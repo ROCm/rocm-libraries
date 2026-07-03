@@ -138,8 +138,8 @@ struct rocsparse_host
 // BSR indexing macros
 #define BSR_IND(j, bi, bj, dir) \
     ((dir == rocsparse_direction_row) ? BSR_IND_R(j, bi, bj) : BSR_IND_C(j, bi, bj))
-#define BSR_IND_R(j, bi, bj) (bsr_dim * bsr_dim * (j) + (bi)*bsr_dim + (bj))
-#define BSR_IND_C(j, bi, bj) (bsr_dim * bsr_dim * (j) + (bi) + (bj)*bsr_dim)
+#define BSR_IND_R(j, bi, bj) (bsr_dim * bsr_dim * (j) + (bi) * bsr_dim + (bj))
+#define BSR_IND_C(j, bi, bj) (bsr_dim * bsr_dim * (j) + (bi) + (bj) * bsr_dim)
 
 /*
  * ===========================================================================
@@ -1011,6 +1011,18 @@ void host_dense_to_coo(I                     m,
                        std::vector<T>&       coo_val,
                        std::vector<I>&       coo_row_ind,
                        std::vector<I>&       coo_col_ind);
+
+template <typename I, typename T>
+void host_dense_to_bell(I                     m,
+                        I                     n,
+                        rocsparse_index_base  base,
+                        const std::vector<T>& A,
+                        int64_t               ld,
+                        rocsparse_order       order,
+                        I                     ell_block_size,
+                        I&                    ell_cols,
+                        std::vector<T>&       bell_val,
+                        std::vector<I>&       bell_col_ind);
 
 template <typename I, typename T>
 void host_coo_to_dense(I                     m,

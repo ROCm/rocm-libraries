@@ -110,6 +110,11 @@ void testing_dense_to_sparse_bell(const Arguments& arg)
     I mn = (order == rocsparse_order_column) ? m : n;
     I nm = (order == rocsparse_order_column) ? n : m;
 
+    std::cout << "m: " << m << " n: " << n << " ld: " << ld << std::endl;
+    std::cout << "mn: " << mn << " nm: " << nm << std::endl;
+    std::cout << "mb: " << mb << " nb: " << nb << std::endl;
+    std::cout << "ell_block_size: " << ell_block_size << std::endl;
+
     // Index and data type
     rocsparse_indextype itype = get_indextype<I>();
     rocsparse_datatype  ttype = get_datatype<T>();
@@ -140,6 +145,17 @@ void testing_dense_to_sparse_bell(const Arguments& arg)
         }
     }
 
+    std::cout << "A" << std::endl;
+    for(I j = 0; j < nm; ++j)
+    {
+        for(int64_t i = 0; i < ld; ++i)
+        {
+            std::cout << h_dense_val[j * ld + i] << " ";
+        }
+        std::cout << "" << std::endl;
+    }
+    std::cout << "" << std::endl;
+
     // Transfer.
     CHECK_HIP_ERROR(
         hipMemcpy(d_dense_val, h_dense_val, sizeof(T) * ld * nm, hipMemcpyHostToDevice));
@@ -159,23 +175,17 @@ void testing_dense_to_sparse_bell(const Arguments& arg)
 
     // Find size of required temporary buffer
     size_t buffer_size;
-    CHECK_ROCSPARSE_ERROR(rocsparse_dense_to_sparse(handle,
-                                                    mat_dense,
-                                                    mat_sparse,
-                                                    rocsparse_dense_to_sparse_alg_default,
-                                                    &buffer_size,
-                                                    nullptr));
+    CHECK_ROCSPARSE_ERROR(
+        rocsparse_dense_to_sparse(handle, mat_dense, mat_sparse, alg, &buffer_size, nullptr));
+
+    std::cout << "buffer_size: " << buffer_size << std::endl;
 
     // Allocate temporary buffer on device
     device_vector<I> d_temp_buffer(buffer_size);
 
     // Perform analysis
-    CHECK_ROCSPARSE_ERROR(rocsparse_dense_to_sparse(handle,
-                                                    mat_dense,
-                                                    mat_sparse,
-                                                    rocsparse_dense_to_sparse_alg_default,
-                                                    nullptr,
-                                                    d_temp_buffer));
+    CHECK_ROCSPARSE_ERROR(
+        rocsparse_dense_to_sparse(handle, mat_dense, mat_sparse, alg, nullptr, d_temp_buffer));
 
     int64_t num_rows_tmp;
     int64_t num_cols_tmp;
@@ -196,100 +206,101 @@ void testing_dense_to_sparse_bell(const Arguments& arg)
                                              &ell_block_dir_tmp,
                                              &ell_block_dim_tmp,
                                              &ell_cols_tmp,
-                                             &ell_col_ind,
-                                             &ell_val,
+                                             &ell_col_ind_tmp,
+                                             &ell_val_tmp,
                                              &idx_type_tmp,
                                              &idx_base_tmp,
                                              &data_type_tmp));
+
+    std::cout << "num_rows_tmp: " << num_rows_tmp << " num_cols_tmp: " << num_cols_tmp
+              << " ell_block_dim_tmp: " << ell_block_dim_tmp << " ell_cols_tmp: " << ell_cols_tmp
+              << std::endl;
 
     // Allocate memory on device
     device_vector<I> d_bell_col_ind(mb * ell_cols_tmp / ell_block_dim_tmp);
     device_vector<T> d_bell_val(m * ell_cols_tmp);
 
-    // CHECK_ROCSPARSE_ERROR(
-    //     rocsparse_coo_set_pointers(mat_sparse, d_coo_row_ind, d_coo_col_ind, d_coo_val));
+    CHECK_ROCSPARSE_ERROR(rocsparse_bell_set_pointers(mat_sparse, d_bell_col_ind, d_bell_val));
 
-    // if(arg.unit_check)
-    // {
-    //     // Complete conversion
-    //     CHECK_ROCSPARSE_ERROR(rocsparse_dense_to_sparse(handle,
-    //                                                     mat_dense,
-    //                                                     mat_sparse,
-    //                                                     rocsparse_dense_to_sparse_alg_default,
-    //                                                     &buffer_size,
-    //                                                     d_temp_buffer));
+    if(arg.unit_check)
+    {
+        // Complete conversion
+        CHECK_ROCSPARSE_ERROR(rocsparse_dense_to_sparse(
+            handle, mat_dense, mat_sparse, alg, &buffer_size, d_temp_buffer));
 
-    //     host_vector<I> h_coo_row_ind_gpu(nnz);
-    //     host_vector<I> h_coo_col_ind_gpu(nnz);
-    //     host_vector<T> h_coo_val_gpu(nnz);
+        host_vector<I> h_bell_col_ind_gpu(mb * ell_cols_tmp / ell_block_dim_tmp);
+        host_vector<T> h_bell_val_gpu(m * ell_cols_tmp);
 
-    //     CHECK_HIP_ERROR(hipMemcpy(
-    //         h_coo_row_ind_gpu.data(), d_coo_row_ind, sizeof(I) * nnz, hipMemcpyDeviceToHost));
-    //     CHECK_HIP_ERROR(hipMemcpy(
-    //         h_coo_col_ind_gpu.data(), d_coo_col_ind, sizeof(I) * nnz, hipMemcpyDeviceToHost));
-    //     CHECK_HIP_ERROR(
-    //         hipMemcpy(h_coo_val_gpu.data(), d_coo_val, sizeof(T) * nnz, hipMemcpyDeviceToHost));
+        CHECK_HIP_ERROR(hipMemcpy(h_bell_col_ind_gpu.data(),
+                                  d_bell_col_ind,
+                                  sizeof(I) * mb * ell_cols_tmp / ell_block_dim_tmp,
+                                  hipMemcpyDeviceToHost));
+        CHECK_HIP_ERROR(hipMemcpy(h_bell_val_gpu.data(),
+                                  d_bell_val,
+                                  sizeof(T) * m * ell_cols_tmp,
+                                  hipMemcpyDeviceToHost));
 
-    //     host_vector<I> nnz_per_row(m);
-    //     CHECK_HIP_ERROR(
-    //         hipMemcpy(nnz_per_row.data(), d_temp_buffer, sizeof(I) * m, hipMemcpyDeviceToHost));
+        //     host_vector<I> nnz_per_row(m);
+        //     CHECK_HIP_ERROR(
+        //         hipMemcpy(nnz_per_row.data(), d_temp_buffer, sizeof(I) * m, hipMemcpyDeviceToHost));
 
-    //     host_vector<I> h_coo_row_ind_cpu(nnz);
-    //     host_vector<I> h_coo_col_ind_cpu(nnz);
-    //     host_vector<T> h_coo_val_cpu(nnz);
+        host_vector<I> h_bell_col_ind_cpu(mb * ell_cols_tmp / ell_block_dim_tmp);
+        host_vector<T> h_bell_val_cpu(m * ell_cols_tmp);
 
-    //     host_dense_to_coo(m,
-    //                       n,
-    //                       base,
-    //                       h_dense_val,
-    //                       ld,
-    //                       order,
-    //                       nnz_per_row,
-    //                       h_coo_val_cpu,
-    //                       h_coo_row_ind_cpu,
-    //                       h_coo_col_ind_cpu);
+        I ell_cols_cpu = 0;
+        host_dense_to_bell(m,
+                           n,
+                           base,
+                           h_dense_val,
+                           ld,
+                           order,
+                           ell_block_size,
+                           ell_cols_cpu,
+                           h_bell_val_cpu,
+                           h_bell_col_ind_cpu);
 
-    //     h_coo_row_ind_cpu.unit_check(h_coo_row_ind_gpu);
-    //     h_coo_col_ind_cpu.unit_check(h_coo_col_ind_gpu);
-    //     h_coo_val_cpu.unit_check(h_coo_val_gpu);
-    // }
+        //     h_coo_row_ind_cpu.unit_check(h_coo_row_ind_gpu);
+        //     h_coo_col_ind_cpu.unit_check(h_coo_col_ind_gpu);
+        //     h_coo_val_cpu.unit_check(h_coo_val_gpu);
+        // }
 
-    // if(arg.timing)
-    // {
+        // if(arg.timing)
+        // {
 
-    //     const double gpu_time_used
-    //         = rocsparse_clients::run_benchmark(arg,
-    //                                            rocsparse_dense_to_sparse,
-    //                                            handle,
-    //                                            mat_dense,
-    //                                            mat_sparse,
-    //                                            rocsparse_dense_to_sparse_alg_default,
-    //                                            &buffer_size,
-    //                                            d_temp_buffer);
+        //     const double gpu_time_used
+        //         = rocsparse_clients::run_benchmark(arg,
+        //                                            rocsparse_dense_to_sparse,
+        //                                            handle,
+        //                                            mat_dense,
+        //                                            mat_sparse,
+        //                                            alg,
+        //                                            &buffer_size,
+        //                                            d_temp_buffer);
 
-    //     double gbyte_count = dense2coo_gbyte_count<T>(m, n, (I)nnz);
-    //     double gpu_gbyte   = get_gpu_gbyte(gpu_time_used, gbyte_count);
+        //     double gbyte_count = dense2coo_gbyte_count<T>(m, n, (I)nnz);
+        //     double gpu_gbyte   = get_gpu_gbyte(gpu_time_used, gbyte_count);
 
-    //     display_timing_info(display_key_t::order,
-    //                         order,
-    //                         display_key_t::M,
-    //                         m,
-    //                         display_key_t::N,
-    //                         n,
-    //                         display_key_t::LD,
-    //                         ld,
-    //                         display_key_t::nnz,
-    //                         nnz,
-    //                         display_key_t::bandwidth,
-    //                         gpu_gbyte,
-    //                         display_key_t::time_ms,
-    //                         get_gpu_time_msec(gpu_time_used));
-    // }
+        //     display_timing_info(display_key_t::order,
+        //                         order,
+        //                         display_key_t::M,
+        //                         m,
+        //                         display_key_t::N,
+        //                         n,
+        //                         display_key_t::LD,
+        //                         ld,
+        //                         display_key_t::nnz,
+        //                         nnz,
+        //                         display_key_t::bandwidth,
+        //                         gpu_gbyte,
+        //                         display_key_t::time_ms,
+        //                         get_gpu_time_msec(gpu_time_used));
+        // }
+    }
 }
 
-#define INSTANTIATE(ITYPE, TYPE)                                                          \
-    template void testing_dense_to_sparse_coo_bad_arg<ITYPE, TYPE>(const Arguments& arg); \
-    template void testing_dense_to_sparse_coo<ITYPE, TYPE>(const Arguments& arg)
+#define INSTANTIATE(ITYPE, TYPE)                                                           \
+    template void testing_dense_to_sparse_bell_bad_arg<ITYPE, TYPE>(const Arguments& arg); \
+    template void testing_dense_to_sparse_bell<ITYPE, TYPE>(const Arguments& arg)
 INSTANTIATE(int32_t, _Float16);
 INSTANTIATE(int32_t, rocsparse_bfloat16);
 INSTANTIATE(int32_t, float);
@@ -302,4 +313,4 @@ INSTANTIATE(int64_t, float);
 INSTANTIATE(int64_t, double);
 INSTANTIATE(int64_t, rocsparse_float_complex);
 INSTANTIATE(int64_t, rocsparse_double_complex);
-void testing_dense_to_sparse_coo_extra(const Arguments& arg) {}
+void testing_dense_to_sparse_bell_extra(const Arguments& arg) {}

@@ -4763,8 +4763,8 @@ void host_csrgeam_nnz(J                    M,
         int nthreads = omp_get_num_threads();
         int tid      = omp_get_thread_num();
 #else
-        int           nthreads = 1;
-        int           tid      = 0;
+        int nthreads = 1;
+        int tid      = 0;
 #endif
 
         J rows_per_thread = (M + nthreads - 1) / nthreads;
@@ -4857,8 +4857,8 @@ void host_csrgeam(J                    M,
         int nthreads = omp_get_num_threads();
         int tid      = omp_get_thread_num();
 #else
-        int           nthreads = 1;
-        int           tid      = 0;
+        int nthreads = 1;
+        int tid      = 0;
 #endif
 
         J rows_per_thread = (M + nthreads - 1) / nthreads;
@@ -7643,6 +7643,63 @@ void host_coo_to_dense(I                     m,
     }
 }
 
+template <typename I, typename T>
+void host_dense_to_bell(I                     m,
+                        I                     n,
+                        rocsparse_index_base  base,
+                        const std::vector<T>& A,
+                        int64_t               ld,
+                        rocsparse_order       order,
+                        I                     ell_block_size,
+                        I&                    ell_cols,
+                        std::vector<T>&       bell_val,
+                        std::vector<I>&       bell_col_ind)
+{
+    ROCSPARSE_CLIENTS_ROUTINE_TRACE;
+
+    const I mb = (m + ell_block_size - 1) / ell_block_size;
+    const I nb = (n + ell_block_size - 1) / ell_block_size;
+
+    ell_cols = 0;
+
+    if(order == rocsparse_order_row)
+    {
+        for(I i = 0; i < mb; i++)
+        {
+            I ell_cols_in_row = 0;
+            for(I j = 0; j < nb; j++)
+            {
+                bool block_col_found = false;
+                for(I r = 0; r < ell_block_size; r++)
+                {
+                    for(I c = 0; c < ell_block_size; c++)
+                    {
+                        const T val_A = A[ld * (ell_block_size * i + r) + ell_block_size * j + c];
+                        if(val_A != static_cast<T>(0))
+                        {
+                            block_col_found = true;
+                            break;
+                        }
+                    }
+                    if(block_col_found)
+                    {
+                        break;
+                    }
+                }
+
+                if(block_col_found)
+                {
+                    ell_cols_in_row++;
+                }
+            }
+
+            ell_cols = std::max(ell_cols, ell_cols_in_row);
+        }
+
+        std::cout << "ell_cols: " << ell_cols << std::endl;
+    }
+}
+
 template <typename I, typename J>
 void host_csr_to_coo(J                     M,
                      I                     nnz,
@@ -9475,17 +9532,27 @@ template struct rocsparse_host<rocsparse_double_complex,
                                                   std::vector<TTYPE>&       A,           \
                                                   int64_t                   ld,          \
                                                   rocsparse_order           order);
-#define INSTANTIATE_DENSE2COO(ITYPE, TTYPE)                                              \
-    template void host_dense_to_coo<ITYPE, TTYPE>(ITYPE                     m,           \
-                                                  ITYPE                     n,           \
-                                                  rocsparse_index_base      base,        \
-                                                  const std::vector<TTYPE>& A,           \
-                                                  int64_t                   ld,          \
-                                                  rocsparse_order           order,       \
-                                                  const std::vector<ITYPE>& nnz_per_row, \
-                                                  std::vector<TTYPE>&       coo_val,     \
-                                                  std::vector<ITYPE>&       coo_row_ind, \
-                                                  std::vector<ITYPE>&       coo_col_ind);
+#define INSTANTIATE_DENSE2COO(ITYPE, TTYPE)                                                  \
+    template void host_dense_to_coo<ITYPE, TTYPE>(ITYPE                     m,               \
+                                                  ITYPE                     n,               \
+                                                  rocsparse_index_base      base,            \
+                                                  const std::vector<TTYPE>& A,               \
+                                                  int64_t                   ld,              \
+                                                  rocsparse_order           order,           \
+                                                  const std::vector<ITYPE>& nnz_per_row,     \
+                                                  std::vector<TTYPE>&       coo_val,         \
+                                                  std::vector<ITYPE>&       coo_row_ind,     \
+                                                  std::vector<ITYPE>&       coo_col_ind);          \
+    template void host_dense_to_bell<ITYPE, TTYPE>(ITYPE                     m,              \
+                                                   ITYPE                     n,              \
+                                                   rocsparse_index_base      base,           \
+                                                   const std::vector<TTYPE>& A,              \
+                                                   int64_t                   ld,             \
+                                                   rocsparse_order           order,          \
+                                                   ITYPE                     ell_block_size, \
+                                                   ITYPE&                    ell_cols,       \
+                                                   std::vector<TTYPE>&       bell_val,       \
+                                                   std::vector<ITYPE>&       bell_col_ind);
 
 #define INSTANTIATE_IJ(ITYPE, JTYPE)                                                       \
     template void host_csr_to_coo<ITYPE, JTYPE>(JTYPE                     M,               \

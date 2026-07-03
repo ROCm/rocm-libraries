@@ -71,6 +71,8 @@ namespace rocsparse
                                               size_t*                       buffer_size,
                                               void*                         temp_buffer)
     {
+        std::cout << "dense_to_sparse_template" << std::endl;
+
         ROCSPARSE_ROUTINE_TRACE;
 
         if(temp_buffer == nullptr)
@@ -87,6 +89,11 @@ namespace rocsparse
             else if(mat_B->format == rocsparse_format_csc)
             {
                 *buffer_size = sizeof(I) * mat_A->cols;
+            }
+            else if(mat_B->format == rocsparse_format_bell)
+            {
+                std::cout << "AAAA" << std::endl;
+                *buffer_size = 4;
             }
             return rocsparse_status_success;
         }
@@ -135,6 +142,11 @@ namespace rocsparse
                                                               mat_A->ld,
                                                               (I*)temp_buffer,
                                                               (I*)&mat_B->nnz));
+                return rocsparse_status_success;
+            }
+            else if(mat_B->format == rocsparse_format_bell)
+            {
+                std::cout << "BBBB" << std::endl;
                 return rocsparse_status_success;
             }
         }
@@ -189,6 +201,13 @@ namespace rocsparse
                                                                       (T*)mat_B->val_data,
                                                                       (I*)mat_B->col_data,
                                                                       (J*)mat_B->row_data));
+            return rocsparse_status_success;
+        }
+
+        // BELL
+        if(mat_B->format == rocsparse_format_bell)
+        {
+            std::cout << "CCCC" << std::endl;
             return rocsparse_status_success;
         }
 
@@ -347,6 +366,8 @@ try
 
     ROCSPARSE_CHECKARG(1, mat_A, (mat_A->batch_count != 1), rocsparse_status_not_implemented);
     ROCSPARSE_CHECKARG(2, mat_B, (mat_B->batch_count != 1), rocsparse_status_not_implemented);
+
+    std::cout << "mat_B->format: " << mat_B->format << std::endl;
 
     rocsparse::dense_to_sparse_t f;
     if(mat_B->format == rocsparse_format_csc)
