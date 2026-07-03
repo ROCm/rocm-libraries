@@ -48,7 +48,7 @@ BenchmarkProblems:
         - MatrixInstruction:
           - [16, 16, 4, 1, 1, 1,1, 1,2]
           - [16, 16, 4, 1, 1, 1,1, 2,1]
-        - MIArchVgpr: [0]
+        - MIArchVgpr: [False]
         - PrefetchGlobalRead: [2]
         - PrefetchLocalRead: [1]
         - ScheduleIterAlg: [3]
@@ -98,7 +98,7 @@ BenchmarkProblems:
         - MatrixInstruction:
           - [16, 16, 32, 1, 1, 1,1, 1, 2]
           - [16, 16, 32, 1, 1, 1,1, 2, 1]
-        - MIArchVgpr: [0]
+        - MIArchVgpr: [False]
         - PrefetchGlobalRead: [2]
         - PrefetchLocalRead: [1]
         - ScheduleIterAlg: [3]
