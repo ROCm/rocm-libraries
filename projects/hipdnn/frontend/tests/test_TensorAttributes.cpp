@@ -195,5 +195,3 @@ TEST(TestTensorAttributes, ValidateDataType)
         EXPECT_EQ(result.code, errorCode) << "For " + std::string(to_string(dataType));
     }
 }
-
-
