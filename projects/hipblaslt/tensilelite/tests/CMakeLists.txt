@@ -59,7 +59,7 @@ target_include_directories(tensilelite-tests PRIVATE "${CMAKE_CURRENT_SOURCE_DIR
 
 target_link_libraries(tensilelite-tests
     PUBLIC
-        tensilelite::tensilelite-host
+        roc::tensilelite-host
     PRIVATE
         hip::device
         tensilelite::client-common
