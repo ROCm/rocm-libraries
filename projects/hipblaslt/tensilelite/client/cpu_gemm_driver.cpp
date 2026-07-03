@@ -29,6 +29,7 @@
 #include <cmath>
 #include <iostream>
 #include <random>
+#include <stdexcept>
 #include <string>
 #include <type_traits>
 #include <vector>
@@ -140,8 +141,8 @@ namespace
     // scaleA is always indexed by row (M), scaleB always by col (N).
     // factorDim only affects scaleAlphaVec: 0 = row-dim (length M), 1 = col-dim (length N).
     //
-    // When mxBlockA/B > 0 and mxScaleA/mxScaleB are non-null, the K-reduction
-    // is block-structured: accumulate min(mxBlockA, mxBlockB) products, then
+    // When both MX operand descriptors are populated, the K-reduction is
+    // block-structured: accumulate min(mxA.block, mxB.block) products, then
     // scale by the MX scale factors before adding to the running sum.
 
     // Quantize a value through `Narrow`, then return as float. This mirrors
@@ -173,6 +174,56 @@ namespace
         }
     }
 
+#ifndef _WIN32
+    struct MXGemmOperand
+    {
+        const E8* scale        = nullptr;
+        int       block        = 0;
+        size_t    strideFree   = 0;
+        size_t    strideKBlock = 0;
+
+        bool empty() const
+        {
+            return scale == nullptr && block == 0 && strideFree == 0
+                   && strideKBlock == 0;
+        }
+    };
+
+    bool validateMXGemmOperands(const MXGemmOperand& mxA,
+                                const MXGemmOperand& mxB)
+    {
+        const bool hasMXA = !mxA.empty();
+        const bool hasMXB = !mxB.empty();
+
+        if(hasMXA != hasMXB)
+        {
+            throw std::runtime_error(
+                "CPU reference GEMM requires MX operands for both A and B, "
+                "or for neither side.");
+        }
+
+        if(!hasMXA)
+            return false;
+
+        auto validateSide = [](const char* name, const MXGemmOperand& operand) {
+            if(!operand.scale)
+                throw std::runtime_error(std::string("CPU reference GEMM MX ")
+                                         + name + " operand has no scale data.");
+            if(operand.block <= 0)
+                throw std::runtime_error(std::string("CPU reference GEMM MX ")
+                                         + name + " operand has a non-positive block.");
+            if(operand.strideFree == 0 || operand.strideKBlock == 0)
+                throw std::runtime_error(std::string("CPU reference GEMM MX ")
+                                         + name
+                                         + " operand requires non-zero scale strides.");
+        };
+
+        validateSide("A", mxA);
+        validateSide("B", mxB);
+        return true;
+    }
+#endif
+
     void columnMajorGemm(const float*   a,
                          const float*   b,
                          const float*   c,
@@ -194,14 +245,8 @@ namespace
                          QuantizeFn     quantizeB     = nullptr
 #ifndef _WIN32
                          ,
-                         const E8*      mxScaleA      = nullptr,
-                         const E8*      mxScaleB      = nullptr,
-                         int            mxBlockA            = 0,
-                         int            mxBlockB            = 0,
-                         size_t         mxScaleAStrideM     = 0,
-                         size_t         mxScaleAStrideKBlk  = 0,
-                         size_t         mxScaleBStrideN     = 0,
-                         size_t         mxScaleBStrideKBlk  = 0
+                         MXGemmOperand  mxA           = {},
+                         MXGemmOperand  mxB           = {}
 #endif
                          )
     {
@@ -221,6 +266,10 @@ namespace
         size_t strideBK = transB ? n : 1;
         size_t strideBN = transB ? 1 : k;
 
+#ifndef _WIN32
+        const bool hasMX = validateMXGemmOperands(mxA, mxB);
+#endif
+
         for(size_t i = 0; i < m; i++)
         {
             for(size_t j = 0; j < n; j++)
@@ -233,15 +282,16 @@ namespace
                 // can pad the scale-K dimension, so using k/mxBlock as the
                 // free-dimension stride would address the wrong scale element.
                 //
-                // Both mxBlockA and mxBlockB are required to be > 0 (#1) and
-                // powers of 2 (validated in runGemm). When they differ, one
-                // divides the other; step the inner reduction by the smaller
-                // of the two so each inner segment has constant (sa, sb) and
-                // can pick the correct scale index for each side.
-                if(mxBlockA > 0 && mxBlockB > 0 && mxScaleA && mxScaleB)
+                // Both MX operands have positive blocks and non-null scale
+                // buffers here. Block shape is validated in runGemm. When the
+                // blocks differ, one divides the other; step the inner
+                // reduction by the smaller of the two so each inner segment
+                // has constant (sa, sb) and can pick the correct scale index
+                // for each side.
+                if(hasMX)
                 {
                     size_t step     = static_cast<size_t>(
-                        std::min(mxBlockA, mxBlockB));
+                        std::min(mxA.block, mxB.block));
                     for(size_t lBase = 0; lBase < k; lBase += step)
                     {
                         float blockSum = 0.0f;
@@ -255,16 +305,16 @@ namespace
                             blockSum += aVal * bVal;
                         }
 
-                        size_t blkA = lBase / static_cast<size_t>(mxBlockA);
-                        size_t blkB = lBase / static_cast<size_t>(mxBlockB);
+                        size_t blkA = lBase / static_cast<size_t>(mxA.block);
+                        size_t blkB = lBase / static_cast<size_t>(mxB.block);
 
-                        size_t mxsaIdx = i * mxScaleAStrideM
-                                        + blkA * mxScaleAStrideKBlk;
-                        size_t mxsbIdx = j * mxScaleBStrideN
-                                        + blkB * mxScaleBStrideKBlk;
+                        size_t mxsaIdx = i * mxA.strideFree
+                                        + blkA * mxA.strideKBlock;
+                        size_t mxsbIdx = j * mxB.strideFree
+                                        + blkB * mxB.strideKBlock;
 
-                        float mxScale = static_cast<float>(mxScaleA[mxsaIdx])
-                                      * static_cast<float>(mxScaleB[mxsbIdx]);
+                        float mxScale = static_cast<float>(mxA.scale[mxsaIdx])
+                                      * static_cast<float>(mxB.scale[mxsbIdx]);
                         sum += blockSum * mxScale;
                     }
                 }
@@ -794,14 +844,20 @@ int runGemm(size_t         m,
                             quantB
 #ifndef _WIN32
                             ,
-                            (isFP4 && mxBlockA > 0) ? mxsa.data() + batch * mxsaBatchStride : nullptr,
-                            (isFP4 && mxBlockB > 0) ? mxsb.data() + batch * mxsbBatchStride : nullptr,
-                            mxBlockA,
-                            mxBlockB,
-                            mxsaStrideM,
-                            mxsaStrideKBlk,
-                            mxsbStrideN,
-                            mxsbStrideKBlk
+                            MXGemmOperand{
+                                (isFP4 && mxBlockA > 0)
+                                    ? mxsa.data() + batch * mxsaBatchStride
+                                    : nullptr,
+                                mxBlockA,
+                                mxsaStrideM,
+                                mxsaStrideKBlk},
+                            MXGemmOperand{
+                                (isFP4 && mxBlockB > 0)
+                                    ? mxsb.data() + batch * mxsbBatchStride
+                                    : nullptr,
+                                mxBlockB,
+                                mxsbStrideN,
+                                mxsbStrideKBlk}
 #endif
                             );
         }
