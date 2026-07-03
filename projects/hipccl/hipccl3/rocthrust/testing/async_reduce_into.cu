@@ -365,6 +365,8 @@ struct test_async_reduce_into
   {
     THRUST_HOST void operator()(std::size_t n)
     {
+      CHECK_ASAN_ENABLEMENT();
+		
       thrust::host_vector<T> h0(unittest::random_integers<T>(n));
 
       thrust::device_vector<T> d0a(h0);

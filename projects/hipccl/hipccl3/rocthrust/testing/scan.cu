@@ -367,6 +367,8 @@ struct TestScan
 {
   void operator()(const size_t n)
   {
+    CHECK_ASAN_ENABLEMENT();
+
     thrust::host_vector<T> h_input   = unittest::random_integers<T>(n);
     thrust::device_vector<T> d_input = h_input;
 
@@ -642,6 +644,8 @@ void TestInclusiveScanWithBigIndexesHelper(int magnitude)
 
 void TestInclusiveScanWithBigIndexes()
 {
+  CHECK_ASAN_ENABLEMENT();
+
   TestInclusiveScanWithBigIndexesHelper(30);
   TestInclusiveScanWithBigIndexesHelper(31);
 #ifndef THRUST_FORCE_32_BIT_OFFSET_TYPE
@@ -673,6 +677,8 @@ void TestExclusiveScanWithBigIndexesHelper(int magnitude)
 
 void TestExclusiveScanWithBigIndexes()
 {
+  CHECK_ASAN_ENABLEMENT();
+  
   TestExclusiveScanWithBigIndexesHelper(30);
   TestExclusiveScanWithBigIndexesHelper(31);
 #ifndef THRUST_FORCE_32_BIT_OFFSET_TYPE
