@@ -48,6 +48,142 @@ namespace miopen {
 namespace ai {
 // Common utilities now in ai_common.hpp
 
+namespace common {
+// Sign- and bounds-safe one-hot. Declared in ai_heuristics.hpp; shared by the immediate-mode
+// (TunaNet) and kernel-tuning (candidate-selection) paths.
+std::vector<int> OneHot(long long label, std::size_t num_classes)
+{
+    std::vector<int> out(num_classes, 0);
+    if(label >= 0 && static_cast<std::size_t>(label) < num_classes)
+        out[static_cast<std::size_t>(label)] = 1;
+    else
+        MIOPEN_LOG_W("OneHot: label " << label << " out of range for " << num_classes
+                                      << " classes, returning all-zero vector");
+    return out;
+}
+
+// Stable datatype->name mapping; declared in ai_heuristics.hpp. The name->index mapping is read
+// from each model's metadata, so all precision encoders share this single source of truth.
+const char* DataTypeToEncodingKey(miopenDataType_t data_type)
+{
+    // if-chain rather than switch: -Wswitch-enum would flag the many miopenDataType_t values no
+    // model encodes.
+    if(data_type == miopenBFloat16)
+        return "BF16";
+    if(data_type == miopenHalf)
+        return "FP16";
+    if(data_type == miopenFloat)
+        return "FP32";
+    if(data_type == miopenInt8)
+        return "INT8";
+    return nullptr;
+}
+
+MIOPEN_INTERNALS_EXPORT std::vector<float> EngineeredConvFeatures(std::size_t N,
+                                                                  std::size_t C_in,
+                                                                  std::size_t C_out,
+                                                                  std::size_t H_in,
+                                                                  std::size_t W_in,
+                                                                  std::size_t H_out,
+                                                                  std::size_t W_out,
+                                                                  std::size_t K_h,
+                                                                  std::size_t K_w,
+                                                                  std::size_t groups,
+                                                                  std::size_t num_cu,
+                                                                  ConvDirection direction)
+{
+    if(groups < 1) // avoid division by zero
+        groups = 1;
+
+    const auto safe_ratio = [](double numerator, double denominator) -> double {
+        if(denominator == 0.0)
+            return 0.0;
+        const double value = numerator / denominator;
+        return std::isfinite(value) ? value : 0.0;
+    };
+    const auto safe_log1p = [](double value) -> double {
+        if(value <= -1.0 || !std::isfinite(value))
+            return 0.0;
+        const double logged = std::log1p(value);
+        return std::isfinite(logged) ? logged : 0.0;
+    };
+
+    // Computational complexity: FLOPs (multiply-accumulate = 2 ops), per group.
+    const double flops = safe_ratio(2.0 * static_cast<double>(N) * static_cast<double>(C_out) *
+                                        static_cast<double>(C_in) * static_cast<double>(K_h) *
+                                        static_cast<double>(K_w) * static_cast<double>(H_out) *
+                                        static_cast<double>(W_out),
+                                    static_cast<double>(groups));
+    // Implicit GEMM dimensions: Conv -> GEMM(M, N, K). The (M, N, K) assignment is
+    // direction-dependent (the conv is lowered to a different GEMM for Fwd/BwdData/Wrw).
+    const double nhowo_over_g =
+        safe_ratio(static_cast<double>(N) * static_cast<double>(H_out) * static_cast<double>(W_out),
+                   static_cast<double>(groups));
+    const double cin_over_g  = safe_ratio(static_cast<double>(C_in), static_cast<double>(groups));
+    const double cout_over_g = safe_ratio(static_cast<double>(C_out), static_cast<double>(groups));
+    const double cin_filter =
+        static_cast<double>(C_in) * static_cast<double>(K_h) * static_cast<double>(K_w);
+    const double cout_filter =
+        static_cast<double>(C_out) * static_cast<double>(K_h) * static_cast<double>(K_w);
+
+    double M = 0.0, N_gemm = 0.0, K_gemm = 0.0;
+    switch(direction)
+    {
+    case ConvDirection::Forward:
+        M      = nhowo_over_g;
+        N_gemm = cin_over_g;
+        K_gemm = cout_filter;
+        break;
+    case ConvDirection::BackwardData:
+        M      = cout_over_g;
+        N_gemm = cin_filter;
+        K_gemm = nhowo_over_g;
+        break;
+    case ConvDirection::BackwardWeights:
+        M      = nhowo_over_g;
+        N_gemm = cin_filter;
+        K_gemm = cout_over_g;
+        break;
+    }
+    const double gemm_size = M * N_gemm * K_gemm;
+    // Hardware utilization: work per compute unit.
+    const double work_per_cu =
+        safe_ratio(static_cast<double>(N) * static_cast<double>(H_out) *
+                       static_cast<double>(W_out) * static_cast<double>(C_out),
+                   static_cast<double>(groups) * static_cast<double>(num_cu));
+    // Spatial / channel ratios.
+    const double spatial_reduction =
+        safe_ratio(static_cast<double>(H_in) * static_cast<double>(W_in),
+                   static_cast<double>(H_out) * static_cast<double>(W_out));
+    const double filter_coverage =
+        safe_ratio(static_cast<double>(K_h) * static_cast<double>(K_w),
+                   static_cast<double>(H_in) * static_cast<double>(W_in));
+    const double channel_ratio = safe_ratio(static_cast<double>(C_in), static_cast<double>(C_out));
+    const double group_density = safe_ratio(static_cast<double>(groups), static_cast<double>(C_in));
+
+    return {
+        static_cast<float>(safe_log1p(flops)),
+        static_cast<float>(safe_log1p(M)),
+        static_cast<float>(safe_log1p(N_gemm)),
+        static_cast<float>(safe_log1p(K_gemm)),
+        static_cast<float>(safe_ratio(M, N_gemm)),
+        static_cast<float>(safe_ratio(M, K_gemm)),
+        static_cast<float>(safe_ratio(N_gemm, K_gemm)),
+        static_cast<float>(safe_log1p(gemm_size)),
+        static_cast<float>(safe_log1p(work_per_cu)),
+        static_cast<float>(spatial_reduction),
+        static_cast<float>(filter_coverage),
+        static_cast<float>(channel_ratio),
+        static_cast<float>(group_density),
+        static_cast<float>(safe_log1p(static_cast<double>(H_in))),
+        static_cast<float>(safe_log1p(static_cast<double>(W_in))),
+        static_cast<float>(safe_log1p(static_cast<double>(C_in))),
+        static_cast<float>(safe_log1p(static_cast<double>(C_out))),
+        static_cast<float>(safe_log1p(static_cast<double>(N))),
+    };
+}
+} // namespace common
+
 #if MIOPEN_ENABLE_AI_IMMED_MODE_FALLBACK
 namespace immed_mode {
 Metadata::Metadata(const std::string& arch)
@@ -83,12 +219,16 @@ size_t Metadata::EncodeDirection(miopen::conv::Direction dir) const
 
 size_t Metadata::EncodePrecision(miopenDataType_t data_type) const
 {
-    if(data_type == miopenBFloat16)
-        return precision_encodings.at("BF16");
-    else if(data_type == miopenHalf)
-        return precision_encodings.at("FP16");
-    else if(data_type == miopenFloat)
-        return precision_encodings.at("FP32");
+    const char* key = common::DataTypeToEncodingKey(data_type);
+    if(key != nullptr)
+    {
+        const auto it = precision_encodings.find(key);
+        if(it != precision_encodings.end())
+            return it->second;
+    }
+    // Unsupported datatype, or a precision this model wasn't trained on: throw a miopen::Exception
+    // so the caller falls back to the non-AI heuristic rather than feeding a degraded feature
+    // vector.
     MIOPEN_THROW("Unsupported data type passed to TunaNet");
 }
 
@@ -745,38 +885,52 @@ std::vector<uint64_t> PredictSolver(const conv::ProblemDescription& problem,
     // 1. Try ND model first (for gfx942/gfx950, supports both 2D and 3D)
     // 2. Fall back to legacy model (for gfx908/gfx90a, 2D only)
     // 3. Return empty vector to trigger WTI fallback for unsupported architectures
-
-    // Try ND model first (preferred for gfx942/gfx950)
-    if((is2d || is3d) && HasNDTunaNetSupport(device))
+    //
+    // Any failure inside this block (including a model that fdeep cannot load -- e.g. a
+    // model exported in an incompatible format, which throws a non-miopen std::exception)
+    // is swallowed and turned into an empty result, so the caller degrades to the non-AI
+    // heuristic instead of failing the convolution. This is the predictor's contract: it
+    // returns a prediction or nothing, but never throws.
+    try
     {
-        int dim                        = is3d ? 3 : 2;
-        std::unique_ptr<ModelND> model = GetNDModel(device, dim);
-
-        if(model && model->IsProblemSupported(problem, ctx))
+        // Try ND model first (preferred for gfx942/gfx950)
+        if((is2d || is3d) && HasNDTunaNetSupport(device))
         {
-            MIOPEN_LOG_I2("Evaluating ND TunaNet for " << device);
-            std::vector<float> predictions = model->Forward(problem);
-            return ProcessAndCachePredictions(
-                problem, device, true, predictions, model->GetSolverMap());
+            int dim                        = is3d ? 3 : 2;
+            std::unique_ptr<ModelND> model = GetNDModel(device, dim);
+
+            if(model && model->IsProblemSupported(problem, ctx))
+            {
+                MIOPEN_LOG_I2("Evaluating ND TunaNet for " << device);
+                std::vector<float> predictions = model->Forward(problem);
+                return ProcessAndCachePredictions(
+                    problem, device, true, predictions, model->GetSolverMap());
+            }
+            // If ND model failed for this architecture, don't try legacy - go to WTI
+            MIOPEN_LOG_I2("ND TunaNet not applicable for this problem on " << device);
+            return {};
         }
-        // If ND model failed for this architecture, don't try legacy - go to WTI
-        MIOPEN_LOG_I2("ND TunaNet not applicable for this problem on " << device);
-        return {};
+
+        // Fall back to legacy 2D model (for gfx908/gfx90a only)
+        if(is2d && HasLegacyTunaNetSupport(device))
+        {
+            std::unique_ptr<Model> model = GetModel(device);
+
+            if(model && model->IsProblemSupported(problem, ctx))
+            {
+                MIOPEN_LOG_I2("Evaluating legacy TunaNet for " << device);
+                std::vector<float> predictions = model->Forward(problem);
+                return ProcessAndCachePredictions(
+                    problem, device, false, predictions, model->metadata.solver_map);
+            }
+            MIOPEN_LOG_I2("Legacy TunaNet not applicable for this problem on " << device);
+            return {};
+        }
     }
-
-    // Fall back to legacy 2D model (for gfx908/gfx90a only)
-    if(is2d && HasLegacyTunaNetSupport(device))
+    catch(const std::exception& e)
     {
-        std::unique_ptr<Model> model = GetModel(device);
-
-        if(model && model->IsProblemSupported(problem, ctx))
-        {
-            MIOPEN_LOG_I2("Evaluating legacy TunaNet for " << device);
-            std::vector<float> predictions = model->Forward(problem);
-            return ProcessAndCachePredictions(
-                problem, device, false, predictions, model->metadata.solver_map);
-        }
-        MIOPEN_LOG_I2("Legacy TunaNet not applicable for this problem on " << device);
+        MIOPEN_LOG_W("TunaNet prediction failed (" << e.what()
+                                                   << "); falling back to non-AI heuristic");
         return {};
     }
 
@@ -787,6 +941,78 @@ std::vector<uint64_t> PredictSolver(const conv::ProblemDescription& problem,
 }
 
 // MetadataND implementation moved to metadata_nd.cpp
+
+// Keep feature definitions in sync with EngineerCandidateSelectionInputFeatures
+// (ai_candidate_selection.cpp); implementations are intentionally separate.
+MIOPEN_INTERNALS_EXPORT std::vector<float> ExtractTunaNetND2dFeatures(
+    const conv::ProblemDescription& problem, bool isFwd, const MetadataND& metadata)
+{
+    MIOPEN_LOG_I2("Using engineered 2d features for Tunanet");
+    // Extract convolution parameters
+    const std::size_t N     = problem.GetOutBatchSize();
+    const std::size_t C_in  = isFwd ? problem.GetInChannels() : problem.GetOutChannels();
+    const std::size_t C_out = isFwd ? problem.GetOutChannels() : problem.GetInChannels();
+    const std::size_t H_in  = isFwd ? problem.GetInHeight() : problem.GetOutHeight();
+    const std::size_t W_in  = isFwd ? problem.GetInWidth() : problem.GetOutWidth();
+    const std::size_t H_out = isFwd ? problem.GetOutHeight() : problem.GetInHeight();
+    const std::size_t W_out = isFwd ? problem.GetOutWidth() : problem.GetInWidth();
+    const std::size_t K_h   = problem.GetWeightsHeight();
+    const std::size_t K_w   = problem.GetWeightsWidth();
+    std::size_t groups      = problem.GetGroupCount();
+    // CU count the model was trained with, for the hardware-aware derived features.
+    const std::size_t num_cu = metadata.GetNumCu();
+
+    // Categorical one-hots; both index and width come from the metadata encodings so they track the
+    // trained model (e.g. precision is 3 or 4 classes depending on INT8 support).
+    const auto in_layout  = common::OneHot(metadata.EncodeInLayout(problem.GetInLayout()),
+                                          metadata.GetInLayoutClassCount());
+    const auto fil_layout = common::OneHot(metadata.EncodeFilLayout(problem.GetWeightsLayout()),
+                                           metadata.GetFilLayoutClassCount());
+    const auto out_layout = common::OneHot(metadata.EncodeOutLayout(problem.GetOutLayout()),
+                                           metadata.GetOutLayoutClassCount());
+    const auto precision  = common::OneHot(metadata.EncodePrecision(problem.GetInDataType()),
+                                          metadata.GetPrecisionClassCount());
+    const auto direction  = common::OneHot(metadata.EncodeDirection(problem.GetDirection()),
+                                          metadata.GetDirectionClassCount());
+
+    std::vector<float> features;
+    for(const auto* one_hot : {&in_layout, &fil_layout, &out_layout, &precision, &direction})
+        for(const auto bit : *one_hot)
+            features.push_back(static_cast<float>(bit));
+
+    // Raw passthrough features (order matters).
+    const std::vector<float> raw_tail = {
+        static_cast<float>(C_in),                       // in_channels
+        static_cast<float>(H_in),                       // in_h
+        static_cast<float>(W_in),                       // in_w
+        static_cast<float>(C_out),                      // out_channels
+        static_cast<float>(H_out),                      // out_h
+        static_cast<float>(W_out),                      // out_w
+        static_cast<float>(K_h),                        // fil_h
+        static_cast<float>(K_w),                        // fil_w
+        static_cast<float>(problem.GetPadH()),          // pad_h
+        static_cast<float>(problem.GetPadW()),          // pad_w
+        static_cast<float>(problem.GetKernelStrideH()), // stride_h
+        static_cast<float>(problem.GetKernelStrideW()), // stride_w
+        static_cast<float>(problem.GetDilationH()),     // dilation_h
+        static_cast<float>(problem.GetDilationW()),     // dilation_w
+        static_cast<float>(problem.GetOutBatchSize()),  // batchsize
+        static_cast<float>(problem.GetGroupCount()),    // group_count
+    };
+    features.insert(features.end(), raw_tail.begin(), raw_tail.end());
+
+    // Derived feature block (shared with the candidate-selection path). Dimensions above are in the
+    // forward (driver) convention; the GEMM assignment is selected by the actual direction.
+    const auto gemm_dir = problem.GetDirection() == conv::Direction::Forward
+                              ? common::ConvDirection::Forward
+                          : problem.GetDirection() == conv::Direction::BackwardData
+                              ? common::ConvDirection::BackwardData
+                              : common::ConvDirection::BackwardWeights;
+    const auto derived  = common::EngineeredConvFeatures(
+        N, C_in, C_out, H_in, W_in, H_out, W_out, K_h, K_w, groups, num_cu, gemm_dir);
+    features.insert(features.end(), derived.begin(), derived.end());
+    return features;
+}
 
 class TunaNetNDModel : public ModelND
 {
@@ -806,6 +1032,19 @@ public:
     {
         std::vector<float> features = ToFeatures(problem);
         MIOPEN_LOG_I2("TunaNetNDModel: Extracted " << features.size() << " features");
+        if(miopen::IsLogging(LoggingLevel::Info2))
+        {
+            std::ostringstream features_ss;
+            features_ss << "TunaNetNDModel features: [";
+            for(size_t i = 0; i < features.size(); ++i)
+            {
+                if(i > 0)
+                    features_ss << ", ";
+                features_ss << features[i];
+            }
+            features_ss << "]";
+            MIOPEN_LOG_I2(features_ss.str());
+        }
 
         // Use fdeep to run TunaNetND inference
         const int dim                = problem.Is3d() ? 3 : 2;
@@ -864,7 +1103,11 @@ protected:
         const bool isFwd = problem.GetDirection() == conv::Direction::Forward;
 
         std::vector<float> features = {};
-        if(problem.Is2d()) // 2d version as in the
+        if(problem.Is2d() && (device_name == "gfx950" || device_name == "gfx942"))
+        {
+            features = ExtractTunaNetND2dFeatures(problem, isFwd, metadata);
+        }
+        else if(problem.Is2d())
         {
             features = {
                 // Input dimensions
