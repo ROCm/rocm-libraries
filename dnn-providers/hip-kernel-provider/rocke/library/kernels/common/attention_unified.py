@@ -1010,6 +1010,7 @@ def _tiled_cache_key(problem: UnifiedAttentionProblem) -> Tuple:
         _enable_i64_kv_addr(problem),
         _select_2d_compile_backend(problem),
         _enable_gfx942_fp16_flash(problem),
+        _enable_gfx942_bf16_flash(problem),
         _gfx942_flash_wide_setting() if _enable_gfx942_fp16_flash(problem) else None,
         (
             _gfx942_flash_kv_cache_policy(problem)
@@ -1412,9 +1413,14 @@ def _enable_gfx942_fp16_flash(problem: UnifiedAttentionProblem) -> bool:
         and problem.softcap == 0
         and not problem.use_alibi
         and not problem.use_qq_bias
-        # short context wins on the light narrow path instead (see
-        # _enable_gfx942_small_q_narrow); the ring only amortises for long q.
-        and not _enable_gfx942_small_q_narrow(problem)
+        # For GQA (num_queries_per_kv > 1) the light narrow path wins at short
+        # context because the ring overhead is not amortised over a 1-2-tile KV
+        # loop. For MHA (num_queries_per_kv == 1) the narrow path is pathologically
+        # slow at S512 (3.5 TF); the dense pipe cures it (57-63 TF) so skip the
+        # narrow carve-out and let the flash path handle MHA at all seqlens.
+        and not (
+            _enable_gfx942_small_q_narrow(problem) and problem.num_queries_per_kv > 1
+        )
     )
 
 
@@ -1456,7 +1462,12 @@ def _enable_gfx942_bf16_flash(problem: UnifiedAttentionProblem) -> bool:
         # Prefill only (the wide 32x32 atom processes a 32-row M tile; decode
         # q=1 has no rows to fill and routes to the 3D split-KV / narrow path).
         and problem.max_seqlen_q > 1
-        and not _enable_gfx942_small_q_narrow(problem)
+        # Mirror the fp16 MHA routing: for GQA the narrow light path wins at
+        # short context; for MHA (num_queries_per_kv == 1) the dense pipe cures
+        # the S512 pathology so skip the narrow carve-out.
+        and not (
+            _enable_gfx942_small_q_narrow(problem) and problem.num_queries_per_kv > 1
+        )
     )
 
 
@@ -2079,7 +2090,9 @@ def _select_2d_block_m_per_warp(problem: UnifiedAttentionProblem) -> int:
     # Small/medium gfx942 prefill light narrow path uses one M=16 atom/warp
     # (BLOCK_M=16*nw); mw=32 is pure overhead for the 1-2-tile KV loop. Precedes
     # the D64/L4 mw=32 rules.
-    if _enable_gfx942_small_q_narrow(problem):
+    if _enable_gfx942_small_q_narrow(problem) and not _enable_gfx942_fp16_flash(
+        problem
+    ):
         return 16
     if _resolve_attention_arch() == "gfx942" and problem.head_size == 64:
         return 32
