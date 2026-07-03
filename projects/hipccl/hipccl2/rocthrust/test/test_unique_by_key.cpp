@@ -478,7 +478,7 @@ UniqueByKeyKernel(int const N, int* in_array, int* in_keys, int* out_size)
   }
 }
 
-TEST(UniqueIntegralTests, TestUniqueDevice)
+TEST(UniqueByKeyIntegralTests, TestUniqueDevice)
 {
   SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
 
