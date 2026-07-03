@@ -141,7 +141,9 @@ if (BUILD_FORTRAN_CLIENTS)
 endif()
 
 # need mf16c flag for float->half convertion
-target_compile_options( hipblas-test PRIVATE -mf16c ) # -Wno-deprecated-declarations )
+if(CMAKE_SYSTEM_PROCESSOR MATCHES "x86_64")
+  target_compile_options( hipblas-test PRIVATE -mf16c ) # -Wno-deprecated-declarations )
+endif()
 
 # Workaround: Clang ASAN emits misaligned asan_globals metadata for
 # compiler-generated .str literals from GTest macros in test TUs.
@@ -185,6 +187,7 @@ if (CREATE_TEST_APP_LOCAL_DEPLOY AND WIN32)
     CONFIGURE_DEPENDS
     ${LAPACK_DIR}/bin/*.dll
     ${BLIS_DIR}/lib/*.dll
+    ${AOCL_ROOT}/amd-utils/lib/*aocl*.dll
     ${OPENBLAS_DIR}/bin/*.dll
     ${HIP_DIR}/bin/amd*.dll
     ${HIP_DIR}/bin/hiprt*.dll

@@ -97,9 +97,52 @@ namespace TensileLite
             return std::fabs(v);
         }
 
+        // Round each element through the narrower compute-input type. This
+        // matches what the slow-path validator does in getElement<>() at the
+        // MAC site when storage type is wider than the MAC input type (e.g.
+        // Half storage, F8 MFMA input). Without this, the fast path keeps
+        // full storage precision and disagrees with both the slow path and
+        // the GPU kernel.
+        inline void quantizeThroughComputeInputType(std::vector<float>& buf,
+                                                    rocisa::DataType    computeInputType)
+        {
+            switch(computeInputType)
+            {
+            case rocisa::DataType::Float:
+                return;
+            case rocisa::DataType::Half:
+                for(auto& v : buf) v = static_cast<float>(static_cast<TensileLite::Half>(v));
+                return;
+            case rocisa::DataType::BFloat16:
+                for(auto& v : buf) v = static_cast<float>(static_cast<TensileLite::BFloat16>(v));
+                return;
+#ifdef TENSILE_USE_FP8_BF8
+            case rocisa::DataType::Float8:
+                for(auto& v : buf) v = static_cast<float>(static_cast<TensileLite::Float8>(v));
+                return;
+            case rocisa::DataType::BFloat8:
+                for(auto& v : buf) v = static_cast<float>(static_cast<TensileLite::BFloat8>(v));
+                return;
+            case rocisa::DataType::Float8_fnuz:
+                for(auto& v : buf) v = static_cast<float>(static_cast<TensileLite::Float8_fnuz>(v));
+                return;
+            case rocisa::DataType::BFloat8_fnuz:
+                for(auto& v : buf) v = static_cast<float>(static_cast<TensileLite::BFloat8_fnuz>(v));
+                return;
+#endif
+            default:
+                throw std::runtime_error(
+                    "Unsupported compute-input type for fast-path quantization.");
+            }
+        }
+
         // Helper class that wraps a shadow copy of input buffers in float format.
         // It quietly manages the indirection between directly using the input pointer
         // (for float) and a shadow copy (for half / bfloat16).
+        //
+        // When `computeInputType` is set and is narrower than `type`, each element
+        // is additionally rounded through `computeInputType` to mirror what the
+        // GPU MFMA / slow-path validator do (see quantizeThroughComputeInputType).
         class ShadowBuffer
         {
             std::vector<float> m_storage;
@@ -107,7 +150,10 @@ namespace TensileLite
 
         public:
             ShadowBuffer() = default;
-            ShadowBuffer(void const* ptr, rocisa::DataType type, size_t N)
+            ShadowBuffer(void const*      ptr,
+                         rocisa::DataType type,
+                         size_t           N,
+                         rocisa::DataType computeInputType = rocisa::DataType::None)
             {
                 if(ptr == nullptr)
                 {
@@ -127,15 +173,64 @@ namespace TensileLite
                     m_storage = loadToFloat<TensileLite::BFloat16>(ptr, N);
                     m_ptr     = m_storage.data();
                 }
+#ifdef TENSILE_USE_FP8_BF8
+                else if(type == rocisa::DataType::Float8)
+                {
+                    m_storage = loadToFloat<TensileLite::Float8>(ptr, N);
+                    m_ptr     = m_storage.data();
+                }
+                else if(type == rocisa::DataType::BFloat8)
+                {
+                    m_storage = loadToFloat<TensileLite::BFloat8>(ptr, N);
+                    m_ptr     = m_storage.data();
+                }
+                else if(type == rocisa::DataType::Float8_fnuz)
+                {
+                    m_storage = loadToFloat<TensileLite::Float8_fnuz>(ptr, N);
+                    m_ptr     = m_storage.data();
+                }
+                else if(type == rocisa::DataType::BFloat8_fnuz)
+                {
+                    m_storage = loadToFloat<TensileLite::BFloat8_fnuz>(ptr, N);
+                    m_ptr     = m_storage.data();
+                }
+#endif
                 else
                 {
                     throw std::runtime_error("Unsupported type for ShadowBuffer");
+                }
+
+                // Apply MAC-input quantization if the compute-input type is
+                // narrower than storage. This is only meaningful for the path
+                // where we hold a writable shadow copy (not for the
+                // direct-pointer Float case, which is already at full
+                // precision and never narrower than itself).
+                if(computeInputType != rocisa::DataType::None
+                   && computeInputType != type
+                   && !m_storage.empty())
+                {
+                    quantizeThroughComputeInputType(m_storage, computeInputType);
+                    m_ptr = m_storage.data();
                 }
             }
 
             const float* data() const
             {
                 return m_ptr;
+            }
+
+            // Return a writable copy of the shadow buffer. Copies from the
+            // direct pointer when the buffer aliases user-owned float storage.
+            float* ensureMutable(size_t count)
+            {
+                if(m_ptr == nullptr)
+                    return nullptr;
+                if(m_storage.empty())
+                    m_storage.assign(m_ptr, m_ptr + count);
+                else if(m_storage.size() < count)
+                    throw std::runtime_error("ShadowBuffer ensureMutable: count exceeds storage");
+                m_ptr = m_storage.data();
+                return m_storage.data();
             }
 
             explicit operator bool() const
@@ -149,6 +244,63 @@ namespace TensileLite
                 return m_ptr[idx];
             }
         };
+
+        // Pre-multiply shadow A/B by MX block scales (rocroller ScaledCPUMM style)
+        // so the fast f32 GEMM path matches the slow per-element reference.
+        void applyMXScaleToShadow(ShadowBuffer&                 shadow,
+                                    ContractionProblemGemm const& problem,
+                                    TensorDescriptor const&       dataTensor,
+                                    TensorDescriptor const&       scaleTensor,
+                                    void const*                   scaleBase,
+                                    rocisa::DataType              mxType,
+                                    int                           mxBlock,
+                                    bool                          forMatrixA)
+        {
+            if(mxBlock <= 0 || scaleBase == nullptr)
+                return;
+
+            float* dataPtr = shadow.ensureMutable(dataTensor.totalAllocatedElements());
+            if(dataPtr == nullptr)
+                return;
+
+            auto const& boundIndices = problem.boundIndices();
+
+            std::vector<size_t> boundSize(boundIndices.size());
+            for(size_t i = 0; i < boundIndices.size(); ++i)
+                boundSize[i] = problem.boundSize(i);
+
+#pragma omp parallel for
+            for(ptrdiff_t elemNumber = 0;
+                elemNumber < static_cast<ptrdiff_t>(dataTensor.totalLogicalElements());
+                ++elemNumber)
+            {
+                std::vector<size_t> dataCoord(dataTensor.dimensions());
+                std::vector<size_t> scaleCoord(scaleTensor.dimensions());
+
+                CoordNumbered(static_cast<size_t>(elemNumber),
+                              dataCoord.begin(),
+                              dataCoord.end(),
+                              dataTensor.sizes().begin(),
+                              dataTensor.sizes().end());
+
+                for(size_t d = 0; d < dataCoord.size(); ++d)
+                    scaleCoord[d] = dataCoord[d];
+
+                for(size_t i = 0; i < boundIndices.size(); ++i)
+                {
+                    auto const& bi  = boundIndices[i];
+                    size_t      pos = forMatrixA ? bi.a : bi.b;
+                    size_t      val = scaleCoord[pos];
+                    if(forMatrixA ? bi.aMirror : bi.bMirror)
+                        val = boundSize[i] - val - 1;
+                    scaleCoord[pos] = val / static_cast<size_t>(mxBlock);
+                }
+
+                size_t dataIdx  = dataTensor.index(dataCoord);
+                size_t scaleIdx = scaleTensor.index(scaleCoord);
+                dataPtr[dataIdx] *= mxScaleElementAsFloat(mxType, scaleBase, scaleIdx);
+            }
+        }
     }
 
     namespace Client
@@ -1021,14 +1173,28 @@ namespace TensileLite
                 return rejectFast("XFloat32");
             }
 
-            auto isSupportedType = [](rocisa::DataType t) {
+            auto isSupportedOutputType = [](rocisa::DataType t) {
                 return t == rocisa::DataType::Float || t == rocisa::DataType::Half
                        || t == rocisa::DataType::BFloat16;
             };
 
-            if(!isSupportedType(problem.a().dataType()) || !isSupportedType(problem.b().dataType())
-               || !isSupportedType(problem.c().dataType())
-               || !isSupportedType(problem.d().dataType()))
+            auto isSupportedInputType = [&](rocisa::DataType t) {
+                if(isSupportedOutputType(t))
+                    return true;
+#ifdef TENSILE_USE_FP8_BF8
+                if(t == rocisa::DataType::Float8
+                   || t == rocisa::DataType::BFloat8
+                   || t == rocisa::DataType::Float8_fnuz
+                   || t == rocisa::DataType::BFloat8_fnuz)
+                    return true;
+#endif
+                return false;
+            };
+
+            if(!isSupportedInputType(problem.a().dataType())
+               || !isSupportedInputType(problem.b().dataType())
+               || !isSupportedOutputType(problem.c().dataType())
+               || !isSupportedOutputType(problem.d().dataType()))
             {
                 std::string detail = "unsupported_type"
                     " A=" + TensileLite::ToString(problem.a().dataType())
@@ -1138,12 +1304,44 @@ namespace TensileLite
             size_t strideBatchD = problem.d().strides()[problem.batchIndices()[0].d];
 
             // 4. Shadow copies in f32.
-            ShadowBuffer shadowA(
-                inputs.a, problem.a().dataType(), problem.a().totalAllocatedElements());
-            ShadowBuffer shadowB(
-                inputs.b, problem.b().dataType(), problem.b().totalAllocatedElements());
+            //
+            // For A and B, also pass the compute-input type so the shadow is
+            // pre-quantized to mirror the GPU MFMA / slow-path semantics when
+            // storage is wider than the MAC input (e.g. Half storage with F8
+            // compute-input). C/D never have a separate MAC-input type.
+            ShadowBuffer shadowA(inputs.a,
+                                 problem.a().dataType(),
+                                 problem.a().totalAllocatedElements(),
+                                 problem.computeInputTypeA());
+            ShadowBuffer shadowB(inputs.b,
+                                 problem.b().dataType(),
+                                 problem.b().totalAllocatedElements(),
+                                 problem.computeInputTypeB());
             ShadowBuffer shadowC(
                 inputs.c, problem.c().dataType(), problem.c().totalAllocatedElements());
+
+            if(problem.mxBlockA() > 0 && inputs.mxsa != nullptr)
+            {
+                applyMXScaleToShadow(shadowA,
+                                     problem,
+                                     problem.a(),
+                                     problem.mxsa(),
+                                     inputs.mxsa,
+                                     problem.mxTypeA(),
+                                     problem.mxBlockA(),
+                                     /*forMatrixA=*/true);
+            }
+            if(problem.mxBlockB() > 0 && inputs.mxsb != nullptr)
+            {
+                applyMXScaleToShadow(shadowB,
+                                     problem,
+                                     problem.b(),
+                                     problem.mxsb(),
+                                     inputs.mxsb,
+                                     problem.mxTypeB(),
+                                     problem.mxBlockB(),
+                                     /*forMatrixA=*/false);
+            }
 
             std::vector<float> shadowD;
             float*             ptrD = nullptr;
@@ -2518,6 +2716,18 @@ namespace TensileLite
                     problem, inputs, elementsToValidate);
             }
 #endif // defined(TENSILE_USE_FP6) && defined(TENSILE_USE_FP4)
+#if defined(TENSILE_USE_FP6) && defined(TENSILE_USE_FP4) && defined(TENSILE_USE_BF16)
+            case TypedGemm_F6F4_B_S::TypeId():
+            {
+                return ReferenceSolution<TypedGemm_F6F4_B_S, float>::SolveCPU(
+                    problem, inputs, elementsToValidate);
+            }
+            case TypedGemm_F4F6_B_S::TypeId():
+            {
+                return ReferenceSolution<TypedGemm_F4F6_B_S, float>::SolveCPU(
+                    problem, inputs, elementsToValidate);
+            }
+#endif // defined(TENSILE_USE_FP6) && defined(TENSILE_USE_FP4) && defined(TENSILE_USE_BF16)
 #if defined(TENSILE_USE_BF6) && defined(TENSILE_USE_FP4)
             case TypedGemm_B6F4_S_S::TypeId():
             {
@@ -2530,6 +2740,18 @@ namespace TensileLite
                     problem, inputs, elementsToValidate);
             }
 #endif // defined(TENSILE_USE_BF6) && defined(TENSILE_USE_FP4)
+#if defined(TENSILE_USE_BF6) && defined(TENSILE_USE_FP4) && defined(TENSILE_USE_BF16)
+            case TypedGemm_B6F4_B_S::TypeId():
+            {
+                return ReferenceSolution<TypedGemm_B6F4_B_S, float>::SolveCPU(
+                    problem, inputs, elementsToValidate);
+            }
+            case TypedGemm_F4B6_B_S::TypeId():
+            {
+                return ReferenceSolution<TypedGemm_F4B6_B_S, float>::SolveCPU(
+                    problem, inputs, elementsToValidate);
+            }
+#endif // defined(TENSILE_USE_BF6) && defined(TENSILE_USE_FP4) && defined(TENSILE_USE_BF16)
 #endif // !_WIN32
 #if defined(TENSILE_USE_FP8_BF8) && defined(TENSILE_USE_FP4)
             // DestDataType: S

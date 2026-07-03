@@ -37,9 +37,7 @@
 #include <Tensile/Tensile.hpp>
 #include <Tensile/TensorOps.hpp>
 
-#include <Tensile/Macros.hpp>
-
-TENSILE_HIDDEN_BEGIN
+#include <tensilelitehost/export.h>
 
 namespace fs = std::filesystem;
 
@@ -234,9 +232,19 @@ namespace TensileLite
             {
                 return std::shared_ptr<MySolution>();
             }
-            auto solution = solutions.at(index);
+            auto                   solution = solutions.at(index);
+            
+            TensileLite::TensorOps nop;
+
             if(solution->requiredHostWorkspaceSizePerProblem == static_cast<size_t>(-1))
             {
+                const auto& pt = solution->problemType;
+
+                bool isComplexInput
+                    = (pt.aType == rocisa::DataType::ComplexFloat || pt.aType == rocisa::DataType::ComplexDouble);
+                    
+                rocisa::DataType alphaBetaType = isComplexInput ? pt.aType : pt.computeType;
+
                 auto problem
                     = MyProblem::createDefaultProblem(solution->problemType.transA,
                                                       solution->problemType.transB,
@@ -244,8 +252,8 @@ namespace TensileLite
                                                       solution->problemType.bType,
                                                       solution->problemType.cType,
                                                       solution->problemType.dType,
-                                                      solution->problemType.computeType,
-                                                      solution->problemType.computeType,
+                                                      alphaBetaType,
+                                                      alphaBetaType,
                                                       solution->problemType.computeInputTypeA,
                                                       solution->problemType.computeInputTypeB,
                                                       solution->problemType.computeType,
@@ -256,7 +264,11 @@ namespace TensileLite
                                                       solution->problemType.biasDataTypeWhiteList,
                                                       solution->problemType.biasSrcWhiteList,
                                                       solution->problemType.groupedGemm,
-                                                      std::numeric_limits<size_t>::max());
+                                                      std::numeric_limits<size_t>::max(),
+                                                      nop,
+                                                      nop,
+                                                      nop,
+                                                      nop);
                 solution->requiredHostWorkspaceSizePerProblem
                     = solution->requiredHostSizeGroupedGemmSingle(problem, hardware);
             }
@@ -384,4 +396,3 @@ namespace TensileLite
 
 } // namespace TensileLite
 
-TENSILE_HIDDEN_END

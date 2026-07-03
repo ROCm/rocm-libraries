@@ -38,6 +38,7 @@
 #include <variant>
 
 #include "origami/math.hpp"
+#include "origami/origami_export.h"
 
 namespace origami {
 
@@ -87,7 +88,7 @@ inline data_type_t int_to_data_type(int dt) { return static_cast<data_type_t>(dt
  * @param type Data type
  * @return int Number of bits
  */
-int datatype_to_bits(data_type_t type);
+ORIGAMI_EXPORT int datatype_to_bits(data_type_t type);
 
 /**
  * @brief Convert data_type_t to number of bytes.
@@ -105,7 +106,7 @@ inline double data_type_to_bytes(data_type_t type) {
  * @param type Data type
  * @return std::string String representation of data type
  */
-std::string datatype_to_string(data_type_t type);
+ORIGAMI_EXPORT std::string datatype_to_string(data_type_t type);
 
 /**
  * @brief Convert string to data_type_t enum.
@@ -113,7 +114,7 @@ std::string datatype_to_string(data_type_t type);
  * @param s String value to convert
  * @return data_type_t Corresponding data type
  */
-data_type_t string_to_datatype(std::string s);
+ORIGAMI_EXPORT data_type_t string_to_datatype(std::string s);
 
 /**
  * @brief Struct to define a matrix instruction.
@@ -182,6 +183,20 @@ enum class reduction_t : std::uint32_t {
 };
 
 /**
+ * @brief StreamK=5 hybrid sub-path selector.
+ *
+ * Picks between the SK3 static work-assignment sub-path and the SK4
+ * dynamic per-XCD work-queue sub-path inside a single SK5 kernel
+ * launch. Used by ::origami::streamk::select_hybrid_mode().
+ */
+enum class hybrid_mode_t : std::uint32_t {
+  static_ = 0,        ///< SK3 static work-assignment sub-path
+  dynamic = 1,        ///< SK4 dynamic per-XCD work-queue sub-path
+  count,              ///< Count of hybrid modes
+  none = 0xFFFFFFFFu  ///< Explicitly invalid
+};
+
+/**
  * @brief Prediction mode types for latency estimation.
  *
  * Different approaches for predicting kernel performance.
@@ -190,6 +205,18 @@ enum class prediction_modes_t : std::uint32_t {
   estimation = 0,     ///< Fast analytical estimation-based prediction (typically faster)
   simulation = 1,     ///< Slow simulation-like prediction (typically more accurate)
   count,              ///< Count of prediction modes
+  none = 0xFFFFFFFFu  ///< Explicitly invalid
+};
+
+/**
+ * @brief Origami model types for performance prediction.
+ *
+ * Specifies which analytical model to use for latency computation.
+ */
+enum class model_t : std::uint32_t {
+  gemm      = 0,      ///< GEMM model for matrix multiplication
+  attention = 1,      ///< Attention model for Flash Attention
+  count,              ///< Count of model types
   none = 0xFFFFFFFFu  ///< Explicitly invalid
 };
 
@@ -301,7 +328,7 @@ struct dim4_t {
  * Provides programmatic access to runtime configuration options that can be
  * set either programmatically or via environment variables.
  */
-struct runtime_options {
+struct ORIGAMI_EXPORT runtime_options {
   /// Enable debug logging (reads from ANALYTICAL_GEMM_DEBUG env var)
   bool debug_enabled;
 
@@ -473,6 +500,9 @@ struct config_t {
   /// Main loop optimization flag (indicates use of any optimized kernel variant)
   bool hand_optimized_main_loop = false;
 
+  /// Whether this kernel uses the subtile implementation (UseSubtileImpl).
+  bool subtile = false;
+
   /// Occupancy (number of wavefronts resident per CU).
   int occupancy = -1;
 
@@ -538,7 +568,8 @@ struct config_t {
 
   bool operator==(const config_t& o) const noexcept {
     return mt == o.mt && mi == o.mi && hand_optimized_main_loop == o.hand_optimized_main_loop &&
-           cache_hints_a == o.cache_hints_a && cache_hints_b == o.cache_hints_b &&
+           subtile == o.subtile && cache_hints_a == o.cache_hints_a &&
+           cache_hints_b == o.cache_hints_b &&
            workgroup_mapping == o.workgroup_mapping && reduction_strategy == o.reduction_strategy &&
            prediction_mode == o.prediction_mode && target == o.target && grvw_a == o.grvw_a &&
            grvw_b == o.grvw_b && gwvw_d == o.gwvw_d && vector_width_a == o.vector_width_a &&
@@ -553,6 +584,7 @@ struct config_t {
                                           mi.n,
                                           mi.k,
                                           hand_optimized_main_loop,
+                                          subtile,
                                           cache_hints_a,
                                           cache_hints_b,
                                           workgroup_mapping,
@@ -608,6 +640,9 @@ struct problem_t {
 
   /// Batch size.
   std::size_t batch = 1;
+
+  /// Number of query heads (for attention workloads).
+  std::size_t q_heads = 32;
 
   /// Transpose types (TT, TN, NT, TT.)
   transpose_t a_transpose = transpose_t::N;

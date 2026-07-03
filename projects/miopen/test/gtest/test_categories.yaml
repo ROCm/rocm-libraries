@@ -56,48 +56,27 @@ positive_patterns: &positive_patterns
   - "*/GPU_UnitTestActivationDescriptor_*"
   - "*/GPU_FinInterfaceTest*"
   - "*/GPU_KernelTuningNetTest*"
-  - "*/GPU_Bwd_Mha_*"
-  - "*/GPU_Fwd_Mha_*"
   - "*/GPU_Softmax*"
   - "*/GPU_Dropout*"
-  - "*/GPU_MhaBackward_*"
-  - "*/GPU_MhaForward_*"
-  - "*GPU_TestMhaFind20*"
   - "*/GPU_MIOpenDriver*"
   - "*/GPU_HipGraphExist*"
+  - "Standard/*" # include all standard tests by default
+
 
 
 test_categories:
   quick:
     description: "Fast sanity checks - Run pre-commit (target: < 5 min)"
     test_patterns:
-      - "Smoke/GPU_BNCKFWDTrainLarge2D_FP16*"
-      - "Smoke/GPU_BNOCLFWDTrainLarge2D_FP16*"
-      - "Smoke/GPU_BNOCLFWDTrainLarge3D_FP16*"
-      - "Smoke/GPU_BNCKFWDTrainLarge2D_BFP16*"
-      - "Smoke/GPU_BNOCLFWDTrainLarge2D_BFP16*"
-      - "Smoke/GPU_BNOCLFWDTrainLarge3D_BFP16*"
       - "Smoke/GPU_UnitTestConvSolverImplicitGemmFwdXdlops_FP16*"
       - "Smoke/GPU_UnitTestConvSolverImplicitGemmFwdXdlops_BFP16*"
 
     exclude:
-      - "Smoke/GPU_BNOCLFWDTrainLarge2D_BFP16*"
-      - "Smoke/GPU_BNOCLInferLarge2D_BFP16*"
       - "*/GPU_MIOpenDriver*"
-      - "*GPU_TestMhaFind20_FP32*" #rocm-1016 fixed in develop. Re-enable once bumped
-      - "*GPU_TestMhaFind20_FP16*" #rocm-1016 fixed in develop. Re-enable once bumped
-      
-    exclude_windows:
-      # The following tests are added to show functionality
-      - "Smoke/GPU_BNOCLFWDTrainLarge2D_BFP16*"
-      - "Smoke/GPU_BNOCLInferLarge2D_BFP16*"
 
-    exclude_linux:
-      # The following tests are added to show functionality
-      - "Smoke/GPU_BNOCLInferLarge2D_BFP16*"
-      - "Smoke/GPU_BNOCLFWDTrainLarge2D_BFP16*"
+    exclude_windows: [] # Placeholder to show per-platform exclude support
+    exclude_linux: [] # Placeholder to show per-platform exclude support
 
-      
     test_files:
       - "gtest/smoke_*.cpp"
       - "gtest/unit_ActivationDescriptor.cpp"
@@ -113,7 +92,7 @@ test_categories:
       - "gtest/log_test.cpp"
       - "gtest/test_errors.cpp"
       - "gtest/pooling2d_asymmetric.cpp"
-    
+
     labels:
       - "quick"
       - "pre-commit"
@@ -132,14 +111,9 @@ test_categories:
       - "Full/GPU_Lrn_FP32*"
       - "Full/GPU_Lrn_FP16*"
       - "Full/GPU_BNOCLInferSerialRun3D_BFP16*"
-      - "Smoke/GPU_BNOCLFWDTrainLarge2D_BFP16*"
-      - "Smoke/GPU_BNOCLInferLarge2D_BFP16*"
       - "Full/GPU_BNOCLBWDSerialRun3D_BFP16*"
-      - "Smoke/GPU_BNOCLBWDLarge2D_BFP16*"
       - "Full/GPU_UnitTestActivationDescriptor_FP32*"
       - "Full/GPU_UnitTestActivationDescriptor_FP16*"
-      - "Smoke/GPU_BNOCLBWDLargeFusedActivation2D_BFP16*"
-      - "Smoke/GPU_BNOCLBWDLargeFusedActivation2D_FP16*"
       - "Full/GPU_ConvGrpBiasActivInfer_BFP16*"
       - "Full/GPU_ConvGrpBiasActivInfer_FP32*"
       - "Full/GPU_ConvGrpBiasActivInfer_FP16*"
@@ -155,8 +129,30 @@ test_categories:
       - "Smoke/GPU_UnitTestConvSolverHipImplicitGemmV4R1Fwd_BFP16.ConvHipImplicitGemmV4R1Fwd/0"
       - "Full/GPU_MIOpenDriverConv2dTransTest*"
       - "Full/GPU_MIOpenDriverRegressionBigTensorTest_FP32"
-      - "*GPU_TestMhaFind20_FP32*" #rocm-1016 fixed in develop. Re-enable once bumped
-      - "*GPU_TestMhaFind20_FP16*" #rocm-1016 fixed in develop. Re-enable once bumped
+      - "Full/GPU_UnitTestConvSolverImplicitGemmGroupFwdXdlops_LargeStride_*"
+      - "Full/GPU_UnitTestConvSolverImplicitGemm3DGroupFwdXdlops_LargeStride_*"
+      - "Full/GPU_UnitTestConvSolverImplicitGemmGroupBwdXdlops_LargeStride_*"
+      - "Full/GPU_UnitTestConvSolverImplicitGemm3DGroupBwdXdlops_LargeStride_*"
+      - "Full/GPU_UnitTestConvSolverImplicitGemmGroupWrwXdlops_LargeStride_*"
+      - "Full/GPU_UnitTestConvSolverImplicitGemm3DGroupWrwXdlops_LargeStride_*"
+      # Large BN tests - full suite only
+      - "Full/GPU_BNCKFWDTrainLarge2D_*"
+      - "Full/GPU_BNOCLFWDTrainLarge2D_*"
+      - "Full/GPU_BNOCLFWDTrainLarge3D_*"
+      - "Full/GPU_BNFWDTrainLarge2D_*"
+      - "Full/GPU_BNCKBWDLarge2D_*"
+      - "Full/GPU_BNOCLBWDLarge2D_*"
+      - "Full/GPU_BNOCLBWDLarge3D_*"
+      - "Full/GPU_BNBWDLarge2D_*"
+      - "Full/GPU_BNBWDLarge3D_*"
+      - "Full/GPU_BNCKInferLarge2D_*"
+      - "Full/GPU_BNOCLInferLarge2D_*"
+      - "Full/GPU_BNOCLInferLarge3D_*"
+      - "Full/GPU_BNInferLarge2D_*"
+      - "Full/GPU_BNOCLFWDTrainLargeFusedActivation2D_*"
+      - "Full/GPU_BNFWDTrainLargeFusedActivation2D_*"
+      - "Full/GPU_BNOCLBWDLargeFusedActivation2D_*"
+      - "Full/GPU_BNOCLInferLargeFusedActivation2D_*"
 
     test_files:
       # Quick tests
@@ -165,7 +161,7 @@ test_categories:
       - "gtest/gtest_activation.cpp"
       - "handle_test.cpp"
       - "gtest/handle_hip_device.cpp"
-      
+
       # Standard tests
       - "conv2d.cpp"
       - "conv2d_bias.cpp"
@@ -190,7 +186,7 @@ test_categories:
       - "gtest/reduce.cpp"
       - "gtest/layernorm.cpp"
       - "gtest/cache.cpp"
-    
+
     labels:
       - "standard"
       - "pr"
@@ -209,14 +205,14 @@ test_categories:
       - "Full/GPU_Lrn_FP32*"
       - "Full/GPU_Lrn_FP16*"
       - "Full/GPU_BNOCLInferSerialRun3D_BFP16*"
-      - "Smoke/GPU_BNOCLFWDTrainLarge2D_BFP16*"
-      - "Smoke/GPU_BNOCLInferLarge2D_BFP16*"
+      - "Full/GPU_BNOCLFWDTrainLarge2D_BFP16*"
+      - "Full/GPU_BNOCLInferLarge2D_BFP16*"
       - "Full/GPU_BNOCLBWDSerialRun3D_BFP16*"
-      - "Smoke/GPU_BNOCLBWDLarge2D_BFP16*"
+      - "Full/GPU_BNOCLBWDLarge2D_BFP16*"
       - "Full/GPU_UnitTestActivationDescriptor_FP32*"
       - "Full/GPU_UnitTestActivationDescriptor_FP16*"
-      - "Smoke/GPU_BNOCLBWDLargeFusedActivation2D_BFP16*"
-      - "Smoke/GPU_BNOCLBWDLargeFusedActivation2D_FP16*"
+      - "Full/GPU_BNOCLBWDLargeFusedActivation2D_BFP16*"
+      - "Full/GPU_BNOCLBWDLargeFusedActivation2D_FP16*"
       - "Full/GPU_ConvGrpBiasActivInfer_BFP16*"
       - "Full/GPU_ConvGrpBiasActivInfer_FP32*"
       - "Full/GPU_ConvGrpBiasActivInfer_FP16*"
@@ -232,12 +228,12 @@ test_categories:
       - "Smoke/GPU_UnitTestConvSolverHipImplicitGemmV4R1Fwd_BFP16.ConvHipImplicitGemmV4R1Fwd/0"
       - "Full/GPU_MIOpenDriverConv2dTransTest*"
       - "Full/GPU_MIOpenDriverRegressionBigTensorTest_FP32"
-      - "*GPU_TestMhaFind20_FP32*" #rocm-1016 fixed in develop. Re-enable once bumped
-      - "*GPU_TestMhaFind20_FP16*" #rocm-1016 fixed in develop. Re-enable once bumped
+      # Exclude FP16 and FP32 (the _FP* glob matches both but not BFP16) — they
+      # share the same dispatch code path and stay in full. Keep BFP16 in
+      # comprehensive (nightly) for coverage.
+      - "Full/GPU_UnitTestConvSolverImplicitGemm*Xdlops_LargeStride_FP*"
       # Only exclude explicitly disabled tests
       - "*DISABLED*"
-      - "*GPU_TestMhaFind20_FP32*" #rocm-1016 fixed in develop. Re-enable once bumped
-      - "*GPU_TestMhaFind20_FP16*" #rocm-1016 fixed in develop. Re-enable once bumped
 
     test_files:
       # Quick tests
@@ -246,7 +242,7 @@ test_categories:
       - "gtest/gtest_activation.cpp"
       - "handle_test.cpp"
       - "gtest/handle_hip_device.cpp"
-      
+
       # Standard tests
       - "conv2d.cpp"
       - "conv2d_bias.cpp"
@@ -284,7 +280,7 @@ test_categories:
       # All test files in the suite
       - "*.cpp"
       - "gtest/*.cpp"
-      
+
     exclude:
       # Excluding slower tests for faster PR validation
       - "*DeepBench*"
@@ -294,14 +290,14 @@ test_categories:
       - "Full/GPU_Lrn_FP32*"
       - "Full/GPU_Lrn_FP16*"
       - "Full/GPU_BNOCLInferSerialRun3D_BFP16*"
-      - "Smoke/GPU_BNOCLFWDTrainLarge2D_BFP16*"
-      - "Smoke/GPU_BNOCLInferLarge2D_BFP16*"
+      - "Full/GPU_BNOCLFWDTrainLarge2D_BFP16*"
+      - "Full/GPU_BNOCLInferLarge2D_BFP16*"
       - "Full/GPU_BNOCLBWDSerialRun3D_BFP16*"
-      - "Smoke/GPU_BNOCLBWDLarge2D_BFP16*"
+      - "Full/GPU_BNOCLBWDLarge2D_BFP16*"
       - "Full/GPU_UnitTestActivationDescriptor_FP32*"
       - "Full/GPU_UnitTestActivationDescriptor_FP16*"
-      - "Smoke/GPU_BNOCLBWDLargeFusedActivation2D_BFP16*"
-      - "Smoke/GPU_BNOCLBWDLargeFusedActivation2D_FP16*"
+      - "Full/GPU_BNOCLBWDLargeFusedActivation2D_BFP16*"
+      - "Full/GPU_BNOCLBWDLargeFusedActivation2D_FP16*"
       - "Full/GPU_ConvGrpBiasActivInfer_BFP16*"
       - "Full/GPU_ConvGrpBiasActivInfer_FP32*"
       - "Full/GPU_ConvGrpBiasActivInfer_FP16*"
@@ -317,11 +313,9 @@ test_categories:
       - "Smoke/GPU_UnitTestConvSolverHipImplicitGemmV4R1Fwd_BFP16.ConvHipImplicitGemmV4R1Fwd/0"
       - "Full/GPU_MIOpenDriverConv2dTransTest*"
       - "Full/GPU_MIOpenDriverRegressionBigTensorTest_FP32"
-      - "*GPU_TestMhaFind20_FP32*" #rocm-1016 fixed in develop. Re-enable once bumped
-      - "*GPU_TestMhaFind20_FP16*" #rocm-1016 fixed in develop. Re-enable once bumped
       # Only exclude explicitly disabled tests
       - "*DISABLED*"
-    
+
     labels:
       - "full"
       - "weekly"
@@ -330,8 +324,8 @@ test_categories:
 
 # Common GPU exclusion patterns - used by multiple GPU architectures
 gfx11_common_patterns: &gfx11_common_patterns
-  - "Smoke/GPU_BNFWDTrainLargeFusedActivation2D_FP32.BnV2LargeFWD_TrainCKfp32Activation/NCHW_BNSpatial_testBNAPIV1_Dim_2_test_id_32"
-  - "Smoke/GPU_BNFWDTrainLarge2D_FP32.BnV2LargeFWD_TrainCKfp32/NCHW_BNSpatial_testBNAPIV2_Dim_2_test_id_64"
+  - "Full/GPU_BNFWDTrainLargeFusedActivation2D_FP32.BnV2LargeFWD_TrainCKfp32Activation/NCHW_BNSpatial_testBNAPIV1_Dim_2_test_id_32"
+  - "Full/GPU_BNFWDTrainLarge2D_FP32.BnV2LargeFWD_TrainCKfp32/NCHW_BNSpatial_testBNAPIV2_Dim_2_test_id_64"
   - "*SerialRun3D*"
   - "*gfx942*"
   - "*GPU_UnitTestConvSolverFFTFwd_FP32*"
@@ -368,7 +362,7 @@ exclude_gpu:
       - "ex_gpu_gfx120X"
 
   exclude_gpu_gfx110X:
-    test_patterns: 
+    test_patterns:
       - *gfx11_common_patterns
       - "*/GPU_MIOpenDriver*"
       - "Smoke/CPU_Handle_NONE*"
@@ -381,7 +375,7 @@ exclude_gpu:
       - "ex_gpu_gfx110X"
 
   exclude_gpu_gfx115X:
-  #Negative patterns for gfx1150 and gfx1151 will be covered here. 
+  #Negative patterns for gfx1150 and gfx1151 will be covered here.
   #Add exclude_gpu_gfx1150/gfx1151 separately only if they have unique patterns.
     test_patterns: *gfx11_common_patterns
     labels:
@@ -401,21 +395,11 @@ exclude_gpu:
       - "full"
       - "ex_gpu_gfx950"
 
-  exclude_gpu_gfx94X:
-    test_patterns:
-      - "*GPU_GetitemBwd_FP32*"
-    labels:
-      - "quick"
-      - "standard"
-      - "comprehensive"
-      - "full"
-      - "ex_gpu_gfx94X"
-
 execution_settings:
   default_timeout: 300  # 5 minutes per test
   timeout_multiplier: 2 # Multiplier for all timeouts (1, 1.5, 1.75, 2, etc.)
   category_timeouts:
-    quick: 300          # 5 minutes 
-    standard: 1800      # 30 minutes 
-    comprehensive: 7200 # 2 hours 
-    full: 14400         # 4 hours         
+    quick: 300          # 5 minutes
+    standard: 1800      # 30 minutes
+    comprehensive: 7200 # 2 hours
+    full: 14400         # 4 hours

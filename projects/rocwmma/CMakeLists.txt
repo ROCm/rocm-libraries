@@ -48,6 +48,11 @@ set( CMAKE_EXPORT_COMPILE_COMMANDS ON CACHE BOOL "" FORCE )
 ### Project ROCWMMA
 project( rocwmma LANGUAGES CXX )
 set(CMAKE_CXX_STANDARD 17)
+
+# Set ROCM_LIBRARIES_ROOT if not already set (for monorepo builds vs standalone)
+if(NOT DEFINED ROCM_LIBRARIES_ROOT)
+    set(ROCM_LIBRARIES_ROOT "${CMAKE_CURRENT_SOURCE_DIR}/../..")
+endif()
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_CXX_EXTENSIONS OFF)
 
@@ -89,7 +94,7 @@ include(ROCMCheckTargetIds)
 include(ROCMClients)
 
 # Versioning via rocm-cmake
-set ( VERSION_STRING "2.2.0" )
+set ( VERSION_STRING "2.2.1" )
 rocm_setup_version( VERSION ${VERSION_STRING} )
 
 # configure a header file to pass the CMake version settings to the source
@@ -112,7 +117,7 @@ if (ADDRESS_SANITIZER_ENABLED)
         TARGETS "gfx90a:xnack+;gfx942:xnack+;gfx950:xnack+" )
 else()
     rocm_check_target_ids(DEFAULT_GPU_TARGETS
-        TARGETS "gfx908;gfx90a;gfx942;gfx950;gfx1100;gfx1101;gfx1102;gfx1150;gfx1151;gfx1152;gfx1153;gfx1200;gfx1201" )
+        TARGETS "gfx908;gfx90a;gfx942;gfx950;gfx1100;gfx1101;gfx1102;gfx1150;gfx1151;gfx1152;gfx1153;gfx1200;gfx1201;gfx1250" )
 endif()
 
 # check if ROCm supports `__hip_fp8_e5m2` and `__hip_fp8_e4m3`

@@ -7,31 +7,7 @@
 #include <hipdnn_data_sdk/utilities/PlatformUtils.hpp>
 #include <string>
 
-#ifdef _WIN32
-
-#ifndef NOMINMAX
-#define NOMINMAX
-#endif
-
-#include <windows.h>
-
-namespace hipdnn_backend::platform_utilities
-{
-
-typedef HMODULE PluginLibHandle;
-
-}
-
-#elif defined(__linux__)
-
-namespace hipdnn_backend::platform_utilities
-{
-
-typedef void* PluginLibHandle;
-
-}
-
-#else
+#if !defined(_WIN32) && !defined(__linux__)
 
 #error "Unsupported platform"
 
@@ -39,6 +15,8 @@ typedef void* PluginLibHandle;
 
 namespace hipdnn_backend::platform_utilities
 {
+
+using PluginLibHandle = hipdnn_data_sdk::utilities::SharedLibraryHandle;
 
 std::filesystem::path getCurrentModuleDirectory();
 

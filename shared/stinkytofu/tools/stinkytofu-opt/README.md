@@ -44,8 +44,7 @@ The binary will be located at: `build/tools/stinkytofu-opt/stinkytofu-opt`
 # Apply optimization passes
 ./build/tools/stinkytofu-opt/stinkytofu-opt \
     --arch gfx1250 func.arch-gfx1250.stir \
-    --StinkyDAGSchedulerPass \
-    --ScheduleFirstLRsPass
+    --StinkyDAGSchedulerPass
 ```
 
 ---
@@ -64,6 +63,7 @@ stinkytofu-opt [options] <ir_file> [--pass1] [--pass2] ...
 
 **Options:**
 - `--arch <arch>`: Target GPU architecture (default: gfx1250). Supported: `gfx1250`
+- `--remarks`: Enable optimization remarks on stderr (e.g. loop region diagnostics)
 - `--list-passes`: Display all available optimization passes
 - `--help`: Show usage information
 
@@ -95,15 +95,15 @@ names and strips comments unless the flag is set.
 ./stinkytofu-opt --list-passes
 ```
 
-Output:
+Output (illustrative — the authoritative, up-to-date list is whatever the tool
+prints, sourced from `availablePasses` in `tools/stinkytofu-opt/stinkytofu-opt.hpp`):
 ```
 Available passes:
 =================
-  --StinkyClusterDSReadPass
   --StinkyDAGSchedulerPass
-  --StinkyConfigurableWaitCntPass
-  --ScheduleLastLRsPass
-  --ScheduleFirstLRsPass
+  --StinkyWaitCntInsertionPass
+  --DeadCodeEliminationPass
+  ...
 ```
 
 **Note:** Passes are applied in the order they appear on the command line, after the initial deserialization pass.
@@ -138,11 +138,32 @@ Apply multiple optimization passes in sequence:
 ```bash
 ./build/tools/stinkytofu-opt/stinkytofu-opt \
     --arch gfx1250 tools/stinkytofu-opt/tests/func.arch-gfx1250.stir \
-    --StinkyClusterDSReadPass \
-    --StinkyDAGSchedulerPass
+    --StinkyDAGSchedulerPass \
+    --StinkyWaitCntInsertionPass
 ```
 
-#### Example 4: Round-Trip Raw Assembly
+#### Example 4: Remove selected instructions
+
+`RemoveInstructionPass` deletes every instruction whose unified opcode matches
+one of the comma-separated mnemonics. See
+[RemoveInstructionPass](../../docs/user/remove-instruction-pass.md) for gfx1250
+pipeline integration and Tensile `ModuleOptions.RemoveInstructions`.
+
+```bash
+# Remove tensor_load_to_lds only
+./build/tools/stinkytofu-opt/stinkytofu-opt \
+    --arch gfx1250 input.stir \
+    --RemoveInstructionPass=tensor_load_to_lds \
+    --print-output
+
+# Remove tensor_load, ds_load, and wmma in one pass
+./build/tools/stinkytofu-opt/stinkytofu-opt \
+    --arch gfx1250 input.stir \
+    --RemoveInstructionPass=tensor_load_to_lds,ds_load_b128,v_wmma_f32_16x16x16_bf16 \
+    --print-output
+```
+
+#### Example 5: Round-Trip Raw Assembly
 
 When the input is a `.s` file (raw GPU assembly), `--emit-asm` is implied and
 the tool can be used as a parse → IR → emit round-trip. By default, symbolic
@@ -219,16 +240,17 @@ struct PassInfo
     std::function<std::unique_ptr<Pass>()> creator; // Factory function to create the pass
 };
 
+// Illustrative — see the actual, up-to-date registry in stinkytofu-opt.hpp.
 const std::vector<PassInfo> availablePasses = {
-    { "StinkyClusterDSReadPass", []() { return createStinkyClusterDSReadPass(); } },
-    { "StinkyDAGSchedulerPass", []() { return createStinkyDAGSchedulerPass(); } },
-    { "StinkyUnrollWaitCntPass", []() { return createStinkyUnrollWaitCntPass(); } },
-    { "ScheduleLastLRsPass", []() { return createScheduleLastLRsPass(); } },
-    { "ScheduleFirstLRsPass", []() { return createScheduleFirstLRsPass(); } },
+    { "StinkyDAGSchedulerPass", [](const auto&) { return createStinkyDAGSchedulerPass(); } },
+    { "StinkyWaitCntInsertionPass", [](const auto&) { return createStinkyWaitCntInsertionPass(); } },
+    // ...
 };
 ```
 
-**Purpose:** This registry allows dynamic pass creation based on command-line arguments.
+**Purpose:** This registry allows dynamic pass creation based on command-line
+arguments. The authoritative list lives in
+`tools/stinkytofu-opt/stinkytofu-opt.hpp::availablePasses`.
 
 #### 2. Debug Print Instrumentation (`createDebugPrintInstrumentation()`)
 
@@ -311,7 +333,11 @@ Modifiers are serialized as attribute keys `mod.<type>` with a dict value. Examp
 
 - **mod.ds**: `mod.ds = { na = 1, offset = 0, offset0 = 0, offset1 = 0, gds = false }`
 - **mod.flat**: `mod.flat = { offset12 = 0, glc = false, slc = false, lds = false }`
-- **mod.mfma**: `mod.mfma = { inputPermute = "...", scaleStr = "...", negStr = "...", reuseA = false, reuseB = false, neg_lo = false, neg_hi = false }`
+- **mod.mfma**: `mod.mfma = { reuseA = false, reuseB = false, negLo = [0,0,0], negHi = [0,0,0], numNegSrcs = 3 }` (negLo/negHi/numNegSrcs only emitted when neg bits are set)
+- **mod.matrix_fmt**: `mod.matrix_fmt = { fmtA = "MATRIX_FMT_FP8", fmtB = "MATRIX_FMT_FP8", scaleFmtA = "MATRIX_SCALE_FMT_E4M3", scaleFmtB = "MATRIX_SCALE_FMT_E4M3" }` (fields only emitted when not NONE; `MatrixFmt` ∈ {FP8, BF8, FP6, BF6, FP4}; `MatrixScaleFmt` ∈ {E8, E5M3, E4M3})
+
+- **mod.dpp** (DPP16): `mod.dpp = { dppCtrl = 273, rowMask = 15, bankMask = 15, boundCtrl = 0, fi = 0 }` (dppCtrl is the numeric DppCtrl enum value)
+- **mod.dpp** (DPP8): `mod.dpp = { isDPP8 = true, dpp8 = [7,6,5,4,3,2,1,0], boundCtrl = 0, fi = 0 }`
 
 Other modifier types (e.g. `mod.vop3`, `mod.swaitcnt`, `mod.delayalu`) follow the same pattern. The serializer emits only fields that apply to the modifier instance.
 
@@ -336,3 +362,24 @@ Successors: ^next
 ```
 
 See `tests/unit/asm/IRParserTest.cpp` and the serialization layer (`StinkyAsmPrinter`, `IRParser`) for more examples.
+
+---
+
+## Optimization Remarks
+
+Use `--remarks` to enable optimization remarks on stderr. Remarks report code quality diagnostics (loop region count, s_nop waste, etc.) without requiring `PASS_DEBUG`.
+
+```bash
+# Run the full gfx1250 pipeline with remarks
+./build/tools/stinkytofu-opt/stinkytofu-opt \
+    --arch gfx1250 kernel.s -O2 --remarks --emit-asm
+
+# Run individual passes with remarks
+./build/tools/stinkytofu-opt/stinkytofu-opt \
+    --arch gfx1250 input.stir \
+    --from-label loop_start --to-label loop_end \
+    --StinkyDAGSchedulerPass --InsertDelayAluPass --LoopRegionRemarkPass \
+    --remarks --print-output
+```
+
+See [Global Parameters](../../docs/user/global-parameters.md) for the `StinkyTofuEnableRemarks` equivalent in the Tensile/KernelWriter path.

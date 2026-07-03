@@ -1,6 +1,6 @@
 /*! \file */
 /* ************************************************************************
- * Copyright (C) 2019-2024 Advanced Micro Devices, Inc. All rights Reserved.
+ * Copyright (C) 2019-2026 Advanced Micro Devices, Inc. All rights Reserved.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -45,6 +45,10 @@ constexpr auto hipsparse_datatype2string(hipDataType type)
 {
     switch(type)
     {
+    case HIP_R_8I:
+        return "i8_r";
+    case HIP_R_32I:
+        return "i32_r";
     case HIP_R_32F:
         return "f32_r";
     case HIP_R_64F:
@@ -53,6 +57,10 @@ constexpr auto hipsparse_datatype2string(hipDataType type)
         return "f32_c";
     case HIP_C_64F:
         return "f64_c";
+    case HIP_R_16F:
+        return "f16_r";
+    case HIP_R_16BF:
+        return "bf16_r";
     default:
         return "invalid";
     }
@@ -151,6 +159,10 @@ constexpr auto hipsparse_format2string(hipsparseFormat_t format)
         return "bell";
     case HIPSPARSE_FORMAT_SLICED_ELL:
         return "sell";
+#ifdef HIPSPARSE_WITH_SPMV_BSR
+    case HIPSPARSE_FORMAT_BSR:
+        return "bsr";
+#endif
     }
     return "invalid";
 }
@@ -389,11 +401,41 @@ constexpr auto hipsparse_spmmalg2string(hipsparseSpMMAlg_t alg)
         return "csr_alg3";
     case HIPSPARSE_SPMM_BLOCKED_ELL_ALG1:
         return "bell_alg1";
+    case HIPSPARSE_SPMM_BSR_ALG1:
+        return "bsr_alg1";
     }
     return "invalid";
 }
 #else
-#if(CUDART_VERSION >= 12000)
+#if(CUDART_VERSION >= 12051)
+constexpr auto hipsparse_spmmalg2string(hipsparseSpMMAlg_t alg)
+{
+    switch(alg)
+    {
+    case HIPSPARSE_SPMM_ALG_DEFAULT:
+        return "default";
+    case HIPSPARSE_SPMM_COO_ALG1:
+        return "coo_alg1";
+    case HIPSPARSE_SPMM_COO_ALG2:
+        return "coo_alg2";
+    case HIPSPARSE_SPMM_COO_ALG3:
+        return "coo_alg3";
+    case HIPSPARSE_SPMM_COO_ALG4:
+        return "coo_alg4";
+    case HIPSPARSE_SPMM_CSR_ALG1:
+        return "csr_alg1";
+    case HIPSPARSE_SPMM_CSR_ALG2:
+        return "csr_alg2";
+    case HIPSPARSE_SPMM_CSR_ALG3:
+        return "csr_alg3";
+    case HIPSPARSE_SPMM_BLOCKED_ELL_ALG1:
+        return "bell_alg1";
+    case HIPSPARSE_SPMM_BSR_ALG1:
+        return "bsr_alg1";
+    }
+    return "invalid";
+}
+#elif(CUDART_VERSION >= 12000 && CUDART_VERSION < 12051)
 constexpr auto hipsparse_spmmalg2string(hipsparseSpMMAlg_t alg)
 {
     switch(alg)
@@ -507,11 +549,39 @@ constexpr auto hipsparse_spmvalg2string(hipsparseSpMVAlg_t alg)
         return "csr_alg2";
     case HIPSPARSE_SPMV_SELL_ALG1:
         return "sell_alg1";
+#ifdef HIPSPARSE_WITH_SPMV_BSR
+    case HIPSPARSE_SPMV_BSR_ALG1:
+        return "bsr_alg1";
+#endif
     }
     return "invalid";
 }
 #else
-#if(CUDART_VERSION >= 12011)
+#if(CUDART_VERSION >= 13001)
+constexpr auto hipsparse_spmvalg2string(hipsparseSpMVAlg_t alg)
+{
+    switch(alg)
+    {
+    case HIPSPARSE_SPMV_ALG_DEFAULT:
+        return "default";
+    case HIPSPARSE_SPMV_COO_ALG1:
+        return "coo_alg1";
+    case HIPSPARSE_SPMV_COO_ALG2:
+        return "coo_alg2";
+    case HIPSPARSE_SPMV_CSR_ALG1:
+        return "csr_alg1";
+    case HIPSPARSE_SPMV_CSR_ALG2:
+        return "csr_alg2";
+    case HIPSPARSE_SPMV_SELL_ALG1:
+        return "sell_alg1";
+#ifdef HIPSPARSE_WITH_SPMV_BSR
+    case HIPSPARSE_SPMV_BSR_ALG1:
+        return "bsr_alg1";
+#endif
+    }
+    return "invalid";
+}
+#elif(CUDART_VERSION >= 12011 && CUDART_VERSION < 13001)
 constexpr auto hipsparse_spmvalg2string(hipsparseSpMVAlg_t alg)
 {
     switch(alg)

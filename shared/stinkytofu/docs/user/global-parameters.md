@@ -10,8 +10,9 @@ Control StinkyTofu behavior through Tensile's `GlobalParameters` system -- eithe
 | `StinkyTofuDebugLevel` | `0`, `1`, `2` | `0` | Diagnostic output verbosity |
 | `StinkyTofuPrintBeforePass` | comma-separated pass names | `""` | Print IR before specific passes |
 | `StinkyTofuPrintAfterPass` | comma-separated pass names | `""` | Print IR after specific passes |
-| `StinkyTofuDebugPass` | comma-separated pass names | `""` | PASS_DEBUG logging + instruction-order snapshot allow-list |
-| `StinkyTofuPassOrderSnapshotJson` | file path | `""` | Before/after instruction-order JSON for stinkytofu-analysis |
+| `StinkyTofuDebugPass` | comma-separated pass names | `""` | PASS_DEBUG logging |
+| `StinkyTofuVerifyEach` | `0`, `1` | `0` | Verify StinkyTofu ASM IR after every pass |
+| `StinkyTofuEnableRemarks` | `0`, `1` | `0` | Emit optimization remarks to stderr |
 
 ---
 
@@ -69,22 +70,45 @@ Pass names target the actual pass (e.g. `CFGBuilderPass`, `StinkyDAGSchedulerPas
 
 ## `StinkyTofuDebugPass`
 
-Comma-separated list of pass names (case-sensitive). Serves two purposes:
-
-1. **PASS_DEBUG logging** -- prints pass-internal debug information (e.g. DAG graphs, scheduling decisions) to stderr.
-2. **Instruction-order snapshot allow-list** -- when `StinkyTofuPassOrderSnapshotJson` is also set, records before/after instruction order for the listed passes. If this parameter is empty and a snapshot path is set, only `StinkyDAGSchedulerPass` is recorded by default.
+Comma-separated list of pass names (case-sensitive). Enables **PASS_DEBUG logging** --
+prints pass-internal debug information (e.g. DAG graphs, scheduling decisions) to stderr
+for the listed passes.
 
 Unmatched pass names are silently ignored.
 
+**Global scope**: `DebugPass` is a global setting that applies to all PMs regardless of nesting. No per-PM configuration needed.
+
 ---
 
-## `StinkyTofuPassOrderSnapshotJson`
+## `StinkyTofuEnableRemarks`
 
-File path for before/after instruction-order JSON consumed by `tools/stinkytofu-analysis`. When empty (default), no snapshot is written. The passes recorded are controlled by `StinkyTofuDebugPass`.
+Enables LLVM-style optimization remarks on stderr. Unlike `PASS_DEBUG` (which targets compiler developers), remarks are designed for **kernel developers** who want to understand the quality of generated code without reading raw IR.
 
-Note: multiple kernels may overwrite the same file unless you use a unique path per build.
+Currently the only remark-emitting pass is `LoopRegionRemarkPass`, which reports per-loop:
 
-**Global scope**: `DebugPass` is a global setting that applies to all PMs regardless of nesting. No per-PM configuration needed.
+| Metric | What it means |
+|--------|---------------|
+| **Region count** | Number of contiguous instruction stretches separated by non-movable side effects. Fewer regions = more scheduling freedom = better performance. |
+| **Boundary causes** | What splits each region: `[wait]` (s_waitcnt), `[store]` (global memory store), `[barrier]`, `[branch]`, or `[untokenized_mem]` (ds_read/ds_write/tensor_load without MemTokenData -- these could potentially be made movable by adding token support). |
+| **s_nop count** | `s_nop` instructions inserted by InsertDelayAluPass, indicating scheduling couldn't hide latency. Reports count and total wasted cycles. |
+| **Branch count** | Branches in the loop body. Too many branches hurt the hardware instruction prefetcher. |
+
+Example output:
+
+```
+analysis: LoopRegionRemark: loop 'loopWithPrefetch' summary: 142 insts, 4 regions, 2 s_nop (5 wasted cycles), 3 branches
+analysis: LoopRegionRemark:   BB 'loopWithPrefetch_body': 4 regions, 3 boundaries:
+analysis: LoopRegionRemark:     [wait] s_waitcnt_vscnt (inst #12)
+analysis: LoopRegionRemark:     [barrier] s_barrier (inst #25)
+analysis: LoopRegionRemark:     [wait] s_waitcnt_lgkmcnt (inst #38)
+analysis: LoopRegionRemark:   BB 'loopWithPrefetch_body': 2 s_nop instructions (5 wasted cycles)
+```
+
+**What to do with the output:**
+
+- **High region count**: Look at the `[untokenized_mem]` boundaries -- these are memory operations that lack MemTokenData tokens. Adding token support for these operations would allow the DAG scheduler to move them freely, merging regions.
+- **s_nop waste**: Indicates the scheduler couldn't hide instruction latency. Consider reordering independent work to fill the gaps.
+- **Many branches**: Consider loop restructuring to reduce branch pressure on the instruction prefetcher.
 
 ---
 
@@ -97,7 +121,8 @@ String values require both outer single quotes and inner double quotes (`'Key="v
 ```bash
 Tensile.sh config.yaml output/ --global-parameters StinkyTofuOptLevel=3 StinkyTofuDebugLevel=2
 Tensile.sh config.yaml output/ --global-parameters StinkyTofuOptLevel=3 'StinkyTofuPrintAfterPass="CFG Builder, StinkyDAGSchedulerPass"'
-Tensile.sh config.yaml output/ --global-parameters StinkyTofuOptLevel=3 'StinkyTofuDebugPass="StinkyDAGSchedulerPass"' 'StinkyTofuPassOrderSnapshotJson="dag.json"'
+Tensile.sh config.yaml output/ --global-parameters StinkyTofuOptLevel=3 'StinkyTofuDebugPass="StinkyDAGSchedulerPass"'
+Tensile.sh config.yaml output/ --global-parameters StinkyTofuOptLevel=3 StinkyTofuEnableRemarks=1
 ```
 
 ### Via YAML
@@ -108,11 +133,11 @@ GlobalParameters:
   StinkyTofuDebugLevel: 2
   StinkyTofuPrintAfterPass: "CFG Builder, StinkyDAGSchedulerPass"
   StinkyTofuDebugPass: "StinkyDAGSchedulerPass"
-  StinkyTofuPassOrderSnapshotJson: "dag.json"
+  StinkyTofuEnableRemarks: 1
 ```
 
 ---
 
 ## Scope
 
-These parameters apply to the **Tensile/KernelWriter integration path only** -- they have no effect on `stinkytofu-opt` (see [stinkytofu-opt README](../../tools/stinkytofu-opt/README.md)).
+These parameters apply to the **Tensile/KernelWriter integration path**. For `stinkytofu-opt`, use the equivalent CLI flags (e.g. `--remarks`). See [stinkytofu-opt README](../../tools/stinkytofu-opt/README.md).
