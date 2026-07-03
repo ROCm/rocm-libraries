@@ -47,11 +47,7 @@
 #endif
 
 THRUST_NAMESPACE_BEGIN
-namespace system
-{
-namespace hip
-{
-namespace detail
+namespace system::hip::detail
 {
 inline THRUST_HOST_DEVICE void terminate_with_message(const char* message)
 {
@@ -61,7 +57,5 @@ inline THRUST_HOST_DEVICE void terminate_with_message(const char* message)
 #endif
   ::internal::terminate();
 }
-} // namespace detail
-} // namespace hip
-} // namespace system
+} // namespace system::hip::detail
 THRUST_NAMESPACE_END
