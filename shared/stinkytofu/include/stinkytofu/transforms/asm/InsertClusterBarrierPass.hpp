@@ -29,7 +29,6 @@
 namespace stinkytofu {
 class Pass;
 
-STINKYTOFU_EXPORT std::unique_ptr<Pass> createInsertClusterBarrierPass(int pgrValue = 1,
-                                                                       int plrValue = 1);
+STINKYTOFU_EXPORT std::unique_ptr<Pass> createInsertClusterBarrierPass(int pgrValue = 1);
 
 }  // namespace stinkytofu
