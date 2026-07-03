@@ -12,6 +12,7 @@
 #include <hipdnn_frontend/attributes/ConvolutionWgradAttributes.hpp>
 #include <hipdnn_frontend/attributes/PointwiseAttributes.hpp>
 #include <nanobind/nanobind.h>
+#include <nanobind/stl/array.h>
 #include <nanobind/stl/optional.h>
 #include <nanobind/stl/shared_ptr.h>
 #include <nanobind/stl/string.h>
@@ -107,7 +108,11 @@ void graphBindings(nb::module_& m)
             nb::arg("engine_id"),
             "Get behavior notes for an engine applicable to the built operation graph.")
         .def("check_support", &graph::Graph::check_support)
-        .def("build_plans", &graph::Graph::build_plans)
+        .def("build_plans",
+             &graph::Graph::build_plans,
+             nb::arg("policy") = BuildPlanPolicy::HEURISTICS_CHOICE,
+             "Finalize execution plans. HEURISTICS_CHOICE compiles only the "
+             "active plan; ALL compiles every plan.")
         .def(
             "get_workspace_size",
             [](const graph::Graph& g) {

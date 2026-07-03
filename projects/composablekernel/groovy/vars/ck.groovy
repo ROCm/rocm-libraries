@@ -50,6 +50,28 @@ def setGithubStatus(String context, String state, String description) {
     }
 }
 
+// Retry a flaky git network operation a few times with backoff. Handles
+// momentary DNS/connectivity blips (e.g. "Could not resolve host: github.com")
+// that would otherwise fail the whole build. Wrap each network-touching git
+// step (ref-repo clone/update, SCM checkout) so a transient blip retries
+// instead of failing the build. If all attempts fail, the node likely can't
+// reach github at all, so escalate to a NodeFault: runOnHealthyNode then
+// excludes this node and reruns the stage on another one.
+def gitNetRetry(String label, Closure body) {
+    int maxAttempts = 3
+    for (int i = 1; i <= maxAttempts; i++) {
+        try { body(); return }
+        catch (e) {
+            if (i == maxAttempts) {
+                echo "${label} failed all ${maxAttempts} attempts on ${env.NODE_NAME}; treating as node fault to reroute to another node: ${e.message}"
+                throw new org.ck.NodeFault("${label}: ${e.message}")
+            }
+            echo "${label} failed (attempt ${i}/${maxAttempts}) on ${env.NODE_NAME}, retrying in 15s: ${e.message}"
+            sleep(time: 15, unit: 'SECONDS')
+        }
+    }
+}
+
 def cloneUpdateRefRepo() {
     def refRepoPath = "/var/jenkins/ref-repo/rocm-libraries"
     def lockLabel = "git ref repo lock - ${env.NODE_NAME}"
@@ -67,7 +89,7 @@ def cloneUpdateRefRepo() {
                 rm -rf ${refRepoPath} && mkdir -p ${refRepoPath}
                 git clone --mirror https://github.com/ROCm/rocm-libraries.git ${refRepoPath}
             """
-            sh(script: cloneCommand, label: "clone ref repo")
+            gitNetRetry("clone ref repo") { sh(script: cloneCommand, label: "clone ref repo") }
         }
         echo "Completed git clone, lock released"
     }
@@ -80,7 +102,7 @@ def cloneUpdateRefRepo() {
             git remote prune origin
             git remote update
         """
-        sh(script: fetchCommand, label: "update ref repo")
+        gitNetRetry("update ref repo") { sh(script: fetchCommand, label: "update ref repo") }
     }
     echo "Completed git ref repo fetch, lock released"
 }
@@ -90,7 +112,7 @@ def checkoutComposableKernel()
     //update ref repo
     cloneUpdateRefRepo()
     // checkout project
-    def scmVars = checkout scm
+    gitNetRetry("checkout scm") { checkout scm }
     // getGitHubCommitHash reads SCMRevisionAction recorded before any local merge,
     // giving the true PR branch tip (pullHash) or branch HEAD (hash).
     // Falls back to ORIG_HEAD (pre-merge HEAD set by git merge) when SCMRevisionAction
@@ -431,8 +453,12 @@ def devicesUp() {
     sh(returnStatus:true, script:'test -e /dev/kfd && ls /dev/dri/renderD* >/dev/null 2>&1') == 0
 }
 def cacheWritable() { sh(returnStatus:true, script:'D=${SCCACHE_DIR:-/.cache/sccache}; mkdir -p "$D/probe" 2>/dev/null') == 0 }
-def diskOk(String path='/var/jenkins/workspace', int minGb=5) {
+def diskOk(String path='/var/jenkins', int minGb=5) {
     echo "Preflight: checking disk space on ${path} (minimum ${minGb}GB)"
+    if (sh(returnStatus:true, script:"test -d ${path}") != 0) {
+        echo "Preflight: disk check path ${path} does not exist, skipping"
+        return true
+    }
     sh(returnStdout:true, script:"df --output=avail -BG ${path} | tail -1 | tr -dc '0-9'").trim().toInteger() >= minGb
 }
 
@@ -442,11 +468,13 @@ def gpuUsable(String image) { sh(returnStatus:true, script:"docker run --rm --de
 // Fail fast with a NodeFault if this agent is unfit to build. Host-only — no image
 // required. Image/registry/container faults are classified in the body by pullImage
 // and the in-container GPU check, where the correct conf is available.
-def preflight() {
+def preflight(boolean requireGpu) {
     echo "Preflight: starting node health checks on ${env.NODE_NAME}"
     if (!daemonUp())  throw new org.ck.NodeFault('docker-daemon-down')
-    if (!driverUp())  throw new org.ck.NodeFault('driver-not-loaded')
-    if (!devicesUp()) throw new org.ck.NodeFault('gpu-devices-missing')
+    if (requireGpu) {
+        if (!driverUp())  throw new org.ck.NodeFault('driver-not-loaded')
+        if (!devicesUp()) throw new org.ck.NodeFault('gpu-devices-missing')
+    }
     if (!diskOk())    throw new org.ck.NodeFault('disk-space-low')
     echo "Preflight: all checks passed on ${env.NODE_NAME}"
     // sccache cache-dir writability is not checked here: sccache runs inside
@@ -521,7 +549,10 @@ def runOnHealthyNode(String label, Closure body) {
             node(exclude(label, excluded)) {
                 attemptNode = env.NODE_NAME
                 echo "Node attempt ${attempt + 1}/${nodeAttempts} on ${attemptNode}"
-                preflight()
+                // Derive GPU requirement from the node label: only "nogpu" stages
+                // skip the driver/device checks. A new non-GPU label would need
+                // adding here (otherwise preflight would wrongly demand a GPU).
+                preflight(!label.contains('nogpu'))
                 runInPlace(body, transientRetries)
             }
             return
@@ -905,11 +936,11 @@ def cmake_build(Map conf=[:]){
                 else{ //run all tests
                     if(!setup_args.contains("gfx1250")){
                         echo "Full test suite requested (RUN_ALL_UNIT_TESTS=true or develop branch)"
-                        sh "ninja -j${nt} check"
+                        sh "ninja -j${nt} install check"
                     }
                     else{ //do not run tests on gfx1250, just build everything
                         echo "Building for gfx1250"
-                        sh "ninja -j${nt}"
+                        sh "ninja -j${nt} install"
                     }
                     if (params.RUN_ROCM_CK_TESTS) {
                         sh 'ninja check-rocm-ck'
@@ -970,7 +1001,7 @@ def buildAndTest(Map conf=[:]){
                 timeout(time: 20, unit: 'HOURS')
                 {
                     cmake_build(conf)
-                    if (isMainBuild) {
+                    if (isMainBuild && !conf.get("setup_args","").contains("gfx1250")) {
                         //check whether to run performance tests on this node
                         def arch = check_arch_name()
                         if ( params.RUN_INDUCTOR_TESTS && arch == "gfx90a" ){
@@ -1011,31 +1042,30 @@ def buildAndTest(Map conf=[:]){
                         }
                         if (params.hipTensor_test && arch == "gfx90a" ){
                             // build and test hipTensor on gfx90a node
-                            sh """#!/bin/bash
-                                rm -rf rocm-libraries
-                                git clone --no-checkout --filter=blob:none https://github.com/ROCm/rocm-libraries.git
-                                cd rocm-libraries
-                                git sparse-checkout init --cone
-                                git sparse-checkout set projects/hiptensor
-                                git checkout "${params.hipTensor_branch}"
-                            """
-                            dir("rocm-libraries/projects/hiptensor"){
+                            gitNetRetry("checkout hipTensor") {
                                 sh """#!/bin/bash
-                                    mkdir -p build
-                                    ls -ltr
-                                    CC=hipcc CXX=hipcc cmake -Bbuild . -D CMAKE_PREFIX_PATH="${env.WORKSPACE}/install"
-                                    cmake --build build -- -j
-                                    ctest --test-dir build
+                                    git sparse-checkout add projects/hiptensor
+                                    git checkout "${params.hipTensor_branch}"
                                 """
                             }
+                            sh """#!/bin/bash
+                                cd projects/hiptensor && mkdir -p build &&
+                                CC=hipcc CXX=hipcc cmake -Bbuild . -D CMAKE_PREFIX_PATH="${env.WORKSPACE}/projects/composablekernel/install" &&
+                                cmake --build build -- -j &&
+                                ctest --test-dir build
+                            """
                         }
                     }
                 }
             }
             setGithubStatus("${env.STAGE_NAME}", 'success', "Stage ${env.STAGE_NAME} passed")
         }
+        catch (org.ck.NodeFault e)      { throw e }   // reroute handled by runOnHealthyNode
+        catch (org.ck.TransientFault e) { throw e }   // retry handled by runOnHealthyNode
+        catch (org.jenkinsci.plugins.workflow.steps.FlowInterruptedException e) { throw e }  // abort: no status update
         catch (Exception e){
-                throw e   // runOnHealthyNode sets failure status — not here
+                setGithubStatus("${env.STAGE_NAME}", 'failure', "Stage ${env.STAGE_NAME} failed")
+                throw e
         }
         return retimage
 }
@@ -1318,10 +1348,10 @@ def runFullGroupedConvTileTests() {
         setup_args: "NO_CK_BUILD",
         build_type: 'Release',
         execute_cmd: """
-            python3 ../experimental/grouped_convolution_tile_instances/generate_instances.py --mode=profiler && \
-            cmake .. --preset dev-gfx90a -D CK_EXPERIMENTAL_BUILDER=ON && \
-            make -j64 test_grouped_convnd_fwd_tile test_grouped_convnd_bwd_weight_tile && \
+            cmake .. --preset dev-gfx90a -D CK_TILE_DISPATCHER=ON -DDISPATCHER_RULE_SET=tests && \
+            make -j64 test_grouped_convnd_fwd_tile test_grouped_convnd_bwd_weight_tile test_grouped_convnd_bwd_data_tile && \
             ./bin/test_grouped_convnd_bwd_weight_tile && \
+            ./bin/test_grouped_convnd_bwd_data_tile && \
             ./bin/test_grouped_convnd_fwd_tile"""
     )
 }

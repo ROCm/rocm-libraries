@@ -132,6 +132,7 @@ set(DEFAULT_GPUS
   gfx906
   gfx908
   gfx90a
+  gfx90c
   gfx942
   gfx950
   gfx1030
@@ -224,6 +225,21 @@ endif()
 
 # Optional RCCL backend for single-node multi-GPU communication.
 option(ROCFFT_RCCL_ENABLE "Enable RCCL for optimized single-node multi-GPU communication" OFF)
+
+# Internal (library-side) unit tests.  enable_testing() must be called
+# here, an ancestor of library/src, for ctest to discover them.
+option( ROCFFT_BUILD_INTERNAL_TESTS "Build internal (library-side) unit tests" OFF )
+option( ROCFFT_RUN_INTERNAL_TESTS "Run internal tests as part of the build" OFF )
+# GoogleTest filter for the build-time run; empty = all.
+set( ROCFFT_INTERNAL_TESTS_FILTER "" CACHE STRING
+  "GoogleTest filter applied to internal tests run at build time (empty = all)" )
+if( ROCFFT_RUN_INTERNAL_TESTS AND NOT ROCFFT_BUILD_INTERNAL_TESTS )
+  message( FATAL_ERROR
+    "ROCFFT_RUN_INTERNAL_TESTS=ON requires ROCFFT_BUILD_INTERNAL_TESTS=ON." )
+endif()
+if( ROCFFT_BUILD_INTERNAL_TESTS )
+  enable_testing()
+endif()
 
 add_subdirectory( library )
 

@@ -1,0 +1,3 @@
+hsaco_bytes,isa_ds_load,isa_ds_store,isa_global_load,isa_global_store,isa_wmma,max_abs,ok,tflops,us_per_iter,v_lds_stage,variant
+13128,4,8,160,64,16,3.0517578125e-05,True,11.032849917389573,389.2890167236328,False,v0_vgather
+13216,132,24,48,64,16,3.0517578125e-05,True,6.230869402220688,689.3046569824219,True,v1_vlds
