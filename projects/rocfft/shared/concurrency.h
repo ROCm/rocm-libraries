@@ -71,5 +71,6 @@ static unsigned int rocfft_concurrency()
         return std::max<unsigned int>(1, std::min(CPU_COUNT(&cpuset), getenv_OMP_NUM_THREADS()));
     }
 #endif
-    return std::max<unsigned int>(1, std::min<unsigned int>(std::thread::hardware_concurrency(), getenv_OMP_NUM_THREADS()));
+    return std::max<unsigned int>(
+        1, std::min<unsigned int>(std::thread::hardware_concurrency(), getenv_OMP_NUM_THREADS()));
 }
