@@ -105,6 +105,11 @@ void typesBindings(nb::module_& m)
         .value("SUPPORTS_EXECUTION_PLAN_SERIALIZATION",
                BehaviorNote::SUPPORTS_EXECUTION_PLAN_SERIALIZATION);
 
+    // Bind BuildPlanPolicy enum
+    nb::enum_<BuildPlanPolicy>(m, "BuildPlanPolicy")
+        .value("HEURISTICS_CHOICE", BuildPlanPolicy::HEURISTICS_CHOICE)
+        .value("ALL", BuildPlanPolicy::ALL);
+
     // Bind ErrorCode enum
     nb::enum_<ErrorCode>(m, "ErrorCode")
         .value("OK", ErrorCode::OK)
