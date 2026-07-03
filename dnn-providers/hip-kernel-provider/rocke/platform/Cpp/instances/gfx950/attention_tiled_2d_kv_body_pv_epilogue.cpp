@@ -780,7 +780,10 @@ rocke_kernel_def_t* rocke_gfx950_attn2d_emit_epilogue(rocke_gfx950_attn2d_build_
             rocke_value_t* op_mask_pos = rocke_b_cmp_lt(b, op_pos_t, ctx->cur_batch_q_len);
             rocke_value_t* op_mask_qh
                 = rocke_b_cmp_lt(b, op_qh_t, rocke_b_const_i32(b, ctx->NUM_QH));
-            rocke_value_t* op_mask_t = rocke_b_land(b, op_mask_pos, op_mask_qh);
+            rocke_value_t* op_mask_inner = rocke_b_land(b, op_mask_pos, op_mask_qh);
+            rocke_value_t* op_mask_vr
+                = rocke_b_cmp_lt(b, q_row_t, rocke_b_const_i32(b, ctx->VALID_ROWS));
+            rocke_value_t* op_mask_t = rocke_b_land(b, op_mask_inner, op_mask_vr);
             rocke_value_t* out_base_t = NULL;
             rocke_value_t* inv_l_t;
             rocke_value_t* l_nonzero_t;
@@ -866,7 +869,10 @@ rocke_kernel_def_t* rocke_gfx950_attn2d_emit_epilogue(rocke_gfx950_attn2d_build_
                 rocke_value_t* mask_pos = rocke_b_cmp_lt(b, op_pos32_base, ctx->cur_batch_q_len);
                 rocke_value_t* mask_qh
                     = rocke_b_cmp_lt(b, op_qh32_base, rocke_b_const_i32(b, ctx->NUM_QH));
-                op_mask32_base = rocke_b_land(b, mask_pos, mask_qh);
+                rocke_value_t* mask_inner = rocke_b_land(b, mask_pos, mask_qh);
+                rocke_value_t* mask_vr
+                    = rocke_b_cmp_lt(b, OUT_ROW_BASE32, rocke_b_const_i32(b, ctx->VALID_ROWS));
+                op_mask32_base = rocke_b_land(b, mask_inner, mask_vr);
             }
             in_names[0] = coord_names[0];
             in_names[1] = coord_names[1];
@@ -974,7 +980,10 @@ rocke_kernel_def_t* rocke_gfx950_attn2d_emit_epilogue(rocke_gfx950_attn2d_build_
         {
             rocke_value_t* mask_pos = rocke_b_cmp_lt(b, op_pos, ctx->cur_batch_q_len);
             rocke_value_t* mask_qh = rocke_b_cmp_lt(b, op_qh, rocke_b_const_i32(b, ctx->NUM_QH));
-            op_mask = rocke_b_land(b, mask_pos, mask_qh);
+            rocke_value_t* mask_inner = rocke_b_land(b, mask_pos, mask_qh);
+            rocke_value_t* mask_vr
+                = rocke_b_cmp_lt(b, OUT_ROW_BASE, rocke_b_const_i32(b, ctx->VALID_ROWS));
+            op_mask = rocke_b_land(b, mask_inner, mask_vr);
         }
         in_names[0] = coord_names[0];
         in_names[1] = coord_names[1];
