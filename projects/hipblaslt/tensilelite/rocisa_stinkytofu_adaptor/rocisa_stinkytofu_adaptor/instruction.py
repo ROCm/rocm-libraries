@@ -2824,6 +2824,34 @@ VMulPKF32 = _make_scalar_alu_class("VMulPKF32", "v_pk_mul_f32", InstType.INST_F3
 VSubCoU32 = _make_scalar_alu_class("VSubCoU32", "v_sub_co_u32", InstType.INST_U32)
 # logicalIR: VMacF32
 VMacF32 = _make_scalar_alu_class("VMacF32", "v_fmac_f32", InstType.INST_F32)
+
+
+class VDualFMACF32(CommonInstruction):
+    """VOPD dual-issue FMA: two independent v_fmac_f32 in one slot."""
+
+    def __init__(self, dstX, src0X, src1X, dstY, src0Y, src1Y, comment=""):
+        super().__init__(InstType.INST_F32, dstX, [src0X, src1X, src0Y, src1Y], comment=comment)
+        self.dst1 = dstY
+        self.setInst("v_dual_fmac_f32")
+
+    def getArgStr(self) -> str:
+        dstX_s = self.dst.toString() if hasattr(self.dst, "toString") else str(self.dst)
+        s0X = self.srcs[0].toString() if hasattr(self.srcs[0], "toString") else str(self.srcs[0])
+        s1X = self.srcs[1].toString() if hasattr(self.srcs[1], "toString") else str(self.srcs[1])
+        dstY_s = self.dst1.toString() if hasattr(self.dst1, "toString") else str(self.dst1)
+        s0Y = self.srcs[2].toString() if hasattr(self.srcs[2], "toString") else str(self.srcs[2])
+        s1Y = self.srcs[3].toString() if hasattr(self.srcs[3], "toString") else str(self.srcs[3])
+        return f"{dstX_s}, {s0X}, {s1X} :: v_dual_fmac_f32 {dstY_s}, {s0Y}, {s1Y}"
+
+    def getSrcParams(self):
+        params = list(self.srcs)
+        if self.dst is not None:
+            params.append(self.dst)
+        if self.dst1 is not None:
+            params.append(self.dst1)
+        return params
+
+
 # logicalIR: VDot2CF32F16
 VDot2CF32F16 = _make_ternary_class("VDot2CF32F16", "v_dot2_c_f32_f16", InstType.INST_F32)
 # logicalIR: VDot2CF32BF16
