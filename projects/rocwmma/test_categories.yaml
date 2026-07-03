@@ -72,3 +72,31 @@ test_categories:
     # review thread for context.
     labels:
       - "full"
+
+  ffm-quick:
+    description: "FFM simulator tests - smoke-mode unit tests (target: < 120 min)"
+    test_patterns:
+      - "regression_tests"
+      - "vector_test smoke"
+      - "vector_util_test smoke"
+      - "vector_iterator_test smoke"
+      - "tuple_test smoke"
+      - "float_test smoke"
+      - "pack_util_test smoke"
+      - "io_traits_test smoke"
+      - "io_shape_test smoke"
+      - "cross_lane_ops_test smoke"
+      - "fill_fragment_test smoke"
+      - "transforms_test smoke"
+      - "layout_test smoke"
+      - "layout_traits_test smoke"
+    # ffm-full is an alias of ffm-quick: tests labeled here are picked up
+    # by both `ctest -L ffm-quick` and `ctest -L ffm-full`. There is no
+    # separate ffm-full category entry at the moment.
+    labels:
+      - "ffm-quick"
+      - "ffm-full"
+
+execution_settings:
+  category_timeouts:
+    ffm-quick: 7200       # 2 hours (FFM simulator budget)
