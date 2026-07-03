@@ -52,6 +52,7 @@ BOOL_TO_INT_PARAMS = [
     "UsePLRPack",
     # globalParameters (int defaults)
     "BoundsCheck",
+    "DirectToLdsMetadata"
 ]
 
 # Group B: Int -> Bool
@@ -59,8 +60,10 @@ BOOL_TO_INT_PARAMS = [
 # bool defaults, or globalParameters bool defaults) but YAMLs have 0/1.
 INT_TO_BOOL_PARAMS = [
     # validParameters (solution-side)
+    "Activation",
     "ActivationAlt",
     "ActivationFuncCall",
+    "BufferStore",
     "ConvertAfterDS",
     "DirectToVgprA",
     "DirectToVgprB",
