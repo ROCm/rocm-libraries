@@ -4,14 +4,21 @@
 // hipblaslt-cotenant-kernel: a persistent, compute-free kernel that occupies a fixed
 // number of CUs, used to benchmark hipBLASLt under CU contention.
 //
-// Occupancy is pinned to one workgroup per CU by reserving just over half of
-// the per-CU LDS as dynamic shared memory: with > LDS/2 per block the runtime
-// can fit only a single block on each CU (this is the runtime equivalent of
-// TensileLite forcing MaxOccupancy: 1 via the LDS limiter). The reservation is
-// sized from a runtime device query, so no per-arch constants are needed.
+// Occupancy is pinned to one workgroup per CU AND the CU is made exclusive by
+// reserving the ENTIRE per-CU LDS as dynamic shared memory for that one block.
+// Two consequences, both from a single runtime device query (no per-arch
+// constants): (1) a second cotenant block can't fit, so a grid of N workgroups
+// lands on exactly N CUs; (2) zero LDS remains, so the hardware can't
+// co-schedule any main-kernel workgroup onto a cotenant-occupied CU either
+// (every hipBLASLt GEMM uses LDS). N is therefore an exact count of CUs removed
+// from the main kernel, not merely "one competing block per CU".
 //
-// A grid of N workgroups therefore lands on exactly N CUs; the kernel body just
-// parks each wave with s_sleep until the host kills the process.
+// (Reserving only > half the LDS still pins the cotenant to 1 block/CU, but
+// leaves ~half the LDS free — enough for a low-LDS main kernel to co-reside on
+// the same CU and run unaffected, silently under-reporting contention. Full-LDS
+// closes that gap.)
+//
+// The kernel body just parks each wave with s_sleep until the host kills it.
 //
 // Each workgroup bumps a system-scope atomic counter in host-pinned memory at
 // entry; the host waits until all N have reported before printing READY. This
@@ -81,17 +88,23 @@ int main(int argc, char** argv)
         return 1;
     }
 
-    // Force one workgroup per CU by reserving more than half the CU's LDS: with
-    // > LDS/2 reserved per block, a second block can never fit alongside the
-    // first. Round up to the 256-byte LDS allocation granularity so the hardware
-    // cannot quantize the request back down to <= half.
+    // Reserve the ENTIRE per-CU LDS for this one block, so (a) a second cotenant
+    // block can't fit (exactly one workgroup per CU) and (b) zero LDS remains for
+    // any main-kernel workgroup, making the CU exclusive. hipFuncSetAttribute may
+    // request up to SharedMemPerBlockOptin, which equals the per-CU total on
+    // gfx942/gfx950, so a single block can legally take all of it. If a device
+    // caps the per-block optin below the per-CU total, reserve the optin max (the
+    // largest a single block may hold) and accept whatever sliver remains; the
+    // occupancy check below still enforces exactly one block per CU.
     int lds_per_cu = 0;
     HIP_CHECK(hipDeviceGetAttribute(
         &lds_per_cu, hipDeviceAttributeMaxSharedMemoryPerMultiprocessor, dev));
-    constexpr int lds_granule = 256;
-    const int     half_lds    = lds_per_cu / 2;
-    // Smallest granule-aligned size strictly greater than half the LDS.
-    const int     reserve     = (half_lds / lds_granule + 1) * lds_granule;
+    int optin = 0;
+    HIP_CHECK(hipDeviceGetAttribute(&optin, hipDeviceAttributeSharedMemPerBlockOptin, dev));
+    const int max_block_lds = (optin > 0 && optin < lds_per_cu) ? optin : lds_per_cu;
+    // Round down to the 256-byte LDS granule so a non-aligned max can't be
+    // rounded *up* past the per-block limit and fail the launch.
+    const int reserve = (max_block_lds / 256) * 256;
     HIP_CHECK(hipFuncSetAttribute(reinterpret_cast<const void*>(&busy_spin),
                                   hipFuncAttributeMaxDynamicSharedMemorySize,
                                   reserve));

@@ -28,13 +28,20 @@ it fails to start with a `libomp.so` error, export
 
 ## How it works
 
-`hipblaslt-cotenant-kernel` is a persistent, compute-free kernel. It pins itself to one
-workgroup per CU by reserving just over half of the per-CU LDS as dynamic shared
-memory — the runtime then fits only a single block on each CU. A grid of `N`
-workgroups therefore occupies exactly `N` CUs, leaving the rest for the
-benchmarked command. The reservation is sized from a runtime device query, so no
-per-architecture constants are needed (this is the runtime equivalent of
-TensileLite forcing `MaxOccupancy: 1` through its LDS limiter).
+`hipblaslt-cotenant-kernel` is a persistent, compute-free kernel. It reserves the
+**entire** per-CU LDS as dynamic shared memory for a single block, sized from a
+runtime device query (no per-architecture constants). This does two things at
+once: only one cotenant block fits per CU (so a grid of `N` workgroups occupies
+exactly `N` CUs), and **zero LDS remains** for anything else — so the hardware
+cannot co-schedule a benchmarked-kernel workgroup onto a cotenant-occupied CU
+either. `N` is therefore an exact count of CUs *removed* from the benchmarked
+command, not merely "one competing block per CU".
+
+Reserving only *half* the LDS still pins the cotenant to one block per CU, but
+leaves ~half the LDS free — enough for a low-LDS kernel (e.g. a shallow-`K` GEMM)
+to co-reside on a cotenant CU and run unaffected, silently under-reporting
+contention. Full-LDS reservation closes that gap; on gfx942/gfx950 it is
+permitted because a single block may take all of the per-CU LDS.
 
 To confirm the kernel is actually executing (not just that a GPU context
 exists), each workgroup increments a system-scope atomic counter in host-pinned

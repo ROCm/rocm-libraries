@@ -144,6 +144,13 @@ def wait_ready(proc, log_handle, log_path, wait_s):
 
 
 def main():
+    # Route SIGTERM through the same cleanup path Ctrl-C already uses, so an
+    # external `kill` of this process still tears the cotenant down.
+    def _sigterm(_signum, _frame):
+        raise KeyboardInterrupt
+
+    signal.signal(signal.SIGTERM, _sigterm)
+
     ap = argparse.ArgumentParser(
         description="Run a command under CU contention from a busy cotenant kernel.",
         epilog="All options must precede `--`; everything after it is the command, "
@@ -246,11 +253,13 @@ def main():
     except OSError as e:
         sys.exit(f"ERROR: cannot write log to {log_path} ({e.strerror}); pass --log PATH.")
     with log, open(log_path, "r") as log_reader:
+        # No start_new_session: keep the cotenant in this process's group so
+        # terminal signals (SIGINT/SIGHUP) reach it directly even if our cleanup
+        # never runs. It is not a group leader, so cleanup uses os.kill, not killpg.
         cotenant = subprocess.Popen(
             [str(binary), str(args.cus)],
             stdout=log,
             stderr=subprocess.STDOUT,
-            start_new_session=True,
             env=env,
         )
         try:
@@ -262,11 +271,11 @@ def main():
         finally:
             if cotenant.poll() is None:
                 try:
-                    os.killpg(cotenant.pid, signal.SIGTERM)
+                    os.kill(cotenant.pid, signal.SIGTERM)
                     try:
                         cotenant.wait(timeout=5)
                     except subprocess.TimeoutExpired:
-                        os.killpg(cotenant.pid, signal.SIGKILL)
+                        os.kill(cotenant.pid, signal.SIGKILL)
                 except ProcessLookupError:
                     pass  # cotenant exited between the poll and the signal
 
