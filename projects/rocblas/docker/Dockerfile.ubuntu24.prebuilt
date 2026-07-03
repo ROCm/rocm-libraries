@@ -46,16 +46,6 @@ RUN apt-get update && apt-get install -y \
     llvm-20 \
     && rm -rf /var/lib/apt/lists/*
 
-# Ubuntu's libmsgpack-dev (above) only ships the C library; Tensile's CMake does
-# find_package(msgpackc-cxx), which needs the C++ header library's CMake config.
-# That package isn't in noble, so build it from source (same cpp-3.0.1 ref that
-# install.sh uses) to provide msgpack-cxx-config.cmake under /usr/local.
-RUN git clone --depth 1 -b cpp-3.0.1 https://github.com/msgpack/msgpack-c.git /tmp/msgpack-c \
-    && cmake -S /tmp/msgpack-c -B /tmp/msgpack-c/build \
-        -DMSGPACK_BUILD_TESTS=OFF -DMSGPACK_BUILD_EXAMPLES=OFF \
-    && cmake --build /tmp/msgpack-c/build --target install \
-    && rm -rf /tmp/msgpack-c
-
 # Use update-alternatives to set default versions
 RUN update-alternatives --install /usr/bin/clang-format clang-format /usr/bin/clang-format-18 100
 RUN update-alternatives --install /usr/bin/clang-tidy clang-tidy /usr/bin/clang-tidy-20 100
