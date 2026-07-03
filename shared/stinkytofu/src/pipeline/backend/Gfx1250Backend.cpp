@@ -141,15 +141,6 @@ bool buildGfx1250Pipeline(PassManager& pm, StinkyAsmModule& module, const PassBu
 
     // -- kernel --
 
-    // Cluster-barrier insertion (kernel scope) — runs at every OptLevel when
-    // the module opts in. Must precede InsertVgprMsbPass so the new
-    // branches/labels are present when MSB configuration is materialized.
-    if (moduleOptions.ClusterBarrier) {
-        pm.addPass(createInsertClusterBarrierPass(/*isKernelScope=*/true,
-                                                  /*pgrValue=*/moduleOptions.PrefetchGlobalRead,
-                                                  /*plrValue=*/moduleOptions.PrefetchLocalRead));
-    }
-
     if (moduleOptions.EnableESM2) {
         // expertScheduleMode2 region (label_ASM_Start..noLoadLoopBody): wait-alu + mode2
         // lifecycle. Must precede the kernel-wide CFGBuilder — ScopeAdaptor needs the flat
@@ -174,6 +165,16 @@ bool buildGfx1250Pipeline(PassManager& pm, StinkyAsmModule& module, const PassBu
     // its MSB computed for its actual operands (chain-head src C is zeroed, so it must not
     // inherit the loop's src C MSB).
     pm.addPass(createCFGBuilderPass());
+
+    // Cluster-barrier insertion (kernel scope) — runs at every OptLevel when the module
+    // opts in. Placed after the first kernel-wide CFGBuilder so anchor lookup sees the
+    // split CFG, and before RegionClonePass / InsertVgprMsbPass so the new branches/labels
+    // are present when MSB configuration is materialized.
+    if (moduleOptions.ClusterBarrier) {
+        pm.addPass(createInsertClusterBarrierPass(/*pgrValue=*/moduleOptions.PrefetchGlobalRead,
+                                                  /*plrValue=*/moduleOptions.PrefetchLocalRead));
+    }
+
     pm.addPass(createRegionClonePass(moduleOptions.CloneList));
     pm.addPass(createInsertVgprMsbPass());
 
