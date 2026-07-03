@@ -58,7 +58,10 @@ TYPED_TEST(TestGemmBlockScaleWP_FP8_MK_NK, Regular0)
     constexpr int K = 512;
 
     for(int M : Ms)
+    {
+        SCOPED_TRACE(::testing::Message() << "M=" << M << " N=" << N << " K=" << K);
         this->Run(M, N, K);
+    }
 }
 
 TYPED_TEST(TestGemmBlockScaleWP_FP8_MK_NK, ReportedWkvDeterminism)
@@ -75,7 +78,11 @@ TYPED_TEST(TestGemmBlockScaleWP_FP8_MK_NK, ReportedWkvDeterminism)
     constexpr int Ks[] = {384, 640, 3968, 4096, 4224};
 
     for(const int K : Ks)
+    {
+        SCOPED_TRACE(::testing::Message() << "M=" << M << " N=" << N << " K=" << K);
+        // Determinism-only large shapes; the next test covers host-reference accuracy.
         this->Run(M, N, K, 0, 1, 8, false);
+    }
 }
 
 TYPED_TEST(TestGemmBlockScaleWP_FP8_MK_NK, Glm52OutOfAllowlistAccuracyAndDeterminism)
@@ -107,7 +114,12 @@ TYPED_TEST(TestGemmBlockScaleWP_FP8_MK_NK, Glm52OutOfAllowlistAccuracyAndDetermi
 
     for(const auto& shape : shapes)
     {
+        const int M = std::get<0>(shape);
+        const int N = std::get<1>(shape);
+        const int K = std::get<2>(shape);
+        SCOPED_TRACE(::testing::Message() << "M=" << M << " N=" << N << " K=" << K);
+
         // Compare to host reference and repeat the device run.
-        this->Run(std::get<0>(shape), std::get<1>(shape), std::get<2>(shape), 0, 1, 4, true);
+        this->Run(M, N, K, 0, 1, 4, true);
     }
 }

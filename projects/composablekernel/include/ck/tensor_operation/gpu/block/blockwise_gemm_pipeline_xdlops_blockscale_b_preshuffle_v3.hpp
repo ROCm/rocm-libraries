@@ -417,6 +417,9 @@ struct BlockwiseGemmXdlops_pipeline_blockscale_bpreshuffle_v3<BlockGemmPipelineS
         ignore = b_block_desc;
         ignore = b_block_buf;
 
+        static_assert(sizeof(AccDataType) == 4 && is_floating_point<AccDataType>::value,
+                      "bpreshuffle accumulator anchor requires 32-bit float AccDataType");
+
         // The empty asm is a read/write VGPR use of the updated accumulator.
         // It keeps each post-scale accumulator definition visible to the
         // optimizer, which enables determinism for bitwise-stable repeated launches.

@@ -241,6 +241,12 @@ bool profile_gemm_blockscale_weightpreshuffle_impl(int do_verification,
     auto check_row_relative_error =
         [&](const auto& actual, const auto& expected, const std::string& label) {
             // sglang#28685 showed sparse per-row spikes near tile boundaries.
+            constexpr double kReferenceDenominatorFloor = 1.0;
+            // Loose enough for expected FP8 noise, tight enough to catch the
+            // >10% per-row spikes reported for the miscompiled gfx950 path.
+            constexpr double kBadRowRelativeThreshold = 0.1;
+            constexpr int kBadRowSampleLimit          = 16;
+
             double worst_row_rel_max_error = -1;
             int worst_row_rel              = 0;
             int bad_row_count              = 0;
@@ -263,16 +269,17 @@ bool profile_gemm_blockscale_weightpreshuffle_impl(int do_verification,
                         std::max(row_ref_max_abs, std::abs(static_cast<double>(expected_value)));
                 }
 
-                const double row_rel_max_error = row_max_abs_error / std::max(row_ref_max_abs, 1.0);
+                const double row_rel_max_error =
+                    row_max_abs_error / std::max(row_ref_max_abs, kReferenceDenominatorFloor);
                 if(row_rel_max_error > worst_row_rel_max_error)
                 {
                     worst_row_rel_max_error = row_rel_max_error;
                     worst_row_rel           = m;
                 }
-                if(row_rel_max_error > 0.1)
+                if(row_rel_max_error > kBadRowRelativeThreshold)
                 {
                     ++bad_row_count;
-                    if(sampled_bad_row_count < 16)
+                    if(sampled_bad_row_count < kBadRowSampleLimit)
                     {
                         if(!bad_row_sample.empty())
                         {
@@ -409,37 +416,35 @@ bool profile_gemm_blockscale_weightpreshuffle_impl(int do_verification,
 
             if(do_verification)
             {
+                bool current_pass = true;
 #if defined CK_ENABLE_FP8
                 // set softer tolerances for fp8
                 if constexpr(is_same_v<A0DataType, f8_t> || is_same_v<B0DataType, f8_t> ||
                              is_same_v<EDataType, f8_t>)
                 {
-                    std::string msg   = "Error: Incorrect results!";
-                    double rtol       = 5e-2;
-                    double atol       = 5e-2;
-                    bool current_pass = ck::utils::check_err(
+                    std::string msg = "Error: Incorrect results!";
+                    double rtol     = 5e-2;
+                    double atol     = 5e-2;
+                    current_pass    = ck::utils::check_err(
                         e_m_n_device_result, e_m_n_host_result, msg, rtol, atol);
-                    current_pass = check_row_relative_error(e_m_n_device_result,
-                                                            e_m_n_host_result,
-                                                            "Reference row-relative check") &&
-                                   current_pass;
-                    pass = pass & current_pass;
-                    if(!current_pass)
-                    {
-                        std::cout << op_ptr->GetTypeString() << " failed" << std::endl;
-                    }
                 }
                 else
                 {
 #endif
-                    pass = pass & ck::utils::check_err(e_m_n_device_result, e_m_n_host_result);
-                    if(!pass)
-                    {
-                        std::cout << op_ptr->GetTypeString() << " failed" << std::endl;
-                    }
+                    current_pass = ck::utils::check_err(e_m_n_device_result, e_m_n_host_result);
 #if defined CK_ENABLE_FP8
                 }
 #endif
+                // Keep sparse per-row coverage independent of the dtype tolerance branch.
+                current_pass = check_row_relative_error(e_m_n_device_result,
+                                                        e_m_n_host_result,
+                                                        "Reference row-relative check") &&
+                               current_pass;
+                pass = pass & current_pass;
+                if(!current_pass)
+                {
+                    std::cout << op_ptr->GetTypeString() << " failed" << std::endl;
+                }
 
                 if(do_log)
                 {
@@ -454,6 +459,8 @@ bool profile_gemm_blockscale_weightpreshuffle_impl(int do_verification,
 
             for(int repeat = 1; repeat < determinism_check; ++repeat)
             {
+                // These extra single-launch repeats sample the fixed-shape instability.
+                // Use a bit-exact memcmp; a tolerance compare would hide hash drift.
                 c_device_buf.SetZero();
                 invoker_ptr->Run(argument_ptr.get(), StreamConfig{nullptr, false, 0, 0, 1});
                 c_device_buf.FromDevice(e_m_n_device_result.mData.data());
