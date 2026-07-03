@@ -218,7 +218,24 @@ inline LoadResult loadIntegrationTestBundle(const std::filesystem::path& jsonPat
     //    for a graph-only bundle).
     IntegrationTestBundle bundle;
     bundle.graphBuffer = builder.Release();
-    bundle.outputTensorUids = hipdnn_test_sdk::utilities::getOutputTensorUidsFromGraph(graphJson);
+
+    // getOutputTensorUidsFromGraph collects every node's output UIDs, including
+    // virtual (inter-node) tensors. The engine never writes to virtual tensors —
+    // they are internal to fused kernels — so comparing them would always fail
+    // against the sentinel NaN fill.
+    {
+        auto allOutputUids = hipdnn_test_sdk::utilities::getOutputTensorUidsFromGraph(graphJson);
+        const auto wrapper = bundle.graphWrapper();
+        const auto& tensorMap = wrapper.getTensorMap();
+        for(const int64_t uid : allOutputUids)
+        {
+            auto it = tensorMap.find(uid);
+            if(it == tensorMap.end() || !it->second->virtual_())
+            {
+                bundle.outputTensorUids.push_back(uid);
+            }
+        }
+    }
 
     // 4. Metadata is mandatory ONLY for golden bundles — those shipping output
     //    .bin blobs. Metadata (arch lock, provenance, seed) exists to validate

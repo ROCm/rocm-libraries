@@ -501,12 +501,6 @@ void IntegrationBundleVerificationHarness::compareEach(OutputTensors& engineOutp
         float rtol = 0.0f;
         tolerance::resolveTolerance(wrapper, dataType, currentTestName(), atol, rtol);
 
-        if(tomlOverride)
-        {
-            atol = tomlOverride->atol;
-            rtol = tomlOverride->rtol;
-        }
-
         compareOutputTensor(uid, *attrs, dataType, expectedTensor, actualTensor, atol, rtol);
     }
 }

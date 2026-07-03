@@ -3,6 +3,7 @@
 
 #pragma once
 
+#include <algorithm>
 #include <cstdint>
 #include <memory>
 #include <random>
@@ -313,8 +314,11 @@ inline void synthesizeInputs(const hipdnn_flatbuffers_sdk::data_objects::Graph& 
         setInitDefaults(*graph.nodes()->Get(i), config);
     }
 
+    auto sortedUids = ownedUids;
+    std::sort(sortedUids.begin(), sortedUids.end());
+
     std::mt19937 rng(config.getSeedEntropy());
-    for(const int64_t uid : ownedUids)
+    for(const int64_t uid : sortedUids)
     {
         unsigned int seed = config.resolveSeed(uid).value_or(static_cast<unsigned int>(rng()));
         fill(*inputs.at(uid), config.get(uid), seed);

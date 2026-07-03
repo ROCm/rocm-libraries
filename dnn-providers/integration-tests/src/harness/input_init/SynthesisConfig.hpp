@@ -86,11 +86,6 @@ public:
         return _inits;
     }
 
-    const std::unordered_map<int64_t, unsigned int>& seeds() const
-    {
-        return _seeds;
-    }
-
     TensorInit get(int64_t uid) const
     {
         auto it = _inits.find(uid);
@@ -115,7 +110,7 @@ public:
 
     SynthesisConfig& seed(int64_t uid, unsigned int value)
     {
-        _seeds[uid] = value;
+        _inits[uid].seed = value;
         return *this;
     }
 
@@ -139,16 +134,15 @@ public:
 
     std::optional<unsigned int> resolveSeed(int64_t uid) const
     {
-        if(auto it = _seeds.find(uid); it != _seeds.end())
+        if(auto it = _inits.find(uid); it != _inits.end() && it->second.seed.has_value())
         {
-            return it->second;
+            return it->second.seed;
         }
         return _fixedSeed;
     }
 
 private:
     std::unordered_map<int64_t, TensorInit> _inits;
-    std::unordered_map<int64_t, unsigned int> _seeds;
     std::optional<unsigned int> _fixedSeed;
     unsigned int _seedEntropy = K_DEFAULT_SEED_ENTROPY;
 };
