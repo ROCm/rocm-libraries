@@ -1,7 +1,10 @@
 # Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
 # SPDX-License-Identifier: MIT
 
-"""Authoritative prefill-2D benchmark: LIVE Triton vs CK DSL variant sweep.
+"""Authoritative prefill-2D benchmark: LIVE Triton vs CK DSL variant sweep (gfx942).
+
+gfx942 (CDNA3 / MI300X) sibling of
+``examples/gfx950/attention/benchmark_prefill2d_live.py``.
 
 Unlike ``benchmark_prefill2d_traces.py`` (which only times CK DSL and joins a
 pre-profiled Triton CSV), this harness:
@@ -10,16 +13,22 @@ pre-profiled Triton CSV), this harness:
     on the same stream + timer as CK DSL (apples-to-apples);
   * sweeps a set of CK DSL 2D kernel variants per shape;
   * checks correctness of every CK DSL variant against the Triton output;
-  * reports, per shape and per bucket (sw / no-sw, bf16 / fp8), the best
+  * reports, per shape and per bucket (sw / no-sw, bf16 / fp16), the best
     correct CK DSL variant and its speedup over Triton.
 
-It is the canonical workbench for closing the prefill-2D gap.
+gfx942 differences vs gfx950:
+  * ``arch="gfx942"`` passed to compile / build / supports helpers.
+  * ``num_sms`` defaults to 120 (MI300X production dispatch value).
+  * The flash-regime combo variant uses ``use_mfma_32x32x8=True`` (the
+    ``mfma_f32_32x32x8_f16`` atom available on gfx942; fp16-only) rather than
+    the gfx950 ``use_mfma_32x32=True`` (``mfma_f32_32x32x16_{f16,bf16}``).
+  * No FP8 KV-cache path (not supported on gfx942).
 
 Run:
 
     export AITER_PATH=<path/to/aiter>
     PYTHONPATH="Python:${AITER_PATH}" \
-      python rocke/library/builders/gfx950/attention/benchmark_prefill2d_live.py \
+      python rocke/library/builders/gfx942/attention/benchmark_prefill2d_live.py \
         --shapes <path/to/unified_attention_shapes.jsonl> \
         --variants prod combo fallback \
         --limit 20
@@ -38,6 +47,8 @@ from typing import Any
 from rocke.assets import shape_utils_dir
 
 DEFAULT_SHAPE_UTILS = shape_utils_dir()
+
+ARCH = "gfx942"
 
 
 # --------------------------------------------------------------------------
@@ -98,26 +109,35 @@ def _gm(vals: list[float]) -> float:
 
 
 # --------------------------------------------------------------------------
-# CK DSL variant specs
+# CK DSL variant specs  (gfx942)
 # --------------------------------------------------------------------------
 def _variant_flags(name: str, *, sliding_window: int, dtype: str, is_fp8: bool) -> dict:
-    """Return the UnifiedAttention2DTiledSpec transposed/opt flags for a variant.
+    """Return the UnifiedAttention2DTiledSpec flags for a gfx942 variant.
 
     Variant grammar (``_`` separated tokens layered on a base):
-      fallback        : plain R4 (16x16x32, no transpose opts), nw4 mw16
-      fallback_nw2    : fallback with num_warps=2
-      combo           : full s1mask + half-local-pv + mask-limit + fast-kv-desc
-      combo_nw2       : combo with num_warps=2 (BLOCK_M=64)
-      combo_t1        : combo with tile_size = 1*block_size (T=32)
-      combo_t4        : combo with tile_size = 4*block_size (T=128)
+      fallback        : narrow 16x16x16 path, nw2 mw16 (matches gfx942 narrow)
+      fallback_nw4    : narrow path with num_warps=4
+      combo           : gfx942 flash-regime (32x32x8 transposed) wide4 path
+      combo_nw1       : flash-regime L4 (WG=64, K single-buffer)
+      combo_nw2       : flash-regime wide2 (BLOCK_M=64)
       combo_earlyv    : combo + use_early_v_schedule
-      r4_t32          : mfma_32x32 + transposed_qk only
+      combo_t1        : combo with tile_mult=1 (T=block_size)
+      combo_t4        : combo with tile_mult=4 (T=4*block_size)
+
+    Notes:
+      * ``use_mfma_32x32x8`` is the gfx942 fp16-only 32x32x8 MFMA atom.
+        The gfx950 script uses ``use_mfma_32x32`` (the wider 32x32x16 atom).
+      * FP8 is not supported on gfx942; ``is_fp8`` is accepted for API
+        compatibility but must be False.
     """
+    if is_fp8:
+        raise ValueError("FP8 is not supported on gfx942")
+
     base = dict(
         num_warps=4,
         block_m_per_warp=32,
         tile_mult=2,  # tile_size = tile_mult * block_size
-        use_mfma_32x32=False,
+        use_mfma_32x32x8=False,
         use_transposed_qk_32x32=False,
         use_transposed_scalar_state=False,
         use_transposed_mask_once=False,
@@ -126,19 +146,23 @@ def _variant_flags(name: str, *, sliding_window: int, dtype: str, is_fp8: bool) 
         use_transposed_mask_limit=False,
         use_fast_paged_kv_desc=False,
         use_early_v_schedule=False,
+        use_k_single_buffer=False,
         waves_per_eu=2,
         use_i64_kv_addr=False,
     )
     toks = name.split("_")
     head = toks[0]
     if head == "fallback":
-        base.update(num_warps=4, block_m_per_warp=16)
-    elif head == "r4" and len(toks) > 1 and toks[1] == "t32":
-        base.update(use_mfma_32x32=True, use_transposed_qk_32x32=True)
-        toks = [head] + toks[2:]
+        base.update(num_warps=2, block_m_per_warp=16)
     elif head == "combo":
+        # gfx942 flash-regime: 32x32x8 transposed-QK (fp16 only).
+        if dtype == "bf16":
+            raise NotImplementedError(
+                "combo variant requires fp16 on gfx942 (use_mfma_32x32x8 is fp16-only)"
+            )
+        # wide4 by default (num_warps=4, BLOCK_M=128 > T=64 => K double-buffered).
         base.update(
-            use_mfma_32x32=True,
+            use_mfma_32x32x8=True,
             use_transposed_qk_32x32=True,
             use_transposed_scalar_state=True,
             use_transposed_mask_once=(sliding_window == 0),
@@ -146,24 +170,23 @@ def _variant_flags(name: str, *, sliding_window: int, dtype: str, is_fp8: bool) 
             use_mfma32_skip_legacy_qreg=True,
             use_transposed_mask_limit=(sliding_window == 0),
             use_fast_paged_kv_desc=True,
-            # Match the production dispatcher: ``_select_2d_waves_per_eu``
-            # returns 4 for the combo family. The harness used to default the
-            # combo to ``waves_per_eu=2`` (the base value below), which builds
-            # an occupancy-starved kernel that does NOT match what production
-            # ships -- it under-reported the combo by ~25% (0.85x vs the
-            # ~1.07x the wpe=4 kernel the dispatcher actually builds gets) on
-            # the long-context multi-seq cohort. The ``_we2`` / ``_we3`` /
-            # ``_wenone`` modifier tokens still override for sweeps.
+            use_k_single_buffer=False,  # double-buffered for wide4
             waves_per_eu=4,
         )
     else:
         raise ValueError(f"unknown variant head {head!r}")
     # modifier tokens
     for t in toks[1:]:
-        if t == "nw2":
-            base["num_warps"] = 2
-        elif t == "nw1":
+        if t == "nw1":
             base["num_warps"] = 1
+            # L4 path: BLOCK_M = 32 <= T=64 => K single-buffer
+            base["use_k_single_buffer"] = True
+        elif t == "nw2":
+            base["num_warps"] = 2
+            # wide2: BLOCK_M=64 <= T=64 => K single-buffer
+            base["use_k_single_buffer"] = True
+        elif t == "nw4":
+            base["num_warps"] = 4
         elif t == "t1":
             base["tile_mult"] = 1
         elif t == "t4":
@@ -182,14 +205,14 @@ def _variant_flags(name: str, *, sliding_window: int, dtype: str, is_fp8: bool) 
             base["waves_per_eu"] = 4
         elif t == "wenone":
             base["waves_per_eu"] = None
-        elif t in ("t32",):
-            pass
+        elif t == "ksb":
+            base["use_k_single_buffer"] = True
         else:
             raise ValueError(f"unknown variant modifier {t!r} in {name!r}")
-    # mw16 cannot use mfma_32x32 transpose path
+    # mw16 cannot use the 32x32 transpose path
     if base["block_m_per_warp"] == 16:
         base.update(
-            use_mfma_32x32=False,
+            use_mfma_32x32x8=False,
             use_transposed_qk_32x32=False,
             use_transposed_scalar_state=False,
             use_transposed_mask_once=False,
@@ -201,7 +224,7 @@ def _variant_flags(name: str, *, sliding_window: int, dtype: str, is_fp8: bool) 
 
 
 class CkVariantBench:
-    def __init__(self, *, compile_backend: str = "llvm", num_sms: int = 256):
+    def __init__(self, *, compile_backend: str = "llvm", num_sms: int = 120):
         self.compile_backend = compile_backend
         self.num_sms = num_sms
         self._launchers: dict[tuple, Any] = {}
@@ -236,8 +259,14 @@ class CkVariantBench:
             build_unified_attention_2d_tiled,
             supports_tiled_2d,
         )
-        from kernels.common.attention_unified import _attn_signature
+        from kernels.common.attention_unified import (
+            _attn_signature,
+            _tiled_2d_impl,
+        )
         from rocke.runtime import KernelLauncher
+
+        # Use the gfx942 spec class (has use_mfma_32x32x8, use_k_single_buffer, etc.)
+        spec_cls, _, _ = _tiled_2d_impl(ARCH)
 
         dtype = "bf16" if shape.q_dtype == "torch.bfloat16" else "fp16"
         problem = self._problem(shape, sliding_window, is_fp8)
@@ -245,7 +274,6 @@ class CkVariantBench:
             variant, sliding_window=sliding_window, dtype=dtype, is_fp8=is_fp8
         )
         tile_size = flags["tile_mult"] * shape.block_size
-        kv_storage_dtype = "fp8e4m3" if is_fp8 else None
         ok, reason = supports_tiled_2d(
             head_size=shape.head_size,
             block_size=shape.block_size,
@@ -256,16 +284,13 @@ class CkVariantBench:
             use_fp8=is_fp8,
             q_dtype=problem.q_dtype,
             num_warps=flags["num_warps"],
-            block_m_per_warp=flags["block_m_per_warp"],
-            kv_storage_dtype=kv_storage_dtype,
             tile_size=tile_size,
-            use_mfma_32x32x8=flags["use_mfma_32x32"],
-            use_transposed_qk_32x32=flags["use_transposed_qk_32x32"],
+            arch=ARCH,
         )
         if not ok:
             raise NotImplementedError(f"supports_tiled_2d: {reason}")
 
-        spec = UnifiedAttention2DTiledSpec(
+        spec = spec_cls(
             head_size=shape.head_size,
             block_size=shape.block_size,
             num_query_heads=shape.num_query_heads,
@@ -281,9 +306,7 @@ class CkVariantBench:
             waves_per_eu=flags["waves_per_eu"],
             tile_size=tile_size,
             block_m_per_warp=flags["block_m_per_warp"],
-            kv_storage_dtype=kv_storage_dtype,
-            use_fp8_mfma_qk=is_fp8,
-            use_mfma_32x32=flags["use_mfma_32x32"],
+            use_mfma_32x32x8=flags["use_mfma_32x32x8"],
             use_transposed_qk_32x32=flags["use_transposed_qk_32x32"],
             use_transposed_scalar_state=flags["use_transposed_scalar_state"],
             use_transposed_mask_once=flags["use_transposed_mask_once"],
@@ -292,12 +315,13 @@ class CkVariantBench:
             use_transposed_mask_limit=flags["use_transposed_mask_limit"],
             use_fast_paged_kv_desc=flags["use_fast_paged_kv_desc"],
             use_early_v_schedule=flags["use_early_v_schedule"],
+            use_k_single_buffer=flags["use_k_single_buffer"],
             use_i64_kv_addr=flags["use_i64_kv_addr"],
         )
         key = (shape.signature, variant, spec.kernel_name(), self.compile_backend)
         if key not in self._launchers:
-            kernel = build_unified_attention_2d_tiled(spec)
-            artifact = compile_kernel(kernel, capture_ir_text=False)
+            kernel = build_unified_attention_2d_tiled(spec, arch=ARCH)
+            artifact = compile_kernel(kernel, arch=ARCH, capture_ir_text=False)
             self._launchers[key] = (
                 KernelLauncher(
                     hsaco=artifact.hsaco,
@@ -305,7 +329,7 @@ class CkVariantBench:
                     signature=_attn_signature(
                         dtype, include_bt_stride=True, include_qq_bias_stride=True
                     ),
-                    cache_key=("prefill2d_live", key),
+                    cache_key=("prefill2d_live_gfx942", key),
                 ),
                 spec,
                 problem,
@@ -388,7 +412,7 @@ def _run_triton_live(shape, data, sliding_window, is_fp8, *, warmup, iters):
                 window_size=window_size,
                 block_table=data["block_tables"],
                 softcap=float(shape.softcap),
-                q_descale=None,  # Q is bf16 in these traces; only K/V are fp8
+                q_descale=None,
                 k_descale=descale,
                 v_descale=descale,
                 alibi_slopes=data["alibi_slopes"],
@@ -412,33 +436,42 @@ def _compare(a, b) -> float:
 def main() -> int:
     ap = argparse.ArgumentParser()
     ap.add_argument("--shapes", nargs="+", type=Path, required=True)
-    ap.add_argument("--dtype", choices=("bf16", "fp16", "all"), default="bf16")
+    ap.add_argument(
+        "--dtype",
+        choices=("bf16", "fp16", "all"),
+        default="bf16",
+        help="gfx942 flash-regime combo is fp16-only; bf16 shapes use the narrow fallback",
+    )
     ap.add_argument(
         "--variants",
         nargs="+",
-        default=["prod", "combo", "fallback"],
-        help="CK DSL variants to sweep: prod combo fallback r4_t32 combo_sw",
+        default=None,
+        help="CK DSL variants to sweep: prod combo combo_nw1 combo_nw2 fallback. "
+        "Defaults to [prod, combo, fallback] for fp16/all, [prod, fallback] for bf16 "
+        "(combo is fp16-only on gfx942).",
     )
     ap.add_argument("--limit", type=int, default=None)
     ap.add_argument("--stride", type=int, default=1, help="subsample every Nth shape")
     ap.add_argument("--iterations", type=int, default=50)
     ap.add_argument("--warmup", type=int, default=10)
     ap.add_argument("--seed", type=int, default=0)
-    # Production paged-KV caches have hundreds of thousands of blocks, so the
-    # KV working set vastly exceeds L2 and attention is HBM-bandwidth-bound.
-    # A small cap makes the cache artificially L2-resident, which understates
-    # CK DSL (its async-DMA KV loads are more bandwidth-efficient than
-    # Triton's, the advantage that only shows once you are HBM-bound). Default
-    # to a production-representative cap. Measured: bf16 cohort 0.90x at
-    # cap=8192 vs 1.11x at cap=65536.
+    # MI300X has 228 CUs; 120 is the production dispatch value used by the
+    # gfx942 attention provider (matches parity_unified_attention.py).
     ap.add_argument("--cap-blocks", type=int, default=65536)
-    ap.add_argument("--num-sms", type=int, default=256)
+    ap.add_argument("--num-sms", type=int, default=120)
     ap.add_argument("--tol", type=float, default=5e-2)
     ap.add_argument("--shape-utils-path", type=Path, default=DEFAULT_SHAPE_UTILS)
     ap.add_argument(
-        "--output-json", type=Path, default=Path("/tmp/prefill2d_live.json")
+        "--output-json", type=Path, default=Path("/tmp/prefill2d_live_gfx942.json")
     )
     args = ap.parse_args()
+
+    # Resolve default variant list: combo is fp16-only, so omit it for bf16 runs.
+    if args.variants is None:
+        if args.dtype == "bf16":
+            args.variants = ["prod", "fallback"]
+        else:
+            args.variants = ["prod", "combo", "fallback"]
 
     import torch
 
@@ -461,6 +494,7 @@ def main() -> int:
     if args.limit is not None:
         shapes = shapes[: args.limit]
     print(f"device: {torch.cuda.get_device_name(0)}")
+    print(f"arch:   {ARCH}")
     print(f"shapes: {len(shapes)}  variants: {args.variants}")
 
     bench = CkVariantBench(num_sms=args.num_sms)
@@ -468,6 +502,11 @@ def main() -> int:
     for i, shape in enumerate(shapes, 1):
         sw = shape.window_size[0] + 1 if shape.window_size[0] >= 0 else 0
         is_fp8 = "float8" in shape.k_dtype
+        if is_fp8:
+            print(
+                f"[{i}/{len(shapes)}] {shape.signature}  SKIP (fp8 not supported on gfx942)"
+            )
+            continue
         tag = f"[{i}/{len(shapes)}] {shape.signature}"
         try:
             data = make_inputs(shape, seed=args.seed, cap_blocks=args.cap_blocks)
@@ -479,9 +518,11 @@ def main() -> int:
             traceback.print_exc()
             continue
 
+        dtype_str = "bf16" if shape.q_dtype == "torch.bfloat16" else "fp16"
         rec = {
             "signature": shape.signature,
             "sliding_window": sw,
+            "dtype": dtype_str,
             "is_fp8": is_fp8,
             "num_seqs": shape.num_seqs,
             "total_q": shape.total_q,
@@ -493,7 +534,6 @@ def main() -> int:
         for v in args.variants:
             try:
                 if v in ("prod", "ck3d"):
-                    # production dispatch via run_unified_attention_torch
                     ck_out, ck_ms, kname = _run_prod(
                         shape,
                         data,
@@ -531,14 +571,17 @@ def main() -> int:
         rec["best_variant"] = best[0] if best else None
         rec["best_speedup"] = best[1] if best else 0.0
         results.append(rec)
-        vs = "  ".join(
-            f"{v}={rec['variants'][v].get('speedup', 0):.2f}x"
-            f"{'' if rec['variants'][v].get('ok') else '!'}"
-            for v in args.variants
-            if "speedup" in rec["variants"][v]
-        )
+
+        def _fmt_variant(v):
+            info = rec["variants"].get(v, {})
+            if "speedup" in info:
+                ok_mark = "" if info.get("ok") else "!"
+                return f"{v}={info['speedup']:.2f}x{ok_mark}"
+            return f"{v}=ERR"
+
+        vs = "  ".join(_fmt_variant(v) for v in args.variants)
         print(
-            f"{tag} sw={sw} fp8={int(is_fp8)} tri={tri_ms * 1000:.1f}us | {vs} | best={rec['best_variant']}={rec['best_speedup']:.2f}x"
+            f"{tag} sw={sw} tri={tri_ms * 1000:.1f}us | {vs} | best={rec['best_variant']}={rec['best_speedup']:.2f}x"
         )
 
     args.output_json.write_text(json.dumps(results, indent=2, default=str))
@@ -546,10 +589,8 @@ def main() -> int:
 
     # summary
     def bucket(r):
-        return (
-            "fp8" if r["is_fp8"] else "bf16",
-            "sw" if r["sliding_window"] else "nosw",
-        )
+        sw_str = "sw" if r["sliding_window"] else "nosw"
+        return (r["dtype"], sw_str)
 
     buckets: dict[tuple, list] = {}
     for r in results:
@@ -558,8 +599,9 @@ def main() -> int:
     for b in sorted(buckets):
         rs = buckets[b]
         best = [r["best_speedup"] for r in rs if r["best_speedup"] > 0]
+        dtype_label, sw_label = b
         print(
-            f"  {b[0]:4s}/{b[1]:4s}  n={len(rs):3d}  best-variant geomean={_gm(best):.3f}x  wins={sum(1 for x in best if x > 1)}/{len(best)}"
+            f"  {dtype_label:4s}  {sw_label:4s}  n={len(rs):3d}  best-variant geomean={_gm(best):.3f}x  wins={sum(1 for x in best if x > 1)}/{len(best)}"
         )
     print("\n=== per-variant geomean (correct shapes only) ===")
     for v in args.variants:
@@ -576,9 +618,21 @@ def main() -> int:
             for r in results
             if v in r["variants"] and r["variants"][v].get("ok") is False
         )
-        print(
-            f"  {v:10s}  geomean={_gm(sp):.3f}x  correct={ncorrect} incorrect={nfail}"
-        )
+        nerr = sum(1 for r in results if "error" in r["variants"].get(v, {}))
+        if nerr == len(results) and results:
+            # Every shape errored — surface the first error so it can't look like a
+            # real sweep.
+            first_err = next(
+                r["variants"][v]["error"]
+                for r in results
+                if "error" in r["variants"].get(v, {})
+            )
+            print(f"  {v:10s}  SKIPPED on all {len(results)} shapes — {first_err}")
+        else:
+            print(
+                f"  {v:10s}  geomean={_gm(sp):.3f}x  correct={ncorrect} incorrect={nfail}"
+                + (f"  errored={nerr}" if nerr else "")
+            )
     return 0
 
 
