@@ -331,7 +331,7 @@ int runGemm(size_t         m,
             int                mxBlockB      = 0,
             size_t             batchCount    = 1)
 {
-    if(batchCount < 1)
+    if(batchCount == 0)
     {
         std::cerr << "Error: batchCount (" << batchCount << ") must be >= 1" << std::endl;
         return 1;
