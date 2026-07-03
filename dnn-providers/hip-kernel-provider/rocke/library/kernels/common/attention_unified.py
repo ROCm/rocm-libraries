@@ -1814,6 +1814,108 @@ def _enable_i64_kv_addr(problem: UnifiedAttentionProblem) -> bool:
     return cache_bytes > 0x8000_0000
 
 
+# --- LDS-budget resolver ----------------------------------------------------
+# The 2D-tiled register-PV path stages the K/V tiles plus a small epilogue Acc_lds
+# buffer in LDS (Q, P^T and the running O accumulator are register-resident, so
+# Acc_lds is the only auxiliary term). At head_dim=256 the default double-buffered
+# K tile makes that footprint 204800 B, over gfx950's 163840 B cap, so the kernel
+# fails to compile ("local memory (204800) exceeds limit (163840)"). Whether a
+# geometry fits is deterministic (closed-form footprint vs the arch cap), so
+# rather than hard-fail we deterministically shrink the geometry until it fits,
+# using only reductions empirically confirmed to compile: (1) single-buffer K,
+# (2) T=64. The resolver is a strict NO-OP whenever the footprint already fits or
+# the path is not register-PV, so every currently-compiling config is byte-identical.
+# Compute-dtype (bf16/fp16) width in bytes. The fp8 lever changes only the K/V
+# *cache* storage width, never the output accumulator, so the epilogue Acc_lds
+# staging buffer is always 16-bit.
+_ACC_LDS_ELEM_BYTES = 2
+
+
+def _kv_lds_elem_bytes(spec) -> int:
+    if getattr(spec, "kv_storage_dtype", None) in ("fp8", "bf8", "e4m3", "e5m2"):
+        return 1
+    return 2  # bf16 / fp16 K/V in LDS
+
+
+def _acc_lds_bytes(spec) -> int:
+    """Epilogue Acc_lds staging buffer -- ``smem_alloc([BLOCK_M, OUT_STRIPE_COLS])``
+    of the compute dtype (see ``gfx950/attention_tiled_2d.py`` ~L1473/1248). In the
+    register-PV path this is the *only* LDS beyond the K/V tiles (Q, P^T and the
+    running softmax stats are register-resident), so it is the full auxiliary term.
+    Scales with ``num_warps``, ``block_m_per_warp`` and ``head_size``."""
+    out_stripe_cols = 32 if spec.head_size <= 64 else spec.head_size
+    block_m = spec.num_warps * spec.block_m_per_warp
+    return block_m * out_stripe_cols * _ACC_LDS_ELEM_BYTES
+
+
+def _lds_bytes_regpv(spec) -> int:
+    """Exact LDS footprint of the register-PV 2D path: the K/V tiles plus the
+    epilogue Acc_lds. Verified against comgr for the D256 T=128 K-double geometry:
+    ``(2+1)*128*256*2 (K/V) + 16*256*2 (Acc) = 196608 + 8192 = 204800``."""
+    wb = _kv_lds_elem_bytes(spec)
+    kbuf = 1 if spec.use_k_single_buffer else 2
+    vbuf = 2 if spec.use_v_double_buffer else 1
+    kv_bytes = (kbuf + vbuf) * spec.tile_size * spec.head_size * wb
+    return kv_bytes + _acc_lds_bytes(spec)
+
+
+def _lds_capacity_bytes() -> int:
+    # Lazy import: keep ``common/`` arch-neutral (see module top).
+    from rocke.core.arch.target import ArchTarget
+
+    return ArchTarget.from_gfx(_resolve_attention_arch()).lds_capacity_bytes
+
+
+def _ldsfix_single_k(spec):
+    if spec.use_k_single_buffer:
+        return None
+    # K-single needs Q to fit the lone K slot: block_m <= tile_size.
+    if spec.num_warps * spec.block_m_per_warp > spec.tile_size:
+        return None
+    try:
+        return replace(spec, use_k_single_buffer=True)
+    except Exception:
+        return None
+
+
+def _ldsfix_tile64(spec):
+    if spec.tile_size <= 64:
+        return None
+    try:
+        return replace(spec, tile_size=64)
+    except Exception:
+        return None
+
+
+def _resolve_lds_budget(spec):
+    """Deterministically shrink an over-budget register-PV 2D spec until it fits
+    the arch LDS cap, using only compile-validated reductions. Returns the same
+    spec unchanged when it already fits or the path is not register-PV (so all
+    currently-compiling configs stay byte-identical)."""
+    # Validated on gfx950 (CDNA4): register-PV stages K/V tiles + the epilogue Acc_lds. The
+    # mechanism is arch-general (reads the cap dynamically); other arches' 2D
+    # footprint models are not yet validated, so engage only where proven.
+    if _resolve_attention_arch() != "gfx950" or not getattr(
+        spec, "use_register_pv", False
+    ):
+        return spec
+    cap = _lds_capacity_bytes()
+    if _lds_bytes_regpv(spec) <= cap:
+        return spec
+    single_k = _ldsfix_single_k(spec)
+    candidates = [single_k, _ldsfix_tile64(spec)]
+    if single_k is not None:
+        candidates.append(_ldsfix_tile64(single_k))
+    for cand in candidates:
+        if cand is not None and _lds_bytes_regpv(cand) <= cap:
+            return cand
+    raise RuntimeError(
+        f"LDS budget: 2D register-PV D{spec.head_size} block_size={spec.block_size} "
+        f"T={spec.tile_size} needs {_lds_bytes_regpv(spec)} B > cap {cap} B on "
+        f"{_resolve_attention_arch()}; no validated reduction (single-K, T=64) fits."
+    )
+
+
 def _tiled_spec_from_problem(
     problem: UnifiedAttentionProblem,
 ):
@@ -1953,7 +2055,7 @@ def _tiled_spec_from_problem(
     # no-fp8 preconditions so it can never fire on an incompatible spec.
     if "use_k_single_buffer" in _spec_field_names and _enable_k_single_buffer(problem):
         _gfx950_schedule_fields["use_k_single_buffer"] = True
-    return UnifiedAttention2DTiledSpec(
+    _spec = UnifiedAttention2DTiledSpec(
         head_size=problem.head_size,
         block_size=problem.block_size,
         num_query_heads=problem.num_query_heads,
@@ -2016,6 +2118,7 @@ def _tiled_spec_from_problem(
         # below -- gfx942's spec class does not declare it.)
         **_gfx950_schedule_fields,
     )
+    return _resolve_lds_budget(_spec)
 
 
 def _select_2d_block_m_per_warp(problem: UnifiedAttentionProblem) -> int:
