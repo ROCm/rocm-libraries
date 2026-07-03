@@ -34,9 +34,7 @@
 #include <stdexcept>
 #include <string>
 
-#include <Tensile/Macros.hpp>
-
-TENSILE_HIDDEN_BEGIN
+#include <tensilelitehost/export.h>
 
 namespace TensileLite
 {
@@ -77,11 +75,10 @@ namespace TensileLite
         Count
     };
 
-    std::string   ToString(ActivationType d);
-    std::ostream& operator<<(std::ostream& stream, const ActivationType& t);
-    std::istream& operator>>(std::istream& stream, ActivationType& t);
+    TENSILELITEHOST_EXPORT std::string   ToString(ActivationType d);
+    TENSILELITEHOST_EXPORT std::ostream& operator<<(std::ostream& stream, const ActivationType& t);
+    TENSILELITEHOST_EXPORT std::istream& operator>>(std::istream& stream, ActivationType& t);
 
-    int getAdditionalArgNum(ActivationType d);
+    TENSILELITEHOST_EXPORT int getAdditionalArgNum(ActivationType d);
 }
 
-TENSILE_HIDDEN_END
