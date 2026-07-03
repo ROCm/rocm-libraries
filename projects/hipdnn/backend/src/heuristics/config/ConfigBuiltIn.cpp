@@ -6,9 +6,9 @@
  * @brief Backend-internal implementation of the
  *        SelectionHeuristic::Config policy.
  *
- * The policy reads HIPDNN_HEUR_CONFIG_PATH (a JSON file mapping
- * conv-shape patterns to engine names via EngineOverrideConfig), walks
- * conv-like nodes in the serialized graph, and on the first matching rule
+ * The policy reads HIPDNN_HEUR_CONFIG_PATH (a JSON file mapping operation
+ * match criteria to engine names via EngineOverrideConfig), walks supported
+ * primary nodes in the serialized graph, and on the first matching rule
  * reorders the candidate engine IDs so the chosen engine is first. When the
  * env var is unset, the file is missing/invalid, no rule matches, or the
  * matched engine is not among the candidates, the policy declines so the
@@ -25,6 +25,7 @@
 #include "heuristics/BuiltInLogging.hpp"
 #include "logging/Logging.hpp"
 
+#include <hipdnn_data_sdk/detail/AutotuneConfigNames.hpp>
 #include <hipdnn_data_sdk/utilities/PolicyNames.hpp>
 #include <hipdnn_flatbuffers_sdk/data_objects/graph_generated.h>
 #include <hipdnn_plugin_sdk/HeuristicValidation.hpp>
@@ -39,13 +40,20 @@
 #include <cstdio>
 #include <cstring>
 #include <memory>
+#include <optional>
+#include <string>
+#include <string_view>
 #include <unordered_map>
+#include <utility>
 #include <vector>
 
 namespace hipdnn_backend::heuristics::config
 {
 namespace
 {
+namespace config_criterion = hipdnn_data_sdk::detail::autotune_config::criterion;
+namespace config_op = hipdnn_data_sdk::detail::autotune_config::op;
+namespace config_tensor = hipdnn_data_sdk::detail::autotune_config::tensor;
 
 constexpr const char* PLUGIN_NAME = "BuiltInConfigHeuristic";
 constexpr const char* PLUGIN_VERSION = "1.0.0";
@@ -115,6 +123,330 @@ std::unordered_map<int64_t, TensorDimsStrides> indexTensorsByUid(const Graph* gr
     return out;
 }
 
+constexpr int K_POINTWISE_PRIORITY = 10;
+constexpr int K_REDUCTION_PRIORITY = 20;
+constexpr int K_RESAMPLE_PRIORITY = 20;
+constexpr int K_NORM_PRIORITY = 30;
+constexpr int K_BATCHNORM_PRIORITY = 40;
+constexpr int K_MATMUL_PRIORITY = 50;
+constexpr int K_SDPA_PRIORITY = 60;
+constexpr int K_CONVOLUTION_PRIORITY = 70;
+
+// Priority gaps are intentional: they preserve the current primary-op ordering while leaving
+// room to insert new operation classes without renumbering every existing class.
+struct BackendAutotuneConfigMatchKey
+{
+    BackendAutotuneConfigMatchKey(std::string_view opName, int opPriority)
+        : op(opName)
+        , priority(opPriority)
+    {
+    }
+
+    void appendTensor(std::string_view tensorId, const TensorDimsStrides& tensor)
+    {
+        tensors.push_back(TensorView{tensorId, &tensor.dims, &tensor.strides});
+    }
+
+    void addCriterion(std::string_view criterionName, int64_t criterionValue)
+    {
+        criteria.push_back(Criterion{std::string(criterionName), criterionValue});
+    }
+
+    std::string op;
+    std::vector<Criterion> criteria;
+    std::vector<TensorView> tensors;
+    int priority = 0;
+};
+
+class BackendAutotuneConfigMatchKeyBuilder
+{
+public:
+    explicit BackendAutotuneConfigMatchKeyBuilder(
+        const std::unordered_map<int64_t, TensorDimsStrides>& tensorIndex)
+        : _tensorIndex(tensorIndex)
+    {
+    }
+
+    std::optional<BackendAutotuneConfigMatchKey>
+        buildKeyForNode(const hipdnn_flatbuffers_sdk::data_objects::Node* node) const
+    {
+        if(node == nullptr)
+        {
+            return std::nullopt;
+        }
+
+        if(const auto* fwd = node->attributes_as_ConvolutionFwdAttributes())
+        {
+            BackendAutotuneConfigMatchKey key(config_op::CONV_FPROP, K_CONVOLUTION_PRIORITY);
+            if(!appendUid(key, config_tensor::X, fwd->x_tensor_uid())
+               || !appendUid(key, config_tensor::W, fwd->w_tensor_uid()))
+            {
+                return std::nullopt;
+            }
+            return key;
+        }
+        if(const auto* bwd = node->attributes_as_ConvolutionBwdAttributes())
+        {
+            BackendAutotuneConfigMatchKey key(config_op::CONV_DGRAD, K_CONVOLUTION_PRIORITY);
+            if(!appendUid(key, config_tensor::DY, bwd->dy_tensor_uid())
+               || !appendUid(key, config_tensor::W, bwd->w_tensor_uid()))
+            {
+                return std::nullopt;
+            }
+            return key;
+        }
+        if(const auto* wrw = node->attributes_as_ConvolutionWrwAttributes())
+        {
+            BackendAutotuneConfigMatchKey key(config_op::CONV_WGRAD, K_CONVOLUTION_PRIORITY);
+            if(!appendUid(key, config_tensor::X, wrw->x_tensor_uid())
+               || !appendUid(key, config_tensor::DY, wrw->dy_tensor_uid()))
+            {
+                return std::nullopt;
+            }
+            return key;
+        }
+        if(const auto* sdpa = node->attributes_as_SdpaAttributes())
+        {
+            BackendAutotuneConfigMatchKey key(config_op::SDPA_FWD, K_SDPA_PRIORITY);
+            if(!appendUid(key, config_tensor::Q, sdpa->q_tensor_uid())
+               || !appendUid(key, config_tensor::K, sdpa->k_tensor_uid())
+               || !appendUid(key, config_tensor::V, sdpa->v_tensor_uid())
+               || !appendOptionalUid(key, config_tensor::SCALE, sdpa->scale_tensor_uid())
+               || !appendOptionalUid(key, config_tensor::ATTN_MASK, sdpa->attn_mask_tensor_uid())
+               || !appendOptionalUid(key, config_tensor::SEQ_LEN_Q, sdpa->seq_len_q_tensor_uid())
+               || !appendOptionalUid(key, config_tensor::SEQ_LEN_KV, sdpa->seq_len_kv_tensor_uid())
+               || !appendOptionalUid(key, config_tensor::SEED, sdpa->seed_tensor_uid())
+               || !appendOptionalUid(key, config_tensor::OFFSET, sdpa->offset_tensor_uid())
+               || !appendOptionalUid(
+                   key, config_tensor::DROPOUT_MASK, sdpa->dropout_mask_tensor_uid())
+               || !appendOptionalUid(
+                   key, config_tensor::DROPOUT_SCALE, sdpa->dropout_scale_tensor_uid())
+               || !appendOptionalUid(
+                   key, config_tensor::PAGE_TABLE_K, sdpa->page_table_k_tensor_uid())
+               || !appendOptionalUid(
+                   key, config_tensor::PAGE_TABLE_V, sdpa->page_table_v_tensor_uid())
+               || !appendOptionalUid(key, config_tensor::BLOCK_MASK, sdpa->block_mask_tensor_uid())
+               || !appendOptionalUid(key, config_tensor::SINK_TOKEN, sdpa->sink_token_tensor_uid())
+               || !appendOptionalUid(key, config_tensor::DESCALE_Q, sdpa->descale_q_tensor_uid())
+               || !appendOptionalUid(key, config_tensor::DESCALE_K, sdpa->descale_k_tensor_uid())
+               || !appendOptionalUid(key, config_tensor::DESCALE_V, sdpa->descale_v_tensor_uid())
+               || !appendOptionalUid(key, config_tensor::DESCALE_S, sdpa->descale_s_tensor_uid())
+               || !appendOptionalUid(key, config_tensor::SCALE_S, sdpa->scale_s_tensor_uid())
+               || !appendOptionalUid(key, config_tensor::SCALE_O, sdpa->scale_o_tensor_uid()))
+            {
+                return std::nullopt;
+            }
+            return key;
+        }
+        if(const auto* sdpa = node->attributes_as_SdpaBackwardAttributes())
+        {
+            BackendAutotuneConfigMatchKey key(config_op::SDPA_BWD, K_SDPA_PRIORITY);
+            if(!appendUid(key, config_tensor::Q, sdpa->q_tensor_uid())
+               || !appendUid(key, config_tensor::K, sdpa->k_tensor_uid())
+               || !appendUid(key, config_tensor::V, sdpa->v_tensor_uid())
+               || !appendUid(key, config_tensor::O, sdpa->o_tensor_uid())
+               || !appendUid(key, config_tensor::DO, sdpa->do_tensor_uid())
+               || !appendUid(key, config_tensor::STATS, sdpa->stats_tensor_uid())
+               || !appendOptionalUid(key, config_tensor::SCALE, sdpa->scale_tensor_uid())
+               || !appendOptionalUid(key, config_tensor::ATTN_MASK, sdpa->attn_mask_tensor_uid())
+               || !appendOptionalUid(key, config_tensor::SEQ_LEN_Q, sdpa->seq_len_q_tensor_uid())
+               || !appendOptionalUid(key, config_tensor::SEQ_LEN_KV, sdpa->seq_len_kv_tensor_uid())
+               || !appendOptionalUid(key, config_tensor::SEED, sdpa->seed_tensor_uid())
+               || !appendOptionalUid(key, config_tensor::OFFSET, sdpa->offset_tensor_uid())
+               || !appendOptionalUid(
+                   key, config_tensor::DROPOUT_MASK, sdpa->dropout_mask_tensor_uid())
+               || !appendOptionalUid(
+                   key, config_tensor::DROPOUT_SCALE, sdpa->dropout_scale_tensor_uid())
+               || !appendOptionalUid(
+                   key, config_tensor::DROPOUT_SCALE_INV, sdpa->dropout_scale_inv_tensor_uid()))
+            {
+                return std::nullopt;
+            }
+            return key;
+        }
+        if(const auto* matmul = node->attributes_as_MatmulAttributes())
+        {
+            BackendAutotuneConfigMatchKey key(config_op::MATMUL, K_MATMUL_PRIORITY);
+            if(!appendUid(key, config_tensor::A, matmul->a_tensor_uid())
+               || !appendUid(key, config_tensor::B, matmul->b_tensor_uid()))
+            {
+                return std::nullopt;
+            }
+            return key;
+        }
+        if(const auto* batchnorm = node->attributes_as_BatchnormAttributes())
+        {
+            BackendAutotuneConfigMatchKey key(config_op::BATCHNORM_TRAINING, K_BATCHNORM_PRIORITY);
+            if(!appendUid(key, config_tensor::X, batchnorm->x_tensor_uid())
+               || !appendUid(key, config_tensor::SCALE, batchnorm->scale_tensor_uid())
+               || !appendUid(key, config_tensor::BIAS, batchnorm->bias_tensor_uid())
+               || !appendUid(key, config_tensor::EPSILON, batchnorm->epsilon_tensor_uid())
+               || !appendOptionalUid(
+                   key, config_tensor::PREV_RUNNING_MEAN, batchnorm->prev_running_mean_tensor_uid())
+               || !appendOptionalUid(key,
+                                     config_tensor::PREV_RUNNING_VARIANCE,
+                                     batchnorm->prev_running_variance_tensor_uid())
+               || !appendOptionalUid(
+                   key, config_tensor::MOMENTUM, batchnorm->momentum_tensor_uid()))
+            {
+                return std::nullopt;
+            }
+            return key;
+        }
+        if(const auto* batchnorm = node->attributes_as_BatchnormInferenceAttributes())
+        {
+            BackendAutotuneConfigMatchKey key(config_op::BATCHNORM_INFERENCE, K_BATCHNORM_PRIORITY);
+            if(!appendUid(key, config_tensor::X, batchnorm->x_tensor_uid())
+               || !appendUid(key, config_tensor::MEAN, batchnorm->mean_tensor_uid())
+               || !appendUid(key, config_tensor::INV_VARIANCE, batchnorm->inv_variance_tensor_uid())
+               || !appendUid(key, config_tensor::SCALE, batchnorm->scale_tensor_uid())
+               || !appendUid(key, config_tensor::BIAS, batchnorm->bias_tensor_uid()))
+            {
+                return std::nullopt;
+            }
+            return key;
+        }
+        if(const auto* batchnorm = node->attributes_as_BatchnormInferenceAttributesVarianceExt())
+        {
+            BackendAutotuneConfigMatchKey key(config_op::BATCHNORM_INFERENCE_VARIANCE_EXT,
+                                              K_BATCHNORM_PRIORITY);
+            if(!appendUid(key, config_tensor::X, batchnorm->x_tensor_uid())
+               || !appendUid(key, config_tensor::MEAN, batchnorm->mean_tensor_uid())
+               || !appendUid(key, config_tensor::VARIANCE, batchnorm->variance_tensor_uid())
+               || !appendUid(key, config_tensor::SCALE, batchnorm->scale_tensor_uid())
+               || !appendUid(key, config_tensor::BIAS, batchnorm->bias_tensor_uid())
+               || !appendUid(key, config_tensor::EPSILON, batchnorm->epsilon_tensor_uid()))
+            {
+                return std::nullopt;
+            }
+            return key;
+        }
+        if(const auto* batchnorm = node->attributes_as_BatchnormBackwardAttributes())
+        {
+            BackendAutotuneConfigMatchKey key(config_op::BATCHNORM_BACKWARD, K_BATCHNORM_PRIORITY);
+            if(!appendUid(key, config_tensor::DY, batchnorm->dy_tensor_uid())
+               || !appendUid(key, config_tensor::X, batchnorm->x_tensor_uid())
+               || !appendUid(key, config_tensor::SCALE, batchnorm->scale_tensor_uid())
+               || !appendOptionalUid(key, config_tensor::MEAN, batchnorm->mean_tensor_uid())
+               || !appendOptionalUid(
+                   key, config_tensor::INV_VARIANCE, batchnorm->inv_variance_tensor_uid()))
+            {
+                return std::nullopt;
+            }
+            return key;
+        }
+        if(const auto* layernorm = node->attributes_as_LayernormAttributes())
+        {
+            BackendAutotuneConfigMatchKey key(config_op::LAYERNORM, K_NORM_PRIORITY);
+            key.addCriterion(config_criterion::NORM_FWD_PHASE,
+                             static_cast<int64_t>(layernorm->forward_phase()));
+            if(!appendUid(key, config_tensor::X, layernorm->x_tensor_uid())
+               || !appendUid(key, config_tensor::SCALE, layernorm->scale_tensor_uid())
+               || !appendUid(key, config_tensor::BIAS, layernorm->bias_tensor_uid())
+               || !appendUid(key, config_tensor::EPSILON, layernorm->epsilon_tensor_uid()))
+            {
+                return std::nullopt;
+            }
+            return key;
+        }
+        if(const auto* rmsnorm = node->attributes_as_RMSNormAttributes())
+        {
+            BackendAutotuneConfigMatchKey key(config_op::RMSNORM, K_NORM_PRIORITY);
+            key.addCriterion(config_criterion::NORM_FWD_PHASE,
+                             static_cast<int64_t>(rmsnorm->forward_phase()));
+            if(!appendUid(key, config_tensor::X, rmsnorm->x_tensor_uid())
+               || !appendUid(key, config_tensor::SCALE, rmsnorm->scale_tensor_uid())
+               || !appendUid(key, config_tensor::EPSILON, rmsnorm->epsilon_tensor_uid())
+               || !appendOptionalUid(key, config_tensor::BIAS, rmsnorm->bias_tensor_uid()))
+            {
+                return std::nullopt;
+            }
+            return key;
+        }
+        if(const auto* rmsnorm = node->attributes_as_RMSNormBackwardAttributes())
+        {
+            BackendAutotuneConfigMatchKey key(config_op::RMSNORM_BACKWARD, K_NORM_PRIORITY);
+            if(!appendUid(key, config_tensor::DY, rmsnorm->dy_tensor_uid())
+               || !appendUid(key, config_tensor::X, rmsnorm->x_tensor_uid())
+               || !appendUid(key, config_tensor::SCALE, rmsnorm->scale_tensor_uid())
+               || !appendUid(key, config_tensor::INV_RMS, rmsnorm->inv_rms_tensor_uid()))
+            {
+                return std::nullopt;
+            }
+            return key;
+        }
+        if(const auto* reduction = node->attributes_as_ReductionAttributes())
+        {
+            BackendAutotuneConfigMatchKey key(config_op::REDUCTION, K_REDUCTION_PRIORITY);
+            key.addCriterion(config_criterion::REDUCTION_MODE,
+                             static_cast<int64_t>(reduction->mode()));
+            if(!appendUid(key, config_tensor::INPUT, reduction->in_tensor_uid()))
+            {
+                return std::nullopt;
+            }
+            return key;
+        }
+        if(const auto* resample = node->attributes_as_ResampleFwdAttributes())
+        {
+            BackendAutotuneConfigMatchKey key(config_op::RESAMPLE_FWD, K_RESAMPLE_PRIORITY);
+            key.addCriterion(config_criterion::RESAMPLE_MODE,
+                             static_cast<int64_t>(resample->resample_mode()));
+            key.addCriterion(config_criterion::PADDING_MODE,
+                             static_cast<int64_t>(resample->padding_mode()));
+            if(!appendUid(key, config_tensor::X, resample->x_tensor_uid()))
+            {
+                return std::nullopt;
+            }
+            return key;
+        }
+        if(const auto* pointwise = node->attributes_as_PointwiseAttributes())
+        {
+            BackendAutotuneConfigMatchKey key(config_op::POINTWISE, K_POINTWISE_PRIORITY);
+            key.addCriterion(config_criterion::POINTWISE_MODE,
+                             static_cast<int64_t>(pointwise->operation()));
+            if(!appendUid(key, config_tensor::IN_0, pointwise->in_0_tensor_uid())
+               || !appendOptionalUid(key, config_tensor::IN_1, pointwise->in_1_tensor_uid())
+               || !appendOptionalUid(key, config_tensor::IN_2, pointwise->in_2_tensor_uid()))
+            {
+                return std::nullopt;
+            }
+            return key;
+        }
+        return std::nullopt;
+    }
+
+private:
+    const TensorDimsStrides* tensorFor(int64_t uid) const
+    {
+        const auto it = _tensorIndex.find(uid);
+        return it == _tensorIndex.end() ? nullptr : &it->second;
+    }
+
+    bool appendUid(BackendAutotuneConfigMatchKey& key, std::string_view tensorId, int64_t uid) const
+    {
+        const auto* tensor = tensorFor(uid);
+        if(tensor == nullptr)
+        {
+            return false;
+        }
+        key.appendTensor(tensorId, *tensor);
+        return true;
+    }
+
+    bool appendOptionalUid(BackendAutotuneConfigMatchKey& key,
+                           std::string_view tensorId,
+                           const std::optional<int64_t>& uid) const
+    {
+        if(!uid.has_value())
+        {
+            return true;
+        }
+        return appendUid(key, tensorId, *uid);
+    }
+
+    const std::unordered_map<int64_t, TensorDimsStrides>& _tensorIndex;
+};
+
 std::optional<int64_t>
     matchOverrideConfig(const EngineOverrideConfig& config,
                         const Graph* graph,
@@ -126,50 +458,35 @@ std::optional<int64_t>
         return std::nullopt;
     }
 
-    auto viewFor = [&](int64_t uid) -> const TensorDimsStrides* {
-        auto it = tensorIndex.find(uid);
-        return it == tensorIndex.end() ? nullptr : &it->second;
-    };
+    const BackendAutotuneConfigMatchKeyBuilder keyBuilder(tensorIndex);
 
-    auto buildView = [&](const TensorDimsStrides* t) { return TensorView{&t->dims, &t->strides}; };
-
+    std::vector<BackendAutotuneConfigMatchKey> bestKeys;
+    int bestPriority = 0;
     for(const auto* node : *nodes)
     {
         if(node == nullptr)
         {
             continue;
         }
-
-        const char* op = nullptr;
-        const TensorDimsStrides* a = nullptr;
-        const TensorDimsStrides* b = nullptr;
-
-        if(const auto* fwd = node->attributes_as_ConvolutionFwdAttributes())
-        {
-            op = "conv_fprop";
-            a = viewFor(fwd->x_tensor_uid());
-            b = viewFor(fwd->w_tensor_uid());
-        }
-        else if(const auto* bwd = node->attributes_as_ConvolutionBwdAttributes())
-        {
-            op = "conv_dgrad";
-            a = viewFor(bwd->dy_tensor_uid());
-            b = viewFor(bwd->w_tensor_uid());
-        }
-        else if(const auto* wrw = node->attributes_as_ConvolutionWrwAttributes())
-        {
-            op = "conv_wgrad";
-            a = viewFor(wrw->x_tensor_uid());
-            b = viewFor(wrw->dy_tensor_uid());
-        }
-
-        if(op == nullptr || a == nullptr || b == nullptr)
+        auto candidate = keyBuilder.buildKeyForNode(node);
+        if(!candidate.has_value())
         {
             continue;
         }
+        if(candidate->priority > bestPriority)
+        {
+            bestPriority = candidate->priority;
+            bestKeys.clear();
+        }
+        if(candidate->priority == bestPriority)
+        {
+            bestKeys.push_back(std::move(*candidate));
+        }
+    }
 
-        const std::vector<TensorView> views{buildView(a), buildView(b)};
-        auto match = config.matchOperation(op, views);
+    for(const auto& key : bestKeys)
+    {
+        auto match = config.matchOperation(key.op, key.criteria, key.tensors);
         if(match.has_value())
         {
             return match;
@@ -505,8 +822,9 @@ hipdnnPluginStatus_t policyFinalize(hipdnnHeuristicPolicyDescriptor_t desc, int3
             = matchOverrideConfig(*config, graph, indexTensorsByUid(graph));
         if(!preferredEngineId.has_value())
         {
-            CONFIG_BUILTIN_LOG(HIPDNN_SEV_INFO,
-                               "policyFinalize: no rule matched any conv node; declining");
+            CONFIG_BUILTIN_LOG(
+                HIPDNN_SEV_INFO,
+                "policyFinalize: no rule matched any supported primary node; declining");
             return HIPDNN_PLUGIN_STATUS_SUCCESS;
         }
 
