@@ -379,7 +379,6 @@ int main(int argc, char* argv[])
         ->excludes("--test_prob",
                    "--emulation_prob",
                    "--unittest_prob",
-                   "--nrand",
                    "--callback_prob",
                    "--R")
         ->each([&](const std::string& emulationtype) {
@@ -454,7 +453,7 @@ int main(int argc, char* argv[])
         ->needs("--mp_lib");
 
     app.add_flag("--smoketest", "Run a short (approx 5 minute) randomized selection of tests")
-        ->excludes("--emulation", "--test_prob", "--emulation_prob", "--unittest_prob", "--nrand")
+        ->excludes("--emulation", "--test_prob", "--emulation_prob", "--unittest_prob")
         ->each([&](const std::string&) {
             // The objective is to have a test that takes about 5 minutes, so just set the
             // probability per test to a small value to achieve this result.
