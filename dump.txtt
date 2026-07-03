@@ -1,2 +1,0 @@
-Command
-/usr/bin/clang-tidy-20 -config-file=/home/AMD/bghimire/worktrees/rocm-libraries-wt-2221/dnn-providers/integration-tests/.clang-tidy -p /home/AMD/bghimire/worktrees/rocm-libraries-wt-2221/build --extra-arg-before=--driver-mode=g++ /home/AMD/bghimire/worktrees/rocm-libraries-wt-2221/dnn-providers/integration-tests/src/harness/golden/IntegrationGraphGoldenReferenceVerificationHarness.cpp
