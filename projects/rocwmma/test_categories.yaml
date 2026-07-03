@@ -41,7 +41,7 @@ test_categories:
   standard:
     description: "rocWMMA standard tests"
     test_patterns:
-      - ".*"
+      - "(?!.* (?:smoke|regression)$).*"
     exclude:
       - ".*unpack_util_test.*"
       - ".*contamination_test.*"
@@ -52,7 +52,7 @@ test_categories:
   comprehensive:
     description: "rocWMMA comprehensive tests"
     test_patterns:
-      - ".*"
+      - "(?!.* (?:smoke|regression)$).*"
     exclude:
       - ".*unpack_util_test.*"
       - ".*contamination_test.*"
@@ -63,13 +63,12 @@ test_categories:
   full:
     description: "rocWMMA full test suite - includes flaky/problematic tests excluded from lower tiers"
     test_patterns:
-      - ".*"
-    # No exclude list: 'full' is the absolute superset and is the only way
-    # to exercise tests that are flaky under current infrastructure
-    # (unpack_util_test, contamination_test, map_util_test). These remain
-    # excluded from quick/standard/comprehensive so routine CI stays green;
-    # `ctest -L full` is the opt-in path for running them. See PR #7535
-    # review thread for context.
+      # Negative lookahead excludes the smoke/regression emulation variants
+      # added to the main install CTestTestfile — those are available via the
+      # smoke/ and regression/ install subdirectories or via ffm-quick.
+      # Using a lookahead instead of exclude means `ctest -L full` works
+      # without needing `-LE full_exclude`.
+      - "(?!.* (?:smoke|regression)$).*"
     labels:
       - "full"
 
