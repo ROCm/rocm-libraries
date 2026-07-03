@@ -43,7 +43,9 @@ namespace ck_tile::core::arch::mma {
 
 #define DEFINE_MMA_SCALE_GFX950_16(AType, BType, EXPAND_A, EXPAND_B, NUM_ACC_A, NUM_ACC_B)                                                                   \
 template <typename CompilerTarget>                                                                                                                           \
+/*               |A B C DataTypes     |MNK            |                                                                                                   */ \
 struct amdgcn_mma<AType, BType, fp32_t, 16u, 16u, 128u, CompilerTarget, MmaOpFamily::SCALE, enable_if_target_id_t<CompilerTarget, amdgcn_target_id::GFX950>> \
+/*                                                    |WS  |AParams          |BPar         |CPar |                                                        */ \
 : amdgcn_mma_base<AType, BType, fp32_t, 16u, 16u, 128u, 64u, 32, NUM_ACC_A, 1, NUM_ACC_B, 1, 4, 1, MfmaOp, MmaOpFamily::SCALE>                               \
 {                                                                                                                                                            \
     static constexpr const char* instruction_name = "__builtin_amdgcn_mfma_scale_f32_16x16x128_f8f6f4";                                                      \
@@ -65,7 +67,9 @@ struct amdgcn_mma<AType, BType, fp32_t, 16u, 16u, 128u, CompilerTarget, MmaOpFam
 
 #define DEFINE_MMA_SCALE_GFX950_32(AType, BType, EXPAND_A, EXPAND_B, NUM_ACC_A, NUM_ACC_B)                                                                  \
 template <typename CompilerTarget>                                                                                                                          \
+/*               |A B C DataTypes     |MNK           |                                                                                                   */ \
 struct amdgcn_mma<AType, BType, fp32_t, 32u, 32u, 64u, CompilerTarget, MmaOpFamily::SCALE, enable_if_target_id_t<CompilerTarget, amdgcn_target_id::GFX950>> \
+/*                                                   |WS  |AParams          |BPar         |CPar  |                                                       */ \
 : amdgcn_mma_base<AType, BType, fp32_t, 32u, 32u, 64u, 64u, 32, NUM_ACC_A, 1, NUM_ACC_B, 1, 16, 4, MfmaOp, MmaOpFamily::SCALE>                              \
 {                                                                                                                                                           \
     static constexpr const char* instruction_name = "__builtin_amdgcn_mfma_scale_f32_32x32x64_f8f6f4";                                                      \
@@ -151,5 +155,7 @@ DEFINE_MMA_SCALE_GFX950_32(pk_fp4_t,    pk_fp4_t,    MMA_SCALE_ARG_F4, MMA_SCALE
 #undef DEFINE_MMA_SCALE_GFX950_16
 #undef DEFINE_MMA_SCALE_GFX950_32
 // clang-format on
+
+/** @} */ // scale_mfma_gfx9
 
 } // namespace ck_tile::core::arch::mma
