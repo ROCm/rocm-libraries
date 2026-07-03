@@ -45,22 +45,14 @@
 THRUST_NAMESPACE_BEGIN
 namespace hip_rocprim
 {
-
 namespace __fill
 {
-
 // fill functor
 template <class Iterator, class T>
 struct functor
 {
   Iterator it;
   T value;
-
-  THRUST_HIP_FUNCTION
-  functor(Iterator it, T value)
-      : it(it)
-      , value(value)
-  {}
 
   template <class Size>
   THRUST_HIP_DEVICE_FUNCTION void operator()(Size idx)
@@ -75,7 +67,7 @@ template <class Derived, class OutputIterator, class Size, class T>
 OutputIterator THRUST_HOST_DEVICE
 fill_n(execution_policy<Derived>& policy, OutputIterator first, Size count, const T& value)
 {
-  hip_rocprim::parallel_for(policy, __fill::functor<OutputIterator, T>(first, value), count);
+  hip_rocprim::parallel_for(policy, __fill::functor<OutputIterator, T>{first, value}, count);
 
   return first + count;
 } // func fill_n
