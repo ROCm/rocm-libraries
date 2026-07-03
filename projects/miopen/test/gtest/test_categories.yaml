@@ -87,6 +87,9 @@ test_categories:
       # The CPU dev-applicability check is unaffected.)
       - "Smoke/GPU_UnitTestConvSolverConvDepthwiseFwd3D_FP16*"
       - "Smoke/GPU_UnitTestConvSolverConvDepthwiseFwd3D_BFP16*"
+      # Each fans out to 32 worker processes loading MIOpen, OOM-killing
+      # small shared-RAM runners (e.g. gfx1151). Still run in standard/full.
+      - "CPU_PerfDb_NONE.*"
 
     exclude_windows: [] # Placeholder to show per-platform exclude support
     exclude_linux: [] # Placeholder to show per-platform exclude support
