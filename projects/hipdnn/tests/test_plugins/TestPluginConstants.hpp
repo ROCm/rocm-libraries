@@ -170,4 +170,17 @@ inline const std::string& testGoodHeuristicPluginPath()
         = getTestCustomFilepathForPlugin(TEST_GOOD_HEURISTIC_PLUGIN_NAME);
     return s_testGoodHeuristicPluginPath;
 }
+
+// The autotune plugin is consumed only by the frontend autotune integration
+// tests. Only targets that define TEST_AUTOTUNE_PLUGIN_NAME (the frontend test
+// target) get this accessor; the backend test target deliberately carries no
+// autotune-plugin wiring, so the macro is absent there and this is compiled out.
+#ifdef TEST_AUTOTUNE_PLUGIN_NAME
+inline const std::string& testAutotunePluginPath()
+{
+    static const std::string s_testAutotunePluginPath
+        = getTestCustomFilepathForPlugin(TEST_AUTOTUNE_PLUGIN_NAME);
+    return s_testAutotunePluginPath;
+}
+#endif
 } // namespace hipdnn_tests::plugin_constants

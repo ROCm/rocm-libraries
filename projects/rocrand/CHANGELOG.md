@@ -19,6 +19,7 @@ Documentation for rocRAND is available at
 ### Resolved Issues
 
 * Fixed memory leak in unit tests.
+* Fixed incorrect Sobol64 number generation beyond offset 2^32.
 
 ## rocRAND 4.3.0 for ROCm 7.12
 
