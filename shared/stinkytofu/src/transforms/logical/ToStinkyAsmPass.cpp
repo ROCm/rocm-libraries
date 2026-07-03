@@ -26,6 +26,7 @@
 #include "stinkytofu/core/PassManager.hpp"
 #include "stinkytofu/hardware/ArchHelper.hpp"
 #include "stinkytofu/ir/asm/StinkyAsmIR.hpp"
+#include "stinkytofu/ir/asm/StinkyModifiers.hpp"
 #include "stinkytofu/ir/logical/LogicalInstructions.hpp"
 #include "stinkytofu/support/Casting.hpp"
 #include "stinkytofu/support/ErrorHandling.hpp"
@@ -225,6 +226,34 @@ StinkyInstruction* createAsmFromIR(LogicalInstruction* irInst, GfxArchID arch) {
     }
     if (irInst->vop3.has_value()) {
         asmInst->addModifier<VOP3PModifiers>(irInst->vop3.value());
+    }
+
+    // MFMA/SMFMA/MXMFMA: attach MFMAModifiers so downstream passes
+    // (RegionClonePass, SetMatrixReusePass) can identify these instructions.
+    if (irInst->getOpcode() == logical::MFMA ||
+        irInst->getOpcode() == logical::SMFMA ||
+        irInst->getOpcode() == logical::MXMFMA) {
+        MFMAModifiers mod;
+        if (irInst->getOpcode() == logical::MFMA) {
+            const MFMAData* data = irInst->asMFMA();
+            if (data && data->neg) {
+                mod.negBits.negLo = {1, 1, 0};
+                mod.negBits.numSrcs = 2;
+            }
+        } else if (irInst->getOpcode() == logical::SMFMA) {
+            const SMFMAData* data = irInst->asSMFMA();
+            if (data && data->neg) {
+                mod.negBits.negLo = {1, 1, 0};
+                mod.negBits.numSrcs = 2;
+            }
+        } else if (irInst->getOpcode() == logical::MXMFMA) {
+            const MXMFMAData* data = irInst->asMXMFMA();
+            if (data) {
+                mod.reuseA = data->reuseA;
+                mod.reuseB = data->reuseB;
+            }
+        }
+        asmInst->addModifier<MFMAModifiers>(mod);
     }
 
     return asmInst;

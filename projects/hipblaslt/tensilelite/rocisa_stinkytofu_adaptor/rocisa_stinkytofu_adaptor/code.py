@@ -356,7 +356,6 @@ class _PostProcessModule:
         asm = _postprocess_vcmpx(asm)
         asm = _postprocess_sbarrier(asm)
         asm = _postprocess_carry(asm)
-        asm = _postprocess_delay_alu_placeholder(asm)
         asm = asm.replace("+-", "-")
         return asm
 
@@ -1541,6 +1540,12 @@ class Module(Item):
                 continue
             if isinstance(it, TextBlock):
                 lm.add_textblock(it.text)
+                continue
+            # Skip SDelayAlu instructions — the optimization pipeline handles
+            # all hazard insertion (InsertWaitAluPass for ESM2, InsertDelayAluPass
+            # for non-ESM2 regions).  The adaptor previously emitted these as
+            # s_nop 0 placeholders that survived the pipeline unrecognized.
+            if getattr(it, "instStr", "") == "s_delay_alu":
                 continue
             handle = getattr(it, "to_stinky_logical", None)
             if not callable(handle):
