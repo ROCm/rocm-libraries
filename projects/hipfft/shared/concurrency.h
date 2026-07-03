@@ -64,9 +64,8 @@ static unsigned int rocfft_concurrency()
     cpu_set_t cpuset;
     if(sched_getaffinity(0, sizeof(cpuset), &cpuset) == 0)
     {
-        return std::min(CPU_COUNT(&cpuset), getenv_OMP_NUM_THREADS());
+        return std::max<unsigned int>(1, std::min(CPU_COUNT(&cpuset), getenv_OMP_NUM_THREADS()));
     }
 #endif
-
-    return std::min<unsigned int>(std::thread::hardware_concurrency(), getenv_OMP_NUM_THREADS());
+    return std::max<unsigned int>(1, std::min<unsigned int>(std::thread::hardware_concurrency(), getenv_OMP_NUM_THREADS()));
 }
