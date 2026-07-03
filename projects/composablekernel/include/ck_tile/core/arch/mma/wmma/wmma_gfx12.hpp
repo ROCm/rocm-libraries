@@ -170,6 +170,38 @@ struct amdgcn_mma<int8_t, int8_t, int32_t, 16u, 16u, 16u, CompilerTarget, MmaOpF
 
 /**
  * @struct amdgcn_mma
+ * @brief Specialization of amdgcn_mma for pk_int4_t, pk_int4_t, int32_t MMA operation on GFX12
+ * architecture.
+ * @tparam CompilerTarget Current compiler target
+ */
+// TODO: c++20 template <amdgcn_target CompilerTarget>
+// TODO: c++20 requires
+template <typename CompilerTarget>
+// clang-format off
+//               | A B C DataTypes             | MNK + WaveSize    |AParams |BPar |CPar |
+struct amdgcn_mma<pk_int4_t, pk_int4_t, int32_t, 16u, 16u, 16u, CompilerTarget, MmaOpFamily::DENSE, enable_if_target_family_gfx12_t<CompilerTarget>>
+: amdgcn_mma_base<pk_int4_t, pk_int4_t, int32_t, 16u, 16u, 16u, 32u, 8, 1, 1, 1, 1, 8, 1, WmmaOp, MmaOpFamily::DENSE>
+// clang-format on
+{
+    static constexpr const char* instruction_name =
+        "__builtin_amdgcn_wmma_i32_16x16x16_iu4_w32_gfx12";
+
+    template <typename... Params>
+    CK_TILE_DEVICE static CVecType
+    exec(AVecType const& aVec, BVecType const& bVec, CVecType const& cVec)
+    {
+        using P = WarpGemmParamsParser<Params...>;
+        return {__builtin_amdgcn_wmma_i32_16x16x16_iu4_w32_gfx12(true, // A signedness
+                                                                 bit_cast<int32_t>(aVec),
+                                                                 true, // B signedness
+                                                                 bit_cast<int32_t>(bVec),
+                                                                 cVec,
+                                                                 P::clamp)};
+    }
+};
+
+/**
+ * @struct amdgcn_mma
  * @brief Specialization of amdgcn_mma for fp8_t, fp8_t, fp32_t MMA operation on GFX12
  * architecture.
  * @tparam CompilerTarget Current compiler target
@@ -273,38 +305,6 @@ struct amdgcn_mma<bf8_t, bf8_t, fp32_t, 16u, 16u, 16u, CompilerTarget, MmaOpFami
     {
         return {__builtin_amdgcn_wmma_f32_16x16x16_bf8_bf8_w32_gfx12(
             bit_cast<int32x2_t>(aVec), bit_cast<int32x2_t>(bVec), cVec)};
-    }
-};
-
-/**
- * @struct amdgcn_mma
- * @brief Specialization of amdgcn_mma for pk_int4_t, pk_int4_t, int32_t MMA operation on GFX12
- * architecture.
- * @tparam CompilerTarget Current compiler target
- */
-// TODO: c++20 template <amdgcn_target CompilerTarget>
-// TODO: c++20 requires
-template <typename CompilerTarget>
-// clang-format off
-//               | A B C DataTypes             | MNK + WaveSize    |AParams |BPar |CPar |
-struct amdgcn_mma<pk_int4_t, pk_int4_t, int32_t, 16u, 16u, 16u, CompilerTarget, MmaOpFamily::DENSE, enable_if_target_family_gfx12_t<CompilerTarget>>
-: amdgcn_mma_base<pk_int4_t, pk_int4_t, int32_t, 16u, 16u, 16u, 32u, 8, 1, 1, 1, 1, 8, 1, WmmaOp, MmaOpFamily::DENSE>
-// clang-format on
-{
-    static constexpr const char* instruction_name =
-        "__builtin_amdgcn_wmma_i32_16x16x16_iu4_w32_gfx12";
-
-    template <typename... Params>
-    CK_TILE_DEVICE static CVecType
-    exec(AVecType const& aVec, BVecType const& bVec, CVecType const& cVec)
-    {
-        using P = WarpGemmParamsParser<Params...>;
-        return {__builtin_amdgcn_wmma_i32_16x16x16_iu4_w32_gfx12(true, // A signedness
-                                                                 bit_cast<int32_t>(aVec),
-                                                                 true, // B signedness
-                                                                 bit_cast<int32_t>(bVec),
-                                                                 cVec,
-                                                                 P::clamp)};
     }
 };
 
