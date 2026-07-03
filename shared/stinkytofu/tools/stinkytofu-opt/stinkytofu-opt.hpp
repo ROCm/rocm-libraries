@@ -132,9 +132,7 @@ const std::vector<PassInfo> availablePasses = {
                  if (a.starts_with(prefix)) return std::atoi(a.substr(prefix.size()).c_str());
              return d;
          };
-         return createInsertClusterBarrierPass(/*isKernelScope=*/true,
-                                               getArgInt("PrefetchGlobalRead", 1),
-                                               getArgInt("PrefetchLocalRead", 1));
+         return createInsertClusterBarrierPass(getArgInt("PrefetchGlobalRead", 1));
      }},
     {"RemoveWaitAluPass", [](const auto&) { return createRemoveWaitAluPass(); }},
     {"InsertWaitAluPass", [](const auto&) { return createInsertWaitAluPass(); }},

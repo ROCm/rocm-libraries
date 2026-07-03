@@ -152,20 +152,21 @@ bool buildGfx1250Pipeline(PassManager& pm, StinkyAsmModule& module, const PassBu
 
     // -- kernel --
 
-    // Cluster-barrier insertion (kernel scope) — runs at every OptLevel when
-    // the module opts in. Must precede InsertVgprMsbPass so the new
-    // branches/labels are present when MSB configuration is materialized.
-    if (moduleOptions.ClusterBarrier) {
-        pm.addPass(createInsertClusterBarrierPass(/*isKernelScope=*/true,
-                                                  /*pgrValue=*/moduleOptions.PrefetchGlobalRead,
-                                                  /*plrValue=*/moduleOptions.PrefetchLocalRead));
-    }
-
     // Build the CFG after the flat region splice-backs so RegionClonePass can match its
     // start BB by label. InsertVgprMsb runs after RegionClonePass so the cloned BB gets
     // its MSB computed for its actual operands (chain-head src C is zeroed, so it must not
     // inherit the loop's src C MSB).
     pm.addPass(createCFGBuilderPass());
+
+    // Cluster-barrier insertion (kernel scope) — runs at every OptLevel when the module
+    // opts in. Placed after the first kernel-wide CFGBuilder so anchor lookup sees the
+    // split CFG, and before RegionClonePass / InsertVgprMsbPass so the new branches/labels
+    // are present when MSB configuration is materialized.
+    if (moduleOptions.ClusterBarrier) {
+        pm.addPass(createInsertClusterBarrierPass(/*pgrValue=*/moduleOptions.PrefetchGlobalRead,
+                                                  /*plrValue=*/moduleOptions.PrefetchLocalRead));
+    }
+
     pm.addPass(createRegionClonePass(moduleOptions.CloneList));
     // Pass the whole-kernel function list so MSB is materialized for the entry function and
     // every callable function (each function owns its VGPR MSB hardware state).
