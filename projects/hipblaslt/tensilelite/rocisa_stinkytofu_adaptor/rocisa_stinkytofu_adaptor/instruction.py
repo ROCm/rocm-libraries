@@ -4491,6 +4491,15 @@ class _True16Wrap:
         return _input_to_str(self._inner) + self._suffix
 
     def to_stinky(self) -> Any:
+        """Return the inner register as a proper StinkyRegister.
+
+        The True16 .h/.l selection is encoded via the VOP3 op_sel modifier
+        on the instruction, NOT as a string suffix on the register. Returning
+        the structured register preserves the physical index needed by
+        InsertVgprMsbPass for correct MSB computation.
+        """
+        if hasattr(self._inner, "to_stinky"):
+            return self._inner.to_stinky()
         import stinkytofu as _st  # noqa: WPS433
         return _st.Register(self.toString())
 

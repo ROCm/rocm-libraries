@@ -198,12 +198,33 @@ StinkyInstruction* createAsmFromIR(LogicalInstruction* irInst, GfxArchID arch) {
     // Create the assembly instruction
     StinkyInstruction* asmInst = IRBase::createIR<StinkyInstruction>(desc);
 
-    // Copy operands from IR to assembly
-    if (!irInst->dests.empty()) {
-        asmInst->setDestRegs(irInst->dests);
+    // Copy operands from IR to assembly.
+    // Handle the store-instruction mismatch: LogicalInstruction may place vdata
+    // in dests (it's the "output" of the Python instruction), but the HW format
+    // (e.g. MUBUF_STORE) defines ALL operand fields as sources (S0..S3).  When
+    // the HW descriptor has zero dest fields but irInst has dests, prepend them
+    // to srcRegs so that collectVgprMsbSlots lines up registers with HW fields.
+    bool hwHasDestField = false;
+    if (desc) {
+        for (const auto& f : desc->operandFields) {
+            if (f.isDest || f.isReadWrite) { hwHasDestField = true; break; }
+        }
     }
-    if (!irInst->srcs.empty()) {
-        asmInst->setSrcRegs(irInst->srcs);
+
+    if (!irInst->dests.empty() && !hwHasDestField) {
+        // HW has no dest field — logical dests are really src operands.
+        std::vector<StinkyRegister> merged;
+        merged.reserve(irInst->dests.size() + irInst->srcs.size());
+        merged.insert(merged.end(), irInst->dests.begin(), irInst->dests.end());
+        merged.insert(merged.end(), irInst->srcs.begin(), irInst->srcs.end());
+        asmInst->setSrcRegs(merged);
+    } else {
+        if (!irInst->dests.empty()) {
+            asmInst->setDestRegs(irInst->dests);
+        }
+        if (!irInst->srcs.empty()) {
+            asmInst->setSrcRegs(irInst->srcs);
+        }
     }
 
     // Copy comment
