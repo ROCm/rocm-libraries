@@ -20,10 +20,15 @@
 
 #pragma once
 
+#include <algorithm>
+#include <cerrno>
+#include <cstdlib>
 #include <iostream>
+#include <limits>
 #include <thread>
 
-#include <iostream>
+#include <cstdlib>
+#include <charconv>
 
 #ifndef _WIN32
 #include <sched.h>
@@ -39,21 +44,15 @@
 // CPU over-subscription when running multiple tests on the same node.
 static int getenv_OMP_NUM_THREADS()
 {
-    const char* env_raw       = std::getenv("OMP_NUM_THREADS");
+    const char* env_char       = std::getenv("OMP_NUM_THREADS");
     int         ompnumthreads = std::numeric_limits<int>::max();
-    if(env_raw != nullptr)
+    if(env_char != nullptr)
     {
-        try
-        {
-            ompnumthreads = std::stoi(env_raw);
-        }
-        catch(const std::invalid_argument& e)
-        {
-            std::cerr << "Error: OMP_NUM_THREADS is not a valid number.\n";
-        }
-        catch(const std::out_of_range& e)
-        {
-            std::cerr << "Error: OMP_NUM_THREADS is too large to fit into an int.\n";
+        auto [ptr, ec] = std::from_chars(env_char, env_char + std::strlen(env_char), ompnumthreads);
+        if (ec == std::errc::invalid_argument) {
+            std::cout << "OMP_NUM_THREADS is not a valid number.\n";
+        } else if (ec == std::errc::result_out_of_range) {
+            std::cout << "OMP_NUM_THREADS exceeds unsigned int limits.\n";
         }
     }
     return ompnumthreads;

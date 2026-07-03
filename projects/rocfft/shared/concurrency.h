@@ -20,10 +20,17 @@
 
 #pragma once
 
+#include <algorithm>
+#include <cerrno>
+#include <cstdlib>
 #include <iostream>
+#include <limits>
 #include <thread>
+#include <cstring>
 
-#include <iostream>
+
+#include <cstdlib>
+#include <charconv>
 
 #ifndef _WIN32
 #include <sched.h>
@@ -39,21 +46,18 @@
 // CPU over-subscription when running multiple tests on the same node.
 static int getenv_OMP_NUM_THREADS()
 {
-    const char* env_raw       = std::getenv("OMP_NUM_THREADS");
+    const char* env_char      = std::getenv("OMP_NUM_THREADS");
     int         ompnumthreads = std::numeric_limits<int>::max();
-    if(env_raw != nullptr)
+    if(env_char != nullptr)
     {
-        try
+        auto [ptr, ec] = std::from_chars(env_char, env_char + std::strlen(env_char), ompnumthreads);
+        if (ec == std::errc::invalid_argument)
         {
-            ompnumthreads = std::stoi(env_raw);
+            throw std::runtime_error("OMP_NUM_THREADS is not a valid number");
         }
-        catch(const std::invalid_argument& e)
+        else if (ec == std::errc::result_out_of_range)
         {
-            std::cerr << "Error: OMP_NUM_THREADS is not a valid number.\n";
-        }
-        catch(const std::out_of_range& e)
-        {
-            std::cerr << "Error: OMP_NUM_THREADS is too large to fit into an int.\n";
+            throw std::runtime_error("OMP_NUM_THREADS exceeds int limits");
         }
     }
     return ompnumthreads;
@@ -68,6 +72,5 @@ static unsigned int rocfft_concurrency()
         return std::min(CPU_COUNT(&cpuset), getenv_OMP_NUM_THREADS());
     }
 #endif
-
     return std::min<unsigned int>(std::thread::hardware_concurrency(), getenv_OMP_NUM_THREADS());
 }
