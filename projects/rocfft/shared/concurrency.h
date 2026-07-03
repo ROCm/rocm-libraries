@@ -23,14 +23,13 @@
 #include <algorithm>
 #include <cerrno>
 #include <cstdlib>
+#include <cstring>
 #include <iostream>
 #include <limits>
 #include <thread>
-#include <cstring>
 
-
-#include <cstdlib>
 #include <charconv>
+#include <cstdlib>
 
 #ifndef _WIN32
 #include <sched.h>
@@ -51,11 +50,11 @@ static int getenv_OMP_NUM_THREADS()
     if(env_char != nullptr)
     {
         auto [ptr, ec] = std::from_chars(env_char, env_char + std::strlen(env_char), ompnumthreads);
-        if (ec == std::errc::invalid_argument)
+        if(ec == std::errc::invalid_argument)
         {
             throw std::runtime_error("OMP_NUM_THREADS is not a valid number");
         }
-        else if (ec == std::errc::result_out_of_range)
+        else if(ec == std::errc::result_out_of_range)
         {
             throw std::runtime_error("OMP_NUM_THREADS exceeds int limits");
         }
