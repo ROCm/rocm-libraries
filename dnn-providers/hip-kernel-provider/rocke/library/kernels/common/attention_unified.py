@@ -585,6 +585,27 @@ def _enable_k_single_buffer(problem: UnifiedAttentionProblem) -> bool:
     return _enable_d128_small_tile(problem) and problem.block_size >= 32
 
 
+def _d256_gfx950_fast(problem: "UnifiedAttentionProblem") -> bool:
+    """AICK-1495: the D256 gfx950 bf16 prefill cohort routed to the 32x32
+    transposed fast path (autotuned 2026-07-04, ~1.0-1.6x torch.compile).
+    Gates the geometry selectors (num_warps/tile_size/block_m_per_warp) AND the
+    spec override in _tiled_spec_from_problem so the built kernel, the launch
+    meta (_get_2d_launch_meta), and the cache key (_tiled_cache_key) all agree
+    -- a mismatch launches the 128-thread kernel with a 64-thread block."""
+    return (
+        _resolve_attention_arch() == "gfx950"
+        and problem.head_size == 256
+        and problem.dtype == "bf16"
+        and not problem.use_fp8
+        and problem.sliding_window == 0
+        and problem.softcap == 0
+        and not problem.use_sinks
+        and not problem.use_alibi
+        and not problem.use_qq_bias
+        and problem.max_seqlen_q > 1
+    )
+
+
 def _select_2d_tile_size(problem: UnifiedAttentionProblem) -> int:
     """Choose ``tile_size`` (T) for the tiled 2D kernel.
 
@@ -612,6 +633,8 @@ def _select_2d_tile_size(problem: UnifiedAttentionProblem) -> int:
     ``T = block_size`` (single block per iter, 32 tokens) — measured
     1.15-1.30× win on every FP8 SW long-prefill shape.
     """
+    if _d256_gfx950_fast(problem):
+        return 64
     if _resolve_attention_arch() == "gfx1250":
         # gfx1250 v1 consumes exactly one 32-token paged-KV block per WMMA
         # iteration; wider T needs separate multi-block block-table handling.
@@ -754,6 +777,8 @@ def _select_2d_num_warps(problem: UnifiedAttentionProblem) -> int:
       - an LDS-budget check (``<= 96 KiB`` so we keep >= 1 CTA/CU on
         MI355X comfortably).
     """
+    if _d256_gfx950_fast(problem):
+        return 2
     if _resolve_attention_arch() == "gfx1250":
         # A gfx1250 workgroup is one wave32 in the v1 WMMA tiled path.
         return 1
@@ -2103,6 +2128,47 @@ def _tiled_spec_from_problem(
         # below -- gfx942's spec class does not declare it.)
         **_gfx950_schedule_fields,
     )
+    # --- AICK-1495: D256 gfx950 bf16 prefill fast route (autotuned 2026-07-04) ---
+    # The default heuristic routes head_size==256 to the 16x16 use_register_pv body,
+    # which measures ~0.24x torch.compile (AOTriton flash). An exhaustive knob sweep
+    # (runbook Step 0) found the 32x32 transposed constellation is LEGAL for D256
+    # (use_mfma_32x32 needs only head_size%16==0) and hits 1.24x torch @ Sq4096 /
+    # 0.81x @ Sq8192 on MI350X -- a ~4.5-5.9x kernel speedup. Route the clean D256
+    # prefill cohort to it. Narrow + arch/feature-guarded: every other shape is
+    # byte-identical. _resolve_lds_budget no-ops here (register_pv=False, fits 65KB).
+    if (
+        arch == "gfx950"
+        and problem.head_size == 256
+        and problem.dtype == "bf16"
+        and not problem.use_fp8
+        and problem.sliding_window == 0
+        and problem.softcap == 0
+        and not problem.use_sinks
+        and not problem.use_alibi
+        and not problem.use_qq_bias
+        and problem.max_seqlen_q > 1
+    ):
+        _spec = replace(
+            _spec,
+            tile_size=64,
+            block_m_per_warp=32,
+            use_mfma_32x32=True,
+            use_transposed_qk_32x32=True,
+            use_q_direct_reg=True,
+            use_transposed_half_local_pv=True,
+            use_transposed_scalar_state=True,
+            use_transposed_mask_once=True,
+            use_transposed_mask_limit=True,
+            use_mask_phase_split=True,
+            use_register_pv=False,
+            use_k_single_buffer=True,
+            use_v_double_buffer=False,
+            use_early_v_schedule=False,
+            use_sched_barrier=False,
+            use_softmax_mfma_interleave=False,
+            use_fast_paged_kv_desc=False,
+            use_mfma32_skip_legacy_qreg=False,
+        )
     return _resolve_lds_budget(_spec, problem)
 
 
@@ -2147,6 +2213,8 @@ def _select_2d_block_m_per_warp(problem: UnifiedAttentionProblem) -> int:
     Gate: ``max_seqlen_q > 256 and num_seqs >= 2``. Below this, mw=16
     is consistently within noise of mw=32 in the per-shape sweep.
     """
+    if _d256_gfx950_fast(problem):
+        return 32
     if _resolve_attention_arch() == "gfx1250":
         return 16
     # mw=32 (BLOCK_M = 32 * num_warps) only pays off when a path actually
