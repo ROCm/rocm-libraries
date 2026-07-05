@@ -317,10 +317,13 @@ else()
     BUILD_BYPRODUCTS ${googletest_LIBRARY}
     DOWNLOAD_NO_PROGRESS YES
   )
-  ExternalProject_Get_Property(googletest install_dir)
 
+  ExternalProject_Get_Property(googletest install_dir)
   set(Gtest_INCLUDE_DIR "${install_dir}/include")
   target_include_directories(rocfft-test PRIVATE "${Gtest_INCLUDE_DIR}")
+  
+  set(Gtest_INCLUDE_DIR ${CMAKE_CURRENT_BINARY_DIR}/googletest/include )
+  include_directories(${Gtest_INCLUDE_DIR})
   
   add_dependencies(rocfft-test googletest)
 endif()
