@@ -10345,7 +10345,7 @@ class KernelWriterAssembly(KernelWriter):
           dataType = kernel["ProblemType"]["MacDataType%s"%tcDataType if (tcDataType=='A' or tcDataType=='B') else "DataType"]
 
       isGlc, isSlc, isNT, scope, th, nv = decodeNonTemporal(
-          self.states.asmCaps, tP["NonTemporal"], _temporalHint(kernel, tc), _nonVolatile(kernel, tc))
+          self.states.asmCaps, tP["NonTemporal"], TemporalHint(tP["TemporalHint"]), _nonVolatile(kernel, tc))
       isLds = True if (kernel["DirectToLds%s"%tc] and not kernel["NonDTLTailLoop%s"%tc]) else False
       isTr = (tc == "A" or tc == "B") and kernel["enableGLTr%s"%tc]
       is16b = dataType.isHalf() or dataType.isBFloat16()
@@ -11323,7 +11323,7 @@ class KernelWriterAssembly(KernelWriter):
       bpe = tP["bpeGR"] if isAB else tP["bpe"]
       bpl = bpe * tP["glvw"]  # bytes per load
       isGlc, isSlc, isNT, scope, th, nv = decodeNonTemporal(
-          self.states.asmCaps, tP["NonTemporal"], _temporalHint(kernel, tc), _nonVolatile(kernel, tc))
+          self.states.asmCaps, tP["NonTemporal"], TemporalHint(tP["TemporalHint"]), _nonVolatile(kernel, tc))
       isLds = True if kernel["DirectToLds%s"%tc] else False
       isTr = (tc == "A" or tc == "B") and kernel["enableGLTr%s"%tc]
 
