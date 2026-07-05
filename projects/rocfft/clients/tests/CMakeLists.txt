@@ -305,12 +305,11 @@ if( BUILD_CLIENTS_TESTS_OPENMP )
   )
 endif()
 
-find_package( GTest QUIET 1.11 )
+find_package( GTest 1.17 QUIET )
 if( GTest_FOUND )
   target_link_libraries( rocfft-test PRIVATE GTest::gtest )
 else()
-  set(googletest_LIBRARY ${CMAKE_CURRENT_BINARY_DIR}/googletest/lib/libgtest${CMAKE_STATIC_LIBRARY_SUFFIX} )
-  message(STATUS "googletest_LIBRARY: ${googletest_LIBRARY}")
+  set(googletest_LIBRARY ${CMAKE_CURRENT_BINARY_DIR}/googletest/lib/${CMAKE_STATIC_LIBRARY_PREFIX}gtest${CMAKE_STATIC_LIBRARY_SUFFIX} )
   ExternalProject_Add(googletest
     URL https://github.com/google/googletest/releases/download/v1.17.0/googletest-1.17.0.tar.gz
     URL_HASH SHA256=65fab701d9829d38cb77c14acdc431d2108bfdbf8979e40eb8ae567edf10b27c
@@ -319,11 +318,9 @@ else()
     DOWNLOAD_NO_PROGRESS YES
   )
   ExternalProject_Get_Property(googletest install_dir)
-  set_property(TARGET rocfft-test PROPERTY IMPORTED_LOCATION ${install_dir}/lib/libgtest${CMAKE_STATIC_LIBRARY_SUFFIX})
-  
-  set(Gtest_INCLUDE_DIR ${CMAKE_CURRENT_BINARY_DIR}/googletest/include )
-  message(STATUS "Gtest_INCLUDE_DIR: ${Gtest_INCLUDE_DIR}")
-  include_directories(${Gtest_INCLUDE_DIR})
+
+  set(Gtest_INCLUDE_DIR "${install_dir}/include")
+  target_include_directories(rocfft-test PRIVATE "${Gtest_INCLUDE_DIR}")
   
   add_dependencies(rocfft-test googletest)
 endif()
