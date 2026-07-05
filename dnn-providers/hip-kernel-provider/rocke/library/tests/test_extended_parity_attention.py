@@ -61,6 +61,7 @@ class TestAttentionParityLibrary(unittest.TestCase):
             text=True,
             timeout=timeout,
         )
+
         return r.returncode, (r.stdout + r.stderr)
 
     def test_extended_parity_attention(self):
