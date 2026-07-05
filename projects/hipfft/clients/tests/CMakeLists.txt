@@ -366,7 +366,7 @@ else()
   endif()
 endif()
 
-find_package( GTest QUIET 1.11 )
+find_package( GTest 1.17 QUIET )
 
 if( GTest_FOUND )
   target_include_directories( hipfft-test PRIVATE $<BUILD_INTERFACE:${GTEST_INCLUDE_DIRS}> )
@@ -383,11 +383,9 @@ else()
     DOWNLOAD_NO_PROGRESS YES
   )
   ExternalProject_Get_Property(googletest install_dir)
-  set_property(TARGET hipfft-test PROPERTY IMPORTED_LOCATION ${install_dir}/lib/libgtest${CMAKE_STATIC_LIBRARY_SUFFIX})
-  
-  set(Gtest_INCLUDE_DIR ${CMAKE_CURRENT_BINARY_DIR}/googletest/include )
-  message(STATUS "Gtest_INCLUDE_DIR: ${Gtest_INCLUDE_DIR}")
-  include_directories(${Gtest_INCLUDE_DIR})
+
+  set(Gtest_INCLUDE_DIR "${install_dir}/include")
+  target_include_directories(rocfft-test PRIVATE "${Gtest_INCLUDE_DIR}")
   
   add_dependencies(hipfft-test googletest)
 endif()
