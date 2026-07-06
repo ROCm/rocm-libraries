@@ -37,7 +37,7 @@ for what is actually exercised vs. manual/diagnostic/demo.
 > has no default-pytest coverage**: the C-engine vs Python-engine equivalence is
 > owned by the byte-identity gate (which builds `rocke_core` and byte-compares the
 > 65 `*_emit.c` outputs to `*_emit.py`), and the binding itself by the
-> consistency proof documented in `Cpp/bindings/README.md`.
+> consistency proof documented in `cpp/bindings/README.md`.
 
 ## Execution categories
 

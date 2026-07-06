@@ -52,7 +52,7 @@ Use this skill when:
 Example commands from the CK DSL repo root:
 
 ```bash
-export PYTHONPATH=Python
+export PYTHONPATH=python
 
 # If the kernel artifact is already built, inspect the HSACO/code object.
 llvm-objdump -d --mcpu=<gfx_arch> path/to/kernel.hsaco > /tmp/kernel.isa

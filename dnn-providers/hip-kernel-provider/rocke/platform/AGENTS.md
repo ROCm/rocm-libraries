@@ -18,13 +18,13 @@ Spec dataclass -> build_*() -> KernelDef -> lower -> .ll -> comgr -> HSACO -> la
 
 ```
 rocKE/
-  Python/rocke/        # authoring frontend (import rocke)
+  python/rocke/        # authoring frontend (import rocke)
     core/               # IR, passes, lower_llvm/lower_hip, arch, isa, backend, serialize
     helpers/            # tensor views, atoms, epilogues, schedules, manifest, ...
     instances/<arch>/   # spec-driven kernels (common, gfx942, gfx950, gfx1151, gfx1201, gfx1250)
     runtime/            # comgr, hip_module, launcher (Python-only)
     dispatch/ analysis/ benchmark/ heuristics/ examples/   # Python-only
-  Cpp/                  # C++20 engine (mirrors the Python layers)
+  cpp/                  # C++20 engine (mirrors the Python layers)
     include/rocke/        # public extern "C" ABI (flat) - the provider/bindings contract
     core/ helpers/ instances/ support/
     bindings/           # rocke_engine pybind module -> links librocke_core.a
@@ -35,7 +35,7 @@ rocKE/
 
 ## The #1 invariant: byte-identity
 
-The Python engine (`core/lower_llvm.py`) and the C++ engine (`Cpp/`) MUST emit the
+The Python engine (`core/lower_llvm.py`) and the C++ engine (`cpp/`) MUST emit the
 **same LLVM-IR bytes** for every kernel family. Any op/instance/atom/fusion/arch
 change must be made in **both** engines in the same change. Prove it:
 
@@ -123,7 +123,7 @@ PYTHONPATH=<rocKE>/Python ~/rocke-venv/bin/python \
 
 If the current machine has no suitable local GPU, do **not** fake the lane or use
 CPU torch. Use the remote GPU path instead: see
-`Python/rocke/benchmark/remote_test/README.md`. In short, configure a site-local
+`python/rocke/benchmark/remote_test/README.md`. In short, configure a site-local
 SSH/Slurm target outside the repo (for example via `~/.rocke_env`), then run:
 
 ```bash

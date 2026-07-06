@@ -373,7 +373,7 @@ def main():
             f"ir_lower_cli not found: {cli}\n"
             "build it: cmake -S <rocKE> -B /tmp/rocke_irart -DCMAKE_BUILD_TYPE="
             "Release && cmake --build /tmp/rocke_irart --target rocke_core -j && "
-            "c++ -std=c++20 -I <rocKE>/Cpp/include <rocKE>/tests/core/"
+            "c++ -std=c++20 -I <rocKE>/cpp/include <rocKE>/tests/core/"
             "ir_lower_cli.cpp /tmp/rocke_irart/librocke_core.a -lm "
             "-o /tmp/rocke_irart/ir_lower_cli"
         )

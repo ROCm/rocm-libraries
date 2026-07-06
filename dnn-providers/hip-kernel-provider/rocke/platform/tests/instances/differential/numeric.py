@@ -51,7 +51,7 @@ from typing import Any, Dict, List, Optional, Tuple
 
 HERE = Path(__file__).resolve().parent
 ROCKE = HERE.parents[2]  # rocKE root (differential -> instances -> tests -> rocKE)
-PYROOT = ROCKE / "Python"  # holds rocke
+PYROOT = ROCKE / "python"  # holds rocke
 if str(PYROOT) not in sys.path:
     sys.path.insert(0, str(PYROOT))
 
