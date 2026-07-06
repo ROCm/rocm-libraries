@@ -81,9 +81,13 @@ constexpr const char* kTailLoopMarker = "Tail Loop";
 ///     is wrapped in a LoopCounterL drain gate so it is suppressed on exactly
 ///     the drain iterations whose paired counterpart is also skipped:
 ///       * Rule 4: ASYMMETRIC gates on the wait+signal handshake -- the WAIT
-///         is skipped at `LCL <= pgrValue` and the SIGNAL one stage earlier at
-///         `LCL <= pgrValue+1`, both lowered by the hoisted `lclPreDecrement`
-///         so the gate keys off the same absolute iteration. When `pgrValue == 0`
+///         is skipped at `LCL <= pgrValue + pubPointIndex` and the SIGNAL one
+///         stage earlier at `LCL <= pgrValue+1` (uniform for every pub point),
+///         both lowered by the hoisted `lclPreDecrement` so the gate keys off
+///         the same absolute iteration. `pubPointIndex` (0 .. pgrValue-1) counts
+///         Rule-4 publication points in kernel order so PGR>1 kernels skip the
+///         2nd+ wait one stage later at drain (e.g. PGR=2: waits at 2,3 not 2,2).
+///         When `pgrValue == 0`
 ///         the wait-side threshold would never skip while the signal-side gate
 ///         still would (hang); Rules 2/3 are suppressed and Rule 4 emits a bare
 ///         wait plus an LCL-gated signal only (see `insertClusterBarrierHandshakeBefore`).
@@ -338,14 +342,14 @@ bool isLoopCounterLSelfDecrement(const StinkyInstruction& inst, int* outImm) {
 /// the containing basic block's entry and \p anchor (exclusive), scanning
 /// backward and stopping at the BB boundary.
 ///
-/// Rule 4's asymmetric drain-gate thresholds (`pgrValue` for the WAIT,
-/// `pgrValue+1` for the SIGNAL) are calibrated against the loop counter value
-/// at basic-block entry. Different `ScheduleIterAlg` settings may hoist the
-/// per-iteration `s_sub LCL, LCL, 1` ABOVE the workgroup-wait anchor, so the
-/// gate then reads an already-decremented LCL. To keep the gate firing on the
-/// identical absolute iteration regardless of where the decrement landed,
-/// the drain gate subtracts this sum from both thresholds (WAIT: pgr -
-/// lclPreDecrement; SIGNAL: pgr+1 - lclPreDecrement). Decrements
+/// Rule 4's asymmetric drain-gate thresholds (`pgrValue + pubPointIndex` for
+/// the WAIT, `pgrValue+1` for the SIGNAL) are calibrated against the loop
+/// counter value at basic-block entry. Different `ScheduleIterAlg` settings may
+/// hoist the per-iteration `s_sub LCL, LCL, 1` ABOVE the workgroup-wait anchor,
+/// so the gate then reads an already-decremented LCL. To keep the gate firing
+/// on the identical absolute iteration regardless of where the decrement landed,
+/// the drain gate subtracts this sum from both thresholds (WAIT: pgr +
+/// pubPointIndex - lclPreDecrement; SIGNAL: pgr+1 - lclPreDecrement). Decrements
 /// that remain BELOW the anchor (the default schedule) are not seen by the
 /// backward scan, so the sum is 0 and the thresholds are left untouched. (Not
 /// consulted when the drain gate is disabled, i.e. `kClusterBarrierDrainGateEnabled
@@ -603,7 +607,7 @@ void insertWorkgroupBarrierSyncBefore(IRBase* anchor, AsmIRBuilder& irBuilder, G
 ///             already exists in the IR.
 ///   - Rule 4 signal half: `s_cmp_le_i32` / imm=pgr+1 (minus any LCL
 ///             pre-decrement) when the drain gate is enabled. The paired WAIT
-///             is gated at imm=pgr via
+///             is gated at imm=pgr+pubPointIndex via
 ///             `insertLoopCounterLGatedClusterBarrierWaitBefore`. When the
 ///             drain gate is disabled, Rule 4 emits the ungated shape via
 ///             `insertClusterBarrierSignalOnlyBefore` /
@@ -732,9 +736,11 @@ std::string makeRule4DrainGateCmpComment(const char* barrierHalf, int pgrNominal
 ///   1. The wait+signal handshake (wait first, then the WaveIdx-gated signal):
 ///        - drain-gated (`kClusterBarrierDrainGateEnabled == true`), `pgrValue >= 1`:
 ///          each half is wrapped in its own asymmetric LoopCounterL skip -- the WAIT
-///          (before \p waitAnchor) is skipped at `LCL <= pgrValue - lclPreDecrement`
-///          and the SIGNAL (before \p signalAnchor) one stage earlier at
-///          `LCL <= pgrValue+1 - lclPreDecrement`. The paired `tensor_load_to_lds`
+///          (before \p waitAnchor) is skipped at
+///          `LCL <= pgrValue + pubPointIndex - lclPreDecrement` and the SIGNAL
+///          (before \p signalAnchor) one stage earlier at
+///          `LCL <= pgrValue+1 - lclPreDecrement` (same for every pub point).
+///          The paired `tensor_load_to_lds`
 ///          is disabled (TDM enable dword = 0) on those last PGR iterations, so
 ///          the handshake is unnecessary there; the one-stage offset keeps
 ///          `signal -3` / `wait -3` balanced despite the ping-pong pairing (each
@@ -767,8 +773,9 @@ std::string makeRule4DrainGateCmpComment(const char* barrierHalf, int pgrNominal
 /// compare, already folded into its operands).
 void insertClusterBarrierHandshakeBefore(IRBase* signalAnchor, IRBase* waitAnchor,
                                          AsmIRBuilder& irBuilder, GfxArchID archId, int pgrValue,
-                                         StinkyInstruction* liveSccCmp, int lclPreDecrement,
-                                         uint64_t waitGen, uint64_t signalGen) {
+                                         int pubPointIndex, StinkyInstruction* liveSccCmp,
+                                         int lclPreDecrement, uint64_t waitGen,
+                                         uint64_t signalGen) {
     if (kClusterBarrierDrainGateEnabled) {
         if (pgrValue == 0) {
             // PGR=0: no prefetch drain iterations -- Rules 2/3 are suppressed and
@@ -783,15 +790,17 @@ void insertClusterBarrierHandshakeBefore(IRBase* signalAnchor, IRBase* waitAncho
                 makeRule4DrainGateCmpComment("signal", pgrValue + 1, lclPreDecrement),
                 "skip cluster signal (drain)", signalGen);
         } else {
-            // WAIT: nominal drain threshold `LCL <= pgrValue`. When the schedule
-            // hoisted `s_sub LCL` above the anchor, `lclPreDecrement` lowers the
-            // compare immediate (e.g. pgr 1 with one hoisted decrement -> 0).
+            // WAIT: nominal drain threshold `LCL <= pgrValue + pubPointIndex`.
+            // Later prefetch publication points (pubPointIndex > 0) skip their
+            // wait one stage later so PGR>1 drain leaves exactly one in-loop wait
+            // at LCL == pgr+1. When the schedule hoisted `s_sub LCL` above the
+            // anchor, `lclPreDecrement` lowers the compare immediate.
             // Planted before `waitAnchor` (immediately above the workgroup signal).
-            const int waitThreshold = pgrValue - lclPreDecrement;
+            const int waitThreshold = pgrValue + pubPointIndex - lclPreDecrement;
             const int signalThreshold = pgrValue + 1 - lclPreDecrement;
             insertLoopCounterLGatedClusterBarrierWaitBefore(
                 waitAnchor, irBuilder, archId, GFX::s_cmp_le_i32, waitThreshold,
-                makeRule4DrainGateCmpComment("wait", pgrValue, lclPreDecrement),
+                makeRule4DrainGateCmpComment("wait", pgrValue + pubPointIndex, lclPreDecrement),
                 "skip cluster wait (drain)", waitGen);
             // SIGNAL: nominal threshold one stage earlier at `LCL <= pgrValue+1`,
             // with the same `lclPreDecrement` compensation on the immediate.
@@ -1208,6 +1217,7 @@ class InsertClusterBarrierPassImpl : public Pass {
         // generation -- the offset ping-pong. Function-scoped so every kernel
         // numbers from 0. See the skip-label prefix comments near the top.
         uint64_t clusterGen = 0;
+        int rule4PubPointCounter = 0;
         int64_t lastSignalGen = -1;
         auto nextSignalGen = [&]() {
             const uint64_t gen = clusterGen++;
@@ -1570,9 +1580,11 @@ class InsertClusterBarrierPassImpl : public Pass {
                     (wgSignal != nullptr) ? static_cast<IRBase*>(wgSignal) : signalAnchor;
                 const uint64_t waitGen = drainWaitGen();
                 const uint64_t signalGen = nextSignalGen();
+                const int pubPointIndex = (pgrValue_ > 0) ? (rule4PubPointCounter % pgrValue_) : 0;
+                ++rule4PubPointCounter;
                 insertClusterBarrierHandshakeBefore(signalAnchor, waitAnchor, irBuilder, archId,
-                                                    pgrValue_, liveSccCmp, lclPreDecrement, waitGen,
-                                                    signalGen);
+                                                    pgrValue_, pubPointIndex, liveSccCmp,
+                                                    lclPreDecrement, waitGen, signalGen);
                 (void)trigger;  // queued for ordering only; insertion uses the anchors
             }
             // Rule 5a -- signal-only after the tail loop's preceding workgroup wait.
