@@ -210,7 +210,7 @@ protected:
                 meanAttr.set_uid(uid++);
             }
             tensors.mean = std::make_shared<TensorAttributes>(std::move(meanAttr));
-            lnAttrs.set_mean(std::move(tensors.mean));
+            lnAttrs.set_mean(tensors.mean);
 
             auto invVarianceAttr = makeTensorAttributes(
                 "inv_variance", DataType::FLOAT, tensorBundle.invVarianceTensor);
@@ -219,7 +219,7 @@ protected:
                 invVarianceAttr.set_uid(uid++);
             }
             tensors.invVariance = std::make_shared<TensorAttributes>(std::move(invVarianceAttr));
-            lnAttrs.set_inv_variance(std::move(tensors.invVariance));
+            lnAttrs.set_inv_variance(tensors.invVariance);
         }
 
         auto outputTensors
@@ -251,7 +251,7 @@ protected:
         variantPack[tensors.x->get_uid()] = tensorBundle.xTensor.memory().deviceData();
         variantPack[tensors.scale->get_uid()] = tensorBundle.scaleTensor.memory().deviceData();
         variantPack[tensors.epsilon->get_uid()] = tensorBundle.epsilonTensor.memory().deviceData();
-        variantPack[tensors.dy->get_uid()] = tensorBundle.dyTensor.memory().deviceData();
+        variantPack[tensors.dx->get_uid()] = tensorBundle.dxTensor.memory().deviceData();
         variantPack[tensors.dscale->get_uid()] = tensorBundle.dscaleTensor.memory().deviceData();
         variantPack[tensors.dbias->get_uid()] = tensorBundle.dbiasTensor.memory().deviceData();
 
