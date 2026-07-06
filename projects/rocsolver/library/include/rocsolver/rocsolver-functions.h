@@ -26933,15 +26933,18 @@ ROCSOLVER_EXPORT rocblas_status rocsolver_zsytrf_strided_batched(rocblas_handle 
 
     \f[
         M = \left[\begin{array}{cccc}
-        E_1 \\
-        A_1 & E_2\\
-         & \ddots & \ddots \\
-         &  & A_{n-1} & E_n
-        \end{array}\right] \left[\begin{array}{cccc}
-        I & F_1 \\
-         & \ddots & \ddots \\
-         &  & I & F_{n-1}\\
-         &  &  & I
+        E_1 &        &         &    \\
+        A_1 & E_2    &         &    \\
+            & \ddots & \ddots  &    \\
+            &        & A_{n-1} & E_n
+        \end{array}\right] 
+
+	\left[
+	\begin{array}{cccc}
+        I & F_1    &        &        \\
+          &        & \ddots & \ddots \\
+	  &        & I      & F_{n-1}\\
+          &        &        & I
         \end{array}\right] = LU
     \f]
 
@@ -27038,11 +27041,11 @@ ROCSOLVER_EXPORT rocblas_status rocsolver_zgeblttrf_npvt(rocblas_handle handle,
 
     \f[
         M_l = \left[\begin{array}{ccccc}
-        B_{l1} & C_{l1}\\
-        A_{l1} & B_{l2} & C_{l2}\\
-         & \ddots & \ddots & \ddots \\
-         &  & A_{l(n-2)} & B_{l(n-1)} & C_{l(l-1)}\\
-         &  &  & A_{l(n-1)} & B_{ln}
+        B_{l1} & C_{l1} &            &            &            \\
+        A_{l1} & B_{l2} & C_{l2}     &            &            \\
+               & \ddots & \ddots     & \ddots     &            \\
+               &        & A_{l(n-2)} & B_{l(n-1)} & C_{l(l-1)} \\
+               &        &            & A_{l(n-1)} & B_{ln}
         \end{array}\right]
     \f]
 
@@ -27050,16 +27053,18 @@ ROCSOLVER_EXPORT rocblas_status rocsolver_zgeblttrf_npvt(rocblas_handle handle,
 
     \f[
         M_l = \left[\begin{array}{cccc}
-        E_{l1} \\
-        A_{l1} & E_{l2}\\
-         & \ddots & \ddots \\
-         &  & A_{l(n-1)} & E_{ln}
-        \end{array}\right] \left[\begin{array}{cccc}
-        I & F_{l1} \\
-         & \ddots & \ddots \\
-         &  & I & F_{l(n-1)}\\
-         &  &  & I
-        \end{array}\right] = L_lU_l
+        E_{l1} &        &            &      \\
+        A_{l1} & E_{l2} &            &      \\
+               & \ddots & \ddots     &      \\
+               &        & A_{l(n-1)} & E_{ln}
+        \end{array}\right] 
+	
+	\left[\begin{array}{cccc}
+        I & F_{l1}  &          &            \\
+          & \ddots  & \ddots   &            \\
+          &         & I        & F_{l(n-1)} \\
+          &         &          & I
+        \end{array}\right] = L_l U_l
     \f]
 
     where the blocks \f$E_{li}\f$ and \f$F_{li}\f$ are general blocks of size ``nb``. The
@@ -27167,11 +27172,11 @@ ROCSOLVER_EXPORT rocblas_status rocsolver_zgeblttrf_npvt_batched(rocblas_handle 
 
     \f[
         M_l = \left[\begin{array}{ccccc}
-        B_{l1} & C_{l1}\\
-        A_{l1} & B_{l2} & C_{l2}\\
-         & \ddots & \ddots & \ddots \\
-         &  & A_{l(n-2)} & B_{l(n-1)} & C_{l(n-1)}\\
-         &  &  & A_{l(n-1)} & B_{ln}
+        B_{l1} & C_{l1}     &            &            &             \\
+        A_{l1} & B_{l2}     & C_{l2}     &            &             \\
+               & \ddots     & \ddots     & \ddots     &             \\
+               &            & A_{l(n-2)} & B_{l(n-1)} & C_{l(n-1)}  \\
+               &            &            & A_{l(n-1)} & B_{ln}
         \end{array}\right]
     \f]
 
@@ -27179,16 +27184,18 @@ ROCSOLVER_EXPORT rocblas_status rocsolver_zgeblttrf_npvt_batched(rocblas_handle 
 
     \f[
         M_l = \left[\begin{array}{cccc}
-        E_{l1} \\
-        A_{l1} & E_{l2}\\
-         & \ddots & \ddots \\
-         &  & A_{l(n-1)} & E_{ln}
-        \end{array}\right] \left[\begin{array}{cccc}
-        I & F_{l1} \\
-         & \ddots & \ddots \\
-         &  & I & F_{l(n-1)}\\
-         &  &  & I
-        \end{array}\right] = L_lU_l
+        E_{l1} &        &            &       \\
+        A_{l1} & E_{l2} &            &       \\
+               & \ddots & \ddots     &       \\
+               &        & A_{l(n-1)} & E_{ln}
+        \end{array}\right] 
+	
+	\left[\begin{array}{cccc}
+        I & F_{l1} &         &             \\
+          & \ddots & \ddots  &             \\
+          &        & I       & F_{l(n-1)}  \\
+          &        &         & I
+        \end{array}\right] = L_l U_l
     \f]
 
     where the blocks \f$E_{li}\f$ and \f$F_{li}\f$ are general blocks of size ``nb``. The
@@ -27326,11 +27333,11 @@ ROCSOLVER_EXPORT rocblas_status
 
     \f[
         M_l = \left[\begin{array}{ccccc}
-        B_{l1} & C_{l1}\\
-        A_{l1} & B_{l2} & C_{l2}\\
-         & \ddots & \ddots & \ddots \\
-         &  & A_{l(n-2)} & B_{l(n-1)} & C_{l(n-1)}\\
-         &  &  & A_{l(n-1)} & B_{ln}
+        B_{l1} & C_{l1}   &            &            &           \\
+        A_{l1} & B_{l2}   & C_{l2}     &            &           \\
+               & \ddots   & \ddots     & \ddots     &           \\
+               &          & A_{l(n-2)} & B_{l(n-1)} & C_{l(n-1)}\\
+               &          &            & A_{l(n-1)} & B_{ln}
         \end{array}\right]
     \f]
 
@@ -27338,16 +27345,18 @@ ROCSOLVER_EXPORT rocblas_status
 
     \f[
         M_l = \left[\begin{array}{cccc}
-        E_{l1} \\
-        A_{l1} & E_{l2}\\
-         & \ddots & \ddots \\
-         &  & A_{l(n-1)} & E_{ln}
-        \end{array}\right] \left[\begin{array}{cccc}
-        I & F_{l1} \\
-         & \ddots & \ddots \\
-         &  & I & F_{l(n-1)}\\
-         &  &  & I
-        \end{array}\right] = L_lU_l
+        E_{l1} &         &            &     \\
+        A_{l1} & E_{l2}  &            &     \\
+               & \ddots  & \ddots     &     \\
+               &         & A_{l(n-1)} & E_{ln}
+        \end{array}\right] 
+	
+	\left[\begin{array}{cccc}
+        I & F_{l1}  &        &            \\
+          & \ddots  & \ddots &            \\
+          &         & I      & F_{l(n-1)} \\
+          &         &        & I
+        \end{array}\right] = L_l U_l
     \f]
 
     where the blocks \f$E_{li}\f$ and \f$F_{li}\f$ are general blocks of size ``nb``. The
