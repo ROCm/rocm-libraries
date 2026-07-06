@@ -117,8 +117,9 @@ def test_gfx950_pci_chip_id_0x75a8_differs_from_default():
     """gfx950 pci_chip_id 0x75a8 uses alternate mem constants vs omitted / id75a0 path."""
     args = {
         "arch": origami.architecture_t.gfx950,
-        "N_CU": 304,
+        "N_CU": 256,
         "lds_capacity": 64 * 1024,
+        "rf_capacity": 512 * 1024,
         "L2_capacity": 32 * 1024 * 1024,
         "compute_clock_khz": 2_100_000,
     }

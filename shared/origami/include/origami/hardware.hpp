@@ -68,14 +68,6 @@ class ORIGAMI_EXPORT hardware_t {
   };
 
   /**
-   * @brief Microbenchmark-derived memory model row for gfx950 (ISA is unchanged).
-   *
-   * Use @ref id75a0 for the primary tuned gfx950 part. Use @ref id75a8 for an
-   * alternate SKU with different mem perf ratios and per-workgroup bandwidth fit.
-   */
-  enum class gfx950_constants_profile { id75a0, id75a8 };
-
-  /**
    * @brief Convert architecture name string to architecture_t enum.
    *
    * @param str Architecture name as string (e.g., "gfx90a", "gfx942")

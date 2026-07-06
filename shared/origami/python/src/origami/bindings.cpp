@@ -34,11 +34,6 @@ NB_MODULE(origami, m) {
       .value("gfx1250", hardware_t::architecture_t::gfx1250)
       .export_values();
 
-  nanobind::enum_<hardware_t::gfx950_constants_profile>(m, "gfx950_constants_profile")
-      .value("id75a0", hardware_t::gfx950_constants_profile::id75a0)
-      .value("id75a8", hardware_t::gfx950_constants_profile::id75a8)
-      .export_values();
-
   nanobind::enum_<origami::data_type_t>(m, "data_type_t")
       .value("Float", origami::data_type_t::Float)
       .value("ComplexFloat", origami::data_type_t::ComplexFloat)
@@ -299,20 +294,7 @@ NB_MODULE(origami, m) {
   // Needs named arguments; optional pci_chip_id for gfx950 memory model row (e.g. 0x75a8)
   m.def(
       "get_hardware_for_arch",
-      [](hardware_t::architecture_t arch,
-         size_t N_CU,
-         size_t lds_capacity,
-         size_t L2_capacity,
-         int compute_clock_khz,
-         std::optional<int> pci_chip_id) {
-        return hardware_t::get_hardware_for_arch(arch,
-                                                 N_CU,
-                                                 lds_capacity,
-                                                 rf_capacity,
-                                                 L2_capacity,
-                                                 compute_clock_khz,
-                                                 pci_chip_id);
-      },
+      &hardware_t::get_hardware_for_arch,
       nanobind::arg("arch"),
       nanobind::arg("N_CU"),
       nanobind::arg("lds_capacity"),
@@ -320,7 +302,7 @@ NB_MODULE(origami, m) {
       nanobind::arg("L2_capacity"),
       nanobind::arg("compute_clock_khz"),
       nanobind::arg("pci_chip_id") = nanobind::none(),
-      "Create hardware object for a specific architecture with specified parameters. "
+      "Create hardware object for a specific architecture with specified parameters."
       "For gfx950, optional pci_chip_id selects the microbenchmark memory-constant row "
       "(0x75a8 -> id75a8; absent or other values -> id75a0).");
   m.def("datatype_to_bits", &origami::datatype_to_bits, "Return the number of bits in a datatype");
