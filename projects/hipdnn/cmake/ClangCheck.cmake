@@ -30,19 +30,9 @@ verifyamdrocmcompiler(${CMAKE_CXX_COMPILER} "C++")
 if(ENABLE_CLANG_FORMAT)
     include(${CMAKE_CURRENT_LIST_DIR}/CheckToolVersion.cmake)
 
-    set(CLANG_FORMAT_PRUNE
-        -path
-        "./build"
-        -prune
-        -o
-        -path
-        "./flatbuffers_sdk/include/hipdnn_flatbuffers_sdk/data_objects"
-        -prune
-        -o
-    )
-
     # Find and check clang-format version using unified function
     findandcheckclangformat()
+    set(_CLANG_FORMAT_SCRIPT "${CMAKE_CURRENT_LIST_DIR}/RunClangFormat.cmake")
 
     # Use prefixed target names in superbuild to avoid collisions
     if(ROCM_LIBS_SUPERBUILD)
@@ -55,20 +45,20 @@ if(ENABLE_CLANG_FORMAT)
 
     add_custom_target(
         ${_CHECK_FORMAT_TARGET}
-        COMMAND find . ${CLANG_FORMAT_PRUNE}
-                \( -name "*.cpp" -o -name "*.hpp" -o -name "*.c" -o -name "*.h" \)
-                -exec ${CLANG_FORMAT_BINARY} --dry-run --Werror {} +
-        WORKING_DIRECTORY ${PROJECT_SOURCE_DIR}
+        COMMAND
+            "${CMAKE_COMMAND}" "-DCLANG_FORMAT_BINARY=${CLANG_FORMAT_BINARY}"
+            "-DFORMAT_SOURCE_DIR=${PROJECT_SOURCE_DIR}" "-DFORMAT_MODE=check" -P
+            "${_CLANG_FORMAT_SCRIPT}"
         VERBATIM
         COMMENT "Checking code format (${PROJECT_NAME})"
     )
 
     add_custom_target(
         ${_FORMAT_TARGET}
-        COMMAND find . ${CLANG_FORMAT_PRUNE}
-                \( -name "*.cpp" -o -name "*.hpp" -o -name "*.c" -o -name "*.h" \)
-                -exec ${CLANG_FORMAT_BINARY} --verbose -i {} +
-        WORKING_DIRECTORY ${PROJECT_SOURCE_DIR}
+        COMMAND
+            "${CMAKE_COMMAND}" "-DCLANG_FORMAT_BINARY=${CLANG_FORMAT_BINARY}"
+            "-DFORMAT_SOURCE_DIR=${PROJECT_SOURCE_DIR}" "-DFORMAT_MODE=format" -P
+            "${_CLANG_FORMAT_SCRIPT}"
         VERBATIM
         COMMENT "Formatting code (${PROJECT_NAME})"
     )
