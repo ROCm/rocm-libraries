@@ -292,8 +292,7 @@ struct pointer_traits<const void*>
 };
 
 template <typename FromPtr, typename ToPtr>
-struct is_pointer_system_convertible
-    : _THRUST_STD::is_convertible<typename iterator_system<FromPtr>::type, typename iterator_system<ToPtr>::type>
+struct is_pointer_system_convertible : _THRUST_STD::is_convertible<iterator_system_t<FromPtr>, iterator_system_t<ToPtr>>
 {};
 
 template <typename FromPtr, typename ToPtr>
