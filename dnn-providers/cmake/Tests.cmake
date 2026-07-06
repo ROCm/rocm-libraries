@@ -296,16 +296,21 @@ function(_add_test_target_internal APPEND_FUNCTION_SUFFIX TARGET WORKING_DIR)
 
     install(TARGETS ${TARGET} RUNTIME DESTINATION ${CMAKE_INSTALL_BINDIR})
 
-    add_test(NAME ${TARGET} COMMAND ${TARGET} WORKING_DIRECTORY ${WORKING_DIR})
+    # YAML-driven categorization (currently miopen-provider only) generates
+    # its own tiered suites via apply_test_category_labels() after this
+    # function returns; registering the raw, unfiltered ${TARGET} test here
+    # would just duplicate the *_full_suite entry with zero labels (never
+    # selectable via `ctest -L`, always run by a bare `ctest`).
     if(DNN_PROVIDER_CTEST_CATEGORIES_YAML)
-        _apply_provider_ctest_category_labels(${TARGET})
-    else()
-        set(ALL_LABELS ${APPEND_FUNCTION_SUFFIX})
-        if(EXTRA_LABELS)
-            list(APPEND ALL_LABELS ${EXTRA_LABELS})
-        endif()
-        set_tests_properties(${TARGET} PROPERTIES LABELS "${ALL_LABELS}")
+        return()
     endif()
+
+    add_test(NAME ${TARGET} COMMAND ${TARGET} WORKING_DIRECTORY ${WORKING_DIR})
+    set(ALL_LABELS ${APPEND_FUNCTION_SUFFIX})
+    if(EXTRA_LABELS)
+        list(APPEND ALL_LABELS ${EXTRA_LABELS})
+    endif()
+    set_tests_properties(${TARGET} PROPERTIES LABELS "${ALL_LABELS}")
 
     if(TEST_ENVIRONMENT)
         set_tests_properties(${TARGET} PROPERTIES ENVIRONMENT "${TEST_ENVIRONMENT}")
