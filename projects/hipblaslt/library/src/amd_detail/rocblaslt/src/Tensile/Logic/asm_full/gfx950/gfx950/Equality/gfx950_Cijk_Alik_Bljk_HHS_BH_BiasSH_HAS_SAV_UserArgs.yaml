@@ -61785,7 +61785,7 @@
     SpaceFillingAlgo: []
     StaggerU: 8
     StaggerUMapping: 0
-    StaggerUStride: 1024.0
+    StaggerUStride: 1024
     StorePriorityOpt: false
     StoreRemapVectorWidth: 0
     StoreSwapAddr: false
@@ -64955,7 +64955,7 @@
     SpaceFillingAlgo: []
     StaggerU: 8
     StaggerUMapping: 0
-    StaggerUStride: 512.0
+    StaggerUStride: 512
     StorePriorityOpt: false
     StoreRemapVectorWidth: 0
     StoreSwapAddr: false
@@ -65272,7 +65272,7 @@
     SpaceFillingAlgo: []
     StaggerU: 16
     StaggerUMapping: 0
-    StaggerUStride: 1024.0
+    StaggerUStride: 1024
     StorePriorityOpt: true
     StoreRemapVectorWidth: 0
     StoreSwapAddr: false
@@ -66857,7 +66857,7 @@
     SpaceFillingAlgo: []
     StaggerU: 8
     StaggerUMapping: 0
-    StaggerUStride: 256.0
+    StaggerUStride: 256
     StorePriorityOpt: false
     StoreRemapVectorWidth: 0
     StoreSwapAddr: false
@@ -67174,7 +67174,7 @@
     SpaceFillingAlgo: []
     StaggerU: 16
     StaggerUMapping: 0
-    StaggerUStride: 512.0
+    StaggerUStride: 512
     StorePriorityOpt: false
     StoreRemapVectorWidth: 0
     StoreSwapAddr: false
@@ -67491,7 +67491,7 @@
     SpaceFillingAlgo: []
     StaggerU: 16
     StaggerUMapping: 0
-    StaggerUStride: 512.0
+    StaggerUStride: 512
     StorePriorityOpt: true
     StoreRemapVectorWidth: 0
     StoreSwapAddr: false
@@ -67808,7 +67808,7 @@
     SpaceFillingAlgo: []
     StaggerU: 16
     StaggerUMapping: 0
-    StaggerUStride: 512.0
+    StaggerUStride: 512
     StorePriorityOpt: false
     StoreRemapVectorWidth: 0
     StoreSwapAddr: false
@@ -71295,7 +71295,7 @@
     SpaceFillingAlgo: []
     StaggerU: 8
     StaggerUMapping: 0
-    StaggerUStride: 128.0
+    StaggerUStride: 128
     StorePriorityOpt: true
     StoreRemapVectorWidth: 0
     StoreSwapAddr: true
