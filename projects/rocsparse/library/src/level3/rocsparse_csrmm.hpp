@@ -1,6 +1,6 @@
 /*! \file */
 /* ************************************************************************
- * Copyright (C) 2018-2025 Advanced Micro Devices, Inc. All rights Reserved.
+ * Copyright (C) 2018-2026 Advanced Micro Devices, Inc. All rights Reserved.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -166,11 +166,11 @@ namespace rocsparse
     // rocsparse::compute_line_nnz_profile (declared in rocsparse_line_nnz_profile.hpp)
     // and cached on the descriptor; this selector is only the policy on top of it.
     //
-    // csrmm_select_default_alg is a pure, O(1), handle-free mapping applied on
-    // every stage: it upgrades the default to the non-zero-split kernel when one
-    // line is long enough, relative to the device's parallelism, that the
-    // row-split kernel would serialize on it (e.g. a power-law "hub" row). The
-    // crossover is the dimensionless, architecture-portable test
+    // csrmm_select_default_alg is a pure, O(1), handle-free mapping: it upgrades
+    // the default to the non-zero-split kernel when one line is long enough,
+    // relative to the device's parallelism, that the row-split kernel would
+    // serialize on it (e.g. a power-law "hub" row). The crossover is the
+    // dimensionless, architecture-portable test
     //
     //     profile.max * cu_count >= C * profile.nnz
     //
@@ -178,10 +178,13 @@ namespace rocsparse
     // and C is a single dimensionless constant; this replaces the previous pair
     // of architecture-specific absolute thresholds and self-scales with the GPU.
     // With nothing cached, or for an explicit (non-default) algorithm, the
-    // algorithm is returned unchanged. Applying the same deterministic test at
-    // every stage keeps the chosen algorithm - and thus the temp-buffer sizing -
-    // consistent, and keeps the capture-sensitive compute stage free of kernel
-    // launches and copies.
+    // algorithm is returned unchanged. The profile is computed once on the
+    // preprocess (analysis) stage; the selector is then re-applied identically on
+    // the compute stage (from the cached profile) so the chosen algorithm stays
+    // consistent while keeping the capture-sensitive compute stage free of kernel
+    // launches and copies. Because buffer_size runs before the profile exists, it
+    // sizes for the largest auto-selectable kernel (nnz-split) as a safe upper
+    // bound.
     void csrmm_select_default_alg(rocsparse_operation                trans_A,
                                   bool                               is_batched,
                                   int                                cu_count,

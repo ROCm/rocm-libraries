@@ -25,50 +25,67 @@
 #include "rocsparse_line_nnz_profile.hpp"
 
 #include "rocsparse_common.h"
+#include "rocsparse_common.hpp"
 #include "rocsparse_control.hpp"
 #include "rocsparse_hip.hpp"
 #include "rocsparse_utility.hpp"
 
 namespace rocsparse
 {
-    // Reduction over line lengths len[i] = offsets[i+1] - offsets[i]
-    // (base-independent, a difference of consecutive offsets), accumulating the
-    // maximum into a global counter via one atomic per block.
+    // The maximum line length is computed with a classic two-pass, atomic-free
+    // reduction. The line length len[i] = offsets[i+1] - offsets[i] is
+    // base-independent (a difference of consecutive offsets).
+    //
+    // Pass 1 launches a fixed grid of BLOCKSIZE blocks of BLOCKSIZE threads.
+    // Each block grid-strides over the lines, reduces its share to a single
+    // block-wide maximum, and writes that one value to workspace[blockIdx.x].
+    // Pass 2 launches a single block that reduces the BLOCKSIZE partials down to
+    // the final maximum. No thread ever contends on a shared global location,
+    // which avoids the atomic serialization of a one-atomic-per-block scheme.
     template <uint32_t BLOCKSIZE, typename I>
     ROCSPARSE_KERNEL(BLOCKSIZE)
-    void line_nnz_profile_kernel(int64_t nlines,
-                                 const I* __restrict__ offsets,
-                                 unsigned long long* __restrict__ d_max)
+    void line_nnz_profile_part1(int64_t nlines,
+                                const I* __restrict__ offsets,
+                                uint64_t* __restrict__ workspace)
     {
-        const int64_t tid    = hipThreadIdx_x;
+        const int     tid    = hipThreadIdx_x;
         const int64_t gid    = int64_t(hipBlockIdx_x) * BLOCKSIZE + tid;
         const int64_t stride = int64_t(hipGridDim_x) * BLOCKSIZE;
 
-        unsigned long long local_max = 0;
-
+        uint64_t local_max = 0;
         for(int64_t line = gid; line < nlines; line += stride)
         {
-            const unsigned long long len
-                = static_cast<unsigned long long>(offsets[line + 1] - offsets[line]);
-            local_max = (len > local_max) ? len : local_max;
+            const uint64_t len = static_cast<uint64_t>(offsets[line + 1] - offsets[line]);
+            local_max          = rocsparse::max(local_max, len);
         }
 
-        __shared__ unsigned long long s_max[BLOCKSIZE];
-        s_max[tid] = local_max;
+        __shared__ uint64_t shared[BLOCKSIZE];
+        shared[tid] = local_max;
         __syncthreads();
 
-        for(uint32_t s = BLOCKSIZE / 2; s > 0; s >>= 1)
-        {
-            if(tid < s)
-            {
-                s_max[tid] = (s_max[tid + s] > s_max[tid]) ? s_max[tid + s] : s_max[tid];
-            }
-            __syncthreads();
-        }
+        rocsparse::blockreduce_max<BLOCKSIZE>(tid, shared);
 
         if(tid == 0)
         {
-            atomicMax(d_max, s_max[0]);
+            workspace[hipBlockIdx_x] = shared[0];
+        }
+    }
+
+    template <uint32_t BLOCKSIZE>
+    ROCSPARSE_KERNEL(BLOCKSIZE)
+    void line_nnz_profile_part2(uint64_t* __restrict__ workspace)
+    {
+        const int tid = hipThreadIdx_x;
+
+        __shared__ uint64_t shared[BLOCKSIZE];
+        shared[tid] = workspace[tid];
+        __syncthreads();
+
+        rocsparse::blockreduce_max<BLOCKSIZE>(tid, shared);
+
+        if(tid == 0)
+        {
+            workspace[0] = shared[0];
         }
     }
 
@@ -82,34 +99,34 @@ namespace rocsparse
 
         constexpr uint32_t BLOCKSIZE = 256;
 
-        // Scratch for the reduction result. The max identity is 0, so a plain
-        // device memset seeds it correctly; read back with one synchronizing copy.
-        unsigned long long* d_max = nullptr;
-        RETURN_IF_HIP_ERROR(
-            rocsparse_hipMallocAsync((void**)&d_max, sizeof(unsigned long long), handle->stream));
-        RETURN_IF_HIP_ERROR(hipMemsetAsync(d_max, 0, sizeof(unsigned long long), handle->stream));
+        // Pass 1 writes exactly BLOCKSIZE partial maxima (one per block), so the
+        // workspace holds BLOCKSIZE entries; every entry is written by pass 1
+        // (idle blocks write the max identity 0), so no pre-seeding is needed.
+        uint64_t* workspace = nullptr;
+        RETURN_IF_HIP_ERROR(rocsparse_hipMallocAsync(
+            (void**)&workspace, sizeof(uint64_t) * BLOCKSIZE, handle->stream));
 
-        int64_t nblocks64 = (nlines - 1) / BLOCKSIZE + 1;
-        if(nblocks64 > 4096)
-        {
-            nblocks64 = 4096;
-        }
-        const uint32_t nblocks = static_cast<uint32_t>(nblocks64);
-
-        RETURN_IF_HIPLAUNCHKERNELGGL_ERROR((rocsparse::line_nnz_profile_kernel<BLOCKSIZE, I>),
-                                           dim3(nblocks),
+        RETURN_IF_HIPLAUNCHKERNELGGL_ERROR((rocsparse::line_nnz_profile_part1<BLOCKSIZE, I>),
+                                           dim3(BLOCKSIZE),
                                            dim3(BLOCKSIZE),
                                            0,
                                            handle->stream,
                                            nlines,
                                            offsets,
-                                           d_max);
+                                           workspace);
 
-        unsigned long long h_max = 0;
+        RETURN_IF_HIPLAUNCHKERNELGGL_ERROR((rocsparse::line_nnz_profile_part2<BLOCKSIZE>),
+                                           dim3(1),
+                                           dim3(BLOCKSIZE),
+                                           0,
+                                           handle->stream,
+                                           workspace);
+
+        uint64_t h_max = 0;
         RETURN_IF_HIP_ERROR(hipMemcpyAsync(
-            &h_max, d_max, sizeof(unsigned long long), hipMemcpyDeviceToHost, handle->stream));
+            &h_max, workspace, sizeof(uint64_t), hipMemcpyDeviceToHost, handle->stream));
         RETURN_IF_HIP_ERROR(hipStreamSynchronize(handle->stream));
-        RETURN_IF_HIP_ERROR(rocsparse_hipFreeAsync(d_max, handle->stream));
+        RETURN_IF_HIP_ERROR(rocsparse_hipFreeAsync(workspace, handle->stream));
 
         profile.max = static_cast<int64_t>(h_max);
 
@@ -133,17 +150,6 @@ rocsparse_status rocsparse::compute_line_nnz_profile(rocsparse_handle           
     }
 
     if(nlines <= 0 || nnz <= 0 || offsets == nullptr)
-    {
-        return rocsparse_status_success;
-    }
-
-    // The reduction below launches a kernel and copies the result back to the
-    // host (a synchronizing operation), which is illegal while the stream is
-    // captured into a HIP graph. Skip it under capture and leave the profile
-    // uncomputed so callers fall back to their capture-safe default.
-    hipStreamCaptureStatus capture_status = hipStreamCaptureStatusNone;
-    RETURN_IF_HIP_ERROR(hipStreamIsCapturing(handle->stream, &capture_status));
-    if(capture_status != hipStreamCaptureStatusNone)
     {
         return rocsparse_status_success;
     }

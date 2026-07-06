@@ -51,13 +51,12 @@ namespace rocsparse
     };
 
     // Computes \p profile from an \p offsets array of length (nlines + 1) using a
-    // single reduction kernel followed by one device->host copy. The copy is a
-    // synchronizing operation that is illegal while the stream is captured into a
-    // HIP graph, so this must only be called from a non-capturing stage. It is a
-    // no-op (leaving profile.known false) when the stream is capturing, and a
-    // no-op when profile.known is already set, so the reduction runs at most once
-    // per descriptor. \p offsets_indextype selects the offsets element type
-    // (i32 or i64).
+    // two-pass, atomic-free reduction followed by one device->host copy. The copy
+    // is a synchronizing operation that is illegal while the stream is captured
+    // into a HIP graph, so this must only be called from a non-capturing stage
+    // (in SpMM, the preprocess/analysis stage). It is a no-op when profile.known
+    // is already set, so the reduction runs at most once per descriptor.
+    // \p offsets_indextype selects the offsets element type (i32 or i64).
     rocsparse_status compute_line_nnz_profile(rocsparse_handle    handle,
                                               rocsparse_indextype offsets_indextype,
                                               int64_t             nlines,

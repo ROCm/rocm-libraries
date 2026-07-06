@@ -41,8 +41,8 @@ void rocsparse::csrmm_select_default_alg(rocsparse_operation                tran
 
     // The load-balanced kernels only apply to non-transposed, single-batch
     // multiplies; the profile is only computed in those cases. With nothing
-    // cached (e.g. buffer_size was skipped, or the stream was capturing on the
-    // first call) keep the historical, capture-safe row-split default.
+    // cached (e.g. the preprocess/analysis stage was skipped, so compute runs
+    // without a profile) keep the historical, capture-safe row-split default.
     if(trans_A != rocsparse_operation_none || is_batched || !profile.known || profile.nnz <= 0
        || cu_count <= 0)
     {
