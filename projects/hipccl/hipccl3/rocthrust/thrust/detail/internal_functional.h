@@ -40,7 +40,9 @@
 #include <thrust/iterator/iterator_traits.h>
 #include <thrust/tuple.h>
 
-#if !_THRUST_HAS_DEVICE_SYSTEM_STD
+#if _THRUST_HAS_DEVICE_SYSTEM_STD
+#  include _THRUST_LIBCXX_INCLUDE(__iterator/discard_iterator.h)
+#else
 #  include <type_traits>
 #endif
 
@@ -124,6 +126,13 @@ struct is_non_const_reference
                        _THRUST_STD::disjunction<_THRUST_STD::is_reference<T>, thrust::detail::is_proxy_reference<T>>>
 {};
 
+// We treat the discarding proxy of _THRUST_LIBCXX::discard_iterator as a const reference, we discard the value
+template <typename T>
+inline constexpr bool is_discard_proxy = false;
+
+template <>
+inline constexpr bool is_discard_proxy<_THRUST_LIBCXX::discard_iterator::__discard_proxy> = true;
+
 template <typename T>
 struct is_tuple_of_iterator_references : _THRUST_STD::false_type
 {};
@@ -136,7 +145,8 @@ struct is_tuple_of_iterator_references<thrust::detail::tuple_of_iterator_referen
 // XXX revisit this problem with c++11 perfect forwarding
 template <typename T>
 struct enable_if_non_const_reference_or_tuple_of_iterator_references
-    : _THRUST_STD::enable_if<is_non_const_reference<T>::value || is_tuple_of_iterator_references<T>::value>
+    : _THRUST_STD::enable_if<is_non_const_reference<T>::value || is_tuple_of_iterator_references<T>::value
+                             || is_discard_proxy<T>>
 {};
 
 template <typename UnaryFunction>
