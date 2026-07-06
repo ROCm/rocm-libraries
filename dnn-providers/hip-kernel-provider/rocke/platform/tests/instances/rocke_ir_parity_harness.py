@@ -573,6 +573,20 @@ def build_deep(kind, arch, **kw):
     return _build
 
 
+def build_grouped_gemm_case(name, arch, m, n, k, e):
+    def _build():
+        from rocke.instances.gfx950.grouped_gemm import (
+            GroupedGemmSpec,
+            build_grouped_gemm,
+        )
+
+        spec = GroupedGemmSpec(M=m, N=n, K=k, E=e, name=name)
+        kernel, _bs, _tm, _tn = build_grouped_gemm(spec)
+        return kernel
+
+    return _build
+
+
 def cases():
     out = []
 
@@ -1806,6 +1820,18 @@ def cases():
         "attention_d256/gfx942/4warp_gqa",
         "gfx942",
         build_attention_d256_gfx942("gfx942"),
+    )
+
+    # Grouped GEMM: hand-authored dense grouped bf16 GEMM (gfx950 / CDNA4),
+    # production lever defaults. Python-lowered only (no C++ engine mirror), so
+    # this pins the Python emitter's IR; re-bless when its codegen changes.
+    add(
+        "grouped_gemm",
+        "grouped_gemm/gfx950/m8192n1024k512e64",
+        "gfx950",
+        build_grouped_gemm_case(
+            "irhash_grouped_gemm_950", "gfx950", 8192, 1024, 512, 64
+        ),
     )
     return out
 

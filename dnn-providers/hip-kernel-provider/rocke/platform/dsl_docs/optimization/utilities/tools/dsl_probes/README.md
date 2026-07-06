@@ -20,6 +20,7 @@ before chasing performance**. These probes are step (3).
 | Want to answer | Use |
 |---|---|
 | "Will the kernel fit at the occupancy I expect?" | `probe_occupancy.py` |
+| "What are the VGPR/spill/LDS, ISA mix and occupancy of one kernel or a pre-built `.co`/`.hsaco`?" | `probe_regs.py` |
 | "Are the right MFMA / async-DMA / ds.read.tr16 intrinsics emitted?" | `probe_intrinsic_counts.py` |
 | "What is the ISA opcode mix between two variants?" | `probe_isa_inspect.py` |
 | "Does the HIP-debug backend agree with LLVM-direct on this kernel?" | `probe_lowering_compare.py` |
@@ -50,6 +51,31 @@ Useful for: tile / block-size sweeps where the wall-clock difference
 is on the order of LDS or VGPR bumps. If the limiter switches from
 `LDS` to `VGPR` across the sweep, the optimal tile size will sit at the
 boundary.
+
+### `probe_regs.py`
+**Input**: one kernel, supplied as a pre-built code object (`--co` /
+`--hsaco`), a runtime-resolved builder (`--builder module:fn`), a
+programmatic list of `(label, KernelDef, block_size)`, or -- with no
+args -- a tiny self-contained demo kernel.
+**Output**: single-kernel VGPR / SGPR / spill / LDS / scratch, the ISA
+opcode mix (MFMA, `ds_read` / `ds_write`, `buffer_load_lds`, `s_waitcnt` /
+`s_barrier` / `sched_barrier`, VALU / SALU), the `ds_read/mfma` ratio,
+and a gfx950/gfx942 unified-VGPR occupancy estimate (blocks/CU + limiter).
+
+How it works: compiles via `compile_kernel` (comgr, or `--hipcc` for the
+`hipcc --genco` path), unbundles the code object if needed, then runs
+`rocke.analysis.isa.analyze_hsaco` (one `llvm-objdump` + `llvm-readelf`
+pass) for both the resource notes and the opcode histogram.
+
+Unlike `probe_occupancy.py` (notes-only, multi-variant table) this is a
+single-kernel deep-dive that folds in the ISA mix, and it can probe a
+**pre-built `.co`/`.hsaco` with no rocke build at all**. It imports
+nothing from `rocke.instances`/kernels: point `--builder` at a family, or
+feed `probe_regs([(label, kdef, bs)])` a `KernelDef` you built.
+
+Useful for: the "inspect the artifact before chasing performance" step on
+one variant -- e.g. confirming an LDS bump dropped occupancy from 2 to 1
+block/CU, or that the `ds_read/mfma` ratio moved after a swizzle change.
 
 ### `probe_isa_inspect.py`
 **Input**: list of `(label, KernelDef)`.
@@ -155,6 +181,7 @@ Useful for: pairing with the rocprof-based tools under
 dsl_probes/
 ├── README.md                         # this file
 ├── probe_occupancy.py                # llvm-readelf notes → occupancy
+├── probe_regs.py                     # analyze_hsaco → regs + ISA mix + occupancy (1 kernel/.co)
 ├── probe_isa_inspect.py              # llvm-objdump → opcode histogram
 ├── probe_intrinsic_counts.py         # lower_kernel_to_llvm → intrinsic histogram
 ├── probe_lowering_compare.py         # LLVM-direct vs HIP-debug HSACO compare

@@ -722,6 +722,14 @@
           "sha256": "d4e20421032922c0cdd0b88c1339758e1341de8897e8e4a54d119498b5a1119e",
           "status": "ok"
         },
+        "grouped_gemm/gfx950/m8192n1024k512e64": {
+          "arch": "gfx950",
+          "bytes": 267299,
+          "family": "grouped_gemm",
+          "kernel_name": "irhash_grouped_gemm_950",
+          "sha256": "5234f535c1882fc42e7cf473363383f65a069383a31a590d85a0764e2bcc510b",
+          "status": "ok"
+        },
         "moe_sort/gfx1151/hist_t32_k2_e8": {
           "arch": "gfx1151",
           "bytes": 3011,
@@ -780,7 +788,7 @@
           "gfx1250": 2,
           "gfx90a": 5,
           "gfx942": 14,
-          "gfx950": 58
+          "gfx950": 59
         },
         "expected_failures": 0,
         "families": {
@@ -792,9 +800,10 @@
           "conv_wgrad": 7,
           "deep_fused_conv": 9,
           "gemm": 13,
+          "grouped_gemm": 1,
           "moe": 9
         },
-        "ok_cases": 96
+        "ok_cases": 97
       }
     },
     "llvm22": {
@@ -1519,6 +1528,14 @@
           "sha256": "ced09f4c5197ce52efae8ee3ee70e93ca0f5d6d927cd786a0bb3246191492df6",
           "status": "ok"
         },
+        "grouped_gemm/gfx950/m8192n1024k512e64": {
+          "arch": "gfx950",
+          "bytes": 267395,
+          "family": "grouped_gemm",
+          "kernel_name": "irhash_grouped_gemm_950",
+          "sha256": "89dc74a06fead91ad0c0a3ac019036dd05989c2619deb64942ed8dff047b69ab",
+          "status": "ok"
+        },
         "moe_sort/gfx1151/hist_t32_k2_e8": {
           "arch": "gfx1151",
           "bytes": 3018,
@@ -1577,7 +1594,7 @@
           "gfx1250": 2,
           "gfx90a": 5,
           "gfx942": 14,
-          "gfx950": 58
+          "gfx950": 59
         },
         "expected_failures": 0,
         "families": {
@@ -1589,9 +1606,10 @@
           "conv_wgrad": 7,
           "deep_fused_conv": 9,
           "gemm": 13,
+          "grouped_gemm": 1,
           "moe": 9
         },
-        "ok_cases": 96
+        "ok_cases": 97
       }
     },
     "llvm23": {
@@ -2316,6 +2334,14 @@
           "sha256": "f6f9ba500d6695ca21a1711c63e6cea4ad98875d8a478adfac96269c7005cee1",
           "status": "ok"
         },
+        "grouped_gemm/gfx950/m8192n1024k512e64": {
+          "arch": "gfx950",
+          "bytes": 267395,
+          "family": "grouped_gemm",
+          "kernel_name": "irhash_grouped_gemm_950",
+          "sha256": "89dc74a06fead91ad0c0a3ac019036dd05989c2619deb64942ed8dff047b69ab",
+          "status": "ok"
+        },
         "moe_sort/gfx1151/hist_t32_k2_e8": {
           "arch": "gfx1151",
           "bytes": 3022,
@@ -2374,7 +2400,7 @@
           "gfx1250": 2,
           "gfx90a": 5,
           "gfx942": 14,
-          "gfx950": 58
+          "gfx950": 59
         },
         "expected_failures": 0,
         "families": {
@@ -2386,9 +2412,10 @@
           "conv_wgrad": 7,
           "deep_fused_conv": 9,
           "gemm": 13,
+          "grouped_gemm": 1,
           "moe": 9
         },
-        "ok_cases": 96
+        "ok_cases": 97
       }
     }
   },
