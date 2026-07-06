@@ -347,10 +347,10 @@ inline std::map<std::string, int>
         isaVersion, assemblerPath, "ds_read_b64_tr_b16 v[0:1], v0 offset: 0", isDebug);
 
     rv["HasGLTr8B64"] = tryAssembler(
-        isaVersion, assemblerPath, "global_load_tr8_b64 v[0], v0, s[0:1], offset:0", isDebug);
+        isaVersion, assemblerPath, "global_load_tr_b64 v[0], v0, s[0:1], offset:0", isDebug);
 
     rv["HasGLTr16B128"] = tryAssembler(
-        isaVersion, assemblerPath, "global_load_tr16_b128 v[0:1], v0, s[0:1], offset:0", isDebug);
+        isaVersion, assemblerPath, "global_load_tr_b128 v[0:1], v0, s[0:1], offset:0", isDebug);
 
     rv["HasLDSTrB128B16"] = tryAssembler(
         isaVersion, assemblerPath, "ds_load_tr16_b128 v[0:3], v0 offset: 0", isDebug);
