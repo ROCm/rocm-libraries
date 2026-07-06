@@ -3486,7 +3486,7 @@ inline void host_csrmv(hipsparseOperation_t trans,
     {
         // Get device properties
         int             dev;
-        hipDeviceProp_t prop;
+        hipDeviceProp_t prop{};
 
         std::ignore = hipGetDevice(&dev);
         std::ignore = hipGetDeviceProperties(&prop, dev);
@@ -5128,7 +5128,7 @@ static inline void host_lssolve(J                     M,
 {
     // Get device properties
     int             dev;
-    hipDeviceProp_t prop;
+    hipDeviceProp_t prop{};
 
     std::ignore = hipGetDevice(&dev);
     std::ignore = hipGetDeviceProperties(&prop, dev);
@@ -5270,7 +5270,7 @@ static inline void host_ussolve(J                     M,
 {
     // Get device properties
     int             dev;
-    hipDeviceProp_t prop;
+    hipDeviceProp_t prop{};
 
     std::ignore = hipGetDevice(&dev);
     std::ignore = hipGetDeviceProperties(&prop, dev);
@@ -5543,7 +5543,7 @@ void host_csr_lsolve(J                    M,
 {
     // Get device properties
     int             dev;
-    hipDeviceProp_t prop;
+    hipDeviceProp_t prop{};
 
     std::ignore = hipGetDevice(&dev);
     std::ignore = hipGetDeviceProperties(&prop, dev);
@@ -5650,7 +5650,7 @@ void host_csr_usolve(J                    M,
 {
     // Get device properties
     int             dev;
-    hipDeviceProp_t prop;
+    hipDeviceProp_t prop{};
 
     std::ignore = hipGetDevice(&dev);
     std::ignore = hipGetDeviceProperties(&prop, dev);

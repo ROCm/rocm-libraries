@@ -19,7 +19,7 @@
 # in each install fragment. The full fragment registers bare names
 # (e.g. `logger_test`); the smoke / regression fragments register
 # suffixed names (e.g. `logger_test smoke`), so patterns allow an
-# optional trailing ` smoke` / ` regression`.
+# optional trailing ` smoke`.
 #
 # `quick` mirrors rtest.xml's <emulation sets="smoke"> membership: every
 # registered test except plan_cache_test, plan_lifetime_test, and
@@ -30,19 +30,19 @@ test_categories:
   quick:
     description: "hipTensor quick tests - mirrors rtest.xml smoke set"
     test_patterns:
-      - "^contraction_mode_test( (smoke|regression))?$"
-      - "^elementwise_cpu_test( (smoke|regression))?$"
-      - "^elementwise_op_test( (smoke|regression))?$"
-      - "^hiptensor_options_test( (smoke|regression))?$"
-      - "^logger_test( (smoke|regression))?$"
-      - "^reduction_cpu_impl_test( (smoke|regression))?$"
-      - "^util_test( (smoke|regression))?$"
-      - "^yaml_test( (smoke|regression))?$"
-      - "^(complex_)?(bilinear|scale)_contraction_test_m[1-6]n[1-6]k[1-6]( (smoke|regression))?$"
-      - "^(bilinear|scale)_contraction_with_unary_ops_test( (smoke|regression))?$"
-      - "^trinary_(bilinear|scale)_contraction_test( (smoke|regression))?$"
-      - "^rank[1-6]_reduction_test( (smoke|regression))?$"
-      - "^rank[2-6]_elementwise_(permute|binary_op|trinary_op)_test( (smoke|regression))?$"
+      - "^contraction_mode_test( smoke)?$"
+      - "^elementwise_cpu_test( smoke)?$"
+      - "^elementwise_op_test( smoke)?$"
+      - "^hiptensor_options_test( smoke)?$"
+      - "^logger_test( smoke)?$"
+      - "^reduction_cpu_impl_test( smoke)?$"
+      - "^util_test( smoke)?$"
+      - "^yaml_test( smoke)?$"
+      - "^(complex_)?(bilinear|scale)_contraction_test_m[1-6]n[1-6]k[1-6]( smoke)?$"
+      - "^(bilinear|scale)_contraction_with_unary_ops_test( smoke)?$"
+      - "^trinary_(bilinear|scale)_contraction_test( smoke)?$"
+      - "^rank[1-6]_reduction_test( smoke)?$"
+      - "^rank[2-6]_elementwise_(permute|binary_op|trinary_op)_test( smoke)?$"
     labels:
       - "quick"
 
