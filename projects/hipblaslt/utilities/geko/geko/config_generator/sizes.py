@@ -3,7 +3,6 @@
 
 import bisect
 import logging
-import sys
 from functools import lru_cache
 from typing import Any, Dict, List, Sequence, Tuple
 
@@ -122,8 +121,8 @@ def _generate_boundary(num_CUs: int, round_x: int, round_y: int, MT0: int, MT1: 
     MN_factor = _factorize(num_CUs)
     boundary_points = []
 
-    m_min, m_max = sys.maxsize, 0
-    n_min, n_max = sys.maxsize, 0
+    m_min, m_max = float('inf'), 0
+    n_min, n_max = float('inf'), 0
 
     for (m_factor, n_factor) in MN_factor:
         m = m_factor * MT0 * round_x
