@@ -32,7 +32,9 @@ def _check_venv():
         )
 
 
-def cmake_build_args(install_prefix=None, tests=True, python=True, examples=True, shared=True):
+def cmake_build_args(
+    install_prefix=None, tests=True, python=True, examples=True, shared=True
+):
     """Canonical cmake args for a stinkytofu build.
 
     Single source of truth for build flags — import this in downstream tasks
@@ -106,6 +108,25 @@ def _detect_rocm() -> Path:
 # ---------------------------------------------------------------------------
 
 
+def _parse_vcvars_env(stdout):
+    """Parse `KEY=VALUE` lines from `vcvarsall.bat ... && set` output.
+
+    Tolerant of stray U+FFFD replacement characters: when the process's active
+    code page can't represent a byte in vcvarsall.bat's banner text (e.g. a
+    JIS/Shift-JIS system locale with an English-language VS install),
+    `_setup_msvc_env()` decodes with errors="replace" rather than crashing, so
+    a banner line may come through full of �. Such lines either fail the
+    "=" check below or produce a garbage key that's harmless to set; the real
+    KEY=VALUE environment lines are plain ASCII and parse normally either way.
+    """
+    env = {}
+    for line in stdout.splitlines():
+        if "=" in line:
+            key, _, value = line.partition("=")
+            env[key] = value
+    return env
+
+
 def _setup_msvc_env():
     """Initialize the full MSVC build environment from vcvarsall.bat."""
     if sys.platform != "win32":
@@ -127,13 +148,11 @@ def _setup_msvc_env():
         capture_output=True,
         text=True,
         encoding="mbcs",
+        errors="replace",
         shell=True,
     )
     original_lib = os.environ.get("LIB", "")
-    for line in result.stdout.splitlines():
-        if "=" in line:
-            key, _, value = line.partition("=")
-            os.environ[key] = value
+    os.environ.update(_parse_vcvars_env(result.stdout))
     # Restore original LIB entries so vcvarsall doesn't drop existing SDK paths
     if original_lib:
         existing = os.environ.get("LIB", "")

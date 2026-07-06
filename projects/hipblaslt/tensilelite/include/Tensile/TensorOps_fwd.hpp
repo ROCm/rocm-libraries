@@ -26,13 +26,10 @@
 
 #pragma once
 
-#include <Tensile/Macros.hpp>
-
-TENSILE_HIDDEN_BEGIN
+#include <tensilelitehost/export.h>
 
 namespace TensileLite
 {
     class TensorOp;
 }
 
-TENSILE_HIDDEN_END
