@@ -393,6 +393,11 @@ globalParameters["StinkyTofuPassOrderSnapshotJson"] = ""
 # splits, and how many s_nop cycles were wasted.
 globalParameters["StinkyTofuEnableRemarks"] = False
 
+# Directory for StinkyTofu per-kernel instruction-cost output files (empty = disabled).
+# When set, each kernel's StinkyTofu module writes its cost file here via
+# StinkyTofuModule.setOutputDir (see KernelWriter._convertToStinkyTofu).
+globalParameters["StinkyTofuCostOutputDir"] = ""
+
 globalParameters["DisableSTWaitCnt"] = True
 
 # Internal plumbing for the --cpu-only CLI switch (see Tensile.py addCommonArguments).
@@ -610,9 +615,10 @@ defaultBenchmarkCommonParameters = [
     # SwInstructionPrefetchAbs — True: enable absolute SW instruction prefetch
     # (s_prefetch_inst with a label-fixed base built from s_getpc_b64 + s_add_u32).
     # Mutually exclusive with SwInstructionPrefetch (abs takes priority when both True).
-    # The 2-SGPR even-aligned base pair is auto-allocated in KernelWriter (reserved past the
-    # kernel-argument region, then freed for body reuse). Default False: abs pass disabled.
-    {"SwInstructionPrefetchAbs": [True]},
+    # The 3-SGPR base (even-aligned pair + scratch) is auto-allocated in KernelWriter (reserved past
+    # the kernel-argument region, then freed at label_MultiGemmEnd for body reuse). gfx1250-only,
+    # not Stream-K. Default False: abs pass disabled.
+    {"SwInstructionPrefetchAbs": [False]},
     # ClusterDim — workgroup cluster dimensions [x, y] for clustered kernel launch.
     # [1, 1] disables clustering. Non-[1, 1] enables Multicast so workgroups within
     # a cluster can share data loaded via TDM-multicast, reducing redundant global reads.

@@ -58,9 +58,9 @@ class StinkyAsmModule;
 /// klength uses the simm5 immediate (`0x1f`), slength = null — no length SGPR.
 /// Minimum-SGPR alternative (2 SGPRs): `@rel32@lo+4` / `@rel32@hi+12` on the adds.
 ///
-/// **Requires:** `SwInstructionPrefetchAbsBaseSgpr` >= 0 — **3** reserved SGPRs:
-/// even-aligned pair `s[base:base+1]` + scratch `s[base+2]`. Freed after the entry
-/// burst (body reuses them → net ~0 pressure). No-op when -1.
+/// **Requires:** `SwInstructionPrefetchAbsBaseSgpr` >= 0 — **3** reserved SGPRs: even-aligned
+/// pair `s[base:base+1]` + scratch `s[base+2]`. Reserved through the prolog and freed at
+/// label_MultiGemmEnd (body reuses → net ~0 pressure). No-op when -1.
 ///
 /// Mutually exclusive with `SwInstructionPrefetchRelStaticPass` /
 /// `SwInstructionPrefetchRelDynamicPass` — do not run together.

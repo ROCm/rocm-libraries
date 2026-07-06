@@ -3019,6 +3019,14 @@ class KernelWriterAssembly(KernelWriter):
       module.addSpaceLine()
       module.add(labelMultiGemmEnd)
 
+      # Deferred check-in of the abs-prefetch base triple (reserved across the prolog in
+      # _initKernel so the dynamic CFG-target ladder inserted after this label can use it). Free it
+      # now, immediately before defineVariableSgprs reclaims the slots (net +0 SGPR; multi-agent +
+      # fleet verified). Guarded so it only runs when labelMultiGemmEnd is actually emitted.
+      if self.states.swPrefetchAbsBaseSgprPendingCheckIn >= 0:
+        self.sgprPool.checkIn(self.states.swPrefetchAbsBaseSgprPendingCheckIn)
+        self.states.swPrefetchAbsBaseSgprPendingCheckIn = -1
+
     # CheckIn temp sgprs
     if sgprNumsOfGemm:
       self.sgprPool.checkIn(sgprNumsOfGemm)

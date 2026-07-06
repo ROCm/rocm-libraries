@@ -1,12 +1,17 @@
 /* ************************************************************************
  * Copyright (C) 2026 Advanced Micro Devices, Inc.
  *
- * Unit tests for SwInstructionPrefetchAbsDynamicPass (P2 abs dynamic policy).
+ * Unit tests for SwInstructionPrefetchAbsDynamicPass (abs CFG-target policy).
  *
- * Phase P2 currently ships a STUB: the dynamic pass no-ops for every kernel
- * size and emits a debug log when totalLayoutBytes > 64 KiB. These tests pin
- * the stub contract so the later real implementation (per-k targets + CFG
- * sites) replaces it deliberately, not by accident.
+ * Contract (D0/D1): no-op only when totalLayoutBytes <= P(0)=32640 (whole kernel
+ * in the CP window). For totalLayoutBytes > 32640 the read-only CFG-target
+ * DETECTOR runs (debug dump, no IR mutation). The Variant-1 ladder is EMITTED
+ * only when totalLayoutBytes > 65536 AND a reserved baseSgpr is present AND the
+ * GSU1 beta-split anchors + the label_MultiGemmEnd site exist AND the dispatch is
+ * supported (sgprGSU + sgprBeta defined, not Stream-K). Most kernels here omit
+ * those anchors so emission bails (no IR mutation); the DynamicRegime_ThreeArm*
+ * tests build the fully emittable shape to pin the positive Variant-1 ladder and
+ * the Stream-K bail-out.
  * ************************************************************************ */
 
 #include <gtest/gtest.h>
@@ -43,11 +48,43 @@ void appendAlignDirective(BasicBlock* bb, int64_t alignBytes) {
     bb->appendIR(d);
 }
 
+/// Emit a `.set <symbol>, <value>` directive so collectAsmSetSymbolValues() sees the
+/// symbol as defined (the emission guard keys on symbol presence, not the value).
+void appendSetDirective(BasicBlock* bb, const std::string& symbol, const std::string& value) {
+    AsmDirective* d = IRBase::createIR<AsmDirective>();
+    d->kind = AsmDirectiveKind::SET;
+    d->name = ".set";
+    d->symbol = symbol;
+    d->value = value;
+    bb->appendIR(d);
+}
+
+/// Append a LABEL instruction (via the same builder path the pass uses) to \p bb.
+void appendLabel(BasicBlock* bb, GfxArchID arch, const std::string& name) {
+    AsmIRBuilder builder(*bb, arch);
+    builder.createLabel(name);
+}
+
+int countLabel(const Function& func, const std::string& name) {
+    int c = 0;
+    for (const BasicBlock& bb : func) {
+        for (auto it = bb.begin(); it != bb.end(); ++it) {
+            const IRBase* n = it.getNodePtr();
+            if (n->getType() != IRBase::IRType::StinkyTofu) continue;
+            const StinkyInstruction& inst = *cast<StinkyInstruction>(n);
+            if (inst.getUnifiedOpcode() != GFX::LABEL) continue;
+            if (const LabelData* ld = inst.getModifier<LabelData>())
+                if (ld->label == name) ++c;
+        }
+    }
+    return c;
+}
+
 /// Build a kernel whose totalLayoutBytes lands just above `alignTo` (one
 /// trailing 4-byte v_add). Use `alignTo` to target a size regime:
-///   - <= 32640        : CP-only regime
-///   - (32640, 65536]  : static regime (defer to static pass)
-///   - > 65536         : dynamic regime (stub no-op + log)
+///   - <= 32640        : CP-only regime (pass no-ops)
+///   - (32640, 65536]  : static regime (dynamic = detector-only, no emit)
+///   - > 65536         : dynamic regime (emits only if GSU1 anchors + MGE site + baseSgpr present)
 void buildKernelAboveAlign(BasicBlock* bb, GfxArchID arch, int64_t alignTo) {
     createVAddInBlock(bb, arch, 0, 1, 2);
     appendAlignDirective(bb, alignTo);
@@ -79,7 +116,7 @@ int countSGetpc(const Function& func) {
 }
 
 /// True if any emitted label name contains "PrefetchAbs" (site or target).
-/// The stub must never emit one.
+/// These synthetic kernels lack the GW/MultiGemmEnd anchors, so the pass must never emit one.
 bool hasAnyAbsPrefetchLabel(const Function& func) {
     for (const BasicBlock& bb : func) {
         for (auto it = bb.begin(); it != bb.end(); ++it) {
@@ -150,8 +187,9 @@ class SwInstructionPrefetchAbsDynamicPassTest : public ::testing::Test {
 };
 
 // ---------------------------------------------------------------------------
-// Stub contract: the dynamic pass never mutates IR (no prefetch / getpc) for
-// any size regime in P2.
+// No-mutation cases: for these synthetic kernels (no label_GW_B0_GSU1 /
+// label_MultiGemmEnd anchors), the dynamic pass never inserts prefetch / getpc,
+// regardless of size regime — emission bails on the missing dispatch.
 // ---------------------------------------------------------------------------
 
 TEST_F(SwInstructionPrefetchAbsDynamicPassTest, BelowP0_NoInsert) {
@@ -180,8 +218,9 @@ TEST_F(SwInstructionPrefetchAbsDynamicPassTest, StaticRegime_DefersToStatic_NoIn
     EXPECT_EQ(countSGetpc(*func), 0);
 }
 
-TEST_F(SwInstructionPrefetchAbsDynamicPassTest, DynamicRegime_AboveIcache_StubNoInsert) {
-    // > 65536 is the dynamic regime. P2 stub still inserts nothing.
+TEST_F(SwInstructionPrefetchAbsDynamicPassTest, DynamicRegime_AboveIcache_NoAnchors_NoInsert) {
+    // > 65536: emission is reached (baseSgpr set), but this synthetic kernel has no
+    // label_GW_B0_GSU1 / label_MultiGemmEnd, so emitVariant1Ladder bails → no IR mutation.
     buildKernelAboveAlign(bb, arch, 70000);
 
     SwPrefetchRelPhase1Accum phase1;
@@ -196,10 +235,10 @@ TEST_F(SwInstructionPrefetchAbsDynamicPassTest, DynamicRegime_AboveIcache_StubNo
     EXPECT_FALSE(hasAnyAbsPrefetchLabel(*func));
 }
 
-// Boundary guard: totalLayoutBytes == 65536 belongs to the STATIC regime
-// (gate is `<= 65536`). If the dynamic gate ever regresses from `<=` to `<`,
-// the stub would wrongly fire "dynamic pass not implemented" at the boundary.
-TEST_F(SwInstructionPrefetchAbsDynamicPassTest, ExactIcacheBoundary_DefersToStatic) {
+// Boundary guard: totalLayoutBytes == 65536 is post-CP, so the DETECTOR runs,
+// but emission is strictly `> 65536` → static owns the (32640, 65536] regime,
+// so the ladder must NOT be emitted at exactly 65536.
+TEST_F(SwInstructionPrefetchAbsDynamicPassTest, ExactIcacheBoundary_DetectorOnly_NoEmit) {
     buildKernelAboveAlign(bb, arch, 65532);  // align 65532 + 4-byte v_add -> 65536
 
     SwPrefetchRelPhase1Accum phase1;
@@ -208,12 +247,13 @@ TEST_F(SwInstructionPrefetchAbsDynamicPassTest, ExactIcacheBoundary_DefersToStat
 
     const std::string text = runWithDebug();
 
+    // No emission at the boundary (static regime), regardless of detector running.
     EXPECT_EQ(countSPrefetchInst(*func), 0);
     EXPECT_EQ(countSGetpc(*func), 0);
     EXPECT_FALSE(hasAnyAbsPrefetchLabel(*func));
-    EXPECT_NE(text.find("no-op"), std::string::npos);
-    EXPECT_EQ(text.find("dynamic pass not implemented"), std::string::npos)
-        << "dynamic stub must defer to static at exactly 65536, not fire";
+    // Detector runs (post-CP), and the legacy "not implemented" stub message is gone.
+    EXPECT_NE(text.find("D0 CFG-target detector"), std::string::npos);
+    EXPECT_EQ(text.find("dynamic pass not implemented"), std::string::npos);
 }
 
 TEST_F(SwInstructionPrefetchAbsDynamicPassTest, NoBaseSgpr_NoInsert) {
@@ -235,15 +275,16 @@ TEST_F(SwInstructionPrefetchAbsDynamicPassTest, NoBaseSgpr_NoInsert) {
 // Debug output
 // ---------------------------------------------------------------------------
 
-TEST_F(SwInstructionPrefetchAbsDynamicPassTest, DebugFile_AboveIcache_NotImplementedMessage) {
+TEST_F(SwInstructionPrefetchAbsDynamicPassTest, DebugFile_AboveIcache_BaseSgprUnset_DetectorOnly) {
     buildKernelAboveAlign(bb, arch, 70000);
 
-    // baseSgpr=-1 mirrors the real pipeline (SwInstructionPrefetchAbsBaseSgpr
-    // defaults to -1 until P5 Tensile wiring). The "not implemented" log must
-    // still appear — it is the stub's one observable deliverable for >64K.
+    // baseSgpr=-1 → no reserved SGPR triple, so D1 emission is skipped and the
+    // pass runs the detector only. The legacy "not implemented" stub log is gone.
     const std::string text = runWithDebug(/*baseSgpr=*/-1);
     EXPECT_NE(text.find("SwInstructionPrefetchAbsDynamicPass"), std::string::npos);
-    EXPECT_NE(text.find("dynamic pass not implemented"), std::string::npos);
+    EXPECT_NE(text.find("D0 CFG-target detector"), std::string::npos);
+    EXPECT_NE(text.find("detector-only"), std::string::npos);
+    EXPECT_EQ(text.find("dynamic pass not implemented"), std::string::npos);
 }
 
 TEST_F(SwInstructionPrefetchAbsDynamicPassTest, DebugFile_BelowP0_NoOpMessage) {
@@ -254,10 +295,85 @@ TEST_F(SwInstructionPrefetchAbsDynamicPassTest, DebugFile_BelowP0_NoOpMessage) {
     EXPECT_NE(text.find("32640"), std::string::npos);
 }
 
-TEST_F(SwInstructionPrefetchAbsDynamicPassTest, DebugFile_StaticRegime_DefersMessage) {
+TEST_F(SwInstructionPrefetchAbsDynamicPassTest, DebugFile_StaticRegime_DetectorOnly_NoEmit) {
+    // (32640, 65536]: detector runs (post-CP), but emission is gated `> 65536`,
+    // so the dynamic pass never emits here — static owns this regime.
     buildKernelAboveAlign(bb, arch, 40000);
 
     const std::string text = runWithDebug();
-    EXPECT_NE(text.find("no-op"), std::string::npos);
-    EXPECT_NE(text.find("SwInstructionPrefetchAbsStaticPass"), std::string::npos);
+    EXPECT_NE(text.find("D0 CFG-target detector"), std::string::npos);
+    EXPECT_EQ(countSPrefetchInst(*func), 0);
+    EXPECT_EQ(countSGetpc(*func), 0);
+}
+
+// ---------------------------------------------------------------------------
+// Positive emission: dynamic regime (> 65536) with all D1 preconditions met —
+// the reserved baseSgpr, the label_MultiGemmEnd site (with a following anchor),
+// the 3-arm GSU/beta anchors (GW_B0_MB / GW_B0_GSU1 / GW_B1_GSU1), sgprGSU +
+// sgprBeta defined, and NOT Stream-K. The pass must emit the Variant-1 ladder.
+// ---------------------------------------------------------------------------
+
+/// Build a > 65536-byte kernel that satisfies every D1 emission precondition and
+/// produces the full 3-arm ladder (Case A=MB, B=GSU1 fall-through, C=B1_GSU1).
+void buildThreeArmEmittableKernel(BasicBlock* bb, GfxArchID arch) {
+    // Site: label_MultiGemmEnd followed by a real insn so the anchor (node after
+    // the label) exists — the ladder is inserted before it, i.e. right after MGE.
+    appendLabel(bb, arch, "label_MultiGemmEnd");
+    createVAddInBlock(bb, arch, 0, 1, 2);
+
+    // GSU/beta dispatch symbols must be defined (GSU0 / no-beta kernels bail), and
+    // NOT Stream-K (no sgprSrdWS / sgprSynchronizer).
+    appendSetDirective(bb, "sgprGSU", "54");
+    appendSetDirective(bb, "sgprBeta", "40");
+
+    // Push total layout past the 64 KiB I-cache split so the dynamic regime owns it.
+    appendAlignDirective(bb, 70000);
+
+    // 3-arm anchors, each followed by a real insn so buildLabelOffsets resolves them.
+    appendLabel(bb, arch, "label_GW_B0_MB");  // Case A (GSU > 1)
+    createVAddInBlock(bb, arch, 3, 4, 5);
+    appendLabel(bb, arch, "label_GW_B0_GSU1");  // Case B (fall-through)
+    createVAddInBlock(bb, arch, 6, 7, 8);
+    appendLabel(bb, arch, "label_GW_B1_GSU1");  // Case C (beta split)
+    createVAddInBlock(bb, arch, 9, 10, 11);
+}
+
+TEST_F(SwInstructionPrefetchAbsDynamicPassTest, DynamicRegime_ThreeArmLadder_Emits) {
+    buildThreeArmEmittableKernel(bb, arch);
+
+    SwPrefetchRelPhase1Accum phase1;
+    computeSwPrefetchRelPhase1Accum(*func, nullptr, phase1);
+    ASSERT_GT(phase1.totalLayoutBytes, kSwPrefetchAbsStaticIcacheSizeBytes);
+
+    auto pm = makePm(/*baseSgpr=*/64);
+    pm.run(*func);
+
+    // Three bursts (A, B, C), each = 1 getpc + 6 prefetch hints (fixed N=6).
+    EXPECT_EQ(countSGetpc(*func), 3);
+    EXPECT_EQ(countSPrefetchInst(*func), 18);
+
+    // The full 3-arm ladder scaffolding must be present.
+    EXPECT_TRUE(hasAnyAbsPrefetchLabel(*func));
+    EXPECT_EQ(countLabel(*func, "label_Do_SW_PrefetchAbs_sel"), 1);
+    EXPECT_EQ(countLabel(*func, "label_Do_PF_caseA"), 1);
+    EXPECT_EQ(countLabel(*func, "label_Do_PF_caseC"), 1);
+    EXPECT_EQ(countLabel(*func, "label_Do_PF_end"), 1);
+}
+
+TEST_F(SwInstructionPrefetchAbsDynamicPassTest, DynamicRegime_StreamK_BailsNoEmit) {
+    // Same emittable 3-arm shape, but Stream-K (sgprSynchronizer defined) → the
+    // supported-dispatch guard must bail with no IR mutation.
+    buildThreeArmEmittableKernel(bb, arch);
+    appendSetDirective(bb, "sgprSynchronizer", "60");
+
+    SwPrefetchRelPhase1Accum phase1;
+    computeSwPrefetchRelPhase1Accum(*func, nullptr, phase1);
+    ASSERT_GT(phase1.totalLayoutBytes, kSwPrefetchAbsStaticIcacheSizeBytes);
+
+    auto pm = makePm(/*baseSgpr=*/64);
+    pm.run(*func);
+
+    EXPECT_EQ(countSGetpc(*func), 0);
+    EXPECT_EQ(countSPrefetchInst(*func), 0);
+    EXPECT_FALSE(hasAnyAbsPrefetchLabel(*func));
 }

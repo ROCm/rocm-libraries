@@ -194,14 +194,17 @@ bool buildGfx1250Pipeline(PassManager& pm, StinkyAsmModule& module, const PassBu
     // Priority: abs (EnableSwInstructionPrefetchAbs) > PC-rel
     // (EnableSwInstructionPrefetchRelStatic).
     if (moduleOptions.EnableSwInstructionPrefetchAbs) {
-        // §16.6 pipeline: one knob enables both abs passes; each no-ops unless
-        // its size regime matches. Static handles 32640 < total ≤ 65536;
-        // dynamic handles total > 65536 (P2 stub: logs + no-ops for now).
-        // Use the module overload so the pass reads SwInstructionPrefetchAbsBaseSgpr
-        // AND writes its debug dump to <outputDir>/<kernel>/sw_prefetch_abs_static_pass.txt
-        // (same as the PC-rel pass); the int overload has no debug path → no dump.
+        // One knob enables both abs passes; they are mutually exclusive by regime:
+        //   - static  : entry-burst grid, emits for (32640, 65536]; no-ops for > 65536.
+        //   - dynamic : CFG-target (post-CP) policy. Always runs the read-only detector dump for
+        //     total > P(0)=32640; EMITS the Variant-1 ladder (after label_MultiGemmEnd) for
+        //     total > 65536. Dumps to <outputDir>/<kernel>/sw_prefetch_abs_dynamic_pass.txt.
+        // Both use the module overload (reads SwInstructionPrefetchAbsBaseSgpr + debug path).
+        // Dynamic runs FIRST so its detector dump reflects the PRISTINE layout (before the static
+        // pass's entry burst shifts offsets). At any given size exactly one pass emits, so there is
+        // no co-mutation or baseSgpr contention.
+        pm.addPass(createSwInstructionPrefetchAbsDynamicPass(module));
         pm.addPass(createSwInstructionPrefetchAbsStaticPass(module));
-        // pm.addPass(createSwInstructionPrefetchAbsDynamicPass(module));
     } else if (moduleOptions.EnableSwInstructionPrefetchRelStatic) {
         // PC-rel dynamic pass (CFG-gated; replaces static PC-rel when enabled).
         // pm.addPass(createSwInstructionPrefetchRelStaticPass(module));

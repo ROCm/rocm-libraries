@@ -39,11 +39,13 @@
 ///   s_prefetch_inst s[base:base+1], k*4096, null, 0x1f   ; for k = 0 .. N-1
 ///
 /// Notes:
-///   - Address uses a bare label + temp SGPR (rocisa long-branch idiom), NOT @pc / @rel32.
-///     @pc is an invalid AMDGCN relocation variant; this idiom is proven by the long-branch code.
+///   - Address uses a bare label + temp SGPR (the rocisa long-branch idiom), proven on amdhsa.
+///     `@pc` is an INVALID variant (assembler rejects it). The 2-SGPR `@rel32@lo/@hi` alternative
+///     was tried and reverted — keep the proven 3-SGPR temp idiom.
 ///   - klength uses the simm5 immediate (0x1f); slength = null. No SGPR for the length.
-///   - The base pair + temp (3 SGPRs) are auto-allocated in Tensile (KernelWriter._initKernel)
-///     and freed after the entry burst — body reuses them, so net ~0 SGPR pressure.
+///   - The base pair + temp (3 SGPRs) are auto-allocated in Tensile (KernelWriter._initKernel),
+///     reserved through the prolog, and freed at label_MultiGemmEnd (before defineVariableSgprs
+///     reclaims them) — body reuses them, so net ~0 SGPR pressure.
 ///   - Minimum-SGPR alternative (2 SGPRs, no temp): @rel32@lo+4 / @rel32@hi+12 on the two adds.
 ///
 /// Purpose of single-label + koffset vs per-k labels (§5.1):
@@ -134,7 +136,7 @@ class SwInstructionPrefetchAbsStaticPass : public StinkyInstPass {
 
         // Gate 1: totalLayoutBytes must be in (P(0), 64 KiB].
         // <= P(0): CP preload covers everything; no software prefetch needed.
-        // > 64 KiB: dynamic policy (SwInstructionPrefetchAbsDynamicPass, not implemented).
+        // > 64 KiB: dynamic regime — handled by SwInstructionPrefetchAbsDynamicPass (CFG-target).
         if (phase1.totalLayoutBytes <= kSwPrefetchFirstGlobalByte) {
             if (m_debug)
                 *m_debugStream << "[" << getName() << "] no-op: totalLayoutBytes ("
@@ -144,20 +146,20 @@ class SwInstructionPrefetchAbsStaticPass : public StinkyInstPass {
             closeDebugFile();
             return PreservedAnalyses::all();
         }
-        // TEMPORARY (testing): the > 64 KiB upper gate is disabled so the static pass also
-        // handles large kernels (no SwInstructionPrefetchAbsDynamicPass yet). The single
-        // entry-burst is still correct for > 64 KiB layout-wise; it just is not
-        // replacement-aware. Re-enable the early-return below once the dynamic pass lands.
+        // Regime split: > 64 KiB is the dynamic regime, handled by the CFG-target
+        // SwInstructionPrefetchAbsDynamicPass (D1, now enabled — emits the predicated ladder after
+        // label_MultiGemmEnd). The static entry-burst grid owns only (32640, 65536], so it no-ops
+        // here to avoid co-mutating the same kernel / contending for the shared
+        // SwInstructionPrefetchAbsBaseSgpr. (Re-disable in lockstep with kD1LadderEmissionEnabled
+        // if D1 emission is ever turned back off.) See design §13.
         if (phase1.totalLayoutBytes > kSwPrefetchAbsStaticIcacheSizeBytes) {
             if (m_debug)
-                *m_debugStream << "[" << getName() << "] WARNING: totalLayoutBytes ("
-                               << phase1.totalLayoutBytes << ") > I-cache limit "
-                               << kSwPrefetchAbsStaticIcacheSizeBytes
-                               << " — static pass running anyway (dynamic pass not implemented; "
-                                  "replacement not modeled)\n";
-            // TODO(abs-dynamic): restore the no-op once SwInstructionPrefetchAbsDynamicPass exists:
-            // closeDebugFile();
-            // return PreservedAnalyses::all();
+                *m_debugStream
+                    << "[" << getName() << "] no-op: totalLayoutBytes (" << phase1.totalLayoutBytes
+                    << ") > I-cache limit " << kSwPrefetchAbsStaticIcacheSizeBytes
+                    << " — dynamic regime, handled by SwInstructionPrefetchAbsDynamicPass\n";
+            closeDebugFile();
+            return PreservedAnalyses::all();
         }
 
         // Gate 2: base SGPR pair must be reserved.
@@ -175,7 +177,8 @@ class SwInstructionPrefetchAbsStaticPass : public StinkyInstPass {
                          static_cast<uint32_t>(archArr[2]));
 
         // Count N (fixed point). The burst we insert at entry-begin grows the kernel by
-        //   I = kBurstFixedBytes (s_getpc_b64 + s_add_i32(+literal) + s_add_u32 + s_addc_u32)
+        //   I = kBurstFixedBytes (s_getpc_b64=4 + s_add_i32(+label literal)=8 + s_add_u32=4
+        //                         + s_addc_u32=4 = 20)
         //     + N * kPrefetchInstBytes (each s_prefetch_inst)
         // bytes, shifting the whole body down by I. That can push one extra 4 KiB grid step past
         // the (now larger) tail, so N must be solved against the POST-insertion total. Because
@@ -253,7 +256,7 @@ class SwInstructionPrefetchAbsStaticPass : public StinkyInstPass {
             const uint32_t baseLo = static_cast<uint32_t>(m_baseSgpr);
             const uint32_t baseHi = static_cast<uint32_t>(m_baseSgpr + 1);
             // Scratch SGPR (base+2): holds the PC-relative offset for the address computation
-            // (rocisa long-branch idiom). Dead after s_add_u32; klength uses the simm5 immediate
+            // (rocisa long-branch idiom). Dead after s_add_u32. klength uses the simm5 immediate
             // (0x1f), so no separate length register is needed.
             // To drop this scratch entirely (2 SGPRs total) switch the two adds to the
             // @rel32@lo+4 / @rel32@hi+12 relocation form (offset encoded in the instruction).
@@ -270,8 +273,8 @@ class SwInstructionPrefetchAbsStaticPass : public StinkyInstPass {
 
             // s_add_i32 s[tmp], label_SW_PrefetchAbs_0, 4
             //   Bare label operand -> assembler emits a PC-relative relocation; +4 corrects for
-            //   s_getpc_b64 returning the address of the following instruction. (Same idiom as the
-            //   rocisa long-branch sequence; @pc / @rel32 variants are not used here.)
+            //   s_getpc_b64 returning the address of the following instruction. Same idiom as the
+            //   rocisa long-branch sequence (proven on amdhsa). NOT @pc (invalid variant).
             StinkyInstruction* addOff = builder.create(getMCIDByUOp(GFX::s_add_i32, archId));
             addOff->addDestReg(StinkyRegister("s", tmp, 1));
             addOff->addSrcReg(StinkyRegister(targetLabelName));
