@@ -1159,14 +1159,18 @@ struct amdgcn_mma<fp8_t, fp8_t, fp32_t, 16u, 16u, 32u, CompilerTarget, MmaOpFami
     static constexpr const char* instruction_name =
         "__builtin_amdgcn_mfma_f32_16x16x32_fp8_fp8_gfx908_gfx90a_workaround";
 
-    // template <typename... Params>
-    // CK_TILE_DEVICE static CVecType
-    // exec(AVecType const& aVec, BVecType const& bVec, CVecType const& cVec)
-    // {
-    //     using P = WarpGemmParamsParser<Params...>;
-    //     return {__builtin_amdgcn_mfma_f32_16x16x32_fp8_fp8(
-    //         bit_cast<int64_t>(aVec), bit_cast<int64_t>(bVec), cVec, P::cbsz, P::abid, P::blgp)};
-    // }
+    template <typename... Params>
+    CK_TILE_DEVICE static CVecType
+    exec(AVecType const& aVec, BVecType const& bVec, CVecType const& cVec)
+    {
+        // using P = WarpGemmParamsParser<Params...>;
+        // ck_tile::ignore = cVec;
+        ck_tile::ignore = aVec;
+        ck_tile::ignore = bVec;
+        return cVec;
+        // return {__builtin_amdgcn_mfma_f32_16x16x32_fp8_fp8(
+        //     bit_cast<int64_t>(aVec), bit_cast<int64_t>(bVec), cVec, P::cbsz, P::abid, P::blgp)};
+    }
 };
 
 // Custom version of fp8 32x32x16 using real workaround for gfx908 and gfx90a
@@ -1217,6 +1221,84 @@ struct amdgcn_mma<fp8_t, fp8_t, fp32_t, 16u, 16u, 16u, CompilerTarget, MmaOpFami
     // exec(AVecType const& aVec, BVecType const& bVec, CVecType const& cVec)
     // {
     //     return {__builtin_amdgcn_wmma_f32_16x16x16_fp8_fp8_w32_gfx12(
+    //         bit_cast<int32x2_t>(aVec), bit_cast<int32x2_t>(bVec), cVec)};
+    // }
+};
+
+// Custom version of bf8 16x16x32 using fake workaround for gfx908 and gfx90a
+template <typename CompilerTarget>
+// clang-format off
+//               |A B C DataTypes     |MNK           |
+struct amdgcn_mma<bf8_t, bf8_t, fp32_t, 16u, 16u, 32u, CompilerTarget, MmaOpFamily::DENSE, enable_if_target_id_t<CompilerTarget, amdgcn_target_id::GFX908, amdgcn_target_id::GFX90A>>
+//                                                   |WS  |AParams |BPar |CPar |
+: amdgcn_mma_base<bf8_t, bf8_t, fp32_t, 16u, 16u, 32u, 64u, 8, 1, 1, 1, 1, 4, 1, MfmaOp, MmaOpFamily::DENSE>
+// clang-format on
+{
+    static constexpr const char* instruction_name =
+        "__builtin_amdgcn_mfma_f32_16x16x32_bf8_bf8_gfx908_gfx90a_workaround";
+
+    template <typename... Params>
+    CK_TILE_DEVICE static CVecType
+    exec(AVecType const& aVec, BVecType const& bVec, CVecType const& cVec)
+    {
+        // using P = WarpGemmParamsParser<Params...>;
+        // ck_tile::ignore = cVec;
+        ck_tile::ignore = aVec;
+        ck_tile::ignore = bVec;
+        return cVec;
+        // return {__builtin_amdgcn_mfma_f32_16x16x32_bf8_bf8(
+        //     bit_cast<int64_t>(aVec), bit_cast<int64_t>(bVec), cVec, P::cbsz, P::abid, P::blgp)};
+    }
+};
+
+// Custom version of bf8 32x32x16 using real workaround for gfx908 and gfx90a
+template <typename CompilerTarget>
+// clang-format off
+//               |A B C DataTypes     |MNK           |
+struct amdgcn_mma<bf8_t, bf8_t, fp32_t, 32u, 32u, 16u, CompilerTarget, MmaOpFamily::DENSE, enable_if_target_id_t<CompilerTarget, amdgcn_target_id::GFX908, amdgcn_target_id::GFX90A>>
+//                                                   |WS  |AParams |BPar |CPar  |
+: amdgcn_mma_base<bf8_t, bf8_t, fp32_t, 32u, 32u, 16u, 64u, 8, 1, 1, 1, 1, 16, 4, MfmaOp, MmaOpFamily::DENSE>
+// clang-format on
+{
+    static constexpr const char* instruction_name =
+        "__builtin_amdgcn_mfma_f32_32x32x16_bf8_bf8_gfx908_gfx90a_workaround";
+
+    template <typename... Params>
+    CK_TILE_DEVICE static CVecType exec(AVecType const& aVec, BVecType const& bVec, CVecType& cVec)
+    {
+        using P = WarpGemmParamsParser<Params...>;
+        static_for<0, 8, 1>{}([&](auto k) {
+            float a_f32 =
+                type_convert<float>(reinterpret_cast<const thread_buffer<ADataType, 8>&>(aVec)
+                                        .template get_as<ADataType>()[number<k>{}]);
+            float b_f32 =
+                type_convert<float>(reinterpret_cast<const thread_buffer<BDataType, 8>&>(bVec)
+                                        .template get_as<BDataType>()[number<k>{}]);
+
+            cVec =
+                __builtin_amdgcn_mfma_f32_32x32x2f32(a_f32, b_f32, cVec, P::cbsz, P::abid, P::blgp);
+        });
+        return cVec;
+    }
+};
+
+// Custom version bf8 16x16x16 using fake workaround for gfx908 and gfx90a with WMMA layout params.
+template <typename CompilerTarget>
+// clang-format off
+//               | A B C DataTypes    | MNK + WaveSize    |AParams |BPar |CPar |
+struct amdgcn_mma<bf8_t, bf8_t, fp32_t, 16u, 16u, 16u, CompilerTarget, MmaOpFamily::DENSE, enable_if_target_id_t<CompilerTarget, amdgcn_target_id::GFX908, amdgcn_target_id::GFX90A>>
+//                                                   |WS   |AParams|BPar |CPar |
+: amdgcn_mma_base<bf8_t, bf8_t, fp32_t, 16u, 16u, 16u, 32u, 8, 1, 1, 1, 1, 8, 1, MfmaOp, MmaOpFamily::DENSE>
+// clang-format on
+{
+    static constexpr const char* instruction_name =
+        "__builtin_amdgcn_wmma_f32_16x16x16_bf8_bf8_w32_gfx12_gfx908_gfx90a_workaround";
+
+    // template <typename... Params>
+    // CK_TILE_DEVICE static CVecType
+    // exec(AVecType const& aVec, BVecType const& bVec, CVecType const& cVec)
+    // {
+    //     return {__builtin_amdgcn_wmma_f32_16x16x16_bf8_bf8_w32_gfx12(
     //         bit_cast<int32x2_t>(aVec), bit_cast<int32x2_t>(bVec), cVec)};
     // }
 };
