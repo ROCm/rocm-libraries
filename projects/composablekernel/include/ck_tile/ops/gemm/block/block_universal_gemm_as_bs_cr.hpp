@@ -135,20 +135,6 @@ struct BlockUniversalGemmAsBsCr
     static constexpr index_t BPackedSize =
         ck_tile::numeric_traits<remove_cvref_t<BDataType>>::PackedSize;
 
-    template <typename SrcBuffer, typename WarpTensor>
-    struct ConvertWarpTensorFromSliceFn
-    {
-        const SrcBuffer& src;
-        WarpTensor& warp_tensor;
-
-        template <typename I>
-        CK_TILE_DEVICE void operator()(I i) const
-        {
-            warp_tensor.get_thread_buffer()[i] =
-                type_convert<typename remove_cvref_t<WarpTensor>::DataType>(src[i]);
-        }
-    };
-
     using I0 = number<0>;
     using I1 = number<1>;
 
@@ -245,25 +231,22 @@ struct BlockUniversalGemmAsBsCr
             load_and_convert_tile<UnaryOpSize_, BLoadTranspose>(b_warp_tile_, b_block_window);
 
             // hot loop:
-            static_ford<sequence<GemmTraits::KIterPerWarp, MIterPerWarp>>{}([&](auto km) {
-                constexpr auto kIter = number<km[number<0>{}]>{};
-                constexpr auto mIter = number<km[number<1>{}]>{};
+            static_for<0, GemmTraits::KIterPerWarp, 1>{}([&](auto kIter) {
+                static_for<0, MIterPerWarp, 1>{}([&](auto mIter) {
                     // read A warp tensor from A block tensor
-                    const auto a_src = a_warp_tile_.get_y_sliced_thread_data(
+                    AWarpTensor a_warp_tensor;
+
+                    a_warp_tensor.get_thread_buffer() = a_warp_tile_.get_y_sliced_thread_data(
                         merge_sequences(sequence<mIter, kIter>{}, a_warp_y_index_zeros),
                         merge_sequences(sequence<1, 1>{}, a_warp_y_lengths));
-                    AWarpTensor a_warp_tensor;
-                    static_for<0, decltype(a_src)::size(), 1>{}(
-                        ConvertWarpTensorFromSliceFn{a_src, a_warp_tensor});
 
                     static_for<0, NIterPerWarp, 1>{}([&](auto nIter) {
                         // read B warp tensor from B block tensor
-                        const auto b_src = b_warp_tile_.get_y_sliced_thread_data(
+                        BWarpTensor b_warp_tensor;
+
+                        b_warp_tensor.get_thread_buffer() = b_warp_tile_.get_y_sliced_thread_data(
                             merge_sequences(sequence<nIter, kIter>{}, b_warp_y_index_zeros),
                             merge_sequences(sequence<1, 1>{}, b_warp_y_lengths));
-                        BWarpTensor b_warp_tensor;
-                        static_for<0, decltype(b_src)::size(), 1>{}(
-                            ConvertWarpTensorFromSliceFn{b_src, b_warp_tensor});
 
                         // read C warp tensor from C block tensor-
                         CWarpTensor c_warp_tensor;
@@ -290,6 +273,7 @@ struct BlockUniversalGemmAsBsCr
                             merge_sequences(sequence<1, 1>{}, c_warp_y_lengths),
                             c_warp_tensor.get_thread_buffer());
                     });
+                });
             });
         }
     };
@@ -359,21 +343,19 @@ struct BlockUniversalGemmAsBsCr
                 constexpr auto kIter = number<km[number<0>{}]>{};
                 constexpr auto mIter = number<km[number<1>{}]>{};
                 // read A warp tensor from A block tensor
-                const auto a_src = a_warp_tile_.get_y_sliced_thread_data(
+                AWarpTensor a_warp_tensor;
+
+                a_warp_tensor.get_thread_buffer() = a_warp_tile_.get_y_sliced_thread_data(
                     merge_sequences(sequence<mIter, kIter>{}, a_warp_y_index_zeros),
                     merge_sequences(sequence<1, 1>{}, a_warp_y_lengths));
-                AWarpTensor a_warp_tensor;
-                static_for<0, decltype(a_src)::size(), 1>{}(
-                    ConvertWarpTensorFromSliceFn{a_src, a_warp_tensor});
 
                 static_for<0, NIterPerWarp, 1>{}([&](auto nIter) {
                     // read B warp tensor from B block tensor
-                    const auto b_src = b_warp_tile_.get_y_sliced_thread_data(
+                    BWarpTensor b_warp_tensor;
+
+                    b_warp_tensor.get_thread_buffer() = b_warp_tile_.get_y_sliced_thread_data(
                         merge_sequences(sequence<nIter, kIter>{}, b_warp_y_index_zeros),
                         merge_sequences(sequence<1, 1>{}, b_warp_y_lengths));
-                    BWarpTensor b_warp_tensor;
-                    static_for<0, decltype(b_src)::size(), 1>{}(
-                        ConvertWarpTensorFromSliceFn{b_src, b_warp_tensor});
 
                     // read C warp tensor from C block tensor
                     CWarpTensor c_warp_tensor;
@@ -523,26 +505,37 @@ struct BlockUniversalGemmAsBsCr
                     constexpr auto kInnerIter = number<km[number<0>{}]>{};
                     constexpr auto mIter      = number<km[number<1>{}]>{};
                     // read A warp tensor from A block tensor
-                    const auto a_src = a_warp_tile_.get_y_sliced_thread_data(
+                    AWarpTensor a_warp_tensor;
+
+                    a_warp_tensor.get_thread_buffer() = a_warp_tile_.get_y_sliced_thread_data(
                         merge_sequences(sequence<mIter, kInnerIter>{}, a_warp_y_index_zeros),
                         merge_sequences(sequence<1, 1>{}, a_warp_y_lengths));
-                    AWarpTensor a_warp_tensor;
-                    static_for<0, decltype(a_src)::size(), 1>{}(
-                        ConvertWarpTensorFromSliceFn{a_src, a_warp_tensor});
                     static_for<0, NIterPerWarp, 1>{}([&](auto nIter) {
                         // read B warp tensor from B block tensor
-                        const auto b_src = b_warp_tile_.get_y_sliced_thread_data(
+                        BWarpTensor b_warp_tensor;
+
+                        b_warp_tensor.get_thread_buffer() = b_warp_tile_.get_y_sliced_thread_data(
                             merge_sequences(sequence<nIter, kInnerIter>{}, b_warp_y_index_zeros),
                             merge_sequences(sequence<1, 1>{}, b_warp_y_lengths));
+_y_index_zeros),
+                            merge_sequences(sequence<1, 1>{}, a_warp_y_lengths)));
+                    static_for<0, NIterPerWarp, 1>{}([&](auto nIter) {
+                        // read B warp tensor from B block tensor
                         BWarpTensor b_warp_tensor;
-                        static_for<0, decltype(b_src)::size(), 1>{}(
-                            ConvertWarpTensorFromSliceFn{b_src, b_warp_tensor});
+
+                        assign_thread_buffer(
+                            b_warp_tensor.get_thread_buffer(),
+                            b_warp_tile_.get_y_sliced_thread_data(
+                                merge_sequences(sequence<nIter, kInnerIter>{}, b_warp_y_index_zeros),
+                                merge_sequences(sequence<1, 1>{}, b_warp_y_lengths)));
                         // read C warp tensor from C block tensor-
                         CWarpTensor c_warp_tensor;
 
-                        c_warp_tensor.get_thread_buffer() = c_block_tensor.get_y_sliced_thread_data(
-                            merge_sequences(sequence<mIter, nIter>{}, c_warp_y_index_zeros),
-                            merge_sequences(sequence<1, 1>{}, c_warp_y_lengths));
+                        direct_assign_thread_buffer(
+                            c_warp_tensor.get_thread_buffer(),
+                            c_block_tensor.get_y_sliced_thread_data(
+                                merge_sequences(sequence<mIter, nIter>{}, c_warp_y_index_zeros),
+                                merge_sequences(sequence<1, 1>{}, c_warp_y_lengths)));
 
                         // The block_sync_lds() here performs double duty:
                         // A) safeguard against data hazard because barrier from

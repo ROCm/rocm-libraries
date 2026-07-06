@@ -985,6 +985,86 @@ struct amdgcn_mma<tf32_t, tf32_t, fp32_t, 32u, 32u, 4u, CompilerTarget, MmaOpFam
 
 template <typename CompilerTarget>
 // clang-format off
+//               |A B C DataTypes       |MNK           |
+struct amdgcn_mma<tf32_t, tf32_t, fp32_t, 16u, 16u, 32u, CompilerTarget, MmaOpFamily::DENSE, enable_if_target_id_t<CompilerTarget, amdgcn_target_id::GFX950>>
+//                                                     |WS  |AParams |BPar |CPar |
+: amdgcn_mma_base<tf32_t, tf32_t, fp32_t, 16u, 16u, 32u, 64u, 8, 1, 1, 1, 1, 4, 1, MfmaOp, MmaOpFamily::DENSE>
+// clang-format on
+{
+    static constexpr const char* instruction_name = "__builtin_amdgcn_mfma_f32_16x16x32_bf16";
+
+    template <typename... Params>
+    CK_TILE_DEVICE static CVecType
+    exec(AVecType const& aVec, BVecType const& bVec, CVecType const& cVec)
+    {
+#if defined(__gfx950__)
+        ext_vector_t<bf16_t, 8> a_big;
+        ext_vector_t<bf16_t, 8> a_small;
+        ext_vector_t<bf16_t, 8> b_big;
+        ext_vector_t<bf16_t, 8> b_small;
+        convert_float_to_bf16_pairs<8>(aVec, a_big, a_small);
+        convert_float_to_bf16_pairs<8>(bVec, b_big, b_small);
+
+        using P = WarpGemmParamsParser<Params...>;
+
+        auto result = __builtin_amdgcn_mfma_f32_16x16x32_bf16(
+            a_small, b_big, cVec, P::cbsz, P::abid, P::blgp);
+        result = __builtin_amdgcn_mfma_f32_16x16x32_bf16(
+            a_big, b_small, result, P::cbsz, P::abid, P::blgp);
+        result = __builtin_amdgcn_mfma_f32_16x16x32_bf16(
+            a_big, b_big, result, P::cbsz, P::abid, P::blgp);
+        return {result};
+#else
+        ck_tile::ignore = aVec;
+        ck_tile::ignore = bVec;
+        ck_tile::ignore = cVec;
+        return {cVec};
+#endif
+    }
+};
+
+template <typename CompilerTarget>
+// clang-format off
+//               |A B C DataTypes       |MNK           |
+struct amdgcn_mma<tf32_t, tf32_t, fp32_t, 32u, 32u, 16u, CompilerTarget, MmaOpFamily::DENSE, enable_if_target_id_t<CompilerTarget, amdgcn_target_id::GFX950>>
+//                                                     |WS  |AParams |BPar |CPar  |
+: amdgcn_mma_base<tf32_t, tf32_t, fp32_t, 32u, 32u, 16u, 64u, 8, 1, 1, 1, 1, 16, 4, MfmaOp, MmaOpFamily::DENSE>
+// clang-format on
+{
+    static constexpr const char* instruction_name = "__builtin_amdgcn_mfma_f32_32x32x16_bf16";
+
+    template <typename... Params>
+    CK_TILE_DEVICE static CVecType
+    exec(AVecType const& aVec, BVecType const& bVec, CVecType const& cVec)
+    {
+#if defined(__gfx950__)
+        ext_vector_t<bf16_t, 8> a_big;
+        ext_vector_t<bf16_t, 8> a_small;
+        ext_vector_t<bf16_t, 8> b_big;
+        ext_vector_t<bf16_t, 8> b_small;
+        convert_float_to_bf16_pairs<8>(aVec, a_big, a_small);
+        convert_float_to_bf16_pairs<8>(bVec, b_big, b_small);
+
+        using P = WarpGemmParamsParser<Params...>;
+
+        auto result = __builtin_amdgcn_mfma_f32_32x32x16_bf16(
+            a_small, b_big, cVec, P::cbsz, P::abid, P::blgp);
+        result = __builtin_amdgcn_mfma_f32_32x32x16_bf16(
+            a_big, b_small, result, P::cbsz, P::abid, P::blgp);
+        result = __builtin_amdgcn_mfma_f32_32x32x16_bf16(
+            a_big, b_big, result, P::cbsz, P::abid, P::blgp);
+        return {result};
+#else
+        ck_tile::ignore = aVec;
+        ck_tile::ignore = bVec;
+        ck_tile::ignore = cVec;
+        return {cVec};
+#endif
+    }
+};
+
+template <typename CompilerTarget>
+// clang-format off
 //               |A B C DataTypes     |MNK           |
 struct amdgcn_mma<bf8_t, bf8_t, fp32_t, 16u, 16u, 32u, CompilerTarget, MmaOpFamily::DENSE, enable_if_target_id_t<CompilerTarget, amdgcn_target_id::GFX942, amdgcn_target_id::GFX950>>
 //                                                   |WS  |AParams |BPar |CPar |
