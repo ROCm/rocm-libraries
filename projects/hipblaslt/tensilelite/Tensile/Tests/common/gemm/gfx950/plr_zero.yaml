@@ -2,7 +2,6 @@ TestParameters:
   marks: [skip-gfx942, skip-gfx900, skip-gfx906, skip-gfx908, skip-gfx90a, skip-gfx1010, skip-gfx1011, skip-gfx1012, skip-gfx1030, skip-gfx1100, skip-gfx1101, skip-gfx1102, skip-gfx1200, skip-gfx1201, skip-gfx1250] # not supported by arch
 
 GlobalParameters:
-  MergeFiles: False
   NumElementsToValidate: -1
 
   NumWarmups: 1
@@ -18,13 +17,9 @@ GlobalParameters:
   DataInitTypeScaleAlphaVec: 1
   DataInitTypeScaleA: 1
   DataInitTypeScaleB: 1
-  CSVExportWinner: 1
-  CSVMergeSameProblemID: 1
-  MinKForGSU: 1
-  MaxFileName: 256
+  CSVExportWinner: true
+  CSVMergeSameProblemID: true
   KernelTime: True
-  MaxLDS: 163840
-  DeviceLDS: 163840
 
   #PrintSolutionRejectionReason: True
   #Device: 3
@@ -112,7 +107,7 @@ BenchmarkProblems:
         - GlobalReadVectorWidthA: [1,2,8]
         - GlobalReadVectorWidthB: [1,2,8]
         - LocalReadVectorWidth: [8]
-        - SourceSwap: [1]
+        - SourceSwap: [true]
         - StreamK: [3]
       BenchmarkJoinParameters:
       BenchmarkFinalParameters:
@@ -143,7 +138,7 @@ BenchmarkProblems:
         - GlobalReadVectorWidthA: [1,2,8]
         - GlobalReadVectorWidthB: [1,2,8]
         - LocalReadVectorWidth: [8]
-        - SourceSwap: [1]
+        - SourceSwap: [true]
         - StreamK: [3]
       BenchmarkJoinParameters:
       BenchmarkFinalParameters:
@@ -168,7 +163,7 @@ BenchmarkProblems:
         - GlobalReadVectorWidthA: [1,2,8]
         - GlobalReadVectorWidthB: [1,2,8]
         - LocalReadVectorWidth: [8]
-        - SourceSwap: [1]
+        - SourceSwap: [true]
         - StreamK: [3]
       BenchmarkJoinParameters:
       BenchmarkFinalParameters:
@@ -191,7 +186,7 @@ BenchmarkProblems:
         - GlobalReadVectorWidthA: [8]
         - GlobalReadVectorWidthB: [8]
         - LocalReadVectorWidth: [8]
-        - SourceSwap: [1]
+        - SourceSwap: [true]
         - StreamK: [3]
       BenchmarkJoinParameters:
       BenchmarkFinalParameters:
@@ -244,9 +239,9 @@ BenchmarkProblems:
         - GlobalReadVectorWidthA: [1,2,8]
         - GlobalReadVectorWidthB: [1,2,8]
         - LocalReadVectorWidth: [8]
-        - SourceSwap: [1]
+        - SourceSwap: [true]
         - StreamK: [3]
-        - LDSTrInst: [0, 1]
+        - LDSTrInst: [false, true]
       BenchmarkJoinParameters:
       BenchmarkFinalParameters:
         - ProblemSizes:
@@ -272,9 +267,9 @@ BenchmarkProblems:
         - GlobalReadVectorWidthA: [1,2,8]
         - GlobalReadVectorWidthB: [1,2,8]
         - LocalReadVectorWidth: [8]
-        - SourceSwap: [1]
+        - SourceSwap: [true]
         - StreamK: [3]
-        - LDSTrInst: [0, 1]
+        - LDSTrInst: [false, true]
       BenchmarkJoinParameters:
       BenchmarkFinalParameters:
         - ProblemSizes:
@@ -298,9 +293,9 @@ BenchmarkProblems:
         - GlobalReadVectorWidthA: [1,2,8]
         - GlobalReadVectorWidthB: [1,2,8]
         - LocalReadVectorWidth: [8]
-        - SourceSwap: [1]
+        - SourceSwap: [true]
         - StreamK: [3]
-        - LDSTrInst: [0, 1]
+        - LDSTrInst: [false, true]
       BenchmarkJoinParameters:
       BenchmarkFinalParameters:
         - ProblemSizes:
@@ -322,7 +317,7 @@ BenchmarkProblems:
         - GlobalReadVectorWidthA: [8]
         - GlobalReadVectorWidthB: [8]
         - LocalReadVectorWidth: [8]
-        - SourceSwap: [1]
+        - SourceSwap: [true]
         - StreamK: [3]
       BenchmarkJoinParameters:
       BenchmarkFinalParameters:
@@ -372,9 +367,9 @@ BenchmarkProblems:
         - GlobalReadVectorWidthA: [1,2,8]
         - GlobalReadVectorWidthB: [1,2,8]
         - LocalReadVectorWidth: [8]
-        - SourceSwap: [1]
+        - SourceSwap: [true]
         - StreamK: [3]
-        - LDSTrInst: [0, 1]
+        - LDSTrInst: [false, true]
       BenchmarkJoinParameters:
       BenchmarkFinalParameters:
         - ProblemSizes:
@@ -400,9 +395,9 @@ BenchmarkProblems:
         - GlobalReadVectorWidthA: [1,2,8]
         - GlobalReadVectorWidthB: [1,2,8]
         - LocalReadVectorWidth: [8]
-        - SourceSwap: [1]
+        - SourceSwap: [true]
         - StreamK: [3]
-        - LDSTrInst: [0, 1]
+        - LDSTrInst: [false, true]
       BenchmarkJoinParameters:
       BenchmarkFinalParameters:
         - ProblemSizes:
@@ -426,9 +421,9 @@ BenchmarkProblems:
         - GlobalReadVectorWidthA: [1,2,8]
         - GlobalReadVectorWidthB: [1,2,8]
         - LocalReadVectorWidth: [8]
-        - SourceSwap: [1]
+        - SourceSwap: [true]
         - StreamK: [3]
-        - LDSTrInst: [0, 1]
+        - LDSTrInst: [false, true]
       BenchmarkJoinParameters:
       BenchmarkFinalParameters:
         - ProblemSizes:
@@ -450,7 +445,7 @@ BenchmarkProblems:
         - GlobalReadVectorWidthA: [8]
         - GlobalReadVectorWidthB: [8]
         - LocalReadVectorWidth: [8]
-        - SourceSwap: [1]
+        - SourceSwap: [true]
         - StreamK: [3]
       BenchmarkJoinParameters:
       BenchmarkFinalParameters:
@@ -501,9 +496,9 @@ BenchmarkProblems:
         - GlobalReadVectorWidthA: [1,2,8]
         - GlobalReadVectorWidthB: [1,2,8]
         - LocalReadVectorWidth: [8]
-        - SourceSwap: [1]
+        - SourceSwap: [true]
         - StreamK: [3]
-        - LDSTrInst: [0, 1]
+        - LDSTrInst: [false, true]
       BenchmarkJoinParameters:
       BenchmarkFinalParameters:
         - ProblemSizes:
@@ -529,9 +524,9 @@ BenchmarkProblems:
         - GlobalReadVectorWidthA: [1,2,8]
         - GlobalReadVectorWidthB: [1,2,8]
         - LocalReadVectorWidth: [8]
-        - SourceSwap: [1]
+        - SourceSwap: [true]
         - StreamK: [3]
-        - LDSTrInst: [0, 1]
+        - LDSTrInst: [false, true]
       BenchmarkJoinParameters:
       BenchmarkFinalParameters:
         - ProblemSizes:
@@ -555,9 +550,9 @@ BenchmarkProblems:
         - GlobalReadVectorWidthA: [1,2,8]
         - GlobalReadVectorWidthB: [1,2,8]
         - LocalReadVectorWidth: [8]
-        - SourceSwap: [1]
+        - SourceSwap: [true]
         - StreamK: [3]
-        - LDSTrInst: [0, 1]
+        - LDSTrInst: [false, true]
       BenchmarkJoinParameters:
       BenchmarkFinalParameters:
         - ProblemSizes:
@@ -579,7 +574,7 @@ BenchmarkProblems:
         - GlobalReadVectorWidthA: [8]
         - GlobalReadVectorWidthB: [8]
         - LocalReadVectorWidth: [8]
-        - SourceSwap: [1]
+        - SourceSwap: [true]
         - StreamK: [3]
       BenchmarkJoinParameters:
       BenchmarkFinalParameters:
@@ -634,7 +629,7 @@ BenchmarkProblems:
         - GlobalReadVectorWidthA: [4,8,16]
         - GlobalReadVectorWidthB: [4,8,16]
         - LocalReadVectorWidth: [16]
-        - SourceSwap: [1]
+        - SourceSwap: [true]
       BenchmarkJoinParameters:
       BenchmarkFinalParameters:
         - ProblemSizes:

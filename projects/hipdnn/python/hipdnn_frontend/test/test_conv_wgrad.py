@@ -35,6 +35,7 @@ def build_conv_wgrad_graph(
     conv_attrs.set_dilation([dil, dil])
 
     dw = graph.conv_wgrad(dy, x, conv_attrs)
+    dw.set_dim([k, c, r, s])
     dw.set_name("weight_gradient_dw")
     dw.set_output(True)
 

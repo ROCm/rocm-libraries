@@ -39,11 +39,11 @@
 #ifdef CODE_COVERAGE
 #include "check_numerics_matrix.hpp"
 #include "hipblaslt_internal.hpp"
-#include "rocblaslt/rocblaslt_mat_utils.hpp"
-#include "rocblaslt/rocroller_host.hpp"
-#include "rocblaslt/status.h"
-#include "rocblaslt/tensile_host.hpp"
-#include "rocblaslt/utility.hpp"
+#include "rocblaslt_mat_utils.hpp"
+#include "rocroller_host.hpp"
+#include "status.h"
+#include "tensile_host.hpp"
+#include "utility.hpp"
 #endif
 #include "unit.hpp"
 #include "utility.hpp"
@@ -1867,7 +1867,7 @@ void testing_aux_mat_copy(const Arguments& arg)
 }
 
 #ifdef CODE_COVERAGE
-void testing_aux_auxiliary_func(const Arguments& arg)
+inline void testing_aux_auxiliary_func(const Arguments& arg)
 {
     // Test gpu_arch_match
     int             deviceId;
@@ -2001,8 +2001,6 @@ void testing_aux_auxiliary_func(const Arguments& arg)
                 == HIPBLASLT_EPILOGUE_GELU_AUX_BIAS);
     ASSERT_TRUE(string_to_epilogue_type("HIPBLASLT_EPILOGUE_RELU_AUX_BIAS")
                 == HIPBLASLT_EPILOGUE_RELU_AUX_BIAS);
-    ASSERT_TRUE(string_to_epilogue_type("HIPBLASLT_EPILOGUE_SIGMOID")
-                == HIPBLASLT_EPILOGUE_SIGMOID);
     ASSERT_TRUE(string_to_epilogue_type("HIPBLASLT_EPILOGUE_DGELU") == HIPBLASLT_EPILOGUE_DGELU);
     ASSERT_TRUE(string_to_epilogue_type("HIPBLASLT_EPILOGUE_DGELU_BGRAD")
                 == HIPBLASLT_EPILOGUE_DGELU_BGRAD);
@@ -2065,7 +2063,7 @@ void testing_aux_auxiliary_func(const Arguments& arg)
     ASSERT_TRUE(hipblaslt_isnan(nan));
 }
 
-void testing_aux_float8_func(const Arguments& arg)
+inline void testing_aux_float8_func(const Arguments& arg)
 {
     _Float16 f16 = 2.0;
 
@@ -2468,7 +2466,7 @@ void testing_aux_float8_func(const Arguments& arg)
     ASSERT_TRUE(result_b == (static_cast<float>(f8_val) > static_cast<float>(f8_b)));
 }
 
-void testing_aux_hipblaslt_ext_op_func(const Arguments& arg)
+inline void testing_aux_hipblaslt_ext_op_func(const Arguments& arg)
 {
     ASSERT_TRUE(hipblasltGetTotalGranularityValue()
                 == hipblasltClientPerformanceArgs::totalGranularity);
@@ -2482,7 +2480,7 @@ void testing_aux_hipblaslt_ext_op_func(const Arguments& arg)
     ASSERT_TRUE(hipblasltGetMemReadBytes() == hipblasltClientPerformanceArgs::memReadBytes);
 }
 
-void testing_aux_rocblaslt_utility_func(const Arguments& arg)
+inline void testing_aux_rocblaslt_utility_func(const Arguments& arg)
 {
     // Test basic prefix functionality
     std::string result = prefix("TEST_LAYER", "test_caller");
@@ -2726,8 +2724,6 @@ void testing_aux_rocblaslt_utility_func(const Arguments& arg)
                 == "EPILOGUE_GELU_AUX");
     ASSERT_TRUE(std::string_view{rocblaslt_epilogue_to_string(ROCBLASLT_EPILOGUE_GELU_AUX_BIAS)}
                 == "EPILOGUE_GELU_AUX_BIAS");
-    ASSERT_TRUE(std::string_view{rocblaslt_epilogue_to_string(ROCBLASLT_EPILOGUE_SIGMOID)}
-                == "EPILOGUE_SIGMOID");
     ASSERT_TRUE(std::string_view{rocblaslt_epilogue_to_string(ROCBLASLT_EPILOGUE_DGELU_BGRAD)}
                 == "EPILOGUE_DGELU_BGRAD");
     ASSERT_TRUE(std::string_view{rocblaslt_epilogue_to_string(ROCBLASLT_EPILOGUE_BGRADA)}
@@ -2998,48 +2994,48 @@ void testing_aux_rocblaslt_utility_func(const Arguments& arg)
     ASSERT_TRUE(desc_result5.front() == '[' && desc_result5.back() == ']');
 
     // Test case 6: Epilogue extension without aux_type
-    _rocblaslt_matmul_desc desc5;
-    desc5.compute_type = rocblaslt_compute_i32;
-    desc5.scale_type   = HIP_R_32I;
-    desc5.op_A         = HIPBLAS_OP_N;
-    desc5.op_B         = HIPBLAS_OP_N;
-    desc5.epilogue     = ROCBLASLT_EPILOGUE_DRELU_BGRAD;
-    desc5.bias         = nullptr;
-    desc5.bias_type    = HIPBLASLT_DATATYPE_INVALID;
-    desc5.aux_type     = HIPBLASLT_DATATYPE_INVALID; // Invalid aux type
-    desc5.e            = reinterpret_cast<void*>(0x55555555);
-    desc5.lde          = 64;
-
-    std::string desc_result5 = rocblaslt_matmul_desc_to_string(&desc5);
-    ASSERT_TRUE(!desc_result5.empty());
-    ASSERT_TRUE(desc_result5.find("computeType=COMPUTE_32I") != std::string::npos);
-    ASSERT_TRUE(desc_result5.find("epilogue=EPILOGUE_DRELU_BGRAD") != std::string::npos);
-    ASSERT_TRUE(desc_result5.find("epilogueAuxPointer=0x") != std::string::npos);
-    ASSERT_TRUE(desc_result5.find("epilogueAuxLd=64") != std::string::npos);
-    // Should NOT contain epilogueAuxDataType since aux_type is invalid
-    ASSERT_TRUE(desc_result5.find("epilogueAuxDataType") == std::string::npos);
-    ASSERT_TRUE(desc_result5.front() == '[' && desc_result5.back() == ']');
-
-    // Test different data types
     _rocblaslt_matmul_desc desc6;
-    desc6.compute_type = rocblaslt_compute_f32_fast_bf16;
-    desc6.scale_type   = HIP_R_16BF;
+    desc6.compute_type = rocblaslt_compute_i32;
+    desc6.scale_type   = HIP_R_32I;
     desc6.op_A         = HIPBLAS_OP_N;
-    desc6.op_B         = HIPBLAS_OP_T;
-    desc6.epilogue     = ROCBLASLT_EPILOGUE_RELU_BIAS;
-    desc6.bias         = reinterpret_cast<void*>(0x99999999);
-    desc6.bias_type    = HIP_R_8F_E4M3_FNUZ;
-    desc6.aux_type     = HIPBLASLT_DATATYPE_INVALID;
-    desc6.e            = nullptr;
-    desc6.lde          = 0;
+    desc6.op_B         = HIPBLAS_OP_N;
+    desc6.epilogue     = ROCBLASLT_EPILOGUE_DRELU_BGRAD;
+    desc6.bias         = nullptr;
+    desc6.bias_type    = HIPBLASLT_DATATYPE_INVALID;
+    desc6.aux_type     = HIPBLASLT_DATATYPE_INVALID; // Invalid aux type
+    desc6.e            = reinterpret_cast<void*>(0x55555555);
+    desc6.lde          = 64;
 
     std::string desc_result6 = rocblaslt_matmul_desc_to_string(&desc6);
     ASSERT_TRUE(!desc_result6.empty());
-    ASSERT_TRUE(desc_result6.find("computeType=COMPUTE_32F_16BF") != std::string::npos);
-    ASSERT_TRUE(desc_result6.find("scaleType=R_16BF") != std::string::npos);
-    ASSERT_TRUE(desc_result6.find("epilogue=EPILOGUE_RELU_BIAS") != std::string::npos);
-    ASSERT_TRUE(desc_result6.find("biasType=R_8F_E4M3_FNUZ") != std::string::npos);
+    ASSERT_TRUE(desc_result6.find("computeType=COMPUTE_32I") != std::string::npos);
+    ASSERT_TRUE(desc_result6.find("epilogue=EPILOGUE_DRELU_BGRAD") != std::string::npos);
+    ASSERT_TRUE(desc_result6.find("epilogueAuxPointer=0x") != std::string::npos);
+    ASSERT_TRUE(desc_result6.find("epilogueAuxLd=64") != std::string::npos);
+    // Should NOT contain epilogueAuxDataType since aux_type is invalid
+    ASSERT_TRUE(desc_result6.find("epilogueAuxDataType") == std::string::npos);
     ASSERT_TRUE(desc_result6.front() == '[' && desc_result6.back() == ']');
+
+    // Test different data types
+    _rocblaslt_matmul_desc desc7;
+    desc7.compute_type = rocblaslt_compute_f32_fast_bf16;
+    desc7.scale_type   = HIP_R_16BF;
+    desc7.op_A         = HIPBLAS_OP_N;
+    desc7.op_B         = HIPBLAS_OP_T;
+    desc7.epilogue     = ROCBLASLT_EPILOGUE_RELU_BIAS;
+    desc7.bias         = reinterpret_cast<void*>(0x99999999);
+    desc7.bias_type    = HIP_R_8F_E4M3_FNUZ;
+    desc7.aux_type     = HIPBLASLT_DATATYPE_INVALID;
+    desc7.e            = nullptr;
+    desc7.lde          = 0;
+
+    std::string desc_result7 = rocblaslt_matmul_desc_to_string(&desc7);
+    ASSERT_TRUE(!desc_result7.empty());
+    ASSERT_TRUE(desc_result7.find("computeType=COMPUTE_32F_16BF") != std::string::npos);
+    ASSERT_TRUE(desc_result7.find("scaleType=R_16BF") != std::string::npos);
+    ASSERT_TRUE(desc_result7.find("epilogue=EPILOGUE_RELU_BIAS") != std::string::npos);
+    ASSERT_TRUE(desc_result7.find("biasType=R_8F_E4M3_FNUZ") != std::string::npos);
+    ASSERT_TRUE(desc_result7.front() == '[' && desc_result7.back() == ']');
 
     // Test case 1: No exception (nullptr) - should return success
     rocblaslt_status excep_result1 = exception_to_rocblaslt_status(nullptr);
@@ -3102,13 +3098,12 @@ void testing_aux_rocblaslt_utility_func(const Arguments& arg)
     ASSERT_TRUE(is_act_enabled(ROCBLASLT_EPILOGUE_SWISH_BIAS_EXT) == true);
     ASSERT_TRUE(is_act_enabled(ROCBLASLT_EPILOGUE_CLAMP_EXT) == true);
     ASSERT_TRUE(is_act_enabled(ROCBLASLT_EPILOGUE_CLAMP_BIAS_EXT) == true);
-    ASSERT_TRUE(is_act_enabled(ROCBLASLT_EPILOGUE_SIGMOID) == true);
     // Test all epilogue values that should return false (activation disabled)
     ASSERT_TRUE(is_act_enabled(ROCBLASLT_EPILOGUE_DEFAULT) == false);
     ASSERT_TRUE(is_act_enabled(ROCBLASLT_EPILOGUE_BIAS) == false);
 }
 
-void testing_aux_status_func(const Arguments& arg)
+inline void testing_aux_status_func(const Arguments& arg)
 {
     // Test get_rocblaslt_status_for_hip_status function
     ASSERT_TRUE(get_rocblaslt_status_for_hip_status(hipSuccess) == rocblaslt_status_success);
@@ -3134,7 +3129,7 @@ void testing_aux_status_func(const Arguments& arg)
                 == rocblaslt_status_internal_error);
 }
 
-void testing_aux_hipblaslt_func(const Arguments& arg)
+inline void testing_aux_hipblaslt_func(const Arguments& arg)
 {
     // Test RocBlasLtStatusToHIPStatus
     ASSERT_TRUE(RocBlasLtStatusToHIPStatus(rocblaslt_status_success) == HIPBLAS_STATUS_SUCCESS);
@@ -3306,7 +3301,7 @@ void testing_aux_hipblaslt_func(const Arguments& arg)
     CHECK_HIPBLASLT_ERROR(hipblasLtMatrixTransformDescDestroy(transformDesc));
 }
 
-void testing_aux_tensile_host_func(const Arguments& arg)
+inline void testing_aux_tensile_host_func(const Arguments& arg)
 {
     // Test hipDataType_to_tensile_type function
     ASSERT_TRUE(hipDataType_to_tensile_type(HIP_R_16F) == rocisa::DataType::Half);
@@ -3349,7 +3344,7 @@ void testing_aux_tensile_host_func(const Arguments& arg)
     ASSERT_TRUE(rocComputeType_to_tensile_type(rocblaslt_compute_i32) == rocisa::DataType::Int32);
 }
 
-void testing_aux_tuple_helper_equal_func(const Arguments& arg)
+inline void testing_aux_tuple_helper_equal_func(const Arguments& arg)
 {
     // Test tuple_helper equal functionality
 
@@ -3380,7 +3375,8 @@ void testing_aux_tuple_helper_equal_func(const Arguments& arg)
     ASSERT_FALSE(str_equal_checker(str_tuple1, str_tuple3));
 }
 
-void testing_aux_rocblaslt_rocroller_host_func(const Arguments& arg)
+#ifdef HIPBLASLT_USE_ROCROLLER
+inline void testing_aux_rocblaslt_rocroller_host_func(const Arguments& arg)
 {
     hipblasLtHandle_t handle;
     CHECK_HIPBLASLT_ERROR(hipblasLtCreate(&handle));
@@ -3561,8 +3557,9 @@ void testing_aux_rocblaslt_rocroller_host_func(const Arguments& arg)
                                         stream, // stream
                                         roc_handle->Synchronizer,
                                         arg.swizzle_a, // swizzleA
-                                        arg.swizzle_b,
-                                        batchMode}; // swizzleB
+                                        arg.swizzle_b, // swizzleB
+                                        batchMode,
+                                        0}; // bias_stride
 
     const hipblasLtMatmulAlgo_t* hip_algo = &heuristicResult[0].algo;
     const rocblaslt_matmul_algo* roc_algo = (const rocblaslt_matmul_algo*)hip_algo;
@@ -3599,10 +3596,11 @@ void testing_aux_rocblaslt_rocroller_host_func(const Arguments& arg)
     CHECK_HIPBLASLT_ERROR(hipblasLtDestroy(handle));
     CHECK_HIP_ERROR(hipStreamDestroy(stream));
 }
+#endif // HIPBLASLT_USE_ROCROLLER
 
 // Coverage for the post-GEMM HIPBLASLT_CHECK_NUMERICS scanner: env-var parsing,
 // public drain API, and the happy-path NaN detection round-trip.
-void testing_aux_check_numerics_func(const Arguments& arg)
+inline void testing_aux_check_numerics_func(const Arguments& arg)
 {
     // setenv/unsetenv are not thread-safe; serialize the body so concurrent
     // RUN_TEST_ON_THREADS_STREAMS threads can't interleave env mutations with
@@ -3732,7 +3730,7 @@ void testing_aux_check_numerics_func(const Arguments& arg)
     // any single dtype's template instantiation that the f32 happy path
     // above would miss.
     auto scan_one_with_nan
-        = [](hipDataType dt, const void* host_buf, size_t elem_size, uint32_t expected_drain) {
+        = [&reset_env](hipDataType dt, const void* host_buf, size_t elem_size, uint32_t expected_drain) {
               reset_env();
               setenv("HIPBLASLT_CHECK_NUMERICS", "1", 1);
               hipblasLtHandle_t h = nullptr;

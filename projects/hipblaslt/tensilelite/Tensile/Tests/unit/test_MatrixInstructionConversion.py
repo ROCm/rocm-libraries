@@ -22,6 +22,7 @@
 #
 # SPDX-License-Identifier: MIT
 ################################################################################
+import pytest
 import yaml
 from pprint import pformat
 
@@ -30,19 +31,19 @@ from Tensile.Common.Capabilities import makeIsaInfoMap
 from Tensile.Common.Types import IsaVersion
 from Tensile.Common.GlobalParameters import defaultSolution
 from Tensile.Toolchain.Validators import validateToolchain
-from Tensile.SolutionStructs.Validators.MatrixInstruction import (
-    matrixInstructionToMIParameters,
-    validateMIParameters,
-)
+from Tensile.SolutionStructs.Validators.MatrixInstruction import matrixInstructionToMIParameters, validateMIParameters
 from Tensile.SolutionStructs.Validators.WorkGroup import validateWorkGroup
 
-cxxCompiler = validateToolchain("amdclang++")
-isaInfoMap = makeIsaInfoMap(SUPPORTED_ISA, cxxCompiler)
+
+@pytest.fixture(scope="module")
+def isa_info_map():
+    cxxCompiler = validateToolchain("amdclang++")
+    return makeIsaInfoMap(SUPPORTED_ISA, cxxCompiler)
 
 
-def test_convert_9_item_custom_kernel_config():
+def test_convert_9_item_custom_kernel_config(isa_info_map):
     input_conf = yaml.load(
-        """
+"""
 ProblemType:
     OperationType: GEMM
     DataTypeA: f8n
@@ -64,9 +65,7 @@ ProblemType:
 MatrixInstruction: [32, 32, 8, 1, 1, 31, 16, 4, 2]
 WavefrontSize: 48
 WorkGroup: [16, 16, 1]
-""",
-        yaml.SafeLoader,
-    )
+""", yaml.SafeLoader)
 
     # NOTE: This is not a valid MatrixInstruction, but since we are testing the conversion
     # functionality, it is useful to have unique values for each item in the list.
@@ -82,7 +81,7 @@ WorkGroup: [16, 16, 1]
         wavefrontSize,
         ptype,
         workgroup,
-        isaInfoMap,
+        isa_info_map,
     )
 
     input = {
@@ -110,11 +109,11 @@ WorkGroup: [16, 16, 1]
     assert outputConf["EnableF32XdlMathOp"] == False
     assert outputConf["MFMA_BF16_1K"] == False
 
-    solution = dict(defaultSolution)
+    solution = defaultSolution
     solution.update(input_conf)
     solution.update(outputConf)
 
-    assert validateMIParameters(solution, isaInfoMap, True)
+    assert validateMIParameters(solution, isa_info_map, True)
     assert validateWorkGroup(solution)
 
     mi4 = solution["MatrixInstruction"]
@@ -128,10 +127,10 @@ WorkGroup: [16, 16, 1]
     assert format9 == mi
 
 
-def testConvert9ItemCustomKernelConfig():
+def testConvert9ItemCustomKernelConfig(isa_info_map):
 
     inputConf = yaml.load(
-        """
+"""
 custom.config:
    ProblemType:
       OperationType: GEMM
@@ -163,16 +162,14 @@ custom.config:
    GlobalReadVectorWidthB: 2
    AssertFree0ElementMultiple: 4
    AssertSummationElementMultiple: 1
-   NoReject: 1
+   NoReject: True
    InternalSupportParams:
       KernArgsVersion: 0
       SupportUserGSU: False
       SupportCustomWGM: False
       SupportCustomStaggerU: False
       UseUniversalArgs: False
-""",
-        yaml.SafeLoader,
-    )
+""", yaml.SafeLoader)
 
     inputConf = inputConf["custom.config"]
 
@@ -186,7 +183,7 @@ custom.config:
         wavefrontSize,
         inputConf["ProblemType"],
         workGroup,
-        isaInfoMap,
+        isa_info_map,
     )
 
     input = {
@@ -208,18 +205,14 @@ custom.config:
     assert outputConf["MIInputPerThreadB"] == 5
     assert outputConf["MIInputPerThreadMetadata"] == 5
     assert outputConf["ThreadTile"] == [1, 1]
-    assert outputConf["WorkGroup"] == [
-        1280,
-        2,
-        6,
-    ]  # Why do we change the workgroup here?
+    assert outputConf["WorkGroup"] == [1280, 2, 6]  # Why do we change the workgroup here?
     assert outputConf["WavefrontSize"] == 48
     assert outputConf["ISA"] == isa
     assert outputConf["EnableF32XdlMathOp"] == False
     assert outputConf["MFMA_BF16_1K"] == False
 
-    solution = dict(defaultSolution)
+    solution = defaultSolution
     solution.update(inputConf)
     solution.update(outputConf)
 
-    assert validateMIParameters(solution, isaInfoMap, True) == True
+    assert validateMIParameters(solution, isa_info_map, True) == True
