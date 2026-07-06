@@ -1144,7 +1144,7 @@ class KernelComponentFactoryGfx950(
             ):
                 pipelines.append(FmhaFwdPipeline("qr_async_trload_v3", "row", "t", "t", "f", "f", F_logits=logits, F_bias="no", F_lse=lse, F_dropout="f", F_qscale=qscale, F_mask=mask, F_skip="f", F_trload="t", F_sink="f"))  # fmt: skip
 
-        elif dtype in cls._DT_MXFP8:
+        elif dtype in cls._DT_MXFP8 or dtype in cls._DT_MXFP4:
             # no need dropout kernels
             lse = "t"
             dropout = "f"
@@ -1157,7 +1157,7 @@ class KernelComponentFactoryGfx950(
             ):
                 pipelines.append(FmhaFwdPipeline("qr", "col", "f", "f", "f", "f", logits, bias, lse, dropout, qscale, mask, "f", "f", sink))  # fmt: skip
                 pipelines.append(FmhaFwdPipeline("qr", "col", "t", "t", "t", "t", logits, bias, lse, dropout, qscale, mask, "f", "f", sink))  # fmt: skip
-                if hdim > 64:
+                if hdim > 64 and dtype in cls._DT_MXFP8:
                     pipelines.append(FmhaFwdPipeline("qr_async", "col", "f", "f", "f", "f", logits, bias, lse, dropout, qscale, mask, "f", "f", sink))  # fmt: skip
                     pipelines.append(FmhaFwdPipeline("qr_async", "col", "t", "t", "t", "t", logits, bias, lse, dropout, qscale, mask, "f", "f", sink))  # fmt: skip
         return pipelines
