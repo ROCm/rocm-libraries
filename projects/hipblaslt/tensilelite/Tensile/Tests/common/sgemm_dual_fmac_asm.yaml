@@ -1,0 +1,141 @@
+# Validates UseDualFMAC: VOPD v_dual_fmac_f32 dual-issue in the f32 source/MAC inner loop.
+# VOPD is RDNA3/3.5/4 only, so skip pre-gfx11 archs (gfx9 MI, gfx10 RDNA2). On supported
+# archs the kernels emit v_dual_fmac_f32 pairs; full numerical validation must PASS.
+TestParameters:
+  marks: [skip-gfx900, skip-gfx906, skip-gfx908, skip-gfx90a, skip-gfx942, skip-gfx950, skip-gfx1010, skip-gfx1011, skip-gfx1012, skip-gfx1030] # VOPD requires gfx11+
+
+GlobalParameters:
+  MinimumRequiredVersion: 5.0.0
+  CMakeBuildType: Release
+  EnqueuesPerSync: 1
+  SyncsPerBenchmark: 1
+  NumElementsToValidate: -1
+  BoundsCheck: 0
+  KernelTime: True
+  PrintWinnersOnly: True
+
+BenchmarkProblems:
+
+  ########################################
+  # NN - f32 source kernels, dual-issue FMA
+  ########################################
+  -
+    - # ProblemType
+      OperationType: GEMM
+      DataType: s
+      DestDataType: s
+      ComputeDataType: s
+      TransposeA: False
+      TransposeB: False
+      UseBeta: True
+      Batched: True
+    - # BenchmarkProblemSizeGroup
+      InitialSolutionParameters:
+      BenchmarkCommonParameters:
+        - KernelLanguage: ["Assembly"]
+      ForkParameters:
+        - UseDualFMAC: [True]
+        - GlobalReadVectorWidthA: [1]
+        - GlobalReadVectorWidthB: [1]
+        - VectorWidthA: [1]
+        - VectorWidthB: [1]
+        - LocalReadVectorWidth: [1]
+        - StoreVectorWidth: [1]
+        - ScheduleIterAlg: [1]
+        - PrefetchGlobalRead: [1]
+        - PrefetchLocalRead: [1]
+        - ThreadTile:
+          - [4, 4]     # 2x2 block-diagonal, 100% VOPD coverage
+          - [8, 8]     # larger even tile, 100% VOPD coverage
+        - WorkGroup:
+          - [16, 8, 1]
+        - DepthU: [16]
+        - WorkGroupMapping: [1]
+        - GlobalSplitU: [1]
+      BenchmarkFinalParameters:
+        - ProblemSizes:
+          - Exact: [128, 128, 1, 256]
+          - Exact: [129, 131, 1, 256]
+          - Exact: [128, 128, 1, 255]   # odd K exercises the tail loop
+
+  ########################################
+  # TN - f32 source kernels, dual-issue FMA
+  ########################################
+  -
+    - # ProblemType
+      OperationType: GEMM
+      DataType: s
+      DestDataType: s
+      ComputeDataType: s
+      TransposeA: True
+      TransposeB: False
+      UseBeta: True
+      Batched: True
+    - # BenchmarkProblemSizeGroup
+      InitialSolutionParameters:
+      BenchmarkCommonParameters:
+        - KernelLanguage: ["Assembly"]
+      ForkParameters:
+        - UseDualFMAC: [True]
+        - GlobalReadVectorWidthA: [1]
+        - GlobalReadVectorWidthB: [1]
+        - VectorWidthA: [1]
+        - VectorWidthB: [1]
+        - LocalReadVectorWidth: [1]
+        - StoreVectorWidth: [1]
+        - ScheduleIterAlg: [1]
+        - PrefetchGlobalRead: [1]
+        - PrefetchLocalRead: [1]
+        - ThreadTile:
+          - [4, 4]
+        - WorkGroup:
+          - [16, 8, 1]
+        - DepthU: [16]
+        - WorkGroupMapping: [1]
+        - GlobalSplitU: [1]
+      BenchmarkFinalParameters:
+        - ProblemSizes:
+          - Exact: [128, 128, 1, 256]
+          - Exact: [129, 131, 1, 256]
+          - Exact: [128, 128, 1, 255]   # odd K exercises the tail loop
+
+  ########################################
+  # NT - f32 source kernels, dual-issue FMA
+  ########################################
+  -
+    - # ProblemType
+      OperationType: GEMM
+      DataType: s
+      DestDataType: s
+      ComputeDataType: s
+      TransposeA: False
+      TransposeB: True
+      UseBeta: True
+      Batched: True
+    - # BenchmarkProblemSizeGroup
+      InitialSolutionParameters:
+      BenchmarkCommonParameters:
+        - KernelLanguage: ["Assembly"]
+      ForkParameters:
+        - UseDualFMAC: [True]
+        - GlobalReadVectorWidthA: [1]
+        - GlobalReadVectorWidthB: [1]
+        - VectorWidthA: [1]
+        - VectorWidthB: [1]
+        - LocalReadVectorWidth: [1]
+        - StoreVectorWidth: [1]
+        - ScheduleIterAlg: [1]
+        - PrefetchGlobalRead: [1]
+        - PrefetchLocalRead: [1]
+        - ThreadTile:
+          - [4, 4]
+        - WorkGroup:
+          - [16, 8, 1]
+        - DepthU: [16]
+        - WorkGroupMapping: [1]
+        - GlobalSplitU: [1]
+      BenchmarkFinalParameters:
+        - ProblemSizes:
+          - Exact: [128, 128, 1, 256]
+          - Exact: [129, 131, 1, 256]
+          - Exact: [128, 128, 1, 255]   # odd K exercises the tail loop

@@ -40,7 +40,6 @@ GlobalParameters:
   NumElementsToValidate: 0
   DataInitTypeBeta: 0
   DataInitTypeAlpha: 1
-  NewClient: 2
   Device: 0
 
 BenchmarkProblems:
