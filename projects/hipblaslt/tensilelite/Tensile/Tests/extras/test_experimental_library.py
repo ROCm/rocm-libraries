@@ -282,3 +282,137 @@ def test_merge_configs_allows_multiple_problem_types():
     b["BenchmarkProblems"][0][0]["DataType"] = "I8"
     merged = merge_configs([a, b])
     assert len(merged["BenchmarkProblems"]) == 2
+
+
+# ---------------------------------------------------------------------------
+# gen-logic host-arch guard (benchmark-by-default; hard-fail on arch mismatch)
+#
+# These need rocisa because they import Tensile.Common.Architectures (which
+# imports rocisa at module load); they skip cleanly without a build.
+# ---------------------------------------------------------------------------
+
+import argparse
+
+
+def _gen_logic_ns(tmp_path, arch, dry_run=False, config=None):
+    return argparse.Namespace(
+        config=str(config) if config else str(tmp_path / "c.yaml"),
+        arch=arch,
+        out=str(tmp_path / "work"),
+        cu=40,
+        feature_name="f",
+        python="python",
+        dry_run=dry_run,
+        verbose=False,
+    )
+
+
+def test_detect_host_gfx_archs_normalizes_and_filters(monkeypatch):
+    """detectHostGfxArchs de-dups, drops CPU gfx000, and normalizes :xnack± variants."""
+    pytest.importorskip("rocisa")
+    import Tensile.Common.Architectures as Arch
+
+    class _Proc:
+        returncode = 0
+        stdout = b"gfx950\ngfx950:xnack-\ngfx000\n"
+
+    monkeypatch.setattr(
+        "Tensile.Toolchain.Validators.validateToolchain", lambda tool: "/fake/enum"
+    )
+    monkeypatch.setattr(Arch, "run", lambda *a, **k: _Proc())
+
+    assert Arch.detectHostGfxArchs() == ["gfx950"]
+    assert Arch.hostHasArch("gfx950") is True
+    assert Arch.hostHasArch("gfx950:xnack-") is True  # variant normalized
+    assert Arch.hostHasArch("gfx1151") is False
+
+
+def test_gen_logic_rejects_arch_absent_on_host(monkeypatch, tmp_path):
+    """Target arch not present -> ExperimentalLibraryError naming the arch and detected set."""
+    pytest.importorskip("rocisa")
+    import Tensile.Common.Architectures as Arch
+    from Tensile.ExperimentalLibrary import cmd_gen_logic
+
+    monkeypatch.setattr(Arch, "hostHasArch", lambda a: False)
+    monkeypatch.setattr(Arch, "detectHostGfxArchs", lambda: ["gfx950"])
+
+    cfg = tmp_path / "c.yaml"
+    cfg.write_text("{}\n")
+
+    with pytest.raises(ExperimentalLibraryError) as ei:
+        cmd_gen_logic(_gen_logic_ns(tmp_path, "gfx1151", config=cfg))
+    msg = str(ei.value)
+    assert "gfx1151" in msg
+    assert "not present on this host" in msg
+    assert "gfx950" in msg  # detected archs surfaced in the message
+
+
+def test_gen_logic_arch_mismatch_maps_to_nonzero_exit(monkeypatch, tmp_path):
+    """main() maps the guard's ExperimentalLibraryError to a non-zero exit code."""
+    pytest.importorskip("rocisa")
+    import Tensile.Common.Architectures as Arch
+    from Tensile.ExperimentalLibrary import main
+
+    monkeypatch.setattr(Arch, "hostHasArch", lambda a: False)
+    monkeypatch.setattr(Arch, "detectHostGfxArchs", lambda: ["gfx950"])
+
+    cfg = tmp_path / "c.yaml"
+    cfg.write_text("{}\n")
+
+    rc = main(
+        [
+            "gen-logic",
+            "--config", str(cfg),
+            "--arch", "gfx1151",
+            "--out", str(tmp_path / "work"),
+            "--cu", "40",
+        ]
+    )
+    assert rc != 0
+
+
+def test_gen_logic_matching_arch_passes_guard_and_omits_cpu_only(monkeypatch, tmp_path):
+    """Matching arch clears the guard; the constructed Tensile cmd has no --cpu-only."""
+    pytest.importorskip("rocisa")
+    import Tensile.Common.Architectures as Arch
+    import Tensile.ExperimentalLibrary as E
+
+    monkeypatch.setattr(Arch, "hostHasArch", lambda a: True)
+
+    captured = {}
+
+    class _Stop(Exception):
+        pass
+
+    def _fake_run_command(cmd, **kwargs):
+        captured["cmd"] = list(cmd)
+        raise _Stop()  # stop right after cmd construction; guard already passed
+
+    monkeypatch.setattr(E, "run_command", _fake_run_command)
+
+    cfg = tmp_path / "c.yaml"
+    cfg.write_text("{}\n")
+
+    with pytest.raises(_Stop):
+        E.cmd_gen_logic(_gen_logic_ns(tmp_path, "gfx950", config=cfg))
+
+    cmd = captured["cmd"]
+    assert "--cpu-only" not in cmd  # regression guard: benchmarking is now default
+    assert "--gpu-targets" in cmd
+    assert "gfx950" in cmd
+
+
+def test_gen_logic_dry_run_bypasses_guard(monkeypatch, tmp_path):
+    """--dry-run must stay hardware-independent: the guard is never consulted."""
+    pytest.importorskip("rocisa")
+    import Tensile.Common.Architectures as Arch
+    import Tensile.ExperimentalLibrary as E
+
+    def _boom(*a, **k):
+        raise AssertionError("host-arch detection called under --dry-run")
+
+    monkeypatch.setattr(Arch, "hostHasArch", _boom)
+    monkeypatch.setattr(Arch, "detectHostGfxArchs", _boom)
+
+    # dry-run does not require the config to exist.
+    assert E.cmd_gen_logic(_gen_logic_ns(tmp_path, "gfx1151", dry_run=True)) == 0

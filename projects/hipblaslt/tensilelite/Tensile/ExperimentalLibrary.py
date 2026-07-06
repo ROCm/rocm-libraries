@@ -1,14 +1,21 @@
 # Copyright Advanced Micro Devices, Inc., or its affiliates.
 # SPDX-License-Identifier: MIT
-"""Feature-agnostic, CPU-only developer tool for benchmarking new TensileLite
-codegen solution parameters in hipBLASLt.
+"""Feature-agnostic developer tool for benchmarking new TensileLite codegen
+solution parameters in hipBLASLt.
 
 This tool takes a known TensileLite solution config, toggles one or more *new*
 codegen solution parameter(s) on, and produces an experimental,
 hipBLASLt-loadable device library (``TensileLibrary_lazy_<arch>.dat`` + code
-objects) without needing a GPU to generate logic. The resulting library can be
-loaded at runtime via ``HIPBLASLT_TENSILE_LIBPATH`` and benchmarked with
-``hipblaslt-bench`` to compare a feature across branches.
+objects). The resulting library can be loaded at runtime via
+``HIPBLASLT_TENSILE_LIBPATH`` and benchmarked with ``hipblaslt-bench`` to
+compare a feature across branches.
+
+``gen-logic`` benchmarks on real hardware: winner selection during logic
+analysis uses measured GFLOPS. It therefore REQUIRES a GPU of the target
+``--arch`` to be present on the host and fails fast otherwise (it does not fall
+back to synthetic performance data, which would make forked solutions tie and
+silently drop all but the first). Cross-arch generation without benchmarking is
+intentionally not supported here.
 
 Pipeline (each stage verifies its own output artifact; nothing is produced
 silently half-built):
@@ -24,9 +31,10 @@ silently half-built):
              ``validParameters`` registry and inject/override them into the
              config's ForkParameters; stage the result under an
              ``Experimental/<feature>/`` tree.
-  gen-logic  Run the CPU-only Tensile flow to emit ``3_LibraryLogic`` and
-             classify failures: kernel-generation error vs. all-solutions
-             rejected by Solution validation.
+  gen-logic  Run the Tensile benchmark+analyze flow to emit ``3_LibraryLogic``
+             and classify failures: kernel-generation error vs. all-solutions
+             rejected by Solution validation. Benchmarks on the target-arch GPU
+             (fails fast if that arch is not present on the host).
   build-lib  Run ``Tensile.TensileCreateLibrary --experimental`` to turn the
              staged logic into a loadable device library.
   find-index Run ``hipblaslt-bench --algo_method all`` to discover the solution
@@ -35,14 +43,13 @@ silently half-built):
   pipeline   Chain augment -> gen-logic -> build-lib, short-circuiting on the
              first failing stage.
 
-GPU-less notes:
-  * ``gen-logic`` passes ``--cpu-only --gpu-targets <arch>`` to spoof the ISA,
-    skip the GPU clock probe, and stub the client launch with synthetic
-    results, then runs the real analyze/serialize step. A single-solution
-    config is trivially picked as the winner.
+Hardware notes:
+  * ``gen-logic`` passes ``--gpu-targets <arch>`` and runs the real client, so a
+    GPU of ``<arch>`` must be present on the host; winner selection uses the
+    measured GFLOPS. The stage refuses to run on non-matching hardware.
   * ``createLibraryLogic`` still calls ``getCUCount()`` which shells to
     ``rocminfo`` UNLESS the ``CU`` env var is set, so ``gen-logic`` sets it
-    from ``--cu`` to stay GPU-less.
+    from ``--cu`` to pin the CU count used for the build predicate.
 
 Example (StreamKFixupTreeReduction, gfx950) -- see ``--help`` of each
 subcommand:
@@ -757,6 +764,34 @@ def cmd_gen_logic(args: argparse.Namespace) -> int:
         os.makedirs(workdir, exist_ok=True)
     feature_name = args.feature_name or "feature"
 
+    # Fail fast (before any kernel generation) if the target arch is not a GPU
+    # present on this host. gen-logic runs REAL benchmarking so winner selection
+    # uses measured GFLOPS; on non-matching hardware there is no benchmark to run,
+    # and falling back to uniform/synthetic GFLOPS would make every forked
+    # solution tie -- the winner-take-all logic analysis then keeps only the
+    # first-listed solution and silently drops the others. Refuse rather than
+    # emit a misleading library. Skipped under --dry-run (must stay HW-independent).
+    # NOTE: mixed-arch hosts -- we only check that the target arch is present
+    # somewhere on the host, not that the benchmarked device (config `Device`)
+    # is that arch. Device pinning on mixed-arch hosts is a follow-up.
+    if not args.dry_run:
+        from Tensile.Common.Architectures import detectHostGfxArchs, hostHasArch
+
+        if not hostHasArch(args.arch):
+            detected = detectHostGfxArchs()
+            detected_str = ", ".join(detected) if detected else "none"
+            raise ExperimentalLibraryError(
+                f"Target arch '{args.arch}' is not present on this host "
+                f"(detected GPU archs: {detected_str}). gen-logic runs real "
+                "hipblaslt-bench benchmarking so winner selection uses measured "
+                "GFLOPS; it will not run on non-matching hardware because there is "
+                "no benchmark to run, and synthetic/uniform GFLOPS would make every "
+                "forked solution tie -- the winner-take-all analysis would then keep "
+                "only the first-listed solution and silently drop the rest. Run this "
+                f"tool on a host with a '{args.arch}' GPU. (Cross-arch generation "
+                "without benchmarking is intentionally not supported by this tool.)"
+            )
+
     bin_tensile = _TENSILE_PKG_DIR / "bin" / "Tensile"
     if not args.dry_run and not bin_tensile.is_file():
         raise ExperimentalLibraryError(f"Tensile launcher not found: {bin_tensile}")
@@ -766,7 +801,6 @@ def cmd_gen_logic(args: argparse.Namespace) -> int:
         str(bin_tensile),
         config,
         workdir,
-        "--cpu-only",
         "--gpu-targets",
         args.arch,
     ]
@@ -1116,7 +1150,7 @@ def _add_global_flags(p: argparse.ArgumentParser) -> None:
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         prog="Tensile.ExperimentalLibrary",
-        description="CPU-only tool to build experimental hipBLASLt device libraries "
+        description="Developer tool to build experimental hipBLASLt device libraries "
         "for benchmarking new TensileLite codegen parameters.",
         formatter_class=argparse.RawDescriptionHelpFormatter,
     )
@@ -1194,11 +1228,11 @@ def build_parser() -> argparse.ArgumentParser:
     pa.set_defaults(func=cmd_augment)
 
     # gen-logic
-    pg = sub.add_parser("gen-logic", help="Run CPU-only Tensile and validate the produced logic.")
+    pg = sub.add_parser("gen-logic", help="Benchmark on the target-arch GPU and validate the produced logic (requires that GPU present).")
     pg.add_argument("--config", required=True, help="Augmented benchmark config yaml.")
     pg.add_argument("--arch", default="gfx950", help="GPU target (default gfx950).")
     pg.add_argument("--out", required=True, help="Work directory for Tensile output.")
-    pg.add_argument("--cu", type=int, default=304, help="CU count env (GPU-less escape hatch).")
+    pg.add_argument("--cu", type=int, default=304, help="CU count pinned via the CU env for the build predicate.")
     pg.add_argument("--feature-name", default=None, help="Feature name for the Experimental dir.")
     _add_global_flags(pg)
     pg.set_defaults(func=cmd_gen_logic)
@@ -1258,7 +1292,7 @@ def build_parser() -> argparse.ArgumentParser:
     )
     pp.add_argument("--feature-name", required=True, help="Feature name.")
     pp.add_argument("--arch", default="gfx950", help="GPU target (default gfx950).")
-    pp.add_argument("--cu", type=int, default=304, help="CU count env (GPU-less escape hatch).")
+    pp.add_argument("--cu", type=int, default=304, help="CU count pinned via the CU env for the build predicate.")
     pp.add_argument("--out", required=True, help="Output root for all stages.")
     pp.add_argument(
         "--skip-validation", action="store_true",
