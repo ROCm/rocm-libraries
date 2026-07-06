@@ -119,7 +119,7 @@ ROCBLAS_INTERNAL_EXPORT_NOINLINE rocblas_status
 
 // cached device properties for handle device
 ROCBLAS_INTERNAL_EXPORT_NOINLINE const hipDeviceProp_t*
-                                       rocblas_internal_get_device_prop(rocblas_handle handle);
+    rocblas_internal_get_device_prop(rocblas_handle handle);
 
 /*******************************************************************************
  * \brief rocblas_handle is a structure holding the rocblas library context.
@@ -231,7 +231,7 @@ public:
     _rocblas_handle();
     ~_rocblas_handle();
 
-    _rocblas_handle(const _rocblas_handle&) = delete;
+    _rocblas_handle(const _rocblas_handle&)            = delete;
     _rocblas_handle& operator=(const _rocblas_handle&) = delete;
 
     // Set the HIP default device ID to the handle's device ID, and restore on exit
@@ -446,7 +446,7 @@ public:
     // at the top of each *_impl and cleared on scope exit. Used by rocblas_layer_mode_log_kernel_select
     // (0x10) to annotate internal-GEMM trace lines with their parent API. Null when no API is active.
     const char* current_api_name = nullptr;
-    void                                      init_check_numerics();
+    void        init_check_numerics();
 
     // data pointer for rocSOLVER
     std::shared_ptr<void> data_ptr;
@@ -523,9 +523,10 @@ public:
     // Sets the optimal size(s) of device memory for a kernel call
     // Maximum size is accumulated in device_memory_query_size
     // Returns rocblas_status_size_increased or rocblas_status_size_unchanged
-    template <typename... Ss,
-              std::enable_if_t<sizeof...(Ss) && conjunction<std::is_convertible<Ss, size_t>...>{},
-                               int> = 0>
+    template <
+        typename... Ss,
+        std::enable_if_t<sizeof...(Ss) && conjunction<std::is_convertible<Ss, size_t>...>{}, int>
+        = 0>
     rocblas_status set_optimal_device_memory_size(Ss... sizes)
     {
         if(!device_memory_size_query)
@@ -905,9 +906,10 @@ private:
 
 public:
     // Allocate one or more sizes
-    template <typename... Ss,
-              std::enable_if_t<sizeof...(Ss) && conjunction<std::is_convertible<Ss, size_t>...>{},
-                               int> = 0>
+    template <
+        typename... Ss,
+        std::enable_if_t<sizeof...(Ss) && conjunction<std::is_convertible<Ss, size_t>...>{}, int>
+        = 0>
     auto device_malloc(Ss... sizes)
     {
         return _device_malloc(this, size_t(sizes)...);
@@ -915,7 +917,8 @@ public:
 
     template <typename... Ss,
               std::enable_if_t<sizeof...(Ss) && conjunction<std::is_convertible<Ss, size_t>...>{},
-                               int> = 0>
+                               int>
+              = 0>
     auto device_malloc_with_GSU(Ss... sizes) //assume last size is gsu size
     {
         //have to assume it can be called to resize in following iteration (resize if > cur?)

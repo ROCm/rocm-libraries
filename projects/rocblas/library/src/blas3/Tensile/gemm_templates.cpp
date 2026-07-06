@@ -176,8 +176,7 @@ rocblas_status rocblas_internal_gemm(rocblas_handle    handle,
 #else
         const char* fallback = "none";
 #endif
-        const char* parent_api
-            = handle->current_api_name ? handle->current_api_name : "unknown";
+        const char* parent_api = handle->current_api_name ? handle->current_api_name : "unknown";
 
         rocblas_internal_ostream kernel_field;
         kernel_field << "kernel=rocblas_gemm_source_solution_64";
