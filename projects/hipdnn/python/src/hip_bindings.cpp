@@ -268,6 +268,10 @@ public:
 
 } // namespace
 
+// NOTE: HipEvent, HipStallGate, and the hip_* stream/device helpers are HIP
+// primitives, not hipDNN concepts. They are exposed through the hipDNN frontend
+// bindings only provisionally; treat them as an internal, unstable surface and
+// avoid depending on them.
 void hipBindings(nb::module_& m)
 {
     nb::class_<HipEvent>(m, "HipEvent")
