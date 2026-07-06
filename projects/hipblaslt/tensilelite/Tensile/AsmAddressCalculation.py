@@ -40,7 +40,7 @@ class AddrCalculation:
     # coord1Vgpr : VGPR which tracks the last coord1 calculation.
     #          If this is new coord1, just overwrite it with latest calc.
     def __init__(self, kernelWriter, ss, addrCVgpr, addrDVgpr, addrGSUSyncVgprs, addrEVgpr, addrBiasVgpr, addrScaleAVecVgpr, addrScaleBVecVgpr, addrScaleAlphaVecVgpr, element, \
-        coordOffset0, coord1Vgpr, coordOffset1, rowInc, newCoord1, vectorDataTypes):
+        coordOffset0, coord1Vgpr, coordOffset1, rowInc, newCoord1, vectorDataTypes, addrGateVgpr=None):
         self.kernelWriter = kernelWriter
 
         # vgprs for address, could be more than one (for flat)
@@ -49,6 +49,7 @@ class AddrCalculation:
         self.addrGSUSyncVgprs    = addrGSUSyncVgprs
         self.addrCVgpr    = addrCVgpr
         self.addrBiasVgpr = addrBiasVgpr
+        self.addrGateVgpr = addrGateVgpr
         self.addrScaleAVecVgpr = addrScaleAVecVgpr
         self.addrScaleBVecVgpr = addrScaleBVecVgpr
         self.addrScaleAlphaVecVgpr = addrScaleAlphaVecVgpr
@@ -76,6 +77,7 @@ class AddrCalculation:
             self.scaleAlphaVecOffset[1]   = coordOffset1 * kernelWriter.states.bpeCinternal + self.vectorDataTypes.scaleAlpha(1).ldsOffset
             self.globalOffset  = coordOffset0 * kernelWriter.states.bpeCexternal
             self.globalOffsetE = coordOffset0 * kernelWriter.states.bpeE
+            self.globalOffsetGate = coordOffset0 * kernelWriter.states.bpeGate
             self.globalOffsetInternal = coordOffset0 * kernelWriter.states.bpeCinternal
         else:
             # else non-opt stores include the coord0 offset into VGPR address calcs
@@ -87,6 +89,7 @@ class AddrCalculation:
             self.scaleAlphaVecOffset[1] = self.vectorDataTypes.scaleAlpha(1).ldsOffset
             self.globalOffset = 0
             self.globalOffsetE = 0
+            self.globalOffsetGate = 0
             self.globalOffsetInternal = 0
 
     def addScaled(self, destV, src0, src1, scale1, tmpS01, comment="", comment1="", comment2="scale stride"):
@@ -190,6 +193,9 @@ class AddrCalculation:
                 bcomment = "coutRowPtrBias.la: += %s*rowInc"%strideW1 if lookahead else "Move coutRowPtrBias to next row"
                 module.add(self.addScaled(vgpr(kw.vgprs.coutRowPtrBias), vgpr(kw.vgprs.coutRowPtrBias), \
                           sgpr(strideW1), rowInc, tmpS01, bcomment))
+            if kw.vgprs.coutRowPtrGate != -1:
+                module.add(self.addScaled(vgpr(kw.vgprs.coutRowPtrGate), vgpr(kw.vgprs.coutRowPtrGate), \
+                            sgpr("GateStride+0"), self.rowInc, tmpS01, "Move coutRowPtrGate to next row"))
         elif len(kernel["PackedC1IndicesX"]) > 1:
             module.add(kw.extractPackedCoord1ToRowStart(kernel, kernel["PackedC1IndicesX"] , self.coord1Vgpr, 'D'))
         return module
@@ -250,6 +256,8 @@ class AddrCalculation:
             return kw.vgprs.coutRowPtrE
         elif tc == 'Bias':
             return kw.vgprs.coutRowPtrBias
+        elif tc == 'Gate':
+            return kw.vgprs.coutRowPtrGate
         else:
             return kw.vgprs.coutRowPtrD
 
@@ -260,6 +268,8 @@ class AddrCalculation:
             return self.addrEVgpr
         elif tc == 'Bias':
             return self.addrBiasVgpr
+        elif tc == 'Gate':
+            return self.addrGateVgpr
         elif tc == 'TD':
             return self.addrGSUSyncVgprs
         else:
@@ -338,7 +348,16 @@ class AddrCalculation:
         (d1,d0,vc1,vc0) = self.element
         rowPtr = self.getRowPtr(kw, tc)
         addrVgpr = self.getAddrVgpr(kw, tc)
-        bpe = kw.states.bpeCinternal if (tc == 'Bias') else (kw.states.bpeE if (tc == 'E') else kw.states.bpeCexternal)
+        if tc == 'Gate' and addrVgpr is None:
+            addrVgpr = self.addrDVgpr
+        if tc == 'Bias':
+            bpe = kw.states.bpeCinternal
+        elif tc == 'E':
+            bpe = kw.states.bpeE
+        elif tc == 'Gate':
+            bpe = kw.states.bpeGate
+        else:
+            bpe = kw.states.bpeCexternal
         if (tc == 'C' or tc == 'TD'):
             bpe = bpe if (kernel["_GlobalAccumulation"] != "MultipleBufferSingleKernel") else kw.states.bpr * kernel["ProblemType"]["DestDataType"].numRegisters()
         # set when we generate code that updates the address
@@ -346,7 +365,13 @@ class AddrCalculation:
         updatedAddr = False
 
         # scale and set final address:
-        stride0 = kw.strideRef('D', 0) if ((tc == 'Bias') or (tc == 'ScaleAlphaVec') or (tc == 'ScaleAVec') or (tc == 'ScaleBVec')) else kw.strideRef(tc, 0)
+        # Gate uses D's stride for col-direction (gate is per-element along col like D).
+        if tc == 'Gate':
+            stride0 = kw.strideRef('D', 0)
+        elif (tc == 'Bias') or (tc == 'ScaleAlphaVec') or (tc == 'ScaleAVec') or (tc == 'ScaleBVec'):
+            stride0 = kw.strideRef('D', 0)
+        else:
+            stride0 = kw.strideRef(tc, 0)
         if kw.isConstUnitStride(stride0):
             elementVgpr = self.coord0Vgpr
         else:
@@ -373,6 +398,8 @@ class AddrCalculation:
                     singleColAddrUpdated = ss.singleColBiasAddrUpdated
                 elif tc == 'TD':
                     singleColAddrUpdated = ss.singleColTDAddrUpdated
+                elif tc == 'Gate':
+                    singleColAddrUpdated = ss.singleColGateAddrUpdated
                 else:
                     singleColAddrUpdated = ss.singleColDAddrUpdated
                 if not singleColAddrUpdated or not ss.optSrdIncForRow:
@@ -442,6 +469,8 @@ class AddrCalculation:
                         ss.singleColBiasAddrUpdated = True
                     elif tc == 'TD':
                         ss.singleColTDAddrUpdated    = True
+                    elif tc == 'Gate':
+                        ss.singleColGateAddrUpdated = True
                     else:
                         ss.singleColDAddrUpdated    = True
                     module.add(vectorAddMultiplyBpe(addrVgpr, rowPtr, elementVgpr, bpe, \
@@ -931,6 +960,9 @@ class AddrCalculation:
                 if tc == 'Bias' and (not kernel["WorkGroupReduction"]):
                     index = packedC1[0] - 1
                     strideCD1 = "Size%s" % "I" if index == 0 else ("J" if index == 1 else (self.kernelWriter.states.indexChars[index]))
+                elif tc == 'Gate':
+                    # Gate uses its own GateStride+0 (gate's col stride) for row advance.
+                    strideCD1 = "GateStride+0"
                 else:
                     td = "D" if tc == 'TD' else tc
                     strideCD1 = "Stride%s%s"%(td ,self.kernelWriter.states.indexChars[packedC1[0]])

@@ -116,12 +116,14 @@ namespace TensileLite
                      Base::template Pair<Predicates::Contraction::ActivationEnumWhiteList>(),
                      Base::template Pair<Predicates::Contraction::UseBiasCheck>(),
                      Base::template Pair<Predicates::Contraction::UseEEqual>(),
+                     Base::template Pair<Predicates::Contraction::UseGateResidualEqual>(),
                      Base::template Pair<Predicates::Contraction::DataTypeEEqual>(),
                      Base::template Pair<Predicates::Contraction::UseScaleABCheck>(),
                      Base::template Pair<Predicates::Contraction::UseScaleCDCheck>(),
                      Base::template Pair<Predicates::Contraction::UseScaleAlphaVecCheck>(),
                      Base::template Pair<Predicates::Contraction::BiasDataTypeWhiteList>(),
                      Base::template Pair<Predicates::Contraction::BiasSrcWhiteList>(),
+                     Base::template Pair<Predicates::Contraction::GateResidualDataTypeWhiteList>(),
                      Base::template Pair<Predicates::Contraction::SizeInRange>(),
                      Base::template Pair<Predicates::Contraction::Sparse>(),
                      Base::template Pair<Predicates::Contraction::F32XdlMathOpEqual>(),
@@ -464,6 +466,12 @@ namespace TensileLite
         };
 
         template <typename IO>
+        struct MappingTraits<Predicates::Contraction::GateResidualDataTypeWhiteList, IO>
+            : public AutoMappingTraits<Predicates::Contraction::GateResidualDataTypeWhiteList, IO>
+        {
+        };
+
+        template <typename IO>
         struct MappingTraits<Predicates::Contraction::ActivationComputeTypeEqual, IO>
             : public AutoMappingTraits<Predicates::Contraction::ActivationComputeTypeEqual, IO>
         {
@@ -478,6 +486,12 @@ namespace TensileLite
         template <typename IO>
         struct MappingTraits<Predicates::Contraction::UseBiasCheck, IO>
             : public AutoMappingTraits<Predicates::Contraction::UseBiasCheck, IO>
+        {
+        };
+
+        template <typename IO>
+        struct MappingTraits<Predicates::Contraction::UseGateResidualEqual, IO>
+            : public AutoMappingTraits<Predicates::Contraction::UseGateResidualEqual, IO>
         {
         };
 
