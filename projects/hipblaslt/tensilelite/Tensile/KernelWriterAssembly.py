@@ -8286,6 +8286,12 @@ class KernelWriterAssembly(KernelWriter):
       self.defineSgpr("GSUSync", 1)
       module.add(RegSet("s", "sgprGSUSync", self.sgprs["GSUSync"]))
 
+    if self.states.useGateResidual:
+      self.defineSgpr("SrdGate", 4, 4)
+      module.add(RegSet("s", "sgprSrdGate", self.sgprs["SrdGate"]))
+      self.defineSgpr("GateNullOne", 1)
+      module.add(RegSet("s", "sgprGateNullOne", self.sgprs["GateNullOne"]))
+
     if kernel["ProblemType"]["UseE"]:
       self.defineSgpr("SrdE", 4, 4)
       module.add(RegSet("s", "sgprSrdE", self.sgprs["SrdE"]))
@@ -13243,7 +13249,27 @@ class KernelWriterAssembly(KernelWriter):
       indices = list(range(0, kernel["ProblemType"]["NumIndicesC"]))
       numDim = len(indices)
       #addrSrcSgpr = "Address" # use "Address" only for the first iteration
-      addrSrcSgpr = "Srd" # Since SrdC/D are initialized with AddressC/D for non-General Batched GEMM case.      
+      addrSrcSgpr = "Srd" # Since SrdC/D are initialized with AddressC/D for non-General Batched GEMM case.
+
+      _gateMultiBpeShiftSgpr = None
+      _gl = kernel["ProblemType"].get("GateResidualDataTypeList", [])
+      if "Gate" in srdTcList and _gl and len(_gl) > 1:
+        _gateMultiBpeShiftSgpr = self.sgprPool.checkOut(1, "gateBpeShift")
+        _gateShiftEnd = Label(self.labels.getNameInc("Gate_SrdBpe_End"), "")
+        _fallbackBpe = max(1, self.states.bpeGate)
+        for _gDtype in _gl:
+          _gNext = Label(self.labels.getNameInc("Gate_SrdBpe_Next_%s" % _gDtype.toNameAbbrev()), "")
+          module.add(self.getSCMPKInstruction("LGU32", "GateType", _gDtype.value,
+                     comment="Gate SRD bpe: GateType != %u" % _gDtype.value))
+          module.add(SCBranchSCC1(_gNext.getLabelName(), "try next gate dtype"))
+          _dtypeBpe = max(1, int(self.states.bpr * _gDtype.numRegisters()))
+          module.add(SMovB32(dst=sgpr(_gateMultiBpeShiftSgpr), src=log2(_dtypeBpe),
+                     comment="Gate SRD log2(bpe)=%u for %s" % (log2(_dtypeBpe), _gDtype.toNameAbbrev())))
+          module.add(SBranch(labelName=_gateShiftEnd.getLabelName(), comment="done"))
+          module.add(_gNext)
+        module.add(SMovB32(dst=sgpr(_gateMultiBpeShiftSgpr), src=log2(_fallbackBpe),
+                   comment="Gate SRD log2(bpe) fallback"))
+        module.add(_gateShiftEnd)
       for i in range(1, numDim):
         if i == kernel["ProblemType"]["Index0"]:
           # Used if the output is transposed?
@@ -13271,8 +13297,13 @@ class KernelWriterAssembly(KernelWriter):
             argTypeChecks = Label(label="ArgTypeChecks"+mat, comment="Checks for ArgType to General Batched or non-General Batched")
             stridedBatchedGemmLoad = Label(label="StridedBatchedGemmLoad"+mat, comment="Computing the Batch Matrix's base address for Strided Batched GEMM")            
             bpe = self.states.bpeCinternal if mat =="Bias" else (self.states.bpeE if mat == "E" else self.states.bpeCexternal)
+            if mat == "Gate":
+              bpe = self.states.bpeGate
             bpe = int(self.states.bpr * kernel["ProblemType"]["DestDataType"].numRegisters()) if kernel["_GlobalAccumulation"] == 'MultipleBuffer' and mat =="C" else bpe
-            bpe = sgpr(sgprBpe) if sgprBpe else log2(bpe)  # sgprBpe cannot be 0
+            if mat == "Gate" and _gateMultiBpeShiftSgpr is not None:
+              bpe = sgpr(_gateMultiBpeShiftSgpr)
+            else:
+              bpe = sgpr(sgprBpe) if sgprBpe else log2(bpe)  # sgprBpe cannot be 0
             if(kernel["GlobalSplitU"] != 0):
               module.add(SAndB32(dst=sgpr(tmpS1), src0=sgpr("GSU"), src1=self.gsuMaskHex(kernel), comment="Restore GSU"))
             # These are constant across all workitems, just add to the SRD:
@@ -13298,7 +13329,10 @@ class KernelWriterAssembly(KernelWriter):
                 strideC = "Size%s"%(INDEX_CHARS[i-1])
                 module.addModuleAsFlatItems(self.s_mul_u64_u32(sgpr(tmpS0), sgpr(tmpS1), coord, sgpr(strideC), comment="Scale%s %s by Stride"%(mat, coord)))
             else:
-              strideC = "Stride%s%s"%(mat, self.states.indexChars[i])
+              if mat == "Gate":
+                strideC = "GateStride+%u" % (i - 1)
+              else:
+                strideC = "Stride%s%s"%(mat, self.states.indexChars[i])
               if(i == 2 and (mat == "C" or mat == "D")):
                 gsuComp = Component.GSU.find(self)
                 module.add(gsuComp.routeToGeneralBatchedOrStridedBatched(stridedBatchedGemmLoad, argTypeChecks, generalBatchedGemmLoad, mat, kernel, tmpS1))
@@ -13323,6 +13357,9 @@ class KernelWriterAssembly(KernelWriter):
           module.addSpaceLine()
 
           addrSrcSgpr = "Srd" # update src Sgpr for the second or later iterations
+
+      if _gateMultiBpeShiftSgpr is not None:
+        self.sgprPool.checkIn(_gateMultiBpeShiftSgpr)
 
     if noMultipleBuffer:
       if srdWsAvailableCtx:
@@ -13512,6 +13549,8 @@ class KernelWriterAssembly(KernelWriter):
           module.add(VMulLOU32(dst=vgpr(self.vgprs.coutRowPtrD), src0=vgpr(self.vgprs.coord1InMT), src1=sgpr(strideD1), comment=" offset 1"))
           if kernel["ProblemType"]["UseE"] and ((kernel["GlobalSplitU"] == 1 or kernel["GlobalSplitU"] == -1) or kernel["StreamK"] > 0):
               module.add(VMovB32(dst=vgpr(self.vgprs.coutRowPtrE), src=vgpr(self.vgprs.coord1InMT), comment=" save offset 1 for E"))
+          if self.vgprs.coutRowPtrGate != -1:
+              module.add(VMovB32(dst=vgpr(self.vgprs.coutRowPtrGate), src=vgpr(self.vgprs.coord1InMT), comment=" save offset 1 for Gate"))
           if self.vgprs.coutRowPtrBias != -1:
               index = packedC1[0] - 1
               strideW1 = "Size%s" % "I" if index == 0 else ("J" if index == 1 else (self.states.indexChars[index]))
@@ -13670,14 +13709,26 @@ class KernelWriterAssembly(KernelWriter):
     module.addSpaceLine()
     return module
 
-  def allocPostLoopSrdSuppressRaw(self, ch: str, chAddress: str, labelStr: str, sgprLength) -> Module:
+  def allocPostLoopSrdSuppressRaw(self, ch: str, chAddress: str, labelStr: str, sgprLength, evenAlignedAddr: bool = True) -> Module:
     module = Module("allocPostLoopSrdSuppress")
     label  = Label("%sAddrValid"%labelStr, "")
     label2 = Label("%sAddrValid_End"%labelStr, "")
-    # Buffer-load uses one base read pointer stored in the SRD - set it here:
-    module.add(SMovB64(dst=sgpr("Srd%s+0"%ch, 2), src=sgpr("Address%s+0"%chAddress, 2), comment="init SRD base address" ))
-    module.add(SMovB32(dst=sgpr("Srd%s+3"%ch), src="Srd127_96", comment="Set bits 127_96 in post-loop SRD"))
-    module.add(BranchIfNotZero("Address%s"%chAddress, DataType('int64').toEnum(), label))
+    # Set SRD base pointer. evenAlignedAddr=False uses 32-bit ops instead of
+    # s_mov_b64/s_cmp_eq_u64, which require an even-aligned AddressX pair.
+    if evenAlignedAddr:
+      module.add(SMovB64(dst=sgpr("Srd%s+0"%ch, 2), src=sgpr("Address%s+0"%chAddress, 2), comment="init SRD base address" ))
+      module.add(SMovB32(dst=sgpr("Srd%s+3"%ch), src="Srd127_96", comment="Set bits 127_96 in post-loop SRD"))
+      module.add(BranchIfNotZero("Address%s"%chAddress, DataType('int64').toEnum(), label))
+    else:
+      # 32-bit base init (odd-aligned safe): copy lo/hi halves independently.
+      module.add(SMovB32(dst=sgpr("Srd%s+0"%ch), src=sgpr("Address%s+0"%chAddress), comment="init SRD base address (lo, unaligned-safe)" ))
+      module.add(SMovB32(dst=sgpr("Srd%s+1"%ch), src=sgpr("Address%s+1"%chAddress), comment="init SRD base address (hi, unaligned-safe)" ))
+      module.add(SMovB32(dst=sgpr("Srd%s+3"%ch), src="Srd127_96", comment="Set bits 127_96 in post-loop SRD"))
+      # Address != 0 (64-bit) without s_cmp_eq_u64: branch to valid if either half is nonzero.
+      module.add(SCmpEQU32(src0=sgpr("Address%s+0"%chAddress), src1=0, comment="Address%s lo == 0 ?"%chAddress))
+      module.add(SCBranchSCC0(label.getLabelName(), "branch if Address%s lo != 0"%chAddress))
+      module.add(SCmpEQU32(src0=sgpr("Address%s+1"%chAddress), src1=0, comment="Address%s hi == 0 ?"%chAddress))
+      module.add(SCBranchSCC0(label.getLabelName(), "branch if Address%s hi != 0"%chAddress))
     module.add(SMovB32(dst=sgpr("Srd%s+2"%ch), src=0))
     module.add(SBranch(label2.getLabelName()))
     module.add(label)
@@ -13686,8 +13737,8 @@ class KernelWriterAssembly(KernelWriter):
     module.addSpaceLine()
     return module
 
-  def allocPostLoopSrdSuppress(self, ch: str, labelStr: str, sgprLength) -> Module:
-    return self.allocPostLoopSrdSuppressRaw(ch, ch, labelStr, sgprLength)
+  def allocPostLoopSrdSuppress(self, ch: str, labelStr: str, sgprLength, evenAlignedAddr: bool = True) -> Module:
+    return self.allocPostLoopSrdSuppressRaw(ch, ch, labelStr, sgprLength, evenAlignedAddr=evenAlignedAddr)
 
   ##############################################################################
   # Not LocalSplitU: Global Write Indices
@@ -13823,6 +13874,9 @@ class KernelWriterAssembly(KernelWriter):
       if self.vgprs.coutRowPtrBias != -1:
         self.vgprPool.checkIn(self.vgprs.coutRowPtrBias)
         self.vgprs.coutRowPtrBias = -1
+      if self.vgprs.coutRowPtrGate != -1:
+        self.vgprPool.checkIn(self.vgprs.coutRowPtrGate)
+        self.vgprs.coutRowPtrGate = -1
     if not kernel["BufferStore"]:
       self.vgprPool.checkIn(self.vgprs.addrD)
       self.vgprPool.checkIn(self.vgprs.addrC)
@@ -15386,8 +15440,26 @@ class KernelWriterAssembly(KernelWriter):
           ssslist.append("E")
           useSize.append(False)
 
+      if self.states.useGateResidual and (kernel["GlobalSplitU"] == 1 or kernel["GlobalSplitU"] == -1 or kernel["_GlobalAccumulation"] == "MultipleBufferSingleKernel"):
+        if self.vgprs.coutRowPtrGate != -1:
+          module.add(VMulLOU32(dst=vgpr(self.vgprs.coutRowPtrGate),
+                               src0=vgpr(self.vgprs.coutRowPtrGate),
+                               src1=sgpr("GateStride+0"),
+                               comment="finalize coutRowPtrGate = row * GateStride+0"))
+        labelGateStr = self.labels.getNameInc("Gate")
+        gateAddrEven = (self.sgprs.get("AddressGate", 0) % 2 == 0)
+        module.add(self.allocPostLoopSrdSuppress("Gate", labelGateStr, "BufferOOB", evenAlignedAddr=gateAddrEven))
+        module.add(self.shiftSrd("Gate"))
+        ssslist.append("Gate")
+        useSize.append(False)
+
       if ssslist:
         module.add(self.computeStoreSrdStart(kernel, ssslist, useSize=useSize, noMultipleBuffer=True))
+
+      # s = gate null ? 1.0 : 0.0. FMA does acc = (gate+s)*acc + gate.
+      if self.states.useGateResidual and (kernel["GlobalSplitU"] == 1 or kernel["GlobalSplitU"] == -1 or kernel["_GlobalAccumulation"] == "MultipleBufferSingleKernel"):
+        module.add(self.getSCMPKInstruction("EQU32", "SrdGate+2", 0, comment="gate null? (SrdGate num_records==0)"))
+        module.add(SCSelectB32(dst=sgpr("GateNullOne"), src0=hex(0x3f800000), src1=0, comment="GateNullOne = (gate null) ? 1.0 : 0.0"))
 
       '''
       Post process for loop end
@@ -16772,6 +16844,9 @@ class KernelWriterAssembly(KernelWriter):
     if tc == 'E':
       globalOffset = addrCalc.globalOffsetE
       bpeType = self.states.bpeE
+    elif tc == 'Gate':
+      globalOffset = addrCalc.globalOffsetGate
+      bpeType = self.states.bpeGate
     elif tc == 'WS':
       soffset = tmpS01
       globalOffset = 0
@@ -16799,7 +16874,7 @@ class KernelWriterAssembly(KernelWriter):
                                              overrideAfterPrimerRows=overrideAfterPrimerRows))
 
     if dataType.isHalf():
-      hi16 = 0 if self.states.HHH_WMMA else (vc0 % 2)
+      hi16 = 0 if (self.states.HHH_WMMA or tc == 'Gate') else (vc0 % 2)
       module.add(self.chooseGlobalRead(useBuffer, bps, data, \
           addr0, addr1, soffset=soffset, offset=globalOffset, \
           glc=isGlc, slc=isSlc, nt=isNT, lds=False, hi16=hi16, \

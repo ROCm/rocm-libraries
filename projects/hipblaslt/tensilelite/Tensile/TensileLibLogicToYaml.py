@@ -249,7 +249,9 @@ def formProblemSize(
     temp = {}
     biasTypeArgs = problemTypeStat["BiasDataTypeList"]
     temp["BiasTypeArgs"] = FlowList(biasTypeArgs)
-
+    gateTypeArgs = problemTypeStat.get("GateResidualDataTypeList", [])
+    if gateTypeArgs:
+        temp["GateTypeArgs"] = FlowList(gateTypeArgs)
     data["BenchmarkFinalParameters"].append(temp)
 
     return data

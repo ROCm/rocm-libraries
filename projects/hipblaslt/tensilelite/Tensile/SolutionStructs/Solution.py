@@ -414,6 +414,27 @@ class BiasTypeArgs:
     s = "BiasTypesArgs\n"
     return s
 
+class GateTypeArgs:
+
+  ########################################
+  def __init__(self, problemType, config):
+    self.gateTypes = []
+    self.totalProblemSizes = 0
+    if problemType["UseGateResidual"]:
+      for btype in config:
+        datatype = DataType(btype)
+        if datatype not in problemType["GateResidualDataTypeList"]:
+          printWarning("Datatype: %s not support in this kernel (%s)"%(datatype, str(problemType["GateResidualDataTypeList"])))
+        self.gateTypes.append(datatype)
+
+      if not self.gateTypes:
+        printExit("Must provide a gate type in benchmark parameters if UseGateResidual is set to True.")
+
+      self.totalProblemSizes = len(self.gateTypes)
+
+  def __str__(self):
+    s = "GateTypesArgs\n"
+    return s
 ################################################################################
 # Activation
 ################################################################################
@@ -1901,6 +1922,7 @@ class Solution(collections.abc.Mapping):
       state["NonTemporalB"] = state["NonTemporal"]
       state["NonTemporalC"] = state["NonTemporal"]
       state["NonTemporalD"] = state["NonTemporal"]
+      state["NonTemporalGate"] = state["NonTemporal"]
       state["NonTemporalMetadata"] = state["NonTemporal"]
 
     if isaInfoMap[isa].asmCaps.get("HasTHModifier", False):

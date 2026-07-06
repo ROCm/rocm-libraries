@@ -1111,6 +1111,27 @@ namespace TensileLite
                                               (uint8_t*)inputs.ws + workspaceOffsetInByte);
             args.template append<const void*>("AmaxSync", inputs.Synchronizer);
         }
+
+        if(problemType.useGateResidual)
+        {
+            if(problemType.stridedBatched)
+                args.template append<void const*>("gateResidual", inputs.gateResidual);
+            else
+                args.template append<void const* const*>("batchGateResidual",
+                                                         inputs.batchGateResidual);
+            bool hasGate = problem.useGateResidual();
+            args.template append<uint32_t>(
+                "gate_type",
+                static_cast<uint32_t>(
+                    hasGate ? problem.tensor(ContractionProblemGemm::TENSOR::GATE_RESIDUAL).dataType()
+                            : problemType.gateResidualDataTypeWhiteList.at(0)));
+
+            TensorDescriptor const& gate
+                = problem.tensor(ContractionProblemGemm::TENSOR::GATE_RESIDUAL);
+            for(size_t i = startStrideCD; i < d.dimensions(); i++)
+                args.template append<uint32_t>(concatenate_if<T_Debug>("strideGate", i),
+                                               hasGate ? gate.strides()[i] : 0);
+        }
     }
 
     inline uint32_t getNumWorkGroups(const KernelInvocation& rv)
@@ -2192,6 +2213,26 @@ namespace TensileLite
 
         rv.args.append("beta", inputs.beta, problem.betaType());
 
+        if(problemType.useGateResidual)
+        {
+            if(problemType.stridedBatched)
+                rv.args.template append<void const*>("gateResidual", inputs.gateResidual);
+            else
+                rv.args.template append<void const* const*>("batchGateResidual",
+                                                         inputs.batchGateResidual);
+            bool hasGate = problem.useGateResidual();
+            rv.args.template append<uint32_t>(
+                "gate_type",
+                static_cast<uint32_t>(
+                    hasGate ? problem.tensor(ContractionProblemGemm::TENSOR::GATE_RESIDUAL).dataType()
+                            : problemType.gateResidualDataTypeWhiteList.at(0)));
+
+            TensorDescriptor const& gate
+                = problem.tensor(ContractionProblemGemm::TENSOR::GATE_RESIDUAL);
+            for(size_t i = 1; i < d.dimensions(); i++)
+                rv.args.template append<uint32_t>(concatenate_if<T_Debug>("strideGate", i),
+                                               hasGate ? gate.strides()[i] : 0);
+        }
         //Pass along code object dependency
         rv.codeObjectFile = codeObjectFilename.load();
 
@@ -2256,7 +2297,10 @@ namespace TensileLite
         {
             name += "_GA";
         }
-
+        if(problemType.useGateResidual)
+        {
+            name += ("_GateR");
+        }
         return name;
     }
 
@@ -2338,6 +2382,9 @@ namespace TensileLite
             args.template append<void const*>("scaleAlphaVec", inputs.scaleAlphaVec);
         }
 
+        if(problemType.useGateResidual)
+            args.template append<void const*>("gateResidual", inputs.gateResidual);
+
         if(sizeMapping.globalAccumulation == 2 || sizeMapping.streamK > 0)
             args.append("alpha", inputs.alpha, problem.alphaType());
         else
@@ -2406,6 +2453,16 @@ namespace TensileLite
         for(size_t i = 1; i < c.dimensions(); i++)
             args.template append<uint32_t>(concatenate_if<T_Debug>("strideC", i), c.strides()[i]);
 
+        if(problemType.useGateResidual)
+        {
+            TensorDescriptor const& gate
+                = problem.tensor(ContractionProblemGemm::TENSOR::GATE_RESIDUAL);
+            bool hasGate = problem.useGateResidual();
+            for(size_t i = 1; i < c.dimensions(); i++)
+                args.template append<uint32_t>(concatenate_if<T_Debug>("strideGate", i),
+                                               hasGate ? gate.strides()[i] : 0);
+        }
+
         if(useBias)
         {
             TensorDescriptor const& bias = problem.tensor(ContractionProblemGemm::TENSOR::BIAS);
@@ -2448,6 +2505,7 @@ namespace TensileLite
             args.template append<uint32_t>("batchMode", static_cast<uint32_t>(batchMode));
             args.template append<uint32_t>("additionalPaddingPerBatch", additionalPaddingPerBatchGeneralBatch);        
         }
+
     }
 
     template <bool T_Debug>
@@ -2818,6 +2876,14 @@ namespace TensileLite
             }
         }
 
+        if(problemType.useGateResidual)
+        {
+            auto gateDtype = problem.useGateResidual()
+                                 ? problem.tensor(ContractionProblemGemm::TENSOR::GATE_RESIDUAL).dataType()
+                                 : problemType.gateResidualDataTypeWhiteList.at(0);
+            name += ("_Gate" + rocisa::TypeAbbrev(gateDtype));
+        }
+
         if(problemType.activationType != ActivationType::None)
         {
             if(problemType.activationType == ActivationType::All)
@@ -2875,7 +2941,10 @@ namespace TensileLite
                              sizeMapping.globalSplitUPGR));
 
         name += "_VW" + std::to_string(vw);
-
+        if(problemType.useGateResidual)
+        {
+            name += "_GateR";
+        }
         return name;
     }
 

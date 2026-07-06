@@ -139,6 +139,10 @@ class KernelWriterConversion(KernelWriterBase):
       if self.state["ProblemType"]["UseScaleAlphaVec"] == 3:
         enableFactorDim = True
 
+    if self.state["ProblemType"]["UseGateResidual"]:
+      gatePtrStr = self.state["ProblemType"]["GateResidualDataTypeList"][0].toDevice(self.language)
+      kStr += "  " + gatePtrStr + " * " + "Gate;" + self.endLine
+
     # alpha & beta
     kStr += "  %s alpha;%s" % (self.state["ProblemType"]["ComputeDataType"].toDevice(self.language), self.endLine)
     kStr += "  %s beta;%s" % (self.state["ProblemType"]["ComputeDataType"].toDevice(self.language), self.endLine)
@@ -166,6 +170,9 @@ class KernelWriterConversion(KernelWriterBase):
       kStr += "  unsigned int strideW%s;%s" % (self.indexChars[i], self.endLine)
     for i in range(firstStrideCD, lastStrideC):
       kStr += "  unsigned int strideC%s;%s" % (self.indexChars[i], self.endLine)
+    if self.state["ProblemType"]["UseGateResidual"]:
+      for i in range(firstStrideCD, lastStrideC):
+        kStr += "  unsigned int strideGate%s;%s" % (self.indexChars[i], self.endLine)
 
     if self.state["ProblemType"]["UseBias"] and \
         (not self.state["ProblemType"]["Gradient"] or \
@@ -237,6 +244,9 @@ class KernelWriterConversion(KernelWriterBase):
       kStr += "#define strideW" + self.indexChars[i] + " 1" + self.endLine
     for i in range(firstStride, lastStrideC):
       kStr += "#define strideC" + self.indexChars[i] + " 1" + self.endLine
+    if self.state["ProblemType"]["UseGateResidual"]:
+      for i in range(firstStride, lastStrideC):
+        kStr += "#define strideGate" + self.indexChars[i] + " 1" + self.endLine
 
     ########################################
     # GLOBAL_E()
@@ -283,6 +293,18 @@ class KernelWriterConversion(KernelWriterBase):
       indexChar = self.indexChars[i]
       kStr += " + (IDX%s)*arg.strideC%s" % (indexChar, indexChar)
     kStr += " ))" + self.endLine
+
+    # GLOBAL_GATE()
+    if self.state["ProblemType"]["UseGateResidual"]:
+      kStr += "#define GLOBAL_GATE(IDX%s" % self.indexChars[0]
+      for i in range(1, problemType["NumIndicesC"]):
+        kStr += ", IDX%s" % self.indexChars[i]
+      indexChar = self.indexChars[0]
+      kStr += ") (( (IDX%s)*strideGate%s" % (indexChar, indexChar)
+      for i in range(1, problemType["NumIndicesC"]):
+        indexChar = self.indexChars[i]
+        kStr += " + (IDX%s)*arg.strideGate%s" % (indexChar, indexChar)
+      kStr += " ))" + self.endLine
 
     # GLOBAL_BIAS()
     if self.state["ProblemType"]["UseBias"] and \
@@ -415,6 +437,8 @@ class KernelWriterConversion(KernelWriterBase):
     # D index
     kStr += self.endLine
     kStr += "%s idxD, idxC;" % self.uint64Str
+    if self.state["ProblemType"]["UseGateResidual"]:
+      kStr += "%s idxGate;" % self.uint64Str
     if not self.state["ProblemType"]["GroupedGemm"]:
       kStr += "  if(batch_mode == 0)" + self.endLine
       kStr += "  {" + self.endLine
@@ -423,6 +447,12 @@ class KernelWriterConversion(KernelWriterBase):
       kStr += ', ' if i else ''
       kStr += '0'  if i in nonTileFreeIndices else ('id%d' % i)
     kStr += ");%s" % (self.endLine)
+    if self.state["ProblemType"]["UseGateResidual"]:
+      kStr += "  idxGate = GLOBAL_GATE( (%s)" % self.uint64Str
+      for i in range(problemType["NumIndicesC"]):
+        kStr += ', ' if i else ''
+        kStr += '0'  if i in nonTileFreeIndices else ('id%d' % i)
+      kStr += ");%s" % (self.endLine)
     if not self.state["ProblemType"]["GroupedGemm"]:
       kStr += "  }" + self.endLine
       kStr += "  else" + self.endLine
@@ -432,6 +462,12 @@ class KernelWriterConversion(KernelWriterBase):
         kStr += ', ' if i else ''
         kStr += '0'  if i in nonTileFreeIndices else ('id%d' % i)
       kStr += ", 0);%s" % (self.endLine)
+      if self.state["ProblemType"]["UseGateResidual"]:
+        kStr += "  idxGate = GLOBAL_GATE( (%s)" % self.uint64Str
+        for i in range(problemType["NumIndicesC"]-1):
+          kStr += ', ' if i else ''
+          kStr += '0'  if i in nonTileFreeIndices else ('id%d' % i)
+        kStr += ", 0);%s" % (self.endLine)
       kStr += "}" + self.endLine
 
     # W index
@@ -802,6 +838,15 @@ class KernelWriterConversion(KernelWriterBase):
         kStr += "  %s[%d] *= scaleD_data;%s" % (accumStr, vIdx, self.endLine)
     kStr += self.endLine
 
+    #Gate Residual: D = gate * acc + gate
+    if self.state["ProblemType"]["UseGateResidual"]:
+      kStr += "  if(arg.Gate != 0){%s" % self.endLine
+      for vIdx in range(self.num_dword_load):
+        kStr += "    %s[%d] = (%s)arg.Gate[idxGate+%d] * %s[%d] + (%s)arg.Gate[idxGate+%d];%s" \
+                % (accumStr, vIdx, intermediateDataType, vIdx, accumStr, vIdx, intermediateDataType, vIdx, self.endLine)
+      kStr += "  }%s" % self.endLine
+      kStr += self.endLine
+
     #Output high precision D to WS
     if self.state["ProblemType"]["UseBias"] and self.state["ProblemType"]["Gradient"] and self.state["ProblemType"]["BiasSrc"] == "D":
       for vIdx in range(self.num_dword_load):
@@ -838,9 +883,14 @@ class KernelWriterConversion(KernelWriterBase):
       kStr += "#undef strideW" + self.indexChars[i] + self.endLine
     for i in range(firstStride, lastStrideC):
       kStr += "#undef strideC" + self.indexChars[i] + self.endLine
+    if self.state["ProblemType"]["UseGateResidual"]:
+      for i in range(firstStride, lastStrideC):
+        kStr += "#undef strideGate" + self.indexChars[i] + self.endLine
     kStr += "#undef GLOBAL_D%s" % (self.endLine)
     kStr += "#undef GLOBAL_W%s" % (self.endLine)
     kStr += "#undef GLOBAL_C%s" % (self.endLine)
+    if self.state["ProblemType"]["UseGateResidual"]:
+      kStr += "#undef GLOBAL_GATE%s" % (self.endLine)
     if self.state["ProblemType"]["UseBias"]:
       kStr += "#undef GLOBAL_BIAS%s" % (self.endLine)
     if self.state["ProblemType"]["UseE"]:
@@ -887,6 +937,9 @@ class KernelWriterConversion(KernelWriterBase):
       else:
         name += "_Aux%s"%state["ProblemType"]["DataTypeE"].toChar()
 
+    if state["ProblemType"]["UseGateResidual"]:
+      name += "_Gate%s"%state["ProblemType"]["GateResidualDataTypeList"][0].toChar()
+
     if ((state["ProblemType"]["ActivationType"] != 'none') and state["ActivationFused"]):
       if state["ProblemType"]["ActivationType"] == 'all':
         name += "_A"
@@ -905,6 +958,8 @@ class KernelWriterConversion(KernelWriterBase):
     name += "_PostGSU" + str(state["GlobalSplitU"])
     if num_elements_load != None:
       name += "_VW" + str(num_elements_load)
+    if state["ProblemType"]["UseGateResidual"]:
+      name += "_GateR"
     return name
 
 
@@ -917,18 +972,24 @@ class KernelWriterConversion(KernelWriterBase):
     fileString = "" # CHeader
     backupGSU    = self.state["GlobalSplitU"]
     backupUnroll = self.state["UnrollOnly"]
+    backupGateList = self.state["ProblemType"]["GateResidualDataTypeList"]
+    gateList = backupGateList if self.state["ProblemType"]["UseGateResidual"] else [None]
     for gsu in self.gsuKernels:
       for toggle in [True, False]:
-        self.state["GlobalSplitU"] = gsu
-        self.state["ProblemType"]["GroupedGemm"] = toggle
-        self.kernelName = self.getKernelName()
-        fileString += self.f8MacroGuardStart
-        fileString += self.functionArgument()
-        fileString += self.functionSignature()
-        fileString += ";\n"
-        fileString += self.f8MacroGuardEnd
+        for gd in gateList:
+          if self.state["ProblemType"]["UseGateResidual"]:
+            self.state["ProblemType"]["GateResidualDataTypeList"] = [gd]
+          self.state["GlobalSplitU"] = gsu
+          self.state["ProblemType"]["GroupedGemm"] = toggle
+          self.kernelName = self.getKernelName()
+          fileString += self.f8MacroGuardStart
+          fileString += self.functionArgument()
+          fileString += self.functionSignature()
+          fileString += ";\n"
+          fileString += self.f8MacroGuardEnd
       if not self.state["UnrollOnly"]:
         self.state["UnrollOnly"] = True
+    self.state["ProblemType"]["GateResidualDataTypeList"] = backupGateList
     self.state["GlobalSplitU"] = backupGSU
     self.state["UnrollOnly"] = backupUnroll
 
@@ -940,17 +1001,23 @@ class KernelWriterConversion(KernelWriterBase):
     fileString = ""
     backupGSU    = self.state["GlobalSplitU"]
     backupUnroll = self.state["UnrollOnly"]
+    backupGateList = self.state["ProblemType"]["GateResidualDataTypeList"]
+    gateList = backupGateList if self.state["ProblemType"]["UseGateResidual"] else [None]
     for gsu in self.gsuKernels:
       for toggle in [True, False]:
-        self.state["GlobalSplitU"] = gsu
-        self.state["ProblemType"]["GroupedGemm"] = toggle
-        self.kernelName = self.getKernelName()
-        fileString += self.f8MacroGuardStart
-        fileString += self.functionSignature()
-        fileString += self.kernelBody()
-        fileString += self.f8MacroGuardEnd
+        for gd in gateList:
+          if self.state["ProblemType"]["UseGateResidual"]:
+            self.state["ProblemType"]["GateResidualDataTypeList"] = [gd]
+          self.state["GlobalSplitU"] = gsu
+          self.state["ProblemType"]["GroupedGemm"] = toggle
+          self.kernelName = self.getKernelName()
+          fileString += self.f8MacroGuardStart
+          fileString += self.functionSignature()
+          fileString += self.kernelBody()
+          fileString += self.f8MacroGuardEnd
       if not self.state["UnrollOnly"]:
         self.state["UnrollOnly"] = True
+    self.state["ProblemType"]["GateResidualDataTypeList"] = backupGateList
     self.state["GlobalSplitU"] = backupGSU
     self.state["UnrollOnly"] = backupUnroll
 
