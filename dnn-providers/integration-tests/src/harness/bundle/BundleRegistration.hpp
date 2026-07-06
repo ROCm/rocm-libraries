@@ -126,25 +126,26 @@ inline void registerBundleTests()
     bundles.reserve(discovered.size());
     for(const auto& disc : discovered)
     {
+        const auto diagnosticPath = disc.diagnosticPath();
         LoadResult loadResult;
         try
         {
-            loadResult = loadIntegrationTestBundle(disc.jsonPath);
+            loadResult = loadIntegrationTestBundle(disc);
         }
         catch(const std::exception& e)
         {
-            HIPDNN_PLUGIN_LOG_ERROR("Skipping bundle " << disc.jsonPath << ": " << e.what());
+            HIPDNN_PLUGIN_LOG_ERROR("Skipping bundle " << diagnosticPath << ": " << e.what());
             continue;
         }
 
         if(const auto* error = std::get_if<LoadError>(&loadResult))
         {
-            HIPDNN_PLUGIN_LOG_ERROR("Skipping bundle " << disc.jsonPath << ": "
+            HIPDNN_PLUGIN_LOG_ERROR("Skipping bundle " << diagnosticPath << ": "
                                                        << toString(*error));
             continue;
         }
 
-        bundles.push_back({disc.jsonPath,
+        bundles.push_back({diagnosticPath,
                            disc.suiteName,
                            disc.testName,
                            std::make_shared<IntegrationTestBundle>(

@@ -60,8 +60,7 @@ public:
         auto dxAttr = graphObj.conv_dgrad(dyTensorAttr, wTensorAttr, convAttrs);
         dxAttr->set_output(true);
 
-        // Set these explicitly since grouped convs cannot infer tensor shape.
-        // Infer behavior will assume groups == 1, but some cases have groups > 1.
+        // Set this explicitly since dgrad output shapes are not inferred.
         dxAttr->set_dim(testCase.xDims);
         dxAttr->set_stride(generateStrides(testCase.xDims, layout.strideOrder));
 
