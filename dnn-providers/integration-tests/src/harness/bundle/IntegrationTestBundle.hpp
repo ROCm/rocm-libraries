@@ -155,6 +155,60 @@ inline std::vector<int64_t> allTensorUids(const nlohmann::json& graphJson)
     return uids;
 }
 
+// Replaces test_sdk's getOutputTensorUidsFromGraph(), which assumes every
+// node wraps output UIDs in an "outputs" sub-object. ReductionAttributes,
+// ResampleFwdAttributes, and CustomOpAttributes emit flat keys instead,
+// causing node.at("outputs") to throw for those ops.
+inline std::vector<int64_t> extractOutputUidsFromJson(const nlohmann::json& graphJson)
+{
+    std::vector<int64_t> uids;
+    if(!graphJson.contains("nodes") || !graphJson.at("nodes").is_array())
+    {
+        return uids;
+    }
+
+    for(const auto& node : graphJson.at("nodes"))
+    {
+        // Standard: outputs wrapped in "outputs" sub-object
+        if(node.contains("outputs") && node.at("outputs").is_object())
+        {
+            for(auto& [name, value] : node.at("outputs").items())
+            {
+                if(name.find("_tensor_uid") != std::string::npos && !value.is_null()
+                   && value.is_number_integer())
+                {
+                    uids.push_back(value.get<int64_t>());
+                }
+            }
+            continue;
+        }
+
+        // Flat vector: CustomOp uses "output_tensor_uids" array
+        if(node.contains("output_tensor_uids") && node.at("output_tensor_uids").is_array())
+        {
+            for(const auto& v : node.at("output_tensor_uids"))
+            {
+                if(v.is_number_integer())
+                {
+                    uids.push_back(v.get<int64_t>());
+                }
+            }
+            continue;
+        }
+
+        // Flat scalar fallback: Reduction ("out_tensor_uid"),
+        // ResampleFwd ("y_tensor_uid")
+        for(const auto& key : {"out_tensor_uid", "y_tensor_uid"})
+        {
+            if(node.contains(key) && node.at(key).is_number_integer())
+            {
+                uids.push_back(node.at(key).get<int64_t>());
+            }
+        }
+    }
+    return uids;
+}
+
 } // namespace detail
 
 // Load a bundle from its graph .json path, classifying the outcome.
@@ -224,7 +278,7 @@ inline LoadResult loadIntegrationTestBundle(const std::filesystem::path& jsonPat
     // they are internal to fused kernels — so comparing them would always fail
     // against the sentinel NaN fill.
     {
-        auto allOutputUids = hipdnn_test_sdk::utilities::getOutputTensorUidsFromGraph(graphJson);
+        auto allOutputUids = detail::extractOutputUidsFromJson(graphJson);
         const auto wrapper = bundle.graphWrapper();
         const auto& tensorMap = wrapper.getTensorMap();
         for(const int64_t uid : allOutputUids)
