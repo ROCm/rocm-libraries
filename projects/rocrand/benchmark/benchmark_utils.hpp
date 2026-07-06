@@ -255,7 +255,7 @@ inline auto gpu_get_mp_count(int* mp_count, int device_id)
 {
     return DISPATCH(hipDeviceGetAttribute, cudaDeviceGetAttribute)(
         mp_count,
-        DISPATCH(hipDeviceAttributeMultiprocessorCount, CU_DEVICE_ATTRIBUTE_MULTIPROCESSOR_COUNT),
+        DISPATCH(hipDeviceAttributeMultiprocessorCount, cudaDevAttrMultiProcessorCount),
         device_id);
 }
 
