@@ -42,19 +42,20 @@ namespace
     // In the general case of <Ti, To, Tc>, these tests do not apply, and if this
     // functor is called, an internal error message is generated. When converted
     // to bool, this functor returns false.
-    template <typename Ti, typename To = Ti, typename Tc = To, typename TBias = Ti, typename = void>
+    template <typename Ti, typename To = Ti, typename Tc = To, typename TBias = Ti, typename TGate = Ti, typename = void>
     struct spmm_testing : hipsparselt_test_invalid
     {
     };
 
     // When Ti = To = Tc != void, this test applies.
     // When converted to bool, this functor returns true.
-    template <typename Ti, typename To, typename Tc, typename TBias>
+    template <typename Ti, typename To, typename Tc, typename TBias, typename TGate>
     struct spmm_testing<
         Ti,
         To,
         Tc,
         TBias,
+        TGate,
         std::enable_if_t<std::is_same<Ti, __half>{} || std::is_same<Ti, hip_bfloat16>{}
                          || std::is_same<Ti, int8_t>{}
 #ifdef HIPSPARSELT_CLIENT_ENABLE_FP8_OCP
@@ -70,17 +71,17 @@ namespace
         void operator()(const Arguments& arg)
         {
             if(!strcmp(arg.function, "spmm"))
-                testing_spmm<Ti, To, Tc, TBias>(arg);
+                testing_spmm<Ti, To, Tc, TBias, TGate>(arg);
             else if(!strcmp(arg.function, "spmm_batched"))
-                testing_spmm<Ti, To, Tc, TBias, hipsparselt_batch_type::batched>(arg);
+                testing_spmm<Ti, To, Tc, TBias, TGate, hipsparselt_batch_type::batched>(arg);
             else if(!strcmp(arg.function, "spmm_strided_batched"))
-                testing_spmm<Ti, To, Tc, TBias, hipsparselt_batch_type::strided_batched>(arg);
+                testing_spmm<Ti, To, Tc, TBias, TGate, hipsparselt_batch_type::strided_batched>(arg);
             else if(!strcmp(arg.function, "spmm_bad_arg"))
                 testing_spmm_bad_arg<Ti, To, Tc>(arg);
             else if(!strcmp(arg.function, "aux_plan_assign"))
                 testing_aux_plan_assign<Ti, To, Tc>(arg);
             else if(!strcmp(arg.function, "spmm_logging"))
-                testing_spmm_logging<Ti, To, Tc, TBias>(arg);
+                testing_spmm_logging<Ti, To, Tc, TBias, TGate>(arg);
             else
                 FAIL() << "Internal error: Test called with unknown function: " << arg.function;
         }
