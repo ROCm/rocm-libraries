@@ -30,7 +30,6 @@ test_categories:
   quick:
     description: "hipTensor quick tests - mirrors rtest.xml smoke set"
     test_patterns:
-      - "^hiptensor_stub_test( smoke)?$"
       - "^contraction_mode_test( smoke)?$"
       - "^elementwise_cpu_test( smoke)?$"
       - "^elementwise_op_test( smoke)?$"

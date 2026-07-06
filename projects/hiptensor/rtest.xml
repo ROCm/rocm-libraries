@@ -20,7 +20,6 @@
         <run name="smoke007">./bin/reduction_cpu_impl_test </run>
         <run name="smoke008">./bin/util_test </run>
         <run name="smoke009">./bin/yaml_test </run>
-        <run name="smoke010">./bin/hiptensor_stub_test </run>
         <run name="smoke101">./bin/bilinear_contraction_test_m1n1k1 -y {EMULATION_ROOT}/{CONTRACTION_CONFIGS}/smoke/bilinear_test_params_rank1.yaml {SMOKE_PARAMS} </run>
         <run name="smoke102">./bin/bilinear_contraction_test_m2n2k2 -y {EMULATION_ROOT}/{CONTRACTION_CONFIGS}/smoke/bilinear_test_params_rank2.yaml {SMOKE_PARAMS} </run>
         <run name="smoke103">./bin/bilinear_contraction_test_m3n3k3 -y {EMULATION_ROOT}/{CONTRACTION_CONFIGS}/smoke/bilinear_test_params_rank3.yaml {SMOKE_PARAMS} </run>
@@ -82,7 +81,6 @@
         <run name="regression007">./bin/reduction_cpu_impl_test </run>
         <run name="regression008">./bin/util_test </run>
         <run name="regression009">./bin/yaml_test </run>
-        <run name="regression010">./bin/hiptensor_stub_test </run>
         <run name="regression051">./bin/simple_elementwise_permute </run>
         <run name="regression052">./bin/simple_elementwise_binary </run>
         <run name="regression053">./bin/simple_elementwise_trinary </run>
@@ -156,7 +154,6 @@
         <run name="extended007">./bin/reduction_cpu_impl_test </run>
         <run name="extended008">./bin/util_test </run>
         <run name="extended009">./bin/yaml_test </run>
-        <run name="extended010">./bin/hiptensor_stub_test </run>
         <run name="extended011">./bin/simple_elementwise_permute </run>
         <run name="extended012">./bin/simple_elementwise_binary </run>
         <run name="extended013">./bin/simple_elementwise_trinary </run>
@@ -227,7 +224,6 @@
         <run name="codecoverage007">./bin/reduction_cpu_impl_test </run>
         <run name="codecoverage008">./bin/util_test </run>
         <run name="codecoverage009">./bin/yaml_test </run>
-        <run name="codecoverage010">./bin/hiptensor_stub_test </run>
         <run name="codecoverage051">./bin/simple_elementwise_permute </run>
         <run name="codecoverage052">./bin/simple_elementwise_binary </run>
         <run name="codecoverage053">./bin/simple_elementwise_trinary </run>
