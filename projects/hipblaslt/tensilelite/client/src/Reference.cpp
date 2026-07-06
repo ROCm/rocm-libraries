@@ -1718,21 +1718,22 @@ namespace TensileLite
                                         current = (alpha * current);
                                     }
 
+                                    bool                 aConjugate = false;
+                                    using Accumulator = float;
+                                    size_t               dNum
+                                        = global_m + (global_n * sizeM) + (b * sizeM * sizeN);
+                                    auto const&          d = problem.d();
+                                    std::vector<int64_t> dCoord(d.dimensions());
+                                    CoordNumbered(dNum,
+                                                  dCoord.begin(),
+                                                  dCoord.end(),
+                                                  d.sizes().begin(),
+                                                  d.sizes().end());
+
                                     if(problem.useBias() && inputs.bias)
                                     {
-
                                         assert(!problem.useGradient()
                                                && "Bias gradient not supported on this path.");
-
-                                        size_t dNum
-                                            = global_m + (global_n * sizeM) + (b * sizeM * sizeN);
-                                        auto const&          d = problem.d();
-                                        std::vector<int64_t> dCoord(d.dimensions());
-                                        CoordNumbered(dNum,
-                                                      dCoord.begin(),
-                                                      dCoord.end(),
-                                                      d.sizes().begin(),
-                                                      d.sizes().end());
 
                                         auto const&          bias = problem.bias();
                                         std::vector<int64_t> biasCoord(bias.dimensions());
@@ -1755,8 +1756,6 @@ namespace TensileLite
                                         else
                                             pos = int(dNum % problem.d().sizes()[0]) + biasIndex;
 
-                                        bool aConjugate   = false;
-                                        using Accumulator = float;
                                         Accumulator biasVal
                                             = GetValue<Accumulator>(problem.bias().dataType(),
                                                                     inputs.bias,
@@ -1774,6 +1773,17 @@ namespace TensileLite
                                                              actArgs);
                                     }
 
+                                    if(problem.useGateResidual() && inputs.gateResidual)
+                                    {
+                                        auto        gateIndex = problem.gateResidual().index(dCoord);
+                                        Accumulator gateVal
+                                            = GetValue<Accumulator>(
+                                                problem.gateResidual().dataType(),
+                                                inputs.gateResidual,
+                                                gateIndex,
+                                                aConjugate);
+                                        current = gateVal * current + gateVal;
+                                    }
                                     curBatchD[idxD] = current;
                                 }
                             }
@@ -2200,6 +2210,19 @@ namespace TensileLite
                 {
                     ws[dIndex] = resultD;
                 }
+
+                // gate residual: D[i,j] = gate[i,j] * resultD[i,j] + gate[i,j]
+                if(problem.useGateResidual() && inputs.gateResidual)
+                {
+                    auto gateIndex = problem.gateResidual().index(dCoord);
+                    Accumulator gateVal
+                        = GetValue<Accumulator>(problem.gateResidual().dataType(),
+                                               inputs.gateResidual,
+                                               gateIndex,
+                                               aConjugate);
+                    resultD = gateVal * resultD + gateVal;
+                }
+
                 dPtr[dIndex] = SaturateCast<typename Inputs::DType>(resultD);
             }
 

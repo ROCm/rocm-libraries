@@ -275,7 +275,9 @@ namespace TensileLite
                                                       nop,
                                                       nop,
                                                       nop,
-                                                      nop);
+                                                      nop,
+                                                      solution->problemType.useGateResidual,
+                                                      solution->problemType.gateResidualDataTypeWhiteList);
                 solution->requiredHostWorkspaceSizePerProblem
                     = solution->requiredHostSizeGroupedGemmSingle(problem, hardware);
             }
