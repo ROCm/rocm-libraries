@@ -155,9 +155,9 @@ TEST(ParseDppCtrlFromAsm, RowXmaskRoundTrip) {
 TEST(ParseDppCtrlFromAsm, InvalidReturnsNone) {
     EXPECT_EQ(parseDppCtrlFromAsm(""), DppCtrl::NONE);
     EXPECT_EQ(parseDppCtrlFromAsm("not_a_ctrl"), DppCtrl::NONE);
-    EXPECT_EQ(parseDppCtrlFromAsm("row_shl:0"), DppCtrl::NONE);   // 0 out of range [1..15]
-    EXPECT_EQ(parseDppCtrlFromAsm("row_shl:16"), DppCtrl::NONE);  // 16 out of range
-    EXPECT_EQ(parseDppCtrlFromAsm("row_bcast:7"), DppCtrl::NONE); // only 15/31 valid
+    EXPECT_EQ(parseDppCtrlFromAsm("row_shl:0"), DppCtrl::NONE);    // 0 out of range [1..15]
+    EXPECT_EQ(parseDppCtrlFromAsm("row_shl:16"), DppCtrl::NONE);   // 16 out of range
+    EXPECT_EQ(parseDppCtrlFromAsm("row_bcast:7"), DppCtrl::NONE);  // only 15/31 valid
     EXPECT_EQ(parseDppCtrlFromAsm("quad_perm:[]"), DppCtrl::NONE);
 }
 
@@ -175,7 +175,8 @@ TEST(MatrixFmt, ToStrAndParse) {
 }
 
 TEST(MatrixFmt, ParseRoundTrip) {
-    for (auto fmt : {MatrixFmt::FP8, MatrixFmt::BF8, MatrixFmt::FP6, MatrixFmt::BF6, MatrixFmt::FP4}) {
+    for (auto fmt :
+         {MatrixFmt::FP8, MatrixFmt::BF8, MatrixFmt::FP6, MatrixFmt::BF6, MatrixFmt::FP4}) {
         EXPECT_EQ(parseMatrixFmt(matrixFmtToStr(fmt)), fmt);
     }
 }
