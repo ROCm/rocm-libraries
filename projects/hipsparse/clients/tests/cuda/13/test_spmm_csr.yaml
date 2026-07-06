@@ -26,73 +26,75 @@ include: hipsparse_common.yaml
 
 
 Tests:
-- name: sddmm_csr_bad_arg
+- name: spmm_csr_bad_arg
   category: pre_checkin
-  function: sddmm_csr_bad_arg
+  function: spmm_csr_bad_arg
   indextype: *i32_i64
   precision: *single_double_precisions_complex_real
 
-- name: sddmm_csr
+- name: spmm_csr
   category: quick
-  function: sddmm_csr
+  function: spmm_csr
   indextype: *i32_i64
   precision: *single_double_precisions_complex_real
-  M: [50]
-  N: [84]
-  K: [5]
+  M: [102]
+  N: [56]
+  K: [83]
   alpha: [2.0]
   alphai: [0.0]
   beta: [1.0]
   betai: [0.0]
   transA: [HIPSPARSE_OPERATION_NON_TRANSPOSE, HIPSPARSE_OPERATION_TRANSPOSE]
   transB: [HIPSPARSE_OPERATION_NON_TRANSPOSE, HIPSPARSE_OPERATION_TRANSPOSE]
-  orderA: [HIPSPARSE_ORDER_COL, HIPSPARSE_ORDER_ROW]
   orderB: [HIPSPARSE_ORDER_COL, HIPSPARSE_ORDER_ROW]
-  baseC: [HIPSPARSE_INDEX_BASE_ZERO, HIPSPARSE_INDEX_BASE_ONE]
-  sddmm_alg: [HIPSPARSE_SDDMM_ALG_DEFAULT]
+  orderC: [HIPSPARSE_ORDER_COL, HIPSPARSE_ORDER_ROW]
+  baseA: [HIPSPARSE_INDEX_BASE_ZERO, HIPSPARSE_INDEX_BASE_ONE]
+  spmm_alg: [HIPSPARSE_SPMM_ALG_DEFAULT, 
+             HIPSPARSE_SPMM_CSR_ALG1,
+             HIPSPARSE_SPMM_CSR_ALG2]
 
-- name: sddmm_csr
+- name: spmm_csr
   category: pre_checkin
-  function: sddmm_csr
+  function: spmm_csr
   indextype: *i32_i64
-  precision: *single_double_precisions
+  precision: *single_double_precisions_complex_real
   M: 1
-  N: 1
-  K: [5]
+  N: [25]
+  K: 1
   alpha: [2.0]
   alphai: [0.0]
   beta: [1.0]
   betai: [0.0]
   transA: [HIPSPARSE_OPERATION_NON_TRANSPOSE, HIPSPARSE_OPERATION_TRANSPOSE]
   transB: [HIPSPARSE_OPERATION_NON_TRANSPOSE, HIPSPARSE_OPERATION_TRANSPOSE]
-  orderA: [HIPSPARSE_ORDER_COL, HIPSPARSE_ORDER_ROW]
   orderB: [HIPSPARSE_ORDER_COL, HIPSPARSE_ORDER_ROW]
-  baseC: [HIPSPARSE_INDEX_BASE_ZERO, HIPSPARSE_INDEX_BASE_ONE]
-  sddmm_alg: [HIPSPARSE_SDDMM_ALG_DEFAULT]
+  orderC: [HIPSPARSE_ORDER_COL, HIPSPARSE_ORDER_ROW]
+  baseA: [HIPSPARSE_INDEX_BASE_ZERO, HIPSPARSE_INDEX_BASE_ONE]
+  spmm_alg: [HIPSPARSE_SPMM_ALG_DEFAULT, 
+             HIPSPARSE_SPMM_CSR_ALG1,
+             HIPSPARSE_SPMM_CSR_ALG2]
   filename: [nos1,
-             nos2,
-             nos3,
-             nos4,
-             nos5,
-             nos6,
-             nos7]
+             nos4, 
+             nos5]
 
-- name: sddmm_csr
+- name: spmm_csr
   category: nightly
-  function: sddmm_csr
-  indextype: *i64
+  function: spmm_csr
+  indextype: *i32
   precision: *double_only_precisions
   M: 1
-  N: 1
-  K: [4]
+  N: [15]
+  K: 1
   alpha: [2.0]
   alphai: [0.0]
   beta: [1.0]
   betai: [0.0]
   transA: [HIPSPARSE_OPERATION_NON_TRANSPOSE, HIPSPARSE_OPERATION_TRANSPOSE]
   transB: [HIPSPARSE_OPERATION_NON_TRANSPOSE, HIPSPARSE_OPERATION_TRANSPOSE]
-  orderA: [HIPSPARSE_ORDER_COL, HIPSPARSE_ORDER_ROW]
   orderB: [HIPSPARSE_ORDER_COL, HIPSPARSE_ORDER_ROW]
-  baseC: [HIPSPARSE_INDEX_BASE_ONE]
-  sddmm_alg: [HIPSPARSE_SDDMM_ALG_DEFAULT]
-  filename: [shipsec1]
+  orderC: [HIPSPARSE_ORDER_COL, HIPSPARSE_ORDER_ROW]
+  baseA: [HIPSPARSE_INDEX_BASE_ZERO]
+  spmm_alg: [HIPSPARSE_SPMM_ALG_DEFAULT, 
+             HIPSPARSE_SPMM_CSR_ALG1,
+             HIPSPARSE_SPMM_CSR_ALG2]
+  filename: [Chebyshev4]

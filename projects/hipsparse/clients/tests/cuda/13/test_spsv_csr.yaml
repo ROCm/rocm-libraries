@@ -26,73 +26,65 @@ include: hipsparse_common.yaml
 
 
 Tests:
-- name: sddmm_csr_bad_arg
+- name: spsv_csr_bad_arg
   category: pre_checkin
-  function: sddmm_csr_bad_arg
+  function: spsv_csr_bad_arg
   indextype: *i32_i64
   precision: *single_double_precisions_complex_real
 
-- name: sddmm_csr
+- name: spsv_csr
   category: quick
-  function: sddmm_csr
+  function: spsv_csr
   indextype: *i32_i64
   precision: *single_double_precisions_complex_real
   M: [50]
-  N: [84]
-  K: [5]
+  N: [50]
   alpha: [2.0]
   alphai: [0.0]
   beta: [1.0]
   betai: [0.0]
-  transA: [HIPSPARSE_OPERATION_NON_TRANSPOSE, HIPSPARSE_OPERATION_TRANSPOSE]
-  transB: [HIPSPARSE_OPERATION_NON_TRANSPOSE, HIPSPARSE_OPERATION_TRANSPOSE]
-  orderA: [HIPSPARSE_ORDER_COL, HIPSPARSE_ORDER_ROW]
-  orderB: [HIPSPARSE_ORDER_COL, HIPSPARSE_ORDER_ROW]
-  baseC: [HIPSPARSE_INDEX_BASE_ZERO, HIPSPARSE_INDEX_BASE_ONE]
-  sddmm_alg: [HIPSPARSE_SDDMM_ALG_DEFAULT]
+  diag_type: [HIPSPARSE_DIAG_TYPE_NON_UNIT]
+  fill_mode: [HIPSPARSE_FILL_MODE_LOWER, HIPSPARSE_FILL_MODE_UPPER]
+  transA: [HIPSPARSE_OPERATION_NON_TRANSPOSE]
+  baseA: [HIPSPARSE_INDEX_BASE_ZERO, HIPSPARSE_INDEX_BASE_ONE]
+  spsv_alg: [HIPSPARSE_SPSM_ALG_DEFAULT]
 
-- name: sddmm_csr
+- name: spsv_csr
   category: pre_checkin
-  function: sddmm_csr
+  function: spsv_csr
   indextype: *i32_i64
-  precision: *single_double_precisions
+  precision: *single_double_precisions_complex_real
   M: 1
   N: 1
-  K: [5]
   alpha: [2.0]
   alphai: [0.0]
   beta: [1.0]
   betai: [0.0]
-  transA: [HIPSPARSE_OPERATION_NON_TRANSPOSE, HIPSPARSE_OPERATION_TRANSPOSE]
-  transB: [HIPSPARSE_OPERATION_NON_TRANSPOSE, HIPSPARSE_OPERATION_TRANSPOSE]
-  orderA: [HIPSPARSE_ORDER_COL, HIPSPARSE_ORDER_ROW]
-  orderB: [HIPSPARSE_ORDER_COL, HIPSPARSE_ORDER_ROW]
-  baseC: [HIPSPARSE_INDEX_BASE_ZERO, HIPSPARSE_INDEX_BASE_ONE]
-  sddmm_alg: [HIPSPARSE_SDDMM_ALG_DEFAULT]
+  diag_type: [HIPSPARSE_DIAG_TYPE_NON_UNIT]
+  fill_mode: [HIPSPARSE_FILL_MODE_LOWER, HIPSPARSE_FILL_MODE_UPPER]
+  transA: [HIPSPARSE_OPERATION_NON_TRANSPOSE]
+  baseA: [HIPSPARSE_INDEX_BASE_ZERO, HIPSPARSE_INDEX_BASE_ONE]
+  spsv_alg: [HIPSPARSE_SPSM_ALG_DEFAULT]
   filename: [nos1,
-             nos2,
-             nos3,
-             nos4,
-             nos5,
-             nos6,
-             nos7]
+             nos3, 
+             nos5]
 
-- name: sddmm_csr
-  category: nightly
-  function: sddmm_csr
-  indextype: *i64
+- name: spsv_csr
+  category: pre_checkin
+  function: spsv_csr
+  indextype: *i32
   precision: *double_only_precisions
   M: 1
   N: 1
-  K: [4]
   alpha: [2.0]
   alphai: [0.0]
   beta: [1.0]
   betai: [0.0]
-  transA: [HIPSPARSE_OPERATION_NON_TRANSPOSE, HIPSPARSE_OPERATION_TRANSPOSE]
-  transB: [HIPSPARSE_OPERATION_NON_TRANSPOSE, HIPSPARSE_OPERATION_TRANSPOSE]
-  orderA: [HIPSPARSE_ORDER_COL, HIPSPARSE_ORDER_ROW]
-  orderB: [HIPSPARSE_ORDER_COL, HIPSPARSE_ORDER_ROW]
-  baseC: [HIPSPARSE_INDEX_BASE_ONE]
-  sddmm_alg: [HIPSPARSE_SDDMM_ALG_DEFAULT]
-  filename: [shipsec1]
+  diag_type: [HIPSPARSE_DIAG_TYPE_NON_UNIT]
+  fill_mode: [HIPSPARSE_FILL_MODE_LOWER, HIPSPARSE_FILL_MODE_UPPER]
+  transA: [HIPSPARSE_OPERATION_NON_TRANSPOSE]
+  baseA: [HIPSPARSE_INDEX_BASE_ZERO]
+  spsv_alg: [HIPSPARSE_SPSM_ALG_DEFAULT]
+  filename: [scircuit,
+             shipsec1,
+             bmwcra_1]

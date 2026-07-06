@@ -26,15 +26,15 @@ include: hipsparse_common.yaml
 
 
 Tests:
-- name: sddmm_csr_bad_arg
+- name: sddmm_coo_bad_arg
   category: pre_checkin
-  function: sddmm_csr_bad_arg
+  function: sddmm_coo_bad_arg
   indextype: *i32_i64
   precision: *single_double_precisions_complex_real
 
-- name: sddmm_csr
+- name: sddmm_coo
   category: quick
-  function: sddmm_csr
+  function: sddmm_coo
   indextype: *i32_i64
   precision: *single_double_precisions_complex_real
   M: [50]
@@ -51,9 +51,9 @@ Tests:
   baseC: [HIPSPARSE_INDEX_BASE_ZERO, HIPSPARSE_INDEX_BASE_ONE]
   sddmm_alg: [HIPSPARSE_SDDMM_ALG_DEFAULT]
 
-- name: sddmm_csr
+- name: sddmm_coo
   category: pre_checkin
-  function: sddmm_csr
+  function: sddmm_coo
   indextype: *i32_i64
   precision: *single_double_precisions
   M: 1
@@ -72,19 +72,19 @@ Tests:
   filename: [nos1,
              nos2,
              nos3,
-             nos4,
+             nos4, 
              nos5,
              nos6,
              nos7]
 
-- name: sddmm_csr
+- name: sddmm_coo
   category: nightly
-  function: sddmm_csr
+  function: sddmm_coo
   indextype: *i64
   precision: *double_only_precisions
   M: 1
   N: 1
-  K: [4]
+  K: [8]
   alpha: [2.0]
   alphai: [0.0]
   beta: [1.0]
@@ -95,4 +95,4 @@ Tests:
   orderB: [HIPSPARSE_ORDER_COL, HIPSPARSE_ORDER_ROW]
   baseC: [HIPSPARSE_INDEX_BASE_ONE]
   sddmm_alg: [HIPSPARSE_SDDMM_ALG_DEFAULT]
-  filename: [shipsec1]
+  filename: [Chebyshev4]

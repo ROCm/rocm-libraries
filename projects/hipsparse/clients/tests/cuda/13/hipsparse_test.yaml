@@ -1,5 +1,5 @@
 # ########################################################################
-# Copyright (C) 2025-2026 Advanced Micro Devices, Inc. All rights Reserved.
+# Copyright (C) 2026 Advanced Micro Devices, Inc. All rights Reserved.
 #
 # Permission is hereby granted, free of charge, to any person obtaining a copy
 # of this software and associated documentation files (the "Software"), to deal
@@ -20,55 +20,6 @@
 # THE SOFTWARE.
 #
 # ########################################################################
-
-#level2
-include: test_bsrmv.yaml
-include: test_bsrxmv.yaml
-include: test_bsrsv2.yaml
-include: test_gemvi.yaml
-
-# level3
-include: test_bsrmm.yaml
-include: test_bsrsm2.yaml
-
-# precond
-include: test_csric02.yaml
-include: test_csrilu02.yaml
-include: test_bsric02.yaml
-include: test_bsrilu02.yaml
-include: test_gtsv.yaml
-include: test_gtsv2_nopivot.yaml
-include: test_gtsv2_strided_batch.yaml
-include: test_gtsv_interleaved_batch.yaml
-include: test_gpsv_interleaved_batch.yaml
-
-# extra
-include: test_csrgeam2.yaml
-
-# reorder
-include: test_csrcolor.yaml
-
-# conversion
-include: test_bsr2csr.yaml
-include: test_coo2csr.yaml
-include: test_csr2bsr.yaml
-include: test_csr2coo.yaml
-include: test_csr2csc.yaml
-include: test_csr2csc_ex2.yaml
-include: test_csr2gebsr.yaml
-include: test_csru2csr.yaml
-include: test_gebsr2csr.yaml
-include: test_gebsr2gebsc.yaml
-include: test_gebsr2gebsr.yaml
-include: test_prune_csr2csr.yaml
-include: test_prune_csr2csr_by_percentage.yaml
-include: test_prune_dense2csr.yaml
-include: test_prune_dense2csr_by_percentage.yaml
-include: test_identity.yaml
-include: test_nnz.yaml
-include: test_coosort.yaml
-include: test_cscsort.yaml
-include: test_csrsort.yaml
 
 # generic
 include: test_axpby.yaml

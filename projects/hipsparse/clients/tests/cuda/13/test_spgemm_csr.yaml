@@ -26,73 +26,58 @@ include: hipsparse_common.yaml
 
 
 Tests:
-- name: sddmm_csr_bad_arg
+- name: spgemm_csr_bad_arg
   category: pre_checkin
-  function: sddmm_csr_bad_arg
-  indextype: *i32_i64
+  function: spgemm_csr_bad_arg
+  indextype: *i32
   precision: *single_double_precisions_complex_real
 
-- name: sddmm_csr
+- name: spgemm_csr
   category: quick
-  function: sddmm_csr
-  indextype: *i32_i64
+  function: spgemm_csr
+  indextype: *i32
   precision: *single_double_precisions_complex_real
-  M: [50]
-  N: [84]
-  K: [5]
+  M: [567, 1149]
+  K: [649, 2148]
   alpha: [2.0]
   alphai: [0.0]
-  beta: [1.0]
-  betai: [0.0]
-  transA: [HIPSPARSE_OPERATION_NON_TRANSPOSE, HIPSPARSE_OPERATION_TRANSPOSE]
-  transB: [HIPSPARSE_OPERATION_NON_TRANSPOSE, HIPSPARSE_OPERATION_TRANSPOSE]
-  orderA: [HIPSPARSE_ORDER_COL, HIPSPARSE_ORDER_ROW]
-  orderB: [HIPSPARSE_ORDER_COL, HIPSPARSE_ORDER_ROW]
-  baseC: [HIPSPARSE_INDEX_BASE_ZERO, HIPSPARSE_INDEX_BASE_ONE]
-  sddmm_alg: [HIPSPARSE_SDDMM_ALG_DEFAULT]
+  baseA: [HIPSPARSE_INDEX_BASE_ZERO]
+  baseB: [HIPSPARSE_INDEX_BASE_ZERO]
+  baseC: [HIPSPARSE_INDEX_BASE_ZERO]
+  spgemm_alg: [HIPSPARSE_SPGEMM_DEFAULT]
 
-- name: sddmm_csr
+- name: spgemm_csr
   category: pre_checkin
-  function: sddmm_csr
-  indextype: *i32_i64
-  precision: *single_double_precisions
+  function: spgemm_csr
+  indextype: *i32
+  precision: *single_double_precisions_complex_real
   M: 1
-  N: 1
-  K: [5]
+  K: 1
   alpha: [2.0]
   alphai: [0.0]
-  beta: [1.0]
-  betai: [0.0]
-  transA: [HIPSPARSE_OPERATION_NON_TRANSPOSE, HIPSPARSE_OPERATION_TRANSPOSE]
-  transB: [HIPSPARSE_OPERATION_NON_TRANSPOSE, HIPSPARSE_OPERATION_TRANSPOSE]
-  orderA: [HIPSPARSE_ORDER_COL, HIPSPARSE_ORDER_ROW]
-  orderB: [HIPSPARSE_ORDER_COL, HIPSPARSE_ORDER_ROW]
-  baseC: [HIPSPARSE_INDEX_BASE_ZERO, HIPSPARSE_INDEX_BASE_ONE]
-  sddmm_alg: [HIPSPARSE_SDDMM_ALG_DEFAULT]
+  baseA: [HIPSPARSE_INDEX_BASE_ONE]
+  baseB: [HIPSPARSE_INDEX_BASE_ONE]
+  baseC: [HIPSPARSE_INDEX_BASE_ONE]
+  spgemm_alg: [HIPSPARSE_SPGEMM_DEFAULT]
   filename: [nos1,
-             nos2,
+             nos2, 
              nos3,
-             nos4,
+             nos4, 
              nos5,
-             nos6,
+             nos6, 
              nos7]
 
-- name: sddmm_csr
-  category: nightly
-  function: sddmm_csr
-  indextype: *i64
-  precision: *double_only_precisions
+- name: spgemm_csr
+  category: pre_checkin
+  function: spgemm_csr
+  indextype: *i32
+  precision: *single_double_precisions
   M: 1
-  N: 1
-  K: [4]
+  K: 1
   alpha: [2.0]
   alphai: [0.0]
-  beta: [1.0]
-  betai: [0.0]
-  transA: [HIPSPARSE_OPERATION_NON_TRANSPOSE, HIPSPARSE_OPERATION_TRANSPOSE]
-  transB: [HIPSPARSE_OPERATION_NON_TRANSPOSE, HIPSPARSE_OPERATION_TRANSPOSE]
-  orderA: [HIPSPARSE_ORDER_COL, HIPSPARSE_ORDER_ROW]
-  orderB: [HIPSPARSE_ORDER_COL, HIPSPARSE_ORDER_ROW]
+  baseA: [HIPSPARSE_INDEX_BASE_ONE]
+  baseB: [HIPSPARSE_INDEX_BASE_ONE]
   baseC: [HIPSPARSE_INDEX_BASE_ONE]
-  sddmm_alg: [HIPSPARSE_SDDMM_ALG_DEFAULT]
-  filename: [shipsec1]
+  spgemm_alg: [HIPSPARSE_SPGEMM_DEFAULT]
+  filename: [bibd_22_8]
