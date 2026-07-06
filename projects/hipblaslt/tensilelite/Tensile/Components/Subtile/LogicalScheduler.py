@@ -2743,10 +2743,37 @@ class LogicalScheduler:
         self._completed.add(Pass.EMIT)
         return all_partitions
 
-    def build(self):
-        """Build mainloop """
-        self.emit()
+    _BUILD_STOPS = (
+        ('place_LRs', Pass.LR),
+        ('assign_vgpr_tiles', Pass.VGPR_TILES),
+        ('place_GRs', Pass.GR),
+        ('annotate_deps', Pass.DEPS),
+        ('remove_unnecessary_gr_deps', Pass.REMOVE_GR_DEPS),
+        ('remove_unnecessary_lr_deps', Pass.REMOVE_LR_DEPS),
+        ('remove_cross_deps', Pass.REMOVE_DEPS),
+        ('insert_gr_lr_inc', Pass.GR_INC),
+        ('group_lr_gr', Pass.GROUP_LR_GR),
+        ('remove_unnecessary_wait_lr_sync', Pass.REMOVE_WAIT_LR_SYNC),
+        ('remove_unnecessary_wait_gr_sync', Pass.REMOVE_WAIT_GR_SYNC),
+        ('emit', Pass.EMIT),
+    )
+
+    def build(self, *, stop_after: Optional[str] = None) -> Union[
+            LogicalSchedule, AnnotatedSchedule, AugmentedSchedule, EmittedSchedule]:
+        """Execute the full scheduling pipeline sequentially.
+
+        Args:
+            stop_after: If given, stop after the named pass and return early.
+                Used by tests to run the pipeline up to a specific stage.
+        """
+        for name, pass_enum in self._BUILD_STOPS:
+            getattr(self, _PASS_PIPELINE[pass_enum][0])()
+            if stop_after == name:
+                if pass_enum == Pass.EMIT:
+                    return self._emitted
+                return self._partitions
         self._completed.add(Pass.BUILD)
+        return self._emitted
 
     # ── Loop variant derivation ────────────────────────────
 
