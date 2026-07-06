@@ -3,6 +3,7 @@
 
 #include "BackendWrapperForwardingTest.hpp"
 
+#include <array>
 #include <atomic>
 #include <memory>
 
@@ -47,7 +48,7 @@ protected:
     std::shared_ptr<hipdnn_frontend::detail::IHipdnnBackend> _backend;
 };
 
-void* missingSymbolResolver(const char*)
+void* missingSymbolResolver(const char* /*unused*/)
 {
     return nullptr;
 }
@@ -136,11 +137,11 @@ TEST(TestHipdnnDynamicBackendWrapper, MissingLastErrorStringClearsBuffer)
     using hipdnn_frontend::detail::HipdnnDynamicBackendWrapper;
 
     HipdnnDynamicBackendWrapper backend(Version{1, 0, 0}, missingSymbolResolver);
-    char message[] = "stale error";
+    std::array<char, sizeof("stale error")> message{"stale error"};
 
-    backend.getLastErrorString(message, sizeof(message));
+    backend.getLastErrorString(message.data(), message.size());
 
-    EXPECT_STREQ(message, "");
+    EXPECT_STREQ(message.data(), "");
 }
 
 TEST(TestHipdnnDynamicBackendWrapper, MissingLastErrorStringAllowsNullAndZeroSize)
@@ -149,13 +150,13 @@ TEST(TestHipdnnDynamicBackendWrapper, MissingLastErrorStringAllowsNullAndZeroSiz
     using hipdnn_frontend::detail::HipdnnDynamicBackendWrapper;
 
     HipdnnDynamicBackendWrapper backend(Version{1, 0, 0}, missingSymbolResolver);
-    char message[] = "unchanged";
+    std::array<char, sizeof("unchanged")> message{"unchanged"};
 
     backend.getLastErrorString(nullptr, 1);
     backend.getLastErrorString(nullptr, 0);
-    backend.getLastErrorString(message, 0);
+    backend.getLastErrorString(message.data(), 0);
 
-    EXPECT_STREQ(message, "unchanged");
+    EXPECT_STREQ(message.data(), "unchanged");
 }
 
 TEST_F(IntegrationHipdnnDynamicBackendWrapper, VersionStringMatchesBackend)
