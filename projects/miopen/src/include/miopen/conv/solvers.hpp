@@ -4807,12 +4807,6 @@ struct MIOPEN_INTERNALS_EXPORT ConvDepthwiseFwd3D final : ConvSolver
                              const miopen::conv::ProblemDescription&) const override;
 };
 
-// Test helper functions for metadata validation
-// These functions return all CK kernel TypeStrings without problem-based filtering
-// Declared here but implemented in the respective solver .cpp files
-#if MIOPEN_BACKEND_HIP && MIOPEN_USE_COMPOSABLEKERNEL
-#endif
-
 } // namespace conv
 } // namespace solver
 } // namespace miopen
