@@ -7666,7 +7666,7 @@ void host_dense_to_bell(I                     m,
     {
         for(I i = 0; i < mb; i++)
         {
-            I ell_cols_in_row = 0;
+            I blocks_in_row = 0;
             for(I j = 0; j < nb; j++)
             {
                 bool block_col_found = false;
@@ -7689,14 +7689,163 @@ void host_dense_to_bell(I                     m,
 
                 if(block_col_found)
                 {
-                    ell_cols_in_row++;
+                    blocks_in_row++;
                 }
             }
 
-            ell_cols = std::max(ell_cols, ell_cols_in_row);
+            ell_cols = std::max(ell_cols, ell_block_size * blocks_in_row);
         }
 
         std::cout << "ell_cols: " << ell_cols << std::endl;
+
+        bell_col_ind.resize(mb * ell_cols / ell_block_size);
+        bell_val.resize(m * ell_cols);
+
+        for(I i = 0; i < mb; i++)
+        {
+            I index = (ell_cols / ell_block_size) * i;
+            for(I j = 0; j < nb; j++)
+            {
+                bool block_col_found = false;
+                for(I r = 0; r < ell_block_size; r++)
+                {
+                    for(I c = 0; c < ell_block_size; c++)
+                    {
+                        const T val_A = A[ld * (ell_block_size * i + r) + ell_block_size * j + c];
+                        if(val_A != static_cast<T>(0))
+                        {
+                            block_col_found = true;
+                            break;
+                        }
+                    }
+                    if(block_col_found)
+                    {
+                        break;
+                    }
+                }
+
+                if(block_col_found)
+                {
+                    bell_col_ind[index] = j;
+                    index++;
+                }
+            }
+
+            for(I j = index; j < ell_cols / ell_block_size; j++)
+            {
+                bell_col_ind[j] = -1;
+            }
+        }
+
+        std::cout << "bell_val.size(): " << bell_val.size() << " m: " << m << " n: " << n << std::endl;
+
+        for(I i = 0; i < m; i++)
+        {
+            int64_t index = ell_cols * i;
+            for(I j = 0; j < n; j++)
+            {
+                const T val = A[ld * i + j];
+
+                if(val != static_cast<T>(0))
+                {
+                    bell_val[index] = val;
+                    index++;
+                }
+            }
+        }
+    }
+    else if(order == rocsparse_order_column)
+    {
+        for(I i = 0; i < mb; i++)
+        {
+            I blocks_in_row = 0;
+            for(I j = 0; j < nb; j++)
+            {
+                bool block_col_found = false;
+                for(I r = 0; r < ell_block_size; r++)
+                {
+                    for(I c = 0; c < ell_block_size; c++)
+                    {
+                        const T val_A = A[ld * (ell_block_size * j + c) + ell_block_size * i + r];
+                        if(val_A != static_cast<T>(0))
+                        {
+                            block_col_found = true;
+                            break;
+                        }
+                    }
+                    if(block_col_found)
+                    {
+                        break;
+                    }
+                }
+
+                if(block_col_found)
+                {
+                    blocks_in_row++;
+                }
+            }
+
+            ell_cols = std::max(ell_cols, ell_block_size * blocks_in_row);
+        }
+
+        std::cout << "ell_cols: " << ell_cols << std::endl;
+
+        bell_col_ind.resize(mb * ell_cols / ell_block_size);
+        bell_val.resize(m * ell_cols);
+
+        for(I i = 0; i < mb; i++)
+        {
+            I index = (ell_cols / ell_block_size) * i;
+            for(I j = 0; j < nb; j++)
+            {
+                bool block_col_found = false;
+                for(I r = 0; r < ell_block_size; r++)
+                {
+                    for(I c = 0; c < ell_block_size; c++)
+                    {
+                        const T val_A = A[ld * (ell_block_size * j + c) + ell_block_size * i + r];
+                        if(val_A != static_cast<T>(0))
+                        {
+                            block_col_found = true;
+                            break;
+                        }
+                    }
+                    if(block_col_found)
+                    {
+                        break;
+                    }
+                }
+
+                if(block_col_found)
+                {
+                    bell_col_ind[index] = j;
+                    index++;
+                }
+            }
+
+            for(I j = index; j < ell_cols / ell_block_size; j++)
+            {
+                bell_col_ind[j] = -1;
+            }
+        }
+
+        std::cout << "bell_val.size(): " << bell_val.size() << " m: " << m << " n: " << n
+                  << std::endl;
+
+        for(I i = 0; i < m; i++)
+        {
+            int64_t index = ell_cols * i;
+            for(I j = 0; j < n; j++)
+            {
+                const T val = A[ld * j + i];
+
+                if(val != static_cast<T>(0))
+                {
+                    bell_val[index] = val;
+                    index++;
+                }
+            }
+        }
     }
 }
 
