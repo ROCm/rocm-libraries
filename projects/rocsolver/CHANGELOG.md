@@ -23,7 +23,7 @@ Full documentation for rocSOLVER is available at the [rocSOLVER documentation](h
 
 ### Changed
 
-* Clarified the `geblttrf_npvt` API documentation to accurately describe the in-place LU block-factorization storage. The diagonal output blocks `B` now store `E_k = L_k + U_k` (where `L_k` is strictly lower triangular and `U_k` is upper triangular), and the upper off-diagonal output blocks `C` now store `F_k`. This correction applies to `geblttrf_npvt`, `geblttrf_npvt_batched`, `geblttrf_npvt_strided_batched`, and `geblttrf_npvt_interleaved_batched`.
+* Clarified the `geblttrf_npvt` API documentation to accurately describe the in-place LU block-factorization storage. The diagonal output blocks `B` store `E_k = L_k + U_k` (where `L_k` is strictly lower triangular and `U_k` is upper triangular), and the upper off-diagonal output blocks `C` store `F_k`. This correction applies to `geblttrf_npvt`, `geblttrf_npvt_batched`, `geblttrf_npvt_strided_batched`, and `geblttrf_npvt_interleaved_batched`.
 
 ### Removed
 ### Optimized
