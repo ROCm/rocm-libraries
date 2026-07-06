@@ -130,19 +130,7 @@ rocke_kernel_def_t* rocke_gfx942_attn2d_emit_epilogue(rocke_gfx942_attn2d_build_
             rocke_value_t* op_qh_t = rocke_b_add(b, op_qh_mul, op_qh_mod);
             rocke_value_t* op_ok_pos = rocke_b_cmp_lt(b, op_pos_t, cur_batch_q_len);
             rocke_value_t* op_ok_qh = rocke_b_cmp_lt(b, op_qh_t, rocke_b_const_i32(b, NUM_QH));
-            rocke_value_t* op_ok_inner = rocke_b_land(b, op_ok_pos, op_ok_qh);
-            /* Skip the VALID_ROWS guard when VALID_ROWS == BLOCK_M (NQK divides BLOCK_M). */
-            rocke_value_t* op_mask_t;
-            if(ctx->VALID_ROWS < ctx->BLOCK_M)
-            {
-                rocke_value_t* op_ok_vr
-                    = rocke_b_cmp_lt(b, q_row_t, rocke_b_const_i32(b, ctx->VALID_ROWS));
-                op_mask_t = rocke_b_land(b, op_ok_inner, op_ok_vr);
-            }
-            else
-            {
-                op_mask_t = op_ok_inner;
-            }
+            rocke_value_t* op_mask_t = rocke_b_land(b, op_ok_pos, op_ok_qh);
             /* Python evaluates the q_desc.offset token arg (cu_q_start+op_pos_t)
              * before the dim const(0); bind in order to keep value numbering. */
             rocke_value_t* op_token_t = rocke_b_add(b, cu_q_start, op_pos_t);
@@ -203,22 +191,10 @@ rocke_kernel_def_t* rocke_gfx942_attn2d_emit_epilogue(rocke_gfx942_attn2d_build_
         rocke_value_t* op_qh32_mul = rocke_b_mul(b, kv_head_idx, rocke_b_const_i32(b, NQK));
         rocke_value_t* op_qh32_mod = rocke_b_mod(b, OUT_ROW_BASE32, rocke_b_const_i32(b, NQK));
         rocke_value_t* op_qh32_base = rocke_b_add(b, op_qh32_mul, op_qh32_mod);
-        /* Python emits the pos cmp BEFORE the qh cmp, then AND's VALID_ROWS; bind in order. */
+        /* Python emits the pos cmp BEFORE the qh cmp; bind in order. */
         rocke_value_t* op_ok_pos32 = rocke_b_cmp_lt(b, op_pos32_base, cur_batch_q_len);
         rocke_value_t* op_ok_qh32 = rocke_b_cmp_lt(b, op_qh32_base, rocke_b_const_i32(b, NUM_QH));
-        rocke_value_t* op_ok_inner32 = rocke_b_land(b, op_ok_pos32, op_ok_qh32);
-        /* Skip the VALID_ROWS guard when VALID_ROWS == BLOCK_M (NQK divides BLOCK_M). */
-        rocke_value_t* op_mask32_base;
-        if(ctx->VALID_ROWS < ctx->BLOCK_M)
-        {
-            rocke_value_t* op_ok_vr32
-                = rocke_b_cmp_lt(b, OUT_ROW_BASE32, rocke_b_const_i32(b, ctx->VALID_ROWS));
-            op_mask32_base = rocke_b_land(b, op_ok_inner32, op_ok_vr32);
-        }
-        else
-        {
-            op_mask32_base = op_ok_inner32;
-        }
+        rocke_value_t* op_mask32_base = rocke_b_land(b, op_ok_pos32, op_ok_qh32);
         /* Python emits the token add (cu_q_start + op_pos32_base) BEFORE the dim
          * const(0); bind in order so C's right-to-left arg eval keeps numbering. */
         rocke_value_t* out_token32 = rocke_b_add(b, cu_q_start, op_pos32_base);
@@ -304,19 +280,7 @@ rocke_kernel_def_t* rocke_gfx942_attn2d_emit_epilogue(rocke_gfx942_attn2d_build_
     rocke_value_t* op_qh = rocke_b_add(b, op_qh_mul, op_qh_mod);
     rocke_value_t* op_mask_pos = rocke_b_cmp_lt(b, op_pos, cur_batch_q_len);
     rocke_value_t* op_mask_qh = rocke_b_cmp_lt(b, op_qh, rocke_b_const_i32(b, NUM_QH));
-    rocke_value_t* op_mask_inner = rocke_b_land(b, op_mask_pos, op_mask_qh);
-    /* Skip the VALID_ROWS guard when VALID_ROWS == BLOCK_M (NQK divides BLOCK_M). */
-    rocke_value_t* op_mask;
-    if(ctx->VALID_ROWS < ctx->BLOCK_M)
-    {
-        rocke_value_t* op_mask_vr
-            = rocke_b_cmp_lt(b, OUT_ROW_BASE, rocke_b_const_i32(b, ctx->VALID_ROWS));
-        op_mask = rocke_b_land(b, op_mask_inner, op_mask_vr);
-    }
-    else
-    {
-        op_mask = op_mask_inner;
-    }
+    rocke_value_t* op_mask = rocke_b_land(b, op_mask_pos, op_mask_qh);
     /* Python evaluates token=add(cu_q_start, op_pos) BEFORE dim=const(0)
      * (kwargs left-to-right). Bind them in that order so C's arg-eval order
      * does not allocate the dim const ahead of the token add and shift it. */

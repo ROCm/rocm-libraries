@@ -122,14 +122,7 @@ def select_shapes(shapes: List[Shape], selectors: Optional[List[str]]) -> List[S
     for sel in selectors:
         if sel == "all":
             picked = shapes
-        elif sel in (
-            "correctness",
-            "perf",
-            "decode",
-            "gqa_nqk_nonpow2",
-            "short_prefill",
-            "long_prefill",
-        ):
+        elif sel in ("correctness", "perf", "decode"):
             picked = [s for s in shapes if s.group == sel]
         else:
             picked = [s for s in shapes if s.name == sel]
@@ -663,7 +656,7 @@ def main() -> int:
         "--scenario",
         action="append",
         default=None,
-        help="group (correctness|perf|decode|short_prefill|long_prefill|gqa_nqk_nonpow2|all) or exact shape name; repeatable",
+        help="group (correctness|perf|all) or an exact shape name; repeatable",
     )
     parser.add_argument("--attempts", type=int, default=30)
     parser.add_argument("--warmup", type=int, default=10)

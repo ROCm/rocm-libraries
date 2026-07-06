@@ -118,7 +118,6 @@ typedef struct rocke_gfx950_attn2d_build_ctx
     /* ---- ALL-CAPS geometry constants (lines 754-847) ---- */
     int HD, T, BS, N_BLOCKS_PER_TILE;
     int BLOCK_M, BLOCK_Q, NQK, NUM_KV, NUM_QH;
-    int VALID_ROWS; /* BLOCK_Q * NQK -- rows that map to complete GQA groups */
     int SLIDING_WINDOW;
     bool USE_SOFTCAP, USE_SINKS, USE_ALIBI, USE_QQ_BIAS;
     /* transposed-softmax + experimental predicate aliases (spec.*) */

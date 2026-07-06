@@ -172,7 +172,6 @@ bool rocke_gfx942_attn2d_build_ctx_init(rocke_gfx942_attn2d_build_ctx_t* ctx,
     ctx->N_BLOCKS_PER_TILE = N_BLOCKS_PER_TILE;
     ctx->BLOCK_M = BLOCK_M;
     ctx->BLOCK_Q = BLOCK_Q;
-    ctx->VALID_ROWS = BLOCK_Q * NQK;
     ctx->NQK = NQK;
     ctx->NUM_KV = NUM_KV;
     ctx->NUM_QH = NUM_QH;
@@ -968,22 +967,10 @@ void rocke_gfx942_attn2d_emit_licm_hoist(rocke_gfx942_attn2d_build_ctx_t* ctx)
         rocke_value_t* qh_mul = rocke_b_mul(b, ctx->kv_head_idx, rocke_b_const_i32(b, ctx->NQK));
         rocke_value_t* qh_mod = rocke_b_mod(b, row, rocke_b_const_i32(b, ctx->NQK));
         rocke_value_t* qh_r = rocke_b_add(b, qh_mul, qh_mod);
-        /* row_ok = (qp_r < q_len) && (qh_r < NUM_QH) [&& (row < VALID_ROWS)].
-         * Skip the VALID_ROWS guard when VALID_ROWS == BLOCK_M (NQK divides BLOCK_M). */
+        /* row_ok = (qp_r < q_len) && (qh_r < NUM_QH) (qp cmp before qh cmp). */
         rocke_value_t* row_ok_pos = rocke_b_cmp_lt(b, qp_r, ctx->cur_batch_q_len);
         rocke_value_t* row_ok_qh = rocke_b_cmp_lt(b, qh_r, rocke_b_const_i32(b, ctx->NUM_QH));
-        rocke_value_t* row_ok_inner = rocke_b_land(b, row_ok_pos, row_ok_qh);
-        rocke_value_t* row_ok;
-        if(ctx->VALID_ROWS < ctx->BLOCK_M)
-        {
-            rocke_value_t* row_ok_vr
-                = rocke_b_cmp_lt(b, row, rocke_b_const_i32(b, ctx->VALID_ROWS));
-            row_ok = rocke_b_land(b, row_ok_inner, row_ok_vr);
-        }
-        else
-        {
-            row_ok = row_ok_inner;
-        }
+        rocke_value_t* row_ok = rocke_b_land(b, row_ok_pos, row_ok_qh);
         rocke_value_t* causal_lim = rocke_b_add(b, ctx->context_len, qp_r);
 
         ctx->hoist_in_warp_row[reg] = row;

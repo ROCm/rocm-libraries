@@ -247,12 +247,12 @@ static rocke_value_t* rocke_x_pack_quant_chunk_local_f32(rocke_ir_builder_t* b,
     /* if out_dtype in ("fp8e4m3", "bf8e5m2") and n % 4 == 0: packed-cvt path. */
     if((strcmp(out_dtype, "fp8e4m3") == 0 || strcmp(out_dtype, "bf8e5m2") == 0) && (n % 4 == 0))
     {
-        rocke_value_t* packed_chunks[2] = {NULL, NULL};
+        rocke_value_t* packed_chunks[2];
         int num_chunks = 0;
         int off;
         const rocke_type_t* f32_ty = rocke_f32();
         bool is_fp8 = (strcmp(out_dtype, "fp8e4m3") == 0);
-        rocke_value_t* out_v = NULL;
+        rocke_value_t* out_v;
         for(off = 0; off < n; off += 4)
         {
             /* quad = b.vec_pack(scaled_f32[off:off+4], F32) */

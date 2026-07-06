@@ -256,11 +256,8 @@ class CkVariantBench:
             use_fp8=is_fp8,
             q_dtype=problem.q_dtype,
             num_warps=flags["num_warps"],
-            block_m_per_warp=flags["block_m_per_warp"],
             kv_storage_dtype=kv_storage_dtype,
             tile_size=tile_size,
-            use_mfma_32x32x8=flags["use_mfma_32x32"],
-            use_transposed_qk_32x32=flags["use_transposed_qk_32x32"],
         )
         if not ok:
             raise NotImplementedError(f"supports_tiled_2d: {reason}")
