@@ -3302,7 +3302,7 @@ class LogicalScheduler:
             _MIN_MFMA_GAP_DS_READ_TO_WAIT_GFX1250,
         )
         from Tensile.Components.Subtile.WaitAluInsertion import (
-            insertLRSwapRawWaitAlu, setMatrixAReuse, insertLRSwapWarWaitAlu)
+            insertLRSwapRawWaitAlu, setMatrixReuse, insertLRSwapWarWaitAlu)
         from rocisa.code import Module, Label
         from rocisa.container import sgpr
         from rocisa.instruction import SCmpEQU32, SCBranchSCC0, SMovB32
@@ -3365,7 +3365,8 @@ class LogicalScheduler:
         # the final post-schedule order (no-op on other archs).
         module = insertLRSwapRawWaitAlu(module, writer, kernel)
         # gfx1250: enable WMMA matrix-A reuse on the final post-schedule order.
-        module = setMatrixAReuse(module, writer, kernel)
+        module = setMatrixReuse(module, writer, kernel, 'a')
+        module = setMatrixReuse(module, writer, kernel, 'b')
         # PGR=0 only: the unprefetched loop puts the ds_read of an LR offset
         # right before the swap that overwrites it.  PGR>=1 prefetch separates
         # them (swap hoisted ahead, dscnt drain between), so no WAR can form.
