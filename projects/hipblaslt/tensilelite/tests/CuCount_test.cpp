@@ -325,6 +325,7 @@ namespace
         return origami::hardware_t(arch_t::gfx950,
                                    kGfx950AnalyticalCuCount,
                                    163840,
+                                   512 * 1024,
                                    8,
                                    1.0,
                                    1.0,
