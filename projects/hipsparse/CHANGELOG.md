@@ -4,7 +4,7 @@ Documentation for hipSPARSE is available at
 [https://rocm.docs.amd.com/projects/hipSPARSE/en/latest/](https://rocm.docs.amd.com/projects/hipSPARSE/en/latest/).
 
 
-## hipSPARSE changes since ROCm 7.13.0
+## hipSPARSE 4.6.0 for ROCm 7.14
 
 ### Added
 * Added `hipsparseCreateBsr` and `hipsparseCreateConstBsr` in order to enable BSR format support in generic routines.

@@ -203,6 +203,7 @@ def _build_store_kernel(cfg, mi_wave_group=None, use_bf16=False):
 
     # Store control
     kernel["BufferStore"] = True
+    kernel["BufferLoad"] = True
     kernel["GlobalSplitU"] = 0
     kernel["_GlobalAccumulation"] = None
     kernel["StreamK"] = 0
@@ -1622,6 +1623,41 @@ def _build_sgprs_for_beta_test(writer):
     return sgprs
 
 
+def _append_subtile_guard_setup(m, sgprs, mi_wave_tile, wg0=2, wg1=2):
+    """Emit subtile M/N guard SGPR setup (matches _emitSubtileGuards for WG0=WG1=0)."""
+    import math
+
+    miM = 16
+    miwt0 = mi_wave_tile[0]
+    miwt1 = mi_wave_tile[1]
+    waveGroupM = miM * miwt0
+    waveGroupN = 16 * miwt1
+    log2_wg0 = int(math.log2(wg0))
+    miMShift = int(math.log2(miM))
+    mGuard = sgprs["subtileMValidBlocks"]
+    nGuard = sgprs["subtileNValidBlocks"]
+
+    m.add(TextBlock(
+        f"  v_readfirstlane_b32 s{mGuard}, v0          // lane0 tid\n"
+        f"  s_lshr_b32 s{mGuard}, s{mGuard}, 6         // waveId = tid >> 6\n"
+        f"  s_lshr_b32 s{nGuard}, s{mGuard}, {log2_wg0} // waveIdN = waveId >> {log2_wg0}\n"
+        f"  s_and_b32  s{mGuard}, s{mGuard}, {wg0-1}   // waveIdM = waveId & {wg0-1}\n"
+        f"  s_mul_i32  s{mGuard}, s{mGuard}, {waveGroupM} // waveBase = waveIdM * {waveGroupM}\n"
+        f"  s_sub_u32  s{mGuard}, s{sgprs['SizeI']}, s{mGuard} // remainder = SizeI - waveBase; SCC=1 if OOB\n"
+        f"  s_cselect_b32 s{mGuard}, 0, s{mGuard}      // clamp to 0 if OOB\n"
+        f"  s_add_u32  s{mGuard}, s{mGuard}, {miM-1}   // ceil: + {miM-1}\n"
+        f"  s_lshr_b32 s{mGuard}, s{mGuard}, {miMShift} // numValidD1Steps = >> {miMShift}\n"
+        f"  s_min_u32  s{mGuard}, s{mGuard}, {miwt0}   // clamp to MIWaveTile[0]={miwt0}\n"
+        f"  s_mul_i32  s{nGuard}, s{nGuard}, {waveGroupN} // waveBaseN = waveIdN * {waveGroupN}\n"
+        f"  s_sub_u32  s{nGuard}, s{sgprs['SizeJ']}, s{nGuard} // validN - waveBaseN; SCC=1 if OOB\n"
+        f"  s_cselect_b32 s{nGuard}, 0, s{nGuard}      // clamp to 0 if OOB\n"
+        f"  s_sub_u32  s{sgprs['Alpha']+1}, s{nGuard}, {waveGroupN} // SCC=1 if < waveGroupN\n"
+        f"  s_cselect_b32 s{nGuard}, s{nGuard}, {waveGroupN} // min(validN_wave, waveGroupN)\n"
+        f"  s_lshr_b32 s{nGuard}, s{nGuard}, 4          // numValid16NBlocks = >> 4\n"
+        f"  s_mov_b32  s{sgprs['Alpha']+1}, 0x3f800000  // restore Alpha[1] = 1.0f\n"
+    ))
+
+
 def _build_beta_prologue(sgprs, mt0, mt1, size_i, size_j, mi_wave_tile, c_stride=None):
     """Prologue for the beta-path OOB guard test.
 
@@ -1699,49 +1735,7 @@ def _build_beta_prologue(sgprs, mt0, mt1, size_i, size_j, mi_wave_tile, c_stride
     # Beta = 1.0f.
     m.add(SMovB32(dst=sgpr(sgprs["Beta"]), src="0x3f800000", comment="Beta = 1.0f"))
 
-    # Compute subtile M/N guard SGPRs using SGPR arithmetic (matches _emitSubtileGuards).
-    # For WG=(0,0): validM = SizeI, validN = SizeJ.
-    # waveId = tid >> 6; waveIdM = waveId & 1; waveIdN = waveId >> 1.
-    # We use a scratch vgpr (v0 = tid) to read waveId into an SGPR via v_readfirstlane.
-    mGuard = sgprs["subtileMValidBlocks"]
-    nGuard = sgprs["subtileNValidBlocks"]
-
-    # Emit the guard computation matching _emitSubtileGuards logic.
-    # Use TextBlock since we need vgpr reads that are easier to express as raw asm.
-    import math
-    log2_wg0    = int(math.log2(wg0))
-    miMShift    = int(math.log2(miM))
-
-    m.add(TextBlock(
-        # --- waveId extraction ---
-        f"  v_readfirstlane_b32 s{mGuard}, v0          // lane0 tid\n"
-        f"  s_lshr_b32 s{mGuard}, s{mGuard}, 6         // waveId = tid >> 6\n"
-        f"  s_lshr_b32 s{nGuard}, s{mGuard}, {log2_wg0} // waveIdN = waveId >> {log2_wg0}\n"
-        f"  s_and_b32  s{mGuard}, s{mGuard}, {wg0-1}   // waveIdM = waveId & {wg0-1}\n"
-        # --- M guard: numValidD1Steps ---
-        # waveBase = waveIdM * waveGroupM
-        f"  s_mul_i32  s{mGuard}, s{mGuard}, {waveGroupM} // waveBase = waveIdM * {waveGroupM}\n"
-        # remainder = max(validM - waveBase, 0)  using SizeI for validM (WG0=0)
-        f"  s_sub_u32  s{mGuard}, s{sgprs['SizeI']}, s{mGuard} // remainder = SizeI - waveBase; SCC=1 if OOB\n"
-        f"  s_cselect_b32 s{mGuard}, 0, s{mGuard}      // clamp to 0 if OOB\n"
-        # ceil(remainder / miM)
-        f"  s_add_u32  s{mGuard}, s{mGuard}, {miM-1}   // ceil: + {miM-1}\n"
-        f"  s_lshr_b32 s{mGuard}, s{mGuard}, {miMShift} // numValidD1Steps = >> {miMShift}\n"
-        # min(result, MIWaveTile[0])
-        f"  s_min_u32  s{mGuard}, s{mGuard}, {miwt0}   // clamp to MIWaveTile[0]={miwt0}\n"
-        # --- N guard: numValid16NBlocks ---
-        # waveBaseN = waveIdN * waveGroupN
-        f"  s_mul_i32  s{nGuard}, s{nGuard}, {waveGroupN} // waveBaseN = waveIdN * {waveGroupN}\n"
-        # remainder = max(validN - waveBaseN, 0)  using SizeJ for validN (WG1=0)
-        f"  s_sub_u32  s{nGuard}, s{sgprs['SizeJ']}, s{nGuard} // validN - waveBaseN; SCC=1 if OOB\n"
-        f"  s_cselect_b32 s{nGuard}, 0, s{nGuard}      // clamp to 0 if OOB\n"
-        # clamp to waveGroupN
-        f"  s_sub_u32  s{sgprs['Alpha']+1}, s{nGuard}, {waveGroupN} // SCC=1 if < waveGroupN\n"
-        f"  s_cselect_b32 s{nGuard}, s{nGuard}, {waveGroupN} // min(validN_wave, waveGroupN)\n"
-        f"  s_lshr_b32 s{nGuard}, s{nGuard}, 4          // numValid16NBlocks = >> 4\n"
-        # Restore Alpha[1] = 1.0f (reused as tmp above).
-        f"  s_mov_b32  s{sgprs['Alpha']+1}, 0x3f800000  // restore Alpha[1] = 1.0f\n"
-    ))
+    _append_subtile_guard_setup(m, sgprs, mi_wave_tile, wg0=wg0, wg1=wg1)
 
     return m
 
@@ -1863,6 +1857,268 @@ def _run_storeD_beta(cfg, tmp_path, size_i, size_j, mi_wave_group=None, dump_asm
     )
     out = struct.unpack(f"{round_mt0 * round_mt1}f", raw[:output_size])
     return out, c_arr, round_mt0, round_mt1
+
+
+# ---------------------------------------------------------------------------
+# SAV + bias epilogue roundtrip (matches mxfp8 subtile inline-epilogue repro geometry)
+# ---------------------------------------------------------------------------
+
+_SAV_BIAS_CFG = TileConfig(mt_a=64, mt_b=64, depth_u=512)
+
+
+def _epilogue_lds_bytes(kernel):
+    """LDS bytes for bias + ScaleAlphaVec staging (subtile MIWaveTile turns)."""
+    num_threads = kernel["NumThreads"]
+    bpe = int(kernel["ProblemType"]["ComputeDataType"].numBytes())
+    turn = kernel["MIWaveTile"][0]
+    total = 0
+    if kernel["ProblemType"]["UseBias"]:
+        total += num_threads * bpe * turn
+    if kernel["ProblemType"]["UseScaleAlphaVec"]:
+        total += num_threads * bpe * turn
+    return total
+
+
+def _configure_kwa_epilogue_vectors(kw, kernel):
+    """Wire KernelWriterAssembly states for bias-read + ScaleAlphaVec epilogue."""
+    from Tensile.Common import DataDirection
+
+    if kernel["ProblemType"]["UseBias"]:
+        kw.states.useBias = DataDirection.READ
+        kw.states.needBiasType = True
+    else:
+        kw.states.useBias = DataDirection.NONE
+        kw.states.needBiasType = False
+
+    kw.states.FactorDim = 0
+    if kernel["ProblemType"]["UseScaleAlphaVec"]:
+        kw.states.FactorDim = max(kw.states.FactorDim, kernel["ProblemType"]["UseScaleAlphaVec"])
+    if kernel["ProblemType"]["UseBias"]:
+        kw.states.FactorDim = max(kw.states.FactorDim, kernel["ProblemType"]["UseBias"])
+
+    kw.states.memTokenLdsBuffer0 = 0
+    kw.states.memTokenLdsBuffer1 = 1
+
+
+def _build_sgprs_for_sav_bias_test(writer):
+    """Store-D sgprs plus epilogue vector address/SRD registers."""
+    sgprs = _build_sgprs_for_test(writer)
+
+    wg2 = writer.sgprPool.checkOut(1, "WorkGroup2")
+    writer.sgprs["WorkGroup2"] = wg2
+
+    bias_stride = writer.sgprPool.checkOut(1, "BiasStride")
+    writer.sgprs["BiasStride"] = bias_stride
+
+    bias_type = writer.sgprPool.checkOut(1, "BiasType")
+    writer.sgprs["BiasType"] = bias_type
+
+    addr_sav = writer.sgprPool.checkOutAligned(2, 2, "AddressScaleAlphaVec", preventOverflow=False)
+    writer.sgprs["AddressScaleAlphaVec"] = addr_sav
+
+    addr_bias = writer.sgprPool.checkOutAligned(2, 2, "AddressBias", preventOverflow=False)
+    writer.sgprs["AddressBias"] = addr_bias
+
+    srd_sav = writer.sgprPool.checkOutAligned(4, 4, "SrdScaleAlphaVec", preventOverflow=False)
+    writer.sgprs["SrdScaleAlphaVec"] = srd_sav
+
+    srd_bias = writer.sgprPool.checkOutAligned(4, 4, "SrdBias", preventOverflow=False)
+    writer.sgprs["SrdBias"] = srd_bias
+
+    gsu = writer.sgprPool.checkOut(1, "GSU")
+    writer.sgprs["GSU"] = gsu
+
+    return sgprs
+
+
+def _build_sav_bias_prologue(sgprs, mt0, mt1, size_i, size_j, mi_wave_tile):
+    """Prologue for acc + SAV + bias + D buffers and subtile guard SGPRs."""
+    from rocisa.instruction import SLoadB64, SLoadB32, SMovB32
+
+    m = Module("sav_bias_prologue")
+
+    # Kernarg layout: acc(8), sav(8), bias(8), output(8), size_i(4), size_j(4), stride(4)
+    m.add(SLoadB64(dst=sgpr(sgprs["SrdInput"], 2), base=sgpr(0, 2), soffset=0,
+                   comment="acc ptr → SrdInput[0:1]"))
+    m.add(SLoadB64(dst=sgpr(sgprs["AddressScaleAlphaVec"], 2), base=sgpr(0, 2), soffset=8,
+                   comment="SAV ptr → AddressScaleAlphaVec[0:1]"))
+    m.add(SLoadB64(dst=sgpr(sgprs["AddressBias"], 2), base=sgpr(0, 2), soffset=16,
+                   comment="bias ptr → AddressBias[0:1]"))
+    m.add(SLoadB64(dst=sgpr(sgprs["SrdD"], 2), base=sgpr(0, 2), soffset=24,
+                   comment="D ptr → SrdD[0:1]"))
+    m.add(SLoadB32(dst=sgpr(sgprs["SizeI"]), base=sgpr(0, 2), soffset=32,
+                   comment="size_i → SizeI"))
+    m.add(SLoadB32(dst=sgpr(sgprs["SizeJ"]), base=sgpr(0, 2), soffset=36,
+                   comment="size_j → SizeJ"))
+    m.add(SLoadB32(dst=sgpr(sgprs["StrideDJ"]), base=sgpr(0, 2), soffset=40,
+                   comment="stride → StrideDJ"))
+    m.add(SWaitCnt(dscnt=0, comment="wait sloads"))
+
+    srd_d = sgprs["SrdD"]
+    srd_in = sgprs["SrdInput"]
+    m.add(SMovB32(dst=sgpr(srd_d + 2), src="0x80000000", comment="SrdD num_records = BufferOOB"))
+    m.add(SMovB32(dst=sgpr(srd_d + 3), src="0x20000", comment="SrdD format word"))
+    m.add(SMovB32(dst=sgpr(srd_in + 2), src="0xFFFFFFFF", comment="SrdInput num_records = max"))
+    m.add(SMovB32(dst=sgpr(srd_in + 3), src="0x20000", comment="SrdInput format word"))
+
+    m.add(SMovB32(dst=sgpr(sgprs["WorkGroup0"]), src=0, comment="WorkGroup0 = 0"))
+    m.add(SMovB32(dst=sgpr(sgprs["WorkGroup1"]), src=0, comment="WorkGroup1 = 0"))
+    m.add(SMovB32(dst=sgpr(sgprs["WorkGroup2"]), src=0, comment="WorkGroup2 = 0"))
+    m.add(SMovB32(dst=sgpr(sgprs["BiasStride"]), src=0, comment="BiasStride = 0 (non-batched)"))
+    m.add(SMovB32(dst=sgpr(sgprs["BiasType"]), src=0, comment="BiasType = f32"))
+    m.add(SMovB32(dst=sgpr(sgprs["GSU"]), src=1, comment="GSU = 1 (single-kernel epilogue path)"))
+    m.add(SMovB32(dst=sgpr(sgprs["StrideCJ"]), src=sgpr(sgprs["StrideDJ"]), comment="StrideCJ = StrideDJ"))
+    m.add(SMovB32(dst=sgpr(sgprs["NumWorkGroups0"]), src=1, comment="NumWorkGroups0 = 1"))
+    m.add(SMovB32(dst=sgpr(sgprs["NumWorkGroups1"]), src=1, comment="NumWorkGroups1 = 1"))
+    m.add(SMovB32(dst=sgpr(sgprs["Alpha"]), src="0x3f800000", comment="Alpha = 1.0f"))
+    m.add(SMovB32(dst=sgpr(sgprs["Alpha"] + 1), src="0x3f800000", comment="Alpha[1] = 1.0f"))
+
+    _append_subtile_guard_setup(m, sgprs, mi_wave_tile)
+
+    return m
+
+
+def _compute_sav_bias_reference(acc_arr, sav_arr, bias_arr, round_mt0, round_mt1, size_i, size_j):
+    """Expected f32 D: alpha=1, beta=0 → D[r,c] = sav[r]*acc[r,c] + bias[r]."""
+    _SENTINEL = struct.unpack('f', struct.pack('I', 0xFFFFFFFF))[0]
+    ref = np.full(round_mt0 * round_mt1, _SENTINEL, dtype=np.float32)
+    ref_2d = ref.reshape(round_mt0, round_mt1, order='F')
+    acc_2d = acc_arr.reshape(round_mt0, round_mt1, order='F')
+    for col in range(size_j):
+        for row in range(size_i):
+            ref_2d[row, col] = float(sav_arr[row] * acc_2d[row, col] + bias_arr[row])
+    return ref
+
+
+def _run_storeD_sav_bias(cfg, tmp_path, size_i, size_j, mi_wave_group=None,
+                         dump_asm=False, seed=0):
+    """Roundtrip: D = alpha * SAV[m] * acc + bias with random SAV (not identically 1)."""
+    from Tensile.Common.DataType import DataType
+
+    if mi_wave_group is None:
+        mi_wave_group = [2, 2]
+
+    kernel = _build_store_kernel(cfg, mi_wave_group=mi_wave_group, use_bf16=True)
+    kernel["UseSubtileImpl"] = True
+    kernel["GlobalSplitU"] = 1  # isSingleKernel gate for epilogue vector LDS + SAV multiply
+    kernel["SubGroup0"] = 4
+    kernel["SubGroup1"] = 16
+    kernel["ProblemType"]["UseScaleAlphaVec"] = 1
+    kernel["ProblemType"]["UseBias"] = 1
+    kernel["ProblemType"]["UseBeta"] = False
+    kernel["ProblemType"]["BiasDataTypeList"] = [DataType('Float')]
+    kernel["NumThreads"] = NUM_THREADS
+    kernel["LdsNumBytes"] = _epilogue_lds_bytes(kernel)
+
+    writer, _, _, _ = create_writer(cfg, mi_wave_group=mi_wave_group)
+    sgprs = _build_sgprs_for_sav_bias_test(writer)
+
+    tileInfoD, agpr_indices = _allocate_d_tile(kernel, writer)
+    kw = _build_kwa(kernel, writer, use_bf16=True)
+    kw.debugConfig = kw.debugConfig._replace(splitGSU=True)  # skip GSU0 atomic workspace path
+    _configure_kwa_epilogue_vectors(kw, kernel)
+    kw.states.d.tileInfo = tileInfoD
+
+    kw.states.subtileM32ValidBlocksSgpr = sgprs["subtileMValidBlocks"]
+    kw.states.subtileN16ValidBlocksSgpr = sgprs["subtileNValidBlocks"]
+    kw.sgprs["SubtileMGuard"] = sgprs["subtileMValidBlocks"]
+    kw.sgprs["SubtileNGuard"] = sgprs["subtileNValidBlocks"]
+    kw.states.subtileMBlockSize = 16
+
+    tmp_v = writer.vgprPool.checkOut(1, "tmp_v", preventOverflow=False)
+    vaddr = writer.vgprPool.checkOut(1, "vaddr", preventOverflow=False)
+    vtmp2 = writer.vgprPool.checkOut(1, "vtmp2", preventOverflow=False)
+
+    kw.codes.accVgprRead = mapAcctoArchRegs(kernel, kw.states.maxLimitAgprs, write=False)
+    store_indices_mod = kw.notLocalSplitUGlobalWriteIndices(kernel)
+    kw.states.c.startVgprValu = 0
+    store_write_mod, _ = kw.notLocalSplitUGlobalWrite(kernel, tPA=None, tPB=None)
+
+    round_mt0 = cfg.mt_a
+    round_mt1 = cfg.mt_b
+    stride_d = round_mt0
+    lds_size = kernel["LdsNumBytes"]
+
+    rng = np.random.default_rng(seed)
+    _, _, acc_arr = _compute_reference(cfg, kernel, tileInfoD, size_i, size_j, rng=rng)
+    # Per-row vectors; size >= MT0 covers epilogue vector global loads for WG0.
+    sav_arr = rng.uniform(0.25, 4.0, size=round_mt0).astype(np.float32)
+    bias_arr = rng.uniform(-2.0, 2.0, size=round_mt0).astype(np.float32)
+    ref_arr = _compute_sav_bias_reference(
+        acc_arr, sav_arr, bias_arr, round_mt0, round_mt1, size_i, size_j,
+    )
+
+    prologue = _build_sav_bias_prologue(
+        sgprs, round_mt0, round_mt1, size_i, size_j, mi_wave_tile=kernel["MIWaveTile"],
+    )
+    init_mod = _build_accvgpr_init_matrix_asm(
+        agpr_indices, kernel, tileInfoD, sgprs, tmp_v, vaddr, vtmp2,
+    )
+
+    store_write_asm = str(store_write_mod)
+    parts = [
+        ".set BufferOOB, 0x80000000\n",
+        ".set Srd127_96, 0x20000\n",
+        ".set vgprValuC, 0\n",
+        str(prologue),
+        str(init_mod),
+        "  s_nop 3  // CDNA3 acc write→read latency\n",
+        str(store_indices_mod),
+        store_write_asm,
+    ]
+    inner_asm = _finalize_inner_asm(parts, kw)
+
+    wg = mi_wave_group
+    label = f"sav_bias_{cfg.label}_wg{'x'.join(str(g) for g in wg)}_m{size_i}n{size_j}"
+
+    args = [
+        ("acc_input",  8, "global_buffer", "u8"),
+        ("sav_input",  8, "global_buffer", "u8"),
+        ("bias_input", 8, "global_buffer", "u8"),
+        ("output",     8, "global_buffer", "u8"),
+        ("size_i",     4, "by_value",      "u32"),
+        ("size_j",     4, "by_value",      "u32"),
+        ("stride_d",   4, "by_value",      "u32"),
+    ]
+
+    full_asm = generate_kernel_asm(
+        inner_asm, writer, args, lds_size=lds_size, num_threads=NUM_THREADS,
+    )
+
+    if dump_asm:
+        asm_path = str(tmp_path / f"test_{label}.s")
+        with open(asm_path, "w") as f:
+            f.write(full_asm)
+        print(f"\n[dump_asm] Full ASM written to: {asm_path}")
+
+    output_size = round_mt0 * round_mt1 * 2  # bf16 bytes
+    raw = assemble_and_run(
+        full_asm, tmp_path, label,
+        output_size=output_size,
+        inputs=(acc_arr, sav_arr, bias_arr),
+        scalars=(size_i, size_j, stride_d),
+        lds_size=lds_size,
+        num_threads=NUM_THREADS,
+    )
+
+    raw_u16 = np.frombuffer(raw[:output_size], dtype=np.uint16)
+    raw_u32 = raw_u16.astype(np.uint32) << 16
+    out = tuple(v for v in raw_u32.view(np.float32))
+    return out, ref_arr, round_mt0, round_mt1
+
+
+def test_storeD_sav_bias_roundtrip(tmp_path):
+    """Subtile bf16 store with ScaleAlphaVec + bias epilogue LDS (mxfp8 repro geometry).
+
+    MT64×64, MIWaveTile=[2,2], MIWaveGroup=[2,2], UseSubtileImpl=1.
+    Model: D = alpha * SAV[m] * acc + bias (alpha=1, beta=0).
+    Random SAV values catch indexing bugs that SAV=1 would mask.
+    """
+    init_rocisa()
+    out, ref_arr, round_mt0, round_mt1 = _run_storeD_sav_bias(
+        _SAV_BIAS_CFG, tmp_path, 64, 64, seed=42,
+    )
+    _verify_bf16_random_matrix_positions(out, ref_arr, round_mt0, round_mt1, 64, 64)
 
 
 @pytest.mark.parametrize("cfg,size_i,size_j", BETA_OOB_CASES,

@@ -8,6 +8,7 @@
 - [Virtual Registers](user/virtual-registers.md) -- Template-based code generation with register remapping
 - [Long-Branch CFG Construction](user/long-branch-cfg.md) -- How `s_setpc_b64` long branches get correct CFG edges
 - [StinkyWaitCnt Insertion Pass](user/stinky-waitcnt-insertion-pass.md) -- Def-use-chain-driven `s_waitcnt` insertion across DS / buffer-load / tensor counters
+- [RemoveInstructionPass](user/remove-instruction-pass.md) -- Strip configurable instruction opcodes from all basic blocks
 - [Error Codes](user/error-codes.md) -- Error code reference
 
 ## For Developers

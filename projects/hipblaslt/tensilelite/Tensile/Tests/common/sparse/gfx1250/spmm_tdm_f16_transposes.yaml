@@ -3,7 +3,6 @@ TestParameters:
 GlobalParameters:
   NumElementsToValidate: -1
   KernelTime: False
-  # NewClient: 2
   BoundsCheck: 0
   # PrintSolutionRejectionReason: True
   ValidationMaxToPrint: 4      # maximum number of mismatches to print
@@ -22,12 +21,10 @@ GlobalParameters:
   NumWarmups: 0
   EnqueuesPerSync: 1
   PrintWinnersOnly: True
-  # MinKForGSU: 1
   Architecture: gfx1250
   CpuThreads: 1
   KeepBuildTmp: True
   PrintLevel: 2
-  ROCmAgentEnumeratorPath: rocm_agent_enumerator
 
 BenchmarkProblems:
   #######################################
