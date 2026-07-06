@@ -347,3 +347,30 @@ accepted equivalents/pragmas here, each with its one-line reason.
 
 ## D16 — BufferLoad/BufferStore promoted to Required Parameters
 **Context** kernel basename hash changes across all archs; assembly verified unchanged/correct; no err or kernel-count changes."
+
+## D17 — StreamKWorkStealing added to the required (min-naming) parameter set
+**Decision:** Accept the regenerated `_codegen` / SolutionClass / ValidParameters goldens after
+adding the new codegen parameter `StreamKWorkStealing` to `Common/RequiredParameters.py`
+(`getRequiredParametersMin`). Regenerate surgically via the characterization suite; do not
+hand-edit goldens.
+**Classification:** intended behavior change (overlay class (a)), not a bug and not test fragility.
+Adding the parameter to the min-naming set inserts the `SKWS0` token into the verbose solution
+name (next to its StreamK siblings `SKA`/`SKFTR`/`SKFDPO`/`SKXCCM`) and perturbs the kernel
+identity-hash `basename` on **every** kernel across **all** archs — `num_keys` 334→335. This is
+the same required-parameter-promotion footprint as D16 (BufferLoad/BufferStore).
+**Why the diff spans all arch nodes (not blanket masking):** the change is a single new required
+parameter, so by construction it touches every kernel's identity hash; the wide golden diff is the
+faithful, minimal consequence of that one source change, not an unrelated multi-node re-record.
+Verified: only `basename` hashes + the `SKWS0` name token + the added roster/valid-values entry
+change — **no `err`, instruction-count, or emitted-assembly changes**. `minNaming` still drops the
+constant param from the *short* visible kernel name, so no `_WS0` token pollutes production kernel
+names.
+**Stable-arch signal (gfx908/gfx90a/gfx942):** the digest changes on the stable archs are this
+intended naming/identity change, **not** a compiler/codegen regression — root cause is the
+required-param addition above; assembly is byte-for-byte unchanged with `StreamKWorkStealing=0`.
+**Re-run:** goldens are byte-identical on two further `--snapshot-update`-free runs and the full
+`-m unit` suite stays green.
+**Alternatives rejected:** (a) keep the param out of `RequiredParameters` — rejected: it would
+drop the param from the kernel identity, so two solutions differing only in `StreamKWorkStealing`
+would collide on the same name/hash; (b) hand-edit the goldens — rejected: derived state + name
+hashes are computed, hand-editing desynchronizes the serialized state from real codegen output.
