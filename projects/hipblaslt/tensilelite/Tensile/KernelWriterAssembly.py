@@ -5912,9 +5912,34 @@ class KernelWriterAssembly(KernelWriter):
     else:
       raise Exception(f"unsupport tc %s{tc}")
 
-    for i in range(1, numVgpr):
+    # EXPERIMENTAL LdsXorSwizzle reserves nBlk extra LocalReadAddr slots at the TOP of the
+    # fixed range for the precomputed swizzled bases; the 64KB-chunk fan-out below must skip
+    # them. nSwz = ldsXorSwzNBlk (0 when disabled).
+    nSwz = getattr(self.states, "ldsXorSwzNBlk", 0) if kernel["LdsXorSwizzle"] and tc in ("A", "B") else 0
+    for i in range(1, numVgpr - nSwz):
       module.add(VAddU32(dst=vgpr("LocalReadAddr%s+%u"%(tP["tensorChar"],i)), src0=i * self.states.regCaps["maxLDSConstOffset"], \
         src1= vgpr("LocalReadAddr%s+0"%tP["tensorChar"]), comment="Final Offset Plus %uK"%((i * self.states.regCaps["maxLDSConstOffset"]) / 1024) ))
+
+    # Precompute nBlk per-lane swizzled read bases into the reserved fixed slots (once), so the
+    # scheduled read stream just selects a base (no per-read ALU, no overlap with compute regs).
+    # base[qb] = LocalReadAddr+0 + ((s ^ qb) << 5), s = Serial & (nBlk-1) == physical_row & (nBlk-1).
+    if nSwz:
+      baseSlot = numVgpr - nSwz
+      sV = self.vgprPool.checkOut(1, "ldsXorSwzS")   # short-lived prologue temp only
+      module.add(VAndB32(dst=vgpr(sV), src0=hex(nSwz-1), src1=vgpr("Serial"), \
+          comment="LdsXorSwizzle: s = Serial & (nBlk-1=%u)"%(nSwz-1)))
+      for qb in range(nSwz):
+        slot = "LocalReadAddr%s+%u"%(tc, baseSlot+qb)
+        module.add(VXorB32(dst=vgpr(slot), src0=hex(qb), src1=vgpr(sV), \
+            comment="LdsXorSwizzle: s ^ qb=%u"%qb))
+        module.add(VLShiftLeftB32(dst=vgpr(slot), shiftHex=5, src=vgpr(slot), \
+            comment="LdsXorSwizzle: (s^qb) << 5"))
+        module.add(VAddU32(dst=vgpr(slot), src0=vgpr("LocalReadAddr%s+0"%tc), src1=vgpr(slot), \
+            comment="LdsXorSwizzle: swizzled read base qb=%u"%qb))
+      self.vgprPool.checkIn(sV)
+      if not hasattr(self.states, "ldsXorSwzBaseSlot"):
+        self.states.ldsXorSwzBaseSlot = {}
+      self.states.ldsXorSwzBaseSlot[tc] = baseSlot
 
     return module
 
@@ -12613,12 +12638,34 @@ class KernelWriterAssembly(KernelWriter):
             else:
               memTokenComment = "sync LDS %s"%(localWriteMemToken)
             commentWithMemToken = "%s %s"%(comment, memTokenComment)
+            ldsXorSwzWriteCode = None
+            ldsXorSwzWriteReg = None
             if numBlocks == 1:
               addrIdx = paramList[1] // 65536
               olwa = "LocalWriteAddr%s+%u"%(tc, addrIdx)
               paramList[1] -= addrIdx * 65536
-              ds        = DSModifiers(na=1, offset=paramList[1])
-              writeInst = LocalWriteX(dstAddr=vgpr(olwa), src=paramList[0], ds=ds, comment=commentWithMemToken)
+              if kernel["LdsXorSwizzle"]:
+                # T(addr) = addr ^ (((addr>>rowShift)&(nBlk-1))<<blkShift): swizzle the K-block
+                # by the full-row residue read from the resolved address itself (handles every
+                # chunk/row of the thread). Done per store on a temp register.
+                nBlk = kernel["_DepthU%s"%tc] // 16
+                rowShift = int(kernel["_DepthU%s"%tc] * tP["bpeDS"]).bit_length() - 1
+                blkShift = int(16 * tP["bpeDS"]).bit_length() - 1
+                swzA = self.vgprPool.checkOut(1, "ldsXorSwzWA")
+                swzT = self.vgprPool.checkOut(1, "ldsXorSwzWT")
+                ldsXorSwzWriteCode = Module("ldsXorSwzWrite")
+                ldsXorSwzWriteCode.add(VAddU32(dst=vgpr(swzA), src0=hex(paramList[1]), src1=vgpr(olwa), comment="LdsXorSwizzle: resolved write addr"))
+                ldsXorSwzWriteCode.add(VLShiftRightB32(dst=vgpr(swzT), shiftHex=rowShift, src=vgpr(swzA), comment="LdsXorSwizzle: row = addr >> %u"%rowShift))
+                ldsXorSwzWriteCode.add(VAndB32(dst=vgpr(swzT), src0=hex(nBlk-1), src1=vgpr(swzT), comment="LdsXorSwizzle: row & (nBlk-1=%u)"%(nBlk-1)))
+                ldsXorSwzWriteCode.add(VLShiftLeftB32(dst=vgpr(swzT), shiftHex=blkShift, src=vgpr(swzT), comment="LdsXorSwizzle: << %u"%blkShift))
+                ldsXorSwzWriteCode.add(VXorB32(dst=vgpr(swzA), src0=vgpr(swzT), src1=vgpr(swzA), comment="LdsXorSwizzle: swizzle k-block"))
+                self.vgprPool.checkIn(swzT)
+                ds        = DSModifiers(na=1, offset=0)
+                writeInst = LocalWriteX(dstAddr=vgpr(swzA), src=paramList[0], ds=ds, comment=commentWithMemToken+" [LdsXorSwizzle]")
+                ldsXorSwzWriteReg = swzA
+              else:
+                ds        = DSModifiers(na=1, offset=paramList[1])
+                writeInst = LocalWriteX(dstAddr=vgpr(olwa), src=paramList[0], ds=ds, comment=commentWithMemToken)
             else:
               ds        = DSModifiers(na=2, offset0=paramList[2], offset1=paramList[3])
               writeInst = LocalWriteX(dstAddr=vgpr(lwa), src0=paramList[0], src1=paramList[1], ds=ds, comment=commentWithMemToken)
@@ -12627,9 +12674,13 @@ class KernelWriterAssembly(KernelWriter):
             writeInst.setMemToken(MemTokenData(localWriteMemToken))
             if self.do["LocalWriteCVT"]:
               localWriteCode.add(localWriteCVTCode)
+            if ldsXorSwzWriteCode is not None:
+              localWriteCode.add(ldsXorSwzWriteCode)
             if self.do["LocalWrite%s"%tc]:
               localWriteCode.add(writeInst)
               instructionCnt += 1 if blockWidth < 8 else 2
+            if ldsXorSwzWriteReg is not None:
+              self.vgprPool.checkIn(ldsXorSwzWriteReg)
 
       if regTmpVgprBlock != None:
         self.vgprPool.checkIn(regTmpVgprBlock)
@@ -12723,7 +12774,14 @@ class KernelWriterAssembly(KernelWriter):
         src0=sgpr("LDSBufferReadInc"), \
         src1=vgpr("LocalReadAddrOrig%s"%(tc)), \
         comment="LocalReadAddr = Inc + Orig"))
-    elif internalPointerSwap or kernel["StoreSwapAddr"]:
+    # EXPERIMENTAL LdsXorSwizzle: the top nSwz LocalReadAddr slots hold swizzled bases. The
+    # double-buffer swap only toggles the buffer bit (LdsOffsetA_Blk), which is independent of the
+    # bits {5,6} the swizzle uses, so base_buf1 = base_buf0 ^ LdsOffsetA_Blk — swap each base with
+    # a single (atomic, race-free) XOR matching the LocalReadAddr swap. The register-swap paths
+    # need it; the immediate-offset path leaves LocalReadAddr (and thus the bases) unchanged.
+    nSwz = getattr(self.states, "ldsXorSwzNBlk", 0) if kernel["LdsXorSwizzle"] and tc in ("A", "B") else 0
+    swapBasesByMask = None
+    if internalPointerSwap or kernel["StoreSwapAddr"]:
       if not kernel["StoreSwapAddr"]:
         tP["localReadSwapByteOffset"] = 0 if tP["localReadSwapByteOffset"] else kernel["LdsOffsetA_Blk"]
         module.addComment1("local read swap internal offset -> %u" % tP["localReadSwapByteOffset"])
@@ -12733,19 +12791,29 @@ class KernelWriterAssembly(KernelWriter):
           src0=vgpr("LocalReadSwapAddr%s"%tc), \
           src1=vgpr("LocalReadAddr%s"%tc), \
           comment="swap Red Blk"))
+        for qb in range(nSwz):
+          module.add(VXorB32(dst=vgpr("LocalReadAddr%s+%u"%(tc, (numLra-nSwz)+qb)), \
+            src0=vgpr("LocalReadSwapAddr%s"%tc), src1=vgpr("LocalReadAddr%s+%u"%(tc, (numLra-nSwz)+qb)), \
+            comment="LdsXorSwizzle: swap base qb=%u"%qb))
     else:
       module.add(VXorB32(
         dst=vgpr("LocalReadAddr%s"%tc), \
         src0=hex(kernel["LdsOffsetA_Blk"]), \
         src1=vgpr("LocalReadAddr%s"%tc), \
         comment="swap Red Blk"))
+      swapBasesByMask = kernel["LdsOffsetA_Blk"]
 
-    for i in range(1,numLra):
+    for i in range(1, numLra - nSwz):
       module.add(VAddU32(
         dst=vgpr("LocalReadAddr%s+%u"%(tc,i)), \
         src0=(i * self.states.regCaps["maxLDSConstOffset"]), \
         src1=vgpr("LocalReadAddr%s"%tc), \
         comment="Final Offset Plus %uK"%((i * self.states.regCaps["maxLDSConstOffset"]) / 1024)))
+    if nSwz and swapBasesByMask is not None:
+      for qb in range(nSwz):
+        slot = "LocalReadAddr%s+%u"%(tc, (numLra-nSwz)+qb)
+        module.add(VXorB32(dst=vgpr(slot), src0=hex(swapBasesByMask), src1=vgpr(slot), \
+            comment="LdsXorSwizzle: swap base qb=%u (track buffer toggle)"%qb))
     return module
 
   ##############################################################################

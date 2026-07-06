@@ -28,7 +28,7 @@ from rocisa.enum import HighBitSel, SelectBit, InstType
 from rocisa.instruction import SMovB32, SWaitCnt, VOrB32, VPermB32, VLShiftLeftOrB32, \
                             VMovB32, VMovB64, VLShiftRightB32, VCvtFP8toF16, VCvtScalePkFP8toF16, VCvtFP8toF32, VCvtScaleFP8toF16, VCvtScalePkFP8toF16, \
                             VCvtPkF32toBF16, VCvtBF16toFP32, PVCvtBF16toFP32, VDot2CF32BF16, SNop, VSubF32, VSwapB32, MFMAInstruction, \
-                            ECvtPkFP8toF32, ECvtF32toF16
+                            ECvtPkFP8toF32, ECvtF32toF16, VAndB32, VXorB32, VLShiftLeftB32, VAddU32
 
 from ..Component import LocalRead
 
@@ -1654,6 +1654,20 @@ class LocalReadMFMA(LocalRead):
                             srcAddr=vgpr("LocalReadAddr%s+%u"%(tc, addrIdx))
                             tdmFullLdsOffset = paramList[0]
                             paramList[0] -= addrIdx * 65536
+
+                            # EXPERIMENTAL LdsXorSwizzle: the K-block index qb occupies bits {5..}
+                            # of the fused immediate (M-tile/within-block/swap do not touch them).
+                            # Select the per-lane swizzled base reg precomputed in lraDeclareAddresses
+                            # (base[qb] = LocalReadAddr+0 + ((s^qb)<<5), s=Serial&(nBlk-1)), and drop
+                            # the qb bits from the immediate. No VALU in the scheduled read stream.
+                            if kernel["LdsXorSwizzle"]:
+                                assert numOffsets == 1, "LdsXorSwizzle expects numOffsets==1"
+                                assert addrIdx == 0, "LdsXorSwizzle: read immediate > 64KB (addrIdx>0) unsupported"
+                                nBlk = kernel["_DepthU%s"%tc] // 16
+                                qb = (paramList[0] >> 5) & (nBlk - 1)
+                                _baseSlot = writer.states.ldsXorSwzBaseSlot[tc]
+                                srcAddr = vgpr("LocalReadAddr%s+%u"%(tc, _baseSlot + qb))
+                                paramList[0] -= (qb << 5)
 
                             if numOffsets == 1:
                                 ds = DSModifiers(na=1, offset=paramList[0])

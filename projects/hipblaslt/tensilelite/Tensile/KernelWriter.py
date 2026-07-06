@@ -8025,6 +8025,16 @@ class KernelWriter(metaclass=abc.ABCMeta):
       if kernel["ProblemType"]["MXBlockB"] and kernel["DirectToVgprMXSB"]:
         self.states.mxsb.numVgprLocalReadAddr = 0
 
+      # EXPERIMENTAL LdsXorSwizzle: reserve nBlk extra LocalReadAddr slots (per A/B) at the top
+      # of the fixed range to hold the precomputed swizzled read bases. Allocated in the fixed
+      # layout (not a prologue pool checkout) so they never overlap compute registers.
+      if kernel["LdsXorSwizzle"]:
+        self.states.ldsXorSwzNBlk = kernel["_DepthUA"] // 16
+        if self.states.a.numVgprLocalReadAddr > 0:
+          self.states.a.numVgprLocalReadAddr += self.states.ldsXorSwzNBlk
+        if self.states.b.numVgprLocalReadAddr > 0:
+          self.states.b.numVgprLocalReadAddr += self.states.ldsXorSwzNBlk
+
 
       # do not allocate local write address register if DirectToVgpr is enabled
       if kernel["DirectToVgprA"] or kernel["DirectToLdsA"]:

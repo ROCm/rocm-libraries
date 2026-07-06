@@ -77,6 +77,7 @@ def getRequiredParametersMin() -> set:
         'LdsPadMetadata',
         'LdsPadMXSA',
         'LdsPadMXSB',
+        'LdsXorSwizzle',
         'LDSTrInst',
         'LocalReadVectorWidth',
         'LocalWritePerMfma',

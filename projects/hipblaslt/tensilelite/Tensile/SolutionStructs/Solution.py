@@ -1581,6 +1581,26 @@ class Solution(collections.abc.Mapping):
       if state["InternalSupportParams"]["KernArgsVersion"] < 3:
         state["InternalSupportParams"]["KernArgsVersion"] = 3
 
+    # EXPERIMENTAL LdsXorSwizzle: only valid on the gfx1151 bf16 TN UnrollMajorLDS WMMA
+    # (HasWMMA_V1, SW-transpose) no-pad path. Reject any unsupported combo loudly so it can
+    # never silently emit wrong data. See lwaFirstOffset (write) and LocalRead (read).
+    if state["LdsXorSwizzle"]:
+      isaInfo = isaInfoMap[tuple(state["ISA"])]
+      nBlk = state["DepthU"] // 16
+      if not isaInfo.asmCaps["HasWMMA_V1"]:
+        reject(state, printRejectionReason, "LdsXorSwizzle: only gfx11 WMMA_V1 supported"); return
+      if state["ProblemType"]["DataType"].toChar() not in ('B', 'H'):
+        reject(state, printRejectionReason, "LdsXorSwizzle: bf16/fp16 only"); return
+      if state["ProblemType"]["TLUA"] or state["ProblemType"]["TLUB"]:
+        reject(state, printRejectionReason, "LdsXorSwizzle: requires UnrollMajorLDS (TLU=0 both)"); return
+      if state["LdsPadA"] != 0 or state["LdsPadB"] != 0:
+        reject(state, printRejectionReason, "LdsXorSwizzle: replaces padding, requires LdsPadA=LdsPadB=0"); return
+      if state["DepthU"] % 16 != 0 or nBlk not in (2, 4, 8, 16):
+        reject(state, printRejectionReason, "LdsXorSwizzle: needs DepthU%16==0 and DepthU//16 in {2,4,8,16}"); return
+      if state["ProblemType"]["Sparse"] or state["DirectToVgprA"] or state["DirectToVgprB"]:
+        reject(state, printRejectionReason, "LdsXorSwizzle: Sparse/DTV not supported"); return
+      if state["MatrixInstK"] != 16:
+        reject(state, printRejectionReason, "LdsXorSwizzle: MatrixInstK must be 16"); return
     if state["StreamK"] != 0:
       #state["AssertSummationElementMultiple"] = 1 # Cannot keep ASEM with Stream-K
       state["GlobalSplitU"] = 0 # Cannot enable both Stream-K and GSU

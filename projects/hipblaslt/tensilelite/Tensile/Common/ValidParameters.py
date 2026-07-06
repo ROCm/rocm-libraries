@@ -919,6 +919,10 @@ validParameters = { # we need to make sure this matches develop
     "LdsBlockSizePerPadB": validLdsBlockSizePerPad,
     "LdsBlockSizePerPadMXSB": [-1, 0, 64, 128, 256, 512, 1024, 2048],
     "LdsBlockSizePerPadMetadata": [-1, 0, 64, 128, 256, 512, 1024, 2048],
+    # EXPERIMENTAL (gfx1151 bf16 TN UnrollMajorLDS WMMA): XOR LDS bank-swizzle instead
+    # of row padding. Block (m,qb) stored at within-row slot (qb XOR (row & (nBlk-1))),
+    # nBlk=DepthU//16. Zero LDS cost; usable where padding does not fit.
+    "LdsXorSwizzle": [False, True],
     # Transpose LDS format. Local store in coalesced dimension , same as optimized global fetch dimension . applicable only in TLU=0 case for miSIMD(s)
     # -1 : keep LDS layout same as global fetch dimension for both A and B
     #      set TLDS = 1 for NN,TN,TT
