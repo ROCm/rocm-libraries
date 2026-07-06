@@ -96,7 +96,7 @@ pass-by-value states ([§4.9](#49-state-reference)):
 ```cpp
 // compile-time constant (default) — value baked, no version elevation.
 // hipDNN's plain scalar ctor lands in the compile-time state, diverging from cuDNN's plain
-// ctor which sets pass_by_value (its runtime type-2, graph_properties.h:163-205).
+// ctor which sets pass_by_value (its runtime type-2, graph_properties.h:158-198).
 auto k  = graph.tensor(TensorAttributes(0.125f));
 auto c3 = graph.tensor(0.125f, ScalarType::COMPILE_TIME_CONST);
 
@@ -113,7 +113,7 @@ existing variant-pack map, keyed by the tensor UID, exactly as device
 buffers are — supplied by the user in the user-supplied case, injected by the frontend in the frontend-injected case
 ([§4.8](#48-frontend-variant-pack-injection)). cuDNN-frontend realizes the
 injected form with `extend_tensor_map_with_pass_by_value_tensors_`
-([`graph_interface.h:198-217`](https://github.com/NVIDIA/cudnn-frontend/blob/c4ec01a28a26aa57021862de809cc257619f7516/include/cudnn_frontend/graph_interface.h#L198-L217)),
+([`graph_interface.h:190-212`](https://github.com/NVIDIA/cudnn-frontend/blob/c4ec01a28a26aa57021862de809cc257619f7516/include/cudnn_frontend/graph_interface.h#L190-L212)),
 which emplaces a *host* pointer to the scalar into the same
 `std::unordered_map<int64_t, void*>` used for device buffers. hipDNN
 adopts the same transport.
@@ -161,7 +161,7 @@ The design must:
    constructor/setter used; the four invalid combinations
    ([§4.7](#47-frontend-validation)) are rejected. cuDNN enforces
    analogous exclusivity in `validate()`
-   ([`graph_properties.h:67-100`](https://github.com/NVIDIA/cudnn-frontend/blob/c4ec01a28a26aa57021862de809cc257619f7516/include/cudnn_frontend/graph_properties.h#L67-L100)).
+   ([`graph_properties.h:70-94`](https://github.com/NVIDIA/cudnn-frontend/blob/c4ec01a28a26aa57021862de809cc257619f7516/include/cudnn_frontend/graph_properties.h#L70-L94)).
 
 ---
 
@@ -217,7 +217,7 @@ presence select the three states ([§4.9](#49-state-reference)).
 
 **Enum.** A `ScalarType` selects a value-carrying tensor's state at
 construction, mirroring cuDNN
-([`graph_properties.h:42-46`](https://github.com/NVIDIA/cudnn-frontend/blob/c4ec01a28a26aa57021862de809cc257619f7516/include/cudnn_frontend/graph_properties.h#L42-L46)):
+([`graph_properties.h:42-45`](https://github.com/NVIDIA/cudnn-frontend/blob/c4ec01a28a26aa57021862de809cc257619f7516/include/cudnn_frontend/graph_properties.h#L42-L45)):
 
 ```cpp
 namespace hipdnn_frontend::graph {
@@ -230,25 +230,25 @@ enum class ScalarType { RUNTIME_PARAM, COMPILE_TIME_CONST };
 - `TensorAttributes(const T& scalar)` → the **compile-time constant** state,
   delegating to `set_value`. This diverges from cuDNN, whose plain scalar
   constructor sets `pass_by_value` (its runtime type-2)
-  ([`graph_properties.h:163-205`](https://github.com/NVIDIA/cudnn-frontend/blob/c4ec01a28a26aa57021862de809cc257619f7516/include/cudnn_frontend/graph_properties.h#L163-L205)).
+  ([`graph_properties.h:158-198`](https://github.com/NVIDIA/cudnn-frontend/blob/c4ec01a28a26aa57021862de809cc257619f7516/include/cudnn_frontend/graph_properties.h#L158-L198)).
 - `TensorAttributes(const T& scalar, ScalarType type)`: `RUNTIME_PARAM`
   → **runtime frontend-injected**, `COMPILE_TIME_CONST` → **compile-time constant**
-  ([`graph_properties.h:207-219`](https://github.com/NVIDIA/cudnn-frontend/blob/c4ec01a28a26aa57021862de809cc257619f7516/include/cudnn_frontend/graph_properties.h#L207-L219)).
+  ([`graph_properties.h:200-271`](https://github.com/NVIDIA/cudnn-frontend/blob/c4ec01a28a26aa57021862de809cc257619f7516/include/cudnn_frontend/graph_properties.h#L200-L271)).
 
 **Setters.**
 
 - `set_value<T>(v)` — retained, now **delegates to
   `set_compile_time_constant(v)`** → compile-time constant.
 - `set_compile_time_constant(pass_by_values_t v)` → compile-time constant
-  ([`graph_properties.h:390-399`](https://github.com/NVIDIA/cudnn-frontend/blob/c4ec01a28a26aa57021862de809cc257619f7516/include/cudnn_frontend/graph_properties.h#L390-L399)).
+  ([`graph_properties.h:384-392`](https://github.com/NVIDIA/cudnn-frontend/blob/c4ec01a28a26aa57021862de809cc257619f7516/include/cudnn_frontend/graph_properties.h#L384-L392)).
 - `set_as_runtime_parameter()` → runtime user-supplied; it **clears any prior value**
   (a deliberate divergence from cuDNN, whose `set_as_runtime_parameter`
   leaves `pass_by_value` set,
-  [`graph_properties.h:401-406`](https://github.com/NVIDIA/cudnn-frontend/blob/c4ec01a28a26aa57021862de809cc257619f7516/include/cudnn_frontend/graph_properties.h#L401-L406)) —
+  [`graph_properties.h:394-400`](https://github.com/NVIDIA/cudnn-frontend/blob/c4ec01a28a26aa57021862de809cc257619f7516/include/cudnn_frontend/graph_properties.h#L394-L400)) —
   hipDNN reaches the frontend-injected state only via the `RUNTIME_PARAM` constructor, so the
   value-less runtime path clears the value.
 - `set_is_pass_by_value(bool)` — retained (cuDNN has it,
-  [`graph_properties.h:373-377`](https://github.com/NVIDIA/cudnn-frontend/blob/c4ec01a28a26aa57021862de809cc257619f7516/include/cudnn_frontend/graph_properties.h#L373-L377));
+  [`graph_properties.h:367-371`](https://github.com/NVIDIA/cudnn-frontend/blob/c4ec01a28a26aa57021862de809cc257619f7516/include/cudnn_frontend/graph_properties.h#L367-L371));
   setting `true` with no value yields the runtime user-supplied state.
 
 **Getters.**
@@ -256,11 +256,15 @@ enum class ScalarType { RUNTIME_PARAM, COMPILE_TIME_CONST };
 - `get_pass_by_value()` returns the **value** (`std::optional`-style /
   value variant), not `bool`, and is mode-gated: the value for the
   frontend-injected state, empty for the user-supplied and compile-time-constant states
-  ([`graph_properties.h:358-366`](https://github.com/NVIDIA/cudnn-frontend/blob/c4ec01a28a26aa57021862de809cc257619f7516/include/cudnn_frontend/graph_properties.h#L358-L366)).
+  ([`graph_properties.h:357-360`](https://github.com/NVIDIA/cudnn-frontend/blob/c4ec01a28a26aa57021862de809cc257619f7516/include/cudnn_frontend/graph_properties.h#L357-L360)).
 - `get_compile_time_constant()` returns the value for the compile-time-constant state, empty otherwise
-  ([`graph_properties.h:385-388`](https://github.com/NVIDIA/cudnn-frontend/blob/c4ec01a28a26aa57021862de809cc257619f7516/include/cudnn_frontend/graph_properties.h#L385-L388)).
+  ([`graph_properties.h:379-382`](https://github.com/NVIDIA/cudnn-frontend/blob/c4ec01a28a26aa57021862de809cc257619f7516/include/cudnn_frontend/graph_properties.h#L379-L382)).
 - `get_is_pass_by_value()` is the umbrella predicate (true for all three)
-  ([`graph_properties.h:368-371`](https://github.com/NVIDIA/cudnn-frontend/blob/c4ec01a28a26aa57021862de809cc257619f7516/include/cudnn_frontend/graph_properties.h#L368-L371)).
+  ([`graph_properties.h:362-365`](https://github.com/NVIDIA/cudnn-frontend/blob/c4ec01a28a26aa57021862de809cc257619f7516/include/cudnn_frontend/graph_properties.h#L362-L365)).
+- `get_has_compile_time_constant()` is the bool predicate for the
+  compile-time-constant state (true only there), returning the
+  `is_compile_time_constant` flag; mirrors cuDNN
+  ([`graph_properties.h:374-377`](https://github.com/NVIDIA/cudnn-frontend/blob/c4ec01a28a26aa57021862de809cc257619f7516/include/cudnn_frontend/graph_properties.h#L374-L377)).
 
 **Breaking changes** (from the current hipDNN API): (a)
 `get_pass_by_value()` returns the value instead of `bool`; (b) its former
@@ -313,8 +317,8 @@ descriptor pack/unpack alongside the `value`, and both are persisted so
 `get_pass_by_value` / `get_compile_time_constant` / `get_is_pass_by_value`
 are correct after graph deserialize. cuDNN keeps its analogous
 `pass_by_values` in its FE JSON across serialize/deserialize
-([`graph_interface.h:1592-1607`](https://github.com/NVIDIA/cudnn-frontend/blob/c4ec01a28a26aa57021862de809cc257619f7516/include/cudnn_frontend/graph_interface.h#L1592-L1607),
-[`graph_interface.h:1671-1710`](https://github.com/NVIDIA/cudnn-frontend/blob/c4ec01a28a26aa57021862de809cc257619f7516/include/cudnn_frontend/graph_interface.h#L1671-L1710));
+([`graph_interface.h:1588-1593`](https://github.com/NVIDIA/cudnn-frontend/blob/c4ec01a28a26aa57021862de809cc257619f7516/include/cudnn_frontend/graph_interface.h#L1588-L1593),
+[`graph_interface.h:1666-1673`](https://github.com/NVIDIA/cudnn-frontend/blob/c4ec01a28a26aa57021862de809cc257619f7516/include/cudnn_frontend/graph_interface.h#L1666-L1673));
 hipDNN keeps them in the tensor flatbuffer instead.
 
 This RFC aligns the backend `TensorDescriptor` attributes with cuDNN's
@@ -385,7 +389,7 @@ graph.execute(handle, variantPack, workspace);
 
 This is exactly cuDNN-frontend's
 `extend_tensor_map_with_pass_by_value_tensors_` behavior
-([`graph_interface.h:198-217`](https://github.com/NVIDIA/cudnn-frontend/blob/c4ec01a28a26aa57021862de809cc257619f7516/include/cudnn_frontend/graph_interface.h#L198-L217)).
+([`graph_interface.h:190-212`](https://github.com/NVIDIA/cudnn-frontend/blob/c4ec01a28a26aa57021862de809cc257619f7516/include/cudnn_frontend/graph_interface.h#L190-L212)).
 The frontend
 variant-pack builder `detail::populateBaseVariantPackDescriptor`
 ([`frontend/include/hipdnn_frontend/detail/VariantPackHelpers.hpp:19`](../../frontend/include/hipdnn_frontend/detail/VariantPackHelpers.hpp#L19))
@@ -589,7 +593,7 @@ frontend API. Rules 1 and 5 are reachable and frontend-testable. There is
 two-state design; the frontend-injected state is value + runtime. These mirror cuDNN-frontend's
 `validate()` (the value⇒umbrella and virtual-exclusion analogues and the
 compile-time-constant constraints,
-[`graph_properties.h:67-100`](https://github.com/NVIDIA/cudnn-frontend/blob/c4ec01a28a26aa57021862de809cc257619f7516/include/cudnn_frontend/graph_properties.h#L67-L100)).
+[`graph_properties.h:70-94`](https://github.com/NVIDIA/cudnn-frontend/blob/c4ec01a28a26aa57021862de809cc257619f7516/include/cudnn_frontend/graph_properties.h#L70-L94)).
 
 **Post-build immutability.** The graph descriptor is frozen at build
 (`backendFinalize`, [§2.3](#23-constraints)), so a scalar's baked value
@@ -619,11 +623,11 @@ For a frontend-injected (`RUNTIME_PARAM`) tensor the frontend owns a host-side
 copy of the value: it is snapshot at graph build and stays stable across
 every execute, mirroring cuDNN-frontend's `cached_pass_by_value`
 (collected once at build, reused every execute,
-[`graph_interface.h:978-982`](https://github.com/NVIDIA/cudnn-frontend/blob/c4ec01a28a26aa57021862de809cc257619f7516/include/cudnn_frontend/graph_interface.h#L978-L982))
+[`graph_interface.h:973-976`](https://github.com/NVIDIA/cudnn-frontend/blob/c4ec01a28a26aa57021862de809cc257619f7516/include/cudnn_frontend/graph_interface.h#L973-L976))
 and delivered by `extend_tensor_map_with_pass_by_value_tensors_`
-([`graph_interface.h:198-217`](https://github.com/NVIDIA/cudnn-frontend/blob/c4ec01a28a26aa57021862de809cc257619f7516/include/cudnn_frontend/graph_interface.h#L198-L217))
+([`graph_interface.h:190-212`](https://github.com/NVIDIA/cudnn-frontend/blob/c4ec01a28a26aa57021862de809cc257619f7516/include/cudnn_frontend/graph_interface.h#L190-L212))
 from that build-time cache at execute
-([`graph_interface.h:649-659`](https://github.com/NVIDIA/cudnn-frontend/blob/c4ec01a28a26aa57021862de809cc257619f7516/include/cudnn_frontend/graph_interface.h#L649-L659)).
+([`graph_interface.h:644-650`](https://github.com/NVIDIA/cudnn-frontend/blob/c4ec01a28a26aa57021862de809cc257619f7516/include/cudnn_frontend/graph_interface.h#L644-L650)).
 
 At `Graph::execute()` the frontend injects `uid → &cachedValue` (a host
 pointer to its own copy) into the variant pack before dispatch — the graph
@@ -680,18 +684,18 @@ hipDNN divergences.
 with no concept translation, and the three-state model
 ([§4.9](#49-state-reference)) covers cuDNN's full
 fused-constant-vs-execute-time surface
-([`graph_properties.h:58-64`](https://github.com/NVIDIA/cudnn-frontend/blob/c4ec01a28a26aa57021862de809cc257619f7516/include/cudnn_frontend/graph_properties.h#L58-L64)).
+([`graph_properties.h:53-57`](https://github.com/NVIDIA/cudnn-frontend/blob/c4ec01a28a26aa57021862de809cc257619f7516/include/cudnn_frontend/graph_properties.h#L53-L57)).
 
 **Divergences (decisions, not gaps)**:
 
 1. The single-value constructor `TensorAttributes(v)` and `set_value(v)`
    default to compile-time, not cuDNN's value-carrying runtime type-2
-   ([`graph_properties.h:163-205`](https://github.com/NVIDIA/cudnn-frontend/blob/c4ec01a28a26aa57021862de809cc257619f7516/include/cudnn_frontend/graph_properties.h#L163-L205));
+   ([`graph_properties.h:158-198`](https://github.com/NVIDIA/cudnn-frontend/blob/c4ec01a28a26aa57021862de809cc257619f7516/include/cudnn_frontend/graph_properties.h#L158-L198));
    hipDNN's default stays on the backward-compatible baked path.
 2. `get_pass_by_value()` is mode-gated over a **single** re-used value
    member, whereas cuDNN keys the mode on two separate value members
    (`pass_by_value`, `compile_time_constant_value`,
-   [`graph_properties.h:122-127`](https://github.com/NVIDIA/cudnn-frontend/blob/c4ec01a28a26aa57021862de809cc257619f7516/include/cudnn_frontend/graph_properties.h#L122-L127));
+   [`graph_properties.h:118-123`](https://github.com/NVIDIA/cudnn-frontend/blob/c4ec01a28a26aa57021862de809cc257619f7516/include/cudnn_frontend/graph_properties.h#L118-L123));
    state is a function of the two flags plus value presence, so a second
    value slot is not needed.
 
@@ -1014,7 +1018,8 @@ applicability-time filter).
 Add `enum class ScalarType { RUNTIME_PARAM, COMPILE_TIME_CONST };`; the
 `TensorAttributes(const T&, ScalarType)` constructor; `set_compile_time_constant`
 and `set_as_runtime_parameter`; and `get_compile_time_constant` /
-`get_is_pass_by_value`. Route the plain scalar constructor and
+`get_has_compile_time_constant` / `get_is_pass_by_value`. Route the plain
+scalar constructor and
 `set_value` through `set_compile_time_constant` (compile-time constant). Change
 `get_pass_by_value()` to return the value variant (mode-gated to the frontend-injected state),
 moving its former bool-predicate role to `get_is_pass_by_value()`, and
@@ -1154,7 +1159,7 @@ Test conventions follow [RFC 0006](0006_PluginAgnosticIntegrationTests.md). The 
   `enum class ScalarType { RUNTIME_PARAM, COMPILE_TIME_CONST };`
   selecting a value-carrying tensor's state at construction, mirroring
   cuDNN-frontend
-  ([`graph_properties.h:42-46`](https://github.com/NVIDIA/cudnn-frontend/blob/c4ec01a28a26aa57021862de809cc257619f7516/include/cudnn_frontend/graph_properties.h#L42-L46)).
+  ([`graph_properties.h:42-45`](https://github.com/NVIDIA/cudnn-frontend/blob/c4ec01a28a26aa57021862de809cc257619f7516/include/cudnn_frontend/graph_properties.h#L42-L45)).
 - **`RUNTIME_PARAM`**: the `ScalarType` alternative producing the runtime frontend-injected state —
   a value-carrying runtime scalar delivered by frontend variant-pack
   injection ([§4.8](#48-frontend-variant-pack-injection)).
@@ -1190,9 +1195,9 @@ Test conventions follow [RFC 0006](0006_PluginAgnosticIntegrationTests.md). The 
   pointer to the frontend's build-time snapshot of the value) into the
   variant pack before dispatch, mirroring cuDNN's
   `extend_tensor_map_with_pass_by_value_tensors_`
-  ([`graph_interface.h:198-217`](https://github.com/NVIDIA/cudnn-frontend/blob/c4ec01a28a26aa57021862de809cc257619f7516/include/cudnn_frontend/graph_interface.h#L198-L217))
+  ([`graph_interface.h:190-212`](https://github.com/NVIDIA/cudnn-frontend/blob/c4ec01a28a26aa57021862de809cc257619f7516/include/cudnn_frontend/graph_interface.h#L190-L212))
   and `cached_pass_by_value`
-  ([`graph_interface.h:978-982`](https://github.com/NVIDIA/cudnn-frontend/blob/c4ec01a28a26aa57021862de809cc257619f7516/include/cudnn_frontend/graph_interface.h#L978-L982)).
+  ([`graph_interface.h:973-976`](https://github.com/NVIDIA/cudnn-frontend/blob/c4ec01a28a26aa57021862de809cc257619f7516/include/cudnn_frontend/graph_interface.h#L973-L976)).
   See [§4.8](#48-frontend-variant-pack-injection).
 - **Variant pack**: the runtime-only carrier of per-execution payload
   (data pointers, unique IDs, workspace). New in this RFC: a runtime
