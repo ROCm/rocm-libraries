@@ -4,12 +4,14 @@
 #pragma once
 
 #include "ck_tile/core/arch/mma/mma_data_format.hpp"
+#include "ck_tile/core/numeric/ext_vector_base.hpp"
 #include "ck_tile/core/numeric/float8.hpp"
 #include "ck_tile/core/numeric/integer.hpp"
 #include "ck_tile/core/numeric/pk_f6.hpp"
 #include "ck_tile/core/numeric/pk_fp4.hpp"
 #include "ck_tile/core/numeric/vector_type.hpp"
 #include "ck_tile/core/utility/bit_cast.hpp"
+#include "ck_tile/core/utility/functional.hpp"
 #include "ck_tile/core/utility/type_traits.hpp"
 #include "ck_tile/ops/gemm/warp/warp_gemm_params.hpp"
 
@@ -17,55 +19,50 @@
 
 namespace ck_tile::core::arch::mma::scale::detail {
 
-template <typename ValueT, typename T>
-inline constexpr int32x8_t to_mfma_scale_arg(const T& vec)
+template <typename OutT, typename ValueT, typename T>
+inline constexpr OutT to_scale_arg(const T& vec)
 {
+    static_assert(is_any_of<OutT, int32x8_t, int32x16_t>::value,
+                  "Only support int32x8_t or int32x16_t as output type.");
+
+    constexpr index_t N = vector_traits<OutT>::vector_size;
     if constexpr(is_any_of<ValueT, fp8_t, bf8_t>::value)
     {
-        return bit_cast<int32x8_t>(vec);
+        return bit_cast<OutT>(vec);
     }
     else if constexpr(is_any_of<ValueT, pk_fp6x16_t, pk_bf6x16_t>::value)
     {
-        return int32x8_t{
-            vec.data[0], vec.data[1], vec.data[2], vec.data[3], vec.data[4], vec.data[5], 0, 0};
+        constexpr index_t init_N = N * 3 / 4;
+        OutT out{};
+        static_for<0, init_N, 1>{}([&out, &vec](auto i) { out[i.value] = vec.data[i.value]; });
+        return out;
     }
     else if constexpr(is_any_of<ValueT, pk_fp4_t>::value)
     {
-        int32x4_t tmp = bit_cast<int32x4_t>(vec);
-        return int32x8_t{tmp[0], tmp[1], tmp[2], tmp[3], 0, 0, 0, 0};
+        constexpr index_t init_N = N / 2;
+        using HalfOutT           = ext_vector_t<int32_t, init_N>;
+        HalfOutT tmp             = bit_cast<HalfOutT>(vec);
+        OutT out{};
+        static_for<0, init_N, 1>{}([&out, &tmp](auto i) { out[i.value] = tmp[i.value]; });
+        return out;
     }
     else
     {
-        static_assert(sizeof(ValueT) == 0, "unsupported ValueT for to_mfma_scale_arg");
-        return int32x8_t{};
+        static_assert(sizeof(ValueT) == 0, "unsupported ValueT for to_scale_arg");
+        return OutT{};
     }
+}
+
+template <typename ValueT, typename T>
+inline constexpr int32x8_t to_mfma_scale_arg(const T& vec)
+{
+    return to_scale_arg<int32x8_t, ValueT>(vec);
 }
 
 template <typename ValueT, typename T>
 inline constexpr int32x16_t to_wmma_scale_arg(const T& vec)
 {
-    if constexpr(is_any_of<ValueT, fp8_t, bf8_t>::value)
-    {
-        return bit_cast<int32x16_t>(vec);
-    }
-    else if constexpr(is_any_of<ValueT, pk_fp6x16_t, pk_bf6x16_t>::value)
-    {
-        // clang-format off
-        return int32x16_t{vec.data[0], vec.data[1], vec.data[2],  vec.data[3],  vec.data[4], vec.data[5], vec.data[6], vec.data[7],
-                          vec.data[8], vec.data[9], vec.data[10], vec.data[11], 0, 0, 0, 0};
-        // clang-format on
-    }
-    else if constexpr(is_any_of<ValueT, pk_fp4_t>::value)
-    {
-        int32x8_t tmp = bit_cast<int32x8_t>(vec);
-        return int32x16_t{
-            tmp[0], tmp[1], tmp[2], tmp[3], tmp[4], tmp[5], tmp[6], tmp[7], 0, 0, 0, 0, 0, 0, 0, 0};
-    }
-    else
-    {
-        static_assert(sizeof(ValueT) == 0, "unsupported ValueT for to_wmma_scale_arg");
-        return int32x16_t{};
-    }
+    return to_scale_arg<int32x16_t, ValueT>(vec);
 }
 
 template <typename DataType, int32_t ScaleFlag>
