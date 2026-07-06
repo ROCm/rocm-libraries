@@ -171,6 +171,10 @@ struct SparseMmaPipeline : public MmaPipelineBase<SparseMmaPipeline<ADataType_, 
         // into it.
         static constexpr index_t AttrNumAccessV = AttrNumAccessAV;
     };
+
+    // Expose kCMLane for some callers (e.g. gemm_quant block policies)
+    static constexpr index_t kCMLane = WarpGemmAttribute::Impl::kCMLane;
+
     // TODO: TileDistrEncCalc only supports K composition (kIter). Setting UncompressedA to true
     // ensures that we get a tile distribution for the uncompressed A matrix, which is what the
     // higher level caller will show up with (external).

@@ -171,6 +171,9 @@ struct ScaleMmaPipeline : public MmaPipelineBase<ScaleMmaPipeline<ADataType_, BD
         static constexpr index_t AttrNumAccessV = AttrNumAccessAV;
     };
 
+    // Expose kCMLane for some callers (e.g. gemm_quant block policies)
+    static constexpr index_t kCMLane = WarpGemmAttribute::Impl::kCMLane;
+
     // Unsupported MmaOps with nonTrivial AttrNumAccess lead to issues in calculator.
     static constexpr index_t AttrNumAccessAV_support =
         MmaOpTraits<MmaOp>::IsSupported ? AttrNumAccessAV : 1;
@@ -277,6 +280,51 @@ struct ScaleMmaPipeline : public MmaPipelineBase<ScaleMmaPipeline<ADataType_, BD
         {
             static_assert(false, "Invalid accumulation policy");
         }
+    }
+
+    // Scope operator(), avoid C++ name hiding
+    using Base::operator();
+
+    // gfx950 scale intrinsics have no "no-scale" opcode
+    // so we mimic Base::operator()(CTensor&, ATensor&, const BTensor&)
+    // with a scale of 1 for both A and B
+    template <typename... Params, typename CTensor, typename ATensor, typename BTensor>
+    CK_TILE_DEVICE void operator()(CTensor& c, ATensor& a, const BTensor& b) const
+    {
+        static_assert(
+            detail::is_similiar_distributed_tensor_v<remove_cvref_t<CTensor>, CWarpTensor> &&
+            detail::is_similiar_distributed_tensor_v<remove_cvref_t<ATensor>, AWarpTensor> &&
+            detail::is_similiar_distributed_tensor_v<remove_cvref_t<BTensor>, BWarpTensor>);
+
+        // gfx950: packed e8m0_t, bias 127 = 0x7F
+        // => 2^(127-127) = 1 for each byte
+        constexpr int32_t identity_scale = 0x7F7F7F7F;
+        // "Multiply by 1" scale
+        Base::template exec<Params...>(a, b, c, identity_scale, identity_scale);
+    }
+
+    // Overload with 2 arguments
+    // gfx950 scale intrinsics have no "no-C" opcode and force cVec
+    template <typename... Params, typename ATensor, typename BTensor>
+    CK_TILE_DEVICE CWarpTensor operator()(const ATensor& a, const BTensor& b) const
+    {
+        static_assert(
+            detail::is_similiar_distributed_tensor_v<remove_cvref_t<ATensor>, AWarpTensor> &&
+            detail::is_similiar_distributed_tensor_v<remove_cvref_t<BTensor>, BWarpTensor>);
+
+        // declare and zero-initialise C
+        CWarpTensor c;
+        for(index_t i = 0; i < CWarpTensor::get_thread_buffer_size(); ++i)
+        {
+            c.get_thread_buffer()[i] = CDataType{0};
+        }
+
+        // gfx950: packed e8m0_t, bias 127 = 0x7F
+        // => 2^(127-127) = 1 for each byte
+        constexpr int32_t identity_scale = 0x7F7F7F7F;
+        // "Multiply by 1" scale
+        Base::template exec<Params...>(a, b, c, identity_scale, identity_scale);
+        return c;
     }
 };
 

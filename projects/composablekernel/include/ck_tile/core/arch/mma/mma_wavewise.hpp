@@ -176,6 +176,9 @@ struct WaveWiseMmaPipeline : public MmaPipelineBase<WaveWiseMmaPipeline<ADataTyp
         static constexpr index_t AttrNumAccessV = AttrNumAccessAV;
     };
 
+    // Expose kCMLane for some callers (e.g. gemm_quant block policies)
+    static constexpr index_t kCMLane = WarpGemmAttribute::Impl::kCMLane;
+
     // Unsupported MmaOps with nonTrivial AttrNumAccess lead to issues in calculator.
     static constexpr index_t AttrNumAccessAV_support =
         MmaOpTraits<MmaOp>::IsSupported ? AttrNumAccessAV : 1;
