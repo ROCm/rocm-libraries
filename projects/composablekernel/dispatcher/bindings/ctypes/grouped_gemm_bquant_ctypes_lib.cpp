@@ -2,11 +2,11 @@
 // SPDX-License-Identifier: MIT
 
 /**
- * BQuantGrouped GEMM Dispatcher ctypes Library
+ * GroupedGemm BQuant Dispatcher ctypes Library
  *
  * Provides C API for Python ctypes integration.
  * Kernel header is force-included at compile time via:
- *   hipcc -include <kernel.hpp> -DCK_TILE_SINGLE_KERNEL_INCLUDE bquant_gemm_ctypes_lib.cpp
+ *   hipcc -include <kernel.hpp> -DCK_TILE_SINGLE_KERNEL_INCLUDE grouped_gemm_bquant_ctypes_lib.cpp
  *
  * Force-include defines (from generated kernel header):
  *   SelectedKernel, KERNEL_NAME

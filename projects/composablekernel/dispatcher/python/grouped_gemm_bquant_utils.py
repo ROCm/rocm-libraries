@@ -4,7 +4,7 @@
 # SPDX-License-Identifier: MIT
 
 """
-BQuantGrouped GEMM dispatcher utilities.
+GroupedGemm BQuant dispatcher utilities.
 
 Three-layer Python bridge for the dispatcher's BQuantGrouped GEMM path:
 
@@ -42,8 +42,8 @@ log = logging.getLogger(__name__)
 # Constants
 # =============================================================================
 
-_CODEGEN_SCRIPT = Path(__file__).parent.parent / "codegen" / "unified_bquant_gemm_codegen.py"
-_CTYPES_LIB_SRC = Path(__file__).parent.parent / "bindings" / "ctypes" / "bquant_gemm_ctypes_lib.cpp"
+_CODEGEN_SCRIPT = Path(__file__).parent.parent / "codegen" / "unified_grouped_gemm_bquant_codegen.py"
+_CTYPES_LIB_SRC = Path(__file__).parent.parent / "bindings" / "ctypes" / "grouped_gemm_bquant_ctypes_lib.cpp"
 
 _DEFAULT_HIPCC    = "hipcc"
 _DEFAULT_GFX_ARCH = "gfx950"
@@ -69,7 +69,7 @@ class BQuantKernelConfig:
     """
     Complete description of one BQuantGrouped GEMM kernel.
 
-    The .name property produces the exact string that unified_bquant_gemm_codegen.py
+    The .name property produces the exact string that unified_grouped_gemm_bquant_codegen.py
     emits as KERNEL_NAME, ensuring the Python side and compiled .so always agree.
     """
 
@@ -102,7 +102,7 @@ class BQuantKernelConfig:
     def name(self) -> str:
         """Byte-exact match to codegen KERNEL_NAME."""
         parts = [
-            "bquant_gemm",
+            "grouped_gemm_bquant",
             self.variant_key,
             self.layout,
             self.pipeline,
@@ -120,7 +120,7 @@ class BQuantKernelConfig:
         return "_".join(parts)
 
     def to_codegen_config(self) -> dict:
-        """Produce the JSON config dict consumed by unified_bquant_gemm_codegen.py."""
+        """Produce the JSON config dict consumed by unified_grouped_gemm_bquant_codegen.py."""
         return {
             "variant_keys": [self.variant_key],
             "layouts": [self.layout],
@@ -416,7 +416,7 @@ def _generate_bquant_kernel(
     output_dir: Path,
 ) -> Optional[Path]:
     """
-    Run unified_bquant_gemm_codegen.py for one config; return the .hpp path or None.
+    Run unified_grouped_gemm_bquant_codegen.py for one config; return the .hpp path or None.
     """
     config_dict = config.to_codegen_config()
     config_json = json.dumps(config_dict)

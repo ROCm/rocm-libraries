@@ -4,19 +4,19 @@
 # SPDX-License-Identifier: MIT
 
 """
-BQuantGrouped GEMM Code Generator
+GroupedGemm BQuant Code Generator
 
 Generates one .hpp per kernel config for the dispatcher's ctypes path.
 Each header defines a SelectedKernel struct with a static launch() method
 taking QuantGemmHostArgs — compiled per-kernel via force-include:
 
-    hipcc -include <kernel.hpp> -DCK_TILE_SINGLE_KERNEL_INCLUDE bquant_gemm_ctypes_lib.cpp
+    hipcc -include <kernel.hpp> -DCK_TILE_SINGLE_KERNEL_INCLUDE grouped_gemm_bquant_ctypes_lib.cpp
 
 Initial scope: fp8 and bf8 dtype variants, non-preshuffle, compv3 pipeline,
 rcr layout, configurable QuantGroupShape.
 
-Naming convention (byte-exact with BQuantKernelConfig.name in bquant_gemm_utils.py):
-    bquant_gemm_{dtype_a}_{layout}_{pipeline}_{epilogue}_{scheduler}_
+Naming convention (byte-exact with BQuantKernelConfig.name in grouped_gemm_bquant_utils.py):
+    grouped_gemm_bquant_{dtype_a}_{layout}_{pipeline}_{epilogue}_{scheduler}_
     {TileM}x{TileN}x{TileK}_{WarpM}x{WarpN}x{WarpK}_{WtM}x{WtN}x{WtK}_
     qg{gM}x{gN}x{gK}[_preshuffleb][_preshufflebq]
 
@@ -147,7 +147,7 @@ class BQuantKernelSpec:
     def name(self) -> str:
         t = self.tile
         parts = [
-            "bquant_gemm",
+            "grouped_gemm_bquant",
             self.variant_key,
             self.layout,
             self.pipeline,
@@ -210,7 +210,7 @@ class BQuantKernelHeaderGenerator:
         return f"""\
 // SPDX-License-Identifier: MIT
 // Auto-generated BQuantGrouped GEMM kernel header.
-// DO NOT EDIT — regenerate via unified_bquant_gemm_codegen.py
+// DO NOT EDIT — regenerate via unified_grouped_gemm_bquant_codegen.py
 #pragma once
 
 #include "ck_tile/core.hpp"

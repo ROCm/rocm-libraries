@@ -4,10 +4,10 @@
 # SPDX-License-Identifier: MIT
 
 """
-Example 13 — BQuantGrouped GEMM via the Dispatcher
+Example 13 — GroupedGemm BQuant via the Dispatcher
 
 Demonstrates the full three-layer path:
-  1. Codegen  — unified_bquant_gemm_codegen.py → .hpp
+  1. Codegen  — unified_grouped_gemm_bquant_codegen.py → .hpp
   2. Compile  — hipcc → .so
   3. Run      — BQuantGpuGemmRunner → C = A @ dequant(B, BQ)
 
@@ -109,7 +109,7 @@ def reference_bquant_gemm(
 
 
 def main():
-    parser = argparse.ArgumentParser(description="BQuantGrouped GEMM dispatcher example")
+    parser = argparse.ArgumentParser(description="GroupedGemm BQuant dispatcher example")
     parser.add_argument("--dtype", choices=["fp8", "bf8"], default="fp8")
     parser.add_argument("--M", type=int, default=16)
     parser.add_argument("--N", type=int, default=64)

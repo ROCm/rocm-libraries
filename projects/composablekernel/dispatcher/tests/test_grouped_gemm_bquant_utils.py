@@ -4,13 +4,13 @@
 # SPDX-License-Identifier: MIT
 
 """
-CPU-only unit tests for bquant_gemm_utils.py.
+CPU-only unit tests for grouped_gemm_bquant_utils.py.
 
 Tests kernel name generation, config serialization, and problem dimension helpers.
 No GPU or hipcc required.
 
 Run:
-    python3 -m pytest dispatcher/tests/test_bquant_gemm_utils.py -v
+    python3 -m pytest dispatcher/tests/test_grouped_gemm_bquant_utils.py -v
 """
 
 import math
@@ -21,7 +21,7 @@ import pytest
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "python"))
 
-from bquant_gemm_utils import (
+from grouped_gemm_bquant_utils import (
     BQuantKernelConfig,
     BQuantGemmProblem,
     default_fp8_config,
@@ -49,7 +49,7 @@ class TestKernelName:
             quant_group_m=1, quant_group_n=1, quant_group_k=128,
         )
         assert cfg.name == (
-            "bquant_gemm_fp8_rcr_compv3_cshuffle_intrawave_"
+            "grouped_gemm_bquant_fp8_rcr_compv3_cshuffle_intrawave_"
             "16x64x256_1x4x1_16x16x16_qg1x1x128"
         )
 
@@ -66,7 +66,7 @@ class TestKernelName:
             quant_group_m=1, quant_group_n=1, quant_group_k=128,
         )
         assert cfg.name == (
-            "bquant_gemm_bf8_rcr_compv3_cshuffle_intrawave_"
+            "grouped_gemm_bquant_bf8_rcr_compv3_cshuffle_intrawave_"
             "16x64x256_1x4x1_16x16x16_qg1x1x128"
         )
 
