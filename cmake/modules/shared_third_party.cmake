@@ -12,6 +12,35 @@ include_guard(GLOBAL)
 
 include(FetchContent)
 
+# _rocm_libs_suppress_rocm_toolchain_checks()
+#
+# Replace ROCMChecks's watched-variable callback with a no-op while a
+# third-party CMake project configures. Some dependencies mutate compiler flag
+# variables internally, and ROCMChecks reports those writes from variable_watch()
+# regardless of ROCM_WARN_TOOLCHAIN_VAR.
+macro(_rocm_libs_suppress_rocm_toolchain_checks)
+    if(COMMAND rocm_check_toolchain_var)
+	# Dummy function
+        function(rocm_check_toolchain_var)
+        endfunction()
+    endif()
+endmacro()
+
+# _rocm_libs_restore_rocm_toolchain_checks()
+#
+# Reinstall ROCMChecks's watched-variable callback after a suppression window.
+# The warning and error toggles are disabled only for the include that restores
+# the callback, so restoring does not emit the messages being suppressed.
+macro(_rocm_libs_restore_rocm_toolchain_checks)
+    if(COMMAND rocm_check_toolchain_var)
+        set(ROCM_WARN_TOOLCHAIN_VAR OFF)
+        set(ROCM_ERROR_TOOLCHAIN_VAR OFF)
+        include(ROCMChecks)
+        unset(ROCM_WARN_TOOLCHAIN_VAR)
+        unset(ROCM_ERROR_TOOLCHAIN_VAR)
+    endif()
+endmacro()
+
 # _create_missing_gtest_alias(<name>)
 #
 # Create a `GTest::<name>` ALIAS for the plain `<name>` target, if the source
@@ -117,7 +146,9 @@ function(rocm_libs_declare_shared_deps)
         URL_HASH SHA256=65fab701d9829d38cb77c14acdc431d2108bfdbf8979e40eb8ae567edf10b27c
         SYSTEM
         OVERRIDE_FIND_PACKAGE)
+    _rocm_libs_suppress_rocm_toolchain_checks()
     FetchContent_MakeAvailable(GTest)
+    _rocm_libs_restore_rocm_toolchain_checks()
     set(BUILD_SHARED_LIBS "${_rocm_libs_saved_BUILD_SHARED_LIBS}")
     unset(_rocm_libs_saved_BUILD_SHARED_LIBS)
 
