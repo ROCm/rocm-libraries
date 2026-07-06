@@ -5738,6 +5738,11 @@ class KernelWriter(metaclass=abc.ABCMeta):
       originalNta = tensorParametersA["NonTemporal"]
       originalNtb = tensorParametersB["NonTemporal"]
 
+      hasTH = self.states.asmCaps.get("HasTHModifier", False)
+      if hasTH:
+        originalThA = tensorParametersA["TemporalHint"]
+        originalThB = tensorParametersB["TemporalHint"]
+
       ntCombos = [[0, 0], [0, 4], [4, 0]]
       ntLabels = [Label("LoopBody_NTA{}_NTB{}".format(nta, ntb), "") for nta, ntb in ntCombos]
       ntLabelDone = Label("LoopBody_NTA_NTB_Done", "")
@@ -5801,6 +5806,9 @@ class KernelWriter(metaclass=abc.ABCMeta):
         module.add(ntLabels[idx])
         tensorParametersA["NonTemporal"] = nta
         tensorParametersB["NonTemporal"] = ntb
+        if hasTH:
+          tensorParametersA["TemporalHint"] = 1 if nta else 0
+          tensorParametersB["TemporalHint"] = 1 if ntb else 0
         _kernelBody(pack, packPre, nta, ntb)
         # All paths but the last one need to skip the rest. Use long
         # branches everywhere because each kernelBody can easily exceed
@@ -5814,6 +5822,9 @@ class KernelWriter(metaclass=abc.ABCMeta):
 
       tensorParametersA["NonTemporal"] = originalNta
       tensorParametersB["NonTemporal"] = originalNtb
+      if hasTH:
+        tensorParametersA["TemporalHint"] = originalThA
+        tensorParametersB["TemporalHint"] = originalThB
 
     if kernel["ExpertSchedulingMode"] > 0:
       module.add(SSetRegIMM32B32(dst=HWRegContainer(reg="26", value=[0,2]), src=0x0, comment="enable hardware dependency checking"))
@@ -9926,6 +9937,7 @@ class KernelWriter(metaclass=abc.ABCMeta):
     tP["wtc"] = itP[cM].writeTileDimComponents                   # write vector components along tile dimension
     tP["idx"] = kernel["ProblemType"]["Index%d"%tP["tensorIdx"]] # index 0 is tile dimension belonging to A. Note 'idx' may not be in tP['ia'].
     tP["NonTemporal"] = kernel["NonTemporal%s"%cM]               # non-temporal read type
+    tP["TemporalHint"] = kernel.get("TemporalHint%s"%cM, 0)      # temporal-hint read type
     tP["shiftGR"] = 0 if (tP["bpeGR"] >= tP["bpeDS"]) else int(tP["glvw"] // 2 * (tP["bpeDS"] / self.states.bpr))  # Shift global read register for cvt spaces
     tP["bpeRatio"] = tP["bpeDS"] // tP["bpeGR"] if tP["bpeGR"] < tP["bpeDS"] else 1                                # g2lIdx multiplier
 
