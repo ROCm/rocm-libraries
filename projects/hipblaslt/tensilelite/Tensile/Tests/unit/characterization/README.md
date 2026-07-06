@@ -54,6 +54,41 @@ pytest -m unit --cov=Tensile --cov-config=pyproject.toml \
 
 Line coverage = `(Stmts - Miss) / Stmts`.
 
+## Coverage floor + ratchet (CI enforcement)
+
+Two complementary gates keep this net from silently eroding. Both run in the `coverage-unit`
+tox environment (`tox -e coverage-unit`), which the Math CI codecov job and the TensileLite
+coverage GitHub Actions lane both invoke.
+
+- **Floor** (AIHPBLAS-3877): a single whole-project minimum. The value lives in **one place** —
+  `fail_under` under `[tool.coverage.report]` in the top-level [`pyproject.toml`](../../../../pyproject.toml)
+  — and pytest-cov fails the run when whole-project coverage drops below it. There is no second
+  copy of the number in `tox.ini` or in CI YAML.
+- **Ratchet** (AIHPBLAS-3878): a per-file no-regression guard. `coverage-baseline.json` (in this
+  directory) pins each file's current coverage; `tools/coverage_ratchet.py check` (wired into the
+  `coverage-unit` env's `commands_post`) fails the run if any file drops below its baseline by more
+  than the recorded tolerance. Coverage may rise freely; it may not silently fall. The failure
+  message names every regressed file and prints the exact remediation command.
+
+### Moving the baseline on purpose
+
+A coverage drop is a signal, not a chore — first decide whether it is a real regression (add the
+missing test) or an intentional, reviewed change (e.g. code removed). Only for an intentional move
+do you regenerate the baseline, and it is a single reviewed command whose diff is reviewed like any
+other change:
+
+```bash
+tox -e coverage-unit    # regenerates coverage.json (even if the ratchet then fails)
+python Tensile/Tests/unit/characterization/tools/coverage_ratchet.py update --current coverage.json
+```
+
+Then commit the reviewed `coverage-baseline.json` diff. Never widen the tolerance or blank the
+baseline to go green.
+
+> The committed baseline ships **seeded (empty)** and must be populated by one `update` run in a
+> real ROCm dev environment (with `rocisa` built) before the ratchet enforces anything. While the
+> `files` map is empty the ratchet is a no-op; the whole-project floor above still applies.
+
 ## Snapshot / golden discipline (governance)
 
 These `.ambr` goldens are the safety net for the TensileLite/hipBLASLt consolidation refactor. They only protect you if they change **deliberately, one reviewed diff at a time**. The cardinal rule: never blanket-regenerate.

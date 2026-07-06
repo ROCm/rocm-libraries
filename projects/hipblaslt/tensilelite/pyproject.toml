@@ -24,6 +24,10 @@ show_missing = true
 skip_covered = false
 skip_empty = true
 sort = "Cover"
+# Whole-project coverage floor (AIHPBLAS-3877). This is the single documented
+# source of truth for the floor; pytest-cov reads it, so CI fails when coverage
+# drops below this number without duplicating the value in tox.ini or CI YAML.
+fail_under = 80
 exclude_lines = [
     "pragma: no cover",
     "def __repr__",

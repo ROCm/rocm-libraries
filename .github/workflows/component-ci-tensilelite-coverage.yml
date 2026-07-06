@@ -1,0 +1,62 @@
+name: "Component CI: TensileLite coverage"
+
+on:
+  workflow_call:
+    inputs:
+      docker_image:
+        type: string
+        required: true
+      linux_runner:
+        type: string
+        required: true
+
+permissions:
+  contents: read
+
+jobs:
+  linux:
+    name: Linux
+    runs-on: ${{ inputs.linux_runner }}
+    container:
+      image: ${{ inputs.docker_image }}
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+
+      - name: Setup ROCm
+        uses: ./.github/actions/setup-rocm-linux
+        with:
+          amdgpu_family: gfx94X-dcgpu
+
+      - name: Install tox
+        shell: bash
+        run: pip install tox
+
+      # Runs the characterization + unit suite under coverage and enforces two
+      # gates (AIHPBLAS-3877 / AIHPBLAS-3878): the whole-project floor
+      # (fail_under in pyproject.toml, via pytest-cov) and the per-file ratchet
+      # (coverage_ratchet.py, wired into the tox env's commands_post). No GPU or
+      # client build is needed - coverage-unit skips the client build; the
+      # compiler env below is only so rocisa builds during the tox run.
+      - name: Run coverage-unit (floor + ratchet)
+        shell: bash
+        working-directory: projects/hipblaslt/tensilelite
+        env:
+          CXX: ${{ env.ROCM_PATH }}/lib/llvm/bin/amdclang++
+          CC: ${{ env.ROCM_PATH }}/lib/llvm/bin/amdclang
+          CMAKE_PREFIX_PATH: ${{ env.ROCM_PATH }}
+          CMAKE_GENERATOR: Ninja
+          LD_LIBRARY_PATH: ${{ env.ROCM_PATH }}/lib:${{ env.LD_LIBRARY_PATH }}
+        run: tox -e coverage-unit
+
+      - name: Upload coverage reports
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: tensilelite-coverage
+          path: |
+            projects/hipblaslt/tensilelite/coverage.xml
+            projects/hipblaslt/tensilelite/coverage.json
+            projects/hipblaslt/tensilelite/htmlcov
+          if-no-files-found: ignore
+          retention-days: 7

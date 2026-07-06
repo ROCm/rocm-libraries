@@ -1,0 +1,6 @@
+{
+  "_comment": "Per-file coverage ratchet baseline for the TensileLite characterization suite (AIHPBLAS-3878). Coverage may rise but not fall. Regenerate with coverage_ratchet.py update; review the diff.",
+  "_status": "SEED - the files map is intentionally empty. Populate it from a real coverage run in the ROCm dev environment (rocisa built) before the ratchet enforces anything: `tox -e coverage-unit` then `python Tensile/Tests/unit/characterization/tools/coverage_ratchet.py update --current coverage.json`, and commit the reviewed diff. While empty, the ratchet is a no-op (the whole-project floor in pyproject.toml still applies).",
+  "tolerance": 0.1,
+  "files": {}
+}
