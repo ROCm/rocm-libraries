@@ -364,6 +364,7 @@ gfx11_common_patterns: &gfx11_common_patterns
   - "Full/GPU_Softmax_FP32*"  # 24 min
   - "Full/GPU_Softmax_BFP16*"  # 13 min
   - "Full/GPU_Softmax_FP16*" # 11.5 min
+  - "*GPU_GemmWrwUniversal_LargeMemory_*"  # aborts the test process on gfx1151
 
 exclude_gpu:
   exclude_gpu_gfx120X:
