@@ -410,8 +410,7 @@ inline bool isCalleeBody(const StinkyInstruction& inst) {
 /// instructions.
 inline bool isPseudoInst(const StinkyInstruction* inst) {
     return inst->getUnifiedOpcode() == GFX::LABEL || inst->getUnifiedOpcode() == GFX::PHI ||
-           inst->getUnifiedOpcode() == GFX::FENCE ||
-           inst->getUnifiedOpcode() == GFX::CALLEE_BODY;
+           inst->getUnifiedOpcode() == GFX::FENCE || inst->getUnifiedOpcode() == GFX::CALLEE_BODY;
 }
 
 inline bool isGlobalMemLoad(const StinkyInstruction& inst) {

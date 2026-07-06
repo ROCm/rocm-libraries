@@ -22,8 +22,12 @@
  * ************************************************************************ */
 #include <gtest/gtest.h>
 
+#include <sstream>
 #include <string>
+#include <vector>
 
+#include "ModifierSerializer.hpp"
+#include "stinkytofu/ir/asm/StinkyAsmIR.hpp"
 #include "stinkytofu/ir/asm/StinkyModifiers.hpp"
 
 using namespace stinkytofu;
@@ -209,4 +213,38 @@ TEST(MatrixScaleFmt, ParseInvalidReturnsNone) {
     EXPECT_EQ(parseMatrixScaleFmt(""), MatrixScaleFmt::NONE);
     EXPECT_EQ(parseMatrixScaleFmt("3"), MatrixScaleFmt::NONE);
     EXPECT_EQ(parseMatrixScaleFmt("E8"), MatrixScaleFmt::NONE);
+}
+
+// ---------------------------------------------------------------------------
+// CallTargetData serializer
+// ---------------------------------------------------------------------------
+
+TEST(CallTargetData, SerializeEscapesCalleeNames) {
+    CallTargetData data(
+        std::vector<std::string>{"label_Activation_Relu_VW1", "quote\"name", "back\\slash"});
+
+    std::ostringstream os;
+    EXPECT_TRUE(ModifierSerializer::serialize(data, os));
+    EXPECT_EQ(os.str(),
+              ", mod.call_targets = { callees = "
+              "[\"label_Activation_Relu_VW1\",\"quote\\\"name\",\"back\\\\slash\"] }");
+}
+
+TEST(CallTargetData, DeserializeParsesEscapedCalleeNames) {
+    Function func("call_targets_test");
+    BasicBlock* bb = func.createBasicBlock("entry");
+    AsmIRBuilder builder(*bb, GfxArchID::Gfx1250);
+    StinkyInstruction* inst = builder.create(getMCIDByUOp(GFX::s_swappc_b64, GfxArchID::Gfx1250));
+
+    ParsedModifierDict modifiers;
+    modifiers["mod.call_targets"]["callees"] =
+        "[\"label_Activation_Relu_VW1\",\"quote\\\"name\",\"back\\\\slash\"]";
+    ModifierSerializer::deserialize(inst, modifiers);
+
+    const auto* data = inst->getModifier<CallTargetData>();
+    ASSERT_NE(data, nullptr);
+    ASSERT_EQ(data->callees.size(), 3u);
+    EXPECT_EQ(data->callees[0], "label_Activation_Relu_VW1");
+    EXPECT_EQ(data->callees[1], "quote\"name");
+    EXPECT_EQ(data->callees[2], "back\\slash");
 }

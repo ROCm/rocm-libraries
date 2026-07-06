@@ -36,7 +36,6 @@
 #include "TestHelpers.hpp"
 #include "stinkytofu/bindings/python/Module.hpp"
 #include "stinkytofu/core/PassManager.hpp"
-#include "stinkytofu/hardware/ArchHelper.hpp"
 #include "stinkytofu/ir/asm/StinkyAsmIR.hpp"
 #include "stinkytofu/transforms/asm/FlattenCalleesPass.hpp"
 
@@ -69,7 +68,7 @@ int countMarkers(const BasicBlock& bb) {
     int n = 0;
     for (const IRBase& ir : bb) {
         const auto* inst = dyn_cast<StinkyInstruction>(&ir);
-        if (inst && inst->getUnifiedOpcode() == GFX::CALLEE_BODY) ++n;
+        if (inst && isCalleeBody(*inst)) ++n;
     }
     return n;
 }
@@ -137,6 +136,54 @@ TEST_F(FlattenCalleesPassTest, InlinesMultipleCalleesInMarkerOrder) {
 
     EXPECT_EQ(vaddDestSeq(*entryBlock), (std::vector<unsigned>{0, 20, 30, 9}));
     EXPECT_EQ(countMarkers(*entryBlock), 0);
+}
+
+TEST_F(FlattenCalleesPassTest, ResolvesNestedCalleeMarkersOnLaterIteration) {
+    // entry: v0, [marker -> outer], v1
+    createVAddInBlock(entryBlock, kArch, /*dest=*/0, 1, 2);
+    addSpliceMarker(entryBlock, "outer_callee");
+    createVAddInBlock(entryBlock, kArch, /*dest=*/1, 1, 2);
+
+    // outer: v10, [marker -> inner], v11
+    Function& outer = module->createFunction("outer_callee");
+    setFunctionArch(outer, kArch);
+    BasicBlock* outerBlock = outer.getEntryBlock();
+    createVAddInBlock(outerBlock, kArch, /*dest=*/10, 1, 2);
+    addSpliceMarker(outerBlock, "inner_callee");
+    createVAddInBlock(outerBlock, kArch, /*dest=*/11, 1, 2);
+
+    // inner: v20
+    Function& inner = module->createFunction("inner_callee");
+    setFunctionArch(inner, kArch);
+    createVAddInBlock(inner.getEntryBlock(), kArch, /*dest=*/20, 1, 2);
+
+    runPass();
+
+    EXPECT_EQ(vaddDestSeq(*entryBlock), (std::vector<unsigned>{0, 10, 20, 11, 1}));
+    EXPECT_EQ(countMarkers(*entryBlock), 0);
+    EXPECT_TRUE(outerBlock->empty());
+    EXPECT_TRUE(inner.getEntryBlock()->empty());
+}
+
+TEST_F(FlattenCalleesPassTest, InlinesMultiBlockCalleeInFunctionOrder) {
+    createVAddInBlock(entryBlock, kArch, /*dest=*/0, 1, 2);
+    addSpliceMarker(entryBlock, "multi_block_callee");
+    createVAddInBlock(entryBlock, kArch, /*dest=*/1, 1, 2);
+
+    Function& callee = module->createFunction("multi_block_callee");
+    setFunctionArch(callee, kArch);
+    BasicBlock* calleeEntry = callee.getEntryBlock();
+    createVAddInBlock(calleeEntry, kArch, /*dest=*/10, 1, 2);
+
+    BasicBlock* calleeTail = callee.createBasicBlock("tail");
+    createVAddInBlock(calleeTail, kArch, /*dest=*/11, 1, 2);
+
+    runPass();
+
+    EXPECT_EQ(vaddDestSeq(*entryBlock), (std::vector<unsigned>{0, 10, 11, 1}));
+    EXPECT_EQ(countMarkers(*entryBlock), 0);
+    EXPECT_TRUE(calleeEntry->empty());
+    EXPECT_TRUE(calleeTail->empty());
 }
 
 TEST_F(FlattenCalleesPassTest, NoMarkersIsNoOp) {

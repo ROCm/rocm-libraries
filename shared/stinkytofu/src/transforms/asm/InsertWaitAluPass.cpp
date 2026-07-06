@@ -432,8 +432,8 @@ class WaitcntBrackets {
             // the pending event set that forced the full drain.
             PASS_DEBUG(
                 std::cerr << "[InsertWaitAlu]     wait hit " << counterName(c) << " on v" << k.idx
-                          << "(" << halfName(k.half) << "," << role << ")"
-                          << " score=" << score << " lb=" << lb << " ub=" << ub << " ooo=" << ooo
+                          << "(" << halfName(k.half) << "," << role << ")" << " score=" << score
+                          << " lb=" << lb << " ub=" << ub << " ooo=" << ooo
                           << (ooo ? " events={" +
                                         pendingEventsStr(pendingEvents & eventsForCounter(c)) + "}"
                                   : std::string())
