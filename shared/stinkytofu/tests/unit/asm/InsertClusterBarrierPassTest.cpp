@@ -49,10 +49,10 @@ constexpr int kClusterBarrierId = -3;    // s_barrier_{signal,wait} -3  (cluster
 constexpr int kWorkgroupBarrierId = -1;  // s_barrier_{signal,wait} -1  (workgroup scope)
 
 // Anchor names / symbols the pass keys off of.
-constexpr const char* kGSU1LabelName = "label_GSU_1";        // Rule 1 anchor
+constexpr const char* kGSU1LabelName = "label_GSU_1";           // Rule 1 anchor
 constexpr const char* kOpenLoopLLabelName = "label_openLoopL";  // Rule 3 anchor
-constexpr const char* kLoopEndLLabelName = "label_LoopEndL";  // Rule 6 fallback anchor
-constexpr const char* kTailLoopMarker = "/* Tail Loop */";   // Rule 5 anchor (TEXTBLOCK substring)
+constexpr const char* kLoopEndLLabelName = "label_LoopEndL";    // Rule 6 fallback anchor
+constexpr const char* kTailLoopMarker = "/* Tail Loop */";  // Rule 5 anchor (TEXTBLOCK substring)
 constexpr const char* kLoopCounterLSymbol = "sgprLoopCounterL";
 constexpr const char* kWaveIdxSymbol = "sgprWaveIdx";
 
@@ -164,10 +164,10 @@ class InsertClusterBarrierPassTest : public ::testing::Test {
     }
 
     /// Run the pass on `func` (whole-kernel IR, as in Gfx1250Backend).
-    void runPass() {
+    void runPass(int pgrValue = 1) {
         PassContext ctx;
         ctx.setGemmTileConfig(config);
-        auto pass = createInsertClusterBarrierPass(/*pgrValue=*/1);
+        auto pass = createInsertClusterBarrierPass(pgrValue);
         pass->run(*func, ctx, am);
     }
 
@@ -291,7 +291,6 @@ class InsertClusterBarrierPassTest : public ::testing::Test {
         return count;
     }
 
-
     /// 0-based position of `target` among StinkyTofu instructions in `func`, or -1.
     int posOfInFunc(const StinkyInstruction* target) const {
         int pos = 0;
@@ -387,12 +386,66 @@ TEST_F(InsertClusterBarrierPassTest, Rule1AndRule2_PrologueHandshake) {
     EXPECT_LT(clusterSignal, posOf(loopExitCmp));
 
     // Rule 2: bare cluster wait directly precedes the first tensor load.
-    EXPECT_EQ(posOfClusterWait() + 1, posOf(tl))
-        << "cluster wait must directly precede the load";
-    EXPECT_LT(posOf(loopExitCmp), posOfClusterWait())
-        << "Rule 2 wait follows the loop-exit guard";
+    EXPECT_EQ(posOfClusterWait() + 1, posOf(tl)) << "cluster wait must directly precede the load";
+    EXPECT_LT(posOf(loopExitCmp), posOfClusterWait()) << "Rule 2 wait follows the loop-exit guard";
 }
 
+// PGR=0: Rule 2 is suppressed (no prologue prefetch wait before first load) and
+// Rule 3 is suppressed (no publication-point priming signal). Rule 1 still runs.
+TEST_F(InsertClusterBarrierPassTest, Pgr0_SkipsRule2AndRule3) {
+    createLabel("label_ASM_Start");
+    createVAddInBlock(bb, arch, /*dest=*/0, /*src0=*/1, /*src1=*/2);
+
+    StinkyInstruction* gsu1Label = createLabel(kGSU1LabelName);
+    createVAddInBlock(bb, arch, /*dest=*/0, /*src0=*/1, /*src1=*/2);
+
+    StinkyInstruction* loopExitCmp = createLoopCounterLCmpEq(/*imm=*/0);
+    createCBranchScc1(kLoopEndLLabelName);
+
+    StinkyInstruction* tl = createTensorLoadInBlock(bb, arch, /*s0=*/0, /*s1=*/4);
+
+    // Rule 3 cross-BB setup (would emit a priming signal at pgr=1).
+    createBarrierWait(kWorkgroupBarrierId);
+    createBranch("label_openLoopL");
+    BasicBlock* openLoopBB = func->createBasicBlock("openLoop");
+    func->addEdge(bb, openLoopBB);
+    StinkyInstruction* openLoopLabel = createLabelIn(openLoopBB, kOpenLoopLLabelName);
+    createVAddInBlock(openLoopBB, arch, /*dest=*/0, /*src0=*/1, /*src1=*/2);
+
+    runPass(/*pgrValue=*/0);
+
+    EXPECT_EQ(countBarrierInFunc(/*wantSignal=*/true, kClusterBarrierId), 1)
+        << "Rule 1 priming signal only -- Rule 3 suppressed at PGR=0";
+    EXPECT_EQ(countBarrierInFunc(/*wantSignal=*/false, kClusterBarrierId), 0)
+        << "Rule 2 suppressed at PGR=0 -- no bare wait before first load";
+    EXPECT_EQ(posOfBarrierInFunc(/*wantSignal=*/false, kClusterBarrierId), -1)
+        << "no cluster wait anywhere in the kernel at PGR=0";
+}
+
+// PGR=0 Rule 4: bare cluster wait (no LCL drain gate) before workgroup signal;
+// signal half keeps the LCL drain gate.
+TEST_F(InsertClusterBarrierPassTest, Pgr0_Rule4_BareWaitGatedSignal) {
+    createBarrierSignal(kWorkgroupBarrierId);
+    createBarrierWait(kWorkgroupBarrierId);
+    createTensorLoadInBlock(bb, arch, /*s0=*/0, /*s1=*/4);
+
+    runPass(/*pgrValue=*/0);
+
+    EXPECT_EQ(countBarrier(/*wantSignal=*/false, kClusterBarrierId), 1)
+        << "one bare Rule 4 wait (no Rule 2 leading wait at PGR=0)";
+    EXPECT_EQ(countBarrier(/*wantSignal=*/true, kClusterBarrierId), 1);
+    EXPECT_EQ(countCmpLeWithSymbol(kLoopCounterLSymbol), 1)
+        << "only the signal half is LCL-gated at PGR=0";
+
+    const int clusterWait = posOfClusterWait();
+    const int wgSignal = posOfBarrier(/*wantSignal=*/true, kWorkgroupBarrierId);
+    const int wgWait = posOfBarrier(/*wantSignal=*/false, kWorkgroupBarrierId);
+    const int clusterSignal = posOfClusterSignal();
+
+    EXPECT_LT(clusterWait, wgSignal)
+        << "bare cluster wait -3 sits immediately above workgroup signal -1";
+    EXPECT_LT(wgWait, clusterSignal);
+}
 
 // ---------------------------------------------------------------------------
 // Rule 3 -- priming signal at the LDS publication point before openLoopL
@@ -417,7 +470,8 @@ TEST_F(InsertClusterBarrierPassTest, Rule3_CrossBB_FindsWaitInPredecessor) {
         << "Rule 3 must emit its priming cluster signal";
     EXPECT_LT(posOfInFunc(pubWait), posOfBarrierInFunc(/*wantSignal=*/true, kClusterBarrierId))
         << "Rule 3 signal must follow the predecessor's publication wait";
-    EXPECT_LT(posOfBarrierInFunc(/*wantSignal=*/true, kClusterBarrierId), posOfInFunc(openLoopLabel))
+    EXPECT_LT(posOfBarrierInFunc(/*wantSignal=*/true, kClusterBarrierId),
+              posOfInFunc(openLoopLabel))
         << "Rule 3 signal must precede label_openLoopL";
 }
 
@@ -454,8 +508,8 @@ TEST_F(InsertClusterBarrierPassTest, Rule3_CrossBB_SynthesizesWgSyncAtLabel) {
 // `s_barrier_signal -3` stays AFTER the workgroup `s_barrier_wait -1`. This puts
 // the workgroup signal/wait pair BETWEEN the cluster wait and cluster signal.
 TEST_F(InsertClusterBarrierPassTest, Rule4_WaitMovesBeforeWorkgroupSignal) {
-    createBarrierSignal(kWorkgroupBarrierId);         // workgroup signal (wait-move anchor)
-    createBarrierWait(kWorkgroupBarrierId);           // anchor wait (Rule 4 trigger)
+    createBarrierSignal(kWorkgroupBarrierId);  // workgroup signal (wait-move anchor)
+    createBarrierWait(kWorkgroupBarrierId);    // anchor wait (Rule 4 trigger)
     createTensorLoadInBlock(bb, arch, /*s0=*/0, /*s1=*/4);
 
     runPass();
@@ -476,8 +530,7 @@ TEST_F(InsertClusterBarrierPassTest, Rule4_WaitMovesBeforeWorkgroupSignal) {
     EXPECT_LT(clusterWait, wgSignal)
         << "cluster wait -3 must be moved immediately above the workgroup signal -1";
     EXPECT_LT(wgSignal, wgWait) << "workgroup signal -1 must precede workgroup wait -1";
-    EXPECT_LT(wgWait, clusterSignal)
-        << "cluster signal -3 must stay after the workgroup wait -1";
+    EXPECT_LT(wgWait, clusterSignal) << "cluster signal -3 must stay after the workgroup wait -1";
 }
 
 // Rule 4 multi-load: two `tensor_load_to_lds` that each have their OWN

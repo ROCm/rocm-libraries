@@ -45,8 +45,8 @@ Rules fire in **kernel execution order**:
 | Rule | Where | What it emits |
 |------|-------|---------------|
 | 1 | after `label_GSU_1:` | priming cluster signal |
-| 2 | before the kernel's first `tensor_load_to_lds` | bare cluster wait (whole-kernel IR only) |
-| 3 | LDS publication point before `label_openLoopL:` | priming cluster signal |
+| 2 | before the kernel's first `tensor_load_to_lds` | bare cluster wait (whole-kernel IR only; **suppressed when `pgrValue == 0`**) |
+| 3 | LDS publication point before `label_openLoopL:` | priming cluster signal (**suppressed when `pgrValue == 0`**) |
 | 4 | after each loop load's workgroup wait | per-iteration cluster handshake |
 | 5 | tail loop | tail cluster handshake (5a signal + 5b wait) |
 | 6 | loop-exit convergence label | trailing cluster wait (LCL gate off, wait-before-signal only) |
@@ -97,7 +97,9 @@ scheme (`kClusterBarrierDrainGateEnabled = true`).
 - **`true` (default):** asymmetric Rule 4 drain gates (`wait` at `LCL <= pgr`,
   `signal` at `LCL <= pgr+1`), Rule 1 gated on `LCL != 0`, Rule 3 gated on
   `LCL <= pgr`. Rule 6 is **disabled** (the asymmetric gate leaves one extra
-  in-loop wait).
+  in-loop wait). When **`pgrValue == 0`**, Rules 2 and 3 are suppressed and
+  Rule 4 emits a **bare wait** plus an **LCL-gated signal only** (see
+  [PGR=0 exception](#pgr0-exception) below).
 - **`false`:** ungated priming signals. With wait-before-signal ordering (default
   when the second switch is off), Rule 4 emits bare wait + WaveIdx-gated signal
   and Rule 6 plants a loop-exit trailing wait. With signal-before-wait ordering
@@ -128,12 +130,17 @@ One bare `s_barrier_wait -3` immediately before the function's first
 `tensor_load_to_lds`. Requires whole-kernel IR (Gfx1250: before RegionClonePass; do not run inside ScopeAdaptor). Skipped when the
 load is already preceded by a cluster wait.
 
+**PGR=0 (`pgrValue == 0`):** suppressed. With no prefetch iterations there is
+no orphaned prologue signal for this leading wait to consume; Rule 1's priming
+signal is paired by the first Rule 4 bare wait inside the main loop instead.
+
 ---
 
 ## Rule 3 -- LDS-publication priming signal
 
 Priming cluster signal at the LDS publication point before `label_openLoopL:`.
 Disabled in ungated signal-before-wait legacy mode (Rules 3 and 6 both off).
+Also disabled when **`pgrValue == 0`** (no prefetch publication point to prime).
 
 ### Anchor scan (`scanRule3PublicationPoint`)
 
@@ -182,7 +189,8 @@ wait and cluster signal.
 
 | Layout | Condition | Rule 4 shape |
 |--------|-----------|--------------|
-| LCL-gated wait-before-signal | `kClusterBarrierDrainGateEnabled == true` (default) | Asymmetric LCL gates on wait (`LCL <= pgr`) and signal (`LCL <= pgr+1`); when the schedule hoists `s_sub LCL` above the anchor, both immediates subtract `lclPreDecrement` (e.g. pgr 1 with one hoisted decrement -> wait threshold 0); workgroup pair between cluster wait and signal |
+| LCL-gated wait-before-signal | `kClusterBarrierDrainGateEnabled == true` (default), `pgrValue >= 1` | Asymmetric LCL gates on wait (`LCL <= pgr`) and signal (`LCL <= pgr+1`); when the schedule hoists `s_sub LCL` above the anchor, both immediates subtract `lclPreDecrement` (e.g. pgr 1 with one hoisted decrement -> wait threshold 0); workgroup pair between cluster wait and signal |
+| PGR=0 wait-before-signal | drain gate on, `pgrValue == 0` | Bare cluster wait (no LCL gate) before the workgroup signal; LCL-gated signal only at `LCL <= pgr+1 - lclPreDecrement` (typically `LCL <= 1` before the hoisted sub, `LCL <= 0` after) so the drain iteration suppresses the signal but still executes the wait |
 | Ungated wait-before-signal | drain gate off, `kRule4SignalBeforeWaitEnabled == false` | Bare cluster wait then WaveIdx-gated signal (same split placement); Rule 6 supplies loop-exit drain |
 | Legacy signal-before-wait | drain gate off, `kRule4SignalBeforeWaitEnabled == true` | Signal, optional SCC restore, then bare wait (all at one anchor); Rules 3 and 6 off |
 
@@ -228,11 +236,38 @@ ordering (`kRule4SignalBeforeWaitEnabled == false`).
 
 ---
 
+## PGR=0 exception
+
+When `pgrValue == 0` (`PrefetchGlobalRead = 0`), the default asymmetric drain
+gate collapses badly: the wait-side threshold `LCL <= pgr` becomes `LCL <= 0`
+(which never skips after a hoisted `s_sub LCL`), while the signal-side threshold
+`LCL <= pgr+1` still skips on the drain iteration. That leaves an extra bare wait
+with no matching signal and can hang.
+
+The pass therefore treats PGR=0 as a special case while keeping the gated scheme
+enabled:
+
+| Rule | PGR=0 behavior |
+|------|----------------|
+| 1 | unchanged (`LCL != 0` gate) |
+| 2 | **suppressed** |
+| 3 | **suppressed** |
+| 4 | **bare wait** + **LCL-gated signal only** (wait-side drain gate omitted) |
+| 5 | unchanged |
+| 6 | unchanged (still disabled under the gated scheme) |
+
+Rule 1's priming signal is consumed by the first Rule 4 bare wait. Each main-loop
+iteration then pairs one bare wait with one gated signal except on the drain
+iteration, where the signal is skipped but the wait still runs -- keeping the
+offset ping-pong balanced for all `LoopCounterL` values.
+
+---
+
 ## Parameters
 
 | Parameter | Default | Used by |
 |-----------|---------|---------|
-| `pgrValue` | `1` | Gated Rule 3/4 drain thresholds (`PrefetchGlobalRead`) |
+| `pgrValue` | `1` | Gated Rule 3/4 drain thresholds (`PrefetchGlobalRead`); triggers the [PGR=0 exception](#pgr0-exception) when zero |
 
 ---
 
@@ -245,6 +280,8 @@ directly (no CFGBuilder pass in the fixture) to mirror post-CFGBuilder IR.
 | Test | Rule / behavior |
 |------|-----------------|
 | `Rule1AndRule2_PrologueHandshake` | Rules 1 + 2 on a prologue-shaped kernel |
+| `Pgr0_SkipsRule2AndRule3` | PGR=0 suppresses Rules 2 and 3; Rule 1 only |
+| `Pgr0_Rule4_BareWaitGatedSignal` | PGR=0 Rule 4 bare wait + LCL-gated signal |
 | `Rule3_CrossBB_FindsWaitInPredecessor` | Rule 3 existing-publication-wait path across BB boundary |
 | `Rule3_CrossBB_SynthesizesWgSyncAtLabel` | Rule 3 synthesized-publication path |
 | `Rule4_WaitMovesBeforeWorkgroupSignal` | Rule 4 wait-move fix |
