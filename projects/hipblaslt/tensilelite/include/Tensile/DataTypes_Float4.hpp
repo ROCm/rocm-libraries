@@ -26,7 +26,7 @@
 
 #pragma once
 
-#include <Tensile/Macros.hpp>
+#include <tensilelitehost/export.h>
 
 #define TENSILE_USE_FP4
 
@@ -41,17 +41,13 @@ namespace TensileLite
 
 #else // _WIN32
 
-#ifdef TENSILE_USE_HIP
 #include <hip/hip_runtime.h>
-#endif
 
 #define HIP_HOST_DEVICE __host__ __device__
 #define HIP_HOST __host__
 #define HIP_DEVICE __device__
 
 #include <hip/hip_ext_ocp.h>
-
-TENSILE_HIDDEN_BEGIN
 
 namespace TensileLite
 {
@@ -157,8 +153,6 @@ namespace std
         return stream << static_cast<float>(result[0]) << " " << static_cast<float>(result[1]);
     }
 } // namespace std
-
-TENSILE_HIDDEN_END
 
 #endif // _WIN32
 

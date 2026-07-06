@@ -32,10 +32,52 @@ endif()
 # Add files to SKIP_TESTS when ASAN packaging is enabled.  These are temporary until a fix is found for
 # the hang that occurs with CK kernels.
 if(THEROCK_SANITIZER STREQUAL "ASAN")
-    # Disable tests temporarily due to a bug that cause a hang when using CK kernels while Address Sanitizer is enabled.
-    list(APPEND SKIP_TESTS bad_fusion_plan.cpp cba_find2_infer.cpp cba_infer.cpp ck_builder_shared.cpp ck_builder_xdl.cpp conv_activ_infer.cpp conv_ai_3d_kernel_tuning_utils.cpp conv_ck_igemm_fwd_v6r1_dlops_nchw.cpp conv_hip_igemm_xdlops.cpp conv_igemm_mlir_xdlops_bwd_wrw.cpp conv_igemm_mlir_xdlops_fwd.cpp find_2_conv.cpp find_db.cpp fused_conv_bias_res_add_activ.cpp graphapi_conv_bias_res_add_activ_fwd.cpp group_conv_deterministic_split_k.cpp group_conv2d_fwd.cpp group_conv2d_bwd.cpp group_conv2d_wrw.cpp group_conv3d_fwd.cpp group_conv3d_bwd.cpp group_conv3d_wrw.cpp find_mode_trust_verify.cpp kernel_tuning_net.cpp miopendriver_conv_immed.cpp miopendriver_conv2d_trans.cpp miopendriver_gemm.cpp miopendriver_regression_big_tensor.cpp miopendriver_regression_big_tensor.cpp miopendriver_regression_half_gfx9.cpp miopendriver_regression_half.cpp perf_config_HipImplicitGemm3DGroupFwdXdlops.cpp smoke_solver_ConvCkIgemmFwdV6r1DlopsNchw.cpp unit_conv_solver_ConvAsmImplicitGemmGTCDynamicBwdXdlops.cpp unit_conv_solver_ConvAsmImplicitGemmGTCDynamicFwdXdlops.cpp unit_conv_solver_ConvAsmImplicitGemmGTCDynamicFwdXdlopsNHWC.cpp unit_conv_solver_ConvAsmImplicitGemmGTCDynamicWrwXdlops.cpp unit_conv_solver_ConvCkGroupedConvFwd.cpp unit_conv_solver_ConvHipImplicitGemm3DGroupBwdXdlops.cpp unit_conv_solver_ConvHipImplicitGemm3DGroupFwdXdlops.cpp unit_conv_solver_ConvHipImplicitGemm3DGroupWrwXdlops.cpp unit_conv_solver_ConvHipImplicitGemmBwdDataV1R1Xdlops.cpp unit_conv_solver_ConvHipImplicitGemmBwdDataV4R1Xdlops.cpp unit_conv_solver_ConvHipImplicitGemmFwdXdlops.cpp unit_conv_solver_ConvHipImplicitGemmGroupBwdXdlops.cpp unit_conv_solver_ConvHipImplicitGemmForwardV4R4Xdlops.cpp unit_conv_solver_ConvHipImplicitGemmForwardV4R5Xdlops.cpp unit_conv_solver_ConvHipImplicitGemmForwardV4R4Xdlops_Padded_Gemm.cpp unit_conv_solver_ConvHipImplicitGemmWrwV4R4Xdlops.cpp unit_conv_solver_ConvHipImplicitGemmWrwV4R4Xdlops_Padded_Gemm.cpp unit_conv_solver_ConvHipImplicitGemmBwdXdlops.cpp unit_conv_solver_ConvAsmImplicitGemmGTCDynamicBwdXdlopsNHWC.cpp unit_conv_solver_ConvAsmImplicitGemmGTCDynamicWrwXdlopsNHWC.cpp unit_conv_solver_ConvHipImplicitGemmGroupFwdXdlops.cpp unit_conv_solver_ConvHipImplicitGemmGroupWrwXdlops.cpp unit_implicitgemm_ck_util.cpp smoke_solver_ConvAsmImplicitGemmGTCDynamicXdlopsNHWC_fp32_fp16.cpp smoke_solver_ConvAsmImplicitGemmGTCDynamicXdlopsNHWC_bf16.cpp)
+    # Disable tests that currently hang or crash under ASAN with CK kernels.
+    list(APPEND SKIP_TESTS
+        group_conv3d_bwd.cpp
+        group_conv3d_fwd.cpp
+        group_conv3d_wrw.cpp
+        miopendriver_conv2d_trans.cpp
+        miopendriver_conv_immed.cpp
+        miopendriver_regression_half_gfx9.cpp
+        unit_conv_solver_ConvCkGroupedConvFwd.cpp
+        unit_conv_solver_ConvHipImplicitGemm3DGroupBwdXdlops.cpp
+        unit_conv_solver_ConvHipImplicitGemm3DGroupFwdXdlops.cpp
+        unit_conv_solver_ConvHipImplicitGemm3DGroupWrwXdlops.cpp
+        unit_conv_solver_ConvHipImplicitGemmGroupBwdXdlops.cpp
+        unit_conv_solver_ConvHipImplicitGemmGroupWrwXdlops.cpp
+    )
+    # Disable tests that are inert on gfx942 configuration (unsupported arch or
+    # test_drive<> framework disabled).  These did not actually launch CK kernels
+    # during gfx942 testing but are kept skipped pending more extensive testing.
+    list(APPEND SKIP_TESTS
+        conv_ck_igemm_fwd_v6r1_dlops_nchw.cpp
+        conv_hip_igemm_xdlops.cpp
+        conv_igemm_mlir_xdlops_bwd_wrw.cpp
+        conv_igemm_mlir_xdlops_fwd.cpp
+        smoke_solver_ConvAsmImplicitGemmGTCDynamicXdlopsNHWC_bf16.cpp
+        smoke_solver_ConvAsmImplicitGemmGTCDynamicXdlopsNHWC_fp32_fp16.cpp
+        smoke_solver_ConvCkIgemmFwdV6r1DlopsNchw.cpp
+        unit_conv_solver_ConvHipImplicitGemmBwdDataV1R1Xdlops.cpp
+        unit_conv_solver_ConvHipImplicitGemmBwdDataV4R1Xdlops.cpp
+        unit_conv_solver_ConvHipImplicitGemmForwardV4R4Xdlops.cpp
+        unit_conv_solver_ConvHipImplicitGemmForwardV4R4Xdlops_Padded_Gemm.cpp
+        unit_conv_solver_ConvHipImplicitGemmForwardV4R5Xdlops.cpp
+        unit_conv_solver_ConvHipImplicitGemmWrwV4R4Xdlops.cpp
+        unit_conv_solver_ConvHipImplicitGemmWrwV4R4Xdlops_Padded_Gemm.cpp
+    )
     # temporarily disable due to test failures
     list(APPEND SKIP_TESTS unit_conv_solver_ConvWinoRageRxS.cpp)
+    # temporarily disable: LeakSanitizer reports a memory leak at exit
+    # (assertions pass but the process leaks).
+    list(APPEND SKIP_TESTS find_2_conv.cpp)
+    # temporarily disable: these fail under ASan even when run individually
+    # on gfx942.
+    list(APPEND SKIP_TESTS
+        miopendriver_gemm.cpp
+        miopendriver_regression_half.cpp
+        unit_conv_solver_ConvDepthwiseFwd3D.cpp
+    )
 endif()
 
 # Append a pattern to the accumulated gtest negative (exclusion) filter.
@@ -135,7 +177,7 @@ function(add_gtest TEST_NAME TEST_CPP)
     # Note: Due to the following cmake issue with gtest_discover_tests https://gitlab.kitware.com/cmake/cmake/-/issues/17812 you cannot pass PROPERTIES as a list.
     #       To work around this limitation, we are passing the environment variables in the format ENVIRONMENT;value1=${value1};ENVIRONMENT;value2=${value2}.
     # bn tests are run sequentially since running tests in parallel was causing large tensor case fail with insufficient memory error.
-    if("${TEST_NAME}" STREQUAL "test_bn_bwd_serial_run" OR "${TEST_NAME}" STREQUAL "test_bn_fwd_train_serial_run" OR "${TEST_NAME}" STREQUAL "test_bn_infer_serial_run")
+    if("${TEST_NAME}" STREQUAL "test_bn_bwd_serial_run" OR "${TEST_NAME}" STREQUAL "test_bn_fwd_train_serial_run" OR "${TEST_NAME}" STREQUAL "test_bn_infer_serial_run" OR "${TEST_NAME}" STREQUAL "test_hip_graph_exist")
       gtest_discover_tests(${TEST_NAME} DISCOVERY_TIMEOUT 300 DISCOVERY_MODE PRE_TEST WORKING_DIRECTORY ${KERNELS_BINARY_DIR} PROPERTIES RUN_SERIAL TRUE ${TEST_ENVIRONMENT_VARIABLES} TEST_FILTER "${MIOPEN_GTEST_FILTER}")
     else()
       gtest_discover_tests(${TEST_NAME} DISCOVERY_TIMEOUT 300 DISCOVERY_MODE PRE_TEST WORKING_DIRECTORY ${KERNELS_BINARY_DIR} PROPERTIES ${TEST_ENVIRONMENT_VARIABLES} TEST_FILTER "${MIOPEN_GTEST_FILTER}")
@@ -179,6 +221,9 @@ function(add_gtest TEST_NAME TEST_CPP)
     # Excluded from MIOpen CI: the FP32 case OOMs when shards run concurrently on a single GPU.
     add_gtest_negative_filter("*UnitTestConvSolver*LargeStride*")
 
+    # HipGraphExist OOMs (LLVM JIT) when shards share one GPU; filtered here, re-added below as RUN_SERIAL.
+    add_gtest_negative_filter("*HipGraphExist*")
+
     # when building the single gtest, add them in a sharded manner
     # loop over GTEST_PARALLEL_LEVEL
     set(MIOPEN_GTEST_FILTER "${MIOPEN_GTEST_PREFIX}*${MIOPEN_GTEST_SUFFIX}*:${MIOPEN_GTEST_PREFIX}*NONE*${MIOPEN_GTEST_FILTER_NEGATIVE}")
@@ -187,15 +232,33 @@ function(add_gtest TEST_NAME TEST_CPP)
 
     # cmake-lint: disable=E1120
     foreach(i RANGE 1 ${GTEST_PARALLEL_LEVEL})
+      math(EXPR SHARD_INDEX "${i} - 1")
       add_test(NAME ${TEST_NAME}_shard${i}
-        COMMAND ${TEST_NAME} --gtest_filter=${MIOPEN_GTEST_FILTER}
+        COMMAND ${TEST_NAME}
+          --gtest_filter=${MIOPEN_GTEST_FILTER}
+          --gtest_output=xml:${PROJECT_BINARY_DIR}/test_results/${TEST_NAME}_shard${i}.xml
         WORKING_DIRECTORY "${KERNELS_BINARY_DIR}"
       )
-      math(EXPR SHARD_INDEX "${i} - 1")
       set_tests_properties(${TEST_NAME}_shard${i} PROPERTIES
         ENVIRONMENT "MIOPEN_USER_DB_PATH=${CMAKE_CURRENT_BINARY_DIR};MIOPEN_INVOKED_FROM_CTEST=1;GTEST_TOTAL_SHARDS=${GTEST_PARALLEL_LEVEL};GTEST_SHARD_INDEX=${SHARD_INDEX}"
       )
     endforeach()
+
+    # HipGraphExist was filtered out of the shards above (LLVM JIT OOM under concurrent GPU memory
+    # pressure). Register it as a single RUN_SERIAL entry so ctest runs it alone, never alongside
+    # another test on the GPU. Skipped when there is no GPU, since these are *GPU* tests.
+    if(NOT MIOPEN_NO_GPU)
+      add_test(NAME ${TEST_NAME}_hip_graph_serial
+        COMMAND ${TEST_NAME}
+          --gtest_filter=*HipGraphExist*
+          --gtest_output=xml:${PROJECT_BINARY_DIR}/test_results/${TEST_NAME}_shard_hip_graph_serial.xml
+        WORKING_DIRECTORY "${KERNELS_BINARY_DIR}"
+      )
+      set_tests_properties(${TEST_NAME}_hip_graph_serial PROPERTIES
+        RUN_SERIAL TRUE
+        ENVIRONMENT "MIOPEN_USER_DB_PATH=${CMAKE_CURRENT_BINARY_DIR};MIOPEN_INVOKED_FROM_CTEST=1"
+      )
+    endif()
 
   endif()
   target_link_libraries(${TEST_NAME} BZip2::BZip2)

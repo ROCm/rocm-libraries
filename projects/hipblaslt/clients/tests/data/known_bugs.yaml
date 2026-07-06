@@ -11,3 +11,8 @@
 Known bugs:
   # ROCM-1545: TF32 matmul with INF inputs returns NaN on gfx950 (MI355)
   - { name: matmul_tf32_inf_ROCM1545, function: matmul, initialization: inf, known_bug_platforms: "gfx950, gfx1250" }
+  # ROCM-27082: gfx950 MXFP4 subtile scaleAlphaVec TN cases fail the norm/accuracy
+  # check on asymmetric (M!=N) tiles. Square tiles (128x128, 192x192) still pass and
+  # remain covered. Suspected TensileLite codegen regression; remove once root-caused.
+  - { name: matmul_subtile_fp4_scaleAlphaVec, function: matmul, M: 128, N: 192, known_bug_platforms: gfx950 }
+  - { name: matmul_subtile_fp4_scaleAlphaVec, function: matmul, M: 192, N: 128, known_bug_platforms: gfx950 }

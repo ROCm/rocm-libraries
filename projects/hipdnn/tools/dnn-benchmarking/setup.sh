@@ -447,18 +447,23 @@ detect_gpu_arch() {
 }
 
 get_torch_mode() {
-    python - <<'PY'
+    # `import torch` from a ROCm wheel with no visible GPU can print SDK probe
+    # warnings to stdout, and this value is captured via command substitution.
+    # Emit the mode on its own final line (the leading newline guards against a
+    # warning that lacks a trailing newline) and read only that last line.
+    python - <<'PY' | tail -n1
 try:
     import torch
 except Exception:
-    print("missing")
+    mode = "missing"
 else:
     if getattr(torch.version, "hip", None):
-        print("rocm")
+        mode = "rocm"
     elif getattr(torch.version, "cuda", None):
-        print("cuda")
+        mode = "cuda"
     else:
-        print("cpu")
+        mode = "cpu"
+print("\n" + mode)
 PY
 }
 
@@ -532,12 +537,17 @@ install_torch() {
         rocm)
             local index_url="$TORCH_INDEX_URL"
             if [ -z "$index_url" ]; then
-                local gpu_arch index_arch
+                local gpu_arch index_bucket
                 gpu_arch=$(detect_gpu_arch)
+                # ROCm nightly bucket per GPU arch. gfx90a's current torch +
+                # ROCm SDK builds live in the bare "gfx90a" bucket; the older
+                # "gfx90X-dcgpu" family bucket is frozen at a release that
+                # predates several SDK libraries (e.g. hipdnn). gfx942/gfx950
+                # are still served by their "-dcgpu" family buckets.
                 case "$gpu_arch" in
-                    gfx90a) index_arch="gfx90X" ;;
-                    gfx942) index_arch="gfx94X" ;;
-                    gfx950) index_arch="gfx950" ;;
+                    gfx90a) index_bucket="gfx90a" ;;
+                    gfx942) index_bucket="gfx94X-dcgpu" ;;
+                    gfx950) index_bucket="gfx950-dcgpu" ;;
                     *)
                         echo "ERROR: Unsupported GPU architecture '${gpu_arch:-none}'." >&2
                         echo "Supported: gfx90a (MI200/MI210/MI250), gfx942 (MI300X/MI300A), gfx950 (MI350)" >&2
@@ -545,7 +555,7 @@ install_torch() {
                         exit 1
                         ;;
                 esac
-                index_url="https://rocm.nightlies.amd.com/v2-staging/${index_arch}-dcgpu/"
+                index_url="https://rocm.nightlies.amd.com/v2-staging/${index_bucket}/"
                 echo "Detected GPU: $gpu_arch"
             fi
             RESOLVED_TORCH_INDEX_URL="$index_url"
@@ -563,7 +573,12 @@ install_torch() {
 }
 
 select_binding_prefix() {
-    if [ "$FORCE_BUILD" -eq 1 ] || [ -n "$ROCM_PREFIX" ]; then
+    # An explicit --rocm-prefix wins. Otherwise the prefix follows the torch
+    # mode (where ROCm comes from), NOT whether --force-build was passed:
+    # force-build only controls *whether* hipDNN is rebuilt, not *where*. In
+    # rocm/existing-rocm mode that is the torch wheel's bundled SDK, so a forced
+    # rebuild works with no system ROCm.
+    if [ -n "$ROCM_PREFIX" ]; then
         resolve_installed_rocm_prefix
         return
     fi
@@ -586,7 +601,11 @@ select_binding_prefix() {
 }
 
 select_provider_toolchain_prefix() {
-    if [ "$FORCE_BUILD" -eq 1 ] || [ -n "$ROCM_PREFIX" ]; then
+    # Same rule as select_binding_prefix: the compiler/devel toolchain follows
+    # the torch mode. For rocm/existing-rocm that is the wheel's devel SDK
+    # (clang + lib/cmake/hip), which a forced rebuild must use too -- the
+    # libraries wheel ships no compiler.
+    if [ -n "$ROCM_PREFIX" ]; then
         resolve_installed_rocm_prefix
         return
     fi
@@ -624,6 +643,7 @@ build_hipdnn() {
     rm -rf "$BUILD_DIR"
     cmake -S "$HIPDNN_ROOT" -B "$BUILD_DIR" \
         -DCMAKE_BUILD_TYPE=Release \
+        "${HIPDNN_HIP_ARCH_ARGS[@]}" \
         -DCMAKE_INSTALL_PREFIX="$install_prefix" \
         -DCMAKE_PREFIX_PATH="$cmake_prefix_path" \
         -DCMAKE_PROGRAM_PATH="$cmake_program_path" \
@@ -661,6 +681,7 @@ build_provider() {
     rm -rf "$build_dir"
     cmake -S "$provider_dir" -B "$build_dir" \
         -DCMAKE_BUILD_TYPE=Release \
+        "${HIPDNN_HIP_ARCH_ARGS[@]}" \
         -DCMAKE_INSTALL_PREFIX="$install_prefix" \
         -DCMAKE_PREFIX_PATH="$cmake_prefix_path" \
         -DCMAKE_PROGRAM_PATH="$cmake_program_path" \
@@ -737,10 +758,12 @@ warn_no_native_engine_plugins() {
     echo "Pass --plugin-path or config plugin_path to use custom provider plugins." >&2
 }
 
-FORCE_BUILD_PREFIX=$(resolve_installed_rocm_prefix)
-
 if [ "$FORCE_BUILD" -eq 1 ] && [ "$AUTO_YES" -eq 0 ]; then
-    read -r -p "This will build and install hipDNN to $FORCE_BUILD_PREFIX. Continue? [Y/n] " confirm
+    # The exact install prefix depends on the torch mode and is only resolved
+    # after torch is installed (rocm/existing-rocm build into the torch wheel's
+    # bundled SDK, not the system ROCm prefix), so it is reported at build time
+    # rather than named here.
+    read -r -p "This will build and install hipDNN and provider plugins from source into the selected ROCm prefix. Continue? [Y/n] " confirm
     case "$confirm" in
         [nN]) echo "Aborted."; exit 0 ;;
     esac
@@ -813,6 +836,22 @@ if [ "$INSTALLED_TORCH_MODE" = "cuda" ] || [ "$TORCH_MODE" = "cuda" ]; then
     echo "Run PyTorch-backend benchmarks with:"
     echo "  python -m dnn_benchmarking --graph <graph.json> --backend pytorch"
     exit 0
+fi
+
+# Resolve the GPU arch once and hand it to the HIP device-code builds. The
+# wheel-bundled ROCm SDK ships no rocm_agent_enumerator/offload-arch on PATH and
+# the build may run with no GPU, so HIP cannot autodetect the offload arch; pass
+# it explicitly via hipDNN's documented GPU_TARGETS instead of letting HIP fall
+# back to a default target list. --gpu-arch (or detection on a configured host)
+# is the single source of truth -- no external GPU_TARGETS or
+# ROCM_SDK_TARGET_FAMILY is required.
+RESOLVED_GPU_ARCH=$(detect_gpu_arch)
+HIPDNN_HIP_ARCH_ARGS=()
+if [ -n "$RESOLVED_GPU_ARCH" ]; then
+    HIPDNN_HIP_ARCH_ARGS=(-DGPU_TARGETS="$RESOLVED_GPU_ARCH" -DAMDGPU_TARGETS="$RESOLVED_GPU_ARCH")
+    # Belt-and-suspenders for any torch C++/HIP extension compile (none today:
+    # the Python bindings are nanobind host code linking hip::host).
+    export PYTORCH_ROCM_ARCH="${PYTORCH_ROCM_ARCH:-$RESOLVED_GPU_ARCH}"
 fi
 
 # 3. Select the hipDNN/ROCm prefix used by Python bindings and provider builds.
