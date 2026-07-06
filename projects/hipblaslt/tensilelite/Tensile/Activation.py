@@ -1,6 +1,6 @@
 ################################################################################
 #
-# Copyright (C) 2022-2025 Advanced Micro Devices, Inc. All rights reserved.
+# Copyright (C) 2022-2026 Advanced Micro Devices, Inc. All rights reserved.
 #
 # Permission is hereby granted, free of charge, to any person obtaining a copy
 # of this software and associated documentation files (the "Software"), to deal
@@ -166,12 +166,15 @@ class ActivationType:
                             'supported_by': SupportedBy.TENSILE | SupportedBy.HIPBLASLT}), \
                           ('sigmoid', { \
                             'instance': ActivationTypeRegister('sigmoid', False, 0,     True,  True, False,   False, False, False, False), \
-                            'supported_by': SupportedBy.TENSILE}), \
+                            'supported_by': SupportedBy.TENSILE | SupportedBy.HIPBLASLT}), \
                           ('tanh', {  \
                             'instance': ActivationTypeRegister('tanh', False, 2,        True,  True, False,   False, False, False, False), \
                             'supported_by': SupportedBy.TENSILE}), \
                           ('dgelu', { \
                             'instance': ActivationTypeRegister('dgelu', True, 0,       False,  True, False,   False, False, False, False), \
+                            'supported_by': SupportedBy.TENSILE | SupportedBy.HIPBLASLT}), \
+                          ('drelu', { \
+                            'instance': ActivationTypeRegister('drelu', True, 0,       False,  True, False,   False, False, False, False), \
                             'supported_by': SupportedBy.TENSILE | SupportedBy.HIPBLASLT}), \
                           ('geluscaling', { \
                             'instance': ActivationTypeRegister('geluscaling', False, 1, True,  True, False,   False, False, False, False), \
@@ -371,6 +374,8 @@ class ActivationModule:
             module = self.getTanhModule(cDataType, vgprIn, vgprOut, "activationAlpha", "activationBeta")
         elif (activationType == 'dgelu'):
             module = self.getDGeluModule(cDataType, vgprIn, vgprOut)
+        elif (activationType == 'drelu'):
+            module = self.getDReluModule(cDataType, vgprIn, vgprOut)    
         elif (activationType == 'silu'):
             module = self.getSiluModule(cDataType, vgprIn, vgprOut)
         elif (activationType == 'swish'):
@@ -843,6 +848,17 @@ class ActivationModule:
             module.add(VMulF32(dst=self.vgprPrefix(vgprOut), src0=hex(coef.u), src1=self.vgprPrefix(vgprOut), comment="out = 4 * out"))
             module.add(VFmaF32(dst=self.vgprPrefix(vgprOut), src0=self.vgprPrefix(vgprOut), src1=vgpr(Holder(idx=vgprTemp2)), src2=vgpr(Holder(idx=vgprTemp1)), comment="out = out * tmp2 + tmp1"))
             module.add(VAddF32(dst=self.vgprPrefix(vgprOut), src0=0.5, src1=self.vgprPrefix(vgprOut), comment="out = out + 0.5"))
+        else:
+            raise RuntimeError("Unsupported data type %s."%cDataType.toDevice("HIP"))
+        return module
+    
+    def getDReluModule(self, cDataType, vgprIn, vgprOut):
+        ti = rocIsa.getInstance()
+        self.needCombine = True
+        module = Module("Gradient Relu")
+        if cDataType.isSingle():
+            module.add(VCmpGTF32(dst=VCC(), src0=self.vgprPrefix(vgprIn), src1=0.0, comment=" VCC = (x > 0) ? 1 : 0" ))
+            module.add(VCndMaskB32(dst=self.vgprPrefix(vgprOut), src0=0.0, src1=1.0, src2=VCC(), comment=" y = VCC ? 1.0 : 0.0" ))
         else:
             raise RuntimeError("Unsupported data type %s."%cDataType.toDevice("HIP"))
         return module
@@ -1334,14 +1350,14 @@ class ActivationInline:
         kStr += (padSpacesStr + "%s.s = %s.s & 0x7fff;\n"%(unionName, unionName))
         kStr += (padSpacesStr + "value = %s.f;\n"%unionName)
       elif (self.dataType.isSingle() or self.dataType.isDouble() or self.dataType.isInt32()):
-        kStr += (padSpacesStr + "value = abs(value);\n")
+        kStr += (padSpacesStr + "value = (value < decltype(value)(0)) ? -value : value;\n")
       else:
         raise RuntimeError("Unrecognized data type %s."%self.dataType)
     elif (activationType == 'clippedrelu'):
       if (self.dataType.isSingle() or self.dataType.isHalf() or self.dataType.isDouble()):
-        kStr += (padSpacesStr + "value = (value > alpha) ? min(value, beta) : min(0.0, beta);\n")
+        kStr += (padSpacesStr + "value = (value > alpha) ? std::min(value, beta) : std::min(decltype(beta)(0), beta);\n")
       elif self.dataType.isInt32():
-        kStr += (padSpacesStr + "value = (value > alpha) ? min(value, beta) : min(0, beta);\n")
+        kStr += (padSpacesStr + "value = (value > alpha) ? std::min(value, beta) : std::min(0, beta);\n")
     elif (activationType == 'exp'):
       kStr += (asm + " // Exp\n")
       module = activation.getExpModule(self.dataType, 0, 0)
@@ -1369,9 +1385,9 @@ class ActivationInline:
         raise RuntimeError("Unsupported data type %s."%ptrStr)
     elif (activationType == 'relu'):
       if (self.dataType.isSingle() or self.dataType.isHalf() or self.dataType.isDouble()):
-        kStr += (padSpacesStr + "value = max(0.0, value);\n")
+        kStr += (padSpacesStr + "value = std::max(decltype(value)(0), value);\n")
       elif self.dataType.isInt32():
-        kStr += (padSpacesStr + "value = max(0, value);\n")
+        kStr += (padSpacesStr + "value = std::max(0, value);\n")
       else:
         raise RuntimeError("Unsupported data type %s."%ptrStr)
     elif (activationType == 'sigmoid'):
@@ -1393,6 +1409,11 @@ class ActivationInline:
       kStr += addSpace(asm, ": \"+v\"(value) : \n")
       needExec = True if self.enableGuard else False
       kStr += self.getRequiredRegStr(asm, activation.vgprCounter, activation.sgprCounter, needExec=needExec)
+    elif (activationType == 'drelu'):
+      if (self.dataType.isSingle()):
+        kStr += (padSpacesStr + "value = (value > 0.0f) ? 1.0f : 0.0f;\n")
+      else:
+        raise RuntimeError("Unsupported data type %s."%ptrStr)
     elif (activationType == 'silu'):
       kStr += (asm + " // Silu\n")
       module = activation.getSiluModule(self.dataType, 0, 0)
@@ -1406,7 +1427,7 @@ class ActivationInline:
       kStr += addSpace(asm, ": \"+v\"(value) : \"s\"(alpha)\n")
       kStr += self.getRequiredRegStr(asm, activation.vgprCounter, activation.sgprCounter)
     elif (activationType == 'clamp'):
-      kStr += (padSpacesStr + "value = max(alpha, min(value, beta));\n")
+      kStr += (padSpacesStr + "value = std::max(alpha, std::min(value, beta));\n")  # clamp
     else:
       if (activationType != 'none'):
         raise RuntimeError("Unrecognized type %s."%activationType)

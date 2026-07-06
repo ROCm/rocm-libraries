@@ -50,28 +50,28 @@ hipsparseStatus_t hipsparseSpSV_destroyDescr(hipsparseSpSVDescr_t descr);
 
 /*! \ingroup generic_module
 *  \details
-*  \p hipsparseSpSV_bufferSize computes the size of the required user allocated buffer needed when solving the
+*  \p hipsparseSpSV_bufferSize computes the size of the user-allocated buffer required when solving the
 *  triangular linear system:
 *  \f[
 *    op(A) \cdot y := \alpha \cdot x,
 *  \f]
-*  where \f$op(A)\f$ is a sparse matrix in CSR or COO storage format, \f$x\f$ and \f$y\f$ are dense vectors.
+*  where \f$op(A)\f$ is a sparse matrix in CSR or COO storage format and \f$x\f$ and \f$y\f$ are dense vectors.
 *
 *  \p hipsparseSpSV_bufferSize supports multiple combinations of data types and compute types. See \ref hipsparseSpSV_solve
 *  for a complete listing of all the data type and compute type combinations available.
 *
 *  @param[in]
-*  handle              handle to the hipsparse library context queue.
+*  handle              handle to the hipSPARSE library context queue.
 *  @param[in]
 *  opA                 matrix operation type.
 *  @param[in]
 *  alpha               scalar \f$\alpha\f$.
 *  @param[in]
-*  matA                matrix descriptor.
+*  matA                sparse matrix descriptor.
 *  @param[in]
-*  x                   vector descriptor.
+*  x                   dense vector descriptor.
 *  @param[inout]
-*  y                   vector descriptor.
+*  y                   dense vector descriptor.
 *  @param[in]
 *  computeType         floating point precision for the SpSV computation.
 *  @param[in]
@@ -81,11 +81,11 @@ hipsparseStatus_t hipsparseSpSV_destroyDescr(hipsparseSpSVDescr_t descr);
 *  @param[out]
 *  pBufferSizeInBytes  number of bytes of the temporary storage buffer.
 *
-*  \retval      HIPSPARSE_STATUS_SUCCESS the operation completed successfully.
-*  \retval      HIPSPARSE_STATUS_INVALID_VALUE \p handle, \p alpha, \p matA, \p x, \p y, \p spsvDescr or
-*               \p pBufferSizeInBytes pointer is invalid.
-*  \retval      HIPSPARSE_STATUS_NOT_SUPPORTED \p opA, \p computeType or \p alg is
-*               currently not supported.
+*  \retval HIPSPARSE_STATUS_SUCCESS the operation completed successfully.
+*  \retval HIPSPARSE_STATUS_NOT_INITIALIZED \p handle is not initialized.
+*  \retval HIPSPARSE_STATUS_INVALID_VALUE \p handle, \p alpha, \p matA, \p x, \p y, \p spsvDescr, or
+*          \p pBufferSizeInBytes is nullptr, or \p opA is invalid.
+*  \retval HIPSPARSE_STATUS_NOT_SUPPORTED \p opA, \p computeType, or \p alg is currently not supported.
 */
 #if(!defined(CUDART_VERSION) || CUDART_VERSION >= 12000)
 HIPSPARSE_EXPORT
@@ -120,13 +120,13 @@ hipsparseStatus_t hipsparseSpSV_bufferSize(hipsparseHandle_t           handle,
 *  \f[
 *    op(A) \cdot y := \alpha \cdot x,
 *  \f]
-*  where \f$op(A)\f$ is a sparse matrix in CSR or COO storage format, \f$x\f$ and \f$y\f$ are dense vectors.
+*  where \f$op(A)\f$ is a sparse matrix in CSR or COO storage format and \f$x\f$ and \f$y\f$ are dense vectors.
 *
 *  \p hipsparseSpSV_analysis supports multiple combinations of data types and compute types. See \ref hipsparseSpSV_solve
 *  for a complete listing of all the data type and compute type combinations available.
 *
 *  @param[in]
-*  handle          handle to the hipsparse library context queue.
+*  handle          handle to the hipSPARSE library context queue.
 *  @param[in]
 *  opA             matrix operation type.
 *  @param[in]
@@ -147,9 +147,9 @@ hipsparseStatus_t hipsparseSpSV_bufferSize(hipsparseHandle_t           handle,
 *  externalBuffer  temporary storage buffer allocated by the user.
 *
 *  \retval      HIPSPARSE_STATUS_SUCCESS the operation completed successfully.
-*  \retval      HIPSPARSE_STATUS_INVALID_VALUE \p handle, \p alpha, \p matA, \p x, \p y, \p spsvDescr or
+*  \retval      HIPSPARSE_STATUS_INVALID_VALUE \p handle, \p alpha, \p matA, \p x, \p y, \p spsvDescr, or
 *               \p externalBuffer pointer is invalid.
-*  \retval      HIPSPARSE_STATUS_NOT_SUPPORTED \p opA, \p computeType or \p alg is
+*  \retval      HIPSPARSE_STATUS_NOT_SUPPORTED \p opA, \p computeType, or \p alg is
 *               currently not supported.
 */
 #if(!defined(CUDART_VERSION) || CUDART_VERSION >= 12000)
@@ -179,7 +179,7 @@ hipsparseStatus_t hipsparseSpSV_analysis(hipsparseHandle_t           handle,
 #endif
 
 /*! \ingroup generic_module
-*  \brief Sparse triangular solve
+*  \brief Sparse triangular solve.
 *
 *  \details
 *  \p hipsparseSpSV_solve solves a triangular linear system of equations defined by a sparse \f$m \times m\f$ square matrix
@@ -198,16 +198,16 @@ hipsparseStatus_t hipsparseSpSV_analysis(hipsparseHandle_t           handle,
 *  \f]
 *  and where \f$y\f$ is the dense solution vector and \f$x\f$ is the dense right-hand side vector.
 *
-*  Performing the above operation requires three steps. First, \ref hipsparseSpSV_bufferSize must be called which will
+*  Performing the above operation requires three steps. First, \ref hipsparseSpSV_bufferSize must be called to
 *  determine the size of the required temporary storage buffer. The user then allocates this buffer and calls
-*  \ref hipsparseSpSV_analysis which will perform analysis on the sparse matrix \f$op(A)\f$. Finally, the user completes
-*  the computation by calling \p hipsparseSpSV_solve. The buffer size and preprecess routines only need to be called once
-*  for a given sparse matrix \f$op(A)\f$ while the computation can be repeatedly used with different \f$x\f$ and \f$y\f$
-*  vectors. Once all calls to \p hipsparseSpSV_solve are complete, the temporary buffer can be deallocated.
+*  \ref hipsparseSpSV_analysis, which will perform analysis on the sparse matrix \f$op(A)\f$. Finally, the user completes
+*  the computation by calling \p hipsparseSpSV_solve. The buffer size and preprocess routines only need to be called once
+*  for a given sparse matrix \f$op(A)\f$, while the computation can be repeatedly used with different \f$x\f$ and \f$y\f$
+*  vectors. After all calls to \p hipsparseSpSV_solve are complete, the temporary buffer can be deallocated.
 *
 *  \p hipsparseSpSV_solve supports \ref HIPSPARSE_INDEX_32I and \ref HIPSPARSE_INDEX_64I index types for
 *  storing the row pointer and column indices arrays of the sparse matrices. \p hipsparseSpSV_solve supports the following
-*  data types for \f$op(A)\f$, \f$x\f$, \f$y\f$ and compute types for \f$\alpha\f$:
+*  data types for \f$op(A)\f$, \f$x\f$, and \f$y\f$ and compute types for \f$\alpha\f$:
 *
 *  \par Uniform Precisions:
 *  <table>
@@ -220,7 +220,7 @@ hipsparseStatus_t hipsparseSpSV_analysis(hipsparseHandle_t           handle,
 *  </table>
 *
 *  @param[in]
-*  handle          handle to the hipsparse library context queue.
+*  handle          handle to the hipSPARSE library context queue.
 *  @param[in]
 *  opA             matrix operation type.
 *  @param[in]
@@ -241,138 +241,8 @@ hipsparseStatus_t hipsparseSpSV_analysis(hipsparseHandle_t           handle,
 *  \retval      HIPSPARSE_STATUS_SUCCESS the operation completed successfully.
 *  \retval      HIPSPARSE_STATUS_INVALID_VALUE \p handle, \p alpha, \p matA, \p x, \p y, or \p spsvDescr
 *               pointer is invalid.
-*  \retval      HIPSPARSE_STATUS_NOT_SUPPORTED \p opA, \p computeType or \p alg is
+*  \retval      HIPSPARSE_STATUS_NOT_SUPPORTED \p opA, \p computeType, or \p alg is
 *               currently not supported.
-*
-*  \par Example
-*  \code{.c}
-*   //     1 0 0 0
-*    // A = 4 2 0 0
-*    //     0 3 7 0
-*    //     0 0 0 1
-*    int m   = 4;
-*
-*    std::vector<int> hcsr_row_ptr = {0, 1, 3, 5, 6};
-*    std::vector<int> hcsr_col_ind = {0, 0, 1, 1, 2, 3};
-*    std::vector<float> hcsr_val   = {1, 4, 2, 3, 7, 1};
-*    std::vector<float> hx(m, 1.0f);
-*    std::vector<float> hy(m, 0.0f);
-*
-*    // Scalar alpha
-*    float alpha = 1.0f;
-*
-*    int nnz = hcsr_row_ptr[m] - hcsr_row_ptr[0];
-*
-*    // Offload data to device
-*    int* dcsr_row_ptr;
-*    int* dcsr_col_ind;
-*    float* dcsr_val;
-*    float* dx;
-*    float* dy;
-*    hipMalloc((void**)&dcsr_row_ptr, sizeof(int) * (m + 1));
-*    hipMalloc((void**)&dcsr_col_ind, sizeof(int) * nnz);
-*    hipMalloc((void**)&dcsr_val, sizeof(float) * nnz);
-*    hipMalloc((void**)&dx, sizeof(float) * m);
-*    hipMalloc((void**)&dy, sizeof(float) * m);
-*
-*    hipMemcpy(dcsr_row_ptr, hcsr_row_ptr.data(), sizeof(int) * (m + 1), hipMemcpyHostToDevice);
-*    hipMemcpy(dcsr_col_ind, hcsr_col_ind.data(), sizeof(int) * nnz, hipMemcpyHostToDevice);
-*    hipMemcpy(dcsr_val, hcsr_val.data(), sizeof(float) * nnz, hipMemcpyHostToDevice);
-*    hipMemcpy(dx, hx.data(), sizeof(float) * m, hipMemcpyHostToDevice);
-*
-*    hipsparseHandle_t     handle;
-*    hipsparseSpMatDescr_t matA;
-*    hipsparseDnVecDescr_t vecX;
-*    hipsparseDnVecDescr_t vecY;
-*
-*    hipsparseIndexType_t row_idx_type = HIPSPARSE_INDEX_32I;
-*    hipsparseIndexType_t col_idx_type = HIPSPARSE_INDEX_32I;
-*    hipDataType  data_type = HIP_R_32F;
-*    hipDataType  computeType = HIP_R_32F;
-*    hipsparseIndexBase_t idx_base = HIPSPARSE_INDEX_BASE_ZERO;
-*    hipsparseOperation_t trans = HIPSPARSE_OPERATION_NON_TRANSPOSE;
-*
-*    hipsparseCreate(&handle);
-*
-*    // Create sparse matrix A
-*    hipsparseCreateCsr(&matA,
-*                        m,
-*                        m,
-*                        nnz,
-*                        dcsr_row_ptr,
-*                        dcsr_col_ind,
-*                        dcsr_val,
-*                        row_idx_type,
-*                        col_idx_type,
-*                        idx_base,
-*                        data_type);
-*
-*    // Create dense vector X
-*    hipsparseCreateDnVec(&vecX, m, dx, data_type);
-*
-*    // Create dense vector Y
-*    hipsparseCreateDnVec(&vecY, m, dy, data_type);
-*
-*    hipsparseSpSVDescr_t descr;
-*    hipsparseSpSV_createDescr(&descr);
-*
-*    // Call spsv to get buffer size
-*    size_t buffer_size;
-*    hipsparseSpSV_bufferSize(handle,
-*                    trans,
-*                    &alpha,
-*                    matA,
-*                    vecX,
-*                    vecY,
-*                    computeType,
-*                    HIPSPARSE_SPSV_ALG_DEFAULT,
-*                    descr,
-*                    &buffer_size);
-*
-*    void* temp_buffer;
-*    hipMalloc((void**)&temp_buffer, buffer_size);
-*
-*    // Call spsv to perform analysis
-*    hipsparseSpSV_analysis(handle,
-*                        trans,
-*                        &alpha,
-*                        matA,
-*                        vecX,
-*                        vecY,
-*                        computeType,
-*                        HIPSPARSE_SPSV_ALG_DEFAULT,
-*                        descr,
-*                        temp_buffer);
-*
-*    // Call spsv to perform computation
-*    hipsparseSpSV_solve(handle,
-*                        trans,
-*                        &alpha,
-*                        matA,
-*                        vecX,
-*                        vecY,
-*                        computeType,
-*                        HIPSPARSE_SPSV_ALG_DEFAULT,
-*                        descr);
-*
-*    // Copy result back to host
-*    hipMemcpy(hy.data(), dy, sizeof(float) * m, hipMemcpyDeviceToHost);
-*
-*    // Clear hipSPARSE
-*    hipsparseSpSV_destroyDescr(descr);
-*    hipsparseDestroyMatDescr(matA);
-*    hipsparseDestroyDnVec(vecX);
-*    hipsparseDestroyDnVec(vecY);
-*    hipsparseDestroy(handle);
-*
-*    // Clear device memory
-*    hipFree(dcsr_row_ptr);
-*    hipFree(dcsr_col_ind);
-*    hipFree(dcsr_val);
-*    hipFree(dx);
-*    hipFree(dy);
-*    hipFree(temp_buffer);
-*  \endcode
 */
 #if(!defined(CUDART_VERSION) || CUDART_VERSION >= 12000)
 HIPSPARSE_EXPORT

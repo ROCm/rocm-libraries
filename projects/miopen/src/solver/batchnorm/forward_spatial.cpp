@@ -55,8 +55,8 @@ bool PerformanceConfigBnFwdTraining::IsValid(
 
     // if default config is variant 2, check if it can be applied
     // (based on variant 2 restrictions)
-    size_t vectorsize, xlocalsize, ylocalsize, zlocalsize, nelements;
-    int variant;
+    size_t vectorsize = 1, xlocalsize = 1, ylocalsize = 1, zlocalsize = 1, nelements = 1;
+    int variant = -1;
     GetVariantFromKernelId(
         this->kernel_id, variant, vectorsize, xlocalsize, ylocalsize, zlocalsize, nelements);
     if(variant == 2)
@@ -185,7 +185,7 @@ ConvSolution BnFwdTrainingSpatial::GetSolution(const ExecutionContext& context,
                                                const PerformanceConfigBnFwdTraining& config) const
 {
     const auto& handle = context.GetStream();
-
+    // Only one can be true
     bool bfpmixparm   = false;
     bool bbfpmixparam = false;
     bool bfp16parm    = false;
@@ -220,12 +220,14 @@ ConvSolution BnFwdTrainingSpatial::GetSolution(const ExecutionContext& context,
 
     int variant       = -1;
     size_t vectorsize = 1;
-    size_t xlocalsize, xgridsize;
+    size_t xlocalsize = 1, xgridsize = 1;
     size_t ylocalsize = 1, ygridsize = 1;
     size_t zlocalsize = 1, zgridsize = 1;
-    unsigned int ldsgcn, ldsnogcn;
+    unsigned int ldsgcn = 0, ldsnogcn = 0;
     int stash_method = 0;
-    size_t nelements;
+    size_t nelements = 1;
+
+    auto const waveSize = handle.GetWavefrontWidth();
 
     GetVariantFromKernelId(
         config.kernel_id, variant, vectorsize, xlocalsize, ylocalsize, zlocalsize, nelements);
@@ -240,19 +242,8 @@ ConvSolution BnFwdTrainingSpatial::GetSolution(const ExecutionContext& context,
             xlocalsize = 256;
         }
         xgridsize = c * xlocalsize;
-        ldsgcn    = xlocalsize / 64;
+        ldsgcn    = xlocalsize / waveSize;
         ldsnogcn  = xlocalsize;
-#if(WORKAROUND_SWDEV_253606 == 0)
-        if(variant == 4)
-        {
-            xlocalsize = 256;
-            xgridsize  = c * xlocalsize;
-            ylocalsize = 1;
-            ygridsize  = 1;
-            ldsgcn     = xlocalsize / 64;
-            ldsnogcn   = xlocalsize;
-        }
-#endif
     }
     else
     {
@@ -293,7 +284,7 @@ ConvSolution BnFwdTrainingSpatial::GetSolution(const ExecutionContext& context,
                 (xlocalsize * ylocalsize * zlocalsize) / xlocalsize_final / zlocalsize_final;
         }
         ldsnogcn = xlocalsize * ylocalsize * zlocalsize;
-        ldsgcn   = xlocalsize * ylocalsize * zlocalsize / 64;
+        ldsgcn   = xlocalsize * ylocalsize * zlocalsize / waveSize;
     }
 
     auto result = ConvSolution{miopenStatusSuccess};
@@ -307,7 +298,9 @@ ConvSolution BnFwdTrainingSpatial::GetSolution(const ExecutionContext& context,
             {"MIOPEN_USE_FPMIX", static_cast<int>(bfpmixparm)},
             {"MIOPEN_USE_BFPMIX", static_cast<int>(bbfpmixparam)},
             {"MIO_SAVE_MEAN_VARIANCE", static_cast<int>(problem.GetResultSave())},
-            {"MIO_RUNNING_RESULT", static_cast<int>(problem.GetResultRunning())},
+            {"MIO_RUNNING_RESULT",
+             context.is_for_generic_search ? static_cast<int>(0)
+                                           : static_cast<int>(problem.GetResultRunning())},
             {"MIO_BN_VARIANT", variant},
             {"MIO_BN_LDS_SIZE", ldsnogcn},
             {"MIO_BN_LDSGCN_SIZE", std::to_string(ldsgcn)},
@@ -323,27 +316,28 @@ ConvSolution BnFwdTrainingSpatial::GetSolution(const ExecutionContext& context,
             {"MIO_BN_GRP2_FINAL", zlocalsize_final},
             {"MIO_BN_GFX103X", (StartsWith(handle.GetDeviceName(), "gfx103") ? "1" : "0")},
             {"MIO_BN_GFX110X", (StartsWith(handle.GetDeviceName(), "gfx110") ? "1" : "0")},
+            {"MIO_BN_GFX115X", (StartsWith(handle.GetDeviceName(), "gfx115") ? "1" : "0")},
             {"MIO_BN_GFX120X", (StartsWith(handle.GetDeviceName(), "gfx120") ? "1" : "0")},
+            {"MIO_BN_GFX125X", (StartsWith(handle.GetDeviceName(), "gfx125") ? "1" : "0")},
             {"MIO_LAYOUT_NHWC", static_cast<int>(problem.IsLayoutNHWC())},
             {"MIO_BN_VECTORIZE", static_cast<int>(vectorsize > 1)},
             {"MIO_BN_VEC_SIZE", vectorsize},
             {"MIO_BN_STASH_METHOD", stash_method},
             {"MIOPEN_NRN_OP_ID", problem.GetActivationDesc().GetMode()}};
 
-        if(variant != 4)
-        {
-            build_params.Define("MIO_BN_C", c);
-            build_params.Define("MIO_BN_HW", in_cstride);
-            build_params.Define("MIO_BN_NHW", in_nhw);
-            build_params.Define("MIO_BN_CHW", in_nstride);
-            build_params.Define("MIO_BN_NCHW", in_nchw);
-        }
+        build_params.Define("MIO_BN_C", c);
+        build_params.Define("MIO_BN_HW", in_cstride);
+        build_params.Define("MIO_BN_NHW", in_nhw);
+        build_params.Define("MIO_BN_CHW", in_nstride);
+        build_params.Define("MIO_BN_NCHW", in_nchw);
 
-        kernel.kernel_file      = "MIOpenBatchNormFwdTrainSpatial.cl";
+        build_params.Define("HIP_ENABLE_EXTRA_WARP_SYNC_TYPES");
+
+        kernel.kernel_file      = "MIOpenBatchNormFwdTrainSpatial.cpp";
         std::string kernel_name = "MIOpenBatchNormFwdTrainSpatial";
-        kernel.kernel_name      = kernel_name;
+        kernel.comp_options     = build_params.GenerateFor(kbp::HIP{});
 
-        kernel.comp_options = build_params.GenerateFor(kbp::OpenCL{});
+        kernel.kernel_name = kernel_name;
 
         kernel.l_wk.push_back(xlocalsize);
         kernel.l_wk.push_back(ylocalsize);
@@ -378,15 +372,17 @@ ConvSolution BnFwdTrainingSpatial::GetSolution(const ExecutionContext& context,
     }
 
     const auto dtype = problem.GetBnScale().GetType();
-    const auto vn4   = (variant != 4);
 
     result.invoker_factory = [=](const std::vector<Kernel>& kernels) {
         return [=](const Handle& handle_, const AnyInvokeParams& raw_params) {
             decltype(auto) params = raw_params.CastTo<miopen::batchnorm::FwdTrainInvokeParams>();
             const auto resultsave =
                 params.resultSaveMean != nullptr && params.resultSaveInvVariance != nullptr;
-            const auto resultrunning =
-                params.resultRunningMean != nullptr && params.resultRunningVariance != nullptr;
+            const auto resultrunning = params.prevResultRunningMean != nullptr &&
+                                       params.prevResultRunningVariance != nullptr &&
+                                       params.nextResultRunningMean != nullptr &&
+                                       params.nextResultRunningVariance != nullptr &&
+                                       !context.is_for_generic_search;
 
             float alpha_activ = problem.GetActivationDesc().GetAlpha();
             float beta_activ  = problem.GetActivationDesc().GetBeta();
@@ -398,131 +394,61 @@ ConvSolution BnFwdTrainingSpatial::GetSolution(const ExecutionContext& context,
                     decltype(auto) kernel = handle_.Run(kernels.front());
                     if(resultsave && resultrunning)
                     {
-                        if(vn4)
-                        {
-                            kernel(params.x,
-                                   params.y,
-                                   params.bnScale,
-                                   params.bnBias,
-                                   as_float(inhw),
-                                   params.expAvgFactor,
-                                   params.resultRunningMean,
-                                   params.resultRunningVariance,
-                                   params.epsilon,
-                                   params.resultSaveMean,
-                                   params.resultSaveInvVariance,
-                                   alpha_activ,
-                                   beta_activ);
-                        }
-                        else
-                        {
-                            kernel(params.x,
-                                   params.y,
-                                   params.bnScale,
-                                   params.bnBias,
-                                   as_float(inhw),
-                                   params.expAvgFactor,
-                                   params.resultRunningMean,
-                                   params.resultRunningVariance,
-                                   params.epsilon,
-                                   params.resultSaveMean,
-                                   params.resultSaveInvVariance,
-                                   in_cstride,
-                                   in_nstride,
-                                   alpha_activ,
-                                   beta_activ);
-                        }
+                        kernel(params.x,
+                               params.y,
+                               params.bnScale,
+                               params.bnBias,
+                               as_float(inhw),
+                               params.expAvgFactor,
+                               params.prevResultRunningMean,
+                               params.prevResultRunningVariance,
+                               params.nextResultRunningMean,
+                               params.nextResultRunningVariance,
+                               params.epsilon,
+                               params.resultSaveMean,
+                               params.resultSaveInvVariance,
+                               alpha_activ,
+                               beta_activ);
                     }
                     else if(resultsave)
                     {
-                        if(vn4)
-                        {
-                            kernel(params.x,
-                                   params.y,
-                                   params.bnScale,
-                                   params.bnBias,
-                                   as_float(inhw),
-                                   params.epsilon,
-                                   params.resultSaveMean,
-                                   params.resultSaveInvVariance,
-                                   alpha_activ,
-                                   beta_activ);
-                        }
-                        else
-                        {
-                            kernel(params.x,
-                                   params.y,
-                                   params.bnScale,
-                                   params.bnBias,
-                                   as_float(inhw),
-                                   params.epsilon,
-                                   params.resultSaveMean,
-                                   params.resultSaveInvVariance,
-                                   in_cstride,
-                                   in_nstride,
-                                   alpha_activ,
-                                   beta_activ);
-                        }
+                        kernel(params.x,
+                               params.y,
+                               params.bnScale,
+                               params.bnBias,
+                               as_float(inhw),
+                               params.epsilon,
+                               params.resultSaveMean,
+                               params.resultSaveInvVariance,
+                               alpha_activ,
+                               beta_activ);
                     }
                     else if(resultrunning)
                     {
-                        if(vn4)
-                        {
-                            kernel(params.x,
-                                   params.y,
-                                   params.bnScale,
-                                   params.bnBias,
-                                   as_float(inhw),
-                                   params.expAvgFactor,
-                                   params.resultRunningMean,
-                                   params.resultRunningVariance,
-                                   params.epsilon,
-                                   alpha_activ,
-                                   beta_activ);
-                        }
-                        else
-                        {
-                            kernel(params.x,
-                                   params.y,
-                                   params.bnScale,
-                                   params.bnBias,
-                                   as_float(inhw),
-                                   params.expAvgFactor,
-                                   params.resultRunningMean,
-                                   params.resultRunningVariance,
-                                   params.epsilon,
-                                   in_cstride,
-                                   in_nstride,
-                                   alpha_activ,
-                                   beta_activ);
-                        }
+                        kernel(params.x,
+                               params.y,
+                               params.bnScale,
+                               params.bnBias,
+                               as_float(inhw),
+                               params.expAvgFactor,
+                               params.prevResultRunningMean,
+                               params.prevResultRunningVariance,
+                               params.nextResultRunningMean,
+                               params.nextResultRunningVariance,
+                               params.epsilon,
+                               alpha_activ,
+                               beta_activ);
                     }
                     else
                     {
-                        if(vn4)
-                        {
-                            kernel(params.x,
-                                   params.y,
-                                   params.bnScale,
-                                   params.bnBias,
-                                   as_float(inhw),
-                                   params.epsilon,
-                                   alpha_activ,
-                                   beta_activ);
-                        }
-                        else
-                        {
-                            kernel(params.x,
-                                   params.y,
-                                   params.bnScale,
-                                   params.bnBias,
-                                   as_float(inhw),
-                                   params.epsilon,
-                                   in_cstride,
-                                   in_nstride,
-                                   alpha_activ,
-                                   beta_activ);
-                        }
+                        kernel(params.x,
+                               params.y,
+                               params.bnScale,
+                               params.bnBias,
+                               as_float(inhw),
+                               params.epsilon,
+                               alpha_activ,
+                               beta_activ);
                     }
                 }
                 else
@@ -535,8 +461,10 @@ ConvSolution BnFwdTrainingSpatial::GetSolution(const ExecutionContext& context,
                         handle_.Run(kernels[1])(params.y,
                                                 as_float(inhw),
                                                 params.expAvgFactor,
-                                                params.resultRunningMean,
-                                                params.resultRunningVariance,
+                                                params.prevResultRunningMean,
+                                                params.prevResultRunningVariance,
+                                                params.nextResultRunningMean,
+                                                params.nextResultRunningVariance,
                                                 params.epsilon,
                                                 params.resultSaveMean,
                                                 params.resultSaveInvVariance);
@@ -554,8 +482,10 @@ ConvSolution BnFwdTrainingSpatial::GetSolution(const ExecutionContext& context,
                         handle_.Run(kernels[1])(params.y,
                                                 as_float(inhw),
                                                 params.expAvgFactor,
-                                                params.resultRunningMean,
-                                                params.resultRunningVariance,
+                                                params.prevResultRunningMean,
+                                                params.prevResultRunningVariance,
+                                                params.nextResultRunningMean,
+                                                params.nextResultRunningVariance,
                                                 params.epsilon);
                     }
                     else

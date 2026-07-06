@@ -1,5 +1,5 @@
 /* ************************************************************************
- * Copyright (C) 2020 Advanced Micro Devices, Inc. All rights Reserved.
+ * Copyright (C) 2020-2026 Advanced Micro Devices, Inc. All rights Reserved.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -41,13 +41,13 @@ using namespace hipsparse;
 using namespace hipsparse_test;
 
 template <typename T>
-void testing_csrgeam2_bad_arg(void)
+void testing_csrgeam2_bad_arg(const Arguments& argus)
 {
 #if(!defined(CUDART_VERSION))
     int safe_size = 1;
 
-    T alpha = 1.0;
-    T beta  = 1.0;
+    T alpha = make_DataType<T>(1.0);
+    T beta  = make_DataType<T>(1.0);
 
     int nnz_C;
 
@@ -729,7 +729,7 @@ void testing_csrgeam2_bad_arg(void)
 }
 
 template <typename T>
-hipsparseStatus_t testing_csrgeam2(Arguments argus)
+void testing_csrgeam2(Arguments argus)
 {
     int                  M          = argus.M;
     int                  N          = argus.N;
@@ -737,8 +737,8 @@ hipsparseStatus_t testing_csrgeam2(Arguments argus)
     hipsparseIndexBase_t idx_base_B = argus.baseB;
     hipsparseIndexBase_t idx_base_C = argus.baseC;
     std::string          filename   = argus.filename;
-    T                    h_alpha    = make_DataType<T>(argus.alpha);
-    T                    h_beta     = make_DataType<T>(argus.beta);
+    T                    h_alpha    = argus.get_alpha<T>();
+    T                    h_beta     = argus.get_beta<T>();
 
     std::unique_ptr<handle_struct> unique_ptr_handle(new handle_struct);
     hipsparseHandle_t              handle = unique_ptr_handle->handle;
@@ -766,12 +766,8 @@ hipsparseStatus_t testing_csrgeam2(Arguments argus)
 
     // Read or construct CSR matrix
     int nnz_A = 0;
-    if(!generate_csr_matrix(
-           filename, M, N, nnz_A, hcsr_row_ptr_A, hcsr_col_ind_A, hcsr_val_A, idx_base_A))
-    {
-        fprintf(stderr, "Cannot open [read] %s\ncol", filename.c_str());
-        return HIPSPARSE_STATUS_INTERNAL_ERROR;
-    }
+    CHECK_GENERATE_MATRIX_ERROR(generate_csr_matrix(
+        filename, M, N, nnz_A, hcsr_row_ptr_A, hcsr_col_ind_A, hcsr_val_A, idx_base_A));
 
     // B = A so that we can compute the square of A
     int              nnz_B = nnz_A;
@@ -1120,8 +1116,6 @@ hipsparseStatus_t testing_csrgeam2(Arguments argus)
                             display_key_t::time_ms,
                             get_gpu_time_msec(gpu_time_used));
     }
-
-    return HIPSPARSE_STATUS_SUCCESS;
 }
 
 #endif // TESTING_CSRGEAM2_HPP

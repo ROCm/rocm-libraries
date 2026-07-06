@@ -111,6 +111,7 @@ void run_vector_test()
 
     vector_test_kernel<Vector, vec_size, block_size>
         <<<size / block_size, block_size>>>(device_input, device_output);
+        HIP_CHECK(hipGetLastError());
 
     std::vector<Vector> output(size);
     HIP_CHECK(hipMemcpy(output.data(),
@@ -130,6 +131,9 @@ void run_vector_test()
                                       expected_num));
         }
     }
+
+    HIP_CHECK(hipFree(device_input));
+    HIP_CHECK(hipFree(device_output));
 }
 
 TYPED_TEST(HipcubVector, Vector1)

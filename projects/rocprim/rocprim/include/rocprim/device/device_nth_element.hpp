@@ -1,4 +1,4 @@
-// Copyright (c) 2024 Advanced Micro Devices, Inc. All rights reserved.
+// Copyright (c) 2024-2026 Advanced Micro Devices, Inc. All rights reserved.
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -22,6 +22,7 @@
 #define ROCPRIM_DEVICE_DEVICE_NTH_ELEMENT_HPP_
 
 #include "detail/device_nth_element.hpp"
+#include "detail/ordered_block_id.hpp"
 
 #include "../detail/temp_storage.hpp"
 
@@ -37,7 +38,12 @@
 #include <cstddef>
 #include <cstdio>
 
+/// \addtogroup devicemodule
+/// @{
+
 BEGIN_ROCPRIM_NAMESPACE
+
+#ifndef DOXYGEN_SHOULD_SKIP_THIS // Do not document
 
 namespace detail
 {
@@ -57,120 +63,155 @@ hipError_t
                      = nullptr)
 {
     using key_type = typename std::iterator_traits<KeysIterator>::value_type;
-    using config   = wrapped_nth_element_config<Config, key_type>;
+    using selector = nth_element_config_selector<key_type>;
 
-    target_arch target_arch;
-    hipError_t  result = host_target_arch(stream, target_arch);
-    if(result != hipSuccess)
-    {
-        return result;
-    }
-    const nth_element_config_params params = dispatch_target_arch<config, false>(target_arch);
+    bool use_atomic_block_id;
+    ROCPRIM_RETURN_ON_ERROR(check_if_using_atomic_block_id(stream, use_atomic_block_id));
+    const auto use_atomic_block_id_variant
+        = ::rocprim::detail::constexpr_value_variant<bool, false, true>::create(
+            use_atomic_block_id);
 
-    constexpr unsigned int num_partitions        = 3;
-    const unsigned int     num_buckets           = params.number_of_buckets;
-    const unsigned int     num_splitters         = num_buckets - 1;
-    const unsigned int     stop_recursion_size   = params.stop_recursion_size;
-    const unsigned int     num_items_per_threads = params.kernel_config.items_per_thread;
-    const unsigned int     num_threads_per_block = params.kernel_config.block_size;
-    const unsigned int     num_items_per_block   = num_threads_per_block * num_items_per_threads;
-    const unsigned int     num_blocks            = ceiling_div(size, num_items_per_block);
-
-    key_type*                            tree             = nullptr;
-    unsigned int*                        buckets          = nullptr;
-    n_th_element_iteration_data*         nth_element_data = nullptr;
-    bool*                                equality_buckets = nullptr;
-    nth_element_onesweep_lookback_state* lookback_states  = nullptr;
-
-    key_type* keys_buffer = nullptr;
-
-    {
-        using namespace temp_storage;
-
-        hipError_t partition_result;
-        if(keys_double_buffer == nullptr)
+    ROCPRIM_RETURN_ON_ERROR(std::visit(
+        [&](auto use_atomic_block_id)
         {
-            partition_result
-                = partition(temporary_storage,
-                            storage_size,
-                            make_linear_partition(
-                                ptr_aligned_array(&tree, num_splitters),
-                                ptr_aligned_array(&equality_buckets, num_buckets),
-                                ptr_aligned_array(&buckets, num_buckets),
-                                ptr_aligned_array(&keys_buffer, size),
-                                ptr_aligned_array(&nth_element_data, 1),
-                                ptr_aligned_array(&lookback_states, num_partitions * num_blocks)));
-        }
-        else
-        {
-            partition_result
-                = partition(temporary_storage,
-                            storage_size,
-                            make_linear_partition(
-                                ptr_aligned_array(&tree, num_splitters),
-                                ptr_aligned_array(&equality_buckets, num_buckets),
-                                ptr_aligned_array(&buckets, num_buckets),
-                                ptr_aligned_array(&nth_element_data, 1),
-                                ptr_aligned_array(&lookback_states, num_partitions * num_blocks)));
-            keys_buffer = keys_double_buffer;
-        }
+            const target current_target(stream);
 
-        if(partition_result != hipSuccess || temporary_storage == nullptr)
-        {
-            return partition_result;
-        }
-    }
+            const auto             params         = get_config<selector>(Config{}, current_target);
+            constexpr unsigned int num_partitions = 3;
+            const unsigned int     num_buckets    = params.number_of_buckets;
+            const unsigned int     num_splitters  = num_buckets - 1;
+            const unsigned int     stop_recursion_size   = params.stop_recursion_size;
+            const unsigned int     num_items_per_threads = params.kernel_config.items_per_thread;
+            const unsigned int     num_threads_per_block = params.kernel_config.block_size;
+            const unsigned int num_items_per_block = num_threads_per_block * num_items_per_threads;
+            const unsigned int num_blocks          = ceiling_div(size, num_items_per_block);
 
-    if((size == 0) || (size == 1 && nth == 0))
-    {
-        return hipSuccess;
-    }
+            key_type*                            tree             = nullptr;
+            unsigned int*                        buckets          = nullptr;
+            n_th_element_iteration_data*         nth_element_data = nullptr;
+            bool*                                equality_buckets = nullptr;
+            nth_element_onesweep_lookback_state* lookback_states  = nullptr;
 
-    if(nth >= size)
-    {
-        return hipErrorInvalidValue;
-    }
+            key_type* keys_buffer = nullptr;
 
-    if(debug_synchronous)
-    {
-        std::cout << "-----" << '\n';
-        std::cout << "size: " << size << '\n';
-        std::cout << "num_buckets: " << num_buckets << '\n';
-        std::cout << "num_threads_per_block: " << num_threads_per_block << '\n';
-        std::cout << "num_blocks: " << num_blocks << '\n';
-        std::cout << "storage_size: " << storage_size << '\n';
-    }
+            using ordered_bid_type = block_id_wrapper<unsigned int, use_atomic_block_id>;
+            typename ordered_bid_type::id_type* ordered_bid_storage;
 
-    return nth_element_keys_impl<config, num_partitions>(target_arch,
-                                                         keys,
-                                                         keys_buffer,
-                                                         tree,
-                                                         nth,
-                                                         size,
-                                                         buckets,
-                                                         equality_buckets,
-                                                         lookback_states,
-                                                         num_buckets,
-                                                         stop_recursion_size,
-                                                         num_threads_per_block,
-                                                         num_items_per_threads,
-                                                         nth_element_data,
-                                                         compare_function,
-                                                         stream,
-                                                         debug_synchronous);
+            {
+                using namespace temp_storage;
+
+                hipError_t partition_result;
+                if(keys_double_buffer == nullptr)
+                {
+                    partition_result = partition(
+                        temporary_storage,
+                        storage_size,
+                        make_linear_partition(
+                            ptr_aligned_array(&tree, num_splitters),
+                            ptr_aligned_array(&equality_buckets, num_buckets),
+                            ptr_aligned_array(&buckets, num_buckets),
+                            ptr_aligned_array(&keys_buffer, size),
+                            ptr_aligned_array(&nth_element_data, 1),
+                            ptr_aligned_array(&lookback_states, num_partitions * num_blocks),
+                            detail::temp_storage::make_partition(
+                                &ordered_bid_storage,
+                                ordered_bid_type::get_temp_storage_layout())));
+                }
+                else
+                {
+                    partition_result = partition(
+                        temporary_storage,
+                        storage_size,
+                        make_linear_partition(
+                            ptr_aligned_array(&tree, num_splitters),
+                            ptr_aligned_array(&equality_buckets, num_buckets),
+                            ptr_aligned_array(&buckets, num_buckets),
+                            ptr_aligned_array(&nth_element_data, 1),
+                            ptr_aligned_array(&lookback_states, num_partitions * num_blocks),
+                            detail::temp_storage::make_partition(
+                                &ordered_bid_storage,
+                                ordered_bid_type::get_temp_storage_layout())));
+                    keys_buffer = keys_double_buffer;
+                }
+
+                if(partition_result != hipSuccess || temporary_storage == nullptr)
+                {
+                    return partition_result;
+                }
+            }
+
+            if((size == 0) || (size == 1 && nth == 0))
+            {
+                return hipSuccess;
+            }
+
+            if(nth >= size)
+            {
+                return hipErrorInvalidValue;
+            }
+
+            if(debug_synchronous)
+            {
+                std::cout << "-----" << '\n';
+                std::cout << "size: " << size << '\n';
+                std::cout << "num_buckets: " << num_buckets << '\n';
+                std::cout << "num_threads_per_block: " << num_threads_per_block << '\n';
+                std::cout << "num_blocks: " << num_blocks << '\n';
+                std::cout << "storage_size: " << storage_size << '\n';
+            }
+
+            auto ordered_bid = ordered_bid_type::create(ordered_bid_storage);
+
+            return nth_element_keys_impl<Config, selector, num_partitions>(current_target,
+                                                                           keys,
+                                                                           keys_buffer,
+                                                                           tree,
+                                                                           nth,
+                                                                           size,
+                                                                           buckets,
+                                                                           equality_buckets,
+                                                                           lookback_states,
+                                                                           num_buckets,
+                                                                           stop_recursion_size,
+                                                                           num_threads_per_block,
+                                                                           num_items_per_threads,
+                                                                           nth_element_data,
+                                                                           compare_function,
+                                                                           stream,
+                                                                           debug_synchronous,
+                                                                           ordered_bid);
+        },
+        use_atomic_block_id_variant));
+    return hipSuccess;
 }
 
 } // namespace detail
 
-/// \addtogroup devicemodule
-/// @{
+#endif // DOXYGEN_SHOULD_SKIP_THIS
 
-/// \brief Rearrange elements smaller than the n-th before and bigger than n-th after the n-th element.
+/// \brief Rearrange elements smaller than the n-th before and larger than n-th after the n-th element.
 ///
-/// The element at index `n` is set to the element that would be at the n-th position if the input was sorted.
+/// After nth_element the element in the position pointed to by `nth` is the element that would be in that
+///   position if the whole range were sorted.
 ///   Additionally the other elements are rearranged such that for all values of `i` in [keys_output, keys_output + n)
 ///   and all values of `j` in [keys_output + n, keys_output + size): `comp(*i, *j)` is false.
-///   Smaller elements than the n-th will be arranged before, and bigger ones after the n-th element.
+///   Smaller elements than the n-th will be arranged before, and larger ones after the n-th element.
+///
+/// The topk algorithm is similar and selects the largest or smallest `k` elements from the input array. The main
+/// differences are:
+/// * topk returns arrays of size `k`, whereas nth_element returns an array matching the input size.
+/// * The element at index `n` is set to the element that would be at the n-th position in nth_element, while
+///   topk does not guarantee that.
+/// * Elements which are smaller than the n-th element will be placed in the front of the output, while topk ignores
+///   all elements which are smaller or larger than the k-th element (depending on descending or ascending).
+/// * `In-place` operation can be done by nth_element, while topk does not support that.
+/// * topk supports hipGraph, but nth_element does not.
+///
+/// Here are some tips for choosing between nth_element and topk:
+/// * If you need the n-th largest or smallest element to be placed at index `n`, please use
+///   nth_element.
+/// * If you want to care about both smaller elements and larger elements, please use nth_element.
+/// * If you want to use hipGraph, please use topk.
 ///
 /// \par Overview
 /// * The contents of the inputs are not altered by the function.
@@ -217,6 +258,8 @@ hipError_t
 /// \parblock
 /// In this example a device-level nth_element is performed where input keys are
 ///   represented by an array of unsigned integers.
+///
+/// The full example is [on GitHub](https://github.com/ROCm/rocm-libraries/tree/develop/projects/rocprim/example/rocprim/device/example_device_nth_element.cpp).
 ///
 /// \code{.cpp}
 /// #include <rocprim/rocprim.hpp>
@@ -270,12 +313,29 @@ hipError_t nth_element(void*          temporary_storage,
                                             nullptr);
 }
 
-/// \brief Rearrange elements smaller than the n-th before and bigger than n-th after the n-th element.
+/// \brief Rearrange elements smaller than the n-th before and larger than n-th after the n-th element.
 ///
-/// The element at index `n` is set to the element that would be at the n-th position if the input was sorted.
+/// After nth_element the element in the position pointed to by `nth` is the element that would be in that
+///   position if the whole range were sorted.
 ///   Additionally the other elements are rearranged such that for all values of `i` in [keys_output, keys_output + n)
 ///   and all values of `j` in [keys_output + n, keys_output + size): `comp(*i, *j)` is false.
-///   Smaller elements than the n-th will be arranged before, and bigger ones after the n-th element.
+///   Smaller elements than the n-th will be arranged before, and larger ones after the n-th element.
+///
+/// The topk algorithm is similar and selects the largest or smallest `k` elements from the input array. The main
+/// differences are:
+/// * topk returns arrays of size `k`, whereas nth_element returns an array matching the input size.
+/// * The element at index `n` is set to the element that would be at the n-th position in nth_element, while
+///   topk does not guarantee that.
+/// * Elements which are smaller than the n-th element will be placed in the front of the output, while topk ignores
+///   all elements which are smaller or larger than the k-th element (depending on descending or ascending).
+/// * `In-place` operation can be done by nth_element, while topk does not support that.
+/// * topk supports hipGraph, but nth_element does not.
+///
+/// Here are some tips for choosing between nth_element and topk:
+/// * If you need the n-th largest or smallest element to be placed at index `n`, please use
+///   nth_element.
+/// * If you want to care about both smaller elements and larger elements, please use nth_element.
+/// * If you want to use hipGraph, please use topk.
 ///
 /// \par Overview
 /// * The contents of the inputs are not altered by the function.
@@ -400,9 +460,9 @@ hipError_t nth_element(void*              temporary_storage,
                                debug_synchronous);
 }
 
+END_ROCPRIM_NAMESPACE
+
 /// @}
 // end of group devicemodule
-
-END_ROCPRIM_NAMESPACE
 
 #endif // ROCPRIM_DEVICE_DEVICE_NTH_ELEMENT_HPP_

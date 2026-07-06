@@ -1,6 +1,6 @@
 /*! \file */
 /* ************************************************************************
- * Copyright (C) 2018-2025 Advanced Micro Devices, Inc. All rights Reserved.
+ * Copyright (C) 2018-2026 Advanced Micro Devices, Inc. All rights Reserved.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -26,6 +26,8 @@
 
 #include <fstream>
 #include <string>
+
+#include "rocsparse_handle.hpp"
 
 #if defined(ROCSPARSE_BUILT_WITH_ROCTX)
 #include "rocsparse_roctx.hpp"
@@ -152,6 +154,18 @@ namespace rocsparse
         void operator()(const rocsparse_double_complex complex_value) const
         {
             os_ << separator_ << std::real(complex_value) << separator_ << std::imag(complex_value);
+        }
+
+        /// Overload () operator for _Float16.
+        void operator()(const _Float16 val) const
+        {
+            os_ << separator_ << static_cast<float>(val);
+        }
+
+        /// Overload () operator for rocsparse_bfloat16.
+        void operator()(const rocsparse_bfloat16 val) const
+        {
+            os_ << separator_ << static_cast<float>(val);
         }
 
     private:
@@ -331,9 +345,9 @@ namespace rocsparse
 
                     if(capture_status == hipStreamCaptureStatusNone)
                     {
-                        RETURN_IF_HIP_ERROR(hipMemcpyAsync(
+                        RETURN_IF_HIP_ERROR(rocsparse_hipMemcpyAsync(
                             &host, value, sizeof(host), hipMemcpyDeviceToHost, handle->stream));
-                        RETURN_IF_HIP_ERROR(hipStreamSynchronize(handle->stream));
+                        RETURN_IF_HIP_ERROR(rocsparse_hipStreamSynchronize(handle->stream));
                         value = &host;
                     }
                     else
@@ -369,9 +383,9 @@ namespace rocsparse
 
                 if(capture_status == hipStreamCaptureStatusNone)
                 {
-                    RETURN_IF_HIP_ERROR(hipMemcpyAsync(
+                    RETURN_IF_HIP_ERROR(rocsparse_hipMemcpyAsync(
                         &host, value, sizeof(host), hipMemcpyDeviceToHost, handle->stream));
-                    RETURN_IF_HIP_ERROR(hipStreamSynchronize(handle->stream));
+                    RETURN_IF_HIP_ERROR(rocsparse_hipStreamSynchronize(handle->stream));
                     value = &host;
                 }
                 else

@@ -1,42 +1,21 @@
-/*******************************************************************************
- *
- * MIT License
- *
- * Copyright 2024-2025 AMD ROCm(TM) Software
- *
- * Permission is hereby granted, free of charge, to any person obtaining a copy
- * of this software and associated documentation files (the "Software"), to deal
- * in the Software without restriction, including without limitation the rights
- * to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
- * copies of the Software, and to permit persons to whom the Software is
- * furnished to do so, subject to the following conditions:
- *
- * The above copyright notice and this permission notice shall be included in
- * all copies or substantial portions of the Software.
- *
- * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
- * IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
- * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
- * AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
- * LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
- * OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
- * SOFTWARE.
- *
- *******************************************************************************/
+// Copyright Advanced Micro Devices, Inc., or its affiliates.
+// SPDX-License-Identifier: MIT
 
-#include "rocRoller/CodeGen/Arithmetic/MatrixMultiply_fwd.hpp"
 #include <rocRoller/CodeGen/MemoryInstructions.hpp>
 #include <rocRoller/CommandSolution.hpp>
 #include <rocRoller/CommandSolution_fwd.hpp>
 #include <rocRoller/DataTypes/DataTypes_Utils.hpp>
 #include <rocRoller/Expression.hpp>
+#include <rocRoller/ExpressionTransformations.hpp>
 #include <rocRoller/KernelGraph/Transforms/AddTransposeLoadCT.hpp>
 #include <rocRoller/KernelGraph/Transforms/LowerTile.hpp>
 #include <rocRoller/KernelGraph/Transforms/LowerTile_details.hpp>
 #include <rocRoller/KernelGraph/Utils.hpp>
 #include <rocRoller/KernelGraph/Visitors.hpp>
+#include <rocRoller/KernelOptions_detail.hpp>
 #include <rocRoller/Operations/Command.hpp>
 #include <rocRoller/Operations/Operations.hpp>
+#include <rocRoller/Scheduling/LDSModel.hpp>
 #include <rocRoller/Utilities/Logging.hpp>
 
 namespace rocRoller
@@ -72,13 +51,44 @@ namespace rocRoller
                 else if(isF4(type))
                 {
                     return ((mi.m == 16) && (mi.n == 16) && (mi.k == 128))
-                           || ((mi.m == 32) && (mi.n == 32) && (mi.k == 64));
+                           || ((mi.m == 32) && (mi.n == 32) && (mi.k == 64))
+                           || ((mi.m == 32) && (mi.n == 16) && (mi.k == 128));
                 }
                 return false;
             }
         }
 
         using namespace LowerTileDetails;
+
+        /**
+         * Parameters for LDS bank swizzle column permutation.
+         * Permutes K-column assignments per tile row to eliminate
+         * ds_read_b128 bank conflicts.  See docs/src/LDSSwizzling.md.
+         */
+        /// Number of dwordx4 columns per LDS bank row.
+        unsigned int getColumnsPerBankRow(ContextPtr context)
+        {
+            auto gfx      = context->targetArchitecture().target().gfx;
+            auto numBanks = Scheduling::LDSModel::getNumLDSBanks(
+                gfx, {Scheduling::LDSModel::LdsDirection::Read}, 4 /*dwordx4*/);
+            return numBanks / 4u; // each dwordx4 spans 4 banks
+        }
+
+        using LDSSwizzleParams = LDSSwizzleDetail::LDSSwizzleParams;
+
+        /**
+         * Check whether LDS bank swizzle is active for a given layout type.
+         */
+        bool isLDSSwizzleActive(LDSBankSwizzleMode swizzleMode,
+                                LayoutType         layoutType,
+                                DataType           dataType)
+        {
+            if(isScaleType(dataType))
+                return false;
+
+            return swizzleMode == LDSBankSwizzleMode::Swizzle
+                   && (layoutType == LayoutType::MATRIX_A || layoutType == LayoutType::MATRIX_B);
+        }
 
         ConstraintStatus NoConstructDestructMT(const KernelGraph& k)
         {
@@ -130,6 +140,142 @@ namespace rocRoller
          * VGPR indexes.
          */
 
+        std::tuple<int, int, int, int>
+            addLoadMacroTileCTPreTiled(KernelGraph&                     graph,
+                                       std::vector<DeferredConnection>& connections,
+                                       int                              macTileTag,
+                                       std::vector<int> const&          sdim,
+                                       bool                             updatePreTiledSubDimStrides)
+        {
+            namespace CT = rocRoller::KernelGraph::CoordinateGraph;
+            using ET     = rocRoller::Expression::EvaluationTime;
+
+            AssertFatal(sdim.size() == 4, "Expected 4 sub-dimensions for Pretiled MacroTile CT.");
+
+            auto tile = graph.coordinates.getNode<MacroTile>(macTileTag);
+
+            auto sdimX       = sdim[0];
+            auto sdimY       = sdim[1];
+            auto sdimPTXTile = sdim[2];
+            auto sdimPTYTile = sdim[3];
+
+            auto sizeX = graph.coordinates.get<SubDimension>(sdimX)->size;
+            auto sizeY = graph.coordinates.get<SubDimension>(sdimY)->size;
+
+            auto sizePTTileXExpr = graph.coordinates.get<SubDimension>(sdimPTXTile)->size;
+            AssertFatal(
+                evaluationTimes(sizePTTileXExpr)[ET::Translate],
+                "Size of pre-tile tile must be known at translate time (ie, must be literal).");
+
+            auto sizePTTileYExpr = graph.coordinates.get<SubDimension>(sdimPTYTile)->size;
+            AssertFatal(
+                evaluationTimes(sizePTTileYExpr)[ET::Translate],
+                "Size of pre-tile tile must be known at translate time (ie, must be literal).");
+
+            auto sizePTTileX = getUnsignedInt(evaluate(sizePTTileXExpr));
+            auto sizePTTileY = getUnsignedInt(evaluate(sizePTTileYExpr));
+
+            if(updatePreTiledSubDimStrides)
+            {
+                auto const strideDataType = DataType::UInt32;
+
+                auto stridePTTileXExpr = graph.coordinates.get<SubDimension>(sdimPTXTile)->stride;
+                auto stridePTTileX     = getUnsignedInt(evaluate(stridePTTileXExpr));
+                auto columnMajor       = stridePTTileX == 1u;
+
+                auto subDimX = graph.coordinates.get<SubDimension>(sdimX).value();
+                auto subDimY = graph.coordinates.get<SubDimension>(sdimY).value();
+
+                auto tileSizeX = literal(sizePTTileX, strideDataType);
+                auto tileSizeY = literal(sizePTTileY, strideDataType);
+
+                if(columnMajor)
+                {
+                    subDimX.stride = tileSizeX * tileSizeY;
+                    subDimY.stride = (subDimX.size / tileSizeX) * tileSizeX * tileSizeY;
+                }
+                else
+                {
+                    subDimX.stride = (subDimY.size / tileSizeY) * tileSizeX * tileSizeY;
+                    subDimY.stride = tileSizeX * tileSizeY;
+                }
+
+                graph.coordinates.setElement(sdimX, subDimX);
+                graph.coordinates.setElement(sdimY, subDimY);
+            }
+
+            auto numPTTilesX = tileCeilDivide(sizeX, sizePTTileX);
+            auto numPTTilesY = tileCeilDivide(sizeY, sizePTTileY);
+
+            Log::debug("PreTiled CT: numPTTilesX: {}", toString(numPTTilesX));
+            Log::debug("PreTiled CT: numPTTilesY: {}", toString(numPTTilesY));
+            Log::debug("PreTiled CT: sizePTTileXExpr: {}", toString(sizePTTileXExpr));
+            Log::debug("PreTiled CT: sizePTTileYExpr: {}", toString(sizePTTileYExpr));
+
+            auto nPTX = graph.coordinates.addElement(CT::WaveTileNumber(0, numPTTilesX, nullptr));
+            auto nPTY = graph.coordinates.addElement(CT::WaveTileNumber(1, numPTTilesY, nullptr));
+            auto iPTX
+                = graph.coordinates.addElement(CT::WaveTileIndex(0, literal(sizePTTileX), nullptr));
+            auto iPTY
+                = graph.coordinates.addElement(CT::WaveTileIndex(1, literal(sizePTTileY), nullptr));
+
+            graph.coordinates.addElement(PassThrough(), {sdimX}, {nPTX});
+            graph.coordinates.addElement(PassThrough(), {sdimY}, {nPTY});
+
+            graph.coordinates.addElement(PassThrough(), {sdimPTXTile}, {iPTX});
+            graph.coordinates.addElement(PassThrough(), {sdimPTYTile}, {iPTY});
+
+            connections.push_back(DC<SubDimension>(sdimPTXTile, 0));
+            connections.push_back(DC<SubDimension>(sdimPTYTile, 1));
+
+            auto numTilesX = tileCeilDivide(sizeX, tile.sizes[0]);
+            auto numTilesY = tileCeilDivide(sizeY, tile.sizes[1]);
+
+            Log::debug("PreTiled CT: numTilesX: {}", toString(numTilesX));
+            Log::debug("PreTiled CT: numTilesY: {}", toString(numTilesY));
+
+            auto nX = graph.coordinates.addElement(tile.tileNumber(0, numTilesX));
+            auto nY = graph.coordinates.addElement(tile.tileNumber(1, numTilesY));
+            auto iX = graph.coordinates.addElement(tile.tileIndex(0));
+            auto iY = graph.coordinates.addElement(tile.tileIndex(1));
+
+            AssertFatal(tile.sizes[0] % sizePTTileX == 0,
+                        "Pre-tile size mismatch: tile.sizes[0] must be divisible by sizePTTileX.",
+                        ShowValue(tile.sizes[0]),
+                        ShowValue(sizePTTileX));
+            AssertFatal(tile.sizes[1] % sizePTTileY == 0,
+                        "Pre-tile size mismatch: tile.sizes[1] must be divisible by sizePTTileY.",
+                        ShowValue(tile.sizes[1]),
+                        ShowValue(sizePTTileY));
+            AssertFatal(tile.sizes[0] / sizePTTileX > 0,
+                        "Bad pre-tile size: tile.sizes[0] must be greater than sizePTTileX.",
+                        ShowValue(tile.sizes[0]),
+                        ShowValue(sizePTTileX));
+            AssertFatal(tile.sizes[1] / sizePTTileY > 0,
+                        "Bad pre-tile size: tile.sizes[1] must be greater than sizePTTileY.",
+                        ShowValue(tile.sizes[1]),
+                        ShowValue(sizePTTileY));
+
+            auto numPTTilesPerTileX = tile.sizes[0] / sizePTTileX;
+            auto numPTTilesPerTileY = tile.sizes[1] / sizePTTileY;
+
+            auto nPTSubX = graph.coordinates.addElement(
+                CT::WaveTileNumber(0, literal(numPTTilesPerTileX), nullptr));
+            auto nPTSubY = graph.coordinates.addElement(
+                CT::WaveTileNumber(1, literal(numPTTilesPerTileY), nullptr));
+
+            graph.coordinates.addElement(Tile(), {nPTX}, {nX, nPTSubX});
+            graph.coordinates.addElement(Tile(), {nPTY}, {nY, nPTSubY});
+
+            graph.coordinates.addElement(Flatten(), {nPTSubX, iPTX}, {iX});
+            graph.coordinates.addElement(Flatten(), {nPTSubY, iPTY}, {iY});
+
+            connections.push_back(DC<MacroTileNumber>(nX, 0));
+            connections.push_back(DC<MacroTileNumber>(nY, 1));
+
+            return {nX, iX, nY, iY};
+        }
+
         /**
          * @brief Add coordinate-transforms for tiling two
          * SubDimension coordinates into macro number/index
@@ -148,8 +294,13 @@ namespace rocRoller
             addLoadMacroTileCT(KernelGraph&                     graph,
                                std::vector<DeferredConnection>& connections,
                                int                              macTileTag,
-                               std::vector<int> const&          sdim)
+                               std::vector<int> const&          sdim,
+                               bool                             updatePreTiledSubDimStrides)
         {
+            if(sdim.size() == 4)
+                return addLoadMacroTileCTPreTiled(
+                    graph, connections, macTileTag, sdim, updatePreTiledSubDimStrides);
+
             auto macTile   = graph.coordinates.getNode<MacroTile>(macTileTag);
             auto sdimX     = sdim[0];
             auto sdimY     = sdim[1];
@@ -220,20 +371,23 @@ namespace rocRoller
             int                              iWaveY,
             int                              lane,
             int                              element,
+            LayoutType                       layout,
             MatrixMultiplySizes              mi,
             uint                             bitsPerElement,
             int                              wavefrontSize)
 
         {
+            uint const M            = layout == LayoutType::MATRIX_B ? mi.n : mi.m;
+            uint const N            = mi.k;
             uint const lanesPerSIMD = 16;
             uint const simdsPerWave = wavefrontSize / lanesPerSIMD;
 
-            uint const simdsPerSGroup = mi.m / lanesPerSIMD;
+            uint const simdsPerSGroup = M / lanesPerSIMD;
             // We should find a name for this 2x factor between wave32 & wave64.
             uint const numVBlocks = wavefrontSize == 64 ? (bitsPerElement == 8 ? 2 : 1)
                                                         : (bitsPerElement == 8 ? 4 : 2);
 
-            uint const elementsPerVGPRBlock = ((mi.m * mi.k) / wavefrontSize) / numVBlocks;
+            uint const elementsPerVGPRBlock = ((M * N) / wavefrontSize) / numVBlocks;
 
             auto SIMD = graph.coordinates.addElement(Adhoc("SIMD", literal(simdsPerWave), nullptr));
             auto laneInSIMD = graph.coordinates.addElement(Lane(literal(lanesPerSIMD), nullptr));
@@ -262,12 +416,57 @@ namespace rocRoller
                 Flatten(), {elementBlockNumber, elementBlockIndex}, {element});
         }
 
+        void addLoadWaveTile32x16x128FP4CT(KernelGraph&                     graph,
+                                           std::vector<DeferredConnection>& connections,
+                                           int                              iWaveX,
+                                           int                              iWaveY,
+                                           int                              lane,
+                                           int                              element,
+                                           MatrixMultiplySizes              mi,
+                                           uint                             bitsPerElement,
+                                           int                              wavefrontSize)
+
+        {
+            uint const lanesPerSIMD         = 16;
+            uint const simdsPerWave         = wavefrontSize / lanesPerSIMD;
+            uint const numVBlocks           = 4;
+            uint const numVBlockSets        = 2;
+            uint const numVBlocksInSet      = numVBlocks / numVBlockSets;
+            uint const elementsPerVGPRBlock = ((mi.m * mi.k) / wavefrontSize) / numVBlocks;
+
+            auto SIMD = graph.coordinates.addElement(Adhoc("SIMD", literal(simdsPerWave), nullptr));
+            auto laneInSIMD = graph.coordinates.addElement(Lane(literal(lanesPerSIMD), nullptr));
+
+            auto elementBlockSet
+                = graph.coordinates.addElement(VGPRBlockSet(literal(numVBlockSets), nullptr));
+            auto elementBlockNumber
+                = graph.coordinates.addElement(VGPRBlockNumber(literal(numVBlocksInSet), nullptr));
+            auto elementBlockIndex = graph.coordinates.addElement(
+                VGPRBlockIndex(literal(elementsPerVGPRBlock), nullptr));
+
+            connections.push_back(DC<VGPRBlockSet>(elementBlockSet));
+            connections.push_back(DC<VGPRBlockNumber>(elementBlockNumber));
+            connections.push_back(DC<VGPRBlockIndex>(elementBlockIndex));
+
+            auto simdsInM = graph.coordinates.addElement(Adhoc("simdsInM", literal(1), nullptr));
+            auto simdsInK = graph.coordinates.addElement(Adhoc("simdsInK", literal(2), nullptr));
+
+            graph.coordinates.addElement(Tile(), {iWaveX}, {elementBlockSet, simdsInM, laneInSIMD});
+
+            graph.coordinates.addElement(
+                Tile(), {iWaveY}, {elementBlockNumber, simdsInK, elementBlockIndex});
+
+            graph.coordinates.addElement(Flatten(), {simdsInM, simdsInK}, {SIMD});
+            graph.coordinates.addElement(Flatten(), {SIMD, laneInSIMD}, {lane});
+            graph.coordinates.addElement(
+                Flatten(), {elementBlockNumber, elementBlockIndex}, {element});
+        }
+
         void addLoadSwizzleTileCT(KernelGraph&                     graph,
                                   std::vector<DeferredConnection>& connections,
                                   int                              macTileTag,
                                   int                              iMacX,
                                   int                              iMacY,
-                                  VariableType const&              varType,
                                   int                              wavefrontSize,
                                   std::vector<unsigned int> const& jammedTiles,
                                   CommandParametersPtr             params)
@@ -294,25 +493,27 @@ namespace rocRoller
             connections.push_back(DC<WaveTileNumber>(nWaveX, 0));
             connections.push_back(DC<WaveTileNumber>(nWaveY, 1));
 
-            uint const nLaneInSIMD = 16;
-            uint const nSIMDBlock  = macTile.miTileSizes[2];
-            uint const nSIMDIndex  = 4 / nSIMDBlock;
-
-            auto SIMDBlock
-                = graph.coordinates.addElement(Adhoc("SIMDBlock", literal(nSIMDBlock), nullptr));
-            auto SIMDIndex
+            uint const nLaneInSIMD   = 16;
+            uint const nSIMDsPerWave = wavefrontSize / nLaneInSIMD;
+            uint const nSIMDIndex    = macTile.subTileSizes.at(0) / nLaneInSIMD;
+            auto       SIMDIndex
                 = graph.coordinates.addElement(Adhoc("SIMDIndex", literal(nSIMDIndex), nullptr));
             auto laneInSIMD = graph.coordinates.addElement(Lane(literal(nLaneInSIMD), nullptr));
 
-            graph.coordinates.addElement(Tile(), {iWaveX}, {SIMDBlock, SIMDIndex, laneInSIMD});
+            graph.coordinates.addElement(Tile(), {iWaveX}, {SIMDIndex, laneInSIMD});
 
-            uint numElements       = waveTile.elements();
-            uint activeLanesInWave = static_cast<uint>(wavefrontSize);
-            uint numVgpr           = numElements / activeLanesInWave;
+            uint const nSIMDBlock = nSIMDsPerWave / nSIMDIndex;
+            auto       SIMDBlock
+                = graph.coordinates.addElement(Adhoc("SIMDBlock", literal(nSIMDBlock), nullptr));
 
-            uint const nVgprIndex = macTile.miTileSizes[2];
-            uint const nVgprBlock = numVgpr / nVgprIndex;
-            auto       vgprBlock
+            uint const numElements       = waveTile.elements();
+            uint       activeLanesInWave = static_cast<uint>(wavefrontSize);
+            uint const numVgpr           = numElements / activeLanesInWave;
+            uint const nVgprIndex
+                = std::min(nSIMDIndex, static_cast<uint>(macTile.miTileSizes.at(2)));
+            uint const nVgprBlock
+                = numElements / macTile.subTileSizes.at(0) / nSIMDBlock / nVgprIndex;
+            auto vgprBlock
                 = graph.coordinates.addElement(VGPRBlockNumber(literal(nVgprBlock), literal(1u)));
             auto vgprIndex
                 = graph.coordinates.addElement(VGPRBlockIndex(literal(nVgprIndex), literal(1u)));
@@ -322,7 +523,7 @@ namespace rocRoller
             connections.push_back(DC<VGPRBlockIndex>(vgprIndex));
             connections.push_back(DC<VGPR>(vgpr));
 
-            graph.coordinates.addElement(PassThrough(), {iWaveY}, {vgpr});
+            graph.coordinates.addElement(Tile(), {iWaveY}, {SIMDBlock, vgpr});
 
             auto activeLanesInWaveLiteral = literal(activeLanesInWave);
 
@@ -348,6 +549,94 @@ namespace rocRoller
             connections.push_back(DC<JammedWaveTileNumber>(jammedWavetileY, 1));
 
             graph.coordinates.addElement(DataFlow(), {macTileTag}, {waveTileTag});
+        }
+
+        void addStoreSwizzleTileCT(KernelGraph&                     graph,
+                                   std::vector<DeferredConnection>& connections,
+                                   int                              macTileTag,
+                                   int                              iMacX,
+                                   int                              iMacY,
+                                   int                              wavefrontSize,
+                                   std::vector<unsigned int> const& jammedTiles,
+                                   CommandParametersPtr             params)
+        {
+            auto macTile = graph.coordinates.getNode<MacroTile>(macTileTag);
+
+            AssertFatal(macTile.subTileSizes.size() == 4, "Invalid tile specification.");
+
+            auto waveTile    = WaveTile(macTile);
+            auto waveTileTag = graph.coordinates.addElement(waveTile);
+
+            connections.push_back(DC<WaveTile>(waveTileTag));
+
+            auto nWaveX = graph.coordinates.addElement(waveTile.tileNumber(0));
+            auto nWaveY = graph.coordinates.addElement(waveTile.tileNumber(1));
+            auto iWaveX = graph.coordinates.addElement(waveTile.tileIndex(0));
+            auto iWaveY = graph.coordinates.addElement(waveTile.tileIndex(1));
+
+            graph.coordinates.addElement(Flatten(), {nWaveX, iWaveX}, {iMacX});
+            graph.coordinates.addElement(Flatten(), {nWaveY, iWaveY}, {iMacY});
+
+            graph.coordinates.addElement(Flatten(), {iWaveX, iWaveY}, {waveTileTag});
+
+            connections.push_back(DC<WaveTileNumber>(nWaveX, 0));
+            connections.push_back(DC<WaveTileNumber>(nWaveY, 1));
+
+            uint const nLaneInSIMD   = 16;
+            uint const nSIMDsPerWave = wavefrontSize / nLaneInSIMD;
+            uint const nSIMDIndex    = macTile.subTileSizes.at(0) / nLaneInSIMD;
+            auto       SIMDIndex
+                = graph.coordinates.addElement(Adhoc("SIMDIndex", literal(nSIMDIndex), nullptr));
+            auto laneInSIMD = graph.coordinates.addElement(Lane(literal(nLaneInSIMD), nullptr));
+
+            graph.coordinates.addElement(Flatten(), {SIMDIndex, laneInSIMD}, {iWaveX});
+
+            uint const nSIMDBlock = nSIMDsPerWave / nSIMDIndex;
+            auto       SIMDBlock
+                = graph.coordinates.addElement(Adhoc("SIMDBlock", literal(nSIMDBlock), nullptr));
+
+            uint const numElements       = waveTile.elements();
+            uint       activeLanesInWave = static_cast<uint>(wavefrontSize);
+            uint const numVgpr           = numElements / activeLanesInWave;
+            uint const nVgprIndex
+                = macTile.subTileSizes.at(2) / (activeLanesInWave / macTile.subTileSizes.at(0));
+            uint const nVgprBlock = numVgpr / nVgprIndex;
+            auto       vgprBlock
+                = graph.coordinates.addElement(VGPRBlockNumber(literal(nVgprBlock), literal(1u)));
+            auto vgprIndex
+                = graph.coordinates.addElement(VGPRBlockIndex(literal(nVgprIndex), literal(1u)));
+            auto vgpr = graph.coordinates.addElement(VGPR(literal(numVgpr), literal(1u)));
+            graph.coordinates.addElement(Flatten(), {vgprBlock, vgprIndex}, {vgpr});
+            connections.push_back(DC<VGPRBlockNumber>(vgprBlock));
+            connections.push_back(DC<VGPRBlockIndex>(vgprIndex));
+            connections.push_back(DC<VGPR>(vgpr));
+
+            graph.coordinates.addElement(Flatten(), {SIMDBlock, vgpr}, {iWaveY});
+
+            auto activeLanesInWaveLiteral = literal(activeLanesInWave);
+
+            auto wave  = graph.coordinates.addElement(Wavefront(-1));
+            auto waveX = graph.coordinates.addElement(Wavefront(0));
+            auto waveY = graph.coordinates.addElement(Wavefront(1));
+            graph.coordinates.addElement(Tile(), {wave}, {waveX, waveY});
+
+            auto workitem = graph.coordinates.addElement(Workitem(0));
+            auto lane = graph.coordinates.addElement(Lane(activeLanesInWaveLiteral, literal(1u)));
+            connections.push_back(DC<Lane>(lane));
+            graph.coordinates.addElement(Tile(), {workitem}, {wave, lane});
+            graph.coordinates.addElement(Tile(), {lane}, {SIMDBlock, SIMDIndex, laneInSIMD});
+
+            auto jammedWavetileX = graph.coordinates.addElement(
+                JammedWaveTileNumber(0, literal(jammedTiles[0]), literal(1)));
+            graph.coordinates.addElement(Flatten(), {jammedWavetileX, waveX}, {nWaveX});
+            connections.push_back(DC<JammedWaveTileNumber>(jammedWavetileX, 0));
+
+            auto jammedWavetileY = graph.coordinates.addElement(
+                JammedWaveTileNumber(1, literal(jammedTiles[1]), literal(1)));
+            graph.coordinates.addElement(Flatten(), {jammedWavetileY, waveY}, {nWaveY});
+            connections.push_back(DC<JammedWaveTileNumber>(jammedWavetileY, 1));
+
+            graph.coordinates.addElement(DataFlow(), {waveTileTag}, {macTileTag});
         }
 
         /**
@@ -399,29 +688,68 @@ namespace rocRoller
             auto waveY = graph.coordinates.addElement(Wavefront(1));
             auto wave  = graph.coordinates.addElement(Wavefront(-1));
 
-            uint numElements       = waveTile.elements();
-            uint activeLanesInWave = static_cast<uint>(wavefrontSize);
-            uint numGPR            = numElements / activeLanesInWave;
+            const MatrixMultiplySizes mi{.m = macTile.miTileSizes[0],
+                                         .n = macTile.miTileSizes[1],
+                                         .k = macTile.miTileSizes[2]};
 
-            const MatrixMultiplySizes mi{.m = macTile.subTileSizes[0],
-                                         .n = macTile.subTileSizes[1],
-                                         .k = macTile.subTileSizes[2]};
-            uint                      K_L = mi.k / (activeLanesInWave / mi.m);
+            uint        numElements       = waveTile.elements();
+            uint        activeLanesInWave = static_cast<uint>(wavefrontSize);
+            const auto& arch              = context->targetArchitecture();
+            if(arch.HasCapability(GPUCapability::PartiallyActiveWaveSize) && isScaleType(dataType))
+            {
+                const uint numRequiredLanes = waveTile.elements() / mi.k;
+                if(numRequiredLanes < wavefrontSize)
+                {
+                    activeLanesInWave = arch.GetCapability(GPUCapability::PartiallyActiveWaveSize);
+                }
+            }
 
-            auto activeLanesInWaveLiteral = literal(activeLanesInWave);
+            uint numGPR = numElements / activeLanesInWave;
 
-            auto lane = graph.coordinates.addElement(Lane(activeLanesInWaveLiteral, nullptr));
+            uint MN  = waveTile.layout == LayoutType::MATRIX_B ? macTile.subTileSizes[1]
+                                                               : macTile.subTileSizes[0];
+            uint K   = macTile.subTileSizes[2];
+            uint K_L = K / (activeLanesInWave / MN);
+
+            auto lane = graph.coordinates.addElement(Lane(literal(activeLanesInWave), nullptr));
             auto vgpr = graph.coordinates.addElement(VGPR(literal(numGPR), nullptr));
 
             graph.coordinates.addElement(Flatten(), {waveX, waveY}, {wave});
-            graph.coordinates.addElement(Flatten(), {wave, lane}, {workitem});
+
+            if(arch.HasCapability(GPUCapability::PartiallyActiveWaveSize) && isScaleType(dataType)
+               && activeLanesInWave < wavefrontSize)
+            {
+                auto one        = literal(1);
+                auto wfsLiteral = literal(wavefrontSize);
+
+                auto newWorkitem       = graph.coordinates.addElement(Linear());
+                auto waveIndex         = graph.coordinates.addElement(Linear(one, one));
+                auto waveBlock_ignored = graph.coordinates.addElement(Linear(wfsLiteral, one));
+
+                auto activeLaneIndex
+                    = graph.coordinates.addElement(Linear(literal(activeLanesInWave), one));
+                auto activeLaneBlock_ignored = graph.coordinates.addElement(Linear(one, one));
+
+                // nWave = workitem // wavefrontSize
+                graph.coordinates.addElement(Flatten(), {waveIndex, waveBlock_ignored}, {workitem});
+                // maskedPeriodInWave = workitem % activeLanesInWave
+                graph.coordinates.addElement(
+                    Flatten(), {activeLaneBlock_ignored, activeLaneIndex}, {workitem});
+
+                // newWI = (workitem % activeLanesInWave) + (workitem // wavefrontSize) * activeLanesInWave
+                graph.coordinates.addElement(Tile(), {newWorkitem}, {waveIndex, activeLaneIndex});
+
+                graph.coordinates.addElement(Flatten(), {wave, lane}, {newWorkitem});
+            }
+            else
+            {
+                graph.coordinates.addElement(Flatten(), {wave, lane}, {workitem});
+            }
 
             connections.push_back(DC<Lane>(lane));
             connections.push_back(DC<VGPR>(vgpr));
 
             auto bitsPerElement = DataTypeInfo::Get(dataType).elementBits;
-
-            const auto& arch = context->targetArchitecture();
 
             bool isTransposeLayout = params->transposeMemoryAccess[waveTile.layout];
 
@@ -448,21 +776,38 @@ namespace rocRoller
                                                    iWaveY,
                                                    lane,
                                                    vgpr,
+                                                   waveTile.layout,
                                                    mi,
                                                    bitsPerElement,
                                                    activeLanesInWave);
                     }
                     else
                     {
-                        addLoadWaveTileViaNonContiguousVGPRBlocksCT(graph,
-                                                                    connections,
-                                                                    iWaveX,
-                                                                    iWaveY,
-                                                                    lane,
-                                                                    vgpr,
-                                                                    mi,
-                                                                    bitsPerElement,
-                                                                    activeLanesInWave);
+                        if(mi.m == 32 && mi.n == 16 && mi.k == 128 && isF4(dataType))
+                        {
+                            addLoadWaveTile32x16x128FP4CT(graph,
+                                                          connections,
+                                                          iWaveX,
+                                                          iWaveY,
+                                                          lane,
+                                                          vgpr,
+                                                          mi,
+                                                          bitsPerElement,
+                                                          activeLanesInWave);
+                        }
+                        else
+                        {
+                            addLoadWaveTileViaNonContiguousVGPRBlocksCT(graph,
+                                                                        connections,
+                                                                        iWaveX,
+                                                                        iWaveY,
+                                                                        lane,
+                                                                        vgpr,
+                                                                        waveTile.layout,
+                                                                        mi,
+                                                                        bitsPerElement,
+                                                                        activeLanesInWave);
+                        }
                     }
                 }
                 else
@@ -470,8 +815,8 @@ namespace rocRoller
                     AssertFatal(
                         K_L != 0,
                         "Invalid operand: cannot divide by zero to compute the BlockNumber");
-                    auto blockNumber = graph.coordinates.addElement(
-                        VGPRBlockNumber(literal(mi.k / K_L), nullptr));
+                    auto blockNumber
+                        = graph.coordinates.addElement(VGPRBlockNumber(literal(K / K_L), nullptr));
                     auto blockIndex
                         = graph.coordinates.addElement(VGPRBlockIndex(literal(K_L), nullptr));
 
@@ -512,6 +857,7 @@ namespace rocRoller
                                                    iWaveX,
                                                    lane,
                                                    vgpr,
+                                                   waveTile.layout,
                                                    mi,
                                                    bitsPerElement,
                                                    activeLanesInWave);
@@ -524,6 +870,7 @@ namespace rocRoller
                                                                     iWaveX,
                                                                     lane,
                                                                     vgpr,
+                                                                    waveTile.layout,
                                                                     mi,
                                                                     bitsPerElement,
                                                                     activeLanesInWave);
@@ -534,8 +881,8 @@ namespace rocRoller
                     AssertFatal(
                         K_L != 0,
                         "Invalid operand: cannot divide by zero to compute the BlockNumber");
-                    auto blockNumber = graph.coordinates.addElement(
-                        VGPRBlockNumber(literal(mi.k / K_L), nullptr));
+                    auto blockNumber
+                        = graph.coordinates.addElement(VGPRBlockNumber(literal(K / K_L), nullptr));
                     auto blockIndex
                         = graph.coordinates.addElement(VGPRBlockIndex(literal(K_L), nullptr));
 
@@ -636,7 +983,7 @@ namespace rocRoller
          *   - The row index of a thread tile is fast wrt the VGPR
          *     index.
          *
-         * When `useSwappedAccess` is true, both of these orders are
+         * When `rightmostFastest` is true, both of these orders are
          * reversed.
          *
          * Required (deferred) connections are appended to
@@ -649,8 +996,10 @@ namespace rocRoller
                                  int                                iMacY,
                                  std::array<unsigned int, 3> const& workgroupSizes,
                                  std::vector<unsigned int> const&   jammedTiles,
-                                 bool                               useSwappedAccess,
-                                 bool                               isDirect2LDS)
+                                 bool                               rightmostFastest,
+                                 bool                               isGlobalToLDS,
+                                 bool                               ldsSwizzle,
+                                 unsigned int                       columnsPerBankRow)
         {
             auto macTile = graph.coordinates.getNode<MacroTile>(macTileTag);
             auto thrTile = ThreadTile(macTile);
@@ -669,7 +1018,38 @@ namespace rocRoller
             auto workitemX
                 = graph.coordinates.addElement(Workitem(0, literal(workgroupSizes.at(0))));
 
-            if(useSwappedAccess)
+            if(macTile.layoutType == LayoutType::MATRIX_A
+               || macTile.layoutType == LayoutType::MATRIX_B
+               || macTile.layoutType == LayoutType::MATRIX_ACCUMULATOR
+               || macTile.layoutType == LayoutType::SCRATCH)
+            {
+                // GEMM layouts: use rightmostFastest to control threadtile orientation
+                if(rightmostFastest)
+                {
+                    elementNumberX = graph.coordinates.addElement(
+                        ElementNumber(0, literal(thrTile.sizes.at(0))));
+                    elementNumberY = graph.coordinates.addElement(
+                        ElementNumber(1, literal(thrTile.sizes.at(1))));
+
+                    graph.coordinates.addElement(PassThrough(), {iThrX}, {elementNumberX});
+                    graph.coordinates.addElement(PassThrough(), {iThrY}, {elementNumberY});
+
+                    graph.coordinates.addElement(Flatten(), {nThrX, nThrY}, {workitemX});
+                }
+                else
+                {
+                    elementNumberX = graph.coordinates.addElement(
+                        ElementNumber(0, literal(thrTile.sizes.at(1))));
+                    elementNumberY = graph.coordinates.addElement(
+                        ElementNumber(1, literal(thrTile.sizes.at(0))));
+
+                    graph.coordinates.addElement(PassThrough(), {iThrX}, {elementNumberY});
+                    graph.coordinates.addElement(PassThrough(), {iThrY}, {elementNumberX});
+
+                    graph.coordinates.addElement(Flatten(), {nThrY, nThrX}, {workitemX});
+                }
+            }
+            else
             {
                 elementNumberX
                     = graph.coordinates.addElement(ElementNumber(0, literal(thrTile.sizes.at(0))));
@@ -679,68 +1059,99 @@ namespace rocRoller
                 graph.coordinates.addElement(PassThrough(), {iThrX}, {elementNumberX});
                 graph.coordinates.addElement(PassThrough(), {iThrY}, {elementNumberY});
 
-                if(macTile.layoutType == LayoutType::MATRIX_A
-                   || macTile.layoutType == LayoutType::MATRIX_B
-                   || macTile.layoutType == LayoutType::MATRIX_ACCUMULATOR
-                   || macTile.layoutType == LayoutType::SCRATCH)
-                {
-                    graph.coordinates.addElement(Flatten(), {nThrX, nThrY}, {workitemX});
-                }
-                else
-                {
-                    graph.coordinates.addElement(PassThrough(), {nThrX}, {workitemX});
+                graph.coordinates.addElement(PassThrough(), {nThrX}, {workitemX});
 
-                    auto workitemY
-                        = graph.coordinates.addElement(Workitem(1, literal(workgroupSizes.at(1))));
-                    graph.coordinates.addElement(PassThrough(), {nThrY}, {workitemY});
-                }
-            }
-            else
-            {
-                elementNumberX
-                    = graph.coordinates.addElement(ElementNumber(0, literal(thrTile.sizes.at(1))));
-                elementNumberY
-                    = graph.coordinates.addElement(ElementNumber(1, literal(thrTile.sizes.at(0))));
-
-                graph.coordinates.addElement(PassThrough(), {iThrX}, {elementNumberY});
-                graph.coordinates.addElement(PassThrough(), {iThrY}, {elementNumberX});
-
-                if(macTile.layoutType == LayoutType::MATRIX_A
-                   || macTile.layoutType == LayoutType::MATRIX_B
-                   || macTile.layoutType == LayoutType::MATRIX_ACCUMULATOR
-                   || macTile.layoutType == LayoutType::SCRATCH)
-                {
-                    graph.coordinates.addElement(Flatten(), {nThrY, nThrX}, {workitemX});
-                }
-                else
-                {
-                    graph.coordinates.addElement(PassThrough(), {nThrX}, {workitemX});
-
-                    auto workitemY
-                        = graph.coordinates.addElement(Workitem(1, literal(workgroupSizes.at(1))));
-                    graph.coordinates.addElement(PassThrough(), {nThrY}, {workitemY});
-                }
+                auto workitemY
+                    = graph.coordinates.addElement(Workitem(1, literal(workgroupSizes.at(1))));
+                graph.coordinates.addElement(PassThrough(), {nThrY}, {workitemY});
             }
 
             connections.push_back(DC<ElementNumber>(elementNumberX, 0));
             connections.push_back(DC<ElementNumber>(elementNumberY, 1));
+
+            // LoadTiled swizzle for Direct2LDS MATRIX_B: permute K-column
+            // (nThrX, dim 0) based on N-row (nThrY).
+            auto loadTiledSwizzleNThrX = nThrX;
+            if(ldsSwizzle && macTile.layoutType == LayoutType::MATRIX_B)
+            {
+                auto numColumns = thrTile.wsizes.at(0);
+                auto params     = LDSSwizzleParams::fromColumnCount(numColumns, columnsPerBankRow);
+
+                if(!params.noConflicts())
+                {
+
+                    loadTiledSwizzleNThrX = LDSSwizzleDetail::addLoadTiledSwizzleEdges(
+                        graph, nThrX, nThrY, 0, params);
+
+                    Log::getLogger()->debug(
+                        "LoadTiled swizzle B: K={} R={}", params.numColumns, params.rowsPerBankRow);
+                }
+            }
 
             if(jammedTiles.size() > 0 && jammedTiles[0] > 1)
             {
                 auto jammedWavetileX = graph.coordinates.addElement(
                     JammedWaveTileNumber(0, literal(jammedTiles[0]), literal(1)));
                 connections.push_back(DC<JammedWaveTileNumber>(jammedWavetileX, 0));
-                if(useSwappedAccess && isDirect2LDS)
-                    graph.coordinates.addElement(Tile(), {iMacX}, {jammedWavetileX, iThrX, nThrX});
+                if(isGlobalToLDS)
+                {
+                    if(rightmostFastest)
+                        graph.coordinates.addElement(
+                            Tile(), {iMacX}, {jammedWavetileX, iThrX, loadTiledSwizzleNThrX});
+                    else
+                        graph.coordinates.addElement(
+                            Tile(), {iMacX}, {jammedWavetileX, loadTiledSwizzleNThrX, iThrX});
+                }
                 else
-                    graph.coordinates.addElement(Tile(), {iMacX}, {jammedWavetileX, nThrX, iThrX});
+                    graph.coordinates.addElement(
+                        Tile(), {iMacX}, {jammedWavetileX, loadTiledSwizzleNThrX, iThrX});
             }
             else
             {
-                if(useSwappedAccess && isDirect2LDS)
-                    graph.coordinates.addElement(Tile(), {iMacX}, {iThrX, nThrX});
+                if(isGlobalToLDS)
+                {
+                    if(rightmostFastest)
+                        graph.coordinates.addElement(
+                            Tile(), {iMacX}, {iThrX, loadTiledSwizzleNThrX});
+                    else
+                        graph.coordinates.addElement(
+                            Tile(), {iMacX}, {loadTiledSwizzleNThrX, iThrX});
+                }
                 else
-                    graph.coordinates.addElement(Tile(), {iMacX}, {nThrX, iThrX});
+                    graph.coordinates.addElement(Tile(), {iMacX}, {loadTiledSwizzleNThrX, iThrX});
+            }
+
+            // LoadTiled swizzle for Direct2LDS MATRIX_A: permute K-column
+            // (nThrY, dim 1) based on M-row (nThrX).
+            auto loadTiledSwizzleNThrY = nThrY;
+            if(ldsSwizzle && macTile.layoutType == LayoutType::MATRIX_A)
+            {
+                auto numColumns = thrTile.wsizes.at(1);
+                auto params     = LDSSwizzleParams::fromColumnCount(numColumns, columnsPerBankRow);
+
+                if(!params.noConflicts())
+                {
+
+                    auto swappedCol
+                        = graph.coordinates.addElement(ThreadTileNumber(1, literal(numColumns)));
+                    graph.coordinates.addElement(
+                        PairSwap{params.rowsPerBankRow}, {swappedCol}, {nThrY, nThrX});
+
+                    loadTiledSwizzleNThrY
+                        = graph.coordinates.addElement(ThreadTileNumber(1, literal(numColumns)));
+                    graph.coordinates.addElement(
+                        Rotate{params.numColumns, params.rowsPerBankRow, false},
+                        {loadTiledSwizzleNThrY},
+                        {swappedCol, nThrX});
+
+                    Log::getLogger()->debug(
+                        "LoadTiled swizzle A: nThrY={} nThrX={} loadTiledSwizzleNThrY={} K={} R={}",
+                        nThrY,
+                        nThrX,
+                        loadTiledSwizzleNThrY,
+                        params.numColumns,
+                        params.rowsPerBankRow);
+                }
             }
 
             if(jammedTiles.size() > 1 && jammedTiles[1] > 1)
@@ -748,29 +1159,32 @@ namespace rocRoller
                 auto jammedWavetileY = graph.coordinates.addElement(
                     JammedWaveTileNumber(1, literal(jammedTiles[1]), literal(1)));
                 connections.push_back(DC<JammedWaveTileNumber>(jammedWavetileY, 1));
-                if(isDirect2LDS)
+                if(isGlobalToLDS)
                 {
-                    if(useSwappedAccess)
+                    if(rightmostFastest)
                         graph.coordinates.addElement(
-                            Tile(), {iMacY}, {jammedWavetileY, nThrY, iThrY});
+                            Tile(), {iMacY}, {jammedWavetileY, loadTiledSwizzleNThrY, iThrY});
                     else
                         graph.coordinates.addElement(
-                            Tile(), {iMacY}, {jammedWavetileY, iThrY, nThrY});
+                            Tile(), {iMacY}, {jammedWavetileY, iThrY, loadTiledSwizzleNThrY});
                 }
                 else
-                    graph.coordinates.addElement(Tile(), {iMacY}, {jammedWavetileY, nThrY, iThrY});
+                    graph.coordinates.addElement(
+                        Tile(), {iMacY}, {jammedWavetileY, loadTiledSwizzleNThrY, iThrY});
             }
             else
             {
-                if(isDirect2LDS)
+                if(isGlobalToLDS)
                 {
-                    if(useSwappedAccess)
-                        graph.coordinates.addElement(Tile(), {iMacY}, {nThrY, iThrY});
+                    if(rightmostFastest)
+                        graph.coordinates.addElement(
+                            Tile(), {iMacY}, {loadTiledSwizzleNThrY, iThrY});
                     else
-                        graph.coordinates.addElement(Tile(), {iMacY}, {iThrY, nThrY});
+                        graph.coordinates.addElement(
+                            Tile(), {iMacY}, {iThrY, loadTiledSwizzleNThrY});
                 }
                 else
-                    graph.coordinates.addElement(Tile(), {iMacY}, {nThrY, iThrY});
+                    graph.coordinates.addElement(Tile(), {iMacY}, {loadTiledSwizzleNThrY, iThrY});
             }
         }
 
@@ -1096,8 +1510,8 @@ namespace rocRoller
                                   int                                iMacY,
                                   std::array<unsigned int, 3> const& workgroupSizes,
                                   std::vector<unsigned int> const&   jammedTiles,
-                                  bool                               useSwappedAccess,
-                                  bool                               isDirect2LDS)
+                                  bool                               rightmostFastest,
+                                  bool                               isGlobalToLDS)
         {
             auto macTile = graph.coordinates.getNode<MacroTile>(macTileTag);
 
@@ -1117,7 +1531,43 @@ namespace rocRoller
 
             int elementNumberX, elementNumberY;
 
-            if(useSwappedAccess)
+            if(macTile.layoutType == LayoutType::MATRIX_A
+               || macTile.layoutType == LayoutType::MATRIX_B
+               || macTile.layoutType == LayoutType::MATRIX_ACCUMULATOR
+               || macTile.layoutType == LayoutType::SCRATCH)
+            {
+                if(rightmostFastest)
+                {
+                    elementNumberX = graph.coordinates.addElement(
+                        ElementNumber(0, literal(thrTile.sizes.at(0))));
+                    elementNumberY = graph.coordinates.addElement(
+                        ElementNumber(1, literal(thrTile.sizes.at(1))));
+
+                    connections.push_back(DC<ElementNumber>(elementNumberX, 0));
+                    connections.push_back(DC<ElementNumber>(elementNumberY, 1));
+
+                    graph.coordinates.addElement(PassThrough(), {elementNumberX}, {iThrX});
+                    graph.coordinates.addElement(PassThrough(), {elementNumberY}, {iThrY});
+
+                    graph.coordinates.addElement(Tile(), {workitemX}, {nThrX, nThrY});
+                }
+                else
+                {
+                    elementNumberX = graph.coordinates.addElement(
+                        ElementNumber(0, literal(thrTile.sizes.at(1))));
+                    elementNumberY = graph.coordinates.addElement(
+                        ElementNumber(1, literal(thrTile.sizes.at(0))));
+
+                    connections.push_back(DC<ElementNumber>(elementNumberX, 0));
+                    connections.push_back(DC<ElementNumber>(elementNumberY, 1));
+
+                    graph.coordinates.addElement(PassThrough(), {elementNumberY}, {iThrX});
+                    graph.coordinates.addElement(PassThrough(), {elementNumberX}, {iThrY});
+
+                    graph.coordinates.addElement(Tile(), {workitemX}, {nThrY, nThrX});
+                }
+            }
+            else
             {
                 elementNumberX
                     = graph.coordinates.addElement(ElementNumber(0, literal(thrTile.sizes.at(0))));
@@ -1130,50 +1580,11 @@ namespace rocRoller
                 graph.coordinates.addElement(PassThrough(), {elementNumberX}, {iThrX});
                 graph.coordinates.addElement(PassThrough(), {elementNumberY}, {iThrY});
 
-                if(macTile.layoutType == LayoutType::MATRIX_A
-                   || macTile.layoutType == LayoutType::MATRIX_B
-                   || macTile.layoutType == LayoutType::MATRIX_ACCUMULATOR
-                   || macTile.layoutType == LayoutType::SCRATCH)
-                {
-                    graph.coordinates.addElement(Tile(), {workitemX}, {nThrX, nThrY});
-                }
-                else
-                {
-                    auto workitemY
-                        = graph.coordinates.addElement(Workitem(1, literal(workgroupSizes.at(1))));
+                auto workitemY
+                    = graph.coordinates.addElement(Workitem(1, literal(workgroupSizes.at(1))));
 
-                    graph.coordinates.addElement(PassThrough(), {workitemX}, {nThrX});
-                    graph.coordinates.addElement(PassThrough(), {workitemY}, {nThrY});
-                }
-            }
-            else
-            {
-                elementNumberX
-                    = graph.coordinates.addElement(ElementNumber(0, literal(thrTile.sizes.at(1))));
-                elementNumberY
-                    = graph.coordinates.addElement(ElementNumber(1, literal(thrTile.sizes.at(0))));
-
-                graph.coordinates.addElement(PassThrough(), {elementNumberY}, {iThrX});
-                graph.coordinates.addElement(PassThrough(), {elementNumberX}, {iThrY});
-
-                connections.push_back(DC<ElementNumber>(elementNumberX, 0));
-                connections.push_back(DC<ElementNumber>(elementNumberY, 1));
-
-                if(macTile.layoutType == LayoutType::MATRIX_A
-                   || macTile.layoutType == LayoutType::MATRIX_B
-                   || macTile.layoutType == LayoutType::MATRIX_ACCUMULATOR
-                   || macTile.layoutType == LayoutType::SCRATCH)
-                {
-                    graph.coordinates.addElement(Tile(), {workitemX}, {nThrY, nThrX});
-                }
-                else
-                {
-                    auto workitemY
-                        = graph.coordinates.addElement(Workitem(1, literal(workgroupSizes.at(1))));
-
-                    graph.coordinates.addElement(PassThrough(), {workitemX}, {nThrX});
-                    graph.coordinates.addElement(PassThrough(), {workitemY}, {nThrY});
-                }
+                graph.coordinates.addElement(PassThrough(), {workitemX}, {nThrX});
+                graph.coordinates.addElement(PassThrough(), {workitemY}, {nThrY});
             }
 
             if(jammedTiles.size() > 0 && jammedTiles[0] > 1)
@@ -1181,7 +1592,7 @@ namespace rocRoller
                 auto jammedWavetileX = graph.coordinates.addElement(
                     JammedWaveTileNumber(0, literal(jammedTiles[0]), literal(1)));
                 connections.push_back(DC<JammedWaveTileNumber>(jammedWavetileX, 0));
-                if(useSwappedAccess && isDirect2LDS)
+                if(rightmostFastest && isGlobalToLDS)
                     graph.coordinates.addElement(
                         Flatten(), {jammedWavetileX, iThrX, nThrX}, {iMacX});
                 else
@@ -1190,25 +1601,34 @@ namespace rocRoller
             }
             else
             {
-                if(useSwappedAccess && isDirect2LDS)
+                if(rightmostFastest && isGlobalToLDS)
                     graph.coordinates.addElement(Flatten(), {iThrX, nThrX}, {iMacX});
                 else
                     graph.coordinates.addElement(Flatten(), {nThrX, iThrX}, {iMacX});
             }
+
+            // Note: No column swizzle on the store side.  For D2L the
+            // LDS write address (M0) must remain un-swizzled because the
+            // hardware writes sequentially at M0 + lane*16.  The swizzle
+            // is applied only on the load side (addLoadThreadTileCT) where
+            // it permutes the global read offset (v16/offen) so that each
+            // lane fetches from a different global column, producing a
+            // swizzled data layout in LDS without shifting M0.
+            auto loadTiledSwizzleNThrY = nThrY;
 
             if(jammedTiles.size() > 1 && jammedTiles[1] > 1)
             {
                 auto jammedWavetileY = graph.coordinates.addElement(
                     JammedWaveTileNumber(1, literal(jammedTiles[1]), literal(1)));
                 connections.push_back(DC<JammedWaveTileNumber>(jammedWavetileY, 1));
-                if(isDirect2LDS)
+                if(isGlobalToLDS)
                 {
-                    if(useSwappedAccess)
+                    if(rightmostFastest)
                         graph.coordinates.addElement(
-                            Flatten(), {jammedWavetileY, nThrY, iThrY}, {iMacY});
+                            Flatten(), {jammedWavetileY, loadTiledSwizzleNThrY, iThrY}, {iMacY});
                     else
                         graph.coordinates.addElement(
-                            Flatten(), {jammedWavetileY, iThrY, nThrY}, {iMacY});
+                            Flatten(), {jammedWavetileY, iThrY, loadTiledSwizzleNThrY}, {iMacY});
                 }
                 else
                     graph.coordinates.addElement(
@@ -1216,12 +1636,14 @@ namespace rocRoller
             }
             else
             {
-                if(isDirect2LDS)
+                if(isGlobalToLDS)
                 {
-                    if(useSwappedAccess)
-                        graph.coordinates.addElement(Flatten(), {nThrY, iThrY}, {iMacY});
+                    if(rightmostFastest)
+                        graph.coordinates.addElement(
+                            Flatten(), {loadTiledSwizzleNThrY, iThrY}, {iMacY});
                     else
-                        graph.coordinates.addElement(Flatten(), {iThrY, nThrY}, {iMacY});
+                        graph.coordinates.addElement(
+                            Flatten(), {iThrY, loadTiledSwizzleNThrY}, {iMacY});
                 }
                 else
                     graph.coordinates.addElement(Flatten(), {nThrY, iThrY}, {iMacY});
@@ -1275,9 +1697,9 @@ namespace rocRoller
             auto thrTileM               = numElementsPerWorkitem;
             auto thrTileN               = 1;
 
-            auto useSwappedAccess = params->transposeMemoryAccess[macTile.layoutType];
+            auto rightmostFastest = params->transposeMemoryAccess[macTile.layoutType];
             if(splitStore)
-                useSwappedAccess = false;
+                rightmostFastest = false;
 
             // Load multiple smaller-precision (< 32-bit) elements into contiguous VGPRs
             bool packed     = false;
@@ -1302,8 +1724,10 @@ namespace rocRoller
                                           GPUCapability::HasWiderDirectToLds);
 
             // Enable the use of longer word instructions if possible
-            if(params->enableLongDwordInstructions && (packed || packFactor <= 1)
-               && (!direct2LDS || useWiderDirect2LDS))
+            auto update = params->enableLongDwordInstructions;
+            update      = update && (packed || packFactor <= 1);
+            update      = update && (!direct2LDS || useWiderDirect2LDS);
+            if(update)
             {
                 auto maxWidth = std::min(context->kernelOptions()->storeGlobalWidth,
                                          context->kernelOptions()->loadLocalWidth);
@@ -1312,16 +1736,28 @@ namespace rocRoller
                 auto macTileM            = macTile.sizes[0];
                 auto macTileN            = macTile.sizes[1];
 
-                auto macTileFastMovingDimSize = !useSwappedAccess ? macTileM : macTileN;
+                auto macTileFastMovingDimSize = !rightmostFastest ? macTileM : macTileN;
 
-                updateThreadTileForLongDwords(
-                    thrTileM, thrTileN, maxWidth, macTileFastMovingDimSize, numDwordsPerElement);
+                auto avoidDWordX2 = direct2LDS;
+                updateThreadTileForLongDwords(thrTileM,
+                                              thrTileN,
+                                              maxWidth,
+                                              macTileFastMovingDimSize,
+                                              numDwordsPerElement,
+                                              avoidDWordX2);
             }
 
-            if(!useSwappedAccess)
+            if(!rightmostFastest)
                 std::swap(thrTileM, thrTileN);
 
-            auto internalTile       = MacroTile(sizes, MemoryType::VGPR, {thrTileM, thrTileN});
+            auto memoryType{MemoryType::VGPR};
+            if(macTile.memoryType == MemoryType::WAVE_Direct2LDS
+               || macTile.memoryType == MemoryType::WAVE_TDMToLDS)
+            {
+                memoryType = macTile.memoryType;
+            }
+
+            auto internalTile       = MacroTile(sizes, memoryType, {thrTileM, thrTileN});
             internalTile.layoutType = macTile.layoutType;
             if(splitStore)
                 internalTile.memoryType = MemoryType::WAVE_SPLIT;
@@ -1353,7 +1789,8 @@ namespace rocRoller
                                 std::vector<unsigned int> const& jammedTiles,
                                 CommandParametersPtr             params,
                                 ContextPtr                       context,
-                                bool                             isDirect2LDS)
+                                bool                             isGlobalToLDS,
+                                bool                             ldsSwizzle)
         {
             auto workgroupSizes = context->kernel()->workgroupSize();
 
@@ -1361,7 +1798,7 @@ namespace rocRoller
                 = addLoadMacroTileCT(graph, connections, macTileTag, sdim);
 
             auto macTile          = *graph.coordinates.get<MacroTile>(macTileTag);
-            auto useSwappedAccess = params->transposeMemoryAccess[macTile.layoutType];
+            auto rightmostFastest = params->transposeMemoryAccess[macTile.layoutType];
 
             addLoadThreadTileCT(graph,
                                 connections,
@@ -1370,8 +1807,10 @@ namespace rocRoller
                                 iMacY,
                                 workgroupSizes,
                                 jammedTiles,
-                                useSwappedAccess,
-                                isDirect2LDS);
+                                rightmostFastest,
+                                isGlobalToLDS,
+                                ldsSwizzle,
+                                ldsSwizzle ? getColumnsPerBankRow(context) : 0u);
 
             graph.coordinates.addElement(DataFlow(), {userTag}, {macTileTag});
         }
@@ -1417,7 +1856,6 @@ namespace rocRoller
                                    int                              userTag,
                                    int                              macTileTag,
                                    std::vector<int> const&          sdim,
-                                   VariableType const&              varType,
                                    std::vector<unsigned int> const& jammedTiles,
                                    CommandParametersPtr             params,
                                    ContextPtr                       context)
@@ -1427,17 +1865,31 @@ namespace rocRoller
             auto [nMacX, iMacX, nMacY, iMacY]
                 = addLoadMacroTileCT(graph, connections, macTileTag, sdim);
 
-            addLoadSwizzleTileCT(graph,
-                                 connections,
-                                 macTileTag,
-                                 iMacX,
-                                 iMacY,
-                                 varType,
-                                 wavefrontSize,
-                                 jammedTiles,
-                                 params);
+            addLoadSwizzleTileCT(
+                graph, connections, macTileTag, iMacX, iMacY, wavefrontSize, jammedTiles, params);
 
             graph.coordinates.addElement(DataFlow(), {userTag}, {macTileTag});
+        }
+
+        void storeMacroTile_SWIZZLE(KernelGraph&                     graph,
+                                    std::vector<DeferredConnection>& connections,
+                                    int                              storeTag,
+                                    int                              userTag,
+                                    int                              macTileTag,
+                                    std::vector<int> const&          sdim,
+                                    std::vector<unsigned int> const& jammedTiles,
+                                    CommandParametersPtr             params,
+                                    ContextPtr                       context)
+        {
+            auto wavefrontSize = context->kernel()->wavefront_size();
+
+            auto [nMacX, iMacX, nMacY, iMacY]
+                = addStoreMacroTileCT(graph, connections, macTileTag, sdim);
+
+            addStoreSwizzleTileCT(
+                graph, connections, macTileTag, iMacX, iMacY, wavefrontSize, jammedTiles, params);
+
+            graph.coordinates.addElement(DataFlow(), {macTileTag}, {userTag});
         }
 
         /**
@@ -1456,7 +1908,7 @@ namespace rocRoller
             auto workgroupSizes = context->kernel()->workgroupSize();
             auto macTile        = *graph.coordinates.get<MacroTile>(macTileTag);
 
-            auto useSwappedAccess = params->transposeMemoryAccess[macTile.layoutType];
+            auto rightmostFastest = params->transposeMemoryAccess[macTile.layoutType];
 
             auto [nMacX, iMacX, nMacY, iMacY]
                 = addStoreMacroTileCT(graph, connections, macTileTag, sdim, jammedTiles);
@@ -1468,7 +1920,8 @@ namespace rocRoller
                                  iMacY,
                                  workgroupSizes,
                                  jammedTiles,
-                                 useSwappedAccess);
+                                 rightmostFastest,
+                                 /*isGlobalToLDS=*/false);
 
             graph.coordinates.addElement(DataFlow(), {macTileTag}, {userTag});
         }
@@ -1573,6 +2026,12 @@ namespace rocRoller
                 , m_params(params)
                 , m_kernel(context->kernel())
             {
+                // LDS bank swizzle currently targets CDNA4 (64 LDS banks).
+                auto swzMode = context->kernelOptions()->ldsSwizzleMode;
+                AssertFatal(swzMode == LDSBankSwizzleMode::None
+                                || context->targetArchitecture().target().isCDNA4GPU(),
+                            "LDS bank swizzle is only supported on CDNA4 architectures",
+                            ShowValue(swzMode));
             }
 
             virtual void visitEdge(KernelGraph&              graph,
@@ -1634,11 +2093,12 @@ namespace rocRoller
                     auto iWaveX      = graph.coordinates.addElement(waveTile.tileIndex(0));
                     auto iWaveY      = graph.coordinates.addElement(waveTile.tileIndex(1));
 
-                    uint const nSIMDBlock   = macTile.miTileSizes[2];
-                    uint const nSIMDIndex   = 4 / nSIMDBlock;
-                    uint const lanesPerSIMD = 16;
-
-                    auto SIMDBlock = graph.coordinates.addElement(
+                    auto       wavefrontSize = m_context->kernel()->wavefront_size();
+                    uint const lanesPerSIMD  = 16;
+                    uint const nSIMDsPerWave = wavefrontSize / lanesPerSIMD;
+                    uint const nSIMDIndex    = macTile.subTileSizes.at(0) / lanesPerSIMD;
+                    uint const nSIMDBlock    = nSIMDsPerWave / nSIMDIndex;
+                    auto       SIMDBlock     = graph.coordinates.addElement(
                         Adhoc("SIMDBlock", literal(nSIMDBlock), nullptr));
                     auto SIMDIndex = graph.coordinates.addElement(
                         Adhoc("SIMDIndex", literal(nSIMDIndex), nullptr));
@@ -1646,27 +2106,43 @@ namespace rocRoller
                         = graph.coordinates.addElement(Lane(literal(lanesPerSIMD), nullptr));
 
                     uint const numElements       = waveTile.elements();
-                    auto       wavefrontSize     = m_context->kernel()->wavefront_size();
                     uint const activeLanesInWave = static_cast<uint>(wavefrontSize);
                     uint const numVgpr           = numElements / activeLanesInWave;
-                    uint const nVgprIndex        = macTile.miTileSizes[2];
-                    uint const nVgprBlock        = numVgpr / nVgprIndex;
-
+                    uint const nVgprIndex
+                        = std::min(nSIMDIndex, static_cast<uint>(macTile.miTileSizes.at(2)));
+                    uint const nVgprBlock
+                        = numElements / macTile.subTileSizes.at(0) / nSIMDBlock / nVgprIndex;
                     auto vgprBlock = graph.coordinates.addElement(
                         VGPRBlockNumber(literal(nVgprBlock), literal(1u)));
                     auto vgprIndex = graph.coordinates.addElement(
                         VGPRBlockIndex(literal(nVgprIndex), literal(1u)));
+                    auto vgpr = graph.coordinates.addElement(VGPR(literal(numVgpr), literal(1u)));
+
+                    graph.coordinates.addElement(Flatten(), {vgprBlock, vgprIndex}, {vgpr});
+
+                    uint const nSIMDIndexBlock = nVgprIndex;
+                    uint const nSIMDIndexIndex = nSIMDIndex / nSIMDIndexBlock;
+                    auto       SIMDIndexBlock  = graph.coordinates.addElement(
+                        Adhoc("SIMDIndexBlock", literal(nSIMDIndexBlock), nullptr));
+                    auto SIMDIndexIndex = graph.coordinates.addElement(
+                        Adhoc("SIMDIndexIndex", literal(nSIMDIndexIndex), nullptr));
+                    graph.coordinates.addElement(
+                        Flatten(), {SIMDIndexBlock, SIMDIndexIndex}, {SIMDIndex});
 
                     connections.push_back(DC<WaveTile>(waveTileTag));
                     connections.push_back(DC<Adhoc>(SIMDBlock, 0));
                     connections.push_back(DC<Adhoc>(SIMDIndex, 1));
+                    connections.push_back(DC<Adhoc>(SIMDIndexBlock, 2));
+                    connections.push_back(DC<Adhoc>(SIMDIndexIndex, 3));
                     connections.push_back(DC<Lane>(laneInSIMD));
                     connections.push_back(DC<VGPRBlockNumber>(vgprBlock));
                     connections.push_back(DC<VGPRBlockIndex>(vgprIndex));
+                    connections.push_back(DC<VGPR>(vgpr));
 
                     graph.coordinates.addElement(
-                        Flatten(), {vgprIndex, SIMDIndex, laneInSIMD}, {iWaveX});
-                    graph.coordinates.addElement(Flatten(), {vgprBlock, SIMDBlock}, {iWaveY});
+                        Flatten(), {vgprIndex, SIMDIndexIndex, laneInSIMD}, {iWaveX});
+                    graph.coordinates.addElement(
+                        Flatten(), {SIMDBlock, vgprBlock, SIMDIndexBlock}, {iWaveY});
                     graph.coordinates.addElement(Flatten(), {iWaveX, iWaveY}, {waveTileTag});
                 }
                 else
@@ -1705,10 +2181,6 @@ namespace rocRoller
                 copyOperation(graph, original, reindexer, tag);
 
                 auto tile = graph.coordinates.getNode<MacroTile>(tileTag);
-
-                auto load         = original.control.get<LoadTiled>(tag).value();
-                auto isDirect2LDS = load.isDirect2LDS;
-
                 AssertFatal(tile.rank == 2, "Rank /= 2 not implemented yet.");
 
                 logger->debug("  User({}), MacroTile({}), Size: {}", userTag, tileTag, tile.sizes);
@@ -1721,6 +2193,11 @@ namespace rocRoller
                 switch(tile.memoryType)
                 {
                 case MemoryType::VGPR:
+                {
+                    bool vgprSwizzle
+                        = isLDSSwizzleActive(m_context->kernelOptions()->ldsSwizzleMode,
+                                             tile.layoutType,
+                                             varType.dataType);
                     loadMacroTile_VGPR(graph,
                                        connections,
                                        userTag,
@@ -1729,9 +2206,12 @@ namespace rocRoller
                                        {1, 1},
                                        m_params,
                                        m_context,
-                                       isDirect2LDS);
-                    break;
+                                       /*isGlobalToLDS=*/vgprSwizzle,
+                                       /*ldsSwizzle=*/vgprSwizzle);
+                }
+                break;
                 case MemoryType::WAVE:
+                case MemoryType::WAVE_FROM_GLOBAL:
                     loadMacroTile_WAVE(graph,
                                        connections,
                                        userTag,
@@ -1749,11 +2229,41 @@ namespace rocRoller
                                           userTag,
                                           tileTag,
                                           sdims,
-                                          varType,
                                           wavetilesPerWavefront,
                                           m_params,
                                           m_context);
                     break;
+                case MemoryType::WAVE_Direct2LDS:
+                {
+                    bool d2lSwizzle = isLDSSwizzleActive(m_context->kernelOptions()->ldsSwizzleMode,
+                                                         tile.layoutType,
+                                                         varType.dataType);
+                    loadMacroTile_VGPR(graph,
+                                       connections,
+                                       userTag,
+                                       tileTag,
+                                       sdims,
+                                       {1, 1},
+                                       m_params,
+                                       m_context,
+                                       /*isGlobalToLDS=*/true,
+                                       /*ldsSwizzle=*/d2lSwizzle);
+                }
+                break;
+                case MemoryType::WAVE_TDMToLDS:
+                {
+                    loadMacroTile_VGPR(graph,
+                                       connections,
+                                       userTag,
+                                       tileTag,
+                                       sdims,
+                                       {1, 1},
+                                       m_params,
+                                       m_context,
+                                       /*isGlobalToLDS=*/false,
+                                       /*ldsSwizzle=*/false);
+                }
+                break;
                 default:
                     Throw<FatalError>("LoadTiled: MacroTile memory type not supported yet.",
                                       ShowValue(tile.memoryType));
@@ -1789,10 +2299,10 @@ namespace rocRoller
                 auto workgroupSizes        = m_context->kernel()->workgroupSize();
                 auto wavefrontSize         = m_context->kernel()->wavefront_size();
                 auto wavetilesPerWavefront = m_params->getWaveTilesPerWavefront();
-                bool useSwappedAccess      = m_params->transposeMemoryAccess[tile.layoutType];
+                bool rightmostFastest      = m_params->transposeMemoryAccess[tile.layoutType];
 
                 logger->debug("  LDS({}), MacroTile({}), MacroTile size: {}x{}, SubTile size: "
-                              "{}x{}, MemoryType {}, LayoutType {}, useSwappedAccess {}",
+                              "{}x{}, MemoryType {}, LayoutType {}, rightmostFastest {}",
                               ldsTag,
                               tileTag,
                               tile.sizes[0],
@@ -1801,7 +2311,7 @@ namespace rocRoller
                               tile.subTileSizes[1],
                               toString(tile.memoryType),
                               toString(tile.layoutType),
-                              useSwappedAccess);
+                              rightmostFastest);
 
                 std::vector<DeferredConnection> connections;
 
@@ -1810,7 +2320,8 @@ namespace rocRoller
                 auto iMacX = graph.coordinates.addElement(tile.tileIndex(0));
                 auto iMacY = graph.coordinates.addElement(tile.tileIndex(1));
 
-                if(tile.memoryType == MemoryType::WAVE)
+                if(tile.memoryType == MemoryType::WAVE
+                   || tile.memoryType == MemoryType::WAVE_FROM_GLOBAL)
                 {
                     auto              varType     = getVariableType(graph, loadTag);
                     std::vector<uint> jammedTiles = wavetilesPerWavefront;
@@ -1828,7 +2339,7 @@ namespace rocRoller
                 }
                 else if(tile.memoryType == MemoryType::WAVE_SPLIT)
                 {
-                    useSwappedAccess = false;
+                    rightmostFastest = false;
                     addLoadAccumulatorTileCT(
                         graph, connections, tileTag, iMacX, iMacY, wavefrontSize, workgroupSizes);
                 }
@@ -1842,13 +2353,63 @@ namespace rocRoller
                                         iMacY,
                                         workgroupSizes,
                                         jammedTiles,
-                                        false);
+                                        false,
+                                        false,
+                                        false,
+                                        0u);
                 }
 
-                if(useSwappedAccess)
-                    graph.coordinates.addElement(Tile(), {ldsTag}, {iMacX, iMacY});
+                // LoadLDSTile swizzle: insert PairSwap + Rotate(inv) edges
+                // that un-permute the K-column so the wave reads the
+                // correct logical element.
+                //   {colChunk, elemInChunk} --Flatten--> {colCoord}
+                //   {rotatedCol} --Rotate(inv)--> {colChunk, rowCoord}
+                //   {rawColChunk} --PairSwap--> {rotatedCol, rowCoord}
+                //   {rawColElem} --Tile--> {rawColChunk, elemInChunk}
+                //   ldsTag --Tile--> {rawColElem, non-K-dim}
+                auto tileIMacY = iMacY;
+                auto tileIMacX = iMacX;
+                {
+                    auto lrVarType = getVariableType(graph, loadTag);
+                    bool isA       = tile.layoutType == LayoutType::MATRIX_A;
+                    bool doSwizzle = isLDSSwizzleActive(m_context->kernelOptions()->ldsSwizzleMode,
+                                                        tile.layoutType,
+                                                        lrVarType.dataType);
+
+                    if(doSwizzle)
+                    {
+                        int  kDim        = isA ? 1 : 0;
+                        auto elementBits = DataTypeInfo::Get(lrVarType.dataType).elementBits;
+                        auto tileK       = static_cast<unsigned int>(tile.sizes.at(kDim));
+                        auto params      = LDSSwizzleParams::compute(
+                            tileK, elementBits, getColumnsPerBankRow(m_context));
+
+                        if(!params.noConflicts())
+                        {
+                            int rowCoord = isA ? iMacX : iMacY;
+                            int colCoord = isA ? iMacY : iMacX;
+
+                            auto rawColElem = LDSSwizzleDetail::addLoadLDSTileSwizzleEdges(
+                                graph, colCoord, rowCoord, kDim, params);
+
+                            if(isA)
+                                tileIMacY = rawColElem;
+                            else
+                                tileIMacX = rawColElem;
+                        }
+
+                        logger->debug("LoadLDSTile swizzle {}: K={} E={} R={}",
+                                      toString(tile.layoutType),
+                                      params.numColumns,
+                                      params.elementsPerChunk,
+                                      params.rowsPerBankRow);
+                    }
+                }
+
+                if(rightmostFastest)
+                    graph.coordinates.addElement(Tile(), {ldsTag}, {tileIMacX, tileIMacY});
                 else
-                    graph.coordinates.addElement(Tile(), {ldsTag}, {iMacY, iMacX});
+                    graph.coordinates.addElement(Tile(), {ldsTag}, {tileIMacY, tileIMacX});
 
                 for(auto& dc : connections)
                 {
@@ -1928,6 +2489,17 @@ namespace rocRoller
                                               wavetilesPerWavefront,
                                               m_context);
                     break;
+                case MemoryType::WAVE_SWIZZLE:
+                    storeMacroTile_SWIZZLE(graph,
+                                           connections,
+                                           storeTag,
+                                           userTag,
+                                           tileTag,
+                                           sdims,
+                                           wavetilesPerWavefront,
+                                           m_params,
+                                           m_context);
+                    break;
                 default:
                     Throw<FatalError>("StoreTiled: MacroTile memory type not supported yet.");
                 }
@@ -1953,11 +2525,10 @@ namespace rocRoller
 
                 copyOperation(graph, original, reindexer, tag);
 
-                auto ldsTag       = reindexer.coordinates.at(originalLDSTag);
-                auto tileTag      = reindexer.coordinates.at(originalTileTag);
-                auto tile         = graph.coordinates.getNode<MacroTile>(tileTag);
-                auto ldsTile      = graph.coordinates.getNode<LDS>(ldsTag);
-                auto isDirect2LDS = ldsTile.isDirect2LDS;
+                auto ldsTag  = reindexer.coordinates.at(originalLDSTag);
+                auto tileTag = reindexer.coordinates.at(originalTileTag);
+                auto tile    = graph.coordinates.getNode<MacroTile>(tileTag);
+                auto ldsTile = graph.coordinates.getNode<LDS>(ldsTag);
                 AssertFatal(tile.rank == 2, "Rank /= 2 not implemented yet.");
 
                 auto workgroupSizes        = m_context->kernel()->workgroupSize();
@@ -1965,10 +2536,10 @@ namespace rocRoller
                 auto wavetilesPerWavefront = m_params->getWaveTilesPerWavefront();
                 auto useWaveAccess         = tile.memoryType == MemoryType::WAVE
                                      || tile.memoryType == MemoryType::WAVE_LDS;
-                bool useSwappedAccess = m_params->transposeMemoryAccess[tile.layoutType];
+                bool rightmostFastest = m_params->transposeMemoryAccess[tile.layoutType];
                 // XXX debug
                 logger->debug("  LDS({}), MacroTile({}), MacroTile size: {}x{}, SubTile size: "
-                              "{}x{}, MemoryType {}, LayoutType {}, useSwappedAccess {}",
+                              "{}x{}, MemoryType {}, LayoutType {}, rightmostFastest {}",
                               ldsTag,
                               tileTag,
                               tile.sizes[0],
@@ -1977,14 +2548,58 @@ namespace rocRoller
                               tile.subTileSizes[1],
                               toString(tile.memoryType),
                               toString(tile.layoutType),
-                              useSwappedAccess);
+                              rightmostFastest);
 
                 std::vector<DeferredConnection> connections;
 
                 auto iMacX = graph.coordinates.addElement(tile.tileIndex(0));
                 auto iMacY = graph.coordinates.addElement(tile.tileIndex(1));
 
+                bool ldsSwizzle = isLDSSwizzleActive(m_context->kernelOptions()->ldsSwizzleMode,
+                                                     tile.layoutType,
+                                                     ostore.varType.dataType);
+
+                logger->debug("StoreLDSTile: tag={} tileTag={} memoryType={} layoutType={} "
+                              "ldsSwizzle={}",
+                              tag,
+                              tileTag,
+                              toString(tile.memoryType),
+                              toString(tile.layoutType),
+                              ldsSwizzle);
+
                 if(tile.memoryType == MemoryType::VGPR)
+                {
+                    // We are storing entire workgroup tiles.
+                    // When LDS swizzle is active, use isGlobalToLDS=true so the
+                    // store coordinate decomposition matches the load side,
+                    // producing the same LDS layout as D2LDS.
+                    std::vector<uint> jammedTiles = {1, 1};
+                    addStoreThreadTileCT(graph,
+                                         connections,
+                                         tileTag,
+                                         iMacX,
+                                         iMacY,
+                                         workgroupSizes,
+                                         jammedTiles,
+                                         rightmostFastest,
+                                         /*isGlobalToLDS=*/ldsSwizzle);
+                }
+                else if(tile.memoryType == MemoryType::WAVE_Direct2LDS)
+                {
+                    // We are storing entire workgroup tiles
+                    std::vector<uint> jammedTiles = {1, 1};
+
+                    addStoreThreadTileCT(graph,
+                                         connections,
+                                         tileTag,
+                                         iMacX,
+                                         iMacY,
+                                         workgroupSizes,
+                                         jammedTiles,
+                                         rightmostFastest,
+                                         /*isGlobalToLDS=*/true);
+                }
+                else if(tile.memoryType == MemoryType::WAVE_TDMToLDS)
                 {
                     // We are storing entire workgroup tiles
                     std::vector<uint> jammedTiles = {1, 1};
@@ -1995,8 +2610,8 @@ namespace rocRoller
                                          iMacY,
                                          workgroupSizes,
                                          jammedTiles,
-                                         useSwappedAccess,
-                                         isDirect2LDS);
+                                         rightmostFastest,
+                                         /*isGlobalToLDS=*/false);
                 }
                 else
                 {
@@ -2014,7 +2629,7 @@ namespace rocRoller
                                        m_params);
                 }
 
-                if(useSwappedAccess)
+                if(rightmostFastest)
                     graph.coordinates.addElement(Flatten(), {iMacX, iMacY}, {ldsTag});
                 else
                     graph.coordinates.addElement(Flatten(), {iMacY, iMacX}, {ldsTag});
@@ -2035,6 +2650,100 @@ namespace rocRoller
         {
             auto visitor = LowerTileVisitor(m_params, m_context);
             return rewrite(graph, visitor);
+        }
+
+        namespace LDSSwizzleDetail
+        {
+            using namespace CoordinateGraph;
+            using namespace Expression;
+
+            LDSSwizzleParams LDSSwizzleParams::compute(unsigned int tileK,
+                                                       unsigned int elementBits,
+                                                       unsigned int colsPerBankRow)
+            {
+                AssertFatal(elementBits > 0 && tileK > 0,
+                            "LDSSwizzleParams::compute requires non-zero tileK and elementBits",
+                            ShowValue(tileK),
+                            ShowValue(elementBits));
+                auto elems = 128u / elementBits;
+                auto cols  = tileK / elems;
+                AssertFatal(tileK % elems == 0,
+                            "tileK must be a multiple of elements per dwordx4 chunk",
+                            ShowValue(tileK),
+                            ShowValue(elems));
+                AssertFatal(cols > 0 && (cols & (cols - 1)) == 0 && colsPerBankRow % cols == 0,
+                            "LDS swizzle requires power-of-2 numColumns",
+                            ShowValue(cols));
+                return {cols, colsPerBankRow / cols, elems, colsPerBankRow};
+            }
+
+            LDSSwizzleParams LDSSwizzleParams::fromColumnCount(unsigned int numCols,
+                                                               unsigned int colsPerBankRow)
+            {
+                AssertFatal(numCols > 0 && (numCols & (numCols - 1)) == 0
+                                && colsPerBankRow % numCols == 0,
+                            "LDS swizzle requires power-of-2 numColumns",
+                            ShowValue(numCols));
+                return {numCols, colsPerBankRow / numCols, 0u, colsPerBankRow};
+            }
+
+            bool LDSSwizzleParams::noConflicts() const
+            {
+                return numColumns >= columnsPerBankRow;
+            }
+
+            int addLoadTiledSwizzleEdges(KernelGraph&            graph,
+                                         int                     colCoord,
+                                         int                     rowCoord,
+                                         int                     kDim,
+                                         LDSSwizzleParams const& params)
+            {
+                auto swappedCol = graph.coordinates.addElement(
+                    ThreadTileNumber(kDim, literal(params.numColumns)));
+                graph.coordinates.addElement(
+                    PairSwap{params.rowsPerBankRow}, {swappedCol}, {colCoord, rowCoord});
+
+                auto rotatedCol = graph.coordinates.addElement(
+                    ThreadTileNumber(kDim, literal(params.numColumns)));
+                graph.coordinates.addElement(
+                    Rotate{params.numColumns, params.rowsPerBankRow, false},
+                    {rotatedCol},
+                    {swappedCol, rowCoord});
+
+                return rotatedCol;
+            }
+
+            int addLoadLDSTileSwizzleEdges(KernelGraph&            graph,
+                                           int                     colCoord,
+                                           int                     rowCoord,
+                                           int                     kDim,
+                                           LDSSwizzleParams const& params)
+            {
+                auto ePC = params.elementsPerChunk;
+
+                auto colChunk = graph.coordinates.addElement(
+                    MacroTileIndex(kDim, literal(params.numColumns), literal(1u)));
+                auto elemInChunk
+                    = graph.coordinates.addElement(MacroTileIndex(kDim, literal(ePC), literal(1u)));
+                graph.coordinates.addElement(Flatten(), {colChunk, elemInChunk}, {colCoord});
+
+                auto rotatedCol = graph.coordinates.addElement(
+                    MacroTileIndex(kDim, literal(params.numColumns), literal(1u)));
+                graph.coordinates.addElement(Rotate{params.numColumns, params.rowsPerBankRow, true},
+                                             {rotatedCol},
+                                             {colChunk, rowCoord});
+
+                auto rawColChunk = graph.coordinates.addElement(
+                    MacroTileIndex(kDim, literal(params.numColumns), literal(1u)));
+                graph.coordinates.addElement(
+                    PairSwap{params.rowsPerBankRow}, {rawColChunk}, {rotatedCol, rowCoord});
+
+                auto rawColElem = graph.coordinates.addElement(
+                    MacroTileIndex(kDim, literal(params.numColumns * ePC), literal(1u)));
+                graph.coordinates.addElement(Tile(), {rawColElem}, {rawColChunk, elemInChunk});
+
+                return rawColElem;
+            }
         }
     }
 }

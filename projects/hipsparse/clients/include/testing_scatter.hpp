@@ -1,5 +1,5 @@
 /* ************************************************************************
- * Copyright (C) 2020 Advanced Micro Devices, Inc. All rights Reserved.
+ * Copyright (C) 2020-2026 Advanced Micro Devices, Inc. All rights Reserved.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -29,6 +29,7 @@
 #include "flops.hpp"
 #include "gbyte.hpp"
 #include "hipsparse_arguments.hpp"
+#include "hipsparse_graph.hpp"
 #include "hipsparse_test_unique_ptr.hpp"
 #include "unit.hpp"
 #include "utility.hpp"
@@ -38,7 +39,8 @@
 
 using namespace hipsparse_test;
 
-void testing_scatter_bad_arg(void)
+template <typename I, typename T>
+void testing_scatter_bad_arg(const Arguments& argus)
 {
 #if(!defined(CUDART_VERSION) || CUDART_VERSION >= 11000)
     int64_t size = 100;
@@ -48,8 +50,7 @@ void testing_scatter_bad_arg(void)
     hipsparseIndexBase_t idxBase  = HIPSPARSE_INDEX_BASE_ZERO;
     hipDataType          dataType = HIP_R_32F;
 
-    std::unique_ptr<handle_struct> unique_ptr_handle(new handle_struct);
-    hipsparseHandle_t              handle = unique_ptr_handle->handle;
+    hipsparseLocalHandle_t handle;
 
     auto dx_val_managed = hipsparse_unique_ptr{device_malloc(sizeof(float) * nnz), device_free};
     auto dx_ind_managed = hipsparse_unique_ptr{device_malloc(sizeof(int) * nnz), device_free};
@@ -81,7 +82,7 @@ void testing_scatter_bad_arg(void)
 }
 
 template <typename I, typename T>
-hipsparseStatus_t testing_scatter(Arguments argus)
+void testing_scatter(Arguments argus)
 {
 #if(!defined(CUDART_VERSION) || CUDART_VERSION >= 11000)
     I size = argus.N;
@@ -94,8 +95,7 @@ hipsparseStatus_t testing_scatter(Arguments argus)
     hipDataType          dataType = getDataType<T>();
 
     // hipSPARSE handle
-    std::unique_ptr<handle_struct> unique_ptr_handle(new handle_struct);
-    hipsparseHandle_t              handle = unique_ptr_handle->handle;
+    hipsparseLocalHandle_t handle(argus);
 
     // Host structures
     std::vector<I> hx_ind(nnz);
@@ -105,7 +105,7 @@ hipsparseStatus_t testing_scatter(Arguments argus)
 
     // Initial Data on CPU
     srand(12345ULL);
-    hipsparseInitIndex(hx_ind.data(), nnz, 1, size);
+    hipsparseInitIndex(hx_ind.data(), nnz, idxBase, size + idxBase);
     hipsparseInit<T>(hx_val, 1, nnz);
     hipsparseInit<T>(hy, 1, size);
 
@@ -136,16 +136,13 @@ hipsparseStatus_t testing_scatter(Arguments argus)
     if(argus.unit_check)
     {
         // Scatter
-        CHECK_HIPSPARSE_ERROR(hipsparseScatter(handle, x, y));
+        CHECK_HIPSPARSE_ERROR(testing::hipsparseScatter(handle, x, y));
 
         // Copy output from device to CPU
         CHECK_HIP_ERROR(hipMemcpy(hy.data(), dy, sizeof(T) * size, hipMemcpyDeviceToHost));
 
         // CPU
-        for(int64_t i = 0; i < nnz; ++i)
-        {
-            hy_gold[hx_ind[i] - idxBase] = hx_val[i];
-        }
+        host_sctr(nnz, hx_val.data(), hx_ind.data(), hy_gold.data(), idxBase);
 
         // Verify results against host
         unit_check_general(1, size, 1, hy_gold.data(), hy.data());
@@ -159,7 +156,7 @@ hipsparseStatus_t testing_scatter(Arguments argus)
         // Warm up
         for(int iter = 0; iter < number_cold_calls; ++iter)
         {
-            CHECK_HIPSPARSE_ERROR(hipsparseScatter(handle, x, y));
+            CHECK_HIPSPARSE_ERROR(testing::hipsparseScatter(handle, x, y));
         }
 
         double gpu_time_used = get_time_us();
@@ -167,7 +164,7 @@ hipsparseStatus_t testing_scatter(Arguments argus)
         // Performance run
         for(int iter = 0; iter < number_hot_calls; ++iter)
         {
-            CHECK_HIPSPARSE_ERROR(hipsparseScatter(handle, x, y));
+            CHECK_HIPSPARSE_ERROR(testing::hipsparseScatter(handle, x, y));
         }
 
         gpu_time_used = (get_time_us() - gpu_time_used) / number_hot_calls;
@@ -186,8 +183,6 @@ hipsparseStatus_t testing_scatter(Arguments argus)
     CHECK_HIPSPARSE_ERROR(hipsparseDestroySpVec(x));
     CHECK_HIPSPARSE_ERROR(hipsparseDestroyDnVec(y));
 #endif
-
-    return HIPSPARSE_STATUS_SUCCESS;
 }
 
 #endif // TESTING_SCATTER_HPP

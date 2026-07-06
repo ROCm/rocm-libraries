@@ -1,4 +1,4 @@
-// Copyright (C) 2021 - 2022 Advanced Micro Devices, Inc. All rights
+// Copyright (C) 2021 - 2026 Advanced Micro Devices, Inc. All rights
 // reserved.
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
@@ -20,14 +20,12 @@
 // THE SOFTWARE.
 
 #include <iostream>
-#ifndef WIN32
+#ifndef _WIN32
 #include <vector>
 
 #include <hip/hip_runtime.h>
 #include <hipfft/hipfft.h>
 #include <hipfft/hipfftXt.h>
-
-#include "../hipfft_params.h"
 
 struct load_cbdata
 {
@@ -53,7 +51,7 @@ __device__ auto load_callback_dev = load_callback;
 
 int main()
 {
-#ifdef WIN32
+#ifdef _WIN32
     std::cout << "This sample is temporarily disabled on Windows" << std::endl;
     return EXIT_SUCCESS;
 #else
@@ -68,9 +66,8 @@ int main()
 
     // Create HIP device object and copy data to device
     // Use hipfftComplex for single-precision
-    hipError_t           hip_rt;
     hipfftDoubleComplex *x, *filter_dev;
-    hip_rt = hipMalloc(&x, complex_bytes);
+    hipError_t           hip_rt = hipMalloc(&x, complex_bytes);
     if(hip_rt != hipSuccess)
         throw std::runtime_error("hipMalloc failed");
     hip_rt = hipMalloc(&filter_dev, complex_bytes);
@@ -98,15 +95,13 @@ int main()
     }
     std::cout << std::endl;
 
-    // Create the plan
-    hipfftHandle plan      = hipfft_params::INVALID_PLAN_HANDLE;
-    hipfftResult hipfft_rt = hipfftCreate(&plan);
-    if(hipfft_rt != HIPFFT_SUCCESS)
-        throw std::runtime_error("failed to create plan");
-    hipfft_rt = hipfftPlan1d(&plan, // plan handle
-                             Nx, // transform length
-                             HIPFFT_Z2Z, // transform type (HIPFFT_C2C for single-precision)
-                             1); // number of transforms
+    // Create the plan (hipfftPlan1d internally allocates the handle)
+    hipfftHandle plan{};
+    hipfftResult hipfft_rt
+        = hipfftPlan1d(&plan, // plan handle
+                       Nx, // transform length
+                       HIPFFT_Z2Z, // transform type (HIPFFT_C2C for single-precision)
+                       1); // number of transforms
     if(hipfft_rt != HIPFFT_SUCCESS)
         throw std::runtime_error("hipfftPlan1d failed");
 
@@ -148,7 +143,8 @@ int main()
     }
     std::cout << std::endl;
 
-    hipfftDestroy(plan);
+    if(hipfftDestroy(plan) != HIPFFT_SUCCESS)
+        throw std::runtime_error("hipfftDestroy failed");
 
     hip_rt = hipFree(cbdata_dev);
     if(hip_rt != hipSuccess)

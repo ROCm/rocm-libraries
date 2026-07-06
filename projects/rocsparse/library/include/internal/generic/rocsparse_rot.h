@@ -1,6 +1,6 @@
 /*! \file */
 /* ************************************************************************
- * Copyright (C) 2023-2024 Advanced Micro Devices, Inc. All rights Reserved.
+ * Copyright (C) 2023-2025 Advanced Micro Devices, Inc. All rights Reserved.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the Software), to deal
@@ -52,8 +52,8 @@ extern "C" {
 *      }
 *  \endcode
 *
-*  \p rocsparse_rot supports the following uniform precision data types for the sparse and dense vectors x and
-*  y and compute types for the scalars \f$c\f$ and \f$s\f$.
+*  \p rocsparse_rot supports the following uniform-precision data types for the sparse and dense vectors \p x and
+*  \p y and compute types for the scalars \f$c\f$ and \f$s\f$.
 *
 *  \par Uniform Precisions:
 *  <table>
@@ -66,18 +66,21 @@ extern "C" {
 *  </table>
 *
 *  \note
-*  This function is non blocking and executed asynchronously with respect to the host.
-*  It may return before the actual computation has finished.
+*  This function is non-blocking and executed asynchronously with respect to the host.
+*  It can return before the actual computation has finished.
 *
 *  \note
 *  This routine supports execution in a hipGraph context.
 *
+*  \note
+*  This routine does not support batched computation.
+*
 *  @param[in]
-*  handle      handle to the rocsparse library context queue.
+*  handle      handle to the rocSPARSE library context queue.
 *  @param[in]
-*  c           pointer to the cosine element of \f$G\f$, can be on host or device.
+*  c           pointer to the cosine element of \f$G\f$, which can be on host or device.
 *  @param[in]
-*  s           pointer to the sine element of \f$G\f$, can be on host or device.
+*  s           pointer to the sine element of \f$G\f$, which can be on host or device.
 *  @param[inout]
 *  x           sparse vector \f$x\f$.
 *  @param[inout]
@@ -85,7 +88,7 @@ extern "C" {
 *
 *  \retval     rocsparse_status_success the operation completed successfully.
 *  \retval     rocsparse_status_invalid_handle the library context was not initialized.
-*  \retval     rocsparse_status_invalid_pointer \p c, \p s, \p x or \p y pointer is
+*  \retval     rocsparse_status_invalid_pointer \p c, \p s, \p x, or \p y pointer is
 *              invalid.
 *  \par Example
 *  \snippet example_rocsparse_rot.cpp doc example

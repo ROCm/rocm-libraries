@@ -1,5 +1,5 @@
+// Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
 // SPDX-License-Identifier: MIT
-// Copyright (c) 2018-2025, Advanced Micro Devices, Inc. All rights reserved.
 
 #include "common.hpp"
 
@@ -25,7 +25,7 @@ using OutElementOp = ck::tensor_operation::element_wise::AddReluAdd;
 
 int main(int argc, char* argv[])
 {
-    if(ck::is_gfx11_supported() || ck::is_gfx12_supported())
+    if(ck::is_gfx11_supported() || ck::is_gfx120_supported())
     {
         return 0;
     }

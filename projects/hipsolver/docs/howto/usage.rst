@@ -12,6 +12,7 @@ hipSOLVER is an open-source marshalling library for `LAPACK routines <https://ww
 It sits between a backend library and the user application, marshalling inputs to and outputs from the backend library so that the user
 application doesn't have to change when using different backends. hipSOLVER supports two backend libraries: The NVIDIA CUDA `cuSOLVER
 library <https://developer.nvidia.com/cusolver>`_ and the open-source AMD ROCm :doc:`rocSOLVER library <rocsolver:index>`.
+For more background on the LAPACK routines, see the :doc:`introduction to rocSOLVER <rocsolver:conceptual/intro-rocsolver>`.
 
 The :ref:`regular hipSOLVER API <library_api>` is a thin wrapper layer around the different backends that does not typically introduce
 significant overhead. However, its main purpose is portability, so when performance is critical, it's recommended to
@@ -21,9 +22,24 @@ After it is installed, hipSOLVER can be used like any other library with a C API
 in the user code, which means the shared library becomes a link-time and run-time dependency for the user application. The
 user application code can be ported with no changes to any system with hipSOLVER installed, regardless of the backend library.
 
-For more details on how to use the API methods, see the client code samples on the
-`hipSOLVER GitHub <https://github.com/ROCm/hipSOLVER/tree/develop/clients/samples>`_ or
+For more details on how to use the API methods, see the client code samples in the
+`rocm-libraries GitHub <https://github.com/ROCm/rocm-libraries/tree/develop/projects/hipsolver/clients/samples>`_ or
 the documentation for the corresponding backend libraries.
+
+.. _multilevel_logging:
+
+Multi-level logging in hipSOLVER
+============================================
+
+hipSOLVER can leverage the rocSOLVER logging functionality by using the rocSOLVER environment variables.
+Upon handle creation, hipSOLVER retrieves these variables using ``std::getenv``.
+
+To enable hipSOLVER logging, specify the default layer mode and max level depth using the following environment variables:
+
+*  ``ROCSOLVER_LAYER``
+*  ``ROCSOLVER_LEVELS``
+
+For more details on how to set these variables to configure logging output, see :doc:`rocSOLVER logging <rocsolver:howto/logging>`.
 
 .. _porting:
 
@@ -108,6 +124,14 @@ Performance implications of the hipsolverDn API
 
       Even though the compatibility API does not provide ``bufferSize`` helpers for these functions, the functions still require
       a workspace to use rocSOLVER. This workspace is automatically managed, but it might result in device memory reallocations with a corresponding overhead.
+
+*  An eigensolver for general matrices has not yet been implemented in rocSOLVER. These components rely on LAPACK to provide this functionality.
+   The :ref:`hipsolverDnXgeev <dense_geev>` functions take the user-provided host workspace, copy the data to the host, use LAPACK to perform the
+   eigenvalue decomposition, and then copy the resulting data back to the device.
+
+   .. note::
+
+      :ref:`hipsolverDnXgeev <dense_geev>` operates on the CPU and performs memory transfers to and from the device.
 
 .. _sparse_api_differences:
 
@@ -231,7 +255,7 @@ Different signatures and additional API methods
 
       ``lwork`` is ignored when the wrapper calls cuSOLVER because it is not needed.
 
-*  All rocSOLVER functions called by hipSOLVER require a workspace. To allow the user to specify one, 
+*  All rocSOLVER functions called by hipSOLVER require a workspace. To allow the user to specify one,
    :ref:`hipsolverXgetrs <getrs>`, :ref:`hipsolverXpotrfBatched <potrf_batched>`, :ref:`hipsolverXpotrs <potrs>`, and
    :ref:`hipsolverXpotrsBatched <potrs_batched>` require ``work`` and ``lwork`` as arguments.
 

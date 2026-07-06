@@ -1,5 +1,5 @@
 # ########################################################################
-# Copyright (C) 2018-2025 Advanced Micro Devices, Inc. All rights Reserved.
+# Copyright (C) 2018-2026 Advanced Micro Devices, Inc. All rights Reserved.
 #
 # Permission is hereby granted, free of charge, to any person obtaining a copy
 # of this software and associated documentation files (the "Software"), to deal
@@ -26,11 +26,15 @@ function(add_rocsparse_example EXAMPLE_SOURCE)
   get_filename_component(EXAMPLE_TARGET ${EXAMPLE_SOURCE} NAME_WE)
   add_executable(${EXAMPLE_TARGET} ${EXAMPLE_SOURCE})
 
+
   # Target compile options
   target_compile_options(${EXAMPLE_TARGET} PRIVATE -Wno-unused-command-line-argument)
 
   # Include common client headers
   target_include_directories(${EXAMPLE_TARGET} PRIVATE $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/../include>)
+  if (BUILD_CLIENTS_ONLY)
+    target_include_directories(${EXAMPLE_TARGET} PRIVATE ${rocsparse_INCLUDE_DIRS}/rocsparse)
+  endif()
 
   # Linker dependencies
   target_link_libraries(${EXAMPLE_TARGET} PRIVATE roc::rocsparse hip::host hip::device)
@@ -73,6 +77,7 @@ add_rocsparse_example(example_spmv_ell.cpp)
 add_rocsparse_example(example_gebsrmv.cpp)
 add_rocsparse_example(example_gemvi.cpp)
 add_rocsparse_example(example_v2_spmv_csr.cpp)
+add_rocsparse_example(example_sptrsv.cpp)
 
 set_source_files_properties(
   example_spmv_coo.cpp
@@ -136,6 +141,9 @@ if(TARGET rocsparse)
 
       # Include common client headers
       target_include_directories(${EXAMPLE_TARGET} PRIVATE $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/../include>)
+      if (BUILD_CLIENTS_ONLY)
+        target_include_directories(${EXAMPLE_TARGET} PRIVATE ${rocsparse_INCLUDE_DIRS}/rocsparse)
+      endif()
 
       # Linker dependencies
       target_link_libraries(${EXAMPLE_TARGET} PRIVATE roc::rocsparse hip::host)
@@ -167,9 +175,18 @@ if(TARGET rocsparse)
 endif()
 
 # Build documentation examples
+
 FILE(GLOB_RECURSE DOCUMENTATION_EXAMPLES documentation_examples/*.cpp)
+FILE(GLOB_RECURSE DOCUMENTATION_EXAMPLES2 documentation_examples/*.c)
+
+if(NOT BUILD_WITH_ILDLT0)
+  list(FILTER DOCUMENTATION_EXAMPLES EXCLUDE REGEX ".*example_rocsparse_spildlt0\\.cpp$")
+endif()
 
 foreach(file ${DOCUMENTATION_EXAMPLES})
-    message(STATUS "Found .cpp file: ${file}")
+    add_rocsparse_example(${file})
+endforeach()
+
+foreach(file ${DOCUMENTATION_EXAMPLES2})
     add_rocsparse_example(${file})
 endforeach()

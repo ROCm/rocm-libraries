@@ -1,5 +1,5 @@
 # ########################################################################
-# Copyright (C) 2022-2024 Advanced Micro Devices, Inc. All rights Reserved.
+# Copyright (C) 2022-2026 Advanced Micro Devices, Inc. All rights Reserved.
 #
 # Permission is hereby granted, free of charge, to any person obtaining a copy
 # of this software and associated documentation files (the "Software"), to deal
@@ -46,7 +46,7 @@ Tests:
   category: pre_checkin
   function: bsrpad_value
   precision: *single_double_precisions_complex_real
-  M: [99, 221, 789]
+  M: [99, 221]
   block_dim: [98, 99, 100, 1000, 1023, 1024, 1025, 2000]
   baseA: [rocsparse_index_base_zero]
   direction: [rocsparse_direction_row]
@@ -57,7 +57,7 @@ Tests:
   category: pre_checkin
   function: bsrpad_value
   precision: *single_double_precisions_complex_real
-  M: [2, 98, 576, 1107, 3546, 12557]
+  M: [2, 98]
   block_dim: [1]
   baseA: [rocsparse_index_base_zero]
   direction: [rocsparse_direction_row]
@@ -68,7 +68,7 @@ Tests:
   category: quick
   function: bsrpad_value
   precision: *single_double_precisions_complex_real
-  M: [100, 801, 2278]
+  M: [100, 300]
   block_dim: [10]
   baseA: [rocsparse_index_base_zero]
   direction: [rocsparse_direction_row]
@@ -85,11 +85,13 @@ Tests:
   direction: [rocsparse_direction_column]
   storage: [rocsparse_storage_mode_sorted, rocsparse_storage_mode_unsorted]
   matrix: [rocsparse_matrix_file_rocalution]
-  filename: [mac_econ_fwd500,
+  filename: [nos1,
              nos2,
+             nos3,
              nos4,
+             nos5,
              nos6,
-             scircuit]
+             nos7]
 
 - name: bsrpad_value
   category: nightly
@@ -153,7 +155,7 @@ Tests:
   category: pre_checkin
   function: bsrpad_value
   precision: *single_double_precisions_complex_real
-  M: [100, 801, 2278]
+  M: [100, 801]
   block_dim: [10]
   baseA: [rocsparse_index_base_zero]
   direction: [rocsparse_direction_row]

@@ -1,5 +1,5 @@
 /* **************************************************************************
- * Copyright (C) 2018-2025 Advanced Micro Devices, Inc. All rights reserved.
+ * Copyright (C) 2018-2026 Advanced Micro Devices, Inc. All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -49,7 +49,6 @@ template <>
 inline constexpr char rocblas2char_precision<rocblas_float_complex> = 'c';
 template <>
 inline constexpr char rocblas2char_precision<rocblas_double_complex> = 'z';
-
 
 /* ============================================================================================
  */
@@ -250,6 +249,18 @@ constexpr auto rocsolver2char_rfinfo_mode(rocsolver_rfinfo_mode value)
     {
     case rocsolver_rfinfo_mode_lu: return '1';
     case rocsolver_rfinfo_mode_cholesky: return '2';
+    }
+    return '\0';
+}
+
+constexpr auto rocsolver2char_norm_type(rocsolver_norm_type value)
+{
+    switch(value)
+    {
+    case rocsolver_norm_type_one: return '1';
+    case rocsolver_norm_type_frobenius: return 'F';
+    case rocsolver_norm_type_infinity: return 'I';
+    case rocsolver_norm_type_max: return 'M';
     }
     return '\0';
 }
@@ -461,6 +472,19 @@ constexpr rocsolver_rfinfo_mode char2rocsolver_rfinfo_mode(char value)
     case '1': return rocsolver_rfinfo_mode_lu;
     case '2': return rocsolver_rfinfo_mode_cholesky;
     default: return static_cast<rocsolver_rfinfo_mode>(0);
+    }
+}
+
+constexpr rocsolver_norm_type char2rocsolver_norm_type(char value)
+{
+    switch(std::toupper(value))
+    {
+    case 'O':
+    case '1': return rocsolver_norm_type_one;
+    case 'F': return rocsolver_norm_type_frobenius;
+    case 'I': return rocsolver_norm_type_infinity;
+    case 'M': return rocsolver_norm_type_max;
+    default: return static_cast<rocsolver_norm_type>(0);
     }
 }
 

@@ -74,11 +74,12 @@ RTCKernel::RTCGenerator RTCKernelStockham::generate_from_node(const LeafNode&   
 
         std::vector<unsigned int> factors;
         std::copy(kernel->factors.begin(), kernel->factors.end(), std::back_inserter(factors));
-        std::vector<unsigned int> precisions = {static_cast<unsigned int>(node.precision)};
+        auto precision = static_cast<unsigned int>(node.precision);
 
         specs.emplace(factors,
                       std::vector<unsigned int>(),
-                      precisions,
+                      precision,
+                      get_curr_gcn_arch_name(),
                       static_cast<unsigned int>(kernel->workgroup_size),
                       PrintScheme(node.scheme));
         specs->threads_per_transform = kernel->threads_per_transform[0];
@@ -88,8 +89,9 @@ RTCKernel::RTCGenerator RTCKernelStockham::generate_from_node(const LeafNode&   
 
         if(node.isPartialPassEnabled())
         {
-            pp_params.off_dim     = node.ppOffDim;
-            pp_params.current_dim = node.ppCurrDim;
+            pp_params.off_dim                  = node.ppOffDim;
+            pp_params.current_dim              = node.ppCurrDim;
+            pp_params.pp_threads_per_transform = kernel->pp_params.pp_tpt;
             pp_params.pp_factors_curr.assign(kernel->pp_params.pp_factors_curr.begin(),
                                              kernel->pp_params.pp_factors_curr.end());
             pp_params.pp_factors_other.assign(kernel->pp_params.pp_factors_other.begin(),
@@ -105,7 +107,8 @@ RTCKernel::RTCGenerator RTCKernelStockham::generate_from_node(const LeafNode&   
 
         std::vector<unsigned int> factors1d;
         std::vector<unsigned int> factors2d;
-        std::vector<unsigned int> precisions = {static_cast<unsigned int>(node.precision)};
+
+        auto precision = static_cast<unsigned int>(node.precision);
 
         // need to break down factors into first dim and second dim
         size_t len0_remain = node.length[0];
@@ -124,7 +127,8 @@ RTCKernel::RTCGenerator RTCKernelStockham::generate_from_node(const LeafNode&   
 
         specs.emplace(factors1d,
                       factors2d,
-                      precisions,
+                      precision,
+                      get_curr_gcn_arch_name(),
                       static_cast<unsigned int>(kernel->workgroup_size),
                       PrintScheme(node.scheme));
         specs->threads_per_transform = kernel->threads_per_transform[0];
@@ -133,7 +137,8 @@ RTCKernel::RTCGenerator RTCKernelStockham::generate_from_node(const LeafNode&   
 
         specs2d.emplace(factors2d,
                         factors1d,
-                        precisions,
+                        precision,
+                        get_curr_gcn_arch_name(),
                         static_cast<unsigned int>(kernel->workgroup_size),
                         PrintScheme(node.scheme));
         specs2d->threads_per_transform = kernel->threads_per_transform[1];
@@ -224,10 +229,12 @@ RTCKernel::RTCGenerator RTCKernelStockham::generate_from_node(const LeafNode&   
                             node.storeOps);
     };
 
-    generator.construct_rtckernel
-        = [](const std::string& kernel_name, const std::vector<char>& code, dim3, dim3) {
-              return std::unique_ptr<RTCKernel>(new RTCKernelStockham(kernel_name, code));
-          };
+    generator.construct_rtckernel = [](const std::string&                       kernel_name,
+                                       std::shared_future<hipModule_wrapper_t>& module,
+                                       dim3,
+                                       dim3) {
+        return std::unique_ptr<RTCKernel>(new RTCKernelStockham(kernel_name, module));
+    };
     return generator;
 }
 
@@ -238,7 +245,10 @@ RTCKernelArgs RTCKernelStockham::get_launch_args(DeviceCallIn& data)
 
     // twiddles
     if(data.node->scheme == CS_KERNEL_STOCKHAM_PP)
+    {
         kargs.append_ptr(data.node->twiddles_pp);
+        kargs.append_ptr(data.node->twiddles_off_dim);
+    }
     kargs.append_ptr(data.node->twiddles);
     // large 1D twiddles
     if(data.node->scheme == CS_KERNEL_STOCKHAM_BLOCK_CC

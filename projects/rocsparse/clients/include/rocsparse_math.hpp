@@ -1,6 +1,6 @@
 /*! \file */
 /* ************************************************************************
- * Copyright (C) 2019-2025 Advanced Micro Devices, Inc. All rights Reserved.
+ * Copyright (C) 2019-2026 Advanced Micro Devices, Inc. All rights Reserved.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -26,7 +26,7 @@
 #ifndef ROCSPARSE_MATH_HPP
 #define ROCSPARSE_MATH_HPP
 
-#include "rocsparse.h"
+#include "rocsparse-types.h"
 #include <cmath>
 
 #include "rocsparse_traits.hpp"
@@ -145,6 +145,17 @@ inline bool rocsparse_isinf(_Float16 arg)
         uint16_t data;
     } x = {arg};
     return (~x.data & 0x7c00) == 0 && (x.data & 0x3ff) == 0;
+}
+
+template <>
+inline bool rocsparse_isinf(rocsparse_bfloat16 arg)
+{
+    union
+    {
+        rocsparse_bfloat16 fp;
+        uint16_t           data;
+    } x = {arg};
+    return (~x.data & 0x7f80) == 0 && (x.data & 0x7f) == 0;
 }
 
 template <>

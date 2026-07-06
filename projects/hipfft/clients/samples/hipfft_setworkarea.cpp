@@ -1,4 +1,4 @@
-// Copyright (C) 2019 - 2022 Advanced Micro Devices, Inc. All rights
+// Copyright (C) 2019 - 2026 Advanced Micro Devices, Inc. All rights
 // reserved.
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
@@ -29,8 +29,6 @@ DISABLE_WARNING_DEPRECATED_DECLARATIONS
 DISABLE_WARNING_RETURN_TYPE
 #include <hip/hip_runtime_api.h>
 DISABLE_WARNING_POP
-
-#include "../hipfft_params.h"
 
 int main()
 {
@@ -86,8 +84,8 @@ int main()
         throw std::runtime_error("hipfftEstimate1d failed");
     std::cout << "hipfftEstimate 1d workSize: " << workSize << std::endl;
 
-    hipfftHandle plan = hipfft_params::INVALID_PLAN_HANDLE;
-    hipfft_rt         = hipfftCreate(&plan);
+    hipfftHandle plan{};
+    hipfft_rt = hipfftCreate(&plan);
     if(hipfft_rt != HIPFFT_SUCCESS)
         throw std::runtime_error("hipfftCreate failed");
     hipfft_rt = hipfftSetAutoAllocation(plan, 0);
@@ -113,6 +111,8 @@ int main()
 
     // Execute plan
     hipfft_rt = hipfftExecR2C(plan, x, (hipfftComplex*)y);
+    if(hipfft_rt != HIPFFT_SUCCESS)
+        throw std::runtime_error("hipfftExecR2C failed");
 
     // Copy result back to host
     hip_rt = hipMemcpy(cdata.data(), y, complex_bytes, hipMemcpyDeviceToHost);
@@ -126,9 +126,14 @@ int main()
     }
     std::cout << std::endl;
 
-    hipfftDestroy(plan);
+    if(hipfftDestroy(plan) != HIPFFT_SUCCESS)
+        throw std::runtime_error("hipfftDestroy failed");
 
     hip_rt = hipFree(x);
+    if(hip_rt != hipSuccess)
+        throw std::runtime_error("hipFree failed");
+
+    hip_rt = hipFree(y);
     if(hip_rt != hipSuccess)
         throw std::runtime_error("hipFree failed");
 

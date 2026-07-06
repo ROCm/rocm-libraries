@@ -1,28 +1,5 @@
-/*******************************************************************************
- *
- * MIT License
- *
- * Copyright 2024-2025 AMD ROCm(TM) Software
- *
- * Permission is hereby granted, free of charge, to any person obtaining a copy
- * of this software and associated documentation files (the "Software"), to deal
- * in the Software without restriction, including without limitation the rights
- * to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
- * copies of the Software, and to permit persons to whom the Software is
- * furnished to do so, subject to the following conditions:
- *
- * The above copyright notice and this permission notice shall be included in
- * all copies or substantial portions of the Software.
- *
- * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
- * IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
- * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
- * AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
- * LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
- * OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
- * SOFTWARE.
- *
- *******************************************************************************/
+// Copyright Advanced Micro Devices, Inc., or its affiliates.
+// SPDX-License-Identifier: MIT
 
 #include <rocRoller/Scheduling/Costs/LinearWeightedCost.hpp>
 
@@ -42,37 +19,43 @@ namespace rocRoller
 
         static void mapping(IO& io, Scheduling::Weights& weights)
         {
-            iot::mapRequired(io, "nops", weights.nops);
-            iot::mapRequired(io, "vmcnt", weights.vmcnt);
-            iot::mapRequired(io, "lgkmcnt", weights.lgkmcnt);
-            iot::mapRequired(io, "vectorQueueSat", weights.vectorQueueSat);
-            iot::mapRequired(io, "vmQueueLen", weights.vmQueueLen);
-            iot::mapRequired(io, "ldsQueueSat", weights.ldsQueueSat);
-            iot::mapRequired(io, "lgkmQueueLen", weights.lgkmQueueLen);
-            iot::mapRequired(io, "stallCycles", weights.stallCycles);
-            iot::mapRequired(io, "newSGPRs", weights.newSGPRs);
-            iot::mapRequired(io, "newVGPRs", weights.newVGPRs);
-            iot::mapRequired(io, "highWaterMarkSGPRs", weights.highWaterMarkSGPRs);
-            iot::mapRequired(io, "highWaterMarkVGPRs", weights.highWaterMarkVGPRs);
-            iot::mapRequired(io, "notMFMA", weights.notMFMA);
-            iot::mapRequired(io, "isMFMA", weights.isMFMA);
-            iot::mapRequired(io, "fractionOfSGPRs", weights.fractionOfSGPRs);
-            iot::mapRequired(io, "fractionOfVGPRs", weights.fractionOfVGPRs);
-            iot::mapRequired(io, "outOfRegisters", weights.outOfRegisters);
-            iot::mapRequired(io, "zeroFreeBarriers", weights.zeroFreeBarriers);
+            // The YAML files from Python now have a `type` field that denotes
+            // which subset of the weights is included; this is irrelevant in
+            // C++.
+            std::string type;
+            iot::mapOptional(io, "type", type);
 
-            iot::mapRequired(io, "isSMEM", weights.isSMEM);
-            iot::mapRequired(io, "isSControl", weights.isSControl);
-            iot::mapRequired(io, "isSALU", weights.isSALU);
+            iot::mapOptional(io, "nops", weights.nops);
+            iot::mapOptional(io, "vmcnt", weights.vmcnt);
+            iot::mapOptional(io, "lgkmcnt", weights.lgkmcnt);
+            iot::mapOptional(io, "vectorQueueSat", weights.vectorQueueSat);
+            iot::mapOptional(io, "vmQueueLen", weights.vmQueueLen);
+            iot::mapOptional(io, "ldsQueueSat", weights.ldsQueueSat);
+            iot::mapOptional(io, "lgkmQueueLen", weights.lgkmQueueLen);
+            iot::mapOptional(io, "stallCycles", weights.stallCycles);
+            iot::mapOptional(io, "newSGPRs", weights.newSGPRs);
+            iot::mapOptional(io, "newVGPRs", weights.newVGPRs);
+            iot::mapOptional(io, "highWaterMarkSGPRs", weights.highWaterMarkSGPRs);
+            iot::mapOptional(io, "highWaterMarkVGPRs", weights.highWaterMarkVGPRs);
+            iot::mapOptional(io, "notMFMA", weights.notMFMA);
+            iot::mapOptional(io, "isMFMA", weights.isMFMA);
+            iot::mapOptional(io, "fractionOfSGPRs", weights.fractionOfSGPRs);
+            iot::mapOptional(io, "fractionOfVGPRs", weights.fractionOfVGPRs);
+            iot::mapOptional(io, "outOfRegisters", weights.outOfRegisters);
+            iot::mapOptional(io, "zeroFreeBarriers", weights.zeroFreeBarriers);
 
-            iot::mapRequired(io, "isVMEMRead", weights.isVMEMRead);
-            iot::mapRequired(io, "isVMEMWrite", weights.isVMEMWrite);
-            iot::mapRequired(io, "isLDSRead", weights.isLDSRead);
-            iot::mapRequired(io, "isLDSWrite", weights.isLDSWrite);
-            iot::mapRequired(io, "isVALU", weights.isVALU);
+            iot::mapOptional(io, "isSMEM", weights.isSMEM);
+            iot::mapOptional(io, "isSControl", weights.isSControl);
+            iot::mapOptional(io, "isSALU", weights.isSALU);
 
-            iot::mapRequired(io, "isACCVGPRWrite", weights.isACCVGPRWrite);
-            iot::mapRequired(io, "isACCVGPRRead", weights.isACCVGPRRead);
+            iot::mapOptional(io, "isVMEMRead", weights.isVMEMRead);
+            iot::mapOptional(io, "isVMEMWrite", weights.isVMEMWrite);
+            iot::mapOptional(io, "isLDSRead", weights.isLDSRead);
+            iot::mapOptional(io, "isLDSWrite", weights.isLDSWrite);
+            iot::mapOptional(io, "isVALU", weights.isVALU);
+
+            iot::mapOptional(io, "isACCVGPRWrite", weights.isACCVGPRWrite);
+            iot::mapOptional(io, "isACCVGPRRead", weights.isACCVGPRRead);
 
             iot::mapOptional(io, "vmemCycles", weights.vmemCycles);
             iot::mapOptional(io, "vmemQueueSize", weights.vmemQueueSize);
@@ -88,38 +71,30 @@ namespace rocRoller
 
     namespace Scheduling
     {
-        constexpr Weights GFX950_SIMPLIFIED_WEIGHTS = {.nops               = 10000.,
-                                                       .vmcnt              = 0,
-                                                       .lgkmcnt            = 0,
-                                                       .vmQueueLen         = 0,
-                                                       .vectorQueueSat     = 0,
-                                                       .ldsQueueSat        = 0,
-                                                       .lgkmQueueLen       = 0,
-                                                       .stallCycles        = 1000.0,
-                                                       .notMFMA            = 0,
-                                                       .isMFMA             = 0,
-                                                       .isSMEM             = 0,
-                                                       .isSControl         = 0,
-                                                       .isSALU             = 10,
-                                                       .isVMEMRead         = 0,
-                                                       .isVMEMWrite        = 0,
-                                                       .isLDSRead          = 0,
-                                                       .isLDSWrite         = 0,
-                                                       .isVALU             = 10,
-                                                       .isACCVGPRWrite     = 0,
-                                                       .isACCVGPRRead      = 0,
-                                                       .newSGPRs           = 0,
-                                                       .newVGPRs           = 0,
-                                                       .highWaterMarkSGPRs = 0,
-                                                       .highWaterMarkVGPRs = 0,
-                                                       .fractionOfSGPRs    = 0,
-                                                       .fractionOfVGPRs    = 0,
-                                                       .outOfRegisters     = 1000000000.0,
-                                                       .zeroFreeBarriers   = true,
-                                                       .vmemCycles         = 63,
-                                                       .vmemQueueSize      = 1,
-                                                       .dsmemCycles        = 38,
-                                                       .dsmemQueueSize     = 1};
+        constexpr Weights GFX950_SIMPLIFIED_WEIGHTS_STREAMK = {
+            .nops             = 10000.0,
+            .stallCycles      = 1000.0,
+            .isSALU           = 154.26834112288643,
+            .isVALU           = 96.5815329589789,
+            .outOfRegisters   = 1000000000.0,
+            .zeroFreeBarriers = true,
+            .vmemCycles       = 410,
+            .vmemQueueSize    = 3,
+            .dsmemCycles      = 94,
+            .dsmemQueueSize   = 1,
+        };
+        constexpr Weights GFX950_SIMPLIFIED_WEIGHTS = {
+            .nops             = 131.82052000047628,
+            .stallCycles      = 1000.0,
+            .isSALU           = 1073.9946584081224,
+            .isVALU           = 96.7974133366133,
+            .outOfRegisters   = 1000000000.0,
+            .zeroFreeBarriers = false,
+            .vmemCycles       = 149,
+            .vmemQueueSize    = 3,
+            .dsmemCycles      = 46,
+            .dsmemQueueSize   = 2,
+        };
 
         constexpr Weights GFX950_WEIGHTS = {.nops               = 1001.4279088984798,
                                             .vmcnt              = 526.093932290615,
@@ -270,11 +245,20 @@ namespace rocRoller
 
                 if(fn == CostFunction::LinearWeightedSimple)
                 {
-                    if(!arch.isCDNA35GPU())
+                    if(!arch.isCDNA4GPU())
                         Log::warn("Architecture {} not tested for simplifed weights.",
                                   arch.toString());
 
                     return GFX950_SIMPLIFIED_WEIGHTS;
+                }
+
+                if(fn == CostFunction::LinearWeightedSimpleStreamK)
+                {
+                    if(!arch.isCDNA4GPU())
+                        Log::warn("Architecture {} not tested for simplifed weights.",
+                                  arch.toString());
+
+                    return GFX950_SIMPLIFIED_WEIGHTS_STREAMK;
                 }
 
                 if(arch.isCDNA1GPU())
@@ -283,7 +267,7 @@ namespace rocRoller
                     return GFX90A_WEIGHTS;
                 else if(arch.isCDNA3GPU())
                     return GFX942_WEIGHTS;
-                else if(arch.isCDNA35GPU())
+                else if(arch.isCDNA4GPU())
                     return GFX950_WEIGHTS;
                 else
                 {
@@ -304,7 +288,8 @@ namespace rocRoller
         {
             auto [costFn, ctx] = arg;
             return costFn == CostFunction::LinearWeighted
-                   || costFn == CostFunction::LinearWeightedSimple;
+                   || costFn == CostFunction::LinearWeightedSimple
+                   || costFn == CostFunction::LinearWeightedSimpleStreamK;
         }
 
         std::shared_ptr<Cost> LinearWeightedCost::Build(Argument arg)
@@ -351,35 +336,31 @@ namespace rocRoller
                 lgkmcnt    = 1 + maxLgkmcnt - cnt;
             }
 
-            int vmQueueLen = status.waitLengths.at(GPUWaitQueueType::LoadQueue)
-                             + status.waitLengths.at(GPUWaitQueueType::StoreQueue);
+            int vmQueueLen
+                = status.waitLengths.at(static_cast<size_t>(GPUWaitQueueType::LoadQueue))
+                  + status.waitLengths.at(static_cast<size_t>(GPUWaitQueueType::StoreQueue));
             float vectorQueueSat = std::max(vmQueueLen - m_weights.vmQueueLen, 0);
-            int   kmQueueLen     = status.waitLengths.at(GPUWaitQueueType::SMemQueue)
-                             + status.waitLengths.at(GPUWaitQueueType::DSQueue);
+            int   kmQueueLen
+                = status.waitLengths.at(static_cast<size_t>(GPUWaitQueueType::SMemQueue))
+                  + status.waitLengths.at(static_cast<size_t>(GPUWaitQueueType::DSQueue));
             float ldsQueueSat = std::max(kmQueueLen - m_weights.lgkmQueueLen, 0);
 
-            float newSGPRs
-                = status.allocatedRegisters.at(static_cast<size_t>(Register::Type::Scalar));
-            float newVGPRs
-                = status.allocatedRegisters.at(static_cast<size_t>(Register::Type::Vector));
-            float highWaterMarkSGPRs = status.highWaterMarkRegistersDelta.at(
-                static_cast<size_t>(Register::Type::Scalar));
-            float highWaterMarkVGPRs = status.highWaterMarkRegistersDelta.at(
-                static_cast<size_t>(Register::Type::Vector));
+            float newSGPRs = status.allocatedRegisters.at(Register::Type::Scalar);
+            float newVGPRs = status.allocatedRegisters.at(Register::Type::Vector);
+            float highWaterMarkSGPRs
+                = status.highWaterMarkRegistersDelta.at(Register::Type::Scalar);
+            float highWaterMarkVGPRs
+                = status.highWaterMarkRegistersDelta.at(Register::Type::Vector);
 
             float notMFMA = inst.getOpCode().find("mfma") == std::string::npos ? 1.0f : 0.0f;
 
-            float fractionOfSGPRs
-                = status.allocatedRegisters.at(static_cast<size_t>(Register::Type::Scalar));
-            float remainingSGPRs
-                = status.remainingRegisters.at(static_cast<size_t>(Register::Type::Scalar));
+            float fractionOfSGPRs = status.allocatedRegisters.at(Register::Type::Scalar);
+            float remainingSGPRs  = status.remainingRegisters.at(Register::Type::Scalar);
             if(remainingSGPRs > 0)
                 fractionOfSGPRs /= remainingSGPRs;
 
-            float fractionOfVGPRs
-                = status.allocatedRegisters.at(static_cast<size_t>(Register::Type::Vector));
-            float remainingVGPRs
-                = status.remainingRegisters.at(static_cast<size_t>(Register::Type::Vector));
+            float fractionOfVGPRs = status.allocatedRegisters.at(Register::Type::Vector);
+            float remainingVGPRs  = status.remainingRegisters.at(Register::Type::Vector);
             if(remainingVGPRs > 0)
                 fractionOfVGPRs /= remainingVGPRs;
 

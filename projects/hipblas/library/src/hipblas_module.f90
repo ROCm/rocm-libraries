@@ -375,6 +375,55 @@ module hipblas
         end function hipblasGetAtomicsMode
     end interface
 
+    ! batch alpha/beta stride
+    interface
+        function hipblasSetBatchAlphaStride(handle, alpha_stride) &
+            bind(c, name='hipblasSetBatchAlphaStride')
+            use iso_c_binding
+            use hipblas_enums
+            implicit none
+            integer(kind(HIPBLAS_STATUS_SUCCESS)) :: hipblasSetBatchAlphaStride
+            type(c_ptr), value :: handle
+            integer(c_int64_t), value :: alpha_stride
+        end function hipblasSetBatchAlphaStride
+    end interface
+
+    interface
+        function hipblasGetBatchAlphaStride(handle, alpha_stride) &
+            bind(c, name='hipblasGetBatchAlphaStride')
+            use iso_c_binding
+            use hipblas_enums
+            implicit none
+            integer(kind(HIPBLAS_STATUS_SUCCESS)) :: hipblasGetBatchAlphaStride
+            type(c_ptr), value :: handle
+            type(c_ptr), value :: alpha_stride
+        end function hipblasGetBatchAlphaStride
+    end interface
+
+    interface
+        function hipblasSetBatchBetaStride(handle, beta_stride) &
+            bind(c, name='hipblasSetBatchBetaStride')
+            use iso_c_binding
+            use hipblas_enums
+            implicit none
+            integer(kind(HIPBLAS_STATUS_SUCCESS)) :: hipblasSetBatchBetaStride
+            type(c_ptr), value :: handle
+            integer(c_int64_t), value :: beta_stride
+        end function hipblasSetBatchBetaStride
+    end interface
+
+    interface
+        function hipblasGetBatchBetaStride(handle, beta_stride) &
+            bind(c, name='hipblasGetBatchBetaStride')
+            use iso_c_binding
+            use hipblas_enums
+            implicit none
+            integer(kind(HIPBLAS_STATUS_SUCCESS)) :: hipblasGetBatchBetaStride
+            type(c_ptr), value :: handle
+            type(c_ptr), value :: beta_stride
+        end function hipblasGetBatchBetaStride
+    end interface
+
     !--------!
     ! blas 1 !
     !--------!
@@ -23884,6 +23933,57 @@ module hipblas
             integer(kind(HIPBLAS_GEMM_DEFAULT)), value :: algo
             integer(kind(HIPBLAS_GEMM_FLAGS_NONE)), value :: flags
         end function hipblasGemmStridedBatchedExWithFlags_64
+    end interface
+
+    ! syrkEx
+    interface
+        function hipblasSyrkEx(handle, uplo, transA, n, k, alpha, a, a_type, lda, &
+                               beta, c, c_type, ldc) &
+            bind(c, name='hipblasSyrkEx')
+            use iso_c_binding
+            use hipblas_enums
+            implicit none
+            integer(kind(HIPBLAS_STATUS_SUCCESS)) :: hipblasSyrkEx
+            type(c_ptr), value :: handle
+            integer(kind(HIPBLAS_FILL_MODE_UPPER)), value :: uplo
+            integer(kind(HIPBLAS_OP_N)), value :: transA
+            integer(c_int), value :: n
+            integer(c_int), value :: k
+            type(c_ptr), value :: alpha
+            type(c_ptr), value :: a
+            integer(kind(HIP_R_16F)), value :: a_type
+            integer(c_int), value :: lda
+            type(c_ptr), value :: beta
+            type(c_ptr), value :: c
+            integer(kind(HIP_R_16F)), value :: c_type
+            integer(c_int), value :: ldc
+        end function hipblasSyrkEx
+    end interface
+
+    ! herkEx
+    interface
+        function hipblasHerkEx(handle, uplo, transA, n, k, alpha, a, a_type, lda, &
+                               beta, c, c_type, ldc, compute_type) &
+            bind(c, name='hipblasHerkEx')
+            use iso_c_binding
+            use hipblas_enums
+            implicit none
+            integer(kind(HIPBLAS_STATUS_SUCCESS)) :: hipblasHerkEx
+            type(c_ptr), value :: handle
+            integer(kind(HIPBLAS_FILL_MODE_UPPER)), value :: uplo
+            integer(kind(HIPBLAS_OP_N)), value :: transA
+            integer(c_int), value :: n
+            integer(c_int), value :: k
+            type(c_ptr), value :: alpha
+            type(c_ptr), value :: a
+            integer(kind(HIP_R_16F)), value :: a_type
+            integer(c_int), value :: lda
+            type(c_ptr), value :: beta
+            type(c_ptr), value :: c
+            integer(kind(HIP_R_16F)), value :: c_type
+            integer(c_int), value :: ldc
+            integer(kind(HIP_R_16F)), value :: compute_type
+        end function hipblasHerkEx
     end interface
 
     ! trsmEx

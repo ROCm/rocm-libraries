@@ -1,28 +1,5 @@
-/*******************************************************************************
- *
- * MIT License
- *
- * Copyright 2024-2025 AMD ROCm(TM) Software
- *
- * Permission is hereby granted, free of charge, to any person obtaining a copy
- * of this software and associated documentation files (the "Software"), to deal
- * in the Software without restriction, including without limitation the rights
- * to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
- * copies of the Software, and to permit persons to whom the Software is
- * furnished to do so, subject to the following conditions:
- *
- * The above copyright notice and this permission notice shall be included in
- * all copies or substantial portions of the Software.
- *
- * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
- * IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
- * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
- * AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
- * LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
- * OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
- * SOFTWARE.
- *
- *******************************************************************************/
+// Copyright Advanced Micro Devices, Inc., or its affiliates.
+// SPDX-License-Identifier: MIT
 
 #pragma once
 
@@ -40,13 +17,15 @@
 #include <rocRoller/KernelOptions.hpp>
 #include <rocRoller/Operations/Command_fwd.hpp>
 #include <rocRoller/Operations/OperationTag.hpp>
+#include <rocRoller/Parameters/Solution/StreamK.hpp>
 #include <rocRoller/Utilities/EnumBitset.hpp>
 #include <rocRoller/Utilities/HIPTimer.hpp>
 
 namespace rocRoller
 {
-    KernelArguments  getKernelArguments(AssemblyKernelPtr kernel, RuntimeArguments const& args);
-    KernelInvocation getKernelInvocation(AssemblyKernelPtr kernel, RuntimeArguments const& args);
+    KernelArguments    getKernelArguments(AssemblyKernelPtr kernel, RuntimeArguments const& args);
+    KernelInvocation   getKernelInvocation(AssemblyKernelPtr kernel, RuntimeArguments const& args);
+    CommandArgumentPtr findArgumentByName(CommandPtr const command, std::string const& argName);
 
     /**
      * CommandParameters - tunable command parameters.
@@ -82,6 +61,9 @@ namespace rocRoller
 
         void setManualWavefrontCount(std::pair<uint, uint> wavefrontCounts);
         std::optional<std::pair<uint, uint>> getManualWavefrontCounts() const;
+
+        void setManualWorkgroupClusterSize(std::array<unsigned int, 3> const&);
+        std::optional<std::array<unsigned int, 3>> getManualWorkgroupClusterSize() const;
 
         /**
          * @brief Set the number of wave tiles to execute within a workgroup
@@ -119,8 +101,6 @@ namespace rocRoller
 
         bool packMultipleElementsInto1VGPR = true;
 
-        unsigned int unrollX   = 0;
-        unsigned int unrollY   = 0;
         unsigned int unrollK   = 0;
         bool         fuseLoops = true;
         bool         tailLoops = true;
@@ -133,8 +113,7 @@ namespace rocRoller
         int  prefetchLDSFactor = 0;
         bool prefetchMixMemOps = false;
 
-        bool streamK        = false;
-        bool streamKTwoTile = false;
+        StreamKConfig streamK{StreamKMode::None};
 
         std::vector<int>  loopOverOutputTilesDimensions    = {};
         std::string       loopOverOutputTilesTopLoop       = XLOOP;
@@ -144,10 +123,27 @@ namespace rocRoller
         std::optional<int> workgroupMappingDim = {};
         std::optional<int> workgroupRemapXCC   = {};
 
+        /**
+         * @brief Padding for LDS.
+         *
+         * Map from LayoutType to LDS padding specification.
+         *
+         * An LDS padding specification is a pair of integers: the
+         * first integer is how many contiguous bytes, followed by
+         * size of padding (gap) in bytes.
+         *
+         * A specification of {0, 0} means no padding.  This is the default.
+         *
+         * A specification of {-1, -1} means automatic padding.
+         */
+        std::map<LayoutType, std::pair<int, int>> ldsPadding
+            = {{LayoutType::MATRIX_A, {0, 0}}, {LayoutType::MATRIX_B, {0, 0}}};
+
     private:
         std::map<Operations::OperationTag, KernelGraph::CoordinateGraph::Dimension> m_dimInfo;
         std::optional<std::array<unsigned int, 3>>                                  m_workgroupSize;
-        std::optional<std::pair<uint, uint>> m_wavefrontCounts;
+        std::optional<std::pair<uint, uint>>       m_wavefrontCounts;
+        std::optional<std::array<unsigned int, 3>> m_workgroupClusterSize;
 
         int m_kernelDimension = 0;
 
@@ -306,13 +302,17 @@ namespace rocRoller
 
         /**
          * @brief Returns the total number of bytes required for scratch space
+         *        for the specified scratch policy.
          *
-         * If this value is greather than 0, the user is required to allocate this
+         * If this value is greater than 0, the user is required to allocate this
          * amount of device memory and pass it into the kernel.
          *
+         * @param policy The scratch policy to query
+         * @param args The runtime arguments
          * @return size_t
          */
-        size_t scratchSpaceRequired(RuntimeArguments const& args) const;
+        size_t scratchSpaceRequired(Operations::ScratchPolicy policy,
+                                    RuntimeArguments const&   args) const;
 
         /**
          * @brief Returns the workgroup size
@@ -323,6 +323,8 @@ namespace rocRoller
          * @brief Returns the hipFunction for the kernel
          */
         hipFunction_t getHipFunction() const;
+
+        void generateKernelGraph();
 
     private:
         CommandPtr  m_command;
@@ -336,7 +338,6 @@ namespace rocRoller
         CommandParametersPtr              m_commandParameters;
         CommandLaunchParametersPtr        m_launchParameters;
 
-        void generateKernelGraph(std::string name);
         void generateKernelSource();
 
         /**

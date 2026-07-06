@@ -55,9 +55,9 @@ MemLayout_t GetSwappedNCLayout(MemLayout_t layout)
     case MemLayout_t::GNCHW: return MemLayout_t::GCNHW;
     case MemLayout_t::CGNHW: return MemLayout_t::NGCHW;
     case MemLayout_t::NGCHW: return MemLayout_t::CGNHW;
-    default:
-        MIOPEN_THROW(std::string("Internal error in GetSwappedNCLayout: Unknown MemLayout_t "));
     }
+
+    MIOPEN_THROW(std::string("Internal error in GetSwappedNCLayout: Unknown MemLayout_t "));
 }
 
 MemLayout_t GetGroupConvLayout(MemLayout_t layout, bool IsDataBuffer)
@@ -69,14 +69,18 @@ MemLayout_t GetGroupConvLayout(MemLayout_t layout, bool IsDataBuffer)
         case MemLayout_t::CNHW: return MemLayout_t::CGNHW;
         case MemLayout_t::NCHW: return MemLayout_t::NGCHW;
         case MemLayout_t::NHWC:
-        case MemLayout_t::CHWN:
-        case MemLayout_t::HWCN:
-        case MemLayout_t::HWNC:
+            // For transposing solvers, NHWC data will be transposed to NCHW before
+            // group operations, so we return the layout unchanged and let the
+            // transpose mechanism handle the conversion
+            return MemLayout_t::NHWC;
+        case MemLayout_t::CHWN: return MemLayout_t::CHWN;
+        case MemLayout_t::HWCN: return MemLayout_t::HWCN;
+        case MemLayout_t::HWNC: return MemLayout_t::HWNC;
+
         case MemLayout_t::NGCHW:
         case MemLayout_t::GNCHW:
         case MemLayout_t::CGNHW:
-        case MemLayout_t::GCNHW:
-        default: break;
+        case MemLayout_t::GCNHW: break;
         }
     }
     else
@@ -86,14 +90,18 @@ MemLayout_t GetGroupConvLayout(MemLayout_t layout, bool IsDataBuffer)
         case MemLayout_t::CNHW: return MemLayout_t::GCNHW;
         case MemLayout_t::NCHW: return MemLayout_t::GNCHW;
         case MemLayout_t::NHWC:
-        case MemLayout_t::CHWN:
-        case MemLayout_t::HWCN:
-        case MemLayout_t::HWNC:
+            // For transposing solvers, NHWC weights will be transposed to NCHW before
+            // group operations, so we return the layout unchanged and let the
+            // transpose mechanism handle the conversion
+            return MemLayout_t::NHWC;
+        case MemLayout_t::CHWN: return MemLayout_t::CHWN;
+        case MemLayout_t::HWCN: return MemLayout_t::HWCN;
+        case MemLayout_t::HWNC: return MemLayout_t::HWNC;
+
         case MemLayout_t::NGCHW:
         case MemLayout_t::GNCHW:
         case MemLayout_t::CGNHW:
-        case MemLayout_t::GCNHW:
-        default: break;
+        case MemLayout_t::GCNHW: break;
         }
     }
     MIOPEN_THROW(std::string("Internal error in GetGroupConvLayout: Unknown MemLayout_t "));
@@ -144,7 +152,6 @@ BuffInfo::BuffInfo(MemLayout_t layout, int nk, int c, int h, int w, int g, int _
     case MemLayout_t::GCNHW:
         FillLayoutStride<LPart_t::W, LPart_t::H, LPart_t::N, LPart_t::C, LPart_t::G>(this);
         break;
-    default: MIOPEN_THROW(std::string("Internal error in BuffInfo(): Unknown MemLayout_t ")); break;
     }
 }
 

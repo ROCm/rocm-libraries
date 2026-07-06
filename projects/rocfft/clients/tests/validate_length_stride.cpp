@@ -20,12 +20,13 @@
 
 #include "../../shared/accuracy_test.h"
 #include "../../shared/array_validator.h"
+#include "../../shared/params_gen.h"
 #include <gtest/gtest.h>
 
 #include <random>
 #include <unordered_set>
 
-inline auto generate_valid_length_stride()
+inline auto generate_length_stride()
 {
     // Array of tuples of length, stride.
     std::vector<std::tuple<std::vector<size_t>, std::vector<size_t>>> vals = {
@@ -40,7 +41,10 @@ inline auto generate_valid_length_stride()
         {{8, 8, 8, 8, 8}, {4096, 512, 64, 7, 1}},
         {{8, 8, 8, 8, 8, 8}, {32768, 4096, 512, 64, 8, 1}},
         {{299, 307, 495}, {1006, 50, 674}},
-
+        // invalid due to collision for (11, 0, 0, 1) and (0, 1, 1, 0):
+        {{12, 2, 2, 2}, {7, 37, 43, 3}},
+        // invalid due to collision for (1, 0, 0, 0, 3) and (0, 4, 1, 1, 0):
+        {{2, 5, 4, 6, 4}, {750, 201, 16, 17, 29}},
     };
 
     return vals;
@@ -86,6 +90,13 @@ auto direct_validity_test(const std::vector<size_t>& length,
 
 TEST_P(valid_length_stride, direct_comparison)
 {
+
+    if(hash_prob(random_seed, ::testing::UnitTest::GetInstance()->current_test_info()->name())
+       > test_prob)
+    {
+        GTEST_SKIP();
+    }
+
     const std::vector<size_t> length = std::get<0>(GetParam());
     const std::vector<size_t> stride = std::get<1>(GetParam());
 
@@ -120,4 +131,4 @@ TEST_P(valid_length_stride, direct_comparison)
 
 INSTANTIATE_TEST_SUITE_P(reference_test,
                          valid_length_stride,
-                         ::testing::ValuesIn(generate_valid_length_stride()));
+                         ::testing::ValuesIn(generate_length_stride()));

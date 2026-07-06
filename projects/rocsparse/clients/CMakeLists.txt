@@ -1,5 +1,5 @@
 # ########################################################################
-# Copyright (C) 2018-2024 Advanced Micro Devices, Inc. All rights Reserved.
+# Copyright (C) 2018-2026 Advanced Micro Devices, Inc. All rights Reserved.
 #
 # Permission is hereby granted, free of charge, to any person obtaining a copy
 # of this software and associated documentation files (the "Software"), to deal
@@ -47,6 +47,10 @@ endfunction()
 if (rocblas_FOUND)
   message("Build rocSPARSE client with rocBLAS")
   add_compile_options(-DROCSPARSE_WITH_ROCBLAS)
+endif()
+
+if (BUILD_CLIENTS_ONLY)
+  find_package(rocsparse 4.0.0 REQUIRED)
 endif()
 
 # Consider removing this in the future
@@ -167,7 +171,6 @@ endif()
 add_subdirectory(tools)
 
 if(BUILD_CLIENTS_TESTS)
-  enable_testing()
   add_subdirectory(tests)
 
   if(NOT CONVERT_SOURCE)

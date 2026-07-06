@@ -2,7 +2,24 @@
 # SPDX-License-Identifier: MIT
 
 cmake_minimum_required(VERSION 3.25.2)
-project(rocm-libraries LANGUAGES C CXX Fortran ASM)
+project(rocm-libraries LANGUAGES C CXX ASM)
+
+include(CheckLanguage)
+check_language(Fortran)
+if(CMAKE_Fortran_COMPILER)
+    enable_language(Fortran)
+    set(ROCM_LIBS_HAVE_FORTRAN TRUE)
+else()
+    set(ROCM_LIBS_HAVE_FORTRAN FALSE)
+    message(STATUS "Fortran compiler not found - Fortran support disabled")
+endif()
+
+if(POLICY CMP0135)
+    cmake_policy(SET CMP0135 NEW) # FetchContent timestamp handling
+endif()
+if(POLICY CMP0077)
+    cmake_policy(SET CMP0077 NEW) # option() honors normal variables
+endif()
 
 list(APPEND CMAKE_MODULE_PATH "${CMAKE_CURRENT_SOURCE_DIR}/cmake/modules")
 
@@ -10,6 +27,7 @@ include(CMakeDependentOption)
 include(GNUInstallDirs)
 include(add_subdirectory_with_message)
 include(fetch_rocm_cmake)
+include(shared_third_party)
 
 # --- Options and cache variables ---
 option(ROCM_LIBS_SUPERBUILD "Enable superbuild mode" ON)
@@ -18,14 +36,28 @@ set(ROCM_LIBS_ENABLE_COMPONENTS "all"
     CACHE STRING "Semicolon-separated list of components to build (default: 'all')"
 )
 
-set(SUPPORTED_COMPONENTS
+set(DEFAULT_COMPONENTS
     # shared
     mxdatagenerator
     rocroller
+    origami
     # projects
     hipblas-common
+    hipblaslt
     rocprim
     rocrand
+)
+
+set(AVAILABLE_COMPONENTS
+    ${DEFAULT_COMPONENTS}
+    # dnn
+    hipdnn
+    hipdnn-integration-tests
+    miopen
+    miopen-provider
+    hipblaslt-provider
+    hip-kernel-provider
+    hipdnn-samples
 )
 
 set(UNSUPPORTED_COMPONENTS
@@ -34,14 +66,12 @@ set(UNSUPPORTED_COMPONENTS
     # projects
     composablekernel
     hipblas
-    hipblaslt
     hipcub
     hipfft
     hiprand
     hipsolver
     hipsparse
     hipsparselt
-    miopen
     rocblas
     rocfft
     rocsolver
@@ -61,12 +91,12 @@ if(NOT ROCM_LIBS_ENABLE_COMPONENTS)
 endif()
 
 if("all" IN_LIST ROCM_LIBS_ENABLE_COMPONENTS)
-    set(ROCM_LIBS_ENABLE_COMPONENTS ${SUPPORTED_COMPONENTS})
+    set(ROCM_LIBS_ENABLE_COMPONENTS ${DEFAULT_COMPONENTS})
 endif()
 
 message(STATUS "Enabling components:")
 foreach(component ${ROCM_LIBS_ENABLE_COMPONENTS})
-    if(component IN_LIST SUPPORTED_COMPONENTS)
+    if(component IN_LIST AVAILABLE_COMPONENTS)
         message(STATUS "  ${component} (supported)")
     elseif(component IN_LIST UNSUPPORTED_COMPONENTS)
         message(STATUS "  ${component} (unsupported)")
@@ -74,6 +104,39 @@ foreach(component ${ROCM_LIBS_ENABLE_COMPONENTS})
         message(FATAL_ERROR "Unknown component: ${component}.")
     endif()
 endforeach()
+
+# Determine if CTest should be enabled at the root superbuild project level.
+# If enabled, this must be done BEFORE any add_subdirectory() calls so that tests
+# registered in subprojects are visible to root-level ctest.
+# Note: The environment variable is checked for only the FIRST configure; the cache
+# value is used exclusively after that.
+set(_root_ctest_env_default "$ENV{ROCM_LIBS_ENABLE_ROOT_CTEST}")
+option(ROCM_LIBS_ENABLE_ROOT_CTEST "Enable CTest at the root superbuild level" "${_root_ctest_env_default}")
+if(ROCM_LIBS_ENABLE_ROOT_CTEST)
+    message(STATUS "CTest test aggregation is enabled at the root superbuild level")
+    enable_testing()
+    include(CTest)
+endif()
+if(ROCM_LIBS_ENABLE_ROOT_CTEST AND EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/shared/ctest/tests/CMakeLists.txt")
+    add_subdirectory(shared/ctest/tests)
+endif()
+
+
+# --- Shared third-party dependencies ---
+# Declare libraries that more than one subproject would otherwise fetch
+# independently (e.g. nlohmann_json used by both hipdnn and miopen).
+# Must run BEFORE any add_subdirectory() call so that subproject
+# find_package() resolutions are intercepted via OVERRIDE_FIND_PACKAGE.
+set(_rocm_libs_needs_shared_json FALSE)
+foreach(_c hipdnn miopen miopen-provider)
+    if("${_c}" IN_LIST ROCM_LIBS_ENABLE_COMPONENTS)
+        set(_rocm_libs_needs_shared_json TRUE)
+    endif()
+endforeach()
+if(_rocm_libs_needs_shared_json)
+    rocm_libs_declare_shared_deps()
+endif()
+unset(_rocm_libs_needs_shared_json)
 
 # --- Add subdirectories ---
 if("mxdatagenerator" IN_LIST ROCM_LIBS_ENABLE_COMPONENTS)
@@ -93,12 +156,30 @@ if("hipblas-common" IN_LIST ROCM_LIBS_ENABLE_COMPONENTS)
 endif()
 
 if("rocroller" IN_LIST ROCM_LIBS_ENABLE_COMPONENTS)
-    # required deps: pip install pytest-cmake
+    # pip packages:
+    #   pip install pytest-cmake
     set(ROCROLLER_ENABLE_FETCH ON)
     add_subdirectory_with_message(
         COMPONENT rocroller
         PREFIX_PATH shared
         EXPECT_TARGET roc::rocroller
+    )
+endif()
+
+if("origami" IN_LIST ROCM_LIBS_ENABLE_COMPONENTS)
+    add_subdirectory_with_message(
+        COMPONENT origami
+        PREFIX_PATH shared
+        EXPECT_TARGET roc::origami
+    )
+endif()
+
+if("hipblaslt" IN_LIST ROCM_LIBS_ENABLE_COMPONENTS)
+    set(HIPBLASLT_ENABLE_BLIS OFF)
+    add_subdirectory_with_message(
+        COMPONENT hipblaslt
+        PREFIX_PATH projects
+        EXPECT_TARGET roc::hipblaslt
     )
 endif()
 
@@ -116,6 +197,71 @@ if("rocrand" IN_LIST ROCM_LIBS_ENABLE_COMPONENTS)
         PREFIX_PATH projects
         EXPECT_TARGET rocrand
     )
+endif()
+
+# --- DNN components (opt-in, not part of default 'all' build) ---
+if("hipdnn" IN_LIST ROCM_LIBS_ENABLE_COMPONENTS)
+    add_subdirectory_with_message(
+        COMPONENT hipdnn
+        PREFIX_PATH projects
+        EXPECT_TARGET hipdnn_backend
+    )
+endif()
+
+if("hipdnn-integration-tests" IN_LIST ROCM_LIBS_ENABLE_COMPONENTS)
+    add_subdirectory_with_message(
+        COMPONENT integration-tests
+        PREFIX_PATH dnn-providers
+        EXPECT_TARGET hipdnn_integration_tests
+    )
+endif()
+
+if("miopen" IN_LIST ROCM_LIBS_ENABLE_COMPONENTS)
+    set(MIOPEN_STANDALONE_BUILD ON CACHE BOOL "")
+    add_subdirectory_with_message(
+        COMPONENT miopen
+        PREFIX_PATH projects
+        EXPECT_TARGET MIOpen
+    )
+endif()
+
+if("miopen-provider" IN_LIST ROCM_LIBS_ENABLE_COMPONENTS)
+    add_subdirectory_with_message(
+        COMPONENT miopen-provider
+        PREFIX_PATH dnn-providers
+        EXPECT_TARGET miopen_plugin
+    )
+endif()
+
+if("hipblaslt-provider" IN_LIST ROCM_LIBS_ENABLE_COMPONENTS)
+    add_subdirectory_with_message(
+        COMPONENT hipblaslt-provider
+        PREFIX_PATH dnn-providers
+        EXPECT_TARGET hipblaslt_plugin
+    )
+endif()
+
+if("hip-kernel-provider" IN_LIST ROCM_LIBS_ENABLE_COMPONENTS)
+    add_subdirectory_with_message(
+        COMPONENT hip-kernel-provider
+        PREFIX_PATH dnn-providers
+        EXPECT_TARGET hip_kernel_provider
+    )
+endif()
+
+if("hipdnn-samples" IN_LIST ROCM_LIBS_ENABLE_COMPONENTS)
+    add_subdirectory_with_message(
+        COMPONENT samples
+        PREFIX_PATH projects/hipdnn
+        EXPECT_TARGET hipdnn_samples
+    )
+
+    # Ensure the supported provider plugins are built before samples (needed at test runtime)
+    foreach(_provider_target miopen_plugin hipblaslt_plugin hip_kernel_provider)
+        if(TARGET ${_provider_target})
+            add_dependencies(hipdnn_samples ${_provider_target})
+        endif()
+    endforeach()
 endif()
 
 # --- Projects not yet configured for superbuild ---
@@ -143,10 +289,6 @@ if("composablekernel" IN_LIST ROCM_LIBS_ENABLE_COMPONENTS)
     message(FATAL_ERROR "composablekernel is not yet supported in the superbuild")
 endif()
 
-if("miopen" IN_LIST ROCM_LIBS_ENABLE_COMPONENTS)
-    message(FATAL_ERROR "miopen is not yet supported in the superbuild")
-endif()
-
 if("hipcub" IN_LIST ROCM_LIBS_ENABLE_COMPONENTS)
     message(FATAL_ERROR "hipcub is not yet supported in the superbuild")
     # NOTE: Currently, hipcub tries to expose the rocm::rocprim target if it isn't already found.
@@ -155,10 +297,6 @@ endif()
 
 if("hiprand" IN_LIST ROCM_LIBS_ENABLE_COMPONENTS)
     message(FATAL_ERROR "hiprand is not yet supported in the superbuild")
-endif()
-
-if("hipblaslt" IN_LIST ROCM_LIBS_ENABLE_COMPONENTS)
-    message(FATAL_ERROR "hipblaslt is not yet supported in the superbuild")
 endif()
 
 if("hipblas" IN_LIST ROCM_LIBS_ENABLE_COMPONENTS)

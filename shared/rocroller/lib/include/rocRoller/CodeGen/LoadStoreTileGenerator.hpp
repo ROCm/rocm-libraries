@@ -1,28 +1,5 @@
-/*******************************************************************************
- *
- * MIT License
- *
- * Copyright 2023-2025 AMD ROCm(TM) Software
- *
- * Permission is hereby granted, free of charge, to any person obtaining a copy
- * of this software and associated documentation files (the "Software"), to deal
- * in the Software without restriction, including without limitation the rights
- * to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
- * copies of the Software, and to permit persons to whom the Software is
- * furnished to do so, subject to the following conditions:
- *
- * The above copyright notice and this permission notice shall be included in
- * all copies or substantial portions of the Software.
- *
- * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
- * IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
- * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
- * AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
- * LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
- * OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
- * SOFTWARE.
- *
- *******************************************************************************/
+// Copyright Advanced Micro Devices, Inc., or its affiliates.
+// SPDX-License-Identifier: MIT
 
 #pragma once
 
@@ -32,6 +9,8 @@
 #include <rocRoller/KernelGraph/RegisterTagManager.hpp>
 
 #include <rocRoller/Expression_fwd.hpp>
+#include <string>
+#include <vector>
 
 namespace rocRoller
 {
@@ -110,39 +89,57 @@ namespace rocRoller
                                                    CoordinateGraph::Transformer      coords);
 
             /**
-             * @brief Generate instructions needed to calculate offset and stride information
+             * @brief Generate instructions needed to load a tile from global into LDS with TDM
              *
              * @param tag The tag of the node in the control graph
              * @param load The node in the control graph
              * @param coords Known coordinates
              * @return Generator<Instruction>
              */
-            Generator<Instruction> genComputeIndex(int                               tag,
-                                                   ControlGraph::ComputeIndex const& ci,
-                                                   CoordinateGraph::Transformer      coords);
+            Generator<Instruction> genLoadTiledTDMToLDS(int                                    tag,
+                                                        ControlGraph::LoadTiledTDMToLDS const& load,
+                                                        CoordinateGraph::Transformer coords);
 
             /**
-             * Information needed in order to load or store a tile.
+             * @brief Information needed in order to load or store a tile.
+             *
+             * @field tag The tag of the control graph node generating the load or store
+             * @field kind The kind of memory instruction to use
+             * @field m Number of rows in the tile
+             * @field n Number of columns in the tile
+             * @field dataType The type of the data being loaded
+             * @field isTransposedTile if tile needs to be transposed
+             * @field vgpr The registers to store the data in (null is loading)
+             * @field offset Offset from the starting index
              */
             struct LoadStoreTileInfo
             {
-                MemoryInstructions::MemoryKind    kind = MemoryInstructions::MemoryKind::Count;
-                uint64_t                          m    = 0;
-                uint64_t                          n    = 0;
-                uint32_t                          elementBits    = 0;
-                uint32_t                          packedAmount   = 0;
-                uint32_t                          ldsWriteStride = 0;
-                Register::ValuePtr                data;
-                Register::ValuePtr                rowOffsetReg;
-                Register::ValuePtr                rowStrideReg;
-                RegisterExpressionAttributes      rowStrideAttributes;
-                Register::ValuePtr                colStrideReg;
-                RegisterExpressionAttributes      colStrideAttributes;
-                Register::ValuePtr                offset;
-                std::shared_ptr<BufferDescriptor> bufDesc;
-                BufferInstructionOptions          bufOpts;
-                bool                              isTransposedTile;
+                int                            tag          = -1;
+                MemoryInstructions::MemoryKind kind         = MemoryInstructions::MemoryKind::Count;
+                uint64_t                       m            = 0;
+                uint64_t                       n            = 0;
+                uint32_t                       elementBits  = 0;
+                uint32_t                       packedAmount = 0;
+                uint32_t                       ldsWriteStride = 0;
+                Register::ValuePtr             data           = nullptr;
+                VariableType                   varType        = VariableType{DataType::Count};
+                Register::ValuePtr             rowOffsetReg   = nullptr;
+                Register::ValuePtr             rowStrideReg   = nullptr;
+                RegisterExpressionAttributes   rowStrideAttributes;
+                Register::ValuePtr             colStrideReg = nullptr;
+                RegisterExpressionAttributes   colStrideAttributes;
+                Register::ValuePtr             offset               = nullptr;
+                Register::ValuePtr             bufDesc              = nullptr;
+                BufferInstructionOptions       bufOpts              = {};
+                bool                           isTransposedTile     = false;
+                bool                           isPadded             = false;
+                bool                           isMacroTileRowStride = false;
+                Register::ValuePtr             tdmDesc              = nullptr;
+                std::vector<std::string>       comments;
             };
+
+            LoadStoreTileInfo getLoadLDSTileInfo(int tag, ControlGraph::LoadLDSTile const& load);
+            LoadStoreTileInfo getStoreLDSTileInfo(int tag, ControlGraph::StoreLDSTile const& store);
 
         private:
             ContextPtr                       m_context;
@@ -154,15 +151,14 @@ namespace rocRoller
                                                    Expression::ExpressionPtr expr) const;
 
             // Index calculation Helpers
-            std::shared_ptr<BufferDescriptor> getBufferDesc(int tag);
-            Expression::ExpressionPtr         getOffsetExpr(int  opTag,
-                                                            bool isDirect2LDS,
-                                                            CoordinateGraph::Transformer const& coords);
-            Generator<Instruction>            getOffset(LoadStoreTileInfo&           info,
-                                                        CoordinateGraph::Transformer coords,
-                                                        int                          tag,
-                                                        bool                         preserveOffset,
-                                                        bool                         direct2LDS = false);
+            Register::ValuePtr        getBufferDesc(int tag);
+            Expression::ExpressionPtr getOffsetExpr(int  opTag,
+                                                    bool isStorePartOfGlobalToLDS,
+                                                    CoordinateGraph::Transformer const& coords);
+            Generator<Instruction>    getOffset(LoadStoreTileInfo&           info,
+                                                CoordinateGraph::Transformer coords,
+                                                bool                         preserveOffset,
+                                                bool isStorePartOfGlobalToLDS = false);
 
             /**
              * @brief Generate stride (in bytes).
@@ -201,17 +197,8 @@ namespace rocRoller
 
             // Move Tile Helpers
             template <MemoryInstructions::MemoryDirection Dir>
-            Generator<Instruction> moveTile(MemoryInstructions::MemoryKind kind,
-                                            uint64_t                       m,
-                                            uint64_t                       n,
-                                            VariableType                   dataType,
-                                            int                            tag,
-                                            Register::ValuePtr             vgpr,
-                                            Register::ValuePtr             offset,
-                                            CoordinateGraph::Transformer&  coords,
-                                            BufferInstructionOptions       bufOpts          = {},
-                                            bool                           isTransposedTile = false,
-                                            bool                           isPadded = false);
+            Generator<Instruction> moveTile(LoadStoreTileInfo&            info,
+                                            CoordinateGraph::Transformer& coords);
             template <MemoryInstructions::MemoryDirection Dir>
             Generator<Instruction> moveTileLiteralStrides(LoadStoreTileInfo& info);
             template <MemoryInstructions::MemoryDirection Dir>
@@ -230,12 +217,6 @@ namespace rocRoller
             Generator<Instruction> loadMacroTileVGPR(int                            tag,
                                                      ControlGraph::LoadTiled const& load,
                                                      CoordinateGraph::Transformer   coords);
-            Generator<Instruction> loadMacroTileLDS(int                              tag,
-                                                    ControlGraph::LoadLDSTile const& load,
-                                                    CoordinateGraph::Transformer     coords);
-            Generator<Instruction> loadMacroTileWAVELDS(int                              tag,
-                                                        ControlGraph::LoadLDSTile const& load,
-                                                        CoordinateGraph::Transformer     coords);
             Generator<Instruction> loadMacroTileWAVE(int                            tag,
                                                      ControlGraph::LoadTiled const& load,
                                                      CoordinateGraph::Transformer   coords);
@@ -243,20 +224,21 @@ namespace rocRoller
                                                             ControlGraph::LoadTiled const& load,
                                                             CoordinateGraph::Transformer   coords);
             Generator<Instruction>
-                loadMacroTileDirect2LDS(int                                     tag,
-                                        ControlGraph::LoadTileDirect2LDS const& load,
-                                        CoordinateGraph::Transformer            coords);
+                              loadMacroTileDirect2LDS(int                                     tag,
+                                                      ControlGraph::LoadTileDirect2LDS const& load,
+                                                      CoordinateGraph::Transformer            coords);
+            LoadStoreTileInfo loadMacroTileLDSInfo(int tag, ControlGraph::LoadLDSTile const& load);
+            LoadStoreTileInfo loadMacroTileWAVELDSInfo(int                              tag,
+                                                       ControlGraph::LoadLDSTile const& load);
+            LoadStoreTileInfo storeMacroTileLDSInfo(int                               tag,
+                                                    ControlGraph::StoreLDSTile const& store);
+            LoadStoreTileInfo storeMacroTileWAVELDSInfo(int                               tag,
+                                                        ControlGraph::StoreLDSTile const& store);
 
             // Store Tile Helpers
-            Generator<Instruction> storeMacroTileLDS(int                               tag,
-                                                     ControlGraph::StoreLDSTile const& store,
-                                                     CoordinateGraph::Transformer      coords);
             Generator<Instruction> storeMacroTileVGPR(int                             tag,
                                                       ControlGraph::StoreTiled const& store,
                                                       CoordinateGraph::Transformer    coords);
-            Generator<Instruction> storeMacroTileWAVELDS(int                               tag,
-                                                         ControlGraph::StoreLDSTile const& store,
-                                                         CoordinateGraph::Transformer      coords);
             Generator<Instruction> storeMacroTileWAVE(int                             tag,
                                                       ControlGraph::StoreTiled const& store,
                                                       CoordinateGraph::Transformer    coords);

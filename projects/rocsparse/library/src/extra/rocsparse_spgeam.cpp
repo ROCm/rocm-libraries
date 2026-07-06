@@ -1,5 +1,5 @@
 /* ************************************************************************
- * Copyright (C) 2024-2025 Advanced Micro Devices, Inc. All rights Reserved.
+ * Copyright (C) 2024-2026 Advanced Micro Devices, Inc. All rights Reserved.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -95,6 +95,7 @@ rocsparse_status
     return rocsparse_status_success;
 }
 
+// LCOV_EXCL_START
 template <>
 const char* rocsparse::enum_utils::to_string(rocsparse_spgeam_alg value_)
 {
@@ -161,6 +162,7 @@ const char* rocsparse::enum_utils::to_string(rocsparse_spgeam_output value_)
     }
     THROW_IF_ROCSPARSE_ERROR(rocsparse_status_invalid_value);
 }
+// LCOV_EXCL_STOP
 
 template <>
 bool rocsparse::enum_utils::is_invalid(rocsparse_spgeam_alg value_)
@@ -329,6 +331,7 @@ namespace rocsparse
             case rocsparse_format_csc:
             case rocsparse_format_ell:
             case rocsparse_format_bell:
+            case rocsparse_format_sell:
             {
                 RETURN_IF_ROCSPARSE_ERROR(rocsparse_status_not_implemented);
             }
@@ -367,6 +370,9 @@ namespace rocsparse
 
         ROCSPARSE_CHECKARG(2, mat_A, (mat_A->init == false), rocsparse_status_not_initialized);
         ROCSPARSE_CHECKARG(3, mat_B, (mat_B->init == false), rocsparse_status_not_initialized);
+
+        ROCSPARSE_CHECKARG(2, mat_A, (mat_A->batch_count != 1), rocsparse_status_not_implemented);
+        ROCSPARSE_CHECKARG(3, mat_B, (mat_B->batch_count != 1), rocsparse_status_not_implemented);
 
         ROCSPARSE_CHECKARG(
             3, mat_B, (mat_B->format != mat_A->format), rocsparse_status_not_implemented);
@@ -436,6 +442,9 @@ namespace rocsparse
 
         ROCSPARSE_CHECKARG(2, mat_A, (mat_A->init == false), rocsparse_status_not_initialized);
         ROCSPARSE_CHECKARG(3, mat_B, (mat_B->init == false), rocsparse_status_not_initialized);
+
+        ROCSPARSE_CHECKARG(2, mat_A, (mat_A->batch_count != 1), rocsparse_status_not_implemented);
+        ROCSPARSE_CHECKARG(3, mat_B, (mat_B->batch_count != 1), rocsparse_status_not_implemented);
 
         ROCSPARSE_CHECKARG(
             3, mat_B, (mat_B->format != mat_A->format), rocsparse_status_not_implemented);
@@ -931,6 +940,7 @@ namespace rocsparse
             case rocsparse_format_csc:
             case rocsparse_format_ell:
             case rocsparse_format_bell:
+            case rocsparse_format_sell:
             {
                 RETURN_IF_ROCSPARSE_ERROR(rocsparse_status_not_implemented);
             }
@@ -1013,6 +1023,7 @@ namespace rocsparse
             case rocsparse_format_csc:
             case rocsparse_format_ell:
             case rocsparse_format_bell:
+            case rocsparse_format_sell:
             {
                 RETURN_IF_ROCSPARSE_ERROR(rocsparse_status_not_implemented);
             }
@@ -1065,6 +1076,7 @@ namespace rocsparse
             case rocsparse_format_csc:
             case rocsparse_format_ell:
             case rocsparse_format_bell:
+            case rocsparse_format_sell:
             {
                 RETURN_IF_ROCSPARSE_ERROR(rocsparse_status_not_implemented);
             }
@@ -1140,6 +1152,7 @@ namespace rocsparse
             case rocsparse_format_csc:
             case rocsparse_format_ell:
             case rocsparse_format_bell:
+            case rocsparse_format_sell:
             {
                 RETURN_IF_ROCSPARSE_ERROR(rocsparse_status_not_implemented);
             }
@@ -1147,7 +1160,9 @@ namespace rocsparse
         }
         }
 
+        // LCOV_EXCL_START
         RETURN_IF_ROCSPARSE_ERROR(rocsparse_status_not_implemented);
+        // LCOV_EXCL_STOP
     }
 }
 
@@ -1184,11 +1199,13 @@ try
         handle, descr, mat_A, mat_B, mat_C, stage, buffer_size_in_bytes)));
 
     return rocsparse_status_success;
+    // LCOV_EXCL_START
 }
 catch(...)
 {
     RETURN_ROCSPARSE_EXCEPTION();
 }
+// LCOV_EXCL_STOP
 
 extern "C" rocsparse_status rocsparse_spgeam(rocsparse_handle            handle,
                                              rocsparse_spgeam_descr      descr,
@@ -1220,8 +1237,10 @@ try
     descr->set_stage(stage);
 
     return rocsparse_status_success;
+    // LCOV_EXCL_START
 }
 catch(...)
 {
     RETURN_ROCSPARSE_EXCEPTION();
 }
+// LCOV_EXCL_STOP

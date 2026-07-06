@@ -30,7 +30,7 @@ extern "C" {
 
 /*! \ingroup conv_module
 *  \brief
-*  This function computes the the size of the user allocated temporary storage buffer used when converting a sparse
+*  This function computes the the size of the user-allocated temporary storage buffer used when converting a sparse
 *  GEBSR matrix to another sparse GEBSR matrix.
 *
 *  \details
@@ -39,9 +39,9 @@ extern "C" {
 *  buffer must be allocated by the user.
 *
 *  @param[in]
-*  handle             handle to the hipsparse library context queue.
+*  handle             handle to the hipSPARSE library context queue.
 *  @param[in]
-*  dirA               the storage format of the blocks, \ref HIPSPARSE_DIRECTION_ROW or \ref HIPSPARSE_DIRECTION_COLUMN
+*  dirA               the storage format of the blocks, \ref HIPSPARSE_DIRECTION_ROW or \ref HIPSPARSE_DIRECTION_COLUMN.
 *  @param[in]
 *  mb                 number of block rows of the general BSR sparse matrix \f$A\f$.
 *  @param[in]
@@ -49,8 +49,8 @@ extern "C" {
 *  @param[in]
 *  nnzb               number of blocks in the general BSR sparse matrix \f$A\f$.
 *  @param[in]
-*  descrA             the descriptor of the general BSR sparse matrix \f$A\f$, the supported matrix type is
-*                     \ref HIPSPARSE_MATRIX_TYPE_GENERAL and also any valid value of the \ref hipsparseIndexBase_t.
+*  descrA             the descriptor of the general BSR sparse matrix \f$A\f$. The supported matrix type is
+*                     \ref HIPSPARSE_MATRIX_TYPE_GENERAL and any valid value of the \ref hipsparseIndexBase_t.
 *  @param[in]
 *  bsrValA            array of \p nnzb*rowBlockDimA*colBlockDimA containing the values of the sparse general BSR matrix \f$A\f$.
 *  @param[in]
@@ -73,7 +73,7 @@ extern "C" {
 *
 *  \retval     HIPSPARSE_STATUS_SUCCESS the operation completed successfully.
 *  \retval     HIPSPARSE_STATUS_INVALID_VALUE \p handle, \p mb, \p nb, \p nnzb, \p rowBlockDimA, \p colBlockDimA,
-*              \p rowBlockDimC, \p colBlockDimC, \p bsrRowPtrA, \p bsrColIndA, \p descrA or \p pBufferSizeInBytes pointer
+*              \p rowBlockDimC, \p colBlockDimC, \p bsrRowPtrA, \p bsrColIndA, \p descrA, or \p pBufferSizeInBytes pointer
 *              is invalid.
 */
 /**@{*/
@@ -145,15 +145,15 @@ hipsparseStatus_t hipsparseZgebsr2gebsr_bufferSize(hipsparseHandle_t         han
 /*! \ingroup conv_module
 *  \brief This function is used when converting a GEBSR sparse matrix \f$A\f$ to another GEBSR sparse matrix \f$C\f$.
 *  Specifically, this function determines the number of non-zero blocks that will exist in \f$C\f$ (stored using either a host
-*  or device pointer), and computes the row pointer array for \f$C\f$.
+*  or device pointer) and computes the row pointer array for \f$C\f$.
 *
 *  \details
-*  The routine does support asynchronous execution.
+*  The routine supports asynchronous execution.
 *
 *  @param[in]
-*  handle             handle to the hipsparse library context queue.
+*  handle             handle to the hipSPARSE library context queue.
 *  @param[in]
-*  dirA               the storage format of the blocks, \ref HIPSPARSE_DIRECTION_ROW or \ref HIPSPARSE_DIRECTION_COLUMN
+*  dirA               the storage format of the blocks, \ref HIPSPARSE_DIRECTION_ROW or \ref HIPSPARSE_DIRECTION_COLUMN.
 *  @param[in]
 *  mb                 number of block rows of the general BSR sparse matrix \f$A\f$.
 *  @param[in]
@@ -161,8 +161,8 @@ hipsparseStatus_t hipsparseZgebsr2gebsr_bufferSize(hipsparseHandle_t         han
 *  @param[in]
 *  nnzb               number of blocks in the general BSR sparse matrix \f$A\f$.
 *  @param[in]
-*  descrA             the descriptor of the general BSR sparse matrix \f$A\f$, the supported matrix type is
-*                     \ref HIPSPARSE_MATRIX_TYPE_GENERAL and also any valid value of the \ref hipsparseIndexBase_t.
+*  descrA             the descriptor of the general BSR sparse matrix \f$A\f$. The supported matrix type is
+*                     \ref HIPSPARSE_MATRIX_TYPE_GENERAL and any valid value of the \ref hipsparseIndexBase_t.
 *  @param[in]
 *  bsrRowPtrA         array of \p mb+1 elements that point to the start of every block row of the
 *                     sparse general BSR matrix \f$A\f$.
@@ -173,8 +173,8 @@ hipsparseStatus_t hipsparseZgebsr2gebsr_bufferSize(hipsparseHandle_t         han
 *  @param[in]
 *  colBlockDimA       column size of the blocks in the sparse general BSR matrix \f$A\f$.
 *  @param[in]
-*  descrC             the descriptor of the general BSR sparse matrix \f$C\f$, the supported matrix type is
-*                     \ref HIPSPARSE_MATRIX_TYPE_GENERAL and also any valid value of the \ref hipsparseIndexBase_t.
+*  descrC             the descriptor of the general BSR sparse matrix \f$C\f$. The supported matrix type is
+*                     \ref HIPSPARSE_MATRIX_TYPE_GENERAL and any valid value of the \ref hipsparseIndexBase_t.
 *  @param[in]
 *  bsrRowPtrC         array of \p mbC+1 elements that point to the start of every block row of the
 *                     sparse general BSR matrix \f$C\f$ where \p mbC = ( \p m+rowBlockDimC-1 ) / \p rowBlockDimC.
@@ -183,9 +183,9 @@ hipsparseStatus_t hipsparseZgebsr2gebsr_bufferSize(hipsparseHandle_t         han
 *  @param[in]
 *  colBlockDimC       column size of the blocks in the sparse general BSR matrix \f$C\f$.
 *  @param[out]
-*  nnzTotalDevHostPtr total number of nonzero blocks in general BSR sparse matrix \f$C\f$ stored using device or host memory.
+*  nnzTotalDevHostPtr total number of non-zero blocks in general BSR sparse matrix \f$C\f$, stored using device or host memory.
 *  @param[out]
-*  buffer             buffer allocated by the user whose size is determined by calling \ref hipsparseSgebsr2gebsr_bufferSize
+*  buffer             buffer allocated by the user. The size is determined by calling \ref hipsparseSgebsr2gebsr_bufferSize
 *                     "hipsparseXgebsr2gebsr_bufferSize()".
 *
 *  \retval     HIPSPARSE_STATUS_SUCCESS the operation completed successfully.
@@ -230,8 +230,8 @@ hipsparseStatus_t hipsparseXgebsr2gebsrNnz(hipsparseHandle_t         handle,
 *  indices array of \f$C\f$ to have \p nnzbC elements and space for the values array of \f$C\f$ to have
 *  \p nnzbC*rowBlockDimC*colBlockDimC and then calls \p hipsparseXgebsr2gebsr to complete the conversion.
 *
-*  It may be the case that \p rowBlockDimC does not divide evenly into \p m and/or \p colBlockDim does not divide evenly
-*  into \p n. In these cases, the GEBSR matrix is expanded in size in order to fit full GEBSR blocks. For example, if
+*  It could be the case that \p rowBlockDimC does not divide evenly into \p m or \p colBlockDim does not divide evenly
+*  into \p n. In these cases, the GEBSR matrix is expanded in size to fit full GEBSR blocks. For example, if
 *  the original GEBSR matrix A (using \p rowBlockDimA=2, \p colBlockDimA=3) looks like:
 *
 *  \f[
@@ -258,7 +258,7 @@ hipsparseStatus_t hipsparseXgebsr2gebsrNnz(hipsparseHandle_t         handle,
 *  \right]
 *  \f]
 *
-*  then if we specify \p rowBlockDimC=3 and \p colBlockDimC=2, our output GEBSR matrix C would be:
+*  then if the user specifies \p rowBlockDimC=3 and \p colBlockDimC=2, the output GEBSR matrix C would be:
 *
 *  \f[
 *   \left[
@@ -299,9 +299,9 @@ hipsparseStatus_t hipsparseXgebsr2gebsrNnz(hipsparseHandle_t         handle,
 *  \f]
 *
 *  @param[in]
-*  handle        handle to the hipsparse library context queue.
+*  handle        handle to the hipSPARSE library context queue.
 *  @param[in]
-*  dirA          the storage format of the blocks, \ref HIPSPARSE_DIRECTION_ROW or \ref HIPSPARSE_DIRECTION_COLUMN
+*  dirA          the storage format of the blocks, \ref HIPSPARSE_DIRECTION_ROW or \ref HIPSPARSE_DIRECTION_COLUMN.
 *  @param[in]
 *  mb            number of block rows of the general BSR sparse matrix \f$A\f$.
 *  @param[in]
@@ -309,7 +309,7 @@ hipsparseStatus_t hipsparseXgebsr2gebsrNnz(hipsparseHandle_t         handle,
 *  @param[in]
 *  nnzb          number of blocks in the general BSR sparse matrix \f$A\f$.
 *  @param[in]
-*  descrA        the descriptor of the general BSR sparse matrix \f$A\f$, the supported matrix type is
+*  descrA        the descriptor of the general BSR sparse matrix \f$A\f$. The supported matrix type is
 *                \ref HIPSPARSE_MATRIX_TYPE_GENERAL and also any valid value of the \ref hipsparseIndexBase_t.
 *  @param[in]
 *  bsrValA       array of \p nnzb*rowBlockDimA*colBlockDimA containing the values of the sparse general BSR matrix \f$A\f$.
@@ -323,8 +323,8 @@ hipsparseStatus_t hipsparseXgebsr2gebsrNnz(hipsparseHandle_t         handle,
 *  @param[in]
 *  colBlockDimA  column size of the blocks in the sparse general BSR matrix \f$A\f$.
 *  @param[in]
-*  descrC        the descriptor of the general BSR sparse matrix \f$C\f$, the supported matrix type is
-*                \ref HIPSPARSE_MATRIX_TYPE_GENERAL and also any valid value of the \ref hipsparseIndexBase_t.
+*  descrC        the descriptor of the general BSR sparse matrix \f$C\f$. The supported matrix type is
+*                \ref HIPSPARSE_MATRIX_TYPE_GENERAL and any valid value of the \ref hipsparseIndexBase_t.
 *  @param[in]
 *  bsrValC       array of \p nnzbC*rowBlockDimC*colBlockDimC containing the values of the sparse general BSR matrix \f$C\f$.
 *  @param[in]
@@ -337,149 +337,13 @@ hipsparseStatus_t hipsparseXgebsr2gebsrNnz(hipsparseHandle_t         handle,
 *  @param[in]
 *  colBlockDimC  column size of the blocks in the sparse general BSR matrix \f$C\f$.
 *  @param[out]
-*  buffer        buffer allocated by the user whose size is determined by calling \ref hipsparseSgebsr2gebsr_bufferSize
+*  buffer        buffer allocated by the user. The size is determined by calling \ref hipsparseSgebsr2gebsr_bufferSize
 *                "hipsparseXgebsr2gebsr_bufferSize()".
 *
 *  \retval     HIPSPARSE_STATUS_SUCCESS the operation completed successfully.
 *  \retval     HIPSPARSE_STATUS_INVALID_VALUE \p handle, \p mb, \p nb, \p nnzb, \p rowBlockDimA, \p colBlockDimA,
 *              \p rowBlockDimC, \p colBlockDimC, \p bsrRowPtrA, \p bsrColIndA, \p bsrValA, \p bsrRowPtrC, \p bsrColIndC,
-*              \p bsrValC, \p descrA, \p descrC or \p buffer pointer is invalid.
-*
-*  \par Example
-*  \code{.c}
-*    // hipSPARSE handle
-*    hipsparseHandle_t handle;
-*    hipsparseCreate(&handle);
-*
-*    hipsparseMatDescr_t descrA;
-*    hipsparseCreateMatDescr(&descrA);
-*
-*    hipsparseMatDescr_t descrC;
-*    hipsparseCreateMatDescr(&descrC);
-*
-*    // Sparse matrix in BSR format
-*    //     1 2 | 0 3 | 0 0
-*    //     0 4 | 5 0 | 0 1
-*    // A = 6 0 | 0 7 | 8 0
-*    //     ---------------
-*    //     0 0 | 3 0 | 2 2
-*    //     1 0 | 0 0 | 4 3
-*    //     7 2 | 0 0 | 1 4
-*    int hbsrRowPtrA[3] = {0, 3, 6};
-*    int hbsrColIndA[6] = {0, 1, 2, 0, 1, 2};
-*    float hbsrValA[36]  = {1.0f, 2.0f, 0.0f, 4.0f, 6.0f, 0.0f,
-*                           0.0f, 3.0f, 5.0f, 0.0f, 0.0f, 7.0f,
-*                           0.0f, 0.0f, 0.0f, 1.0f, 8.0f, 0.0f,
-*                           0.0f, 0.0f, 1.0f, 0.0f, 7.0f, 2.0f,
-*                           3.0f, 0.0f, 0.0f, 0.0f, 0.0f, 0.0f,
-*                           2.0f, 2.0f, 4.0f, 3.0f, 1.0f, 4.0f};
-*
-*    int m           = 6;
-*    int n           = 6;
-*    int rowBlockDimA = 3;
-*    int colBlockDimA = 2;
-*    int rowBlockDimC = 2;
-*    int colBlockDimC = 2;
-*    hipsparseDirection_t dirA = HIPSPARSE_DIRECTION_ROW;
-*
-*    int mbA   = (m + rowBlockDimA - 1) / rowBlockDimA;
-*    int nbA   = (n + colBlockDimA - 1) / colBlockDimA;
-*    int nnzbA = 6;
-*
-*    int mbC   = (m + rowBlockDimC - 1) / rowBlockDimC;
-*    int nbC   = (n + colBlockDimC - 1) / colBlockDimC;
-*
-*    int* dbsrRowPtrA = nullptr;
-*    int* dbsrColIndA = nullptr;
-*    float* dbsrValA = nullptr;
-*    hipMalloc((void**)&dbsrRowPtrA, sizeof(int) * (mbA + 1));
-*    hipMalloc((void**)&dbsrColIndA, sizeof(int) * nnzbA);
-*    hipMalloc((void**)&dbsrValA, sizeof(float) * rowBlockDimA * colBlockDimA * nnzbA);
-*
-*    hipMemcpy(dbsrRowPtrA, hbsrRowPtrA, sizeof(int) * (mbA + 1), hipMemcpyHostToDevice);
-*    hipMemcpy(dbsrColIndA, hbsrColIndA, sizeof(int) * nnzbA, hipMemcpyHostToDevice);
-*    hipMemcpy(dbsrValA, hbsrValA, sizeof(float) * rowBlockDimA * colBlockDimA * nnzbA, hipMemcpyHostToDevice);
-*
-*    int* dbsrRowPtrC = nullptr;
-*    hipMalloc((void**)&dbsrRowPtrC, sizeof(int) * (mbC + 1));
-*
-*    size_t bufferSize;
-*    hipsparseSgebsr2gebsr_bufferSize(handle,
-*                                     dirA,
-*                                     mbA,
-*                                     nbA,
-*                                     nnzbA,
-*                                     descrA,
-*                                     dbsrValA,
-*                                     dbsrRowPtrA,
-*                                     dbsrColIndA,
-*                                     rowBlockDimA,
-*                                     colBlockDimA,
-*                                     rowBlockDimC,
-*                                     colBlockDimC,
-*                                     &bufferSize);
-*
-*    void* dbuffer = nullptr;
-*    hipMalloc((void**)&dbuffer, bufferSize);
-*
-*    int nnzbC;
-*    hipsparseXgebsr2gebsrNnz(handle,
-*                             dirA,
-*                             mbA,
-*                             nbA,
-*                             nnzbA,
-*                             descrA,
-*                             dbsrRowPtrA,
-*                             dbsrColIndA,
-*                             rowBlockDimA,
-*                             colBlockDimA,
-*                             descrC,
-*                             dbsrRowPtrC,
-*                             rowBlockDimC,
-*                             colBlockDimC,
-*                             &nnzbC,
-*                             dbuffer);
-*
-*    hipDeviceSynchronize();
-*
-*    int* dbsrColIndC = nullptr;
-*    float* dbsrValC = nullptr;
-*    hipMalloc((void**)&dbsrColIndC, sizeof(int) * nnzbC);
-*    hipMalloc((void**)&dbsrValC, sizeof(float) * rowBlockDimC * colBlockDimC * nnzbC);
-*
-*    hipsparseSgebsr2gebsr(handle,
-*                          dirA,
-*                          mbA,
-*                          nbA,
-*                          nnzbA,
-*                          descrA,
-*                          dbsrValA,
-*                          dbsrRowPtrA,
-*                          dbsrColIndA,
-*                          rowBlockDimA,
-*                          colBlockDimA,
-*                          descrC,
-*                          dbsrValC,
-*                          dbsrRowPtrC,
-*                          dbsrColIndC,
-*                          rowBlockDimC,
-*                          colBlockDimC,
-*                          dbuffer);
-*
-*    hipFree(dbsrRowPtrA);
-*    hipFree(dbsrColIndA);
-*    hipFree(dbsrValA);
-*
-*    hipFree(dbsrRowPtrC);
-*    hipFree(dbsrColIndC);
-*    hipFree(dbsrValC);
-*
-*    hipFree(dbuffer);
-*
-*    hipsparseDestroyMatDescr(descrA);
-*    hipsparseDestroyMatDescr(descrC);
-*    hipsparseDestroy(handle);
-*  \endcode
+*              \p bsrValC, \p descrA, \p descrC, or \p buffer pointer is invalid.
 */
 /**@{*/
 HIPSPARSE_EXPORT

@@ -26,9 +26,9 @@
 
 #pragma once
 
-#ifdef TENSILE_USE_HIP
+#include <tensilelitehost/export.h>
+
 #include <hip/hip_runtime.h>
-#endif
 
 #include <Tensile/DistinctType.hpp>
 
@@ -49,3 +49,4 @@ namespace std
         return stream << static_cast<int32_t>(val);
     }
 } // namespace std
+

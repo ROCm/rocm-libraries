@@ -87,7 +87,7 @@ For more information, run the command with the ``--help`` option. The output of 
    --compute_input_typeA <value>      Precision of computation input A. Options: f32_r, f16_r, bf16_r, f8_r, bf8_r, f8_fnuz_r, bf8_fnuz_r, The default value indicates that the compute_input_typeA has no effect.
    --compute_input_typeB <value>      Precision of computation input B. Options: f32_r, f16_r, bf16_r, f8_r, bf8_r, f8_fnuz_r, bf8_fnuz_r, The default value indicates that the compute_input_typeA has no effect.
    --scale_type <value>               Precision of scalar. Options: f16_r,bf16_r
-   --initialization <value>           Initialize matrix data.Options: rand_int, trig_float, hpl(floating), special, zero  (Default value is: hpl)
+   --initialization <value>           Initialize matrix data.Options: rand_int, trig_float, hpl(floating), special, zero, norm_dist, uniform_01  (Default value is: hpl)
    --transA <value>                   N = no transpose, T = transpose                                                     (Default value is: N)
    --transB <value>                   N = no transpose, T = transpose                                                     (Default value is: N)
    --swizzleA                         Enable tensor swizzling for A
@@ -138,13 +138,9 @@ For more information, run the command with the ``--help`` option. The output of 
 Building clients with prebuilt libraries
 ========================================
 
-Sometimes it is desirable to build or rebuild the clients without having to conduct a full build of the library. This can be done by adding the ``-n``/``--client-only`` option to the install script. For example, ``./install.sh -c -a gfx942 -n`` will build the clients and host code, but will not build Tensile libraries.
+Sometimes it is desirable to build or rebuild the clients without having to conduct a full build of the library. This can be done by passing ``--no-tensile`` to ``inv build``. For example, ``inv build --clients --architecture gfx942 --no-tensile`` will build the clients and host code, but will not build Tensile libraries.
 
-.. note::
-
-   For backwards compatibility, ``--no-tensile`` may be used as an alias for ``-n``/``--client-only``.
-
-Internally, this passes the ``-DTensile_SKIP_BUILD=ON`` option to CMake. If you prefer to build hipBLASLt with CMake directly instead of through the install script, the same effect can be achieved with the following steps:
+Internally, this passes the ``-DHIPBLASLT_ENABLE_DEVICE=OFF`` option to CMake. If you prefer to build hipBLASLt with CMake directly instead of through invoke, the same effect can be achieved with the following steps:
 
 .. code-block:: bash
 

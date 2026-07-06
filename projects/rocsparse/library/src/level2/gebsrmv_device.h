@@ -1,5 +1,5 @@
 /* ************************************************************************
-* Copyright (C) 2020-2025 Advanced Micro Devices, Inc. All rights Reserved.
+* Copyright (C) 2020-2026 Advanced Micro Devices, Inc. All rights Reserved.
 *
 * Permission is hereby granted, free of charge, to any person obtaining a copy
 * of this software and associated documentation files (the "Software"), to deal
@@ -41,6 +41,9 @@ namespace rocsparse
                                                       T* __restrict__ y,
                                                       rocsparse_index_base idx_base)
     {
+        static_assert(WFSIZE > 0 && (WFSIZE & (WFSIZE - 1)) == 0, "WFSIZE must be a power of two.");
+        static_assert(BLOCKSIZE % WFSIZE == 0, "BLOCKSIZE must be a multiple of WFSIZE.");
+
         // Lane id
         const rocsparse_int lid = hipThreadIdx_x & (WFSIZE - 1);
 
@@ -116,6 +119,9 @@ namespace rocsparse
                                                   T* __restrict__ y,
                                                   rocsparse_index_base idx_base)
     {
+        static_assert(WFSIZE > 0 && (WFSIZE & (WFSIZE - 1)) == 0, "WFSIZE must be a power of two.");
+        static_assert(BLOCKSIZE % WFSIZE == 0, "BLOCKSIZE must be a multiple of WFSIZE.");
+
         // Lane id
         const rocsparse_int lid = hipThreadIdx_x & (WFSIZE - 1);
 
@@ -184,6 +190,9 @@ namespace rocsparse
                                                   T* __restrict__ y,
                                                   rocsparse_index_base idx_base)
     {
+        static_assert(WFSIZE > 0 && (WFSIZE & (WFSIZE - 1)) == 0, "WFSIZE must be a power of two.");
+        static_assert(BLOCKSIZE % WFSIZE == 0, "BLOCKSIZE must be a multiple of WFSIZE.");
+
         // GEBSR block dimension
         static constexpr int ROWBSRDIM = 2;
 
@@ -286,6 +295,9 @@ namespace rocsparse
                                                   T* __restrict__ y,
                                                   rocsparse_index_base idx_base)
     {
+        static_assert(WFSIZE > 0 && (WFSIZE & (WFSIZE - 1)) == 0, "WFSIZE must be a power of two.");
+        static_assert(BLOCKSIZE % WFSIZE == 0, "BLOCKSIZE must be a multiple of WFSIZE.");
+
         // GEBSR block dimension
         static constexpr int ROWBSRDIM = 3;
 
@@ -399,6 +411,9 @@ namespace rocsparse
                                                   T* __restrict__ y,
                                                   rocsparse_index_base idx_base)
     {
+        static_assert(WFSIZE > 0 && (WFSIZE & (WFSIZE - 1)) == 0, "WFSIZE must be a power of two.");
+        static_assert(BLOCKSIZE % WFSIZE == 0, "BLOCKSIZE must be a multiple of WFSIZE.");
+
         // GEBSR block dimension
         static constexpr int ROWBSRDIM = 4;
 
@@ -522,6 +537,9 @@ namespace rocsparse
                                                   T* __restrict__ y,
                                                   rocsparse_index_base idx_base)
     {
+        static_assert(BLOCKSIZE % (ROWBSRDIM * COLBSRDIM) == 0,
+                      "BLOCKSIZE must be a multiple of ROWBSRDIM * COLBSRDIM.");
+
         // BSR block lane id
         const rocsparse_int lid = hipThreadIdx_x % COLBSRDIM;
 
@@ -583,7 +601,9 @@ namespace rocsparse
             POW2 >>= 1;
 
             if(hipThreadIdx_x < NBLOCKS * ROWBSRDIM * COLBSRDIM - POW2 * ROWBSRDIM * COLBSRDIM)
+            {
                 sdata[hipThreadIdx_x] += sdata[hipThreadIdx_x + POW2 * ROWBSRDIM * COLBSRDIM];
+            }
             __syncthreads();
         }
 
@@ -591,19 +611,25 @@ namespace rocsparse
         if(NBLOCKS >= 8)
         {
             if(hipThreadIdx_x < 4 * ROWBSRDIM * COLBSRDIM)
+            {
                 sdata[hipThreadIdx_x] += sdata[hipThreadIdx_x + 4 * ROWBSRDIM * COLBSRDIM];
+            }
             __syncthreads();
         }
         if(NBLOCKS >= 4)
         {
             if(hipThreadIdx_x < 2 * ROWBSRDIM * COLBSRDIM)
+            {
                 sdata[hipThreadIdx_x] += sdata[hipThreadIdx_x + 2 * ROWBSRDIM * COLBSRDIM];
+            }
             __syncthreads();
         }
         if(NBLOCKS >= 2)
         {
             if(hipThreadIdx_x < 1 * ROWBSRDIM * COLBSRDIM)
+            {
                 sdata[hipThreadIdx_x] += sdata[hipThreadIdx_x + 1 * ROWBSRDIM * COLBSRDIM];
+            }
             __syncthreads();
         }
 
@@ -623,28 +649,36 @@ namespace rocsparse
                 POW2 >>= 1;
 
                 if(hipThreadIdx_x < ROWBSRDIM * COLBSRDIM - ROWBSRDIM * POW2)
+                {
                     sdata[hipThreadIdx_x] += sdata[hipThreadIdx_x + ROWBSRDIM * POW2];
-                __threadfence_block();
+                }
+                __syncthreads();
             }
 
             // Finish reducing the intra block row sum
             if(COLBSRDIM >= 8)
             {
                 if(hipThreadIdx_x < ROWBSRDIM * 4)
+                {
                     sdata[hipThreadIdx_x] += sdata[hipThreadIdx_x + ROWBSRDIM * 4];
-                __threadfence_block();
+                }
+                __syncthreads();
             }
             if(COLBSRDIM >= 4)
             {
                 if(hipThreadIdx_x < ROWBSRDIM * 2)
+                {
                     sdata[hipThreadIdx_x] += sdata[hipThreadIdx_x + ROWBSRDIM * 2];
-                __threadfence_block();
+                }
+                __syncthreads();
             }
             if(COLBSRDIM >= 2)
             {
                 if(hipThreadIdx_x < ROWBSRDIM * 1)
+                {
                     sdata[hipThreadIdx_x] += sdata[hipThreadIdx_x + ROWBSRDIM * 1];
-                __threadfence_block();
+                }
+                __syncthreads();
             }
             if(COLBSRDIM >= 1)
             {
@@ -668,33 +702,43 @@ namespace rocsparse
                 POW2 >>= 1;
 
                 if(lid < COLBSRDIM - POW2)
+                {
                     sdata[hipThreadIdx_x] += sdata[hipThreadIdx_x + POW2];
-                __threadfence_block();
+                }
+                __syncthreads();
             }
 
             // Finish reducing the intra block row sum
             if(COLBSRDIM >= 8)
             {
                 if(lid < 4)
+                {
                     sdata[hipThreadIdx_x] += sdata[hipThreadIdx_x + 4];
-                __threadfence_block();
+                }
+                __syncthreads();
             }
             if(COLBSRDIM >= 4)
             {
                 if(lid < 2)
+                {
                     sdata[hipThreadIdx_x] += sdata[hipThreadIdx_x + 2];
-                __threadfence_block();
+                }
+                __syncthreads();
             }
             if(COLBSRDIM >= 2)
             {
                 if(lid < 1)
+                {
                     sdata[hipThreadIdx_x] += sdata[hipThreadIdx_x + 1];
-                __threadfence_block();
+                }
+                __syncthreads();
             }
             if(COLBSRDIM >= 1)
             {
                 if(hipThreadIdx_x < ROWBSRDIM)
+                {
                     sum = sdata[hipThreadIdx_x * COLBSRDIM];
+                }
             }
         }
 
@@ -726,6 +770,9 @@ namespace rocsparse
                                                      T* __restrict__ y,
                                                      rocsparse_index_base idx_base)
     {
+        static_assert(BLOCKSIZE % (ROWBSRDIM * COLBSRDIM) == 0,
+                      "BLOCKSIZE must be a multiple of ROWBSRDIM * COLBSRDIM.");
+
         // BSR block lane id
         const rocsparse_int lid = hipThreadIdx_x % COLBSRDIM;
 
@@ -787,7 +834,9 @@ namespace rocsparse
             POW2 >>= 1;
 
             if(hipThreadIdx_x < NBLOCKS * ROWBSRDIM * COLBSRDIM - POW2 * ROWBSRDIM * COLBSRDIM)
+            {
                 sdata[hipThreadIdx_x] += sdata[hipThreadIdx_x + POW2 * ROWBSRDIM * COLBSRDIM];
+            }
             __syncthreads();
         }
 
@@ -795,19 +844,25 @@ namespace rocsparse
         if(NBLOCKS >= 8)
         {
             if(hipThreadIdx_x < 4 * ROWBSRDIM * COLBSRDIM)
+            {
                 sdata[hipThreadIdx_x] += sdata[hipThreadIdx_x + 4 * ROWBSRDIM * COLBSRDIM];
+            }
             __syncthreads();
         }
         if(NBLOCKS >= 4)
         {
             if(hipThreadIdx_x < 2 * ROWBSRDIM * COLBSRDIM)
+            {
                 sdata[hipThreadIdx_x] += sdata[hipThreadIdx_x + 2 * ROWBSRDIM * COLBSRDIM];
+            }
             __syncthreads();
         }
         if(NBLOCKS >= 2)
         {
             if(hipThreadIdx_x < 1 * ROWBSRDIM * COLBSRDIM)
+            {
                 sdata[hipThreadIdx_x] += sdata[hipThreadIdx_x + 1 * ROWBSRDIM * COLBSRDIM];
+            }
             __syncthreads();
         }
 
@@ -827,7 +882,9 @@ namespace rocsparse
                 POW2 >>= 1;
 
                 if(hipThreadIdx_x < ROWBSRDIM * COLBSRDIM - ROWBSRDIM * POW2)
+                {
                     sdata[hipThreadIdx_x] += sdata[hipThreadIdx_x + ROWBSRDIM * POW2];
+                }
                 __syncthreads();
             }
 
@@ -835,31 +892,41 @@ namespace rocsparse
             if(COLBSRDIM >= 16)
             {
                 if(hipThreadIdx_x < ROWBSRDIM * 8)
+                {
                     sdata[hipThreadIdx_x] += sdata[hipThreadIdx_x + ROWBSRDIM * 8];
+                }
                 __syncthreads();
             }
             if(COLBSRDIM >= 8)
             {
                 if(hipThreadIdx_x < ROWBSRDIM * 4)
+                {
                     sdata[hipThreadIdx_x] += sdata[hipThreadIdx_x + ROWBSRDIM * 4];
+                }
                 __syncthreads();
             }
             if(COLBSRDIM >= 4)
             {
                 if(hipThreadIdx_x < ROWBSRDIM * 2)
+                {
                     sdata[hipThreadIdx_x] += sdata[hipThreadIdx_x + ROWBSRDIM * 2];
-                __threadfence_block();
+                }
+                __syncthreads();
             }
             if(COLBSRDIM >= 2)
             {
                 if(hipThreadIdx_x < ROWBSRDIM * 1)
+                {
                     sdata[hipThreadIdx_x] += sdata[hipThreadIdx_x + ROWBSRDIM * 1];
-                __threadfence_block();
+                }
+                __syncthreads();
             }
             if(COLBSRDIM >= 1)
             {
                 if(hipThreadIdx_x < ROWBSRDIM * 1)
+                {
                     sum = sdata[hipThreadIdx_x];
+                }
             }
         }
         else
@@ -878,7 +945,9 @@ namespace rocsparse
                 POW2 >>= 1;
 
                 if(lid < COLBSRDIM - POW2)
+                {
                     sdata[hipThreadIdx_x] += sdata[hipThreadIdx_x + POW2];
+                }
                 __syncthreads();
             }
 
@@ -886,31 +955,41 @@ namespace rocsparse
             if(COLBSRDIM >= 16)
             {
                 if(lid < 8)
+                {
                     sdata[hipThreadIdx_x] += sdata[hipThreadIdx_x + 8];
+                }
                 __syncthreads();
             }
             if(COLBSRDIM >= 8)
             {
                 if(lid < 4)
+                {
                     sdata[hipThreadIdx_x] += sdata[hipThreadIdx_x + 4];
+                }
                 __syncthreads();
             }
             if(COLBSRDIM >= 4)
             {
                 if(lid < 2)
+                {
                     sdata[hipThreadIdx_x] += sdata[hipThreadIdx_x + 2];
+                }
                 __syncthreads();
             }
             if(COLBSRDIM >= 2)
             {
                 if(lid < 1)
+                {
                     sdata[hipThreadIdx_x] += sdata[hipThreadIdx_x + 1];
+                }
                 __syncthreads();
             }
             if(COLBSRDIM >= 1)
             {
                 if(hipThreadIdx_x < ROWBSRDIM)
+                {
                     sum = sdata[hipThreadIdx_x * COLBSRDIM];
+                }
             }
         }
 

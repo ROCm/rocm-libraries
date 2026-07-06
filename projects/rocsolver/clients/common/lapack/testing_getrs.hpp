@@ -34,6 +34,7 @@
 #include "common/misc/rocsolver.hpp"
 #include "common/misc/rocsolver_arguments.hpp"
 #include "common/misc/rocsolver_test.hpp"
+#include "common/misc/rocsolver_timer.hpp"
 
 template <bool STRIDED, typename I, typename Td, typename Id>
 void getrs_checkBadArgs(const rocblas_handle handle,
@@ -301,7 +302,7 @@ void getrs_getPerfData(const rocblas_handle handle,
     // gpu-lapack performance
     hipStream_t stream;
     CHECK_ROCBLAS_ERROR(rocblas_get_stream(handle, &stream));
-    double start;
+    rocsolver_timer timer;
 
     if(profile > 0)
     {
@@ -318,12 +319,12 @@ void getrs_getPerfData(const rocblas_handle handle,
         getrs_initData<false, true, T>(handle, trans, n, nrhs, dA, lda, stA, dIpiv, stP, dB, ldb,
                                        stB, bc, hA, hIpiv, hIpiv_cpu, hB);
 
-        start = get_time_us_sync(stream);
+        timer.start(stream);
         rocsolver_getrs(STRIDED, handle, trans, n, nrhs, dA.data(), lda, stA, dIpiv.data(), stP,
                         dB.data(), ldb, stB, bc);
-        *gpu_time_used += get_time_us_sync(stream) - start;
+        timer.end(stream);
     }
-    *gpu_time_used /= hot_calls;
+    *gpu_time_used = timer.get_combined();
 }
 
 template <bool BATCHED, bool STRIDED, typename T, typename I>
@@ -432,13 +433,12 @@ void testing_getrs(Arguments& argus)
                                        stB, bc, hA, hIpiv, hIpiv_cpu, hB, hBRes, &max_error);
 
         // collect performance data
-        if(argus.timing)
+        if(argus.timing && hot_calls > 0)
             getrs_getPerfData<STRIDED, T>(handle, trans, n, nrhs, dA, lda, stA, dIpiv, stP, dB, ldb,
                                           stB, bc, hA, hIpiv, hIpiv_cpu, hB, &gpu_time_used,
                                           &cpu_time_used, hot_calls, argus.profile,
                                           argus.profile_kernels, argus.perf);
     }
-
     else
     {
         // memory allocations
@@ -475,7 +475,7 @@ void testing_getrs(Arguments& argus)
                                        stB, bc, hA, hIpiv, hIpiv_cpu, hB, hBRes, &max_error);
 
         // collect performance data
-        if(argus.timing)
+        if(argus.timing && hot_calls > 0)
             getrs_getPerfData<STRIDED, T>(handle, trans, n, nrhs, dA, lda, stA, dIpiv, stP, dB, ldb,
                                           stB, bc, hA, hIpiv, hIpiv_cpu, hB, &gpu_time_used,
                                           &cpu_time_used, hot_calls, argus.profile,
@@ -483,7 +483,7 @@ void testing_getrs(Arguments& argus)
     }
 
     // validate results for rocsolver-test
-    // using m * machine_precision as tolerance
+    // using n * machine_precision as tolerance
     if(argus.unit_check)
         ROCSOLVER_TEST_CHECK(T, max_error, n);
 

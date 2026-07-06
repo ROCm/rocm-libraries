@@ -33,7 +33,7 @@ extern "C" {
 #endif
 
 /*! \ingroup generic_module
-*  \brief Gather elements from a dense vector and store them into a sparse vector.
+*  \brief Gather elements from a dense vector and store them in a sparse vector.
 *
 *  \details
 *  \p rocsparse_gather gathers the elements from the dense vector \f$y\f$ and stores
@@ -46,8 +46,8 @@ extern "C" {
 *      }
 *  \endcode
 *
-*  \p rocsparse_gather supports the following uniform precision data types for the sparse and dense vectors x and
-*  y.
+*  \p rocsparse_gather supports the following uniform-precision data types for the sparse and dense vectors \p x and
+*  \p y.
 *
 *  \par Uniform Precisions:
 *  <table>
@@ -63,14 +63,17 @@ extern "C" {
 *  </table>
 *
 *  \note
-*  This function is non blocking and executed asynchronously with respect to the host.
-*  It may return before the actual computation has finished.
+*  This function is non-blocking and executed asynchronously with respect to the host.
+*  It can return before the actual computation has finished.
 *
 *  \note
 *  This routine supports execution in a hipGraph context.
 *
+*  \note
+*  This routine does not support batched computation.
+*
 *  @param[in]
-*  handle       handle to the rocsparse library context queue.
+*  handle       handle to the rocSPARSE library context queue.
 *  @param[in]
 *  y            dense vector \f$y\f$.
 *  @param[out]

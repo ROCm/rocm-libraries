@@ -1,6 +1,6 @@
 /*! \file */
 /* ************************************************************************
- * Copyright (C) 2019-2025 Advanced Micro Devices, Inc. All rights Reserved.
+ * Copyright (C) 2019-2026 Advanced Micro Devices, Inc. All rights Reserved.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -42,6 +42,14 @@ template <>
 struct default_tolerance<_Float16>
 {
     static constexpr _Float16 value = 1.0e-2f;
+};
+
+template <>
+struct default_tolerance<rocsparse_bfloat16>
+{
+    // Higher tolerance for bfloat16 due to lower precision (7-bit mantissa)
+    // and atomic operation accumulation errors on some architectures
+    static inline const rocsparse_bfloat16 value = 5.0e-2f;
 };
 
 template <>
@@ -110,6 +118,9 @@ inline void near_check_segments(int64_t            n,
 {
     near_check_general(1, n, a, 1, b, 1, tol);
 }
+
+template <typename T>
+void check_integer(const T* a);
 
 void unit_check_garray(rocsparse_datatype val_type,
                        int64_t            size,

@@ -1,4 +1,4 @@
-// Copyright (C) 2019 - 2023 Advanced Micro Devices, Inc. All rights reserved.
+// Copyright (C) 2019 - 2026 Advanced Micro Devices, Inc. All rights reserved.
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -158,11 +158,11 @@ int main(int argc, char* argv[])
 
     if(forward)
     {
-        initreal_cm(length, istride, gpu_in);
+        initreal_cm(length, istride, static_cast<double*>(gpu_in));
     }
     else
     {
-        init_hermitiancomplex_cm(length, ilength, istride, gpu_in);
+        init_hermitiancomplex_cm(length, ilength, istride, static_cast<hipDoubleComplex*>(gpu_in));
     }
 
     // Print the input:
@@ -207,7 +207,7 @@ int main(int argc, char* argv[])
         0, // input batch distance
         ostride.size(), // output stride length
         ostride.data(), // output stride data
-        0); // ouptut batch distance
+        0); // output batch distance
     if(rc != rocfft_status_success)
         throw std::runtime_error("failed to set data layout");
 
@@ -312,6 +312,7 @@ int main(int argc, char* argv[])
         throw std::runtime_error("rocfft_plan_destroy failed.");
     gpu_plan = nullptr;
 
-    rocfft_cleanup();
+    if(rocfft_cleanup() != rocfft_status_success)
+        throw std::runtime_error("rocfft_cleanup failed.");
     return 0;
 }

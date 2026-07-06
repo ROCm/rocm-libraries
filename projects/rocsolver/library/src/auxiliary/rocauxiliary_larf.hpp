@@ -32,6 +32,7 @@
 
 #pragma once
 
+#include "asan_helpers.hpp"
 #include "rocblas.hpp"
 #include "rocsolver/rocsolver.h"
 #include "rocsolver_run_specialized_kernels.hpp"
@@ -319,7 +320,7 @@ rocblas_status rocsolver_larf_template(rocblas_handle handle,
     // determine side
     bool leftside = (side == rocblas_side_left);
 
-    static constexpr int NB = 1024;
+    static constexpr int NB = ROCSOLVER_ASAN_VALUE(256, 1024);
     const int lds_size = leftside ? (m + (NB / props->warpSize)) * sizeof(T)
                                   : (n + (NB / props->warpSize)) * sizeof(T);
 
@@ -344,9 +345,7 @@ rocblas_status rocsolver_larf_template(rocblas_handle handle,
     }
 
     // everything must be executed with scalars on the device
-    rocblas_pointer_mode old_mode;
-    rocblas_get_pointer_mode(handle, &old_mode);
-    rocblas_set_pointer_mode(handle, rocblas_pointer_mode_device);
+    rocblas_pointer_mode_saver saver(handle, rocblas_pointer_mode_device);
 
     // determine order of H
     I order = m;
@@ -379,7 +378,6 @@ rocblas_status rocsolver_larf_template(rocblas_handle handle,
                                        incx, stridex, A, shiftA, lda, stridea, batch_count, workArr);
     }
 
-    rocblas_set_pointer_mode(handle, old_mode);
     return rocblas_status_success;
 }
 

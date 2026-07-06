@@ -1,9 +1,10 @@
 TestParameters:
-  marks: [skip-gfx900, skip-gfx906, skip-gfx1010, skip-gfx1011, skip-gfx1012, skip-gfx1030, skip-gfx1100, skip-gfx1101, skip-gfx1102, skip-gfx1200, skip-gfx1201] # not supported by arch
+  marks: [skip-gfx900, skip-gfx906, skip-gfx1010, skip-gfx1011, skip-gfx1012, skip-gfx1030, skip-gfx1100, skip-gfx1101, skip-gfx1102, skip-gfx1200, skip-gfx1201, skip-gfx1250] # not supported by arch
 
 GlobalParameters:
+  SyncsPerBenchmark: 0
   NumElementsToValidate: -1
-  BoundsCheck: False
+  BoundsCheck: 0
   KernelTime: False
   DataInitTypeAlpha: 1
   DataInitTypeBeta: 1
@@ -36,7 +37,7 @@ BenchmarkProblems:
       InitialSolutionParameters:
       BenchmarkCommonParameters:
         - KernelLanguage: ["Assembly"]
-        - PrefetchLocalRead: [True]
+        - PrefetchLocalRead: [1]
       ForkParameters:
         - 1LDSBuffer: [1]
         - DepthU: [ 16 ]
@@ -66,7 +67,7 @@ BenchmarkProblems:
           - [16, 16, 4, 1, 1, 1,4, 2,2]
           - [16, 16, 4, 1, 1, 1,2, 2,2]
           - [16, 16, 4, 1, 1, 1,1, 2,2]
-        - MIArchVgpr: [0]
+        - MIArchVgpr: [false]
         - PrefetchGlobalRead: [2]
         - PrefetchLocalRead: [1]
         - ScheduleIterAlg: [3]
@@ -95,7 +96,7 @@ BenchmarkProblems:
       InitialSolutionParameters:
       BenchmarkCommonParameters:
         - KernelLanguage: ["Assembly"]
-        - PrefetchLocalRead: [True]
+        - PrefetchLocalRead: [1]
       ForkParameters:
         - 1LDSBuffer: [1]
         - DepthU: [ 8, 16, 32 ]
@@ -107,7 +108,7 @@ BenchmarkProblems:
         - MatrixInstruction:
           # - [16, 16, 4, 1, 1, 8,8, 2,2]
           - [16, 16, 4, 1, 1, 4,4, 2,2]
-        - MIArchVgpr: [0]
+        - MIArchVgpr: [false]
         - PrefetchGlobalRead: [2]
         - PrefetchLocalRead: [1]
         - ScheduleIterAlg: [3]
@@ -137,7 +138,7 @@ BenchmarkProblems:
       InitialSolutionParameters:
       BenchmarkCommonParameters:
         - KernelLanguage: ["Assembly"]
-        - PrefetchLocalRead: [True]
+        - PrefetchLocalRead: [1]
       ForkParameters:
         - 1LDSBuffer: [0, 1]
         - DepthU: [16]
@@ -149,7 +150,7 @@ BenchmarkProblems:
         - MatrixInstruction:
           # - [16, 16, 4, 1, 1, 8,8, 2,2]
           - [16, 16, 4, 1, 1, 4,4, 2,2]
-        - MIArchVgpr: [0]
+        - MIArchVgpr: [false]
         - PrefetchGlobalRead: [2]
         - PrefetchLocalRead: [1]
         - StaggerU: [0, 32]
@@ -158,6 +159,7 @@ BenchmarkProblems:
         - StoreRemapVectorWidth: [0, 4]
         - StoreVectorWidth: [1]
         - StreamK: [3]
+        - StreamKFixupTreeReduction: [0, 1]
         - PrefetchLocalRead: [1, 3]
         - NonTemporalC: [0, 7]
         - NonTemporalD: [0, 7]
@@ -229,7 +231,7 @@ BenchmarkProblems:
       InitialSolutionParameters:
       BenchmarkCommonParameters:
         - KernelLanguage: ["Assembly"]
-        - PrefetchLocalRead: [True]
+        - PrefetchLocalRead: [1]
       ForkParameters:
         - 1LDSBuffer: [1]
         - DepthU: [ 16 ]
@@ -259,7 +261,7 @@ BenchmarkProblems:
           - [16, 16, 4, 1, 1, 1,4, 2,2]
           - [16, 16, 4, 1, 1, 1,2, 2,2]
           - [16, 16, 4, 1, 1, 1,1, 2,2]
-        - MIArchVgpr: [0]
+        - MIArchVgpr: [false]
         - PrefetchGlobalRead: [2]
         - PrefetchLocalRead: [1]
         - ScheduleIterAlg: [3]
@@ -351,6 +353,7 @@ BenchmarkProblems:
     #     - StoreRemapVectorWidth: [0, 4]
     #     - StoreVectorWidth: [1]
     #     - StreamK: [3]
+    #     - StreamKFixupTreeReduction: [0, 1]
     #     - PrefetchLocalRead: [1, 3]
     #     - NonTemporalC: [0, 7]
     #     - NonTemporalD: [0, 7]
@@ -481,7 +484,7 @@ BenchmarkProblems:
       InitialSolutionParameters:
       BenchmarkCommonParameters:
         - KernelLanguage: ["Assembly"]
-        - PrefetchLocalRead: [True]
+        - PrefetchLocalRead: [1]
       ForkParameters:
         - 1LDSBuffer: [1]
         - DepthU: [ 8, 16, 32, 48 ]
@@ -493,7 +496,7 @@ BenchmarkProblems:
         - MatrixInstruction:
           # - [16, 16, 4, 1, 1, 8,8, 2,2]
           - [16, 16, 4, 1, 1, 4,4, 2,2]
-        - MIArchVgpr: [0]
+        - MIArchVgpr: [false]
         - PrefetchGlobalRead: [2]
         - PrefetchLocalRead: [1]
         - ScheduleIterAlg: [3]
@@ -544,6 +547,7 @@ BenchmarkProblems:
     #     - StoreRemapVectorWidth: [0, 4]
     #     - StoreVectorWidth: [1]
     #     - StreamK: [3]
+    #     - StreamKFixupTreeReduction: [0, 1]
     #     - PrefetchLocalRead: [1, 3]
     #     - NonTemporalC: [0, 7]
     #     - NonTemporalD: [0, 7]
@@ -716,7 +720,7 @@ BenchmarkProblems:
       InitialSolutionParameters:
       BenchmarkCommonParameters:
         - KernelLanguage: ["Assembly"]
-        - PrefetchLocalRead: [True]
+        - PrefetchLocalRead: [1]
       ForkParameters:
         - 1LDSBuffer: [0, 1]
         - DepthU: [16]
@@ -728,7 +732,7 @@ BenchmarkProblems:
         - MatrixInstruction:
           # - [16, 16, 4, 1, 1, 8,8, 2,2]
           - [16, 16, 4, 1, 1, 4,4, 2,2]
-        - MIArchVgpr: [0]
+        - MIArchVgpr: [false]
         - PrefetchGlobalRead: [2]
         - PrefetchLocalRead: [1]
         - StaggerU: [0, 32]
@@ -737,6 +741,7 @@ BenchmarkProblems:
         - StoreRemapVectorWidth: [0, 4]
         - StoreVectorWidth: [1]
         - StreamK: [3]
+        - StreamKFixupTreeReduction: [0, 1]
         - PrefetchLocalRead: [1, 3]
         - NonTemporalC: [0, 7]
         - NonTemporalD: [0, 7]
@@ -794,3 +799,129 @@ BenchmarkProblems:
     #   BenchmarkFinalParameters:
     #     - ProblemSizes:
     #       - Range: [ [32, 249, 2048], [32, 249, 2048], [1], [32, 249, 2048] ]
+
+    - # SGEMM TT - Test autoWGMXCC (WorkGroupMappingXCC: [-1])
+      # WorkGroupMappingXCC is set to number of XCDs at runtime
+      InitialSolutionParameters:
+      BenchmarkCommonParameters:
+        - KernelLanguage: ["Assembly"]
+        - PrefetchLocalRead: [1]
+      ForkParameters:
+        - 1LDSBuffer: [0, 1]
+        - DepthU: [16]
+        - ExpandPointerSwap: [False]
+        - GlobalReadVectorWidthA: [4]
+        - GlobalReadVectorWidthB: [4]
+        - GlobalSplitU: [0]
+        - LocalReadVectorWidth: [1]
+        - MatrixInstruction:
+          # - [16, 16, 4, 1, 1, 8,8, 2,2]
+          - [16, 16, 4, 1, 1, 4,4, 2,2]
+        - MIArchVgpr: [false]
+        - PrefetchGlobalRead: [2]
+        - PrefetchLocalRead: [1]
+        - StaggerU: [0, 32]
+        - ScheduleIterAlg: [3]
+        - SourceSwap: [False, True]
+        - StoreRemapVectorWidth: [0, 4]
+        - StoreVectorWidth: [1]
+        - StreamK: [3]
+        - StreamKFixupTreeReduction: [0, 1]
+        - PrefetchLocalRead: [1, 3]
+        - TransposeLDS: [0, 1]
+        - VectorWidthA: [4]
+        - VectorWidthB: [4]
+        - WorkGroupMapping: [1, 8]
+        - WorkGroupMappingXCC: [-1]
+      
+      BenchmarkForkParameters:
+      JoinParameters:
+      BenchmarkJoinParameters:
+      BenchmarkFinalParameters:
+        - ProblemSizes:
+          - Exact: [512, 512, 1, 512]
+          - Exact: [2055, 2055, 1, 1031]
+    
+    - # SGEMM TT - Test autoWGM (WorkGroupMapping: [0])
+      # WorkGroupMapping is set to default (sqrt(CU/XCD)) at runtime
+      InitialSolutionParameters:
+      BenchmarkCommonParameters:
+        - KernelLanguage: ["Assembly"]
+        - PrefetchLocalRead: [1]
+      ForkParameters:
+        - 1LDSBuffer: [0, 1]
+        - DepthU: [16]
+        - ExpandPointerSwap: [False]
+        - GlobalReadVectorWidthA: [4]
+        - GlobalReadVectorWidthB: [4]
+        - GlobalSplitU: [0]
+        - LocalReadVectorWidth: [1]
+        - MatrixInstruction:
+          # - [16, 16, 4, 1, 1, 8,8, 2,2]
+          - [16, 16, 4, 1, 1, 4,4, 2,2]
+        - MIArchVgpr: [false]
+        - PrefetchGlobalRead: [2]
+        - PrefetchLocalRead: [1]
+        - StaggerU: [0, 32]
+        - ScheduleIterAlg: [3]
+        - SourceSwap: [False, True]
+        - StoreRemapVectorWidth: [0, 4]
+        - StoreVectorWidth: [1]
+        - StreamK: [3]
+        - StreamKFixupTreeReduction: [0, 1]
+        - PrefetchLocalRead: [1, 3]
+        - TransposeLDS: [0, 1]
+        - VectorWidthA: [4]
+        - VectorWidthB: [4]
+        - WorkGroupMapping: [0]
+        - WorkGroupMappingXCC: [1]
+
+      BenchmarkForkParameters:
+      JoinParameters:
+      BenchmarkJoinParameters:
+      BenchmarkFinalParameters:
+        - ProblemSizes:
+          - Exact: [512, 512, 1, 512]
+          - Exact: [2055, 2055, 1, 1031]
+    
+    - # SGEMM TT - Test autoWGM + autoWGMXCC (WorkGroupMapping: [0] and WorkGroupMappingXCC: [-1])
+      # WorkGroupMapping and WorkGroupMappingXCC values are predicted at runtime. (not default values)
+      InitialSolutionParameters:
+      BenchmarkCommonParameters:
+        - KernelLanguage: ["Assembly"]
+        - PrefetchLocalRead: [1]
+      ForkParameters:
+        - 1LDSBuffer: [0, 1]
+        - DepthU: [16]
+        - ExpandPointerSwap: [False]
+        - GlobalReadVectorWidthA: [4]
+        - GlobalReadVectorWidthB: [4]
+        - GlobalSplitU: [0]
+        - LocalReadVectorWidth: [1]
+        - MatrixInstruction:
+          # - [16, 16, 4, 1, 1, 8,8, 2,2]
+          - [16, 16, 4, 1, 1, 4,4, 2,2]
+        - MIArchVgpr: [false]
+        - PrefetchGlobalRead: [2]
+        - PrefetchLocalRead: [1]
+        - StaggerU: [0, 32]
+        - ScheduleIterAlg: [3]
+        - SourceSwap: [False, True]
+        - StoreRemapVectorWidth: [0, 4]
+        - StoreVectorWidth: [1]
+        - StreamK: [3]
+        - StreamKFixupTreeReduction: [0, 1]
+        - PrefetchLocalRead: [1, 3]
+        - TransposeLDS: [0, 1]
+        - VectorWidthA: [4]
+        - VectorWidthB: [4]
+        - WorkGroupMapping: [0]
+        - WorkGroupMappingXCC: [-1]
+
+      BenchmarkForkParameters:
+      JoinParameters:
+      BenchmarkJoinParameters:
+      BenchmarkFinalParameters:
+        - ProblemSizes:
+          - Exact: [512, 512, 1, 512]
+          - Exact: [2055, 2055, 1, 1031]

@@ -26,13 +26,13 @@ add_executable(rocroller-gemm
 target_sources(rocroller-gemm
     PRIVATE
         "${CMAKE_CURRENT_SOURCE_DIR}/include/client/BenchmarkSolution.hpp"
+        "${CMAKE_CURRENT_SOURCE_DIR}/include/client/CLI_Utils.hpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/include/client/DataParallelGEMMSolution.hpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/include/client/GEMMParameters.hpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/include/client/GEMMParameters_serialization.hpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/include/client/GEMMSolution.hpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/include/client/GraphInspector.hpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/include/client/GraphInspector_impl.hpp"
-        "${CMAKE_CURRENT_SOURCE_DIR}/include/client/PreSwizzle.hpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/include/client/StreamKGEMMSolution.hpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/include/client/visualize.hpp"
 )

@@ -1,23 +1,54 @@
 .. meta::
-   :description: hipcub API library data type support
-   :keywords: hipcub, ROCm, API library, API reference, data type, support
+   :description: hipCUB library precision support
+   :keywords: hipCUB, ROCm, API library, API reference, data type, support, precision
 
-.. _data-type-support:
+.. _hipcub-data-type-support:
 
 ******************************************
-Data type support
+hipCUB precision support
 ******************************************
 
-hipCUB supports the following data types on both ROCm and CUDA:
+This topic lists the data type support for the hipCUB library on AMD GPUs.
 
-* ``int8``
-* ``int16``
-* ``int32``
-* ``float32``
-* ``float64``
+This page lists the data types supported by the library itself and does not
+indicate hardware support. A type listed here is only usable if the GPU
+architecture also supports it; otherwise it is unsupported. For data type support
+across the other ROCm libraries and by GPU architecture, see the
+:doc:`Data types and precision support page <rocm:reference/precision-support>`.
 
-``float8``, ``bfloat8``, and ``tensorfloat32`` are not supported by hipCUB on neither ROCm nor CUDA.
+.. _hipcub-input-output-type-support:
 
-The NVIDIA back end does not support ``float16`` nor ``bfloat16`` with the following API calls: ``block_adjacent_difference``, ``device_adjacent_difference``, ``device_reduce``, ``device_scan``, ``device_segmented_reduce`` and ``device_select``.
+Supported data types
+====================
 
-The NVIDIA backend also does not support ``bfloat16`` with ``device_histogram``.
+The following table lists the input and output data types supported by hipCUB.
+
+.. list-table::
+    :header-rows: 1
+
+    *
+      - Icon
+      - Definition
+    *
+      - ✅
+      - Fully supported as both an input and output type.
+    *
+      - ⚠️
+      - Partially supported as an input or output type.
+
+Data types not listed in the table below are not supported.
+
+.. datatemplate:yaml:: /data/reference/precision-support.yaml
+
+    .. list-table::
+        :header-rows: 1
+        :widths: 70, 30
+
+        *
+            - Data type
+            - Support
+    {% for data_type in data.data_types %}
+        *
+            - {{ data_type.type }}
+            - {{ data_type.support }}
+    {% endfor %}

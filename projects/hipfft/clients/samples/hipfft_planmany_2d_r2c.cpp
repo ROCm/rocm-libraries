@@ -1,4 +1,4 @@
-// Copyright (C) 2019 - 2022 Advanced Micro Devices, Inc. All rights
+// Copyright (C) 2019 - 2026 Advanced Micro Devices, Inc. All rights
 // reserved.
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
@@ -44,10 +44,10 @@ int main()
 
     int istride    = 1;
     int ostride    = istride;
-    int inembed[2] = {istride * n[0], istride * n1_padding_real_elements};
-    int onembed[2] = {ostride * n[0], ostride * n1_complex_elements};
-    int idist      = inembed[0] * inembed[1];
-    int odist      = onembed[0] * onembed[1];
+    int inembed[2] = {n[0], n1_padding_real_elements};
+    int onembed[2] = {n[0], n1_complex_elements};
+    int idist      = istride * inembed[0] * inembed[1];
+    int odist      = ostride * onembed[0] * onembed[1];
 
     std::cout << "n: " << n[0] << " " << n[1] << "\n"
               << "howmany: " << howmany << "\n"
@@ -76,11 +76,11 @@ int main()
     for(int ibatch = 0; ibatch < howmany; ++ibatch)
     {
         std::cout << "batch: " << ibatch << "\n";
-        for(int i = 0; i < inembed[0]; i++)
+        for(int i = 0; i < n[0]; i++)
         {
-            for(int j = 0; j < inembed[1]; j++)
+            for(int j = 0; j < n[1]; j++)
             {
-                const auto pos = ibatch * idist + i * inembed[1] + j;
+                const auto pos = ibatch * idist + istride * (i * inembed[1] + j);
                 std::cout << data[pos] << " ";
             }
             std::cout << "\n";
@@ -90,25 +90,23 @@ int main()
     std::cout << std::endl;
 
     hipfftHandle hipForwardPlan;
-    hipfftResult hipfft_rt;
-    hipfft_rt = hipfftPlanMany(&hipForwardPlan,
-                               rank,
-                               n,
-                               inembed,
-                               istride,
-                               idist,
-                               onembed,
-                               ostride,
-                               odist,
-                               HIPFFT_R2C, // Use HIPFFT_D2Z for double-precsion.
-                               howmany);
+    hipfftResult hipfft_rt = hipfftPlanMany(&hipForwardPlan,
+                                            rank,
+                                            n,
+                                            inembed,
+                                            istride,
+                                            idist,
+                                            onembed,
+                                            ostride,
+                                            odist,
+                                            HIPFFT_R2C, // Use HIPFFT_D2Z for double-precision.
+                                            howmany);
     if(hipfft_rt != HIPFFT_SUCCESS)
         throw std::runtime_error("failed to create plan");
 
     hipfftReal* gpu_data;
 
-    hipError_t hip_rt;
-    hip_rt = hipMalloc((void**)&gpu_data, total_bytes);
+    hipError_t hip_rt = hipMalloc((void**)&gpu_data, total_bytes);
     if(hip_rt != hipSuccess)
         throw std::runtime_error("hipMalloc failed");
 
@@ -129,11 +127,11 @@ int main()
     for(int ibatch = 0; ibatch < howmany; ++ibatch)
     {
         std::cout << "batch: " << ibatch << "\n";
-        for(int i = 0; i < onembed[0]; i++)
+        for(int i = 0; i < n[0]; i++)
         {
-            for(int j = 0; j < onembed[1]; j++)
+            for(int j = 0; j < n1_complex_elements; j++)
             {
-                const auto pos = ibatch * odist + i * onembed[1] + j;
+                const auto pos = ibatch * odist + ostride * (i * onembed[1] + j);
                 std::cout << output[pos] << " ";
             }
             std::cout << "\n";
@@ -142,7 +140,8 @@ int main()
     }
     std::cout << std::endl;
 
-    hipfftDestroy(hipForwardPlan);
+    if(hipfftDestroy(hipForwardPlan) != HIPFFT_SUCCESS)
+        throw std::runtime_error("hipfftDestroy failed");
 
     hip_rt = hipFree(gpu_data);
     if(hip_rt != hipSuccess)

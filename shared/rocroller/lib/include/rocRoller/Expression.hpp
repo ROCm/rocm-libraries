@@ -1,28 +1,5 @@
-/*******************************************************************************
- *
- * MIT License
- *
- * Copyright 2021-2025 AMD ROCm(TM) Software
- *
- * Permission is hereby granted, free of charge, to any person obtaining a copy
- * of this software and associated documentation files (the "Software"), to deal
- * in the Software without restriction, including without limitation the rights
- * to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
- * copies of the Software, and to permit persons to whom the Software is
- * furnished to do so, subject to the following conditions:
- *
- * The above copyright notice and this permission notice shall be included in
- * all copies or substantial portions of the Software.
- *
- * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
- * IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
- * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
- * AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
- * LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
- * OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
- * SOFTWARE.
- *
- *******************************************************************************/
+// Copyright Advanced Micro Devices, Inc., or its affiliates.
+// SPDX-License-Identifier: MIT
 
 #pragma once
 
@@ -261,6 +238,23 @@ namespace rocRoller
             constexpr static inline int                 Complexity = 1;
         };
 
+        struct BitfieldCombine : Binary
+        {
+            uint32_t srcOffset = 0u;
+            uint32_t dstOffset = 0u;
+            uint32_t width     = 0u;
+
+            // if srcIsZero sets to true, that means bits outside [srcOffset:srcOffset+width-1] are 0
+            std::optional<bool> srcIsZero = std::nullopt;
+            // if dstIsZero sets to true, that means bits [dstOffset:dstOffset+width-1] are 0
+            std::optional<bool> dstIsZero = std::nullopt;
+
+            constexpr static inline auto                Type = Category::Arithmetic;
+            constexpr static inline EvaluationTimes     EvalTimes{EvaluationTime::Translate};
+            constexpr static inline AlgebraicProperties Properties{};
+            constexpr static inline int                 Complexity = 4;
+        };
+
         /*
          * SRConversion performs a stochastic rounding conversion.
          * The lhs is the value to be converted, the rhs is the seed
@@ -486,6 +480,22 @@ namespace rocRoller
             DataType destinationType = DataType::None;
         };
 
+        struct Reinterpret : Unary
+        {
+            inline Reinterpret& copyParams(const Reinterpret& other)
+            {
+                destinationType = other.destinationType;
+
+                return *this;
+            }
+
+            constexpr static inline auto Type       = Category::Conversion;
+            constexpr static inline auto EvalTimes  = EvaluationTimes::All();
+            constexpr static inline int  Complexity = 0;
+
+            DataType destinationType = DataType::None;
+        };
+
         struct LogicalNot : Unary
         {
             constexpr static inline auto Type       = Category::Logical;
@@ -533,13 +543,13 @@ namespace rocRoller
                 return *this;
             }
 
-            constexpr static inline auto            Type = Category::Arithmetic;
-            constexpr static inline EvaluationTimes EvalTimes{EvaluationTime::Translate};
-            constexpr static inline int             Complexity = 1;
+            constexpr static inline auto Type       = Category::Arithmetic;
+            constexpr static inline auto EvalTimes  = EvaluationTimes::All();
+            constexpr static inline int  Complexity = 1;
 
             DataType outputDataType = DataType::None;
-            int      offset         = 0;
-            int      width          = 0;
+            uint32_t offset         = 0;
+            uint32_t width          = 0;
         };
 
         struct Nary
@@ -563,7 +573,7 @@ namespace rocRoller
 
         /**
          * @brief Perform bitwise concatenation among all operands.
-         * 
+         *
          * Each operand must be dword aligned and the total number of operands'
          * registers must be equal to the number of registers for
          * 'destinationType'.
@@ -574,10 +584,10 @@ namespace rocRoller
         struct Concatenate : Nary
         {
             constexpr static inline auto            Type       = Category::Value;
-            constexpr static inline EvaluationTimes EvalTimes  = EvaluationTimes::All();
+            constexpr static inline EvaluationTimes EvalTimes  = EvaluationTimes{};
             constexpr static inline int             Complexity = 1;
 
-            DataType destinationType = DataType::None;
+            VariableType destinationType;
 
             inline Concatenate& copyParams(const Concatenate& other)
             {
@@ -659,8 +669,20 @@ namespace rocRoller
         template <DataType DATATYPE>
         ExpressionPtr convert(ExpressionPtr a);
 
-        ExpressionPtr bfe(DataType dt, ExpressionPtr a, uint8_t offset, uint8_t width);
-        ExpressionPtr bfe(ExpressionPtr a, uint8_t offset, uint8_t width);
+        ExpressionPtr reinterpret(DataType dt, ExpressionPtr a);
+
+        ExpressionPtr bfe(DataType dt, ExpressionPtr a, uint32_t offset, uint32_t width);
+        ExpressionPtr bfe(ExpressionPtr a, uint32_t offset, uint32_t width);
+
+        ExpressionPtr bfc(ExpressionPtr       src,
+                          ExpressionPtr       dst,
+                          uint32_t            srcOffset,
+                          uint32_t            dstOffset,
+                          uint32_t            width,
+                          std::optional<bool> srcIsZero = std::nullopt,
+                          std::optional<bool> dstIsZero = std::nullopt);
+
+        ExpressionPtr concat(const std::vector<ExpressionPtr>& ops, VariableType v);
 
         template <CCommandArgumentValue T>
         ExpressionPtr literal(T value);
@@ -835,10 +857,14 @@ namespace rocRoller
         Register::Type resultRegisterType(Expression const& expr);
         Register::Type resultRegisterType(ExpressionPtr const& expr);
 
+        size_t resultValueCount(Expression const& expr);
+        size_t resultValueCount(ExpressionPtr const& expr);
+
         struct ResultType
         {
             Register::Type regType;
             VariableType   varType;
+            size_t         valueCount;
             bool           operator==(ResultType const&) const = default;
         };
         ResultType resultType(ExpressionPtr const& expr);

@@ -212,7 +212,7 @@ class KernelWriter(metaclass=abc.ABCMeta):
   ##############################################################################
   def makeSchedule(self, kernel, tensorParametersA, tensorParametersB, localWriteEndIter, uDu=0, skipGlobalReadInc=False, firstIter=False, lastLoop=False, lastLc=False):
 
-    currentIsa = globalParameters["CurrentISA"]
+    currentIsa = kernel["ISA"]
     maxVmcnt = globalParameters["AsmCaps"][currentIsa]["MaxVmcnt"]
 
     self.unrollLoopHeaderCode = Code.Module()
@@ -1093,7 +1093,7 @@ class KernelWriter(metaclass=abc.ABCMeta):
         barrier = Code.Module()
         barrier.addComment0("1 LDS buffer: read-sync-write")
         barrier.addInst("s_waitcnt lgkmcnt(0)","")
-        barrier.addInst("s_barrier","")
+        barrier.addInst(self.syncStr,"")
         iterCode.addCode(barrier)
       iterCode.addCode(localWriteCode)
       iterCode.addCode(pointerLWCode)
@@ -1343,7 +1343,7 @@ class KernelWriter(metaclass=abc.ABCMeta):
           barrier = Code.Module()
           barrier.addComment0("1 LDS buffer: read-sync-write")
           barrier.addInst("s_waitcnt lgkmcnt(0)","")
-          barrier.addInst("s_barrier","")
+          barrier.addInst(self.syncStr,"")
           iterCode.addCode(barrier)
 
         if kernel["StorePriorityOpt"]:
@@ -2168,7 +2168,7 @@ class KernelWriter(metaclass=abc.ABCMeta):
               if not kernel["NoLdsWriteCode"]:
                 waitLWCode.addCode(self.wait(kernel, tensorParametersA, tensorParametersB, -1, 0, -1, "3wait for local write"))
               if (kernel["DirectToVgprA"] or kernel["DirectToVgprB"]) and (kernel["DirectToLdsA"] or kernel["DirectToLdsB"]):
-                # DirectToVgpr + DirectToLds case, add waitcnt vmcnt before s_barrier
+                # DirectToVgpr + DirectToLds case, add waitcnt vmcnt before thread sync
                 # Except for PGR=2 and Load C (StoreCInUnroll) case. In that case, Load C is executed after necessary Load A and B.
                 # Wait for Load C is already done here in PGR=2 case.
                 needLoadC = kernel["StoreCInUnroll"] and (not kernel["AtomicAddC"]) and kernel["ProblemType"]["UseBeta"]
@@ -2749,7 +2749,7 @@ class KernelWriter(metaclass=abc.ABCMeta):
               if not(kernel["DirectToVgprA"] or kernel["DirectToVgprB"]) and not kernel["PrefetchGlobalRead"]==2:
                 kl.append(self.wait(kernel, tensorParametersA, tensorParametersB, 0, -1, -1, "12wait for global read"))
               else:
-                # DirectToVgpr + DirectToLds case, add waitcnt vmcnt before s_barrier
+                # DirectToVgpr + DirectToLds case, add waitcnt vmcnt before thread sync
                 # Except for PGR=2 and Load C case. In that case, Load C is executed after necessary Load A and B.
                 # Wait for Load C is already done here in PGR=2 case.
                 needLoadC = kernel["StoreCInUnroll"] and (not kernel["AtomicAddC"]) and kernel["ProblemType"]["UseBeta"]
@@ -2765,7 +2765,7 @@ class KernelWriter(metaclass=abc.ABCMeta):
               if not (kernel["DirectToVgprA"] and kernel["DirectToVgprB"]):
                 # put only barrier for DirectToVgpr (to avoid generating waitcnt for global read)
                 # barrier is not necessary if both DirectToVgprA and B are enabled
-                syncCode.addCode("s_barrier" + self.endLine)
+                syncCode.addCode(self.syncStr + self.endLine)
             else:
               syncCode.addCode(self.syncThreads(kernel))
 
@@ -2932,8 +2932,6 @@ class KernelWriter(metaclass=abc.ABCMeta):
               #print("Waitcnt(%u..%u)\n"%(iter,waitCntItems[iter]))
           for iter in range(0,numGroups):
             #Mac Code
-            #place holder for future work Instruction class for generting MAC instruction
-            #FMAInstruction = MacInstruction(globalParameters["CurrentISA"])
             subIterCode = Code.Module()
             waitCode = Code.Module()
             macIterCodeGrp = Code.Module()
@@ -3707,6 +3705,9 @@ class KernelWriter(metaclass=abc.ABCMeta):
   @abc.abstractmethod
   def initKernel(self, kernel, tensorParametersA, tensorParametersB ):
 
+    if "ISA" not in kernel:
+      raise ValueError(f"ISA not found in kernel {kernel}. This is required for assembly kernels.")
+
     self.staggerU = kernel["StaggerU"]
     if self.staggerU:
       assert (kernel["KernelLanguage"]=="Source" or kernel["BufferLoad"])
@@ -4272,7 +4273,7 @@ class KernelWriter(metaclass=abc.ABCMeta):
     self.useInitAccVgprOpt = False
     # enable for the following conditions
     if kernel["EnableMatrixInstruction"] and (kernel["PrefetchGlobalRead"] == 1 or kernel["PrefetchGlobalRead"] == 2) \
-       and globalParameters["AsmCaps"][globalParameters["CurrentISA"]]["HasMFMA_constSrc"] \
+       and globalParameters["AsmCaps"][kernel["ISA"]]["HasMFMA_constSrc"] \
        and kernel["StreamK"] == 0:
       self.useInitAccVgprOpt = True
     # force to disable for the following conditions
@@ -5301,7 +5302,7 @@ fileString += "* CTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOF
 fileString += "*******************************************************************************/\\n\\n"
 fileString += "/**************************************************\\n"
 fileString += "* This file was generated by Tensile:             *\\n"
-fileString += "* https://github.com/ROCmSoftwarePlatform/Tensile *\\n"
+fileString += "* https://github.com/ROCm/Tensile                 *\\n"
 fileString += "**************************************************/\\n\\n\\n"
 import os.path
 fileString += '#include "Kernels.h"\\n\\n'
@@ -5385,9 +5386,7 @@ for codeObjectFileName in codeObjectFileNames:
         # ISA version, such as 803
         self.kernel = kernel
         self.language = "ASM"
-        self.version = globalParameters["CurrentISA"]
-        if "ISA" in kernel:
-          self.version = tuple(kernel["ISA"])
+        self.version = tuple(kernel["ISA"])
         if not globalParameters["AsmCaps"][self.version]["SupportedISA"]:
           defaultIsa = (9,0,0)
           print("warning: ISA:", self.version, " is not supported; overriding with ", defaultIsa)

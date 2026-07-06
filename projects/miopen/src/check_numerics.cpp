@@ -62,12 +62,14 @@ std::string GetKernelName(miopenDataType_t data_type)
     case miopenBFloat16: return {"check_numerics_bf16"};
     case miopenFloat8_fnuz: return {"check_numerics_fp8"};
     case miopenBFloat8_fnuz: return {"check_numerics_bf8"};
+
     case miopenInt64:
     case miopenInt32:
     case miopenInt8:
-    case miopenDouble:
-    default: return {""};
+    case miopenDouble: break;
     }
+
+    return {""};
 }
 
 bool checkNumericsImpl(
@@ -78,17 +80,42 @@ bool checkNumericsImpl(
     auto abnormal_d =
         handle.Create(sizeof(CheckNumericsResult)); // TODO - someday avoid slow malloc/free here
     handle.WriteTo(&abnormal_h, abnormal_d, sizeof(CheckNumericsResult));
+
+    // Let each thread work on a single element
     const size_t threadsPerBlock = 256;
-    const size_t numBlocks       = handle.GetMaxComputeUnits() * 6;
-    const int computeStats       = (mode & CheckNumerics::ComputeStats);
+
+    // Calculate based on tensor size
+    const size_t totalThreads = numElements;
+    const size_t minBlocks    = (totalThreads + threadsPerBlock - 1) / threadsPerBlock;
+
+    // Calculate based on hardware occupancy
+    const size_t numCUs                = handle.GetMaxHardwareComputeUnits();
+    const size_t minWavesPerCU         = 4;    // Minimum occupancy target
+    const size_t maxWavesPerCU         = 2048; // Maximum to avoid over-subscription
+    const size_t wavesPerBlock         = threadsPerBlock / handle.GetWavefrontWidth();
+    const size_t minBlocksForOccupancy = (numCUs * minWavesPerCU) / wavesPerBlock;
+    const size_t maxBlocksForOccupancy = (numCUs * maxWavesPerCU) / wavesPerBlock;
+
+    // Clamp minBlocks to the occupancy range [min, max]
+    size_t numBlocks = std::max(minBlocks, minBlocksForOccupancy);
+    numBlocks        = std::min(numBlocks, maxBlocksForOccupancy);
+
+    const int computeStats = (mode & CheckNumerics::ComputeStats);
     // TODO - some constants we should get from the device:
     std::string program_name      = "MIOpenCheckNumerics.cpp";
     std::string kernel_name       = GetKernelName(dDesc.GetType());
     const std::vector<size_t> vld = {size_t{threadsPerBlock}, size_t{1}, size_t{1}};
     const std::vector<size_t> vgd = {numBlocks, size_t{1}, size_t{1}};
-    handle.AddKernel(
-        "MIOpenCheckNumerics", "MIOpenCheckNumerics", program_name, kernel_name, vld, vgd, "")(
-        data, numElements, abnormal_d.get(), computeStats);
+    const std::string build_options =
+        " -DMIOPEN_FP8_CLIPPING=" + std::to_string(MIOPEN_FP8_CLIPPING) +
+        " -DMIOPEN_FP8_IEEE_EXPONENT_BIAS=" + std::to_string(MIOPEN_FP8_IEEE_EXPONENT_BIAS);
+    handle.AddKernel("MIOpenCheckNumerics",
+                     "MIOpenCheckNumerics",
+                     program_name,
+                     kernel_name,
+                     vld,
+                     vgd,
+                     build_options)(data, numElements, abnormal_d.get(), computeStats);
 
     handle.ReadTo(&abnormal_h, abnormal_d, sizeof(CheckNumericsResult));
 

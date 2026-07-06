@@ -301,7 +301,7 @@ class WaitCnt (Module):
     main_args = []
     wait_store = False
     if self.lgkmcnt != -1:
-      currentIsa    = globalParameters["CurrentISA"]
+      currentIsa    = self.version
       maxLgkmcnt    = globalParameters["AsmCaps"][currentIsa]["MaxLgkmcnt"]
       seperateVscnt = globalParameters["ArchCaps"][currentIsa]["SeparateVscnt"]
       wait_store    = True
@@ -359,7 +359,7 @@ class  MFMAInst (Inst):
   """
   def  __init__(self,kernel,aIdx,bIdx,PLRval,innerUnroll):
        self.endLine = ""
-       self.version = globalParameters["CurrentISA"]
+       self.version = kernel["ISA"]
        self.kernel  = kernel
        self.aIdx    = aIdx
        self.bIdx    = bIdx
@@ -411,7 +411,7 @@ class  MacInst (Inst):
 
   def  __init__(self,kernel,aIdx,bIdx,PLRval,innerUnroll):
        self.endLine = ""
-       self.version = globalParameters["CurrentISA"]
+       self.version = kernel["ISA"]
        self.kernel  = kernel
        self.aIdx    = aIdx
        self.bIdx    = bIdx
@@ -632,7 +632,7 @@ class  MacInst (Inst):
             cStr = "v[%s+%u+%u*%u]" % ("vgprValuC", self.aIdx, self.bIdx, self.kernel["ThreadTile0"])
             aStr = "v[%s+%u]"       % ("vgprValuA_X%u_I%u"%(self.PLR,iui), self.aIdx)
             bStr = "v[%s+%u]"       % ("vgprValuB_X%u_I%u"%(self.PLR,iui), self.bIdx)
-            kStr += "v_dot4_i32_i8  %s, %s, %s, %s op_sel:[0,0] op_sel_hi:[1,1] //valuC[%u]%s" % (cStr, aStr, bStr, cStr, cidx, self.endLine)
+            kStr += "v_dot4_i32_i8  %s, %s, %s, %s //valuC[%u]%s" % (cStr, aStr, bStr, cStr, cidx, self.endLine)
       # single precision
       elif self.kernel["ProblemType"]["DataType"].isSingle():
         for iui in range(0, self.innerUnroll):
@@ -774,8 +774,46 @@ class SrdUpperValue11XX(BitfieldUnion):
     return cls(fields=SrdUpperFields11XX.default())
 
 
+# gfx12 buffer-resource DWORD3 layout.
+# Mirrors SrdUpperFields12XX in rocisa (projects/hipblaslt/tensilelite/rocisa/rocisa/
+# include/code.hpp) which is the gfx12-aware code generator path. Differences vs.
+# gfx11: no LLC_noalloc field, _unusedB widens from 1 to 3 bits, and oob_select moves
+# from bits 27-28 to bits 28-29. With the gfx9 fallback (data_format=4) gfx1201 raw
+# buffer stores are silently dropped because oob_select reads as 0; we need oob_select=3
+# and format=32 for the RAW buffer mode used by all Tensile buffer load/store ops.
+class SrdUpperFields12XX(BitfieldStructure):
+  _fields_ = [("dst_sel_x",      ctypes.c_uint, 3),
+              ("dst_sel_y",      ctypes.c_uint, 3),
+              ("dst_sel_z",      ctypes.c_uint, 3),
+              ("dst_sel_w",      ctypes.c_uint, 3),
+              ("format",         ctypes.c_uint, 7),
+              ("_unusedA",       ctypes.c_uint, 2),
+              ("index_stride",   ctypes.c_uint, 2),
+              ("add_tid_enable", ctypes.c_uint, 1),
+              ("resource_level", ctypes.c_uint, 1),
+              ("_unusedB",       ctypes.c_uint, 3),
+              ("oob_select",     ctypes.c_uint, 2),
+              ("type",           ctypes.c_uint, 2)]
+
+
+  @classmethod
+  def default(cls):
+    return cls(format     = 32,
+               oob_select = 3)
+
+
+class SrdUpperValue12XX(BitfieldUnion):
+  _fields_ = [("fields", SrdUpperFields12XX), ("value", ctypes.c_uint32)]
+
+  @classmethod
+  def default(cls):
+    return cls(fields=SrdUpperFields12XX.default())
+
+
 def SrdUpperValue(isa):
-  if isa[0] == 11:
+  if isa[0] == 12:
+    return SrdUpperValue12XX.default()
+  elif isa[0] == 11:
     return SrdUpperValue11XX.default()
   elif isa[0] == 10:
     return SrdUpperValue10XX.default()

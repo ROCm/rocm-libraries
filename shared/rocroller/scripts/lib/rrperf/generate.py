@@ -1,54 +1,40 @@
-################################################################################
-#
-# MIT License
-#
-# Copyright 2025 AMD ROCm(TM) Software
-#
-# Permission is hereby granted, free of charge, to any person obtaining a copy
-# of this software and associated documentation files (the "Software"), to deal
-# in the Software without restriction, including without limitation the rights
-# to use, copy, modify, merge, publish, distribute, sublicense, and/or sell cop-
-# ies of the Software, and to permit persons to whom the Software is furnished
-# to do so, subject to the following conditions:
-#
-# The above copyright notice and this permission notice shall be included in all
-# copies or substantial portions of the Software.
-#
-# THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR IM-
-# PLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY, FITNESS
-# FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE AUTHORS OR
-# COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER
-# IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNE-
-# CTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
-#
-################################################################################
+# Copyright Advanced Micro Devices, Inc., or its affiliates.
+# SPDX-License-Identifier: MIT
 
 """Generate all kernels from a benchmark suite."""
 
 import argparse
 import os
 import subprocess
-
 from itertools import chain
 from pathlib import Path
-from typing import Dict
 
 import rrperf
-
 from rrperf.utils import sjoin
 
 
 def generate_kernels(
-    generator, architecture: str, build_dir: Path, work_dir: Path, env: Dict[str, str]
+    generator,
+    architecture: str,
+    build_dir: Path,
+    work_dir: Path,
+    env: dict[str, str],
+    id_filter: list[str],
 ) -> bool:
 
     already_run = set()
     failed = []
 
     for i, problem in enumerate(generator):
+        if id_filter is not None and not any(
+            problem.id.startswith(filt) for filt in id_filter
+        ):
+            continue
+
         if problem in already_run:
             continue
 
+        id = getattr(problem, "id", None)
         cmd = problem.command(architecture=architecture, generate_only=True)
         log = (work_dir / f"{problem.group}-{i:06d}.log").resolve()
         rr_env = {k: str(v) for k, v in env.items() if k.startswith("ROC")}
@@ -59,6 +45,7 @@ def generate_kernels(
             print(f"# command: {sjoin(cmd)}", file=f, flush=True)
             print(f"# token: {repr(problem)}", file=f, flush=True)
             print("running:")
+            print(f"  id: {id}")
             print(f"  command: {sjoin(cmd)}")
             print(f"  wrkdir:  {work_dir.resolve()}")
             print(f"  log:     {log.resolve()}")
@@ -74,6 +61,11 @@ def generate_kernels(
         already_run.add(problem)
 
     if len(failed) > 0:
+        ids = [getattr(problem, "id", None) for i, problem in failed]
+        print("")
+        print(f"Failed {len(failed)} problems ids:")
+        print(" ".join([str(id) for id in ids]))
+        print("")
         print(f"Failed {len(failed)} problems:")
         for i, problem in failed:
             cmd = list(map(str, problem.command()))
@@ -87,6 +79,7 @@ def generate(
     suite: str = None,
     rundir: str = None,
     build_dir: str = None,
+    id_filter: list[str] = None,
     **kwargs,
 ):
     """Generate kernels!"""
@@ -94,6 +87,9 @@ def generate(
     generator = rrperf.utils.empty()
     if suite is not None:
         generator = chain(generator, rrperf.utils.load_suite(suite))
+    else:
+        print("No suite specified.")
+        return
 
     if build_dir is None:
         build_dir = rrperf.utils.get_build_dir()
@@ -113,7 +109,9 @@ def generate(
     except Exception:
         git_commit.write_text("NO_COMMIT\n")
 
-    success = generate_kernels(generator, architecture, build_dir, run_dir, env)
+    success = generate_kernels(
+        generator, architecture, build_dir, run_dir, env, id_filter
+    )
 
     if not success:
         raise RuntimeError("Some jobs failed.")
@@ -123,6 +121,7 @@ def get_args(parser: argparse.ArgumentParser):
     common_args = [
         rrperf.args.rundir,
         rrperf.args.suite,
+        rrperf.args.id_filter,
     ]
     for arg in common_args:
         arg(parser)

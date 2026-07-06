@@ -1,6 +1,6 @@
 // MIT License
 //
-// Copyright (c) 2024-2025 Advanced Micro Devices, Inc. All rights reserved.
+// Copyright (c) 2024-2026 Advanced Micro Devices, Inc. All rights reserved.
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -159,7 +159,7 @@ TYPED_TEST(RocprimDeviceFindFirstOfTests, FindFirstOf)
             SCOPED_TRACE(testing::Message() << "with size = " << size);
 
             const size_t keys_size
-                = std::sqrt(test_utils::get_random_value<size_t>(0, size, seed_value));
+                = std::sqrt(test_utils::get_random_value<size_t>(common::use_hmm() ? 1 : 0, size, seed_value));
 
             // Starting point is an appoximate position of the first match we want to test for
             for(double starting_point : {0.0, 0.234, 0.876, 1.0, 100.0})
@@ -295,6 +295,9 @@ TYPED_TEST(RocprimDeviceFindFirstOfTests, FindFirstOf)
 
 TEST(RocprimDeviceFindFirstOfTests, LargeIndices)
 {
+    GTEST_SKIP_ASAN();
+    GTEST_SKIP_VALGRIND();
+
     int device_id = test_common_utils::obtain_device_from_ctest();
     SCOPED_TRACE(testing::Message() << "with device_id = " << device_id);
     HIP_CHECK(hipSetDevice(device_id));

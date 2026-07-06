@@ -31,6 +31,8 @@
 #include <Tensile/ContractionProblem.hpp>
 #include <Tensile/TensorDescriptor_Detail.hpp>
 
+#include <tensilelitehost/export.h>
+
 namespace TensileLite
 {
     template <>
@@ -106,8 +108,10 @@ namespace TensileLite
                                         rhs.d(),
                                         lhs.e(),
                                         rhs.e(),
-                                        lhs.computeInputType(),
-                                        rhs.computeInputType(),
+                                        lhs.computeInputTypeA(),
+                                        rhs.computeInputTypeA(),
+                                        lhs.computeInputTypeB(),
+                                        rhs.computeInputTypeB(),
                                         lhs.workspaceSize(),
                                         rhs.workspaceSize(),
                                         lhs.stridedBatched(),
@@ -143,7 +147,15 @@ namespace TensileLite
                                         lhs.swizzleTensorA(),
                                         rhs.swizzleTensorA(),
                                         lhs.swizzleTensorB(),
-                                        rhs.swizzleTensorB());
+                                        rhs.swizzleTensorB(),
+                                        lhs.mxBlockA(),
+                                        rhs.mxBlockA(),
+                                        lhs.mxBlockB(),
+                                        rhs.mxBlockB(),
+                                        lhs.mxTypeA(),
+                                        rhs.mxTypeA(),
+                                        lhs.mxTypeB(),
+                                        rhs.mxTypeB());
         }
     };
 } // namespace TensileLite
@@ -161,7 +173,8 @@ namespace std
                                              problem.c(),
                                              problem.d(),
                                              problem.e(),
-                                             problem.computeInputType(),
+                                             problem.computeInputTypeA(),
+                                             problem.computeInputTypeB(),
                                              problem.highPrecisionAccumulate(),
                                              problem.kernelLanguage(),
                                              problem.deterministicMode(),
@@ -182,7 +195,11 @@ namespace std
                                              problem.outputAmaxD(),
                                              problem.f32XdlMathOp(),
                                              problem.swizzleTensorA(),
-                                             problem.swizzleTensorB());
+                                             problem.swizzleTensorB(),
+                                             problem.mxBlockA(),
+                                             problem.mxBlockB(),
+                                             problem.mxTypeA(),
+                                             problem.mxTypeB());
         }
     };
 
@@ -202,7 +219,8 @@ namespace std
                                                   problem.c(),
                                                   problem.d(),
                                                   problem.e(),
-                                                  problem.computeInputType(),
+                                                  problem.computeInputTypeA(),
+                                                  problem.computeInputTypeB(),
                                                   problem.highPrecisionAccumulate(),
                                                   problem.kernelLanguage(),
                                                   problem.deterministicMode(),
@@ -223,10 +241,15 @@ namespace std
                                                   problem.outputAmaxD(),
                                                   problem.f32XdlMathOp(),
                                                   problem.swizzleTensorA(),
-                                                  problem.swizzleTensorB());
+                                                  problem.swizzleTensorB(),
+                                                  problem.mxBlockA(),
+                                                  problem.mxBlockB(),
+                                                  problem.mxTypeA(),
+                                                  problem.mxTypeB());
             }
             return hash;
         }
     };
 
 } // namespace std
+

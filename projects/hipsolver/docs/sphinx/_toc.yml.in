@@ -5,7 +5,9 @@ subtrees:
 - caption: Install
   entries:
   - file: installation/install.rst
-    title: Installation guide
+    title: Install hipSOLVER
+  - file: installation/build.rst
+    title: Build from source
 
 - caption: How to
   entries:
@@ -14,13 +16,13 @@ subtrees:
 
 - caption: Examples
   entries:
-  - url: https://github.com/ROCm/hipSOLVER/tree/develop/clients/samples
+  - url: https://github.com/ROCm/rocm-libraries/tree/develop/projects/hipsolver/clients/samples
     title: Client samples
 
 - caption: Reference
   entries:
   - file: reference/intro.rst
-  - file: reference/precision.rst
+  - file: reference/data-type-support.rst
   - file: reference/api/index.rst
     entries:
     - file: reference/api/types.rst

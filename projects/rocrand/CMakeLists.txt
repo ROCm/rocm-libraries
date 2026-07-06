@@ -23,6 +23,14 @@
 cmake_minimum_required(VERSION 3.16 FATAL_ERROR)
 cmake_policy(VERSION 3.16...3.25)
 
+# ROCm libraries root (for shared/ctest and other shared resources).
+# Only set the default when not already defined (e.g. by superproject /
+# rocm-libraries). The default assumes the standard
+# rocm-libraries/projects/rocrand layout.
+if(NOT DEFINED ROCM_LIBRARIES_ROOT)
+  set(ROCM_LIBRARIES_ROOT "${CMAKE_CURRENT_SOURCE_DIR}/../..")
+endif()
+
 # Build options
 include(CMakeDependentOption)
 
@@ -35,13 +43,13 @@ option(BUILD_ADDRESS_SANITIZER "Build with address sanitizer enabled" OFF)
 option(CODE_COVERAGE "Build with code coverage flags (clang only)" OFF)
 option(DEPENDENCIES_FORCE_DOWNLOAD "Don't search the system for dependencies, always download them" OFF)
 cmake_dependent_option(RUN_SLOW_TESTS "Run extra tests with CTest. These cover niche functionality and take long time" OFF "BUILD_TEST" OFF)
-
+cmake_dependent_option(USE_SYSTEM_LIB "Use existing system ROCm library installation when building tests" OFF BUILD_TEST OFF)
 
 if (NOT DEFINED ENV{ROCM_PATH})
 #Path to ROCm installation
   set(ENV{ROCM_PATH} "/opt/rocm")
 endif()
-  
+
 # Install prefix
 set(CMAKE_INSTALL_PREFIX "$ENV{ROCM_PATH}" CACHE PATH "Install path prefix, prepended onto install directories")
 
@@ -128,7 +136,7 @@ if(GPU_TARGETS STREQUAL "all")
     )
   else()
     rocm_check_target_ids(DEFAULT_AMDGPU_TARGETS
-      TARGETS "gfx803;gfx900:xnack-;gfx906:xnack-;gfx908:xnack-;gfx90a:xnack-;gfx90a:xnack+;gfx942;gfx950;gfx1030;gfx1100;gfx1101;gfx1102;gfx1200;gfx1201;gfx1151"
+      TARGETS "gfx803;gfx900:xnack-;gfx906:xnack-;gfx908:xnack-;gfx90a:xnack-;gfx90a:xnack+;gfx942;gfx950;gfx1030;gfx1100;gfx1101;gfx1102;gfx1200;gfx1201;gfx1250;gfx1150;gfx1151;gfx1152;gfx1153"
     )
   endif()
 
@@ -179,7 +187,7 @@ if(BUILD_ADDRESS_SANITIZER AND BUILD_SHARED_LIBS)
 endif()
 
 # Set version variables
-rocm_setup_version( VERSION "4.1.0" )
+rocm_setup_version( VERSION "4.5.0" )
 set ( rocrand_VERSION ${rocRAND_VERSION} )
 # Old-style version number used within the library's API. rocrand_get_version should be modified.
 math(EXPR rocrand_VERSION_NUMBER "${rocRAND_VERSION_MAJOR} * 100000 + ${rocRAND_VERSION_MINOR} * 100 + ${rocRAND_VERSION_PATCH}")
@@ -189,11 +197,16 @@ set(rocrand_SOVERSION 1.1)
 include(cmake/Summary.cmake)
 print_configuration_summary()
 
-# Tools
-add_subdirectory(tools)
+# The "tools" and "library" targets may be skipped under certain conditions when USE_SYSTEM_LIB=ON
+if ((NOT BUILD_BENCHMARK) AND (NOT BUILD_FORTRAN_WRAPPER) AND BUILD_TEST AND USE_SYSTEM_LIB)
+  message(STATUS "Skipping the 'tools' and 'library' targets as only BUILD_TEST=ON and USE_SYSTEM_LIB=ON were specified")
+else()
+  # Tools
+  add_subdirectory(tools)
 
-# rocRAND library, adds library target "rocrand" and includes Fortran wrapper
-add_subdirectory(library)
+  # rocRAND library, adds library target "rocrand" and includes Fortran wrapper
+  add_subdirectory(library)
+endif()
 
 if(BUILD_TEST OR BUILD_BENCHMARK)
   rocm_package_setup_component(clients)
@@ -201,6 +214,13 @@ endif()
 
 # Tests
 if (BUILD_TEST)
+    if(USE_SYSTEM_LIB)
+        find_package(rocrand REQUIRED CONFIG PATHS "$ENV{ROCM_PATH}/rocrand")
+        if (NOT ${rocrand_VERSION} VERSION_EQUAL ${rocRAND_VERSION})
+            message(WARNING "The installed rocrand version, ${rocrand_VERSION}, does not match project version ${rocRAND_VERSION}. Building tests with USE_SYSTEM_LIB=ON may not work properly.")
+        endif()
+    endif()
+
     enable_testing()
     rocm_package_setup_client_component(tests)
     add_subdirectory(test)

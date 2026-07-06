@@ -1,28 +1,5 @@
-/*******************************************************************************
- *
- * MIT License
- *
- * Copyright 2024-2025 AMD ROCm(TM) Software
- *
- * Permission is hereby granted, free of charge, to any person obtaining a copy
- * of this software and associated documentation files (the "Software"), to deal
- * in the Software without restriction, including without limitation the rights
- * to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
- * copies of the Software, and to permit persons to whom the Software is
- * furnished to do so, subject to the following conditions:
- *
- * The above copyright notice and this permission notice shall be included in
- * all copies or substantial portions of the Software.
- *
- * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
- * IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
- * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
- * AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
- * LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
- * OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
- * SOFTWARE.
- *
- *******************************************************************************/
+// Copyright Advanced Micro Devices, Inc., or its affiliates.
+// SPDX-License-Identifier: MIT
 
 #pragma once
 
@@ -61,18 +38,28 @@ namespace rocRoller::KernelGraph
         return {tag, expr.rhs};
     }
 
+    template <Graph::Direction Direction, typename EdgeType>
+    std::optional<int> GetEdgeTag(KernelGraph const& graph, int tag)
+    {
+        for(auto elem : graph.coordinates.getNeighbours<Direction>(tag))
+        {
+            auto maybeEdge = graph.coordinates.get<EdgeType>(elem);
+            if(maybeEdge)
+                return elem;
+        }
+        return {};
+    }
+
     template <std::ranges::forward_range Range>
     void purgeNodes(KernelGraph& kgraph, Range nodes)
     {
         for(int tag : nodes)
         {
-            for(auto reap :
-                kgraph.control.getNeighbours<Graph::Direction::Upstream>(tag).to<std::vector>())
+            for(auto reap : kgraph.control.getNeighbours<Graph::Direction::Upstream>(tag))
             {
                 kgraph.control.deleteElement(reap);
             }
-            for(auto reap :
-                kgraph.control.getNeighbours<Graph::Direction::Downstream>(tag).to<std::vector>())
+            for(auto reap : kgraph.control.getNeighbours<Graph::Direction::Downstream>(tag))
             {
                 kgraph.control.deleteElement(reap);
             }
@@ -128,7 +115,7 @@ namespace rocRoller::KernelGraph
     template <Graph::Direction direction>
     void reconnect(KernelGraph& graph, int newop, int op)
     {
-        auto neighbours = graph.control.getNeighbours<direction>(op).template to<std::vector>();
+        auto neighbours = graph.control.getNeighbours<direction>(op);
         for(auto const& tag : neighbours)
         {
             auto edge = graph.control.getElement(tag);
@@ -338,5 +325,96 @@ namespace rocRoller::KernelGraph
         for(auto const a : A)
             for(auto const b : B)
                 kg.control.addElement(EdgeType(), {a}, {b});
+    }
+
+    template <ControlGraph::COperation SrcOpType, ControlGraph::COperation DstOpType>
+    requires(
+        (std::is_same_v<
+             SrcOpType,
+             ControlGraph::LoadTiled> && std::is_same_v<DstOpType, ControlGraph::StoreLDSTile>)
+        || (std::is_same_v<
+                SrcOpType,
+                ControlGraph::StoreLDSTile> && std::is_same_v<DstOpType, ControlGraph::LoadTiled>))
+        std::vector<int> getAssociatedOps(KernelGraph const& kgraph, int srcOpTag)
+    {
+        using namespace ControlGraph;
+        using namespace CoordinateGraph;
+
+        const auto element = kgraph.control.getElement(srcOpTag);
+        AssertFatal(std::holds_alternative<Operation>(element),
+                    concatenate("Expected Operation but got Edge", ShowValue(srcOpTag)));
+
+        const auto op = std::get<Operation>(element);
+        AssertFatal(std::holds_alternative<SrcOpType>(op),
+                    fmt::format("Expected {} but got {}", typeName<SrcOpType>(), toString(op)));
+
+        auto macroTileTag = kgraph.mapper.get<MacroTile>(srcOpTag);
+
+        std::vector<int> rv{};
+
+        for(auto conn : kgraph.mapper.getCoordinateConnections(macroTileTag))
+        {
+            const auto dstOpTag = conn.control;
+            const auto element  = kgraph.control.getElement(dstOpTag);
+            AssertFatal(std::holds_alternative<Operation>(element),
+                        concatenate("Expected Operation but got Edge", ShowValue(dstOpTag)));
+
+            const auto op = std::get<Operation>(element);
+            if(std::holds_alternative<DstOpType>(op))
+            {
+                rv.push_back(dstOpTag);
+            }
+        }
+        return rv;
+    }
+
+    template <std::predicate<int> Predicate>
+    std::vector<std::pair<int, int>> getLoadTiledStoreLDSTilePairs(KernelGraph const& kgraph,
+                                                                   Predicate          predicate)
+    {
+        using namespace ControlGraph;
+        using namespace CoordinateGraph;
+
+        std::vector<std::pair<int, int>> rv;
+
+        for(auto loadTiledTag : kgraph.control.findElements(predicate))
+        {
+            const auto storeLDSTags{
+                getAssociatedOps<LoadTiled, StoreLDSTile>(kgraph, loadTiledTag)};
+
+            if(storeLDSTags.size() == 1)
+            {
+                rv.push_back({loadTiledTag, storeLDSTags[0]});
+            }
+            else
+            {
+                AssertFatal(storeLDSTags.size() <= 2,
+                            "getLoadTiledStoreLDSTilePairs: More than 2 ComputeIndex operation "
+                            "required for StoreLDSTile.",
+                            ShowValue(loadTiledTag),
+                            ShowValue(storeLDSTags.size()));
+                for(const auto& storeLDS : storeLDSTags)
+                {
+                    auto maybeForLoopOfLoad
+                        = findContainingOperation<ForLoopOp>(loadTiledTag, kgraph);
+                    auto maybeForLoopOfStore = findContainingOperation<ForLoopOp>(storeLDS, kgraph);
+
+                    const auto isLoadInLoop  = maybeForLoopOfLoad.has_value();
+                    const auto isStoreInLoop = maybeForLoopOfStore.has_value();
+
+                    const auto bothInSameLoop
+                        = isLoadInLoop && isStoreInLoop
+                          && maybeForLoopOfLoad.value() == maybeForLoopOfStore.value();
+
+                    const auto bothNotInLoop = not isLoadInLoop && not isStoreInLoop;
+
+                    if(bothInSameLoop || bothNotInLoop)
+                    {
+                        rv.push_back({loadTiledTag, storeLDS});
+                    }
+                }
+            }
+        }
+        return rv;
     }
 }

@@ -33,7 +33,7 @@ extern "C" {
 #endif
 
 /*! \ingroup generic_module
-*  \brief Sparse vector inner dot product
+*  \brief Sparse vector inner dot product.
 *
 *  \details
 *  \p rocsparse_spvv computes the inner dot product of the sparse vector \f$x\f$ with the
@@ -59,13 +59,13 @@ extern "C" {
 *      }
 *  \endcode
 *
-*  Performing the above operation involves two steps. First, the user calls \p rocsparse_spvv with \p temp_buffer set to \p nullptr
-*  which will return the required temporary buffer size in the parameter \p buffer_size. The user then allocates this buffer. Finally,
-*  the user then completes the computation by calling \p rocsparse_spvv a second time with the newly allocated buffer. Once the
-*  computation is complete, the user is free to deallocate the buffer.
+*  Performing the above operation involves two steps. First, call \p rocsparse_spvv with \p temp_buffer set to \p nullptr,
+*  which will return the required temporary buffer size in the parameter \p buffer_size. Then allocate this buffer. Finally,
+*  complete the computation by calling \p rocsparse_spvv a second time with the newly allocated buffer. After the
+*  computation is complete, deallocate the buffer.
 *
-*  \p rocsparse_spvv supports the following uniform and mixed precision data types for the sparse and dense vectors \f$x\f$ and
-*  \f$y\f$ and compute types for the scalar \f$result\f$.
+*  \p rocsparse_spvv supports the following uniform and mixed-precision data types for the sparse and dense vectors \f$x\f$ and
+*  \f$y\f$ and compute types for the scalar \p result.
 *
 *  \par Uniform Precisions:
 *  <table>
@@ -77,7 +77,7 @@ extern "C" {
 *  <tr><td>rocsparse_datatype_f64_c
 *  </table>
 *
-*  \par Mixed precisions:
+*  \par Mixed Precisions:
 *  <table>
 *  <caption id="spvv_mixed">Mixed Precisions</caption>
 *  <tr><th>X / Y                     <th>compute_type / result
@@ -89,7 +89,7 @@ extern "C" {
 *
 *  \note
 *  This function writes the required allocation size (in bytes) to \p buffer_size and
-*  returns without performing the SpVV operation, when a nullptr is passed for
+*  returns without performing the SpVV operation when a nullptr is passed for
 *  \p temp_buffer.
 *
 *  \note
@@ -98,8 +98,11 @@ extern "C" {
 *  \note
 *  This routine does not support execution in a hipGraph context.
 *
+*  \note
+*  This routine does not support batched computation.
+*
 *  @param[in]
-*  handle       handle to the rocsparse library context queue.
+*  handle       handle to the rocSPARSE library context queue.
 *  @param[in]
 *  trans        sparse vector operation type.
 *  @param[in]
@@ -107,7 +110,7 @@ extern "C" {
 *  @param[in]
 *  y            dense vector descriptor.
 *  @param[out]
-*  result       pointer to the result, can be host or device memory
+*  result       pointer to the result, which can be in host or device memory.
 *  @param[in]
 *  compute_type floating point precision for the SpVV computation.
 *  @param[out]
@@ -115,12 +118,12 @@ extern "C" {
 *               \p temp_buffer is nullptr.
 *  @param[in]
 *  temp_buffer  temporary storage buffer allocated by the user. When a nullptr is passed,
-*               the required allocation size (in bytes) is written to \p buffer_size and
+*               the required allocation size (in bytes) is written to \p buffer_size and the
 *               function returns without performing the SpVV operation.
 *
 *  \retval      rocsparse_status_success the operation completed successfully.
 *  \retval      rocsparse_status_invalid_handle the library context was not initialized.
-*  \retval      rocsparse_status_invalid_pointer \p x, \p y, \p result or \p buffer_size
+*  \retval      rocsparse_status_invalid_pointer \p x, \p y, \p result, or \p buffer_size
 *               pointer is invalid.
 *  \retval      rocsparse_status_not_implemented \p compute_type is currently not
 *               supported.

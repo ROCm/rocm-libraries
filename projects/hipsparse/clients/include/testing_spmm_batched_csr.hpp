@@ -1,5 +1,5 @@
 /* ************************************************************************
- * Copyright (C) 2022 Advanced Micro Devices, Inc. All rights Reserved.
+ * Copyright (C) 2022-2026 Advanced Micro Devices, Inc. All rights Reserved.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -30,6 +30,7 @@
 #include "gbyte.hpp"
 #include "hipsparse.hpp"
 #include "hipsparse_arguments.hpp"
+#include "hipsparse_graph.hpp"
 #include "hipsparse_test_unique_ptr.hpp"
 #include "unit.hpp"
 #include "utility.hpp"
@@ -41,7 +42,8 @@
 using namespace hipsparse;
 using namespace hipsparse_test;
 
-void testing_spmm_batched_csr_bad_arg(void)
+template <typename I, typename J, typename T>
+void testing_spmm_batched_csr_bad_arg(const Arguments& argus)
 {
 #if(!defined(CUDART_VERSION))
     int32_t              m         = 100;
@@ -65,8 +67,7 @@ void testing_spmm_batched_csr_bad_arg(void)
     hipsparseSpMMAlg_t alg = HIPSPARSE_MM_ALG_DEFAULT;
 #endif
 
-    std::unique_ptr<handle_struct> unique_ptr_handle(new handle_struct);
-    hipsparseHandle_t              handle = unique_ptr_handle->handle;
+    hipsparseLocalHandle_t handle;
 
     auto dptr_managed
         = hipsparse_unique_ptr{device_malloc(sizeof(int64_t) * safe_size), device_free};
@@ -176,14 +177,14 @@ void testing_spmm_batched_csr_bad_arg(void)
 }
 
 template <typename I, typename J, typename T>
-hipsparseStatus_t testing_spmm_batched_csr(Arguments argus)
+void testing_spmm_batched_csr(Arguments argus)
 {
 #if(!defined(CUDART_VERSION))
     J                    m        = argus.M;
     J                    n        = argus.N;
     J                    k        = argus.K;
-    T                    h_alpha  = make_DataType<T>(argus.alpha);
-    T                    h_beta   = make_DataType<T>(argus.beta);
+    T                    h_alpha  = argus.get_alpha<T>();
+    T                    h_beta   = argus.get_beta<T>();
     hipsparseOperation_t transA   = argus.transA;
     hipsparseOperation_t transB   = argus.transB;
     hipsparseOrder_t     orderB   = argus.orderB;
@@ -205,7 +206,7 @@ hipsparseStatus_t testing_spmm_batched_csr(Arguments argus)
 #if(defined(CUDART_VERSION))
     if(orderB != orderC || orderB != HIPSPARSE_ORDER_COL)
     {
-        return HIPSPARSE_STATUS_SUCCESS;
+        return;
     }
 #endif
 
@@ -215,8 +216,7 @@ hipsparseStatus_t testing_spmm_batched_csr(Arguments argus)
     hipDataType          typeT = getDataType<T>();
 
     // hipSPARSE handle
-    std::unique_ptr<handle_struct> unique_ptr_handle(new handle_struct);
-    hipsparseHandle_t              handle = unique_ptr_handle->handle;
+    hipsparseLocalHandle_t handle(argus);
 
     // Host structures
     std::vector<I> hcsr_row_ptr_temp;
@@ -227,18 +227,18 @@ hipsparseStatus_t testing_spmm_batched_csr(Arguments argus)
     srand(12345ULL);
 
     I nnz_A;
-    if(!generate_csr_matrix(filename,
+    CHECK_GENERATE_MATRIX_ERROR(
+        generate_csr_matrix(filename,
                             (transA == HIPSPARSE_OPERATION_NON_TRANSPOSE) ? m : k,
                             (transA == HIPSPARSE_OPERATION_NON_TRANSPOSE) ? k : m,
                             nnz_A,
                             hcsr_row_ptr_temp,
                             hcsr_col_ind_temp,
                             hcsr_val_temp,
-                            idx_base))
-    {
-        fprintf(stderr, "Cannot open [read] %s\ncol", filename.c_str());
-        return HIPSPARSE_STATUS_INTERNAL_ERROR;
-    }
+                            idx_base));
+
+    // Redefine sparse matrix values
+    hipsparseInit<T>(hcsr_val_temp, hcsr_val_temp.size(), 1);
 
     // Some matrix properties
     J A_m = (transA == HIPSPARSE_OPERATION_NON_TRANSPOSE) ? m : k;
@@ -362,7 +362,7 @@ hipsparseStatus_t testing_spmm_batched_csr(Arguments argus)
 
     // Query SpMM buffer
     size_t bufferSize;
-    CHECK_HIPSPARSE_ERROR(hipsparseSpMM_bufferSize(
+    CHECK_HIPSPARSE_ERROR(testing::hipsparseSpMM_bufferSize(
         handle, transA, transB, &h_alpha, A, B, &h_beta, C1, typeT, alg, &bufferSize));
 
 #if(!defined(CUDART_VERSION) || CUDART_VERSION >= 11021)
@@ -379,26 +379,26 @@ hipsparseStatus_t testing_spmm_batched_csr(Arguments argus)
     // HIPSPARSE pointer mode host
 #if(!defined(CUDART_VERSION) || CUDART_VERSION >= 11021)
     CHECK_HIPSPARSE_ERROR(hipsparseSetPointerMode(handle, HIPSPARSE_POINTER_MODE_HOST));
-    CHECK_HIPSPARSE_ERROR(hipsparseSpMM_preprocess(
+    CHECK_HIPSPARSE_ERROR(testing::hipsparseSpMM_preprocess(
         handle, transA, transB, &h_alpha, A, B, &h_beta, C1, typeT, alg, buffer));
 #endif
 
     // HIPSPARSE pointer mode device
 #if(!defined(CUDART_VERSION) || CUDART_VERSION >= 11021)
     CHECK_HIPSPARSE_ERROR(hipsparseSetPointerMode(handle, HIPSPARSE_POINTER_MODE_DEVICE));
-    CHECK_HIPSPARSE_ERROR(hipsparseSpMM_preprocess(
+    CHECK_HIPSPARSE_ERROR(testing::hipsparseSpMM_preprocess(
         handle, transA, transB, d_alpha, A, B, d_beta, C2, typeT, alg, buffer));
 #endif
 
     if(argus.unit_check)
     {
         CHECK_HIPSPARSE_ERROR(hipsparseSetPointerMode(handle, HIPSPARSE_POINTER_MODE_HOST));
-        CHECK_HIPSPARSE_ERROR(
-            hipsparseSpMM(handle, transA, transB, &h_alpha, A, B, &h_beta, C1, typeT, alg, buffer));
+        CHECK_HIPSPARSE_ERROR(testing::hipsparseSpMM(
+            handle, transA, transB, &h_alpha, A, B, &h_beta, C1, typeT, alg, buffer));
 
         CHECK_HIPSPARSE_ERROR(hipsparseSetPointerMode(handle, HIPSPARSE_POINTER_MODE_DEVICE));
-        CHECK_HIPSPARSE_ERROR(
-            hipsparseSpMM(handle, transA, transB, d_alpha, A, B, d_beta, C2, typeT, alg, buffer));
+        CHECK_HIPSPARSE_ERROR(testing::hipsparseSpMM(
+            handle, transA, transB, d_alpha, A, B, d_beta, C2, typeT, alg, buffer));
 
         // copy output from device to CPU
         CHECK_HIP_ERROR(
@@ -407,31 +407,31 @@ hipsparseStatus_t testing_spmm_batched_csr(Arguments argus)
             hipMemcpy(hC_2.data(), dC_2, sizeof(T) * batch_count_C * nnz_C, hipMemcpyDeviceToHost));
 
         // CPU
-        host_csrmm_batched(A_m,
-                           n,
-                           A_n,
-                           batch_count_A,
-                           (I)offsets_batch_stride_A,
-                           (I)columns_values_batch_stride_A,
-                           transA,
-                           transB,
-                           h_alpha,
-                           hcsr_row_ptr.data(),
-                           hcsr_col_ind.data(),
-                           hcsr_val.data(),
-                           hB.data(),
-                           (J)ldb,
-                           batch_count_B,
-                           (I)batch_stride_B,
-                           orderB,
-                           h_beta,
-                           hC_gold.data(),
-                           (J)ldc,
-                           batch_count_C,
-                           (I)batch_stride_C,
-                           orderC,
-                           idx_base,
-                           false);
+        host_csrmm_batched<T, I, J>(A_m,
+                                    n,
+                                    A_n,
+                                    batch_count_A,
+                                    offsets_batch_stride_A,
+                                    columns_values_batch_stride_A,
+                                    transA,
+                                    transB,
+                                    h_alpha,
+                                    hcsr_row_ptr.data(),
+                                    hcsr_col_ind.data(),
+                                    hcsr_val.data(),
+                                    hB.data(),
+                                    ldb,
+                                    batch_count_B,
+                                    batch_stride_B,
+                                    orderB,
+                                    h_beta,
+                                    hC_gold.data(),
+                                    ldc,
+                                    batch_count_C,
+                                    batch_stride_C,
+                                    orderC,
+                                    idx_base,
+                                    false);
 
         unit_check_near(1, batch_count_C * nnz_C, 1, hC_gold.data(), hC_1.data());
         unit_check_near(1, batch_count_C * nnz_C, 1, hC_gold.data(), hC_2.data());
@@ -447,7 +447,7 @@ hipsparseStatus_t testing_spmm_batched_csr(Arguments argus)
         // Warm up
         for(int iter = 0; iter < number_cold_calls; ++iter)
         {
-            CHECK_HIPSPARSE_ERROR(hipsparseSpMM(
+            CHECK_HIPSPARSE_ERROR(testing::hipsparseSpMM(
                 handle, transA, transB, &h_alpha, A, B, &h_beta, C1, typeT, alg, buffer));
         }
 
@@ -456,7 +456,7 @@ hipsparseStatus_t testing_spmm_batched_csr(Arguments argus)
         // Performance run
         for(int iter = 0; iter < number_hot_calls; ++iter)
         {
-            CHECK_HIPSPARSE_ERROR(hipsparseSpMM(
+            CHECK_HIPSPARSE_ERROR(testing::hipsparseSpMM(
                 handle, transA, transB, &h_alpha, A, B, &h_beta, C1, typeT, alg, buffer));
         }
 
@@ -512,8 +512,6 @@ hipsparseStatus_t testing_spmm_batched_csr(Arguments argus)
     CHECK_HIPSPARSE_ERROR(hipsparseDestroyDnMat(C2));
 
 #endif
-
-    return HIPSPARSE_STATUS_SUCCESS;
 }
 
 #endif // TESTING_SPMM_BATCHED_CSR_HPP

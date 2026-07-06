@@ -35,7 +35,7 @@
    include a minimal definition of rocsparse_bfloat16 */
 
 #include <stdint.h>
-/*! \brief Struct to represent a 16 bit brain floating-point number. */
+/*! \brief Struct to represent a 16-bit brain floating-point number. */
 typedef struct
 {
     uint16_t data; /**< brain float storage. */
@@ -50,7 +50,7 @@ typedef struct
 #include <ostream>
 #include <type_traits>
 
-/*! \brief Struct to represent a 16 bit brain floating-point number. */
+/*! \brief Struct to represent a 16-bit brain floating-point number. */
 struct ROCSPARSE_EXPORT rocsparse_bfloat16
 {
     uint16_t data;
@@ -128,22 +128,17 @@ struct ROCSPARSE_EXPORT rocsparse_bfloat16
 
     explicit __host__ __device__ operator double() const
     {
-        union
-        {
-            uint64_t int64;
-            double   fp64;
-        } u = {uint64_t(data) << 48};
-        return u.fp64;
+        return static_cast<double>(static_cast<float>(*this));
     }
 
     explicit __host__ __device__ operator int32_t() const
     {
-        return static_cast<int32_t>(static_cast<float>(data));
+        return static_cast<int32_t>(static_cast<float>(*this));
     }
 
     explicit __host__ __device__ operator int64_t() const
     {
-        return static_cast<int64_t>(static_cast<float>(data));
+        return static_cast<int64_t>(static_cast<float>(*this));
     }
 
     explicit __host__ __device__ operator bool() const
@@ -319,69 +314,73 @@ inline __host__ __device__ bool operator>=(rocsparse_bfloat16 a, rocsparse_bfloa
 {
     return !(a < b);
 }
-inline __host__ __device__ rocsparse_bfloat16 operator+=(rocsparse_bfloat16 a, rocsparse_bfloat16 b)
+inline __host__ __device__ rocsparse_bfloat16& operator+=(rocsparse_bfloat16& a,
+                                                          rocsparse_bfloat16  b)
 {
     return a = a + b;
 }
-inline __host__ __device__ rocsparse_bfloat16 operator+=(rocsparse_bfloat16 a, float b)
+inline __host__ __device__ rocsparse_bfloat16& operator+=(rocsparse_bfloat16& a, float b)
 {
     return a = rocsparse_bfloat16(float(a) + b);
 }
-inline __host__ __device__ float operator+=(float a, rocsparse_bfloat16 b)
+inline __host__ __device__ float& operator+=(float& a, rocsparse_bfloat16 b)
 {
     return a = a + float(b);
 }
-inline __host__ __device__ rocsparse_bfloat16 operator-=(rocsparse_bfloat16 a, rocsparse_bfloat16 b)
+inline __host__ __device__ rocsparse_bfloat16& operator-=(rocsparse_bfloat16& a,
+                                                          rocsparse_bfloat16  b)
 {
     return a = a - b;
 }
-inline __host__ __device__ rocsparse_bfloat16 operator-=(rocsparse_bfloat16 a, float b)
+inline __host__ __device__ rocsparse_bfloat16& operator-=(rocsparse_bfloat16& a, float b)
 {
     return a = rocsparse_bfloat16(float(a) - b);
 }
-inline __host__ __device__ float operator-=(float a, rocsparse_bfloat16 b)
+inline __host__ __device__ float& operator-=(float& a, rocsparse_bfloat16 b)
 {
     return a = a - float(b);
 }
-inline __host__ __device__ rocsparse_bfloat16 operator*=(rocsparse_bfloat16 a, rocsparse_bfloat16 b)
+inline __host__ __device__ rocsparse_bfloat16& operator*=(rocsparse_bfloat16& a,
+                                                          rocsparse_bfloat16  b)
 {
     return a = a * b;
 }
-inline __host__ __device__ float operator*=(rocsparse_bfloat16 a, float b)
+inline __host__ __device__ rocsparse_bfloat16& operator*=(rocsparse_bfloat16& a, float b)
 {
-    return a = float(a) * b;
+    return a = rocsparse_bfloat16(float(a) * b);
 }
-inline __host__ __device__ float operator*=(float a, rocsparse_bfloat16 b)
+inline __host__ __device__ float& operator*=(float& a, rocsparse_bfloat16 b)
 {
     return a = a * float(b);
 }
-inline __host__ __device__ rocsparse_bfloat16 operator/=(rocsparse_bfloat16 a, rocsparse_bfloat16 b)
+inline __host__ __device__ rocsparse_bfloat16& operator/=(rocsparse_bfloat16& a,
+                                                          rocsparse_bfloat16  b)
 {
     return a = a / b;
 }
-inline __host__ __device__ rocsparse_bfloat16 operator/=(rocsparse_bfloat16 a, float b)
+inline __host__ __device__ rocsparse_bfloat16& operator/=(rocsparse_bfloat16& a, float b)
 {
     return a = rocsparse_bfloat16(float(a) / b);
 }
-inline __host__ __device__ float operator/=(float a, rocsparse_bfloat16 b)
+inline __host__ __device__ float& operator/=(float& a, rocsparse_bfloat16 b)
 {
     return a = a / float(b);
 }
-inline __host__ __device__ rocsparse_bfloat16 operator++(rocsparse_bfloat16 a)
+inline __host__ __device__ rocsparse_bfloat16& operator++(rocsparse_bfloat16& a)
 {
     return a += rocsparse_bfloat16(1.0f);
 }
-inline __host__ __device__ rocsparse_bfloat16 operator--(rocsparse_bfloat16 a)
+inline __host__ __device__ rocsparse_bfloat16& operator--(rocsparse_bfloat16& a)
 {
     return a -= rocsparse_bfloat16(1.0f);
 }
-inline __host__ __device__ rocsparse_bfloat16 operator++(rocsparse_bfloat16 a, int)
+inline __host__ __device__ rocsparse_bfloat16 operator++(rocsparse_bfloat16& a, int)
 {
     rocsparse_bfloat16 orig = a;
     ++a;
     return orig;
 }
-inline __host__ __device__ rocsparse_bfloat16 operator--(rocsparse_bfloat16 a, int)
+inline __host__ __device__ rocsparse_bfloat16 operator--(rocsparse_bfloat16& a, int)
 {
     rocsparse_bfloat16 orig = a;
     --a;

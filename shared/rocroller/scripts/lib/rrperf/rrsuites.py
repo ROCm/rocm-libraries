@@ -1,36 +1,19 @@
-################################################################################
-#
-# MIT License
-#
-# Copyright 2024-2025 AMD ROCm(TM) Software
-#
-# Permission is hereby granted, free of charge, to any person obtaining a copy
-# of this software and associated documentation files (the "Software"), to deal
-# in the Software without restriction, including without limitation the rights
-# to use, copy, modify, merge, publish, distribute, sublicense, and/or sell cop-
-# ies of the Software, and to permit persons to whom the Software is furnished
-# to do so, subject to the following conditions:
-#
-# The above copyright notice and this permission notice shall be included in all
-# copies or substantial portions of the Software.
-#
-# THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR IM-
-# PLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY, FITNESS
-# FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE AUTHORS OR
-# COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER
-# IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNE-
-# CTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
-#
-################################################################################
+# Copyright Advanced Micro Devices, Inc., or its affiliates.
+# SPDX-License-Identifier: MIT
 
-from rrperf.problems import GEMMRun, CodeGenRun, TensileRun, TypeParameters
+from itertools import product
+from pathlib import Path
+from typing import Generator
+
+from rrperf.problems import (
+    CodeGenRun,
+    GEMMRun,
+    MKNLTuple,
+    TypeParameters,
+)
 from rrperf.utils import rocm_gfx
 
-import pathlib
-from itertools import product
-from typing import List
-
-repo_dir = pathlib.Path(__file__).resolve().parent.parent.parent.parent
+repo_dir = Path(__file__).resolve().parent.parent.parent.parent
 
 fp4fp4_fp32 = TypeParameters(
     type_A="fp4",
@@ -127,6 +110,10 @@ HGEMM_7680x8448x8448 = dict(
     workgroup_size_x=128,
     workgroup_size_y=2,
     types=TypeParameters(fp16, trans_A="N", trans_B="T"),
+)
+
+SGEMM_256x256x16384 = dict(
+    M=256, N=256, K=16384, mac_m=64, mac_n=64, mac_k=64, types=fp32
 )
 
 
@@ -427,7 +414,7 @@ def visualizer():
         beta=0.5,
         workgroup_size_x=256,
         workgroup_size_y=1,
-        storeLDS_D=False,
+        store="VGPRToGlobalMemoryWithBuffer",
         visualize=True,
         prefetch=False,
         types=TypeParameters(
@@ -492,7 +479,7 @@ def hgemm_no_store_LDS():
             mac_m=128,
             mac_n=256,
             mac_k=16,
-            storeLDS_D=False,
+            store="VGPRToGlobalMemoryWithBuffer",
             scheduler="Priority",
             prefetch=True,
             prefetchInFlight=2,
@@ -500,42 +487,42 @@ def hgemm_no_store_LDS():
         )
 
 
-def tensile_guidepost():
-    yield TensileRun(
-        config=str(
-            repo_dir
-            / "test"
-            / "unit"
-            / "GemmGuidePost"
-            / "HGemmGuidePost_Optimized.yaml"
-        ),
-    )
-
-
-def tensile_sgemm_guidepost():
-    yield TensileRun(
-        config=str(
-            repo_dir
-            / "test"
-            / "unit"
-            / "GemmGuidePost"
-            / "GemmGuidePost_Optimized.yaml"
-        ),
-    )
-
-
 def streamk_sweep():
-    for twoTile in {True, False}:
+    # Prefetch configurations: (prefetch, prefetchInFlight, prefetchLDSFactor)
+    prefetchConfigs = [(False, 0, 0)] + [(True, 2, 2)]
+
+    for twoTile, twoTileDPFirst in [(True, False), (False, True), (False, False)]:
         for base in [HGEMM_7680x8448x8448]:
             # Currently these run out of LDS everywhere except gfx950.
             # + [SGEMM_3072x4096x4096]
             for mac_m in [64, 128]:
                 for mac_n in [64, 128, 256]:
                     for mac_k in [16, 32, 64]:
-                        if twoTile and mac_m * mac_n * mac_k >= (64 * 256 * 64):
-                            # currently these run out of VGPRs.
-                            pass
-                        else:
+                        for (
+                            prefetch,
+                            prefetchInFlight,
+                            prefetchLDSFactor,
+                        ) in prefetchConfigs:
+                            # Runs out of VGPRs
+                            if (
+                                twoTile or twoTileDPFirst
+                            ) and mac_m * mac_n * mac_k >= (64 * 256 * 64):
+                                continue
+
+                            # Runs out of VGPRs: TwoTile/TwoTileDPFirst + prefetch
+                            if (twoTile or twoTileDPFirst) and prefetch:
+                                continue
+
+                            # Runs out of VGPRs: Standard + large tiles + prefetchLDSFactor=2
+                            if (
+                                (not twoTile and not twoTileDPFirst)
+                                and prefetch
+                                and mac_n == 256
+                                and mac_k == 64
+                                and prefetchLDSFactor == 2
+                            ):
+                                continue
+
                             yield mkGEMM(
                                 base,
                                 mac_m=mac_m,
@@ -544,11 +531,18 @@ def streamk_sweep():
                                 workgroup_size_x=128,
                                 workgroup_size_y=2,
                                 visualize=False,
-                                prefetch=False,  # TODO: Fix k loop unrolling with stream k
-                                # prefetchInFlight=2,
-                                # prefetchLDSFactor=2,
-                                streamK=True,
-                                streamKTwoTile=twoTile,
+                                prefetch=prefetch,
+                                prefetchInFlight=prefetchInFlight,
+                                prefetchLDSFactor=prefetchLDSFactor,
+                                streamK=(
+                                    "TwoTile"
+                                    if twoTile
+                                    else (
+                                        "TwoTileDPFirst"
+                                        if twoTileDPFirst
+                                        else "Standard"
+                                    )
+                                ),
                                 types=TypeParameters(
                                     base["types"],
                                     trans_A="N",
@@ -558,18 +552,22 @@ def streamk_sweep():
 
 
 def streamk():
-    for twoTile in {True, False}:
+    common_overrides = dict(
+        workgroup_size_x=128,
+        workgroup_size_y=2,
+        prefetch=False,
+        # TODO: Consider enabling, some run out of VGPRs
+        # prefetch=True,
+        # prefetchInFlight=2,
+        # prefetchLDSFactor=2,
+    )
+
+    for streamKMode in ["TwoTile", "TwoTileDPFirst", "Standard"]:
         # SGEMM
         yield mkGEMM(
             SGEMM_3072x4096x4096,
-            workgroup_size_x=128,
-            workgroup_size_y=2,
-            visualize=False,
-            prefetch=False,  # TODO: Fix k loop unrolling with stream k
-            # prefetchInFlight=2,
-            # prefetchLDSFactor=2,
-            streamK=True,
-            streamKTwoTile=twoTile,
+            **common_overrides,
+            streamK=streamKMode,
             types=TypeParameters(
                 SGEMM_3072x4096x4096["types"],
                 trans_A="N",
@@ -582,13 +580,8 @@ def streamk():
             mac_m=128,
             mac_n=256,
             mac_k=16,
-            workgroup_size_x=128,
-            workgroup_size_y=2,
-            prefetch=False,  # TODO: Fix k loop unrolling with stream k
-            # prefetchInFlight=2,
-            # prefetchLDSFactor=2,
-            streamK=True,
-            streamKTwoTile=twoTile,
+            **common_overrides,
+            streamK=streamKMode,
             types=TypeParameters(
                 HGEMM_7680x8448x8448["types"],
                 trans_A="N",
@@ -600,9 +593,8 @@ def streamk():
             mac_m=128,
             mac_n=256,
             mac_k=16,
-            prefetch=False,  # TODO: Fix k loop unrolling with stream k
-            streamK=True,
-            streamKTwoTile=twoTile,
+            **common_overrides,
+            streamK=streamKMode,
             types=TypeParameters(
                 HGEMM_7680x8448x8192["types"],
                 trans_A="N",
@@ -611,12 +603,30 @@ def streamk():
         )
 
 
+def smallMN_largeK_fp32():
+    yield mkGEMM(
+        SGEMM_256x256x16384,
+        workgroup_size_x=128,
+        workgroup_size_y=2,
+        visualize=False,
+        prefetch=False,
+        # prefetchInFlight=2,
+        # prefetchLDSFactor=2,
+        streamK="None",
+        types=TypeParameters(
+            SGEMM_256x256x16384["types"],
+            trans_A="T",
+            trans_B="N",
+        ),
+    )
+
+
 def scalar_is_zero():
     # TODO: Make streamK and ConstantPropagation transformation can be both applied
     sgemm = update_parameters(
         SGEMM_3072x4096x4096,
         beta=0.0,
-        streamK=False,
+        streamK="None",
     )
     yield mkGEMM(sgemm)
     yield mkGEMM(sgemm, mac_m=128, mac_n=64, mac_k=16)
@@ -624,7 +634,7 @@ def scalar_is_zero():
     hgemm = update_parameters(
         HGEMM_7680x8448x8192,
         beta=0.0,
-        streamK=False,
+        streamK="None",
     )
     yield mkGEMM(hgemm)
     yield mkGEMM(
@@ -659,11 +669,6 @@ def scalar_is_zero():
         workgroup_size_x=64,
         workgroup_size_y=4,
     )
-
-
-def tensile_benchmarks():
-    yield from tensile_guidepost()
-    yield from tensile_sgemm_guidepost()
 
 
 def codegen():
@@ -980,6 +985,116 @@ def bf16bf16gemm_32x32x4():
     )
 
 
+def fp4_small():
+    yield GEMMRun(
+        M=256,
+        N=256,
+        K=256,
+        beta=0.0,
+        mac_m=128,
+        mac_n=128,
+        mac_k=256,
+        wave_m=16,
+        wave_n=16,
+        wave_k=128,
+        wave_b=1,
+        workgroup_size_x=128,
+        workgroup_size_y=2,
+        workgroupMappingDim=0,
+        workgroupMappingValue=2,
+        load_A="BufferToLDS",
+        load_B="BufferToLDS",
+        loadScale_A="BufferToLDS",
+        loadScale_B="BufferToLDS",
+        store="VGPRToGlobalMemoryWithBuffer",
+        prefetch=True,
+        prefetchInFlight=2,
+        prefetchLDSFactor=1,
+        prefetchScale=True,
+        pretileScale=True,
+        swizzleScale=True,
+        prefetchMixMemOps=True,
+        betaInFma=True,
+        scheduler="Priority",
+        schedulerCost="LinearWeightedSimple",
+        tailLoops=True,
+        types=TypeParameters(
+            trans_A="T",
+            trans_B="N",
+            type_A="fp4",
+            type_B="fp4",
+            type_C="half",
+            type_D="half",
+            type_acc="float",
+            scale_A="Separate",
+            scaleType_A="E8M0",
+            scale_B="Separate",
+            scaleType_B="E8M0",
+            scaleBlockSize=32,
+            scaleSkipPermlane="PreSwizzleScaleGFX950",
+        ),
+        swizzleTileSize=MKNLTuple(32, 8, 32, 8),
+        numOuter=1,
+        numWarmUp=1000,
+        numInner=1000,
+    )
+
+
+def fp4_small_k():
+    yield GEMMRun(
+        M=4096,
+        N=4096,
+        K=256,
+        beta=0.0,
+        mac_m=128,
+        mac_n=128,
+        mac_k=256,
+        wave_m=16,
+        wave_n=16,
+        wave_k=128,
+        wave_b=1,
+        workgroup_size_x=128,
+        workgroup_size_y=2,
+        workgroupMappingDim=0,
+        workgroupMappingValue=2,
+        load_A="BufferToLDS",
+        load_B="BufferToLDS",
+        loadScale_A="BufferToLDS",
+        loadScale_B="BufferToLDS",
+        store="VGPRToGlobalMemoryWithBuffer",
+        prefetch=True,
+        prefetchInFlight=2,
+        prefetchLDSFactor=1,
+        prefetchScale=True,
+        pretileScale=True,
+        swizzleScale=True,
+        prefetchMixMemOps=True,
+        betaInFma=True,
+        scheduler="Priority",
+        schedulerCost="LinearWeightedSimple",
+        tailLoops=True,
+        types=TypeParameters(
+            trans_A="T",
+            trans_B="N",
+            type_A="fp4",
+            type_B="fp4",
+            type_C="half",
+            type_D="half",
+            type_acc="float",
+            scale_A="Separate",
+            scaleType_A="E8M0",
+            scale_B="Separate",
+            scaleType_B="E8M0",
+            scaleBlockSize=32,
+            scaleSkipPermlane="PreSwizzleScaleGFX950",
+        ),
+        swizzleTileSize=MKNLTuple(32, 8, 32, 8),
+        numOuter=1,
+        numWarmUp=1000,
+        numInner=1000,
+    )
+
+
 def fp4_target():
     yield GEMMRun(
         M=4096,
@@ -994,19 +1109,16 @@ def fp4_target():
         wave_b=1,
         workgroup_size_x=128,
         workgroup_size_y=2,
-        unroll_x=0,
-        unroll_y=0,
-        loadLDS_A=True,
-        loadLDS_B=True,
-        loadLDSScale_A=True,
-        loadLDSScale_B=True,
-        storeLDS_D=True,
+        load_A="BufferToLDSViaVGPR",
+        load_B="BufferToLDSViaVGPR",
+        loadScale_A="BufferToLDSViaVGPR",
+        loadScale_B="BufferToLDSViaVGPR",
+        store="VGPRToGlobalMemoryViaLDSWithBuffer",
         prefetch=True,
         prefetchInFlight=2,
         prefetchLDSFactor=2,
         betaInFma=True,
         scheduler="Priority",
-        matchMemoryAccess=True,
         types=TypeParameters(
             trans_A="T",
             trans_B="N",
@@ -1021,6 +1133,7 @@ def fp4_target():
             scaleType_B="E8M0",
             scaleBlockSize=32,
         ),
+        swizzleTileSize=MKNLTuple(64, 64 // 32 * 2 * 2, 64, 64 // 32 * 2 * 2),
         numOuter=1,
         numWarmUp=1000,
         numInner=1000,
@@ -1041,19 +1154,16 @@ def fp4_target_d2lds_mi32x32x64_pf2x1():
         wave_b=1,
         workgroup_size_x=128,
         workgroup_size_y=2,
-        unroll_x=0,
-        unroll_y=0,
-        direct2LDS_A=True,
-        direct2LDS_B=True,
-        loadLDSScale_A=True,
-        loadLDSScale_B=True,
-        storeLDS_D=True,
+        load_A="BufferToLDS",
+        load_B="BufferToLDS",
+        loadScale_A="BufferToLDSViaVGPR",
+        loadScale_B="BufferToLDSViaVGPR",
+        store="VGPRToGlobalMemoryViaLDSWithBuffer",
         prefetch=True,
         prefetchInFlight=2,
         prefetchLDSFactor=1,
         betaInFma=True,
         scheduler="Priority",
-        matchMemoryAccess=True,
         types=TypeParameters(
             trans_A="T",
             trans_B="N",
@@ -1068,6 +1178,7 @@ def fp4_target_d2lds_mi32x32x64_pf2x1():
             scaleType_B="E8M0",
             scaleBlockSize=32,
         ),
+        swizzleTileSize=MKNLTuple(64, 64 // 32 * 2 * 2, 64, 64 // 32 * 2 * 2),
         numOuter=1,
         numWarmUp=1000,
         numInner=1000,
@@ -1081,9 +1192,23 @@ def add_wgm(mapping, suite):
         yield run
 
 
-def addSkipPermlane(suite: List[GEMMRun], value=True):
+def addSkipPermlane(suite: Generator[GEMMRun, None, None], value="PreSwizzleScale"):
     for run in suite:
         run.types.scaleSkipPermlane = value
+        yield run
+
+
+def addStreamK(suite: Generator[GEMMRun, None, None], value="Standard"):
+    for run in suite:
+        run.streamK = value
+        if run.types.scale_A == "Separate" or run.types.scale_B == "Separate":
+            run.schedulerCost = "LinearWeightedSimpleStreamK"
+        yield run
+
+
+def addLDSBankSwizzle(suite, value="Swizzle"):
+    for run in suite:
+        run.ldsBankSwizzle = value
         yield run
 
 
@@ -1114,13 +1239,11 @@ def fp4_target_d2lds_mi32x32x64_pf4x1():
         wave_b=1,
         workgroup_size_x=128,
         workgroup_size_y=2,
-        unroll_x=0,
-        unroll_y=0,
-        direct2LDS_A=True,
-        direct2LDS_B=True,
-        loadLDSScale_A=False,
-        loadLDSScale_B=False,
-        storeLDS_D=False,
+        load_A="BufferToLDS",
+        load_B="BufferToLDS",
+        loadScale_A="BufferToVGPR",
+        loadScale_B="BufferToVGPR",
+        store="VGPRToGlobalMemoryWithBuffer",
         prefetch=True,
         prefetchInFlight=4,
         prefetchLDSFactor=1,
@@ -1129,7 +1252,6 @@ def fp4_target_d2lds_mi32x32x64_pf4x1():
         prefetchMixMemOps=True,
         betaInFma=True,
         scheduler="Priority",
-        matchMemoryAccess=True,
         types=TypeParameters(
             trans_A="T",
             trans_B="N",
@@ -1144,6 +1266,56 @@ def fp4_target_d2lds_mi32x32x64_pf4x1():
             scaleType_B="E8M0",
             scaleBlockSize=32,
         ),
+        swizzleTileSize=MKNLTuple(64, 64 // 32 * 2 * 4, 64, 64 // 32 * 2 * 4),
+        numOuter=1,
+        numWarmUp=1000,
+        numInner=1000,
+    )
+
+
+def fp4_target_d2lds_mi32x32x64_st32x8_pf4x1():
+    yield GEMMRun(
+        M=4096,
+        N=4096,
+        K=32768,
+        beta=0.0,
+        mac_m=128,
+        mac_n=128,
+        mac_k=256,
+        wave_m=32,
+        wave_n=32,
+        wave_k=64,
+        wave_b=1,
+        workgroup_size_x=128,
+        workgroup_size_y=2,
+        load_A="BufferToLDS",
+        load_B="BufferToLDS",
+        loadScale_A="BufferToVGPR",
+        loadScale_B="BufferToVGPR",
+        store="VGPRToGlobalMemoryWithBuffer",
+        prefetch=True,
+        prefetchInFlight=4,
+        prefetchLDSFactor=1,
+        prefetchScale=True,
+        swizzleScale=True,
+        prefetchMixMemOps=True,
+        betaInFma=True,
+        scheduler="Priority",
+        types=TypeParameters(
+            trans_A="T",
+            trans_B="N",
+            type_A="fp4",
+            type_B="fp4",
+            type_C="half",
+            type_D="half",
+            type_acc="float",
+            scale_A="Separate",
+            scaleType_A="E8M0",
+            scale_B="Separate",
+            scaleType_B="E8M0",
+            scaleBlockSize=32,
+        ),
+        swizzleTileSize=MKNLTuple(32, 8, 32, 8),
         numOuter=1,
         numWarmUp=1000,
         numInner=1000,
@@ -1152,10 +1324,12 @@ def fp4_target_d2lds_mi32x32x64_pf4x1():
 
 def fp4_target_d2lds_mi32x32x64_pf4x1_wgm():
     yield from add_wgm((0, 2), fp4_target_d2lds_mi32x32x64_pf4x1())
+    yield from add_wgm((0, 2), fp4_target_d2lds_mi32x32x64_st32x8_pf4x1())
 
 
 def fp4_target_d2lds_mi32x32x64_pf4x1_both():
     yield from fp4_target_d2lds_mi32x32x64_pf4x1()
+    yield from fp4_target_d2lds_mi32x32x64_st32x8_pf4x1()
     yield from fp4_target_d2lds_mi32x32x64_pf4x1_wgm()
 
 
@@ -1174,13 +1348,11 @@ def fp4_target_d2lds_mi16x16x128_pf4x1():
         wave_b=1,
         workgroup_size_x=128,
         workgroup_size_y=2,
-        unroll_x=0,
-        unroll_y=0,
-        direct2LDS_A=True,
-        direct2LDS_B=True,
-        loadLDSScale_A=False,
-        loadLDSScale_B=False,
-        storeLDS_D=False,
+        load_A="BufferToLDS",
+        load_B="BufferToLDS",
+        loadScale_A="BufferToVGPR",
+        loadScale_B="BufferToVGPR",
+        store="VGPRToGlobalMemoryWithBuffer",
         prefetch=True,
         prefetchInFlight=4,
         prefetchLDSFactor=1,
@@ -1189,7 +1361,7 @@ def fp4_target_d2lds_mi16x16x128_pf4x1():
         prefetchMixMemOps=True,
         betaInFma=True,
         scheduler="Priority",
-        matchMemoryAccess=True,
+        schedulerCost="LinearWeightedSimple",
         types=TypeParameters(
             trans_A="T",
             trans_B="N",
@@ -1204,6 +1376,57 @@ def fp4_target_d2lds_mi16x16x128_pf4x1():
             scaleType_B="E8M0",
             scaleBlockSize=32,
         ),
+        swizzleTileSize=MKNLTuple(64, 128 // 32 * 1 * 4, 64, 128 // 32 * 1 * 4),
+        numOuter=1,
+        numWarmUp=1000,
+        numInner=1000,
+    )
+
+
+def fp4_target_d2lds_mi16x16x128_st32x8_pf4x1():
+    yield GEMMRun(
+        M=4096,
+        N=4096,
+        K=32768,
+        beta=0.0,
+        mac_m=128,
+        mac_n=128,
+        mac_k=256,
+        wave_m=16,
+        wave_n=16,
+        wave_k=128,
+        wave_b=1,
+        workgroup_size_x=128,
+        workgroup_size_y=2,
+        load_A="BufferToLDS",
+        load_B="BufferToLDS",
+        loadScale_A="BufferToVGPR",
+        loadScale_B="BufferToVGPR",
+        store="VGPRToGlobalMemoryWithBuffer",
+        prefetch=True,
+        prefetchInFlight=4,
+        prefetchLDSFactor=1,
+        prefetchScale=True,
+        swizzleScale=True,
+        prefetchMixMemOps=True,
+        betaInFma=True,
+        scheduler="Priority",
+        schedulerCost="LinearWeightedSimple",
+        types=TypeParameters(
+            trans_A="T",
+            trans_B="N",
+            type_A="fp4",
+            type_B="fp4",
+            type_C="half",
+            type_D="half",
+            type_acc="float",
+            scale_A="Separate",
+            scaleType_A="E8M0",
+            scale_B="Separate",
+            scaleType_B="E8M0",
+            scaleBlockSize=32,
+        ),
+        swizzleTileSize=MKNLTuple(32, 8, 32, 8),
         numOuter=1,
         numWarmUp=1000,
         numInner=1000,
@@ -1212,11 +1435,266 @@ def fp4_target_d2lds_mi16x16x128_pf4x1():
 
 def fp4_target_d2lds_mi16x16x128_pf4x1_wgm():
     yield from add_wgm((0, 2), fp4_target_d2lds_mi16x16x128_pf4x1())
+    yield from add_wgm((0, 2), fp4_target_d2lds_mi16x16x128_st32x8_pf4x1())
 
 
 def fp4_target_d2lds_mi16x16x128_pf4x1_both():
     yield from fp4_target_d2lds_mi16x16x128_pf4x1()
+    yield from fp4_target_d2lds_mi16x16x128_st32x8_pf4x1()
     yield from fp4_target_d2lds_mi16x16x128_pf4x1_wgm()
+
+
+def fp4_target_d2lds_mi16x16x128_st32x8_pf2x1():
+    yield GEMMRun(
+        M=4096,
+        N=4096,
+        K=32768,
+        beta=0.0,
+        mac_m=256,
+        mac_n=256,
+        mac_k=256,
+        wave_m=16,
+        wave_n=16,
+        wave_k=128,
+        wave_b=1,
+        workgroup_size_x=128,
+        workgroup_size_y=2,
+        load_A="BufferToLDS",
+        load_B="BufferToLDS",
+        loadScale_A="BufferToLDS",
+        loadScale_B="BufferToLDS",
+        store="VGPRToGlobalMemoryWithBuffer",
+        prefetch=True,
+        prefetchInFlight=2,
+        prefetchLDSFactor=1,
+        prefetchScale=True,
+        pretileScale=True,
+        swizzleScale=True,
+        prefetchMixMemOps=True,
+        betaInFma=True,
+        scheduler="Priority",
+        schedulerCost="LinearWeightedSimple",
+        tailLoops=False,
+        types=TypeParameters(
+            trans_A="T",
+            trans_B="N",
+            type_A="fp4",
+            type_B="fp4",
+            type_C="half",
+            type_D="half",
+            type_acc="float",
+            scale_A="Separate",
+            scaleType_A="E8M0",
+            scale_B="Separate",
+            scaleType_B="E8M0",
+            scaleBlockSize=32,
+            scaleSkipPermlane="PreSwizzleScaleGFX950",
+        ),
+        swizzleTileSize=MKNLTuple(32, 8, 32, 8),
+        numOuter=1,
+        numWarmUp=1000,
+        numInner=1000,
+    )
+
+
+def fp4_mt32x32x256_d2lds_mi16x16x128_st32x8_pf2x1():
+    yield GEMMRun(
+        M=1024,
+        N=1024,
+        K=4096,
+        beta=0.0,
+        mac_m=32,
+        mac_n=32,
+        mac_k=256,
+        wave_m=16,
+        wave_n=16,
+        wave_k=128,
+        wave_b=1,
+        workgroup_size_x=64,
+        workgroup_size_y=1,
+        load_A="BufferToLDS",
+        load_B="BufferToLDS",
+        loadScale_A="BufferToLDS",
+        loadScale_B="BufferToLDS",
+        store="VGPRToGlobalMemoryWithBuffer",
+        prefetch=True,
+        prefetchInFlight=2,
+        prefetchLDSFactor=1,
+        prefetchScale=True,
+        pretileScale=True,
+        swizzleScale=True,
+        prefetchMixMemOps=True,
+        betaInFma=True,
+        scheduler="Priority",
+        schedulerCost="LinearWeightedSimple",
+        matchMemoryAccess=True,
+        tailLoops=True,
+        types=TypeParameters(
+            trans_A="T",
+            trans_B="N",
+            type_A="fp4",
+            type_B="fp4",
+            type_C="half",
+            type_D="half",
+            type_acc="float",
+            scale_A="Separate",
+            scaleType_A="E8M0",
+            scale_B="Separate",
+            scaleType_B="E8M0",
+            scaleBlockSize=32,
+            scaleSkipPermlane="PreSwizzleScaleGFX950",
+        ),
+        swizzleTileSize=MKNLTuple(32, 8, 32, 8),
+        numOuter=1,
+        numWarmUp=1000,
+        numInner=1000,
+    )
+
+
+def fp4_scaled2lds_mi16x16x128_st32x8_pf2x1_sweep():
+    """Sweep mac_m, mac_n, and prefetchLDSFactor for fp4_mt32x32x256 configuration."""
+    mac_m_values = [32, 64, 96]
+    mac_n_values = [32, 64, 96]
+    prefetchLDSFactor_values = [1]
+
+    for mac_m in mac_m_values:
+        for mac_n in mac_n_values:
+            for prefetchLDSFactor in prefetchLDSFactor_values:
+                yield GEMMRun(
+                    M=1024,
+                    N=1024,
+                    K=4096,
+                    beta=0.0,
+                    mac_m=mac_m,
+                    mac_n=mac_n,
+                    mac_k=256,
+                    wave_m=16,
+                    wave_n=16,
+                    wave_k=128,
+                    wave_b=1,
+                    workgroup_size_x=64,
+                    workgroup_size_y=1,
+                    load_A="BufferToLDS",
+                    load_B="BufferToLDS",
+                    loadScale_A="BufferToLDS",
+                    loadScale_B="BufferToLDS",
+                    prefetch=True,
+                    prefetchInFlight=2,
+                    prefetchLDSFactor=prefetchLDSFactor,
+                    prefetchScale=True,
+                    pretileScale=True,
+                    swizzleScale=True,
+                    prefetchMixMemOps=True,
+                    betaInFma=True,
+                    scheduler="Priority",
+                    schedulerCost="LinearWeightedSimple",
+                    tailLoops=True,
+                    types=TypeParameters(
+                        trans_A="T",
+                        trans_B="N",
+                        type_A="fp4",
+                        type_B="fp4",
+                        type_C="half",
+                        type_D="half",
+                        type_acc="float",
+                        scale_A="Separate",
+                        scaleType_A="E8M0",
+                        scale_B="Separate",
+                        scaleType_B="E8M0",
+                        scaleBlockSize=32,
+                        scaleSkipPermlane="PreSwizzleScaleGFX950",
+                    ),
+                    swizzleTileSize=MKNLTuple(32, 8, 32, 8),
+                    numOuter=1,
+                    numWarmUp=1000,
+                    numInner=1000,
+                )
+
+
+def fp4_target_d2lds_mi16x16x128_st32x8_pf2x1_pretile():
+    for gemm in fp4_target_d2lds_mi16x16x128_st32x8_pf2x1():
+        gemm.prefetchScale = False
+        gemm.pretileScale = True
+        gemm.loadScale_A = "BufferToLDS"
+        gemm.loadScale_B = "BufferToLDS"
+        gemm.swizzleTileSize = MKNLTuple(64, 4, 64, 4)
+        gemm.types.scaleSkipPermlane = "PreSwizzleScale"
+        yield gemm
+
+
+def fp4_target_d2lds_mi16x16x128_st32x8_pf2x1_pad():
+    for gemm in fp4_target_d2lds_mi16x16x128_st32x8_pf2x1():
+        gemm.loadScale_A = "BufferToLDS"
+        gemm.loadScale_B = "BufferToLDS"
+        gemm.swizzleTileSize = MKNLTuple(64, 4, 64, 4)
+        gemm.types.scaleSkipPermlane = "PreSwizzleScale"
+        gemm.padLDS_A = (2048, 8)
+        gemm.padLDS_B = (2048, 8)
+        yield gemm
+
+
+def fp4_target_mxd2lds_mi16x16x128_st32x8_pf2x1():
+    yield GEMMRun(
+        M=4096,
+        N=4096,
+        K=32768,
+        beta=0.0,
+        mac_m=128,
+        mac_n=128,
+        mac_k=256,
+        wave_m=16,
+        wave_n=16,
+        wave_k=128,
+        wave_b=1,
+        workgroup_size_x=128,
+        workgroup_size_y=2,
+        load_A="BufferToLDS",
+        load_B="BufferToLDS",
+        loadScale_A="BufferToLDS",
+        loadScale_B="BufferToLDS",
+        store="VGPRToGlobalMemoryWithBuffer",
+        prefetch=True,
+        prefetchInFlight=2,
+        prefetchLDSFactor=1,
+        prefetchScale=True,
+        swizzleScale=True,
+        prefetchMixMemOps=True,
+        betaInFma=True,
+        scheduler="Priority",
+        schedulerCost="LinearWeightedSimple",
+        types=TypeParameters(
+            trans_A="T",
+            trans_B="N",
+            type_A="fp4",
+            type_B="fp4",
+            type_C="half",
+            type_D="half",
+            type_acc="float",
+            scale_A="Separate",
+            scaleType_A="E8M0",
+            scale_B="Separate",
+            scaleType_B="E8M0",
+            scaleBlockSize=32,
+            scaleSkipPermlane="PreSwizzleScale",
+        ),
+        swizzleTileSize=MKNLTuple(32, 8, 32, 8),
+        numOuter=1,
+        numWarmUp=1000,
+        numInner=1000,
+    )
+
+
+def fp4_target_d2lds_mi16x16x128_st32x8_pf2x1_wgm():
+    yield from add_wgm((0, 2), fp4_target_d2lds_mi16x16x128_st32x8_pf2x1())
+
+
+def fp4_target_d2lds_mi16x16x128_st32x8_pf2x1_both():
+    yield from fp4_target_d2lds_mi16x16x128_st32x8_pf2x1()
+    yield from fp4_target_d2lds_mi16x16x128_st32x8_pf2x1_wgm()
+
+
+def fp4_target_d2lds_mi16x16x128_st32x8_pf2x1_wgm_lds_swizzle():
+    yield from addLDSBankSwizzle(fp4_target_d2lds_mi16x16x128_st32x8_pf2x1_wgm())
 
 
 def does_this_fail():
@@ -1234,13 +1712,11 @@ def does_this_fail():
         wave_b=1,
         workgroup_size_x=128,
         workgroup_size_y=2,
-        unroll_x=0,
-        unroll_y=0,
-        direct2LDS_A=True,
-        direct2LDS_B=True,
-        loadLDSScale_A=False,
-        loadLDSScale_B=False,
-        storeLDS_D=False,
+        load_A="BufferToLDS",
+        load_B="BufferToLDS",
+        loadScale_A="BufferToVGPR",
+        loadScale_B="BufferToVGPR",
+        store="VGPRToGlobalMemoryWithBuffer",
         prefetch=True,
         prefetchInFlight=4,
         prefetchLDSFactor=1,
@@ -1249,7 +1725,6 @@ def does_this_fail():
         prefetchMixMemOps=True,
         betaInFma=True,
         scheduler="Priority",
-        matchMemoryAccess=True,
         types=TypeParameters(
             trans_A="T",
             trans_B="N",
@@ -1280,13 +1755,11 @@ def fp4_single_scale_target_d2lds_mi16x16x128_pf4x1():
         wave_b=1,
         workgroup_size_x=128,
         workgroup_size_y=2,
-        unroll_x=0,
-        unroll_y=0,
-        direct2LDS_A=True,
-        direct2LDS_B=True,
-        loadLDSScale_A=False,
-        loadLDSScale_B=False,
-        storeLDS_D=False,
+        load_A="BufferToLDS",
+        load_B="BufferToLDS",
+        loadScale_A="BufferToVGPR",
+        loadScale_B="BufferToVGPR",
+        store="VGPRToGlobalMemoryWithBuffer",
         prefetch=True,
         prefetchInFlight=4,
         prefetchLDSFactor=1,
@@ -1298,7 +1771,6 @@ def fp4_single_scale_target_d2lds_mi16x16x128_pf4x1():
         scaleValue_B=1e-2,
         scheduler="Priority",
         schedulerCost="LinearWeightedSimple",
-        matchMemoryAccess=True,
         types=TypeParameters(
             trans_A="T",
             trans_B="N",
@@ -1322,11 +1794,64 @@ def fp4_single_scale_target_d2lds_mi16x16x128_pf4x1_wgm():
     yield from add_wgm((0, 2), fp4_single_scale_target_d2lds_mi16x16x128_pf4x1())
 
 
+def fp4_d2lds_wgts256x256x256():
+    yield GEMMRun(
+        M=4096,
+        N=4096,
+        K=32768,
+        beta=0.0,
+        mac_m=256,
+        mac_n=256,
+        mac_k=256,
+        wave_m=16,
+        wave_n=16,
+        wave_k=128,
+        wave_b=1,
+        workgroup_size_x=128,
+        workgroup_size_y=2,
+        load_A="BufferToLDS",
+        load_B="BufferToLDS",
+        loadScale_A="BufferToLDS",
+        loadScale_B="BufferToLDS",
+        store="VGPRToGlobalMemoryWithBuffer",
+        prefetch=True,
+        prefetchInFlight=2,
+        prefetchLDSFactor=1,
+        prefetchScale=True,
+        swizzleScale=True,
+        prefetchMixMemOps=True,
+        scheduler="Priority",
+        schedulerCost="LinearWeightedSimple",
+        types=TypeParameters(
+            trans_A="T",
+            trans_B="N",
+            type_A="fp4",
+            type_B="fp4",
+            type_C="half",
+            type_D="half",
+            type_acc="float",
+            scale_A="Separate",
+            scaleType_A="E8M0",
+            scale_B="Separate",
+            scaleType_B="E8M0",
+            scaleSkipPermlane="PreSwizzleScale",
+        ),
+        swizzleTileSize=MKNLTuple(64, 8, 64, 8),
+        numOuter=1,
+        numWarmUp=1000,
+        numInner=1000,
+    )
+
+
 def fp4_kernels_no_wgm():
     yield from fp4_target()
     yield from fp4_target_d2lds_mi32x32x64_pf2x1()
     yield from fp4_target_d2lds_mi32x32x64_pf4x1()
+    yield from fp4_target_d2lds_mi32x32x64_st32x8_pf4x1()
     yield from fp4_target_d2lds_mi16x16x128_pf4x1()
+    yield from fp4_target_d2lds_mi16x16x128_st32x8_pf4x1()
+    yield from fp4_small()
+    yield from fp4_small_k()
     # yield from fp4_single_scale_target_d2lds_mi16x16x128_pf4x1()
 
 
@@ -1337,21 +1862,56 @@ def fp4_kernels_wgm():
     yield from fp4_single_scale_target_d2lds_mi16x16x128_pf4x1_wgm()
 
 
+def fp4_kernels_wgm_streamk():
+    yield from addStreamK(fp4_kernels_wgm())
+
+
 def fp4_16x16x128_scale_options():
     yield from fp4_target_d2lds_mi16x16x128_pf4x1_wgm()
     yield from addSkipPermlane(fp4_target_d2lds_mi16x16x128_pf4x1_wgm())
+    yield from fp4_target_d2lds_mi16x16x128_st32x8_pf2x1_wgm()
+    yield from addSkipPermlane(fp4_target_d2lds_mi16x16x128_st32x8_pf2x1_wgm())
 
 
 def fp4_32x32x64_scale_options():
-    yield from fp4_target_d2lds_mi16x16x128_pf4x1_wgm()
+    yield from fp4_target_d2lds_mi32x32x64_pf4x1_wgm()
     yield from addSkipPermlane(fp4_target_d2lds_mi32x32x64_pf4x1_wgm())
 
 
 def fp4_kernels():
     yield from fp4_kernels_no_wgm()
     yield from fp4_kernels_wgm()
+    yield from fp4_kernels_wgm_streamk()
     yield from fp4_16x16x128_scale_options()
     yield from fp4_32x32x64_scale_options()
+    yield from fp4_d2lds_wgts256x256x256()
+    yield from fp4_target_d2lds_mi16x16x128_st32x8_pf2x1_pretile()
+    yield from fp4_target_d2lds_mi16x16x128_st32x8_pf2x1_pad()
+    yield from test_streamk_fp4()
+
+
+def fp4_kernels_streamk():
+    """Only the FP4 kernel configurations that pass with StreamK enabled."""
+    yield from addStreamK(fp4_target())
+    yield from addStreamK(fp4_target_d2lds_mi32x32x64_pf2x1())
+    yield from addStreamK(fp4_target_d2lds_mi32x32x64_pf4x1())
+    yield from addStreamK(fp4_target_d2lds_mi16x16x128_pf4x1())
+    yield from addStreamK(fp4_d2lds_wgts256x256x256())
+
+
+def test_streamk_fp4():
+    kernel = fp4_target_d2lds_mi16x16x128_st32x8_pf2x1()
+    kernel = addStreamK(kernel)
+    for k in kernel:
+        k.M = 128
+        k.N = 128
+        k.K = 76800
+        k.mac_m = (64,)
+        k.mac_n = (32,)
+        k.mac_k = (256,)
+        k.prefetchInFlight = 2
+
+        yield k
 
 
 def fp4_target_sweep_wgms():
@@ -1380,19 +1940,16 @@ def mxfp8_target_128x256():
         wave_b=1,
         workgroup_size_x=128,
         workgroup_size_y=2,
-        unroll_x=0,
-        unroll_y=0,
-        loadLDS_A=True,
-        loadLDS_B=True,
-        loadLDSScale_A=True,
-        loadLDSScale_B=True,
-        storeLDS_D=True,
+        load_A="BufferToLDSViaVGPR",
+        load_B="BufferToLDSViaVGPR",
+        loadScale_A="BufferToLDSViaVGPR",
+        loadScale_B="BufferToLDSViaVGPR",
+        store="VGPRToGlobalMemoryViaLDSWithBuffer",
         prefetch=True,
         prefetchInFlight=2,
         prefetchLDSFactor=2,
         betaInFma=True,
         scheduler="Priority",
-        matchMemoryAccess=True,
         types=TypeParameters(
             trans_A="T",
             trans_B="N",
@@ -1407,6 +1964,7 @@ def mxfp8_target_128x256():
             scaleType_B="E8M0",
             scaleBlockSize=32,
         ),
+        swizzleTileSize=MKNLTuple(64, 128 // 32 * 1 * 2, 64, 128 // 32 * 1 * 2),
         numOuter=1,
         numWarmUp=1000,
         numInner=1000,
@@ -1427,19 +1985,16 @@ def mxfp8_target_256x128():
         wave_b=1,
         workgroup_size_x=128,
         workgroup_size_y=2,
-        unroll_x=0,
-        unroll_y=0,
-        loadLDS_A=True,
-        loadLDS_B=True,
-        loadLDSScale_A=True,
-        loadLDSScale_B=True,
-        storeLDS_D=True,
+        load_A="BufferToLDSViaVGPR",
+        load_B="BufferToLDSViaVGPR",
+        loadScale_A="BufferToLDSViaVGPR",
+        loadScale_B="BufferToLDSViaVGPR",
+        store="VGPRToGlobalMemoryViaLDSWithBuffer",
         prefetch=True,
         prefetchInFlight=2,
         prefetchLDSFactor=2,
         betaInFma=True,
         scheduler="Priority",
-        matchMemoryAccess=True,
         types=TypeParameters(
             trans_A="T",
             trans_B="N",
@@ -1454,6 +2009,7 @@ def mxfp8_target_256x128():
             scaleType_B="E8M0",
             scaleBlockSize=32,
         ),
+        swizzleTileSize=MKNLTuple(64, 128 // 32 * 1 * 2, 64, 128 // 32 * 1 * 2),
         numOuter=1,
         numWarmUp=1000,
         numInner=1000,
@@ -1474,19 +2030,16 @@ def mxfp8_target_d2lds_mi32x32x64_pf2x1():
         wave_b=1,
         workgroup_size_x=128,
         workgroup_size_y=2,
-        unroll_x=0,
-        unroll_y=0,
-        direct2LDS_A=True,
-        direct2LDS_B=True,
-        loadLDSScale_A=True,
-        loadLDSScale_B=True,
-        storeLDS_D=True,
+        load_A="BufferToLDS",
+        load_B="BufferToLDS",
+        loadScale_A="BufferToLDSViaVGPR",
+        loadScale_B="BufferToLDSViaVGPR",
+        store="VGPRToGlobalMemoryViaLDSWithBuffer",
         prefetch=True,
         prefetchInFlight=2,
         prefetchLDSFactor=1,
         betaInFma=True,
         scheduler="Priority",
-        matchMemoryAccess=True,
         types=TypeParameters(
             trans_A="T",
             trans_B="N",
@@ -1501,6 +2054,7 @@ def mxfp8_target_d2lds_mi32x32x64_pf2x1():
             scaleType_B="E8M0",
             scaleBlockSize=32,
         ),
+        swizzleTileSize=MKNLTuple(64, 64 // 32 * 2 * 2, 64, 64 // 32 * 2 * 2),
         numOuter=1,
         numWarmUp=1000,
         numInner=1000,
@@ -1526,13 +2080,11 @@ def mxfp8_target_d2lds_mi32x32x64_pf4x1():
         wave_b=1,
         workgroup_size_x=128,
         workgroup_size_y=2,
-        unroll_x=0,
-        unroll_y=0,
-        direct2LDS_A=True,
-        direct2LDS_B=True,
-        loadLDSScale_A=False,
-        loadLDSScale_B=False,
-        storeLDS_D=False,
+        load_A="BufferToLDS",
+        load_B="BufferToLDS",
+        loadScale_A="BufferToVGPR",
+        loadScale_B="BufferToVGPR",
+        store="VGPRToGlobalMemoryWithBuffer",
         prefetch=True,
         prefetchInFlight=4,
         prefetchLDSFactor=1,
@@ -1541,7 +2093,6 @@ def mxfp8_target_d2lds_mi32x32x64_pf4x1():
         prefetchMixMemOps=True,
         betaInFma=True,
         scheduler="Priority",
-        matchMemoryAccess=True,
         types=TypeParameters(
             trans_A="T",
             trans_B="N",
@@ -1556,6 +2107,7 @@ def mxfp8_target_d2lds_mi32x32x64_pf4x1():
             scaleType_B="E8M0",
             scaleBlockSize=32,
         ),
+        swizzleTileSize=MKNLTuple(64, 64 // 32 * 2 * 4, 64, 64 // 32 * 2 * 4),
         numOuter=1,
         numWarmUp=1000,
         numInner=1000,
@@ -1581,13 +2133,11 @@ def mxfp8_target_d2lds_mi16x16x128_pf4x1():
         wave_b=1,
         workgroup_size_x=128,
         workgroup_size_y=2,
-        unroll_x=0,
-        unroll_y=0,
-        direct2LDS_A=True,
-        direct2LDS_B=True,
-        loadLDSScale_A=False,
-        loadLDSScale_B=False,
-        storeLDS_D=False,
+        load_A="BufferToLDS",
+        load_B="BufferToLDS",
+        loadScale_A="BufferToVGPR",
+        loadScale_B="BufferToVGPR",
+        store="VGPRToGlobalMemoryWithBuffer",
         prefetch=True,
         prefetchInFlight=4,
         prefetchLDSFactor=1,
@@ -1596,7 +2146,7 @@ def mxfp8_target_d2lds_mi16x16x128_pf4x1():
         prefetchMixMemOps=True,
         betaInFma=True,
         scheduler="Priority",
-        matchMemoryAccess=True,
+        schedulerCost="LinearWeightedSimple",
         types=TypeParameters(
             trans_A="T",
             trans_B="N",
@@ -1611,6 +2161,7 @@ def mxfp8_target_d2lds_mi16x16x128_pf4x1():
             scaleType_B="E8M0",
             scaleBlockSize=32,
         ),
+        swizzleTileSize=MKNLTuple(64, 128 // 32 * 1 * 4, 64, 128 // 32 * 1 * 4),
         numOuter=1,
         numWarmUp=1000,
         numInner=1000,
@@ -1636,13 +2187,11 @@ def fp8_target_d2lds_mi16x16x128_pf4x1():
         wave_b=1,
         workgroup_size_x=128,
         workgroup_size_y=2,
-        unroll_x=0,
-        unroll_y=0,
-        direct2LDS_A=True,
-        direct2LDS_B=True,
-        loadLDSScale_A=False,
-        loadLDSScale_B=False,
-        storeLDS_D=False,
+        load_A="BufferToLDS",
+        load_B="BufferToLDS",
+        loadScale_A="BufferToVGPR",
+        loadScale_B="BufferToVGPR",
+        store="VGPRToGlobalMemoryWithBuffer",
         prefetch=True,
         prefetchInFlight=4,
         prefetchLDSFactor=1,
@@ -1651,7 +2200,6 @@ def fp8_target_d2lds_mi16x16x128_pf4x1():
         prefetchMixMemOps=True,
         betaInFma=True,
         scheduler="Priority",
-        matchMemoryAccess=True,
         types=TypeParameters(
             trans_A="T",
             trans_B="N",
@@ -1721,14 +2269,15 @@ def all():
         yield from fp8_kernels()
         yield from mxfp8_kernels()
         yield from mx_gemms_f8f6f4()
-    else:
-        yield from sgemm()
-        yield from hgemm()
-        yield from hgemm_no_store_LDS()
-        yield from streamk()
-        yield from streamk_sweep()
-        yield from scalar_is_zero()
-        yield from codegen()
+
+    yield from sgemm()
+    yield from hgemm()
+    yield from hgemm_no_store_LDS()
+    yield from streamk()
+    yield from streamk_sweep()
+    yield from scalar_is_zero()
+    yield from smallMN_largeK_fp32()
+    yield from codegen()
 
 
 def all_gfx120X():

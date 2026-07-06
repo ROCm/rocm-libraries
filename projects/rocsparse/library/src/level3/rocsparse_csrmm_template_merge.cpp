@@ -1,6 +1,6 @@
 /*! \file */
 /* ************************************************************************
- * Copyright (C) 2021-2025 Advanced Micro Devices, Inc. All rights Reserved.
+ * Copyright (C) 2021-2026 Advanced Micro Devices, Inc. All rights Reserved.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -71,7 +71,7 @@ namespace rocsparse
         }
     }
 
-    template <typename T, typename I, typename J, typename A>
+    template <typename I, typename J, typename A>
     rocsparse_status csrmm_analysis_template_merge(rocsparse_handle          handle,
                                                    rocsparse_operation       trans_A,
                                                    rocsparse_csrmm_alg       alg,
@@ -495,48 +495,45 @@ INSTANTIATE_BUFFER_SIZE(float, int64_t, int32_t, rocsparse_bfloat16);
 INSTANTIATE_BUFFER_SIZE(float, int64_t, int64_t, rocsparse_bfloat16);
 #undef INSTANTIATE_BUFFER_SIZE
 
-#define INSTANTIATE_ANALYSIS(TTYPE, ITYPE, JTYPE, ATYPE)                       \
-    template rocsparse_status rocsparse::csrmm_analysis_template_merge<TTYPE>( \
-        rocsparse_handle          handle,                                      \
-        rocsparse_operation       trans_A,                                     \
-        rocsparse_csrmm_alg       alg,                                         \
-        JTYPE                     m,                                           \
-        JTYPE                     n,                                           \
-        JTYPE                     k,                                           \
-        ITYPE                     nnz,                                         \
-        const rocsparse_mat_descr descr,                                       \
-        const ATYPE*              csr_val,                                     \
-        const ITYPE*              csr_row_ptr,                                 \
-        const JTYPE*              csr_col_ind,                                 \
+#define INSTANTIATE_ANALYSIS(ITYPE, JTYPE, ATYPE)                       \
+    template rocsparse_status rocsparse::csrmm_analysis_template_merge( \
+        rocsparse_handle          handle,                               \
+        rocsparse_operation       trans_A,                              \
+        rocsparse_csrmm_alg       alg,                                  \
+        JTYPE                     m,                                    \
+        JTYPE                     n,                                    \
+        JTYPE                     k,                                    \
+        ITYPE                     nnz,                                  \
+        const rocsparse_mat_descr descr,                                \
+        const ATYPE*              csr_val,                              \
+        const ITYPE*              csr_row_ptr,                          \
+        const JTYPE*              csr_col_ind,                          \
         void*                     temp_buffer)
 
 // Uniform precisions
-INSTANTIATE_ANALYSIS(float, int32_t, int32_t, float);
-INSTANTIATE_ANALYSIS(float, int64_t, int32_t, float);
-INSTANTIATE_ANALYSIS(float, int64_t, int64_t, float);
-INSTANTIATE_ANALYSIS(double, int32_t, int32_t, double);
-INSTANTIATE_ANALYSIS(double, int64_t, int32_t, double);
-INSTANTIATE_ANALYSIS(double, int64_t, int64_t, double);
-INSTANTIATE_ANALYSIS(rocsparse_float_complex, int32_t, int32_t, rocsparse_float_complex);
-INSTANTIATE_ANALYSIS(rocsparse_float_complex, int64_t, int32_t, rocsparse_float_complex);
-INSTANTIATE_ANALYSIS(rocsparse_float_complex, int64_t, int64_t, rocsparse_float_complex);
-INSTANTIATE_ANALYSIS(rocsparse_double_complex, int32_t, int32_t, rocsparse_double_complex);
-INSTANTIATE_ANALYSIS(rocsparse_double_complex, int64_t, int32_t, rocsparse_double_complex);
-INSTANTIATE_ANALYSIS(rocsparse_double_complex, int64_t, int64_t, rocsparse_double_complex);
+INSTANTIATE_ANALYSIS(int32_t, int32_t, float);
+INSTANTIATE_ANALYSIS(int64_t, int32_t, float);
+INSTANTIATE_ANALYSIS(int64_t, int64_t, float);
+INSTANTIATE_ANALYSIS(int32_t, int32_t, double);
+INSTANTIATE_ANALYSIS(int64_t, int32_t, double);
+INSTANTIATE_ANALYSIS(int64_t, int64_t, double);
+INSTANTIATE_ANALYSIS(int32_t, int32_t, rocsparse_float_complex);
+INSTANTIATE_ANALYSIS(int64_t, int32_t, rocsparse_float_complex);
+INSTANTIATE_ANALYSIS(int64_t, int64_t, rocsparse_float_complex);
+INSTANTIATE_ANALYSIS(int32_t, int32_t, rocsparse_double_complex);
+INSTANTIATE_ANALYSIS(int64_t, int32_t, rocsparse_double_complex);
+INSTANTIATE_ANALYSIS(int64_t, int64_t, rocsparse_double_complex);
 
 // Mixed precisions
-INSTANTIATE_ANALYSIS(int32_t, int32_t, int32_t, int8_t);
-INSTANTIATE_ANALYSIS(int32_t, int64_t, int32_t, int8_t);
-INSTANTIATE_ANALYSIS(int32_t, int64_t, int64_t, int8_t);
-INSTANTIATE_ANALYSIS(float, int32_t, int32_t, int8_t);
-INSTANTIATE_ANALYSIS(float, int64_t, int32_t, int8_t);
-INSTANTIATE_ANALYSIS(float, int64_t, int64_t, int8_t);
-INSTANTIATE_ANALYSIS(float, int32_t, int32_t, _Float16);
-INSTANTIATE_ANALYSIS(float, int64_t, int32_t, _Float16);
-INSTANTIATE_ANALYSIS(float, int64_t, int64_t, _Float16);
-INSTANTIATE_ANALYSIS(float, int32_t, int32_t, rocsparse_bfloat16);
-INSTANTIATE_ANALYSIS(float, int64_t, int32_t, rocsparse_bfloat16);
-INSTANTIATE_ANALYSIS(float, int64_t, int64_t, rocsparse_bfloat16);
+INSTANTIATE_ANALYSIS(int32_t, int32_t, int8_t);
+INSTANTIATE_ANALYSIS(int64_t, int32_t, int8_t);
+INSTANTIATE_ANALYSIS(int64_t, int64_t, int8_t);
+INSTANTIATE_ANALYSIS(int32_t, int32_t, _Float16);
+INSTANTIATE_ANALYSIS(int64_t, int32_t, _Float16);
+INSTANTIATE_ANALYSIS(int64_t, int64_t, _Float16);
+INSTANTIATE_ANALYSIS(int32_t, int32_t, rocsparse_bfloat16);
+INSTANTIATE_ANALYSIS(int64_t, int32_t, rocsparse_bfloat16);
+INSTANTIATE_ANALYSIS(int64_t, int64_t, rocsparse_bfloat16);
 #undef INSTANTIATE_ANALYSIS
 
 #define INSTANTIATE(TTYPE, ITYPE, JTYPE, ATYPE, BTYPE, CTYPE)         \
@@ -611,9 +608,15 @@ INSTANTIATE(rocsparse_double_complex,
 INSTANTIATE(float, int32_t, int32_t, _Float16, _Float16, float);
 INSTANTIATE(float, int64_t, int32_t, _Float16, _Float16, float);
 INSTANTIATE(float, int64_t, int64_t, _Float16, _Float16, float);
+INSTANTIATE(float, int32_t, int32_t, _Float16, _Float16, _Float16);
+INSTANTIATE(float, int64_t, int32_t, _Float16, _Float16, _Float16);
+INSTANTIATE(float, int64_t, int64_t, _Float16, _Float16, _Float16);
 INSTANTIATE(float, int32_t, int32_t, rocsparse_bfloat16, rocsparse_bfloat16, float);
 INSTANTIATE(float, int64_t, int32_t, rocsparse_bfloat16, rocsparse_bfloat16, float);
 INSTANTIATE(float, int64_t, int64_t, rocsparse_bfloat16, rocsparse_bfloat16, float);
+INSTANTIATE(float, int32_t, int32_t, rocsparse_bfloat16, rocsparse_bfloat16, rocsparse_bfloat16);
+INSTANTIATE(float, int64_t, int32_t, rocsparse_bfloat16, rocsparse_bfloat16, rocsparse_bfloat16);
+INSTANTIATE(float, int64_t, int64_t, rocsparse_bfloat16, rocsparse_bfloat16, rocsparse_bfloat16);
 INSTANTIATE(int32_t, int32_t, int32_t, int8_t, int8_t, int32_t);
 INSTANTIATE(int32_t, int64_t, int32_t, int8_t, int8_t, int32_t);
 INSTANTIATE(int32_t, int64_t, int64_t, int8_t, int8_t, int32_t);

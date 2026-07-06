@@ -5,22 +5,24 @@ subtrees:
 
 - caption: Install
   entries:
+  - file: install/install
+    title: Install rocSPARSE
   - file: install/Linux_Install_Guide
-    title: Linux installation guide
+    title: Build from source on Linux
   - file: install/Windows_Install_Guide
-    title: Windows installation guide
+    title: Build from source on Windows
 
 - caption: Conceptual
   entries:
   - file: conceptual/rocsparse-design
     title: rocSPARSE design
+  - file: conceptual/storage-formats-sparse
+    title: Storage formats
 
 - caption: How to
   entries:
   - file: how-to/using-rocsparse
     title: Use rocSPARSE
-  - file: how-to/contribute
-    title: Contribute to rocSPARSE
 
 - caption: Examples
   entries:
@@ -36,7 +38,7 @@ subtrees:
       - file: reference/api.rst
       - file: reference/debugging.rst
       - file: reference/types.rst
-      - file: reference/precision.rst
+      - file: reference/data_type_support.rst
       - file: reference/env_variables.rst
       - file: reference/roctx.rst
       - file: reference/enumerations.rst
@@ -55,3 +57,5 @@ subtrees:
 - caption: About
   entries:
   - file: license
+  - file: contribute
+    title: Contribute to rocSPARSE

@@ -94,6 +94,7 @@ inline void ref_asum(int64_t n, const rocblas_double_complex* x, int64_t incx, d
 template <typename T>
 void ref_axpy(int64_t n, T alpha, T* x, int64_t incx, T* y, int64_t incy);
 
+#if !(defined(WIN32) && !defined(BLIS_ENABLE_CBLAS)) // windows OpenBLAS bug override
 template <>
 inline void ref_axpy(int64_t n, float alpha, float* x, int64_t incx, float* y, int64_t incy)
 {
@@ -127,6 +128,7 @@ inline void ref_axpy(int64_t                 n,
 {
     cblas_zaxpy(n, &alpha, x, incx, y, incy);
 }
+#endif
 
 // copy
 template <typename T>
@@ -1880,6 +1882,32 @@ void ref_syrk(rocblas_fill      uplo,
               T                 beta,
               T*                C,
               int64_t           ldc);
+
+// syrk_ex
+template <typename T, typename U = T, typename Tc = U>
+void ref_syrk_ex(rocblas_fill      uplo,
+                 rocblas_operation transA,
+                 int64_t           n,
+                 int64_t           k,
+                 Tc                alpha,
+                 const T*          A,
+                 int64_t           lda,
+                 Tc                beta,
+                 U*                C,
+                 int64_t           ldc);
+
+// herk_ex
+template <typename T, typename U = T, typename Tc = U>
+void ref_herk_ex(rocblas_fill      uplo,
+                 rocblas_operation transA,
+                 int64_t           n,
+                 int64_t           k,
+                 Tc                alpha,
+                 const T*          A,
+                 int64_t           lda,
+                 Tc                beta,
+                 U*                C,
+                 int64_t           ldc);
 
 // syr2k
 template <typename T>

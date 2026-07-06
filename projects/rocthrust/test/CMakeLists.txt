@@ -29,7 +29,7 @@ configure_file(
     ${CMAKE_CURRENT_BINARY_DIR}/test_seed.hpp
 )
 
-function(add_relative_test test_name test_target)
+function(add_relative_test test_name test_target resource_group)
     get_target_property(EXE_PATH ${test_target} RUNTIME_OUTPUT_DIRECTORY)
     if(EXE_PATH STREQUAL "EXE_PATH-NOTFOUND")
         set(EXE_PATH ".")
@@ -45,6 +45,8 @@ function(add_relative_test test_name test_target)
     file(RELATIVE_PATH rel_path "${CMAKE_CURRENT_BINARY_DIR}" "${EXE_PATH}/${EXE_NAME}")
     add_test(NAME "${test_name}" COMMAND "./${rel_path}")
     file(APPEND "${INSTALL_TEST_FILE}" "add_test(${test_name} \"../${EXE_NAME}\")\n")
+    # Set the resource group for the test. This must correspond to a GPU resource present in resources.json.
+    file(APPEND "${INSTALL_TEST_FILE}" "set_tests_properties(${test_name} PROPERTIES RESOURCE_GROUPS \"1,${resource_group}:1\")\n")
 endfunction()
 
 function(add_rocthrust_test TEST)
@@ -96,6 +98,7 @@ function(add_rocthrust_test TEST)
         PROPERTIES
             RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/test/"
     )
+
     if(AMDGPU_TEST_TARGETS)
         foreach(AMDGPU_TARGET IN LISTS AMDGPU_TEST_TARGETS)
             add_test("${AMDGPU_TARGET}-${TEST_TARGET}" ${TEST_TARGET})
@@ -104,13 +107,18 @@ function(add_rocthrust_test TEST)
                     RESOURCE_GROUPS "1,${AMDGPU_TARGET}:1"
                     LABELS "hip;${AMDGPU_TARGET}"
             )
+            # Pair the target with this resource so the shared CTest
+            # categorization can pin its category suites to the same GPU.
+            set_property(GLOBAL APPEND PROPERTY ROCTHRUST_TEST_TARGET_RESOURCE_PAIRS "${TEST_TARGET}|${AMDGPU_TARGET}")
         endforeach()
     else()
-        add_relative_test(${TEST_TARGET} ${TEST_TARGET})
+        add_relative_test(${TEST_TARGET} ${TEST_TARGET} ${DEFAULT_GPU_RESOURCE})
         set_tests_properties(${TEST_TARGET}
             PROPERTIES
+                RESOURCE_GROUPS "1,${DEFAULT_GPU_RESOURCE}:1"
                 LABELS "hip"
         )
+        set_property(GLOBAL APPEND PROPERTY ROCTHRUST_TEST_TARGET_RESOURCE_PAIRS "${TEST_TARGET}|${DEFAULT_GPU_RESOURCE}")
     endif()
     rocm_install(TARGETS ${TEST_TARGET} COMPONENT tests)
     if (WIN32 AND NOT DEFINED DLLS_COPIED)
@@ -239,7 +247,10 @@ if(BUILD_TEST)
     add_rocthrust_test("reduce_by_key")
     add_rocthrust_test("reduce_large")
     add_rocthrust_test("remove")
-    add_rocthrust_test("replace")
+    # Temporarily disable this test for gfx950 when CODE_COVERAGE is ON due to a compiler issue
+    if((NOT CODE_COVERAGE) OR (NOT (("gfx950" IN_LIST GPU_TARGETS) OR (GPU_TARGETS STREQUAL "all"))))
+        add_rocthrust_test("replace")
+    endif()
     add_rocthrust_test("reproducibility")
     add_rocthrust_test("reverse")
     add_rocthrust_test("reverse_iterator")
@@ -299,6 +310,8 @@ if(BUILD_TEST)
     add_rocthrust_test("type_traits")
     add_rocthrust_test("uninitialized_copy")
     add_rocthrust_test("uninitialized_fill")
+    add_rocthrust_test("unique_ptr_general")
+    add_rocthrust_test("unique_ptr_allocate_deallocate")
     add_rocthrust_test("unique")
     add_rocthrust_test("unique_by_key")
     add_rocthrust_test("universal_memory")
@@ -335,9 +348,52 @@ if(BUILD_HIPSTDPAR_TEST)
     endif()
 endif()
 
+# ****************************************************************************
+# Test Filter Standardization
+# ****************************************************************************
+
+if(EXISTS "${ROCM_LIBRARIES_ROOT}/shared/ctest/TestCategories.cmake")
+    include("${ROCM_LIBRARIES_ROOT}/shared/ctest/TestCategories.cmake")
+
+    message(STATUS "Applying test categories for rocthrust")
+    get_property(_rt_pairs GLOBAL PROPERTY ROCTHRUST_TEST_TARGET_RESOURCE_PAIRS)
+    list(REMOVE_DUPLICATES _rt_pairs)
+    foreach(_rt_pair IN LISTS _rt_pairs)
+        string(REPLACE "|" ";" _rt_parts "${_rt_pair}")
+        list(GET _rt_parts 0 _rt_t)
+        list(GET _rt_parts 1 _rt_rg)
+        get_target_property(_rt_dir ${_rt_t} RUNTIME_OUTPUT_DIRECTORY)
+        apply_test_category_labels(${_rt_t}
+            "${CMAKE_CURRENT_SOURCE_DIR}/test_categories.yaml"
+            "${_rt_dir}" "${INSTALL_TEST_FILE}" "${_rt_rg}")
+    endforeach()
+else()
+    message(
+        STATUS
+        "Shared CTest categories not found at "
+        "${ROCM_LIBRARIES_ROOT}/shared/ctest/TestCategories.cmake - "
+        "skipping rocthrust test category labels"
+    )
+endif()
+
 rocm_install(
     FILES "${INSTALL_TEST_FILE}"
     DESTINATION "${CMAKE_INSTALL_BINDIR}/${PROJECT_NAME}"
     COMPONENT tests
     RENAME "CTestTestfile.cmake"
+)
+
+# Build the executable used for generating the resource spec file.
+add_executable(generate_resource_spec ${CMAKE_SOURCE_DIR}/test/generate_resource_spec.cpp)
+set_target_properties(generate_resource_spec PROPERTIES RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}")
+target_link_libraries(generate_resource_spec PRIVATE hip::host)
+
+# Install the executable using the standard install command instead of rocm_install
+# since we want to put it in a custom DESTINATION (rocm_install does not support
+# the DESTINATION option for TARGETS).
+set_property(TARGET generate_resource_spec APPEND PROPERTY INSTALL_RPATH "$ORIGIN/../../lib")
+install(
+    TARGETS generate_resource_spec
+    DESTINATION "${CMAKE_INSTALL_BINDIR}/${PROJECT_NAME}"
+    COMPONENT tests
 )

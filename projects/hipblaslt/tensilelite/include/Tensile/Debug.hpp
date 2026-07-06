@@ -2,7 +2,7 @@
  *
  * MIT License
  *
- * Copyright (C) 2022-2024 Advanced Micro Devices, Inc. All rights reserved.
+ * Copyright (C) 2022-2025 Advanced Micro Devices, Inc. All rights reserved.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -27,7 +27,10 @@
 #pragma once
 
 #include <cstdlib>
+#include <set>
 #include <string>
+#include <tensilelitehost/export.h>
+
 #ifdef Tensile_ENABLE_MARKER
 #include <roctracer/roctx.h>
 #endif
@@ -36,44 +39,58 @@
 
 namespace TensileLite
 {
+    using StringSet = std::set<std::string>;
+
     /**
- * @brief Common place for defining flags which enable debug behaviour.
- */
-    class Debug : public LazySingleton<Debug>
+     * @brief Common place for defining flags which enable debug behaviour.
+     */
+    class TENSILELITEHOST_EXPORT Debug : public LazySingleton<Debug>
     {
     public:
         bool printPropertyEvaluation() const;
         bool printPredicateEvaluation() const;
+        bool printPredicateEvaluationVerbose() const;
         bool printDeviceSelection() const;
         bool printCodeObjectInfo() const;
-
         bool printKernelArguments() const;
-
         bool printDataInit() const;
-
-        // print tensor dims, strides, memory sizes
-        bool printTensorInfo() const;
-
-        // if tensors are printed, use hexadecimal output format
-        bool printTensorModeHex() const;
-
+        bool printTensorInfo() const; // print tensor dims, strides, memory sizes
+        bool printTensorModeHex() const; // if tensors are printed, use hexadecimal output format
         bool printLibraryVersion() const;
-
         bool printLookupEfficiency() const;
-
         bool printWinningKernelName() const;
 
-        bool printSolutionSelectionTime() const;
+        // Re-reads TENSILE_DB, TENSILE_DB2, and TENSILE_STREAMK5_FORCE_MODE from
+        // the environment and updates cached state.  Only these three fields are
+        // refreshed; all other env-driven settings remain at their initial values.
+        // Intended for tests that call setenv() in-process after the singleton has
+        // already been constructed.
+        //
+        // Thread safety: must only be called when no concurrent TensileLite
+        // operations are in flight (e.g., between GEMM calls in a serial test).
+        void reloadDebugBitsForTest();
+
+        bool usePredictionLibrary() const;
 
         bool printLibraryLogicIndex() const;
+
+        // Reports the effective Stream-K (SK5 hybrid) scheduling mode selected at
+        // runtime by streamK5EffectiveDynamic(). Gated by TENSILE_DB bit 0x100000.
+        bool printStreamKModeSelection() const;
 
         bool naivePropertySearch() const;
 
         bool skipKernelLaunch() const;
 
-        bool enableDebugSelection() const;
-
         bool useStreamKDataParrallel() const;
+
+        // SK5 hybrid mode debug override.
+        // Return value semantics:
+        //   -1 -> respect the API attribute / GemmPreference setting
+        //    0 -> force the static (SK3) path
+        //    1 -> force the dynamic (SK4) path
+        // Sourced from the TENSILE_STREAMK5_FORCE_MODE environment variable.
+        int streamK5ForceMode() const;
 
         int useExperimentalSelection() const;
 
@@ -83,7 +100,7 @@ namespace TensileLite
 
         int getSolutionIndex() const;
 
-        bool getSolutionSelectionTrace() const;
+        bool printSolutionSelectionTime() const;
 
         int getGridbasedTopSols() const;
 
@@ -94,6 +111,10 @@ namespace TensileLite
         bool gridBasedBatchExp() const;
 
         bool disableStaggerU() const;
+
+        StringSet excludedLibFromGetAll() const;
+
+        void setExcludedLibFromGetAll(StringSet& excludedSet);
 
         __attribute__((always_inline)) inline void markerStart(const char* name) const
         {
@@ -133,11 +154,10 @@ namespace TensileLite
         int         m_value;
         int         m_value2;
         bool        m_naivePropertySearch = false;
-        bool        m_debugSelection      = false;
-        bool        m_dataParallel      = false;
+        bool        m_dataParallel        = false;
         int         m_experimentSelection = 0;
         int         m_solution_index      = -1;
-        bool        m_solselTrace         = false;
+        bool        m_predictionLib       = false;
         std::string m_metric              = "";
         int         m_gridbasedTopSols    = 1;
         bool        m_benchmark           = false;
@@ -145,7 +165,11 @@ namespace TensileLite
         bool        m_gridbasedBatchExp   = false;
         bool        m_printMarker         = false;
         bool        m_disableStaggerU     = false;
+        // -1 = unset (use API attribute); 0 = force static SK3; 1 = force dynamic SK4
+        int         m_streamK5ForceMode   = -1;
+        StringSet   m_excludedFromGetAll;
 
         Debug();
     };
 } // namespace TensileLite
+

@@ -116,8 +116,10 @@ class rocblas_local_handle
     void*          m_memory{nullptr};
     hipStream_t    m_graph_stream{nullptr};
     hipStream_t    m_old_stream{nullptr};
-    std::string    m_hipblaslt_saved_status = "";
+    std::string    m_hipblaslt_saved_status    = "";
+    std::string    m_stream_order_saved_status = "";
     bool           m_hipblaslt_env_set{false};
+    bool           m_stream_order_env_set{false};
 
     void rocblas_stream_begin_capture();
     void rocblas_stream_end_capture();
@@ -146,6 +148,12 @@ public:
 
     void pre_test(const Arguments& arg)
     {
+        if(arg.alpha_beta_stride && arg.pointer_mode_device)
+        {
+            // for now no GEMM applicability so c/d stride used
+            rocblas_set_batch_alpha_stride(m_handle, arg.stride_c);
+            rocblas_set_batch_beta_stride(m_handle, arg.stride_d);
+        }
 #if HIP_VERSION >= 50500000
         arg.graph_test ? rocblas_stream_begin_capture() : NOOP;
 #endif
@@ -156,6 +164,11 @@ public:
 #if HIP_VERSION >= 50500000
         arg.graph_test ? rocblas_stream_end_capture() : NOOP;
 #endif
+        if(arg.alpha_beta_stride && arg.pointer_mode_device)
+        {
+            rocblas_set_batch_alpha_stride(m_handle, 0);
+            rocblas_set_batch_beta_stride(m_handle, 0);
+        }
     }
 };
 
@@ -173,7 +186,7 @@ void set_device(rocblas_int device_id);
 /*! \brief  CPU Timer(in microsecond): synchronize with the default device and return wall time */
 double get_time_us_sync_device();
 
-/*! \brief  CPU Timer(in microsecond): synchronize with given queue/stream and return wall time */
+/*! \brief  CPU Timer(in microsecond): synchronize with given queue/stream and return wall time. Must be called in matching pairs (start, stop) */
 double get_time_us_sync(hipStream_t stream);
 
 /*! \brief  CPU Timer(in microsecond): no GPU synchronization and return wall time */
@@ -604,5 +617,6 @@ size_t calculate_flush_batch_count(size_t arg_flush_batch_count,
                                    size_t cached_size);
 
 void print_reference_lib_warning();
+void print_asan_kernel_warning(const char* program_name);
 
 hipError_t limit_device_count(int& device_count, int max_limit);

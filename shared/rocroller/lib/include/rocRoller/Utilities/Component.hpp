@@ -1,28 +1,5 @@
-/*******************************************************************************
- *
- * MIT License
- *
- * Copyright 2021-2025 AMD ROCm(TM) Software
- *
- * Permission is hereby granted, free of charge, to any person obtaining a copy
- * of this software and associated documentation files (the "Software"), to deal
- * in the Software without restriction, including without limitation the rights
- * to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
- * copies of the Software, and to permit persons to whom the Software is
- * furnished to do so, subject to the following conditions:
- *
- * The above copyright notice and this permission notice shall be included in
- * all copies or substantial portions of the Software.
- *
- * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
- * IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
- * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
- * AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
- * LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
- * OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
- * SOFTWARE.
- *
- *******************************************************************************/
+// Copyright Advanced Micro Devices, Inc., or its affiliates.
+// SPDX-License-Identifier: MIT
 
 #pragma once
 
@@ -31,6 +8,8 @@
 #include <iostream>
 #include <map>
 #include <memory>
+#include <mutex>
+#include <shared_mutex>
 #include <string>
 #include <type_traits>
 #include <unordered_map>
@@ -214,7 +193,11 @@ namespace rocRoller
             virtual void emptyCache() override;
 
         private:
-            std::vector<Entry> m_entries;
+            using ReaderLock = std::shared_lock<std::shared_mutex>;
+            using WriterLock = std::unique_lock<std::shared_mutex>;
+
+            mutable std::shared_mutex m_entriesLock;
+            std::vector<Entry>        m_entries;
 
             /**
              * Finds an entry among the registered entries (classes).  This is the fallback for if there
@@ -223,7 +206,9 @@ namespace rocRoller
             template <typename T, bool Debug = false>
             Entry const& findEntry(T&& arg) const;
 
+            mutable std::shared_mutex                                   m_entryCacheLock;
             mutable std::unordered_map<Argument, Entry>                 m_entryCache;
+            mutable std::shared_mutex                                   m_instanceCacheLock;
             mutable std::unordered_map<Argument, std::shared_ptr<Base>> m_instanceCache;
         };
 

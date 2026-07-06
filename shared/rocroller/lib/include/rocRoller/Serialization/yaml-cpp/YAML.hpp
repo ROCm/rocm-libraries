@@ -1,31 +1,9 @@
-/*******************************************************************************
- *
- * MIT License
- *
- * Copyright 2019-2025 AMD ROCm(TM) Software
- *
- * Permission is hereby granted, free of charge, to any person obtaining a copy
- * of this software and associated documentation files (the "Software"), to deal
- * in the Software without restriction, including without limitation the rights
- * to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
- * copies of the Software, and to permit persons to whom the Software is
- * furnished to do so, subject to the following conditions:
- *
- * The above copyright notice and this permission notice shall be included in
- * all copies or substantial portions of the Software.
- *
- * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
- * IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
- * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
- * AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
- * LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
- * OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
- * SOFTWARE.
- *
- *******************************************************************************/
+// Copyright Advanced Micro Devices, Inc., or its affiliates.
+// SPDX-License-Identifier: MIT
 
 #pragma once
 
+#ifdef ROCROLLER_USE_YAML_CPP
 #include <rocRoller/Serialization/Base.hpp>
 #include <rocRoller/Serialization/Containers.hpp>
 #include <rocRoller/Serialization/HasTraits.hpp>
@@ -208,6 +186,22 @@ namespace rocRoller
 
         template <>
         inline void EmitterOutput::output(E8M0& obj)
+        {
+            std::stringstream ss;
+            ss << obj;
+            *emitter << ss.str();
+        }
+
+        template <>
+        inline void EmitterOutput::output(E5M3& obj)
+        {
+            std::stringstream ss;
+            ss << obj;
+            *emitter << ss.str();
+        }
+
+        template <>
+        inline void EmitterOutput::output(E4M3& obj)
         {
             std::stringstream ss;
             ss << obj;
@@ -597,4 +591,50 @@ namespace YAML
         }
     };
 
+    template <>
+    struct convert<rocRoller::E5M3>
+    {
+        static Node encode(const rocRoller::E5M3& rhs)
+        {
+            Node node;
+            node.push_back(rhs.scale);
+            return node;
+        }
+
+        static bool decode(const Node& node, rocRoller::E5M3& rhs)
+        {
+            if(!node.IsSequence() || node.size() != 1)
+            {
+                return false;
+            }
+
+            rhs.scale = node[0].as<decltype(rhs.scale)>();
+            return true;
+        }
+    };
+
+    template <>
+    struct convert<rocRoller::E4M3>
+    {
+        static Node encode(const rocRoller::E4M3& rhs)
+        {
+            Node node;
+            node.push_back(rhs.scale);
+            return node;
+        }
+
+        static bool decode(const Node& node, rocRoller::E4M3& rhs)
+        {
+            if(!node.IsSequence() || node.size() != 1)
+            {
+                return false;
+            }
+
+            rhs.scale = node[0].as<decltype(rhs.scale)>();
+            return true;
+        }
+    };
+
 } // namespace YAML
+
+#endif

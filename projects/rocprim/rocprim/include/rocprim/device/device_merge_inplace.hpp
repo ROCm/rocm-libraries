@@ -1,4 +1,4 @@
-// Copyright (c) 2025 Advanced Micro Devices, Inc. All rights reserved.
+// Copyright (c) 2025-2026 Advanced Micro Devices, Inc. All rights reserved.
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -45,11 +45,12 @@
 #include <iterator>
 #include <limits>
 
-BEGIN_ROCPRIM_NAMESPACE
-
 /// \addtogroup devicemodule
 /// @{
 
+BEGIN_ROCPRIM_NAMESPACE
+
+#ifndef DOXYGEN_SHOULD_SKIP_THIS // Do not document
 namespace detail
 {
 
@@ -262,7 +263,8 @@ struct merge_inplace_impl
     static auto get_num_global_divisions(size_t left_size, size_t right_size)
     {
         const offset_t max_size = max(left_size, right_size);
-        const int32_t  set_bits = std::numeric_limits<size_t>::digits - clz(max_size);
+        const int32_t  set_bits = max_size == 0 ? std::numeric_limits<size_t>::digits :
+                                  std::numeric_limits<size_t>::digits - clz(max_size);
 
         // compute 2 + ceil(log_2(max(left, right))) - log_2(items_per_thread)
         return max(2, 2 + set_bits - Log2<block_merge_items_per_block>::VALUE);
@@ -377,11 +379,11 @@ struct merge_inplace_impl
 
             const offset_t left_index  = left_start + reverse_offset;
             const offset_t right_index = right_end - reverse_offset - 1;
+            const bool     swap        = left_index != right_index;
 
-            if(left_index != right_index)
-            {
-                rocprim::swap(data[left_index], data[right_index]);
-            }
+            ::rocprim::detail::swap_if<rocprim::detail::swap_method::ternary>(swap,
+                                                                              data[left_index],
+                                                                              data[right_index]);
         }
     }
 
@@ -423,11 +425,11 @@ struct merge_inplace_impl
 
             const auto left_index  = pivot.left + work_offset;
             const auto right_index = pivot.right - work_offset - 1;
+            const bool swap        = left_index != right_index;
 
-            if(left_index != right_index)
-            {
-                rocprim::swap(data[left_index], data[right_index]);
-            }
+            ::rocprim::detail::swap_if<rocprim::detail::swap_method::ternary>(swap,
+                                                                              data[left_index],
+                                                                              data[right_index]);
         }
     }
 
@@ -620,6 +622,8 @@ struct merge_inplace_impl
 };
 } // namespace detail
 
+#endif // DOXYGEN_SHOULD_SKIP_THIS
+
 /// \brief Parallel merge inplace primitive for device level.
 ///
 /// The `merge_inplace` function performs a device-wide merge in place. It merges two ordered sets
@@ -661,6 +665,9 @@ struct merge_inplace_impl
 /// \par Example
 /// \parblock
 /// \code{.cpp}
+///
+/// The full example is [on GitHub](https://github.com/ROCm/rocm-libraries/tree/develop/projects/rocprim/example/rocprim/device/example_device_merge_inplace.cpp).
+///
 /// #include <rocprim/rocprim.hpp>
 ///
 /// size_t left_size;  // e.g. 4
@@ -915,9 +922,9 @@ inline hipError_t merge_inplace(void*             temporary_storage,
     return hipSuccess;
 }
 
+END_ROCPRIM_NAMESPACE
+
 /// @}
 // end of group devicemodule
-
-END_ROCPRIM_NAMESPACE
 
 #endif // ROCPRIM_DEVICE_DEVICE_MERGE_INPLACE_HPP_

@@ -11,7 +11,7 @@ def runCI =
     def prj = new rocProject('rocRoller', 'CodeCoverage')
 
     //use docker files from this repo
-    prj.repoDockerfile = true
+    prj.repoDockerfile = false
     prj.defaults.ccache = true
 
     def uniqueTag = params?."Unique Docker image tag" ? org.apache.commons.lang.RandomStringUtils.random(9, true, true) : ""
@@ -45,9 +45,7 @@ def runCI =
         platform, project->
 
         commonGroovy = load "${project.paths.project_src_prefix}/.jenkins/common.groovy"
-        String mxDataGeneratorGitURL = params?.ROCROLLER_MXDATAGENERATOR_GIT_URL ?: baseParams?.ROCROLLER_MXDATAGENERATOR_GIT_URL
-        String mxDataGeneratorGitTag = params?.ROCROLLER_MXDATAGENERATOR_GIT_TAG ?: baseParams?.ROCROLLER_MXDATAGENERATOR_GIT_TAG
-        commonGroovy.runCompileCommand(platform, project, jobName, mxDataGeneratorGitURL, mxDataGeneratorGitTag, true)
+        commonGroovy.runCompileCommand(platform, project, jobName, true)
     }
 
     def testCommand =
@@ -91,18 +89,6 @@ ci: {
             defaultValue: params?.ROCROLLER_AMDGPU_BUILD_URI ?: "",
             trim: true,
             description: "Specify the specific artifact path for AMDGPU"
-        ),
-        string(
-            name: "ROCROLLER_MXDATAGENERATOR_GIT_URL",
-            defaultValue: params?.ROCROLLER_MXDATAGENERATOR_GIT_URL ?: "",
-            trim: true,
-            description: "Specify the specific mxDataGenerator Git URL"
-        ),
-        string(
-            name: "ROCROLLER_MXDATAGENERATOR_GIT_TAG",
-            defaultValue: params?.ROCROLLER_MXDATAGENERATOR_GIT_TAG ?: "",
-            trim: true,
-            description: "Specify the specific mxDataGenerator tag/commit hash"
         ),
         booleanParam(
             name: "Unique Docker image tag",

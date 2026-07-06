@@ -1,5 +1,5 @@
 # ########################################################################
-# Copyright (C) 2021-2025 Advanced Micro Devices, Inc. All rights Reserved.
+# Copyright (C) 2021-2026 Advanced Micro Devices, Inc. All rights Reserved.
 #
 # Permission is hereby granted, free of charge, to any person obtaining a copy
 # of this software and associated documentation files (the "Software"), to deal
@@ -39,16 +39,11 @@ Definitions:
     - { alpha:  -1.0, beta: -0.5,  alphai:  0.0, betai:  0.0 }
 
 Tests:
-- name: spmm_bell_bad_arg
-  category: pre_checkin
-  function: spmm_bell_bad_arg
-  indextype: *i32_i64
-  precision: *single_double_precisions_complex_real
-
+# Quick
 - name: spmm_bell
   category: quick
   function: spmm_bell
-  indextype: *i32_i64
+  indextype: *i32
   precision: *single_double_precisions_complex_real
   M: [2]
   N: [2]
@@ -60,13 +55,13 @@ Tests:
   baseA: [rocsparse_index_base_zero]
   matrix: [rocsparse_matrix_random]
   spmm_alg: [rocsparse_spmm_alg_bell]
-  orderB: [rocsparse_order_row, rocsparse_order_column]
+  orderB: [rocsparse_order_column]
   orderC: [rocsparse_order_row]
 
 - name: spmm_bell
   category: quick
   function: spmm_bell
-  indextype: *i32_i64
+  indextype: *i64
   precision: *single_double_precisions_complex_real
   M: [48]
   N: [64]
@@ -78,37 +73,62 @@ Tests:
   baseA: [rocsparse_index_base_zero]
   matrix: [rocsparse_matrix_random]
   spmm_alg: [rocsparse_spmm_alg_bell]
-  orderB: [rocsparse_order_row, rocsparse_order_column]
+  orderB: [rocsparse_order_row]
   orderC: [rocsparse_order_column]
 
 - name: spmm_bell_file
   category: quick
   function: spmm_bell
-  indextype: *i32_i64
-  precision: *single_double_precisions
+  indextype: *i32
+  precision: *single_only_precisions
   M: 1
   N: 7
   K: 1
   block_dim: [3, 4]
   alpha_beta: *alpha_beta_range_quick
   transA: [rocsparse_operation_none]
-  transB: [rocsparse_operation_none, rocsparse_operation_transpose]
+  transB: [rocsparse_operation_none]
   baseA: [rocsparse_index_base_one]
   matrix: [rocsparse_matrix_file_rocalution]
   spmm_alg: [rocsparse_spmm_alg_bell]
   orderB: [rocsparse_order_row]
   orderC: [rocsparse_order_row]
-  filename: [nos4,
-             nos6]
+  filename: [nos4]
 
+- name: spmm_bell_file
+  category: quick
+  function: spmm_bell
+  indextype: *i64
+  precision: *double_only_precisions
+  M: 1
+  N: 7
+  K: 1
+  block_dim: [5, 6]
+  alpha_beta: *alpha_beta_range_quick
+  transA: [rocsparse_operation_none]
+  transB: [rocsparse_operation_transpose]
+  baseA: [rocsparse_index_base_one]
+  matrix: [rocsparse_matrix_file_rocalution]
+  spmm_alg: [rocsparse_spmm_alg_bell]
+  orderB: [rocsparse_order_row]
+  orderC: [rocsparse_order_row]
+  filename: [nos6]
+
+
+# Pre-checkin
+- name: spmm_bell_bad_arg
+  category: pre_checkin
+  function: spmm_bell_bad_arg
+  indextype: *i32
+  precision: *single_double_precisions_complex_real
 
 - name: spmm_bell
   category: pre_checkin
   function: spmm_bell
-  indextype: *i32_i64
+  indextype: *i32
   precision: *single_double_precisions
-  M: [0, 51]
-  N: [0, 44]
+  M: [8, 51]
+  N: [8, 44]
   K: [0, 8]
   block_dim: [1, 2, 4, 8, 16, 32, 64]
   alpha_beta: *alpha_beta_range_checkin
@@ -123,7 +143,7 @@ Tests:
 - name: spmm_bell
   category: pre_checkin
   function: spmm_bell
-  indextype: *i32_i64
+  indextype: *i64
   precision: *float16_float16_float32_float32_abct_precision
   M: [43]
   N: [65]
@@ -141,7 +161,7 @@ Tests:
 - name: spmm_bell_file
   category: pre_checkin
   function: spmm_bell
-  indextype: *i32_i64
+  indextype: *i64
   precision: *single_double_precisions
   M: 1
   N: 3
@@ -158,7 +178,26 @@ Tests:
   filename: [nos1,
              nos5]
 
+- name: spmm_bell_graph_test
+  category: pre_checkin
+  function: spmm_bell
+  indextype: *i32
+  precision: *single_double_precisions_complex_real
+  M: [48]
+  N: [64]
+  K: [22]
+  block_dim: [5, 16]
+  alpha_beta: *alpha_beta_range_checkin
+  transA: [rocsparse_operation_none]
+  transB: [rocsparse_operation_none, rocsparse_operation_transpose, rocsparse_operation_conjugate_transpose]
+  baseA: [rocsparse_index_base_zero]
+  matrix: [rocsparse_matrix_random]
+  spmm_alg: [rocsparse_spmm_alg_bell]
+  orderB: [rocsparse_order_row, rocsparse_order_column]
+  orderC: [rocsparse_order_row]
+  graph_test: true
 
+# Nightly
 - name: spmm_bell
   category: nightly
   function: spmm_bell
@@ -176,22 +215,3 @@ Tests:
   spmm_alg: [rocsparse_spmm_alg_bell]
   orderB: [rocsparse_order_column]
   orderC: [rocsparse_order_column]
-
-- name: spmm_bell_graph_test
-  category: pre_checkin
-  function: spmm_bell
-  indextype: *i32_i64
-  precision: *single_double_precisions_complex_real
-  M: [48]
-  N: [64]
-  K: [22]
-  block_dim: [5, 16]
-  alpha_beta: *alpha_beta_range_checkin
-  transA: [rocsparse_operation_none]
-  transB: [rocsparse_operation_none, rocsparse_operation_transpose, rocsparse_operation_conjugate_transpose]
-  baseA: [rocsparse_index_base_zero]
-  matrix: [rocsparse_matrix_random]
-  spmm_alg: [rocsparse_spmm_alg_bell]
-  orderB: [rocsparse_order_row, rocsparse_order_column]
-  orderC: [rocsparse_order_row]
-  graph_test: true

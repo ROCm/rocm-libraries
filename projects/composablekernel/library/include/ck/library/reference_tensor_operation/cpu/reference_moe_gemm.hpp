@@ -1,5 +1,5 @@
+// Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
 // SPDX-License-Identifier: MIT
-// Copyright (c) 2018-2025, Advanced Micro Devices, Inc. All rights reserved.
 
 #pragma once
 
@@ -11,6 +11,10 @@
 #include "ck/tensor_operation/gpu/device/device_base.hpp"
 #include "ck/library/utility/host_tensor.hpp"
 
+#if __clang_major__ >= 23
+#pragma clang diagnostic push
+#pragma clang diagnostic ignored "-Wlifetime-safety-intra-tu-suggestions"
+#endif
 namespace ck {
 namespace tensor_operation {
 namespace host {
@@ -172,26 +176,26 @@ struct ReferenceMoeGemm : public device::BaseOperator
 
                     if constexpr(ActivationType == 1)
                     {
-                        v_c = v_c * arg.b_scale_e_n_(e, n) * arg.a_scale_t_(t);
+                        v_c = v_c * arg.b_scale_e_n_(e, n) * arg.a_scale_t_(t, 0);
                         if constexpr(is_same_v<BDataType, pk_i4_t>)
                         {
                             v_c_up *= 16;
                             v_c *= 16;
                         }
                         tensor_operation::element_wise::Silu{}(v_c, v_c);
-                        v_c_up = v_c_up * arg.b_scale_e_n_(e, n + full_n) * arg.a_scale_t_(t);
+                        v_c_up = v_c_up * arg.b_scale_e_n_(e, n + full_n) * arg.a_scale_t_(t, 0);
                         arg.c_t_k_n_(t, topk_id, n) = v_c * v_c_up;
                     }
                     else if constexpr(ActivationType == 0)
                     {
-                        v_c = v_c * arg.b_scale_e_n_(e, n) * arg.a_scale_t_(t);
+                        v_c = v_c * arg.b_scale_e_n_(e, n) * arg.a_scale_t_(t, 0);
                         if constexpr(is_same_v<BDataType, pk_i4_t>)
                         {
                             v_c_up *= 16;
                             v_c *= 16;
                         }
                         tensor_operation::element_wise::Gelu{}(v_c, v_c);
-                        v_c_up = v_c_up * arg.b_scale_e_n_(e, n + full_n) * arg.a_scale_t_(t);
+                        v_c_up = v_c_up * arg.b_scale_e_n_(e, n + full_n) * arg.a_scale_t_(t, 0);
                         arg.c_t_k_n_(t, topk_id, n) = v_c * v_c_up;
                     }
                 }
@@ -293,3 +297,6 @@ struct ReferenceMoeGemm : public device::BaseOperator
 } // namespace host
 } // namespace tensor_operation
 } // namespace ck
+#if __clang_major__ >= 23
+#pragma clang diagnostic pop
+#endif

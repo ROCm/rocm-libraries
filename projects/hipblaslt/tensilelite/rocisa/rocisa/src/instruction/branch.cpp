@@ -63,6 +63,14 @@ void branch_inst(nb::module_ m_branch)
             return new rocisa::SCBranchSCC1(self);
         });
 
+    nb::class_<rocisa::SAddPCI64_SIMM, rocisa::BranchInstruction>(m_branch, "SAddPCI64_SIMM")
+        .def(nb::init<const std::string&, const std::string&>(),
+             nb::arg("src"),
+             nb::arg("comment") = "")
+        .def("__deepcopy__",
+             [](const rocisa::SAddPCI64_SIMM& self, nb::dict&) { return new rocisa::SAddPCI64_SIMM(self); 
+        });
+
     nb::class_<rocisa::SCBranchVCCNZ, rocisa::BranchInstruction>(m_branch, "SCBranchVCCNZ")
         .def(nb::init<const std::string&, const std::string&>(),
              nb::arg("labelName"),
@@ -83,6 +91,9 @@ void branch_inst(nb::module_ m_branch)
         .def(nb::init<const std::shared_ptr<rocisa::Container>&, const std::string&>(),
              nb::arg("src"),
              nb::arg("comment") = "")
+        // Long-branch target hint -- see SSetPCB64::longBranchLabel in branch.hpp.
+        // Metadata only; does not affect the emitted assembly.
+        .def_rw("longBranchLabel", &rocisa::SSetPCB64::longBranchLabel)
         .def("__deepcopy__",
              [](const rocisa::SSetPCB64& self, nb::dict&) { return new rocisa::SSetPCB64(self); });
 

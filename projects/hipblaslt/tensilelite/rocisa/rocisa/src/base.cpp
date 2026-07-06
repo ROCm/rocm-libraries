@@ -37,18 +37,26 @@ namespace rocisa
         return getGfxNameTuple(arch);
     }
 
-    std::string getGlcBitName(bool hasGLCModifier)
+    std::string getGlcBitName()
     {
+        auto hasGLCModifier = rocIsa::getInstance().getAsmCaps()["HasGLCModifier"];
+        auto hasSC0Modifier = rocIsa::getInstance().getAsmCaps()["HasSC0Modifier"];
         if(hasGLCModifier)
             return "glc";
-        return "sc0";
+        if(hasSC0Modifier)
+            return "sc0";
+        return "";
     }
 
-    std::string getSlcBitName(bool hasGLCModifier)
+    std::string getSlcBitName()
     {
+        auto hasGLCModifier = rocIsa::getInstance().getAsmCaps()["HasGLCModifier"];
+        auto hasSC0Modifier = rocIsa::getInstance().getAsmCaps()["HasSC0Modifier"];
         if(hasGLCModifier)
             return "slc";
-        return "sc1";
+        if(hasSC0Modifier)
+            return "sc1";
+        return "";
     }
 
     // Force init the instance
@@ -111,7 +119,13 @@ void init_base(nb::module_ m)
         .def("getArchCaps", &rocisa::rocIsa::getArchCaps, "Get arch capabilities.")
         .def("getAsmBugs", &rocisa::rocIsa::getAsmBugs, "Get asm bugs.")
         .def("getData", &rocisa::rocIsa::getData, "Get data for pickling.")
-        .def("setData", &rocisa::rocIsa::setData, "Set data for pickling.");
+        .def("setData", &rocisa::rocIsa::setData, "Set data for pickling.")
+        .def("getOutputOptions", &rocisa::rocIsa::getOutputOptions, "Get output options.")
+        .def("getVgprIdx", &rocisa::rocIsa::getVgprIdx, "Get vgpr idx.")
+        .def("getVgprMsb", &rocisa::rocIsa::getVgprMsb, "Get vgpr msb.")
+        .def("setOutputOptions", &rocisa::rocIsa::setOutputOptions, "Set output options.")
+        .def("setVgprIdx", &rocisa::rocIsa::setVgprIdx, "Set vgpr idx.")
+        .def("setVgprMsb", &rocisa::rocIsa::setVgprMsb, "Set vgpr msb.");
 
     auto m_base = m.def_submodule("base", "rocIsa base submodule.");
     nb::class_<IsaVersion>(m_base, "IsaVersion")
@@ -175,6 +189,16 @@ void init_base(nb::module_ m)
                  new(&self) rocisa::KernelInfo(std::get<0>(state), std::get<1>(state));
              });
 
+    nb::class_<rocisa::OutputOptions>(m_base, "OutputOptions")
+        .def(nb::init<>())
+        .def_rw("outputNoComment", &rocisa::OutputOptions::outputNoComment)
+        .def(
+            "__getstate__",
+            [](const rocisa::OutputOptions& self) { return std::make_tuple(self.outputNoComment); })
+        .def("__setstate__", [](rocisa::OutputOptions& self, const std::tuple<bool>& state) {
+            new(&self) rocisa::OutputOptions{std::get<0>(state)};
+        });
+
     nb::class_<rocisa::Item>(m_base, "Item")
         .def(nb::init<const char*>(), nb::arg("name") = "")
         .def_rw("name", &rocisa::Item::name)
@@ -183,6 +207,8 @@ void init_base(nb::module_ m)
         .def_prop_ro("regCaps", &rocisa::Item::getRegCaps)
         .def_prop_ro("archCaps", &rocisa::Item::getArchCaps)
         .def_prop_ro("asmBugs", &rocisa::Item::getAsmBugs)
+        .def_prop_ro("vgprIdx", &rocisa::Item::getVgprIdx)
+        .def_prop_ro("vgprMsb", &rocisa::Item::getVgprMsb)
         .def_prop_ro("kernel", &rocisa::Item::kernel)
         .def("prettyPrint", &rocisa::Item::prettyPrint, "Print the instance and the name of Item.")
         .def("__str__", &rocisa::Item::toString)

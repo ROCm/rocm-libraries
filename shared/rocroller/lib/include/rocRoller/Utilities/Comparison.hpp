@@ -1,32 +1,13 @@
-/*******************************************************************************
- *
- * MIT License
- *
- * Copyright 2019-2025 AMD ROCm(TM) Software
- *
- * Permission is hereby granted, free of charge, to any person obtaining a copy
- * of this software and associated documentation files (the "Software"), to deal
- * in the Software without restriction, including without limitation the rights
- * to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
- * copies of the Software, and to permit persons to whom the Software is
- * furnished to do so, subject to the following conditions:
- *
- * The above copyright notice and this permission notice shall be included in
- * all copies or substantial portions of the Software.
- *
- * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
- * IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
- * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
- * AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
- * LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
- * OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
- * SOFTWARE.
- *
- *******************************************************************************/
+// Copyright Advanced Micro Devices, Inc., or its affiliates.
+// SPDX-License-Identifier: MIT
 
 #pragma once
 
+#include <stddef.h>
+#include <tuple>
 #include <type_traits>
+
+#include <rocRoller/Utilities/Concepts.hpp>
 
 namespace rocRoller
 {
@@ -156,13 +137,13 @@ namespace rocRoller
         return b ^ (a + 0x9b9773e99e3779b9 + (b << 6) + (b >> 2));
     }
 
-    template <typename T>
+    template <CHashable T>
     inline size_t hash_combine(T const& val)
     {
         return std::hash<T>()(val);
     }
 
-    template <typename T, typename... Ts>
+    template <CHashable T, CHashable... Ts>
     inline size_t hash_combine(T const& val, Ts const&... more)
     {
         //size_t mine = sizeof(val);

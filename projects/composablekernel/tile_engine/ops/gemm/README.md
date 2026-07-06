@@ -85,15 +85,15 @@ cmake ...
 # Build for gfx942 with fp8 and fp16 datatypes, rcr layout
 mkdir build && cd build
 ../script/cmake-ck-dev.sh ../ gfx942 -DGEMM_DATATYPE="fp8;fp16" -DGEMM_LAYOUT="rcr;ccr;rrr;crr"
-make benchmark_gemm_fp8_rcr -j
-make benchmark_gemm_fp16_rcr -j
+make benchmark_gemm_universal_fp8_rcr -j
+make benchmark_gemm_universal_fp16_rcr -j
 ```
 
 ### Building Individual Kernels
 
 ```bash
 # Build a specific kernel configuration
-make benchmark_gemm_fp8_rcr_compv4_default_intrawave_False_False_False_False_256x256x32_1x4x1_32x32x32
+make benchmark_gemm_universal_fp8_rcr_compv4_default_intrawave_False_False_False_False_256x256x32_1x4x1_32x32x32
 
 # Build all fp16 benchmarks in parallel
 make -j$(nproc) $(make help | grep benchmark_gemm_fp16 | awk '{print $2}')
@@ -103,7 +103,7 @@ make -j$(nproc) $(make help | grep benchmark_gemm_fp16 | awk '{print $2}')
 
 If you modify the configuration file, you must rebuild:
 ```bash
-rm -rf tile_engine/ && make benchmark_gemm_[Datatype]_[Layout] -j
+rm -rf tile_engine/ && make benchmark_gemm_universal_[Datatype]_[Layout] -j
 ```
 
 ## Running Benchmarks
@@ -112,7 +112,7 @@ rm -rf tile_engine/ && make benchmark_gemm_[Datatype]_[Layout] -j
 
 ```bash
 cd /path/to/build/directory
-./bin/benchmark_gemm_fp16_rcr_compv3_default_intrawave_False_False_False_False_256x128x32_4x1x1_32x32x16 \
+./bin/benchmark_gemm_universal_fp16_rcr_compv3_default_intrawave_False_False_False_False_256x128x32_4x1x1_32x32x16 \
     -m=512 -n=512 -k=512 -verify=1
 ```
 
@@ -120,7 +120,7 @@ cd /path/to/build/directory
 
 ```bash
 # Run specific pipeline/scheduler/epilogue combination
-./bin/benchmark_gemm_[Datatype]_[Layout] -pipeline=compv3 -scheduler=intrawave -epilogue=default
+./bin/benchmark_gemm_universal_[Datatype]_[Layout] -pipeline=compv3 -scheduler=intrawave -epilogue=default
 ```
 
 ### Automated Testing
@@ -171,7 +171,7 @@ The system uses JSON configuration files to specify kernel parameters:
 
 ### Python Scripts
 
-#### gemm_instance_builder.py
+#### gemm_universal_instance_builder.py
 **Purpose**: Main kernel instance generation script that creates C++ kernel implementations based on configuration files.
 
 **Key Features**:
@@ -182,12 +182,12 @@ The system uses JSON configuration files to specify kernel parameters:
 
 **Usage**:
 ```bash
-python gemm_instance_builder.py \
+python gemm_universal_instance_builder.py \
     --working_path ./generated \
     --datatype fp16 \
     --layout rcr \
     --config_json configs/user_provided_config.json \
-    --gen_individual
+    --gen_all_individual
 ```
 
 #### gemm_instance_builder_parallel.py
@@ -225,7 +225,7 @@ python test_validation.py
 - Trait combination validation
 - Full tile configuration validation
 
-#### gemm_benchmark.py
+#### gemm_universal_benchmark.py
 **Purpose**: Python script for running and analyzing GEMM benchmarks.
 
 **Features**:
@@ -336,15 +336,15 @@ All benchmark executables support the following options:
 The kernel naming convention encodes the configuration:
 
 ```
-benchmark_gemm_fp16_rcr_compv3_default_intrawave_False_False_False_False_256x128x32_4x1x1_32x32x16
-               ^^^^  ^^^ ^^^^^^ ^^^^^^^ ^^^^^^^^^ ^^^^^^^^^^^^^^^^^^^^^^^ ^^^^^^^^^ ^^^^^^^ ^^^^^^^^^
-               |     |   |      |       |         |                       |         |       |
-               |     |   |      |       |         Padding & flags         |         |       Warp tile
-               |     |   |      |       Scheduler                         |         Thread tile
-               |     |   |      Epilogue                                  Block tile
-               |     |   Pipeline
-               |     Layout (Row-Column-Row)
-               Data type
+benchmark_gemm_universal_fp16_rcr_compv3_default_intrawave_False_False_False_False_256x128x32_4x1x1_32x32x16
+               		 ^^^^  ^^^ ^^^^^^ ^^^^^^^ ^^^^^^^^^ ^^^^^^^^^^^^^^^^^^^^^^^ ^^^^^^^^^ ^^^^^^^ ^^^^^^^^^
+               		 |     |   |      |       |         |                       |         |       |
+               		 |     |   |      |       |         Padding & flags         |         |       Warp tile
+               		 |     |   |      |       Scheduler                         |         Thread tile
+               		 |     |   |      Epilogue                                  Block tile
+               		 |     |   Pipeline
+               		 |     Layout (Row-Column-Row)
+               		 Data type
 ```
 
 ### Components:
@@ -409,7 +409,7 @@ import json
 
 # Run benchmark with JSON output
 result = subprocess.run([
-    './bin/benchmark_gemm_fp16_rcr_...', 
+    './bin/benchmark_gemm_universal_fp16_rcr_...', 
     '-m=1024', '-n=1024', '-k=1024',
     '-json_output=true'
 ], capture_output=True, text=True)

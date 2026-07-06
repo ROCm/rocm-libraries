@@ -1,4 +1,4 @@
-// Copyright (c) 2024 Advanced Micro Devices, Inc. All rights reserved.
+// Copyright (c) 2025-2026 Advanced Micro Devices, Inc. All rights reserved.
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -31,10 +31,10 @@
 #include <cstddef>
 #include <cstdio>
 
-BEGIN_ROCPRIM_NAMESPACE
-
 /// \addtogroup devicemodule
 /// @{
+
+BEGIN_ROCPRIM_NAMESPACE
 
 /// \brief Searches for the first occurrence of the sequence.
 ///
@@ -87,6 +87,8 @@ BEGIN_ROCPRIM_NAMESPACE
 /// In this example a device-level search is performed where input values are
 ///   represented by an array of unsigned integers and the key is also an array
 ///   of unsigned integers.
+///
+/// The full example is [on GitHub](https://github.com/ROCm/rocm-libraries/tree/develop/projects/rocprim/example/rocprim/device/example_device_search.cpp).
 ///
 /// \code{.cpp}
 /// #include <rocprim/rocprim.hpp>
@@ -147,9 +149,9 @@ hipError_t search(void*          temporary_storage,
                                              debug_synchronous);
 }
 
+END_ROCPRIM_NAMESPACE
+
 /// @}
 // end of group devicemodule
-
-END_ROCPRIM_NAMESPACE
 
 #endif // ROCPRIM_DEVICE_DEVICE_SEARCH_HPP_

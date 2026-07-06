@@ -2,7 +2,7 @@
  *
  * MIT License
  *
- * Copyright (C) 2022-2024 Advanced Micro Devices, Inc. All rights reserved.
+ * Copyright (C) 2022-2025 Advanced Micro Devices, Inc. All rights reserved.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -55,6 +55,11 @@ namespace TensileLite
         return m_value & 0x10;
     }
 
+    bool Debug::printPredicateEvaluationVerbose() const
+    {
+        return m_value & 0x40000;
+    }
+
     bool Debug::printCodeObjectInfo() const
     {
         return m_value & 0x20;
@@ -105,6 +110,11 @@ namespace TensileLite
         return m_value & 0x20000;
     }
 
+    bool Debug::printStreamKModeSelection() const
+    {
+        return m_value & 0x100000;
+    }
+
     bool Debug::naivePropertySearch() const
     {
         return m_naivePropertySearch;
@@ -115,14 +125,14 @@ namespace TensileLite
         return m_value2 & 0x1;
     }
 
-    bool Debug::enableDebugSelection() const
-    {
-        return m_debugSelection;
-    }
-
     bool Debug::useStreamKDataParrallel() const
     {
         return m_dataParallel;
+    }
+
+    int Debug::streamK5ForceMode() const
+    {
+        return m_streamK5ForceMode;
     }
 
     int Debug::useExperimentalSelection() const
@@ -145,19 +155,14 @@ namespace TensileLite
         return m_solution_index;
     }
 
-    bool Debug::getSolutionSelectionTrace() const
+    bool Debug::usePredictionLibrary() const
     {
-        return m_solselTrace;
+        return m_predictionLib;
     }
 
     int Debug::getGridbasedTopSols() const
     {
         return m_gridbasedTopSols;
-    }
-
-    bool Debug::printStreamKGridInfo() const
-    {
-        return m_value & 0x80000;
     }
 
     bool Debug::gridBasedKDTree() const
@@ -173,6 +178,16 @@ namespace TensileLite
     bool Debug::disableStaggerU() const
     {
         return m_disableStaggerU;
+    }
+
+    StringSet Debug::excludedLibFromGetAll() const
+    {
+        return m_excludedFromGetAll;
+    }
+
+    void Debug::setExcludedLibFromGetAll(StringSet& excludedSet)
+    {
+        m_excludedFromGetAll = excludedSet;
     }
 
     Debug::Debug()
@@ -191,21 +206,28 @@ namespace TensileLite
         if(naive)
             m_naivePropertySearch = strtol(naive, nullptr, 0) != 0;
 
-        const char* db_select = std::getenv("TENSILE_TAM_SELECTION_ENABLE");
-        if(db_select)
-            m_debugSelection = strtol(db_select, nullptr, 0) != 0;
-
         const char* exp_streamkDP = std::getenv("TENSILE_STREAMK_DATA_PARALLEL");
         if(exp_streamkDP)
             m_dataParallel = strtol(exp_streamkDP, nullptr, 0) != 0;
+
+        // StreamK=5 hybrid-mode debug override (-1=respect API, 0=static, 1=dynamic).
+        // Non-numeric or out-of-range values are ignored (not silently coerced to 0).
+        const char* sk5Force = std::getenv("TENSILE_STREAMK5_FORCE_MODE");
+        if(sk5Force)
+        {
+            char* end = nullptr;
+            const long val = strtol(sk5Force, &end, 0);
+            if(end != sk5Force && *end == '\0' && val >= -1 && val <= 1)
+                m_streamK5ForceMode = static_cast<int>(val);
+        }
 
         const char* exp_select = std::getenv("TENSILE_SOLUTION_SELECTION_METHOD");
         if(exp_select)
             m_experimentSelection = strtol(exp_select, nullptr, 0);
 
-        const char* solsel_trace = std::getenv("TENSILE_SOLUTION_SELECTION_TRACE");
-        if(solsel_trace)
-            m_solselTrace = strtol(solsel_trace, nullptr, 0) != 0;
+        const char* prediction_only = std::getenv("TENSILE_PREDICTION_LIB");
+        if(prediction_only)
+            m_predictionLib = strtol(prediction_only, nullptr, 0) != 0;
 
         const char* solution_index = std::getenv("TENSILE_SOLUTION_INDEX");
         if(solution_index)
@@ -245,6 +267,25 @@ namespace TensileLite
         const char* tensile_disable_staggerU = std::getenv("TENSILE_DISABLE_STAGGERU");
         if(tensile_disable_staggerU)
             m_disableStaggerU = strtol(tensile_disable_staggerU, nullptr, 0) != 0;
+    }
+
+    void Debug::reloadDebugBitsForTest()
+    {
+        const char* db = std::getenv("TENSILE_DB");
+        m_value        = db ? static_cast<int>(strtol(db, nullptr, 0)) : DEBUG_SM;
+
+        const char* db2 = std::getenv("TENSILE_DB2");
+        m_value2        = db2 ? static_cast<int>(strtol(db2, nullptr, 0)) : DEBUG_SM2;
+
+        const char* sk5Force    = std::getenv("TENSILE_STREAMK5_FORCE_MODE");
+        m_streamK5ForceMode     = -1;
+        if(sk5Force)
+        {
+            char*      end = nullptr;
+            const long val = strtol(sk5Force, &end, 0);
+            if(end != sk5Force && *end == '\0' && val >= -1 && val <= 1)
+                m_streamK5ForceMode = static_cast<int>(val);
+        }
     }
 
 } // namespace TensileLite

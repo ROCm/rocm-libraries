@@ -101,7 +101,7 @@ void RTRT3DNode::BuildTree_internal(SchemeTreeVec& child_scheme_trees)
     //    Don't fuse zPlan, trans2Plan to FT_STOCKHAM_WITH_TRANS_Z_XY
     //    because the preceding trans1 is XY_Z:
     //    xyPlan handles the first 2 dimensions without a transpose.
-    //    So the XY_Z tranpose arranges the Z dimension to the fastest dim, and
+    //    So the XY_Z transpose arranges the Z dimension to the fastest dim, and
     //    Z_XY puts it back to the expected arrangement for output.
 }
 
@@ -681,15 +681,16 @@ void RC3DNode::AssignParams_internal()
  *****************************************************/
 size_t PP3DNode::GetPPOffDim() const
 {
-    auto key = PPFMKey(length[0], length[1], length[2], precision, scheme);
-    if(!pool.has_function(key))
+    auto key
+        = PPFMKey(length[0], length[1], length[2], precision, GetRootPlanTransformType(), scheme);
+    if(!pool.has_function(key, batch))
         throw std::runtime_error("GetPPOffDim failed to find a valid kernel");
 
     // CS_3D_PP will have two corresponding kernels in
     // the function pool, both will have the same off-dim
     // value, and at least of one them must be an SBCC PP
     auto child_scheme = CS_KERNEL_STOCKHAM_PP_BLOCK_CC;
-    auto kernel       = pool.get_kernel(key, child_scheme);
+    auto kernel       = pool.get_kernel(key, child_scheme, batch);
 
     return kernel.pp_params.off_dim;
 }

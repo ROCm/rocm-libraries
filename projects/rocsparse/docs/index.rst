@@ -30,8 +30,9 @@ For ROCm code examples, see `<https://github.com/ROCm/rocm-examples>`_.
 
   .. grid-item-card:: Install
 
-    * :doc:`Linux installation guide <./install/Linux_Install_Guide>`
-    * :doc:`Windows installation guide <./install/Windows_Install_Guide>`
+    * :doc:`Install rocSPARSE <./install/install>`
+    * :doc:`Build from source on Linux <./install/Linux_Install_Guide>`
+    * :doc:`Build from source on Windows <./install/Windows_Install_Guide>`
 
 .. grid:: 2
   :gutter: 3
@@ -39,11 +40,11 @@ For ROCm code examples, see `<https://github.com/ROCm/rocm-examples>`_.
   .. grid-item-card:: Conceptual
 
     * :doc:`rocSPARSE design <./conceptual/rocsparse-design>`
+    * :doc:`Storage formats <./conceptual/storage-formats-sparse>`
 
   .. grid-item-card:: How to
 
     * :doc:`Use rocSPARSE <./how-to/using-rocsparse>`
-    * :doc:`Contribute to rocSPARSE <./how-to/contribute>`
 
   .. grid-item-card:: Examples
 
@@ -71,5 +72,6 @@ For ROCm code examples, see `<https://github.com/ROCm/rocm-examples>`_.
     * :ref:`reproducibility`
 
 To contribute to the documentation, see `Contributing to ROCm <https://rocm.docs.amd.com/en/latest/contribute/contributing.html>`_.
+For information on contributing to the rocSPARSE code base, see :doc:`Contribute to rocSPARSE <./contribute>`.
 
 You can find licensing information on the `Licensing <https://rocm.docs.amd.com/en/latest/about/license.html>`_ page.

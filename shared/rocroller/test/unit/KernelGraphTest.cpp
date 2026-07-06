@@ -1,28 +1,5 @@
-/*******************************************************************************
- *
- * MIT License
- *
- * Copyright 2024-2025 AMD ROCm(TM) Software
- *
- * Permission is hereby granted, free of charge, to any person obtaining a copy
- * of this software and associated documentation files (the "Software"), to deal
- * in the Software without restriction, including without limitation the rights
- * to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
- * copies of the Software, and to permit persons to whom the Software is
- * furnished to do so, subject to the following conditions:
- *
- * The above copyright notice and this permission notice shall be included in
- * all copies or substantial portions of the Software.
- *
- * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
- * IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
- * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
- * AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
- * LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
- * OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
- * SOFTWARE.
- *
- *******************************************************************************/
+// Copyright Advanced Micro Devices, Inc., or its affiliates.
+// SPDX-License-Identifier: MIT
 
 #ifdef ROCROLLER_USE_HIP
 #include <hip/hip_ext.h>
@@ -41,6 +18,7 @@
 #include <rocRoller/KernelGraph/Transforms/All.hpp>
 #include <rocRoller/KernelGraph/Utils.hpp>
 #include <rocRoller/KernelGraph/Visitors.hpp>
+#include <rocRoller/KernelOptions_detail.hpp>
 #include <rocRoller/Operations/Command.hpp>
 #include <rocRoller/Utilities/Error.hpp>
 #include <rocRoller/Utilities/Random.hpp>
@@ -102,8 +80,9 @@ namespace KernelGraphTest
 
     TEST_F(KernelGraphTest, BasicTranslateLinear)
     {
-        auto example = rocRollerTest::Graphs::VectorAddNegSquare<int>();
-        auto kgraph0 = example.getKernelGraph();
+        auto example       = rocRollerTest::Graphs::VectorAddNegSquare<int>();
+        auto kgraph0       = example.getKernelGraph();
+        auto commandParams = example.getCommandParameters();
 
         auto bottom = kgraph0.coordinates.roots().to<std::vector>();
         EXPECT_EQ(bottom.size(), 2);
@@ -124,8 +103,8 @@ namespace KernelGraphTest
 
         std::string expectedC = R".(
                 digraph {
-                "coord1"[label="User{CommandArgument(Tensor_0_extent)I64}(1)"];
-                "coord2"[label="User{CommandArgument(Tensor_2_extent)I64}(2)"];
+                "coord1"[label="User{NA}(1)"];
+                "coord2"[label="User{NA}(2)"];
                 "coord3"[label="SubDimension{0, CommandArgument(Tensor_0_size_0)I64}(3)"];
                 "coord4"[label="Split(4)",shape=box];
                 "coord5"[label="Linear{CommandArgument(Tensor_0_size_0)I64}(5)"];
@@ -142,9 +121,9 @@ namespace KernelGraphTest
                 "coord16"[label="DataFlow(16)",shape=box];
                 "coord17"[label="Linear{NA}(17)"];
                 "coord18"[label="DataFlow(18)",shape=box];
-                "coord19"[label="SubDimension{0, NA}(19)"];
+                "coord19"[label="SubDimension{0, CommandArgument(Tensor_8_size_0)I64}(19)"];
                 "coord20"[label="Split(20)",shape=box];
-                "coord21"[label="User{CommandArgument(Tensor_8_extent)I64}(21)"];
+                "coord21"[label="User{NA}(21)"];
                 "coord22"[label="Join(22)",shape=box];
                 "coord23"[label="DataFlow(23)",shape=box];
                 "coord1" -> "coord4"
@@ -258,13 +237,13 @@ namespace KernelGraphTest
 
         std::string expected0 = R".(
                 digraph {
-                "coord1"[label="User{CommandArgument(Tensor_0_extent)I64}(1)"];
+                "coord1"[label="User{NA}(1)"];
                 "coord2"[label="SubDimension{0, CommandArgument(Tensor_0_size_0)I64}(2)"];
                 "coord3"[label="Split(3)",shape=box];
                 "coord4"[label="Linear{CommandArgument(Tensor_0_size_0)I64}(4)"];
                 "coord5"[label="Flatten(5)",shape=box];
                 "coord6"[label="DataFlow(6)",shape=box];
-                "coord7"[label="User{CommandArgument(Tensor_2_extent)I64}(7)"];
+                "coord7"[label="User{NA}(7)"];
                 "coord8"[label="SubDimension{0, CommandArgument(Tensor_2_size_0)I64}(8)"];
                 "coord9"[label="Split(9)",shape=box];
                 "coord10"[label="Linear{CommandArgument(Tensor_2_size_0)I64}(10)"];
@@ -276,8 +255,8 @@ namespace KernelGraphTest
                 "coord16"[label="DataFlow(16)",shape=box];
                 "coord17"[label="Linear{NA}(17)"];
                 "coord18"[label="DataFlow(18)",shape=box];
-                "coord19"[label="SubDimension{0, NA}(19)"];
-                "coord20"[label="User{CommandArgument(Tensor_8_extent)I64}(20)"];
+                "coord19"[label="SubDimension{0, CommandArgument(Tensor_8_size_0)I64}(19)"];
+                "coord20"[label="User{NA}(20)"];
                 "coord21"[label="Split(21)",shape=box];
                 "coord22"[label="Join(22)",shape=box];
                 "coord23"[label="DataFlow(23)",shape=box];
@@ -392,8 +371,8 @@ namespace KernelGraphTest
 
         std::string expected1 = R".(
             digraph {
-        "coord1"[label="User{CommandArgument(Tensor_0_extent)I64}(1)"];
-        "coord2"[label="User{CommandArgument(Tensor_2_extent)I64}(2)"];
+        "coord1"[label="User{Multiply(CommandArgument(Tensor_0_stride_0)I64, CommandArgument(Tensor_0_size_0)I64)I64}(1)"];
+        "coord2"[label="User{Multiply(CommandArgument(Tensor_2_stride_0)I64, CommandArgument(Tensor_2_size_0)I64)I64}(2)"];
         "coord3"[label="SubDimension{0, CommandArgument(Tensor_0_size_0)I64}(3)"];
         "coord4"[label="Split(4)",shape=box];
         "coord5"[label="Linear{CommandArgument(Tensor_0_size_0)I64}(5)"];
@@ -403,18 +382,18 @@ namespace KernelGraphTest
         "coord9"[label="Linear{CommandArgument(Tensor_2_size_0)I64}(9)"];
         "coord10"[label="Flatten(10)",shape=box];
         "coord11"[label="Linear{NA}(11)"];
-        "coord12"[label="SubDimension{0, NA}(12)"];
+        "coord12"[label="SubDimension{0, CommandArgument(Tensor_8_size_0)I64}(12)"];
         "coord13"[label="Split(13)",shape=box];
-        "coord14"[label="User{CommandArgument(Tensor_8_extent)I64}(14)"];
+        "coord14"[label="User{Multiply(CommandArgument(Tensor_8_stride_0)I64, CommandArgument(Tensor_8_size_0)I64)I64}(14)"];
         "coord15"[label="Join(15)",shape=box];
         "coord16"[label="VGPR{NA}(16)"];
-        "coord17"[label="Workgroup{0, Divide(Subtract(Add(CommandArgument(Tensor_0_extent)I64, 64:U32)I64, 1:U32)I64, 64:U32)I64}(17)"];
+        "coord17"[label="Workgroup{0, Divide(Subtract(Add(Multiply(CommandArgument(Tensor_0_stride_0)I64, CommandArgument(Tensor_0_size_0)I64)I64, 64:U32)I64, 1:U32)I64, 64:U32)I64}(17)"];
         "coord18"[label="Workitem{0, 64:U32}(18)"];
         "coord19"[label="Tile(19)",shape=box];
         "coord20"[label="Forget(20)",shape=box];
         "coord21"[label="DataFlow(21)",shape=box];
         "coord22"[label="VGPR{NA}(22)"];
-        "coord23"[label="Workgroup{0, Divide(Subtract(Add(CommandArgument(Tensor_2_extent)I64, 64:U32)I64, 1:U32)I64, 64:U32)I64}(23)"];
+        "coord23"[label="Workgroup{0, Divide(Subtract(Add(Multiply(CommandArgument(Tensor_2_stride_0)I64, CommandArgument(Tensor_2_size_0)I64)I64, 64:U32)I64, 1:U32)I64, 64:U32)I64}(23)"];
         "coord24"[label="Workitem{0, 64:U32}(24)"];
         "coord25"[label="Tile(25)",shape=box];
         "coord26"[label="Forget(26)",shape=box];
@@ -425,7 +404,7 @@ namespace KernelGraphTest
         "coord31"[label="DataFlow(31)",shape=box];
         "coord32"[label="VGPR{NA}(32)"];
         "coord33"[label="DataFlow(33)",shape=box];
-        "coord34"[label="Workgroup{0, Divide(Subtract(Add(CommandArgument(Tensor_8_extent)I64, 64:U32)I64, 1:U32)I64, 64:U32)I64}(34)"];
+        "coord34"[label="Workgroup{0, Divide(Subtract(Add(Multiply(CommandArgument(Tensor_8_stride_0)I64, CommandArgument(Tensor_8_size_0)I64)I64, 64:U32)I64, 1:U32)I64, 64:U32)I64}(34)"];
         "coord35"[label="Workitem{0, 64:U32}(35)"];
         "coord36"[label="Inherit(36)",shape=box];
         "coord37"[label="Flatten(37)",shape=box];
@@ -589,20 +568,22 @@ namespace KernelGraphTest
         m_context->kernel()->setWorkgroupSize({64, 1, 1});
         m_context->kernel()->setWorkitemCount({one, one, one});
 
-        auto lowerLinearTransform = std::make_shared<LowerLinear>(m_context);
+        auto lowerLinearTransform      = std::make_shared<LowerLinear>(m_context);
+        auto updateParametersTransform = std::make_shared<UpdateParameters>(commandParams);
 
-        auto kgraph1 = kgraph0.transform(lowerLinearTransform);
-        EXPECT_EQ(NormalizedSource(expected1), NormalizedSource(kgraph1.toDOT(true)));
+        auto kgraph1 = kgraph0.transform(updateParametersTransform);
+        auto kgraph2 = kgraph1.transform(lowerLinearTransform);
+        EXPECT_EQ(NormalizedSource(expected1), NormalizedSource(kgraph2.toDOT(true)));
 
         std::string expected2 = R".(
         digraph {
-        "coord1"[label="User{CommandArgument(Tensor_0_extent)I64}(1)"];
-        "coord2"[label="User{CommandArgument(Tensor_2_extent)I64}(2)"];
+        "coord1"[label="User{Multiply(CommandArgument(Tensor_0_stride_0)I64, CommandArgument(Tensor_0_size_0)I64)I64}(1)"];
+        "coord2"[label="User{Multiply(CommandArgument(Tensor_2_stride_0)I64, CommandArgument(Tensor_2_size_0)I64)I64}(2)"];
         "coord3"[label="SubDimension{0, CommandArgument(Tensor_0_size_0)I64}(3)"];
         "coord4"[label="Split(4)",shape=box];
         "coord5"[label="Linear{CommandArgument(Tensor_0_size_0)I64}(5)"];
         "coord6"[label="Flatten(6)",shape=box];
-        "coord7"[label="Workgroup{0, Divide(Subtract(Add(CommandArgument(Tensor_0_extent)I64, 64:U32)I64, 1:U32)I64, 64:U32)I64}(7)"];
+        "coord7"[label="Workgroup{0, Divide(Subtract(Add(Multiply(CommandArgument(Tensor_0_stride_0)I64, CommandArgument(Tensor_0_size_0)I64)I64, 64:U32)I64, 1:U32)I64, 64:U32)I64}(7)"];
         "coord8"[label="Workitem{0, 64:U32}(8)"];
         "coord9"[label="Tile(9)",shape=box];
         "coord10"[label="Linear{16:I}(10)"];
@@ -615,7 +596,7 @@ namespace KernelGraphTest
         "coord17"[label="Split(17)",shape=box];
         "coord18"[label="Linear{CommandArgument(Tensor_2_size_0)I64}(18)"];
         "coord19"[label="Flatten(19)",shape=box];
-        "coord20"[label="Workgroup{0, Divide(Subtract(Add(CommandArgument(Tensor_2_extent)I64, 64:U32)I64, 1:U32)I64, 64:U32)I64}(20)"];
+        "coord20"[label="Workgroup{0, Divide(Subtract(Add(Multiply(CommandArgument(Tensor_2_stride_0)I64, CommandArgument(Tensor_2_size_0)I64)I64, 64:U32)I64, 1:U32)I64, 64:U32)I64}(20)"];
         "coord21"[label="Workitem{0, 64:U32}(21)"];
         "coord22"[label="Tile(22)",shape=box];
         "coord23"[label="ForLoop{16:I}(23)"];
@@ -629,16 +610,16 @@ namespace KernelGraphTest
         "coord31"[label="DataFlow(31)",shape=box];
         "coord32"[label="VGPR{NA}(32)"];
         "coord33"[label="DataFlow(33)",shape=box];
-        "coord34"[label="Workgroup{0, Divide(Subtract(Add(CommandArgument(Tensor_8_extent)I64, 64:U32)I64, 1:U32)I64, 64:U32)I64}(34)"];
+        "coord34"[label="Workgroup{0, Divide(Subtract(Add(Multiply(CommandArgument(Tensor_8_stride_0)I64, CommandArgument(Tensor_8_size_0)I64)I64, 64:U32)I64, 1:U32)I64, 64:U32)I64}(34)"];
         "coord35"[label="Workitem{0, 64:U32}(35)"];
         "coord36"[label="Inherit(36)",shape=box];
         "coord37"[label="ForLoop{16:I}(37)"];
         "coord38"[label="DataFlow(38)",shape=box];
         "coord39"[label="Linear{NA}(39)"];
         "coord40"[label="Flatten(40)",shape=box];
-        "coord41"[label="SubDimension{0, NA}(41)"];
+        "coord41"[label="SubDimension{0, CommandArgument(Tensor_8_size_0)I64}(41)"];
         "coord42"[label="Split(42)",shape=box];
-        "coord43"[label="User{CommandArgument(Tensor_8_extent)I64}(43)"];
+        "coord43"[label="User{Multiply(CommandArgument(Tensor_8_stride_0)I64, CommandArgument(Tensor_8_size_0)I64)I64}(43)"];
         "coord44"[label="Join(44)",shape=box];
         "coord45"[label="DataFlow(45)",shape=box];
         "coord1" -> "coord4"
@@ -837,8 +818,8 @@ namespace KernelGraphTest
 
         auto lowerLinerLoopTransform = std::make_shared<LowerLinearLoop>(loopSizeExpr, m_context);
 
-        auto kgraph2 = kgraph1.transform(lowerLinerLoopTransform);
-        EXPECT_EQ(NormalizedSource(expected2), NormalizedSource(kgraph2.toDOT(true)));
+        auto kgraph3 = kgraph2.transform(lowerLinerLoopTransform);
+        EXPECT_EQ(NormalizedSource(expected2), NormalizedSource(kgraph3.toDOT(true)));
     }
 
     TEST_F(KernelGraphTest, BasicTranslateScalar)
@@ -972,14 +953,14 @@ namespace KernelGraphTest
 
         std::string expected0 = R".(
         digraph {
-        "coord1"[label="User{CommandArgument(Tensor_0_extent)I64}(1)"];
+        "coord1"[label="User{NA}(1)"];
         "coord2"[label="SubDimension{0, CommandArgument(Tensor_0_size_0)I64}(2)"];
         "coord3"[label="SubDimension{1, CommandArgument(Tensor_0_size_1)I64}(3)"];
         "coord4"[label="MacroTile{NA}(2/None/None){}-()(4)"];
         "coord5"[label="Split(5)",shape=box];
         "coord6"[label="ConstructMacroTile(6)",shape=box];
         "coord7"[label="DataFlow(7)",shape=box];
-        "coord8"[label="User{CommandArgument(Tensor_2_extent)I64}(8)"];
+        "coord8"[label="User{NA}(8)"];
         "coord9"[label="SubDimension{0, CommandArgument(Tensor_2_size_0)I64}(9)"];
         "coord10"[label="SubDimension{1, CommandArgument(Tensor_2_size_1)I64}(10)"];
         "coord11"[label="MacroTile{NA}(2/None/None){}-()(11)"];
@@ -988,9 +969,9 @@ namespace KernelGraphTest
         "coord14"[label="DataFlow(14)",shape=box];
         "coord15"[label="MacroTile{NA}(0/None/None){}-()(15)"];
         "coord16"[label="DataFlow(16)",shape=box];
-        "coord17"[label="SubDimension{0, NA}(17)"];
-        "coord18"[label="SubDimension{1, NA}(18)"];
-        "coord19"[label="User{CommandArgument(Tensor_5_extent)I64}(19)"];
+        "coord17"[label="User{NA}(17)"];
+        "coord18"[label="SubDimension{0, CommandArgument(Tensor_5_size_0)I64}(18)"];
+        "coord19"[label="SubDimension{1, CommandArgument(Tensor_5_size_1)I64}(19)"];
         "coord20"[label="DestructMacroTile(20)",shape=box];
         "coord21"[label="Join(21)",shape=box];
         "coord22"[label="DataFlow(22)",shape=box];
@@ -1015,12 +996,12 @@ namespace KernelGraphTest
         "coord15" -> "coord20"
         "coord15" -> "coord22"
         "coord16" -> "coord15"
-        "coord17" -> "coord21"
         "coord18" -> "coord21"
-        "coord20" -> "coord17"
+        "coord19" -> "coord21"
         "coord20" -> "coord18"
-        "coord21" -> "coord19"
-        "coord22" -> "coord19"
+        "coord20" -> "coord19"
+        "coord21" -> "coord17"
+        "coord22" -> "coord17"
         {
         rank=same
         "coord2"->"coord3"[style=invis]
@@ -1048,12 +1029,12 @@ namespace KernelGraphTest
         }
         {
         rank=same
-        "coord17"->"coord18"[style=invis]
+        "coord18"->"coord19"[style=invis]
         rankdir=LR
         }
         {
         rank=same
-        "coord17"->"coord18"[style=invis]
+        "coord18"->"coord19"[style=invis]
         rankdir=LR
         }
         subgraph clusterCF {label = "Control Graph";
@@ -1110,10 +1091,10 @@ namespace KernelGraphTest
         "to_cntrl_15_9"[label="9->15: MacroTile: (0)", shape=cds]
         "cntrl9" -> "to_coord_9_15"
         "to_coord_9_15"[label="9->15: MacroTile: (0)", shape=cds]
-        "coord19" -> "to_cntrl_19_9"
-        "to_cntrl_19_9"[label="9->19: User: (0)", shape=cds]
-        "cntrl9" -> "to_coord_9_19"
-        "to_coord_9_19"[label="9->19: User: (0)", shape=cds]
+        "coord17" -> "to_cntrl_17_9"
+        "to_cntrl_17_9"[label="9->17: User: (0)", shape=cds]
+        "cntrl9" -> "to_coord_9_17"
+        "to_coord_9_17"[label="9->17: User: (0)", shape=cds]
         }).";
 
         EXPECT_EQ(NormalizedSource(expected0), NormalizedSource(kgraph0.toDOT(true)));
@@ -1128,12 +1109,12 @@ namespace KernelGraphTest
                                                              Operations::ScaleMode::None);
 
         auto expectedCommand = R".(
-        Tensor.FP8.d2 0, (base=&0, lim=&8, sizes={&16 &24 }, strides={&32 &40 })
+        Tensor.FP8.d2 0, (base=&0, sizes={&8 &16 }, strides={&24 &32 })
         T_LOAD_TILED 1 Source 0
-        Tensor.FP6.d2 2, (base=&48, lim=&56, sizes={&64 &72 }, strides={&80 &88 })
+        Tensor.FP6.d2 2, (base=&40, sizes={&48 &56 }, strides={&64 &72 })
         T_LOAD_TILED 3 Source 2
         T_Mul 1 3 Value: Float
-        Tensor.Float.d2 5, (base=&96, lim=&104, sizes={&112 &120 }, strides={&128 &136 })
+        Tensor.Float.d2 5, (base=&80, sizes={&88 &96 }, strides={&104 &112 })
         T_STORE_TILED 6 Source 4 Dest 5
         ).";
 
@@ -1190,18 +1171,18 @@ namespace KernelGraphTest
                                                              Operations::ScaleMode::Separate);
 
         auto expectedCommand = R".(
-        Tensor.FP8.d2 0, (base=&0, lim=&8, sizes={&16 &24 }, strides={&32 &40 })
+        Tensor.FP8.d2 0, (base=&0, sizes={&8 &16 }, strides={&24 &32 })
         T_LOAD_TILED 1 Source 0
-        Tensor.E8M0.d2 2, (base=&48, lim=&56, sizes={&64 &72 }, strides={&80 &88 })
+        Tensor.E8M0.d2 2, (base=&40, sizes={&48 &56 }, strides={&64 &72 })
         T_LOAD_TILED 3 Source 2
         BlockScale(Separate, {1, 32}): Data: 1, Scale: 3
-        Tensor.FP6.d2 5, (base=&96, lim=&104, sizes={&112 &120 }, strides={&128 &136 })
+        Tensor.FP6.d2 5, (base=&80, sizes={&88 &96 }, strides={&104 &112 })
         T_LOAD_TILED 6 Source 5
-        Tensor.E8M0.d2 7, (base=&144, lim=&152, sizes={&160 &168 }, strides={&176 &184 })
+        Tensor.E8M0.d2 7, (base=&120, sizes={&128 &136 }, strides={&144 &152 })
         T_LOAD_TILED 8 Source 7
         BlockScale(Separate, {32, 1}): Data: 6, Scale: 8
         T_Mul 4 9 Value: Float
-        Tensor.Float.d2 11, (base=&192, lim=&200, sizes={&208 &216 }, strides={&224 &232 })
+        Tensor.Float.d2 11, (base=&160, sizes={&168 &176 }, strides={&184 &192 })
         T_STORE_TILED 12 Source 10 Dest 11
         ).";
 
@@ -1272,8 +1253,11 @@ namespace KernelGraphTest
         auto fuseLoopsTransform        = std::make_shared<FuseLoops>();
         auto removeDuplicatesTransform = std::make_shared<RemoveDuplicates>();
 
-        auto cleanLoopsTransform      = std::make_shared<CleanLoops>();
-        auto addComputeIndexTransform = std::make_shared<AddComputeIndex>();
+        auto cleanLoopsTransform = std::make_shared<CleanLoops>();
+        auto updateWavefrontParametersTransform
+            = std::make_shared<UpdateWavefrontParameters>(params);
+        auto assignIndexExprsTransform
+            = std::make_shared<AssignIndexExpressions>(m_context, example.getCommand());
 
         kgraph0      = kgraph0.transform(updateParametersTransform);
         auto kgraph1 = kgraph0.transform(addLDSTransform);
@@ -1330,11 +1314,11 @@ namespace KernelGraphTest
                           .to<std::vector>();
         EXPECT_EQ(unrolledStoreLDS.size(), kloops.size());
 
-        // Verify number of ComputeIndexes: A loads; A LDS loads; B loads; C load; D
-        // store: 3 + (2+2) + 3 + 3 + 3 = 12
-        kgraph1             = kgraph1.transform(addComputeIndexTransform);
-        auto computeIndexes = kgraph1.control.getNodes<ComputeIndex>().to<std::vector>();
-        EXPECT_EQ(computeIndexes.size(), 16);
+        // Verify number of Assigns: A loads; A LDS loads; B loads; C load; D
+        kgraph1           = kgraph1.transform(updateWavefrontParametersTransform);
+        kgraph1           = kgraph1.transform(assignIndexExprsTransform);
+        auto indexAssigns = kgraph1.control.getNodes<Assign>().to<std::vector>();
+        EXPECT_EQ(indexAssigns.size(), 44);
 
         // Verify number of deallocated dimensions.  They may be merged into fewer deallocate nodes.
         auto addDeallocate = std::make_shared<AddDeallocateDataFlow>();
@@ -1351,7 +1335,7 @@ namespace KernelGraphTest
                     deallocatedDims.insert(c.coordinate);
                 }
             }
-            EXPECT_EQ(deallocatedDims.size(), 48);
+            EXPECT_EQ(deallocatedDims.size(), 61);
         }
 
         auto storeLDS = kgraphUnrolled.control.getNodes<StoreLDSTile>().to<std::vector>();
@@ -1360,10 +1344,11 @@ namespace KernelGraphTest
         auto fusedStoreLDS = kgraphFused.control.getNodes<StoreLDSTile>().to<std::vector>();
         EXPECT_EQ(fusedStoreLDS.size(), 1);
 
-        // Verify number of ComputeIndexes after unroll/fuse/lds
-        unrolled_kgraph_lds = unrolled_kgraph_lds.transform(addComputeIndexTransform);
-        computeIndexes = unrolled_kgraph_lds.control.getNodes<ComputeIndex>().to<std::vector>();
-        EXPECT_EQ(computeIndexes.size(), 112);
+        // Verify number of Assigns after unroll/fuse/lds
+        unrolled_kgraph_lds = unrolled_kgraph_lds.transform(updateWavefrontParametersTransform);
+        unrolled_kgraph_lds = unrolled_kgraph_lds.transform(assignIndexExprsTransform);
+        indexAssigns        = unrolled_kgraph_lds.control.getNodes<Assign>().to<std::vector>();
+        EXPECT_EQ(indexAssigns.size(), 248);
 
         // Verify number of deallocated dimensions.  They may be merged into fewer deallocate nodes.
         unrolled_kgraph_lds = unrolled_kgraph_lds.transform(addDeallocate);
@@ -1379,7 +1364,7 @@ namespace KernelGraphTest
                     deallocatedDims.insert(c.coordinate);
                 }
             }
-            EXPECT_EQ(deallocatedDims.size(), 290);
+            EXPECT_EQ(deallocatedDims.size(), 303);
         }
     }
 
@@ -1400,9 +1385,12 @@ namespace KernelGraphTest
         auto lowerTileTransform        = std::make_shared<LowerTile>(params, m_context);
         auto lowerTensorContractionTransform
             = std::make_shared<LowerTensorContraction>(params, m_context);
-        auto unrollLoopsTransform        = std::make_shared<UnrollLoops>(params, m_context);
-        auto cleanLoopsTransform         = std::make_shared<CleanLoops>();
-        auto addComputeIndexTransform    = std::make_shared<AddComputeIndex>();
+        auto unrollLoopsTransform = std::make_shared<UnrollLoops>(params, m_context);
+        auto cleanLoopsTransform  = std::make_shared<CleanLoops>();
+        auto updateWavefrontParametersTransform
+            = std::make_shared<UpdateWavefrontParameters>(params);
+        auto assignIndexExprsTransform
+            = std::make_shared<AssignIndexExpressions>(m_context, example.getCommand());
         auto inlineInrecrementsTransform = std::make_shared<InlineIncrements>();
 
         kgraph = kgraph.transform(updateParametersTransform);
@@ -1413,8 +1401,9 @@ namespace KernelGraphTest
 
         // Usual lowering, should be able to inline everything.
         auto kgraph1 = kgraph.transform(unrollLoopsTransform);
+        kgraph1      = kgraph1.transform(updateWavefrontParametersTransform);
         kgraph1      = kgraph1.transform(cleanLoopsTransform);
-        kgraph1      = kgraph1.transform(addComputeIndexTransform);
+        kgraph1      = kgraph1.transform(assignIndexExprsTransform);
 
         auto pre1  = kgraph1.control.getEdges<ForLoopIncrement>().to<std::vector>();
         kgraph1    = kgraph1.transform(inlineInrecrementsTransform);
@@ -1440,29 +1429,29 @@ namespace KernelGraphTest
 
         std::string expected0 = R".(
             digraph {
-        "coord1"[label="User{CommandArgument(Tensor_0_extent)I64}(1)"];
+        "coord1"[label="User{Multiply(CommandArgument(Tensor_0_stride_0)I64, CommandArgument(Tensor_0_size_0)I64)I64}(1)"];
         "coord2"[label="SubDimension{0, CommandArgument(Tensor_0_size_0)I64}(2)"];
         "coord3"[label="SubDimension{1, CommandArgument(Tensor_0_size_1)I64}(3)"];
-        "coord4"[label="MacroTile{NA}(2/LDS/None){16,8}-(4,2)(4)"];
+        "coord4"[label="MacroTile{NA}(2/LDS/ROW_MAJOR){16,8}-(4,2)(4)"];
         "coord5"[label="Split(5)",shape=box];
         "coord6"[label="ConstructMacroTile(6)",shape=box];
         "coord7"[label="DataFlow(7)",shape=box];
-        "coord8"[label="User{CommandArgument(Tensor_2_extent)I64}(8)"];
+        "coord8"[label="User{Multiply(CommandArgument(Tensor_2_stride_0)I64, CommandArgument(Tensor_2_size_0)I64)I64}(8)"];
         "coord9"[label="SubDimension{0, CommandArgument(Tensor_2_size_0)I64}(9)"];
         "coord10"[label="SubDimension{1, CommandArgument(Tensor_2_size_1)I64}(10)"];
-        "coord11"[label="MacroTile{NA}(2/VGPR/None){16,8}-(4,2)(11)"];
+        "coord11"[label="MacroTile{NA}(2/VGPR/ROW_MAJOR){16,8}-(4,2)(11)"];
         "coord12"[label="Split(12)",shape=box];
         "coord13"[label="ConstructMacroTile(13)",shape=box];
         "coord14"[label="DataFlow(14)",shape=box];
-        "coord15"[label="MacroTile{NA}(2/VGPR/None){16,8}-(4,2)(15)"];
+        "coord15"[label="MacroTile{NA}(2/VGPR/ROW_MAJOR){16,8}-(4,2)(15)"];
         "coord16"[label="DataFlow(16)",shape=box];
-        "coord17"[label="MacroTile{NA}(2/VGPR/None){16,8}-(4,2)(17)"];
+        "coord17"[label="MacroTile{NA}(2/VGPR/ROW_MAJOR){16,8}-(4,2)(17)"];
         "coord18"[label="DataFlow(18)",shape=box];
-        "coord19"[label="MacroTile{NA}(2/VGPR/None){16,8}-(4,2)(19)"];
+        "coord19"[label="MacroTile{NA}(2/VGPR/ROW_MAJOR){16,8}-(4,2)(19)"];
         "coord20"[label="DataFlow(20)",shape=box];
-        "coord21"[label="SubDimension{0, NA}(21)"];
-        "coord22"[label="SubDimension{1, NA}(22)"];
-        "coord23"[label="User{CommandArgument(Tensor_8_extent)I64}(23)"];
+        "coord21"[label="User{Multiply(CommandArgument(Tensor_8_stride_0)I64, CommandArgument(Tensor_8_size_0)I64)I64}(21)"];
+        "coord22"[label="SubDimension{0, CommandArgument(Tensor_8_size_0)I64}(22)"];
+        "coord23"[label="SubDimension{1, CommandArgument(Tensor_8_size_1)I64}(23)"];
         "coord24"[label="DestructMacroTile(24)",shape=box];
         "coord25"[label="Join(25)",shape=box];
         "coord26"[label="DataFlow(26)",shape=box];
@@ -1491,12 +1480,12 @@ namespace KernelGraphTest
         "coord19" -> "coord24"
         "coord19" -> "coord26"
         "coord20" -> "coord19"
-        "coord21" -> "coord25"
         "coord22" -> "coord25"
-        "coord24" -> "coord21"
+        "coord23" -> "coord25"
         "coord24" -> "coord22"
-        "coord25" -> "coord23"
-        "coord26" -> "coord23"
+        "coord24" -> "coord23"
+        "coord25" -> "coord21"
+        "coord26" -> "coord21"
         {
         rank=same
         "coord2"->"coord3"[style=invis]
@@ -1524,12 +1513,12 @@ namespace KernelGraphTest
         }
         {
         rank=same
-        "coord21"->"coord22"[style=invis]
+        "coord22"->"coord23"[style=invis]
         rankdir=LR
         }
         {
         rank=same
-        "coord21"->"coord22"[style=invis]
+        "coord22"->"coord23"[style=invis]
         rankdir=LR
         }
         subgraph clusterCF {label = "Control Graph";
@@ -1600,21 +1589,22 @@ namespace KernelGraphTest
         "to_cntrl_19_15"[label="15->19: MacroTile: (0)", shape=cds]
         "cntrl15" -> "to_coord_15_19"
         "to_coord_15_19"[label="15->19: MacroTile: (0)", shape=cds]
-        "coord23" -> "to_cntrl_23_15"
-        "to_cntrl_23_15"[label="15->23: User: (0)", shape=cds]
-        "cntrl15" -> "to_coord_15_23"
-        "to_coord_15_23"[label="15->23: User: (0)", shape=cds]
+        "coord21" -> "to_cntrl_21_15"
+        "to_cntrl_21_15"[label="15->21: User: (0)", shape=cds]
+        "cntrl15" -> "to_coord_15_21"
+        "to_coord_15_21"[label="15->21: User: (0)", shape=cds]
         }).";
 
         EXPECT_EQ(NormalizedSource(expected0), NormalizedSource(kgraph0.toDOT(true)));
 
-        auto addLDSTransform          = std::make_shared<AddLDS>(params, m_context);
-        auto lowerTileTransform       = std::make_shared<LowerTile>(params, m_context);
-        auto addComputeIndexTransform = std::make_shared<AddComputeIndex>();
+        auto addLDSTransform    = std::make_shared<AddLDS>(params, m_context);
+        auto lowerTileTransform = std::make_shared<LowerTile>(params, m_context);
+        auto assignIndexExprsTransform
+            = std::make_shared<AssignIndexExpressions>(m_context, example.getCommand());
 
         auto kgraph1 = kgraph0.transform(addLDSTransform);
         kgraph1      = kgraph1.transform(lowerTileTransform);
-        kgraph1      = kgraph1.transform(addComputeIndexTransform);
+        kgraph1      = kgraph1.transform(assignIndexExprsTransform);
 
         namespace CG = rocRoller::KernelGraph::ControlGraph;
         ASSERT_EQ(kgraph1.control.getNodes<CG::LoadTiled>().to<std::vector>().size(), 2);
@@ -1952,12 +1942,10 @@ namespace KernelGraphTest
         CommandArguments commandArgs = command->createArguments();
 
         commandArgs.setArgument(xTensorTag, ArgumentType::Value, d_a.get());
-        commandArgs.setArgument(xTensorTag, ArgumentType::Limit, nx);
         commandArgs.setArgument(xTensorTag, ArgumentType::Size, 0, nx);
         commandArgs.setArgument(xTensorTag, ArgumentType::Stride, 0, (size_t)1);
         commandArgs.setArgument(alphaScalarTag, ArgumentType::Value, d_alpha.get());
         commandArgs.setArgument(reluTensorTag, ArgumentType::Value, d_b.get());
-        commandArgs.setArgument(reluTensorTag, ArgumentType::Limit, nx);
         commandArgs.setArgument(reluTensorTag, ArgumentType::Size, 0, nx);
         commandArgs.setArgument(reluTensorTag, ArgumentType::Stride, 0, (size_t)1);
 
@@ -2012,11 +2000,9 @@ namespace KernelGraphTest
         CommandArguments commandArgs = command->createArguments();
 
         commandArgs.setArgument(tagTensorA, ArgumentType::Value, d_a.get());
-        commandArgs.setArgument(tagTensorA, ArgumentType::Limit, nx);
         commandArgs.setArgument(tagTensorA, ArgumentType::Size, 0, nx);
         commandArgs.setArgument(tagTensorA, ArgumentType::Stride, 0, (size_t)1);
         commandArgs.setArgument(tagTensorB, ArgumentType::Value, d_b.get());
-        commandArgs.setArgument(tagTensorB, ArgumentType::Limit, nx);
         commandArgs.setArgument(tagTensorB, ArgumentType::Size, 0, nx);
         commandArgs.setArgument(tagTensorB, ArgumentType::Stride, 0, (size_t)1);
 
@@ -2214,30 +2200,6 @@ namespace KernelGraphTest
         double rnorm = relativeNormL2(r, example.referenceSolution(a, b));
 
         ASSERT_LT(rnorm, 1.e-12);
-    }
-
-    TEST_F(KernelGraphTest, CleanExpression)
-    {
-        VariableType doubleVal{DataType::Double, PointerType::Value};
-        auto         command = std::make_shared<Command>();
-
-        auto aTag = command->allocateTag();
-        auto a    = std::make_shared<Expression::Expression>(command->allocateArgument(
-            {DataType::Int32, PointerType::Value}, aTag, ArgumentType::Value));
-        auto bTag = command->allocateTag();
-        auto b    = std::make_shared<Expression::Expression>(command->allocateArgument(
-            {DataType::Int32, PointerType::Value}, bTag, ArgumentType::Value));
-
-        m_context->kernel()->addCommandArguments(command->getArguments());
-
-        auto expr1 = a + b;
-        auto expr2 = b * expr1;
-
-        auto clean_expr = cleanArguments(expr2, m_context->kernel());
-
-        EXPECT_EQ(
-            Expression::toString(clean_expr),
-            "Multiply(user_Int32_Value_1:I, Add(user_Int32_Value_0:I, user_Int32_Value_1:I)I)I");
     }
 
     TEST_F(KernelGraphTest, CleanArguments)
@@ -2493,14 +2455,14 @@ namespace KernelGraphTest
 
         std::string expected0 = R".(
         digraph {
-        "coord1"[label="User{CommandArgument(Tensor_0_extent)I64}(1)"];
+        "coord1"[label="User{NA}(1)"];
         "coord2"[label="SubDimension{0, CommandArgument(Tensor_0_size_0)I64}(2)"];
         "coord3"[label="SubDimension{1, CommandArgument(Tensor_0_size_1)I64}(3)"];
         "coord4"[label="MacroTile{NA}(2/None/None){}-()(4)"];
         "coord5"[label="Split(5)",shape=box];
         "coord6"[label="ConstructMacroTile(6)",shape=box];
         "coord7"[label="DataFlow(7)",shape=box];
-        "coord8"[label="User{CommandArgument(Tensor_2_extent)I64}(8)"];
+        "coord8"[label="User{NA}(8)"];
         "coord9"[label="SubDimension{0, CommandArgument(Tensor_2_size_0)I64}(9)"];
         "coord10"[label="SubDimension{1, CommandArgument(Tensor_2_size_1)I64}(10)"];
         "coord11"[label="MacroTile{NA}(2/None/None){}-()(11)"];
@@ -2509,9 +2471,9 @@ namespace KernelGraphTest
         "coord14"[label="DataFlow(14)",shape=box];
         "coord15"[label="MacroTile{NA}(0/None/None){}-()(15)"];
         "coord16"[label="DataFlow(16)",shape=box];
-        "coord17"[label="SubDimension{0, NA}(17)"];
-        "coord18"[label="SubDimension{1, NA}(18)"];
-        "coord19"[label="User{CommandArgument(Tensor_5_extent)I64}(19)"];
+        "coord17"[label="User{NA}(17)"];
+        "coord18"[label="SubDimension{0, CommandArgument(Tensor_5_size_0)I64}(18)"];
+        "coord19"[label="SubDimension{1, CommandArgument(Tensor_5_size_1)I64}(19)"];
         "coord20"[label="DestructMacroTile(20)",shape=box];
         "coord21"[label="Join(21)",shape=box];
         "coord22"[label="DataFlow(22)",shape=box];
@@ -2536,12 +2498,12 @@ namespace KernelGraphTest
         "coord15" -> "coord20"
         "coord15" -> "coord22"
         "coord16" -> "coord15"
-        "coord17" -> "coord21"
         "coord18" -> "coord21"
-        "coord20" -> "coord17"
+        "coord19" -> "coord21"
         "coord20" -> "coord18"
-        "coord21" -> "coord19"
-        "coord22" -> "coord19"
+        "coord20" -> "coord19"
+        "coord21" -> "coord17"
+        "coord22" -> "coord17"
         {
         rank=same
         "coord2"->"coord3"[style=invis]
@@ -2569,12 +2531,12 @@ namespace KernelGraphTest
         }
         {
         rank=same
-        "coord17"->"coord18"[style=invis]
+        "coord18"->"coord19"[style=invis]
         rankdir=LR
         }
         {
         rank=same
-        "coord17"->"coord18"[style=invis]
+        "coord18"->"coord19"[style=invis]
         rankdir=LR
         }
         subgraph clusterCF {label = "Control Graph";
@@ -2623,14 +2585,14 @@ namespace KernelGraphTest
 
         std::string expected1 = R".(
         digraph {
-        "coord1"[label="User{CommandArgument(Tensor_0_extent)I64}(1)"];
+        "coord1"[label="User{Multiply(CommandArgument(Tensor_0_stride_1)I64, CommandArgument(Tensor_0_size_1)I64)I64}(1)"];
         "coord2"[label="SubDimension{0, CommandArgument(Tensor_0_size_0)I64}(2)"];
         "coord3"[label="SubDimension{1, CommandArgument(Tensor_0_size_1)I64}(3)"];
         "coord4"[label="MacroTile{NA}(2/VGPR/None){64,64}-()(4)"];
         "coord5"[label="Split(5)",shape=box];
         "coord6"[label="ConstructMacroTile(6)",shape=box];
         "coord7"[label="DataFlow(7)",shape=box];
-        "coord8"[label="User{CommandArgument(Tensor_2_extent)I64}(8)"];
+        "coord8"[label="User{Multiply(CommandArgument(Tensor_2_stride_1)I64, CommandArgument(Tensor_2_size_1)I64)I64}(8)"];
         "coord9"[label="SubDimension{0, CommandArgument(Tensor_2_size_0)I64}(9)"];
         "coord10"[label="SubDimension{1, CommandArgument(Tensor_2_size_1)I64}(10)"];
         "coord11"[label="MacroTile{NA}(2/VGPR/None){64,64}-()(11)"];
@@ -2639,9 +2601,9 @@ namespace KernelGraphTest
         "coord14"[label="DataFlow(14)",shape=box];
         "coord15"[label="MacroTile{NA}(2/WAVE/MATRIX_ACCUMULATOR){64,64}-()(15)"];
         "coord16"[label="DataFlow(16)",shape=box];
-        "coord17"[label="SubDimension{0, NA}(17)"];
-        "coord18"[label="SubDimension{1, NA}(18)"];
-        "coord19"[label="User{CommandArgument(Tensor_5_extent)I64}(19)"];
+        "coord17"[label="User{Multiply(CommandArgument(Tensor_5_stride_1)I64, CommandArgument(Tensor_5_size_1)I64)I64}(17)"];
+        "coord18"[label="SubDimension{0, CommandArgument(Tensor_5_size_0)I64}(18)"];
+        "coord19"[label="SubDimension{1, CommandArgument(Tensor_5_size_1)I64}(19)"];
         "coord20"[label="DestructMacroTile(20)",shape=box];
         "coord21"[label="Join(21)",shape=box];
         "coord22"[label="DataFlow(22)",shape=box];
@@ -2666,12 +2628,12 @@ namespace KernelGraphTest
         "coord15" -> "coord20"
         "coord15" -> "coord22"
         "coord16" -> "coord15"
-        "coord17" -> "coord21"
         "coord18" -> "coord21"
-        "coord20" -> "coord17"
+        "coord19" -> "coord21"
         "coord20" -> "coord18"
-        "coord21" -> "coord19"
-        "coord22" -> "coord19"
+        "coord20" -> "coord19"
+        "coord21" -> "coord17"
+        "coord22" -> "coord17"
         {
         rank=same
         "coord2"->"coord3"[style=invis]
@@ -2699,12 +2661,12 @@ namespace KernelGraphTest
         }
         {
         rank=same
-        "coord17"->"coord18"[style=invis]
+        "coord18"->"coord19"[style=invis]
         rankdir=LR
         }
         {
         rank=same
-        "coord17"->"coord18"[style=invis]
+        "coord18"->"coord19"[style=invis]
         rankdir=LR
         }
         subgraph clusterCF {label = "Control Graph";
@@ -2755,8 +2717,8 @@ namespace KernelGraphTest
             = kgraph.control.addElement(Assign{Register::Type::Vector, Expression::literal(0)});
         kgraph.control.addElement(Body(), {kernel}, {beforeConditionalAssign});
 
-        auto conditional
-            = kgraph.control.addElement(ConditionalOp{test < unit, "Test Conditional"});
+        auto conditional = kgraph.control.addElement(
+            ConditionalOp{test < unit, ConditionalMode::Branch, "Test Conditional"});
 
         kgraph.control.addElement(Sequence(), {beforeConditionalAssign}, {conditional});
 
@@ -2776,18 +2738,23 @@ namespace KernelGraphTest
 
         m_context->schedule(rocRoller::KernelGraph::generate(kgraph, m_context->kernel()));
 
-        if(m_context->targetArchitecture().HasCapability(GPUCapability::WorkgroupIdxViaTTMP))
+        EXPECT_THAT(output(), testing::HasSubstr("s_cmp_lt_i32 s3, 1"));
+        EXPECT_THAT(output(), testing::HasSubstr("s_cbranch_scc0")); //Branch for False
+        EXPECT_THAT(output(), testing::HasSubstr("s_branch")); //Branch after True
+
+        if(m_context->targetArchitecture().HasCapability(GPUCapability::HasVGPRIndexing))
         {
-            EXPECT_THAT(output(), testing::HasSubstr("s_cmp_lt_i32 s2, 1"));
+            int idx = Register::RegisterAllocatorDetail::ReservedRegionSize();
+            EXPECT_THAT(output(),
+                        testing::HasSubstr(fmt::format("v_mov_b32 v{}, 1", idx))); //True Body
+            EXPECT_THAT(output(),
+                        testing::HasSubstr(fmt::format("v_mov_b32 v{}, 0", idx))); //False Body
         }
         else
         {
-            EXPECT_THAT(output(), testing::HasSubstr("s_cmp_lt_i32 s3, 1"));
+            EXPECT_THAT(output(), testing::HasSubstr(fmt::format("v_mov_b32 v1, 1"))); //True Body
+            EXPECT_THAT(output(), testing::HasSubstr(fmt::format("v_mov_b32 v1, 0"))); //False Body
         }
-        EXPECT_THAT(output(), testing::HasSubstr("s_cbranch_scc0")); //Branch for False
-        EXPECT_THAT(output(), testing::HasSubstr("s_branch")); //Branch after True
-        EXPECT_THAT(output(), testing::HasSubstr("v_mov_b32 v1, 1")); //True Body
-        EXPECT_THAT(output(), testing::HasSubstr("v_mov_b32 v1, 0")); //False Body
     }
 
     TEST_F(KernelGraphTestGPU, GPU_ConditionalExecute)
@@ -2834,11 +2801,13 @@ namespace KernelGraphTest
             Assign{Register::Type::Vector, Expression::literal(testValues[1])});
         kgraph.mapper.connect(assignFalseBranch, dstVGPR, NaryArgument::DEST);
 
-        auto workgroupExpr = k->workgroupIndex().at(0)->expression();
-        auto firstConditional
-            = kgraph.control.addElement(ConditionalOp{workgroupExpr < one, "First Conditional"});
+        auto workgroupExpr    = k->workgroupIndex().at(0)->expression();
+        auto firstConditional = kgraph.control.addElement(
+            ConditionalOp{workgroupExpr < one, ConditionalMode::Branch, "First Conditional"});
         auto secondConditional = kgraph.control.addElement(
-            ConditionalOp{(workgroupExpr > one) && (workgroupExpr <= two), "Second Conditional"});
+            ConditionalOp{(workgroupExpr > one) && (workgroupExpr <= two),
+                          ConditionalMode::Branch,
+                          "Second Conditional"});
 
         auto storeIndex = kgraph.control.addElement(StoreVGPR());
         kgraph.mapper.connect<User>(storeIndex, user);
@@ -3023,7 +2992,8 @@ namespace KernelGraphTest
 
         auto exprA = std::make_shared<Expression::Expression>(
             Expression::DataFlowTag{vgprA, Register::Type::Scalar, DataType::Int32});
-        auto conditional = kgraph.control.addElement(ConditionalOp{exprA > unit, "conditional"});
+        auto conditional = kgraph.control.addElement(
+            ConditionalOp{exprA > unit, ConditionalMode::Branch, "conditional"});
         kgraph.control.addElement(Sequence(), {loadA}, {conditional});
 
         auto loadB = kgraph.control.addElement(LoadVGPR(DataType::Int32, true));
@@ -3106,8 +3076,9 @@ namespace KernelGraphTest
         auto fuseLoopsTransform        = std::make_shared<FuseLoops>();
         auto removeDuplicatesTransform = std::make_shared<RemoveDuplicates>();
 
-        auto cleanLoopsTransform      = std::make_shared<CleanLoops>();
-        auto addComputeIndexTransform = std::make_shared<AddComputeIndex>();
+        auto cleanLoopsTransform = std::make_shared<CleanLoops>();
+        auto assignIndexExprsTransform
+            = std::make_shared<AssignIndexExpressions>(m_context, example.getCommand());
 
         kgraph0      = kgraph0.transform(updateParametersTransform);
         auto kgraph1 = kgraph0.transform(addLDSTransform);
@@ -3130,7 +3101,18 @@ namespace KernelGraphTest
         // The resulting transformers should be identical
         //
         for(auto op : kgraph1.control.getNodes())
-            EXPECT_EQ(transformers.at(op).getIndexes(), kgraph1.buildTransformer(op).getIndexes());
+        {
+            auto const& expected = transformers.at(op).getIndexes();
+            auto const& actual   = kgraph1.buildTransformer(op).getIndexes();
+
+            ASSERT_EQ(expected.size(), actual.size());
+            for(auto const& [dim, expr] : expected)
+            {
+                auto it = actual.find(dim);
+                ASSERT_NE(it, actual.end());
+                EXPECT_TRUE(Expression::identical(expr, it->second));
+            }
+        }
     }
 
     TEST_F(KernelGraphTest, RemoveSetCoordinate)
@@ -3256,5 +3238,127 @@ namespace KernelGraphTest
                }).";
 
         EXPECT_EQ(NormalizedSource(expected), NormalizedSource(kg2.control.toDOT()));
+    }
+
+    TEST_F(KernelGraphTest, StreamKTwoTileDPFirst)
+    {
+        auto kgraph = rocRoller::KernelGraph::KernelGraph();
+
+        uint numTileM = 57;
+        uint numTileN = 57;
+        uint numTileK = 57;
+        uint numWGs   = 128;
+
+        auto kernel = kgraph.control.addElement(Kernel());
+        auto [forKCoord, forKOp]
+            = rangeFor(kgraph, Expression::literal(numTileK), rocRoller::KLOOP);
+
+        auto user = kgraph.coordinates.addElement(User({}, "result"));
+
+        auto tileM = kgraph.coordinates.addElement(
+            MacroTileNumber(0, Expression::literal(numTileM), nullptr));
+        auto tileN = kgraph.coordinates.addElement(
+            MacroTileNumber(1, Expression::literal(numTileN), nullptr));
+        auto tileK = kgraph.coordinates.addElement(
+            MacroTileNumber(-1, Expression::literal(numTileK), nullptr));
+
+        kgraph.coordinates.addElement(PassThrough(), {forKCoord}, {tileK});
+        kgraph.coordinates.addElement(Flatten(), {tileM, tileN, tileK}, {user});
+
+        auto dstVGPR = kgraph.coordinates.addElement(VGPR());
+        auto wgDim   = kgraph.coordinates.addElement(Workgroup(0));
+        auto wgExpr  = std::make_shared<Expression::Expression>(
+            Expression::DataFlowTag{wgDim, Register::Type::Vector, DataType::UInt32});
+        auto assignWGNumber = kgraph.control.addElement(Assign{Register::Type::Vector, wgExpr});
+        kgraph.mapper.connect(assignWGNumber, dstVGPR, NaryArgument::DEST);
+
+        kgraph.coordinates.addElement(PassThrough(), {user}, {dstVGPR});
+
+        auto storeOp = kgraph.control.addElement(StoreVGPR());
+        kgraph.mapper.connect<User>(storeOp, user);
+        kgraph.mapper.connect<VGPR>(storeOp, dstVGPR);
+
+        auto preWaitOp  = kgraph.control.addElement(WaitZero());
+        auto loopWaitOp = kgraph.control.addElement(WaitZero());
+
+        kgraph.control.addElement(Body(), {kernel}, {preWaitOp});
+        kgraph.control.addElement(Sequence(), {preWaitOp}, {forKOp});
+        kgraph.control.addElement(Body(), {forKOp}, {assignWGNumber});
+        kgraph.control.addElement(Sequence(), {assignWGNumber}, {storeOp});
+        kgraph.control.addElement(Sequence(), {storeOp}, {loopWaitOp});
+
+        CommandParametersPtr params           = std::make_shared<CommandParameters>();
+        params->loopOverOutputTilesDimensions = {0, 1};
+
+        // Helper to check loop order in a given kernel graph
+        auto checkStreamKLoopOrder = [&](rocRoller::KernelGraph::KernelGraph& kg,
+                                         const std::string&                   firstLoop,
+                                         const std::string&                   secondLoop) {
+            int body = -1, sequence = -1;
+            for(auto const scope :
+                filter(kg.control.isElemType<Scope>(),
+                       kg.control.depthFirstVisit(kg.control.roots().only().value())))
+            {
+                auto bodies = kg.control.getOutputNodeIndices<Body>(scope).to<std::unordered_set>();
+                auto sequences
+                    = kg.control.getOutputNodeIndices<Sequence>(scope).to<std::unordered_set>();
+
+                if(bodies.size() + sequences.size() == 1)
+                    continue;
+
+                AssertFatal(
+                    bodies.size() == 1 && sequences.size() == 1,
+                    "Expected one body and one sequence in scope, found {} bodies and {} sequences",
+                    bodies.size(),
+                    sequences.size());
+
+                body     = *bodies.begin();
+                sequence = *sequences.begin();
+                break;
+            }
+
+            // Check for first loop through the Body edge
+            for(auto const loop :
+                filter(kg.control.isElemType<ForLoopOp>(), kg.control.depthFirstVisit(body)))
+            {
+                auto forloop = kg.control.get<ForLoopOp>(loop).value();
+                EXPECT_EQ(forloop.loopName, firstLoop);
+                break;
+            }
+
+            // Check for second loop through the Sequence edge
+            for(auto const loop :
+                filter(kg.control.isElemType<ForLoopOp>(), kg.control.depthFirstVisit(sequence)))
+            {
+                auto forloop = kg.control.get<ForLoopOp>(loop).value();
+                EXPECT_EQ(forloop.loopName, secondLoop);
+                break;
+            }
+        };
+
+        // For streamKTwoTile, the SK loop is first
+        params->streamK = StreamKMode::TwoTile;
+
+        auto kgraphTwoTile = kgraph.transform(std::make_shared<AddStreamK>(
+            m_context, params, rocRoller::KLOOP, rocRoller::KLOOP, Expression::literal(numWGs)));
+
+        if(m_context->kernelOptions()->removeSetCoordinate)
+            kgraphTwoTile = kgraphTwoTile.transform(std::make_shared<RemoveSetCoordinate>());
+
+        checkStreamKLoopOrder(kgraphTwoTile, "SKStreamTileLoop", "DPStreamTileLoop");
+
+        m_context->kernel()->resetArguments();
+
+        // For streamKTwoTileDPFirst, the DP loop is first
+        params->streamK = StreamKMode::TwoTileDPFirst;
+
+        auto kgraphTwoTileDPFirst = kgraph.transform(std::make_shared<AddStreamK>(
+            m_context, params, rocRoller::KLOOP, rocRoller::KLOOP, Expression::literal(numWGs)));
+
+        if(m_context->kernelOptions()->removeSetCoordinate)
+            kgraphTwoTileDPFirst
+                = kgraphTwoTileDPFirst.transform(std::make_shared<RemoveSetCoordinate>());
+
+        checkStreamKLoopOrder(kgraphTwoTileDPFirst, "DPStreamTileLoop", "SKStreamTileLoop");
     }
 }

@@ -1,28 +1,5 @@
-/*******************************************************************************
- *
- * MIT License
- *
- * Copyright 2024-2025 AMD ROCm(TM) Software
- *
- * Permission is hereby granted, free of charge, to any person obtaining a copy
- * of this software and associated documentation files (the "Software"), to deal
- * in the Software without restriction, including without limitation the rights
- * to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
- * copies of the Software, and to permit persons to whom the Software is
- * furnished to do so, subject to the following conditions:
- *
- * The above copyright notice and this permission notice shall be included in
- * all copies or substantial portions of the Software.
- *
- * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
- * IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
- * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
- * AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
- * LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
- * OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
- * SOFTWARE.
- *
- *******************************************************************************/
+// Copyright Advanced Micro Devices, Inc., or its affiliates.
+// SPDX-License-Identifier: MIT
 
 #include <rocRoller/AssemblyKernel.hpp>
 #include <rocRoller/CodeGen/ArgumentLoader.hpp>
@@ -52,17 +29,17 @@ namespace rocRollerTest
     struct FloatReference<rocRoller::FP6> // E2M3
     {
         // clang-format off
-        static constexpr auto Values = std::to_array<float>({
-            0.000,  0.125,   0.25,   0.375,   0.50,   0.625,   0.75,   0.875,
-            1.000,  1.125,   1.25,   1.375,   1.50,   1.625,   1.75,   1.875,
-            2.000,  2.250,   2.50,   2.750,   3.00,   3.250,   3.50,   3.750,
-            4.000,  4.500,   5.00,   5.500,   6.00,   6.500,   7.00,   7.500,
-
-           -0.000, -0.125,  -0.25,  -0.375,  -0.50,  -0.625,  -0.75,  -0.875,
-           -1.000, -1.125,  -1.25,  -1.375,  -1.50,  -1.625,  -1.75,  -1.875,
-           -2.000, -2.250,  -2.50,  -2.750,  -3.00,  -3.250,  -3.50,  -3.750,
-           -4.000, -4.500,  -5.00,  -5.500,  -6.00,  -6.500,  -7.00,  -7.500
-        });
+         static constexpr auto Values = std::to_array<float>({
+             0.000,  0.125,   0.25,   0.375,   0.50,   0.625,   0.75,   0.875,
+             1.000,  1.125,   1.25,   1.375,   1.50,   1.625,   1.75,   1.875,
+             2.000,  2.250,   2.50,   2.750,   3.00,   3.250,   3.50,   3.750,
+             4.000,  4.500,   5.00,   5.500,   6.00,   6.500,   7.00,   7.500,
+ 
+            -0.000, -0.125,  -0.25,  -0.375,  -0.50,  -0.625,  -0.75,  -0.875,
+            -1.000, -1.125,  -1.25,  -1.375,  -1.50,  -1.625,  -1.75,  -1.875,
+            -2.000, -2.250,  -2.50,  -2.750,  -3.00,  -3.250,  -3.50,  -3.750,
+            -4.000, -4.500,  -5.00,  -5.500,  -6.00,  -6.500,  -7.00,  -7.500
+         });
         // clang-format on
     };
 
@@ -70,25 +47,25 @@ namespace rocRollerTest
     struct FloatReference<rocRoller::BF6> // E3M2
     {
         // clang-format off
-        static constexpr auto Values = std::to_array<float>({
-            0.00,    0.0625,    0.125,    0.1875,
-            0.25,    0.3125,    0.375,    0.4375,
-            0.50,    0.6250,    0.750,    0.8750,
-            1.00,    1.2500,    1.500,    1.7500,
-            2.00,    2.5000,    3.000,    3.5000,
-            4.00,    5.0000,    6.000,    7.0000,
-            8.00,   10.0000,   12.000,   14.0000,
-           16.00,   20.0000,   24.000,   28.0000,
-
-           -0.00,   -0.0625,   -0.125,   -0.1875,
-           -0.25,   -0.3125,   -0.375,   -0.4375,
-           -0.50,   -0.6250,   -0.750,   -0.8750,
-           -1.00,   -1.2500,   -1.500,   -1.7500,
-           -2.00,   -2.5000,   -3.000,   -3.5000,
-           -4.00,   -5.0000,   -6.000,   -7.0000,
-           -8.00,  -10.0000,  -12.000,  -14.0000,
-          -16.00,  -20.0000,  -24.000,  -28.0000
-        });
+         static constexpr auto Values = std::to_array<float>({
+             0.00,    0.0625,    0.125,    0.1875,
+             0.25,    0.3125,    0.375,    0.4375,
+             0.50,    0.6250,    0.750,    0.8750,
+             1.00,    1.2500,    1.500,    1.7500,
+             2.00,    2.5000,    3.000,    3.5000,
+             4.00,    5.0000,    6.000,    7.0000,
+             8.00,   10.0000,   12.000,   14.0000,
+            16.00,   20.0000,   24.000,   28.0000,
+ 
+            -0.00,   -0.0625,   -0.125,   -0.1875,
+            -0.25,   -0.3125,   -0.375,   -0.4375,
+            -0.50,   -0.6250,   -0.750,   -0.8750,
+            -1.00,   -1.2500,   -1.500,   -1.7500,
+            -2.00,   -2.5000,   -3.000,   -3.5000,
+            -4.00,   -5.0000,   -6.000,   -7.0000,
+            -8.00,  -10.0000,  -12.000,  -14.0000,
+           -16.00,  -20.0000,  -24.000,  -28.0000
+         });
         // clang-format on
     };
 
@@ -99,9 +76,9 @@ namespace rocRollerTest
     {
     public:
         /*
-         * Packs F6 to F6x16 on CPU, buffer_load that into F6x16 to
-         * GPU, buffer_store to CPU
-         */
+          * Packs F6 to F6x16 on CPU, buffer_load that into F6x16 to
+          * GPU, buffer_store to CPU
+          */
         void genF6x16BufferLoadAndStore(int num_f6, DataType F6x16Type)
         {
             int N = (num_f6 / numF6PerF6x16) * numBytesPerF6x16;
@@ -150,17 +127,31 @@ namespace rocRollerTest
 
                 co_yield v_a->allocate();
 
-                auto bufDesc = std::make_shared<rocRoller::BufferDescriptor>(m_context);
-                co_yield bufDesc->setup();
-                co_yield bufDesc->setBasePointer(s_a);
-                co_yield bufDesc->setSize(Register::Value::Literal(N));
-                co_yield bufDesc->setOptions(Register::Value::Literal(0x00020000));
+                Expression::ExpressionPtr bufferExpr = Expression::literal(Buffer{0, 0, 0, 0});
+                bufferExpr = BufferDescriptor::SetDefaults(bufferExpr, m_context);
+                bufferExpr
+                    = BufferDescriptor::SetBasePointer(bufferExpr, s_a->expression(), m_context);
+                bufferExpr
+                    = BufferDescriptor::SetSize(bufferExpr, Expression::literal(N), m_context);
+                bufferExpr = BufferDescriptor::SetOptions(bufferExpr,
+                                                          Expression::literal(131072)); //0x00020000
+
+                auto bufferRegs = Register::Value::Placeholder(
+                    m_context, Register::Type::Scalar, {DataType::None, PointerType::Buffer}, 1);
+                co_yield Expression::generate(bufferRegs, bufferExpr, m_context);
+                bufferExpr = bufferRegs->expression();
 
                 auto bufInstOpts = rocRoller::BufferInstructionOptions();
 
-                co_yield m_context->mem()->loadBuffer(v_a, vgprSerial, 0, bufDesc, bufInstOpts, N);
-                co_yield bufDesc->setBasePointer(s_result);
-                co_yield m_context->mem()->storeBuffer(v_a, vgprSerial, 0, bufDesc, bufInstOpts, N);
+                co_yield m_context->mem()->loadBuffer(
+                    v_a, vgprSerial, 0, bufferRegs, bufInstOpts, N);
+
+                bufferExpr = BufferDescriptor::SetBasePointer(
+                    bufferExpr, s_result->expression(), m_context);
+                co_yield Expression::generate(bufferRegs, bufferExpr, m_context);
+
+                co_yield m_context->mem()->storeBuffer(
+                    v_a, vgprSerial, 0, bufferRegs, bufInstOpts, N);
             };
 
             m_context->schedule(kb());
@@ -169,9 +160,9 @@ namespace rocRollerTest
         }
 
         /**
-         * Packs F6 to F6x16 on CPU, global_load that into F6x16 to GPU,
-         * global_store to CPU
-         */
+          * Packs F6 to F6x16 on CPU, global_load that into F6x16 to GPU,
+          * global_store to CPU
+          */
         void genF6x16GlobalLoadAndStore(int num_f6, DataType F6x16Type)
         {
             int  N = (num_f6 / numF6PerF6x16) * numBytesPerF6x16;
@@ -324,24 +315,22 @@ namespace rocRollerTest
 
             auto command = std::make_shared<Command>();
 
-            auto tagTensorA
-                = command->addOperation(rocRoller::Operations::Tensor(2, F6Type, {0, 1})); // Load A
+            auto tagTensorA = command->addOperation(
+                rocRoller::Operations::Tensor(2, F6Type, {}, {0, 1})); // Load A
             auto tagLoadA = command->addOperation(rocRoller::Operations::T_Load_Tiled(tagTensorA));
 
             auto tagTensorB = command->addOperation(
-                rocRoller::Operations::Tensor(2, F6Type, {0, 1})); // Store B
+                rocRoller::Operations::Tensor(2, F6Type, {}, {0, 1})); // Store B
             command->addOperation(rocRoller::Operations::T_Store_Tiled(tagLoadA, tagTensorB));
 
             auto commandArgs = command->createArguments();
             commandArgs.setArgument(tagTensorA, ArgumentType::Value, d_a.get());
-            commandArgs.setArgument(tagTensorA, ArgumentType::Limit, (size_t)nx * ny);
             commandArgs.setArgument(tagTensorA, ArgumentType::Size, 0, (size_t)nx);
             commandArgs.setArgument(tagTensorA, ArgumentType::Size, 1, (size_t)ny);
             commandArgs.setArgument(tagTensorA, ArgumentType::Stride, 0, (size_t)ny);
             commandArgs.setArgument(tagTensorA, ArgumentType::Stride, 1, (size_t)1);
 
             commandArgs.setArgument(tagTensorB, ArgumentType::Value, d_b.get());
-            commandArgs.setArgument(tagTensorB, ArgumentType::Limit, (size_t)nx * ny);
             commandArgs.setArgument(tagTensorB, ArgumentType::Size, 0, (size_t)nx);
             commandArgs.setArgument(tagTensorB, ArgumentType::Size, 1, (size_t)ny);
             commandArgs.setArgument(tagTensorB, ArgumentType::Stride, 0, (size_t)ny);
@@ -449,13 +438,6 @@ namespace rocRollerTest
 
     TEST_P(F6Test, GPU_F6TiledLoadStore)
     {
-        auto const& arch = m_context->targetArchitecture().target();
-        if(!arch.isCDNAGPU())
-        {
-            GTEST_SKIP() << "Test not yet supported on "
-                         << m_context->targetArchitecture().target().toString() << std::endl;
-        }
-
         int workitemsPerWorkgroup = 64;
         int elementsPerWorkitem   = 16;
 
@@ -550,39 +532,39 @@ namespace rocRollerTest
         }
 
         // clang-format off
-        std::array fp6 = {0.125f,  /* 000001 */
-                          0.25f,   /* 000010 */
-                          0.375f,  /* 000011 */
-                          0.5f,    /* 000100 */
-                          0.625f,  /* 000101 */
-                          0.75f,   /* 000110 */
-                          0.875f,  /* 000111 */
-                          1.f,     /* 001000 */
-                          1.125f,  /* 001001 */
-                          1.25f,   /* 001010 */
-                          1.375f,  /* 001011 */
-                          1.5f,    /* 001100 */
-                          1.625f,  /* 001101 */
-                          1.75f,   /* 001110 */
-                          1.875f,  /* 001111 */
-                          2.f};    /* 010000 */
-
-        std::array bf6 = {0.0625f, /* 000001 */
-                          0.125f,  /* 000010 */
-                          0.1875f, /* 000011 */
-                          0.25f,   /* 000100 */
-                          0.3125f, /* 000101 */
-                          0.375f,  /* 000110 */
-                          0.4375f, /* 000111 */
-                          0.50f,   /* 001000 */
-                          0.625f,  /* 001001 */
-                          0.75f,   /* 001010 */
-                          0.875f,  /* 001011 */
-                          1.f,     /* 001100 */
-                          1.25f,   /* 001101 */
-                          1.5f,    /* 001110 */
-                          1.75f,   /* 001111 */
-                          2.f};    /* 010000 */
+         std::array fp6 = {0.125f,  /* 000001 */
+                           0.25f,   /* 000010 */
+                           0.375f,  /* 000011 */
+                           0.5f,    /* 000100 */
+                           0.625f,  /* 000101 */
+                           0.75f,   /* 000110 */
+                           0.875f,  /* 000111 */
+                           1.f,     /* 001000 */
+                           1.125f,  /* 001001 */
+                           1.25f,   /* 001010 */
+                           1.375f,  /* 001011 */
+                           1.5f,    /* 001100 */
+                           1.625f,  /* 001101 */
+                           1.75f,   /* 001110 */
+                           1.875f,  /* 001111 */
+                           2.f};    /* 010000 */
+ 
+         std::array bf6 = {0.0625f, /* 000001 */
+                           0.125f,  /* 000010 */
+                           0.1875f, /* 000011 */
+                           0.25f,   /* 000100 */
+                           0.3125f, /* 000101 */
+                           0.375f,  /* 000110 */
+                           0.4375f, /* 000111 */
+                           0.50f,   /* 001000 */
+                           0.625f,  /* 001001 */
+                           0.75f,   /* 001010 */
+                           0.875f,  /* 001011 */
+                           1.f,     /* 001100 */
+                           1.25f,   /* 001101 */
+                           1.5f,    /* 001110 */
+                           1.75f,   /* 001111 */
+                           2.f};    /* 010000 */
         // clang-format on
 
         auto testPacking = [&](auto& floats, auto fmt) {

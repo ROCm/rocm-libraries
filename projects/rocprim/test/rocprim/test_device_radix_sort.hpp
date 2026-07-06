@@ -1,6 +1,6 @@
 // MIT License
 //
-// Copyright (c) 2017-2025 Advanced Micro Devices, Inc. All rights reserved.
+// Copyright (c) 2017-2026 Advanced Micro Devices, Inc. All rights reserved.
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -36,6 +36,10 @@
 
 #include "../../common/utils_device_ptr.hpp"
 
+// including Windows.h from test_utils_memory_check.hpp includes
+// macro definitions max and min which conflict with rocPRIM code.
+#define NOMINMAX
+
 // required test headers
 #include "test_seed.hpp"
 #include "test_utils.hpp"
@@ -46,6 +50,7 @@
 #include "test_utils_hipgraphs.hpp"
 #include "test_utils_sort_checker.hpp"
 #include "test_utils_sort_comparator.hpp"
+#include "test_utils_memory_check.hpp"
 
 #include <algorithm>
 #include <cstddef>
@@ -84,33 +89,6 @@ public:
 };
 
 TYPED_TEST_SUITE_P(RocprimDeviceRadixSort);
-
-template<class KeyIter>
-auto generate_key_input(KeyIter keys_input, size_t size, engine_type& rng_engine)
-    -> std::enable_if_t<
-        rocprim::is_floating_point<typename std::iterator_traits<KeyIter>::value_type>::value>
-{
-    using key_type = typename std::iterator_traits<KeyIter>::value_type;
-    test_utils::generate_random_data_n(keys_input,
-                                       size,
-                                       static_cast<key_type>(-1000),
-                                       static_cast<key_type>(+1000),
-                                       rng_engine);
-    test_utils::add_special_values(keys_input, size, rng_engine);
-}
-
-template<class KeyIter>
-auto generate_key_input(KeyIter keys_input, size_t size, engine_type& rng_engine)
-    -> std::enable_if_t<
-        !rocprim::is_floating_point<typename std::iterator_traits<KeyIter>::value_type>::value>
-{
-    using key_type = typename std::iterator_traits<KeyIter>::value_type;
-    test_utils::generate_random_data_n(keys_input,
-                                       size,
-                                       rocprim::numeric_limits<key_type>::min(),
-                                       rocprim::numeric_limits<key_type>::max(),
-                                       rng_engine);
-}
 
 // Working around custom_float_test_type, which is both a float and a common::custom_type
 template<class T>
@@ -255,7 +233,7 @@ void sort_keys()
     constexpr bool         check_large_sizes = TestFixture::params::check_large_sizes;
 
     hipStream_t stream = 0;
-    if (TestFixture::params::use_graphs)
+    if(TestFixture::params::use_graphs)
     {
         // Default stream does not support hipGraph stream capture, so create one
         HIP_CHECK(hipStreamCreateWithFlags(&stream, hipStreamNonBlocking));
@@ -288,7 +266,7 @@ void sort_keys()
 
             // Generate data
             auto keys_input = std::make_unique<key_type[]>(size);
-            generate_key_input(keys_input.get(), size, rng_engine);
+            test_utils::generate_key_input(keys_input.get(), size, rng_engine);
 
             common::device_ptr<key_type>  d_keys_input(keys_input, size);
             common::device_ptr<key_type>  d_keys_output_alloc;
@@ -341,50 +319,13 @@ void sort_keys()
                 gHelper.cleanupGraphHelper();
             }
 
-            if(size > 4096)
-            {
-                bool is_sorted = test_utils::device_sort_check(
-                    d_keys_output.get(),
-                    size,
-                    test_utils::key_comparator<key_type, descending, start_bit, end_bit>{},
-                    stream,
-                    debug_synchronous);
-                if(!is_sorted)
-                {
-                    // Load output to host
-                    const auto keys_output = d_keys_output.load_to_unique_ptr();
-
-                    // Calculate expected results on host
-                    std::vector<key_type> expected(keys_input.get(), keys_input.get() + size);
-                    std::stable_sort(
-                        expected.begin(),
-                        expected.end(),
-                        test_utils::key_comparator<key_type, descending, start_bit, end_bit>{});
-
-                    ASSERT_NO_FATAL_FAILURE(test_utils::assert_bit_eq(keys_output.get(),
-                                                                      keys_output.get() + size,
-                                                                      expected.begin(),
-                                                                      expected.end()));
-                    FAIL();
-                }
-            }
-            else
-            {
-                // Load output to host
-                const auto keys_output = d_keys_output.load_to_unique_ptr();
-
-                // Calculate expected results on host
-                std::vector<key_type> expected(keys_input.get(), keys_input.get() + size);
-                std::stable_sort(
-                    expected.begin(),
-                    expected.end(),
-                    test_utils::key_comparator<key_type, descending, start_bit, end_bit>{});
-
-                ASSERT_NO_FATAL_FAILURE(test_utils::assert_bit_eq(keys_output.get(),
-                                                                  keys_output.get() + size,
-                                                                  expected.begin(),
-                                                                  expected.end()));
-            }
+            bool is_sorted = test_utils::device_sort_check(
+                d_keys_output.get(),
+                size,
+                test_utils::key_comparator<key_type, descending, start_bit, end_bit>{},
+                stream,
+                debug_synchronous);
+            ASSERT_TRUE(is_sorted);
         }
     }
 
@@ -554,7 +495,7 @@ void sort_pairs()
     constexpr bool         check_large_sizes = TestFixture::params::check_large_sizes;
 
     hipStream_t stream = 0;
-    if (TestFixture::params::use_graphs)
+    if(TestFixture::params::use_graphs)
     {
         // Default stream does not support hipGraph stream capture, so create one
         HIP_CHECK(hipStreamCreateWithFlags(&stream, hipStreamNonBlocking));
@@ -587,7 +528,7 @@ void sort_pairs()
 
             // Generate data
             auto keys_input = std::make_unique<key_type[]>(size);
-            generate_key_input(keys_input.get(), size, rng_engine);
+            test_utils::generate_key_input(keys_input.get(), size, rng_engine);
 
             std::vector<value_type> values_input(size);
             test_utils::iota(values_input.begin(), values_input.end(), 0);
@@ -837,7 +778,7 @@ void sort_keys_double_buffer()
     constexpr bool         check_large_sizes = TestFixture::params::check_large_sizes;
 
     hipStream_t stream = 0;
-    if (TestFixture::params::use_graphs)
+    if(TestFixture::params::use_graphs)
     {
         // Default stream does not support hipGraph stream capture, so create one
         HIP_CHECK(hipStreamCreateWithFlags(&stream, hipStreamNonBlocking));
@@ -867,17 +808,10 @@ void sort_keys_double_buffer()
 
             // Generate data
             auto keys_input = std::make_unique<key_type[]>(size);
-            generate_key_input(keys_input.get(), size, rng_engine);
+            test_utils::generate_key_input(keys_input.get(), size, rng_engine);
 
             common::device_ptr<key_type> d_keys_input(keys_input, size);
             common::device_ptr<key_type> d_keys_output(size);
-
-            // Calculate expected results on host
-            std::vector<key_type> expected(keys_input.get(), keys_input.get() + size);
-            std::stable_sort(
-                expected.begin(),
-                expected.end(),
-                test_utils::key_comparator<key_type, descending, start_bit, end_bit>());
 
             rocprim::double_buffer<key_type> d_keys(d_keys_input.get(), d_keys_output.get());
 
@@ -917,21 +851,18 @@ void sort_keys_double_buffer()
                 gHelper.createAndLaunchGraph(stream);
             }
 
-            auto keys_output = std::make_unique<key_type[]>(size);
-            HIP_CHECK(hipMemcpy(keys_output.get(),
-                                d_keys.current(),
-                                size * sizeof(key_type),
-                                hipMemcpyDeviceToHost));
+            bool is_sorted = test_utils::device_sort_check(
+                d_keys.current(),
+                size,
+                test_utils::key_comparator<key_type, descending, start_bit, end_bit>{},
+                stream,
+                debug_synchronous);
+            ASSERT_TRUE(is_sorted);
 
             if(TestFixture::params::use_graphs)
             {
                 gHelper.cleanupGraphHelper();
             }
-
-            ASSERT_NO_FATAL_FAILURE(test_utils::assert_bit_eq(keys_output.get(),
-                                                              keys_output.get() + size,
-                                                              expected.begin(),
-                                                              expected.end()));
         }
     }
 
@@ -1081,7 +1012,7 @@ void sort_pairs_double_buffer()
     constexpr bool         check_large_sizes = TestFixture::params::check_large_sizes;
 
     hipStream_t stream = 0;
-    if (TestFixture::params::use_graphs)
+    if(TestFixture::params::use_graphs)
     {
         // Default stream does not support hipGraph stream capture, so create one
         HIP_CHECK(hipStreamCreateWithFlags(&stream, hipStreamNonBlocking));
@@ -1111,7 +1042,7 @@ void sort_pairs_double_buffer()
 
             // Generate data
             auto keys_input = std::make_unique<key_type[]>(size);
-            generate_key_input(keys_input.get(), size, rng_engine);
+            test_utils::generate_key_input(keys_input.get(), size, rng_engine);
 
             std::vector<value_type> values_input(size);
             test_utils::iota(values_input.begin(), values_input.end(), 0);
@@ -1227,8 +1158,8 @@ void sort_keys_over_4g()
     constexpr bool         debug_synchronous       = false;
     constexpr size_t       size                    = (1ull << 32) + 32;
     constexpr size_t       number_of_possible_keys = 1ull << (8ull * sizeof(key_type));
-    hipStream_t stream = 0;
-    if (UseGraphs)
+    hipStream_t            stream                  = 0;
+    if(UseGraphs)
     {
         // Default stream does not support hipGraph stream capture, so create one
         HIP_CHECK(hipStreamCreateWithFlags(&stream, hipStreamNonBlocking));
@@ -1252,7 +1183,7 @@ void sort_keys_over_4g()
     std::for_each(keys_input.begin(), keys_input.end(), [&](const key_type& a) { histogram[a]++; });
 
     common::device_ptr<key_type> d_keys_input_output(keys_input);
-    size_t key_type_storage_bytes = size * sizeof(key_type);
+    size_t                       key_type_storage_bytes = size * sizeof(key_type);
 
     size_t temporary_storage_bytes;
     HIP_CHECK(rocprim::radix_sort_keys(nullptr,
@@ -1270,51 +1201,51 @@ void sort_keys_over_4g()
     hipDeviceProp_t prop;
     HIP_CHECK(hipGetDeviceProperties(&prop, device_id));
 
-   size_t total_storage_bytes = key_type_storage_bytes +  temporary_storage_bytes;
-   if(total_storage_bytes > (static_cast<size_t>(prop.totalGlobalMem * 0.90)))
-   {
-       GTEST_SKIP() << "Test case device memory requirement (" << total_storage_bytes
-                    << " bytes) exceeds available memory on current device (" << prop.totalGlobalMem
-                    << " bytes). Skipping test";
-   }
+    size_t total_storage_bytes = key_type_storage_bytes + temporary_storage_bytes;
+    if(total_storage_bytes > (static_cast<size_t>(prop.totalGlobalMem * 0.90)))
+    {
+        GTEST_SKIP() << "Test case device memory requirement (" << total_storage_bytes
+                     << " bytes) exceeds available memory on current device ("
+                     << prop.totalGlobalMem << " bytes). Skipping test";
+    }
 
-   common::device_ptr<void> d_temporary_storage(temporary_storage_bytes);
+    common::device_ptr<void> d_temporary_storage(temporary_storage_bytes);
 
-   test_utils::GraphHelper gHelper;
-   if(UseGraphs)
-   {
-       gHelper.startStreamCapture(stream);
-   }
+    test_utils::GraphHelper gHelper;
+    if(UseGraphs)
+    {
+        gHelper.startStreamCapture(stream);
+    }
 
-   HIP_CHECK(rocprim::radix_sort_keys(d_temporary_storage.get(),
-                                      temporary_storage_bytes,
-                                      d_keys_input_output.get(),
-                                      d_keys_input_output.get(),
-                                      size,
-                                      start_bit,
-                                      end_bit,
-                                      stream,
-                                      debug_synchronous));
+    HIP_CHECK(rocprim::radix_sort_keys(d_temporary_storage.get(),
+                                       temporary_storage_bytes,
+                                       d_keys_input_output.get(),
+                                       d_keys_input_output.get(),
+                                       size,
+                                       start_bit,
+                                       end_bit,
+                                       stream,
+                                       debug_synchronous));
 
-   if(UseGraphs)
-   {
-       gHelper.createAndLaunchGraph(stream);
-   }
+    if(UseGraphs)
+    {
+        gHelper.createAndLaunchGraph(stream);
+    }
 
-   const auto output = d_keys_input_output.load();
+    const auto output = d_keys_input_output.load();
 
-   size_t counter = 0;
-   for(size_t i = 0; i <= rocprim::numeric_limits<key_type>::max(); ++i)
-   {
-       for(size_t j = 0; j < histogram[i]; ++j)
-       {
-           ASSERT_EQ(static_cast<size_t>(output[counter]), i);
-           ++counter;
-       }
-   }
+    size_t counter = 0;
+    for(size_t i = 0; i <= rocprim::numeric_limits<key_type>::max(); ++i)
+    {
+        for(size_t j = 0; j < histogram[i]; ++j)
+        {
+            ASSERT_EQ(static_cast<size_t>(output[counter]), i);
+            ++counter;
+        }
+    }
     ASSERT_EQ(counter, size);
 
-    if (UseGraphs)
+    if(UseGraphs)
     {
         gHelper.cleanupGraphHelper();
         HIP_CHECK(hipStreamDestroy(stream));
@@ -1333,22 +1264,19 @@ inline void sort_keys_large_sizes()
 
     hipStream_t stream = 0;
 
-    // Currently, CI enforces a hard limit of 96 GB on memory allocations.
-    // Temporarily use sizes that will require less space than the limit.
-    // On Windows, sizes above 2^34 (that are still under the 96 GB limit)
-    // can hang due to issues that we can't currently catch by examining
-    // the hipMalloc return value or querying available memory. Workaround
-    // this for now by setting a different maximum size for that platform.
-#if defined(_WIN32)
-    const size_t max_pow2 = 34;
-#else
     const size_t max_pow2 = 35;
-#endif
+
+    rocprim::detail::target_arch arch;
+    HIP_CHECK(rocprim::detail::host_target_arch(stream, arch));
+
     const std::vector<size_t> sizes = test_utils::get_large_sizes<max_pow2>(seeds[0]);
     for(const size_t size : sizes)
     {
         SCOPED_TRACE(testing::Message() << "with size = " << size);
 
+        test_utils::MemCheck memcheck;
+
+        MEMCHECK_OR_BREAK_ALLOC_DEVICE(key_type, size)
         common::device_ptr<key_type> d_keys;
         if(!d_keys.resize_with_memory_check(size))
         {
@@ -1357,6 +1285,7 @@ inline void sort_keys_large_sizes()
         }
 
         // Generate data
+        MEMCHECK_OR_BREAK_ALLOC_HOST(key_type, size)
         std::vector<key_type> keys_input(size);
         std::iota(keys_input.begin(), keys_input.end(), 0);
         d_keys.store(keys_input);
@@ -1370,8 +1299,9 @@ inline void sort_keys_large_sizes()
                                            start_bit,
                                            end_bit,
                                            stream));
-
         ASSERT_GT(temporary_storage_bytes, 0U);
+
+        MEMCHECK_OR_BREAK_ALLOC_DEVICE_BYTES(temporary_storage_bytes)
         common::device_ptr<void> d_temporary_storage;
         if(!d_temporary_storage.resize_with_memory_check(temporary_storage_bytes))
         {
@@ -1388,6 +1318,7 @@ inline void sort_keys_large_sizes()
                                            end_bit,
                                            stream));
 
+        MEMCHECK_OR_BREAK_ALLOC_HOST_BYTES(d_keys.msize())
         const auto keys_output = d_keys.load();
 
         // Check if output values are as expected

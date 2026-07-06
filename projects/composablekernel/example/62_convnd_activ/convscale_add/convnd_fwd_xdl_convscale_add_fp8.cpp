@@ -1,5 +1,5 @@
+// Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
 // SPDX-License-Identifier: MIT
-// Copyright (c) 2024-2025, Advanced Micro Devices, Inc. All rights reserved.
 
 #include "ck/utility/tuple.hpp"
 #include "convnd_fwd_convscale_add_common.hpp"
@@ -54,7 +54,7 @@ using DeviceGroupedConvNDFwdInstance =
         256,         // BlockSize
         128,         // MPerBlock
         256,         // NPerBlock
-        32,          // KPerBlock
+        64,          // KPerBlock
         8,           // AK1
         8,           // BK1
         16,          // MPerXdl

@@ -217,6 +217,7 @@ namespace Tensile
             {
                 iot::enumCase(io, value, "gfx803", AMDGPU::Processor::gfx803);
                 iot::enumCase(io, value, "gfx900", AMDGPU::Processor::gfx900);
+                iot::enumCase(io, value, "gfx90c", AMDGPU::Processor::gfx90c);
                 iot::enumCase(io, value, "gfx906", AMDGPU::Processor::gfx906);
                 iot::enumCase(io, value, "gfx908", AMDGPU::Processor::gfx908);
                 iot::enumCase(io, value, "gfx90a", AMDGPU::Processor::gfx90a);
@@ -228,16 +229,21 @@ namespace Tensile
                 iot::enumCase(io, value, "gfx1030", AMDGPU::Processor::gfx1030);
                 iot::enumCase(io, value, "gfx1031", AMDGPU::Processor::gfx1031);
                 iot::enumCase(io, value, "gfx1032", AMDGPU::Processor::gfx1032);
+                iot::enumCase(io, value, "gfx1033", AMDGPU::Processor::gfx1033);
                 iot::enumCase(io, value, "gfx1034", AMDGPU::Processor::gfx1034);
                 iot::enumCase(io, value, "gfx1035", AMDGPU::Processor::gfx1035);
+                iot::enumCase(io, value, "gfx1036", AMDGPU::Processor::gfx1036);
                 iot::enumCase(io, value, "gfx1100", AMDGPU::Processor::gfx1100);
                 iot::enumCase(io, value, "gfx1101", AMDGPU::Processor::gfx1101);
                 iot::enumCase(io, value, "gfx1102", AMDGPU::Processor::gfx1102);
                 iot::enumCase(io, value, "gfx1103", AMDGPU::Processor::gfx1103);
                 iot::enumCase(io, value, "gfx1150", AMDGPU::Processor::gfx1150);
                 iot::enumCase(io, value, "gfx1151", AMDGPU::Processor::gfx1151);
+                iot::enumCase(io, value, "gfx1152", AMDGPU::Processor::gfx1152);
+                iot::enumCase(io, value, "gfx1153", AMDGPU::Processor::gfx1153);
                 iot::enumCase(io, value, "gfx1200", AMDGPU::Processor::gfx1200);
                 iot::enumCase(io, value, "gfx1201", AMDGPU::Processor::gfx1201);
+                iot::enumCase(io, value, "gfx1250", AMDGPU::Processor::gfx1250);
             }
         };
 

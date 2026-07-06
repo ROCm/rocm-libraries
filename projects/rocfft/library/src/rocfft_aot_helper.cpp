@@ -245,7 +245,8 @@ void build_stockham_function_pool(CompileQueue& queue)
 
         StockhamGeneratorSpecs specs{factors,
                                      {},
-                                     {static_cast<unsigned int>(precision)},
+                                     static_cast<unsigned int>(precision),
+                                     get_curr_gcn_arch_name(),
                                      static_cast<unsigned int>(i.second.workgroup_size),
                                      PrintScheme(scheme)};
         specs.threads_per_transform = i.second.threads_per_transform[0];
@@ -346,30 +347,40 @@ void build_realcomplex(CompileQueue& queue)
             {
                 for(size_t dim : {1, 2, 3})
                 {
-                    for(bool Ndiv4 : {true, false})
+                    for(size_t lensz = dim; lensz <= 3; lensz++)
                     {
-                        // standalone even-length kernels may be
-                        // first/last in the plan, so allow for
-                        // callbacks
-                        for(auto cbtype : {CallbackType::NONE, CallbackType::USER_LOAD_STORE})
+                        for(bool Ndiv4 : {true, false})
                         {
-                            // r2c may have planar output, c2r may have planar input
-                            auto inArrayType  = (scheme == CS_KERNEL_CMPLX_TO_R && planar)
-                                                    ? rocfft_array_type_complex_planar
-                                                    : rocfft_array_type_complex_interleaved;
-                            auto outArrayType = (scheme == CS_KERNEL_R_TO_CMPLX && planar)
-                                                    ? rocfft_array_type_complex_planar
-                                                    : rocfft_array_type_complex_interleaved;
+                            // standalone even-length kernels may be
+                            // first/last in the plan, so allow for
+                            // callbacks
+                            for(auto cbtype : {CallbackType::NONE, CallbackType::USER_LOAD_STORE})
+                            {
+                                // r2c may have planar output, c2r may have planar input
+                                auto inArrayType  = (scheme == CS_KERNEL_CMPLX_TO_R && planar)
+                                                        ? rocfft_array_type_complex_planar
+                                                        : rocfft_array_type_complex_interleaved;
+                                auto outArrayType = (scheme == CS_KERNEL_R_TO_CMPLX && planar)
+                                                        ? rocfft_array_type_complex_planar
+                                                        : rocfft_array_type_complex_interleaved;
 
-                            RealComplexEvenSpecs specs{
-                                {scheme, dim, precision, inArrayType, outArrayType, cbtype, {}, {}},
-                                Ndiv4};
-                            auto kernel_name = realcomplex_even_rtc_kernel_name(specs);
-                            std::function<std::string(const std::string&)> generate_src
-                                = [=](const std::string& kernel_name) -> std::string {
-                                return realcomplex_even_rtc(kernel_name, specs);
-                            };
-                            queue.push({kernel_name, generate_src});
+                                RealComplexEvenSpecs specs{{scheme,
+                                                            dim,
+                                                            lensz,
+                                                            precision,
+                                                            inArrayType,
+                                                            outArrayType,
+                                                            cbtype,
+                                                            {},
+                                                            {}},
+                                                           Ndiv4};
+                                auto kernel_name = realcomplex_even_rtc_kernel_name(specs);
+                                std::function<std::string(const std::string&)> generate_src
+                                    = [=](const std::string& kernel_name) -> std::string {
+                                    return realcomplex_even_rtc(kernel_name, specs);
+                                };
+                                queue.push({kernel_name, generate_src});
+                            }
                         }
                     }
                 }
@@ -384,20 +395,24 @@ void build_realcomplex(CompileQueue& queue)
                                         ? rocfft_array_type_complex_planar
                                         : rocfft_array_type_complex_interleaved;
 
-                RealComplexEvenTransposeSpecs specs{{scheme,
-                                                     static_cast<size_t>(1),
-                                                     precision,
-                                                     inArrayType,
-                                                     outArrayType,
-                                                     CallbackType::NONE,
-                                                     {},
-                                                     {}}};
-                auto kernel_name = realcomplex_even_transpose_rtc_kernel_name(specs);
-                std::function<std::string(const std::string&)> generate_src
-                    = [=](const std::string& kernel_name) -> std::string {
-                    return realcomplex_even_transpose_rtc(kernel_name, specs);
-                };
-                queue.push({kernel_name, generate_src, ""});
+                for(size_t lensz = 1; lensz <= 3; lensz++)
+                {
+                    RealComplexEvenTransposeSpecs specs{{scheme,
+                                                         static_cast<size_t>(1),
+                                                         lensz,
+                                                         precision,
+                                                         inArrayType,
+                                                         outArrayType,
+                                                         CallbackType::NONE,
+                                                         {},
+                                                         {}}};
+                    auto kernel_name = realcomplex_even_transpose_rtc_kernel_name(specs);
+                    std::function<std::string(const std::string&)> generate_src
+                        = [=](const std::string& kernel_name) -> std::string {
+                        return realcomplex_even_transpose_rtc(kernel_name, specs);
+                    };
+                    queue.push({kernel_name, generate_src, ""});
+                }
             }
         }
     }
@@ -490,7 +505,7 @@ void solution_kernel_combo(FMKey                             kernel_key,
         {
             placement_range = {rocfft_placement_inplace, rocfft_placement_notinplace};
         }
-        // sbcc can be used in 2D, 3D, for L1D, it's still psuedo-2D
+        // sbcc can be used in 2D, 3D, for L1D, it's still pseudo-2D
         if(static_dim == 0)
         {
             static_dims_range = {2, 3};
@@ -663,7 +678,8 @@ void build_solution_kernels(CompileQueue& queue)
 
                 StockhamGeneratorSpecs specs{factors,
                                              {},
-                                             {static_cast<unsigned int>(precision)},
+                                             static_cast<unsigned int>(precision),
+                                             get_curr_gcn_arch_name(),
                                              static_cast<unsigned int>(config.workgroup_size),
                                              PrintScheme(scheme)};
                 specs.threads_per_transform = config.threads_per_transform[0];

@@ -994,12 +994,15 @@ After the build, the rocBLAS clients can be found in the ``rocBLAS/build/release
 
 .. note::
 
-   The ``rocblas-bench`` and ``rocblas-test`` executables use AMD's ILP64 version of AOCL-BLAS 4.2 as the host
-   reference BLAS to verify correctness. However, there is a known issue with multiple threads
-   in AOCL-BLAS that can cause these executables to hang.
+   The ``rocblas-bench`` and ``rocblas-test`` executables use AMD's AOCL-BLAS library with ILP64 support
+   (64-bit integers) as the host reference BLAS to verify correctness. On Linux, ``install.sh -dc`` automatically
+   builds AOCL 5.2 from source. On Windows, AOCL 4.2+ can be manually installed from
+   `AMD Developer Central <https://www.amd.com/en/developer/aocl.html>`_.
+
+   There is a known issue with thread oversubscription in AOCL-BLAS that can cause these executables to hang.
    If the number of threads matches the total number of CPU threads, thread oversubscription can occur, which causes the process to hang.
 
-   To prevent this issue, the number of threads used the AOCL-BLAS library should be smaller than the number of available CPU cores.
+   To prevent this issue, the number of threads used by the AOCL-BLAS library should be smaller than the number of available CPU cores.
    You can configure this setting using the ``OMP_NUM_THREADS`` environment variable.
    For example, on a server with 32 cores, limit the number of threads to 28 by setting ``export OMP_NUM_THREADS=28``.
 
@@ -1461,6 +1464,12 @@ For example, the performance of SGEMM using rocblas-bench on an AMD vega20 machi
    transA,transB,M,N,K,alpha,lda,ldb,beta,ldc,rocblas-Gflops,us
    N,N,4096,4096,4096,1,4096,4096,0,4096,11941.5,11509.4
 
+Logging affects performance, so only use it to log the command under evaluation,
+then run the command without logging to measure performance.
+
+Use of logging to advise on rocblas-bench arguments
+^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
 A useful way of finding the parameters that can be used with ``./rocblas-bench -f gemm`` is to turn on logging
 by setting the environment variable ``ROCBLAS_LAYER=2``. For example, if the user runs:
 
@@ -1480,15 +1489,18 @@ The user can copy and change the above command. For example, to change the datat
 
    ./rocblas-bench -f gemm -r f64_r --transposeA N --transposeB N -m 2048 -n 2048 -k 2048 --alpha 1 --lda 2048 --ldb 2048 --beta 0 --ldc 2048
 
+
+Benchmarking ILP64 APIs
+^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
 To measure performance on the ILP64 API functions, when they exist, add the argument ``--api 1`` rather
 than changing the function name set in ``-f``.
-Logging affects performance, so only use it to log the command under evaluation,
-then run the command without logging to measure performance.
 
 
 .. note::
 
-   rocblas-bench also has the flag ``-v 1`` for correctness checks.
+   rocblas-bench has the flag ``-v 1`` for norm based correctness checks against CPU reference.
+   rocblas-bench has the flag ``-t 1`` for equality and tolerance based correctness checks against CPU reference.
 
 Benchmarking special case gemv_batched and gemv_strided_batched functions using rocblas-bench
 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
@@ -1546,7 +1558,7 @@ Where the far right values (``solution_index``) are the indices of the best perf
 These indices can be used directly in future GEMM calls but cannot be reused across library
 releases or different device architectures.
 
-See `example_user_driven_tuning.cpp <https://github.com/ROCm/rocBLAS/blob/develop/clients/samples/example_user_driven_tuning.cpp>`_ for
+See `example_user_driven_tuning.cpp <https://github.com/ROCm/rocm-libraries/blob/develop/projects/rocblas/clients/samples/example_user_driven_tuning.cpp>`_ for
 sample code showing how to use kernels directly via their indices.
 
 If the output is stored in a file, you can use the results to override the default kernel selection
@@ -1624,6 +1636,10 @@ The following test situations require additional consideration:
 
       ROCBLAS_CLIENT_RAM_GB_LIMIT=32 ./rocblas-test --gtest_filter=*stress*
 
+   If the ``rocblas-test`` process is being killed due to an out of memory (OOM) condition, then reduce the client limit by half
+   and try again.  It is not advisable to run any stress tests if you have less than 8 GB VRAM available to your graphics device.
+   Use the test subtraction syntax if combining with other filters, for example, ``-*stress*``.
+
 *  Long-running tests
 
    The rocblas-test process will be terminated if a single test takes longer than the configured timeout.
@@ -1642,6 +1658,13 @@ The following test situations require additional consideration:
    .. code-block:: bash
 
       ROCBLAS_TEST_NO_SIGACTION=1 rocgdb ./rocblas-test --gtest_filter=*stress*
+
+   On Linux the rocblas-test process now aborts when catching signals to log a stack dump. To disable this feature,
+   set the environment variable ``ROCBLAS_TEST_CONTINUE_ON_FATAL_SIGNAL``:
+
+   .. code-block:: bash
+
+      ROCBLAS_TEST_CONTINUE_ON_FATAL_SIGNAL=1 ./rocblas-test --gtest_filter=*stress*
 
 
 Adding a new rocBLAS unit test

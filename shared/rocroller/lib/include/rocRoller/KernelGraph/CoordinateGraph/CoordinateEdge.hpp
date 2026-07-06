@@ -1,28 +1,5 @@
-/*******************************************************************************
- *
- * MIT License
- *
- * Copyright 2024-2025 AMD ROCm(TM) Software
- *
- * Permission is hereby granted, free of charge, to any person obtaining a copy
- * of this software and associated documentation files (the "Software"), to deal
- * in the Software without restriction, including without limitation the rights
- * to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
- * copies of the Software, and to permit persons to whom the Software is
- * furnished to do so, subject to the following conditions:
- *
- * The above copyright notice and this permission notice shall be included in
- * all copies or substantial portions of the Software.
- *
- * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
- * IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
- * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
- * AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
- * LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
- * OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
- * SOFTWARE.
- *
- *******************************************************************************/
+// Copyright Advanced Micro Devices, Inc., or its affiliates.
+// SPDX-License-Identifier: MIT
 
 #pragma once
 
@@ -95,6 +72,21 @@ namespace rocRoller
         RR_EMPTY_STRUCT_WITH_NAME(Alias);
 
         /**
+         * Identify - connects coordinates that can be identified with
+         * another coordinate.
+         *
+         * This is a variant of `DataFlowEdge`; and therefore they are
+         * not traversed during coordinate transforms.
+         *
+         * Primarily used in StreamK kernels to connect streaming
+         * Unroll coordinates to their associated ForLoop coordinate
+         * deeper in the coordinate transform.
+         *
+         * See `rocRoller::KernelGraph::followIdentify()`.
+         */
+        RR_EMPTY_STRUCT_WITH_NAME(Identify);
+
+        /**
          * Index - denotes that the source will index the register
          * allocation from the dest.
          */
@@ -143,6 +135,11 @@ namespace rocRoller
         };
 
         /**
+         * BaseAddress - denotes base address for Global instructions
+         */
+        RR_EMPTY_STRUCT_WITH_NAME(BaseAddress);
+
+        /**
          * Buffer - denotes SRD for MUBUF instructions
          */
         RR_EMPTY_STRUCT_WITH_NAME(Buffer);
@@ -151,7 +148,7 @@ namespace rocRoller
          * Offset - denotes offset between target/increment
          * dimensions.
          *
-         * See ComputeIndex.
+         * See AssignIndexExpressions.
          */
         RR_EMPTY_STRUCT_WITH_NAME(Offset);
 
@@ -159,7 +156,7 @@ namespace rocRoller
          * Stride - denotes stride between target/increment
          * dimensions.
          *
-         * See ComputeIndex.
+         * See AssignIndexExpressions.
          */
         RR_EMPTY_STRUCT_WITH_NAME(Stride);
 
@@ -168,6 +165,11 @@ namespace rocRoller
          * node.
          */
         RR_EMPTY_STRUCT_WITH_NAME(View);
+
+        /**
+         * TDM - denotes TDM descriptor for TDM instructions
+         */
+        RR_EMPTY_STRUCT_WITH_NAME(TDM);
 
         /**
          * Construct MacroTile.
@@ -263,6 +265,85 @@ namespace rocRoller
          * Forward and reverse transforms are the identity.
          */
         RR_EMPTY_STRUCT_WITH_NAME(PassThrough);
+
+        /**
+         * Swap adjacent pairs of the first coordinate based on a
+         * grouping of the second coordinate.
+         *
+         * Self-inverse: applying the swap twice returns the original
+         * value.  rowsPerGroup controls how many rows share the same
+         * parity (bankRowIdx = row >> log2(rowsPerGroup)).
+         *
+         * Graph: addElement(edge, {out}, {in, groupCoord})
+         * Reverse: out = in ^ ((groupIdx ^ 1) & 1)
+         */
+        struct PairSwap
+        {
+
+            unsigned int rowsPerGroup;
+
+            PairSwap() = default;
+
+            explicit PairSwap(unsigned int rowsPerGroup)
+                : rowsPerGroup(rowsPerGroup)
+            {
+                AssertFatal(rowsPerGroup > 0 && (rowsPerGroup & (rowsPerGroup - 1)) == 0,
+                            "PairSwap requires power-of-2 rowsPerGroup",
+                            ShowValue(rowsPerGroup));
+            }
+
+            std::string toString() const
+            {
+                return name();
+            }
+
+            std::string name() const
+            {
+                return "PairSwap";
+            }
+        };
+
+        /**
+         * Circular rotation of the first coordinate based on a
+         * grouping of the second coordinate.
+         *
+         * Forward (inverse=false):
+         *   out = (in + numPositions - groupIdx/2*2) & (numPositions-1)
+         * Inverse (inverse=true):
+         *   out = (in + groupIdx/2*2) & (numPositions-1)
+         *
+         * Graph: addElement(edge, {out}, {in, groupCoord})
+         * Reverse: given in and groupCoord, compute rotated out.
+         */
+        struct Rotate
+        {
+
+            unsigned int numPositions;
+            unsigned int rowsPerGroup;
+            bool         inverse;
+
+            Rotate() = default;
+
+            Rotate(unsigned int numPositions, unsigned int rowsPerGroup, bool inverse)
+                : numPositions(numPositions)
+                , rowsPerGroup(rowsPerGroup)
+                , inverse(inverse)
+            {
+                AssertFatal(rowsPerGroup > 0 && (rowsPerGroup & (rowsPerGroup - 1)) == 0,
+                            "Rotate requires power-of-2 rowsPerGroup",
+                            ShowValue(rowsPerGroup));
+            }
+
+            std::string toString() const
+            {
+                return name();
+            }
+
+            std::string name() const
+            {
+                return "Rotate";
+            }
+        };
 
         /**
          * Join dimensions using conditional strides and initial values.
@@ -476,5 +557,6 @@ namespace rocRoller
             }
             return false;
         }
+
     }
 }

@@ -128,6 +128,8 @@ Auxiliary functions
 +------------------------------------------+
 |:cpp:func:`hipsparseCreateBlockedEll`     |
 +------------------------------------------+
+|:cpp:func:`hipsparseCreateBsr`            |
++------------------------------------------+
 |:cpp:func:`hipsparseDestroySpMat`         |
 +------------------------------------------+
 |:cpp:func:`hipsparseCooGet`               |
@@ -407,4 +409,5 @@ Function name                                     single double single complex d
 :cpp:func:`hipsparseSpSM_bufferSize()`            x      x      x              x
 :cpp:func:`hipsparseSpSM_analysis()`              x      x      x              x
 :cpp:func:`hipsparseSpSM_solve()`                 x      x      x              x
+:cpp:func:`hipsparseSpSM_solve_ex()`              x      x      x              x
 ================================================= ====== ====== ============== ==============

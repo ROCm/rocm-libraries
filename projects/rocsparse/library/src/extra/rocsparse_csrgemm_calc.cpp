@@ -1,6 +1,6 @@
 /*! \file */
 /* ************************************************************************
- * Copyright (C) 2023-2025 Advanced Micro Devices, Inc. All rights Reserved.
+ * Copyright (C) 2023-2026 Advanced Micro Devices, Inc. All rights Reserved.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -307,10 +307,10 @@ rocsparse_status rocsparse::csrgemm_calc_template(rocsparse_handle          hand
 
     J nnz_max;
     RETURN_IF_HIP_ERROR(
-        hipMemcpyAsync(&nnz_max, workspace, sizeof(J), hipMemcpyDeviceToHost, stream));
+        rocsparse_hipMemcpyAsync(&nnz_max, workspace, sizeof(J), hipMemcpyDeviceToHost, stream));
 
     // Wait for host transfer to finish
-    RETURN_IF_HIP_ERROR(hipStreamSynchronize(stream));
+    RETURN_IF_HIP_ERROR(rocsparse_hipStreamSynchronize(stream));
 
     // Group offset buffer
     J* d_group_offset = reinterpret_cast<J*>(buffer);
@@ -382,14 +382,14 @@ rocsparse_status rocsparse::csrgemm_calc_template(rocsparse_handle          hand
                                                                         rocprim_buffer));
 
         // Copy group sizes to host
-        RETURN_IF_HIP_ERROR(hipMemcpyAsync(&h_group_size,
-                                           d_group_size,
-                                           sizeof(J) * CSRGEMM_MAXGROUPS,
-                                           hipMemcpyDeviceToHost,
-                                           stream));
+        RETURN_IF_HIP_ERROR(rocsparse_hipMemcpyAsync(&h_group_size,
+                                                     d_group_size,
+                                                     sizeof(J) * CSRGEMM_MAXGROUPS,
+                                                     hipMemcpyDeviceToHost,
+                                                     stream));
 
         // Wait for host transfer to finish
-        RETURN_IF_HIP_ERROR(hipStreamSynchronize(stream));
+        RETURN_IF_HIP_ERROR(rocsparse_hipStreamSynchronize(stream));
 
         // Create identity permutation for group access
         RETURN_IF_ROCSPARSE_ERROR(
@@ -420,7 +420,7 @@ rocsparse_status rocsparse::csrgemm_calc_template(rocsparse_handle          hand
     {
         // First group processes all rows
         h_group_size[0] = m;
-        RETURN_IF_HIP_ERROR(hipMemsetAsync(d_group_offset, 0, sizeof(J), stream));
+        RETURN_IF_HIP_ERROR(rocsparse_hipMemsetAsync(d_group_offset, 0, sizeof(J), stream));
     }
 
     // Compute columns and accumulate values for each group
@@ -840,15 +840,21 @@ INSTANTIATE(int32_t, int32_t, float);
 INSTANTIATE(int32_t, int32_t, double);
 INSTANTIATE(int32_t, int32_t, rocsparse_float_complex);
 INSTANTIATE(int32_t, int32_t, rocsparse_double_complex);
+INSTANTIATE(int32_t, int32_t, _Float16);
+INSTANTIATE(int32_t, int32_t, rocsparse_bfloat16);
 
 INSTANTIATE(int64_t, int64_t, float);
 INSTANTIATE(int64_t, int64_t, double);
 INSTANTIATE(int64_t, int64_t, rocsparse_float_complex);
 INSTANTIATE(int64_t, int64_t, rocsparse_double_complex);
+INSTANTIATE(int64_t, int64_t, _Float16);
+INSTANTIATE(int64_t, int64_t, rocsparse_bfloat16);
 
 INSTANTIATE(int64_t, int32_t, float);
 INSTANTIATE(int64_t, int32_t, double);
 INSTANTIATE(int64_t, int32_t, rocsparse_float_complex);
 INSTANTIATE(int64_t, int32_t, rocsparse_double_complex);
+INSTANTIATE(int64_t, int32_t, _Float16);
+INSTANTIATE(int64_t, int32_t, rocsparse_bfloat16);
 
 #undef INSTANTIATE

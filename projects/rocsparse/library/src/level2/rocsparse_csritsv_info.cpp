@@ -1,6 +1,6 @@
 /*! \file */
 /* ************************************************************************
- * Copyright (C) 2025 Advanced Micro Devices, Inc. All rights Reserved.
+ * Copyright (C) 2025-2026 Advanced Micro Devices, Inc. All rights Reserved.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -27,86 +27,82 @@
 #include "rocsparse_utility.hpp"
 
 /********************************************************************************
- * \brief rocsparse_csritsv_info is a structure holding the rocsparse csritsv
- * info data gathered during csritsv_buffer_size. It must be initialized using
- * the create_csritsv_info() routine. It should be destroyed at the
- * end using destroy_csritsv_info().
+ * \brief Copy csritsv info.
  *******************************************************************************/
-rocsparse_status rocsparse::create_csritsv_info(rocsparse_csritsv_info* info)
+void _rocsparse_csritsv_info::copy(const _rocsparse_csritsv_info* that, hipStream_t stream)
 {
     ROCSPARSE_ROUTINE_TRACE;
-
-    if(info == nullptr)
+    //
+    // this == nullptr
+    //
+    if(that == nullptr || this == that)
     {
-        return rocsparse_status_invalid_pointer;
+        THROW_IF_ROCSPARSE_ERROR(rocsparse_status_invalid_pointer);
+    }
+    //
+    // Release any device buffer this object may already own before overwriting it,
+    // otherwise the previous allocation would be leaked.
+    //
+    if(this->ptr_end != nullptr && this->is_submatrix)
+    {
+        // Mirror the destructor: HIP 7.0 made hipFree of asynchronous allocations
+        // asynchronous, so synchronize before freeing a buffer that may still be in use.
+        THROW_IF_HIP_ERROR(hipDeviceSynchronize());
+        THROW_IF_HIP_ERROR(rocsparse_hipFree(this->ptr_end));
+        this->ptr_end = nullptr;
+    }
+
+    this->is_submatrix      = that->is_submatrix;
+    this->ptr_end_size      = that->ptr_end_size;
+    this->ptr_end_indextype = that->ptr_end_indextype;
+
+    if(that->ptr_end != nullptr && that->is_submatrix)
+    {
+        //
+        // When 'that' owns its ptr_end device buffer (is_submatrix == true), a shallow
+        // pointer copy would make both info objects free the same allocation in their
+        // destructor, leading to a double-free/use-after-free. Deep-copy the buffer so
+        // each object owns its own allocation.
+        //
+        const size_t element_size = rocsparse::indextype_sizeof(that->ptr_end_indextype);
+        const size_t num_bytes    = element_size * that->ptr_end_size;
+        THROW_IF_HIP_ERROR(rocsparse_hipMallocAsync(&this->ptr_end, num_bytes, stream));
+        THROW_IF_HIP_ERROR(hipMemcpyAsync(
+            this->ptr_end, that->ptr_end, num_bytes, hipMemcpyDeviceToDevice, stream));
     }
     else
     {
-        // Allocate
-        try
-        {
-            *info = new _rocsparse_csritsv_info;
-        }
-        catch(const rocsparse_status& status)
-        {
-            return status;
-        }
-        return rocsparse_status_success;
+        //
+        // 'that' does not own ptr_end (it aliases csr_row_ptr + 1); a shallow copy is
+        // safe because the destructor will not free it (guarded by is_submatrix).
+        //
+        this->ptr_end = that->ptr_end;
     }
-}
 
-/********************************************************************************
- * \brief Copy csritsv info.
- *******************************************************************************/
-rocsparse_status rocsparse::copy_csritsv_info(rocsparse_csritsv_info       dest,
-                                              const rocsparse_csritsv_info src)
-{
-    ROCSPARSE_ROUTINE_TRACE;
-
-    if(dest == nullptr || src == nullptr || dest == src)
-    {
-        return rocsparse_status_invalid_pointer;
-    }
-    dest->is_submatrix      = src->is_submatrix;
-    dest->ptr_end_size      = src->ptr_end_size;
-    dest->ptr_end_indextype = src->ptr_end_indextype;
-    dest->ptr_end           = src->ptr_end;
-    return rocsparse_status_success;
+    this->rocsparse::pivot_info_t::copy_pivot_info_async(that, stream);
+    THROW_IF_HIP_ERROR(rocsparse_hipStreamSynchronize(stream));
 }
 
 /********************************************************************************
  * \brief Destroy csritsv info.
  *******************************************************************************/
-rocsparse_status rocsparse::destroy_csritsv_info(rocsparse_csritsv_info info)
+_rocsparse_csritsv_info::~_rocsparse_csritsv_info()
 {
     ROCSPARSE_ROUTINE_TRACE;
-
-    if(info == nullptr)
-    {
-        return rocsparse_status_success;
-    }
-
-    if(info->ptr_end != nullptr && info->is_submatrix)
+    if(this->ptr_end != nullptr && this->is_submatrix)
     {
         // Due to the changes in the hipFree introduced in HIP 7.0
         // https://rocm.docs.amd.com/projects/HIP/en/latest/hip-7-changes.html#update-hipfree
         // we need to introduce a device synchronize here as the below hipFree calls are now asynchronous.
         // hipFree() previously had an implicit wait for synchronization purpose which is applicable for all memory allocations.
         // This wait has been disabled in the HIP 7.0 runtime for allocations made with hipMallocAsync and hipMallocFromPoolAsync.
-        RETURN_IF_HIP_ERROR(hipDeviceSynchronize());
+        WARNING_IF_HIP_ERROR(rocsparse_hipDeviceSynchronize());
 
-        RETURN_IF_HIP_ERROR(rocsparse_hipFree(info->ptr_end));
-        info->ptr_end = nullptr;
+        WARNING_IF_HIP_ERROR(rocsparse_hipFree(this->ptr_end));
+        this->ptr_end = nullptr;
     }
-
-    // Destruct
-    try
+    if(this->m_csrmv_info)
     {
-        delete info;
+        delete this->m_csrmv_info;
     }
-    catch(const rocsparse_status& status)
-    {
-        return status;
-    }
-    return rocsparse_status_success;
 }

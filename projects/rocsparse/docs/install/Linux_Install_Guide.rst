@@ -15,41 +15,13 @@ Prerequisites
 =============
 
 rocSPARSE requires a ROCm enabled platform. For more information, including a list of supported
-GPUs and Linux distributions, see the :doc:`ROCm on Linux install guide <rocm-install-on-linux:index>`.
-
-Installing pre-built packages
-=============================
-
-Use the following commands to install rocSPARSE on Ubuntu or Debian:
-
-.. code-block:: shell
-
-   sudo apt-get update
-   sudo apt-get install rocsparse
-
-Use the following commands to install rocSPARSE on RHEL-based platforms:
-
-.. code-block:: shell
-
-   sudo yum update
-   sudo yum install rocsparse
-
-Use the following commands to install rocSPARSE on SLES:
-
-.. code-block:: shell
-
-   sudo dnf upgrade
-   sudo dnf install rocsparse
-
-After rocSPARSE is installed, it can be used just like any other library with a C API.
-To call rocSPARSE, the header file must be included in the user code.
-This means the rocSPARSE shared library becomes a link-time and run-time dependency for the user application.
+GPUs and Linux distributions, see the :doc:`ROCm compatibility matrix <compatibility/compatibility-matrix>`.
 
 Building rocSPARSE from source
 ==============================
 
 It isn't necessary to build rocSPARSE from source because it's ready to use after installing
-the prebuilt packages, as described above.
+the prebuilt packages, as described in :doc:`Install rocSPARSE <./install>`.
 To build rocSPARSE from source, follow the instructions in this section.
 
 Requirements
@@ -106,7 +78,7 @@ longer but is recommended for those working with a large number of libraries.
 
 .. note::
 
-   To build ROCm 6.4.2 and earlier, use the rocSPARSE repository at `<https://github.com/ROCm/rocSPARSE>`_.
+   To build ROCm 6.4.3 and earlier, use the rocSPARSE repository at `<https://github.com/ROCm/rocSPARSE>`_.
    For more information, see the documentation associated with the release you want to build.
 
 Building rocSPARSE using the install script
@@ -123,6 +95,12 @@ Using install.sh to build rocSPARSE with dependencies
 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
 
 The following table lists the common ways to use ``install.sh`` to build the rocSPARSE dependencies and library.
+
+.. note::
+
+   By default, rocBLAS is a dependency and the build will fail if it isn't found.
+   To opt out of using rocBLAS when building from source with
+   the ``install.sh`` script, use the ``no-rocblas`` option. 
 
 .. csv-table::
    :header: "Command","Description"
@@ -151,6 +129,7 @@ the library, dependencies, and clients are listed in the table below.
    "``./install.sh -ic``", "Build the library and client, then build and install the rocSPARSE package in ``opt/rocm/rocsparse``. The script prompts you for ``sudo`` access. This installs rocSPARSE for all users."
    "``./install.sh -idc -a gfx908``", "Build the library specifically for the gfx908 architecture, build the dependencies and client, then build and install the rocSPARSE package in ``/opt/rocm/rocsparse``. The script prompts you for ``sudo`` access. This installs rocSPARSE for all users."
    "``./install.sh -ic -a gfx908``", "Build the library specifically for the gfx908 architecture, build the client, then build and install the rocSPARSE package in ``opt/rocm/rocsparse``. The script prompts you for ``sudo`` access. This installs rocSPARSE for all users."
+   "``./install.sh -o``", "Build the client executables using an already installed version of the library."
 
 Building rocSPARSE using individual make commands
 -------------------------------------------------
@@ -230,3 +209,29 @@ after successfully compiling the library with the clients.
 
       # Execute rocSPARSE example
       ./example_csrmv 1000
+
+For more comprehensive testing, you can run the entire unit test suite using the command:
+
+.. code-block:: shell
+
+      # Navigate to clients binary directory
+      cd build/release/clients/staging
+
+      # Execute rocSPARSE example
+      ./rocsparse-test
+
+For more focused testing, you can run a specific test by running the following command:
+
+.. code-block:: shell
+
+      # Navigate to clients binary directory
+      cd build/release/clients/staging
+
+      # Execute rocSPARSE example
+      ./rocsparse-test --gtest_filter=TestName
+
+.. warning::
+
+   The unit test suite is a comprehensive test of the rocSPARSE library and takes multiple hours to finish. Consider running 
+   more focused tests for quicker feedback.
+

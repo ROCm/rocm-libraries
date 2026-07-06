@@ -43,4 +43,31 @@ typedef MLO_POOLING_INDEX_TYPE index_t;
 #define MLO_POOLING_OP_ID 0
 #endif
 
+__device__ constexpr _Float16 poolingMax(_Float16 a, _Float16 b) { return __builtin_fmaxf16(a, b); }
+
+__device__ constexpr float poolingMax(float a, float b) { return fmaxf(a, b); }
+
+#if MIOPEN_USE_BFP16
+#include "bfloat16_dev.hpp"
+__device__ inline ushort poolingMax(ushort a, ushort b)
+{
+    return float_to_bfloat16(fmaxf(bfloat16_to_float(a), bfloat16_to_float(b)));
+}
+#endif
+
+__device__ float approxRcp(float x)
+{
+    // By default, the compiler is convervative about emitting v_rcp_f32.
+    // This is because:
+    // 1. The inputs are required to be normalized. This should be the
+    //    case for most float operations that result from other float
+    //    operations.
+    // 2. The accuracy is 1 ULP. This is fine for OpenCL, where the
+    //    required accuracy is only 2.5 ULP, but not for HIP.
+    // The performance difference between v_rcp_f32 and actual division
+    // is quite significant, hence this function for cases where 1 ULP
+    // is close enough.
+    return __builtin_amdgcn_rcpf(x);
+}
+
 #endif // GUARD_POOLING_FUNCTIONS_H

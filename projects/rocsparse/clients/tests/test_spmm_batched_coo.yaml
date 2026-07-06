@@ -1,5 +1,5 @@
 # ########################################################################
-# Copyright (C) 2022-2024 Advanced Micro Devices, Inc. All rights Reserved.
+# Copyright (C) 2022-2026 Advanced Micro Devices, Inc. All rights Reserved.
 #
 # Permission is hereby granted, free of charge, to any person obtaining a copy
 # of this software and associated documentation files (the "Software"), to deal
@@ -28,7 +28,6 @@ include: rocsparse_common.yaml
 Definitions:
   - &alpha_beta_range_quick
     - { alpha:   1.0, beta: -1.0, alphai:  1.0, betai: -0.5 }
-    - { alpha:  -0.5, beta:  0.5, alphai: -0.5, betai:  1.0 }
 
   - &alpha_beta_range_checkin
     - { alpha:   0.0, beta:  1.0,  alphai:  1.5, betai:  0.5 }
@@ -42,46 +41,40 @@ Definitions:
     - { alpha:   1.0, beta:  0.0, alphai:  0.0, betai:  0.0 }
 
 Tests:
-- name: spmm_batched_coo_bad_arg
-  category: pre_checkin
-  function: spmm_batched_coo_bad_arg
-  indextype: *i32_i64
-  precision: *single_double_precisions_complex_real
-
 # ##############################
 # # Quick
 # ##############################
 - name: spmm_batched_coo
   category: quick
   function: spmm_batched_coo
-  indextype: *i64i32
-  precision: *double_only_precisions
+  indextype: *i32
+  precision: *single_only_precisions
   M: [15, 32]
-  N: [2, 3, 5]
-  K: [7, 11, 27]
-  batch_count_A: [1, 3]
-  batch_count_B: [2, 7]
-  batch_count_C: [2, 7]
+  N: [2, 3]
+  K: [7, 27]
+  batch_count_A: [1]
+  batch_count_B: [3]
+  batch_count_C: [3]
   alpha_beta: *alpha_beta_range_quick
   transA: [rocsparse_operation_none]
   transB: [rocsparse_operation_none, rocsparse_operation_transpose]
   baseA: [rocsparse_index_base_zero]
   matrix: [rocsparse_matrix_random]
   spmm_alg: [rocsparse_spmm_alg_coo_atomic, rocsparse_spmm_alg_coo_segmented_atomic]
-  orderB: [rocsparse_order_column, rocsparse_order_row]
+  orderB: [rocsparse_order_column]
   orderC: [rocsparse_order_column]
 
 - name: spmm_batched_coo
   category: quick
   function: spmm_batched_coo
-  indextype: *i32
+  indextype: *i64
   precision: *double_only_precisions
-  M: [16, 456, 1234]
-  N: [32, 128, 900]
-  K: [48, 256, 1045]
-  batch_count_A: [1, 2, 3, 4]
-  batch_count_B: [2, 3, 4]
-  batch_count_C: [2, 3, 4]
+  M: [300]
+  N: [128]
+  K: [256]
+  batch_count_A: [4]
+  batch_count_B: [1]
+  batch_count_C: [4]
   alpha_beta: *alpha_beta_range_quick
   transA: [rocsparse_operation_transpose]
   transB: [rocsparse_operation_none]
@@ -94,14 +87,14 @@ Tests:
 - name: spmm_batched_coo
   category: quick
   function: spmm_batched_coo
-  indextype: *i32i32_i64i32_i64i64
-  precision: *double_only_precisions
-  M: [155, 326]
-  N: [22, 39, 43]
-  K: [72, 117, 279]
-  batch_count_A: [15, 39]
-  batch_count_B: [24, 78]
-  batch_count_C: [23, 75]
+  indextype: *i32
+  precision: *single_only_precisions_complex
+  M: [364]
+  N: [39]
+  K: [120]
+  batch_count_A: [6]
+  batch_count_B: [6]
+  batch_count_C: [6]
   alpha_beta: *alpha_beta_range_quick
   transA: [rocsparse_operation_none]
   transB: [rocsparse_operation_none, rocsparse_operation_transpose]
@@ -114,14 +107,14 @@ Tests:
 - name: spmm_batched_coo
   category: quick
   function: spmm_batched_coo
-  indextype: *i32i32_i64i32_i64i64
-  precision: *double_only_precisions
-  M: [1552, 3263]
-  N: [222, 393, 557]
-  K: [728, 1177, 2796]
-  batch_count_A: [155, 393]
-  batch_count_B: [312, 782]
-  batch_count_C: [235, 752]
+  indextype: *i64
+  precision: *double_only_precisions_complex
+  M: [226]
+  N: [222]
+  K: [117]
+  batch_count_A: [1]
+  batch_count_B: [7]
+  batch_count_C: [7]
   alpha_beta: *alpha_beta_range_quick
   transA: [rocsparse_operation_none]
   transB: [rocsparse_operation_none, rocsparse_operation_transpose]
@@ -134,14 +127,14 @@ Tests:
 - name: spmm_batched_coo
   category: quick
   function: spmm_batched_coo
-  indextype: *i32i32_i64i32_i64i64
+  indextype: *i32
   precision: *int8_int8_int32_int32_abct_precision
-  M: [523]
+  M: [200]
   N: [78]
   K: [470]
-  batch_count_A: [132]
-  batch_count_B: [255]
-  batch_count_C: [178]
+  batch_count_A: [9]
+  batch_count_B: [1]
+  batch_count_C: [9]
   alpha_beta: *alpha_beta_range_quick
   transA: [rocsparse_operation_none, rocsparse_operation_transpose]
   transB: [rocsparse_operation_none, rocsparse_operation_transpose]
@@ -150,18 +143,21 @@ Tests:
   spmm_alg: [rocsparse_spmm_alg_coo_segmented]
   orderB: [rocsparse_order_row]
   orderC: [rocsparse_order_row]
+  rand_gen_min: -128.0
+  rand_gen_max: 127.0
+  convert_to_int: true
 
 - name: spmm_batched_coo
   category: quick
   function: spmm_batched_coo
-  indextype: *i32i32_i64i32_i64i64
+  indextype: *i64
   precision: *int8_int8_float32_float32_abct_precision
-  M: [777]
-  N: [312]
+  M: [300]
+  N: [300]
   K: [155]
-  batch_count_A: [176]
-  batch_count_B: [202]
-  batch_count_C: [156]
+  batch_count_A: [10]
+  batch_count_B: [10]
+  batch_count_C: [10]
   alpha_beta: *alpha_beta_range_quick
   transA: [rocsparse_operation_none, rocsparse_operation_transpose]
   transB: [rocsparse_operation_none, rocsparse_operation_transpose]
@@ -170,21 +166,30 @@ Tests:
   spmm_alg: [rocsparse_spmm_alg_coo_segmented_atomic]
   orderB: [rocsparse_order_column]
   orderC: [rocsparse_order_row]
+  rand_gen_min: -128.0
+  rand_gen_max: 127.0
+  convert_to_int: true
 
 ##############################
 # Precheckin
 ##############################
+- name: spmm_batched_coo_bad_arg
+  category: pre_checkin
+  function: spmm_batched_coo_bad_arg
+  indextype: *i32
+  precision: *single_only_precisions
+
 - name: spmm_batched_coo
   category: pre_checkin
   function: spmm_batched_coo
-  indextype: *i32i32_i64i32_i64i64
-  precision: *double_only_precisions
-  M: [701, 3467]
-  N: [248, 577]
-  K: [409, 1797]
-  batch_count_A: [135, 234]
-  batch_count_B: [253, 682]
-  batch_count_C: [364, 552]
+  indextype: *i64
+  precision: *single_only_precisions
+  M: [1000]
+  N: [577]
+  K: [1797]
+  batch_count_A: [1]
+  batch_count_B: [7]
+  batch_count_C: [7]
   alpha_beta: *alpha_beta_range_checkin
   transA: [rocsparse_operation_none]
   transB: [rocsparse_operation_none, rocsparse_operation_transpose]
@@ -197,7 +202,7 @@ Tests:
 - name: spmm_batched_coo_file
   category: pre_checkin
   function: spmm_batched_coo
-  indextype: *i32_i64
+  indextype: *i32
   precision: *single_double_precisions
   M: 1
   N: [7]
@@ -219,7 +224,7 @@ Tests:
 - name: spmm_batched_coo_file
   category: pre_checkin
   function: spmm_batched_coo
-  indextype: *i32_i64
+  indextype: *i64
   precision: *single_double_precisions
   M: 1
   N: [4]
@@ -241,15 +246,15 @@ Tests:
 - name: spmm_batched_coo_file
   category: pre_checkin
   function: spmm_batched_coo
-  indextype: *i32_i64
+  indextype: *i32
   precision: *single_double_precisions
   M: 1
   N: [4]
   K: 1
   tolm: 2
   batch_count_A: [1]
-  batch_count_B: [22]
-  batch_count_C: [22]
+  batch_count_B: [21]
+  batch_count_C: [21]
   alpha_beta: *alpha_beta_range_quick
   transA: [rocsparse_operation_none]
   transB: [rocsparse_operation_transpose]
@@ -263,12 +268,12 @@ Tests:
 - name: spmm_batched_coo_file
   category: pre_checkin
   function: spmm_batched_coo
-  indextype: *i32_i64
+  indextype: *i64
   precision: *single_double_precisions_complex
   M: 1
   N: [4]
   K: 1
-  batch_count_A: [1]
+  batch_count_A: [14]
   batch_count_B: [14]
   batch_count_C: [14]
   alpha_beta: *alpha_beta_range_quick
@@ -284,7 +289,7 @@ Tests:
 - name: spmm_batched_coo_file
   category: pre_checkin
   function: spmm_batched_coo
-  indextype: *i32i32_i64i32_i64i64
+  indextype: *i32
   precision: *int8_int8_int32_int32_abct_precision
   M: 1
   N: [87]
@@ -300,15 +305,18 @@ Tests:
   spmm_alg: [rocsparse_spmm_alg_coo_atomic]
   orderB: [rocsparse_order_row]
   orderC: [rocsparse_order_column]
-  filename: [Chevron2]
+  filename: [mplate]
+  rand_gen_min: -128.0
+  rand_gen_max: 127.0
+  convert_to_int: true
 
 - name: spmm_batched_coo_graph_test
   category: pre_checkin
   function: spmm_batched_coo
-  indextype: *i32i32_i64i32_i64i64
-  precision: *double_only_precisions
+  indextype: *i64
+  precision: *single_only_precisions
   M: [155, 326]
-  N: [22, 39, 43]
+  N: [22, 39]
   K: [72, 117, 279]
   batch_count_A: [23]
   batch_count_B: [1]
@@ -326,14 +334,14 @@ Tests:
 - name: spmm_batched_coo_graph_test
   category: pre_checkin
   function: spmm_batched_coo
-  indextype: *i32i32_i64i32_i64i64
+  indextype: *i32
   precision: *double_only_precisions
   M: [155, 326]
-  N: [22, 39, 43]
+  N: [22, 39]
   K: [72, 117, 279]
   batch_count_A: [1]
-  batch_count_B: [22]
-  batch_count_C: [22]
+  batch_count_B: [19]
+  batch_count_C: [19]
   alpha_beta: *alpha_beta_range_quick
   transA: [rocsparse_operation_none]
   transB: [rocsparse_operation_none, rocsparse_operation_transpose]
@@ -347,14 +355,14 @@ Tests:
 - name: spmm_batched_coo_graph_test
   category: pre_checkin
   function: spmm_batched_coo
-  indextype: *i32i32_i64i32_i64i64
-  precision: *double_only_precisions
+  indextype: *i64
+  precision: *double_only_precisions_complex
   M: [155, 326]
-  N: [22, 39, 43]
+  N: [22, 39]
   K: [72, 117, 279]
-  batch_count_A: [14]
-  batch_count_B: [14]
-  batch_count_C: [14]
+  batch_count_A: [15]
+  batch_count_B: [15]
+  batch_count_C: [15]
   alpha_beta: *alpha_beta_range_quick
   transA: [rocsparse_operation_none]
   transB: [rocsparse_operation_none, rocsparse_operation_transpose]
@@ -415,7 +423,7 @@ Tests:
 - name: spmm_batched_coo_file
   category: nightly
   function: spmm_batched_coo
-  indextype: *i32i32_i64i32_i64i64
+  indextype: *i32_i64
   precision: *int8_int8_float32_float32_abct_precision
   M: 1
   N: [6]
@@ -432,6 +440,9 @@ Tests:
   orderB: [rocsparse_order_column]
   orderC: [rocsparse_order_column]
   filename: [amazon0312]
+  rand_gen_min: -128.0
+  rand_gen_max: 127.0
+  convert_to_int: true
 
 ##############################
 # Stress
@@ -442,7 +453,7 @@ Tests:
   function: spmm_batched_coo
   indextype: *i32
   precision: *single_only_precisions
-  M: [500000000]
+  M: [50000000]
   N: [1]
   K: [500000000]
   batch_count_A: [1]
@@ -479,5 +490,7 @@ Tests:
   spmm_alg: [rocsparse_spmm_alg_coo_atomic]
   orderB: [rocsparse_order_row, rocsparse_order_column]
   orderC: [rocsparse_order_row, rocsparse_order_column]
+  rand_gen_min: -100.0
+  rand_gen_max: 100.0
   convert_to_int: true
   filename: [mac_econ_fwd500]

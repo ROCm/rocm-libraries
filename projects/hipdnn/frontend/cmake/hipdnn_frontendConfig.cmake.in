@@ -1,0 +1,31 @@
+# Copyright © Advanced Micro Devices, Inc., or its affiliates.
+# SPDX-License-Identifier:  MIT
+
+@PACKAGE_INIT@
+
+include(CMakeFindDependencyMacro)
+find_dependency(hipdnn_data_sdk @HIPDNN_FRONTEND_DATA_SDK_MIN_VERSION@ CONFIG REQUIRED)
+find_dependency(hipdnn_backend @HIPDNN_FRONTEND_BACKEND_MIN_VERSION@ CONFIG REQUIRED)
+
+set(HIPDNN_ENABLE_SDPA @HIPDNN_ENABLE_SDPA@)
+
+# Frontend headers include <nlohmann/json.hpp> directly when JSON support is enabled.
+# This reflects how hipDNN was built; not consumer-overridable, since the imported
+# target's compile definitions are already baked in.
+set(HIPDNN_FRONTEND_SKIP_JSON_LIB @HIPDNN_FRONTEND_SKIP_JSON_LIB@)
+if(NOT HIPDNN_FRONTEND_SKIP_JSON_LIB)
+    find_dependency(nlohmann_json REQUIRED)
+endif()
+
+include("${CMAKE_CURRENT_LIST_DIR}/hipdnn_frontendTargets.cmake")
+
+if(NOT HIPDNN_FRONTEND_SKIP_JSON_LIB AND TARGET nlohmann_json::nlohmann_json)
+    get_target_property(_hipdnn_nlohmann_includes nlohmann_json::nlohmann_json INTERFACE_INCLUDE_DIRECTORIES)
+    if(_hipdnn_nlohmann_includes)
+        get_property(_hipdnn_existing_includes TARGET hipdnn_frontend PROPERTY INTERFACE_INCLUDE_DIRECTORIES)
+        list(APPEND _hipdnn_existing_includes ${_hipdnn_nlohmann_includes})
+        set_property(TARGET hipdnn_frontend PROPERTY INTERFACE_INCLUDE_DIRECTORIES ${_hipdnn_existing_includes})
+    endif()
+endif()
+
+check_required_components(hipdnn_frontend)

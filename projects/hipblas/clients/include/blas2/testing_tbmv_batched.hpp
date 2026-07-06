@@ -208,7 +208,7 @@ void testing_tbmv_batched(const Arguments& arg)
         return;
     }
 
-    double hipblas_error;
+    double hipblas_error{0};
 
     // Naming: `h` is in CPU (host) memory(eg hAb), `d` is in GPU (device) memory (eg dAb).
     // Allocate host memory
@@ -285,7 +285,7 @@ void testing_tbmv_batched(const Arguments& arg)
 
     if(arg.timing)
     {
-        double gpu_time_used;
+        double gpu_time_used{0};
         CHECK_HIP_ERROR(dx.transfer_from(hx));
 
         hipStream_t stream;

@@ -1,5 +1,5 @@
+// Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
 // SPDX-License-Identifier: MIT
-// Copyright (c) 2018-2024, Advanced Micro Devices, Inc. All rights reserved.
 
 #pragma once
 
@@ -18,7 +18,19 @@
 #include "ck/tensor_operation/gpu/device/matrix_padder.hpp"
 #include "ck/host_utility/device_prop.hpp"
 #include "ck/host_utility/kernel_launch.hpp"
+#include "ck/tensor_operation/gpu/device/impl/split_k_arg.hpp"
+#include "ck/tensor_operation/gpu/device/impl/split_k_utils.hpp"
 
+#ifdef CK_EXPERIMENTAL_BUILDER
+#include "ck_tile/builder/reflect/description.hpp"
+#include "ck_tile/builder/reflect/instance_traits_device_grouped_conv_bwd_weight_dl.hpp"
+#endif
+#include "ck/tensor_operation/gpu/device/tensor_size_check.hpp"
+
+#if __clang_major__ >= 23
+#pragma clang diagnostic push
+#pragma clang diagnostic ignored "-Wlifetime-safety-intra-tu-suggestions"
+#endif
 namespace ck {
 namespace tensor_operation {
 namespace device {
@@ -49,7 +61,7 @@ __launch_bounds__(CK_MAX_THREAD_PER_BLOCK, CK_MIN_BLOCK_PER_CU)
         const ComputePtrOffsetOfBatch compute_ptr_offset_of_batch)
 {
 #if(defined(__gfx906__) || defined(__gfx103__) || defined(__gfx90a__) || defined(__gfx908__) || \
-    defined(__gfx94__) || defined(__gfx11__) || defined(__gfx12__))
+    defined(__gfx94__) || defined(__gfx101__) || defined(__gfx11__) || defined(__gfx12__))
     const index_t num_blocks_per_batch =
         __builtin_amdgcn_readfirstlane(get_grid_size() / batch_count);
     const index_t g_idx = __builtin_amdgcn_readfirstlane(get_block_1d_id() / num_blocks_per_batch);
@@ -807,7 +819,7 @@ struct DeviceGroupedConvBwdWeight_Dl : public DeviceGroupedConvBwdWeight<NDimSpa
     using Block2CTileMap =
         decltype(GridwiseGemm::MakeCBlockClusterAdaptor(CGridDesc_M_N{}, 1, 1, 1));
 
-    struct Argument : public BaseArgument
+    struct Argument : public BaseArgument, public ArgumentSplitK
     {
         Argument(const InDataType* p_in_grid,
                  WeiDataType* p_wei_grid,
@@ -825,7 +837,8 @@ struct DeviceGroupedConvBwdWeight_Dl : public DeviceGroupedConvBwdWeight<NDimSpa
                  InElementwiseOperation in_element_op,
                  WeiElementwiseOperation wei_element_op,
                  OutElementwiseOperation out_element_op,
-                 ck::index_t split_k)
+                 ck::index_t split_k,
+                 bool stride_overflow_in = false)
             : p_a_grid_{p_out_grid},
               p_b_grid_{p_in_grid},
               p_c_grid_{p_wei_grid},
@@ -844,9 +857,12 @@ struct DeviceGroupedConvBwdWeight_Dl : public DeviceGroupedConvBwdWeight<NDimSpa
               conv_filter_strides_{conv_filter_strides},
               conv_filter_dilations_{conv_filter_dilations},
               input_left_pads_{input_left_pads},
-              input_right_pads_{input_right_pads},
-              k_batch_{split_k}
+              input_right_pads_{input_right_pads}
         {
+            stride_overflow = stride_overflow_in;
+            k_batch_        = split_k;
+            k_batch_        = clamp_gemm_k_batch(k_batch_);
+
             const auto descs =
                 DeviceOp::MakeABCGridDescriptor_A_K0_M_K1_B_K0_N_K1_C_M_N<NDimSpatial>(
                     a_g_n_c_wis_lengths, // input
@@ -915,7 +931,7 @@ struct DeviceGroupedConvBwdWeight_Dl : public DeviceGroupedConvBwdWeight<NDimSpa
         const std::array<ck::index_t, NDimSpatial>& conv_filter_dilations_;
         const std::array<ck::index_t, NDimSpatial>& input_left_pads_;
         const std::array<ck::index_t, NDimSpatial>& input_right_pads_;
-        index_t k_batch_;
+        bool stride_overflow;
     };
 
     // Invoker
@@ -1032,6 +1048,8 @@ struct DeviceGroupedConvBwdWeight_Dl : public DeviceGroupedConvBwdWeight<NDimSpa
 
     static bool IsSupportedArgument(const Argument& arg)
     {
+        if(arg.stride_overflow)
+            return false;
 
         // DL version only supports split_k equal to 1
         if(arg.k_batch_ != 1)
@@ -1163,6 +1181,70 @@ struct DeviceGroupedConvBwdWeight_Dl : public DeviceGroupedConvBwdWeight<NDimSpa
                         split_k};
     }
 
+    static auto MakeArgument(const InDataType* p_in_grid,
+                             WeiDataType* p_wei_grid,
+                             const OutDataType* p_out_grid,
+                             const std::array<long_index_t, NDimSpatial + 3>& a_g_n_c_wis_lengths,
+                             const std::array<long_index_t, NDimSpatial + 3>& a_g_n_c_wis_strides,
+                             const std::array<long_index_t, NDimSpatial + 3>& b_g_k_c_xs_lengths,
+                             const std::array<long_index_t, NDimSpatial + 3>& b_g_k_c_xs_strides,
+                             const std::array<long_index_t, NDimSpatial + 3>& e_g_n_k_wos_lengths,
+                             const std::array<long_index_t, NDimSpatial + 3>& e_g_n_k_wos_strides,
+                             const std::array<long_index_t, NDimSpatial>& conv_filter_strides,
+                             const std::array<long_index_t, NDimSpatial>& conv_filter_dilations,
+                             const std::array<long_index_t, NDimSpatial>& input_left_pads,
+                             const std::array<long_index_t, NDimSpatial>& input_right_pads,
+                             InElementwiseOperation in_element_op,
+                             WeiElementwiseOperation wei_element_op,
+                             OutElementwiseOperation out_element_op,
+                             ck::index_t split_k)
+    {
+        const bool stride_ovf = tensor_exceeds_2gb<ADataType>(a_g_n_c_wis_lengths) ||
+                                tensor_exceeds_2gb<BDataType>(b_g_k_c_xs_lengths) ||
+                                tensor_exceeds_2gb<CDataType>(e_g_n_k_wos_lengths);
+
+        std::array<index_t, NDimSpatial + 3> a_g_n_c_wis_lengths_i32;
+        std::array<index_t, NDimSpatial + 3> a_g_n_c_wis_strides_i32;
+        std::array<index_t, NDimSpatial + 3> b_g_k_c_xs_lengths_i32;
+        std::array<index_t, NDimSpatial + 3> b_g_k_c_xs_strides_i32;
+        std::array<index_t, NDimSpatial + 3> e_g_n_k_wos_lengths_i32;
+        std::array<index_t, NDimSpatial + 3> e_g_n_k_wos_strides_i32;
+        std::array<index_t, NDimSpatial> conv_filter_strides_i32;
+        std::array<index_t, NDimSpatial> conv_filter_dilations_i32;
+        std::array<index_t, NDimSpatial> input_left_pads_i32;
+        std::array<index_t, NDimSpatial> input_right_pads_i32;
+
+        array_convert(a_g_n_c_wis_lengths_i32, a_g_n_c_wis_lengths);
+        array_convert(a_g_n_c_wis_strides_i32, a_g_n_c_wis_strides);
+        array_convert(b_g_k_c_xs_lengths_i32, b_g_k_c_xs_lengths);
+        array_convert(b_g_k_c_xs_strides_i32, b_g_k_c_xs_strides);
+        array_convert(e_g_n_k_wos_lengths_i32, e_g_n_k_wos_lengths);
+        array_convert(e_g_n_k_wos_strides_i32, e_g_n_k_wos_strides);
+        array_convert(conv_filter_strides_i32, conv_filter_strides);
+        array_convert(conv_filter_dilations_i32, conv_filter_dilations);
+        array_convert(input_left_pads_i32, input_left_pads);
+        array_convert(input_right_pads_i32, input_right_pads);
+
+        return Argument{p_in_grid,
+                        p_wei_grid,
+                        p_out_grid,
+                        a_g_n_c_wis_lengths_i32,
+                        a_g_n_c_wis_strides_i32,
+                        b_g_k_c_xs_lengths_i32,
+                        b_g_k_c_xs_strides_i32,
+                        e_g_n_k_wos_lengths_i32,
+                        e_g_n_k_wos_strides_i32,
+                        conv_filter_strides_i32,
+                        conv_filter_dilations_i32,
+                        input_left_pads_i32,
+                        input_right_pads_i32,
+                        in_element_op,
+                        wei_element_op,
+                        out_element_op,
+                        split_k,
+                        stride_ovf};
+    }
+
     static auto MakeInvoker() { return Invoker{}; }
 
     std::unique_ptr<BaseArgument>
@@ -1203,6 +1285,71 @@ struct DeviceGroupedConvBwdWeight_Dl : public DeviceGroupedConvBwdWeight<NDimSpa
                                           split_k);
     }
 
+    std::unique_ptr<BaseArgument>
+    MakeArgumentPointer(const void* p_in_grid,
+                        void* p_wei_grid,
+                        const void* p_out_grid,
+                        const std::array<long_index_t, NDimSpatial + 3>& a_g_n_c_wis_lengths,
+                        const std::array<long_index_t, NDimSpatial + 3>& a_g_n_c_wis_strides,
+                        const std::array<long_index_t, NDimSpatial + 3>& b_g_k_c_xs_lengths,
+                        const std::array<long_index_t, NDimSpatial + 3>& b_g_k_c_xs_strides,
+                        const std::array<long_index_t, NDimSpatial + 3>& e_g_n_k_wos_lengths,
+                        const std::array<long_index_t, NDimSpatial + 3>& e_g_n_k_wos_strides,
+                        const std::array<long_index_t, NDimSpatial>& conv_filter_strides,
+                        const std::array<long_index_t, NDimSpatial>& conv_filter_dilations,
+                        const std::array<long_index_t, NDimSpatial>& input_left_pads,
+                        const std::array<long_index_t, NDimSpatial>& input_right_pads,
+                        InElementwiseOperation in_element_op,
+                        WeiElementwiseOperation wei_element_op,
+                        OutElementwiseOperation out_element_op,
+                        ck::index_t split_k) override
+    {
+        const bool stride_ovf = tensor_exceeds_2gb<ADataType>(a_g_n_c_wis_lengths) ||
+                                tensor_exceeds_2gb<BDataType>(b_g_k_c_xs_lengths) ||
+                                tensor_exceeds_2gb<CDataType>(e_g_n_k_wos_lengths);
+
+        std::array<index_t, NDimSpatial + 3> a_g_n_c_wis_lengths_i32;
+        std::array<index_t, NDimSpatial + 3> a_g_n_c_wis_strides_i32;
+        std::array<index_t, NDimSpatial + 3> b_g_k_c_xs_lengths_i32;
+        std::array<index_t, NDimSpatial + 3> b_g_k_c_xs_strides_i32;
+        std::array<index_t, NDimSpatial + 3> e_g_n_k_wos_lengths_i32;
+        std::array<index_t, NDimSpatial + 3> e_g_n_k_wos_strides_i32;
+        std::array<index_t, NDimSpatial> conv_filter_strides_i32;
+        std::array<index_t, NDimSpatial> conv_filter_dilations_i32;
+        std::array<index_t, NDimSpatial> input_left_pads_i32;
+        std::array<index_t, NDimSpatial> input_right_pads_i32;
+
+        array_convert(a_g_n_c_wis_lengths_i32, a_g_n_c_wis_lengths);
+        array_convert(a_g_n_c_wis_strides_i32, a_g_n_c_wis_strides);
+        array_convert(b_g_k_c_xs_lengths_i32, b_g_k_c_xs_lengths);
+        array_convert(b_g_k_c_xs_strides_i32, b_g_k_c_xs_strides);
+        array_convert(e_g_n_k_wos_lengths_i32, e_g_n_k_wos_lengths);
+        array_convert(e_g_n_k_wos_strides_i32, e_g_n_k_wos_strides);
+        array_convert(conv_filter_strides_i32, conv_filter_strides);
+        array_convert(conv_filter_dilations_i32, conv_filter_dilations);
+        array_convert(input_left_pads_i32, input_left_pads);
+        array_convert(input_right_pads_i32, input_right_pads);
+
+        return std::make_unique<Argument>(static_cast<const InDataType*>(p_in_grid),
+                                          static_cast<WeiDataType*>(p_wei_grid),
+                                          static_cast<const OutDataType*>(p_out_grid),
+                                          a_g_n_c_wis_lengths_i32,
+                                          a_g_n_c_wis_strides_i32,
+                                          b_g_k_c_xs_lengths_i32,
+                                          b_g_k_c_xs_strides_i32,
+                                          e_g_n_k_wos_lengths_i32,
+                                          e_g_n_k_wos_strides_i32,
+                                          conv_filter_strides_i32,
+                                          conv_filter_dilations_i32,
+                                          input_left_pads_i32,
+                                          input_right_pads_i32,
+                                          in_element_op,
+                                          wei_element_op,
+                                          out_element_op,
+                                          split_k,
+                                          stride_ovf);
+    }
+
     std::unique_ptr<BaseInvoker> MakeInvokerPointer() override
     {
         return std::make_unique<Invoker>(Invoker{});
@@ -1226,8 +1373,29 @@ struct DeviceGroupedConvBwdWeight_Dl : public DeviceGroupedConvBwdWeight<NDimSpa
 
         return str.str();
     }
+
+#ifdef CK_EXPERIMENTAL_BUILDER
+    std::string GetInstanceString() const override
+    {
+        static_assert(ck_tile::reflect::HasInstanceTraits<DeviceOp>,
+                      "Specialization of instance_traits not found. Please check that a "
+                      "specialization exists in file "
+                      "ck_tile/builder/reflect/"
+                      "instance_traits_device_grouped_conv_bwd_weight_dl.hpp "
+                      "for the given template parameters.");
+        return ck_tile::reflect::instance_string<DeviceOp>();
+    }
+
+    std::unique_ptr<ck_tile::reflect::Description> describe() const override
+    {
+        return std::make_unique<ck_tile::reflect::InstanceStringDescription>(GetInstanceString());
+    }
+#endif
 };
 
 } // namespace device
 } // namespace tensor_operation
 } // namespace ck
+#if __clang_major__ >= 23
+#pragma clang diagnostic pop
+#endif

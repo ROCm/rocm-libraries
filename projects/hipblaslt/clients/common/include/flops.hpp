@@ -39,6 +39,20 @@ constexpr double gemm_gflop_count(int64_t m, int64_t n, int64_t k)
     return (2.0 * m * n * k) / 1e9;
 }
 
+template <>
+constexpr double gemm_gflop_count<std::complex<float>>(int64_t m, int64_t n, int64_t k)
+{
+    if(k == 0)
+        k = 1;
+    return (8.0 * m * n * k) / 1e9;
+}
+
+template <>
+constexpr double gemm_gflop_count<std::complex<double>>(int64_t m, int64_t n, int64_t k)
+{
+    return gemm_gflop_count<std::complex<float>>(m, n, k);
+}
+
 constexpr double gemm_gflop_count(int64_t m, int64_t n, int64_t k, hipDataType type)
 {
     switch(type)
@@ -51,9 +65,37 @@ constexpr double gemm_gflop_count(int64_t m, int64_t n, int64_t k, hipDataType t
         return gemm_gflop_count<hipblasLtHalf>(m, n, k);
     case HIP_R_32I:
         return gemm_gflop_count<int32_t>(m, n, k);
+    case HIP_C_32F:
+        return gemm_gflop_count<std::complex<float>>(m, n, k);
+    case HIP_C_64F:
+        return gemm_gflop_count<std::complex<double>>(m, n, k);    
     default:
         hipblaslt_cerr << "Error type in gemm_gflop_count()" << std::endl;
         return gemm_gflop_count<float>(m, n, k);
+    }
+}
+
+template <typename T>
+constexpr double sigmoid_gflop_count(int64_t m, int64_t n)
+{
+    return (4 * m * n) / 1e9;
+}
+
+constexpr double sigmoid_gflop_count(int64_t m, int64_t n, hipDataType type)
+{
+    switch(type)
+    {
+    case HIP_R_32F:
+        return sigmoid_gflop_count<float>(m, n);
+    case HIP_R_64F:
+        return sigmoid_gflop_count<double>(m, n);
+    case HIP_R_16F:
+        return sigmoid_gflop_count<hipblasLtHalf>(m, n);
+    case HIP_R_32I:
+        return sigmoid_gflop_count<int32_t>(m, n);
+    default:
+        hipblaslt_cerr << "Error type in sigmoid_gflop_count()" << std::endl;
+        return sigmoid_gflop_count<float>(m, n);
     }
 }
 

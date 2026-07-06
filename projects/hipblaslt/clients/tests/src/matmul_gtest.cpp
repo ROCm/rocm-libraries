@@ -127,15 +127,19 @@ namespace
                     name << "_SA";
                 else if(arg.scaleA == hipblaslt_scaling_format::Vector)
                     name << "_SAV";
-                else if(arg.scaleA == hipblaslt_scaling_format::Block)
-                    name << "_SAMX";
+                else if(arg.scaleA == hipblaslt_scaling_format::Block_32_UE8M0)
+                    name << "_SAMX_32_UE8M0";
+                else if(arg.scaleA == hipblaslt_scaling_format::Block_32_UE8M0_32_8_EXT)
+                    name << "_SAMX_32_UE8M0_32_8";
 
                 if(arg.scaleB == hipblaslt_scaling_format::Scalar)
                     name << "_SB";
                 else if(arg.scaleB == hipblaslt_scaling_format::Vector)
                     name << "_SBV";
-                else if(arg.scaleB == hipblaslt_scaling_format::Block)
-                    name << "_SBMX";
+                else if(arg.scaleB == hipblaslt_scaling_format::Block_32_UE8M0)
+                    name << "_SBMX_32_UE8M0";
+                else if(arg.scaleB == hipblaslt_scaling_format::Block_32_UE8M0_32_8_EXT)
+                    name << "_SBMX_32_UE8M0_32_8";
 
                 if(arg.scaleC)
                     name << "_SC";
@@ -186,6 +190,7 @@ namespace
 
     TEST_P(matmul_test, matmul)
     {
+        SKIP_IF_KNOWN_BUG_FOR_PLATFORM();
         RUN_TEST_ON_THREADS_STREAMS(matmul_testing{}(GetParam()));
     }
     INSTANTIATE_TEST_CATEGORIES(matmul_test);
@@ -224,6 +229,7 @@ namespace
 
     TEST_P(rocroller_predicate_test, unrollXYK)
     {
+        SKIP_IF_KNOWN_BUG_FOR_PLATFORM();
         // rocRoller has predicates that check the dimensions (M/N/K) must be
         // multiples of the work group sizes. This test set the K dimension
         // to not be a multiple, and thus we shall see failure.

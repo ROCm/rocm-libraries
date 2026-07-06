@@ -32,6 +32,7 @@ Definitions:
     - { M: 1, N: 256, K: 1 }
     - { M: 1, N: 257, K: 1 }
 
+  # Also used by matmul_fp16_accumulator_probe_small (initialization: fp16_accumulator_probe).
   - &small_matrix_size_range
     - { M: 8, N: 8, K: 8, lda: 8, ldb: 8, ldc: 8, ldd: 8 }
     - { M: 16, N: 16, K: 16, lda: 16, ldb: 16, ldc: 16, ldd: 16 }
@@ -56,6 +57,26 @@ Definitions:
   - &chunk_matrix_size_range
     - { M: 24000, N: 256, K: 256, lda: 24010, ldb: 256, ldc: 24000, ldd: 24000 }
     - { M: 24000, N: 256, K: 256, lda: 24000, ldb: 256, ldc: 24020, ldd: 24020 }
+
+  - &grid_limit_matrix_size_real
+    - { M: 2, N: 2097152, K:1 }
+    - { M: 64, N: 1048576, K: 1 }
+    - { M: 256, N: 1048576, K: 1 }
+    - { M: 1024, N: 524288, K: 1 }
+    - { M: 2048, N: 262144, K: 1 }
+    - { M: 3072, N: 131072, K: 1 }
+    - { M: 4096, N: 131072, K: 1 }
+
+  - &grid_limit_matrix_size_double
+    - { M: 2, N: 1048576, K:1 }
+    - { M: 3, N: 2, K: 1, lda: 4, ldb: 5, ldc: 6, ldd: 6}
+    - { M: 64, N: 1048576, K: 1 }
+    - { M: 256, N: 1048576, K: 1 }
+    - { M: 1024, N: 524288, K: 1 }
+    - { M: 2048, N: 262144, K: 1 }
+    - { M: 3072, N: 131072, K: 1 }
+    - { M: 4096, N: 131072, K: 1 }
+
 
   - &deepbench_sizes
     - { M: 192, N: 64, K: 784 }

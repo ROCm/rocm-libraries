@@ -1,6 +1,6 @@
 /*! \file */
 /* ************************************************************************
- * Copyright (C) 2018-2025 Advanced Micro Devices, Inc. All rights Reserved.
+ * Copyright (C) 2018-2026 Advanced Micro Devices, Inc. All rights Reserved.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -106,6 +106,7 @@ namespace rocsparse
               typename T>
     ROCSPARSE_KERNEL(BLOCKSIZE)
     void coomvn_atomic_loops(int64_t nnz,
+                             I       m,
                              ROCSPARSE_DEVICE_HOST_SCALAR_PARAMS(T, alpha),
                              const I* __restrict__ coo_row_ind,
                              const I* __restrict__ coo_col_ind,
@@ -119,7 +120,7 @@ namespace rocsparse
         if(alpha != 0)
         {
             rocsparse::coomvn_atomic_loops_device<BLOCKSIZE, LOOPS>(
-                nnz, alpha, coo_row_ind, coo_col_ind, coo_val, x, y, idx_base);
+                nnz, m, alpha, coo_row_ind, coo_col_ind, coo_val, x, y, idx_base);
         }
     }
 
@@ -127,6 +128,7 @@ namespace rocsparse
     ROCSPARSE_KERNEL(BLOCKSIZE)
     void coomvt_kernel(rocsparse_operation trans,
                        int64_t             nnz,
+                       I                   n,
                        ROCSPARSE_DEVICE_HOST_SCALAR_PARAMS(T, alpha),
                        const I* __restrict__ coo_row_ind,
                        const I* __restrict__ coo_col_ind,
@@ -140,7 +142,7 @@ namespace rocsparse
         if(alpha != 0)
         {
             rocsparse::coomvt_device(
-                trans, nnz, alpha, coo_row_ind, coo_col_ind, coo_val, x, y, idx_base);
+                trans, nnz, n, alpha, coo_row_ind, coo_col_ind, coo_val, x, y, idx_base);
         }
     }
 }
@@ -229,7 +231,7 @@ rocsparse_status rocsparse::coomv_analysis_template(rocsparse_handle          ha
             RETURN_IF_HIP_ERROR(rocsparse_hipMallocAsync(&max_nnz, sizeof(I), handle->stream));
             RETURN_IF_HIP_ERROR(
                 rocsparse_hipMallocAsync(&csr_row_ptr, sizeof(I) * (m + 1), handle->stream));
-            RETURN_IF_HIP_ERROR(hipMemsetAsync(max_nnz, 0, sizeof(I), handle->stream));
+            RETURN_IF_HIP_ERROR(rocsparse_hipMemsetAsync(max_nnz, 0, sizeof(I), handle->stream));
 
             RETURN_IF_ROCSPARSE_ERROR(rocsparse::coo2csr_template(
                 handle, coo_row_ind, (I)nnz, m, csr_row_ptr, descr->base));
@@ -243,12 +245,12 @@ rocsparse_status rocsparse::coomv_analysis_template(rocsparse_handle          ha
                                                csr_row_ptr,
                                                max_nnz);
 
-            RETURN_IF_HIP_ERROR(hipMemcpyAsync(&descr->max_nnz_per_row,
-                                               max_nnz,
-                                               sizeof(I),
-                                               hipMemcpyDeviceToHost,
-                                               handle->stream));
-            RETURN_IF_HIP_ERROR(hipStreamSynchronize(handle->stream));
+            RETURN_IF_HIP_ERROR(rocsparse_hipMemcpyAsync(&descr->max_nnz_per_row,
+                                                         max_nnz,
+                                                         sizeof(I),
+                                                         hipMemcpyDeviceToHost,
+                                                         handle->stream));
+            RETURN_IF_HIP_ERROR(rocsparse_hipStreamSynchronize(handle->stream));
 
             RETURN_IF_HIP_ERROR(rocsparse_hipFreeAsync(max_nnz, handle->stream));
             RETURN_IF_HIP_ERROR(rocsparse_hipFreeAsync(csr_row_ptr, handle->stream));
@@ -262,7 +264,8 @@ rocsparse_status rocsparse::coomv_analysis_template(rocsparse_handle          ha
 
             RETURN_IF_HIP_ERROR(
                 rocsparse_hipMallocAsync(&csr_row_ptr, sizeof(int64_t) * (m + 1), handle->stream));
-            RETURN_IF_HIP_ERROR(hipMemsetAsync(max_nnz, 0, sizeof(int64_t), handle->stream));
+            RETURN_IF_HIP_ERROR(
+                rocsparse_hipMemsetAsync(max_nnz, 0, sizeof(int64_t), handle->stream));
 
             RETURN_IF_ROCSPARSE_ERROR(
                 rocsparse::coo2csr_template(handle, coo_row_ind, nnz, m, csr_row_ptr, descr->base));
@@ -277,12 +280,12 @@ rocsparse_status rocsparse::coomv_analysis_template(rocsparse_handle          ha
                 csr_row_ptr,
                 max_nnz);
 
-            RETURN_IF_HIP_ERROR(hipMemcpyAsync(&descr->max_nnz_per_row,
-                                               max_nnz,
-                                               sizeof(int64_t),
-                                               hipMemcpyDeviceToHost,
-                                               handle->stream));
-            RETURN_IF_HIP_ERROR(hipStreamSynchronize(handle->stream));
+            RETURN_IF_HIP_ERROR(rocsparse_hipMemcpyAsync(&descr->max_nnz_per_row,
+                                                         max_nnz,
+                                                         sizeof(int64_t),
+                                                         hipMemcpyDeviceToHost,
+                                                         handle->stream));
+            RETURN_IF_HIP_ERROR(rocsparse_hipStreamSynchronize(handle->stream));
 
             RETURN_IF_HIP_ERROR(rocsparse_hipFreeAsync(max_nnz, handle->stream));
             RETURN_IF_HIP_ERROR(rocsparse_hipFreeAsync(csr_row_ptr, handle->stream));
@@ -341,6 +344,7 @@ namespace rocsparse
                     0,
                     stream,
                     nnz,
+                    m,
                     ROCSPARSE_DEVICE_HOST_SCALAR_ARGS(handle, alpha_device_host),
                     coo_row_ind,
                     coo_col_ind,
@@ -359,6 +363,7 @@ namespace rocsparse
                     0,
                     stream,
                     nnz,
+                    m,
                     ROCSPARSE_DEVICE_HOST_SCALAR_ARGS(handle, alpha_device_host),
                     coo_row_ind,
                     coo_col_ind,
@@ -381,6 +386,7 @@ namespace rocsparse
                 handle->stream,
                 trans,
                 nnz,
+                n,
                 ROCSPARSE_DEVICE_HOST_SCALAR_ARGS(handle, alpha_device_host),
                 coo_row_ind,
                 coo_col_ind,
@@ -490,6 +496,7 @@ namespace rocsparse
                 handle->stream,
                 trans,
                 nnz,
+                n,
                 ROCSPARSE_DEVICE_HOST_SCALAR_ARGS(handle, alpha_device_host),
                 coo_row_ind,
                 coo_col_ind,
@@ -808,8 +815,12 @@ INSTANTIATE_MIXED(float, int32_t, int8_t, int8_t, float);
 INSTANTIATE_MIXED(float, int64_t, int8_t, int8_t, float);
 INSTANTIATE_MIXED(float, int32_t, _Float16, _Float16, float);
 INSTANTIATE_MIXED(float, int64_t, _Float16, _Float16, float);
+INSTANTIATE_MIXED(float, int32_t, _Float16, _Float16, _Float16);
+INSTANTIATE_MIXED(float, int64_t, _Float16, _Float16, _Float16);
 INSTANTIATE_MIXED(float, int32_t, rocsparse_bfloat16, rocsparse_bfloat16, float);
 INSTANTIATE_MIXED(float, int64_t, rocsparse_bfloat16, rocsparse_bfloat16, float);
+INSTANTIATE_MIXED(float, int32_t, rocsparse_bfloat16, rocsparse_bfloat16, rocsparse_bfloat16);
+INSTANTIATE_MIXED(float, int64_t, rocsparse_bfloat16, rocsparse_bfloat16, rocsparse_bfloat16);
 INSTANTIATE_MIXED(
     rocsparse_float_complex, int32_t, float, rocsparse_float_complex, rocsparse_float_complex);
 INSTANTIATE_MIXED(

@@ -1,6 +1,6 @@
 /*! \file */
 /* ************************************************************************
- * Copyright (C) 2020-2025 Advanced Micro Devices, Inc. All rights Reserved.
+ * Copyright (C) 2020-2026 Advanced Micro Devices, Inc. All rights Reserved.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -31,7 +31,7 @@
 #ifndef GBYTE_HPP
 #define GBYTE_HPP
 
-#include "rocsparse.h"
+#include "rocsparse.hpp"
 
 /*
  * ===========================================================================
@@ -140,6 +140,16 @@ template <typename A, typename X, typename Y, typename I>
 constexpr double ellmv_gbyte_count(I M, I N, int64_t nnz, bool beta = false)
 {
     return (sizeof(I) * nnz + sizeof(A) * nnz + sizeof(Y) * (M + (beta ? M : 0)) + sizeof(X) * N)
+           / 1e9;
+}
+
+template <typename A, typename X, typename Y, typename I, typename J>
+constexpr double sellmv_gbyte_count(
+    J M, J N, int64_t nnz, J sell_slice_size, I sell_colval_size, bool beta = false)
+{
+    J nslices = (M - 1) / sell_slice_size + 1;
+    return (sizeof(I) * (nslices + 1) + sizeof(J) * sell_colval_size + sizeof(A) * sell_colval_size
+            + sizeof(Y) * (M + (beta ? M : 0)) + sizeof(X) * N)
            / 1e9;
 }
 
@@ -508,6 +518,16 @@ template <typename T>
 constexpr double csric0_gbyte_count(rocsparse_int M, rocsparse_int nnz)
 {
     return ((M + 1 + nnz) * sizeof(rocsparse_int) + 2.0 * nnz * sizeof(T)) / 1e9;
+}
+
+template <typename T>
+constexpr double csrildlt0_gbyte_count(rocsparse_int M, rocsparse_int nnz)
+{
+    // Same accesses as csric0 (read/write of the value array, read of the sparsity pattern),
+    // plus the write of the real diagonal D of M entries.
+    return ((M + 1 + nnz) * sizeof(rocsparse_int) + 2.0 * nnz * sizeof(T)
+            + M * sizeof(floating_data_t<T>))
+           / 1e9;
 }
 
 template <typename T>

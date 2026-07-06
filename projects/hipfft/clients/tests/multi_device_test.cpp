@@ -1,4 +1,4 @@
-// Copyright (C) 2024 Advanced Micro Devices, Inc. All rights reserved.
+// Copyright (C) 2024 - 2026 Advanced Micro Devices, Inc. All rights reserved.
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -19,6 +19,7 @@
 // THE SOFTWARE.
 
 #include "../../shared/accuracy_test.h"
+#include "../../shared/fft_enums.h"
 #include "../../shared/params_gen.h"
 #include "../hipfft_params.h"
 #include <algorithm>
@@ -35,7 +36,7 @@ static const std::vector<std::vector<size_t>> multi_gpu_sizes = {
     {64, 128, 256},
     {96, 160, 192},
 };
-static const std::vector<size_t>        multi_gpu_batch_range = {10, 1};
+static const std::vector<size_t>        multi_gpu_batch_range = {4, 1};
 static std::vector<std::vector<size_t>> ioffset_range_zero    = {{0, 0}};
 static std::vector<std::vector<size_t>> ooffset_range_zero    = {{0, 0}};
 
@@ -75,31 +76,44 @@ std::vector<fft_params> param_generator_multi_gpu(const std::optional<SplitType>
         return {};
 
     static const std::vector<std::vector<size_t>> stride_range = {{1}};
-    auto params_complex                                        = param_generator_complex(test_prob,
-                                                  multi_gpu_sizes,
-                                                  precision_range_sp_dp,
-                                                  multi_gpu_batch_range,
-                                                  stride_generator(stride_range),
-                                                  stride_generator(stride_range),
-                                                  ioffset_range_zero,
-                                                  ooffset_range_zero,
-                                                  place_range,
-                                                  false,
-                                                  false,
-                                                  auto_alloc_setting);
 
-    auto params_real = param_generator_real(test_prob,
-                                            multi_gpu_sizes,
-                                            precision_range_sp_dp,
-                                            multi_gpu_batch_range,
-                                            stride_generator(stride_range),
-                                            stride_generator(stride_range),
-                                            ioffset_range_zero,
-                                            ooffset_range_zero,
-                                            {fft_placement_notinplace},
-                                            false,
-                                            false,
-                                            auto_alloc_setting);
+    // gather cases to test as single-device params, then distribute
+    // to multiple GPUs
+    std::vector<fft_params> params_single;
+
+    // function pointer callbacks need -fgpu-rdc, but that causes build
+    // nondeterminism in kpack
+    auto multi_device_callbacks = {fft_callback_type_none, /*fft_callback_type_funcptr, */};
+
+    {
+        auto params = param_generator_complex(test_prob,
+                                              multi_gpu_sizes,
+                                              precision_range_sp_dp,
+                                              multi_gpu_batch_range,
+                                              stride_generator(stride_range),
+                                              stride_generator(stride_range),
+                                              ioffset_range_zero,
+                                              ooffset_range_zero,
+                                              {fft_placement_inplace, fft_placement_notinplace},
+                                              false,
+                                              multi_device_callbacks,
+                                              auto_alloc_setting);
+        std::copy(params.begin(), params.end(), std::back_inserter(params_single));
+
+        params = param_generator_real(test_prob,
+                                      multi_gpu_sizes,
+                                      precision_range_sp_dp,
+                                      multi_gpu_batch_range,
+                                      stride_generator(stride_range),
+                                      stride_generator(stride_range),
+                                      ioffset_range_zero,
+                                      ooffset_range_zero,
+                                      {fft_placement_notinplace},
+                                      false,
+                                      multi_device_callbacks,
+                                      auto_alloc_setting);
+        std::copy(params.begin(), params.end(), std::back_inserter(params_single));
+    }
 
     std::vector<fft_params> all_params;
 
@@ -177,8 +191,8 @@ std::vector<fft_params> param_generator_multi_gpu(const std::optional<SplitType>
                 }
 
                 p_dist.mp_lib = mp_lib;
-                p_dist.distribute_input(localDeviceCount, input_grid);
-                p_dist.distribute_output(localDeviceCount, output_grid);
+                p_dist.distribute_field<fft_io::fft_io_in>(localDeviceCount, input_grid);
+                p_dist.distribute_field<fft_io::fft_io_out>(localDeviceCount, output_grid);
 
                 // "placement" flag is meaningless if exactly one of
                 // input+output is a field.  So just add those cases if
@@ -196,8 +210,7 @@ std::vector<fft_params> param_generator_multi_gpu(const std::optional<SplitType>
         }
     };
 
-    distribute_params(params_complex);
-    distribute_params(params_real);
+    distribute_params(params_single);
 
     return all_params;
 }

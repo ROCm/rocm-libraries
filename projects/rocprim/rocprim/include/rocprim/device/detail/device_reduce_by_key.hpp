@@ -1,4 +1,4 @@
-// Copyright (c) 2017-2025 Advanced Micro Devices, Inc. All rights reserved.
+// Copyright (c) 2017-2026 Advanced Micro Devices, Inc. All rights reserved.
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -34,6 +34,7 @@
 
 #include "../../config.hpp"
 #include "../../type_traits.hpp"
+#include "rocprim/device/detail/ordered_block_id.hpp"
 
 #include <iterator>
 #include <type_traits>
@@ -60,15 +61,22 @@ using lookback_scan_state_t
 
 template<typename KeyType,
          typename AccumulatorType,
-         unsigned int      BlockSize,
-         unsigned int      ItemsPerThread,
-         block_load_method load_keys_method,
-         block_load_method load_values_method>
+         unsigned int            BlockSize,
+         unsigned int            ItemsPerThread,
+         block_load_method       load_keys_method,
+         block_load_method       load_values_method,
+         arch::wavefront::target TargetWaveSize>
 struct load_helper
 {
-    using block_load_keys = block_load<KeyType, BlockSize, ItemsPerThread, load_keys_method>;
-    using block_load_values
-        = block_load<AccumulatorType, BlockSize, ItemsPerThread, load_values_method>;
+    using block_load_keys
+        = block_load<KeyType, BlockSize, ItemsPerThread, load_keys_method, 1, 1, TargetWaveSize>;
+    using block_load_values = block_load<AccumulatorType,
+                                         BlockSize,
+                                         ItemsPerThread,
+                                         load_values_method,
+                                         1,
+                                         1,
+                                         TargetWaveSize>;
 
     /// We only need to sync between loading keys & values if BOTH the key and value
     /// loading method require shared memory.
@@ -286,7 +294,8 @@ template<typename KeyType,
          block_load_method         load_keys_method,
          block_load_method         load_values_method,
          block_scan_algorithm      scan_algorithm,
-         lookback_scan_determinism Determinism>
+         lookback_scan_determinism Determinism,
+         arch::wavefront::target   TargetWaveSize>
 class tile_helper
 {
 private:
@@ -295,12 +304,14 @@ private:
                                                  BlockSize,
                                                  ItemsPerThread,
                                                  load_keys_method,
-                                                 load_values_method>;
+                                                 load_values_method,
+                                                 TargetWaveSize>;
 
     using wrapped_type = reduce_by_key::wrapped_type_t<AccumulatorType>;
 
     using discontinuity_type = reduce_by_key::discontinuity_helper<KeyType, BlockSize>;
-    using block_scan_type    = rocprim::block_scan<wrapped_type, BlockSize, scan_algorithm>;
+    using block_scan_type
+        = rocprim::block_scan<wrapped_type, BlockSize, scan_algorithm, 1, 1, TargetWaveSize>;
     using prefix_op_factory  = detail::offset_lookback_scan_factory<wrapped_type>;
 
     using scatter_keys_type = reduce_by_key::scatter_helper<KeyType, BlockSize, ItemsPerThread>;
@@ -515,7 +526,7 @@ public:
     }
 };
 
-template<typename ArchConfig,
+template<typename TargetConfig,
          lookback_scan_determinism Determinism,
          typename AccumulatorType,
          typename KeyIterator,
@@ -525,7 +536,8 @@ template<typename ArchConfig,
          typename UniqueCountIterator,
          typename CompareFunction,
          typename BinaryOp,
-         typename LookbackScanState>
+         typename LookbackScanState,
+         typename BlockIdWrapper>
 ROCPRIM_DEVICE ROCPRIM_FORCE_INLINE auto kernel_impl(KeyIterator,
                                                      ValueIterator,
                                                      const UniqueIterator,
@@ -538,13 +550,14 @@ ROCPRIM_DEVICE ROCPRIM_FORCE_INLINE auto kernel_impl(KeyIterator,
                                                      const std::size_t,
                                                      const std::size_t,
                                                      const std::size_t* const,
-                                                     const AccumulatorType* const)
+                                                     const AccumulatorType* const,
+                                                     BlockIdWrapper)
     -> std::enable_if_t<!is_lookback_kernel_runnable<LookbackScanState>()>
 {
     // No need to build the kernel with sleep on a device that does not require it
 }
 
-template<typename ArchConfig,
+template<typename TargetConfig,
          lookback_scan_determinism Determinism,
          typename AccumulatorType,
          typename KeyIterator,
@@ -554,7 +567,8 @@ template<typename ArchConfig,
          typename UniqueCountIterator,
          typename CompareFunction,
          typename BinaryOp,
-         typename LookbackScanState>
+         typename LookbackScanState,
+         typename BlockIdWrapper>
 ROCPRIM_DEVICE ROCPRIM_FORCE_INLINE auto
     kernel_impl(KeyIterator                    keys_input,
                 ValueIterator                  values_input,
@@ -568,10 +582,11 @@ ROCPRIM_DEVICE ROCPRIM_FORCE_INLINE auto
                 const std::size_t              total_number_of_blocks,
                 const std::size_t              size,
                 const std::size_t* const       global_head_count,
-                const AccumulatorType* const   previous_accumulated)
+                const AccumulatorType* const   previous_accumulated,
+                BlockIdWrapper                 ordered_bid)
         -> std::enable_if_t<is_lookback_kernel_runnable<LookbackScanState>()>
 {
-    static constexpr reduce_by_key_config_params params = ArchConfig::params;
+    static constexpr reduce_by_key_config_params params = TargetConfig::params;
 
     static constexpr unsigned int         block_size       = params.kernel_config.block_size;
     static constexpr unsigned int         items_per_thread = params.kernel_config.items_per_thread;
@@ -589,14 +604,18 @@ ROCPRIM_DEVICE ROCPRIM_FORCE_INLINE auto
                                        load_keys_method,
                                        load_values_method,
                                        scan_algorithm,
-                                       Determinism>;
+                                       Determinism,
+                                       TargetConfig::wavefront>;
 
     ROCPRIM_SHARED_MEMORY union
     {
+        typename BlockIdWrapper::storage_type ordered_bid;
         typename tile_processor::storage_type tile;
     } storage;
 
-    const unsigned int  block_id     = rocprim::flat_block_id<block_size, 1, 1>();
+    const unsigned int block_id
+        = ordered_bid.get(threadIdx.x,
+                          storage.ordered_bid); // rocprim::flat_block_id<block_size, 1, 1>();
     const unsigned int  block_offset = block_id * items_per_block;
     const KeyIterator   block_keys   = keys_input + block_offset;
     const ValueIterator block_values = values_input + block_offset;

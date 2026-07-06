@@ -1,5 +1,5 @@
+// Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
 // SPDX-License-Identifier: MIT
-// Copyright (c) 2018-2025, Advanced Micro Devices, Inc. All rights reserved.
 
 #pragma once
 
@@ -24,6 +24,10 @@
 #include "ck/host_utility/io.hpp"
 #include "ck/library/utility/numeric.hpp"
 
+#if __clang_major__ >= 23
+#pragma clang diagnostic push
+#pragma clang diagnostic ignored "-Wlifetime-safety-intra-tu-suggestions"
+#endif
 namespace ck {
 namespace tensor_operation {
 namespace device {
@@ -173,7 +177,7 @@ __launch_bounds__(CK_MAX_THREAD_PER_BLOCK, CK_MIN_BLOCK_PER_CU)
         const auto ds_batch_offset = compute_ptr_offset_of_batch.GetDsPtrOffset(g_idx);
         const auto rs_batch_offset = compute_ptr_offset_of_batch.GetRsPtrOffset(g_idx);
 
-        __shared__ char p_shared[GridwiseGemm::GetSharedMemoryNumberOfByte()];
+        __shared__ char p_shared[GridwiseGemm::GetSharedMemoryNumberOfByte(get_device_arch())];
 
         DsPointer p_ds_grid_grp;
 
@@ -303,13 +307,29 @@ struct DeviceGroupedConvFwdMultipleDMultipleR_Xdl_CShuffle
                                                     RsElementwiseOperation,
                                                     QsElementwiseOperation>
 {
-    using DeviceOp = DeviceGroupedConvFwdMultipleDMultipleR_Xdl_CShuffle;
-    GET_NXDL_PER_WAVE_IMPL
-    static constexpr auto NXdlPerWave64 = GetNXdlPerWave<true>();
-    static constexpr auto NXdlPerWave32 = GetNXdlPerWave<false>();
-
-    static constexpr index_t NumDTensor = DsDataType::Size();
-    static constexpr index_t NumRTensor = RsDataType::Size();
+    using DeviceOp                         = DeviceGroupedConvFwdMultipleDMultipleR_Xdl_CShuffle;
+    static constexpr auto WarpTileConfig64 = GetWarpTileConfig<BlockSize,
+                                                               MPerBlock,
+                                                               NPerBlock,
+                                                               MPerXDL,
+                                                               NPerXDL,
+                                                               MXdlPerWave,
+                                                               CShuffleMXdlPerWavePerShuffle,
+                                                               CShuffleNXdlPerWavePerShuffle,
+                                                               true>();
+    static constexpr auto WarpTileConfig32 = GetWarpTileConfig<BlockSize,
+                                                               MPerBlock,
+                                                               NPerBlock,
+                                                               MPerXDL,
+                                                               NPerXDL,
+                                                               MXdlPerWave,
+                                                               CShuffleMXdlPerWavePerShuffle,
+                                                               CShuffleNXdlPerWavePerShuffle,
+                                                               false>();
+    static constexpr auto NXdlPerWave64    = WarpTileConfig64.At(3);
+    static constexpr auto NXdlPerWave32    = WarpTileConfig32.At(3);
+    static constexpr index_t NumDTensor    = DsDataType::Size();
+    static constexpr index_t NumRTensor    = RsDataType::Size();
 
     static constexpr auto I0 = Number<0>{};
     static constexpr auto I1 = Number<1>{};
@@ -369,11 +389,10 @@ struct DeviceGroupedConvFwdMultipleDMultipleR_Xdl_CShuffle
                      GemmSpec == GemmSpecialization::MNKPadding)
         {
             // pad M
-            return transform_tensor_descriptor(
-                descriptor,
-                make_tuple(make_right_pad_transform(descriptor, MPad)),
-                make_tuple(Sequence<0>{}),
-                make_tuple(Sequence<0>{}));
+            return transform_tensor_descriptor(descriptor,
+                                               make_tuple(make_right_pad_transform(MRaw, MPad)),
+                                               make_tuple(Sequence<0>{}),
+                                               make_tuple(Sequence<0>{}));
         }
         else
         {
@@ -437,7 +456,7 @@ struct DeviceGroupedConvFwdMultipleDMultipleR_Xdl_CShuffle
     using RGridDesc_M = remove_cvref_t<decltype(MakeRGridDescriptor_M<RLayout>({}, {}))>;
 
     // GridwiseGemm
-    template <index_t NXdlPerWave_>
+    template <typename WarpTileConfig>
     using GridwiseGemmBase = GridwiseGemmMultipleDMultipleR_k0mk1_k0nk1_mn_xdl_cshuffle_v1<
         ADataType, // TODO: distinguish A/B datatype
         AccDataType,
@@ -465,10 +484,10 @@ struct DeviceGroupedConvFwdMultipleDMultipleR_Xdl_CShuffle
         KPerBlock,
         AK1,
         BK1,
-        MPerXDL,
-        NPerXDL,
-        MXdlPerWave,
-        NXdlPerWave_,
+        WarpTileConfig::At(0),
+        WarpTileConfig::At(1),
+        WarpTileConfig::At(2),
+        WarpTileConfig::At(3),
         ABlockTransferThreadClusterLengths_AK0_M_AK1,
         ABlockTransferThreadClusterArrangeOrder,
         ABlockTransferSrcAccessOrder,
@@ -485,14 +504,14 @@ struct DeviceGroupedConvFwdMultipleDMultipleR_Xdl_CShuffle
         BBlockTransferDstScalarPerVector_BK1,
         false,
         BBlockLdsExtraN,
-        CShuffleMXdlPerWavePerShuffle,
-        CShuffleNXdlPerWavePerShuffle,
+        WarpTileConfig::At(4),
+        WarpTileConfig::At(5),
         CDRThreadTransferClusterLengths_MPerBlock_NPerBlock,
         CDEBlockTransferScalarPerVector_NPerBlock,
         RThreadTransferDstScalarPerVector_MPerBlock,
         LoopSched>;
-    using GridwiseGemm64 = GridwiseGemmBase<math::max(NXdlPerWave64, 1)>;
-    using GridwiseGemm32 = GridwiseGemmBase<NXdlPerWave32>;
+    using GridwiseGemm64 = GridwiseGemmBase<decltype(WarpTileConfig64)>;
+    using GridwiseGemm32 = GridwiseGemmBase<decltype(WarpTileConfig32)>;
 
     using AGridDesc_AK0_M_AK1 =
         remove_cvref_t<decltype(GridwiseGemm64::MakeDefaultAGridDescriptor_AK0_M_AK1(
@@ -616,7 +635,8 @@ struct DeviceGroupedConvFwdMultipleDMultipleR_Xdl_CShuffle
                 using RDataType = remove_cvref_t<tuple_element_t<i.value, RsDataType>>;
 
                 // R pointer
-                p_rs_grid_(i) = static_cast<RDataType*>(p_rs[i]);
+                p_rs_grid_(i)                                  = static_cast<RDataType*>(p_rs[i]);
+                compute_ptr_offset_of_batch_.BatchStrideRs_(i) = r_g_n_wos_strides[0];
             });
         }
 
@@ -1141,3 +1161,6 @@ struct DeviceGroupedConvFwdMultipleDMultipleR_Xdl_CShuffle
 } // namespace device
 } // namespace tensor_operation
 } // namespace ck
+#if __clang_major__ >= 23
+#pragma clang diagnostic pop
+#endif

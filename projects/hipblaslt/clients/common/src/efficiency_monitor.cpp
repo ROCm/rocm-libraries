@@ -1,4 +1,3 @@
-
 /* ************************************************************************
  * Copyright (C) 2024 Advanced Micro Devices, Inc. All rights reserved.
  *
@@ -21,9 +20,6 @@
  *
  * ************************************************************************ */
 
-#include "efficiency_monitor.hpp"
-#include "hipblaslt/hipblaslt-ext-op.h"
-
 #include <atomic>
 #include <condition_variable>
 #include <future>
@@ -32,11 +28,13 @@
 #include <thread>
 #include <vector>
 
+#include "efficiency_monitor.hpp"
+#include "hipblaslt/hipblaslt-ext-op.h"
+
 #ifndef _WIN32
 
 #include <hip/hip_runtime.h>
-#include <rocm_smi/rocm_smi.h>
-#include <rocm_smi/rocm_smi64Config.h>
+#include <amd_smi/amdsmi.h>
 
 template <typename T>
 inline std::ostream& stream_write(std::ostream& stream, T&& val)
@@ -76,14 +74,14 @@ inline std::string concatenate(Ts&&... vals)
         }                                                                                         \
     } while(0)
 
-#define RSMI_CHECK_EXC(expr)                                                                      \
+#define AMDSMI_CHECK_EXC(expr)                                                                    \
     do                                                                                            \
     {                                                                                             \
-        rsmi_status_t e = (expr);                                                                 \
+        amdsmi_status_t e = (expr);                                                               \
         if(e)                                                                                     \
         {                                                                                         \
             const char* errName = nullptr;                                                        \
-            rsmi_status_string(e, &errName);                                                      \
+            amdsmi_status_code_to_string(e, &errName);                                            \
             std::ostringstream msg;                                                               \
             msg << "Error " << e << "(" << errName << ") " << __FILE__ << ":" << __LINE__ << ": " \
                 << std::endl                                                                      \
@@ -100,24 +98,26 @@ public:
     const double cHzToMHz = 0.000001;
     const double cMhzToHz = 1000000;
 
-    // deleting copy constructor
     EfficiencyMonitorImp(const EfficiencyMonitorImp& obj) = delete;
 
 #ifndef _WIN32
 
     bool enabled()
     {
-        static const char* env1_freq = getenv("HIPBLASLT_BENCH_FREQ");
-        static const char* env1_eff = getenv("HIPBLASLT_BENCH_EFF");
-        static const char* env2      = getenv("HIPBLASLT_BENCH_FREQ_ALL");
-        return env1_freq != nullptr || env1_eff != nullptr
-               || (env2 != nullptr && m_isMultiXCDSupported);
+        static const char* env = getenv("HIPBLASLT_BENCH_FREQ");
+        return (env != nullptr || efficiencyReport() || detailedReport());
     }
 
     bool detailedReport()
     {
-        static const char* env2 = getenv("HIPBLASLT_BENCH_FREQ_ALL");
-        return (env2 != nullptr && m_isMultiXCDSupported);
+        static const char* env = getenv("HIPBLASLT_BENCH_FREQ_ALL");
+        return (env != nullptr && m_isMultiXCDSupported);
+    }
+
+    bool efficiencyReport()
+    {
+        static const char* env = getenv("HIPBLASLT_BENCH_PERF");
+        return (env != nullptr);
     }
 
     EfficiencyMonitorImp()
@@ -134,15 +134,15 @@ public:
         m_thread.join();
     }
 
-    void set_device_id(int deviceId)
+    void setDeviceId(int deviceId)
     {
-        m_smiDeviceIndex = GetROCmSMIIndex(deviceId);
+        m_smiDeviceIndex = GetAMDSMIIndex(deviceId);
         m_XCDCount       = 1;
 
-#if rocm_smi_VERSION_MAJOR >= 7
-        auto status2 = rsmi_dev_metrics_xcd_counter_get(m_smiDeviceIndex, &m_XCDCount);
+#if AMDSMI_LIB_VERSION_MAJOR >= 25
+        auto status = amdsmi_get_gpu_xcd_counter(m_processorHandles[m_smiDeviceIndex], &m_XCDCount);
 
-        if(status2 != RSMI_STATUS_SUCCESS)
+        if(status != AMDSMI_STATUS_SUCCESS)
         {
             m_XCDCount = 1;
         }
@@ -318,7 +318,7 @@ private:
         m_exit = false;
 
         m_isMultiXCDSupported = false;
-#if rocm_smi_VERSION_MAJOR >= 7
+#if AMDSMI_LIB_VERSION_MAJOR >= 25
         m_isMultiXCDSupported = true;
 #endif
 
@@ -365,14 +365,15 @@ private:
 
     void collect()
     {
-        rsmi_frequencies_t freq;
+        amdsmi_frequencies_t freq;
         do
         {
-#if rocm_smi_VERSION_MAJOR >= 7
+#if AMDSMI_LIB_VERSION_MAJOR >= 25
             // multi_XCD
-            rsmi_gpu_metrics_t gpuMetrics;
-            auto status1 = rsmi_dev_gpu_metrics_info_get(m_smiDeviceIndex, &gpuMetrics);
-            if(status1 == RSMI_STATUS_SUCCESS)
+            amdsmi_gpu_metrics_t gpuMetrics;
+            auto                 status1
+                = amdsmi_get_gpu_metrics_info(m_processorHandles[m_smiDeviceIndex], &gpuMetrics);
+            if(status1 == AMDSMI_STATUS_SUCCESS)
             {
                 for(int i = 0; i < m_XCDCount; i++)
                 {
@@ -382,16 +383,17 @@ private:
             }
 #else
             //XCD 0
-            auto status1 = rsmi_dev_gpu_clk_freq_get(m_smiDeviceIndex, RSMI_CLK_TYPE_SYS, &freq);
-            if(status1 == RSMI_STATUS_SUCCESS)
+            auto status1 = amdsmi_get_clk_freq(
+                m_processorHandles[m_smiDeviceIndex], AMDSMI_CLK_TYPE_SYS, &freq);
+            if(status1 == AMDSMI_STATUS_SUCCESS)
             {
                 m_SYSCLK_sum[0] += freq.frequency[freq.current];
                 m_SYSCLK_array[0].push_back(freq.frequency[freq.current]);
             }
 #endif
-
-            auto status2 = rsmi_dev_gpu_clk_freq_get(m_smiDeviceIndex, RSMI_CLK_TYPE_MEM, &freq);
-            if(status2 == RSMI_STATUS_SUCCESS)
+            auto status2 = amdsmi_get_clk_freq(
+                m_processorHandles[m_smiDeviceIndex], AMDSMI_CLK_TYPE_MEM, &freq);
+            if(status2 == AMDSMI_STATUS_SUCCESS)
             {
                 m_MEMCLK_sum += freq.frequency[freq.current];
                 m_MEMCLK_array.push_back(freq.frequency[freq.current]);
@@ -435,15 +437,15 @@ private:
         m_future = std::move(std::future<void>());
     }
 
-    void InitROCmSMI()
+    void InitAMDSMI()
     {
-        static rsmi_status_t status = rsmi_init(0);
-        RSMI_CHECK_EXC(status);
+        static amdsmi_status_t status = amdsmi_init(AMDSMI_INIT_AMD_GPUS);
+        AMDSMI_CHECK_EXC(status);
     }
 
-    uint32_t GetROCmSMIIndex(int hipDeviceIndex)
+    uint32_t GetAMDSMIIndex(int hipDeviceIndex)
     {
-        InitROCmSMI();
+        InitAMDSMI();
 
         hipDeviceProp_t props;
 
@@ -464,36 +466,48 @@ private:
 #endif
 
         uint64_t hipPCIID = 0;
-        // hipPCIID |= props.pciDeviceID & 0xFF;
-        // hipPCIID |= ((props.pciBusID & 0xFF) << 8);
-        // hipPCIID |= (props.pciDomainID) << 16;
 
         hipPCIID |= (((uint64_t)props.pciDomainID & 0xffffffff) << 32);
         hipPCIID |= ((props.pciBusID & 0xff) << 8);
         hipPCIID |= ((props.pciDeviceID & 0x1f) << 3);
 
-        uint32_t smiCount = 0;
+        uint32_t smiSocketCount{};
+        AMDSMI_CHECK_EXC(amdsmi_get_socket_handles(&smiSocketCount, nullptr));
 
-        RSMI_CHECK_EXC(rsmi_num_monitor_devices(&smiCount));
+        m_socketHandles.resize(smiSocketCount);
+        AMDSMI_CHECK_EXC(amdsmi_get_socket_handles(&smiSocketCount, &m_socketHandles[0]));
 
         std::ostringstream msg;
         msg << "PCI IDs: [" << std::endl;
 
-        for(uint32_t smiIndex = 0; smiIndex < smiCount; smiIndex++)
+        for(uint32_t device = 0; device < smiSocketCount; device++)
         {
-            uint64_t rsmiPCIID = 0;
+            uint32_t deviceCount{};
+            AMDSMI_CHECK_EXC(
+                amdsmi_get_processor_handles(m_socketHandles[device], &deviceCount, nullptr));
+            m_processorHandles.resize(deviceCount);
 
-            RSMI_CHECK_EXC(rsmi_dev_pci_id_get(smiIndex, &rsmiPCIID));
+            AMDSMI_CHECK_EXC(amdsmi_get_processor_handles(
+                m_socketHandles[device], &deviceCount, &m_processorHandles[0]));
+            for(uint32_t smiIndex = 0; smiIndex < deviceCount; smiIndex++)
+            {
+                uint64_t amdSMIPCIID{};
+                AMDSMI_CHECK_EXC(amdsmi_get_gpu_bdf_id(m_processorHandles[smiIndex], &amdSMIPCIID));
 
-            msg << smiIndex << ": " << rsmiPCIID << std::endl;
+                msg << smiIndex << ": " << amdSMIPCIID << std::endl;
 
-            if(hipPCIID == rsmiPCIID)
-                return smiIndex;
+                if(hipPCIID == amdSMIPCIID)
+                {
+                    return smiIndex;
+                }
+            }
         }
+
+        return 0;
 
         msg << "]" << std::endl;
 
-        throw std::runtime_error(concatenate("RSMI Can't find a device with PCI ID ",
+        throw std::runtime_error(concatenate("AMDSMI Can't find a device with PCI ID ",
                                              hipPCIID,
                                              "(",
                                              props.pciDomainID,
@@ -524,6 +538,9 @@ private:
     uint64_t                           m_MEMCLK_sum;
     std::vector<uint64_t>              m_MEMCLK_array;
 
+    std::vector<amdsmi_socket_handle>    m_socketHandles;
+    std::vector<amdsmi_processor_handle> m_processorHandles;
+
 #else // WIN32
 
     // not supporting windows for now
@@ -533,7 +550,7 @@ public:
 
     ~EfficiencyMonitorImp() {}
 
-    void set_device_id(int deviceId) {}
+    void setDeviceId(int deviceId) {}
 
     void start() {}
 
@@ -545,6 +562,11 @@ public:
     }
 
     bool detailedReport()
+    {
+        return false;
+    }
+
+    bool efficiencyReport()
     {
         return false;
     }
@@ -635,22 +657,7 @@ public:
 #endif
 };
 
-static EfficiencyMonitorImp* g_EffMonitorInstance{nullptr};
-
-EfficiencyMonitor& getEfficiencyMonitor()
-{
-    if(g_EffMonitorInstance == nullptr)
-    {
-        g_EffMonitorInstance = new EfficiencyMonitorImp();
-    }
-    return *g_EffMonitorInstance;
-}
-
-void freeEfficiencyMonitor()
-{
-    if(g_EffMonitorInstance != nullptr)
-    {
-        delete g_EffMonitorInstance;
-        g_EffMonitorInstance = nullptr;
-    }
+std::shared_ptr<EfficiencyMonitor> EfficiencyMonitor::create() {
+    static std::shared_ptr<EfficiencyMonitor> instance = std::make_shared<EfficiencyMonitorImp>();
+    return instance;
 }

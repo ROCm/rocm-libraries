@@ -1,5 +1,5 @@
+// Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
 // SPDX-License-Identifier: MIT
-// Copyright (c) 2024-2025, Advanced Micro Devices, Inc. All rights reserved.
 
 #include <cstdlib>
 #include <iostream>
@@ -21,6 +21,10 @@
 #include "ck/library/utility/convolution_host_tensor_descriptor_helper.hpp"
 #include "ck/library/reference_tensor_operation/cpu/reference_conv_bwd_data.hpp"
 #include "ck/library/utility/convolution_host_tensor_descriptor_helper.hpp"
+
+using ::ck::DeviceMem;
+using ::ck::HostTensorDescriptor;
+using ::ck::Tensor;
 
 constexpr ck::index_t NDimSpatial = 3;
 using InDataType                  = ck::half_t;
@@ -202,8 +206,10 @@ bool run_grouped_conv(bool do_verification,
 
     if(!conv.IsSupportedArgument(argument))
     {
-        throw std::runtime_error("The device op with the specified compilation parameters does "
-                                 "not support this convolution problem.");
+        std::cout << "The device op with the specified compilation parameters does "
+                     "not support this convolution problem - skipping."
+                  << std::endl;
+        return true;
     }
 
     float avg_time = invoker.Run(argument, StreamConfig{nullptr, time_kernel});

@@ -2,3 +2,20 @@ __pycache__
 
 # Build directories
 _build/
+build/
+
+# User-specific CMake presets
+CMakeUserPresets.json
+
+# Miscellanous tools
+.cline_storage/
+
+# claude tmp files
+.nfs*
+
+# tensilelite-characterization working scratch (tooling + generated artifacts; not a deliverable)
+/work/tensilelite-characterization/
+/parametric-chaos.pdf
+/parametric-chaos-v2.pdf
+/params-=findings.md
+/check_caps.py

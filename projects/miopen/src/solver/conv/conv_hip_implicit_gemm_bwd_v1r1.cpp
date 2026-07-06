@@ -636,10 +636,25 @@ bool ConvHipImplicitGemmBwdDataV1R1::IsApplicable(const ExecutionContext& ctx,
 {
     if(env::disabled(MIOPEN_DEBUG_CONV_IMPLICIT_GEMM_HIP_BWD_V1R1))
         return false;
-    if(ThisSolverIsDeprecatedStatic::IsDisabled(ctx))
+    const std::string name = ctx.GetStream().GetDeviceName();
+    if(!(StartsWith(name, "gfx8") || StartsWith(name, "gfx90") || StartsWith(name, "gfx103")))
         return false;
-    if(problem.GetConv().attribute.deterministic)
-        return false;
+    // Reject non-deterministic configs when determinism is requested.
+    // BwdV1R1 uses AtomicAdd when stride < dilation*(kernel_size-1)+1.
+    // This causes non-deterministic results due to FP rounding order dependency.
+    if(problem.GetConv().attribute.deterministic.Get() != 0)
+    {
+        const auto y           = ProblemInterpreter::GetFilterHeightY(problem);
+        const auto x           = ProblemInterpreter::GetFilterWidthX(problem);
+        const auto stride_h    = ProblemInterpreter::GetAdjustedConvolutionStrideH(problem);
+        const auto stride_w    = ProblemInterpreter::GetAdjustedConvolutionStrideW(problem);
+        const auto dilation_h  = ProblemInterpreter::GetAdjustedConvolutionDilationH(problem);
+        const auto dilation_w  = ProblemInterpreter::GetAdjustedConvolutionDilationW(problem);
+        const auto threshold_h = dilation_h * (y - 1) + 1;
+        const auto threshold_w = dilation_w * (x - 1) + 1;
+        if(stride_h < threshold_h || stride_w < threshold_w)
+            return false;
+    }
     if(!ctx.use_hip_kernels)
         return false;
     if(problem.HasNonPackedTensors())
@@ -651,7 +666,7 @@ bool ConvHipImplicitGemmBwdDataV1R1::IsApplicable(const ExecutionContext& ctx,
     if(!static_ck::IsComposableKernelSupportedHardware(ctx))
         return false;
     // Missing instruction: v_mac_f32
-    if(problem.IsFp32() && static_ck::GfxHasMissingFp32Intrinsics(ctx.GetStream().GetDeviceName()))
+    if(problem.IsFp32() && static_ck::GfxHasMissingFp32Intrinsics(name))
         return false;
     if(!problem.IsDirectionBackwardData())
         return false;

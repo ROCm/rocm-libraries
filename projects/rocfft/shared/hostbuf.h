@@ -23,20 +23,22 @@
 
 #include "arithmetic.h"
 #include "sys_mem.h"
-#include <atomic>
 #include <cstdlib>
 #include <cstring>
-#include <iostream>
+#include <hip/hip_runtime_api.h>
+#include <sstream>
+#include <stdexcept>
+
 #include <new>
 
-#ifndef WIN32
+#ifndef _WIN32
 #include <stdlib.h>
 #include <sys/mman.h>
 #endif
 
-struct HOSTBUF_MEM_USAGE
+struct HOSTBUF_MEM_USAGE : public std::runtime_error
 {
-    const std::string msg;
+    using std::runtime_error::runtime_error;
 };
 
 // Simple RAII class for host buffers.  T is the type of pointer that
@@ -53,6 +55,7 @@ public:
         std::swap(owned, other.owned);
         std::swap(bsize, other.bsize);
         std::swap(bsize_track, other.bsize_track);
+        std::swap(is_pinned_memory, other.is_pinned_memory);
     }
     hostbuf_t& operator=(hostbuf_t&& other)
     {
@@ -60,6 +63,7 @@ public:
         std::swap(owned, other.owned);
         std::swap(bsize, other.bsize);
         std::swap(bsize_track, other.bsize_track);
+        std::swap(is_pinned_memory, other.is_pinned_memory);
         return *this;
     }
     hostbuf_t(const hostbuf_t&) = delete;
@@ -68,10 +72,11 @@ public:
     static hostbuf_t make_nonowned(T* p, size_t size_bytes = 0)
     {
         hostbuf_t ret;
-        ret.owned       = false;
-        ret.buf         = p;
-        ret.bsize       = size_bytes;
-        ret.bsize_track = 0;
+        ret.owned            = false;
+        ret.buf              = p;
+        ret.bsize            = size_bytes;
+        ret.bsize_track      = 0;
+        ret.is_pinned_memory = false; // irrelevant anyways if not owned
         return ret;
     }
 
@@ -80,59 +85,75 @@ public:
         free();
     }
 
-    void alloc(size_t size)
+    void alloc(size_t size, bool make_it_pinned = false)
     {
         free();
 
-        bsize = size;
-
-        auto usable_mem = host_memory::singleton().get_usable_bytes();
-        if(total_used_mem + size > usable_mem)
+        if(size > system_memory::singleton().get_usable_bytes())
         {
             std::stringstream msg;
-            msg << "Host memory usage limit exceed (used mem: "
-                << bytes_to_GiB(total_used_mem + size)
-                << "GiB, free mem: " << bytes_to_GiB(usable_mem) << " GiB)";
+            auto&             sys_mem = system_memory::singleton();
+            msg << "Unauthorized host allocation.\n"
+                << "\tRequested size is " << byte_size_to_str(size) << "\n"
+                << sys_mem.get_details();
             throw HOSTBUF_MEM_USAGE{msg.str()};
         }
 
-        // we're aligning to multiples of 64 bytes, so round the
-        // allocation size up to the nearest 64 to keep ASAN happy
-        if(size % 64)
+        bsize = size;
+        if(make_it_pinned)
         {
-            size += 64 - size % 64;
-        }
-
-        // FFTW requires aligned allocations to use faster SIMD instructions.
-        // If enabling hugepages, align to 2 MiB. Otherwise, aligning to
-        // 64 bytes is enough for AVX instructions up to AVX512.
-#ifdef WIN32
-        buf = _aligned_malloc(size, 64);
-#else
-        // On Linux, ask for hugepages to reduce TLB pressure and
-        // improve performance.  Allocations need to be aligned to
-        // the hugepage size, and rounded up to the next whole
-        // hugepage.
-        static const size_t TWO_MiB = 2 * 1024 * 1024;
-        if(size >= TWO_MiB)
-        {
-            size_t rounded_size = DivRoundingUp(size, TWO_MiB) * TWO_MiB;
-            buf                 = aligned_alloc(TWO_MiB, rounded_size);
-            madvise(buf, rounded_size, MADV_HUGEPAGE);
+            if(hipHostMalloc(&buf, size) != hipSuccess)
+            {
+                buf   = nullptr;
+                bsize = 0;
+            }
         }
         else
-            buf = aligned_alloc(64, size);
+        {
+            // we're aligning to multiples of 64 bytes, so round the
+            // allocation size up to the nearest 64 to keep ASAN happy
+            if(size % 64)
+            {
+                size += 64 - size % 64;
+            }
+
+            // FFTW requires aligned allocations to use faster SIMD instructions.
+            // If enabling hugepages, align to 2 MiB. Otherwise, aligning to
+            // 64 bytes is enough for AVX instructions up to AVX512.
+#ifdef _WIN32
+            buf = _aligned_malloc(size, 64);
+#else
+            // On Linux, ask for hugepages to reduce TLB pressure and
+            // improve performance.  Allocations need to be aligned to
+            // the hugepage size, and rounded up to the next whole
+            // hugepage.
+            static const size_t TWO_MiB = 2 * 1024 * 1024;
+            if(size >= TWO_MiB)
+            {
+                size_t rounded_size = DivRoundingUp(size, TWO_MiB) * TWO_MiB;
+                buf                 = aligned_alloc(TWO_MiB, rounded_size);
+                madvise(buf, rounded_size, MADV_HUGEPAGE);
+            }
+            else
+                buf = aligned_alloc(64, size);
 #endif
+        }
         if(!buf)
             throw std::bad_alloc();
 
-        bsize_track = size;
-        total_used_mem += bsize_track;
+        is_pinned_memory = make_it_pinned;
+        bsize_track      = size;
+        system_memory::singleton().record_used_bytes(bsize_track);
     }
 
     size_t size() const
     {
         return bsize;
+    }
+
+    bool is_pinned() const
+    {
+        return is_pinned_memory;
     }
 
     void free()
@@ -141,13 +162,20 @@ public:
         {
             if(owned)
             {
-                total_used_mem -= bsize_track;
-
-#ifdef WIN32
-                _aligned_free(buf);
+                if(is_pinned_memory)
+                {
+                    (void)hipHostFree(buf);
+                }
+                else
+                {
+#ifdef _WIN32
+                    _aligned_free(buf);
 #else
-                std::free(buf);
+                    std::free(buf);
 #endif
+                }
+
+                system_memory::singleton().release_used_bytes(bsize_track);
             }
             buf   = nullptr;
             bsize = bsize_track = 0;
@@ -169,10 +197,10 @@ public:
     }
 
     // Copy method
-    hostbuf_t copy() const
+    hostbuf_t copy(bool make_copy_pinned = false) const
     {
         hostbuf_t copy;
-        copy.alloc(bsize);
+        copy.alloc(bsize, make_copy_pinned);
         memcpy(copy.buf, buf, bsize);
         return copy;
     }
@@ -205,15 +233,13 @@ private:
     void* buf = nullptr;
     // whether this object owns the 'buf' pointer (and hence needs to
     // free it)
-    bool   owned = true;
-    size_t bsize = 0;
+    bool   owned            = true;
+    bool   is_pinned_memory = false;
+    size_t bsize            = 0;
 
     // Buffer size for tracking total memory usage.
     // When buffer is shrunk in place, bsize_track is not changed.
     size_t bsize_track = 0;
-
-    // Keeps track of total used memory for all hostbufs
-    inline static std::atomic<size_t> total_used_mem = 0;
 };
 
 // default hostbuf that gives out void* pointers

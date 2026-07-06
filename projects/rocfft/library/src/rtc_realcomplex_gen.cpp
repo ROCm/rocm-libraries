@@ -48,7 +48,7 @@ std::string realcomplex_rtc_kernel_name(const RealComplexSpecs& specs)
         throw std::runtime_error("invalid realcomplex rtc scheme");
     }
 
-    kernel_name += "_dim" + std::to_string(specs.dim);
+    kernel_name += "_dim" + std::to_string(specs.dim) + "_lensz" + std::to_string(specs.lensz);
 
     kernel_name += rtc_precision_name(specs.precision);
     kernel_name += rtc_array_type_name(specs.inArrayType);
@@ -141,7 +141,7 @@ std::string r2c_copy_rtc(const std::string& kernel_name, const RealComplexSpecs&
     func.body += CommentLines{"per-dimension indexes"};
     func.body += Declaration{idx_0, global_idx % lengths0_divide};
     func.body += Assign{global_idx, global_idx / lengths0_divide};
-    if(specs.dim > 1)
+    if(specs.lensz > 1)
     {
         func.body += Declaration{idx_1, global_idx % lengths1};
         func.body += Assign{global_idx, global_idx / lengths1};
@@ -150,7 +150,7 @@ std::string r2c_copy_rtc(const std::string& kernel_name, const RealComplexSpecs&
     {
         func.body += Declaration{idx_1, 0};
     }
-    if(specs.dim > 2)
+    if(specs.lensz > 2)
     {
         func.body += Declaration{idx_2, global_idx % lengths2};
         func.body += Assign{global_idx, global_idx / lengths2};
@@ -169,7 +169,7 @@ std::string r2c_copy_rtc(const std::string& kernel_name, const RealComplexSpecs&
         Variable input_offset{"input_offset", "auto"};
         func.body += Declaration{input_offset,
                                  idx_0 * stride_in0 + idx_1 * stride_in1 + idx_2 * stride_in2
-                                     + idx_batch * ("stride_in" + std::to_string(specs.dim))};
+                                     + idx_batch * ("stride_in" + std::to_string(specs.lensz))};
 
         Variable outputs_offset{"outputs_offset", "auto"};
         Variable outputc_offset{"outputc_offset", "auto"};
@@ -187,15 +187,22 @@ std::string r2c_copy_rtc(const std::string& kernel_name, const RealComplexSpecs&
         Variable ic1{"ic1", "auto"};
         Variable ic2{"ic2", "auto"};
         func.body += Declaration{ic0, Ternary{is0 == 0, 0, lengths0 - is0}};
-        func.body += Declaration{ic1, Ternary{is1 == 0, 0, lengths1 - is1}};
-        func.body += Declaration{ic2, Ternary{is2 == 0, 0, lengths2 - is2}};
+        // length axes beyond specs.dim are actually batch axes
+        if(specs.dim > 1)
+            func.body += Declaration{ic1, Ternary{is1 == 0, 0, lengths1 - is1}};
+        else
+            func.body += Declaration{ic1, is1};
+        if(specs.dim > 2)
+            func.body += Declaration{ic2, Ternary{is2 == 0, 0, lengths2 - is2}};
+        else
+            func.body += Declaration{ic2, is2};
 
         func.body += Declaration{outputs_offset,
                                  is0 * stride_out0 + is1 * stride_out1 + is2 * stride_out2
-                                     + idx_batch * ("stride_out" + std::to_string(specs.dim))};
+                                     + idx_batch * ("stride_out" + std::to_string(specs.lensz))};
         func.body += Declaration{outputc_offset,
                                  ic0 * stride_out0 + ic1 * stride_out1 + ic2 * stride_out2
-                                     + idx_batch * ("stride_out" + std::to_string(specs.dim))};
+                                     + idx_batch * ("stride_out" + std::to_string(specs.lensz))};
 
         func.body += CallbackLoadDeclaration("scalar_type", "cbtype");
         func.body += CallbackStoreDeclaration("scalar_type", "cbtype");
@@ -232,10 +239,10 @@ std::string r2c_copy_rtc(const std::string& kernel_name, const RealComplexSpecs&
         Variable outputIdx{"outputIdx", "auto"};
         func.body += Declaration{inputIdx,
                                  idx_0 * stride_in0 + idx_1 * stride_in1 + idx_2 * stride_in2
-                                     + idx_batch * ("stride_in" + std::to_string(specs.dim))};
+                                     + idx_batch * ("stride_in" + std::to_string(specs.lensz))};
         func.body += Declaration{outputIdx,
                                  idx_0 * stride_out0 + idx_1 * stride_out1 + idx_2 * stride_out2
-                                     + idx_batch * ("stride_out" + std::to_string(specs.dim))};
+                                     + idx_batch * ("stride_out" + std::to_string(specs.lensz))};
 
         if(specs.scheme == CS_KERNEL_COPY_R_TO_CMPLX)
         {
@@ -334,7 +341,7 @@ std::string realcomplex_even_rtc_kernel_name(const RealComplexEvenSpecs& specs)
         kernel_name += "_Ndiv4";
     }
 
-    kernel_name += "_dim" + std::to_string(specs.dim);
+    kernel_name += "_dim" + std::to_string(specs.dim) + "_lensz" + std::to_string(specs.lensz);
 
     kernel_name += rtc_precision_name(specs.precision);
     kernel_name += rtc_array_type_name(specs.inArrayType);
@@ -371,27 +378,34 @@ std::string realcomplex_even_rtc(const std::string& kernel_name, const RealCompl
     src += "// When N is divisible by 4, one value is handled separately; this is controlled by "
            "Ndiv4.\n";
 
-    Variable half_N{"half_N", "const unsigned int"};
-    Variable idist1D{"idist1D", "const unsigned int"};
-    Variable odist1D{"odist1D", "const unsigned int"};
-    Variable higherFFTLengths{"higherFFTLengths", "unsigned int"};
-    Variable nbatch{"nbatch", "unsigned int"};
-    Variable input{"input", "scalar_type", true, true};
-    Variable idist{"idist", "const unsigned int"};
-    Variable output{"output", "scalar_type", true, true};
-    Variable odist{"odist", "const unsigned int"};
-    Variable twiddles{"twiddles", "const scalar_type", true, true};
+    Variable              half_N{"half_N", "const unsigned int"};
+    std::vector<Variable> stride_in;
+    std::vector<Variable> stride_out;
+    std::vector<Variable> length;
+    std::vector<Variable> idx_length;
+    Variable              nbatch{"nbatch", "unsigned int"};
+    Variable              input{"input", "scalar_type", true, true};
+    Variable              idist{"idist", "const unsigned int"};
+    Variable              output{"output", "scalar_type", true, true};
+    Variable              odist{"odist", "const unsigned int"};
+    Variable              twiddles{"twiddles", "const scalar_type", true, true};
 
     Function func{kernel_name};
     func.launch_bounds = LAUNCH_BOUNDS_R2C_C2R_KERNEL;
     func.qualifier     = "extern \"C\" __global__";
     func.arguments.append(half_N);
-    if(specs.dim > 1)
+    // add arguments for each length+stride
+    for(unsigned int i = 1; i < specs.lensz; ++i)
     {
-        func.arguments.append(idist1D);
-        func.arguments.append(odist1D);
+        std::string i_str = std::to_string(i);
+        stride_in.emplace_back("stride_in" + i_str, "const unsigned int");
+        stride_out.emplace_back("stride_out" + i_str, "const unsigned int");
+        length.emplace_back("length" + i_str, "const unsigned int");
+
+        func.arguments.append(stride_in.back());
+        func.arguments.append(stride_out.back());
+        func.arguments.append(length.back());
     }
-    func.arguments.append(higherFFTLengths);
     func.arguments.append(nbatch);
     func.arguments.append(input);
     func.arguments.append(idist);
@@ -407,37 +421,40 @@ std::string realcomplex_even_rtc(const std::string& kernel_name, const RealCompl
     Variable idx_p{"idx_p", "const auto"};
     Variable idx_q{"idx_q", "const auto"};
     Variable idx_batch{"idx_batch", "const unsigned int"};
-    Variable idx_batch1D{"idx_batch1D", "const unsigned int"};
+    Variable remaining{"remaining", "unsigned int"};
+    Variable index_along_d{"index_along_d", "unsigned int"};
 
     func.body += Declaration{idx_p, global_idx % half_N};
     func.body += Declaration{idx_q, half_N - idx_p};
 
-    func.body += Assign{global_idx, global_idx / half_N};
+    func.body += Declaration{remaining, global_idx / half_N};
+    func.body += Declaration{index_along_d};
 
     Variable quarter_N{"quarter_N", "const auto"};
     func.body += Declaration{quarter_N, Parens{half_N + 1} / 2};
 
     If guard{idx_p < quarter_N, {}};
 
-    Variable input_offset{"input_offset", "auto"};
-    Variable output_offset{"output_offset", "auto"};
-    guard.body += Declaration(input_offset, idx_batch * idist);
-    guard.body += Declaration(output_offset, idx_batch * odist);
-    if(specs.dim > 1)
+    func.body += CommentLines{"unrolled loop to compute index for higher dimensions"};
+    Variable input_offset{"input_offset", "unsigned int"};
+    Variable output_offset{"output_offset", "unsigned int"};
+    func.body += Declaration{input_offset, "0"};
+    func.body += Declaration{output_offset, "0"};
+    for(unsigned int i = 1; i < specs.lensz; ++i)
     {
-        guard.body += AddAssign(input_offset, idx_batch1D * idist1D);
-        guard.body += AddAssign(output_offset, idx_batch1D * odist1D);
+        func.body += Assign{index_along_d, remaining % length[i - 1]};
+        func.body += Assign{remaining, remaining / length[i - 1]};
+        func.body += AddAssign(input_offset, index_along_d * stride_in[i - 1]);
+        func.body += AddAssign(output_offset, index_along_d * stride_out[i - 1]);
     }
 
-    func.body += CommentLines{
-        "this kernel treats all rows as batched 1D (it does not tolerate differing",
-        "strides between higher FFT dimensions), but user-provided batch is tracked",
-        "separately"};
-    func.body += Declaration{idx_batch1D, global_idx % higherFFTLengths};
-    func.body += Declaration{idx_batch, global_idx / higherFFTLengths};
+    func.body += Declaration{idx_batch, remaining};
 
     func.body += CommentLines{"any excess threads will be past the end of batch"};
     func.body += If{idx_batch >= nbatch, {Return{}}};
+
+    func.body += AddAssign(input_offset, idx_batch * idist);
+    func.body += AddAssign(output_offset, idx_batch * odist);
 
     if(specs.scheme == CS_KERNEL_R_TO_CMPLX)
     {

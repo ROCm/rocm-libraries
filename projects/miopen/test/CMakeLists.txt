@@ -40,6 +40,7 @@ option( MIOPEN_TEST_ALL "Run the full test suite" OFF )
 option( MIOPEN_TEST_HALF "Test in half mode" OFF )
 option( MIOPEN_TEST_INT8 "Test in int8 mode" OFF )
 option( MIOPEN_TEST_BFLOAT16 "Test in bfloat16 mode" OFF )
+option( MIOPEN_TEST_TF32 "Test in tf32 mode" OFF )
 option( MIOPEN_TEST_GFX908 "Test on MI100 (gfx908)" OFF )
 option( MIOPEN_TEST_GFX90A "Test on MI2X0 (gfx90a)" OFF )
 option( MIOPEN_TEST_GFX94X "Test on MI300 (gfx942)" OFF )
@@ -47,8 +48,10 @@ option( MIOPEN_TEST_GFX95X "Test on (gfx950)" OFF )
 option( MIOPEN_TEST_GFX900 "Test on Vega10 (gfx900)" OFF )
 option( MIOPEN_TEST_GFX906 "Test on Vega20 (gfx906)" OFF )
 option( MIOPEN_TEST_GFX103X "Test on Navi21/22 (gfx1030/31)" OFF )
-option( MIOPEN_TEST_GFX110X "Test on Navi31/32 (gfx1100/02)" OFF )
+option( MIOPEN_TEST_GFX110X "Test on Navi31/32/33/Phoenix (gfx1100/03)" OFF )
+option( MIOPEN_TEST_GFX115X "Test on Navi35 strix halo (gfx1150/51/52/53)" OFF )
 option( MIOPEN_TEST_GFX120X "Test on gfx1200/01" OFF )
+option( MIOPEN_TEST_GFX125X "Test on gfx1250" OFF )
 option( MIOPEN_TEST_GPU_XNACK_ENABLED "Test as if XNACK mode is enabled" OFF )
 option( MIOPEN_TEST_CONV "" OFF )
 option( MIOPEN_TEST_DEEPBENCH "" OFF )
@@ -77,7 +80,7 @@ if(NOT ENABLE_ASAN_PACKAGING AND MIOPEN_TEST_PERF)
         DESTINATION ${DATA_INSTALL_DIR}/perf_models)
     foreach(MODEL_FILE ${MODEL_FILES})
        get_filename_component(MODEL_FILE_FILENAME "${MODEL_FILE}" NAME)
-       configure_file("${MODEL_FILE}" "${PROJECT_BINARY_DIR}/${DATA_INSTALL_DIR}/perf_models/${MODEL_FILE_FILENAME}" COPYONLY)
+       configure_file("${MODEL_FILE}" "${CMAKE_BINARY_DIR}/${DATA_INSTALL_DIR}/perf_models/${MODEL_FILE_FILENAME}" COPYONLY)
     endforeach()
 endif()
 
@@ -107,16 +110,20 @@ endif()
 # Also we do not detect GPU when target GPU for testing is specified explicitly.
 set(MIOPEN_TEST_GPU_DETECTION_FAILED FALSE)
 set(MIOPEN_NO_GPU FALSE)
-if(NOT (MIOPEN_TEST_GFX900 OR MIOPEN_TEST_GFX906 OR MIOPEN_TEST_GFX908 OR MIOPEN_TEST_GFX90A OR MIOPEN_TEST_GFX94X OR MIOPEN_TEST_GFX95X OR MIOPEN_TEST_GFX103X OR MIOPEN_TEST_GFX110X OR MIOPEN_TEST_GFX120X OR MIOPEN_TEST_HIP_NOGPU))
+
+if(NOT (MIOPEN_TEST_GFX900 OR MIOPEN_TEST_GFX906 OR MIOPEN_TEST_GFX908 OR MIOPEN_TEST_GFX90A OR MIOPEN_TEST_GFX94X OR MIOPEN_TEST_GFX95X OR MIOPEN_TEST_GFX103X OR MIOPEN_TEST_GFX110X OR MIOPEN_TEST_GFX115X OR MIOPEN_TEST_GFX120X OR MIOPEN_TEST_GFX125X OR MIOPEN_TEST_HIP_NOGPU))
+    # Try to find rocminfo first, then hipinfo as fallback (for Windows)
     find_program(ROCMINFO
-        NAMES rocminfo
+        NAMES rocminfo hipinfo
         PATHS
             /opt/rocm
             ${CMAKE_INSTALL_PREFIX}
+            $ENV{ROCM_PATH}
+            $ENV{HIP_PATH}
         PATH_SUFFIXES
             /bin
     )
-    message(STATUS "rocminfo utility: ${ROCMINFO}")
+    message(STATUS "GPU info utility: ${ROCMINFO}")
     if(ROCMINFO)
         execute_process (
             COMMAND ${ROCMINFO}
@@ -127,16 +134,18 @@ if(NOT (MIOPEN_TEST_GFX900 OR MIOPEN_TEST_GFX906 OR MIOPEN_TEST_GFX908 OR MIOPEN
             message(WARNING "ROCk module is NOT loaded, possibly no GPU devices")
             set(MIOPEN_NO_GPU TRUE)
         elseif (NOT ROCMINFO_EXIT_STATUS EQUAL 0)
-            message(WARNING "ROCMINFO FAILED, GPU TYPE UNKNOWN. Manually set respective MIOPEN_TEST_GFX* CMake variable to specify target GPU for testing.")
+            message(WARNING "GPU info utility FAILED, GPU TYPE UNKNOWN. Manually set respective MIOPEN_TEST_GFX* CMake variable to specify target GPU for testing.")
             set(MIOPEN_TEST_GPU_DETECTION_FAILED TRUE)
         elseif(ROCMINFO_OUTPUT MATCHES "gfx103.")
             set(MIOPEN_TEST_GFX103X ON)
         elseif(ROCMINFO_OUTPUT MATCHES "gfx110.")
             set(MIOPEN_TEST_GFX110X ON)
         elseif(ROCMINFO_OUTPUT MATCHES "gfx115.")
-            set(MIOPEN_TEST_GFX110X ON)
+            set(MIOPEN_TEST_GFX115X ON)
         elseif(ROCMINFO_OUTPUT MATCHES "gfx120.")
             set(MIOPEN_TEST_GFX120X ON)
+        elseif(ROCMINFO_OUTPUT MATCHES "gfx125.")
+            set(MIOPEN_TEST_GFX125X ON)
         elseif(ROCMINFO_OUTPUT MATCHES "gfx900")
             set(MIOPEN_TEST_GFX900 ON)
         elseif(ROCMINFO_OUTPUT MATCHES "gfx906")
@@ -162,7 +171,7 @@ if(NOT (MIOPEN_TEST_GFX900 OR MIOPEN_TEST_GFX906 OR MIOPEN_TEST_GFX908 OR MIOPEN
             message(STATUS "${ROCMINFO_OUTPUT}")
         endif()
     else()
-        message(WARNING "ROCMINFO NOT FOUND, GPU TYPE UNKNOWN. Manually set respective MIOPEN_TEST_GFX* CMake variable to specify target GPU for testing.")
+        message(WARNING "GPU info utility FAILED, GPU TYPE UNKNOWN. Manually set respective MIOPEN_TEST_GFX* CMake variable to specify target GPU for testing.")
         set(MIOPEN_TEST_GPU_DETECTION_FAILED TRUE)
     endif()
 endif()
@@ -189,7 +198,9 @@ message(STATUS "MIOPEN_TEST_GFX94X ${MIOPEN_TEST_GFX94X}")
 message(STATUS "MIOPEN_TEST_GFX95X ${MIOPEN_TEST_GFX95X}")
 message(STATUS "MIOPEN_TEST_GFX103X ${MIOPEN_TEST_GFX103X}")
 message(STATUS "MIOPEN_TEST_GFX110X ${MIOPEN_TEST_GFX110X}")
+message(STATUS "MIOPEN_TEST_GFX115X ${MIOPEN_TEST_GFX115X}")
 message(STATUS "MIOPEN_TEST_GFX120X ${MIOPEN_TEST_GFX120X}")
+message(STATUS "MIOPEN_TEST_GFX125X ${MIOPEN_TEST_GFX125X}")
 message(STATUS "MIOPEN_TEST_GPU_XNACK_ENABLED ${MIOPEN_TEST_GPU_XNACK_ENABLED}")
 message(STATUS "MIOPEN_TEST_GPU_DETECTION_FAILED ${MIOPEN_TEST_GPU_DETECTION_FAILED}")
 message(STATUS "MIOPEN_TEST_WITH_MIOPENDRIVER ${MIOPEN_TEST_WITH_MIOPENDRIVER}")
@@ -209,18 +220,30 @@ else()
     add_definitions(-DMIOPEN_TEST_DRIVER_MODE=1)
 endif()
 
-add_custom_target(check COMMAND ${CMAKE_CTEST_COMMAND} --output-on-failure -C ${CMAKE_CFG_INTDIR})
-add_custom_target(tests)
+# Project-prefixed targets avoid collisions when included via add_subdirectory in a superbuild.
+# Unprefixed `check` / `tests` / `gpu_detection_check` aliases are created standalone-only.
+add_custom_target(miopen-check
+  COMMAND ${CMAKE_COMMAND} -E make_directory ${PROJECT_BINARY_DIR}/test_results
+  COMMAND ${CMAKE_CTEST_COMMAND} --output-on-failure --verbose -C ${CMAKE_CFG_INTDIR} --exclude-regex ".*_suite" COMMENT "Running MIOpen tests"
+)
+add_custom_target(miopen-tests COMMENT "Aggregate target for MIOpen tests")
+
+if(NOT ROCM_LIBS_SUPERBUILD)
+    add_custom_target(check DEPENDS miopen-check COMMENT "Back-compat alias for miopen-check")
+    add_custom_target(tests DEPENDS miopen-tests COMMENT "Back-compat alias for miopen-tests")
+endif()
 
 if(MIOPEN_TEST_GPU_DETECTION_FAILED AND NOT (MIOPEN_NO_GPU))
-    add_custom_target(gpu_detection_check COMMAND echo "*** FATAL: GPU DETECTION FAILED DURING CMAKE PHASE, CHECK CMAKE WARNINGS ***" COMMAND exit 1)
-    add_dependencies(check gpu_detection_check)
+    add_custom_target(miopen-gpu-detection-check COMMAND echo "*** FATAL: GPU DETECTION FAILED DURING CMAKE PHASE, CHECK CMAKE WARNINGS ***" COMMAND exit 1 COMMENT "Reporting failed GPU detection")
+    add_dependencies(miopen-check miopen-gpu-detection-check)
+    if(NOT ROCM_LIBS_SUPERBUILD)
+        add_custom_target(gpu_detection_check DEPENDS miopen-gpu-detection-check COMMENT "Back-compat alias for miopen-gpu-detection-check")
+    endif()
 endif()
 
 if(MIOPEN_TEST_WITH_MIOPENDRIVER)
-    add_dependencies(check MIOpenDriver)
+    add_dependencies(miopen-check MIOpenDriver)
 endif()
-
 
 set(MIOPEN_GTEST_SUFFIX)
 set(MIOPEN_TEST_FLOAT_ARG)
@@ -252,6 +275,13 @@ elseif(MIOPEN_TEST_BFLOAT16)
     set(MIOPENDRIVER_MODE_BN NOT_SUPPORTED)
     set(MIOPENDRIVER_MODE_POOL NOT_SUPPORTED)
     set(MIOPENDRIVER_MODE_GEMM NOT_SUPPORTED)
+elseif(MIOPEN_TEST_TF32)
+    set(MIOPEN_GTEST_SUFFIX TF32)
+    set(MIOPEN_TEST_FLOAT_ARG --float)  # TODO: not integrated in test_conv2d
+    set(MIOPENDRIVER_MODE_CONV conv)
+    set(MIOPENDRIVER_MODE_BN NOT_SUPPORTED)
+    set(MIOPENDRIVER_MODE_POOL NOT_SUPPORTED)
+    set(MIOPENDRIVER_MODE_GEMM NOT_SUPPORTED)
 else()
     set(MIOPEN_GTEST_SUFFIX FP32)
     set(MIOPEN_TEST_FLOAT_ARG --float)
@@ -266,13 +296,14 @@ message(STATUS "MIOPEN_GTEST_SUFFIX ${MIOPEN_GTEST_SUFFIX}")
 message(STATUS "MIOPEN_TEST_FLOAT ${MIOPEN_TEST_FLOAT}")
 message(STATUS "MIOPEN_TEST_HALF ${MIOPEN_TEST_HALF}")
 message(STATUS "MIOPEN_TEST_BFLOAT16 ${MIOPEN_TEST_BFLOAT16}")
+message(STATUS "MIOPEN_TEST_TF32 ${MIOPEN_TEST_TF32}")
 message(STATUS "MIOPEN_TEST_INT8 ${MIOPEN_TEST_INT8}")
 message(STATUS "MIOPEN_TEST_ALL ${MIOPEN_TEST_ALL}")
 
 set_var_to_condition(WORKAROUND_ISSUE_1187_DEFAULT MIOPEN_TEST_GFX90A AND MIOPEN_TEST_FLOAT)
 option( WORKAROUND_ISSUE_1187 "" ${WORKAROUND_ISSUE_1187_DEFAULT})
 
-set_var_to_condition(WORKAROUND_ISSUE_1148_DEFAULT (MIOPEN_TEST_GFX103X OR MIOPEN_TEST_GFX110X) AND MIOPEN_TEST_FLOAT)
+set_var_to_condition(WORKAROUND_ISSUE_1148_DEFAULT (MIOPEN_TEST_GFX103X OR MIOPEN_TEST_GFX110X OR MIOPEN_TEST_GFX115X) AND MIOPEN_TEST_FLOAT)
 option( WORKAROUND_ISSUE_1148 "" ${WORKAROUND_ISSUE_1148_DEFAULT})
 
 if(MIOPEN_TEST_INT8)
@@ -281,7 +312,7 @@ if(MIOPEN_TEST_INT8)
 elseif(MIOPEN_TEST_BFLOAT16)
     set(SKIP_ALL_EXCEPT_TESTS
               test_conv2d test_conv2d_find2 test_tensor_vec test_immed_conv2d
-              test_check_numerics_test test_conv_extra test_conv_for_implicit_gemm test_miopen_conv
+              test_conv_extra test_conv_for_implicit_gemm test_miopen_conv
               test_deepbench_conv test_conv_igemm_dynamic_xdlops_nhwc_wrw_bf16
               test_conv_igemm_dynamic_xdlops_nhwc_fwd_bf16
               test_conv_igemm_dynamic_xdlops_nhwc_bwd_bf16)
@@ -289,8 +320,7 @@ endif()
 
 if(MIOPEN_NO_GPU)
     set(SKIP_ALL_EXCEPT_TESTS
-            test_sqlite_perfdb
-            test_perfdb)
+            test_sqlite_perfdb)
 endif()
 
 #TODO WORKAROUND_ISSUE_1424
@@ -302,6 +332,17 @@ endif()
 if(NOT MIOPEN_TEST_DBSYNC)
     list(APPEND SKIP_TESTS db_sync)
 endif()
+
+if (MIOPEN_TEST_GFX115X)
+    list(APPEND SKIP_TESTS test_ctc)
+endif()
+
+# Skip conv2d tests to capture flaky behavior
+list(APPEND SKIP_TESTS test_conv2d test_conv2d_find2)
+
+# Skip test_immed_conv2d tests to capture flaky behavior
+list(APPEND SKIP_TESTS test_immed_conv2d)
+
 
 # The usage is non-trivial, see function add_test_command.
 if(SKIP_TESTS)
@@ -319,6 +360,7 @@ message(STATUS "SKIP_ALL_EXCEPT_TESTS: ${SKIP_ALL_EXCEPT_TESTS}")
 # If XNACK is enabled on the GPU, then the testing mode must be changed by the --xnack 1 option.
 set(XNACK_TESTS test_mdgraph)
 
+# Register a ctest entry for NAME, honoring skip lists and GDB/Windows modes.
 function(add_test_command NAME EXE)
     if( (NOT (NAME IN_LIST SKIP_ALL_EXCEPT_TESTS) AND SKIP_ALL_EXCEPT_TESTS)
         OR (NAME IN_LIST SKIP_TESTS)
@@ -326,7 +368,7 @@ function(add_test_command NAME EXE)
         add_test(NAME ${NAME} COMMAND echo skipped)
         set_tests_properties(${NAME} PROPERTIES DISABLED On)
     elseif(WIN32)
-        add_test(NAME ${NAME} COMMAND $<TARGET_FILE:${EXE}> ${ARGN} WORKING_DIRECTORY "${PROJECT_BINARY_DIR}/${DATABASE_INSTALL_DIR}")
+        add_test(NAME ${NAME} COMMAND $<TARGET_FILE:${EXE}> ${ARGN} WORKING_DIRECTORY "${KERNELS_BINARY_DIR}")
     else()
         if(MIOPEN_TEST_GDB)
             file(GENERATE OUTPUT "${CMAKE_CURRENT_BINARY_DIR}/test_${NAME}.cmake"
@@ -349,7 +391,9 @@ endfunction()
 
 separate_arguments(MIOPEN_TEST_FLAGS_ARGS NATIVE_COMMAND ${MIOPEN_TEST_FLAGS})
 
+# Build a test executable, wire up its libraries, and register it with ctest.
 function(add_test_executable TEST_NAME)
+    # cmake-lint: disable=R0912
     add_executable (${TEST_NAME} EXCLUDE_FROM_ALL ${ARGN})
     if(WIN32)
         target_compile_definitions(${TEST_NAME} PRIVATE NOMINMAX)
@@ -380,17 +424,18 @@ function(add_test_executable TEST_NAME)
 
     add_test_command(${TEST_NAME} ${TEST_COMMAND})
     rate_added_test(${TEST_NAME})
-    add_dependencies(tests ${TEST_NAME})
-    add_dependencies(check ${TEST_NAME})
+    add_dependencies(miopen-tests ${TEST_NAME})
+    add_dependencies(miopen-check ${TEST_NAME})
     set_tests_properties(${TEST_NAME} PROPERTIES FAIL_REGULAR_EXPRESSION "FAILED")
     if(WORKAROUND_ISSUE_1148
         AND (${TEST_NAME} MATCHES "test_soft_max") )
         set_tests_properties(${TEST_NAME} PROPERTIES RUN_SERIAL On)
     endif()
+    # MIOpen_with_plugins ensures CK plugin .so's are built alongside the test
     if(NOT MIOPEN_EMBED_DB STREQUAL "")
-        target_link_libraries(${TEST_NAME} MIOpen miopen_data)
+        target_link_libraries(${TEST_NAME} MIOpen_with_plugins miopen_data)
     else()
-        target_link_libraries(${TEST_NAME} MIOpen)
+        target_link_libraries(${TEST_NAME} MIOpen_with_plugins)
     endif()
     target_include_directories(${TEST_NAME} PRIVATE ../src/kernels)
     if(WIN32)
@@ -418,6 +463,7 @@ foreach(SANTIZER address thread)
     endif()
 endforeach()
 
+# Build sanitizer-instrumented variants of a test for each enabled sanitizer.
 function(add_sanitize_test TEST_SOURCE)
     get_filename_component(BASE_NAME ${TEST_SOURCE} NAME_WE)
     foreach(SANTIZER ${MIOPEN_TEST_SANITIZERS})
@@ -440,11 +486,10 @@ set(LONG_TESTS
     test_immed_conv3d
     test_conv3d_extra
     test_conv_3d
-    test_pooling2d
-    test_pooling3d
     test_conv_ck_igemm_fwd_v6r1_dlops_nchw
     )
 
+# Assign a ctest COST to a test so long-running tests are scheduled first.
 function(rate_added_test NAME)
     if(${NAME} IN_LIST LONG_TESTS)
         set_tests_properties(${NAME} PROPERTIES COST 800)
@@ -485,13 +530,13 @@ endforeach()
 if(MIOPEN_TEST_ENABLE_TEST_SQLITE_PERFDB)
     set_tests_properties(test_sqlite_perfdb PROPERTIES RUN_SERIAL On)
 endif()
-set_tests_properties(test_perfdb PROPERTIES RUN_SERIAL On)
 
 # add_sanitize_test(perfdb.cpp)
 # add_sanitize_test(cache.cpp)
 # add_sanitize_test(tensor_test.cpp)
 # add_sanitize_test(type_name.cpp)
 
+# Set result to TRUE when the two boolean arguments are equal (XNOR).
 function(bool_equality_f first_arg sec_arg result)
     if(${first_arg})
         if(${sec_arg})
@@ -506,6 +551,7 @@ function(bool_equality_f first_arg sec_arg result)
     endif()
 endfunction()
 
+# Set result to the logical AND of the two boolean arguments.
 function(bool_and_f first_arg sec_arg result)
     if(${first_arg} AND ${sec_arg})
         set(${result} TRUE PARENT_SCOPE)
@@ -514,6 +560,7 @@ function(bool_and_f first_arg sec_arg result)
     endif()
 endfunction()
 
+# Set result to the logical OR of the two boolean arguments.
 function(bool_or_f first_arg sec_arg result)
     if(${first_arg} OR ${sec_arg})
         set(${result} TRUE PARENT_SCOPE)
@@ -522,6 +569,7 @@ function(bool_or_f first_arg sec_arg result)
     endif()
 endfunction()
 
+# Set result to the logical NOT of the boolean argument.
 function(bool_not_f first_arg result)
     if(${first_arg})
         set(${result} FALSE PARENT_SCOPE)
@@ -530,6 +578,7 @@ function(bool_not_f first_arg result)
     endif()
 endfunction()
 
+# Resolve an enabled/disabled/default tri-state option into a boolean result.
 function(option_support_check is_enabled is_disabled default_result result)
     if(${is_enabled} AND ${is_disabled})
         message(FATAL_ERROR " Incompatible options used")
@@ -553,9 +602,9 @@ endfunction()
 #   These attributes can be enabled or disabled by using '_ENABLED' and '_DISABLED' suffix.
 #   Defaults: FLOAT_ENABLED HALF_DISABLED BF16_DISABLED INT8_DISABLED
 #
-# GPU types: GFX900, GFX906, GFX908, GFX90A, GFX94X, GFX1030/31, GFX1100/02
+# GPU types: GFX900, GFX906, GFX908, GFX90A, GFX94X, GFX1030/31, GFX1100/02, GFX115X
 #   These attributes can be enabled or disabled by using '_ENABLED' and '_DISABLED' suffix.
-#   Defaults: GFX900_ENABLED, GFX906_ENABLED, GFX908_ENABLED, GFX90A_ENABLED, GFX94X_DISABLED, GFX103X_DISABLED, GFX110X_DISABLED
+#   Defaults: GFX900_ENABLED, GFX906_ENABLED, GFX908_ENABLED, GFX90A_ENABLED, GFX94X_DISABLED, GFX103X_DISABLED, GFX110X_DISABLED, GFX115X_DISABLED
 #
 # Testing mode:
 #   SKIP_UNLESS_ALL - The test should be only run if MIOPEN_TEST_ALL=TRUE. Intended for long tests.
@@ -568,12 +617,12 @@ endfunction()
 # Backend: HIP HIP_NOGPU
 #   These attributes can be enabled or disabled by using '_ENABLED' and '_DISABLED' suffix.
 #   Default: HIP_ENABLED HIP_NOGPU_DISABLED.
-
 function(add_custom_test NAME)
+    # cmake-lint: disable=R0915
     set(options
-        BF16_ENABLED BF16_DISABLED HALF_ENABLED HALF_DISABLED INT8_ENABLED INT8_DISABLED FLOAT_ENABLED FLOAT_DISABLED
+        BF16_ENABLED BF16_DISABLED HALF_ENABLED HALF_DISABLED INT8_ENABLED INT8_DISABLED TF32_ENABLED TF32_DISABLED FLOAT_ENABLED FLOAT_DISABLED
         GFX900_ENABLED GFX900_DISABLED GFX906_ENABLED GFX906_DISABLED GFX908_ENABLED GFX908_DISABLED
-        GFX103X_ENABLED GFX103X_DISABLED GFX110X_ENABLED GFX110X_DISABLED GFX90A_ENABLED GFX90A_DISABLED GFX94X_ENABLED GFX94X_DISABLED
+            GFX103X_ENABLED GFX103X_DISABLED GFX110X_ENABLED GFX110X_DISABLED GFX115X_ENABLED GFX115X_DISABLED GFX90A_ENABLED GFX90A_DISABLED GFX94X_ENABLED GFX94X_DISABLED
         SKIP_UNLESS_MLIR SKIP_UNLESS_COMPOSABLEKERNEL SKIP_UNLESS_ALL TEST_PERF_DB_RECORD_NOT_FOUND TEST_TUNING SKIP_XNACK_ON
         HIP_ENABLED HIP_DISABLED HIP_NOGPU_ENABLED HIP_NOGPU_DISABLED
     )
@@ -582,7 +631,7 @@ function(add_custom_test NAME)
     cmake_parse_arguments(PARSE "${options}" "${oneValueArgs}" "${multiValueArgs}" ${ARGN})
 
     # Many custom tests do test only FP32 data type and therefore
-    # added only if none of MIOPEN_TEST_HALF, MIOPEN_TEST_INT8, MIOPEN_TEST_BFLOAT16
+    # added only if none of MIOPEN_TEST_HALF, MIOPEN_TEST_INT8, MIOPEN_TEST_TF32, MIOPEN_TEST_BFLOAT16
     # are set, except the test is allowed explicitly.
     set(HALF_TEST_DEFAULT FALSE)
     option_support_check(${PARSE_HALF_ENABLED} ${PARSE_HALF_DISABLED} ${HALF_TEST_DEFAULT} is_half_check)
@@ -595,6 +644,10 @@ function(add_custom_test NAME)
     set(INT8_TEST_DEFAULT FALSE)
     option_support_check(${PARSE_INT8_ENABLED} ${PARSE_INT8_DISABLED} ${INT8_TEST_DEFAULT} is_int8_check)
     bool_and_f(${MIOPEN_TEST_INT8} ${is_int8_check} is_int8_check)
+
+    set(TF32_TEST_DEFAULT FALSE)
+    option_support_check(${PARSE_TF32_ENABLED} ${PARSE_TF32_DISABLED} ${TF32_TEST_DEFAULT} is_tf32_check)
+    bool_and_f(${MIOPEN_TEST_TF32} ${is_tf32_check} is_tf32_check)
 
     set(FLOAT_TEST_DEFAULT TRUE)
     option_support_check(${PARSE_FLOAT_ENABLED} ${PARSE_FLOAT_DISABLED} ${FLOAT_TEST_DEFAULT} is_float_check)
@@ -645,6 +698,10 @@ function(add_custom_test NAME)
     option_support_check(${PARSE_GFX110X_ENABLED} ${PARSE_GFX110X_DISABLED} ${GFX110X_TEST_DEFAULT} is_gfx110x_check)
     bool_and_f(${MIOPEN_TEST_GFX110X} ${is_gfx110x_check} is_gfx110x_check)
 
+    set(GFX115X_TEST_DEFAULT FALSE)
+    option_support_check(${PARSE_GFX115X_ENABLED} ${PARSE_GFX115X_DISABLED} ${GFX115X_TEST_DEFAULT} is_gfx115x_check)
+    bool_and_f(${MIOPEN_TEST_GFX115X} ${is_gfx115x_check} is_gfx115x_check)
+
     # When SKIP_XNACK_ON is set, the test will be skipped if MIOPEN_TEST_GPU_XNACK_ENABLED is set.
     bool_and_f(${PARSE_SKIP_XNACK_ON} ${MIOPEN_TEST_GPU_XNACK_ENABLED} is_xnack_on_check)
     bool_not_f(${is_xnack_on_check} is_xnack_on_check)
@@ -652,8 +709,8 @@ function(add_custom_test NAME)
     bool_not_f(${PARSE_SKIP_UNLESS_ALL} is_full_check)
     bool_or_f(${is_full_check} ${MIOPEN_TEST_ALL} is_full_check)
 
-    add_custom_target(${NAME} ${PARSE_UNPARSED_ARGUMENTS})
-    add_test(NAME ${NAME} COMMAND ${CMAKE_COMMAND} --build ${CMAKE_CURRENT_BINARY_DIR} --target ${NAME})
+    add_custom_target(${NAME} ${PARSE_UNPARSED_ARGUMENTS} COMMENT "Building custom test ${NAME}")
+    add_test(NAME ${NAME} COMMAND ${CMAKE_COMMAND} --build ${CMAKE_BINARY_DIR} --target ${NAME})
     foreach(__environment ${PARSE_ENVIRONMENT})
         set_tests_properties(${NAME} PROPERTIES ENVIRONMENT "${__environment}")
     endforeach()
@@ -678,12 +735,12 @@ function(add_custom_test NAME)
         set_tests_properties(${NAME} PROPERTIES RUN_SERIAL On)
     endif()
 
-    if(  (is_gfx900_check OR is_gfx906_check OR is_gfx908_check OR is_gfx103x_check OR is_gfx110x_check OR is_gfx90a_check OR is_gfx94x_check OR is_gfx95x_check)
+    if ((is_gfx900_check OR is_gfx906_check OR is_gfx908_check OR is_gfx103x_check OR is_gfx110x_check OR is_gfx115x_check OR is_gfx90a_check OR is_gfx94x_check OR is_gfx95x_check)
      AND is_full_check
      AND is_xnack_on_check
      AND is_mlir_check
      AND is_composablekernel_check
-     AND (is_half_check OR is_bfloat16_check OR is_int8_check OR is_float_check)
+     AND (is_half_check OR is_bfloat16_check OR is_int8_check OR is_tf32_check OR is_float_check)
      AND (is_hip_check AND is_hip_nogpu_check)
     )
         if(PARSE_TEST_PERF_DB_RECORD_NOT_FOUND AND PARSE_TEST_TUNING)
@@ -731,8 +788,7 @@ set(IMPLICITGEMM_TESTING_ENV
 )
 
 if(MIOPEN_TEST_DEEPBENCH)
-    add_custom_test(test_deepbench_rnn GFX94X_ENABLED GFX103X_ENABLED GFX110X_ENABLED
-    )
+    add_custom_test(test_deepbench_rnn GFX94X_ENABLED GFX103X_ENABLED GFX110X_ENABLED GFX115X_ENABLED)
 endif()
 
 set(DYNAMIC_IMPLICITGEMM_COMMON

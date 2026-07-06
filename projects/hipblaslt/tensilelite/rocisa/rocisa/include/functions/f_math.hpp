@@ -34,6 +34,47 @@
 #include <memory>
 #include <optional>
 #include <string>
+#include <type_traits>
+
+namespace {
+    template <typename T>
+    inline std::string to_string_flexible(const T& value) {
+        using U = std::decay_t<T>;
+        if constexpr (std::is_same_v<U, std::string>) {
+            return value;
+        } else if constexpr (std::is_arithmetic_v<U>) {
+            return std::to_string(value);
+        } else {
+            static_assert(std::is_arithmetic_v<U> || std::is_same_v<U, std::string>,
+                          "to_string_flexible only supports arithmetic types and std::string");
+            return {}; // fallback, won't be reached due to static_assert
+        }
+    }
+
+    template <typename T>
+    inline auto getVgpr(T vgpr, int idx) {
+        using U = std::decay_t<T>;
+        if constexpr (std::is_same_v<U, int>) {
+            return rocisa::vgpr(vgpr + idx);
+        } else if constexpr (std::is_same_v<U, std::string>) {
+            return rocisa::vgpr(vgpr + "+" + std::to_string(idx));
+        } else {
+            return rocisa::vgpr(-1);
+        }
+    }
+
+    template <typename T>
+    inline auto getSgpr(T sgpr, int idx) {
+        using U = std::decay_t<T>;
+        if constexpr (std::is_same_v<U, int>) {
+            return rocisa::sgpr(sgpr + idx);
+        } else if constexpr (std::is_same_v<U, std::string>) {
+            return rocisa::sgpr(sgpr + "+" + std::to_string(idx));
+        } else {
+            return rocisa::sgpr(-1);
+        }
+    }
+}
 
 namespace rocisa
 {
@@ -52,26 +93,8 @@ namespace rocisa
                                        bool                              doRemainder = true,
                                        const std::string&                comment     = "")
     {
-        auto qRegStr = [&qReg]() {
-            if constexpr(std::is_same_v<QREG, int>)
-            {
-                return std::to_string(qReg);
-            }
-            else
-            {
-                return qReg;
-            }
-        }();
-        auto dRegStr = [&dReg]() {
-            if constexpr(std::is_same_v<DREG, int>)
-            {
-                return std::to_string(dReg);
-            }
-            else
-            {
-                return dReg;
-            }
-        }();
+        auto qRegStr = to_string_flexible(qReg);
+        auto dRegStr = to_string_flexible(dReg);
         std::string dComment = comment.empty()
                                    ? qRegStr + " = " + dRegStr + " / " + std::to_string(divisor)
                                    : comment;
@@ -631,6 +654,93 @@ namespace rocisa
         return module;
     }
 
+    // Use fp64 reciprocal instruction to compute integer division.
+    // This gives accurate results for dividends up to 2^24 and divisors up to 2^16.
+    template <typename QREG, typename DREG, typename DIVREG, typename RREG>
+    std::shared_ptr<Module> scalarUInt24DivideAndRemainder(QREG                qReg,
+                                                           DREG                dReg,
+                                                           DIVREG              divReg,
+                                                           RREG                rReg,
+                                                           ContinuousRegister& tmpVgprRes,
+                                                           int                 wavewidth,
+                                                           bool                doRemainder = true,
+                                                           bool                doQuotient = true,
+                                                           const std::string&  comment     = "")
+    {
+        auto module = std::make_shared<Module>("scalarUInt24DivideAndRemainder");
+
+        auto qRegSgpr   = sgpr(qReg);
+        auto rRegSgpr   = sgpr(rReg);
+        auto dRegSgpr   = sgpr(dReg);
+        auto divRegSgpr = sgpr(divReg);
+
+        std::string dComment = comment.empty() ? qRegSgpr->toString() + " = " + dRegSgpr->toString()
+                                                     + " / " + divRegSgpr->toString()
+                                               : comment;
+
+        std::string rComment = "";
+        if(doRemainder)
+        {
+            rComment = comment.empty() ? sgpr(rReg)->toString() + " = " + dRegSgpr->toString()
+                                             + " % " + divRegSgpr->toString()
+                                       : comment;
+        }
+
+        if(tmpVgprRes.size < 4)
+        {
+            throw std::runtime_error("Invalid tmpVgprRes, must be at least 4");
+        }
+        auto tmpVgpr  = tmpVgprRes.idx;
+        auto tmpVgpr1 = tmpVgprRes.idx + 2;
+
+        auto pEXEC = MAKE(EXEC);
+
+        module->addT<VCvtU32toF64>(vgpr(tmpVgpr, 2), divRegSgpr, std::nullopt, dComment);
+        module->addT<VRcpF64>(vgpr(tmpVgpr, 2), vgpr(tmpVgpr, 2), dComment);
+        module->addT<VCvtU32toF64>(vgpr(tmpVgpr1, 2), dRegSgpr, std::nullopt, dComment);
+        module->addT<VMulF64>(vgpr(tmpVgpr, 2), vgpr(tmpVgpr, 2), vgpr(tmpVgpr1, 2), std::nullopt, dComment);
+        module->addT<VCvtF64toU32>(vgpr(tmpVgpr), vgpr(tmpVgpr, 2), std::nullopt, dComment);
+
+        module->addT<VMulLOU32>(vgpr(tmpVgpr + 1), vgpr(tmpVgpr), divRegSgpr, dComment);
+        module->addT<VSubU32>(vgpr(tmpVgpr1), dRegSgpr, vgpr(tmpVgpr + 1), dComment);
+        module->addT<VCmpXGeU32>(pEXEC, vgpr(tmpVgpr1), divRegSgpr, std::nullopt, dComment);
+        module->addT<VAddU32>(vgpr(tmpVgpr), vgpr(tmpVgpr), 1, dComment);
+
+        auto resetExec = [module, pEXEC](int wavewidth) {
+            if(wavewidth == 64)
+            {
+                module->addT<SMovB64>(pEXEC, -1, "Reset exec");
+            }
+            else
+            {
+                module->addT<SMovB32>(pEXEC, -1, "Reset exec");
+            }
+        };
+        resetExec(wavewidth);
+
+        if(doRemainder)
+        {
+            module->addT<VMulLOU32>(vgpr(tmpVgpr + 1), vgpr(tmpVgpr), divRegSgpr, dComment);
+            module->addT<VSubU32>(vgpr(tmpVgpr1), dRegSgpr, vgpr(tmpVgpr + 1), dComment);
+        }
+
+        if(doQuotient)
+        {
+            module->addT<VReadfirstlaneB32>(qRegSgpr, vgpr(tmpVgpr), "quotient");
+        }
+        else
+        {
+            module->addT<SNop>(0);
+        }
+
+        if(doRemainder)
+        {
+            module->addT<VReadfirstlaneB32>(sgpr(rReg), vgpr(tmpVgpr1), "remainder");
+        }
+
+        return module;
+    }
+
     template <typename QREG, typename DREG, typename DIVREG, typename RREG>
     std::shared_ptr<Module> scalarUInt32DivideAndRemainder(QREG                qReg,
                                                            DREG                dReg,
@@ -732,18 +842,7 @@ namespace rocisa
 
         auto destSgpr  = sgpr(dest, 2);
         auto destSgpr0 = sgpr(dest);
-        auto destSgpr1 = [&dest]() {
-            if constexpr(std::is_same_v<DEST, int>)
-            {
-                return sgpr(dest + 1);
-            }
-            else if constexpr(std::is_same_v<DEST, std::string>)
-            {
-                std::string destStr = dest + "+1";
-                return sgpr(destStr);
-            }
-            return sgpr(-1);
-        }();
+        auto destSgpr1 = getSgpr(dest, 1);
         auto continuousReg = ContinuousRegister(tmpVgpr.idx, 2);
 
         module->addModuleAsFlatItems(SMulInt64to32(destSgpr0,
@@ -810,4 +909,147 @@ namespace rocisa
                                int                                       multiplier,
                                const std::optional<ContinuousRegister>&  tmpSgprRes = std::nullopt,
                                const std::string&                        comment    = "");
+
+    std::shared_ptr<Module>
+        vectorAddMultiplyBpe(int dst,
+                            int src0,
+                            int src1,
+                            float bpe,
+                            const std::string&  comment = "");
+
+    template<typename DST, typename SRC>
+    std::shared_ptr<Module>
+        vectorMultiplyBpe(DST dst,
+                          SRC src,
+                          float bpe,
+                          const std::string&  comment     = "")
+    {
+        auto module = std::make_shared<Module>("vectorMultiplyBpe");
+        std::string mcomment = comment + " (multiple bpe)";
+        auto dstVgpr  = vgpr(dst);
+        auto srcVgpr  = vgpr(src);
+        if (bpe == 0.5) {
+            module->addT<VLShiftRightB32>(dstVgpr, 1, srcVgpr, mcomment);
+        } else if (bpe == 0.75) {
+            module->addT<VMulLOU32>(dstVgpr, 6, srcVgpr, mcomment);
+            module->addT<VLShiftRightB32>(dstVgpr, 3, dstVgpr, mcomment);
+        } else {
+            int bpe_log2 = static_cast<int>(std::log2(bpe));
+            std::string dst_str = to_string_flexible<DST>(dst);
+            std::string src_str = to_string_flexible<SRC>(src);
+            if ((bpe_log2 == 0) && (dst_str == src_str)) {
+                module->addCommentAlign(comment + " (bpe is 1, do nothing)");
+            } else {
+                module->addT<VLShiftLeftB32>(dstVgpr, bpe_log2, srcVgpr, mcomment);
+            }
+        }
+        return module;
+    }
+
+    template<typename DST, typename SRC, typename TMP>
+    std::shared_ptr<Module>
+        vectorMultiply64Bpe(DST dst,
+                            SRC src,
+                            float bpe,
+                            TMP tmp,
+                            const std::string&  comment     = "")
+    {
+        auto module = std::make_shared<Module>("vectorMultiply64Bpe");
+        std::string mcomment = comment + " (multiple bpe)";
+        auto dstVgpr  = vgpr(dst, 2);
+        auto srcVgpr  = vgpr(src, 2);
+        auto tmpVgpr  = vgpr(tmp);
+        if (bpe == 0.5) {
+            module->addT<VLShiftRightB64>(dstVgpr, 1, srcVgpr, mcomment);
+        } else if (bpe == 0.75) {
+            auto dstVgpr0 = vgpr(dst);
+            auto dstVgpr1 = getVgpr(dst,1);
+            auto srcVgpr0 = vgpr(src);
+            auto srcVgpr1 = getVgpr(src,1);
+            module->addT<VMovB32>(tmpVgpr, srcVgpr1, std::nullopt, mcomment);
+            module->addT<VMulHIU32>(dstVgpr1, 6, srcVgpr0, mcomment);
+            module->addT<VMulLOU32>(dstVgpr0, 6, srcVgpr0, mcomment);
+            module->addT<VMulLOU32>(tmpVgpr, 6, tmpVgpr, mcomment);
+            module->addT<VAddU32>(dstVgpr1, dstVgpr1, tmpVgpr, mcomment);
+            module->addT<VLShiftRightB64>(dstVgpr, 3, dstVgpr, mcomment);
+        } else {
+            int bpe_log2 = static_cast<int>(std::log2(bpe));
+            std::string dst_str = to_string_flexible<DST>(dst);
+            std::string src_str = to_string_flexible<SRC>(src);
+            if ((bpe_log2 == 0) && (dst_str == src_str)) {
+                module->addCommentAlign(comment + " (bpe is 1, do nothing)");
+            } else {
+                module->addT<VLShiftLeftB64>(dstVgpr, bpe_log2, srcVgpr, mcomment);
+            }
+        }
+        return module;
+    }
+
+    template<typename DST, typename SRC>
+    std::shared_ptr<Module>
+        scalarMultiplyBpe(DST dst,
+                          SRC src,
+                          float bpe,
+                          const std::string&  comment     = "")
+    {
+        auto module = std::make_shared<Module>("scalarMultiplyBpe");
+        std::string mcomment = comment + " (multiple bpe)";
+        auto dstSgpr = sgpr(dst);
+        auto srcSgpr = sgpr(src);
+        if (bpe == 0.5) {
+            module->addT<SLShiftRightB32>(dstSgpr, 1, srcSgpr, mcomment);
+        } else if (bpe == 0.75) {
+            module->addT<SMulI32>(dstSgpr, 6, srcSgpr, mcomment);
+            module->addT<SLShiftRightB32>(dstSgpr, 3, dstSgpr, mcomment);
+        } else {
+            int bpe_log2 = static_cast<int>(std::log2(bpe));
+            std::string dst_str = to_string_flexible<DST>(dst);
+            std::string src_str = to_string_flexible<SRC>(src);
+            if ((bpe_log2 == 0) && (dst_str == src_str)) {
+                module->addCommentAlign(comment + " (bpe is 1, do nothing)");
+            } else {
+                module->addT<SLShiftLeftB32>(dstSgpr, bpe_log2, srcSgpr, mcomment);
+            }
+        }
+        return module;
+    }
+
+    template<typename DST, typename SRC, typename TMP>
+    std::shared_ptr<Module>
+        scalarMultiply64Bpe(DST dst,
+                            SRC src,
+                            float bpe,
+                            TMP tmp,
+                            const std::string&  comment     = "")
+    {
+        auto module = std::make_shared<Module>("scalarMultiply64Bpe");
+        std::string mcomment = comment + " (multiple bpe)";
+        auto dstSgpr = sgpr(dst, 2);
+        auto srcSgpr = sgpr(src, 2);
+        auto tmpSgpr = sgpr(tmp);
+        if (bpe == 0.5) {
+            module->addT<SLShiftRightB64>(dstSgpr, 1, srcSgpr, mcomment);
+        } else if (bpe == 0.75) {
+            auto dstSgpr0 = sgpr(dst);
+            auto dstSgpr1 = getSgpr(dst,1);
+            auto srcSgpr0 = sgpr(src);
+            auto srcSgpr1 = getSgpr(src,1);
+            module->addT<SMovB32>(tmpSgpr, srcSgpr1, mcomment);
+            module->addT<SMulHIU32>(dstSgpr1, 6, srcSgpr0, mcomment);
+            module->addT<SMulI32>(dstSgpr0, 6, srcSgpr0, mcomment);
+            module->addT<SMulI32>(tmpSgpr, 6, tmpSgpr, mcomment);
+            module->addT<SAddU32>(dstSgpr1, dstSgpr1, tmpSgpr, mcomment);
+            module->addT<SLShiftRightB64>(dstSgpr, 3, dstSgpr, mcomment);
+        } else {
+            int bpe_log2 = static_cast<int>(std::log2(bpe));
+            std::string dst_str = to_string_flexible<DST>(dst);
+            std::string src_str = to_string_flexible<SRC>(src);
+            if ((bpe_log2 == 0) && (dst_str == src_str)) {
+                module->addCommentAlign(comment + " (bpe is 1, do nothing)");
+            } else {
+                module->addT<SLShiftLeftB64>(dstSgpr, bpe_log2, srcSgpr, mcomment);
+            }
+        }
+        return module;
+    }
 } // namespace rocisa

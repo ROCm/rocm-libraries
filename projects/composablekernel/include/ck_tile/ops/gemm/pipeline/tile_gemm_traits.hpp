@@ -1,9 +1,10 @@
+// Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
 // SPDX-License-Identifier: MIT
-// Copyright (c) 2024-2025, Advanced Micro Devices, Inc. All rights reserved.
 
 #pragma once
 
 #include "ck_tile/core.hpp"
+#include "ck_tile/core/utility/data_cache_prefetch.hpp"
 
 namespace ck_tile {
 
@@ -39,28 +40,37 @@ template <bool kPadM_,
           typename AsLayout_,
           typename BsLayout_,
           typename CLayout_,
-          bool TransposeC_            = false,
-          bool UseStructuredSparsity_ = false,
-          bool UsePersistentKernel_   = false,
-          index_t NumWaveGroups_      = 1,
-          bool Preshuffle_            = false>
+          bool TransposeC_                          = false,
+          bool UseStructuredSparsity_               = false,
+          bool UsePersistentKernel_                 = false,
+          index_t NumWaveGroups_                    = 1,
+          bool Preshuffle_                          = false,
+          int VectorSize_                           = 16,
+          DataCachePrefetchKind DataCachePrefetchA_ = DataCachePrefetchKind::None,
+          DataCachePrefetchKind DataCachePrefetchB_ = DataCachePrefetchKind::None,
+          bool Async_                               = false,
+          bool LargeTensors_                        = false>
 struct TileGemmUniversalTraits
 {
     static constexpr bool kPadM            = kPadM_;
     static constexpr bool kPadN            = kPadN_;
     static constexpr bool kPadK            = kPadK_;
-    static constexpr int _VectorSize       = 16;
+    static constexpr int _VectorSize       = VectorSize_;
     static constexpr bool DoubleSmemBuffer = DoubleSmemBuffer_;
+    static constexpr bool LargeTensors     = LargeTensors_;
 
-    using AsLayout = AsLayout_;
-    using BsLayout = BsLayout_;
-    using CLayout  = CLayout_;
+    using AsLayout                   = AsLayout_;
+    using BsLayout                   = BsLayout_;
+    using CLayout                    = CLayout_;
+    static constexpr bool TransposeC = TransposeC_;
 
-    static constexpr bool TransposeC            = TransposeC_;
-    static constexpr bool UseStructuredSparsity = UseStructuredSparsity_;
-    static constexpr bool UsePersistentKernel   = UsePersistentKernel_;
-    static constexpr index_t NumWaveGroups      = NumWaveGroups_;
-    static constexpr bool Preshuffle            = Preshuffle_;
+    static constexpr bool UseStructuredSparsity               = UseStructuredSparsity_;
+    static constexpr bool UsePersistentKernel                 = UsePersistentKernel_;
+    static constexpr index_t NumWaveGroups                    = NumWaveGroups_;
+    static constexpr bool Preshuffle                          = Preshuffle_;
+    static constexpr DataCachePrefetchKind DataCachePrefetchA = DataCachePrefetchA_;
+    static constexpr DataCachePrefetchKind DataCachePrefetchB = DataCachePrefetchB_;
+    static constexpr bool Async                               = Async_;
 };
 
 template <bool kPadM_,

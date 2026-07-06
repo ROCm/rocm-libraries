@@ -1,4 +1,4 @@
-// Copyright (c) 2017-2025 Advanced Micro Devices, Inc. All rights reserved.
+// Copyright (c) 2017-2026 Advanced Micro Devices, Inc. All rights reserved.
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -27,10 +27,10 @@
 #include "../detail/various.hpp"
 #include "../intrinsics/arch.hpp"
 
-BEGIN_ROCPRIM_NAMESPACE
-
 /// \addtogroup intrinsicsmodule
 /// @{
+
+BEGIN_ROCPRIM_NAMESPACE
 
 // Sizes
 
@@ -165,28 +165,28 @@ auto flat_block_id()
            (blockIdx.z * gridDim.y * gridDim.x);
 }
 // Returns the warp lane mask of all lanes less than the calling thread
-ROCPRIM_DEVICE ROCPRIM_FORCE_INLINE
+ROCPRIM_DEVICE ROCPRIM_INLINE
 uint64_t get_sreg_lanemask_lt()
 {
     return (uint64_t(1) << ::rocprim::lane_id()) - 1;
 }
 
 // Returns the warp lane mask of all lanes less than or equal to the calling thread
-ROCPRIM_DEVICE ROCPRIM_FORCE_INLINE
+ROCPRIM_DEVICE ROCPRIM_INLINE
 uint64_t get_sreg_lanemask_le()
 {
     return ((uint64_t(1) << ::rocprim::lane_id()) << 1) - 1;
 }
 
 // Returns the warp lane mask of all lanes greater than the calling thread
-ROCPRIM_DEVICE ROCPRIM_FORCE_INLINE
+ROCPRIM_DEVICE ROCPRIM_INLINE
 uint64_t get_sreg_lanemask_gt()
 {
     return uint64_t(-1) ^ get_sreg_lanemask_le();
 }
 
 // Returns the warp lane mask of all lanes greater than or equal to the calling thread
-ROCPRIM_DEVICE ROCPRIM_FORCE_INLINE
+ROCPRIM_DEVICE ROCPRIM_INLINE
 uint64_t get_sreg_lanemask_ge()
 {
     return uint64_t(-1) ^ get_sreg_lanemask_lt();
@@ -333,9 +333,9 @@ namespace detail
     }
 }
 
+END_ROCPRIM_NAMESPACE
+
 /// @}
 // end of group intrinsicsmodule
-
-END_ROCPRIM_NAMESPACE
 
 #endif // ROCPRIM_INTRINSICS_THREAD_HPP_

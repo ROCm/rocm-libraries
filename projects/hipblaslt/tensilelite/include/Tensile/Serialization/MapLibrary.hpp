@@ -32,6 +32,8 @@
 #include <Tensile/Serialization/Base.hpp>
 #include <Tensile/Serialization/Properties.hpp>
 
+#include <tensilelitehost/export.h>
+
 namespace TensileLite
 {
     namespace Serialization
@@ -62,3 +64,4 @@ namespace TensileLite
         };
     } // namespace Serialization
 } // namespace TensileLite
+

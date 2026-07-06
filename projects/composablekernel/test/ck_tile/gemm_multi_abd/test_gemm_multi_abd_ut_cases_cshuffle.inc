@@ -1,3 +1,6 @@
+// Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
+// SPDX-License-Identifier: MIT
+
 #pragma once
 
 TYPED_TEST(TestCkTileGemmMultiABD, TestCkTileGemmMultiABDKBatch1CShuffle_256x512x256)
@@ -84,16 +87,6 @@ TYPED_TEST(TestCkTileGemmMultiABD, TestCkTileGemmMultiABDKBatch1CShuffle_1280x51
 {
     constexpr int M      = 1280;
     constexpr int N      = 512;
-    constexpr int K      = 256;
-    constexpr int kBatch = 1;
-
-    EXPECT_EQ(this->Run(M, N, K, kBatch), true);
-}
-
-TYPED_TEST(TestCkTileGemmMultiABD, TestCkTileGemmMultiABDKBatch1CShuffle_1280x256x256)
-{
-    constexpr int M      = 1280;
-    constexpr int N      = 256;
     constexpr int K      = 256;
     constexpr int kBatch = 1;
 

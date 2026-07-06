@@ -1,28 +1,5 @@
-/*******************************************************************************
- *
- * MIT License
- *
- * Copyright 2024-2025 AMD ROCm(TM) Software
- *
- * Permission is hereby granted, free of charge, to any person obtaining a copy
- * of this software and associated documentation files (the "Software"), to deal
- * in the Software without restriction, including without limitation the rights
- * to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
- * copies of the Software, and to permit persons to whom the Software is
- * furnished to do so, subject to the following conditions:
- *
- * The above copyright notice and this permission notice shall be included in
- * all copies or substantial portions of the Software.
- *
- * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
- * IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
- * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
- * AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
- * LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
- * OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
- * SOFTWARE.
- *
- *******************************************************************************/
+// Copyright Advanced Micro Devices, Inc., or its affiliates.
+// SPDX-License-Identifier: MIT
 
 #include <rocRoller/DataTypes/DataTypes.hpp>
 #include <rocRoller/Expression.hpp>
@@ -84,8 +61,7 @@ namespace rocRoller
                 auto new_tag = reindexer.coordinates.at(tag);
 
                 auto outgoing_nodes
-                    = graph.coordinates.getNeighbours<Graph::Direction::Downstream>(new_tag)
-                          .to<std::vector>();
+                    = graph.coordinates.getNeighbours<Graph::Direction::Downstream>(new_tag);
                 auto dstTag = -1;
                 for(auto const& out : outgoing_nodes)
                 {
@@ -103,8 +79,7 @@ namespace rocRoller
                 outgoing_nodes.insert(outgoing_nodes.begin(), loop);
 
                 auto incoming_nodes
-                    = graph.coordinates.getNeighbours<Graph::Direction::Upstream>(new_tag)
-                          .to<std::vector>();
+                    = graph.coordinates.getNeighbours<Graph::Direction::Upstream>(new_tag);
 
                 graph.coordinates.deleteElement(new_tag);
                 graph.coordinates.addElement(new_tag, edge, incoming_nodes, outgoing_nodes);
@@ -138,8 +113,7 @@ namespace rocRoller
             {
                 auto new_tag = reindexer.coordinates.at(tag);
                 auto incoming_nodes
-                    = graph.coordinates.getNeighbours<Graph::Direction::Upstream>(new_tag)
-                          .to<std::vector>();
+                    = graph.coordinates.getNeighbours<Graph::Direction::Upstream>(new_tag);
                 auto srcTag = -1;
                 for(auto const& in : incoming_nodes)
                 {
@@ -157,8 +131,7 @@ namespace rocRoller
                 incoming_nodes.insert(incoming_nodes.begin(), loop);
 
                 auto outgoing_nodes
-                    = graph.coordinates.getNeighbours<Graph::Direction::Downstream>(new_tag)
-                          .to<std::vector>();
+                    = graph.coordinates.getNeighbours<Graph::Direction::Downstream>(new_tag);
                 graph.coordinates.deleteElement(new_tag);
                 graph.coordinates.addElement(new_tag, edge, incoming_nodes, outgoing_nodes);
             }
@@ -172,8 +145,7 @@ namespace rocRoller
                 copyEdge(graph, original, reindexer, tag);
 
                 auto incoming_nodes
-                    = graph.coordinates.getNeighbours<Graph::Direction::Upstream>(tag)
-                          .to<std::vector>();
+                    = graph.coordinates.getNeighbours<Graph::Direction::Upstream>(tag);
                 if(incoming_nodes.size() > 1)
                     addLoopSrc(graph, original, reindexer, tag, edge);
             }
@@ -198,8 +170,7 @@ namespace rocRoller
 
                 auto new_tag = reindexer.control.at(tag);
                 auto incoming_edge_tag
-                    = graph.control.getNeighbours<Graph::Direction::Upstream>(new_tag)
-                          .to<std::vector>();
+                    = graph.control.getNeighbours<Graph::Direction::Upstream>(new_tag);
                 AssertFatal(incoming_edge_tag.size() == 1, "one parent node is expected");
                 auto incoming_edge = graph.control.getElement(incoming_edge_tag[0]);
 

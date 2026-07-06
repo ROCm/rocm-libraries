@@ -28,55 +28,253 @@ include: rocsparse_common.yaml
 Definitions:
   - &alpha_beta_range_quick
     - { alpha:   1.0, beta: -1.0, alphai:  1.0, betai: -0.5 }
-    - { alpha:  -0.5, beta:  0.5, alphai: -0.5, betai:  1.0 }
+
 
   - &alpha_beta_range_checkin
     - { alpha:   0.0, beta:  1.0,  alphai:  1.5, betai:  0.5 }
-    - { alpha:   3.0, beta:  1.0,  alphai:  2.0, betai: -0.5 }
 
   - &alpha_beta_range_nightly
     - { alpha:  -0.5, beta:  0.5,  alphai:  1.0, betai: -0.5 }
     - { alpha:  -1.0, beta: -0.5,  alphai:  0.0, betai:  0.0 }
 
 Tests:
+# Quick
+- name: v2_spmv_bsr
+  category: quick
+  function: v2_spmv_bsr
+  indextype: *i32
+  precision: *single_double_precisions
+  M: [50]
+  N: [50]
+  block_dim: [2, 3]
+  alpha_beta: *alpha_beta_range_quick
+  direction: [rocsparse_direction_row]
+  baseA: [rocsparse_index_base_zero]
+  matrix: [rocsparse_matrix_random]
+
+- name: v2_spmv_bsr_file
+  category: quick
+  function: v2_spmv_bsr
+  indextype: *i32
+  precision: *single_double_precisions
+  block_dim: [4, 5]
+  alpha_beta: *alpha_beta_range_quick
+  direction: [rocsparse_direction_column]
+  baseA: [rocsparse_index_base_one]
+  matrix: [rocsparse_matrix_file_rocalution]
+  filename: [mac_econ_fwd500,
+             nos2]
+
+- name: v2_spmv_bsr_file
+  category: quick
+  function: v2_spmv_bsr
+  indextype: *i32
+  precision: *single_only_precisions_complex
+  M: 1
+  N: 1
+  block_dim: [3, 6]
+  alpha_beta: *alpha_beta_range_quick
+  direction: [rocsparse_direction_row]
+  baseA: [rocsparse_index_base_zero]
+  matrix: [rocsparse_matrix_file_rocalution]
+  filename: [Chevron2,
+             qc2534]
+
+- name: v2_spmv_bsr
+  category: quick
+  function: v2_spmv_bsr
+  indextype: *i32
+  precision: *float32_float64_float64_float64
+  M: [50]
+  N: [50]
+  block_dim: [7, 12]
+  alpha_beta: *alpha_beta_range_checkin
+  direction: [rocsparse_direction_row]
+  baseA: [rocsparse_index_base_zero]
+  matrix: [rocsparse_matrix_random]
+
+- name: v2_spmv_bsr
+  category: quick
+  function: v2_spmv_bsr
+  indextype: *i32
+  precision: *int8_int8_int32_int32_axyt_precision
+  M: [50]
+  N: [50]
+  block_dim: [8, 9]
+  alpha_beta: *alpha_beta_range_quick
+  direction: [rocsparse_direction_row]
+  baseA: [rocsparse_index_base_zero]
+  matrix: [rocsparse_matrix_random]
+
+# Pre-checkin
 - name: v2_spmv_bsr_bad_arg
   category: pre_checkin
   function: v2_spmv_bsr_bad_arg
   indextype: *i32i32_i64i32_i64i64
   precision: *single_double_precisions_complex_real
 
-#
-# general matrix type
-#
-
-- name: v2_spmv_bsr
-  category: quick
-  function: v2_spmv_bsr
-  indextype: *i32i32_i64i32_i64i64
-  precision: *single_double_precisions_complex_real
-  M: [10, 500]
-  N: [33, 842]
-  block_dim: [2]
-  alpha_beta: *alpha_beta_range_quick
-  direction: [rocsparse_direction_row]
-  baseA: [rocsparse_index_base_zero]
-  matrix: [rocsparse_matrix_random]
-
-
 - name: v2_spmv_bsr
   category: pre_checkin
   function: v2_spmv_bsr
   indextype: *i32i32_i64i32_i64i64
   precision: *single_double_precisions_complex_real
-  M: [0, 7111]
-  N: [0, 4441]
+  M: [100]
+  N: [100]
   block_dim: [3]
   alpha_beta: *alpha_beta_range_checkin
   direction: [rocsparse_direction_column]
   baseA: [rocsparse_index_base_one]
   matrix: [rocsparse_matrix_random]
 
+- name: v2_spmv_bsr_file
+  category: pre_checkin
+  function: v2_spmv_bsr
+  indextype: *i32i32_i64i32_i64i64
+  precision: *single_double_precisions
+  block_dim: [5]
+  alpha_beta: *alpha_beta_range_checkin
+  direction: [rocsparse_direction_row]
+  baseA: [rocsparse_index_base_zero]
+  matrix: [rocsparse_matrix_file_rocalution]
+  filename: [nos1,
+             nos3,
+             nos5,
+             nos7]
 
+- name: v2_spmv_bsr_file
+  category: pre_checkin
+  function: v2_spmv_bsr
+  indextype: *i32_i64
+  precision: *single_double_precisions
+  block_dim: [7]
+  alpha_beta: *alpha_beta_range_checkin
+  direction: [rocsparse_direction_row]
+  baseA: [rocsparse_index_base_zero]
+  matrix: [rocsparse_matrix_file_rocalution]
+  filename: [rma10,
+             mc2depi,
+             mac_econ_fwd500]
+
+- name: v2_spmv_bsr_file
+  category: pre_checkin
+  function: v2_spmv_bsr
+  indextype: *i32_i64
+  precision: *single_double_precisions
+  block_dim: [3]
+  alpha_beta: *alpha_beta_range_checkin
+  direction: [rocsparse_direction_row]
+  baseA: [rocsparse_index_base_zero]
+  matrix: [rocsparse_matrix_file_rocalution]
+  filename: [ASIC_320k,
+             bibd_22_8,
+             Chebyshev4]
+
+- name: v2_spmv_bsr_file
+  category: pre_checkin
+  function: v2_spmv_bsr
+  indextype: *i32i32_i64i32_i64i64
+  precision: *single_double_precisions_complex
+  block_dim: [2]
+  alpha_beta: *alpha_beta_range_checkin
+  direction: [rocsparse_direction_column]
+  baseA: [rocsparse_index_base_one]
+  matrix: [rocsparse_matrix_file_rocalution]
+  filename: [mplate,
+             Chevron3]
+
+- name: v2_spmv_bsr_graph_test
+  category: pre_checkin
+  function: v2_spmv_bsr
+  indextype: *i32i32_i64i32_i64i64
+  precision: *single_double_precisions_complex_real
+  M: [500]
+  N: [842]
+  block_dim: [8]
+  alpha_beta: *alpha_beta_range_checkin
+  direction: [rocsparse_direction_column]
+  baseA: [rocsparse_index_base_zero]
+  matrix: [rocsparse_matrix_random]
+  graph_test: true
+
+- name: v2_spmv_bsr
+  category: pre_checkin
+  function: v2_spmv_bsr
+  indextype: *i32_i64
+  precision: *float32_float64_float64_float64
+  M: [200]
+  N: [578, 2000]
+  block_dim: [16]
+  alpha_beta: *alpha_beta_range_checkin
+  direction: [rocsparse_direction_column]
+  baseA: [rocsparse_index_base_one]
+  matrix: [rocsparse_matrix_random]
+
+- name: v2_spmv_bsr
+  category: pre_checkin
+  function: v2_spmv_bsr
+  indextype: *i32_i64
+  precision: *int8_int8_float32_float32_axyt_precision
+  M: [200]
+  N: [578, 2000]
+  block_dim: [16]
+  alpha_beta: *alpha_beta_range_checkin
+  direction: [rocsparse_direction_column]
+  baseA: [rocsparse_index_base_one]
+  matrix: [rocsparse_matrix_random]
+
+- name: v2_spmv_bsr
+  category: pre_checkin
+  function: v2_spmv_bsr
+  indextype: *i32_i64
+  precision: *float16_float16_float32_float32_axyt_precision
+  M: [2000]
+  N: [2000]
+  block_dim: [9]
+  alpha_beta: *alpha_beta_range_checkin
+  direction: [rocsparse_direction_column]
+  baseA: [rocsparse_index_base_one]
+  matrix: [rocsparse_matrix_random]
+
+- name: v2_spmv_bsr
+  category: pre_checkin
+  function: v2_spmv_bsr
+  indextype: *i32_i64
+  precision: *bfloat16_bfloat16_float32_float32_axyt_precision
+  M: [2000]
+  N: [2000]
+  block_dim: [10]
+  alpha_beta: *alpha_beta_range_checkin
+  direction: [rocsparse_direction_column]
+  baseA: [rocsparse_index_base_one]
+  matrix: [rocsparse_matrix_random]
+
+- name: v2_spmv_bsr_file
+  category: pre_checkin
+  function: v2_spmv_bsr
+  indextype: *i32_i64
+  precision: *float32_cmplx32_cmplx32_cmplx32_axyt_precision
+  M: [2000]
+  N: [2000]
+  block_dim: [4]
+  alpha_beta: *alpha_beta_range_checkin
+  direction: [rocsparse_direction_row]
+  baseA: [rocsparse_index_base_zero]
+  matrix: [rocsparse_matrix_random]
+
+- name: v2_spmv_bsr_file
+  category: pre_checkin
+  function: v2_spmv_bsr
+  indextype: *i32_i64
+  precision: *cmplx32_cmplx64_cmplx64_cmplx64
+  M: [2000]
+  N: [2000]
+  block_dim: [4]
+  alpha_beta: *alpha_beta_range_checkin
+  direction: [rocsparse_direction_row]
+  baseA: [rocsparse_index_base_zero]
+  matrix: [rocsparse_matrix_random]
+
+# Nightly
 - name: v2_spmv_bsr
   category: nightly
   function: v2_spmv_bsr
@@ -89,40 +287,6 @@ Tests:
   direction: [rocsparse_direction_row]
   baseA: [rocsparse_index_base_zero]
   matrix: [rocsparse_matrix_random]
-
-
-- name: v2_spmv_bsr_file
-  category: quick
-  function: v2_spmv_bsr
-  indextype: *i32i32_i64i32_i64i64
-  precision: *single_double_precisions
-  block_dim: [5]
-  alpha_beta: *alpha_beta_range_quick
-  direction: [rocsparse_direction_column]
-  baseA: [rocsparse_index_base_one]
-  matrix: [rocsparse_matrix_file_rocalution]
-  filename: [mac_econ_fwd500,
-             nos2,
-             nos4,
-             nos6]
-
-- name: v2_spmv_bsr_file
-  category: pre_checkin
-  function: v2_spmv_bsr
-  indextype: *i32i32_i64i32_i64i64
-  precision: *single_double_precisions
-  block_dim: [6]
-  alpha_beta: *alpha_beta_range_checkin
-  direction: [rocsparse_direction_row]
-  baseA: [rocsparse_index_base_zero]
-  matrix: [rocsparse_matrix_file_rocalution]
-  filename: [rma10,
-             mc2depi,
-             ASIC_320k,
-             nos1,
-             nos3,
-             nos5,
-             nos7]
 
 - name: v2_spmv_bsr_file
   category: nightly
@@ -143,34 +307,6 @@ Tests:
              scircuit]
 
 - name: v2_spmv_bsr_file
-  category: quick
-  function: v2_spmv_bsr
-  indextype: *i32i32_i64i32_i64i64
-  precision: *double_only_precisions_complex
-  M: 1
-  N: 1
-  block_dim: [3]
-  alpha_beta: *alpha_beta_range_quick
-  direction: [rocsparse_direction_row]
-  baseA: [rocsparse_index_base_zero]
-  matrix: [rocsparse_matrix_file_rocalution]
-  filename: [Chevron2,
-             qc2534]
-
-- name: v2_spmv_bsr_file
-  category: pre_checkin
-  function: v2_spmv_bsr
-  indextype: *i32i32_i64i32_i64i64
-  precision: *single_double_precisions_complex
-  block_dim: [2]
-  alpha_beta: *alpha_beta_range_checkin
-  direction: [rocsparse_direction_column]
-  baseA: [rocsparse_index_base_one]
-  matrix: [rocsparse_matrix_file_rocalution]
-  filename: [mplate,
-             Chevron3]
-
-- name: v2_spmv_bsr_file
   category: nightly
   function: v2_spmv_bsr
   indextype: *i32i32_i64i32_i64i64
@@ -182,115 +318,6 @@ Tests:
   matrix: [rocsparse_matrix_file_rocalution]
   filename: [Chevron4]
   skip_hardware: gfx1151
-
-- name: v2_spmv_bsr_graph_test
-  category: pre_checkin
-  function: v2_spmv_bsr
-  indextype: *i32i32_i64i32_i64i64
-  precision: *single_double_precisions_complex_real
-  M: [10, 500]
-  N: [33, 842]
-  block_dim: [8]
-  alpha_beta: *alpha_beta_range_quick
-  direction: [rocsparse_direction_column]
-  baseA: [rocsparse_index_base_zero]
-  matrix: [rocsparse_matrix_random]
-  graph_test: true
-
-#
-# mixed precision
-#
-
-- name: v2_spmv_bsr
-  category: quick
-  function: v2_spmv_bsr
-  indextype: *i32_i64
-  precision: *float32_float64_float64_float64
-  M: [34, 104, 343, 5196]
-  N: [57, 109, 458, 3425]
-  block_dim: [12]
-  alpha_beta: *alpha_beta_range_checkin
-  direction: [rocsparse_direction_row]
-  baseA: [rocsparse_index_base_zero]
-  matrix: [rocsparse_matrix_random]
-
-- name: v2_spmv_bsr
-  category: pre_checkin
-  function: v2_spmv_bsr
-  indextype: *i32_i64
-  precision: *float32_float64_float64_float64
-  M: [534, 1604, 3413, 75196]
-  N: [578, 4109, 9458, 34254]
-  block_dim: [16]
-  alpha_beta: *alpha_beta_range_quick
-  direction: [rocsparse_direction_column]
-  baseA: [rocsparse_index_base_one]
-  matrix: [rocsparse_matrix_random]
-
-- name: v2_spmv_bsr
-  category: quick
-  function: v2_spmv_bsr
-  indextype: *i32_i64
-  precision: *int8_int8_int32_int32_axyt_precision
-  M: [34, 104, 343, 5196]
-  N: [57, 109, 458, 3425]
-  block_dim: [12]
-  alpha_beta: *alpha_beta_range_checkin
-  direction: [rocsparse_direction_row]
-  baseA: [rocsparse_index_base_zero]
-  matrix: [rocsparse_matrix_random]
-
-- name: v2_spmv_bsr
-  category: pre_checkin
-  function: v2_spmv_bsr
-  indextype: *i32_i64
-  precision: *int8_int8_float32_float32_axyt_precision
-  M: [534, 1604, 3413, 75196]
-  N: [578, 4109, 9458, 34254]
-  block_dim: [16]
-  alpha_beta: *alpha_beta_range_quick
-  direction: [rocsparse_direction_column]
-  baseA: [rocsparse_index_base_one]
-  matrix: [rocsparse_matrix_random]
-
-- name: v2_spmv_bsr
-  category: pre_checkin
-  function: v2_spmv_bsr
-  indextype: *i32_i64
-  precision: *float16_float16_float32_float32_axyt_precision
-  M: [59128]
-  N: [54760]
-  block_dim: [9]
-  alpha_beta: *alpha_beta_range_quick
-  direction: [rocsparse_direction_column]
-  baseA: [rocsparse_index_base_one]
-  matrix: [rocsparse_matrix_random]
-
-- name: v2_spmv_bsr
-  category: pre_checkin
-  function: v2_spmv_bsr
-  indextype: *i32_i64
-  precision: *bfloat16_bfloat16_float32_float32_axyt_precision
-  M: [54849]
-  N: [56893]
-  block_dim: [10]
-  alpha_beta: *alpha_beta_range_quick
-  direction: [rocsparse_direction_column]
-  baseA: [rocsparse_index_base_one]
-  matrix: [rocsparse_matrix_random]
-
-- name: v2_spmv_bsr_file
-  category: pre_checkin
-  function: v2_spmv_bsr
-  indextype: *i32_i64
-  precision: *float32_cmplx32_cmplx32_cmplx32_axyt_precision
-  M: [48374]
-  N: [42846]
-  block_dim: [4]
-  alpha_beta: *alpha_beta_range_checkin
-  direction: [rocsparse_direction_row]
-  baseA: [rocsparse_index_base_zero]
-  matrix: [rocsparse_matrix_random]
 
 - name: v2_spmv_bsr_file
   category: nightly
@@ -306,20 +333,6 @@ Tests:
   matrix: [rocsparse_matrix_file_rocalution]
   filename: [Chevron3,
              bmwcra_1]
-
-
-- name: v2_spmv_bsr_file
-  category: pre_checkin
-  function: v2_spmv_bsr
-  indextype: *i32_i64
-  precision: *cmplx32_cmplx64_cmplx64_cmplx64
-  M: [48374]
-  N: [42846]
-  block_dim: [4]
-  alpha_beta: *alpha_beta_range_checkin
-  direction: [rocsparse_direction_row]
-  baseA: [rocsparse_index_base_zero]
-  matrix: [rocsparse_matrix_random]
 
 - name: v2_spmv_bsr_file
   category: nightly

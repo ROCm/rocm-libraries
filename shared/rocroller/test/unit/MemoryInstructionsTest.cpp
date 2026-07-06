@@ -1,28 +1,5 @@
-/*******************************************************************************
- *
- * MIT License
- *
- * Copyright 2024-2025 AMD ROCm(TM) Software
- *
- * Permission is hereby granted, free of charge, to any person obtaining a copy
- * of this software and associated documentation files (the "Software"), to deal
- * in the Software without restriction, including without limitation the rights
- * to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
- * copies of the Software, and to permit persons to whom the Software is
- * furnished to do so, subject to the following conditions:
- *
- * The above copyright notice and this permission notice shall be included in
- * all copies or substantial portions of the Software.
- *
- * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
- * IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
- * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
- * AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
- * LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
- * OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
- * SOFTWARE.
- *
- *******************************************************************************/
+// Copyright Advanced Micro Devices, Inc., or its affiliates.
+// SPDX-License-Identifier: MIT
 
 #include <memory>
 
@@ -35,7 +12,9 @@
 #include <rocRoller/CodeGen/MemoryInstructions.hpp>
 #include <rocRoller/CommandSolution.hpp>
 #include <rocRoller/ExecutableKernel.hpp>
+#include <rocRoller/ExpressionTransformations.hpp>
 #include <rocRoller/GPUArchitecture/GPUArchitectureLibrary.hpp>
+#include <rocRoller/InstructionValues/RegisterAllocator_detail.hpp>
 #include <rocRoller/KernelArguments.hpp>
 #include <rocRoller/Operations/Command.hpp>
 #include <rocRoller/Utilities/Generator.hpp>
@@ -432,18 +411,27 @@ namespace MemoryInstructionsTest
                 co_yield v_result->allocate();
                 co_yield m_context->copier()->copy(v_result, s_result, "Move pointer.");
 
-                auto bufDesc = rocRoller::BufferDescriptor(m_context);
+                Expression::ExpressionPtr bufferExpr = Expression::literal(Buffer{0, 0, 0, 0});
+                bufferExpr = BufferDescriptor::SetDefaults(bufferExpr, m_context);
+                bufferExpr = BufferDescriptor::SetBasePointer(
+                    bufferExpr, Expression::literal(0x00000000ull, DataType::UInt64), m_context);
+                bufferExpr = BufferDescriptor::SetSize(
+                    bufferExpr, Expression::literal(0x00000001), m_context);
+                bufferExpr = BufferDescriptor::IncrementBasePointer(
+                    bufferExpr, Expression::literal(0x00000001ull, DataType::UInt64), m_context);
 
-                co_yield bufDesc.setup();
-                co_yield bufDesc.setBasePointer(Register::Value::Literal(0x00000000));
-                co_yield bufDesc.setSize(Register::Value::Literal(0x00000001));
-                co_yield bufDesc.incrementBasePointer(Register::Value::Literal(0x00000001));
+                auto sRD = Register::Value::Placeholder(
+                    m_context, Register::Type::Scalar, {DataType::None, PointerType::Buffer}, 1);
+                co_yield Expression::generate(sRD, bufferExpr, m_context);
 
-                auto sRD = bufDesc.allRegisters();
                 co_yield m_context->copier()->copy(v_a, sRD, "Move Value");
                 co_yield m_context->mem()->storeGlobal(v_result, v_a, 0, 16);
 
-                auto dOpt = bufDesc.descriptorOptions();
+                auto optsExpr = BufferDescriptor::GetOptions(bufferExpr);
+                auto dOpt     = Register::Value::Placeholder(
+                    m_context, Register::Type::Scalar, {DataType::Raw32}, 1);
+                co_yield Expression::generate(dOpt, optsExpr, m_context);
+
                 co_yield m_context->copier()->copy(v_a->subset({3}), dOpt, "Move Value");
                 co_yield m_context->mem()->storeGlobal(v_result, v_a->subset({3}), 16, 4);
             };
@@ -481,11 +469,41 @@ namespace MemoryInstructionsTest
                                   hipMemcpyDefault),
                         HasHipSuccess(0));
 
+            auto                 defaultOptions = BufferDescriptor::GetDefaultOptions(m_context);
+            CommandArgumentValue optionsValue   = Expression::evaluate(defaultOptions);
+            uint32_t             opts           = std::get<uint32_t>(optionsValue);
+
+            // If format specification is passed via SOFFSET, then the partial
+            // layout of the buffer descriptor is:
+            //
+            // 56:0     BaseAddress
+            // 101:57   Num Records
+            // 107:102  Reserved (must be set to zero)
+            // 121:108  Stride
+            //
+            // Otherwise, it is:
+            //
+            // 47:0   Base Address
+            // 61:48  Stride
+            // 63:62  Swizzle Enable
+            // 95:64  Num Records
+            //
+            // See also BufferDescriptor::setSize()
+            // & BufferDescritor::setOptions() for more details.
             EXPECT_EQ(result[0], 0x00000001);
-            EXPECT_EQ(result[1], 0x00000000);
-            EXPECT_EQ(result[2], 0x00000001);
-            EXPECT_EQ(result[3], BufferDescriptor::getDefaultOptionsValue(m_context));
-            EXPECT_EQ(result[4], BufferDescriptor::getDefaultOptionsValue(m_context));
+            if(m_context->targetArchitecture().HasCapability(
+                   GPUCapability::HasBufferFormatSpecInSOffsetField))
+            {
+                EXPECT_EQ(result[1], 1u << 25);
+                EXPECT_EQ(result[2], 0x00000000);
+            }
+            else
+            {
+                EXPECT_EQ(result[1], 0x00000000);
+                EXPECT_EQ(result[2], 0x00000001);
+            }
+            EXPECT_EQ(result[3], opts);
+            EXPECT_EQ(result[4], opts);
         }
     }
 
@@ -533,16 +551,29 @@ namespace MemoryInstructionsTest
 
                 co_yield v_a->allocate();
 
-                auto bufDesc = std::make_shared<rocRoller::BufferDescriptor>(m_context);
-                co_yield bufDesc->setup();
-                co_yield bufDesc->setBasePointer(s_a);
-                co_yield bufDesc->setSize(Register::Value::Literal(N));
+                Expression::ExpressionPtr bufferExpr = Expression::literal(Buffer{0, 0, 0, 0});
+                bufferExpr = BufferDescriptor::SetDefaults(bufferExpr, m_context);
+                bufferExpr
+                    = BufferDescriptor::SetBasePointer(bufferExpr, s_a->expression(), m_context);
+                bufferExpr
+                    = BufferDescriptor::SetSize(bufferExpr, Expression::literal(N), m_context);
 
+                auto bufferRegs = Register::Value::Placeholder(
+                    m_context, Register::Type::Scalar, {DataType::None, PointerType::Buffer}, 1);
                 auto bufInstOpts = rocRoller::BufferInstructionOptions();
 
-                co_yield m_context->mem()->loadBuffer(v_a, vgprSerial, 0, bufDesc, bufInstOpts, N);
-                co_yield bufDesc->setBasePointer(s_result);
-                co_yield m_context->mem()->storeBuffer(v_a, vgprSerial, 0, bufDesc, bufInstOpts, N);
+                co_yield Expression::generate(bufferRegs, bufferExpr, m_context);
+                bufferExpr = bufferRegs->expression();
+
+                co_yield m_context->mem()->loadBuffer(
+                    v_a, vgprSerial, 0, bufferRegs, bufInstOpts, N);
+
+                bufferExpr = BufferDescriptor::SetBasePointer(
+                    bufferExpr, s_result->expression(), m_context);
+                co_yield Expression::generate(bufferRegs, bufferExpr, m_context);
+
+                co_yield m_context->mem()->storeBuffer(
+                    v_a, vgprSerial, 0, bufferRegs, bufInstOpts, N);
             };
 
             m_context->schedule(kb());
@@ -1042,6 +1073,10 @@ namespace MemoryInstructionsTest
         };
         m_context->schedule(setupRegisters());
 
+        auto fixRegs = [&](std::string instr) {
+            return FixupInstructionStringsForVGPRIndexing(m_context->targetArchitecture(), instr);
+        };
+
         // Test storeGlobalWidth
         {
             auto kb = [&]() -> Generator<Instruction> {
@@ -1052,36 +1087,36 @@ namespace MemoryInstructionsTest
             setKernelOptions({{.storeGlobalWidth = 4}});
 
             m_context->schedule(kb());
-            expected = R"(global_store_dwordx4 v[4:5], v[0:3] off)";
+            expected = fixRegs(R"(global_store_dwordx4 v[4:5], v[0:3] off)");
             EXPECT_THAT(NormalizedSource(output()), testing::HasSubstr(NormalizedSource(expected)));
 
             clearOutput();
             setKernelOptions({{.storeGlobalWidth = 3}});
             m_context->schedule(kb());
-            expected = R"(
-            global_store_dwordx3 v[4:5], v[0:2] off
-            global_store_dword v[4:5], v3 off offset:12
-            )";
+            expected = fixRegs(R"(
+             global_store_dwordx3 v[4:5], v[0:2] off
+             global_store_dword v[4:5], v3 off offset:12
+             )");
             EXPECT_THAT(NormalizedSource(output()), testing::HasSubstr(NormalizedSource(expected)));
 
             clearOutput();
             setKernelOptions({{.storeGlobalWidth = 2}});
             m_context->schedule(kb());
-            expected = R"(
-            global_store_dwordx2 v[4:5], v[0:1] off
-            global_store_dwordx2 v[4:5], v[2:3] off offset:8
-            )";
+            expected = fixRegs(R"(
+             global_store_dwordx2 v[4:5], v[0:1] off
+             global_store_dwordx2 v[4:5], v[2:3] off offset:8
+             )");
             EXPECT_THAT(NormalizedSource(output()), testing::HasSubstr(NormalizedSource(expected)));
 
             clearOutput();
             setKernelOptions({{.storeGlobalWidth = 1}});
             m_context->schedule(kb());
-            expected = R"(
-            global_store_dword v[4:5], v0 off
-            global_store_dword v[4:5], v1 off offset:4
-            global_store_dword v[4:5], v2 off offset:8
-            global_store_dword v[4:5], v3 off offset:12
-            )";
+            expected = fixRegs(R"(
+             global_store_dword v[4:5], v0 off
+             global_store_dword v[4:5], v1 off offset:4
+             global_store_dword v[4:5], v2 off offset:8
+             global_store_dword v[4:5], v3 off offset:12
+             )");
             EXPECT_THAT(NormalizedSource(output()), testing::HasSubstr(NormalizedSource(expected)));
         }
 
@@ -1094,38 +1129,38 @@ namespace MemoryInstructionsTest
             clearOutput();
             setKernelOptions({{.loadGlobalWidth = 4}});
             m_context->schedule(kb());
-            expected = R"(
-            global_load_dwordx4 v[0:3], v[4:5] off
-            )";
+            expected = fixRegs(R"(
+             global_load_dwordx4 v[0:3], v[4:5] off
+             )");
             EXPECT_THAT(NormalizedSource(output()), testing::HasSubstr(NormalizedSource(expected)));
 
             clearOutput();
             setKernelOptions({{.loadGlobalWidth = 3}});
             m_context->schedule(kb());
-            expected = R"(
-            global_load_dwordx3 v[0:2], v[4:5] off
-            global_load_dword v3, v[4:5] off offset:12
-            )";
+            expected = fixRegs(R"(
+             global_load_dwordx3 v[0:2], v[4:5] off
+             global_load_dword v3, v[4:5] off offset:12
+             )");
             EXPECT_THAT(NormalizedSource(output()), testing::HasSubstr(NormalizedSource(expected)));
 
             clearOutput();
             setKernelOptions({{.loadGlobalWidth = 2}});
             m_context->schedule(kb());
-            expected = R"(
-            global_load_dwordx2 v[0:1], v[4:5] off
-            global_load_dwordx2 v[2:3], v[4:5] off offset:8
-            )";
+            expected = fixRegs(R"(
+             global_load_dwordx2 v[0:1], v[4:5] off
+             global_load_dwordx2 v[2:3], v[4:5] off offset:8
+             )");
             EXPECT_THAT(NormalizedSource(output()), testing::HasSubstr(NormalizedSource(expected)));
 
             clearOutput();
             setKernelOptions({{.loadGlobalWidth = 1}});
             m_context->schedule(kb());
-            expected = R"(
-            global_load_dword v0, v[4:5] off
-            global_load_dword v1, v[4:5] off offset:4
-            global_load_dword v2, v[4:5] off offset:8
-            global_load_dword v3, v[4:5] off offset:12
-            )";
+            expected = fixRegs(R"(
+             global_load_dword v0, v[4:5] off
+             global_load_dword v1, v[4:5] off offset:4
+             global_load_dword v2, v[4:5] off offset:8
+             global_load_dword v3, v[4:5] off offset:12
+             )");
             EXPECT_THAT(NormalizedSource(output()), testing::HasSubstr(NormalizedSource(expected)));
         }
 
@@ -1138,36 +1173,36 @@ namespace MemoryInstructionsTest
             clearOutput();
             setKernelOptions({{.storeLocalWidth = 4}});
             m_context->schedule(kb());
-            expected = R"(ds_write_b128 v6, v[0:3])";
+            expected = fixRegs(R"(ds_write_b128 v6, v[0:3])");
             EXPECT_THAT(NormalizedSource(output()), testing::HasSubstr(NormalizedSource(expected)));
 
             clearOutput();
             setKernelOptions({{.storeLocalWidth = 3}});
             m_context->schedule(kb());
-            expected = R"(
-            ds_write_b96 v6, v[0:2]
-            ds_write_b32 v6, v3 offset:12
-            )";
+            expected = fixRegs(R"(
+             ds_write_b96 v6, v[0:2]
+             ds_write_b32 v6, v3 offset:12
+             )");
             EXPECT_THAT(NormalizedSource(output()), testing::HasSubstr(NormalizedSource(expected)));
 
             clearOutput();
             setKernelOptions({{.storeLocalWidth = 2}});
             m_context->schedule(kb());
-            expected = R"(
-            ds_write_b64 v6, v[0:1]
-            ds_write_b64 v6, v[2:3] offset:8
-            )";
+            expected = fixRegs(R"(
+             ds_write_b64 v6, v[0:1]
+             ds_write_b64 v6, v[2:3] offset:8
+             )");
             EXPECT_THAT(NormalizedSource(output()), testing::HasSubstr(NormalizedSource(expected)));
 
             clearOutput();
             setKernelOptions({{.storeLocalWidth = 1}});
             m_context->schedule(kb());
-            expected = R"(
-            ds_write_b32 v6, v0
-            ds_write_b32 v6, v1 offset:4
-            ds_write_b32 v6, v2 offset:8
-            ds_write_b32 v6, v3 offset:12
-            )";
+            expected = fixRegs(R"(
+             ds_write_b32 v6, v0
+             ds_write_b32 v6, v1 offset:4
+             ds_write_b32 v6, v2 offset:8
+             ds_write_b32 v6, v3 offset:12
+             )");
             EXPECT_THAT(NormalizedSource(output()), testing::HasSubstr(NormalizedSource(expected)));
         }
 
@@ -1182,38 +1217,38 @@ namespace MemoryInstructionsTest
             clearOutput();
             setKernelOptions({{.loadLocalWidth = 4}});
             m_context->schedule(kb());
-            expected = R"(
-            ds_read_b128 v[0:3], v6
-            )";
+            expected = fixRegs(R"(
+             ds_read_b128 v[0:3], v6
+             )");
             EXPECT_THAT(NormalizedSource(output()), testing::HasSubstr(NormalizedSource(expected)));
 
             clearOutput();
             setKernelOptions({{.loadLocalWidth = 3}});
             m_context->schedule(kb());
-            expected = R"(
-            ds_read_b96 v[0:2], v6
-            ds_read_b32 v3, v6 offset:12
-            )";
+            expected = fixRegs(R"(
+             ds_read_b96 v[0:2], v6
+             ds_read_b32 v3, v6 offset:12
+             )");
             EXPECT_THAT(NormalizedSource(output()), testing::HasSubstr(NormalizedSource(expected)));
 
             clearOutput();
             setKernelOptions({{.loadLocalWidth = 2}});
             m_context->schedule(kb());
-            expected = R"(
-            ds_read_b64 v[0:1], v6
-            ds_read_b64 v[2:3], v6 offset:8
-            )";
+            expected = fixRegs(R"(
+             ds_read_b64 v[0:1], v6
+             ds_read_b64 v[2:3], v6 offset:8
+             )");
             EXPECT_THAT(NormalizedSource(output()), testing::HasSubstr(NormalizedSource(expected)));
 
             clearOutput();
             setKernelOptions({{.loadLocalWidth = 1}});
             m_context->schedule(kb());
-            expected = R"(
-            ds_read_b32 v0, v6
-            ds_read_b32 v1, v6 offset:4
-            ds_read_b32 v2, v6 offset:8
-            ds_read_b32 v3, v6 offset:12
-            )";
+            expected = fixRegs(R"(
+             ds_read_b32 v0, v6
+             ds_read_b32 v1, v6 offset:4
+             ds_read_b32 v2, v6 offset:8
+             ds_read_b32 v3, v6 offset:12
+             )");
             EXPECT_THAT(NormalizedSource(output()), testing::HasSubstr(NormalizedSource(expected)))
                 << NormalizedSource(output()) << "------\n"
                 << output();
@@ -1273,30 +1308,53 @@ namespace MemoryInstructionsTest
 
                 co_yield v_a->allocate();
 
-                auto bufDesc = std::make_shared<rocRoller::BufferDescriptor>(m_context);
-                co_yield bufDesc->setup();
-                co_yield bufDesc->setBasePointer(s_a);
-                co_yield bufDesc->setSize(Register::Value::Literal(N));
-                co_yield bufDesc->setOptions(Register::Value::Literal(131072)); //0x00020000
+                Expression::ExpressionPtr bufferExpr = Expression::literal(Buffer{0, 0, 0, 0});
+                bufferExpr = BufferDescriptor::SetDefaults(bufferExpr, m_context);
+                bufferExpr
+                    = BufferDescriptor::SetBasePointer(bufferExpr, s_a->expression(), m_context);
+                bufferExpr
+                    = BufferDescriptor::SetSize(bufferExpr, Expression::literal(N), m_context);
+                bufferExpr = BufferDescriptor::SetOptions(bufferExpr,
+                                                          Expression::literal(131072)); //0x00020000
+
+                auto bufferRegs = Register::Value::Placeholder(
+                    m_context, Register::Type::Scalar, {DataType::None, PointerType::Buffer}, 1);
+
+                co_yield Expression::generate(bufferRegs, bufferExpr, m_context);
+                bufferExpr = bufferRegs->expression();
 
                 auto bufInstOpts = rocRoller::BufferInstructionOptions();
 
-                co_yield m_context->mem()->loadBuffer(v_a, vgprSerial, 0, bufDesc, bufInstOpts, N);
-                co_yield bufDesc->setBasePointer(s_result);
-                co_yield m_context->mem()->storeBuffer(v_a, vgprSerial, 0, bufDesc, bufInstOpts, N);
+                co_yield m_context->mem()->loadBuffer(
+                    v_a, vgprSerial, 0, bufferRegs, bufInstOpts, N);
+                bufferExpr = BufferDescriptor::SetBasePointer(
+                    bufferExpr, s_result->expression(), m_context);
+                co_yield Expression::generate(bufferRegs, bufferExpr, m_context);
+                bufferExpr = bufferRegs->expression();
+                co_yield m_context->mem()->storeBuffer(
+                    v_a, vgprSerial, 0, bufferRegs, bufInstOpts, N);
 
                 co_yield m_context->mem()->loadBuffer(
-                    v_a, vgprSerial, 0, bufDesc, bufInstOpts, N, true);
-                co_yield bufDesc->setBasePointer(s_result);
+                    v_a, vgprSerial, 0, bufferRegs, bufInstOpts, N, true);
+                bufferExpr = BufferDescriptor::SetBasePointer(
+                    bufferExpr, s_result->expression(), m_context);
+                co_yield Expression::generate(bufferRegs, bufferExpr, m_context);
+                bufferExpr = bufferRegs->expression();
                 co_yield m_context->mem()->storeBuffer(
-                    v_a, vgprSerial, 0, bufDesc, bufInstOpts, N, true);
+                    v_a, vgprSerial, 0, bufferRegs, bufInstOpts, N, true);
 
                 co_yield m_context->mem()->loadLocal(v_a, vgprSerial, 0, N);
-                co_yield bufDesc->setBasePointer(s_result);
+                bufferExpr = BufferDescriptor::SetBasePointer(
+                    bufferExpr, s_result->expression(), m_context);
+                co_yield Expression::generate(bufferRegs, bufferExpr, m_context);
+                bufferExpr = bufferRegs->expression();
                 co_yield m_context->mem()->storeLocal(v_a, vgprSerial, 0, N);
 
                 co_yield m_context->mem()->loadLocal(v_a, vgprSerial, 0, N, "", true);
-                co_yield bufDesc->setBasePointer(s_result);
+                bufferExpr = BufferDescriptor::SetBasePointer(
+                    bufferExpr, s_result->expression(), m_context);
+                co_yield Expression::generate(bufferRegs, bufferExpr, m_context);
+                bufferExpr = bufferRegs->expression();
                 co_yield m_context->mem()->storeLocal(v_a, vgprSerial, 0, N, "", true);
             };
 
@@ -1436,15 +1494,17 @@ namespace MemoryInstructionsTest
             co_yield m_context->copier()->copy(
                 s_offset, Register::Value::Literal(v_lds->getLDSAllocation()->offset()));
 
-            auto bufDesc = std::make_shared<rocRoller::BufferDescriptor>(m_context);
-            co_yield Instruction::Comment("setup bufDesc");
-            co_yield bufDesc->setup();
-            co_yield Instruction::Comment("Set base pointer");
-            co_yield bufDesc->setBasePointer(s_a);
-            co_yield Instruction::Comment("Set buffer size");
-            co_yield bufDesc->setSize(Register::Value::Literal(N));
-            co_yield Instruction::Comment("Set buffer option");
-            co_yield bufDesc->setOptions(Register::Value::Literal(131072)); //0x00020000
+            Expression::ExpressionPtr bufferExpr = Expression::literal(Buffer{0, 0, 0, 0});
+            bufferExpr = BufferDescriptor::SetDefaults(bufferExpr, m_context);
+            bufferExpr = BufferDescriptor::SetBasePointer(bufferExpr, s_a->expression(), m_context);
+            bufferExpr = BufferDescriptor::SetSize(bufferExpr, Expression::literal(N), m_context);
+            bufferExpr = BufferDescriptor::SetOptions(bufferExpr,
+                                                      Expression::literal(131072)); //0x00020000
+
+            auto bufferRegs = Register::Value::Placeholder(
+                m_context, Register::Type::Scalar, {DataType::None, PointerType::Buffer}, 1);
+            co_yield Instruction::Comment("Inialize BufferDescriptor");
+            co_yield Expression::generate(bufferRegs, bufferExpr, m_context);
 
             auto bufInstOpts = rocRoller::BufferInstructionOptions();
             bufInstOpts.lds  = true;
@@ -1498,7 +1558,7 @@ namespace MemoryInstructionsTest
                 }
                 co_yield_(m_context->mem()->barrier({v_lds}));
                 co_yield m_context->mem()
-                    ->bufferLoad2LDS(vgprSerial, bufDesc, bufInstOpts, bytesPerMove, soffset)
+                    ->bufferLoad2LDS(vgprSerial, bufferRegs, bufInstOpts, bytesPerMove, soffset)
                     .map(MemoryInstructions::addExtraDst(v_lds));
                 remain -= bytesPerMove;
             } while(remain > 0);

@@ -1,6 +1,6 @@
 /*! \file */
 /* ************************************************************************
-* Copyright (C) 2021-2025 Advanced Micro Devices, Inc. All rights Reserved.
+* Copyright (C) 2021-2026 Advanced Micro Devices, Inc. All rights Reserved.
 *
 * Permission is hereby granted, free of charge, to any person obtaining a copy
 * of this software and associated documentation files (the "Software"), to deal
@@ -171,7 +171,7 @@ namespace rocsparse
             T* val_block_red = reinterpret_cast<T*>(reinterpret_cast<void*>(ptr));
             // ptr += ((sizeof(T) * nblocks * n * batch_count_C - 1) / COOMMN_DIM + 1) * COOMMN_DIM;
 
-            RETURN_IF_HIP_ERROR(hipMemsetAsync(
+            RETURN_IF_HIP_ERROR(rocsparse_hipMemsetAsync(
                 row_block_red,
                 0XFF,
                 ((sizeof(I) * nblocks * batch_count_C - 1) / COOMMN_DIM + 1) * COOMMN_DIM,
@@ -409,8 +409,12 @@ INSTANTIATE(rocsparse_double_complex,
 // Mixed Precisions
 INSTANTIATE(float, int32_t, _Float16, _Float16, float);
 INSTANTIATE(float, int64_t, _Float16, _Float16, float);
+INSTANTIATE(float, int32_t, _Float16, _Float16, _Float16);
+INSTANTIATE(float, int64_t, _Float16, _Float16, _Float16);
 INSTANTIATE(float, int32_t, rocsparse_bfloat16, rocsparse_bfloat16, float);
 INSTANTIATE(float, int64_t, rocsparse_bfloat16, rocsparse_bfloat16, float);
+INSTANTIATE(float, int32_t, rocsparse_bfloat16, rocsparse_bfloat16, rocsparse_bfloat16);
+INSTANTIATE(float, int64_t, rocsparse_bfloat16, rocsparse_bfloat16, rocsparse_bfloat16);
 INSTANTIATE(int32_t, int32_t, int8_t, int8_t, int32_t);
 INSTANTIATE(int32_t, int64_t, int8_t, int8_t, int32_t);
 INSTANTIATE(float, int32_t, int8_t, int8_t, float);

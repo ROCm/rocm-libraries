@@ -1,32 +1,10 @@
-/*******************************************************************************
- *
- * MIT License
- *
- * Copyright 2024-2025 AMD ROCm(TM) Software
- *
- * Permission is hereby granted, free of charge, to any person obtaining a copy
- * of this software and associated documentation files (the "Software"), to deal
- * in the Software without restriction, including without limitation the rights
- * to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
- * copies of the Software, and to permit persons to whom the Software is
- * furnished to do so, subject to the following conditions:
- *
- * The above copyright notice and this permission notice shall be included in
- * all copies or substantial portions of the Software.
- *
- * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
- * IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
- * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
- * AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
- * LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
- * OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
- * SOFTWARE.
- *
- *******************************************************************************/
+// Copyright Advanced Micro Devices, Inc., or its affiliates.
+// SPDX-License-Identifier: MIT
 
 #include <rocRoller/CodeGen/Arithmetic/MatrixMultiply.hpp>
 #include <rocRoller/CodeGen/Arithmetic/Utility.hpp>
 #include <rocRoller/InstructionValues/Register.hpp>
+#include <rocRoller/KernelOptions_detail.hpp>
 #include <rocRoller/Utilities/Error.hpp>
 
 namespace rocRoller
@@ -159,6 +137,12 @@ namespace rocRoller
 
             const auto isBF8 = [](DataType type) { return type == DataType::BF8x4; };
 
+            const auto isF6 = [](DataType type) {
+                return type == DataType::FP6x16 || type == DataType::BF6x16;
+            };
+
+            const auto isF4 = [](DataType type) { return type == DataType::FP4x8; };
+
             const auto isF16 = [](DataType type) {
                 return type == DataType::Halfx2 || type == DataType::BFloat16x2;
             };
@@ -167,15 +151,32 @@ namespace rocRoller
 
             const auto isBF16 = [](DataType type) { return type == DataType::BFloat16x2; };
 
+            const auto isF32 = [](DataType type) { return type == DataType::Float; };
+
             if(arch.HasCapability(GPUCapability::HasWMMA))
             {
-                AssertFatal((mi.m == 16) && (mi.n == 16) && (mi.k == 16 || mi.k == 32),
-                            "Invalid inputs",
-                            ShowValue(mi.m),
-                            ShowValue(mi.n),
-                            ShowValue(mi.k));
+                AssertFatal(
+                    (mi.m == 16 || mi.m == 32) && (mi.n == 16)
+                        && (mi.k == 4 || mi.k == 16 || mi.k == 32 || mi.k == 64 || mi.k == 128),
+                    "Invalid inputs",
+                    ShowValue(mi.m),
+                    ShowValue(mi.n),
+                    ShowValue(mi.k));
 
-                if(isF8(typeA) && isF8(typeB))
+                const auto favourF8F6F4
+                    = m_context->kernelOptions()->favourF8F6F4OverF8MatrixInstruction;
+
+                if(favourF8F6F4 && mi.m == 16 && mi.n == 16 && mi.k == 128
+                   && (isF8(typeA) || isF6(typeA) || isF4(typeA))
+                   && (isF8(typeB) || isF6(typeB) || isF4(typeB)))
+                {
+                    inputType = "f8f6f4";
+                }
+                else if(isF4(typeA) && isF4(typeB) && mi.m == 32 && mi.n == 16 && mi.k == 128)
+                {
+                    inputType = "f4";
+                }
+                else if(isF8(typeA) && isF8(typeB))
                 {
                     inputType = isFP8(typeA) ? "fp8" : "bf8";
                     inputType += isFP8(typeB) ? "_fp8" : "_bf8";
@@ -183,6 +184,10 @@ namespace rocRoller
                 else if(typeA == typeB && isF16(typeA))
                 {
                     inputType = isFP16(typeA) ? "f16" : "bf16";
+                }
+                else if(typeA == typeB && isF32(typeA))
+                {
+                    inputType = "f32";
                 }
                 else
                 {
@@ -194,9 +199,17 @@ namespace rocRoller
                                       typeB);
                 }
 
+                if(inputType == "f8f6f4")
+                {
+                    modifier = concatenate("matrix_a_fmt:",
+                                           Arithmetic::getModifier(typeA),
+                                           " matrix_b_fmt:",
+                                           Arithmetic::getModifier(typeB));
+                }
+
                 auto wmma = concatenate(
                     "v_wmma_", typeStr(typeD), "_", mi.m, "x", mi.n, "x", mi.k, "_", inputType);
-                co_yield_(Instruction(wmma, {D}, {A, B, C}, {}, ""));
+                co_yield_(Instruction(wmma, {D}, {A, B, C}, {modifier}, ""));
             }
             else if(arch.HasCapability(GPUCapability::HasMFMA))
             {

@@ -1,6 +1,6 @@
 /*! \file */
 /* ************************************************************************
- * Copyright (C) 2019-2025 Advanced Micro Devices, Inc. All rights Reserved.
+ * Copyright (C) 2019-2026 Advanced Micro Devices, Inc. All rights Reserved.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -366,14 +366,14 @@ namespace rocsparse
 
                 if(csr_row_ptr_C != nullptr)
                 {
-                    RETURN_IF_HIP_ERROR(hipMemcpyAsync(
+                    RETURN_IF_HIP_ERROR(rocsparse_hipMemcpyAsync(
                         &end, &csr_row_ptr_C[m], sizeof(I), hipMemcpyDeviceToHost, handle->stream));
-                    RETURN_IF_HIP_ERROR(hipMemcpyAsync(&start,
-                                                       &csr_row_ptr_C[0],
-                                                       sizeof(I),
-                                                       hipMemcpyDeviceToHost,
-                                                       handle->stream));
-                    RETURN_IF_HIP_ERROR(hipStreamSynchronize(handle->stream));
+                    RETURN_IF_HIP_ERROR(rocsparse_hipMemcpyAsync(&start,
+                                                                 &csr_row_ptr_C[0],
+                                                                 sizeof(I),
+                                                                 hipMemcpyDeviceToHost,
+                                                                 handle->stream));
+                    RETURN_IF_HIP_ERROR(rocsparse_hipStreamSynchronize(handle->stream));
                 }
 
                 const I nnz_C = (end - start);
@@ -476,14 +476,14 @@ namespace rocsparse
 
                 if(csr_row_ptr_C != nullptr)
                 {
-                    RETURN_IF_HIP_ERROR(hipMemcpyAsync(
+                    RETURN_IF_HIP_ERROR(rocsparse_hipMemcpyAsync(
                         &end, &csr_row_ptr_C[m], sizeof(I), hipMemcpyDeviceToHost, handle->stream));
-                    RETURN_IF_HIP_ERROR(hipMemcpyAsync(&start,
-                                                       &csr_row_ptr_C[0],
-                                                       sizeof(I),
-                                                       hipMemcpyDeviceToHost,
-                                                       handle->stream));
-                    RETURN_IF_HIP_ERROR(hipStreamSynchronize(handle->stream));
+                    RETURN_IF_HIP_ERROR(rocsparse_hipMemcpyAsync(&start,
+                                                                 &csr_row_ptr_C[0],
+                                                                 sizeof(I),
+                                                                 hipMemcpyDeviceToHost,
+                                                                 handle->stream));
+                    RETURN_IF_HIP_ERROR(rocsparse_hipStreamSynchronize(handle->stream));
                 }
 
                 const I nnz_C = (end - start);
@@ -579,14 +579,14 @@ namespace rocsparse
 
                 if(csr_row_ptr_C != nullptr)
                 {
-                    RETURN_IF_HIP_ERROR(hipMemcpyAsync(
+                    RETURN_IF_HIP_ERROR(rocsparse_hipMemcpyAsync(
                         &end, &csr_row_ptr_C[m], sizeof(I), hipMemcpyDeviceToHost, handle->stream));
-                    RETURN_IF_HIP_ERROR(hipMemcpyAsync(&start,
-                                                       &csr_row_ptr_C[0],
-                                                       sizeof(I),
-                                                       hipMemcpyDeviceToHost,
-                                                       handle->stream));
-                    RETURN_IF_HIP_ERROR(hipStreamSynchronize(handle->stream));
+                    RETURN_IF_HIP_ERROR(rocsparse_hipMemcpyAsync(&start,
+                                                                 &csr_row_ptr_C[0],
+                                                                 sizeof(I),
+                                                                 hipMemcpyDeviceToHost,
+                                                                 handle->stream));
+                    RETURN_IF_HIP_ERROR(rocsparse_hipStreamSynchronize(handle->stream));
                 }
 
                 const I nnz_C = (end - start);
@@ -662,14 +662,20 @@ INSTANTIATE(int32_t, int32_t, float);
 INSTANTIATE(int32_t, int32_t, double);
 INSTANTIATE(int32_t, int32_t, rocsparse_float_complex);
 INSTANTIATE(int32_t, int32_t, rocsparse_double_complex);
+INSTANTIATE(int32_t, int32_t, _Float16);
+INSTANTIATE(int32_t, int32_t, rocsparse_bfloat16);
 INSTANTIATE(int64_t, int32_t, float);
 INSTANTIATE(int64_t, int32_t, double);
 INSTANTIATE(int64_t, int32_t, rocsparse_float_complex);
 INSTANTIATE(int64_t, int32_t, rocsparse_double_complex);
+INSTANTIATE(int64_t, int32_t, _Float16);
+INSTANTIATE(int64_t, int32_t, rocsparse_bfloat16);
 INSTANTIATE(int64_t, int64_t, float);
 INSTANTIATE(int64_t, int64_t, double);
 INSTANTIATE(int64_t, int64_t, rocsparse_float_complex);
 INSTANTIATE(int64_t, int64_t, rocsparse_double_complex);
+INSTANTIATE(int64_t, int64_t, _Float16);
+INSTANTIATE(int64_t, int64_t, rocsparse_bfloat16);
 #undef INSTANTIATE
 
 namespace rocsparse

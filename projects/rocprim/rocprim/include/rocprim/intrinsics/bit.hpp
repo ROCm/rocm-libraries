@@ -1,4 +1,4 @@
-// Copyright (c) 2017-2025 Advanced Micro Devices, Inc. All rights reserved.
+// Copyright (c) 2017-2026 Advanced Micro Devices, Inc. All rights reserved.
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -25,10 +25,10 @@
 
 #include <hip/device_functions.h>
 
-BEGIN_ROCPRIM_NAMESPACE
-
 /// \addtogroup intrinsicsmodule
 /// @{
+
+BEGIN_ROCPRIM_NAMESPACE
 
 /// \brief Returns a single bit at 'i' from 'x'
 ROCPRIM_DEVICE ROCPRIM_INLINE
@@ -58,54 +58,59 @@ unsigned int bit_count(unsigned long long x)
 /// \brief Count trailing zeroes
 ///
 /// Count the number of consecutive 0-bits, starting from the
-/// least significant bit.
+/// least significant bit. \p x must be non-zero.
 ROCPRIM_HOST_DEVICE ROCPRIM_INLINE unsigned int ctz(unsigned int x)
 {
+    __hip_assert(x != 0 && "'x' should be non-zero!");
     return __builtin_ctz(x);
 }
 
 /// \brief Count trailing zeroes
 ///
 /// Count the number of consecutive 0-bits, starting from the
-/// least significant bit.
+/// least significant bit. \p x must be non-zero.
 ROCPRIM_HOST_DEVICE ROCPRIM_INLINE unsigned int ctz(unsigned long long x)
 {
+    __hip_assert(x != 0 && "'x' should be non-zero!");
     return __builtin_ctzll(x);
 }
 
 /// \brief Count leading zeroes
 ///
 /// Count the number of consecutive 0-bits, starting from the
-/// most significant bit.
+/// most significant bit. \p x must be non-zero.
 ROCPRIM_HOST_DEVICE ROCPRIM_INLINE
 int clz(unsigned int x)
 {
+    __hip_assert(x != 0 && "'x' should be non-zero!");
     return __builtin_clz(x);
 }
 
 /// \brief Count leading zeroes
 ///
 /// Count the number of consecutive 0-bits, starting from the
-/// most significant bit.
+/// most significant bit. \p x must be non-zero.
 ROCPRIM_HOST_DEVICE ROCPRIM_INLINE
 int clz(unsigned long x)
 {
+    __hip_assert(x != 0 && "'x' should be non-zero!");
     return __builtin_clzl(x);
 }
 
 /// \brief Count leading zeroes
 ///
 /// Count the number of consecutive 0-bits, starting from the
-/// most significant bit.
+/// most significant bit. \p x must be non-zero.
 ROCPRIM_HOST_DEVICE ROCPRIM_INLINE
 int clz(unsigned long long x)
 {
+    __hip_assert(x != 0 && "'x' should be non-zero!");
     return __builtin_clzll(x);
 }
 
+END_ROCPRIM_NAMESPACE
+
 /// @}
 // end of group intrinsicsmodule
-
-END_ROCPRIM_NAMESPACE
 
 #endif // ROCPRIM_INTRINSICS_BIT_HPP_

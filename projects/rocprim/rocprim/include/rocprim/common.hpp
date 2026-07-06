@@ -26,8 +26,6 @@
 #include <iostream>
 #include <chrono>
 
-namespace detail
-{
 #ifndef ROCPRIM_DETAIL_HIP_SYNC_AND_RETURN_ON_ERROR
     #define ROCPRIM_DETAIL_HIP_SYNC_AND_RETURN_ON_ERROR(name, size, start)                           \
         do                                                                                           \
@@ -50,18 +48,16 @@ namespace detail
 #endif // ROCPRIM_DETAIL_HIP_SYNC_AND_RETURN_ON_ERROR
 
 #ifndef ROCPRIM_RETURN_ON_ERROR
-    #define ROCPRIM_RETURN_ON_ERROR(...)      \
-        do                                    \
-        {                                     \
-            hipError_t error = (__VA_ARGS__); \
-            if(error != hipSuccess)           \
-            {                                 \
-                return error;                 \
-            }                                 \
-        }                                     \
+    #define ROCPRIM_RETURN_ON_ERROR(...)                                        \
+        do                                                                      \
+        {                                                                       \
+            hipError_t error = (__VA_ARGS__);                                   \
+            if(error != hipSuccess)                                             \
+            {                                                                   \
+                return error;                                                   \
+            }                                                                   \
+        }                                                                       \
         while(0)
 #endif // ROCPRIM_RETURN_ON_ERROR
-
-} // namespace detail
 
 #endif // ROCPRIM_COMMON_HPP_

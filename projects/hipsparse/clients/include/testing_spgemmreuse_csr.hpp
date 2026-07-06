@@ -1,5 +1,5 @@
 /* ************************************************************************
- * Copyright (C) 2021 Advanced Micro Devices, Inc. All rights Reserved.
+ * Copyright (C) 2021-2026 Advanced Micro Devices, Inc. All rights Reserved.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -36,7 +36,8 @@
 
 using namespace hipsparse_test;
 
-void testing_spgemmreuse_csr_bad_arg(void)
+template <typename I, typename J, typename T>
+void testing_spgemmreuse_csr_bad_arg(const Arguments& argus)
 {
 #if(!defined(CUDART_VERSION) || CUDART_VERSION >= 11031)
     int64_t              m         = 100;
@@ -206,16 +207,16 @@ void testing_spgemmreuse_csr_bad_arg(void)
 }
 
 template <typename I, typename J, typename T>
-hipsparseStatus_t testing_spgemmreuse_csr(Arguments argus)
+void testing_spgemmreuse_csr(Arguments argus)
 {
 #if(!defined(CUDART_VERSION) || CUDART_VERSION >= 11031)
     J                    m        = argus.M;
     J                    k        = argus.K;
-    T                    h_alpha  = make_DataType<T>(argus.alpha);
+    T                    h_alpha  = argus.get_alpha<T>();
     hipsparseIndexBase_t idxBaseA = argus.baseA;
     hipsparseIndexBase_t idxBaseB = argus.baseB;
     hipsparseIndexBase_t idxBaseC = argus.baseC;
-    hipsparseSpGEMMAlg_t alg      = static_cast<hipsparseSpGEMMAlg_t>(argus.spgemm_alg);
+    hipsparseSpGEMMAlg_t alg      = argus.spgemm_alg;
     std::string          filename = argus.filename;
 
     T                    h_beta = make_DataType<T>(0);
@@ -243,12 +244,8 @@ hipsparseStatus_t testing_spgemmreuse_csr(Arguments argus)
     srand(12345ULL);
 
     I nnz_A;
-    if(!generate_csr_matrix(
-           filename, m, k, nnz_A, hcsr_row_ptr_A, hcsr_col_ind_A, hcsr_val_A, idxBaseA))
-    {
-        fprintf(stderr, "Cannot open [read] %s\ncol", filename.c_str());
-        return HIPSPARSE_STATUS_INTERNAL_ERROR;
-    }
+    CHECK_GENERATE_MATRIX_ERROR(generate_csr_matrix(
+        filename, m, k, nnz_A, hcsr_row_ptr_A, hcsr_col_ind_A, hcsr_val_A, idxBaseA));
 
     // Sparse matrix B as the transpose of A
     J n     = m;
@@ -512,8 +509,6 @@ hipsparseStatus_t testing_spgemmreuse_csr(Arguments argus)
     CHECK_HIPSPARSE_ERROR(hipsparseDestroySpMat(B));
     CHECK_HIPSPARSE_ERROR(hipsparseDestroySpMat(C));
 #endif
-
-    return HIPSPARSE_STATUS_SUCCESS;
 }
 
 #endif // TESTING_SPGEMM_CSR_HPP

@@ -36,7 +36,8 @@ inline bool isValidOrderForDatatype(hipDataType datatype, hipblasLtOrder_t order
     if((datatype == HIP_R_16F && order != HIPBLASLT_ORDER_COL16_4R8)
        || (datatype == HIP_R_16BF && order != HIPBLASLT_ORDER_COL16_4R8)
        || (datatype == HIP_R_8F_E4M3 && order != HIPBLASLT_ORDER_COL16_4R16)
-       || (datatype == HIP_R_8F_E4M3_FNUZ && order != HIPBLASLT_ORDER_COL16_4R16))
+       || (datatype == HIP_R_8F_E4M3_FNUZ && order != HIPBLASLT_ORDER_COL16_4R16)
+       || (datatype == HIP_R_4F_E2M1 && order != HIPBLASLT_ORDER_COL16_4R32))
     {
         return false;
     }
@@ -84,6 +85,43 @@ inline rocblaslt_status validateMatmulSwizzleArgs(const rocblaslt_matmul_desc   
                   "There's no need to set ldb.");
 
     return rocblaslt_status_continue;
+}
+
+/*******************************************************************************
+ * Validate the Matmul Arguments for General Batched GEMM Case
+ * In General Batched GEMM case:
+ * 1. Only Tensorwide scaling is supported.
+ * 2. Only HIPBLASLT_EPILOGUE_DEFAULT is supported.
+ ******************************************************************************/
+ inline rocblaslt_status validateMatmulArgsForGeneralBatchedGemm(RocblasltContractionProblem::ScalingFormat scaleAType,
+                                                                 RocblasltContractionProblem::ScalingFormat scaleBType,
+                                                                 const rocblaslt_epilogue& epilogue)
+{
+    rocblaslt_status status = rocblaslt_status_continue;
+    
+    if((scaleAType == RocblasltContractionProblem::ScalingFormat::Scalar || 
+       scaleAType == RocblasltContractionProblem::ScalingFormat::None) &&
+       (scaleBType == RocblasltContractionProblem::ScalingFormat::Scalar || 
+       scaleBType == RocblasltContractionProblem::ScalingFormat::None))
+        status = rocblaslt_status_continue;
+    else
+        status = rocblaslt_status_invalid_value;
+
+    if(epilogue != ROCBLASLT_EPILOGUE_DEFAULT)
+        status = rocblaslt_status_invalid_value;
+    
+    if(status != rocblaslt_status_continue)
+    {
+        log_error(__func__,
+                  "invalid args for General Batched GEMM",
+                  "scaleAType",
+                  rocblaslt_scaling_format_to_string(scaleAType),
+                  "scaleBtype",
+                  rocblaslt_scaling_format_to_string(scaleBType),
+                  "epilogue",
+                  rocblaslt_epilogue_to_string(epilogue));
+    }   
+    return status;
 }
 
 /*******************************************************************************
@@ -223,18 +261,14 @@ inline rocblaslt_status
                                   const void*               alpha,
                                   const RocblasltContractionProblem::ScalingFormat scaleAType,
                                   const RocblasltContractionProblem::ScalingFormat scaleBType,
-                                  const uint32_t scaleABlockRowSize,
-                                  const uint32_t scaleABlockColSize,
-                                  const uint32_t scaleBBlockRowSize,
-                                  const uint32_t scaleBBlockColSize,
-                                  void*&         E,
-                                  hipDataType&   aux_type,
-                                  int64_t&       lde,
-                                  int64_t&       batch_stride_e,
-                                  void*&         bias,
-                                  hipDataType&   bias_type,
-                                  void*&         scaleAlphaVec,
-                                  bool&          gradient)
+                                  void*&                                           E,
+                                  hipDataType&                                     aux_type,
+                                  int64_t&                                         lde,
+                                  int64_t&                                         batch_stride_e,
+                                  void*&                                           bias,
+                                  hipDataType&                                     bias_type,
+                                  void*&                                           scaleAlphaVec,
+                                  bool&                                            gradient)
 {
     // Set status
     rocblaslt_status status = rocblaslt_status_continue;
@@ -274,22 +308,6 @@ inline rocblaslt_status
     {
         log_error(__func__, "Scale A and Scale B must be both scalar, vector or block.");
         status = rocblaslt_status_invalid_value;
-    }
-    if(scaleAType == RocblasltContractionProblem::ScalingFormat::Block)
-    {
-        if(scaleABlockRowSize != 32 || scaleABlockColSize != 1)
-        {
-            log_error(__func__, "ScaleA block row and column sizes currently only support 32x1");
-            status = rocblaslt_status_invalid_value;
-        }
-    }
-    if(scaleBType == RocblasltContractionProblem::ScalingFormat::Block)
-    {
-        if(scaleBBlockRowSize != 1 || scaleBBlockColSize != 32)
-        {
-            log_error(__func__, "ScaleB block row and column sizes currently only support 1x32");
-            status = rocblaslt_status_invalid_value;
-        }
     }
     return status;
 }
@@ -337,7 +355,7 @@ inline rocblaslt_status rocblaslt_matmul_valid_args(const rocblaslt_matmul_desc 
     hipblasOperation_t opB = matmul_descr->op_B;
 
     auto matmul_swizzle_status
-        = validateMatmulSwizzleArgs(matmul_descr, matA, matB, a_type, b_type, swizzleA, swizzleB);
+        = validateMatmulSwizzleArgs(matmul_descr, matA, matB, matA->type, matB->type, swizzleA, swizzleB);
 
     if(matmul_swizzle_status != rocblaslt_status_continue)
         return matmul_swizzle_status;
@@ -417,10 +435,6 @@ inline rocblaslt_status rocblaslt_matmul_valid_args(const rocblaslt_matmul_desc 
                                                          alpha,
                                                          matmul_descr->scaleAType,
                                                          matmul_descr->scaleBType,
-                                                         matmul_descr->scaleABlockRowSize,
-                                                         matmul_descr->scaleABlockColSize,
-                                                         matmul_descr->scaleBBlockRowSize,
-                                                         matmul_descr->scaleBBlockColSize,
                                                          E,
                                                          aux_type,
                                                          lde,
@@ -459,4 +473,39 @@ inline void setTo1(const rocblaslt_compute_type& compute_type, const void* onePt
         *dst              = onePtr;
     }
 }
+
+inline hipblaslt_complex_double get_alpha_beta_scalar(hipDataType type, const void* ptr)
+{
+    if (!ptr) {
+        return {0.0, 0.0};
+    }
+
+    switch (type)
+    {
+        case HIP_R_32F:
+            return {static_cast<double>(*(reinterpret_cast<const float*>(ptr))), 0.0};
+        case HIP_R_64F:
+            return {*(reinterpret_cast<const double*>(ptr)), 0.0};
+        case HIP_R_32I:
+            return {static_cast<double>(*(reinterpret_cast<const int32_t*>(ptr))), 0.0};
+        
+        case HIP_R_16F:
+        case HIP_R_16BF:
+            return {static_cast<double>(*(reinterpret_cast<const float*>(ptr))), 0.0};
+
+        case HIP_C_32F:
+        {
+            auto val = *(reinterpret_cast<const hipblaslt_complex_float*>(ptr));
+            return {static_cast<double>(val.real()), static_cast<double>(val.imag())};
+        }
+        case HIP_C_64F:
+        {
+            return *(reinterpret_cast<const hipblaslt_complex_double*>(ptr));
+        }
+            
+        default:
+            return {0.0, 0.0};
+    }
+}
+
 #endif

@@ -29,11 +29,11 @@ extern "C" {
 #endif
 
 /*! \ingroup conv_module
-*  \brief Convert a sparse GEBSR matrix into a sparse CSR matrix
+*  \brief Convert a sparse GEBSR matrix into a sparse CSR matrix.
 *
 *  \details
-*  \p hipsparseXgebsr2csr converts a GEBSR matrix into a CSR matrix. It is assumed,
-*  that \p csrValC, \p csrColIndC and \p csrRowPtrC are already allocated prior to
+*  \p hipsparseXgebsr2csr converts a GEBSR matrix into a CSR matrix. It is assumed
+*  that \p csrValC, \p csrColIndC, and \p csrRowPtrC are already allocated prior to
 *  calling \p hipsparseXgebsr2csr. Allocation size for \p csrRowPtrC equals
 *  \p m+1 where:
 *
@@ -45,7 +45,7 @@ extern "C" {
 *  \f]
 *
 *  Allocation size for \p csrValC and \p csrColIndC is computed by the the number of blocks in the GEBSR
-*  matrix, \p nnzb, multiplied by the product of the block dimensions, i.e. \p nnz=nnzb*rocBlockDim*colBlockDim.
+*  matrix, \p nnzb, multiplied by the product of the block dimensions, that is, \p nnz=nnzb*rocBlockDim*colBlockDim.
 *
 *  For example, given the GEBSR matrix:
 *  \f[
@@ -87,13 +87,13 @@ extern "C" {
 *  \f]
 *
 *  \note
-*  This function is non blocking and executed asynchronously with respect to the host.
-*  It may return before the actual computation has finished.
+*  This function is non-blocking and executed asynchronously with respect to the host.
+*  It can return before the actual computation has finished.
 *
 *  @param[in]
-*  handle      handle to the hipsparse library context queue.
+*  handle      handle to the hipSPARSE library context queue.
 *  @param[in]
-*  dirA        the storage format of the blocks, \ref HIPSPARSE_DIRECTION_ROW or \ref HIPSPARSE_DIRECTION_COLUMN
+*  dirA        the storage format of the blocks, \ref HIPSPARSE_DIRECTION_ROW or \ref HIPSPARSE_DIRECTION_COLUMN.
 *  @param[in]
 *  mb          number of block rows in the sparse general BSR matrix.
 *  @param[in]
@@ -125,92 +125,7 @@ extern "C" {
 *
 *  \retval     HIPSPARSE_STATUS_SUCCESS the operation completed successfully.
 *  \retval     HIPSPARSE_STATUS_INVALID_VALUE \p handle, \p mb, \p nb, \p block_dim, \p bsrValA,
-*              \p bsrRowPtrA, \p bsrColIndA, \p csrValC, \p csrRowPtrC or \p csrColIndC pointer is invalid.
-*
-*  \par Example
-*  \code{.c}
-*    // hipSPARSE handle
-*    hipsparseHandle_t handle;
-*    hipsparseCreate(&handle);
-*
-*    hipsparseMatDescr_t csr_descr;
-*    hipsparseCreateMatDescr(&csr_descr);
-*
-*    hipsparseMatDescr_t bsr_descr;
-*    hipsparseCreateMatDescr(&bsr_descr);
-*
-*    // Sparse matrix in GEBSR format
-*    //     1 2 | 0 3 | 0 0
-*    //     0 4 | 5 0 | 0 1
-*    // A = 6 0 | 0 7 | 8 0
-*    //     ---------------
-*    //     0 0 | 3 0 | 2 2
-*    //     1 0 | 0 0 | 4 3
-*    //     7 2 | 0 0 | 1 4
-*    int hbsrRowPtr[3] = {0, 3, 6};
-*    int hbsrColInd[6] = {0, 1, 2, 0, 1, 2};
-*    float hbsrVal[36]  = {1.0f, 2.0f, 0.0f, 4.0f, 6.0f, 0.0f,
-*                           0.0f, 3.0f, 5.0f, 0.0f, 0.0f, 7.0f,
-*                           0.0f, 0.0f, 0.0f, 1.0f, 8.0f, 0.0f,
-*                           0.0f, 0.0f, 1.0f, 0.0f, 7.0f, 2.0f,
-*                           3.0f, 0.0f, 0.0f, 0.0f, 0.0f, 0.0f,
-*                           2.0f, 2.0f, 4.0f, 3.0f, 1.0f, 4.0f};
-*
-*    int m        = 6;
-*    int n        = 6;
-*    int nnz      = 36;
-*    int mb       = 2;
-*    int nb       = 3;
-*    int nnzb     = 6;
-*    int rowBlockDim = 3;
-*    int colBlockDim = 2;
-*    hipsparseDirection_t dir = HIPSPARSE_DIRECTION_ROW;
-*
-*    int* dbsrRowPtr = nullptr;
-*    int* dbsrColInd = nullptr;
-*    float* dbsrVal = nullptr;
-*    hipMalloc((void**)&dbsrRowPtr, sizeof(int) * (mb + 1));
-*    hipMalloc((void**)&dbsrColInd, sizeof(int) * nnzb);
-*    hipMalloc((void**)&dbsrVal, sizeof(float) * rowBlockDim * colBlockDim * nnzb);
-*
-*    hipMemcpy(dbsrRowPtr, hbsrRowPtr, sizeof(int) * (mb + 1), hipMemcpyHostToDevice);
-*    hipMemcpy(dbsrColInd, hbsrColInd, sizeof(int) * nnzb, hipMemcpyHostToDevice);
-*    hipMemcpy(dbsrVal, hbsrVal, sizeof(float) * rowBlockDim * colBlockDim * nnzb, hipMemcpyHostToDevice);
-*
-*    int* dcsrRowPtr = nullptr;
-*    int* dcsrColInd = nullptr;
-*    float* dcsrVal = nullptr;
-*    hipMalloc((void**)&dcsrRowPtr, sizeof(int) * (m + 1));
-*    hipMalloc((void**)&dcsrColInd, sizeof(int) * nnz);
-*    hipMalloc((void**)&dcsrVal, sizeof(float) * nnz);
-*
-*    hipsparseSgebsr2csr(handle,
-*                        dir,
-*                        mb,
-*                        nb,
-*                        bsr_descr,
-*                        dbsrVal,
-*                        dbsrRowPtr,
-*                        dbsrColInd,
-*                        rowBlockDim,
-*                        colBlockDim,
-*                        csr_descr,
-*                        dcsrVal,
-*                        dcsrRowPtr,
-*                        dcsrColInd);
-*
-*    hipFree(dbsrRowPtr);
-*    hipFree(dbsrColInd);
-*    hipFree(dbsrVal);
-*
-*    hipFree(dcsrRowPtr);
-*    hipFree(dcsrColInd);
-*    hipFree(dcsrVal);
-*
-*    hipsparseDestroyMatDescr(csr_descr);
-*    hipsparseDestroyMatDescr(bsr_descr);
-*    hipsparseDestroy(handle);
-*  \endcode
+*              \p bsrRowPtrA, \p bsrColIndA, \p csrValC, \p csrRowPtrC, or \p csrColIndC pointer is invalid.
 */
 /**@{*/
 HIPSPARSE_EXPORT

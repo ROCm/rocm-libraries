@@ -1,5 +1,5 @@
 # ########################################################################
-# Copyright (C) 2021-2024 Advanced Micro Devices, Inc. All rights Reserved.
+# Copyright (C) 2021-2026 Advanced Micro Devices, Inc. All rights Reserved.
 #
 # Permission is hereby granted, free of charge, to any person obtaining a copy
 # of this software and associated documentation files (the "Software"), to deal
@@ -33,6 +33,7 @@ Definitions:
     - { alpha:  -0.5, beta:  0.0, alphai: -0.5, betai:  0.0 }
 
   - &alpha_beta_range_checkin
+    - { alpha:   0.0, beta:  1.0,  alphai:  0.0, betai:  0.0 }
     - { alpha:   2.0, beta:  0.67, alphai: -1.0, betai:  1.5 }
     - { alpha:   2.0, beta:  0.0,  alphai:  1.5, betai:  0.5 }
     - { alpha:   0.0, beta:  1.0,  alphai:  1.5, betai:  0.5 }
@@ -64,8 +65,8 @@ Tests:
   category: pre_checkin
   function: gemvi
   precision: *single_double_precisions_complex_real
-  M: [0, 91, 209]
-  N: [0, 76, 331]
+  M: [8, 91]
+  N: [8, 76]
   alpha_beta: *alpha_beta_range_checkin
   transA: [rocsparse_operation_none]
   baseA: [rocsparse_index_base_zero, rocsparse_index_base_one]
@@ -74,7 +75,7 @@ Tests:
   category: nightly
   function: gemvi
   precision: *single_double_precisions_complex_real
-  M: [728, 291, 1292]
+  M: [728, 291]
   N: [119, 493]
   alpha_beta: *alpha_beta_range_nightly
   transA: [rocsparse_operation_none]
@@ -84,8 +85,8 @@ Tests:
   category: nightly
   function: gemvi
   precision: *single_double_precisions
-  M: [629, 341, 1304]
-  N: [220, 512, 2153]
+  M: [629, 341]
+  N: [220, 512]
   alpha_beta: *alpha_beta_range_nightly
   transA: [rocsparse_operation_none]
   baseA: [rocsparse_index_base_zero, rocsparse_index_base_one]

@@ -5,7 +5,9 @@ subtrees:
   - caption: Install
     entries:
     - file: install/installing
-      title: Installation guide
+      title: Install rocRAND
+    - file: install/build
+      title: Build from source
 
   - caption: Conceptual
     entries:
@@ -13,6 +15,8 @@ subtrees:
       title: Programming guide
     - file: conceptual/curand-compatibility
     - file: conceptual/dynamic_ordering_configuration
+    - file: conceptual/generator-types
+      title: Random number generators
 
   - caption: Examples
     entries:

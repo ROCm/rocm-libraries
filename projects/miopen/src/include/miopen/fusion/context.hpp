@@ -42,6 +42,7 @@ struct FusionContext : ExecutionContext
     {
         auto ctx = ExecutionContext{*this};
         conv_problem.SetupFloats(ctx);
+        conv_problem.SetupComputeType(ctx);
         return ctx;
     }
 };

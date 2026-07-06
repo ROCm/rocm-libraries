@@ -145,6 +145,8 @@ set(rocblas_testing_common_source
     blas3/common_geam.cpp
     blas_ex/common_gemmt.cpp
     blas_ex/common_geam_ex.cpp
+    blas_ex/common_syrk_ex.cpp
+    blas_ex/common_herk_ex.cpp
 )
 
 add_library(rocblas_clients_common OBJECT ${rocblas_testing_common_tensile_source} ${rocblas_common_source})
@@ -158,7 +160,11 @@ rocblas_client_library_settings( rocblas_clients_testing_common )
 if ( WARN_NOT_ILP64_PREFERRED )
   target_compile_definitions( rocblas_clients_common PRIVATE ROCBLAS_REFERENCE_LIB_WARN )
 endif()
-target_compile_definitions( rocblas_clients_common PRIVATE ROCBLAS_REFERENCE_LIB=${BLAS_LIBRARY} )
+if ( ROCBLAS_REFERENCE_BLAS_DEFINES )
+  target_compile_definitions( rocblas_clients_common PRIVATE ${ROCBLAS_REFERENCE_BLAS_DEFINES} )
+  target_compile_definitions( rocblas_clients_testing_common PRIVATE ${ROCBLAS_REFERENCE_BLAS_DEFINES} )
+endif()
+target_compile_definitions( rocblas_clients_common PRIVATE ROCBLAS_REFERENCE_LIB=${ROCBLAS_REFERENCE_LIB_LABEL} )
 
 
 # target is not linked as OBJECT library but we want any interface flags from dependencies, e.g. COMMON_LINK_LIBS may bring OpenMP

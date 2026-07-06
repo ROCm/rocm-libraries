@@ -137,6 +137,7 @@ function(add_thrust_test TEST)
         add_test(${TEST} ${TEST_TARGET})
         set_tests_properties(${TEST}
             PROPERTIES
+                RESOURCE_GROUPS "1,${DEFAULT_GPU_RESOURCE}:1"
                 LABELS upstream
         )
     endif()
@@ -248,7 +249,10 @@ add_thrust_test("reduce")
 add_thrust_test("reduce_by_key")
 add_thrust_test("reduce_large")
 add_thrust_test("remove")
-add_thrust_test("replace")
+# Temporarily disable this test for gfx950 when CODE_COVERAGE is ON due to a compiler issue
+if((NOT CODE_COVERAGE) OR (NOT (("gfx950" IN_LIST GPU_TARGETS) OR (GPU_TARGETS STREQUAL "all"))))
+    add_thrust_test("replace")
+endif()
 add_thrust_test("reverse")
 add_thrust_test("reverse_iterator")
 add_thrust_test("scan")

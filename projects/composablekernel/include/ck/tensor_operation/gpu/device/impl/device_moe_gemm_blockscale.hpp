@@ -1,5 +1,5 @@
+// Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
 // SPDX-License-Identifier: MIT
-// Copyright (c) 2025, Advanced Micro Devices, Inc. All rights reserved.
 
 #pragma once
 
@@ -74,12 +74,14 @@ template <typename ALayout,
           index_t ActivationOP                        = 0,
           bool NSwizzle                               = false,
           bool IsInputGemm                            = true,
+          bool IsSplitK                               = false,
           bool MulRoutedWeight                        = false,
           typename IndexType                          = index_t,
           typename ComputeTypeA                       = CDataType,
           typename ComputeTypeB                       = ComputeTypeA,
           typename LDSTypeA                           = ComputeTypeA,
-          typename LDSTypeB                           = ComputeTypeB>
+          typename LDSTypeB                           = ComputeTypeB,
+          bool NonTemporalLoadB                       = false>
 struct DeviceMoeGemmBlockScale
     : public DeviceGemmMultipleD_BlockScale_BPreshuffle<ALayout,
                                                         BLayout,
@@ -98,11 +100,28 @@ struct DeviceMoeGemmBlockScale
                                                         BElementwiseOperation,
                                                         CElementwiseOperation>
 {
-    GET_NXDL_PER_WAVE_IMPL
-    static constexpr auto NXdlPerWave64 = GetNXdlPerWave<true>();
-    static constexpr auto NXdlPerWave32 = GetNXdlPerWave<false>();
-    static constexpr index_t NumDTensor = DsDataType::Size();
-    template <index_t NXdlPerWave_>
+    static constexpr auto WarpTileConfig64 = GetWarpTileConfig<BlockSize,
+                                                               MPerBlock,
+                                                               NPerBlock,
+                                                               MPerXDL,
+                                                               NPerXDL,
+                                                               MXdlPerWave,
+                                                               CShuffleMXdlPerWavePerShuffle,
+                                                               CShuffleNXdlPerWavePerShuffle,
+                                                               true>();
+    static constexpr auto WarpTileConfig32 = GetWarpTileConfig<BlockSize,
+                                                               MPerBlock,
+                                                               NPerBlock,
+                                                               MPerXDL,
+                                                               NPerXDL,
+                                                               MXdlPerWave,
+                                                               CShuffleMXdlPerWavePerShuffle,
+                                                               CShuffleNXdlPerWavePerShuffle,
+                                                               false>();
+    static constexpr auto NXdlPerWave64    = WarpTileConfig64.At(3);
+    static constexpr auto NXdlPerWave32    = WarpTileConfig32.At(3);
+    static constexpr index_t NumDTensor    = DsDataType::Size();
+    template <typename WarpTileConfig>
     using GridwiseGemmBase = GridwiseMoeGemmBlockScale<
         ALayout,
         BLayout,
@@ -127,10 +146,10 @@ struct DeviceMoeGemmBlockScale
         KPerBlock,
         AK1,
         BK1,
-        MPerXDL,
-        NPerXDL,
-        MXdlPerWave,
-        NXdlPerWave_,
+        WarpTileConfig::At(0),
+        WarpTileConfig::At(1),
+        WarpTileConfig::At(2),
+        WarpTileConfig::At(3),
         ABlockTransferThreadClusterLengths_AK0_M_AK1,
         ABlockTransferThreadClusterArrangeOrder,
         ABlockTransferSrcAccessOrder,
@@ -147,8 +166,8 @@ struct DeviceMoeGemmBlockScale
         BBlockTransferDstScalarPerVector_BK1,
         false,
         BBlockLdsExtraN,
-        CShuffleMXdlPerWavePerShuffle,
-        math::min(CShuffleNXdlPerWavePerShuffle, NXdlPerWave_),
+        WarpTileConfig::At(4),
+        WarpTileConfig::At(5),
         CShuffleBlockTransferClusterLengths_MBlock_MPerBlock_NBlock_NPerBlock,
         CDEShuffleBlockTransferScalarPerVectors,
         BlkGemmPipeSched,
@@ -156,14 +175,16 @@ struct DeviceMoeGemmBlockScale
         ActivationOP,
         NSwizzle,
         IsInputGemm,
+        IsSplitK,
         MulRoutedWeight,
         IndexType,
         ComputeTypeA,
         ComputeTypeB,
         LDSTypeA,
-        LDSTypeB>;
-    using GridwiseGemm64 = GridwiseGemmBase<math::max(NXdlPerWave64, 1)>;
-    using GridwiseGemm32 = GridwiseGemmBase<NXdlPerWave32>;
+        LDSTypeB,
+        NonTemporalLoadB>;
+    using GridwiseGemm64 = GridwiseGemmBase<decltype(WarpTileConfig64)>;
+    using GridwiseGemm32 = GridwiseGemmBase<decltype(WarpTileConfig32)>;
 
     using Argument = typename GridwiseGemm64::Argument;
 
@@ -181,7 +202,10 @@ struct DeviceMoeGemmBlockScale
             return 1;
     }();
 
-    int GetPreShuffleParameters() override { return NPerXDL; }
+    int GetPreShuffleParameters() override
+    {
+        return get_warp_size() == 64 ? WarpTileConfig64.At(1) : WarpTileConfig32.At(1);
+    }
 
     // Invoker
     struct Invoker : public BaseInvoker
@@ -201,12 +225,12 @@ struct DeviceMoeGemmBlockScale
             }
 
             index_t gdx, gdy, gdz;
-            std::tie(gdx, gdy, gdz) = GridwiseGemm::CalculateGridSize(arg.M, arg.N);
+            std::tie(gdx, gdy, gdz) = GridwiseGemm::CalculateGridSize(
+                arg.M, arg.N * (IsInputGemm && IsSplitK ? 2 : 1), arg.K, arg.KBatch);
 
             float ave_time = 0;
 
-            index_t k_grain = arg.KBatch * KPerBlock;
-            index_t K_split = (arg.K + k_grain - 1) / k_grain * KPerBlock;
+            index_t K_split = arg.KBatch == 1 ? arg.K : arg.KBatch * KPerBlock;
 
             const bool has_main_k_block_loop = GridwiseGemm::CalculateHasMainKBlockLoop(K_split);
             const auto RunKernel             = [&](const auto& kernel) {
@@ -252,7 +276,9 @@ struct DeviceMoeGemmBlockScale
                         if(arg_.KBatch > 1)
                             hipGetErrorString(hipMemsetAsync(arg_.p_c_grid,
                                                              0,
-                                                             arg_.M * arg_.N * sizeof(CDataType),
+                                                             arg_.NumTokens * arg_.TopK * arg_.N *
+                                                                 sizeof(CDataType) *
+                                                                 (IsInputGemm && IsSplitK ? 2 : 1),
                                                              stream_config.stream_id_));
                     };
 
@@ -268,11 +294,12 @@ struct DeviceMoeGemmBlockScale
                 else
                 {
                     if(arg.KBatch > 1)
-                        hipGetErrorString(hipMemsetAsync(arg.p_c_grid,
-                                                         0,
-                                                         arg.M * arg.N * sizeof(CDataType),
-                                                         stream_config.stream_id_));
-
+                        hipGetErrorString(
+                            hipMemsetAsync(arg.p_c_grid,
+                                           0,
+                                           arg.NumTokens * arg.TopK * arg.N * sizeof(CDataType) *
+                                               (IsInputGemm && IsSplitK ? 2 : 1),
+                                           stream_config.stream_id_));
                     ave_time = launch_and_time_kernel(
                         stream_config, kernel, dim3(gdx, gdy, gdz), dim3(BlockSize), 0, arg);
                 }
@@ -289,8 +316,9 @@ struct DeviceMoeGemmBlockScale
 
             constexpr index_t minimum_occupancy = (estimated_reg_total >= 256) ? 1 : 2;
 
-            constexpr auto MemoryDataOp =
-                IsInputGemm ? InMemoryDataOperationEnum::Set : InMemoryDataOperationEnum::AtomicAdd;
+            constexpr auto MemoryDataOp = (IsInputGemm && !IsSplitK)
+                                              ? InMemoryDataOperationEnum::Set
+                                              : InMemoryDataOperationEnum::AtomicAdd;
 
             if(has_main_k_block_loop)
             {
@@ -416,12 +444,17 @@ struct DeviceMoeGemmBlockScale
 
     static bool IsSupportedArgument(const Argument& arg)
     {
-        // only impl kbatch 1 now
-        if(arg.KBatch > 1)
+        // only impl kbatch 1 for fp32
+        if(arg.KBatch > 1 && !std::is_same_v<CDataType, float>)
         {
             return false;
         }
-        if(!ck::is_xdl_wmma_supported<ComputeTypeA, ComputeTypeB, MPerXDL, NPerXDL>())
+        if(!ck::is_xdl_wmma_supported<ComputeTypeA,
+                                      ComputeTypeB,
+                                      MPerXDL,
+                                      NPerXDL,
+                                      WarpTileConfig32.At(0),
+                                      WarpTileConfig32.At(1)>())
         {
             return false;
         }
@@ -439,6 +472,11 @@ struct DeviceMoeGemmBlockScale
         }
         if(arg.N % NPerBlock != 0 || arg.K % KPerBlock != 0)
         {
+            return false;
+        }
+        if(arg.KBatch > 1 && arg.K % (KPerBlock * arg.KBatch) != 0)
+        {
+            // Not support Kpadding with KBatch > 1
             return false;
         }
 

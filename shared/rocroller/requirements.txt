@@ -3,6 +3,7 @@ dash
 dash_bootstrap_components
 dash_svg
 flake8
+isort
 matplotlib
 msgpack
 pandas
@@ -12,6 +13,7 @@ pytest-cmake
 pytest-cov
 pytest-mock
 scipy
+pylint
 pyyaml
 joblib
 # codeql

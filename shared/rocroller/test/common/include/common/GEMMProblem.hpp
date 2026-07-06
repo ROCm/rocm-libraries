@@ -1,34 +1,20 @@
-/*******************************************************************************
- *
- * MIT License
- *
- * Copyright 2024-2025 AMD ROCm(TM) Software
- *
- * Permission is hereby granted, free of charge, to any person obtaining a copy
- * of this software and associated documentation files (the "Software"), to deal
- * in the Software without restriction, including without limitation the rights
- * to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
- * copies of the Software, and to permit persons to whom the Software is
- * furnished to do so, subject to the following conditions:
- *
- * The above copyright notice and this permission notice shall be included in
- * all copies or substantial portions of the Software.
- *
- * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
- * IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
- * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
- * AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
- * LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
- * OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
- * SOFTWARE.
- *
- *******************************************************************************/
+// Copyright Advanced Micro Devices, Inc., or its affiliates.
+// SPDX-License-Identifier: MIT
 
 #pragma once
 
 #include <rocRoller/DataTypes/DataTypes.hpp>
 #include <rocRoller/Operations/BlockScale_fwd.hpp>
+#include <rocRoller/Parameters/Solution/LDSBankSwizzleMode.hpp>
+#include <rocRoller/Parameters/Solution/LoadOption.hpp>
+#include <rocRoller/Parameters/Solution/ScaleSkipPermlaneMode.hpp>
+#include <rocRoller/Parameters/Solution/StoreOption.hpp>
+#include <rocRoller/Parameters/Solution/StreamK.hpp>
+
 #include <string>
+#include <vector>
+
+namespace SolutionParams = rocRoller::Parameters::Solution;
 
 struct GEMMProblem
 {
@@ -61,15 +47,12 @@ struct GEMMProblem
     std::string transB = "T";
 
     // Unroll Sizes
-    unsigned int unrollX = 0;
-    unsigned int unrollY = 0;
     unsigned int unrollK = 0;
 
-    bool loadLDSA    = true;
-    bool loadLDSB    = true;
-    bool storeLDSD   = true;
-    bool direct2LDSA = false;
-    bool direct2LDSB = false;
+    SolutionParams::StorePath storePath{
+        SolutionParams::StorePath::VGPRToGlobalMemoryViaLDSWithBuffer};
+    SolutionParams::LoadPath loadPathA{SolutionParams::LoadPath::BufferToLDSViaVGPR};
+    SolutionParams::LoadPath loadPathB{SolutionParams::LoadPath::BufferToLDSViaVGPR};
 
     bool fuseLoops                 = true;
     bool tailLoops                 = true;
@@ -79,6 +62,11 @@ struct GEMMProblem
 
     bool swizzleScale  = false;
     bool prefetchScale = false;
+    // Swizzle tile size
+    int swizzleM = 64;
+    int swizzleN = 64;
+    int swizzleK = 4;
+    int swizzleB = 1;
 
     bool prefetch          = false;
     int  prefetchInFlight  = 1;
@@ -87,18 +75,22 @@ struct GEMMProblem
 
     bool packMultipleElementsInto1VGPR = true;
 
-    bool loopOverTiles  = false;
-    bool streamK        = false;
-    bool streamKTwoTile = false;
+    bool loopOverTiles = false;
+
+    rocRoller::StreamKConfig streamK{rocRoller::StreamKMode::None};
 
     bool splitStoreTileIntoWaveBlocks = false;
 
-    bool loadLDSScaleA = false;
-    bool loadLDSScaleB = false;
+    SolutionParams::LoadPath loadScalePathA{SolutionParams::LoadPath::BufferToVGPR};
+    SolutionParams::LoadPath loadScalePathB{SolutionParams::LoadPath::BufferToVGPR};
 
     int  workgroupMappingDim   = -1;
     int  workgroupMappingValue = -1;
     bool workgroupRemapXCC     = false;
+
+    uint workgroupClusterSizeX = 0;
+    uint workgroupClusterSizeY = 0;
+    uint workgroupClusterSizeZ = 0;
 
     rocRoller::Operations::ScaleMode scaleAMode = rocRoller::Operations::ScaleMode::None;
     rocRoller::Operations::ScaleMode scaleBMode = rocRoller::Operations::ScaleMode::None;
@@ -107,6 +99,25 @@ struct GEMMProblem
     rocRoller::DataType scaleTypeB = rocRoller::DataType::None;
 
     int scaleBlockSize = -1;
+
+    // LDS bank conflict swizzle
+    rocRoller::LDSBankSwizzleMode ldsSwizzleMode = rocRoller::LDSBankSwizzleMode::None;
+
+    // Scale pretile / swizzle (mirrors client TypeParameters)
+    rocRoller::ScaleSkipPermlaneMode scaleSkipPermlane = rocRoller::ScaleSkipPermlaneMode::None;
+    std::vector<size_t>              scalePretileA;
+    std::vector<size_t>              scalePretileB;
+    std::vector<size_t>              scaleShuffleTileA;
+    std::vector<size_t>              scaleShuffleTileB;
+
+    // Pre-tile A matrix (MxK tile dimensions); kernel expects pre-tiled layout (transA must be T)
+    std::vector<size_t> pretileA;
+    // Pre-tile B matrix (KxN tile dimensions); kernel expects pre-tiled layout
+    std::vector<size_t> pretileB;
+
+    // LDS padding for MATRIX_A and MATRIX_B; default no padding
+    std::pair<int, int> padA = {0, 0};
+    std::pair<int, int> padB = {0, 0};
 
     auto operator<=>(GEMMProblem const& rhs) const = default;
 };

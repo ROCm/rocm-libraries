@@ -29,14 +29,15 @@ The rocRAND public repository is located at `<https://github.com/ROCm/rocm-libra
 
   .. grid-item-card:: Install
 
-    * :doc:`Installation guide <./install/installing>`
+    * :doc:`Install rocRAND <./install/installing>`
+    * :doc:`Build from source <./install/build>`
 
   .. grid-item-card:: Conceptual
 
     * :doc:`Programming guide <./conceptual/programmers-guide>`
-
     * :ref:`curand-compatibility`
     * :ref:`dynamic-ordering-configuration`
+    * :doc:`Random number generators <./conceptual/generator-types>`
 
   .. grid-item-card:: Examples
 
@@ -44,7 +45,7 @@ The rocRAND public repository is located at `<https://github.com/ROCm/rocm-libra
 
   .. grid-item-card:: API reference
 
-    * :doc:`rocRAND data type support <api-reference/data-type-support>`
+    * :doc:`rocRAND precision support <api-reference/data-type-support>`
     * :ref:`cpp-api`
     * :ref:`python-api`
     * :doc:`Fortran API reference <fortran-api-reference>`

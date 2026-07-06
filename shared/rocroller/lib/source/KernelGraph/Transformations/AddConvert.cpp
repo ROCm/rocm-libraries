@@ -1,28 +1,5 @@
-/*******************************************************************************
- *
- * MIT License
- *
- * Copyright 2024-2025 AMD ROCm(TM) Software
- *
- * Permission is hereby granted, free of charge, to any person obtaining a copy
- * of this software and associated documentation files (the "Software"), to deal
- * in the Software without restriction, including without limitation the rights
- * to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
- * copies of the Software, and to permit persons to whom the Software is
- * furnished to do so, subject to the following conditions:
- *
- * The above copyright notice and this permission notice shall be included in
- * all copies or substantial portions of the Software.
- *
- * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
- * IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
- * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
- * AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
- * LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
- * OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
- * SOFTWARE.
- *
- *******************************************************************************/
+// Copyright Advanced Micro Devices, Inc., or its affiliates.
+// SPDX-License-Identifier: MIT
 
 #include <rocRoller/KernelGraph/KernelGraph.hpp>
 #include <rocRoller/KernelGraph/Transforms/AddConvert.hpp>
@@ -40,7 +17,10 @@ namespace rocRoller
         class AddConvertOperations
         {
         public:
-            AddConvertOperations() {}
+            AddConvertOperations(ContextPtr context)
+                : m_context(context)
+            {
+            }
 
             void addConverts(KernelGraph& graph);
 
@@ -68,6 +48,8 @@ namespace rocRoller
             std::map<int, DataType> m_storageDataType;
 
             std::vector<ConvertLocation> m_locations;
+
+            ContextPtr m_context;
         };
 
         void AddConvertOperations::stageMultiplyConverts(KernelGraph const& graph)
@@ -91,6 +73,28 @@ namespace rocRoller
                         auto [macBTag, macB] = graph.getDimension<MacroTile>(
                             node, Connections::typeArgument<MacroTile>(NaryArgument::RHS));
                         m_multiplyArgs[macBTag].push_back({node, NaryArgument::RHS});
+
+                        if(m_context->targetArchitecture().HasCapability(
+                               GPUCapability::PartiallyActiveWaveSize))
+                        {
+                            if(op.scaleA == Operations::ScaleMode::Separate)
+                            {
+                                auto [macScaleATag, macScaleA] = graph.getDimension<MacroTile>(
+                                    node,
+                                    Connections::typeArgument<MacroTile>(NaryArgument::LHS_SCALE));
+                                m_multiplyArgs[macScaleATag].push_back(
+                                    {node, NaryArgument::LHS_SCALE});
+                            }
+
+                            if(op.scaleB == Operations::ScaleMode::Separate)
+                            {
+                                auto [macScaleBTag, macScaleB] = graph.getDimension<MacroTile>(
+                                    node,
+                                    Connections::typeArgument<MacroTile>(NaryArgument::RHS_SCALE));
+                                m_multiplyArgs[macScaleBTag].push_back(
+                                    {node, NaryArgument::RHS_SCALE});
+                            }
+                        }
                     },
                     [&](CIsAnyOf<LoadTiled, LoadLDSTile> auto op) {
                         auto coord = graph.mapper.get<MacroTile>(node);
@@ -217,7 +221,7 @@ namespace rocRoller
         {
             auto graph = k;
 
-            AddConvertOperations adder;
+            AddConvertOperations adder{m_context};
 
             adder.addConverts(graph);
 

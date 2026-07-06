@@ -1,5 +1,5 @@
+// Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
 // SPDX-License-Identifier: MIT
-// Copyright (c) Advanced Micro Devices, Inc. All rights reserved.
 
 #pragma once
 
@@ -20,7 +20,7 @@ struct BatchedTransposeCommonPolicy
         constexpr index_t kSecondDimPerBlock = Problem::kMPerBlock;
 
         constexpr index_t kVectorSize = Problem::VectorSizeInput;
-        static_assert((kLeadDimPerBlock * kVectorSize) % kBlockSize == 0, "");
+
         using TileEncodingPattern = tile_distribution_encoding_pattern_2d<kBlockSize,
                                                                           kSecondDimPerBlock,
                                                                           kLeadDimPerBlock,

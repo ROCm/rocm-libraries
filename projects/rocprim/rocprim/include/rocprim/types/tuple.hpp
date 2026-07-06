@@ -1,4 +1,4 @@
-// Copyright (c) 2018-2025 Advanced Micro Devices, Inc. All rights reserved.
+// Copyright (c) 2018-2026 Advanced Micro Devices, Inc. All rights reserved.
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -21,8 +21,10 @@
 #ifndef ROCPRIM_TYPES_TUPLE_HPP_
 #define ROCPRIM_TYPES_TUPLE_HPP_
 
+#include <functional>
 #include <tuple>
 #include <type_traits>
+#include <utility>
 
 #include "../config.hpp"
 #include "../detail/all_true.hpp"
@@ -971,6 +973,19 @@ tuple_element_t<I, tuple<Types...>>&& get(tuple<Types...>&& t) noexcept
     return static_cast<value_type&&>(static_cast<type&>(t.base).get());
 }
 
+#ifndef DOXYGEN_SHOULD_SKIP_THIS
+
+template<size_t I, class... Types>
+ROCPRIM_HOST_DEVICE
+inline tuple_element_t<I, tuple<Types...>>&& get(const tuple<Types...>&& t) noexcept
+{
+    using value_type = tuple_element_t<I, tuple<Types...>>;
+    using type       = detail::tuple_value<I, tuple_element_t<I, tuple<Types...>>>;
+    return static_cast<const value_type&&>(static_cast<const type&>(t.base).get());
+}
+
+#endif // DOXYGEN_SHOULD_SKIP_THIS
+
 // ////////////////////////
 // make_tuple
 // ////////////////////////
@@ -1069,6 +1084,32 @@ ROCPRIM_HOST_DEVICE inline
 tuple<Types&...> tie(Types&... args) noexcept
 {
     return ::rocprim::tuple<Types&...>(args...);
+}
+
+namespace detail
+{
+template<class Func, class Tuple, size_t... Indices>
+ROCPRIM_HOST_DEVICE ROCPRIM_INLINE
+auto apply_tuple(Func&& func, Tuple&& tuple, std::index_sequence<Indices...> /* indices */) noexcept
+{
+    return func(::rocprim::get<Indices>(std::forward<Tuple>(tuple))...);
+}
+} // namespace detail
+
+/// \brief Applies a function to a tuple.
+///
+/// \param func the function to apply.
+/// \param tuple the target tuple.
+///
+/// \see std::apply
+template<class Func, class Tuple>
+ROCPRIM_HOST_DEVICE ROCPRIM_INLINE
+auto apply(Func&& func, Tuple&& tuple) noexcept
+{
+    return ::rocprim::detail::apply_tuple(
+        std::forward<Func>(func),
+        std::forward<Tuple>(tuple),
+        std::make_index_sequence<rocprim::tuple_size<std::remove_reference_t<Tuple>>::value>{});
 }
 
 END_ROCPRIM_NAMESPACE

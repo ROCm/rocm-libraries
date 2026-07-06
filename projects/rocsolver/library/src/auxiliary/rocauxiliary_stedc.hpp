@@ -4,7 +4,7 @@
  *     Univ. of Tennessee, Univ. of California Berkeley,
  *     Univ. of Colorado Denver and NAG Ltd..
  *     December 2016
- * Copyright (C) 2021-2025 Advanced Micro Devices, Inc. All rights reserved.
+ * Copyright (C) 2021-2026 Advanced Micro Devices, Inc. All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -32,6 +32,7 @@
 
 #pragma once
 
+#include "asan_helpers.hpp"
 #include "lapack_device_functions.hpp"
 #include "rocauxiliary_steqr.hpp"
 #include "rocauxiliary_sterf.hpp"
@@ -46,11 +47,18 @@ ROCSOLVER_BEGIN_NAMESPACE
 
 #define DEBUG_OUTPUT 1
 
-#define STEDC_BDIM 512 // Number of threads per thread-block used in main stedc kernels
+#define STEDC_BDIM \
+    ROCSOLVER_ASAN_VALUE(256, 512) // Number of threads per thread-block used in main stedc kernels
 
+#if defined(ROCSOLVER_USE_REFERENCE_SECULAR_EQUATIONS_SOLVER)
+// Using reference secular equation solver
+#define STEDC_SOLVE_BDIM 4 // Number of threads per thread-block used in solver kernel
+#else
+// Using updated secular equation solver
 // Upper bound to number of threads of solver kernel (target number of threads is wave size; set
 // as max of wave sizes accross all supported architectures or larger).
 #define STEDC_SOLVE_BDIM 64
+#endif
 
 // bit indicating base deflation candidate
 #define L_F_BCAND_BIT 0
@@ -1334,26 +1342,11 @@ __device__ I laed4_alt(I n,
     assert(BDIM == hipBlockDim_x);
 
     i = i + 1;
-    auto lam_abs = [](auto x) -> auto
-    {
-        return std::abs(x);
-    };
-    auto lam_sqr = [](auto x) -> auto
-    {
-        return x * x;
-    };
-    auto lam_sqrt = [](auto x) -> auto
-    {
-        return std::sqrt(x);
-    };
-    auto lam_max = [](auto x, auto y) -> auto
-    {
-        return std::max(x, y);
-    };
-    auto lam_min = [](auto x, auto y) -> auto
-    {
-        return std::min(x, y);
-    };
+    auto lam_abs = [](auto x) -> auto { return std::abs(x); };
+    auto lam_sqr = [](auto x) -> auto { return x * x; };
+    auto lam_sqrt = [](auto x) -> auto { return std::sqrt(x); };
+    auto lam_max = [](auto x, auto y) -> auto { return std::max(x, y); };
+    auto lam_min = [](auto x, auto y) -> auto { return std::min(x, y); };
 
     S zz[3]{};
     struct X_t
@@ -2137,7 +2130,7 @@ __device__ I laed4_alt(I n,
                     }
                 }
                 info = slaed6(niter, orgati, c, DELTA.x_ + iim1 - 1, ZZ.x_, w, eta, eps, ssfmin,
-                             MAXIT);
+                              MAXIT);
                 if(info != 0)
                 {
                     return info;
@@ -3131,9 +3124,7 @@ rocblas_status rocsolver_stedc_template(rocblas_handle handle,
         HIP_CHECK(hipMemsetAsync((void*)tempgemm, 0, size_tempgemm, stream));
 
         // everything must be executed with scalars on the host
-        rocblas_pointer_mode old_mode;
-        rocblas_get_pointer_mode(handle, &old_mode);
-        rocblas_set_pointer_mode(handle, rocblas_pointer_mode_host);
+        rocblas_pointer_mode_saver saver(handle, rocblas_pointer_mode_host);
         S one = 1.0;
         S zero = 0.0;
 
@@ -3399,7 +3390,6 @@ rocblas_status rocsolver_stedc_template(rocblas_handle handle,
         ROCSOLVER_LAUNCH_KERNEL(stedc_sort<T>, dim3(n, batch_count), dim3(STEDC_BDIM), 0, stream, n,
                                 tmpz, n, D + shiftD, strideD, (T*)tempgemm, 0, n, n * n, C, shiftC,
                                 ldc, strideC);
-
 #if DEBUG_OUTPUT
         if(std::getenv("SHOW") && global_cnt == 1)
         {
@@ -3414,8 +3404,6 @@ rocblas_status rocsolver_stedc_template(rocblas_handle handle,
             std::cout << cur << "\t" << total << "\t";
         }
 #endif
-
-        rocblas_set_pointer_mode(handle, old_mode);
     }
 
     return rocblas_status_success;

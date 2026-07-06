@@ -3,18 +3,107 @@
 Documentation for rocFFT is available at
 [https://rocm.docs.amd.com/projects/rocFFT/en/latest/](https://rocm.docs.amd.com/projects/rocFFT/en/latest/).
 
+## rocFFT 1.0.38 for ROCm 7.14
+
+### Added
+
+* Generalized multi-device computations for transforms such that each of the length dimension is fully covered either in all the input field's bricks or in all the output field's bricks, regardless of the type and placement of the transform. Note specifically for real transforms: the innermost length dimension must be fully covered in all the input (resp. output) field's bricks for real forward (resp. inverse) transforms.
+* Support for the gfx1250 architecture.
+
+### Optimized
+
+* Improved performance of even-length real transforms with real lengths between 512 and 8192, extending to larger lengths (up to around 32768) on devices with more LDS.
+
+### Changed
+
+* Modified the `rocfft_plan_get_work_buffer_size` and `rocfft_execution_info_set_work_buffer` functions to get and set work memory for the current HIP device.
+  * Multi-device transforms can require work memory on any of the devices used for input or output bricks, and the current device set at plan creation.  Users should loop over the set of devices used by the input/output of the transform and check the work memory requirements for each device.
+
+### Resolved issues
+
+* Fixed possible incorrect results for multi-dimensional real transforms with small lengths (e.g., smaller than 128) along the two fastest-varying dimensions.
+
+## rocFFT 1.0.37 for ROCm 7.13
+
+### Added
+
+* Support for the gfx90c compilation target.
+
+### Optimized
+
+* Allow plans to share hipModules if they use the same kernels.  This reduces time spent and memory used when
+  creating plans that exist concurrently.
+* Improved performance of unit-strided, interleaved, complex-to-complex and real-to-complex FFTs on gfx1201, gfx90a, gfx942, and gfx950.
+  Single-precision lengths:
+  * (160,72,72)
+  * (160,80,72)
+  * (160,80,80)
+  * (72,72,72)
+  * (80,80,80)
+  * (84,84,72)
+  * (96,96,96)
+  * (108,108,80)
+  Double-precision lengths:
+  * (72,72,52)
+  * (60,60,60)
+  * (64,64,52)
+  * (64,64,64)
+
+### Changed
+
+* Moved library to C++20 standard.
+* Removed Boost as a dependency for clients and samples.
+* Split the precompiled kernel cache file (`rocfft_kernel_cache.db`) into per-architecture files (`rocfft_kernel_cache_gfx950.db`, `rocfft_kernel_cache_gfx1201.db`, etc).
+* `rocfft_plan_create` returns `rocfft_status_invalid_offset` for any usage of non-zero offsets in plan descriptions. The feature is not supported yet.
+* Callback functions specified as function pointers on execution info handles will be deprecated in a future release.
+
+### Resolved issues
+
+* Fixed potential issue with data generation for multidimensional transforms in rocfft-tests and rocfft-bench.
+* Fixed issue that sometimes blocked complex-to-complex FFT plan creation when using noncontiguous strides in multiple dimensions.
+* Fixed issue that sometimes blocked complex-to-real FFT plan creation when using noncontiguous strides in multiple dimensions.
+* Fixed issue that sometimes blocked complex-to-real FFT plan creation when using noncontiguous strides with small lengths on the two fastest dimensions.
+* Fixed potential launch failure of data generation kernels in test and benchmark programs.
+* Fixed incorrect results on some strided real-complex FFTs on gfx90a.
+* Fixed incorrect results on some even-length real FFTs that have odd-length strides on higher dimensions.
+* Fixed callbacks on MPI transforms, when not all ranks have the same number of data bricks.
+* Fixed functional issues for multi-device, in-place real transforms.
+* Fixed functional issues for multi-dimensional, multi-device transforms involving some unit length(s).
+* Fixed functional issues for multi-device transforms involving data divisions along the slowest-varying axis (only) for some bricks but not all.
+* Fixed functional issues for multi-device transforms setting no field on input or output.
+* Fixed automatic allocation of work memory at plan execution time, when work memory is required on multiple devices.
+
+## rocFFT 1.0.36 for ROCm 7.2.0
+
+### Added
+
+* Support for gfx1150 architecture.
+* Added support for per precision and architecture kernel configuration entries in the library.
+* Support for the gfx1152 and gfx1153 architectures.
+
+### Optimized
+
+* Removed a potential unnecessary global transpose operation from MPI 3D multi-GPU pencil decompositions.
+* Enabled optimization of 3D pencil decompositions for single-process multi-GPU transforms.
+
+### Resolved issues
+
+* Fixed potential division by zero when constructing plans using dimensions of length 1.
+* Fixed result scaling on multi-device transforms.
+* Fixed callbacks on multi-device transforms.
+
 ## rocFFT 1.0.35 for ROCM 7.1.0
 
 ### Optimized
 
 * Implemented single-kernel plans for some 2D problem sizes, on devices with at least 160KiB of LDS.
 * Improved performance of unit-strided, complex-interleaved, forward/inverse FFTs for lengths:
-  - (64,64,128)
-  - (64,64,52)
-  - (60,60,60)
-  - (32,32,128)
-  - (32,32,64)
-  - (64,32,128)
+  * (64,64,128)
+  * (64,64,52)
+  * (60,60,60)
+  * (32,32,128)
+  * (32,32,64)
+  * (64,32,128)
 * Improved performance of 3D MPI pencil decompositions by using sub-communicators for global transpose operations.
 
 ## rocFFT 1.0.34 for ROCm 7.0.0
@@ -32,16 +121,16 @@ Documentation for rocFFT is available at
 
 * Removed unnecessary HIP event/stream allocation and synchronization during MPI transforms.
 * Implemented single-precision 1D kernels for lengths:
-  - 4704
-  - 5488
-  - 6144
-  - 6561
-  - 8192
+  * 4704
+  * 5488
+  * 6144
+  * 6561
+  * 8192
 * Implemented single-kernel plans for some large 1D problem sizes, on devices with at least 160KiB of LDS.
 
 ### Resolved issues
 
-* Fixed kernel faults on multi-device transforms that gather to a single device, when the input/output bricks are not 
+* Fixed kernel faults on multi-device transforms that gather to a single device, when the input/output bricks are not
   contiguous.
 
 ## rocFFT 1.0.32 for ROCm 6.4.0

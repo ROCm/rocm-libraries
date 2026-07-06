@@ -1,0 +1,9 @@
+#!/bin/bash -ex
+
+# Copyright Advanced Micro Devices, Inc., or its affiliates.
+# SPDX-License-Identifier: MIT
+
+# ROCprof Trace Decoder for thread trace with rocprofiler-sdk
+wget -O /tmp/rocprof-trace-decoder.deb https://github.com/ROCm/rocprof-trace-decoder/releases/download/0.1.4/rocprof-trace-decoder-ubuntu-22.04-0.1.4-Linux.deb
+apt-get install -y /tmp/rocprof-trace-decoder.deb
+rm /tmp/rocprof-trace-decoder.deb

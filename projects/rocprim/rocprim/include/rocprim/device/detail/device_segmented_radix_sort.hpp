@@ -1,4 +1,4 @@
-// Copyright (c) 2017-2025 Advanced Micro Devices, Inc. All rights reserved.
+// Copyright (c) 2017-2026 Advanced Micro Devices, Inc. All rights reserved.
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -50,11 +50,12 @@ namespace detail
 
 template<class Key,
          class Value,
-         unsigned int WarpSize,
-         unsigned int BlockSize,
-         unsigned int ItemsPerThread,
-         unsigned int RadixBits,
-         bool         Descending>
+         unsigned int            WarpSize,
+         unsigned int            BlockSize,
+         unsigned int            ItemsPerThread,
+         unsigned int            RadixBits,
+         bool                    Descending,
+         arch::wavefront::target TargetWaveSize>
 class segmented_radix_sort_helper
 {
     static constexpr unsigned int radix_size = 1 << RadixBits;
@@ -64,14 +65,20 @@ class segmented_radix_sort_helper
 
     using count_helper_type
         = radix_digit_count_helper<WarpSize, BlockSize, ItemsPerThread, RadixBits, Descending>;
-    using scan_type               = typename ::rocprim::block_scan<unsigned int, radix_size>;
+    using scan_type               = typename ::rocprim::block_scan<unsigned int,
+                                                     radix_size,
+                                                     block_scan_algorithm::default_algorithm,
+                                                     1,
+                                                     1,
+                                                     TargetWaveSize>;
     using sort_and_scatter_helper = radix_sort_and_scatter_helper<BlockSize,
                                                                   ItemsPerThread,
                                                                   RadixBits,
                                                                   Descending,
                                                                   key_type,
                                                                   value_type,
-                                                                  unsigned int>;
+                                                                  unsigned int,
+                                                                  TargetWaveSize>;
 
 public:
     union storage_type
@@ -730,7 +737,7 @@ public:
 };
 
 template<
-    class ArchConfig,
+    class TargetConfig,
     bool Descending,
     class KeysInputIterator,
     class KeysOutputIterator,
@@ -752,7 +759,7 @@ void segmented_sort(KeysInputIterator keys_input,
                     unsigned int begin_bit,
                     unsigned int end_bit)
 {
-    static constexpr segmented_radix_sort_config_params params = ArchConfig::params;
+    static constexpr segmented_radix_sort_config_params params = TargetConfig::params;
 
     static constexpr unsigned int radix_bits        = params.radix_bits;
     static constexpr unsigned int block_size        = params.kernel_config.block_size;
@@ -775,7 +782,8 @@ void segmented_sort(KeysInputIterator keys_input,
                                       block_size,
                                       items_per_thread,
                                       radix_bits,
-                                      Descending>;
+                                      Descending,
+                                      TargetConfig::wavefront>;
     using warp_sort_helper_type = segmented_warp_sort_helper<
         select_warp_sort_helper_config_t<params.warp_sort_config.partitioning_allowed,
                                          params.warp_sort_config.logical_warp_size_small,
@@ -863,7 +871,7 @@ void segmented_sort(KeysInputIterator keys_input,
 }
 
 template<
-    class ArchConfig,
+    class TargetConfig,
     bool Descending,
     class KeysInputIterator,
     class KeysOutputIterator,
@@ -887,7 +895,7 @@ void segmented_sort_large(KeysInputIterator keys_input,
                           unsigned int begin_bit,
                           unsigned int end_bit)
 {
-    static constexpr segmented_radix_sort_config_params params = ArchConfig::params;
+    static constexpr segmented_radix_sort_config_params params = TargetConfig::params;
 
     static constexpr unsigned int radix_bits       = params.radix_bits;
     static constexpr unsigned int block_size       = params.kernel_config.block_size;
@@ -909,7 +917,8 @@ void segmented_sort_large(KeysInputIterator keys_input,
                                       block_size,
                                       items_per_thread,
                                       radix_bits,
-                                      Descending>;
+                                      Descending,
+                                      TargetConfig::wavefront>;
 
     ROCPRIM_SHARED_MEMORY union
     {
@@ -966,8 +975,9 @@ void segmented_sort_large(KeysInputIterator keys_input,
 }
 
 template<
-    class ArchConfig,
+    class TargetConfig,
     bool Descending,
+    bool IsSmall,
     class KeysInputIterator,
     class KeysOutputIterator,
     class ValuesInputIterator,
@@ -976,7 +986,7 @@ template<
     class OffsetIterator
 >
 ROCPRIM_DEVICE ROCPRIM_FORCE_INLINE
-void segmented_sort_small(KeysInputIterator keys_input,
+void segmented_sort_medium_or_small(KeysInputIterator keys_input,
                           typename std::iterator_traits<KeysInputIterator>::value_type * keys_tmp,
                           KeysOutputIterator keys_output,
                           ValuesInputIterator values_input,
@@ -990,11 +1000,14 @@ void segmented_sort_small(KeysInputIterator keys_input,
                           unsigned int begin_bit,
                           unsigned int end_bit)
 {
-    static constexpr segmented_radix_sort_config_params params = ArchConfig::params;
+    static constexpr segmented_radix_sort_config_params params = TargetConfig::params;
+    constexpr unsigned int block_size = IsSmall ? params.warp_sort_config.block_size_small
+                                                : params.warp_sort_config.block_size_medium;
 
-    static constexpr unsigned int block_size = params.warp_sort_config.block_size_small;
-    static constexpr unsigned int logical_warp_size
-        = params.warp_sort_config.logical_warp_size_small;
+    constexpr unsigned int logical_warp_size
+        = IsSmall ? params.warp_sort_config.logical_warp_size_small
+                  : params.warp_sort_config.logical_warp_size_medium;
+
     static_assert(block_size % logical_warp_size == 0,
                   "logical_warp_size must be a divisor of block_size");
     static constexpr unsigned int warps_per_block = block_size / logical_warp_size;
@@ -1002,15 +1015,22 @@ void segmented_sort_small(KeysInputIterator keys_input,
     using key_type   = typename std::iterator_traits<KeysInputIterator>::value_type;
     using value_type = typename std::iterator_traits<ValuesInputIterator>::value_type;
 
-    using warp_sort_helper_type = segmented_warp_sort_helper<
-        select_warp_sort_helper_config_t<params.warp_sort_config.partitioning_allowed,
-                                         params.warp_sort_config.logical_warp_size_small,
-                                         params.warp_sort_config.items_per_thread_small,
-                                         params.warp_sort_config.block_size_small>,
-        key_type,
-        value_type,
-        block_size,
-        Descending>;
+    using warp_helper_small
+        = select_warp_sort_helper_config_t<params.warp_sort_config.partitioning_allowed,
+                                           params.warp_sort_config.logical_warp_size_small,
+                                           params.warp_sort_config.items_per_thread_small,
+                                           params.warp_sort_config.block_size_small>;
+
+    using warp_helper_medium
+        = select_warp_sort_helper_config_t<params.warp_sort_config.partitioning_allowed,
+                                           params.warp_sort_config.logical_warp_size_medium,
+                                           params.warp_sort_config.items_per_thread_medium,
+                                           params.warp_sort_config.block_size_medium>;
+
+    using warp_helper = typename std::conditional<IsSmall == true, warp_helper_small, warp_helper_medium>::type;
+
+    using warp_sort_helper_type
+        = segmented_warp_sort_helper<warp_helper, key_type, value_type, block_size, Descending>;
 
     ROCPRIM_SHARED_MEMORY typename warp_sort_helper_type::storage_type storage;
 
@@ -1044,84 +1064,6 @@ void segmented_sort_small(KeysInputIterator keys_input,
                                  end_bit,
                                  storage);
 }
-
-template<class ArchConfig,
-         bool Descending,
-         class KeysInputIterator,
-         class KeysOutputIterator,
-         class ValuesInputIterator,
-         class ValuesOutputIterator,
-         class SegmentIndexIterator,
-         class OffsetIterator>
-ROCPRIM_DEVICE ROCPRIM_FORCE_INLINE void segmented_sort_medium(
-    KeysInputIterator                                               keys_input,
-    typename std::iterator_traits<KeysInputIterator>::value_type*   keys_tmp,
-    KeysOutputIterator                                              keys_output,
-    ValuesInputIterator                                             values_input,
-    typename std::iterator_traits<ValuesInputIterator>::value_type* values_tmp,
-    ValuesOutputIterator                                            values_output,
-    bool                                                            to_output,
-    unsigned int                                                    num_segments,
-    SegmentIndexIterator                                            segment_indices,
-    OffsetIterator                                                  begin_offsets,
-    OffsetIterator                                                  end_offsets,
-    unsigned int                                                    begin_bit,
-    unsigned int                                                    end_bit)
-{
-    static constexpr segmented_radix_sort_config_params params = ArchConfig::params;
-
-    static constexpr unsigned int block_size = params.warp_sort_config.block_size_medium;
-    static constexpr unsigned int logical_warp_size
-        = params.warp_sort_config.logical_warp_size_medium;
-    static_assert(block_size % logical_warp_size == 0,
-                  "logical_warp_size must be a divisor of block_size");
-    static constexpr unsigned int warps_per_block = block_size / logical_warp_size;
-
-    using key_type   = typename std::iterator_traits<KeysInputIterator>::value_type;
-    using value_type = typename std::iterator_traits<ValuesInputIterator>::value_type;
-
-    using warp_sort_helper_type = segmented_warp_sort_helper<
-        select_warp_sort_helper_config_t<params.warp_sort_config.partitioning_allowed,
-                                         params.warp_sort_config.logical_warp_size_medium,
-                                         params.warp_sort_config.items_per_thread_medium,
-                                         params.warp_sort_config.block_size_medium>,
-        key_type,
-        value_type,
-        block_size,
-        Descending>;
-
-    ROCPRIM_SHARED_MEMORY typename warp_sort_helper_type::storage_type storage;
-
-    const unsigned int block_id        = ::rocprim::detail::block_id<0>();
-    const unsigned int logical_warp_id = ::rocprim::detail::logical_warp_id<logical_warp_size>();
-    const unsigned int segment_index   = block_id * warps_per_block + logical_warp_id;
-    if(segment_index >= num_segments)
-    {
-        return;
-    }
-
-    const unsigned int segment_id   = segment_indices[segment_index];
-    const unsigned int begin_offset = begin_offsets[segment_id];
-    const unsigned int end_offset   = end_offsets[segment_id];
-    if(end_offset <= begin_offset)
-    {
-        return;
-    }
-
-    warp_sort_helper_type().sort(keys_input,
-                                 keys_tmp,
-                                 keys_output,
-                                 values_input,
-                                 values_tmp,
-                                 values_output,
-                                 to_output,
-                                 begin_offset,
-                                 end_offset,
-                                 begin_bit,
-                                 end_bit,
-                                 storage);
-}
-
 } // end namespace detail
 
 END_ROCPRIM_NAMESPACE

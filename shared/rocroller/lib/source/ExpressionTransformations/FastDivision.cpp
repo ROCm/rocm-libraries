@@ -1,28 +1,5 @@
-/*******************************************************************************
- *
- * MIT License
- *
- * Copyright 2024-2025 AMD ROCm(TM) Software
- *
- * Permission is hereby granted, free of charge, to any person obtaining a copy
- * of this software and associated documentation files (the "Software"), to deal
- * in the Software without restriction, including without limitation the rights
- * to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
- * copies of the Software, and to permit persons to whom the Software is
- * furnished to do so, subject to the following conditions:
- *
- * The above copyright notice and this permission notice shall be included in
- * all copies or substantial portions of the Software.
- *
- * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
- * IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
- * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
- * AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
- * LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
- * OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
- * SOFTWARE.
- *
- *******************************************************************************/
+// Copyright Advanced Micro Devices, Inc., or its affiliates.
+// SPDX-License-Identifier: MIT
 
 #include <rocRoller/AssemblyKernel.hpp>
 #include <rocRoller/Expression.hpp>
@@ -45,8 +22,8 @@ namespace rocRoller
          * operations.
          */
 
-        std::tuple<ExpressionPtr, ExpressionPtr, ExpressionPtr>
-            getMagicMultipleShiftAndSign(ExpressionPtr denominator, ContextPtr context)
+        std::tuple<ExpressionPtr, ExpressionPtr, ExpressionPtr, ExpressionPtr>
+            getMagicDivisionParams(ExpressionPtr denominator, ContextPtr context)
         {
             auto multiple = launchTimeSubExpressions(magicMultiple(denominator), context);
 
@@ -57,7 +34,7 @@ namespace rocRoller
             {
                 auto shifts = launchTimeSubExpressions(magicShifts(denominator), context);
 
-                return {multiple, shifts, nullptr};
+                return {multiple, shifts, nullptr, (shifts & literal(1u << 31u))};
             }
 
             auto bitfield = launchTimeSubExpressions(magicShiftAndSign(denominator), context);
@@ -75,7 +52,7 @@ namespace rocRoller
             auto sign        = (convert(resultType, bitfield) << literal((endingBit - startingBit)))
                         >> literal(endingBit);
 
-            return {multiple, shifts, sign};
+            return {multiple, shifts, sign, nullptr};
         }
 
         void enableDivideBy(ExpressionPtr expr, ContextPtr context)
@@ -102,8 +79,8 @@ namespace rocRoller
 
             AssertFatal(exprTimes[EvaluationTime::KernelLaunch], ShowValue(exprTimes));
 
-            auto const& [magicExpr, numShiftsExpr, signExpr]
-                = getMagicMultipleShiftAndSign(expr, context);
+            auto const& [magicExpr, numShiftsExpr, signExpr, numShiftsMSBExpr]
+                = getMagicDivisionParams(expr, context);
 
             auto magicTimes = evaluationTimes(magicExpr);
             auto shiftTimes = evaluationTimes(numShiftsExpr);
@@ -118,6 +95,8 @@ namespace rocRoller
 
             if(isSigned)
             {
+                AssertFatal(numShiftsMSBExpr == nullptr,
+                            "Signed case does not need the MSB of magicShift");
                 AssertFatal(signExpr != nullptr);
                 auto signTimes = evaluationTimes(signExpr);
 
@@ -153,8 +132,8 @@ namespace rocRoller
 
             auto k = context->kernel();
 
-            auto const& [magicExpr, numShiftsExpr, signExpr]
-                = getMagicMultipleShiftAndSign(denominator, context);
+            auto const& [magicExpr, numShiftsExpr, signExpr, numShiftsMSBExpr]
+                = getMagicDivisionParams(denominator, context);
 
             {
                 EvaluationTimes evalTimes
@@ -183,7 +162,10 @@ namespace rocRoller
 
                 auto t = (arithmeticShiftR(numerator - q, one)) + q;
                 setComment(t, "Magic t (unsigned)");
-                result = arithmeticShiftR(t, numShiftsExpr);
+
+                result = conditional(
+                    numShiftsMSBExpr == literal(0u), arithmeticShiftR(t, numShiftsExpr), numerator);
+
                 setComment(result, "Magic result (unsigned)");
             }
             else
@@ -428,10 +410,7 @@ namespace rocRoller
             ExpressionPtr operator()(Expr const& expr) const
             {
                 Expr cpy = expr;
-                if(expr.arg)
-                {
-                    cpy.arg = call(expr.arg);
-                }
+                cpy.arg  = call(expr.arg);
                 return std::make_shared<Expression>(cpy);
             }
 
@@ -439,40 +418,19 @@ namespace rocRoller
             ExpressionPtr operator()(Expr const& expr) const
             {
                 Expr cpy = expr;
-                if(expr.lhs)
-                {
-                    cpy.lhs = call(expr.lhs);
-                }
-                if(expr.rhs)
-                {
-                    cpy.rhs = call(expr.rhs);
-                }
+                cpy.lhs  = call(expr.lhs);
+                cpy.rhs  = call(expr.rhs);
                 return std::make_shared<Expression>(cpy);
             }
 
             ExpressionPtr operator()(ScaledMatrixMultiply const& expr) const
             {
                 ScaledMatrixMultiply cpy = expr;
-                if(expr.matA)
-                {
-                    cpy.matA = call(expr.matA);
-                }
-                if(expr.matB)
-                {
-                    cpy.matB = call(expr.matB);
-                }
-                if(expr.matC)
-                {
-                    cpy.matC = call(expr.matC);
-                }
-                if(expr.scaleA)
-                {
-                    cpy.scaleA = call(expr.scaleA);
-                }
-                if(expr.scaleB)
-                {
-                    cpy.scaleB = call(expr.scaleB);
-                }
+                cpy.matA                 = call(expr.matA);
+                cpy.matB                 = call(expr.matB);
+                cpy.matC                 = call(expr.matC);
+                cpy.scaleA               = call(expr.scaleA);
+                cpy.scaleB               = call(expr.scaleB);
                 return std::make_shared<Expression>(cpy);
             }
 
@@ -480,18 +438,9 @@ namespace rocRoller
             ExpressionPtr operator()(Expr const& expr) const
             {
                 Expr cpy = expr;
-                if(expr.lhs)
-                {
-                    cpy.lhs = call(expr.lhs);
-                }
-                if(expr.r1hs)
-                {
-                    cpy.r1hs = call(expr.r1hs);
-                }
-                if(expr.r2hs)
-                {
-                    cpy.r2hs = call(expr.r2hs);
-                }
+                cpy.lhs  = call(expr.lhs);
+                cpy.r1hs = call(expr.r1hs);
+                cpy.r2hs = call(expr.r2hs);
                 return std::make_shared<Expression>(cpy);
             }
 

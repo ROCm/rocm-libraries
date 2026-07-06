@@ -1,4 +1,4 @@
-// Copyright (C) 2022 - 2023 Advanced Micro Devices, Inc. All rights reserved.
+// Copyright (C) 2022 - 2026 Advanced Micro Devices, Inc. All rights reserved.
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -18,8 +18,6 @@
 // OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
 // THE SOFTWARE.
 
-#include <boost/scope_exit.hpp>
-#include <boost/tokenizer.hpp>
 #include <gtest/gtest.h>
 #include <math.h>
 #include <stdexcept>
@@ -28,6 +26,7 @@
 
 #include "../../shared/rocfft_accuracy_test.h"
 
+#include "../../shared/CLI11.hpp"
 #include "../../shared/client_except.h"
 #include "../../shared/fftw_transform.h"
 #include "../../shared/gpubuf.h"
@@ -36,8 +35,38 @@
 #include "rocfft/rocfft.h"
 
 extern std::string mp_launch;
-
-extern last_cpu_fft_cache last_cpu_fft_data;
+struct user_mp_launch_command
+{
+    std::string              exe;
+    std::vector<std::string> user_mp_argv;
+};
+static user_mp_launch_command get_mp_launch_command()
+{
+    user_mp_launch_command ret;
+    try
+    {
+        CLI::App command_splitter;
+        command_splitter.allow_extras();
+        command_splitter.parse(mp_launch, /*program_name_included = */ true);
+        ret.exe          = command_splitter.get_name();
+        ret.user_mp_argv = command_splitter.remaining();
+    }
+    catch(const CLI::Error& e)
+    {
+        if(verbose)
+        {
+            if(!mp_launch.empty())
+                std::cout << "CLI11 failed to parse the command " << mp_launch << "\n";
+            std::cout << "CLI11 exception name: " << e.get_name() << "\n"
+                      << "CLI11 exception info: " << e.what() << "\n"
+                      << "CLI11 error code:" << e.get_exit_code() << std::endl;
+        }
+        // returned empty struct
+        ret.exe.clear();
+        ret.user_mp_argv.clear();
+    }
+    return ret;
+}
 
 void fft_vs_reference(rocfft_params& params, bool round_trip)
 {
@@ -80,51 +109,25 @@ TEST_P(accuracy_test, vs_fftw)
     {
         // Single-proc FFT.
         // Only do round trip for non-field FFTs
-        bool round_trip = params.ifields.empty() && params.ofields.empty();
+        bool round_trip = params.is_forward() && params.ifields.empty() && params.ofields.empty();
 
         try
         {
             fft_vs_reference(params, round_trip);
         }
-        catch(std::bad_alloc&)
-        {
-            GTEST_SKIP() << "host memory allocation failure";
-        }
-        catch(HOSTBUF_MEM_USAGE& e)
-        {
-            // explicitly clear cache
-            last_cpu_fft_data = last_cpu_fft_cache();
-            GTEST_SKIP() << e.msg;
-        }
-        catch(ROCFFT_SKIP& e)
-        {
-            GTEST_SKIP() << e.msg;
-        }
-        catch(ROCFFT_FAIL& e)
-        {
-            GTEST_FAIL() << e.msg;
-        }
+        ROCFFT_CATCH_TEST_EXCEPTIONS;
         break;
     }
     case fft_params::fft_mp_lib_mpi:
     {
         // Multi-proc FFT.
-        // Split launcher into tokens since the first one is the exe
-        // and the remainder is the start of its argv
-        boost::escaped_list_separator<char>                   sep('\\', ' ', '\"');
-        boost::tokenizer<boost::escaped_list_separator<char>> tokenizer(mp_launch, sep);
-        std::string                                           exe;
-        std::vector<std::string>                              argv;
-        for(auto t : tokenizer)
-        {
-            if(t.empty())
-                continue;
+        static const auto mp_launch_command = get_mp_launch_command();
 
-            if(exe.empty())
-                exe = t;
-            else
-                argv.push_back(t);
-        }
+        if(mp_launch_command.exe.empty())
+            GTEST_FAIL() << "Cannot proceed due to empty multi-process executable: omitted "
+                            "\"--mp_launch\" option or invalid value thereof.";
+        auto argv = mp_launch_command.user_mp_argv;
+
         // append test token and ask for accuracy test
         argv.push_back("--token");
         argv.push_back(testcase_token);
@@ -132,7 +135,7 @@ TEST_P(accuracy_test, vs_fftw)
 
         // throws an exception if launch fails or if subprocess
         // returns nonzero exit code
-        execute_subprocess(exe, argv, {});
+        execute_subprocess(mp_launch_command.exe, argv, {});
         break;
     }
     default:

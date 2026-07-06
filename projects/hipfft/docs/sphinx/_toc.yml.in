@@ -5,13 +5,15 @@ subtrees:
 
 - caption: Install
   entries:
-  - file: install/building-installing-hipfft
-    title: Installation guide
+  - file: install/install
+    title: Install hipFFT and hipFFTW
+  - file: install/building-installing-hipfft-and-hipfftw
+    title: Build from source
 
 - caption: Conceptual
   entries:
   - file: conceptual/overview
-    title: hipFFT overview
+    title: Overview of hipFFT and hipFFTW
 
 - caption: Examples
   entries:
@@ -20,8 +22,12 @@ subtrees:
 
 - caption: API reference
   entries:
-  - file: reference/fft-api-usage
-    title: API and usage notes
+  - file: reference/data-type-support
+    title: Precision support
+  - file: reference/hipfft-api-usage
+    title: hipFFT API and usage notes
+  - file: reference/hipfftw-api-usage
+    title: hipFFTW API and usage notes
 
 - caption: About
   entries:

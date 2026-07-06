@@ -1,6 +1,6 @@
 # MIT License
 #
-# Copyright (c) 2017-2025 Advanced Micro Devices, Inc. All rights reserved.
+# Copyright (c) 2017-2026 Advanced Micro Devices, Inc. All rights reserved.
 #
 # Permission is hereby granted, free of charge, to any person obtaining a copy
 # of this software and associated documentation files (the "Software"), to deal
@@ -32,11 +32,24 @@ endfunction()
 function(add_rocprim_test TEST_NAME TEST_SOURCES)
   get_rocprim_test_target(${TEST_SOURCES} TEST_TARGET)
   add_rocprim_test_internal(${TEST_NAME} "${TEST_SOURCES}" ${TEST_TARGET})
+  # Re-propagate DLLS_COPIED_2 from add_rocprim_test_internal's scope to our
+  # caller (file scope). PARENT_SCOPE only propagates one level, so without
+  # this relay the guard resets on every call and each test target gets
+  # duplicate POST_BUILD copy commands that race on parallel builds.
+  if(DEFINED DLLS_COPIED_2)
+    set(DLLS_COPIED_2 "${DLLS_COPIED_2}" PARENT_SCOPE)
+  endif()
   if(WITH_ROCRAND)
     find_package(rocrand REQUIRED)
-    target_link_libraries(${TEST_TARGET} PRIVATE roc::rocrand) 
+    target_link_libraries(${TEST_TARGET} PRIVATE roc::rocrand)
     target_compile_definitions(${TEST_TARGET} PRIVATE WITH_ROCRAND)
-  endif() 
+  endif()
+  if(BUILD_CODE_COVERAGE)
+    target_compile_definitions(${TEST_TARGET} PRIVATE CODE_COVERAGE)
+  endif()
+  if(ROCPRIM_ENABLE_TOPK)
+    target_compile_definitions(${TEST_TARGET} PRIVATE ROCPRIM_WITH_TOPK)
+  endif()
 endfunction()
 
 function(add_rocprim_test_internal TEST_NAME TEST_SOURCES TEST_TARGET)
@@ -105,7 +118,7 @@ function(add_rocprim_test_internal TEST_NAME TEST_SOURCES TEST_TARGET)
   )
   if(AMDGPU_TEST_TARGETS)
     foreach(AMDGPU_TARGET IN LISTS AMDGPU_TEST_TARGETS)
-      add_relative_test("${AMDGPU_TARGET}-${TEST_NAME}" ${TEST_TARGET})
+      add_relative_test("${AMDGPU_TARGET}-${TEST_NAME}" ${TEST_TARGET} ${AMDGPU_TARGET})
       set_tests_properties("${AMDGPU_TARGET}-${TEST_NAME}"
           PROPERTIES
               RESOURCE_GROUPS "1,${AMDGPU_TARGET}:1"
@@ -113,9 +126,10 @@ function(add_rocprim_test_internal TEST_NAME TEST_SOURCES TEST_TARGET)
       )
     endforeach()
   else()
-      add_relative_test(${TEST_NAME} ${TEST_TARGET})
+      add_relative_test(${TEST_NAME} ${TEST_TARGET} ${DEFAULT_GPU_RESOURCE})
       set_tests_properties(${TEST_NAME}
           PROPERTIES
+              RESOURCE_GROUPS "1,${DEFAULT_GPU_RESOURCE}:1"
               LABELS "hip"
       )
   endif()
@@ -287,6 +301,7 @@ add_rocprim_test_parallel("rocprim.block_scan" test_block_scan.cpp.in)
 add_rocprim_test("rocprim.block_shuffle" test_block_shuffle.cpp)
 add_rocprim_test("rocprim.block_sort_bitonic" test_block_sort_bitonic.cpp)
 add_rocprim_test("rocprim.config_dispatch" test_config_dispatch.cpp)
+add_rocprim_test("rocprim.config_types" test_config_types.cpp)
 add_rocprim_test("rocprim.constant_iterator" test_constant_iterator.cpp)
 add_rocprim_test("rocprim.counting_iterator" test_counting_iterator.cpp)
 add_rocprim_test("rocprim.device_batch_memcpy" test_device_batch_memcpy.cpp)
@@ -299,7 +314,7 @@ add_rocprim_test("rocprim.device_histogram" test_device_histogram.cpp)
 add_rocprim_test("rocprim.device_merge" test_device_merge.cpp)
 add_rocprim_test("rocprim.device_merge_inplace" test_device_merge_inplace.cpp)
 add_rocprim_test("rocprim.device_merge_sort" test_device_merge_sort.cpp)
-add_rocprim_test("rocprim.nth_element" test_device_nth_element.cpp)
+add_rocprim_test("rocprim.device_nth_element" test_device_nth_element.cpp)
 add_rocprim_test("rocprim.device_partial_sort" test_device_partial_sort.cpp)
 add_rocprim_test("rocprim.device_partition" test_device_partition.cpp)
 add_rocprim_test_parallel("rocprim.device_radix_sort" test_device_radix_sort.cpp.in)
@@ -314,6 +329,7 @@ add_rocprim_test("rocprim.device_search_n" test_device_search_n.cpp)
 add_rocprim_test("rocprim.device_segmented_reduce" test_device_segmented_reduce.cpp)
 add_rocprim_test("rocprim.device_segmented_scan" test_device_segmented_scan.cpp)
 add_rocprim_test("rocprim.device_select" test_device_select.cpp)
+add_rocprim_test("rocprim.device_topk" test_device_topk.cpp)
 add_rocprim_test("rocprim.device_transform" test_device_transform.cpp)
 add_rocprim_test("rocprim.discard_iterator" test_discard_iterator.cpp)
 add_rocprim_test("rocprim.lookback_reproducibility" test_lookback_reproducibility.cpp)
@@ -325,6 +341,7 @@ add_rocprim_test("rocprim.rocprim_types" test_rocprim_types.cpp)
 add_rocprim_test("rocprim.texture_cache_iterator" test_texture_cache_iterator.cpp)
 add_rocprim_test("rocprim.thread" test_thread.cpp)
 add_rocprim_test("rocprim.thread_algos" test_thread_algos.cpp)
+add_rocprim_test("rocprim.tuple" test_tuple.cpp)
 add_rocprim_test("rocprim.utils_sort_checker" test_utils_sort_checker.cpp)
 add_rocprim_test("rocprim.transform_iterator" test_transform_iterator.cpp)
 add_rocprim_cpp_standard_test(17 OFF "_cpp17" "rocprim.type_traits_interface" test_type_traits_interface.cpp)
@@ -333,7 +350,10 @@ add_rocprim_cpp_standard_test(20 OFF "_cpp20" "rocprim.type_traits_interface" te
 add_rocprim_cpp_standard_test(20 ON "_gnupp20" "rocprim.type_traits_interface" test_type_traits_interface.cpp)
 add_rocprim_test("rocprim.no_half_operators" test_no_half_operators.cpp)
 add_rocprim_test("rocprim.intrinsics" test_intrinsics.cpp)
+# Tests internal function, 128-bit atomic that currently is not yet supported with SPIR-V.
+if(NOT "amdgcnspirv" IN_LIST GPU_TARGETS)
 add_rocprim_test("rocprim.intrinsics_atomic" test_intrinsics_atomic.cpp)
+endif()
 add_rocprim_test("rocprim.invoke_result" test_invoke_result.cpp)
 add_rocprim_test("rocprim.warp_exchange" test_warp_exchange.cpp)
 add_rocprim_test("rocprim.warp_load" test_warp_load.cpp)

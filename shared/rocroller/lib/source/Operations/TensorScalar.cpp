@@ -1,28 +1,5 @@
-/*******************************************************************************
- *
- * MIT License
- *
- * Copyright 2024-2025 AMD ROCm(TM) Software
- *
- * Permission is hereby granted, free of charge, to any person obtaining a copy
- * of this software and associated documentation files (the "Software"), to deal
- * in the Software without restriction, including without limitation the rights
- * to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
- * copies of the Software, and to permit persons to whom the Software is
- * furnished to do so, subject to the following conditions:
- *
- * The above copyright notice and this permission notice shall be included in
- * all copies or substantial portions of the Software.
- *
- * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
- * IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
- * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
- * AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
- * LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
- * OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
- * SOFTWARE.
- *
- *******************************************************************************/
+// Copyright Advanced Micro Devices, Inc., or its affiliates.
+// SPDX-License-Identifier: MIT
 
 #include <rocRoller/Operations/Command.hpp>
 #include <rocRoller/Operations/Operation.hpp>
@@ -46,14 +23,6 @@ namespace rocRoller
                     msg << *(reinterpret_cast<const size_t*>(runtime_args + m_pointer->offset()));
                 else
                     msg << "&" << m_pointer->offset();
-            }
-            msg << ", lim=";
-            if(m_extent)
-            {
-                if(runtime_args)
-                    msg << *(reinterpret_cast<const size_t*>(runtime_args + m_extent->offset()));
-                else
-                    msg << "&" << m_extent->offset();
             }
             msg << ", sizes={";
             for(auto i : m_sizes)
@@ -85,12 +54,16 @@ namespace rocRoller
 
         Tensor::Tensor(int                        numDims,
                        VariableType               variableType,
+                       std::vector<size_t> const& literalSizes,
                        std::vector<size_t> const& literalStrides)
             : Tensor(numDims, variableType)
         {
+            AssertFatal(literalSizes.size() <= numDims,
+                        "Cannot specify more literal sizes than dimensions.");
             AssertFatal(literalStrides.size() <= numDims,
                         "Cannot specify more literal strides than dimensions.");
 
+            m_literalSizes   = literalSizes;
             m_literalStrides = literalStrides;
         }
 
@@ -108,11 +81,6 @@ namespace rocRoller
                                             DataDirection::ReadWrite,
                                             base + "_pointer");
 
-                m_extent  = ptr->allocateArgument(DataType::Int64,
-                                                 m_tag,
-                                                 ArgumentType::Limit,
-                                                 DataDirection::ReadOnly,
-                                                 base + "_extent");
                 m_sizes   = ptr->allocateArgumentVector(DataType::Int64,
                                                       m_numDims,
                                                       m_tag,

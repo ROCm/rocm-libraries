@@ -1,5 +1,5 @@
+// Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
 // SPDX-License-Identifier: MIT
-// Copyright (c) 2024-2025, Advanced Micro Devices, Inc. All rights reserved.
 
 #include "ck/host/device_grouped_conv_fwd_multiple_d/conv_fwd_op.hpp"
 #include "ck/host/device_grouped_conv_fwd_multiple_d/conv_fwd_problem.hpp"
@@ -197,10 +197,6 @@ struct Epilogue
                                                               conv_filter_dilations,
                                                               input_left_pads,
                                                               input_right_pads);
-
-        // auto res = rtc::from_gpu(out_dev);
-        // pass &= ck::utils::check_err(res, out_host, "Error: incorrect results!", 1e-5f, 1e-4f);
-        // assert(pass);
 
         // Simple check: this checks that the output from each instance matches the output from the
         // first instance

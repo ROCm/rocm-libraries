@@ -57,6 +57,7 @@ namespace Tensile
             //gfx802  =  3,
             gfx803  = 803,
             gfx900  = 900,
+            gfx90c  = 912,
             gfx906  = 906,
             gfx908  = 908,
             gfx90a  = 910,
@@ -68,16 +69,21 @@ namespace Tensile
             gfx1030 = 1030,
             gfx1031 = 1031,
             gfx1032 = 1032,
+            gfx1033 = 1033,
             gfx1034 = 1034,
             gfx1035 = 1035,
+            gfx1036 = 1036,
             gfx1100 = 1100,
             gfx1101 = 1101,
             gfx1102 = 1102,
             gfx1103 = 1103,
             gfx1150 = 1150,
             gfx1151 = 1151,
+            gfx1152 = 1152,
+            gfx1153 = 1153,
             gfx1200 = 1200,
-            gfx1201 = 1201
+            gfx1201 = 1201,
+            gfx1250 = 1250
         };
 
         static std::string toString(Processor p)
@@ -88,6 +94,8 @@ namespace Tensile
                 return "gfx803";
             case AMDGPU::Processor::gfx900:
                 return "gfx900";
+            case AMDGPU::Processor::gfx90c:
+                return "gfx90c";
             case AMDGPU::Processor::gfx906:
                 return "gfx906";
             case AMDGPU::Processor::gfx908:
@@ -110,10 +118,14 @@ namespace Tensile
                 return "gfx1031";
             case AMDGPU::Processor::gfx1032:
                 return "gfx1032";
+            case AMDGPU::Processor::gfx1033:
+                return "gfx1033";
             case AMDGPU::Processor::gfx1034:
                 return "gfx1034";
             case AMDGPU::Processor::gfx1035:
                 return "gfx1035";
+            case AMDGPU::Processor::gfx1036:
+                return "gfx1036";
             case AMDGPU::Processor::gfx1100:
                 return "gfx1100";
             case AMDGPU::Processor::gfx1101:
@@ -126,10 +138,16 @@ namespace Tensile
                 return "gfx1150";
             case AMDGPU::Processor::gfx1151:
                 return "gfx1151";
+            case AMDGPU::Processor::gfx1152:
+                return "gfx1152";
+            case AMDGPU::Processor::gfx1153:
+                return "gfx1153";
             case AMDGPU::Processor::gfx1200:
                 return "gfx1200";
             case AMDGPU::Processor::gfx1201:
                 return "gfx1201";
+            case AMDGPU::Processor::gfx1250:
+                return "gfx1250";
             }
             return "";
         }
@@ -143,6 +161,10 @@ namespace Tensile
             else if(deviceString.find("gfx900") != std::string::npos)
             {
                 return AMDGPU::Processor::gfx900;
+            }
+            else if(deviceString.find("gfx90c") != std::string::npos)
+            {
+                return AMDGPU::Processor::gfx90c;
             }
             else if(deviceString.find("gfx906") != std::string::npos)
             {
@@ -180,6 +202,30 @@ namespace Tensile
             {
                 return AMDGPU::Processor::gfx1030;
             }
+            else if(deviceString.find("gfx1031") != std::string::npos)
+            {
+                return AMDGPU::Processor::gfx1031;
+            }
+            else if(deviceString.find("gfx1032") != std::string::npos)
+            {
+                return AMDGPU::Processor::gfx1032;
+            }
+            else if(deviceString.find("gfx1033") != std::string::npos)
+            {
+                return AMDGPU::Processor::gfx1033;
+            }
+            else if(deviceString.find("gfx1034") != std::string::npos)
+            {
+                return AMDGPU::Processor::gfx1034;
+            }
+            else if(deviceString.find("gfx1035") != std::string::npos)
+            {
+                return AMDGPU::Processor::gfx1035;
+            }
+            else if(deviceString.find("gfx1036") != std::string::npos)
+            {
+                return AMDGPU::Processor::gfx1036;
+            }
             else if(deviceString.find("gfx1100") != std::string::npos)
             {
                 return AMDGPU::Processor::gfx1100;
@@ -204,6 +250,14 @@ namespace Tensile
             {
                 return AMDGPU::Processor::gfx1151;
             }
+            else if(deviceString.find("gfx1152") != std::string::npos)
+            {
+                return AMDGPU::Processor::gfx1152;
+            }
+            else if(deviceString.find("gfx1153") != std::string::npos)
+            {
+                return AMDGPU::Processor::gfx1153;
+            }
             else if(deviceString.find("gfx1200") != std::string::npos)
             {
                 return AMDGPU::Processor::gfx1200;
@@ -211,6 +265,10 @@ namespace Tensile
             else if(deviceString.find("gfx1201") != std::string::npos)
             {
                 return AMDGPU::Processor::gfx1201;
+            }
+            else if(deviceString.find("gfx1250") != std::string::npos)
+            {
+                return AMDGPU::Processor::gfx1250;
             }
             else
             {

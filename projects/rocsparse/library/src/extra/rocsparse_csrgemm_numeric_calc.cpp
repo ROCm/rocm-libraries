@@ -1,6 +1,6 @@
 /*! \file */
 /* ************************************************************************
- * Copyright (C) 2019-2025 Advanced Micro Devices, Inc. All rights Reserved.
+ * Copyright (C) 2019-2026 Advanced Micro Devices, Inc. All rights Reserved.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -484,13 +484,13 @@ rocsparse_status rocsparse::csrgemm_numeric_calc_template(rocsparse_handle    ha
     J h_group_size[CSRGEMM_MAXGROUPS + 1];
 
     // Copy group sizes to host
-    RETURN_IF_HIP_ERROR(hipMemcpyAsync(h_group_size,
-                                       d_group_size,
-                                       sizeof(J) * (CSRGEMM_MAXGROUPS + 1),
-                                       hipMemcpyDeviceToHost,
-                                       handle->stream));
+    RETURN_IF_HIP_ERROR(rocsparse_hipMemcpyAsync(h_group_size,
+                                                 d_group_size,
+                                                 sizeof(J) * (CSRGEMM_MAXGROUPS + 1),
+                                                 hipMemcpyDeviceToHost,
+                                                 handle->stream));
     // Wait for host transfer to finish
-    RETURN_IF_HIP_ERROR(hipStreamSynchronize(handle->stream));
+    RETURN_IF_HIP_ERROR(rocsparse_hipStreamSynchronize(handle->stream));
 
     J nnz_max = h_group_size[CSRGEMM_MAXGROUPS];
     if(nnz_max > 16)
@@ -954,15 +954,21 @@ INSTANTIATE(int32_t, int32_t, float);
 INSTANTIATE(int32_t, int32_t, double);
 INSTANTIATE(int32_t, int32_t, rocsparse_float_complex);
 INSTANTIATE(int32_t, int32_t, rocsparse_double_complex);
+INSTANTIATE(int32_t, int32_t, _Float16);
+INSTANTIATE(int32_t, int32_t, rocsparse_bfloat16);
 
 INSTANTIATE(int64_t, int64_t, float);
 INSTANTIATE(int64_t, int64_t, double);
 INSTANTIATE(int64_t, int64_t, rocsparse_float_complex);
 INSTANTIATE(int64_t, int64_t, rocsparse_double_complex);
+INSTANTIATE(int64_t, int64_t, _Float16);
+INSTANTIATE(int64_t, int64_t, rocsparse_bfloat16);
 
 INSTANTIATE(int64_t, int32_t, float);
 INSTANTIATE(int64_t, int32_t, double);
 INSTANTIATE(int64_t, int32_t, rocsparse_float_complex);
 INSTANTIATE(int64_t, int32_t, rocsparse_double_complex);
+INSTANTIATE(int64_t, int32_t, _Float16);
+INSTANTIATE(int64_t, int32_t, rocsparse_bfloat16);
 
 #undef INSTANTIATE

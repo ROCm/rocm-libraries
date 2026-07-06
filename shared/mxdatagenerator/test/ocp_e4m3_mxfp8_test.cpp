@@ -1,30 +1,7 @@
-/*******************************************************************************
- *
- * MIT License
- *
- * Copyright 2024-2025 AMD ROCm(TM) Software
- *
- * Permission is hereby granted, free of charge, to any person obtaining a copy
- * of this software and associated documentation files (the "Software"), to deal
- * in the Software without restriction, including without limitation the rights
- * to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
- * copies of the Software, and to permit persons to whom the Software is
- * furnished to do so, subject to the following conditions:
- *
- * The above copyright notice and this permission notice shall be included in
- * all copies or substantial portions of the Software.
- *
- * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
- * IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
- * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
- * AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
- * LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
- * OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
- * SOFTWARE.
- *
- *******************************************************************************/
+// Copyright Advanced Micro Devices, Inc., or its affiliates.
+// SPDX-License-Identifier: MIT
 
-#include <dataTypeInfo.hpp>
+#include <mxDataGenerator/dataTypeInfo.hpp>
 
 #include <gtest/gtest.h>
 
@@ -163,6 +140,57 @@ protected:
         return closestDiff;
     }
 };
+
+TEST_F(ocp_e4m3_mxfp8_test, PreservesSignedZero)
+{
+    uint8_t scale[] = {DGen::Constants::E8M0_1};
+    uint8_t zeros[] = {DT::positiveZeroMask, DT::negativeZeroMask};
+    float   posF    = toFloat<DT>(scale, zeros, 0, 0);
+    float   negF    = toFloat<DT>(scale, zeros, 0, 1);
+    double  posD    = toDouble<DT>(scale, zeros, 0, 0);
+    double  negD    = toDouble<DT>(scale, zeros, 0, 1);
+
+    EXPECT_FALSE(std::signbit(posF));
+    EXPECT_TRUE(std::signbit(negF));
+    EXPECT_FALSE(std::signbit(posD));
+    EXPECT_TRUE(std::signbit(negD));
+
+    float negZero = std::copysign(0.0f, -1.0f);
+    EXPECT_EQ(static_cast<uint64_t>(DT::negativeZeroMask), satConvertToType<DT>(negZero));
+    EXPECT_EQ(static_cast<uint64_t>(DT::negativeZeroMask), nonSatConvertToType<DT>(negZero));
+    EXPECT_EQ(static_cast<uint64_t>(DT::negativeZeroMask), satConvertToTypeSR<DT>(negZero, 0));
+    EXPECT_EQ(static_cast<uint64_t>(DT::negativeZeroMask), nonSatConvertToTypeSR<DT>(negZero, 0));
+}
+
+TEST_F(ocp_e4m3_mxfp8_test, NaNConversionReturnsValidRawByte)
+{
+    float negNaN = std::copysign(std::numeric_limits<float>::quiet_NaN(), -1.0f);
+
+    EXPECT_EQ(static_cast<uint64_t>(DT::dataNaNMasks[0]), satConvertToType<DT>(NAN));
+    EXPECT_EQ(static_cast<uint64_t>(DT::dataNaNMasks[1]), satConvertToType<DT>(negNaN));
+    EXPECT_EQ(static_cast<uint64_t>(DT::dataNaNMasks[0]), nonSatConvertToType<DT>(NAN));
+    EXPECT_EQ(static_cast<uint64_t>(DT::dataNaNMasks[1]), nonSatConvertToType<DT>(negNaN));
+    EXPECT_EQ(static_cast<uint64_t>(DT::dataNaNMasks[0]), satConvertToTypeSR<DT>(NAN, 0));
+    EXPECT_EQ(static_cast<uint64_t>(DT::dataNaNMasks[1]), satConvertToTypeSR<DT>(negNaN, 0));
+    EXPECT_EQ(static_cast<uint64_t>(DT::dataNaNMasks[0]), nonSatConvertToTypeSR<DT>(NAN, 0));
+    EXPECT_EQ(static_cast<uint64_t>(DT::dataNaNMasks[1]), nonSatConvertToTypeSR<DT>(negNaN, 0));
+    EXPECT_EQ(static_cast<uint64_t>(DT::dataNaNMasks[0]), nonSatConvertToType<DT>(1000.0f));
+    EXPECT_EQ(static_cast<uint64_t>(DT::dataNaNMasks[1]), nonSatConvertToType<DT>(-1000.0f));
+    EXPECT_EQ(static_cast<uint64_t>(DT::dataNaNMasks[0]), nonSatConvertToTypeSR<DT>(1000.0f, 0));
+    EXPECT_EQ(static_cast<uint64_t>(DT::dataNaNMasks[1]), nonSatConvertToTypeSR<DT>(-1000.0f, 0));
+}
+
+TEST_F(ocp_e4m3_mxfp8_test, SetInfBehaviorForE4M3)
+{
+    uint8_t scale[] = {DGen::Constants::E8M0_1};
+    uint8_t data[]  = {DT::oneMask};
+
+    setInf<DT>(scale, data, 0, 0);
+
+    EXPECT_EQ(DT::oneMask, data[0]);
+    EXPECT_FALSE(isNaN<DT>(scale, data, 0, 0));
+    EXPECT_FALSE(isInf<DT>(scale, data, 0, 0));
+}
 
 TEST_F(ocp_e4m3_mxfp8_test, isOne)
 {
@@ -590,10 +618,12 @@ TEST_F(ocp_e4m3_mxfp8_test, isSubnorm)
 
         double value = toDouble<DT>(temp, temp, 0, 1);
 
-        if(exp != 0b0 || std::isnan(value))
-            EXPECT_FALSE(isSubnorm<DT>(temp, 1));
-        else
+        uint8_t mantissa = data & ((1 << getDataMantissaBits<DT>()) - 1);
+
+        if(exp == 0b0 && mantissa != 0 && !std::isnan(value))
             EXPECT_TRUE(isSubnorm<DT>(temp, 1));
+        else
+            EXPECT_FALSE(isSubnorm<DT>(temp, 1));
     }
 }
 

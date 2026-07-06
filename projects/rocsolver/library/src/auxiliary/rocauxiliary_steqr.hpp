@@ -4,7 +4,7 @@
  *     Univ. of Tennessee, Univ. of California Berkeley,
  *     Univ. of Colorado Denver and NAG Ltd..
  *     December 2016
- * Copyright (C) 2019-2025 Advanced Micro Devices, Inc. All rights reserved.
+ * Copyright (C) 2019-2026 Advanced Micro Devices, Inc. All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -67,7 +67,7 @@ rocblas_status run_steqr_hybrid(rocblas_handle handle,
     hipStream_t stream;
     rocblas_get_stream(handle, &stream);
 
-    rocblas_int m, l, lsv, lend, lendsv;
+    rocblas_int m, l, lsv, lend, lendsv, lsv_scaling, lendsv_scaling;
     rocblas_int l1;
     rocblas_int iters;
     S anorm, p;
@@ -131,13 +131,15 @@ rocblas_status run_steqr_hybrid(rocblas_handle handle,
             if(lend == l)
                 continue;
 
+            lsv_scaling = lsv;
+            lendsv_scaling = lendsv;
             // Scale submatrix
             if(anorm == 0)
                 continue;
             else if(anorm > ssfmax)
-                scale_tridiag(lsv, lendsv, D, E, anorm / ssfmax);
+                scale_tridiag(lsv_scaling, lendsv_scaling, D, E, ssfmax / anorm);
             else if(anorm < ssfmin)
-                scale_tridiag(lsv, lendsv, D, E, anorm / ssfmin);
+                scale_tridiag(lsv_scaling, lendsv_scaling, D, E, ssfmin / anorm);
 
             if(lend >= l)
             {
@@ -315,9 +317,9 @@ rocblas_status run_steqr_hybrid(rocblas_handle handle,
 
             // Undo scaling
             if(anorm > ssfmax)
-                scale_tridiag(lsv, lendsv, D, E, ssfmax / anorm);
+                scale_tridiag(lsv_scaling, lendsv_scaling, D, E, anorm / ssfmax);
             if(anorm < ssfmin)
-                scale_tridiag(lsv, lendsv, D, E, ssfmin / anorm);
+                scale_tridiag(lsv_scaling, lendsv_scaling, D, E, anorm / ssfmin);
         }
 
         // Check for convergence
@@ -383,7 +385,7 @@ __device__ void run_steqr(const rocblas_int tid,
                           const S ssfmax,
                           const bool ordered = true)
 {
-    __shared__ rocblas_int m, l, lsv, lend, lendsv;
+    __shared__ rocblas_int m, l, lsv, lend, lendsv, lsv_scaling, lendsv_scaling;
     __shared__ rocblas_int l1;
     __shared__ rocblas_int iters;
     __shared__ S anorm, p;
@@ -424,6 +426,10 @@ __device__ void run_steqr(const rocblas_int tid,
 
             // Get scaling factor
             anorm = find_max_tridiag(lsv, lendsv, D, E);
+
+            // Save for the case we have to undo the scaling later
+            lsv_scaling = lsv;
+            lendsv_scaling = lendsv;
         }
         __syncthreads();
 
@@ -434,9 +440,9 @@ __device__ void run_steqr(const rocblas_int tid,
         if(anorm == 0)
             continue;
         else if(anorm > ssfmax)
-            scale_tridiag(lsv, lendsv, D, E, anorm / ssfmax, tid, tid_inc);
+            scale_tridiag(lsv_scaling, lendsv_scaling, D, E, ssfmax / anorm, tid, tid_inc);
         else if(anorm < ssfmin)
-            scale_tridiag(lsv, lendsv, D, E, anorm / ssfmin, tid, tid_inc);
+            scale_tridiag(lsv_scaling, lendsv_scaling, D, E, ssfmin / anorm, tid, tid_inc);
         __syncthreads();
 
         if(lend >= l)
@@ -622,9 +628,9 @@ __device__ void run_steqr(const rocblas_int tid,
 
         // Undo scaling
         if(anorm > ssfmax)
-            scale_tridiag(lsv, lendsv, D, E, ssfmax / anorm, tid, tid_inc);
+            scale_tridiag(lsv_scaling, lendsv_scaling, D, E, anorm / ssfmax, tid, tid_inc);
         if(anorm < ssfmin)
-            scale_tridiag(lsv, lendsv, D, E, ssfmin / anorm, tid, tid_inc);
+            scale_tridiag(lsv_scaling, lendsv_scaling, D, E, anorm / ssfmin, tid, tid_inc);
         __syncthreads();
     }
 
@@ -804,8 +810,8 @@ rocblas_status rocsolver_steqr_template(rocblas_handle handle,
     // Initialize identity matrix
     if(evect == rocblas_evect_tridiagonal)
     {
-        rocblas_int blocks = (n - 1) / 32 + 1;
-        ROCSOLVER_LAUNCH_KERNEL(init_ident<T>, dim3(blocks, blocks, batch_count), dim3(32, 32), 0,
+        rocblas_int blocks = (n - 1) / BS2 + 1;
+        ROCSOLVER_LAUNCH_KERNEL(init_ident<T>, dim3(blocks, blocks, batch_count), dim3(BS2, BS2), 0,
                                 stream, n, n, C, shiftC, ldc, strideC);
     }
 

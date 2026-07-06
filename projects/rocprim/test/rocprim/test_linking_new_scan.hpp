@@ -1,6 +1,6 @@
 // MIT License
 //
-// Copyright (c) 2025 Advanced Micro Devices, Inc. All rights reserved.
+// Copyright (c) 2025-2026 Advanced Micro Devices, Inc. All rights reserved.
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -78,37 +78,6 @@ ROCPRIM_DEVICE ROCPRIM_FORCE_INLINE void single_scan_kernel_impl(InputIterator  
     block_store_direct_striped<block_size>(flat_block_thread_id(), output, values, input_size);
 }
 
-template<class Config,
-         bool Exclusive,
-         class InputIterator,
-         class OutputIterator,
-         class BinaryFunction,
-         class InitValueType,
-         class AccType>
-inline hipError_t launch_single_scan(detail::target_arch arch,
-                                     InputIterator       input,
-                                     const size_t        size,
-                                     const InitValueType initial_value,
-                                     OutputIterator      output,
-                                     BinaryFunction      scan_op,
-                                     dim3                grid,
-                                     dim3                block,
-                                     size_t              shmem,
-                                     hipStream_t         stream)
-{
-    auto kernel = [=](auto arch_config)
-    {
-        single_scan_kernel_impl<decltype(arch_config), Exclusive>(
-            input,
-            size,
-            static_cast<AccType>(get_input_value(initial_value)),
-            output,
-            scan_op);
-    };
-
-    return execute_launch_plan<Config>(arch, kernel, grid, block, shmem, stream);
-}
-
 template<lookback_scan_determinism Determinism,
          bool                      Exclusive,
          class Config,
@@ -129,15 +98,11 @@ inline auto scan_impl(void*               temporary_storage,
 {
     (void)debug_synchronous;
 
-    using config = wrapped_scan_config<Config, AccType>;
+    using Selector = scan_config_selector<AccType>;
 
-    detail::target_arch target_arch;
-    hipError_t          result = host_target_arch(stream, target_arch);
-    if(result != hipSuccess)
-    {
-        return result;
-    }
-    const scan_config_params params = dispatch_target_arch<config, false>(target_arch);
+    const target current_target(stream);
+
+    const auto params = get_config<Selector>(Config{}, current_target);
 
     const unsigned int block_size       = params.kernel_config.block_size;
     const unsigned int items_per_thread = params.kernel_config.items_per_thread;
@@ -155,22 +120,21 @@ inline auto scan_impl(void*               temporary_storage,
         return hipErrorInvalidValue;
     }
 
-    ROCPRIM_RETURN_ON_ERROR(launch_single_scan<config,
-                                               Exclusive,
-                                               InputIterator,
-                                               OutputIterator,
-                                               BinaryFunction,
-                                               InitValueType,
-                                               AccType>(target_arch,
-                                                        input,
-                                                        size,
-                                                        initial_value,
-                                                        output,
-                                                        scan_op,
-                                                        dim3(1),
-                                                        dim3(block_size),
-                                                        0,
-                                                        stream));
+    auto single_scan_kernel = [=](auto arch_config)
+    {
+        single_scan_kernel_impl<decltype(arch_config), Exclusive>(
+            input,
+            size,
+            static_cast<AccType>(get_input_value(initial_value)),
+            output,
+            scan_op);
+    };
+    ROCPRIM_RETURN_ON_ERROR(execute_launch_plan<Config, Selector>(current_target,
+                                                                  single_scan_kernel,
+                                                                  dim3(1),
+                                                                  dim3(block_size),
+                                                                  0,
+                                                                  stream));
     return hipGetLastError();
 }
 

@@ -1,5 +1,5 @@
 # ##########################################################################
-# Copyright (C) 2019-2025 Advanced Micro Devices, Inc. All rights reserved.
+# Copyright (C) 2019-2026 Advanced Micro Devices, Inc. All rights reserved.
 #
 # Redistribution and use in source and binary forms, with or without
 # modification, are permitted provided that the following conditions
@@ -50,6 +50,9 @@ set(rocsolver_lapack_source
   lapack/roclapack_getrs.cpp
   lapack/roclapack_getrs_batched.cpp
   lapack/roclapack_getrs_strided_batched.cpp
+  lapack/roclapack_getrs_npvt.cpp
+  lapack/roclapack_getrs_npvt_batched.cpp
+  lapack/roclapack_getrs_npvt_strided_batched.cpp
   lapack/roclapack_gesv.cpp
   lapack/roclapack_gesv_batched.cpp
   lapack/roclapack_gesv_strided_batched.cpp
@@ -61,6 +64,13 @@ set(rocsolver_lapack_source
   lapack/roclapack_posv.cpp
   lapack/roclapack_posv_batched.cpp
   lapack/roclapack_posv_strided_batched.cpp
+  #- symmetric indefinite matrices
+  lapack/roclapack_sytrs.cpp
+  lapack/roclapack_sytrs_batched.cpp
+  lapack/roclapack_sytrs_strided_batched.cpp
+  lapack/roclapack_sytrs2.cpp
+  lapack/roclapack_sytrs2_batched.cpp
+  lapack/roclapack_sytrs2_strided_batched.cpp
   #- block-tridiagonal systems
   lapack/roclapack_geblttrs_npvt.cpp
   lapack/roclapack_geblttrs_npvt_batched.cpp
@@ -237,6 +247,9 @@ set(rocsolver_auxiliary_source
   auxiliary/rocauxiliary_larf.cpp
   auxiliary/rocauxiliary_larft.cpp
   auxiliary/rocauxiliary_larfb.cpp
+  # norm and condition number
+  auxiliary/rocauxiliary_lange.cpp
+  auxiliary/rocauxiliary_gecon.cpp
   # plane rotations
   auxiliary/rocauxiliary_lasr.cpp
   # orthonormal/unitary matrices
@@ -269,6 +282,7 @@ set(rocsolver_auxiliary_source
   auxiliary/rocauxiliary_stedcx.cpp
   auxiliary/rocauxiliary_stein.cpp
   auxiliary/rocauxiliary_latrd.cpp
+  auxiliary/rocauxiliary_latrd_forsytrd.cpp
   # symmetric matrices
   auxiliary/rocauxiliary_lasyf.cpp
   # triangular matrices
@@ -347,6 +361,17 @@ if(OPTIMAL)
     specialized/roclapack_trtri_specialized_kernels_c.cpp
     specialized/roclapack_trtri_specialized_kernels_z.cpp
   )
+endif()
+
+# Asynchronous logger option
+# Note: this does not mean abolsutely asynchronous, just less synchronous
+option(ROCSOLVER_USE_ASYNC_LOGGER "Enable asynchronous HIP event-based logger (reduces GPU synchronizations)" ON)
+
+# Configure asynchronous logger compile definition
+if(ROCSOLVER_USE_ASYNC_LOGGER)
+  set(ROCSOLVER_ASYNC_LOGGER_DEFINITION "ROCSOLVER_USE_ASYNC_LOGGER=1")
+else()
+  set(ROCSOLVER_ASYNC_LOGGER_DEFINITION "ROCSOLVER_USE_ASYNC_LOGGER=0")
 endif()
 
 set(auxiliaries
@@ -492,6 +517,7 @@ target_compile_definitions(rocsolver PRIVATE
   ROCM_USE_FLOAT16
   ROCBLAS_INTERNAL_API
   ROCSOLVER_LIBRARY
+  ${ROCSOLVER_ASYNC_LOGGER_DEFINITION}
 )
 
 add_armor_flags(rocsolver "${ARMOR_LEVEL}")

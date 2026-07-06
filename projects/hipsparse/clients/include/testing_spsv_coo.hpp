@@ -1,5 +1,5 @@
 /* ************************************************************************
- * Copyright (C) 2021 Advanced Micro Devices, Inc. All rights Reserved.
+ * Copyright (C) 2021-2026 Advanced Micro Devices, Inc. All rights Reserved.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -39,7 +39,8 @@
 
 using namespace hipsparse_test;
 
-void testing_spsv_coo_bad_arg(void)
+template <typename I, typename T>
+void testing_spsv_coo_bad_arg(const Arguments& argus)
 {
 #if(!defined(CUDART_VERSION))
     int64_t              m         = 100;
@@ -159,17 +160,17 @@ void testing_spsv_coo_bad_arg(void)
 }
 
 template <typename I, typename T>
-hipsparseStatus_t testing_spsv_coo(Arguments argus)
+void testing_spsv_coo(Arguments argus)
 {
 #if(!defined(CUDART_VERSION) || CUDART_VERSION >= 11030)
     I                    m        = argus.M;
     I                    n        = argus.N;
-    T                    h_alpha  = make_DataType<T>(argus.alpha);
+    T                    h_alpha  = argus.get_alpha<T>();
     hipsparseOperation_t transA   = argus.transA;
     hipsparseIndexBase_t idx_base = argus.baseA;
     hipsparseDiagType_t  diag     = argus.diag_type;
     hipsparseFillMode_t  uplo     = argus.fill_mode;
-    hipsparseSpSVAlg_t   alg      = static_cast<hipsparseSpSVAlg_t>(argus.spsv_alg);
+    hipsparseSpSVAlg_t   alg      = argus.spsv_alg;
     std::string          filename = argus.filename;
 
     // Index and data type
@@ -189,11 +190,8 @@ hipsparseStatus_t testing_spsv_coo(Arguments argus)
     srand(12345ULL);
 
     I nnz;
-    if(!generate_csr_matrix(filename, m, n, nnz, hrow_ptr, hcol_ind, hval, idx_base))
-    {
-        fprintf(stderr, "Cannot open [read] %s\ncol", filename.c_str());
-        return HIPSPARSE_STATUS_INTERNAL_ERROR;
-    }
+    CHECK_GENERATE_MATRIX_ERROR(
+        generate_csr_matrix(filename, m, n, nnz, hrow_ptr, hcol_ind, hval, idx_base));
 
     std::vector<I> hrow_ind(nnz);
 
@@ -379,8 +377,6 @@ hipsparseStatus_t testing_spsv_coo(Arguments argus)
     CHECK_HIPSPARSE_ERROR(hipsparseDestroyDnVec(y1));
     CHECK_HIPSPARSE_ERROR(hipsparseDestroyDnVec(y2));
 #endif
-
-    return HIPSPARSE_STATUS_SUCCESS;
 }
 
 #endif // TESTING_SPSV_COO_HPP

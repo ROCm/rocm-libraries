@@ -1,6 +1,6 @@
 /*! \file */
 /* ************************************************************************
- * Copyright (C) 2022-2025 Advanced Micro Devices, Inc. All rights Reserved.
+ * Copyright (C) 2022-2026 Advanced Micro Devices, Inc. All rights Reserved.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -178,6 +178,10 @@ namespace rocsparse
     ROCSPARSE_DEVICE_ILF void insert_pair_rxc(
         I key, T val, int row, int col, I* __restrict__ table, T* __restrict__ data, I empty)
     {
+        static_assert(HASHSIZE > 0 && (HASHSIZE & (HASHSIZE - 1)) == 0,
+                      "HASHSIZE must be a power of two.");
+        static constexpr uint32_t BLOCKDIM_SQ = BLOCKDIM * BLOCKDIM;
+
         // Compute hash
         I hash = (key * HASHVAL) & (HASHSIZE - 1);
 
@@ -190,8 +194,8 @@ namespace rocsparse
             if(temp == key)
             {
                 // Element already present, add value to exsiting entry
-                rocsparse::atomic_add(&data[BLOCKDIM * BLOCKDIM * hash + BLOCKDIM * row + col],
-                                      val);
+                rocsparse::atomic_add(
+                    data, BLOCKDIM_SQ * hash + BLOCKDIM * row + col, HASHSIZE * BLOCKDIM_SQ, val);
                 break;
             }
             else if(temp == empty)
@@ -200,7 +204,9 @@ namespace rocsparse
                 if(rocsparse::atomic_cas(&table[hash], empty, key) == empty)
                 {
                     // Add value
-                    rocsparse::atomic_add(&data[BLOCKDIM * BLOCKDIM * hash + BLOCKDIM * row + col],
+                    rocsparse::atomic_add(data,
+                                          BLOCKDIM_SQ * hash + BLOCKDIM * row + col,
+                                          HASHSIZE * BLOCKDIM_SQ,
                                           val);
                     break;
                 }
@@ -247,6 +253,11 @@ namespace rocsparse
                                            bool                 mul,
                                            bool                 add)
     {
+        static_assert(WFSIZE > 0 && (WFSIZE & (WFSIZE - 1)) == 0, "WFSIZE must be a power of two.");
+        static_assert(BLOCKSIZE > 0, "BLOCKSIZE must be positive.");
+        static_assert(BLOCKSIZE % WFSIZE == 0, "BLOCKSIZE must be a multiple of WFSIZE.");
+        static_assert(HASHSIZE > 0 && (HASHSIZE & (HASHSIZE - 1)) == 0,
+                      "HASHSIZE must be a power of two.");
         // Lane id
         int lid = hipThreadIdx_x & (WFSIZE - 1);
         // Wavefront id
@@ -421,6 +432,7 @@ namespace rocsparse
 
         // Entry point of current row into C
         I row_begin_C = bsr_row_ptr_C[row] - idx_base_C;
+        I row_end_C   = bsr_row_ptr_C[row + 1] - idx_base_C;
 
         // Loop over hash table
         for(uint32_t i = lid; i < HASHSIZE; i += WFSIZE)
@@ -457,21 +469,24 @@ namespace rocsparse
             }
 
             // Write column and accumulated value to the obtained position in C
-            bsr_col_ind_C[idx_C] = col_C + idx_base_C;
+            if(idx_C >= row_begin_C && idx_C < row_end_C)
+            {
+                bsr_col_ind_C[idx_C] = col_C + idx_base_C;
 
-            if(dir == rocsparse_direction_row)
-            {
-                bsr_val_C[4 * idx_C + 2 * 0 + 0] = data[4 * i + 2 * 0 + 0];
-                bsr_val_C[4 * idx_C + 2 * 0 + 1] = data[4 * i + 2 * 0 + 1];
-                bsr_val_C[4 * idx_C + 2 * 1 + 0] = data[4 * i + 2 * 1 + 0];
-                bsr_val_C[4 * idx_C + 2 * 1 + 1] = data[4 * i + 2 * 1 + 1];
-            }
-            else
-            {
-                bsr_val_C[4 * idx_C + 2 * 0 + 0] = data[4 * i + 2 * 0 + 0];
-                bsr_val_C[4 * idx_C + 2 * 0 + 1] = data[4 * i + 2 * 1 + 0];
-                bsr_val_C[4 * idx_C + 2 * 1 + 0] = data[4 * i + 2 * 0 + 1];
-                bsr_val_C[4 * idx_C + 2 * 1 + 1] = data[4 * i + 2 * 1 + 1];
+                if(dir == rocsparse_direction_row)
+                {
+                    bsr_val_C[4 * idx_C + 2 * 0 + 0] = data[4 * i + 2 * 0 + 0];
+                    bsr_val_C[4 * idx_C + 2 * 0 + 1] = data[4 * i + 2 * 0 + 1];
+                    bsr_val_C[4 * idx_C + 2 * 1 + 0] = data[4 * i + 2 * 1 + 0];
+                    bsr_val_C[4 * idx_C + 2 * 1 + 1] = data[4 * i + 2 * 1 + 1];
+                }
+                else
+                {
+                    bsr_val_C[4 * idx_C + 2 * 0 + 0] = data[4 * i + 2 * 0 + 0];
+                    bsr_val_C[4 * idx_C + 2 * 0 + 1] = data[4 * i + 2 * 1 + 0];
+                    bsr_val_C[4 * idx_C + 2 * 1 + 0] = data[4 * i + 2 * 0 + 1];
+                    bsr_val_C[4 * idx_C + 2 * 1 + 1] = data[4 * i + 2 * 1 + 1];
+                }
             }
         }
     }
@@ -511,6 +526,11 @@ namespace rocsparse
                                               bool                 mul,
                                               bool                 add)
     {
+        static_assert(WFSIZE > 0 && (WFSIZE & (WFSIZE - 1)) == 0, "WFSIZE must be a power of two.");
+        static_assert(BLOCKSIZE > 0, "BLOCKSIZE must be positive.");
+        static_assert(BLOCKSIZE % WFSIZE == 0, "BLOCKSIZE must be a multiple of WFSIZE.");
+        static_assert(HASHSIZE > 0 && (HASHSIZE & (HASHSIZE - 1)) == 0,
+                      "HASHSIZE must be a power of two.");
         // Lane id
         int lid = hipThreadIdx_x & (WFSIZE - 1);
         // Wavefront id
@@ -673,6 +693,7 @@ namespace rocsparse
 
         // Entry point of current row into C
         I row_begin_C = bsr_row_ptr_C[row] - idx_base_C;
+        I row_end_C   = bsr_row_ptr_C[row + 1] - idx_base_C;
 
         // Loop over hash table
         for(uint32_t i = hipThreadIdx_x; i < HASHSIZE; i += BLOCKSIZE)
@@ -709,20 +730,23 @@ namespace rocsparse
             }
 
             // Write column and accumulated value to the obtained position in C
-            bsr_col_ind_C[idx_C] = col_C + idx_base_C;
-            if(dir == rocsparse_direction_row)
+            if(idx_C >= row_begin_C && idx_C < row_end_C)
             {
-                bsr_val_C[4 * idx_C + 0] = data[4 * i + 0];
-                bsr_val_C[4 * idx_C + 1] = data[4 * i + 1];
-                bsr_val_C[4 * idx_C + 2] = data[4 * i + 2];
-                bsr_val_C[4 * idx_C + 3] = data[4 * i + 3];
-            }
-            else
-            {
-                bsr_val_C[4 * idx_C + 0] = data[4 * i + 0];
-                bsr_val_C[4 * idx_C + 1] = data[4 * i + 2];
-                bsr_val_C[4 * idx_C + 2] = data[4 * i + 1];
-                bsr_val_C[4 * idx_C + 3] = data[4 * i + 3];
+                bsr_col_ind_C[idx_C] = col_C + idx_base_C;
+                if(dir == rocsparse_direction_row)
+                {
+                    bsr_val_C[4 * idx_C + 0] = data[4 * i + 0];
+                    bsr_val_C[4 * idx_C + 1] = data[4 * i + 1];
+                    bsr_val_C[4 * idx_C + 2] = data[4 * i + 2];
+                    bsr_val_C[4 * idx_C + 3] = data[4 * i + 3];
+                }
+                else
+                {
+                    bsr_val_C[4 * idx_C + 0] = data[4 * i + 0];
+                    bsr_val_C[4 * idx_C + 1] = data[4 * i + 2];
+                    bsr_val_C[4 * idx_C + 2] = data[4 * i + 1];
+                    bsr_val_C[4 * idx_C + 3] = data[4 * i + 3];
+                }
             }
         }
     }
@@ -762,6 +786,8 @@ namespace rocsparse
                                                              bool                 mul,
                                                              bool                 add)
     {
+        static constexpr uint32_t BLOCKDIM_SQ = BLOCKDIM * BLOCKDIM;
+
         int tid = hipThreadIdx_x;
 
         // Lane id
@@ -769,8 +795,8 @@ namespace rocsparse
         // Wavefront id
         int wid = tid / WFSIZE;
 
-        int slid = lid & (BLOCKDIM * BLOCKDIM - 1);
-        int swid = lid / (BLOCKDIM * BLOCKDIM);
+        int slid = lid & (BLOCKDIM_SQ - 1);
+        int swid = lid / BLOCKDIM_SQ;
 
         int c = slid & (BLOCKDIM - 1);
         int r = slid / BLOCKDIM;
@@ -780,11 +806,11 @@ namespace rocsparse
 
         // Hash table in shared memory
         __shared__ J stable[(BLOCKSIZE / WFSIZE) * HASHSIZE];
-        __shared__ T sdata[(BLOCKSIZE / WFSIZE) * BLOCKDIM * BLOCKDIM * HASHSIZE];
+        __shared__ T sdata[(BLOCKSIZE / WFSIZE) * BLOCKDIM_SQ * HASHSIZE];
 
         // Local hash table
         J* table = &stable[wid * HASHSIZE];
-        T* data  = &sdata[wid * BLOCKDIM * BLOCKDIM * HASHSIZE];
+        T* data  = &sdata[wid * BLOCKDIM_SQ * HASHSIZE];
 
         // Initialize hash table
         for(uint32_t i = lid; i < HASHSIZE; i += WFSIZE)
@@ -792,7 +818,7 @@ namespace rocsparse
             table[i] = nkb;
         }
 
-        for(uint32_t i = lid; i < BLOCKDIM * BLOCKDIM * HASHSIZE; i += WFSIZE)
+        for(uint32_t i = lid; i < BLOCKDIM_SQ * HASHSIZE; i += WFSIZE)
         {
             data[i] = static_cast<T>(0);
         }
@@ -816,7 +842,7 @@ namespace rocsparse
             I row_end_A   = bsr_row_ptr_A[row + 1] - idx_base_A;
 
             // Loop over columns of A in current row
-            for(I j = row_begin_A + swid; j < row_end_A; j += WFSIZE / (BLOCKDIM * BLOCKDIM))
+            for(I j = row_begin_A + swid; j < row_end_A; j += WFSIZE / BLOCKDIM_SQ)
             {
                 // Column of A in current row
                 J col_A = bsr_col_ind_A[j] - idx_base_A;
@@ -871,7 +897,7 @@ namespace rocsparse
             I row_end_D   = bsr_row_ptr_D[row + 1] - idx_base_D;
 
             // Loop over columns of D in current row and insert all columns of D into hash table
-            for(I j = row_begin_D + swid; j < row_end_D; j += WFSIZE / (BLOCKDIM * BLOCKDIM))
+            for(I j = row_begin_D + swid; j < row_end_D; j += WFSIZE / BLOCKDIM_SQ)
             {
                 // Column of D in current row
                 J col_D = bsr_col_ind_D[j] - idx_base_D;
@@ -899,9 +925,10 @@ namespace rocsparse
 
         // Entry point of current row into C
         I row_begin_C = bsr_row_ptr_C[row] - idx_base_C;
+        I row_end_C   = bsr_row_ptr_C[row + 1] - idx_base_C;
 
         // Loop over hash table
-        for(uint32_t i = swid; i < HASHSIZE; i += WFSIZE / (BLOCKDIM * BLOCKDIM))
+        for(uint32_t i = swid; i < HASHSIZE; i += WFSIZE / BLOCKDIM_SQ)
         {
             // Get column from hash table to fill it into C
             J col_C = table[i];
@@ -935,19 +962,22 @@ namespace rocsparse
             }
 
             // Write column and accumulated value to the obtained position in C
-            bsr_col_ind_C[idx_C] = col_C + idx_base_C;
-
-            if(c < block_dim && r < block_dim)
+            if(idx_C >= row_begin_C && idx_C < row_end_C)
             {
-                if(dir == rocsparse_direction_row)
+                bsr_col_ind_C[idx_C] = col_C + idx_base_C;
+
+                if(c < block_dim && r < block_dim)
                 {
-                    bsr_val_C[block_dim * block_dim * idx_C + block_dim * r + c]
-                        = data[BLOCKDIM * BLOCKDIM * i + BLOCKDIM * r + c];
-                }
-                else
-                {
-                    bsr_val_C[block_dim * block_dim * idx_C + block_dim * r + c]
-                        = data[BLOCKDIM * BLOCKDIM * i + BLOCKDIM * c + r];
+                    if(dir == rocsparse_direction_row)
+                    {
+                        bsr_val_C[block_dim * block_dim * idx_C + block_dim * r + c]
+                            = data[BLOCKDIM_SQ * i + BLOCKDIM * r + c];
+                    }
+                    else
+                    {
+                        bsr_val_C[block_dim * block_dim * idx_C + block_dim * r + c]
+                            = data[BLOCKDIM_SQ * i + BLOCKDIM * c + r];
+                    }
                 }
             }
         }
@@ -987,10 +1017,12 @@ namespace rocsparse
                                                                 bool                 mul,
                                                                 bool                 add)
     {
+        static constexpr uint32_t BLOCKDIM_SQ = BLOCKDIM * BLOCKDIM;
+
         // Lane id
-        int lid = hipThreadIdx_x & (BLOCKDIM * BLOCKDIM - 1);
+        int lid = hipThreadIdx_x & (BLOCKDIM_SQ - 1);
         // Wavefront id
-        int wid = hipThreadIdx_x / (BLOCKDIM * BLOCKDIM);
+        int wid = hipThreadIdx_x / BLOCKDIM_SQ;
 
         int c = lid & (BLOCKDIM - 1);
         int r = lid / BLOCKDIM;
@@ -1000,7 +1032,7 @@ namespace rocsparse
 
         // Hash table in shared memory
         __shared__ J table[HASHSIZE];
-        __shared__ T data[BLOCKDIM * BLOCKDIM * HASHSIZE];
+        __shared__ T data[BLOCKDIM_SQ * HASHSIZE];
 
         // Initialize hash table
         for(uint32_t i = hipThreadIdx_x; i < HASHSIZE; i += BLOCKSIZE)
@@ -1008,7 +1040,7 @@ namespace rocsparse
             table[i] = nkb;
         }
 
-        for(uint32_t i = hipThreadIdx_x; i < BLOCKDIM * BLOCKDIM * HASHSIZE; i += BLOCKSIZE)
+        for(uint32_t i = hipThreadIdx_x; i < BLOCKDIM_SQ * HASHSIZE; i += BLOCKSIZE)
         {
             data[i] = static_cast<T>(0);
         }
@@ -1023,7 +1055,7 @@ namespace rocsparse
             I row_end_A   = bsr_row_ptr_A[row + 1] - idx_base_A;
 
             // Loop over columns of A in current row
-            for(I j = row_begin_A + wid; j < row_end_A; j += (BLOCKSIZE / (BLOCKDIM * BLOCKDIM)))
+            for(I j = row_begin_A + wid; j < row_end_A; j += (BLOCKSIZE / BLOCKDIM_SQ))
             {
                 // Column of A in current row
                 J col_A = bsr_col_ind_A[j] - idx_base_A;
@@ -1080,7 +1112,7 @@ namespace rocsparse
             I row_end_D   = bsr_row_ptr_D[row + 1] - idx_base_D;
 
             // Loop over columns of D in current row and insert all columns of D into hash table
-            for(I j = row_begin_D + wid; j < row_end_D; j += (BLOCKSIZE / (BLOCKDIM * BLOCKDIM)))
+            for(I j = row_begin_D + wid; j < row_end_D; j += (BLOCKSIZE / BLOCKDIM_SQ))
             {
                 // Insert key value pair into hash table
                 J col_D = bsr_col_ind_D[j] - idx_base_D;
@@ -1108,9 +1140,10 @@ namespace rocsparse
 
         // Entry point of current row into C
         I row_begin_C = bsr_row_ptr_C[row] - idx_base_C;
+        I row_end_C   = bsr_row_ptr_C[row + 1] - idx_base_C;
 
         // Loop over hash table
-        for(uint32_t i = wid; i < HASHSIZE; i += (BLOCKSIZE / (BLOCKDIM * BLOCKDIM)))
+        for(uint32_t i = wid; i < HASHSIZE; i += (BLOCKSIZE / BLOCKDIM_SQ))
         {
             // Get column from hash table to fill it into C
             J col_C = table[i];
@@ -1144,18 +1177,21 @@ namespace rocsparse
             }
 
             // Write column and accumulated value to the obtained position in C
-            bsr_col_ind_C[idx_C] = col_C + idx_base_C;
-            if(c < block_dim && r < block_dim)
+            if(idx_C >= row_begin_C && idx_C < row_end_C)
             {
-                if(dir == rocsparse_direction_row)
+                bsr_col_ind_C[idx_C] = col_C + idx_base_C;
+                if(c < block_dim && r < block_dim)
                 {
-                    bsr_val_C[block_dim * block_dim * idx_C + block_dim * r + c]
-                        = data[BLOCKDIM * BLOCKDIM * i + BLOCKDIM * r + c];
-                }
-                else
-                {
-                    bsr_val_C[block_dim * block_dim * idx_C + block_dim * c + r]
-                        = data[BLOCKDIM * BLOCKDIM * i + BLOCKDIM * r + c];
+                    if(dir == rocsparse_direction_row)
+                    {
+                        bsr_val_C[block_dim * block_dim * idx_C + block_dim * r + c]
+                            = data[BLOCKDIM_SQ * i + BLOCKDIM * r + c];
+                    }
+                    else
+                    {
+                        bsr_val_C[block_dim * block_dim * idx_C + block_dim * c + r]
+                            = data[BLOCKDIM_SQ * i + BLOCKDIM * r + c];
+                    }
                 }
             }
         }
@@ -1195,10 +1231,12 @@ namespace rocsparse
                                                       bool                 mul,
                                                       bool                 add)
     {
+        static constexpr uint32_t BLOCKDIM_SQ = BLOCKDIM * BLOCKDIM;
+
         // Lane id
-        int lid = hipThreadIdx_x & (BLOCKDIM * BLOCKDIM - 1);
+        int lid = hipThreadIdx_x & (BLOCKDIM_SQ - 1);
         // Wavefront id
-        int wid = hipThreadIdx_x / (BLOCKDIM * BLOCKDIM);
+        int wid = hipThreadIdx_x / BLOCKDIM_SQ;
 
         int c = lid & (BLOCKDIM - 1);
         int r = lid / BLOCKDIM;
@@ -1208,7 +1246,7 @@ namespace rocsparse
 
         // Row entry marker and value accumulator
         __shared__ int table[CHUNKSIZE];
-        __shared__ T   data[BLOCKDIM * BLOCKDIM * CHUNKSIZE];
+        __shared__ T   data[BLOCKDIM_SQ * CHUNKSIZE];
         __shared__ T   shared_A[BLOCKSIZE];
 
         __shared__ J next_chunk;
@@ -1223,6 +1261,7 @@ namespace rocsparse
 
         // Entry point into columns of C
         I row_begin_C = bsr_row_ptr_C[row] - idx_base_C;
+        I row_end_C   = bsr_row_ptr_C[row + 1] - idx_base_C;
 
         // Loop over the row chunks until the end of the row has been reached (which is
         // the number of total columns)
@@ -1234,7 +1273,7 @@ namespace rocsparse
                 table[i] = 0;
             }
 
-            for(uint32_t i = hipThreadIdx_x; i < BLOCKDIM * BLOCKDIM * CHUNKSIZE; i += BLOCKSIZE)
+            for(uint32_t i = hipThreadIdx_x; i < BLOCKDIM_SQ * CHUNKSIZE; i += BLOCKSIZE)
             {
                 data[i] = static_cast<T>(0);
             }
@@ -1255,7 +1294,7 @@ namespace rocsparse
             if(mul == true)
             {
                 // Loop over columns of A in current row
-                for(I jj = row_begin_A; jj < row_end_A; jj += (BLOCKSIZE / (BLOCKDIM * BLOCKDIM)))
+                for(I jj = row_begin_A; jj < row_end_A; jj += (BLOCKSIZE / BLOCKDIM_SQ))
                 {
                     I j = jj + wid;
 
@@ -1266,13 +1305,12 @@ namespace rocsparse
                         // Load values into shared memory
                         if(c < block_dim && r < block_dim)
                         {
-                            shared_A[BLOCKDIM * BLOCKDIM * wid + BLOCKDIM * r + c]
+                            shared_A[BLOCKDIM_SQ * wid + BLOCKDIM * r + c]
                                 = bsr_val_A[block_dim * block_dim * j + block_dim * r + c];
                         }
                         else
                         {
-                            shared_A[BLOCKDIM * BLOCKDIM * wid + BLOCKDIM * r + c]
-                                = static_cast<T>(0);
+                            shared_A[BLOCKDIM_SQ * wid + BLOCKDIM * r + c] = static_cast<T>(0);
                         }
                     }
 
@@ -1312,31 +1350,30 @@ namespace rocsparse
                                     {
                                         for(int i = 0; i < block_dim; i++)
                                         {
-                                            val_AB
-                                                = rocsparse::fma(shared_A[BLOCKDIM * BLOCKDIM * wid
-                                                                          + BLOCKDIM * r + i],
-                                                                 bsr_val_B[block_dim * block_dim * k
-                                                                           + block_dim * i + c],
-                                                                 val_AB);
+                                            val_AB = rocsparse::fma(
+                                                shared_A[BLOCKDIM_SQ * wid + BLOCKDIM * r + i],
+                                                bsr_val_B[block_dim * block_dim * k + block_dim * i
+                                                          + c],
+                                                val_AB);
                                         }
                                     }
                                     else
                                     {
                                         for(int i = 0; i < block_dim; i++)
                                         {
-                                            val_AB
-                                                = rocsparse::fma(shared_A[BLOCKDIM * BLOCKDIM * wid
-                                                                          + BLOCKDIM * i + r],
-                                                                 bsr_val_B[block_dim * block_dim * k
-                                                                           + block_dim * c + i],
-                                                                 val_AB);
+                                            val_AB = rocsparse::fma(
+                                                shared_A[BLOCKDIM_SQ * wid + BLOCKDIM * i + r],
+                                                bsr_val_B[block_dim * block_dim * k + block_dim * c
+                                                          + i],
+                                                val_AB);
                                         }
                                     }
 
-                                    rocsparse::atomic_add(
-                                        &data[BLOCKDIM * BLOCKDIM * (col_B - chunk_begin)
-                                              + BLOCKDIM * r + c],
-                                        alpha * val_AB);
+                                    rocsparse::atomic_add(data,
+                                                          BLOCKDIM_SQ * (col_B - chunk_begin)
+                                                              + BLOCKDIM * r + c,
+                                                          CHUNKSIZE * BLOCKDIM_SQ,
+                                                          alpha * val_AB);
                                 }
                             }
                             else if(col_B >= chunk_end)
@@ -1368,8 +1405,7 @@ namespace rocsparse
                 I row_end_D   = bsr_row_ptr_D[row + 1] - idx_base_D;
 
                 // Loop over columns of D in current row
-                for(I j = row_begin_D + wid; j < row_end_D;
-                    j += (BLOCKSIZE / (BLOCKDIM * BLOCKDIM)))
+                for(I j = row_begin_D + wid; j < row_end_D; j += (BLOCKSIZE / BLOCKDIM_SQ))
                 {
                     // Column of D in row col_A
                     J col_D = bsr_col_ind_D[j] - idx_base_D;
@@ -1394,8 +1430,10 @@ namespace rocsparse
                                         * bsr_val_D[block_dim * block_dim * j + block_dim * c + r];
                             }
 
-                            rocsparse::atomic_add(&data[BLOCKDIM * BLOCKDIM * (col_D - chunk_begin)
-                                                        + BLOCKDIM * r + c],
+                            rocsparse::atomic_add(data,
+                                                  BLOCKDIM_SQ * (col_D - chunk_begin) + BLOCKDIM * r
+                                                      + c,
+                                                  CHUNKSIZE * BLOCKDIM_SQ,
                                                   val_D);
                         }
                     }
@@ -1408,7 +1446,7 @@ namespace rocsparse
                 }
             }
 
-            if(lid == (BLOCKDIM * BLOCKDIM - 1))
+            if(lid == (BLOCKDIM_SQ - 1))
             {
                 // Atomically determine the new chunks beginning (minimum column index of B
                 // that is larger than the current chunks end point)
@@ -1450,25 +1488,28 @@ namespace rocsparse
 
             __syncthreads();
 
-            for(uint32_t i = wid; i < CHUNKSIZE; i += (BLOCKSIZE / (BLOCKDIM * BLOCKDIM)))
+            for(uint32_t i = wid; i < CHUNKSIZE; i += (BLOCKSIZE / BLOCKDIM_SQ))
             {
                 if(table[i])
                 {
                     I idx = row_begin_C + table[i] - 1;
 
-                    bsr_col_ind_C[idx] = i + chunk_begin + idx_base_C;
-
-                    if(c < block_dim && r < block_dim)
+                    if(idx < row_end_C)
                     {
-                        if(dir == rocsparse_direction_row)
+                        bsr_col_ind_C[idx] = i + chunk_begin + idx_base_C;
+
+                        if(c < block_dim && r < block_dim)
                         {
-                            bsr_val_C[block_dim * block_dim * idx + block_dim * r + c]
-                                = data[BLOCKDIM * BLOCKDIM * i + BLOCKDIM * r + c];
-                        }
-                        else
-                        {
-                            bsr_val_C[block_dim * block_dim * idx + block_dim * c + r]
-                                = data[BLOCKDIM * BLOCKDIM * i + BLOCKDIM * r + c];
+                            if(dir == rocsparse_direction_row)
+                            {
+                                bsr_val_C[block_dim * block_dim * idx + block_dim * r + c]
+                                    = data[BLOCKDIM_SQ * i + BLOCKDIM * r + c];
+                            }
+                            else
+                            {
+                                bsr_val_C[block_dim * block_dim * idx + block_dim * c + r]
+                                    = data[BLOCKDIM_SQ * i + BLOCKDIM * r + c];
+                            }
                         }
                     }
                 }
@@ -1521,6 +1562,8 @@ namespace rocsparse
                                                bool                 mul,
                                                bool                 add)
     {
+        static constexpr uint32_t BLOCKDIM_SQ = BLOCKDIM * BLOCKDIM;
+
         // Lane id
         int lid = hipThreadIdx_x & ((BLOCKSIZE / BLOCKDIM) - 1);
         // Wavefront id
@@ -1531,7 +1574,7 @@ namespace rocsparse
 
         // Row entry marker and value accumulator
         __shared__ bool table[CHUNKSIZE];
-        __shared__ T    data[BLOCKDIM * BLOCKDIM * CHUNKSIZE];
+        __shared__ T    data[BLOCKDIM_SQ * CHUNKSIZE];
 
         // Begin of the current row chunk (this is the column index of the current row)
         J chunk_begin = 0;
@@ -1543,6 +1586,7 @@ namespace rocsparse
 
         // Entry point into columns of C
         I row_begin_C = bsr_row_ptr_C[row] - idx_base_C;
+        I row_end_C   = bsr_row_ptr_C[row + 1] - idx_base_C;
 
         // Loop over the row chunks until the end of the row has been reached (which is
         // the number of total columns)
@@ -1554,7 +1598,7 @@ namespace rocsparse
                 table[i] = 0;
             }
 
-            for(uint32_t i = hipThreadIdx_x; i < BLOCKDIM * BLOCKDIM * CHUNKSIZE; i += BLOCKSIZE)
+            for(uint32_t i = hipThreadIdx_x; i < BLOCKDIM_SQ * CHUNKSIZE; i += BLOCKSIZE)
             {
                 data[i] = static_cast<T>(0);
             }
@@ -1628,13 +1672,12 @@ namespace rocsparse
                                         }
                                     }
 
-                                    data[BLOCKDIM * BLOCKDIM * (col_B - chunk_begin)
-                                         + BLOCKDIM * wid + (i + lid)]
-                                        = rocsparse::fma(
-                                            alpha,
-                                            val_AB,
-                                            data[BLOCKDIM * BLOCKDIM * (col_B - chunk_begin)
-                                                 + BLOCKDIM * wid + (i + lid)]);
+                                    data[BLOCKDIM_SQ * (col_B - chunk_begin) + BLOCKDIM * wid
+                                         + (i + lid)]
+                                        = rocsparse::fma(alpha,
+                                                         val_AB,
+                                                         data[BLOCKDIM_SQ * (col_B - chunk_begin)
+                                                              + BLOCKDIM * wid + (i + lid)]);
                                 }
                             }
 
@@ -1692,13 +1735,12 @@ namespace rocsparse
                                                       + block_dim * (i + lid) + wid];
                                 }
 
-                                data[BLOCKDIM * BLOCKDIM * (col_D - chunk_begin) + BLOCKDIM * wid
+                                data[BLOCKDIM_SQ * (col_D - chunk_begin) + BLOCKDIM * wid
                                      + (i + lid)]
-                                    = rocsparse::fma(
-                                        beta,
-                                        val_D,
-                                        data[BLOCKDIM * BLOCKDIM * (col_D - chunk_begin)
-                                             + BLOCKDIM * wid + (i + lid)]);
+                                    = rocsparse::fma(beta,
+                                                     val_D,
+                                                     data[BLOCKDIM_SQ * (col_D - chunk_begin)
+                                                          + BLOCKDIM * wid + (i + lid)]);
                             }
                         }
 
@@ -1728,21 +1770,26 @@ namespace rocsparse
 
                     I idx = row_begin_C + offset - 1;
 
-                    bsr_col_ind_C[idx] = j + chunk_begin + idx_base_C;
-
-                    for(uint32_t i = 0; i < BLOCKDIM; i += BLOCKSIZE / BLOCKDIM)
+                    if(idx < row_end_C)
                     {
-                        if((i + lid) < block_dim && wid < block_dim)
+                        bsr_col_ind_C[idx] = j + chunk_begin + idx_base_C;
+
+                        for(uint32_t i = 0; i < BLOCKDIM; i += BLOCKSIZE / BLOCKDIM)
                         {
-                            if(dir == rocsparse_direction_row)
+                            if((i + lid) < block_dim && wid < block_dim)
                             {
-                                bsr_val_C[block_dim * block_dim * idx + block_dim * wid + (i + lid)]
-                                    = data[BLOCKDIM * BLOCKDIM * j + BLOCKDIM * wid + (i + lid)];
-                            }
-                            else
-                            {
-                                bsr_val_C[block_dim * block_dim * idx + block_dim * (i + lid) + wid]
-                                    = data[BLOCKDIM * BLOCKDIM * j + BLOCKDIM * wid + (i + lid)];
+                                if(dir == rocsparse_direction_row)
+                                {
+                                    bsr_val_C[block_dim * block_dim * idx + block_dim * wid
+                                              + (i + lid)]
+                                        = data[BLOCKDIM_SQ * j + BLOCKDIM * wid + (i + lid)];
+                                }
+                                else
+                                {
+                                    bsr_val_C[block_dim * block_dim * idx + block_dim * (i + lid)
+                                              + wid]
+                                        = data[BLOCKDIM_SQ * j + BLOCKDIM * wid + (i + lid)];
+                                }
                             }
                         }
                     }

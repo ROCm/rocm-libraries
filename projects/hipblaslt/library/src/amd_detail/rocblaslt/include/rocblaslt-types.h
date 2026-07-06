@@ -33,6 +33,9 @@
 #define _ROCBLASLT_TYPES_H_
 
 #include <hip/hip_bfloat16.h>
+#ifdef __cplusplus
+#include <array>
+#endif
 #ifndef LEGACY_HIPBLAS_DIRECT
 #include <hipblas-common/hipblas-common.h>
 #else
@@ -176,12 +179,15 @@ typedef enum rocblaslt_epilogue_
     ROCBLASLT_EPILOGUE_GELU_BIAS          = 36,
     ROCBLASLT_EPILOGUE_RELU_AUX           = 130,
     ROCBLASLT_EPILOGUE_RELU_AUX_BIAS      = 134,
+    ROCBLASLT_EPILOGUE_DRELU              = 136,
+    ROCBLASLT_EPILOGUE_DRELU_BGRAD        = 152,
     ROCBLASLT_EPILOGUE_GELU_AUX           = 160,
     ROCBLASLT_EPILOGUE_GELU_AUX_BIAS      = 164,
     ROCBLASLT_EPILOGUE_DGELU              = 192,
     ROCBLASLT_EPILOGUE_DGELU_BGRAD        = 208,
     ROCBLASLT_EPILOGUE_BGRADA             = 256,
     ROCBLASLT_EPILOGUE_BGRADB             = 512,
+    ROCBLASLT_EPILOGUE_SIGMOID            = 1024,
     ROCBLASLT_EPILOGUE_SWISH_EXT          = 65536,
     ROCBLASLT_EPILOGUE_SWISH_BIAS_EXT     = 65540,
     ROCBLASLT_EPILOGUE_CLAMP_EXT          = 131072,
@@ -266,8 +272,22 @@ typedef enum rocblaslt_status_
     rocblaslt_status_not_initialized         = 10, /**< descriptor has not been initialized. */
     rocblaslt_status_type_mismatch           = 11, /**< index types do not match. */
     rocblaslt_status_requires_sorted_storage = 12, /**< sorted storage required. */
-    rocblaslt_status_continue                = 13 /**< nothing preventing function to proceed. */
+    rocblaslt_status_continue                = 13  /**< nothing preventing function to proceed. */
 } rocblaslt_status;
+
+/*! \ingroup types_module
+ *  \brief Bitmask controlling the post-GEMM NaN-check feature.
+ *
+ *  Set the env var \c HIPBLASLT_CHECK_NUMERICS to one of these values to
+ *  enable scanning of every \c hipblasLtMatmul output (D) for NaN. The env
+ *  var also accepts case-insensitive words: "none"/"off", "info", "warn".
+ */
+typedef enum hipblaslt_check_numerics_mode_
+{
+    hipblaslt_check_numerics_mode_no_check = 0, /**< feature disabled (default). */
+    hipblaslt_check_numerics_mode_info     = 1, /**< always print check results. */
+    hipblaslt_check_numerics_mode_warn     = 2, /**< print only when NaN is found. */
+} hipblaslt_check_numerics_mode;
 
 /*! \ingroup types_module
  *  \brief Specify the compute precision modes of the matrix
@@ -322,7 +342,8 @@ typedef enum rocblaslt_matrix_layout_attribute_
     ROCBLASLT_MATRIX_LAYOUT_ROWS  = 4,
     ROCBLASLT_MATRIX_LAYOUT_COLS  = 5,
     ROCBLASLT_MATRIX_LAYOUT_LD    = 6,
-    ROCBLASLT_MATRIX_LAYOUT_MAX   = 7
+    ROCBLASLT_MATRIX_LAYOUT_BATCH_MODE = 7,
+    ROCBLASLT_MATRIX_LAYOUT_MAX   = 8
 } rocblaslt_matrix_layout_attribute;
 
 typedef enum
@@ -366,12 +387,15 @@ typedef enum rocblaslt_matmul_desc_attributes_
     ROCBLASLT_MATMUL_DESC_POINTER_MODE               = 13,
     ROCBLASLT_MATMUL_DESC_AMAX_D_POINTER             = 14,
     ROCBLASLT_MATMUL_DESC_EPILOGUE_AUX_DATA_TYPE     = 22,
+    ROCBLASLT_MATMUL_DESC_BIAS_BATCH_STRIDE          = 23,
     ROCBLASLT_MATMUL_DESC_A_SCALE_MODE               = 31,
     ROCBLASLT_MATMUL_DESC_B_SCALE_MODE               = 32,
+    ROCBLASLT_MATMUL_DESC_SM_COUNT_TARGET            = 33,
     ROCBLASLT_MATMUL_DESC_COMPUTE_INPUT_TYPE_A_EXT   = 100,
     ROCBLASLT_MATMUL_DESC_COMPUTE_INPUT_TYPE_B_EXT,
     ROCBLASLT_MATMUL_DESC_EPILOGUE_ACT_ARG0_EXT,
     ROCBLASLT_MATMUL_DESC_EPILOGUE_ACT_ARG1_EXT,
+    ROCBLASLT_MATMUL_DESC_STREAMK_TILE_SCHEDULING_EXT    = 104,
     ROCBLASLT_MATMUL_DESC_MAX,
 } rocblaslt_matmul_desc_attributes;
 
@@ -387,7 +411,8 @@ typedef enum rocblaslt_matmul_preference_attributes_
 {
     ROCBLASLT_MATMUL_PREF_SEARCH_MODE         = 0,
     ROCBLASLT_MATMUL_PREF_MAX_WORKSPACE_BYTES = 1,
-    ROCBLASLT_MATMUL_PREF_MAX                 = 2
+    ROCBLASLT_MATMUL_PREF_SM_COUNT_TARGET     = 2,
+    ROCBLASLT_MATMUL_PREF_MAX                 = 3
 } rocblaslt_matmul_preference_attributes;
 
 /********************************************************************************
@@ -464,7 +489,13 @@ struct RocblasltContractionProblem
         None = 0,
         Scalar,
         Vector,
-        Block
+        Block_32_UE8M0,
+        Block_16_UE8M0,
+        Block_32_UE4M3,
+        Block_16_UE4M3,
+        Block_32_UE5M3,
+        Block_16_UE5M3,
+        Block_32_UE8M0_32_8_EXT,
     };
 
     hipblasOperation_t trans_a;
@@ -479,6 +510,12 @@ struct RocblasltContractionProblem
     size_t k;
 
     const void* alpha;
+    // When certain features (e.g., scaleAlphaVec) require overriding alpha to a constant 1.0,
+    // we must ensure the backing storage outlives the scope that constructs the problem.
+    // ASAN caught a stack-use-after-return where alpha pointed to a stack-local buffer.
+    // This owned buffer is used to hold such overridden alpha values.
+    // NOTE: sized to 16 bytes to hold any supported scalar type representation.
+    std::array<int8_t, 16> alpha_owned = {0};
 
     hipDataType        a_type;
     const void*        A;
@@ -534,10 +571,6 @@ struct RocblasltContractionProblem
     ScalingFormat scaleAType;
     ScalingFormat scaleBType;
 
-    size_t             scaleABlockRowSize;
-    size_t             scaleABlockColSize;
-    size_t             scaleBBlockRowSize;
-    size_t             scaleBBlockColSize;
     hipDataType        bias_type;
     hipDataType        aux_type;
     rocblaslt_epilogue epilogue;
@@ -551,6 +584,20 @@ struct RocblasltContractionProblem
     void*       Synchronizer;
     bool        swizzleA;
     bool        swizzleB;
+    hipblasLtBatchMode_t batchMode;   
+    int32_t bias_stride; 
+    // Mirrors HIPBLASLT_MATMUL_DESC_STREAMK_TILE_SCHEDULING_EXT. Forwarded
+    // into ContractionProblemParameters::setStreamKTileSchedulingMode by
+    // tensile_host.cpp so that ContractionSolution::solve can populate
+    // StreamKSettings::streamKTileSchedulingMode. Tri-state:
+    //   0 = OFF  (default; SK3 static unless sm_count_target > 0),
+    //   1 = ON   (SK4 dynamic per-XCD work-queue on SK5 kernels),
+    //   2 = AUTO (always delegate to origami::streamk::select_hybrid_mode).
+    // Ignored for non-StreamK=5 solutions.
+    int32_t streamk_tile_scheduling_ext = 0;
+    // Effective sm_count_target after the (pref > desc > handle)
+    // precedence resolution. 0 = "use all CUs the device exposes".
+    int32_t sm_count_target = 0;
 
     // gemm_ex
     // gemm_strided_batched_ex
@@ -600,10 +647,6 @@ struct RocblasltContractionProblem
                                 const void*            scaleAlphaVec,
                                 ScalingFormat          scaleAType,
                                 ScalingFormat          scaleBType,
-                                size_t                 scaleABlockRowSize,
-                                size_t                 scaleABlockColSize,
-                                size_t                 scaleBBlockRowSize,
-                                size_t                 scaleBBlockColSize,
                                 hipDataType            bias_type,
                                 hipDataType            aux_type,
                                 rocblaslt_epilogue     epilogue,
@@ -615,7 +658,11 @@ struct RocblasltContractionProblem
                                 hipStream_t            stream,
                                 void*                  Synchronizer,
                                 bool                   swizzleA,
-                                bool                   swizzleB);
+                                bool                   swizzleB,
+                                hipblasLtBatchMode_t   batchMode,
+                                int32_t                bias_stride,
+                                int32_t                streamk_tile_scheduling_ext = 0,
+                                int32_t                sm_count_target         = 0);
 };
 
 namespace rocblaslt

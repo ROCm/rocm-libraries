@@ -10,11 +10,6 @@ target_link_libraries(common-test-utilities
         roc::mxDataGenerator
         hip::host
         OpenMP::OpenMP_CXX
-        # Some of the internal rocroller headers use boost templates. Since we
-        # do not wish to advertise a public boost dep from the rocroller library
-        # itself, we add the boost dep only to the tests that depend on these
-        # private headers.
-        Boost::headers
         ${CBLAS_LIBRARIES}
 )
 
@@ -24,7 +19,6 @@ endif()
 
 if(ROCROLLER_ENABLE_TIMERS)
     target_compile_definitions(common-test-utilities PUBLIC ROCROLLER_ENABLE_TIMERS)
-    target_compile_options(common-test-utilities PUBLIC -pg -fno-omit-frame-pointer)
 endif()
 
 target_include_directories(common-test-utilities
@@ -32,17 +26,5 @@ target_include_directories(common-test-utilities
         $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>
 )
 
-target_sources(common-test-utilities
-    PRIVATE
-        "${CMAKE_CURRENT_SOURCE_DIR}/include/common/CommonGraphs.hpp"
-        "${CMAKE_CURRENT_SOURCE_DIR}/include/common/CommonGraphs_impl.hpp"
-        "${CMAKE_CURRENT_SOURCE_DIR}/include/common/F8Values.hpp"
-        "${CMAKE_CURRENT_SOURCE_DIR}/include/common/GEMMProblem.hpp"
-        "${CMAKE_CURRENT_SOURCE_DIR}/include/common/mxDataGen.hpp"
-        "${CMAKE_CURRENT_SOURCE_DIR}/include/common/SourceMatcher.hpp"
-        "${CMAKE_CURRENT_SOURCE_DIR}/include/common/TestValues.hpp"
-        "${CMAKE_CURRENT_SOURCE_DIR}/include/common/Utilities.hpp"
-        "${CMAKE_CURRENT_SOURCE_DIR}/include/common/WidenAddrExprTo64bit.hpp"
-)
-
+add_subdirectory(include)
 add_subdirectory(src)

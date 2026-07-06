@@ -1,6 +1,6 @@
 // MIT License
 //
-// Copyright (c) 2024-2025 Advanced Micro Devices, Inc. All rights reserved.
+// Copyright (c) 2024-2026 Advanced Micro Devices, Inc. All rights reserved.
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -20,17 +20,16 @@
 // OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 // SOFTWARE.
 
-#include "benchmark_device_search_n.parallel.hpp"
-#include "benchmark_utils.hpp"
+#include "benchmark_device_search_n.hpp"
+#include "primbench.hpp"
 
-// HIP API
 #include <hip/hip_runtime.h>
 
 #include <cstddef>
 #include <string>
 #include <vector>
 
-#define CREATE_BENCHMARK(T, S, C) executor.queue_instance(benchmark_search_n<T, S, C>());
+#define CREATE_BENCHMARK(T, S, C) executor.queue<device_search_n_benchmark<T, S, C>>();
 
 #define CREATE_BENCHMARKS(T)                                  \
     CREATE_BENCHMARK(T, size_t, count_equal_to<1>)            \
@@ -43,23 +42,29 @@
 
 int main(int argc, char* argv[])
 {
-    benchmark_utils::executor executor(argc, argv, 2 * benchmark_utils::GiB, 10, 10);
+    primbench::settings settings;
+    settings.size = 2 * primbench::GiB;
+    primbench::executor executor(argc, argv, settings, primbench::flags::sync);
 
 #ifndef BENCHMARK_CONFIG_TUNING
-    using custom_int2            = common::custom_type<int>;
-    using custom_longlong_double = common::custom_type<long long, double>;
-
-    CREATE_BENCHMARKS(custom_int2)
-    CREATE_BENCHMARKS(custom_longlong_double)
-    CREATE_BENCHMARKS(int8_t)
-    CREATE_BENCHMARKS(int16_t)
-    CREATE_BENCHMARKS(int32_t)
-    CREATE_BENCHMARKS(int64_t)
+    // Tuned types
     CREATE_BENCHMARKS(rocprim::int128_t)
-    CREATE_BENCHMARKS(rocprim::uint128_t)
-    CREATE_BENCHMARKS(rocprim::half)
-    CREATE_BENCHMARKS(float)
+    CREATE_BENCHMARKS(int64_t)
+    CREATE_BENCHMARKS(int32_t)
+    CREATE_BENCHMARKS(int16_t)
+    CREATE_BENCHMARKS(int8_t)
     CREATE_BENCHMARKS(double)
+    CREATE_BENCHMARKS(float)
+    CREATE_BENCHMARKS(rocprim::half)
+
+    #ifndef BENCHMARK_AUTOTUNED_TYPES_ONLY
+    // Not tuned types
+    CREATE_BENCHMARKS(rocprim::uint128_t)
+
+    // Not tuned custom types
+    CREATE_BENCHMARKS(custom_i32_i32)
+    CREATE_BENCHMARKS(custom_i64_f64)
+    #endif
 #endif
 
     // Run benchmarks

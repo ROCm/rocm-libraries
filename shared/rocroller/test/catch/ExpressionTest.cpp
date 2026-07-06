@@ -1,34 +1,12 @@
-/*******************************************************************************
- *
- * MIT License
- *
- * Copyright 2024-2025 AMD ROCm(TM) Software
- *
- * Permission is hereby granted, free of charge, to any person obtaining a copy
- * of this software and associated documentation files (the "Software"), to deal
- * in the Software without restriction, including without limitation the rights
- * to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
- * copies of the Software, and to permit persons to whom the Software is
- * furnished to do so, subject to the following conditions:
- *
- * The above copyright notice and this permission notice shall be included in
- * all copies or substantial portions of the Software.
- *
- * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
- * IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
- * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
- * AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
- * LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
- * OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
- * SOFTWARE.
- *
- *******************************************************************************/
+// Copyright Advanced Micro Devices, Inc., or its affiliates.
+// SPDX-License-Identifier: MIT
 
 #include <cmath>
 #include <memory>
 
 #include <rocRoller/Expression.hpp>
 #include <rocRoller/ExpressionTransformations.hpp>
+#include <rocRoller/Expression_evaluate_detail.hpp>
 #include <rocRoller/GPUArchitecture/GPUArchitectureLibrary.hpp>
 #include <rocRoller/KernelGraph/RegisterTagManager.hpp>
 #include <rocRoller/Operations/Command.hpp>
@@ -268,38 +246,38 @@ namespace ExpressionTest
         expected += R"(
              // BitFieldExtract<0,16>(rb: VGPR Value: Halfx2 x 1: v1)
              // Allocated : 2 VGPRs (Value: Half): v3, v2
-              v_bfe_u32 v11, v7, 0, 16
-              v_bfe_u32 v10, v7, 16, 16
+              v_bfe_u32 v10, v7, 0, 16
+              v_bfe_u32 v11, v7, 16, 16
 
              // BitFieldExtract<0,16>(rb: VGPR Value: BFloat16x2 x 1: v1)
              // Allocated : 2 VGPRs (Value: BFloat16): v3, v2
-             v_bfe_u32 v11, v7, 0, 16
-             v_bfe_u32 v10, v7, 16, 16
+             v_bfe_u32 v10, v7, 0, 16
+             v_bfe_u32 v11, v7, 16, 16
 
              // BitFieldExtract<0,8>(rb: VGPR Value: FP8x4 x 1: v1)
              // Allocated : 4 VGPRs (Value: FP8): v5, v4, v3, v2
-             v_bfe_u32 v13, v7, 0, 8
-             v_bfe_u32 v12, v7, 8, 8
-             v_bfe_u32 v11, v7, 16, 8
-             v_bfe_u32 v10, v7, 24, 8
+             v_bfe_u32 v10, v7, 0, 8
+             v_bfe_u32 v11, v7, 8, 8
+             v_bfe_u32 v12, v7, 16, 8
+             v_bfe_u32 v13, v7, 24, 8
 
              // BitFieldExtract<0,8>(rb: VGPR Value: BF8x4 x 1: v1)
              // Allocated : 4 VGPRs (Value: BF8): v5, v4, v3, v2
-             v_bfe_u32 v13, v7, 0, 8
-             v_bfe_u32 v12, v7, 8, 8
-             v_bfe_u32 v11, v7, 16, 8
-             v_bfe_u32 v10, v7, 24, 8
+             v_bfe_u32 v10, v7, 0, 8
+             v_bfe_u32 v11, v7, 8, 8
+             v_bfe_u32 v12, v7, 16, 8
+             v_bfe_u32 v13, v7, 24, 8
 
              // BitFieldExtract<0,4>(rb: VGPR Value: FP4x8 x 1: v1)
              // Allocated : 8 VGPRs (Value: FP4): v9, v8, v7, v6, v5, v4, v3, v2
-             v_bfe_u32 v17, v7, 0, 4
-             v_bfe_u32 v16, v7, 4, 4
-             v_bfe_u32 v15, v7, 8, 4
-             v_bfe_u32 v14, v7, 12, 4
-             v_bfe_u32 v13, v7, 16, 4
-             v_bfe_u32 v12, v7, 20, 4
-             v_bfe_u32 v11, v7, 24, 4
-             v_bfe_u32 v10, v7, 28, 4
+             v_bfe_u32 v10, v7, 0, 4
+             v_bfe_u32 v11, v7, 4, 4
+             v_bfe_u32 v12, v7, 8, 4
+             v_bfe_u32 v13, v7, 12, 4
+             v_bfe_u32 v14, v7, 16, 4
+             v_bfe_u32 v15, v7, 20, 4
+             v_bfe_u32 v16, v7, 24, 4
+             v_bfe_u32 v17, v7, 28, 4
         )";
 
         {
@@ -321,7 +299,62 @@ namespace ExpressionTest
          s_bfe_u32 s0, v7, 1048576 //    expr.offset = 0
          )";
 
+        {
+            auto rb = std::make_shared<Register::Value>(
+                context.get(), Register::Type::Vector, DataType::UInt64, 1);
+            rb->setName("rb");
+            rb->allocateNow();
+
+            auto b = rb->expression();
+
+            auto expr10 = bfe(DataType::UInt32, a, 0, 32); // redundant full register
+            auto expr11
+                = bfe(DataType::UInt32, b, 0, 32); // full register from Uint64 (2 registers)
+            auto expr12
+                = bfe(DataType::UInt32, b, 32, 32); // full register from Uint64 (2 registers)
+            auto expr13 = bfe(DataType::UInt64, b, 0, 64); // redundant full register from UInt64
+            auto expr14 = bfe(DataType::Int32, b, 0, 32); // full register from Uint64 (2 registers)
+
+            auto dest10 = std::make_shared<Register::Value>(
+                context.get(), Register::Type::Vector, DataType::UInt32, 1);
+            auto dest11 = std::make_shared<Register::Value>(
+                context.get(), Register::Type::Vector, DataType::UInt32, 1);
+            auto dest12 = std::make_shared<Register::Value>(
+                context.get(), Register::Type::Vector, DataType::UInt32, 1);
+            auto dest13 = std::make_shared<Register::Value>(
+                context.get(), Register::Type::Vector, DataType::UInt64, 1);
+            auto dest14 = std::make_shared<Register::Value>(
+                context.get(), Register::Type::Vector, DataType::Int32, 1);
+
+            context.get()->schedule(Expression::generate(dest10, expr10, context.get()));
+            context.get()->schedule(Expression::generate(dest11, expr11, context.get()));
+            context.get()->schedule(Expression::generate(dest12, expr12, context.get()));
+            context.get()->schedule(Expression::generate(dest13, expr13, context.get()));
+            context.get()->schedule(Expression::generate(dest14, expr14, context.get()));
+        }
+
+        expected += R"(
+            // expr10 - full register extraction should optimize away
+            v_mov_b32 v7, v0
+
+            // expr11 - extracting first register from UInt64 to UInt32
+            v_mov_b32 v12, v10
+
+            // expr12 - extracting second register from UInt64 to UInt32
+            v_mov_b32 v13, v11
+
+            // expr13 - full register extraction from UInt64 to UInt64
+            v_mov_b32 v14, v10
+            v_mov_b32 v15, v11
+
+            // expr14 - extracting first register from UInt64 to Int32
+            v_mov_b32 v16, v10
+        )";
+
         CHECK(NormalizedSource(context.output()) == NormalizedSource(expected));
+
+        auto bfe1 = Expression::BitFieldExtract{{.arg{a}}, DataType::UInt8, 300u, 8u};
+        CHECK(bfe1.offset == 300u);
     }
 
     TEST_CASE("Expression comments", "[expression][comments][codegen]")
@@ -953,36 +986,37 @@ namespace ExpressionTest
         auto litFloat  = Expression::literal(5.0f);
         auto litDouble = Expression::literal(5.0);
 
-        Expression::ResultType rVgprFloat{Register::Type::Vector, DataType::Float};
-        Expression::ResultType rVgprDouble{Register::Type::Vector, DataType::Double};
-        Expression::ResultType rVgprInt32{Register::Type::Vector, DataType::Int32};
-        Expression::ResultType rVgprInt64{Register::Type::Vector, DataType::Int64};
-        Expression::ResultType rVgprUInt32{Register::Type::Vector, DataType::UInt32};
-        Expression::ResultType rVgprUInt64{Register::Type::Vector, DataType::UInt64};
-        Expression::ResultType rVgprHalf{Register::Type::Vector, DataType::Half};
-        Expression::ResultType rVgprHalfx2{Register::Type::Vector, DataType::Halfx2};
-        Expression::ResultType rVgprBool32{Register::Type::Vector, DataType::Bool32};
+        Expression::ResultType rVgprFloat{Register::Type::Vector, DataType::Float, 1};
+        Expression::ResultType rVgprDouble{Register::Type::Vector, DataType::Double, 1};
+        Expression::ResultType rVgprInt32{Register::Type::Vector, DataType::Int32, 1};
+        Expression::ResultType rVgprInt64{Register::Type::Vector, DataType::Int64, 1};
+        Expression::ResultType rVgprUInt32{Register::Type::Vector, DataType::UInt32, 1};
+        Expression::ResultType rVgprUInt64{Register::Type::Vector, DataType::UInt64, 1};
+        Expression::ResultType rVgprHalf{Register::Type::Vector, DataType::Half, 1};
+        Expression::ResultType rVgprHalfx2{Register::Type::Vector, DataType::Halfx2, 2};
+        Expression::ResultType rVgprBool32{Register::Type::Vector, DataType::Bool32, 1};
 
-        Expression::ResultType rSgprFloat{Register::Type::Scalar, DataType::Float};
-        Expression::ResultType rSgprDouble{Register::Type::Scalar, DataType::Double};
-        Expression::ResultType rSgprInt32{Register::Type::Scalar, DataType::Int32};
-        Expression::ResultType rSgprInt64{Register::Type::Scalar, DataType::Int64};
-        Expression::ResultType rSgprUInt32{Register::Type::Scalar, DataType::UInt32};
-        Expression::ResultType rSgprUInt64{Register::Type::Scalar, DataType::UInt64};
-        Expression::ResultType rSgprHalf{Register::Type::Scalar, DataType::Half};
-        Expression::ResultType rSgprHalfx2{Register::Type::Scalar, DataType::Halfx2};
-        Expression::ResultType rSgprBool32{Register::Type::Scalar, DataType::Bool32};
-        Expression::ResultType rSgprBool64{Register::Type::Scalar, DataType::Bool64};
-        Expression::ResultType rSgprBool{Register::Type::Scalar, DataType::Bool};
+        Expression::ResultType rSgprFloat{Register::Type::Scalar, DataType::Float, 1};
+        Expression::ResultType rSgprDouble{Register::Type::Scalar, DataType::Double, 1};
+        Expression::ResultType rSgprInt32{Register::Type::Scalar, DataType::Int32, 1};
+        Expression::ResultType rSgprInt64{Register::Type::Scalar, DataType::Int64, 1};
+        Expression::ResultType rSgprUInt32{Register::Type::Scalar, DataType::UInt32, 1};
+        Expression::ResultType rSgprUInt64{Register::Type::Scalar, DataType::UInt64, 1};
+        Expression::ResultType rSgprHalf{Register::Type::Scalar, DataType::Half, 1};
+        Expression::ResultType rSgprHalfx2{Register::Type::Scalar, DataType::Halfx2, 2};
+        Expression::ResultType rSgprBool32{Register::Type::Scalar, DataType::Bool32, 1};
+        Expression::ResultType rSgprBool64{Register::Type::Scalar, DataType::Bool64, 1};
+        Expression::ResultType rSgprBool{Register::Type::Scalar, DataType::Bool, 1};
         Expression::ResultType rSgprWavefrontSized{
             Register::Type::Scalar,
-            context.get()->kernel()->wavefront_size() == 64 ? DataType::Bool64 : DataType::Bool32};
+            context.get()->kernel()->wavefront_size() == 64 ? DataType::Bool64 : DataType::Bool32,
+            1};
 
-        Expression::ResultType rVCC{Register::Type::VCC, DataType::Bool32};
-        Expression::ResultType rSCC{Register::Type::SCC, DataType::Bool};
+        Expression::ResultType rVCC{Register::Type::VCC, DataType::Bool32, 1};
+        Expression::ResultType rSCC{Register::Type::SCC, DataType::Bool, 1};
 
-        Expression::ResultType rAgprFloat{Register::Type::Accumulator, DataType::Float};
-        Expression::ResultType rAgprDouble{Register::Type::Accumulator, DataType::Double};
+        Expression::ResultType rAgprFloat{Register::Type::Accumulator, DataType::Float, 1};
+        Expression::ResultType rAgprDouble{Register::Type::Accumulator, DataType::Double, 1};
 
         SECTION("Value expressions")
         {
@@ -1079,7 +1113,9 @@ namespace ExpressionTest
             CHECK(rVgprInt32 == resultType(op(vgprUInt32)));
             CHECK(rVgprInt32 == resultType(op(vgprUInt64)));
             CHECK(rVgprInt32 == resultType(op(vgprHalf)));
-            CHECK(rVgprInt32 == resultType(op(vgprHalfx2)));
+            CHECK(Expression::ResultType(
+                      rVgprInt32.regType, rVgprInt32.varType, rVgprInt32.valueCount * 2)
+                  == resultType(op(vgprHalfx2)));
             CHECK(rVgprInt32 == resultType(op(vgprBool32)));
 
             CHECK(rSgprInt32 == resultType(op(sgprFloat)));
@@ -1089,7 +1125,9 @@ namespace ExpressionTest
             CHECK(rSgprInt32 == resultType(op(sgprUInt32)));
             CHECK(rSgprInt32 == resultType(op(sgprUInt64)));
             CHECK(rSgprInt32 == resultType(op(sgprHalf)));
-            CHECK(rSgprInt32 == resultType(op(sgprHalfx2)));
+            CHECK(Expression::ResultType(
+                      rSgprInt32.regType, rSgprInt32.varType, rSgprInt32.valueCount * 2)
+                  == resultType(op(sgprHalfx2)));
             CHECK(rSgprInt32 == resultType(op(sgprBool32)));
         }
 
@@ -1103,7 +1141,9 @@ namespace ExpressionTest
             CHECK(rVgprUInt32 == resultType(op(vgprUInt32)));
             CHECK(rVgprUInt32 == resultType(op(vgprUInt64)));
             CHECK(rVgprUInt32 == resultType(op(vgprHalf)));
-            CHECK(rVgprUInt32 == resultType(op(vgprHalfx2)));
+            CHECK(Expression::ResultType(
+                      rVgprUInt32.regType, rVgprUInt32.varType, rVgprUInt32.valueCount * 2)
+                  == resultType(op(vgprHalfx2)));
             CHECK(rVgprUInt32 == resultType(op(vgprBool32)));
 
             CHECK(rSgprUInt32 == resultType(op(sgprFloat)));
@@ -1113,7 +1153,9 @@ namespace ExpressionTest
             CHECK(rSgprUInt32 == resultType(op(sgprUInt32)));
             CHECK(rSgprUInt32 == resultType(op(sgprUInt64)));
             CHECK(rSgprUInt32 == resultType(op(sgprHalf)));
-            CHECK(rSgprUInt32 == resultType(op(sgprHalfx2)));
+            CHECK(Expression::ResultType(
+                      rSgprUInt32.regType, rSgprUInt32.varType, rSgprUInt32.valueCount * 2)
+                  == resultType(op(sgprHalfx2)));
             CHECK(rSgprUInt32 == resultType(op(sgprBool32)));
         }
 
@@ -1134,7 +1176,10 @@ namespace ExpressionTest
             CHECK(rSgprWavefrontSized == resultType(op(vgprUInt32, vgprUInt32)));
             CHECK(rSgprWavefrontSized == resultType(op(vgprUInt64, vgprUInt64)));
             CHECK(rSgprWavefrontSized == resultType(op(vgprHalf, vgprHalf)));
-            CHECK(rSgprWavefrontSized == resultType(op(vgprHalfx2, vgprHalfx2)));
+            CHECK(Expression::ResultType(rSgprWavefrontSized.regType,
+                                         rSgprWavefrontSized.varType,
+                                         rSgprWavefrontSized.valueCount * 2)
+                  == resultType(op(vgprHalfx2, vgprHalfx2)));
             CHECK(rSgprWavefrontSized == resultType(op(vgprBool32, vgprBool32)));
             CHECK(rSgprWavefrontSized == resultType(op(vgprBool, vgprBool)));
 
@@ -1145,7 +1190,9 @@ namespace ExpressionTest
             CHECK(rSgprBool == resultType(op(sgprUInt32, sgprUInt32)));
             CHECK(rSgprBool == resultType(op(sgprUInt64, sgprUInt64)));
             CHECK(rSgprBool == resultType(op(sgprHalf, sgprHalf)));
-            CHECK(rSgprBool == resultType(op(sgprHalfx2, sgprHalfx2)));
+            CHECK(Expression::ResultType(
+                      rSgprBool.regType, rSgprBool.varType, rSgprBool.valueCount * 2)
+                  == resultType(op(sgprHalfx2, sgprHalfx2)));
             CHECK(rSgprBool == resultType(op(sgprBool32, sgprBool32)));
             CHECK(rSgprBool == resultType(op(sgprBool, sgprBool)));
         }
@@ -1420,6 +1467,7 @@ namespace ExpressionTest
 
         SECTION("Arguments")
         {
+            size_t       valueCount = 1;
             VariableType doubleVal{DataType::Double, PointerType::Value};
             auto         ca = std::make_shared<CommandArgument>(nullptr, doubleVal, 0);
             auto         cb = std::make_shared<CommandArgument>(nullptr, doubleVal, 8);
@@ -1438,7 +1486,7 @@ namespace ExpressionTest
             } args;
             RuntimeArguments runtimeArgs((uint8_t*)&args, sizeof(args));
 
-            Expression::ResultType expected{Register::Type::Literal, DataType::Double};
+            Expression::ResultType expected{Register::Type::Literal, DataType::Double, valueCount};
             CHECK(expected == resultType(expr2));
             CHECK(6.0 == std::get<double>(evaluate(expr2, runtimeArgs)));
 
@@ -1460,6 +1508,7 @@ namespace ExpressionTest
 
     TEST_CASE("Expression test evaluate mixed types", "[expression]")
     {
+        size_t valueCount = 1;
         using Expression::literal;
         auto one          = literal(1.0);
         auto two          = literal(2.0f);
@@ -1513,9 +1562,9 @@ namespace ExpressionTest
         auto eight75Half = convert(DataType::Half, eightPoint75);
         CHECK(Half(8.75) == std::get<Half>(evaluate(eight75Half)));
 
-        Expression::ResultType litDouble{Register::Type::Literal, DataType::Double};
-        Expression::ResultType litFloat{Register::Type::Literal, DataType::Float};
-        Expression::ResultType litBool{Register::Type::Literal, DataType::Bool};
+        Expression::ResultType litDouble{Register::Type::Literal, DataType::Double, valueCount};
+        Expression::ResultType litFloat{Register::Type::Literal, DataType::Float, valueCount};
+        Expression::ResultType litBool{Register::Type::Literal, DataType::Bool, valueCount};
 
         CHECK(litDouble == resultType(exprSix));
         // Result type not (yet?) defined for mixed integral/floating point types.
@@ -1882,6 +1931,104 @@ namespace ExpressionTest
         }
     }
 
+    TEST_CASE("Reinterpret produces no instructions and changes register type",
+              "[expression][codegen]")
+    {
+        auto context = TestContext::ForDefaultTarget();
+
+        const auto make_expression = [&](auto type) {
+            auto r
+                = std::make_shared<Register::Value>(context.get(), Register::Type::Vector, type, 1);
+            r->allocateNow();
+            return r->expression();
+        };
+
+        SECTION("Int32 to UInt32")
+        {
+            auto a    = make_expression(DataType::Int32);
+            auto expr = Expression::reinterpret(DataType::UInt32, a);
+
+            Register::ValuePtr destReg;
+            context.get()->schedule(Expression::generate(destReg, expr, context.get()));
+
+            auto result = R"()";
+            CHECK(NormalizedSource(context.output()) == NormalizedSource(result));
+            CHECK(destReg->variableType().dataType == DataType::UInt32);
+        }
+
+        SECTION("Float to UInt32")
+        {
+            auto a    = make_expression(DataType::Float);
+            auto expr = Expression::reinterpret(DataType::UInt32, a);
+
+            Register::ValuePtr destReg;
+            context.get()->schedule(Expression::generate(destReg, expr, context.get()));
+
+            auto result = R"()";
+            CHECK(NormalizedSource(context.output()) == NormalizedSource(result));
+            CHECK(destReg->variableType().dataType == DataType::UInt32);
+        }
+
+        SECTION("UInt64 to Int64")
+        {
+            auto a    = make_expression(DataType::UInt64);
+            auto expr = Expression::reinterpret(DataType::Int64, a);
+
+            Register::ValuePtr destReg;
+            context.get()->schedule(Expression::generate(destReg, expr, context.get()));
+
+            auto result = R"()";
+            CHECK(NormalizedSource(context.output()) == NormalizedSource(result));
+            CHECK(destReg->variableType().dataType == DataType::Int64);
+        }
+
+        SECTION("Reinterpret in arithmetic expression, uint32 -> int32")
+        {
+            auto a = make_expression(DataType::UInt32);
+            auto b = make_expression(DataType::UInt32);
+            auto c = make_expression(DataType::Int32);
+
+            auto expr = Expression::reinterpret(DataType::Int32, a + b) + c;
+
+            Register::ValuePtr destReg;
+            context.get()->schedule(Expression::generate(destReg, expr, context.get()));
+
+            auto result = R"(
+                v_add_u32 v3, v0, v1
+                v_add_i32 v4, v3, v2
+            )";
+            CHECK(NormalizedSource(context.output()) == NormalizedSource(result));
+        }
+
+        SECTION("Reinterpret in arithmetic expression, float -> uint32")
+        {
+            auto a = make_expression(DataType::Float);
+            auto b = make_expression(DataType::UInt32);
+
+            auto expr = Expression::reinterpret(DataType::UInt32, a) + b;
+
+            Register::ValuePtr destReg;
+            context.get()->schedule(Expression::generate(destReg, expr, context.get()));
+
+            auto result = R"(
+                v_add_u32 v2, v0, v1
+            )";
+            CHECK(NormalizedSource(context.output()) == NormalizedSource(result));
+        }
+
+        SECTION("Size mismatch throws")
+        {
+            auto a = make_expression(DataType::Float);
+            CHECK_THROWS_AS(Expression::reinterpret(DataType::Int64, a), FatalError);
+        }
+
+        SECTION("Invalid reinterpret - unsupported type")
+        {
+            auto a = make_expression(DataType::UInt32);
+            CHECK_THROWS(Expression::reinterpret(DataType::None, a));
+        }
+    }
+
     TEST_CASE("Expression evaluate comparisons", "[expression]")
     {
         auto command = std::make_shared<Command>();
@@ -2236,6 +2383,383 @@ namespace ExpressionTest
         CHECK(std::get<float>(evaluate(exp7)) == static_cast<float>(d));
     }
 
+    TEST_CASE("Expression evaluate BitfieldCombine", "[expression]")
+    {
+        using namespace Expression;
+
+        SECTION("Evaluation 1")
+        {
+            auto const srcOffset = 0u;
+            auto const dstOffset = 0u;
+            auto const width     = 32u;
+            auto       src       = literal(1222u);
+            auto       dst       = literal(0u);
+
+            auto expr = bfc(src, dst, srcOffset, dstOffset, width);
+
+            CHECK(std::get<uint32_t>(evaluate(expr)) == 1222u);
+        }
+
+        SECTION("Evaluation 2")
+        {
+            auto const srcOffset = 0u;
+            auto const dstOffset = 16u;
+            auto const width     = 8u;
+            auto       src       = literal(0u);
+            auto       dst       = literal(0xffffffffu);
+
+            auto expr = bfc(src, dst, srcOffset, dstOffset, width);
+
+            CHECK(std::get<uint32_t>(evaluate(expr)) == 0xff00ffffu);
+        }
+
+        SECTION("Evaluation 3")
+        {
+            auto const srcOffset = 16u;
+            auto const dstOffset = 0;
+            auto const width     = 16u;
+            auto       src       = literal(0xffff0000u);
+            auto       dst       = literal(0u);
+
+            auto expr = bfc(src, dst, srcOffset, dstOffset, width);
+
+            CHECK(std::get<uint32_t>(evaluate(expr)) == 0x0000ffffu);
+        }
+
+        SECTION("Evaluation 4")
+        {
+            auto const srcOffset = 8u;
+            auto const dstOffset = 16u;
+            auto const width     = 8u;
+            auto       src       = literal(0x0000ff00u);
+            auto       dst       = literal(0u);
+
+            auto expr = bfc(src, dst, srcOffset, dstOffset, width);
+
+            CHECK(std::get<uint32_t>(evaluate(expr)) == 0x00ff0000u);
+        }
+
+        SECTION("Evaluation 5 - UInt32 source to Raw32 destination")
+        {
+            auto const srcOffset = 8u;
+            auto const dstOffset = 4u;
+            auto const width     = 12u;
+            auto       src       = literal(0x00abcd00u);
+            auto       dst       = literal(Raw32(0xffff0000u));
+
+            auto expr = bfc(src, dst, srcOffset, dstOffset, width);
+
+            CHECK(std::get<Raw32>(evaluate(expr)).value == 0xffffbcd0u);
+        }
+
+        SECTION("Evaluation 6 - UInt64 source to Raw32 destination")
+        {
+            auto const srcOffset = 16u;
+            auto const dstOffset = 8u;
+            auto const width     = 16u;
+            auto       src       = literal(0x123456789abcdef0ull, DataType::UInt64);
+            auto       dst       = literal(Raw32(0x000000ffu));
+
+            auto expr = bfc(src, dst, srcOffset, dstOffset, width);
+
+            CHECK(std::get<Raw32>(evaluate(splitBitfieldCombine(expr))).value == 0x009abcffu);
+        }
+
+        SECTION("Evaluation 7 - UInt32 to Raw32 full width")
+        {
+            auto const srcOffset = 0u;
+            auto const dstOffset = 0u;
+            auto const width     = 32u;
+            auto       src       = literal(0xdeadbeefu);
+            auto       dst       = literal(Raw32(0u));
+
+            auto expr = bfc(src, dst, srcOffset, dstOffset, width);
+
+            CHECK(std::get<Raw32>(evaluate(expr)).value == 0xdeadbeefu);
+        }
+    }
+
+    TEST_CASE("Expression evaluate BitfieldExtract", "[expression]")
+    {
+        using namespace Expression;
+
+        SECTION("Evaluation 1")
+        {
+            auto const offset = 0u;
+            auto const width  = 32u;
+            auto       src    = literal(1222u);
+
+            auto expr = bfe(DataType::UInt32, src, offset, width);
+
+            CHECK(std::get<uint32_t>(evaluate(expr)) == 1222u);
+        }
+
+        SECTION("Evaluation 2")
+        {
+            auto const offset = 0u;
+            auto const width  = 8u;
+            auto       src    = literal(0x000000ffu);
+
+            auto expr = bfe(DataType::UInt32, src, offset, width);
+
+            CHECK(std::get<uint32_t>(evaluate(expr)) == 0x000000ffu);
+        }
+
+        SECTION("Evaluation 3")
+        {
+            auto const offset = 16u;
+            auto const width  = 8u;
+            auto       src    = literal(0x00ff0000u);
+
+            auto expr = bfe(DataType::UInt32, src, offset, width);
+
+            CHECK(std::get<uint32_t>(evaluate(expr)) == 0x000000ffu);
+        }
+
+        SECTION("Evaluation 4")
+        {
+            auto const offset = 48u;
+            auto const width  = 8u;
+            auto       src    = literal(0x00ff000000000000ul);
+
+            auto expr = bfe(DataType::UInt32, src, offset, width);
+
+            CHECK(std::get<uint32_t>(evaluate(expr)) == 0x000000ffu);
+        }
+
+        SECTION("Evaluation 5")
+        {
+            auto const offset = 2u;
+            auto const width  = 30u;
+            auto       src1   = literal(4u);
+            auto       src2   = literal(-4);
+
+            auto expr1 = bfe(DataType::UInt32, src1, offset, width);
+            auto expr2 = bfe(DataType::Int32, src2, offset, width);
+
+            CHECK(std::get<uint32_t>(evaluate(expr1)) == 1u);
+            CHECK(std::get<int32_t>(evaluate(expr2)) == -1);
+        }
+
+        SECTION("Evaluation 6 - UInt64 to UInt32 truncation")
+        {
+            auto const offset = 0u;
+            auto const width  = 32u;
+            auto       src    = literal(0x123456789abcdef0ull, DataType::UInt64);
+
+            auto expr = bfe(DataType::UInt32, src, offset, width);
+
+            CHECK(std::get<uint32_t>(evaluate(expr)) == 0x9abcdef0u);
+        }
+
+        SECTION("Evaluation 7 - UInt64 to Raw32 truncation")
+        {
+            auto const offset = 0u;
+            auto const width  = 32u;
+            auto       src    = literal(0xfedcba9876543210ull, DataType::UInt64);
+
+            auto expr = bfe(DataType::Raw32, src, offset, width);
+
+            CHECK(std::get<Raw32>(evaluate(expr)).value == 0x76543210u);
+        }
+
+        SECTION("Evaluation 8 - Int64 to Int32 truncation with sign extension")
+        {
+            auto const offset = 0u;
+            auto const width  = 32u;
+            auto       src    = literal(-1ll, DataType::Int64);
+
+            auto expr = bfe(DataType::Int32, src, offset, width);
+
+            CHECK(std::get<int32_t>(evaluate(expr)) == -1);
+        }
+    }
+
+    TEST_CASE("Expression evaluate reinterpret", "[expression]")
+    {
+        using namespace Expression;
+
+        SECTION("Int32 to UInt32")
+        {
+            auto value = literal(int32_t(-1));
+            auto expr  = reinterpret(DataType::UInt32, value);
+
+            CHECK(resultVariableType(expr).dataType == DataType::UInt32);
+            CHECK(std::get<uint32_t>(evaluate(expr)) == 0xFFFFFFFFu);
+        }
+
+        SECTION("UInt32 to Int32")
+        {
+            auto value = literal(uint32_t(0xFFFFFFFFu));
+            auto expr  = reinterpret(DataType::Int32, value);
+
+            CHECK(resultVariableType(expr).dataType == DataType::Int32);
+            CHECK(std::get<int32_t>(evaluate(expr)) == -1);
+        }
+
+        SECTION("Int32 to Raw32")
+        {
+            auto value = literal(int32_t(-1));
+            auto expr  = reinterpret(DataType::Raw32, value);
+
+            CHECK(resultVariableType(expr).dataType == DataType::Raw32);
+            CHECK(std::get<Raw32>(evaluate(expr)).value == 0xFFFFFFFFu);
+        }
+
+        SECTION("Raw32 to UInt32")
+        {
+            auto value = literal(Raw32(0xDEADBEEFu));
+            auto expr  = reinterpret(DataType::UInt32, value);
+
+            CHECK(resultVariableType(expr).dataType == DataType::UInt32);
+            CHECK(std::get<uint32_t>(evaluate(expr)) == 0xDEADBEEFu);
+        }
+
+        SECTION("Raw32 to Int32")
+        {
+            auto value = literal(Raw32(0x80000000u));
+            auto expr  = reinterpret(DataType::Int32, value);
+
+            CHECK(resultVariableType(expr).dataType == DataType::Int32);
+            CHECK(std::get<int32_t>(evaluate(expr)) == static_cast<int32_t>(0x80000000));
+        }
+
+        SECTION("UInt32 to Raw32")
+        {
+            auto value = literal(uint32_t(0x12345678u));
+            auto expr  = reinterpret(DataType::Raw32, value);
+
+            CHECK(resultVariableType(expr).dataType == DataType::Raw32);
+            CHECK(std::get<Raw32>(evaluate(expr)).value == 0x12345678u);
+        }
+
+        SECTION("Int64 to UInt64")
+        {
+            auto value = literal(int64_t(-1LL));
+            auto expr  = reinterpret(DataType::UInt64, value);
+
+            CHECK(resultVariableType(expr).dataType == DataType::UInt64);
+            CHECK(std::get<uint64_t>(evaluate(expr)) == 0xFFFFFFFFFFFFFFFFull);
+        }
+
+        SECTION("UInt64 to Int64")
+        {
+            auto value = literal(uint64_t(0x8000000000000000ull));
+            auto expr  = reinterpret(DataType::Int64, value);
+
+            CHECK(resultVariableType(expr).dataType == DataType::Int64);
+            CHECK(std::get<int64_t>(evaluate(expr)) == static_cast<int64_t>(0x8000000000000000ull));
+        }
+
+        SECTION("Float to UInt32")
+        {
+            auto value = literal(1.0f);
+            auto expr  = reinterpret(DataType::UInt32, value);
+
+            CHECK(resultVariableType(expr).dataType == DataType::UInt32);
+            // 1.0f in IEEE 754
+            CHECK(std::get<uint32_t>(evaluate(expr)) == 0x3F800000u);
+        }
+
+        SECTION("UInt32 to Float")
+        {
+            auto value = literal(uint32_t(0x40000000u)); // 2.0f in IEEE 754
+            auto expr  = reinterpret(DataType::Float, value);
+
+            CHECK(resultVariableType(expr).dataType == DataType::Float);
+            CHECK(std::get<float>(evaluate(expr)) == 2.0f);
+        }
+
+        SECTION("Double to UInt64")
+        {
+            auto value = literal(1.0);
+            auto expr  = reinterpret(DataType::UInt64, value);
+
+            CHECK(resultVariableType(expr).dataType == DataType::UInt64);
+            // 1.0 in IEEE 754 double
+            CHECK(std::get<uint64_t>(evaluate(expr)) == 0x3FF0000000000000ull);
+        }
+
+        SECTION("Invalid reinterpret - different sizes")
+        {
+            auto value = literal(int32_t(42));
+            CHECK_THROWS_AS(reinterpret(DataType::Int64, value), FatalError);
+        }
+
+        SECTION("Invalid reinterpret - unsupported type")
+        {
+            auto value = literal(int32_t(42));
+            CHECK_THROWS(reinterpret(DataType::None, value));
+        }
+    }
+
+    TEST_CASE("Expression evaluate reinterpretTruncateValue with endianness", "[expression]")
+    {
+        auto swapEndian = [](auto value) -> decltype(value) {
+            using T                = decltype(value);
+            constexpr size_t N     = sizeof(T);
+            auto             bytes = std::bit_cast<std::array<std::byte, N>>(value);
+            std::reverse(bytes.begin(), bytes.end());
+            return std::bit_cast<T>(bytes);
+        };
+
+        constexpr bool isLittleEndian = std::endian::native == std::endian::little;
+        constexpr bool isBigEndian    = std::endian::native == std::endian::big;
+
+        SECTION("Round-trip: Native to opposite endianness and back - UInt64 to UInt32")
+        {
+            uint64_t originalValue = 15ull;
+
+            if constexpr(isLittleEndian)
+            {
+                // System is LE: convert to BE, truncate, convert back
+                uint64_t valueAsBE = swapEndian(originalValue);
+
+                auto resultBE = Expression::EvaluateDetail::reinterpretTruncateValue(
+                    valueAsBE, DataType::UInt32, std::endian::big);
+                uint32_t truncatedBE = std::get<uint32_t>(resultBE);
+
+                uint32_t truncatedLE = swapEndian(truncatedBE);
+
+                CHECK(truncatedLE == 15u);
+            }
+            else if constexpr(isBigEndian)
+            {
+                // System is BE: convert to LE, truncate, convert back
+                uint64_t valueAsLE = swapEndian(originalValue);
+
+                auto resultLE = Expression::EvaluateDetail::reinterpretTruncateValue(
+                    valueAsLE, DataType::UInt32, std::endian::little);
+                uint32_t truncatedLE = std::get<uint32_t>(resultLE);
+
+                uint32_t truncatedBE = swapEndian(truncatedLE);
+
+                CHECK(truncatedBE == 15u);
+            }
+        }
+
+        SECTION("Native endianness - UInt64 to UInt32")
+        {
+            uint64_t originalValue = 15ull;
+            auto     result        = Expression::EvaluateDetail::reinterpretTruncateValue(
+                originalValue, DataType::UInt32, std::endian::native);
+            CHECK(std::get<uint32_t>(result) == 15u);
+        }
+
+        SECTION("Same-size reinterpret - endianness independent (no truncation)")
+        {
+            int value = 0x00000FFF;
+
+            auto resultLE = Expression::EvaluateDetail::reinterpretTruncateValue(
+                value, DataType::UInt32, std::endian::little);
+            auto resultBE = Expression::EvaluateDetail::reinterpretTruncateValue(
+                value, DataType::UInt32, std::endian::big);
+
+            CHECK(std::get<uint32_t>(resultLE) == 0x00000FFFu);
+            CHECK(std::get<uint32_t>(resultBE) == 0x00000FFFu);
+        }
+    }
+
     TEST_CASE("Expression generate dataflow tags", "[expression][codegen]")
     {
         auto context = TestContext::ForDefaultTarget();
@@ -2544,4 +3068,223 @@ namespace ExpressionTest
         }
     }
 
+    TEST_CASE("Raw32 expression and evaluation", "[expression][raw32]")
+    {
+        using Expression::literal;
+
+        auto raw32One    = literal(rocRoller::Raw32(1u));
+        auto unsignedOne = literal(uint32_t(1u));
+        auto unsignedTwo = literal(uint32_t(2u));
+        auto signedOne   = literal(int32_t(1));
+        auto floatOne    = literal(1.0f);
+
+        CHECK_THROWS_AS(unsignedOne << raw32One, FatalError);
+        CHECK_THROWS_AS(unsignedOne >> raw32One, FatalError);
+        CHECK_THROWS_AS(unsignedOne + raw32One, FatalError);
+        CHECK_THROWS_AS(unsignedOne - raw32One, FatalError);
+        CHECK_THROWS_AS(unsignedOne * raw32One, FatalError);
+        CHECK_THROWS_AS(unsignedOne % raw32One, FatalError);
+        CHECK_THROWS_AS(unsignedOne >= raw32One, FatalError);
+        CHECK_THROWS_AS(unsignedOne <= raw32One, FatalError);
+        CHECK_THROWS_AS(unsignedOne > raw32One, FatalError);
+        CHECK_THROWS_AS(unsignedOne < raw32One, FatalError);
+        CHECK_THROWS_AS(unsignedOne == raw32One, FatalError);
+        CHECK_THROWS_AS(unsignedOne != raw32One, FatalError);
+        CHECK_THROWS_AS(Expression::exp(raw32One), FatalError);
+        CHECK_THROWS_AS(Expression::exp2(raw32One), FatalError);
+
+        auto raw32Two = literal(rocRoller::Raw32(2u));
+        CHECK_NOTHROW(raw32Two == raw32One);
+        CHECK_NOTHROW(raw32Two != raw32One);
+
+        {
+            // Test shift left
+            auto expr = raw32One << unsignedOne;
+            CHECK_NOTHROW(evaluate(expr));
+        }
+
+        {
+            // Test shift right
+            auto expr = raw32One >> unsignedOne;
+            CHECK_NOTHROW(evaluate(expr));
+        }
+
+        {
+            // Test bitwise OR
+            auto expr = unsignedOne | raw32One;
+            CHECK_NOTHROW(evaluate(expr));
+
+            auto expr2 = raw32One | unsignedOne;
+            CHECK_NOTHROW(evaluate(expr2));
+        }
+
+        {
+            // Test bitwise AND
+            auto expr = unsignedOne & raw32One;
+            CHECK_NOTHROW(evaluate(expr));
+
+            auto expr2 = raw32One & unsignedOne;
+            CHECK_NOTHROW(evaluate(expr2));
+        }
+
+        {
+            // Test bitwise negate
+            auto expr = ~raw32One;
+            CHECK_NOTHROW(evaluate(expr));
+        }
+
+        {
+            // Test conversion
+            auto expr = std::make_shared<Expression::Expression>(
+                Expression::Convert{raw32One, "", rocRoller::DataType::UInt32});
+            CHECK_NOTHROW(evaluate(expr + unsignedOne));
+        }
+
+        SECTION("multiplyHigh")
+        {
+            CHECK_THROWS_AS(Expression::multiplyHigh(raw32One, unsignedOne), FatalError);
+            CHECK_THROWS_AS(Expression::multiplyHigh(unsignedOne, raw32One), FatalError);
+            CHECK_THROWS_AS(Expression::multiplyHigh(raw32One, raw32Two), FatalError);
+            CHECK_NOTHROW(evaluate(Expression::multiplyHigh(unsignedOne, unsignedTwo)));
+        }
+
+        SECTION("multiplyAdd")
+        {
+            CHECK_THROWS_AS(Expression::multiplyAdd(raw32One, unsignedOne, unsignedTwo),
+                            FatalError);
+            CHECK_THROWS_AS(Expression::multiplyAdd(unsignedOne, raw32One, unsignedTwo),
+                            FatalError);
+            CHECK_THROWS_AS(Expression::multiplyAdd(unsignedOne, unsignedTwo, raw32One),
+                            FatalError);
+            CHECK_THROWS_AS(Expression::multiplyAdd(raw32One, raw32Two, unsignedOne), FatalError);
+            CHECK_NOTHROW(evaluate(Expression::multiplyAdd(unsignedOne, unsignedTwo, unsignedOne)));
+        }
+
+        SECTION("addShiftL")
+        {
+            CHECK_THROWS_AS(Expression::addShiftL(raw32One, unsignedOne, unsignedTwo), FatalError);
+            CHECK_THROWS_AS(Expression::addShiftL(unsignedOne, raw32One, unsignedTwo), FatalError);
+            CHECK_THROWS_AS(Expression::addShiftL(unsignedOne, unsignedTwo, raw32One), FatalError);
+            CHECK_NOTHROW(evaluate(Expression::addShiftL(unsignedOne, unsignedTwo, unsignedOne)));
+        }
+
+        SECTION("shiftLAdd")
+        {
+            CHECK_THROWS_AS(evaluate(Expression::shiftLAdd(raw32One, unsignedOne, unsignedTwo)),
+                            FatalError); // Type mismatch after shift
+            CHECK_THROWS_AS(Expression::shiftLAdd(unsignedOne, raw32One, unsignedTwo), FatalError);
+            CHECK_THROWS_AS(Expression::shiftLAdd(unsignedOne, unsignedTwo, raw32One), FatalError);
+            CHECK_NOTHROW(evaluate(Expression::shiftLAdd(unsignedOne, unsignedTwo, unsignedOne)));
+        }
+
+        SECTION("magicMultiple")
+        {
+            CHECK_THROWS_AS(Expression::magicMultiple(raw32One), FatalError);
+            CHECK_NOTHROW(evaluate(Expression::magicMultiple(unsignedTwo)));
+        }
+
+        SECTION("magicShifts")
+        {
+            CHECK_THROWS_AS(Expression::magicShifts(raw32One), FatalError);
+            CHECK_NOTHROW(evaluate(Expression::magicShifts(unsignedTwo)));
+        }
+
+        SECTION("magicShiftAndSign")
+        {
+            CHECK_THROWS_AS(Expression::magicShiftAndSign(raw32One), FatalError);
+            CHECK_NOTHROW(evaluate(Expression::magicShiftAndSign(signedOne)));
+        }
+    }
+
+    TEST_CASE("Code gen for BitfieldCombine", "[expression][codegen]")
+    {
+        auto context = TestContext::ForDefaultTarget();
+
+        auto ra = std::make_shared<Register::Value>(
+            context.get(), Register::Type::Vector, DataType::Int32, 1);
+        ra->setName("ra");
+        ra->allocateNow();
+
+        auto rb = std::make_shared<Register::Value>(
+            context.get(), Register::Type::Vector, DataType::Int32, 1);
+        rb->setName("rb");
+        rb->allocateNow();
+
+        auto srcExpr = ra->expression();
+        auto dstExpr = rb->expression();
+
+        auto const srcOffset = 10u;
+        auto const dstOffset = 4u;
+        auto const width     = 7u;
+
+        SECTION("Lowering Basic")
+        {
+            auto bfc = std::make_shared<Expression::Expression>(
+                Expression::BitfieldCombine{srcExpr, dstExpr, "", srcOffset, dstOffset, width});
+
+            Register::ValuePtr dest;
+            context.get()->schedule(Expression::generate(dest, bfc, context.get()));
+
+            // 130048     = 00000000000000011111110000000000
+            // 4294965263 = 11111111111111111111100000001111
+            std::string expected = R"(
+                v_and_b32 v2, 130048, v0
+                v_lshrrev_b32 v3, 6, v2
+                v_and_b32 v2, 4294965263, v1
+                v_or_b32 v4, v3, v2
+            )";
+
+            CHECK(NormalizedSource(context.output()) == NormalizedSource(expected));
+        }
+
+        SECTION("Lowering with srcIsZero")
+        {
+            auto bfc = std::make_shared<Expression::Expression>(Expression::BitfieldCombine{
+                srcExpr, dstExpr, "", srcOffset, dstOffset, width, true});
+
+            Register::ValuePtr dest;
+            context.get()->schedule(Expression::generate(dest, bfc, context.get()));
+
+            std::string expected = R"(
+                v_lshrrev_b32 v2, 6, v0
+                v_and_b32 v3, 4294965263, v1
+                v_or_b32 v4, v2, v3
+            )";
+
+            CHECK(NormalizedSource(context.output()) == NormalizedSource(expected));
+        }
+
+        SECTION("Lowering with dstIsZero")
+        {
+            auto bfc = std::make_shared<Expression::Expression>(Expression::BitfieldCombine{
+                srcExpr, dstExpr, "", srcOffset, dstOffset, width, std::nullopt, true});
+
+            Register::ValuePtr dest;
+            context.get()->schedule(Expression::generate(dest, bfc, context.get()));
+
+            std::string expected = R"(
+                v_and_b32 v2, 130048, v0
+                v_lshrrev_b32 v3, 6, v2
+                v_or_b32 v2, v3, v1
+            )";
+
+            CHECK(NormalizedSource(context.output()) == NormalizedSource(expected));
+        }
+
+        SECTION("Lowering with srcIsZero & dstIsZero")
+        {
+            auto bfc = std::make_shared<Expression::Expression>(Expression::BitfieldCombine{
+                srcExpr, dstExpr, "", srcOffset, dstOffset, width, true, true});
+
+            Register::ValuePtr dest;
+            context.get()->schedule(Expression::generate(dest, bfc, context.get()));
+
+            std::string expected = R"(
+                v_lshrrev_b32 v2, 6, v0
+                v_or_b32 v3, v2, v1
+            )";
+
+            CHECK(NormalizedSource(context.output()) == NormalizedSource(expected));
+        }
+    }
 }

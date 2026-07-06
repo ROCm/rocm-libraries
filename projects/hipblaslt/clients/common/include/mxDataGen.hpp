@@ -2,7 +2,7 @@
  *
  * MIT License
  *
- * Copyright (C) 2025 Advanced Micro Devices, Inc.
+ * Copyright (C) 2025-2026 Advanced Micro Devices, Inc.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -26,21 +26,36 @@
 
 #pragma once
 
-#include <hipblaslt/hipblaslt.h>
+// All content below is gated so the header is harmless to include when the
+// feature is disabled (the entire translation unit collapses to nothing).
+// Callers that actually invoke `generateMXInput` must guard their use sites
+// on the same macro.
+#if HIPBLASLT_ENABLE_MXDATAGENERATOR
+
+#include <hip/hip_bfloat16.h>
+#include <hip/hip_runtime.h>
+#include <hipblaslt/hipblaslt-export.h>
+#include <hipblaslt/hipblaslt-types.h>
 #include <stdint.h>
 
-#ifdef HIPBLASLT_USE_ROCROLLER
-std::vector<float> generateMXInput(hipDataType            dataType,
-                                   void*                  data,
-                                   void*                  scale,
-                                   uint64_t               row,
-                                   uint64_t               col,
-                                   uint64_t               stride,
-                                   bool                   isTranspose,
-                                   int const              scaleBlockRowSize,
-                                   int const              scaleBlockColSize,
-                                   bool                   isMatrixA,
-                                   std::string_view const initMethod = "Bounded",
-                                   float                  min_val    = -1.0f,
-                                   float                  max_val    = 1.0f);
+#include <string_view>
+#include <vector>
+
+std::vector<float> generateMXInput(hipDataType                dataType,
+                                   hipDataType                scaleType,
+                                   void*                      data,
+                                   void*                      scale,
+                                   uint64_t                   row,
+                                   uint64_t                   col,
+                                   uint64_t                   stride,
+                                   bool                       isTranspose,
+                                   const std::vector<size_t>& preSwizzleTile,
+                                   const std::vector<size_t>& preTile,
+                                   int const                  scaleBlockRowSize,
+                                   int const                  scaleBlockColSize,
+                                   bool                       isMatrixA,
+                                   std::string_view const     initMethod = "Bounded",
+                                   float                      min_val    = -1.0f,
+                                   float                      max_val    = 1.0f);
+
 #endif

@@ -1,69 +1,73 @@
-/*******************************************************************************
- *
- * MIT License
- *
- * Copyright (c) 2017 Advanced Micro Devices, Inc.
- *
- * Permission is hereby granted, free of charge, to any person obtaining a copy
- * of this software and associated documentation files (the "Software"), to deal
- * in the Software without restriction, including without limitation the rights
- * to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
- * copies of the Software, and to permit persons to whom the Software is
- * furnished to do so, subject to the following conditions:
- *
- * The above copyright notice and this permission notice shall be included in all
- * copies or substantial portions of the Software.
- *
- * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
- * IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
- * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
- * AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
- * LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
- * OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
- * SOFTWARE.
- *
- *******************************************************************************/
+// Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
+// SPDX-License-Identifier: MIT
+
 #ifndef MIOPEN_UTIL_HPP_
 #define MIOPEN_UTIL_HPP_
 
 #include <miopen/common.hpp>
 #include <miopen/miopen.h>
 
-#include <boost/range/adaptors.hpp>
+#include <vector>
 
 namespace miopen {
 
 struct Handle;
 
-MIOPEN_INTERNALS_EXPORT float
-Im2ColGPU(const Handle& handle,
-          std::size_t spatial_dim,
-          ConstData_t im,
-          std::size_t im_offset,
-          std::size_t in_c,
-          const decltype(boost::adaptors::slice(std::vector<std::size_t>(), 0, 1))& in_spatial,
-          const decltype(boost::adaptors::slice(std::vector<std::size_t>(), 0, 1))& wei_spatial,
-          const decltype(boost::adaptors::slice(std::vector<std::size_t>(), 0, 1))& out_spatial,
-          const std::vector<int>& pad_spatial,
-          const std::vector<int>& stride_spatial,
-          const std::vector<int>& dilation_spatial,
-          Data_t col,
-          miopenDataType_t type);
+float Im2ColGPU(const Handle& handle,
+                std::size_t spatial_dim,
+                ConstData_t im,
+                std::size_t im_offset,
+                std::size_t in_c,
+                const std::vector<size_t>& in_spatial,
+                const std::vector<size_t>& wei_spatial,
+                const std::vector<size_t>& out_spatial,
+                const std::vector<int>& pad_spatial,
+                const std::vector<int>& stride_spatial,
+                const std::vector<int>& dilation_spatial,
+                Data_t col,
+                miopenDataType_t type);
 
-MIOPEN_INTERNALS_EXPORT float
-Col2ImGPU(const Handle& handle,
-          std::size_t spatial_dim,
-          ConstData_t col,
-          const decltype(boost::adaptors::slice(std::vector<std::size_t>(), 0, 1))& out_spatial,
-          const decltype(boost::adaptors::slice(std::vector<std::size_t>(), 0, 1))& wei_spatial,
-          const std::vector<int>& pad_spatial,
-          const std::vector<int>& stride_spatial,
-          const std::vector<int>& dilation_spatial,
-          std::size_t in_c,
-          const decltype(boost::adaptors::slice(std::vector<std::size_t>(), 0, 1))& in_spatial,
-          Data_t im,
-          std::size_t im_offset,
-          miopenDataType_t type);
+float Col2ImGPU(const Handle& handle,
+                std::size_t spatial_dim,
+                ConstData_t col,
+                const std::vector<size_t>& out_spatial,
+                const std::vector<size_t>& wei_spatial,
+                const std::vector<int>& pad_spatial,
+                const std::vector<int>& stride_spatial,
+                const std::vector<int>& dilation_spatial,
+                std::size_t in_c,
+                const std::vector<size_t>& in_spatial,
+                Data_t im,
+                std::size_t im_offset,
+                miopenDataType_t type);
+
+float Col2Im3dGPUBatched(const Handle& handle,
+                         ConstData_t col,
+                         uint32_t out_d,
+                         uint32_t out_h,
+                         uint32_t out_w,
+                         uint32_t wei_d,
+                         uint32_t wei_h,
+                         uint32_t wei_w,
+                         uint32_t pad_d,
+                         uint32_t pad_h,
+                         uint32_t pad_w,
+                         uint32_t stride_d,
+                         uint32_t stride_h,
+                         uint32_t stride_w,
+                         uint32_t dilation_d,
+                         uint32_t dilation_h,
+                         uint32_t dilation_w,
+                         uint32_t in_c,
+                         uint32_t in_d,
+                         uint32_t in_h,
+                         uint32_t in_w,
+                         uint32_t batch_count,
+                         uint64_t col_batch_stride,
+                         Data_t im,
+                         uint64_t im_batch_stride,
+                         uint64_t im_offset,
+                         miopenDataType_t type);
 
 MIOPEN_INTERNALS_EXPORT float transpose_NCHW2CNHW(const Handle& handle,
                                                   int n,
@@ -105,14 +109,14 @@ MIOPEN_INTERNALS_EXPORT float transpose_NCHW2Vec(const Handle& handle,
                                                  const void* alpha,
                                                  const void* beta);
 
-MIOPEN_INTERNALS_EXPORT float transpose_packed_MN2NM(const Handle& handle,
-                                                     int m,
-                                                     int n,
-                                                     std::size_t in_offset,
-                                                     std::size_t out_offset,
-                                                     ConstData_t in,
-                                                     Data_t out,
-                                                     miopenDataType_t type);
+float transpose_packed_MN2NM(const Handle& handle,
+                             int m,
+                             int n,
+                             std::size_t in_offset,
+                             std::size_t out_offset,
+                             ConstData_t in,
+                             Data_t out,
+                             miopenDataType_t type);
 } // namespace miopen
 
 #endif // _MIOPEN_UTIL_HPP_

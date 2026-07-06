@@ -24,11 +24,17 @@ import rocisa
 from copy import deepcopy
 import pickle
 import os
+import shutil
 
 isa = (9, 0, 10)
 rocm_path = os.environ.get("ROCM_PATH", "/opt/rocm")
 global_isa = rocisa.rocIsa.getInstance()
-global_isa.init(isa, rocm_path + "/bin/amdclang++", False)
+_search_path = os.pathsep.join([
+    os.path.join(rocm_path, "bin"),
+    os.path.join(rocm_path, "lib", "llvm", "bin"),
+])
+_assembler = shutil.which("amdclang++", path=_search_path) or "amdclang++"
+global_isa.init(isa, _assembler, False)
 global_isa.setKernel(isa, 64)
 
 def test_containers():
@@ -41,15 +47,23 @@ def test_containers():
     assert str(ds_modifiers) == " offset:2 gds"
 
     # Test FLATModifiers
-    flat_modifiers = rocisa.container.FLATModifiers(8, True, False, True, False)
+    flat_modifiers = rocisa.container.FLATModifiers(
+        offset12=8, glc=True, slc=False, dlc=False,
+        scope=rocisa.enum.CacheScope.SCOPE_NONE,
+        lds=True, isStore=False)
     assert str(flat_modifiers) == " offset:8 glc lds"
 
     # Test MUBUFModifiers
-    mubuf_modifiers = rocisa.container.MUBUFModifiers(True, 12, True, False, True, False, True)
-    assert str(mubuf_modifiers) == " offen offset:12, glc"
+    mubuf_modifiers = rocisa.container.MUBUFModifiers(
+        offen=True, offset12=12, glc=True, slc=False,
+        dlc=False, scope=rocisa.enum.CacheScope.SCOPE_NONE,
+        nt=True, lds=False, isStore=True)
+    assert str(mubuf_modifiers) == " offen offset:12 glc"
 
     # Test SMEMModifiers
-    smem_modifiers = rocisa.container.SMEMModifiers(True, False, 8)
+    smem_modifiers = rocisa.container.SMEMModifiers(
+        glc=True, dlc=False, scope=rocisa.enum.CacheScope.SCOPE_NONE,
+        nv=False, offset=8)
     assert str(smem_modifiers) == " offset:8 glc"
 
     # Test SDWAModifiers
@@ -104,7 +118,7 @@ def test_containers():
 
     # Test Holder
     from rocisa.container import vgpr, sgpr, accvgpr, mgpr, Holder
-    holder = Holder("holder");
+    holder = Holder("holder")
     assert holder.idx == -1
     assert str(holder.name) == "holder"
     assert isinstance(holder, Holder)
@@ -120,6 +134,8 @@ def test_containers():
     assert str(testGpr) == "acc4"
     testGpr = mgpr(holder)
     assert str(testGpr) == "m[mgprholder]"
+    testGpr = vgpr("off", isOff=True)
+    assert str(testGpr) == "off"
 
 def test_containers_copy():
     def copy_test(name, obj):
@@ -133,9 +149,14 @@ def test_containers_copy():
     copy_test("DSModifiers", ds)
     flat = rocisa.container.FLATModifiers(lds=True)
     copy_test("FLATModifiers", flat)
-    mubuf = rocisa.container.MUBUFModifiers(True, 12, True, False, True, False, True)
+    mubuf = rocisa.container.MUBUFModifiers(
+        offen=True, offset12=12, glc=True, slc=False,
+        dlc=False, scope=rocisa.enum.CacheScope.SCOPE_NONE,
+        nt=True, lds=False, isStore=True)
     copy_test("MUBUFModifiers", mubuf)
-    smem = rocisa.container.SMEMModifiers(True, False, 8)
+    smem = rocisa.container.SMEMModifiers(
+        glc=True, dlc=False, scope=rocisa.enum.CacheScope.SCOPE_NONE,
+        nv=False, offset=8)
     copy_test("SMEMModifiers", smem)
     sdwa = rocisa.container.SDWAModifiers(
         dst_sel=rocisa.enum.SelectBit.WORD_0,

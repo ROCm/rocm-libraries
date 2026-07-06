@@ -27,9 +27,9 @@ The hipBLAS public repository is located at
 
   .. grid-item-card:: Install
 
-    * :doc:`hipBLAS prerequisites <./install/prerequisites>`
-    * :doc:`Install hipBLAS on Linux <./install/Linux_Install_Guide>`
-    * :doc:`Install hipBLAS on Windows <./install/Windows_Install_Guide>`
+    * :doc:`Install hipBLAS <./install/install>`
+    * :doc:`Build hipBLAS on Linux <./install/Linux_Install_Guide>`
+    * :doc:`Build hipBLAS on Windows <./install/Windows_Install_Guide>`
 
 .. grid:: 2
   :gutter: 3
@@ -41,7 +41,6 @@ The hipBLAS public repository is located at
   .. grid-item-card:: How to
 
     * :doc:`Use hipBLAS clients <./how-to/using-hipblas-clients>`
-    * :doc:`Contribute to hipBLAS <./how-to/contributing-to-hipblas>`
 
   .. grid-item-card:: Examples
 
@@ -49,12 +48,14 @@ The hipBLAS public repository is located at
 
   .. grid-item-card:: API Reference
 
-    * :doc:`Data type support <./reference/data-type-support>`
+    * :doc:`Precision support <./reference/data-type-support>`
     * :doc:`hipBLAS API <./reference/hipblas-api-functions>`
     * :doc:`Deprecations by version <./reference/deprecation>`
 
 To contribute to the documentation, see
 `Contributing to ROCm <https://rocm.docs.amd.com/en/latest/contribute/contributing.html>`_.
+For information on contributing to the hipBLAS code base, see :doc:`Contribute to hipBLAS <./contribute>`.
+
 
 You can find licensing information on the
 `Licensing <https://rocm.docs.amd.com/en/latest/about/license.html>`_ page.

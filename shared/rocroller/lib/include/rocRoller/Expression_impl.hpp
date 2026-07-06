@@ -1,28 +1,5 @@
-/*******************************************************************************
- *
- * MIT License
- *
- * Copyright 2021-2025 AMD ROCm(TM) Software
- *
- * Permission is hereby granted, free of charge, to any person obtaining a copy
- * of this software and associated documentation files (the "Software"), to deal
- * in the Software without restriction, including without limitation the rights
- * to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
- * copies of the Software, and to permit persons to whom the Software is
- * furnished to do so, subject to the following conditions:
- *
- * The above copyright notice and this permission notice shall be included in
- * all copies or substantial portions of the Software.
- *
- * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
- * IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
- * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
- * AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
- * LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
- * OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
- * SOFTWARE.
- *
- *******************************************************************************/
+// Copyright Advanced Micro Devices, Inc., or its affiliates.
+// SPDX-License-Identifier: MIT
 
 #pragma once
 
@@ -31,6 +8,7 @@
 #include <variant>
 
 #include <rocRoller/CodeGen/Instruction.hpp>
+#include <rocRoller/Expression.hpp>
 #include <rocRoller/InstructionValues/Register.hpp>
 #include <rocRoller/Operations/CommandArgument.hpp>
 
@@ -104,48 +82,102 @@ namespace rocRoller
             return stream << toString(c);
         }
 
+        inline bool isRaw32Literal(Expression const& expr)
+        {
+            return std::visit(
+                [](auto&& arg) {
+                    using T = std::decay_t<decltype(arg)>;
+                    if constexpr(std::is_same_v<T, CommandArgumentValue>)
+                    {
+                        return std::holds_alternative<rocRoller::Raw32>(arg);
+                    }
+                    else
+                        return false;
+                },
+                expr);
+        }
+
+        inline bool isRaw32Literal(ExpressionPtr const& exprPtr)
+        {
+            if(not exprPtr)
+                return false;
+            return isRaw32Literal(*exprPtr);
+        }
+
         inline ExpressionPtr operator+(ExpressionPtr a, ExpressionPtr b)
         {
+            AssertFatal(!isRaw32Literal(a) and !isRaw32Literal(b),
+                        "Raw32 is a bit type and cannot be used in arithmetic (+) operation: ",
+                        ShowValue(a),
+                        ShowValue(b));
             return std::make_shared<Expression>(Add{a, b});
         }
 
         inline ExpressionPtr operator-(ExpressionPtr a, ExpressionPtr b)
         {
+            AssertFatal(!isRaw32Literal(a) and !isRaw32Literal(b),
+                        "Raw32 is a bit type and cannot be used in arithmetic (-) operation: ",
+                        ShowValue(a),
+                        ShowValue(b));
             return std::make_shared<Expression>(Subtract{a, b});
         }
 
         inline ExpressionPtr operator*(ExpressionPtr a, ExpressionPtr b)
         {
+            AssertFatal(!isRaw32Literal(a) and !isRaw32Literal(b),
+                        "Raw32 is a bit type and cannot be used in arithmetic (*) operation: ",
+                        ShowValue(a),
+                        ShowValue(b));
             return std::make_shared<Expression>(Multiply{a, b});
         }
 
         inline ExpressionPtr operator/(ExpressionPtr a, ExpressionPtr b)
         {
+            AssertFatal(!isRaw32Literal(a) and !isRaw32Literal(b),
+                        "Raw32 is a bit type and cannot be used in arithmetic (/) operation: ",
+                        ShowValue(a),
+                        ShowValue(b));
             return std::make_shared<Expression>(Divide{a, b});
         }
 
         inline ExpressionPtr operator%(ExpressionPtr a, ExpressionPtr b)
         {
+            AssertFatal(!isRaw32Literal(a) and !isRaw32Literal(b),
+                        "Raw32 is a bit type and cannot be used in arithmetic (%) operation: ",
+                        ShowValue(a),
+                        ShowValue(b));
             return std::make_shared<Expression>(Modulo{a, b});
         }
 
         inline ExpressionPtr operator<<(ExpressionPtr a, ExpressionPtr b)
         {
+            AssertFatal(!isRaw32Literal(b),
+                        "Raw32 is a bit type and cannot be used as RHS in <<: ",
+                        ShowValue(b));
             return std::make_shared<Expression>(ShiftL{a, b});
         }
 
         inline ExpressionPtr operator>>(ExpressionPtr a, ExpressionPtr b)
         {
+            AssertFatal(!isRaw32Literal(b),
+                        "Raw32 is a bit type and cannot be used as RHS in >>: ",
+                        ShowValue(b));
             return std::make_shared<Expression>(ArithmeticShiftR{a, b});
         }
 
         inline ExpressionPtr arithmeticShiftR(ExpressionPtr a, ExpressionPtr b)
         {
+            AssertFatal(!isRaw32Literal(b),
+                        "Raw32 is a bit type and cannot be used as RHS in ArithmeticShiftR: ",
+                        ShowValue(b));
             return std::make_shared<Expression>(ArithmeticShiftR{a, b});
         }
 
         inline ExpressionPtr logicalShiftR(ExpressionPtr a, ExpressionPtr b)
         {
+            AssertFatal(!isRaw32Literal(b),
+                        "Raw32 is a bit type and cannot be used as RHS in logicalShiftR: ",
+                        ShowValue(b));
             return std::make_shared<Expression>(LogicalShiftR{a, b});
         }
 
@@ -166,51 +198,92 @@ namespace rocRoller
 
         inline ExpressionPtr operator>(ExpressionPtr a, ExpressionPtr b)
         {
+            AssertFatal(!isRaw32Literal(a) and !isRaw32Literal(b),
+                        "Raw32 is a bit type and cannot be used for >: ",
+                        ShowValue(a),
+                        ShowValue(b));
             return std::make_shared<Expression>(GreaterThan{a, b});
         }
 
         inline ExpressionPtr operator>=(ExpressionPtr a, ExpressionPtr b)
         {
+            AssertFatal(!isRaw32Literal(a) and !isRaw32Literal(b),
+                        "Raw32 is a bit type and cannot be used for >=: ",
+                        ShowValue(a),
+                        ShowValue(b));
             return std::make_shared<Expression>(GreaterThanEqual{a, b});
         }
 
         inline ExpressionPtr operator<(ExpressionPtr a, ExpressionPtr b)
         {
+            AssertFatal(!isRaw32Literal(a) and !isRaw32Literal(b),
+                        "Raw32 is a bit type and cannot be used for <: ",
+                        ShowValue(a),
+                        ShowValue(b));
             return std::make_shared<Expression>(LessThan{a, b});
         }
 
         inline ExpressionPtr operator<=(ExpressionPtr a, ExpressionPtr b)
         {
+            AssertFatal(!isRaw32Literal(a) and !isRaw32Literal(b),
+                        "Raw32 is a bit type and cannot be used for <=: ",
+                        ShowValue(a),
+                        ShowValue(b));
             return std::make_shared<Expression>(LessThanEqual{a, b});
         }
 
         inline ExpressionPtr operator==(ExpressionPtr a, ExpressionPtr b)
         {
+            // Either both are Raw32 or both are not
+            AssertFatal((isRaw32Literal(a) and isRaw32Literal(b))
+                            || (!isRaw32Literal(a) and !isRaw32Literal(b)),
+                        "Cannot compare Raw32 with other types: ",
+                        ShowValue(a),
+                        ShowValue(b));
             return std::make_shared<Expression>(Equal{a, b});
         }
 
         inline ExpressionPtr operator!=(ExpressionPtr a, ExpressionPtr b)
         {
+            // Either both are Raw32 or both are not
+            AssertFatal((isRaw32Literal(a) and isRaw32Literal(b))
+                            || (!isRaw32Literal(a) and !isRaw32Literal(b)),
+                        "Cannot compare Raw32 with other types: ",
+                        ShowValue(a),
+                        ShowValue(b));
             return std::make_shared<Expression>(NotEqual{a, b});
         }
 
         inline ExpressionPtr operator&&(ExpressionPtr a, ExpressionPtr b)
         {
+            AssertFatal(!isRaw32Literal(a) and !isRaw32Literal(b),
+                        "Raw32 is a bit type and cannot be used for LogicalAnd: ",
+                        ShowValue(a),
+                        ShowValue(b));
             return std::make_shared<Expression>(LogicalAnd{a, b});
         }
 
         inline ExpressionPtr operator||(ExpressionPtr a, ExpressionPtr b)
         {
+            AssertFatal(!isRaw32Literal(a) and !isRaw32Literal(b),
+                        "Raw32 is a bit type and cannot be used for LogicalOr: ",
+                        ShowValue(a),
+                        ShowValue(b));
             return std::make_shared<Expression>(LogicalOr{a, b});
         }
 
         inline ExpressionPtr logicalNot(ExpressionPtr a)
         {
+            AssertFatal(!isRaw32Literal(a),
+                        "Raw32 is a bit type and cannot be used for LogicalNot: ",
+                        ShowValue(a));
             return std::make_shared<Expression>(LogicalNot{a});
         }
 
         inline ExpressionPtr operator-(ExpressionPtr a)
         {
+            AssertFatal(
+                !isRaw32Literal(a), "Raw32 is a bit type and cannot be used for -: ", ShowValue(a));
             return std::make_shared<Expression>(Negate{a});
         }
 
@@ -221,11 +294,17 @@ namespace rocRoller
 
         inline ExpressionPtr exp2(ExpressionPtr a)
         {
+            AssertFatal(!isRaw32Literal(a),
+                        "Raw32 is a bit type and cannot be used for exp2: ",
+                        ShowValue(a));
             return std::make_shared<Expression>(Exponential2{a});
         }
 
         inline ExpressionPtr exp(ExpressionPtr a)
         {
+            AssertFatal(!isRaw32Literal(a),
+                        "Raw32 is a bit type and cannot be used for exp: ",
+                        ShowValue(a));
             return std::make_shared<Expression>(Exponential{a});
         }
 
@@ -237,7 +316,8 @@ namespace rocRoller
                    || dt == DataType::FP6x16 || dt == DataType::BF6x16 || dt == DataType::FP4x8
                    || dt == DataType::Double || dt == DataType::Int32 || dt == DataType::Int64
                    || dt == DataType::UInt32 || dt == DataType::UInt64 || dt == DataType::Bool
-                   || dt == DataType::Bool32 || dt == DataType::Bool64;
+                   || dt == DataType::Bool32 || dt == DataType::Bool64 || dt == DataType::E8M0x4
+                   || dt == DataType::E5M3x4 || dt == DataType::E4M3x4;
         }
 
         inline ExpressionPtr convert(DataType dt, ExpressionPtr a)
@@ -269,10 +349,52 @@ namespace rocRoller
             return convert(DATATYPE, a);
         }
 
+        inline ExpressionPtr reinterpret(DataType dt, ExpressionPtr a)
+        {
+            auto argType = resultVariableType(a);
+            auto srcSize = DataTypeInfo::Get(argType.dataType).elementBytes;
+            auto dstSize = DataTypeInfo::Get(dt).elementBytes;
+
+            AssertFatal(srcSize == dstSize,
+                        "Reinterpret requires same size types: source type ",
+                        toString(argType.dataType),
+                        " (",
+                        srcSize,
+                        " bytes) != destination type ",
+                        toString(dt),
+                        " (",
+                        dstSize,
+                        " bytes)");
+
+            return std::make_shared<Expression>(Reinterpret{{.arg{a}}, dt});
+        }
+
         template <CCommandArgumentValue T>
         inline ExpressionPtr literal(T value)
         {
             return std::make_shared<Expression>(value);
+        }
+
+        inline ExpressionPtr literal(Buffer value)
+        {
+            std::vector<ExpressionPtr> operands{literal(value.desc0),
+                                                literal(value.desc1),
+                                                literal(value.desc2),
+                                                literal(value.desc3)};
+            return std::make_shared<Expression>(
+                Concatenate{{operands}, {DataType::None, PointerType::Buffer}});
+        }
+
+        inline ExpressionPtr literal(TDM value)
+        {
+            std::vector<ExpressionPtr> operands;
+
+            std::for_each(std::begin(value.parts),
+                          std::end(value.parts),
+                          [&operands](auto const& v) { operands.push_back(literal(v)); });
+
+            return std::make_shared<Expression>(
+                Concatenate{{operands}, {DataType::None, PointerType::TDM}});
         }
 
         template <CCommandArgumentValue T>
@@ -298,6 +420,8 @@ namespace rocRoller
                 return literal<float>(value);
             case DataType::Double:
                 return literal<double>(value);
+            case DataType::Raw32:
+                return literal<Raw32>(Raw32(static_cast<uint32_t>(value)));
             default:
                 Throw<FatalError>(
                     "Unsupported datatype ", v.dataType, " provided to Expression::literal");
@@ -340,6 +464,7 @@ namespace rocRoller
         EXPRESSION_INFO(LogicalShiftR);
         EXPRESSION_INFO(ArithmeticShiftR);
 
+        EXPRESSION_INFO(BitfieldCombine);
         EXPRESSION_INFO(BitwiseNegate);
         EXPRESSION_INFO(BitwiseAnd);
         EXPRESSION_INFO(BitwiseOr);
@@ -375,6 +500,8 @@ namespace rocRoller
         EXPRESSION_INFO(BitFieldExtract);
 
         EXPRESSION_INFO(Convert);
+
+        EXPRESSION_INFO(Reinterpret);
 
         EXPRESSION_INFO(Concatenate);
 
@@ -591,6 +718,5 @@ namespace rocRoller
                 return std::make_tuple(exp.lhs, exp.r1hs, exp.r2hs);
             }
         }
-
     }
 }

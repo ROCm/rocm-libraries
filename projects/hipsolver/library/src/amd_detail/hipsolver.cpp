@@ -1,5 +1,5 @@
 /* ************************************************************************
- * Copyright (C) 2020-2025 Advanced Micro Devices, Inc. All rights reserved.
+ * Copyright (C) 2020-2026 Advanced Micro Devices, Inc. All rights reserved.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -563,6 +563,31 @@ try
     if(!handle)
         return HIPSOLVER_STATUS_HANDLE_IS_NULLPTR;
 
+    // we check if rocsolver logging needs to be started
+    bool enable_rocsolver_logging = false;
+    // check for ROCSOLVER_LAYER environment variable
+    if(const char* str_layer_mode = std::getenv("ROCSOLVER_LAYER"))
+    {
+        errno      = 0;
+        long value = strtol(str_layer_mode, 0, 0);
+        if(!(errno || value < 0 || size_t(value) > size_t(UINT32_MAX)))
+            enable_rocsolver_logging = true;
+    }
+
+    // check for ROCSOLVER_LEVELS environment variable
+    if(const char* str_max_level = std::getenv("ROCSOLVER_LEVELS"))
+    {
+        errno      = 0;
+        long value = strtol(str_max_level, 0, 0);
+        if(!(errno || value < 1 || size_t(value) > size_t(INT_MAX)))
+            enable_rocsolver_logging = true;
+    }
+
+    if(enable_rocsolver_logging)
+    {
+        rocsolver_log_begin();
+    }
+
     // Create the rocBLAS handle
     return hipsolver::rocblas2hip_status(rocblas_create_handle((rocblas_handle*)handle));
 }
@@ -574,6 +599,31 @@ catch(...)
 hipsolverStatus_t hipsolverDestroy(hipsolverHandle_t handle)
 try
 {
+    // we check if rocsolver logging needs to be ended
+    bool enable_rocsolver_logging = false;
+    // check for ROCSOLVER_LAYER environment variable
+    if(const char* str_layer_mode = std::getenv("ROCSOLVER_LAYER"))
+    {
+        errno      = 0;
+        long value = strtol(str_layer_mode, 0, 0);
+        if(!(errno || value < 0 || size_t(value) > size_t(UINT32_MAX)))
+            enable_rocsolver_logging = true;
+    }
+
+    // check for ROCSOLVER_LEVELS environment variable
+    if(const char* str_max_level = std::getenv("ROCSOLVER_LEVELS"))
+    {
+        errno      = 0;
+        long value = strtol(str_max_level, 0, 0);
+        if(!(errno || value < 1 || size_t(value) > size_t(INT_MAX)))
+            enable_rocsolver_logging = true;
+    }
+
+    if(enable_rocsolver_logging)
+    {
+        rocsolver_log_end();
+    }
+
     return hipsolver::rocblas2hip_status(rocblas_destroy_handle((rocblas_handle)handle));
 }
 catch(...)
@@ -694,13 +744,15 @@ struct hipsolverGesvdjInfo
     }
 
     // Free device memory
-    void free()
+    hipsolverStatus_t free()
     {
         if(capacity > 0)
         {
-            hipFree(n_sweeps);
             capacity = 0;
+            if(hipFree(n_sweeps) != hipSuccess)
+                return HIPSOLVER_STATUS_INTERNAL_ERROR;
         }
+        return HIPSOLVER_STATUS_SUCCESS;
     }
 };
 
@@ -726,10 +778,10 @@ try
         return HIPSOLVER_STATUS_INVALID_VALUE;
 
     hipsolverGesvdjInfo* params = (hipsolverGesvdjInfo*)info;
-    params->free();
+    hipsolverStatus_t    status = params->free();
     delete params;
 
-    return HIPSOLVER_STATUS_SUCCESS;
+    return status;
 }
 catch(...)
 {
@@ -906,13 +958,15 @@ struct hipsolverSyevjInfo
     }
 
     // Free device memory
-    void free()
+    hipsolverStatus_t free()
     {
         if(capacity > 0)
         {
-            hipFree(n_sweeps);
             capacity = 0;
+            if(hipFree(n_sweeps) != hipSuccess)
+                return HIPSOLVER_STATUS_INTERNAL_ERROR;
         }
+        return HIPSOLVER_STATUS_SUCCESS;
     }
 };
 
@@ -938,10 +992,10 @@ try
         return HIPSOLVER_STATUS_INVALID_VALUE;
 
     hipsolverSyevjInfo* params = (hipsolverSyevjInfo*)info;
-    params->free();
+    hipsolverStatus_t   status = params->free();
     delete params;
 
-    return HIPSOLVER_STATUS_SUCCESS;
+    return status;
 }
 catch(...)
 {

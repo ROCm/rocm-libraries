@@ -29,11 +29,7 @@
 #include "handle.h"
 #include "hipsparselt_ostream.hpp"
 #include "utility.hpp"
-#if BUILD_WITH_TENSILE
 #include "tensile_host.hpp"
-#else
-#include "kernel_launcher.hpp"
-#endif
 #include <cxxabi.h>
 
 inline rocsparselt_status getOriginalSizes(rocsparselt_operation opA,
@@ -116,6 +112,10 @@ inline int64_t rocsparselt_metadata_offset_in_compressed_matrix(int64_t     num_
 #if HIP_FP8_TYPE_OCP
         case HIP_R_8F_E4M3:
         case HIP_R_8F_E5M2:
+#endif
+#if HIP_FP8_TYPE_FNUZ
+        case HIP_R_8F_E4M3_FNUZ:
+        case HIP_R_8F_E5M2_FNUZ:
 #endif
         case HIP_R_8I:
             return 1;
@@ -211,6 +211,10 @@ inline rocsparselt_status validateMatrixArgs(const _rocsparselt_handle* handle,
     case HIP_R_8F_E4M3:
     case HIP_R_8F_E5M2:
 #endif
+#if HIP_FP8_TYPE_FNUZ
+    case HIP_R_8F_E4M3_FNUZ:
+    case HIP_R_8F_E5M2_FNUZ:
+#endif
         num_elements = 16;
         break;
     default:
@@ -259,11 +263,18 @@ inline rocsparselt_status validateMatrixArgs(const _rocsparselt_handle* handle,
     case HIP_R_16F:
     case HIP_R_16BF:
     case HIP_R_8I:
+    case HIP_R_32I:
         break;
 #if HIP_FP8_TYPE_OCP
     case HIP_R_8F_E4M3:
     case HIP_R_8F_E5M2:
         if(handle->has_fp8_ocp)
+            break;
+#endif
+#if HIP_FP8_TYPE_FNUZ
+    case HIP_R_8F_E4M3_FNUZ:
+    case HIP_R_8F_E5M2_FNUZ:
+        if(handle->has_fp8_fnuz)
             break;
 #endif
     default:

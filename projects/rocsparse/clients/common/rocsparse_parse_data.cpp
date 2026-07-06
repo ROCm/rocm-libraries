@@ -1,6 +1,6 @@
 /*! \file */
 /* ************************************************************************
- * Copyright (C) 2019-2025 Advanced Micro Devices, Inc. All rights Reserved.
+ * Copyright (C) 2019-2026 Advanced Micro Devices, Inc. All rights Reserved.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -23,6 +23,7 @@
  * ************************************************************************ */
 
 #include "rocsparse_parse_data.hpp"
+#include "rocsparse-debugging.h"
 #include "rocsparse_clients_matrices_dir.hpp"
 #include "rocsparse_data.hpp"
 #include "rocsparse_reproducibility.hpp"
@@ -33,13 +34,8 @@
 
 #ifdef WIN32
 
-#ifdef __cpp_lib_filesystem
 #include <filesystem>
 namespace fs = std::filesystem;
-#else
-#include <experimental/filesystem>
-namespace fs = std::experimental::filesystem;
-#endif
 
 #else
 #include <sys/wait.h>
@@ -220,8 +216,10 @@ bool rocsparse_parse_data(int& argc, char** argv, const std::string& default_fil
         {
             include_path = argv[++i];
         }
-        else if(!strcmp(argv[i], "--data") || (yaml |= !strcmp(argv[i], "--yaml")))
+        else if(!strcmp(argv[i], "--data") || !strcmp(argv[i], "--yaml"))
         {
+            yaml = true;
+
             if(filename != "")
             {
                 std::cerr << "Only one of the --yaml and --data options may be specified"
@@ -336,8 +334,21 @@ bool rocsparse_parse_data(int& argc, char** argv, const std::string& default_fil
                           << " [ --data <path> | --yaml <path> ] [--matrices-dir <path>] [-I "
                              "<path>] <options> ...\n"
                           << std::endl;
+#ifdef ROCSPARSE_DEBUG
 
                 std::cout << "" << std::endl;
+                std::cout << "Rocsparse HIP debug testing options:" << std::endl;
+                std::cout << "--test-hip-debug      enable rocsparse HIP debug testing."
+                          << std::endl;
+                std::cout
+                    << "--test-hip-debug-full enable rocsparse hip debug testing, as opposed to "
+                       "'--test-hip-debug' all checks regarding results must be consistent"
+                    << std::endl;
+                std::cout << "--test-hip-debug-o    output filename for HIP debug report."
+                          << std::endl;
+
+#endif
+
                 std::cout << "Rocsparse reproducibility options:" << std::endl;
                 std::cout << "--r          enable rocsparse reproducibility testing" << std::endl;
                 std::cout << "--r-niter    set the number of "
@@ -347,6 +358,12 @@ bool rocsparse_parse_data(int& argc, char** argv, const std::string& default_fil
                 std::cout << "--r-level    level of information shrinking in the reproducibility "
                              "json file."
                           << std::endl;
+                std::cout << "" << std::endl;
+                std::cout << "Skipped test output options:" << std::endl;
+                std::cout << "--show-skipped    Force showing skipped test output (overrides "
+                             "default --yaml behavior)"
+                          << std::endl;
+                std::cout << "--hide-skipped    Force hiding skipped test output" << std::endl;
                 std::cout << "" << std::endl;
                 std::cout << "" << std::endl;
                 std::cout << "Specific environment variables:" << std::endl;
@@ -390,6 +407,7 @@ bool rocsparse_parse_data(int& argc, char** argv, const std::string& default_fil
     if(filename != "")
     {
         RocSPARSE_TestData::set_filename(filename, yaml);
+        RocSPARSE_TestData::set_yaml_filter_active(yaml);
         return true;
     }
 

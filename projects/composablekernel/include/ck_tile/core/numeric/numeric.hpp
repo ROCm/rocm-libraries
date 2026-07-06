@@ -1,11 +1,14 @@
+// Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
 // SPDX-License-Identifier: MIT
-// Copyright (c) 2018-2025, Advanced Micro Devices, Inc. All rights reserved.
 
 #pragma once
 
 #include "ck_tile/core/config.hpp"
+#include "ck_tile/core/numeric/integer.hpp"
+
+#include <cmath>
 #include <limits>
-#include <stdint.h>
+#include <type_traits>
 
 namespace ck_tile {
 
@@ -19,7 +22,7 @@ struct numeric
     // minimum finite value, or minimum positive normalized value for float
     CK_TILE_HOST_DEVICE static constexpr T min() { return std::numeric_limits<T>::min(); }
 
-    // minumum finite value
+    // minimum finite value
     CK_TILE_HOST_DEVICE static constexpr T lowest() { return std::numeric_limits<T>::lowest(); }
 
     // maximum finite value
@@ -133,7 +136,7 @@ struct numeric_traits<float>
     attr_ type_ operator-(const type_& x)                                                  \
     {                                                                                      \
         constexpr uint32_t bits = sizeof(type_) * 8;                                       \
-        constexpr uint32_t mask = 1 << (bits - 1);                                         \
+        constexpr uint32_t mask = 1u << (bits - 1u);                                       \
         type_ y                 = x;                                                       \
         y.data ^= static_cast<typename type_::raw_type>(mask);                             \
         return y;                                                                          \
@@ -150,32 +153,32 @@ struct numeric_traits<float>
     {                                                                                      \
         return type_(static_cast<float>(x) / static_cast<float>(y));                       \
     }                                                                                      \
-    attr_ type_& operator+=(type_& x, const type_& y)                                      \
+    attr_ type_& operator+=([[clang::lifetimebound]] type_& x, const type_& y)             \
     {                                                                                      \
         x = type_(static_cast<float>(x) + static_cast<float>(y));                          \
         return x;                                                                          \
     }                                                                                      \
-    attr_ type_& operator-=(type_& x, const type_& y)                                      \
+    attr_ type_& operator-=([[clang::lifetimebound]] type_& x, const type_& y)             \
     {                                                                                      \
         x = type_(static_cast<float>(x) - static_cast<float>(y));                          \
         return x;                                                                          \
     }                                                                                      \
-    attr_ type_& operator*=(type_& x, const type_& y)                                      \
+    attr_ type_& operator*=([[clang::lifetimebound]] type_& x, const type_& y)             \
     {                                                                                      \
         x = type_(static_cast<float>(x) * static_cast<float>(y));                          \
         return x;                                                                          \
     }                                                                                      \
-    attr_ type_& operator/=(type_& x, const type_& y)                                      \
+    attr_ type_& operator/=([[clang::lifetimebound]] type_& x, const type_& y)             \
     {                                                                                      \
         x = type_(static_cast<float>(x) / static_cast<float>(y));                          \
         return x;                                                                          \
     }                                                                                      \
-    attr_ type_& operator++(type_& x)                                                      \
+    attr_ type_& operator++([[clang::lifetimebound]] type_& x)                             \
     {                                                                                      \
         x = type_(static_cast<float>(x) + 1.f);                                            \
         return x;                                                                          \
     }                                                                                      \
-    attr_ type_& operator--(type_& x)                                                      \
+    attr_ type_& operator--([[clang::lifetimebound]] type_& x)                             \
     {                                                                                      \
         x = type_(static_cast<float>(x) - 1.f);                                            \
         return x;                                                                          \

@@ -1,5 +1,5 @@
 /******************************************************************************
-* Copyright (C) 2016 - 2024 Advanced Micro Devices, Inc. All rights reserved.
+* Copyright (C) 2016 - 2026 Advanced Micro Devices, Inc. All rights reserved.
 *
 * Permission is hereby granted, free of charge, to any person obtaining a copy
 * of this software and associated documentation files (the "Software"), to deal
@@ -33,8 +33,9 @@
 #define ROCFFT_EXPORT
 #endif
 
+#include <stddef.h>
+
 #ifdef __cplusplus
-#include <cstddef>
 extern "C" {
 #endif /* __cplusplus */
 
@@ -266,10 +267,12 @@ ROCFFT_EXPORT rocfft_status rocfft_plan_description_set_scale_factor(
  *      * Hermitian and complex data defaults to interleaved if a specific
           format is not specified.
  *  * Offset of first data element in the data buffer.  Defaults to 0 if unspecified.
- *  * Stride between consecutive elements in each dimension.  Defaults
-      to contiguous data in all dimensions if unspecified.
- *  * Distance between consecutive batches.  Defaults to contiguous
-      batches if unspecified.
+ *  * Stride between consecutive elements in each dimension. Defaults to packed data
+      layout consistent with the type of transform and its placement (requested at
+      plan creation), if unspecified.
+ *  * Distance between consecutive batches. Zero values are interpreted as defaults
+      to be deduced from the corresponding length and stride along the last transform
+      dimension.
  *
  *  Not all combinations of array types are supported and error codes
  *  will be returned for unsupported cases.
@@ -277,6 +280,7 @@ ROCFFT_EXPORT rocfft_status rocfft_plan_description_set_scale_factor(
  *  Offset, stride, and distance for either input or output provided
  *  here is ignored if a field is set for the corresponding input or
  *  output.
+ *  @note Non-zero offsets are not supported yet.
  * 
  *  @param[in, out] description description handle
  *  @param[in] in_array_type array type of input buffer
@@ -365,12 +369,12 @@ ROCFFT_EXPORT rocfft_status rocfft_plan_description_set_comm(rocfft_plan_descrip
  * All arrays may be re-used or freed immediately after the function returns.
  *
  * @param[out] brick: brick structure
- * @param[in] field_lower: array of length dim specifying the lower index (inclusive) for the brick in the
- * field's index space.
- * @param[in] field_upper: array of length dim specifying the upper index (exclusive) for the brick in the
- * field's index space.
- * @param[in] brick_stride: array of length dim specifying the brick's stride in memory
- * @param[in] dim_with_batch length of the arrays; this must match the dimension of
+ * @param[in] field_lower: array of length `dim_with_batch` specifying the lower index
+ * (inclusive) for the brick in the field's index space.
+ * @param[in] field_upper: array of length `dim_with_batch` specifying the upper index
+ * (exclusive) for the brick in the field's index space.
+ * @param[in] brick_stride: array of length `dim_with_batch` specifying the brick's stride in memory
+ * @param[in] dim_with_batch: length of the arrays; this must match the dimension of
  * the FFT plus one for the batch dimension.
  * @param[in] deviceID: HIP device ID for the device on which the brick's data is resident.
  *
@@ -429,8 +433,16 @@ ROCFFT_EXPORT rocfft_status rocfft_plan_description_add_infield(rocfft_plan_desc
 ROCFFT_EXPORT rocfft_status
     rocfft_plan_description_add_outfield(rocfft_plan_description description, rocfft_field field);
 
-/*! @brief Get work buffer size
- *  @details Get the work buffer size required for a plan.
+/*! @brief Get work buffer size on current HIP device
+ *  @details Get the work buffer size required for a plan on the current HIP device.
+ *
+ *  Work memory may be required on any device(s) with input or output
+ *  data for the transform, and also the current device when the plan
+ *  was created.  If the FFT plan uses multiple devices then this
+ *  function can be called repeatedly with each of those devices as
+ *  the current HIP device, to know the complete work memory
+ *  requirements for all devices.
+ *
  *  @param[in] plan plan handle
  *  @param[out] size_in_bytes size of needed work buffer in bytes
  *  */
@@ -473,12 +485,18 @@ ROCFFT_EXPORT rocfft_status rocfft_execution_info_create(rocfft_execution_info* 
  *  */
 ROCFFT_EXPORT rocfft_status rocfft_execution_info_destroy(rocfft_execution_info info);
 
-/*! @brief Set work buffer in execution info
+/*! @brief Set work buffer in execution info for the current HIP device
  *
  *  @details This is one of the execution info functions to specify
  *  optional additional information to control execution.  This API
  *  provides a work buffer for the transform. It must be called
  *  before ::rocfft_execute.
+ *
+ *  Work memory may be required on any device(s) with input or output
+ *  data for the transform, and also the current device when the plan
+ *  was created.  If the FFT plan uses multiple devices then this
+ *  function can be called repeatedly with each of those devices as
+ *  the current HIP device, to set work memory for all devices.
  *
  *  When a non-zero value is obtained from
  *  ::rocfft_plan_get_work_buffer_size, that means the library needs a
@@ -537,8 +555,16 @@ ROCFFT_EXPORT rocfft_status rocfft_execution_info_set_stream(rocfft_execution_in
  *  transform.  Callbacks are an experimental feature in rocFFT.
  *
  *  Callback function pointers/data are given as arrays, with one
- *  function/data pointer per device executing this plan.  Currently,
- *  plans can only use one device.
+ *  function/data pointer per brick in the input field of the plan.
+ *  Load callbacks require at least one brick in the input field to
+ *  be assigned to the current device used at plan creation. A plan
+ *  with no input field specified is considered to have one brick on
+ *  the current device used at plan creation.
+ *
+ *  All functions in the array must perform the same logical
+ *  operation.  That is, any function in the array must be
+ *  substitutable for any other function in the array if the data
+ *  being loaded were moved to another brick.
  *
  *  The provided function pointers replace any previously-specified
  *  load callback for this execution info handle.
@@ -555,8 +581,9 @@ ROCFFT_EXPORT rocfft_status rocfft_execution_info_set_stream(rocfft_execution_in
  *  real-to-complex transform would load single-precision real
  *  elements).
  *
- *  A null value for 'cb' may be specified to clear any previously
- *  registered load callback.
+ *  A null value for 'cb_functions' may be specified to clear any
+ *  previously registered load callback.  'cb_data' may be null if
+ *  the functions require no additional pointer to be passed to them.
  *
  *  Currently, 'shared_mem_bytes' must be 0.  Callbacks are not
  *  supported on transforms that use planar formats for either input
@@ -565,7 +592,8 @@ ROCFFT_EXPORT rocfft_status rocfft_execution_info_set_stream(rocfft_execution_in
  *  @param[in] info execution info handle
  *  @param[in] cb_functions callback function pointers
  *  @param[in] cb_data callback function data, passed to the function pointer when it is called
- *  @param[in] shared_mem_bytes amount of shared memory to allocate for the callback function to use */
+ *  @param[in] shared_mem_bytes amount of shared memory to allocate for the callback function to use 
+ * */
 ROCFFT_EXPORT rocfft_status rocfft_execution_info_set_load_callback(rocfft_execution_info info,
                                                                     void** cb_functions,
                                                                     void** cb_data,
@@ -577,8 +605,16 @@ ROCFFT_EXPORT rocfft_status rocfft_execution_info_set_load_callback(rocfft_execu
  *  transform.  Callbacks are an experimental feature in rocFFT.
  *
  *  Callback function pointers/data are given as arrays, with one
- *  function/data pointer per device executing this plan.  Currently,
- *  plans can only use one device.
+ *  function/data pointer per brick in the output field of the plan.
+ *  Store callbacks require at least one brick in the output field to
+ *  be assigned to the current device used at plan creation. A plan
+ *  with no output field specified is considered to have one brick on
+ *  the current device used at plan creation.
+ *
+ *  All functions in the array must perform the same logical
+ *  operation.  That is, any function in the array must be
+ *  substitutable for any other function in the array if the data
+ *  being stored were moved to another brick.
  *
  *  The provided function pointers replace any previously-specified
  *  store callback for this execution info handle.
@@ -595,15 +631,16 @@ ROCFFT_EXPORT rocfft_status rocfft_execution_info_set_load_callback(rocfft_execu
  *  real-to-complex transform would store single-precision complex
  *  elements).
  *
- *  A null value for 'cb' may be specified to clear any previously
- *  registered store callback.
+ *  A null value for 'cb_functions' may be specified to clear any
+ *  previously registered load callback.  'cb_data' may be null if
+ *  the functions require no additional pointer to be passed to them.
  *
  *  Currently, 'shared_mem_bytes' must be 0.  Callbacks are not
  *  supported on transforms that use planar formats for either input
  *  or output.
  *
  *  @param[in] info execution info handle
- *  @param[in] cb_functions callbacks function pointers
+ *  @param[in] cb_functions callback function pointers
  *  @param[in] cb_data callback function data, passed to the function pointer when it is called
  *  @param[in] shared_mem_bytes amount of shared memory to allocate for the callback function to use
  *  */

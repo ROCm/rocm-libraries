@@ -1,29 +1,7 @@
-/*******************************************************************************
- *
- * MIT License
- *
- * Copyright 2025 AMD ROCm(TM) Software
- *
- * Permission is hereby granted, free of charge, to any person obtaining a copy
- * of this software and associated documentation files (the "Software"), to deal
- * in the Software without restriction, including without limitation the rights
- * to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
- * copies of the Software, and to permit persons to whom the Software is
- * furnished to do so, subject to the following conditions:
- *
- * The above copyright notice and this permission notice shall be included in
- * all copies or substantial portions of the Software.
- *
- * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
- * IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
- * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
- * AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
- * LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
- * OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
- * SOFTWARE.
- *
- *******************************************************************************/
+// Copyright Advanced Micro Devices, Inc., or its affiliates.
+// SPDX-License-Identifier: MIT
 
+#include <rocRoller/KernelOptions_detail.hpp>
 #include <rocRoller/Scheduling/Observers/FunctionalUnit/WMMAObserver.hpp>
 
 #include <catch2/catch_test_macros.hpp>
@@ -41,6 +19,8 @@ namespace WMMAObserverUnitTests
     public:
         WMMAObserverUnitTest(GPUArchitectureGFX gfx)
             : TestContext(TestContext::ForTarget({gfx})){};
+        WMMAObserverUnitTest(GPUArchitectureTarget target, KernelOptions kernelOptions)
+            : TestContext(TestContext::ForTarget(target, kernelOptions)){};
     };
 
     TEST_CASE("Unit test observer regarding WMMA hazards on GFX1200/1201", "[observer]")
@@ -102,6 +82,79 @@ namespace WMMAObserverUnitTests
             ctx->schedule(valuInst);
 
             CHECK(latency - 1 == ctx->peek(wmmaInst).stallCycles);
+            CHECK(0 == ctx->peek(valuInst).stallCycles);
+
+            ctx->schedule(wmmaInst);
+
+            CHECK(latency == ctx->peek(wmmaInst).stallCycles);
+            CHECK(0 == ctx->peek(valuInst).stallCycles);
+        }
+    }
+
+    TEST_CASE("Unit test observer regarding WMMA hazards on GFX1250", "[observer]")
+    {
+        auto          target = GENERATE(GPUArchTargetGFX1250Rev0, GPUArchTargetGFX1250Rev1);
+        auto          coexecutionEnabled = GENERATE(true, false);
+        KernelOptions kernelOptions{};
+        kernelOptions->coexecutionEnabled = coexecutionEnabled;
+        std::string          opCode{"v_wmma_f32_16x16x32_f16"};
+        WMMAObserverUnitTest t{target, kernelOptions};
+        auto                 ctx = t.get();
+
+        const auto FC = Register::AllocationOptions::FullyContiguous();
+        const auto v0
+            = Register::Value::Placeholder(ctx, Register::Type::Vector, DataType::Float, 8, FC);
+        const auto v1
+            = Register::Value::Placeholder(ctx, Register::Type::Vector, DataType::Half, 4, FC);
+        const auto v2
+            = Register::Value::Placeholder(ctx, Register::Type::Vector, DataType::Half, 4, FC);
+        v0->allocateNow();
+        v1->allocateNow();
+        v2->allocateNow();
+
+        auto wmmaInst = Instruction(opCode, {v0}, {v1, v2, v0}, {}, "");
+        auto valuInst = Instruction("v_add_f32", {v1}, {v1, v2}, {}, "");
+
+        const auto info       = ctx->targetArchitecture().GetInstructionInfo(wmmaInst.getOpCode());
+        const auto latency    = info.getLatency();
+        const auto warLatency = latency - (coexecutionEnabled ? 4 : 0);
+
+        SECTION("Use observer object directly")
+        {
+            Scheduling::WMMAObserver observer(ctx);
+
+            CHECK(0 == observer.peek(wmmaInst).stallCycles);
+            CHECK(0 == observer.peek(valuInst).stallCycles);
+
+            observer.observe(wmmaInst);
+
+            CHECK(latency == observer.peek(wmmaInst).stallCycles);
+            CHECK(0 == observer.peek(valuInst).stallCycles);
+
+            observer.observe(valuInst);
+
+            CHECK(latency - 1 == observer.peek(wmmaInst).stallCycles);
+            CHECK(0 == observer.peek(valuInst).stallCycles);
+
+            observer.observe(wmmaInst);
+
+            CHECK(latency == observer.peek(wmmaInst).stallCycles);
+            CHECK(0 == observer.peek(valuInst).stallCycles);
+        }
+
+        SECTION("Use observer object through context")
+        {
+            CHECK(0 == ctx->peek(wmmaInst).stallCycles);
+            CHECK(0 == ctx->peek(valuInst).stallCycles);
+
+            ctx->schedule(wmmaInst);
+
+            CHECK(latency == ctx->peek(wmmaInst).stallCycles);
+            CHECK(0 == ctx->peek(valuInst).stallCycles);
+
+            ctx->schedule(valuInst);
+
+            CHECK(warLatency - 1 == ctx->peek(wmmaInst).stallCycles);
             CHECK(0 == ctx->peek(valuInst).stallCycles);
 
             ctx->schedule(wmmaInst);

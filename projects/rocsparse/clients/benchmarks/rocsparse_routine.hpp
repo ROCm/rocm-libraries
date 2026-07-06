@@ -1,6 +1,6 @@
 /*! \file */
 /* ************************************************************************
-* Copyright (C) 2021-2025 Advanced Micro Devices, Inc. All rights Reserved.
+* Copyright (C) 2021-2026 Advanced Micro Devices, Inc. All rights Reserved.
 *
 * Permission is hereby granted, free of charge, to any person obtaining a copy
 * of this software and associated documentation files (the "Software"), to deal
@@ -25,6 +25,13 @@
 #include "rocsparse_arguments.hpp"
 
 // clang-format off
+#ifdef ROCSPARSE_WITH_ILDLT0
+#define ROCSPARSE_FOREACH_ROUTINE_ILDLT0    \
+ROCSPARSE_DO_ROUTINE(spildlt0)
+#else
+#define ROCSPARSE_FOREACH_ROUTINE_ILDLT0
+#endif
+
 #define ROCSPARSE_FOREACH_ROUTINE			\
 ROCSPARSE_DO_ROUTINE(axpyi)						\
 ROCSPARSE_DO_ROUTINE(bellmm)						\
@@ -78,6 +85,10 @@ ROCSPARSE_DO_ROUTINE(csrsort)					\
 ROCSPARSE_DO_ROUTINE(csrsv)					\
 ROCSPARSE_DO_ROUTINE(csritsv)					\
 ROCSPARSE_DO_ROUTINE(spitsv_csr)				\
+ROCSPARSE_DO_ROUTINE(spic0)				\
+ROCSPARSE_FOREACH_ROUTINE_ILDLT0			\
+ROCSPARSE_DO_ROUTINE(spilu0)				\
+ROCSPARSE_DO_ROUTINE(sptrsv)				\
 ROCSPARSE_DO_ROUTINE(csr2dense)					\
 ROCSPARSE_DO_ROUTINE(csr2bsr)					\
 ROCSPARSE_DO_ROUTINE(csr2coo)					\
@@ -95,6 +106,7 @@ ROCSPARSE_DO_ROUTINE(dense_to_sparse_csr)			\
 ROCSPARSE_DO_ROUTINE(doti)					\
 ROCSPARSE_DO_ROUTINE(dotci)					\
 ROCSPARSE_DO_ROUTINE(ellmv)					\
+ROCSPARSE_DO_ROUTINE(sellmv)					\
 ROCSPARSE_DO_ROUTINE(ell2csr)					\
 ROCSPARSE_DO_ROUTINE(gebsr2csr)					\
 ROCSPARSE_DO_ROUTINE(gebsr2gebsr)				\
@@ -132,7 +144,8 @@ ROCSPARSE_DO_ROUTINE(v2_spmv_csr)				\
 ROCSPARSE_DO_ROUTINE(v2_spmv_csc)				\
 ROCSPARSE_DO_ROUTINE(v2_spmv_coo)				\
 ROCSPARSE_DO_ROUTINE(v2_spmv_coo_aos)				\
-ROCSPARSE_DO_ROUTINE(v2_spmv_ell)
+ROCSPARSE_DO_ROUTINE(v2_spmv_ell)               \
+ROCSPARSE_DO_ROUTINE(v2_spmv_sell)
 // clang-format on
 
 template <std::size_t N, typename T>

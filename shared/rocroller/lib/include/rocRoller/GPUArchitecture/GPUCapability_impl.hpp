@@ -1,28 +1,5 @@
-/*******************************************************************************
- *
- * MIT License
- *
- * Copyright 2024-2025 AMD ROCm(TM) Software
- *
- * Permission is hereby granted, free of charge, to any person obtaining a copy
- * of this software and associated documentation files (the "Software"), to deal
- * in the Software without restriction, including without limitation the rights
- * to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
- * copies of the Software, and to permit persons to whom the Software is
- * furnished to do so, subject to the following conditions:
- *
- * The above copyright notice and this permission notice shall be included in
- * all copies or substantial portions of the Software.
- *
- * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
- * IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
- * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
- * AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
- * LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
- * OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
- * SOFTWARE.
- *
- *******************************************************************************/
+// Copyright Advanced Micro Devices, Inc., or its affiliates.
+// SPDX-License-Identifier: MIT
 
 #pragma once
 
@@ -39,6 +16,8 @@
 #include <unordered_map>
 #include <vector>
 
+#include <rocRoller/GPUArchitecture/GPUCapability.hpp>
+
 namespace rocRoller
 {
     inline std::string GPUCapability::toString() const
@@ -48,7 +27,7 @@ namespace rocRoller
 
     inline std::ostream& operator<<(std::ostream& stream, GPUCapability::Value v)
     {
-        return stream << toString(v);
+        return stream << GPUCapability::toString(v);
     }
 
     inline std::string GPUCapability::toString(GPUCapability::Value value)
@@ -103,7 +82,22 @@ namespace rocRoller
             {"HasWMMA_f32_16x16x16_f16", Value::HasWMMA_f32_16x16x16_f16},
             {"HasWMMA_f16_16x16x16_f16", Value::HasWMMA_f16_16x16x16_f16},
             {"HasWMMA_bf16_16x16x16_bf16", Value::HasWMMA_bf16_16x16x16_bf16},
+            {"HasWMMA_f16_16x16x32_f16", Value::HasWMMA_f16_16x16x32_f16},
+            {"HasWMMA_bf16_16x16x32_bf16", Value::HasWMMA_bf16_16x16x32_bf16},
+            {"HasWMMA_f32_16x16x32_f16", Value::HasWMMA_f32_16x16x32_f16},
             {"HasWMMA_f32_16x16x16_f8", Value::HasWMMA_f32_16x16x16_f8},
+            {"HasWMMA_f32_16x16x64_f8", Value::HasWMMA_f32_16x16x64_f8},
+            {"HasWMMA_f16_16x16x64_f8", Value::HasWMMA_f16_16x16x64_f8},
+            {"HasWMMA_f32_16x16x128_f8", Value::HasWMMA_f32_16x16x128_f8},
+            {"HasWMMA_f16_16x16x128_f8", Value::HasWMMA_f16_16x16x128_f8},
+            {"HasWMMA_f32_16x16x4_f32", Value::HasWMMA_f32_16x16x4_f32},
+
+            {"HasWMMA_f8f6f4", Value::HasWMMA_f8f6f4},
+            {"HasWMMA_scale_f8f6f4", Value::HasWMMA_scale_f8f6f4},
+            {"HasWMMA_scale16_f8f6f4", Value::HasWMMA_scale16_f8f6f4},
+            {"HasWMMA_32x16x128_f4", Value::HasWMMA_32x16x128_f4},
+            {"HasWMMA_scale_32x16x128_f4", Value::HasWMMA_scale_32x16x128_f4},
+            {"HasWMMA_scale16_32x16x128_f4", Value::HasWMMA_scale16_32x16x128_f4},
 
             {"HasAccumOffset", Value::HasAccumOffset},
             {"HasGlobalOffset", Value::HasGlobalOffset},
@@ -142,6 +136,8 @@ namespace rocRoller
             {"MaxLgkmcnt", Value::MaxLgkmcnt},
             {"MaxExpcnt", Value::MaxExpcnt},
             {"HasExpcnt", Value::HasExpcnt},
+            {"MaxTensorcnt", Value::MaxTensorcnt},
+            {"HasTensorcnt", Value::HasTensorcnt},
             {"SupportedSource", Value::SupportedSource},
 
             {"Waitcnt0Disabled", Value::Waitcnt0Disabled},
@@ -158,8 +154,11 @@ namespace rocRoller
             {"DefaultWavefrontSize", Value::DefaultWavefrontSize},
 
             {"HasBlockScaling32", Value::HasBlockScaling32},
+            {"HasBlockScaling16", Value::HasBlockScaling16},
             {"DefaultScaleBlockSize", Value::DefaultScaleBlockSize},
             {"HasE8M0Scale", Value::HasE8M0Scale},
+            {"HasE5M3Scale", Value::HasE5M3Scale},
+            {"HasE4M3Scale", Value::HasE4M3Scale},
 
             {"UnalignedVGPRs", Value::UnalignedVGPRs},
             {"UnalignedSGPRs", Value::UnalignedSGPRs},
@@ -178,6 +177,11 @@ namespace rocRoller
             {"ds_read_b96_tr_b6", Value::ds_read_b96_tr_b6},
             {"ds_read_b64_tr_b4", Value::ds_read_b64_tr_b4},
 
+            {"ds_load_tr16_b128", Value::ds_load_tr16_b128},
+            {"ds_load_tr8_b64", Value::ds_load_tr8_b64},
+            {"ds_load_tr6_b96", Value::ds_load_tr6_b96},
+            {"ds_load_tr4_b64", Value::ds_load_tr4_b64},
+
             {"DSReadTransposeB6PaddingBytes", Value::DSReadTransposeB6PaddingBytes},
 
             {"HasPRNG", Value::HasPRNG},
@@ -187,8 +191,19 @@ namespace rocRoller
 
             {"WorkgroupIdxViaTTMP", Value::WorkgroupIdxViaTTMP},
             {"HasBufferOutOfBoundsCheckOption", Value::HasBufferOutOfBoundsCheckOption},
+            {"HasBufferFormatSpecInSOffsetField", Value::HasBufferFormatSpecInSOffsetField},
 
             {"HasXCC", Value::HasXCC},
             {"DefaultRemapXCCValue", Value::DefaultRemapXCCValue},
+
+            {"MaxPreloadedKernargs", Value::MaxPreloadedKernargs},
+
+            {"PartiallyActiveWaveSize", Value::PartiallyActiveWaveSize},
+
+            {"HasVGPRIndexing", Value::HasVGPRIndexing},
+
+            {"HasWorkgroupClusters", Value::HasWorkgroupClusters},
+
+            {"HasTDM", Value::HasTDM},
     };
 }

@@ -1,5 +1,5 @@
+// Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
 // SPDX-License-Identifier: MIT
-// Copyright (c) 2024-2025, Advanced Micro Devices, Inc. All rights reserved.
 
 #pragma once
 
@@ -92,13 +92,30 @@ struct DeviceGemmMultiD_ABScale_Xdl_CShuffle_V3
                                          BElementwiseOperation,
                                          CElementwiseOperation>
 {
-    GET_NXDL_PER_WAVE_IMPL
-    static constexpr auto NXdlPerWave64 = GetNXdlPerWave<true>();
-    static constexpr auto NXdlPerWave32 = GetNXdlPerWave<false>();
-    static constexpr index_t NumDTensor = DsDataType::Size();
+    static constexpr auto WarpTileConfig64 = GetWarpTileConfig<BlockSize,
+                                                               MPerBlock,
+                                                               NPerBlock,
+                                                               MPerXDL,
+                                                               NPerXDL,
+                                                               MXdlPerWave,
+                                                               CShuffleMXdlPerWavePerShuffle,
+                                                               CShuffleNXdlPerWavePerShuffle,
+                                                               true>();
+    static constexpr auto WarpTileConfig32 = GetWarpTileConfig<BlockSize,
+                                                               MPerBlock,
+                                                               NPerBlock,
+                                                               MPerXDL,
+                                                               NPerXDL,
+                                                               MXdlPerWave,
+                                                               CShuffleMXdlPerWavePerShuffle,
+                                                               CShuffleNXdlPerWavePerShuffle,
+                                                               false>();
+    static constexpr auto NXdlPerWave64    = WarpTileConfig64.At(3);
+    static constexpr auto NXdlPerWave32    = WarpTileConfig32.At(3);
+    static constexpr index_t NumDTensor    = DsDataType::Size();
 
     // GridwiseGemm
-    template <index_t NXdlPerWave_>
+    template <typename WarpTileConfig>
     using GridwiseGemmBase = GridwiseGemmMultiD_ABScale_xdl_cshuffle_v3<
         ALayout,
         BLayout,
@@ -123,10 +140,10 @@ struct DeviceGemmMultiD_ABScale_Xdl_CShuffle_V3
         KPerBlock,
         AK1,
         BK1,
-        MPerXDL,
-        NPerXDL,
-        MXdlPerWave,
-        NXdlPerWave_,
+        WarpTileConfig::At(0),
+        WarpTileConfig::At(1),
+        WarpTileConfig::At(2),
+        WarpTileConfig::At(3),
         ABlockTransferThreadClusterLengths_AK0_M_AK1,
         ABlockTransferThreadClusterArrangeOrder,
         ABlockTransferSrcAccessOrder,
@@ -143,8 +160,8 @@ struct DeviceGemmMultiD_ABScale_Xdl_CShuffle_V3
         BBlockTransferDstScalarPerVector_BK1,
         false,
         BBlockLdsExtraN,
-        CShuffleMXdlPerWavePerShuffle,
-        math::min(CShuffleNXdlPerWavePerShuffle, NXdlPerWave_),
+        WarpTileConfig::At(4),
+        WarpTileConfig::At(5),
         CShuffleBlockTransferClusterLengths_MBlock_MPerBlock_NBlock_NPerBlock,
         CDEShuffleBlockTransferScalarPerVectors,
         BlkGemmPipeSched,
@@ -153,8 +170,8 @@ struct DeviceGemmMultiD_ABScale_Xdl_CShuffle_V3
         ComputeTypeB,
         LDSTypeA,
         LDSTypeB>;
-    using GridwiseGemm64 = GridwiseGemmBase<math::max(NXdlPerWave64, 1)>;
-    using GridwiseGemm32 = GridwiseGemmBase<math::max(NXdlPerWave32, 1)>;
+    using GridwiseGemm64 = GridwiseGemmBase<decltype(WarpTileConfig64)>;
+    using GridwiseGemm32 = GridwiseGemmBase<decltype(WarpTileConfig32)>;
 
     using Argument = typename GridwiseGemm64::Argument;
 
@@ -210,7 +227,7 @@ struct DeviceGemmMultiD_ABScale_Xdl_CShuffle_V3
                         // rotating mem
                         rotating_mem.Next();
                         // clear c mem
-                        if(arg_.KBatch > 1)
+                        if(arg_.KBatch > 1 && !arg_.skip_zero_init)
                             hipGetErrorString(hipMemsetAsync(arg_.p_c_grid,
                                                              0,
                                                              arg_.M * arg_.N * sizeof(CDataType),
@@ -228,7 +245,7 @@ struct DeviceGemmMultiD_ABScale_Xdl_CShuffle_V3
                 }
                 else
                 {
-                    if(arg.KBatch > 1)
+                    if(arg.KBatch > 1 && !arg.skip_zero_init)
                         hipGetErrorString(hipMemsetAsync(arg.p_c_grid,
                                                          0,
                                                          arg.M * arg.N * sizeof(CDataType),
@@ -262,6 +279,16 @@ struct DeviceGemmMultiD_ABScale_Xdl_CShuffle_V3
                 if constexpr(BlkGemmPipelineVer == BlockGemmPipelineVersion::v1 ||
                              BlkGemmPipelineVer == BlockGemmPipelineVersion::v3)
                 {
+                    if(arg.KBatch > 1)
+                    {
+                        const auto kernel =
+                            kernel_gemm_xdl_cshuffle_v3<GridwiseGemm,
+                                                        true,
+                                                        InMemoryDataOperationEnum::AtomicAdd,
+                                                        minimum_occupancy>;
+                        Run(kernel);
+                    }
+                    else
                     {
                         const auto kernel =
                             kernel_gemm_xdl_cshuffle_v3<GridwiseGemm,
@@ -279,22 +306,47 @@ struct DeviceGemmMultiD_ABScale_Xdl_CShuffle_V3
                 {
                     if(GridwiseGemm::CalculateKBlockLoopTailNum(K_split) == TailNumber::Full)
                     {
-                        const auto kernel =
-                            kernel_gemm_xdl_cshuffle_v3<GridwiseGemm,
-                                                        false,
-                                                        InMemoryDataOperationEnum::Set,
-                                                        minimum_occupancy>;
-                        Run(kernel);
+                        if(arg.KBatch > 1)
+                        {
+                            const auto kernel =
+                                kernel_gemm_xdl_cshuffle_v3<GridwiseGemm,
+                                                            false,
+                                                            InMemoryDataOperationEnum::AtomicAdd,
+                                                            minimum_occupancy>;
+                            Run(kernel);
+                        }
+                        else
+                        {
+                            const auto kernel =
+                                kernel_gemm_xdl_cshuffle_v3<GridwiseGemm,
+                                                            false,
+                                                            InMemoryDataOperationEnum::Set,
+                                                            minimum_occupancy>;
+                            Run(kernel);
+                        }
                     }
                     else if(GridwiseGemm::CalculateKBlockLoopTailNum(K_split) == TailNumber::Odd)
                     {
-                        const auto kernel =
-                            kernel_gemm_xdl_cshuffle_v3<GridwiseGemm,
-                                                        false,
-                                                        InMemoryDataOperationEnum::Set,
-                                                        minimum_occupancy,
-                                                        TailNumber::Odd>;
-                        Run(kernel);
+                        if(arg.KBatch > 1)
+                        {
+                            const auto kernel =
+                                kernel_gemm_xdl_cshuffle_v3<GridwiseGemm,
+                                                            false,
+                                                            InMemoryDataOperationEnum::AtomicAdd,
+                                                            minimum_occupancy,
+                                                            TailNumber::Odd>;
+                            Run(kernel);
+                        }
+                        else
+                        {
+                            const auto kernel =
+                                kernel_gemm_xdl_cshuffle_v3<GridwiseGemm,
+                                                            false,
+                                                            InMemoryDataOperationEnum::Set,
+                                                            minimum_occupancy,
+                                                            TailNumber::Odd>;
+                            Run(kernel);
+                        }
                     }
                 }
             }
@@ -311,6 +363,32 @@ struct DeviceGemmMultiD_ABScale_Xdl_CShuffle_V3
         }
     };
 
+    void SetKBatch(BaseArgument* base_arg, int KBatch) const override
+    {
+        auto& arg  = *dynamic_cast<Argument*>(base_arg);
+        arg.KBatch = KBatch;
+        if(get_warp_size() == 64)
+        {
+            if constexpr(NXdlPerWave64 > 0)
+            {
+                arg.KRead   = GridwiseGemm64::CalculateKRead(arg.K, KBatch);
+                arg.KPadded = GridwiseGemm64::CalculateKPadded(arg.K, KBatch);
+                arg.AK0     = GridwiseGemm64::CalculateAK0Padded(arg.K, KBatch);
+                arg.BK0     = GridwiseGemm64::CalculateBK0Padded(arg.K, KBatch);
+            }
+        }
+        else
+        {
+            if constexpr(NXdlPerWave32 > 0)
+            {
+                arg.KRead   = GridwiseGemm32::CalculateKRead(arg.K, KBatch);
+                arg.KPadded = GridwiseGemm32::CalculateKPadded(arg.K, KBatch);
+                arg.AK0     = GridwiseGemm32::CalculateAK0Padded(arg.K, KBatch);
+                arg.BK0     = GridwiseGemm32::CalculateBK0Padded(arg.K, KBatch);
+            }
+        }
+    }
+
     static constexpr bool IsValidCompilationParameter()
     {
         // TODO: properly implement this check
@@ -319,7 +397,19 @@ struct DeviceGemmMultiD_ABScale_Xdl_CShuffle_V3
 
     static bool IsSupportedArgument(const Argument& arg)
     {
-        if(!ck::is_xdl_wmma_supported<ComputeTypeA, ComputeTypeB, MPerXDL, NPerXDL>())
+        // with splitk the implementation doesn't work
+        // when KRead % ScaleBlockK != 0, independently of K padding
+        if(arg.KBatch > 1 && arg.KRead % ScaleBlockK != 0)
+        {
+            return false;
+        }
+
+        if(!ck::is_xdl_wmma_supported<ComputeTypeA,
+                                      ComputeTypeB,
+                                      MPerXDL,
+                                      NPerXDL,
+                                      WarpTileConfig32.At(0),
+                                      WarpTileConfig32.At(1)>())
         {
             return false;
         }
@@ -379,6 +469,14 @@ struct DeviceGemmMultiD_ABScale_Xdl_CShuffle_V3
                              BElementwiseOperation b_element_op,
                              CElementwiseOperation c_element_op)
     {
+        index_t StrideScaleA = ck::is_same_v<ALayout, tensor_layout::gemm::RowMajor>
+                                   ? math::integer_divide_ceil(K, ScaleBlockK)
+                                   : math::integer_divide_ceil(M, ScaleBlockM);
+
+        index_t StrideScaleB = ck::is_same_v<BLayout, ck::tensor_layout::gemm::ColumnMajor>
+                                   ? math::integer_divide_ceil(K, ScaleBlockK)
+                                   : math::integer_divide_ceil(N, ScaleBlockN);
+
         return Argument{static_cast<const ADataType*>(p_a),
                         static_cast<const BDataType*>(p_b),
                         p_ds,
@@ -390,6 +488,8 @@ struct DeviceGemmMultiD_ABScale_Xdl_CShuffle_V3
                         StrideB,
                         StrideDs,
                         StrideC,
+                        StrideScaleA,
+                        StrideScaleB,
                         static_cast<const AScaleDataType*>(p_a_scale),
                         static_cast<const BScaleDataType*>(p_b_scale),
                         1,
@@ -419,6 +519,14 @@ struct DeviceGemmMultiD_ABScale_Xdl_CShuffle_V3
                         BElementwiseOperation b_element_op,
                         CElementwiseOperation c_element_op) override
     {
+        index_t StrideScaleA = ck::is_same_v<ALayout, tensor_layout::gemm::RowMajor>
+                                   ? math::integer_divide_ceil(K, ScaleBlockK)
+                                   : math::integer_divide_ceil(M, ScaleBlockM);
+
+        index_t StrideScaleB = ck::is_same_v<BLayout, ck::tensor_layout::gemm::ColumnMajor>
+                                   ? math::integer_divide_ceil(K, ScaleBlockK)
+                                   : math::integer_divide_ceil(N, ScaleBlockN);
+
         return std::make_unique<Argument>(static_cast<const ADataType*>(p_a),
                                           static_cast<const BDataType*>(p_b),
                                           p_ds,
@@ -430,6 +538,8 @@ struct DeviceGemmMultiD_ABScale_Xdl_CShuffle_V3
                                           StrideB,
                                           StrideDs,
                                           StrideC,
+                                          StrideScaleA,
+                                          StrideScaleB,
                                           static_cast<const AScaleDataType*>(p_a_scale),
                                           static_cast<const BScaleDataType*>(p_b_scale),
                                           1,

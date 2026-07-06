@@ -1,28 +1,5 @@
-/*******************************************************************************
- *
- * MIT License
- *
- * Copyright 2024-2025 AMD ROCm(TM) Software
- *
- * Permission is hereby granted, free of charge, to any person obtaining a copy
- * of this software and associated documentation files (the "Software"), to deal
- * in the Software without restriction, including without limitation the rights
- * to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
- * copies of the Software, and to permit persons to whom the Software is
- * furnished to do so, subject to the following conditions:
- *
- * The above copyright notice and this permission notice shall be included in
- * all copies or substantial portions of the Software.
- *
- * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
- * IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
- * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
- * AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
- * LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
- * OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
- * SOFTWARE.
- *
- *******************************************************************************/
+// Copyright Advanced Micro Devices, Inc., or its affiliates.
+// SPDX-License-Identifier: MIT
 
 #include <rocRoller/Context.hpp>
 #include <rocRoller/Expression.hpp>
@@ -116,13 +93,17 @@ Generator<Instruction> simple_mi(ContextPtr m_context)
     {
         mi_mnemonic = "v_mfma_f32_32x32x1f32";
     }
-    else if(arch.HasCapability(GPUCapability::HasWMMA) && arch.target().isRDNA4GPU())
+    else if(arch.HasCapability(GPUCapability::HasWMMA_f32_16x16x16_f16))
     {
         mi_mnemonic = "v_wmma_f32_16x16x16_f16";
     }
+    else if(arch.HasCapability(GPUCapability::HasWMMA_f16_16x16x32_f16))
+    {
+        mi_mnemonic = "v_wmma_f16_16x16x32_f16";
+    }
     else
     {
-        AssertFatal(false, concatenate("Arch not supported: ", arch.target().toString()));
+        Throw<FatalError>(concatenate("Arch not supported: ", arch.target().toString()));
     }
     auto v = createRegisters(m_context, Register::Type::Vector, DataType::Float, 4);
     while(true)
@@ -140,13 +121,17 @@ Generator<Instruction> complex_mi_with_coop(ContextPtr m_context)
     {
         mi_mnemonic = "v_mfma_f32_32x32x1f32";
     }
-    else if(arch.HasCapability(GPUCapability::HasWMMA) && arch.target().isRDNA4GPU())
+    else if(arch.HasCapability(GPUCapability::HasWMMA_f32_16x16x16_f16))
     {
         mi_mnemonic = "v_wmma_f32_16x16x16_f16";
     }
+    else if(arch.HasCapability(GPUCapability::HasWMMA_f16_16x16x32_f16))
+    {
+        mi_mnemonic = "v_wmma_f16_16x16x32_f16";
+    }
     else
     {
-        AssertFatal(false, concatenate("Arch not supported: ", arch.target().toString()));
+        Throw<FatalError>(concatenate("Arch not supported: ", arch.target().toString()));
     }
     auto mi_v = createRegisters(m_context, Register::Type::Vector, DataType::Float, 16);
     auto or_v = createRegisters(m_context, Register::Type::Vector, DataType::Float, 4);
@@ -216,7 +201,7 @@ CodeGenResult CodeGen(CodeGenProblem const& prob)
     }
     else
     {
-        AssertFatal(false, "Invalid instructions selection.");
+        Throw<FatalError>("Invalid instructions selection.");
     }
 
     auto Program = [&](ContextPtr m_context) -> Generator<Instruction> {

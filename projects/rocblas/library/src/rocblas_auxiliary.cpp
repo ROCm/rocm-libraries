@@ -38,7 +38,7 @@
 extern "C" rocblas_pointer_mode rocblas_pointer_to_mode(void* ptr)
 {
     hipPointerAttribute_t attribute;
-    hipPointerGetAttributes(&attribute, ptr);
+    PRINT_IF_HIP_ERROR(hipPointerGetAttributes(&attribute, ptr));
     return ptr == attribute.devicePointer ? rocblas_pointer_mode_device : rocblas_pointer_mode_host;
 }
 
@@ -119,6 +119,86 @@ try
     if(handle->layer_mode & rocblas_layer_mode_log_trace)
         logger.log_trace(handle, "rocblas_set_atomics_mode", mode);
     handle->atomics_mode = mode;
+    return rocblas_status_success;
+}
+catch(...)
+{
+    return exception_to_rocblas_status();
+}
+
+/*******************************************************************************
+ * ! \brief get alpha stride
+ ******************************************************************************/
+extern "C" rocblas_status rocblas_get_batch_alpha_stride(rocblas_handle  handle,
+                                                         rocblas_stride* alpha_stride)
+try
+{
+    if(!handle)
+        return rocblas_status_invalid_handle;
+    *alpha_stride = handle->get_stride_alpha();
+    rocblas_internal_logger logger;
+    if(handle->layer_mode & rocblas_layer_mode_log_trace)
+        logger.log_trace(handle, "rocblas_get_batch_alpha_stride", *alpha_stride);
+    return rocblas_status_success;
+}
+catch(...)
+{
+    return exception_to_rocblas_status();
+}
+
+/*******************************************************************************
+ * ! \brief set alpha stride
+ ******************************************************************************/
+extern "C" rocblas_status rocblas_set_batch_alpha_stride(rocblas_handle handle,
+                                                         rocblas_stride alpha_stride)
+try
+{
+    if(!handle)
+        return rocblas_status_invalid_handle;
+    rocblas_internal_logger logger;
+    if(handle->layer_mode & rocblas_layer_mode_log_trace)
+        logger.log_trace(handle, "rocblas_set_batch_alpha_stride", alpha_stride);
+    handle->set_stride_alpha(alpha_stride);
+    return rocblas_status_success;
+}
+catch(...)
+{
+    return exception_to_rocblas_status();
+}
+
+/*******************************************************************************
+ * ! \brief get beta stride
+ ******************************************************************************/
+extern "C" rocblas_status rocblas_get_batch_beta_stride(rocblas_handle  handle,
+                                                        rocblas_stride* beta_stride)
+try
+{
+    if(!handle)
+        return rocblas_status_invalid_handle;
+    *beta_stride = handle->get_stride_beta();
+    rocblas_internal_logger logger;
+    if(handle->layer_mode & rocblas_layer_mode_log_trace)
+        logger.log_trace(handle, "rocblas_get_batch_beta_stride", *beta_stride);
+    return rocblas_status_success;
+}
+catch(...)
+{
+    return exception_to_rocblas_status();
+}
+
+/*******************************************************************************
+ * ! \brief set beta stride
+ ******************************************************************************/
+extern "C" rocblas_status rocblas_set_batch_beta_stride(rocblas_handle handle,
+                                                        rocblas_stride beta_stride)
+try
+{
+    if(!handle)
+        return rocblas_status_invalid_handle;
+    rocblas_internal_logger logger;
+    if(handle->layer_mode & rocblas_layer_mode_log_trace)
+        logger.log_trace(handle, "rocblas_set_batch_beta_stride", beta_stride);
+    handle->set_stride_beta(beta_stride);
     return rocblas_status_success;
 }
 catch(...)
@@ -252,33 +332,8 @@ try
     if(handle->layer_mode & rocblas_layer_mode_log_trace)
         logger.log_trace(handle, "rocblas_set_stream", stream);
 
-    // If the stream is unchanged, return immediately
-    if(stream == handle->stream)
-        return rocblas_status_success;
-
-    //Verify if the new stream is in capture mode
-    hipStreamCaptureStatus stream_status = hipStreamCaptureStatusNone;
-    if(stream != 0)
-    {
-        bool status = hipStreamIsCapturing(stream, &stream_status) == hipSuccess;
-
-        if(!status)
-            return rocblas_status_invalid_value;
-    }
-
-    // Stream capture does not allow use of hipStreamQuery
-    // If the current stream or new stream is in capture mode, skip use of hipStreamQuery()
-    if((handle->stream == 0 || !handle->is_stream_in_capture_mode())
-       && stream_status == hipStreamCaptureStatusNone)
-    {
-        // The new stream must be valid
-        if(stream != 0 && hipStreamQuery(stream) == hipErrorInvalidHandle)
-            return rocblas_status_invalid_value;
-    }
-
     // Set the new stream
-    handle->stream = stream;
-    return rocblas_status_success;
+    return handle->set_stream(stream);
 }
 catch(...)
 {
@@ -300,6 +355,7 @@ try
     rocblas_internal_logger logger;
     if(handle->layer_mode & rocblas_layer_mode_log_trace)
         logger.log_trace(handle, "rocblas_get_stream", *stream_id);
+
     *stream_id = handle->get_stream();
     return rocblas_status_success;
 }
@@ -910,30 +966,35 @@ bool rocblas_internal_tensile_supports_ldc_ne_ldd(rocblas_handle handle)
 bool rocblas_internal_tensile_supports_xdl_math_op(rocblas_math_mode mode)
 {
     int deviceId;
-    hipGetDevice(&deviceId);
+    PRINT_IF_HIP_ERROR(hipGetDevice(&deviceId));
     hipDeviceProp_t deviceProperties;
-    hipGetDeviceProperties(&deviceProperties, deviceId);
+    PRINT_IF_HIP_ERROR(hipGetDeviceProperties(&deviceProperties, deviceId));
     std::string deviceString(deviceProperties.gcnArchName);
     return (deviceString.find("gfx942") != std::string::npos);
+}
+
+std::string rocblas_internal_get_arch_name(int deviceId)
+{
+    hipDeviceProp_t deviceProperties;
+    PRINT_IF_HIP_ERROR(hipGetDeviceProperties(&deviceProperties, deviceId));
+    return ArchName<hipDeviceProp_t>{}(deviceProperties); // strips : and later
 }
 
 // exported. Get architecture name
 std::string rocblas_internal_get_arch_name()
 {
     int deviceId;
-    hipGetDevice(&deviceId);
-    hipDeviceProp_t deviceProperties;
-    hipGetDeviceProperties(&deviceProperties, deviceId);
-    return ArchName<hipDeviceProp_t>{}(deviceProperties);
+    PRINT_IF_HIP_ERROR(hipGetDevice(&deviceId));
+    return rocblas_internal_get_arch_name(deviceId);
 }
 
 // exported. Get xnack mode
 std::string rocblas_internal_get_xnack_mode()
 {
     int deviceId;
-    hipGetDevice(&deviceId);
+    PRINT_IF_HIP_ERROR(hipGetDevice(&deviceId));
     hipDeviceProp_t deviceProperties;
-    hipGetDeviceProperties(&deviceProperties, deviceId);
+    PRINT_IF_HIP_ERROR(hipGetDeviceProperties(&deviceProperties, deviceId));
     return XnackMode<hipDeviceProp_t>{}(deviceProperties);
 }
 

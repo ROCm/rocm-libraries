@@ -2,6 +2,108 @@
 
 Full documentation for rocPRIM is available at [https://rocm.docs.amd.com/projects/rocPRIM/en/latest/](https://rocm.docs.amd.com/projects/rocPRIM/en/latest/).
 
+## rocPRIM 4.5.0 for ROCm 7.14
+
+### Added
+
+* Added `generate_resource_spec.cpp` to the test directory and built as a new target by CMake. It generates the resource spec file required by CTest when running tests in parallel.
+* gfx1250 support
+
+* Added a parallel `device_topk`, which finds the largest/smallest K elements from an input array of keys.
+
+### Changed
+
+* Updated the documentation on how to run rocPrim tests on multiple GPUs in parallel.
+* Combined and simplified seperate assertion templates using `std::is_floating_point`, `rocprim::half`, and `rocprim::bfloat16` to use `rocprim::is_floating_point`
+
+### Removed
+
+* Removed the `GenerateResourceSpec.cmake` script - it is replaced by the added `generate_resource_spec.cpp` code above.
+
+## Since last release ROCm 7.12
+
+### Added
+
+* Added type trait definitions for `__hip_bfloat16`. This should resolve issues where this type did not work with radix-based algorithms.
+* Unit tests for config_types
+
+### Optimized
+
+* Reduced build times for unit tests.
+* Memory usage in unit tests.
+
+### Changed
+
+* Changed the `bitonic_sort` algorithm in `warp_sort_shuffle` to use forward-only comparison for better performance. `block_sort_bitonic` is also changed to use forward-only comparison, to align the sorting with `warp_sort`.
+
+### Resolved issues
+
+* Fixed a silent overflow in `rocprim::device_segmented_reduce` where it could exceed the maximum number of HIP threads, resulting in missing output.
+* Certain large unit tests now properly detect if insufficient system memory is present and skip the test case accordingly.
+* Fixed out-of-bounds memory access in block run length decode.
+* Fixed memory leak in unit tests.
+
+## rocPRIM 4.3.0 for ROCm 7.12
+
+### Added
+
+* Added tested examples for all algorithms.
+
+### Optimizations
+
+* Updated config system to pick better fallback configs for untuned GPUs.
+
+### Upcoming changes
+
+* Deprecated the `ROCPRIM_PRINT_ERROR_ONCE` macro.
+
+### Changed
+
+* Changed various APIs with undefined behaviors to abort with a trap instead of printing a runtime error with `ROCPRIM_PRINT_ERROR_ONCE` 
+* Benchmarking now requires [AMD SMI](https://rocm.docs.amd.com/projects/amdsmi/en/latest/) to be installed.
+  * rocPRIM now uses the new single-header library 'primbench' for benchmarks, rather than Google Benchmark. primbench requires AMD SMI.
+  * See `shared/primbench/README.md` for primbench its documentation.
+* Uses mold linker for compilation if availible.
+
+### Removed
+
+* Removed the CMake option `BENCHMARK_USE_AMDSMI`, as benchmarking now requires AMD SMI to be installed.
+
+### Removed
+
+* Removed unused `equality`, `inequality`, `sum`, `max`, `min` from thread_operator.hpp.
+* Removed duplicate `inequality_operator` from binary_op_warpper.hpp
+
+## rocPRIM 4.2.0 for ROCm 7.2
+
+### Added
+
+* Added missing benchmarks, such that every autotuned specialization is now benchmarked.
+* Added a new cmake option, `BENCHMARK_USE_AMDSMI`. It is set to `OFF` by default. When this option is set to `ON`, it lets benchmarks use AMD SMI to output more GPU statistics.
+* Added the first tested example program for `device_search`, which is linked in the documentation.
+* Added `apply_config_improvements.py`, which generates improved configs by taking the best specializations from old and new configs.
+  * Run the script with `--help` for usage instructions, and see `projects/rocprim/docs/concepts/tuning.rst` for documentation.
+* Kernel Tuner proof-of-concept.
+* Enhanced SPIR-V support and performance.
+* Added `block_adjacent_difference_crosslane` using warp intrinsics, for better performance in some cases compared to using only LDS.
+
+### Optimizations
+
+* Improved performance of `device_radix_sort` onesweep variant 
+
+### Resolved issues
+
+* Fixed the issue where `rocprim::device_scan_by_key` failed when performing an "in-place" inclusive scan by reusing "keys" as output, by adding a buffer to store the last keys of each block (excluding the last block). This fix only affects the specific case of reusing "keys" as output in an inclusive scan, and does not affect other cases.
+* Fixed benchmark build error on Windows.
+* Fixed offload compress build option.
+* Fixed `float_bit_mask` for `rocprim::half`. 
+* Fixed handling of undefined behaviour when `__builtin_clz`, `__builtin_ctz`, and similar builtins are called.
+* Fixed potential build error with `rocprim::detail::histogram_impl`.
+
+### Known issues
+
+* Potential hang with `rocprim::partition_threeway` with large input data sizes on later ROCm builds. A workaround is currently in place.
+
 ## rocPRIM 4.1.0 for ROCm 7.1
 
 ### Added
@@ -11,6 +113,12 @@ Full documentation for rocPRIM is available at [https://rocm.docs.amd.com/projec
 * Added experimental support for SPIR-V, to use the correct tuned config for part of the appliable algorithms.
 * Added a new cmake option, `BUILD_OFFLOAD_COMPRESS`. When rocPRIM is build with this option enabled, the `--offload-compress` switch is passed to the compiler. This causes the compiler to compress the binary that it generates. Compression can be useful in cases where you are compiling for a large number of targets, since this often results in a large binary. Without compression, in some cases, the generated binary may become so large symbols are placed out of range, resulting in linking errors. The new `BUILD_OFFLOAD_COMPRESS` option is set to `ON` by default.
 * Added a new CMake option `-DUSE_SYSTEM_LIB` to allow tests to be built from `ROCm` libraries provided by the system.
+* Added `rocprim::apply` which applies a function to a `rocprim::tuple`.
+
+
+### Known issues
+
+* benchmark_device_adjacent_difference build hangs due to https://github.com/ROCm/llvm-project/issues/2616.  Workaround is to build with -O1.
 
 ### Changed
 
@@ -31,6 +139,13 @@ Full documentation for rocPRIM is available at [https://rocm.docs.amd.com/projec
 * Fixed `device_select`, `device_merge`, and `device_merge_sort` not allocating the correct amount of virtual shared memory on the host.
 * Fixed the `->` operator for the `transform_iterator`, the `texture_cache_iterator` and the `arg_index_iterator`, by now returning a proxy pointer.
   * The `arg_index_iterator` also now only returns the internal iterator for the `->`.
+
+## rocPRIM 4.0.1 for ROCm 7.0.2
+
+### Resolved issues
+
+* Fixed compilation issue when using `rocprim::texture_cache_iterator`.
+* Fixed a HIP version check used to determine whether hipStreamLegacy is supported. This resolves runtime errors that occur when hipStreamLegacy is used in versions of ROCm later than 6.4.
 
 ## rocPRIM 4.0.0 for ROCm 7.0
 
@@ -673,5 +788,3 @@ when the input or inital type was smaller than the output type.
 
 * Switched to HIP-Clang as the default compiler
 * CMake searches for rocPRIM locally first; if t's not found, CMake downloads it from GitHub
-
-

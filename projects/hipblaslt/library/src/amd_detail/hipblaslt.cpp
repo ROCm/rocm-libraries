@@ -2,7 +2,7 @@
  *
  * MIT License
  *
- * Copyright (C) 2022-2024 Advanced Micro Devices, Inc.
+ * Copyright (C) 2022-2026 Advanced Micro Devices, Inc.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -26,7 +26,9 @@
 
 #include "hipblaslt/hipblaslt.h"
 #include "UserDrivenTuningParser.hpp"
+#include "check_numerics_matrix.hpp"
 #include "exceptions.hpp"
+#include "handle.h"
 #include "hipblaslt/hipblaslt-ext-op.h"
 #include "hipblaslt_internal.hpp"
 
@@ -46,11 +48,26 @@ bool override_path_compare_git_version(OverrideSingleton& override, hipblasLtHan
 {
     char git_version[128];
     hipblasLtGetGitRevision(handle, &git_version[0]);
-    std::ifstream file_read(override.file_path);
-    std::string   firstline;
-    std::string   header = "Git Version: ";
-    std::getline(file_read, firstline);
-    size_t pos = firstline.find(header);
+    static std::string cached_firstline;
+    static std::string cached_path;
+    static bool        cached = false;
+    std::string        firstline;
+
+    if(!cached || cached_path != override.file_path)
+    {
+        std::ifstream file_read(override.file_path);
+        std::getline(file_read, firstline);
+        cached_firstline = firstline;
+        cached_path      = override.file_path;
+        cached           = true;
+    }
+    else
+    {
+        firstline = cached_firstline;
+    }
+
+    std::string header = "Git Version: ";
+    size_t      pos    = firstline.find(header);
     if(pos != std::string::npos)
     {
         std::string file_version = firstline.substr(pos + header.length());
@@ -179,6 +196,49 @@ catch(...)
     return exception_to_hipblas_status();
 }
 
+hipblasStatus_t hipblasLtSetSmCountTarget(hipblasLtHandle_t handle, int32_t smCountTarget)
+try
+{
+    rocblaslt::Debug::Instance().markerStart("hipblasLtSetSmCountTarget");
+    auto status = RocBlasLtStatusToHIPStatus(
+        rocblaslt_set_sm_count_target((rocblaslt_handle)handle, smCountTarget));
+    rocblaslt::Debug::Instance().markerStop();
+    return status;
+}
+catch(...)
+{
+    return exception_to_hipblas_status();
+}
+
+hipblasStatus_t hipblasLtGetSmCountTarget(hipblasLtHandle_t handle, int32_t* smCountTarget)
+try
+{
+    rocblaslt::Debug::Instance().markerStart("hipblasLtGetSmCountTarget");
+    auto status = RocBlasLtStatusToHIPStatus(
+        rocblaslt_get_sm_count_target((rocblaslt_handle)handle, smCountTarget));
+    rocblaslt::Debug::Instance().markerStop();
+    return status;
+}
+catch(...)
+{
+    return exception_to_hipblas_status();
+}
+
+hipblasStatus_t hipblasLtCheckNumericsDrain(hipblasLtHandle_t handle, uint32_t* first_nan_call_id)
+try
+{
+    if(handle == nullptr)
+        return HIPBLAS_STATUS_NOT_INITIALIZED;
+    const uint32_t first_nan = hipblaslt_check_numerics_drain_handle((rocblaslt_handle)handle);
+    if(first_nan_call_id)
+        *first_nan_call_id = first_nan;
+    return HIPBLAS_STATUS_SUCCESS;
+}
+catch(...)
+{
+    return exception_to_hipblas_status();
+}
+
 hipblasStatus_t hipblasLtMatrixLayoutCreate(hipblasLtMatrixLayout_t* matDescr,
                                             hipDataType              valueType,
                                             uint64_t                 rows,
@@ -217,6 +277,23 @@ hipblasStatus_t hipblasLtMatmulDescCreate(hipblasLtMatmulDesc_t* matmulDesc,
 try
 {
     rocblaslt::Debug::Instance().markerStart("hipblasLtMatmulDescCreate");
+    char* override = std::getenv("HIPBLASLT_OVERRIDE_COMPUTE_TYPE_XF32");
+    if(override && (computeType == hipblasComputeType_t::HIPBLAS_COMPUTE_32F_FAST_TF32)
+       && (std::string(override) != ""))
+    {
+        switch(std::stoi(std::string(override)))
+        {
+        case 0:
+            computeType = hipblasComputeType_t::HIPBLAS_COMPUTE_32F;
+            break;
+        case 2:
+            computeType = hipblasComputeType_t::HIPBLAS_COMPUTE_32F_FAST_16BF;
+            break;
+        case 1:
+        default:
+            break;
+        }
+    }
     auto status = RocBlasLtStatusToHIPStatus(rocblaslt_matmul_desc_create(
         (rocblaslt_matmul_desc*)matmulDesc, (rocblaslt_compute_type)computeType, scaleType));
     rocblaslt::Debug::Instance().markerStop();
@@ -704,8 +781,8 @@ try
 {
     *archName        = nullptr;
     std::string arch = rocblaslt_internal_get_arch_name();
-    *archName        = (char*)malloc(arch.size() * sizeof(char));
-    strncpy(*archName, arch.c_str(), arch.size());
+    *archName        = (char*)malloc(arch.size() + 1);
+    memcpy(*archName, arch.c_str(), arch.size() + 1);
     return HIPBLAS_STATUS_SUCCESS;
 }
 catch(...)

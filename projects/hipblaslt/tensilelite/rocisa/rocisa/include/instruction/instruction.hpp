@@ -1,5 +1,5 @@
 /* ************************************************************************
- * Copyright (C) 2025 Advanced Micro Devices, Inc.
+ * Copyright (C) 2025-2026 Advanced Micro Devices, Inc.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -118,10 +118,11 @@ namespace rocisa
 
     struct Instruction : public Item
     {
-        InstType    instType;
-        std::string comment;
-        std::string instStr;
-        bool        outputInlineAsm;
+        InstType         instType;
+        std::string      comment;
+        std::string      instStr;
+        bool             outputInlineAsm;
+        std::shared_ptr<MemTokenData> m_memToken;
 
         Instruction(InstType instType, const std::string& comment = "")
             : instType(instType)
@@ -137,7 +138,20 @@ namespace rocisa
             , comment(other.comment)
             , instStr(other.instStr)
             , outputInlineAsm(other.outputInlineAsm)
+            , m_memToken(other.m_memToken
+                             ? std::make_shared<MemTokenData>(*other.m_memToken)
+                             : nullptr)
         {
+        }
+
+        void setMemToken(const std::shared_ptr<MemTokenData>& token)
+        {
+            m_memToken = token;
+        }
+
+        std::shared_ptr<MemTokenData> getMemToken() const
+        {
+            return m_memToken;
         }
 
         std::shared_ptr<Item> clone() const override
@@ -154,19 +168,28 @@ namespace rocisa
 
         std::string formatOnly(const std::string& instStr, const std::string& comment) const
         {
-            return formatStr(outputInlineAsm, instStr, comment);
+            return formatStr(outputInlineAsm,
+                             instStr,
+                             comment,
+                             rocIsa::getInstance().getOutputOptions().outputNoComment);
         }
 
         std::string formatWithComment(const std::string& instStr) const
         {
-            return formatStr(outputInlineAsm, instStr, comment);
+            return formatStr(outputInlineAsm,
+                             instStr,
+                             comment,
+                             rocIsa::getInstance().getOutputOptions().outputNoComment);
         }
 
         std::string formatWithExtraComment(const std::string& instStr,
                                            const std::string& extraComment) const
         {
             std::string combinedComment = comment + extraComment;
-            return formatStr(outputInlineAsm, instStr, combinedComment);
+            return formatStr(outputInlineAsm,
+                             instStr,
+                             combinedComment,
+                             rocIsa::getInstance().getOutputOptions().outputNoComment);
         }
 
         void setInst(const std::string& instStr)
@@ -185,7 +208,71 @@ namespace rocisa
             return "";
         }
 
+        void setMsb(std::string&                         kStr,
+                    const std::vector<InstructionInput>& srcs,
+                    const std::shared_ptr<Container>&    dst) const
+        {
+            if(!getAsmCaps()["HasVgprMSB"])
+                return;
+
+            int  msbSrc[3] = {0, 0, 0};
+            int  msbDst    = 0;
+            bool hasVgpr   = false;
+            assert(srcs.size() <= 3);
+            for(int i = 0; i < srcs.size(); i++)
+            {
+                if(std::holds_alternative<std::shared_ptr<Container>>(srcs[i])
+                   && std::get<std::shared_ptr<Container>>(srcs[i]) != nullptr)
+                {
+                    auto gpr = dynamic_cast<RegisterContainer*>(
+                        std::get<std::shared_ptr<Container>>(srcs[i]).get());
+                    if(gpr && gpr->regType == "v")
+                    {
+                        msbSrc[i] = gpr->msb;
+                        hasVgpr   = true;
+                    }
+                }
+            }
+            // dst
+            if(dst)
+            {
+                std::string s   = dst->toString();
+                auto        gpr = dynamic_cast<RegisterContainer*>(dst.get());
+                if(gpr && gpr->regType == "v")
+                {
+                    msbDst  = gpr->msb;
+                    hasVgpr = true;
+                }
+            }
+            if(!hasVgpr){
+                if(getVgprMsb() == -1)
+                    // Base layer WA: -2 means no-vgpr inst
+                    rocIsa::getInstance().setVgprMsb(-2);
+                return;
+            }
+            int newVal = msbSrc[0] + (msbSrc[1] << 2) + (msbSrc[2] << 4) + (msbDst << 6);
+            int oriVal = getVgprMsb();
+            if(newVal != oriVal && !outputInlineAsm){
+                // Base layer WA: need to store previous msb value in [15:8] bits.
+                //int setVal = oriVal < 0? newVal : newVal + (oriVal << 8);
+		// only set newVal until compiler support it
+                int setVal = newVal;
+                std::string msbStr = "s_set_vgpr_msb " + std::to_string(setVal);
+                std::string msbComment = std::string("src0: " + std::to_string(msbSrc[0]) + ", src1: " + std::to_string(msbSrc[1]) + \
+                    ", src2: " + std::to_string(msbSrc[2]) + ", dst: " + std::to_string(msbDst));
+                msbStr = formatStr(false, msbStr, msbComment, false);
+                // Base layer WA: add a no-vgpr inst if oriVal is non-determined and right after label
+                if(oriVal == -1)
+                    msbStr = "s_nop 0\n" + msbStr;
+                kStr = msbStr + kStr;
+                rocIsa::getInstance().setVgprMsb(newVal);
+            }
+        }
+
         virtual std::vector<InstructionInput> getParams() const = 0;
+
+        virtual std::vector<InstructionInput> getDstParams() const = 0;
+        virtual std::vector<InstructionInput> getSrcParams() const = 0;
 
         virtual int getIssueLatency() const
         {
@@ -259,6 +346,21 @@ namespace rocisa
                 plist.insert(plist.end(), srcs.begin(), srcs.end());
             }
             return plist;
+        }
+
+        std::vector<InstructionInput> getDstParams() const override
+        {
+            std::vector<InstructionInput> dsts;
+            if(dst)
+            {
+                dsts.push_back(dst);
+            }
+            return dsts;
+        }
+
+        std::vector<InstructionInput> getSrcParams() const override
+        {
+            return srcs;
         }
 
         std::string toString() const override
@@ -382,6 +484,25 @@ namespace rocisa
             return l;
         }
 
+        std::vector<InstructionInput> getDstParams() const override
+        {
+            std::vector<InstructionInput> dsts;
+            if(dst)
+            {
+                dsts.push_back(dst);
+            }
+            if(dst1)
+            {
+                dsts.push_back(dst1);
+            }
+            return dsts;
+        }
+
+        std::vector<InstructionInput> getSrcParams() const override
+        {
+            return srcs;
+        }
+
         std::string toString() const override
         {
             auto        newInstStr = preStr();
@@ -398,7 +519,9 @@ namespace rocisa
             {
                 kStr += vop3->toString();
             }
-            return formatWithComment(kStr);
+            kStr = formatWithComment(kStr);
+            setMsb(kStr, srcs, dst);
+            return kStr;
         }
     };
 
@@ -448,6 +571,18 @@ namespace rocisa
         std::vector<InstructionInput> getParams() const override
         {
             return args;
+        }
+
+        std::vector<InstructionInput> getDstParams() const override
+        {
+            throw std::runtime_error("MacroInstruction does not have destination parameters");
+            return {}; // Macro instructions do not have destination parameters
+        }
+
+        std::vector<InstructionInput> getSrcParams() const override
+        {
+            throw std::runtime_error("MacroInstruction does not have source parameters");
+            return args; // All arguments are treated as source parameters
         }
 
         std::string getArgStr() const

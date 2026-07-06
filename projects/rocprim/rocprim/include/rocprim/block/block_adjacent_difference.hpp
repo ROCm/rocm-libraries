@@ -1,7 +1,7 @@
 /******************************************************************************
 * Copyright (c) 2011, Duane Merrill.  All rights reserved.
 * Copyright (c) 2011-2018, NVIDIA CORPORATION.  All rights reserved.
-* Modifications Copyright (c) 2022-2025, Advanced Micro Devices, Inc.  All rights reserved.
+* Modifications Copyright (c) 2022-2026, Advanced Micro Devices, Inc.  All rights reserved.
 *
 * Redistribution and use in source and binary forms, with or without
 * modification, are permitted provided that the following conditions are met:
@@ -30,8 +30,8 @@
 #ifndef ROCPRIM_BLOCK_BLOCK_ADJACENT_DIFFERENCE_HPP_
 #define ROCPRIM_BLOCK_BLOCK_ADJACENT_DIFFERENCE_HPP_
 
-
-#include "detail/block_adjacent_difference_impl.hpp"
+#include "detail/block_adjacent_difference_crosslane.hpp"
+#include "detail/block_adjacent_difference_shared_mem.hpp"
 
 #include "../config.hpp"
 #include "../detail/various.hpp"
@@ -42,6 +42,43 @@
 /// @{
 
 BEGIN_ROCPRIM_NAMESPACE
+
+/// \brief Available algorithms for block_adjacent_difference.
+enum class block_adjacent_difference_algorithm
+{
+    /// \brief An algorithm using warp intrinsics.
+    adjacent_difference_crosslane,
+    /// \brief An algorithm using only shared memory.
+    adjacent_difference_shared_mem,
+    /// \brief Default block_adjacent_difference algorithm.
+    default_algorithm = adjacent_difference_shared_mem,
+};
+
+namespace detail
+{
+
+// Selector for block_adjacent_difference algorithm which gives block adjacent difference
+// implementation, type based on passed block_adjacent_difference_algorithm enum
+template<block_adjacent_difference_algorithm Algorithm>
+struct select_block_adjacent_difference_impl;
+
+template<>
+struct select_block_adjacent_difference_impl<
+    block_adjacent_difference_algorithm::adjacent_difference_crosslane>
+{
+    template<class T, unsigned int BlockSizeX, unsigned int BlockSizeY, unsigned int BlockSizeZ>
+    using type = block_adjacent_difference_crosslane<T, BlockSizeX, BlockSizeY, BlockSizeZ>;
+};
+
+template<>
+struct select_block_adjacent_difference_impl<
+    block_adjacent_difference_algorithm::adjacent_difference_shared_mem>
+{
+    template<class T, unsigned int BlockSizeX, unsigned int BlockSizeY, unsigned int BlockSizeZ>
+    using type = block_adjacent_difference_shared_mem<T, BlockSizeX, BlockSizeY, BlockSizeZ>;
+};
+
+} // end namespace detail
 
 /// \brief The \p block_adjacent_difference class is a block level parallel primitive which provides
 /// methods for applying binary functions for pairs of consecutive items partition across a thread
@@ -63,6 +100,8 @@ BEGIN_ROCPRIM_NAMESPACE
 /// In the examples discontinuity operation is performed on block of 128 threads, using type
 /// \p int.
 ///
+/// The full example is [on GitHub](https://github.com/ROCm/rocm-libraries/tree/develop/projects/rocprim/example/rocprim/block/example_block_adjacent_difference.cpp).
+///
 /// \code{.cpp}
 /// __global__ void example_kernel(...)
 /// {
@@ -82,18 +121,20 @@ BEGIN_ROCPRIM_NAMESPACE
 /// }
 /// \endcode
 /// \endparblock
-template<
-    class T,
-    unsigned int BlockSizeX,
-    unsigned int BlockSizeY = 1,
-    unsigned int BlockSizeZ = 1
->
+template<class T,
+         unsigned int                        BlockSizeX,
+         unsigned int                        BlockSizeY = 1,
+         unsigned int                        BlockSizeZ = 1,
+         block_adjacent_difference_algorithm Algorithm
+         = block_adjacent_difference_algorithm::default_algorithm>
 class block_adjacent_difference
 #ifndef DOXYGEN_SHOULD_SKIP_THIS // hide implementation detail from documentation
-    : private detail::block_adjacent_difference_impl<T, BlockSizeX, BlockSizeY, BlockSizeZ>
+    : private detail::select_block_adjacent_difference_impl<
+          Algorithm>::template type<T, BlockSizeX, BlockSizeY, BlockSizeZ>
 #endif // DOXYGEN_SHOULD_SKIP_THIS
 {
-    using base_type = detail::block_adjacent_difference_impl<T, BlockSizeX, BlockSizeY, BlockSizeZ>;
+    using base_type = typename detail::select_block_adjacent_difference_impl<
+        Algorithm>::template type<T, BlockSizeX, BlockSizeY, BlockSizeZ>;
 
     static constexpr unsigned BlockSize = base_type::BlockSize;
     // Struct used for creating a raw_storage object for this primitive's temporary storage.

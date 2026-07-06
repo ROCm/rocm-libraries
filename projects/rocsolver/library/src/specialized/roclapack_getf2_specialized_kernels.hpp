@@ -4,11 +4,12 @@
  * Factorization and inversion of a million matrices using GPUs: Challenges
  * and countermeasures. Procedia Computer Science, 108, 606-615.
  *
- * Copyright (C) 2019-2025 Advanced Micro Devices, Inc.
+ * Copyright (C) 2019-2026 Advanced Micro Devices, Inc.
  * ***********************************************************************/
 
 #pragma once
 
+#include "asan_helpers.hpp"
 #include "rocblas.hpp"
 #include "rocsolver_run_specialized_kernels.hpp"
 
@@ -42,7 +43,7 @@ ROCSOLVER_KERNEL void __launch_bounds__(GETF2_SSKER_MAX_M)
 
     I myrow = hipThreadIdx_x;
     const I ty = hipThreadIdx_y;
-    const I id = hipBlockIdx_y * static_cast<I>(hipBlockDim_y) + ty;
+    const I id = hipBlockIdx_x * static_cast<I>(hipBlockDim_y) + ty;
 
     if(id >= batch_count)
         return;
@@ -99,6 +100,9 @@ ROCSOLVER_KERNEL void __launch_bounds__(GETF2_SSKER_MAX_M)
         else if(myinfo == 0)
             myinfo = k + 1;
 
+        // synchronize across waves before overwriting common
+        __syncthreads();
+
         // swap rows (lazy swaping)
         if(myrow == pivot_index)
         {
@@ -152,7 +156,7 @@ ROCSOLVER_KERNEL void __launch_bounds__(GETF2_SSKER_MAX_M)
 
     I myrow = hipThreadIdx_x;
     const I ty = hipThreadIdx_y;
-    const I id = hipBlockIdx_y * static_cast<I>(hipBlockDim_y) + ty;
+    const I id = hipBlockIdx_x * static_cast<I>(hipBlockDim_y) + ty;
 
     if(id >= batch_count)
         return;
@@ -580,7 +584,9 @@ rocblas_status getf2_run_small(rocblas_handle handle,
         msize = n + 1;
 
     // prepare kernel launch
-    dim3 grid(1, blocks, 1);
+    // batch blocks go on grid.x (limit 2^31), not grid.y: grid.y is capped at
+    // 65536 on some archs (e.g. gfx1201), which overflows for large batches.
+    dim3 grid(blocks, 1, 1);
     dim3 block(nthds, ngrp, 1);
     size_t lmemsize = msize * ngrp * sizeof(T);
     hipStream_t stream;
@@ -683,6 +689,7 @@ rocblas_status getf2_run_panel(rocblas_handle handle,
     using S = decltype(std::real(T{}));
 
     // determine sizes
+    constexpr I max_threads = ROCSOLVER_ASAN_VALUE(256, 1024);
     I dimy, dimx;
     if(m <= 8)
         dimx = 8;
@@ -694,13 +701,18 @@ rocblas_status getf2_run_panel(rocblas_handle handle,
         dimx = 64;
     else if(m <= 128)
         dimx = 128;
-    else if(m <= 256)
-        dimx = 256;
-    else if(m <= 512)
-        dimx = 512;
+    else if constexpr(!rocsolver_enable_asan)
+    {
+        if(m <= 256)
+            dimx = 256;
+        else if(m <= 512)
+            dimx = 512;
+        else
+            dimx = 1024;
+    }
     else
-        dimx = 1024;
-    dimy = I(1024) / dimx;
+        dimx = 256;
+    dimy = I(max_threads) / dimx;
 
     // prepare kernel launch
     dim3 grid(1, 1, batch_count);

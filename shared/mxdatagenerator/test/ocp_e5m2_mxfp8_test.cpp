@@ -1,32 +1,10 @@
-/*******************************************************************************
- *
- * MIT License
- *
- * Copyright 2024-2025 AMD ROCm(TM) Software
- *
- * Permission is hereby granted, free of charge, to any person obtaining a copy
- * of this software and associated documentation files (the "Software"), to deal
- * in the Software without restriction, including without limitation the rights
- * to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
- * copies of the Software, and to permit persons to whom the Software is
- * furnished to do so, subject to the following conditions:
- *
- * The above copyright notice and this permission notice shall be included in
- * all copies or substantial portions of the Software.
- *
- * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
- * IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
- * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
- * AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
- * LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
- * OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
- * SOFTWARE.
- *
- *******************************************************************************/
+// Copyright Advanced Micro Devices, Inc., or its affiliates.
+// SPDX-License-Identifier: MIT
 
-#include <dataTypeInfo.hpp>
+#include <mxDataGenerator/dataTypeInfo.hpp>
 
 #include <gtest/gtest.h>
+#include <cmath>
 #include <iostream>
 #include <limits>
 #include <random>
@@ -234,6 +212,52 @@ protected:
         return closestDiff;
     }
 };
+
+TEST_F(ocp_e5m2_mxfp8_test, PreservesSignedZero)
+{
+    uint8_t scale[] = {DGen::Constants::E8M0_1};
+    uint8_t zeros[] = {DT::positiveZeroMask, DT::negativeZeroMask};
+    float   posF    = toFloat<DT>(scale, zeros, 0, 0);
+    float   negF    = toFloat<DT>(scale, zeros, 0, 1);
+    double  posD    = toDouble<DT>(scale, zeros, 0, 0);
+    double  negD    = toDouble<DT>(scale, zeros, 0, 1);
+
+    EXPECT_FALSE(std::signbit(posF));
+    EXPECT_TRUE(std::signbit(negF));
+    EXPECT_FALSE(std::signbit(posD));
+    EXPECT_TRUE(std::signbit(negD));
+
+    float negZero = std::copysign(0.0f, -1.0f);
+    EXPECT_EQ(static_cast<uint64_t>(DT::negativeZeroMask), satConvertToType<DT>(negZero));
+    EXPECT_EQ(static_cast<uint64_t>(DT::negativeZeroMask), nonSatConvertToType<DT>(negZero));
+    EXPECT_EQ(static_cast<uint64_t>(DT::negativeZeroMask), satConvertToTypeSR<DT>(negZero, 0));
+    EXPECT_EQ(static_cast<uint64_t>(DT::negativeZeroMask), nonSatConvertToTypeSR<DT>(negZero, 0));
+}
+
+TEST_F(ocp_e5m2_mxfp8_test, NaNConversionReturnsValidRawByte)
+{
+    float negNaN = std::copysign(std::numeric_limits<float>::quiet_NaN(), -1.0f);
+
+    EXPECT_EQ(static_cast<uint64_t>(0b01111111), satConvertToType<DT>(NAN));
+    EXPECT_EQ(static_cast<uint64_t>(0b11111111), satConvertToType<DT>(negNaN));
+    EXPECT_EQ(static_cast<uint64_t>(0b01111111), nonSatConvertToType<DT>(NAN));
+    EXPECT_EQ(static_cast<uint64_t>(0b11111111), nonSatConvertToType<DT>(negNaN));
+    EXPECT_EQ(static_cast<uint64_t>(0b01111111), satConvertToTypeSR<DT>(NAN, 0));
+    EXPECT_EQ(static_cast<uint64_t>(0b11111111), satConvertToTypeSR<DT>(negNaN, 0));
+    EXPECT_EQ(static_cast<uint64_t>(0b01111111), nonSatConvertToTypeSR<DT>(NAN, 0));
+    EXPECT_EQ(static_cast<uint64_t>(0b11111111), nonSatConvertToTypeSR<DT>(negNaN, 0));
+}
+
+TEST_F(ocp_e5m2_mxfp8_test, ScaleNaNDominatesInf)
+{
+    uint8_t scale[] = {DGen::Constants::E8M0_NAN};
+    uint8_t data[]  = {DT::positiveInfMask, DT::negativeInfMask};
+
+    EXPECT_TRUE(isNaN<DT>(scale, data, 0, 0));
+    EXPECT_FALSE(isInf<DT>(scale, data, 0, 0));
+    EXPECT_TRUE(isNaN<DT>(scale, data, 0, 1));
+    EXPECT_FALSE(isInf<DT>(scale, data, 0, 1));
+}
 
 TEST_F(ocp_e5m2_mxfp8_test, isOne)
 {
@@ -664,7 +688,7 @@ TEST_F(ocp_e5m2_mxfp8_test, isInf)
     EXPECT_EQ(false, isInf<DT>(scales, data, 1, 2)); // NaN * NaN 1
     EXPECT_EQ(false, isInf<DT>(scales, data, 1, 3)); // NaN * NaN 2
     EXPECT_EQ(false, isInf<DT>(scales, data, 1, 4)); // NaN * NaN 3
-    EXPECT_EQ(true, isInf<DT>(scales, data, 1, 5)); // NaN * Inf
+    EXPECT_EQ(false, isInf<DT>(scales, data, 1, 5)); // NaN * Inf
     EXPECT_EQ(false, isInf<DT>(scales, data, 1, 6)); // NaN * min normal
     EXPECT_EQ(false, isInf<DT>(scales, data, 1, 7)); // NaN * max normal
     EXPECT_EQ(false, isInf<DT>(scales, data, 1, 8)); // NaN * min sub-normal
@@ -732,7 +756,7 @@ TEST_F(ocp_e5m2_mxfp8_test, isInf)
     EXPECT_EQ(false, isInf<DT>(scales, negativeData, 1, 2)); // NaN * NaN 1
     EXPECT_EQ(false, isInf<DT>(scales, negativeData, 1, 3)); // NaN * NaN 2
     EXPECT_EQ(false, isInf<DT>(scales, negativeData, 1, 4)); // NaN * NaN 3
-    EXPECT_EQ(true, isInf<DT>(scales, negativeData, 1, 5)); // NaN * Inf
+    EXPECT_EQ(false, isInf<DT>(scales, negativeData, 1, 5)); // NaN * Inf
     EXPECT_EQ(false, isInf<DT>(scales, negativeData, 1, 6)); // NaN * min normal
     EXPECT_EQ(false, isInf<DT>(scales, negativeData, 1, 7)); // NaN * max normal
     EXPECT_EQ(false, isInf<DT>(scales, negativeData, 1, 8)); // NaN * min sub-normal
@@ -796,10 +820,12 @@ TEST_F(ocp_e5m2_mxfp8_test, isSubnorm)
 
         double value = toDouble<DT>(temp, temp, 0, 1);
 
-        if(exp != 0b0 || std::isnan(value))
-            EXPECT_FALSE(isSubnorm<DT>(temp, 1));
-        else
+        uint8_t mantissa = data & ((1 << getDataMantissaBits<DT>()) - 1);
+
+        if(exp == 0b0 && mantissa != 0 && !std::isnan(value))
             EXPECT_TRUE(isSubnorm<DT>(temp, 1));
+        else
+            EXPECT_FALSE(isSubnorm<DT>(temp, 1));
     }
 }
 

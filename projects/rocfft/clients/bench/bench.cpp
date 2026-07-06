@@ -25,6 +25,7 @@
 
 #include "../../shared/CLI11.hpp"
 #include "../../shared/arithmetic.h"
+#include "../../shared/fft_enums.h"
 #include "../../shared/gpubuf.h"
 #include "../../shared/hip_object_wrapper.h"
 #include "../../shared/rocfft_params.h"
@@ -218,8 +219,8 @@ int main(int argc, char* argv[])
             std::copy(ingrid.begin(), ingrid.end(), input_grid.begin() + 1);
             std::copy(outgrid.begin(), outgrid.end(), output_grid.begin() + 1);
 
-            params.distribute_input(localDeviceCount, input_grid);
-            params.distribute_output(localDeviceCount, output_grid);
+            params.distribute_field<fft_io::fft_io_in>(localDeviceCount, input_grid);
+            params.distribute_field<fft_io::fft_io_out>(localDeviceCount, output_grid);
         }
 
         if(*opt_not_in_place)
@@ -306,32 +307,23 @@ int main(int argc, char* argv[])
         std::cout << params.str(" ") << std::endl;
     }
 
-    // Check free and total available memory:
-    size_t free  = 0;
-    size_t total = 0;
-    try
+    // Check available memory:
+    const auto vram_avail = device_memory_accountant::singleton().get_usable_bytes_all_devices();
+    const auto io_vram_footprint = params.io_vram_footprint();
+    if(!vram_fits_problem(io_vram_footprint, vram_avail))
     {
-        HIP_V_THROW(hipMemGetInfo(&free, &total), "hipMemGetInfo failed");
-    }
-    catch(rocfft_hip_runtime_error)
-    {
-        return ignore_hip_runtime_failures ? EXIT_SUCCESS : EXIT_FAILURE;
-    }
-
-    const auto raw_vram_footprint
-        = params.fft_params_vram_footprint() + twiddle_table_vram_footprint(params);
-    if(!vram_fits_problem(raw_vram_footprint, free))
-    {
-        std::cout << "SKIPPED: Problem size (" << raw_vram_footprint
-                  << ") raw data too large for device.\n";
+        std::cout << "SKIPPED: Problem size (" << byte_sizes_to_str(io_vram_footprint)
+                  << ") exceeds usable memory on some device (" << byte_sizes_to_str(vram_avail)
+                  << ")\n";
         return EXIT_SUCCESS;
     }
 
     const auto vram_footprint = params.vram_footprint();
-    if(!vram_fits_problem(vram_footprint, free))
+    if(!vram_fits_problem(vram_footprint, vram_avail))
     {
-        std::cout << "SKIPPED: Problem size (" << vram_footprint
-                  << ") raw data too large for device.\n";
+        std::cout << "SKIPPED: Problem size (" << byte_sizes_to_str(vram_footprint)
+                  << ") exceeds usable memory on some device (" << byte_sizes_to_str(vram_avail)
+                  << ")\n";
         return EXIT_SUCCESS;
     }
 

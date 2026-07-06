@@ -494,6 +494,7 @@ typedef enum hipblasClientProcessor
     gfx906  = 906,
     gfx908  = 908,
     gfx90a  = 910,
+    gfx90c  = 912,
     gfx942  = 942,
     gfx950  = 950,
     gfx1010 = 1010,
@@ -510,8 +511,11 @@ typedef enum hipblasClientProcessor
     gfx1103 = 1103,
     gfx1150 = 1150,
     gfx1151 = 1151,
+    gfx1152 = 1152,
+    gfx1153 = 1153,
     gfx1200 = 1200,
-    gfx1201 = 1201
+    gfx1201 = 1201,
+    gfx1250 = 1250
 } hipblasClientProcessor;
 
 /* get architecture number */

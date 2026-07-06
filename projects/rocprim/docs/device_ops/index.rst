@@ -5,8 +5,10 @@
 .. _dev-index:
 
 ********************************************************************
- Device-Wide Operations
+rocPRIM device-level operations
 ********************************************************************
+
+API reference for rocPRIM device-level operations.
 
    * :ref:`dev-config`
    * :ref:`dev-transform`
@@ -26,6 +28,7 @@
    * :ref:`dev-device_copy`
    * :ref:`dev-memcpy`
    * :ref:`dev-nth_element`
+   * :ref:`dev-topk`
    * :ref:`dev-partial_sort`
    * :ref:`dev-find_first_of`
    * :ref:`dev-find_end`

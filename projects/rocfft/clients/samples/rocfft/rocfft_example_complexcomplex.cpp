@@ -1,4 +1,4 @@
-// Copyright (C) 2019 - 2023 Advanced Micro Devices, Inc. All rights reserved.
+// Copyright (C) 2019 - 2026 Advanced Micro Devices, Inc. All rights reserved.
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -69,8 +69,8 @@ int main(int argc, char* argv[])
     const bool inplace = place == rocfft_placement_inplace;
 
     // Direction of transform
-    const rocfft_transform_type direction = *opt_inverse ? rocfft_transform_type_complex_forward
-                                                         : rocfft_transform_type_complex_inverse;
+    const rocfft_transform_type direction = *opt_inverse ? rocfft_transform_type_complex_inverse
+                                                         : rocfft_transform_type_complex_forward;
 
     // Set up the strides and buffer size for the input:
     std::vector<size_t> istride = {1};
@@ -112,7 +112,7 @@ int main(int argc, char* argv[])
         std::cout << " " << i;
     std::cout << "\n";
     std::cout << "input size: " << isize << "\n";
-    std::cout << "output size: " << isize << "\n";
+    std::cout << "output size: " << osize << "\n";
     std::cout << std::endl;
 
     // Set the device:
@@ -124,7 +124,7 @@ int main(int argc, char* argv[])
     if(hipMalloc(&gpu_in, isize * sizeof(hipDoubleComplex)) != hipSuccess)
         throw std::runtime_error("hipMalloc failed.");
 
-    // Inititalize the data on the device
+    // Initialize the data on the device
     initcomplex_cm(length, istride, gpu_in);
     if(hipDeviceSynchronize() != hipSuccess)
         throw std::runtime_error("hipDeviceSynchronize failed.");
@@ -158,7 +158,7 @@ int main(int argc, char* argv[])
                                                  0, // input batch distance
                                                  ostride.size(), // output stride length
                                                  ostride.data(), // output stride data
-                                                 0); // ouptut batch distance
+                                                 0); // output batch distance
     if(rc != rocfft_status_success)
         throw std::runtime_error("failed to set data layout");
     // We can also pass "nullptr" instead of a description; rocFFT will use reasonable
@@ -225,7 +225,7 @@ int main(int argc, char* argv[])
     if(hip_status != hipSuccess)
         throw std::runtime_error("hipMemcpy failed.");
 
-    printbuffer_cm(odata, length, istride, 1, isize);
+    printbuffer_cm(odata, length, ostride, 1, osize);
 
     // Clean up: free GPU memory:
     if(hipFree(gpu_in) != hipSuccess)

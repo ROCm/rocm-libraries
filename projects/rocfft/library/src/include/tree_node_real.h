@@ -131,6 +131,10 @@ class Real3DEvenNode : public InternalNode
         return true;
     }
 
+    static bool use_real_2D_single_SBCC(const NodeMetaData&  nodeData,
+                                        const function_pool& pool,
+                                        const bool&          is_default_contiguous_layout);
+
 protected:
     explicit Real3DEvenNode(TreeNode* p)
         : InternalNode(p)
@@ -153,6 +157,24 @@ protected:
     void AssignParams_internal_SBCC();
     void AssignParams_internal_SBCR();
     void AssignParams_internal_TR_pairs();
+};
+
+/*****************************************************
+ * CS_REAL_3D_PP
+ *****************************************************/
+class Real3DPPNode : public InternalNode
+{
+    friend class NodeFactory;
+
+protected:
+    explicit Real3DPPNode(TreeNode* p)
+        : InternalNode(p)
+    {
+        scheme = CS_REAL_3D_PP;
+    }
+    size_t GetPPOffDim() const;
+    void   AssignParams_internal() override;
+    void   BuildTree_internal(SchemeTreeVec& child_scheme_trees = EmptySchemeTreeVec) override;
 };
 
 /*****************************************************
@@ -254,7 +276,8 @@ protected:
     void   SetupGridParam_internal(GridParam& gp) override{};
 
 public:
-    bool UseOutputLengthForPadding() override
+    std::vector<size_t> CollapsibleDims() override;
+    bool                UseOutputLengthForPadding() override
     {
         return true;
     }

@@ -43,6 +43,7 @@
 #include <miopen/batchnorm/problem_description.hpp>
 #include <miopen/find_solution.hpp>
 
+#include <algorithm>
 #include <chrono>
 
 namespace miopen {
@@ -54,6 +55,51 @@ miopen::PerformanceDb GetDb(const miopen::ExecutionContext& ctx,
     return {DbKinds::PerfDb, ctx.GetPerfDbPath("batchnorm"), ctx.GetUserPerfDbPath("batchnorm")};
 }
 } // namespace batchnorm
+
+namespace {
+// Validate batch norm training input dimensions (PyTorch-compatible)
+// PyTorch rejects training when there's insufficient data for statistics computation
+inline void ValidateBatchNormTrainingInput(const TensorDescriptor& xDesc,
+                                           miopenBatchNormMode_t bn_mode)
+{
+    const auto& lengths = xDesc.GetLengths();
+    const auto N        = lengths[0];
+
+    if(bn_mode == miopenBNSpatial)
+    {
+
+        // For Spatial BN: need N*spatial_size > 1 to compute variance
+        // spatial_size = H*W (2D) or D*H*W (3D)
+
+        // dims are always declared in NCHW & NCDHW order
+        size_t spatial_size = 1;
+        for(size_t i = 2; i < lengths.size(); ++i)
+        {
+            spatial_size *= lengths[i];
+        }
+
+        if(N * spatial_size <= 1)
+        {
+            MIOPEN_THROW(miopenStatusBadParm,
+                         "BatchNorm Spatial training requires N*spatial_size > 1. "
+                         "Got N=" +
+                             std::to_string(N) + ", spatial=" + std::to_string(spatial_size) +
+                             ". This restriction matches PyTorch behavior.");
+        }
+    }
+    else if(bn_mode == miopenBNPerActivation)
+    {
+        // For PerActivation BN: need N > 1 to compute variance across batch dimension
+        if(N <= 1)
+        {
+            MIOPEN_THROW(miopenStatusBadParm,
+                         "BatchNorm PerActivation training requires N > 1. "
+                         "Got N=" +
+                             std::to_string(N) + ". This restriction matches PyTorch behavior.");
+        }
+    }
+}
+} // anonymous namespace
 
 //============ BEGIN FORWARD TRAINING ===============
 
@@ -74,6 +120,55 @@ void BatchNormForwardTraining(const Handle& handle,
                               double expAvgFactor,
                               Data_t resultRunningMean,
                               Data_t resultRunningVariance,
+                              double epsilon,
+                              Data_t resultSaveMean,
+                              Data_t resultSaveInvVariance,
+                              const ActivationDescriptor& activDesc)
+{
+    return BatchNormForwardTraining(handle,
+                                    bn_mode,
+                                    alpha,
+                                    beta,
+                                    xDesc,
+                                    x,
+                                    yDesc,
+                                    y,
+                                    scaleDesc,
+                                    biasDesc,
+                                    savedMeanDesc,
+                                    savedVarianceDesc,
+                                    bnScale,
+                                    bnBias,
+                                    expAvgFactor,
+                                    resultRunningMean,
+                                    resultRunningVariance,
+                                    resultRunningMean,
+                                    resultRunningVariance,
+                                    epsilon,
+                                    resultSaveMean,
+                                    resultSaveInvVariance,
+                                    activDesc);
+}
+
+void BatchNormForwardTraining(const Handle& handle,
+                              miopenBatchNormMode_t bn_mode,
+                              const void* alpha,
+                              const void* beta,
+                              const TensorDescriptor& xDesc,
+                              ConstData_t x,
+                              const TensorDescriptor& yDesc,
+                              Data_t y,
+                              const TensorDescriptor& scaleDesc,
+                              const TensorDescriptor& biasDesc,
+                              const TensorDescriptor& savedMeanDesc,
+                              const TensorDescriptor& savedVarianceDesc,
+                              ConstData_t bnScale,
+                              ConstData_t bnBias,
+                              double expAvgFactor,
+                              ConstData_t prevResultRunningMean,
+                              ConstData_t prevResultRunningVariance,
+                              Data_t nextResultRunningMean,
+                              Data_t nextResultRunningVariance,
                               double epsilon,
                               Data_t resultSaveMean,
                               Data_t resultSaveInvVariance,
@@ -103,6 +198,10 @@ void BatchNormForwardTraining(const Handle& handle,
     {
         MIOPEN_THROW(miopenStatusBadParm);
     }
+
+    // Validate training input dimensions (PyTorch-compatible) - fail fast
+    ValidateBatchNormTrainingInput(xDesc, bn_mode);
+
     if(!float_equal(*(static_cast<const float*>(alpha)), 1.0) ||
        !float_equal(*(static_cast<const float*>(beta)), 0.0))
     {
@@ -117,40 +216,45 @@ void BatchNormForwardTraining(const Handle& handle,
             miopen::checkNumericsInput(handle, biasDesc, bnBias);
     }
 
-    const auto resultsave    = resultSaveMean != nullptr && resultSaveInvVariance != nullptr;
-    const auto resultrunning = resultRunningMean != nullptr && resultRunningVariance != nullptr;
+    const auto resultsave = resultSaveMean != nullptr && resultSaveInvVariance != nullptr;
+    const auto resultrunning =
+        prevResultRunningMean != nullptr && prevResultRunningVariance != nullptr &&
+        nextResultRunningMean != nullptr && nextResultRunningVariance != nullptr;
 
-    const auto problem = batchnorm::ProblemDescription{bn_mode,
-                                                       xDesc,
-                                                       yDesc,
-                                                       scaleDesc,
-                                                       biasDesc,
-                                                       savedMeanDesc,
-                                                       savedVarianceDesc,
-                                                       expAvgFactor,
-                                                       epsilon,
-                                                       resultsave,
-                                                       resultrunning,
-                                                       size_t(0.6f * handle.GetMaxComputeUnits()),
-                                                       activDesc};
+    const auto problem = batchnorm::ProblemDescription{
+        bn_mode,
+        xDesc,
+        yDesc,
+        scaleDesc,
+        biasDesc,
+        savedMeanDesc,
+        savedVarianceDesc,
+        expAvgFactor,
+        epsilon,
+        resultsave,
+        resultrunning,
+        std::max(size_t(1), size_t(0.6f * handle.GetMaxComputeUnits())),
+        activDesc};
 
     const auto algo = bn_mode == miopenBNSpatial
                           ? AlgorithmName{"miopenBatchNormForwardTrainingSpatial"}
                           : AlgorithmName{"miopenBatchNormForwardTrainingPerActivation"};
 
     const auto invoke_params = [&]() {
-        auto tmp                  = miopen::batchnorm::FwdTrainInvokeParams{};
-        tmp.type                  = InvokeType::Run;
-        tmp.x                     = x;
-        tmp.y                     = y;
-        tmp.bnScale               = bnScale;
-        tmp.bnBias                = bnBias;
-        tmp.expAvgFactor          = expAvgFactor;
-        tmp.resultRunningMean     = resultRunningMean;
-        tmp.resultRunningVariance = resultRunningVariance;
-        tmp.epsilon               = epsilon;
-        tmp.resultSaveMean        = resultSaveMean;
-        tmp.resultSaveInvVariance = resultSaveInvVariance;
+        auto tmp                      = miopen::batchnorm::FwdTrainInvokeParams{};
+        tmp.type                      = InvokeType::Run;
+        tmp.x                         = x;
+        tmp.y                         = y;
+        tmp.bnScale                   = bnScale;
+        tmp.bnBias                    = bnBias;
+        tmp.expAvgFactor              = expAvgFactor;
+        tmp.prevResultRunningMean     = prevResultRunningMean;
+        tmp.prevResultRunningVariance = prevResultRunningVariance;
+        tmp.nextResultRunningMean     = nextResultRunningMean;
+        tmp.nextResultRunningVariance = nextResultRunningVariance;
+        tmp.epsilon                   = epsilon;
+        tmp.resultSaveMean            = resultSaveMean;
+        tmp.resultSaveInvVariance     = resultSaveInvVariance;
         return tmp;
     }();
 
@@ -162,10 +266,10 @@ void BatchNormForwardTraining(const Handle& handle,
     if(miopen::CheckNumericsEnabled())
     {
         miopen::checkNumericsOutput(handle, yDesc, y);
-        if(resultRunningMean != nullptr)
-            miopen::checkNumericsOutput(handle, savedMeanDesc, resultRunningMean);
-        if(resultRunningVariance != nullptr)
-            miopen::checkNumericsOutput(handle, savedVarianceDesc, resultRunningVariance);
+        if(nextResultRunningMean != nullptr)
+            miopen::checkNumericsOutput(handle, savedMeanDesc, nextResultRunningMean);
+        if(nextResultRunningVariance != nullptr)
+            miopen::checkNumericsOutput(handle, savedVarianceDesc, nextResultRunningVariance);
         if(resultSaveMean != nullptr)
             miopen::checkNumericsOutput(handle, savedMeanDesc, resultSaveMean);
         if(resultSaveInvVariance != nullptr)
@@ -192,7 +296,7 @@ void BatchNormForwardInference(const Handle& handle,
                                ConstData_t bnBias,
                                ConstData_t estimatedMean,
                                ConstData_t estimatedVariance,
-                               double epsilon,
+                               std::optional<double> epsilonOpt,
                                const ActivationDescriptor& activDesc)
 {
 
@@ -234,14 +338,18 @@ void BatchNormForwardInference(const Handle& handle,
             MIOPEN_THROW(miopenStatusBadParm);
         }
 
-        const auto problem = batchnorm::ProblemDescription{bn_mode,
+        // The BN forward inference APIs taking an estimated inverse variance rather than a
+        // variance don't require and epsilon paramter. If epsilonOpt doesn't have a value then
+        // treat the estimatedVariance parameter as inverse variance rather than variance.
+        const bool useInverseVariance = !epsilonOpt.has_value();
+        const auto problem            = batchnorm::ProblemDescription{bn_mode,
                                                            xDesc,
                                                            yDesc,
                                                            scaleDesc,
                                                            biasDesc,
                                                            estMeanDesc,
                                                            estVarianceDesc,
-                                                           epsilon,
+                                                           epsilonOpt,
                                                            activDesc};
 
         const auto invoke_params = [&]() {
@@ -254,11 +362,16 @@ void BatchNormForwardInference(const Handle& handle,
             tmp.bnBias            = bnBias;
             tmp.estimatedMean     = estimatedMean;
             tmp.estimatedVariance = estimatedVariance;
-            tmp.epsilon           = epsilon;
+            if(!useInverseVariance)
+            {
+                tmp.epsilon = epsilonOpt.value();
+            }
             return tmp;
         }();
 
-        const auto algo    = AlgorithmName{"miopenBatchNormalizationForwardInference"};
+        const auto algo    = useInverseVariance
+                                 ? AlgorithmName{"miopenBatchNormalizationForwardInferenceInvVariance"}
+                                 : AlgorithmName{"miopenBatchNormalizationForwardInference"};
         const auto solvers = solver::SolverContainer<solver::batchnorm::BnFwdInference>{};
 
         solvers.ExecutePrimitive(handle, problem, algo, invoke_params);
@@ -283,7 +396,7 @@ void BatchNormForwardInference(const Handle& handle,
                                  0,
                                  nullptr,
                                  nullptr,
-                                 epsilon,
+                                 epsilonOpt.value_or(1e-5),
                                  nullptr,
                                  nullptr,
                                  activDesc);
@@ -359,6 +472,10 @@ void BatchNormBackward(const Handle& handle,
     {
         MIOPEN_THROW(miopenStatusBadParm);
     }
+
+    // Validate training input dimensions (PyTorch-compatible) - fail fast
+    ValidateBatchNormTrainingInput(xDesc, bn_mode);
+
     if(!float_equal(*(static_cast<const float*>(alphaDataDiff)), 1.0) ||
        !float_equal(*(static_cast<const float*>(betaDataDiff)), 0))
     {
@@ -374,18 +491,19 @@ void BatchNormBackward(const Handle& handle,
 
     const auto useSaved = savedMean != nullptr && savedInvVariance != nullptr;
 
-    const auto problem = batchnorm::ProblemDescription{bn_mode,
-                                                       xDesc,
-                                                       dyDesc,
-                                                       dxDesc,
-                                                       scaleDesc,
-                                                       biasDesc,
-                                                       savedMeanDesc,
-                                                       savedVarianceDesc,
-                                                       epsilon,
-                                                       useSaved,
-                                                       size_t(0.6f * handle.GetMaxComputeUnits()),
-                                                       activDesc};
+    const auto problem = batchnorm::ProblemDescription{
+        bn_mode,
+        xDesc,
+        dyDesc,
+        dxDesc,
+        scaleDesc,
+        biasDesc,
+        savedMeanDesc,
+        savedVarianceDesc,
+        epsilon,
+        useSaved,
+        std::max(size_t(1), size_t(0.6f * handle.GetMaxComputeUnits())),
+        activDesc};
 
     const auto algo = bn_mode == miopenBNSpatial
                           ? AlgorithmName{"miopenBatchNormBackwardPropSpatial"}

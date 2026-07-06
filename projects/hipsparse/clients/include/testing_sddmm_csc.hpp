@@ -1,5 +1,5 @@
 /* ************************************************************************
- * Copyright (C) 2021 Advanced Micro Devices, Inc. All rights Reserved.
+ * Copyright (C) 2021-2026 Advanced Micro Devices, Inc. All rights Reserved.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -30,6 +30,7 @@
 #include "gbyte.hpp"
 #include "hipsparse.hpp"
 #include "hipsparse_arguments.hpp"
+#include "hipsparse_graph.hpp"
 #include "hipsparse_test_unique_ptr.hpp"
 #include "unit.hpp"
 #include "utility.hpp"
@@ -41,7 +42,8 @@
 using namespace hipsparse;
 using namespace hipsparse_test;
 
-void testing_sddmm_csc_bad_arg(void)
+template <typename I, typename J, typename T>
+void testing_sddmm_csc_bad_arg(const Arguments& argus)
 {
 #if(!defined(CUDART_VERSION))
 
@@ -62,8 +64,7 @@ void testing_sddmm_csc_bad_arg(void)
     hipDataType          dataType  = HIP_R_32F;
     hipsparseSDDMMAlg_t  alg       = HIPSPARSE_SDDMM_ALG_DEFAULT;
 
-    std::unique_ptr<handle_struct> unique_ptr_handle(new handle_struct);
-    hipsparseHandle_t              handle = unique_ptr_handle->handle;
+    hipsparseLocalHandle_t handle;
 
     auto dptr_managed
         = hipsparse_unique_ptr{device_malloc(sizeof(int64_t) * safe_size), device_free};
@@ -184,21 +185,21 @@ void testing_sddmm_csc_bad_arg(void)
 }
 
 template <typename I, typename J, typename T>
-hipsparseStatus_t testing_sddmm_csc(Arguments argus)
+void testing_sddmm_csc(Arguments argus)
 {
 // only csr format supported when using cusparse backend
 #if(!defined(CUDART_VERSION))
     J                    m        = argus.M;
     J                    n        = argus.N;
     J                    k        = argus.K;
-    T                    h_alpha  = make_DataType<T>(argus.alpha);
-    T                    h_beta   = make_DataType<T>(argus.beta);
+    T                    h_alpha  = argus.get_alpha<T>();
+    T                    h_beta   = argus.get_beta<T>();
     hipsparseOperation_t transA   = argus.transA;
     hipsparseOperation_t transB   = argus.transB;
     hipsparseOrder_t     orderA   = argus.orderA;
     hipsparseOrder_t     orderB   = argus.orderB;
-    hipsparseIndexBase_t idx_base = argus.baseA;
-    hipsparseSDDMMAlg_t  alg      = static_cast<hipsparseSDDMMAlg_t>(argus.sddmm_alg);
+    hipsparseIndexBase_t idx_base = argus.baseC;
+    hipsparseSDDMMAlg_t  alg      = argus.sddmm_alg;
     std::string          filename = argus.filename;
 
     // Index and data type
@@ -207,8 +208,7 @@ hipsparseStatus_t testing_sddmm_csc(Arguments argus)
     hipDataType          typeT = getDataType<T>();
 
     // hipSPARSE handle
-    std::unique_ptr<handle_struct> unique_ptr_handle(new handle_struct);
-    hipsparseHandle_t              handle = unique_ptr_handle->handle;
+    hipsparseLocalHandle_t handle(argus);
 
     // Host structures
     std::vector<I> hcsc_col_ptr;
@@ -220,11 +220,8 @@ hipsparseStatus_t testing_sddmm_csc(Arguments argus)
 
     // Read or construct CSR matrix
     I nnz = 0;
-    if(!generate_csr_matrix(filename, n, m, nnz, hcsc_col_ptr, hcsc_row_ind, hcsc_val, idx_base))
-    {
-        fprintf(stderr, "Cannot open [read] %s\ncol", filename.c_str());
-        return HIPSPARSE_STATUS_INTERNAL_ERROR;
-    }
+    CHECK_GENERATE_MATRIX_ERROR(
+        generate_csr_matrix(filename, n, m, nnz, hcsc_col_ptr, hcsc_row_ind, hcsc_val, idx_base));
 
     // Some matrix properties
     J A_m = (transA == HIPSPARSE_OPERATION_NON_TRANSPOSE) ? m : k;
@@ -314,7 +311,7 @@ hipsparseStatus_t testing_sddmm_csc(Arguments argus)
 
     // Query SDDMM buffer
     size_t bufferSize;
-    CHECK_HIPSPARSE_ERROR(hipsparseSDDMM_bufferSize(
+    CHECK_HIPSPARSE_ERROR(testing::hipsparseSDDMM_bufferSize(
         handle, transA, transB, &h_alpha, A, B, &h_beta, C1, typeT, alg, &bufferSize));
 
     void* buffer;
@@ -322,23 +319,23 @@ hipsparseStatus_t testing_sddmm_csc(Arguments argus)
 
     // HIPSPARSE pointer mode host
     CHECK_HIPSPARSE_ERROR(hipsparseSetPointerMode(handle, HIPSPARSE_POINTER_MODE_HOST));
-    CHECK_HIPSPARSE_ERROR(hipsparseSDDMM_preprocess(
+    CHECK_HIPSPARSE_ERROR(testing::hipsparseSDDMM_preprocess(
         handle, transA, transB, &h_alpha, A, B, &h_beta, C1, typeT, alg, buffer));
 
     // HIPSPARSE pointer mode device
     CHECK_HIPSPARSE_ERROR(hipsparseSetPointerMode(handle, HIPSPARSE_POINTER_MODE_DEVICE));
-    CHECK_HIPSPARSE_ERROR(hipsparseSDDMM_preprocess(
+    CHECK_HIPSPARSE_ERROR(testing::hipsparseSDDMM_preprocess(
         handle, transA, transB, d_alpha, A, B, d_beta, C2, typeT, alg, buffer));
 
     if(argus.unit_check)
     {
         CHECK_HIPSPARSE_ERROR(hipsparseSetPointerMode(handle, HIPSPARSE_POINTER_MODE_HOST));
-        CHECK_HIPSPARSE_ERROR(hipsparseSDDMM(
+        CHECK_HIPSPARSE_ERROR(testing::hipsparseSDDMM(
             handle, transA, transB, &h_alpha, A, B, &h_beta, C1, typeT, alg, buffer));
 
         CHECK_HIPSPARSE_ERROR(hipsparseSetPointerMode(handle, HIPSPARSE_POINTER_MODE_DEVICE));
-        CHECK_HIPSPARSE_ERROR(
-            hipsparseSDDMM(handle, transA, transB, d_alpha, A, B, d_beta, C2, typeT, alg, buffer));
+        CHECK_HIPSPARSE_ERROR(testing::hipsparseSDDMM(
+            handle, transA, transB, d_alpha, A, B, d_beta, C2, typeT, alg, buffer));
 
         // copy output from device to CPU.
         std::vector<T> hval1(nnz);
@@ -346,40 +343,25 @@ hipsparseStatus_t testing_sddmm_csc(Arguments argus)
         CHECK_HIP_ERROR(hipMemcpy(hval1.data(), dval1, sizeof(T) * nnz, hipMemcpyDeviceToHost));
         CHECK_HIP_ERROR(hipMemcpy(hval2.data(), dval2, sizeof(T) * nnz, hipMemcpyDeviceToHost));
 
-        const int64_t incA = (orderA == HIPSPARSE_ORDER_COL)
-                                 ? ((transA == HIPSPARSE_OPERATION_NON_TRANSPOSE) ? lda : 1)
-                                 : ((transA == HIPSPARSE_OPERATION_NON_TRANSPOSE) ? 1 : lda);
-        const int64_t incB = (orderB == HIPSPARSE_ORDER_COL)
-                                 ? ((transB == HIPSPARSE_OPERATION_NON_TRANSPOSE) ? 1 : ldb)
-                                 : ((transB == HIPSPARSE_OPERATION_NON_TRANSPOSE) ? ldb : 1);
-
-        for(J c = 0; c < C_n; c++)
-        {
-            I start = hcsc_col_ptr[c] - idx_base;
-            I end   = hcsc_col_ptr[c + 1] - idx_base;
-
-            for(I j = start; j < end; j++)
-            {
-                J r = hcsc_row_ind[j] - idx_base;
-
-                const T* Aptr
-                    = (orderA == HIPSPARSE_ORDER_COL)
-                          ? ((transA == HIPSPARSE_OPERATION_NON_TRANSPOSE) ? &hA[r] : &hA[lda * r])
-                          : ((transA == HIPSPARSE_OPERATION_NON_TRANSPOSE) ? &hA[lda * r] : &hA[r]);
-
-                const T* Bptr
-                    = (orderB == HIPSPARSE_ORDER_COL)
-                          ? ((transB == HIPSPARSE_OPERATION_NON_TRANSPOSE) ? &hB[ldb * c] : &hB[c])
-                          : ((transB == HIPSPARSE_OPERATION_NON_TRANSPOSE) ? &hB[c] : &hB[ldb * c]);
-
-                T sum = static_cast<T>(0);
-                for(I s = 0; s < k; ++s)
-                {
-                    sum = testing_fma(Aptr[incA * s], Bptr[incB * s], sum);
-                }
-                hcsc_val[j] = testing_mult(hcsc_val[j], h_beta) + testing_mult(h_alpha, sum);
-            }
-        }
+        // Host SDDMM CSC
+        host_sddmm_csc(C_m,
+                       C_n,
+                       k,
+                       nnz,
+                       h_alpha,
+                       hA.data(),
+                       lda,
+                       orderA,
+                       transA,
+                       hB.data(),
+                       ldb,
+                       orderB,
+                       transB,
+                       h_beta,
+                       hcsc_val.data(),
+                       hcsc_col_ptr.data(),
+                       hcsc_row_ind.data(),
+                       idx_base);
 
         unit_check_near(1, nnz, 1, hval1.data(), hcsc_val.data());
         unit_check_near(1, nnz, 1, hval2.data(), hcsc_val.data());
@@ -395,7 +377,7 @@ hipsparseStatus_t testing_sddmm_csc(Arguments argus)
         // Warm up
         for(int iter = 0; iter < number_cold_calls; ++iter)
         {
-            CHECK_HIPSPARSE_ERROR(hipsparseSDDMM(
+            CHECK_HIPSPARSE_ERROR(testing::hipsparseSDDMM(
                 handle, transA, transB, &h_alpha, A, B, &h_beta, C1, typeT, alg, buffer));
         }
 
@@ -404,7 +386,7 @@ hipsparseStatus_t testing_sddmm_csc(Arguments argus)
         // Performance run
         for(int iter = 0; iter < number_hot_calls; ++iter)
         {
-            CHECK_HIPSPARSE_ERROR(hipsparseSDDMM(
+            CHECK_HIPSPARSE_ERROR(testing::hipsparseSDDMM(
                 handle, transA, transB, &h_alpha, A, B, &h_beta, C1, typeT, alg, buffer));
         }
 
@@ -452,8 +434,6 @@ hipsparseStatus_t testing_sddmm_csc(Arguments argus)
     CHECK_HIPSPARSE_ERROR(hipsparseDestroyDnMat(B));
 
 #endif
-
-    return HIPSPARSE_STATUS_SUCCESS;
 }
 
 #endif // TESTING_SDDMM_CSC_HPP

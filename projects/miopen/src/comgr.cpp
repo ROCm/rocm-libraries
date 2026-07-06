@@ -54,9 +54,6 @@
 /// More info at https://github.com/ROCm/MIOpen/issues/1257.
 #define WORKAROUND_ISSUE_1257 (HIP_PACKAGE_VERSION_FLAT >= 4003021331ULL)
 
-/// https://github.com/ROCm/ROCm-CompilerSupport/issues/67 about unused -nogpulib.
-#define WORKAROUND_ROCMCOMPILERSUPPORT_ISSUE_67 1
-
 MIOPEN_DECLARE_ENV_VAR_BOOL(MIOPEN_DEBUG_COMGR_LOG_CALLS)
 MIOPEN_DECLARE_ENV_VAR_BOOL(MIOPEN_DEBUG_COMGR_LOG_SOURCE_NAMES)
 
@@ -242,42 +239,10 @@ static inline auto to_string(const std::size_t& v) { return std::to_string(v); }
 /// of code between different COMgr versions.
 ///
 /// \todo Request comgr to expose this stuff via API.
-static std::string to_string(const amd_comgr_language_t val)
+template <typename T>
+static std::string to_string(const T val)
 {
-    std::ostringstream oss;
-    MIOPEN_LOG_ENUM(oss,
-                    val,
-                    AMD_COMGR_LANGUAGE_NONE,
-                    AMD_COMGR_LANGUAGE_OPENCL_1_2,
-                    AMD_COMGR_LANGUAGE_OPENCL_2_0,
-                    AMD_COMGR_LANGUAGE_HIP);
-    return oss.str();
-}
-
-static std::string to_string(const amd_comgr_data_kind_t val)
-{
-    std::ostringstream oss;
-    MIOPEN_LOG_ENUM(oss,
-                    val,
-                    AMD_COMGR_DATA_KIND_UNDEF,
-                    AMD_COMGR_DATA_KIND_SOURCE,
-                    AMD_COMGR_DATA_KIND_INCLUDE,
-                    AMD_COMGR_DATA_KIND_LOG,
-                    AMD_COMGR_DATA_KIND_EXECUTABLE);
-    return oss.str();
-}
-
-static std::string to_string(const amd_comgr_action_kind_t val)
-{
-    std::ostringstream oss;
-    MIOPEN_LOG_ENUM(oss,
-                    val,
-                    AMD_COMGR_ACTION_ADD_PRECOMPILED_HEADERS,
-                    AMD_COMGR_ACTION_CODEGEN_BC_TO_RELOCATABLE,
-                    AMD_COMGR_ACTION_LINK_RELOCATABLE_TO_EXECUTABLE,
-                    AMD_COMGR_ACTION_ASSEMBLE_SOURCE_TO_RELOCATABLE,
-                    AMD_COMGR_ACTION_COMPILE_SOURCE_WITH_DEVICE_LIBS_TO_BC);
-    return oss.str();
+    return (std::ostringstream() << val).str();
 }
 
 static bool PrintVersionImpl()
@@ -289,11 +254,7 @@ static bool PrintVersionImpl()
     return true;
 }
 
-static void PrintVersion()
-{
-    static const auto once = PrintVersionImpl();
-    std::ignore            = once;
-}
+static void PrintVersion() { std::ignore = PrintVersionImpl(); }
 
 static std::string GetStatusText(const amd_comgr_status_t status, const bool unknown_error = false)
 {
@@ -528,17 +489,26 @@ static std::string GetLog(const Dataset& dataset, const bool comgr_error_handlin
         /// \todo Clarify API and update implementation.
         const auto count = dataset.GetDataCount(AMD_COMGR_DATA_KIND_LOG);
         if(count < 1)
-            return {comgr_error_handling ? "comgr warning: error log not found" : ""};
+        {
+            text = comgr_error_handling ? "comgr warning: error log not found" : "";
+            return text;
+        }
 
         const auto data = dataset.GetData(AMD_COMGR_DATA_KIND_LOG, 0);
         text            = data.GetString();
         if(text.empty())
-            return {comgr_error_handling ? "comgr info: error log empty" : ""};
+        {
+            text = comgr_error_handling ? "comgr info: error log empty" : "";
+            return text;
+        }
     }
     catch(ComgrError&)
     {
         if(comgr_error_handling)
-            return {"comgr error: failed to get error log"};
+        {
+            text = "comgr error: failed to get error log";
+            return text;
+        }
         // deepcode ignore EmptyThrowOutsideCatch: false positive
         throw;
         /// \anchor catch_and_rethrow_in_getlog
@@ -596,10 +566,8 @@ void BuildOcl(const std::string& name,
         compiler::lc::ocl::AddCompilerOptions(optCompile);
         action.SetOptionList(optCompile);
 
-        const Dataset addedPch;
-        action.Do(AMD_COMGR_ACTION_ADD_PRECOMPILED_HEADERS, inputs, addedPch);
         const Dataset linkedBc;
-        action.Do(AMD_COMGR_ACTION_COMPILE_SOURCE_WITH_DEVICE_LIBS_TO_BC, addedPch, linkedBc);
+        action.Do(AMD_COMGR_ACTION_COMPILE_SOURCE_WITH_DEVICE_LIBS_TO_BC, inputs, linkedBc);
 
         action.SetOptionList(optCompile);
         const Dataset relocatable;
@@ -641,13 +609,11 @@ void BuildAsm(const std::string& name,
         action.SetLogging(true);
         auto optAsm = miopen::SplitSpaceSeparated(options);
 #if WORKAROUND_ISSUE_3001
-        if(target.Xnack() && !*target.Xnack())
+        if(!target.isXnackEnabled())
             optAsm.emplace_back("-mno-xnack");
 #endif
         compiler::lc::gcnasm::RemoveOptionsUnwanted(optAsm);
-#if WORKAROUND_ROCMCOMPILERSUPPORT_ISSUE_67
-        optAsm.push_back("--rocm-path=.");
-#endif
+
         action.SetOptionList(optAsm);
 
         const Dataset relocatable;
@@ -934,7 +900,7 @@ void BuildHip(const std::string& name,
 #endif
         opts.push_back("-D__HIP_PLATFORM_AMD__=1"); // Workaround?
         opts.push_back("-DHIP_PACKAGE_VERSION_FLAT=" + std::to_string(HIP_PACKAGE_VERSION_FLAT));
-        opts.push_back("-DMIOPEN_DONT_USE_HIP_RUNTIME_HEADERS");
+        opts.push_back("-DMIOPEN_HIP_RUNTIME_COMPILE");
 #if HIP_PACKAGE_VERSION_FLAT < 6001024000ULL && !defined(_WIN32)
         opts.push_back("-DWORKAROUND_DONT_USE_CUSTOM_LIMITS=1");
 #endif
@@ -963,13 +929,12 @@ void BuildHip(const std::string& name,
 
         auto rocm_path = env::value(ROCM_PATH);
 
-        if(rocm_path.empty())
+        if(!rocm_path.empty())
         {
-            rocm_path = "/opt/rocm";
+            auto rocm_include_arg = "-I" + rocm_path + "/include";
+            opts.push_back(rocm_include_arg);
+            MIOPEN_LOG_T("HIPRTC compile ROCm include path argument: " << rocm_include_arg);
         }
-        opts.push_back("-I" + rocm_path + "/include");
-
-        MIOPEN_LOG_T("HIPRTC compile ROCm path: " << rocm_path);
 
         HiprtcProgram prog(name, text);
         prog.Compile(opts);

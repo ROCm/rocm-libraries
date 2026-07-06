@@ -11,50 +11,192 @@ updates:
         patterns:
           - "*"
 
-  - package-ecosystem: "pip" # See documentation for possible values
+  - package-ecosystem: "pip"
     directory: "projects/hipcub/docs/sphinx" # Location of package manifests
-    open-pull-requests-limit: 10
+    open-pull-requests-limit: 5
     schedule:
-      interval: "daily"
-    labels:
-      - "documentation"
-      - "dependencies"
-      - "ci:docs-only"
-    reviewers:
-      - "samjwu"
+      interval: "weekly"
+    groups:
+      hipcub-docs-dependencies:
+        patterns:
+          - "*"
 
-  - package-ecosystem: "pip" # See documentation for possible values
+  - package-ecosystem: "pip"
     directory: "projects/rocprim/docs/sphinx" # Location of package manifests
-    open-pull-requests-limit: 10
+    open-pull-requests-limit: 5
     schedule:
-      interval: "daily"
-    labels:
-      - "documentation"
-      - "dependencies"
-      - "ci:docs-only"
-    reviewers:
-      - "samjwu"
+      interval: "weekly"
+    groups:
+      rocprim-docs-dependencies:
+        patterns:
+          - "*"
 
-  - package-ecosystem: "pip" # See documentation for possible values
-    directory: "projects/rocrand/docs/sphinx" # Location of package manifests
-    open-pull-requests-limit: 10
+  - package-ecosystem: "pip"
+    directory: "projects/hiprand/docs/sphinx" # Location of package manifests
+    open-pull-requests-limit: 5
     schedule:
-      interval: "daily"
-    labels:
-      - "documentation"
-      - "dependencies"
-      - "ci:docs-only"
-    reviewers:
-      - "samjwu"
+      interval: "weekly"
+    groups:
+      hiprand-docs-dependencies:
+        patterns:
+          - "*"
 
-  - package-ecosystem: "pip" # See documentation for possible values
+  - package-ecosystem: "pip"
     directory: "projects/rocthrust/docs/sphinx" # Location of package manifests
-    open-pull-requests-limit: 10
+    open-pull-requests-limit: 5
     schedule:
-      interval: "daily"
-    labels:
-      - "documentation"
-      - "dependencies"
-      - "ci:docs-only"
-    reviewers:
-      - "samjwu"
+      interval: "weekly"
+    groups:
+      rocthrust-docs-dependencies:
+        patterns:
+          - "*"
+
+  - package-ecosystem: "pip"
+    directory: "projects/hipblaslt/docs/sphinx" # Location of package manifests
+    open-pull-requests-limit: 5
+    schedule:
+      interval: "weekly"
+    groups:
+      hipblaslt-docs-dependencies:
+        patterns:
+          - "*"
+
+  - package-ecosystem: "pip"
+    directory: "projects/hipsparselt/docs/sphinx" # Location of package manifests
+    open-pull-requests-limit: 5
+    schedule:
+      interval: "weekly"
+    groups:
+      hipsparselt-docs-dependencies:
+        patterns:
+          - "*"
+
+  - package-ecosystem: "pip"
+    directory: "projects/rocsparse/docs/sphinx" # Location of package manifests
+    open-pull-requests-limit: 5
+    schedule:
+      interval: "weekly"
+    groups:
+      rocsparse-docs-dependencies:
+        patterns:
+          - "*"
+
+  - package-ecosystem: "pip"
+    directory: "projects/hipsparse/docs/sphinx" # Location of package manifests
+    open-pull-requests-limit: 5
+    schedule:
+      interval: "weekly"
+    groups:
+      hipsparse-docs-dependencies:
+        patterns:
+          - "*"
+
+  - package-ecosystem: "pip"
+    directory: "projects/hipblas/docs/sphinx" # Location of package manifests
+    open-pull-requests-limit: 5
+    schedule:
+      interval: "weekly"
+    groups:
+      hipblas-docs-dependencies:
+        patterns:
+          - "*"
+
+  - package-ecosystem: "pip"
+    directory: "projects/miopen/docs/sphinx" # Location of package manifests
+    open-pull-requests-limit: 5
+    schedule:
+      interval: "weekly"
+    groups:
+      miopen-docs-dependencies:
+        patterns:
+          - "*"
+
+  - package-ecosystem: "pip"
+    directory: "projects/hipfft/docs/sphinx" # Location of package manifests
+    open-pull-requests-limit: 5
+    schedule:
+      interval: "weekly"
+    groups:
+      hipfft-docs-dependencies:
+        patterns:
+          - "*"
+
+  - package-ecosystem: "pip"
+    directory: "projects/rocfft/docs/sphinx" # Location of package manifests
+    open-pull-requests-limit: 5
+    schedule:
+      interval: "weekly"
+    groups:
+      rocfft-docs-dependencies:
+        patterns:
+          - "*"
+
+  - package-ecosystem: "pip"
+    directory: "projects/rocblas/docs/sphinx" # Location of package manifests
+    open-pull-requests-limit: 5
+    schedule:
+      interval: "weekly"
+    groups:
+      rocblas-docs-dependencies:
+        patterns:
+          - "*"
+
+  - package-ecosystem: "pip"
+    directory: "projects/rocsolver/docs/sphinx" # Location of package manifests
+    open-pull-requests-limit: 5
+    schedule:
+      interval: "weekly"
+    groups:
+      rocsolver-docs-dependencies:
+        patterns:
+          - "*"
+
+  - package-ecosystem: "pip"
+    directory: "projects/hipsolver/docs/sphinx" # Location of package manifests
+    open-pull-requests-limit: 5
+    schedule:
+      interval: "weekly"
+    groups:
+      hipsolver-docs-dependencies:
+        patterns:
+          - "*"
+
+  - package-ecosystem: "pip"
+    directory: "projects/rocrand/docs/sphinx" # Location of package manifests
+    open-pull-requests-limit: 5
+    schedule:
+      interval: "weekly"
+    groups:
+      rocrand-docs-dependencies:
+        patterns:
+          - "*"
+
+  - package-ecosystem: "pip"
+    directory: "projects/hiptensor/docs/sphinx" # Location of package manifests
+    open-pull-requests-limit: 5
+    schedule:
+      interval: "weekly"
+    groups:
+      hiptensor-docs-dependencies:
+        patterns:
+          - "*"
+
+  - package-ecosystem: "pip"
+    directory: "projects/rocwmma/docs/sphinx" # Location of package manifests
+    open-pull-requests-limit: 5
+    schedule:
+      interval: "weekly"
+    groups:
+      rocwmma-docs-dependencies:
+        patterns:
+          - "*"
+
+  - package-ecosystem: "pip"
+    directory: "shared/tensile/docs/sphinx" # Location of package manifests
+    open-pull-requests-limit: 5
+    schedule:
+      interval: "weekly"
+    groups:
+      tensile-docs-dependencies:
+        patterns:
+          - "*"

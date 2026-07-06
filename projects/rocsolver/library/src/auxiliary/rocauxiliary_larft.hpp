@@ -538,9 +538,8 @@ rocblas_status rocsolver_larft_template(rocblas_handle handle,
     hipStream_t stream;
     rocblas_get_stream(handle, &stream);
 
-    // save old pointer mode
-    rocblas_pointer_mode old_mode;
-    rocblas_get_pointer_mode(handle, &old_mode);
+    // gemm kernels use scalars on host
+    rocblas_pointer_mode_saver saver(handle, rocblas_pointer_mode_host);
 
     rocblas_stride stridew = rocblas_stride(k);
     rocblas_diagonal diag = rocblas_diagonal_non_unit;
@@ -558,7 +557,6 @@ rocblas_status rocsolver_larft_template(rocblas_handle handle,
     // SYRK/HERK can be used alternatively, but GEMM is currently more performant.
     if(use_gemm)
     {
-        rocblas_set_pointer_mode(handle, rocblas_pointer_mode_host);
         if(direct == rocblas_forward_direction && storev == rocblas_column_wise)
         {
             rocsolver_gemm(handle, rocblas_operation_conjugate_transpose, rocblas_operation_none, k,
@@ -590,8 +588,8 @@ rocblas_status rocsolver_larft_template(rocblas_handle handle,
     // Fix diagonal of T, make zero the not used triangular part,
     // setup tau (changing signs) and account for the non-stored 1's on the
     // householder vectors
-    rocblas_int blocks = (k - 1) / 32 + 1;
-    ROCSOLVER_LAUNCH_KERNEL(set_triangular, dim3(blocks, blocks, batch_count), dim3(32, 32), 0,
+    rocblas_int blocks = (k - 1) / BS2 + 1;
+    ROCSOLVER_LAUNCH_KERNEL(set_triangular, dim3(blocks, blocks, batch_count), dim3(BS2, BS2), 0,
                             stream, n, k, V, shiftV, ldv, strideV, tau, strideT, F, ldf, strideF,
                             direct, storev, use_gemm);
     ROCSOLVER_LAUNCH_KERNEL(set_tau, dim3(blocks, batch_count), dim3(32, 1), 0, stream, k, tau,
@@ -600,6 +598,7 @@ rocblas_status rocsolver_larft_template(rocblas_handle handle,
     const hipDeviceProp_t* props = rocblas_internal_get_device_prop(handle);
     size_t lmemsize = sizeof(T) * (k + 1) * k;
 
+    // Remaining kernels take scalars on device.
     rocblas_set_pointer_mode(handle, rocblas_pointer_mode_device);
 
     if(direct == rocblas_forward_direction)
@@ -716,7 +715,6 @@ rocblas_status rocsolver_larft_template(rocblas_handle handle,
     ROCSOLVER_LAUNCH_KERNEL(set_tau, dim3(blocks, batch_count), dim3(32, 1), 0, stream, k, tau,
                             strideT);
 
-    rocblas_set_pointer_mode(handle, old_mode);
     return rocblas_status_success;
 }
 
@@ -862,10 +860,8 @@ rocblas_status rocsolver_larft_inverse_template(rocblas_handle handle,
     hipStream_t stream;
     rocblas_get_stream(handle, &stream);
 
-    // everything must be executed with scalars on the device
-    rocblas_pointer_mode old_mode;
-    rocblas_get_pointer_mode(handle, &old_mode);
-    rocblas_set_pointer_mode(handle, rocblas_pointer_mode_host);
+    // everything must be executed with scalars on the host
+    rocblas_pointer_mode_saver saver(handle, rocblas_pointer_mode_host);
 
     T one = 1;
     T zero = 0;
@@ -892,9 +888,9 @@ rocblas_status rocsolver_larft_inverse_template(rocblas_handle handle,
         tri_offset = (!forward && n > k) ? idx2D(0, n - k, ldv) : 0;
     }
 
-    rocblas_int blocks = (k - 1) / 32 + 1;
+    rocblas_int blocks = (k - 1) / BS2 + 1;
     dim3 gridTri(blocks, blocks, batch_count);
-    dim3 blockTri(32, 32);
+    dim3 blockTri(BS2, BS2);
 
     // set V to unit triangular/trapezoidal
     ROCSOLVER_LAUNCH_KERNEL((larft_set_tri), gridTri, blockTri, 0, stream, tri_uplo, k, V,
@@ -912,7 +908,6 @@ rocblas_status rocsolver_larft_inverse_template(rocblas_handle handle,
     ROCSOLVER_LAUNCH_KERNEL((larft_restore_tri), gridTri, blockTri, 0, stream, tri_uplo, k, V,
                             shiftV + tri_offset, ldv, strideV, work);
 
-    rocblas_set_pointer_mode(handle, old_mode);
     return rocblas_status_success;
 }
 

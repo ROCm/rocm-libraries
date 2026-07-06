@@ -1,43 +1,11 @@
-/*******************************************************************************
- *
- * MIT License
- *
- * Copyright 2024-2025 AMD ROCm(TM) Software
- *
- * Permission is hereby granted, free of charge, to any person obtaining a copy
- * of this software and associated documentation files (the "Software"), to deal
- * in the Software without restriction, including without limitation the rights
- * to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
- * copies of the Software, and to permit persons to whom the Software is
- * furnished to do so, subject to the following conditions:
- *
- * The above copyright notice and this permission notice shall be included in
- * all copies or substantial portions of the Software.
- *
- * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
- * IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
- * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
- * AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
- * LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
- * OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
- * SOFTWARE.
- *
- *******************************************************************************/
+// Copyright Advanced Micro Devices, Inc., or its affiliates.
+// SPDX-License-Identifier: MIT
 
 #pragma once
 
-#include <array>
-#include <cstdio>
-#include <fstream>
-#include <iomanip>
-#include <iostream>
-#include <memory>
-#include <sstream>
-#include <stdexcept>
 #include <string>
-#include <unordered_map>
-#include <vector>
 
+#include <rocRoller/GPUArchitecture/GPUArchitectureTarget.hpp>
 #include <rocRoller/Utilities/Utils.hpp>
 
 namespace rocRoller
@@ -66,6 +34,8 @@ namespace rocRoller
             return "gfx1200";
         case GPUArchitectureGFX::GFX1201:
             return "gfx1201";
+        case GPUArchitectureGFX::GFX1250:
+            return "gfx1250";
         default:
             return "gfxunknown";
         }
@@ -87,7 +57,7 @@ namespace rocRoller
         case GPUArchitectureGFX::GFX942:
             return "AMD CDNA 3";
         case GPUArchitectureGFX::GFX950:
-            return "AMD CDNA 3.5";
+            return "AMD CDNA 4";
         case GPUArchitectureGFX::GFX1012:
             return "AMD RDNA 1";
         case GPUArchitectureGFX::GFX1030:
@@ -95,6 +65,8 @@ namespace rocRoller
         case GPUArchitectureGFX::GFX1200:
         case GPUArchitectureGFX::GFX1201:
             return "AMD RDNA 4";
+        case GPUArchitectureGFX::GFX1250:
+            return "AMD CDNA 5";
         default:
             return "unknown";
         }
@@ -109,6 +81,10 @@ namespace rocRoller
         }
         if(xnack)
         {
+            if(!rv.empty())
+            {
+                rv = concatenate(rv, ":");
+            }
             rv = concatenate(rv, "xnack+");
         }
         return rv;
@@ -132,6 +108,17 @@ namespace rocRoller
 
     inline std::string GPUArchitectureTarget::toString() const
     {
+        std::string rv{rocRoller::toString(gfx)};
+        if(asicRevisionId >= 0)
+            rv = concatenate(rv, "rev", asicRevisionId);
+
+        if(features.sramecc || features.xnack)
+            rv = concatenate(rv, ":", features.toString());
+        return rv;
+    }
+
+    inline std::string GPUArchitectureTarget::toAssemblerString() const
+    {
         if(features.sramecc || features.xnack)
             return concatenate(gfx, ":", features.toString());
         else
@@ -143,30 +130,4 @@ namespace rocRoller
         return rocRoller::name(gfx);
     }
 
-    inline GPUArchitectureTarget GPUArchitectureTarget::fromString(std::string const& archStr)
-    {
-        GPUArchitectureTarget rv;
-
-        int         start = 0;
-        size_t      end   = archStr.find(":");
-        std::string arch  = archStr.substr(start, end - start);
-
-        rv.gfx = rocRoller::fromString<GPUArchitectureGFX>(arch);
-
-        while(end != std::string::npos)
-        {
-            start               = end + 1;
-            end                 = archStr.find(":", start);
-            std::string feature = archStr.substr(start, end - start);
-            if(feature == "xnack+")
-            {
-                rv.features.xnack = true;
-            }
-            else if(feature == "sramecc+")
-            {
-                rv.features.sramecc = true;
-            }
-        }
-        return rv;
-    }
 }

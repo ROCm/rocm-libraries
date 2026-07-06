@@ -1,4 +1,4 @@
-// Copyright (c) 2024 Advanced Micro Devices, Inc. All rights reserved.
+// Copyright (c) 2024-2026 Advanced Micro Devices, Inc. All rights reserved.
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -34,26 +34,99 @@ BEGIN_ROCPRIM_NAMESPACE
 namespace detail
 {
 
-template<class Config, class InputIterator, class BinaryPredicate>
-struct search_n_impl_kernels
+template<class SizeType>
+static ROCPRIM_KERNEL ROCPRIM_LAUNCH_BOUNDS(1) void search_n_init_kernel(SizeType* __restrict__ output,
+                                                   const SizeType target)
 {
-    inline hipError_t launch_search_n_normal(
-        detail::target_arch arch,
-        InputIterator       input,
-        size_t* __restrict__ output,
-        const size_t                                                    size,
-        const size_t                                                    possible_head_exist_size,
-        const size_t                                                    count,
-        const typename std::iterator_traits<InputIterator>::value_type* value,
-        const BinaryPredicate                                           binary_predicate,
-        dim3                                                            grid,
-        dim3                                                            block,
-        size_t                                                          shmem,
-        hipStream_t                                                     stream)
+    *output = target;
+}
+
+inline void search_n_start_timer(std::chrono::steady_clock::time_point& start,
+                                 const bool                             debug_synchronous)
+{
+    if(debug_synchronous)
     {
-        auto kernel = [=](auto arch_config)
+        start = std::chrono::steady_clock::now();
+    }
+}
+
+template<class Config, class InputIterator, class OutputIterator, class BinaryPredicate>
+ROCPRIM_INLINE
+hipError_t search_n_impl(void*          temporary_storage,
+                         size_t&        storage_size,
+                         InputIterator  input,
+                         OutputIterator output,
+                         const size_t   size,
+                         const size_t   count,
+                         const typename std::iterator_traits<InputIterator>::value_type* value,
+                         const BinaryPredicate binary_predicate,
+                         const hipStream_t     stream,
+                         const bool            debug_synchronous)
+{
+    using input_type  = typename std::iterator_traits<InputIterator>::value_type;
+    using output_type = typename std::iterator_traits<OutputIterator>::value_type;
+
+    using Selector = search_n_config_selector<input_type>;
+
+    // The `size` must greater than or equal to `count`
+    if(count > size)
+    {
+        return hipErrorInvalidValue;
+    }
+
+    const target current_target(stream);
+
+    const auto         params           = get_config<Selector>(Config{}, current_target);
+    const unsigned int block_size       = params.kernel_config.block_size;
+    const unsigned int items_per_thread = params.kernel_config.items_per_thread;
+    const unsigned int items_per_block  = block_size * items_per_thread;
+
+    std::chrono::steady_clock::time_point start;
+
+    size_t* tmp_output = reinterpret_cast<size_t*>(temporary_storage);
+
+    // Only the items on index that smaller than possible_head_exist_size are possible heads
+    const size_t possible_head_exist_size = size - count + 1;
+
+    // To be consistent with std::search_n
+    if(size == 0 || count <= 0)
+    {
+        // Calculate size
+        if(tmp_output == nullptr)
         {
-            static constexpr auto params           = decltype(arch_config)::params;
+            storage_size = sizeof(size_t);
+            return hipSuccess;
+        }
+
+        // Return end or begin
+        search_n_start_timer(start, debug_synchronous);
+
+        search_n_init_kernel<<<1, 1, 0, stream>>>(tmp_output, count <= 0 ? 0 : size);
+        ROCPRIM_DETAIL_HIP_SYNC_AND_RETURN_ON_ERROR("search_n_init_kernel", 1, start);
+        ROCPRIM_RETURN_ON_ERROR(
+            transform(tmp_output, output, 1, identity<output_type>(), stream, debug_synchronous));
+        return hipSuccess;
+    }
+    else if(count <= params.threshold)
+    { // reduce search_n will have a maximum access time of params.threshold
+        // So if the count is equals to or smaller than params.threshold, `normal_search_n` should be faster
+        // calculate size
+        if(tmp_output == nullptr)
+        {
+            storage_size = sizeof(size_t);
+            return hipSuccess;
+        }
+
+        const unsigned int num_blocks = ceiling_div(possible_head_exist_size, items_per_block);
+
+        // do `normal_search_n`
+        search_n_start_timer(start, debug_synchronous);
+        search_n_init_kernel<<<1, 1, 0, stream>>>(tmp_output, size);
+        ROCPRIM_DETAIL_HIP_SYNC_AND_RETURN_ON_ERROR("search_n_init_kernel", 1, start);
+
+        auto search_n_normal_kernel = [=](auto target_config)
+        {
+            static constexpr auto params           = decltype(target_config)::params;
             static constexpr auto block_size       = params.kernel_config.block_size;
             static constexpr auto items_per_thread = params.kernel_config.items_per_thread;
             static constexpr auto items_per_block  = block_size * items_per_thread;
@@ -80,7 +153,7 @@ struct search_n_impl_kernels
                 {
                     if(--remaining_count == 0)
                     {
-                        atomic_min(output, head);
+                        atomic_min(tmp_output, head);
                         return;
                     }
                 }
@@ -91,278 +164,12 @@ struct search_n_impl_kernels
                 }
             }
         };
-        return execute_launch_plan<Config>(arch, kernel, grid, block, shmem, stream);
-    }
-
-    template<class SizeType>
-    static ROCPRIM_KERNEL ROCPRIM_LAUNCH_BOUNDS(1) void search_n_init_kernel(SizeType* __restrict__ output,
-                                                       const SizeType target)
-    {
-        *output = target;
-    }
-
-    inline hipError_t launch_search_n_find_heads(
-        detail::target_arch                                             arch,
-        InputIterator                                                   input,
-        const size_t                                                    input_size,
-        const size_t                                                    possible_head_exist_size,
-        const typename std::iterator_traits<InputIterator>::value_type* value,
-        const BinaryPredicate                                           binary_predicate,
-        size_t* __restrict__ unfiltered_heads,
-        const size_t group_size,
-        dim3         grid,
-        dim3         block,
-        size_t       shmem,
-        hipStream_t  stream)
-    {
-        auto kernel = [=](auto arch_config)
-        {
-            static constexpr auto params           = decltype(arch_config)::params;
-            static constexpr auto block_size       = params.kernel_config.block_size;
-            static constexpr auto items_per_thread = params.kernel_config.items_per_thread;
-            static constexpr auto items_per_block  = block_size * items_per_thread;
-
-            const size_t this_thread_start_idx
-                = (block_id<0>() * items_per_block) + (items_per_thread * block_thread_id<0>());
-            const size_t this_thread_end_idx
-                = std::min<size_t>(this_thread_start_idx + items_per_thread,
-                                   possible_head_exist_size);
-            for(size_t i = this_thread_start_idx; i < this_thread_end_idx; i++)
-            {
-                if(binary_predicate(input[i], *value))
-                {
-                    if(i == 0)
-                    {
-                        // This item is the first head
-                        // `input_size - i - 1` is the distance to the end
-                        atomic_min(&(unfiltered_heads[i / group_size]), input_size - i - 1);
-                    }
-                    else if(!binary_predicate(input[i - 1], *value))
-                    {
-                        // This item is head
-                        atomic_min(&(unfiltered_heads[i / group_size]), input_size - i - 1);
-                    }
-                }
-            }
-        };
-        return execute_launch_plan<Config>(arch, kernel, grid, block, shmem, stream);
-    }
-
-    inline hipError_t launch_search_n_heads_filter(detail::target_arch arch,
-                                                   const size_t        input_size,
-                                                   const size_t        count,
-                                                   const size_t* __restrict__ unfiltered_heads,
-                                                   const size_t unfiltered_heads_size,
-                                                   size_t* __restrict__ filtered_heads,
-                                                   size_t* __restrict__ filtered_heads_size,
-                                                   dim3        grid,
-                                                   dim3        block,
-                                                   size_t      shmem,
-                                                   hipStream_t stream)
-    {
-        auto kernel = [=](auto arch_config)
-        {
-            static constexpr auto params           = decltype(arch_config)::params;
-            static constexpr auto block_size       = params.kernel_config.block_size;
-            static constexpr auto items_per_thread = params.kernel_config.items_per_thread;
-            static constexpr auto items_per_block  = block_size * items_per_thread;
-
-            const size_t this_thread_start_idx
-                = (block_id<0>() * items_per_block) + (block_thread_id<0>() * items_per_thread);
-            const size_t this_thread_end_idx
-                = std::min<size_t>(items_per_thread + this_thread_start_idx, unfiltered_heads_size);
-            for(size_t i = this_thread_start_idx; i < this_thread_end_idx; ++i)
-            {
-                const auto cur_val = unfiltered_heads[i];
-                // This is not a valid head
-                if(cur_val == (size_t)-1)
-                {
-                    continue;
-                }
-                const size_t this_head = input_size - cur_val - 1;
-                // Other heads
-                if(i + 1 < unfiltered_heads_size)
-                {
-                    const auto next_val = unfiltered_heads[i + 1];
-                    // Check if this head is valid by calculating the distance between this head and the next head.
-                    if((next_val != (size_t)-1)
-                       && (((input_size - next_val - 1) - this_head - 1) < count))
-                    {
-                        continue;
-                    }
-                }
-                filtered_heads[atomic_add(filtered_heads_size, 1)] = this_head;
-            }
-        };
-        return execute_launch_plan<Config>(arch, kernel, grid, block, shmem, stream);
-    }
-
-    inline hipError_t launch_search_n_discard_heads(
-        detail::target_arch                                             arch,
-        InputIterator                                                   input,
-        const size_t                                                    input_size,
-        const size_t                                                    count,
-        const typename std::iterator_traits<InputIterator>::value_type* value,
-        const BinaryPredicate                                           binary_predicate,
-        size_t* __restrict__ filtered_heads,
-        size_t*     filtered_heads_size,
-        dim3        grid,
-        dim3        block,
-        size_t      shmem,
-        hipStream_t stream)
-    {
-        auto kernel = [=](auto arch_config)
-        {
-            static constexpr auto params           = decltype(arch_config)::params;
-            static constexpr auto block_size       = params.kernel_config.block_size;
-            static constexpr auto items_per_thread = params.kernel_config.items_per_thread;
-            static constexpr auto items_per_block  = block_size * items_per_thread;
-
-            const size_t heads_size = *filtered_heads_size;
-            const auto   block_idx  = block_id<0>();
-            if(heads_size == 0)
-            {
-                return;
-            }
-            const size_t total_check_size  = heads_size * count /*group_size*/;
-            const size_t num_blocks_needed = ceiling_div(total_check_size, items_per_block);
-            if(block_idx >= num_blocks_needed)
-            {
-                return;
-            }
-
-            const size_t this_thread_start_idx
-                = (block_idx * items_per_block) + (block_thread_id<0>() * items_per_thread);
-            const size_t this_thread_end_idx
-                = std::min<size_t>(items_per_thread + this_thread_start_idx, total_check_size);
-            // The `global_idx` is the index of item in the whole `input`
-            for(size_t global_idx = this_thread_start_idx; global_idx < this_thread_end_idx;
-                global_idx++)
-            {
-                // The id of the group who contains the item on global_idx
-                const size_t group_id = global_idx / count /*group_size*/;
-                if(group_id >= heads_size)
-                {
-                    return;
-                }
-                const size_t check_head
-                    = filtered_heads[group_id]
-                      + 1; // The `head` is already checked, so we check the next value here
-                const size_t check_count = count - 1;
-                const size_t idx         = check_head + (global_idx % count);
-
-                if((idx >= input_size) || (idx >= (check_head + check_count)))
-                {
-                    return;
-                }
-                if(!binary_predicate(input[idx], *value))
-                {
-                    filtered_heads[group_id] = input_size;
-                    return;
-                }
-            }
-        };
-        return execute_launch_plan<Config>(arch, kernel, grid, block, shmem, stream);
-    }
-};
-
-inline void search_n_start_timer(std::chrono::steady_clock::time_point& start,
-                                 const bool                             debug_synchronous)
-{
-    if(debug_synchronous)
-    {
-        start = std::chrono::steady_clock::now();
-    }
-}
-
-template<class Config, class InputIterator, class OutputIterator, class BinaryPredicate>
-ROCPRIM_INLINE
-hipError_t search_n_impl(void*          temporary_storage,
-                         size_t&        storage_size,
-                         InputIterator  input,
-                         OutputIterator output,
-                         const size_t   size,
-                         const size_t   count,
-                         const typename std::iterator_traits<InputIterator>::value_type* value,
-                         const BinaryPredicate binary_predicate,
-                         const hipStream_t     stream,
-                         const bool            debug_synchronous)
-{
-    using input_type       = typename std::iterator_traits<InputIterator>::value_type;
-    using output_type      = typename std::iterator_traits<OutputIterator>::value_type;
-    using config           = wrapped_search_n_config<Config, input_type>;
-    using search_n_kernels = search_n_impl_kernels<config, InputIterator, BinaryPredicate>;
-
-    // The `size` must greater than or equal to `count`
-    if(count > size)
-    {
-        return hipErrorInvalidValue;
-    }
-
-    target_arch target_arch;
-    ROCPRIM_RETURN_ON_ERROR(host_target_arch(stream, target_arch));
-
-    const auto         params           = dispatch_target_arch<config, false>(target_arch);
-    const unsigned int block_size       = params.kernel_config.block_size;
-    const unsigned int items_per_thread = params.kernel_config.items_per_thread;
-    const unsigned int items_per_block  = block_size * items_per_thread;
-
-    std::chrono::steady_clock::time_point start;
-
-    size_t* tmp_output = reinterpret_cast<size_t*>(temporary_storage);
-
-    // Only the items on index that smaller than possible_head_exist_size are possible heads
-    const size_t possible_head_exist_size = size - count + 1;
-
-    // To be consistent with std::search_n
-    if(size == 0 || count <= 0)
-    {
-        // Calculate size
-        if(tmp_output == nullptr)
-        {
-            storage_size = sizeof(size_t);
-            return hipSuccess;
-        }
-
-        // Return end or begin
-        search_n_start_timer(start, debug_synchronous);
-
-        search_n_kernels::search_n_init_kernel<<<1, 1, 0, stream>>>(tmp_output,
-                                                                    count <= 0 ? 0 : size);
-        ROCPRIM_DETAIL_HIP_SYNC_AND_RETURN_ON_ERROR("search_n_init_kernel", 1, start);
-        ROCPRIM_RETURN_ON_ERROR(
-            transform(tmp_output, output, 1, identity<output_type>(), stream, debug_synchronous));
-        return hipSuccess;
-    }
-    else if(count <= params.threshold)
-    { // reduce search_n will have a maximum access time of params.threshold
-        // So if the count is equals to or smaller than params.threshold, `normal_search_n` should be faster
-        // calculate size
-        if(tmp_output == nullptr)
-        {
-            storage_size = sizeof(size_t);
-            return hipSuccess;
-        }
-
-        const unsigned int num_blocks = ceiling_div(possible_head_exist_size, items_per_block);
-
-        // do `normal_search_n`
-        search_n_start_timer(start, debug_synchronous);
-        search_n_kernels::search_n_init_kernel<<<1, 1, 0, stream>>>(tmp_output, size);
-        ROCPRIM_DETAIL_HIP_SYNC_AND_RETURN_ON_ERROR("search_n_init_kernel", 1, start);
-
-        ROCPRIM_RETURN_ON_ERROR(search_n_kernels{}.launch_search_n_normal(target_arch,
-                                                                          input,
-                                                                          tmp_output,
-                                                                          size,
-                                                                          possible_head_exist_size,
-                                                                          count,
-                                                                          value,
-                                                                          binary_predicate,
-                                                                          num_blocks,
-                                                                          block_size,
-                                                                          0,
-                                                                          stream));
+        ROCPRIM_RETURN_ON_ERROR(execute_launch_plan<Config, Selector>(current_target,
+                                                                      search_n_normal_kernel,
+                                                                      num_blocks,
+                                                                      block_size,
+                                                                      0,
+                                                                      stream));
         ROCPRIM_DETAIL_HIP_SYNC_AND_RETURN_ON_ERROR("search_n_normal_kernel", size, start);
         ROCPRIM_RETURN_ON_ERROR(
             transform(tmp_output, output, 1, identity<output_type>(), stream, debug_synchronous));
@@ -408,18 +215,41 @@ hipError_t search_n_impl(void*          temporary_storage,
     // This function processes `possible_head_exist_size` items
     const size_t num_blocks_for_find_heads = ceiling_div(possible_head_exist_size, items_per_block);
 
-    ROCPRIM_RETURN_ON_ERROR(search_n_kernels{}.launch_search_n_find_heads(target_arch,
-                                                                          input,
-                                                                          size,
-                                                                          possible_head_exist_size,
-                                                                          value,
-                                                                          binary_predicate,
-                                                                          unfiltered_heads,
-                                                                          count /*group_size*/,
-                                                                          num_blocks_for_find_heads,
-                                                                          block_size,
-                                                                          0,
-                                                                          stream));
+    auto search_n_find_heads_kernel = [=](auto target_config)
+    {
+        static constexpr auto params           = decltype(target_config)::params;
+        static constexpr auto block_size       = params.kernel_config.block_size;
+        static constexpr auto items_per_thread = params.kernel_config.items_per_thread;
+        static constexpr auto items_per_block  = block_size * items_per_thread;
+
+        const size_t this_thread_start_idx
+            = (block_id<0>() * items_per_block) + (items_per_thread * block_thread_id<0>());
+        const size_t this_thread_end_idx
+            = std::min<size_t>(this_thread_start_idx + items_per_thread, possible_head_exist_size);
+        for(size_t i = this_thread_start_idx; i < this_thread_end_idx; i++)
+        {
+            if(binary_predicate(input[i], *value))
+            {
+                if(i == 0)
+                {
+                    // This item is the first head
+                    // `input_size - i - 1` is the distance to the end
+                    atomic_min(&(unfiltered_heads[i / count]), size - i - 1);
+                }
+                else if(!binary_predicate(input[i - 1], *value))
+                {
+                    // This item is head
+                    atomic_min(&(unfiltered_heads[i / count]), size - i - 1);
+                }
+            }
+        }
+    };
+    ROCPRIM_RETURN_ON_ERROR(execute_launch_plan<Config, Selector>(current_target,
+                                                                  search_n_find_heads_kernel,
+                                                                  num_blocks_for_find_heads,
+                                                                  block_size,
+                                                                  0,
+                                                                  stream));
     ROCPRIM_DETAIL_HIP_SYNC_AND_RETURN_ON_ERROR("search_n_find_heads_kernel",
                                                 possible_head_exist_size,
                                                 start);
@@ -427,18 +257,49 @@ hipError_t search_n_impl(void*          temporary_storage,
     // This function processes `num_groups` items
     const size_t num_blocks_for_heads_filter = ceiling_div(num_groups, items_per_block);
 
-    ROCPRIM_RETURN_ON_ERROR(search_n_kernels{}.launch_search_n_heads_filter(
-        target_arch,
-        size, // It is just a value to decode the heads' index value
-        count, // It is just a value to determine whether a certain head is invalid
-        unfiltered_heads, // Input heads
-        num_groups, // Size of unfiltered_heads
-        filtered_heads, // Output
-        tmp_output, // Used to store the number of items in `filtered_heads`
-        num_blocks_for_heads_filter,
-        block_size,
-        0,
-        stream));
+    auto search_n_heads_filter_kernel = [=](auto target_config)
+    {
+        static constexpr auto params           = decltype(target_config)::params;
+        static constexpr auto block_size       = params.kernel_config.block_size;
+        static constexpr auto items_per_thread = params.kernel_config.items_per_thread;
+        static constexpr auto items_per_block  = block_size * items_per_thread;
+
+        const size_t this_thread_start_idx
+            = (block_id<0>() * items_per_block) + (block_thread_id<0>() * items_per_thread);
+        // num_groups: size of unfiltered_heads
+        const size_t this_thread_end_idx
+            = std::min<size_t>(items_per_thread + this_thread_start_idx, num_groups);
+        for(size_t i = this_thread_start_idx; i < this_thread_end_idx; ++i)
+        {
+            const auto cur_val = unfiltered_heads[i];
+            // This is not a valid head
+            if(cur_val == (size_t)-1)
+            {
+                continue;
+            }
+            // size: a value to decode the heads' index value
+            const size_t this_head = size - cur_val - 1;
+            // Other heads
+            if(i + 1 < num_groups)
+            {
+                const auto next_val = unfiltered_heads[i + 1];
+                // Check if this head is valid by calculating the distance between this head and the next head.
+                if((next_val != (size_t)-1) && (((size - next_val - 1) - this_head - 1) < count))
+                {
+                    // count: a value to determine whether a certain head is invalid
+                    continue;
+                }
+            }
+            // tmp_output: used to store the number of items in `filtered_heads`
+            filtered_heads[atomic_add(tmp_output, 1)] = this_head;
+        }
+    };
+    ROCPRIM_RETURN_ON_ERROR(execute_launch_plan<Config, Selector>(current_target,
+                                                                  search_n_heads_filter_kernel,
+                                                                  num_blocks_for_heads_filter,
+                                                                  block_size,
+                                                                  0,
+                                                                  stream));
     ROCPRIM_DETAIL_HIP_SYNC_AND_RETURN_ON_ERROR("search_n_heads_filter_kernel", num_groups, start);
 
     size_t h_filtered_heads_size = 0;
@@ -453,7 +314,7 @@ hipError_t search_n_impl(void*          temporary_storage,
         {
             // Return end
             search_n_start_timer(start, debug_synchronous);
-            search_n_kernels::search_n_init_kernel<<<1, 1, 0, stream>>>(tmp_output, size);
+            search_n_init_kernel<<<1, 1, 0, stream>>>(tmp_output, size);
             ROCPRIM_DETAIL_HIP_SYNC_AND_RETURN_ON_ERROR("search_n_init_kernel", 1, start);
             ROCPRIM_RETURN_ON_ERROR(transform(tmp_output,
                                               output,
@@ -474,19 +335,64 @@ hipError_t search_n_impl(void*          temporary_storage,
     const size_t num_blocks_for_discard_heads
         = ceiling_div(h_filtered_heads_size * count, items_per_block);
 
-    ROCPRIM_RETURN_ON_ERROR(search_n_kernels{}.launch_search_n_discard_heads(
-        target_arch,
-        input,
-        size,
-        count,
-        value,
-        binary_predicate,
-        filtered_heads,
-        tmp_output, // Currently, `tmp_output` contains the actual size of `filtered_heads`
-        num_blocks_for_discard_heads,
-        block_size,
-        0,
-        stream));
+    auto search_n_discard_heads_kernel = [=](auto target_config)
+    {
+        static constexpr auto params           = decltype(target_config)::params;
+        static constexpr auto block_size       = params.kernel_config.block_size;
+        static constexpr auto items_per_thread = params.kernel_config.items_per_thread;
+        static constexpr auto items_per_block  = block_size * items_per_thread;
+
+        // Currently, `tmp_output` contains the actual size of `filtered_heads`
+        const size_t heads_size = *tmp_output;
+        const auto   block_idx  = block_id<0>();
+        if(heads_size == 0)
+        {
+            return;
+        }
+        const size_t total_check_size  = heads_size * count /*group_size*/;
+        const size_t num_blocks_needed = ceiling_div(total_check_size, items_per_block);
+        if(block_idx >= num_blocks_needed)
+        {
+            return;
+        }
+
+        const size_t this_thread_start_idx
+            = (block_idx * items_per_block) + (block_thread_id<0>() * items_per_thread);
+        const size_t this_thread_end_idx
+            = std::min<size_t>(items_per_thread + this_thread_start_idx, total_check_size);
+        // The `global_idx` is the index of item in the whole `input`
+        for(size_t global_idx = this_thread_start_idx; global_idx < this_thread_end_idx;
+            global_idx++)
+        {
+            // The id of the group who contains the item on global_idx
+            const size_t group_id = global_idx / count /*group_size*/;
+            if(group_id >= heads_size)
+            {
+                return;
+            }
+            const size_t check_head
+                = filtered_heads[group_id]
+                  + 1; // The `head` is already checked, so we check the next value here
+            const size_t check_count = count - 1;
+            const size_t idx         = check_head + (global_idx % count);
+
+            if((idx >= size) || (idx >= (check_head + check_count)))
+            {
+                return;
+            }
+            if(!binary_predicate(input[idx], *value))
+            {
+                filtered_heads[group_id] = size;
+                return;
+            }
+        }
+    };
+    ROCPRIM_RETURN_ON_ERROR(execute_launch_plan<Config, Selector>(current_target,
+                                                                  search_n_discard_heads_kernel,
+                                                                  num_blocks_for_discard_heads,
+                                                                  block_size,
+                                                                  0,
+                                                                  stream));
     ROCPRIM_DETAIL_HIP_SYNC_AND_RETURN_ON_ERROR("search_n_discard_heads_kernel ",
                                                 h_filtered_heads_size,
                                                 start);

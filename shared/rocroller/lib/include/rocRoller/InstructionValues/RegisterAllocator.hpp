@@ -1,31 +1,9 @@
-/*******************************************************************************
- *
- * MIT License
- *
- * Copyright 2024-2025 AMD ROCm(TM) Software
- *
- * Permission is hereby granted, free of charge, to any person obtaining a copy
- * of this software and associated documentation files (the "Software"), to deal
- * in the Software without restriction, including without limitation the rights
- * to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
- * copies of the Software, and to permit persons to whom the Software is
- * furnished to do so, subject to the following conditions:
- *
- * The above copyright notice and this permission notice shall be included in
- * all copies or substantial portions of the Software.
- *
- * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
- * IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
- * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
- * AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
- * LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
- * OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
- * SOFTWARE.
- *
- *******************************************************************************/
+// Copyright Advanced Micro Devices, Inc., or its affiliates.
+// SPDX-License-Identifier: MIT
 
 #pragma once
 
+#include <rocRoller/GPUArchitecture/GPUArchitecture.hpp>
 #include <rocRoller/InstructionValues/Register_fwd.hpp>
 
 #include <string>
@@ -79,7 +57,9 @@ namespace rocRoller
 
             bool canAllocate(std::shared_ptr<const Allocation> alloc) const;
 
-            std::vector<int> findFree(int count, AllocationOptions const& options) const;
+            std::vector<int> findFree(int                      count,
+                                      AllocationOptions const& options,
+                                      GPUArchitecture const&   arch) const;
 
             /**
              * @brief Returns the first free range matching the criteria as index and block size. Returns {-1, 0} if no such range exists.
@@ -93,6 +73,7 @@ namespace rocRoller
             std::pair<int, int> findContiguousRange(int                      start,
                                                     int                      regCount,
                                                     AllocationOptions const& options,
+                                                    GPUArchitecture const&   arch,
                                                     std::vector<int> const&  reservedIndices
                                                     = {}) const;
 
@@ -115,9 +96,26 @@ namespace rocRoller
             //> Allocate these specific registers.
             void allocate(AllocationPtr alloc, std::vector<int>&& registers);
 
-            std::vector<int> findFreeFirstFit(int count, AllocationOptions const& options) const;
+            std::vector<int> findFreeFirstFit(int                      count,
+                                              AllocationOptions const& options,
+                                              GPUArchitecture const&   arch) const;
 
-            std::vector<int> findFreePerfectFit(int count, AllocationOptions const& options) const;
+            /**
+             * @brief Find free registers using the PerfectFit strategy.
+             *
+             * Priority order:
+             * 1. Perfect fit: a hole exactly matching the required size
+             * 2. Perfect alignment: start or end of a hole where no gap is created
+             * 3. Start of a hole (may create alignment gap)
+             * 4. End of register space (last resort)
+             *
+             * @param count Number of registers to allocate
+             * @param options Allocation options (alignment, contiguity)
+             * @return Vector of register indices, or empty if allocation failed
+             */
+            std::vector<int> findFreePerfectFit(int                      count,
+                                                AllocationOptions const& options,
+                                                GPUArchitecture const&   arch) const;
 
             AllocatorScheme m_scheme;
 

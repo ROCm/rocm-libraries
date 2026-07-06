@@ -1,5 +1,5 @@
+// Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
 // SPDX-License-Identifier: MIT
-// Copyright (c) 2018-2025, Advanced Micro Devices, Inc. All rights reserved.
 
 #pragma once
 
@@ -33,7 +33,7 @@ template <typename GridwiseGemm,
           typename CElementwiseOperation = ck::tensor_operation::element_wise::PassThrough>
 __global__ void
 #if CK_USE_LAUNCH_BOUNDS
-__launch_bounds__(CK_MAX_THREAD_PER_BLOCK, CK_MIN_BLOCK_PER_CU)
+__launch_bounds__(GridwiseGemm::MaxBlockSize, CK_MIN_BLOCK_PER_CU)
 #endif
     kernel_grouped_gemm_xdl_splitk(const void CK_CONSTANT_ADDRESS_SPACE* gemm_descs_const,
                                    const index_t group_count,
@@ -44,7 +44,8 @@ __launch_bounds__(CK_MAX_THREAD_PER_BLOCK, CK_MIN_BLOCK_PER_CU)
 #if defined(__gfx9__) || defined(__gfx11__) || defined(__gfx12__)
     if constexpr(GridwiseGemm::template IsValidCompilationParameter<CGlobalMemoryDataOperation>())
     {
-        constexpr index_t shared_size = GridwiseGemm::GetSharedMemoryNumberOfByte();
+        constexpr index_t shared_size =
+            GridwiseGemm::GetSharedMemoryNumberOfByte(get_device_arch());
         __shared__ uint8_t p_shared[shared_size];
 
         const index_t block_id   = get_block_1d_id();
@@ -147,10 +148,27 @@ struct DeviceGroupedGemmXdlSplitKCShuffle : public DeviceGroupedGemmSplitK<ALayo
                                                                            BElementwiseOperation,
                                                                            CDEElementwiseOperation>
 {
-    GET_NXDL_PER_WAVE_IMPL
-    static constexpr auto NXdlPerWave64 = GetNXdlPerWave<true>();
-    static constexpr auto NXdlPerWave32 = GetNXdlPerWave<false>();
-    static constexpr index_t NumDTensor = DsDataType::Size();
+    static constexpr auto WarpTileConfig64 = GetWarpTileConfig<BlockSize,
+                                                               MPerBlock,
+                                                               NPerBlock,
+                                                               MPerXDL,
+                                                               NPerXDL,
+                                                               MXdlPerWave,
+                                                               CShuffleMXdlPerWavePerShuffle,
+                                                               CShuffleNXdlPerWavePerShuffle,
+                                                               true>();
+    static constexpr auto WarpTileConfig32 = GetWarpTileConfig<BlockSize,
+                                                               MPerBlock,
+                                                               NPerBlock,
+                                                               MPerXDL,
+                                                               NPerXDL,
+                                                               MXdlPerWave,
+                                                               CShuffleMXdlPerWavePerShuffle,
+                                                               CShuffleNXdlPerWavePerShuffle,
+                                                               false>();
+    static constexpr auto NXdlPerWave64    = WarpTileConfig64.At(3);
+    static constexpr auto NXdlPerWave32    = WarpTileConfig32.At(3);
+    static constexpr index_t NumDTensor    = DsDataType::Size();
 
     static constexpr auto I0 = Number<0>{};
     static constexpr auto I1 = Number<1>{};
@@ -159,7 +177,7 @@ struct DeviceGroupedGemmXdlSplitKCShuffle : public DeviceGroupedGemmSplitK<ALayo
     static_assert(KPerBlock % AK1 == 0);
     static constexpr index_t K0PerBlock = KPerBlock / AK1;
 
-    template <index_t NXdlPerWave_>
+    template <typename WarpTileConfig>
     using GridwiseGemmBase = GridwiseGemm_bk0mk1_bk0nk1_mn_xdlops_v2r4r2<
         BlockSize,
         ADataType,
@@ -177,11 +195,11 @@ struct DeviceGroupedGemmXdlSplitKCShuffle : public DeviceGroupedGemmSplitK<ALayo
         MPerBlock,
         NPerBlock,
         K0PerBlock,
-        MPerXDL,
-        NPerXDL,
+        WarpTileConfig::At(0),
+        WarpTileConfig::At(1),
         AK1,
-        MXdlPerWave,
-        NXdlPerWave_,
+        WarpTileConfig::At(2),
+        WarpTileConfig::At(3),
         ABlockTransferThreadClusterLengths_K0_M_K1,
         ABlockTransferThreadClusterArrangeOrder,
         ABlockTransferSrcAccessOrder,
@@ -198,14 +216,14 @@ struct DeviceGroupedGemmXdlSplitKCShuffle : public DeviceGroupedGemmSplitK<ALayo
         BBlockTransferDstScalarPerVector_K1,
         false, // BThreadTransferSrcResetCoordinateAfterRun,
         BBlockLdsExtraN,
-        CShuffleMXdlPerWavePerShuffle,
-        CShuffleNXdlPerWavePerShuffle,
+        WarpTileConfig::At(4),
+        WarpTileConfig::At(5),
         CDEBlockTransferScalarPerVector_NPerBlock,
         CDEBlockTransferClusterLengths_MBlock_MPerBlock_NBlock_NPerBlock,
         LoopSched,
         PipelineVer>;
-    using GridwiseGemm64 = GridwiseGemmBase<math::max(NXdlPerWave64, 1)>;
-    using GridwiseGemm32 = GridwiseGemmBase<NXdlPerWave32>;
+    using GridwiseGemm64 = GridwiseGemmBase<decltype(WarpTileConfig64)>;
+    using GridwiseGemm32 = GridwiseGemmBase<decltype(WarpTileConfig32)>;
 
     using CGridDesc_M_N = typename GridwiseGemm64::CGridDesc_M_N;
     using Block2ETileMapKSplit =
@@ -591,7 +609,12 @@ struct DeviceGroupedGemmXdlSplitKCShuffle : public DeviceGroupedGemmSplitK<ALayo
 
     static bool IsSupportedArgument(const Argument& arg)
     {
-        if(!ck::is_xdl_wmma_supported<ADataType, BDataType, MPerXDL, NPerXDL>())
+        if(!ck::is_xdl_wmma_supported<ADataType,
+                                      BDataType,
+                                      MPerXDL,
+                                      NPerXDL,
+                                      WarpTileConfig32.At(0),
+                                      WarpTileConfig32.At(1)>())
         {
             return false;
         }
@@ -620,7 +643,44 @@ struct DeviceGroupedGemmXdlSplitKCShuffle : public DeviceGroupedGemmSplitK<ALayo
         bool isWave64  = get_warp_size() == 64;
         for(std::size_t i = 0; i < arg.gemm_kernel_args_.size(); ++i)
         {
-            const auto& a        = arg.gemm_kernel_args_[i].karg_;
+            const auto& a = arg.gemm_kernel_args_[i].karg_;
+
+            // Validate stride requirements for SplitK (k_batch > 1)
+            // TODO: Enable splitK
+            if(a.k_batch > 1)
+            {
+                if constexpr(std::is_same_v<ELayout, tensor_layout::gemm::RowMajor>)
+                {
+                    if(a.StrideC != a.N)
+                    {
+                        if(ck::EnvIsEnabled(CK_ENV(CK_LOGGING)))
+                        {
+                            std::cout << "[" << __func__ << "] group id: " << i
+                                      << " SplitK (k_batch=" << a.k_batch
+                                      << ") requires contiguous output stride."
+                                      << " For RowMajor layout: StrideC must equal N."
+                                      << " Got StrideC=" << a.StrideC << ", N=" << a.N << std::endl;
+                        }
+                        return false;
+                    }
+                }
+                else if constexpr(std::is_same_v<ELayout, tensor_layout::gemm::ColumnMajor>)
+                {
+                    if(a.StrideC != a.M)
+                    {
+                        if(ck::EnvIsEnabled(CK_ENV(CK_LOGGING)))
+                        {
+                            std::cout << "[" << __func__ << "] group id: " << i
+                                      << " SplitK (k_batch=" << a.k_batch
+                                      << ") requires contiguous output stride."
+                                      << " For ColumnMajor layout: StrideC must equal M."
+                                      << " Got StrideC=" << a.StrideC << ", M=" << a.M << std::endl;
+                        }
+                        return false;
+                    }
+                }
+            }
+
             bool group_arg_valid = false;
             if(isWave64)
             {

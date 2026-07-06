@@ -1,28 +1,5 @@
-/*******************************************************************************
- *
- * MIT License
- *
- * Copyright 2024-2025 AMD ROCm(TM) Software
- *
- * Permission is hereby granted, free of charge, to any person obtaining a copy
- * of this software and associated documentation files (the "Software"), to deal
- * in the Software without restriction, including without limitation the rights
- * to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
- * copies of the Software, and to permit persons to whom the Software is
- * furnished to do so, subject to the following conditions:
- *
- * The above copyright notice and this permission notice shall be included in
- * all copies or substantial portions of the Software.
- *
- * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
- * IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
- * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
- * AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
- * LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
- * OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
- * SOFTWARE.
- *
- *******************************************************************************/
+// Copyright Advanced Micro Devices, Inc., or its affiliates.
+// SPDX-License-Identifier: MIT
 
 #pragma once
 
@@ -91,6 +68,7 @@ namespace rocRoller
             Tensor(int numDims, VariableType variableType);
             Tensor(int                        numDims,
                    VariableType               variableType,
+                   std::vector<size_t> const& literalSizes,
                    std::vector<size_t> const& literalStrides);
 
             std::string toString() const;
@@ -98,12 +76,12 @@ namespace rocRoller
 
             void allocateArguments();
 
+            std::vector<size_t> const& literalSizes() const;
             std::vector<size_t> const& literalStrides() const;
 
             std::vector<CommandArgumentPtr> const& strides() const;
             std::vector<CommandArgumentPtr> const& sizes() const;
 
-            CommandArgumentPtr limit() const;
             CommandArgumentPtr data() const;
 
             VariableType variableType() const;
@@ -121,11 +99,11 @@ namespace rocRoller
             int          m_numDims = -1;
 
             CommandArgumentPtr m_pointer;
-            CommandArgumentPtr m_extent;
 
             std::vector<CommandArgumentPtr> m_sizes;
             std::vector<CommandArgumentPtr> m_strides;
 
+            std::vector<size_t> m_literalSizes;
             std::vector<size_t> m_literalStrides;
         };
 

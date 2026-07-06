@@ -1,6 +1,6 @@
 /*! \file */
 /* ************************************************************************
- * Copyright (C) 2025 Advanced Micro Devices, Inc. All rights Reserved.
+ * Copyright (C) 2025-2026 Advanced Micro Devices, Inc. All rights Reserved.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -30,19 +30,19 @@ extern "C" {
 
 /*! \ingroup generic_module
 *  \details
-*  \p hipsparseSpMM_bufferSize computes the required user allocated buffer size needed when computing the
+*  \p hipsparseSpMM_bufferSize computes the required user-allocated buffer size needed when computing the
 *  sparse matrix multiplication with a dense matrix:
 *  \f[
 *    C := \alpha \cdot op(A) \cdot op(B) + \beta \cdot C,
 *  \f]
-*  where \f$op(A)\f$ is a sparse \f$m \times k\f$ matrix in CSR, COO, BSR or Blocked ELL storage format,
-*  \f$B\f$ is a dense matrix of size \f$k \times n\f$ and \f$C\f$ is a dense matrix of size \f$m \times n\f$.
+*  where \f$op(A)\f$ is a sparse \f$m \times k\f$ matrix in CSR, CSC, COO, BSR, or Blocked ELL storage format,
+*  \f$B\f$ is a dense matrix of size \f$k \times n\f$, and \f$C\f$ is a dense matrix of size \f$m \times n\f$.
 *
 *  \p hipsparseSpMM_bufferSize supports multiple combinations of data types and compute types. See \ref hipsparseSpMM
 *  for a complete listing of all the data type and compute type combinations available.
 *
 *  @param[in]
-*  handle              handle to the hipsparse library context queue.
+*  handle              handle to the hipSPARSE library context queue.
 *  @param[in]
 *  opA                 matrix operation type.
 *  @param[in]
@@ -50,13 +50,13 @@ extern "C" {
 *  @param[in]
 *  alpha               scalar \f$\alpha\f$.
 *  @param[in]
-*  matA                matrix descriptor.
+*  matA                sparse matrix descriptor.
 *  @param[in]
-*  matB                matrix descriptor.
+*  matB                dense matrix descriptor.
 *  @param[in]
 *  beta                scalar \f$\beta\f$.
 *  @param[in]
-*  matC                matrix descriptor.
+*  matC                dense matrix descriptor.
 *  @param[in]
 *  computeType         floating point precision for the SpMM computation.
 *  @param[in]
@@ -64,11 +64,11 @@ extern "C" {
 *  @param[out]
 *  pBufferSizeInBytes  number of bytes of the temporary storage buffer.
 *
-*  \retval      HIPSPARSE_STATUS_SUCCESS the operation completed successfully.
-*  \retval      HIPSPARSE_STATUS_INVALID_VALUE \p handle, \p alpha, \p matA, \p matB, \p matC, \p beta, or
-*               \p pBufferSizeInBytes pointer is invalid.
-*  \retval      HIPSPARSE_STATUS_NOT_SUPPORTED \p opA, \p opB, \p computeType or \p alg is
-*               currently not supported.
+*  \retval HIPSPARSE_STATUS_SUCCESS the operation completed successfully.
+*  \retval HIPSPARSE_STATUS_NOT_INITIALIZED \p handle is not initialized.
+*  \retval HIPSPARSE_STATUS_INVALID_VALUE \p handle, \p alpha, \p matA, \p matB, \p matC, \p beta, or
+*          \p pBufferSizeInBytes is nullptr, or \p opA or \p opB is invalid.
+*  \retval HIPSPARSE_STATUS_NOT_SUPPORTED \p opA, \p opB, \p computeType, or \p alg is currently not supported.
 */
 #if(!defined(CUDART_VERSION) || CUDART_VERSION >= 12000)
 HIPSPARSE_EXPORT
@@ -105,14 +105,14 @@ hipsparseStatus_t hipsparseSpMM_bufferSize(hipsparseHandle_t           handle,
 *  \f[
 *    C := \alpha \cdot op(A) \cdot op(B) + \beta \cdot C,
 *  \f]
-*  where \f$op(A)\f$ is a sparse \f$m \times k\f$ matrix in CSR, COO, BSR or Blocked ELL storage format,
-*  \f$B\f$ is a dense matrix of size \f$k \times n\f$ and \f$C\f$ is a dense matrix of size \f$m \times n\f$.
+*  where \f$op(A)\f$ is a sparse \f$m \times k\f$ matrix in CSR, CSC, COO, BSR, or Blocked ELL storage format,
+*  \f$B\f$ is a dense matrix of size \f$k \times n\f$, and \f$C\f$ is a dense matrix of size \f$m \times n\f$.
 *
 *  \p hipsparseSpMM_preprocess supports multiple combinations of data types and compute types. See \ref hipsparseSpMM for a complete
 *  listing of all the data type and compute type combinations available.
 *
 *  @param[in]
-*  handle          handle to the hipsparse library context queue.
+*  handle          handle to the hipSPARSE library context queue.
 *  @param[in]
 *  opA             matrix operation type.
 *  @param[in]
@@ -137,7 +137,7 @@ hipsparseStatus_t hipsparseSpMM_bufferSize(hipsparseHandle_t           handle,
 *  \retval      HIPSPARSE_STATUS_SUCCESS the operation completed successfully.
 *  \retval      HIPSPARSE_STATUS_INVALID_VALUE \p handle, \p alpha, \p matA, \p matB, \p matC, \p beta, or
 *               \p externalBuffer pointer is invalid.
-*  \retval      HIPSPARSE_STATUS_NOT_SUPPORTED \p opA, \p opB, \p computeType or \p alg is
+*  \retval      HIPSPARSE_STATUS_NOT_SUPPORTED \p opA, \p opB, \p computeType, or \p alg is
 *               currently not supported.
 */
 #if(!defined(CUDART_VERSION) || CUDART_VERSION >= 12000)
@@ -169,11 +169,11 @@ hipsparseStatus_t hipsparseSpMM_preprocess(hipsparseHandle_t           handle,
 #endif
 
 /*! \ingroup generic_module
-*  \brief Compute the sparse matrix multiplication with a dense matrix
+*  \brief Compute the sparse matrix multiplication with a dense matrix.
 *
 *  \details
 *  \p hipsparseSpMM multiplies the scalar \f$\alpha\f$ with a sparse \f$m \times k\f$ matrix \f$op(A)\f$,
-*  defined in CSR, COO, BSR or Blocked ELL storage format, and the dense \f$k \times n\f$ matrix \f$op(B)\f$
+*  defined in CSR, CSC, COO, BSR, or Blocked ELL storage format, and the dense \f$k \times n\f$ matrix \f$op(B)\f$
 *  and adds the result to the dense \f$m \times n\f$ matrix \f$C\f$ that is multiplied by the scalar
 *  \f$\beta\f$, such that
 *  \f[
@@ -203,13 +203,13 @@ hipsparseStatus_t hipsparseSpMM_preprocess(hipsparseHandle_t           handle,
 *
 *  \p hipsparseSpMM requires three stages to complete. First, the user calls \ref hipsparseSpMM_bufferSize to determine
 *  the size of the required temporary storage buffer. Next, the user allocates this buffer and calls
-*  \ref hipsparseSpMM_preprocess which will perform analysis on the sparse matrix \f$op(A)\f$. Finally, the user calls
-*  \p hipsparseSpMM to perform the actual computation. The buffer size and preprecess routines only need to be called once for a given
-*  sparse matrix \f$op(A)\f$ while the computation routine can be repeatedly used with different \f$B\f$ and \f$C\f$ matrices.
-*  Once all calls to \p hipsparseSpMM are complete, the temporary buffer can be deallocated.
+*  \ref hipsparseSpMM_preprocess, which will perform analysis on the sparse matrix \f$op(A)\f$. Finally, the user calls
+*  \p hipsparseSpMM to perform the actual computation. The buffer size and preprocess routines only need to be called once for a given
+*  sparse matrix \f$op(A)\f$, while the computation routine can be repeatedly used with different \f$B\f$ and \f$C\f$ matrices.
+*  After all calls to \p hipsparseSpMM are complete, the temporary buffer can be deallocated.
 *
 *  As noted above, both \f$B\f$ and \f$C\f$ can be in row or column order (this includes mixing the order so that \f$B\f$ is
-*  row order and \f$C\f$ is column order and vice versa). For best performance, use row order for both \f$B\f$ and \f$C\f$ as
+*  row order and \f$C\f$ is column order and vice versa). For best performance, use row order for both \f$B\f$ and \f$C\f$ because
 *  this provides the best memory access.
 *
 *  \p hipsparseSpMM supports multiple different algorithms. These algorithms have different trade offs depending on the sparsity
@@ -217,8 +217,8 @@ hipsparseStatus_t hipsparseSpMM_preprocess(hipsparseHandle_t           handle,
 *  be performed.
 *
 *  <table>
-*  <caption id="spmm_csr_algorithms">CSR Algorithms</caption>
-*  <tr><th>CSR Algorithms
+*  <caption id="spmm_csr_algorithms">CSR/CSC Algorithms</caption>
+*  <tr><th>CSR/CSC Algorithms
 *  <tr><td>HIPSPARSE_SPMM_CSR_ALG1</td>
 *  <tr><td>HIPSPARSE_SPMM_CSR_ALG2</td>
 *  <tr><td>HIPSPARSE_SPMM_CSR_ALG3</td>
@@ -242,19 +242,19 @@ hipsparseStatus_t hipsparseSpMM_preprocess(hipsparseHandle_t           handle,
 *  <table>
 *  <caption id="spmm_bsr_algorithms">BSR Algorithms</caption>
 *  <tr><th>BSR Algorithms
-*  <tr><td>CUSPARSE_SPMM_BSR_ALG1</td>
+*  <tr><td>HIPSPARSE_SPMM_BSR_ALG1</td>
 *  </table>
 *
-*  One can also pass \ref HIPSPARSE_SPMM_ALG_DEFAULT which will automatically select from the algorithms listed above
+*  Users can also pass \ref HIPSPARSE_SPMM_ALG_DEFAULT, which will automatically select from the algorithms listed above
 *  based on the sparse matrix format.
 *
 *  When A is transposed, \p hipsparseSpMM will revert to using \ref HIPSPARSE_SPMM_CSR_ALG2
-*  for CSR format and \ref HIPSPARSE_SPMM_COO_ALG1 for COO format regardless of algorithm selected.
+*  for CSR format and \ref HIPSPARSE_SPMM_COO_ALG1 for COO format, regardless of the algorithm selected.
 *
 *  \p hipsparseSpMM supports multiple combinations of data types and compute types. The tables below indicate the currently
-*  supported different data types that can be used for for the sparse matrix \f$op(A)\f$ and the dense matrices \f$op(B)\f$ and
-*  \f$C\f$ and the compute type for \f$\alpha\f$ and \f$\beta\f$. The advantage of using different data types is to save on
-*  memory bandwidth and storage when a user application allows while performing the actual computation in a higher precision.
+*  supported different data types that can be used for for the sparse matrix \f$op(A)\f$, the dense matrices \f$op(B)\f$ and
+*  \f$C\f$, and the compute type for \f$\alpha\f$ and \f$\beta\f$. The advantage of using different data types is to save on
+*  memory bandwidth and storage when the user application supports it, while performing the actual computation in a higher precision.
 *
 *  \par Uniform Precisions:
 *  <table>
@@ -266,29 +266,31 @@ hipsparseStatus_t hipsparseSpMM_preprocess(hipsparseHandle_t           handle,
 *  <tr><td>HIP_C_64F
 *  </table>
 *
-*  \par Mixed precisions:
+*  \par Mixed Precisions:
 *  <table>
 *  <caption id="spmm_mixed">Mixed Precisions</caption>
 *  <tr><th>A / B      <th>C         <th>compute_type
 *  <tr><td>HIP_R_8I   <td>HIP_R_32I <td>HIP_R_32I
 *  <tr><td>HIP_R_8I   <td>HIP_R_32F <td>HIP_R_32F
 *  <tr><td>HIP_R_16F  <td>HIP_R_32F <td>HIP_R_32F
+*  <tr><td>HIP_R_16F  <td>HIP_R_16F <td>HIP_R_32F
 *  <tr><td>HIP_R_16BF <td>HIP_R_32F <td>HIP_R_32F
+*  <tr><td>HIP_R_16BF <td>HIP_R_16BF <td>HIP_R_32F
 *  </table>
 *
 *  \p hipsparseSpMM supports \ref HIPSPARSE_INDEX_32I and \ref HIPSPARSE_INDEX_64I index precisions
 *  for storing the row pointer and column indices arrays of the sparse matrices.
 *
-*  \p hipsparseSpMM also supports batched computation for CSR and COO matrices. There are three supported batch modes:
+*  \p hipsparseSpMM also supports batched computation for CSR, CSC, COO and Blocked ELL matrices. There are three supported batch modes:
 *  \f[
 *      C_i = A \times B_i \\
 *      C_i = A_i \times B \\
 *      C_i = A_i \times B_i
 *  \f]
 *
-*  The batch mode is determined by the batch count and stride passed for each matrix. For example
+*  The batch mode is determined by the batch count and stride passed for each matrix. For example,
 *  to use the first batch mode (\f$C_i = A \times B_i\f$) with 100 batches for non-transposed \f$A\f$,
-*  \f$B\f$, and \f$C\f$, one passes:
+*  \f$B\f$, and \f$C\f$, pass the following:
 *  \f[
 *      batchCountA=1 \\
 *      batchCountB=100 \\
@@ -298,7 +300,7 @@ hipsparseStatus_t hipsparseSpMM_preprocess(hipsparseHandle_t           handle,
 *      batchStrideB=k*n \\
 *      batchStrideC=m*n
 *  \f]
-*  To use the second batch mode (\f$C_i = A_i \times B\f$) one could use:
+*  To use the second batch mode (\f$C_i = A_i \times B\f$), use these settings:
 *  \f[
 *      batchCountA=100 \\
 *      batchCountB=1 \\
@@ -308,7 +310,7 @@ hipsparseStatus_t hipsparseSpMM_preprocess(hipsparseHandle_t           handle,
 *      batchStrideB=0 \\
 *      batchStrideC=m*n
 *  \f]
-*  And to use the third batch mode (\f$C_i = A_i \times B_i\f$) one could use:
+*  And to use the third batch mode (\f$C_i = A_i \times B_i\f$), pass these values:
 *  \f[
 *      batchCountA=100 \\
 *      batchCountB=100 \\
@@ -318,10 +320,10 @@ hipsparseStatus_t hipsparseSpMM_preprocess(hipsparseHandle_t           handle,
 *      batchStrideB=k*n \\
 *      batchStrideC=m*n
 *  \f]
-*  See examples below.
+*  For more information, see the examples below.
 *
 *  @param[in]
-*  handle          handle to the hipsparse library context queue.
+*  handle          handle to the hipSPARSE library context queue.
 *  @param[in]
 *  opA             matrix operation type.
 *  @param[in]
@@ -346,126 +348,8 @@ hipsparseStatus_t hipsparseSpMM_preprocess(hipsparseHandle_t           handle,
 *  \retval      HIPSPARSE_STATUS_SUCCESS the operation completed successfully.
 *  \retval      HIPSPARSE_STATUS_INVALID_VALUE \p handle, \p alpha, \p matA, \p matB, \p matC, \p beta, or
 *               \p externalBuffer pointer is invalid.
-*  \retval      HIPSPARSE_STATUS_NOT_SUPPORTED \p opA, \p opB, \p computeType or \p alg is
+*  \retval      HIPSPARSE_STATUS_NOT_SUPPORTED \p opA, \p opB, \p computeType, or \p alg is
 *               currently not supported.
-*
-*  \par Example
-*  \code{.c}
-*    // A, B, and C are m×k, k×n, and m×n
-*    int m = 3, n = 5, k = 4;
-*    int ldb = n, ldc = n;
-*    int nnz_A = 8, nnz_B = 20, nnz_C = 15;
-*    hipsparseOperation_t transA = HIPSPARSE_OPERATION_NON_TRANSPOSE;
-*    hipsparseOperation_t transB = HIPSPARSE_OPERATION_NON_TRANSPOSE;
-*    hipsparseOperation_t transC = HIPSPARSE_OPERATION_NON_TRANSPOSE;
-*    hipsparseOrder_t order = HIPSPARSE_ORDER_ROW;
-*
-*    // alpha and beta
-*    float alpha = 0.5f;
-*    float beta  = 0.25f;
-*
-*    std::vector<int> hcsrRowPtr = {0, 3, 5, 8};
-*    std::vector<int> hcsrColInd = {0, 1, 3, 1, 2, 0, 2, 3};
-*    std::vector<float> hcsrVal     = {1, 2, 3, 4, 5, 6, 7, 8};
-*
-*    std::vector<float> hB(nnz_B, 1.0f);
-*    std::vector<float> hC(nnz_C, 1.0f);
-*
-*    int *dcsrRowPtr;
-*    int *dcsrColInd;
-*    float *dcsrVal;
-*    hipMalloc((void**)&dcsrRowPtr, sizeof(int) * (m + 1));
-*    hipMalloc((void**)&dcsrColInd, sizeof(int) * nnz_A);
-*    hipMalloc((void**)&dcsrVal, sizeof(float) * nnz_A);
-*
-*    hipMemcpy(dcsrRowPtr, hcsrRowPtr.data(), sizeof(int) * (m + 1), hipMemcpyHostToDevice);
-*    hipMemcpy(dcsrColInd, hcsrColInd.data(), sizeof(int) * nnz_A, hipMemcpyHostToDevice);
-*    hipMemcpy(dcsrVal, hcsrVal.data(), sizeof(float) * nnz_A, hipMemcpyHostToDevice);
-*
-*    hipsparseHandle_t handle;
-*    hipsparseCreate(&handle);
-*
-*    hipsparseSpMatDescr_t matA;
-*    hipsparseCreateCsr(&matA, m, k, nnz_A,
-*                        dcsrRowPtr, dcsrColInd, dcsrVal,
-*                        HIPSPARSE_INDEX_32I, HIPSPARSE_INDEX_32I,
-*                        HIPSPARSE_INDEX_BASE_ZERO, HIP_R_32F);
-*
-*    // Allocate memory for the matrix B
-*    float* dB;
-*    hipMalloc((void**)&dB, sizeof(float) * nnz_B);
-*    hipMemcpy(dB, hB.data(), sizeof(float) * nnz_B, hipMemcpyHostToDevice);
-*
-*    hipsparseDnMatDescr_t matB;
-*    hipsparseCreateDnMat(&matB, k, n, ldb, dB, HIP_R_32F, order);
-*
-*    // Allocate memory for the resulting matrix C
-*    float* dC;
-*    hipMalloc((void**)&dC, sizeof(float) * nnz_C);
-*    hipMemcpy(dC, hC.data(), sizeof(float) * nnz_C, hipMemcpyHostToDevice);
-*
-*    hipsparseDnMatDescr_t matC;
-*    hipsparseCreateDnMat(&matC, m, n, ldc, dC, HIP_R_32F, HIPSPARSE_ORDER_ROW);
-*
-*    // Compute buffersize
-*    size_t bufferSize;
-*    hipsparseSpMM_bufferSize(handle,
-*                             transA,
-*                             transB,
-*                             &alpha,
-*                             matA,
-*                             matB,
-*                             &beta,
-*                             matC,
-*                             HIP_R_32F,
-*                             HIPSPARSE_MM_ALG_DEFAULT,
-*                             &bufferSize);
-*
-*    void* buffer;
-*    hipMalloc(&buffer, bufferSize);
-*
-*    // Preprocess operation (Optional)
-*    hipsparseSpMM_preprocess(handle,
-*                            transA,
-*                            transB,
-*                            &alpha,
-*                            matA,
-*                            matB,
-*                            &beta,
-*                            matC,
-*                            HIP_R_32F,
-*                            HIPSPARSE_MM_ALG_DEFAULT,
-*                            buffer);
-*
-*    // Perform operation
-*    hipsparseSpMM(handle,
-*                 transA,
-*                 transB,
-*                 &alpha,
-*                 matA,
-*                 matB,
-*                 &beta,
-*                 matC,
-*                 HIP_R_32F,
-*                 HIPSPARSE_MM_ALG_DEFAULT,
-*                 buffer);
-*
-*    // Copy device to host
-*    hipMemcpy(hC.data(), dC, sizeof(float) * nnz_C, hipMemcpyDeviceToHost);
-*
-*    // Destroy matrix descriptors and handles
-*    hipsparseDestroySpMat(matA);
-*    hipsparseDestroyDnMat(matB);
-*    hipsparseDestroyDnMat(matC);
-*    hipsparseDestroy(handle);
-*
-*    hipFree(buffer);
-*    hipFree(dcsrRowPtr);
-*    hipFree(dcsrColInd);
-*    hipFree(dcsrVal);
-*    hipFree(dB);
-*    hipFree(dC);
-*  \endcode
 */
 #if(!defined(CUDART_VERSION) || CUDART_VERSION >= 12000)
 HIPSPARSE_EXPORT

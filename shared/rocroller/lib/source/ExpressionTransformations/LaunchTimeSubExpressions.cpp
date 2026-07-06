@@ -1,28 +1,5 @@
-/*******************************************************************************
- *
- * MIT License
- *
- * Copyright 2024-2025 AMD ROCm(TM) Software
- *
- * Permission is hereby granted, free of charge, to any person obtaining a copy
- * of this software and associated documentation files (the "Software"), to deal
- * in the Software without restriction, including without limitation the rights
- * to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
- * copies of the Software, and to permit persons to whom the Software is
- * furnished to do so, subject to the following conditions:
- *
- * The above copyright notice and this permission notice shall be included in
- * all copies or substantial portions of the Software.
- *
- * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
- * IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
- * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
- * AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
- * LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
- * OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
- * SOFTWARE.
- *
- *******************************************************************************/
+// Copyright Advanced Micro Devices, Inc., or its affiliates.
+// SPDX-License-Identifier: MIT
 
 #include <rocRoller/ExpressionTransformations.hpp>
 
@@ -85,8 +62,7 @@ namespace rocRoller
                            toString(varType),
                            toString(expr));
 
-                return kernel->addArgument(
-                    {.name = argName, .variableType = varType, .expression = expr});
+                return kernel->addArgument({argName, varType, DataDirection::ReadOnly, expr});
             }
 
             ExpressionPtr maybeLaunchEval(ExpressionPtr expr, bool ignoreComplexity)
@@ -107,12 +83,11 @@ namespace rocRoller
                 if(!m_allowNewArgs)
                     return nullptr;
 
-                LaunchTimeExpressionVisitor sub(m_context, false);
-                auto                        ex2    = sub.call(expr);
-                auto                        myComp = complexity(ex2);
+                bool isMagicOperation = std::holds_alternative<MagicMultiple>(*expr)
+                                        || std::holds_alternative<MagicShifts>(*expr)
+                                        || std::holds_alternative<MagicShiftAndSign>(*expr);
 
-                if(ignoreComplexity || !evalTimes[EvaluationTime::KernelExecute]
-                   || complexity(expr) >= m_minComplexity)
+                if(ignoreComplexity || isMagicOperation || complexity(expr) >= m_minComplexity)
                     return addLaunchEval(expr);
 
                 return nullptr;

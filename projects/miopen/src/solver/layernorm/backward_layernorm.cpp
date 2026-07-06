@@ -24,6 +24,7 @@
  *
  *******************************************************************************/
 
+#include "miopen/layernorm/problem_description.hpp"
 #include <miopen/datatype.hpp>
 #include <miopen/kernel_build_params.hpp>
 #include <miopen/layernorm/solvers.hpp>
@@ -33,74 +34,69 @@
 #include <miopen/layernorm.hpp>
 #include <miopen/target_properties.hpp>
 
-#define LOCAL_SIZE 256
-
 namespace miopen {
 
 namespace solver {
 
 namespace layernorm {
 
-bool LayernormBackward::IsApplicable(const ExecutionContext&,
-                                     const miopen::layernorm::ProblemDescription& problem) const
-{
-    if(!problem.IsSameType())
-        return false;
-    if(!problem.IsSameLength())
-        return false;
-    if(!problem.IsAllPacked())
-        return false;
-    if(!problem.IsRightNormDim())
-        return false;
-    if(!(sizeof_local_memory(problem) <= TargetProperties::GetMaxLocalMemorySize()))
-        return false;
-    return true;
-}
-
-ConvSolution
-LayernormBackward::GetSolution(const ExecutionContext& context,
-                               const miopen::layernorm::ProblemDescription& problem) const
+ConvSolution LayernormBackward::GetSolution(const ExecutionContext& context,
+                                            const miopen::layernorm::ProblemDescription& problem,
+                                            const PerformanceConfigLayernorm& config) const
 {
     auto result = ConvSolution{miopenStatusSuccess};
 
-    auto dtype        = problem.GetDYDesc().GetType();
-    auto input_dtype  = miopen::GetDataType(problem.GetDYDesc().GetType());
-    auto output_dtype = miopen::GetDataType(problem.GetDXDesc().GetType());
-    auto dims         = problem.GetDYDesc().GetLengths();
+    auto dtype     = problem.GetDYDesc().GetType();
+    auto mode      = problem.GetMode();
+    auto data_type = miopen::GetDataType(problem.GetDYDesc().GetType());
 
-    auto outer_size =
-        std::accumulate(dims.begin(), dims.begin() + problem.GetNormalizedDim(), 1ULL, std::multiplies<size_t>());
-    auto inner_size =
-        std::accumulate(dims.begin() + problem.GetNormalizedDim(), dims.end(), 1ULL, std::multiplies<size_t>());
-
-    auto reqd_work_item_cnt = get_reqd_work_item_cnt(context);
+    auto reqd_work_item_cnt =
+        get_reqd_work_item_cnt(context, PerformanceConfigLayernorm::max_parallel_local_size);
 
     {
-        size_t xlocalsize = LOCAL_SIZE;
-        size_t xgridsize  = outer_size * xlocalsize;
-        size_t ylocalsize = 1;
-        size_t ygridsize  = 1;
+        size_t xlocalsize, xgridsize, ylocalsize, ygridsize;
+        if(config.separate_stride)
+        {
+            xlocalsize = problem.stride <= config.local_size && config.stride_in_local_size
+                             ? config.local_size >> mloLg2(problem.stride)
+                             : config.local_size;
+            xgridsize  = problem.outer_size * xlocalsize;
+            ylocalsize = problem.stride <= config.local_size && config.stride_in_local_size
+                             ? problem.stride
+                             : 1;
+            ygridsize  = problem.stride;
+        }
+        else
+        {
+            xlocalsize = config.local_size;
+            xgridsize  = problem.outer_size * problem.stride * xlocalsize;
+            ylocalsize = 1;
+            ygridsize  = 1;
+        }
         size_t zlocalsize = 1;
         size_t zgridsize  = 1;
 
         auto kernel = KernelInfo{};
 
         kernel.kernel_file = "MIOpenLayerNorm.cpp";
-        kernel.kernel_name = "LayernormBwdContiguous";
+        kernel.kernel_name = "LayernormBwd";
 
         const auto build_params = KernelBuildParameters{
             {"MIOPEN_USE_FP16", static_cast<int>(dtype == miopenHalf)},
             {"MIOPEN_USE_FP32", static_cast<int>(dtype == miopenFloat)},
             {"MIOPEN_USE_BFP16", static_cast<int>(dtype == miopenBFloat16)},
-            {"INPUT_TYPE", input_dtype == "bfloat16" ? "ushort" : input_dtype},
-            {"OUTPUT_TYPE", output_dtype == "bfloat16" ? "ushort" : output_dtype},
-            {"LOCAL_SIZE", LOCAL_SIZE},
+            {"DATA_TYPE", data_type == "bfloat16" ? "ushort" : data_type},
+            {"OUTER_SIZE", problem.outer_size},
+            {"INNER_SIZE", problem.inner_size},
+            {"STRIDE", problem.stride},
+            {"LOCAL_SIZE_X", xlocalsize},
+            {"LOCAL_SIZE_Y", ylocalsize},
+            {"MODE", mode},
+            {"VECTORIZED", config.vectorized},
+            {"SEPARATE_STRIDE", config.separate_stride},
+            {"PARALLEL_SIZE", 1},
             {"MIOPEN_ELEMENTWISE_AFFINE", 0},
             {"MIOPEN_WEIGHT_BIAS", 1},
-            {"MIOPEN_ELEMENTWISE_AFFINE_FUSED_ADD", 2},
-            {"MIOPEN_WEIGHT_BIAS_FUSED_ADD", 3},
-            {"MIOPEN_ELEMENTWISE_AFFINE_T5", 4},
-            {"MIOPEN_WEIGHT_BIAS_T5", 5},
         };
 
         kernel.comp_options = build_params.GenerateFor(kbp::HIP{});
@@ -116,14 +112,14 @@ LayernormBackward::GetSolution(const ExecutionContext& context,
         result.construction_params.push_back(kernel);
     }
 
-    if(is_parallelism(reqd_work_item_cnt, inner_size, outer_size))
+    if(is_parallelism(reqd_work_item_cnt, problem.inner_size, problem.outer_size))
     {
-        {
-            auto parallelism_size =
-                get_parallelism_size(reqd_work_item_cnt, inner_size, outer_size);
+        auto parallelism_size =
+            get_parallelism_size(reqd_work_item_cnt, problem.inner_size, problem.outer_size);
 
-            size_t xlocalsize = LOCAL_SIZE;
-            size_t xgridsize  = AlignUp(parallelism_size * inner_size, xlocalsize);
+        {
+            size_t xlocalsize = config.local_size;
+            size_t xgridsize  = AlignUp(parallelism_size * problem.inner_size, xlocalsize);
             size_t ylocalsize = 1;
             size_t ygridsize  = 1;
             size_t zlocalsize = 1;
@@ -132,21 +128,24 @@ LayernormBackward::GetSolution(const ExecutionContext& context,
             auto kernel = KernelInfo{};
 
             kernel.kernel_file = "MIOpenLayerNorm.cpp";
-            kernel.kernel_name = "LayernormBwdWeightBiasContiguousParallel";
+            kernel.kernel_name = "LayernormBwdWeightBiasParallel";
 
             const auto build_params = KernelBuildParameters{
                 {"MIOPEN_USE_FP16", static_cast<int>(dtype == miopenHalf)},
                 {"MIOPEN_USE_FP32", static_cast<int>(dtype == miopenFloat)},
                 {"MIOPEN_USE_BFP16", static_cast<int>(dtype == miopenBFloat16)},
-                {"INPUT_TYPE", input_dtype == "bfloat16" ? "ushort" : input_dtype},
-                {"OUTPUT_TYPE", output_dtype == "bfloat16" ? "ushort" : output_dtype},
-                {"LOCAL_SIZE", LOCAL_SIZE},
+                {"DATA_TYPE", data_type == "bfloat16" ? "ushort" : data_type},
+                {"OUTER_SIZE", problem.outer_size},
+                {"INNER_SIZE", problem.inner_size},
+                {"STRIDE", problem.stride},
+                {"PARALLEL_SIZE", parallelism_size},
+                {"LOCAL_SIZE_X", xlocalsize},
+                {"LOCAL_SIZE_Y", ylocalsize},
+                {"MODE", mode},
+                {"VECTORIZED", config.vectorized},
+                {"SEPARATE_STRIDE", config.separate_stride},
                 {"MIOPEN_ELEMENTWISE_AFFINE", 0},
                 {"MIOPEN_WEIGHT_BIAS", 1},
-                {"MIOPEN_ELEMENTWISE_AFFINE_FUSED_ADD", 2},
-                {"MIOPEN_WEIGHT_BIAS_FUSED_ADD", 3},
-                {"MIOPEN_ELEMENTWISE_AFFINE_T5", 4},
-                {"MIOPEN_WEIGHT_BIAS_T5", 5},
             };
 
             kernel.comp_options = build_params.GenerateFor(kbp::HIP{});
@@ -163,8 +162,8 @@ LayernormBackward::GetSolution(const ExecutionContext& context,
         }
 
         {
-            size_t xlocalsize = LOCAL_SIZE;
-            size_t xgridsize  = AlignUp(static_cast<size_t>(inner_size), LOCAL_SIZE);
+            size_t xlocalsize = config.local_size;
+            size_t xgridsize  = AlignUp(problem.inner_size, xlocalsize);
             size_t ylocalsize = 1;
             size_t ygridsize  = 1;
             size_t zlocalsize = 1;
@@ -173,21 +172,24 @@ LayernormBackward::GetSolution(const ExecutionContext& context,
             auto kernel = KernelInfo{};
 
             kernel.kernel_file = "MIOpenLayerNorm.cpp";
-            kernel.kernel_name = "LayernormBwdContiguousReduceSum";
+            kernel.kernel_name = "LayernormBwdReduceSum";
 
             const auto build_params = KernelBuildParameters{
                 {"MIOPEN_USE_FP16", static_cast<int>(dtype == miopenHalf)},
                 {"MIOPEN_USE_FP32", static_cast<int>(dtype == miopenFloat)},
                 {"MIOPEN_USE_BFP16", static_cast<int>(dtype == miopenBFloat16)},
-                {"INPUT_TYPE", input_dtype == "bfloat16" ? "ushort" : input_dtype},
-                {"OUTPUT_TYPE", output_dtype == "bfloat16" ? "ushort" : output_dtype},
-                {"LOCAL_SIZE", LOCAL_SIZE},
+                {"DATA_TYPE", data_type == "bfloat16" ? "ushort" : data_type},
+                {"OUTER_SIZE", problem.outer_size},
+                {"INNER_SIZE", problem.inner_size},
+                {"STRIDE", problem.stride},
+                {"PARALLEL_SIZE", parallelism_size},
+                {"LOCAL_SIZE_X", xlocalsize},
+                {"LOCAL_SIZE_Y", ylocalsize},
+                {"MODE", mode},
+                {"VECTORIZED", config.vectorized},
+                {"SEPARATE_STRIDE", config.separate_stride},
                 {"MIOPEN_ELEMENTWISE_AFFINE", 0},
                 {"MIOPEN_WEIGHT_BIAS", 1},
-                {"MIOPEN_ELEMENTWISE_AFFINE_FUSED_ADD", 2},
-                {"MIOPEN_WEIGHT_BIAS_FUSED_ADD", 3},
-                {"MIOPEN_ELEMENTWISE_AFFINE_T5", 4},
-                {"MIOPEN_WEIGHT_BIAS_T5", 5},
             };
 
             kernel.comp_options = build_params.GenerateFor(kbp::HIP{});
@@ -205,8 +207,8 @@ LayernormBackward::GetSolution(const ExecutionContext& context,
     }
     else
     {
-        size_t xlocalsize = LOCAL_SIZE;
-        size_t xgridsize  = inner_size;
+        size_t xlocalsize = config.local_size;
+        size_t xgridsize  = problem.inner_size;
         size_t ylocalsize = 1;
         size_t ygridsize  = 1;
         size_t zlocalsize = 1;
@@ -215,21 +217,24 @@ LayernormBackward::GetSolution(const ExecutionContext& context,
         auto kernel = KernelInfo{};
 
         kernel.kernel_file = "MIOpenLayerNorm.cpp";
-        kernel.kernel_name = "LayernormBwdWeightBiasContiguous";
+        kernel.kernel_name = "LayernormBwdWeightBias";
 
         const auto build_params = KernelBuildParameters{
             {"MIOPEN_USE_FP16", static_cast<int>(dtype == miopenHalf)},
             {"MIOPEN_USE_FP32", static_cast<int>(dtype == miopenFloat)},
             {"MIOPEN_USE_BFP16", static_cast<int>(dtype == miopenBFloat16)},
-            {"INPUT_TYPE", input_dtype == "bfloat16" ? "ushort" : input_dtype},
-            {"OUTPUT_TYPE", output_dtype == "bfloat16" ? "ushort" : output_dtype},
-            {"LOCAL_SIZE", LOCAL_SIZE},
+            {"DATA_TYPE", data_type == "bfloat16" ? "ushort" : data_type},
+            {"OUTER_SIZE", problem.outer_size},
+            {"INNER_SIZE", problem.inner_size},
+            {"STRIDE", problem.stride},
+            {"PARALLEL_SIZE", 1},
+            {"LOCAL_SIZE_X", xlocalsize},
+            {"LOCAL_SIZE_Y", ylocalsize},
+            {"MODE", mode},
+            {"VECTORIZED", config.vectorized},
+            {"SEPARATE_STRIDE", config.separate_stride},
             {"MIOPEN_ELEMENTWISE_AFFINE", 0},
             {"MIOPEN_WEIGHT_BIAS", 1},
-            {"MIOPEN_ELEMENTWISE_AFFINE_FUSED_ADD", 2},
-            {"MIOPEN_WEIGHT_BIAS_FUSED_ADD", 3},
-            {"MIOPEN_ELEMENTWISE_AFFINE_T5", 4},
-            {"MIOPEN_WEIGHT_BIAS_T5", 5},
         };
 
         kernel.comp_options = build_params.GenerateFor(kbp::HIP{});
@@ -245,7 +250,7 @@ LayernormBackward::GetSolution(const ExecutionContext& context,
         result.construction_params.push_back(kernel);
     }
 
-    if(is_parallelism(reqd_work_item_cnt, inner_size, outer_size))
+    if(is_parallelism(reqd_work_item_cnt, problem.inner_size, problem.outer_size))
     {
         result.invoker_factory = [](const std::vector<Kernel>& kernels) {
             return [=](const Handle& handle_, const AnyInvokeParams& raw_params) {
@@ -254,16 +259,10 @@ LayernormBackward::GetSolution(const ExecutionContext& context,
                 decltype(auto) weight_bias_kernel          = handle_.Run(kernels[2]);
                 decltype(auto) params = raw_params.CastTo<miopen::layernorm::BwdInvokeParams>();
 
-                auto dims = params.dyDesc->GetLengths();
-
-                auto outer_size =
-                    std::accumulate(dims.begin(), dims.begin() + params.normalized_dim, 1ULL, std::multiplies<size_t>());
-                auto inner_size =
-                    std::accumulate(dims.begin() + params.normalized_dim, dims.end(), 1ULL, std::multiplies<size_t>());
-
-                auto reqd_work_item_cnt = get_reqd_work_item_cnt(handle_);
-                auto parallelism_size =
-                    get_parallelism_size(reqd_work_item_cnt, inner_size, outer_size);
+                auto reqd_work_item_count = get_reqd_work_item_cnt(
+                    handle_, PerformanceConfigLayernorm::max_parallel_local_size);
+                auto parallelism_size = get_parallelism_size(
+                    reqd_work_item_count, params.inner_size, params.outer_size);
 
                 auto elapsed = 0.f;
                 HipEventPtr start;
@@ -273,34 +272,25 @@ LayernormBackward::GetSolution(const ExecutionContext& context,
                 {
                     start = miopen::make_hip_event();
                     stop  = miopen::make_hip_event();
-                    hipEventRecord(start.get(), handle_.GetStream());
+                    (void)hipEventRecord(start.get(), handle_.GetStream());
                 }
 
-                kernel(params.dy,
-                       params.x,
-                       params.weight,
-                       params.mean,
-                       params.rstd,
-                       params.dx,
-                       inner_size,
-                       static_cast<int32_t>(params.mode));
+                kernel(params.dy, params.x, params.weight, params.mean, params.rstd, params.dx);
 
                 weight_bias_parallel_kernel(params.dy,
                                             params.x,
                                             params.mean,
                                             params.rstd,
                                             params.workspace,
-                                            outer_size,
-                                            inner_size,
                                             parallelism_size);
 
-                weight_bias_kernel(params.workspace, params.dw, params.db, inner_size, parallelism_size);
+                weight_bias_kernel(params.workspace, params.dw, params.db, parallelism_size);
 
                 if(handle_.IsProfilingEnabled())
                 {
-                    hipEventRecord(stop.get(), handle_.GetStream());
-                    hipEventSynchronize(stop.get());
-                    hipEventElapsedTime(&elapsed, start.get(), stop.get());
+                    (void)hipEventRecord(stop.get(), handle_.GetStream());
+                    (void)hipEventSynchronize(stop.get());
+                    (void)hipEventElapsedTime(&elapsed, start.get(), stop.get());
                     handle_.ResetKernelTime();
                     handle_.AccumKernelTime(elapsed);
                 };
@@ -311,16 +301,9 @@ LayernormBackward::GetSolution(const ExecutionContext& context,
     {
         result.invoker_factory = [](const std::vector<Kernel>& kernels) {
             return [=](const Handle& handle_, const AnyInvokeParams& raw_params) {
-                decltype(auto) kernel        = handle_.Run(kernels[0]);
+                decltype(auto) kernel             = handle_.Run(kernels[0]);
                 decltype(auto) weight_bias_kernel = handle_.Run(kernels[1]);
                 decltype(auto) params = raw_params.CastTo<miopen::layernorm::BwdInvokeParams>();
-
-                auto dims = params.dyDesc->GetLengths();
-
-                auto outer_size =
-                    std::accumulate(dims.begin(), dims.begin() + params.normalized_dim, 1ULL, std::multiplies<size_t>());
-                auto inner_size =
-                    std::accumulate(dims.begin() + params.normalized_dim, dims.end(), 1ULL, std::multiplies<size_t>());
 
                 auto elapsed = 0.f;
                 HipEventPtr start;
@@ -330,32 +313,19 @@ LayernormBackward::GetSolution(const ExecutionContext& context,
                 {
                     start = miopen::make_hip_event();
                     stop  = miopen::make_hip_event();
-                    hipEventRecord(start.get(), handle_.GetStream());
+                    (void)hipEventRecord(start.get(), handle_.GetStream());
                 }
 
-                kernel(params.dy,
-                       params.x,
-                       params.weight,
-                       params.mean,
-                       params.rstd,
-                       params.dx,
-                       inner_size,
-                       static_cast<int32_t>(params.mode));
+                kernel(params.dy, params.x, params.weight, params.mean, params.rstd, params.dx);
 
-                weight_bias_kernel(params.dy,
-                                   params.x,
-                                   params.mean,
-                                   params.rstd,
-                                   params.dw,
-                                   params.db,
-                                   outer_size,
-                                   inner_size);
+                weight_bias_kernel(
+                    params.dy, params.x, params.mean, params.rstd, params.dw, params.db);
 
                 if(handle_.IsProfilingEnabled())
                 {
-                    hipEventRecord(stop.get(), handle_.GetStream());
-                    hipEventSynchronize(stop.get());
-                    hipEventElapsedTime(&elapsed, start.get(), stop.get());
+                    (void)hipEventRecord(stop.get(), handle_.GetStream());
+                    (void)hipEventSynchronize(stop.get());
+                    (void)hipEventElapsedTime(&elapsed, start.get(), stop.get());
                     handle_.ResetKernelTime();
                     handle_.AccumKernelTime(elapsed);
                 };
@@ -370,21 +340,16 @@ std::size_t
 LayernormBackward::GetWorkspaceSize(const ExecutionContext& context,
                                     const miopen::layernorm::ProblemDescription& problem) const
 {
-    auto dims = problem.GetDYDesc().GetLengths();
+    auto reqd_work_item_cnt =
+        get_reqd_work_item_cnt(context, PerformanceConfigLayernorm::max_parallel_local_size);
 
-    auto outer_size =
-        std::accumulate(dims.begin(), dims.begin() + problem.GetNormalizedDim(), 1ULL, std::multiplies<size_t>());
-
-    auto inner_size =
-        std::accumulate(dims.begin() + problem.GetNormalizedDim(), dims.end(), 1ULL, std::multiplies<size_t>());
-
-    auto reqd_work_item_cnt = get_reqd_work_item_cnt(context);
-
-    if(is_parallelism(reqd_work_item_cnt, inner_size, outer_size))
+    if(is_parallelism(reqd_work_item_cnt, problem.inner_size, problem.outer_size))
     {
-        auto parallelism_size = get_parallelism_size(reqd_work_item_cnt, inner_size, outer_size);
+        auto parallelism_size =
+            get_parallelism_size(reqd_work_item_cnt, problem.inner_size, problem.outer_size);
 
-        return 2 * parallelism_size * inner_size * get_data_size(problem.GetXDesc().GetType());
+        return 2 * parallelism_size * problem.inner_size *
+               get_data_size(problem.GetXDesc().GetType());
     }
 
     return 0;

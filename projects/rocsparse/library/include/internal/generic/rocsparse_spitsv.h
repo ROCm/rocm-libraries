@@ -1,6 +1,6 @@
 /*! \file */
 /* ************************************************************************
- * Copyright (C) 2023-2024 Advanced Micro Devices, Inc. All rights Reserved.
+ * Copyright (C) 2023-2025 Advanced Micro Devices, Inc. All rights Reserved.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the Software), to deal
@@ -32,7 +32,7 @@
 extern "C" {
 #endif
 /*! \ingroup generic_module
-*  \brief Sparse iterative triangular solve
+*  \brief Sparse iterative triangular solve.
 *
 *  \details
 *  \p rocsparse_spitsv solves, using the Jacobi iterative method, a sparse triangular linear system of a sparse
@@ -72,16 +72,16 @@ extern "C" {
 *  \f]
 *  with \f$\epsilon\f$ = \p host_tol.
 *
-*  \p rocsparse_spitsv requires three stages to complete. First, the user passes the \ref rocsparse_spitsv_stage_buffer_size
-*  stage to determine the size of the required temporary storage buffer. Next, the user allocates this buffer and calls
-*  \p rocsparse_spitsv again with the \ref rocsparse_spitsv_stage_preprocess stage which will preprocess data and store it
-*  in the temporary buffer. Finally, the user calls \p rocsparse_spitsv with the \ref rocsparse_spitsv_stage_compute stage to
-*  perform the actual computation. Once all calls to \p rocsparse_spitsv are complete, the temporary buffer
+*  \p rocsparse_spitsv requires three stages to complete. First, pass the \ref rocsparse_spitsv_stage_buffer_size
+*  stage to determine the size of the required temporary storage buffer. Next, allocate this buffer and call
+*  \p rocsparse_spitsv again with the \ref rocsparse_spitsv_stage_preprocess stage, which will preprocess data and store it
+*  in the temporary buffer. Finally, call \p rocsparse_spitsv with the \ref rocsparse_spitsv_stage_compute stage to
+*  perform the actual computation. After all calls to \p rocsparse_spitsv are complete, the temporary buffer
 *  can be deallocated.
 *
 *  \p rocsparse_spitsv supports \ref rocsparse_indextype_i32 and \ref rocsparse_indextype_i64 index precisions for storing the
 *  row pointer and column indices arrays of the sparse matrix. \p rocsparse_spitsv supports the following data types for
-*  \f$op(A)\f$, \f$x\f$, \f$y\f$ and compute types for \f$\alpha\f$:
+*  \f$op(A)\f$, \f$x\f$, \f$y\f$, and compute types for \f$\alpha\f$:
 *
 *  \par Uniform Precisions:
 *  <table>
@@ -96,14 +96,17 @@ extern "C" {
 *  \note
 *  This routine does not support execution in a hipGraph context.
 *
+*  \note
+*  This routine does not support batched computation.
+*
 *  @param[in]
-*  handle        handle to the rocsparse library context queue.
+*  handle        handle to the rocSPARSE library context queue.
 *  @param[inout]
 *  host_nmaxiter maximum number of iteration on input and number of iteration on output. If the output number of iterations is strictly less than the input maximum number of iterations, then the algorithm converged.
 *  @param[in]
-*  host_tol      if the pointer is null then loop will execute \p nmaxiter[0] iterations. The precision is float for f32 based calculation (including the complex case) and double for f64 based calculation (including the complex case).
+*  host_tol      if the pointer is null, then the loop will execute \p nmaxiter[0] iterations. The precision is float for f32-based calculations (including the complex case) and double for f64-based calculations (including the complex case).
 *  @param[out]
-*  host_history  Optional array to record the norm of the residual before each iteration. The precision is float for f32 based calculation (including the complex case) and double for f64 based calculation (including the complex case).
+*  host_history  Optional array to record the norm of the residual before each iteration. The precision is float for f32-based calculations (including the complex case) and double for f64-based calculations (including the complex case).
 *  @param[in]
 *  trans         matrix operation type.
 *  @param[in]
@@ -129,9 +132,9 @@ extern "C" {
 *
 *  \retval       rocsparse_status_success the operation completed successfully.
 *  \retval       rocsparse_status_invalid_handle the library context was not initialized.
-*  \retval       rocsparse_status_invalid_pointer \p alpha, \p mat, \p x, \p y, \p descr or
+*  \retval       rocsparse_status_invalid_pointer \p alpha, \p mat, \p x, \p y, \p descr, or
 *                \p buffer_size pointer is invalid.
-*  \retval       rocsparse_status_not_implemented \p trans, \p compute_type, \p stage or \p alg is
+*  \retval       rocsparse_status_not_implemented \p trans, \p compute_type, \p stage, or \p alg is
 *                currently not supported.
 *
 *  \par Example

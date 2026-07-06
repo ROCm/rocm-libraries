@@ -1,28 +1,5 @@
-/*******************************************************************************
- *
- * MIT License
- *
- * Copyright 2024-2025 AMD ROCm(TM) Software
- *
- * Permission is hereby granted, free of charge, to any person obtaining a copy
- * of this software and associated documentation files (the "Software"), to deal
- * in the Software without restriction, including without limitation the rights
- * to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
- * copies of the Software, and to permit persons to whom the Software is
- * furnished to do so, subject to the following conditions:
- *
- * The above copyright notice and this permission notice shall be included in
- * all copies or substantial portions of the Software.
- *
- * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
- * IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
- * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
- * AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
- * LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
- * OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
- * SOFTWARE.
- *
- *******************************************************************************/
+// Copyright Advanced Micro Devices, Inc., or its affiliates.
+// SPDX-License-Identifier: MIT
 
 #pragma once
 
@@ -36,6 +13,7 @@
 #include <rocRoller/DataTypes/DataTypes.hpp>
 #include <rocRoller/InstructionValues/RegisterAllocator.hpp>
 #include <rocRoller/Operations/CommandArgument.hpp>
+#include <rocRoller/Scheduling/Observers/VGPRIndexingObserver_detail.hpp>
 #include <rocRoller/Scheduling/Scheduling.hpp>
 #include <rocRoller/Utilities/Error.hpp>
 #include <rocRoller/Utilities/Generator.hpp>
@@ -91,9 +69,11 @@ namespace rocRoller
             case Type::VCC:
             case Type::VCC_LO:
             case Type::VCC_HI:
+            case Type::EXECZ:
             case Type::EXEC:
             case Type::EXEC_LO:
             case Type::EXEC_HI:
+            case Type::TTMP6:
             case Type::TTMP7:
             case Type::TTMP9:
             case Type::Constant:
@@ -127,9 +107,11 @@ namespace rocRoller
             case Type::VCC:
             case Type::VCC_LO:
             case Type::VCC_HI:
+            case Type::EXECZ:
             case Type::EXEC:
             case Type::EXEC_LO:
             case Type::EXEC_HI:
+            case Type::TTMP6:
             case Type::TTMP7:
             case Type::TTMP9:
                 return true;
@@ -148,11 +130,13 @@ namespace rocRoller
             case Type::VCC:
             case Type::VCC_LO:
             case Type::VCC_HI:
+            case Type::EXECZ:
             case Type::EXEC:
             case Type::EXEC_LO:
             case Type::EXEC_HI:
                 return true;
 
+            case Type::TTMP6:
             case Type::TTMP7:
             case Type::TTMP9:
             default:
@@ -164,6 +148,7 @@ namespace rocRoller
         {
             switch(t)
             {
+            case Type::TTMP6:
             case Type::TTMP7:
             case Type::TTMP9:
                 return true;
@@ -218,9 +203,11 @@ namespace rocRoller
             {
             case Type::M0:
             case Type::SCC:
+            case Type::EXECZ:
             case Type::EXEC:
             case Type::EXEC_LO:
             case Type::EXEC_HI:
+            case Type::TTMP6:
             case Type::TTMP7:
             case Type::TTMP9:
             case Type::VCC:
@@ -264,12 +251,16 @@ namespace rocRoller
                 return "VCC_LO";
             case Type::VCC_HI:
                 return "VCC_HI";
+            case Type::EXECZ:
+                return "EXECZ";
             case Type::EXEC:
                 return "EXEC";
             case Type::EXEC_LO:
                 return "EXEC_LO";
             case Type::EXEC_HI:
                 return "EXEC_HI";
+            case Type::TTMP6:
+                return "TTMP6";
             case Type::TTMP7:
                 return "TTMP7";
             case Type::TTMP9:
@@ -500,6 +491,20 @@ namespace rocRoller
             return Instruction::Allocate(shared_from_this());
         }
 
+        inline void Value::setForceReservedRegion()
+        {
+            AssertFatal(regType() == Register::Type::Vector, ShowValue(regType()));
+            AssertFatal(allocationState() == AllocationState::Unallocated,
+                        "Must be unallocated to enforce a AllocationOption",
+                        ShowValue(allocationState()));
+
+            AssertFatal(m_allocation);
+
+            auto options                = m_allocation->options();
+            options.forceReservedRegion = true;
+            m_allocation->m_options     = options;
+        }
+
         inline void Value::allocate(Instruction& inst)
         {
             if(allocationState() != AllocationState::Unallocated)
@@ -535,7 +540,19 @@ namespace rocRoller
             if(m_regType != Type::Literal)
                 return false;
 
-            return std::visit([](auto const& val) { return val == 0; }, m_literalValue);
+            return std::visit(
+                [](auto const& val) {
+                    using T = std::decay_t<decltype(val)>;
+                    if constexpr(std::is_same_v<T, Raw32>)
+                        return static_cast<uint32_t>(val) == 0;
+                    else if constexpr(std::is_same_v<T, Buffer>)
+                        return val.desc0 == 0 && val.desc1 == 0 && val.desc2 == 0 && val.desc3 == 0;
+                    else if constexpr(std::is_same_v<T, TDM>)
+                        return IsTDMAllZeros(val);
+                    else
+                        return val == 0;
+                },
+                m_literalValue);
         }
 
         inline constexpr bool Value::isSpecial() const
@@ -553,9 +570,9 @@ namespace rocRoller
             return m_regType == Type::SCC;
         }
 
-        inline constexpr bool Value::isExec() const
+        inline constexpr bool Value::isEXECZ() const
         {
-            return m_regType == Type::EXEC;
+            return m_regType == Type::EXECZ;
         }
 
         inline ValuePtr Value::placeholder() const
@@ -628,7 +645,8 @@ namespace rocRoller
         {
             AssertFatal(canUseAsOperand(),
                         "Tried to use unallocated register value!",
-                        ShowValue(this->toString()));
+                        ShowValue(this->toString()),
+                        ShowValue(this->valueCount()));
         }
 
         inline void Value::specialString(std::ostream& os) const
@@ -650,6 +668,9 @@ namespace rocRoller
             case Type::VCC_HI:
                 os << "vcc_hi";
                 return;
+            case Type::EXECZ:
+                os << "execz";
+                return;
             case Type::EXEC:
                 os << "exec";
                 return;
@@ -658,6 +679,9 @@ namespace rocRoller
                 return;
             case Type::EXEC_HI:
                 os << "exec_hi";
+                return;
+            case Type::TTMP6:
+                os << "ttmp6";
                 return;
             case Type::TTMP7:
                 os << "ttmp7";
@@ -671,7 +695,7 @@ namespace rocRoller
             Throw<FatalError>("Invalid special register: ", (int)m_regType);
         }
 
-        inline void Value::gprString(std::ostream& os) const
+        inline void Value::gprString(std::ostream& os, bool useNormalized) const
         {
             AssertFatal(m_regType == Type::Accumulator || m_regType == Type::Scalar
                             || m_regType == Type::Vector,
@@ -686,7 +710,8 @@ namespace rocRoller
 
             auto prefix = TypePrefix(m_regType);
 
-            auto const& regIndices = m_allocation->m_registerIndices;
+            auto const& regIndices = useNormalized ? m_allocation->normalizedRegisterIndices()
+                                                   : m_allocation->registerIndices();
 
             if(m_negate)
             {
@@ -702,12 +727,17 @@ namespace rocRoller
             else if(hasContiguousIndices())
             {
                 // contiguous range of registers, e.g. v[0:3].
-                os << concatenate(prefix,
-                                  "[",
-                                  regIndices[m_allocationCoord.front()],
-                                  ":",
-                                  regIndices[m_allocationCoord.back()],
-                                  "]");
+                auto front = regIndices[m_allocationCoord.front()];
+                auto back  = regIndices[m_allocationCoord.back()];
+
+                if(back < front)
+                {
+                    AssertFatal(useNormalized);
+                    // Fixup normalized register indices that cross the 255/256 boundary.
+                    back += Scheduling::VGPRIndexingObserverDetail::RegisterBankSize();
+                }
+
+                os << concatenate(prefix, "[", front, ":", back, "]");
             }
             else
             {
@@ -737,14 +767,16 @@ namespace rocRoller
             return oss.str();
         }
 
-        inline void Value::toStream(std::ostream& os) const
+        inline void Value::toStream(std::ostream& os, bool useNormalized) const
         {
             switch(m_regType)
             {
             case Type::Accumulator:
             case Type::Scalar:
-            case Type::Vector:
                 gprString(os);
+                return;
+            case Type::Vector:
+                gprString(os, useNormalized);
                 return;
             case Type::Label:
             case Type::NullLiteral:
@@ -755,9 +787,11 @@ namespace rocRoller
             case Type::VCC:
             case Type::VCC_LO:
             case Type::VCC_HI:
+            case Type::EXECZ:
             case Type::EXEC:
             case Type::EXEC_LO:
             case Type::EXEC_HI:
+            case Type::TTMP6:
             case Type::TTMP7:
             case Type::TTMP9:
                 specialString(os);
@@ -1063,28 +1097,38 @@ namespace rocRoller
             : m_context(context)
             , m_regType(regType)
             , m_variableType(variableType)
-            , m_options(options)
             , m_valueCount(count)
         {
             AssertFatal(context != nullptr);
 
             setRegisterCount();
-            if(options.contiguousChunkWidth == Register::FULLY_CONTIGUOUS)
+
+            setOptions(options);
+        }
+
+        inline void Allocation::setOptions(AllocationOptions opts)
+        {
+            m_options = opts;
+
+            if(m_options.contiguousChunkWidth == Register::FULLY_CONTIGUOUS)
             {
                 m_options.contiguousChunkWidth = m_registerCount;
             }
-            else if(options.contiguousChunkWidth == Register::VALUE_CONTIGUOUS)
+            else if(m_options.contiguousChunkWidth == Register::VALUE_CONTIGUOUS)
             {
-                m_options.contiguousChunkWidth = CeilDivide<int>(variableType.getElementSize(), 4);
+                m_options.contiguousChunkWidth
+                    = CeilDivide<int>(m_variableType.getElementSize(), 4);
             }
 
-            if(options.alignment <= 0)
+            if(m_options.alignment <= 0)
             {
-                m_options.alignment = m_variableType.registerAlignment(
-                    m_regType, m_options.contiguousChunkWidth, context->targetArchitecture());
+                m_options.alignment
+                    = m_variableType.registerAlignment(m_regType,
+                                                       m_options.contiguousChunkWidth,
+                                                       m_context.lock()->targetArchitecture());
             }
 
-            if(options.contiguousChunkWidth != Register::MANUAL)
+            if(m_options.contiguousChunkWidth != Register::MANUAL)
             {
                 AssertFatal(m_options.alignment <= m_options.contiguousChunkWidth,
                             ShowValue(m_options),
@@ -1094,6 +1138,8 @@ namespace rocRoller
             {
                 m_options.contiguousChunkWidth = 1;
             }
+
+            m_options.forceReservedRegion = opts.forceReservedRegion;
 
             AssertFatal(m_options.contiguousChunkWidth > 0, ShowValue(m_options));
         }
@@ -1256,6 +1302,25 @@ namespace rocRoller
             setAllocation(allocator, std::move(copy));
         }
 
+        static inline std::vector<int>
+            computeNormalizedRegisterIndices(std::vector<int> const& regInd)
+        {
+            auto normalize = [](auto idx) {
+                // TODO: Should be capability check:
+                // e.g. m_context.targetArchitecture().target().GetCapability(GPUCapability::MaxVGPRs)
+                AssertFatal(0 <= idx and idx < 1024, ShowValue(idx));
+                return static_cast<uint>(idx)
+                       & Scheduling::VGPRIndexingObserverDetail::RegisterIndexNormalizationMask();
+            };
+            std::vector<int> normalizedRegisterIndices;
+            for(auto idx : regInd)
+            {
+                normalizedRegisterIndices.push_back(normalize(idx));
+            }
+
+            return normalizedRegisterIndices;
+        }
+
         inline void Allocation::setAllocation(std::shared_ptr<Allocator> allocator,
                                               std::vector<int>&&         registers)
         {
@@ -1267,12 +1332,19 @@ namespace rocRoller
             m_allocator       = allocator;
             m_registerIndices = std::move(registers);
 
+            m_normalizedRegisterIndices = computeNormalizedRegisterIndices(m_registerIndices);
+
             m_allocationState = AllocationState::Allocated;
         }
 
         inline std::vector<int> const& Allocation::registerIndices() const
         {
             return m_registerIndices;
+        }
+
+        inline std::vector<int> const& Allocation::normalizedRegisterIndices() const
+        {
+            return m_normalizedRegisterIndices;
         }
 
         inline void Allocation::free()

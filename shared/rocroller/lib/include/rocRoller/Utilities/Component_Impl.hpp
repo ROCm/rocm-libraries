@@ -1,28 +1,5 @@
-/*******************************************************************************
- *
- * MIT License
- *
- * Copyright 2021-2025 AMD ROCm(TM) Software
- *
- * Permission is hereby granted, free of charge, to any person obtaining a copy
- * of this software and associated documentation files (the "Software"), to deal
- * in the Software without restriction, including without limitation the rights
- * to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
- * copies of the Software, and to permit persons to whom the Software is
- * furnished to do so, subject to the following conditions:
- *
- * The above copyright notice and this permission notice shall be included in
- * all copies or substantial portions of the Software.
- *
- * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
- * IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
- * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
- * AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
- * LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
- * OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
- * SOFTWARE.
- *
- *******************************************************************************/
+// Copyright Advanced Micro Devices, Inc., or its affiliates.
+// SPDX-License-Identifier: MIT
 
 #pragma once
 
@@ -116,6 +93,8 @@ namespace rocRoller
         template <typename T>
         std::shared_ptr<Base> ComponentFactory<Base>::get(T&& arg) const
         {
+            WriterLock lock{m_instanceCacheLock};
+
             auto iter = m_instanceCache.find(arg);
 
             if(iter != m_instanceCache.end())
@@ -143,6 +122,8 @@ namespace rocRoller
         typename ComponentFactory<Base>::Entry const&
             ComponentFactory<Base>::getEntry(T&& arg) const
         {
+            WriterLock lock{m_entryCacheLock};
+
             auto iter = m_entryCache.find(arg);
 
             if(iter != m_entryCache.end())
@@ -160,6 +141,8 @@ namespace rocRoller
         typename ComponentFactory<Base>::Entry const&
             ComponentFactory<Base>::findEntry(T&& arg) const
         {
+            ReaderLock lock{m_entriesLock};
+
             auto foundIter = m_entries.end();
 
             for(auto iter = m_entries.begin(); iter != m_entries.end(); iter++)
@@ -210,6 +193,8 @@ namespace rocRoller
             if(name == "")
                 throw std::runtime_error(concatenate("Empty ", Base::Basename, " component name"));
             auto sameName = [&name](auto const& entry) { return entry.name == name; };
+
+            WriterLock lock{m_entriesLock};
             if(std::any_of(m_entries.begin(), m_entries.end(), sameName))
                 throw std::runtime_error(
                     concatenate("Duplicate ", Base::Basename, " component names: '", name, "'"));
@@ -225,15 +210,27 @@ namespace rocRoller
         template <typename T>
         void ComponentFactory<Base>::emptyCache(T&& arg)
         {
-            m_entryCache.erase(arg);
-            m_instanceCache.erase(arg);
+            {
+                WriterLock lock{m_entryCacheLock};
+                m_entryCache.erase(arg);
+            }
+            {
+                WriterLock lock{m_instanceCacheLock};
+                m_instanceCache.erase(arg);
+            }
         }
 
         template <ComponentBase Base>
         void ComponentFactory<Base>::emptyCache()
         {
-            m_entryCache.clear();
-            m_instanceCache.clear();
+            {
+                WriterLock lock{m_entryCacheLock};
+                m_entryCache.clear();
+            }
+            {
+                WriterLock lock{m_instanceCacheLock};
+                m_instanceCache.clear();
+            }
         }
 
         inline void ComponentFactoryBase::ClearAllCaches()

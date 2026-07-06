@@ -1,5 +1,5 @@
+// Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
 // SPDX-License-Identifier: MIT
-// Copyright (c) 2018-2025, Advanced Micro Devices, Inc. All rights reserved.
 
 #pragma once
 
@@ -38,15 +38,16 @@ bool profile_batched_gemm_gemm_impl(bool do_verification,
                                     int N,
                                     int K,
                                     int O,
-                                    int BatchCount    = 1,
-                                    int StrideA       = -1,
-                                    int StrideB0      = -1,
-                                    int StrideB1      = -1,
-                                    int StrideC       = -1,
-                                    int BatchStrideA  = -1,
-                                    int BatchStrideB0 = -1,
-                                    int BatchStrideB1 = -1,
-                                    int BatchStrideC  = -1)
+                                    int BatchCount     = 1,
+                                    int StrideA        = -1,
+                                    int StrideB0       = -1,
+                                    int StrideB1       = -1,
+                                    int StrideC        = -1,
+                                    int BatchStrideA   = -1,
+                                    int BatchStrideB0  = -1,
+                                    int BatchStrideB1  = -1,
+                                    int BatchStrideC   = -1,
+                                    int instance_index = -1)
 
 {
 
@@ -110,11 +111,13 @@ bool profile_batched_gemm_gemm_impl(bool do_verification,
 
         if(std::is_same<decltype(layout), Row>::value)
         {
-            return HostTensorDescriptor({batch_count, row, col}, {batch_stride, stride, 1_uz});
+            return HostTensorDescriptor(
+                {batch_count, row, col}, {batch_stride, stride, 1_uz}, layout);
         }
         else
         {
-            return HostTensorDescriptor({batch_count, row, col}, {batch_stride, 1_uz, stride});
+            return HostTensorDescriptor(
+                {batch_count, row, col}, {batch_stride, 1_uz, stride}, layout);
         }
     };
 
@@ -226,8 +229,14 @@ bool profile_batched_gemm_gemm_impl(bool do_verification,
     int num_supported_instances = 0;
 
     // profile device op instances
-    for(auto& op_ptr : op_ptrs)
+    for(size_t i = 0; i < op_ptrs.size(); i++)
     {
+        if((instance_index != -1) && (instance_index != static_cast<int>(i)))
+        {
+            // skip test if instance_index is specified
+            continue;
+        }
+        auto& op_ptr      = op_ptrs[i];
         auto argument_ptr = op_ptr->MakeArgumentPointer(
             static_cast<ADataType*>(a_g_m_k_device_buf.GetDeviceBuffer()),
             static_cast<B0DataType*>(b0_g_k_n_device_buf.GetDeviceBuffer()),

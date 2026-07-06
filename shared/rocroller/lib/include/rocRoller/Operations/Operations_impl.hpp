@@ -1,28 +1,5 @@
-/*******************************************************************************
- *
- * MIT License
- *
- * Copyright 2024-2025 AMD ROCm(TM) Software
- *
- * Permission is hereby granted, free of charge, to any person obtaining a copy
- * of this software and associated documentation files (the "Software"), to deal
- * in the Software without restriction, including without limitation the rights
- * to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
- * copies of the Software, and to permit persons to whom the Software is
- * furnished to do so, subject to the following conditions:
- *
- * The above copyright notice and this permission notice shall be included in
- * all copies or substantial portions of the Software.
- *
- * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
- * IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
- * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
- * AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
- * LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
- * OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
- * SOFTWARE.
- *
- *******************************************************************************/
+// Copyright Advanced Micro Devices, Inc., or its affiliates.
+// SPDX-License-Identifier: MIT
 
 /**
  *
@@ -61,6 +38,11 @@ namespace rocRoller
         inline std::unordered_set<OperationTag> Inputs::operator()(BlockScale const& blockScale)
         {
             return blockScale.getInputs();
+        }
+
+        inline std::unordered_set<OperationTag> Inputs::operator()(Scratch const&)
+        {
+            return {};
         }
 
         inline std::unordered_set<OperationTag> Inputs::operator()(SubTileTranspose const& op)
@@ -156,6 +138,11 @@ namespace rocRoller
         inline std::unordered_set<OperationTag> Outputs::operator()(BlockScale const& blockScale)
         {
             return {blockScale.getTag()};
+        }
+
+        inline std::unordered_set<OperationTag> Outputs::operator()(Scratch const& scratch)
+        {
+            return {scratch.getTag()};
         }
 
         inline std::unordered_set<OperationTag> Outputs::operator()(SubTileTranspose const& op)
@@ -298,6 +285,17 @@ namespace rocRoller
             }
 
             return {blockScale.getTag()};
+        }
+
+        inline std::unordered_set<OperationTag> AssignOutputs::operator()(Scratch& scratch)
+        {
+            if(scratch.getTag().uninitialized())
+            {
+                scratch.setTag(m_nextTagValue);
+                ++m_nextTagValue;
+            }
+
+            return {scratch.getTag()};
         }
 
         inline std::unordered_set<OperationTag> AssignOutputs::operator()(SubTileTranspose& op)
@@ -473,6 +471,11 @@ namespace rocRoller
             return blockScale.toString();
         }
 
+        inline std::string ToStringVisitor::operator()(Scratch const& scratch)
+        {
+            return scratch.toString();
+        }
+
         inline std::string ToStringVisitor::operator()(SubTileTranspose const& op)
         {
             return op.toString();
@@ -573,6 +576,11 @@ namespace rocRoller
             blockScale.setCommand(command);
         }
 
+        inline void SetCommand::operator()(Scratch& scratch)
+        {
+            scratch.setCommand(command);
+        }
+
         inline void SetCommand::operator()(SubTileTranspose& op)
         {
             op.setCommand(command);
@@ -639,6 +647,8 @@ namespace rocRoller
 
         inline void AllocateArguments::operator()(BlockScale& blockScale) {}
 
+        inline void AllocateArguments::operator()(Scratch&) {}
+
         inline void AllocateArguments::operator()(SubTileTranspose&) {}
 
         inline void AllocateArguments::operator()(T_Load_Linear& load) {}
@@ -685,6 +695,12 @@ namespace rocRoller
 
         inline rocRoller::VariableType
             rocRoller::Operations::VariableTypeVisitor::operator()(BlockScale&)
+        {
+            return {rocRoller::DataType::None};
+        }
+
+        inline rocRoller::VariableType
+            rocRoller::Operations::VariableTypeVisitor::operator()(Scratch&)
         {
             return {rocRoller::DataType::None};
         }
@@ -773,6 +789,7 @@ namespace rocRoller
         RR_OPERATION_NAME(Scalar);
         RR_OPERATION_NAME(Literal);
         RR_OPERATION_NAME(BlockScale);
+        RR_OPERATION_NAME(Scratch);
         RR_OPERATION_NAME(SubTileTranspose);
         RR_OPERATION_NAME(T_Load_Linear);
         RR_OPERATION_NAME(T_Load_Scalar);

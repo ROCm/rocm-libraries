@@ -93,6 +93,75 @@ void ref_axpy<rocblas_half>(
     // cblas_saxpy(n, alpha, x_float, incx, y_float, incy);
 }
 
+#if defined(WIN32) && !defined(BLIS_ENABLE_CBLAS)
+
+template <typename T>
+void ref_axpy(int64_t n, T alpha, T* x, int64_t incx, T* y, int64_t incy)
+{
+    // Handle negative increments
+    x += incx < 0 ? incx * (1 - n) : 0;
+    y += incy < 0 ? incy * (1 - n) : 0;
+
+    for(int64_t i = 0; i < n; i++)
+    {
+        y[i * incy] += alpha * x[i * incx];
+    }
+}
+
+template void
+    ref_axpy<float>(int64_t n, float alpha, float* x, int64_t incx, float* y, int64_t incy);
+
+template void
+    ref_axpy<double>(int64_t n, double alpha, double* x, int64_t incx, double* y, int64_t incy);
+
+template void ref_axpy<rocblas_float_complex>(int64_t                n,
+                                              rocblas_float_complex  alpha,
+                                              rocblas_float_complex* x,
+                                              int64_t                incx,
+                                              rocblas_float_complex* y,
+                                              int64_t                incy);
+
+template void ref_axpy<rocblas_double_complex>(int64_t                 n,
+                                               rocblas_double_complex  alpha,
+                                               rocblas_double_complex* x,
+                                               int64_t                 incx,
+                                               rocblas_double_complex* y,
+                                               int64_t                 incy);
+
+template <>
+void ref_axpy<rocblas_bfloat16>(int64_t           n,
+                                rocblas_bfloat16  alpha,
+                                rocblas_bfloat16* x,
+                                int64_t           incx,
+                                rocblas_bfloat16* y,
+                                int64_t           incy)
+{
+    // Handle negative increments
+    int64_t abs_incx = incx < 0 ? -incx : incx;
+    int64_t abs_incy = incy < 0 ? -incy : incy;
+
+    // Convert to float
+    host_vector<float> x_float(n * abs_incx);
+    host_vector<float> y_float(n * abs_incy);
+
+    for(int64_t i = 0; i < n; i++)
+    {
+        x_float[i * abs_incx] = float(x[i * abs_incx]);
+        y_float[i * abs_incy] = float(y[i * abs_incy]);
+    }
+
+    // Compute in float precision
+    ref_axpy<float>(n, float(alpha), x_float, incx, y_float, incy);
+
+    // Convert back to bfloat16
+    for(int64_t i = 0; i < n; i++)
+    {
+        y[i * abs_incy] = rocblas_bfloat16(y_float[i * abs_incy]);
+    }
+}
+
+#endif
+
 template <>
 void ref_asum<float>(int64_t n, const float* x, int64_t incx, float* result)
 {
@@ -1122,7 +1191,10 @@ void cast_to_buffer(
         U*       dst    = A_u + offset;
         for(size_t j = 0; j < rowsA; j++)
         {
-            *dst++ = static_cast<U>(*src++);
+            if constexpr(std::is_same_v<T, rocblas_bfloat16> && std::is_same_v<U, float>)
+                *dst++ = float(*src++);
+            else
+                *dst++ = static_cast<U>(*src++);
         }
     }
 }
@@ -1137,7 +1209,12 @@ void cast_from_buffer(int64_t m, int64_t n, int64_t ldc, const host_vector<T>& C
     {
         size_t offset = i * ldc;
         for(size_t j = 0; j < m; j++)
-            C_u[j + offset] = static_cast<U>(C_t[j + offset]);
+        {
+            if constexpr(std::is_same_v<U, rocblas_bfloat16> && std::is_same_v<T, float>)
+                C_u[j + offset] = rocblas_bfloat16(C_t[j + offset]);
+            else
+                C_u[j + offset] = static_cast<U>(C_t[j + offset]);
+        }
     }
 }
 
@@ -2228,6 +2305,136 @@ void ref_syrk(rocblas_fill                  uplo,
                 C,
                 ldc);
 }
+
+// syrk_ex
+template <typename T, typename U, typename Tc>
+void ref_syrk_ex(rocblas_fill      uplo,
+                 rocblas_operation transA,
+                 int64_t           n,
+                 int64_t           k,
+                 Tc                alpha,
+                 const T*          A,
+                 int64_t           lda,
+                 Tc                beta,
+                 U*                C,
+                 int64_t           ldc)
+{
+    if constexpr(!std::is_same_v<Tc, double>)
+    {
+        float alpha_float = alpha;
+        float beta_float  = beta;
+
+        host_vector<float> A_float, C_float;
+
+        cast_to_buffer(transA, n, k, lda, A, A_float);
+        cast_to_buffer(rocblas_operation_none, n, n, ldc, C, C_float);
+
+        ref_syrk(uplo,
+                 transA,
+                 n,
+                 k,
+                 alpha_float,
+                 (const float*)A_float.data(),
+                 lda,
+                 beta_float,
+                 C_float.data(),
+                 ldc);
+
+        cast_from_buffer(n, n, ldc, C_float, C);
+    }
+    else
+    {
+        double alpha_double = alpha;
+        double beta_double  = beta;
+
+        host_vector<double> A_double, C_double;
+
+        cast_to_buffer(transA, n, k, lda, A, A_double);
+        cast_to_buffer(rocblas_operation_none, n, n, ldc, C, C_double);
+
+        ref_syrk(uplo,
+                 transA,
+                 n,
+                 k,
+                 alpha_double,
+                 (const double*)A_double.data(),
+                 lda,
+                 beta_double,
+                 C_double.data(),
+                 ldc);
+
+        cast_from_buffer(n, n, ldc, C_double, C);
+    }
+}
+
+#define INSTANTIATE_SYRK_EX_TEMPLATE(T_, U_, Tc_)                    \
+    template void ref_syrk_ex<T_, U_, Tc_>(rocblas_fill      uplo,   \
+                                           rocblas_operation transA, \
+                                           int64_t           n,      \
+                                           int64_t           k,      \
+                                           Tc_               alpha,  \
+                                           const T_*         A,      \
+                                           int64_t           lda,    \
+                                           Tc_               beta,   \
+                                           U_*               C,      \
+                                           int64_t           ldc);
+
+INSTANTIATE_SYRK_EX_TEMPLATE(rocblas_half, rocblas_half, float)
+INSTANTIATE_SYRK_EX_TEMPLATE(rocblas_half, float, float)
+INSTANTIATE_SYRK_EX_TEMPLATE(rocblas_bfloat16, rocblas_bfloat16, float)
+INSTANTIATE_SYRK_EX_TEMPLATE(rocblas_bfloat16, float, float)
+INSTANTIATE_SYRK_EX_TEMPLATE(float, float, double)
+INSTANTIATE_SYRK_EX_TEMPLATE(float, double, double)
+
+// herk_ex
+template <typename T, typename U, typename Tc>
+void ref_herk_ex(rocblas_fill      uplo,
+                 rocblas_operation transA,
+                 int64_t           n,
+                 int64_t           k,
+                 Tc                alpha,
+                 const T*          A,
+                 int64_t           lda,
+                 Tc                beta,
+                 U*                C,
+                 int64_t           ldc)
+{
+    double alpha_double = alpha;
+    double beta_double  = beta;
+
+    host_vector<rocblas_double_complex> A_double, C_double;
+
+    cast_to_buffer(transA, n, k, lda, A, A_double);
+    cast_to_buffer(rocblas_operation_none, n, n, ldc, C, C_double);
+
+    ref_herk(uplo,
+             transA,
+             n,
+             k,
+             alpha_double,
+             (const rocblas_double_complex*)A_double.data(),
+             lda,
+             beta_double,
+             C_double.data(),
+             ldc);
+
+    cast_from_buffer(n, n, ldc, C_double, C);
+}
+
+#define INSTANTIATE_HERK_EX_TEMPLATE(T_, U_, Tc_)                    \
+    template void ref_herk_ex<T_, U_, Tc_>(rocblas_fill      uplo,   \
+                                           rocblas_operation transA, \
+                                           int64_t           n,      \
+                                           int64_t           k,      \
+                                           Tc_               alpha,  \
+                                           const T_*         A,      \
+                                           int64_t           lda,    \
+                                           Tc_               beta,   \
+                                           U_*               C,      \
+                                           int64_t           ldc);
+
+INSTANTIATE_HERK_EX_TEMPLATE(rocblas_float_complex, rocblas_float_complex, double)
+INSTANTIATE_HERK_EX_TEMPLATE(rocblas_float_complex, rocblas_double_complex, double)
 
 // syr2k
 

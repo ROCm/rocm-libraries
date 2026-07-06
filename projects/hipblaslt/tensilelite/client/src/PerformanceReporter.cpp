@@ -25,6 +25,7 @@
  *******************************************************************************/
 
 #include "PerformanceReporter.hpp"
+#include "TimingInstrumentation.hpp"
 #include "Tensile/hip/HipUtils.hpp"
 
 #include <cmath>
@@ -123,6 +124,7 @@ namespace TensileLite
 
         void PerformanceReporter::postSolution()
         {
+            ScopedTimer timer("post_solution_perf_reset");
             m_clockMhz         = std::numeric_limits<double>::quiet_NaN();
             m_memClockMhz      = std::numeric_limits<double>::quiet_NaN();
             m_gFlops           = std::numeric_limits<double>::quiet_NaN();
@@ -197,7 +199,7 @@ namespace TensileLite
         {
         }
         void PerformanceReporter::preProblem(ContractionProblem* const problem) {}
-        void PerformanceReporter::preSolution(ContractionSolution const& solution) {}
+        void PerformanceReporter::preSolution(ContractionSolution* const solution) {}
         void PerformanceReporter::finalizeReport() {}
 
     } // namespace Client

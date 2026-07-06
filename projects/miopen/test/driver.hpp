@@ -1,28 +1,5 @@
-/*******************************************************************************
- *
- * MIT License
- *
- * Copyright (c) 2017 Advanced Micro Devices, Inc.
- *
- * Permission is hereby granted, free of charge, to any person obtaining a copy
- * of this software and associated documentation files (the "Software"), to deal
- * in the Software without restriction, including without limitation the rights
- * to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
- * copies of the Software, and to permit persons to whom the Software is
- * furnished to do so, subject to the following conditions:
- *
- * The above copyright notice and this permission notice shall be included in all
- * copies or substantial portions of the Software.
- *
- * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
- * IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
- * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
- * AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
- * LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
- * OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
- * SOFTWARE.
- *
- *******************************************************************************/
+// Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
+// SPDX-License-Identifier: MIT
 
 #ifndef GUARD_MIOPEN_TEST_DRIVER_HPP
 #define GUARD_MIOPEN_TEST_DRIVER_HPP
@@ -31,6 +8,7 @@
 #include "get_handle.hpp"
 #include "network_data.hpp"
 #include "serialize.hpp"
+#include "miopen/stringutils.hpp"
 #include "tensor_holder.hpp"
 #include "test.hpp"
 #include "verify.hpp"
@@ -47,8 +25,6 @@
 #include <miopen/env.hpp>
 #include <miopen/rank.hpp>
 #include <miopen/bfloat16.hpp>
-#include <boost/algorithm/string/classification.hpp>
-#include <boost/algorithm/string/split.hpp>
 
 namespace env = miopen::env;
 
@@ -102,8 +78,8 @@ MIOPEN_DECLARE_ENV_VAR_STR(MIOPEN_VERIFY_CACHE_PATH)
 
 struct test_driver
 {
-    test_driver()                   = default;
-    test_driver(const test_driver&) = delete;
+    test_driver()                              = default;
+    test_driver(const test_driver&)            = delete;
     test_driver& operator=(const test_driver&) = delete;
 
     struct argument
@@ -116,8 +92,8 @@ struct test_driver
         std::string name;
 
         // Function may refer to the argument by reference so this needs to be noncopyable
-        argument()                = default;
-        argument(const argument&) = delete;
+        argument()                           = default;
+        argument(const argument&)            = delete;
         argument& operator=(const argument&) = delete;
 
         void post_write()
@@ -136,7 +112,7 @@ struct test_driver
         template <class Source, class T>
         void add_source(Source src, T& x)
         {
-            data_sources.push_back([=, &x](std::function<void()> callback) {
+            data_sources.push_back([=, this, &x](std::function<void()> callback) {
                 for(auto y : src()) // NOLINT
                 {
                     x = T(y);
@@ -151,9 +127,8 @@ struct test_driver
     {
         auto s = env::value(MIOPEN_VERIFY_CACHE_PATH);
         if(s.empty())
-            return "~/.cache/miopen/tests";
-        else
-            return s;
+            s = "~/.cache/miopen/tests";
+        return s;
     }
 
     std::string program_name;
@@ -168,6 +143,8 @@ struct test_driver
     bool verbose           = false;
     double tolerance       = 80;
     bool time              = false;
+    int time_iter          = 1;
+    int warmup_iter        = 0;
     int batch_factor       = 0;
     bool no_validate       = false;
     int repeat             = 1;
@@ -175,6 +152,7 @@ struct test_driver
     bool disabled_cache    = false;
     bool dry_run           = false;
     int config_iter_start  = 0;
+    int config_iter_end    = -1;
     int iteration          = 0;
 
     argument& get_argument(const std::string& s)
@@ -196,6 +174,8 @@ struct test_driver
         v(verbose, {"--verbose", "-v"}, "Run verbose mode");
         v(tolerance, {"--tolerance", "-t"}, "Set test tolerance");
         v(time, {"--time"}, "Time the kernel on GPU");
+        v(time_iter, {"--time-iter"}, "The number of iterations to average for timing the kernel");
+        v(warmup_iter, {"--warmup-iter"}, "The number of warmup iterations for timing the kernel");
         v(batch_factor, {"--batch-factor", "-n"}, "Set batch factor");
         v(no_validate,
           {"--disable-validation"},
@@ -209,6 +189,9 @@ struct test_driver
           {"--config-iter-start", "-i"},
           "index of config at which to start a test."
           "Can be used to restart a test after a failing config.");
+        v(config_iter_end,
+          {"--config-iter-end", "-e"},
+          "index of config at which to end a test (exclusive).");
     }
 
     struct per_arg
@@ -312,9 +295,8 @@ struct test_driver
 
         for(auto&& arg : this->arguments)
         {
-            std::string value = arg.read_value();
-            std::vector<std::string> value_vector;
-            boost::split(value_vector, value, boost::is_any_of(" "), boost::token_compress_on);
+            std::string value                     = arg.read_value();
+            std::vector<std::string> value_vector = miopen::SplitSpaceSeparated(value);
             if(not value.empty())
             {
                 ret.emplace_back("--" + arg.name);
@@ -350,7 +332,7 @@ struct test_driver
     template <class X, class G>
     generate_tensor_t<X, G> generate_tensor(std::set<X> dims, X single, G g)
     {
-        return {[=]() -> std::set<X> {
+        return {[=, this]() -> std::set<X> {
                     if(full_set)
                         return dims;
                     else
@@ -369,7 +351,7 @@ struct test_driver
     template <class F, class G>
     auto lazy_generate_tensor(F f, G g) -> generate_tensor_t<miopen::range_value<decltype(f())>, G>
     {
-        return {[=]() -> decltype(f()) {
+        return {[=, this]() -> decltype(f()) {
                     if(full_set)
                         return f();
                     else
@@ -381,7 +363,7 @@ struct test_driver
     template <class F, class X, class G>
     generate_tensor_t<X, G> lazy_generate_tensor(F f, X single, G g)
     {
-        return {[=]() -> std::set<X> {
+        return {[=, this]() -> std::set<X> {
                     if(full_set)
                         return f();
                     else
@@ -400,23 +382,25 @@ struct test_driver
     template <class F, class G>
     generate_tensor_t<std::vector<int>, G> get_tensor(F gen_shapes, G gen_value)
     {
-        return lazy_generate_tensor([=] { return gen_shapes(batch_factor); }, gen_value);
+        return lazy_generate_tensor([=, this] { return gen_shapes(batch_factor); }, gen_value);
     }
 
     template <class G = tensor_elem_gen_integer>
     generate_tensor_t<std::vector<int>, G>
     get_bn_spatial_input_tensor(G tensor_elem_gen = tensor_elem_gen_integer{})
     {
-        return lazy_generate_tensor(
-            [=] { return get_bn_spatial_inputs(batch_factor); }, {4, 64, 28, 28}, tensor_elem_gen);
+        return lazy_generate_tensor([=, this] { return get_bn_spatial_inputs(batch_factor); },
+                                    {4, 64, 28, 28},
+                                    tensor_elem_gen);
     }
 
     template <class G = tensor_elem_gen_integer>
     generate_tensor_t<std::vector<int>, G>
     get_bn_peract_input_tensor(G tensor_elem_gen = tensor_elem_gen_integer{})
     {
-        return lazy_generate_tensor(
-            [=] { return get_bn_peract_inputs(batch_factor); }, {16, 32, 8, 8}, tensor_elem_gen);
+        return lazy_generate_tensor([=, this] { return get_bn_peract_inputs(batch_factor); },
+                                    {16, 32, 8, 8},
+                                    tensor_elem_gen);
     }
 
     template <class G = tensor_elem_gen_integer>
@@ -424,14 +408,14 @@ struct test_driver
     get_input_tensor(G tensor_elem_gen = tensor_elem_gen_integer{})
     {
         return lazy_generate_tensor(
-            [=] { return get_inputs(batch_factor); }, {16, 32, 8, 8}, tensor_elem_gen);
+            [=, this] { return get_inputs(batch_factor); }, {16, 32, 8, 8}, tensor_elem_gen);
     }
 
     template <class G = tensor_elem_gen_integer>
     generate_tensor_t<std::vector<int>, G>
     get_3d_bn_spatial_input_tensor(G tensor_elem_gen = tensor_elem_gen_integer{})
     {
-        return lazy_generate_tensor([=] { return get_3d_bn_spatial_inputs(batch_factor); },
+        return lazy_generate_tensor([=, this] { return get_3d_bn_spatial_inputs(batch_factor); },
                                     {16, 32, 8, 8, 8},
                                     tensor_elem_gen);
     }
@@ -440,7 +424,7 @@ struct test_driver
     generate_tensor_t<std::vector<int>, G>
     get_3d_bn_peract_input_tensor(G tensor_elem_gen = tensor_elem_gen_integer{})
     {
-        return lazy_generate_tensor([=] { return get_3d_bn_peract_inputs(batch_factor); },
+        return lazy_generate_tensor([=, this] { return get_3d_bn_peract_inputs(batch_factor); },
                                     {16, 32, 8, 8, 8},
                                     tensor_elem_gen);
     }
@@ -450,7 +434,7 @@ struct test_driver
     get_weights_tensor(G tensor_elem_gen = tensor_elem_gen_integer{})
     {
         return lazy_generate_tensor(
-            [=] { return get_weights(batch_factor); }, {64, 32, 5, 5}, tensor_elem_gen);
+            [=, this] { return get_weights(batch_factor); }, {64, 32, 5, 5}, tensor_elem_gen);
     }
 
     template <class X>
@@ -474,7 +458,7 @@ struct test_driver
     template <class T>
     generate_data_t<std::vector<T>> generate_data(std::vector<T> dims, T single)
     {
-        return {[=]() -> std::vector<T> {
+        return {[=, this]() -> std::vector<T> {
             if(full_set)
                 return dims;
             else
@@ -486,7 +470,7 @@ struct test_driver
     generate_data_t<std::vector<T>>
     generate_data_limited(std::vector<T> dims, int limit_multiplier, T single)
     {
-        return {[=]() -> std::vector<T> {
+        return {[=, this]() -> std::vector<T> {
             if(full_set)
             {
                 if(limit_set > 0)
@@ -522,7 +506,7 @@ struct test_driver
     template <class T>
     generate_data_t<std::vector<T>> generate_data(std::vector<T> dims)
     {
-        return {[=]() -> std::vector<T> {
+        return {[=, this]() -> std::vector<T> {
             if(full_set)
                 return dims;
             else
@@ -533,13 +517,15 @@ struct test_driver
     template <class T>
     generate_data_t<std::vector<T>> generate_multi_data(std::vector<std::vector<T>> multi_dims)
     {
-        return {[=]() -> std::vector<T> { return generate_data(multi_dims.at(dataset_id))(T{}); }};
+        return {[=, this]() -> std::vector<T> {
+            return generate_data(multi_dims.at(dataset_id))(T{});
+        }};
     }
 
     template <class T>
     generate_data_t<std::vector<T>> generate_data_limited(std::vector<T> dims, int limit_multiplier)
     {
-        return {[=]() -> std::vector<T> {
+        return {[=, this]() -> std::vector<T> {
             if(full_set)
             {
                 if(limit_set > 0)
@@ -565,7 +551,7 @@ struct test_driver
     generate_data_t<std::vector<T>>
     generate_multi_data_limited(std::vector<std::vector<T>> multi_dims, int limit_multiplier)
     {
-        return {[=]() -> std::vector<T> {
+        return {[=, this]() -> std::vector<T> {
             return generate_data_limited(multi_dims.at(dataset_id), limit_multiplier)(T{});
         }};
     }
@@ -573,7 +559,7 @@ struct test_driver
     template <class F, class T>
     auto lazy_generate_data(F f, T single) -> generate_data_t<decltype(f())>
     {
-        return {[=]() -> decltype(f()) {
+        return {[=, this]() -> decltype(f()) {
             if(full_set)
                 return f();
             else
@@ -584,7 +570,7 @@ struct test_driver
     template <class F>
     auto lazy_generate_data(F f) -> generate_data_t<decltype(f())>
     {
-        return {[=]() -> decltype(f()) {
+        return {[=, this]() -> decltype(f()) {
             if(full_set)
                 return f();
             else
@@ -595,7 +581,7 @@ struct test_driver
     template <class T>
     generate_data_t<std::vector<T>> generate_single(T single)
     {
-        return {[=]() -> std::vector<T> { return {single}; }};
+        return {[=, this]() -> std::vector<T> { return {single}; }};
     }
 
     template <class X>
@@ -631,11 +617,11 @@ struct test_driver
 
     auto verify_reporter()
     {
-        return [=](bool pass,
-                   std::vector<double> error,
-                   const auto& out_cpu,
-                   const auto& out_gpu,
-                   auto fail) {
+        return [=, this](bool pass,
+                         std::vector<double> error,
+                         const auto& out_cpu,
+                         const auto& out_gpu,
+                         auto fail) {
             if(not pass or verbose)
             {
                 if(not error.empty() or not pass)
@@ -756,16 +742,16 @@ struct test_driver
         if(miopen::fs::exists(f) and not retry)
         {
             miss = false;
-            return detach_async([=] {
+            return miopen::detach_async([=] {
                 result_type result;
                 load(f.string(), result);
-                return result;
+                return std::move(result);
             });
         }
         else
         {
             miss = true;
-            return then(cpu_async(v, xs...), [=](auto data) {
+            return miopen::then(cpu_async(v, xs...), [=](auto data) {
                 save(f.string(), data);
                 return data;
             });
@@ -781,8 +767,8 @@ struct test_driver
     /// Winograd-specific precision loss is roughly 2+2 bits.
     /// Let's adjust tolerance (only for FP32 WrW for now).
     template <class V>
-    auto adjust_parameters_impl(miopen::rank<1>, V&& v)
-        -> decltype(v.stats, v.is_conv_wrw_f32, void())
+    auto adjust_parameters_impl(miopen::rank<1>,
+                                V&& v) -> decltype(v.stats, v.is_conv_wrw_f32, void())
     {
         if(v.is_conv_wrw_f32 && v.stats->algorithm == miopenConvolutionAlgoWinograd)
             tolerance *= 16.0;
@@ -795,8 +781,8 @@ struct test_driver
     }
 
     template <class F, class V, class... Ts>
-    auto verify_impl(F&& f, V&& v, Ts&&... xs)
-        -> decltype(std::make_pair(v.cpu(xs...), v.gpu(xs...)))
+    auto verify_impl(F&& f, V&& v, Ts&&... xs) -> decltype(std::make_pair(v.cpu(xs...),
+                                                                          v.gpu(xs...)))
     {
         decltype(v.cpu(xs...)) cpu;
         decltype(v.gpu(xs...)) gpu;
@@ -817,17 +803,29 @@ struct test_driver
             // Compute gpu
             if(time)
             {
+                for(size_t i = 0; i < warmup_iter; ++i)
+                {
+                    v.gpu(xs...);
+                }
+
                 h.EnableProfiling();
                 h.ResetKernelTime();
             }
             gpu = v.gpu(xs...);
-            adjust_parameters(v);
-
             if(time)
             {
-                std::cout << "Kernel time: " << h.GetKernelTime() << " ms" << std::endl;
+                float total_time = h.GetKernelTime();
+                for(size_t i = 1; i < time_iter; ++i)
+                {
+                    h.ResetKernelTime();
+                    v.gpu(xs...);
+                    total_time += h.GetKernelTime();
+                }
+                std::cout << "Kernel time: " << (total_time / time_iter) << " ms" << std::endl;
                 h.EnableProfiling(false);
             }
+            adjust_parameters(v);
+
             // Validate
             if(!no_validate)
             {
@@ -937,8 +935,13 @@ struct test_driver
     template <class Derived>
     void base_run()
     {
-        if(this->iteration >= this->config_iter_start)
+        if(this->iteration >= this->config_iter_start &&
+           (this->config_iter_end < 0 || this->iteration < this->config_iter_end))
         {
+            if(this->time && !this->verbose)
+            {
+                std::cout << "Iteration: " << this->iteration << std::endl;
+            }
             if(this->dry_run)
             {
                 std::cout << "Iteration: " << this->iteration << std::endl;
@@ -1116,7 +1119,7 @@ build_configs(Driver& d,
               std::unordered_map<std::string, std::vector<std::string>>& arg_map,
               std::set<std::string>& keywords)
 {
-    std::cout << "Building configs...";
+    std::cout << "Building configs..." << std::endl;
     std::vector<std::vector<std::string>> configs;
 
     d.parse(parser{arg_map});
@@ -1223,8 +1226,7 @@ void test_drive_impl_2(std::string program_name, std::vector<std::string> as)
             }(running_average, elapsed.count(), i + 1); // (avg_acc/N-1) * ((N-1)/N) + y/N;
         }
 
-        std::cout << "Elapsed time: " << elapsed.count() << " s"
-                  << ", "
+        std::cout << "Elapsed time: " << elapsed.count() << " s" << ", "
                   << "Running Average: " << running_average << " s" << std::endl;
     }
 }

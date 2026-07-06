@@ -1,28 +1,5 @@
-
-################################################################################
-#
-# MIT License
-#
-# Copyright 2024-2025 AMD ROCm(TM) Software
-#
-# Permission is hereby granted, free of charge, to any person obtaining a copy
-# of this software and associated documentation files (the "Software"), to deal
-# in the Software without restriction, including without limitation the rights
-# to use, copy, modify, merge, publish, distribute, sublicense, and/or sell cop-
-# ies of the Software, and to permit persons to whom the Software is furnished
-# to do so, subject to the following conditions:
-#
-# The above copyright notice and this permission notice shall be included in all
-# copies or substantial portions of the Software.
-#
-# THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR IM-
-# PLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY, FITNESS
-# FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE AUTHORS OR
-# COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER
-# IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNE-
-# CTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
-#
-################################################################################
+# Copyright Advanced Micro Devices, Inc., or its affiliates.
+# SPDX-License-Identifier:  MIT
 
 cmake_minimum_required(VERSION 3.25.2)
 project(mxDataGenerator VERSION 0.1.0)
@@ -41,52 +18,84 @@ target_include_directories(mxDataGenerator
         $<INSTALL_INTERFACE:${CMAKE_INSTALL_INCLUDEDIR}>
 )
 
+# Optional HIP/GPU backend (`DGen::DataGeneratorGPU`). The implementation is
+# header-only and gated behind `__HIPCC__`; host-only consumers see nothing.
+# We deliberately do *not* link `hip::device` into the INTERFACE here, since
+# that would propagate `--offload-arch` flags to every consumer (including
+# pure-host TUs that compile with g++) and break their builds. Consumers that
+# actually want the GPU backend must:
+#   * compile their TU with hipcc / amdclang++ in HIP mode (so `__HIPCC__`
+#     is defined and `<hip/hip_runtime.h>` is in the include path), and
+#   * `target_link_libraries(<their_tgt> PRIVATE hip::device)` themselves.
+#
+# The default is ON because the option is a no-op for non-test builds: the
+# header gate above makes pure-host TUs see nothing, and the `if(... AND
+# MXDATAGENERATOR_BUILD_TESTING)` block below only pulls in the HIP language
+# when we're also building our own test executable. Downstream consumers that
+# want to disable the backend entirely can still pass `-DMXDATAGENERATOR_ENABLE_GPU=OFF`.
+option(MXDATAGENERATOR_ENABLE_GPU
+       "Enable header-only HIP/GPU backend in mxDataGenerator" ON)
+if(MXDATAGENERATOR_ENABLE_GPU AND MXDATAGENERATOR_BUILD_TESTING)
+    find_package(hip QUIET CONFIG)
+    if(hip_FOUND)
+        # We only need the HIP language when *we* build the GPU test
+        # executable below; otherwise leave host consumers alone.
+        enable_language(HIP)
+    endif()
+endif()
+
 target_sources(mxDataGenerator
     INTERFACE
-        $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/lib/include/DataGenerator.hpp>
-        $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/lib/include/bf16.hpp>
-        $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/lib/include/bf16_impl.hpp>
-        $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/lib/include/dataTypeInfo.hpp>
-        $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/lib/include/dataTypeInfo_impl.hpp>
-        $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/lib/include/data_generation_utils.hpp>
-        $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/lib/include/f32.hpp>
-        $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/lib/include/f32_impl.hpp>
-        $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/lib/include/fp16.hpp>
-        $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/lib/include/fp16_impl.hpp>
-        $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/lib/include/fp6.hpp>
-        $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/lib/include/ocp_e2m1_mxfp4.hpp>
-        $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/lib/include/ocp_e2m1_mxfp4_impl.hpp>
-        $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/lib/include/ocp_e2m3_mxfp6.hpp>
-        $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/lib/include/ocp_e2m3_mxfp6_impl.hpp>
-        $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/lib/include/ocp_e3m2_mxfp6.hpp>
-        $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/lib/include/ocp_e3m2_mxfp6_impl.hpp>
-        $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/lib/include/ocp_e4m3_mxfp8.hpp>
-        $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/lib/include/ocp_e4m3_mxfp8_impl.hpp>
-        $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/lib/include/ocp_e5m2_mxfp8.hpp>
-        $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/lib/include/ocp_e5m2_mxfp8_impl.hpp>
-        $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/lib/include/packing.hpp>
-        $<INSTALL_INTERFACE:${CMAKE_INSTALL_INCLUDEDIR}/DataGenerator.hpp>
-        $<INSTALL_INTERFACE:${CMAKE_INSTALL_INCLUDEDIR}/bf16.hpp>
-        $<INSTALL_INTERFACE:${CMAKE_INSTALL_INCLUDEDIR}/bf16_impl.hpp>
-        $<INSTALL_INTERFACE:${CMAKE_INSTALL_INCLUDEDIR}/dataTypeInfo.hpp>
-        $<INSTALL_INTERFACE:${CMAKE_INSTALL_INCLUDEDIR}/dataTypeInfo_impl.hpp>
-        $<INSTALL_INTERFACE:${CMAKE_INSTALL_INCLUDEDIR}/data_generation_utils.hpp>
-        $<INSTALL_INTERFACE:${CMAKE_INSTALL_INCLUDEDIR}/f32.hpp>
-        $<INSTALL_INTERFACE:${CMAKE_INSTALL_INCLUDEDIR}/f32_impl.hpp>
-        $<INSTALL_INTERFACE:${CMAKE_INSTALL_INCLUDEDIR}/fp16.hpp>
-        $<INSTALL_INTERFACE:${CMAKE_INSTALL_INCLUDEDIR}/fp16_impl.hpp>
-        $<INSTALL_INTERFACE:${CMAKE_INSTALL_INCLUDEDIR}/fp6.hpp>
-        $<INSTALL_INTERFACE:${CMAKE_INSTALL_INCLUDEDIR}/ocp_e2m1_mxfp4.hpp>
-        $<INSTALL_INTERFACE:${CMAKE_INSTALL_INCLUDEDIR}/ocp_e2m1_mxfp4_impl.hpp>
-        $<INSTALL_INTERFACE:${CMAKE_INSTALL_INCLUDEDIR}/ocp_e2m3_mxfp6.hpp>
-        $<INSTALL_INTERFACE:${CMAKE_INSTALL_INCLUDEDIR}/ocp_e2m3_mxfp6_impl.hpp>
-        $<INSTALL_INTERFACE:${CMAKE_INSTALL_INCLUDEDIR}/ocp_e3m2_mxfp6.hpp>
-        $<INSTALL_INTERFACE:${CMAKE_INSTALL_INCLUDEDIR}/ocp_e3m2_mxfp6_impl.hpp>
-        $<INSTALL_INTERFACE:${CMAKE_INSTALL_INCLUDEDIR}/ocp_e4m3_mxfp8.hpp>
-        $<INSTALL_INTERFACE:${CMAKE_INSTALL_INCLUDEDIR}/ocp_e4m3_mxfp8_impl.hpp>
-        $<INSTALL_INTERFACE:${CMAKE_INSTALL_INCLUDEDIR}/ocp_e5m2_mxfp8.hpp>
-        $<INSTALL_INTERFACE:${CMAKE_INSTALL_INCLUDEDIR}/ocp_e5m2_mxfp8_impl.hpp>
-        $<INSTALL_INTERFACE:${CMAKE_INSTALL_INCLUDEDIR}/packing.hpp>
+        $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/lib/include/mxDataGenerator/DataGenerator.hpp>
+        $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/lib/include/mxDataGenerator/DataGeneratorGPU.hpp>
+        $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/lib/include/mxDataGenerator/DataGeneratorGPU_impl.hpp>
+        $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/lib/include/mxDataGenerator/bf16.hpp>
+        $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/lib/include/mxDataGenerator/bf16_impl.hpp>
+        $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/lib/include/mxDataGenerator/dataTypeInfo.hpp>
+        $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/lib/include/mxDataGenerator/dataTypeInfo_impl.hpp>
+        $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/lib/include/mxDataGenerator/data_generation_utils.hpp>
+        $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/lib/include/mxDataGenerator/f32.hpp>
+        $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/lib/include/mxDataGenerator/f32_impl.hpp>
+        $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/lib/include/mxDataGenerator/fp16.hpp>
+        $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/lib/include/mxDataGenerator/fp16_impl.hpp>
+        $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/lib/include/mxDataGenerator/fp6.hpp>
+        $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/lib/include/mxDataGenerator/ocp_e2m1_mxfp4.hpp>
+        $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/lib/include/mxDataGenerator/ocp_e2m1_mxfp4_impl.hpp>
+        $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/lib/include/mxDataGenerator/ocp_e2m3_mxfp6.hpp>
+        $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/lib/include/mxDataGenerator/ocp_e2m3_mxfp6_impl.hpp>
+        $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/lib/include/mxDataGenerator/ocp_e3m2_mxfp6.hpp>
+        $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/lib/include/mxDataGenerator/ocp_e3m2_mxfp6_impl.hpp>
+        $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/lib/include/mxDataGenerator/ocp_e4m3_mxfp8.hpp>
+        $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/lib/include/mxDataGenerator/ocp_e4m3_mxfp8_impl.hpp>
+        $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/lib/include/mxDataGenerator/ocp_e5m2_mxfp8.hpp>
+        $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/lib/include/mxDataGenerator/ocp_e5m2_mxfp8_impl.hpp>
+        $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/lib/include/mxDataGenerator/packing.hpp>
+        $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/lib/include/mxDataGenerator/PreSwizzle.hpp>
+        $<INSTALL_INTERFACE:${CMAKE_INSTALL_INCLUDEDIR}/mxDataGenerator/DataGenerator.hpp>
+        $<INSTALL_INTERFACE:${CMAKE_INSTALL_INCLUDEDIR}/mxDataGenerator/DataGeneratorGPU.hpp>
+        $<INSTALL_INTERFACE:${CMAKE_INSTALL_INCLUDEDIR}/mxDataGenerator/DataGeneratorGPU_impl.hpp>
+        $<INSTALL_INTERFACE:${CMAKE_INSTALL_INCLUDEDIR}/mxDataGenerator/bf16.hpp>
+        $<INSTALL_INTERFACE:${CMAKE_INSTALL_INCLUDEDIR}/mxDataGenerator/bf16_impl.hpp>
+        $<INSTALL_INTERFACE:${CMAKE_INSTALL_INCLUDEDIR}/mxDataGenerator/dataTypeInfo.hpp>
+        $<INSTALL_INTERFACE:${CMAKE_INSTALL_INCLUDEDIR}/mxDataGenerator/dataTypeInfo_impl.hpp>
+        $<INSTALL_INTERFACE:${CMAKE_INSTALL_INCLUDEDIR}/mxDataGenerator/data_generation_utils.hpp>
+        $<INSTALL_INTERFACE:${CMAKE_INSTALL_INCLUDEDIR}/mxDataGenerator/f32.hpp>
+        $<INSTALL_INTERFACE:${CMAKE_INSTALL_INCLUDEDIR}/mxDataGenerator/f32_impl.hpp>
+        $<INSTALL_INTERFACE:${CMAKE_INSTALL_INCLUDEDIR}/mxDataGenerator/fp16.hpp>
+        $<INSTALL_INTERFACE:${CMAKE_INSTALL_INCLUDEDIR}/mxDataGenerator/fp16_impl.hpp>
+        $<INSTALL_INTERFACE:${CMAKE_INSTALL_INCLUDEDIR}/mxDataGenerator/fp6.hpp>
+        $<INSTALL_INTERFACE:${CMAKE_INSTALL_INCLUDEDIR}/mxDataGenerator/ocp_e2m1_mxfp4.hpp>
+        $<INSTALL_INTERFACE:${CMAKE_INSTALL_INCLUDEDIR}/mxDataGenerator/ocp_e2m1_mxfp4_impl.hpp>
+        $<INSTALL_INTERFACE:${CMAKE_INSTALL_INCLUDEDIR}/mxDataGenerator/ocp_e2m3_mxfp6.hpp>
+        $<INSTALL_INTERFACE:${CMAKE_INSTALL_INCLUDEDIR}/mxDataGenerator/ocp_e2m3_mxfp6_impl.hpp>
+        $<INSTALL_INTERFACE:${CMAKE_INSTALL_INCLUDEDIR}/mxDataGenerator/ocp_e3m2_mxfp6.hpp>
+        $<INSTALL_INTERFACE:${CMAKE_INSTALL_INCLUDEDIR}/mxDataGenerator/ocp_e3m2_mxfp6_impl.hpp>
+        $<INSTALL_INTERFACE:${CMAKE_INSTALL_INCLUDEDIR}/mxDataGenerator/ocp_e4m3_mxfp8.hpp>
+        $<INSTALL_INTERFACE:${CMAKE_INSTALL_INCLUDEDIR}/mxDataGenerator/ocp_e4m3_mxfp8_impl.hpp>
+        $<INSTALL_INTERFACE:${CMAKE_INSTALL_INCLUDEDIR}/mxDataGenerator/ocp_e5m2_mxfp8.hpp>
+        $<INSTALL_INTERFACE:${CMAKE_INSTALL_INCLUDEDIR}/mxDataGenerator/ocp_e5m2_mxfp8_impl.hpp>
+        $<INSTALL_INTERFACE:${CMAKE_INSTALL_INCLUDEDIR}/mxDataGenerator/packing.hpp>
+        $<INSTALL_INTERFACE:${CMAKE_INSTALL_INCLUDEDIR}/mxDataGenerator/PreSwizzle.hpp>
 )
 
 if(MXDATAGENERATOR_BUILD_TESTING)
@@ -104,6 +113,7 @@ if(MXDATAGENERATOR_BUILD_TESTING)
     add_executable(
       mxDataGeneratorTests
       test/data_generator_test.cpp
+      test/data_generator_constant_fills_test.cpp
       test/f32_test.cpp
       test/fp16_test.cpp
       test/bf16_test.cpp
@@ -112,6 +122,8 @@ if(MXDATAGENERATOR_BUILD_TESTING)
       test/ocp_e2m3_mxfp6_test.cpp
       test/ocp_e3m2_mxfp6_test.cpp
       test/ocp_e2m1_mxfp4_test.cpp
+      test/ocp_e2m1_mxfp4_e4m3_e5m3_scale_test.cpp
+      test/preswizzle_test.cpp
     )
     if(CMAKE_CXX_COMPILER_ID STREQUAL "Clang" OR CMAKE_CXX_COMPILER_ID STREQUAL "GNU")
         target_compile_options(mxDataGeneratorTests PRIVATE -Wall -Wextra -Wpedantic -Werror -Wno-strict-aliasing -Wno-error=strict-aliasing)
@@ -125,6 +137,31 @@ if(MXDATAGENERATOR_BUILD_TESTING)
     )
     include(GoogleTest)
     gtest_discover_tests(mxDataGeneratorTests DISCOVERY_MODE PRE_TEST)
+
+    # GPU backend tests live in a separate executable because they require the
+    # TU to be compiled in HIP mode (`-x hip`). We only build them if the GPU
+    # backend is enabled and a HIP runtime is available; this keeps host-only
+    # CI builds (and the legacy `mxDataGeneratorTests` target) decoupled from
+    # the HIP toolchain.
+    if(MXDATAGENERATOR_ENABLE_GPU AND hip_FOUND)
+        add_executable(
+          mxDataGeneratorGPUTests
+          test/data_generator_gpu_test.cpp
+        )
+        # Force HIP compilation regardless of file extension.
+        set_source_files_properties(
+            test/data_generator_gpu_test.cpp
+            PROPERTIES LANGUAGE HIP
+        )
+        target_link_libraries(
+          mxDataGeneratorGPUTests PRIVATE
+          GTest::gtest_main
+          mxDataGenerator
+          hip::device
+          OpenMP::OpenMP_CXX
+        )
+        gtest_discover_tests(mxDataGeneratorGPUTests DISCOVERY_MODE PRE_TEST)
+    endif()
 endif()
 
 get_target_property(mxdatagenerator_headers_public mxDataGenerator INTERFACE_SOURCES)
@@ -167,7 +204,7 @@ install(FILES
 install(
     FILES ${mxdatagenerator_headers_public}
     COMPONENT mxDataGenerator_Development
-    DESTINATION "${CMAKE_INSTALL_INCLUDEDIR}"
+    DESTINATION "${CMAKE_INSTALL_INCLUDEDIR}/mxDataGenerator"
 )
 
 install(

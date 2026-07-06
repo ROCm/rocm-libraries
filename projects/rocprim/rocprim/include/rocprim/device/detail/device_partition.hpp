@@ -1,4 +1,4 @@
-// Copyright (c) 2017-2025 Advanced Micro Devices, Inc. All rights reserved.
+// Copyright (c) 2017-2026 Advanced Micro Devices, Inc. All rights reserved.
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -908,7 +908,7 @@ public:
     {}
 };
 
-template<class ArchConfig,
+template<class TargetConfig,
          select_method SelectMethod,
          bool          OnlySelected,
          class Key,
@@ -919,21 +919,36 @@ template<class ArchConfig,
 struct partition_kernel_impl_
 {
 
-    static constexpr partition_config_params params = ArchConfig::params;
+    static constexpr partition_config_params params = TargetConfig::params;
 
     static constexpr auto         block_size       = params.kernel_config.block_size;
     static constexpr auto         items_per_thread = params.kernel_config.items_per_thread;
     static constexpr unsigned int items_per_block  = block_size * items_per_thread;
 
     // Block primitives
-    using block_load_key_type
-        = ::rocprim::block_load<Key, block_size, items_per_thread, params.key_block_load_method>;
-    using block_load_value_type = ::rocprim::
-        block_load<Value, block_size, items_per_thread, params.value_block_load_method>;
-    using block_load_flag_type = ::rocprim::
-        block_load<FlagType, block_size, items_per_thread, params.flag_block_load_method>;
-    using block_scan_offset_type
-        = ::rocprim::block_scan<OffsetType, block_size, params.block_scan_method>;
+    using block_load_key_type    = ::rocprim::block_load<Key,
+                                                         block_size,
+                                                         items_per_thread,
+                                                         params.key_block_load_method,
+                                                         1,
+                                                         1,
+                                                         TargetConfig::wavefront>;
+    using block_load_value_type  = ::rocprim::block_load<Value,
+                                                         block_size,
+                                                         items_per_thread,
+                                                         params.value_block_load_method,
+                                                         1,
+                                                         1,
+                                                         TargetConfig::wavefront>;
+    using block_load_flag_type   = ::rocprim::block_load<FlagType,
+                                                         block_size,
+                                                         items_per_thread,
+                                                         params.flag_block_load_method,
+                                                         1,
+                                                         1,
+                                                         TargetConfig::wavefront>;
+    using block_scan_offset_type = ::rocprim::
+        block_scan<OffsetType, block_size, params.block_scan_method, 1, 1, TargetConfig::wavefront>;
     using block_discontinuity_key_type = ::rocprim::block_discontinuity<Key, block_size>;
     using ordered_block_id             = BlockIdWrapper;
 
@@ -1026,14 +1041,11 @@ struct partition_kernel_impl_
                                  bool[items_per_thread],
                                  bool[sizeof...(UnaryPredicates)][items_per_thread]>;
 
+        const auto flat_block_thread_id = ::rocprim::detail::block_thread_id<0>();
+        const uint32_t flat_block_id        = block_id.get(flat_block_thread_id, storage.block_id);
+
         size_t prev_selected_count_values[sizeof...(UnaryPredicates)]{};
         load_selected_count(prev_selected_count, prev_selected_count_values);
-
-        const auto flat_block_thread_id = ::rocprim::detail::block_thread_id<0>();
-        const auto flat_block_id        = block_id.get(flat_block_thread_id, storage.block_id);
-        ::rocprim::syncthreads(); // sync threads to reuse shared memory
-
-        // const auto flat_block_id = ::rocprim::detail::block_id<0>();
 
         const auto         block_offset = flat_block_id * items_per_block;
         const unsigned int valid_in_global_last_block
@@ -1131,6 +1143,14 @@ struct partition_kernel_impl_
             selected_in_block = prefix_op.get_reduction();
             selected_prefix   = prefix_op.get_prefix();
         }
+        // Temporary workaround: In ROCm versions 7.0.2, for large data sizes, on Linux,
+        // gfx1151 devices may hang here without an extra syncthreads call.
+        // Logically, this should not be necessary, since the work performed within prefix_op
+        // (to compute the reduction and prefix) has already been performed within the block-level
+        // exclusive_scan call above.
+#if defined(__gfx1151__) && !defined(_WIN32)
+        ::rocprim::syncthreads();
+#endif
 
         // Scatter selected and rejected values
         partition_scatter<OnlySelected, block_size>(keys,

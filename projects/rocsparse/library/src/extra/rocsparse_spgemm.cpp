@@ -1,5 +1,5 @@
 /* ************************************************************************
- * Copyright (C) 2020-2025 Advanced Micro Devices, Inc. All rights Reserved.
+ * Copyright (C) 2020-2026 Advanced Micro Devices, Inc. All rights Reserved.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -30,6 +30,7 @@
 #include "rocsparse_csrgemm_numeric.hpp"
 #include "rocsparse_csrgemm_symbolic.hpp"
 
+// LCOV_EXCL_START
 template <>
 const char* rocsparse::enum_utils::to_string(rocsparse_spgemm_alg value_)
 {
@@ -41,9 +42,7 @@ const char* rocsparse::enum_utils::to_string(rocsparse_spgemm_alg value_)
         CASE(rocsparse_spgemm_alg_default);
 #undef CASE
     }
-    // LCOV_EXCL_START
     THROW_IF_ROCSPARSE_ERROR(rocsparse_status_invalid_value);
-    // LCOV_EXCL_STOP
 }
 
 template <>
@@ -61,10 +60,9 @@ const char* rocsparse::enum_utils::to_string(rocsparse_spgemm_stage value_)
         CASE(rocsparse_spgemm_stage_numeric);
 #undef CASE
     }
-    // LCOV_EXCL_START
     THROW_IF_ROCSPARSE_ERROR(rocsparse_status_invalid_value);
-    // LCOV_EXCL_STOP
 }
+// LCOV_EXCL_STOP
 
 template <>
 bool rocsparse::enum_utils::is_invalid(rocsparse_spgemm_alg value_)
@@ -183,6 +181,7 @@ namespace rocsparse
             case rocsparse_format_csc:
             case rocsparse_format_ell:
             case rocsparse_format_bell:
+            case rocsparse_format_sell:
             {
                 RETURN_IF_ROCSPARSE_ERROR(rocsparse_status_not_implemented);
             }
@@ -278,6 +277,7 @@ namespace rocsparse
             case rocsparse_format_csc:
             case rocsparse_format_ell:
             case rocsparse_format_bell:
+            case rocsparse_format_sell:
             {
                 RETURN_IF_ROCSPARSE_ERROR(rocsparse_status_not_implemented);
             }
@@ -363,6 +363,7 @@ namespace rocsparse
             case rocsparse_format_csc:
             case rocsparse_format_ell:
             case rocsparse_format_bell:
+            case rocsparse_format_sell:
             {
                 RETURN_IF_ROCSPARSE_ERROR(rocsparse_status_not_implemented);
             }
@@ -379,6 +380,7 @@ namespace rocsparse
             case rocsparse_format_ell:
             case rocsparse_format_bell:
             case rocsparse_format_bsr:
+            case rocsparse_format_sell:
             {
                 RETURN_IF_ROCSPARSE_ERROR(rocsparse_status_not_implemented);
             }
@@ -424,6 +426,7 @@ namespace rocsparse
             case rocsparse_format_ell:
             case rocsparse_format_bell:
             case rocsparse_format_bsr:
+            case rocsparse_format_sell:
             {
                 RETURN_IF_ROCSPARSE_ERROR(rocsparse_status_not_implemented);
             }
@@ -479,7 +482,7 @@ namespace rocsparse
 
         switch(itype)
         {
-        case rocsparse_indextype_u16:
+        case deprecated_rocsparse_indextype_u16:
         {
             RETURN_IF_ROCSPARSE_ERROR(rocsparse_status_not_implemented);
         }
@@ -488,7 +491,7 @@ namespace rocsparse
             switch(jtype)
             {
             case rocsparse_indextype_i64:
-            case rocsparse_indextype_u16:
+            case deprecated_rocsparse_indextype_u16:
             {
                 RETURN_IF_ROCSPARSE_ERROR(rocsparse_status_not_implemented);
             }
@@ -522,12 +525,23 @@ namespace rocsparse
                             params...)));
                     return rocsparse_status_success;
                 }
+                case rocsparse_datatype_f16_r:
+                {
+                    RETURN_IF_ROCSPARSE_ERROR(
+                        (rocsparse::spgemm_template<int32_t, int32_t, _Float16>(params...)));
+                    return rocsparse_status_success;
+                }
+                case rocsparse_datatype_bf16_r:
+                {
+                    RETURN_IF_ROCSPARSE_ERROR(
+                        (rocsparse::spgemm_template<int32_t, int32_t, rocsparse_bfloat16>(
+                            params...)));
+                    return rocsparse_status_success;
+                }
                 case rocsparse_datatype_i8_r:
                 case rocsparse_datatype_u8_r:
                 case rocsparse_datatype_i32_r:
                 case rocsparse_datatype_u32_r:
-                case rocsparse_datatype_f16_r:
-                case rocsparse_datatype_bf16_r:
                 {
                     RETURN_IF_ROCSPARSE_ERROR(rocsparse_status_not_implemented);
                 }
@@ -539,7 +553,7 @@ namespace rocsparse
         {
             switch(jtype)
             {
-            case rocsparse_indextype_u16:
+            case deprecated_rocsparse_indextype_u16:
             {
                 RETURN_IF_ROCSPARSE_ERROR(rocsparse_status_not_implemented);
             }
@@ -573,12 +587,23 @@ namespace rocsparse
                             params...)));
                     return rocsparse_status_success;
                 }
+                case rocsparse_datatype_f16_r:
+                {
+                    RETURN_IF_ROCSPARSE_ERROR(
+                        (rocsparse::spgemm_template<int64_t, int32_t, _Float16>(params...)));
+                    return rocsparse_status_success;
+                }
+                case rocsparse_datatype_bf16_r:
+                {
+                    RETURN_IF_ROCSPARSE_ERROR(
+                        (rocsparse::spgemm_template<int64_t, int32_t, rocsparse_bfloat16>(
+                            params...)));
+                    return rocsparse_status_success;
+                }
                 case rocsparse_datatype_i8_r:
                 case rocsparse_datatype_u8_r:
                 case rocsparse_datatype_i32_r:
                 case rocsparse_datatype_u32_r:
-                case rocsparse_datatype_f16_r:
-                case rocsparse_datatype_bf16_r:
                 {
                     RETURN_IF_ROCSPARSE_ERROR(rocsparse_status_not_implemented);
                 }
@@ -614,12 +639,23 @@ namespace rocsparse
                             params...)));
                     return rocsparse_status_success;
                 }
+                case rocsparse_datatype_f16_r:
+                {
+                    RETURN_IF_ROCSPARSE_ERROR(
+                        (rocsparse::spgemm_template<int64_t, int64_t, _Float16>(params...)));
+                    return rocsparse_status_success;
+                }
+                case rocsparse_datatype_bf16_r:
+                {
+                    RETURN_IF_ROCSPARSE_ERROR(
+                        (rocsparse::spgemm_template<int64_t, int64_t, rocsparse_bfloat16>(
+                            params...)));
+                    return rocsparse_status_success;
+                }
                 case rocsparse_datatype_i8_r:
                 case rocsparse_datatype_u8_r:
                 case rocsparse_datatype_i32_r:
                 case rocsparse_datatype_u32_r:
-                case rocsparse_datatype_f16_r:
-                case rocsparse_datatype_bf16_r:
                 {
                     RETURN_IF_ROCSPARSE_ERROR(rocsparse_status_not_implemented);
                 }
@@ -689,6 +725,11 @@ namespace rocsparse
         ROCSPARSE_CHECKARG(5, B, (B->init == false), rocsparse_status_not_initialized);
         ROCSPARSE_CHECKARG(7, D, (D->init == false), rocsparse_status_not_initialized);
         ROCSPARSE_CHECKARG(8, C, (C->init == false), rocsparse_status_not_initialized);
+
+        ROCSPARSE_CHECKARG(4, A, (A->batch_count != 1), rocsparse_status_not_implemented);
+        ROCSPARSE_CHECKARG(5, B, (B->batch_count != 1), rocsparse_status_not_implemented);
+        ROCSPARSE_CHECKARG(7, D, (D->batch_count != 1), rocsparse_status_not_implemented);
+        ROCSPARSE_CHECKARG(8, C, (C->batch_count != 1), rocsparse_status_not_implemented);
 
         ROCSPARSE_CHECKARG(5, B, (B->format != A->format), rocsparse_status_not_implemented);
         ROCSPARSE_CHECKARG(7, D, (D->format != A->format), rocsparse_status_not_implemented);

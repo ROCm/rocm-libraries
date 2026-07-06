@@ -38,46 +38,62 @@ inline __device__ T rocblas_sbmv_kernel_helper(rocblas_int ty,
                                                const T* __restrict__ x,
                                                int64_t incx)
 {
-    T           res_A = 0.0;
-    rocblas_int col;
+    T res_A = 0.0;
 
-    // Since the column is consistent, we iterate up diagonally in banded format
-    // ty defines the column of banded matrix
-    for(col = ty; col < n; col += DIM_Y)
+    if(ind >= n)
+        return res_A;
+
+    // key_point serves two purposes:
+    // 1. Marks the column-wise turning point (ty = key_point) in the banded matrix.
+    // 2. Marks the row-wise turning point (ty = key_point) in the banded matrix.
+    rocblas_int key_point = min(k, ind);
+
+    rocblas_int ind_row  = UPPER ? max(k - ind, 0) : min(k, ind);
+    rocblas_int ind_col  = UPPER ? ind : max(ind - k, 0);
+    rocblas_int ind_xcol = ind < k ? 0 : ind - k;
+
+    rocblas_int invaliad_right = max((n - (k + 1) - ind), 0);
+    rocblas_int invaliad_left  = max(ind - k, 0);
+    rocblas_int valiad_num     = n - (invaliad_right + invaliad_left);
+
+    for(rocblas_int xcol = ind_xcol + ty; ty < valiad_num; ty += DIM_Y, xcol += DIM_Y)
     {
-        // We have to convert ind to banded matrix row
-        rocblas_int row = UPPER ? ind + (k - col) : ind - col;
-
-        if(ind < n)
-        {
-            if((ind <= col && UPPER) || (ind >= col && !UPPER))
-            {
-                // in upper/lower triangular part
-                if(row <= k && row >= 0)
-                {
-                    res_A += A[row + col * size_t(lda)] * x[col * incx];
-                }
-            }
-            else
-            {
-                // in the opposite triangle, get value at transposed position
-                rocblas_int trans_row = col;
-                rocblas_int trans_col = ind;
-                trans_row             = UPPER ? trans_row + (k - trans_col) : trans_row - trans_col;
-                if(trans_row <= k && trans_row >= 0)
-                {
-                    res_A += A[trans_row + trans_col * size_t(lda)] * x[col * incx];
-                }
-            }
-        }
+        rocblas_int row = ty < key_point ? (UPPER ? ind_row + ty : ind_row - ty)
+                                         : (UPPER ? k - (ty - key_point) : ty - key_point);
+        rocblas_int col = ty < key_point
+                              ? (UPPER ? ind_col : ind_col + ty)
+                              : (UPPER ? ind_col + (ty - key_point) : ind_col + key_point);
+        res_A += A[col * size_t(lda) + row] * x[xcol * int64_t(incx)];
     }
+
     return res_A;
 }
 
 /**
-  *  Computes y := alpha*A*x + beta*y where A is a symmetric matrix.
+  *  Computes y := alpha*A*x + beta*y where A is a symmetric banded matrix.
   *  If uplo == upper, the strictly lower part of A is not referenced,
   *  if uplo == lower, the strictly upper part of A is not referenced.
+  * 
+  *  Ex: (n = 6; k = 2)
+  * 
+  *  uplo == upper:
+  * 
+  *  a11 a12 a13  .   .   .              .   .  a13 a24 a35 a46
+  *  a12 a22 a23 a24  .   .              .  a12 a23 a34 a45 a56
+  *  a13 a23 a33 a34 a35  .     upper   a11 a22 a33 a44 a55 a66  <- main diag
+  *   .  a24 a34 a44 a45 a46    ---->    .   .   .   .   .   .
+  *   .   .  a35 a45 a55 a56             .   .   .   .   .   .
+  *   .   .   .  a46 a56 a66             .   .   .   .   .   .
+  * 
+  *  uplo == lower:
+  * 
+  *  a11 a12 a13  .   .   .             a11 a22 a33 a44 a55 a66  <- main diag
+  *  a12 a22 a23 a24  .   .             a12 a23 a34 a45 a56  .
+  *  a13 a23 a33 a34 a35  .     lower   a13 a24 a35 a46  .   .
+  *   .  a24 a34 a44 a45 a46    ---->    .   .   .   .   .   .
+  *   .   .  a35 a45 a55 a56             .   .   .   .   .   .
+  *   .   .   .  a46 a56 a66             .   .   .   .   .   .
+  * 
   */
 template <bool UPPER, rocblas_int DIM_X, rocblas_int DIM_Y, typename T>
 inline __device__ void rocblas_sbmv_kernel_calc(rocblas_int n,
@@ -163,20 +179,14 @@ rocblas_sbmv_kernel(rocblas_int    n,
 
     uint32_t batch = blockIdx.z;
 
-#if DEVICE_GRID_YZ_16BIT
     for(; batch < batch_count; batch += c_YZ_grid_launch_limit)
     {
-#endif
 
         auto alpha = load_scalar(alpha_device_host, batch, stride_alpha);
         auto beta  = load_scalar(beta_device_host, batch, stride_beta);
         if(!alpha && beta == 1)
         {
-#if DEVICE_GRID_YZ_16BIT
-            continue; //iterate to the next batch in the for loop rather than return.
-#else
-        return;
-#endif
+            continue;
         }
 
         const auto* A = cond_load_ptr_batch(alpha, Aa, batch, shifta, stride_A);
@@ -185,10 +195,7 @@ rocblas_sbmv_kernel(rocblas_int    n,
         auto* y = load_ptr_batch(ya, batch, shifty, stride_y);
 
         rocblas_sbmv_kernel_calc<UPPER, DIM_X, DIM_Y>(n, k, alpha, A, lda, x, incx, beta, y, incy);
-
-#if DEVICE_GRID_YZ_16BIT
     }
-#endif
 }
 
 template <typename T, typename TScal, typename TConstPtr, typename TPtr>

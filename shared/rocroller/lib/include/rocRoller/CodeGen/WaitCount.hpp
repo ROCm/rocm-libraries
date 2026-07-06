@@ -1,28 +1,5 @@
-/*******************************************************************************
- *
- * MIT License
- *
- * Copyright 2021-2025 AMD ROCm(TM) Software
- *
- * Permission is hereby granted, free of charge, to any person obtaining a copy
- * of this software and associated documentation files (the "Software"), to deal
- * in the Software without restriction, including without limitation the rights
- * to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
- * copies of the Software, and to permit persons to whom the Software is
- * furnished to do so, subject to the following conditions:
- *
- * The above copyright notice and this permission notice shall be included in
- * all copies or substantial portions of the Software.
- *
- * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
- * IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
- * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
- * AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
- * LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
- * OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
- * SOFTWARE.
- *
- *******************************************************************************/
+// Copyright Advanced Micro Devices, Inc., or its affiliates.
+// SPDX-License-Identifier: MIT
 
 #pragma once
 
@@ -31,6 +8,7 @@
 
 #include <rocRoller/GPUArchitecture/GPUArchitecture.hpp>
 #include <rocRoller/GPUArchitecture/GPUInstructionInfo.hpp>
+#include <rocRoller/Utilities/EnumBitset.hpp>
 #include <rocRoller/Utilities/Settings_fwd.hpp>
 
 namespace rocRoller
@@ -55,15 +33,24 @@ namespace rocRoller
                   int                    vscnt,
                   int                    dscnt,
                   int                    kmcnt,
-                  int                    expcnt);
-        WaitCount(GPUArchitecture const& arch, GPUWaitQueue, int count);
+                  int                    expcnt,
+                  int                    tensorcnt);
+
+        /// Issues a waitcnt with the given count for the given queue.
+        WaitCount(GPUArchitecture const& arch, GPUWaitQueue queueForCount, int count);
+
+        /// Instructs the WaitcntObserver to sync the given queues.
+        WaitCount(GPUArchitecture const&       arch,
+                  EnumBitset<GPUWaitQueueType> queuesToSync,
+                  std::string const&           message = "");
 
         ~WaitCount() = default;
 
         bool operator==(WaitCount const& a) const
         {
             return a.m_loadcnt == m_loadcnt && a.m_storecnt == m_storecnt && a.m_vscnt == m_vscnt
-                   && a.m_dscnt == m_dscnt && a.m_kmcnt == m_kmcnt && a.m_expcnt == m_expcnt;
+                   && a.m_dscnt == m_dscnt && a.m_kmcnt == m_kmcnt && a.m_expcnt == m_expcnt
+                   && a.m_tensorcnt == m_tensorcnt;
         }
         bool operator!=(WaitCount const& a) const
         {
@@ -82,10 +69,27 @@ namespace rocRoller
             KMCnt(GPUArchitecture const& arch, int value, std::string const& message = "");
         static WaitCount
             EXPCnt(GPUArchitecture const& arch, int value, std::string const& message = "");
+        static WaitCount
+            TensorCnt(GPUArchitecture const& arch, int value, std::string const& message = "");
 
         static WaitCount Zero(GPUArchitecture const& arch, std::string const& message = " ");
 
         static WaitCount Max(GPUArchitecture const& arch, std::string const& message = " ");
+
+        /**
+         * This means to empty the specified queue, i.e. include a waitcount of 0 if that queue
+         * is not empty.
+         */
+        static WaitCount SyncQueue(GPUArchitecture const& arch,
+                                   GPUWaitQueueType       queue,
+                                   std::string const&     message = "");
+        /**
+         * This means to empty the specified queues, i.e. include a waitcount of 0 if any of the
+         * specified queues are not empty.
+         */
+        static WaitCount SyncQueues(GPUArchitecture const&       arch,
+                                    EnumBitset<GPUWaitQueueType> queues,
+                                    std::string const&           message = "");
 
         std::string toString(LogLevel level) const;
         void        toStream(std::ostream& os, LogLevel level) const;
@@ -100,6 +104,7 @@ namespace rocRoller
         int dscnt() const;
         int kmcnt() const;
         int expcnt() const;
+        int tensorcnt() const;
 
         /**
          * vmcnt is the combination of loadcnt and storecnt for non-split counters
@@ -114,6 +119,7 @@ namespace rocRoller
         void setDScnt(int value);
         void setKMcnt(int value);
         void setExpcnt(int value);
+        void setTensorcnt(int value);
 
         WaitCount& combineLoadcnt(int value);
         WaitCount& combineStorecnt(int value);
@@ -121,6 +127,7 @@ namespace rocRoller
         WaitCount& combineDScnt(int value);
         WaitCount& combineKMcnt(int value);
         WaitCount& combineExpcnt(int value);
+        WaitCount& combineTensorcnt(int value);
 
         std::vector<std::string> const& comments() const;
 
@@ -129,6 +136,8 @@ namespace rocRoller
 
         WaitCount getAsSaturatedWaitCount(GPUArchitecture const& arch) const;
 
+        EnumBitset<GPUWaitQueueType> const& queuesToSync() const;
+
     private:
         /**
          * -1 means don't care.
@@ -136,18 +145,22 @@ namespace rocRoller
          * On machines without separate vscnt, the vscnt field should not be used.
          *
          */
-        int m_loadcnt  = -1;
-        int m_storecnt = -1;
-        int m_vscnt    = -1;
-        int m_dscnt    = -1;
-        int m_kmcnt    = -1;
-        int m_expcnt   = -1;
+        int m_loadcnt   = -1;
+        int m_storecnt  = -1;
+        int m_vscnt     = -1;
+        int m_dscnt     = -1;
+        int m_kmcnt     = -1;
+        int m_expcnt    = -1;
+        int m_tensorcnt = -1;
 
         std::vector<std::string> m_comments;
 
         bool m_isSplitCounter = false;
         bool m_hasVSCnt       = false;
         bool m_hasEXPCnt      = false;
+        bool m_hasTensorCnt   = false;
+
+        EnumBitset<GPUWaitQueueType> m_queuesToSync;
     };
 
     std::ostream& operator<<(std::ostream& stream, WaitCount const& wait);

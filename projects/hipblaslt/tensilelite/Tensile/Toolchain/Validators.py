@@ -28,7 +28,7 @@ import re
 from pathlib import Path
 from typing import List, NamedTuple, Union
 
-from Tensile.Common.Utilities import isRhel8
+from Tensile.Common.Utilities import isRhel8, print2
 
 DEFAULT_ROCM_BIN_PATH_POSIX = Path("/opt/rocm/bin")
 DEFAULT_ROCM_LLVM_BIN_PATH_POSIX = Path("/opt/rocm/lib/llvm/bin")
@@ -114,10 +114,11 @@ def _posixSearchPaths() -> List[Path]:
 
 
 class ToolchainDefaults(NamedTuple):
+    inFFMEnv = os.environ.get("HSA_MODEL_MEMFILE", "") != ""
     CXX_COMPILER = osSelect(linux="amdclang++", windows="clang++.exe")
     C_COMPILER = osSelect(linux="amdclang", windows="clang.exe")
     OFFLOAD_BUNDLER = osSelect(linux="clang-offload-bundler", windows="clang-offload-bundler.exe")
-    DEVICE_ENUMERATOR = osSelect(linux="rocm_agent_enumerator" if isRhel8() else "amdgpu-arch", windows="hipinfo")
+    DEVICE_ENUMERATOR = osSelect(linux="rocm_agent_enumerator" if isRhel8() or inFFMEnv else "amdgpu-arch", windows="hipinfo")
     ASSEMBLER = osSelect(linux="amdclang++", windows="clang++.exe")
     HIP_CONFIG = osSelect(linux="hipconfig", windows="hipconfig.exe")
 
@@ -220,6 +221,8 @@ def _validateExecutable(file: str, searchPaths: List[Path]) -> str:
     Returns:
         The validated executable with an absolute path.
     """
+    print2(f"Validating {file}")
+
     if not any((
         supportedCxxCompiler(file),
         supportedCCompiler(file),
@@ -230,8 +233,10 @@ def _validateExecutable(file: str, searchPaths: List[Path]) -> str:
         raise ValueError(f"`{file}` is not a supported toolchain component on {'Windows' if os.name == 'nt' else 'Linux'}")
 
     # Check if the file is an absolute path and executable
-    if _exeExists(Path(file)):
-        return file
+    if Path(file).is_absolute():
+        if _exeExists(Path(file)):
+            return file
+        raise FileNotFoundError(f"`{file}` either not found or not executable")
 
     # Then check the search paths
     files = _windowsWithExtensions(file) if os.name == "nt" else [file]
@@ -243,7 +248,7 @@ def _validateExecutable(file: str, searchPaths: List[Path]) -> str:
     raise FileNotFoundError(f"`{file}` either not found or not executable in any search path: {':'.join(map(str, searchPaths))}")
 
 
-def validateToolchain(*args: str) :
+def validateToolchain(*args: str):
     """
     Validate that the given toolchain components are in the PATH and executable,
     returning the absolute path to each.

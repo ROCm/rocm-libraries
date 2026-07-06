@@ -1,4 +1,4 @@
-// Copyright (c) 2017-2025 Advanced Micro Devices, Inc. All rights reserved.
+// Copyright (c) 2017-2026 Advanced Micro Devices, Inc. All rights reserved.
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -30,6 +30,7 @@
 #include "../functional.hpp"
 
 #include "detail/warp_sort_shuffle.hpp"
+#include "rocprim/intrinsics/arch.hpp"
 
 /// \addtogroup warpmodule
 /// @{
@@ -69,6 +70,8 @@ BEGIN_ROCPRIM_NAMESPACE
 /// Every thread within the warp uses the warp_sort class by first specializing the
 /// warp_sort type, and instantiating an object that will be used to invoke a
 /// member function.
+///
+/// The full example is [on GitHub](https://github.com/ROCm/rocm-libraries/tree/develop/projects/rocprim/example/rocprim/warp/example_warp_sort.cpp).
 ///
 /// \code{.cpp}
 /// __global__ void example_kernel(...)
@@ -144,10 +147,7 @@ public:
         {
             if(VirtualWaveSize > ::rocprim::arch::wavefront::size())
             {
-                ROCPRIM_PRINT_ERROR_ONCE(
-                    "Specified warp size exceeds current hardware supported warp "
-                    "size. Aborting warp sort.");
-                return;
+                __builtin_trap(); // behavior undefined if virtual wave size exceeds hardware limit
             }
         }
         base_type::sort(thread_key, compare_function);
@@ -162,9 +162,7 @@ public:
         typename std::enable_if<(FunctionVirtualWaveSize > arch::wavefront::max_size()), void>::type
     {
         (void)compare_function; // disables unused parameter warning
-        ROCPRIM_PRINT_ERROR_ONCE("Specified warp size exceeds current hardware supported warp "
-                                 "size. Aborting warp sort.");
-        return;
+        __builtin_trap(); // behavior undefined if virtual wave size exceeds hardware limit
     }
 
     /// \brief Warp sort for any data type.
@@ -190,10 +188,7 @@ public:
         {
             if(VirtualWaveSize > ::rocprim::arch::wavefront::size())
             {
-                ROCPRIM_PRINT_ERROR_ONCE(
-                    "Specified warp size exceeds current hardware supported warp "
-                    "size. Aborting warp sort.");
-                return;
+                __builtin_trap(); // behavior undefined if virtual wave size exceeds hardware limit
             }
         }
         base_type::sort(thread_keys, compare_function);
@@ -211,9 +206,7 @@ public:
     {
         (void)thread_keys; // disables unused parameter warning
         (void)compare_function; // disables unused parameter warning
-        ROCPRIM_PRINT_ERROR_ONCE("Specified warp size exceeds current hardware supported warp "
-                                 "size. Aborting warp sort.");
-        return;
+        __builtin_trap(); // behavior undefined if virtual wave size exceeds hardware limit
     }
 
     /// \brief Warp sort for any data type using temporary storage.
@@ -257,10 +250,7 @@ public:
         {
             if(VirtualWaveSize > ::rocprim::arch::wavefront::size())
             {
-                ROCPRIM_PRINT_ERROR_ONCE(
-                    "Specified warp size exceeds current hardware supported warp "
-                    "size. Aborting warp sort.");
-                return;
+                __builtin_trap(); // behavior undefined if virtual wave size exceeds hardware limit
             }
         }
         base_type::sort(
@@ -277,9 +267,7 @@ public:
         typename std::enable_if<(FunctionVirtualWaveSize > arch::wavefront::max_size()), void>::type
     {
         (void)compare_function; // disables unused parameter warning
-        ROCPRIM_PRINT_ERROR_ONCE("Specified warp size exceeds current hardware supported warp "
-                                 "size. Aborting warp sort.");
-        return;
+        __builtin_trap(); // behavior undefined if virtual wave size exceeds hardware limit
     }
 
     /// \brief Warp sort for any data type using temporary storage.
@@ -324,10 +312,7 @@ public:
         {
             if(VirtualWaveSize > ::rocprim::arch::wavefront::size())
             {
-                ROCPRIM_PRINT_ERROR_ONCE(
-                    "Specified warp size exceeds current hardware supported warp "
-                    "size. Aborting warp sort.");
-                return;
+                __builtin_trap(); // behavior undefined if virtual wave size exceeds hardware limit
             }
         }
         base_type::sort(
@@ -348,9 +333,7 @@ public:
     {
         (void)thread_keys; // disables unused parameter warning
         (void)compare_function; // disables unused parameter warning
-        ROCPRIM_PRINT_ERROR_ONCE("Specified warp size exceeds current hardware supported warp "
-                                 "size. Aborting warp sort.");
-        return;
+        __builtin_trap(); // behavior undefined if virtual wave size exceeds hardware limit
     }
 
     /// \brief Warp sort by key for any data type.
@@ -377,10 +360,7 @@ public:
         {
             if(VirtualWaveSize > ::rocprim::arch::wavefront::size())
             {
-                ROCPRIM_PRINT_ERROR_ONCE(
-                    "Specified warp size exceeds current hardware supported warp "
-                    "size. Aborting warp sort.");
-                return;
+                __builtin_trap(); // behavior undefined if virtual wave size exceeds hardware limit
             }
         }
         base_type::sort(
@@ -397,9 +377,7 @@ public:
         typename std::enable_if<(FunctionVirtualWaveSize > arch::wavefront::max_size()), void>::type
     {
         (void)compare_function; // disables unused parameter warning
-        ROCPRIM_PRINT_ERROR_ONCE("Specified warp size exceeds current hardware supported warp "
-                                 "size. Aborting warp sort.");
-        return;
+        __builtin_trap(); // behavior undefined if virtual wave size exceeds hardware limit
     }
 
     /// \brief Warp sort by key for any data type.
@@ -427,10 +405,7 @@ public:
         {
             if(VirtualWaveSize > ::rocprim::arch::wavefront::size())
             {
-                ROCPRIM_PRINT_ERROR_ONCE(
-                    "Specified warp size exceeds current hardware supported warp "
-                    "size. Aborting warp sort.");
-                return;
+                __builtin_trap(); // behavior undefined if virtual wave size exceeds hardware limit
             }
         }
         base_type::sort(
@@ -452,9 +427,7 @@ public:
         (void)thread_keys; // disables unused parameter warning
         (void)thread_values; // disables unused parameter warning
         (void)compare_function; // disables unused parameter warning
-        ROCPRIM_PRINT_ERROR_ONCE("Specified warp size exceeds current hardware supported warp "
-                                 "size. Aborting warp sort.");
-        return;
+        __builtin_trap(); // behavior undefined if virtual wave size exceeds hardware limit
     }
 
     /// \brief Warp sort by key for any data type using temporary storage.
@@ -500,10 +473,7 @@ public:
         {
             if(VirtualWaveSize > ::rocprim::arch::wavefront::size())
             {
-                ROCPRIM_PRINT_ERROR_ONCE(
-                    "Specified warp size exceeds current hardware supported warp "
-                    "size. Aborting warp sort.");
-                return;
+                __builtin_trap(); // behavior undefined if virtual wave size exceeds hardware limit
             }
         }
         base_type::sort(
@@ -520,9 +490,7 @@ public:
         typename std::enable_if<(FunctionVirtualWaveSize > arch::wavefront::max_size()), void>::type
     {
         (void)compare_function; // disables unused parameter warning
-        ROCPRIM_PRINT_ERROR_ONCE("Specified warp size exceeds current hardware supported warp "
-                                 "size. Aborting warp sort.");
-        return;
+        __builtin_trap(); // behavior undefined if virtual wave size exceeds hardware limit
     }
 
     /// \brief Warp sort by key for any data type using temporary storage.
@@ -569,10 +537,7 @@ public:
         {
             if(VirtualWaveSize > ::rocprim::arch::wavefront::size())
             {
-                ROCPRIM_PRINT_ERROR_ONCE(
-                    "Specified warp size exceeds current hardware supported warp "
-                    "size. Aborting warp sort.");
-                return;
+                __builtin_trap(); // behavior undefined if virtual wave size exceeds hardware limit
             }
         }
         base_type::sort(
@@ -595,11 +560,38 @@ public:
         (void)thread_keys; // disables unused parameter warning
         (void)thread_values; // disables unused parameter warning
         (void)compare_function; // disables unused parameter warning
-        ROCPRIM_PRINT_ERROR_ONCE("Specified warp size exceeds current hardware supported warp "
-                                 "size. Aborting warp sort.");
-        return;
+        __builtin_trap(); // behavior undefined if virtual wave size exceeds hardware limit
     }
 };
+
+#ifndef DOXYGEN_SHOULD_SKIP_THIS
+
+template<class Key, unsigned int VirtualWaveSize, class Value>
+class warp_sort<Key, VirtualWaveSize, Value, ::rocprim::arch::wavefront::target::dynamic>
+{
+private:
+    using warp_sort_32
+        = warp_sort<Key, VirtualWaveSize, Value, ::rocprim::arch::wavefront::target::size32>;
+
+    using warp_sort_64
+        = warp_sort<Key, VirtualWaveSize, Value, ::rocprim::arch::wavefront::target::size64>;
+
+    using dispatch = ::rocprim::detail::dispatch_wave_size<warp_sort_32, warp_sort_64>;
+
+public:
+    using storage_type = typename dispatch::storage_type;
+
+    template<typename... Args>
+    ROCPRIM_DEVICE ROCPRIM_INLINE
+    auto sort(Args&&... args)
+    {
+        dispatch{}([](auto impl, auto&&... args)
+                   { impl.sort(std::forward<decltype(args)>(args)...); },
+                   std::forward<Args>(args)...);
+    }
+};
+
+#endif
 
 END_ROCPRIM_NAMESPACE
 

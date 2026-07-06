@@ -1,28 +1,5 @@
-/*******************************************************************************
- *
- * MIT License
- *
- * Copyright 2024-2025 AMD ROCm(TM) Software
- *
- * Permission is hereby granted, free of charge, to any person obtaining a copy
- * of this software and associated documentation files (the "Software"), to deal
- * in the Software without restriction, including without limitation the rights
- * to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
- * copies of the Software, and to permit persons to whom the Software is
- * furnished to do so, subject to the following conditions:
- *
- * The above copyright notice and this permission notice shall be included in
- * all copies or substantial portions of the Software.
- *
- * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
- * IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
- * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
- * AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
- * LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
- * OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
- * SOFTWARE.
- *
- *******************************************************************************/
+// Copyright Advanced Micro Devices, Inc., or its affiliates.
+// SPDX-License-Identifier: MIT
 
 /**
  */
@@ -165,7 +142,10 @@ namespace rocRoller
         std::array<unsigned int, 3> const&              workgroupSize() const;
         Expression::ExpressionPtr                       workgroupCount(size_t index);
         std::array<Expression::ExpressionPtr, 3> const& workitemCount() const;
-        Expression::ExpressionPtr const&                dynamicSharedMemBytes() const;
+
+        std::optional<std::array<unsigned int, 3>> const& workgroupClusterSize() const;
+
+        Expression::ExpressionPtr const& dynamicSharedMemBytes() const;
 
         void setWorkgroupSize(std::array<unsigned int, 3> const& val);
         void setWorkitemCount(std::array<Expression::ExpressionPtr, 3> const& val);
@@ -173,6 +153,8 @@ namespace rocRoller
         void setKernelGraphMeta(KernelGraph::KernelGraphPtr graph);
         void setCommandMeta(CommandPtr graph);
         void setWavefrontSize(int);
+
+        void setWorkgroupClusterSize(std::array<unsigned int, 3> const& val);
 
         std::array<Register::ValuePtr, 3> const& workgroupIndex() const;
         std::array<Register::ValuePtr, 3> const& workitemIndex() const;
@@ -228,8 +210,21 @@ namespace rocRoller
 
         int m_wavefrontSize = 64;
 
+        std::optional<std::array<unsigned int, 3>> m_workgroupClusterSize;
+
         KernelGraph::KernelGraphPtr m_kernelGraph;
         CommandPtr                  m_command;
+
+        int                m_preloadedRegOffset = 0;
+        int                m_numPreloadedRegs   = 0;
+        Register::ValuePtr m_preloadedArgs;
+
+        // In case context is not available
+        // Context does not get serialized but sometimes we need these values after serialization
+        std::optional<int> m_sgprCount;
+        std::optional<int> m_vgprCount;
+        std::optional<int> m_agprCount;
+        std::optional<int> m_group_segment_fixed_size;
     };
 
     struct AssemblyKernels
@@ -241,6 +236,7 @@ namespace rocRoller
         std::vector<AssemblyKernel> kernels;
 
         static AssemblyKernels fromYAML(std::string const& str);
+        static AssemblyKernels fromELF(std::string const& filename);
     };
 }
 

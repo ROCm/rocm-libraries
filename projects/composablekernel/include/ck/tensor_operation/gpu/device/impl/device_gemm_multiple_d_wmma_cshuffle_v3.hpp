@@ -1,5 +1,5 @@
+// Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
 // SPDX-License-Identifier: MIT
-// Copyright (c) 2025, Advanced Micro Devices, Inc. All rights reserved.
 
 #pragma once
 
@@ -18,6 +18,10 @@
 #include "ck/host_utility/flush_cache.hpp"
 #include "ck/tensor_operation/gpu/device/impl/device_gemm_wmma_cshuffle_v3_common.hpp"
 
+#if __clang_major__ >= 23
+#pragma clang diagnostic push
+#pragma clang diagnostic ignored "-Wlifetime-safety-intra-tu-suggestions"
+#endif
 namespace ck {
 namespace tensor_operation {
 namespace device {
@@ -193,8 +197,8 @@ struct DeviceGemmMultipleD_Wmma_CShuffleV3
         BLayout,
         DsLayout,
         ELayout,
-        ADataType,
-        BDataType,
+        Tuple<ADataType>,
+        Tuple<BDataType>,
         AccDataType,
         CShuffleDataType,
         DsDataType,
@@ -244,8 +248,8 @@ struct DeviceGemmMultipleD_Wmma_CShuffleV3
 
     using DeviceGemmCommon =
         DeviceGemm_Wmma_CShuffleV3_Common<GridwiseGemm,
-                                          ADataType,
-                                          BDataType,
+                                          Tuple<ADataType>,
+                                          Tuple<BDataType>,
                                           DsDataType,
                                           EDataType,
                                           MPerBlock,
@@ -291,15 +295,15 @@ struct DeviceGemmMultipleD_Wmma_CShuffleV3
                              BElementwiseOperation b_element_op,
                              CDEElementwiseOperation cde_element_op)
     {
-        return Argument{static_cast<const ADataType*>(p_a),
-                        static_cast<const BDataType*>(p_b),
+        return Argument{std::array<const void*, 1>{p_a},
+                        std::array<const void*, 1>{p_b},
                         p_ds,
                         static_cast<EDataType*>(p_e),
                         M,
                         N,
                         K,
-                        StrideA,
-                        StrideB,
+                        std::array<index_t, 1>{StrideA},
+                        std::array<index_t, 1>{StrideB},
                         StrideDs,
                         StrideE,
                         KBatch,
@@ -328,15 +332,15 @@ struct DeviceGemmMultipleD_Wmma_CShuffleV3
                         BElementwiseOperation b_element_op,
                         CDEElementwiseOperation cde_element_op) override
     {
-        return std::make_unique<Argument>(static_cast<const ADataType*>(p_a),
-                                          static_cast<const BDataType*>(p_b),
+        return std::make_unique<Argument>(std::array<const void*, 1>{p_a},
+                                          std::array<const void*, 1>{p_b},
                                           p_ds,
                                           static_cast<EDataType*>(p_e),
                                           M,
                                           N,
                                           K,
-                                          StrideA,
-                                          StrideB,
+                                          std::array<index_t, 1>{StrideA},
+                                          std::array<index_t, 1>{StrideB},
                                           StrideDs,
                                           StrideE,
                                           KBatch,
@@ -408,3 +412,6 @@ struct DeviceGemmMultipleD_Wmma_CShuffleV3
 } // namespace device
 } // namespace tensor_operation
 } // namespace ck
+#if __clang_major__ >= 23
+#pragma clang diagnostic pop
+#endif

@@ -221,6 +221,11 @@ hipblasAtomicsMode_t
 ---------------------
 .. doxygenenum:: hipblasAtomicsMode_t
 
+hipblasLibraryProperty_t
+---------------------
+.. doxygenenum:: hipblasLibraryProperty_t
+
+
 *****************
 hipBLAS functions
 *****************
@@ -1842,6 +1847,18 @@ hipblasGemmEx + Batched, StridedBatched
 
 The ``gemmEx``, ``gemmBatchedEx``, and ``gemmStridedBatchedEx`` functions support the 64-bit integer interface. See the :ref:`ILP64 API` section.
 
+.. _hipblas_syrkex:
+
+hipblasSyrkEx
+------------------------------------------
+.. doxygenfunction:: hipblasSyrkEx
+
+.. _hipblas_herkex:
+   
+hipblasHerkEx
+------------------------------------------
+.. doxygenfunction:: hipblasHerkEx
+
 .. _hipblas_trsmex:
 
 hipblasTrsmEx + Batched, StridedBatched
@@ -2146,6 +2163,30 @@ hipblasGetAtomicsMode
 ----------------------
 .. doxygenfunction:: hipblasGetAtomicsMode
 
+hipblasSetBatchAlphaStride
+---------------------------
+.. doxygenfunction:: hipblasSetBatchAlphaStride
+
+hipblasGetBatchAlphaStride
+---------------------------
+.. doxygenfunction:: hipblasGetBatchAlphaStride
+
+hipblasSetBatchBetaStride
+--------------------------
+.. doxygenfunction:: hipblasSetBatchBetaStride
+
+hipblasGetBatchBetaStride
+--------------------------
+.. doxygenfunction:: hipblasGetBatchBetaStride
+
 hipblasStatusToString
 ----------------------
 .. doxygenfunction:: hipblasStatusToString
+
+hipblasGetVersion
+----------------------
+.. doxygenfunction:: hipblasGetVersion
+
+hipblasGetProperty
+----------------------
+.. doxygenfunction:: hipblasGetProperty

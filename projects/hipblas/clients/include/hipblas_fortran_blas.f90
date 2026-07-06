@@ -184,6 +184,54 @@ function hipblasGetAtomicsModeFortran(handle, atomics_mode) &
         hipblasGetAtomicsMode(handle, atomics_mode)
 end function hipblasGetAtomicsModeFortran
 
+function hipblasSetBatchAlphaStrideFortran(handle, alpha_stride) &
+    bind(c, name='hipblasSetBatchAlphaStrideFortran')
+    use iso_c_binding
+    use hipblas_enums
+    implicit none
+    integer(kind(HIPBLAS_STATUS_SUCCESS)) :: hipblasSetBatchAlphaStrideFortran
+    type(c_ptr), value :: handle
+    integer(c_int64_t), value :: alpha_stride
+            hipblasSetBatchAlphaStrideFortran = &
+        hipblasSetBatchAlphaStride(handle, alpha_stride)
+end function hipblasSetBatchAlphaStrideFortran
+
+function hipblasGetBatchAlphaStrideFortran(handle, alpha_stride) &
+    bind(c, name='hipblasGetBatchAlphaStrideFortran')
+    use iso_c_binding
+    use hipblas_enums
+    implicit none
+    integer(kind(HIPBLAS_STATUS_SUCCESS)) :: hipblasGetBatchAlphaStrideFortran
+    type(c_ptr), value :: handle
+    type(c_ptr), value :: alpha_stride
+            hipblasGetBatchAlphaStrideFortran = &
+        hipblasGetBatchAlphaStride(handle, alpha_stride)
+end function hipblasGetBatchAlphaStrideFortran
+
+function hipblasSetBatchBetaStrideFortran(handle, beta_stride) &
+    bind(c, name='hipblasSetBatchBetaStrideFortran')
+    use iso_c_binding
+    use hipblas_enums
+    implicit none
+    integer(kind(HIPBLAS_STATUS_SUCCESS)) :: hipblasSetBatchBetaStrideFortran
+    type(c_ptr), value :: handle
+    integer(c_int64_t), value :: beta_stride
+            hipblasSetBatchBetaStrideFortran = &
+        hipblasSetBatchBetaStride(handle, beta_stride)
+end function hipblasSetBatchBetaStrideFortran
+
+function hipblasGetBatchBetaStrideFortran(handle, beta_stride) &
+    bind(c, name='hipblasGetBatchBetaStrideFortran')
+    use iso_c_binding
+    use hipblas_enums
+    implicit none
+    integer(kind(HIPBLAS_STATUS_SUCCESS)) :: hipblasGetBatchBetaStrideFortran
+    type(c_ptr), value :: handle
+    type(c_ptr), value :: beta_stride
+            hipblasGetBatchBetaStrideFortran = &
+        hipblasGetBatchBetaStride(handle, beta_stride)
+end function hipblasGetBatchBetaStrideFortran
+
 !--------!
 ! blas 1 !
 !--------!
@@ -12604,6 +12652,59 @@ function hipblasGemmStridedBatchedExWithFlagsFortran(handle, transA, transB, m, 
                                     a, a_type, lda, stride_a, b, b_type, ldb, stride_b, beta, c, c_type, ldc, stride_c, &
                                     batch_count, compute_type, algo, flags)
 end function hipblasGemmStridedBatchedExWithFlagsFortran
+
+! syrkEx
+function hipblasSyrkExFortran(handle, uplo, transA, n, k, alpha, a, a_type, lda, &
+                                beta, c, c_type, ldc) &
+    bind(c, name='hipblasSyrkExFortran')
+    use iso_c_binding
+    use hipblas_enums
+    implicit none
+    integer(kind(HIPBLAS_STATUS_SUCCESS)) :: hipblasSyrkExFortran
+    type(c_ptr), value :: handle
+    integer(kind(HIPBLAS_FILL_MODE_UPPER)), value :: uplo
+    integer(kind(HIPBLAS_OP_N)), value :: transA
+    integer(c_int), value :: n
+    integer(c_int), value :: k
+    type(c_ptr), value :: alpha
+    type(c_ptr), value :: a
+    integer(kind(HIP_R_16F)), value :: a_type
+    integer(c_int), value :: lda
+    type(c_ptr), value :: beta
+    type(c_ptr), value :: c
+    integer(kind(HIP_R_16F)), value :: c_type
+    integer(c_int), value :: ldc
+            hipblasSyrkExFortran = &
+        hipblasSyrkEx(handle, uplo, transA, n, k, alpha, &
+                        a, a_type, lda, beta, c, c_type, ldc)
+end function hipblasSyrkExFortran
+
+! herkEx
+function hipblasHerkExFortran(handle, uplo, transA, n, k, alpha, a, a_type, lda, &
+                                beta, c, c_type, ldc, compute_type) &
+    bind(c, name='hipblasHerkExFortran')
+    use iso_c_binding
+    use hipblas_enums
+    implicit none
+    integer(kind(HIPBLAS_STATUS_SUCCESS)) :: hipblasHerkExFortran
+    type(c_ptr), value :: handle
+    integer(kind(HIPBLAS_FILL_MODE_UPPER)), value :: uplo
+    integer(kind(HIPBLAS_OP_N)), value :: transA
+    integer(c_int), value :: n
+    integer(c_int), value :: k
+    type(c_ptr), value :: alpha
+    type(c_ptr), value :: a
+    integer(kind(HIP_R_16F)), value :: a_type
+    integer(c_int), value :: lda
+    type(c_ptr), value :: beta
+    type(c_ptr), value :: c
+    integer(kind(HIP_R_16F)), value :: c_type
+    integer(c_int), value :: ldc
+    integer(kind(HIP_R_16F)), value :: compute_type
+        hipblasHerkExFortran = &
+        hipblasHerkEx(handle, uplo, transA, n, k, alpha, &
+                        a, a_type, lda, beta, c, c_type, ldc, compute_type)
+end function hipblasHerkExFortran
 
 ! trsmEx
 function hipblasTrsmExFortran(handle, side, uplo, transA, diag, m, n, alpha, A, lda, &

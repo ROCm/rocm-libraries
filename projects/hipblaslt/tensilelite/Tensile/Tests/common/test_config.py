@@ -22,185 +22,93 @@
 #
 ################################################################################
 
+"""Combined build-then-run test phase for YAML kernel configs (default mode).
+
+This module runs when neither ``--build-only`` nor ``--use-cache`` is passed.
+Two mechanisms keep it from running in split-CI mode: the
+``pytest_ignore_collect`` hook in ``conftest.py`` excludes it at collection
+time, and the test function itself calls ``pytest.skip`` if either flag is
+present (fallback for pytest versions or invocation styles where the hook is
+not called).
+
+This is the single-machine equivalent of the full split-CI workflow. It drives
+the same ``_build`` and ``_run`` helpers that live in ``test_config_build.py``
+and ``test_config_run.py``, verifying the full artifact round-trip in one
+pytest session:
+
+  1. ``_build``  — compile kernels, compress the output to a temporary artifact
+  2. wipe        — delete the build output directory
+  3. ``_run``    — extract the artifact, benchmark against the cached kernels
+  4. cleanup     — delete the temporary artifact
+
+Wiping the output between steps 1 and 3 confirms the artifact is genuinely
+self-contained and not relying on leftover build state.
+
+Each phase is launched in a subprocess so that Tensile's process-level global
+state accumulated during the build phase cannot bleed into the run phase.
+The helpers are imported by name in the child process, keeping the logic
+defined in exactly one place (the build/run modules) rather than duplicated
+here.
+"""
+
+import contextlib
 import os
-import pytest
+import shutil
 import subprocess
-import yaml
+import sys
 
-from Tensile import Tensile
-from Tensile.Common.DataType import DataType
+import py
+import pytest
 
-################################################################################
-# Locate Executables
-# rocm-smi, hip-clang, rocm_agent_enumerator
-################################################################################
-def isExe( filePath ):
-  return os.path.isfile(filePath) and os.access(filePath, os.X_OK)
+from artifact_helpers import artifact_name_for_config
 
-def locateExe( defaultPath, exeName ): # /opt/rocm/bin, hip-clang
-  # look in path first
-  for path in os.environ["PATH"].split(os.pathsep):
-    exePath = os.path.join(path, exeName)
-    if isExe(exePath):
-      return exePath
-  # look in default path second
-  exePath = os.path.join(defaultPath, exeName)
-  if isExe(exePath):
-    return exePath
-  return None
+_COMMON_DIR = os.path.dirname(os.path.abspath(__file__))
 
-def walkDict(root, path=""):
+
+def _call_helper_in_subprocess(
+    module: str,
+    func: str,
+    config: str,
+    output_dir: str,
+    artifact_dir: str,
+    tensile_args: list[str],
+) -> None:
+    """Call module.func(config, output_dir, artifact_dir, tensile_args) in a subprocess.
+
+    Each phase runs in a clean interpreter so Tensile's global state from the
+    build phase cannot bleed into the run phase (uninstalled checkout case).
+    PYTHONPATH is forwarded from sys.path so the child can import Tensile.
     """
-    Recursively walks a structure which may consist of dictionaries, lists,
-    and other objects. Yields (object, path) for each object in the
-    structure.
+    script = (
+        f"import sys; sys.path.insert(0, {repr(_COMMON_DIR)}); "
+        f"from {module} import {func}; "
+        f"{func}(sys.argv[1], sys.argv[2], sys.argv[3], sys.argv[4:])"
+    )
+    env = {**os.environ, "PYTHONPATH": os.pathsep.join(sys.path)}
+    subprocess.run(
+        [sys.executable, "-c", script, config, output_dir, artifact_dir, *tensile_args],
+        check=True,
+        env=env,
+    )
+
+
+def test_config(tensile_args: list[str], config: str, tmpdir: py.path.local, pytestconfig: pytest.Config) -> None:
+    """Pytest wrapper: run the full build→artifact→run round-trip on a single machine.
+
+    Activated in the default mode (no ``--build-only`` / ``--use-cache`` flags).
+    Requires a GPU. See the module docstring for a description of the four steps.
     """
-    yield root, path
-    if isinstance(root, dict):
-        for key, value in root.items():
-            keypath = key
-            if path != "":
-                keypath = path + "." + str(keypath)
-            yield from walkDict(value, keypath)
-    elif isinstance(root, list):
-        for i,obj in enumerate(root):
-            keypath = str(i)
-            if path != "":
-                keypath = path + "." + keypath
-            yield from walkDict(obj, keypath)
+    if pytestconfig.getoption("--build-only") or pytestconfig.getoption("--use-cache"):
+        pytest.skip("split mode active — use test_config_build or test_config_run")
+    artifact_name = artifact_name_for_config(config)
+    output_dir = os.path.join(tmpdir.strpath, artifact_name)
+    artifact_dir = tmpdir.strpath
+    artifact_path = os.path.join(artifact_dir, artifact_name + ".tar.gz")
 
-def markNamed(name):
-    """
-    Gets a mark by a name contained in a variable.
-    """
-    return getattr(pytest.mark, name)
-
-def configMarks(filepath, rootDir, availableArchs):
-    """
-    Returns a list of marks to add to a particular YAML config path.  Currently gets a mark for:
-
-     - Root directory name.  This separates tests into pre_checkin, nightly, etc.
-     - Expected failures. Include 'xfail' in the name of the YAML file.
-     - Anything in yaml["TestParameters"]["marks"]
-     - validate / validateAll - whether the test validates (all?) results.
-     - Data type(s) used in the YAML
-     - Problem type(s) used in the YAML
-     - Kernel language(s) used in the YAML
-    """
-    relpath = os.path.relpath(filepath, rootDir)
-    components = relpath.split(os.path.sep)
-
-    # First part of directory - nightly, pre-checkin, etc.
-    marks = list([markNamed(component) for component in components[:-1]])
-
-    if 'xfail' in relpath or 'wip' in relpath:
-        marks.append(pytest.mark.xfail)
-    if 'disabled' in relpath:
-        marks.append(pytest.mark.skip)
-
+    _call_helper_in_subprocess("test_config_build", "_build", config, output_dir, artifact_dir, tensile_args)
+    shutil.rmtree(output_dir)
     try:
-        with open(filepath) as f:
-            doc = yaml.load(f, yaml.SafeLoader)
-    except yaml.parser.ParserError:
-        marks.append(pytest.mark.syntax_error)
-        return marks
-
-    if "TestParameters" in doc:
-        if "marks" in doc["TestParameters"]:
-            marks += [markNamed(m) for m in doc["TestParameters"]["marks"]]
-
-    # Architecture specific xfail marks
-    for arch in availableArchs:
-        ArchFail = "xfail-%s" % arch
-        if markNamed(ArchFail) in marks:
-            marks.append(pytest.mark.xfail)
-        ArchSkip = "skip-%s" % arch
-        if markNamed(ArchSkip) in marks:
-            marks.append(pytest.mark.skip)
-
-    validate = True
-    validateAll = False
-    try:
-        if doc["GlobalParameters"]['NumElementsToValidate'] == 0:
-            validate = False
-        if doc["GlobalParameters"]['NumElementsToValidate'] == -1:
-            validateAll = True
-    except KeyError:
-        pass
-
-    if validate:
-        marks.append(pytest.mark.validate)
-    if validateAll:
-        marks.append(pytest.mark.validateAll)
-
-    dataTypes = set([problem[0]["DataType"] for problem in doc["BenchmarkProblems"]])
-    operationTypes = set([problem[0]["OperationType"] for problem in doc["BenchmarkProblems"]])
-
-    languages = set()
-    #print ("***doc=", doc)
-    for obj, path in walkDict(doc):
-        #print ("  obj=", obj, "path=", path)
-        if "KernelLanguage" in path and isinstance(obj, str):
-            languages.add(obj)
-
-    for l in languages:
-        marks.append(markNamed(l))
-
-    for dt in dataTypes:
-        dataType = DataType(dt)
-        marks.append(markNamed(dataType.toName()))
-
-    for operationType in operationTypes:
-        marks.append(markNamed(operationType))
-
-    return marks
-
-def findAvailableArchs():
-    availableArchs = []
-    rocmpath = "/opt/rocm"
-    if "ROCM_PATH" in os.environ:
-        rocmpath = os.environ.get("ROCM_PATH")
-    if "TENSILE_ROCM_PATH" in os.environ:
-        rocmpath = os.environ.get("TENSILE_ROCM_PATH")
-    rocmAgentEnum = os.path.join(rocmpath, "bin/rocm_agent_enumerator")
-    output = subprocess.check_output([rocmAgentEnum, "-t", "GPU"])
-    lines = output.decode().splitlines()
-    for line in lines:
-        line = line.strip()
-        if (not line in availableArchs) and (not "gfx000" in line):
-            availableArchs.append(line)
-    return availableArchs
-
-def findConfigs(rootDir=None):
-    """
-    Walks rootDir (defaults to trying to find Tensile/Tests) and returns a
-    list of test parameters, one for each YAML file.
-    """
-    if rootDir ==  None:
-        rootDir = os.path.dirname(os.path.dirname(__file__))
-        printRoot = os.path.dirname(os.path.dirname(rootDir))
-    else:
-        printRoot = rootDir
-
-    availableArchs = findAvailableArchs()
-    globaParamArchsStr = ';'.join(availableArchs)
-    os.environ["PyTestBuildArchNames"] = globaParamArchsStr
-
-    params = []
-    for (dirpath, dirnames, filenames) in os.walk(rootDir):
-        for filename in filenames:
-            # Skip build client script
-            if filename == "build_client.yaml":
-                continue
-            # filter out yamls in logic_yaml since they are not meant for Tensile.py
-            elif filename.endswith('.yaml') and "logic_yaml" not in dirpath:
-                filepath = os.path.join(rootDir, dirpath, filename)
-                if not "test_data" in filepath:
-                    marks = configMarks(filepath, rootDir, availableArchs)
-                    relpath = os.path.relpath(filepath, printRoot)
-                    params.append(pytest.param(filepath, marks=marks, id=relpath))
-    return params
-
-@pytest.mark.parametrize("config", findConfigs())
-def test_config(tensile_args, config, tmpdir):
-    Tensile.Tensile([config, tmpdir.strpath, *tensile_args])
+        _call_helper_in_subprocess("test_config_run", "_run", config, output_dir, artifact_dir, tensile_args)
+    finally:
+        with contextlib.suppress(FileNotFoundError):
+            os.remove(artifact_path)

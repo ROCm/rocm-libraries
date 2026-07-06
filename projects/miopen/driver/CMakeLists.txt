@@ -39,6 +39,7 @@ add_executable(MIOpenDriver
     dm_convbfp16.cpp
     dm_convbfp8.cpp
     dm_convfp16.cpp
+    dm_convfp32.cpp
     dm_convfp8.cpp
     dm_convint8.cpp
     dm_dropout.cpp
@@ -70,9 +71,16 @@ if(WIN32)
     # Refer to https://en.cppreference.com/w/cpp/language/types for details.
     target_compile_options(MIOpenDriver PRIVATE $<BUILD_INTERFACE:$<$<CXX_COMPILER_ID:Clang>:-U__LP64__>>)
 endif()
-add_dependencies(MIOpenDriver generate_kernels)
+# miopen.h:6221 declares `miopenTensorArgumentIsScalar = 1U << 31` in an enum with no
+# explicit underlying type. Clang widens via the MS extension, which is exactly what
+# -Wmicrosoft-enum-value reports. We can't change the bit pattern (it's a flag value),
+# and modifying MIOpen's public enum carries ABI/consumer risk. Lowest-risk fix:
+# silence this specific warning here.
+target_compile_options(MIOpenDriver PRIVATE $<$<CXX_COMPILER_ID:Clang>:-Wno-microsoft-enum-value>)
+add_dependencies(MIOpenDriver miopen-generate-kernels)
 target_include_directories(MIOpenDriver PRIVATE ../src/kernels)
-target_link_libraries(MIOpenDriver PRIVATE MIOpen Threads::Threads roc::rocrand nlohmann_json::nlohmann_json )
+# MIOpen_with_plugins ensures CK plugin .so's are built alongside MIOpenDriver
+target_link_libraries(MIOpenDriver PRIVATE MIOpen_with_plugins Threads::Threads roc::rocrand nlohmann_json::nlohmann_json )
 if(NOT MIOPEN_EMBED_DB STREQUAL "")
     target_link_libraries(MIOpenDriver PRIVATE $<BUILD_INTERFACE:miopen_data> )
 endif()
@@ -86,6 +94,7 @@ if(CMAKE_CXX_COMPILER_ID MATCHES "GNU")
 endif()
 
 if( NOT ENABLE_ASAN_PACKAGING )
+  set_target_properties(MIOpenDriver PROPERTIES INSTALL_RPATH "$ORIGIN/../lib")
   install(TARGETS MIOpenDriver
       PERMISSIONS OWNER_READ OWNER_WRITE OWNER_EXECUTE GROUP_READ GROUP_EXECUTE WORLD_READ WORLD_EXECUTE
       DESTINATION ${CMAKE_INSTALL_BINDIR})

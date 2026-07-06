@@ -1,28 +1,5 @@
-/*******************************************************************************
- *
- * MIT License
- *
- * Copyright 2024-2025 AMD ROCm(TM) Software
- *
- * Permission is hereby granted, free of charge, to any person obtaining a copy
- * of this software and associated documentation files (the "Software"), to deal
- * in the Software without restriction, including without limitation the rights
- * to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
- * copies of the Software, and to permit persons to whom the Software is
- * furnished to do so, subject to the following conditions:
- *
- * The above copyright notice and this permission notice shall be included in
- * all copies or substantial portions of the Software.
- *
- * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
- * IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
- * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
- * AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
- * LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
- * OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
- * SOFTWARE.
- *
- *******************************************************************************/
+// Copyright Advanced Micro Devices, Inc., or its affiliates.
+// SPDX-License-Identifier: MIT
 
 #include <gtest/gtest.h>
 
@@ -119,6 +96,10 @@ TEST(EnumToStringTest, ALL)
         {DataType::Bool64, "Bool64"},
         {DataType::E8M0, "E8M0"},
         {DataType::E8M0x4, "E8M0x4"},
+        {DataType::E5M3, "E5M3"},
+        {DataType::E5M3x4, "E5M3x4"},
+        {DataType::E4M3, "E4M3"},
+        {DataType::E4M3x4, "E4M3x4"},
         {DataType::None, "None"},
     });
 
@@ -127,6 +108,7 @@ TEST(EnumToStringTest, ALL)
         {PointerType::PointerLocal, "PointerLocal"},
         {PointerType::PointerGlobal, "PointerGlobal"},
         {PointerType::Buffer, "Buffer"},
+        {PointerType::TDM, "TDM"},
     });
 
     verify<MemoryType>({
@@ -137,6 +119,9 @@ TEST(EnumToStringTest, ALL)
         {MemoryType::WAVE, "WAVE"},
         {MemoryType::WAVE_LDS, "WAVE_LDS"},
         {MemoryType::WAVE_SPLIT, "WAVE_SPLIT"},
+        {MemoryType::WAVE_Direct2LDS, "WAVE_Direct2LDS"},
+        {MemoryType::WAVE_SWIZZLE, "WAVE_SWIZZLE"},
+        {MemoryType::WAVE_FROM_GLOBAL, "WAVE_FROM_GLOBAL"},
         {MemoryType::Literal, "Literal"},
         {MemoryType::None, "None"},
     });
@@ -164,6 +149,7 @@ TEST(EnumToStringTest, ALL)
         {GPUArchitectureGFX::GFX1030, "gfx1030"},
         {GPUArchitectureGFX::GFX1200, "gfx1200"},
         {GPUArchitectureGFX::GFX1201, "gfx1201"},
+        {GPUArchitectureGFX::GFX1250, "gfx1250"},
     });
 
     verify<Graph::ElementType>({
@@ -240,18 +226,6 @@ TEST(EnumToStringTest, ALL)
         });
     }
 
-    {
-        using namespace KernelGraph::Connections;
-        verify<ComputeIndexArgument>({
-            {ComputeIndexArgument::TARGET, "TARGET"},
-            {ComputeIndexArgument::INCREMENT, "INCREMENT"},
-            {ComputeIndexArgument::BASE, "BASE"},
-            {ComputeIndexArgument::OFFSET, "OFFSET"},
-            {ComputeIndexArgument::STRIDE, "STRIDE"},
-            {ComputeIndexArgument::BUFFER, "BUFFER"},
-        });
-    }
-
     verify<Operations::RandomNumberGenerator::SeedMode>({
         {Operations::RandomNumberGenerator::SeedMode::Default, "Default"},
         {Operations::RandomNumberGenerator::SeedMode::PerThread, "PerThread"},
@@ -266,7 +240,6 @@ TEST(EnumToStringTest, ALL)
 
     verify<ArgumentType>({
         {ArgumentType::Value, "Value"},
-        {ArgumentType::Limit, "Limit"},
         {ArgumentType::Size, "Size"},
         {ArgumentType::Stride, "Stride"},
     });

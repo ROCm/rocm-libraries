@@ -1,28 +1,5 @@
-/*******************************************************************************
- *
- * MIT License
- *
- * Copyright 2024-2025 AMD ROCm(TM) Software
- *
- * Permission is hereby granted, free of charge, to any person obtaining a copy
- * of this software and associated documentation files (the "Software"), to deal
- * in the Software without restriction, including without limitation the rights
- * to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
- * copies of the Software, and to permit persons to whom the Software is
- * furnished to do so, subject to the following conditions:
- *
- * The above copyright notice and this permission notice shall be included in
- * all copies or substantial portions of the Software.
- *
- * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
- * IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
- * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
- * AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
- * LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
- * OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
- * SOFTWARE.
- *
- *******************************************************************************/
+// Copyright Advanced Micro Devices, Inc., or its affiliates.
+// SPDX-License-Identifier: MIT
 
 #pragma once
 
@@ -133,14 +110,29 @@ namespace rocRoller
         return is;
     }
 
-    inline std::ostream& operator<<(std::ostream& os, GPUWaitQueueType const& input)
+    template <typename T>
+    requires(std::is_pointer_v<T>) bool GPUArchitecture::isSupportedConstantValue(T value) const
     {
-        os << input.toString();
-        return os;
+        return false;
+    }
+
+    inline bool GPUArchitecture::isSupportedConstantValue(Raw32 value) const
+    {
+        return isSupportedConstantValue(static_cast<int>(value));
+    }
+
+    inline bool GPUArchitecture::isSupportedConstantValue(Buffer value) const
+    {
+        return false;
+    }
+
+    inline bool GPUArchitecture::isSupportedConstantValue(TDM value) const
+    {
+        return false;
     }
 
     template <std::integral T>
-    requires(!std::same_as<bool, T>) bool GPUArchitecture::isSupportedConstantValue(T value) const
+    bool GPUArchitecture::isSupportedConstantValue(T value) const
     {
         auto range = supportedConstantRange<T>();
         return value >= range.first && value <= range.second;
@@ -162,10 +154,11 @@ namespace rocRoller
     template <std::floating_point T>
     std::unordered_set<T> GPUArchitecture::supportedConstantValues() const
     {
-        static_assert(CIsAnyOf<T, float, double, Half, BFloat16, FP8, BF8, FP6, BF6, FP4, E8M0>,
-                      "Unsupported floating point type");
+        static_assert(
+            CIsAnyOf<T, float, double, Half, BFloat16, FP8, BF8, FP6, BF6, FP4, E8M0, E5M3, E4M3>,
+            "Unsupported floating point type");
 
-        if constexpr(CIsAnyOf<T, BFloat16, FP8, BF8, FP6, BF6, FP4, E8M0>)
+        if constexpr(CIsAnyOf<T, BFloat16, FP8, BF8, FP6, BF6, FP4, E8M0, E5M3, E4M3>)
         {
             return {};
         }
@@ -206,7 +199,8 @@ namespace rocRoller
 
     inline bool GPUArchitecture::isSupportedScaleBlockSize(int size) const
     {
-        return m_capabilities.contains(GPUCapability::HasBlockScaling32) && (size == 32);
+        return (m_capabilities.contains(GPUCapability::HasBlockScaling32) && (size == 32))
+               || (m_capabilities.contains(GPUCapability::HasBlockScaling16) && (size == 16));
     }
 
     inline bool GPUArchitecture::isSupportedScaleType(DataType type) const
@@ -215,6 +209,10 @@ namespace rocRoller
         {
         case DataType::E8M0:
             return m_capabilities.contains(GPUCapability::HasE8M0Scale);
+        case DataType::E5M3:
+            return m_capabilities.contains(GPUCapability::HasE5M3Scale);
+        case DataType::E4M3:
+            return m_capabilities.contains(GPUCapability::HasE4M3Scale);
         default:
             return false;
         }

@@ -1,5 +1,5 @@
+// Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
 // SPDX-License-Identifier: MIT
-// Copyright (c) 2023-2025, Advanced Micro Devices, Inc. All rights reserved.
 
 #pragma once
 
@@ -28,7 +28,16 @@
 #include "ck/host_utility/device_prop.hpp"
 #include "ck/host_utility/kernel_launch.hpp"
 #include "ck/host_utility/io.hpp"
+#ifdef CK_EXPERIMENTAL_BUILDER
+#include "ck_tile/builder/reflect/conv_describe.hpp"
+#include "ck_tile/builder/reflect/instance_traits_device_grouped_conv_fwd_multiple_abd_xdl_cshuffle.hpp"
+#endif
+#include "ck/tensor_operation/gpu/device/tensor_size_check.hpp"
 
+#if __clang_major__ >= 23
+#pragma clang diagnostic push
+#pragma clang diagnostic ignored "-Wlifetime-safety-intra-tu-suggestions"
+#endif
 namespace ck {
 namespace tensor_operation {
 namespace device {
@@ -81,7 +90,7 @@ template <typename GridwiseGemm,
           bool CTranspose>
 __global__ void
 #if CK_USE_LAUNCH_BOUNDS
-__launch_bounds__(CK_MAX_THREAD_PER_BLOCK, CK_MIN_BLOCK_PER_CU)
+__launch_bounds__(GridwiseGemm::MaxBlockSize, CK_MIN_BLOCK_PER_CU)
 #endif
     kernel_grouped_conv_fwd_multiple_abd_xdl_cshuffle(
         AsPointer p_as_grid,
@@ -116,7 +125,7 @@ __launch_bounds__(CK_MAX_THREAD_PER_BLOCK, CK_MIN_BLOCK_PER_CU)
         const long_index_t e_n_offset =
             amd_wave_read_first_lane(compute_ptr_offset_of_n.GetEPtrOffset(n_idx));
 
-        __shared__ char p_shared[GridwiseGemm::GetSharedMemoryNumberOfByte()];
+        __shared__ char p_shared[GridwiseGemm::GetSharedMemoryNumberOfByte(get_device_arch())];
 
         DsPointer p_ds_grid_grp;
 
@@ -321,9 +330,23 @@ struct DeviceGroupedConvFwdMultipleABD_Xdl_CShuffle
                                              BComputeDataType>
 {
     using DeviceOp = DeviceGroupedConvFwdMultipleABD_Xdl_CShuffle;
-    GET_NXDL_PER_WAVE_IMPL
-    static constexpr auto NXdlPerWave64 = GetNXdlPerWave<true>();
-    static constexpr auto NXdlPerWave32 = GetNXdlPerWave<false>();
+    GET_MXDL_PER_WAVE_IMPL
+    // Force usage of 16x16 instruction for WMMA
+    static constexpr bool Wave32Force16MNPerXDL =
+        is_NSpatialGC_GKSpatial_NSpatialGK<ALayout, BLayout, ELayout>() &&
+        sizeof(AComputeDataType) == 2 && sizeof(BComputeDataType) == 2 &&
+        is_same_v<CDEElementwiseOperation, tensor_operation::element_wise::PassThrough> &&
+        (ConvForwardSpecialization == ConvolutionForwardSpecialization::Filter1x1Stride1Pad0 ||
+         ConvForwardSpecialization == ConvolutionForwardSpecialization::Default);
+    static constexpr index_t Wave32MaxMNPerXDL =
+        Wave32Force16MNPerXDL ? 16 : math::max(MPerXDL, NPerXDL);
+
+    static constexpr auto MXdlPerWave64 = GetMXdlPerWave<true>();
+    static constexpr auto MXdlPerWave32 =
+        GetMXdlPerWave<false,
+                       Wave32MaxMNPerXDL,
+                       Wave32MaxMNPerXDL,
+                       NXdlPerWave*(NPerXDL / Wave32MaxMNPerXDL)>();
 
     static_assert(NumGroupsToMerge >= 1);
 
@@ -482,44 +505,45 @@ struct DeviceGroupedConvFwdMultipleABD_Xdl_CShuffle
     using GemmADataType = std::conditional_t<!isMultiA && isMultiB, Tuple<ADataType>, ADataType>;
     using GemmBDataType = std::conditional_t<!isMultiB && isMultiA, Tuple<BDataType>, BDataType>;
 
-#define GridwiseGemmMultiABDTemplateParameters                                                  \
-    GemmADataType, GemmBDataType, AComputeDataType, AccDataType, CShuffleDataType, DsDataType,  \
-        EDataType, AElementwiseOperation, BElementwiseOperation, CDEElementwiseOperation,       \
-        InMemoryDataOperationEnum::Set, NumGemmKPrefetchStage, BlockSize, MPerBlock, NPerBlock, \
-        KPerBlock, AK1, BK1, MPerXDL, NPerXDL, MXdlPerWave, NXdlPerWave_,                       \
-        ABlockTransferThreadClusterLengths_AK0_M_AK1, ABlockTransferThreadClusterArrangeOrder,  \
-        ABlockTransferSrcAccessOrder, ABlockTransferSrcVectorDim,                               \
-        ABlockTransferSrcScalarPerVector, ABlockTransferDstScalarPerVector_AK1, false,          \
-        ABlockLdsExtraM, BBlockTransferThreadClusterLengths_BK0_N_BK1,                          \
-        BBlockTransferThreadClusterArrangeOrder, BBlockTransferSrcAccessOrder,                  \
-        BBlockTransferSrcVectorDim, BBlockTransferSrcScalarPerVector,                           \
-        BBlockTransferDstScalarPerVector_BK1, false, BBlockLdsExtraN,                           \
-        CShuffleMXdlPerWavePerShuffle, CShuffleNXdlPerWavePerShuffle,                           \
-        CDEBlockTransferClusterLengths_MBlock_MPerBlock_NBlock_NPerBlock,                       \
-        CDEBlockTransferScalarPerVector_NPerBlock, LoopSched, PipelineVersion::v1,              \
+#define CK_GRIDWISE_GEMM_FWD_MULTIPLE_ABD_XDL_CSHUFFLE_TEMPLATE_PARAMETERS                       \
+    GemmADataType, GemmBDataType, AComputeDataType, AccDataType, CShuffleDataType, DsDataType,   \
+        EDataType, AElementwiseOperation, BElementwiseOperation, CDEElementwiseOperation,        \
+        InMemoryDataOperationEnum::Set, NumGemmKPrefetchStage, BlockSize, MPerBlock, NPerBlock,  \
+        KPerBlock, AK1, BK1, MPerXDL_, NPerXDL_, MXdlPerWave_, NXdlPerWave*(NPerXDL / NPerXDL_), \
+        ABlockTransferThreadClusterLengths_AK0_M_AK1, ABlockTransferThreadClusterArrangeOrder,   \
+        ABlockTransferSrcAccessOrder, ABlockTransferSrcVectorDim,                                \
+        ABlockTransferSrcScalarPerVector, ABlockTransferDstScalarPerVector_AK1, false,           \
+        ABlockLdsExtraM, BBlockTransferThreadClusterLengths_BK0_N_BK1,                           \
+        BBlockTransferThreadClusterArrangeOrder, BBlockTransferSrcAccessOrder,                   \
+        BBlockTransferSrcVectorDim, BBlockTransferSrcScalarPerVector,                            \
+        BBlockTransferDstScalarPerVector_BK1, false, BBlockLdsExtraN,                            \
+        CShuffleMXdlPerWavePerShuffle, CShuffleNXdlPerWavePerShuffle*(NPerXDL / NPerXDL_),       \
+        CDEBlockTransferClusterLengths_MBlock_MPerBlock_NBlock_NPerBlock,                        \
+        CDEBlockTransferScalarPerVector_NPerBlock, LoopSched, PipelineVersion::v1,               \
         BComputeDataType
 
-#define GridwiseGemmTemplateParameters                                                         \
+#define CK_GRIDWISE_GEMM_FWD_MULTIPLE_D_XDL_CSHUFFLE_TEMPLATE_PARAMETERS                       \
     GemmADataType, GemmBDataType, AComputeDataType, AccDataType, CShuffleDataType, DsDataType, \
         EDataType, AElementwiseOperation, BElementwiseOperation, CDEElementwiseOperation,      \
-        NumGemmKPrefetchStage, BlockSize, MPerBlock, NPerBlock, KPerBlock, AK1, BK1, MPerXDL,  \
-        NPerXDL, MXdlPerWave, NXdlPerWave_, ABlockTransferThreadClusterLengths_AK0_M_AK1,      \
-        ABlockTransferThreadClusterArrangeOrder, ABlockTransferSrcAccessOrder,                 \
-        ABlockTransferSrcVectorDim, ABlockTransferSrcScalarPerVector,                          \
-        ABlockTransferDstScalarPerVector_AK1, false, ABlockLdsExtraM,                          \
-        BBlockTransferThreadClusterLengths_BK0_N_BK1, BBlockTransferThreadClusterArrangeOrder, \
-        BBlockTransferSrcAccessOrder, BBlockTransferSrcVectorDim,                              \
-        BBlockTransferSrcScalarPerVector, BBlockTransferDstScalarPerVector_BK1, false,         \
-        BBlockLdsExtraN, CShuffleMXdlPerWavePerShuffle, CShuffleNXdlPerWavePerShuffle,         \
+        NumGemmKPrefetchStage, BlockSize, MPerBlock, NPerBlock, KPerBlock, AK1, BK1, MPerXDL_, \
+        NPerXDL_, MXdlPerWave_, NXdlPerWave*(NPerXDL / NPerXDL_),                              \
+        ABlockTransferThreadClusterLengths_AK0_M_AK1, ABlockTransferThreadClusterArrangeOrder, \
+        ABlockTransferSrcAccessOrder, ABlockTransferSrcVectorDim,                              \
+        ABlockTransferSrcScalarPerVector, ABlockTransferDstScalarPerVector_AK1, false,         \
+        ABlockLdsExtraM, BBlockTransferThreadClusterLengths_BK0_N_BK1,                         \
+        BBlockTransferThreadClusterArrangeOrder, BBlockTransferSrcAccessOrder,                 \
+        BBlockTransferSrcVectorDim, BBlockTransferSrcScalarPerVector,                          \
+        BBlockTransferDstScalarPerVector_BK1, false, BBlockLdsExtraN,                          \
+        CShuffleMXdlPerWavePerShuffle, CShuffleNXdlPerWavePerShuffle*(NPerXDL / NPerXDL_),     \
         CDEBlockTransferClusterLengths_MBlock_MPerBlock_NBlock_NPerBlock,                      \
         CDEBlockTransferScalarPerVector_NPerBlock, LoopSched, PipelineVersion::v1,             \
         BComputeDataType, DoElementwiseBeforeCShuffle
 
-#define GridwiseGemmCTransposeTemplateParameters                                               \
+#define CK_GRIDWISE_GEMM_FWD_CTRANSPOSE_XDL_CSHUFFLE_TEMPLATE_PARAMETERS                       \
     GemmBDataType, GemmADataType, AComputeDataType, AccDataType, CShuffleDataType, DsDataType, \
         EDataType, BElementwiseOperation, AElementwiseOperation, CDEElementwiseOperation,      \
         NumGemmKPrefetchStage, BlockSize, NPerBlock, MPerBlock, KPerBlock, BK1, AK1, NPerXDL,  \
-        MPerXDL, NXdlPerWave_, MXdlPerWave, BBlockTransferThreadClusterLengths_BK0_N_BK1,      \
+        MPerXDL, NXdlPerWave, MXdlPerWave_, BBlockTransferThreadClusterLengths_BK0_N_BK1,      \
         BBlockTransferThreadClusterArrangeOrder, BBlockTransferSrcAccessOrder,                 \
         BBlockTransferSrcVectorDim, BBlockTransferSrcScalarPerVector,                          \
         BBlockTransferDstScalarPerVector_BK1, false, BBlockLdsExtraN,                          \
@@ -532,31 +556,35 @@ struct DeviceGroupedConvFwdMultipleABD_Xdl_CShuffle
         BComputeDataType, DoElementwiseBeforeCShuffle
 
     // Use appropriate gridwise gemm
-    template <index_t NXdlPerWave_>
-    using GridwiseGemmMultipleABDBase =
-        GridwiseGemmMultipleABD_xdl_cshuffle<GridwiseGemmMultiABDTemplateParameters>;
-    template <index_t NXdlPerWave_>
-    using GridwiseGemmMultipleDBase =
-        GridwiseGemmMultipleD_xdl_cshuffle<GridwiseGemmTemplateParameters>;
-    template <index_t NXdlPerWave_>
-    using GridwiseGemmMultipleDCTransposeBase =
-        GridwiseGemmMultipleD_xdl_cshuffle<GridwiseGemmCTransposeTemplateParameters>;
+    template <index_t MXdlPerWave_, index_t MPerXDL_, index_t NPerXDL_>
+    using GridwiseGemmMultipleABDBase = GridwiseGemmMultipleABD_xdl_cshuffle<
+        CK_GRIDWISE_GEMM_FWD_MULTIPLE_ABD_XDL_CSHUFFLE_TEMPLATE_PARAMETERS>;
+    template <index_t MXdlPerWave_, index_t MPerXDL_, index_t NPerXDL_>
+    using GridwiseGemmMultipleDBase = GridwiseGemmMultipleD_xdl_cshuffle<
+        CK_GRIDWISE_GEMM_FWD_MULTIPLE_D_XDL_CSHUFFLE_TEMPLATE_PARAMETERS>;
+    template <index_t MXdlPerWave_>
+    using GridwiseGemmMultipleDCTransposeBase = GridwiseGemmMultipleD_xdl_cshuffle<
+        CK_GRIDWISE_GEMM_FWD_CTRANSPOSE_XDL_CSHUFFLE_TEMPLATE_PARAMETERS>;
+#undef CK_GRIDWISE_GEMM_FWD_MULTIPLE_ABD_XDL_CSHUFFLE_TEMPLATE_PARAMETERS
+#undef CK_GRIDWISE_GEMM_FWD_MULTIPLE_D_XDL_CSHUFFLE_TEMPLATE_PARAMETERS
+#undef CK_GRIDWISE_GEMM_FWD_CTRANSPOSE_XDL_CSHUFFLE_TEMPLATE_PARAMETERS
 
-    using GridwiseGemm64 =
-        std::conditional_t<isMultiA || isMultiB,
-                           GridwiseGemmMultipleABDBase<math::max(NXdlPerWave64, 1)>,
-                           GridwiseGemmMultipleDBase<math::max(NXdlPerWave64, 1)>>;
-    using GridwiseGemm32 = std::conditional_t<isMultiA || isMultiB,
-                                              GridwiseGemmMultipleABDBase<NXdlPerWave32>,
-                                              GridwiseGemmMultipleDBase<NXdlPerWave32>>;
+    using GridwiseGemm64 = std::conditional_t<
+        isMultiA || isMultiB,
+        GridwiseGemmMultipleABDBase<math::max(MXdlPerWave64, 1), MPerXDL, NPerXDL>,
+        GridwiseGemmMultipleDBase<math::max(MXdlPerWave64, 1), MPerXDL, NPerXDL>>;
+    using GridwiseGemm32 = std::conditional_t<
+        isMultiA || isMultiB,
+        GridwiseGemmMultipleABDBase<MXdlPerWave32, Wave32MaxMNPerXDL, Wave32MaxMNPerXDL>,
+        GridwiseGemmMultipleDBase<MXdlPerWave32, Wave32MaxMNPerXDL, Wave32MaxMNPerXDL>>;
 
     using GridwiseGemmCTranspose64 =
         std::conditional_t<CTranspose,
-                           GridwiseGemmMultipleDCTransposeBase<math::max(NXdlPerWave64, 1)>,
+                           GridwiseGemmMultipleDCTransposeBase<math::max(MXdlPerWave64, 1)>,
                            GridwiseGemm64>;
     using GridwiseGemmCTranspose32 =
         std::conditional_t<CTranspose,
-                           GridwiseGemmMultipleDCTransposeBase<NXdlPerWave32>,
+                           GridwiseGemmMultipleDCTransposeBase<MXdlPerWave32>,
                            GridwiseGemm32>;
 
     // If ADataTypes or BDataTypes is tuple, user has to pass std::array with pointers.
@@ -745,7 +773,8 @@ struct DeviceGroupedConvFwdMultipleABD_Xdl_CShuffle
                  const std::array<index_t, NDimSpatial>& input_right_pads,
                  const AElementwiseOperation& a_element_op,
                  const BElementwiseOperation& b_element_op,
-                 const CDEElementwiseOperation& cde_element_op)
+                 const CDEElementwiseOperation& cde_element_op,
+                 bool stride_overflow_in = false)
             : p_as_grid_{},
               p_bs_grid_{},
               p_ds_grid_{},
@@ -802,7 +831,8 @@ struct DeviceGroupedConvFwdMultipleABD_Xdl_CShuffle
               compute_ptr_offset_of_n_{},
               a_element_op_{a_element_op},
               b_element_op_{b_element_op},
-              cde_element_op_{cde_element_op}
+              cde_element_op_{cde_element_op},
+              stride_overflow_{stride_overflow_in}
         {
             // A/B/E Batch Stride
             if constexpr(isMultiA || isMultiB)
@@ -906,14 +936,14 @@ struct DeviceGroupedConvFwdMultipleABD_Xdl_CShuffle
 
             if(get_warp_size() == 64)
             {
-                if constexpr(NXdlPerWave64 > 0)
+                if constexpr(MXdlPerWave64 > 0)
                 {
                     InitGridDesc<GridwiseGemm64, GridwiseGemmCTranspose64>();
                 }
             }
             else
             {
-                if constexpr(NXdlPerWave32 > 0)
+                if constexpr(MXdlPerWave32 > 0)
                 {
                     InitGridDesc<GridwiseGemm32, GridwiseGemmCTranspose32>();
                 }
@@ -1078,6 +1108,7 @@ struct DeviceGroupedConvFwdMultipleABD_Xdl_CShuffle
         AElementwiseOperation a_element_op_;
         BElementwiseOperation b_element_op_;
         CDEElementwiseOperation cde_element_op_;
+        bool stride_overflow_;
     };
 
     // Invoker
@@ -1135,26 +1166,52 @@ struct DeviceGroupedConvFwdMultipleABD_Xdl_CShuffle
                         isMultiB,
                         CTranspose>;
 
-                    return launch_and_time_kernel(
-                        stream_config,
-                        kernel,
-                        dim3(gdx, gdy, gdz),
-                        dim3(BlockSize),
-                        0,
-                        arg.p_as_grid_,
-                        arg.p_bs_grid_,
-                        arg.p_ds_grid_,
-                        arg.p_e_grid_,
-                        arg.a_element_op_,
-                        arg.b_element_op_,
-                        arg.cde_element_op_,
-                        as_grid_desc_ak0_m_ak1,
-                        bs_grid_desc_bk0_n_bk1,
-                        arg.ds_grid_desc_mblock_mperblock_nblock_nperblock_,
-                        arg.e_grid_desc_mblock_mperblock_nblock_nperblock_,
-                        arg.block_2_etile_map_,
-                        arg.compute_ptr_offset_of_groups_,
-                        arg.compute_ptr_offset_of_n_);
+                    if(stream_config.flush_cache)
+                    {
+                        return launch_and_time_kernel_flush_cache(
+                            stream_config,
+                            kernel,
+                            dim3(gdx, gdy, gdz),
+                            dim3(BlockSize),
+                            0,
+                            arg.p_as_grid_,
+                            arg.p_bs_grid_,
+                            arg.p_ds_grid_,
+                            arg.p_e_grid_,
+                            arg.a_element_op_,
+                            arg.b_element_op_,
+                            arg.cde_element_op_,
+                            as_grid_desc_ak0_m_ak1,
+                            bs_grid_desc_bk0_n_bk1,
+                            arg.ds_grid_desc_mblock_mperblock_nblock_nperblock_,
+                            arg.e_grid_desc_mblock_mperblock_nblock_nperblock_,
+                            arg.block_2_etile_map_,
+                            arg.compute_ptr_offset_of_groups_,
+                            arg.compute_ptr_offset_of_n_);
+                    }
+                    else
+                    {
+                        return launch_and_time_kernel(
+                            stream_config,
+                            kernel,
+                            dim3(gdx, gdy, gdz),
+                            dim3(BlockSize),
+                            0,
+                            arg.p_as_grid_,
+                            arg.p_bs_grid_,
+                            arg.p_ds_grid_,
+                            arg.p_e_grid_,
+                            arg.a_element_op_,
+                            arg.b_element_op_,
+                            arg.cde_element_op_,
+                            as_grid_desc_ak0_m_ak1,
+                            bs_grid_desc_bk0_n_bk1,
+                            arg.ds_grid_desc_mblock_mperblock_nblock_nperblock_,
+                            arg.e_grid_desc_mblock_mperblock_nblock_nperblock_,
+                            arg.block_2_etile_map_,
+                            arg.compute_ptr_offset_of_groups_,
+                            arg.compute_ptr_offset_of_n_);
+                    }
                 }
                 else
                 {
@@ -1207,26 +1264,53 @@ struct DeviceGroupedConvFwdMultipleABD_Xdl_CShuffle
                             isMultiA,
                             isMultiB,
                             CTranspose>;
-                        return launch_and_time_kernel(
-                            stream_config,
-                            kernel,
-                            dim3(gdx, gdy, gdz),
-                            dim3(BlockSize),
-                            0,
-                            p_b_grid,
-                            p_a_grid,
-                            arg.p_ds_grid_,
-                            p_e_grid,
-                            arg.b_element_op_,
-                            arg.a_element_op_,
-                            arg.cde_element_op_,
-                            arg.b_grid_desc_bk0_n_bk1_,
-                            arg.a_grid_desc_ak0_m_ak1_,
-                            arg.ds_grid_desc_mblock_mperblock_nblock_nperblock_,
-                            arg.e_grid_desc_mblock_mperblock_nblock_nperblock_,
-                            arg.block_2_etile_map_,
-                            arg.compute_ptr_offset_of_groups_,
-                            arg.compute_ptr_offset_of_n_);
+
+                        if(stream_config.flush_cache)
+                        {
+                            return launch_and_time_kernel_flush_cache(
+                                stream_config,
+                                kernel,
+                                dim3(gdx, gdy, gdz),
+                                dim3(BlockSize),
+                                0,
+                                p_b_grid,
+                                p_a_grid,
+                                arg.p_ds_grid_,
+                                p_e_grid,
+                                arg.b_element_op_,
+                                arg.a_element_op_,
+                                arg.cde_element_op_,
+                                arg.b_grid_desc_bk0_n_bk1_,
+                                arg.a_grid_desc_ak0_m_ak1_,
+                                arg.ds_grid_desc_mblock_mperblock_nblock_nperblock_,
+                                arg.e_grid_desc_mblock_mperblock_nblock_nperblock_,
+                                arg.block_2_etile_map_,
+                                arg.compute_ptr_offset_of_groups_,
+                                arg.compute_ptr_offset_of_n_);
+                        }
+                        else
+                        {
+                            return launch_and_time_kernel(
+                                stream_config,
+                                kernel,
+                                dim3(gdx, gdy, gdz),
+                                dim3(BlockSize),
+                                0,
+                                p_b_grid,
+                                p_a_grid,
+                                arg.p_ds_grid_,
+                                p_e_grid,
+                                arg.b_element_op_,
+                                arg.a_element_op_,
+                                arg.cde_element_op_,
+                                arg.b_grid_desc_bk0_n_bk1_,
+                                arg.a_grid_desc_ak0_m_ak1_,
+                                arg.ds_grid_desc_mblock_mperblock_nblock_nperblock_,
+                                arg.e_grid_desc_mblock_mperblock_nblock_nperblock_,
+                                arg.block_2_etile_map_,
+                                arg.compute_ptr_offset_of_groups_,
+                                arg.compute_ptr_offset_of_n_);
+                        }
                     }
                     else
                     {
@@ -1251,26 +1335,52 @@ struct DeviceGroupedConvFwdMultipleABD_Xdl_CShuffle
                             isMultiB,
                             CTranspose>;
 
-                        return launch_and_time_kernel(
-                            stream_config,
-                            kernel,
-                            dim3(gdx, gdy, gdz),
-                            dim3(BlockSize),
-                            0,
-                            p_a_grid,
-                            p_b_grid,
-                            arg.p_ds_grid_,
-                            p_e_grid,
-                            arg.a_element_op_,
-                            arg.b_element_op_,
-                            arg.cde_element_op_,
-                            arg.a_grid_desc_ak0_m_ak1_,
-                            arg.b_grid_desc_bk0_n_bk1_,
-                            arg.ds_grid_desc_mblock_mperblock_nblock_nperblock_,
-                            arg.e_grid_desc_mblock_mperblock_nblock_nperblock_,
-                            arg.block_2_etile_map_,
-                            arg.compute_ptr_offset_of_groups_,
-                            arg.compute_ptr_offset_of_n_);
+                        if(stream_config.flush_cache)
+                        {
+                            return launch_and_time_kernel_flush_cache(
+                                stream_config,
+                                kernel,
+                                dim3(gdx, gdy, gdz),
+                                dim3(BlockSize),
+                                0,
+                                p_a_grid,
+                                p_b_grid,
+                                arg.p_ds_grid_,
+                                p_e_grid,
+                                arg.a_element_op_,
+                                arg.b_element_op_,
+                                arg.cde_element_op_,
+                                arg.a_grid_desc_ak0_m_ak1_,
+                                arg.b_grid_desc_bk0_n_bk1_,
+                                arg.ds_grid_desc_mblock_mperblock_nblock_nperblock_,
+                                arg.e_grid_desc_mblock_mperblock_nblock_nperblock_,
+                                arg.block_2_etile_map_,
+                                arg.compute_ptr_offset_of_groups_,
+                                arg.compute_ptr_offset_of_n_);
+                        }
+                        else
+                        {
+                            return launch_and_time_kernel(
+                                stream_config,
+                                kernel,
+                                dim3(gdx, gdy, gdz),
+                                dim3(BlockSize),
+                                0,
+                                p_a_grid,
+                                p_b_grid,
+                                arg.p_ds_grid_,
+                                p_e_grid,
+                                arg.a_element_op_,
+                                arg.b_element_op_,
+                                arg.cde_element_op_,
+                                arg.a_grid_desc_ak0_m_ak1_,
+                                arg.b_grid_desc_bk0_n_bk1_,
+                                arg.ds_grid_desc_mblock_mperblock_nblock_nperblock_,
+                                arg.e_grid_desc_mblock_mperblock_nblock_nperblock_,
+                                arg.block_2_etile_map_,
+                                arg.compute_ptr_offset_of_groups_,
+                                arg.compute_ptr_offset_of_n_);
+                        }
                     }
                 }
             };
@@ -1381,7 +1491,7 @@ struct DeviceGroupedConvFwdMultipleABD_Xdl_CShuffle
         {
             if(get_warp_size() == 64)
             {
-                if constexpr(NXdlPerWave64 > 0)
+                if constexpr(MXdlPerWave64 > 0)
                 {
                     return RunImp<GridwiseGemm64, GridwiseGemmCTranspose64>(arg, stream_config);
                 }
@@ -1392,7 +1502,7 @@ struct DeviceGroupedConvFwdMultipleABD_Xdl_CShuffle
             }
             else
             {
-                if constexpr(NXdlPerWave32 > 0)
+                if constexpr(MXdlPerWave32 > 0)
                 {
                     return RunImp<GridwiseGemm32, GridwiseGemmCTranspose32>(arg, stream_config);
                 }
@@ -1411,6 +1521,9 @@ struct DeviceGroupedConvFwdMultipleABD_Xdl_CShuffle
 
     static bool IsSupportedArgument(const Argument& arg)
     {
+        if(arg.stride_overflow_)
+            return false;
+
         namespace ctc = tensor_layout::convolution;
 
         const index_t G                  = arg.b_g_k_c_xs_lengths_[I0];
@@ -1429,11 +1542,21 @@ struct DeviceGroupedConvFwdMultipleABD_Xdl_CShuffle
             }
         }
 
-        if(!ck::is_xdl_wmma_supported<AComputeDataType, BComputeDataType, MPerXDL, NPerXDL>())
+        if(!ck::is_xdl_wmma_supported<AComputeDataType,
+                                      BComputeDataType,
+                                      Wave32MaxMNPerXDL,
+                                      Wave32MaxMNPerXDL>())
         {
             return false;
         }
-
+        if(!is_xdl_wmma_k_supported<AComputeDataType, KPerBlock>())
+        {
+            return false;
+        }
+        if(!is_xdl_wmma_k_supported<BComputeDataType, KPerBlock>())
+        {
+            return false;
+        }
         // check ConvolutionForwardSpecialization
         if constexpr(ConvForwardSpecialization ==
                      ConvolutionForwardSpecialization::Filter1x1Stride1Pad0)
@@ -1487,7 +1610,7 @@ struct DeviceGroupedConvFwdMultipleABD_Xdl_CShuffle
 
         if constexpr(NumGroupsToMerge > 1)
         {
-            if(!(C == 1))
+            if(!(C == 1) && CDEBlockTransferScalarPerVector_NPerBlock > 1)
             {
                 return false;
             }
@@ -1713,7 +1836,7 @@ struct DeviceGroupedConvFwdMultipleABD_Xdl_CShuffle
         // check Gridwise GEMM
         if(get_warp_size() == 64)
         {
-            if constexpr(NXdlPerWave64 > 0)
+            if constexpr(MXdlPerWave64 > 0)
             {
                 if constexpr(isMultiA || isMultiB)
                 {
@@ -1752,7 +1875,7 @@ struct DeviceGroupedConvFwdMultipleABD_Xdl_CShuffle
         else
         {
 
-            if constexpr(NXdlPerWave32 > 0)
+            if constexpr(MXdlPerWave32 > 0)
             {
                 if constexpr(isMultiA || isMultiB)
                 {
@@ -1789,28 +1912,6 @@ struct DeviceGroupedConvFwdMultipleABD_Xdl_CShuffle
             }
         }
 
-        if constexpr(is_same_v<AComputeDataType, ck::tf32_t> ||
-                     is_same_v<BComputeDataType, ck::tf32_t>)
-
-        {
-            if(!(ck::get_device_name() == "gfx942"))
-            {
-                if(ck::EnvIsEnabled(CK_ENV(CK_LOGGING)))
-                {
-                    std::cout << "TF32 is enabled on gfx942 only" << std::endl;
-                }
-                return false;
-            }
-            if constexpr(!is_same_v<AComputeDataType, BComputeDataType>)
-            {
-                if(ck::EnvIsEnabled(CK_ENV(CK_LOGGING)))
-                {
-                    std::cout << "ComputeDataType for A and B should be same while using TF32"
-                              << std::endl;
-                }
-                return false;
-            }
-        }
         return false;
     }
 
@@ -1913,6 +2014,14 @@ struct DeviceGroupedConvFwdMultipleABD_Xdl_CShuffle
         array_convert(input_left_pads_i32, input_left_pads);
         array_convert(input_right_pads_i32, input_right_pads);
 
+        bool ds_ovf = false;
+        static_for<0, NumDTensor, 1>{}([&](auto i) {
+            using DDataType = remove_cvref_t<tuple_element_t<i.value, DsDataType>>;
+            ds_ovf |= tensor_exceeds_2gb<DDataType>(ds_g_n_k_wos_lengths[i]);
+        });
+        const bool stride_ovf = tensor_exceeds_2gb<ADataType>(a_g_n_c_wis_lengths) ||
+                                tensor_exceeds_2gb<BDataType>(b_g_k_c_xs_lengths) ||
+                                tensor_exceeds_2gb<EDataType>(e_g_n_k_wos_lengths) || ds_ovf;
         return Argument{p_as,
                         p_bs,
                         p_ds,
@@ -1931,7 +2040,8 @@ struct DeviceGroupedConvFwdMultipleABD_Xdl_CShuffle
                         input_right_pads_i32,
                         a_element_op,
                         b_element_op,
-                        cde_element_op};
+                        cde_element_op,
+                        stride_ovf};
     }
 
     static auto MakeInvoker() { return Invoker{}; }
@@ -2031,6 +2141,14 @@ struct DeviceGroupedConvFwdMultipleABD_Xdl_CShuffle
         array_convert(input_left_pads_i32, input_left_pads);
         array_convert(input_right_pads_i32, input_right_pads);
 
+        bool ds_ovf = false;
+        static_for<0, NumDTensor, 1>{}([&](auto i) {
+            using DDataType = remove_cvref_t<tuple_element_t<i.value, DsDataType>>;
+            ds_ovf |= tensor_exceeds_2gb<DDataType>(ds_g_n_k_wos_lengths[i]);
+        });
+        const bool stride_ovf = tensor_exceeds_2gb<ADataType>(a_g_n_c_wis_lengths) ||
+                                tensor_exceeds_2gb<BDataType>(b_g_k_c_xs_lengths) ||
+                                tensor_exceeds_2gb<EDataType>(e_g_n_k_wos_lengths) || ds_ovf;
         return std::make_unique<Argument>(p_as,
                                           p_bs,
                                           p_ds,
@@ -2049,7 +2167,8 @@ struct DeviceGroupedConvFwdMultipleABD_Xdl_CShuffle
                                           input_right_pads_i32,
                                           a_element_op,
                                           b_element_op,
-                                          cde_element_op);
+                                          cde_element_op,
+                                          stride_ovf);
     }
 
     std::unique_ptr<BaseInvoker> MakeInvokerPointer() override
@@ -2062,8 +2181,13 @@ struct DeviceGroupedConvFwdMultipleABD_Xdl_CShuffle
         auto str = std::stringstream();
 
         // clang-format off
-        str << "DeviceGroupedConvFwdMultipleABD_Xdl_CShuffle"
-            << "<"
+        str << "DeviceGroupedConvFwdMultipleABD_Xdl_CShuffle";
+
+        if(get_warp_size() != 64) {
+            str << "_WmmaPorted";
+        }
+
+        str    << "<"
             << BlockSize << ", "
             << MPerBlock << ", "
             << NPerBlock << ", "
@@ -2084,6 +2208,34 @@ struct DeviceGroupedConvFwdMultipleABD_Xdl_CShuffle
 
         return str.str();
     }
+
+#ifdef CK_EXPERIMENTAL_BUILDER
+    std::string GetInstanceString() const override
+    {
+        static_assert(ck_tile::reflect::HasInstanceTraits<DeviceOp>,
+                      "Specialization of instance_traits not found. Please check that a "
+                      "specialization exists in file "
+                      "ck_tile/builder/reflect/"
+                      "instance_traits_device_grouped_conv_fwd_multiple_abd_xdl_cshuffle.hpp "
+                      "for the given template parameters.");
+        return ck_tile::reflect::instance_string<DeviceOp>();
+    }
+
+    std::unique_ptr<ck_tile::reflect::Description> describe() const override
+    {
+        static_assert(ck_tile::reflect::HasConvTraits<DeviceOp>,
+                      "ConvTraits specialization not found for this device operation. "
+                      "If you modified the template parameters of this class, ensure that "
+                      "the corresponding ConvTraits specialization in "
+                      "ck_tile/builder/reflect/conv_traits.hpp is updated to match, or that "
+                      "InstanceTraits in "
+                      "ck_tile/builder/reflect/"
+                      "instance_traits_device_grouped_conv_fwd_multiple_abd_xdl_cshuffle.hpp "
+                      "provides all required members for ConvTraits to work.");
+        return std::make_unique<ck_tile::reflect::conv::ConvDescription>(
+            ck_tile::reflect::describe<DeviceOp>());
+    }
+#endif
 
     size_t GetWorkSpaceSize(const BaseArgument* p_arg) const override
     {
@@ -2117,3 +2269,6 @@ struct DeviceGroupedConvFwdMultipleABD_Xdl_CShuffle
 } // namespace device
 } // namespace tensor_operation
 } // namespace ck
+#if __clang_major__ >= 23
+#pragma clang diagnostic pop
+#endif
