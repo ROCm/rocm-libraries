@@ -26,7 +26,6 @@
 
 #include "mxDataGen.hpp"
 #include <hip/hip_runtime.h>
-#include <hipblaslt_datatype2string.hpp>
 #include <mxDataGenerator/DataGenerator.hpp>
 #include <mxDataGenerator/DataGeneratorGPU.hpp>
 #include <mxDataGenerator/PreSwizzle.hpp>
@@ -905,8 +904,9 @@ MXScaleLayout mxScaleLayoutForArchName(std::string_view archName)
 
 MXScaleLayout mxScaleLayoutForFormat(int scalingFormat)
 {
-    if(scalingFormat
-       == static_cast<int>(hipblaslt_scaling_format::Block_32_UE8M0_32_8_EXT))
+    // hipblaslt_scaling_format::Block_32_UE8M0_32_8_EXT (avoid datatype2string.hpp + ostream in HIP TU)
+    constexpr int kBlock32Ue8m0Gfx950Ext = 1001;
+    if(scalingFormat == kBlock32Ue8m0Gfx950Ext)
         return MXScaleLayout::kGFX950;
     if(currentDeviceIsGfx1250())
         return MXScaleLayout::kGFX1250;
