@@ -42,9 +42,6 @@ DISABLE_WARNING_RETURN_TYPE
 DISABLE_WARNING_POP
 #endif
 
-typedef hip_object_wrapper_t<hipfftHandle, hipfftCreate, hipfftDestroy, HIPFFT_SUCCESS>
-    hipfftHandle_wrapper_t;
-
 // hipfftXtMalloc takes (plan, &desc, format) but hip_object_wrapper_t expects TCreate(&obj, ...).
 // This adapter reorders the arguments to match.
 inline hipfftResult
@@ -52,6 +49,9 @@ inline hipfftResult
 {
     return hipfftXtMalloc(plan, desc, fmt);
 }
+// RAII wrappers used in this unit
+typedef hip_object_wrapper_t<hipfftHandle, hipfftCreate, hipfftDestroy, HIPFFT_SUCCESS>
+    hipfftHandle_wrapper_t;
 typedef hip_object_wrapper_t<hipLibXtDesc*, hipfftXtMalloc_adapted, hipfftXtFree, HIPFFT_SUCCESS>
     hipfftLibXtDesc_wrapper_t;
 
