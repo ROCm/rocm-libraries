@@ -121,7 +121,11 @@ def build_tensilelite_client(hipblaslt_path: str | Path, build_dir: str | Path =
 
     if build:
         if not find_spec("invoke"):
-            subprocess.check_call([sys.executable, "-m", "pip", "install", "invoke"], stdout=subprocess.DEVNULL)
+            raise RuntimeError(
+                "'invoke' package not found. It is required by tensilelite's "
+                "build system. Install it via the tensilelite setup "
+                "(hipBLASLt/tensilelite/requirements.txt) or: pip install invoke"
+            )
 
         shutil.rmtree(build_dir, ignore_errors=True)
 
