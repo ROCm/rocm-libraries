@@ -62,11 +62,11 @@ this vendored location, set `PYTHONPATH` explicitly to the relevant tool
 subdirectories and CK DSL Python root.
 
 ```bash
-cd <repo>/dnn-providers/hip-kernel-provider/rocKE
+cd <repo>/dnn-providers/hip-kernel-provider
 
 PYTHONPATH=rocke/library \
   python3 -m builders.common.benchmark_rocke_unified_attention \
-  --shapes dsl_docs/optimization/utilities/tools/stage1_benchmark/tests/aiter_ua_prefill2d_allbf16.json \
+  --shapes rocke/library/builders/gfx950/attention/aiter_ua_prefill2d_allbf16.json \
   --dtype bf16 \
   --limit 1
 ```
