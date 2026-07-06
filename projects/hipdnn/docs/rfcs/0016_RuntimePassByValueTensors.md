@@ -585,28 +585,30 @@ combinations:
 5. **Virtual exclusion.** `INVALID_VALUE` if `virtual && is_pass_by_value`.
 
 Rules 2–4 are unreachable through the public constructors/setters (which
-keep the flags consistent) and guard only the raw backend-attribute path
-(1307/1308/`HIPDNN_ATTR_TENSOR_CONSTANT_VALUE` set directly); they are
-therefore validated at the `validate()` / descriptor level, not via the
-frontend API. Rules 1 and 5 are reachable and frontend-testable. There is
+keep the flags consistent); they guard the raw backend-attribute path
+(1307/1308/`HIPDNN_ATTR_TENSOR_CONSTANT_VALUE` set directly on a
+`TensorDescriptor`) and are enforced by the backend
+`TensorDescriptor::finalize()` ([§2.2](#22-hipdnn-gap)). It needs no
+runtime scalar: each is a predicate over the two flag bits and value
+*presence* (`value.type != NONE`), and in these combos the value is a
+baked `CONSTANT_VALUE` already in the descriptor. Rules 1 and 5 are
+reachable and frontend-testable. There is
 **no** "value present ⇒ compile-time mode" rule — that was the old
 two-state design; the frontend-injected state is value + runtime. These mirror cuDNN-frontend's
 `validate()` (the value⇒umbrella and virtual-exclusion analogues and the
 compile-time-constant constraints,
 [`graph_properties.h:70-94`](https://github.com/NVIDIA/cudnn-frontend/blob/c4ec01a28a26aa57021862de809cc257619f7516/include/cudnn_frontend/graph_properties.h#L70-L94)).
 
-**Post-build immutability.** The graph descriptor is frozen at build
-(`backendFinalize`, [§2.3](#23-constraints)), so a scalar's baked value
-and pass-by-value mode cannot change after build. To make that guarantee
-enforced rather than a silent no-op, a `frozen` flag is set on each
-`TensorAttributes` during `lowerGraphToDescriptors`, and the value/mode
-setters (`set_value`, `set_compile_time_constant`,
-`set_as_runtime_parameter`, `set_is_pass_by_value`) return `INVALID_VALUE`
-when called on a frozen tensor. The **only** sanctioned way to change a
-runtime (user-supplied or frontend-injected) scalar after build is the variant pack at execute
-([§4.4](#44-execute-time-transport)); it does not go through these setters,
-so it is unaffected. This is the reachable, frontend-testable rejection
-path for a post-build value change.
+**Post-build immutability.** The compiled plan is frozen at build
+(`backendFinalize`, [§2.3](#23-constraints)): a scalar's baked value and
+pass-by-value mode are captured in the backend `TensorDescriptor` and the
+serialized plan, and nothing re-reads the frontend `TensorAttributes`
+after build. Post-build calls to the value/mode setters (`set_value`,
+`set_compile_time_constant`, `set_as_runtime_parameter`,
+`set_is_pass_by_value`) are therefore inert: they mutate only the detached
+frontend object and cannot alter the compiled plan. The only way to vary a
+runtime (user-supplied or frontend-injected) scalar after build is the
+variant pack at execute ([§4.4](#44-execute-time-transport)).
 
 `detail::validateScalarParameter`
 ([`frontend/include/hipdnn_frontend/node/detail/Utilities.hpp`](../../frontend/include/hipdnn_frontend/node/detail/Utilities.hpp), ~line
@@ -1030,11 +1032,7 @@ in [`DescriptorHelpers.hpp`](../../frontend/include/hipdnn_frontend/detail/Descr
 the rest. Add the `graph.tensor(scalar, ScalarType)` factory overloads
 ([§4.1](#41-frontend-tensor-flag)). Add the frontend validations
 ([§4.7](#47-frontend-validation)): the build-time invalid-combo checks and
-the post-build immutability guard — a `frozen` flag set on each
-`TensorAttributes` during `lowerGraphToDescriptors` and checked by
-`set_value` / `set_compile_time_constant` / `set_as_runtime_parameter` /
-`set_is_pass_by_value`, which return `INVALID_VALUE` once the tensor is
-frozen — plus the relaxed `validateScalarParameter`. No
+the relaxed `validateScalarParameter`. No
 graph-level setter or graph schema field is added — the
 runtime-pass-by-value feature signal is derived from the per-tensor flags
 ([§4.3](#43-feature-signal-derived)).
@@ -1128,18 +1126,19 @@ Test conventions follow [RFC 0006](0006_PluginAgnosticIntegrationTests.md). The 
   payload. A plugin that cannot interpret a newer payload version rejects
   it at deserialize.
 
-- **Post-build immutability (reachable rejection).** After `graph.build()`,
-  calling `set_value` / `set_compile_time_constant` /
-  `set_as_runtime_parameter` / `set_is_pass_by_value` on a frozen tensor
-  returns `INVALID_VALUE` ([§4.7](#47-frontend-validation)); the
-  variant-pack path still supplies a runtime pass-by-value value at execute post-build.
-  This is the frontend-testable rejection scenario.
+- **Post-build immutability (inertness).** After `graph.build()`, calling
+  `set_value` / `set_compile_time_constant` / `set_as_runtime_parameter` /
+  `set_is_pass_by_value` on a tensor does not change the compiled plan or
+  the execution result ([§4.7](#47-frontend-validation)); the variant-pack
+  path still supplies a runtime pass-by-value value at execute post-build.
 - **Invalid-combination rejection (descriptor level).** The inconsistent
   flag/value combinations the public API cannot construct
   (`is_compile_time_constant && no value`; `value present &&
   !is_pass_by_value`; `is_compile_time_constant && !is_pass_by_value`) are
-  exercised via the raw backend-attribute path and rejected by
-  `validate()`; `virtual && is_pass_by_value` and value⇒umbrella are
+  exercised via the raw backend-attribute path (1307/1308/`CONSTANT_VALUE`
+  set directly on a `TensorDescriptor`) and rejected by the backend
+  `TensorDescriptor::finalize()`, which sees both flags and value presence
+  (`value.type != NONE`); `virtual && is_pass_by_value` and value⇒umbrella are
   reachable and checked directly. All three states validate cleanly, and a
   required scalar in any of the three passes `validateScalarParameter`.
 
