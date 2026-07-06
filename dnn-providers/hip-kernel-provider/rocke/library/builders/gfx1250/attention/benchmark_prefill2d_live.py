@@ -421,7 +421,7 @@ def main() -> int:
             print(
                 f"  speedup vs Triton:  geomean={_gm(spds):.3f}x  wins={wins}/{len(spds)}"
             )
-        if tri_out is not None:
+        if not args.skip_triton and n_fly_supported:
             print(
                 f"  correctness:        {n_fly_correct}/{n_fly_supported} correct (tol={args.tol})"
             )
