@@ -146,11 +146,16 @@ inline void validate_or_throw(fft_io io, const std::string& func_name)
         throw std::invalid_argument("invalid io flag for " + func_name);
     }
 }
-template <fft_io io>
-constexpr inline fft_io other()
+inline fft_io other(fft_io io)
 {
-    static_assert(io == fft_io_in || io == fft_io_out, "invalid fft_io value");
+    validate_or_throw(io, "other");
     return io == fft_io_in ? fft_io_out : fft_io_in;
+}
+
+inline std::string str(const fft_io& io)
+{
+    validate_or_throw(io, "str");
+    return io == fft_io_in ? "input" : "output";
 }
 
 template <>

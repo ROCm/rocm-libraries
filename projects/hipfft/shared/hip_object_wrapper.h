@@ -60,7 +60,7 @@ struct hip_object_wrapper_t
 
     void free()
     {
-        if(obj)
+        if(obj && owned)
         {
             (void)TDestroy(obj);
             obj = nullptr;
