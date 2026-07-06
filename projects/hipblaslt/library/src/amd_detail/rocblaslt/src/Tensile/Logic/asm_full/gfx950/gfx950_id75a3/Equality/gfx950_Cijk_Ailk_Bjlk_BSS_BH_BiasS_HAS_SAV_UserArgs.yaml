@@ -1,7 +1,7 @@
 - {MinimumRequiredVersion: 5.0.0}
 - gfx950
 - gfx950
-- [Device 75a0]
+- [Device 75a3, Device 75a2]
 - Activation: true
   ActivationComputeDataType: 0
   ActivationNoGuard: false
