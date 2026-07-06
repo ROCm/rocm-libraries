@@ -336,7 +336,9 @@ class Reporter:
         if pe.role == "reference" and pe.status == "success":
             label = "reference"
             timing = (
-                pe.gpu_kernel_stats if pe.gpu_kernel_stats is not None else pe.e2e_stats
+                pe.gpu_kernel_stats
+                if pe.gpu_kernel_stats is not None
+                else pe.host_stats
             )
             if timing is not None:
                 exec_s = timing.total_ms / 1000
@@ -353,7 +355,9 @@ class Reporter:
                 else "passed"
             )
             timing = (
-                pe.gpu_kernel_stats if pe.gpu_kernel_stats is not None else pe.e2e_stats
+                pe.gpu_kernel_stats
+                if pe.gpu_kernel_stats is not None
+                else pe.host_stats
             )
             if timing is not None:
                 exec_s = timing.total_ms / 1000
@@ -377,8 +381,8 @@ class Reporter:
             [
                 "kernel_mean_ms",
                 "kernel_median_ms",
-                "e2e_mean_ms",
-                "e2e_median_ms",
+                "host_mean_ms",
+                "host_median_ms",
             ]
         )
         include_warnings = any(pe.warnings for pe in graph_result.results)
@@ -393,8 +397,8 @@ class Reporter:
                 [
                     self._fmt_stat(pe.gpu_kernel_stats, "mean_ms"),
                     self._fmt_stat(pe.gpu_kernel_stats, "median_ms"),
-                    self._fmt_stat(pe.e2e_stats, "mean_ms"),
-                    self._fmt_stat(pe.e2e_stats, "median_ms"),
+                    self._fmt_stat(pe.host_stats, "mean_ms"),
+                    self._fmt_stat(pe.host_stats, "median_ms"),
                 ]
             )
             if include_warnings:
@@ -494,16 +498,16 @@ class Reporter:
             self._print("")
 
     def _print_pe_stats(self, pe: ProviderEngineResult) -> None:
-        """Print E2E + kernel stats from a ProviderEngineResult."""
-        if pe.e2e_stats is not None:
-            self._print("E2E Execution Statistics:")
-            self._print_stats_block(pe.e2e_stats)
+        """Print host + kernel stats from a ProviderEngineResult."""
+        if pe.host_stats is not None:
+            self._print("Host Submission Statistics:")
+            self._print_stats_block(pe.host_stats)
             self._print("")
         if pe.gpu_kernel_stats is not None:
             self._print("Kernel Execution Statistics:")
             self._print_stats_block(pe.gpu_kernel_stats)
             self._print("")
-        elif pe.e2e_stats is not None:
+        elif pe.host_stats is not None:
             self._print("Kernel Timing: Not available")
             self._print("")
 
