@@ -20,6 +20,7 @@
 
 add_executable( rocfft-internal-test
   function_pool_test.cpp
+  is_inner_batched_test.cpp
 )
 
 target_include_directories( rocfft-internal-test PRIVATE

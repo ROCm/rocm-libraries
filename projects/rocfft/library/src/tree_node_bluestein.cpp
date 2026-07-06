@@ -85,17 +85,8 @@ BluesteinType BluesteinNode::DecideBlueType()
 
     if(scheme == CS_L1D_CC)
     {
-        // The fused path can't represent inner-batched layouts, where
-        // the batch distance is smaller than an FFT stride.  Use the
-        // non-fused path there.
-        bool innerBatched = false;
-        if(batch > 1)
-        {
-            for(size_t i = 0; i < inStride.size(); ++i)
-                innerBatched |= (iDist < inStride[i]);
-            for(size_t i = 0; i < outStride.size(); ++i)
-                innerBatched |= (oDist < outStride[i]);
-        }
+        // Fused path can't represent inner-batched layouts, use non-fused there.
+        bool innerBatched = is_inner_batched(batch, inStride, iDist, outStride, oDist);
 
         auto fusedBluesteinAllow = (parent || innerBatched) ? false : true;
 
