@@ -22,6 +22,8 @@ subtrees:
 
 - caption: API reference
   entries:
+  - file: reference/data-type-support
+    title: Precision support
   - file: reference/hipfft-api-usage
     title: hipFFT API and usage notes
   - file: reference/hipfftw-api-usage

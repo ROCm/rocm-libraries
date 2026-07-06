@@ -38,7 +38,7 @@ set(PROFILER_OPS
     profile_gemm_quantization.cpp
 )
 
-if(SUPPORTED_GPU_TARGETS MATCHES "gfx9")
+if(SUPPORTED_GPU_TARGETS MATCHES "gfx9|gfx1250")
   if(DTYPES MATCHES "fp32" OR DTYPES MATCHES "fp64" OR NOT DEFINED DTYPES)
     list(APPEND PROFILER_OPS profile_contraction_bilinear.cpp)
     list(APPEND PROFILER_OPS profile_contraction_scale.cpp)
@@ -56,7 +56,6 @@ if(SUPPORTED_GPU_TARGETS MATCHES "gfx9|gfx1[12]")
     list(APPEND PROFILER_OPS profile_batched_gemm_add_relu_gemm_add.cpp)
     list(APPEND PROFILER_OPS profile_gemm_add.cpp)
     list(APPEND PROFILER_OPS profile_grouped_gemm.cpp)
-    list(APPEND PROFILER_OPS profile_gemm_streamk.cpp)
     list(APPEND PROFILER_OPS profile_gemm_add_relu.cpp)
     list(APPEND PROFILER_OPS profile_gemm_add_relu_add_layernorm.cpp)
     list(APPEND PROFILER_OPS profile_grouped_gemm_fixed_nk.cpp)
@@ -79,7 +78,6 @@ if(SUPPORTED_GPU_TARGETS MATCHES "gfx9|gfx1[12]")
   list(APPEND PROFILER_OPS profile_gemm_bias_add_reduce.cpp)
   list(APPEND PROFILER_OPS profile_gemm_splitk.cpp)
   list(APPEND PROFILER_OPS profile_gemm_universal_batched.cpp)
-  list(APPEND PROFILER_OPS profile_gemm_universal_streamk.cpp)
   list(APPEND PROFILER_OPS profile_conv_fwd_bias_relu.cpp)
   list(APPEND PROFILER_OPS profile_conv_fwd_bias_relu_add.cpp)
   list(APPEND PROFILER_OPS profile_conv_bwd_data.cpp)
@@ -159,14 +157,16 @@ endif()
 # =============================================================================
 # CK Tile Dispatcher: Generate and compile CK Tile conv kernels
 # =============================================================================
-if(CK_TILE_DISPATCHER AND SUPPORTED_GPU_TARGETS MATCHES "gfx9")
+if(CK_TILE_DISPATCHER AND SUPPORTED_GPU_TARGETS MATCHES "gfx9|gfx1250")
   find_package(Python3 COMPONENTS Interpreter REQUIRED)
 
   # Build dispatcher instance libraries (defines ck_dispatcher_grouped_conv_* targets)
-  add_subdirectory(
-    ${PROJECT_SOURCE_DIR}/dispatcher/library
-    ${CMAKE_CURRENT_BINARY_DIR}/dispatcher_library
-  )
+  if(NOT TARGET ck_dispatcher_grouped_conv_fwd)
+    add_subdirectory(
+      ${PROJECT_SOURCE_DIR}/dispatcher/library
+      ${CMAKE_CURRENT_BINARY_DIR}/dispatcher_library
+    )
+  endif()
 
   # Profiler needs dispatcher API headers and builder test infrastructure
   target_include_directories(${PROFILER_EXECUTABLE} PRIVATE
@@ -178,6 +178,9 @@ if(CK_TILE_DISPATCHER AND SUPPORTED_GPU_TARGETS MATCHES "gfx9")
     -Wno-float-equal
     -Wno-ctad-maybe-unsupported
     -Wno-old-style-cast
+    # New clang -Weverything suggestion firing on builder-pattern setters that
+    # return *this in the shared dispatcher headers; not a real defect.
+    -Wno-lifetime-safety-intra-tu-suggestions
   )
 
   # Link all available dispatcher instance libraries
@@ -219,7 +222,6 @@ if(SUPPORTED_GPU_TARGETS MATCHES "gfx9|gfx1[12]")
     list(APPEND DEVICE_INSTANCES device_gemm_fastgelu_instance)
     list(APPEND DEVICE_INSTANCES device_batched_gemm_add_relu_gemm_add_instance)
     list(APPEND DEVICE_INSTANCES device_grouped_gemm_instance)
-    list(APPEND DEVICE_INSTANCES device_gemm_streamk_instance)
     list(APPEND DEVICE_INSTANCES device_gemm_add_relu_instance)
     list(APPEND DEVICE_INSTANCES device_gemm_add_relu_add_layernorm_instance)
     list(APPEND DEVICE_INSTANCES device_grouped_gemm_fixed_nk_instance)
@@ -240,7 +242,6 @@ if(SUPPORTED_GPU_TARGETS MATCHES "gfx9|gfx1[12]")
   endif()
   list(APPEND DEVICE_INSTANCES device_gemm_splitk_instance)
   list(APPEND DEVICE_INSTANCES device_gemm_universal_batched_instance)
-  list(APPEND DEVICE_INSTANCES device_gemm_universal_streamk_instance)
   list(APPEND DEVICE_INSTANCES device_gemm_add_multiply_instance)
   list(APPEND DEVICE_INSTANCES device_gemm_add_instance)
   list(APPEND DEVICE_INSTANCES device_gemm_reduce_instance)
@@ -323,16 +324,6 @@ if(SUPPORTED_GPU_TARGETS MATCHES "gfx9|gfx1[12]")
   list(APPEND DEVICE_INSTANCES device_grouped_conv3d_bwd_weight_ndhwgc_instance)
   list(APPEND DEVICE_INSTANCES device_grouped_conv3d_bwd_weight_gndhwc_instance)
   list(APPEND DEVICE_INSTANCES device_grouped_conv3d_bwd_weight_ngcdhw_instance)
-endif()
-
-if(SUPPORTED_GPU_TARGETS MATCHES "gfx9")
-  if(CK_EXPERIMENTAL_BUILDER)
-    if(NOT CK_TILE_DISPATCHER)
-      list(APPEND DEVICE_INSTANCES device_grouped_conv_fwd_tile_instances)
-      list(APPEND DEVICE_INSTANCES device_grouped_conv_bwd_weight_tile_instances)
-      list(APPEND DEVICE_INSTANCES device_grouped_conv_bwd_data_tile_instances)
-    endif()
-  endif()
 endif()
 
 if(DL_KERNELS)

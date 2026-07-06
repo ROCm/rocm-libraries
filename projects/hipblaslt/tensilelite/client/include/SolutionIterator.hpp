@@ -36,6 +36,7 @@
 #include <queue>
 
 #include "RunListener.hpp"
+#include <origami/simulator/tensilelite/formocast_simulator.hpp>
 
 namespace TensileLite
 {
@@ -109,11 +110,6 @@ namespace TensileLite
 
             virtual void finalizeReport() override {}
 
-            virtual int error() const override
-            {
-                return 0;
-            }
-
             virtual bool                                 moreSolutionsInProblem() const = 0;
             virtual std::shared_ptr<ContractionSolution> getSolution()                  = 0;
             virtual bool                                 runCurrentSolution();
@@ -129,6 +125,11 @@ namespace TensileLite
                                        ContractionProblemGemm& problem,
                                        bool                    isReportValid=true);
             virtual bool checkSolution(ContractionSolution& solution);
+
+            int error() const override
+            {
+                return static_cast<int>(m_encounteredNonFatalError);
+            }
 
             std::shared_ptr<MasterSolutionLibrary<ContractionProblemGemm>> m_library;
             std::shared_ptr<Hardware>                                      m_hardware;
@@ -170,6 +171,7 @@ namespace TensileLite
             std::vector<std::shared_ptr<ContractionSolution>> m_solutions;
             std::queue<std::pair<int,double>>                 m_qSolutionIdx;
             std::unordered_map<int,double>                    m_hitrate;
+            std::unordered_map<int,origami::Formocast::PredictedPerformance> m_predPerf;
 
             double m_predictionThreshold;
             double m_currentPrediction;
@@ -228,6 +230,8 @@ namespace TensileLite
             std::vector<std::shared_ptr<ContractionSolution>> m_solutions;
             std::queue<std::pair<int,double>>                 m_qSolutionIdx;
             std::unordered_map<int,double>                    m_hitrate;
+            std::unordered_map<int,origami::Formocast::PredictedPerformance> m_predPerf;
+
             int                                               m_numSolutions       = 1;
             int                                               m_currentSolutionIdx = 0;
             double                                            m_predictionThreshold;

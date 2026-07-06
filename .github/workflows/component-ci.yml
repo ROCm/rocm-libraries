@@ -1,0 +1,92 @@
+name: Component CI
+
+on:
+  push:
+    branches:
+      - develop
+      - release/therock-*
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.head_ref || github.run_id }}
+  cancel-in-progress: true
+
+jobs:
+  changes:
+    name: "Configure CI"
+    runs-on: ubuntu-24.04
+    outputs:
+      stinkytofu: ${{ steps.configure.outputs.stinkytofu }}
+      rocisa: ${{ steps.configure.outputs.rocisa }}
+      miopen: ${{ steps.configure.outputs.miopen }}
+      docker-image: ${{ steps.env.outputs.docker-image }}
+      linux-runner: ${{ steps.env.outputs.linux-runner }}
+      windows-runner: ${{ steps.env.outputs.windows-runner }}
+      therock-ref: ${{ steps.env.outputs.therock-ref }}
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          sparse-checkout: |
+            .github/actions/ci-env
+            .github/scripts/ci_utils.py
+            .github/scripts/component_ci.py
+          fetch-depth: 2
+      - uses: ./.github/actions/ci-env
+        id: env
+      - name: Detect changed components
+        id: configure
+        run: python .github/scripts/component_ci.py
+
+  stinkytofu:
+    name: "StinkyTofu"
+    needs: changes
+    if: needs.changes.outputs.stinkytofu == 'true'
+    uses: ./.github/workflows/component-ci-stinkytofu.yml
+    with:
+      docker_image: ${{ needs.changes.outputs.docker-image }}
+      linux_runner: ${{ needs.changes.outputs.linux-runner }}
+      windows_runner: ${{ needs.changes.outputs.windows-runner }}
+
+  rocisa:
+    name: "rocISA"
+    needs: changes
+    if: needs.changes.outputs.rocisa == 'true'
+    uses: ./.github/workflows/component-ci-rocisa.yml
+    with:
+      docker_image: ${{ needs.changes.outputs.docker-image }}
+      linux_runner: ${{ needs.changes.outputs.linux-runner }}
+      windows_runner: ${{ needs.changes.outputs.windows-runner }}
+
+  miopen:
+    name: "MIOpen"
+    needs: changes
+    if: needs.changes.outputs.miopen == 'true'
+    uses: ./.github/workflows/component-ci-miopen.yml
+
+  component-ci-summary:
+    name: "Component CI Summary"
+    if: always()
+    needs:
+      - stinkytofu
+      - rocisa
+      - miopen
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Checkout TheRock repository
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          repository: "ROCm/TheRock"
+          ref: ${{ needs.changes.outputs.therock-ref }}
+          sparse-checkout: build_tools/github_actions
+          sparse-checkout-cone-mode: true
+
+      - name: Evaluate workflow results
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+        run: |
+          python build_tools/github_actions/workflow_summary.py \
+            --needs-json '${{ toJson(needs) }}'

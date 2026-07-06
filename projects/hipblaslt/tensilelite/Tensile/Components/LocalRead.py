@@ -94,14 +94,11 @@ class LocalReadVALU(LocalRead):
                     #     tP["bpe"], \
                     #     paramList[-1]))
                 # paramTuple = tuple(paramList)
-                num = paramList[0] //65536
+                num = paramList[0] // 65536
                 paramList[0] = paramList[0] - num * 65536
-                srcVgpr=vgpr("LocalReadAddr%s+%d"%(tc,num))
+                srcAddr = vgpr("LocalReadAddr%s+%d"%(tc, num))
 
                 if numOffsets == 1:
-                    addrIdx = paramList[0] // 65536
-                    srcAddr=vgpr("LocalReadAddr%s+%u"%(tc, addrIdx))
-                    paramList[0] -= addrIdx * 65536
                     ds = DSModifiers(na=1, offset=paramList[0])
                 if numOffsets == 2:
                     ds = DSModifiers(na=2, offset0=paramList[0], offset1=paramList[1])
@@ -111,7 +108,7 @@ class LocalReadVALU(LocalRead):
                 valuIdx += blockWidth
 
                 # TODO - handle vector-load
-                with writer.allocTmpSgpr(1) as tmpSgprInfo:
+                with writer.allocTmpSgpr(1, tag="LocalReadVALU_tmpSgprInfo") as tmpSgprInfo:
                     tmpSgpr = tmpSgprInfo.idx
                     if writer.db["CheckValue1%s" % tc]:
                         dbgVgpr = destVgpr
@@ -1671,7 +1668,7 @@ class LocalReadMFMA(LocalRead):
 
                             self._emitLdsRead(writer, kernel, tP, LocalReadX, dst=destVgpr, src=srcAddr, ds=ds, module=localReadCodeT, comment=comment)
                             # TODO - handle vector-load
-                            with writer.allocTmpSgpr(1) as tmpSgprInfo:
+                            with writer.allocTmpSgpr(1, tag="LocalReadVALU_tmpSgprInfo2") as tmpSgprInfo:
                                 tmpSgpr = tmpSgprInfo.idx
                                 if writer.db["CheckValue1%s"%tc] and not writer.inTailLoop:
 
