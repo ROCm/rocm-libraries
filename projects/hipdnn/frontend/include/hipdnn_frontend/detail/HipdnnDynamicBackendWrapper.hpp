@@ -129,6 +129,10 @@ public:
         {
             _getLastErrorString(message, maxSize);
         }
+        else if(message != nullptr && maxSize > 0)
+        {
+            message[0] = '\0';
+        }
     }
 
     hipdnn_data_sdk::utilities::Version version() override

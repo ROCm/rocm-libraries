@@ -118,7 +118,12 @@ target_link_libraries(
     hipdnn_frontend_dynamic_load_tests
     GTest::gtest GTest::gtest_main Threads::Threads hipdnn_frontend_dynamic
 )
-add_dependencies(hipdnn_frontend_dynamic_load_tests hipdnn_backend)
+if(TARGET hipdnn_backend)
+    add_dependencies(hipdnn_frontend_dynamic_load_tests hipdnn_backend)
+    target_compile_definitions(
+        hipdnn_frontend_dynamic_load_tests PRIVATE HIPDNN_TEST_EXPECT_BACKEND_LIBRARY
+    )
+endif()
 
 add_unit_test_target(
     hipdnn_frontend_dynamic_load_tests ${CMAKE_CURRENT_BINARY_DIR}

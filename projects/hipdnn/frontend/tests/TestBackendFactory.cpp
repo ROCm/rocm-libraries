@@ -44,6 +44,57 @@ TEST(TestBackendFactory, TryToUseBackendInterfaceNullptrCreatesIncompatibleWrapp
         std::dynamic_pointer_cast<IncompatibleBackendWrapper>(tryToUseBackendInterface(nullptr)));
 }
 
+TEST(TestBackendFactory, GetOrCreateInstanceReturnsPresetInstanceWithoutCallingFactory)
+{
+    IHipdnnBackend::resetInstance();
+    auto presetBackend = std::make_shared<IncompatibleBackendWrapper>();
+    IHipdnnBackend::setInstance(presetBackend);
+
+    int factoryCalls = 0;
+    auto backend = IHipdnnBackend::getOrCreateInstance([&] {
+        ++factoryCalls;
+        return tryToUseBackendInterface(SUCCESS_VERSION.c_str());
+    });
+
+    EXPECT_EQ(backend, presetBackend);
+    EXPECT_EQ(factoryCalls, 0);
+
+    IHipdnnBackend::resetInstance();
+}
+
+TEST(TestBackendFactory, GetOrCreateInstanceCachesFirstInitialization)
+{
+    IHipdnnBackend::resetInstance();
+    auto createdBackend = std::make_shared<IncompatibleBackendWrapper>();
+
+    int factoryCalls = 0;
+    auto firstBackend = IHipdnnBackend::getOrCreateInstance([&] {
+        ++factoryCalls;
+        return createdBackend;
+    });
+    auto secondBackend = IHipdnnBackend::getOrCreateInstance([&] {
+        ++factoryCalls;
+        return tryToUseBackendInterface(SUCCESS_VERSION.c_str());
+    });
+
+    EXPECT_EQ(firstBackend, createdBackend);
+    EXPECT_EQ(secondBackend, createdBackend);
+    EXPECT_EQ(factoryCalls, 1);
+
+    IHipdnnBackend::resetInstance();
+}
+
+TEST(TestBackendFactory, HipdnnBackendReturnsPresetInstance)
+{
+    IHipdnnBackend::resetInstance();
+    auto presetBackend = std::make_shared<IncompatibleBackendWrapper>();
+    IHipdnnBackend::setInstance(presetBackend);
+
+    EXPECT_EQ(hipdnnBackend(), presetBackend);
+
+    IHipdnnBackend::resetInstance();
+}
+
 TEST(TestBackendFactory, HipdnnBackendCreatesDirectWrapperWithBackendVersion)
 {
     IHipdnnBackend::resetInstance();

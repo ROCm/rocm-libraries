@@ -54,7 +54,7 @@ void* missingSymbolResolver(const char*)
 
 } // namespace
 
-TEST(HipdnnDynamicBackendWrapper, MissingStatusReturningSymbolsReturnVersionMismatch)
+TEST(TestHipdnnDynamicBackendWrapper, MissingStatusReturningSymbolsReturnVersionMismatch)
 {
     using hipdnn_data_sdk::utilities::Version;
     using hipdnn_frontend::detail::HipdnnDynamicBackendWrapper;
@@ -128,6 +128,34 @@ TEST(HipdnnDynamicBackendWrapper, MissingStatusReturningSymbolsReturnVersionMism
 
     EXPECT_STREQ(backend.getErrorString(HIPDNN_STATUS_VERSION_MISMATCH),
                  "HIPDNN_STATUS_VERSION_MISMATCH");
+}
+
+TEST(TestHipdnnDynamicBackendWrapper, MissingLastErrorStringClearsBuffer)
+{
+    using hipdnn_data_sdk::utilities::Version;
+    using hipdnn_frontend::detail::HipdnnDynamicBackendWrapper;
+
+    HipdnnDynamicBackendWrapper backend(Version{1, 0, 0}, missingSymbolResolver);
+    char message[] = "stale error";
+
+    backend.getLastErrorString(message, sizeof(message));
+
+    EXPECT_STREQ(message, "");
+}
+
+TEST(TestHipdnnDynamicBackendWrapper, MissingLastErrorStringAllowsNullAndZeroSize)
+{
+    using hipdnn_data_sdk::utilities::Version;
+    using hipdnn_frontend::detail::HipdnnDynamicBackendWrapper;
+
+    HipdnnDynamicBackendWrapper backend(Version{1, 0, 0}, missingSymbolResolver);
+    char message[] = "unchanged";
+
+    backend.getLastErrorString(nullptr, 1);
+    backend.getLastErrorString(nullptr, 0);
+    backend.getLastErrorString(message, 0);
+
+    EXPECT_STREQ(message, "unchanged");
 }
 
 TEST_F(IntegrationHipdnnDynamicBackendWrapper, VersionStringMatchesBackend)

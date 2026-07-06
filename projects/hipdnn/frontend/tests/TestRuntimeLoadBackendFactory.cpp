@@ -21,16 +21,24 @@ class TestRuntimeLoadBackendFactory : public testing::Test
 protected:
     void SetUp() override
     {
+#ifdef HIPDNN_TEST_EXPECT_BACKEND_LIBRARY
+        ASSERT_NE(backendLibraryHandle(), nullptr);
+#else
         if(backendLibraryHandle() == nullptr)
         {
             GTEST_SKIP() << "hipDNN backend library is not available for runtime symbol loading";
         }
+#endif
 
         IHipdnnBackend::resetInstance();
         _backend = hipdnnBackend();
         if(_backend->versionString()[0] == '\0')
         {
+#ifdef HIPDNN_TEST_EXPECT_BACKEND_LIBRARY
+            FAIL() << "hipDNN backend library was found, but runtime symbol loading failed";
+#else
             GTEST_SKIP() << "hipDNN backend library is not available for runtime symbol loading";
+#endif
         }
     }
 

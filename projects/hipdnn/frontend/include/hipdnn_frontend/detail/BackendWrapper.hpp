@@ -110,16 +110,13 @@ inline std::shared_ptr<IHipdnnBackend> tryToUseDynamicBackendInterface()
 // Allow overriding the backend implementation by setting a custom backend instance.
 inline static std::shared_ptr<IHipdnnBackend> hipdnnBackend()
 {
-    if(!IHipdnnBackend::getInstance())
-    {
+    return IHipdnnBackend::getOrCreateInstance([] {
 #ifdef HIPDNN_FRONTEND_RUNTIME_LOAD_BACKEND
-        IHipdnnBackend::setInstance(tryToUseDynamicBackendInterface());
+        return tryToUseDynamicBackendInterface();
 #else
-        IHipdnnBackend::setInstance(tryToUseBackendInterface(hipdnnVersionString_ext()));
+        return tryToUseBackendInterface(hipdnnVersionString_ext());
 #endif
-    }
-
-    return IHipdnnBackend::getInstance();
+    });
 }
 
 } // namespace hipdnn_frontend::detail

@@ -63,6 +63,6 @@ TEST(TestRuntimeLoadBackendStaticCheck, LinksWithoutBackendLibrary)
     // Reference (but never call) the surface so the linker must resolve every
     // backend reference reachable from it.
     using SurfaceFn = hipdnn_frontend::Error (*)();
-    SurfaceFn surface = &exerciseRuntimeLoadSurface;
+    volatile SurfaceFn surface = &exerciseRuntimeLoadSurface;
     EXPECT_NE(surface, nullptr);
 }

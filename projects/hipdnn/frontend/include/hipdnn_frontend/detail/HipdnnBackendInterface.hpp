@@ -4,7 +4,9 @@
 #pragma once
 
 #include <cstdint>
+#include <memory>
 #include <mutex>
+#include <utility>
 
 #include <hipdnn_backend.h>
 #include <hipdnn_data_sdk/Visibility.hpp>
@@ -134,6 +136,20 @@ public:
     {
         const std::lock_guard<std::mutex> lock(backendMutex());
         return backendInstance();
+    }
+
+    template <typename BackendFactory>
+    HIPDNN_HIDDEN static std::shared_ptr<IHipdnnBackend>
+        getOrCreateInstance(BackendFactory&& factory)
+    {
+        const std::lock_guard<std::mutex> lock(backendMutex());
+        auto& instance = backendInstance();
+        if(!instance)
+        {
+            instance = std::forward<BackendFactory>(factory)();
+        }
+
+        return instance;
     }
 
     HIPDNN_HIDDEN static void setInstance(std::shared_ptr<IHipdnnBackend> instance)
