@@ -46,6 +46,7 @@ inline constexpr int32x16_t to_wmma_scale_arg(const T& vec)
     else
     {
         static_assert(sizeof(ValueT) == 0, "unsupported ValueT for to_wmma_scale_arg");
+        return int32x16_t{};
     }
 }
 
