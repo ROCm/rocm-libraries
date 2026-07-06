@@ -517,25 +517,12 @@ struct BlockUniversalGemmAsBsCr
                         b_warp_tensor.get_thread_buffer() = b_warp_tile_.get_y_sliced_thread_data(
                             merge_sequences(sequence<nIter, kInnerIter>{}, b_warp_y_index_zeros),
                             merge_sequences(sequence<1, 1>{}, b_warp_y_lengths));
-_y_index_zeros),
-                            merge_sequences(sequence<1, 1>{}, a_warp_y_lengths)));
-                    static_for<0, NIterPerWarp, 1>{}([&](auto nIter) {
-                        // read B warp tensor from B block tensor
-                        BWarpTensor b_warp_tensor;
-
-                        assign_thread_buffer(
-                            b_warp_tensor.get_thread_buffer(),
-                            b_warp_tile_.get_y_sliced_thread_data(
-                                merge_sequences(sequence<nIter, kInnerIter>{}, b_warp_y_index_zeros),
-                                merge_sequences(sequence<1, 1>{}, b_warp_y_lengths)));
                         // read C warp tensor from C block tensor-
                         CWarpTensor c_warp_tensor;
 
-                        direct_assign_thread_buffer(
-                            c_warp_tensor.get_thread_buffer(),
-                            c_block_tensor.get_y_sliced_thread_data(
-                                merge_sequences(sequence<mIter, nIter>{}, c_warp_y_index_zeros),
-                                merge_sequences(sequence<1, 1>{}, c_warp_y_lengths)));
+                        c_warp_tensor.get_thread_buffer() = c_block_tensor.get_y_sliced_thread_data(
+                            merge_sequences(sequence<mIter, nIter>{}, c_warp_y_index_zeros),
+                            merge_sequences(sequence<1, 1>{}, c_warp_y_lengths));
 
                         // The block_sync_lds() here performs double duty:
                         // A) safeguard against data hazard because barrier from
