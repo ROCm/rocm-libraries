@@ -348,3 +348,22 @@ def needs_warp_expansion(config: dict) -> bool:
 def needs_pipeline_expansion(config: dict) -> bool:
     """True if pipeline is a wildcard (\"*\")."""
     return config.get("pipeline", "compv4") == "*"
+
+
+# ============================================================================
+# BQuant-specific Type Mappings
+# ============================================================================
+
+# CK qualified type names for BQuant dtype fields (A, B, C, Q).
+# Used by unified_bquant_gemm_codegen.py. Kept here so future AQuant/ABQuant
+# codegens can reuse the same map without duplication.
+BQUANT_DTYPE_MAP = {
+    "fp8":     "ck_tile::fp8_t",
+    "bf8":     "ck_tile::bf8_t",
+    "pk_int4": "ck_tile::pk_int4_t",
+    "pk_fp4":  "ck_tile::pk_fp4_t",
+    "half":    "ck_tile::half_t",
+    "bf16":    "ck_tile::bf16_t",
+    "float":   "float",
+    "e8m0":    "ck_tile::e8m0_t",
+}

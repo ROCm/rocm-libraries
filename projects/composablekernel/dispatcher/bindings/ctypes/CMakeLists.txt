@@ -155,6 +155,37 @@ else()
 endif()
 
 # =============================================================================
+# BQuantGrouped GEMM ctypes Library
+# =============================================================================
+
+file(GLOB BQUANT_GEMM_KERNEL_HEADERS "${CMAKE_BINARY_DIR}/generated_kernels/bquant_gemm_*.hpp")
+if(BQUANT_GEMM_KERNEL_HEADERS)
+    list(GET BQUANT_GEMM_KERNEL_HEADERS 0 BQUANT_GEMM_KERNEL_HEADER)
+    message(STATUS "Found BQuant GEMM kernel for ctypes lib: ${BQUANT_GEMM_KERNEL_HEADER}")
+
+    add_ctypes_library(dispatcher_bquant_gemm_lib
+        bquant_gemm_ctypes_lib.cpp
+        KERNEL_HEADER ${BQUANT_GEMM_KERNEL_HEADER}
+    )
+    target_compile_definitions(dispatcher_bquant_gemm_lib PRIVATE
+        CK_TILE_SINGLE_KERNEL_INCLUDE
+        GFX_ARCH="gfx950"
+    )
+else()
+    message(STATUS "No BQuant GEMM kernel found for ctypes lib - building without kernel")
+    add_library(dispatcher_bquant_gemm_lib SHARED bquant_gemm_ctypes_lib.cpp)
+    target_include_directories(dispatcher_bquant_gemm_lib PRIVATE
+        ${PROJECT_SOURCE_DIR}/include
+        ${PROJECT_SOURCE_DIR}/dispatcher/include
+    )
+    target_link_libraries(dispatcher_bquant_gemm_lib PRIVATE hip::device)
+    set_target_properties(dispatcher_bquant_gemm_lib PROPERTIES
+        POSITION_INDEPENDENT_CODE ON
+        CXX_STANDARD 17
+    )
+endif()
+
+# =============================================================================
 # GPU Helper Executable
 # =============================================================================
 
