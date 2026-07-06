@@ -54,7 +54,7 @@ using Target942  = decltype(make_amdgcn_gfx9_target<amdgcn_target_id::GFX942>())
 using Target950  = decltype(make_amdgcn_gfx9_target<amdgcn_target_id::GFX950>());
 using Target11   = decltype(make_amdgcn_gfx11_target<amdgcn_target_id::GFX1100>());
 using Target12   = decltype(make_amdgcn_gfx12_target<amdgcn_target_id::GFX1201>());
-using Target1250 = decltype(make_amdgcn_gfx12_target<amdgcn_target_id::GFX1250>());
+using Target1250 = decltype(make_amdgcn_gfx1250_target<amdgcn_target_id::GFX1250>());
 #if defined(CK_MMA_TEST_ARCH_GFX950)
 using TestTarget = Target950;
 #elif defined(CK_MMA_TEST_ARCH_GFX942)
