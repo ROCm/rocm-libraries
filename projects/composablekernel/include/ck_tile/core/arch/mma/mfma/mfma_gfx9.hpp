@@ -9,14 +9,18 @@
 #include "ck_tile/core/arch/mma/amdgcn_mma.hpp"
 #include "ck_tile/core/arch/mma/mma_op_family.hpp"
 #include "ck_tile/core/config.hpp"
+#include "ck_tile/core/container/thread_buffer.hpp"
 #include "ck_tile/core/numeric/bfloat16.hpp"
 #include "ck_tile/core/numeric/float8.hpp"
 #include "ck_tile/core/numeric/half.hpp"
 #include "ck_tile/core/numeric/int8.hpp"
 #include "ck_tile/core/numeric/integer.hpp"
 #include "ck_tile/core/numeric/tfloat32.hpp"
+#include "ck_tile/core/numeric/type_convert.hpp"
 #include "ck_tile/core/numeric/vector_type.hpp"
 #include "ck_tile/core/utility/bit_cast.hpp"
+#include "ck_tile/core/utility/functional.hpp"
+#include "ck_tile/core/utility/ignore.hpp"
 #include "ck_tile/ops/gemm/warp/warp_gemm_params.hpp"
 
 namespace ck_tile::core::arch::mma {
