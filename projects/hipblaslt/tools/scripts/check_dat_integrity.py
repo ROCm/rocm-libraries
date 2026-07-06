@@ -18,6 +18,8 @@ try:
 except ImportError:
     msgpack = None
 
+_MSGPACK_ERRORS = (msgpack.exceptions.UnpackException,) if msgpack is not None else ()
+
 _MASTER_RE = re.compile(r"^TensileLibrary_lazy_(?P<arch>[A-Za-z0-9]+)\.dat(?:\.zlib)?$")
 _MAPPING_RE = re.compile(
     r"^TensileLiteLibrary_lazy_(?P<arch>[A-Za-z0-9]+)_Mapping\.dat(?:\.zlib)?$"
@@ -75,7 +77,7 @@ def _loadMapping(libDir: Path, arch: str):
             return msgpack.unpackb(raw, raw=False, strict_map_key=False)
         with open(src, "rb") as f:
             return msgpack.unpack(f, raw=False, strict_map_key=False)
-    except (OSError, ValueError, zlib.error) as exc:
+    except (OSError, ValueError, zlib.error, *_MSGPACK_ERRORS) as exc:
         raise _MappingLoadError(
             f"arch={arch}: failed to read/decode Mapping ({src.name}): {exc}"
         ) from exc

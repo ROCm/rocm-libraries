@@ -190,17 +190,21 @@ namespace TensileLite
         }
     }
 
+    constexpr char   zlib_suffix[]    = ".zlib";
+    constexpr size_t zlib_suffix_size = sizeof(zlib_suffix) - 1;
+
+    bool hasZlibSuffix(std::string const& filename)
+    {
+        return filename.size() >= zlib_suffix_size
+               && filename.compare(
+                      filename.size() - zlib_suffix_size, zlib_suffix_size, zlib_suffix)
+                      == 0;
+    }
+
     std::string logicalLibraryName(std::string const& filename)
     {
-        constexpr char   zlib_suffix[]    = ".zlib";
-        constexpr size_t zlib_suffix_size = sizeof(zlib_suffix) - 1;
-        if(filename.size() >= zlib_suffix_size
-           && filename.compare(
-                  filename.size() - zlib_suffix_size, zlib_suffix_size, zlib_suffix)
-                  == 0)
-        {
+        if(hasZlibSuffix(filename))
             return filename.substr(0, filename.size() - zlib_suffix_size);
-        }
         return filename;
     }
     } // anonymous namespace
@@ -210,13 +214,7 @@ namespace TensileLite
         try
         {
             std::string base_filename = filename;
-            constexpr char            zlib_suffix[] = ".zlib";
-            constexpr size_t          zlib_suffix_size = sizeof(zlib_suffix) - 1;
-            if(base_filename.size() >= zlib_suffix_size
-               && base_filename.compare(base_filename.size() - zlib_suffix_size,
-                                        zlib_suffix_size,
-                                        zlib_suffix)
-                      == 0)
+            if(hasZlibSuffix(base_filename))
             {
                 if(readCompressedMsgObject(base_filename, result))
                     return true;
