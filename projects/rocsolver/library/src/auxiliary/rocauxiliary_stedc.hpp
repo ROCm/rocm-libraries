@@ -1185,7 +1185,7 @@ ROCSOLVER_KERNEL void __launch_bounds__(STEDC_BDIM)
 template <std::int32_t BDIM = 0, typename S>
 __device__ inline void reduce_wave_sum(S& val)
 {
-    assert(BDIM <= warpSize);
+    /* assert(BDIM <= warpSize); */
 
 #pragma unroll
     for(rocblas_int r = warpSize / 2; r >= 1; r /= 2)
@@ -1199,9 +1199,9 @@ __device__ inline void reduce_wave_sum(S& val)
 template <std::int32_t BDIM = STEDC_SOLVE_BDIM, typename S>
 __device__ inline void reduce_block_sum(S& val)
 {
-    assert(BDIM == hipBlockDim_x);
+    /* assert(BDIM == hipBlockDim_x); */
 
-    if(BDIM > warpSize)
+    if(hipBlockDim_x > warpSize)
     {
         __shared__ S lds[BDIM];
         rocblas_int tid = threadIdx.x;
@@ -1245,7 +1245,7 @@ __device__ inline void reduce_block_sum(S& val)
 template <std::int32_t BDIM = 0, typename S>
 __device__ inline void reduce_wave_sum(S& val1, S& val2, S& val3)
 {
-    assert(BDIM <= warpSize);
+    /* assert(BDIM <= warpSize); */
 
 #pragma unroll
     for(rocblas_int r = warpSize / 2; r >= 1; r /= 2)
@@ -1263,9 +1263,9 @@ __device__ inline void reduce_wave_sum(S& val1, S& val2, S& val3)
 template <std::int32_t BDIM = STEDC_SOLVE_BDIM, typename S>
 __device__ inline void reduce_block_sum(S& val1, S& val2, S& val3)
 {
-    assert(BDIM == hipBlockDim_x);
+    /* assert(BDIM == hipBlockDim_x); */
 
-    if(BDIM > warpSize)
+    if(hipBlockDim_x > warpSize)
     {
         __shared__ S lds1[BDIM];
         __shared__ S lds2[BDIM];
@@ -1316,7 +1316,7 @@ __device__ inline void reduce_block_sum(S& val1, S& val2, S& val3)
     }
     else
     {
-        reduce_wave_sum<BDIM>(val1, val2, val3);
+        reduce_wave_sum(val1, val2, val3);
     }
 }
 
@@ -1331,7 +1331,7 @@ __device__ I laed4_alt(I n,
                        S ssfmin = std::numeric_limits<S>::min(),
                        I MAXIT = 50)
 {
-    assert(BDIM == hipBlockDim_x);
+    /* assert(BDIM == hipBlockDim_x); */
 
     i = i + 1;
     auto lam_abs = [](auto x) -> auto
@@ -1408,6 +1408,7 @@ __device__ I laed4_alt(I n,
             S dj = (DELTA(j) - di) - midpt;
             psi = psi + Z(j) * Z(j) / ((DELTA(j) - di) - midpt);
         }
+        __syncthreads();
         reduce_block_sum(psi);
 
         c = rhoinv + psi;
@@ -1478,6 +1479,7 @@ __device__ I laed4_alt(I n,
             dpsi = dpsi + temp * temp;
             erretm = erretm + psi;
         }
+        __syncthreads();
         reduce_block_sum(psi, dpsi, erretm);
         erretm = lam_abs(erretm);
         //
@@ -1571,6 +1573,7 @@ __device__ I laed4_alt(I n,
             dpsi = dpsi + temp * temp;
             erretm = erretm + psi;
         }
+        __syncthreads();
         reduce_block_sum(psi, dpsi, erretm);
         erretm = lam_abs(erretm);
         //
@@ -1659,6 +1662,7 @@ __device__ I laed4_alt(I n,
                 dpsi = dpsi + temp * temp;
                 erretm = erretm + psi;
             }
+            __syncthreads();
             reduce_block_sum(psi, dpsi, erretm);
             erretm = lam_abs(erretm);
             //
@@ -1695,6 +1699,7 @@ __device__ I laed4_alt(I n,
             S dj = (DELTA(j) - di) - midpt;
             psi = psi + Z(j) * Z(j) / dj;
         }
+        __syncthreads();
         reduce_block_sum(psi);
 
         phi = S(0.);
@@ -1703,6 +1708,7 @@ __device__ I laed4_alt(I n,
             S dj = (DELTA(j) - di) - midpt;
             phi = phi + Z(j) * Z(j) / dj;
         }
+        __syncthreads();
         reduce_block_sum(phi);
 
         c = rhoinv + psi + phi;
@@ -1789,6 +1795,7 @@ __device__ I laed4_alt(I n,
             dpsi = dpsi + temp * temp;
             erretm = erretm + psi;
         }
+        __syncthreads();
         reduce_block_sum(psi, dpsi, erretm);
         erretm = lam_abs(erretm);
         //
@@ -1804,6 +1811,7 @@ __device__ I laed4_alt(I n,
             dphi = dphi + temp * temp;
             erretm2 = erretm2 + phi;
         }
+        __syncthreads();
         reduce_block_sum(phi, dphi, erretm2);
         erretm += erretm2;
         w = rhoinv + phi + psi;
@@ -1974,6 +1982,7 @@ __device__ I laed4_alt(I n,
             dpsi = dpsi + temp * temp;
             erretm = erretm + psi;
         }
+        __syncthreads();
         reduce_block_sum(psi, dpsi, erretm);
         erretm = lam_abs(erretm);
         //
@@ -1989,6 +1998,7 @@ __device__ I laed4_alt(I n,
             dphi = dphi + temp * temp;
             erretm2 = erretm2 + phi;
         }
+        __syncthreads();
         reduce_block_sum(phi, dphi, erretm2);
         erretm += erretm2;
         temp = Z(ii) / DELTA(ii);
@@ -2187,6 +2197,7 @@ __device__ I laed4_alt(I n,
                 dpsi = dpsi + temp * temp;
                 erretm = erretm + psi;
             }
+            __syncthreads();
             reduce_block_sum(psi, dpsi, erretm);
             erretm = lam_abs(erretm);
             //
@@ -2202,6 +2213,7 @@ __device__ I laed4_alt(I n,
                 dphi = dphi + temp * temp;
                 erretm2 = erretm2 + phi;
             }
+            __syncthreads();
             reduce_block_sum(phi, dphi, erretm2);
             erretm += erretm2;
             temp = Z(ii) / DELTA(ii);
@@ -3235,7 +3247,15 @@ rocblas_status rocsolver_stedc_template(rocblas_handle handle,
             HIP_CHECK(hipEventRecord(events[k], stream));
 #endif
 
-            if(get_device_warp_size() == 64)
+#if defined(ROCSOLVER_USE_REFERENCE_SECULAR_EQUATIONS_SOLVER)
+            rocblas_int numgrps_solve = (n - 1) / STEDC_SOLVE_BDIM + 1;
+            ROCSOLVER_LAUNCH_KERNEL((stedc_mergeValues_Solve_kernel<S>),
+                                    dim3(numgrps_solve, batch_count), dim3(STEDC_SOLVE_BDIM), 0,
+                                    stream, k, n, D + shiftD, strideD, E + shiftE, strideE, tmpz,
+                                    tempgemm, splits, eps, ssfmin, ssfmax);
+#else
+            const hipDeviceProp_t* props = rocblas_internal_get_device_prop(handle);
+            if((props != nullptr) && (props->warpSize == 64))
             {
                 constexpr rocblas_int WarpSize = 64;
                 ROCSOLVER_LAUNCH_KERNEL((stedc_mergeValues_Solve_kernel<WarpSize, S>),
@@ -3251,6 +3271,7 @@ rocblas_status rocsolver_stedc_template(rocblas_handle handle,
                                         D + shiftD, strideD, E + shiftE, strideE, tmpz, tempgemm,
                                         splits, eps, ssfmin, ssfmax);
             }
+#endif
 
 #if DEBUG_OUTPUT
             HIP_CHECK(hipEventRecord(events[k + levs], stream));
