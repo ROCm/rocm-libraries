@@ -168,7 +168,6 @@ bool rocke_gfx942_attention_tiled_2d_supports(
     const rocke_gfx942_attention_tiled_2d_supports_args_t* args, char* reason, size_t reason_cap)
 {
     const char* arch;
-    int block_m;
     char buf[320];
 
     if(args == NULL)
@@ -237,19 +236,6 @@ bool rocke_gfx942_attention_tiled_2d_supports(
         snprintf(buf,
                  sizeof(buf),
                  "tiled 2D kernel needs 1<=num_queries_per_kv<=16 (got %d)",
-                 args->num_queries_per_kv);
-        rocke__reason(reason, reason_cap, buf);
-        return false;
-    }
-    block_m = 16 * args->num_warps;
-    if(block_m % args->num_queries_per_kv != 0)
-    {
-        snprintf(buf,
-                 sizeof(buf),
-                 "tiled 2D kernel needs num_queries_per_kv to divide "
-                 "BLOCK_M=%d (num_warps=%d, got num_queries_per_kv=%d)",
-                 block_m,
-                 args->num_warps,
                  args->num_queries_per_kv);
         rocke__reason(reason, reason_cap, buf);
         return false;

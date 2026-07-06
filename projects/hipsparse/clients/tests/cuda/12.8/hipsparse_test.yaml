@@ -79,6 +79,7 @@ include: test_sddmm_coo_aos.yaml
 include: test_sddmm_coo.yaml
 include: test_sddmm_csc.yaml
 include: test_sddmm_csr.yaml
+include: test_sddmm_csr_reuse_descr.yaml
 include: test_dense_to_sparse_coo.yaml
 include: test_dense_to_sparse_csc.yaml
 include: test_dense_to_sparse_csr.yaml
@@ -90,9 +91,11 @@ include: test_spgemmreuse_csr.yaml
 include: test_spmm_batched_coo.yaml
 include: test_spmm_batched_csc.yaml
 include: test_spmm_batched_csr.yaml
+include: test_spmm_bsr.yaml
 include: test_spmm_coo.yaml
 include: test_spmm_csc.yaml
 include: test_spmm_csr.yaml
+include: test_spmm_csr_reuse_descr.yaml
 include: test_spmv_coo_aos.yaml
 include: test_spmv_coo.yaml
 include: test_spmv_csr.yaml
