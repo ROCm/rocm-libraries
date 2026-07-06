@@ -909,6 +909,10 @@ TEST(TestBatchnormFwdTrainingActivPlan, CompileDefaultSetsCorrectDefines)
     EXPECT_TRUE(hasOption("-DHIP_PLUGIN_BN_STASH_METHOD=0"));
     EXPECT_TRUE(hasOption("-DHIP_PLUGIN_BN_VARIANT=1"));
     EXPECT_TRUE(hasOption("-DHIP_PLUGIN_BN_NRN_OP_ID=3"));
+    EXPECT_TRUE(hasOption("-DHIP_PLUGIN_BN_INPUT_TYPE=float"));
+    EXPECT_TRUE(hasOption("-DHIP_PLUGIN_BN_OUTPUT_TYPE=float"));
+    EXPECT_TRUE(hasOption("-DHIP_PLUGIN_BN_MEAN_VAR_TYPE=float"));
+    EXPECT_TRUE(hasOption("-DHIP_PLUGIN_BN_SCALE_TYPE=float"));
 }
 
 } // namespace hip_kernel_provider::batchnorm::test

@@ -35,6 +35,7 @@ def build_conv_dgrad_graph(
     conv_attrs.set_dilation([dil, dil])
 
     dx = graph.conv_dgrad(dy, weight, conv_attrs)
+    dx.set_dim([n, c, h, w])
     dx.set_name("input_gradient_dx")
     dx.set_output(True)
 
