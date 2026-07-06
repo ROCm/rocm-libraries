@@ -10,6 +10,7 @@ set(CMAKE_TOOLCHAIN_FILE "${CMAKE_CURRENT_SOURCE_DIR}/../cmake/ClangToolChain.cm
 set(CMAKE_POSITION_INDEPENDENT_CODE ON)
 
 include(${CMAKE_CURRENT_LIST_DIR}/../cmake/VersionUtils.cmake)
+
 dnn_provider_setup_version(hip_kernel_provider ${CMAKE_CURRENT_LIST_DIR})
 
 project(hip-kernel-provider VERSION ${HIP_KERNEL_PROVIDER_VERSION} LANGUAGES CXX)
@@ -39,7 +40,9 @@ list(APPEND CMAKE_MODULE_PATH ${CMAKE_CURRENT_SOURCE_DIR}/cmake
 )
 
 option(HIPKERNELPROVIDER_ENABLE_TESTS "Build tests" ON)
+option(HIPKERNELPROVIDER_ENABLE_ROCKE "Build rocKE engine and smoke tests" OFF)
 option(ENABLE_ASM_SDPA_ENGINE "Build the ASM SDPA engine" ON)
+option(ENABLE_HIP_MLOPS_ENGINE "Build the HIP kernel engine" ON)
 
 option(BUILD_ADDRESS_SANITIZER "Build with Address Sanitizer enabled" OFF)
 option(ENABLE_CLANG_FORMAT "Enable Clang-Format checks" ON)
@@ -54,6 +57,18 @@ if(HIPKERNELPROVIDER_ENABLE_COVERAGE)
     message(VERBOSE "Enabling compile flags for coverage-mapping")
     add_compile_options(-fprofile-instr-generate -fcoverage-mapping)
     add_link_options(-fprofile-instr-generate -fcoverage-mapping)
+endif()
+
+if(ENABLE_ASM_SDPA_ENGINE)
+    message(STATUS "ASM SDPA engine enabled")
+else()
+    message(STATUS "ASM SDPA engine disabled")
+endif()
+
+if(ENABLE_HIP_MLOPS_ENGINE)
+    message(STATUS "HIP kernel engine enabled")
+else()
+    message(STATUS "HIP kernel engine disabled")
 endif()
 
 list(
@@ -124,14 +139,20 @@ message(STATUS "Plugin build directory: ${HIPDNN_BUILD_PLUGIN_ENGINE_DIR}")
 message(STATUS "Plugin install directory: ${HIPDNN_INSTALL_PLUGIN_ENGINE_DIR}")
 file(MAKE_DIRECTORY ${HIPDNN_BUILD_PLUGIN_ENGINE_DIR})
 
-# ============================================================================
-# Kernel embedding (must come before src so KERNEL_GENERATED_SOURCES is set)
-# ============================================================================
-add_subdirectory(kernels)
+if(HIPKERNELPROVIDER_ENABLE_ROCKE)
+    message(STATUS "rocKE features enabled")
 
-# ============================================================================
-# Plugin library targets and tests
-# ============================================================================
+    # rocke/ = library (api / provider plugin) + platform (engine). The engine's
+    # installed CTest entries stage into
+    # EXTERNAL_TEST_INSTALL_STAGING_hip_kernel_provider, so add_subdirectory(rocke)
+    # must precede src/ below, which emits bin/hip_kernel_provider/CTestTestfile.cmake.
+    set(ROCKE_INSTALL_PROVIDER_CTEST_SUBDIR "hip_kernel_provider")
+    set(ROCKE_INSTALL_STANDALONE_CTEST OFF)
+    add_subdirectory(rocke)
+else()
+    message(STATUS "rocKE features disabled")
+endif()
+
 add_subdirectory(src)
 
 # ============================================================================

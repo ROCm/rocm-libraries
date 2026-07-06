@@ -8,7 +8,6 @@ test_categories:
       - "*smoke*"
     exclude:
       - "*known_bug*"
-      - "*spmm*"
     labels:
       - "smoke"
       - "quick"
@@ -28,7 +27,6 @@ test_categories:
       - "*pre_checkin*"
     exclude:
       - "*known_bug*"
-      - "*spmm*"
     labels:
       - "precheckin"
       - "standard"
@@ -45,7 +43,6 @@ test_categories:
       - "*nightly*"
     exclude:
       - "*known_bug*"
-      - "*spmm*"
     labels:
       - "comprehensive"
       - "nightly"
@@ -60,11 +57,31 @@ test_categories:
       - "*HMM*"
     exclude:
       - "*known_bug*"
-      - "*spmm*"
     labels:
       - "stress"
       - "weekly"
       - "full"
+  
+  ffm_quick:
+    description: "Smoke - same as Jenkins smoke (timeout: 2 hours)"
+    test_patterns:
+      - "*smoke*"
+    exclude:
+      - "*known_bug*"
+    labels:
+      - "ffm"
+      - "ffm_quick"
+      - "ffm_full"
+
+  ffm_full:
+    description: "Stress / weekly - same as Jenkins weekly (stress + HMM)"
+    test_patterns:
+      - "*HMM*"
+    exclude:
+      - "*known_bug*"
+    labels:
+      - "ffm"
+      - "ffm_full"
 
   spmm_quick:
     description: "Smoke - sparse kernel only (timeout: 5 mins)"
@@ -130,6 +147,27 @@ test_categories:
       - "spmm_weekly"
       - "spmm_full"
 
+  spmm_ffm_quick:
+    description: "Smoke - same as Jenkins smoke (timeout: 2 hours)"
+    test_patterns:
+      - "*smoke*spmm*"
+    exclude:
+      - "*known_bug*"
+    labels:
+      - "spmm_ffm"
+      - "spmm_ffm_quick"
+      - "spmm_ffm_full"
+
+  spmm_ffm_full:
+    description: "Stress / weekly - same as Jenkins weekly (stress + HMM)"
+    test_patterns:
+      - "*HMM*spmm*"
+    exclude:
+      - "*known_bug*"
+    labels:
+      - "spmm_ffm"
+      - "spmm_ffm_full"
+
 # GPU-specific exclusions can be added here when needed (see shared/ctest/README.md).
 # exclude_gpu:
 #   exclude_gpu_gfxXXXX:
@@ -139,15 +177,16 @@ test_categories:
 execution_settings:
   default_timeout: 300
   timeout_multiplier: 1
-  environment:
-    OPENBLAS_NUM_THREADS: "48"
-    OMP_NUM_THREADS: "48"
   category_timeouts:
-    quick: 300    # 5 mins (quick suite can exceed 300s on some systems)
+    quick: 900    # 15 mins (quick suite can exceed 300s after ctest parallelism reduction)
     standard: 1800    # 30 mins (standard can take over an hour)
     comprehensive: 7200   # 2 hours
     full: 86400       # 24 hours
-    spmm_quick: 300
+    ffm_quick: 7200    # 2 hours
+    ffm_full: 7200    # 2 hours
+    spmm_quick: 900    # 15 mins (spmm_quick suite can exceed 300s after ctest parallelism reduction)
     spmm_standard: 1800
     spmm_comprehensive: 7200
     spmm_full: 86400
+    spmm_ffm_quick: 7200    # 2 hours
+    spmm_ffm_full: 7200    # 2 hours

@@ -132,6 +132,17 @@ namespace rocRoller
          */
         LDSBankSwizzleMode ldsSwizzleMode = LDSBankSwizzleMode::None;
 
+        bool coexecutionEnabled = true;
+
+        std::optional<std::array<unsigned int, 3>> workgroupClusterSize;
+
+        /**
+         * By default, v_(mfma|wmma)_*_f8f6f4 instructions are used for F8 datatypes
+         * with compatible wavetile sizes. Setting this option to false generates
+         * v_(mfma|wmma)_*_(fp8|bf8)_(fp8|bf8) instead when available.
+         */
+        bool favourF8F6F4OverF8MatrixInstruction = true;
+
         std::string toString() const;
     };
 

@@ -20,7 +20,6 @@
  *
  * ************************************************************************ */
 
-#include "asan_helpers.hpp"
 #include "check_numerics_matrix.hpp"
 #include "check_numerics_vector.hpp"
 #include "device_macros.hpp"
@@ -503,10 +502,8 @@ rocblas_trsv_device(rocblas_int    n,
     // Load appropriate pointers
     uint32_t batch = blockIdx.z;
 
-#if DEVICE_GRID_YZ_16BIT
     for(; batch < batch_count; batch += c_YZ_grid_launch_limit)
     {
-#endif
 
         auto* __restrict__ A = load_ptr_batch(dA, batch, offset_A, stride_A);
         auto* __restrict__ x = load_ptr_batch(dx, batch, offset_x, stride_x);
@@ -566,7 +563,7 @@ rocblas_trsv_device(rocblas_int    n,
                                || (TRANS && !LOWER && block_row < INV_AFTER)
                                || (TRANS && row_is_remainder);
 #else
-    bool cache_transpose = TRANS; // works for ALL without inversion method
+        bool cache_transpose = TRANS; // works for ALL without inversion method
 #endif
         if(!row_is_remainder)
         {
@@ -762,16 +759,16 @@ rocblas_trsv_device(rocblas_int    n,
                     x[(block_row * DIM_X + tid) * incx] = val;
         }
 #else
-    // Solve the diagonal block
-    if(backwards_sub)
-        rocblas_trsv_block_solve_upper<DIM_X, UNIT>(sAdiag, DIM_X, val);
-    else
-        rocblas_trsv_block_solve_lower<DIM_X, UNIT>(sAdiag, DIM_X, val);
+        // Solve the diagonal block
+        if(backwards_sub)
+            rocblas_trsv_block_solve_upper<DIM_X, UNIT>(sAdiag, DIM_X, val);
+        else
+            rocblas_trsv_block_solve_lower<DIM_X, UNIT>(sAdiag, DIM_X, val);
 
-    // Store solved value into x
-    if(!row_is_remainder || tx < remainder)
-        if(ty == 0)
-            x[(block_row * DIM_X + tid) * incx] = val;
+        // Store solved value into x
+        if(!row_is_remainder || tx < remainder)
+            if(ty == 0)
+                x[(block_row * DIM_X + tid) * incx] = val;
 #endif
 
         // ensure solved x values are saved
@@ -785,10 +782,7 @@ rocblas_trsv_device(rocblas_int    n,
             w_completed_sec[batch]++;
 
         __threadfence();
-
-#if DEVICE_GRID_YZ_16BIT
     }
-#endif
 }
 
 // this file uses kernels some defined above so inlined here
@@ -879,7 +873,7 @@ rocblas_status rocblas_internal_trsv_substitution_template(rocblas_handle    han
 
     int batches = handle->getBatchGridDim((int)batch_count);
 
-    constexpr rocblas_int DIM_Y  = rocblas::conditional_v<rocblas_enable_asan, 4, 16>;
+    constexpr rocblas_int DIM_Y  = 16;
     rocblas_int           blocks = (n + DIM_X - 1) / DIM_X;
     dim3                  threads(DIM_X, DIM_Y, 1);
     dim3                  grid(blocks, 1, batches);

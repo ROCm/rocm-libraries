@@ -20,6 +20,7 @@ namespace rocRoller
         const std::string KeyValue            = "Value";
         const std::string KeySramecc          = "Sramecc";
         const std::string KeyXnack            = "Xnack";
+        const std::string KeyAsicRevisionId   = "AsicRevisionId";
         const std::string KeyInstruction      = "Instruction";
         const std::string KeyWaitCount        = "WaitCount";
         const std::string KeyWaitQueues       = "WaitQueues";
@@ -61,6 +62,7 @@ namespace rocRoller
                 iot::mapRequired(io, KeyArchString.c_str(), target.gfx);
                 iot::mapRequired(io, KeyXnack.c_str(), target.features.xnack);
                 iot::mapRequired(io, KeySramecc.c_str(), target.features.sramecc);
+                iot::mapRequired(io, KeyAsicRevisionId.c_str(), target.asicRevisionId);
             }
 
             static void mapping(IO& io, GPUArchitectureTarget& target, EmptyContext& ctx)

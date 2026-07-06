@@ -27,6 +27,7 @@ coverage.xml
 venv/
 env/
 ENV/
+.workspace/
 
 # IDE
 .idea/
@@ -47,3 +48,7 @@ dmypy.json
 results.json
 *.log
 .planning/
+
+# Crash artifacts (e.g. ROCm/GPU process core dumps)
+core
+core.*

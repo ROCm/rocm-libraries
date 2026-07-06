@@ -1,6 +1,6 @@
 /*! \file */
 /* ************************************************************************
- * Copyright (C) 2018-2025 Advanced Micro Devices, Inc. All rights Reserved.
+ * Copyright (C) 2018-2026 Advanced Micro Devices, Inc. All rights Reserved.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -66,9 +66,11 @@ rocsparse_status rocsparse::csrmv_analysis_lrb_template_dispatch(rocsparse_handl
         rocsparse_hipMallocAsync(&csrmv_info->lrb.n_rows_bins, sizeof(J) * 32, stream));
 
     RETURN_IF_HIP_ERROR(
-        hipMemsetAsync(csrmv_info->lrb.rows_offsets_scratch, 0, sizeof(J) * m, stream));
-    RETURN_IF_HIP_ERROR(hipMemsetAsync(csrmv_info->lrb.rows_bins, 0, sizeof(J) * m, stream));
-    RETURN_IF_HIP_ERROR(hipMemsetAsync(csrmv_info->lrb.n_rows_bins, 0, sizeof(J) * 32, stream));
+        rocsparse_hipMemsetAsync(csrmv_info->lrb.rows_offsets_scratch, 0, sizeof(J) * m, stream));
+    RETURN_IF_HIP_ERROR(
+        rocsparse_hipMemsetAsync(csrmv_info->lrb.rows_bins, 0, sizeof(J) * m, stream));
+    RETURN_IF_HIP_ERROR(
+        rocsparse_hipMemsetAsync(csrmv_info->lrb.n_rows_bins, 0, sizeof(J) * 32, stream));
 
     dim3 blocks(256);
     dim3 threads(WG_SIZE);
@@ -89,9 +91,9 @@ rocsparse_status rocsparse::csrmv_analysis_lrb_template_dispatch(rocsparse_handl
     // with the phase-2 and phase-3 kernels. Alternatively, we could always launch a fixed grid
     // size and then do more in the (SpMV) kernels to compute intra-kernel iteration bounds.
     J temp[32];
-    RETURN_IF_HIP_ERROR(hipMemcpyAsync(
+    RETURN_IF_HIP_ERROR(rocsparse_hipMemcpyAsync(
         temp, csrmv_info->lrb.n_rows_bins, sizeof(J) * 32, hipMemcpyDeviceToHost, stream));
-    RETURN_IF_HIP_ERROR(hipStreamSynchronize(stream));
+    RETURN_IF_HIP_ERROR(rocsparse_hipStreamSynchronize(stream));
 
     for(int i = 0; i < 32; i++)
     {
@@ -719,7 +721,7 @@ rocsparse_status rocsparse::csrmv_lrb_template_dispatch(rocsparse_handle        
         {
             if(info->lrb.nRowsBins[j] != 0)
             {
-                RETURN_IF_HIP_ERROR(hipMemsetAsync(
+                RETURN_IF_HIP_ERROR(rocsparse_hipMemsetAsync(
                     info->lrb.wg_flags, 0, sizeof(uint32_t) * info->lrb.size, stream));
 
                 uint32_t block_size      = WG_SIZE;

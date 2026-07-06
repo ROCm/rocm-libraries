@@ -144,8 +144,10 @@ std::vector<LayerNormTestCase> LayerNormTestConfigs()
         {1,    3,    16,  112, 112, 4, 1e-5, MIOPEN_WEIGHT_BIAS,        miopenTensorNCDHW},     // 3D convet on video
         {32,   4,    0,   4,   256, 1, 1e-5, MIOPEN_ELEMENTWISE_AFFINE, miopenTensorNCHW},
         {64,   4,    0,   4,   256, 1, 1e-5, MIOPEN_ELEMENTWISE_AFFINE, miopenTensorNCHW},
+        {1,    2048, 0,   4,   32,  3, 1e-5, MIOPEN_ELEMENTWISE_AFFINE, miopenTensorNCHW},
         {32,   4,    0,   4,   256, 1, 1e-5, MIOPEN_WEIGHT_BIAS,        miopenTensorNCHW},
         {64,   4,    0,   4,   256, 1, 1e-5, MIOPEN_WEIGHT_BIAS,        miopenTensorNCHW},
+        {1,    2048, 0,   4,   32,  3, 1e-5, MIOPEN_WEIGHT_BIAS,        miopenTensorNCHW},
         {32,   1,    32,  32,  32,  4, 1e-5, MIOPEN_ELEMENTWISE_AFFINE, miopenTensorNDHWC},    // 32x32x32 based on VoxNet arch
         {32,   1,    14,  14,  14,  4, 1e-5, MIOPEN_ELEMENTWISE_AFFINE, miopenTensorNDHWC},
         {32,   32,   14,  14,  14,  4, 1e-5, MIOPEN_ELEMENTWISE_AFFINE, miopenTensorNDHWC},
@@ -206,8 +208,10 @@ std::vector<LayerNormTestCase> LayerNormTestConfigs()
         {1,    3,    16,  112, 112, 4, 1e-5, MIOPEN_WEIGHT_BIAS,        miopenTensorNDHWC},     // 3D convet on video
         {32,   4,    0,   4,   256, 1, 1e-5, MIOPEN_ELEMENTWISE_AFFINE, miopenTensorNHWC},
         {64,   4,    0,   4,   256, 1, 1e-5, MIOPEN_ELEMENTWISE_AFFINE, miopenTensorNHWC},
+        {1,    2048, 0,   4,   32,  3, 1e-5, MIOPEN_ELEMENTWISE_AFFINE, miopenTensorNHWC},
         {32,   4,    0,   4,   256, 1, 1e-5, MIOPEN_WEIGHT_BIAS,        miopenTensorNHWC},
         {64,   4,    0,   4,   256, 1, 1e-5, MIOPEN_WEIGHT_BIAS,        miopenTensorNHWC},
+        {1,    2048, 0,   4,   32,  3, 1e-5, MIOPEN_WEIGHT_BIAS,        miopenTensorNHWC},
         {32,   0,    0,   0,   256, 1, 1e-5, MIOPEN_ELEMENTWISE_AFFINE, std::nullopt},          // NW is not present in the miopenTensorLayout_t enum
         {64,   0,    0,   0,   256, 1, 1e-5, MIOPEN_ELEMENTWISE_AFFINE, std::nullopt},
         {32,   0,    0,   0,   256, 1, 1e-5, MIOPEN_WEIGHT_BIAS,        std::nullopt},

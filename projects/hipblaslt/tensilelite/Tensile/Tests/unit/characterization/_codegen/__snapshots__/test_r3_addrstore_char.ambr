@@ -1,0 +1,13 @@
+# serializer version: 1
+# name: test_r3_addrstore_gfx942_golden
+  list([
+    dict({
+      'basename': 'Cijk_Alik_Bljk_F8NSS_BH_SABV_SAV_UserArgs_MT128x5N13Z-g1GXe67Ir9KWCsSwQKtmhW_BmmlBQKPsExGCE=',
+      'err': 0,
+    }),
+    dict({
+      'basename': 'Cijk_Alik_Bljk_F8NSS_BH_SABV_SAV_UserArgs_MT256xqtJ3dcRQt26eeUfjcQFKYi-dFaSJVLY964Nf6__J7tw=',
+      'err': 0,
+    }),
+  ])
+# ---

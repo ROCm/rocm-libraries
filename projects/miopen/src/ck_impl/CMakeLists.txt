@@ -31,7 +31,7 @@ set(_CK_SUPPORTED_ARCHS
     gfx908 gfx90a gfx942 gfx950
     gfx1100 gfx1101 gfx1102
     gfx1150 gfx1151 gfx1152 gfx1153
-    gfx1200 gfx1201
+    gfx1200 gfx1201 gfx1250
 )
 
 # Filter GPU_TARGETS to only those with MIOpen CK grouped conv support.
@@ -148,6 +148,7 @@ foreach(gpu_target IN LISTS _CK_FILTERED_TARGETS)
     target_link_libraries(${lib_name} PRIVATE MIOpen)
 
     # Install alongside MIOpen
+    set_target_properties(${lib_name} PROPERTIES INSTALL_RPATH "$ORIGIN")
     install(TARGETS ${lib_name}
         LIBRARY DESTINATION ${CMAKE_INSTALL_LIBDIR}
         RUNTIME DESTINATION ${CMAKE_INSTALL_BINDIR}
