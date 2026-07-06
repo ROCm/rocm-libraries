@@ -21,6 +21,7 @@
 
 #include "harness/IReferenceGraphExecutor.hpp"
 #include "harness/TestConfig.hpp"
+#include "harness/TomlGuards.hpp"
 #include "harness/golden/IntegrationTestBundle.hpp"
 
 namespace hipdnn_integration_tests::golden
@@ -53,6 +54,16 @@ using OutputTensors
 //     are mark*Modified().
 //   * Virtual (inter-node) tensors are allocated internally by each executor; the
 //     variant packs we build carry only real (input + output) tensors.
+//
+// TODO(ALMIOPEN-1969 follow-up): Unify graph-init with the non-golden harness.
+//   Stage 1 — Route non-golden ops whose initializeBundle() is plain randomize
+//             (conv, matmul, BN-inference, reduction, rmsnorm-fwd, layernorm,
+//             pointwise) through the synthesis switch. Zero behavioral change.
+//   Stage 2 — Migrate structured recipes one op at a time: copy the exact
+//             ranges/seeds/derivation from each non-golden subclass override
+//             into the corresponding fill function, using fillComputed/tensorAt
+//             for derived inputs. Delete each override once its fill fn works.
+//   Stage 3 — Both harnesses share one init pipeline via SynthesisTracker.
 class IntegrationGraphGoldenReferenceVerificationHarness : public ::testing::Test
 {
 public:
@@ -79,6 +90,11 @@ protected:
         if(_bundle == nullptr)
         {
             GTEST_SKIP() << "No bundle set";
+        }
+
+        if(auto reason = checkTomlSkip(currentTestName()))
+        {
+            GTEST_SKIP() << "[arch " << TestConfig::get().getCurrentArch() << "] " << *reason;
         }
 
         applyMetadataGuards();
@@ -244,6 +260,9 @@ private:
     static std::string dataTypeName(hipdnn_flatbuffers_sdk::data_objects::DataType dataType);
 
     // ── tolerances ──────────────────────────────────────────────────────
+    // Two-level lookup: per-operation default from TestTolerances.hpp,
+    // then TOML per-engine override (if a [[tolerance_overrides]] filter
+    // matches the current gtest name).
     static void
         resolveTolerances(const hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper& wrapper,
                           hipdnn_flatbuffers_sdk::data_objects::DataType dataType,

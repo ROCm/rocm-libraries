@@ -96,6 +96,8 @@ if(HIPSPARSE_ENABLE_CUDA)
 elseif(HIPSPARSE_ENABLE_HIP)
     find_package(hip REQUIRED CONFIG)
     find_package(rocsparse REQUIRED)
+    get_target_property(ROCSPARSE_LOCATION roc::rocsparse LOCATION)
+    message(STATUS "Found rocsparse shared library: ${ROCSPARSE_LOCATION}")
 endif()
 
 if(HIPSPARSE_ENABLE_CLIENT OR HIPSPARSE_BUILD_TESTING OR BUILD_TESTING)

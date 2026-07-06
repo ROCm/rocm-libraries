@@ -23,7 +23,7 @@ def _make_pe_success(
     provider: str = "miopen",
 ) -> ProviderEngineResult:
     """Helper: build a successful ProviderEngineResult with timing."""
-    e2e = BenchmarkStats(
+    host = BenchmarkStats(
         mean_ms=1.234,
         std_ms=0.045,
         min_ms=1.156,
@@ -44,7 +44,7 @@ def _make_pe_success(
         engine_id=engine_id,
         status="success",
         cpu_build_time_ms=45.23,
-        e2e_stats=e2e,
+        host_stats=host,
         gpu_kernel_stats=kernel,
         correctness=correctness,
     )
@@ -213,7 +213,7 @@ class TestVerboseReporter:
         assert "hipDNN Benchmark: conv1_fwd" in out
         assert "Engine ID:  1" in out
         assert "Graph build time:" in out
-        assert "E2E Execution Statistics:" in out
+        assert "Host Submission Statistics:" in out
         assert "Kernel Execution Statistics:" in out
         assert "Mean:" in out
 
@@ -436,7 +436,7 @@ class TestVerboseReporter:
             engine_id=1,
             status="success",
             cpu_build_time_ms=12.3,
-            e2e_stats=BenchmarkStats(
+            host_stats=BenchmarkStats(
                 mean_ms=1.0,
                 std_ms=0.1,
                 min_ms=0.9,
@@ -510,7 +510,7 @@ class TestVerboseReporter:
             engine_id=1,
             status="success",
             cpu_build_time_ms=12.3,
-            e2e_stats=BenchmarkStats(
+            host_stats=BenchmarkStats(
                 mean_ms=1.0,
                 std_ms=0.1,
                 min_ms=0.9,
@@ -590,7 +590,7 @@ class TestPrintHeader:
                     engine_id=0,
                     status="success",
                     role="reference",
-                    e2e_stats=BenchmarkStats(
+                    host_stats=BenchmarkStats(
                         mean_ms=2.0,
                         median_ms=2.0,
                         std_ms=0.0,

@@ -30,9 +30,7 @@
 #include <cmath>
 #include <iostream>
 
-#include <Tensile/Macros.hpp>
-
-TENSILE_HIDDEN_BEGIN
+#include <tensilelitehost/export.h>
 
 #define TENSILE_USE_XF32
 
@@ -239,4 +237,3 @@ namespace std
     }
 } // namespace std
 
-TENSILE_HIDDEN_END

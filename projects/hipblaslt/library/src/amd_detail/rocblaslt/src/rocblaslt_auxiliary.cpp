@@ -2713,3 +2713,13 @@ extern "C" int rocblaslt_matmul_is_tuned(rocblaslt_handle        handle,
 
     return 0;
 }
+
+// Re-reads TENSILE_DB / TENSILE_DB2 / TENSILE_STREAMK5_FORCE_MODE from the
+// environment and updates the Debug singleton that lives inside this shared
+// library.  Intended for tests that call setenv() in-process after the
+// singleton has already been constructed.  Must only be called when no
+// concurrent TensileLite operations are in flight.
+extern "C" HIPBLASLT_EXPORT void hipblaslt_debug_reload()
+{
+    TensileLite::Debug::Instance().reloadDebugBitsForTest();
+}
