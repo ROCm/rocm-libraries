@@ -165,7 +165,7 @@ def test_findall_recurses_into_abstract(snapshot):
 
 def test_localread_get_lds_read_mem_token():
     writer = types.SimpleNamespace(states=types.SimpleNamespace(ldsReadTokenIdx=3))
-    token, idx = LocalRead._getLdsReadMemToken(types.SimpleNamespace(), writer, None, None)
+    token, idx = LocalRead._getLdsReadMemToken(types.SimpleNamespace(), writer, {"TDMSplit": False}, None)
     assert idx == 3
 
 
@@ -182,7 +182,7 @@ def test_localread_emit_lds_read():
 
     module = types.SimpleNamespace(add=added.append)
     fake_self = types.SimpleNamespace(
-        _getLdsReadMemToken=lambda w, k, t: ("TOKEN", 5)
+        _getLdsReadMemToken=lambda w, k, t, u, v: ("TOKEN", 5)
     )
     # comment set -> the "%s sync LDS%u" branch.
     LocalRead._emitLdsRead(fake_self, None, None, None, _Inst, "dst", "src", "ds",
