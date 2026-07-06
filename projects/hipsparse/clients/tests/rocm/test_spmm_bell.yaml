@@ -24,6 +24,9 @@
 ---
 include: hipsparse_common.yaml
 
+# Known bugs - all spmm_bell tests are moved to the known_bug category
+Known bugs:
+  - function: spmm_bell
 
 Tests:
 # Quick

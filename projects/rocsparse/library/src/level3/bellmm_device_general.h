@@ -97,7 +97,7 @@ namespace rocsparse
                 // Padded (empty) ELL slot.
                 if(bc < 0)
                 {
-                    continue;
+                    break;
                 }
 
                 for(I c = 0; c < block_dim; c++)
