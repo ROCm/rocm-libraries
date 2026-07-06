@@ -34,6 +34,7 @@
 #include <optional>
 #include <sstream>
 #include <string>
+#include <type_traits>
 #include <vector>
 
 #include "../../../shared/client_data_layout_helpers.h"
@@ -722,23 +723,27 @@ struct hipfftHandle_t
     double                    scale_factor  = 1.0;
     bool                      auto_allocate = true;
 
-    // Plans (and their possible I/O fields) are keyed by transform direction,
-    // and input descriptor's subformat. For single-device usage, the key's input
-    // descriptors' subformat values are unrelated to actual, user-provided arguments
-    // (no descriptor is passed or expected at execution in that case), but deduced
-    // at execution time as follows (for internal map-querying purposes, only):
-    // - (HIPFFT_FORWARD, HIPFFT_XT_FORMAT_INPLACE) for in-place forward transforms;
-    // - (HIPFFT_BACKWARD, HIPFFT_XT_FORMAT_INPLACE_SHUFFLED) for in-place inverse transforms;
-    // - (direction, HIPFFT_XT_FORMAT_INPUT) for out-of-place transforms.
+    // Plans (and their possible I/O fields) are keyed by transform type and input
+    // descriptor's subformat. For single-device usage, the key's input descriptors'
+    // subformat values are unrelated to actual, user-provided arguments (no descriptor
+    // is passed or expected at execution in that case), but deduced at execution time
+    // as follows (for internal map-querying purposes, only):
+    // - (forward dft_type, HIPFFT_XT_FORMAT_INPLACE) for forward in-place transforms;
+    // - (inverse dft_type, HIPFFT_XT_FORMAT_INPLACE_SHUFFLED) for inverse in-place transforms;
+    // - (dft_type, HIPFFT_XT_FORMAT_INPUT) for out-of-place transforms.
     struct map_key_t
     {
         map_key_t() = delete;
-        explicit map_key_t(int _direction, hipfftXtSubFormat _input_desc_format)
-            : direction(_direction)
+        explicit map_key_t(rocfft_transform_type _transform_type,
+                           hipfftXtSubFormat     _input_desc_format)
+            : transform_type(_transform_type)
             , input_desc_format(_input_desc_format)
         {
-            if(direction != HIPFFT_FORWARD && direction != HIPFFT_BACKWARD)
-                throw std::invalid_argument("map_key_t invalid direction");
+            if(transform_type != rocfft_transform_type_complex_forward
+               && transform_type != rocfft_transform_type_complex_inverse
+               && transform_type != rocfft_transform_type_real_forward
+               && transform_type != rocfft_transform_type_real_inverse)
+                throw std::invalid_argument("map_key_t invalid transform_type");
             if(input_desc_format != HIPFFT_XT_FORMAT_INPUT
                && input_desc_format != HIPFFT_XT_FORMAT_OUTPUT
                && input_desc_format != HIPFFT_XT_FORMAT_INPLACE
@@ -746,21 +751,22 @@ struct hipfftHandle_t
                && input_desc_format != HIPFFT_XT_FORMAT_1D_INPUT_SHUFFLED)
                 throw std::invalid_argument("map_key_t invalid input_desc_format");
         };
-        const int               direction;
-        const hipfftXtSubFormat input_desc_format;
-        bool                    operator<(const map_key_t& other) const
+        const rocfft_transform_type transform_type;
+        const hipfftXtSubFormat     input_desc_format;
+        bool                        operator<(const map_key_t& other) const
         {
-            return std::tie(direction, input_desc_format)
-                   < std::tie(other.direction, other.input_desc_format);
+            return std::tie(transform_type, input_desc_format)
+                   < std::tie(other.transform_type, other.input_desc_format);
         }
 
-        static map_key_t make_single_device_key(int direction, rocfft_result_placement placement)
+        static map_key_t make_single_device_key(rocfft_transform_type   transform_type,
+                                                rocfft_result_placement placement)
         {
-            return map_key_t{direction,
-                             placement == rocfft_placement_inplace
-                                 ? (direction == HIPFFT_FORWARD ? HIPFFT_XT_FORMAT_INPLACE
-                                                                : HIPFFT_XT_FORMAT_INPLACE_SHUFFLED)
-                                 : HIPFFT_XT_FORMAT_INPUT};
+            const bool fwd = is_fwd(fft_transform_type_from_rocfft_transform_type(transform_type));
+            return map_key_t{transform_type,
+                             placement == rocfft_placement_inplace ? (
+                                 fwd ? HIPFFT_XT_FORMAT_INPLACE : HIPFFT_XT_FORMAT_INPLACE_SHUFFLED)
+                                                                   : HIPFFT_XT_FORMAT_INPUT};
         }
     };
 
@@ -848,20 +854,75 @@ struct hipfftHandle_t
         return true;
     }
 
-    inline bool can_execute(const int&                             direction,
+    template <typename TransformArgType>
+    inline rocfft_transform_type get_transform_type_for(TransformArgType transform_arg) const
+    {
+        static_assert(std::is_same<TransformArgType, int>::value
+                          || std::is_same<TransformArgType, rocfft_transform_type>::value,
+                      "hipfftHandle_t::get_transform_type_for: TransformArgType must be either int "
+                      "or rocfft_transform_type");
+        if constexpr(std::is_same<TransformArgType, rocfft_transform_type>::value)
+            return transform_arg;
+        else
+        {
+            // transform_arg is an int, coming straight from the user: invalid values
+            // must not be reported as internal errors
+            if(transform_arg != HIPFFT_FORWARD && transform_arg != HIPFFT_BACKWARD)
+                throw HIPFFT_INVALID_VALUE;
+            if(io_type.is_real_to_complex())
+            {
+                if(transform_arg != HIPFFT_FORWARD)
+                    throw HIPFFT_INVALID_PLAN;
+                return rocfft_transform_type_real_forward;
+            }
+            else if(io_type.is_complex_to_real())
+            {
+                if(transform_arg != HIPFFT_BACKWARD)
+                    throw HIPFFT_INVALID_PLAN;
+                return rocfft_transform_type_real_inverse;
+            }
+            // C2C case
+            return transform_arg == HIPFFT_FORWARD ? rocfft_transform_type_complex_forward
+                                                   : rocfft_transform_type_complex_inverse;
+        }
+    }
+
+    inline bool can_execute(rocfft_transform_type                  transform_type,
                             const std::optional<rocfft_precision>& execution_precision
                             = std::nullopt) const
     {
-        if(direction != HIPFFT_FORWARD && direction != HIPFFT_BACKWARD)
-            throw std::invalid_argument("hipfftHandle_t::can_execute: invalid direction");
         if(!initialized())
             return false;
         if(execution_precision && io_type.precision() != *execution_precision)
             return false;
-        if(io_type.is_real_to_complex() && direction == HIPFFT_BACKWARD)
-            return false;
-        else if(io_type.is_complex_to_real() && direction == HIPFFT_FORWARD)
-            return false;
+        // Validate that the requested transform type is compatible with the plan's io_type
+        switch(transform_type)
+        {
+        case rocfft_transform_type_complex_forward:
+            [[fallthrough]];
+        case rocfft_transform_type_complex_inverse:
+        {
+            if(!io_type.is_complex_to_complex())
+                return false;
+        }
+        break;
+        case rocfft_transform_type_real_inverse:
+        {
+            if(!io_type.is_complex_to_real())
+                return false;
+        }
+        break;
+        case rocfft_transform_type_real_forward:
+        {
+            if(!io_type.is_real_to_complex())
+                return false;
+        }
+        break;
+        default:
+            // This would be an internal error, not a user error
+            throw std::invalid_argument("hipfftHandle_t::can_execute: invalid transform_type");
+        }
+
         return true;
     }
 
@@ -1042,9 +1103,6 @@ static hipfftResult hipfftMakePlan_internal(hipfftHandle               plan,
                                        && !plan->global_ionembed.get_nembed(fft_io::fft_io_out);
     for(auto dft_type : iotype.transform_types())
     {
-        const int hipfft_dir = is_fwd(fft_transform_type_from_rocfft_transform_type(dft_type))
-                                   ? HIPFFT_FORWARD
-                                   : HIPFFT_BACKWARD;
         for(const auto& input_subformat :
             {HIPFFT_XT_FORMAT_INPUT, HIPFFT_XT_FORMAT_INPLACE, HIPFFT_XT_FORMAT_INPLACE_SHUFFLED})
         {
@@ -1054,7 +1112,7 @@ static hipfftResult hipfftMakePlan_internal(hipfftHandle               plan,
             if(plan->device_contexts.size() == 1)
             {
                 const auto single_dev_key
-                    = hipfftHandle_t::map_key_t::make_single_device_key(hipfft_dir, placement);
+                    = hipfftHandle_t::map_key_t::make_single_device_key(dft_type, placement);
                 if(single_dev_key.input_desc_format != input_subformat)
                     continue;
             }
@@ -1175,7 +1233,7 @@ static hipfftResult hipfftMakePlan_internal(hipfftHandle               plan,
                 continue;
             }
             // add successful plan to the map, keyed by transform type and input descriptor's subformat
-            plan->exec_plans.emplace(hipfftHandle_t::map_key_t(hipfft_dir, input_subformat),
+            plan->exec_plans.emplace(hipfftHandle_t::map_key_t(dft_type, input_subformat),
                                      std::move(rocfft_plan));
         }
     }
@@ -1707,24 +1765,37 @@ catch(...)
     return handle_exception();
 }
 
+// Execute an FFT on a single-device plan.
+// TransformArgType may be either rocfft_transform_type or int (direction).
+// Prefer passing rocfft_transform_type when the caller knows the exact transform
+// kind (e.g., hipfftExecR2C passes rocfft_transform_type_real_forward): this
+// enables stronger validation since the transform type is checked against the
+// plan's io_type without ambiguity. The int overload exists for untyped APIs
+// (hipfftXtExec) where direction is all the caller provides; in that case,
+// get_transform_type_for derives the transform type from plan->io_type and
+// additionally validates that the direction is compatible with the plan.
+template <typename TransformArgType>
 static hipfftResult hipfftExecBase(const hipfftHandle_t*                 plan,
                                    void*                                 input,
                                    void*                                 output,
-                                   int                                   direction,
+                                   TransformArgType                      transform_arg,
                                    const std::optional<rocfft_precision> precision
                                    = std::nullopt) noexcept
 try
 {
-    if(direction != HIPFFT_FORWARD && direction != HIPFFT_BACKWARD)
-        return HIPFFT_INVALID_VALUE;
-    if(!plan || !plan->initialized() || plan->device_contexts.size() > 1
-       || !plan->can_execute(direction, precision))
+    static_assert(std::is_same<TransformArgType, rocfft_transform_type>::value
+                      || std::is_same<TransformArgType, int>::value,
+                  "hipfftExecBase: transform_arg must be either rocfft_transform_type or int");
+    if(!plan || !plan->initialized() || plan->device_contexts.size() > 1)
+        return HIPFFT_INVALID_PLAN;
+    const auto dft_type = plan->get_transform_type_for(transform_arg);
+    if(!plan->can_execute(dft_type, precision))
         return HIPFFT_INVALID_PLAN;
     if(!input || !output)
         return HIPFFT_INVALID_VALUE;
 
     const auto it = plan->exec_plans.find(hipfftHandle_t::map_key_t::make_single_device_key(
-        direction, input == output ? rocfft_placement_inplace : rocfft_placement_notinplace));
+        dft_type, input == output ? rocfft_placement_inplace : rocfft_placement_notinplace));
     if(it == plan->exec_plans.end())
         throw HIPFFT_INVALID_PLAN;
     const auto& rplan  = it->second;
@@ -1741,17 +1812,26 @@ catch(...)
 hipfftResult
     hipfftExecC2C(hipfftHandle plan, hipfftComplex* idata, hipfftComplex* odata, int direction)
 {
-    return hipfftExecBase(plan, idata, odata, direction, rocfft_precision_single);
+    if(direction != HIPFFT_FORWARD && direction != HIPFFT_BACKWARD)
+        return HIPFFT_INVALID_VALUE;
+    return hipfftExecBase(plan,
+                          idata,
+                          odata,
+                          direction == HIPFFT_FORWARD ? rocfft_transform_type_complex_forward
+                                                      : rocfft_transform_type_complex_inverse,
+                          rocfft_precision_single);
 }
 
 hipfftResult hipfftExecR2C(hipfftHandle plan, hipfftReal* idata, hipfftComplex* odata)
 {
-    return hipfftExecBase(plan, idata, odata, HIPFFT_FORWARD, rocfft_precision_single);
+    return hipfftExecBase(
+        plan, idata, odata, rocfft_transform_type_real_forward, rocfft_precision_single);
 }
 
 hipfftResult hipfftExecC2R(hipfftHandle plan, hipfftComplex* idata, hipfftReal* odata)
 {
-    return hipfftExecBase(plan, idata, odata, HIPFFT_BACKWARD, rocfft_precision_single);
+    return hipfftExecBase(
+        plan, idata, odata, rocfft_transform_type_real_inverse, rocfft_precision_single);
 }
 
 hipfftResult hipfftExecZ2Z(hipfftHandle         plan,
@@ -1759,17 +1839,26 @@ hipfftResult hipfftExecZ2Z(hipfftHandle         plan,
                            hipfftDoubleComplex* odata,
                            int                  direction)
 {
-    return hipfftExecBase(plan, idata, odata, direction, rocfft_precision_double);
+    if(direction != HIPFFT_FORWARD && direction != HIPFFT_BACKWARD)
+        return HIPFFT_INVALID_VALUE;
+    return hipfftExecBase(plan,
+                          idata,
+                          odata,
+                          direction == HIPFFT_FORWARD ? rocfft_transform_type_complex_forward
+                                                      : rocfft_transform_type_complex_inverse,
+                          rocfft_precision_double);
 }
 
 hipfftResult hipfftExecD2Z(hipfftHandle plan, hipfftDoubleReal* idata, hipfftDoubleComplex* odata)
 {
-    return hipfftExecBase(plan, idata, odata, HIPFFT_FORWARD, rocfft_precision_double);
+    return hipfftExecBase(
+        plan, idata, odata, rocfft_transform_type_real_forward, rocfft_precision_double);
 }
 
 hipfftResult hipfftExecZ2D(hipfftHandle plan, hipfftDoubleComplex* idata, hipfftDoubleReal* odata)
 {
-    return hipfftExecBase(plan, idata, odata, HIPFFT_BACKWARD, rocfft_precision_double);
+    return hipfftExecBase(
+        plan, idata, odata, rocfft_transform_type_real_inverse, rocfft_precision_double);
 }
 
 hipfftResult hipfftSetStream(hipfftHandle plan, hipStream_t stream)
@@ -2297,19 +2386,25 @@ catch(...)
     return handle_exception();
 }
 
+// Execute an FFT on a multi-device plan using hipLibXtDesc descriptors.
+// Same templating convention as hipfftExecBase: prefer rocfft_transform_type
+// when the caller knows the exact transform kind (typed APIs like
+// hipfftXtExecDescriptorR2C). The int overload exists for hipfftXtExecDescriptor
+// where only a direction is available from the user.
+template <typename TransformArgType>
 static hipfftResult hipfftXtExecDescriptorBase(const hipfftHandle_t*                 plan,
                                                hipLibXtDesc*                         input,
                                                hipLibXtDesc*                         output,
-                                               int                                   direction,
+                                               TransformArgType                      transform_arg,
                                                const std::optional<rocfft_precision> precision
                                                = std::nullopt) noexcept
 try
 {
-    if(direction != HIPFFT_FORWARD && direction != HIPFFT_BACKWARD)
-        return HIPFFT_INVALID_VALUE;
-    if(!plan || plan->device_contexts.size() < 2 || !plan->can_execute(direction, precision))
+    if(!plan || !plan->initialized() || plan->device_contexts.size() < 2)
         return HIPFFT_INVALID_PLAN;
-
+    const auto dft_type = plan->get_transform_type_for(transform_arg);
+    if(!plan->can_execute(dft_type, precision))
+        return HIPFFT_INVALID_PLAN;
     if(!input || !output || !plan->can_work_with(*input)
        || (input != output && !plan->can_work_with(*output)))
         return HIPFFT_INVALID_VALUE;
@@ -2334,7 +2429,7 @@ try
         return HIPFFT_INVALID_VALUE;
     }
 
-    const auto it = plan->exec_plans.find(hipfftHandle_t::map_key_t{direction, key_insubFormat});
+    const auto it = plan->exec_plans.find(hipfftHandle_t::map_key_t{dft_type, key_insubFormat});
     if(it == plan->exec_plans.end())
         throw HIPFFT_INVALID_PLAN;
 
@@ -2367,18 +2462,27 @@ hipfftResult hipfftXtExecDescriptorC2C(hipfftHandle  plan,
                                        hipLibXtDesc* output,
                                        int           direction)
 {
-    return hipfftXtExecDescriptorBase(plan, input, output, direction, rocfft_precision_single);
+    if(direction != HIPFFT_FORWARD && direction != HIPFFT_BACKWARD)
+        return HIPFFT_INVALID_VALUE;
+    return hipfftXtExecDescriptorBase(plan,
+                                      input,
+                                      output,
+                                      direction == HIPFFT_FORWARD
+                                          ? rocfft_transform_type_complex_forward
+                                          : rocfft_transform_type_complex_inverse,
+                                      rocfft_precision_single);
 }
 
 hipfftResult hipfftXtExecDescriptorR2C(hipfftHandle plan, hipLibXtDesc* input, hipLibXtDesc* output)
 {
-    return hipfftXtExecDescriptorBase(plan, input, output, HIPFFT_FORWARD, rocfft_precision_single);
+    return hipfftXtExecDescriptorBase(
+        plan, input, output, rocfft_transform_type_real_forward, rocfft_precision_single);
 }
 
 hipfftResult hipfftXtExecDescriptorC2R(hipfftHandle plan, hipLibXtDesc* input, hipLibXtDesc* output)
 {
     return hipfftXtExecDescriptorBase(
-        plan, input, output, HIPFFT_BACKWARD, rocfft_precision_single);
+        plan, input, output, rocfft_transform_type_real_inverse, rocfft_precision_single);
 }
 
 hipfftResult hipfftXtExecDescriptorZ2Z(hipfftHandle  plan,
@@ -2386,18 +2490,27 @@ hipfftResult hipfftXtExecDescriptorZ2Z(hipfftHandle  plan,
                                        hipLibXtDesc* output,
                                        int           direction)
 {
-    return hipfftXtExecDescriptorBase(plan, input, output, direction, rocfft_precision_double);
+    if(direction != HIPFFT_FORWARD && direction != HIPFFT_BACKWARD)
+        return HIPFFT_INVALID_VALUE;
+    return hipfftXtExecDescriptorBase(plan,
+                                      input,
+                                      output,
+                                      direction == HIPFFT_FORWARD
+                                          ? rocfft_transform_type_complex_forward
+                                          : rocfft_transform_type_complex_inverse,
+                                      rocfft_precision_double);
 }
 
 hipfftResult hipfftXtExecDescriptorD2Z(hipfftHandle plan, hipLibXtDesc* input, hipLibXtDesc* output)
 {
-    return hipfftXtExecDescriptorBase(plan, input, output, HIPFFT_FORWARD, rocfft_precision_double);
+    return hipfftXtExecDescriptorBase(
+        plan, input, output, rocfft_transform_type_real_forward, rocfft_precision_double);
 }
 
 hipfftResult hipfftXtExecDescriptorZ2D(hipfftHandle plan, hipLibXtDesc* input, hipLibXtDesc* output)
 {
     return hipfftXtExecDescriptorBase(
-        plan, input, output, HIPFFT_BACKWARD, rocfft_precision_double);
+        plan, input, output, rocfft_transform_type_real_inverse, rocfft_precision_double);
 }
 
 hipfftResult hipfftXtExecDescriptor(hipfftHandle  plan,
