@@ -27,7 +27,7 @@ pytestmark = [pytest.mark.gpu, pytest.mark.cuda]
 
 
 def test_pytorch_gpu_timing_cuda() -> None:
-    """Validate PyTorch executor E2E and kernel timings with torch.cuda events."""
+    """Validate PyTorch executor host and kernel timings with torch.cuda events."""
     skip_if_no_cuda_torch()
 
     graph_path = Path(__file__).parent.parent.parent / "graphs" / "sample_conv_fwd.json"
@@ -53,13 +53,13 @@ def test_pytorch_gpu_timing_cuda() -> None:
 
     assert result.kernel_timings is not None
     assert len(result.kernel_timings) == 3
-    assert len(result.e2e_timings) == 3
+    assert len(result.host_timings) == 3
     assert all(t > 0.0 for t in result.kernel_timings)
-    assert all(t > 0.0 for t in result.e2e_timings)
+    assert all(t > 0.0 for t in result.host_timings)
 
     tolerance_ms = 0.1
-    for e2e_ms, kernel_ms in zip(result.e2e_timings, result.kernel_timings):
-        assert e2e_ms + tolerance_ms >= kernel_ms
+    for host_ms, kernel_ms in zip(result.host_timings, result.kernel_timings):
+        assert host_ms + tolerance_ms >= kernel_ms
 
     assert result.metadata is not None
     assert result.metadata.execution_backend == "pytorch"
