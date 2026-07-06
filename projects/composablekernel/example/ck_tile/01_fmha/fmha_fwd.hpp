@@ -677,29 +677,50 @@ struct fmha_batch_prefill_args
 
 // Selects the KV-cache load mode for a batch-prefill dispatch arm.
 //   GLOBAL_LOAD_LDS: required when (a) the page is smaller than one K/V tile
-//     so per-page SRD is impossible, AND (b) the total KV-pool byte size
-//     exceeds INT32_MAX so SRD's 32-bit byte offset cannot address it.
+//     so per-page SRD is impossible, AND (b) the SRD 32-bit voffset arithmetic
+//     would overflow for either K or V.  SRD computes addr = (base[63:32]<<32) |
+//     ((base[31:0] + voffset) & 0xFFFFFFFF), so overflow occurs when
+//     base[31:0] + max_voffset > 0xFFFFFFFF even if the pool itself is < 2 GB.
+//     K and V are independently allocated, so each must be checked separately.
 //   BUFFER_LOAD: every other case - the SGPR-resident SRD path is fastest.
-// Inputs are taken as plain integers so the helper has no template parameter
-// and can be called from each codegen-emitted dispatcher arm with the arm's
-// compile-time kN0 / element_bytes substituted as constants.
+// k_base_ptr/v_base_ptr are the VAs of the first elements of the K and V caches;
+// the low 32 bits of each determine whether the 32-bit voffset addition wraps around.
 inline ck_tile::BlockAttentionKVCacheLoadModeEnum
 fmha_batch_prefill_select_kv_load_mode(ck_tile::index_t page_block_size,
                                        ck_tile::index_t kN0,
                                        ck_tile::index_t num_total_pages,
                                        ck_tile::index_t batch_stride_k,
-                                       ck_tile::index_t element_bytes)
+                                       ck_tile::index_t batch_stride_v,
+                                       ck_tile::index_t element_bytes,
+                                       const void* k_base_ptr,
+                                       const void* v_base_ptr)
 {
-    // Promote every operand to long_index_t so overflow is impossible regardless
-    // of multiplication order. A bare `static_cast<long_index_t>(num_total_pages)
-    // * batch_stride_k * element_bytes` only works because of left-to-right
-    // associativity - a future reorder of the operands would silently truncate.
-    const auto kv_pool_bytes = static_cast<ck_tile::long_index_t>(num_total_pages) *
-                               static_cast<ck_tile::long_index_t>(batch_stride_k) *
-                               static_cast<ck_tile::long_index_t>(element_bytes);
-    return (page_block_size < kN0 && kv_pool_bytes > INT32_MAX)
-               ? ck_tile::BlockAttentionKVCacheLoadModeEnum::GLOBAL_LOAD_LDS
-               : ck_tile::BlockAttentionKVCacheLoadModeEnum::BUFFER_LOAD;
+    if(page_block_size >= kN0)
+        return ck_tile::BlockAttentionKVCacheLoadModeEnum::BUFFER_LOAD;
+
+    // Maximum byte offsets that buffer_load will add to K/V base pointers.
+    // Each page is addressed as page_id * batch_stride * element_bytes.
+    const auto k_pool_bytes = static_cast<uint64_t>(num_total_pages) *
+                              static_cast<uint64_t>(batch_stride_k) *
+                              static_cast<uint64_t>(element_bytes);
+    const auto v_pool_bytes = static_cast<uint64_t>(num_total_pages) *
+                              static_cast<uint64_t>(batch_stride_v) *
+                              static_cast<uint64_t>(element_bytes);
+
+    // Low-32-bit components of the base VAs.  SRD buffer_load computes:
+    //   effective_addr = (base[63:32] << 32) | ((base[31:0] + voffset) & 0xFFFF_FFFF)
+    // If base[31:0] + max_voffset overflows 32 bits the carry is dropped.
+    // K and V are independently allocated and may have different VA low-32 values,
+    // so both must be checked.
+    const auto k_lo32 =
+        static_cast<uint64_t>(reinterpret_cast<uintptr_t>(k_base_ptr)) & 0xFFFFFFFFULL;
+    const auto v_lo32 =
+        static_cast<uint64_t>(reinterpret_cast<uintptr_t>(v_base_ptr)) & 0xFFFFFFFFULL;
+    const bool srd_would_overflow =
+        (k_lo32 + k_pool_bytes) > 0xFFFFFFFFULL || (v_lo32 + v_pool_bytes) > 0xFFFFFFFFULL;
+
+    return srd_would_overflow ? ck_tile::BlockAttentionKVCacheLoadModeEnum::GLOBAL_LOAD_LDS
+                              : ck_tile::BlockAttentionKVCacheLoadModeEnum::BUFFER_LOAD;
 }
 
 template <typename FmhaKernel>
