@@ -576,6 +576,35 @@ TEST_F(InsertClusterBarrierPassTest, Rule4_SharedWait) {
     EXPECT_EQ(countTensorLoads(), 2);
 }
 
+// PGR=2 Rule 4: two distinct publication points get staggered WAIT drain
+// thresholds (2 then 3) while both SIGNAL halves stay at 3.
+TEST_F(InsertClusterBarrierPassTest, Rule4_Pgr2_StaggeredWaitDrainGates) {
+    createBarrierWait(kWorkgroupBarrierId);
+    createTensorLoadInBlock(bb, arch, /*s0=*/0, /*s1=*/4);
+    createBranch("label_next");
+    createBarrierWait(kWorkgroupBarrierId);
+    createTensorLoadInBlock(bb, arch, /*s0=*/8, /*s1=*/12);
+
+    runPass(/*pgrValue=*/2);
+
+    std::vector<int> drainGateImms;
+    for (const IRBase& ir : *bb) {
+        if (ir.getType() != IRBase::IRType::StinkyTofu) continue;
+        const auto* inst = cast<StinkyInstruction>(&ir);
+        if (inst->getUnifiedOpcode() != GFX::s_cmp_le_i32) continue;
+        const auto& srcs = inst->getSrcRegs();
+        if (srcs.empty() || srcs[0].getSymbolicName() != kLoopCounterLSymbol) continue;
+        if (srcs.size() < 2 || srcs[1].dataType != StinkyRegister::Type::LiteralInt) continue;
+        drainGateImms.push_back(static_cast<int>(srcs[1].getLiteralInt()));
+    }
+
+    ASSERT_EQ(drainGateImms.size(), 4u);
+    EXPECT_EQ(drainGateImms[0], 2) << "pub0 wait gate";
+    EXPECT_EQ(drainGateImms[1], 3) << "pub0 signal gate";
+    EXPECT_EQ(drainGateImms[2], 3) << "pub1 wait gate";
+    EXPECT_EQ(drainGateImms[3], 3) << "pub1 signal gate";
+}
+
 // Rule 4 SCC restore (mode d): when a live `s_cmp_eq s[sgprLoopCounterL]` is the
 // first SCC writer above the anchor wait, the WaveIdx gate would clobber its
 // SCC, so the pass re-clones that compare AFTER the whole handshake block. We
