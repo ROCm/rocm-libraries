@@ -80,6 +80,47 @@ void bias(int64_t m, int64_t n, int64_t ld, T* src, To* dest, Tb* bias)
     }
 }
 
+// gate_residual: D[i,j] = gate[i,j] * spmm_result[i,j] + gate[i,j]
+template <typename T, typename Tgate, typename To = T, hipsparseOrder_t order>
+void gate_residual(int64_t m, int64_t n, int64_t ld, int64_t ld_gate, T* src, To* dest, Tgate* gate)
+{
+    using TAccum = float;
+
+    auto saturate_i8 = [](TAccum val) {
+        auto _val = std::nearbyint(static_cast<double>(val));
+        _val      = _val > 127.f ? 127.f : _val < -128.f ? -128.f : _val;
+        return static_cast<To>(_val);
+    };
+
+    auto saturate_o = [](TAccum val) { return static_cast<To>(val); };
+
+    To (*saturate)(TAccum val);
+    saturate = std::is_same<int8_t, To>() ? saturate_i8 : saturate_o;
+
+    for(int64_t i = 0; i < m; i++)
+    {
+#pragma omp parallel for
+        for(int64_t j = 0; j < n; j++)
+        {
+            int64_t pos, gate_pos;
+            if constexpr(order == HIPSPARSE_ORDER_COL)
+            {
+                pos      = j * ld + i;
+                gate_pos = j * ld_gate + i;
+            }
+            else
+            {
+                pos      = i * ld + j;
+                gate_pos = i * ld_gate + j;
+            }
+
+            TAccum g      = static_cast<TAccum>(*(gate + gate_pos));
+            TAccum spmm   = static_cast<TAccum>(*(src + pos));
+            *(dest + pos) = saturate(g * spmm + g);
+        }
+    }
+}
+
 template <typename Ti, typename To, typename Tact, typename F>
 void activation(int64_t m, int64_t n, int64_t ld, Ti* in, To* out, Tact arg1, Tact arg2, F& func)
 {
@@ -252,6 +293,7 @@ template <typename Ti,
           typename To,
           typename Tc,
           typename TBias,
+          typename TGate               = Ti,
           hipsparselt_batch_type btype = hipsparselt_batch_type::none>
 void testing_spmm(const Arguments& arg)
 {
@@ -531,6 +573,66 @@ void testing_spmm(const Arguments& arg)
 
     hipsparselt_seedrand();
 
+    // Gate ld and stride: from arg.ldg/arg.stride_gate; validated in client.cpp.
+    const int64_t ldg = arg.ldg;
+    const int64_t stride_gate
+        = do_strided_batched              ? arg.stride_gate
+          : orderD == HIPSPARSE_ORDER_COL ? ldg * N
+                                          : ldg * M;
+
+    const size_t size_gate = arg.gate_residual ? (stride_gate == 0 ? (orderD == HIPSPARSE_ORDER_COL ? ldd * N : ldd * M) * num_batches : stride_gate * num_batches) : 0;
+
+    device_vector<TGate> dGate(size_gate, 1, HMM);
+    CHECK_DEVICE_ALLOCATION(dGate.memcheck());
+    host_vector<TGate> hGate(size_gate);
+    if(arg.gate_residual)
+    {
+        hipsparselt_init<TGate>(hGate,
+                             orderD == HIPSPARSE_ORDER_COL ? M : N,
+                             orderD == HIPSPARSE_ORDER_COL ? N : M,
+                             ldg,
+                             stride_gate,
+                             num_batches);
+        CHECK_HIP_ERROR(dGate.transfer_from(hGate));
+        // Create a mat descriptor for the gate using arg.gate_type
+        hipsparselt_local_mat_descr matGate(hipsparselt_matrix_type_dense,
+                                            handle,
+                                            M,
+                                            N,
+                                            ldg,
+                                            arg.gate_type,
+                                            orderD);
+        if(do_batched || do_strided_batched)
+        {
+            EXPECT_HIPSPARSE_STATUS(
+                hipsparseLtMatDescSetAttribute(
+                    handle, matGate, HIPSPARSELT_MAT_NUM_BATCHES, &num_batches, sizeof(int)),
+                HIPSPARSE_STATUS_SUCCESS);
+        }
+        if(do_strided_batched)
+        {
+            EXPECT_HIPSPARSE_STATUS(
+                hipsparseLtMatDescSetAttribute(
+                    handle, matGate, HIPSPARSELT_MAT_BATCH_STRIDE, &stride_gate, sizeof(int64_t)),
+                HIPSPARSE_STATUS_SUCCESS);
+        }
+        void* _dGate = dGate;
+        EXPECT_HIPSPARSE_STATUS(
+            hipsparseLtMatmulDescSetAttribute(handle,
+                                             matmul,
+                                             HIPSPARSELT_MATMUL_GATE_RESIDUAL_MAT_POINTER,
+                                             &_dGate,
+                                             sizeof(void*)),
+            HIPSPARSE_STATUS_SUCCESS);
+        EXPECT_HIPSPARSE_STATUS(
+            hipsparseLtMatmulDescSetAttribute(handle,
+                                             matmul,
+                                             HIPSPARSELT_MATMUL_GATE_RESIDUAL_DESC,
+                                             &matGate,
+                                             sizeof(hipsparseLtMatDescriptor_t*)),
+            HIPSPARSE_STATUS_SUCCESS);
+    }
+
     const size_t size_bias
         = arg.bias_vector ? (bias_stride == 0 ? M : bias_stride * num_batches) : 0;
 
@@ -649,7 +751,7 @@ void testing_spmm(const Arguments& arg)
                                        ? (orderD == HIPSPARSE_ORDER_COL ? ldd * N : ldd * M) * num_batches
                                        : stride_d * num_batches;
     const size_t size_D_copy     = arg.unit_check || arg.norm_check ? size_D : 0;
-    const size_t size_D_act_copy = activation_on ? size_D_copy : 0;
+    const size_t size_D_act_copy = (activation_on || arg.gate_residual) ? size_D_copy : 0;
 
     // allocate memory on device
     device_vector<Ti>            dA(size_A, 1, HMM);
@@ -737,7 +839,7 @@ void testing_spmm(const Arguments& arg)
 
     if(size_D_copy)
     {
-        if(activation_on || arg.bias_vector)
+        if(activation_on || arg.bias_vector || arg.gate_residual)
         {
             std::transform(hC.begin(), hC.end(), hD_gold_act.begin(), [](To c) -> Talpha {
                 return static_cast<Talpha>(c);
@@ -848,15 +950,19 @@ void testing_spmm(const Arguments& arg)
                               : HIPSPARSE_OPERATION_NON_TRANSPOSE;
         }
 
+#define activation_act_param \
+    tM, tN, ldd, hD_gold_act + pos, hD_gold_act + pos, arg.activation_arg1, arg.activation_arg2
 #define activation_param \
     tM, tN, ldd, hD_gold_act + pos, hD_gold + pos, arg.activation_arg1, arg.activation_arg2
 #define bias_act_param M, N, ldd, hD_gold_act + pos, hD_gold_act + pos, hBias + bias_stride* i
 #define bias_param M, N, ldd, hD_gold_act + pos, hD_gold + pos, hBias + bias_stride* i
+#define gate_residual_param \
+    M, N, ldd, ldg, hD_gold_act + pos, hD_gold + pos, hGate.data() + stride_gate * i
 
         for(int i = 0; i < num_batches; i++)
         {
 
-            if(activation_on || arg.bias_vector)
+            if(activation_on || arg.bias_vector || arg.gate_residual)
             {
                 cblas_gemm<Ti, Talpha, Talpha>(orderC,
                                                tTransA,
@@ -881,7 +987,7 @@ void testing_spmm(const Arguments& arg)
                 auto pos = stride_d * i;
                 if(arg.bias_vector)
                 {
-                    if(activation_on)
+                    if(activation_on || arg.gate_residual)
                     {
                         if(orderD == HIPSPARSE_ORDER_COL)
                             bias<Talpha, TBias, Talpha, HIPSPARSE_ORDER_COL>(bias_act_param);
@@ -899,32 +1005,74 @@ void testing_spmm(const Arguments& arg)
 
                 if(activation_on)
                 {
-                    switch(arg.activation_type)
+                    if(arg.gate_residual)
                     {
-                    case hipsparselt_activation_type::clippedrelu:
-                        activation(activation_param, ::_clippedrelu);
-                        break;
-                    case hipsparselt_activation_type::gelu:
-                        activation(activation_param, ::_gelu);
-                        break;
-                    case hipsparselt_activation_type::relu:
-                        activation(activation_param, ::_relu);
-                        break;
-                    case hipsparselt_activation_type::abs:
-                        activation(activation_param, ::_abs);
-                        break;
-                    case hipsparselt_activation_type::leakyrelu:
-                        activation(activation_param, ::_leakyrelu);
-                        break;
-                    case hipsparselt_activation_type::sigmoid:
-                        activation(activation_param, ::_sigmoid);
-                        break;
-                    case hipsparselt_activation_type::tanh:
-                        activation(activation_param, ::_tanh);
-                        break;
-                    default:
-                        continue;
+                        switch(arg.activation_type)
+                        {
+                        case hipsparselt_activation_type::clippedrelu:
+                            activation(activation_act_param, ::_clippedrelu);
+                            break;
+                        case hipsparselt_activation_type::gelu:
+                            activation(activation_act_param, ::_gelu);
+                            break;
+                        case hipsparselt_activation_type::relu:
+                            activation(activation_act_param, ::_relu);
+                            break;
+                        case hipsparselt_activation_type::abs:
+                            activation(activation_act_param, ::_abs);
+                            break;
+                        case hipsparselt_activation_type::leakyrelu:
+                            activation(activation_act_param, ::_leakyrelu);
+                            break;
+                        case hipsparselt_activation_type::sigmoid:
+                            activation(activation_act_param, ::_sigmoid);
+                            break;
+                        case hipsparselt_activation_type::tanh:
+                            activation(activation_act_param, ::_tanh);
+                            break;
+                        default:
+                            break;
+                        }
                     }
+                    else
+                    {
+                        switch(arg.activation_type)
+                        {
+                        case hipsparselt_activation_type::clippedrelu:
+                            activation(activation_param, ::_clippedrelu);
+                            break;
+                        case hipsparselt_activation_type::gelu:
+                            activation(activation_param, ::_gelu);
+                            break;
+                        case hipsparselt_activation_type::relu:
+                            activation(activation_param, ::_relu);
+                            break;
+                        case hipsparselt_activation_type::abs:
+                            activation(activation_param, ::_abs);
+                            break;
+                        case hipsparselt_activation_type::leakyrelu:
+                            activation(activation_param, ::_leakyrelu);
+                            break;
+                        case hipsparselt_activation_type::sigmoid:
+                            activation(activation_param, ::_sigmoid);
+                            break;
+                        case hipsparselt_activation_type::tanh:
+                            activation(activation_param, ::_tanh);
+                            break;
+                        default:
+                            break;
+                        }
+                    }
+                }
+
+                if(arg.gate_residual)
+                {
+                    if(orderD == HIPSPARSE_ORDER_COL)
+                        gate_residual<Talpha, TGate, To, HIPSPARSE_ORDER_COL>(
+                            gate_residual_param);
+                    else
+                        gate_residual<Talpha, TGate, To, HIPSPARSE_ORDER_ROW>(
+                            gate_residual_param);
                 }
             }
 
@@ -949,7 +1097,11 @@ void testing_spmm(const Arguments& arg)
                                            arg.alpha_vector_scaling ? hAlpahVector : (float*)nullptr,
                                            false);
         }
+#undef activation_act_param
 #undef activation_param
+#undef bias_act_param
+#undef bias_param
+#undef gate_residual_param
 
         if(arg.timing)
         {
@@ -988,6 +1140,8 @@ void testing_spmm(const Arguments& arg)
         print_strided_batched("C", &hC[0], C_row_r, C_col_r, num_batches, 1, ldc, stride_c);
         if(arg.bias_vector)
             print_strided_batched("bias", &hBias[0], M, 1, num_batches, 1, M, bias_stride);
+        if(arg.gate_residual)
+            print_strided_batched("gate", hGate.data(), M, N, num_batches, 1, ldg, stride_gate);
         if(arg.alpha_vector_scaling)
             print_strided_batched("alpha_vec", &hAlpahVector[0], M, 1, 1, 1, M, M);
         print_strided_batched("hD_gold", &hD_gold[0], tM, tN, num_batches, 1, ldd, stride_d);
@@ -1276,7 +1430,7 @@ void testing_aux_plan_assign(const Arguments& arg)
     const size_t size_C      = stride_c == 0 ? ldc * N * num_batches : stride_c * num_batches;
     const size_t size_D      = stride_d == 0 ? ldd * N * num_batches : stride_d * num_batches;
     const size_t size_D_copy = size_D;
-    const size_t size_D_act_copy = activation_on ? size_D_copy : 0;
+    const size_t size_D_act_copy = (activation_on || arg.gate_residual) ? size_D_copy : 0;
 
     // allocate memory on device
     device_vector<Ti>            dA(size_A, 1, HMM);
@@ -1538,9 +1692,10 @@ void testing_aux_plan_assign(const Arguments& arg)
 template <typename Ti,
           typename To,
           typename Tc,
-          typename TBias>
+          typename TBias,
+          typename TGate = Ti>
 void testing_spmm_logging(const Arguments& arg)
 {
     Logger logger(arg.logging);
-    testing_spmm<Ti, To, Tc, TBias>(arg);
+    testing_spmm<Ti, To, Tc, TBias, TGate>(arg);
 }
