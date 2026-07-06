@@ -169,8 +169,6 @@ template <typename ADataType_,
           MmaOpFamily OpFamily_>
 struct amdgcn_mma_base
 {
-    static constexpr const char* instruction_name = "Unknown";
-
     using OpType                          = OpType_;
     static constexpr MmaOpFamily OpFamily = OpFamily_;
 
@@ -307,6 +305,8 @@ template <typename ADataType,
 struct amdgcn_mma : amdgcn_mma_base<fp32_t, fp32_t, fp32_t, 1u, 1u, 1u, 1u, 1, 1, 1, 1, 1, 1, 1, Unsupported, MmaOpFamily::UNDEFINED>
 // clang-format on
 {
+    static constexpr const char* instruction_name = "Unknown";
+
     // This is a default pass-through implementation that doesn't do anything practical.
     template <typename... Params>
     CK_TILE_DEVICE static CVecType
