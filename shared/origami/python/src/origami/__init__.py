@@ -18,6 +18,8 @@ try:
         reduction_t,
         prediction_modes_t,
         model_t,
+        target_t,
+        prune_kind_t,
         # Data structures
         dim3_t,
         dim4_t,
@@ -29,6 +31,9 @@ try:
         problem_t,
         hardware_t,
         context_t,
+        prune_policy_t,
+        ranking_phase_t,
+        ranking_pipeline_t,
         # Hardware functions
         get_hardware_for_device,
         get_hardware_for_arch,
@@ -42,9 +47,11 @@ try:
         rank_configs,
         select_config_mnk,
         select_topk_configs,
+        make_cascade_pipeline,
         # Performance functions
         compute_perf_gflops,
         compute_total_latency,
+        compute_formocast_latency,
         compute_number_matrix_instructions,
         compute_mt_compute_latency,
         # Memory functions
@@ -107,6 +114,8 @@ __all__ = [
     "reduction_t",
     "prediction_modes_t",
     "model_t",
+    "target_t",
+    "prune_kind_t",
     # Data structures
     "dim3_t",
     "dim4_t",
@@ -117,6 +126,9 @@ __all__ = [
     "problem_t",
     "hardware_t",
     "context_t",
+    "prune_policy_t",
+    "ranking_phase_t",
+    "ranking_pipeline_t",
     # Hardware functions
     "get_hardware_for_device",
     "get_hardware_for_arch",
@@ -130,9 +142,11 @@ __all__ = [
     "rank_configs",
     "select_config_mnk",
     "select_topk_configs",
+    "make_cascade_pipeline",
     # Performance functions
     "compute_perf_gflops",
     "compute_total_latency",
+    "compute_formocast_latency",
     "compute_number_matrix_instructions",
     "compute_mt_compute_latency",
     # Memory functions

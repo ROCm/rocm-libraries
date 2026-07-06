@@ -30,17 +30,28 @@
 #include <compare>
 #include <cstddef>
 #include <cstdint>
+#include <functional>
+#include <limits>
 #include <ostream>
 #include <string>
 #include <tuple>
 #include <type_traits>
 #include <unordered_map>
+#include <utility>
 #include <variant>
+#include <vector>
 
 #include "origami/math.hpp"
 #include "origami/origami_export.h"
 
 namespace origami {
+
+// Forward declarations for the optional fast-reject predicate on a ranking phase.
+// (problem_t and config_t are fully defined later in this header; hardware_t in
+// hardware.hpp. References in the predicate signature only need a declaration.)
+struct problem_t;
+struct config_t;
+class hardware_t;
 
 /**
  * @brief Enumeration of supported data types.
@@ -233,6 +244,83 @@ enum class target_t : std::uint32_t {
   composable_kernel = 4,  ///< Composable Kernel backend (Not supported yet)
   count,                  ///< Count of target types
   none = 0xFFFFFFFFu      ///< Explicitly invalid
+};
+
+/**
+ * @brief Pruning strategy applied to the survivors of a ranking phase.
+ *
+ * Selects how a multi-phase ranking pipeline narrows the candidate set before
+ * passing it to the next, typically more expensive, phase.
+ */
+enum class prune_kind_t : std::uint32_t {
+  none                     = 0,  ///< Keep every feasible config (no narrowing)
+  top_k                    = 1,  ///< Keep the best prune_policy_t::top_k configs
+  top_fraction             = 2,  ///< Keep the best prune_policy_t::fraction of configs
+  within_fraction_of_best  = 3,  ///< Keep configs within prune_policy_t::fraction of the best latency
+  count,                         ///< Count of prune kinds
+  none_invalid = 0xFFFFFFFFu     ///< Explicitly invalid
+};
+
+/**
+ * @brief Pruning policy for a single ranking phase.
+ *
+ * Describes how many candidate configs survive a phase. @ref min_keep is a floor
+ * that guarantees a phase never prunes its survivors down to zero (as long as at
+ * least that many feasible configs exist).
+ */
+struct prune_policy_t {
+  /// Which pruning rule to apply.
+  prune_kind_t kind = prune_kind_t::none;
+
+  /// Survivor count for prune_kind_t::top_k.
+  std::size_t top_k = 0;
+
+  /// Fraction in (0, 1] for prune_kind_t::top_fraction and
+  /// prune_kind_t::within_fraction_of_best (e.g. 0.1 == keep within 10%).
+  double fraction = 0.0;
+
+  /// Minimum number of survivors a phase must keep when candidates are available.
+  std::size_t min_keep = 1;
+};
+
+/**
+ * @brief A single phase of a multi-phase ranking pipeline.
+ *
+ * A phase scores the current survivor set with the cost model resolved from
+ * (@ref model, @ref target, @ref fidelity), then narrows it using @ref prune.
+ * Each phase runs one whole model; any coarse-to-fine refinement WITHIN a model
+ * (with data reuse) is internal to that model, not a pipeline concern.
+ */
+struct ranking_phase_t {
+  /// Operation model to score with (gemm or attention).
+  model_t model = model_t::gemm;
+
+  /// Target backend whose kernels are being modeled.
+  target_t target = target_t::tensilelite;
+
+  /// Prediction fidelity for this phase (e.g. estimation then simulation).
+  prediction_modes_t fidelity = prediction_modes_t::estimation;
+
+  /// Pruning applied to this phase's survivors before the next phase.
+  prune_policy_t prune{};
+
+  /// Optional fast-reject predicate, evaluated BEFORE the cost model. When set,
+  /// any config for which it returns true is dropped immediately, skipping the
+  /// (more expensive) feasibility and latency evaluation. Intended for cheap
+  /// primitive rules. A C++ predicate is safe to evaluate concurrently if its
+  /// captures are; a Python callable is GIL-bound.
+  std::function<bool(const problem_t&, const hardware_t&, const config_t&)> reject;
+};
+
+/**
+ * @brief An ordered sequence of ranking phases (coarse-to-fine cascade).
+ *
+ * Phases run in order; each consumes the survivors pruned by the previous one.
+ * The final phase's latencies determine the returned ranking.
+ */
+struct ranking_pipeline_t {
+  /// Phases executed in order (first is cheapest/coarsest).
+  std::vector<ranking_phase_t> phases;
 };
 
 /**
@@ -441,6 +529,17 @@ struct tensile_params_t {
   bool global_split_u_coalesced = false;
   bool global_split_u_wgm_round_robin = false;
 
+  /// Global read vector width for matrix A / B (elements per load).
+  std::size_t grvw_a = 1;
+  std::size_t grvw_b = 1;
+
+  /// Global write vector width for matrix D (elements per store).
+  std::size_t gwvw_d = 1;
+
+  /// LDS load vector width for matrix A / B (elements per LDS read).
+  int vector_width_a = 1;
+  int vector_width_b = 1;
+
   constexpr bool operator==(const tensile_params_t& o) const noexcept {
     return depth_u == o.depth_u && global_split_u == o.global_split_u &&
            global_accumulation == o.global_accumulation && local_split_u == o.local_split_u &&
@@ -454,7 +553,9 @@ struct tensile_params_t {
            swizzle_b == o.swizzle_b && workgroup_mapping_xcc == o.workgroup_mapping_xcc &&
            workgroup_mapping_xcc_group == o.workgroup_mapping_xcc_group &&
            global_split_u_coalesced == o.global_split_u_coalesced &&
-           global_split_u_wgm_round_robin == o.global_split_u_wgm_round_robin;
+           global_split_u_wgm_round_robin == o.global_split_u_wgm_round_robin &&
+           grvw_a == o.grvw_a && grvw_b == o.grvw_b && gwvw_d == o.gwvw_d &&
+           vector_width_a == o.vector_width_a && vector_width_b == o.vector_width_b;
   }
 
   std::size_t hash() const {
@@ -478,7 +579,12 @@ struct tensile_params_t {
                               workgroup_mapping_xcc,
                               workgroup_mapping_xcc_group,
                               global_split_u_coalesced,
-                              global_split_u_wgm_round_robin);
+                              global_split_u_wgm_round_robin,
+                              grvw_a,
+                              grvw_b,
+                              gwvw_d,
+                              vector_width_a,
+                              vector_width_b);
   }
 };
 
@@ -522,9 +628,6 @@ struct config_t {
   /// Reduction strategy.
   reduction_t reduction_strategy = reduction_t::none;
 
-  /// Prediction mode for latency estimation.
-  prediction_modes_t prediction_mode = prediction_modes_t::estimation;
-
   /// Target backend for kernel execution.
   target_t target = target_t::tensilelite;
   /// Grid selection algorithm.
@@ -532,21 +635,6 @@ struct config_t {
 
   /// Index of config, not used by Origami but can be used by the user
   std::size_t index = 0;
-
-  /// Global read vector width for matrix A (elements per load)
-  std::size_t grvw_a = 1;
-
-  /// Global read vector width for matrix B (elements per load)
-  std::size_t grvw_b = 1;
-
-  /// Global write vector width for matrix D (elements per store)
-  std::size_t gwvw_d = 1;
-
-  /// LDS load vector width for matrix A (elements per LDS read)
-  int vector_width_a = 1;
-
-  /// LDS load vector width for matrix B (elements per LDS read)
-  int vector_width_b = 1;
 
   /// Backend-specific parameters (type should match target).
   /// Use tensile() accessor to get/set Tensile-specific params.
@@ -571,9 +659,7 @@ struct config_t {
            subtile == o.subtile && cache_hints_a == o.cache_hints_a &&
            cache_hints_b == o.cache_hints_b &&
            workgroup_mapping == o.workgroup_mapping && reduction_strategy == o.reduction_strategy &&
-           prediction_mode == o.prediction_mode && target == o.target && grvw_a == o.grvw_a &&
-           grvw_b == o.grvw_b && gwvw_d == o.gwvw_d && vector_width_a == o.vector_width_a &&
-           vector_width_b == o.vector_width_b && backend == o.backend;
+           target == o.target && backend == o.backend;
   }
 
   std::size_t hash() const {
@@ -589,13 +675,7 @@ struct config_t {
                                           cache_hints_b,
                                           workgroup_mapping,
                                           static_cast<std::uint32_t>(reduction_strategy),
-                                          static_cast<std::uint32_t>(prediction_mode),
-                                          static_cast<std::uint32_t>(target),
-                                          grvw_a,
-                                          grvw_b,
-                                          gwvw_d,
-                                          vector_width_a,
-                                          vector_width_b);
+                                          static_cast<std::uint32_t>(target));
     // Hash backend-specific parameters if present. The visitor pattern allows
     // automatic handling of any backend type that provides a hash() method,
     // while std::monostate (no backend params) is a no-op.
@@ -617,6 +697,18 @@ struct config_t {
     return mt.m > 0 && mt.n > 0 && mt.k > 0 && mi.m > 0 && mi.n > 0 && mi.k > 0 && occupancy > 0;
   }
 };
+
+/**
+ * @brief A scored candidate during ranking: (cost, index into the candidate array).
+ *
+ * Lower cost is better. The index refers into the caller's config array, so a
+ * scored set can be carried/pruned without copying configs. Used by the cost
+ * models' score_candidates and the ranking driver.
+ */
+using scored_config_t = std::pair<double, std::size_t>;
+
+/// An ordered set of @ref scored_config_t (sorted ascending by cost by convention).
+using scored_configs_t = std::vector<scored_config_t>;
 
 /**
  * @brief Latency prediction result given kernel configuration.

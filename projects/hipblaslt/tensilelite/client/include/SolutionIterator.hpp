@@ -36,7 +36,7 @@
 #include <queue>
 
 #include "RunListener.hpp"
-#include <origami/simulator/tensilelite/formocast_simulator.hpp>
+#include <origami/formocast.hpp>
 
 namespace TensileLite
 {

@@ -9,6 +9,7 @@
 #include <nanobind/stl/unordered_map.h>
 #include <nanobind/stl/vector.h>
 #include "origami/attention.hpp"
+#include "origami/formocast.hpp"
 #include "origami/gemm.hpp"
 #include "origami/hardware.hpp"
 #include "origami/origami.hpp"
@@ -97,6 +98,21 @@ NB_MODULE(origami, m) {
       .value("attention", origami::model_t::attention)
       .export_values();
 
+  nanobind::enum_<origami::target_t>(m, "target_t")
+      .value("generic", origami::target_t::generic)
+      .value("tensilelite", origami::target_t::tensilelite)
+      .value("rocroller", origami::target_t::rocroller)
+      .value("triton", origami::target_t::triton)
+      .value("composable_kernel", origami::target_t::composable_kernel)
+      .export_values();
+
+  nanobind::enum_<origami::prune_kind_t>(m, "prune_kind_t")
+      .value("none", origami::prune_kind_t::none)
+      .value("top_k", origami::prune_kind_t::top_k)
+      .value("top_fraction", origami::prune_kind_t::top_fraction)
+      .value("within_fraction_of_best", origami::prune_kind_t::within_fraction_of_best)
+      .export_values();
+
   // Add new struct bindings
   nanobind::class_<origami::dim3_t>(m, "dim3_t")
       .def(nanobind::init<std::size_t, std::size_t, std::size_t>())
@@ -118,7 +134,7 @@ NB_MODULE(origami, m) {
       .def("mnk", &origami::dim4_t::mnk)
       .def("total", &origami::dim4_t::total);
 
-  // Tensile-specific parameters (used when prediction_mode == simulation)
+  // Tensile-specific parameters (used by the Formocast simulation model)
   nanobind::class_<origami::tensile_params_t>(m, "tensile_params_t")
       .def(nanobind::init<>())
       .def_rw("depth_u", &origami::tensile_params_t::depth_u)
@@ -143,7 +159,12 @@ NB_MODULE(origami, m) {
               &origami::tensile_params_t::workgroup_mapping_xcc_group)
       .def_rw("global_split_u_coalesced", &origami::tensile_params_t::global_split_u_coalesced)
       .def_rw("global_split_u_wgm_round_robin",
-              &origami::tensile_params_t::global_split_u_wgm_round_robin);
+              &origami::tensile_params_t::global_split_u_wgm_round_robin)
+      .def_rw("grvw_a", &origami::tensile_params_t::grvw_a)
+      .def_rw("grvw_b", &origami::tensile_params_t::grvw_b)
+      .def_rw("gwvw_d", &origami::tensile_params_t::gwvw_d)
+      .def_rw("vector_width_a", &origami::tensile_params_t::vector_width_a)
+      .def_rw("vector_width_b", &origami::tensile_params_t::vector_width_b);
 
   nanobind::class_<origami::config_t>(m, "config_t")
       .def(nanobind::init<>())
@@ -159,12 +180,6 @@ NB_MODULE(origami, m) {
       .def_rw("workspace_size_per_elem_c", &origami::config_t::workspace_size_per_elem_c)
       .def_rw("reduction_strategy", &origami::config_t::reduction_strategy)
       .def_rw("grid_selection", &origami::config_t::grid_selection)
-      .def_rw("prediction_mode", &origami::config_t::prediction_mode)
-      .def_rw("grvw_a", &origami::config_t::grvw_a)
-      .def_rw("grvw_b", &origami::config_t::grvw_b)
-      .def_rw("gwvw_d", &origami::config_t::gwvw_d)
-      .def_rw("vector_width_a", &origami::config_t::vector_width_a)
-      .def_rw("vector_width_b", &origami::config_t::vector_width_b)
       // Tensile-specific parameters accessed via variant backend
       .def("tensile",
            static_cast<origami::tensile_params_t& (origami::config_t::*)()>(
@@ -190,6 +205,30 @@ NB_MODULE(origami, m) {
       .def_rw("latency", &origami::prediction_result_t::latency)
       .def_rw("config", &origami::prediction_result_t::config);
 
+  // Multi-phase ranking pipeline types
+  nanobind::class_<origami::prune_policy_t>(m, "prune_policy_t")
+      .def(nanobind::init<>())
+      .def_rw("kind", &origami::prune_policy_t::kind)
+      .def_rw("top_k", &origami::prune_policy_t::top_k)
+      .def_rw("fraction", &origami::prune_policy_t::fraction)
+      .def_rw("min_keep", &origami::prune_policy_t::min_keep);
+
+  // NOTE: ranking_phase_t::reject (a std::function fast-reject predicate) is a
+  // C++-only feature. It is intentionally NOT exposed here: a Python callable
+  // stored in a C++ std::function is a strong reference invisible to Python's
+  // cyclic GC (it leaks at shutdown) and would be GIL-bound. Fast primitive
+  // rejection is meant for the C++ hot path.
+  nanobind::class_<origami::ranking_phase_t>(m, "ranking_phase_t")
+      .def(nanobind::init<>())
+      .def_rw("model", &origami::ranking_phase_t::model)
+      .def_rw("target", &origami::ranking_phase_t::target)
+      .def_rw("fidelity", &origami::ranking_phase_t::fidelity)
+      .def_rw("prune", &origami::ranking_phase_t::prune);
+
+  nanobind::class_<origami::ranking_pipeline_t>(m, "ranking_pipeline_t")
+      .def(nanobind::init<>())
+      .def_rw("phases", &origami::ranking_pipeline_t::phases);
+
   nanobind::class_<origami::gemm::context_t>(m, "context_t")
       .def(nanobind::init<>())
       .def(nanobind::init<const origami::problem_t&,
@@ -207,7 +246,12 @@ NB_MODULE(origami, m) {
       .def_rw("write_mem_bw_limited", &origami::gemm::context_t::write_mem_bw_limited)
       .def_rw("tile_elements", &origami::gemm::context_t::tile_elements)
       .def_rw("output_tile_bytes", &origami::gemm::context_t::output_tile_bytes)
-      .def_rw("wgm", &origami::gemm::context_t::wgm);
+      // wgm is now lazily predicted and memoized in context_t::wgm (see get_wgm).
+      // Expose it read-only: returns the memoized mapping once the analytical path
+      // has run, otherwise the default mapping.
+      .def_prop_ro("wgm", [](const origami::gemm::context_t& c) {
+        return c.wgm.value_or(origami::workgroup_mapping_t{0, 8, 1});
+      });
 
   nanobind::class_<origami::problem_t>(m, "problem_t")
       .def(nanobind::init<>())
@@ -289,16 +333,31 @@ NB_MODULE(origami, m) {
   // Origami functions [origami.cpp]
   m.def("select_config",
         &origami::select_config,
-        "Select best configuration based on problem and hardware");
+        nanobind::arg("problem"),
+        nanobind::arg("hardware"),
+        nanobind::arg("configs"),
+        nanobind::arg("model")    = origami::model_t::gemm,
+        nanobind::arg("pipeline") = origami::ranking_pipeline_t{},
+        "Select best configuration (single pass, or cascade if pipeline is non-empty)");
   m.def("select_workgroup_mapping",
         &origami::select_workgroup_mapping,
         "Select best workgroup mapping");
   m.def("select_staggerU", &origami::select_staggerU, "Select best staggerU parameters");
-  m.def("rank_configs", &origami::rank_configs, "Rank configurations by performance");
+  m.def("rank_configs",
+        &origami::rank_configs,
+        nanobind::arg("problem"),
+        nanobind::arg("hardware"),
+        nanobind::arg("configs"),
+        nanobind::arg("model")    = origami::model_t::gemm,
+        nanobind::arg("pipeline") = origami::ranking_pipeline_t{},
+        "Rank configurations by performance (single pass, or cascade if pipeline is non-empty)");
   m.def("select_config_mnk",
         &origami::select_config_mnk,
         "Select best configuration for M,N,K dimensions");
   m.def("select_topk_configs", &origami::select_topk_configs, "Select topk configurations");
+  m.def("make_cascade_pipeline",
+        &origami::make_cascade_pipeline,
+        "Build a two-phase estimation-then-simulation cascade pipeline");
   m.def("compute_perf_gflops", &origami::compute_perf_gflops, "Compute performance in GFLOPS");
 
   // StreamK functions [streamk.cpp]
@@ -367,8 +426,12 @@ NB_MODULE(origami, m) {
   m.def("compute_l2_hit_rate_global",
         &origami::gemm::compute_l2_hit_rate_global,
         "Compute L2 hit rate from a global perspective");
+  // compute_memory_latency is overloaded with a level-templated variant; bind the
+  // non-template (full-detail) overload via an explicit cast.
   m.def("compute_memory_latency",
-        &origami::gemm::compute_memory_latency,
+        static_cast<double (*)(const origami::problem_t&, const origami::hardware_t&,
+                               const origami::config_t&, const origami::gemm::context_t&)>(
+            &origami::gemm::compute_memory_latency),
         "Compute memory latency per macro tile");
   m.def("compute_tile_latency",
         &origami::gemm::compute_tile_latency,
@@ -378,7 +441,10 @@ NB_MODULE(origami, m) {
         "Compute latency per K-complete MT wave");
   m.def("compute_total_latency",
         &origami::gemm::compute_total_latency,
-        "Compute total latency (uses Formocast when config.prediction_mode == simulation)");
+        "Compute total analytical (estimation) latency");
+  m.def("compute_formocast_latency",
+        &origami::gemm::compute_formocast_latency,
+        "Compute total latency using the Formocast simulation model");
 
   // Attention functions
   m.def("att_compute_total_latency",

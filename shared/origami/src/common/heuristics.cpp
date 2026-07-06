@@ -62,9 +62,6 @@ void heuristic_params_t::merge_with(const heuristic_params_t& other) {
 
   // Main loop efficiency
   main_loop_efficiency = other.main_loop_efficiency;
-
-  // Kernel rejection
-  reject = other.reject;
 }
 
 // ============================================================================
@@ -427,25 +424,10 @@ void heuristics_database_t::initialize_defaults() {
     }
   }
 
-  // ========================================================================
-  // HEURISTIC 3: Reject gfx950 BF16 TN subtile kernels for small K
-  // ========================================================================
-  // Subtile kernels are not competitive when the reduction dimension is small
-  // (K < 512). Scoped to gfx950 BF16 TN (a_transpose=T, b_transpose=N).
-  {
-    heuristic_params_t reject_params;
-    reject_params.reject = true;
-
-    // K < 512
-    heuristic_key_t key;
-    key.arch        = hardware_t::architecture_t::gfx950;
-    key.mi_dtype    = data_type_t::BFloat16;
-    key.a_transpose = transpose_t::T;
-    key.b_transpose = transpose_t::N;
-    key.subtile     = true;
-    key.max_k       = 511;
-    add_entry(key, reject_params);
-  }
+  // NOTE: kernel *rejection* is intentionally not encoded in the heuristics table.
+  // All fast-rejection rules (including the former gfx950 BF16 TN subtile-small-K
+  // reject) live in gemm::fast_reject() so the disqualification logic is explicit
+  // and centralized.
 }
 
 // ============================================================================

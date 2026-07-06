@@ -29,6 +29,7 @@
 #include <catch2/matchers/catch_matchers_string.hpp>
 #include <limits>
 #include "common.hpp"
+#include "origami/formocast.hpp"
 
 using Catch::Approx;
 
@@ -421,6 +422,9 @@ TEST_CASE("Origami: rank_configs unit test", "[origami]") {
         invalid_configs.push_back(make_config(128, 128, 512, 32, 32, 8, false, 1, 6, 0, 0));
         invalid_configs.push_back(make_config(256, 256, 512, 32, 32, 8, false, 1, 6, 0, 0));
       }
+      // The LDS feasibility gate is skipped for tensilelite (configs are assumed
+      // library-validated), so use a target that still runs the capacity check.
+      for (auto& c : invalid_configs) c.target = origami::target_t::generic;
 
       if (!invalid_configs.empty()) {
         auto fallback_results = origami::rank_configs(problem, hardware, invalid_configs);
@@ -437,6 +441,8 @@ TEST_CASE("Origami: rank_configs unit test", "[origami]") {
         mixed_configs.push_back(make_config(64, 64, 64, 32, 32, 8, false, 1, 6, 0, 0));
 
         auto lds_invalid = make_config(512, 512, 256, 32, 32, 8, false, 1, 6, 0, 0);
+        // Force the LDS capacity check (skipped for the default tensilelite target).
+        lds_invalid.target = origami::target_t::generic;
         mixed_configs.push_back(lds_invalid);
 
         auto heuristic_rejected = make_config(128, 128, 64, 32, 32, 8, false, 1, 6, 0, 0);
@@ -453,8 +459,10 @@ TEST_CASE("Origami: rank_configs unit test", "[origami]") {
       if (gpu_arch == 950) {
         auto small_k_problem = make_problem(1024, 1024, 256);
         std::vector<origami::config_t> all_rejected_configs;
-        all_rejected_configs.push_back(
-            make_config(512, 512, 256, 32, 32, 8, false, 1, 6, 0, 0));
+        auto lds_invalid = make_config(512, 512, 256, 32, 32, 8, false, 1, 6, 0, 0);
+        // Force the LDS capacity check (skipped for the default tensilelite target).
+        lds_invalid.target = origami::target_t::generic;
+        all_rejected_configs.push_back(lds_invalid);
 
         auto heuristic_rejected = make_config(128, 128, 64, 32, 32, 8, false, 1, 6, 0, 0);
         heuristic_rejected.subtile = true;
@@ -513,6 +521,10 @@ TEST_CASE("Origami: rank_configs unit test", "[origami]") {
       // Read back and parse
       env_val = origami::runtime_options::read_heuristics_variance_from_env();
       REQUIRE(env_val == 1.0);  // Return ANALYTICAL_GEMM_HEURISTICS_VARIANCE is set to 1.0
+
+      // Restore the default so this case does not leak a non-default variance
+      // into other tests (ranking tie-breaking is order-sensitive to it).
+      portable_unsetenv("ANALYTICAL_GEMM_HEURISTICS_VARIANCE");
     }
   }
 }
@@ -610,56 +622,49 @@ TEST_CASE("Origami: simulation mode basic", "[origami][formocast]") {
       auto hardware = make_hardware(gpu_arch);
       auto problem = make_problem(2048, 2048, 2048);
       
-      // Create config with simulation mode
+      // Create config for the Formocast simulation model.
       auto config = make_config(128, 128, 32, 16, 16, 16, false, 8, 2);
-      config.prediction_mode = origami::prediction_modes_t::simulation;
-      
+
       // Set Formocast-specific parameters (via tensile nested struct)
       config.tensile().depth_u = 32;
       config.tensile().global_split_u = 1;
-      config.grvw_a = 4;
-      config.grvw_b = 4;
-      config.gwvw_d = 4;
+      config.tensile().grvw_a = 4;
+      config.tensile().grvw_b = 4;
+      config.tensile().gwvw_d = 4;
       config.tensile().wave_num = 4;
       config.tensile().wave_group_m = 2;
       config.tensile().wave_group_n = 2;
       config.tensile().prefetch_global_read = 2;
       
-      double latency = origami::gemm::compute_total_latency(problem, hardware, config);
+      double latency = origami::gemm::compute_formocast_latency(problem, hardware, config);
       
       REQUIRE(latency > 0);
     }
   }
 }
 
-TEST_CASE("Origami: simulation mode via compute_total_latency", "[origami][formocast]") {
+TEST_CASE("Origami: estimation and simulation are distinct latency models", "[origami][formocast]") {
   for (int gpu_arch : test_architectures) {
     if (gpu_arch == 1250) continue;  // Formocast not yet supported on gfx1250
-    DYNAMIC_SECTION("gfx" << gpu_arch << " - compute_total_latency uses Formocast in simulation mode") {
+    DYNAMIC_SECTION("gfx" << gpu_arch << " - estimation vs Formocast differ") {
       auto hardware = make_hardware(gpu_arch);
       auto problem = make_problem(2048, 2048, 2048);
       
-      // Create config with estimation mode
-      auto config_estimation = make_config(128, 128, 32, 16, 16, 16, false, 8, 2);
-      config_estimation.prediction_mode = origami::prediction_modes_t::estimation;
+      auto config = make_config(128, 128, 32, 16, 16, 16, false, 8, 2);
+      config.tensile().depth_u = 32;
+      config.tensile().global_split_u = 1;
+      config.tensile().grvw_a = 4;
+      config.tensile().grvw_b = 4;
+      config.tensile().gwvw_d = 4;
+      config.tensile().wave_num = 4;
+      config.tensile().wave_group_m = 2;
+      config.tensile().wave_group_n = 2;
+      config.tensile().prefetch_global_read = 2;
       
-      // Create config with simulation mode
-      auto config_simulation = make_config(128, 128, 32, 16, 16, 16, false, 8, 2);
-      config_simulation.prediction_mode = origami::prediction_modes_t::simulation;
-      config_simulation.tensile().depth_u = 32;
-      config_simulation.tensile().global_split_u = 1;
-      config_simulation.grvw_a = 4;
-      config_simulation.grvw_b = 4;
-      config_simulation.gwvw_d = 4;
-      config_simulation.tensile().wave_num = 4;
-      config_simulation.tensile().wave_group_m = 2;
-      config_simulation.tensile().wave_group_n = 2;
-      config_simulation.tensile().prefetch_global_read = 2;
-      
-      double latency_estimation = origami::gemm::compute_total_latency(
-          problem, hardware, config_estimation);
-      double latency_simulation = origami::gemm::compute_total_latency(
-          problem, hardware, config_simulation);
+      double latency_estimation =
+          origami::gemm::compute_total_latency(problem, hardware, config);
+      double latency_simulation =
+          origami::gemm::compute_formocast_latency(problem, hardware, config);
       
       // Both should be positive
       REQUIRE(latency_estimation > 0);
@@ -689,17 +694,16 @@ TEST_CASE("Origami: Formocast with various problem sizes", "[origami][formocast]
         auto problem = make_problem(m, n, k);
         
         auto config = make_config(128, 128, 32, 16, 16, 16, false, 8, 2);
-        config.prediction_mode = origami::prediction_modes_t::simulation;
         config.tensile().depth_u = 32;
         config.tensile().global_split_u = 1;
-        config.grvw_a = 4;
-        config.grvw_b = 4;
-        config.gwvw_d = 4;
+        config.tensile().grvw_a = 4;
+        config.tensile().grvw_b = 4;
+        config.tensile().gwvw_d = 4;
         config.tensile().wave_num = 4;
         config.tensile().wave_group_m = 2;
         config.tensile().wave_group_n = 2;
         
-        double latency = origami::gemm::compute_total_latency(problem, hardware, config);
+        double latency = origami::gemm::compute_formocast_latency(problem, hardware, config);
         
         INFO("Problem size: " << m << "x" << n << "x" << k);
         REQUIRE(latency > 0);
@@ -725,17 +729,16 @@ TEST_CASE("Origami: Formocast with different tile sizes", "[origami][formocast]"
       
       for (const auto& [mt_m, mt_n, mt_k] : tile_sizes) {
         auto config = make_config(mt_m, mt_n, mt_k, 16, 16, 16, false, 8, 2);
-        config.prediction_mode = origami::prediction_modes_t::simulation;
         config.tensile().depth_u = mt_k;
         config.tensile().global_split_u = 1;
-        config.grvw_a = 4;
-        config.grvw_b = 4;
-        config.gwvw_d = 4;
+        config.tensile().grvw_a = 4;
+        config.tensile().grvw_b = 4;
+        config.tensile().gwvw_d = 4;
         config.tensile().wave_num = 4;
         config.tensile().wave_group_m = 2;
         config.tensile().wave_group_n = 2;
         
-        double latency = origami::gemm::compute_total_latency(problem, hardware, config);
+        double latency = origami::gemm::compute_formocast_latency(problem, hardware, config);
         
         INFO("Tile size: " << mt_m << "x" << mt_n << "x" << mt_k);
         REQUIRE(latency > 0);
@@ -752,9 +755,9 @@ TEST_CASE("Origami: Formocast config fields have correct defaults", "[origami][f
   REQUIRE(config.tensile().global_split_u == 1);
   REQUIRE(config.tensile().global_accumulation == 0);
   REQUIRE(config.tensile().local_split_u == 1);
-  REQUIRE(config.grvw_a == 1);
-  REQUIRE(config.grvw_b == 1);
-  REQUIRE(config.gwvw_d == 1);
+  REQUIRE(config.tensile().grvw_a == 1);
+  REQUIRE(config.tensile().grvw_b == 1);
+  REQUIRE(config.tensile().gwvw_d == 1);
   REQUIRE(config.tensile().direct_to_vgpr_a == false);
   REQUIRE(config.tensile().direct_to_vgpr_b == false);
   REQUIRE(config.tensile().direct_to_lds_a == false);
@@ -763,7 +766,6 @@ TEST_CASE("Origami: Formocast config fields have correct defaults", "[origami][f
   REQUIRE(config.tensile().wave_group_m == 2);
   REQUIRE(config.tensile().wave_group_n == 2);
   REQUIRE(config.tensile().prefetch_global_read == 2);
-  REQUIRE(config.prediction_mode == origami::prediction_modes_t::estimation);
 }
 
 TEST_CASE("Origami: select_staggerU unit test", "[origami]") {

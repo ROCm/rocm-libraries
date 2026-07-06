@@ -5,6 +5,7 @@
 #include <cassert>
 #include <chrono>
 #include <cmath>
+#include <cstdio>
 #include <cstdlib>
 #include <iomanip>
 #include <iostream>
@@ -19,16 +20,10 @@
 #include "origami/types.hpp"
 
 #include "origami/gemm.hpp"
-#include "origami/simulator/tensilelite/formocast_simulator.hpp"
 #include "origami/streamk.hpp"
 
 namespace origami {
 namespace gemm {
-
-// Forward declaration for internal Formocast latency computation
-static double compute_formocast_latency(const problem_t& problem,
-                                        const hardware_t& hardware,
-                                        const config_t& config);
 
 /* ---------------------------------------------------------------------------------------- */
 /* context_t constructor                                                                    */
@@ -48,9 +43,6 @@ context_t::context_t(const problem_t& problem, const hardware_t& hardware, const
 
   const size_t MT_M = config.mt.m;
   const size_t MT_N = config.mt.n;
-
-  // Heuristic parameters
-  heuristic = get_heuristic_params(problem, hardware, config);
 
   // Element sizes
   a_bytes = data_type_to_bytes(problem.a_dtype);
@@ -78,14 +70,10 @@ context_t::context_t(const problem_t& problem, const hardware_t& hardware, const
   real_occupancy       = std::min(
       std::max(config.occupancy, static_cast<int>(1)),
       static_cast<int>(math::safe_ceil_div(grid_m * grid_n * batch * splitting_factor, N_CU)));
-  occupancy_factor = pow(heuristic.occupancy_decay_base, real_occupancy);
 
   // Tile-derived values
   tile_elements     = MT_M * MT_N;
   output_tile_bytes = tile_elements * d_bytes;
-
-  // Workgroup mapping
-  wgm = predict_workgroup_mapping(problem, hardware, config, grid_m, grid_n, splitting_factor);
 
   // Debug flag (cached to avoid repeated singleton lookups)
   debug = runtime_options::get().debug_enabled;
@@ -109,6 +97,8 @@ context_t::context_t(const problem_t& problem, const hardware_t& hardware, const
     OLOG_DEBUG("InputDataTypeB: " << datatype_to_string(problem.b_dtype));
     OLOG_DEBUG("OutputDataType: " << datatype_to_string(problem.d_dtype));
     OLOG_DEBUG("ComputeType: " << datatype_to_string(problem.mi_dtype));
+    OLOG_DEBUG("Transpose: " << (problem.a_transpose == transpose_t::T ? "T" : "N")
+                             << (problem.b_transpose == transpose_t::T ? "T" : "N"));
     OLOG_DEBUG("MacroTile: " << int(MT_M) << "x" << int(MT_N) << "x" << int(MT_K));
     OLOG_DEBUG("MatrixInstruction: " << int(MI_M) << "x" << int(MI_N) << "x" << int(MI_K));
     OLOG_DEBUG("ElementSizeA (bits): " << int(a_bits));
@@ -127,10 +117,13 @@ context_t::context_t(const problem_t& problem, const hardware_t& hardware, const
     OLOG_DEBUG("ReadMemBWFactor: " << mem_bw_limited);
     OLOG_DEBUG("WriteMemBWFactor: " << write_mem_bw_limited);
     OLOG_DEBUG("RealOccupancy: " << real_occupancy);
+    const double occupancy_factor =
+        pow(get_heuristic(problem, hardware, config).occupancy_decay_base, real_occupancy);
     OLOG_DEBUG("OccupancyFactor: " << occupancy_factor);
 
-    OLOG_DEBUG("CHUNKxXCCxWGM: " << int(wgm.wgmxccchunk) << "x" << int(wgm.wgmxcc) << "x"
-                                 << int(wgm.wgm));
+    const auto& wgm_dbg = get_wgm(problem, hardware, config);
+    OLOG_DEBUG("CHUNKxXCCxWGM: " << int(wgm_dbg.wgmxccchunk) << "x" << int(wgm_dbg.wgmxcc) << "x"
+                                 << int(wgm_dbg.wgm));
   }
 }
 
@@ -138,6 +131,28 @@ bool context_t::is_valid() const {
   return grid_m > 0 && grid_n > 0 && num_output_tiles > 0 && splitting_factor > 0 && num_wgs > 0 &&
          num_timesteps > 0 && active_cus > 0 && mem_bw_limited > 0.0 && tile_elements > 0 &&
          output_tile_bytes > 0 && a_bytes > 0 && b_bytes > 0 && d_bytes > 0;
+}
+
+const workgroup_mapping_t& context_t::get_wgm(const problem_t& problem,
+                                              const hardware_t& hardware,
+                                              const config_t& config) const {
+  // Lazily predict and memoize the workgroup mapping (the most expensive derived
+  // value), so coarse detail levels that never touch the cache/memory model do
+  // not pay for it.
+  if (!wgm) {
+    wgm = predict_workgroup_mapping(problem, hardware, config, grid_m, grid_n, splitting_factor);
+  }
+  return *wgm;
+}
+
+const heuristic_params_t& context_t::get_heuristic(const problem_t& problem,
+                                                   const hardware_t& hardware,
+                                                   const config_t& config) const {
+  // Lazily look up and memoize the heuristic parameters: the database lookup
+  // allocates + copies a sizable struct and is only needed by the memory/full
+  // detail level, so coarse-pruned configs never reach this.
+  if (!heuristic_cache) heuristic_cache = get_heuristic_params(problem, hardware, config);
+  return *heuristic_cache;
 }
 
 /* ---------------------------------------------------------------------------------------- */
@@ -902,6 +917,52 @@ size_t compute_mt_compute_latency(const problem_t& problem,
   return L_MT;
 }
 
+// Context-free coarse epilogue proxy: the store latency of a single interior
+// MT_M x MT_N output tile. Deliberately ignores edge/corner tiles, split-K
+// reduction, ACC->VGPR transfer, and alignment -- it exists so the coarse
+// (context-free) scoring levels can account for the write cost without building a
+// context. active_cus and bandwidth are approximated from the output-tile count
+// (min(num_output_tiles, N_CU)), mirroring the store term of the full
+// compute_epilogue_latency.
+// Core (context-free): caller supplies num_output_tiles so no grid recompute.
+double compute_coarse_epilogue_latency(const hardware_t& hardware,
+                                       const dim3_t& mt,
+                                       data_type_t d_dtype,
+                                       size_t num_output_tiles) {
+  const double d_bytes = data_type_to_bytes(d_dtype);
+  if (d_bytes == 0.0) return 0.0;
+
+  const size_t active_cus = std::min(num_output_tiles, hardware.N_CU);
+  if (active_cus == 0) return 0.0;
+
+  const double mem_bw   = compute_mem_bw_from_occupancy(hardware, active_cus);
+  const double store_bw = hardware.mem3_perf_ratio * mem_bw;
+  if (store_bw <= 0.0) return 0.0;
+
+  const double per_cu_store_bw = store_bw / static_cast<double>(active_cus);
+  const double tile_bytes      = static_cast<double>(mt.m) * mt.n * d_bytes;
+  return tile_bytes / per_cu_store_bw;
+}
+
+// Context-based: reuse the context's exact active_cus / bandwidth / output bytes
+// (no recompute, no approximation) -- used by levels that already hold a context.
+double compute_coarse_epilogue_latency(const hardware_t& hardware,
+                                       const config_t& config,
+                                       const context_t& context) {
+  const double d_bytes = context.d_bytes;
+  if (d_bytes == 0.0) return 0.0;
+
+  const size_t active_cus = context.active_cus;
+  if (active_cus == 0) return 0.0;
+
+  const double store_bw = hardware.mem3_perf_ratio * context.mem_bw_limited;
+  if (store_bw <= 0.0) return 0.0;
+
+  const double per_cu_store_bw = store_bw / static_cast<double>(active_cus);
+  const double tile_bytes      = static_cast<double>(config.mt.m) * config.mt.n * d_bytes;
+  return tile_bytes / per_cu_store_bw;
+}
+
 /* ---------------------------------------------------------------------------------------- */
 /* Memory-related functions                                                                 */
 /* ---------------------------------------------------------------------------------------- */
@@ -979,7 +1040,7 @@ double estimate_l2_hit(const problem_t& problem,
                        const hardware_t& hardware,
                        const config_t& config,
                        const context_t& context) {
-  const size_t wgm_val = static_cast<size_t>(std::abs(context.wgm.wgm));
+  const size_t wgm_val = static_cast<size_t>(std::abs(context.get_wgm(problem, hardware, config).wgm));
   auto [l2_m, l2_n]    = compute_l2_tiles(problem,
                                        hardware,
                                        config,
@@ -1003,7 +1064,7 @@ double estimate_mall_hit(const problem_t& problem,
                          const hardware_t& hardware,
                          const config_t& config,
                          const context_t& context) {
-  const size_t wgm_val = static_cast<size_t>(std::abs(context.wgm.wgm));
+  const size_t wgm_val = static_cast<size_t>(std::abs(context.get_wgm(problem, hardware, config).wgm));
   auto [mall_m, mall_n] =
       compute_mall_tiles(context.grid_m, context.grid_n, context.active_cus, wgm_val);
 
@@ -1073,17 +1134,21 @@ cache_hit_rates_t estimate_cache_hit_rates(const problem_t& problem,
                                            const hardware_t& hardware,
                                            const config_t& config,
                                            const context_t& context) {
+  // Hierarchical carry-over: reuse the rates if a coarser level already computed
+  // them for this config (this is the most expensive estimation sub-step).
+  if (context.cache_rates) return *context.cache_rates;
+
   // Extract parameters
   const size_t num_xcd     = hardware.NUM_XCD;
   const size_t N_CU        = context.n_cu;
   const double l2_cap      = static_cast<double>(hardware.L2_capacity);
   const size_t k_per_split = context.k_per_split;
-  const auto& wgm          = context.wgm;
+  const auto& wgm          = context.get_wgm(problem, hardware, config);
   const bool debug         = context.debug;
   const double a_bytes     = context.a_bytes;
   const double b_bytes     = context.b_bytes;
   const double k_iters     = static_cast<double>(context.k_iters);
-  const auto& heuristic    = context.heuristic;
+  const auto& heuristic    = context.get_heuristic(problem, hardware, config);
 
   // Setup
   const dim4_t grid  = {context.splitting_factor, context.grid_m, context.grid_n, problem.batch};
@@ -1342,6 +1407,7 @@ cache_hit_rates_t estimate_cache_hit_rates(const problem_t& problem,
     OLOG_DEBUG("H_mem_mall_B: " << H_mem_mall_B);
   }
 
+  context.cache_rates = rates;
   return rates;
 }
 
@@ -1381,11 +1447,14 @@ static std::tuple<double, double, double> aggregate_cache_hit_rates_for_debug(do
   return {H_mem_l1, H_mem_l2, H_mem_mall};
 }
 
-// Determine the memory latency
-double compute_memory_latency(const problem_t& problem,
-                              const hardware_t& hardware,
-                              const config_t& config,
-                              const context_t& context) {
+// Core memory-latency math given precomputed per-operand cache hit rates. Shared
+// by the detailed path (compute_memory_latency) and the leveled proxies
+// (compute_memory_latency<Level>), so they never diverge below the hit rates.
+double compute_memory_latency_from_rates(const problem_t& problem,
+                                         const hardware_t& hardware,
+                                         const config_t& config,
+                                         const context_t& context,
+                                         const cache_hit_rates_t& rates) {
   const bool debug = context.debug;
 
   // Extract parameters from structured types
@@ -1398,11 +1467,10 @@ double compute_memory_latency(const problem_t& problem,
   const auto b_bytes          = context.b_bytes;
   const size_t num_active_cus = context.active_cus;
   double bw_limited           = context.mem_bw_limited;
-  auto heuristic              = context.heuristic;
+  const auto& heuristic       = context.get_heuristic(problem, hardware, config);
 
-  // 1) Estimate per-operand L1/MALL/L2 hit-rates using the analytical model
-  const auto [H_mem_l1_A, H_mem_l1_B, H_mem_l2_A, H_mem_l2_B, H_mem_mall_A, H_mem_mall_B] =
-      estimate_cache_hit_rates(problem, hardware, config, context);
+  // 1) Per-operand L1/MALL/L2 hit-rates (precomputed by the caller).
+  const auto [H_mem_l1_A, H_mem_l1_B, H_mem_l2_A, H_mem_l2_B, H_mem_mall_A, H_mem_mall_B] = rates;
 
   // 2) Total loads per CU (A + B, with 128B alignment and MX scales)
   size_t Ld_A      = a_trans ? config.mt.m * round_elements_to_128B(config.mt.k, a_bits)
@@ -1494,6 +1562,20 @@ double compute_memory_latency(const problem_t& problem,
   return L_mem;
 }
 
+double compute_memory_latency(const problem_t& problem,
+                              const hardware_t& hardware,
+                              const config_t& config,
+                              const context_t& context) {
+  // Detailed path: reuse the memoized per-tile value if a level already computed
+  // it; otherwise run the (expensive) cache-rate model -- which also predicts the
+  // WGM lazily -- and cache the result for finer levels / the full latency.
+  if (context.L_mem_stream) return *context.L_mem_stream;
+  const cache_hit_rates_t rates = estimate_cache_hit_rates(problem, hardware, config, context);
+  const double L_mem = compute_memory_latency_from_rates(problem, hardware, config, context, rates);
+  context.L_mem_stream = L_mem;
+  return L_mem;
+}
+
 /* ---------------------------------------------------------------------------------------- */
 /* Tile-related functions                                                                   */
 /* ---------------------------------------------------------------------------------------- */
@@ -1502,6 +1584,9 @@ double compute_epilogue_latency(const problem_t& problem,
                                 const hardware_t& hardware,
                                 const config_t& config,
                                 const context_t& context) {
+  // Hierarchical carry-over: reuse if a coarser level already computed it.
+  if (context.L_epilogue) return *context.L_epilogue;
+
   // In epilogue:
   // 1. ACC -> VGPR
   // 2. Alpha/beta scaling
@@ -1536,7 +1621,7 @@ double compute_epilogue_latency(const problem_t& problem,
   const bool debug                     = context.debug;
   const reduction_t reduction_strategy = context.reduction_strategy;
   const bool is_parallel_reduction     = (reduction_strategy == reduction_t::parallel);
-  const auto& heuristic                = context.heuristic;
+  const auto& heuristic                = context.get_heuristic(problem, hardware, config);
 
   if (d_bytes == 0.0) return 0.0;
 
@@ -1661,6 +1746,7 @@ double compute_epilogue_latency(const problem_t& problem,
     OLOG_DEBUG("L_epilogue_corner: " << L_epilogue_corner);
   }
 
+  context.L_epilogue = L_epilogue;
   return L_epilogue;
 }
 
@@ -1682,27 +1768,37 @@ double compute_tile_latency(const problem_t& problem,
   // Extract parameters from context
   const size_t splitting_factor = context.splitting_factor;
   const size_t k_per_split      = context.k_per_split;
-  const auto& heuristic         = context.heuristic;
+  const auto& heuristic         = context.get_heuristic(problem, hardware, config);
   const bool debug              = context.debug;
 
-  // 1) Compute per-tile latencies
-  double L_compute = compute_mt_compute_latency(problem, hardware, config);
+  // 1) Compute per-tile latencies (compute reused via the carried context when a
+  // coarser detail level already computed it).
+  if (!context.L_comp_stream) {
+    context.L_comp_stream =
+        static_cast<double>(compute_mt_compute_latency(problem, hardware, config));
+  }
+  double L_compute = *context.L_comp_stream;
   double L_mem     = compute_memory_latency(problem, hardware, config, context);
 
   double utilization            = calculate_work_utilization(problem, config);
   double effective_tile_penalty = (utilization > 1e-9) ? (1.0 / (utilization)) : 1.0;
+  context.utilization            = utilization;
+  context.effective_tile_penalty = effective_tile_penalty;
 
   // 2) Work-group setup & iteration latencies
   double L_WG_setup = 1;
 
   // 3) Prologue and Epilogue latencies
   const size_t real_occupancy   = context.real_occupancy;
-  const double occupancy_factor = context.occupancy_factor;
+  // Derived lazily here (needs the heuristic); mirror into the cost record.
+  const double occupancy_factor = pow(heuristic.occupancy_decay_base, real_occupancy);
+  context.occupancy_factor = occupancy_factor;
 
   // 3-1) Prologue
   double L_prologue = L_mem;
   L_prologue *= effective_tile_penalty;
   L_prologue *= occupancy_factor;
+  context.L_prologue = L_prologue;
 
   // 3-2) Epilogue (per-tile store + optional in-kernel reduction)
   // Core epilogue (compute + stores + reduction) scaled by occupancy decay.
@@ -1727,15 +1823,21 @@ double compute_tile_latency(const problem_t& problem,
       L_cvt = compute_cvt_overhead_x1(problem, hardware, config);
     }
   }
+  context.L_cvt = L_cvt;
   double L_tile_single =
       std::max(L_compute * heuristic.weight_compute, L_mem * heuristic.weight_memory);
   L_tile_single *= (splitting_factor > 4) ? 1.0 : heuristic.main_loop_efficiency;
   L_tile_single *= effective_tile_penalty;
   L_tile_single += L_cvt;
+  context.L_tile_single = L_tile_single;
 
   // 5) Number of K-iterations (excluding epilogue), at least 1
   long num_iter =
       std::max(static_cast<long>(math::safe_ceil_div(k_per_split, MT_K) - 1), static_cast<long>(1));
+
+  // Whole-tile compute/memory totals (per-iteration arm summed over the main loop).
+  context.L_comp = L_compute * static_cast<double>(num_iter);
+  context.L_mem  = L_mem * static_cast<double>(num_iter);
 
   // 6) Total tile latency
   double L_tile_total = L_tile_single * static_cast<double>(num_iter);
@@ -1791,7 +1893,7 @@ double compute_parallel_reduction_latency(const problem_t& problem,
   if (context.splitting_factor <= 1 || context.reduction_strategy != reduction_t::parallel)
     return 0.0;
 
-  const auto& heuristic = context.heuristic;
+  const auto& heuristic = context.get_heuristic(problem, hardware, config);
 
   // Extract parameters
   const size_t M               = problem.size.m;
@@ -1852,84 +1954,129 @@ double compute_total_latency(const problem_t& problem,
                              const config_t& config) {
   assert(config.is_valid());
 
-  // Heuristic-driven kernel rejection (e.g. subtile kernels with small K).
-  // When a matching heuristic marks the config as rejected, report the maximum
-  // latency so rank_configs() drops the kernel from selection entirely.
-  if (get_heuristic_params(problem, hardware, config).reject) {
+  // Fast rejection (e.g. subtile kernels with small K, structural disqualifiers).
+  // Reported as max so rank_configs() drops the kernel from selection entirely.
+  if (fast_reject(problem, hardware, config)) {
     return std::numeric_limits<double>::max();
   }
 
-  // Use Formocast simulation model if prediction_mode is set to simulation
-  if (config.prediction_mode == prediction_modes_t::simulation) {
-    return compute_formocast_latency(problem, hardware, config);
-  }
+  // Analytical estimation: build the context, then compute from it. This is the
+  // single source of truth shared with the leveled cost model's full level. The
+  // simulation path is separate (see compute_formocast_latency).
+  context_t context(problem, hardware, config);
+  return estimation_latency_from_context(problem, hardware, config, context);
+}
 
-  // Extract parameters from structured types
-  size_t M     = problem.size.m;
-  size_t N     = problem.size.n;
-  size_t K     = problem.size.k;
-  size_t batch = problem.batch;
+bool fast_reject(const problem_t& problem, const hardware_t& hardware, const config_t& config) {
+  // Single collection point for every cheap, context-free GEMM disqualification
+  // rule. Evaluated at the leveled model's level 0 (no context build) and reused
+  // to gate the full estimation / simulation paths. Rejection rules live here --
+  // explicitly -- rather than being encoded as reject=true entries in the
+  // heuristics table. Add new fast-rejection conditions to this function.
+  const size_t M     = problem.size.m;
+  const size_t N     = problem.size.n;
+  const size_t K     = problem.size.k;
+  const size_t batch = problem.batch;
 
-  bool a_trans = problem.a_transpose == transpose_t::T;
-  bool b_trans = problem.b_transpose == transpose_t::T;
+  const bool a_trans = problem.a_transpose == transpose_t::T;
+  const bool b_trans = problem.b_transpose == transpose_t::T;
 
-  size_t MT_M = config.mt.m;
-  size_t MT_N = config.mt.n;
-  size_t MT_K = config.mt.k;
-  size_t MI_M = config.mi.m;
-  size_t MI_N = config.mi.n;
-  size_t MI_K = config.mi.k;
+  const size_t MT_M = config.mt.m;
+  const size_t MT_N = config.mt.n;
+  const size_t MT_K = config.mt.k;
+  const size_t MI_M = config.mi.m;
+  const size_t MI_N = config.mi.n;
+  const size_t MI_K = config.mi.k;
 
   const int a_bits = datatype_to_bits(problem.a_dtype);
   const int b_bits = datatype_to_bits(problem.b_dtype);
 
-  // 0) Short-circuit
-  // We don't need to compute latency for all MTs. With this, we can shortcut.
-  bool shortCircuit = true;
-  if (shortCircuit) {
-    // When problem dimensions are small enough that we can fit them in one tile, we should do
-    // so. This short circuit condition also decreases selection latency when problems are very
-    // small :)
-    // TODO 256 and 256 here should be largest M and N tile dimensions in library
-    if (M <= 256 && N <= 256 && K < 1024 && batch != 1 && (MT_M < M || MT_N < N))
-      return std::numeric_limits<double>::max();
+  // When problem dimensions are small enough to fit one tile, we should do so;
+  // this also speeds up selection for very small problems.
+  // TODO 256 and 256 here should be largest M and N tile dimensions in library
+  if (M <= 256 && N <= 256 && K < 1024 && batch != 1 && (MT_M < M || MT_N < N)) return true;
 
-    // Use Dot2 only for M < 3
-    if (MI_M == 1 && MI_N == 1 && MI_K == 64 && M > 2) return std::numeric_limits<double>::max();
+  // Use Dot2 only for M < 3
+  if (MI_M == 1 && MI_N == 1 && MI_K == 64 && M > 2) return true;
 
-    size_t K_mod_128bytes    = K * a_bits % 1024;
-    size_t MT_K_mod_128bytes = MT_K * a_bits % 1024;
-    if (K_mod_128bytes == 0 && MT_K_mod_128bytes == 0) {
-      // avoid division by 0 if K == 0
-      if (M <= MT_M * 2 && !b_trans && ((N * b_bits) / (M * a_bits) > 5)) {
-        // Use nontemporal B
-        if (!(config.cache_hints_b == 4)) { return std::numeric_limits<double>::max(); }
-      } else if (N <= MT_N * 2 && a_trans && ((M * a_bits) / (N * b_bits) > 5)) {
-        // Use Non Temporal A
-        if (!(config.cache_hints_a == 4)) { return std::numeric_limits<double>::max(); }
-      } else {
-        // Never use Non Temporal
-        if (config.cache_hints_a || config.cache_hints_b) {
-          return std::numeric_limits<double>::max();
-        }
-      }
-    } else if (config.cache_hints_a || config.cache_hints_b) {
-      return std::numeric_limits<double>::max();
+  const size_t K_mod_128bytes    = K * a_bits % 1024;
+  const size_t MT_K_mod_128bytes = MT_K * a_bits % 1024;
+  if (K_mod_128bytes == 0 && MT_K_mod_128bytes == 0) {
+    // avoid division by 0 if K == 0
+    if (M <= MT_M * 2 && !b_trans && ((N * b_bits) / (M * a_bits) > 5)) {
+      // Should use nontemporal B
+      if (!(config.cache_hints_b == 4)) return true;
+    } else if (N <= MT_N * 2 && a_trans && ((M * a_bits) / (N * b_bits) > 5)) {
+      // Should use nontemporal A
+      if (!(config.cache_hints_a == 4)) return true;
+    } else {
+      // Should never use nontemporal
+      if (config.cache_hints_a || config.cache_hints_b) return true;
     }
+  } else if (config.cache_hints_a || config.cache_hints_b) {
+    return true;
   }
 
-  // 1) Setup context (computes grid dims, launch params, WGM, etc.)
-  context_t context(problem, hardware, config);
+  // Subtile kernels are not competitive when the reduction dimension is small
+  // (K < 512). Scoped to gfx950 BF16 TN (a_transpose=T, b_transpose=N). Ported
+  // out of the heuristics table.
+  if (hardware.arch == hardware_t::architecture_t::gfx950 &&
+      problem.mi_dtype == data_type_t::BFloat16 && a_trans &&
+      problem.b_transpose == transpose_t::N && config.subtile && K < 512) {
+    return true;
+  }
 
-  // 2) Compute latency of a timestep
+  return false;
+}
+
+double estimation_latency_from_context(const problem_t& problem,
+                                       const hardware_t& hardware,
+                                       const config_t& config,
+                                       const context_t& context) {
+  // NOTE: fast_reject is the caller's responsibility and is intentionally not
+  // re-run here. Both entry points already filter upstream -- the leveled model
+  // at level 0 and compute_total_latency before building the context -- so
+  // repeating it on every full-level survivor would be pure overhead.
+
+  // 1) Compute latency of a timestep
   double L_timestep = compute_timestep_latency(problem, hardware, config, context);
 
-  // 3) Compute latency for all timesteps with linear scaling
+  // 2) Compute latency for all timesteps with linear scaling
   double total_latency = L_timestep * context.num_timesteps;
 
-  //  4) Add parallel reduction kernel cost (separate kernel launch, 0 if not parallel)
+  // 3) Add parallel reduction kernel cost (separate kernel launch, 0 if not parallel)
   double L_parallel_reduce = compute_parallel_reduction_latency(problem, hardware, config, context);
   total_latency += L_parallel_reduce;
+
+  // Capture the final-level features in the cost/feature record.
+  context.L_parallel_reduction = L_parallel_reduce;
+  context.L_total              = total_latency;
+
+  // TEMPORARY (env-gated investigation): dump the full-model component breakdown for
+  // a single target problem (ORIGAMI_DUMP_MNK="m,n,k") so we can see exactly what
+  // makes the flat winner win vs the leveled over-pick on a regression case.
+  {
+    static const bool dump_on = std::getenv("ORIGAMI_DUMP_MNK") != nullptr;
+    if (dump_on) {
+      static long tm = -1, tn = -1, tk = -1;
+      static bool parsed = false;
+      if (!parsed) {
+        const char* e = std::getenv("ORIGAMI_DUMP_MNK");
+        if (e) sscanf(e, "%ld,%ld,%ld", &tm, &tn, &tk);
+        parsed = true;
+      }
+      if ((long)problem.size.m == tm && (long)problem.size.n == tn && (long)problem.size.k == tk) {
+        auto opt = [](const std::optional<double>& v) { return v ? *v : -1.0; };
+        printf("[comp] MT=%zux%zux%zu split=%zu red=%d ts=%zu mainloop=%.0f reduce=%.0f "
+               "Lcomp=%.0f Lmem=%.0f util=%.3f occ=%.3f total=%.0f\n",
+               config.mt.m, config.mt.n, config.mt.k, context.splitting_factor,
+               (int)context.reduction_strategy, context.num_timesteps,
+               total_latency - L_parallel_reduce, L_parallel_reduce, opt(context.L_comp),
+               opt(context.L_mem), opt(context.utilization), context.occupancy_factor,
+               total_latency);
+      }
+    }
+  }
 
   if (context.debug) {
     OLOG_DEBUG("L_parallel_reduce: " << L_parallel_reduce);
@@ -1938,87 +2085,6 @@ double compute_total_latency(const problem_t& problem,
   }
 
   return total_latency;
-}
-
-static double compute_formocast_latency(const problem_t& problem,
-                                        const hardware_t& hardware,
-                                        const config_t& config) {
-  // Create Formocast simulator instance
-  Formocast formocast;
-
-  // Convert problem_t to Formocast::ProblemInfo
-  Formocast::ProblemInfo prob_info;
-  prob_info.M              = static_cast<double>(problem.size.m);
-  prob_info.N              = static_cast<double>(problem.size.n);
-  prob_info.K              = static_cast<double>(problem.size.k);
-  prob_info.NumBatches     = static_cast<double>(problem.batch);
-  prob_info.bpeA           = static_cast<uint32_t>(datatype_to_bits(problem.a_dtype) / 8);
-  prob_info.bpeB           = static_cast<uint32_t>(datatype_to_bits(problem.b_dtype) / 8);
-  prob_info.bpeD           = static_cast<uint32_t>(datatype_to_bits(problem.d_dtype) / 8);
-  prob_info.bpeCompute     = static_cast<uint32_t>(datatype_to_bits(problem.mi_dtype) / 8);
-  prob_info.transA         = (problem.a_transpose == transpose_t::T);
-  prob_info.transB         = (problem.b_transpose == transpose_t::T);
-  prob_info.swizzleTensorA = config.tensile().swizzle_a;
-  prob_info.swizzleTensorB = config.tensile().swizzle_b;
-  prob_info.dataType       = problem.mi_dtype;
-
-  // Convert config_t to Formocast::SizeMapping
-  Formocast::SizeMapping size_mapping;
-  size_mapping.macroTile[0]         = static_cast<int>(config.mt.m);
-  size_mapping.macroTile[1]         = static_cast<int>(config.mt.n);
-  size_mapping.macroTile[2]         = static_cast<int>(config.mt.k);
-  size_mapping.matrixInstruction[0] = static_cast<int>(config.mi.m);
-  size_mapping.matrixInstruction[1] = static_cast<int>(config.mi.n);
-  size_mapping.matrixInstruction[2] = static_cast<int>(config.mi.k);
-  size_mapping.matrixInstruction[3] = 1;  // Default
-
-  // Use depth_u if set, otherwise use mt.k
-  size_mapping.depthU = (config.tensile().depth_u > 0) ? config.tensile().depth_u : config.mt.k;
-
-  size_mapping.globalSplitU       = config.tensile().global_split_u;
-  size_mapping.globalAccumulation = config.tensile().global_accumulation;
-  size_mapping.LocalSplitU        = config.tensile().local_split_u;
-
-  size_mapping.grvwA = config.grvw_a;
-  size_mapping.grvwB = config.grvw_b;
-  size_mapping.gwvwD = config.gwvw_d;
-  size_mapping.gwvwC = config.gwvw_d;  // Typically same as D
-
-  size_mapping.DirectToVgprA = config.tensile().direct_to_vgpr_a;
-  size_mapping.DirectToVgprB = config.tensile().direct_to_vgpr_b;
-  size_mapping.DirectToLdsA  = config.tensile().direct_to_lds_a;
-  size_mapping.DirectToLdsB  = config.tensile().direct_to_lds_b;
-
-  size_mapping.NumLoadsCoalescedA = config.tensile().num_loads_coalesced_a;
-  size_mapping.NumLoadsCoalescedB = config.tensile().num_loads_coalesced_b;
-  size_mapping.VectorWidthA       = config.vector_width_a;
-  size_mapping.VectorWidthB       = config.vector_width_b;
-
-  size_mapping.waveNum      = config.tensile().wave_num;
-  size_mapping.waveGroup[0] = config.tensile().wave_group_m;
-  size_mapping.waveGroup[1] = config.tensile().wave_group_n;
-
-  size_mapping.workGroupMapping         = config.workgroup_mapping;
-  size_mapping.workGroupMappingXCC      = config.tensile().workgroup_mapping_xcc;
-  size_mapping.workGroupMappingXCCGroup = config.tensile().workgroup_mapping_xcc_group;
-  size_mapping.globalSplitUCoalesced    = config.tensile().global_split_u_coalesced;
-  size_mapping.globalSplitUWorkGroupMappingRoundRobin =
-      config.tensile().global_split_u_wgm_round_robin;
-
-  size_mapping.CUOccupancy            = config.occupancy;
-  size_mapping.PrefetchGlobalRead     = config.tensile().prefetch_global_read;
-  size_mapping.MathClocksUnrolledLoop = config.tensile().math_clocks_unrolled_loop;
-
-  // Set problem, solution, and hardware in Formocast
-  formocast.setProblem(prob_info);
-  formocast.setSolution(size_mapping);
-  formocast.setHardware(hardware.arch);
-
-  // Get predicted performance
-  Formocast::PredictedPerformance perf = formocast.predictedPerformance();
-
-  // Return latency in microseconds
-  return perf.microSeconds;
 }
 
 }  // namespace gemm

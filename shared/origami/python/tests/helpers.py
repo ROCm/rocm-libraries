@@ -87,10 +87,18 @@ def create_config_list(
     waves: list[list[int]] | None = None,
     max_mt: int = 512,
 ) -> list[origami.config_t]:
-    """Create a list of configurations for testing using dynamic MI discovery."""
+    """Create a list of configurations for testing using dynamic MI discovery.
+
+    Configs are pre-filtered to those that fit in LDS, mirroring real tensilelite
+    input (the library only emits LDS-valid configs). Origami skips the LDS
+    feasibility check for the tensilelite target, so the generator must not inject
+    unrunnable configs.
+    """
     mi_list = get_matrix_instructions(hardware, dtype)
     if not mi_list:
         return []
+
+    dtype_enum = origami.string_to_datatype(dtype)
 
     if depth_unroll is None:
         depth_unroll = [16, 32, 64, 128, 256, 512, 1024]
@@ -115,6 +123,9 @@ def create_config_list(
                         config.mi = origami.dim3_t(mi_m, mi_n, mi_k)
                         config.occupancy = occ
                         config.workgroup_mapping = wgm
-                        configs.append(config)
+                        if origami.check_lds_capacity(
+                            hardware, config.mt, dtype_enum, dtype_enum
+                        ):
+                            configs.append(config)
 
     return configs

@@ -27,6 +27,7 @@
 #pragma once
 
 #include <atomic>
+#include <cstdlib>
 #include <set>
 #include <vector>
 
@@ -185,8 +186,55 @@ namespace TensileLite
                 .b_mx_block_size = 0, // MX Data types come from rocroller
             };
 
-            auto prediction_result = origami::rank_configs(
-                origami_problem, *(pAMDGPU->analyticalHardware), origami_config_list);
+            // When ORIGAMI_LEVELED_ESTIMATION is set, route selection through the
+            // leveled coarse-to-fine cascade (a single estimation phase makes
+            // rank_configs use GemmModel::score_candidates -> score_estimation_leveled)
+            // instead of the flat per-config path.
+            static const bool use_leveled_estimation = [] {
+                const char* e = std::getenv("ORIGAMI_LEVELED_ESTIMATION");
+                return e != nullptr && std::strtol(e, nullptr, 0) != 0;
+            }();
+
+            // Split-K problems regress under the leveled cascade: StreamK splits the
+            // K loop across CUs and the winner is decided by memory reuse, which the
+            // context-free coarse levels can't see -- so they prune it. Route those
+            // problems to the accurate flat per-config path; the fast leveled path
+            // handles the non-split-K majority.
+            //
+            // Detect "split-K-prone" with StreamK's own select_reduction criterion,
+            // evaluated on a large reference tile: a problem needs K-splitting when
+            // even a big (256x256) tile underfills the GPU (output tiles < N_CU) and K
+            // is deep enough to split (iters/tile >= 64, i.e. K >= 64*64). This is
+            // shape-based (not a raw K cutoff), so it catches split-K at moderate K
+            // too. On the workload it cuts leveled divergence to ~0.4% (routing ~21%
+            // of problems to flat) vs ~1.4% for a plain K>=10k threshold.
+            const size_t ref_tile      = 256;
+            const size_t ref_tiles     = ((m + ref_tile - 1) / ref_tile)
+                                     * ((n + ref_tile - 1) / ref_tile) * batch;
+            const size_t ref_k_iters   = k / 64;  // K-iterations for a 64-deep k-tile
+            const bool   split_k_prone = ref_tiles < analytical_hardware.N_CU && ref_k_iters >= 64;
+            const bool   use_leveled   = use_leveled_estimation && !split_k_prone;
+
+            std::vector<origami::prediction_result_t> prediction_result;
+            if(use_leveled)
+            {
+                origami::ranking_phase_t phase;
+                phase.model    = origami::model_t::gemm;
+                phase.target   = origami::target_t::tensilelite;
+                phase.fidelity = origami::prediction_modes_t::estimation;
+                origami::ranking_pipeline_t pipeline;
+                pipeline.phases.push_back(phase);
+                prediction_result = origami::rank_configs(origami_problem,
+                                                          analytical_hardware,
+                                                          origami_config_list,
+                                                          origami::model_t::gemm,
+                                                          pipeline);
+            }
+            else
+            {
+                prediction_result = origami::rank_configs(
+                    origami_problem, *(pAMDGPU->analyticalHardware), origami_config_list);
+            }
 
             for(const auto& r : prediction_result)
             {

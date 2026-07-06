@@ -334,9 +334,6 @@ def test_config_has_formocast_fields():
     """Test that config_t has Formocast-specific fields via variant backend."""
     config = origami.config_t()
     
-    # Check prediction_mode field
-    assert hasattr(config, 'prediction_mode')
-    
     # Check tensile accessor method exists
     assert hasattr(config, 'tensile')
     assert callable(config.tensile)
@@ -346,12 +343,12 @@ def test_config_has_formocast_fields():
     # Get tensile params (initializes if not set)
     tensile = config.tensile()
     
-    # Check vectorization fields on config (generic, not Tensile-specific)
-    assert hasattr(config, 'grvw_a')
-    assert hasattr(config, 'grvw_b')
-    assert hasattr(config, 'gwvw_d')
-    assert hasattr(config, 'vector_width_a')
-    assert hasattr(config, 'vector_width_b')
+    # Vectorization fields are Tensile backend params (used by the simulator)
+    assert hasattr(tensile, 'grvw_a')
+    assert hasattr(tensile, 'grvw_b')
+    assert hasattr(tensile, 'gwvw_d')
+    assert hasattr(tensile, 'vector_width_a')
+    assert hasattr(tensile, 'vector_width_b')
     
     # Check Tensile-specific fields
     assert hasattr(tensile, 'depth_u')
@@ -406,28 +403,27 @@ def test_simulation_mode_returns_valid_latency():
     config.mi = origami.dim3_t(16, 16, 16)
     config.occupancy = 2
     config.workgroup_mapping = 8
-    config.prediction_mode = origami.prediction_modes_t.simulation
     
     # Set Formocast-specific parameters (via tensile nested struct)
     config.tensile().depth_u = 32
     config.tensile().global_split_u = 1
-    config.grvw_a = 4
-    config.grvw_b = 4
-    config.gwvw_d = 4
+    config.tensile().grvw_a = 4
+    config.tensile().grvw_b = 4
+    config.tensile().gwvw_d = 4
     config.tensile().wave_num = 4
     config.tensile().wave_group_m = 2
     config.tensile().wave_group_n = 2
     config.tensile().prefetch_global_read = 2
     
-    # Call compute_total_latency with simulation mode
-    latency = origami.compute_total_latency(problem, hardware, config)
+    # Call the Formocast simulation model
+    latency = origami.compute_formocast_latency(problem, hardware, config)
     
     assert latency > 0, f"Expected positive latency, got {latency}"
 
 
 @pytest.mark.integration
-def test_simulation_mode_via_compute_total_latency():
-    """Test that compute_total_latency uses Formocast when prediction_mode is simulation."""
+def test_estimation_and_simulation_are_distinct_models():
+    """Estimation (compute_total_latency) and Formocast (compute_formocast_latency) differ."""
     # Create hardware for gfx942
     hardware = origami.hardware_t(
         origami.architecture_t.gfx942,
@@ -456,35 +452,32 @@ def test_simulation_mode_via_compute_total_latency():
     problem.d_dtype = origami.data_type_t.Half
     problem.mi_dtype = origami.data_type_t.Half
     
-    # Create config with estimation mode
+    # One config scored by both models.
     config_estimation = origami.config_t()
     config_estimation.mt = origami.dim3_t(128, 128, 32)
     config_estimation.mi = origami.dim3_t(16, 16, 16)
     config_estimation.occupancy = 2
     config_estimation.workgroup_mapping = 8
-    config_estimation.prediction_mode = origami.prediction_modes_t.estimation
     
-    # Create config with simulation mode
     config_simulation = origami.config_t()
     config_simulation.mt = origami.dim3_t(128, 128, 32)
     config_simulation.mi = origami.dim3_t(16, 16, 16)
     config_simulation.occupancy = 2
     config_simulation.workgroup_mapping = 8
-    config_simulation.prediction_mode = origami.prediction_modes_t.simulation
     config_simulation.tensile().depth_u = 32
     config_simulation.tensile().global_split_u = 1
-    config_simulation.grvw_a = 4
-    config_simulation.grvw_b = 4
-    config_simulation.gwvw_d = 4
+    config_simulation.tensile().grvw_a = 4
+    config_simulation.tensile().grvw_b = 4
+    config_simulation.tensile().gwvw_d = 4
     config_simulation.tensile().wave_num = 4
     config_simulation.tensile().wave_group_m = 2
     config_simulation.tensile().wave_group_n = 2
     config_simulation.tensile().prefetch_global_read = 2
     
-    # Get latencies from both modes
+    # Estimation via the analytical model; simulation via Formocast.
     latency_estimation = origami.compute_total_latency(
         problem, hardware, config_estimation)
-    latency_simulation = origami.compute_total_latency(
+    latency_simulation = origami.compute_formocast_latency(
         problem, hardware, config_simulation)
     
     # Both should return positive values
@@ -528,15 +521,14 @@ def test_simulation_mode_various_problem_sizes(m, n, k):
     config.mi = origami.dim3_t(16, 16, 16)
     config.occupancy = 2
     config.workgroup_mapping = 8
-    config.prediction_mode = origami.prediction_modes_t.simulation
     config.tensile().depth_u = 32
     config.tensile().global_split_u = 1
-    config.grvw_a = 4
-    config.grvw_b = 4
-    config.gwvw_d = 4
+    config.tensile().grvw_a = 4
+    config.tensile().grvw_b = 4
+    config.tensile().gwvw_d = 4
     config.tensile().wave_num = 4
     config.tensile().wave_group_m = 2
     config.tensile().wave_group_n = 2
     
-    latency = origami.compute_total_latency(problem, hardware, config)
+    latency = origami.compute_formocast_latency(problem, hardware, config)
     assert latency > 0, f"Expected positive latency for {m}x{n}x{k}, got {latency}"

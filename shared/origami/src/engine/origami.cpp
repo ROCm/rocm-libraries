@@ -6,17 +6,266 @@
 #include <cmath>
 #include <iomanip>
 #include <iostream>
-#include <limits>
+#include <numeric>
+#include <utility>
 
 #include "origami/attention.hpp"
 #include "origami/gemm.hpp"
 #include "origami/logger.hpp"
 #include "origami/math.hpp"
+#include "origami/model.hpp"
 #include "origami/origami.hpp"
 #include "origami/streamk.hpp"
 #include "origami/types.hpp"
 
 namespace origami {
+
+namespace {
+
+/**
+ * @brief Apply tie-breakers to a latency-sorted ranking, in place.
+ *
+ * Given results already sorted ascending by latency, refine the order among
+ * near-equal-latency configs: first by arithmetic intensity (higher is better),
+ * then by problem-dimension preference, and finally by a deterministic tile-size
+ * rule. Shared by rank_configs() and the multi-phase pipeline's final stage so
+ * both rank identically.
+ *
+ * @param results Latency-sorted ranking (modified in place).
+ * @param problem Problem descriptor used for the dimension tie-breaker.
+ */
+void apply_tie_breakers(std::vector<prediction_result_t>& results, const problem_t& problem) {
+  // Compute arithmetic intensity for tie-breaking
+  // Flops = 2 * MT_M * MT_N * MT_K, Memory traffic = MT_M*MT_K + MT_K*MT_N + MT_M*MT_N
+  auto compute_arithmetic_intensity = [](const config_t& config) -> double {
+    const auto MT_M = config.mt.m;
+    const auto MT_N = config.mt.n;
+    const auto MT_K = config.mt.k;
+
+    const double flops          = static_cast<double>(2ull * MT_M * MT_N * MT_K);
+    const double memory_traffic = static_cast<double>(MT_M * MT_K + MT_N * MT_K + MT_M * MT_N);
+
+    if (memory_traffic == 0.0) return 0.0;
+    return flops / memory_traffic;
+  };
+
+  // Apply tie-breaking logic for configs with similar latency
+  double best_latency = results.front().latency;
+  size_t num_the_same = 0;
+
+  // Count the number of similar latencies
+  constexpr double epsilon = 1e-9;
+  // variance is set through environment variable ANALYTICAL_GEMM_HEURISTICS_VARIANCE
+  // Use runtime_options from first config if available, otherwise global singleton
+  const double top_N_heuristic = origami::runtime_options::get().heuristics_variance;
+
+  OLOG_DEBUG("Tie-breaking: best_latency=" << best_latency
+             << " heuristics_variance=" << top_N_heuristic);
+
+  for (const auto& res : results) {
+    bool within_top;
+    const double diff = std::abs(res.latency - best_latency);
+
+    if (top_N_heuristic <= epsilon) {
+      // Absolute tolerance path
+      within_top = diff < epsilon;
+    } else {
+      // Relative tolerance path (guard denom)
+      const double denom = std::max(std::abs(best_latency), epsilon);
+      // If it's within top_N_heuristic%, include it.
+      within_top = (diff / denom) < top_N_heuristic;
+    }
+
+    if (within_top) {
+      ++num_the_same;
+      OLOG_DEBUG("  Config within threshold: MT=(" << res.config.mt.m << ","
+                 << res.config.mt.n << "," << res.config.mt.k << ")"
+                 << " latency=" << res.latency << " diff=" << diff);
+    } else {
+      break;
+    }
+  }
+
+  OLOG_DEBUG("Found " << num_the_same << " configs within variance threshold");
+
+  // Sort top candidates by arithmetic intensity (descending - highest first)
+  if (num_the_same > 1) {
+    OLOG_DEBUG("Applying arithmetic intensity tie-breaker for " << num_the_same << " configs");
+
+    std::stable_sort(results.begin(),
+                     results.begin() + num_the_same,
+                     [&compute_arithmetic_intensity](const prediction_result_t& a,
+                                                     const prediction_result_t& b) {
+                       return compute_arithmetic_intensity(a.config) >
+                              compute_arithmetic_intensity(b.config);
+                     });
+
+    OLOG_DEBUG("After arithmetic intensity sort (top configs):");
+    for (size_t i = 0; i < std::min(num_the_same, size_t(5)); i++) {
+      double ai = compute_arithmetic_intensity(results[i].config);
+      OLOG_DEBUG("  Rank " << i << ": MT=(" << results[i].config.mt.m << ","
+                 << results[i].config.mt.n << "," << results[i].config.mt.k << ")"
+                 << " AI=" << ai << " latency=" << results[i].latency);
+    }
+
+    // After arithmetic intensity tie-breaking, check if we still have ties
+    // among the top results (those with same latency and arithmetic intensity)
+    // Check if the top tiles still have the same arithmetic intensity
+    double first_ai    = compute_arithmetic_intensity(results.front().config);
+    size_t num_same_ai = 1;
+    for (size_t i = 1; i < num_the_same; ++i) {
+      double current_ai = compute_arithmetic_intensity(results[i].config);
+      if (std::abs(current_ai - first_ai) < 1e-6) {
+        num_same_ai++;
+      } else {
+        break;
+      }
+    }
+
+    // If we still have ties after arithmetic intensity, apply problem dimension tie-breaker
+    if (num_same_ai > 1) {
+      // Problem dimension-based tie breaker:
+      // If M > N, prefer tiles with larger MT_M
+      // If N > M, prefer tiles with larger MT_N
+      // If M == N, this tie-breaker doesn't apply (will use final tie-breaker)
+
+      if (problem.size.m != problem.size.n) {
+        std::stable_sort(results.begin(),
+                         results.begin() + num_same_ai,
+                         [problem](const prediction_result_t& a, const prediction_result_t& b) {
+                           if (problem.size.m > problem.size.n) {
+                             // M-dominant: prefer larger MT_M
+                             if (a.config.mt.m != b.config.mt.m)
+                               return a.config.mt.m > b.config.mt.m;
+                             // If MT_M is same, prefer larger MT_N as secondary
+                             return a.config.mt.n > b.config.mt.n;
+                           } else  // N > M
+                           {
+                             // N-dominant: prefer larger MT_N
+                             if (a.config.mt.n != b.config.mt.n)
+                               return a.config.mt.n > b.config.mt.n;
+                             // If MT_N is same, prefer larger MT_M as secondary
+                             return a.config.mt.m > b.config.mt.m;
+                           }
+                         });
+      }
+
+      // Final tie-breaker: when all else is equal (including square problems),
+      // consistently prefer tiles with larger MT_M
+      // This ensures deterministic selection regardless of input order
+      std::stable_sort(results.begin(),
+                       results.begin() + num_same_ai,
+                       [](const prediction_result_t& a, const prediction_result_t& b) {
+                         // Prefer larger MT_M first
+                         if (a.config.mt.m != b.config.mt.m) return a.config.mt.m > b.config.mt.m;
+                         // If MT_M is same, prefer larger MT_N
+                         if (a.config.mt.n != b.config.mt.n) return a.config.mt.n > b.config.mt.n;
+                         // If both MT_M and MT_N are same, prefer larger MT_K
+                         return a.config.mt.k > b.config.mt.k;
+                       });
+    }
+  }
+}
+
+/**
+ * @brief Narrow a latency-sorted survivor list per a phase's pruning policy.
+ *
+ * @param scored (latency, config-index) pairs sorted ascending by latency;
+ *               resized in place to the surviving prefix.
+ * @param policy Pruning policy to apply. @ref prune_policy_t::min_keep is honored
+ *               as a floor (never exceeding the number of available configs).
+ */
+void apply_prune(scored_configs_t& scored,
+                 const prune_policy_t& policy) {
+  if (scored.empty()) return;
+
+  std::size_t keep = scored.size();
+  switch (policy.kind) {
+    case prune_kind_t::none:
+      keep = scored.size();
+      break;
+    case prune_kind_t::top_k:
+      keep = std::min(policy.top_k, scored.size());
+      break;
+    case prune_kind_t::top_fraction: {
+      const double fraction = std::clamp(policy.fraction, 0.0, 1.0);
+      keep = static_cast<std::size_t>(std::ceil(fraction * static_cast<double>(scored.size())));
+      break;
+    }
+    case prune_kind_t::within_fraction_of_best: {
+      const double best  = scored.front().first;
+      const double denom = std::max(std::abs(best), 1e-9);
+      keep               = 0;
+      for (const auto& entry : scored) {
+        if ((entry.first - best) / denom <= policy.fraction)
+          ++keep;
+        else
+          break;
+      }
+      break;
+    }
+    default:
+      keep = scored.size();
+      break;
+  }
+
+  // Honor the minimum-survivor floor without exceeding what is available.
+  keep = std::max(keep, std::min(policy.min_keep, scored.size()));
+  scored.resize(keep);
+}
+
+/**
+ * @brief Score a survivor set with @p score_one and sort ascending by cost.
+ *
+ * @p score_one returns std::numeric_limits<double>::max() to drop a config.
+ * @return (cost, config index) pairs sorted ascending by cost.
+ */
+template <typename Scorer>
+scored_configs_t score_and_sort(
+    const std::vector<config_t>& configs,
+    const std::vector<std::size_t>& survivors,
+    Scorer&& score_one) {
+  scored_configs_t scored;
+  scored.reserve(survivors.size());
+  for (std::size_t idx : survivors) {
+    const double cost = score_one(configs[idx], idx);
+    if (cost != std::numeric_limits<double>::max()) scored.emplace_back(cost, idx);
+  }
+  std::stable_sort(scored.begin(), scored.end(),
+                   [](const auto& a, const auto& b) { return a.first < b.first; });
+  return scored;
+}
+
+// Build the full survivor index set [0, configs.size()).
+std::vector<std::size_t> all_indices(std::size_t n) {
+  std::vector<std::size_t> indices(n);
+  std::iota(indices.begin(), indices.end(), std::size_t{0});
+  return indices;
+}
+
+// Reject-fallback: rank the given candidates at max latency. Used when a scoring
+// pass drops every candidate (e.g. all configs are infeasible) so callers still
+// get a usable ranking instead of a hard failure.
+scored_configs_t fallback_ranking(const std::vector<std::size_t>& indices) {
+  scored_configs_t scored;
+  scored.reserve(indices.size());
+  for (std::size_t idx : indices) {
+    scored.emplace_back(std::numeric_limits<double>::max(), idx);
+  }
+  return scored;
+}
+
+// Materialize (latency, index) pairs into prediction_result_t (copying configs).
+std::vector<prediction_result_t> to_results(
+    const scored_configs_t& scored,
+    const std::vector<config_t>& configs) {
+  std::vector<prediction_result_t> results;
+  results.reserve(scored.size());
+  for (const auto& entry : scored) { results.push_back({entry.first, configs[entry.second]}); }
+  return results;
+}
+
+}  // namespace
 
 std::vector<prediction_result_t> select_topk_configs(const problem_t& problem,
                                                      const hardware_t& hardware,
@@ -555,202 +804,88 @@ staggerU_t select_staggerU(const problem_t& problem,
   return staggerU_t{out_staggerUMapping, out_staggerU, out_staggerUStrideShift};
 }
 
-namespace {
-
-constexpr double kRejectedLatency = std::numeric_limits<double>::max();
-
-void log_config_rejection(const config_t& config, const char* reason) {
-  OLOG_DEBUG("  Config MT=(" << config.mt.m << "," << config.mt.n << "," << config.mt.k
-             << ") MI=(" << config.mi.m << "," << config.mi.n << "," << config.mi.k
-             << ") REJECTED: " << reason);
-}
-
-double compute_ranked_latency(const problem_t& problem,
-                              const hardware_t& hardware,
-                              const config_t& config,
-                              model_t model) {
-  if (model == model_t::attention) {
-    if (!attention::check_rf_capacity(hardware, config.mt, problem.a_dtype)) {
-      log_config_rejection(config, "Register File (RF) capacity exceeded");
-      return kRejectedLatency;
-    }
-    if (!attention::check_lds_capacity(hardware, config.mt, problem.a_dtype)) {
-      log_config_rejection(config, "LDS capacity exceeded");
-      return kRejectedLatency;
-    }
-    return attention::compute_total_latency(problem, hardware, config);
-  }
-
-  if (!gemm::check_lds_capacity(hardware, config.mt, problem.a_dtype, problem.b_dtype)) {
-    log_config_rejection(config, "LDS capacity exceeded");
-    return kRejectedLatency;
-  }
-  return gemm::compute_total_latency(problem, hardware, config);
-}
-
-}  // namespace
-
 std::vector<prediction_result_t> rank_configs(const problem_t& problem,
                                               const hardware_t& hardware,
                                               const std::vector<config_t>& configs,
-                                              model_t model) {
+                                              model_t model,
+                                              const ranking_pipeline_t& pipeline) {
   if (configs.empty()) { throw std::runtime_error("No configurations provided."); }
 
-  struct prediction_result_wrapper_t {
-    double latency;
-    std::reference_wrapper<const config_t> config;
-  };
+  scored_configs_t scored;
 
-  std::vector<prediction_result_wrapper_t> valid_configs;
-  std::vector<prediction_result_wrapper_t> invalid_configs;
-  valid_configs.reserve(configs.size());
-  invalid_configs.reserve(configs.size());
+  if (pipeline.phases.empty()) {
+    // Single pass: score every config once with the analytical estimation model
+    // (resolved per the config's target), no pruning. Simulation is a ranking
+    // strategy: request it via a pipeline (@see make_cascade_pipeline), not a
+    // single pass.
+    scored = score_and_sort(
+        configs, all_indices(configs.size()),
+        [&](const config_t& config, std::size_t /*idx*/) -> double {
+          const CostModel& cost_model =
+              get_model(model, config.target, prediction_modes_t::estimation);
+          if (!cost_model.feasible(problem, hardware, config))
+            return std::numeric_limits<double>::max();
+          return cost_model.latency(problem, hardware, config);
+        });
 
-  for (auto& config : configs) {
-    const double latency = compute_ranked_latency(problem, hardware, config, model);
+    // Every candidate was infeasible: rank them all at max latency rather than
+    // failing, so the caller still gets a (poor but usable) result.
+    if (scored.empty()) { scored = fallback_ranking(all_indices(configs.size())); }
+  } else {
+    // Cross-model cascade: each phase runs one whole cost model over the current
+    // survivors and prunes between phases. There is no per-config carry-over
+    // across phases -- distinct models (e.g. analytical estimation vs Formocast
+    // simulation) share nothing. Any coarse-to-fine refinement WITHIN a model
+    // (where data IS reused) is internal to that model's score_candidates.
+    // Survivors are carried as indices into `configs` (stable, no config copies).
+    std::vector<std::size_t> survivors = all_indices(configs.size());
 
-    if (latency != kRejectedLatency) {
-      valid_configs.push_back({latency, std::cref(config)});
-    } else {
-      invalid_configs.push_back({latency, std::cref(config)});
-    }
-  }
+    for (std::size_t p = 0; p < pipeline.phases.size(); ++p) {
+      const ranking_phase_t& phase      = pipeline.phases[p];
+      const CostModel&       cost_model = get_model(phase.model, phase.target, phase.fidelity);
 
-  // Fallback: when the analytical model rejected every candidate, rank the
-  // invalid configs so the caller still gets a usable kernel rather than failing.
-  if (valid_configs.empty()) {
-    valid_configs = std::move(invalid_configs);
-  }
-
-  std::stable_sort(valid_configs.begin(),
-                   valid_configs.end(),
-                   [](const auto& a, const auto& b) {
-                     return a.latency < b.latency;
-                   });
-
-  std::vector<prediction_result_t> results;
-  results.reserve(valid_configs.size());
-  std::transform(valid_configs.begin(),
-                 valid_configs.end(),
-                 std::back_inserter(results),
-                 [&](const auto& r) -> prediction_result_t {
-                   return {r.latency, r.config.get()};
-                 });
-
-  // Compute arithmetic intensity for tie-breaking
-  // Flops = 2 * MT_M * MT_N * MT_K, Memory traffic = MT_M*MT_K + MT_K*MT_N + MT_M*MT_N
-  auto compute_arithmetic_intensity = [](const config_t& config) -> double {
-    const auto MT_M = config.mt.m;
-    const auto MT_N = config.mt.n;
-    const auto MT_K = config.mt.k;
-
-    const double flops          = static_cast<double>(2ull * MT_M * MT_N * MT_K);
-    const double memory_traffic = static_cast<double>(MT_M * MT_K + MT_N * MT_K + MT_M * MT_N);
-
-    if (memory_traffic == 0.0) return 0.0;
-    return flops / memory_traffic;
-  };
-
-  // Apply tie-breaking logic for configs with similar latency
-  double best_latency = results.front().latency;
-  size_t num_the_same = 0;
-
-  // Count the number of similar latencies
-  constexpr double epsilon = 1e-9;
-  // variance is set through environment variable ANALYTICAL_GEMM_HEURISTICS_VARIANCE
-  // Use runtime_options from first config if available, otherwise global singleton
-  const double top_N_heuristic = origami::runtime_options::get().heuristics_variance;
-
-  for (const auto& res : results) {
-    bool within_top;
-    const double diff = std::abs(res.latency - best_latency);
-
-    if (top_N_heuristic <= epsilon) {
-      // Absolute tolerance path
-      within_top = diff < epsilon;
-    } else {
-      // Relative tolerance path (guard denom)
-      const double denom = std::max(std::abs(best_latency), epsilon);
-      // If it's within top_N_heuristic%, include it.
-      within_top = (diff / denom) < top_N_heuristic;
-    }
-
-    if (within_top)
-      ++num_the_same;
-    else
-      break;
-  }
-
-  // Sort top candidates by arithmetic intensity (descending - highest first)
-  if (num_the_same > 1) {
-    std::stable_sort(results.begin(),
-                     results.begin() + num_the_same,
-                     [&compute_arithmetic_intensity](const prediction_result_t& a,
-                                                     const prediction_result_t& b) {
-                       return compute_arithmetic_intensity(a.config) >
-                              compute_arithmetic_intensity(b.config);
-                     });
-
-    // After arithmetic intensity tie-breaking, check if we still have ties
-    // among the top results (those with same latency and arithmetic intensity)
-    // Check if the top tiles still have the same arithmetic intensity
-    double first_ai    = compute_arithmetic_intensity(results.front().config);
-    size_t num_same_ai = 1;
-    for (size_t i = 1; i < num_the_same; ++i) {
-      double current_ai = compute_arithmetic_intensity(results[i].config);
-      if (std::abs(current_ai - first_ai) < 1e-6) {
-        num_same_ai++;
-      } else {
-        break;
-      }
-    }
-
-    // If we still have ties after arithmetic intensity, apply problem dimension tie-breaker
-    if (num_same_ai > 1) {
-      // Problem dimension-based tie breaker:
-      // If M > N, prefer tiles with larger MT_M
-      // If N > M, prefer tiles with larger MT_N
-      // If M == N, this tie-breaker doesn't apply (will use final tie-breaker)
-
-      if (problem.size.m != problem.size.n) {
-        std::stable_sort(results.begin(),
-                         results.begin() + num_same_ai,
-                         [problem](const prediction_result_t& a, const prediction_result_t& b) {
-                           if (problem.size.m > problem.size.n) {
-                             // M-dominant: prefer larger MT_M
-                             if (a.config.mt.m != b.config.mt.m)
-                               return a.config.mt.m > b.config.mt.m;
-                             // If MT_M is same, prefer larger MT_N as secondary
-                             return a.config.mt.n > b.config.mt.n;
-                           } else  // N > M
-                           {
-                             // N-dominant: prefer larger MT_N
-                             if (a.config.mt.n != b.config.mt.n)
-                               return a.config.mt.n > b.config.mt.n;
-                             // If MT_N is same, prefer larger MT_M as secondary
-                             return a.config.mt.m > b.config.mt.m;
-                           }
-                         });
+      // Cheap primitive rejection gate (if any) before the model does any work.
+      std::vector<std::size_t> candidates;
+      candidates.reserve(survivors.size());
+      for (std::size_t idx : survivors) {
+        if (phase.reject && phase.reject(problem, hardware, configs[idx])) continue;
+        candidates.push_back(idx);
       }
 
-      // Final tie-breaker: when all else is equal (including square problems),
-      // consistently prefer tiles with larger MT_M
-      // This ensures deterministic selection regardless of input order
-      std::stable_sort(results.begin(),
-                       results.begin() + num_same_ai,
-                       [](const prediction_result_t& a, const prediction_result_t& b) {
-                         // Prefer larger MT_M first
-                         if (a.config.mt.m != b.config.mt.m) return a.config.mt.m > b.config.mt.m;
-                         // If MT_M is same, prefer larger MT_N
-                         if (a.config.mt.n != b.config.mt.n) return a.config.mt.n > b.config.mt.n;
-                         // If both MT_M and MT_N are same, prefer larger MT_K
-                         return a.config.mt.k > b.config.mt.k;
-                       });
+      OLOG_DEBUG("Phase " << p << " (" << cost_model.name() << "): scoring "
+                 << candidates.size() << " configs");
+
+      // The model scores the candidates, internally refining across its own
+      // detail levels (with per-config data reuse) where applicable.
+      scored = cost_model.score_candidates(problem, hardware, configs, candidates);
+
+      if (scored.empty()) { throw std::runtime_error("No valid configs found."); }
+
+      apply_prune(scored, phase.prune);
+
+      survivors.clear();
+      survivors.reserve(scored.size());
+      for (const auto& entry : scored) survivors.push_back(entry.second);
     }
   }
 
-  OLOG_DEBUG("rank_configs selected MT=(" << results[0].config.mt.m << ","
+  std::vector<prediction_result_t> results = to_results(scored, configs);
+
+  OLOG_DEBUG("Initial ranking (by latency, top 10):");
+  for (size_t i = 0; i < std::min(size_t(10), results.size()); i++) {
+    OLOG_DEBUG("  Rank " << i << ": MT=(" << results[i].config.mt.m << ","
+               << results[i].config.mt.n << "," << results[i].config.mt.k << ")"
+               << " MI=(" << results[i].config.mi.m << "," << results[i].config.mi.n << "," << results[i].config.mi.k << ")"
+               << " latency=" << results[i].latency);
+  }
+
+  // Refine the order among near-equal-latency configs.
+  apply_tie_breakers(results, problem);
+
+  OLOG_DEBUG("=== rank_configs FINAL RESULT ===");
+  OLOG_DEBUG("Selected config: MT=(" << results[0].config.mt.m << ","
              << results[0].config.mt.n << "," << results[0].config.mt.k << ")"
+             << " MI=(" << results[0].config.mi.m << "," << results[0].config.mi.n << "," << results[0].config.mi.k << ")"
              << " latency=" << results[0].latency);
 
   return results;
@@ -784,11 +919,36 @@ prediction_result_t select_config_mnk(size_t M,
 prediction_result_t select_config(const problem_t& problem,
                                   const hardware_t& hardware,
                                   const std::vector<config_t>& configs,
-                                  model_t model) {
-  auto ranked_configs = rank_configs(problem, hardware, configs, model);
+                                  model_t model,
+                                  const ranking_pipeline_t& pipeline) {
+  // Return the top configuration of the (single-pass or cascade) ranking.
+  return rank_configs(problem, hardware, configs, model, pipeline)[0];
+}
 
-  // Return the top configuration
-  return ranked_configs[0];
+ranking_pipeline_t make_cascade_pipeline(model_t model,
+                                         target_t target,
+                                         std::size_t topk_after_estimation) {
+  ranking_pipeline_t pipeline;
+
+  // Phase 1: cheap analytical estimation, keep the best topk_after_estimation.
+  ranking_phase_t estimation_phase;
+  estimation_phase.model          = model;
+  estimation_phase.target         = target;
+  estimation_phase.fidelity       = prediction_modes_t::estimation;
+  estimation_phase.prune.kind     = prune_kind_t::top_k;
+  estimation_phase.prune.top_k    = topk_after_estimation;
+  estimation_phase.prune.min_keep = 1;
+  pipeline.phases.push_back(estimation_phase);
+
+  // Phase 2: expensive simulation over the survivors, no further pruning.
+  ranking_phase_t simulation_phase;
+  simulation_phase.model      = model;
+  simulation_phase.target     = target;
+  simulation_phase.fidelity   = prediction_modes_t::simulation;
+  simulation_phase.prune.kind = prune_kind_t::none;
+  pipeline.phases.push_back(simulation_phase);
+
+  return pipeline;
 }
 
 double compute_perf_gflops(const hardware_t& hardware,

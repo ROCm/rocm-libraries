@@ -69,16 +69,18 @@ target_sources(origami-headers
         "${PROJECT_BINARY_DIR}/include"
     FILES
         "${CMAKE_CURRENT_SOURCE_DIR}/include/origami/attention.hpp"
+        "${CMAKE_CURRENT_SOURCE_DIR}/include/origami/estimation_leveled.hpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/include/origami/gemm.hpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/include/origami/hardware.hpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/include/origami/heuristics.hpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/include/origami/logger.hpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/include/origami/math.hpp"
+        "${CMAKE_CURRENT_SOURCE_DIR}/include/origami/model.hpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/include/origami/origami.hpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/include/origami/streamk.hpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/include/origami/types.hpp"
-        "${CMAKE_CURRENT_SOURCE_DIR}/include/origami/simulator/tensilelite/formocast.hpp"
-        "${CMAKE_CURRENT_SOURCE_DIR}/include/origami/simulator/tensilelite/formocast_simulator.hpp"
+        "${CMAKE_CURRENT_SOURCE_DIR}/include/origami/formocast.hpp"
+        "${CMAKE_CURRENT_SOURCE_DIR}/include/origami/formocast_internal.hpp"
         "${PROJECT_BINARY_DIR}/include/origami/origami_export.h"
 )
 target_include_directories(
@@ -95,16 +97,19 @@ add_dependencies(origami origami-headers_verify_interface_header_sets)
 
 target_sources(
     origami
-    PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/src/origami/attention.cpp"
-            "${CMAKE_CURRENT_SOURCE_DIR}/src/origami/gemm.cpp"
-            "${CMAKE_CURRENT_SOURCE_DIR}/src/origami/hardware.cpp"
-            "${CMAKE_CURRENT_SOURCE_DIR}/src/origami/heuristics.cpp"
-            "${CMAKE_CURRENT_SOURCE_DIR}/src/origami/logger.cpp"
-            "${CMAKE_CURRENT_SOURCE_DIR}/src/origami/origami.cpp"
-            "${CMAKE_CURRENT_SOURCE_DIR}/src/origami/streamk.cpp"
-            "${CMAKE_CURRENT_SOURCE_DIR}/src/origami/types.cpp"
-            "${CMAKE_CURRENT_SOURCE_DIR}/src/simulator/tensilelite/formocast_simulator.cpp"
-            "${CMAKE_CURRENT_SOURCE_DIR}/src/simulator/tensilelite/formocast.cpp"
+    PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/src/core/types.cpp"
+            "${CMAKE_CURRENT_SOURCE_DIR}/src/core/hardware.cpp"
+            "${CMAKE_CURRENT_SOURCE_DIR}/src/core/logger.cpp"
+            "${CMAKE_CURRENT_SOURCE_DIR}/src/common/heuristics.cpp"
+            "${CMAKE_CURRENT_SOURCE_DIR}/src/common/streamk.cpp"
+            "${CMAKE_CURRENT_SOURCE_DIR}/src/models/gemm/gemm_common.cpp"
+            "${CMAKE_CURRENT_SOURCE_DIR}/src/models/gemm/estimation_leveled.cpp"
+            "${CMAKE_CURRENT_SOURCE_DIR}/src/models/gemm/formocast.cpp"
+            "${CMAKE_CURRENT_SOURCE_DIR}/src/models/gemm/formocast_internal.cpp"
+            "${CMAKE_CURRENT_SOURCE_DIR}/src/models/gemm/formocast_wrapper.cpp"
+            "${CMAKE_CURRENT_SOURCE_DIR}/src/models/attention/attention.cpp"
+            "${CMAKE_CURRENT_SOURCE_DIR}/src/engine/origami.cpp"
+            "${CMAKE_CURRENT_SOURCE_DIR}/src/engine/model.cpp"
 )
 
 target_link_libraries(origami PRIVATE hip::host)

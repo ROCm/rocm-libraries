@@ -40,15 +40,22 @@ namespace origami {
 /**
  * @brief Based on the provided problem and configs; selects the best config.
  *
+ * With the default (empty) pipeline this performs a single ranking pass that
+ * honors each config's own target and prediction fidelity. Passing a non-empty
+ * pipeline runs the coarse-to-fine cascade instead (see @ref rank_configs).
+ *
  * @param problem Problem description (M, N, K, etc.)
  * @param hardware Hardware characteristics (@see origami::hardware_t)
  * @param configs Vector of all possible valid configurations.
+ * @param model Operation model for the single-pass case (gemm or attention).
+ * @param pipeline Optional multi-phase pipeline; empty means a single pass.
  * @return prediction_result_t Configurations with best latency.
  */
 ORIGAMI_EXPORT prediction_result_t select_config(const problem_t& problem,
                                   const hardware_t& hardware,
                                   const std::vector<config_t>& configs,
-                                  model_t model = model_t::gemm);
+                                  model_t model = model_t::gemm,
+                                  const ranking_pipeline_t& pipeline = ranking_pipeline_t{});
 
 /**
  * @brief Select best workgroup-mapping for the given tile size.
@@ -83,19 +90,33 @@ ORIGAMI_EXPORT staggerU_t select_staggerU(const problem_t& problem,
 /**
  * @brief Rank configurations based on predicted performance.
  *
+ * Two modes, selected by @p pipeline:
+ * - Empty pipeline (default): a single ranking pass. Each config resolves its
+ *   own cost model from @p model plus its target and prediction fidelity, is
+ *   gated for feasibility, scored, and the whole set is ranked (best first).
+ * - Non-empty pipeline: a coarse-to-fine cascade. Each phase scores the current
+ *   survivors with the cost model fixed by its (model, target, fidelity), drops
+ *   infeasible configs, then prunes per its policy before the next phase. The
+ *   result is ranked by the final phase's latencies. (@p model is unused here;
+ *   each phase carries its own.) A single no-prune phase is thus the cascade
+ *   form of a single pass.
+ *
  * @param problem Problem description (M, N, K, etc.)
  * @param hardware Hardware characteristics (@see origami::hardware_t)
- * @param configs List of candidate configurations to rank
- * @param model Model type to use for ranking (gemm or attention)
- * @return std::vector<prediction_result_t> Configurations with latencies ranked by performance
- * (best first). If every candidate is rejected, returns a ranking of the rejected configs
- * (max latency) instead of throwing.
+ * @param configs List of candidate kernel configurations to rank
+ * @param model Operation model for the single-pass case (gemm or attention)
+ * @param pipeline Optional multi-phase pipeline; empty means a single pass
+ * @return std::vector<prediction_result_t> Configurations with latencies ranked by
+ * performance (best first). If every candidate is rejected, returns a ranking of the
+ * rejected configs (max latency) instead of throwing.
  * @throws std::runtime_error if @p configs is empty.
  */
-ORIGAMI_EXPORT std::vector<prediction_result_t> rank_configs(const problem_t& problem,
-                                              const hardware_t& hardware,
-                                              const std::vector<config_t>& configs,
-                                              model_t model = model_t::gemm);
+ORIGAMI_EXPORT std::vector<prediction_result_t> rank_configs(
+    const problem_t& problem,
+    const hardware_t& hardware,
+    const std::vector<config_t>& configs,
+    model_t model = model_t::gemm,
+    const ranking_pipeline_t& pipeline = ranking_pipeline_t{});
 
 /**
  * @brief Select best configuration based only on M, N, K dimensions with default settings.
@@ -127,6 +148,23 @@ ORIGAMI_EXPORT std::vector<prediction_result_t> select_topk_configs(const proble
                                                      const std::vector<config_t>& configs,
                                                      std::size_t topk,
                                                      model_t model = model_t::gemm);
+
+/**
+ * @brief Build a two-phase estimation-then-simulation cascade pipeline.
+ *
+ * Phase 1 runs the cheap analytical estimation and keeps the best
+ * @p topk_after_estimation configs; phase 2 re-ranks those survivors with the
+ * simulation model (no further pruning). Simulation must be registered for
+ * (@p model, @p target); today that is gemm + tensilelite.
+ *
+ * @param model Operation model (gemm or attention).
+ * @param target Target backend whose kernels are modeled.
+ * @param topk_after_estimation Survivors kept after the estimation phase.
+ * @return ranking_pipeline_t The configured cascade pipeline.
+ */
+ORIGAMI_EXPORT ranking_pipeline_t make_cascade_pipeline(model_t model,
+                                                        target_t target,
+                                                        std::size_t topk_after_estimation);
 
 /**
  * @brief Given a latency, compute the achieved throughput in gflops.

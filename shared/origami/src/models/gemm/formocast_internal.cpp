@@ -1,7 +1,7 @@
 // Copyright Advanced Micro Devices, Inc., or its affiliates.
 // SPDX-License-Identifier: MIT
 
-#include <origami/simulator/tensilelite/formocast.hpp>
+#include <origami/formocast_internal.hpp>
 #include <origami/math.hpp>
 
 #include <algorithm>

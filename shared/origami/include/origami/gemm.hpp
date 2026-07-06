@@ -3,6 +3,8 @@
 
 #pragma once
 
+#include <cstddef>
+#include <optional>
 #include <tuple>
 #include <utility>
 #include <vector>
@@ -30,8 +32,11 @@ using cache_hit_rates_t = std::tuple<double, double, double, double, double, dou
  * values computed from problem, config, and hardware.
  */
 struct ORIGAMI_EXPORT context_t {
-  /// Heuristic parameters (cached to avoid repeated lookups).
-  heuristic_params_t heuristic{};
+  /// Heuristic parameters, looked up lazily and memoized on first use via
+  /// @ref get_heuristic. Coarse detail levels (timesteps / compute proxy) never
+  /// need them, so deferring the lookup keeps early-pruned configs from paying
+  /// for the (allocating) database lookup + struct copy.
+  mutable std::optional<heuristic_params_t> heuristic_cache;
 
   /// Element sizes (fractional for sub-byte types like FP4).
   double a_bytes = 0.0;
@@ -64,15 +69,34 @@ struct ORIGAMI_EXPORT context_t {
   size_t tile_elements     = 0;
   double output_tile_bytes = 0.0;
 
-  /// Workgroup mapping parameters.
-  workgroup_mapping_t wgm{0, 8, 1};
-
-  /// Occupancy-derived decay factor.
-  size_t real_occupancy   = 0;
-  double occupancy_factor = 1.0;
+  /// Occupancy-derived value. The decay factor itself (occupancy_factor) needs
+  /// the heuristic, so it is derived lazily at the full level.
+  size_t real_occupancy = 0;
 
   /// Debug flag (cached from runtime_options to avoid repeated singleton lookups).
   bool debug = false;
+
+  /// Leveled latency components, filled progressively as finer detail levels run
+  /// and reused across the levels that share this context (hierarchical
+  /// carry-over). An unset optional means "not computed at this level yet".
+  /// Mutable because memoization is logically const; a context is per-config and
+  /// used single-threaded, so the in-place fill is race-free. These double as a
+  /// per-config feature record for any future ML export.
+  mutable double                             occupancy_factor = 1.0;  // [L3] decay factor
+  mutable std::optional<double>              utilization;             // [L2] cheap
+  mutable std::optional<double>              effective_tile_penalty;  // [L2] cheap
+  mutable std::optional<workgroup_mapping_t> wgm;                     // [L3] lazily predicted WGM
+  mutable std::optional<cache_hit_rates_t>   cache_rates;             // [L3] per-operand hit rates
+  mutable std::optional<double>              L_comp_stream;           // [L1] per-iteration compute arm
+  mutable std::optional<double>              L_mem_stream;            // [L3] per-iteration memory arm (detailed)
+  mutable std::optional<double>              L_prologue;              // [L3] fill cost
+  mutable std::optional<double>              L_comp;                  // [L3] whole-tile compute total (L_comp_stream * num_iter)
+  mutable std::optional<double>              L_cvt;                   // [L3] dtype-conversion overhead
+  mutable std::optional<double>              L_mem;                   // [L3] whole-tile memory total (L_mem_stream * num_iter)
+  mutable std::optional<double>              L_epilogue;              // [L3] epilogue/drain (stores + reduction)
+  mutable std::optional<double>              L_tile_single;           // [L3] steady per-iteration latency
+  mutable std::optional<double>              L_parallel_reduction;    // [L3] PostGSU reduction kernel
+  mutable std::optional<double>              L_total;                 // [L3] full analytical latency
 
   /// Default constructor.
   context_t() = default;
@@ -92,6 +116,30 @@ struct ORIGAMI_EXPORT context_t {
    * @return bool True if the context is valid, false otherwise.
    */
   bool is_valid() const;
+
+  /**
+   * @brief Lazily predict (and memoize) the workgroup mapping.
+   *
+   * WGM prediction is the most expensive part of building a context and is only
+   * needed by the detailed cache/memory model and the full level, so it is
+   * deferred here instead of being computed eagerly. The result is cached in
+   * @ref wgm and reused on subsequent calls.
+   */
+  const workgroup_mapping_t& get_wgm(const problem_t& problem,
+                                     const hardware_t& hardware,
+                                     const config_t& config) const;
+
+  /**
+   * @brief Lazily look up (and memoize) the heuristic parameters.
+   *
+   * The heuristics database lookup allocates and copies a sizable struct, but the
+   * coarse detail levels never read it. Deferring it here (mirroring @ref get_wgm)
+   * means a config pruned before the memory/full level never pays for it. The
+   * result is cached in @ref heuristic_cache and reused on subsequent calls.
+   */
+  const heuristic_params_t& get_heuristic(const problem_t& problem,
+                                          const hardware_t& hardware,
+                                          const config_t& config) const;
 };
 
 /**
@@ -426,6 +474,59 @@ ORIGAMI_EXPORT double compute_memory_latency(const problem_t& problem,
                               const context_t& context);
 
 /**
+ * @brief Core memory-latency math from precomputed per-operand cache hit rates.
+ *
+ * Everything in @ref compute_memory_latency below the hit-rate estimation. Lets a
+ * caller inject the cache fidelity (detailed estimate vs a flat proxy) so the
+ * leveled entry points share one implementation. Does not touch the context's
+ * cost record.
+ *
+ * @param rates Per-operand L1/L2/MALL hit rates to use.
+ */
+ORIGAMI_EXPORT double compute_memory_latency_from_rates(const problem_t& problem,
+                                         const hardware_t& hardware,
+                                         const config_t& config,
+                                         const context_t& context,
+                                         const cache_hit_rates_t& rates);
+
+/**
+ * @brief Per-tile memory latency at a given detail @p Level.
+ *
+ * One entry point parameterized over the detail level, instead of a family of
+ * `_coarse` / `_detailed` siblings. The level selects the cache fidelity:
+ *   - Level >= 3: full detail -- the analytical cache model (predicts the WGM and
+ *     memoizes into the context's cost record). Delegates to the non-template
+ *     @ref compute_memory_latency.
+ *   - Level == 2: a flat ~0.5 hit-rate proxy (no WGM / detailed cache, uncached).
+ *   - Level <= 1: a cheaper proxy still (no caching modeled).
+ *
+ * To add a dedicated routine for another level (e.g. a bespoke level-1 memory
+ * model), extend the `if constexpr` chain below -- the runtime dispatch (a
+ * `switch` mapping the phase's runtime level to one of these instantiations)
+ * lives in the cost-model adapter.
+ *
+ * The coarse levels never write @ref context_t::L_mem_stream, so a coarse value
+ * can never poison the full level's detailed result.
+ */
+template <std::size_t Level>
+inline double compute_memory_latency(const problem_t& problem,
+                                     const hardware_t& hardware,
+                                     const config_t& config,
+                                     const context_t& context) {
+  if constexpr (Level >= 3) {
+    // Calls the non-template (detailed) overload: Level is non-deducible, so an
+    // un-templated call never re-selects this template -- no recursion.
+    return compute_memory_latency(problem, hardware, config, context);
+  } else {
+    // Coarser levels use a flat per-operand hit-rate proxy that sharpens with the
+    // level. Add a `Level == N` branch here for a bespoke per-level routine.
+    constexpr double        rate = (Level >= 2) ? 0.5 : 0.0;
+    const cache_hit_rates_t rates{rate, rate, rate, rate, rate, rate};
+    return compute_memory_latency_from_rates(problem, hardware, config, context, rates);
+  }
+}
+
+/**
  * @brief Compute the epilogue latency for a single tile.
  *
  * Models the cost of writing output (or workspace partials) after the main loop:
@@ -442,6 +543,43 @@ ORIGAMI_EXPORT double compute_epilogue_latency(const problem_t& problem,
                                 const hardware_t& hardware,
                                 const config_t& config,
                                 const context_t& context);
+
+/**
+ * @brief Context-free coarse epilogue proxy: store latency of one interior tile.
+ *
+ * The cheapest possible epilogue estimate -- just the cost of storing a single
+ * MT_M x MT_N output tile -- so the coarse (context-free) scoring levels can
+ * account for the write cost before a context is built. Ignores edge/corner
+ * tiles, split-K reduction, ACC->VGPR transfer, and alignment; active CU count
+ * and bandwidth are approximated from the output-tile count.
+ *
+ * Core overload: the caller supplies @p num_output_tiles, so a caller that has
+ * already derived the grid (e.g. the level-1 proxy) does not recompute it.
+ *
+ * @param hardware Hardware characteristics (@see origami::hardware_t)
+ * @param mt Macro-tile dimensions.
+ * @param d_dtype Output element data type.
+ * @param num_output_tiles grid_m * grid_n * batch.
+ * @return double Approximate tile-store latency in cycles.
+ */
+ORIGAMI_EXPORT double compute_coarse_epilogue_latency(const hardware_t& hardware,
+                                                      const dim3_t& mt,
+                                                      data_type_t d_dtype,
+                                                      size_t num_output_tiles);
+
+/**
+ * @brief Context-based overload: reuses the context's already-derived fields
+ *        (exact active_cus / bandwidth, output bytes) instead of recomputing or
+ *        approximating them. Used by levels that already hold a context.
+ *
+ * @param hardware Hardware characteristics (@see origami::hardware_t)
+ * @param config Kernel configuration.
+ * @param context Execution context with derived parameters.
+ * @return double Approximate tile-store latency in cycles.
+ */
+ORIGAMI_EXPORT double compute_coarse_epilogue_latency(const hardware_t& hardware,
+                                                      const config_t& config,
+                                                      const context_t& context);
 
 /**
  * @brief Computes the latency to compute a K-COMPLETE tile.
@@ -490,8 +628,11 @@ ORIGAMI_EXPORT double compute_parallel_reduction_latency(const problem_t& proble
                                           const context_t& context);
 
 /**
- * @brief Compute the total latency of a gemm based on the latency of one timestep multiplied by the
- * number of timesteps. (@see compute_timestep_latency)
+ * @brief Compute the total analytical (estimation) latency of a GEMM.
+ *
+ * The analytical estimation path: fast-rejection gate, then the per-timestep
+ * latency summed over all timesteps plus the parallel-reduction cost. Simulation
+ * is a separate model with its own entry (@see compute_formocast_latency).
  *
  * @param problem Problem description (M, N, K, etc.)
  * @param hardware Hardware characteristics (@see origami::hardware_t)
@@ -501,6 +642,43 @@ ORIGAMI_EXPORT double compute_parallel_reduction_latency(const problem_t& proble
 ORIGAMI_EXPORT double compute_total_latency(const problem_t& problem,
                              const hardware_t& hardware,
                              const config_t& config);
+
+/**
+ * @brief Full analytical estimation latency from a prebuilt context.
+ *
+ * Single source of truth for the estimation latency: sums the per-timestep
+ * latency over all timesteps plus the parallel-reduction cost. The
+ * four/five-argument compute_total_latency builds a context and delegates here;
+ * the leveled cost model reuses a carried context to avoid rebuilding it.
+ *
+ * @note The caller is responsible for fast_reject; this routine does NOT re-run
+ *       it. Both internal entry points already filter upstream (the leveled model
+ *       at level 0, compute_total_latency before building the context).
+ *
+ * @param problem Problem description (M, N, K, etc.)
+ * @param hardware Hardware characteristics (@see origami::hardware_t)
+ * @param config Kernel configuration.
+ * @param context Prebuilt execution context for (problem, hardware, config).
+ * @return double Latency in cycles (max if rejected/short-circuited).
+ */
+ORIGAMI_EXPORT double estimation_latency_from_context(const problem_t& problem,
+                                      const hardware_t& hardware,
+                                      const config_t& config,
+                                      const context_t& context);
+
+/**
+ * @brief Cheap, context-free fast rejection: the single collection point for
+ *        every structural disqualification rule for a GEMM config.
+ *
+ * Used by the leveled model's level 0 (no execution context built) and to gate
+ * the full estimation / simulation paths. This is a performance gate ("this
+ * kernel is not worth scoring"), distinct from feasibility ("can it run").
+ *
+ * @return true if the config should be rejected before any real scoring.
+ */
+ORIGAMI_EXPORT bool fast_reject(const problem_t& problem,
+                                const hardware_t& hardware,
+                                const config_t& config);
 
 }  // namespace gemm
 }  // namespace origami

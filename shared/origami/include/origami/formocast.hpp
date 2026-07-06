@@ -13,7 +13,6 @@
 #include <tuple>
 #include <iostream>
 #include <unordered_map>
-#include <origami/simulator/tensilelite/formocast.hpp>
 #include "origami/types.hpp"
 #include "origami/hardware.hpp"
 #include "origami/origami_export.h"
@@ -780,5 +779,19 @@ namespace origami
         double mt0_a, double mt1_a, double du_a, int svw_a,
         double mt0_b, double mt1_b, double du_b, int svw_b
     );
+
+    namespace gemm
+    {
+        /**
+         * @brief GEMM latency via the tensilelite Formocast simulation.
+         *
+         * Wraps a GEMM (problem, config) onto Formocast's ProblemInfo/SizeMapping
+         * and returns the predicted latency. This is the simulation-fidelity path of
+         * the GEMM cost model; the analytical estimation lives in gemm_model.cpp.
+         */
+        ORIGAMI_EXPORT double compute_formocast_latency(const problem_t& problem,
+                                                        const hardware_t& hardware,
+                                                        const config_t& config);
+    } // namespace gemm
 
 } // namespace origami

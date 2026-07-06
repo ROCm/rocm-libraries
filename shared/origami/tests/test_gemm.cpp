@@ -134,6 +134,72 @@ TEST_CASE("GEMM: compute_memory_latency", "[gemm]") {
   }
 }
 
+TEST_CASE("GEMM: fast_reject centralizes the subtile small-K rule", "[gemm]") {
+  // The gfx950 BF16 TN subtile-small-K rejection (formerly a reject=true entry in
+  // the heuristics table) now lives in gemm::fast_reject.
+  auto hardware = make_hardware(950);
+
+  // gfx950, BF16, TN, K < 512: a subtile kernel is rejected; a non-subtile one is not.
+  auto problem_small_k =
+      make_problem(4096, 4096, 256, origami::transpose_t::T, origami::transpose_t::N);
+
+  auto subtile_cfg   = make_config(256, 256, 64, 16, 16, 16);
+  subtile_cfg.subtile = true;
+  auto regular_cfg   = make_config(256, 256, 64, 16, 16, 16);
+  regular_cfg.subtile = false;
+
+  REQUIRE(origami::gemm::fast_reject(problem_small_k, hardware, subtile_cfg));
+  REQUIRE_FALSE(origami::gemm::fast_reject(problem_small_k, hardware, regular_cfg));
+
+  // Same subtile kernel with K >= 512 is not rejected by the rule.
+  auto problem_large_k =
+      make_problem(4096, 4096, 512, origami::transpose_t::T, origami::transpose_t::N);
+  REQUIRE_FALSE(origami::gemm::fast_reject(problem_large_k, hardware, subtile_cfg));
+
+  // The rule is scoped to gfx950: the same subtile/small-K case is not rejected on gfx942.
+  REQUIRE_FALSE(origami::gemm::fast_reject(problem_small_k, make_hardware(942), subtile_cfg));
+}
+
+TEST_CASE("GEMM: lazy WGM and coarse memory do not poison the detailed value", "[gemm]") {
+  for (int gpu_arch : test_architectures) {
+    DYNAMIC_SECTION("gfx" << gpu_arch << " - coarse 0.5 proxy is uncached and WGM is lazy") {
+      auto hardware = make_hardware(gpu_arch);
+      auto problem =
+          make_problem(4096, 4096, 1024, origami::transpose_t::T, origami::transpose_t::N, 1);
+      auto config = make_config(128, 128, 64, 32, 32, 8, false, 8);
+
+      // A freshly built context has not predicted the (expensive) WGM yet, nor
+      // computed any leveled latency component.
+      origami::gemm::context_t ctx(problem, hardware, config);
+      REQUIRE_FALSE(ctx.wgm.has_value());
+      REQUIRE_FALSE(ctx.L_mem_stream.has_value());
+
+      // The level-2 (roofline) proxy must not predict the WGM, run the detailed
+      // cache model, or cache anything into the record.
+      const double coarse = origami::gemm::compute_memory_latency<2>(problem, hardware, config, ctx);
+      REQUIRE(coarse > 0.0);
+      REQUIRE_FALSE(ctx.wgm.has_value());
+      REQUIRE_FALSE(ctx.L_mem_stream.has_value());
+      REQUIRE_FALSE(ctx.cache_rates.has_value());
+
+      // The detailed path predicts the WGM, runs the cache model, and memoizes the
+      // per-tile memory latency. The cached detailed value must equal a freshly
+      // computed one (i.e. the coarse call above did not corrupt it).
+      const double detailed = origami::gemm::compute_memory_latency(problem, hardware, config, ctx);
+      REQUIRE(ctx.wgm.has_value());
+      REQUIRE(ctx.cache_rates.has_value());
+      REQUIRE(ctx.L_mem_stream.has_value());
+      REQUIRE(*ctx.L_mem_stream == detailed);
+
+      origami::gemm::context_t fresh(problem, hardware, config);
+      REQUIRE(origami::gemm::compute_memory_latency(problem, hardware, config, fresh) == detailed);
+
+      // The coarse proxy (flat ~0.5 hit rate) differs from the detailed estimate.
+      REQUIRE(coarse != detailed);
+    }
+  }
+}
+
 TEST_CASE("GEMM: compute_tile_latency", "[gemm]") {
   for (int gpu_arch : test_architectures) {
     DYNAMIC_SECTION("gfx" << gpu_arch << " - verify larger tiles have higher latency") {
@@ -1742,7 +1808,7 @@ TEST_CASE("GEMM: compute_parallel_reduction_latency", "[gemm]") {
       ctx.reduction_strategy  = origami::reduction_t::parallel;
 
       auto latency = origami::gemm::compute_parallel_reduction_latency(problem, hardware, config, ctx);
-      REQUIRE(latency >= ctx.heuristic.postgsu_kernel_launch_overhead);
+      REQUIRE(latency >= ctx.get_heuristic(problem, hardware, config).postgsu_kernel_launch_overhead);
     }
   }
 }
