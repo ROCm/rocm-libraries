@@ -288,6 +288,17 @@ def main():
         default=[],
         help="Additional CTest label to append to every generated suite. May be repeated.",
     )
+    parser.add_argument(
+        "--environment",
+        action="append",
+        default=[],
+        help=(
+            "Additional ENVIRONMENT entry (KEY=VALUE) applied to every generated "
+            "suite, e.g. CMake-side TEST_ENVIRONMENT (ASAN symbolizer path, "
+            "coverage LLVM_PROFILE_FILE). May be repeated. Overrides a "
+            "same-keyed execution_settings.environment entry from the YAML."
+        ),
+    )
 
     args = parser.parse_args()
 
@@ -306,6 +317,16 @@ def main():
         if err is not None:
             print(f"Error: invalid --additional-label value: {err}", file=sys.stderr)
             sys.exit(1)
+    cli_env_overrides = {}
+    for entry in args.environment:
+        if "=" not in entry:
+            print(
+                f"Error: invalid --environment value {entry!r}: expected KEY=VALUE",
+                file=sys.stderr,
+            )
+            sys.exit(1)
+        key, value = entry.split("=", 1)
+        cli_env_overrides[key] = value
     if resource_group is not None:
         err = validate_identifier(resource_group)
         if err is not None:
@@ -354,7 +375,8 @@ def main():
         execution_settings = config.get("execution_settings", {})
         timeouts = execution_settings.get("category_timeouts", {})
         timeout_multiplier = execution_settings.get("timeout_multiplier", 1)
-        env_dict = execution_settings.get("environment", {}) or {}
+        env_dict = dict(execution_settings.get("environment", {}) or {})
+        env_dict.update(cli_env_overrides)
         env_string = (
             ";".join(f"{k}={v}" for k, v in env_dict.items()) if env_dict else None
         )

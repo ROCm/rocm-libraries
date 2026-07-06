@@ -13,7 +13,7 @@ function(_parse_test_category_optional_args)
         ARG
         ""
         "INSTALL_TEST_FILE;RESOURCE_GROUP;TEST_NAME_PREFIX;INSTALL_EXECUTABLE"
-        "COMMAND_ARGS;INSTALL_COMMAND_ARGS;ADDITIONAL_LABELS"
+        "COMMAND_ARGS;INSTALL_COMMAND_ARGS;ADDITIONAL_LABELS;ENVIRONMENT"
         ${ARGN}
     )
 
@@ -36,6 +36,7 @@ function(_parse_test_category_optional_args)
     set(_TEST_CATEGORY_COMMAND_ARGS "${ARG_COMMAND_ARGS}" PARENT_SCOPE)
     set(_TEST_CATEGORY_INSTALL_COMMAND_ARGS "${ARG_INSTALL_COMMAND_ARGS}" PARENT_SCOPE)
     set(_TEST_CATEGORY_ADDITIONAL_LABELS "${ARG_ADDITIONAL_LABELS}" PARENT_SCOPE)
+    set(_TEST_CATEGORY_ENVIRONMENT "${ARG_ENVIRONMENT}" PARENT_SCOPE)
 endfunction()
 
 # Appends parser args for generated GTest category suites.
@@ -62,6 +63,9 @@ function(_build_test_category_parser_args out_var)
     endforeach()
     foreach(additional_label IN LISTS _TEST_CATEGORY_ADDITIONAL_LABELS)
         list(APPEND extra_args "--additional-label" "${additional_label}")
+    endforeach()
+    foreach(extra_env_kv IN LISTS _TEST_CATEGORY_ENVIRONMENT)
+        list(APPEND extra_args "--environment" "${extra_env_kv}")
     endforeach()
     set(${out_var} "${extra_args}" PARENT_SCOPE)
 endfunction()
@@ -115,6 +119,10 @@ endfunction()
 #   INSTALL_COMMAND_ARGS - Extra install-tree command args before --gtest_filter
 #   INSTALL_EXECUTABLE - Install-tree executable path; defaults to ../target_name
 #   ADDITIONAL_LABELS - Labels appended to every generated suite
+#   ENVIRONMENT - Extra ENVIRONMENT entries (KEY=VALUE) applied to every
+#       generated suite, merged with execution_settings.environment from the
+#       YAML (this list wins on key conflicts). Use to forward CMake-side
+#       TEST_ENVIRONMENT (ASAN symbolizer path, coverage LLVM_PROFILE_FILE).
 # ~~~
 function(apply_test_category_labels target_name yaml_file working_dir)
     _parse_test_category_optional_args(${ARGN})

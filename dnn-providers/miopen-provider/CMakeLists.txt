@@ -325,18 +325,23 @@ if(NOT MIOPENPROVIDER_SKIP_TESTS)
         )
         # The GTest YAML applies to both test binaries; each call appends its category suites
         # (e.g. miopen_plugin_tests_quick_suite, miopen_plugin_integration_tests_quick_suite)
-        # to the same install-time CTestTestfile.cmake.
+        # to the same install-time CTestTestfile.cmake. ENVIRONMENT forwards the CMake-side
+        # TEST_ENVIRONMENT (ASAN symbolizer path, coverage LLVM_PROFILE_FILE, set by
+        # dnn-providers/cmake/Sanitizers.cmake / _build_test_environment_list_internal) to
+        # every generated suite; without it those suites run unsanitized/uninstrumented.
         apply_test_category_labels(
             miopen_plugin_tests
             "${MIOPENPROVIDER_GTEST_CATEGORIES_YAML}"
             "${PROJECT_BINARY_DIR}/staging"
             "${MIOPENPROVIDER_CTEST_INSTALL_FILE}"
+            ENVIRONMENT ${TEST_ENVIRONMENT}
         )
         apply_test_category_labels(
             miopen_plugin_integration_tests
             "${MIOPENPROVIDER_GTEST_CATEGORIES_YAML}"
             "${PROJECT_BINARY_DIR}/staging"
             "${MIOPENPROVIDER_CTEST_INSTALL_FILE}"
+            ENVIRONMENT ${TEST_ENVIRONMENT}
         )
     endif()
 
