@@ -209,7 +209,7 @@ def _run_flydsl_live(shape, data, *, warmup, iters):
         )
 
     ms = time_launches(call_once, warmup=warmup, iters=iters, stream=hip_stream)
-    synchronize_and_release(hip_stream)
+    synchronize_and_release()
     return out, ms
 
 
