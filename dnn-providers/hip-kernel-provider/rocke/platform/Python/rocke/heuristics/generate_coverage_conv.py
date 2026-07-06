@@ -226,7 +226,9 @@ def generate_edge_shapes():
                 for N in [1, 4]:
                     if conv_shape_valid(N, 1, C, K, hw, hw, 1, 1, 1, 1, 0, 0):
                         shapes.add((N, 1, C, K, hw, hw, 1, 1, 1, 1, 0, 0))
-                    if hw >= 3 and conv_shape_valid(N, 1, C, K, hw, hw, 3, 3, 1, 1, 1, 1):
+                    if hw >= 3 and conv_shape_valid(
+                        N, 1, C, K, hw, hw, 3, 3, 1, 1, 1, 1
+                    ):
                         shapes.add((N, 1, C, K, hw, hw, 3, 3, 1, 1, 1, 1))
 
     # 5. Small spatial (8-16) with minimal channels
