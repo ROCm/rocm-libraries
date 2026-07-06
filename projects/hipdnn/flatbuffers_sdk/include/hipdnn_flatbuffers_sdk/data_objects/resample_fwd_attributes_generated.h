@@ -36,7 +36,7 @@ struct ResampleFwdAttributesT : public ::flatbuffers::NativeTable {
   std::vector<int64_t> window{};
   hipdnn_flatbuffers_sdk::data_objects::ResampleMode resample_mode = hipdnn_flatbuffers_sdk::data_objects::ResampleMode::NOT_SET;
   hipdnn_flatbuffers_sdk::data_objects::PaddingMode padding_mode = hipdnn_flatbuffers_sdk::data_objects::PaddingMode::PADDING_NOT_SET;
-  ::flatbuffers::Optional<bool> generate_index = ::flatbuffers::nullopt;
+  bool generate_index = false;
 };
 
 struct ResampleFwdAttributes FLATBUFFERS_FINAL_CLASS : private ::flatbuffers::Table {
@@ -108,11 +108,11 @@ struct ResampleFwdAttributes FLATBUFFERS_FINAL_CLASS : private ::flatbuffers::Ta
   bool mutate_padding_mode(hipdnn_flatbuffers_sdk::data_objects::PaddingMode _padding_mode = static_cast<hipdnn_flatbuffers_sdk::data_objects::PaddingMode>(0)) {
     return SetField<int8_t>(VT_PADDING_MODE, static_cast<int8_t>(_padding_mode), 0);
   }
-  ::flatbuffers::Optional<bool> generate_index() const {
-    return GetOptional<uint8_t, bool>(VT_GENERATE_INDEX);
+  bool generate_index() const {
+    return GetField<uint8_t>(VT_GENERATE_INDEX, 0) != 0;
   }
-  bool mutate_generate_index(bool _generate_index) {
-    return SetField<uint8_t>(VT_GENERATE_INDEX, static_cast<uint8_t>(_generate_index));
+  bool mutate_generate_index(bool _generate_index = 0) {
+    return SetField<uint8_t>(VT_GENERATE_INDEX, static_cast<uint8_t>(_generate_index), 0);
   }
   bool Verify(::flatbuffers::Verifier &verifier) const {
     return VerifyTableStart(verifier) &&
@@ -169,7 +169,7 @@ struct ResampleFwdAttributesBuilder {
     fbb_.AddElement<int8_t>(ResampleFwdAttributes::VT_PADDING_MODE, static_cast<int8_t>(padding_mode), 0);
   }
   void add_generate_index(bool generate_index) {
-    fbb_.AddElement<uint8_t>(ResampleFwdAttributes::VT_GENERATE_INDEX, static_cast<uint8_t>(generate_index));
+    fbb_.AddElement<uint8_t>(ResampleFwdAttributes::VT_GENERATE_INDEX, static_cast<uint8_t>(generate_index), 0);
   }
   explicit ResampleFwdAttributesBuilder(::flatbuffers::FlatBufferBuilder &_fbb)
         : fbb_(_fbb) {
@@ -193,7 +193,7 @@ inline ::flatbuffers::Offset<ResampleFwdAttributes> CreateResampleFwdAttributes(
     ::flatbuffers::Offset<::flatbuffers::Vector<int64_t>> window = 0,
     hipdnn_flatbuffers_sdk::data_objects::ResampleMode resample_mode = hipdnn_flatbuffers_sdk::data_objects::ResampleMode::NOT_SET,
     hipdnn_flatbuffers_sdk::data_objects::PaddingMode padding_mode = hipdnn_flatbuffers_sdk::data_objects::PaddingMode::PADDING_NOT_SET,
-    ::flatbuffers::Optional<bool> generate_index = ::flatbuffers::nullopt) {
+    bool generate_index = false) {
   ResampleFwdAttributesBuilder builder_(_fbb);
   if(index_tensor_uid) { builder_.add_index_tensor_uid(*index_tensor_uid); }
   builder_.add_y_tensor_uid(y_tensor_uid);
@@ -202,7 +202,7 @@ inline ::flatbuffers::Offset<ResampleFwdAttributes> CreateResampleFwdAttributes(
   builder_.add_stride(stride);
   builder_.add_post_padding(post_padding);
   builder_.add_pre_padding(pre_padding);
-  if(generate_index) { builder_.add_generate_index(*generate_index); }
+  builder_.add_generate_index(generate_index);
   builder_.add_padding_mode(padding_mode);
   builder_.add_resample_mode(resample_mode);
   return builder_.Finish();
@@ -219,7 +219,7 @@ inline ::flatbuffers::Offset<ResampleFwdAttributes> CreateResampleFwdAttributesD
     const std::vector<int64_t> *window = nullptr,
     hipdnn_flatbuffers_sdk::data_objects::ResampleMode resample_mode = hipdnn_flatbuffers_sdk::data_objects::ResampleMode::NOT_SET,
     hipdnn_flatbuffers_sdk::data_objects::PaddingMode padding_mode = hipdnn_flatbuffers_sdk::data_objects::PaddingMode::PADDING_NOT_SET,
-    ::flatbuffers::Optional<bool> generate_index = ::flatbuffers::nullopt) {
+    bool generate_index = false) {
   auto pre_padding__ = pre_padding ? _fbb.CreateVector<int64_t>(*pre_padding) : 0;
   auto post_padding__ = post_padding ? _fbb.CreateVector<int64_t>(*post_padding) : 0;
   auto stride__ = stride ? _fbb.CreateVector<int64_t>(*stride) : 0;

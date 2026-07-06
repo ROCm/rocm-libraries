@@ -5660,7 +5660,7 @@ public:
 
         auto y = outputTensor(attributes.get_name() + "::Y");
         std::shared_ptr<TensorAttributes> index = nullptr;
-        const bool generateIndex = attributes.get_generate_index().value_or(false);
+        const bool generateIndex = attributes.get_generate_index();
         if(generateIndex && attributes.get_resample_mode() == ResampleMode::MAXPOOL)
         {
             index = outputTensor(attributes.get_name() + "::Index");

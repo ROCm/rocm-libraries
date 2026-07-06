@@ -22,5 +22,5 @@ table ResampleFwdAttributes {
     padding_mode: PaddingMode;
 
     // Whether to generate index output (for max resample)
-    generate_index: bool = null;
+    generate_index: bool = false;
 }

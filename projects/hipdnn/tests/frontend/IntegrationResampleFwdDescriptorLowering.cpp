@@ -147,11 +147,11 @@ TEST_F(IntegrationResampleFwdDescriptorLowering, ResampleFwdLoweringRoundTrip)
     EXPECT_EQ(opNode->window, toVec(K_RESAMPLE_FWD_WINDOW));
 
     // Verify index
-    EXPECT_FALSE(opNode->generate_index.has_value());
+    EXPECT_FALSE(opNode->generate_index);
     EXPECT_FALSE(opNode->index_tensor_uid.has_value());
 }
 
-// Verifies that the optional generate_index attribute survives lowering round-trip.
+// Verifies that the generate_index attribute survives lowering round-trip.
 TEST_F(IntegrationResampleFwdDescriptorLowering, GenerateIndexPreservedInRoundTrip)
 {
     auto graph = std::make_shared<hipdnn_tests::TestableGraphLowering>();
@@ -204,8 +204,7 @@ TEST_F(IntegrationResampleFwdDescriptorLowering, GenerateIndexPreservedInRoundTr
     auto* opNode = graphT.nodes[0]->attributes.AsResampleFwdAttributes();
     ASSERT_NE(opNode, nullptr);
 
-    ASSERT_TRUE(opNode->generate_index.has_value());
-    EXPECT_EQ(opNode->generate_index.value(), true);
+    EXPECT_TRUE(opNode->generate_index);
     ASSERT_TRUE(opNode->index_tensor_uid.has_value());
     EXPECT_EQ(opNode->index_tensor_uid.value(), K_RESAMPLE_FWD_TENSOR_INDEX_UID);
 }
@@ -548,8 +547,7 @@ TEST_F(IntegrationResampleFwdDescriptorLowering, GenerateIndexNotMaxPool)
     auto* opNode = node->attributes.AsResampleFwdAttributes();
     ASSERT_NE(opNode, nullptr);
 
-    ASSERT_TRUE(opNode->generate_index.has_value());
-    EXPECT_EQ(opNode->generate_index.value(), true);
+    EXPECT_TRUE(opNode->generate_index);
     ASSERT_FALSE(opNode->index_tensor_uid.has_value());
     ASSERT_EQ(opNode->resample_mode,
               hipdnn_flatbuffers_sdk::data_objects::ResampleMode::AVGPOOL_EXCLUDE_PADDING);

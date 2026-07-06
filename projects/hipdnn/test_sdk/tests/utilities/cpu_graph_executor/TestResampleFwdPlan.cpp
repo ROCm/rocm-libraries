@@ -123,7 +123,7 @@ TEST(TestResampleFwdPlanBuilder, RejectsUnsupportedModes)
 
     for(const auto mode : {ResampleMode::NOT_SET, static_cast<ResampleMode>(127)})
     {
-        auto builder = createValidResampleFwdGraph(std::nullopt, mode);
+        auto builder = createValidResampleFwdGraph(false, mode);
         const GraphWrapper graph(builder.GetBufferPointer(), builder.GetSize());
         EXPECT_FALSE(planBuilder.isApplicable(graph.getNode(0), graph.getTensorMap()));
     }
@@ -136,8 +136,7 @@ TEST(TestResampleFwdPlanBuilder, RejectsUnsupportedPaddingModes)
 
     for(const auto paddingMode : {PaddingMode::PADDING_NOT_SET, static_cast<PaddingMode>(127)})
     {
-        auto builder
-            = createValidResampleFwdGraph(std::nullopt, ResampleMode::MAXPOOL, paddingMode);
+        auto builder = createValidResampleFwdGraph(false, ResampleMode::MAXPOOL, paddingMode);
         const GraphWrapper graph(builder.GetBufferPointer(), builder.GetSize());
         EXPECT_FALSE(planBuilder.isApplicable(graph.getNode(0), graph.getTensorMap()));
     }
