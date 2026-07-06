@@ -1,0 +1,86 @@
+# Copyright Advanced Micro Devices, Inc., or its affiliates.
+# SPDX-License-Identifier: MIT
+
+set(HIPSPARSE_TEST_SOURCES
+    # Generic
+    test_axpby.cpp
+    test_const_dnmat_descr.cpp
+    test_const_dnvec_descr.cpp
+    test_const_spmat_descr.cpp
+    test_const_spvec_descr.cpp
+    test_dense_to_sparse_coo.cpp
+    test_dense_to_sparse_csc.cpp
+    test_dense_to_sparse_csr.cpp
+    test_dnmat_descr.cpp
+    test_dnvec_descr.cpp
+    test_gather.cpp
+    test_rot.cpp
+    test_scatter.cpp
+    test_sddmm_coo.cpp
+    test_sddmm_coo_aos.cpp
+    test_sddmm_csc.cpp
+    test_sddmm_csr.cpp
+    test_sparse_to_dense_coo.cpp
+    test_sparse_to_dense_csc.cpp
+    test_sparse_to_dense_csr.cpp
+    test_spgemm_csr.cpp
+    test_spgemmreuse_csr.cpp
+    test_spmat_descr.cpp
+    test_spmm_batched_coo.cpp
+    test_spmm_batched_csc.cpp
+    test_spmm_batched_csr.cpp
+    test_spmm_bell.cpp
+    test_spmm_bsr.cpp
+    test_spmm_coo.cpp
+    test_spmm_csc.cpp
+    test_spmm_csr.cpp
+    test_spmv_coo.cpp
+    test_spmv_coo_aos.cpp
+    test_spmv_csr.cpp
+    test_spmv_csr_reuse_descr.cpp
+    test_spmv_sell.cpp
+    test_spsm_coo.cpp
+    test_spsm_csr.cpp
+    test_spsv_coo.cpp
+    test_spsv_csr.cpp
+    test_spvec_descr.cpp
+    test_spvv.cpp
+)
+
+set(HIPSPARSE_TEST_YAML_INCLUDE cuda/13/hipsparse_test.yaml)
+
+set(HIPSPARSE_TEST_YAMLS
+    # Generic
+    cuda/13/test_axpby.yaml
+    cuda/13/test_dense_to_sparse_coo.yaml
+    cuda/13/test_dense_to_sparse_csc.yaml
+    cuda/13/test_dense_to_sparse_csr.yaml
+    cuda/13/test_gather.yaml
+    cuda/13/test_rot.yaml
+    cuda/13/test_scatter.yaml
+    cuda/13/test_sddmm_coo.yaml
+    cuda/13/test_sddmm_coo_aos.yaml
+    cuda/13/test_sddmm_csc.yaml
+    cuda/13/test_sddmm_csr.yaml
+    cuda/13/test_sparse_to_dense_coo.yaml
+    cuda/13/test_sparse_to_dense_csc.yaml
+    cuda/13/test_sparse_to_dense_csr.yaml
+    cuda/13/test_spgemm_csr.yaml
+    cuda/13/test_spgemmreuse_csr.yaml
+    cuda/13/test_spmm_batched_coo.yaml
+    cuda/13/test_spmm_batched_csc.yaml
+    cuda/13/test_spmm_batched_csr.yaml
+    cuda/13/test_spmm_bsr.yaml
+    cuda/13/test_spmm_coo.yaml
+    cuda/13/test_spmm_csc.yaml
+    cuda/13/test_spmm_csr.yaml
+    cuda/13/test_spmv_coo.yaml
+    cuda/13/test_spmv_coo_aos.yaml
+    cuda/13/test_spmv_csr.yaml
+    cuda/13/test_spmv_csr_reuse_descr.yaml
+    cuda/13/test_spmv_sell.yaml
+    cuda/13/test_spsm_coo.yaml
+    cuda/13/test_spsm_csr.yaml
+    cuda/13/test_spsv_coo.yaml
+    cuda/13/test_spsv_csr.yaml
+    cuda/13/test_spvv.yaml)
