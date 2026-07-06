@@ -1,17 +1,24 @@
 # Copyright Advanced Micro Devices, Inc.
 # SPDX-License-Identifier: MIT
 
-# Multi-Arch CI Host ASAN for rocm-libraries
+# Multi-Arch CI ASAN for rocm-libraries
 #
-# This workflow runs host Address Sanitizer (ASAN) builds and tests
-# using TheRock's multi-arch CI pipeline.
+# This workflow runs Address Sanitizer (ASAN) builds and tests using
+# TheRock's multi-arch CI pipeline.
+#
+# TheRock's configure_multi_arch_ci.py automatically selects:
+# - "host-asan" for push events (post-submit) - faster, host-only sanitization
+# - "asan" (full) for schedule/workflow_dispatch - comprehensive sanitization
 
 name: TheRock Multi-Arch CI ASAN
 
 on:
-  push:
-    branches:
-      - develop
+  schedule:
+    - cron: "0 7 * * *" # Runs nightly at 7 AM UTC
+  # TODO: Enable postsubmit ASAN once we have capacity
+  # push:
+  #   branches:
+  #     - develop
   workflow_dispatch:
     inputs:
       linux_amdgpu_families:
@@ -40,15 +47,20 @@ concurrency:
 
 jobs:
   setup:
-    uses: ROCm/TheRock/.github/workflows/setup_multi_arch.yml@685f8c3b89006309b34a7c16de17e841400f0d76 # 2026-05-29 commit
+    uses: ROCm/TheRock/.github/workflows/setup_multi_arch.yml@main
     with:
-      build_variant: "host-asan"
+      # TheRock's configure_multi_arch_ci.py automatically selects:
+      # - "host-asan" for push events (post-submit)
+      # - "asan" (full) for schedule and workflow_dispatch events
+      build_variant: "asan"
+      # targets gfx94X and gfx950 are selected to replicate the ASAN coverage in TheRock
+      # as ASAN builds and tests require more resources, we only target these two architectures for the timebeing.
       linux_amdgpu_families: ${{ inputs.linux_amdgpu_families || 'gfx94X,gfx950' }}
       linux_test_labels: ${{ inputs.linux_test_labels || '' }}
       prebuilt_stages: ${{ inputs.prebuilt_stages || '' }}
       baseline_run_id: ${{ inputs.baseline_run_id || '' }}
       repository: ROCm/TheRock
-      ref: "685f8c3b89006309b34a7c16de17e841400f0d76" # 2026-05-29 commit
+      ref: main
       external_repo: '{"repository":"${{ github.repository }}","ref":"${{ github.sha }}"}'
 
   linux_build_and_test:
@@ -59,7 +71,7 @@ jobs:
         needs.setup.outputs.linux_build_config != '' &&
         needs.setup.outputs.enable_build_jobs == 'true'
       }}
-    uses: ROCm/TheRock/.github/workflows/multi_arch_ci_linux.yml@685f8c3b89006309b34a7c16de17e841400f0d76 # 2026-05-29 commit
+    uses: ROCm/TheRock/.github/workflows/multi_arch_ci_linux.yml@main
     secrets: inherit
     with:
       build_config: ${{ needs.setup.outputs.linux_build_config }}
@@ -68,7 +80,7 @@ jobs:
       test_type: ${{ needs.setup.outputs.test_type }}
       external_repo_config: ${{ needs.setup.outputs.external_repo_config }}
       repository: ROCm/TheRock
-      ref: "685f8c3b89006309b34a7c16de17e841400f0d76" # 2026-05-29 commit
+      ref: main
     permissions:
       contents: read
       id-token: write
@@ -85,7 +97,7 @@ jobs:
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
         with:
           repository: "ROCm/TheRock"
-          ref: "685f8c3b89006309b34a7c16de17e841400f0d76" # 2026-05-29 commit
+          ref: main
           sparse-checkout: build_tools/github_actions
           sparse-checkout-cone-mode: true
 
