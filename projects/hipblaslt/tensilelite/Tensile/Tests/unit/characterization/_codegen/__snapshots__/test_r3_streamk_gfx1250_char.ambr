@@ -2,15 +2,15 @@
 # name: test_r3_streamk_gfx1250_golden
   list([
     dict({
-      'basename': 'Cijk_Alik_Bljk_F8SS_MXAE8B32_MXBE8B32_BH_UserArgEEY8swR5v0BqZyCWOlKElyH3XYWa-f5oSPXI-1hyIsY=',
+      'basename': 'Cijk_Alik_Bljk_F8SS_MXAE8B32_MXBE8B32_BH_UserArgEmOM0v41nWIi9_fqYxOGn1Wi08XGtH46kvuMoFXXaHo=',
       'err': 0,
     }),
     dict({
-      'basename': 'Cijk_Alik_Bljk_F8SS_MXAE8B32_MXBE8B32_BH_UserArgLD8TVn1wca35X7YmnbmoNeSXiAlYyRwg6Dhia4Z0jbU=',
+      'basename': 'Cijk_Alik_Bljk_F8SS_MXAE8B32_MXBE8B32_BH_UserArgb_EOWDXfijfh6bYbTYaJuyE_75_v4n56-ams0hwB4yU=',
       'err': 0,
     }),
     dict({
-      'basename': 'Cijk_Alik_Bljk_F8SS_MXAE8B32_MXBE8B32_BH_UserArgdqeRhw0l0HEe0zoUoJmd3Cb6CW6bnlriNYqB5jWHhAM=',
+      'basename': 'Cijk_Alik_Bljk_F8SS_MXAE8B32_MXBE8B32_BH_UserArggBwDqV7O86XGb-L-gEuvSORTA0Mk07zfVgZU-uKS4UM=',
       'err': 0,
     }),
   ])
