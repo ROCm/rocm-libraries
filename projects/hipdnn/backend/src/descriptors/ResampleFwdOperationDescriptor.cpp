@@ -133,11 +133,12 @@ void ResampleFwdOperationDescriptor::setAttribute(hipdnnBackendAttributeName_t a
                        "ResampleFwdOperationDescriptor::setAttribute()");
         break;
     case HIPDNN_ATTR_RESAMPLE_GENERATE_INDEX_EXT:
-        setOptionalScalar<HIPDNN_TYPE_BOOLEAN>(_data.generate_index,
-                                               attributeType,
-                                               elementCount,
-                                               arrayOfElements,
-                                               "ResampleFwdOperationDescriptor::setAttribute()");
+        setScalar(_data.generate_index,
+                  HIPDNN_TYPE_BOOLEAN,
+                  attributeType,
+                  elementCount,
+                  arrayOfElements,
+                  "ResampleFwdOperationDescriptor::setAttribute()");
         break;
     case HIPDNN_ATTR_RESAMPLE_COMP_TYPE:
         setDataType(_computeDataType,
@@ -253,12 +254,13 @@ void ResampleFwdOperationDescriptor::getAttribute(hipdnnBackendAttributeName_t a
                        "ResampleFwdOperationDescriptor::getAttribute()");
         break;
     case HIPDNN_ATTR_RESAMPLE_GENERATE_INDEX_EXT:
-        getOptionalScalar<HIPDNN_TYPE_BOOLEAN>(_data.generate_index,
-                                               attributeType,
-                                               requestedElementCount,
-                                               elementCount,
-                                               arrayOfElements,
-                                               "ResampleFwdOperationDescriptor::getAttribute()");
+        getScalar(_data.generate_index,
+                  HIPDNN_TYPE_BOOLEAN,
+                  attributeType,
+                  requestedElementCount,
+                  elementCount,
+                  arrayOfElements,
+                  "ResampleFwdOperationDescriptor::getAttribute()");
         break;
     case HIPDNN_ATTR_RESAMPLE_COMP_TYPE:
         getDataType(_computeDataType,
@@ -336,9 +338,7 @@ std::string ResampleFwdOperationDescriptor::toString() const
     str += ", window=" + vecToString(_data.window);
     str += ", resample_mode=" + std::to_string(static_cast<int>(_data.resample_mode));
     str += ", padding_mode=" + std::to_string(static_cast<int>(_data.padding_mode));
-    str += ", generate_index="
-           + (_data.generate_index ? std::to_string(static_cast<int>(*_data.generate_index))
-                                   : "nullopt");
+    str += ", generate_index=" + std::to_string(static_cast<int>(_data.generate_index));
     str += ", compute_data_type=";
     str += hipdnn_flatbuffers_sdk::data_objects::EnumNameDataType(_computeDataType);
     str += '}';

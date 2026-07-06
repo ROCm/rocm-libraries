@@ -112,16 +112,13 @@ TEST(TestResampleFwdAttributes, GenerateIndex)
 {
     hipdnn_frontend::graph::ResampleFwdAttributes resampleFwdAttributes;
 
-    EXPECT_FALSE(resampleFwdAttributes.get_generate_index().has_value());
+    EXPECT_FALSE(resampleFwdAttributes.get_generate_index());
 
     resampleFwdAttributes.set_generate_index(true);
-    ASSERT_TRUE(resampleFwdAttributes.get_generate_index().has_value());
-
-    resampleFwdAttributes.set_generate_index(true);
-    EXPECT_TRUE(resampleFwdAttributes.get_generate_index().value());
+    EXPECT_TRUE(resampleFwdAttributes.get_generate_index());
 
     resampleFwdAttributes.set_generate_index(false);
-    EXPECT_FALSE(resampleFwdAttributes.get_generate_index().value());
+    EXPECT_FALSE(resampleFwdAttributes.get_generate_index());
 }
 
 TEST(TestResampleFwdAttributes, Window)

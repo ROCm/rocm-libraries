@@ -2748,8 +2748,7 @@ inline flatbuffers::FlatBufferBuilder createValidReductionGraph()
     return builder;
 }
 
-inline flatbuffers::FlatBufferBuilder createValidResampleFwdGraph(std::optional<bool> generateIndex
-                                                                  = std::nullopt)
+inline flatbuffers::FlatBufferBuilder createValidResampleFwdGraph(bool generateIndex = false)
 {
     flatbuffers::FlatBufferBuilder builder;
     std::vector<::flatbuffers::Offset<hipdnn_flatbuffers_sdk::data_objects::TensorAttributes>>
@@ -2765,7 +2764,7 @@ inline flatbuffers::FlatBufferBuilder createValidResampleFwdGraph(std::optional<
     tensorAttributes.push_back(hipdnn_flatbuffers_sdk::data_objects::CreateTensorAttributesDirect(
         builder, 2, "y", hipdnn_flatbuffers_sdk::data_objects::DataType::FLOAT, &yStrides, &yDims));
     ::flatbuffers::Optional<int64_t> indexTensorUid = ::flatbuffers::nullopt;
-    if(generateIndex.has_value() && generateIndex.value())
+    if(generateIndex)
     {
         indexTensorUid = 3;
         tensorAttributes.push_back(

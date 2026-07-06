@@ -26,10 +26,7 @@ inline void to_json(nlohmann::json& j, const ResampleFwdAttributes& attr)
     j["window"] = attr.window();
     j["resample_mode"] = attr.resample_mode();
     j["padding_mode"] = attr.padding_mode();
-    if(attr.generate_index().has_value())
-    {
-        j["generate_index"] = attr.generate_index().value();
-    }
+    j["generate_index"] = attr.generate_index();
 }
 
 }
@@ -52,9 +49,8 @@ inline auto to<data_objects::ResampleFwdAttributes>(flatbuffers::FlatBufferBuild
     auto window = builder.CreateVector(entry.at("window").get<std::vector<int64_t>>());
     auto resampleMode = entry.at("resample_mode").get<data_objects::ResampleMode>();
     auto paddingMode = entry.at("padding_mode").get<data_objects::PaddingMode>();
-    auto generateIndex = entry.contains("generate_index")
-                             ? ::flatbuffers::Optional<bool>(entry.at("generate_index").get<bool>())
-                             : ::flatbuffers::nullopt;
+    auto generateIndex
+        = entry.contains("generate_index") ? entry.at("generate_index").get<bool>() : false;
 
     return data_objects::CreateResampleFwdAttributes(builder,
                                                      xUid,

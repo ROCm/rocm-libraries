@@ -89,14 +89,11 @@ inline Error createResampleFwdOperation(
                                                    *paddingMode,
                                                    "padding mode"));
     }
-    if(attributes.get_generate_index().has_value())
-    {
-        HIPDNN_CHECK_ERROR(setDescriptorAttrScalar(opDesc.get(),
-                                                   HIPDNN_ATTR_RESAMPLE_GENERATE_INDEX_EXT,
-                                                   HIPDNN_TYPE_BOOLEAN,
-                                                   *attributes.get_generate_index(),
-                                                   "resample generate_index"));
-    }
+    HIPDNN_CHECK_ERROR(setDescriptorAttrScalar(opDesc.get(),
+                                               HIPDNN_ATTR_RESAMPLE_GENERATE_INDEX_EXT,
+                                               HIPDNN_TYPE_BOOLEAN,
+                                               attributes.get_generate_index(),
+                                               "resample generate_index"));
 
     HIPDNN_CHECK_ERROR(setDescriptorAttrDataType(opDesc.get(),
                                                  HIPDNN_ATTR_RESAMPLE_COMP_TYPE,
