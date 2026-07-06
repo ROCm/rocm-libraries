@@ -7,12 +7,15 @@
 #include "data_generation_utils.hpp"
 
 #include <cmath>
+#include <cstring>
 #include <limits>
+#include <optional>
 #include <random>
 #include <string>
 #include <thread>
 #include <type_traits>
 #include <variant>
+#include <algorithm>
 
 // `<bit>` provides std::endian (C++20). Used by read_data_bits_le's
 // little-endian static_assert. Guarded so this header still compiles
@@ -253,6 +256,35 @@ namespace DGen
         return s;
     }
 
+    inline bool dataInitModesEqual(DataInitMode const& a, DataInitMode const& b)
+    {
+        return toString(a) == toString(b);
+    }
+
+    inline bool isRandomLikeDataInitMode(DataInitMode const& mode)
+    {
+        return std::holds_alternative<Bounded>(mode) || std::holds_alternative<BoundedAlternatingSign>(mode)
+               || std::holds_alternative<Unbounded>(mode) || std::holds_alternative<NormalFromFloat>(mode)
+               || std::holds_alternative<RandInt>(mode);
+    }
+
+    inline bool isConstantScaleInitMode(DataInitMode const& mode)
+    {
+        return std::holds_alternative<Ones>(mode) || std::holds_alternative<Zeros>(mode)
+               || std::holds_alternative<Twos>(mode) || std::holds_alternative<NegOnes>(mode)
+               || std::holds_alternative<MaxVals>(mode) || std::holds_alternative<DenormMins>(mode)
+               || std::holds_alternative<DenormMaxs>(mode) || std::holds_alternative<NaNs>(mode)
+               || std::holds_alternative<Infs>(mode);
+    }
+
+    // Phase 1: random-like data init + constant scale init (e.g. Bounded + Ones).
+    inline bool canDecoupleScaleInit(DataInitMode const& dataMode, DataInitMode const& scaleMode)
+    {
+        if(dataInitModesEqual(dataMode, scaleMode))
+            return true;
+        return isRandomLikeDataInitMode(dataMode) && isConstantScaleInitMode(scaleMode);
+    }
+
     enum DataScaling
     {
         Mean
@@ -267,6 +299,10 @@ namespace DGen
         bool forceDenorm = true;
 
         DataInitMode initMode = Bounded{};
+
+        // When set and different from initMode, scale bytes are filled from this
+        // mode and data blocks are re-quantized (random-like data + constant scale).
+        std::optional<DataInitMode> scaleInitMode;
 
         double min = -1.0;
         double max = 1.0;
@@ -372,6 +408,10 @@ namespace DGen
         void post_sprinkle(const std::vector<index_t>& size, int32_t unbiased_min_exp);
 
         void setGenerator(int numThreads);
+
+        void fillScaleTemplateBytes(DataInitMode const& scaleMode, std::vector<uint8_t>& s_template);
+
+        void apply_decoupled_scale_init(DataInitMode const& scaleMode);
     };
 
     // Helpers for easy visiting of DataInitMode
@@ -545,7 +585,149 @@ namespace DGen
 
         dispatch_generate_data(sorted_size, sorted_stride);
 
+        DataInitMode const effectiveScaleMode
+            = m_options.scaleInitMode.value_or(m_options.initMode);
+        if constexpr(isScaled<DTYPE>())
+        {
+            if(!dataInitModesEqual(effectiveScaleMode, m_options.initMode)
+               && canDecoupleScaleInit(m_options.initMode, effectiveScaleMode))
+            {
+                apply_decoupled_scale_init(effectiveScaleMode);
+            }
+        }
+
         return *this;
+    }
+
+    template <typename DTYPE>
+    void DataGenerator<DTYPE>::fillScaleTemplateBytes(DataInitMode const& scaleMode,
+                                                    std::vector<uint8_t>& s_template)
+    {
+        std::vector<uint8_t> d_dummy(m_dataDesc.byte_size, 0x00);
+        std::fill(s_template.begin(), s_template.end(), 0x00);
+
+        auto setScaleFromValue = [&](double value) {
+            if constexpr(isScaled<DTYPE>())
+            {
+                using scaleInfo = scale_info_t<DTYPE>;
+                if constexpr(hasFullRangeScale<DTYPE>())
+                {
+                    const auto scale_candidates = enumerateFiniteNonzeroScaleBytes<scaleInfo>();
+                    s_template[0] = nearestFiniteScaleByte<scaleInfo>(
+                        std::abs(value), scale_candidates);
+                }
+                else
+                {
+                    const int exp = static_cast<int>(std::round(std::log2(std::abs(value))));
+                    s_template[0] = static_cast<uint8_t>(exp + getScaleBias<DTYPE>());
+                }
+            }
+        };
+
+        std::visit(overload{[&](const Ones&) {
+                                setOne<DTYPE>(s_template.data(),
+                                              d_dummy.data(),
+                                              0,
+                                              0,
+                                              m_options.forceDenorm);
+                            },
+                            [&](const Zeros&) {},
+                            [&](const Twos&) { setScaleFromValue(2.0); },
+                            [&](const NegOnes&) { setScaleFromValue(1.0); },
+                            [&](const MaxVals&) {
+                                if constexpr(isScaled<DTYPE>())
+                                {
+                                    using scaleInfo = scale_info_t<DTYPE>;
+                                    const auto scale_candidates
+                                        = enumerateFiniteNonzeroScaleBytes<scaleInfo>();
+                                    if(!scale_candidates.empty())
+                                    {
+                                        s_template[0] = *std::max_element(
+                                            scale_candidates.begin(),
+                                            scale_candidates.end(),
+                                            [](uint8_t a, uint8_t b) {
+                                                return getScaleValue<scaleInfo>(a)
+                                                       < getScaleValue<scaleInfo>(b);
+                                            });
+                                    }
+                                }
+                            },
+                            [&](const DenormMins&) { setScaleFromValue(1.0); },
+                            [&](const DenormMaxs&) { setScaleFromValue(1.0); },
+                            [&](const NaNs&) {
+                                setNaN<DTYPE>(
+                                    s_template.data(), d_dummy.data(), 0, 0);
+                            },
+                            [&](const Infs&) {
+                                if constexpr(DTYPE::dataInfo.hasInf)
+                                {
+                                    setOne<DTYPE>(s_template.data(),
+                                                  d_dummy.data(),
+                                                  0,
+                                                  0,
+                                                  /*subNormal=*/false);
+                                    setInf<DTYPE>(
+                                        s_template.data(), d_dummy.data(), 0, 0);
+                                }
+                            },
+                            [&](const auto&) {
+                                throw std::invalid_argument(
+                                    "DataGenerator::fillScaleTemplateBytes: unsupported "
+                                    "scale init mode for decoupled generation");
+                            }},
+                   scaleMode);
+    }
+
+    template <typename DTYPE>
+    void DataGenerator<DTYPE>::apply_decoupled_scale_init(DataInitMode const& scaleMode)
+    {
+        const auto           refFloats  = getReferenceFloat();
+        const index_t        block_size = m_options.blockScaling;
+        std::vector<uint8_t> s_template(m_scaleDesc.byte_size, 0x00);
+        fillScaleTemplateBytes(scaleMode, s_template);
+
+        using scaleInfo = scale_info_t<DTYPE>;
+        const double scaleValue = getScaleValue<scaleInfo>(s_template[0]);
+        const bool   scaleIsNan = std::isnan(scaleValue);
+
+#pragma omp parallel for num_threads(m_num_threads)
+        for(index_t scale_i = 0; scale_i < m_scaleDesc.array_size; scale_i++)
+        {
+            std::memcpy(&m_scaleBytes[scale_i * m_scaleDesc.byte_size],
+                        s_template.data(),
+                        m_scaleDesc.byte_size);
+
+            for(index_t block_i = 0; block_i < block_size; block_i++)
+            {
+                const index_t data_i = scale_i * block_size + block_i;
+                const float   ref    = refFloats[static_cast<size_t>(data_i)];
+
+                if(scaleIsNan || std::isnan(ref))
+                {
+                    setNaN<DTYPE>(
+                        m_scaleBytes.data(), m_dataBytes.data(), scale_i, data_i);
+                }
+                else if(std::isinf(ref))
+                {
+                    if constexpr(DTYPE::dataInfo.hasInf)
+                        setInf<DTYPE>(
+                            m_scaleBytes.data(), m_dataBytes.data(), scale_i, data_i);
+                }
+                else if(ref == 0.0f || scaleValue == 0.0)
+                {
+                    setZero<DTYPE>(
+                        m_scaleBytes.data(), m_dataBytes.data(), scale_i, data_i);
+                }
+                else
+                {
+                    const uint64_t result = satConvertToType<DTYPE>(
+                        ref / static_cast<float>(scaleValue));
+                    std::memcpy(&m_dataBytes[data_i * m_dataDesc.byte_size],
+                                &result,
+                                m_dataDesc.byte_size);
+                }
+            }
+        }
     }
 
     template <typename DTYPE>

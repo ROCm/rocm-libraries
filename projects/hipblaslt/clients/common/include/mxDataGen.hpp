@@ -41,17 +41,18 @@ enum class MXInitDevice
     Gpu = 1,
 };
 
-// Scale tensor memory layout left in the `scale` buffer.
-//   kNone    : natural mxDataGenerator layout (no swizzle).
-//   kGFX950  : preSwizzleScalesGFX950 layout for gfx950 subtile kernels.
-//   kGFX1250 : preSwizzleScalesGFX1250 (dimk) layout for gfx1250 +
-//              non-rocroller WMMA kernels.
+// Post-generation scale tensor memory layout.
 enum class MXScaleLayout
 {
     kNone    = 0,
     kGFX950  = 1,
     kGFX1250 = 2,
 };
+
+#include <string_view>
+
+// Default MX scale layout for a device architecture name (tensilelite client).
+MXScaleLayout mxScaleLayoutForArchName(std::string_view archName);
 
 #if HIPBLASLT_ENABLE_MXDATAGENERATOR
 
@@ -61,8 +62,10 @@ enum class MXScaleLayout
 #include <hipblaslt/hipblaslt-types.h>
 #include <stdint.h>
 
-#include <string_view>
 #include <vector>
+
+// Maps a block-scaling format and the active device to the scale swizzle layout.
+MXScaleLayout mxScaleLayoutForFormat(int scalingFormat);
 
 // `scaleLayout` selects the post-generation scale memory layout. `initDevice`
 // selects the host vs device PRNG path; with MXInitDevice::Gpu, data/scale
@@ -82,6 +85,7 @@ std::vector<float> generateMXInput(hipDataType            dataType,
                                    std::string_view const initMethod  = "Bounded",
                                    float                  min_val     = -1.0f,
                                    float                  max_val     = 1.0f,
-                                   MXInitDevice           initDevice  = MXInitDevice::Cpu);
+                                   MXInitDevice           initDevice  = MXInitDevice::Cpu,
+                                   std::string_view const scaleInitMethod = "");
 
 #endif

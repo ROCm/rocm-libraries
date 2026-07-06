@@ -535,11 +535,6 @@ typename std::enable_if<!std::is_same<int8_t, T>::value, T>::type saturate_cast(
 std::vector<void*> benchmark_allocation();
 int32_t            hipblaslt_get_arch();
 int32_t            hipblaslt_get_arch_major();
-// Returns true iff the currently active HIP device reports a gfx1250-family
-// architecture. Uses a string prefix match because hipblaslt_get_arch_major()
-// can't distinguish gfx1250 from gfx1200/gfx1201 (both return 12). Returns
-// false on any HIP error so callers can use it as a safe fallback flag.
-bool hipblaslt_is_gfx1250();
 void hipblaslt_print_version();
 
 /* ==================================================================== */

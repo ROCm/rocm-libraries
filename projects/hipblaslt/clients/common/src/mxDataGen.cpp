@@ -26,6 +26,7 @@
 
 #include "mxDataGen.hpp"
 #include <hip/hip_runtime.h>
+#include <hipblaslt_datatype2string.hpp>
 #include <mxDataGenerator/DataGenerator.hpp>
 #include <mxDataGenerator/DataGeneratorGPU.hpp>
 #include <mxDataGenerator/PreSwizzle.hpp>
@@ -77,6 +78,94 @@ namespace
         default:
             return 1.0;
         }
+    }
+} // namespace
+
+namespace
+{
+    using namespace DGen;
+
+    void applyInitMethodString(DataGeneratorOptions&  opt,
+                               std::string_view const initMethod,
+                               hipDataType            dataType,
+                               float                  min_val,
+                               float                  max_val)
+    {
+        opt.min         = initMethod == "uniform_01" ? 0. : (initMethod == "hpl" ? -.5 : min_val);
+        opt.max         = initMethod == "uniform_01" ? 1. : (initMethod == "hpl" ? .5 : max_val);
+        opt.forceDenorm = false;
+
+        if(initMethod == "Sequential")
+            opt.initMode = DataInitMode(Sequential{});
+        else if(initMethod == "RowIndex")
+            opt.initMode = DataInitMode(RowIndex{});
+        else if(initMethod == "ColIndex")
+            opt.initMode = DataInitMode(ColIndex{});
+        else if(initMethod == "Checkerboard")
+            opt.initMode = DataInitMode(Checkerboard{});
+        else if(initMethod == "ScaledDiagonal")
+            opt.initMode = DataInitMode(ScaledDiagonal{});
+        else if(initMethod == "Identity")
+            opt.initMode = DataInitMode(Identity{});
+        else if(initMethod == "Ones")
+            opt.initMode = DataInitMode(Ones{});
+        else if(initMethod == "Zeros" || initMethod == "zero")
+            opt.initMode = DataInitMode(Zeros{});
+        else if(initMethod == "Twos")
+            opt.initMode = DataInitMode(Twos{});
+        else if(initMethod == "NegOnes")
+            opt.initMode = DataInitMode(NegOnes{});
+        else if(initMethod == "MaxVals")
+            opt.initMode = DataInitMode(MaxVals{});
+        else if(initMethod == "DenormMins")
+            opt.initMode = DataInitMode(DenormMins{});
+        else if(initMethod == "DenormMaxs")
+            opt.initMode = DataInitMode(DenormMaxs{});
+        else if(initMethod == "NaNs")
+            opt.initMode = DataInitMode(NaNs{});
+        else if(initMethod == "Infs")
+            opt.initMode = DataInitMode(Infs{});
+        else if(initMethod == "Bounded" || initMethod == "uniform_01" || initMethod == "hpl")
+            opt.initMode = DataInitMode(Bounded{});
+        else if(initMethod == "uniform_low_precision")
+        {
+            opt.min      = -kFP4E2M1Max;
+            opt.max      = kFP4E2M1Max;
+            opt.initMode = DataInitMode(Bounded{});
+        }
+        else if(initMethod == "TrigonometricFromFloat" || initMethod == "trig_float")
+            opt.initMode = DataInitMode(TrigonometricFromFloat{});
+        else if(initMethod == "norm_dist")
+            opt.initMode = DataInitMode(NormalFromFloat{0.0, normDistStdDevFor(dataType)});
+        else if(initMethod == "rand_int")
+        {
+            auto const range = randIntRangeFor(dataType);
+            opt.initMode     = DataInitMode(RandInt{range.first, range.second});
+        }
+        else
+            throw std::runtime_error(
+                std::string("generateMXInput: unsupported initMethod '")
+                + std::string(initMethod)
+                + "'. Supported methods: Bounded/uniform_01, hpl, "
+                  "uniform_low_precision, "
+                  "TrigonometricFromFloat/trig_float, norm_dist, rand_int, "
+                  "Sequential, RowIndex, ColIndex, Checkerboard, ScaledDiagonal, "
+                  "Identity, Ones, Zeros/zero, Twos, NegOnes, MaxVals, "
+                  "DenormMins, DenormMaxs, NaNs, Infs.");
+    }
+
+    void applyScaleInitMethodString(DataGeneratorOptions&  opt,
+                                    std::string_view const scaleInitMethod,
+                                    hipDataType            dataType)
+    {
+        if(scaleInitMethod.empty())
+            return;
+
+        DataGeneratorOptions scaleOpt;
+        applyInitMethodString(scaleOpt, scaleInitMethod, dataType, -1.0f, 1.0f);
+        if(!canDecoupleScaleInit(opt.initMode, scaleOpt.initMode))
+            return;
+        opt.scaleInitMode = scaleOpt.initMode;
     }
 } // namespace
 
@@ -392,82 +481,15 @@ static std::vector<float> generateMXInputCpu(hipDataType            dataType,
                                              MXScaleLayout          scaleLayout,
                                              std::string_view const initMethod,
                                              float                  min_val,
-                                             float                  max_val)
+                                             float                  max_val,
+                                             std::string_view const scaleInitMethod)
 {
     using namespace DGen;
 
     DataGeneratorOptions opt;
-    opt.min          = initMethod == "uniform_01" ? 0. : (initMethod == "hpl" ? -.5 : min_val);
-    opt.max          = initMethod == "uniform_01" ? 1. : (initMethod == "hpl" ? .5 : max_val);
     opt.blockScaling = scaleBlockRowSize * scaleBlockColSize;
-    opt.forceDenorm  = false;
-
-    // Map string initMethod to DataInitMode
-    if(initMethod == "Sequential")
-        opt.initMode = DataInitMode(Sequential{});
-    else if(initMethod == "RowIndex")
-        opt.initMode = DataInitMode(RowIndex{});
-    else if(initMethod == "ColIndex")
-        opt.initMode = DataInitMode(ColIndex{});
-    else if(initMethod == "Checkerboard")
-        opt.initMode = DataInitMode(Checkerboard{});
-    else if(initMethod == "ScaledDiagonal")
-        opt.initMode = DataInitMode(ScaledDiagonal{});
-    else if(initMethod == "Identity")
-        opt.initMode = DataInitMode(Identity{});
-    else if(initMethod == "Ones")
-        opt.initMode = DataInitMode(Ones{});
-    else if(initMethod == "Zeros" || initMethod == "zero")
-        opt.initMode = DataInitMode(Zeros{});
-    else if(initMethod == "Twos")
-        opt.initMode = DataInitMode(Twos{});
-    else if(initMethod == "NegOnes")
-        opt.initMode = DataInitMode(NegOnes{});
-    else if(initMethod == "MaxVals")
-        opt.initMode = DataInitMode(MaxVals{});
-    else if(initMethod == "DenormMins")
-        opt.initMode = DataInitMode(DenormMins{});
-    else if(initMethod == "DenormMaxs")
-        opt.initMode = DataInitMode(DenormMaxs{});
-    else if(initMethod == "NaNs")
-        opt.initMode = DataInitMode(NaNs{});
-    else if(initMethod == "Infs")
-        opt.initMode = DataInitMode(Infs{});
-    else if(initMethod == "Bounded" || initMethod == "uniform_01" || initMethod == "hpl")
-        // "hpl" reuses the {-0.5, 0.5} min/max already overridden above; PRNG
-        // bytes won't match the legacy random_hpl path, only the distribution.
-        opt.initMode = DataInitMode(Bounded{});
-    else if(initMethod == "uniform_low_precision")
-    {
-        // Uniform random in [-6, 6] (full FP4 E2M1 range). UE8M0 scales can
-        // represent the resulting per-block exponents (log2(6) ≈ 2.6 fits
-        // well inside UE8M0's [-127, 127] unbiased-exponent range), so no
-        // scale-dtype guard is needed here.
-        opt.min      = -kFP4E2M1Max;
-        opt.max      = kFP4E2M1Max;
-        opt.initMode = DataInitMode(Bounded{});
-    }
-    else if(initMethod == "TrigonometricFromFloat" || initMethod == "trig_float")
-        opt.initMode = DataInitMode(TrigonometricFromFloat{});
-    else if(initMethod == "norm_dist")
-        opt.initMode = DataInitMode(NormalFromFloat{0.0, normDistStdDevFor(dataType)});
-    else if(initMethod == "rand_int")
-    {
-        auto const range = randIntRangeFor(dataType);
-        opt.initMode     = DataInitMode(RandInt{range.first, range.second});
-    }
-    else
-        // Throw rather than fall through so unsupported modes (special,
-        // integer_exact, ...) surface as test misconfiguration.
-        throw std::runtime_error(
-            std::string("generateMXInput: unsupported initMethod '")
-            + std::string(initMethod)
-            + "'. Supported methods: Bounded/uniform_01, hpl, "
-              "uniform_low_precision, "
-              "TrigonometricFromFloat/trig_float, norm_dist, rand_int, "
-              "Sequential, RowIndex, ColIndex, Checkerboard, ScaledDiagonal, "
-              "Identity, Ones, Zeros/zero, Twos, NegOnes, MaxVals, "
-              "DenormMins, DenormMaxs, NaNs, Infs.");
+    applyInitMethodString(opt, initMethod, dataType, min_val, max_val);
+    applyScaleInitMethodString(opt, scaleInitMethod, dataType);
 
     const uint32_t seed = 1713573849;
 
@@ -751,10 +773,14 @@ std::vector<float> generateMXInput(hipDataType            dataType,
                                    std::string_view const initMethod,
                                    float                  min_val,
                                    float                  max_val,
-                                   MXInitDevice           initDevice)
+                                   MXInitDevice           initDevice,
+                                   std::string_view const scaleInitMethod)
 {
-    // CPU init: straight delegation to the host helper.
-    if(initDevice == MXInitDevice::Cpu)
+    bool const scaleInitDiffers
+        = !scaleInitMethod.empty() && scaleInitMethod != initMethod;
+
+    // CPU init, or GPU with decoupled scale init (GPU path lacks scale override).
+    if(initDevice == MXInitDevice::Cpu || scaleInitDiffers)
     {
         return generateMXInputCpu(dataType,
                                   scaleType,
@@ -770,7 +796,8 @@ std::vector<float> generateMXInput(hipDataType            dataType,
                                   scaleLayout,
                                   initMethod,
                                   min_val,
-                                  max_val);
+                                  max_val,
+                                  scaleInitMethod);
     }
 
     // GPU init fast path is wired for the layout combinations where the
@@ -797,89 +824,16 @@ std::vector<float> generateMXInput(hipDataType            dataType,
                                   scaleLayout,
                                   initMethod,
                                   min_val,
-                                  max_val);
+                                  max_val,
+                                  scaleInitMethod);
     }
 
-    // Build the same DataGeneratorOptions the host overload would build,
+  // Build the same DataGeneratorOptions the host overload would build,
     // then dispatch to a templated on-device generator.
     DGen::DataGeneratorOptions opt;
-    opt.min          = initMethod == "uniform_01"
-                           ? 0.
-                           : (initMethod == "hpl" ? -.5 : min_val);
-    opt.max          = initMethod == "uniform_01"
-                           ? 1.
-                           : (initMethod == "hpl" ? .5 : max_val);
     opt.blockScaling = scaleBlockRowSize * scaleBlockColSize;
-    opt.forceDenorm  = false;
-    if(initMethod == "Sequential")
-        opt.initMode = DGen::DataInitMode(DGen::Sequential{});
-    else if(initMethod == "RowIndex")
-        opt.initMode = DGen::DataInitMode(DGen::RowIndex{});
-    else if(initMethod == "ColIndex")
-        opt.initMode = DGen::DataInitMode(DGen::ColIndex{});
-    else if(initMethod == "Checkerboard")
-        opt.initMode = DGen::DataInitMode(DGen::Checkerboard{});
-    else if(initMethod == "ScaledDiagonal")
-        opt.initMode = DGen::DataInitMode(DGen::ScaledDiagonal{});
-    else if(initMethod == "Identity")
-        opt.initMode = DGen::DataInitMode(DGen::Identity{});
-    else if(initMethod == "Ones")
-        opt.initMode = DGen::DataInitMode(DGen::Ones{});
-    else if(initMethod == "Zeros" || initMethod == "zero")
-        opt.initMode = DGen::DataInitMode(DGen::Zeros{});
-    else if(initMethod == "Twos")
-        opt.initMode = DGen::DataInitMode(DGen::Twos{});
-    else if(initMethod == "NegOnes")
-        opt.initMode = DGen::DataInitMode(DGen::NegOnes{});
-    else if(initMethod == "MaxVals")
-        opt.initMode = DGen::DataInitMode(DGen::MaxVals{});
-    else if(initMethod == "DenormMins")
-        opt.initMode = DGen::DataInitMode(DGen::DenormMins{});
-    else if(initMethod == "DenormMaxs")
-        opt.initMode = DGen::DataInitMode(DGen::DenormMaxs{});
-    else if(initMethod == "NaNs")
-        opt.initMode = DGen::DataInitMode(DGen::NaNs{});
-    else if(initMethod == "Infs")
-        opt.initMode = DGen::DataInitMode(DGen::Infs{});
-    else if(initMethod == "Bounded" || initMethod == "uniform_01" || initMethod == "hpl")
-        // See note in the host overload above. min/max for "hpl" are
-        // already overridden to {-0.5, 0.5} a few lines above, so this
-        // dispatches Bounded over the same range as the legacy random_hpl.
-        opt.initMode = DGen::DataInitMode(DGen::Bounded{});
-    else if(initMethod == "uniform_low_precision")
-    {
-        // Uniform random in [-6, 6] (full FP4 E2M1 range). UE8M0 scales can
-        // represent the resulting per-block exponents (log2(6) ≈ 2.6 fits
-        // well inside UE8M0's [-127, 127] unbiased-exponent range), so no
-        // scale-dtype guard is needed here.
-        opt.min      = -kFP4E2M1Max;
-        opt.max      = kFP4E2M1Max;
-        opt.initMode = DGen::DataInitMode(DGen::Bounded{});
-    }
-    else if(initMethod == "TrigonometricFromFloat" || initMethod == "trig_float")
-        opt.initMode = DGen::DataInitMode(DGen::TrigonometricFromFloat{});
-    else if(initMethod == "norm_dist")
-        // See note in the host overload above; std_dev is per-DTYPE so FP4
-        // doesn't collapse most samples into the round-to-zero bin.
-        opt.initMode = DGen::DataInitMode(
-            DGen::NormalFromFloat{0.0, normDistStdDevFor(dataType)});
-    else if(initMethod == "rand_int")
-    {
-        auto const range = randIntRangeFor(dataType);
-        opt.initMode     = DGen::DataInitMode(DGen::RandInt{range.first, range.second});
-    }
-    else
-        // See note in the host overload above -- no silent fallback; throw
-        // on any unrecognised method so the misconfiguration is loud.
-        throw std::runtime_error(
-            std::string("generateMXInput (GPU): unsupported initMethod '")
-            + std::string(initMethod)
-            + "'. Supported methods: Bounded/uniform_01, hpl, "
-              "uniform_low_precision, "
-              "TrigonometricFromFloat/trig_float, norm_dist, rand_int, "
-              "Sequential, RowIndex, ColIndex, Checkerboard, ScaledDiagonal, "
-              "Identity, Ones, Zeros/zero, Twos, NegOnes, MaxVals, "
-              "DenormMins, DenormMaxs, NaNs, Infs.");
+    applyInitMethodString(opt, initMethod, dataType, min_val, max_val);
+    applyScaleInitMethodString(opt, scaleInitMethod, dataType);
 
     constexpr uint32_t               kSeed = 1713573849;
     std::vector<DGen::index_t> const sizes
@@ -912,4 +866,49 @@ std::vector<float> generateMXInput(hipDataType            dataType,
             data, scale, sizes, strides, opt, kSeed, elementsPerMXBlock, scaleLayout);
     }
     throw std::runtime_error("Unsupported data type in GPU MX data generation");
+}
+
+namespace
+{
+    bool archNameHasGfx1250Prefix(std::string_view archName)
+    {
+        constexpr char     kPrefix[]    = "gfx1250";
+        constexpr size_t   kPrefixLen   = sizeof(kPrefix) - 1;
+        if(archName.size() < kPrefixLen)
+            return false;
+        if(archName.compare(0, kPrefixLen, kPrefix) != 0)
+            return false;
+        return archName.size() == kPrefixLen || archName[kPrefixLen] == ':';
+    }
+
+    bool currentDeviceIsGfx1250()
+    {
+        static int const cached = []() {
+            int             deviceId = 0;
+            hipDeviceProp_t props{};
+            if(hipGetDevice(&deviceId) != hipSuccess)
+                return 0;
+            if(hipGetDeviceProperties(&props, deviceId) != hipSuccess)
+                return 0;
+            return archNameHasGfx1250Prefix(props.gcnArchName) ? 1 : 0;
+        }();
+        return cached != 0;
+    }
+} // namespace
+
+MXScaleLayout mxScaleLayoutForArchName(std::string_view archName)
+{
+    if(archName.find("gfx950") != std::string_view::npos)
+        return MXScaleLayout::kGFX950;
+    return MXScaleLayout::kGFX1250;
+}
+
+MXScaleLayout mxScaleLayoutForFormat(int scalingFormat)
+{
+    if(scalingFormat
+       == static_cast<int>(hipblaslt_scaling_format::Block_32_UE8M0_32_8_EXT))
+        return MXScaleLayout::kGFX950;
+    if(currentDeviceIsGfx1250())
+        return MXScaleLayout::kGFX1250;
+    return MXScaleLayout::kNone;
 }

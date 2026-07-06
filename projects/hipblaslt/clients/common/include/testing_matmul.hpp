@@ -2202,10 +2202,6 @@ void testing_matmul_with_bias(const Arguments& arg,
     // Calculating block count end
     matmul.resize(block_count, std::vector<hipblasLtMatmulDesc_t>(gemm_count));
 
-    // gfx1250 detection drives the dimk scale swizzle in generateMXInput; the
-    // arch is fixed for the process, so query it once outside the per-GEMM loop.
-    bool const isGfx1250Arch = hipblaslt_is_gfx1250();
-
     for(int i = 0; i < gemm_count; i++)
     {
         CHECK_HIPBLASLT_ERROR(
@@ -2758,8 +2754,6 @@ void testing_matmul_with_bias(const Arguments& arg,
         size_t scaleA_col = ((transA == HIPBLAS_OP_T) ? 1 : blockSize(arg.scaleA));
         if(isBlockScaling(arg.scaleA))
         {
-            // MX A always goes through mxDataGenerator; the only arch-dependent
-            // bit is the scale layout, selected via MXScaleLayout below.
             if(arg.initialization != hipblaslt_initialization::hpl
                && arg.initialization != hipblaslt_initialization::trig_float
                && arg.initialization != hipblaslt_initialization::uniform_01
@@ -2778,13 +2772,7 @@ void testing_matmul_with_bias(const Arguments& arg,
                 hipblaslt_cout << "MX data types do not support algorithm \"all\"" << std::endl;
                 return;
             }
-            // Block_32_UE8M0_32_8_EXT pins the gfx950 swizzle; otherwise on
-            // gfx1250 use the dimk swizzle; everything else stays canonical.
-            MXScaleLayout const scaleLayoutA
-                = (arg.scaleA == hipblaslt_scaling_format::Block_32_UE8M0_32_8_EXT)
-                      ? MXScaleLayout::kGFX950
-                  : isGfx1250Arch ? MXScaleLayout::kGFX1250
-                                  : MXScaleLayout::kNone;
+            MXScaleLayout const scaleLayoutA = mxScaleLayoutForFormat(arg.scaleA);
             size_t dataBatchBytesA  = (num_batches[i] > 1) ? elementsToBytes(stride_a[i], TiA) : 0;
             size_t scaleBatchBytesA = (num_batches[i] > 1) ? size_scaleAVec[i] : 0;
             std::vector<float> refAAll;
@@ -2888,11 +2876,7 @@ void testing_matmul_with_bias(const Arguments& arg,
                 hipblaslt_cout << "MX data types do not support algorithm \"all\"" << std::endl;
                 return;
             }
-            MXScaleLayout const scaleLayoutB
-                = (arg.scaleB == hipblaslt_scaling_format::Block_32_UE8M0_32_8_EXT)
-                      ? MXScaleLayout::kGFX950
-                  : isGfx1250Arch ? MXScaleLayout::kGFX1250
-                                  : MXScaleLayout::kNone;
+            MXScaleLayout const scaleLayoutB = mxScaleLayoutForFormat(arg.scaleB);
             size_t             dataBatchBytesB    = (num_batches[i] > 1)
                                                         ? elementsToBytes(stride_b[i], TiB)
                                                         : 0;

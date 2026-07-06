@@ -8,6 +8,7 @@
 #include <algorithm>
 #include <cmath>
 #include <cstdint>
+#include <set>
 #include <string>
 #include <string_view>
 #include <vector>
@@ -374,4 +375,110 @@ TEST(MXDataGenInitMode, UniformLowPrecisionFP4WithinRange)
         anyNonZero = anyNonZero || (v != 0.0f);
     }
     EXPECT_TRUE(anyNonZero) << "uniform_low_precision produced all-zero data";
+}
+
+// Phase 1: decoupled scale init -- random data with unity scales (--init-a=Random,
+// --init-mx-a=One). Scale bytes must all encode 1.0; dequantized data must vary.
+TEST(MXDataGenDecoupledScale, BoundedDataWithUnityScales)
+{
+    constexpr uint64_t rows    = 256;
+    constexpr uint64_t cols    = 256;
+    constexpr int      mxBlock = 32;
+
+    const size_t numPacked = (rows * cols + 1) / 2;
+    const size_t numScales = (rows / mxBlock) * cols;
+
+    std::vector<uint8_t> dataBuffer(numPacked, 0);
+    std::vector<uint8_t> scaleBuffer(numScales, 0);
+
+    auto ref = generateMXInput((hipDataType)HIP_R_4F_E2M1,
+                               HIP_R_8F_UE8M0,
+                               dataBuffer.data(),
+                               scaleBuffer.data(),
+                               rows,
+                               cols,
+                               rows,
+                               /*isTranspose=*/true,
+                               mxBlock,
+                               1,
+                               /*isMatrixA=*/true,
+                               MXScaleLayout::kNone,
+                               "Bounded",
+                               -1.0f,
+                               1.0f,
+                               MXInitDevice::Cpu,
+                               "Ones");
+
+    ASSERT_FALSE(ref.empty());
+
+    // UE8M0 unity scale byte (E8M0_1 = 127 = 0x7F).
+    constexpr uint8_t kUnityScale = 0x7F;
+    for(uint8_t s : scaleBuffer)
+        EXPECT_EQ(s, kUnityScale) << "expected unity UE8M0 scale byte";
+
+    int meaningful = 0;
+    for(float v : ref)
+    {
+        EXPECT_TRUE(std::isfinite(v));
+        if(std::abs(v) > 1e-4f)
+            ++meaningful;
+    }
+    EXPECT_GT(meaningful, 0)
+        << "Bounded data with Ones scales should produce representable dequantized values";
+
+    std::set<uint8_t> uniqueData(dataBuffer.begin(), dataBuffer.end());
+    EXPECT_GT(uniqueData.size(), 1u)
+        << "packed data should not collapse to a single byte pattern";
+}
+
+TEST(MXDataGenDecoupledScale, MatchingInitUnchangedFromDefault)
+{
+    constexpr uint64_t rows    = 128;
+    constexpr uint64_t cols    = 128;
+    constexpr int      mxBlock = 32;
+
+    const size_t numPacked = (rows * cols + 1) / 2;
+    const size_t numScales = (rows / mxBlock) * cols;
+
+    std::vector<uint8_t> dataA(numPacked);
+    std::vector<uint8_t> dataB(numPacked);
+    std::vector<uint8_t> scaleA(numScales, 0);
+    std::vector<uint8_t> scaleB(numScales, 0);
+
+    generateMXInput((hipDataType)HIP_R_4F_E2M1,
+                    HIP_R_8F_UE8M0,
+                    dataA.data(),
+                    scaleA.data(),
+                    rows,
+                    cols,
+                    rows,
+                    true,
+                    mxBlock,
+                    1,
+                    true,
+                    MXScaleLayout::kNone,
+                    "Bounded",
+                    -1.f,
+                    1.f);
+
+    generateMXInput((hipDataType)HIP_R_4F_E2M1,
+                    HIP_R_8F_UE8M0,
+                    dataB.data(),
+                    scaleB.data(),
+                    rows,
+                    cols,
+                    rows,
+                    true,
+                    mxBlock,
+                    1,
+                    true,
+                    MXScaleLayout::kNone,
+                    "Bounded",
+                    -1.f,
+                    1.f,
+                    MXInitDevice::Cpu,
+                    "Bounded");
+
+    EXPECT_EQ(dataA, dataB);
+    EXPECT_EQ(scaleA, scaleB);
 }

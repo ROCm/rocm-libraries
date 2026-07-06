@@ -961,15 +961,10 @@ namespace TensileLite
 
         {
             {
-                // gfx950 subtile kernels read preSwizzleScalesGFX950; everything
-                // else (gfx1250 + non-rocroller WMMA) reads the dimk K-swizzle.
                 hipDeviceProp_t prop;
                 int deviceIdx = args.count("device-idx") ? args["device-idx"].as<int>() : 0;
                 hipGetDeviceProperties(&prop, deviceIdx);
-                std::string const archName(prop.gcnArchName);
-                m_mxScaleLayout = (archName.find("gfx950") != std::string::npos)
-                                      ? MXScaleLayout::kGFX950
-                                      : MXScaleLayout::kGFX1250;
+                m_mxScaleLayout = mxScaleLayoutForArchName(prop.gcnArchName);
             }
 
             m_rotatingBuffer
@@ -1825,11 +1820,7 @@ namespace TensileLite
             // swizzled scale into gpuInput.valid (when m_mxScaleLayout selects
             // one), so copySwizzledToGPUBuffer just forwards it; otherwise the
             // canonical scale (cpuInput.valid) is uploaded via the normal path.
-            // gfx1250 MX problems go THROUGH the generator (we deliberately do not
-            // gate on m_mxScaleFormat, which would force gfx1250 onto the plain
-            // initArray path). F6 is excluded (develop #7644) because it currently
-            // fails through the generator on gfx1250 and must fall back to initArray.
-            bool useMXGenerator = isMXProblemExceptF6(problem);
+            bool useMXGenerator = isMXProblem(problem);
             if(useMXGenerator)
                 initializeMXData(problem);
 
@@ -1980,6 +1971,48 @@ namespace TensileLite
                   "or add a mapping in initModeToMXMethod.");
         }
 
+        static bool isRandomLikeInitMode(InitMode mode)
+        {
+            switch(mode)
+            {
+            case InitMode::Random:
+            case InitMode::RandomNarrow:
+            case InitMode::RandomNegPosLimited:
+            case InitMode::UniformLowPrecision:
+                return true;
+            default:
+                return false;
+            }
+        }
+
+        static bool isConstantScaleInitMode(InitMode mode)
+        {
+            switch(mode)
+            {
+            case InitMode::Zero:
+            case InitMode::One:
+            case InitMode::Two:
+            case InitMode::NegOne:
+            case InitMode::Max:
+            case InitMode::DenormMin:
+            case InitMode::DenormMax:
+            case InitMode::NaN:
+            case InitMode::Inf:
+            case InitMode::BadInput:
+            case InitMode::BadOutput:
+                return true;
+            default:
+                return false;
+            }
+        }
+
+        static bool canDecoupleMXScaleInit(InitMode dataInit, InitMode scaleInit)
+        {
+            if(dataInit == scaleInit)
+                return true;
+            return isRandomLikeInitMode(dataInit) && isConstantScaleInitMode(scaleInit);
+        }
+
         // generateMXInput emits scales packed for the unpadded data K, but setMXScaleA/B
         // pad ceil(K/mxBlock) up to a multiple of 8. When those differ (e.g. K=384 →
         // 12 padded to 16) the kernel and CPU reference read every (m>0, k_block) at the
@@ -2110,7 +2143,8 @@ namespace TensileLite
                       scaleBatchStrideBytes = scaleDesc.strides()[scaleDesc.sizes().size() - 1];
                   }
 
-                  auto initMode = m_vdata[dataTensorEnum].init;
+                  auto dataInitMode  = m_vdata[dataTensorEnum].init;
+                  auto scaleInitMode = m_vdata[scaleTensorEnum].init;
 
                   std::memset(pristineScale.cpuInput.valid.get(),
                               0x00,
@@ -2155,9 +2189,11 @@ namespace TensileLite
                                       isMatrixA ? 1 : mxBlock,
                                       isMatrixA,
                                       MXScaleLayout::kNone,
-                                      initModeToMXMethod(initMode),
+                                      initModeToMXMethod(dataInitMode),
                                       -1.0f,
-                                      1.0f);
+                                      1.0f,
+                                      MXInitDevice::Cpu,
+                                      initModeToMXMethod(scaleInitMode));
                       if(kFast)
                           restrideMXScaleBufferKFast(
                               scalePtr, compactFree, compactKBlocks, paddedKBlocks, scaleElemSize);
@@ -2209,9 +2245,11 @@ namespace TensileLite
                                           isMatrixA ? 1 : mxBlock,
                                           isMatrixA,
                                           swizzleLayout,
-                                          initModeToMXMethod(initMode),
+                                          initModeToMXMethod(dataInitMode),
                                           -1.0f,
-                                          1.0f);
+                                          1.0f,
+                                          MXInitDevice::Cpu,
+                                          initModeToMXMethod(scaleInitMode));
                       }
                       HIP_CHECK_EXC(hipMemcpy(pristineScale.gpuInput.valid.get(),
                                               gpuScaleBuf.data(),
@@ -2221,29 +2259,31 @@ namespace TensileLite
                   }
               };
 
-            // mxDataGenerator generates data + scale in lock-step from one initMode,
-            // so any conflicting --init-MXSA / --init-MXSB is silently ignored. Warn
-            // once per process so the user sees the knob isn't being honoured.
-            static std::atomic<bool> warnedScaleInitIgnored{false};
-            auto warnIfScaleInitMismatched
+            // Warn when --init-mx-a/b differs from data init in a way Phase 1
+            // cannot honour (e.g. Random scale with Bounded data, Trig/Serial).
+            static std::atomic<bool> warnedScaleInitUnsupported{false};
+            auto warnIfScaleInitUnsupported
                 = [&](int dataTensorEnum, int scaleTensorEnum) {
-                      if(warnedScaleInitIgnored.load(std::memory_order_relaxed))
+                      if(warnedScaleInitUnsupported.load(std::memory_order_relaxed))
                           return;
                       auto const& dataInit  = m_vdata[dataTensorEnum].init;
                       auto const& scaleInit = m_vdata[scaleTensorEnum].init;
-                      if(dataInit == scaleInit)
+                      if(canDecoupleMXScaleInit(dataInit, scaleInit))
                           return;
                       bool expected = false;
-                      if(!warnedScaleInitIgnored.compare_exchange_strong(
+                      if(!warnedScaleInitUnsupported.compare_exchange_strong(
                              expected, true, std::memory_order_relaxed))
                           return;
                       std::cerr
                           << "Warning: --init-" << m_vdata[scaleTensorEnum].name << "="
-                          << ToString(scaleInit) << " is ignored for MX problems; "
-                          << "scale tensors are generated together with their data "
-                          << "tensor and inherit --init-" << m_vdata[dataTensorEnum].name
-                          << "=" << ToString(dataInit)
-                          << ". This warning is shown once per process." << std::endl;
+                          << ToString(scaleInit) << " cannot be decoupled from --init-"
+                          << m_vdata[dataTensorEnum].name << "=" << ToString(dataInit)
+                          << " for MX generation; scale init is ignored. "
+                          << "Supported decoupling: random-like data init (Random, "
+                          "RandomNarrow, RandomNegPosLimited, UniformLowPrecision) with "
+                          "constant scale init (Zero, One, Two, NegOne, Max, DenormMin, "
+                          "DenormMax, NaN, Inf). This warning is shown once per process."
+                          << std::endl;
                   };
 
             // MX sides go through initOneMXSide (which throws for unsupported
@@ -2251,7 +2291,7 @@ namespace TensileLite
             // path so buffers don't stay uninitialised.
             if(isMXTensor(problem.a(), problem.mxBlockA()))
             {
-                warnIfScaleInitMismatched(ContractionProblemGemm::TENSOR::A,
+                warnIfScaleInitUnsupported(ContractionProblemGemm::TENSOR::A,
                                           ContractionProblemGemm::TENSOR::MXSA);
                 initOneMXSide(ContractionProblemGemm::TENSOR::A,
                               ContractionProblemGemm::TENSOR::MXSA,
@@ -2275,7 +2315,7 @@ namespace TensileLite
 
             if(isMXTensor(problem.b(), problem.mxBlockB()))
             {
-                warnIfScaleInitMismatched(ContractionProblemGemm::TENSOR::B,
+                warnIfScaleInitUnsupported(ContractionProblemGemm::TENSOR::B,
                                           ContractionProblemGemm::TENSOR::MXSB);
                 initOneMXSide(ContractionProblemGemm::TENSOR::B,
                               ContractionProblemGemm::TENSOR::MXSB,
