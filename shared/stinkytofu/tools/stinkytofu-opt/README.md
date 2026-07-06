@@ -142,7 +142,28 @@ Apply multiple optimization passes in sequence:
     --StinkyWaitCntInsertionPass
 ```
 
-#### Example 4: Round-Trip Raw Assembly
+#### Example 4: Remove selected instructions
+
+`RemoveInstructionPass` deletes every instruction whose unified opcode matches
+one of the comma-separated mnemonics. See
+[RemoveInstructionPass](../../docs/user/remove-instruction-pass.md) for gfx1250
+pipeline integration and Tensile `ModuleOptions.RemoveInstructions`.
+
+```bash
+# Remove tensor_load_to_lds only
+./build/tools/stinkytofu-opt/stinkytofu-opt \
+    --arch gfx1250 input.stir \
+    --RemoveInstructionPass=tensor_load_to_lds \
+    --print-output
+
+# Remove tensor_load, ds_load, and wmma in one pass
+./build/tools/stinkytofu-opt/stinkytofu-opt \
+    --arch gfx1250 input.stir \
+    --RemoveInstructionPass=tensor_load_to_lds,ds_load_b128,v_wmma_f32_16x16x16_bf16 \
+    --print-output
+```
+
+#### Example 5: Round-Trip Raw Assembly
 
 When the input is a `.s` file (raw GPU assembly), `--emit-asm` is implied and
 the tool can be used as a parse → IR → emit round-trip. By default, symbolic
