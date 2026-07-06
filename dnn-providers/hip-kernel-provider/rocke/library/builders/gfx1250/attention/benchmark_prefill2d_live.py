@@ -254,7 +254,7 @@ def _run_triton_live(shape, data, sliding_window, is_fp8, *, warmup, iters):
             )
 
         ms = time_launches(call_once, warmup=warmup, iters=iters, stream=hip_stream)
-        synchronize_and_release(hip_stream)
+        synchronize_and_release()
     finally:
         _restore_triton()
     return out, ms
