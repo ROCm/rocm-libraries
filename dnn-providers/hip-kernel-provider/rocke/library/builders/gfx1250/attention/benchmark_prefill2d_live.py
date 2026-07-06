@@ -411,7 +411,7 @@ def main() -> int:
             for r in fly_results
             if "speedup_flydsl_vs_triton" in r
         ]
-        correct = [r for r in fly_results if r.get("flydsl_ok")]
+        # correctness stats tracked incrementally in n_fly_correct
         print(f"\n=== FlyDSL summary ===")
         print(f"  shapes total:       {len(results)}")
         print(f"  FlyDSL supported:   {n_fly_supported}")
