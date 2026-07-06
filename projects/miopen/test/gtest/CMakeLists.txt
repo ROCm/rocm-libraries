@@ -177,7 +177,7 @@ function(add_gtest TEST_NAME TEST_CPP)
     # Note: Due to the following cmake issue with gtest_discover_tests https://gitlab.kitware.com/cmake/cmake/-/issues/17812 you cannot pass PROPERTIES as a list.
     #       To work around this limitation, we are passing the environment variables in the format ENVIRONMENT;value1=${value1};ENVIRONMENT;value2=${value2}.
     # bn tests are run sequentially since running tests in parallel was causing large tensor case fail with insufficient memory error.
-    if("${TEST_NAME}" STREQUAL "test_bn_bwd_serial_run" OR "${TEST_NAME}" STREQUAL "test_bn_fwd_train_serial_run" OR "${TEST_NAME}" STREQUAL "test_bn_infer_serial_run")
+    if("${TEST_NAME}" STREQUAL "test_bn_bwd_serial_run" OR "${TEST_NAME}" STREQUAL "test_bn_fwd_train_serial_run" OR "${TEST_NAME}" STREQUAL "test_bn_infer_serial_run" OR "${TEST_NAME}" STREQUAL "test_hip_graph_exist")
       gtest_discover_tests(${TEST_NAME} DISCOVERY_TIMEOUT 300 DISCOVERY_MODE PRE_TEST WORKING_DIRECTORY ${KERNELS_BINARY_DIR} PROPERTIES RUN_SERIAL TRUE ${TEST_ENVIRONMENT_VARIABLES} TEST_FILTER "${MIOPEN_GTEST_FILTER}")
     else()
       gtest_discover_tests(${TEST_NAME} DISCOVERY_TIMEOUT 300 DISCOVERY_MODE PRE_TEST WORKING_DIRECTORY ${KERNELS_BINARY_DIR} PROPERTIES ${TEST_ENVIRONMENT_VARIABLES} TEST_FILTER "${MIOPEN_GTEST_FILTER}")
@@ -221,6 +221,9 @@ function(add_gtest TEST_NAME TEST_CPP)
     # Excluded from MIOpen CI: the FP32 case OOMs when shards run concurrently on a single GPU.
     add_gtest_negative_filter("*UnitTestConvSolver*LargeStride*")
 
+    # HipGraphExist OOMs (LLVM JIT) when shards share one GPU; filtered here, re-added below as RUN_SERIAL.
+    add_gtest_negative_filter("*HipGraphExist*")
+
     # when building the single gtest, add them in a sharded manner
     # loop over GTEST_PARALLEL_LEVEL
     set(MIOPEN_GTEST_FILTER "${MIOPEN_GTEST_PREFIX}*${MIOPEN_GTEST_SUFFIX}*:${MIOPEN_GTEST_PREFIX}*NONE*${MIOPEN_GTEST_FILTER_NEGATIVE}")
@@ -240,6 +243,22 @@ function(add_gtest TEST_NAME TEST_CPP)
         ENVIRONMENT "MIOPEN_USER_DB_PATH=${CMAKE_CURRENT_BINARY_DIR};MIOPEN_INVOKED_FROM_CTEST=1;GTEST_TOTAL_SHARDS=${GTEST_PARALLEL_LEVEL};GTEST_SHARD_INDEX=${SHARD_INDEX}"
       )
     endforeach()
+
+    # HipGraphExist was filtered out of the shards above (LLVM JIT OOM under concurrent GPU memory
+    # pressure). Register it as a single RUN_SERIAL entry so ctest runs it alone, never alongside
+    # another test on the GPU. Skipped when there is no GPU, since these are *GPU* tests.
+    if(NOT MIOPEN_NO_GPU)
+      add_test(NAME ${TEST_NAME}_hip_graph_serial
+        COMMAND ${TEST_NAME}
+          --gtest_filter=*HipGraphExist*
+          --gtest_output=xml:${PROJECT_BINARY_DIR}/test_results/${TEST_NAME}_shard_hip_graph_serial.xml
+        WORKING_DIRECTORY "${KERNELS_BINARY_DIR}"
+      )
+      set_tests_properties(${TEST_NAME}_hip_graph_serial PROPERTIES
+        RUN_SERIAL TRUE
+        ENVIRONMENT "MIOPEN_USER_DB_PATH=${CMAKE_CURRENT_BINARY_DIR};MIOPEN_INVOKED_FROM_CTEST=1"
+      )
+    endif()
 
   endif()
   target_link_libraries(${TEST_NAME} BZip2::BZip2)

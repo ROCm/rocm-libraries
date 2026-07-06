@@ -4,7 +4,6 @@ GlobalParameters:
   SyncsPerBenchmark: 0
   NumElementsToValidate: -1
   KernelTime: True
-  NewClient: 2
   BoundsCheck: 0
   # PrintSolutionRejectionReason: True
   ValidationMaxToPrint: 4      # maximum number of mismatches to print
@@ -18,9 +17,6 @@ GlobalParameters:
   #PrintTensorD: 1
   #PrintTensorRef: 1
   PrintWinnersOnly: True
-  MinKForGSU: 1
-  MaxLDS: 163840
-  DeviceLDS: 163840
 
 BenchmarkProblems:
   #######################################

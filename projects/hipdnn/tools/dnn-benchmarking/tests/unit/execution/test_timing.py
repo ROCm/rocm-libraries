@@ -15,11 +15,13 @@ from dnn_benchmarking.execution.timing import (
     GpuTimer,
     GpuTimerInterface,
     HipGpuTimer,
+    StalledRegionTimer,
     Timer,
     TorchGpuTimer,
     create_gpu_timer,
     get_available_backends,
     is_gpu_timing_available,
+    run_staged_iterations,
 )
 
 # Import shared test fixture
@@ -389,6 +391,151 @@ class TestDirectHipTimers:
             ("record", events[1], 456),
             ("synchronize", events[1]),
         ]
+
+
+class TestStalledRegionTimer:
+    """Tests for the stalled-queue staged region timer (CPU-only via fakes)."""
+
+    @staticmethod
+    def _install_fake(monkeypatch, calls, events):
+        class FakeEvent:
+            def __init__(self) -> None:
+                events.append(self)
+
+            def record(self, stream: int) -> None:
+                calls.append(("record", self, stream))
+
+            def synchronize(self) -> None:
+                calls.append(("synchronize", self))
+
+            def elapsed_time(self, stop) -> float:
+                calls.append(("elapsed", self, stop))
+                return 1.25
+
+        class FakeGate:
+            def arm(self, stream: int) -> None:
+                calls.append(("arm", stream))
+
+            def release(self) -> None:
+                calls.append(("release",))
+
+        class FakeHipdnn:
+            @staticmethod
+            def hip_get_device_count() -> int:
+                return 1
+
+            @staticmethod
+            def hip_device_synchronize() -> None:
+                calls.append(("device_sync",))
+
+            HipEvent = FakeEvent
+            HipStallGate = FakeGate
+
+        monkeypatch.setattr(timing_module, "hipdnn", FakeHipdnn)
+
+    def test_barrier_syncs_device_once(self, monkeypatch) -> None:
+        calls: list = []
+        events: list = []
+        self._install_fake(monkeypatch, calls, events)
+
+        timer = StalledRegionTimer(stream=7)
+        timer.barrier()
+
+        assert calls.count(("device_sync",)) == 1
+
+    def test_measure_orders_staging_sequence(self, monkeypatch) -> None:
+        calls: list = []
+        events: list = []
+        self._install_fake(monkeypatch, calls, events)
+
+        timer = StalledRegionTimer(stream=7)
+
+        def enqueue() -> None:
+            calls.append(("enqueue",))
+
+        cpu_ms, kernel_ms = timer.measure(enqueue)
+
+        # Fixed kernel span from the fake start->stop elapsed_time.
+        assert kernel_ms == 1.25
+        # Host bracket measures real perf_counter time around enqueue.
+        assert cpu_ms >= 0.0
+
+        start, stop = events[0], events[1]
+        # The full staging order: arm, start.record, enqueue, stop.record,
+        # release, stop.synchronize, elapsed -- with no device sync inside.
+        assert calls == [
+            ("arm", 7),
+            ("record", start, 7),
+            ("enqueue",),
+            ("record", stop, 7),
+            ("release",),
+            ("synchronize", stop),
+            ("elapsed", start, stop),
+        ]
+        assert ("device_sync",) not in calls
+
+    def test_measure_releases_gate_when_enqueue_raises(self, monkeypatch) -> None:
+        calls: list = []
+        events: list = []
+        self._install_fake(monkeypatch, calls, events)
+
+        timer = StalledRegionTimer(stream=7)
+
+        def boom() -> None:
+            calls.append(("enqueue",))
+            raise RuntimeError("enqueue failed")
+
+        with pytest.raises(RuntimeError, match="enqueue failed"):
+            timer.measure(boom)
+
+        start, stop = events[0], events[1]
+        # The gate was armed then released even though enqueue raised, so the
+        # stalled work stream never stays blocked.
+        assert ("arm", 7) in calls
+        assert ("release",) in calls
+        assert calls.index(("release",)) > calls.index(("arm", 7))
+        # The device is drained on the failure path so no pending wait still
+        # references the signal memory at teardown.
+        assert ("device_sync",) in calls
+        # stop was never recorded, so it must not be synchronized or measured.
+        assert ("record", stop, 7) not in calls
+        assert ("synchronize", stop) not in calls
+        assert ("elapsed", start, stop) not in calls
+
+    def test_run_staged_iterations_collects_parallel_timings(self, monkeypatch) -> None:
+        calls: list = []
+        events: list = []
+        self._install_fake(monkeypatch, calls, events)
+
+        timer = StalledRegionTimer(stream=7)
+
+        def enqueue() -> None:
+            calls.append(("enqueue",))
+
+        host_timings, kernel_timings = run_staged_iterations(timer, 3, enqueue)
+
+        # One barrier (device sync) before the loop, then exactly N measures.
+        assert calls.count(("device_sync",)) == 1
+        assert calls.count(("arm", 7)) == 3
+        assert calls.count(("enqueue",)) == 3
+        # Parallel lists, one entry per iteration; kernel span from the fake.
+        assert len(host_timings) == 3
+        assert kernel_timings == [1.25, 1.25, 1.25]
+        assert all(h >= 0.0 for h in host_timings)
+
+    def test_run_staged_iterations_zero_iterations_only_barriers(
+        self, monkeypatch
+    ) -> None:
+        calls: list = []
+        events: list = []
+        self._install_fake(monkeypatch, calls, events)
+
+        timer = StalledRegionTimer(stream=7)
+        host_timings, kernel_timings = run_staged_iterations(timer, 0, lambda: None)
+
+        assert host_timings == []
+        assert kernel_timings == []
+        assert calls == [("device_sync",)]
 
 
 class TestTorchGpuTimer:
