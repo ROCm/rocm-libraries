@@ -109,7 +109,7 @@
     CUOccupancy: -1
     ClusterDim: [1, 1]
     ClusterLocalRead: 0
-    CodeObjectVersion: 4
+    CodeObjectVersion: "4"
     CompactLoopStore: false
     ConvertAfterDS: false
     CustomKernelName: ''
@@ -397,7 +397,7 @@
     CUOccupancy: -1
     ClusterDim: [1, 1]
     ClusterLocalRead: 0
-    CodeObjectVersion: 4
+    CodeObjectVersion: "4"
     CompactLoopStore: false
     ConvertAfterDS: false
     CustomKernelName: ''
@@ -685,7 +685,7 @@
     CUOccupancy: -1
     ClusterDim: [1, 1]
     ClusterLocalRead: 0
-    CodeObjectVersion: 4
+    CodeObjectVersion: "4"
     CompactLoopStore: false
     ConvertAfterDS: false
     CustomKernelName: ''
@@ -973,7 +973,7 @@
     CUOccupancy: -1
     ClusterDim: [1, 1]
     ClusterLocalRead: 0
-    CodeObjectVersion: 4
+    CodeObjectVersion: "4"
     CompactLoopStore: false
     ConvertAfterDS: false
     CustomKernelName: ''
@@ -1261,7 +1261,7 @@
     CUOccupancy: -1
     ClusterDim: [1, 1]
     ClusterLocalRead: 0
-    CodeObjectVersion: 4
+    CodeObjectVersion: "4"
     CompactLoopStore: false
     ConvertAfterDS: false
     CustomKernelName: ''
@@ -1549,7 +1549,7 @@
     CUOccupancy: -1
     ClusterDim: [1, 1]
     ClusterLocalRead: 0
-    CodeObjectVersion: 4
+    CodeObjectVersion: "4"
     CompactLoopStore: false
     ConvertAfterDS: false
     CustomKernelName: ''
@@ -1837,7 +1837,7 @@
     CUOccupancy: -1
     ClusterDim: [1, 1]
     ClusterLocalRead: 0
-    CodeObjectVersion: 4
+    CodeObjectVersion: "4"
     CompactLoopStore: false
     ConvertAfterDS: false
     CustomKernelName: ''
@@ -2125,7 +2125,7 @@
     CUOccupancy: -1
     ClusterDim: [1, 1]
     ClusterLocalRead: 0
-    CodeObjectVersion: 4
+    CodeObjectVersion: "4"
     CompactLoopStore: false
     ConvertAfterDS: false
     CustomKernelName: ''
@@ -2413,7 +2413,7 @@
     CUOccupancy: -1
     ClusterDim: [1, 1]
     ClusterLocalRead: 0
-    CodeObjectVersion: 4
+    CodeObjectVersion: "4"
     CompactLoopStore: false
     ConvertAfterDS: false
     CustomKernelName: ''
@@ -2968,7 +2968,7 @@
     CUOccupancy: -1
     ClusterDim: [1, 1]
     ClusterLocalRead: 0
-    CodeObjectVersion: 4
+    CodeObjectVersion: "4"
     CompactLoopStore: false
     ConvertAfterDS: false
     CustomKernelName: ''
@@ -3260,7 +3260,7 @@
     CUOccupancy: -1
     ClusterDim: [1, 1]
     ClusterLocalRead: 0
-    CodeObjectVersion: 4
+    CodeObjectVersion: "4"
     CompactLoopStore: false
     ConvertAfterDS: false
     CustomKernelName: ''
@@ -3552,7 +3552,7 @@
     CUOccupancy: -1
     ClusterDim: [1, 1]
     ClusterLocalRead: 0
-    CodeObjectVersion: 4
+    CodeObjectVersion: "4"
     CompactLoopStore: false
     ConvertAfterDS: false
     CustomKernelName: ''
@@ -3844,7 +3844,7 @@
     CUOccupancy: -1
     ClusterDim: [1, 1]
     ClusterLocalRead: 0
-    CodeObjectVersion: 4
+    CodeObjectVersion: "4"
     CompactLoopStore: false
     ConvertAfterDS: false
     CustomKernelName: ''
@@ -4136,7 +4136,7 @@
     CUOccupancy: -1
     ClusterDim: [1, 1]
     ClusterLocalRead: 0
-    CodeObjectVersion: 4
+    CodeObjectVersion: "4"
     CompactLoopStore: false
     ConvertAfterDS: false
     CustomKernelName: ''
@@ -4428,7 +4428,7 @@
     CUOccupancy: -1
     ClusterDim: [1, 1]
     ClusterLocalRead: 0
-    CodeObjectVersion: 4
+    CodeObjectVersion: "4"
     CompactLoopStore: false
     ConvertAfterDS: false
     CustomKernelName: ''
@@ -4720,7 +4720,7 @@
     CUOccupancy: -1
     ClusterDim: [1, 1]
     ClusterLocalRead: 0
-    CodeObjectVersion: 4
+    CodeObjectVersion: "4"
     CompactLoopStore: false
     ConvertAfterDS: false
     CustomKernelName: ''
@@ -5012,7 +5012,7 @@
     CUOccupancy: -1
     ClusterDim: [1, 1]
     ClusterLocalRead: 0
-    CodeObjectVersion: 4
+    CodeObjectVersion: "4"
     CompactLoopStore: false
     ConvertAfterDS: false
     CustomKernelName: ''
@@ -5304,7 +5304,7 @@
     CUOccupancy: -1
     ClusterDim: [1, 1]
     ClusterLocalRead: 0
-    CodeObjectVersion: 4
+    CodeObjectVersion: "4"
     CompactLoopStore: false
     ConvertAfterDS: false
     CustomKernelName: ''
@@ -5596,7 +5596,7 @@
     CUOccupancy: -1
     ClusterDim: [1, 1]
     ClusterLocalRead: 0
-    CodeObjectVersion: 4
+    CodeObjectVersion: "4"
     CompactLoopStore: false
     ConvertAfterDS: false
     CustomKernelName: ''
@@ -5888,7 +5888,7 @@
     CUOccupancy: -1
     ClusterDim: [1, 1]
     ClusterLocalRead: 0
-    CodeObjectVersion: 4
+    CodeObjectVersion: "4"
     CompactLoopStore: false
     ConvertAfterDS: false
     CustomKernelName: ''
@@ -6180,7 +6180,7 @@
     CUOccupancy: -1
     ClusterDim: [1, 1]
     ClusterLocalRead: 0
-    CodeObjectVersion: 4
+    CodeObjectVersion: "4"
     CompactLoopStore: false
     ConvertAfterDS: false
     CustomKernelName: ''
@@ -6472,7 +6472,7 @@
     CUOccupancy: -1
     ClusterDim: [1, 1]
     ClusterLocalRead: 0
-    CodeObjectVersion: 4
+    CodeObjectVersion: "4"
     CompactLoopStore: false
     ConvertAfterDS: false
     CustomKernelName: ''
@@ -6764,7 +6764,7 @@
     CUOccupancy: -1
     ClusterDim: [1, 1]
     ClusterLocalRead: 0
-    CodeObjectVersion: 4
+    CodeObjectVersion: "4"
     CompactLoopStore: false
     ConvertAfterDS: false
     CustomKernelName: ''
@@ -7056,7 +7056,7 @@
     CUOccupancy: -1
     ClusterDim: [1, 1]
     ClusterLocalRead: 0
-    CodeObjectVersion: 4
+    CodeObjectVersion: "4"
     CompactLoopStore: false
     ConvertAfterDS: false
     CustomKernelName: ''
@@ -7348,7 +7348,7 @@
     CUOccupancy: -1
     ClusterDim: [1, 1]
     ClusterLocalRead: 0
-    CodeObjectVersion: 4
+    CodeObjectVersion: "4"
     CompactLoopStore: false
     ConvertAfterDS: false
     CustomKernelName: ''
@@ -7640,7 +7640,7 @@
     CUOccupancy: -1
     ClusterDim: [1, 1]
     ClusterLocalRead: 0
-    CodeObjectVersion: 4
+    CodeObjectVersion: "4"
     CompactLoopStore: false
     ConvertAfterDS: false
     CustomKernelName: ''
@@ -7932,7 +7932,7 @@
     CUOccupancy: -1
     ClusterDim: [1, 1]
     ClusterLocalRead: 0
-    CodeObjectVersion: 4
+    CodeObjectVersion: "4"
     CompactLoopStore: false
     ConvertAfterDS: false
     CustomKernelName: ''
@@ -8224,7 +8224,7 @@
     CUOccupancy: -1
     ClusterDim: [1, 1]
     ClusterLocalRead: 1
-    CodeObjectVersion: 4
+    CodeObjectVersion: "4"
     CompactLoopStore: false
     ConvertAfterDS: false
     CustomKernelName: ''
@@ -8516,7 +8516,7 @@
     CUOccupancy: -1
     ClusterDim: [1, 1]
     ClusterLocalRead: 1
-    CodeObjectVersion: 4
+    CodeObjectVersion: "4"
     CompactLoopStore: false
     ConvertAfterDS: false
     CustomKernelName: ''
@@ -8808,7 +8808,7 @@
     CUOccupancy: -1
     ClusterDim: [1, 1]
     ClusterLocalRead: 0
-    CodeObjectVersion: 4
+    CodeObjectVersion: "4"
     CompactLoopStore: false
     ConvertAfterDS: false
     CustomKernelName: ''
@@ -9103,7 +9103,7 @@
     CUOccupancy: -1
     ClusterDim: [1, 1]
     ClusterLocalRead: 0
-    CodeObjectVersion: 4
+    CodeObjectVersion: "4"
     CompactLoopStore: false
     ConvertAfterDS: false
     CustomKernelName: ''
@@ -9398,7 +9398,7 @@
     CUOccupancy: -1
     ClusterDim: [1, 1]
     ClusterLocalRead: 0
-    CodeObjectVersion: 4
+    CodeObjectVersion: "4"
     CompactLoopStore: false
     ConvertAfterDS: false
     CustomKernelName: ''
@@ -9694,7 +9694,7 @@
     ClusterBarrier: false
     ClusterDim: [1, 1]
     ClusterLocalRead: 0
-    CodeObjectVersion: 4
+    CodeObjectVersion: "4"
     CompactLoopStore: false
     ConvertAfterDS: false
     CustomKernelName: ''
@@ -9704,7 +9704,7 @@
     DirectToLds: 1
     DirectToLdsA: true
     DirectToLdsB: true
-    DirectToLdsMetadata: false
+    DirectToLdsMetadata: 0
     DirectToVgprA: false
     DirectToVgprB: false
     DirectToVgprMXSA: false
@@ -9895,7 +9895,7 @@
     SpaceFillingAlgo: []
     StaggerU: 8
     StaggerUMapping: 0
-    StaggerUStride: 256.0
+    StaggerUStride: 256
     StorePriorityOpt: true
     StoreRemapVectorWidth: 0
     StoreSwapAddr: false
@@ -10026,7 +10026,7 @@
     ClusterBarrier: false
     ClusterDim: [1, 1]
     ClusterLocalRead: 0
-    CodeObjectVersion: 4
+    CodeObjectVersion: "4"
     CompactLoopStore: false
     ConvertAfterDS: false
     CustomKernelName: ''
@@ -10036,7 +10036,7 @@
     DirectToLds: 1
     DirectToLdsA: true
     DirectToLdsB: true
-    DirectToLdsMetadata: false
+    DirectToLdsMetadata: 0
     DirectToVgprA: false
     DirectToVgprB: false
     DirectToVgprMXSA: false
@@ -10358,7 +10358,7 @@
     ClusterBarrier: false
     ClusterDim: [1, 1]
     ClusterLocalRead: 0
-    CodeObjectVersion: 4
+    CodeObjectVersion: "4"
     CompactLoopStore: false
     ConvertAfterDS: false
     CustomKernelName: ''
@@ -10368,7 +10368,7 @@
     DirectToLds: 2
     DirectToLdsA: true
     DirectToLdsB: false
-    DirectToLdsMetadata: false
+    DirectToLdsMetadata: 0
     DirectToVgprA: false
     DirectToVgprB: false
     DirectToVgprMXSA: false
@@ -10690,7 +10690,7 @@
     ClusterBarrier: false
     ClusterDim: [1, 1]
     ClusterLocalRead: 0
-    CodeObjectVersion: 4
+    CodeObjectVersion: "4"
     CompactLoopStore: false
     ConvertAfterDS: false
     CustomKernelName: ''
@@ -10700,7 +10700,7 @@
     DirectToLds: 1
     DirectToLdsA: true
     DirectToLdsB: true
-    DirectToLdsMetadata: false
+    DirectToLdsMetadata: 0
     DirectToVgprA: false
     DirectToVgprB: false
     DirectToVgprMXSA: false
@@ -11022,7 +11022,7 @@
     ClusterBarrier: false
     ClusterDim: [1, 1]
     ClusterLocalRead: 0
-    CodeObjectVersion: 4
+    CodeObjectVersion: "4"
     CompactLoopStore: false
     ConvertAfterDS: false
     CustomKernelName: ''
@@ -11032,7 +11032,7 @@
     DirectToLds: 1
     DirectToLdsA: true
     DirectToLdsB: true
-    DirectToLdsMetadata: false
+    DirectToLdsMetadata: 0
     DirectToVgprA: false
     DirectToVgprB: false
     DirectToVgprMXSA: false
@@ -11354,7 +11354,7 @@
     ClusterBarrier: false
     ClusterDim: [1, 1]
     ClusterLocalRead: 0
-    CodeObjectVersion: 4
+    CodeObjectVersion: "4"
     CompactLoopStore: false
     ConvertAfterDS: false
     CustomKernelName: ''
@@ -11364,7 +11364,7 @@
     DirectToLds: 1
     DirectToLdsA: true
     DirectToLdsB: true
-    DirectToLdsMetadata: false
+    DirectToLdsMetadata: 0
     DirectToVgprA: false
     DirectToVgprB: false
     DirectToVgprMXSA: false
@@ -11686,7 +11686,7 @@
     ClusterBarrier: false
     ClusterDim: [1, 1]
     ClusterLocalRead: 0
-    CodeObjectVersion: 4
+    CodeObjectVersion: "4"
     CompactLoopStore: false
     ConvertAfterDS: false
     CustomKernelName: ''
@@ -11696,7 +11696,7 @@
     DirectToLds: 1
     DirectToLdsA: true
     DirectToLdsB: true
-    DirectToLdsMetadata: false
+    DirectToLdsMetadata: 0
     DirectToVgprA: false
     DirectToVgprB: false
     DirectToVgprMXSA: false
@@ -12018,7 +12018,7 @@
     ClusterBarrier: false
     ClusterDim: [1, 1]
     ClusterLocalRead: 0
-    CodeObjectVersion: 4
+    CodeObjectVersion: "4"
     CompactLoopStore: false
     ConvertAfterDS: false
     CustomKernelName: ''
@@ -12028,7 +12028,7 @@
     DirectToLds: 1
     DirectToLdsA: true
     DirectToLdsB: true
-    DirectToLdsMetadata: false
+    DirectToLdsMetadata: 0
     DirectToVgprA: false
     DirectToVgprB: false
     DirectToVgprMXSA: false
@@ -12350,7 +12350,7 @@
     ClusterBarrier: false
     ClusterDim: [1, 1]
     ClusterLocalRead: 0
-    CodeObjectVersion: 4
+    CodeObjectVersion: "4"
     CompactLoopStore: false
     ConvertAfterDS: false
     CustomKernelName: ''
@@ -12360,7 +12360,7 @@
     DirectToLds: 1
     DirectToLdsA: true
     DirectToLdsB: true
-    DirectToLdsMetadata: false
+    DirectToLdsMetadata: 0
     DirectToVgprA: false
     DirectToVgprB: false
     DirectToVgprMXSA: false
@@ -12682,7 +12682,7 @@
     ClusterBarrier: false
     ClusterDim: [1, 1]
     ClusterLocalRead: 0
-    CodeObjectVersion: 4
+    CodeObjectVersion: "4"
     CompactLoopStore: false
     ConvertAfterDS: false
     CustomKernelName: ''
@@ -12692,7 +12692,7 @@
     DirectToLds: 1
     DirectToLdsA: true
     DirectToLdsB: true
-    DirectToLdsMetadata: false
+    DirectToLdsMetadata: 0
     DirectToVgprA: false
     DirectToVgprB: false
     DirectToVgprMXSA: false
@@ -13014,7 +13014,7 @@
     ClusterBarrier: false
     ClusterDim: [1, 1]
     ClusterLocalRead: 0
-    CodeObjectVersion: 4
+    CodeObjectVersion: "4"
     CompactLoopStore: false
     ConvertAfterDS: false
     CustomKernelName: ''
@@ -13024,7 +13024,7 @@
     DirectToLds: 1
     DirectToLdsA: true
     DirectToLdsB: true
-    DirectToLdsMetadata: false
+    DirectToLdsMetadata: 0
     DirectToVgprA: false
     DirectToVgprB: false
     DirectToVgprMXSA: false
@@ -13346,7 +13346,7 @@
     ClusterBarrier: false
     ClusterDim: [1, 1]
     ClusterLocalRead: 0
-    CodeObjectVersion: 4
+    CodeObjectVersion: "4"
     CompactLoopStore: false
     ConvertAfterDS: false
     CustomKernelName: ''
@@ -13356,7 +13356,7 @@
     DirectToLds: 1
     DirectToLdsA: true
     DirectToLdsB: true
-    DirectToLdsMetadata: false
+    DirectToLdsMetadata: 0
     DirectToVgprA: false
     DirectToVgprB: false
     DirectToVgprMXSA: false
@@ -13678,7 +13678,7 @@
     ClusterBarrier: false
     ClusterDim: [1, 1]
     ClusterLocalRead: 0
-    CodeObjectVersion: 4
+    CodeObjectVersion: "4"
     CompactLoopStore: false
     ConvertAfterDS: false
     CustomKernelName: ''
@@ -13688,7 +13688,7 @@
     DirectToLds: 1
     DirectToLdsA: true
     DirectToLdsB: true
-    DirectToLdsMetadata: false
+    DirectToLdsMetadata: 0
     DirectToVgprA: false
     DirectToVgprB: false
     DirectToVgprMXSA: false
@@ -14010,7 +14010,7 @@
     ClusterBarrier: false
     ClusterDim: [1, 1]
     ClusterLocalRead: 0
-    CodeObjectVersion: 4
+    CodeObjectVersion: "4"
     CompactLoopStore: false
     ConvertAfterDS: false
     CustomKernelName: ''
@@ -14020,7 +14020,7 @@
     DirectToLds: 1
     DirectToLdsA: true
     DirectToLdsB: true
-    DirectToLdsMetadata: false
+    DirectToLdsMetadata: 0
     DirectToVgprA: false
     DirectToVgprB: false
     DirectToVgprMXSA: false
@@ -14342,7 +14342,7 @@
     ClusterBarrier: false
     ClusterDim: [1, 1]
     ClusterLocalRead: 0
-    CodeObjectVersion: 4
+    CodeObjectVersion: "4"
     CompactLoopStore: false
     ConvertAfterDS: false
     CustomKernelName: ''
@@ -14352,7 +14352,7 @@
     DirectToLds: 1
     DirectToLdsA: true
     DirectToLdsB: true
-    DirectToLdsMetadata: false
+    DirectToLdsMetadata: 0
     DirectToVgprA: false
     DirectToVgprB: false
     DirectToVgprMXSA: false
@@ -14674,7 +14674,7 @@
     ClusterBarrier: false
     ClusterDim: [1, 1]
     ClusterLocalRead: 0
-    CodeObjectVersion: 4
+    CodeObjectVersion: "4"
     CompactLoopStore: false
     ConvertAfterDS: false
     CustomKernelName: ''
@@ -14684,7 +14684,7 @@
     DirectToLds: 1
     DirectToLdsA: true
     DirectToLdsB: true
-    DirectToLdsMetadata: false
+    DirectToLdsMetadata: 0
     DirectToVgprA: false
     DirectToVgprB: false
     DirectToVgprMXSA: false
