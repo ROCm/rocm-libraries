@@ -193,10 +193,30 @@ CloneResult cloneRegion(Function& func, const std::vector<BasicBlock*>& origBBs,
             builder.createLabel(cl, /*alignment=*/1);
         }
         for (IRBase& node : *origBBs[i]) {
-            // Labels are re-emitted via getLabel() above; skip pseudo insts
-            // (LABEL/PHI/FENCE) when copying the body.
+            // BB-header labels are re-emitted via getLabel() above. Other pseudo
+            // insts (PHI/FENCE) are dropped, BUT mid-block LABEL definitions must
+            // be re-emitted under a clone-local name and recorded in labelMap so
+            // `rewriteInternalBranches` can redirect this region's own branches to
+            // them. These mid-block labels (e.g. the cluster-barrier drain skip
+            // labels `label_skipCBWait_LCL_*` / `label_skipCBSignal_LCL_*` emitted
+            // by InsertClusterBarrierPass) are not BB headers, so skipping them
+            // here leaves the cloned branch dangling onto the ORIGINAL region's
+            // label (two branches to one label).
             if (auto* inst = dyn_cast<StinkyInstruction>(&node)) {
-                if (isPseudoInst(inst)) continue;
+                if (isPseudoInst(inst)) {
+                    if (isLabel(*inst)) {
+                        if (const auto* ld = inst->getModifier<LabelData>()) {
+                            // The BB-header label is already mapped/emitted above;
+                            // only handle mid-block labels here.
+                            if (res.labelMap.find(ld->label) == res.labelMap.end()) {
+                                const std::string cl = makeClonedLabel(specName, ld->label, jobIdx);
+                                res.labelMap[ld->label] = cl;
+                                builder.createLabel(cl, /*alignment=*/1);
+                            }
+                        }
+                    }
+                    continue;
+                }
             }
             IRBase* cloned = node.clone();
             if (cloned) clonedBB->appendIR(cloned);
