@@ -38,7 +38,6 @@ namespace rocsparse
     ROCSPARSE_KERNEL(BELL_BLOCK_DIM* BLK_SIZE_Y)
     void bellmm_general_blockdim_kernel(rocsparse_operation trans_A,
                                         rocsparse_operation trans_B,
-                                        rocsparse_direction dir_A,
                                         I                   Mb,
                                         I                   N,
                                         ROCSPARSE_DEVICE_HOST_SCALAR_PARAMS(T, alpha),
@@ -66,7 +65,6 @@ namespace rocsparse
 
         rocsparse::bellmm_general_blockdim_device<BELL_BLOCK_DIM, BLK_SIZE_Y, T>(trans_A,
                                                                                  trans_B,
-                                                                                 dir_A,
                                                                                  Mb,
                                                                                  N,
                                                                                  alpha,
@@ -88,7 +86,6 @@ namespace rocsparse
     rocsparse_status bellmm_template_general(rocsparse_handle          handle,
                                              rocsparse_operation       trans_A,
                                              rocsparse_operation       trans_B,
-                                             rocsparse_direction       dir_A,
                                              I                         mb,
                                              I                         n,
                                              I                         kb,
@@ -126,7 +123,6 @@ namespace rocsparse
                                            stream,
                                            trans_A,
                                            trans_B,
-                                           dir_A,
                                            mb,
                                            n,
                                            ROCSPARSE_DEVICE_HOST_SCALAR_ARGS(handle, alpha),
@@ -152,7 +148,6 @@ namespace rocsparse
     template rocsparse_status rocsparse::bellmm_template_general(rocsparse_handle    handle,         \
                                                                  rocsparse_operation trans_A,        \
                                                                  rocsparse_operation trans_B,        \
-                                                                 rocsparse_direction dir_A,          \
                                                                  ITYPE               mb,             \
                                                                  ITYPE               n,              \
                                                                  ITYPE               kb,             \

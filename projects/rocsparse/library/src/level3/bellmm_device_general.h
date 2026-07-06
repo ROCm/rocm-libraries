@@ -37,7 +37,6 @@ namespace rocsparse
               typename C>
     ROCSPARSE_DEVICE_ILF void bellmm_general_blockdim_device(rocsparse_operation trans_A,
                                                              rocsparse_operation trans_B,
-                                                             rocsparse_direction dir_A,
                                                              I                   Mb,
                                                              I                   N,
                                                              T                   alpha,
