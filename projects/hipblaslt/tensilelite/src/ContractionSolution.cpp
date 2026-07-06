@@ -310,10 +310,16 @@ namespace TensileLite
         }
     }
 
+#if defined(__GNUC__) || defined(__clang__)
+#pragma GCC visibility push(default)
+#endif
     template void
         setDeviceUserArgs<float>(std::vector<ContractionSolution::Problem> const& problems,
                                  ContractionSolution::GroupedInputs const&        inputs,
                                  DeviceUserArguments<float>*                      args);
+#if defined(__GNUC__) || defined(__clang__)
+#pragma GCC visibility pop
+#endif
 
     PerfModel perf;
 
