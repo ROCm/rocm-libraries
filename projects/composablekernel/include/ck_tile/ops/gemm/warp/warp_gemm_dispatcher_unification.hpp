@@ -73,7 +73,8 @@ struct MmaPipelineSelector<true,
                                   TransposeC,
                                   SwizzleFactor,
                                   AttrNumAccessAV,
-                                  AttrNumAccessBV>;
+                                  AttrNumAccessBV,
+                                  UsePackedNumAccess>;
 };
 
 template <typename AType,
