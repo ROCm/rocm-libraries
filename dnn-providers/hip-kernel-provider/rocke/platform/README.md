@@ -19,7 +19,7 @@ Spec dataclass -> build_*() -> KernelDef -> lower -> .ll -> comgr -> HSACO -> la
 ## Layout
 
 ```text
-rocKE/
+rocke/platform/
   python/rocke/   # authoring frontend (import rocke): core, helpers, instances/<arch>,
                    # runtime, dispatch, analysis, benchmark, heuristics, examples
   cpp/             # C++20 engine (mirrors the Python layers): core, helpers, instances,
@@ -48,7 +48,7 @@ two engines must stay byte-identical (see [`dsl_docs/development/engine_parity.m
   under `sudo -E` (or membership in the `video`/`render` groups).
 
 ```bash
-export ROCKE=$(pwd)        # run from this rocKE/ directory
+export ROCKE=$(pwd)        # run from this rocke/platform/ directory
 export PYTHONPATH=$ROCKE/Python
 ```
 

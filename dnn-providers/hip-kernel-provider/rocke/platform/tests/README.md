@@ -12,7 +12,7 @@ python tests/run_all.py --only gemm
 python tools/check_byte_identity.py   # build engine fresh + byte-identity gate (llvm20/llvm22)
 ```
 
-`conftest.py` puts `rocKE/Python` on `sys.path` (so `import rocke` works);
+`conftest.py` puts `rocke/platform/python` on `sys.path` (so `import rocke` works);
 `pytest.ini` uses `--import-mode=importlib` so same-named test modules coexist
 across layers without `__init__.py`.
 

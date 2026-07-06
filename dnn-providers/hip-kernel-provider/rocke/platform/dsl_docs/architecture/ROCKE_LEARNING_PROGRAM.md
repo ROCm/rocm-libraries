@@ -9,7 +9,7 @@
 > **Validation note**: Every code example, exercise, and command in this guide
 > has been run and verified on an AMD Instinct MI355X (gfx950, ROCm 7.0). All
 > custom kernels are bit-exact against their torch reference. Run commands from
-> the `rocKE/` directory with `export PYTHONPATH=python`.
+> the `rocke/platform/` directory with `export PYTHONPATH=python`.
 
 ---
 
@@ -54,7 +54,7 @@ python3 -c "from rocke import *; print('CK DSL ready!')"
 > reports `CUDA: False`, your shell is missing the GPU device groups. Confirm
 > with `python3 -c "import torch; print(torch.cuda.is_available())"`. If the
 > import itself fails with `No module named 'rocke'`, you are not in
-> `rocKE/` or `PYTHONPATH=python` is unset.
+> `rocke/platform/` or `PYTHONPATH=python` is unset.
 
 2. Run the validation suite to confirm everything works:
 ```bash
@@ -1502,7 +1502,7 @@ Provide:
 
 ### Essential Commands
 ```bash
-# All commands run from rocKE/ with PYTHONPATH=python
+# All commands run from rocke/platform/ with PYTHONPATH=python
 export PYTHONPATH=python
 
 # Verify setup

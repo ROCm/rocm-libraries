@@ -21,7 +21,7 @@ This script:
 
 Run with::
 
-    cd <repo>/dnn-providers/hip-kernel-provider/rocKE/Python
+    cd <repo>/dnn-providers/hip-kernel-provider/rocke/platform/python
     python rocke/examples/moe/test_preshuffle_b.py
 """
 

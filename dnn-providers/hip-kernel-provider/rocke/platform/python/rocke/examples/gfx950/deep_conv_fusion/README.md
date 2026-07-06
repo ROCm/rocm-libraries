@@ -31,7 +31,7 @@ int8/int4 packed paths, true virtual concat, or production autotuning.
   example module both import.
 
 ```bash
-cd <repo>/dnn-providers/hip-kernel-provider/rocKE/Python
+cd <repo>/dnn-providers/hip-kernel-provider/rocke/platform/python
 export PYTHONPATH=$(pwd)
 VENV=python3   # or the path to your venv's python
 ```

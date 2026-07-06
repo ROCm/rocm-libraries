@@ -34,7 +34,7 @@ step table):
     L10 active de-padded grid                0.152-> 0.131  flag (harness grid)
     L11 persistent kernel + XCD (NEUTRAL)    0.131         flag (persistent) OFF-default
 
-Run from ``dnn-providers/hip-kernel-provider/rocKE/Python`` with ``PYTHONPATH=$(pwd)``::
+Run from ``dnn-providers/hip-kernel-provider/rocke/platform/python`` with ``PYTHONPATH=$(pwd)``::
 
     PYTHONPATH=$(pwd) python \
         -m rocke.examples.gfx950.fused_mega_moe.reproduce_levels

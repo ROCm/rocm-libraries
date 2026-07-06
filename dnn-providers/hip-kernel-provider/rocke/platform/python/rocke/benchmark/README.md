@@ -22,7 +22,7 @@ rocke/benchmark/
 Plan only:
 
 ```bash
-PYTHONDONTWRITEBYTECODE=1 PYTHONPATH=dnn-providers/hip-kernel-provider/rocKE/Python \
+PYTHONDONTWRITEBYTECODE=1 PYTHONPATH=dnn-providers/hip-kernel-provider/rocke/platform/python \
   ~/atom-venv/bin/python -m rocke.benchmark.gemm.fp16_rcr_sweep \
   --output-dir /tmp/rocke_gemm_sweep \
   --shape '128,128,32:small:true'
@@ -31,7 +31,7 @@ PYTHONDONTWRITEBYTECODE=1 PYTHONPATH=dnn-providers/hip-kernel-provider/rocKE/Pyt
 Compile one selected variant and run it:
 
 ```bash
-PYTHONDONTWRITEBYTECODE=1 PYTHONPATH=dnn-providers/hip-kernel-provider/rocKE/Python \
+PYTHONDONTWRITEBYTECODE=1 PYTHONPATH=dnn-providers/hip-kernel-provider/rocke/platform/python \
   ~/atom-venv/bin/python -m rocke.benchmark.gemm.fp16_rcr_sweep \
   --output-dir /tmp/rocke_gemm_sweep \
   --shape '128,128,32:small:true' \
@@ -43,7 +43,7 @@ PYTHONDONTWRITEBYTECODE=1 PYTHONPATH=dnn-providers/hip-kernel-provider/rocKE/Pyt
 Run the representative shape set:
 
 ```bash
-PYTHONDONTWRITEBYTECODE=1 PYTHONPATH=dnn-providers/hip-kernel-provider/rocKE/Python \
+PYTHONDONTWRITEBYTECODE=1 PYTHONPATH=dnn-providers/hip-kernel-provider/rocke/platform/python \
   ~/atom-venv/bin/python -m rocke.benchmark.gemm.fp16_rcr_sweep \
   --output-dir /tmp/rocke_gemm_sweep \
   --compile --run \
@@ -69,26 +69,26 @@ The document contains:
 No-GPU sweep planning tests:
 
 ```bash
-PYTHONDONTWRITEBYTECODE=1 PYTHONPATH=dnn-providers/hip-kernel-provider/rocKE/Python \
+PYTHONDONTWRITEBYTECODE=1 PYTHONPATH=dnn-providers/hip-kernel-provider/rocke/platform/python \
   ~/atom-venv/bin/python -m unittest discover \
-  -s dnn-providers/hip-kernel-provider/rocKE/python/rocke/benchmark/gemm/tests \
+  -s dnn-providers/hip-kernel-provider/rocke/platform/python/rocke/benchmark/gemm/tests \
   -p 'test_fp16_rcr_sweep.py'
 ```
 
 GPU-gated multi-GPU sweep smoke:
 
 ```bash
-PYTHONDONTWRITEBYTECODE=1 PYTHONPATH=dnn-providers/hip-kernel-provider/rocKE/Python \
+PYTHONDONTWRITEBYTECODE=1 PYTHONPATH=dnn-providers/hip-kernel-provider/rocke/platform/python \
   ~/atom-venv/bin/python -m unittest \
-  dnn-providers/hip-kernel-provider/rocKE/python/rocke/benchmark/gemm/tests/test_fp16_rcr_multigpu.py
+  dnn-providers/hip-kernel-provider/rocke/platform/python/rocke/benchmark/gemm/tests/test_fp16_rcr_multigpu.py
 ```
 
 All GEMM benchmark tests:
 
 ```bash
-PYTHONDONTWRITEBYTECODE=1 PYTHONPATH=dnn-providers/hip-kernel-provider/rocKE/Python \
+PYTHONDONTWRITEBYTECODE=1 PYTHONPATH=dnn-providers/hip-kernel-provider/rocke/platform/python \
   ~/atom-venv/bin/python -m unittest discover \
-  -s dnn-providers/hip-kernel-provider/rocKE/python/rocke/benchmark/gemm/tests \
+  -s dnn-providers/hip-kernel-provider/rocke/platform/python/rocke/benchmark/gemm/tests \
   -p 'test*.py'
 ```
 

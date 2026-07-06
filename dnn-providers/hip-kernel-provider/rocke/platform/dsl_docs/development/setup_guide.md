@@ -43,7 +43,7 @@ cd rocm-libraries/dnn-providers/hip-kernel-provider/rocKE
 export PYTHONPATH=python          # the DSL lives under python/rocke
 ```
 
-All commands below assume you are in the `rocKE/` directory with
+All commands below assume you are in the `rocke/platform/` directory with
 `PYTHONPATH=python` unless noted.
 
 ---
@@ -229,7 +229,7 @@ are working on that specific kernel path.
 | Symptom | Cause / fix |
 |---|---|
 | `do_action(COMPILE_SOURCE_TO_BC): status=1` | LLVM-flavor vs comgr-version mismatch — set `ROCKE_LLVM_FLAVOR=llvm22` for a ROCm 7.2 stack (§5). |
-| `No module named 'rocke'` | `PYTHONPATH` not pointing at `rocKE/Python`. |
+| `No module named 'rocke'` | `PYTHONPATH` not pointing at `rocke/platform/python`. |
 | `torch.cuda.is_available()` is `False` | Not in GPU device groups (§3.3). |
 | `cpp` backend silently uses Python | `rocke_engine` not built/on `PYTHONPATH`; build it (§3.4) and/or set `ROCKE_CPP_STRICT=1` to surface it. |
 | A persistent-kernel example hangs the compiler | Known on older comgr; use ROCm 7.2. |

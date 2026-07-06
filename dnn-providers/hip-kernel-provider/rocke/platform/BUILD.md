@@ -1,12 +1,12 @@
 # Building the rocKE engine
 
 This is the canonical build and artifact-hygiene reference for the **rocKE C++
-engine**: the tree rooted at this `rocKE/` directory whose sources live under
+engine**: the tree rooted at this `rocke/platform/` directory whose sources live under
 `cpp/` and which compiles to a static archive `librocke_core.a`. The engine lowers
 the rocke IR to LLVM IR and is consumed by a hipDNN provider plugin (which links
 the archive and loads it at runtime).
 
-All paths below are relative to the `rocKE/` root (written `<rocKE>`), so they
+All paths below are relative to the `rocke/platform/` root (written `<rocke/platform>`), so they
 are correct wherever this tree lives.
 
 There is **one supported engine build path**. Use it. The historical failures it
@@ -17,7 +17,7 @@ silently".
 
 ```bash
 # build the engine fresh AND run the byte-identity gate (the definition-of-done):
-python <rocKE>/tools/check_byte_identity.py
+python <rocke/platform>/tools/check_byte_identity.py
 ```
 
 `check_byte_identity.py` builds the engine fresh as a Release static archive
@@ -42,8 +42,8 @@ To run the full validation suite (relative-path guard + byte-identity gate +
 pytest + ctest when a build dir exists), use the test runner:
 
 ```bash
-python <rocKE>/tests/run_all.py                  # guard + gate + pytest (+ ctest)
-python <rocKE>/tests/run_all.py --only gemm      # restrict the gate to one family
+python <rocke/platform>/tests/run_all.py                  # guard + gate + pytest (+ ctest)
+python <rocke/platform>/tests/run_all.py --only gemm      # restrict the gate to one family
 ```
 
 Multi-arch coverage (gfx950 baseline plus gfx942/gfx1151/gfx1201) is intrinsic to
@@ -53,12 +53,12 @@ config, so the standard run above already exercises every supported arch.
 ## Building the engine archive by hand
 
 ```bash
-cmake -S <rocKE> -B <build> -DCMAKE_BUILD_TYPE=Release
+cmake -S <rocke/platform> -B <build> -DCMAKE_BUILD_TYPE=Release
 cmake --build <build> --target rocke_core -j$(nproc)
 # -> <build>/librocke_core.a   (the archive a provider links)
 ```
 
-The top-level `<rocKE>/CMakeLists.txt` globs `cpp/**/*.cpp` (excluding
+The top-level `<rocke/platform>/CMakeLists.txt` globs `cpp/**/*.cpp` (excluding
 `cpp/bindings/`) into `rocke_core`, with the public ABI headers at `cpp/include`.
 
 Optional sanitizer build for diagnostics (not for shipping): `-DROCKE_SANITIZE=ON`.
@@ -77,7 +77,7 @@ The `cpp` backend of the Python frontend reaches the engine through the
 archive:
 
 ```bash
-cmake -S <rocKE>/cpp/bindings -B <bld> -DCMAKE_BUILD_TYPE=Release \
+cmake -S <rocke/platform>/cpp/bindings -B <bld> -DCMAKE_BUILD_TYPE=Release \
   -DROCKE_ENGINE_ARCHIVE=<build>/librocke_core.a \
   -Dpybind11_DIR="$(python -m pybind11 --cmakedir)" \
   -DPYTHON_EXECUTABLE="$(which python)"
@@ -109,7 +109,7 @@ silently shadows a fresh build and produces failures that look like code bugs.
 This includes anything matching: `build*/`, `cmake-build*/`, `CMakeFiles/`,
 `CMakeCache.txt`, `_deps/`, `__pycache__/`, `*.a`, `*.o`, `*.so`, `*.dylib`,
 `*.dll`, `*.lib`, `*.cpython-*.so`. Always build into an out-of-tree directory
-(`-B /tmp/rocke`, never inside `rocKE/`) so these never land in a commit.
+(`-B /tmp/rocke`, never inside `rocke/platform/`) so these never land in a commit.
 
 ## Freshness stamps
 

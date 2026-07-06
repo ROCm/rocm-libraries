@@ -84,11 +84,11 @@ for A/B (`--no-native-int`, `--no-direct`, `--no-fused-c0a1`,
 
 ## Reproduce
 
-Run from the `rocke` Python root (`dnn-providers/hip-kernel-provider/rocKE/Python`) with
+Run from the `rocke` Python root (`dnn-providers/hip-kernel-provider/rocke/platform/python`) with
 `PYTHONPATH` set so the package and the example module both import:
 
 ```bash
-cd <repo>/dnn-providers/hip-kernel-provider/rocKE/Python
+cd <repo>/dnn-providers/hip-kernel-provider/rocke/platform/python
 export PYTHONPATH=$(pwd)
 VENV=python3   # or the path to your venv's python
 ```

@@ -39,7 +39,7 @@ else()
     "ROCKE_ENGINE_ARCHIVE must point to a prebuilt librocke_core.a "
     "when the binding is configured outside the rocKE engine build "
     "(got: '${ROCKE_ENGINE_ARCHIVE}'). Build the engine first:\n"
-    "  cmake -S <rocKE> -B <bld>/engine -DCMAKE_BUILD_TYPE=Release\n"
+    "  cmake -S <rocke/platform> -B <bld>/engine -DCMAKE_BUILD_TYPE=Release\n"
     "  cmake --build <bld>/engine -j")
 endif()
 

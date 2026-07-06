@@ -4,7 +4,7 @@ This page covers how to run the `rocke` test suites, how to build and validate a
 
 ## Repo Layout For Testing
 
-All paths below are relative to the `rocKE/` root (with `PYTHONPATH=python`).
+All paths below are relative to the `rocke/platform/` root (with `PYTHONPATH=python`).
 
 ```text
 tests/test_rocke.py                  # unit suite: IR/lowering/transforms (most no-GPU; ~20 harness/timer tests need a GPU)
@@ -88,7 +88,7 @@ section.
 ## Manual Build + Verify One Instance
 
 ```bash
-cd <rocKE>
+cd <rocke/platform>
 
 # Build the implicit-GEMM conv example.
 OUT_DIR="${OUT_DIR:-$(mktemp -d)}"
@@ -272,7 +272,7 @@ Reports MFMA delta, vector store delta, VGPR delta, LDS delta — the runbook-re
 A two-minute smoke for a clean clone:
 
 ```bash
-cd <rocKE>
+cd <rocke/platform>
 export PYTHONDONTWRITEBYTECODE=1
 export PYTHONPATH=python
 OUT_DIR="${OUT_DIR:-$(mktemp -d)}"

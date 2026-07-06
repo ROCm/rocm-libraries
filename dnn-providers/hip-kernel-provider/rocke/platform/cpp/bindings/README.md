@@ -61,7 +61,7 @@ engine are copied into a `std::string` and `free`'d.
 1. Build the engine archive (read-only; never modify the engine):
 
    ```bash
-   # run from the rocKE/ root; the top-level CMakeLists builds the rocke_core archive
+   # run from the rocke/platform/ root; the top-level CMakeLists builds the rocke_core archive
    cmake -S . -B /tmp/rocke_pybind/engine -DCMAKE_BUILD_TYPE=Release
    cmake --build /tmp/rocke_pybind/engine --target rocke_core -j"$(nproc)"
    # -> /tmp/rocke_pybind/engine/librocke_core.a

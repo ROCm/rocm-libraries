@@ -51,7 +51,7 @@ ceiling).
 | comgr / hip | `C:\Windows\System32\amd_comgr_3.dll`, `amdhip64_7.dll` (versioned driver DLLs) |
 | f16 WMMA peak | ~59 TFLOP/s |
 | int8 WMMA peak | ~118 TOPS (≈2× f16) |
-| CK DSL | this repo (`dnn-providers/hip-kernel-provider/rocKE/python/rocke`) |
+| CK DSL | this repo (`dnn-providers/hip-kernel-provider/rocke/platform/python/rocke`) |
 
 ## Reproduce
 

@@ -101,7 +101,7 @@ export ROCKE_REMOTE_HOST=rocke-login                                 # ssh alias
 export ROCKE_DOCKER_IMAGE=rocm/composable_kernel:ck_ub24.04_rocm7.2
 export ROCKE_DOCKER_EXTRA_FLAGS="-e HIP_VISIBLE_DEVICES \
   -e ROCR_VISIBLE_DEVICES -e GPU_DEVICE_ORDINAL --group-add render"
-export PYTHONPATH=/path/to/rocm-libraries/dnn-providers/hip-kernel-provider/rocKE/Python
+export PYTHONPATH=/path/to/rocm-libraries/dnn-providers/hip-kernel-provider/rocke/platform/python
 ```
 
 Then `source ~/.rocke_env` before any `cli` invocation.

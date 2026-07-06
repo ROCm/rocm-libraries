@@ -41,7 +41,7 @@ build_<op>(spec)
 
 ## Layout
 ```text
-rocKE/python/rocke/
+rocke/platform/python/rocke/
 ├── core/         # IR, printing, optimization passes, LLVM/HIP lowering
 ├── helpers/      # authoring helpers: manifests, MFMA atoms, epilogues, layouts
 ├── instances/    # spec-driven CK Tile parity kernels
@@ -53,11 +53,11 @@ rocKE/python/rocke/
 ├── sweep.py
 └── sweep_bench.py
 
-# architecture/runtime/development docs live at the engine root: rocKE/dsl_docs/
+# architecture/runtime/development docs live at the engine root: rocke/platform/dsl_docs/
 ```
 
 ## Quick Start
-Run from the `rocKE/` root (the package lives under `Python/`):
+Run from the `rocke/platform/` root (the package lives under `Python/`):
 
 ```bash
 export PYTHONPATH=python

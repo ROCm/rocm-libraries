@@ -300,7 +300,7 @@ level (via a flag-config on the production kernel, or a curated snapshot under
 per-level ledger (T1 and T8). No external dependencies.
 
 ```bash
-cd <repo>/dnn-providers/hip-kernel-provider/rocKE/Python
+cd <repo>/dnn-providers/hip-kernel-provider/rocke/platform/python
 VENV=python  # or the path to your venv's python
 
 # whole ledger (parity + numeric perf, T1 and T8)

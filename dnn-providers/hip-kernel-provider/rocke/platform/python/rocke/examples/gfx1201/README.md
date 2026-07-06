@@ -33,7 +33,7 @@ built on the single new **gfx12 WMMA `16×16×16` f16 atom**
   a numpy reference, so they need the hardware. Use `--no-verify` (probe and
   `matmul_nbits`) to **build + write the artifact only**, with no device.
 - The repo's `rocke` Python package on `PYTHONPATH` (run from
-  `dnn-providers/hip-kernel-provider/rocKE/Python`, i.e. `PYTHONPATH=python`).
+  `dnn-providers/hip-kernel-provider/rocke/platform/python`, i.e. `PYTHONPATH=python`).
 - A working `rocke` build toolchain (LLVM/comgr) to compile the HSACO.
 
 ## File map
@@ -54,7 +54,7 @@ The kernel sources these drivers build live outside this directory:
 
 ## Run
 
-Run from `dnn-providers/hip-kernel-provider/rocKE/Python`. All three are Python modules
+Run from `dnn-providers/hip-kernel-provider/rocke/platform/python`. All three are Python modules
 (`python3 -m …`).
 
 ### 1. WMMA lane-map probe

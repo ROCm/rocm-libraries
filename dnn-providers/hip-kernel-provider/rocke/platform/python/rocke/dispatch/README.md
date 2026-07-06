@@ -64,9 +64,9 @@ benchmark records. It includes the operation family, candidate, algorithm,
 No-GPU GEMM dispatch tests:
 
 ```bash
-PYTHONDONTWRITEBYTECODE=1 PYTHONPATH=dnn-providers/hip-kernel-provider/rocKE/Python \
+PYTHONDONTWRITEBYTECODE=1 PYTHONPATH=dnn-providers/hip-kernel-provider/rocke/platform/python \
   ~/atom-venv/bin/python -m unittest discover \
-  -s dnn-providers/hip-kernel-provider/rocKE/python/rocke/dispatch/tests/gemm \
+  -s dnn-providers/hip-kernel-provider/rocke/platform/python/rocke/dispatch/tests/gemm \
   -p 'test*.py'
 ```
 
@@ -76,18 +76,18 @@ ROCm GPU is not visible.
 Broader no-GPU regression checks:
 
 ```bash
-PYTHONDONTWRITEBYTECODE=1 PYTHONPATH=dnn-providers/hip-kernel-provider/rocKE/Python \
-  ~/atom-venv/bin/python dnn-providers/hip-kernel-provider/rocKE/Python/test/test_rocke.py
+PYTHONDONTWRITEBYTECODE=1 PYTHONPATH=dnn-providers/hip-kernel-provider/rocke/platform/python \
+  ~/atom-venv/bin/python dnn-providers/hip-kernel-provider/rocke/platform/python/test/test_rocke.py
 
-PYTHONDONTWRITEBYTECODE=1 PYTHONPATH=dnn-providers/hip-kernel-provider/rocKE/Python \
+PYTHONDONTWRITEBYTECODE=1 PYTHONPATH=dnn-providers/hip-kernel-provider/rocke/platform/python \
   ~/atom-venv/bin/python -m unittest \
-  dnn-providers/hip-kernel-provider/rocKE/Python/test/test_rocke_multiarch.py \
+  dnn-providers/hip-kernel-provider/rocke/platform/python/test/test_rocke_multiarch.py \
   -k TestGfx950ByteIdentical
 
 PYTHONDONTWRITEBYTECODE=1 \
-PYTHONPATH=dnn-providers/hip-kernel-provider/rocKE/Python:dnn-providers/hip-kernel-provider/rocKE/Python/test \
+PYTHONPATH=dnn-providers/hip-kernel-provider/rocke/platform/python:dnn-providers/hip-kernel-provider/rocke/platform/python/test \
   ~/atom-venv/bin/python -m rocke_ir_parity_harness \
-  --compare dnn-providers/hip-kernel-provider/rocKE/Python/test/golden/rocke_representative_ir_sha256.json
+  --compare dnn-providers/hip-kernel-provider/rocke/platform/python/test/golden/rocke_representative_ir_sha256.json
 ```
 
 ## Onboard A New Operator Family

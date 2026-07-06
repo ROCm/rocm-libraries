@@ -127,7 +127,7 @@ Hard facts:
 ## Validation Status
 
 The docs in this folder are written against the current code. Run commands
-from the `rocKE/` root with the Python interpreter for your ROCm environment:
+from the `rocke/platform/` root with the Python interpreter for your ROCm environment:
 
 ```bash
 export PYTHONPATH=python

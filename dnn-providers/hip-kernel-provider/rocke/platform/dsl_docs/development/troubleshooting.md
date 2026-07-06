@@ -113,8 +113,8 @@ your environment provides (e.g. `sudo -n -E <venv>/bin/python …`), and write
 artifacts somewhere you own (e.g. `/tmp`), not into a root-owned repo path.
 
 ### `No module named 'rocke'` / `Cpp`
-`PYTHONPATH` isn't pointing at `dnn-providers/hip-kernel-provider/rocKE/Python`. Set it
-(`PYTHONPATH=<…>/dnn-providers/hip-kernel-provider/rocKE/Python`) and run from there.
+`PYTHONPATH` isn't pointing at `dnn-providers/hip-kernel-provider/rocke/platform/python`. Set it
+(`PYTHONPATH=<…>/dnn-providers/hip-kernel-provider/rocke/platform/python`) and run from there.
 
 ### A probe can't find `llvm-readelf` / `objdump`
 The ROCm `bin/` directory isn't on `PATH`. Add it.

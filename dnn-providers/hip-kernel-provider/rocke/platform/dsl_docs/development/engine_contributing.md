@@ -70,8 +70,8 @@ mismatch. A green run means the two engines still agree everywhere.
 If you prefer to run the steps by hand (they are what the script does):
 
 ```bash
-# From dnn-providers/hip-kernel-provider/rocKE/Python  (use the project venv with ROCm+PyTorch).
-PY=$(pwd)                      # .../dnn-providers/hip-kernel-provider/rocKE/Python
+# From dnn-providers/hip-kernel-provider/rocke/platform/python  (use the project venv with ROCm+PyTorch).
+PY=$(pwd)                      # .../dnn-providers/hip-kernel-provider/rocke/platform/python
 
 # 1. Build the C++ engine archive into a LOCAL dir (never NFS — it is slow).
 cmake -S "$PY/cpp" -B /tmp/rocke_verify -DCMAKE_BUILD_TYPE=Release
