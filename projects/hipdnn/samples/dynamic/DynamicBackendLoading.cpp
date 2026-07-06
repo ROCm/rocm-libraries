@@ -1,19 +1,12 @@
 // Copyright © Advanced Micro Devices, Inc., or its affiliates.
 // SPDX-License-Identifier:  MIT
 
-// Post-install test for the runtime-load frontend target (hipdnn_frontend_dynamic).
+// Sample for the runtime-load frontend target (hipdnn_frontend_dynamic).
 //
-// This sample is compiled against the installed frontend headers in runtime-load
-// mode and links ONLY hipdnn_frontend_dynamic -- it does NOT link
-// libhipdnn_backend. It therefore exercises the property the dynamic target
-// exists to provide: the backend is resolved at runtime via dlopen/dlsym (by
-// HipdnnDynamicBackendWrapper) rather than through a hard link dependency.
-//
-// Unlike the other samples it deliberately avoids hipdnn_test_sdk (which links
-// the direct frontend, and would pull libhipdnn_backend back onto the link line).
-// Correctness is checked inline with a deterministic case instead of the CPU
-// reference utilities: an all-ones 1x1 convolution with no padding makes every
-// output element equal to the input channel count C.
+// It links ONLY hipdnn_frontend_dynamic, not hipdnn_test_sdk or
+// libhipdnn_backend, so creating the handle must resolve the backend at runtime.
+// The graph is a deterministic all-ones 1x1 convolution where every output
+// element equals the input channel count C.
 
 #include <cmath>
 #include <cstdio>
@@ -41,8 +34,8 @@ int main()
         constexpr int64_t R = 1; // Filter height
         constexpr int64_t S = 1; // Filter width
 
-        // Creating the handle goes through detail::hipdnnBackend(), which (in this
-        // build) instantiates HipdnnDynamicBackendWrapper and dlopens libhipdnn_backend.
+        // Creating the handle instantiates HipdnnDynamicBackendWrapper and
+        // opens libhipdnn_backend at runtime.
         auto [handle, handleError] = createHipdnnHandle();
         HIPDNN_FE_CHECK(handleError);
 
@@ -55,7 +48,7 @@ int main()
         auto wAttr = createTensor({K, C, R, S}, DataType::FLOAT, layout);
 
         graph::ConvFpropAttributes convAttributes;
-        convAttributes.set_name("conv_fprop_dynamic");
+        convAttributes.set_name("dynamic_backend_loading");
         convAttributes.set_padding({0, 0});
         convAttributes.set_stride({1, 1});
         convAttributes.set_dilation({1, 1});
@@ -74,7 +67,7 @@ int main()
             return 0;
         }
         HIPDNN_FE_CHECK(buildStatus);
-        std::cout << "Runtime-load graph build successful (backend resolved via dlopen).\n";
+        std::cout << "Dynamic backend loading graph build successful.\n";
 
         utilities::Tensor<float> xTensor(xAttr->get_dim(), layout);
         utilities::Tensor<float> wTensor(wAttr->get_dim(), layout);
@@ -99,8 +92,8 @@ int main()
         const auto* yHost = yTensor.memory().hostData();
 
         // All-ones 1x1 convolution => every output element == C.
-        constexpr float expected = static_cast<float>(C);
-        constexpr float tolerance = 1e-3F;
+        constexpr auto EXPECTED = static_cast<float>(C);
+        constexpr float TOLERANCE = 1e-3F;
         int64_t elementCount = 1;
         for(auto dim : yAttr->get_dim())
         {
@@ -110,10 +103,10 @@ int main()
         bool correct = true;
         for(int64_t i = 0; i < elementCount; ++i)
         {
-            if(std::fabs(yHost[i] - expected) > tolerance)
+            if(std::fabs(yHost[i] - EXPECTED) > TOLERANCE)
             {
                 std::cerr << "Mismatch at " << i << ": got " << yHost[i] << ", expected "
-                          << expected << '\n';
+                          << EXPECTED << '\n';
                 correct = false;
                 break;
             }
@@ -121,12 +114,12 @@ int main()
 
         if(!correct)
         {
-            std::cout << "Runtime-load convolution produced incorrect results.\n";
+            std::cout << "Dynamic backend loading sample produced incorrect results.\n";
             return 1;
         }
 
-        std::cout << "Runtime-load convolution executed and verified (" << elementCount
-                  << " elements == " << expected << ").\n";
+        std::cout << "Dynamic backend loading sample executed and verified (" << elementCount
+                  << " elements == " << EXPECTED << ").\n";
         return 0;
     }
     catch(const std::exception& e)
