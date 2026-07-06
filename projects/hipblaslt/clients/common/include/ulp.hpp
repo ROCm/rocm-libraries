@@ -34,6 +34,7 @@
 #include <cstdio>
 #include <hipblaslt/hipblaslt.h>
 #include <limits>
+#include <cfloat>
 
 /* =====================================================================
         ULP check: per-element error measured in units in the last place
@@ -121,32 +122,27 @@ inline double ulp_as_double(hipblasLtInt8 x)
     return static_cast<double>(x);
 }
 
-/*! \brief ULP distance between two scalar values, expressed in ULPs of the
- *         output datatype (mant_bits fraction bits). */
-inline double ulp_distance(double a, double b, int mant_bits)
+/*! \brief calculate the distance in units of ULP between two double values */
+inline double ulp_distance(double exact, double approximation, int mant_bits)
 {
-    if(a == b)
-        return 0.0;
+    // 1. Handle identical values immediately to prevent 0/0 errors
+    if (exact == approximation) return 0.0;
 
-    // Non-finite handling: equal bit-patterns already returned 0 above.
-    if(!std::isfinite(a) || !std::isfinite(b))
-        return std::numeric_limits<double>::infinity();
-
-    const double diff = std::abs(a - b);
-
-    if(mant_bits == 0) // integer type
-        return diff;
-
-    const double m = std::max(std::abs(a), std::abs(b));
-    if(m == 0.0)
-        return 0.0;
-
-    // For m in [2^(e-1), 2^e), the spacing of a format with mant_bits fraction
-    // bits is 2^(e-1-mant_bits). frexp returns e such that m = mant * 2^e with
-    // mant in [0.5, 1), so the binade exponent is (e - 1).
     int e = 0;
-    std::frexp(m, &e);
-    const double ulp_size = std::ldexp(1.0, e - 1 - mant_bits);
+    double mantissa = std::frexp(exact, &e);
+
+    // 2. Fix the power-of-2 boundary condition
+    if (std::abs(mantissa) == 0.5) {
+        e--;
+    }
+
+    // 3. Compute step size using the output type's mantissa width (mant_bits is
+    //    passed in by the caller, e.g. 24 for f32 / 53 for f64); the ULP step
+    //    must reflect the result precision, not always double.
+    const double ulp_size = std::ldexp(1.0, e - mant_bits);
+    
+    // 4. Return the distance in units of ULP
+    double diff = std::abs(exact - approximation);
     return diff / ulp_size;
 }
 
