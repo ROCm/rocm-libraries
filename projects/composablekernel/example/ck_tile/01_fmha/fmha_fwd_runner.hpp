@@ -2354,13 +2354,15 @@ fwd_result fmha_fwd_run(mode_enum mode,
                     });
                 }
 
-                // Use smaller rtol/atol as LSE is computed and stored in fp32, so there is no
-                // precision loss due to conversion
-                bool cur_pass = ck_tile::check_err(lse_host_result,
+                constexpr bool is_low_precision =
+                    ck_tile::is_any_of<DataTypeConfig, FmhaFwdMxFp8, FmhaFwdMxFp4>::
+                        value; // Fp8Bf16 has def_lse=false
+                const double lse_tol = is_low_precision ? 2e-4 : 1e-4;
+                bool cur_pass        = ck_tile::check_err(lse_host_result,
                                                    lse_host_ref,
                                                    "LSE Error: Incorrect results!",
-                                                   2e-4,
-                                                   2e-4,
+                                                   lse_tol,
+                                                   lse_tol,
                                                    /* allow_infinity_ref = */ true);
 
                 pass &= cur_pass;
