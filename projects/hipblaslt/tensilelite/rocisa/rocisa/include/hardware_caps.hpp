@@ -223,12 +223,16 @@ inline std::map<std::string, int>
     // InitCIterWmma replaces the v_mov initC with a WMMA using src C = immediate 0
     rv["HasWMMA_AccImmZero"] = tryAssembler(isaVersion,
                                             assemblerPath,
-                                            "v_wmma_f32_16x16x32_bf16 v[0:7], v[8:15], v[8:15], 0",
+                                            "v_wmma_f32_16x16x16_f16 v[0:3], v[8:15], v[16:23], 0",
                                             isDebug)
-                                && tryAssembler(isaVersion,
-                                                assemblerPath,
-                                                "v_wmma_f32_16x16x4_f32 v[0:7], v[8:9], v[8:9], 0",
-                                                isDebug);
+                                || (tryAssembler(isaVersion,
+                                                 assemblerPath,
+                                                 "v_wmma_f32_16x16x32_bf16 v[0:7], v[8:15], v[8:15], 0",
+                                                 isDebug)
+                                    && tryAssembler(isaVersion,
+                                                    assemblerPath,
+                                                    "v_wmma_f32_16x16x4_f32 v[0:7], v[8:9], v[8:9], 0",
+                                                    isDebug));
 
     rv["HasAdd_PC_i64"] = false;
 
