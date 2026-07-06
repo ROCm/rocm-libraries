@@ -1,0 +1,59 @@
+{
+  "schema": "rocke.bench.measurement/v1",
+  "run": {
+    "run_id": "2026-06-26T18:00:00+00:00_abc1234",
+    "git_commit": "abc1234",
+    "branch": "users/juzoka/rocke-bench",
+    "timestamp": "2026-06-26T18:00:00+00:00",
+    "arch": "gfx1201",
+    "gpu_name": "AMD Radeon RX 9070 XT",
+    "rocm_version": "7.x",
+    "host": "cgy-paras",
+    "trigger": "manual"
+  },
+  "kernel": {
+    "kernel_name": "gemm_fp16_rcr_512x512x512_t128x128x32",
+    "op": "gemm",
+    "cache_key": "gemm:gfx1201:fp16:RCR:...",
+    "shape": {"M": 512, "N": 512, "K": 512},
+    "config": {"tile_m": 128, "tile_n": 128, "tile_k": 32, "pipeline": "mem"},
+    "grid": [16, 4, 1],
+    "block": [256, 1, 1],
+    "dispatch_ref": "ui_output_agent_1_dispatch_0"
+  },
+  "wall": {
+    "ms_median": 0.0472,
+    "ms_spread_pct": 0.9,
+    "tflops": 5.68,
+    "gbs": 33.3,
+    "pct_peak": 6.0,
+    "samples": [{"ms": 0.0471}, {"ms": 0.0472}, {"ms": 0.0474}]
+  },
+  "counters": {
+    "total_clocks": 105000,
+    "busy_cycles": 98000,
+    "sq_busy_cycles": 91000,
+    "waves": 256,
+    "valu_insts": 1200000,
+    "lds_insts": 64000,
+    "wait_cycles": 7000,
+    "l2_hit": 480000,
+    "l2_miss": 20000
+  },
+  "resources": {
+    "vgpr": 96,
+    "agpr": 0,
+    "sgpr": 48,
+    "lds_bytes": 16384,
+    "occupancy": 8
+  },
+  "derived": {
+    "busy_fraction": 0.933,
+    "l2_hit_rate": 0.96
+  },
+  "captured_counters": [
+    "total_clocks", "busy_cycles", "sq_busy_cycles", "waves",
+    "valu_insts", "lds_insts", "wait_cycles", "l2_hit", "l2_miss"
+  ],
+  "verify": {"ok": true, "max_abs_diff": 0.0}
+}
