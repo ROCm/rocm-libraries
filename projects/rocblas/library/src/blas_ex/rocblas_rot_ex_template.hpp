@@ -45,10 +45,10 @@ rocblas_status rocblas_rot_ex_typecasting(rocblas_handle handle,
                                           rocblas_stride stride_y,
                                           const void*    c,
                                           const void*    s,
+                                          rocblas_stride stride_cs,
                                           API_INT        batch_count)
 {
     static constexpr rocblas_stride offset_0 = 0;
-    static constexpr rocblas_stride stride_0 = 0;
 
     auto           check_numerics = handle->check_numerics;
     rocblas_status status         = rocblas_status_success;
@@ -88,9 +88,9 @@ rocblas_status rocblas_rot_ex_typecasting(rocblas_handle handle,
                                                                               incy,
                                                                               stride_y,
                                                                               (const Tcs*)c,
-                                                                              stride_0,
+                                                                              stride_cs,
                                                                               (const Tcs*)s,
-                                                                              stride_0,
+                                                                              stride_cs,
                                                                               batch_count);
         if(status != rocblas_status_success)
             return status;
@@ -152,9 +152,9 @@ rocblas_status rocblas_rot_ex_typecasting(rocblas_handle handle,
                                                                               incy,
                                                                               stride_y,
                                                                               (const Tcs*)c,
-                                                                              stride_0,
+                                                                              stride_cs,
                                                                               (const Tcs*)s,
-                                                                              stride_0,
+                                                                              stride_cs,
                                                                               batch_count);
 
         if(status != rocblas_status_success)
@@ -199,11 +199,12 @@ rocblas_status rocblas_rot_ex_template(rocblas_handle   handle,
                                        const void*      c,
                                        const void*      s,
                                        rocblas_datatype cs_type,
+                                       rocblas_stride   stride_cs,
                                        API_INT          batch_count,
                                        rocblas_datatype execution_type)
 {
 #define rocblas_rot_ex_typecasting_PARAM \
-    handle, n, x, incx, stride_x, y, incy, stride_y, c, s, batch_count
+    handle, n, x, incx, stride_x, y, incy, stride_y, c, s, stride_cs, batch_count
 
     if(x_type == rocblas_datatype_bf16_r && y_type == rocblas_datatype_bf16_r
        && cs_type == rocblas_datatype_bf16_r && execution_type == rocblas_datatype_f32_r)
@@ -301,6 +302,7 @@ template rocblas_status rocblas_rot_ex_template<TI_ , NB, ISBATCHED>           \
                                        const void*      c,               \
                                        const void*      s,               \
                                        rocblas_datatype cs_type,         \
+                                       rocblas_stride   stride_cs,       \
                                        TI_      batch_count,     \
                                        rocblas_datatype execution_type);
 // clang-format on

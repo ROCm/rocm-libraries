@@ -41,5 +41,6 @@ rocblas_status rocblas_rot_ex_template(rocblas_handle   handle,
                                        const void*      c,
                                        const void*      s,
                                        rocblas_datatype cs_type,
+                                       rocblas_stride   stride_cs,
                                        API_INT          batch_count,
                                        rocblas_datatype execution_type);

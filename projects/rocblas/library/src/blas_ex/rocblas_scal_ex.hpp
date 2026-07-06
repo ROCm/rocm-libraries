@@ -34,5 +34,6 @@ rocblas_status rocblas_scal_ex_template(rocblas_handle   handle,
                                         rocblas_datatype x_type,
                                         API_INT          incx,
                                         rocblas_stride   stride_x,
+                                        rocblas_stride   stride_alpha,
                                         API_INT          batch_count,
                                         rocblas_datatype execution_type);

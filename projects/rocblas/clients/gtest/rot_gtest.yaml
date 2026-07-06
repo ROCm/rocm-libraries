@@ -475,4 +475,21 @@ Tests:
        - rotm_strided_batched:  *single_double_precisions
        - rotmg_strided_batched: *single_double_precisions
 
+# per-batch c and s (rocblas_set_batch_alpha_stride) coverage, device pointer mode only
+# c and s share the alpha stride; stride_c 1 is densely packed, stride_c 2 a strided layout
+  - name: rot_stride_alpha
+    category: pre_checkin
+    N: [ 1025 ]
+    incx_incy: *incx_incy_range_small
+    batch_count: [ 3 ]
+    stride_scale: [ 1 ]
+    alpha_beta_stride: true
+    stride_c: [ 1, 2 ] # alpha stride (shared by c and s)
+    pointer_mode_host: false
+    function:
+      - rot_batched:   *rot_precisions
+      - rot_strided_batched:   *rot_precisions
+      - rot_batched_ex: *rot_ex_precisions
+      - rot_strided_batched_ex: *rot_ex_precisions
+
 ...

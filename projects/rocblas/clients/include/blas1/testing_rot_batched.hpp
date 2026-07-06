@@ -83,6 +83,10 @@ void testing_rot_batched(const Arguments& arg)
     int64_t incy        = arg.incy;
     int64_t batch_count = arg.batch_count;
 
+    // Per-batch c and s (alpha striding) share the alpha stride, device pointer mode only.
+    bool    ab_striding  = arg.alpha_beta_stride;
+    int64_t alpha_stride = ab_striding ? arg.stride_c : 0;
+
     rocblas_local_handle handle{arg};
     double               cpu_time_used;
     double norm_error_host_x = 0.0, norm_error_host_y = 0.0, norm_error_device_x = 0.0,
@@ -101,14 +105,14 @@ void testing_rot_batched(const Arguments& arg)
     // Allocate host memory
     HOST_MEMCHECK(host_batch_vector<T>, hx, (N, incx, batch_count));
     HOST_MEMCHECK(host_batch_vector<T>, hy, (N, incy, batch_count));
-    HOST_MEMCHECK(host_vector<U>, hc, (1, 1));
-    HOST_MEMCHECK(host_vector<V>, hs, (1, 1));
+    HOST_MEMCHECK(host_vector<U>, hc, (batch_count, alpha_stride));
+    HOST_MEMCHECK(host_vector<V>, hs, (batch_count, alpha_stride));
 
     // Allocate device memory
     DEVICE_MEMCHECK(device_batch_vector<T>, dx, (N, incx, batch_count));
     DEVICE_MEMCHECK(device_batch_vector<T>, dy, (N, incy, batch_count));
-    DEVICE_MEMCHECK(device_vector<U>, dc, (1, 1));
-    DEVICE_MEMCHECK(device_vector<V>, ds, (1, 1));
+    DEVICE_MEMCHECK(device_vector<U>, dc, (batch_count, alpha_stride));
+    DEVICE_MEMCHECK(device_vector<V>, ds, (batch_count, alpha_stride));
 
     // Initialize data on host memory
     rocblas_init_vector(hx, arg, rocblas_client_alpha_sets_nan, true);
@@ -124,7 +128,8 @@ void testing_rot_batched(const Arguments& arg)
 
     if(arg.unit_check || arg.norm_check)
     {
-        if(arg.pointer_mode_host)
+        // Per-batch c and s (alpha striding) are only supported in device pointer mode.
+        if(arg.pointer_mode_host && !ab_striding)
         {
             CHECK_ROCBLAS_ERROR(rocblas_set_pointer_mode(handle, rocblas_pointer_mode_host));
             CHECK_HIP_ERROR(dx.transfer_from(hx));
@@ -191,8 +196,8 @@ void testing_rot_batched(const Arguments& arg)
                     // Allocate device memory
                     DEVICE_MEMCHECK(device_batch_vector<T>, dx_copy, (N, incx, batch_count));
                     DEVICE_MEMCHECK(device_batch_vector<T>, dy_copy, (N, incy, batch_count));
-                    DEVICE_MEMCHECK(device_vector<U>, dc_copy, (1, 1));
-                    DEVICE_MEMCHECK(device_vector<V>, ds_copy, (1, 1));
+                    DEVICE_MEMCHECK(device_vector<U>, dc_copy, (batch_count, alpha_stride));
+                    DEVICE_MEMCHECK(device_vector<V>, ds_copy, (batch_count, alpha_stride));
 
                     CHECK_HIP_ERROR(dc_copy.transfer_from(hc));
                     CHECK_HIP_ERROR(ds_copy.transfer_from(hs));
@@ -229,11 +234,17 @@ void testing_rot_batched(const Arguments& arg)
         cpu_time_used = get_time_us_no_sync();
         for(size_t b = 0; b < batch_count; b++)
         {
-            ref_rot<T, T, U, V>(N, hx_gold[b], incx, hy_gold[b], incy, hc, hs);
+            ref_rot<T, T, U, V>(N,
+                                hx_gold[b],
+                                incx,
+                                hy_gold[b],
+                                incy,
+                                (U*)hc + b * alpha_stride,
+                                (V*)hs + b * alpha_stride);
         }
         cpu_time_used = get_time_us_no_sync() - cpu_time_used;
 
-        if(arg.pointer_mode_host)
+        if(arg.pointer_mode_host && !ab_striding)
         {
             if(arg.unit_check)
             {
@@ -282,6 +293,7 @@ void testing_rot_batched(const Arguments& arg)
 
         hipStream_t stream;
         CHECK_ROCBLAS_ERROR(rocblas_get_stream(handle, &stream));
+        handle.pre_test(arg);
         for(int iter = 0; iter < total_calls; iter++)
         {
             if(iter == number_cold_calls)
@@ -298,6 +310,7 @@ void testing_rot_batched(const Arguments& arg)
                            ds,
                            batch_count));
         }
+        handle.post_test(arg);
 
         gpu_time_used = (get_time_us_sync(stream) - gpu_time_used);
 

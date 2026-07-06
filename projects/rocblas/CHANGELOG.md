@@ -12,6 +12,8 @@ rocBLAS documentation is available at
 * Per-batch `alpha`/`beta` support for Level 2 batched and strided-batched `gemv` via `rocblas_set_batch_alpha_stride` and `rocblas_set_batch_beta_stride` (device pointer mode).
 * Per-batch `alpha` support for Level 2 batched and strided-batched `ger`, `geru`, and `gerc` via `rocblas_set_batch_alpha_stride` (device pointer mode).
 * Per-batch `alpha` (scalar vector) API support for `axpy_batched`, `axpy_strided_batched`, and their `_ex` forms through `rocblas_set_batch_alpha_stride` when `rocblas_handle` is in `rocblas_pointer_mode_device`.
+* Per-batch `alpha` (scalar vector) API support for `scal_batched`, `scal_strided_batched`, and their `_ex` forms through `rocblas_set_batch_alpha_stride` when `rocblas_handle` is in `rocblas_pointer_mode_device`.
+* Per-batch `c` and `s` (scalar vectors) API support for `rot_batched`, `rot_strided_batched`, and their `_ex` forms through `rocblas_set_batch_alpha_stride` (shared by `c` and `s`) when `rocblas_handle` is in `rocblas_pointer_mode_device`.
 * support custom build with CMake arguments `GPU_TARGET=amdgcnspirv` when using `BUILD_WITH_TENSILE=OFF`
 
 ### Resolved issues

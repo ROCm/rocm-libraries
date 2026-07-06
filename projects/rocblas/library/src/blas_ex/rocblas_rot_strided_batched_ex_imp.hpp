@@ -120,7 +120,9 @@ namespace
                                "batch_count",
                                batch_count,
                                "compute_type",
-                               ex_type_str);
+                               ex_type_str,
+                               "stride_alpha",
+                               handle->get_stride_alpha());
 
         if(n <= 0 || batch_count <= 0)
             return rocblas_status_success;
@@ -141,6 +143,7 @@ namespace
                                                     c,
                                                     s,
                                                     cs_type,
+                                                    handle->get_stride_alpha(),
                                                     batch_count,
                                                     execution_type);
     }

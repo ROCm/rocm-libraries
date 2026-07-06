@@ -127,11 +127,22 @@ namespace
                                    "batch_count",
                                    batch_count,
                                    "compute_type",
-                                   ex_type_str);
+                                   ex_type_str,
+                                   "stride_alpha",
+                                   handle->get_stride_alpha());
         }
 
-        return rocblas_scal_ex_template<API_INT, ROCBLAS_SCAL_NB, false>(
-            handle, n, alpha, alpha_type, x, x_type, incx, stridex, batch_count, execution_type);
+        return rocblas_scal_ex_template<API_INT, ROCBLAS_SCAL_NB, false>(handle,
+                                                                         n,
+                                                                         alpha,
+                                                                         alpha_type,
+                                                                         x,
+                                                                         x_type,
+                                                                         incx,
+                                                                         stridex,
+                                                                         handle->get_stride_alpha(),
+                                                                         batch_count,
+                                                                         execution_type);
     }
 }
 

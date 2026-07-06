@@ -35,11 +35,11 @@ rocblas_status rocblas_scal_ex_typecasting(rocblas_handle handle,
                                            void*          x,
                                            API_INT        incx,
                                            rocblas_stride stride_x,
+                                           rocblas_stride stride_alpha,
                                            API_INT        batch_count)
 {
-    const Ta*            alpha        = (const Ta*)alpha_void;
-    const rocblas_stride stride_alpha = 0;
-    const rocblas_stride offset_x     = 0;
+    const Ta*            alpha    = (const Ta*)alpha_void;
+    const rocblas_stride offset_x = 0;
 
     if(!alpha_void)
         return rocblas_status_invalid_pointer;
@@ -162,6 +162,7 @@ rocblas_status rocblas_scal_ex_template(rocblas_handle   handle,
                                         rocblas_datatype x_type,
                                         API_INT          incx,
                                         rocblas_stride   stride_x,
+                                        rocblas_stride   stride_alpha,
                                         API_INT          batch_count,
                                         rocblas_datatype execution_type)
 {
@@ -174,7 +175,8 @@ rocblas_status rocblas_scal_ex_template(rocblas_handle   handle,
 
     rocblas_status status = rocblas_status_not_implemented;
 
-#define rocblas_scal_ex_typecasting_PARAM handle, n, alpha, x, incx, stride_x, batch_count
+#define rocblas_scal_ex_typecasting_PARAM \
+    handle, n, alpha, x, incx, stride_x, stride_alpha, batch_count
 
     if(alpha_type == rocblas_datatype_f16_r && x_type == rocblas_datatype_f16_r
        && execution_type == rocblas_datatype_f32_r)
@@ -292,5 +294,6 @@ rocblas_status rocblas_scal_ex_template(rocblas_handle   handle,
         rocblas_datatype x_type,                                        \
         TI_              incx,                                          \
         rocblas_stride   stride_x,                                      \
+        rocblas_stride   stride_alpha,                                  \
         TI_              batch_count,                                   \
         rocblas_datatype execution_type);
