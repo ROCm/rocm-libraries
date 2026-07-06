@@ -134,6 +134,7 @@ struct WaveWiseMmaPipeline : public MmaPipelineBase<WaveWiseMmaPipeline<ADataTyp
     // TODO: Check this in WMMA pipelines / gfx1250.
     static constexpr index_t kAKPack = MmaOp::kABKPerLane * FragsK;
     static constexpr index_t kBKPack = MmaOp::kABKPerLane * FragsK;
+    static constexpr index_t kCMLane = MmaOp::kM / MmaOp::kCMBlocks / MmaOp::kCMPerLane;
 
     // CK Tile expects this structure with some old-style layout params. Added for compatibility.
     struct WarpGemmAttribute

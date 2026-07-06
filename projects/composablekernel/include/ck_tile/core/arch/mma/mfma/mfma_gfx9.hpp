@@ -997,7 +997,6 @@ struct amdgcn_mma<tf32_t, tf32_t, fp32_t, 16u, 16u, 32u, CompilerTarget, MmaOpFa
     CK_TILE_DEVICE static CVecType
     exec(AVecType const& aVec, BVecType const& bVec, CVecType const& cVec)
     {
-#if defined(__gfx950__)
         ext_vector_t<bf16_t, 8> a_big;
         ext_vector_t<bf16_t, 8> a_small;
         ext_vector_t<bf16_t, 8> b_big;
@@ -1014,12 +1013,6 @@ struct amdgcn_mma<tf32_t, tf32_t, fp32_t, 16u, 16u, 32u, CompilerTarget, MmaOpFa
         result = __builtin_amdgcn_mfma_f32_16x16x32_bf16(
             a_big, b_big, result, P::cbsz, P::abid, P::blgp);
         return {result};
-#else
-        ck_tile::ignore = aVec;
-        ck_tile::ignore = bVec;
-        ck_tile::ignore = cVec;
-        return {cVec};
-#endif
     }
 };
 
@@ -1037,7 +1030,6 @@ struct amdgcn_mma<tf32_t, tf32_t, fp32_t, 32u, 32u, 16u, CompilerTarget, MmaOpFa
     CK_TILE_DEVICE static CVecType
     exec(AVecType const& aVec, BVecType const& bVec, CVecType const& cVec)
     {
-#if defined(__gfx950__)
         ext_vector_t<bf16_t, 8> a_big;
         ext_vector_t<bf16_t, 8> a_small;
         ext_vector_t<bf16_t, 8> b_big;
@@ -1054,12 +1046,6 @@ struct amdgcn_mma<tf32_t, tf32_t, fp32_t, 32u, 32u, 16u, CompilerTarget, MmaOpFa
         result = __builtin_amdgcn_mfma_f32_32x32x16_bf16(
             a_big, b_big, result, P::cbsz, P::abid, P::blgp);
         return {result};
-#else
-        ck_tile::ignore = aVec;
-        ck_tile::ignore = bVec;
-        ck_tile::ignore = cVec;
-        return {cVec};
-#endif
     }
 };
 

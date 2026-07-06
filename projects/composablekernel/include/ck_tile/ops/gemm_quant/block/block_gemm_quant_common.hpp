@@ -207,7 +207,7 @@ struct AQPickerCommon : public BlockGemmQuantBase
                 // to.
                 constexpr index_t m_base_offset_of_c_row =
                     (c_row / WarpGemm::WarpGemmAttribute::Impl::kCM1PerLane) *
-                    (WarpGemm::WarpGemmAttribute::Impl::kCMLane *
+                    (WarpGemm::kCMLane *
                      WarpGemm::WarpGemmAttribute::Impl::kCM1PerLane);
 
                 // M offset of each thread within its group (see comment above)
