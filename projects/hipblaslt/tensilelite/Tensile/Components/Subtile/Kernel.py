@@ -900,13 +900,12 @@ class RegisterTileInfo:
     return str(self.regList)
 
 
-def _zeroRegRange(module, writer, tileInfo, firstReg, totalRegs, isAgpr, borrowScratch=None):
+def _zeroRegRange(module, writer, tileInfo, firstReg, totalRegs, isAgpr):
   """Zero a contiguous register range using MFMA (16/inst) or WMMA (8/inst).
 
-  borrowScratch: optional base index of a provably-dead, 2-aligned VGPR pair
-  (from the already-allocated input tile block) to reuse as the MFMA zero-source
-  scratch when a fresh checkout would overflow the pool. When given it is used
-  in place of a checkout and is NOT checked in (the tile block owns it).
+  Uses the last MFMA-sized chunk of the D range itself as the zero source:
+  scalar-zero that chunk first, then use it as the A/B operand to MFMA-zero
+  all preceding chunks. No external scratch VGPRs are needed.
   """
   useWmma = writer.states.asmCaps.get("HasWMMA_AccImmZero", False)
   tileAlias = vgpr if useWmma else (accvgpr if isAgpr else vgpr)
@@ -924,49 +923,31 @@ def _zeroRegRange(module, writer, tileInfo, firstReg, totalRegs, isAgpr, borrowS
     acc2_kwargs = {"acc2": 0}
 
   numInst = totalRegs // regsPerInst
-  # MFMA-based zeroing needs a 2-VGPR scratch holding 0 as the matrix source.
-  # When initC is overlapped with the prologue global reads (InitCGROverlap),
-  # this scratch is requested while the VGPR pool is already at its working-set
-  # peak, so checking out 2 fresh VGPRs can push the pool past the hardware limit
-  # (MaxVgpr) and reject otherwise-valid kernels. Precedence when a fresh
-  # checkout would not fit under MaxVgpr: (1) borrow a provably-dead, 2-aligned
-  # pair from the input tile block (borrowScratch) and keep the fast MFMA path;
-  # (2) otherwise fall back to scratch-free scalar zeroing. Both still overlap GR.
-  useBorrow = False
-  if numInst > 0:
-    maxVgpr = writer.states.regCaps["MaxVgpr"]
-    alignedTop = ((writer.vgprPool.size() + 1) // 2) * 2  # next 2-aligned base
-    if alignedTop + 2 > maxVgpr:
-      if borrowScratch is not None:
-        useBorrow = True  # reuse dead input-tile regs: no pool growth, MFMA path kept
-      else:
-        numInst = 0  # no headroom and nothing to borrow: zero everything scalar
-  if numInst > 0:
-    if useBorrow:
-      tmpVgpr = borrowScratch
-    else:
-      tmpVgpr = writer.vgprPool.checkOutAligned(2, 2, tag="zeroRegRange_tmpVgpr")
-    module.add(VMovB64(dst=vgpr(tmpVgpr, 2), src=0, comment="zero A/B"))
+  # Scalar-zero the last full chunk (or the only chunk). When numInst > 1 this
+  # chunk doubles as the MFMA zero-source for all preceding chunks, saving one
+  # MFMA and avoiding any scratch allocation.
+  lastChunkBase = firstReg + max(0, numInst - 1) * regsPerInst
+  for i in range(min(regsPerInst, totalRegs)):
+    module.add(tileCopyInst(dst=tileAlias(lastChunkBase + i), src=0,
+                            comment="init%s zero-src v%u" % (tileInfo.tc, lastChunkBase + i)))
+  if numInst > 1:
     module.add(SNop(waitState=1, comment="wait for vgpr before matrix inst"))
-    for i in range(numInst):
+    for i in range(numInst - 1):
       r = firstReg + i * regsPerInst
       module.add(MFMAInstruction(instType=instType, accType=accType,
                                  variant=variant, mfma1k=False,
                                  acc=tileAlias(r, regsPerInst),
-                                 a=vgpr(tmpVgpr, 2), b=vgpr(tmpVgpr, 2),
+                                 a=vgpr(lastChunkBase, 2), b=vgpr(lastChunkBase, 2),
                                  **acc2_kwargs,
                                  comment="init%s: [%u:%u]"%(tileInfo.tc, r, r + regsPerInst - 1)))
-    if not useBorrow:
-      writer.vgprPool.checkIn(tmpVgpr)
-
+  # Remainder registers (< regsPerInst) that don't fill a full MFMA
   for i in range(numInst * regsPerInst, totalRegs):
     module.add(tileCopyInst(dst=tileAlias(firstReg + i), src=0, comment="init%s"%(tileInfo.tc)))
 
-def initVgprTilesToZero(writer, kernel, tileInfo, borrowScratch=None):
+def initVgprTilesToZero(writer, kernel, tileInfo):
   """Initialize vgprTiles to zero using MFMA for blocks of 16, scalar writes for remainder.
 
-  borrowScratch: optional base index of a dead, 2-aligned VGPR pair to reuse as
-  the MFMA zero-source scratch (see _zeroRegRange), forwarded to each range.
+  Uses the last MFMA-chunk of D itself as the zero source (no external scratch needed).
   """
   module = Module()
   module.addComment0("Init %s vgprTiles to zero"%(tileInfo.tc))
@@ -983,16 +964,14 @@ def initVgprTilesToZero(writer, kernel, tileInfo, borrowScratch=None):
     pool = tile.regList.pool
     numRegs = len(tile.regList.indices)
     if pool != curPool:
-      _zeroRegRange(module, writer, tileInfo, firstReg, totalRegs, curPool == writer.agprPool,
-                    borrowScratch=borrowScratch)
+      _zeroRegRange(module, writer, tileInfo, firstReg, totalRegs, curPool == writer.agprPool)
       firstReg = tile.regList.indices[0]
       totalRegs = numRegs
       curPool = pool
     else:
       totalRegs += numRegs
 
-  _zeroRegRange(module, writer, tileInfo, firstReg, totalRegs, curPool == writer.agprPool,
-                borrowScratch=borrowScratch)
+  _zeroRegRange(module, writer, tileInfo, firstReg, totalRegs, curPool == writer.agprPool)
 
   return module
 
