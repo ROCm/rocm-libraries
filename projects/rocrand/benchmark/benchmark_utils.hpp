@@ -27,6 +27,7 @@
 #ifdef __HIP__
     #include <rocrand/rocrand_kernel.h>
 #elif defined(__CUDACC__)
+    #include <cuda.h>
     #include <curand_kernel.h>
 #endif
 
