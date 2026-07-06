@@ -48,7 +48,7 @@ By the end of Week 1, you will:
 1. Set up your environment:
 ```bash
 # Run all commands from the rocKE root:
-cd <rocm-libraries-checkout>/dnn-providers/hip-kernel-provider/rocKE
+cd <rocm-libraries-checkout>/dnn-providers/hip-kernel-provider/rocke/platform
 export PYTHONPATH=python
 export PYTHONDONTWRITEBYTECODE=1
 

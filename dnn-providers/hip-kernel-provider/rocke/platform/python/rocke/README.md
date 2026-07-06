@@ -57,7 +57,7 @@ rocke/platform/python/rocke/
 ```
 
 ## Quick Start
-Run from the `rocke/platform/` root (the package lives under `Python/`):
+Run from the `rocke/platform/` root (the package lives under `python/`):
 
 ```bash
 export PYTHONPATH=python

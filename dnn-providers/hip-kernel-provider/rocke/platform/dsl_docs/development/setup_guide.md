@@ -39,7 +39,7 @@ recommended stack pins a recent, consistent ROCm:
 
 ```bash
 git clone <your-rocm-libraries-remote> rocm-libraries
-cd rocm-libraries/dnn-providers/hip-kernel-provider/rocKE
+cd rocm-libraries/dnn-providers/hip-kernel-provider/rocke/platform
 export PYTHONPATH=python          # the DSL lives under python/rocke
 ```
 
