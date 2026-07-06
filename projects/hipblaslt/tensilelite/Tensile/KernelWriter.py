@@ -4078,6 +4078,8 @@ class KernelWriter(metaclass=abc.ABCMeta):
         module.add(self._wait(kernel, tensorParametersA, tensorParametersB, vlcntVal, -1, -1, "10wait for global read"))
       if not kernel["NoLdsWriteCode"]:
         module.add(self._wait(kernel, tensorParametersA, tensorParametersB, -1, 0, -1, "4wait for local write"))
+      elif kernel["enableTDMA"] and kernel["enableTDMB"]:
+        module.add(self._wait(kernel, tensorParametersA, tensorParametersB, 0, -1, -1, "wait for TDM tensor loads"))
       module.add(self._syncThreads(kernel, "wait for local write done, sync"))
       papPriorSync = True
     elif kernel["enableTDMA"] and kernel["enableTDMB"]:
@@ -5736,6 +5738,11 @@ class KernelWriter(metaclass=abc.ABCMeta):
       originalNta = tensorParametersA["NonTemporal"]
       originalNtb = tensorParametersB["NonTemporal"]
 
+      hasTH = self.states.asmCaps.get("HasTHModifier", False)
+      if hasTH:
+        originalThA = tensorParametersA["TemporalHint"]
+        originalThB = tensorParametersB["TemporalHint"]
+
       ntCombos = [[0, 0], [0, 4], [4, 0]]
       ntLabels = [Label("LoopBody_NTA{}_NTB{}".format(nta, ntb), "") for nta, ntb in ntCombos]
       ntLabelDone = Label("LoopBody_NTA_NTB_Done", "")
@@ -5799,6 +5806,9 @@ class KernelWriter(metaclass=abc.ABCMeta):
         module.add(ntLabels[idx])
         tensorParametersA["NonTemporal"] = nta
         tensorParametersB["NonTemporal"] = ntb
+        if hasTH:
+          tensorParametersA["TemporalHint"] = 1 if nta else 0
+          tensorParametersB["TemporalHint"] = 1 if ntb else 0
         _kernelBody(pack, packPre, nta, ntb)
         # All paths but the last one need to skip the rest. Use long
         # branches everywhere because each kernelBody can easily exceed
@@ -5812,6 +5822,9 @@ class KernelWriter(metaclass=abc.ABCMeta):
 
       tensorParametersA["NonTemporal"] = originalNta
       tensorParametersB["NonTemporal"] = originalNtb
+      if hasTH:
+        tensorParametersA["TemporalHint"] = originalThA
+        tensorParametersB["TemporalHint"] = originalThB
 
     if kernel["ExpertSchedulingMode"] > 0:
       module.add(SSetRegIMM32B32(dst=HWRegContainer(reg="26", value=[0,2]), src=0x0, comment="enable hardware dependency checking"))
@@ -6238,7 +6251,7 @@ class KernelWriter(metaclass=abc.ABCMeta):
         module.addComment1("Recalc local read offsets")
         module.add(self.recalcLocalReadAddressesAB(kernel, tensorParametersA, tensorParametersB))
       module.add(self._wait(kernel, tensorParametersA, tensorParametersB, -1, 0, -1, "5wait for local write"))
-      module.add(self._syncThreads(kernel, "Tail loop LW->LR, sync LDS0", memoryToken=[self.states.memTokenLdsBuffer0]))
+      module.add(self._syncThreads(kernel, "Tail loop LW->LR, sync LDS0", memoryToken=self._tailLoopBarrierTokens(kernel)))
       #module.add(self.dumpLds(kernel, 0, 8))
 
       # tail: free G2L Vgpr
@@ -6466,7 +6479,7 @@ class KernelWriter(metaclass=abc.ABCMeta):
       # generate wait code for early exit
       module.add(self._wait(kernel, tensorParametersA, tensorParametersB, 0, -1, -1, " tailloopInNll: wait for global read"))
       module.add(self._wait(kernel, tensorParametersA, tensorParametersB, -1, 0, -1, " tailloopInNll: wait for local read"))
-      module.add(self._syncThreads(kernel, "tailloopInNll: wait until LR done, sync LDS0", memoryToken=[self.states.memTokenLdsBuffer0]))
+      module.add(self._syncThreads(kernel, "tailloopInNll: wait until LR done, sync LDS0", memoryToken=self._tailLoopBarrierTokens(kernel)))
 
     if self.states.lastValuMXSAB:
       self.vgprPool.add(0 , self.states.lastValuMXSAB, "ValuMXSAB")
@@ -7183,9 +7196,12 @@ class KernelWriter(metaclass=abc.ABCMeta):
     if kernel["1LDSBuffer"]:
       self.states.memTokenLdsBuffer0 = 0
       self.states.memTokenLdsBuffer1 = 0
+      self.states.memTokenLdsSplit = [[1, 2], [1, 2]]
     else:
       self.states.memTokenLdsBuffer0 = 0
       self.states.memTokenLdsBuffer1 = 1
+      # [bufferParity][half]; half-0 reuses buffer token so MXSA/MXSB share it
+      self.states.memTokenLdsSplit = [[self.states.memTokenLdsBuffer0, 2], [self.states.memTokenLdsBuffer1, 6]]
     self.states.ldsReadTokenIdx = self.states.memTokenLdsBuffer0
     self.states.ldsTensorTokenIdx = self.states.memTokenLdsBuffer0
     self.states.ldsDirectToLDSTokenIdx = self.states.memTokenLdsBuffer0
@@ -9921,6 +9937,7 @@ class KernelWriter(metaclass=abc.ABCMeta):
     tP["wtc"] = itP[cM].writeTileDimComponents                   # write vector components along tile dimension
     tP["idx"] = kernel["ProblemType"]["Index%d"%tP["tensorIdx"]] # index 0 is tile dimension belonging to A. Note 'idx' may not be in tP['ia'].
     tP["NonTemporal"] = kernel["NonTemporal%s"%cM]               # non-temporal read type
+    tP["TemporalHint"] = kernel.get("TemporalHint%s"%cM, 0)      # temporal-hint read type
     tP["shiftGR"] = 0 if (tP["bpeGR"] >= tP["bpeDS"]) else int(tP["glvw"] // 2 * (tP["bpeDS"] / self.states.bpr))  # Shift global read register for cvt spaces
     tP["bpeRatio"] = tP["bpeDS"] // tP["bpeGR"] if tP["bpeGR"] < tP["bpeDS"] else 1                                # g2lIdx multiplier
 
@@ -10399,6 +10416,14 @@ class KernelWriter(metaclass=abc.ABCMeta):
     if self.do["Sync"]:
       return syncThreads(kernel, self.states.archCaps, self.states.asmCaps, comment, skipForceWaitcnt0=skipForceWaitcnt0, memoryToken=memoryToken)
     return Module("SyncThreads (Empty)")
+
+  def _tailLoopBarrierTokens(self, kernel):
+    # Explicit tail barriers must list every token; the auto-barrier pass doesn't cover them.
+    tokens = [self.states.memTokenLdsBuffer0]
+    if kernel["TDMSplit"] and not kernel["ProblemType"]["Sparse"]:
+      for row in self.states.memTokenLdsSplit:
+        tokens.extend(row)
+    return sorted(set(tokens))
 
   ##############################################################################
   # PostMainLoopBarrierCheckAndReset
