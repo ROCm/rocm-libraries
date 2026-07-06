@@ -45,7 +45,7 @@ using namespace hipsparse_test;
 template <typename I, typename T>
 void testing_spmm_bell_bad_arg(const Arguments& argus)
 {
-#if(!defined(CUDART_VERSION))
+#if (!defined(CUDART_VERSION))
     int32_t              n            = 100;
     int32_t              m            = 100;
     int32_t              k            = 100;
@@ -188,7 +188,7 @@ void testing_spmm_bell_bad_arg(const Arguments& argus)
 template <typename I, typename T>
 void testing_spmm_bell(Arguments argus)
 {
-#if(!defined(CUDART_VERSION) || CUDART_VERSION >= 11021)
+#if (!defined(CUDART_VERSION) || CUDART_VERSION >= 11021)
     I                    m        = argus.M;
     I                    n        = argus.N;
     I                    k        = argus.K;
@@ -326,22 +326,23 @@ void testing_spmm_bell(Arguments argus)
         // Host pointer mode.
         CHECK_HIPSPARSE_ERROR(hipsparseSetPointerMode(handle, HIPSPARSE_POINTER_MODE_HOST));
 
-#if(!defined(CUDART_VERSION) || CUDART_VERSION >= 11021)
+#if (!defined(CUDART_VERSION) || CUDART_VERSION >= 11021)
         CHECK_HIPSPARSE_ERROR(hipsparseSpMM_preprocess(
             handle, transA, transB, &h_alpha, matA, matB, &h_beta, matC1, typeT, alg, dbuffer));
 #endif
         CHECK_HIPSPARSE_ERROR(hipsparseSpMM(
             handle, transA, transB, &h_alpha, matA, matB, &h_beta, matC1, typeT, alg, dbuffer));
 
+#if (!defined(CUDART_VERSION))
         // Device pointer mode.
         CHECK_HIPSPARSE_ERROR(hipsparseSetPointerMode(handle, HIPSPARSE_POINTER_MODE_DEVICE));
 
-#if(!defined(CUDART_VERSION) || CUDART_VERSION >= 11021)
         CHECK_HIPSPARSE_ERROR(hipsparseSpMM_preprocess(
             handle, transA, transB, d_alpha, matA, matB, d_beta, matC2, typeT, alg, dbuffer));
-#endif
+
         CHECK_HIPSPARSE_ERROR(hipsparseSpMM(
             handle, transA, transB, d_alpha, matA, matB, d_beta, matC2, typeT, alg, dbuffer));
+#endif
 
         host_bellmm(A_mb,
                     n,
@@ -363,10 +364,12 @@ void testing_spmm_bell(Arguments argus)
                     idxBase);
 
         CHECK_HIP_ERROR(hipMemcpy(hC_1.data(), dC_1, sizeof(T) * nnz_C, hipMemcpyDeviceToHost));
-        CHECK_HIP_ERROR(hipMemcpy(hC_2.data(), dC_2, sizeof(T) * nnz_C, hipMemcpyDeviceToHost));
-
         unit_check_near(1, nnz_C, 1, hC_gold.data(), hC_1.data());
+
+#if (!defined(CUDART_VERSION))
+        CHECK_HIP_ERROR(hipMemcpy(hC_2.data(), dC_2, sizeof(T) * nnz_C, hipMemcpyDeviceToHost));
         unit_check_near(1, nnz_C, 1, hC_gold.data(), hC_2.data());
+#endif
     }
 
     if(argus.timing)
