@@ -397,8 +397,7 @@ void SdpaFwdPlanBuilder::buildPlan(
     params.lseStrideHead = lseStrideHead;
     params.attnScale = attnScale;
     params.archString = deviceString;
-    const plan_utils::MaskType maskType = plan_utils::getMaskType(sdpaAttrs);
-    params.noMask = maskType == plan_utils::MaskType::NO_MASK;
+    params.maskType = plan_utils::getMaskType(sdpaAttrs);
 
     // Find matching kernel to graph
     fmha_v3_fwdConfig config;
@@ -408,7 +407,7 @@ void SdpaFwdPlanBuilder::buildPlan(
             qTensor->data_type(), kTensor->data_type(), vTensor->data_type(), oTensor->data_type()),
         static_cast<int>(headDimQk),
         static_cast<int>(headDimV),
-        maskType,
+        params.maskType,
         getRoundingMode(sdpaAttrs),
         getBatchMode(sdpaAttrs),
         &cfg_fmha_fwd);

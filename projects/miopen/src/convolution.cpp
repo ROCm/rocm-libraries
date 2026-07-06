@@ -17,6 +17,7 @@
 #include <miopen/tensor.hpp>
 #include <miopen/tensor_layout.hpp>
 #include <miopen/algorithm.hpp>
+#include <miopen/conv/solver_finders.hpp>
 
 #include <nlohmann/json.hpp>
 
@@ -24,6 +25,7 @@
 #include <cassert>
 #include <cmath>
 #include <cstddef>
+#include <limits>
 #include <ostream>
 #include <ranges>
 #include <tuple>
@@ -449,6 +451,43 @@ std::size_t ConvolutionDescriptor::GetWorkSpaceSize(ExecutionContext ctx,
 
     MIOPEN_LOG_I(workspace_size);
     return workspace_size;
+}
+
+void ConvolutionDescriptor::GetWorkSpaceSizeRange(ExecutionContext ctx,
+                                                  const conv::ProblemDescription& problem,
+                                                  std::size_t* minWorkspaceSize,
+                                                  std::size_t* maxWorkspaceSize) const
+{
+    MIOPEN_LOG_I2("");
+
+    ctx.do_search             = false;
+    ctx.disable_perfdb_access = true;
+
+    auto minWs = std::numeric_limits<std::size_t>::max();
+    auto maxWs = std::size_t{0};
+    auto found = false;
+
+    for(const auto& solver_id : solver::GetSolversByPrimitive(solver::Primitive::Convolution))
+    {
+        const auto algo = solver_id.GetAlgo();
+        if(conv::IsAlgorithmDisabled(algo, problem))
+            continue;
+        const auto& s = solver_id.GetSolver();
+        if(s.IsEmpty() || !s.IsApplicable(ctx, problem))
+            continue;
+
+        const auto ws = s.GetWorkspaceSize(ctx, problem);
+        minWs         = std::min(minWs, ws);
+        maxWs         = std::max(maxWs, ws);
+        found         = true;
+    }
+
+    if(!found)
+        MIOPEN_THROW(miopenStatusNotImplemented, "No applicable solver found");
+
+    MIOPEN_LOG_I("min=" << minWs << " max=" << maxWs);
+    *minWorkspaceSize = minWs;
+    *maxWorkspaceSize = maxWs;
 }
 
 bool ConvolutionDescriptor::EnableTF32() const
