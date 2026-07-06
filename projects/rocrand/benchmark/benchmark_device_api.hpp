@@ -137,7 +137,7 @@ struct config
                                                                     req_block_size);
 
             result.block_size = req_block_size;
-            result.occupancy  = (error == CUDA_SUCCESS) ? occupancy : 1;
+            result.occupancy  = (error == 0) ? occupancy : 1;
         }
         else
         {
