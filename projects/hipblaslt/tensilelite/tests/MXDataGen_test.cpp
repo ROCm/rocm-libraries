@@ -482,3 +482,13 @@ TEST(MXDataGenDecoupledScale, MatchingInitUnchangedFromDefault)
     EXPECT_EQ(dataA, dataB);
     EXPECT_EQ(scaleA, scaleB);
 }
+
+TEST(MXScaleLayoutArch, MapsArchNameToScaleLayout)
+{
+    EXPECT_EQ(mxScaleLayoutForArchName("gfx950"), MXScaleLayout::kGFX950);
+    EXPECT_EQ(mxScaleLayoutForArchName("gfx950:sramecc+:xnack-"), MXScaleLayout::kGFX950);
+    EXPECT_EQ(mxScaleLayoutForArchName("gfx1250"), MXScaleLayout::kGFX1250);
+    EXPECT_EQ(mxScaleLayoutForArchName("gfx1250:xnack-"), MXScaleLayout::kGFX1250);
+    EXPECT_EQ(mxScaleLayoutForArchName("gfx942"), MXScaleLayout::kNone);
+    EXPECT_EQ(mxScaleLayoutForArchName("gfx90a"), MXScaleLayout::kNone);
+}

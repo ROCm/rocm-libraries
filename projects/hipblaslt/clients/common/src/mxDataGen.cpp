@@ -899,14 +899,14 @@ MXScaleLayout mxScaleLayoutForArchName(std::string_view archName)
 {
     if(archName.find("gfx950") != std::string_view::npos)
         return MXScaleLayout::kGFX950;
-    return MXScaleLayout::kGFX1250;
+    if(archNameHasGfx1250Prefix(archName))
+        return MXScaleLayout::kGFX1250;
+    return MXScaleLayout::kNone;
 }
 
 MXScaleLayout mxScaleLayoutForFormat(int scalingFormat)
 {
-    // hipblaslt_scaling_format::Block_32_UE8M0_32_8_EXT (avoid datatype2string.hpp + ostream in HIP TU)
-    constexpr int kBlock32Ue8m0Gfx950Ext = 1001;
-    if(scalingFormat == kBlock32Ue8m0Gfx950Ext)
+    if(scalingFormat == kHipblasltScalingBlock32Ue8m0Gfx950Ext)
         return MXScaleLayout::kGFX950;
     if(currentDeviceIsGfx1250())
         return MXScaleLayout::kGFX1250;

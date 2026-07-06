@@ -2072,7 +2072,8 @@ namespace TensileLite
             MXScaleLayout layoutA = MXScaleLayout::kNone;
             MXScaleLayout layoutB = MXScaleLayout::kNone;
 
-            if(m_mxScaleLayout == MXScaleLayout::kGFX950 && m_currentSolution != nullptr)
+            if(m_mxScaleFormat > 0 && m_mxScaleLayout == MXScaleLayout::kGFX950
+               && m_currentSolution != nullptr)
             {
                 auto const&      mi            = m_currentSolution->sizeMapping.matrixInstruction;
                 size_t           MiK           = static_cast<size_t>(mi[2]);
@@ -2104,7 +2105,7 @@ namespace TensileLite
                     }
                 }
             }
-            else if(m_mxScaleLayout == MXScaleLayout::kGFX1250)
+            else if(m_mxScaleFormat > 0 && m_mxScaleLayout == MXScaleLayout::kGFX1250)
             {
                 if(problem.mxBlockA() > 0)
                     layoutA = MXScaleLayout::kGFX1250;
@@ -2148,7 +2149,7 @@ namespace TensileLite
 
                   std::memset(pristineScale.cpuInput.valid.get(),
                               0x00,
-                              scaleDesc.totalAllocatedElements());
+                              scaleDesc.totalAllocatedBytes());
 
                   hipDataType const hipDataT = hipMxDataTypeForDataGenerator(dataDesc.dataType());
                   hipDataType const hipScaleT = hipMxScaleTypeForDataGenerator(scaleEltType);
