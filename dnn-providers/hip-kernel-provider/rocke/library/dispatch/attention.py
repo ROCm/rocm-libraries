@@ -233,8 +233,9 @@ ATTENTION_REGISTRY.extend(
 def _make_gfx942_dense_pipe_candidate() -> KernelCandidate:
     """Fast gfx942 fp16 prefill kernel — transposed-x8 flash with ring-sliced K.
 
-    Registered at priority 15 so it outranks the generic unified_2d candidate
+    Registered at priority 5 so it outranks the generic unified_2d candidate
     (priority 10) whenever both would match the same gfx942 fp16 2D problem.
+    The registry sorts ascending (lower = higher precedence).
     Callers can also force this path explicitly via algorithm="dense_pipe".
     """
     spec_id = "gfx942_dense_pipe"
@@ -286,7 +287,7 @@ def _make_gfx942_dense_pipe_candidate() -> KernelCandidate:
         algorithm="dense_pipe",
         spec_id=spec_id,
         abi_version=ATTENTION_ABI_VERSION,
-        priority=15,
+        priority=5,
         supports=support,
         select_spec=select,
         signature=lambda _spec: (),

@@ -1011,10 +1011,18 @@ def _tiled_cache_key(problem: UnifiedAttentionProblem) -> Tuple:
         _select_2d_compile_backend(problem),
         _enable_gfx942_fp16_flash(problem),
         _enable_gfx942_bf16_flash(problem),
-        _gfx942_flash_wide_setting() if _enable_gfx942_fp16_flash(problem) else None,
+        (
+            _gfx942_flash_wide_setting()
+            if (
+                _enable_gfx942_fp16_flash(problem) or _enable_gfx942_bf16_flash(problem)
+            )
+            else None
+        ),
         (
             _gfx942_flash_kv_cache_policy(problem)
-            if _enable_gfx942_fp16_flash(problem)
+            if (
+                _enable_gfx942_fp16_flash(problem) or _enable_gfx942_bf16_flash(problem)
+            )
             else None
         ),
         _enable_gfx942_flash_q_direct(problem),
@@ -1441,14 +1449,13 @@ def _enable_gfx942_bf16_flash(problem: UnifiedAttentionProblem) -> bool:
     wide path (the transposed PV consumes P from registers, dropping the P_lds
     round-trip), addressing both throughput and occupancy.
 
-    OPT-IN / DEFAULT-OFF: gated behind ``HIPDNN_GFX942_BF16_WIDE=1`` so the
-    default dispatch (and every shipped kernel's byte-identity) is unchanged
-    while the path is being validated/tuned. The fp16 flash path
-    (``use_mfma_32x32x8``) is unaffected and takes precedence for fp16.
+    DEFAULT-ON for eligible shapes: small_q_narrow shapes (q<=768) are sent
+    to the narrow light path because the bf16 D128 ring is not yet validated
+    in the kernel generator (D128 ring produces wrong results; D64 ring is
+    correct but insufficient to amortise the ring overhead at short context).
+    The fp16 flash path (``use_mfma_32x32x8``) is unaffected and takes
+    precedence for fp16.
     """
-    env = __import__("os").environ.get("HIPDNN_GFX942_BF16_WIDE", "").strip().lower()
-    if env not in ("1", "on", "enable", "enabled", "yes", "true"):
-        return False
     return (
         _resolve_attention_arch() == "gfx942"
         and problem.head_size in (64, 128)
@@ -1462,12 +1469,11 @@ def _enable_gfx942_bf16_flash(problem: UnifiedAttentionProblem) -> bool:
         # Prefill only (the wide 32x32 atom processes a 32-row M tile; decode
         # q=1 has no rows to fill and routes to the 3D split-KV / narrow path).
         and problem.max_seqlen_q > 1
-        # Mirror the fp16 MHA routing: for GQA the narrow light path wins at
-        # short context; for MHA (num_queries_per_kv == 1) the dense pipe cures
-        # the S512 pathology so skip the narrow carve-out.
-        and not (
-            _enable_gfx942_small_q_narrow(problem) and problem.num_queries_per_kv > 1
-        )
+        # Unlike fp16 (which has a working ring for MHA short-context), bf16
+        # D128 ring is not yet validated. Send all small_q_narrow shapes —
+        # both GQA and MHA — to the narrow light path until D128 bf16 ring
+        # is fixed in the kernel generator.
+        and not _enable_gfx942_small_q_narrow(problem)
     )
 
 
@@ -1613,11 +1619,13 @@ def _gfx942_flash_kv_cache_policy(problem: UnifiedAttentionProblem) -> str:
 
 
 def _enable_gfx942_flash_q_direct(problem: UnifiedAttentionProblem) -> bool:
-    return _enable_gfx942_fp16_flash(problem) and problem.head_size == 64
+    return (
+        _enable_gfx942_fp16_flash(problem) or _enable_gfx942_bf16_flash(problem)
+    ) and problem.head_size == 64
 
 
 def _enable_gfx942_flash_mask_limit(problem: UnifiedAttentionProblem) -> bool:
-    if not _enable_gfx942_fp16_flash(problem):
+    if not (_enable_gfx942_fp16_flash(problem) or _enable_gfx942_bf16_flash(problem)):
         return False
     env = __import__("os").environ.get("HIPDNN_GFX942_FLASH_MLIM", "").strip().lower()
     if env in ("0", "off", "disable", "disabled", "no", "false"):
@@ -1642,7 +1650,15 @@ def _enable_gfx942_flash_k_sliced_ring(problem: UnifiedAttentionProblem) -> bool
     # mask-limit (nw4) vs the prior per-head bests: D64 13-17% faster (beats Torch
     # at S2048, ~parity elsewhere); D128 beats Torch S2048/S4096. So D64 and D128
     # prefill now share the ring path.
-    if not (_enable_gfx942_fp16_flash(problem) and problem.head_size in (64, 128)):
+    # bf16 ring is correctness-verified only for D64 — D128 bf16 ring produces
+    # wrong results (max_abs ~3-5, NaN/Inf for MHA) in the kernel generator and
+    # is excluded until the D128 bf16 ring path in attention_tiled_2d.py is fixed.
+    if _enable_gfx942_bf16_flash(problem) and problem.head_size == 128:
+        return False
+    if not (
+        (_enable_gfx942_fp16_flash(problem) or _enable_gfx942_bf16_flash(problem))
+        and problem.head_size in (64, 128)
+    ):
         return False
     env = (
         __import__("os").environ.get("HIPDNN_GFX942_K_SLICED_RING", "").strip().lower()
@@ -1854,12 +1870,23 @@ def _tiled_spec_from_problem(
         # (HIPDNN_GFX942_BF16_WIDE=1); default dispatch is byte-identical.
         # Uses the CDNA3-legal mfma_f32_32x32x8_bf16 atom (the K=16 bf16 atom is
         # gfx950-only). The transposed orientation consumes V from strided LDS +
-        # P^T from registers (no P_lds, no gfx950-only transpose reads). Geometry:
-        #   * D64  -> nw=4 (BLOCK_M=128), double-buffered K: LDS=32 KB => 2 WG/CU.
-        #   * D128 -> nw=2 (BLOCK_M=64=T) + K single-buffer: LDS=48 KB (the
-        #     double-buffered nw=4 form is 80 KB and overflows the 64 KB cap).
-        nw, single_k = _gfx942_bf16_wide_geometry(problem)
-        use_cfvst = _gfx942_bf16_wide_use_cfvst(problem)
+        # P^T from registers (no P_lds, no gfx950-only transpose reads).
+        #
+        # When the sliced-K ring is active (HIPDNN_GFX942_K_SLICED_RING not
+        # disabled, prefill), the bf16 path mirrors the fp16 ring geometry:
+        #   nw=4 (BLOCK_M=128), 3-slot K ring, cfvst, T=64.
+        # Without ring, falls back to the legacy bf16-wide geometry:
+        #   D64  -> nw=4, double-buffered K.
+        #   D128 -> nw=2 (BLOCK_M=64=T) + K single-buffer: LDS=48 KB.
+        use_ring = _enable_gfx942_flash_k_sliced_ring(problem)
+        if use_ring:
+            nw = _gfx942_flash_wide_setting()
+            single_k = False  # ring uses 3-slot staging, not single/double buffer
+            use_cfvst = True  # ring requires cfvst (spec validator enforces this)
+        else:
+            nw, single_k = _gfx942_bf16_wide_geometry(problem)
+            use_cfvst = _gfx942_bf16_wide_use_cfvst(problem)
+        use_mask_limit = _enable_gfx942_flash_mask_limit(problem)
         return UnifiedAttention2DTiledSpec(
             head_size=problem.head_size,
             block_size=problem.block_size,
@@ -1875,19 +1902,21 @@ def _tiled_spec_from_problem(
             num_warps=nw,
             waves_per_eu=_select_2d_waves_per_eu(problem),
             kv_storage_dtype=_kv_storage_dtype(problem),
-            tile_size=_gfx942_bf16_wide_tile_size(problem),
+            tile_size=64 if use_ring else _gfx942_bf16_wide_tile_size(problem),
             block_m_per_warp=32,
             use_mfma_32x32x8=True,
             use_transposed_qk_32x32=True,
-            use_k_single_buffer=single_k,
-            # Port the fp16 flash family's conflict-free V store (cfvst) to bf16
-            # (byte-size driven: bf16 == 2 bytes == fp16, the perm_b32 transpose
-            # rides raw i32 words, the K=8 atom is gfx942-legal). Measured ~3%
-            # win on D64 prefill (the residual naive-V bottleneck); D128 and
-            # decode keep the naive-V feed (cfvst nw=4 overflows LDS there and
-            # the sliced-K ring that would make it fit regressed -- see
-            # _gfx942_bf16_wide_use_cfvst).
+            use_transposed_scalar_state=use_mask_limit,
+            use_transposed_invariant_hoist=use_mask_limit,
+            use_transposed_mask_once=use_mask_limit,
+            use_transposed_mask_limit=use_mask_limit,
             use_conflict_free_v_store=use_cfvst,
+            use_k_single_buffer=single_k,
+            use_k_sliced_ring=use_ring,
+            use_k_sliced_ldsseq=_enable_gfx942_flash_k_sliced_ldsseq(problem),
+            use_q_direct_global=_enable_gfx942_flash_q_direct(problem),
+            kv_cache_policy=_gfx942_flash_kv_cache_policy(problem),
+            use_i64_kv_addr=_enable_i64_kv_addr(problem),
         )
     if _enable_gfx942_fp16_flash(problem):
         num_warps = _select_gfx942_flash_num_warps(problem)
