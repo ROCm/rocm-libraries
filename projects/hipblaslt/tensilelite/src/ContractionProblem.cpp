@@ -1688,7 +1688,7 @@ namespace TensileLite
         return problem;
     }
 
-    TENSILE_API std::ostream& operator<<(std::ostream&                 stream,
+    TENSILELITEHOST_EXPORT std::ostream& operator<<(std::ostream&                 stream,
                                          ContractionProblemGemm const& contraction)
     {
         return stream << contraction.description();
@@ -1731,7 +1731,7 @@ namespace TensileLite
         return stream >> bound.a >> comma >> bound.b;
     }
 
-    TENSILE_API ProblemInputs::~ProblemInputs() = default;
+    TENSILELITEHOST_EXPORT ProblemInputs::~ProblemInputs() = default;
     ContractionInputs::ContractionInputs()      = default;
     ContractionInputs::~ContractionInputs()     = default;
 

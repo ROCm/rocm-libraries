@@ -14,7 +14,6 @@ GlobalParameters:
   DataInitTypeAlpha: 1
   DataInitTypeBeta: 1
   BoundsCheck: 2
-  #MaxFileName: 256
   #KeepBuildTmp: True
 
 BenchmarkProblems:
