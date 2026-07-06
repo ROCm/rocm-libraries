@@ -1,7 +1,7 @@
 # Copyright © Advanced Micro Devices, Inc., or its affiliates.
 # SPDX-License-Identifier:  MIT
 
-"""Tests for hipDNN executor E2E timing synchronization."""
+"""Tests for hipDNN executor host timing synchronization."""
 
 import time
 import sys
@@ -12,6 +12,19 @@ import pytest
 import dnn_benchmarking.execution.executor as executor_module
 from dnn_benchmarking.config.benchmark_config import BenchmarkConfig
 from dnn_benchmarking.execution.timing import GpuTimerInterface
+
+
+@pytest.fixture(autouse=True)
+def _disable_staging(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Force the non-staged sync path for this module's tests.
+
+    These tests cover the wall-clock + GPU-event sync path and pass
+    ``FakeHandle`` integer streams. On a GPU host ``_is_staged_hip_available``
+    returns True, which would arm a real HIP gate on the fake stream and fail
+    with "context is destroyed". Staging is exercised separately in
+    test_timing.py and the on-GPU integration tests.
+    """
+    monkeypatch.setattr(executor_module, "_is_staged_hip_available", lambda: False)
 
 
 class DummyResult:
@@ -152,7 +165,7 @@ def test_benchmark_synchronizes_each_measured_iteration(monkeypatch) -> None:
     result = executor.benchmark(handle=None, variant_pack={})
 
     assert calls == ["execute", "sync", "execute", "sync", "execute", "sync"]
-    assert len(result.e2e_timings) == 3
+    assert len(result.host_timings) == 3
 
 
 def test_benchmark_uses_handle_stream_for_timing_and_sync(monkeypatch) -> None:
@@ -195,7 +208,7 @@ def test_gpu_timer_start_stop_elapsed_inside_timed_region(monkeypatch) -> None:
     """Ensure GPU timer start/stop/elapsed are invoked within Timer.
 
     elapsed_ms() synchronizes the stop event, so it must be called inside the
-    Timer context for E2E timing to cover the full GPU work interval.
+    Timer context for host timing to cover the full GPU work interval.
     """
     in_timer = {"value": False}
     start_called_in_timer = {"value": False}
@@ -255,12 +268,12 @@ def test_gpu_timer_start_stop_elapsed_inside_timed_region(monkeypatch) -> None:
     assert result.metadata.timing_backend == "hip"
 
 
-def test_e2e_timing_at_least_as_long_as_kernel(monkeypatch) -> None:
-    """Ensure E2E timing >= kernel timing for every iteration.
+def test_host_timing_at_least_as_long_as_kernel(monkeypatch) -> None:
+    """Ensure host timing >= kernel timing for every iteration.
 
-    With correct timer ordering, the wall-clock Timer wraps gpu_timer
-    start/stop and elapsed_ms(). elapsed_ms() synchronizes the stop event, so
-    E2E must always be >= kernel.
+    On the non-staged path the wall-clock Timer wraps gpu_timer start/stop and
+    elapsed_ms(). elapsed_ms() synchronizes the stop event, so the host timing
+    must always be >= kernel.
     We simulate sync overhead in elapsed_ms() so that the real Timer measures
     more wall-clock time than the fixed kernel duration.
     """
@@ -301,17 +314,17 @@ def test_e2e_timing_at_least_as_long_as_kernel(monkeypatch) -> None:
     result = executor.benchmark(handle=None, variant_pack={})
 
     assert result.kernel_timings is not None
-    assert len(result.e2e_timings) == 5
+    assert len(result.host_timings) == 5
     assert len(result.kernel_timings) == 5
 
-    for i, (e2e, kernel) in enumerate(zip(result.e2e_timings, result.kernel_timings)):
+    for i, (host, kernel) in enumerate(zip(result.host_timings, result.kernel_timings)):
         assert (
-            e2e >= kernel
-        ), f"Iteration {i}: E2E ({e2e:.3f}ms) must be >= kernel ({kernel:.3f}ms)"
+            host >= kernel
+        ), f"Iteration {i}: host ({host:.3f}ms) must be >= kernel ({kernel:.3f}ms)"
 
 
-def test_e2e_timings_recorded_without_gpu_timing(monkeypatch) -> None:
-    """Ensure E2E timings are recorded even when GPU timing is disabled."""
+def test_host_timings_recorded_without_gpu_timing(monkeypatch) -> None:
+    """Ensure host timings are recorded even when GPU timing is disabled."""
 
     class FakeTimer:
         def __enter__(self) -> "FakeTimer":
@@ -334,7 +347,7 @@ def test_e2e_timings_recorded_without_gpu_timing(monkeypatch) -> None:
     executor = _make_executor(collect_kernel_timing=False)
     result = executor.benchmark(handle=None, variant_pack={})
 
-    assert result.e2e_timings == [2.0]
+    assert result.host_timings == [2.0]
     assert result.kernel_timings is None
 
 
@@ -362,5 +375,5 @@ def test_cpu_only_torch_does_not_affect_hip_synchronization(monkeypatch) -> None
     executor = _make_executor(collect_kernel_timing=False)
     result = executor.benchmark(handle=None, variant_pack={})
 
-    assert result.e2e_timings
+    assert result.host_timings
     assert sync_calls == ["sync"]
