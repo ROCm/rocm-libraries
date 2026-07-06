@@ -109,6 +109,12 @@ struct RocsparseltContractionProblem
     hipDataType                 bias_type;
     bool                        alpha_vector_scaling;
 
+    const void* gate;
+    size_t      row_stride_g;
+    size_t      col_stride_g;
+    size_t      batch_stride_g;
+    hipDataType gate_type;
+
     void*  workspace;
     size_t workspaceSize;
 
@@ -152,6 +158,10 @@ struct RocsparseltContractionProblem
                                   int64_t                     bias_stride,
                                   hipDataType                 bias_type,
                                   bool                        alpha_vector_scaling,
+                                  const void*                 gate,
+                                  int64_t                     ld_g,
+                                  int64_t                     batch_stride_g,
+                                  hipDataType                 gate_type,
                                   void*                       workspace,
                                   size_t                      workspaceSize,
                                   hipStream_t*                streams,
@@ -200,6 +210,11 @@ struct RocsparseltContractionProblem
         , bias_stride(bias_stride)
         , bias_type(bias_type)
         , alpha_vector_scaling(alpha_vector_scaling)
+        , gate(gate)
+        , row_stride_g(1)
+        , col_stride_g(ld_g)
+        , batch_stride_g(batch_stride_g)
+        , gate_type(gate_type)
         , workspace(workspace)
         , workspaceSize(workspaceSize)
         , streams(streams)
@@ -249,6 +264,10 @@ struct RocsparseltContractionProblem
                                   int64_t                     bias_stride,
                                   hipDataType                 bias_type,
                                   bool                        alpha_vector_scaling,
+                                  const void*                 gate,
+                                  int64_t                     ld_g,
+                                  int64_t                     batch_stride_g,
+                                  hipDataType                 gate_type,
                                   void*                       workspace,
                                   size_t                      workspaceSize,
                                   hipStream_t*                streams,
@@ -297,6 +316,11 @@ struct RocsparseltContractionProblem
         , bias_stride(bias_stride)
         , bias_type(bias_type)
         , alpha_vector_scaling(alpha_vector_scaling)
+        , gate(gate)
+        , row_stride_g(1)
+        , col_stride_g(ld_g)
+        , batch_stride_g(batch_stride_g)
+        , gate_type(gate_type)
         , workspace(workspace)
         , workspaceSize(workspaceSize)
         , streams(streams)
@@ -347,6 +371,10 @@ struct RocsparseltContractionProblem
                                   int64_t                     bias_stride,
                                   hipDataType                 bias_type,
                                   bool                        alpha_vector_scaling,
+                                  const void*                 gate,
+                                  int64_t                     ld_g,
+                                  int64_t                     batch_stride_g,
+                                  hipDataType                 gate_type,
                                   void*                       workspace,
                                   size_t                      workspaceSize,
                                   hipStream_t*                streams,
@@ -395,6 +423,11 @@ struct RocsparseltContractionProblem
         , bias_stride(bias_stride)
         , bias_type(bias_type)
         , alpha_vector_scaling(alpha_vector_scaling)
+        , gate(gate)
+        , row_stride_g(1)
+        , col_stride_g(ld_g)
+        , batch_stride_g(batch_stride_g)
+        , gate_type(gate_type)
         , workspace(workspace)
         , workspaceSize(workspaceSize)
         , streams(streams)
