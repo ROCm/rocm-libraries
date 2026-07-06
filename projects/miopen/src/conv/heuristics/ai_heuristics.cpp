@@ -38,6 +38,7 @@
 #include <miopen/env.hpp>
 
 #include <any>
+#include <mutex>
 
 MIOPEN_DECLARE_ENV_VAR_BOOL(MIOPEN_AI_FDEEP_USE_SINGLE_THREAD_PREDICT)
 
@@ -1377,22 +1378,23 @@ private:
 std::shared_ptr<Model> GetModel(const std::string& arch, const std::string& solver)
 {
     static std::map<std::string, std::shared_ptr<Model>> models;
-    auto it = models.find(solver);
+    static std::mutex models_mutex;
 
     auto model_arch = arch;
     if(model_arch == "gfx950")
         model_arch = "gfx942"; // use gfx942 model for gfx950 until we have a gfx950 model
 
+    // Guard the shared cache: this is called concurrently from multiple threads
+    // (e.g. per-thread MIOpen handles running convolutions at once).
+    std::lock_guard<std::mutex> lock(models_mutex);
+    auto it = models.find(solver);
     if(it == models.end())
     {
         std::shared_ptr<Model> model = std::make_shared<Model>(model_arch, solver);
         models[solver]               = model;
         return model;
     }
-    else
-    {
-        return it->second;
-    }
+    return it->second;
 }
 
 /**
@@ -1502,6 +1504,15 @@ namespace candidate_selection {
 const fdeep::model& GetFdeepModel(const std::string& path, const std::string& key)
 {
     static std::map<std::string, std::unique_ptr<fdeep::model>> models;
+    static std::mutex models_mutex;
+
+    // Guard the shared cache. Without this lock, concurrent callers racing on the
+    // same key could both insert: the second insert destroys the first's model via
+    // operator[]/move-assign while another thread is still using the reference
+    // returned here (used-after-free inside fdeep predict). Holding the lock across
+    // find+insert serializes population; entries are never overwritten afterward, so
+    // the returned reference stays valid once the lock is released.
+    std::lock_guard<std::mutex> lock(models_mutex);
     auto it = models.find(key);
     if(it == models.end())
     {
@@ -1509,11 +1520,9 @@ const fdeep::model& GetFdeepModel(const std::string& path, const std::string& ke
             MIOPEN_THROW(miopenStatusInternalError, "Unable to load model file: " + path);
         auto model =
             std::make_unique<fdeep::model>(fdeep::load_model(path, true, fdeep::dev_null_logger));
-        auto& ref   = *model;
-        models[key] = std::move(model);
-        return ref;
+        it = models.emplace(key, std::move(model)).first;
     }
-    return *it->second;
+    return *(it->second);
 }
 
 std::vector<float> EncodeInputFeaturesWithFdeep(const std::vector<float>& features,
