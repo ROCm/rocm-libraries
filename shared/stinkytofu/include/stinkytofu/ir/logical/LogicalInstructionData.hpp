@@ -139,9 +139,8 @@ struct SWaitAluLogicalData {
     int va_vcc;
     int sa_sdst;
 
-    SWaitAluLogicalData(int va_vdst_ = -1, int va_sdst_ = -1, int va_ssrc_ = -1,
-                        int hold_cnt_ = -1, int vm_vsrc_ = -1, int va_vcc_ = -1,
-                        int sa_sdst_ = -1)
+    SWaitAluLogicalData(int va_vdst_ = -1, int va_sdst_ = -1, int va_ssrc_ = -1, int hold_cnt_ = -1,
+                        int vm_vsrc_ = -1, int va_vcc_ = -1, int sa_sdst_ = -1)
         : va_vdst(va_vdst_),
           va_sdst(va_sdst_),
           va_ssrc(va_ssrc_),

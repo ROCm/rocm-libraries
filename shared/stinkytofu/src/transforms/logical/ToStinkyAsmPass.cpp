@@ -152,8 +152,8 @@ StinkyInstruction* createAsmFromIR(LogicalInstruction* irInst, GfxArchID arch) {
             return nullptr;
         }
         StinkyInstruction* asmInst = IRBase::createIR<StinkyInstruction>(desc);
-        SWaitAluData waitAluData(data->va_vdst, data->va_sdst, data->va_ssrc,
-                                 data->hold_cnt, data->vm_vsrc, data->va_vcc, data->sa_sdst);
+        SWaitAluData waitAluData(data->va_vdst, data->va_sdst, data->va_ssrc, data->hold_cnt,
+                                 data->vm_vsrc, data->va_vcc, data->sa_sdst);
         asmInst->addModifier<SWaitAluData>(waitAluData);
         if (!irInst->comment.empty()) {
             asmInst->addModifier(CommentData(irInst->comment));
@@ -207,7 +207,10 @@ StinkyInstruction* createAsmFromIR(LogicalInstruction* irInst, GfxArchID arch) {
     bool hwHasDestField = false;
     if (desc) {
         for (const auto& f : desc->operandFields) {
-            if (f.isDest || f.isReadWrite) { hwHasDestField = true; break; }
+            if (f.isDest || f.isReadWrite) {
+                hwHasDestField = true;
+                break;
+            }
         }
     }
 
@@ -251,8 +254,7 @@ StinkyInstruction* createAsmFromIR(LogicalInstruction* irInst, GfxArchID arch) {
 
     // MFMA/SMFMA/MXMFMA: attach MFMAModifiers so downstream passes
     // (RegionClonePass, SetMatrixReusePass) can identify these instructions.
-    if (irInst->getOpcode() == logical::MFMA ||
-        irInst->getOpcode() == logical::SMFMA ||
+    if (irInst->getOpcode() == logical::MFMA || irInst->getOpcode() == logical::SMFMA ||
         irInst->getOpcode() == logical::MXMFMA) {
         MFMAModifiers mod;
         if (irInst->getOpcode() == logical::MFMA) {

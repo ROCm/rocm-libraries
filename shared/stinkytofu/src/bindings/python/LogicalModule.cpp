@@ -94,8 +94,8 @@ const std::vector<SetDirectiveEntry>& PyLogicalModule::getSetDirectives() const 
 
 void PyLogicalModule::addLabel(const std::string& labelName, uint16_t alignment,
                                const std::string& comment) {
-    pImpl->labels.push_back(
-        LabelEntry{pImpl->instructions.size(), pImpl->globalOrder++, labelName, alignment, comment});
+    pImpl->labels.push_back(LabelEntry{pImpl->instructions.size(), pImpl->globalOrder++, labelName,
+                                       alignment, comment});
 }
 
 const std::vector<LabelEntry>& PyLogicalModule::getLabels() const {
@@ -103,7 +103,8 @@ const std::vector<LabelEntry>& PyLogicalModule::getLabels() const {
 }
 
 void PyLogicalModule::addTextBlock(const std::string& text) {
-    pImpl->textBlocks.push_back(TextBlockEntry{pImpl->instructions.size(), pImpl->globalOrder++, text});
+    pImpl->textBlocks.push_back(
+        TextBlockEntry{pImpl->instructions.size(), pImpl->globalOrder++, text});
 }
 
 const std::vector<TextBlockEntry>& PyLogicalModule::getTextBlocks() const {

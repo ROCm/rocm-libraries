@@ -1119,14 +1119,10 @@ TEST(LogicalToAsmComprehensive, AllInstructionsAllArchitectures) {
     using ArchTuple = std::tuple<int, int, int>;
     std::map<logical::Opcode, std::set<ArchTuple>> ARCH_SPECIFIC = {
         // gfx1250 only
-        {logical::TensorLoadToLds, {{12, 5, 0}}},
-        {logical::MXMFMA, {{12, 5, 0}}},
-        {logical::DSLoadB96TrB6, {{12, 5, 0}}},
-        {logical::DSLoadB64TrB4, {{12, 5, 0}}},
-        {logical::DSLoadB64TrB8, {{12, 5, 0}}},
-        {logical::DSLoadB128TrB16, {{12, 5, 0}}},
-        {logical::DSLoadB192, {{12, 5, 0}}},
-        {logical::DSStoreB192, {{12, 5, 0}}},
+        {logical::TensorLoadToLds, {{12, 5, 0}}}, {logical::MXMFMA, {{12, 5, 0}}},
+        {logical::DSLoadB96TrB6, {{12, 5, 0}}},   {logical::DSLoadB64TrB4, {{12, 5, 0}}},
+        {logical::DSLoadB64TrB8, {{12, 5, 0}}},   {logical::DSLoadB128TrB16, {{12, 5, 0}}},
+        {logical::DSLoadB192, {{12, 5, 0}}},      {logical::DSStoreB192, {{12, 5, 0}}},
     };
 
     std::cout << "Testing " << testedOpcodes.size() << " instructions on " << archs.size()

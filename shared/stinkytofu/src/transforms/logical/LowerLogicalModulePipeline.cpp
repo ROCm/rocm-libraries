@@ -25,8 +25,8 @@
 
 #include <algorithm>
 #include <cassert>
-#include <cstdint>
 #include <climits>
+#include <cstdint>
 #include <cstdlib>
 #include <iostream>
 
@@ -113,8 +113,8 @@ std::shared_ptr<StinkyAsmModule> lowerLogicalModuleToAsm(
         // current emission point.  Group markers toggle the active-group
         // stack but do not emit IR.
         auto processGroupMarkers = [&](size_t pos, size_t maxOrder) {
-            while (gmIdx < groupMarkers.size() && groupMarkers[gmIdx].position <= pos
-                   && groupMarkers[gmIdx].order < maxOrder) {
+            while (gmIdx < groupMarkers.size() && groupMarkers[gmIdx].position <= pos &&
+                   groupMarkers[gmIdx].order < maxOrder) {
                 if (groupMarkers[gmIdx].isBegin) {
                     activeGroups.push_back(groupMarkers[gmIdx].name);
                 } else {
@@ -141,35 +141,35 @@ std::shared_ptr<StinkyAsmModule> lowerLogicalModuleToAsm(
         auto emitNextItem = [&](int type) {
             const auto instsCountBefore = entryBB->size();
             switch (type) {
-            case 0: {
-                AsmDirective* dir = IRBase::createIR<AsmDirective>();
-                dir->kind = AsmDirectiveKind::SET;
-                dir->name = ".set";
-                dir->symbol = directives[dirIdx].symbol;
-                dir->value = directives[dirIdx].value;
-                entryBB->appendIR(dir);
-                ++dirIdx;
-                break;
-            }
-            case 1: {
-                StinkyInstruction* labelInst =
-                    irBuilder.createLabel(labels[lblIdx].labelName, labels[lblIdx].alignment);
-                if (!labels[lblIdx].comment.empty()) {
-                    labelInst->addModifier<CommentData>(CommentData{labels[lblIdx].comment});
+                case 0: {
+                    AsmDirective* dir = IRBase::createIR<AsmDirective>();
+                    dir->kind = AsmDirectiveKind::SET;
+                    dir->name = ".set";
+                    dir->symbol = directives[dirIdx].symbol;
+                    dir->value = directives[dirIdx].value;
+                    entryBB->appendIR(dir);
+                    ++dirIdx;
+                    break;
                 }
-                ++lblIdx;
-                break;
-            }
-            case 2: {
-                AsmDirective* dir = IRBase::createIR<AsmDirective>();
-                dir->kind = AsmDirectiveKind::TEXTBLOCK;
-                dir->value = textBlocks[tbIdx].text;
-                entryBB->appendIR(dir);
-                ++tbIdx;
-                break;
-            }
-            default:
-                break;
+                case 1: {
+                    StinkyInstruction* labelInst =
+                        irBuilder.createLabel(labels[lblIdx].labelName, labels[lblIdx].alignment);
+                    if (!labels[lblIdx].comment.empty()) {
+                        labelInst->addModifier<CommentData>(CommentData{labels[lblIdx].comment});
+                    }
+                    ++lblIdx;
+                    break;
+                }
+                case 2: {
+                    AsmDirective* dir = IRBase::createIR<AsmDirective>();
+                    dir->kind = AsmDirectiveKind::TEXTBLOCK;
+                    dir->value = textBlocks[tbIdx].text;
+                    entryBB->appendIR(dir);
+                    ++tbIdx;
+                    break;
+                }
+                default:
+                    break;
             }
             asmModule->updateInstructionGroups(buildGroupPtrs(), instsCountBefore);
         };
@@ -179,18 +179,18 @@ std::shared_ptr<StinkyAsmModule> lowerLogicalModuleToAsm(
                 size_t bestOrder = SIZE_MAX;
                 int bestType = -1;
 
-                if (dirIdx < directives.size() && directives[dirIdx].position <= pos
-                    && directives[dirIdx].order < bestOrder) {
+                if (dirIdx < directives.size() && directives[dirIdx].position <= pos &&
+                    directives[dirIdx].order < bestOrder) {
                     bestOrder = directives[dirIdx].order;
                     bestType = 0;
                 }
-                if (lblIdx < labels.size() && labels[lblIdx].position <= pos
-                    && labels[lblIdx].order < bestOrder) {
+                if (lblIdx < labels.size() && labels[lblIdx].position <= pos &&
+                    labels[lblIdx].order < bestOrder) {
                     bestOrder = labels[lblIdx].order;
                     bestType = 1;
                 }
-                if (tbIdx < textBlocks.size() && textBlocks[tbIdx].position <= pos
-                    && textBlocks[tbIdx].order < bestOrder) {
+                if (tbIdx < textBlocks.size() && textBlocks[tbIdx].position <= pos &&
+                    textBlocks[tbIdx].order < bestOrder) {
                     bestOrder = textBlocks[tbIdx].order;
                     bestType = 2;
                 }

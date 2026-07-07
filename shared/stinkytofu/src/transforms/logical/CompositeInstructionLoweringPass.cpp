@@ -243,8 +243,8 @@ class CompositeInstructionLoweringPassImpl : public Pass {
 
                 auto* shift = VLShiftLeftB32(dst, src2, src0, std::nullopt, std::nullopt,
                                              irInst->comment + " (lshl)");
-                auto* add = VAddU32(dst, dst, src1, std::nullopt, std::nullopt,
-                                    irInst->comment + " (add)");
+                auto* add =
+                    VAddU32(dst, dst, src1, std::nullopt, std::nullopt, irInst->comment + " (add)");
                 result.push_back(shift);
                 result.push_back(add);
             }

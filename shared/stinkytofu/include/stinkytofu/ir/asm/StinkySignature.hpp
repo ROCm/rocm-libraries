@@ -235,8 +235,7 @@ struct SrdUpperValue125X : public BitfieldUnion {
 // Factory function to create appropriate SRD value based on ISA version.
 // Exported for the _stinkytofu.so Python module (libstinkytofu hides all
 // symbols by default; see shared/stinkytofu/CMakeLists.txt).
-STINKYTOFU_EXPORT std::shared_ptr<BitfieldUnion> createSrdUpperValue(
-    const std::array<int, 3>& isa);
+STINKYTOFU_EXPORT std::shared_ptr<BitfieldUnion> createSrdUpperValue(const std::array<int, 3>& isa);
 
 /***************************************
  * Signature Argument

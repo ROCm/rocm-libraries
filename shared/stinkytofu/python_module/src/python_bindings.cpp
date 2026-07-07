@@ -203,10 +203,9 @@ NB_MODULE(_stinkytofu, m) {
             "__init__",
             [](StinkyRegister* self, const std::string& type, uint32_t index, uint16_t count) {
                 if (!isValidRegTypeString(type)) {
-                    throw nb::value_error(
-                        ("Register: unknown register type '" + type +
-                         "'; expected one of v/s/a/m/... (see RegisterType.def)")
-                            .c_str());
+                    throw nb::value_error(("Register: unknown register type '" + type +
+                                           "'; expected one of v/s/a/m/... (see RegisterType.def)")
+                                              .c_str());
                 }
                 new (self) StinkyRegister(type, index, count);
             },
@@ -311,9 +310,8 @@ NB_MODULE(_stinkytofu, m) {
                 std::string base = (pos == std::string::npos) ? s : s.substr(0, pos);
                 while (pos != std::string::npos) {
                     auto next = s.find('+', pos + 1);
-                    std::string token =
-                        s.substr(pos + 1, next == std::string::npos ? std::string::npos
-                                                                    : next - pos - 1);
+                    std::string token = s.substr(
+                        pos + 1, next == std::string::npos ? std::string::npos : next - pos - 1);
                     offsets.push_back(std::stoi(token));
                     pos = next;
                 }
@@ -377,11 +375,8 @@ NB_MODULE(_stinkytofu, m) {
             "Set the register offset for MSB encoding (e.g. -512 = bank 2). No-op on literals.")
 
         // --- Hash / equality (KernelWriter uses Registers as dict keys) ----
-        .def(
-            "__hash__",
-            [](const StinkyRegister& r) -> Py_hash_t {
-                return static_cast<Py_hash_t>(r.hash());
-            })
+        .def("__hash__",
+             [](const StinkyRegister& r) -> Py_hash_t { return static_cast<Py_hash_t>(r.hash()); })
         .def(
             "__eq__",
             [](const StinkyRegister& r, const nb::object& other) -> bool {
@@ -407,9 +402,8 @@ NB_MODULE(_stinkytofu, m) {
         // and deep copy because there are no nested references.
         .def("__copy__", [](const StinkyRegister& r) { return StinkyRegister(r); })
         .def(
-            "__deepcopy__", [](const StinkyRegister& r, nb::handle /*memo*/) {
-                return StinkyRegister(r);
-            },
+            "__deepcopy__",
+            [](const StinkyRegister& r, nb::handle /*memo*/) { return StinkyRegister(r); },
             nb::arg("memo"))
 
         // --- Debug repr -----------------------------------------------------
@@ -477,8 +471,7 @@ NB_MODULE(_stinkytofu, m) {
 
     m.def(
         "mgpr", [](int index, int count) { return StinkyRegister("m", index, count); },
-        nb::arg("index"), nb::arg("count") = 1,
-        "Create an MGPR (Memory descriptor) register");
+        nb::arg("index"), nb::arg("count") = 1, "Create an MGPR (Memory descriptor) register");
 
     m.def(
         "literal", [](float value) { return StinkyRegister(value); }, nb::arg("value"),
@@ -553,21 +546,17 @@ NB_MODULE(_stinkytofu, m) {
              "Create a new IR module with the given kernel name")
         .def("add", &PyLogicalModule::add, nb::arg("instruction"),
              "Add a high-level IR instruction to the module (shared ownership)")
-        .def("add_set_directive", &PyLogicalModule::addSetDirective,
-             nb::arg("symbol"), nb::arg("value"),
+        .def("add_set_directive", &PyLogicalModule::addSetDirective, nb::arg("symbol"),
+             nb::arg("value"),
              "Record a .set directive at the current position in the instruction stream")
-        .def("add_label", &PyLogicalModule::addLabel,
-             nb::arg("label_name"), nb::arg("alignment") = 1,
-             nb::arg("comment") = "",
+        .def("add_label", &PyLogicalModule::addLabel, nb::arg("label_name"),
+             nb::arg("alignment") = 1, nb::arg("comment") = "",
              "Record a label at the current position in the instruction stream")
-        .def("add_textblock", &PyLogicalModule::addTextBlock,
-             nb::arg("text"),
+        .def("add_textblock", &PyLogicalModule::addTextBlock, nb::arg("text"),
              "Record a textblock (comment/raw text) at the current position")
-        .def("begin_group", &PyLogicalModule::beginGroup,
-             nb::arg("name"),
+        .def("begin_group", &PyLogicalModule::beginGroup, nb::arg("name"),
              "Mark the beginning of a named instruction-group scope")
-        .def("end_group", &PyLogicalModule::endGroup,
-             nb::arg("name"),
+        .def("end_group", &PyLogicalModule::endGroup, nb::arg("name"),
              "Mark the end of a named instruction-group scope")
         .def("getName", &PyLogicalModule::getName, "Get the kernel name")
         .def(
@@ -602,25 +591,24 @@ NB_MODULE(_stinkytofu, m) {
             "Dump the instruction to a string")
         .def(
             "set_ds",
-            [](LogicalInstruction& inst, int na, int offset, int offset0, int offset1,
-               bool gds) { inst.ds = DSModifiers(na, offset, offset0, offset1, gds); },
+            [](LogicalInstruction& inst, int na, int offset, int offset0, int offset1, bool gds) {
+                inst.ds = DSModifiers(na, offset, offset0, offset1, gds);
+            },
             nb::arg("na") = 1, nb::arg("offset") = 0, nb::arg("offset0") = 0,
-            nb::arg("offset1") = 0, nb::arg("gds") = false,
-            "Set DS (LDS/GDS) modifiers")
+            nb::arg("offset1") = 0, nb::arg("gds") = false, "Set DS (LDS/GDS) modifiers")
         .def(
             "set_mubuf",
             [](LogicalInstruction& inst, bool offen, int offset, bool glc, bool slc, bool nt,
                int scope, int th, bool isStore) {
                 MUBUFScope mScope = static_cast<MUBUFScope>(scope);
                 TemporalHint mTh = static_cast<TemporalHint>(th);
-                inst.mubuf = MUBUFModifiers(offen, offset, glc, slc, nt, /*lds=*/false,
-                                            isStore, /*hasMUBUFConst=*/false,
-                                            /*hasGLCModifier=*/false, /*hasSC0Modifier=*/false,
-                                            mScope, mTh);
+                inst.mubuf = MUBUFModifiers(
+                    offen, offset, glc, slc, nt, /*lds=*/false, isStore, /*hasMUBUFConst=*/false,
+                    /*hasGLCModifier=*/false, /*hasSC0Modifier=*/false, mScope, mTh);
             },
             nb::arg("offen") = false, nb::arg("offset") = 0, nb::arg("glc") = false,
-            nb::arg("slc") = false, nb::arg("nt") = false, nb::arg("scope") = 0,
-            nb::arg("th") = -1, nb::arg("is_store") = false,
+            nb::arg("slc") = false, nb::arg("nt") = false, nb::arg("scope") = 0, nb::arg("th") = -1,
+            nb::arg("is_store") = false,
             "Set MUBUF modifiers (offen, offset, glc, slc, nt, scope, th, is_store)")
         .def(
             "add_src",
@@ -632,8 +620,7 @@ NB_MODULE(_stinkytofu, m) {
                const std::vector<int>& op_sel_hi, const std::vector<int>& byte_sel) {
                 inst.vop3 = VOP3PModifiers(op_sel, op_sel_hi, byte_sel);
             },
-            nb::arg("op_sel") = std::vector<int>{},
-            nb::arg("op_sel_hi") = std::vector<int>{},
+            nb::arg("op_sel") = std::vector<int>{}, nb::arg("op_sel_hi") = std::vector<int>{},
             nb::arg("byte_sel") = std::vector<int>{},
             "Set VOP3P (op_sel/op_sel_hi/byte_sel) modifiers");
 
@@ -707,8 +694,7 @@ NB_MODULE(_stinkytofu, m) {
         },
         nb::arg("va_vdst") = -1, nb::arg("va_sdst") = -1, nb::arg("va_ssrc") = -1,
         nb::arg("hold_cnt") = -1, nb::arg("vm_vsrc") = -1, nb::arg("va_vcc") = -1,
-        nb::arg("sa_sdst") = -1, nb::arg("comment") = "",
-        "Create an SWaitAlu instruction");
+        nb::arg("sa_sdst") = -1, nb::arg("comment") = "", "Create an SWaitAlu instruction");
 
     // SchedulingFence - Scheduling barrier pseudo-instruction
     m.def(
@@ -718,8 +704,7 @@ NB_MODULE(_stinkytofu, m) {
             inst->comment = comment;
             return makeLogicalInstructionShared(inst);
         },
-        nb::arg("comment") = "",
-        "Create a SchedulingFence pseudo-instruction");
+        nb::arg("comment") = "", "Create a SchedulingFence pseudo-instruction");
 
     // TensorLoadToLds - Higher-level tensor load operation
     m.def(
@@ -859,7 +844,7 @@ NB_MODULE(_stinkytofu, m) {
         "SrdUpperValue",
         [](const nb::object& isa) {
             std::array<int, 3> version{};
-            if(nb::isinstance<nb::tuple>(isa) || nb::isinstance<nb::list>(isa)) {
+            if (nb::isinstance<nb::tuple>(isa) || nb::isinstance<nb::list>(isa)) {
                 version = {nb::cast<int>(isa[0]), nb::cast<int>(isa[1]), nb::cast<int>(isa[2])};
             } else {
                 version = nb::cast<std::array<int, 3>>(isa);
