@@ -19,9 +19,6 @@ on:
   # push:
   #   branches:
   #     - develop
-  push:
-    branches:
-      - users/geomin12/host-asan # Test branch trigger
   workflow_dispatch:
     inputs:
       linux_amdgpu_families:
