@@ -28,12 +28,30 @@ import argparse
 import json
 import os
 import sys
-from pathlib import Path
+import xml.etree.ElementTree as ET
 
 
 def _load(path: str) -> dict:
     with open(path, encoding="utf-8-sig") as fh:
         return json.load(fh)
+
+
+def _junit_ran(path: str) -> int | None:
+    """Count executed (non-skipped) tests in a JUnit XML report.
+
+    Returns the number of ``<testcase>`` entries that were not skipped, which
+    equals the passed count on a green run. Returns ``None`` if the file is
+    missing or unparseable so the card can still render without the count.
+    """
+    try:
+        root = ET.parse(path).getroot()
+    except (OSError, ET.ParseError):
+        return None
+    ran = 0
+    for tc in root.iter("testcase"):
+        if tc.find("skipped") is None:
+            ran += 1
+    return ran
 
 
 def _pct(report: dict) -> float:
@@ -101,14 +119,25 @@ def main(argv: list[str] | None = None) -> int:
     p.add_argument("--combined", default=None, help="combined coverage.json (optional)")
     p.add_argument("--characterization-tests", type=int, default=None)
     p.add_argument("--unit-tests", type=int, default=None)
+    p.add_argument("--characterization-junit", default=None,
+                   help="char JUnit xml; test count derived when --characterization-tests omitted")
+    p.add_argument("--unit-junit", default=None,
+                   help="unit JUnit xml; test count derived when --unit-tests omitted")
     args = p.parse_args(argv)
+
+    char_tests = args.characterization_tests
+    if char_tests is None and args.characterization_junit:
+        char_tests = _junit_ran(args.characterization_junit)
+    unit_tests = args.unit_tests
+    if unit_tests is None and args.unit_junit:
+        unit_tests = _junit_ran(args.unit_junit)
 
     md = build_markdown(
         _load(args.characterization),
         _load(args.unit),
         _load(args.combined) if args.combined else None,
-        args.characterization_tests,
-        args.unit_tests,
+        char_tests,
+        unit_tests,
     )
     print(md)
 

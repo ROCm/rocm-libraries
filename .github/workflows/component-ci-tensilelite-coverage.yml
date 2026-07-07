@@ -32,12 +32,15 @@ jobs:
         shell: bash
         run: pip install tox
 
-      # Runs the characterization + unit suite under coverage and enforces two
-      # gates (AIHPBLAS-3877 / AIHPBLAS-3878): the whole-project floor
-      # (fail_under in pyproject.toml, via pytest-cov) and the per-file ratchet
-      # (coverage_ratchet.py, wired into the tox env's commands_post). No GPU or
-      # client build is needed - coverage-unit skips the client build; the
-      # compiler env below is only so rocisa builds during the tox run.
+      # Runs the characterization suite and the pure unit suite under coverage
+      # (once each), unions them, and enforces two gates on the combined result
+      # (AIHPBLAS-3877 / AIHPBLAS-3878): the whole-project floor (fail_under in
+      # pyproject.toml, enforced by `coverage report` on the combined data) and
+      # the per-file ratchet (coverage_ratchet.py, wired into the tox env's
+      # commands_post). As a byproduct it emits per-suite reports (char.json /
+      # unit.json) that feed the split-summary card below - no duplicate runs.
+      # No GPU or client build is needed - coverage-unit skips the client build;
+      # the compiler env below is only so rocisa builds during the tox run.
       #
       # PATH must include the ROCm toolchain bin dirs: setup-rocm sets ROCM_PATH
       # but not PATH, and several characterization tests resolve the assembler
@@ -60,48 +63,36 @@ jobs:
 
       # Informational (non-gating): attribute coverage to the two suites that
       # make up the unit lane - characterization tests (the characterization/
-      # subtree) vs the pure unit tests. They are separated by path, not marker,
-      # so we re-measure each selection with the tox venv rocisa and render a
-      # job-summary card. Reuses the combined coverage.json from the gating step.
-      # Runs the same tests once each, so it roughly doubles the lane time; if the
-      # card proves useful this can be folded into the gating run (two runs +
-      # coverage combine) to reclaim that time. Never fails the job.
+      # subtree) vs the pure unit tests. The gating step above already runs each
+      # suite exactly once and drops char.json / unit.json (plus their JUnit
+      # reports) alongside the combined coverage.json, so this step only renders
+      # the job-summary card from those artifacts - no extra test runs. Never
+      # fails the job.
       - name: Coverage split summary (characterization vs unit)
-        if: success()
+        if: always()
         shell: bash
         working-directory: projects/hipblaslt/tensilelite
-        env:
-          LD_LIBRARY_PATH: ${{ env.ROCM_PATH }}/lib:${{ env.LD_LIBRARY_PATH }}
         run: |
-          export PATH="${ROCM_PATH}/bin:${ROCM_PATH}/lib/llvm/bin:${PATH}"
-          export PYTHONPATH="$PWD"
           PY=.tox/coverage-unit/bin/python
-          W="${TENSILE_NUM_PYTEST_WORKERS:-4}"
-          COVERAGE_FILE=.cov_char "$PY" -m pytest -m unit \
-            Tensile/Tests/unit/characterization \
-            --cov=Tensile --cov-config=pyproject.toml \
-            --cov-report=json:char.json --cov-report= --cov-fail-under=0 \
-            -n "$W" -p no:cacheprovider -q 2>&1 | tee /tmp/char_out.txt
-          COVERAGE_FILE=.cov_unit "$PY" -m pytest -m unit \
-            Tensile/Tests/unit --ignore=Tensile/Tests/unit/characterization \
-            --cov=Tensile --cov-config=pyproject.toml \
-            --cov-report=json:unit.json --cov-report= --cov-fail-under=0 \
-            -n "$W" -p no:cacheprovider -q 2>&1 | tee /tmp/unit_out.txt
-          char_n=$(grep -oE '[0-9]+ passed' /tmp/char_out.txt | head -1 | grep -oE '[0-9]+')
-          unit_n=$(grep -oE '[0-9]+ passed' /tmp/unit_out.txt | head -1 | grep -oE '[0-9]+')
           "$PY" Tensile/Tests/unit/characterization/tools/coverage_split_summary.py \
             --characterization char.json --unit unit.json --combined coverage.json \
-            --characterization-tests "${char_n:-0}" --unit-tests "${unit_n:-0}" || true
+            --characterization-junit char_tests.xml --unit-junit unit_tests.xml || true
           exit 0
 
+      # Best-effort: the reports are diagnostic artifacts, not a gate, so a
+      # transient artifact-service hiccup (e.g. an ENOTFOUND while finalizing the
+      # upload on a self-hosted runner) must not red an otherwise-green lane.
       - name: Upload coverage reports
         if: always()
+        continue-on-error: true
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: tensilelite-coverage
           path: |
             projects/hipblaslt/tensilelite/coverage.xml
             projects/hipblaslt/tensilelite/coverage.json
+            projects/hipblaslt/tensilelite/char.json
+            projects/hipblaslt/tensilelite/unit.json
             projects/hipblaslt/tensilelite/htmlcov
           if-no-files-found: ignore
           retention-days: 7
