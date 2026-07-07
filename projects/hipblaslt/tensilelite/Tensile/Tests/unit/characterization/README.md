@@ -5,7 +5,7 @@ This directory holds **characterization tests**: tests that pin down what the Te
 Companion docs in this directory:
 - **`adr/`** — Architecture Decision Records: one short, append-only file per genuine decision (Nygard form). See **Architecture Decision Records (ADRs)** below.
 - **`DECISIONS.md`** — the running registry: the at-a-glance catalog of modules accepted below the coverage bar, pinned latent bugs, accepted-equivalent mutants, and the few departures from the add-only rule.
-- **`_codegen/GPU-MOCK.md`** — the GPU-less (`--cpu-only`) seam that makes the client/perf and device-probe paths exercisable without a GPU, and the synthetic-perf caveat that comes with it.
+- **`_codegen/GPU-MOCK.md`** — the GPU-less (`--mock-gpu`) seam that makes the client/perf and device-probe paths exercisable without a GPU, and the synthetic-perf caveat that comes with it.
 
 Everything you need to understand or extend the suite is in this directory. Per-module provenance — for each characterized module, the public surface by tier, the determinism strategy, before→after coverage, the mutation-testing outcome, and any accepted coverage ceiling or pinned-bug rationale — is recorded in `DECISIONS.md` and the per-module commit history.
 

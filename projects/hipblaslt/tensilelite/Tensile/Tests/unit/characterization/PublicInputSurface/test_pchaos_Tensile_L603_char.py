@@ -10,7 +10,7 @@ Branch 26f1acfe1ff93095519d418855bb9593f2c4f4bb. The predicate is a pure
 block:
 
   'LibraryLogic' in config and UseEffLike and not buildOnly
-      and not globalParameters["CpuOnly"]
+      and not globalParameters["MockGpu"]
 
 Exhaustive 2^4 truth table: exactly 1 TRUE assignment (all four conjuncts
 hold), 15 FALSE assignments. The four false_examples each negate exactly one
@@ -32,14 +32,14 @@ def liblogic_freq_branch(
     library_logic_in_config: bool,
     use_eff_like: bool,
     build_only: bool,
-    cpu_only: bool,
+    mock_gpu: bool,
 ) -> bool:
     """Mirrors Tensile.py:603 guard: enter GPU-frequency configuration block."""
     return (
         library_logic_in_config
         and use_eff_like
         and not build_only
-        and not cpu_only
+        and not mock_gpu
     )
 
 
@@ -48,7 +48,7 @@ def test_l603_true_all_conjuncts_hold():
         library_logic_in_config=True,
         use_eff_like=True,
         build_only=False,
-        cpu_only=False,
+        mock_gpu=False,
     ) is True
 
 
@@ -57,7 +57,7 @@ def test_l603_false_missing_library_logic_key():
         library_logic_in_config=False,
         use_eff_like=False,
         build_only=False,
-        cpu_only=False,
+        mock_gpu=False,
     ) is False
 
 
@@ -66,16 +66,16 @@ def test_l603_false_build_only_set():
         library_logic_in_config=True,
         use_eff_like=True,
         build_only=True,
-        cpu_only=False,
+        mock_gpu=False,
     ) is False
 
 
-def test_l603_false_cpu_only_set():
+def test_l603_false_mock_gpu_set():
     assert liblogic_freq_branch(
         library_logic_in_config=True,
         use_eff_like=True,
         build_only=False,
-        cpu_only=True,
+        mock_gpu=True,
     ) is False
 
 
@@ -84,7 +84,7 @@ def test_l603_false_use_eff_like_false():
         library_logic_in_config=True,
         use_eff_like=False,
         build_only=False,
-        cpu_only=False,
+        mock_gpu=False,
     ) is False
 
 
@@ -92,12 +92,12 @@ def test_l603_real_predicate_dict_membership_true():
     config = {'LibraryLogic': ['some_logic_entry']}
     UseEffLike = True
     buildOnly = False
-    globalParameters = {'CpuOnly': False}
+    globalParameters = {'MockGpu': False}
     result = (
         'LibraryLogic' in config
         and UseEffLike
         and not buildOnly
-        and not globalParameters['CpuOnly']
+        and not globalParameters['MockGpu']
     )
     assert result is True
 
@@ -106,11 +106,11 @@ def test_l603_real_predicate_dict_membership_key_absent():
     config = {'GlobalParameters': {}}
     UseEffLike = True
     buildOnly = False
-    globalParameters = {'CpuOnly': False}
+    globalParameters = {'MockGpu': False}
     result = (
         'LibraryLogic' in config
         and UseEffLike
         and not buildOnly
-        and not globalParameters['CpuOnly']
+        and not globalParameters['MockGpu']
     )
     assert result is False
