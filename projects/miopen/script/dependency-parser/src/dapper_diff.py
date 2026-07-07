@@ -2,7 +2,6 @@ import json
 import os
 import re
 import sys
-import time
 from miopen_gtest_runner import calc_union_filter
 
 
@@ -228,7 +227,6 @@ def analyze_sharded_gtest(input_file):
 
 
 def main():
-    time.sleep(1)  # ctest summary is still printing; delay so dapper is at the bottom
     input_file = "miopen_dapper_tests.json"
     if len(sys.argv) > 1:
         input_file = sys.argv[1]
