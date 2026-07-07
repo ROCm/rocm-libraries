@@ -177,7 +177,7 @@ void sb2st_hb2st_getError(const rocblas_handle handle,
                           double* max_err)
 {
     using S = decltype(std::real(T{}));
-    using std::abs, std::imag, std::real, std::max;
+    using std::abs, std::imag, std::real;
 
     I idiag = kd - 1;
 
@@ -199,7 +199,7 @@ void sb2st_hb2st_getError(const rocblas_handle handle,
         // Check that diag is real to working precision.
         for(I j = 0; j < n; ++j)
         {
-            err = max(err, abs(imag(hAbandRes[0][idiag + j * ldab])));
+            err = rocblas_max_nan(err, abs(imag(hAbandRes[0][idiag + j * ldab])));
         }
         *max_err = rocblas_max_nan(err, *max_err);
 
@@ -207,7 +207,7 @@ void sb2st_hb2st_getError(const rocblas_handle handle,
         err = 0;
         for(I j = 0; j < n - 1; ++j)
         {
-            err = max(err, abs(imag(hAbandRes[0][idiag + 1 + j * ldab])));
+            err = rocblas_max_nan(err, abs(imag(hAbandRes[0][idiag + 1 + j * ldab])));
         }
         *max_err = rocblas_max_nan(err, *max_err);
     }
