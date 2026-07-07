@@ -85,7 +85,7 @@ struct MmaPipelineBase
         }
     }
 
-    // Entry point for dense and sparse operations. TODO: Add c_vec = a_vec * b_vec variant.
+    // CAB = (C, A, B).
     template <typename... Params, typename CTensor, typename ATensor, typename BTensor>
     CK_TILE_DEVICE void operator()(CTensor& c, ATensor& a, const BTensor& b) const
     {
@@ -95,7 +95,41 @@ struct MmaPipelineBase
                                                                typename Derived::AWarpTensor> &&
                       detail::is_similiar_distributed_tensor_v<remove_cvref_t<BTensor>,
                                                                typename Derived::BWarpTensor>);
-        exec<Params...>(a, b, c);
+        if constexpr(MmaOpTraits<typename Derived::MmaOp>::IsScale)
+        {
+            auto identity_scale = Derived::kIdentityScale;
+            exec<Params...>(a, b, c, identity_scale, identity_scale);
+        }
+        else
+        {
+            exec<Params...>(a, b, c);
+        }
+    }
+
+    // AB = (A, B)
+    // Same as CAB when C is not pre-existing
+    template <typename... Params, typename ATensor, typename BTensor>
+    CK_TILE_DEVICE auto operator()(const ATensor& a, const BTensor& b) const
+    {
+        static_assert(detail::is_similiar_distributed_tensor_v<remove_cvref_t<ATensor>,
+                                                               typename Derived::AWarpTensor> &&
+                      detail::is_similiar_distributed_tensor_v<remove_cvref_t<BTensor>,
+                                                               typename Derived::BWarpTensor>);
+        typename Derived::CWarpTensor c;
+        for(index_t i = 0; i < Derived::CWarpTensor::get_thread_buffer_size(); ++i)
+        {
+            c.get_thread_buffer()[i] = typename Derived::CDataType{0};
+        }
+        if constexpr(MmaOpTraits<typename Derived::MmaOp>::IsScale)
+        {
+            auto identity_scale = Derived::kIdentityScale;
+            exec<Params...>(a, b, c, identity_scale, identity_scale);
+        }
+        else
+        {
+            exec<Params...>(a, b, c);
+        }
+        return c;
     }
 
     template <typename... Params,
@@ -140,8 +174,8 @@ struct MmaPipelineBase
         }
     }
 
-    // Entry point for scale operations. TODO: Add c_vec = a_vec * b_vec variant (+ scaleless
-    // variant?)
+    // Scale operations
+    // CABSS = (C, A, B, ScaleA, ScaleB)
     // TODO: Add support for other scale types.
     template <typename... Params, typename CTensor, typename ATensor, typename BTensor>
     CK_TILE_DEVICE void operator()(CTensor& c,
@@ -157,6 +191,27 @@ struct MmaPipelineBase
                       detail::is_similiar_distributed_tensor_v<remove_cvref_t<BTensor>,
                                                                typename Derived::BWarpTensor>);
         exec<Params...>(a, b, c, a_scale, b_scale);
+    }
+
+    // ABSS = (A, B, ScaleA, ScaleB)
+    // Same as CABSS, but C is not pre-existing
+    template <typename... Params, typename ATensor, typename BTensor>
+    CK_TILE_DEVICE auto operator()(const ATensor& a,
+                                   const BTensor& b,
+                                   const int32_t& a_scale,
+                                   const int32_t& b_scale) const
+    {
+        static_assert(detail::is_similiar_distributed_tensor_v<remove_cvref_t<ATensor>,
+                                                               typename Derived::AWarpTensor> &&
+                      detail::is_similiar_distributed_tensor_v<remove_cvref_t<BTensor>,
+                                                               typename Derived::BWarpTensor>);
+        typename Derived::CWarpTensor c;
+        for(index_t i = 0; i < Derived::CWarpTensor::get_thread_buffer_size(); ++i)
+        {
+            c.get_thread_buffer()[i] = typename Derived::CDataType{0};
+        }
+        exec<Params...>(a, b, c, a_scale, b_scale);
+        return c;
     }
 };
 
