@@ -492,10 +492,11 @@ def config_cmd():
     # not just for tensile
     cmake_options.append(f'-DGPU_TARGETS=\"{args.gpu_architecture}\"')
 
-    if args.hipblaslt_only:
-        args.build_tensile = False # implied
-        cmake_options.append(f"-DBUILD_WITH_HIPBLASLT_ONLY=ON")
-
+if args.hipblaslt_only:
+    if not args.build_hipblaslt:
+        fatal("--hipblaslt-only cannot be combined with --no_hipblaslt")
+    args.build_tensile = False # implied
+    cmake_options.append("-DBUILD_WITH_HIPBLASLT_ONLY=ON")
     if not args.build_tensile:
         cmake_options.append(f"-DBUILD_WITH_TENSILE=OFF")
 
