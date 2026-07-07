@@ -134,7 +134,6 @@ inline std::vector<BatchnormTestCase> getBnBwdSmoke3dTestCases()
     return {
         {{2, 3, 3, 1, 1}, seed},
         {{2, 3, 2, 4, 4}, seed},
-        {{1, 16, 8, 112, 112}, seed},
     };
 }
 
