@@ -58,7 +58,7 @@ static bool g_initialized                       = false;
 extern "C" {
 
 /**
- * Initialize dispatcher — must be called before dispatcher_run_bquant_gemm.
+ * Initialize dispatcher -- must be called before dispatcher_run_bquant_gemm.
  *
  * Registers SelectedKernel (from the force-included header) into the Registry.
  * Returns 0 on success, -1 on error.
