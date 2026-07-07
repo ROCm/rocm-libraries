@@ -112,7 +112,8 @@ def calc_union_filter(gtest_filter_json: str, category_name: str, category_filte
         json_data = json.load(f)
     _convert_xml_shards(json_data)
     # super-minimal default test if there's nothing to do:
-    dapper_filter = "CPU_HandleHipDevice_NONE*"
+    default_filter = "CPU_HandleHipDevice_NONE*"
+    dapper_filter = default_filter
     if "dapper_filter" in json_data:
         dapper_filter = json_data["dapper_filter"]
 
@@ -138,6 +139,21 @@ def calc_union_filter(gtest_filter_json: str, category_name: str, category_filte
     if duplicates_removed:
         print(f"Removed {duplicates_removed} duplicate entries from union_positives")
     union_positives = deduped
+
+    # If the Dapper filter and the category filter share no fixtures, there is
+    # nothing meaningful to run. Fall back to the super-minimal default test and
+    # warn that coverage may be missing. This is a PASS and COMPLIANT situation,
+    # not a failure -- an empty positive filter would otherwise make gtest run
+    # everything, which is the opposite of what's intended.
+    if not union_positives:
+        print(
+            "WARNING: no overlap between the Dapper filter and category filter "
+            f"'{category_name}'; falling back to super-minimal default test "
+            f"'{default_filter}'. Testing may be missing for this category, but "
+            "this is a PASS and COMPLIANT."
+        )
+        union_positives = [default_filter]
+
     union_filter = ":".join(union_positives)
     if category_exclude:
         category_exclude_filter = ":".join(category_exclude)
