@@ -932,13 +932,18 @@ def _zeroRegRange(module, writer, tileInfo, firstReg, totalRegs, isAgpr):
                             comment="init%s zero-src v%u" % (tileInfo.tc, lastChunkBase + i)))
   if numInst > 1:
     module.add(SNop(waitState=1, comment="wait for vgpr before matrix inst"))
+    # gfx1250: all initC MFMAs share the same A/B source, so enable matrix reuse
+    # on all but the last (the last has no successor to reuse into).
+    canReuse = useWmma and writer.states.archCaps.get("HasWmmaArbStallBit", False)
     for i in range(numInst - 1):
       r = firstReg + i * regsPerInst
+      reuse = canReuse and i < (numInst - 2)
       module.add(MFMAInstruction(instType=instType, accType=accType,
                                  variant=variant, mfma1k=False,
                                  acc=tileAlias(r, regsPerInst),
                                  a=vgpr(lastChunkBase, 2), b=vgpr(lastChunkBase, 2),
                                  **acc2_kwargs,
+                                 reuseA=reuse, reuseB=reuse,
                                  comment="init%s: [%u:%u]"%(tileInfo.tc, r, r + regsPerInst - 1)))
   # Remainder registers (< regsPerInst) that don't fill a full MFMA
   for i in range(numInst * regsPerInst, totalRegs):
