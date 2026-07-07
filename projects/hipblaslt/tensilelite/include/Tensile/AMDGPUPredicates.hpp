@@ -35,9 +35,7 @@
 #include <sstream>
 #include <vector>
 
-#include <Tensile/Macros.hpp>
-
-TENSILE_HIDDEN_BEGIN
+#include <tensilelitehost/export.h>
 
 namespace TensileLite
 {
@@ -318,4 +316,3 @@ namespace TensileLite
     } // namespace Predicates
 } // namespace TensileLite
 
-TENSILE_HIDDEN_END

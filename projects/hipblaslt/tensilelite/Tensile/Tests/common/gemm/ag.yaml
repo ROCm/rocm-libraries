@@ -8,9 +8,8 @@ GlobalParameters:
   NumElementsToValidate: 128
   DataInitTypeBeta: 0
   DataInitTypeAlpha: 1
-  NewClient: 2
-  CSVExportWinner: 1
-  CSVMergeSameProblemID: 1
+  CSVExportWinner: true
+  CSVMergeSameProblemID: true
   Device: 0
 
 BenchmarkProblems:
@@ -43,11 +42,11 @@ BenchmarkProblems:
         - ClusterLocalRead: [1]
         - DepthU: [64]
         - ScheduleIterAlg: [3]
-        - ExpandPointerSwap: [0]
+        - ExpandPointerSwap: [false]
         - TransposeLDS: [0]
         - GlobalSplitU: [1,2,4]
         - GlobalSplitUAlgorithm: ["MultipleBuffer", "MultipleBufferSingleKernel"]
-        - SourceSwap: [0]
+        - SourceSwap: [false]
         - StoreVectorWidth: [8]
         - AdaptiveGemm: [0,1]
       BenchmarkJoinParameters:
@@ -109,11 +108,11 @@ BenchmarkProblems:
         - ClusterLocalRead: [1]
         - DepthU: [64]
         - ScheduleIterAlg: [3]
-        - ExpandPointerSwap: [0]
+        - ExpandPointerSwap: [false]
         - TransposeLDS: [0]
         - GlobalSplitU: [1,2,4]
         - GlobalSplitUAlgorithm: ["MultipleBuffer", "MultipleBufferSingleKernel"]
-        - SourceSwap: [0]
+        - SourceSwap: [false]
         - StoreVectorWidth: [8]
         - AdaptiveGemm: [0,1]
       BenchmarkJoinParameters:
@@ -175,11 +174,11 @@ BenchmarkProblems:
         - ClusterLocalRead: [1]
         - DepthU: [64]
         - ScheduleIterAlg: [3]
-        - ExpandPointerSwap: [0]
+        - ExpandPointerSwap: [false]
         - TransposeLDS: [0]
         - GlobalSplitU: [1,2,4]
         - GlobalSplitUAlgorithm: ["MultipleBuffer", "MultipleBufferSingleKernel"]
-        - SourceSwap: [0]
+        - SourceSwap: [false]
         - StoreVectorWidth: [8]
         - AdaptiveGemm: [0,1]
       BenchmarkJoinParameters:
@@ -241,11 +240,11 @@ BenchmarkProblems:
         - ClusterLocalRead: [1]
         - DepthU: [64]
         - ScheduleIterAlg: [3]
-        - ExpandPointerSwap: [0]
+        - ExpandPointerSwap: [false]
         - TransposeLDS: [0]
         - GlobalSplitU: [1,2,4]
         - GlobalSplitUAlgorithm: ["MultipleBuffer", "MultipleBufferSingleKernel"]
-        - SourceSwap: [0]
+        - SourceSwap: [false]
         - StoreVectorWidth: [8]
         - AdaptiveGemm: [0,1]
       BenchmarkJoinParameters:

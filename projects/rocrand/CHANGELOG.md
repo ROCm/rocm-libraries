@@ -3,7 +3,7 @@
 Documentation for rocRAND is available at
 [https://rocm.docs.amd.com/projects/rocRAND/en/latest/](https://rocm.docs.amd.com/projects/rocRAND/en/latest/)
 
-## Since last release ROCm 7.13
+## rocRAND 4.5.0 for ROCm 7.14
 
 ### Added
 
@@ -19,6 +19,7 @@ Documentation for rocRAND is available at
 ### Resolved Issues
 
 * Fixed memory leak in unit tests.
+* Fixed incorrect Sobol64 number generation beyond offset 2^32.
 
 ## rocRAND 4.3.0 for ROCm 7.12
 

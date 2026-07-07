@@ -2,7 +2,7 @@
  *
  * MIT License
  *
- * Copyright (C) 2022-2025 Advanced Micro Devices, Inc.
+ * Copyright (C) 2022-2026 Advanced Micro Devices, Inc.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -32,6 +32,7 @@
 
 #include <llvm/ObjectYAML/YAML.h>
 
+#include "benchmark_timing.hpp"
 #include "hipblaslt_datatype2string.hpp"
 #include "hipblaslt_test.hpp"
 #include "utility.hpp"
@@ -257,6 +258,19 @@ public:
     uint32_t iters              = 10;
     int64_t  max_workspace_size = 128 * 1024 * 1024;
     bool     graph_mode         = false;
+    // Adaptive timing (gated on `adaptive`); per-knob values are the preset defaults.
+    float    warmup_time        = hipblaslt_bench::adaptive_defaults::warmup_time;
+    float    sample_time        = hipblaslt_bench::adaptive_defaults::sample_time;
+    float    measure_time       = hipblaslt_bench::adaptive_defaults::measure_time;
+    float    max_measure_time   = hipblaslt_bench::adaptive_defaults::max_measure_time;
+    float    noise_threshold    = hipblaslt_bench::adaptive_defaults::noise_threshold;
+    int32_t  min_iters          = hipblaslt_bench::adaptive_defaults::min_iters;
+    int32_t  max_iters          = hipblaslt_bench::adaptive_defaults::max_iters;
+    float    stability_threshold = hipblaslt_bench::adaptive_defaults::stability_threshold;
+    int32_t  stability_window    = hipblaslt_bench::adaptive_defaults::stability_window;
+    int32_t  stability_interval  = hipblaslt_bench::adaptive_defaults::stability_interval;
+    bool     use_gpu_timer      = true;
+    bool     adaptive           = false;
 };
 
 class LayerConfigIO
@@ -283,6 +297,18 @@ namespace llvm
                 io.mapOptional("Iter", lc.iters);
                 io.mapOptional("MaxWorkspaceSize", lc.max_workspace_size);
                 io.mapOptional("UseGraphMode", lc.graph_mode);
+                io.mapOptional("UseGpuTimer", lc.use_gpu_timer);
+                io.mapOptional("Adaptive", lc.adaptive);
+                io.mapOptional("AdaptiveWarmupTime", lc.warmup_time);
+                io.mapOptional("AdaptiveSampleTime", lc.sample_time);
+                io.mapOptional("AdaptiveMeasureTime", lc.measure_time);
+                io.mapOptional("AdaptiveMaxMeasureTime", lc.max_measure_time);
+                io.mapOptional("AdaptiveNoiseThreshold", lc.noise_threshold);
+                io.mapOptional("AdaptiveMinIters", lc.min_iters);
+                io.mapOptional("AdaptiveMaxIters", lc.max_iters);
+                io.mapOptional("AdaptiveStabilityThreshold", lc.stability_threshold);
+                io.mapOptional("AdaptiveStabilityWindow", lc.stability_window);
+                io.mapOptional("AdaptiveStabilityInterval", lc.stability_interval);
             }
         };
         template <>
@@ -374,13 +400,50 @@ int main(int argc, char** argv)
 {
     if(argc != 2)
     {
-        std::cerr << "Usage: " << argv[0] << " yaml-config.yaml" << std::endl;
+        hipblaslt_cerr << "Usage: " << argv[0] << " yaml-config.yaml" << std::endl;
         exit(1);
     }
     auto              inputFile = llvm::MemoryBuffer::getFile(argv[1]);
     LayerConfigIO     rv;
     llvm::yaml::Input yin((*inputFile)->getMemBufferRef());
     yin >> rv;
+
+    // Build the timing config once from the parsed YAML and validate it up front, before any
+    // GPU setup, so a bad config fails fast. The same object is reused for the measurement
+    // below -- keep it the single source of truth rather than mirroring fields into a second
+    // config that can drift out of sync.
+    hipblaslt_bench::TimingConfig timingCfg;
+    timingCfg.iters         = rv.gs.iters;
+    timingCfg.use_gpu_timer = rv.gs.use_gpu_timer;
+    timingCfg.adaptive      = rv.gs.adaptive;
+    if(rv.gs.adaptive)
+    {
+        // Adaptive timing and graph mode are mutually exclusive: graph mode times a single
+        // fixed-count replay, while adaptive timing self-sizes and samples in a launch loop.
+        // Reject the combination rather than silently letting graph mode win.
+        if(rv.gs.graph_mode)
+        {
+            hipblaslt_cerr << "error: Adaptive and UseGraphMode cannot be enabled together"
+                           << std::endl;
+            return 1;
+        }
+
+        timingCfg.warmup_time         = rv.gs.warmup_time;
+        timingCfg.sample_time         = rv.gs.sample_time;
+        timingCfg.min_iters           = rv.gs.min_iters;
+        timingCfg.max_iters           = rv.gs.max_iters;
+        timingCfg.measure_time        = rv.gs.measure_time;
+        timingCfg.max_measure_time    = rv.gs.max_measure_time;
+        timingCfg.noise_threshold     = rv.gs.noise_threshold;
+        timingCfg.stability_threshold = rv.gs.stability_threshold;
+        timingCfg.stability_window    = rv.gs.stability_window;
+        timingCfg.stability_interval  = rv.gs.stability_interval;
+        if(const auto err = hipblaslt_bench::validate_adaptive_config(timingCfg); !err.empty())
+        {
+            hipblaslt_cerr << "error: " << err << std::endl;
+            return 1;
+        }
+    }
 
     uint32_t rotating           = rv.gs.rotating * 1024 * 1024;
     int32_t  cold_iters         = rv.gs.cold_iters;
@@ -390,7 +453,7 @@ int main(int argc, char** argv)
     std::vector<Layer>& layer = rv.layer;
     if(layer.size() == 0)
     {
-        std::cerr << "Test is empty!" << std::endl;
+        hipblaslt_cerr << "Test is empty!" << std::endl;
         exit(1);
     }
 
@@ -533,32 +596,15 @@ int main(int argc, char** argv)
     CHECK_HIP_ERROR(hipEventCreate(&event_gpu_time_start));
     CHECK_HIP_ERROR(hipEventCreate(&event_gpu_time_end));
 
-    for(int i = 0; i < cold_iters; i++)
-    {
-        for(size_t gemmIdx = 0; gemmIdx < layer.size(); gemmIdx++)
-        {
-            if(layer[gemmIdx].type == Layer::TYPE::GEMM)
-                static_cast<void>((*layer[gemmIdx].gemms)[i % block_count].run(stream));
-        }
-    }
-
-    CHECK_HIP_ERROR(hipEventSynchronize(event_gpu_time_start));
-    CHECK_HIP_ERROR(hipEventRecord(event_gpu_time_start, stream));
-    hipGraph_t graph = NULL;
-    if(rv.gs.graph_mode)
-    {
-        hipStreamCaptureMode mode = hipStreamCaptureModeGlobal;
-        CHECK_HIP_ERROR(hipStreamBeginCapture(stream, mode));
-    }
-
-    for(int i = 0; i < iters; i++)
-    {
+    // One enqueue of the whole layer sequence for a given (rotating) index.
+    auto launch = [&](int64_t idx) {
+        int b = static_cast<int>(idx % block_count);
         for(size_t gemmIdx = 0; gemmIdx < layer.size(); gemmIdx++)
         {
             switch(layer[gemmIdx].type)
             {
             case Layer::TYPE::GEMM:
-                static_cast<void>((*layer[gemmIdx].gemms)[i % block_count].run(stream));
+                static_cast<void>((*layer[gemmIdx].gemms)[b].run(stream));
                 break;
             case Layer::TYPE::FLUSH:
                 hipLaunchKernelGGL(flush_icache, dim3(gpu_block3), dim3(64), 0, stream);
@@ -567,30 +613,59 @@ int main(int argc, char** argv)
                 break;
             }
         }
-    }
+    };
 
+    // Warmup. Adaptive mode ignores ColdIter/Iter and warms up inside run_measurement.
+    if(!rv.gs.adaptive)
+        for(int i = 0; i < cold_iters; i++)
+            launch(i);
+
+    hipGraph_t                    graph = NULL;
+    hipblaslt_bench::TimingResult timing;
     if(rv.gs.graph_mode)
     {
+        // Graph mode is mutually exclusive with adaptive timing (rejected at config load),
+        // so this fixed-count replay path never runs in adaptive mode.
+        // Capture `iters` enqueues into a graph and time a single replay.
+        CHECK_HIP_ERROR(hipStreamBeginCapture(stream, hipStreamCaptureModeGlobal));
+        for(int i = 0; i < iters; i++)
+            launch(i);
         CHECK_HIP_ERROR(hipStreamEndCapture(stream, &graph));
-    }
-    CHECK_HIP_ERROR(hipEventRecord(event_gpu_time_end, stream));
-    CHECK_HIP_ERROR(hipEventSynchronize(event_gpu_time_end));
+        CHECK_HIP_ERROR(hipStreamSynchronize(stream)); // drain warmup before timing (matches original)
 
-    if(rv.gs.graph_mode)
-    {
         hipGraphExec_t graph_exec = NULL;
         CHECK_HIP_ERROR(hipGraphInstantiate(&graph_exec, graph, nullptr, nullptr, 0));
-        CHECK_HIP_ERROR(hipEventSynchronize(event_gpu_time_start));
         CHECK_HIP_ERROR(hipEventRecord(event_gpu_time_start, stream));
         CHECK_HIP_ERROR(hipGraphLaunch(graph_exec, stream));
         CHECK_HIP_ERROR(hipEventRecord(event_gpu_time_end, stream));
         CHECK_HIP_ERROR(hipEventSynchronize(event_gpu_time_end));
         CHECK_HIP_ERROR(hipGraphExecDestroy(graph_exec));
+
+        float gpu_time_ms;
+        CHECK_HIP_ERROR(
+            hipEventElapsedTime(&gpu_time_ms, event_gpu_time_start, event_gpu_time_end));
+        timing.median_us = timing.min_us = timing.mean_us
+            = (static_cast<double>(gpu_time_ms) * 1000.0) / (iters < 1 ? 1 : iters);
+        timing.batch     = iters;
+        timing.samples   = 1;
+        timing.hot_iters = iters;
     }
-    float gpu_time_ms;
-    CHECK_HIP_ERROR(hipEventElapsedTime(&gpu_time_ms, event_gpu_time_start, event_gpu_time_end));
-    auto gpu_time_used = gpu_time_ms * 1000; // ms to us
-    std::cout << "Time: " << gpu_time_used / iters << std::endl;
+    else
+    {
+        hipblaslt_bench::run_measurement(
+            launch, timingCfg, event_gpu_time_start, event_gpu_time_end, stream, timing);
+    }
+
+    std::cout << "Time: " << timing.median_us << std::endl;
+    if(timing.samples > 1)
+        std::cout << "  median over " << timing.samples << " samples, batch " << timing.batch
+                  << ", mean " << timing.mean_us << " us, min " << timing.min_us << " us, cv "
+                  << timing.cv
+                  << (timing.noise_active ? (timing.converged ? ", converged"
+                                             : timing.stable   ? ", stable"
+                                                               : ", noisy")
+                                          : "")
+                  << std::endl;
 
     // Print kernel info
     if(rv.gs.print_kernel_info)
