@@ -328,6 +328,12 @@ def main() -> int:
         help="Max paged-KV pool size (blocks). Large values keep KV in HBM.",
     )
     ap.add_argument(
+        "--dtype",
+        choices=["fp16", "bf16", "all"],
+        default=None,
+        help="Override dtype for all shapes (fp16, bf16, or all to run both). Default: use dtype from JSON.",
+    )
+    ap.add_argument(
         "--limit", type=int, default=None, help="Process only first N shapes."
     )
     ap.add_argument(
@@ -364,6 +370,37 @@ def main() -> int:
         return 1
 
     shapes = load_decode_shapes(args.shapes)
+    if args.dtype == "all":
+        shapes = [
+            DecodeShape(
+                batch=s.batch,
+                seqlen_q=s.seqlen_q,
+                seqlen_k=s.seqlen_k,
+                num_query_heads=s.num_query_heads,
+                num_kv_heads=s.num_kv_heads,
+                head_size=s.head_size,
+                block_size=s.block_size,
+                dtype=dt,
+                label=s.label,
+            )
+            for s in shapes
+            for dt in ("fp16", "bf16")
+        ]
+    elif args.dtype is not None:
+        shapes = [
+            DecodeShape(
+                batch=s.batch,
+                seqlen_q=s.seqlen_q,
+                seqlen_k=s.seqlen_k,
+                num_query_heads=s.num_query_heads,
+                num_kv_heads=s.num_kv_heads,
+                head_size=s.head_size,
+                block_size=s.block_size,
+                dtype=args.dtype,
+                label=s.label,
+            )
+            for s in shapes
+        ]
     if args.limit is not None:
         shapes = shapes[: args.limit]
 
