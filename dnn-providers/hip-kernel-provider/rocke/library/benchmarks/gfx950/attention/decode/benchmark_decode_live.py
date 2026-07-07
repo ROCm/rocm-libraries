@@ -329,9 +329,16 @@ def main() -> int:
     )
     ap.add_argument(
         "--dtype",
-        choices=["fp16", "bf16", "all"],
+        choices=["fp16", "bf16"],
         default=None,
-        help="Override dtype for all shapes (fp16, bf16, or all to run both). Default: use dtype from JSON.",
+        help="Override dtype for all shapes. Default: use dtype from JSON.",
+    )
+    ap.add_argument(
+        "--batch",
+        type=int,
+        default=None,
+        metavar="N",
+        help="Override batch size for all shapes. Default: use batch from JSON.",
     )
     ap.add_argument(
         "--limit", type=int, default=None, help="Process only first N shapes."
@@ -370,23 +377,7 @@ def main() -> int:
         return 1
 
     shapes = load_decode_shapes(args.shapes)
-    if args.dtype == "all":
-        shapes = [
-            DecodeShape(
-                batch=s.batch,
-                seqlen_q=s.seqlen_q,
-                seqlen_k=s.seqlen_k,
-                num_query_heads=s.num_query_heads,
-                num_kv_heads=s.num_kv_heads,
-                head_size=s.head_size,
-                block_size=s.block_size,
-                dtype=dt,
-                label=s.label,
-            )
-            for s in shapes
-            for dt in ("fp16", "bf16")
-        ]
-    elif args.dtype is not None:
+    if args.dtype is not None:
         shapes = [
             DecodeShape(
                 batch=s.batch,
@@ -397,6 +388,21 @@ def main() -> int:
                 head_size=s.head_size,
                 block_size=s.block_size,
                 dtype=args.dtype,
+                label=s.label,
+            )
+            for s in shapes
+        ]
+    if args.batch is not None:
+        shapes = [
+            DecodeShape(
+                batch=args.batch,
+                seqlen_q=s.seqlen_q,
+                seqlen_k=s.seqlen_k,
+                num_query_heads=s.num_query_heads,
+                num_kv_heads=s.num_kv_heads,
+                head_size=s.head_size,
+                block_size=s.block_size,
+                dtype=s.dtype,
                 label=s.label,
             )
             for s in shapes
