@@ -9,7 +9,7 @@ Covers:
   - GQA short-context routes to unified_2d narrow (dense_pipe rejected)
   - explicit algorithm="dense_pipe" forces the candidate
   - spec name and path are correct
-  - bf16 flash gate respects env var (HIPDNN_GFX942_BF16_WIDE)
+  - bf16 flash gate is default-on with a small_q_narrow (q<=768) carve-out
 """
 
 from __future__ import annotations
