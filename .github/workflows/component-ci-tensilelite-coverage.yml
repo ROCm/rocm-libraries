@@ -94,6 +94,11 @@ jobs:
           PY=.tox/coverage-unit/bin/python
           [ -x "$PY" ] || { echo "no tox venv python at $PY"; exit 0; }
           echo "LD_LIBRARY_PATH=$LD_LIBRARY_PATH"
+          echo "--- process limits ---"
+          echo "nproc=$(nproc) ulimit-u(soft)=$(ulimit -Su) ulimit-u(hard)=$(ulimit -Hu)"
+          echo "pid_max=$(cat /proc/sys/kernel/pid_max 2>/dev/null) threads-max=$(cat /proc/sys/kernel/threads-max 2>/dev/null)"
+          echo "cgroup v2 pids.max=$(cat /sys/fs/cgroup/pids.max 2>/dev/null) current=$(cat /sys/fs/cgroup/pids.current 2>/dev/null)"
+          echo "cgroup v1 pids.max=$(cat /sys/fs/cgroup/pids/pids.max 2>/dev/null) current=$(cat /sys/fs/cgroup/pids/pids.current 2>/dev/null)"
           # Write a real module so 'spawn'/'forkserver' can re-import it.
           cat > /tmp/wprobe.py <<'PYEOF'
           import os, sys, multiprocessing as mp
@@ -102,25 +107,24 @@ jobs:
           from Tensile.Common.Architectures import SUPPORTED_ISA
           from Tensile.Common.Capabilities import makeIsaInfoMap
 
-          def probe(_=0):
+          # Mimic the per-xdist-worker session fixture: compute caps for ALL ISAs.
+          def fullProbe(_=0):
               cxx = validateToolchain("amdclang++")
-              isas = [v for v in SUPPORTED_ISA if tuple(v) == (9, 4, 2)]
-              m = makeIsaInfoMap(isas, cxx)
+              m = makeIsaInfoMap(list(SUPPORTED_ISA), cxx)
               k = [k for k in m if tuple(k) == (9, 4, 2)][0]
-              return m[k].asmCaps.get("SupportedISA")
+              return int(m[k].asmCaps.get("SupportedISA"))
 
           if __name__ == "__main__":
-              # Workers first so the fork case computes caps fresh (not inherited
-              # from a parent that already populated the rocisa singleton).
-              for method in ("fork", "spawn", "forkserver"):
-                  try:
-                      ctx = mp.get_context(method)
-                      with ctx.Pool(2) as pool:
-                          print(f"{method}: gfx942 SupportedISA per-worker =",
-                                pool.map(probe, range(2)), flush=True)
-                  except Exception as e:
-                      print(f"{method}: EXC {e!r}", flush=True)
-              print("main: gfx942 SupportedISA =", probe(), flush=True)
+              for n in (4, 8):
+                  for method in ("fork", "spawn"):
+                      try:
+                          ctx = mp.get_context(method)
+                          with ctx.Pool(n) as pool:
+                              res = pool.map(fullProbe, range(n))
+                          print(f"{method} x{n}: gfx942 SupportedISA per-worker = {res} "
+                                f"(zeros={res.count(0)})", flush=True)
+                      except Exception as e:
+                          print(f"{method} x{n}: EXC {e!r}", flush=True)
           PYEOF
           TL_DIR="$PWD" PYTHONPATH="$PWD" "$PY" /tmp/wprobe.py
           echo "diag rc=$?"
