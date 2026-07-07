@@ -21,17 +21,12 @@
 #ifndef ROCPRIM_DEVICE_DETAIL_DEVICE_SEGMENTED_TOPK_HPP_
 #define ROCPRIM_DEVICE_DETAIL_DEVICE_SEGMENTED_TOPK_HPP_
 
-#include "../../block/block_load_func.hpp"
-#include "../../block/block_scan.hpp"
-#include "../../block/block_store_func.hpp"
 #include "../../detail/temp_storage.hpp"
 #include "../device_segmented_radix_sort.hpp"
 #include "../device_transform.hpp"
 #include "rocprim/config.hpp"
 #include "rocprim/device/config_types.hpp"
-#include "rocprim/device/device_select.hpp"
 #include "rocprim/functional.hpp"
-#include <iostream>
 
 BEGIN_ROCPRIM_NAMESPACE
 
@@ -87,76 +82,64 @@ public:
                            const hipStream_t                 stream            = 0,
                            const bool                        debug_synchronous = false)
     {
-
         ValuesInputIterator temp_values              = nullptr;
         KeysInputIterator   temp_keys                = nullptr;
         void*               temporary_storage_radix  = nullptr;
         size_t              radix_storage_size_bytes = 0;
+        bool                ignored                  = false;
 
-        if(temporary_storage != nullptr)
+        auto do_segmented_radix_sort = [&]()
         {
-            constexpr bool with_values = !std::is_same_v<ValuesInputIterator, rocprim::empty_type>;
-            // Partition temporary storage for segmented_radix_sort and temporary results
+            return detail::segmented_radix_sort_impl<default_config, Descending>(
+                temporary_storage_radix,
+                radix_storage_size_bytes,
+                keys_input,
+                nullptr,
+                temp_keys,
+                values_input,
+                nullptr,
+                temp_values,
+                size,
+                ignored,
+                segments,
+                begin_offsets,
+                end_offsets,
+                0,
+                8 * sizeof(key_in_t),
+                stream,
+                debug_synchronous);
+        };
 
-            radix_storage_size_bytes = storage_size - size * sizeof(key_in_t)
-                                       - (with_values ? size : 0) * sizeof(value_in_t);
-            // When keys and values are sorted we need temporary storage for both
-            ROCPRIM_RETURN_ON_ERROR(detail::temp_storage::partition(
-                temporary_storage,
-                storage_size,
-                detail::temp_storage::make_linear_partition(
-                    detail::temp_storage::ptr_aligned_array(&temp_keys, size),
-                    detail::temp_storage::ptr_aligned_array(&temp_values, with_values ? size : 0),
-                    detail::temp_storage::make_partition(&temporary_storage_radix, 1))));
-        }
+        constexpr bool with_values = !std::is_same_v<ValuesInputIterator, rocprim::empty_type>;
 
-        bool ignored = false;
+        // Compute radix_storage_size_bytes: 'temporary_storage_radix' is still 'nullptr'
+        ROCPRIM_RETURN_ON_ERROR(do_segmented_radix_sort());
 
-        ROCPRIM_RETURN_ON_ERROR(
-            detail::segmented_radix_sort_impl<default_config, Descending>(temporary_storage_radix,
-                                                                          radix_storage_size_bytes,
-                                                                          keys_input,
-                                                                          nullptr,
-                                                                          temp_keys,
-                                                                          values_input,
-                                                                          nullptr,
-                                                                          temp_values,
-                                                                          size,
-                                                                          ignored,
-                                                                          segments,
-                                                                          begin_offsets,
-                                                                          end_offsets,
-                                                                          0,
-                                                                          8 * sizeof(key_in_t),
-                                                                          stream,
-                                                                          debug_synchronous));
+        // When keys and values are sorted we need temporary storage for both
+        ROCPRIM_RETURN_ON_ERROR(detail::temp_storage::partition(
+            temporary_storage,
+            storage_size,
+            detail::temp_storage::make_linear_partition(
+                detail::temp_storage::ptr_aligned_array(&temp_keys, size),
+                detail::temp_storage::ptr_aligned_array(&temp_values, with_values ? size : 0),
+                detail::temp_storage::make_partition(&temporary_storage_radix, radix_storage_size_bytes))));
 
-        if(temporary_storage == nullptr)
+        if (temporary_storage == nullptr)
         {
-            storage_size
-                = radix_storage_size_bytes + size * sizeof(key_in_t) + size * sizeof(value_in_t);
-
-            ROCPRIM_RETURN_ON_ERROR(detail::temp_storage::partition(
-                temporary_storage,
-                storage_size,
-                detail::temp_storage::make_linear_partition(
-                    detail::temp_storage::ptr_aligned_array(&temp_keys, size),
-                    detail::temp_storage::ptr_aligned_array(&temp_values, size),
-                    detail::temp_storage::make_partition(&temporary_storage_radix,
-                                                         radix_storage_size_bytes))));
-            // Return temp memory size required by segmented_radix_sort and temporary results
             return hipSuccess;
         }
 
+        // Actually do the radix sort
+        ROCPRIM_RETURN_ON_ERROR(do_segmented_radix_sort());
+
         for(size_t segment = 0; segment < segments; segment++)
         {
-
             // Move first K keys from sorted temporary buffer to output
             ROCPRIM_RETURN_ON_ERROR(rocprim::transform(temp_keys + begin_offsets[segment],
                                                        keys_output + segment * K,
                                                        K,
                                                        rocprim::identity<>{}));
-            if constexpr(!std::is_same_v<ValuesInputIterator, rocprim::empty_type>)
+            if constexpr(with_values)
             {
                 // If values are provided, also move first K values to the output
                 ROCPRIM_RETURN_ON_ERROR(rocprim::transform(temp_values + begin_offsets[segment],
