@@ -28,6 +28,35 @@ jobs:
         with:
           amdgpu_family: gfx94X-dcgpu
 
+      # TEMPORARY DIAGNOSTIC (AIHPBLAS-3877/3878): coverage-unit errors in this
+      # container because rocisa's SupportedISA probe
+      # (`amdclang++ -x assembler -target amdgcn-amdhsa -mcpu=<arch> -`) exits
+      # nonzero here while it succeeds on a normal ROCm install, which fails the
+      # characterization Solution fixtures and drags coverage below the floor.
+      # This surfaces the compiler's actual stderr/exit code. Remove once known.
+      - name: Diagnose SupportedISA assembler probe
+        shell: bash
+        run: |
+          set +e
+          echo "ROCM_PATH=$ROCM_PATH"
+          echo "--- candidate amdclang++ locations (validateToolchain order) ---"
+          CXX_PROBE=""
+          for d in "$ROCM_PATH/bin" "$ROCM_PATH/lib/llvm/bin" /opt/rocm/bin /opt/rocm/lib/llvm/bin; do
+            echo "[$d]"; ls -l "$d/amdclang++" 2>&1
+            if [ -z "$CXX_PROBE" ] && [ -x "$d/amdclang++" ]; then CXX_PROBE="$d/amdclang++"; fi
+          done
+          [ -z "$CXX_PROBE" ] && CXX_PROBE="$(command -v amdclang++)"
+          echo "--- resolved: $CXX_PROBE ---"
+          "$CXX_PROBE" --version 2>&1 | head -3
+          for arch in gfx942 gfx90a gfx950; do
+            echo "=== probe $arch (stderr shown) ==="
+            printf "" | "$CXX_PROBE" -x assembler -target amdgcn-amdhsa -mcpu=$arch - -o /tmp/probe_$arch.o
+            echo "exit=$?"
+          done
+          echo "--- device libs / bitcode present? ---"
+          ls -1 "$ROCM_PATH/amdgcn/bitcode" 2>&1 | head -5
+          exit 0
+
       - name: Install tox
         shell: bash
         run: pip install tox
