@@ -70,7 +70,7 @@
     AssertMinApproxSize: 0
     AssertSizeEqual: {}
     AssertSizeGreaterThan: {}
-    AssertSizeLessThan: {}
+    AssertSizeLessThan: {0: 256, 1: 256}
     AssertSizeMultiple: {}
     AssertStrideAEqual: {0: 1}
     AssertStrideBEqual: {0: 1}
@@ -626,7 +626,7 @@
     AssertMinApproxSize: 0
     AssertSizeEqual: {}
     AssertSizeGreaterThan: {}
-    AssertSizeLessThan: {}
+    AssertSizeLessThan: {0: 256, 1: 256}
     AssertSizeMultiple: {}
     AssertStrideAEqual: {0: 1}
     AssertStrideBEqual: {0: 1}
