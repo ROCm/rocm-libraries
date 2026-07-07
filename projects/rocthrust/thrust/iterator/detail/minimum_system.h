@@ -41,8 +41,11 @@ struct unrelated_systems
 // if a minimum system exists for these arguments, return it
 // otherwise, collect the arguments and report them as unrelated
 template <typename... Ts>
-using minimum_system = ::internal::
-  If<is_metafunction_defined<minimum_type<Ts...>>::value, minimum_type<Ts...>, identity_<unrelated_systems<Ts...>>>;
+using minimum_system = _THRUST_STD::
+  _If<is_metafunction_defined<minimum_type<Ts...>>::value, minimum_type<Ts...>, identity_<unrelated_systems<Ts...>>>;
+
+template <typename... Ts>
+using minimum_system_t = typename minimum_system<Ts...>::type;
 
 } // namespace detail
 THRUST_NAMESPACE_END
