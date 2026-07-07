@@ -55,15 +55,38 @@ log = logging.getLogger(__name__)
 # =============================================================================
 
 
-def _fp8_to_float32(arr: np.ndarray) -> np.ndarray:
-    """Cast fp8 byte array to float32 (treating as float8_e4m3fn)."""
-    # numpy doesn't have fp8; cast uint8 bit pattern to float via ml_dtypes if available,
-    # otherwise fall back to float32 direct cast (close enough for reference at low values).
+def _float32_to_fp8(arr: np.ndarray, dtype: str) -> np.ndarray:
+    """Encode float32 values as fp8 bytes (uint8 view of the fp8 bit pattern).
+
+    dtype: "fp8" -> float8_e4m3fn, "bf8" -> float8_e5m2.
+    Falls back to saturating the float32 values to [-448, 448] and storing as
+    uint8 when ml_dtypes is not installed; the bit patterns are not true fp8 in
+    that case but the buffer has the correct element size (1 byte/element).
+    """
     try:
         import ml_dtypes
-        return arr.view(ml_dtypes.float8_e4m3fn).astype(np.float32)
+        ml_t = ml_dtypes.float8_e4m3fn if dtype == "fp8" else ml_dtypes.float8_e5m2
+        return arr.astype(ml_t).view(np.uint8)
     except ImportError:
-        return arr.astype(np.float32)
+        # Fallback: clamp to a small range so values fit in fp8, store as uint8.
+        # The bit patterns are not genuine fp8, but the buffer size is correct.
+        clamped = np.clip(arr, -2.0, 2.0)
+        return (clamped * 64).astype(np.int8).view(np.uint8)
+
+
+def _fp8_to_float32(arr: np.ndarray, dtype: str) -> np.ndarray:
+    """Decode fp8 bytes (uint8 view) back to float32.
+
+    dtype: "fp8" -> float8_e4m3fn, "bf8" -> float8_e5m2.
+    Must be called on the same array produced by _float32_to_fp8 to get the
+    values the kernel actually computes on.
+    """
+    try:
+        import ml_dtypes
+        ml_t = ml_dtypes.float8_e4m3fn if dtype == "fp8" else ml_dtypes.float8_e5m2
+        return arr.view(ml_t).astype(np.float32)
+    except ImportError:
+        return arr.view(np.int8).astype(np.float32) / 64.0
 
 
 def reference_bquant_gemm(
@@ -75,8 +98,8 @@ def reference_bquant_gemm(
     """
     CPU fp32 reference for C = A @ dequant(B, BQ).
 
-    A   [M, K]  float32 (upcast from fp8/bf8)
-    B   [K, N]  float32 (upcast from fp8/bf8)
+    A   [M, K]  float32 — must be decoded from the same fp8 bytes sent to the GPU
+    B   [K, N]  float32 — must be decoded from the same fp8 bytes sent to the GPU
     BQ  [QK_B, QN_B] float32 scale factors
 
     Dequant: B[k, n] *= BQ[k // gK, n // gN]
@@ -161,17 +184,21 @@ def main():
     QK_B = math.ceil(K / gK)
     QN_B = math.ceil(N / gN)
 
-    # A and B as uint8 (fp8 byte representation) in [-2, 2] float range
-    # Using simple values so the reference is easy to verify
+    # Generate float32 values in the fp8 representable range, then encode as
+    # real fp8 bytes (1 byte/element) so the C layer receives the correct size.
     A_f32 = rng.uniform(-2.0, 2.0, (M, K)).astype(np.float32)
     B_f32 = rng.uniform(-2.0, 2.0, (K, N)).astype(np.float32)
     BQ_f32 = rng.uniform(0.5, 2.0, (QK_B, QN_B)).astype(np.float32)
 
-    # Cast to fp8 approximation (uint8 for raw byte passing to C lib)
-    # Real fp8 encoding would use ml_dtypes; here we use float16 as a stand-in
-    # that the kernel can safely interpret as fp8 bit patterns for testing.
-    A_raw = A_f32.astype(np.float16)
-    B_raw = B_f32.astype(np.float16)
+    # Encode as fp8 bytes (uint8 view). _float32_to_fp8 uses ml_dtypes when
+    # available for accurate fp8 bit patterns, with a fallback otherwise.
+    A_raw = _float32_to_fp8(A_f32, args.dtype)   # shape (M, K), 1 byte/element
+    B_raw = _float32_to_fp8(B_f32, args.dtype)   # shape (K, N), 1 byte/element
+
+    # Decode back to float32 so the CPU reference sees the same values the
+    # kernel will compute on (fp8 encoding introduces rounding).
+    A_dec = _fp8_to_float32(A_raw, args.dtype)
+    B_dec = _fp8_to_float32(B_raw, args.dtype)
 
     # -------------------------------------------------------------------------
     # 4. Run on GPU
@@ -191,7 +218,8 @@ def main():
     # 5. Verify
     # -------------------------------------------------------------------------
     if not args.no_verify:
-        C_ref = reference_bquant_gemm(A_f32, B_f32, BQ_f32, problem)
+        # Reference uses decoded fp8 values — the same bit patterns the kernel sees.
+        C_ref = reference_bquant_gemm(A_dec, B_dec, BQ_f32, problem)
         C_gpu = result.C
 
         max_rel = float(np.max(np.abs(C_gpu.astype(np.float32) - C_ref.astype(np.float32)))

@@ -45,6 +45,13 @@ log = logging.getLogger(__name__)
 _CODEGEN_SCRIPT = Path(__file__).parent.parent / "codegen" / "unified_grouped_gemm_bquant_codegen.py"
 _CTYPES_LIB_SRC = Path(__file__).parent.parent / "bindings" / "ctypes" / "grouped_gemm_bquant_ctypes_lib.cpp"
 
+# Import the shared name-construction helper from codegen_common so both sides
+# stay byte-exact without duplicating the logic.
+_codegen_dir = str(Path(__file__).parent.parent / "codegen")
+if _codegen_dir not in sys.path:
+    sys.path.insert(0, _codegen_dir)
+from codegen_common import make_bquant_kernel_name  # noqa: E402
+
 _DEFAULT_HIPCC    = "hipcc"
 _DEFAULT_GFX_ARCH = "gfx950"
 
@@ -102,24 +109,22 @@ class BQuantKernelConfig:
 
     @property
     def name(self) -> str:
-        """Byte-exact match to codegen KERNEL_NAME."""
-        parts = [
-            "grouped_gemm_bquant",
-            self.variant_key,
-            self.layout,
-            self.pipeline,
-            self.epilogue,
-            self.scheduler,
-            f"{self.tile_m}x{self.tile_n}x{self.tile_k}",
-            f"{self.warp_m}x{self.warp_n}x{self.warp_k}",
-            f"{self.warp_tile_m}x{self.warp_tile_n}x{self.warp_tile_k}",
-            f"qg{self.quant_group_m}x{self.quant_group_n}x{self.quant_group_k}",
-        ]
-        if self.preshuffle_b:
-            parts.append("preshuffleb")
-        if self.preshuffle_bquant:
-            parts.append("preshufflebq")
-        return "_".join(parts)
+        """Byte-exact match to codegen KERNEL_NAME (delegates to make_bquant_kernel_name)."""
+        return make_bquant_kernel_name(
+            variant_key=self.variant_key,
+            layout=self.layout,
+            pipeline=self.pipeline,
+            epilogue=self.epilogue,
+            scheduler=self.scheduler,
+            tile_m=self.tile_m, tile_n=self.tile_n, tile_k=self.tile_k,
+            warp_m=self.warp_m, warp_n=self.warp_n, warp_k=self.warp_k,
+            warp_tile_m=self.warp_tile_m, warp_tile_n=self.warp_tile_n, warp_tile_k=self.warp_tile_k,
+            quant_group_m=self.quant_group_m,
+            quant_group_n=self.quant_group_n,
+            quant_group_k=self.quant_group_k,
+            preshuffle_b=self.preshuffle_b,
+            preshuffle_bquant=self.preshuffle_bquant,
+        )
 
     def to_codegen_config(self) -> dict:
         """Produce the JSON config dict consumed by unified_grouped_gemm_bquant_codegen.py."""
@@ -574,7 +579,7 @@ def setup_multiple_bquant_dispatchers(
 
     if parallel and len(deduped) > 1:
         workers = max_workers or min(len(deduped), os.cpu_count() or 4)
-        with concurrent.futures.ProcessPoolExecutor(max_workers=workers) as ex:
+        with concurrent.futures.ThreadPoolExecutor(max_workers=workers) as ex:
             futures = {ex.submit(_build_one, idx, cfg): (idx, cfg) for idx, cfg in deduped}
             for fut in concurrent.futures.as_completed(futures):
                 try:

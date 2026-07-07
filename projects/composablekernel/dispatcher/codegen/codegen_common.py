@@ -351,6 +351,50 @@ def needs_pipeline_expansion(config: dict) -> bool:
 
 
 # ============================================================================
+# BQuant kernel name construction
+# ============================================================================
+
+
+def make_bquant_kernel_name(
+    variant_key: str,
+    layout: str,
+    pipeline: str,
+    epilogue: str,
+    scheduler: str,
+    tile_m: int, tile_n: int, tile_k: int,
+    warp_m: int, warp_n: int, warp_k: int,
+    warp_tile_m: int, warp_tile_n: int, warp_tile_k: int,
+    quant_group_m: int,
+    quant_group_n: int,
+    quant_group_k: int,
+    preshuffle_b: bool = False,
+    preshuffle_bquant: bool = False,
+) -> str:
+    """Return the canonical BQuant kernel name used as KERNEL_NAME in generated headers.
+
+    Both BQuantKernelConfig (utils) and BQuantKernelSpec (codegen) delegate to this
+    function so the two sides are guaranteed to stay byte-exact.
+    """
+    parts = [
+        "grouped_gemm_bquant",
+        variant_key,
+        layout,
+        pipeline,
+        epilogue,
+        scheduler,
+        f"{tile_m}x{tile_n}x{tile_k}",
+        f"{warp_m}x{warp_n}x{warp_k}",
+        f"{warp_tile_m}x{warp_tile_n}x{warp_tile_k}",
+        f"qg{quant_group_m}x{quant_group_n}x{quant_group_k}",
+    ]
+    if preshuffle_b:
+        parts.append("preshuffleb")
+    if preshuffle_bquant:
+        parts.append("preshufflebq")
+    return "_".join(parts)
+
+
+# ============================================================================
 # BQuant-specific Type Mappings
 # ============================================================================
 

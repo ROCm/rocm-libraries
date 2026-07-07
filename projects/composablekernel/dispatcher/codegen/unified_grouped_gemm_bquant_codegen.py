@@ -34,7 +34,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Dict, List, Optional, Tuple
 
-from codegen_common import TileConfig, parallel_generate, BQUANT_DTYPE_MAP
+from codegen_common import make_bquant_kernel_name
 
 logging.basicConfig(level=logging.INFO, format="%(levelname)s: %(message)s")
 log = logging.getLogger(__name__)
@@ -209,23 +209,21 @@ class BQuantKernelSpec:
     @property
     def name(self) -> str:
         t = self.tile
-        parts = [
-            "grouped_gemm_bquant",
-            self.variant_key,
-            self.layout,
-            self.pipeline,
-            self.epilogue,
-            self.scheduler,
-            f"{t.tile_m}x{t.tile_n}x{t.tile_k}",
-            f"{t.warp_m}x{t.warp_n}x{t.warp_k}",
-            f"{t.warp_tile_m}x{t.warp_tile_n}x{t.warp_tile_k}",
-            f"qg{self.quant_group_m}x{self.quant_group_n}x{self.quant_group_k}",
-        ]
-        if self.preshuffle_b:
-            parts.append("preshuffleb")
-        if self.preshuffle_bquant:
-            parts.append("preshufflebq")
-        return "_".join(parts)
+        return make_bquant_kernel_name(
+            variant_key=self.variant_key,
+            layout=self.layout,
+            pipeline=self.pipeline,
+            epilogue=self.epilogue,
+            scheduler=self.scheduler,
+            tile_m=t.tile_m, tile_n=t.tile_n, tile_k=t.tile_k,
+            warp_m=t.warp_m, warp_n=t.warp_n, warp_k=t.warp_k,
+            warp_tile_m=t.warp_tile_m, warp_tile_n=t.warp_tile_n, warp_tile_k=t.warp_tile_k,
+            quant_group_m=self.quant_group_m,
+            quant_group_n=self.quant_group_n,
+            quant_group_k=self.quant_group_k,
+            preshuffle_b=self.preshuffle_b,
+            preshuffle_bquant=self.preshuffle_bquant,
+        )
 
 
 # =============================================================================
@@ -267,9 +265,53 @@ class BQuantKernelHeaderGenerator:
         preshuffle_bquant = str(spec.preshuffle_bquant).lower()
         double_smem_buffer = str(spec.double_smem_buffer).lower()
 
-        # CShuffleEpilogue problem parameters
-        # TiledMMAPermuteN is false when quant_group_n > 1 (see run_gemm_quant_example.inc)
-        tiled_permute_n = "false"
+        # TiledMMAPermuteN = (N_Repeat % 2 == 0) where N_Repeat = TileN / (WarpN * WarpTileN)
+        # Mirrors GemmConfig::TiledMMAPermuteN in gemm_utils.hpp.
+        n_repeat = t.tile_n // (t.warp_n * t.warp_tile_n)
+        tiled_mma_permute_n = (n_repeat % 2 == 0)
+        # PermuteNEpilogue is used when quant_group_n == 1 and TiledMMAPermuteN is true;
+        # CShuffleEpilogue otherwise. Mirrors run_gemm_quant_example.inc:
+        #   TiledPermuteN = (BQuantGroupSize::kN > 1) ? false : GemmConfig::TiledMMAPermuteN
+        use_permute_n_epilogue = tiled_mma_permute_n and spec.quant_group_n == 1
+
+        # Build the epilogue block outside the f-string to keep it readable.
+        # PermuteNEpilogueProblem takes two extra trailing args (false, 1) vs CShuffleEpilogueProblem.
+        if use_permute_n_epilogue:
+            epilogue_block = f"""\
+            using GemmEpilogue = ck_tile::PermuteNEpilogue<
+                ck_tile::PermuteNEpilogueProblem<
+                    typename PipelineProblem::AComputeDataType,
+                    typename PipelineProblem::BComputeDataType,
+                    ck_tile::tuple<>,
+                    AccDataType,
+                    CDataType,
+                    ck_tile::tuple<>,
+                    {ns}::CLayout,
+                    ck_tile::element_wise::PassThrough,
+                    TilePartitioner::MPerBlock,
+                    TilePartitioner::NPerBlock,
+                    WarpM, WarpN,
+                    WarpTileM, WarpTileN, WarpTileK,
+                    TransposeC,
+                    false,
+                    1>>;"""
+        else:
+            epilogue_block = f"""\
+            using GemmEpilogue = ck_tile::CShuffleEpilogue<
+                ck_tile::CShuffleEpilogueProblem<
+                    typename PipelineProblem::AComputeDataType,
+                    typename PipelineProblem::BComputeDataType,
+                    ck_tile::tuple<>,
+                    AccDataType,
+                    CDataType,
+                    ck_tile::tuple<>,
+                    {ns}::CLayout,
+                    ck_tile::element_wise::PassThrough,
+                    TilePartitioner::MPerBlock,
+                    TilePartitioner::NPerBlock,
+                    WarpM, WarpN,
+                    WarpTileM, WarpTileN, WarpTileK,
+                    TransposeC>>;"""
 
         return f"""\
 // SPDX-License-Identifier: MIT
@@ -380,21 +422,7 @@ struct {struct} {{
 
             using GemmPipeline = {pipeline_ck}<PipelineProblem>;
 
-            using GemmEpilogue = ck_tile::CShuffleEpilogue<
-                ck_tile::CShuffleEpilogueProblem<
-                    typename PipelineProblem::AComputeDataType,
-                    typename PipelineProblem::BComputeDataType,
-                    ck_tile::tuple<>,
-                    AccDataType,
-                    CDataType,
-                    ck_tile::tuple<>,
-                    {ns}::CLayout,
-                    ck_tile::element_wise::PassThrough,
-                    TilePartitioner::MPerBlock,
-                    TilePartitioner::NPerBlock,
-                    WarpM, WarpN,
-                    WarpTileM, WarpTileN, WarpTileK,
-                    TransposeC>>;
+{epilogue_block}
 
             using Kernel = ck_tile::QuantGemmKernel<
                 TilePartitioner, GemmPipeline, GemmEpilogue,
