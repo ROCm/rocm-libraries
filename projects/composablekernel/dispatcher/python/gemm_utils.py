@@ -415,8 +415,13 @@ def _bf16_u16_to_fp32(u16: np.ndarray) -> np.ndarray:
 # ---------------------------------------------------------------------------
 
 
+@functools.lru_cache(maxsize=None)
 def _fnuz_decode_table(exp_bits: int, mant_bits: int) -> np.ndarray:
-    """Build the 256-entry byte -> fp32 value table for an 8-bit FNUZ float."""
+    """Build the 256-entry byte -> fp32 value table for an 8-bit FNUZ float.
+
+    The table is a pure function of (exp_bits, mant_bits), so it is cached; the
+    returned array is marked read-only because callers share the one instance.
+    """
     bias = (1 << (exp_bits - 1))
     mant_max = 1 << mant_bits
     sign_shift = exp_bits + mant_bits
@@ -435,6 +440,7 @@ def _fnuz_decode_table(exp_bits: int, mant_bits: int) -> np.ndarray:
         else:
             val = (1.0 + mant / mant_max) * (2.0 ** (exp - bias))  # normal
         table[b] = np.float32(-val if sign else val)
+    table.flags.writeable = False  # shared cached instance -- do not mutate
     return table
 
 
@@ -584,7 +590,15 @@ class GpuGemmRunner:
         # accumulate into fp16, int8 into int32, otherwise the input dtype.
         out_dtype = _output_dtype(dtype)
         _C_NP = {"fp16": np.float16, "bf16": np.uint16, "int32": np.int32}
-        C_h = np.zeros(C_shape, dtype=_C_NP.get(out_dtype, np.float16))
+        if out_dtype not in _C_NP:
+            # A silent fp16 fallback would size the host C buffer wrong for an
+            # unrecognized dtype (sizeof(CDataType) mismatch -> corrupt results
+            # across the C ABI). Fail loudly so a new dtype is added here.
+            raise ValueError(
+                f"unsupported C dtype {out_dtype!r} (from input dtype {dtype!r}); "
+                "add it to _C_NP so the host buffer matches sizeof(CDataType)"
+            )
+        C_h = np.zeros(C_shape, dtype=_C_NP[out_dtype])
 
         status, time_ms = self.lib.run(A_h, B_h, C_h, M, N, K)
 
