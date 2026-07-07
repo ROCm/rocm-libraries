@@ -20,10 +20,10 @@ namespace common_utils {
 }
 } // namespace common_utils
 
-#define COMMON_THROW(msg)                                  \
-    do                                                     \
-    {                                                      \
-        common_utils::Throw(__FILE__, __LINE__, msg);      \
+#define COMMON_THROW(msg)                             \
+    do                                                \
+    {                                                 \
+        common_utils::Throw(__FILE__, __LINE__, msg); \
     } while(false)
 
 #endif // GUARD_COMMON_UTILS_ERRORS_HPP

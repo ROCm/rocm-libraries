@@ -14,7 +14,8 @@
 // pulled in via miopen/config.h). Guard against it being undefined: an absent
 // macro would evaluate to 0 below and silently flip the rounding scheme.
 #ifndef MIOPEN_USE_RNE_BFLOAT16
-#error "MIOPEN_USE_RNE_BFLOAT16 is not defined. Link against miopen_common_utils (MIOpen::common_utils) so the compile definition is propagated."
+#error \
+    "MIOPEN_USE_RNE_BFLOAT16 is not defined. Link against miopen_common_utils (MIOpen::common_utils) so the compile definition is propagated."
 #endif
 
 class bfloat16

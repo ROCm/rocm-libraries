@@ -20,6 +20,7 @@ using glibc_gen = std::linear_congruential_engine<std::uint32_t, 1103515245, 123
 // MIOPEN_DECLARE_ENV_VAR_UINT64 default). A value of 0 selects std::random_device.
 inline std::uint64_t get_external_seed()
 {
+    // NOLINTNEXTLINE(concurrency-mt-unsafe)
     const char* const env = std::getenv("MIOPEN_DEBUG_DRIVER_PRNG_SEED");
     if(env == nullptr || env[0] == '\0')
         return 12345678ULL;
