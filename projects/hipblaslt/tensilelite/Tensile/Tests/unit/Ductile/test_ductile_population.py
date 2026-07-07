@@ -1,11 +1,20 @@
 # Copyright Advanced Micro Devices, Inc., or its affiliates.
 # SPDX-License-Identifier: MIT
 
+import copy
+
+import numpy as np
 import pytest
 
-from Tensile.ductile.core.population import Individual, Population, IndividualSet, ExceedsCapacity
+from Tensile.ductile.core.population import (
+    ExceedsCapacity,
+    Individual,
+    IndividualSet,
+    Population,
+)
 
 pytestmark = pytest.mark.unit
+
 
 
 def test_individual_diff_and_assignment_reset_fitness():
@@ -47,54 +56,6 @@ def test_individual_set_capacity_limit():
 
     with pytest.raises(ExceedsCapacity):
         s.add(Individual({"DepthU": 1, "SourceSwap": 1}))
-
-################################################################################
-#
-# Copyright (C) 2025-2026 Advanced Micro Devices, Inc. All rights reserved.
-#
-# Permission is hereby granted, free of charge, to any person obtaining a copy
-# of this software and associated documentation files (the "Software"), to deal
-# in the Software without restriction, including without limitation the rights
-# to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
-# copies of the Software, and to permit persons to whom the Software is
-# furnished to do so, subject to the following conditions:
-#
-# The above copyright notice and this permission notice shall be included in
-# all copies or substantial portions of the Software.
-#
-# THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
-# IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
-# FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
-# AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
-# LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
-# OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
-# SOFTWARE.
-#
-################################################################################
-
-"""Extended tests for Tensile.ductile.core.population — targeting uncovered paths.
-
-Covers: Individual arithmetic ops (+,-,*,/), __radd__/__rsub__/__rmul__, __hash__,
-comparison (__eq__, __lt__, __le__, __gt__, __ge__), __copy__, IndividualSet
-init from IndividualSet, IndividualSet capacity with iterable, Population.get(),
-diversity(reduce=False), F.setter, G.getter/G.setter, argsort, shuffle,
-Population.copy(), nunique(key=None and key=k), Population with set input,
-Individual.copy() independence, individual __repr__, Population.__str__.
-"""
-
-import copy
-
-import numpy as np
-import pytest
-
-from Tensile.ductile.core.population import (
-    ExceedsCapacity,
-    Individual,
-    IndividualSet,
-    Population,
-)
-
-pytestmark = pytest.mark.unit
 
 
 # ---------------------------------------------------------------------------

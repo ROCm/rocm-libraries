@@ -53,6 +53,7 @@ from Tensile.Utilities.Decorators.Profile import profile
 from Tensile import BenchmarkProblems
 from Tensile import ClientWriter
 from Tensile import LibraryIO
+from Tensile.backends.config import parse_backend_config
 from Tensile import LibraryLogic
 
 TENSILE_SCRIPT_DIR = Path(os.path.dirname(os.path.abspath(__file__)))
@@ -610,33 +611,10 @@ def Tensile(userArgs):
     globalParameters["ConfigPath"] = configPaths
 
     # Backend selection precedence:
-    # 1) YAML Backend
+    # 1) YAML Backend (with strict validation)
     # 2) tensile (default)
-    backend_name = "tensile"
-    backend_cfg = {}
     yaml_backend = config.get("Backend", None)
-
-    if yaml_backend is not None:
-        if not isinstance(yaml_backend, dict):
-            printExit("Invalid backend configuration: 'Backend' must be a dictionary with key 'Name' and optional key 'Config'.")
-
-        if "Name" not in yaml_backend:
-            printExit("Invalid backend configuration: 'Backend' must contain key 'Name'.")
-
-        yaml_name = yaml_backend.get("Name")
-        yaml_cfg = yaml_backend.get("Config", {})
-
-        if not isinstance(yaml_name, str) or not yaml_name.strip():
-            printExit("Invalid backend configuration: 'Backend.Name' must be a non-empty string.")
-        if yaml_cfg is None:
-            yaml_cfg = {}
-        if not isinstance(yaml_cfg, dict):
-            printExit("Invalid backend configuration: 'Backend.Config' must be a dictionary.")
-
-        backend_name = yaml_name.strip().lower()
-        backend_cfg = yaml_cfg
-
-    config["Backend"] = {"Name": backend_name, "Config": backend_cfg}
+    config["Backend"] = parse_backend_config(yaml_backend)
 
     asm_debug = config["GlobalParameters"].get("AsmDebug", False)
     device_id = config["GlobalParameters"].get("Device", int(args.device))

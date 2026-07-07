@@ -1,13 +1,26 @@
 # Copyright Advanced Micro Devices, Inc., or its affiliates.
 # SPDX-License-Identifier: MIT
 
+import os
+import importlib
+
+import numpy as np
 import pytest
 
 import Tensile.ductile.core.space as space_mod
-from Tensile.ductile.core.space import SearchSpace, MaxIterationsReached
+
+from Tensile.ductile.core.space import SearchSpace, MaxIterationsReached, sample_chunk
 from Tensile.ductile.core.population import Individual, Population
 
 pytestmark = pytest.mark.unit
+
+
+def _valid_a_zero(x):
+    return x["A"] == 0
+
+
+def _always_false(_x):
+    return False
 
 
 class _FakeParallel:
@@ -47,58 +60,6 @@ def test_searchspace_sample_reuse_cache_with_capacity(monkeypatch):
     pop = space.sample(size=1, reuse=True)
     assert pop.size == 1
     assert space.transform(pop)[0] == {"DepthU": 32, "SourceSwap": 1}
-
-################################################################################
-#
-# Copyright (C) 2025-2026 Advanced Micro Devices, Inc. All rights reserved.
-#
-# Permission is hereby granted, free of charge, to any person obtaining a copy
-# of this software and associated documentation files (the "Software"), to deal
-# in the Software without restriction, including without limitation the rights
-# to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
-# copies of the Software, and to permit persons to whom the Software is
-# furnished to do so, subject to the following conditions:
-#
-# The above copyright notice and this permission notice shall be included in
-# all copies or substantial portions of the Software.
-#
-# THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
-# IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
-# FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
-# AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
-# LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
-# OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
-# SOFTWARE.
-#
-################################################################################
-
-"""Extended tests for Tensile.ductile.core.space (SearchSpace) — targeting
-uncovered code paths.
-
-Covers: valid() with a validator, transform() for both Individual and Population,
-size() keyed and unkeyed, __contains__, __iter__, sample with reuse=True (cache),
-MaxIterationsReached when constraint rejects everything, xdist override detection,
-__repr__.
-"""
-
-import os
-import importlib
-
-import numpy as np
-import pytest
-
-from Tensile.ductile.core.space import SearchSpace, MaxIterationsReached, sample_chunk
-from Tensile.ductile.core.population import Individual, Population
-
-pytestmark = pytest.mark.unit
-
-
-def _valid_a_zero(x):
-    return x["A"] == 0
-
-
-def _always_false(_x):
-    return False
 
 
 # ---------------------------------------------------------------------------

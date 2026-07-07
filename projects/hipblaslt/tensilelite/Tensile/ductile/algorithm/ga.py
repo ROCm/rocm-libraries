@@ -83,7 +83,9 @@ class GeneticAlgorithm:
         self.tol = tol
 
         if self.space.n_perms < self.pop_size:
-            raise ValueError("pop_size must be larger than the total amount of variable permutations.")
+            raise ValueError(f"search space too small: only {self.space.n_perms} valid permutations "
+                             f"for pop_size={self.pop_size}. Consider using the Tensile backend for "
+                             f"exhaustive search instead.")
 
         self._pop_size = pop_size
         self._decay_type = "none"

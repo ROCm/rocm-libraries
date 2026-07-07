@@ -509,9 +509,13 @@ def test_main_with_none_config_returns_early(monkeypatch):
 
 
 def test_main_invalid_backend_type_exits(monkeypatch, tmp_path):
-    monkeypatch.setattr(BP, "printExit", lambda msg: (_ for _ in ()).throw(RuntimeError(msg)))
+    # Monkeypatch printExit in both BP and backends.config modules
+    exit_func = lambda msg: (_ for _ in ()).throw(RuntimeError(msg))
+    monkeypatch.setattr(BP, "printExit", exit_func)
+    from Tensile.backends import config as backend_config_module
+    monkeypatch.setattr(backend_config_module, "printExit", exit_func)
 
-    with pytest.raises(RuntimeError, match="Invalid backend configuration type"):
+    with pytest.raises(RuntimeError, match="'Backend' must be a dictionary"):
         BP.main(
             backend="bad",
             config=[],
@@ -563,9 +567,13 @@ def test_main_backend_config_none_is_normalized(monkeypatch, tmp_path):
 
 
 def test_main_backend_config_invalid_type_exits(monkeypatch, tmp_path):
-    monkeypatch.setattr(BP, "printExit", lambda msg: (_ for _ in ()).throw(RuntimeError(msg)))
+    # Monkeypatch printExit in both BP and backends.config modules
+    exit_func = lambda msg: (_ for _ in ()).throw(RuntimeError(msg))
+    monkeypatch.setattr(BP, "printExit", exit_func)
+    from Tensile.backends import config as backend_config_module
+    monkeypatch.setattr(backend_config_module, "printExit", exit_func)
 
-    with pytest.raises(RuntimeError, match="'Config' must be a dictionary"):
+    with pytest.raises(RuntimeError, match="'Backend.Config' must be a dictionary"):
         BP.main(
             backend={"Name": "tensile", "Config": "bad"},
             config=[],

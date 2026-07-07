@@ -81,10 +81,12 @@ def _stub_pipeline(monkeypatch):
 
 
 def _make_exit(monkeypatch):
-    monkeypatch.setattr(
-        TensileModule, "printExit",
-        lambda msg: (_ for _ in ()).throw(RuntimeError(msg)),
-    )
+    # Monkeypatch printExit in both Tensile module and backends.config module
+    exit_func = lambda msg: (_ for _ in ()).throw(RuntimeError(msg))
+    monkeypatch.setattr(TensileModule, "printExit", exit_func)
+    # Also patch in the backends.config module since parse_backend_config imports it there
+    from Tensile.backends import config as backend_config_module
+    monkeypatch.setattr(backend_config_module, "printExit", exit_func)
 
 
 # ---------------------------------------------------------------------------
@@ -188,7 +190,13 @@ def test_benchmark_problems_backend_cfg_missing_name_exits(monkeypatch, tmp_path
         ),
     )
     exited = []
-    monkeypatch.setattr(TensileModule, "printExit", lambda m: exited.append(m))
+    # Monkeypatch printExit to collect messages without raising
+    def collect_exit(m):
+        exited.append(m)
+    monkeypatch.setattr(TensileModule, "printExit", collect_exit)
+    # Also patch in backends.config module
+    from Tensile.backends import config as backend_config_module
+    monkeypatch.setattr(backend_config_module, "printExit", collect_exit)
 
     # Patch BenchmarkProblems.main to capture the backend_cfg passed in
     import Tensile.BenchmarkProblems as BP
@@ -235,7 +243,13 @@ def test_benchmark_problems_backend_cfg_not_dict_exits(monkeypatch, tmp_path):
         ),
     )
     exited = []
-    monkeypatch.setattr(TensileModule, "printExit", lambda m: exited.append(m))
+    # Monkeypatch printExit to collect messages without raising
+    def collect_exit(m):
+        exited.append(m)
+    monkeypatch.setattr(TensileModule, "printExit", collect_exit)
+    # Also patch in backends.config module
+    from Tensile.backends import config as backend_config_module
+    monkeypatch.setattr(backend_config_module, "printExit", collect_exit)
 
     import Tensile.BenchmarkProblems as BP
     monkeypatch.setattr(BP, "main", lambda *a, **kw: None)

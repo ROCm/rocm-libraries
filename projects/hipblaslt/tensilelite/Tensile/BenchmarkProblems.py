@@ -48,6 +48,7 @@ from Tensile.SolutionStructs.Naming import getKeyNoInternalArgs, getSolutionName
 
 from .BenchmarkStructs import BenchmarkProcess
 from .backends import BackendFactory
+from .backends.config import parse_backend_config
 from .Contractions import ProblemType as ContractionsProblemType
 from .ClientWriter import runClient, writeClientConfig, writeClientConfigIni, getClientExecutablePath
 from .KernelWriterAssembly import KernelWriterAssembly
@@ -879,16 +880,8 @@ def main(
         print(f'No config specified in {globalParameters["ConfigPath"]}, built client only')
         return
 
-    if not isinstance(backend, dict):
-        printExit(f"Invalid backend configuration type: {type(backend).__name__}. Expected dict.")
-    backend = {
-        "Name": str(backend.get("Name", "tensile")).lower(),
-        "Config": backend.get("Config", {}),
-    }
-    if backend["Config"] is None:
-        backend["Config"] = {}
-    if not isinstance(backend["Config"], dict):
-        printExit("Invalid backend configuration: 'Config' must be a dictionary.")
+    # Parse and validate backend config using shared contract
+    backend = parse_backend_config(backend if backend else None)
 
     # Load solution pool index if provided and supported by the backend
     solutionPoolIndex = None

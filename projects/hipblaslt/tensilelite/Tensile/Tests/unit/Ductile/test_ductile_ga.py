@@ -169,7 +169,7 @@ class TestGAConstructorValidation:
         # Space with only 2 permutations
         space = _make_space(keys={"A": [0, 1]})
         mating = _make_mating(space)
-        with pytest.raises(ValueError, match="pop_size must be larger"):
+        with pytest.raises(ValueError, match="search space too small"):
             GeneticAlgorithm(
                 space, mating,
                 evaluate=lambda x: np.ones((1, len(x))),
