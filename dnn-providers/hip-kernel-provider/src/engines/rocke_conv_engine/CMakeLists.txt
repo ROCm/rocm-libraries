@@ -20,7 +20,7 @@ target_sources(hip_kernel_provider_impl PRIVATE
 
 target_include_directories(hip_kernel_provider_impl PRIVATE
     ${CMAKE_CURRENT_SOURCE_DIR}
-    ${CMAKE_CURRENT_SOURCE_DIR}/../../../rocke/platform/Cpp/include
+    ${CMAKE_CURRENT_SOURCE_DIR}/../../../rocke/platform/cpp/include
 )
 
 target_compile_definitions(hip_kernel_provider_impl PUBLIC HIPDNN_ENGINE_ROCKE_CONV=1)

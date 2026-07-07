@@ -237,7 +237,7 @@ if(ENABLE_ROCKE_CONV_ENGINE)
     # Decompress .lgbm.gz model files and install alongside feature_spec.json.
     # The plain .lgbm is not committed; gunzip once at install time.
     set(_rocke_models_src
-        "${CMAKE_CURRENT_SOURCE_DIR}/rocke/platform/Python/rocke/heuristics/models")
+        "${CMAKE_CURRENT_SOURCE_DIR}/rocke/platform/python/rocke/heuristics/models")
     set(_rocke_models_dst
         "${HIPDNN_RELATIVE_INSTALL_PLUGIN_ENGINE_DIR}/hip_kernel_provider/rocke_models")
     install(CODE "

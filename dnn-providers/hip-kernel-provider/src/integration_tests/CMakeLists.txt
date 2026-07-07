@@ -66,14 +66,14 @@ if(ENABLE_ROCKE_CONV_ENGINE)
         rocke_conv_engine/IntegrationGpuRockeConvForward.cpp
     )
     target_include_directories(hip_kernel_provider_integration_tests PRIVATE
-        ${CMAKE_CURRENT_LIST_DIR}/../../rocke/platform/Cpp/include
+        ${CMAKE_CURRENT_LIST_DIR}/../../rocke/platform/cpp/include
     )
     # Pass the models directory into the test environment so ConvMLHeuristic
     # can locate the trained .lgbm files without requiring an install.
     # ROCKE_CONV_MODELS_DIR defaults to the source-tree models path.
     if(NOT DEFINED ROCKE_CONV_MODELS_DIR)
         set(ROCKE_CONV_MODELS_DIR
-            "${CMAKE_CURRENT_SOURCE_DIR}/../../rocke/platform/Python/rocke/heuristics/models")
+            "${CMAKE_CURRENT_SOURCE_DIR}/../../rocke/platform/python/rocke/heuristics/models")
     endif()
 endif()
 
