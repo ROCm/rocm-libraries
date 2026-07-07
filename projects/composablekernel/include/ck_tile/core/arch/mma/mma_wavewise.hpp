@@ -1,19 +1,23 @@
 // Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
 // SPDX-License-Identifier: MIT
 #pragma once
+
 #include "ck_tile/core/arch/arch.hpp"
+#include "ck_tile/core/arch/mma/mfma/mfma_selector.hpp"
+#include "ck_tile/core/arch/mma/mfma/mfma_transforms.hpp"
+#include "ck_tile/core/arch/mma/mma_op_family.hpp"
+#include "ck_tile/core/arch/mma/mma_pipeline.hpp"
+#include "ck_tile/core/arch/mma/mma_traits.hpp"
 #include "ck_tile/core/arch/mma/utility/tile_distribution_encoding_calculator.hpp"
+#include "ck_tile/core/arch/mma/wmma/wmma_selector.hpp"
+#include "ck_tile/core/arch/mma/wmma/wmma_transforms.hpp"
+#include "ck_tile/core/container/thread_buffer.hpp"
+#include "ck_tile/core/numeric/integer.hpp"
 #include "ck_tile/core/tensor/static_distributed_tensor.hpp"
-#include "ck_tile/core/numeric/vector_type.hpp"
+#include "ck_tile/core/tensor/tile_distribution.hpp"
+#include "ck_tile/core/utility/type_traits.hpp"
 
-#include "amdgcn_mma.hpp"
-#include "mma_pipeline.hpp"
-#include "mma_selector.hpp"
-#include "mma_transforms.hpp"
-
-#include "mfma/mfma.hpp"
-#include "wmma/wmma.hpp"
-#include <tuple>
+#include <type_traits>
 
 namespace ck_tile::core::arch::mma {
 
@@ -28,15 +32,6 @@ enum struct MmaAccumPolicy
     COL_MAJOR
 };
 
-namespace dense::wavewise::detail {
-// TODO: c++20: return MmaPipelineOptionFlags directly
-template <bool SwapAB>
-constexpr inline int getPipelineFlags()
-{
-    return static_cast<int>(SwapAB ? MmaPipelineOptionFlag::ABSwap : MmaPipelineOptionFlag::NONE);
-}
-} // namespace dense::wavewise::detail
-
 /**
  * @class Mma
  * @brief Driver for the wave-tile Mma operation. Given a backend MmaOp implementation
@@ -50,7 +45,7 @@ constexpr inline int getPipelineFlags()
  * @tparam WaveTileN       Mma WaveTile N dimension
  * @tparam WaveTileK       Mma WaveTile K dimension
  * @tparam AccumPolicy     The fragment order of the accum. registers (row or col major frag order)
- * @tparam CTranspose      Swaps A and B input vectors and interprets C with transposed layout.
+ * @tparam CTranspose_     Swaps A and B input vectors and interprets C with transposed layout.
  * @tparam SwizzleFactor   SwizzleFactor for Tile Distribution Encoding calculation.
  * @tparam AttrNumAccessAV Extra unmerge factor for vector dimension for A vec, see amdgcn_mma.hpp.
  * @tparam AttrNumAccessBV Extra unmerge factor for vector dimension for B vec, see amdgcn_mma.hpp.
@@ -72,7 +67,7 @@ template <typename ADataType_,
           uint32_t WaveTileN,
           uint32_t WaveTileK,
           MmaAccumPolicy AccumPolicy = MmaAccumPolicy::ROW_MAJOR,
-          bool CTranspose            = false,
+          bool CTranspose_           = false,
           index_t SwizzleFactor      = 1,
           index_t AttrNumAccessAV    = 1,
           index_t AttrNumAccessBV    = AttrNumAccessAV,
@@ -92,11 +87,12 @@ template <typename ADataType_,
           typename MmaTransforms = // TODO: c++20 MmaTransformsI MmaTransforms =
           typename MmaTransformsDefaultSelector<MmaOp_, CompilerTarget>::SelectedTransforms>
 // clang-format off
-struct WaveWiseMmaPipeline : public MmaPipelineBase<dense::wavewise::detail::getPipelineFlags<CTranspose>(), WaveWiseMmaPipeline<ADataType_, BDataType_, CDataType_, WaveTileM, WaveTileN, WaveTileK, AccumPolicy, CTranspose, SwizzleFactor, AttrNumAccessAV, AttrNumAccessBV, CompilerTarget, MmaOp_, MmaTransforms>>
+struct WaveWiseMmaPipeline : public MmaPipelineBase<WaveWiseMmaPipeline<ADataType_, BDataType_, CDataType_, WaveTileM, WaveTileN, WaveTileK, AccumPolicy, CTranspose_, SwizzleFactor, AttrNumAccessAV, AttrNumAccessBV, CompilerTarget, MmaOp_, MmaTransforms>>
 {
-    using Base = MmaPipelineBase<dense::wavewise::detail::getPipelineFlags<CTranspose>(), WaveWiseMmaPipeline<ADataType_, BDataType_, CDataType_, WaveTileM, WaveTileN, WaveTileK, AccumPolicy, CTranspose, SwizzleFactor, AttrNumAccessAV, AttrNumAccessBV, CompilerTarget, MmaOp_, MmaTransforms>>;
+    using Base = MmaPipelineBase<WaveWiseMmaPipeline<ADataType_, BDataType_, CDataType_, WaveTileM, WaveTileN, WaveTileK, AccumPolicy, CTranspose_, SwizzleFactor, AttrNumAccessAV, AttrNumAccessBV, CompilerTarget, MmaOp_, MmaTransforms>>;
     // clang-format on
-    using MmaOp = MmaOp_;
+    using MmaOp                      = MmaOp_;
+    static constexpr bool CTranspose = CTranspose_;
 
     using ADataType = typename MmaOp::ADataType;
     using BDataType = typename MmaOp::BDataType;
@@ -185,7 +181,7 @@ struct WaveWiseMmaPipeline : public MmaPipelineBase<dense::wavewise::detail::get
     static_assert(WaveTileK % MmaOp::kK == 0u, "WaveTileK must be a multiple of MmaOp::kK");
 
     // TODO: Why does this even need to be a template? The types should be known.
-    template <typename ATensor, typename BTensor, typename CTensor>
+    template <typename... Params, typename ATensor, typename BTensor, typename CTensor>
     CK_TILE_DEVICE static void execImpl(ATensor& a, BTensor& b, CTensor& c)
     {
         static_assert(
@@ -205,9 +201,10 @@ struct WaveWiseMmaPipeline : public MmaPipelineBase<dense::wavewise::detail::get
                 {
                     for(uint32_t bk = 0u; bk < FragsK; ++bk)
                     {
-                        c_buf.at(bm * FragsN + bn) = MmaOp::exec(a_buf.at(bm * FragsK + bk),
-                                                                 b_buf.at(bn * FragsK + bk),
-                                                                 c_buf.at(bm * FragsN + bn));
+                        c_buf.at(bm * FragsN + bn) =
+                            MmaOp::template exec<Params...>(a_buf.at(bm * FragsK + bk),
+                                                            b_buf.at(bn * FragsK + bk),
+                                                            c_buf.at(bm * FragsN + bn));
                     }
                 }
             }
@@ -220,9 +217,10 @@ struct WaveWiseMmaPipeline : public MmaPipelineBase<dense::wavewise::detail::get
                 {
                     for(uint32_t bk = 0u; bk < FragsK; ++bk)
                     {
-                        c_buf.at(bm * FragsN + bn) = MmaOp::exec(a_buf.at(bm * FragsK + bk),
-                                                                 b_buf.at(bn * FragsK + bk),
-                                                                 c_buf.at(bm * FragsN + bn));
+                        c_buf.at(bm * FragsN + bn) =
+                            MmaOp::template exec<Params...>(a_buf.at(bm * FragsK + bk),
+                                                            b_buf.at(bn * FragsK + bk),
+                                                            c_buf.at(bm * FragsN + bn));
                     }
                 }
             }

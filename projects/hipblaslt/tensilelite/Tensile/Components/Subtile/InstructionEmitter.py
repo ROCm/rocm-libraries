@@ -58,6 +58,25 @@ class SWaitCntEx(SWaitCnt):
             comment=self.comment)
 
 
+
+def _zigzag_order(rows, cols):
+    """Return (row, col) pairs in boustrophedon (zigzag/snake) order.
+
+    Even rows traverse left-to-right, odd rows right-to-left.
+    Row transitions share the column coordinate with the last element
+    of the previous row, so every consecutive pair shares exactly one
+    coordinate -- guaranteeing a VGPR source-cache hit at every step.
+    """
+    result = []
+    for r in range(rows):
+        if r % 2 == 0:
+            for c in range(cols):
+                result.append((r, c))
+        else:
+            for c in range(cols - 1, -1, -1):
+                result.append((r, c))
+    return result
+
 class InstructionEmitter:
     """Emits GPU instructions for each opType in the LogicalScheduler output.
 
@@ -132,36 +151,51 @@ class InstructionEmitter:
         tile_maps = {t: placement.vgpr_tile_maps[t][unroll_iter]
                      for t in placement.vgpr_tile_maps}
 
-        for a in placement.tileA.tileId_list:
-            for b in placement.tileB.tileId_list:
-                groupA = (a // self.config.lrA.mn) * self.config.lrA.mn
-                groupB = (b // self.config.lrB.mn) * self.config.lrB.mn
-                aTile = self.vgprTilesA[tile_maps['A'][groupA]]
-                bTile = self.vgprTilesB[tile_maps['B'][groupB]]
-                dTile = self.dtileInfo.vgprTiles[a + b * self.dtileInfo.localMMATileGrid[0]]
+        aTiles = placement.tileA.tileId_list
+        bTiles = placement.tileB.tileId_list
 
-                if self.hasScale:
-                    scaleGroupA = (a // self.config.lrSA.mn) * self.config.lrSA.mn
-                    scaleGroupB = (b // self.config.lrSB.mn) * self.config.lrSB.mn
-                    scaleATile = self.vgprTilesSA[tile_maps['SA'][scaleGroupA]]
-                    scaleBTile = self.vgprTilesSB[tile_maps['SB'][scaleGroupB]]
-                    scaleAVgpr = next(iter(scaleATile))
-                    scaleBVgpr = next(iter(scaleBTile))
-                    mShapeA = self.tileInfoMap['SA'].lrSubtileShape[0]
-                    mShapeB = self.tileInfoMap['SB'].lrSubtileShape[0]
-                    kShapeA = self.tileInfoMap['SA'].lrSubtileShape[1]
-                    kShapeB = self.tileInfoMap['SB'].lrSubtileShape[1]
-                    sAsel = (a % mShapeA) + mShapeA * (subIterK % kShapeA)
-                    sBsel = (b % mShapeB) + mShapeB * (subIterK % kShapeB)
-                else:
-                    scaleAVgpr = scaleBVgpr = -1
-                    sAsel = sBsel = 0
+        hasWmmaSourceCache = self.writer.states.asmCaps.get("HasWMMA_V3", False)
+        if hasWmmaSourceCache and len(aTiles) > 1 and len(bTiles) > 1:
+            # Zigzag ordering: traverse the AxB tile grid in snake order so
+            # every consecutive WMMA pair shares exactly one operand (A or B),
+            # guaranteeing a VGPR source-cache hit at every step.
+            # Always sweep along the longer tile dimension for maximum reuse.
+            if len(aTiles) >= len(bTiles):
+                abPairs = [(aTiles[c], bTiles[r]) for r, c in _zigzag_order(len(bTiles), len(aTiles))]
+            else:
+                abPairs = [(aTiles[r], bTiles[c]) for r, c in _zigzag_order(len(aTiles), len(bTiles))]
+        else:
+            abPairs = [(a, b) for a in aTiles for b in bTiles]
 
-                module.add(emitMfmaInstruction(
-                    self.writer, self.kernel, aTile, bTile, dTile, dTile,
-                    scaleAVgpr=scaleAVgpr, scaleBVgpr=scaleBVgpr,
-                    scaleAsel=sAsel, scaleBsel=sBsel,
-                    comment=f"MFMA C[{a},{b}] += A[{a},K={subIterK}] * B[{b},K={subIterK}]"))
+        for a, b in abPairs:
+            groupA = (a // self.config.lrA.mn) * self.config.lrA.mn
+            groupB = (b // self.config.lrB.mn) * self.config.lrB.mn
+            aTile = self.vgprTilesA[tile_maps['A'][groupA]]
+            bTile = self.vgprTilesB[tile_maps['B'][groupB]]
+            dTile = self.dtileInfo.vgprTiles[a + b * self.dtileInfo.localMMATileGrid[0]]
+
+            if self.hasScale:
+                scaleGroupA = (a // self.config.lrSA.mn) * self.config.lrSA.mn
+                scaleGroupB = (b // self.config.lrSB.mn) * self.config.lrSB.mn
+                scaleATile = self.vgprTilesSA[tile_maps['SA'][scaleGroupA]]
+                scaleBTile = self.vgprTilesSB[tile_maps['SB'][scaleGroupB]]
+                scaleAVgpr = next(iter(scaleATile))
+                scaleBVgpr = next(iter(scaleBTile))
+                mShapeA = self.tileInfoMap['SA'].lrSubtileShape[0]
+                mShapeB = self.tileInfoMap['SB'].lrSubtileShape[0]
+                kShapeA = self.tileInfoMap['SA'].lrSubtileShape[1]
+                kShapeB = self.tileInfoMap['SB'].lrSubtileShape[1]
+                sAsel = (a % mShapeA) + mShapeA * (subIterK % kShapeA)
+                sBsel = (b % mShapeB) + mShapeB * (subIterK % kShapeB)
+            else:
+                scaleAVgpr = scaleBVgpr = -1
+                sAsel = sBsel = 0
+
+            module.add(emitMfmaInstruction(
+                self.writer, self.kernel, aTile, bTile, dTile, dTile,
+                scaleAVgpr=scaleAVgpr, scaleBVgpr=scaleBVgpr,
+                scaleAsel=sAsel, scaleBsel=sBsel,
+                comment=f"MFMA C[{a},{b}] += A[{a},K={subIterK}] * B[{b},K={subIterK}]"))
         return list(module.flatitems())
 
     def emit_lr(self, placement, unroll_iter=0):
