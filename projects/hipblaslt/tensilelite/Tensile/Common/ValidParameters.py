@@ -24,6 +24,7 @@
 
 import math
 from functools import lru_cache
+from typing import Any, Union
 
 from .Architectures import SUPPORTED_ISA
 from .Types import IsaVersion
@@ -1158,7 +1159,7 @@ newMIValidParameters = {
 # Solution.py and imported back by ValidParameters extensions) would have
 # introduced a Common -> Solution reverse import.
 
-def _getExpectedTypes(validParams):
+def _getExpectedTypes(validParams: dict[str, Union[int, list[Any], Any]]) -> dict[str, set[type]]:
     """Build a map from parameter name to the set of allowed Python types.
 
     Uses the validParameters registry as the source of truth.  For each
