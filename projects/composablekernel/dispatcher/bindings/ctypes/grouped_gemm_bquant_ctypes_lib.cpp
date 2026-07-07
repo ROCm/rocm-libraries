@@ -44,15 +44,15 @@ using Priority = ck_tile::dispatcher::Registry::Priority;
 static std::shared_ptr<Dispatcher> g_dispatcher = nullptr;
 static bool g_initialized                       = false;
 
-#define HIP_CHECK(call)                                              \
-    {                                                                \
-        hipError_t _err = (call);                                    \
-        if(_err != hipSuccess)                                       \
-        {                                                            \
-            std::cerr << "HIP error: " << hipGetErrorString(_err)   \
-                      << " at " << __FILE__ << ":" << __LINE__ << "\n"; \
-            return -1;                                               \
-        }                                                            \
+#define HIP_CHECK(call)                                                                        \
+    {                                                                                          \
+        hipError_t _err = (call);                                                              \
+        if(_err != hipSuccess)                                                                 \
+        {                                                                                      \
+            std::cerr << "HIP error: " << hipGetErrorString(_err) << " at " << __FILE__ << ":" \
+                      << __LINE__ << "\n";                                                     \
+            return -1;                                                                         \
+        }                                                                                      \
     }
 
 extern "C" {
@@ -87,9 +87,12 @@ int dispatcher_initialize()
     key.signature.num_d_tensors       = 0;
     key.signature.structured_sparsity = false;
 
-    key.algorithm.tile_shape      = {SelectedKernel::TileM, SelectedKernel::TileN, SelectedKernel::TileK};
-    key.algorithm.wave_shape      = {SelectedKernel::WarpM, SelectedKernel::WarpN, SelectedKernel::WarpK};
-    key.algorithm.warp_tile_shape = {SelectedKernel::WarpTileM, SelectedKernel::WarpTileN, SelectedKernel::WarpTileK};
+    key.algorithm.tile_shape = {
+        SelectedKernel::TileM, SelectedKernel::TileN, SelectedKernel::TileK};
+    key.algorithm.wave_shape = {
+        SelectedKernel::WarpM, SelectedKernel::WarpN, SelectedKernel::WarpK};
+    key.algorithm.warp_tile_shape = {
+        SelectedKernel::WarpTileM, SelectedKernel::WarpTileN, SelectedKernel::WarpTileK};
     key.algorithm.pipeline        = Pipeline::CompV3;
     key.algorithm.scheduler       = Scheduler::Intrawave;
     key.algorithm.epilogue        = Epilogue::CShuffle;
@@ -132,22 +135,21 @@ int dispatcher_initialize()
  *
  * Returns 0 on success, negative on error.
  */
-int dispatcher_run_bquant_gemm(
-    const void* A,
-    const void* B,
-    const void* BQ,
-    void*       C,
-    int64_t     M,
-    int64_t     N,
-    int64_t     K,
-    int64_t     stride_A,
-    int64_t     stride_B,
-    int64_t     stride_BQ,
-    int64_t     stride_C,
-    int64_t     QK_B,
-    int64_t     QN_B,
-    int         k_batch,
-    float*      time_ms)
+int dispatcher_run_bquant_gemm(const void* A,
+                               const void* B,
+                               const void* BQ,
+                               void* C,
+                               int64_t M,
+                               int64_t N,
+                               int64_t K,
+                               int64_t stride_A,
+                               int64_t stride_B,
+                               int64_t stride_BQ,
+                               int64_t stride_C,
+                               int64_t QK_B,
+                               int64_t QN_B,
+                               int k_batch,
+                               float* time_ms)
 {
     if(!g_initialized)
     {
@@ -175,10 +177,9 @@ int dispatcher_run_bquant_gemm(
             (N + static_cast<int64_t>(QuantGroupSize::kN) - 1) / QuantGroupSize::kN;
         if(QK_B != expected_QK_B || QN_B != expected_QN_B)
         {
-            std::cerr << "dispatcher_run_bquant_gemm: QK_B/QN_B mismatch. "
-                      << "Got (" << QK_B << ", " << QN_B << "), "
-                      << "expected (" << expected_QK_B << ", " << expected_QN_B << ") "
-                      << "for K=" << K << " N=" << N
+            std::cerr << "dispatcher_run_bquant_gemm: QK_B/QN_B mismatch. " << "Got (" << QK_B
+                      << ", " << QN_B << "), " << "expected (" << expected_QK_B << ", "
+                      << expected_QN_B << ") " << "for K=" << K << " N=" << N
                       << " with QuantGroupSize kK=" << QuantGroupSize::kK
                       << " kN=" << QuantGroupSize::kN << "\n";
             return -1;
@@ -188,7 +189,7 @@ int dispatcher_run_bquant_gemm(
     const ADataType* A_host  = static_cast<const ADataType*>(A);
     const BDataType* B_host  = static_cast<const BDataType*>(B);
     const QDataType* BQ_host = static_cast<const QDataType*>(BQ);
-    CDataType*       C_host  = static_cast<CDataType*>(C);
+    CDataType* C_host        = static_cast<CDataType*>(C);
 
     ADataType* A_dev  = nullptr;
     BDataType* B_dev  = nullptr;
@@ -196,23 +197,60 @@ int dispatcher_run_bquant_gemm(
     CDataType* C_dev  = nullptr;
 
     auto cleanup = [&]() {
-        if(A_dev)  (void)hipFree(A_dev);
-        if(B_dev)  (void)hipFree(B_dev);
-        if(BQ_dev) (void)hipFree(BQ_dev);
-        if(C_dev)  (void)hipFree(C_dev);
+        if(A_dev)
+            (void)hipFree(A_dev);
+        if(B_dev)
+            (void)hipFree(B_dev);
+        if(BQ_dev)
+            (void)hipFree(BQ_dev);
+        if(C_dev)
+            (void)hipFree(C_dev);
     };
 
     // Allocate device buffers
-    if(hipMalloc(&A_dev,  M * K    * sizeof(ADataType)) != hipSuccess) { cleanup(); return -1; }
-    if(hipMalloc(&B_dev,  K * N    * sizeof(BDataType)) != hipSuccess) { cleanup(); return -1; }
-    if(hipMalloc(&BQ_dev, QK_B * QN_B * sizeof(QDataType)) != hipSuccess) { cleanup(); return -1; }
-    if(hipMalloc(&C_dev,  M * N    * sizeof(CDataType)) != hipSuccess) { cleanup(); return -1; }
+    if(hipMalloc(&A_dev, M * K * sizeof(ADataType)) != hipSuccess)
+    {
+        cleanup();
+        return -1;
+    }
+    if(hipMalloc(&B_dev, K * N * sizeof(BDataType)) != hipSuccess)
+    {
+        cleanup();
+        return -1;
+    }
+    if(hipMalloc(&BQ_dev, QK_B * QN_B * sizeof(QDataType)) != hipSuccess)
+    {
+        cleanup();
+        return -1;
+    }
+    if(hipMalloc(&C_dev, M * N * sizeof(CDataType)) != hipSuccess)
+    {
+        cleanup();
+        return -1;
+    }
 
     // Copy inputs to device
-    if(hipMemcpy(A_dev,  A_host,  M * K    * sizeof(ADataType), hipMemcpyHostToDevice) != hipSuccess) { cleanup(); return -1; }
-    if(hipMemcpy(B_dev,  B_host,  K * N    * sizeof(BDataType), hipMemcpyHostToDevice) != hipSuccess) { cleanup(); return -1; }
-    if(hipMemcpy(BQ_dev, BQ_host, QK_B * QN_B * sizeof(QDataType), hipMemcpyHostToDevice) != hipSuccess) { cleanup(); return -1; }
-    if(hipMemset(C_dev,  0,       M * N    * sizeof(CDataType)) != hipSuccess) { cleanup(); return -1; }
+    if(hipMemcpy(A_dev, A_host, M * K * sizeof(ADataType), hipMemcpyHostToDevice) != hipSuccess)
+    {
+        cleanup();
+        return -1;
+    }
+    if(hipMemcpy(B_dev, B_host, K * N * sizeof(BDataType), hipMemcpyHostToDevice) != hipSuccess)
+    {
+        cleanup();
+        return -1;
+    }
+    if(hipMemcpy(BQ_dev, BQ_host, QK_B * QN_B * sizeof(QDataType), hipMemcpyHostToDevice) !=
+       hipSuccess)
+    {
+        cleanup();
+        return -1;
+    }
+    if(hipMemset(C_dev, 0, M * N * sizeof(CDataType)) != hipSuccess)
+    {
+        cleanup();
+        return -1;
+    }
 
     // Build QuantGemmHostArgs (aq_ptr = nullptr, QK_A = 0, stride_AQ = 0 for BQuant-only)
     ck_tile::QuantGemmHostArgs args;
