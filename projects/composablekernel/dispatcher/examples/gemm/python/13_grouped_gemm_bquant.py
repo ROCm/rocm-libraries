@@ -37,7 +37,7 @@ import numpy as np
 # Add dispatcher/python to path
 sys.path.insert(0, str(Path(__file__).resolve().parents[3] / "python"))
 
-from bquant_gemm_utils import (
+from grouped_gemm_bquant_utils import (
     BQuantKernelConfig,
     BQuantGemmProblem,
     BQuantGpuGemmRunner,
