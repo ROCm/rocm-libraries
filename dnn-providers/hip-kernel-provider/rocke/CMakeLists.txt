@@ -27,7 +27,12 @@ if(ROCKE_BUILD_PYENV)
 
     set(ROCKE_PYENV_DIR "${CMAKE_BINARY_DIR}/rocke-pyenv")
     set(ROCKE_PYENV_STAMP "${CMAKE_BINARY_DIR}/rocke-pyenv.stamp")
-    set(ROCKE_PYENV_PYTHON "${ROCKE_PYENV_DIR}/bin/python"
+    if(WIN32)
+        set(_rocke_pyenv_python "${ROCKE_PYENV_DIR}/Scripts/python.exe")
+    else()
+        set(_rocke_pyenv_python "${ROCKE_PYENV_DIR}/bin/python")
+    endif()
+    set(ROCKE_PYENV_PYTHON "${_rocke_pyenv_python}"
         CACHE FILEPATH "Interpreter for the rocke editable Python env")
 
     add_custom_command(
