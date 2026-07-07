@@ -10,6 +10,11 @@ Full documentation for rocSOLVER is available at the [rocSOLVER documentation](h
 ### Removed
 ### Optimized
 ### Resolved issues
+
+* SYEVJ/HEEVJ (and the SYGVJ/HEGVJ generalized solvers) could return incorrect eigenvectors and
+  eigenvalues, with `info == 0`, for small matrices on gfx11 (RDNA3) architectures.
+  ([#9118](https://github.com/ROCm/rocm-libraries/issues/9118))
+
 ### Known issues
 ### Upcoming changes
 

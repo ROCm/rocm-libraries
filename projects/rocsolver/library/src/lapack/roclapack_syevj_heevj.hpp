@@ -6,7 +6,7 @@
  * and
  * Hari & Kovac (2019). On the Convergence of Complex Jacobi Methods.
  *     Linear and Multilinear Algebra 69(3), p. 489-514.
- * Copyright (C) 2021-2025 Advanced Micro Devices, Inc.
+ * Copyright (C) 2021-2026 Advanced Micro Devices, Inc.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -186,8 +186,18 @@ __device__ void run_syevj(const rocblas_int dimx,
                 i = kx < half_n ? top[kx] : n;
                 j = kx < half_n ? bottom[kx] : n;
 
-                // calculate current rotation J
-                if(tiy == 0 && i < n && j < n)
+                // Calculate the current Jacobi rotation J. This is computed redundantly by
+                // every thread of the tix-column (a pure function of the current, unmodified
+                // Acpy diagonal/off-diagonal entries, hence bit-identical across threads)
+                // rather than computed once by tiy==0 and broadcast through cosines_res/
+                // sines_diag in LDS. The broadcast form is miscompiled on gfx11 (RDNA3): the
+                // per-thread LDS reload of c/s1 after the __syncthreads() below returns
+                // inconsistent values across the row-parallel (tiy) threads, so different rows
+                // of columns i,j receive slightly different rotations and the accumulated
+                // eigenvectors lose orthogonality for workgroups above ~512 threads (silent,
+                // info=0). Recomputing per-thread avoids the LDS round-trip entirely and is
+                // free in practice (the apply below is memory-bound).
+                if(i < n && j < n)
                 {
                     aij = Acpy[i + j * n];
                     mag = std::abs(aij);
@@ -205,16 +215,12 @@ __device__ void run_syevj(const rocblas_int dimx,
                         lartg(f, g, c, s, r);
                         s1 = s * aij / mag;
                     }
-                    cosines_res[tix] = c;
-                    sines_diag[tix] = s1;
                 }
                 __syncthreads();
 
                 // apply J from the right and update vectors
                 if(i < n && j < n)
                 {
-                    c = cosines_res[tix];
-                    s1 = sines_diag[tix];
                     s2 = conj(s1);
 
                     for(rocblas_int ky = tiy; ky < half_n; ky += dimy)

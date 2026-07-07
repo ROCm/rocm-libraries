@@ -56,6 +56,12 @@ const vector<vector<int>> size_range = {
     {12, 12},
     {23, 30},
     {40, 45},
+    // small-kernel path (n <= SYEVJ_BLOCKED_SWITCH) with a 2D thread array exceeding
+    // ~512 threads: previously untested window that exposed an eigenvector/eigenvalue
+    // corruption on gfx11 (see run_syevj rotation-broadcast note).
+    {48, 50},
+    {56, 56},
+    {58, 60},
     {67, 70},
     {70, 70},
 };
