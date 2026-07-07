@@ -178,7 +178,7 @@ _STUB_HEADER = """\
 //
 // Stub implementations of the hipTensor public API: every function returns
 // HIPTENSOR_STATUS_NOT_SUPPORTED. Used as libhiptensor on architectures with no
-// usable GPU target (HIPTENSOR_ENABLE_DEVICE=OFF), so downstream consumers link
+// usable GPU target (HIPTENSOR_DISABLE_DEVICE=ON), so downstream consumers link
 // and get a defined runtime error instead of an unresolved symbol.
 //
 // Only functions returning hiptensorStatus_t are generated here. Informational

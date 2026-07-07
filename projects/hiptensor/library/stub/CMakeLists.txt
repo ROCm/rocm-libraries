@@ -28,7 +28,7 @@
 #
 # The stub serves two purposes:
 #
-#   1. On architectures with no usable GPU target (HIPTENSOR_ENABLE_DEVICE=OFF),
+#   1. On architectures with no usable GPU target (HIPTENSOR_DISABLE_DEVICE=ON),
 #      it IS the installed libhiptensor: the device kernels and their Composable
 #      Kernel dependency cannot be built, but the package, headers, and a
 #      well-defined runtime error stay available for downstream consumers.
