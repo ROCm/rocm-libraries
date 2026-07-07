@@ -145,13 +145,25 @@ void rocke_gfx942_attn2d_emit_q_load(rocke_gfx942_attn2d_build_ctx_t* ctx)
             rocke_value_t* qh_mod = rocke_b_mod(b, Q_row, rocke_b_const_i32(b, (int64_t)ctx->NQK));
             qh_t = rocke_b_add(b, qh_mul, qh_mod);
         }
-        /* qmask_t = (q_pos_t < cur_batch_q_len) && (qh_t < NUM_QH)
-         * (Python emits the q_pos cmp before the qh cmp). */
+        /* qmask_t = (q_pos_t < cur_batch_q_len) && (qh_t < NUM_QH) [&& (Q_row < VALID_ROWS)]
+         * The VALID_ROWS guard is only needed when NQK does not divide BLOCK_M (i.e.
+         * VALID_ROWS < BLOCK_M); otherwise every row index is already in-bounds and the
+         * guard is always true — omitting it avoids a redundant cmp+and on the hot path. */
         {
             rocke_value_t* lt_pos = rocke_b_cmp_lt(b, q_pos_t, ctx->cur_batch_q_len);
             rocke_value_t* lt_qh
                 = rocke_b_cmp_lt(b, qh_t, rocke_b_const_i32(b, (int64_t)ctx->NUM_QH));
-            qmask_t = rocke_b_land(b, lt_pos, lt_qh);
+            rocke_value_t* and_pos_qh = rocke_b_land(b, lt_pos, lt_qh);
+            if(ctx->VALID_ROWS < ctx->BLOCK_M)
+            {
+                rocke_value_t* lt_row
+                    = rocke_b_cmp_lt(b, Q_row, rocke_b_const_i32(b, (int64_t)ctx->VALID_ROWS));
+                qmask_t = rocke_b_land(b, and_pos_qh, lt_row);
+            }
+            else
+            {
+                qmask_t = and_pos_qh;
+            }
         }
         /* q_pos_safe / qh_safe = select(qmask_t, ..., 0) */
         q_pos_safe = rocke_b_select(b, qmask_t, q_pos_t, rocke_b_const_i32(b, 0));

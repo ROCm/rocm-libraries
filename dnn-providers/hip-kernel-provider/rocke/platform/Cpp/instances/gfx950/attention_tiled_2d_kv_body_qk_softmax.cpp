@@ -244,7 +244,18 @@ void rocke_gfx950_attn2d_emit_licm_hoist(rocke_gfx950_attn2d_build_ctx_t* ctx)
         rocke_value_t* qh_r = rocke_b_add(b, qh_mul, qh_mod);
         rocke_value_t* row_ok_pos = rocke_b_cmp_lt(b, qp_r, ctx->cur_batch_q_len);
         rocke_value_t* row_ok_qh = rocke_b_cmp_lt(b, qh_r, rocke_b_const_i32(b, ctx->NUM_QH));
-        rocke_value_t* row_ok = rocke_b_land(b, row_ok_pos, row_ok_qh);
+        rocke_value_t* row_ok_inner = rocke_b_land(b, row_ok_pos, row_ok_qh);
+        rocke_value_t* row_ok;
+        if(ctx->VALID_ROWS < ctx->BLOCK_M)
+        {
+            rocke_value_t* row_ok_vr
+                = rocke_b_cmp_lt(b, row, rocke_b_const_i32(b, ctx->VALID_ROWS));
+            row_ok = rocke_b_land(b, row_ok_inner, row_ok_vr);
+        }
+        else
+        {
+            row_ok = row_ok_inner;
+        }
         rocke_value_t* causal_lim = rocke_b_add(b, ctx->context_len, qp_r);
 
         ctx->hoist_in_warp_row[reg] = row;
@@ -284,9 +295,19 @@ void rocke_gfx950_attn2d_emit_licm_hoist(rocke_gfx950_attn2d_build_ctx_t* ctx)
         rocke_value_t* st_qh = rocke_b_add(b, st_qh_mul, st_qh_mod);
         rocke_value_t* st_ok_qp = rocke_b_cmp_lt(b, st_qp, ctx->cur_batch_q_len);
         rocke_value_t* st_ok_qh = rocke_b_cmp_lt(b, st_qh, rocke_b_const_i32(b, ctx->NUM_QH));
+        rocke_value_t* st_ok_inner = rocke_b_land(b, st_ok_qp, st_ok_qh);
         ctx->st_qp_hoist = st_qp;
         ctx->st_qh_hoist = st_qh;
-        ctx->st_row_ok_hoist = rocke_b_land(b, st_ok_qp, st_ok_qh);
+        if(ctx->VALID_ROWS < ctx->BLOCK_M)
+        {
+            rocke_value_t* st_ok_vr
+                = rocke_b_cmp_lt(b, st_q_row, rocke_b_const_i32(b, ctx->VALID_ROWS));
+            ctx->st_row_ok_hoist = rocke_b_land(b, st_ok_inner, st_ok_vr);
+        }
+        else
+        {
+            ctx->st_row_ok_hoist = st_ok_inner;
+        }
         ctx->st_causal_lim_hoist = rocke_b_add(b, ctx->context_len, st_qp);
         if(ctx->USE_ALIBI)
         {
@@ -508,7 +529,17 @@ void rocke_gfx950_attn2d_emit_kv_body(rocke_gfx950_attn2d_build_ctx_t* ctx)
         rocke_value_t* st_qh_iter = rocke_b_add(b, st_qh_mul, st_qh_mod);
         rocke_value_t* st_ok_qp = rocke_b_cmp_lt(b, st_qp_iter, ctx->cur_batch_q_len);
         rocke_value_t* st_ok_qh = rocke_b_cmp_lt(b, st_qh_iter, rocke_b_const_i32(b, ctx->NUM_QH));
-        st_row_ok_iter = rocke_b_land(b, st_ok_qp, st_ok_qh);
+        rocke_value_t* st_ok_inner = rocke_b_land(b, st_ok_qp, st_ok_qh);
+        if(ctx->VALID_ROWS < ctx->BLOCK_M)
+        {
+            rocke_value_t* st_ok_vr
+                = rocke_b_cmp_lt(b, st_q_row_iter, rocke_b_const_i32(b, ctx->VALID_ROWS));
+            st_row_ok_iter = rocke_b_land(b, st_ok_inner, st_ok_vr);
+        }
+        else
+        {
+            st_row_ok_iter = st_ok_inner;
+        }
         st_causal_lim_iter = rocke_b_add(b, ctx->context_len, st_qp_iter);
         if(ctx->USE_ALIBI)
         {
@@ -722,7 +753,17 @@ void rocke_gfx950_attn2d_emit_kv_body(rocke_gfx950_attn2d_build_ctx_t* ctx)
                             qh_r = rocke_b_add(b, qh_mul, qh_mod);
                             row_ok_pos = rocke_b_cmp_lt(b, qp_r, ctx->cur_batch_q_len);
                             row_ok_qh = rocke_b_cmp_lt(b, qh_r, rocke_b_const_i32(b, ctx->NUM_QH));
-                            row_ok = rocke_b_land(b, row_ok_pos, row_ok_qh);
+                            rocke_value_t* row_ok_inner = rocke_b_land(b, row_ok_pos, row_ok_qh);
+                            if(ctx->VALID_ROWS < ctx->BLOCK_M)
+                            {
+                                rocke_value_t* row_ok_vr = rocke_b_cmp_lt(
+                                    b, q_row_t, rocke_b_const_i32(b, ctx->VALID_ROWS));
+                                row_ok = rocke_b_land(b, row_ok_inner, row_ok_vr);
+                            }
+                            else
+                            {
+                                row_ok = row_ok_inner;
+                            }
                             col_abs = rocke_b_add(b, group_tile_off, k_local);
                             causal_lim = rocke_b_add(b, ctx->context_len, qp_r);
                         }
