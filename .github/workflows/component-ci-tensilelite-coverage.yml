@@ -87,27 +87,32 @@ jobs:
         if: always()
         shell: bash
         working-directory: projects/hipblaslt/tensilelite
+        env:
+          LD_LIBRARY_PATH: ${{ env.ROCM_PATH }}/lib:${{ env.LD_LIBRARY_PATH }}
         run: |
           set +e
           PY=.tox/coverage-unit/bin/python
           [ -x "$PY" ] || { echo "no tox venv python at $PY"; exit 0; }
+          echo "LD_LIBRARY_PATH=$LD_LIBRARY_PATH"
           PYTHONPATH="$PWD" "$PY" - <<'PYEOF'
-          import subprocess
+          import os, subprocess
           from Tensile.Toolchain.Validators import validateToolchain
           from Tensile.Common.Architectures import SUPPORTED_ISA
           from Tensile.Common.Capabilities import makeIsaInfoMap
+          print("env LD_LIBRARY_PATH =", os.environ.get("LD_LIBRARY_PATH"), flush=True)
           cxx = validateToolchain("amdclang++")
           print("resolved cxx:", cxx, flush=True)
           m = makeIsaInfoMap(SUPPORTED_ISA, cxx)
-          gfx942 = [k for k in m if tuple(k) == (9, 4, 2)]
-          for k in gfx942:
+          for k in [k for k in m if tuple(k) == (9, 4, 2)]:
               print("gfx942 SupportedISA =", m[k].asmCaps.get("SupportedISA"), flush=True)
-          # Mirror rocisa's tryAssembler exactly (no -o; empty stdin) via subprocess
-          for extra in ([], ["-o", "/tmp/a942.o"]):
-              cmd = [cxx, "-x", "assembler", "-target", "amdgcn-amdhsa", "-mcpu=gfx942", "-"] + extra
-              r = subprocess.run(cmd, input=b"", capture_output=True)
-              print(f"subprocess {'with -o' if extra else 'no -o'}: rc={r.returncode} "
-                    f"stderr={r.stderr.decode(errors='replace')[:400]!r}", flush=True)
+          # Mirror rocisa's tryAssembler (no -o; empty stdin), with the inherited
+          # env and with LD_LIBRARY_PATH stripped, to isolate the trigger.
+          cmd = [cxx, "-x", "assembler", "-target", "amdgcn-amdhsa", "-mcpu=gfx942", "-"]
+          clean = {k: v for k, v in os.environ.items() if k != "LD_LIBRARY_PATH"}
+          for label, env in (("inherited-env", None), ("no-LD_LIBRARY_PATH", clean)):
+              r = subprocess.run(cmd, input=b"", capture_output=True, env=env)
+              print(f"subprocess {label}: rc={r.returncode} "
+                    f"stderr={r.stderr.decode(errors='replace')[:500]!r}", flush=True)
           PYEOF
           echo "diag rc=$?"
           exit 0
