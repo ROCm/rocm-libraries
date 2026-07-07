@@ -3,8 +3,6 @@
 
 #include <gtest/gtest.h>
 
-#include <algorithm>
-#include <limits>
 #include <memory>
 #include <vector>
 
@@ -111,19 +109,6 @@ namespace
         };
     }
 
-    origami::hardware_t makeRankingHardware(hip::HipAMDGPU const& device)
-    {
-        origami::hardware_t ranking_hardware = *(device.analyticalHardware);
-        if(device.skMaxCUs > 0)
-        {
-            ranking_hardware.N_CU
-                = std::min({ranking_hardware.N_CU,
-                            static_cast<size_t>(device.skMaxCUs),
-                            static_cast<size_t>(device.computeUnitCount)});
-        }
-        return ranking_hardware;
-    }
-
     void populatePredictionLibrary(ContractionProblemPredictionLibrary& lib)
     {
         lib.origami_config_list = {
@@ -164,7 +149,7 @@ TEST(PredictionLibrarySkMaxCUsTest, SharedAnalyticalHardwareUnchangedWhenSkMaxCU
     auto device       = makeHipDeviceWithAnalytical(analyticalHw);
     device.skMaxCUs   = 0;
 
-  const size_t originalNCU = analyticalHw->N_CU;
+    const size_t originalNCU = analyticalHw->N_CU;
     ContractionProblemPredictionLibrary lib;
     populatePredictionLibrary(lib);
     auto         problem     = makeGemmProblem(4096, 4096, 1024);
@@ -216,7 +201,7 @@ TEST(PredictionLibrarySkMaxCUsTest, FindTopSolutionsMatchesUncappedRankingWhenSk
         << "skMaxCUs=0 should rank with uncapped analytical hardware N_CU";
 }
 
-TEST(PredictionLibrarySkMaxCUsTest, FindTopSolutionsUsesCappedRankingHardwareWhenSkMaxCUsPositive)
+TEST(PredictionLibrarySkMaxCUsTest, FindTopSolutionsMatchesRankingWhenSkMaxCUsBinds)
 {
     auto analyticalHw = std::make_shared<origami::hardware_t>(makeGfx950AnalyticalHardware());
     auto device       = makeHipDeviceWithAnalytical(analyticalHw);
@@ -228,17 +213,42 @@ TEST(PredictionLibrarySkMaxCUsTest, FindTopSolutionsUsesCappedRankingHardwareWhe
     auto problem = makeGemmProblem(4096, 4096, 1024);
 
     auto const origami_problem = toOrigamiProblem(problem);
-    auto const ranking_hardware = makeRankingHardware(device);
-    EXPECT_EQ(ranking_hardware.N_CU, 64u)
-        << "ranking hardware N_CU should be min(analytical, skMaxCUs, computeUnitCount)";
-    EXPECT_EQ(analyticalHw->N_CU, kAnalyticalCuCount)
-        << "shared analytical hardware must remain uncapped";
+    // Fixture: analytical N_CU=256, computeUnitCount=128, skMaxCUs=64 → expect 64.
+    origami::hardware_t expected_hw = *analyticalHw;
+    expected_hw.N_CU                = 64;
 
     auto const expected
-        = rankedConfigIndices(origami_problem, ranking_hardware, lib.origami_config_list);
+        = rankedConfigIndices(origami_problem, expected_hw, lib.origami_config_list);
+    auto const actual = rankedSolutionIndices(lib, problem, device, static_cast<int>(expected.size()));
+
+    ASSERT_FALSE(expected.empty());
+    EXPECT_EQ(analyticalHw->N_CU, kAnalyticalCuCount)
+        << "shared analytical hardware must remain uncapped";
+    EXPECT_EQ(actual, expected)
+        << "findTopSolutions should rank as if N_CU were capped to skMaxCUs";
+}
+
+TEST(PredictionLibrarySkMaxCUsTest, FindTopSolutionsMatchesRankingWhenComputeUnitCountBinds)
+{
+    auto analyticalHw = std::make_shared<origami::hardware_t>(makeGfx950AnalyticalHardware());
+    auto device       = makeHipDeviceWithAnalytical(analyticalHw);
+    device.skMaxCUs   = 200;
+    device.computeUnitCount = 128;
+
+    ContractionProblemPredictionLibrary lib;
+    populatePredictionLibrary(lib);
+    auto problem = makeGemmProblem(4096, 4096, 1024);
+
+    auto const origami_problem = toOrigamiProblem(problem);
+    // Fixture: analytical N_CU=256, computeUnitCount=128, skMaxCUs=200 → expect 128.
+    origami::hardware_t expected_hw = *analyticalHw;
+    expected_hw.N_CU                = 128;
+
+    auto const expected
+        = rankedConfigIndices(origami_problem, expected_hw, lib.origami_config_list);
     auto const actual = rankedSolutionIndices(lib, problem, device, static_cast<int>(expected.size()));
 
     ASSERT_FALSE(expected.empty());
     EXPECT_EQ(actual, expected)
-        << "skMaxCUs>0 should rank with capped local ranking hardware";
+        << "findTopSolutions should rank as if N_CU were capped to computeUnitCount";
 }
