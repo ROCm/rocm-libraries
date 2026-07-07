@@ -94,26 +94,35 @@ jobs:
           PY=.tox/coverage-unit/bin/python
           [ -x "$PY" ] || { echo "no tox venv python at $PY"; exit 0; }
           echo "LD_LIBRARY_PATH=$LD_LIBRARY_PATH"
-          PYTHONPATH="$PWD" "$PY" - <<'PYEOF'
-          import os, subprocess
+          # Write a real module so 'spawn'/'forkserver' can re-import it.
+          cat > /tmp/wprobe.py <<'PYEOF'
+          import os, sys, multiprocessing as mp
+          sys.path.insert(0, os.environ["TL_DIR"])
           from Tensile.Toolchain.Validators import validateToolchain
           from Tensile.Common.Architectures import SUPPORTED_ISA
           from Tensile.Common.Capabilities import makeIsaInfoMap
-          print("env LD_LIBRARY_PATH =", os.environ.get("LD_LIBRARY_PATH"), flush=True)
-          cxx = validateToolchain("amdclang++")
-          print("resolved cxx:", cxx, flush=True)
-          m = makeIsaInfoMap(SUPPORTED_ISA, cxx)
-          for k in [k for k in m if tuple(k) == (9, 4, 2)]:
-              print("gfx942 SupportedISA =", m[k].asmCaps.get("SupportedISA"), flush=True)
-          # Mirror rocisa's tryAssembler (no -o; empty stdin), with the inherited
-          # env and with LD_LIBRARY_PATH stripped, to isolate the trigger.
-          cmd = [cxx, "-x", "assembler", "-target", "amdgcn-amdhsa", "-mcpu=gfx942", "-"]
-          clean = {k: v for k, v in os.environ.items() if k != "LD_LIBRARY_PATH"}
-          for label, env in (("inherited-env", None), ("no-LD_LIBRARY_PATH", clean)):
-              r = subprocess.run(cmd, input=b"", capture_output=True, env=env)
-              print(f"subprocess {label}: rc={r.returncode} "
-                    f"stderr={r.stderr.decode(errors='replace')[:500]!r}", flush=True)
+
+          def probe(_=0):
+              cxx = validateToolchain("amdclang++")
+              isas = [v for v in SUPPORTED_ISA if tuple(v) == (9, 4, 2)]
+              m = makeIsaInfoMap(isas, cxx)
+              k = [k for k in m if tuple(k) == (9, 4, 2)][0]
+              return m[k].asmCaps.get("SupportedISA")
+
+          if __name__ == "__main__":
+              # Workers first so the fork case computes caps fresh (not inherited
+              # from a parent that already populated the rocisa singleton).
+              for method in ("fork", "spawn", "forkserver"):
+                  try:
+                      ctx = mp.get_context(method)
+                      with ctx.Pool(2) as pool:
+                          print(f"{method}: gfx942 SupportedISA per-worker =",
+                                pool.map(probe, range(2)), flush=True)
+                  except Exception as e:
+                      print(f"{method}: EXC {e!r}", flush=True)
+              print("main: gfx942 SupportedISA =", probe(), flush=True)
           PYEOF
+          TL_DIR="$PWD" PYTHONPATH="$PWD" "$PY" /tmp/wprobe.py
           echo "diag rc=$?"
           exit 0
 
