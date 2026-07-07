@@ -21,13 +21,22 @@
 namespace ck_tile::core::arch::mma {
 
 /**
- * @struct amdgcn_mma
- * @brief Specialization of amdgcn_mma for fp16_t, fp16_t, fp32_t MMA operation on GFX12
- * architecture.
- * @tparam CompilerTarget Current compiler target
+ * @defgroup sparse_wmma_gfx12 Sparse WMMA for GFX12
+ * @brief Sparse specializations of @ref amdgcn_mma for GFX12 family.
+ *
+ * Template parameters A/B/C denote input/output types,
+ * M/N/K are the fragment (MmaTile) sizes,
+ * and `enable_if_target_*` restricts the specialization to specific GPU targets.
+ *
+ * @tparam CompilerTarget Current compiler target.
+ *
+ * @sa amdgcn_mma_base for base template parameter documentation.
+ * @{
  */
+
 // TODO: c++20 template <amdgcn_target CompilerTarget>
 // TODO: c++20 requires
+
 template <typename CompilerTarget>
 // clang-format off
 //               |A B C DataTypes       |MNK           |
@@ -47,14 +56,6 @@ struct amdgcn_mma<fp16_t, fp16_t, fp32_t, 16u, 16u, 32u, CompilerTarget, MmaOpFa
     }
 };
 
-/**
- * @struct amdgcn_mma
- * @brief Specialization of amdgcn_mma for bf16_t, bf16_t, fp32_t MMA operation on GFX12
- * architecture.
- * @tparam CompilerTarget Current compiler target
- */
-// TODO: c++20 template <amdgcn_target CompilerTarget>
-// TODO: c++20 requires
 template <typename CompilerTarget>
 // clang-format off
 //               |A B C DataTypes       |MNK           |
@@ -74,14 +75,6 @@ struct amdgcn_mma<bf16_t, bf16_t, fp32_t, 16u, 16u, 32u, CompilerTarget, MmaOpFa
     }
 };
 
-/**
- * @struct amdgcn_mma
- * @brief Specialization of amdgcn_mma for fp16_t, fp16_t, fp16_t MMA operation on GFX12
- * architecture.
- * @tparam CompilerTarget Current compiler target
- */
-// TODO: c++20 template <amdgcn_target CompilerTarget>
-// TODO: c++20 requires
 template <typename CompilerTarget>
 // clang-format off
 //               |A B C DataTypes       |MNK           |
@@ -104,14 +97,6 @@ struct amdgcn_mma<fp16_t, fp16_t, fp16_t, 16u, 16u, 32u, CompilerTarget, MmaOpFa
     }
 };
 
-/**
- * @struct amdgcn_mma
- * @brief Specialization of amdgcn_mma for bf16_t, bf16_t, bf16_t MMA operation on GFX12
- * architecture.
- * @tparam CompilerTarget Current compiler target
- */
-// TODO: c++20 template <amdgcn_target CompilerTarget>
-// TODO: c++20 requires
 template <typename CompilerTarget>
 // clang-format off
 //               |A B C DataTypes       |MNK           |
@@ -132,14 +117,6 @@ struct amdgcn_mma<bf16_t, bf16_t, bf16_t, 16u, 16u, 32u, CompilerTarget, MmaOpFa
     }
 };
 
-/**
- * @struct amdgcn_mma
- * @brief Specialization of amdgcn_mma for int8_t, int8_t, int32_t MMA operation on GFX12
- * architecture.
- * @tparam CompilerTarget Current compiler target
- */
-// TODO: c++20 template <amdgcn_target CompilerTarget>
-// TODO: c++20 requires
 template <typename CompilerTarget>
 // clang-format off
 //               |A B C DataTypes        |MNK           |
@@ -165,14 +142,6 @@ struct amdgcn_mma<int8_t, int8_t, int32_t, 16u, 16u, 32u, CompilerTarget, MmaOpF
     }
 };
 
-/**
- * @struct amdgcn_mma
- * @brief Specialization of amdgcn_mma for fp8_t, fp8_t, fp32_t MMA operation on GFX12
- * architecture.
- * @tparam CompilerTarget Current compiler target
- */
-// TODO: c++20 template <amdgcn_target CompilerTarget>
-// TODO: c++20 requires
 template <typename CompilerTarget>
 // clang-format off
 //               |A B C DataTypes     |MNK           |
@@ -193,14 +162,6 @@ struct amdgcn_mma<fp8_t, fp8_t, fp32_t, 16u, 16u, 32u, CompilerTarget, MmaOpFami
     }
 };
 
-/**
- * @struct amdgcn_mma
- * @brief Specialization of amdgcn_mma for fp8_t, bf8_t, fp32_t MMA operation on GFX12
- * architecture.
- * @tparam CompilerTarget Current compiler target
- */
-// TODO: c++20 template <amdgcn_target CompilerTarget>
-// TODO: c++20 requires
 template <typename CompilerTarget>
 // clang-format off
 //               |A B C DataTypes     |MNK           |
@@ -221,14 +182,6 @@ struct amdgcn_mma<fp8_t, bf8_t, fp32_t, 16u, 16u, 32u, CompilerTarget, MmaOpFami
     }
 };
 
-/**
- * @struct amdgcn_mma
- * @brief Specialization of amdgcn_mma for bf8_t, fp8_t, fp32_t MMA operation on GFX12
- * architecture.
- * @tparam CompilerTarget Current compiler target
- */
-// TODO: c++20 template <amdgcn_target CompilerTarget>
-// TODO: c++20 requires
 template <typename CompilerTarget>
 // clang-format off
 //               |A B C DataTypes     |MNK           |
@@ -249,14 +202,6 @@ struct amdgcn_mma<bf8_t, fp8_t, fp32_t, 16u, 16u, 32u, CompilerTarget, MmaOpFami
     }
 };
 
-/**
- * @struct amdgcn_mma
- * @brief Specialization of amdgcn_mma for bf8_t, bf8_t, fp32_t MMA operation on GFX12
- * architecture.
- * @tparam CompilerTarget Current compiler target
- */
-// TODO: c++20 template <amdgcn_target CompilerTarget>
-// TODO: c++20 requires
 template <typename CompilerTarget>
 // clang-format off
 //               |A B C DataTypes     |MNK           |
@@ -277,8 +222,6 @@ struct amdgcn_mma<bf8_t, bf8_t, fp32_t, 16u, 16u, 32u, CompilerTarget, MmaOpFami
     }
 };
 
-// TODO: c++20 template <amdgcn_target CompilerTarget>
-// TODO: c++20 requires
 template <typename CompilerTarget>
 // clang-format off
 //               |A B C DataTypes              |MNK           |
@@ -304,8 +247,6 @@ struct amdgcn_mma<pk_int4_t, pk_int4_t, int32_t, 16u, 16u, 32u, CompilerTarget, 
     }
 };
 
-// TODO: c++20 template <amdgcn_target CompilerTarget>
-// TODO: c++20 requires
 template <typename CompilerTarget>
 // clang-format off
 //               |A B C DataTypes              |MNK           |
@@ -330,5 +271,7 @@ struct amdgcn_mma<pk_int4_t, pk_int4_t, int32_t, 16u, 16u, 64u, CompilerTarget, 
                                                              P::clamp)};
     }
 };
+
+/** @} */ // sparse_wmma_gfx12
 
 } // namespace ck_tile::core::arch::mma
