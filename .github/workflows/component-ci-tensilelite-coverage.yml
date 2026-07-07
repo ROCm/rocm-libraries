@@ -78,6 +78,40 @@ jobs:
           LD_LIBRARY_PATH: ${{ env.ROCM_PATH }}/lib:${{ env.LD_LIBRARY_PATH }}
         run: tox -e coverage-unit
 
+      # TEMPORARY DIAGNOSTIC (AIHPBLAS-3877/3878): reproduce the exact
+      # makeIsaInfoMap path using the rocisa that tox just built in this
+      # container, since the raw shell probe above succeeds yet the
+      # characterization Solution fixtures still see SupportedISA=0. Uses the
+      # tox venv so it exercises the same rocisa build. Never fails the job.
+      - name: Diagnose makeIsaInfoMap in-process
+        if: always()
+        shell: bash
+        working-directory: projects/hipblaslt/tensilelite
+        run: |
+          set +e
+          PY=.tox/coverage-unit/bin/python
+          [ -x "$PY" ] || { echo "no tox venv python at $PY"; exit 0; }
+          PYTHONPATH="$PWD" "$PY" - <<'PYEOF'
+          import subprocess
+          from Tensile.Toolchain.Validators import validateToolchain
+          from Tensile.Common.Architectures import SUPPORTED_ISA
+          from Tensile.Common.Capabilities import makeIsaInfoMap
+          cxx = validateToolchain("amdclang++")
+          print("resolved cxx:", cxx, flush=True)
+          m = makeIsaInfoMap(SUPPORTED_ISA, cxx)
+          gfx942 = [k for k in m if tuple(k) == (9, 4, 2)]
+          for k in gfx942:
+              print("gfx942 SupportedISA =", m[k].asmCaps.get("SupportedISA"), flush=True)
+          # Mirror rocisa's tryAssembler exactly (no -o; empty stdin) via subprocess
+          for extra in ([], ["-o", "/tmp/a942.o"]):
+              cmd = [cxx, "-x", "assembler", "-target", "amdgcn-amdhsa", "-mcpu=gfx942", "-"] + extra
+              r = subprocess.run(cmd, input=b"", capture_output=True)
+              print(f"subprocess {'with -o' if extra else 'no -o'}: rc={r.returncode} "
+                    f"stderr={r.stderr.decode(errors='replace')[:400]!r}", flush=True)
+          PYEOF
+          echo "diag rc=$?"
+          exit 0
+
       - name: Upload coverage reports
         if: always()
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
