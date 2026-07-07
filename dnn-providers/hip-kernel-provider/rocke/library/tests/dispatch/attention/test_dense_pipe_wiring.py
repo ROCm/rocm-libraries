@@ -4,8 +4,7 @@
 
 Covers:
   - dense_pipe candidate is registered and discoverable
-  - priority 15 wins over unified_2d (priority 10) for eligible gfx942 fp16 shapes
-  - support() gates: arch, dtype, 2d path, fp16-flash eligibility
+  - dense_pipe priority outranks unified_2d (priority 10) for eligible gfx942 fp16 shapes
   - MHA short-context (seqlen_q<=768) routes to dense_pipe, not narrow
   - GQA short-context routes to unified_2d narrow (dense_pipe rejected)
   - explicit algorithm="dense_pipe" forces the candidate
