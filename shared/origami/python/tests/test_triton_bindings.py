@@ -238,7 +238,7 @@ def _make_overlay_config(target):
 
 class TestTritonHeuristicOverlay:
     """End-to-end check that the Triton-target heuristic overlay is applied
-    via `heuristic_params_t::merge_with` at `context_t` construction time.
+    via `heuristic_params_t::overlay_with` at `context_t` construction time.
 
     This used to be a manual `if (target == triton) L_tile_total *=
     triton_h.weight_tile_total` patch inside `compute_tile_latency`. After

@@ -48,9 +48,9 @@ ORIGAMI_EXPORT std::size_t compute_sk_grid(const problem_t&  problem,
  *   - Everything else:
  *       MN in {16, 32, 64, 128, 256}, K in {16, 32, 64, 128, 256, 512}.
  *
- * Only `mt.{m,n,k}` is populated on each returned config. The caller is
- * expected to set `mi` (and any other config fields it needs, e.g. occupancy,
- * grid_selection, target) per its own selection policy.
+ * `mt.{m,n,k}` and `target` (target_t::triton) are populated on each returned
+ * config. The caller is expected to set `mi` (and any other config fields it
+ * needs, e.g. occupancy, grid_selection) per its own selection policy.
  *
  * @param problem  Problem description (uses `a_dtype`, `b_dtype`).
  * @param hardware Hardware description (uses `arch`).

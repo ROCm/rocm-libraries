@@ -133,6 +133,7 @@ std::vector<config_t> get_default_configs(const problem_t&  problem,
       for (std::size_t bk : block_k) {
         config_t c;
         c.mt = dim3_t{bm, bn, bk};
+        c.target = target_t::triton;
         configs.push_back(c);
       }
     }

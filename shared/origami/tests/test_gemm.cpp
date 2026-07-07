@@ -1692,7 +1692,7 @@ TEST_CASE("Triton overlay: applied at context_t construction, no per-call patchi
   // triton) L_tile_total *= triton_h.weight_tile_total;` patch inside
   // compute_tile_latency, which (a) ran on every latency call and (b) only
   // worked because the manual patch reproduced what the overlay would have
-  // done. After the unification, a single `merge_with` at construction is
+  // done. After the unification, a single `overlay_with` at construction is
   // the only thing required to make the Triton tuning take effect.
   auto hardware = make_hardware(950);
   auto problem  = make_problem(4096, 4096, 1024,
