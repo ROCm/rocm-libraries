@@ -247,24 +247,16 @@ static constexpr unsigned int seeds [] = {};
 
 ## Running benchmarks
 
+rocPRIM uses [primbench](https://github.com/ROCm/rocm-libraries/tree/develop/shared/primbench) for benchmarking; see its [command-line options](https://github.com/ROCm/rocm-libraries/tree/develop/shared/primbench#command-line-options).
+
 ```shell
 # Go to rocPRIM build directory
 cd rocPRIM; cd build
 
-# To run benchmark for warp functions:
-# Further option can be found using --help
-# [] Fields are optional
-./benchmark/benchmark_warp_<function_name> [--size <size>] [--trials <trials>]
-
-# To run benchmark for block functions:
-# Further option can be found using --help
-# [] Fields are optional
-./benchmark/benchmark_block_<function_name> [--size <size>] [--trials <trials>]
-
-# To run benchmark for device functions:
-# Further option can be found using --help
-# [] Fields are optional
-./benchmark/benchmark_device_<function_name> [--size <size>] [--trials <trials>]
+# To run benchmarks for warp, block, or device functions:
+./benchmark/benchmark_warp_<function_name>
+./benchmark/benchmark_block_<function_name>
+./benchmark/benchmark_device_<function_name>
 ```
 
 ### Performance configuration
