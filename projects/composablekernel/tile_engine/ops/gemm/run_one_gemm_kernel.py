@@ -1,4 +1,6 @@
 #!/usr/bin/env python3
+# Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
+# SPDX-License-Identifier: MIT
 """Worker script for running GEMM kernels in an isolated subprocess.
 
 Mirrors grouped_conv's run_one_grouped_conv_kernel.py:
@@ -47,9 +49,17 @@ def _run_one(idx, so_path, prob_dict, kernel_name, verify=False, verify_tol=2e-2
     try:
         problem = GemmProblem.from_dict(prob_dict)
 
-        np.random.seed(42)
-        A = (np.random.randn(problem.M, problem.K) * 0.1).astype(np.float16)
-        B = (np.random.randn(problem.K, problem.N) * 0.1).astype(np.float16)
+        # Cache host matrices per shape so batch mode doesn't regenerate huge inputs per kernel.
+        cache = getattr(_run_one, "_ab_cache", {})
+        key = (problem.M, problem.N, problem.K)
+        if key not in cache:
+            rng = np.random.RandomState(42)
+            cache[key] = (
+                (rng.randn(problem.M, problem.K) * 0.1).astype(np.float32),
+                (rng.randn(problem.K, problem.N) * 0.1).astype(np.float32),
+            )
+            _run_one._ab_cache = cache
+        A, B = cache[key]
 
         # CRITICAL: load the library ONLY inside this subprocess.
         runner = GpuGemmRunner(lib_path=so_path)

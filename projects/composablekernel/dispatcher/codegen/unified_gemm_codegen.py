@@ -187,6 +187,10 @@ logging.basicConfig(level=logging.INFO, format="%(levelname)s: %(message)s")
 log = logging.getLogger(__name__)
 
 
+def _is_power_of_two(x: int) -> bool:
+    return x > 0 and (x & (x - 1)) == 0
+
+
 # ============================================================================
 # Configuration and Data Structures
 # ============================================================================
@@ -547,6 +551,43 @@ using AccDataType = float;
 using ALayout = {ns_name}::ALayout;
 using BLayout = {ns_name}::BLayout;
 using CLayout = {ns_name}::CLayout;
+
+// KernelKey field descriptors for the force-included kernel.
+// The ctypes library builds the registry KernelKey from these so the
+// registered entry reflects this kernel's real traits (not a hard-coded
+// fp16/rcr default). Enum-valued fields are emitted as the exact strings
+// consumed by string_to_dtype/layout/pipeline/scheduler/epilogue in
+// kernel_key.hpp; shape/flag fields are emitted as numeric/0-1 literals.
+#define GEMM_KEY_DTYPE_A "{self.datatype}"
+#define GEMM_KEY_DTYPE_B "{self.datatype}"
+#define GEMM_KEY_DTYPE_C "{output_dtype}"
+#define GEMM_KEY_DTYPE_ACC "fp32"
+#define GEMM_KEY_LAYOUT_A "{self.layout[0]}"
+#define GEMM_KEY_LAYOUT_B "{self.layout[1]}"
+#define GEMM_KEY_LAYOUT_C "{self.layout[2]}"
+#define GEMM_KEY_PIPELINE "{tr.pipeline}"
+#define GEMM_KEY_SCHEDULER "{tr.scheduler}"
+#define GEMM_KEY_EPILOGUE "{tr.epilogue}"
+#define GEMM_KEY_TILE_M {t.tile_m}
+#define GEMM_KEY_TILE_N {t.tile_n}
+#define GEMM_KEY_TILE_K {t.tile_k}
+#define GEMM_KEY_WAVE_M {t.warp_m}
+#define GEMM_KEY_WAVE_N {t.warp_n}
+#define GEMM_KEY_WAVE_K {t.warp_k}
+#define GEMM_KEY_WARP_TILE_M {t.warp_tile_m}
+#define GEMM_KEY_WARP_TILE_N {t.warp_tile_n}
+#define GEMM_KEY_WARP_TILE_K {t.warp_tile_k}
+#define GEMM_KEY_BLOCK_SIZE {config.block_size}
+#define GEMM_KEY_NUM_WAVE_GROUPS {config.num_wave_groups}
+#define GEMM_KEY_PAD_M {int(tr.pad_m)}
+#define GEMM_KEY_PAD_N {int(tr.pad_n)}
+#define GEMM_KEY_PAD_K {int(tr.pad_k)}
+#define GEMM_KEY_PERSISTENT {int(tr.persistent)}
+#define GEMM_KEY_DOUBLE_BUFFER {int(tr.pipeline == "compv4" or tr.pipeline == "preshufflev2")}
+#define GEMM_KEY_PRESHUFFLE {int(config.preshuffle)}
+#define GEMM_KEY_TRANSPOSE_C 0
+#define GEMM_KEY_GROUPED 0
+#define GEMM_KEY_SPLIT_K 1
 #endif // CK_TILE_SINGLE_KERNEL_INCLUDE
 """
 
@@ -1215,6 +1256,31 @@ class UnifiedGemmCodegen:
             log.error(f"Invalid preselected set: {e}")
             return []
 
+    @staticmethod
+    def _cshuffle_repeat_ok(tile: TileConfig) -> bool:
+        """CShuffle-store correctness gate.
+
+        The CShuffle epilogue stores the accumulator back through LDS in
+        power-of-two MRepeat/NRepeat chunks, so a tile whose per-wave repeat
+        count -- tile / (warp * warp_tile) -- is not a power of two is
+        mis-stored and yields numerically WRONG results at runtime. The kernel
+        still compiles (the epilogue's static_asserts only check divisibility,
+        which such tiles satisfy), so it must be filtered in codegen. Observed
+        on MI350 for tile_m=192 (MRepeat = 192 / (2*32) = 3): verified incorrect
+        on BOTH the bridge and Tile Engine at every shape, including shapes
+        divisible by 192. Power-of-two tiles (64/128/256) are unaffected.
+
+        This is CShuffle-specific: the "default" (DefaultGemm2DEpilogue) path
+        stores directly (not through the LDS repack) and is numerically correct
+        for non-pow2 repeats -- verified on gfx942 at tile_m=192/MRepeat=3
+        (max_rel ~5e-4 across shapes divisible by 192, while the same tile under
+        CShuffle returns garbage, max_rel ~1.3). Only call this for kernels
+        whose resolved epilogue is "cshuffle".
+        """
+        m_repeat = tile.tile_m // (tile.warp_m * tile.warp_tile_m)
+        n_repeat = tile.tile_n // (tile.warp_n * tile.warp_tile_n)
+        return _is_power_of_two(m_repeat) and _is_power_of_two(n_repeat)
+
     def _get_configs_for_variant(self, variant: GemmVariant) -> List[KernelConfig]:
         """Get all configurations for a variant
 
@@ -1243,6 +1309,12 @@ class UnifiedGemmCodegen:
                     continue
 
             if variant == GemmVariant.STANDARD:
+                # CShuffle-store correctness gate: skip non-pow2 repeat tiles
+                # only for the cshuffle epilogue (see _cshuffle_repeat_ok). The
+                # "default" epilogue is correct with non-pow2 repeats, so it is
+                # NOT gated here.
+                if trait.epilogue == "cshuffle" and not self._cshuffle_repeat_ok(tile):
+                    continue
                 configs.append(KernelConfig(tile=tile, trait=trait, variant=variant))
 
             elif variant == GemmVariant.STREAM_K:
@@ -1277,7 +1349,13 @@ class UnifiedGemmCodegen:
                 )
                 # Only generate one preshuffle config per tile (not per trait)
                 # since preshuffle has fixed pipeline/scheduler
-                if trait.pipeline == "compv3" and trait.scheduler == "intrawave":
+                # Preshuffle always uses the cshuffle epilogue, so the
+                # CShuffle-store pow2 repeat gate always applies here.
+                if (
+                    trait.pipeline == "compv3"
+                    and trait.scheduler == "intrawave"
+                    and self._cshuffle_repeat_ok(tile)
+                ):
                     configs.append(
                         KernelConfig(
                             tile=tile,
@@ -1288,6 +1366,10 @@ class UnifiedGemmCodegen:
                     )
 
             elif variant == GemmVariant.MULTI_D:
+                # CShuffle-store correctness gate: applies only when the
+                # (swept) epilogue is cshuffle; the default epilogue is exempt.
+                if trait.epilogue == "cshuffle" and not self._cshuffle_repeat_ok(tile):
+                    continue
                 multi_d = self.config.get("multi_d_config", {})
                 for ew_op, num_d in itertools.product(
                     multi_d.get("elementwise_ops", ["MultiDAdd"]),
@@ -1329,6 +1411,13 @@ class UnifiedGemmCodegen:
             if not tile.is_valid():
                 rejected_count += 1
                 continue
+
+            # NOTE: the CShuffle-store pow2 MRepeat/NRepeat correctness gate is
+            # NOT applied here. It is epilogue-specific (only the CShuffle
+            # epilogue mis-stores non-pow2 repeats; the "default" epilogue is
+            # correct), so it is applied per (tile, trait) in
+            # _get_configs_for_variant once the epilogue is known. See
+            # _cshuffle_repeat_ok.
 
             # Architecture-specific validation. This is a pre-filter run before
             # tiles are paired with traits, so keep a tile if it is legal under

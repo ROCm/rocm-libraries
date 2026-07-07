@@ -115,8 +115,8 @@ auto-detected (`HIP_VISIBLE_DEVICES`, then `rocm-smi`/`amd-smi`); override with
 
 | Axis | Supported |
 |---|---|
-| dtype | `fp16` (bf16 follows in #8190) |
-| layout | `rcr` (rrr/crr/ccr follow in #8191; row-major C only — ck_tile rejects column-major C at build) |
+| dtype | `fp16`, `bf16` |
+| layout | `rcr`, `rrr`, `crr`, `ccr` (row-major C only — ck_tile rejects column-major C at build) |
 
 ### Variant scope
 
@@ -137,40 +137,6 @@ What that means for this PR:
   presence as working support.
 - Grouped GEMM and stream-K go through **separate bridge efforts** (stream-K in
   #8136, grouped GEMM on its own branch), not this PR.
-
-### Stream-K bridge
-
-Stream-K reuses the same bridge mechanics through its **own** driver/worker pair
-(it keeps a distinct ctypes lib that bypasses the registry; see
-`dispatcher/bindings/ctypes/streamk_gemm_ctypes_lib.cpp`):
-
-| Script | Role |
-|---|---|
-| `streamk_gemm_full_benchmark.py` | Stream-K driver — same 3-phase, multi-GPU, `--verify`/`--devices` flags as the regular driver; threads `variant="stream_k"`. Defaults to `gemm_streamk/configs/default_config.json`. |
-| `run_one_streamk_gemm_kernel.py` | Disposable per-kernel worker (same fp16 host path as the regular worker; the ABI matches). |
-
-```bash
-# Default Stream-K config, all visible GPUs, with correctness checking:
-python streamk_gemm_full_benchmark.py --verify
-
-# Explicit config, 4 GPUs, custom output:
-python streamk_gemm_full_benchmark.py gemm_streamk/configs/default_config.json \
-    --devices 4 --csv streamk_gemm_results.csv
-```
-
-Notes specific to Stream-K:
-- Kernel names carry a `_streamk` suffix (`GemmKernelConfig(variant="stream_k").name`).
-- Supported surface here is **fp16 / rcr**, same as the regular bridge.
-- The Atomic reduction does multiple fp16 atomic-adds per K-split, so it is noisier
-  than regular GEMM; `--verify` still uses the default `2e-2` gate (observed
-  `max_rel ≤ 2.5e-3`, well within it).
-- Benchmark knobs in `streamk_gemm_ctypes_lib.cpp` default to warmup=50/repeat=100
-  (env-overridable via `CK_TILE_BENCH_WARMUP`/`REPEAT`/`FLUSH`/`ROTATING`), matching
-  the regular path — **except** `rotating_count` defaults to 1, because the Atomic
-  preprocess only re-zeros the original C buffer and rotating C would corrupt the
-  accumulation.
-- Tiny problems (e.g. `257³`) have too few tiles to partition across CUs; the kernel
-  reports them unsupported (status `-2`) and the bridge surfaces that gracefully.
 
 ### Removal note
 

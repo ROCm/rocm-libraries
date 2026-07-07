@@ -114,39 +114,39 @@ class TestBenchmarkResult:
 
     def test_has_kernel_timings_false_when_none(self) -> None:
         """Test has_kernel_timings is False when timings are None."""
-        result = BenchmarkResult(e2e_timings=[1.0, 2.0], kernel_timings=None)
+        result = BenchmarkResult(host_timings=[1.0, 2.0], kernel_timings=None)
         assert result.has_kernel_timings is False
 
     def test_has_kernel_timings_false_when_empty(self) -> None:
         """Test has_kernel_timings is False when timings are empty."""
-        result = BenchmarkResult(e2e_timings=[1.0, 2.0], kernel_timings=[])
+        result = BenchmarkResult(host_timings=[1.0, 2.0], kernel_timings=[])
         assert result.has_kernel_timings is False
 
     def test_has_kernel_timings_true(self) -> None:
         """Test has_kernel_timings is True when timings exist."""
-        result = BenchmarkResult(e2e_timings=[1.0, 2.0], kernel_timings=[0.5, 0.6])
+        result = BenchmarkResult(host_timings=[1.0, 2.0], kernel_timings=[0.5, 0.6])
         assert result.has_kernel_timings is True
 
     def test_timing_backend_from_metadata(self) -> None:
         """Test timing_backend property reads from metadata."""
         metadata = BenchmarkMetadata(timing_backend="hip")
         result = BenchmarkResult(
-            e2e_timings=[1.0], kernel_timings=[0.5], metadata=metadata
+            host_timings=[1.0], kernel_timings=[0.5], metadata=metadata
         )
         assert result.timing_backend == "hip"
 
     def test_timing_backend_empty_without_metadata(self) -> None:
         """Test timing_backend is empty when no metadata."""
-        result = BenchmarkResult(e2e_timings=[1.0])
+        result = BenchmarkResult(host_timings=[1.0])
         assert result.timing_backend == ""
 
     def test_to_dict_basic(self) -> None:
         """Test to_dict with basic result."""
         result = BenchmarkResult(
-            e2e_timings=[1.0, 2.0, 3.0], kernel_timings=[0.5, 0.6, 0.7]
+            host_timings=[1.0, 2.0, 3.0], kernel_timings=[0.5, 0.6, 0.7]
         )
         data = result.to_dict()
-        assert data["e2e_timings"] == [1.0, 2.0, 3.0]
+        assert data["host_timings"] == [1.0, 2.0, 3.0]
         assert data["kernel_timings"] == [0.5, 0.6, 0.7]
         assert "metadata" not in data or data["metadata"] is None
 
@@ -156,7 +156,7 @@ class TestBenchmarkResult:
             graph_name="test", timing_backend="hip", benchmark_iters=100
         )
         result = BenchmarkResult(
-            e2e_timings=[1.0], kernel_timings=[0.5], metadata=metadata
+            host_timings=[1.0], kernel_timings=[0.5], metadata=metadata
         )
         data = result.to_dict()
         assert "metadata" in data
@@ -166,28 +166,28 @@ class TestBenchmarkResult:
 
     def test_to_json(self) -> None:
         """Test to_json produces valid JSON."""
-        result = BenchmarkResult(e2e_timings=[1.0, 2.0], kernel_timings=[0.5, 0.6])
+        result = BenchmarkResult(host_timings=[1.0, 2.0], kernel_timings=[0.5, 0.6])
         json_str = result.to_json()
         # Should be valid JSON
         parsed = json.loads(json_str)
-        assert parsed["e2e_timings"] == [1.0, 2.0]
+        assert parsed["host_timings"] == [1.0, 2.0]
         assert parsed["kernel_timings"] == [0.5, 0.6]
 
     def test_from_dict(self) -> None:
         """Test from_dict creates correct result."""
         data = {
-            "e2e_timings": [1.0, 2.0, 3.0],
+            "host_timings": [1.0, 2.0, 3.0],
             "kernel_timings": [0.5, 0.6, 0.7],
         }
         result = BenchmarkResult.from_dict(data)
-        assert result.e2e_timings == [1.0, 2.0, 3.0]
+        assert result.host_timings == [1.0, 2.0, 3.0]
         assert result.kernel_timings == [0.5, 0.6, 0.7]
         assert result.metadata is None
 
     def test_from_dict_with_metadata(self) -> None:
         """Test from_dict with metadata."""
         data = {
-            "e2e_timings": [1.0],
+            "host_timings": [1.0],
             "kernel_timings": None,
             "metadata": {
                 "graph_name": "test_graph",
@@ -208,7 +208,7 @@ class TestBenchmarkResult:
     def test_from_dict_accepts_legacy_gpu_backend_metadata(self) -> None:
         """Test from_dict accepts pre-rename gpu_backend metadata."""
         data = {
-            "e2e_timings": [1.0],
+            "host_timings": [1.0],
             "kernel_timings": None,
             "metadata": {
                 "graph_name": "test_graph",
@@ -224,7 +224,7 @@ class TestBenchmarkResult:
     ) -> None:
         """Test from_dict ignores legacy gpu_backend when timing_backend exists."""
         data = {
-            "e2e_timings": [1.0],
+            "host_timings": [1.0],
             "kernel_timings": None,
             "metadata": {
                 "graph_name": "test_graph",
@@ -239,7 +239,7 @@ class TestBenchmarkResult:
     def test_round_trip_serialization(self, tmp_path) -> None:
         """Test that results survive JSON round-trip."""
         original = BenchmarkResult(
-            e2e_timings=[1.0, 2.0, 3.0],
+            host_timings=[1.0, 2.0, 3.0],
             kernel_timings=[0.5, 0.6, 0.7],
             metadata=BenchmarkMetadata(
                 graph_name="test_graph",
@@ -255,7 +255,7 @@ class TestBenchmarkResult:
         original.save_json(str(path))
         loaded = BenchmarkResult.load_json(str(path))
 
-        assert loaded.e2e_timings == original.e2e_timings
+        assert loaded.host_timings == original.host_timings
         assert loaded.kernel_timings == original.kernel_timings
         assert loaded.metadata is not None
         assert loaded.metadata.graph_name == original.metadata.graph_name
@@ -264,11 +264,11 @@ class TestBenchmarkResult:
 
     def test_round_trip_no_kernel_timings(self, tmp_path) -> None:
         """Test round-trip with no kernel timings."""
-        original = BenchmarkResult(e2e_timings=[1.0, 2.0])
+        original = BenchmarkResult(host_timings=[1.0, 2.0])
 
         path = tmp_path / "results.json"
         original.save_json(str(path))
         loaded = BenchmarkResult.load_json(str(path))
 
-        assert loaded.e2e_timings == original.e2e_timings
+        assert loaded.host_timings == original.host_timings
         assert loaded.kernel_timings is None

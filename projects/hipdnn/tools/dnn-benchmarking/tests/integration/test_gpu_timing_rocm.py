@@ -14,7 +14,7 @@ from dnn_benchmarking.execution.buffer_manager import BufferManager
 from dnn_benchmarking.execution.executor import Executor
 from dnn_benchmarking.graph.loader import GraphLoader
 
-pytestmark = [pytest.mark.gpu, pytest.mark.amd]
+pytestmark = [pytest.mark.gpu, pytest.mark.rocm]
 
 
 def _skip_if_no_rocm(plugin_paths: List[str]) -> None:
@@ -34,7 +34,7 @@ def _skip_if_no_rocm(plugin_paths: List[str]) -> None:
 
 
 def test_hipdnn_gpu_timing_rocm(plugin_paths: List[str]) -> None:
-    """Validate E2E and kernel timings on AMD ROCm devices using hipDNN."""
+    """Validate host and kernel timings on AMD ROCm devices using hipDNN."""
     _skip_if_no_rocm(plugin_paths)
 
     graph_path = Path(__file__).parent.parent.parent / "graphs" / "sample_conv_fwd.json"
@@ -51,7 +51,7 @@ def test_hipdnn_gpu_timing_rocm(plugin_paths: List[str]) -> None:
     import hipdnn_frontend as hipdnn
 
     handle = hipdnn.Handle()
-    executor = Executor(graph_json_str, config, timing_backend="hip")
+    executor = Executor(graph_json_str, config)
     executor.prepare(handle)
 
     with BufferManager(tensor_infos) as buffer_manager:
@@ -66,13 +66,8 @@ def test_hipdnn_gpu_timing_rocm(plugin_paths: List[str]) -> None:
 
     assert result.kernel_timings is not None
     assert len(result.kernel_timings) == 3
-    assert len(result.e2e_timings) == 3
+    assert len(result.host_timings) == 3
     assert all(t > 0.0 for t in result.kernel_timings)
-    assert all(t > 0.0 for t in result.e2e_timings)
-
-    tolerance_ms = 0.1
-    for e2e_ms, kernel_ms in zip(result.e2e_timings, result.kernel_timings):
-        assert e2e_ms + tolerance_ms >= kernel_ms
-
+    assert all(t > 0.0 for t in result.host_timings)
     assert result.metadata is not None
     assert result.metadata.timing_backend == "hip"

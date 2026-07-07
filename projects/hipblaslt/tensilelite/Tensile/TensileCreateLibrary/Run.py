@@ -227,9 +227,15 @@ def processKernelSource(kernelWriterAssembly, data, outOptions, splitGSU, kernel
     header = kernelWriter.getHeaderFileString(kernel)
     objFilename = kernel._state.get("codeObjectFile", None)
     pgr = int(kernel["PrefetchGlobalRead"])
+    cuocc = kernel["CUOccupancy"]
+    if cuocc <= 0 and getVerbosity() >= 2:
+        print2(
+            f"[codegen] CUOccupancy={cuocc} (<=0) after codegen for kernel {asmFilename}; "
+            f"runtime will clamp to 1."
+        )
     return KernelCodeGenResult(
         err, src, header, asmFilename, objFilename, tuple(kernel["ISA"]), \
-        kernel["WavefrontSize"], kernel["CUOccupancy"], \
+        kernel["WavefrontSize"], cuocc, \
         pgr, kernel["MathClocksUnrolledLoop"]
     )
 
@@ -489,7 +495,11 @@ def writeSolutionsAndKernels(
     def assemble(ret):
         p, isa, wavefrontsize, _ = ret
         o_path = p.with_suffix(".o")
-        asmToolchain.assembler(isaToGfx(isa), wavefrontsize, str(p), str(o_path))
+        try:
+            asmToolchain.assembler(isaToGfx(isa), wavefrontsize, str(p), str(o_path))
+        except RuntimeError as e:
+            printWarning(f"Failed to assemble {p}: {e}")
+            return
         if _stinky_asm_verify_wanted(isa):
             _verify_stinky_asm_comment_vs_elf_text(p, o_path, p.stem)
         if removeTemporaries:
@@ -505,6 +515,14 @@ def writeSolutionsAndKernels(
             return_as="list",
             multiArg=False,
         )
+
+    # Remove solutions whose kernels failed to assemble (no .o file produced)
+    failedBases = {k["BaseName"] for k in asmKernels
+                   if not k.duplicate and not (assemblyTmpPath / (k["BaseName"] + ".o")).exists()}
+    if failedBases:
+        solutions[:] = [s for s in solutions
+                        if getKernelFileBase(splitGSU, s.getKernels()[0]) not in failedBases]
+        asmKernels[:] = [k for k in asmKernels if k.get("BaseName", None) not in failedBases]
 
     with timing_context("python_kernel_write_helpers"):
         writeHelpers(outputPath, kernelHelperObjs, KERNEL_HELPER_FILENAME_CPP, KERNEL_HELPER_FILENAME_H)
@@ -524,7 +542,7 @@ def writeSolutionsAndKernels(
             codeObjectFiles += buildAssemblyCodeObjectFiles(
                 asmToolchain.linker,
                 asmToolchain.bundler,
-                asmKernels,
+                [k for k in asmKernels if not k.duplicate],
                 destRoot,
                 assemblyTmpPath,
                 compress,
@@ -822,7 +840,7 @@ def generateLogicDataAndSolutions(logicFiles, args, assembler: Assembler, isaInf
                 yield from libraryIter(lazyLib)
 
     for library in ParallelMap2(
-        LibraryIO.parseLibraryLogicFile, fIter, "Loading Logics...", return_as="generator_unordered"
+        LibraryIO.parseLibraryLogicFile, fIter, "Loading Logics...", return_as="generator"
     ):
         _, architectureName, _, _, _, newLibrary, typeMismatches = library
         mergeTypeMismatchCollector(typeMismatches)

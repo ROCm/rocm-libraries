@@ -28,9 +28,12 @@ how it is compiled into a ``.so``.
 from __future__ import annotations
 
 import ctypes
+import functools
 import itertools
 import json
 import multiprocessing
+import subprocess
+import tempfile
 from concurrent.futures import ProcessPoolExecutor, as_completed
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -167,7 +170,7 @@ class GemmKernelConfig:
         triple ``warp_*`` and the MFMA triple ``warp_tile_*``. We translate
         from dispatcher semantics here so the mapping cannot drift.
         """
-        cfg: Dict[str, Any] = {
+        cfg = {
             "tile_config": {
                 "tile_m": [self.tile_m],
                 "tile_n": [self.tile_n],
@@ -214,7 +217,6 @@ class GemmKernelConfig:
             "persistent": self.persistent,
             "gfx_arch": self.gfx_arch,
             "variant": self.variant,
-            "reduction_strategy": self.reduction_strategy,
             "name": self.name,
         }
 
@@ -246,7 +248,6 @@ class GemmKernelConfig:
             pad_k=self.pad_k,
             gfx_arch=self.gfx_arch,
             variant=self.variant,
-            reduction_strategy=self.reduction_strategy,
         )
 
 
@@ -391,139 +392,40 @@ class GemmDispatcherLib:
 # ============================================================================
 
 
-# ---------------------------------------------------------------------------
-# fp8 (E4M3) / bf8 (E5M2) -- FNUZ ("NANOO") encoding used by gfx942/MI300.
-#
-# numpy has no native 8-bit float, and the C ABI only cares about the 1-byte
-# memory layout (sizeof(fp8_t) == sizeof(bf8_t) == 1). We carry the value as a
-# uint8 bit pattern. As with bf16, the DECODE is the load-bearing half: it must
-# return the exact value the device's fp8_t/bf8_t represents for a byte, so the
-# NumPy reference multiplies bit-for-bit what the GPU multiplies. The ENCODE only
-# needs to land on the nearest representable byte.
-#
-# FNUZ format (gfx942): bias = 2^(exp_bits-1); the all-1s exponent is a normal
-# number (no Inf), the sole NaN is the sign=1/exp=0/mant=0 byte (0x80), and there
-# is no negative zero. gfx950/MI350 uses the OCP fp8 format instead; this codec
-# targets the gfx942 default and the OCP path needs separate handling (the runner
-# raises a clear error for fp8/bf8 on a non-gfx942 arch).
-# ---------------------------------------------------------------------------
+def _fp32_to_bf16_u16(x: np.ndarray) -> np.ndarray:
+    """Encode fp32 -> bfloat16 bit pattern in a uint16 array (round-to-nearest-even).
 
-
-def _fnuz_decode_table(exp_bits: int, mant_bits: int) -> np.ndarray:
-    """Build the 256-entry byte -> fp32 value table for an 8-bit FNUZ float."""
-    bias = (1 << (exp_bits - 1))
-    mant_max = 1 << mant_bits
-    sign_shift = exp_bits + mant_bits
-    exp_mask = (1 << exp_bits) - 1
-    table = np.zeros(256, dtype=np.float32)
-    for b in range(256):
-        sign = (b >> sign_shift) & 1
-        exp = (b >> mant_bits) & exp_mask
-        mant = b & (mant_max - 1)
-        if exp == 0 and mant == 0:
-            # +0 (0x00); the negative-zero slot (0x80) is the lone NaN.
-            table[b] = np.float32(np.nan) if sign else np.float32(0.0)
-            continue
-        if exp == 0:
-            val = (mant / mant_max) * (2.0 ** (1 - bias))  # subnormal
-        else:
-            val = (1.0 + mant / mant_max) * (2.0 ** (exp - bias))  # normal
-        table[b] = np.float32(-val if sign else val)
-    return table
-
-
-def _fnuz_encode(x: np.ndarray, exp_bits: int, mant_bits: int) -> np.ndarray:
-    """Encode fp32 -> nearest 8-bit FNUZ float, returned as a uint8 bit pattern.
-
-    PRESERVES the input's memory order (C or F) so a column-major operand stays
-    column-major after encoding.
+    numpy has no native bf16, but the C ABI only cares about the 2-byte memory
+    layout (sizeof(bf16_t) == 2 == sizeof(uint16)). Truncating the low 16 bits of
+    the fp32 representation with round-to-nearest-even matches ck_tile's bf16.
     """
-    table = _fnuz_decode_table(exp_bits, mant_bits)
-    sign_byte = np.uint8(1 << (exp_bits + mant_bits))  # 0x80
-
-    # Positive half (bytes 0..127) holds every non-negative magnitude, sorted.
-    # Compare in float64: for very large inputs the gap between the two top
-    # magnitudes is below fp32 resolution, which would tie and mis-saturate.
-    pos_mag = table[: int(sign_byte)].astype(np.float64)
-    order = np.argsort(pos_mag)
-    sorted_mag = pos_mag[order]
-    sorted_byte = order.astype(np.uint8)
-
-    xf = np.asarray(x, dtype=np.float32)
-    if not (xf.flags["C_CONTIGUOUS"] or xf.flags["F_CONTIGUOUS"]):
-        xf = np.ascontiguousarray(xf)
-    ax = np.abs(xf).astype(np.float64)
-    # Both neighbours come from the raw insertion point: raw==size saturates to
-    # the top magnitude (lo==hi), raw==0 pins to zero, otherwise compare the two.
-    raw = np.searchsorted(sorted_mag, ax)
-    hi = np.clip(raw, 0, sorted_mag.size - 1)
-    lo = np.clip(raw - 1, 0, sorted_mag.size - 1)
-    pick_lo = np.abs(sorted_mag[lo] - ax) <= np.abs(sorted_mag[hi] - ax)
-    chosen = np.where(pick_lo, lo, hi)
-    out = sorted_byte[chosen]
-
-    # Apply sign, but never the 0x80 (-0 == NaN) slot: zeros stay +0.
-    is_zero = sorted_mag[chosen] == 0
-    out = np.where((xf < 0) & ~is_zero, out | sign_byte, out)
-    out = np.where(np.isnan(xf), sign_byte, out)  # NaN inputs -> NaN byte
-    # np.where collapses memory order; restore the operand's contiguity.
-    out = out.astype(np.uint8)
-    return np.asfortranarray(out) if xf.flags["F_CONTIGUOUS"] else np.ascontiguousarray(out)
+    u32 = np.ascontiguousarray(x, dtype=np.float32).view(np.uint32)
+    # round-to-nearest-even: add (lsb-of-kept-bits + 0x7FFF) before truncating
+    rounding = ((u32 >> 16) & 1) + np.uint32(0x7FFF)
+    return ((u32 + rounding) >> 16).astype(np.uint16)
 
 
-def _fp32_to_fp8_u8(x: np.ndarray) -> np.ndarray:
-    """Encode fp32 -> fp8 E4M3 (FNUZ) bit pattern in a uint8 array."""
-    return _fnuz_encode(x, exp_bits=4, mant_bits=3)
+def _bf16_u16_to_fp32(u16: np.ndarray) -> np.ndarray:
+    """Decode a uint16 bf16 bit pattern back to fp32 (low 16 mantissa bits zero)."""
+    return (u16.astype(np.uint32) << 16).view(np.float32)
 
 
-def _fp8_u8_to_fp32(u8: np.ndarray) -> np.ndarray:
-    """Decode an fp8 E4M3 (FNUZ) bit pattern back to fp32."""
-    return _fnuz_decode_table(4, 3)[u8.astype(np.intp)]
+def _dtype_from_kernel_name(name: str) -> str:
+    """Extract the dtype token from a kernel name like ``gemm_<dtype>_<layout>_...``."""
+    parts = name.split("_")
+    return parts[1] if len(parts) > 1 else "fp16"
 
 
-def _fp32_to_bf8_u8(x: np.ndarray) -> np.ndarray:
-    """Encode fp32 -> bf8 E5M2 (FNUZ) bit pattern in a uint8 array."""
-    return _fnuz_encode(x, exp_bits=5, mant_bits=2)
+def _layout_from_kernel_name(name: str) -> str:
+    """Extract the 3-char layout token (e.g. 'rcr') from a kernel name.
 
-
-def _bf8_u8_to_fp32(u8: np.ndarray) -> np.ndarray:
-    """Decode a bf8 E5M2 (FNUZ) bit pattern back to fp32."""
-    return _fnuz_decode_table(5, 2)[u8.astype(np.intp)]
-
-
-# Output (C) element dtype for an A/B element dtype, mirroring the codegen's
-# CommonTypeMappings.get_output_dtype: fp8/bf8 accumulate into fp16, int8 into
-# int32, everything else stores in its own dtype.
-_OUTPUT_DTYPE = {"fp8": "fp16", "bf8": "fp16", "int8": "int32"}
-
-
-def _output_dtype(dtype: str) -> str:
-    return _OUTPUT_DTYPE.get(dtype, dtype)
-
-
-# numpy carrier dtype for each output (C) element type. fp8/bf8 -> fp16 store,
-# int8 -> int32 accumulate, bf16 carried as raw uint16 bits.
-_C_NP = {"fp16": np.float16, "bf16": np.uint16, "int32": np.int32}
-
-
-def _detect_gpu_arch() -> Optional[str]:
-    """Best-effort detection of the active GPU's gcnArchName (e.g. 'gfx942').
-
-    Parses ``rocminfo`` for the first ``gfx*`` Name line. Returns ``None`` if it
-    cannot be determined; callers treat that as "cannot verify arch" rather than
-    a hard failure for non-fp8 dtypes.
+    Name format is ``gemm_<dtype>_<layout>_...``; each char is 'r' (row-major)
+    or 'c' (column-major) for operands A, B, C respectively.
     """
-    import re
-    import subprocess
-
-    try:
-        out = subprocess.run(
-            ["rocminfo"], capture_output=True, text=True, timeout=30
-        ).stdout
-    except Exception:
-        return None
-    m = re.search(r"^\s*Name:\s*(gfx[0-9a-fA-F]+)\s*$", out, re.MULTILINE)
-    return m.group(1) if m else None
+    parts = name.split("_")
+    if len(parts) > 2 and len(parts[2]) == 3 and set(parts[2]) <= {"r", "c"}:
+        return parts[2]
+    return "rcr"
 
 
 class GpuGemmRunner:
@@ -540,101 +442,54 @@ class GpuGemmRunner:
             raise RuntimeError(f"Failed to initialize dispatcher .so: {lib_path}")
         names = self.lib.kernel_names
         self._kernel_name = names[0] if names else "unknown"
-        # dtype and layout are encoded in the kernel name: gemm_<dtype>_<layout>_...
-        # layout is the 3-char A/B/C major code (e.g. 'rcr'). Nothing layout- or
-        # dtype-specific is hardcoded -- both are read off the compiled kernel.
-        parts = self._kernel_name.split("_")
-        self._dtype = parts[1] if len(parts) > 1 else "fp16"
-        lay = parts[2] if len(parts) > 2 and len(parts[2]) == 3 else "rcr"
-        self._layout = lay if set(lay) <= {"r", "c"} else "rcr"
 
     @property
     def kernel_name(self) -> str:
         return self._kernel_name
 
-    @staticmethod
-    def _bf16_encode(x: np.ndarray) -> np.ndarray:
-        """float -> bfloat16 bits (uint16), round-to-nearest-even, PRESERVING the
-        input's memory order (C or F) so column-major operands stay column-major.
-        ENCODE need only be nearest-representable; DECODE must be bit-exact to
-        device bf16_t so the numpy reference multiplies what the GPU does."""
-        f = np.asarray(x, dtype=np.float32)
-        if not (f.flags["C_CONTIGUOUS"] or f.flags["F_CONTIGUOUS"]):
-            f = np.ascontiguousarray(f)
-        u = f.view(np.uint32)
-        rounded = (u + 0x7FFF + ((u >> 16) & 1)) >> 16
-        return rounded.astype(np.uint16)
-
-    @staticmethod
-    def _bf16_decode(u16: np.ndarray) -> np.ndarray:
-        return (u16.astype(np.uint32) << 16).view(np.float32)
-
-    # fp8/bf8 codecs are bit-exact to the device fp8_t/bf8_t (FNUZ on gfx942);
-    # re-exposed as static methods so references (smoke test, run_one) can build
-    # decode(encode(x)) quantized inputs without reaching into module functions.
-    _fp8_encode = staticmethod(_fp32_to_fp8_u8)
-    _fp8_decode = staticmethod(_fp8_u8_to_fp32)
-    _bf8_encode = staticmethod(_fp32_to_bf8_u8)
-    _bf8_decode = staticmethod(_bf8_u8_to_fp32)
-
-    def _check_arch_for_dtype(self) -> None:
-        """fp8/bf8 use the gfx942 FNUZ format. gfx950/MI350 uses OCP fp8, a
-        different bit layout, so refuse rather than silently mis-decode."""
-        if self._dtype not in ("fp8", "bf8"):
-            return
-        arch = _detect_gpu_arch()
-        if arch is not None and arch != "gfx942":
-            raise RuntimeError(
-                f"fp8/bf8 bridge codec is FNUZ (gfx942/MI300) only; detected "
-                f"GPU arch {arch!r}. gfx950/MI350 uses OCP fp8 (different bit "
-                f"layout) -- an OCP codec is required for that arch."
-            )
-
-    def _to_buf(self, X: np.ndarray, major: str) -> np.ndarray:
-        """Lay out an operand in the order its layout implies: RowMajor ->
-        C-contiguous, ColumnMajor -> F-contiguous. The .so reads a flat buffer
-        with the matching stride, so the raw byte order is what matters. The
-        encode helpers (bf16/fp8/bf8) preserve that contiguity; int8/fp16 keep
-        the requested order via astype(order='K')."""
-        arr = np.ascontiguousarray(X) if major == "r" else np.asfortranarray(X)
-        if self._dtype == "bf16":
-            return self._bf16_encode(arr)
-        if self._dtype == "fp8":
-            return _fp32_to_fp8_u8(arr)
-        if self._dtype == "bf8":
-            return _fp32_to_bf8_u8(arr)
-        if self._dtype == "int8":
-            return arr.astype(np.int8, order="K")
-        return arr.astype(np.float16, order="K")
-
     def run(
         self, A: np.ndarray, B: np.ndarray, problem: GemmProblem
     ) -> GemmResult:
         M, N, K = problem.M, problem.N, problem.K
-        self._check_arch_for_dtype()
 
-        # Arrange A (MxK), B (KxN), C (MxN) per the kernel's actual layout. The
-        # ctypes ABI is void*+sizeof, so each dtype just needs the right bit
-        # pattern: bf16 -> uint16, fp8/bf8 -> uint8, int8 -> int8, fp16 -> fp16.
-        la, lb, lc = self._layout[0], self._layout[1], self._layout[2]
-        A_h = self._to_buf(A, la)
-        B_h = self._to_buf(B, lb)
+        # Caller passes logical A (MxK) and B (KxN) row-major. The compiled
+        # kernel dictates both the element dtype and the memory layout of each
+        # operand (encoded in its name, e.g. gemm_bf16_rcr_...). The C ABI sizes
+        # its device buffers from sizeof(ADataType) and the kernel computes
+        # strides from its compiled layout + M,N,K -- so the host buffers must
+        # be laid out byte-for-byte in the order the kernel expects.
+        #
+        # For a 'c' (column-major) operand we transpose so the contiguous host
+        # buffer's flat memory matches column-major order:
+        #   col-major A (MxK)  <=>  ascontiguousarray(A.T)  (KxM row-major)
+        # Likewise column-major C (MxN) lands in memory as NxM row-major, so we
+        # allocate (N,M) and transpose the result back to logical MxN.
+        dtype = _dtype_from_kernel_name(self._kernel_name)
+        la, lb, lc = _layout_from_kernel_name(self._kernel_name)
 
-        # The C buffer's element size must equal sizeof(CDataType): fp8/bf8
-        # accumulate into fp16, int8 into int32, otherwise the input dtype (bf16
-        # carried as raw uint16 bits).
-        out_dtype = _output_dtype(self._dtype)
-        cdt = _C_NP.get(out_dtype, np.float16)
-        C_h = np.zeros((M, N), dtype=cdt, order=("C" if lc == "r" else "F"))
+        A_lay = A if la == "r" else A.T
+        B_lay = B if lb == "r" else B.T
+        C_shape = (M, N) if lc == "r" else (N, M)
+
+        if dtype == "bf16":
+            # _fp32_to_bf16_u16 already forces a contiguous float32 buffer, so
+            # an outer ascontiguousarray here would only add a redundant copy.
+            A_h = _fp32_to_bf16_u16(A_lay)
+            B_h = _fp32_to_bf16_u16(B_lay)
+            C_h = np.zeros(C_shape, dtype=np.uint16)
+        else:  # fp16 (default)
+            A_h = np.ascontiguousarray(A_lay, dtype=np.float16)
+            B_h = np.ascontiguousarray(B_lay, dtype=np.float16)
+            C_h = np.zeros(C_shape, dtype=np.float16)
 
         status, time_ms = self.lib.run(A_h, B_h, C_h, M, N, K)
 
-        # Decode the output to a comparable numeric array. fp16/fp8/bf8 store fp16
-        # (already comparable); int8 stores int32; only bf16 needs bit-decode.
-        out = self._bf16_decode(C_h) if out_dtype == "bf16" else C_h
+        C_dec = _bf16_u16_to_fp32(C_h) if dtype == "bf16" else C_h
+        C_out = C_dec if lc == "r" else C_dec.T
+
         tflops = (problem.flops / (time_ms * 1e-3)) / 1e12 if time_ms > 0 else 0.0
         return GemmResult(
-            output=out,
+            output=C_out,
             time_ms=time_ms,
             status=status,
             tflops=tflops,
@@ -645,6 +500,79 @@ class GpuGemmRunner:
 # ============================================================================
 # Build API: codegen + hipcc -> .so paths (no GPU)
 # ============================================================================
+
+# AMDGPU codegen flags Tile Engine passes to hipcc for GEMM kernels. These MUST
+# match, flag-for-flag, the set the Tile Engine gemm_universal benchmark TU is
+# compiled with (projects/composablekernel/CMakeLists.txt) -- they steer inlining
+# and register allocation, and because persistent kernels size their grid by
+# occupancy, any mismatch produces large perf gaps vs Tile Engine and makes the
+# parity comparison no longer apples-to-apples.
+#
+# Tile Engine's actual GEMM benchmark flags (verified from its compile_commands):
+#     -fno-offload-uniform-block
+#     -mllvm --lsr-drop-solution=1
+#     -mllvm -enable-post-misched=0
+#     -mllvm -amdgpu-early-inline-all=true
+#     -mllvm -amdgpu-function-calls=false
+#     -mllvm -amdgpu-coerce-illegal-types=1   (CMake adds this only when the
+#                                              compiler accepts it; see below)
+# NOTE: -enable-noalias-to-md-conversion=0 is NOT a Tile Engine GEMM flag (it only
+# appears in the standalone CK examples/tests), so it deliberately is NOT here.
+_TILE_ENGINE_CODEGEN_FLAGS = (
+    "-mllvm", "--lsr-drop-solution=1",
+    "-mllvm", "-enable-post-misched=0",
+    "-mllvm", "-amdgpu-early-inline-all=true",
+    "-mllvm", "-amdgpu-function-calls=false",
+    "-fno-offload-uniform-block",
+)
+
+# Flags Tile Engine's CMake only adds when ``check_cxx_compiler_flag`` passes
+# (newer -mllvm options that some clang builds reject). We mirror that probe so
+# the bridge stays matched to Tile Engine on every toolchain: the flag is present
+# exactly where TE would have it, and absent where TE's CMake would also skip it.
+_PROBED_CODEGEN_FLAGS = (
+    ("-mllvm", "-amdgpu-coerce-illegal-types=1"),
+)
+
+# The single hipcc used for BOTH the flag-acceptance probe and the actual
+# compile/link. Pinned to match Old-TE, which builds via CMake's
+# CMAKE_CXX_COMPILER (== /opt/rocm/bin/hipcc in CK CI) and never reads $HIPCC;
+# ctypes_utils uses the same path. Keeping probe == compiler guarantees the
+# -mllvm flag decision reflects the compiler that actually builds the kernel.
+_HIPCC = "/opt/rocm/bin/hipcc"
+
+
+def _resolve_hipcc() -> str:
+    return _HIPCC
+
+
+@functools.lru_cache(maxsize=None)
+def _hipcc_accepts(flag_tuple: Tuple[str, ...]) -> bool:
+    """Mirror CMake check_cxx_compiler_flag: does hipcc compile a trivial TU with
+    these flags? Cached so the probe runs at most once per distinct flag set."""
+    hipcc = _resolve_hipcc()
+    try:
+        with tempfile.TemporaryDirectory() as d:
+            src = Path(d) / "probe.cpp"
+            src.write_text("int main(){}\n")
+            r = subprocess.run(
+                [hipcc, *flag_tuple, "-c", str(src), "-o", str(Path(d) / "probe.o")],
+                capture_output=True, timeout=120,
+            )
+            return r.returncode == 0
+    except Exception:
+        return False
+
+
+@functools.lru_cache(maxsize=1)
+def _tile_engine_codegen_flags() -> Tuple[str, ...]:
+    """Tile Engine's GEMM codegen flags plus any probe-gated flags the compiler
+    accepts -- the exact backend flag set the TE benchmark is built with."""
+    flags = list(_TILE_ENGINE_CODEGEN_FLAGS)
+    for pair in _PROBED_CODEGEN_FLAGS:
+        if _hipcc_accepts(pair):
+            flags = list(pair) + flags
+    return tuple(flags)
 
 
 def _ctypes_source_name(variant: str) -> str:
@@ -669,9 +597,7 @@ def _build_compile_jobs(
     ck_root = root.parent
     build_dir = _cu.get_build_dir()
     output_dir = _cu.get_generated_kernels_dir()
-    ctypes_source = (
-        root / "bindings" / "ctypes" / _ctypes_source_name(config.variant)
-    )
+    ctypes_source = root / "bindings" / "ctypes" / _ctypes_source_name(config.variant)
     static_lib = build_dir / "libck_tile_dispatcher.a"
 
     lib_path = build_dir / "examples" / f"lib{config.name}.so"
@@ -680,17 +606,11 @@ def _build_compile_jobs(
     # directory, so ensure it exists before hipcc writes the object/.so here.
     lib_path.parent.mkdir(parents=True, exist_ok=True)
 
-    # Per-variant compile flags. Stream-K must match Tile Engine's gemm_streamk
-    # build EXACTLY for a fair A/B. Ground truth is a TE streamk build's
-    # compile_commands.json (the -mllvm flags come from the composablekernel
-    # project-root add_compile_options, applied globally to the TE benchmark, NOT
-    # the per-target options): -std=c++20 -fno-offload-uniform-block
-    # -mllvm --lsr-drop-solution=1 -mllvm -enable-post-misched=0
-    # -mllvm -amdgpu-early-inline-all=true -mllvm -amdgpu-function-calls=false
-    # --offload-compress. Note -enable-post-misched=0 is applied UNCONDITIONALLY by
-    # TE for streamk (not persistent-gated like the gemm_universal bridge). TE
-    # streamk does NOT use -enable-noalias-to-md-conversion=0. The non-streamk path
-    # keeps its existing flags unchanged (that is a #8479 concern).
+    # Per-variant AMDGPU codegen flags. The regular path matches Tile Engine's
+    # gemm_universal build via _tile_engine_codegen_flags(). Stream-K must instead
+    # match TE's gemm_streamk build EXACTLY for a fair A/B: -enable-post-misched=0
+    # is applied unconditionally (not persistent-gated) and it does NOT use
+    # -enable-noalias-to-md-conversion=0.
     is_streamk = getattr(config, "variant", "") == "stream_k"
     variant_flags = (
         [
@@ -703,10 +623,11 @@ def _build_compile_jobs(
             "--offload-compress",
         ]
         if is_streamk
-        else ["-mllvm", "-enable-noalias-to-md-conversion=0"]
+        else list(_tile_engine_codegen_flags())
     )
+
     compile_cmd = [
-        "/opt/rocm/bin/hipcc",
+        _resolve_hipcc(),
         "-c",
         "-fPIC",
         "-O3",
@@ -719,6 +640,12 @@ def _build_compile_jobs(
         "-D__HIP_PLATFORM_AMD__",
         f"--offload-arch={config.gfx_arch}",
         f'-DGFX_ARCH="{config.gfx_arch}"',
+        # Match Tile Engine's AMDGPU codegen flags exactly (see variant_flags /
+        # _tile_engine_codegen_flags). Without them the kernel is compiled with
+        # different inlining/register allocation, which changes occupancy;
+        # persistent kernels size their grid by occupancy
+        # (UniversalGemmKernel::MaxOccupancyGridSize = #CUs x occupancy), so a
+        # mismatch shows up as large perf gaps vs Tile Engine on persistent tiles.
         *variant_flags,
         "-Wno-undefined-func-template",
         "-Wno-float-equal",
@@ -726,17 +653,16 @@ def _build_compile_jobs(
         "-o",
         str(obj_file),
     ]
-    # The Stream-K ctypes lib launches the force-included kernel directly and does
-    # NOT reference any registry/dispatcher symbols, so its .so does not need the
-    # dispatcher static lib. Skipping it removes the libck_tile_dispatcher.a build
-    # dependency for the Stream-K bridge. The regular path still links it.
     link_cmd = [
-        "/opt/rocm/bin/hipcc",
+        _resolve_hipcc(),
         "-shared",
         "-fPIC",
         f"--offload-arch={config.gfx_arch}",
         "--hip-link",
         str(obj_file),
+        # The Stream-K ctypes lib launches the force-included kernel directly and
+        # references no registry/dispatcher symbols, so its .so does not need the
+        # dispatcher static lib. The regular path still links it.
         *([] if is_streamk else [str(static_lib)]),
         "-o",
         str(lib_path),
@@ -906,6 +832,10 @@ def _expand_values(entry: Optional[Dict[str, Any]], default: List[Any]) -> List[
     return list(entry.get("values", default))
 
 
+def _is_power_of_two(x: int) -> bool:
+    return x > 0 and (x & (x - 1)) == 0
+
+
 def expand_sweep(
     config_path: str,
     arch: str,
@@ -921,7 +851,8 @@ def expand_sweep(
     one GemmKernelConfig. Invalid combinations are dropped via the dispatcher's
     own validator, and duplicates (by .name) are collapsed.
 
-    For Phase 1 the signature is fixed to fp16 / rcr.
+    The signature is controlled by the `dtype` and `layout` arguments (defaults
+    to fp16 / rcr).
     """
     with open(config_path) as f:
         cfg = json.load(f)
@@ -976,7 +907,7 @@ def expand_sweep(
         pn,
         pk,
         persist,
-        redux,
+        red,
     ) in itertools.product(
         tile_ms,
         tile_ns,
@@ -1021,13 +952,31 @@ def expand_sweep(
             persistent=bool(persist),
             gfx_arch=arch,
             variant=variant,
-            reduction_strategy=redux,
+            reduction_strategy=red,
         )
         if c.name in seen:
             continue
         val = _cu.validate_kernel_config(c.to_ctypes_config())
         if not val.is_valid:
             continue
+        # Tile/CShuffle correctness gate (mirrors unified_gemm_codegen's
+        # TileConfig.is_valid + the power-of-two repeat rule; the ctypes
+        # validate_kernel_config above does NOT enforce either). A block tile must
+        # split evenly across its waves -- tile % (wave * warp_tile) == 0 -- and
+        # the CShuffle epilogue stores the accumulator through LDS in power-of-two
+        # MRepeat/NRepeat chunks, so the per-wave repeat must be a power of two.
+        # Tiles that violate either still compile but produce numerically WRONG
+        # results at runtime. Observed on MI350 for tile_m=192 (MRepeat=3) and
+        # tile_n=192 (e.g. 64x192x64_1x4x1, 192 not divisible by 4*32) -- both
+        # verified incorrect on the bridge and Tile Engine. Power-of-two tiles
+        # (64/128/256) are unaffected.
+        m_div = wm * wtm
+        n_div = wn * wtn
+        if m_div <= 0 or n_div <= 0 or tm % m_div != 0 or tn % n_div != 0:
+            continue
+        if epi == "cshuffle":
+            if not _is_power_of_two(tm // m_div) or not _is_power_of_two(tn // n_div):
+                continue
         seen.add(c.name)
         configs.append(c)
 

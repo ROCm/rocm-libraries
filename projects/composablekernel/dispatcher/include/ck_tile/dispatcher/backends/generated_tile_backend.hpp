@@ -75,14 +75,14 @@ class GeneratedTileKernelInstance : public KernelInstance
         constexpr int tile_k = SelectedKernel::TileK;
 
         const auto is_row = [](LayoutTag l) { return l == LayoutTag::RowMajor; };
-        const bool row_a = is_row(key_.signature.layout_a);
-        const bool row_b = is_row(key_.signature.layout_b);
-        const bool row_c = is_row(key_.signature.layout_c);
+        const bool row_a  = is_row(key_.signature.layout_a);
+        const bool row_b  = is_row(key_.signature.layout_b);
+        const bool row_c  = is_row(key_.signature.layout_c);
 
         // Which problem dimensions are actually constrained for this layout combo.
-        const bool require_m = (!row_a) || (!row_c);          // ColMajor A or C gate M
-        const bool require_n = row_b || row_c;                // RowMajor B or C gate N
-        const bool require_k = row_a || (!row_b);             // RowMajor A or ColMajor B gate K
+        const bool require_m = (!row_a) || (!row_c); // ColMajor A or C gate M
+        const bool require_n = row_b || row_c;       // RowMajor B or C gate N
+        const bool require_k = row_a || (!row_b);    // RowMajor A or ColMajor B gate K
 
         const std::int64_t k_grain =
             static_cast<std::int64_t>(tile_k) * (problem.k_batch > 0 ? problem.k_batch : 1);
@@ -123,20 +123,6 @@ class GeneratedTileKernelInstance : public KernelInstance
                                    problem.N        // stride_E/C (row-major C: stride = N)
         );
 
-        // Benchmark parameters. Defaults mirror old Tile Engine's
-        // gemm_common.hpp (warmup=50, repeat=100, flush_cache=true,
-        // rotating_count=1000), and a generous warmup keeps the GPU clock
-        // ramped. NOTE: matching these knobs does NOT by itself make
-        // bridge-vs-old-TE numbers comparable -- the byte-identical kernel
-        // measures ~18-20% faster here than through old TE's *standalone
-        // benchmark binary* at e.g. 1024^3/compv4, purely because that
-        // separate process runs the kernel at a lower sustained SCLK (+ more
-        // memory-stall cycles), not because of any bench knob, compiler, or
-        // kernel difference (rocprof-confirmed). For an honest A/B, measure
-        // BOTH kernels through the SAME harness (build the old-TE kernel into a
-        // .so and run it via run_one_gemm_kernel.py) -- the gap then collapses
-        // to ~1%. Each knob is env-overridable so a caller can match another
-        // harness without recompiling.
         const bool bench = this->benchmarking_;
         ck_tile::stream_config stream_cfg;
         stream_cfg.stream_id_      = reinterpret_cast<hipStream_t>(stream);

@@ -55,7 +55,7 @@ static auto GetDirectSolvers()
                                            miopen::solver::conv::ConvAsm7x7c3h224w224k64u2v2p3q3f1,
                                            miopen::solver::conv::ConvAsm5x10u2v2b1,
                                            miopen::solver::conv::ConvHipDirectFwd11x11,
-                                           miopen::solver::conv::ConvOclDirectFwd,
+                                           miopen::solver::conv::ConvHipDirectFwd,
                                            miopen::solver::conv::ConvDirectNaiveConvFwd,
                                            miopen::solver::conv::ConvDirectNaiveConvBwd,
                                            miopen::solver::conv::ConvDirectNaiveConvWrw,
@@ -87,12 +87,12 @@ static auto GetImplicitGemmSolvers()
         miopen::solver::conv::ConvAsmImplicitGemmGTCDynamicFwdXdlopsNHWC,
         miopen::solver::conv::ConvAsmImplicitGemmGTCDynamicBwdXdlopsNHWC,
         miopen::solver::conv::ConvCkIgemmFwdV6r1DlopsNchw,
-#if MIOPEN_BACKEND_HIP && MIOPEN_USE_COMPOSABLEKERNEL
+#if MIOPEN_BACKEND_HIP
         miopen::solver::conv::ConvHipImplicitGemmGroupFwdXdlops,
         miopen::solver::conv::ConvHipImplicitGemmGroupBwdXdlops,
         miopen::solver::conv::ConvHipImplicitGemm3DGroupFwdXdlops,
         miopen::solver::conv::ConvHipImplicitGemm3DGroupBwdXdlops,
-#endif // MIOPEN_BACKEND_HIP && MIOPEN_USE_COMPOSABLEKERNEL
+#endif // MIOPEN_BACKEND_HIP
         miopen::solver::conv::ConvAsmImplicitGemmGTCDynamicFwdDlopsNCHWC>{};
 }
 
@@ -121,7 +121,6 @@ static auto GetWindogradSolvers()
         miopen::solver::conv::TransposedConvBinWinogradRxS,
         miopen::solver::conv::TransposedConvBinWinogradRxSf2x3g1,
         miopen::solver::conv::TransposedConvWinoFuryRxS<2, 3>,
-        miopen::solver::conv::TransposedConvWinoRageRxS<2, 3>,
         miopen::solver::conv::TransposedConvMPBidirectWinograd<2, 3>,
         miopen::solver::conv::TransposedConvMPBidirectWinograd<3, 3>,
         miopen::solver::conv::TransposedConvMPBidirectWinograd<4, 3>,
@@ -147,10 +146,10 @@ static auto GetImplicitGemmWrWSolvers()
         miopen::solver::conv::ConvMlirIgemmWrWXdlops,
         miopen::solver::conv::ConvMlirIgemmWrW,
         miopen::solver::conv::ConvAsmImplicitGemmGTCDynamicWrwXdlops,
-#if MIOPEN_BACKEND_HIP && MIOPEN_USE_COMPOSABLEKERNEL
+#if MIOPEN_BACKEND_HIP
         miopen::solver::conv::ConvHipImplicitGemmGroupWrwXdlops,
         miopen::solver::conv::ConvHipImplicitGemm3DGroupWrwXdlops,
-#endif // MIOPEN_BACKEND_HIP && MIOPEN_USE_COMPOSABLEKERNEL
+#endif // MIOPEN_BACKEND_HIP
         miopen::solver::conv::ConvAsmImplicitGemmGTCDynamicWrwXdlopsNHWC>{};
 }
 
@@ -181,7 +180,6 @@ static auto GetWindogradWrWSolvers()
         miopen::solver::conv::TransposedConvBinWinogradRxS,
         miopen::solver::conv::TransposedConvBinWinogradRxSf2x3g1,
         miopen::solver::conv::TransposedConvWinoFuryRxS<2, 3>,
-        miopen::solver::conv::TransposedConvWinoRageRxS<2, 3>,
         miopen::solver::conv::TransposedConvWinograd3x3MultipassWrW<3, 2>,
         miopen::solver::conv::TransposedConvWinograd3x3MultipassWrW<3, 3>,
         miopen::solver::conv::TransposedConvWinograd3x3MultipassWrW<3, 4>,
@@ -352,6 +350,23 @@ AllFFTForwardBackwardDataWorkspaceSize(const miopen::ExecutionContext& ctx,
                                        const miopen::conv::ProblemDescription& problem)
 {
     return GetFFTSolvers().GetWorkspaceSizes(ctx, problem);
+}
+
+std::vector<std::string> GetAllFindSolverDbIds()
+{
+    std::vector<std::string> ids;
+    const auto collect = [&](auto container) {
+        container.Foreach([&](auto solver) { ids.push_back(solver.SolverDbId()); });
+    };
+    collect(GetGemmSolvers());
+    collect(GetDirectSolvers());
+    collect(GetImplicitGemmSolvers());
+    collect(GetWindogradSolvers());
+    collect(GetImplicitGemmWrWSolvers());
+    collect(GetWindogradWrWSolvers());
+    collect(GetBwdWrW2DSolvers());
+    collect(GetFFTSolvers());
+    return ids;
 }
 
 void mlo_construct_activ_lrn_pooling_common::setupFloats()

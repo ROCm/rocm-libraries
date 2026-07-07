@@ -454,7 +454,7 @@ From here, follow the instructions in the [Quick Start Guide](#quick-start-guide
 
 * **Docker GPU access issues**
    - Ensure ROCm is installed on the host system
-   - Verify GPU is visible: `rocm-smi` or `rocminfo`
+   - Verify GPU is visible: `amd-smi` or `rocminfo`
    - Check user is in `video` and `render` groups:
      ```bash
      sudo usermod -a -G video,render $USER
