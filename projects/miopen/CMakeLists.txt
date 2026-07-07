@@ -285,7 +285,16 @@ if( DEFINED MIOPEN_OVERRIDE_HIP_VERSION_PATCH )
     message(STATUS "MIOPEN_hip_VERSION_PATCH overriden with ${MIOPEN_OVERRIDE_HIP_VERSION_PATCH}")
 endif()
 
-# Depend on Composable Kernels
+# Composable Kernel (CK) is decoupled from the MIOpen *host* library at build time: the host never
+# links CK device code -- it dlopens per-arch MIOpenCKGroupedConv_<arch>.so plugins at runtime
+# (CkImplLibLoader) and degrades gracefully when a plugin is absent. Host-side CK solver
+# registration and the dlopen prefetch are compiled UNCONDITIONALLY (no MIOPEN_USE_COMPOSABLEKERNEL
+# guards remain in mlo_dir_conv.cpp / handlehip.cpp), so the grouped-conv XDLOPS solvers are always
+# present in the device-neutral libMIOpen.so regardless of this flag. That is what prevents a
+# CK-less host from silently disabling fast convolution on every arch (ROCM-27359) -- it is enforced
+# in code, not by forcing this flag on. This flag now only gates the per-arch CK plugin build
+# (src/ck_impl, itself arch-gated) and the CK-header-dependent gtest; the host configures and builds
+# cleanly whether or not a CK package is found, so no per-arch build gating of this flag is needed.
 option(MIOPEN_USE_COMPOSABLEKERNEL "Enable MIOpen to use composable kernels for various operations" On)
 if(MIOPEN_BACKEND_OPENCL)
     set(MIOPEN_USE_COMPOSABLEKERNEL OFF)

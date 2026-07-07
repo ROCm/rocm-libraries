@@ -31,6 +31,13 @@ import io
 import math
 
 from rocisa.code import Module
+from .ScheduleTypes import (
+    AnnotatedSchedule,
+    AugmentedSchedule,
+    EmittedSchedule,
+    LogicalSchedule,
+    PartitionSchedule,
+)
 
 from ...Common.GlobalParameters import globalParameters
 
@@ -616,11 +623,13 @@ class LogicalScheduler:
         self.config = config
         self.tensors: List[str] = ['A', 'B'] + (['SA', 'SB'] if config.hasScale else [])
         self._completed: set = set()   # tracks which passes have run (Pass enum members)
-        self._partitions: Optional[List[List[SubIterKSlot]]] = None  # shared mutable state across passes
-        self._emitted: Optional[List[List[EmittedModule]]] = None
-        self._preloop_emitted: Optional[List[List[List[EmittedModule]]]] = None
-        self._ngll_emitted: Optional[List[List[List[EmittedModule]]]] = None
-        self._nll_emitted: Optional[List[List[List[EmittedModule]]]] = None
+        # Shared mutable state across passes. The same field holds different
+        # stage representations over time; see ScheduleTypes for stage meanings.
+        self._partitions: Optional[Union[LogicalSchedule, AnnotatedSchedule, AugmentedSchedule]] = None
+        self._emitted: Optional[EmittedSchedule] = None
+        self._preloop_emitted: Optional[EmittedSchedule] = None
+        self._ngll_emitted: Optional[EmittedSchedule] = None
+        self._nll_emitted: Optional[EmittedSchedule] = None
         # Tail-loop tile bookkeeping. Tail loop only use a subset of tiles, so we track which tileIds are
         # unused or freed for reuse within the tail loop.
         self._tail_unused_tile_ids: Dict[str, set] = {'A': set(), 'B': set(),
@@ -647,7 +656,7 @@ class LogicalScheduler:
         return {'A': (cfg._prefixM[piM], cfg._prefixM[piM + 1]),
                 'B': (cfg._prefixN[piN], cfg._prefixN[piN + 1])}
 
-    def place_LRs(self) -> List[List[SubIterKSlot]]:
+    def place_LRs(self) -> LogicalSchedule:
         """Place MFMAs and LRs based on read granularities.
 
         Returns a list of partitions, each containing a list of SubIterKSlots.
@@ -1381,7 +1390,7 @@ class LogicalScheduler:
                         partition=pi,
                         unrollId=uid))
 
-    def place_GRs(self) -> List[SubIterKSlot]:
+    def place_GRs(self) -> PartitionSchedule:
         """Place Global Reads by iterating MFMAs across partitions.
 
         Phase 1: Build ordered GR list from partition traversal respecting gr granularities.
@@ -2602,7 +2611,7 @@ class LogicalScheduler:
                 cross.append(dep)
         return same, cross
 
-    def emit(self) -> List[List[List[EmittedModule]]]:
+    def emit(self) -> EmittedSchedule:
         """Convert placements into EmittedModule chains per partition per subIterK.
 
         Returns [partition][subIterK][EmittedModule].
@@ -2759,7 +2768,7 @@ class LogicalScheduler:
             em.before = b
         return [em for em in emitted if em.moduleId not in removed_ids]
 
-    def build_ngll(self) -> List[List[List[EmittedModule]]]:
+    def build_ngll(self) -> EmittedSchedule:
         """NGLL (No Global Load Loop): mainloop without GR(n+2), GR_INC.
 
         WaitGR inflight counts are zeroed since no new GRs are in flight.
@@ -2789,7 +2798,7 @@ class LogicalScheduler:
         self._ngll_emitted = ngll
         return ngll
 
-    def build_nll(self) -> List[List[List[EmittedModule]]]:
+    def build_nll(self) -> EmittedSchedule:
         """NLL (No Load Loop): mainloop without GR, LR(n+1), GR_INC, LR_INC,
         WaitGR(n+1)+Sync. Keeps LR(n), MFMAs, WaitGR(n). WaitGR counts are
         zeroed only when no LR(n) remains in the last subIterK slot."""
@@ -3184,7 +3193,7 @@ class LogicalScheduler:
                     ))
         return result
 
-    def build_preloop(self) -> List[List[List[EmittedModule]]]:
+    def build_preloop(self) -> EmittedSchedule:
         """Build preloop: pipeline initialization sequence before mainloop.
 
         PGR=0: no preloop (mainloop only).
@@ -3293,7 +3302,7 @@ class LogicalScheduler:
             _MIN_MFMA_GAP_DS_READ_TO_WAIT_GFX1250,
         )
         from Tensile.Components.Subtile.WaitAluInsertion import (
-            insertLRSwapRawWaitAlu, setMatrixAReuse, insertLRSwapWarWaitAlu)
+            insertLRSwapRawWaitAlu, setMatrixReuse, insertLRSwapWarWaitAlu)
         from rocisa.code import Module, Label
         from rocisa.container import sgpr
         from rocisa.instruction import SCmpEQU32, SCBranchSCC0, SMovB32
@@ -3356,7 +3365,8 @@ class LogicalScheduler:
         # the final post-schedule order (no-op on other archs).
         module = insertLRSwapRawWaitAlu(module, writer, kernel)
         # gfx1250: enable WMMA matrix-A reuse on the final post-schedule order.
-        module = setMatrixAReuse(module, writer, kernel)
+        module = setMatrixReuse(module, writer, kernel, 'a')
+        module = setMatrixReuse(module, writer, kernel, 'b')
         # PGR=0 only: the unprefetched loop puts the ds_read of an LR offset
         # right before the swap that overwrites it.  PGR>=1 prefetch separates
         # them (swap hoisted ahead, dscnt drain between), so no WAR can form.
@@ -3926,7 +3936,7 @@ class LogicalScheduler:
         return tensor.ljust(2)
 
 
-    def print_lr(self, partitions: List[List[SubIterKSlot]] = None) -> str:
+    def print_lr(self, partitions: Optional[LogicalSchedule] = None) -> str:
         """Print place_LRs output in design doc format."""
         if partitions is None:
             partitions = self._partitions
@@ -4105,7 +4115,7 @@ class LogicalScheduler:
         return f"{kind} {p.tensor} @P{part}:subIterK={slot}{uid}{mt}"
 
 
-    def print_emit(self, all_partitions: List[List[List[EmittedModule]]] = None) -> str:
+    def print_emit(self, all_partitions: Optional[EmittedSchedule] = None) -> str:
         """Print emit output: EmittedModule list with before-links."""
         if all_partitions is None:
             all_partitions = self._emitted
@@ -4140,7 +4150,7 @@ class LogicalScheduler:
             return f" uid={src.tiles.subIterK_start // per_uid_k}"
         return ""
 
-    def print_emit_dep_order(self, all_partitions: List[List[List[EmittedModule]]] = None) -> str:
+    def print_emit_dep_order(self, all_partitions: Optional[EmittedSchedule] = None) -> str:
         """Print emit output as dependency paths (same decomposition as _extractPathsFromBeforeDeps)."""
         from Tensile.Components.Subtile.InstructionScheduler import extractPathsFromBeforeDeps
         if all_partitions is None:
