@@ -1,7 +1,7 @@
 {
   "meta": {
     "model": "Qwen3-30B-A3B",
-    "arch": "gfx950",
+    "arch": "gfx942",
     "dtype": "bf16",
     "num_query_heads": 32,
     "num_kv_heads": 4,
