@@ -148,6 +148,11 @@ if(HIPKERNELPROVIDER_ENABLE_ROCKE)
     # must precede src/ below, which emits bin/hip_kernel_provider/CTestTestfile.cmake.
     set(ROCKE_INSTALL_PROVIDER_CTEST_SUBDIR "hip_kernel_provider")
     set(ROCKE_INSTALL_STANDALONE_CTEST OFF)
+    # Route rocke-client test targets into hip-kernel-provider's test bucket so
+    # they appear in install_provider_ctest_files("hip_kernel_provider") output.
+    # Without this, _add_test_target_internal uses rocke-client's own PROJECT_NAME
+    # and the targets are never picked up by the parent's finalize_test_targets.
+    set(ROCKE_CLIENT_PARENT_PROJECT "${PROJECT_NAME}")
     add_subdirectory(rocke)
 else()
     message(STATUS "rocKE features disabled")
