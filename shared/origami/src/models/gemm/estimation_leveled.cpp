@@ -26,10 +26,11 @@ namespace gemm {
 namespace {
 
 // The cascade has two stages: levels 0+1 are context-free and fused in one pass
-// (feasibility / fast-reject + a compute-vs-memory proxy), pruned to
-// a small working set, which then gets the full analytical latency. (An intermediate
-// flat-cache roofline level was removed -- it pruned eventual winners for no speed
-// benefit now that split-K problems are routed to the flat path upstream.)
+// (feasibility / fast-reject + a compute-vs-memory proxy), pruned to a small working
+// set, which then gets the full analytical latency. Split-K-prone problems skip the
+// prune (see is_split_k_prone) so every candidate reaches the full-latency level.
+// (An intermediate flat-cache roofline level was removed -- it pruned eventual
+// winners for no speed benefit.)
 
 // Level-1 keep fraction: after the context-free proxy pass, keep the cheapest 1/6.
 constexpr double kL1KeepFraction = 1.0 / 6.0;
@@ -63,6 +64,22 @@ inline bool coarse_feasible(const problem_t& problem,
                             const config_t& config) {
   if (config.target == target_t::tensilelite) return true;
   return check_lds_capacity(hardware, config.mt, problem.a_dtype, problem.b_dtype);
+}
+
+// Split-K-prone detection (problem/hardware only, config-independent). The winner
+// for these shapes is decided by cross-CU K-reduction reuse that the context-free
+// coarse proxy cannot model, so it would prune the eventual StreamK winner. Uses
+// StreamK's shape criterion on a large reference tile: even a 256x256 output tiling
+// underfills the GPU (tiles < N_CU) AND K is deep enough to split (>= 64 iterations
+// of a 64-deep k-tile). For these the cascade skips its coarse prune so every
+// candidate reaches the full-latency level -- matching the flat per-config ranking
+// exactly where accuracy needs it, while the non-split-K majority still gets pruned.
+inline bool is_split_k_prone(const problem_t& problem, const hardware_t& hardware) {
+  constexpr std::size_t ref_tile = 256;
+  const std::size_t ref_tiles = math::safe_ceil_div(problem.size.m, ref_tile) *
+                                math::safe_ceil_div(problem.size.n, ref_tile) * problem.batch;
+  const std::size_t ref_k_iters = problem.size.k / 64;  // K-iters for a 64-deep k-tile
+  return ref_tiles < static_cast<std::size_t>(hardware.N_CU) && ref_k_iters >= 64;
 }
 
 // Debug-only: report the cascade level at which a config drops out. No-op unless
@@ -112,10 +129,10 @@ inline double score_compute_proxy(const problem_t& problem,
   const double      bw         = compute_mem_bw_from_occupancy(hardware, active_cus);
   const double      L_mem      = (bw > 0.0) ? (bytes_per_block / bw) : 0.0;
 
-  // Spread all K-blocks (num_output_tiles x num_iter) across the CUs. Split-K
-  // problems are routed to the flat path upstream, so the leveled cascade only sees
-  // the data-parallel (many-tile) regime, where this equals the per-tile form
-  // (work_per_cu ~= waves * num_iter).
+  // Spread all K-blocks (num_output_tiles x num_iter) across the CUs. This coarse
+  // proxy only drives the prune among data-parallel (many-tile) problems; split-K-
+  // prone shapes skip the prune entirely (see is_split_k_prone), so the proxy's
+  // spread approximation never gates their winner.
   const double      per_block      = std::max(L_compute, L_mem);
   const std::size_t total_k_blocks = num_output_tiles * num_iter;
   const std::size_t work_per_cu =
@@ -168,8 +185,15 @@ scored_configs_t score_estimation_leveled(const problem_t& problem,
   }
 
   // Prune at level 1 to the cheapest max(min_keep, 1/6) survivors (O(n) selection).
-  const std::size_t keep = std::max(
-      kInternalMinKeep, static_cast<std::size_t>(static_cast<double>(scored.size()) * kL1KeepFraction));
+  // Split-K-prone problems are the exception: their winner is set by cross-CU K
+  // reuse the coarse proxy can't model, so keep everything and let the full-latency
+  // level rank them (equivalent to the flat per-config path) rather than risk pruning
+  // the winner.
+  const std::size_t keep =
+      is_split_k_prone(problem, hardware)
+          ? scored.size()
+          : std::max(kInternalMinKeep,
+                     static_cast<std::size_t>(static_cast<double>(scored.size()) * kL1KeepFraction));
   if (scored.size() > keep) {
     std::vector<std::size_t> before_idx;  // debug-only: attribute the L1 keep-fraction drops
     if (dbg)

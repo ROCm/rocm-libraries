@@ -195,28 +195,10 @@ namespace TensileLite
                 return e != nullptr && std::strtol(e, nullptr, 0) != 0;
             }();
 
-            // Split-K problems regress under the leveled cascade: StreamK splits the
-            // K loop across CUs and the winner is decided by memory reuse, which the
-            // context-free coarse levels can't see -- so they prune it. Route those
-            // problems to the accurate flat per-config path; the fast leveled path
-            // handles the non-split-K majority.
-            //
-            // Detect "split-K-prone" with StreamK's own select_reduction criterion,
-            // evaluated on a large reference tile: a problem needs K-splitting when
-            // even a big (256x256) tile underfills the GPU (output tiles < N_CU) and K
-            // is deep enough to split (iters/tile >= 64, i.e. K >= 64*64). This is
-            // shape-based (not a raw K cutoff), so it catches split-K at moderate K
-            // too. On the workload it cuts leveled divergence to ~0.4% (routing ~21%
-            // of problems to flat) vs ~1.4% for a plain K>=10k threshold.
-            const size_t ref_tile      = 256;
-            const size_t ref_tiles     = ((m + ref_tile - 1) / ref_tile)
-                                     * ((n + ref_tile - 1) / ref_tile) * batch;
-            const size_t ref_k_iters   = k / 64;  // K-iterations for a 64-deep k-tile
-            const bool   split_k_prone = ref_tiles < analytical_hardware.N_CU && ref_k_iters >= 64;
-            const bool   use_leveled   = use_leveled_estimation && !split_k_prone;
-
+            // Split-K handling lives in Origami's leveled cascade now (it skips its
+            // coarse prune for split-K-prone shapes), so always use the leveled path.
             std::vector<origami::prediction_result_t> prediction_result;
-            if(use_leveled)
+            if(use_leveled_estimation)
             {
                 origami::ranking_phase_t phase;
                 phase.model    = origami::model_t::gemm;
