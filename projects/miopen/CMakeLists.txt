@@ -940,6 +940,7 @@ enable_cppcheck(
         ${CMAKE_CURRENT_SOURCE_DIR}/include
         ${CMAKE_CURRENT_BINARY_DIR}/include
         ${CMAKE_CURRENT_SOURCE_DIR}/src/include
+        ${CMAKE_CURRENT_SOURCE_DIR}/common_utils/include
     DEFINE
         CPPCHECK=1
         __linux__=1
