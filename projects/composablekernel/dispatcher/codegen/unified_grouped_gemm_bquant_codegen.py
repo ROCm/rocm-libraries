@@ -69,6 +69,62 @@ BQUANT_VARIANTS: Dict[str, Dict[str, str]] = {
         "ck_q": "float",
         "ck_acc": "float",
     },
+    "fp8i4": {
+        "dtype_a": "fp8",
+        "dtype_b": "pk_int4",
+        "dtype_c": "half",
+        "dtype_q": "fp8",
+        "ck_a": "ck_tile::fp8_t",
+        "ck_b": "ck_tile::pk_int4_t",
+        "ck_c": "ck_tile::half_t",
+        "ck_q": "ck_tile::fp8_t",
+        "ck_acc": "float",
+    },
+    "bf8i4": {
+        "dtype_a": "bf8",
+        "dtype_b": "pk_int4",
+        "dtype_c": "half",
+        "dtype_q": "bf8",
+        "ck_a": "ck_tile::bf8_t",
+        "ck_b": "ck_tile::pk_int4_t",
+        "ck_c": "ck_tile::half_t",
+        "ck_q": "ck_tile::bf8_t",
+        "ck_acc": "float",
+    },
+    # MX microscale variants — Q-type is e8m0 (block scale), pipeline = microscale
+    "mx_bf16bf16": {
+        "dtype_a": "bf16",
+        "dtype_b": "bf16",
+        "dtype_c": "bf16",
+        "dtype_q": "e8m0",
+        "ck_a": "ck_tile::bf16_t",
+        "ck_b": "ck_tile::bf16_t",
+        "ck_c": "ck_tile::bf16_t",
+        "ck_q": "ck_tile::e8m0_t",
+        "ck_acc": "float",
+    },
+    "mx_bf16bf8": {
+        "dtype_a": "bf16",
+        "dtype_b": "bf8",
+        "dtype_c": "bf16",
+        "dtype_q": "e8m0",
+        "ck_a": "ck_tile::bf16_t",
+        "ck_b": "ck_tile::bf8_t",
+        "ck_c": "ck_tile::bf16_t",
+        "ck_q": "ck_tile::e8m0_t",
+        "ck_acc": "float",
+    },
+    "mx_bf16fp4": {
+        "dtype_a": "bf16",
+        "dtype_b": "pk_fp4",
+        "dtype_c": "bf16",
+        "dtype_q": "e8m0",
+        "ck_a": "ck_tile::bf16_t",
+        "ck_b": "ck_tile::pk_fp4_t",
+        "ck_c": "ck_tile::bf16_t",
+        "ck_q": "ck_tile::e8m0_t",
+        "ck_acc": "float",
+    },
 }
 
 # Layout strings supported: only rcr for initial implementation
@@ -78,15 +134,21 @@ BQUANT_LAYOUT_TO_CK = {
     "c": "ck_tile::tensor_layout::gemm::ColumnMajor",
 }
 
-# Pipeline map for BQuant (compv3 for initial; preshuffle/microscale are follow-ons)
+# Pipeline map for BQuant kernels.
+# "preshuffleb"  -> WPQuantBPipelineAgBgCrV2        (preshuffle_b=true variants)
+# "microscale"   -> MicroscaleGemmPipelineAgBgCrCompV3 (MX e8m0 scale variants)
 BQUANT_PIPELINE_MAP = {
-    "compv3": "ck_tile::BQuantGemmPipelineAgBgCrCompV3",
-    # preshuffle_b -> WPQuantBPipelineAgBgCrV2  (follow-on)
-    # mx           -> MicroscaleGemmPipelineAgBgCrCompV3  (follow-on)
+    "compv3":      "ck_tile::BQuantGemmPipelineAgBgCrCompV3",
+    "preshuffleb": "ck_tile::WPQuantBPipelineAgBgCrV2",
+    "microscale":  "ck_tile::MicroscaleGemmPipelineAgBgCrCompV3",
 }
 
 BQUANT_BASE_PIPELINE_MAP = {
-    "compv3": "ck_tile::BaseGemmPipelineAgBgCrCompV3",
+    "compv3":      "ck_tile::BaseGemmPipelineAgBgCrCompV3",
+    "preshuffleb": "ck_tile::BaseWeightPreshufflePipelineAGmemBGmemCRegV2",
+    # MX BQuant (QDataType=e8m0, PreshuffleB=false) falls into the else branch in
+    # run_gemm_quant_example.inc — same base as preshuffleb.
+    "microscale":  "ck_tile::BaseWeightPreshufflePipelineAGmemBGmemCRegV2",
 }
 
 BQUANT_SCHEDULER_TO_CK = {
@@ -137,6 +199,7 @@ class BQuantKernelSpec:
     quant_group_k: int = 128
     preshuffle_b: bool = False
     preshuffle_bquant: bool = False
+    double_smem_buffer: bool = False
     pad_m: bool = False
     pad_n: bool = False
     pad_k: bool = True
@@ -202,6 +265,7 @@ class BQuantKernelHeaderGenerator:
         pad_k = str(spec.pad_k).lower()
         preshuffle_b = str(spec.preshuffle_b).lower()
         preshuffle_bquant = str(spec.preshuffle_bquant).lower()
+        double_smem_buffer = str(spec.double_smem_buffer).lower()
 
         # CShuffleEpilogue problem parameters
         # TiledMMAPermuteN is false when quant_group_n > 1 (see run_gemm_quant_example.inc)
@@ -265,7 +329,7 @@ struct {struct} {{
     static constexpr bool BPreshuffleQuant = {preshuffle_bquant};
     static constexpr bool PreshuffleB     = {preshuffle_b};
     static constexpr bool TransposeC      = false;
-    static constexpr bool DoubleSmemBuffer = false;
+    static constexpr bool DoubleSmemBuffer = {double_smem_buffer};
 
     using TileShape = ck_tile::TileGemmShape<
         ck_tile::sequence<TileM, TileN, TileK>,
@@ -394,6 +458,9 @@ def _default_config() -> dict:
         "pad_k": True,
         "block_size": 256,
         "k_block_per_cu": 1,
+        "double_smem_buffer": False,
+        "preshuffle_b": False,
+        "preshuffle_bquant": False,
     }
 
 
@@ -405,8 +472,11 @@ def _build_specs(config: dict) -> List[BQuantKernelSpec]:
     pad_m     = config.get("pad_m", False)
     pad_n     = config.get("pad_n", False)
     pad_k     = config.get("pad_k", True)
-    block_size    = config.get("block_size", 256)
-    k_block_per_cu = config.get("k_block_per_cu", 1)
+    block_size         = config.get("block_size", 256)
+    k_block_per_cu     = config.get("k_block_per_cu", 1)
+    double_smem_buffer = config.get("double_smem_buffer", False)
+    preshuffle_b       = config.get("preshuffle_b", False)
+    preshuffle_bquant  = config.get("preshuffle_bquant", False)
 
     for variant_key, layout, tile_dict, qg in itertools.product(
         config.get("variant_keys", ["fp8"]),
@@ -446,6 +516,9 @@ def _build_specs(config: dict) -> List[BQuantKernelSpec]:
             quant_group_m=qg.get("quant_group_m", 1),
             quant_group_n=qg.get("quant_group_n", 1),
             quant_group_k=qg.get("quant_group_k", 128),
+            preshuffle_b=preshuffle_b,
+            preshuffle_bquant=preshuffle_bquant,
+            double_smem_buffer=double_smem_buffer,
             pad_m=pad_m,
             pad_n=pad_n,
             pad_k=pad_k,

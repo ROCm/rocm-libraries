@@ -93,8 +93,10 @@ class BQuantKernelConfig:
     quant_group_n: int = 1
     quant_group_k: int = 128
 
-    preshuffle_b: bool     = False
-    preshuffle_bquant: bool = False
+    preshuffle_b: bool      = False
+    preshuffle_bquant: bool  = False
+    double_smem_buffer: bool = False
+    k_block_per_cu: int      = 1
 
     gfx_arch: str = _DEFAULT_GFX_ARCH
 
@@ -143,6 +145,10 @@ class BQuantKernelConfig:
                 "quant_group_n": self.quant_group_n,
                 "quant_group_k": self.quant_group_k,
             }],
+            "preshuffle_b": self.preshuffle_b,
+            "preshuffle_bquant": self.preshuffle_bquant,
+            "double_smem_buffer": self.double_smem_buffer,
+            "k_block_per_cu": self.k_block_per_cu,
         }
 
 
@@ -641,6 +647,380 @@ def default_bf8_config(
         tile_m=16, tile_n=64, tile_k=256,
         warp_m=1, warp_n=4, warp_k=1,
         warp_tile_m=16, warp_tile_n=16, warp_tile_k=16,
+        quant_group_m=1,
+        quant_group_n=quant_group_n,
+        quant_group_k=quant_group_k,
+        gfx_arch=gfx_arch,
+    )
+
+
+def default_fp8i4_config(
+    quant_group_k: int = 128,
+    quant_group_n: int = 1,
+    gfx_arch: str = _DEFAULT_GFX_ARCH,
+) -> BQuantKernelConfig:
+    """Return the default fp8i4 BQuant config (A=fp8, B=pk_int4, Q=fp8; tile = 16x64x256)."""
+    return BQuantKernelConfig(
+        variant_key="fp8i4",
+        layout="rcr",
+        pipeline="compv3",
+        epilogue="cshuffle",
+        scheduler="intrawave",
+        tile_m=16, tile_n=64, tile_k=256,
+        warp_m=1, warp_n=4, warp_k=1,
+        warp_tile_m=16, warp_tile_n=16, warp_tile_k=16,
+        quant_group_m=1,
+        quant_group_n=quant_group_n,
+        quant_group_k=quant_group_k,
+        gfx_arch=gfx_arch,
+    )
+
+
+def default_bf8i4_config(
+    quant_group_k: int = 128,
+    quant_group_n: int = 1,
+    gfx_arch: str = _DEFAULT_GFX_ARCH,
+) -> BQuantKernelConfig:
+    """Return the default bf8i4 BQuant config (A=bf8, B=pk_int4, Q=bf8; tile = 16x64x256)."""
+    return BQuantKernelConfig(
+        variant_key="bf8i4",
+        layout="rcr",
+        pipeline="compv3",
+        epilogue="cshuffle",
+        scheduler="intrawave",
+        tile_m=16, tile_n=64, tile_k=256,
+        warp_m=1, warp_n=4, warp_k=1,
+        warp_tile_m=16, warp_tile_n=16, warp_tile_k=16,
+        quant_group_m=1,
+        quant_group_n=quant_group_n,
+        quant_group_k=quant_group_k,
+        gfx_arch=gfx_arch,
+    )
+
+
+# =============================================================================
+# Phase 3a — preshuffle_b only (WPQuantBPipelineAgBgCrV2, prefill tile 128x128x128)
+#
+# Tile dims from GemmConfigPreshuffleB_BQuant_Prefill<PrecType>:
+#   M=128, N=128, K=128/sizeof(PrecType)
+#   Warp: 1x4x1, WarpTile: 16x16x K_warp
+#   K_warp from get_k_warp_tile<PrecType, 16, IsFlatMM=true> on gfx950:
+#     fp8/bf8  (8-bit float): K_warp = 128  → tile_k = 128
+#     pk_int4  (not 8b float): K_warp = 32   → tile_k = 128 (sizeof=0.5 → 128/0.5=256 packed)
+#   DoubleSmemBuffer=true, kBlockPerCu=2
+# =============================================================================
+
+
+def _preshuffleb_config(
+    variant_key: str,
+    warp_tile_k: int,
+    quant_group_k: int,
+    quant_group_n: int,
+    gfx_arch: str,
+) -> BQuantKernelConfig:
+    return BQuantKernelConfig(
+        variant_key=variant_key,
+        layout="rcr",
+        pipeline="preshuffleb",
+        epilogue="cshuffle",
+        scheduler="intrawave",
+        tile_m=128, tile_n=128, tile_k=128,
+        warp_m=1, warp_n=4, warp_k=1,
+        warp_tile_m=16, warp_tile_n=16, warp_tile_k=warp_tile_k,
+        quant_group_m=1,
+        quant_group_n=quant_group_n,
+        quant_group_k=quant_group_k,
+        preshuffle_b=True,
+        preshuffle_bquant=False,
+        double_smem_buffer=True,
+        k_block_per_cu=2,
+        gfx_arch=gfx_arch,
+    )
+
+
+def default_fp8_preshuffleb_config(
+    quant_group_k: int = 128,
+    quant_group_n: int = 1,
+    gfx_arch: str = _DEFAULT_GFX_ARCH,
+) -> BQuantKernelConfig:
+    """fp8 preshuffle_b prefill config (GemmConfigPreshuffleB_BQuant_Prefill<fp8_t>)."""
+    return _preshuffleb_config("fp8", warp_tile_k=128, quant_group_k=quant_group_k,
+                               quant_group_n=quant_group_n, gfx_arch=gfx_arch)
+
+
+def default_bf8_preshuffleb_config(
+    quant_group_k: int = 128,
+    quant_group_n: int = 1,
+    gfx_arch: str = _DEFAULT_GFX_ARCH,
+) -> BQuantKernelConfig:
+    """bf8 preshuffle_b prefill config (GemmConfigPreshuffleB_BQuant_Prefill<bf8_t>)."""
+    return _preshuffleb_config("bf8", warp_tile_k=128, quant_group_k=quant_group_k,
+                               quant_group_n=quant_group_n, gfx_arch=gfx_arch)
+
+
+def default_fp8i4_preshuffleb_config(
+    quant_group_k: int = 128,
+    quant_group_n: int = 1,
+    gfx_arch: str = _DEFAULT_GFX_ARCH,
+) -> BQuantKernelConfig:
+    """fp8i4 preshuffle_b prefill config (GemmConfigPreshuffleB_BQuant_Prefill<fp8_t>, B=pk_int4).
+
+    K_warp_tile=32: pk_int4 is not an 8-bit float type so get_k_warp_tile returns 32 on gfx950.
+    """
+    return _preshuffleb_config("fp8i4", warp_tile_k=32, quant_group_k=quant_group_k,
+                               quant_group_n=quant_group_n, gfx_arch=gfx_arch)
+
+
+def default_bf8i4_preshuffleb_config(
+    quant_group_k: int = 128,
+    quant_group_n: int = 1,
+    gfx_arch: str = _DEFAULT_GFX_ARCH,
+) -> BQuantKernelConfig:
+    """bf8i4 preshuffle_b prefill config (GemmConfigPreshuffleB_BQuant_Prefill<bf8_t>, B=pk_int4).
+
+    K_warp_tile=32: pk_int4 is not an 8-bit float type so get_k_warp_tile returns 32 on gfx950.
+    """
+    return _preshuffleb_config("bf8i4", warp_tile_k=32, quant_group_k=quant_group_k,
+                               quant_group_n=quant_group_n, gfx_arch=gfx_arch)
+
+
+# =============================================================================
+# Phase 3b — preshuffle_bquant only (BQuantGemmPipelineAgBgCrCompV3, prefill tile 128x128x128)
+#
+# Tile dims from GemmConfigPreshuffleBQuantPrefill<PrecType> (inherits GemmConfigQuantPrefill):
+#   M=128, N=128, K=128, Warp: 1x4x1, WarpTile: 16x16xK_warp
+#   K_warp from get_k_warp_tile<PrecType, 16, IsFlatMM=false> on gfx950:
+#     fp8/bf8: K_warp = 128  (is_8bit_float=true, M_Warp_Tile != 32)
+#     pk_int4: K_warp = 32
+#   DoubleSmemBuffer=false (default), kBlockPerCu=1 (default)
+#   Extra quant group: 1x16x128 (not in 3a)
+# =============================================================================
+
+
+def _preshufflequant_config(
+    variant_key: str,
+    warp_tile_k: int,
+    quant_group_k: int,
+    quant_group_n: int,
+    gfx_arch: str,
+) -> BQuantKernelConfig:
+    return BQuantKernelConfig(
+        variant_key=variant_key,
+        layout="rcr",
+        pipeline="compv3",
+        epilogue="cshuffle",
+        scheduler="intrawave",
+        tile_m=128, tile_n=128, tile_k=128,
+        warp_m=1, warp_n=4, warp_k=1,
+        warp_tile_m=16, warp_tile_n=16, warp_tile_k=warp_tile_k,
+        quant_group_m=1,
+        quant_group_n=quant_group_n,
+        quant_group_k=quant_group_k,
+        preshuffle_b=False,
+        preshuffle_bquant=True,
+        gfx_arch=gfx_arch,
+    )
+
+
+def default_fp8_preshufflequant_config(
+    quant_group_k: int = 128,
+    quant_group_n: int = 1,
+    gfx_arch: str = _DEFAULT_GFX_ARCH,
+) -> BQuantKernelConfig:
+    """fp8 preshuffle_bquant prefill config (GemmConfigPreshuffleBQuantPrefill<fp8_t>)."""
+    return _preshufflequant_config("fp8", warp_tile_k=128, quant_group_k=quant_group_k,
+                                   quant_group_n=quant_group_n, gfx_arch=gfx_arch)
+
+
+def default_bf8_preshufflequant_config(
+    quant_group_k: int = 128,
+    quant_group_n: int = 1,
+    gfx_arch: str = _DEFAULT_GFX_ARCH,
+) -> BQuantKernelConfig:
+    """bf8 preshuffle_bquant prefill config (GemmConfigPreshuffleBQuantPrefill<bf8_t>)."""
+    return _preshufflequant_config("bf8", warp_tile_k=128, quant_group_k=quant_group_k,
+                                   quant_group_n=quant_group_n, gfx_arch=gfx_arch)
+
+
+def default_fp8i4_preshufflequant_config(
+    quant_group_k: int = 128,
+    quant_group_n: int = 1,
+    gfx_arch: str = _DEFAULT_GFX_ARCH,
+) -> BQuantKernelConfig:
+    """fp8i4 preshuffle_bquant prefill config."""
+    return _preshufflequant_config("fp8i4", warp_tile_k=32, quant_group_k=quant_group_k,
+                                   quant_group_n=quant_group_n, gfx_arch=gfx_arch)
+
+
+def default_bf8i4_preshufflequant_config(
+    quant_group_k: int = 128,
+    quant_group_n: int = 1,
+    gfx_arch: str = _DEFAULT_GFX_ARCH,
+) -> BQuantKernelConfig:
+    """bf8i4 preshuffle_bquant prefill config."""
+    return _preshufflequant_config("bf8i4", warp_tile_k=32, quant_group_k=quant_group_k,
+                                   quant_group_n=quant_group_n, gfx_arch=gfx_arch)
+
+
+# =============================================================================
+# Phase 3c — preshuffle_b + preshuffle_bquant (WPQuantBPipelineAgBgCrV2, prefill tile)
+#
+# Tile dims from GemmConfigPreshuffleB_PreshuffleBQuant_Prefill<PrecType>
+#   (inherits GemmConfigPreshuffleB_BQuant_Prefill): identical tile/warp dims to 3a.
+#   PreshuffleB=true, BPreshuffleQuant=true, DoubleSmemBuffer=true, kBlockPerCu=2
+# =============================================================================
+
+
+def _preshuffleb_bquant_config(
+    variant_key: str,
+    warp_tile_k: int,
+    quant_group_k: int,
+    quant_group_n: int,
+    gfx_arch: str,
+) -> BQuantKernelConfig:
+    return BQuantKernelConfig(
+        variant_key=variant_key,
+        layout="rcr",
+        pipeline="preshuffleb",
+        epilogue="cshuffle",
+        scheduler="intrawave",
+        tile_m=128, tile_n=128, tile_k=128,
+        warp_m=1, warp_n=4, warp_k=1,
+        warp_tile_m=16, warp_tile_n=16, warp_tile_k=warp_tile_k,
+        quant_group_m=1,
+        quant_group_n=quant_group_n,
+        quant_group_k=quant_group_k,
+        preshuffle_b=True,
+        preshuffle_bquant=True,
+        double_smem_buffer=True,
+        k_block_per_cu=2,
+        gfx_arch=gfx_arch,
+    )
+
+
+def default_fp8_preshuffleb_bquant_config(
+    quant_group_k: int = 128,
+    quant_group_n: int = 1,
+    gfx_arch: str = _DEFAULT_GFX_ARCH,
+) -> BQuantKernelConfig:
+    """fp8 preshuffle_b+preshuffle_bquant config (GemmConfigPreshuffleB_PreshuffleBQuant_Prefill<fp8_t>)."""
+    return _preshuffleb_bquant_config("fp8", warp_tile_k=128, quant_group_k=quant_group_k,
+                                      quant_group_n=quant_group_n, gfx_arch=gfx_arch)
+
+
+def default_bf8_preshuffleb_bquant_config(
+    quant_group_k: int = 128,
+    quant_group_n: int = 1,
+    gfx_arch: str = _DEFAULT_GFX_ARCH,
+) -> BQuantKernelConfig:
+    """bf8 preshuffle_b+preshuffle_bquant config."""
+    return _preshuffleb_bquant_config("bf8", warp_tile_k=128, quant_group_k=quant_group_k,
+                                      quant_group_n=quant_group_n, gfx_arch=gfx_arch)
+
+
+def default_fp8i4_preshuffleb_bquant_config(
+    quant_group_k: int = 128,
+    quant_group_n: int = 1,
+    gfx_arch: str = _DEFAULT_GFX_ARCH,
+) -> BQuantKernelConfig:
+    """fp8i4 preshuffle_b+preshuffle_bquant config."""
+    return _preshuffleb_bquant_config("fp8i4", warp_tile_k=32, quant_group_k=quant_group_k,
+                                      quant_group_n=quant_group_n, gfx_arch=gfx_arch)
+
+
+def default_bf8i4_preshuffleb_bquant_config(
+    quant_group_k: int = 128,
+    quant_group_n: int = 1,
+    gfx_arch: str = _DEFAULT_GFX_ARCH,
+) -> BQuantKernelConfig:
+    """bf8i4 preshuffle_b+preshuffle_bquant config."""
+    return _preshuffleb_bquant_config("bf8i4", warp_tile_k=32, quant_group_k=quant_group_k,
+                                      quant_group_n=quant_group_n, gfx_arch=gfx_arch)
+
+
+# =============================================================================
+# Phase 4 — MX microscale variants (A=bf16, Q=e8m0 block scale)
+#
+# Pipeline for all three: MicroscaleGemmPipelineAgBgCrCompV3
+#   (QDataType=e8m0_t, PreshuffleB=false → microscale branch in BQuantPipeline selection)
+# Base pipeline: BaseWeightPreshufflePipelineAGmemBGmemCRegV2
+#   (BQuantGrouped, PreshuffleB=false, not AQuant/ABQuant → else branch)
+#
+# Tile dims:
+#   mx_bf16bf16: GemmConfigQuantPrefill<bf16_t> → 128x128x128, warp 1x4x1, warp_tile_k=32
+#   mx_bf16bf8:  GemmConfigMixedPrecision       → 128x128x128, warp 1x4x1, warp_tile_k=64
+#   mx_bf16fp4:  GemmConfigQuantPrefill<bf16_t> → 128x128x128, warp 1x4x1, warp_tile_k=32
+# =============================================================================
+
+
+def default_mx_bf16bf16_config(
+    quant_group_k: int = 32,
+    quant_group_n: int = 1,
+    gfx_arch: str = _DEFAULT_GFX_ARCH,
+) -> BQuantKernelConfig:
+    """MX bf16+bf16 config (A=bf16, B=bf16, Q=e8m0; GemmConfigQuantPrefill<bf16_t>).
+
+    Default quant_group_k=32 matches the smallest MX block size for bf16+bf16.
+    """
+    return BQuantKernelConfig(
+        variant_key="mx_bf16bf16",
+        layout="rcr",
+        pipeline="microscale",
+        epilogue="cshuffle",
+        scheduler="intrawave",
+        tile_m=128, tile_n=128, tile_k=128,
+        warp_m=1, warp_n=4, warp_k=1,
+        warp_tile_m=16, warp_tile_n=16, warp_tile_k=32,
+        quant_group_m=1,
+        quant_group_n=quant_group_n,
+        quant_group_k=quant_group_k,
+        gfx_arch=gfx_arch,
+    )
+
+
+def default_mx_bf16bf8_config(
+    quant_group_k: int = 128,
+    quant_group_n: int = 1,
+    gfx_arch: str = _DEFAULT_GFX_ARCH,
+) -> BQuantKernelConfig:
+    """MX bf16+bf8 config (A=bf16, B=bf8, Q=e8m0; GemmConfigMixedPrecision).
+
+    warp_tile_k=64 is hardcoded in GemmConfigMixedPrecision (mixed-precision KPack=16).
+    """
+    return BQuantKernelConfig(
+        variant_key="mx_bf16bf8",
+        layout="rcr",
+        pipeline="microscale",
+        epilogue="cshuffle",
+        scheduler="intrawave",
+        tile_m=128, tile_n=128, tile_k=128,
+        warp_m=1, warp_n=4, warp_k=1,
+        warp_tile_m=16, warp_tile_n=16, warp_tile_k=64,
+        quant_group_m=1,
+        quant_group_n=quant_group_n,
+        quant_group_k=quant_group_k,
+        gfx_arch=gfx_arch,
+    )
+
+
+def default_mx_bf16fp4_config(
+    quant_group_k: int = 32,
+    quant_group_n: int = 1,
+    gfx_arch: str = _DEFAULT_GFX_ARCH,
+) -> BQuantKernelConfig:
+    """MX bf16+fp4 config (A=bf16, B=pk_fp4, Q=e8m0; GemmConfigQuantPrefill<bf16_t>).
+
+    Default quant_group_k=32 matches the smallest MX block size for fp4.
+    """
+    return BQuantKernelConfig(
+        variant_key="mx_bf16fp4",
+        layout="rcr",
+        pipeline="microscale",
+        epilogue="cshuffle",
+        scheduler="intrawave",
+        tile_m=128, tile_n=128, tile_k=128,
+        warp_m=1, warp_n=4, warp_k=1,
+        warp_tile_m=16, warp_tile_n=16, warp_tile_k=32,
         quant_group_m=1,
         quant_group_n=quant_group_n,
         quant_group_k=quant_group_k,
