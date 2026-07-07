@@ -148,6 +148,11 @@ if(HIPKERNELPROVIDER_ENABLE_ROCKE)
     # must precede src/ below, which emits bin/hip_kernel_provider/CTestTestfile.cmake.
     set(ROCKE_INSTALL_PROVIDER_CTEST_SUBDIR "hip_kernel_provider")
     set(ROCKE_INSTALL_STANDALONE_CTEST OFF)
+    # Defer the Python rocKE CI tests (import smoke + golden): their test-artifact
+    # packaging (rocke package + scripts + golden JSON) is not yet wired into
+    # TheRock's hipkernelprovider artifact includes, so staging them here would
+    # fail CI. The C++ smoke tests stay enabled; re-enable once packaging lands.
+    set(ROCKE_INSTALL_PYTHON_TESTS OFF)
     add_subdirectory(rocke)
 else()
     message(STATUS "rocKE features disabled")
