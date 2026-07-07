@@ -21,7 +21,7 @@ def show_node_info() {
         hostname
         lsb_release -sd
         uname -r
-        cat /sys/module/amdgpu/version
+        cat /sys/module/amdgpu/version 2>/dev/null || echo "amdgpu driver: not loaded"
         ls /opt/ -la
     """
 }
