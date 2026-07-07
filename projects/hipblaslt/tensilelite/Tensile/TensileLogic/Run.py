@@ -36,7 +36,7 @@ from Tensile.Common import ParallelMap2, print1, print2, IsaVersion, IsaInfo, se
 from Tensile.Common.Architectures import SUPPORTED_ISA
 from Tensile.Common.Capabilities import makeIsaInfoMap
 from Tensile.Common.GlobalParameters import assignGlobalParameters
-from Tensile.LibraryIO import readYAML, _expandSolutionDefaults
+from Tensile.LibraryIO import read, readYAML, _expandSolutionDefaults
 from Tensile.Toolchain.Validators import validateToolchain
 
 from .ParseArguments import parseArguments
@@ -100,7 +100,7 @@ def _runChecks(
 
         # --- Solution level validation ---
         solutions = []
-        data = readYAML(file)
+        data = read(str(file))
         problemType = data[4]
         if check.OnlyCustomKernels and hasCustomKernel(file):
             print2(f">> {rel}")
@@ -152,11 +152,14 @@ def _setup():
         All=args.CheckAll,
     )
 
-    if logicPath.is_file() and logicPath.suffix == ".yaml":
+    if logicPath.is_file() and logicPath.suffix in (".yaml", ".json"):
         files = [logicPath]
     else:
-        pattern = "**/*.yaml"
-        files = list(logicPath.glob(pattern))
+        # Discover both YAML and (converted) JSON logic files; otherwise a
+        # directory of converted files would silently validate to an empty set.
+        files = sorted(
+            f for ext in ("*.yaml", "*.json") for f in logicPath.glob(f"**/{ext}")
+        )
     if len(files) == 0:
         print1(f"No files found in {logicPath}")
         exit(1)

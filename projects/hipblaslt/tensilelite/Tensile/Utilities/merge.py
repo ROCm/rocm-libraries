@@ -132,8 +132,12 @@ def removeUnusedKernels(oriData, prefix=""):
 
 def _expandSolutionDefaults(element5):
     if isinstance(element5, dict) and "SolutionDefaults" in element5:
+        if "Solutions" not in element5:
+            sys.exit("[Error] Defaults+overrides Solutions element is missing "
+                     "the required 'Solutions' key")
         defaults = element5["SolutionDefaults"]
-        return [dict(defaults, **ovr) for ovr in element5["Solutions"]]
+        # deepcopy so list/dict-valued defaults are not aliased across siblings.
+        return [{**deepcopy(defaults), **ovr} for ovr in element5["Solutions"]]
     return element5
 
 def loadData(filename):

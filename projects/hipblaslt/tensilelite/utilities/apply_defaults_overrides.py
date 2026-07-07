@@ -73,6 +73,12 @@ def compute_defaults(solutions: list[dict]) -> dict:
     n = len(solutions)
 
     for key in sorted(all_keys):
+        # Only keys present in EVERY solution are eligible to be defaulted.
+        # Otherwise expansion (defaults + overrides) would resurrect the key on
+        # the solutions that legitimately omitted it, breaking the round trip.
+        if any(key not in s for s in solutions):
+            continue
+
         counter: Counter = Counter()
         for s in solutions:
             if key in s:

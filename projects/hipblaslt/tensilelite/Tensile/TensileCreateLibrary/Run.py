@@ -997,6 +997,17 @@ def run():
 
     logicFiles = [file for file in logicFiles if validLogicFile(Path(file))]
 
+    # If a logic stem exists as both .yaml and .json (e.g. a converted file kept
+    # next to its original), keep only one so the same logic is not generated
+    # twice; prefer the .json (converted) form.
+    _byStem = {}
+    for file in logicFiles:
+        p = Path(file)
+        key = p.with_suffix("")
+        if key not in _byStem or p.suffix == ".json":
+            _byStem[key] = file
+    logicFiles = list(_byStem.values())
+
     print1(f"# Experimental:      {arguments['Experimental']}")
     if not arguments["Experimental"]:
         logicFiles = [

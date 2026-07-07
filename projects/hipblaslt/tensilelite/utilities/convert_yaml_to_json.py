@@ -17,10 +17,38 @@ import argparse
 import glob
 import json
 import os
+import re
 import sys
 from pathlib import Path
 
 import yaml
+
+try:
+    from yaml import CSafeLoader as _BaseLoader
+except ImportError:
+    from yaml import SafeLoader as _BaseLoader
+
+
+class StrictTypeLoader(_BaseLoader):
+    """YAML loader that preserves 0/1 as ints and does not treat yes/no/on/off
+    as booleans.
+
+    Mirrors ``Tensile.LibraryIO.StrictTypeLoader`` so the JSON we emit reflects
+    exactly what the runtime reader parses; loading here with ``yaml.safe_load``
+    would coerce bool-like tokens and bake a type divergence into the JSON.
+    """
+    pass
+
+
+StrictTypeLoader.yaml_implicit_resolvers = {
+    k: [r for r in v if r[0] != "tag:yaml.org,2002:bool"]
+    for k, v in _BaseLoader.yaml_implicit_resolvers.items()
+}
+StrictTypeLoader.add_implicit_resolver(
+    "tag:yaml.org,2002:bool",
+    re.compile(r"^(?:true|false|True|False)$", re.X),
+    list("tTfF"),
+)
 
 
 LOGIC_BASE = (
@@ -36,15 +64,17 @@ CATEGORIES = ("StreamK", "Equality", "GridBased", "Experimental", "FreeSize")
 
 def load_yaml(path: str) -> list:
     with open(path, "r") as f:
-        return yaml.safe_load(f)
+        return yaml.load(f, StrictTypeLoader)
 
 
 def write_json(data, path: str, pretty: bool = False) -> None:
+    # allow_nan=False so we never emit the non-standard NaN/Infinity tokens that
+    # a strict reader (e.g. orjson) rejects; fail loudly at conversion instead.
     with open(path, "w") as f:
         if pretty:
-            json.dump(data, f, indent=2)
+            json.dump(data, f, indent=2, allow_nan=False)
         else:
-            json.dump(data, f, indent=None, separators=(",", ":"))
+            json.dump(data, f, indent=None, separators=(",", ":"), allow_nan=False)
 
 
 # ---------------------------------------------------------------------------
@@ -108,7 +138,8 @@ def convert_file(path: str, delete_original: bool = False, pretty: bool = False,
 
     if dry_run:
         json_bytes = json.dumps(data, indent=2 if pretty else None,
-                                separators=None if pretty else (",", ":"))
+                                separators=None if pretty else (",", ":"),
+                                allow_nan=False)
         json_size = len(json_bytes.encode("utf-8"))
     else:
         write_json(data, json_path, pretty=pretty)

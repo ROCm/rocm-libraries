@@ -42,6 +42,7 @@ import os
 import sys
 import subprocess
 import re
+import copy
 
 try:
     import orjson as json
@@ -625,11 +626,16 @@ def _expandSolutionDefaults(element5):
          "Solutions": [{"key3": override_val}, ...]}
     """
     if isinstance(element5, dict) and "SolutionDefaults" in element5:
+        if "Solutions" not in element5:
+            printExit("Defaults+overrides Solutions element is missing the "
+                      "required 'Solutions' key")
         defaults = element5["SolutionDefaults"]
         overrides_list = element5["Solutions"]
         expanded = []
         for override in overrides_list:
-            full = dict(defaults)
+            # deepcopy so list/dict-valued defaults (e.g. ISA, MatrixInstruction)
+            # are not shared by reference across sibling solutions.
+            full = copy.deepcopy(defaults)
             full.update(override)
             expanded.append(full)
         return expanded
