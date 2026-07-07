@@ -721,8 +721,22 @@ inline LoadResult loadIntegrationTestBundle(const DiscoveredBundle& discovered)
 
     IntegrationTestBundle bundle;
     bundle.graphBuffer = std::move(graphBuffer);
-    bundle.outputTensorUids
-        = hipdnn_test_sdk::utilities::getOutputTensorUidsFromGraph(expandedGraph);
+
+    // Mirror the direct-bundle path: extractOutputUidsFromJson handles flat-uid
+    // ops (Reduction/ResampleFwd/CustomOp) that getOutputTensorUidsFromGraph throws on.
+    {
+        auto allOutputUids = detail::extractOutputUidsFromJson(expandedGraph);
+        const auto wrapper = bundle.graphWrapper();
+        const auto& tensorMap = wrapper.getTensorMap();
+        for(const int64_t uid : allOutputUids)
+        {
+            auto it = tensorMap.find(uid);
+            if(it == tensorMap.end() || !it->second->virtual_())
+            {
+                bundle.outputTensorUids.push_back(uid);
+            }
+        }
+    }
 
     // Every sweep case must carry a metadata block. Metadata (arch lock,
     // ROCm/GPU version, seed, VRAM guard) is what validates golden data and
