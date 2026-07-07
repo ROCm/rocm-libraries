@@ -52,7 +52,7 @@ Coverage caveats:
 
 Every IR op must have explicit production lowering. Unsupported ops raise at lowering time.
 
-There are two interchangeable lowering engines reached through the same authoring API: the native Python lowerer (`core/lower_llvm.py`) and a C++ engine (the `Cpp/` port, reached via the `rocke_engine` binding). They emit byte-identical LLVM IR across every family. The active engine is selected by `core/backend.py::resolve_backend` (`ROCKE_BACKEND`, default `cpp`, falling back to the Python lowerer when the binding is not built); see `ir_lowering/` and `development/engine_parity.md`. The notes below apply to both engines.
+There are two interchangeable lowering engines reached through the same authoring API: the native Python lowerer (`core/lower_llvm.py`) and a C++ engine (the `cpp/` port, reached via the `rocke_engine` binding). They emit byte-identical LLVM IR across every family. The active engine is selected by `core/backend.py::resolve_backend` (`ROCKE_BACKEND`, default `cpp`, falling back to the Python lowerer when the binding is not built); see `ir_lowering/` and `development/engine_parity.md`. The notes below apply to both engines.
 
 HIP debug lowering is narrower than LLVM production lowering. CK Tile spec emission is narrower still and operates from selected specs, not `KernelDef`.
 

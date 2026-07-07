@@ -31,7 +31,7 @@ If no kernel script is provided, ask the user.
 **Check MEMORY.md for the user's current remote access configuration.** If not found, ask the user for:
 - SSH host and user
 - Docker container name (if applicable)
-- CK DSL install path on remote (e.g. `<repo>/dnn-providers/hip-kernel-provider/rocKE/Python`)
+- CK DSL install path on remote (e.g. `<repo>/dnn-providers/hip-kernel-provider/rocke/platform/python`)
 
 SSH command pattern (adjust per environment):
 ```bash
@@ -357,7 +357,7 @@ For profiling, ensure the kernel is actually launched (not just compiled).
 """CK DSL Conv2D for profiling with rocprofv3."""
 import sys
 from pathlib import Path
-sys.path.insert(0, '<repo>/dnn-providers/hip-kernel-provider/rocKE/Python')
+sys.path.insert(0, '<repo>/dnn-providers/hip-kernel-provider/rocke/platform/python')
 
 from rocke.helpers import compile_kernel, make_conv_manifest, write_artifact
 from rocke.instances.conv_implicit_gemm import (
