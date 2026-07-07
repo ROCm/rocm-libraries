@@ -69,6 +69,9 @@ try:
         # Reduction functions
         int_to_reduction_t,
     )
+
+    # Communication (collective) cost model — exposed as ``origami.comm``.
+    from .origami import comm
 except ImportError as e:
     raise ImportError(
         f"Failed to import origami extension module: {e}. "
@@ -136,6 +139,8 @@ __all__ = [
     "compute_number_of_output_tiles",
     # Reduction functions
     "int_to_reduction_t",
+    # Communication (collective) cost model
+    "comm",
 ]
 
 try:

@@ -55,7 +55,8 @@ target_include_directories(
 )
 target_sources(
     origami-headers
-    INTERFACE $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include/origami/gemm.hpp>
+    INTERFACE $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include/origami/architecture.hpp>
+              $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include/origami/gemm.hpp>
               $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include/origami/hardware.hpp>
               $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include/origami/heuristics.hpp>
               $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include/origami/logger.hpp>
@@ -68,6 +69,107 @@ target_sources(
 )
 
 target_link_libraries(origami PUBLIC roc::origami-headers)
+
+# ── origami::comm — analytical communication cost model ──────────────────────
+# Header-only INTERFACE library. Deliberately does NOT link hip::host: the comm
+# model is pure C++17 and usable without a ROCm toolchain, so consumers that only
+# need collective cost prediction can depend on it independently of roc::origami.
+add_library(origami-comm-headers INTERFACE)
+add_library(roc::origami-comm-headers ALIAS origami-comm-headers)
+
+target_compile_features(origami-comm-headers INTERFACE cxx_std_17)
+
+target_include_directories(
+    origami-comm-headers INTERFACE $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>
+                                   $<INSTALL_INTERFACE:${CMAKE_INSTALL_INCLUDEDIR}>
+)
+target_sources(
+    origami-comm-headers
+    INTERFACE $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include/origami/architecture.hpp>
+              $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include/origami/comm/origami_comm.hpp>
+              $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include/origami/comm/types.hpp>
+              $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include/origami/comm/hardware.hpp>
+              $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include/origami/comm/heuristics.hpp>
+              $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include/origami/comm/primitives.hpp>
+              $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include/origami/comm/algorithms.hpp>
+              $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include/origami/comm/algorithms/base.hpp>
+              $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include/origami/comm/algorithms/direct.hpp>
+              $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include/origami/comm/algorithms/ring.hpp>
+              $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include/origami/comm/algorithms/resolve.hpp>
+              $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include/origami/comm/latency.hpp>
+              $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include/origami/comm/collective.hpp>
+              $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include/origami/comm/tensor.hpp>
+)
+
+# The HIP-dependent device bridge header is registered separately: it is not part
+# of the HIP-free header set above (it includes origami/hardware.hpp). It is
+# installed via the include/ directory glob below and consumed through
+# roc::origami-comm-device.
+
+# ── origami::comm compiled library ───────────────────────────────────────────
+# The non-constexpr bodies of the comm model are compiled once here, instead of
+# being re-parsed inline in every consumer. The declarations and all constexpr
+# code still come from the headers (roc::origami-comm-headers). Like that
+# interface target, this library is pure C++17 and deliberately does NOT link
+# hip::host, so the collective cost model remains usable without a ROCm toolchain.
+if(ORIGAMI_BUILD_SHARED_LIBS OR (BUILD_SHARED_LIBS AND ORIGAMI_STANDALONE))
+    add_library(origami-comm SHARED)
+else()
+    add_library(origami-comm STATIC)
+endif()
+
+rocm_set_soversion(origami-comm "${PROJECT_VERSION_MAJOR}.${PROJECT_VERSION_MINOR}")
+
+add_library(roc::origami-comm ALIAS origami-comm)
+
+set_target_properties(origami-comm PROPERTIES
+    POSITION_INDEPENDENT_CODE ON
+    WINDOWS_EXPORT_ALL_SYMBOLS ON
+)
+target_compile_features(origami-comm PUBLIC cxx_std_17)
+target_link_libraries(origami-comm PUBLIC roc::origami-comm-headers)
+
+target_sources(
+    origami-comm
+    PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/src/origami/comm/primitives.cpp"
+            "${CMAKE_CURRENT_SOURCE_DIR}/src/origami/comm/latency.cpp"
+            "${CMAKE_CURRENT_SOURCE_DIR}/src/origami/comm/algorithms/direct.cpp"
+            "${CMAKE_CURRENT_SOURCE_DIR}/src/origami/comm/algorithms/ring.cpp"
+            "${CMAKE_CURRENT_SOURCE_DIR}/src/origami/comm/algorithms/resolve.cpp"
+            "${CMAKE_CURRENT_SOURCE_DIR}/src/origami/comm/collective.cpp"
+            "${CMAKE_CURRENT_SOURCE_DIR}/src/origami/comm/tensor.cpp"
+)
+
+# ── origami::comm device bridge — origami::hardware_t → comm system_t ─────────
+# Unlike the rest of origami::comm, this small bridge IS HIP-dependent: it reads
+# live device topology (origami::hardware_t / hipDeviceProp_t) so a comm system_t
+# can describe the exact device about to run, including CPX partitions. It is a
+# separate target precisely so the core cost model (roc::origami-comm) stays
+# HIP-free and usable without a ROCm toolchain. Consumers that want device
+# introspection link roc::origami-comm-device in addition.
+if(ORIGAMI_BUILD_SHARED_LIBS OR (BUILD_SHARED_LIBS AND ORIGAMI_STANDALONE))
+    add_library(origami-comm-device SHARED)
+else()
+    add_library(origami-comm-device STATIC)
+endif()
+
+rocm_set_soversion(origami-comm-device "${PROJECT_VERSION_MAJOR}.${PROJECT_VERSION_MINOR}")
+
+add_library(roc::origami-comm-device ALIAS origami-comm-device)
+
+set_target_properties(origami-comm-device PROPERTIES
+    POSITION_INDEPENDENT_CODE ON
+    WINDOWS_EXPORT_ALL_SYMBOLS ON
+)
+target_compile_features(origami-comm-device PUBLIC cxx_std_17)
+target_link_libraries(origami-comm-device
+    PUBLIC roc::origami-comm-headers roc::origami hip::host
+)
+
+target_sources(
+    origami-comm-device
+    PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/src/origami/comm/hardware_device.cpp"
+)
 
 target_sources(
     origami
@@ -94,12 +196,16 @@ if(ORIGAMI_BUILD_TESTING OR BUILD_TESTING)
 endif()
 
 if(ORIGAMI_ENABLE_INSTALL OR ORIGAMI_STANDALONE)
-    rocm_install(TARGETS origami origami-headers)
+    rocm_install(TARGETS origami origami-headers origami-comm-headers origami-comm
+                 origami-comm-device)
 
     rocm_export_targets(
         TARGETS
         roc::origami
         roc::origami-headers
+        roc::origami-comm-headers
+        roc::origami-comm
+        roc::origami-comm-device
         DEPENDS
         PACKAGE
         hip
