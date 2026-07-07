@@ -220,6 +220,17 @@ struct iterator_traversal<_THRUST_LIBCXX::discard_iterator>
   using type = random_access_traversal_tag;
 };
 
+template <class T, class Index>
+struct iterator_system<_THRUST_LIBCXX::constant_iterator<T, Index>>
+{
+  using type = any_system_tag;
+};
+template <class T, class Index>
+struct iterator_traversal<_THRUST_LIBCXX::constant_iterator<T, Index>>
+{
+  using type = random_access_traversal_tag;
+};
+
 template <class Start>
 struct iterator_system<_THRUST_LIBCXX::counting_iterator<Start>>
 {
