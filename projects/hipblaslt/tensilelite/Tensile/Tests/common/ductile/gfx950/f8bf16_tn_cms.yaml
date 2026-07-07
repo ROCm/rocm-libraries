@@ -25,6 +25,7 @@ GlobalParameters:
   KeepBuildTmp: false
   RotatingBufferSize: 1024
   UseEffLike: false
+  SyncsPerBenchmark: 0
 BenchmarkProblems:
 - - OperationType: GEMM
     DataType: F8

@@ -83,7 +83,11 @@ def test_yaml_backend_is_normalized_and_preserved(monkeypatch, tmp_path):
 
 def test_invalid_backend_type_exits(monkeypatch, tmp_path):
     _stub_tensile_pipeline(monkeypatch)
-    monkeypatch.setattr(TensileModule, "printExit", lambda msg: (_ for _ in ()).throw(RuntimeError(msg)))
+    # Monkeypatch printExit in both TensileModule and backends.config modules
+    exit_func = lambda msg: (_ for _ in ()).throw(RuntimeError(msg))
+    monkeypatch.setattr(TensileModule, "printExit", exit_func)
+    from Tensile.backends import config as backend_config_module
+    monkeypatch.setattr(backend_config_module, "printExit", exit_func)
     config_path = _write_config(tmp_path, _base_config(backend="ductile"))
 
     with pytest.raises(RuntimeError, match="Invalid backend configuration"):
