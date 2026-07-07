@@ -81,7 +81,7 @@ void search_kernel_impl(InputIterator1 input,
             found &= compare_function(input[current_id], keys[i]);
         }
 
-        // The first time the pattern if found we want to save it.
+        // The first time the pattern is found we want to save it.
         const bool replace = !find_pattern && found;
         find_pattern |= replace;
         index = replace ? id : index;
@@ -227,7 +227,7 @@ void search_kernel_shared_impl(InputIterator1 input,
             found &= compare_function(input[current_id + block_offset], local_keys[i]);
         }
 
-        // The first time the pattern if found we want to save it.
+        // The first time the pattern is found we want to save it.
         const bool replace = !find_pattern && found;
         find_pattern |= replace;
         index = replace ? id + block_offset : index;
