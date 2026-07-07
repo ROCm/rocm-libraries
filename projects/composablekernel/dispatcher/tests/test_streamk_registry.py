@@ -82,23 +82,26 @@ LAYOUTS = ["rcr", "rrr", "ccr", "crr"]
 
 
 def detect_arch(fallback=None):
-    try:
-        sys.path.insert(0, str(DISPATCHER_DIR / "python"))
-        from dispatcher_common import detect_gpu_arch  # noqa: E402
-
-        return detect_gpu_arch()
-    except Exception:
-        if shutil.which("rocminfo"):
+    # Resolve the gfx target without shelling out to rocminfo. Preference order:
+    # the arch the build already configured with (passed via --arch from
+    # CMakeLists.txt) is handled by the caller; here we fall back to the standard
+    # ROCm environment variables and then the amdgpu-arch / offload-arch LLVM
+    # tools, which query the driver directly and ship with the ROCm/LLVM toolchain.
+    for env in ("PYTORCH_ROCM_ARCH", "HCC_AMDGPU_TARGET", "AMDGPU_TARGETS", "GPU_TARGETS"):
+        val = os.environ.get(env)
+        if val:
+            return re.split(r"[;,]", val)[0].strip()
+    for tool in ("amdgpu-arch", "offload-arch"):
+        exe = shutil.which(tool)
+        if exe:
             try:
-                txt = subprocess.run(
-                    ["rocminfo"], capture_output=True, text=True, timeout=30
-                ).stdout
-                m = re.search(r"\bgfx[0-9a-f]+\b", txt)
+                out = run([exe], timeout=30).stdout
+                m = re.search(r"\bgfx[0-9a-f]+\b", out)
                 if m:
                     return m.group(0)
             except Exception:
                 pass
-        return fallback
+    return fallback
 
 
 def run(cmd, **kw):
@@ -235,9 +238,13 @@ def run_for_combo(dtype, layout, td, arch, args, hipcc, inc, reg_o, disp_o):
             )
             out = r.stdout
             ok_verify = "Verification: PASS" in out
-            ok_suffix = f"identifier={dtype}_{layout}" in out and want_suffix in out.split(
-                "identifier="
-            )[1].split()[0]
+            # Guard the identifier parse: a crashed/silent driver prints no
+            # "identifier=" token, so split(...)[1] would raise IndexError and
+            # abort the run instead of recording a clean failure.
+            ok_suffix = False
+            if f"identifier={dtype}_{layout}" in out and "identifier=" in out:
+                token = out.split("identifier=", 1)[1].split()[0]
+                ok_suffix = want_suffix in token
             if r.returncode != 0 or not ok_verify or not ok_suffix:
                 failures.append(
                     f"{tag} @ {sm}x{sn}x{sk}: rc={r.returncode} verify={ok_verify} "

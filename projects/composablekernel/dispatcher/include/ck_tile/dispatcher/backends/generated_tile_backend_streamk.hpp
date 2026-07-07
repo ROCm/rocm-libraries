@@ -8,6 +8,7 @@
 #include "ck_tile/host.hpp"
 #include "ck_tile/ops/gemm.hpp"
 #include "ck_tile/ops/gemm/kernel/streamk_gemm/streamk_gemm_kernel.hpp"
+#include "ck_tile/ops/common/streamk_common.hpp"
 #include <hip/hip_runtime.h>
 #include <cstdint>
 #include <limits>
@@ -17,6 +18,23 @@
 namespace ck_tile {
 namespace dispatcher {
 namespace backends {
+
+// Lock the dispatcher's ReductionStrategy (defined in kernel_key.hpp, which is
+// deliberately kept ck_tile-free -- same policy as the void* workspace in
+// dispatcher.hpp) to ck_tile::StreamKReductionStrategy so the two enums cannot
+// silently drift. The dispatcher enum carries an extra None=0 sentinel, so the
+// three real strategies are offset by one. This backend header is the single
+// place that includes both definitions, so the check belongs here rather than in
+// the public key header.
+static_assert(static_cast<std::uint32_t>(ReductionStrategy::Atomic) ==
+                  static_cast<std::uint32_t>(ck_tile::StreamKReductionStrategy::Atomic) + 1u,
+              "dispatcher ReductionStrategy drifted from ck_tile::StreamKReductionStrategy");
+static_assert(static_cast<std::uint32_t>(ReductionStrategy::Linear) ==
+                  static_cast<std::uint32_t>(ck_tile::StreamKReductionStrategy::Linear) + 1u,
+              "dispatcher ReductionStrategy drifted from ck_tile::StreamKReductionStrategy");
+static_assert(static_cast<std::uint32_t>(ReductionStrategy::Tree) ==
+                  static_cast<std::uint32_t>(ck_tile::StreamKReductionStrategy::Tree) + 1u,
+              "dispatcher ReductionStrategy drifted from ck_tile::StreamKReductionStrategy");
 
 /**
  * Kernel-instance wrapper for unified_gemm_codegen.py Stream-K kernels.
@@ -201,18 +219,17 @@ class GeneratedStreamKKernelInstance : public KernelInstance
             return static_cast<idx>(v);
         };
 
-        const auto& sig  = key_.signature;
-        const bool a_row = sig.layout_a == LayoutTag::RowMajor;
-        const bool b_row = sig.layout_b == LayoutTag::RowMajor;
-        const bool c_row = sig.layout_c == LayoutTag::RowMajor;
+        const auto& sig    = key_.signature;
+        const bool a_row   = sig.layout_a == LayoutTag::RowMajor;
+        const bool b_row   = sig.layout_b == LayoutTag::RowMajor;
+        const bool c_row   = sig.layout_c == LayoutTag::RowMajor;
         const idx M        = to_idx(problem.M, "M");
         const idx N        = to_idx(problem.N, "N");
         const idx K        = to_idx(problem.K, "K");
         const idx stride_a = to_idx(a_row ? problem.K : problem.M, "stride_a");
         const idx stride_b = to_idx(b_row ? problem.N : problem.K, "stride_b");
         const idx stride_c = to_idx(c_row ? problem.N : problem.M, "stride_c");
-        return ck_tile::StreamKHostArgs{
-            a_ptr, b_ptr, c_ptr, M, N, K, stride_a, stride_b, stride_c};
+        return ck_tile::StreamKHostArgs{a_ptr, b_ptr, c_ptr, M, N, K, stride_a, stride_b, stride_c};
     }
 
     KernelKey key_;
