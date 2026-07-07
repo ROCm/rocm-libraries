@@ -131,6 +131,7 @@ std::shared_ptr<StinkyAsmModule> lowerLogicalModuleToAsm(
         // Build the pointer vector for updateInstructionGroups from active groups.
         auto buildGroupPtrs = [&]() -> std::vector<const std::string*> {
             std::vector<const std::string*> ptrs;
+            ptrs.reserve(activeGroups.size());
             for (auto& g : activeGroups) {
                 ptrs.push_back(&g);
             }
@@ -167,6 +168,8 @@ std::shared_ptr<StinkyAsmModule> lowerLogicalModuleToAsm(
                 ++tbIdx;
                 break;
             }
+            default:
+                break;
             }
             asmModule->updateInstructionGroups(buildGroupPtrs(), instsCountBefore);
         };
