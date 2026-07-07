@@ -164,6 +164,9 @@ macro(_add_external_integration_category_suites)
             COMMAND_ARGS ${_category_command_args}
             ADDITIONAL_LABELS "integration_test" "slow" "external_integration_test" "${ARG_ENGINE_NAME}"
         )
+        if(ARG_ENVIRONMENT)
+            list(APPEND _apply_category_args ENVIRONMENT ${ARG_ENVIRONMENT})
+        endif()
 
         if(ARG_INSTALL_TEST_FILE AND _install_bin)
             set(_category_install_command_args
@@ -200,7 +203,7 @@ function(add_external_integration_test_target)
         ARG
         ""
         "TARGET_NAME;PLUGIN_TARGET;ENGINE_NAME;INSTALL_SUBDIR;TEST_CONFIG;TEST_CATEGORIES_YAML;INSTALL_TEST_FILE;TEST_NAME_PREFIX"
-        "GTEST_FILTER"
+        "GTEST_FILTER;ENVIRONMENT"
         ${ARGN}
     )
 
