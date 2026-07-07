@@ -1156,27 +1156,31 @@ def initTDMDescriptorSubtile(writer, kernel, tP):
 
 
 def tdmApplyStreamKOffsetSubtile(writer, kernel, tP):
-  """Assert StreamKLocalStart == 0 for subtile TDM path.
+  """Apply the StreamK K-offset to the subtile TDM descriptor.
 
-  StreamK=3 (Two-Tile) aligns WG iteration ranges to tile boundaries,
-  so StreamKLocalStart is always 0.  The TDM descriptor is already
-  initialized with the correct Address{tc} and does not need updating.
-
-  If a future StreamK mode breaks this invariant, Address{tc} would need
-  to be offset and the TDM descriptor synced (s_mov_b64 + s_or_b32).
+  StreamK=3 DP-partial work items have a nonzero StreamKLocalStart and must read
+  their own K-slice. Advance Address{tc} by StreamKLocalStart unroll iterations
+  (inc = ti.depthUBytes, matching _emitGRPtrUpdate_TLU0's per-iteration advance)
+  and re-sync the descriptor. No-op when StreamKLocalStart == 0.
   """
   tc = tP["tensorChar"]
+  ti = writer.states.a.tileInfo if tc == 'A' else writer.states.b.tileInfo
+  inc = int(ti.depthUBytes)  # per-unroll TDM advance; same source as _emitGRPtrUpdate_TLU0
+  group0 = f"tdm{tc}Group0"
   mod = Module(f"TDM StreamK K-offset subtile {tc}")
-  # Assert StreamKLocalStart == 0 at runtime
-  mod.addComment0(f"Assert: StreamKLocalStart == 0 (subtile TDM {tc})")
-  mod.add(SCmpEQU32(src0=sgpr("StreamKLocalStart"), src1=0,
-                    comment="subtile TDM requires tile-aligned WG starts"))
-  assertLabel = Label(f"SK_Assert_OK_{tc}", "")
-  mod.add(SCBranchSCC1(labelName=assertLabel.getLabelName(),
-                       comment="OK: StreamKLocalStart == 0"))
-  # Trap if invariant violated
-  mod.add(SEndpgm(comment=f"FATAL: StreamKLocalStart != 0 for subtile TDM {tc}"))
-  mod.add(assertLabel)
+  with writer.allocTmpSgpr(2, alignment=2, tag="tdmSkOffset") as tmpSgprRes:
+    o = tmpSgprRes.idx
+    mod.add(SMulI32(dst=sgpr(o), src0=sgpr("StreamKLocalStart"), src1=inc,
+                    comment=f"SK K-start * depthU*bpe ({inc})"))
+    mod.add(SMovB32(dst=sgpr(o + 1), src=0, comment="SK K-start offset hi = 0"))
+    mod.add(SAddU32(dst=sgpr(f"Address{tc}+0"), src0=sgpr(f"Address{tc}+0"), src1=sgpr(o),
+                    comment="Address += SK K-start offset (lo)"))
+    mod.add(SAddCU32(dst=sgpr(f"Address{tc}+1"), src0=sgpr(f"Address{tc}+1"), src1=sgpr(o + 1),
+                     comment="Address += SK K-start offset (hi, carry)"))
+  mod.add(SMovB64(dst=sgpr(f"{group0}+2", 2), src=sgpr(f"Address{tc}", 2),
+                  comment="sync descriptor global addr"))
+  mod.add(SOrB32(dst=sgpr(f"{group0}+3"), src0=sgpr(f"{group0}+3"), src1=hex(2 << 30),
+                 comment="restore descriptor type field"))
   return mod
 
 ##################################################
