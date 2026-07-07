@@ -134,7 +134,16 @@ inline std::optional<BundleMetadata> parseBundleMetadataJson(const nlohmann::jso
         std::unordered_map<int64_t, nlohmann::json> inputMap;
         for(const auto& [key, val] : json["inputs"].items())
         {
-            inputMap[std::stoll(key)] = val;
+            try
+            {
+                inputMap[std::stoll(key)] = val;
+            }
+            catch(const std::exception&)
+            {
+                HIPDNN_SDK_LOG_WARN("Non-numeric inputs key \""
+                                    << key << "\" in " << (source.empty() ? "metadata" : source));
+                return std::nullopt;
+            }
         }
         meta.inputs = std::move(inputMap);
     }
