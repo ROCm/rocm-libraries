@@ -547,6 +547,17 @@ class FmhaFwdTileSize:
     F_wk1: int  # gemm1 warp size along k
     F_occupancy: int  # occupancy, -1 will let pipeline decide the occupancy, other value will overwrite occupancy
     F_constraint: CppConstraint = field(default_factory=lambda: CppConstraint())
+    # Optional compile-time preprocessor predicate. When it evaluates true on the
+    # device pass, this tile's kernel body is excluded from that arch via
+    # `#if !defined(__HIP_DEVICE_COMPILE__) || (<base> && !(<F_arch_exclude>))`.
+    # Used to drop tiles that cannot instantiate on a specific arch. E.g. on
+    # gfx950 the async K load widens to dwordx4 (KVector=8 for fp16/bf16, 16 for
+    # fp8), which makes MakeKLdsLoadBlockDescriptor's
+    #   NumIssues = kNPerBlock / (LaneGroups * NumWarps)
+    # floor to 0 for the small-bn0 d256 tiles, triggering a magic_division
+    # divide-by-zero (see block_fmha_pipeline_qx_ks_vs_custom_policy.hpp:447 for
+    # the matching #if defined(__gfx950__) load-width gate).
+    F_arch_exclude: Optional[str] = None
 
     @property
     def name(self) -> str:
@@ -569,6 +580,17 @@ class FmhaFwdKernel:
     mask_impl: str
     F_page_size: int = 1  # page block size
     F_use_global_load: bool = False  # use global_load_lds_* for >2GB KV cache
+
+    def _arch_check_expr(self) -> str:
+        # Base gate: global_load_lds kernels are CDNA3+ only; everything else
+        # compiles on all gfx9 device targets ("true").
+        base = (
+            CDNA3_PLUS_ARCH.preprocessor_check if self.F_use_global_load else "true"
+        )
+        excl = self.F_tile.F_arch_exclude
+        if excl:
+            return f"({base}) && !({excl})"
+        return base
 
     @property
     def template(self) -> str:
@@ -619,9 +641,7 @@ class FmhaFwdKernel:
             F_page_size=self.F_page_size,
             F_sink=BOOL_MAP[self.F_pipeline.F_sink],
             F_kv_load_mode=KV_LOAD_MODE_ENUM_MAP[self.F_use_global_load],
-            F_arch_check=CDNA3_PLUS_ARCH.preprocessor_check
-            if self.F_use_global_load
-            else "true",
+            F_arch_check=self._arch_check_expr(),
         )
 
     @property
@@ -678,7 +698,7 @@ class KernelComponentFactory:
             return {
                 128 : [FmhaFwdTileSize(128, 128, 32, 128, 32,  128,  4, 1, 1,  4, 1, 1,  32, 32, 16,  32, 32, 16,  -1)],
                 256 : [
-                    FmhaFwdTileSize(128,  32, 16, 256, 16,  256,  4, 1, 1,  4, 1, 1,  32, 32, 16,  32, 32, 16, 2, CppConstraint("num_cus < 128")),
+                    FmhaFwdTileSize(128,  32, 16, 256, 16,  256,  4, 1, 1,  4, 1, 1,  32, 32, 16,  32, 32, 16, 2, CppConstraint("num_cus < 128"), F_arch_exclude="defined(__gfx950__)"),
                     FmhaFwdTileSize(128, 128, 32, 256, 32,  256,  4, 1, 1,  4, 1, 1,  32, 32, 16,  32, 32, 16,  -1),
                 ],
             }  # fmt: skip
@@ -686,7 +706,7 @@ class KernelComponentFactory:
             return {
                 128 : [FmhaFwdTileSize(128, 128, 32, 128, 32,  128,  4, 1, 1,  4, 1, 1,  32, 32, 32,  32, 32, 32,  -1)],
                 256 : [
-                    FmhaFwdTileSize(128,  64, 32, 256, 32,  256,  4, 1, 1,  4, 1, 1,  32, 32, 32,  32, 32, 32,  2, CppConstraint("num_cus < 128")),
+                    FmhaFwdTileSize(128,  64, 32, 256, 32,  256,  4, 1, 1,  4, 1, 1,  32, 32, 32,  32, 32, 32,  2, CppConstraint("num_cus < 128"), F_arch_exclude="defined(__gfx950__)"),
                     FmhaFwdTileSize(128, 128, 32, 256, 32,  256,  4, 1, 1,  4, 1, 1,  32, 32, 32,  32, 32, 32,  -1),
                 ],
             }  # fmt: skip
