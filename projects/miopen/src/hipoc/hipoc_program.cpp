@@ -220,12 +220,8 @@ void HIPOCProgramImpl::BuildCodeObject(std::string params, const std::string& ke
     {
         params += " -Werror" + HipKernelWarningsString();
     }
-    else if(program.extension() == ".cl")
-    {
-        params += " -Werror" + OclKernelWarningsString();
-    }
 #else
-    if(program.extension() == ".cpp" || program.extension() == ".cl")
+    if(program.extension() == ".cpp")
         params += " -Wno-everything";
 #endif
 
