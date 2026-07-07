@@ -2769,6 +2769,103 @@ void host_gebsrmm(rocsparse_handle          handle,
     }
 }
 
+template <typename T, typename I, typename A, typename B, typename C>
+void host_bellmm(I                     Mb,
+                 I                     N,
+                 I                     Kb,
+                 I                     ell_cols,
+                 I                     ell_block_size,
+                 rocsparse_operation   trans_A,
+                 rocsparse_operation   trans_B,
+                 T                     alpha,
+                 const std::vector<I>& bell_col_ind_A,
+                 const std::vector<A>& bell_val_A,
+                 const std::vector<B>& dense_B,
+                 int64_t               ldb,
+                 rocsparse_order       order_B,
+                 T                     beta,
+                 std::vector<C>&       dense_C,
+                 int64_t               ldc,
+                 rocsparse_order       order_C,
+                 rocsparse_index_base  base)
+{
+    ROCSPARSE_CLIENTS_ROUTINE_TRACE;
+
+    if(trans_A != rocsparse_operation_none)
+    {
+        return;
+    }
+
+    bool conj_A     = (trans_A == rocsparse_operation_conjugate_transpose);
+    bool conj_B     = (trans_B == rocsparse_operation_conjugate_transpose);
+    bool do_trans_B = (trans_B != rocsparse_operation_none);
+
+    const I m = Mb * ell_block_size;
+
+    // Scale C by beta (or zero it out)
+    for(I i = 0; i < m; i++)
+    {
+        for(I j = 0; j < N; j++)
+        {
+            int64_t idx_C
+                = (order_C == rocsparse_order_column) ? i + (int64_t)j * ldc : (int64_t)i * ldc + j;
+            if(beta == static_cast<T>(0))
+                dense_C[idx_C] = static_cast<T>(0);
+            else
+                dense_C[idx_C] = beta * dense_C[idx_C];
+        }
+    }
+
+    // Accumulate alpha * op(A) * op(B) into C.
+    const I ell_block_width = ell_cols / ell_block_size;
+    for(I br = 0; br < Mb; br++)
+    {
+        for(I ei = 0; ei < ell_block_width; ei++)
+        {
+            const I bc = bell_col_ind_A[static_cast<size_t>(br) * ell_block_width + ei] - base;
+            if(bc < 0)
+                break;
+
+            // Access A_block[r, c] from the row-major value array.
+            auto a_val = [&](I r, I c) -> T {
+                int64_t idx = ((int64_t)br * ell_block_size + r) * ell_cols
+                              + (int64_t)ei * ell_block_size + c;
+                return conj_val(bell_val_A[idx], conj_A);
+            };
+
+            // Access B element at logical position (b_row, n)
+            auto b_val = [&](I b_row, I n) -> T {
+                int64_t idx;
+                if(!do_trans_B)
+                    idx = (order_B == rocsparse_order_column) ? b_row + (int64_t)n * ldb
+                                                              : (int64_t)b_row * ldb + n;
+                else
+                    idx = (order_B == rocsparse_order_column) ? n + (int64_t)b_row * ldb
+                                                              : (int64_t)n * ldb + b_row;
+                return conj_val(dense_B[idx], conj_B);
+            };
+
+            // C[br*bs + r, n] += alpha * sum_c( A_block[r,c] * B[bc*bs+c, n] )
+            for(I r = 0; r < ell_block_size; r++)
+            {
+                I C_row = br * ell_block_size + r;
+                for(I n = 0; n < N; n++)
+                {
+                    int64_t idx_C = (order_C == rocsparse_order_column) ? C_row + (int64_t)n * ldc
+                                                                        : (int64_t)C_row * ldc + n;
+                    T       sum   = static_cast<T>(0);
+                    for(I c = 0; c < ell_block_size; c++)
+                    {
+                        sum = std::fma(a_val(r, c), b_val(bc * ell_block_size + c, n), sum);
+                    }
+
+                    dense_C[idx_C] = std::fma(alpha, sum, dense_C[idx_C]);
+                }
+            }
+        }
+    }
+}
+
 template <typename T, typename I, typename J, typename A, typename B, typename C>
 void host_csrmm(J                    M,
                 J                    N,
@@ -9884,7 +9981,25 @@ template struct rocsparse_host<rocsparse_double_complex,
                                      ITYPE                batch_count_C,  \
                                      int64_t              batch_stride_C, \
                                      rocsparse_order      order_C,        \
-                                     rocsparse_index_base base);
+                                     rocsparse_index_base base);          \
+    template void host_bellmm(ITYPE                     Mb,               \
+                              ITYPE                     N,                \
+                              ITYPE                     Kb,               \
+                              ITYPE                     ell_cols,         \
+                              ITYPE                     ell_block_size,   \
+                              rocsparse_operation       trans_A,          \
+                              rocsparse_operation       trans_B,          \
+                              TTYPE                     alpha,            \
+                              const std::vector<ITYPE>& bell_col_ind_A,   \
+                              const std::vector<ATYPE>& bell_val_A,       \
+                              const std::vector<BTYPE>& dense_B,          \
+                              int64_t                   ldb,              \
+                              rocsparse_order           order_B,          \
+                              TTYPE                     beta,             \
+                              std::vector<CTYPE>&       dense_C,          \
+                              int64_t                   ldc,              \
+                              rocsparse_order           order_C,          \
+                              rocsparse_index_base      base)
 
 #define INSTANTIATE_IJABCT(ITYPE, JTYPE, ATYPE, BTYPE, CTYPE, TTYPE)                     \
     template void host_csrmm(JTYPE                M,                                     \
