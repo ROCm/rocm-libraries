@@ -25,7 +25,7 @@ loudly and falls back to a standalone single-graph bundle. Nothing is dropped.
 
 Usage::
 
-    place_bundles.py <capture-dir> <target-dir> [--dry-run] [--no-verify]
+    place_bundles.py --capture-dir <path> --output-dir <path> [--dry-run] [--no-verify]
 """
 
 import argparse
@@ -729,10 +729,16 @@ def main() -> int:
     ap = argparse.ArgumentParser(
         description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter
     )
-    ap.add_argument("capture_dir", type=Path, help="root of --capture-bundles output")
     ap.add_argument(
-        "target_dir",
+        "--capture-dir",
         type=Path,
+        required=True,
+        help="root of --capture-bundles output",
+    )
+    ap.add_argument(
+        "--output-dir",
+        type=Path,
+        required=True,
         help="root of output tree (e.g. integration_test_bundles/)",
     )
     ap.add_argument(
@@ -786,7 +792,7 @@ def main() -> int:
         if len(bucket.cases) == 1:
             reason = "single-case topology (no sweep benefit)"
             out = write_standalone(
-                args.target_dir, bucket.cases[0], reason, args.dry_run
+                args.output_dir, bucket.cases[0], reason, args.dry_run
             )
             stats.standalone_written += 1
             print(f"  standalone: {out}  ({reason})", file=sys.stderr)
@@ -795,7 +801,7 @@ def main() -> int:
         template, sweep_cases, err = detect_and_build(bucket)
         if err is not None:
             for c in bucket.cases:
-                write_standalone(args.target_dir, c, err, args.dry_run)
+                write_standalone(args.output_dir, c, err, args.dry_run)
                 stats.standalone_written += 1
             print(
                 f"  SKIP->standalone {bucket.operation}/{bucket.topology_name} "
@@ -813,7 +819,7 @@ def main() -> int:
                 # fall back the whole bucket to standalone; nothing dropped
                 for c in bucket.cases:
                     write_standalone(
-                        args.target_dir, c, "round-trip verify failed", args.dry_run
+                        args.output_dir, c, "round-trip verify failed", args.dry_run
                     )
                     stats.standalone_written += 1
                 stats.verify_fail += len(failed)
@@ -825,7 +831,7 @@ def main() -> int:
                 continue
             stats.verify_pass += len(sweep_cases)
 
-        out = write_sweep(args.target_dir, bucket, template, sweep_cases, args.dry_run)
+        out = write_sweep(args.output_dir, bucket, template, sweep_cases, args.dry_run)
         stats.sweeps_written += 1
         stats.sweep_cases += len(sweep_cases)
         topology_map.append(
@@ -848,7 +854,7 @@ def main() -> int:
     # data. Write it OUTSIDE the bundle tree so bundle discovery (which scans
     # every *.json recursively) does not try to load it as a graph.
     if not args.dry_run and topology_map:
-        report_dir = args.target_dir.parent / ".migration_reports"
+        report_dir = args.output_dir.parent / ".migration_reports"
         report_dir.mkdir(parents=True, exist_ok=True)
         map_path = report_dir / "topology_map.json"
         with open(map_path, "w") as f:

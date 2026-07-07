@@ -69,8 +69,9 @@ This works on CPU — no GPU needed. The capture hook fires inside
 ### Step 3: Place (Hop B) — compress into template+sweep
 
 ```bash
-python3 migration_scripts/place_bundles.py captured_bundles \
-    dnn-providers/integration-tests/integration_test_bundles
+python3 migration_scripts/place_bundles.py \
+    --capture-dir captured_bundles \
+    --output-dir dnn-providers/integration-tests/integration_test_bundles
 ```
 
 Groups captured graphs by **structure** (node types + wiring + tensor
