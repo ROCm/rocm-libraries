@@ -157,12 +157,14 @@ void LayernormValidator::checkTensorDataTypesSupported(const std::vector<int64_t
                                                        const std::vector<int64_t>& epsilonTensorIds)
 {
     const auto allowedIoTypes = type_configs::getAllowedIoTypes();
-    validateConsistentDataTypes(
-        ioTensorIds,
-        allowedIoTypes,
-        "Layernorm implementation supports only FLOAT, HALF and BFLOAT16 data types for x and y "
-        "tensors.",
-        "All IO tensors for layernorm must have the same data type.");
+    for(const auto ioTensorId : ioTensorIds)
+    {
+        const auto& ioTensorAttr = core::utils::findTensorAttributes(_tensorMap, ioTensorId);
+        validateDataTypeIsSupported(ioTensorAttr.data_type(),
+                                    allowedIoTypes,
+                                    "Layernorm implementation supports only FLOAT, HALF and "
+                                    "BFLOAT16 data types for x and y tensors.");
+    }
 
     const auto allowedAffineTypes = type_configs::getAllowedAffineTypes();
     validateConsistentDataTypes(
@@ -179,21 +181,6 @@ void LayernormValidator::checkTensorDataTypesSupported(const std::vector<int64_t
         "Layernorm implementation supports only FLOAT, HALF and BFLOAT16 data types for mean and "
         "inverse variance tensors.",
         "All stat tensors for layernorm must have the same data type.");
-
-    std::vector<int64_t> allTensorIds;
-    allTensorIds.insert(allTensorIds.end(), ioTensorIds.begin(), ioTensorIds.end());
-    allTensorIds.insert(allTensorIds.end(), affineTensorIds.begin(), affineTensorIds.end());
-    allTensorIds.insert(allTensorIds.end(), statTensorIds.begin(), statTensorIds.end());
-
-    std::unordered_set<hipdnn_flatbuffers_sdk::data_objects::DataType> allAllowedTypes;
-    allAllowedTypes.insert(allowedIoTypes.begin(), allowedIoTypes.end());
-    allAllowedTypes.insert(allowedAffineTypes.begin(), allowedAffineTypes.end());
-    allAllowedTypes.insert(allowedStatTypes.begin(), allowedStatTypes.end());
-    validateConsistentDataTypes(
-        allTensorIds,
-        allAllowedTypes,
-        "Layernorm implementation only supports FLOAT, HALF and BFLOAT16 data types.",
-        "All IO, affine and stat tensors for layernorm must have the same data type.");
 
     const auto allowedEpsilonTypes = type_configs::getAllowedEpsilonTypes();
     if(allowedEpsilonTypes.size() == 1)
