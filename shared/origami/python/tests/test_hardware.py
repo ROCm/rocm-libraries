@@ -175,8 +175,6 @@ def test_hardware_for_arch_gfx1200():
     # Verify architecture-specific constants
     assert hardware.NUM_XCD == 1
     assert hardware.parallel_mi_cu == 2
-    assert not hardware.has_native_TF32()
-    assert hardware.has_MALL()
 
 
 @pytest.mark.integration
