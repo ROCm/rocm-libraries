@@ -292,25 +292,10 @@ static void test_arch_name()
 {
     auto&& h = get_handle();
 
-    const auto known_arch = {"gfx908",
-                             "gfx90a",
-                             "gfx906",
-                             "gfx900",
-                             "gfx942",
-                             "gfx950",
-                             "gfx803",
-                             "gfx1030",
-                             "gfx1031",
-                             "gfx1100",
-                             "gfx1101",
-                             "gfx1102",
-                             "gfx1103",
-                             "gfx1150",
-                             "gfx1151",
-                             "gfx1152",
-                             "gfx1153",
-                             "gfx1200",
-                             "gfx1201"};
+    const auto known_arch = {"gfx908",  "gfx90a",  "gfx906",  "gfx900",  "gfx942",
+                             "gfx950",  "gfx803",  "gfx1030", "gfx1031", "gfx1100",
+                             "gfx1101", "gfx1102", "gfx1103", "gfx1150", "gfx1151",
+                             "gfx1152", "gfx1153", "gfx1200", "gfx1201", "gfx1250"};
 
     const auto this_arch = h.GetDeviceName();
 
