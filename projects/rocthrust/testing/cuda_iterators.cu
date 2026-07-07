@@ -44,6 +44,25 @@ void TestCUDADiscardIterator()
 }
 DECLARE_UNITTEST(TestCUDADiscardIterator);
 
+void TestCUDAConstantIterator()
+{
+  { // device system
+    thrust::device_vector<int> vec{1, 2, 3, 4};
+    thrust::copy(cuda::constant_iterator{42, 0}, cuda::constant_iterator{42, 4}, vec.begin());
+  }
+
+  { // host system
+    thrust::host_vector<int> vec{1, 2, 3, 4};
+    thrust::copy(cuda::constant_iterator{42, 0}, cuda::constant_iterator{42, 4}, vec.begin());
+  }
+
+  { // plain std::vector
+    std::vector<int> vec{1, 2, 3, 4};
+    thrust::copy(cuda::constant_iterator{42, 0}, cuda::constant_iterator{42, 4}, vec.begin());
+  }
+}
+DECLARE_UNITTEST(TestCUDAConstantIterator);
+
 void TestCUDACountingIterator()
 {
   { // device system

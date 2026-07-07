@@ -42,6 +42,24 @@ TEST(LibcxxIteratorTests, TestLibcxxDiscardIterator)
   }
 }
 
+TEST(LibcxxIteratorTests, TestLibcxxConstantIterator)
+{
+  { // device system
+    thrust::device_vector<int> vec{1, 2, 3, 4};
+    thrust::copy(_THRUST_LIBCXX::constant_iterator{42, 0}, _THRUST_LIBCXX::constant_iterator{42, 4}, vec.begin());
+  }
+
+  { // host system
+    thrust::host_vector<int> vec{1, 2, 3, 4};
+    thrust::copy(_THRUST_LIBCXX::constant_iterator{42, 0}, _THRUST_LIBCXX::constant_iterator{42, 4}, vec.begin());
+  }
+
+  { // plain std::vector
+    std::vector<int> vec{1, 2, 3, 4};
+    thrust::copy(_THRUST_LIBCXX::constant_iterator{42, 0}, _THRUST_LIBCXX::constant_iterator{42, 4}, vec.begin());
+  }
+}
+
 TEST(LibcxxIteratorTests, TestLibcxxCountingIterator)
 {
   { // device system
