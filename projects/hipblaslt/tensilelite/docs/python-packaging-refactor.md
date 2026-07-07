@@ -359,10 +359,61 @@ Package-data decisions:
   `Tensile/Source/FindOpenCL.cmake` from the wheel unless a supported packaged
   workflow is found that still uses them. A repository scan found no tracked
   callers outside the files themselves.
-- Rewrite or remove `MANIFEST.in` as part of this step. The current manifest
-  recursively includes broad `Tensile` file globs and selected `Tensile/bin`
-  files; the source distribution and wheel must use the same intentional
-  package-data allowlist.
+- Rewrite `MANIFEST.in` as part of this step. The current manifest recursively
+  includes broad `Tensile` file globs, a partial `rocisa` source snapshot,
+  selected `Tensile/bin` launchers, a stale `Tensile/Ops/gen_assembly.sh`
+  entry, and `requirements.txt`. The source distribution and wheel must use the
+  same intentional package-data allowlist.
+
+Current `MANIFEST.in` risks to address:
+
+- `recursive-include Tensile *.py *.h *.hpp *.cpp *.txt *.cmake *.yaml` is
+  over-broad. It can pull tests, test YAML, CMake snippets, and local generated
+  files such as `Tensile/Tests/unit/build_tmp` artifacts into sdists, and those
+  files can also enter wheels when setuptools package-data inclusion is left
+  implicit.
+- `recursive-include rocisa *.cpp *.hpp *.txt` conflicts with the native
+  dependency split. `rocisa` has its own scikit-build package and should be
+  built or installed as a separate local dependency, not partially vendored into
+  the `tensilelite` sdist. The broad rule can also capture `rocisa/build`
+  artifacts such as `CMakeCache.txt` and generated native sources.
+- `include Tensile/bin/Tensile Tensile/bin/TensileCreateLibrary` preserves only
+  part of the checked-in legacy launcher surface. `TensileCreateLibrary` is
+  still reached by source-tree callers such as `ClientWriter` and
+  `GenerateSummations`, so those callers must move to the new dispatcher or an
+  in-process API before `Tensile/bin` is removed from package data.
+- The current manifest is also not a complete legacy-workflow preservation
+  mechanism. It omits other checked-in launchers and data such as
+  `Tensile/bin/TensileLogic`, `TensileMergeLibrary`, `.ambr` snapshots, `.csv`
+  test data, `.gz` fixtures, `Tensile/Source/winners.awk`, and `multigpu.sh`.
+  The refactor should not fix that by broadening package data; unsupported
+  source-tree workflows should stay out of the canonical wheel.
+- `include Tensile/Ops/gen_assembly.sh` is stale in this checkout because the
+  referenced path does not exist. Remove it unless a supported replacement
+  workflow is identified.
+- `include requirements.txt` should not be treated as runtime dependency
+  metadata. Runtime dependencies belong in `pyproject.toml`; if
+  `requirements.txt` remains, it is a developer/bootstrap helper and must not be
+  allowed to drift into the published package contract.
+
+Target manifest and wheel-data rules:
+
+- Prefer explicit wheel data in `pyproject.toml`; consider setting
+  `tool.setuptools.include-package-data = false` so future broad
+  `MANIFEST.in` matches cannot silently enter wheels.
+- Replace the legacy manifest with a strict allowlist for the new `tensilelite`
+  namespace. Do not carry forward `recursive-include Tensile ...` or
+  `recursive-include rocisa ...`.
+- Add package data only for the static headers, `CustomKernels/*.s`, and the
+  chosen `known_bugs.yaml` resource if the new CLI defaults to it.
+- Add explicit source-distribution exclusions while the old tree exists:
+  `prune rocisa`, `prune */build`, `prune */build_tmp`,
+  `prune Tensile/Tests`, `recursive-exclude * CMakeCache.txt`,
+  `recursive-exclude * install_manifest.txt`, and
+  `global-exclude *.py[cod] __pycache__`.
+- Do not package `Tensile/bin` files in the canonical wheel. Temporary legacy
+  command names should be console-script aliases routed through
+  `tensilelite.cli`, not checked-in launcher files.
 
 Code should access these files through `importlib.resources` instead of
 constructing paths from `__file__` and assuming a checkout layout. Any path that
@@ -509,7 +560,13 @@ repository layout.
 The refactor should be validated in both package and hipBLASLt build modes:
 
 - Build or install a local `rocisa` package into the test environment first.
-- Build a wheel with `python -m build`.
+- Build an sdist and wheel with `python -m build`.
+- Inspect the sdist and wheel contents in CI, for example with `tar tf` and
+  wheel zip listing, and fail if the canonical package contains `Tensile/`,
+  `Tensile/bin`, `Tensile/Tests`, `rocisa/build`, `CMakeCache.txt`,
+  `install_manifest.txt`, or other generated build artifacts.
+- Fail package-content validation if the required static headers,
+  `CustomKernels/*.s`, or the chosen `known_bugs.yaml` resource are missing.
 - Install the local `rocisa` package and the `tensilelite` wheel into a clean
   venv and verify `import tensilelite`.
 - Verify a clean venv does not import top-level `Tensile` from the new package
