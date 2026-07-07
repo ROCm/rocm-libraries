@@ -46,6 +46,7 @@ add_executable(
     descriptors/TestGraphDescriptorBlockScaleDequantize.cpp
     descriptors/TestKnobDescriptor.cpp
     descriptors/TestKnobSettingDescriptor.cpp
+    descriptors/TestProfilingControlDescriptor.cpp
     descriptors/TestBatchnormBackwardOperationDescriptor.cpp
     descriptors/TestBatchnormBackwardOperationFromNode.cpp
     descriptors/TestConvolutionBwdOperationDescriptor.cpp
