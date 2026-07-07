@@ -11,6 +11,69 @@ TEST(TestTypes, HeuristicModeConversion)
 
     EXPECT_EQ(toBackendType(HeuristicMode::FALLBACK),
               hipdnnBackendHeurMode_t::HIPDNN_HEUR_MODE_FALLBACK);
+    EXPECT_EQ(toBackendType(HeuristicMode::A), hipdnnBackendHeurMode_t::HIPDNN_HEUR_MODE_FALLBACK);
+    EXPECT_EQ(toBackendType(HeuristicMode::B), hipdnnBackendHeurMode_t::HIPDNN_HEUR_MODE_FALLBACK);
+    EXPECT_EQ(toBackendType(HeuristicMode::OPENSOURCE),
+              hipdnnBackendHeurMode_t::HIPDNN_HEUR_MODE_FALLBACK);
+}
+
+TEST(TestTypes, HeuristicModeToString)
+{
+    using namespace hipdnn_frontend;
+
+    EXPECT_STREQ(to_string(HeuristicMode::FALLBACK), "FALLBACK");
+    EXPECT_STREQ(to_string(HeuristicMode::A), "A");
+    EXPECT_STREQ(to_string(HeuristicMode::B), "B");
+    EXPECT_STREQ(to_string(HeuristicMode::OPENSOURCE), "OPENSOURCE");
+}
+
+TEST(TestTypes, BehaviorNoteFromBackend)
+{
+    using namespace hipdnn_frontend;
+
+    EXPECT_EQ(fromHipdnnBehaviorNote(HIPDNN_BEHAVIOR_NOTE_RUNTIME_COMPILATION),
+              BehaviorNote::RUNTIME_COMPILATION);
+    EXPECT_EQ(fromHipdnnBehaviorNote(HIPDNN_BEHAVIOR_NOTE_REQUIRES_LAYOUT_TRANSFORM),
+              BehaviorNote::REQUIRES_LAYOUT_TRANSFORM);
+    EXPECT_EQ(fromHipdnnBehaviorNote(HIPDNN_BEHAVIOR_NOTE_SUPPORTS_GRAPH_CAPTURE),
+              BehaviorNote::SUPPORTS_GRAPH_CAPTURE);
+    EXPECT_EQ(fromHipdnnBehaviorNote(HIPDNN_BEHAVIOR_NOTE_EXTERNAL_LIBRARY_DEPENDENCY),
+              BehaviorNote::EXTERNAL_LIBRARY_DEPENDENCY);
+    EXPECT_EQ(fromHipdnnBehaviorNote(HIPDNN_BEHAVIOR_NOTE_SUPPORTS_EXECUTION_PLAN_SERIALIZATION),
+              BehaviorNote::SUPPORTS_EXECUTION_PLAN_SERIALIZATION);
+
+    constexpr hipdnnBackendBehaviorNote_t UNKNOWN_NOTE = HIPDNN_BEHAVIOR_NOTE_TYPE_COUNT + 1;
+    EXPECT_EQ(fromHipdnnBehaviorNote(UNKNOWN_NOTE), static_cast<BehaviorNote>(UNKNOWN_NOTE));
+}
+
+TEST(TestTypes, IsKnownBehaviorNote)
+{
+    using namespace hipdnn_frontend;
+
+    EXPECT_TRUE(isKnownBehaviorNote(BehaviorNote::RUNTIME_COMPILATION));
+    EXPECT_TRUE(isKnownBehaviorNote(BehaviorNote::REQUIRES_LAYOUT_TRANSFORM));
+    EXPECT_TRUE(isKnownBehaviorNote(BehaviorNote::SUPPORTS_GRAPH_CAPTURE));
+    EXPECT_TRUE(isKnownBehaviorNote(BehaviorNote::EXTERNAL_LIBRARY_DEPENDENCY));
+    EXPECT_TRUE(isKnownBehaviorNote(BehaviorNote::SUPPORTS_EXECUTION_PLAN_SERIALIZATION));
+    EXPECT_FALSE(isKnownBehaviorNote(static_cast<BehaviorNote>(HIPDNN_BEHAVIOR_NOTE_TYPE_COUNT)));
+}
+
+TEST(TestTypes, BehaviorNoteToString)
+{
+    using namespace hipdnn_frontend;
+
+    EXPECT_STREQ(to_string(BehaviorNote::RUNTIME_COMPILATION), "RUNTIME_COMPILATION");
+    EXPECT_STREQ(to_string(BehaviorNote::REQUIRES_LAYOUT_TRANSFORM), "REQUIRES_LAYOUT_TRANSFORM");
+    EXPECT_STREQ(to_string(BehaviorNote::SUPPORTS_GRAPH_CAPTURE), "SUPPORTS_GRAPH_CAPTURE");
+    EXPECT_STREQ(to_string(BehaviorNote::EXTERNAL_LIBRARY_DEPENDENCY),
+                 "EXTERNAL_LIBRARY_DEPENDENCY");
+    EXPECT_STREQ(to_string(BehaviorNote::SUPPORTS_EXECUTION_PLAN_SERIALIZATION),
+                 "SUPPORTS_EXECUTION_PLAN_SERIALIZATION");
+    EXPECT_STREQ(to_string(static_cast<BehaviorNote>(-1)), "unknown");
+
+    std::ostringstream oss;
+    oss << BehaviorNote::SUPPORTS_GRAPH_CAPTURE;
+    EXPECT_EQ(oss.str(), "SUPPORTS_GRAPH_CAPTURE");
 }
 
 TEST(TestTypes, GetDataTypeEnumFromType)
@@ -53,7 +116,29 @@ TEST(TestTypes, DataTypeToString)
     EXPECT_STREQ(to_string(DataType::FP6_E3M2), "fp6_e3m2");
     EXPECT_STREQ(to_string(DataType::INT64), "int64");
     EXPECT_STREQ(to_string(DataType::BOOLEAN), "boolean");
+    EXPECT_STREQ(to_string(DataType::INT8x4), "int8x4");
+    EXPECT_STREQ(to_string(DataType::UINT8x4), "uint8x4");
+    EXPECT_STREQ(to_string(DataType::INT8x32), "int8x32");
+    EXPECT_STREQ(to_string(DataType::FAST_FLOAT_FOR_FP8), "fast_float_for_fp8");
+    EXPECT_STREQ(to_string(DataType::COMPLEX_FP32), "complex_fp32");
+    EXPECT_STREQ(to_string(DataType::COMPLEX_FP64), "complex_fp64");
     EXPECT_STREQ(to_string(DataType::NOT_SET), "unknown");
+}
+
+TEST(TestTypes, DataTypeCudnnCompatHasNoBackendMapping)
+{
+    using namespace hipdnn_frontend;
+
+    for(auto dt : {DataType::INT8x4,
+                   DataType::UINT8x4,
+                   DataType::INT8x32,
+                   DataType::FAST_FLOAT_FOR_FP8,
+                   DataType::COMPLEX_FP32,
+                   DataType::COMPLEX_FP64})
+    {
+        EXPECT_EQ(toHipdnnDataType(dt), std::nullopt)
+            << "Unexpected backend mapping for " << to_string(dt);
+    }
 }
 
 TEST(TestTypes, PointwiseModeToString)
@@ -64,6 +149,9 @@ TEST(TestTypes, PointwiseModeToString)
     EXPECT_STREQ(to_string(PointwiseMode::RELU_FWD), "RELU_FWD");
     EXPECT_STREQ(to_string(PointwiseMode::ADD), "ADD");
     EXPECT_STREQ(to_string(PointwiseMode::BINARY_SELECT), "BINARY_SELECT");
+    EXPECT_STREQ(to_string(PointwiseMode::MOD), "MOD");
+    EXPECT_STREQ(to_string(PointwiseMode::POW), "POW");
+    EXPECT_STREQ(to_string(PointwiseMode::COS), "COS");
     EXPECT_STREQ(to_string(PointwiseMode::COUNT), "UNKNOWN");
 
     // Verify all valid modes produce a non-UNKNOWN string
@@ -114,13 +202,44 @@ TEST(TestTypes, PointwiseModeToString)
                      PointwiseMode::SWISH_FWD,
                      PointwiseMode::TAN,
                      PointwiseMode::TANH_BWD,
-                     PointwiseMode::TANH_FWD})
+                     PointwiseMode::TANH_FWD,
+                     PointwiseMode::MOD,
+                     PointwiseMode::POW,
+                     PointwiseMode::COS})
     {
         EXPECT_STRNE(to_string(mode), "UNKNOWN")
             << "to_string returned UNKNOWN for PointwiseMode " << static_cast<int>(mode);
         EXPECT_STRNE(to_string(mode), "")
             << "to_string returned empty for PointwiseMode " << static_cast<int>(mode);
     }
+}
+
+TEST(TestTypes, PointwiseModeCudnnCompatClassificationAndMapping)
+{
+    using namespace hipdnn_frontend;
+
+    EXPECT_TRUE(isUnaryPointwiseMode(PointwiseMode::COS));
+    EXPECT_TRUE(isBinaryPointwiseMode(PointwiseMode::MOD));
+    EXPECT_TRUE(isBinaryPointwiseMode(PointwiseMode::POW));
+
+    EXPECT_FALSE(isBinaryPointwiseMode(PointwiseMode::COS));
+    EXPECT_FALSE(isUnaryPointwiseMode(PointwiseMode::MOD));
+    EXPECT_FALSE(isUnaryPointwiseMode(PointwiseMode::POW));
+
+    for(auto mode : {PointwiseMode::MOD, PointwiseMode::POW, PointwiseMode::COS})
+    {
+        EXPECT_EQ(toBackendPointwiseMode(mode), std::nullopt)
+            << "Unexpected backend mapping for " << to_string(mode);
+    }
+}
+
+TEST(TestTypes, ResampleAndPaddingCudnnCompatHaveNoBackendMapping)
+{
+    using namespace hipdnn_frontend;
+
+    EXPECT_EQ(toBackendResampleMode(ResampleMode::BILINEAR), std::nullopt);
+    EXPECT_EQ(toBackendResampleMode(ResampleMode::NEAREST), std::nullopt);
+    EXPECT_EQ(toBackendPaddingMode(PaddingMode::EDGE_VAL_PAD), std::nullopt);
 }
 
 TEST(TestTypes, DataTypeStreamOperator)

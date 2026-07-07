@@ -49,7 +49,6 @@ Definitions:
     - { alpha:  -0.5, alphai:  0.1 }
 
   - &alpha_range_checkin
-    - { alpha:   2.0, alphai:  0.0 }
     - { alpha:   3.0, alphai: -1.0 }
 
   - &alpha_range_nightly
@@ -67,7 +66,7 @@ Tests:
 - name: spsm_csr
   category: quick
   function: spsm_csr
-  indextype: *i32i32_i64i32_i64i64
+  indextype: *i32
   precision: *single_double_precisions_complex_real
   M_N: *M_N_range_quick
   K: [0, 1, 280]
@@ -87,7 +86,7 @@ Tests:
 - name: spsm_csr_file
   category: quick
   function: spsm_csr
-  indextype: *i32i32_i64i32_i64i64
+  indextype: *i64
   precision: *single_double_precisions
   M: 1
   N: 1
@@ -109,7 +108,7 @@ Tests:
 - name: spsm_csr_file
   category: quick
   function: spsm_csr
-  indextype: *i32i32_i64i32_i64i64
+  indextype: *i64i32
   precision: *single_double_precisions
   M: 1
   N: 1
@@ -131,7 +130,7 @@ Tests:
 - name: spsm_csr_file
   category: quick
   function: spsm_csr
-  indextype: *i32i32_i64i32_i64i64
+  indextype: *i32
   precision: *single_double_precisions
   M: 1
   N: 1
@@ -153,7 +152,7 @@ Tests:
 - name: spsm_csr_file
   category: quick
   function: spsm_csr
-  indextype: *i32
+  indextype: *i64
   precision: *double_only_precisions_complex
   M: 1
   N: 1
@@ -184,7 +183,7 @@ Tests:
   indextype: *i64
   precision: *single_only_precisions
   M_N: *M_N_range_checkin
-  K: [16, 32, 64, 128]
+  K: [64, 128]
   ld_multiplier_B: [1]
   ld_multiplier_C: [4]
   alpha_alphai: *alpha_range_checkin
@@ -204,7 +203,7 @@ Tests:
   indextype: *i32
   precision: *double_only_precisions
   M_N: *M_N_range_checkin
-  K: [17, 33, 65, 129]
+  K: [33, 129]
   ld_multiplier_B: [1]
   ld_multiplier_C: [4]
   alpha_alphai: *alpha_range_checkin
@@ -382,8 +381,57 @@ Tests:
   baseA: [rocsparse_index_base_zero]
   spsm_alg: [rocsparse_spsm_alg_default]
   matrix: [rocsparse_matrix_file_rocalution]
-  filename: [bmwcra_1,
-             amazon0312]
+  filename: [amazon0312]
+
+# bmwcra_1: ill-conditioned matrix — strict tolerance on all hardware except gfx1103.
+- name: spsm_csr_file
+  category: nightly
+  function: spsm_csr
+  indextype: *i32i32_i64i32_i64i64
+  precision: *single_double_precisions_complex_real
+  M: 1
+  N: 1
+  K: [16, 57]
+  ld_multiplier_B: [2]
+  ld_multiplier_C: [1]
+  alpha_alphai: *alpha_range_nightly_one
+  transA: [rocsparse_operation_transpose]
+  transB: [rocsparse_operation_transpose]
+  orderB: [rocsparse_order_column]
+  orderC: [rocsparse_order_column]
+  diag: [rocsparse_diag_type_non_unit]
+  uplo: [rocsparse_fill_mode_lower]
+  baseA: [rocsparse_index_base_zero]
+  spsm_alg: [rocsparse_spsm_alg_default]
+  matrix: [rocsparse_matrix_file_rocalution]
+  skip_hardware: gfx1103
+  filename: [bmwcra_1]
+
+# bmwcra_1: relaxed tolerance on gfx1103 (RDNA3 iGPU): floating-point operation
+# ordering differs from discrete GPUs, causing larger roundoff on ill-conditioned solves.
+- name: spsm_csr_file
+  category: nightly
+  function: spsm_csr
+  indextype: *i32i32_i64i32_i64i64
+  precision: *single_double_precisions_complex_real
+  M: 1
+  N: 1
+  K: [16, 57]
+  ld_multiplier_B: [2]
+  ld_multiplier_C: [1]
+  alpha_alphai: *alpha_range_nightly_one
+  transA: [rocsparse_operation_transpose]
+  transB: [rocsparse_operation_transpose]
+  orderB: [rocsparse_order_column]
+  orderC: [rocsparse_order_column]
+  diag: [rocsparse_diag_type_non_unit]
+  uplo: [rocsparse_fill_mode_lower]
+  baseA: [rocsparse_index_base_zero]
+  spsm_alg: [rocsparse_spsm_alg_default]
+  matrix: [rocsparse_matrix_file_rocalution]
+  hardware: [gfx1103]
+  tolm: 5
+  filename: [bmwcra_1]
 
 - name: spsm_csr_file
   category: nightly

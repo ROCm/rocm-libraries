@@ -89,6 +89,7 @@ set(HIPSPARSE_TEST_SOURCES
     test_sddmm_coo_aos.cpp
     test_sddmm_csc.cpp
     test_sddmm_csr.cpp
+    test_sddmm_csr_reuse_descr.cpp
     test_sparse_to_dense_coo.cpp
     test_sparse_to_dense_csc.cpp
     test_sparse_to_dense_csr.cpp
@@ -99,12 +100,15 @@ set(HIPSPARSE_TEST_SOURCES
     test_spmm_batched_csc.cpp
     test_spmm_batched_csr.cpp
     test_spmm_bell.cpp
+    test_spmm_bsr.cpp
     test_spmm_coo.cpp
     test_spmm_csc.cpp
     test_spmm_csr.cpp
+    test_spmm_csr_reuse_descr.cpp
     test_spmv_coo.cpp
     test_spmv_coo_aos.cpp
     test_spmv_csr.cpp
+    test_spmv_csr_reuse_descr.cpp
     test_spmv_csr_pytorch_compat.cpp
     test_spmv_sell.cpp
     test_spsm_coo.cpp
@@ -198,6 +202,7 @@ set(HIPSPARSE_TEST_YAMLS
     rocm/test_sddmm_coo_aos.yaml
     rocm/test_sddmm_csc.yaml
     rocm/test_sddmm_csr.yaml
+    rocm/test_sddmm_csr_reuse_descr.yaml
     rocm/test_sparse_to_dense_coo.yaml
     rocm/test_sparse_to_dense_csc.yaml
     rocm/test_sparse_to_dense_csr.yaml
@@ -206,12 +211,16 @@ set(HIPSPARSE_TEST_YAMLS
     rocm/test_spmm_batched_coo.yaml
     rocm/test_spmm_batched_csc.yaml
     rocm/test_spmm_batched_csr.yaml
+    rocm/test_spmm_bell.yaml
+    rocm/test_spmm_bsr.yaml
     rocm/test_spmm_coo.yaml
     rocm/test_spmm_csc.yaml
     rocm/test_spmm_csr.yaml
+    rocm/test_spmm_csr_reuse_descr.yaml
     rocm/test_spmv_coo.yaml
     rocm/test_spmv_coo_aos.yaml
     rocm/test_spmv_csr.yaml
+    rocm/test_spmv_csr_reuse_descr.yaml
     rocm/test_spmv_sell.yaml
     rocm/test_spsm_coo.yaml
     rocm/test_spsm_csr.yaml
@@ -220,3 +229,8 @@ set(HIPSPARSE_TEST_YAMLS
     rocm/test_spsv_coo.yaml
     rocm/test_spsv_csr.yaml
     rocm/test_spvv.yaml)
+
+if(HIPSPARSE_ENABLE_SPMV_BSR)
+    list(APPEND HIPSPARSE_TEST_SOURCES test_spmv_bsr.cpp)
+    list(APPEND HIPSPARSE_TEST_YAMLS rocm/test_spmv_bsr.yaml)
+endif()

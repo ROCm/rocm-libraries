@@ -21,11 +21,14 @@
  *
  * This file also contains conversion utilities between frontend types and
  * the backend C API types (hipdnn_backend.h).
+ *
+ * Portions derived from NVIDIA cuDNN frontend, used under the MIT license.
  */
 
 #pragma once
 
 #include <HipdnnAttentionImplementation.h>
+#include <HipdnnBackendBehaviorNote.h>
 #include <HipdnnBackendHeuristicType.h>
 #include <HipdnnConvolutionMode.h>
 #include <HipdnnDataType.h>
@@ -39,6 +42,7 @@
 
 #include <hipdnn_frontend/Error.hpp>
 
+#include <cstdint>
 #include <optional>
 #include <ostream>
 #include <string>
@@ -49,7 +53,9 @@ namespace hipdnn_frontend
 {
 using hipdnn_data_sdk::types::bfloat16;
 using hipdnn_data_sdk::types::fp8_e4m3;
+using hipdnn_data_sdk::types::fp8_e4m3_fnuz;
 using hipdnn_data_sdk::types::fp8_e5m2;
+using hipdnn_data_sdk::types::fp8_e5m2_fnuz;
 using hipdnn_data_sdk::types::half;
 
 /**
@@ -125,7 +131,10 @@ enum class PointwiseMode
     TAN = 45, ///< Tangent function
     TANH_BWD = 46, ///< Tanh backward pass
     TANH_FWD = 47, ///< Tanh forward pass
-    COUNT = 48 ///< Number of pointwise modes (sentinel — not a valid mode)
+    MOD = 48, ///< Modulo: x mod y (binary)
+    POW = 49, ///< Power: x raised to y (binary)
+    COS = 50, ///< Cosine function (unary)
+    COUNT = 51 ///< Number of pointwise modes (sentinel — not a valid mode)
 };
 typedef PointwiseMode PointwiseMode_t; ///< @brief Type alias for PointwiseMode
 
@@ -159,7 +168,9 @@ enum class ResampleMode
     NOT_SET = 0, ///< Resample mode not specified
     MAXPOOL = 1, ///< Maximum pooling
     AVGPOOL_EXCLUDE_PADDING = 2, ///< Average pooling (excludes padding from divisor)
-    AVGPOOL_INCLUDE_PADDING = 3 ///< Average pooling (includes padding in divisor)
+    AVGPOOL_INCLUDE_PADDING = 3, ///< Average pooling (includes padding in divisor)
+    BILINEAR = 4, ///< Bilinear resampling
+    NEAREST = 5 ///< Nearest-neighbor resampling
 };
 typedef ResampleMode ResampleMode_t; ///< @brief Type alias for ResampleMode
 
@@ -171,7 +182,8 @@ enum class PaddingMode
 {
     NOT_SET = 0, ///< Padding mode not specified
     NEG_INF_PAD = 1, ///< Pad with negative infinity
-    ZERO_PAD = 2 ///< Pad with zeros
+    ZERO_PAD = 2, ///< Pad with zeros
+    EDGE_VAL_PAD = 3 ///< Pad with the edge value
 };
 typedef PaddingMode PaddingMode_t; ///< @brief Type alias for PaddingMode
 
@@ -201,6 +213,17 @@ enum class DataType
     FP6_E3M2 = 14, ///< 6-bit floating point (3 exponent, 2 mantissa bits)
     INT64 = 15, ///< 64-bit signed integer
     BOOLEAN = 16, ///< 8-bit boolean
+    FP8_E4M3_FNUZ = 17, ///< 8-bit floating point (4 exponent, 3 mantissa bits, FNUZ)
+    FP8_E5M2_FNUZ = 18, ///< 8-bit floating point (5 exponent, 2 mantissa bits, FNUZ)
+    // NOLINTNEXTLINE(readability-identifier-naming)
+    INT8x4 = 19, ///< Four packed 8-bit signed integers (vectorized layout)
+    // NOLINTNEXTLINE(readability-identifier-naming)
+    UINT8x4 = 20, ///< Four packed 8-bit unsigned integers (vectorized layout)
+    // NOLINTNEXTLINE(readability-identifier-naming)
+    INT8x32 = 21, ///< Thirty-two packed 8-bit signed integers (vectorized layout)
+    FAST_FLOAT_FOR_FP8 = 22, ///< Fast floating-point accumulation type for FP8
+    COMPLEX_FP32 = 23, ///< Complex number with 32-bit floating-point components
+    COMPLEX_FP64 = 24, ///< Complex number with 64-bit floating-point components
 };
 typedef DataType DataType_t; ///< @brief Type alias for DataType
 
@@ -253,8 +276,25 @@ typedef AttentionImplementation
 enum class HeuristicMode
 {
     FALLBACK, ///< Use fallback heuristics for engine selection
+    A, ///< cuDNN heuristic mode A (mapped to fallback for now)
+    B, ///< cuDNN heuristic mode B (mapped to fallback for now)
+    OPENSOURCE, ///< cuDNN open-source heuristic mode (mapped to fallback for now)
 };
 typedef HeuristicMode HeurMode_t; ///< @brief Type alias for HeuristicMode
+
+/**
+ * @enum BehaviorNote
+ * @brief Advisory behavior metadata reported by an engine
+ */
+enum class BehaviorNote : int32_t
+{
+    RUNTIME_COMPILATION = 0, ///< Engine may compile kernels or other code at runtime.
+    REQUIRES_LAYOUT_TRANSFORM = 1, ///< Engine may require internal tensor layout transforms.
+    SUPPORTS_GRAPH_CAPTURE = 2, ///< Engine supports execution during stream graph capture.
+    EXTERNAL_LIBRARY_DEPENDENCY = 3, ///< Engine depends on a library outside core hipDNN.
+    SUPPORTS_EXECUTION_PLAN_SERIALIZATION = 4 ///< Engine supports execution plan serialization.
+};
+typedef BehaviorNote BehaviorNote_t; ///< @brief Type alias for BehaviorNote
 
 /**
  * @enum BuildPlanPolicy
@@ -263,7 +303,7 @@ typedef HeuristicMode HeurMode_t; ///< @brief Type alias for HeuristicMode
 enum class BuildPlanPolicy
 {
     HEURISTICS_CHOICE, ///< Use heuristics to select the best plan
-    ALL ///< Build all available plans (currently unused)
+    ALL ///< Build all available plans
 };
 typedef BuildPlanPolicy BuildPlanPolicy_t; ///< @brief Type alias for BuildPlanPolicy
 
@@ -351,9 +391,17 @@ DataType getDataTypeEnumFromType()
     {
         return DataType::FP8_E4M3;
     }
+    else if constexpr(std::is_same_v<T, fp8_e4m3_fnuz>)
+    {
+        return DataType::FP8_E4M3_FNUZ;
+    }
     else if constexpr(std::is_same_v<T, fp8_e5m2>)
     {
         return DataType::FP8_E5M2;
+    }
+    else if constexpr(std::is_same_v<T, fp8_e5m2_fnuz>)
+    {
+        return DataType::FP8_E5M2_FNUZ;
     }
     else if constexpr(std::is_same_v<T, bool>)
     {
@@ -710,6 +758,10 @@ inline std::optional<hipdnnDataType_t> toHipdnnDataType(const DataType& type)
         return HIPDNN_DATA_INT64;
     case DataType::BOOLEAN:
         return HIPDNN_DATA_BOOLEAN;
+    case DataType::FP8_E4M3_FNUZ:
+        return HIPDNN_DATA_FP8_E4M3_FNUZ;
+    case DataType::FP8_E5M2_FNUZ:
+        return HIPDNN_DATA_FP8_E5M2_FNUZ;
     case DataType::NOT_SET:
     default:
         return std::nullopt;
@@ -760,6 +812,10 @@ inline std::pair<DataType, Error> fromHipdnnDataType(hipdnnDataType_t type)
         return {DataType::INT64, {}};
     case HIPDNN_DATA_BOOLEAN:
         return {DataType::BOOLEAN, {}};
+    case HIPDNN_DATA_FP8_E4M3_FNUZ:
+        return {DataType::FP8_E4M3_FNUZ, {}};
+    case HIPDNN_DATA_FP8_E5M2_FNUZ:
+        return {DataType::FP8_E5M2_FNUZ, {}};
     default:
         return {DataType::NOT_SET,
                 {ErrorCode::HIPDNN_BACKEND_ERROR,
@@ -878,10 +934,80 @@ inline hipdnnBackendHeurMode_t toBackendType(const HeuristicMode& type)
 {
     switch(type)
     {
+    // All cuDNN heuristic modes currently fold to hipDNN fallback.
     case HeuristicMode::FALLBACK:
+    case HeuristicMode::A:
+    case HeuristicMode::B:
+    case HeuristicMode::OPENSOURCE:
     default:
         return hipdnnBackendHeurMode_t::HIPDNN_HEUR_MODE_FALLBACK;
     }
+}
+
+/// @brief Convert backend behavior note to frontend behavior note.
+/// @return A frontend behavior note. Unknown values are preserved numerically.
+inline BehaviorNote fromHipdnnBehaviorNote(hipdnnBackendBehaviorNote_t note)
+{
+    switch(note)
+    {
+    case HIPDNN_BEHAVIOR_NOTE_RUNTIME_COMPILATION:
+        return BehaviorNote::RUNTIME_COMPILATION;
+    case HIPDNN_BEHAVIOR_NOTE_REQUIRES_LAYOUT_TRANSFORM:
+        return BehaviorNote::REQUIRES_LAYOUT_TRANSFORM;
+    case HIPDNN_BEHAVIOR_NOTE_SUPPORTS_GRAPH_CAPTURE:
+        return BehaviorNote::SUPPORTS_GRAPH_CAPTURE;
+    case HIPDNN_BEHAVIOR_NOTE_EXTERNAL_LIBRARY_DEPENDENCY:
+        return BehaviorNote::EXTERNAL_LIBRARY_DEPENDENCY;
+    case HIPDNN_BEHAVIOR_NOTE_SUPPORTS_EXECUTION_PLAN_SERIALIZATION:
+        return BehaviorNote::SUPPORTS_EXECUTION_PLAN_SERIALIZATION;
+    default:
+        return static_cast<BehaviorNote>(note);
+    }
+}
+
+/// @brief Return true if a behavior note is known to this frontend version.
+inline bool isKnownBehaviorNote(const BehaviorNote& note)
+{
+    switch(note)
+    {
+    case BehaviorNote::RUNTIME_COMPILATION:
+    case BehaviorNote::REQUIRES_LAYOUT_TRANSFORM:
+    case BehaviorNote::SUPPORTS_GRAPH_CAPTURE:
+    case BehaviorNote::EXTERNAL_LIBRARY_DEPENDENCY:
+    case BehaviorNote::SUPPORTS_EXECUTION_PLAN_SERIALIZATION:
+        return true;
+    default:
+        return false;
+    }
+}
+
+/// @brief Convert BehaviorNote to a human-readable string
+/// @param note The behavior note to convert
+/// @return A C-string representation of the behavior note
+// NOLINTNEXTLINE(readability-identifier-naming)
+inline const char* to_string(const BehaviorNote& note)
+{
+    switch(note)
+    {
+    case BehaviorNote::RUNTIME_COMPILATION:
+        return "RUNTIME_COMPILATION";
+    case BehaviorNote::REQUIRES_LAYOUT_TRANSFORM:
+        return "REQUIRES_LAYOUT_TRANSFORM";
+    case BehaviorNote::SUPPORTS_GRAPH_CAPTURE:
+        return "SUPPORTS_GRAPH_CAPTURE";
+    case BehaviorNote::EXTERNAL_LIBRARY_DEPENDENCY:
+        return "EXTERNAL_LIBRARY_DEPENDENCY";
+    case BehaviorNote::SUPPORTS_EXECUTION_PLAN_SERIALIZATION:
+        return "SUPPORTS_EXECUTION_PLAN_SERIALIZATION";
+    default:
+        return "unknown";
+    }
+}
+
+inline std::ostream& operator<<(std::ostream& os, const BehaviorNote& note)
+{
+    os << to_string(note);
+    return os;
 }
 
 /**
@@ -949,6 +1075,22 @@ inline const char* to_string(const DataType& type)
         return "int64";
     case DataType::BOOLEAN:
         return "boolean";
+    case DataType::FP8_E4M3_FNUZ:
+        return "fp8_e4m3_fnuz";
+    case DataType::FP8_E5M2_FNUZ:
+        return "fp8_e5m2_fnuz";
+    case DataType::INT8x4:
+        return "int8x4";
+    case DataType::UINT8x4:
+        return "uint8x4";
+    case DataType::INT8x32:
+        return "int8x32";
+    case DataType::FAST_FLOAT_FOR_FP8:
+        return "fast_float_for_fp8";
+    case DataType::COMPLEX_FP32:
+        return "complex_fp32";
+    case DataType::COMPLEX_FP64:
+        return "complex_fp64";
     default:
         return "unknown";
     }
@@ -1062,6 +1204,12 @@ inline const char* to_string(const PointwiseMode& mode)
         return "TANH_BWD";
     case PointwiseMode::TANH_FWD:
         return "TANH_FWD";
+    case PointwiseMode::MOD:
+        return "MOD";
+    case PointwiseMode::POW:
+        return "POW";
+    case PointwiseMode::COS:
+        return "COS";
     default:
         return "UNKNOWN";
     }
@@ -1102,6 +1250,12 @@ inline const char* to_string(const HeuristicMode& mode)
     {
     case HeuristicMode::FALLBACK:
         return "FALLBACK";
+    case HeuristicMode::A:
+        return "A";
+    case HeuristicMode::B:
+        return "B";
+    case HeuristicMode::OPENSOURCE:
+        return "OPENSOURCE";
     default:
         return "unknown";
     }
@@ -1315,6 +1469,7 @@ inline bool isUnaryPointwiseMode(PointwiseMode mode)
     case PointwiseMode::SWISH_FWD:
     case PointwiseMode::TAN:
     case PointwiseMode::TANH_FWD:
+    case PointwiseMode::COS:
         return true;
     default:
         return false;
@@ -1353,6 +1508,8 @@ inline bool isBinaryPointwiseMode(PointwiseMode mode)
     case PointwiseMode::SUB:
     case PointwiseMode::SWISH_BWD:
     case PointwiseMode::TANH_BWD:
+    case PointwiseMode::MOD:
+    case PointwiseMode::POW:
         return true;
     default:
         return false;

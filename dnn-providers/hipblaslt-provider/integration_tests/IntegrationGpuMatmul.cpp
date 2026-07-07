@@ -17,33 +17,29 @@ template <typename DataType>
 class IntegrationGpuMatmul : public IntegrationGpuMatmulBase<DataType, MatmulTestCase>
 {
 protected:
-    virtual std::shared_ptr<graph::TensorAttributes>
+    std::shared_ptr<graph::TensorAttributes>
         initGraph(const MatmulTestCase& testParams,
                   hipdnn_frontend::graph::Graph& graphObj) const override
     {
         auto aAttr = graph::makeTensorAttributes(
-            "a",
-            testParams.aDims,
-            this->generateInputStrideOrder(testParams.aDims, testParams.transA));
+            "a", testParams.aDims, generateInputStrideOrder(testParams.aDims, testParams.transA));
         auto aTensorAttr = std::make_shared<graph::TensorAttributes>(std::move(aAttr));
 
         auto bAttr = graph::makeTensorAttributes(
-            "b",
-            testParams.bDims,
-            this->generateInputStrideOrder(testParams.bDims, testParams.transB));
+            "b", testParams.bDims, generateInputStrideOrder(testParams.bDims, testParams.transB));
         auto bTensorAttr = std::make_shared<graph::TensorAttributes>(std::move(bAttr));
 
-        graph::MatmulAttributes matmulAttrs;
+        graph::MatmulAttributes const matmulAttrs;
 
         return graphObj.matmul(aTensorAttr, bTensorAttr, matmulAttrs);
     };
 
-    virtual std::string getGraphName() const override
+    std::string getGraphName() const override
     {
         return "MatmulTest";
     }
 
-    virtual unsigned int getSeed(const MatmulTestCase& testParams) const override
+    unsigned int getSeed(const MatmulTestCase& testParams) const override
     {
         return testParams.seed;
     }

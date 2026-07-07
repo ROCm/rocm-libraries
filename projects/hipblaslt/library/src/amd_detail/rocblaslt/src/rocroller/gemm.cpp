@@ -656,8 +656,50 @@ size_t RocRollerGemmKernel::workspaceRequired(const RocblasltContractionProblem&
     return commandKernel->scratchSpaceRequired(Operations::ScratchPolicy::None, runtimeArgs);
 }
 
+bool RocRollerGemmKernel::exceedsBufferAddressingLimit(
+    const RocblasltContractionProblem& prob) const
+{
+    // rocRoller addresses each tensor through one AMD buffer descriptor whose num_records
+    // (byte-count) field is 32 bits: it is set to ToBytes(tensor size, elementBits) and packed
+    // into the low 32 bits by BufferDescriptor::SetSize (see rocRoller's AssignIndexExpressions
+    // and CodeGen/Buffer). A byte extent >= 4 GiB therefore wraps num_records, after which
+    // out-of-bounds accesses are silently dropped (stores) or read back as 0 (loads) -- the
+    // kernel runs but produces an all-zero/wrong result. Detect that here so such problems are
+    // reported unsupported ("no solution found") instead of returning silently-wrong output.
+    //
+    // The byte extent below mirrors num_records exactly because both use elementBits (note:
+    // not sizeof(T), which differs for sub-byte types such as FP4/FP6). Extents are packed:
+    // createCommandArguments builds {M,N}/{M,K}/{K,N} descriptors with no leading-dimension
+    // padding, and batch_count is always 1 on this path (enforced in getRocRollerBestSolutions).
+    constexpr size_t kMaxBufferBytes = size_t(1) << 32; // 4 GiB
+    auto             bytesOf = [](size_t elems, rocRoller::DataType t) -> size_t {
+        return (elems * rocRoller::DataTypeInfo::Get(t).elementBits + 7u) / 8u; // ceil for sub-byte types
+    };
+    const size_t M = prob.m, N = prob.n, K = prob.k;
+    auto         over = [&](const char* name, size_t bytes) -> bool {
+        if(bytes < kMaxBufferBytes)
+            return false;
+        if(get_logger_layer_mode() & rocblaslt_layer_mode_log_info)
+        {
+            std::ostringstream msg;
+            msg << "rocRoller cannot address operand " << name << " (" << bytes
+                << " bytes): a single buffer descriptor is limited to < 4 GiB (32-bit "
+                   "num_records). Reporting problem as unsupported.";
+            log_info("exceedsBufferAddressingLimit", msg.str());
+        }
+        return true;
+    };
+    return over("A", bytesOf(M * K, params->kernelType.typeA))
+           || over("B", bytesOf(K * N, params->kernelType.typeB))
+           || over("C", bytesOf(M * N, params->kernelType.typeC))
+           || over("D", bytesOf(M * N, params->kernelType.typeD));
+}
+
 bool RocRollerGemmKernel::isSupportedProblem(const RocblasltContractionProblem& prob)
 {
+    if(exceedsBufferAddressingLimit(prob))
+        return false;
+
     auto workSpaceRequired = this->workspaceRequired(prob);
 
     if(workSpaceRequired > prob.workspaceSize)
@@ -751,6 +793,11 @@ CommandArguments RocRollerGemmKernel::createCommandArguments(const RocblasltCont
 
 rocblaslt_status RocRollerGemmKernel::run(const RocblasltContractionProblem& prob)
 {
+    // Also guard the execution path: an algo selected for a smaller problem (or resolved by
+    // index) can be replayed on a larger one, bypassing isSupportedProblem.
+    if(exceedsBufferAddressingLimit(prob))
+        return rocblaslt_status_invalid_value;
+
     auto workSpaceRequired = this->workspaceRequired(prob);
 
     if(workSpaceRequired > prob.workspaceSize)

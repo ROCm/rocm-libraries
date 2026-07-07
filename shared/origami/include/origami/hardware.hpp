@@ -37,6 +37,7 @@
 
 #include "origami/architecture.hpp"
 #include "origami/types.hpp"
+#include "origami/origami_export.h"
 
 namespace origami {
 
@@ -44,7 +45,7 @@ namespace origami {
  * @brief Represents hardware characteristics and capabilities of GPU architectures.
  *
  */
-class hardware_t {
+class ORIGAMI_EXPORT hardware_t {
  public:
   // Architecture identity and the microbenchmarked constants table now live in
   // the HIP-free origami/architecture.hpp so that consumers without a ROCm
@@ -450,6 +451,7 @@ class hardware_t {
   architecture_t arch;  ///< GPU architecture type
   size_t N_CU;          ///< Number of Compute Units
   size_t lds_capacity;  ///< Capacity of Local Data Share (LDS) in bytes
+  size_t rf_capacity;   ///< Capacity of Register File (RF) in bytes
   double mem1_perf_ratio;
   double mem2_perf_ratio;
   double mem3_perf_ratio;
@@ -467,6 +469,7 @@ class hardware_t {
    * @param arch GPU architecture type
    * @param N_CU Number of compute units
    * @param lds_capacity LDS capacity in bytes
+   * @param rf_capacity RF capacity in bytes
    * @param NUM_XCD Number of XCDs
    * @param mem1_perf_ratio Memory level 1 performance ratio
    * @param mem2_perf_ratio Memory level 2 performance ratio
@@ -479,6 +482,7 @@ class hardware_t {
   hardware_t(architecture_t arch,
              size_t N_CU,
              size_t lds_capacity,
+             size_t rf_capacity,
              size_t NUM_XCD,
              double mem1_perf_ratio,
              double mem2_perf_ratio,
@@ -497,6 +501,7 @@ class hardware_t {
    * @param arch GPU architecture type
    * @param N_CU Number of compute units
    * @param lds_capacity LDS capacity in bytes
+   * @param rf_capacity RF capacity in bytes
    * @param constants Architecture-specific constants
    * @param num_xcds Number of XCDs — provided separately from constants so that
    *                 it can come from a runtime query or a known-architecture table
@@ -507,6 +512,7 @@ class hardware_t {
   hardware_t(architecture_t arch,
              size_t N_CU,
              size_t lds_capacity,
+             size_t rf_capacity,
              const architecture_constants& constants,
              size_t num_xcds,
              size_t L2_capacity,
@@ -592,6 +598,7 @@ class hardware_t {
    * @param arch Architecture enum value
    * @param N_CU Number of compute units
    * @param lds_capacity LDS capacity in bytes
+   * @param rf_capacity LDS capacity in bytes
    * @param L2_capacity L2 cache capacity in bytes
    * @param compute_clock_khz Compute clock in KHz
    * @return hardware_t Configured hardware instance
@@ -600,6 +607,7 @@ class hardware_t {
   static hardware_t get_hardware_for_arch(architecture_t arch,
                                           size_t N_CU,
                                           size_t lds_capacity,
+                                          size_t rf_capacity,
                                           size_t L2_capacity,
                                           int compute_clock_khz);
 

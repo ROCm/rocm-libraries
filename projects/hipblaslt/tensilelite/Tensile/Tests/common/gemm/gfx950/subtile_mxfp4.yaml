@@ -2,12 +2,13 @@ TestParameters:
   marks: [skip-gfx900, skip-gfx906, skip-gfx908, skip-gfx90a, skip-gfx940, skip-gfx941, skip-gfx942, skip-gfx1010, skip-gfx1011, skip-gfx1012, skip-gfx1030, skip-gfx1100, skip-gfx1101, skip-gfx1102, skip-gfx1200, skip-gfx1201, skip-gfx1250] # not supported by arch
 
 GlobalParameters:
+  SyncsPerBenchmark: 0
+  PrintSolutionRejectionReason: True
   NumElementsToValidate: -1
   MinimumRequiredVersion: 5.0.0
   PrintLevel: 3
   Device: 0
   CMakeBuildType: Release
-  MergeFiles: False
   KernelTime: True
   MaxWorkspaceSize: 13421772800
   DataInitTypeA: 3
@@ -21,8 +22,6 @@ GlobalParameters:
   MXScaleFormat: 1
   BoundsCheck: 0
   KeepBuildTmp: True
-  DeviceLDS: 163840
-  MaxLDS: 163840
   #PrintSolutionRejectionReason: True
   #GenerateSourcesAndExit: False
   CpuThreads: 1
@@ -46,8 +45,8 @@ BenchmarkProblems:
       HighPrecisionAccumulate: True
       MXBlockA: 32
       MXBlockB: 32
-      TransposeA: 1
-      TransposeB: 0
+      TransposeA: True
+      TransposeB: False
       UseBeta: True
       Batched: True
       ActivationFuncCall: True
@@ -77,14 +76,14 @@ BenchmarkProblems:
           # 1x4 wave group
           - [16, 16, 128, 1,  1, 2, 6,  1, 4]  # MT 32x384
           - [16, 16, 128, 1,  1, 6, 4,  1, 4]  # MT 96x256
-        - PrefetchGlobalRead: [0, 2]
+        - PrefetchGlobalRead: [0, 1, 2]
         - PrefetchLocalRead: [0]
         - DepthU: [256]                 # 2*MI_K = 2*128
         - ScheduleIterAlg: [3]
         - DirectToLds: [1]
         - StreamK: [0, 3]
         - StaggerU: [0]
-        - UseSubtileImpl: [1]
+        - UseSubtileImpl: [true]
       BenchmarkJoinParameters:
       BenchmarkFinalParameters:
         - ProblemSizes:
@@ -140,8 +139,8 @@ BenchmarkProblems:
       HighPrecisionAccumulate: True
       MXBlockA: 32
       MXBlockB: 32
-      TransposeA: 1
-      TransposeB: 0
+      TransposeA: True
+      TransposeB: False
       UseBeta: True
       Batched: True
       ActivationFuncCall: True
@@ -155,14 +154,14 @@ BenchmarkProblems:
           - [16, 16, 128, 1,  1, 8, 8,  2, 2]  # MT 256x256
           - [16, 16, 128, 1,  1, 6, 4,  2, 2]  # MT 192x128 (asymmetric)
           - [16, 16, 128, 1,  1, 2, 6,  4, 1]  # MT 128x96  (4x1 wave group)
-        - PrefetchGlobalRead: [0, 2]
+        - PrefetchGlobalRead: [0, 1, 2]
         - PrefetchLocalRead: [1]
         - DepthU: [512]                 # 4*MI_K; K must be mult of 512
         - ScheduleIterAlg: [3]
         - DirectToLds: [1]
         - StreamK: [0, 3]
         - StaggerU: [0]
-        - UseSubtileImpl: [1]
+        - UseSubtileImpl: [true]
       BenchmarkJoinParameters:
       BenchmarkFinalParameters:
         - ProblemSizes:
@@ -203,8 +202,8 @@ BenchmarkProblems:
       HighPrecisionAccumulate: True
       MXBlockA: 32
       MXBlockB: 32
-      TransposeA: 1
-      TransposeB: 0
+      TransposeA: True
+      TransposeB: False
       UseBeta: True
       Batched: True
       ActivationFuncCall: True
@@ -219,14 +218,14 @@ BenchmarkProblems:
           - [16, 16, 128, 1,  1, 8, 8,  2, 2]  # MT 256x256
           - [16, 16, 128, 1,  1, 6, 4,  2, 2]  # MT 192x128 (asymmetric)
           - [16, 16, 128, 1,  1, 2, 6,  4, 1]  # MT 128x96  (4x1 WG)
-        - PrefetchGlobalRead: [0, 2]
+        - PrefetchGlobalRead: [0, 1, 2]
         - PrefetchLocalRead: [0]
         - DepthU: [256]                 # 2*MI_K = 2*128
         - ScheduleIterAlg: [3]
         - DirectToLds: [1]
         - StreamK: [0, 3]
         - StaggerU: [0]
-        - UseSubtileImpl: [1]
+        - UseSubtileImpl: [true]
       BenchmarkJoinParameters:
       BenchmarkFinalParameters:
         - ProblemSizes:
@@ -269,8 +268,8 @@ BenchmarkProblems:
       HighPrecisionAccumulate: True
       MXBlockA: 32
       MXBlockB: 32
-      TransposeA: 1
-      TransposeB: 0
+      TransposeA: True
+      TransposeB: False
       UseBeta: True
       Batched: True
       Activation: True
@@ -286,14 +285,14 @@ BenchmarkProblems:
           - [16, 16, 128, 1,  1, 4, 4,  2, 2]  # MT 128x128
           - [16, 16, 128, 1,  1, 8, 8,  2, 2]  # MT 256x256
           - [16, 16, 128, 1,  1, 6, 4,  2, 2]  # MT 192x128 (odd M wavetile)
-        - PrefetchGlobalRead: [0]
+        - PrefetchGlobalRead: [0, 1, 2]
         - PrefetchLocalRead: [0]
         - DepthU: [256]
         - ScheduleIterAlg: [3]
         - DirectToLds: [1]
         - StreamK: [0, 3]
         - StaggerU: [0]
-        - UseSubtileImpl: [1]
+        - UseSubtileImpl: [true]
       BenchmarkJoinParameters:
       BenchmarkFinalParameters:
         - ProblemSizes:
@@ -319,8 +318,8 @@ BenchmarkProblems:
       HighPrecisionAccumulate: True
       MXBlockA: 32
       MXBlockB: 32
-      TransposeA: 1
-      TransposeB: 0
+      TransposeA: True
+      TransposeB: False
       UseBeta: True
       Batched: True
       ActivationFuncCall: True
@@ -335,14 +334,14 @@ BenchmarkProblems:
           - [16, 16, 128, 1,  1, 8, 8,  2, 2]  # MT 256x256
           - [16, 16, 128, 1,  1, 6, 4,  2, 2]  # MT 192x128 (asymmetric)
           - [16, 16, 128, 1,  1, 2, 6,  4, 1]  # MT 128x96  (4x1 WG)
-        - PrefetchGlobalRead: [0, 2]
+        - PrefetchGlobalRead: [0, 1, 2]
         - PrefetchLocalRead: [0]
         - DepthU: [256]                 # 2*MI_K = 2*128
         - ScheduleIterAlg: [3]
         - DirectToLds: [1]
         - StreamK: [0, 3]
         - StaggerU: [0]
-        - UseSubtileImpl: [1]
+        - UseSubtileImpl: [true]
       BenchmarkJoinParameters:
       BenchmarkFinalParameters:
         - ProblemSizes:
@@ -386,8 +385,8 @@ BenchmarkProblems:
       HighPrecisionAccumulate: True
       MXBlockA: 32
       MXBlockB: 32
-      TransposeA: 1
-      TransposeB: 0
+      TransposeA: True
+      TransposeB: False
       UseBeta: True
       Batched: True
       Activation: True
@@ -407,14 +406,14 @@ BenchmarkProblems:
           # Odd M wavetile
           - [16, 16, 128, 1,  1, 6, 4,  2, 2]  # MT 192x128
           - [16, 16, 128, 1,  1, 6, 8,  2, 2]  # MT 192x256
-        - PrefetchGlobalRead: [0]
+        - PrefetchGlobalRead: [0, 1, 2]
         - PrefetchLocalRead: [0]
         - DepthU: [256]
         - ScheduleIterAlg: [3]
         - DirectToLds: [1]
         - StreamK: [0, 3]
         - StaggerU: [0]
-        - UseSubtileImpl: [1]
+        - UseSubtileImpl: [true]
       BenchmarkJoinParameters:
       BenchmarkFinalParameters:
         - ProblemSizes:
@@ -443,8 +442,8 @@ BenchmarkProblems:
       HighPrecisionAccumulate: True
       MXBlockA: 32
       MXBlockB: 32
-      TransposeA: 1
-      TransposeB: 0
+      TransposeA: True
+      TransposeB: False
       UseBeta: True
       Batched: True
       Activation: True
@@ -460,14 +459,14 @@ BenchmarkProblems:
           - [16, 16, 128, 1,  1, 4, 4,  2, 2]  # MT 128x128
           - [16, 16, 128, 1,  1, 8, 8,  2, 2]  # MT 256x256
           - [16, 16, 128, 1,  1, 6, 4,  2, 2]  # MT 192x128 (odd M wavetile)
-        - PrefetchGlobalRead: [0]
+        - PrefetchGlobalRead: [0, 1, 2]
         - PrefetchLocalRead: [0]
         - DepthU: [256]
         - ScheduleIterAlg: [3]
         - DirectToLds: [1]
         - StreamK: [0, 3]
         - StaggerU: [0]
-        - UseSubtileImpl: [1]
+        - UseSubtileImpl: [true]
       BenchmarkJoinParameters:
       BenchmarkFinalParameters:
         - ProblemSizes:
@@ -495,8 +494,8 @@ BenchmarkProblems:
       HighPrecisionAccumulate: True
       MXBlockA: 32
       MXBlockB: 32
-      TransposeA: 1
-      TransposeB: 0
+      TransposeA: True
+      TransposeB: False
       UseBeta: True
       Batched: True
       Activation: True
@@ -512,14 +511,14 @@ BenchmarkProblems:
         - MatrixInstruction:
           - [16, 16, 128, 1,  1, 4, 4,  2, 2]  # MT 128x128
           - [16, 16, 128, 1,  1, 6, 4,  2, 2]  # MT 192x128 (asymmetric)
-        - PrefetchGlobalRead: [0,2]
+        - PrefetchGlobalRead: [0, 1, 2]
         - PrefetchLocalRead: [0]
         - DepthU: [256]
         - ScheduleIterAlg: [3]
         - DirectToLds: [1]
         - StreamK: [3]
         - StaggerU: [0]
-        - UseSubtileImpl: [1]
+        - UseSubtileImpl: [true]
       BenchmarkJoinParameters:
       BenchmarkFinalParameters:
         - ProblemSizes:
@@ -551,8 +550,8 @@ BenchmarkProblems:
       HighPrecisionAccumulate: True
       MXBlockA: 32
       MXBlockB: 32
-      TransposeA: 1
-      TransposeB: 0
+      TransposeA: True
+      TransposeB: False
       UseBeta: True
       Batched: True
       ActivationFuncCall: True
@@ -577,14 +576,14 @@ BenchmarkProblems:
           - [16, 16, 128, 1,  1, 4, 6,  2, 2]  # MT 128x192
           - [16, 16, 128, 1,  1, 6, 8,  2, 2]  # MT 192x256
           - [16, 16, 128, 1,  1, 8, 6,  2, 2]  # MT 256x192
-        - PrefetchGlobalRead: [0, 2]
+        - PrefetchGlobalRead: [0, 1, 2]
         - PrefetchLocalRead: [1]
         - DepthU: [256]
         - ScheduleIterAlg: [3]
         - DirectToLds: [1]
         - StreamK: [3]
         - StaggerU: [0]
-        - UseSubtileImpl: [1]
+        - UseSubtileImpl: [true]
       BenchmarkJoinParameters:
       BenchmarkFinalParameters:
         - ProblemSizes:
@@ -609,8 +608,8 @@ BenchmarkProblems:
       HighPrecisionAccumulate: True
       MXBlockA: 32
       MXBlockB: 32
-      TransposeA: 1
-      TransposeB: 0
+      TransposeA: True
+      TransposeB: False
       UseBeta: True
       Batched: True
       ActivationFuncCall: True
@@ -648,14 +647,14 @@ BenchmarkProblems:
           - [16, 16, 128, 1,  1, 8, 2,  1, 4]  # MT 128x128
           - [16, 16, 128, 1,  1, 4, 4,  1, 4]  # MT 64x256
           - [16, 16, 128, 1,  1, 8, 4,  1, 4]  # MT 128x256
-        - PrefetchGlobalRead: [0, 2]
+        - PrefetchGlobalRead: [0, 1, 2]
         - PrefetchLocalRead: [0]
         - DepthU: [256]
         - ScheduleIterAlg: [3]
         - DirectToLds: [1]
         - StreamK: [3]
         - StaggerU: [0]
-        - UseSubtileImpl: [1]
+        - UseSubtileImpl: [true]
       BenchmarkJoinParameters:
       BenchmarkFinalParameters:
         - ProblemSizes:
@@ -674,8 +673,8 @@ BenchmarkProblems:
       HighPrecisionAccumulate: True
       MXBlockA: 32
       MXBlockB: 32
-      TransposeA: 1
-      TransposeB: 0
+      TransposeA: True
+      TransposeB: False
       UseBeta: True
       Batched: True
       ActivationFuncCall: True
@@ -691,15 +690,71 @@ BenchmarkProblems:
           - [16, 16, 128, 1,  1, 2, 2,  1, 4]  # MT 32x128
           - [16, 16, 128, 1,  1, 4, 2,  1, 4]  # MT 64x128
           - [16, 16, 128, 1,  1, 4, 4,  1, 4]  # MT 64x256
-        - PrefetchGlobalRead: [2]
+        - PrefetchGlobalRead: [0, 1, 2]
         - PrefetchLocalRead: [1]
         - DepthU: [256]
         - ScheduleIterAlg: [3]
         - DirectToLds: [1]
         - StreamK: [0, 3]
         - StaggerU: [0]
-        - UseSubtileImpl: [1]
+        - UseSubtileImpl: [true]
       BenchmarkJoinParameters:
       BenchmarkFinalParameters:
         - ProblemSizes:
           - Exact: [256, 256, 1, 768]   # K = 3*DU (triggers failure)
+
+  ########################################
+  # F4BS TN — TAIL loop sweep (bias + ScaleAlphaVec + hipblaslt_all)
+  #
+  # Sweeps K = 32..512 (step 32, the FP4 K-granularity) at M=N=256 with
+  # MT 128x128, exercising tail-loop remainders for DU=256 and DU=512.
+  # PGR=0/1/2, StreamK=3, WGM=16/XCC=4 to match the production scheduler path.
+  ########################################
+  -
+    - # ProblemType
+      OperationType: GEMM
+      DataType: F4
+      DestDataType: b
+      ComputeDataType: s
+      HighPrecisionAccumulate: True
+      MXBlockA: 32
+      MXBlockB: 32
+      TransposeA: true
+      TransposeB: false
+      UseBeta: True
+      Batched: True
+      Activation: True
+      ActivationType: hipblaslt_all
+      ActivationFuncCall: True
+      UseBias: 1
+      BiasDataTypeList: [s]
+      UseScaleAlphaVec: 1
+
+    - InitialSolutionParameters:
+      BenchmarkCommonParameters:
+        - KernelLanguage: ["Assembly"]
+      ForkParameters:
+        - MatrixInstruction:
+          - [16, 16, 128, 1,  1, 4, 4,  2, 2]  # MT 128x128
+          - [16, 16, 128, 1,  1, 2, 2,  2, 2]  # MT 64x64   (single-wave, smaller scale-tile geometry)
+        - PrefetchGlobalRead: [0, 1, 2]
+        - PrefetchLocalRead: [1]
+        - ActivationFuncCall: [false]
+        - DepthU: [256, 512, 768]
+        - ScheduleIterAlg: [3]
+        - DirectToLds: [1]
+        - TransposeLDS: [1]
+        - StreamK: [3]
+        - StaggerU: [0]
+        - 1LDSBuffer: [0]
+        - NonTemporalD: [4]
+        - SourceSwap: [true]
+        - WorkGroupMapping: [16]
+        - WorkGroupMappingXCC: [4]
+        - UseSubtileImpl: [true]
+        - UseCustomMainLoopSchedule: [0]
+      BenchmarkJoinParameters:
+      BenchmarkFinalParameters:
+        - ProblemSizes:
+          - Range: [[256], [256], [1], [32, 32, 512]]
+        - BiasTypeArgs: ['s']

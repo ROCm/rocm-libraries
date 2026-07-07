@@ -97,6 +97,22 @@ template <typename T>
     return {};
 }
 
+/// Gets a scalar attribute, returning std::nullopt when the backend cannot
+/// report it instead of surfacing an error.
+template <typename T>
+[[nodiscard]] inline std::optional<T> getNullableAttrScalar(hipdnnBackendDescriptor_t desc,
+                                                            hipdnnBackendAttributeName_t attrName,
+                                                            hipdnnBackendAttributeType_t attrType,
+                                                            const std::string& errorContext)
+{
+    T value{};
+    if(getDescriptorAttrScalar<T>(desc, attrName, attrType, value, errorContext).is_bad())
+    {
+        return std::nullopt;
+    }
+    return value;
+}
+
 /// Gets a string attribute (char array) from a backend descriptor.
 /// Queries the character count first, then retrieves the string value.
 /// If the attribute is not supported or the string is empty, sets value to empty and returns
@@ -429,6 +445,8 @@ template <typename T>
         case DataType::INT8:
         case DataType::FP8_E4M3:
         case DataType::FP8_E5M2:
+        case DataType::FP8_E4M3_FNUZ:
+        case DataType::FP8_E5M2_FNUZ:
         {
             const uint8_t val = valueBytes[0];
             tensor->set_value(val);

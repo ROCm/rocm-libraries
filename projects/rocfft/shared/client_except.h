@@ -1,4 +1,4 @@
-// Copyright (C) 2024 Advanced Micro Devices, Inc. All rights reserved.
+// Copyright (C) 2024-2026 Advanced Micro Devices, Inc. All rights reserved.
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -21,7 +21,7 @@
 #ifndef ROCFFT_CLIENT_EXCEPT_H
 #define ROCFFT_CLIENT_EXCEPT_H
 
-#include <string>
+#include <stdexcept>
 
 // exception type to throw when we want to skip a problem
 struct ROCFFT_SKIP : public std::runtime_error
@@ -34,5 +34,51 @@ struct ROCFFT_FAIL : public std::runtime_error
 {
     using std::runtime_error::runtime_error;
 };
+
+// catch exceptions that may occur in test cases
+#define ROCFFT_CATCH_TEST_EXCEPTIONS                                                \
+    catch(const std::bad_alloc&)                                                    \
+    {                                                                               \
+        /* explicitly clear cache */                                                \
+        reference_fft_data_t::clear_cache();                                        \
+        GTEST_SKIP() << "host memory allocation failure";                           \
+    }                                                                               \
+    catch(const hip_runtime_error& e)                                               \
+    {                                                                               \
+        if(skip_runtime_fails)                                                      \
+            GTEST_SKIP() << e.what() << "\nHIP error code: " << e.hip_error << "."; \
+        else                                                                        \
+            GTEST_FAIL() << e.what() << "\nHIP error code: " << e.hip_error << "."; \
+    }                                                                               \
+    catch(const HOSTBUF_MEM_USAGE& e)                                               \
+    {                                                                               \
+        /* explicitly clear cache */                                                \
+        reference_fft_data_t::clear_cache();                                        \
+        GTEST_SKIP() << e.what();                                                   \
+    }                                                                               \
+    catch(const DEVICEBUF_MEM_USAGE& e)                                             \
+    {                                                                               \
+        GTEST_SKIP() << e.what();                                                   \
+    }                                                                               \
+    catch(const ROCFFT_SKIP& e)                                                     \
+    {                                                                               \
+        GTEST_SKIP() << e.what();                                                   \
+    }                                                                               \
+    catch(const ROCFFT_FAIL& e)                                                     \
+    {                                                                               \
+        GTEST_FAIL() << e.what();                                                   \
+    }                                                                               \
+    catch(const fft_params::unimplemented_exception& e)                             \
+    {                                                                               \
+        GTEST_SKIP() << "Unimplemented exception: " << e.what();                    \
+    }                                                                               \
+    catch(const std::exception& e)                                                  \
+    {                                                                               \
+        GTEST_FAIL() << e.what();                                                   \
+    }                                                                               \
+    catch(...)                                                                      \
+    {                                                                               \
+        GTEST_FAIL() << "unidentified exception caught during test.";               \
+    }
 
 #endif

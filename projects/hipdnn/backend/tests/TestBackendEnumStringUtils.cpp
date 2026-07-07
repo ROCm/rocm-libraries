@@ -93,6 +93,8 @@ TEST(TestBackendEnumStringUtils, GetBackendDescriptorTypeName)
     EXPECT_STREQ(
         hipdnnGetBackendDescriptorTypeName(HIPDNN_BACKEND_OPERATION_RESAMPLE_FWD_DESCRIPTOR),
         "HIPDNN_BACKEND_OPERATION_RESAMPLE_FWD_DESCRIPTOR");
+    EXPECT_STREQ(hipdnnGetBackendDescriptorTypeName(HIPDNN_BACKEND_PROFILING_CONTROL_EXT),
+                 "HIPDNN_BACKEND_PROFILING_CONTROL_EXT");
 
     // Test unknown type
     EXPECT_STREQ(hipdnnGetBackendDescriptorTypeName(static_cast<hipdnnBackendDescriptorType_t>(-1)),
@@ -141,6 +143,11 @@ TEST(TestBackendEnumStringUtils, GetBackendAttributeName)
                  "HIPDNN_ATTR_EXECUTION_PLAN_DEVICEPROP");
     EXPECT_STREQ(hipdnnGetAttributeNameString(HIPDNN_ATTR_EXECUTION_PLAN_TENSOR_UIDS_EXT),
                  "HIPDNN_ATTR_EXECUTION_PLAN_TENSOR_UIDS_EXT");
+    EXPECT_STREQ(hipdnnGetAttributeNameString(HIPDNN_ATTR_EXECUTION_PLAN_ENGINE_GLOBAL_INDEX_EXT),
+                 "HIPDNN_ATTR_EXECUTION_PLAN_ENGINE_GLOBAL_INDEX_EXT");
+    EXPECT_STREQ(
+        hipdnnGetAttributeNameString(HIPDNN_ATTR_EXECUTION_PLAN_IS_OVERRIDE_SHAPE_ENABLED_EXT),
+        "HIPDNN_ATTR_EXECUTION_PLAN_IS_OVERRIDE_SHAPE_ENABLED_EXT");
 
     EXPECT_STREQ(hipdnnGetAttributeNameString(HIPDNN_ATTR_INTERMEDIATE_INFO_UNIQUE_ID),
                  "HIPDNN_ATTR_INTERMEDIATE_INFO_UNIQUE_ID");
@@ -164,6 +171,11 @@ TEST(TestBackendEnumStringUtils, GetBackendAttributeName)
                  "HIPDNN_ATTR_OPERATIONGRAPH_ENGINE_GLOBAL_COUNT");
     EXPECT_STREQ(hipdnnGetAttributeNameString(HIPDNN_ATTR_OPERATIONGRAPH_IS_DYNAMIC_SHAPE_ENABLED),
                  "HIPDNN_ATTR_OPERATIONGRAPH_IS_DYNAMIC_SHAPE_ENABLED");
+    EXPECT_STREQ(
+        hipdnnGetAttributeNameString(HIPDNN_ATTR_OPERATIONGRAPH_IS_OVERRIDE_SHAPE_ENABLED_EXT),
+        "HIPDNN_ATTR_OPERATIONGRAPH_IS_OVERRIDE_SHAPE_ENABLED_EXT");
+    EXPECT_NE(HIPDNN_ATTR_OPERATIONGRAPH_IS_DYNAMIC_SHAPE_ENABLED,
+              HIPDNN_ATTR_OPERATIONGRAPH_IS_OVERRIDE_SHAPE_ENABLED_EXT);
     EXPECT_STREQ(hipdnnGetAttributeNameString(HIPDNN_ATTR_OPERATIONGRAPH_COMPUTE_DATA_TYPE_EXT),
                  "HIPDNN_ATTR_OPERATIONGRAPH_COMPUTE_DATA_TYPE_EXT");
     EXPECT_STREQ(
@@ -184,6 +196,14 @@ TEST(TestBackendEnumStringUtils, GetBackendAttributeName)
                  "HIPDNN_ATTR_VARIANT_PACK_INTERMEDIATES");
     EXPECT_STREQ(hipdnnGetAttributeNameString(HIPDNN_ATTR_VARIANT_PACK_WORKSPACE),
                  "HIPDNN_ATTR_VARIANT_PACK_WORKSPACE");
+    EXPECT_STREQ(hipdnnGetAttributeNameString(HIPDNN_ATTR_VARIANT_PACK_OVERRIDE_UNIQUE_IDS_EXT),
+                 "HIPDNN_ATTR_VARIANT_PACK_OVERRIDE_UNIQUE_IDS_EXT");
+    EXPECT_STREQ(hipdnnGetAttributeNameString(HIPDNN_ATTR_VARIANT_PACK_OVERRIDE_SHAPES_EXT),
+                 "HIPDNN_ATTR_VARIANT_PACK_OVERRIDE_SHAPES_EXT");
+    EXPECT_STREQ(hipdnnGetAttributeNameString(HIPDNN_ATTR_VARIANT_PACK_OVERRIDE_STRIDES_EXT),
+                 "HIPDNN_ATTR_VARIANT_PACK_OVERRIDE_STRIDES_EXT");
+    EXPECT_STREQ(hipdnnGetAttributeNameString(HIPDNN_ATTR_VARIANT_PACK_OVERRIDE_LENGTHS_EXT),
+                 "HIPDNN_ATTR_VARIANT_PACK_OVERRIDE_LENGTHS_EXT");
 
     EXPECT_STREQ(hipdnnGetAttributeNameString(HIPDNN_ATTR_LAYOUT_INFO_TENSOR_UID),
                  "HIPDNN_ATTR_LAYOUT_INFO_TENSOR_UID");
@@ -725,6 +745,17 @@ TEST(TestBackendEnumStringUtils, GetBackendAttributeName)
     EXPECT_STREQ(hipdnnGetAttributeNameString(HIPDNN_ATTR_RESAMPLE_COMP_TYPE),
                  "HIPDNN_ATTR_RESAMPLE_COMP_TYPE");
 
+    // Profiling control descriptor attributes
+    EXPECT_STREQ(hipdnnGetAttributeNameString(HIPDNN_ATTR_PROFILING_HANDLE_EXT),
+                 "HIPDNN_ATTR_PROFILING_HANDLE_EXT");
+    EXPECT_STREQ(hipdnnGetAttributeNameString(HIPDNN_ATTR_PROFILING_START_EXT),
+                 "HIPDNN_ATTR_PROFILING_START_EXT");
+    EXPECT_STREQ(hipdnnGetAttributeNameString(HIPDNN_ATTR_PROFILING_STOP_EXT),
+                 "HIPDNN_ATTR_PROFILING_STOP_EXT");
+    EXPECT_STREQ(hipdnnGetAttributeNameString(HIPDNN_ATTR_PROFILING_ELAPSED_MS_EXT),
+                 "HIPDNN_ATTR_PROFILING_ELAPSED_MS_EXT");
+    EXPECT_STREQ(hipdnnGetAttributeNameString(HIPDNN_ATTR_PROFILING_DEVICE_SYNC_EXT),
+                 "HIPDNN_ATTR_PROFILING_DEVICE_SYNC_EXT");
     // Unknown attribute
     EXPECT_STREQ(hipdnnGetAttributeNameString(static_cast<hipdnnBackendAttributeName_t>(-1)),
                  "HIPDNN_ATTR_UNKNOWN");
@@ -804,6 +835,9 @@ TEST(TestBackendEnumStringUtils, GetStatusString)
                  "HIPDNN_STATUS_INTERNAL_ERROR_DEVICE_ALLOCATION_FAILED");
     EXPECT_STREQ(hipdnnGetStatusString(HIPDNN_STATUS_EXECUTION_FAILED),
                  "HIPDNN_STATUS_EXECUTION_FAILED");
+    EXPECT_STREQ(hipdnnGetStatusString(HIPDNN_STATUS_PLUGIN_ERROR), "HIPDNN_STATUS_PLUGIN_ERROR");
+    EXPECT_STREQ(hipdnnGetStatusString(HIPDNN_STATUS_VERSION_MISMATCH),
+                 "HIPDNN_STATUS_VERSION_MISMATCH");
 
     EXPECT_STREQ(hipdnnGetStatusString(static_cast<hipdnnStatus_t>(-1)), "HIPDNN_STATUS_UNKNOWN");
 }
@@ -859,6 +893,25 @@ TEST(TestBackendEnumStringUtils, GetAttributeTypeString)
 
     EXPECT_STREQ(hipdnnGetAttributeTypeString(static_cast<hipdnnBackendAttributeType_t>(-1)),
                  "HIPDNN_ATTRIBUTE_UNKNOWN");
+}
+
+TEST(TestBackendEnumStringUtils, GetBehaviorNoteString)
+{
+    EXPECT_STREQ(hipdnnGetBehaviorNoteString(HIPDNN_BEHAVIOR_NOTE_RUNTIME_COMPILATION),
+                 "HIPDNN_BEHAVIOR_NOTE_RUNTIME_COMPILATION");
+    EXPECT_STREQ(hipdnnGetBehaviorNoteString(HIPDNN_BEHAVIOR_NOTE_REQUIRES_LAYOUT_TRANSFORM),
+                 "HIPDNN_BEHAVIOR_NOTE_REQUIRES_LAYOUT_TRANSFORM");
+    EXPECT_STREQ(hipdnnGetBehaviorNoteString(HIPDNN_BEHAVIOR_NOTE_SUPPORTS_GRAPH_CAPTURE),
+                 "HIPDNN_BEHAVIOR_NOTE_SUPPORTS_GRAPH_CAPTURE");
+    EXPECT_STREQ(hipdnnGetBehaviorNoteString(HIPDNN_BEHAVIOR_NOTE_EXTERNAL_LIBRARY_DEPENDENCY),
+                 "HIPDNN_BEHAVIOR_NOTE_EXTERNAL_LIBRARY_DEPENDENCY");
+    EXPECT_STREQ(
+        hipdnnGetBehaviorNoteString(HIPDNN_BEHAVIOR_NOTE_SUPPORTS_EXECUTION_PLAN_SERIALIZATION),
+        "HIPDNN_BEHAVIOR_NOTE_SUPPORTS_EXECUTION_PLAN_SERIALIZATION");
+    EXPECT_STREQ(hipdnnGetBehaviorNoteString(HIPDNN_BEHAVIOR_NOTE_TYPE_COUNT),
+                 "HIPDNN_BEHAVIOR_NOTE_TYPE_COUNT");
+    EXPECT_STREQ(hipdnnGetBehaviorNoteString(static_cast<hipdnnBackendBehaviorNote_t>(-1)),
+                 "HIPDNN_BEHAVIOR_NOTE_UNKNOWN");
 }
 
 TEST(TestBackendEnumStringUtils, GetPluginLoadingModeString)
