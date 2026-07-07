@@ -64,9 +64,7 @@ target_include_directories(TensileClient PUBLIC "${CMAKE_CURRENT_SOURCE_DIR}/inc
 
 target_link_libraries(TensileClient PRIVATE TensileHost)
 
-if(amd_smi_FOUND)
-    target_link_libraries(TensileClient PRIVATE amd_smi)
-endif()
+target_link_libraries(TensileClient PRIVATE amd_smi)
 
 if(TENSILE_USE_OPENMP)
     target_link_libraries(TensileClient PRIVATE custom_openmp_cxx)

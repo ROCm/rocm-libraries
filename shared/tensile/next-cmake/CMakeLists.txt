@@ -137,9 +137,7 @@ if(TENSILE_ENABLE_CLIENT)
     tensile-client-lib PRIVATE tensile-host OpenMP::OpenMP_CXX)
     target_compile_features(tensile-client-lib PUBLIC cxx_std_${TENSILE_CXX_STANDARD})
 
-  if(amd_smi_FOUND)
-    target_link_libraries(tensile-client-lib PRIVATE amd_smi)
-  endif()
+  target_link_libraries(tensile-client-lib PRIVATE amd_smi)
   target_include_directories(
     tensile-client-lib
     PUBLIC $<BUILD_INTERFACE:${TENSILE_SOURCE_TREE}/client/include>)
