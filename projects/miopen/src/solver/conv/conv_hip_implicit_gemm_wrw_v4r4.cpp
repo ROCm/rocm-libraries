@@ -588,8 +588,6 @@ bool ConvHipImplicitGemmV4R4WrW::IsApplicable(const ExecutionContext& ctx,
     if(!(StartsWith(name, "gfx8") || StartsWith(name, "gfx90") || StartsWith(name, "gfx103") ||
          StartsWith(name, "gfx120")))
         return false;
-    if(problem.GetConv().attribute.deterministic)
-        return false;
     if(!ctx.use_hip_kernels)
         return false;
     if(problem.HasNonPackedTensors())

@@ -11,7 +11,7 @@
 #include <hipdnn_test_sdk/utilities/CpuFpReferenceConvolution.hpp>
 
 using namespace hipdnn_test_sdk::utilities;
-using namespace hipdnn_data_sdk::data_objects;
+using namespace hipdnn_flatbuffers_sdk::data_objects;
 using namespace hipdnn_data_sdk::utilities;
 using namespace hipdnn_data_sdk::types;
 using hipdnn_test_sdk::detail::safeTestTypeCast;

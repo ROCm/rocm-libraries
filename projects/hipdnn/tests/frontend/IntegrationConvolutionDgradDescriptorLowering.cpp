@@ -8,8 +8,8 @@
 #include <unordered_set>
 #include <vector>
 
-#include <hipdnn_data_sdk/data_objects/convolution_bwd_attributes_generated.h>
-#include <hipdnn_data_sdk/data_objects/graph_generated.h>
+#include <hipdnn_flatbuffers_sdk/data_objects/convolution_bwd_attributes_generated.h>
+#include <hipdnn_flatbuffers_sdk/data_objects/graph_generated.h>
 #include <hipdnn_frontend.hpp>
 #include <hipdnn_test_sdk/utilities/IntegrationTestFixture.hpp>
 #include <hipdnn_test_sdk/utilities/LoweringTestHelpers.hpp>
@@ -24,9 +24,9 @@ using namespace hipdnn_frontend;
 using namespace hipdnn_frontend::graph;
 using hipdnn_tests::IntegrationTestFixture;
 using hipdnn_tests::toVec;
-using DataTypeSdk = hipdnn_data_sdk::data_objects::DataType;
-using NodeAttrType = hipdnn_data_sdk::data_objects::NodeAttributes;
-using ConvModeSdk = hipdnn_data_sdk::data_objects::ConvMode;
+using DataTypeSdk = hipdnn_flatbuffers_sdk::data_objects::DataType;
+using NodeAttrType = hipdnn_flatbuffers_sdk::data_objects::NodeAttributes;
+using ConvModeSdk = hipdnn_flatbuffers_sdk::data_objects::ConvMode;
 using hipdnn_tests::buildTensorMap;
 using hipdnn_tests::lowerAndDeserialize;
 using hipdnn_tests::TestableGraphLowering;
@@ -42,6 +42,8 @@ constexpr std::array<int64_t, 4> K_AUTO_DY_DIMS = {1, 16, 6, 6};
 constexpr std::array<int64_t, 4> K_AUTO_DY_STRIDES = {576, 36, 6, 1};
 constexpr std::array<int64_t, 4> K_AUTO_W_DIMS = {16, 3, 3, 3};
 constexpr std::array<int64_t, 4> K_AUTO_W_STRIDES = {27, 9, 3, 1};
+constexpr std::array<int64_t, 4> K_AUTO_DX_DIMS = {1, 3, 8, 8};
+constexpr std::array<int64_t, 4> K_AUTO_DX_STRIDES = {192, 64, 8, 1};
 
 constexpr std::array<int64_t, 2> K_AUTO_PADDING = {0, 0};
 constexpr std::array<int64_t, 2> K_AUTO_STRIDE = {1, 1};
@@ -82,6 +84,7 @@ TEST_F(IntegrationConvolutionDgradDescriptorLowering, ConvDgradGraphRoundTrip)
     convAttrs.set_convolution_mode(ConvolutionMode::CROSS_CORRELATION);
 
     auto dx = graph->conv_dgrad(dy, w, convAttrs);
+    dx->set_dim(toVec(K_DGRAD_TENSOR_DX_DIMS));
     dx->set_uid(K_DGRAD_TENSOR_DX_UID).set_output(true).set_name("DX");
 
     auto graphT = lowerAndDeserialize(*graph, _handle);
@@ -120,6 +123,8 @@ TEST_F(IntegrationConvolutionDgradDescriptorLowering, ConvDgradGraphRoundTrip)
     EXPECT_EQ(dxT->name, "DX");
     EXPECT_EQ(dxT->data_type, DataTypeSdk::FLOAT);
     EXPECT_FALSE(dxT->virtual_);
+    EXPECT_EQ(dxT->dims, toVec(K_DGRAD_TENSOR_DX_DIMS));
+    EXPECT_EQ(dxT->strides, toVec(K_DGRAD_TENSOR_DX_STRIDES));
 
     // -- Verify conv bwd operation node --
     ASSERT_EQ(graphT.nodes.size(), 1u);
@@ -164,6 +169,7 @@ TEST_F(IntegrationConvolutionDgradDescriptorLowering, AutoAssignedUidsPreservedI
     convAttrs.set_dilation(toVec(K_AUTO_DILATION));
 
     auto dx = graph->conv_dgrad(dy, w, convAttrs);
+    dx->set_dim(toVec(K_AUTO_DX_DIMS));
     dx->set_output(true);
 
     auto graphT = lowerAndDeserialize(*graph, _handle);
@@ -199,6 +205,11 @@ TEST_F(IntegrationConvolutionDgradDescriptorLowering, AutoAssignedUidsPreservedI
         = {convBwd->dy_tensor_uid, convBwd->w_tensor_uid, convBwd->dx_tensor_uid};
     EXPECT_EQ(nodeUids.size(), 3u)
         << "Conv bwd node tensor UIDs are not distinct"; // NOLINT(readability-implicit-bool-conversion)
+
+    auto tensorMap = buildTensorMap(graphT);
+    ASSERT_NE(tensorMap.count(convBwd->dx_tensor_uid), 0u);
+    EXPECT_EQ(tensorMap[convBwd->dx_tensor_uid]->dims, toVec(K_AUTO_DX_DIMS));
+    EXPECT_EQ(tensorMap[convBwd->dx_tensor_uid]->strides, toVec(K_AUTO_DX_STRIDES));
 }
 
 } // namespace

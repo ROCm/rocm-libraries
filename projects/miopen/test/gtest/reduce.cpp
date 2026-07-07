@@ -154,7 +154,6 @@ struct verify_reduce_with_indices
     tensor<float> gpu() const
     {
         using reduce::convert_type;
-
         std::tuple<tensor<T>, tensor<int>> results;
 
         results = gpuImpl();
@@ -272,10 +271,8 @@ struct verify_reduce_with_indices
     {
         using reduce::convert_type;
 
-        std::vector<std::vector<std::size_t>> indexes_1, indexes_2;
-
-        get_all_indexes(invariantLengths, 0, indexes_1);
-        get_all_indexes(toReduceLengths, 0, indexes_2);
+        const auto indexes_1 = get_all_indexes(invariantLengths);
+        const auto indexes_2 = get_all_indexes(toReduceLengths);
 
         // go through indexes of the invariant dimensions
         for(const auto& index_1 : indexes_1)
@@ -347,9 +344,7 @@ struct verify_reduce_with_indices
     {
         using reduce::convert_type;
 
-        std::vector<std::vector<std::size_t>> indexes_1;
-
-        get_all_indexes(inLengths, 0, indexes_1);
+        const auto indexes_1 = get_all_indexes(inLengths);
 
         compType accuVal = reduce::ReduceOpZeroVal<compType>(reduceOp);
         int accuIndex    = 0;
@@ -581,10 +576,8 @@ struct verify_reduce_no_indices
     {
         using reduce::convert_type;
 
-        std::vector<std::vector<std::size_t>> indexes_1, indexes_2;
-
-        get_all_indexes(invariantLengths, 0, indexes_1);
-        get_all_indexes(toReduceLengths, 0, indexes_2);
+        const auto indexes_1 = get_all_indexes(invariantLengths);
+        const auto indexes_2 = get_all_indexes(toReduceLengths);
 
         // go through indexes of the invariant dimensions
         for(const auto& index_1 : indexes_1)
@@ -652,9 +645,7 @@ struct verify_reduce_no_indices
     {
         using reduce::convert_type;
 
-        std::vector<std::vector<std::size_t>> indexes_1;
-
-        get_all_indexes(inLengths, 0, indexes_1);
+        const auto indexes_1 = get_all_indexes(inLengths);
 
         compType accuVal = reduce::ReduceOpZeroVal<compType>(reduceOp);
 
@@ -1035,7 +1026,10 @@ struct ReduceCommon : public testing::TestWithParam<TestCase>
         case MIOPEN_REDUCE_TENSOR_AMAX:
             inputTensor = tensor<T>{this->inLengths}.generate(gen_value_amax);
             break;
-        default: inputTensor = tensor<T>{this->inLengths}.generate(gen_value_min_max);
+
+        case MIOPEN_REDUCE_TENSOR_MIN:
+        case MIOPEN_REDUCE_TENSOR_MAX:
+            inputTensor = tensor<T>{this->inLengths}.generate(gen_value_min_max);
         };
 
         auto outputTensor = tensor<T>{outLengths};
@@ -1180,7 +1174,7 @@ class ReduceCustomCommon : public ReduceCommon<T>
 {
     void SetUp() override
     {
-        using e_mask = enabled<Gpu::gfx94X, Gpu::gfx103X, Gpu::gfx110X>;
+        using e_mask = enabled<Gpu::gfx94X, Gpu::gfx103X, Gpu::gfx110X, Gpu::gfx115X>;
         using d_mask = disabled<Gpu::Default>;
         if(!::IsTestSupportedForDevMask<d_mask, e_mask>())
         {

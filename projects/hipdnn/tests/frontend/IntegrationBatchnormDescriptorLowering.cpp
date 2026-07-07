@@ -8,8 +8,8 @@
 #include <unordered_set>
 #include <vector>
 
-#include <hipdnn_data_sdk/data_objects/batchnorm_attributes_generated.h>
-#include <hipdnn_data_sdk/data_objects/graph_generated.h>
+#include <hipdnn_flatbuffers_sdk/data_objects/batchnorm_attributes_generated.h>
+#include <hipdnn_flatbuffers_sdk/data_objects/graph_generated.h>
 #include <hipdnn_frontend.hpp>
 #include <hipdnn_test_sdk/constants/BatchnormConstants.hpp>
 #include <hipdnn_test_sdk/utilities/IntegrationTestFixture.hpp>
@@ -25,8 +25,8 @@ using namespace hipdnn_frontend::graph;
 using namespace hipdnn_tests::constants;
 using hipdnn_tests::IntegrationTestFixture;
 using hipdnn_tests::toVec;
-using DataTypeSdk = hipdnn_data_sdk::data_objects::DataType;
-using NodeAttrType = hipdnn_data_sdk::data_objects::NodeAttributes;
+using DataTypeSdk = hipdnn_flatbuffers_sdk::data_objects::DataType;
+using NodeAttrType = hipdnn_flatbuffers_sdk::data_objects::NodeAttributes;
 using hipdnn_tests::buildTensorMap;
 using hipdnn_tests::lowerAndDeserialize;
 using hipdnn_tests::TestableGraphLowering;
@@ -398,6 +398,55 @@ TEST_F(IntegrationBatchnormDescriptorLowering, MinimalRequiredOnlyRoundTrip)
 
     // No peer stats
     EXPECT_EQ(bnFwd->peer_stats_tensor_uid.size(), 0u);
+}
+
+// Verifies that broadcastable and relaxed scale/bias shapes accepted by the frontend are
+// successfully lowered and packed into backend descriptors during integration.
+TEST_F(IntegrationBatchnormDescriptorLowering, AcceptsBroadcastableScaleBiasShapesDuringLowering)
+{
+    auto graph = std::make_shared<TestableGraphLowering>();
+    graph->set_name("BroadcastableScaleBiasLoweringGraph")
+        .set_io_data_type(DataType::FLOAT)
+        .set_intermediate_data_type(DataType::FLOAT)
+        .set_compute_data_type(DataType::FLOAT);
+
+    auto x = std::make_shared<TensorAttributes>();
+    x->set_uid(1)
+        .set_dim({2, 64, 32, 32})
+        .set_stride({65536, 1024, 32, 1})
+        .set_data_type(DataType::FLOAT);
+
+    // Broadcastable (not full {1,C,1,1})
+    auto scale = std::make_shared<TensorAttributes>();
+    scale->set_uid(2).set_dim({64}).set_stride({1}).set_data_type(DataType::FLOAT);
+
+    // Must match scale shape
+    auto bias = std::make_shared<TensorAttributes>();
+    bias->set_uid(3).set_dim({64}).set_stride({1}).set_data_type(DataType::FLOAT);
+
+    auto epsilon = std::make_shared<TensorAttributes>(1e-5f);
+    epsilon->set_uid(4);
+
+    BatchnormAttributes bnAttrs;
+    bnAttrs.set_epsilon(epsilon);
+
+    auto [y, mean, invVar, nextMean, nextVar] = graph->batchnorm(x, scale, bias, bnAttrs);
+
+    y->set_uid(5).set_output(true);
+
+    // Verify lowering succeeds
+    auto result = lowerAndDeserialize(*graph, _handle);
+
+    ASSERT_EQ(result.nodes.size(), 1u);
+
+    // Verify node type is correct
+    auto* bnFwd = result.nodes[0]->attributes.AsBatchnormAttributes();
+    ASSERT_NE(bnFwd, nullptr);
+
+    EXPECT_EQ(bnFwd->x_tensor_uid, 1);
+    EXPECT_EQ(bnFwd->scale_tensor_uid, 2);
+    EXPECT_EQ(bnFwd->bias_tensor_uid, 3);
+    EXPECT_EQ(bnFwd->epsilon_tensor_uid, 4);
 }
 
 } // namespace

@@ -160,6 +160,66 @@ namespace TensileLite
             return true;
         }
 
+        static std::string formatFormocastInfo(ContractionSolution* const solution,
+                                               std::unordered_map<int,origami::Formocast::PredictedPerformance> predPerfs,
+                                               int currentSolutionIdx, double currentPrediction, int currentIdx, int lastSolutionIdx)
+        {
+            auto predPerf = predPerfs[currentSolutionIdx];
+            auto hitrate = predPerf.hitRate;
+            auto predPerfStr = concatenate<true>(
+                                "perf: ",predPerf.perf," us,",
+                                "MT0: ",predPerf.MT0,",",
+                                "MT1: ",predPerf.MT1,",",
+                                "depthU: ",predPerf.depthU,",",
+                                "NumCUs: ",predPerf.NumCUs,",",
+                                "WorkGroupMapping: ",predPerf.WorkGroupMapping,",",
+                                "CUOccupancy: ",predPerf.CUOccupancy,",",
+                                "GlobalSplitU: ",predPerf.GlobalSplitU,",",
+                                "LocalSplitU: ",predPerf.LocalSplitU,",",
+                                "loopCnt: ",predPerf.loopCnt,",",
+                                "init: ",predPerf.init," us,",
+                                "preloop: ",predPerf.preloop," us,",
+                                "Loop: ",predPerf.loop," us,",
+                                "lsu: ",predPerf.lsu," us,",
+                                "tail: ",predPerf.tail," us,",
+                                "math_overall: ",predPerf.math_overall,",",
+                                "mem_overall: ",predPerf.mem_overall,",",
+                                "A_loop_hitrate_l1: ",predPerf.memCosts.cache_hits.L1_hit.tile0HitRate,",",
+                                "B_loop_hitrate_l1: ",predPerf.memCosts.cache_hits.L1_hit.tile1HitRate,",",
+                                "A_loop_hitrate_l2: ",predPerf.memCosts.cache_hits.L2_hit.tile0HitRate,",",
+                                "B_loop_hitrate_l2: ",predPerf.memCosts.cache_hits.L2_hit.tile1HitRate,",",
+                                "A_loop_hitrate_l3: ",predPerf.memCosts.cache_hits.L3_hit.tile0HitRate,",",
+                                "B_loop_hitrate_l3: ",predPerf.memCosts.cache_hits.L3_hit.tile1HitRate,",",
+                                "A_request_l1: ",predPerf.memCosts.A_mem_l1_req,",",
+                                "B_request_l1: ",predPerf.memCosts.B_mem_l1_req,",",
+                                "tcc_ea0_coalscedA: ",predPerf.memCosts.tcc_ea0_coalscedA,",",
+                                "tcc_ea0_coalscedB: ",predPerf.memCosts.tcc_ea0_coalscedB,",",
+                                "request_l1: ",predPerf.memCosts.mem_l1_req,",",
+                                "request_l2: ",predPerf.memCosts.mem_l2_req,",",
+                                "request_l3: ",predPerf.memCosts.mem_l3_req,",",
+                                "request_hbm: ",predPerf.memCosts.mem_hbm_req,",",
+                                "loop_request_l1: ",predPerf.memCosts.mem_loop_l1_req,",",
+                                "loop_request_l2: ",predPerf.memCosts.mem_loop_l2_req,",",
+                                "loop_request_l3: ",predPerf.memCosts.mem_loop_l3_req,",",
+                                "loop_request_hbm: ",predPerf.memCosts.mem_loop_hbm_req,",",
+                                "A_MT_request_l1: ",predPerf.memCosts.MT_A_L1_req,",",
+                                "B_MT_request_l1: ",predPerf.memCosts.MT_B_L1_req,",",
+                                "A_MT_request_l2: ",predPerf.memCosts.MT_A_L2_req,",",
+                                "B_MT_request_l2: ",predPerf.memCosts.MT_B_L2_req,",",
+                                "A_MT_request_l3: ",predPerf.memCosts.MT_A_L3_req,",",
+                                "B_MT_request_l3: ",predPerf.memCosts.MT_B_L3_req,",",
+                                "A_MT_request_hbm: ",predPerf.memCosts.MT_A_hbm_req,",",
+                                "B_MT_request_hbm: ",predPerf.memCosts.MT_B_hbm_req,",",
+                                "store: ",predPerf.store," us,",
+                                "gsu: ",predPerf.gsu," us,",
+                                "num_tiles: ",predPerf.num_tiles,","
+                                "hitrate,", hitrate, ",",
+                                currentSolutionIdx,"->", currentPrediction, " us, ", currentIdx, ", ",
+                                currentSolutionIdx, "/", lastSolutionIdx
+            );
+            return predPerfStr;
+        }
+
         static origami::Formocast::ProblemInfo getProblemInfo(ContractionSolution&    solution,
                                                            ContractionProblemGemm& problem)
         {
@@ -179,17 +239,23 @@ namespace TensileLite
             problemInfo.swizzleTensorA = problem.swizzleTensorA();
             problemInfo.swizzleTensorB = problem.swizzleTensorB();
 
-            problemInfo.dataType = datatypeToAnalyticalDatatype(problem.computeInputType());
+            problemInfo.dataType = datatypeToAnalyticalDatatype(problem.computeInputTypeA());
             return problemInfo;
+        }
+
+        static bool isPredictionAvailable(Hardware const& hardware)
+        {
+            auto const* hipAMDGPU = dynamic_cast<hip::HipAMDGPU const*>(&hardware);
+            return hipAMDGPU && hipAMDGPU->analyticalHardware;
         }
 
         static origami::hardware_t::architecture_t getHardware(Hardware const& hardware)
         {
             hip::HipAMDGPU const* hipAMDGPU = dynamic_cast<hip::HipAMDGPU const*>(&hardware);
-            auto origamiHardware = hipAMDGPU->analyticalHardware;
-
-            // Return origami architecture directly
-            return origamiHardware->arch;
+            if(!hipAMDGPU || !hipAMDGPU->analyticalHardware)
+                throw std::runtime_error(
+                    "[SolutionIterator] analyticalHardware is not available for this GPU");
+            return hipAMDGPU->analyticalHardware->arch;
         }
 
         static origami::Formocast::SizeMapping getSizeMapping(ContractionSolution&    solution,
@@ -298,7 +364,7 @@ namespace TensileLite
         void AllSolutionsIterator::preProblem(ContractionProblem* const problem)
         {
             SolutionIterator::preProblem(problem);
-            if (m_predictionThreshold > 1.0)
+            if (m_predictionThreshold > 1.0 || !isPredictionAvailable(*m_hardware))
             {
                 m_currentSolutionIdx = m_firstSolutionIdx;
             }
@@ -326,6 +392,7 @@ namespace TensileLite
                             predPerf = formocast.predictedPerformance();
                             performance.push_back(std::pair(i,predPerf.microSeconds));
                             m_hitrate[i] = predPerf.hitRate;
+                            m_predPerf[i] = predPerf;
                         }
                     }
                 }
@@ -379,12 +446,12 @@ namespace TensileLite
             {
                 m_reporter->report(ResultKey::SolutionProgress,
                      concatenate(m_currentSolutionIdx, "/", m_lastSolutionIdx));
-                
             }
             else
             {
                 m_reporter->report(ResultKey::SolutionProgress,
-                    concatenate("hitrate,",m_hitrate[m_currentSolutionIdx],",",m_currentSolutionIdx,"->",m_currentPrediction," us, ",m_currentIdx,", ",m_currentSolutionIdx,"/",m_lastSolutionIdx));
+                                   formatFormocastInfo(solution, m_predPerf,
+                                                       m_currentSolutionIdx, m_currentPrediction, m_currentIdx, m_lastSolutionIdx));
             }
         }
 
@@ -555,7 +622,7 @@ namespace TensileLite
                 m_solutions.push_back(m_library->solutions.find(0)->second);
             }
 
-            if(m_predictionThreshold > 1.0)
+            if(m_predictionThreshold > 1.0 || !isPredictionAvailable(*m_hardware))
             {
                 m_currentSolutionIdx = 0;
             }
@@ -615,9 +682,10 @@ namespace TensileLite
             if(m_predictionThreshold > 1.0)
                 m_reporter->report(ResultKey::SolutionProgress,
                                concatenate(m_currentSolutionIdx, "/", m_solutions.size()));
-            else    
+            else
                 m_reporter->report(ResultKey::SolutionProgress,
-                               concatenate("hitrate,",m_hitrate[m_currentSolutionIdx],",",m_currentSolutionIdx,"->",m_currentPrediction," us, ",m_currentSolutionIdx,"/",m_solutions.size()));               
+                                   formatFormocastInfo(solution, m_predPerf,
+                                                       m_currentSolutionIdx, m_currentPrediction, m_currentSolutionIdx, m_solutions.size()));
         }
 
         void TopSolutionIterator::postSolution()

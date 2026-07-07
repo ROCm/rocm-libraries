@@ -23,6 +23,7 @@ TEST(TestConvolutionDgradNode, PreValidateNode)
     convAttributes.set_w(wTensor);
 
     auto dxTensor = std::make_shared<TensorAttributes>();
+    dxTensor->set_dim({1, 3, 32, 32});
     convAttributes.set_dx(dxTensor);
 
     convAttributes.set_pre_padding({1, 1});
@@ -124,6 +125,40 @@ TEST(TestConvolutionDgradNode, PreValidateNodeMissingDxTensor)
     EXPECT_EQ(error.code, error_code_t::ATTRIBUTE_NOT_SET);
 }
 
+TEST(TestConvolutionDgradNode, PreValidateNodeMissingDxDims)
+{
+    ConvDgradAttributes convAttributes;
+
+    auto dyTensor = std::make_shared<TensorAttributes>();
+    dyTensor->set_dim({1, 64, 32, 32});
+    dyTensor->set_stride({65536, 1024, 32, 1});
+    convAttributes.set_dy(dyTensor);
+
+    auto wTensor = std::make_shared<TensorAttributes>();
+    wTensor->set_dim({64, 3, 3, 3});
+    wTensor->set_stride({27, 9, 3, 1});
+    convAttributes.set_w(wTensor);
+
+    // Dx tensor is present but its dimensions are omitted; inference is not
+    // supported, so pre-validation must reject at the first gate (issue #8530).
+    auto dxTensor = std::make_shared<TensorAttributes>();
+    convAttributes.set_dx(dxTensor);
+
+    convAttributes.set_pre_padding({1, 1});
+    convAttributes.set_post_padding({1, 1});
+    convAttributes.set_stride({1, 1});
+    convAttributes.set_dilation({1, 1});
+
+    const GraphAttributes graphAttributes;
+    const ConvolutionDgradNode node(std::move(convAttributes), graphAttributes);
+
+    auto error = node.pre_validate_node();
+    EXPECT_EQ(error.code, error_code_t::ATTRIBUTE_NOT_SET);
+    // Assert the dx-specific gate fired, not some other ATTRIBUTE_NOT_SET gate.
+    EXPECT_NE(error.err_msg.find("set dx dimensions explicitly"), std::string::npos)
+        << error.err_msg;
+}
+
 TEST(TestConvolutionDgradNode, PreValidateNodeMissingConvolutionParameters)
 {
     ConvDgradAttributes convAttributes;
@@ -217,7 +252,7 @@ TEST(TestConvolutionDgradNode, InferPropertiesNodeMissingDxTensor)
     EXPECT_EQ(error.code, error_code_t::ATTRIBUTE_NOT_SET);
 }
 
-TEST(TestConvolutionDgradNode, InferPropertiesNode2DConvolutionSuccess)
+TEST(TestConvolutionDgradNode, InferPropertiesNodeMissingDxDims)
 {
     ConvDgradAttributes convAttributes;
 
@@ -242,16 +277,73 @@ TEST(TestConvolutionDgradNode, InferPropertiesNode2DConvolutionSuccess)
     ConvolutionDgradNode node(std::move(convAttributes), graphAttributes);
 
     auto error = node.infer_properties_node();
+    EXPECT_EQ(error.code, error_code_t::ATTRIBUTE_NOT_SET);
+    EXPECT_TRUE(dxTensor->get_dim().empty());
+}
+
+TEST(TestConvolutionDgradNode, InferPropertiesNodeAmbiguousEmptyDxDims)
+{
+    ConvDgradAttributes convAttributes;
+
+    auto dyTensor = std::make_shared<TensorAttributes>();
+    dyTensor->set_dim({1, 64, 16, 16});
+    dyTensor->set_stride({16384, 256, 16, 1});
+    convAttributes.set_dy(dyTensor);
+
+    auto wTensor = std::make_shared<TensorAttributes>();
+    wTensor->set_dim({64, 3, 3, 3});
+    convAttributes.set_w(wTensor);
+
+    auto dxTensor = std::make_shared<TensorAttributes>();
+    convAttributes.set_dx(dxTensor);
+
+    convAttributes.set_pre_padding({0, 1});
+    convAttributes.set_post_padding({1, 0});
+    convAttributes.set_stride({2, 2});
+    convAttributes.set_dilation({2, 2});
+
+    const GraphAttributes graphAttributes;
+    ConvolutionDgradNode node(std::move(convAttributes), graphAttributes);
+
+    auto error = node.infer_properties_node();
+    EXPECT_EQ(error.code, error_code_t::ATTRIBUTE_NOT_SET);
+    EXPECT_TRUE(dxTensor->get_dim().empty());
+}
+
+TEST(TestConvolutionDgradNode, InferPropertiesNode2DConvolutionSuccess)
+{
+    ConvDgradAttributes convAttributes;
+
+    auto dyTensor = std::make_shared<TensorAttributes>();
+    dyTensor->set_dim({1, 64, 32, 32});
+    dyTensor->set_stride({65536, 1024, 32, 1});
+    convAttributes.set_dy(dyTensor);
+
+    auto wTensor = std::make_shared<TensorAttributes>();
+    wTensor->set_dim({64, 3, 3, 3});
+    convAttributes.set_w(wTensor);
+
+    auto dxTensor = std::make_shared<TensorAttributes>();
+    dxTensor->set_dim({1, 3, 32, 32});
+    convAttributes.set_dx(dxTensor);
+
+    convAttributes.set_pre_padding({1, 1});
+    convAttributes.set_post_padding({1, 1});
+    convAttributes.set_stride({1, 1});
+    convAttributes.set_dilation({1, 1});
+
+    const GraphAttributes graphAttributes;
+    ConvolutionDgradNode node(std::move(convAttributes), graphAttributes);
+
+    auto error = node.infer_properties_node();
     EXPECT_EQ(error.code, error_code_t::OK) << error.err_msg;
 
-    auto inferredDims = dxTensor->get_dim();
-    EXPECT_EQ(inferredDims.size(), 4);
-    EXPECT_EQ(inferredDims[0], 1); // Batch size
-    EXPECT_EQ(inferredDims[1], 3); // Input channels
-    // For backward pass: dx_size = stride * (dy_size - 1) + dilated_kernel_size - pre_pad - post_pad
-    // dx_size = 1 * (32 - 1) + 3 - 1 - 1 = 31 + 3 - 2 = 32
-    EXPECT_EQ(inferredDims[2], 32); // Height
-    EXPECT_EQ(inferredDims[3], 32); // Width
+    auto dxDims = dxTensor->get_dim();
+    EXPECT_EQ(dxDims.size(), 4);
+    EXPECT_EQ(dxDims[0], 1); // Batch size
+    EXPECT_EQ(dxDims[1], 3); // Input channels
+    EXPECT_EQ(dxDims[2], 32); // Height
+    EXPECT_EQ(dxDims[3], 32); // Width
 }
 
 TEST(TestConvolutionDgradNode, InferPropertiesNode3DConvolutionSuccess)
@@ -268,6 +360,7 @@ TEST(TestConvolutionDgradNode, InferPropertiesNode3DConvolutionSuccess)
     convAttributes.set_w(wTensor);
 
     auto dxTensor = std::make_shared<TensorAttributes>();
+    dxTensor->set_dim({2, 16, 8, 16, 16});
     convAttributes.set_dx(dxTensor);
 
     convAttributes.set_pre_padding({0, 1, 1});
@@ -281,16 +374,13 @@ TEST(TestConvolutionDgradNode, InferPropertiesNode3DConvolutionSuccess)
     auto error = node.infer_properties_node();
     EXPECT_EQ(error.code, error_code_t::OK) << error.err_msg;
 
-    auto inferredDims = dxTensor->get_dim();
-    EXPECT_EQ(inferredDims.size(), 5);
-    EXPECT_EQ(inferredDims[0], 2); // Batch size
-    EXPECT_EQ(inferredDims[1], 16); // Input channels
-    // Depth: 1 * (6 - 1) + 3 - 0 - 0 = 5 + 3 - 0 = 8
-    EXPECT_EQ(inferredDims[2], 8);
-    // Height: 1 * (16 - 1) + 3 - 1 - 1 = 15 + 3 - 2 = 16
-    EXPECT_EQ(inferredDims[3], 16);
-    // Width: 1 * (16 - 1) + 3 - 1 - 1 = 15 + 3 - 2 = 16
-    EXPECT_EQ(inferredDims[4], 16);
+    auto dxDims = dxTensor->get_dim();
+    EXPECT_EQ(dxDims.size(), 5);
+    EXPECT_EQ(dxDims[0], 2); // Batch size
+    EXPECT_EQ(dxDims[1], 16); // Input channels
+    EXPECT_EQ(dxDims[2], 8); // Depth
+    EXPECT_EQ(dxDims[3], 16); // Height
+    EXPECT_EQ(dxDims[4], 16); // Width
 }
 
 TEST(TestConvolutionDgradNode, InferPropertiesNodeWithStride2x2)
@@ -307,6 +397,7 @@ TEST(TestConvolutionDgradNode, InferPropertiesNodeWithStride2x2)
     convAttributes.set_w(wTensor);
 
     auto dxTensor = std::make_shared<TensorAttributes>();
+    dxTensor->set_dim({1, 3, 31, 31});
     convAttributes.set_dx(dxTensor);
 
     convAttributes.set_pre_padding({1, 1});
@@ -320,15 +411,12 @@ TEST(TestConvolutionDgradNode, InferPropertiesNodeWithStride2x2)
     auto error = node.infer_properties_node();
     EXPECT_EQ(error.code, error_code_t::OK) << error.err_msg;
 
-    // Check inferred dimensions
-    auto inferredDims = dxTensor->get_dim();
-    EXPECT_EQ(inferredDims.size(), 4);
-    EXPECT_EQ(inferredDims[0], 1); // Batch size
-    EXPECT_EQ(inferredDims[1], 3); // Input channels
-    // Height: 2 * (16 - 1) + 3 - 1 - 1 = 30 + 3 - 2 = 31
-    EXPECT_EQ(inferredDims[2], 31);
-    // Width: 2 * (16 - 1) + 3 - 1 - 1 = 30 + 3 - 2 = 31
-    EXPECT_EQ(inferredDims[3], 31);
+    auto dxDims = dxTensor->get_dim();
+    EXPECT_EQ(dxDims.size(), 4);
+    EXPECT_EQ(dxDims[0], 1); // Batch size
+    EXPECT_EQ(dxDims[1], 3); // Input channels
+    EXPECT_EQ(dxDims[2], 31); // Height
+    EXPECT_EQ(dxDims[3], 31); // Width
 
     // Check inferred strides
     auto inferredStrides = dxTensor->get_stride();
@@ -353,6 +441,7 @@ TEST(TestConvolutionDgradNode, InferPropertiesNodeWithDilation2x2)
     convAttributes.set_w(wTensor);
 
     auto dxTensor = std::make_shared<TensorAttributes>();
+    dxTensor->set_dim({1, 16, 20, 20});
     convAttributes.set_dx(dxTensor);
 
     convAttributes.set_pre_padding({2, 2});
@@ -366,93 +455,12 @@ TEST(TestConvolutionDgradNode, InferPropertiesNodeWithDilation2x2)
     auto error = node.infer_properties_node();
     EXPECT_EQ(error.code, error_code_t::OK) << error.err_msg;
 
-    // Check inferred dimensions
-    auto inferredDims = dxTensor->get_dim();
-    EXPECT_EQ(inferredDims.size(), 4);
-    EXPECT_EQ(inferredDims[0], 1); // Batch size
-    EXPECT_EQ(inferredDims[1], 16); // Input channels
-    // Effective kernel size with dilation: (3-1)*2 + 1 = 5
-    // Height: 1 * (20 - 1) + 5 - 2 - 2 = 19 + 5 - 4 = 20
-    EXPECT_EQ(inferredDims[2], 20);
-    // Width: 1 * (20 - 1) + 5 - 2 - 2 = 19 + 5 - 4 = 20
-    EXPECT_EQ(inferredDims[3], 20);
-}
-
-TEST(TestConvolutionDgradNode, PackNode)
-{
-    ConvDgradAttributes convAttributes;
-    convAttributes.set_name("ConvolutionDgrad");
-
-    auto dyTensor = std::make_shared<TensorAttributes>();
-    dyTensor->set_uid(1)
-        .set_name("DyTensor")
-        .set_data_type(DataType_t::FLOAT)
-        .set_dim({1, 64, 32, 32})
-        .set_stride({65536, 1024, 32, 1});
-    convAttributes.set_dy(dyTensor);
-
-    auto wTensor = std::make_shared<TensorAttributes>();
-    wTensor->set_uid(2)
-        .set_name("WTensor")
-        .set_data_type(DataType_t::FLOAT)
-        .set_dim({64, 3, 3, 3})
-        .set_stride({27, 9, 3, 1});
-    convAttributes.set_w(wTensor);
-
-    auto dxTensor = std::make_shared<TensorAttributes>();
-    dxTensor->set_uid(3)
-        .set_name("DxTensor")
-        .set_data_type(DataType_t::FLOAT)
-        .set_dim({1, 3, 32, 32})
-        .set_stride({3072, 1024, 32, 1});
-    convAttributes.set_dx(dxTensor);
-
-    convAttributes.set_pre_padding({1, 1});
-    convAttributes.set_post_padding({1, 1});
-    convAttributes.set_stride({1, 1});
-    convAttributes.set_dilation({1, 1});
-    convAttributes.set_convolution_mode(hipdnn_frontend::ConvolutionMode_t::CROSS_CORRELATION);
-
-    const GraphAttributes graphAttributes;
-    const ConvolutionDgradNode node(std::move(convAttributes), graphAttributes);
-
-    flatbuffers::FlatBufferBuilder builder;
-    auto offset = node.pack_node(builder);
-    EXPECT_NE(offset.o, 0);
-
-    builder.Finish(offset);
-    auto bufferPointer = builder.GetBufferPointer();
-    auto nodeFlatbuffer = flatbuffers::GetRoot<hipdnn_data_sdk::data_objects::Node>(bufferPointer);
-
-    EXPECT_STREQ(nodeFlatbuffer->name()->c_str(), "ConvolutionDgrad");
-    EXPECT_EQ(nodeFlatbuffer->attributes_type(),
-              hipdnn_data_sdk::data_objects::NodeAttributes::ConvolutionBwdAttributes);
-
-    auto packedAttributes = nodeFlatbuffer->attributes_as_ConvolutionBwdAttributes();
-    ASSERT_NE(packedAttributes, nullptr);
-
-    EXPECT_EQ(packedAttributes->dy_tensor_uid(), dyTensor->get_uid());
-    EXPECT_EQ(packedAttributes->w_tensor_uid(), wTensor->get_uid());
-    EXPECT_EQ(packedAttributes->dx_tensor_uid(), dxTensor->get_uid());
-
-    ASSERT_EQ(packedAttributes->pre_padding()->size(), 2);
-    EXPECT_EQ(packedAttributes->pre_padding()->Get(0), 1);
-    EXPECT_EQ(packedAttributes->pre_padding()->Get(1), 1);
-
-    ASSERT_EQ(packedAttributes->post_padding()->size(), 2);
-    EXPECT_EQ(packedAttributes->post_padding()->Get(0), 1);
-    EXPECT_EQ(packedAttributes->post_padding()->Get(1), 1);
-
-    ASSERT_EQ(packedAttributes->stride()->size(), 2);
-    EXPECT_EQ(packedAttributes->stride()->Get(0), 1);
-    EXPECT_EQ(packedAttributes->stride()->Get(1), 1);
-
-    ASSERT_EQ(packedAttributes->dilation()->size(), 2);
-    EXPECT_EQ(packedAttributes->dilation()->Get(0), 1);
-    EXPECT_EQ(packedAttributes->dilation()->Get(1), 1);
-
-    EXPECT_EQ(packedAttributes->conv_mode(),
-              hipdnn_data_sdk::data_objects::ConvMode::CROSS_CORRELATION);
+    auto dxDims = dxTensor->get_dim();
+    EXPECT_EQ(dxDims.size(), 4);
+    EXPECT_EQ(dxDims[0], 1); // Batch size
+    EXPECT_EQ(dxDims[1], 16); // Input channels
+    EXPECT_EQ(dxDims[2], 20); // Height
+    EXPECT_EQ(dxDims[3], 20); // Width
 }
 
 TEST(TestConvolutionDgradNode, GatherHipdnnTensors)
@@ -577,6 +585,7 @@ TEST(TestConvolutionDgradNode, InferPropertiesGroupedConv2Groups)
     convAttributes.set_w(wTensor);
 
     auto dxTensor = std::make_shared<TensorAttributes>();
+    dxTensor->set_dim({1, 32, 32, 32});
     convAttributes.set_dx(dxTensor);
 
     convAttributes.set_pre_padding({1, 1});
@@ -590,13 +599,12 @@ TEST(TestConvolutionDgradNode, InferPropertiesGroupedConv2Groups)
     auto error = node.infer_properties_node();
     EXPECT_EQ(error.code, error_code_t::OK) << error.err_msg;
 
-    // Check inferred dimensions
-    auto inferredDims = dxTensor->get_dim();
-    EXPECT_EQ(inferredDims.size(), 4);
-    EXPECT_EQ(inferredDims[0], 1); // Batch size
-    EXPECT_EQ(inferredDims[1], 32); // Input channels (assume 1 group)
-    EXPECT_EQ(inferredDims[2], 32); // Height
-    EXPECT_EQ(inferredDims[3], 32); // Width
+    auto dxDims = dxTensor->get_dim();
+    EXPECT_EQ(dxDims.size(), 4);
+    EXPECT_EQ(dxDims[0], 1); // Batch size
+    EXPECT_EQ(dxDims[1], 32); // Input channels
+    EXPECT_EQ(dxDims[2], 32); // Height
+    EXPECT_EQ(dxDims[3], 32); // Width
 }
 
 TEST(TestConvolutionDgradNode, PreValidateTensorDimsTooFew)
@@ -614,6 +622,7 @@ TEST(TestConvolutionDgradNode, PreValidateTensorDimsTooFew)
     convAttributes.set_w(wTensor);
 
     auto dxTensor = std::make_shared<TensorAttributes>();
+    dxTensor->set_dim({1, 3});
     convAttributes.set_dx(dxTensor);
 
     convAttributes.set_pre_padding({1});
@@ -644,6 +653,7 @@ TEST(TestConvolutionDgradNode, PreValidateWeightDimsMismatch)
     convAttributes.set_w(wTensor);
 
     auto dxTensor = std::make_shared<TensorAttributes>();
+    dxTensor->set_dim({1, 3, 32, 32});
     convAttributes.set_dx(dxTensor);
 
     convAttributes.set_pre_padding({1, 1});
@@ -673,6 +683,7 @@ TEST(TestConvolutionDgradNode, PreValidateOutputChannelMismatch)
     convAttributes.set_w(wTensor);
 
     auto dxTensor = std::make_shared<TensorAttributes>();
+    dxTensor->set_dim({1, 3, 32, 32});
     convAttributes.set_dx(dxTensor);
 
     convAttributes.set_pre_padding({1, 1});
@@ -702,6 +713,7 @@ TEST(TestConvolutionDgradNode, PreValidateSpatialParamMismatch)
     convAttributes.set_w(wTensor);
 
     auto dxTensor = std::make_shared<TensorAttributes>();
+    dxTensor->set_dim({1, 3, 32, 32, 32});
     convAttributes.set_dx(dxTensor);
 
     // Only 2 spatial parameters for 3D spatial dimensions
@@ -732,6 +744,7 @@ TEST(TestConvolutionDgradNode, PreValidateNegativeStride)
     convAttributes.set_w(wTensor);
 
     auto dxTensor = std::make_shared<TensorAttributes>();
+    dxTensor->set_dim({1, 3, 32, 32});
     convAttributes.set_dx(dxTensor);
 
     convAttributes.set_pre_padding({1, 1});
@@ -761,6 +774,7 @@ TEST(TestConvolutionDgradNode, PreValidateZeroDilation)
     convAttributes.set_w(wTensor);
 
     auto dxTensor = std::make_shared<TensorAttributes>();
+    dxTensor->set_dim({1, 3, 32, 32});
     convAttributes.set_dx(dxTensor);
 
     convAttributes.set_pre_padding({1, 1});
@@ -790,6 +804,7 @@ TEST(TestConvolutionDgradNode, PreValidateNegativePrePadding)
     convAttributes.set_w(wTensor);
 
     auto dxTensor = std::make_shared<TensorAttributes>();
+    dxTensor->set_dim({1, 3, 32, 32});
     convAttributes.set_dx(dxTensor);
 
     convAttributes.set_pre_padding({-1, 1}); // Negative padding
@@ -818,6 +833,7 @@ TEST(TestConvolutionDgradNode, InferPropertiesWithLargeStride)
     convAttributes.set_w(wTensor);
 
     auto dxTensor = std::make_shared<TensorAttributes>();
+    dxTensor->set_dim({1, 3, 22, 22});
     convAttributes.set_dx(dxTensor);
 
     convAttributes.set_pre_padding({2, 2});
@@ -831,14 +847,12 @@ TEST(TestConvolutionDgradNode, InferPropertiesWithLargeStride)
     auto error = node.infer_properties_node();
     EXPECT_EQ(error.code, error_code_t::OK) << error.err_msg;
 
-    auto inferredDims = dxTensor->get_dim();
-    EXPECT_EQ(inferredDims.size(), 4);
-    EXPECT_EQ(inferredDims[0], 1); // Batch size
-    EXPECT_EQ(inferredDims[1], 3); // Input channels
-    // Height: 3 * (8 - 1) + 5 - 2 - 2 = 21 + 5 - 4 = 22
-    EXPECT_EQ(inferredDims[2], 22);
-    // Width: 3 * (8 - 1) + 5 - 2 - 2 = 21 + 5 - 4 = 22
-    EXPECT_EQ(inferredDims[3], 22);
+    auto dxDims = dxTensor->get_dim();
+    EXPECT_EQ(dxDims.size(), 4);
+    EXPECT_EQ(dxDims[0], 1); // Batch size
+    EXPECT_EQ(dxDims[1], 3); // Input channels
+    EXPECT_EQ(dxDims[2], 22); // Height
+    EXPECT_EQ(dxDims[3], 22); // Width
 }
 
 TEST(TestConvolutionDgradNode, InferPropertiesZeroPadding)
@@ -855,6 +869,7 @@ TEST(TestConvolutionDgradNode, InferPropertiesZeroPadding)
     convAttributes.set_w(wTensor);
 
     auto dxTensor = std::make_shared<TensorAttributes>();
+    dxTensor->set_dim({1, 3, 32, 32});
     convAttributes.set_dx(dxTensor);
 
     convAttributes.set_pre_padding({0, 0}); // No padding
@@ -868,14 +883,12 @@ TEST(TestConvolutionDgradNode, InferPropertiesZeroPadding)
     auto error = node.infer_properties_node();
     EXPECT_EQ(error.code, error_code_t::OK) << error.err_msg;
 
-    auto inferredDims = dxTensor->get_dim();
-    EXPECT_EQ(inferredDims.size(), 4);
-    EXPECT_EQ(inferredDims[0], 1); // Batch size
-    EXPECT_EQ(inferredDims[1], 3); // Input channels
-    // Height: 1 * (28 - 1) + 5 - 0 - 0 = 27 + 5 = 32
-    EXPECT_EQ(inferredDims[2], 32);
-    // Width: 1 * (28 - 1) + 5 - 0 - 0 = 27 + 5 = 32
-    EXPECT_EQ(inferredDims[3], 32);
+    auto dxDims = dxTensor->get_dim();
+    EXPECT_EQ(dxDims.size(), 4);
+    EXPECT_EQ(dxDims[0], 1); // Batch size
+    EXPECT_EQ(dxDims[1], 3); // Input channels
+    EXPECT_EQ(dxDims[2], 32); // Height
+    EXPECT_EQ(dxDims[3], 32); // Width
 }
 
 TEST(TestConvolutionDgradNode, InferPropertiesAsymmetricPadding)
@@ -892,6 +905,7 @@ TEST(TestConvolutionDgradNode, InferPropertiesAsymmetricPadding)
     convAttributes.set_w(wTensor);
 
     auto dxTensor = std::make_shared<TensorAttributes>();
+    dxTensor->set_dim({2, 32, 16, 16});
     convAttributes.set_dx(dxTensor);
 
     convAttributes.set_pre_padding({0, 1}); // Asymmetric padding
@@ -905,15 +919,12 @@ TEST(TestConvolutionDgradNode, InferPropertiesAsymmetricPadding)
     auto error = node.infer_properties_node();
     EXPECT_EQ(error.code, error_code_t::OK) << error.err_msg;
 
-    // Check inferred dimensions
-    auto inferredDims = dxTensor->get_dim();
-    EXPECT_EQ(inferredDims.size(), 4);
-    EXPECT_EQ(inferredDims[0], 2); // Batch size
-    EXPECT_EQ(inferredDims[1], 32); // Input channels
-    // Height: 1 * (15 - 1) + 3 - 0 - 1 = 14 + 3 - 1 = 16
-    EXPECT_EQ(inferredDims[2], 16);
-    // Width: 1 * (15 - 1) + 3 - 1 - 0 = 14 + 3 - 1 = 16
-    EXPECT_EQ(inferredDims[3], 16);
+    auto dxDims = dxTensor->get_dim();
+    EXPECT_EQ(dxDims.size(), 4);
+    EXPECT_EQ(dxDims[0], 2); // Batch size
+    EXPECT_EQ(dxDims[1], 32); // Input channels
+    EXPECT_EQ(dxDims[2], 16); // Height
+    EXPECT_EQ(dxDims[3], 16); // Width
 }
 
 TEST(TestConvolutionDgradNode, PreValidateGroupedConvInvalidOutputChannels)

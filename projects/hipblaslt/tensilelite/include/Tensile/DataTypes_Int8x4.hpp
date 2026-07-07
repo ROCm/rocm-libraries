@@ -26,6 +26,8 @@
 
 #pragma once
 
+#include <tensilelitehost/export.h>
+
 namespace TensileLite
 {
     /**
@@ -84,3 +86,4 @@ namespace std
                + std::to_string(val.c) + ", " + std::to_string(val.d) + ")";
     }
 } // namespace std
+

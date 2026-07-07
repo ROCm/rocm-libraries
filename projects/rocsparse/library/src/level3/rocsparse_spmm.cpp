@@ -37,6 +37,7 @@
 #include "rocsparse_csrmm.hpp"
 #include "rocsparse_determine_indextype.hpp"
 
+// LCOV_EXCL_START
 template <>
 const char* rocsparse::enum_utils::to_string(rocsparse_spmm_alg value_)
 {
@@ -57,9 +58,7 @@ const char* rocsparse::enum_utils::to_string(rocsparse_spmm_alg value_)
         CASE(rocsparse_spmm_alg_bsr);
 #undef CASE
     }
-    // LCOV_EXCL_START
     THROW_IF_ROCSPARSE_ERROR(rocsparse_status_invalid_value);
-    // LCOV_EXCL_STOP
 }
 
 template <>
@@ -75,10 +74,9 @@ const char* rocsparse::enum_utils::to_string(rocsparse_spmm_stage value_)
         CASE(rocsparse_spmm_stage_compute);
 #undef CASE
     }
-    // LCOV_EXCL_START
     THROW_IF_ROCSPARSE_ERROR(rocsparse_status_invalid_value);
-    // LCOV_EXCL_STOP
 }
+// LCOV_EXCL_STOP
 
 template <>
 bool rocsparse::enum_utils::is_invalid(rocsparse_spmm_alg value_)
@@ -573,7 +571,6 @@ namespace rocsparse
                     handle,
                     trans_A,
                     trans_B,
-                    mat_A->block_dir,
                     (mat_C->rows / mat_A->block_dim),
                     mat_C->cols,
 
@@ -609,7 +606,6 @@ namespace rocsparse
                     handle,
                     trans_A,
                     trans_B,
-                    mat_A->block_dir,
                     (mat_C->rows / mat_A->block_dim),
                     mat_C->cols,
 
@@ -644,7 +640,6 @@ namespace rocsparse
                 RETURN_IF_ROCSPARSE_ERROR((rocsparse::bellmm(handle,
                                                              trans_A,
                                                              trans_B,
-                                                             mat_A->block_dir,
                                                              (mat_C->rows / mat_A->block_dim),
                                                              mat_C->cols,
 

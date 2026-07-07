@@ -104,6 +104,13 @@ and :doc:`Performance database <../conceptual/perfdb>`.
       - | 1: Enable
         | 0 or unset: Disable
 
+    * - | ``MIOPEN_NAIVE_DISABLE_IF_ALT``
+        | Skips naive convolution solvers during find when at least one
+        | non-naive solver succeeds across any algorithm. Naive solvers
+        | are still used as a fallback when no non-naive solver succeeds.
+      - | 1 or unset: Enable (default)
+        | 0: Disable
+
     * - | ``MIOPEN_DEBUG_DISABLE_FIND_DB``
         | Disables FindDb functionality.
       - | 1: Disable FindDb
@@ -263,38 +270,18 @@ For more information, see :doc:`Logging and debugging <../how-to/debug-log>`.
       - | 0: Disable
         | 1: Enable
 
-    * - | ``MIOPEN_DEBUG_CONV_DIRECT_OCL_FWD11X11``
-        | Controls ConvOclDirectFwd11x11 direct solution.
+    * - | ``MIOPEN_DEBUG_CONV_DIRECT_HIP_FWD11X11``
+        | Controls ConvHipDirectFwd11x11 direct solution.
       - | 0: Disable
         | 1: Enable
 
-    * - | ``MIOPEN_DEBUG_CONV_DIRECT_OCL_FWDGEN``
-        | Controls ConvOclDirectFwdGen direct solution.
+    * - | ``MIOPEN_DEBUG_CONV_DIRECT_HIP_FWD``
+        | Controls ConvHipDirectFwd direct solution.
       - | 0: Disable
         | 1: Enable
 
-    * - | ``MIOPEN_DEBUG_CONV_DIRECT_OCL_FWD``
-        | Controls ConvOclDirectFwd direct solution.
-      - | 0: Disable
-        | 1: Enable
-
-    * - | ``MIOPEN_DEBUG_CONV_DIRECT_OCL_FWD1X1``
-        | Controls ConvOclDirectFwd1x1 direct solution.
-      - | 0: Disable
-        | 1: Enable
-
-    * - | ``MIOPEN_DEBUG_CONV_DIRECT_OCL_WRW2``
-        | Controls ConvOclBwdWrW2<n> (n={1,2,4,8,16}) and ConvOclBwdWrW2NonTunable solutions.
-      - | 0: Disable
-        | 1: Enable
-
-    * - | ``MIOPEN_DEBUG_CONV_DIRECT_OCL_WRW53``
-        | Controls ConvOclBwdWrW53 direct solution.
-      - | 0: Disable
-        | 1: Enable
-
-    * - | ``MIOPEN_DEBUG_CONV_DIRECT_OCL_WRW1X1``
-        | Controls ConvOclBwdWrW1x1 direct solution.
+    * - | ``MIOPEN_DEBUG_CONV_DIRECT_HIP_WRW53``
+        | Controls ConvHipBwdWrW53 direct solution.
       - | 0: Disable
         | 1: Enable
 

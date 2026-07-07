@@ -152,7 +152,7 @@ struct verify_inference_batchnorm_activ
             miopenTensorArgument_t{miopenTensorBatchnormBias, nullptr, bnbias_dev.get()},
             miopenTensorArgument_t{miopenTensorBatchnormEstimatedMean, nullptr, estMean_dev.get()},
             miopenTensorArgument_t{miopenTensorBatchnormEstimatedVariance, nullptr, estVariance_dev.get()},
-            miopenTensorArgument_t{miopenScalarBatchnormEpsilon, nullptr, (void*)&mut_eps},
+            miopenTensorArgument_t{miopenScalarBatchnormEpsilon, nullptr, static_cast<void*>(&mut_eps)},
             // clang-format on
         };
 
@@ -321,25 +321,25 @@ struct na_inference_find2_test : public ::testing::TestWithParam<TestCase>
                                                miopenStatus_t (*)(miopenProblem_t)>;
 
         const auto problem = [&]() {
-            miopenProblem_t problem;
-            miopenCreateBatchnormProblem(&problem, bnmode, true, miopenProblemDirectionInference);
+            miopenProblem_t problem_;
+            miopenCreateBatchnormProblem(&problem_, bnmode, true, miopenProblemDirectionInference);
 
             // clang-format off
-            miopenSetProblemTensorDescriptor(problem, miopenTensorBatchnormX, &input.desc);
-            miopenSetProblemTensorDescriptor(problem, miopenTensorBatchnormScale, &scale.desc);
-            miopenSetProblemTensorDescriptor(problem, miopenTensorBatchnormBias, &shift.desc);
-            miopenSetProblemTensorDescriptor(problem, miopenTensorBatchnormEstimatedMean, &derivedBnDesc);
-            miopenSetProblemTensorDescriptor(problem, miopenTensorBatchnormEstimatedVariance, &derivedBnDesc);
+            miopenSetProblemTensorDescriptor(problem_, miopenTensorBatchnormX, &input.desc);
+            miopenSetProblemTensorDescriptor(problem_, miopenTensorBatchnormScale, &scale.desc);
+            miopenSetProblemTensorDescriptor(problem_, miopenTensorBatchnormBias, &shift.desc);
+            miopenSetProblemTensorDescriptor(problem_, miopenTensorBatchnormEstimatedMean, &derivedBnDesc);
+            miopenSetProblemTensorDescriptor(problem_, miopenTensorBatchnormEstimatedVariance, &derivedBnDesc);
             // clang-format on
 
-            AddAndFuse(problem, [&](auto activation) {
+            AddAndFuse(problem_, [&](auto activation) {
                 miopenCreateActivationProblem(
                     activation, ptr_activdesc.get(), miopenProblemDirectionForward);
                 miopenSetProblemTensorDescriptor(*activation, miopenTensorActivationX, &input.desc);
                 miopenSetProblemTensorDescriptor(*activation, miopenTensorActivationY, &input.desc);
             });
 
-            return ManagedProblem{problem, &miopenDestroyProblem};
+            return ManagedProblem{problem_, &miopenDestroyProblem};
         }();
 
         test_helpers::CompareResults(verify_inference_batchnorm_activ<T, PREC_TYPE>{

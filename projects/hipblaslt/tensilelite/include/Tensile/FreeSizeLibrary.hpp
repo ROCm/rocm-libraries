@@ -29,6 +29,8 @@
 #include <set>
 #include <vector>
 
+#include <tensilelitehost/export.h>
+
 namespace TensileLite
 {
     template <typename Value>
@@ -158,3 +160,4 @@ namespace TensileLite
         }
     };
 } // namespace TensileLite
+

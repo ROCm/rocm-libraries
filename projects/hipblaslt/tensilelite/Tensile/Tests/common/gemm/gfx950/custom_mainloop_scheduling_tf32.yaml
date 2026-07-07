@@ -1,7 +1,8 @@
 TestParameters:
-  marks: [skip-gfx900, skip-gfx906, skip-gfx908, skip-gfx90a, skip-gfx940, skip-gfx941, skip-gfx942, skip-gfx1010, skip-gfx1011, skip-gfx1012, skip-gfx1030, skip-gfx1100, skip-gfx1101, skip-gfx1102, skip-gfx1200, skip-gfx1201] # not supported by arch
+  marks: [skip-gfx900, skip-gfx906, skip-gfx908, skip-gfx90a, skip-gfx940, skip-gfx941, skip-gfx942, skip-gfx1010, skip-gfx1011, skip-gfx1012, skip-gfx1030, skip-gfx1100, skip-gfx1101, skip-gfx1102, skip-gfx1200, skip-gfx1201, skip-gfx1250] # not supported by arch
 
 GlobalParameters:
+  SyncsPerBenchmark: 0
   #MinimumRequiredVersion: 4.14.0
   SleepPercent: 50
   NumElementsToValidate: -1
@@ -11,13 +12,10 @@ GlobalParameters:
   DataInitTypeAlpha: 1
   DataInitTypeA: 3
   DataInitTypeB: 3
-  NewClient: 2
-  CSVExportWinner: 1
-  CSVMergeSameProblemID: 1
+  CSVExportWinner: true
+  CSVMergeSameProblemID: true
   Device: 0
   RotatingBufferSize: 512
-  DeviceLDS: 163840
-  MaxLDS: 163840
   PrintSolutionRejectionReason: True
 
 BenchmarkProblems:
@@ -30,8 +28,8 @@ BenchmarkProblems:
       DataType: S
       DestDataType: S
       F32XdlMathOp: X
-      TransposeA: 1
-      TransposeB: 0
+      TransposeA: True
+      TransposeB: False
       UseBeta: True
       Batched: True
     - # BenchmarkProblemSizeGroup - Standard - All problem
@@ -45,7 +43,7 @@ BenchmarkProblems:
         - PrefetchLocalRead: [1]
         - DepthU: [32]
         - ScheduleIterAlg: [3]
-        - ExpandPointerSwap: [0]
+        - ExpandPointerSwap: [false]
         - TransposeLDS: [1]
         - LocalReadVectorWidth: [4]
         - GlobalReadVectorWidthA: [4]
@@ -59,7 +57,7 @@ BenchmarkProblems:
         - NonTemporalA: [0]
         - NonTemporalB: [0]
         - NonTemporalD: [4]
-        - SourceSwap: [1]
+        - SourceSwap: [true]
         - LdsBlockSizePerPadA: [-1]
         - LdsBlockSizePerPadB: [-1]
         - LDSTrInst: [False]
@@ -90,7 +88,7 @@ BenchmarkProblems:
         - StaggerU: [0]
         - ClusterLocalRead: [1]
         - TransposeLDS: [1]
-        - LDSTrInst: [0]
+        - LDSTrInst: [false]
       BenchmarkJoinParameters:
       BenchmarkFinalParameters:
         - ProblemSizes:
@@ -111,7 +109,7 @@ BenchmarkProblems:
         - PrefetchLocalRead: [1]
         - DepthU: [32]
         - ScheduleIterAlg: [3]
-        - ExpandPointerSwap: [0]
+        - ExpandPointerSwap: [false]
         - TransposeLDS: [1]
         - LocalReadVectorWidth: [4]
         - GlobalReadVectorWidthA: [4]
@@ -125,7 +123,7 @@ BenchmarkProblems:
         - NonTemporalA: [0]
         - NonTemporalB: [0]
         - NonTemporalD: [4]
-        - SourceSwap: [1]
+        - SourceSwap: [true]
         - LdsBlockSizePerPadA: [-1]
         - LdsBlockSizePerPadB: [-1]
         - LDSTrInst: [False]
@@ -149,7 +147,7 @@ BenchmarkProblems:
         - PrefetchLocalRead: [1]
         - DepthU: [32]
         - ScheduleIterAlg: [3]
-        - ExpandPointerSwap: [0]
+        - ExpandPointerSwap: [false]
         - TransposeLDS: [1]
         - LocalReadVectorWidth: [4]
         - GlobalReadVectorWidthA: [4]
@@ -163,7 +161,7 @@ BenchmarkProblems:
         - NonTemporalA: [0]
         - NonTemporalB: [0]
         - NonTemporalD: [4]
-        - SourceSwap: [1]
+        - SourceSwap: [true]
         - LdsBlockSizePerPadA: [-1]
         - LdsBlockSizePerPadB: [-1]
         - LDSTrInst: [False]
@@ -188,7 +186,7 @@ BenchmarkProblems:
         - PrefetchLocalRead: [1]
         - DepthU: [32]
         - ScheduleIterAlg: [3]
-        - ExpandPointerSwap: [0]
+        - ExpandPointerSwap: [false]
         - TransposeLDS: [1]
         - LocalReadVectorWidth: [4]
         - GlobalReadVectorWidthA: [4]
@@ -202,13 +200,13 @@ BenchmarkProblems:
         - NonTemporalA: [0]
         - NonTemporalB: [0]
         - NonTemporalD: [4]
-        - SourceSwap: [1]
+        - SourceSwap: [true]
         - LdsBlockSizePerPadA: [-1]
         - LdsBlockSizePerPadB: [-1]
         - LDSTrInst: [False]
         - UseSgprForGRO: [0]
         - UseCustomMainLoopSchedule: [1]
-        - MIArchVgpr: [1]
+        - MIArchVgpr: [true]
       BenchmarkJoinParameters:
       BenchmarkFinalParameters:
         - ProblemSizes:
@@ -225,7 +223,7 @@ BenchmarkProblems:
         - PrefetchLocalRead: [1]
         - DepthU: [32]
         - ScheduleIterAlg: [3]
-        - ExpandPointerSwap: [1]
+        - ExpandPointerSwap: [true]
         - TransposeLDS: [1]
         - LocalReadVectorWidth: [4]
         - GlobalReadVectorWidthA: [4]
@@ -239,7 +237,7 @@ BenchmarkProblems:
         - NonTemporalA: [0]
         - NonTemporalB: [0]
         - NonTemporalD: [4]
-        - SourceSwap: [1]
+        - SourceSwap: [true]
         - LdsBlockSizePerPadA: [-1]
         - LdsBlockSizePerPadB: [-1]
         - LDSTrInst: [False]
@@ -264,7 +262,7 @@ BenchmarkProblems:
         - PrefetchLocalRead: [1]
         - DepthU: [32]
         - ScheduleIterAlg: [3]
-        - ExpandPointerSwap: [0]
+        - ExpandPointerSwap: [false]
         - TransposeLDS: [1]
         - LocalReadVectorWidth: [4]
         - GlobalReadVectorWidthA: [4]
@@ -278,13 +276,13 @@ BenchmarkProblems:
         - NonTemporalA: [0]
         - NonTemporalB: [0]
         - NonTemporalD: [4]
-        - SourceSwap: [1]
+        - SourceSwap: [true]
         - LdsBlockSizePerPadA: [-1]
         - LdsBlockSizePerPadB: [-1]
         - LDSTrInst: [False]
         - UseSgprForGRO: [0]
         - UseCustomMainLoopSchedule: [1]
-        - MIArchVgpr: [1]
+        - MIArchVgpr: [true]
       BenchmarkJoinParameters:
       BenchmarkFinalParameters:
         - ProblemSizes:
@@ -301,7 +299,7 @@ BenchmarkProblems:
         - PrefetchLocalRead: [1]
         - DepthU: [64]
         - ScheduleIterAlg: [3]
-        - ExpandPointerSwap: [0]
+        - ExpandPointerSwap: [false]
         - TransposeLDS: [1]
         - LocalReadVectorWidth: [4]
         - GlobalReadVectorWidthA: [4]
@@ -310,11 +308,11 @@ BenchmarkProblems:
         - StreamK: [3]
         - StaggerU: [0]
         - 1LDSBuffer: [0]
-        - SourceSwap: [1]
+        - SourceSwap: [true]
         - LDSTrInst: [False]
         - UseSgprForGRO: [0]
         - UseCustomMainLoopSchedule: [1]
-        - MIArchVgpr: [0]
+        - MIArchVgpr: [false]
       BenchmarkJoinParameters:
       BenchmarkFinalParameters:
         - ProblemSizes:
@@ -333,7 +331,7 @@ BenchmarkProblems:
         - PrefetchLocalRead: [1]
         - DepthU: [32]
         - ScheduleIterAlg: [3]
-        - ExpandPointerSwap: [0]
+        - ExpandPointerSwap: [false]
         - TransposeLDS: [1]
         - LocalReadVectorWidth: [4]
         - GlobalReadVectorWidthA: [4]
@@ -347,10 +345,10 @@ BenchmarkProblems:
         - NonTemporalA: [0]
         - NonTemporalB: [0]
         - NonTemporalD: [4]
-        - SourceSwap: [1]
+        - SourceSwap: [true]
         - LdsBlockSizePerPadA: [-1]
         - LdsBlockSizePerPadB: [-1]
-        - LDSTrInst: [1]
+        - LDSTrInst: [true]
         - UseSgprForGRO: [0]
         - UseCustomMainLoopSchedule: [1]
       BenchmarkJoinParameters:
@@ -371,7 +369,7 @@ BenchmarkProblems:
         - PrefetchLocalRead: [1]
         - DepthU: [32]
         - ScheduleIterAlg: [3]
-        - ExpandPointerSwap: [0]
+        - ExpandPointerSwap: [false]
         - TransposeLDS: [1]
         - LocalReadVectorWidth: [4]
         - GlobalReadVectorWidthA: [4]
@@ -385,7 +383,7 @@ BenchmarkProblems:
         - NonTemporalA: [0]
         - NonTemporalB: [0]
         - NonTemporalD: [0]
-        - SourceSwap: [0]
+        - SourceSwap: [false]
         - LdsBlockSizePerPadA: [-1]
         - LdsBlockSizePerPadB: [-1]
         - LDSTrInst: [False]
@@ -423,7 +421,7 @@ BenchmarkProblems:
         - NonTemporalA: [0]
         - NonTemporalB: [0]
         - NonTemporalD: [4]
-        - SourceSwap: [1]
+        - SourceSwap: [true]
         - LdsBlockSizePerPadA: [-1]
         - LdsBlockSizePerPadB: [-1]
         - LDSTrInst: [False]
@@ -460,7 +458,7 @@ BenchmarkProblems:
         - NonTemporalA: [0]
         - NonTemporalB: [0]
         - NonTemporalD: [4]
-        - SourceSwap: [1]
+        - SourceSwap: [true]
         - LdsBlockSizePerPadA: [-1]
         - LdsBlockSizePerPadB: [-1]
         - LDSTrInst: [False]
@@ -485,7 +483,7 @@ BenchmarkProblems:
         - GlobalReadVectorWidthA: [4]
         - LocalReadVectorWidth: [4]
         - ScheduleIterAlg: [3]
-        - SourceSwap: [0]
+        - SourceSwap: [false]
         - 1LDSBuffer: [0]
         - DirectToLds: [1]
         - PrefetchGlobalRead: [2]
@@ -497,7 +495,7 @@ BenchmarkProblems:
         - StaggerU: [0]
         - ClusterLocalRead: [1]
         - TransposeLDS: [1]
-        - LDSTrInst: [1]
+        - LDSTrInst: [true]
       BenchmarkJoinParameters:
       BenchmarkFinalParameters:
         - ProblemSizes:
@@ -529,7 +527,7 @@ BenchmarkProblems:
         - NonTemporalA: [0]
         - NonTemporalB: [0]
         - NonTemporalD: [4]
-        - SourceSwap: [1]
+        - SourceSwap: [true]
         - LdsBlockSizePerPadA: [-1]
         - LdsBlockSizePerPadB: [-1]
         - LDSTrInst: [False]
@@ -566,7 +564,7 @@ BenchmarkProblems:
         - NonTemporalA: [0]
         - NonTemporalB: [0]
         - NonTemporalD: [4]
-        - SourceSwap: [1]
+        - SourceSwap: [true]
         - LdsBlockSizePerPadA: [-1]
         - LdsBlockSizePerPadB: [-1]
         - LDSTrInst: [False]
@@ -589,8 +587,8 @@ BenchmarkProblems:
       DataType: S
       DestDataType: S
       F32XdlMathOp: X
-      TransposeA: 0
-      TransposeB: 0
+      TransposeA: False
+      TransposeB: False
       UseBeta: True
       Batched: True
       UseBias: 1
@@ -619,7 +617,7 @@ BenchmarkProblems:
         - NonTemporalA: [0]
         - NonTemporalB: [0]
         - NonTemporalD: [4]
-        - SourceSwap: [1]
+        - SourceSwap: [true]
         - LDSTrInst: [False]
         - UseSgprForGRO: [0]
         - UseCustomMainLoopSchedule: [1]
@@ -675,7 +673,7 @@ BenchmarkProblems:
         - PrefetchLocalRead: [1]
         - DepthU: [32]
         - ScheduleIterAlg: [3]
-        - ExpandPointerSwap: [1]
+        - ExpandPointerSwap: [true]
         - TransposeLDS: [1]
         - LocalReadVectorWidth: [4]
         - GlobalReadVectorWidthA: [4]
@@ -689,7 +687,7 @@ BenchmarkProblems:
         - NonTemporalA: [0]
         - NonTemporalB: [0]
         - NonTemporalD: [4]
-        - SourceSwap: [1]
+        - SourceSwap: [true]
         - LdsBlockSizePerPadA: [-1]
         - LdsBlockSizePerPadB: [-1]
         - LDSTrInst: [False]
@@ -717,7 +715,7 @@ BenchmarkProblems:
         - PrefetchLocalRead: [1]
         - DepthU: [64]
         - ScheduleIterAlg: [3]
-        - ExpandPointerSwap: [1]
+        - ExpandPointerSwap: [true]
         - TransposeLDS: [1]
         - LocalReadVectorWidth: [4]
         - GlobalReadVectorWidthA: [4]
@@ -726,7 +724,7 @@ BenchmarkProblems:
         - StreamK: [3]
         - StaggerU: [0]
         - 1LDSBuffer: [0]
-        - SourceSwap: [1]
+        - SourceSwap: [true]
         - LDSTrInst: [False]
         - VectorWidthA: [4]
         - UseSgprForGRO: [0]
@@ -758,7 +756,7 @@ BenchmarkProblems:
         - NonTemporalA: [0]
         - NonTemporalB: [0]
         - NonTemporalD: [4]
-        - SourceSwap: [1]
+        - SourceSwap: [true]
         - VectorWidthA: [1]
         - LDSTrInst: [False]
         - UseSgprForGRO: [0]
@@ -787,7 +785,7 @@ BenchmarkProblems:
         - StaggerU: [0]
         - ClusterLocalRead: [1]
         - TransposeLDS: [1]
-        - LDSTrInst: [1]
+        - LDSTrInst: [true]
       BenchmarkJoinParameters:
       BenchmarkFinalParameters:
         - ProblemSizes:
@@ -804,8 +802,8 @@ BenchmarkProblems:
       DataType: S
       DestDataType: S
       F32XdlMathOp: X
-      TransposeA: 0
-      TransposeB: 1
+      TransposeA: False
+      TransposeB: True
       UseBeta: True
       Batched: True
       UseBias: 1
@@ -840,7 +838,7 @@ BenchmarkProblems:
         - NonTemporalA: [0]
         - NonTemporalB: [0]
         - NonTemporalD: [4]
-        - SourceSwap: [1]
+        - SourceSwap: [true]
         - LdsBlockSizePerPadA: [-1]
         - LdsBlockSizePerPadB: [-1]
         - LDSTrInst: [False]
@@ -866,7 +864,7 @@ BenchmarkProblems:
         - PrefetchLocalRead: [1]
         - DepthU: [32]
         - ScheduleIterAlg: [3]
-        - ExpandPointerSwap: [1]
+        - ExpandPointerSwap: [true]
         - TransposeLDS: [0]
         - LocalReadVectorWidth: [4]
         - GlobalReadVectorWidthA: [4]
@@ -877,8 +875,8 @@ BenchmarkProblems:
         - WorkGroupMapping: [1]
         - WorkGroupMappingXCC: [2]
         - 1LDSBuffer: [0]
-        - SourceSwap: [1]
-        - LDSTrInst: [1]
+        - SourceSwap: [true]
+        - LDSTrInst: [true]
         - VectorWidthA: [2]
         - VectorWidthB: [2]
         - UseSgprForGRO: [0]

@@ -537,7 +537,8 @@ namespace rocRoller
                                 std::vector<unsigned int> const& jammedTiles,
                                 CommandParametersPtr             params,
                                 ContextPtr                       context,
-                                bool                             isGlobalToLDS = false);
+                                bool                             isGlobalToLDS = false,
+                                bool                             ldsSwizzle    = false);
 
         /**
          * @brief Store version of addLoadThreadTileCT.
@@ -659,7 +660,9 @@ namespace rocRoller
                                  std::array<unsigned int, 3> const& workgroupSizes,
                                  std::vector<unsigned int> const&   jammedTiles,
                                  bool                               rightmostFastest,
-                                 bool                               isGlobalToLDS = false);
+                                 bool                               isGlobalToLDS     = false,
+                                 bool                               ldsSwizzle        = false,
+                                 unsigned int                       columnsPerBankRow = 0u);
 
         /**
          * @brief Create an internal tile backed by a ThreadTile.
@@ -802,26 +805,30 @@ namespace rocRoller
         void removeRedundantBodyEdgesBaselineMethod(KernelGraph& graph);
 
         /**
-         * Yields all of the nodes that are body parents of `control` in order from the node
-         * up to the root of the graph.
+         * Yields all nodes that contain `control` via a non-Sequence edge, in order from
+         * the immediate parent up to the root of the graph, paired with the containing edge
+         * connecting the parent to the child (e.g. Body, Else, Initialize, ForLoopIncrement).
          */
-        Generator<int> bodyParents(int control, KernelGraph const& graph);
+        Generator<std::pair<int, ControlGraph::ControlEdge>>
+            containingAncestors(int control, KernelGraph const& graph);
 
         /**
-         * Yields all of the nodes that are body parents of `control` in order from the node
-         * up to the root of the graph.
+         * Yields all nodes that contain `control` via a non-Sequence edge, in order from
+         * the immediate parent up to the root of the graph, paired with the containing edge
+         * connecting the parent to the child (e.g. Body, Else, Initialize, ForLoopIncrement).
          */
-        Generator<int> bodyParents(int control, ControlGraph::ControlGraph const& graph);
+        Generator<std::pair<int, ControlGraph::ControlEdge>>
+            containingAncestors(int control, ControlGraph::ControlGraph const& graph);
 
         /**
-         * Returns all of the nodes that contain `control` with a body
-         * relationship in order from the root of the graph, including `control` itself.
+         * Returns all nodes that contain `control` via a non-Sequence edge, in order
+         * from the root of the graph down to `control` itself.
          */
         std::deque<int> controlStack(int control, KernelGraph const& graph);
 
         /**
-         * Returns all of the nodes that contain `control` with a body
-         * relationship in order from the root of the graph, including `control` itself.
+         * Returns all nodes that contain `control` via a non-Sequence edge, in order
+         * from the root of the graph down to `control` itself.
          */
         std::deque<int> controlStack(int control, ControlGraph::ControlGraph const& graph);
 
@@ -866,6 +873,24 @@ namespace rocRoller
          */
         std::optional<int>
             getExchangeForMultiply(KernelGraph const& graph, int multiplyTag, NaryArgument arg);
+
+        /**
+         * @brief Return true if the layout of the given element number is swapped.
+         *
+         * In LowerTile, swapped layout means when X & Y dimensions for a particular tile are swapped
+         * to improve the use of long dword instructions. This function determines whether the layout
+         * was swapped for a given element number, which affects how tile elements should be accessed.
+         */
+        bool isSwappedLayout(KernelGraph const&                    graph,
+                             int                                   elementNumberTag,
+                             CoordinateGraph::ElementNumber const& elementNumber);
+
+        /**
+         * @brief Get the size of the VGPRBlockSet dimension for a given tag.
+         *
+         * @return The VGPRBlockSet size, or std::nullopt if no VGPRBlockSet dimension exists.
+         */
+        std::optional<uint> GetVGPRBlockSetDimSize(KernelGraph const& graph, int tag);
     }
 }
 

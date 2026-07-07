@@ -162,6 +162,10 @@ MIOPEN_EXPORT miopenStatus_t miopenGetVersion(size_t* major, size_t* minor, size
  *
  * This function creates a MIOpen handle. This is called at the very start to initialize the MIOpen
  * environment.
+ *
+ * @note When MIOpen is built with Composable Kernel support, the first handle created for a given
+ * GPU architecture in a process loads the CK dynamic library.
+ *
  * @param handle     A pointer to a MIOpen handle type (output)
  *
  * @return           miopenStatus_t
@@ -174,6 +178,10 @@ MIOPEN_EXPORT miopenStatus_t miopenCreate(miopenHandle_t* handle);
  * cl_command_queue.
  *
  * Create a handle with a previously created accelerator command queue.
+ *
+ * @note When MIOpen is built with Composable Kernel support, the first handle created for a given
+ * GPU architecture in a process loads the CK dynamic library.
+ *
  * @param handle     A pointer to a MIOpen handle type (output)
  * @param stream      An accelerator queue type (input)
  *
@@ -2168,6 +2176,10 @@ miopenConvolutionBackwardWeights(miopenHandle_t handle,
                                  size_t workSpaceSize);
 
 /*! @brief Calculates the gradient with respect to the bias.
+ *
+ * @deprecated This function is deprecated and will be removed in a future release.
+ *             The underlying OpenCL kernel (MIOpenConvBwdBias.cl) has been removed.
+ *             This function now returns miopenStatusNotImplemented.
  *
  * Compute the convolution backwards gradient with respect to the bias tensor.
  * The scaling parameter alpha (float) and shift parameter beta (float) are only supported for

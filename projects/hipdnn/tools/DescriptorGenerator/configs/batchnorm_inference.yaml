@@ -77,37 +77,31 @@ operation:
       fbs_field: "x_tensor_uid"
       attr_suffix: "X_EXT"
       required: true
-      frontend_getter: "get_x()"
 
     - name: "mean"
       fbs_field: "mean_tensor_uid"
       attr_suffix: "MEAN_EXT"
       required: true
-      frontend_getter: "get_mean()"
 
     - name: "inv_variance"
       fbs_field: "inv_variance_tensor_uid"
       attr_suffix: "INV_VARIANCE_EXT"
       required: true
-      frontend_getter: "get_inv_variance()"
 
     - name: "scale"
       fbs_field: "scale_tensor_uid"
       attr_suffix: "SCALE_EXT"
       required: true
-      frontend_getter: "get_scale()"
 
     - name: "bias"
       fbs_field: "bias_tensor_uid"
       attr_suffix: "BIAS_EXT"
       required: true
-      frontend_getter: "get_bias()"
 
     - name: "y"
       fbs_field: "y_tensor_uid"
       attr_suffix: "Y_EXT"
       required: true
-      frontend_getter: "get_y()"
 
   data_fields: []
 

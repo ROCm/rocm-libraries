@@ -42,10 +42,12 @@
 #include <iostream>
 #include <iterator>
 
-BEGIN_ROCPRIM_NAMESPACE
-
 /// \addtogroup devicemodule
 /// @{
+
+BEGIN_ROCPRIM_NAMESPACE
+
+#ifndef DOXYGEN_SHOULD_SKIP_THIS // Do not document
 
 namespace detail
 {
@@ -240,6 +242,8 @@ hipError_t run_length_encode_non_trivial_runs_impl(void*                   tempo
 } // namespace run_length_encode
 } // namespace detail
 
+#endif // DOXYGEN_SHOULD_SKIP_THIS
+
 /// \brief Parallel run-length encoding for device level.
 ///
 /// run_length_encode function performs a device-wide run-length encoding of runs (groups)
@@ -399,6 +403,8 @@ inline hipError_t run_length_encode(void*                   temporary_storage,
 /// In this example a device-level run-length encoding of non-trivial runs is performed on an array of
 /// integer values.
 ///
+/// The full example is [on GitHub](https://github.com/ROCm/rocm-libraries/tree/develop/projects/rocprim/example/rocprim/device/example_device_run_length_encode.cpp).
+///
 /// \code{.cpp}
 /// #include <rocprim/rocprim.hpp>
 ///
@@ -459,9 +465,9 @@ inline hipError_t run_length_encode_non_trivial_runs(void*                   tem
         debug_synchronous);
 }
 
+END_ROCPRIM_NAMESPACE
+
 /// @}
 // end of group devicemodule
-
-END_ROCPRIM_NAMESPACE
 
 #endif // ROCPRIM_DEVICE_DEVICE_RUN_LENGTH_ENCODE_HPP_

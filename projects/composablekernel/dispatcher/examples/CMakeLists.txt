@@ -187,7 +187,6 @@ function(add_gpu_example NAME SOURCE KERNEL_HEADER)
     if(HEADER_NAME STREQUAL "register_all_kernels.hpp")
         # Registration header - examples include it directly
         target_compile_options(${NAME} PRIVATE
-            -DGEMM_KERNEL_AVAILABLE=1
             -mllvm -enable-noalias-to-md-conversion=0
             -Wno-undefined-func-template
             -Wno-float-equal
@@ -291,7 +290,7 @@ function(add_declarative_gpu_example NAME SOURCE)
         COMMAND python3 ${CMAKE_CURRENT_SOURCE_DIR}/../scripts/example_kernel_builder.py
                 ${EXAMPLE_SOURCE}
                 --output-dir ${EXAMPLE_KERNEL_DIR}
-                --include-dirs "${CMAKE_CURRENT_SOURCE_DIR}/../../include,${CMAKE_CURRENT_SOURCE_DIR}/../include"
+                --include-dirs "${CMAKE_CURRENT_SOURCE_DIR}/../../include,${CMAKE_CURRENT_SOURCE_DIR}/../include,${CMAKE_CURRENT_SOURCE_DIR}/../.."
                 --gpu-target ${GPU_TARGET}
                 --jobs ${NPROC}
                 --target-name ${NAME}
@@ -315,6 +314,7 @@ function(add_declarative_gpu_example NAME SOURCE)
     target_include_directories(${NAME} PRIVATE
         ${CMAKE_CURRENT_SOURCE_DIR}/../../include
         ${CMAKE_CURRENT_SOURCE_DIR}/../include
+        ${CMAKE_CURRENT_SOURCE_DIR}/../..
         ${EXAMPLE_KERNEL_DIR}
         ${EXAMPLE_KERNEL_DIR}/dispatcher_wrappers
     )
@@ -322,7 +322,6 @@ function(add_declarative_gpu_example NAME SOURCE)
     # Force-include the generated registration header
     target_compile_options(${NAME} PRIVATE
         -include ${EXAMPLE_HEADER}
-        -DGEMM_KERNEL_AVAILABLE=1
         -mllvm -enable-noalias-to-md-conversion=0
         -Wno-undefined-func-template
         -Wno-float-equal
@@ -345,6 +344,7 @@ add_declarative_gpu_example(gemm_03_benchmark_validation gemm/cpp/03_benchmark_v
 add_declarative_gpu_example(gemm_04_heuristics           gemm/cpp/04_heuristics.cpp)
 add_declarative_gpu_example(gemm_05_json_export          gemm/cpp/05_json_export.cpp)
 add_declarative_gpu_example(gemm_06_multi_registry       gemm/cpp/06_multi_registry.cpp)
+add_declarative_gpu_example(gemm_07_gfx950_minimal       gemm/cpp/07_gfx950_minimal.cpp)
 
 # ML Heuristic example -- requires LightGBM shared library
 # Derive site-packages from active Python interpreter (respects virtualenvs)
@@ -443,19 +443,173 @@ if(hip_FOUND)
 endif()
 add_dependencies(dispatcher_gemm_lib generate_gemm_fallback_kernel)
 
+# =============================================================================
+# Grouped Convolution C++ Examples
+# =============================================================================
+
+add_declarative_gpu_example(grouped_conv_01_basic         grouped_conv/cpp/01_basic_grouped_conv.cpp)
+add_declarative_gpu_example(grouped_conv_02_all_dirs      grouped_conv/cpp/02_all_directions.cpp)
+add_declarative_gpu_example(grouped_conv_03_bench_val     grouped_conv/cpp/03_benchmark_validation.cpp)
+add_declarative_gpu_example(grouped_conv_04_registry_json grouped_conv/cpp/04_registry_json.cpp)
+add_declarative_gpu_example(grouped_conv_05_bwd_data      grouped_conv/cpp/05_bwd_data.cpp)
+add_declarative_gpu_example(grouped_conv_06_bwd_weight    grouped_conv/cpp/06_bwd_weight.cpp)
+add_declarative_gpu_example(grouped_conv_07_benchmark     grouped_conv/cpp/07_multi_tile_benchmark.cpp)
+
+# =============================================================================
+# FMHA C++ Examples
+# =============================================================================
+
+add_declarative_gpu_example(fmha_01_basic        fmha/cpp/01_basic_fmha.cpp)
+add_declarative_gpu_example(fmha_02_splitkv      fmha/cpp/02_splitkv_fmha.cpp)
+add_declarative_gpu_example(fmha_03_kvcache      fmha/cpp/03_kvcache_fmha.cpp)
+add_declarative_gpu_example(fmha_04_bwd          fmha/cpp/04_bwd_fmha.cpp)
+add_declarative_gpu_example(fmha_05_appendkv     fmha/cpp/05_appendkv_fmha.cpp)
+add_declarative_gpu_example(fmha_06_batch_prefill fmha/cpp/06_batch_prefill_fmha.cpp)
+add_declarative_gpu_example(fmha_07_profile_pytorch fmha/cpp/07_profile_pytorch_fmha.cpp)
+add_declarative_gpu_example(fmha_08_profile_flash fmha/cpp/08_profile_flash_fmha.cpp)
+add_declarative_gpu_example(fmha_09_profile_aiter fmha/cpp/09_profile_aiter_fmha.cpp)
+add_declarative_gpu_example(fmha_10_profile_fp32_fp8 fmha/cpp/10_profile_fp32_fp8_fmha.cpp)
+add_declarative_gpu_example(fmha_11_receipt_aliases fmha/cpp/11_receipt_aliases_fmha.cpp)
+add_declarative_gpu_example(fmha_12_registry_json fmha/cpp/12_registry_json_fmha.cpp)
+add_declarative_gpu_example(fmha_13_feature_coverage fmha/cpp/13_feature_coverage_fmha.cpp)
+add_declarative_gpu_example(fmha_14_benchmark_validation fmha/cpp/14_benchmark_validation_fmha.cpp)
+add_declarative_gpu_example(fmha_15_multi_shape fmha/cpp/15_multi_shape_fmha.cpp)
+add_declarative_gpu_example(fmha_16_heuristics fmha/cpp/16_heuristics_fmha.cpp)
+add_declarative_gpu_example(fmha_17_autofill_autocorrect fmha/cpp/17_autofill_autocorrect_fmha.cpp)
+add_declarative_gpu_example(fmha_18_gpu_splitkv fmha/cpp/18_gpu_splitkv_fmha.cpp)
+add_declarative_gpu_example(fmha_19_gpu_masks fmha/cpp/19_gpu_masks_fmha.cpp)
+add_declarative_gpu_example(fmha_20_gpu_bias fmha/cpp/20_gpu_bias_fmha.cpp)
+add_declarative_gpu_example(fmha_21_gpu_features fmha/cpp/21_gpu_features_fmha.cpp)
+add_declarative_gpu_example(fmha_22_gpu_bwd fmha/cpp/22_gpu_bwd_fmha.cpp)
+add_declarative_gpu_example(fmha_23_multi_registry fmha/cpp/23_multi_registry_fmha.cpp)
+add_declarative_gpu_example(fmha_24_per_receipt_registries fmha/cpp/24_per_receipt_registries_fmha.cpp)
+add_declarative_gpu_example(fmha_25_gpu_appendkv_prefill fmha/cpp/25_gpu_appendkv_batchprefill_fmha.cpp)
+add_declarative_gpu_example(fmha_26_dtypes_hdims fmha/cpp/26_dtypes_hdims_fmha.cpp)
+add_declarative_gpu_example(fmha_27_padding_permutation fmha/cpp/27_padding_permutation_fmha.cpp)
+add_declarative_gpu_example(fmha_28_bwd_masks fmha/cpp/28_bwd_masks_fmha.cpp)
+add_declarative_gpu_example(fmha_29_bwd_bias_dropout fmha/cpp/29_bwd_bias_dropout_fmha.cpp)
+add_declarative_gpu_example(fmha_30_bwd_benchmark fmha/cpp/30_bwd_benchmark_fmha.cpp)
+add_declarative_gpu_example(fmha_31_logits_soft_cap fmha/cpp/31_logits_soft_cap_fmha.cpp)
+add_declarative_gpu_example(fmha_32_sink_tokens fmha/cpp/32_sink_tokens_fmha.cpp)
+add_declarative_gpu_example(fmha_33_bwd_deterministic fmha/cpp/33_bwd_deterministic_fmha.cpp)
+add_declarative_gpu_example(fmha_34_bwd_gqa fmha/cpp/34_bwd_gqa_fmha.cpp)
+add_declarative_gpu_example(fmha_35_generic_mask fmha/cpp/35_generic_mask_fmha.cpp)
+
+# =============================================================================
+# Grouped Convolution Python Library - Multi-Kernel (fwd/bwdd/bwdw x 2D/3D)
+# =============================================================================
+
+# Kernel output directory for the Python conv library
+set(CONV_FALLBACK_KERNEL_DIR "${CMAKE_CURRENT_BINARY_DIR}/conv_python_fallback")
+set(CONV_DISPATCH_HEADER "${CONV_FALLBACK_KERNEL_DIR}/conv_python_dispatch.hpp")
+
+# Generate ALL conv kernels (fwd/bwd_data/bwd_weight x 2D/3D x multiple tile configs)
+# then create the dispatch header with 2D/3D aliases
+add_custom_command(
+    OUTPUT ${CONV_DISPATCH_HEADER}
+    COMMAND ${CMAKE_COMMAND} -E make_directory ${CONV_FALLBACK_KERNEL_DIR}
+    COMMAND python3 ${CMAKE_CURRENT_SOURCE_DIR}/../codegen/unified_grouped_conv_codegen.py
+            --variant forward bwd_data bwd_weight --ndim 2 3
+            --datatype fp16 --arch ${GPU_TARGET}
+            --output ${CONV_FALLBACK_KERNEL_DIR}
+    COMMAND python3 ${CMAKE_CURRENT_SOURCE_DIR}/../scripts/generate_conv_dispatch_header.py
+            --kernel-dir ${CONV_FALLBACK_KERNEL_DIR}
+            --output ${CONV_DISPATCH_HEADER}
+    COMMENT "Generating conv kernels (fwd/bwd_data/bwd_weight x 2D/3D) for Python library..."
+    VERBATIM
+)
+
+add_custom_target(generate_conv_fallback_kernels DEPENDS ${CONV_DISPATCH_HEADER})
+
+# Conv dynamic library for Python (all 6 kernel variants)
+add_library(dispatcher_conv_lib SHARED ${CMAKE_CURRENT_SOURCE_DIR}/../bindings/ctypes/conv_ctypes_lib.cpp)
+target_link_libraries(dispatcher_conv_lib PRIVATE ck_tile_dispatcher)
+target_include_directories(dispatcher_conv_lib PRIVATE
+    ${CMAKE_CURRENT_SOURCE_DIR}/../../include
+    ${CMAKE_CURRENT_SOURCE_DIR}/../include
+    ${CONV_FALLBACK_KERNEL_DIR}
+)
+target_compile_options(dispatcher_conv_lib PRIVATE
+    -include ${CONV_DISPATCH_HEADER}
+    -DGFX_ARCH="${GPU_TARGET}"
+    -mllvm -enable-noalias-to-md-conversion=0
+    -Wno-undefined-func-template
+    -Wno-float-equal
+    --offload-compress
+)
+if(hip_FOUND)
+    target_link_libraries(dispatcher_conv_lib PRIVATE hip::device hip::host)
+endif()
+add_dependencies(dispatcher_conv_lib generate_conv_fallback_kernels)
+
+# =============================================================================
+# FMHA Python Library - Single Fallback Kernel
+# =============================================================================
+
+set(FMHA_FALLBACK_KERNEL_DIR "${CMAKE_CURRENT_BINARY_DIR}/fmha_python_fallback")
+set(FMHA_DISPATCH_HEADER "${FMHA_FALLBACK_KERNEL_DIR}/fmha_python_dispatch.hpp")
+set(FMHA_FALLBACK_LIB "${FMHA_FALLBACK_KERNEL_DIR}/libfmha_python_fallback.a")
+set(FMHA_FALLBACK_SENTINEL "${FMHA_FALLBACK_KERNEL_DIR}/.generated")
+
+# Generate the FMHA fallback kernel, compile it, and produce both
+# the dispatch header and a static library with the kernel object.
+# Uses example_kernel_builder.py with a synthetic source that declares
+# a single FMHA kernel set, just like the C++ examples do.
+set(FMHA_FALLBACK_SOURCE "${FMHA_FALLBACK_KERNEL_DIR}/fmha_python_fallback.cpp")
+add_custom_command(
+    OUTPUT ${FMHA_DISPATCH_HEADER} ${FMHA_FALLBACK_LIB} ${FMHA_FALLBACK_SENTINEL}
+    COMMAND ${CMAKE_COMMAND} -E make_directory ${FMHA_FALLBACK_KERNEL_DIR}
+    COMMAND python3 ${CMAKE_CURRENT_SOURCE_DIR}/../codegen/fmha/generate_fallback.py
+            --output-dir ${FMHA_FALLBACK_KERNEL_DIR}
+            --gpu-target ${GPU_TARGET}
+            --compile
+            --include-dirs "${CMAKE_CURRENT_SOURCE_DIR}/../../include:${CMAKE_CURRENT_SOURCE_DIR}/../include:${CMAKE_CURRENT_SOURCE_DIR}/../.."
+    COMMAND ${CMAKE_COMMAND} -E touch ${FMHA_FALLBACK_SENTINEL}
+    COMMENT "Generating and compiling FMHA fallback kernel for Python library..."
+    VERBATIM
+)
+
+add_custom_target(generate_fmha_fallback_kernels
+    DEPENDS ${FMHA_DISPATCH_HEADER} ${FMHA_FALLBACK_LIB})
+
+# FMHA dynamic library for Python
+add_library(dispatcher_fmha_lib SHARED ${CMAKE_CURRENT_SOURCE_DIR}/../bindings/ctypes/fmha_ctypes_lib.cpp)
+target_link_libraries(dispatcher_fmha_lib PRIVATE ck_tile_dispatcher ${FMHA_FALLBACK_LIB})
+target_include_directories(dispatcher_fmha_lib PRIVATE
+    ${CMAKE_CURRENT_SOURCE_DIR}/../../include
+    ${CMAKE_CURRENT_SOURCE_DIR}/../include
+    ${CMAKE_CURRENT_SOURCE_DIR}/../..
+    ${FMHA_FALLBACK_KERNEL_DIR}
+    ${FMHA_FALLBACK_KERNEL_DIR}/dispatcher_wrappers
+)
+target_compile_options(dispatcher_fmha_lib PRIVATE
+    -include ${FMHA_DISPATCH_HEADER}
+    -DGFX_ARCH="${GPU_TARGET}"
+    -mllvm -enable-noalias-to-md-conversion=0
+    -Wno-undefined-func-template
+    -Wno-float-equal
+    --offload-compress
+)
+if(hip_FOUND)
+    target_link_libraries(dispatcher_fmha_lib PRIVATE hip::device hip::host)
+endif()
+add_dependencies(dispatcher_fmha_lib generate_fmha_fallback_kernels)
+
 message(STATUS "GEMM examples configured - kernels will be generated during 'make'")
+message(STATUS "Grouped Conv examples configured - kernels will be generated during 'make'")
+message(STATUS "FMHA examples configured - kernels will be generated during 'make'")
 
 # Convenience target to build all Python ctypes libraries
 add_custom_target(python_libs
-    DEPENDS dispatcher_gemm_lib
-    COMMENT "Building Python ctypes libraries (GEMM)"
+    DEPENDS dispatcher_gemm_lib dispatcher_conv_lib dispatcher_fmha_lib
+    COMMENT "Building Python ctypes libraries (GEMM + Conv + FMHA)"
 )
 
 # =============================================================================
 # Per-Architecture Kernel Generation Targets
 # =============================================================================
 
-set(SUPPORTED_GPU_ARCHS gfx942 gfx90a gfx1100 gfx1030)
+set(SUPPORTED_GPU_ARCHS gfx942 gfx950 gfx90a gfx1100 gfx1030)
 
 foreach(ARCH ${SUPPORTED_GPU_ARCHS})
     # GEMM kernels for this arch

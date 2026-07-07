@@ -255,7 +255,50 @@ constexpr float getTolerance()
     }
 }
 
+template <typename T>
+constexpr float getMxTolerance()
+{
+    if constexpr(std::is_same_v<T, float>)
+    {
+        return 1e-4f;
+    }
+    else if constexpr(std::is_same_v<T, half> || std::is_same_v<T, bfloat16>)
+    {
+        return 1e-2f;
+    }
+    else
+    {
+        static_assert(false, "Type not supported");
+    }
+}
+
 } // namespace matmul
+
+namespace reduction
+{
+
+template <typename T>
+constexpr float getTolerance()
+{
+    if constexpr(std::is_same_v<T, float>)
+    {
+        return 1e-5f;
+    }
+    else if constexpr(std::is_same_v<T, half>)
+    {
+        return 1e-2f;
+    }
+    else if constexpr(std::is_same_v<T, bfloat16>)
+    {
+        return 5e-2f;
+    }
+    else
+    {
+        static_assert(false, "Type not supported");
+    }
+}
+
+} // namespace reduction
 
 namespace pointwise
 {
@@ -320,5 +363,27 @@ constexpr float getTolerance()
 }
 
 } // namespace layernorm
+
+namespace sdpa
+{
+
+template <typename T>
+constexpr float getToleranceFwd()
+{
+    if constexpr(std::is_same_v<T, float>)
+    {
+        return 1e-5f;
+    }
+    else if constexpr(std::is_same_v<T, half> || std::is_same_v<T, bfloat16>)
+    {
+        return 1e-2f;
+    }
+    else
+    {
+        static_assert(false, "Type not supported");
+    }
+}
+
+} // namespace sdpa
 
 } // namespace hipdnn_test_sdk::utilities

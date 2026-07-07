@@ -14,6 +14,18 @@ target_include_directories(hipblaslt-clients-common
         "${CMAKE_CURRENT_SOURCE_DIR}/../../tensilelite"
 )
 
+if(HIPBLASLT_ENABLE_COVERAGE)
+    target_include_directories(hipblaslt-clients-common
+        PUBLIC
+            ${PROJECT_SOURCE_DIR}/library/src/amd_detail
+            ${PROJECT_SOURCE_DIR}/library/src/amd_detail/rocblaslt/src/include
+            ${PROJECT_SOURCE_DIR}/library/src/amd_detail/rocblaslt/include
+            ${PROJECT_SOURCE_DIR}/library/src/amd_detail/rocblaslt/src/rocroller/include
+            ${PROJECT_SOURCE_DIR}/tensilelite/rocisa
+            ${PROJECT_SOURCE_DIR}/../../shared/origami/include
+    )
+endif()
+
 add_library(hipblaslt::hipblaslt-clients-common ALIAS hipblaslt-clients-common)
 
 if(HIPBLASLT_ENABLE_BLIS)
@@ -26,20 +38,21 @@ target_link_libraries(hipblaslt-clients-common
         ${LAPACK_LIBRARIES}
     PRIVATE
         hip::device
+        roc::tensilelite-host
 )
 
-if(HIPBLASLT_ENABLE_ROCROLLER)
-    if(NOT ROCM_LIBS_SUPERBUILD)
-        if(HIPBLASLT_ENABLE_THEROCK)
-            find_package(mxDataGenerator REQUIRED)
-        else()
-            add_subdirectory("${CMAKE_CURRENT_SOURCE_DIR}/../../../shared/mxdatagenerator" "${CMAKE_CURRENT_BINARY_DIR}/mxdatagenerator")
-        endif()
-    endif()
-    target_compile_definitions(hipblaslt-clients-common PRIVATE HIPBLASLT_USE_ROCROLLER)
-    target_link_libraries(hipblaslt-clients-common PRIVATE roc::mxDataGenerator)
-    target_compile_features(hipblaslt-clients-common PRIVATE cxx_std_20)
+if(HIPBLASLT_ENABLE_MXDATAGENERATOR)
+    # PUBLIC because public headers such as testing_matmul.hpp guard
+    # `<mxDataGen.hpp>` on `HIPBLASLT_ENABLE_MXDATAGENERATOR`, so downstream
+    # targets (hipblaslt-test, hipblaslt-bench, ...) need to see the macro,
+    # the include path, and the C++20 floor all the way through.
+    target_link_libraries(hipblaslt-clients-common PUBLIC hipblaslt::mxdatagen)
 endif()
+
+if(HIPBLASLT_ENABLE_ROCROLLER)
+    target_compile_definitions(hipblaslt-clients-common PRIVATE HIPBLASLT_USE_ROCROLLER)
+endif()
+
 
 if(HIPBLASLT_ENABLE_ASAN)
     hipblaslt_target_configure_sanitizers(hipblaslt-clients-common PUBLIC)
@@ -58,7 +71,13 @@ if(HIPBLASLT_ENABLE_OPENMP)
     target_link_libraries(hipblaslt-bench PRIVATE OpenMP::OpenMP_CXX)
 endif()
 
-add_subdirectory(common)
+# `clients/common/CMakeLists.txt` itself only declares the mxdatagen helper
+# (which the project root already added when needed); the `include` and
+# `src` subdirectories populate hipblaslt-clients-common's sources, so they
+# are added directly here, avoiding a second `add_subdirectory(common)` that
+# would clash with the root-level one.
+add_subdirectory(common/include)
+add_subdirectory(common/src)
 add_subdirectory(bench)
 
 add_executable(hipblaslt-api-overhead "${CMAKE_CURRENT_SOURCE_DIR}/bench/src/client_api_overhead.cpp")
@@ -95,7 +114,7 @@ if(HIPBLASLT_ENABLE_YAML)
     target_include_directories(hipblaslt-sequence PRIVATE ${LLVM_INCLUDE_DIRS})
 endif()
 if(BUILD_TESTING OR HIPBLASLT_BUILD_TESTING)
-    find_package(GTest REQUIRED)
+    find_package(GTest CONFIG REQUIRED)
     add_executable(hipblaslt-test)
     if(amd_smi_FOUND)
         target_link_libraries(hipblaslt-test PRIVATE amd_smi)
@@ -104,6 +123,7 @@ if(BUILD_TESTING OR HIPBLASLT_BUILD_TESTING)
         PRIVATE
             hip::device
             hipblaslt::hipblaslt-clients-common
+            roc::tensilelite-host
             GTest::gtest
             OpenMP::OpenMP_CXX
             ${CMAKE_DL_LIBS}
@@ -112,9 +132,34 @@ if(BUILD_TESTING OR HIPBLASLT_BUILD_TESTING)
     if(HIPBLASLT_ENABLE_ROCROLLER)
         target_compile_definitions(hipblaslt-test PRIVATE HIPBLASLT_USE_ROCROLLER)
     endif()
+    if(HIPBLASLT_ENABLE_COVERAGE)
+        target_compile_definitions(hipblaslt-test PRIVATE CODE_COVERAGE)
+        # For coverage testing, link against hipblaslt's object files to access internal symbols
+        # This ensures we test the real library code, not stubs
+        target_link_libraries(hipblaslt-test PRIVATE
+            $<TARGET_OBJECTS:hipblaslt>
+            roc::tensilelite-host
+            ${CMAKE_DL_LIBS}
+        )
+        # Add roctracer if HIPBLASLT_ENABLE_MARKER is enabled
+        if(HIPBLASLT_ENABLE_MARKER)
+            target_link_libraries(hipblaslt-test PRIVATE ${rocTracer})
+        endif()
+        # Add msgpack if not using YAML
+        if(NOT HIPBLASLT_ENABLE_YAML)
+            target_link_libraries(hipblaslt-test PRIVATE ${hipblaslt_msgpack_target})
+        endif()
+        # Add rocroller dependencies if enabled
+        if(HIPBLASLT_ENABLE_ROCROLLER)
+            target_link_libraries(hipblaslt-test PRIVATE
+                $<TARGET_OBJECTS:hipblaslt-rocroller>
+                rocroller
+            )
+        endif()
+    endif()
+
     add_subdirectory(tests)
 endif()
-
 if(HIPBLASLT_ENABLE_SAMPLES)
     add_subdirectory(samples)
 endif()

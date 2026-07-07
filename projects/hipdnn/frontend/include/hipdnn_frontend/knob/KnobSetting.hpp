@@ -11,11 +11,16 @@
 
 #pragma once
 
+#include <cstdint>
+#include <sstream>
 #include <string>
+#include <variant>
 
-#include <hipdnn_data_sdk/data_objects/engine_config_generated.h>
-#include <hipdnn_data_sdk/data_objects/knob_value_generated.h>
-#include <hipdnn_data_sdk/utilities/FlatbufferUtils.hpp>
+#ifndef HIPDNN_FRONTEND_SKIP_JSON_LIB
+#include <nlohmann/json.hpp>
+
+#include <type_traits>
+#endif
 
 namespace hipdnn_frontend
 {
@@ -102,46 +107,15 @@ public:
         _value = value;
     }
 
-    /**
-     * @brief Serialize this KnobSetting to a FlatBuffer
-     * @param builder The FlatBufferBuilder to use
-     * @return FlatBuffer offset for the serialized KnobSetting
-     */
-    flatbuffers::Offset<hipdnn_data_sdk::data_objects::KnobSetting>
-        packKnobSetting(flatbuffers::FlatBufferBuilder& builder) const
+    /// Equality: same knob ID and same value
+    bool operator==(const KnobSetting& other) const
     {
-        // Create the appropriate KnobValue based on the variant type
-        flatbuffers::Offset<void> valueOffset = 0;
-        hipdnn_data_sdk::data_objects::KnobValue valueType
-            = hipdnn_data_sdk::data_objects::KnobValue::NONE;
+        return _knobId == other._knobId && _value == other._value;
+    }
 
-        std::visit(
-            [&builder, &valueOffset, &valueType](auto&& value) {
-                using T = std::decay_t<decltype(value)>;
-                if constexpr(std::is_same_v<T, int64_t>)
-                {
-                    valueOffset
-                        = hipdnn_data_sdk::data_objects::CreateIntValue(builder, value).Union();
-                    valueType = hipdnn_data_sdk::data_objects::KnobValue::IntValue;
-                }
-                else if constexpr(std::is_same_v<T, double>)
-                {
-                    valueOffset
-                        = hipdnn_data_sdk::data_objects::CreateFloatValue(builder, value).Union();
-                    valueType = hipdnn_data_sdk::data_objects::KnobValue::FloatValue;
-                }
-                else if constexpr(std::is_same_v<T, std::string>)
-                {
-                    valueOffset = hipdnn_data_sdk::data_objects::CreateStringValueDirect(
-                                      builder, value.c_str())
-                                      .Union();
-                    valueType = hipdnn_data_sdk::data_objects::KnobValue::StringValue;
-                }
-            },
-            _value);
-
-        return hipdnn_data_sdk::data_objects::CreateKnobSettingDirect(
-            builder, _knobId.c_str(), valueType, valueOffset);
+    bool operator!=(const KnobSetting& other) const
+    {
+        return !(*this == other);
     }
 
     /**
@@ -174,5 +148,35 @@ private:
     std::string _knobId; ///< The knob identifier
     KnobValueVariant _value; ///< The knob value
 };
+
+#ifndef HIPDNN_FRONTEND_SKIP_JSON_LIB
+/// Serialize a KnobSetting to a JSON object ({knob_id, type, value}). Found via ADL.
+// NOLINTNEXTLINE(readability-identifier-naming)
+inline void to_json(nlohmann::json& j, const KnobSetting& v)
+{
+    j["knob_id"] = v.knobId();
+
+    std::visit(
+        [&j](const auto& value) {
+            using T = std::decay_t<decltype(value)>;
+            if constexpr(std::is_same_v<T, int64_t>)
+            {
+                j["type"] = "int";
+                j["value"] = value;
+            }
+            else if constexpr(std::is_same_v<T, double>)
+            {
+                j["type"] = "double";
+                j["value"] = value;
+            }
+            else if constexpr(std::is_same_v<T, std::string>)
+            {
+                j["type"] = "string";
+                j["value"] = value;
+            }
+        },
+        v.value());
+}
+#endif // HIPDNN_FRONTEND_SKIP_JSON_LIB
 
 } // namespace hipdnn_frontend

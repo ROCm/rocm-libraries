@@ -15,9 +15,10 @@ namespace ck_tile {
 template <typename Problem>
 struct BaseGemmPipelineAgBgCrCompAsync
 {
-    static constexpr index_t PrefetchStages  = 2;
+    static constexpr index_t PrefetchStages  = 3;
     static constexpr index_t PrefillStages   = 1;
     static constexpr index_t GlobalBufferNum = 1;
+    static constexpr index_t UnrollHotLoop   = 2;
 
     CK_TILE_HOST_DEVICE static constexpr bool BlockHasHotloop(index_t num_loop)
     {
@@ -30,13 +31,13 @@ struct BaseGemmPipelineAgBgCrCompAsync
         {
             return TailNumber::One;
         }
-        if(num_loop % PrefetchStages == 1)
+        if(num_loop % UnrollHotLoop == 0)
         {
-            return TailNumber::Three;
+            return TailNumber::Two;
         }
         else
         {
-            return TailNumber::Two;
+            return TailNumber::Three;
         }
     }
 
@@ -99,7 +100,7 @@ struct BaseGemmPipelineAgBgCrCompAsync
  * This pipeline introduces asynchronous load from global memory to LDS,
  * skipping the intermediate loading into pipeline registers.
  */
-template <typename Problem, typename Policy = GemmPipelineAgBgCrCompAsyncDefaultPolicy>
+template <typename Problem, typename Policy = GemmPipelineAgBgCrCompAsyncDefaultPolicy<>>
 struct GemmPipelineAgBgCrCompAsync : public BaseGemmPipelineAgBgCrCompAsync<Problem>
 {
     using Base             = BaseGemmPipelineAgBgCrCompAsync<Problem>;
@@ -130,10 +131,11 @@ struct GemmPipelineAgBgCrCompAsync : public BaseGemmPipelineAgBgCrCompAsync<Prob
     static constexpr index_t BPackedSize =
         ck_tile::numeric_traits<remove_cvref_t<BDataType>>::PackedSize;
 
-    using BlockGemm = remove_cvref_t<decltype(Policy::template GetBlockGemm<Problem>())>;
-    using I0        = number<0>;
-    using I1        = number<1>;
-    using I2        = number<2>;
+    using I0 = number<0>;
+    using I1 = number<1>;
+    using I2 = number<2>;
+
+    static constexpr bool LargeTensors = Problem::LargeTensors;
 
     static constexpr index_t BlockSize = Problem::kBlockSize;
 
@@ -173,6 +175,37 @@ struct GemmPipelineAgBgCrCompAsync : public BaseGemmPipelineAgBgCrCompAsync<Prob
 
     static constexpr auto is_a_load_tr_v = bool_constant<PipelineImplBase::is_a_load_tr>{};
     static constexpr auto is_b_load_tr_v = bool_constant<PipelineImplBase::is_b_load_tr>{};
+
+    using BlockWarps               = typename BlockGemmShape::BlockWarps;
+    using WarpTile                 = typename BlockGemmShape::WarpTile;
+    static constexpr index_t MWarp = BlockWarps::at(I0{});
+    static constexpr index_t NWarp = BlockWarps::at(I1{});
+
+    // Compute effective XdlPack sizes (fall back to 1 when iter count < pack)
+    static constexpr index_t MPerXdl      = WarpTile::at(I0{});
+    static constexpr index_t NPerXdl      = WarpTile::at(I1{});
+    static constexpr index_t KPerXdl      = WarpTile::at(I2{});
+    static constexpr index_t MIterPerWarp = MPerBlock / (MWarp * MPerXdl);
+    static constexpr index_t NIterPerWarp = NPerBlock / (NWarp * NPerXdl);
+    static constexpr index_t KIterPerWarp = KPerBlock / KPerXdl;
+
+    static constexpr index_t MXdlPackEff =
+        (MIterPerWarp >= Policy::MXdlPack && MIterPerWarp % Policy::MXdlPack == 0)
+            ? Policy::MXdlPack
+            : 1;
+    static constexpr index_t NXdlPackEff =
+        (NIterPerWarp >= Policy::NXdlPack && NIterPerWarp % Policy::NXdlPack == 0)
+            ? Policy::NXdlPack
+            : 1;
+    static constexpr index_t KXdlPackEff =
+        (KIterPerWarp >= Policy::KXdlPack && KIterPerWarp % Policy::KXdlPack == 0)
+            ? Policy::KXdlPack
+            : 1;
+
+    static constexpr index_t ScaleBlockSize = 32;
+
+    // Packed scale dimensions
+    static constexpr index_t ScaleKDimPerBlock = KPerBlock / ScaleBlockSize / KXdlPackEff;
 
     [[nodiscard]] CK_TILE_HOST static const std::string GetPipelineName()
     {
@@ -244,6 +277,8 @@ struct GemmPipelineAgBgCrCompAsync : public BaseGemmPipelineAgBgCrCompAsync<Prob
                   typename BsDramBlockWindowTmp,
                   typename AElementFunction,
                   typename BElementFunction,
+                  typename ScaleADramBlockWindow,
+                  typename ScaleBDramBlockWindow,
                   typename std::enable_if_t<is_detected<is_tuple, AsDramBlockWindowTmp>::value &&
                                                 is_detected<is_tuple, BsDramBlockWindowTmp>::value,
                                             bool>* = nullptr>
@@ -251,9 +286,16 @@ struct GemmPipelineAgBgCrCompAsync : public BaseGemmPipelineAgBgCrCompAsync<Prob
                                        const AElementFunction& a_element_func,
                                        const BsDramBlockWindowTmp& b_dram_block_window_tmp,
                                        const BElementFunction& b_element_func,
+                                       ScaleADramBlockWindow& scale_a_dram_window,
+                                       ScaleBDramBlockWindow& scale_b_dram_window,
                                        index_t num_loop,
                                        void* __restrict__ p_smem) const
         {
+            constexpr bool IsScaledGemm = !is_null_tile_window_v<ScaleADramBlockWindow> &&
+                                          !is_null_tile_window_v<ScaleBDramBlockWindow>;
+            using BlockGemm =
+                remove_cvref_t<decltype(Policy::template GetBlockGemm<Problem, IsScaledGemm>())>;
+
             // TODO support multi-ABD
             static_assert(1 == std::tuple_size_v<AsDramBlockWindowTmp>);
             static_assert(1 == std::tuple_size_v<BsDramBlockWindowTmp>);
@@ -262,8 +304,6 @@ struct GemmPipelineAgBgCrCompAsync : public BaseGemmPipelineAgBgCrCompAsync<Prob
             using BDramBlockWindowTmp =
                 remove_cvref_t<std::tuple_element_t<number<0>{}, BsDramBlockWindowTmp>>;
             // TODO currently fused elementwise are not supported
-            ignore = a_element_func;
-            ignore = b_element_func;
             static_assert(std::is_same_v<remove_cvref_t<decltype(a_element_func)>,
                                          element_wise::PassThrough>);
             static_assert(std::is_same_v<remove_cvref_t<decltype(b_element_func)>,
@@ -313,6 +353,24 @@ struct GemmPipelineAgBgCrCompAsync : public BaseGemmPipelineAgBgCrCompAsync<Prob
                 },
                 number<BsLayout::size()>{});
 
+            // for XOR swizzle: policy makes async global-to-LDS stores match LDS reads
+            // otherwise: no change to view
+            auto a_async_tile_windows = generate_tuple(
+                [&](auto idx) {
+                    return make_tile_window(Policy::template MakeAsyncLoadADramWindow<Problem>(
+                                                a_tile_windows[number<idx>{}]),
+                                            Policy::template MakeADramTileDistribution<Problem>());
+                },
+                number<AsLayout::size()>{});
+
+            auto b_async_tile_windows = generate_tuple(
+                [&](auto idx) {
+                    return make_tile_window(Policy::template MakeAsyncLoadBDramWindow<Problem>(
+                                                b_tile_windows[number<idx>{}]),
+                                            Policy::template MakeBDramTileDistribution<Problem>());
+                },
+                number<BsLayout::size()>{});
+
             // this pipeline has a pair of LDS buffers per logical tile
             constexpr index_t smem_size         = Policy::template GetSmemSize<Problem>();
             auto&& [a_lds_block0, b_lds_block0] = Base::GetABLdsTensorViews(p_smem);
@@ -352,12 +410,29 @@ struct GemmPipelineAgBgCrCompAsync : public BaseGemmPipelineAgBgCrCompAsync<Prob
             constexpr BDramTileWindowStep b_dram_tile_window_step =
                 is_b_row_major ? make_array(KPerBlock, 0) : make_array(0, KPerBlock);
 
+            using ScaleATileType = decltype(load_tile(scale_a_dram_window));
+            using ScaleBTileType = decltype(load_tile(scale_b_dram_window));
+            ScaleATileType scale_a_tile_ping, scale_a_tile_pong;
+            ScaleBTileType scale_b_tile_ping, scale_b_tile_pong;
+
+            // initialize Scale DRAM window steps, used to advance the Scale DRAM windows
+            constexpr auto scale_a_dram_tile_window_step = make_array(0, ScaleKDimPerBlock);
+            constexpr auto scale_b_dram_tile_window_step = make_array(0, ScaleKDimPerBlock);
+
+            // Helper function to load scales
+            auto load_scales_from_dram = [&](auto& scale_a, auto& scale_b) {
+                scale_a = load_tile(scale_a_dram_window);
+                scale_b = load_tile(scale_b_dram_window);
+                move_tile_window(scale_a_dram_window, scale_a_dram_tile_window_step);
+                move_tile_window(scale_b_dram_window, scale_b_dram_tile_window_step);
+            };
+
             // read A(0), B(0) from DRAM to LDS window(0)
             // and advance the DRAM windows
             Base::GlobalPrefetchAsync(
-                a_copy_lds_window0, a_tile_windows[number<0>{}], a_dram_tile_window_step);
+                a_copy_lds_window0, a_async_tile_windows[number<0>{}], a_dram_tile_window_step);
             Base::GlobalPrefetchAsync(
-                b_copy_lds_window0, b_tile_windows[number<0>{}], b_dram_tile_window_step);
+                b_copy_lds_window0, b_async_tile_windows[number<0>{}], b_dram_tile_window_step);
 
             // initialize block gemm
             auto block_gemm = BlockGemm();
@@ -369,9 +444,9 @@ struct GemmPipelineAgBgCrCompAsync : public BaseGemmPipelineAgBgCrCompAsync<Prob
             // read A(1), B(1) from DRAM to LDS window(1)
             // and advance the DRAM windows
             Base::GlobalPrefetchAsync(
-                a_copy_lds_window1, a_tile_windows[number<0>{}], a_dram_tile_window_step);
+                a_copy_lds_window1, a_async_tile_windows[number<0>{}], a_dram_tile_window_step);
             Base::GlobalPrefetchAsync(
-                b_copy_lds_window1, b_tile_windows[number<0>{}], b_dram_tile_window_step);
+                b_copy_lds_window1, b_async_tile_windows[number<0>{}], b_dram_tile_window_step);
 
             // tile distribution for the register tiles
             constexpr auto ALdsTileDistr =
@@ -432,10 +507,22 @@ struct GemmPipelineAgBgCrCompAsync : public BaseGemmPipelineAgBgCrCompAsync<Prob
             block_sync_lds();
             // read A(2), B(2) from DRAM to LDS window(0)
             // and advance the DRAM windows
-            Base::GlobalPrefetchAsync(
-                a_copy_lds_window0, a_tile_windows[number<0>{}], a_dram_tile_window_step);
-            Base::GlobalPrefetchAsync(
-                b_copy_lds_window0, b_tile_windows[number<0>{}], b_dram_tile_window_step);
+            if constexpr((!HasHotLoop && (TailNum == TailNumber::Three)) || HasHotLoop)
+            {
+                Base::GlobalPrefetchAsync(
+                    a_copy_lds_window0, a_async_tile_windows[number<0>{}], a_dram_tile_window_step);
+                Base::GlobalPrefetchAsync(
+                    b_copy_lds_window0, b_async_tile_windows[number<0>{}], b_dram_tile_window_step);
+            }
+
+            // Load scales for iteration 0 (ping)
+            load_scales_from_dram(scale_a_tile_ping, scale_b_tile_ping);
+
+            // Load scales for iteration 1 (pong) if needed
+            if(num_loop > 1)
+            {
+                load_scales_from_dram(scale_a_tile_pong, scale_b_tile_pong);
+            }
 
             if constexpr(HasHotLoop)
             {
@@ -455,14 +542,20 @@ struct GemmPipelineAgBgCrCompAsync : public BaseGemmPipelineAgBgCrCompAsync<Prob
                         // read A(i), B(i) from DRAM to LDS window(1)
                         // and advance the DRAM windows
                         Base::GlobalPrefetchAsync(a_copy_lds_window1,
-                                                  a_tile_windows[number<0>{}],
+                                                  a_async_tile_windows[number<0>{}],
                                                   a_dram_tile_window_step);
                         Base::GlobalPrefetchAsync(b_copy_lds_window1,
-                                                  b_tile_windows[number<0>{}],
+                                                  b_async_tile_windows[number<0>{}],
                                                   b_dram_tile_window_step);
                         // C(i-3) = A(i-3) @ B(i-3)
-                        block_gemm(c_block_tile, a_block_tile0, b_block_tile0);
+                        block_gemm(c_block_tile,
+                                   a_block_tile0,
+                                   b_block_tile0,
+                                   scale_a_tile_ping,
+                                   scale_b_tile_ping);
                         HotLoopScheduler();
+                        // Load next scales after using current scales above
+                        load_scales_from_dram(scale_a_tile_ping, scale_b_tile_ping);
                     }
                     // pong
                     {
@@ -476,14 +569,20 @@ struct GemmPipelineAgBgCrCompAsync : public BaseGemmPipelineAgBgCrCompAsync<Prob
                         // read A(i+1), B(i+1) from DRAM to LDS window(0)
                         // and advance the DRAM windows
                         Base::GlobalPrefetchAsync(a_copy_lds_window0,
-                                                  a_tile_windows[number<0>{}],
+                                                  a_async_tile_windows[number<0>{}],
                                                   a_dram_tile_window_step);
                         Base::GlobalPrefetchAsync(b_copy_lds_window0,
-                                                  b_tile_windows[number<0>{}],
+                                                  b_async_tile_windows[number<0>{}],
                                                   b_dram_tile_window_step);
                         // C(i-2) = A(i-2) @ B(i-2)
-                        block_gemm(c_block_tile, a_block_tile1, b_block_tile1);
+                        block_gemm(c_block_tile,
+                                   a_block_tile1,
+                                   b_block_tile1,
+                                   scale_a_tile_pong,
+                                   scale_b_tile_pong);
                         HotLoopScheduler();
+                        // Load next scales after using current scales above
+                        load_scales_from_dram(scale_a_tile_pong, scale_b_tile_pong);
                     }
                     i_global_read += 2;
                 } while(i_global_read < num_loop);
@@ -497,7 +596,13 @@ struct GemmPipelineAgBgCrCompAsync : public BaseGemmPipelineAgBgCrCompAsync<Prob
                     Base::LocalPrefetch(a_block_tile1, a_lds_ld_window1, is_a_load_tr_v);
                     Base::LocalPrefetch(b_block_tile1, b_lds_ld_window1, is_b_load_tr_v);
                     // C(num_loop-2) = A(num_loop-2) @ B(num_loop-2)
-                    block_gemm(c_block_tile, a_block_tile0, b_block_tile0);
+                    block_gemm(c_block_tile,
+                               a_block_tile0,
+                               b_block_tile0,
+                               scale_a_tile_ping,
+                               scale_b_tile_ping);
+                    // load last scales to ping for the last iteration to ping buffers
+                    load_scales_from_dram(scale_a_tile_ping, scale_b_tile_ping);
                 }
                 {
                     // write to LDS window(0) must complete before the local prefetch
@@ -506,11 +611,19 @@ struct GemmPipelineAgBgCrCompAsync : public BaseGemmPipelineAgBgCrCompAsync<Prob
                     Base::LocalPrefetch(a_block_tile0, a_lds_ld_window0, is_a_load_tr_v);
                     Base::LocalPrefetch(b_block_tile0, b_lds_ld_window0, is_b_load_tr_v);
                     // C(num_loop-1) = A(num_loop-1) @ B(num_loop-1)
-                    block_gemm(c_block_tile, a_block_tile1, b_block_tile1);
+                    block_gemm(c_block_tile,
+                               a_block_tile1,
+                               b_block_tile1,
+                               scale_a_tile_pong,
+                               scale_b_tile_pong);
                 }
                 {
                     // C(num_loop) = A(num_loop) @ B(num_loop)
-                    block_gemm(c_block_tile, a_block_tile0, b_block_tile0);
+                    block_gemm(c_block_tile,
+                               a_block_tile0,
+                               b_block_tile0,
+                               scale_a_tile_ping,
+                               scale_b_tile_ping);
                 }
             }
             else if(TailNum == TailNumber::Two)
@@ -521,23 +634,92 @@ struct GemmPipelineAgBgCrCompAsync : public BaseGemmPipelineAgBgCrCompAsync<Prob
                     Base::LocalPrefetch(a_block_tile1, a_lds_ld_window1, is_a_load_tr_v);
                     Base::LocalPrefetch(b_block_tile1, b_lds_ld_window1, is_b_load_tr_v);
                     // C(num_loop-1) = A(num_loop-1) @ B(num_loop-1)
-                    block_gemm(c_block_tile, a_block_tile0, b_block_tile0);
+                    block_gemm(c_block_tile,
+                               a_block_tile0,
+                               b_block_tile0,
+                               scale_a_tile_ping,
+                               scale_b_tile_ping);
                 }
                 {
                     // C(num_loop) = A(num_loop) @ B(num_loop)
-                    block_gemm(c_block_tile, a_block_tile1, b_block_tile1);
+                    block_gemm(c_block_tile,
+                               a_block_tile1,
+                               b_block_tile1,
+                               scale_a_tile_pong,
+                               scale_b_tile_pong);
                 }
             }
             else if(TailNum == TailNumber::One)
             {
                 block_sync_lds();
-                block_gemm(c_block_tile, a_block_tile0, b_block_tile0);
+                block_gemm(c_block_tile,
+                           a_block_tile0,
+                           b_block_tile0,
+                           scale_a_tile_ping,
+                           scale_b_tile_ping);
                 __builtin_amdgcn_sched_barrier(0);
             }
             return c_block_tile;
         }
     };
 
+    using NullTileWindowType =
+        decltype(make_null_tile_window(make_tuple(number<0>{}, number<0>{})));
+
+    template <typename AsDramBlockWindowTmp,
+              typename BsDramBlockWindowTmp,
+              typename AElementFunction,
+              typename BElementFunction,
+              typename ScaleADramBlockWindowTmp,
+              typename ScaleBDramBlockWindowTmp,
+              typename std::enable_if_t<is_detected<is_tuple, AsDramBlockWindowTmp>::value &&
+                                            is_detected<is_tuple, BsDramBlockWindowTmp>::value,
+                                        bool>* = nullptr>
+    CK_TILE_DEVICE auto operator()(const AsDramBlockWindowTmp& a_dram_block_window_tmp,
+                                   const AElementFunction& a_element_func,
+                                   const BsDramBlockWindowTmp& b_dram_block_window_tmp,
+                                   const BElementFunction& b_element_func,
+                                   const ScaleADramBlockWindowTmp& scale_a_window,
+                                   const ScaleBDramBlockWindowTmp& scale_b_window,
+                                   index_t num_loop,
+                                   void* p_smem) const
+    {
+        // Scale tensor views and base origins for creating tile windows per iteration
+        const auto& scale_a_tensor_view = scale_a_window[number<0>{}].get_bottom_tensor_view();
+        const auto& scale_b_tensor_view = scale_b_window[number<0>{}].get_bottom_tensor_view();
+        auto scale_a_base_origin        = scale_a_window[number<0>{}].get_window_origin();
+        auto scale_b_base_origin        = scale_b_window[number<0>{}].get_window_origin();
+
+        // Create scale windows with packed int32_t dimensions
+        auto scale_a_dram_window = make_tile_window(
+            scale_a_tensor_view,
+            make_tuple(number<MPerBlock / MXdlPackEff>{}, number<ScaleKDimPerBlock>{}),
+            scale_a_base_origin,
+            Policy::template MakeMX_ScaleA_DramTileDistribution<Problem>());
+
+        auto scale_b_dram_window = make_tile_window(
+            scale_b_tensor_view,
+            make_tuple(number<NPerBlock / NXdlPackEff>{}, number<ScaleKDimPerBlock>{}),
+            scale_b_base_origin,
+            Policy::template MakeMX_ScaleB_DramTileDistribution<Problem>());
+
+        const bool has_hot_loop = Base::BlockHasHotloop(num_loop);
+        const auto tail_number  = Base::GetBlockLoopTailNum(num_loop);
+        const auto RunPipeline  = [&](auto hot_loop_, auto tail_num_) {
+            return PipelineImpl<Scheduler>{}.template operator()<hot_loop_.value, tail_num_.value>(
+                a_dram_block_window_tmp,
+                a_element_func,
+                b_dram_block_window_tmp,
+                b_element_func,
+                scale_a_dram_window,
+                scale_b_dram_window,
+                num_loop,
+                p_smem);
+        };
+
+        return Base::TailHandler(RunPipeline, has_hot_loop, tail_number);
+    }
+
     template <typename AsDramBlockWindowTmp,
               typename BsDramBlockWindowTmp,
               typename AElementFunction,
@@ -552,6 +734,9 @@ struct GemmPipelineAgBgCrCompAsync : public BaseGemmPipelineAgBgCrCompAsync<Prob
                                    index_t num_loop,
                                    void* p_smem) const
     {
+        auto scale_a_dram_window = NullTileWindowType{};
+        auto scale_b_dram_window = NullTileWindowType{};
+
         const bool has_hot_loop = Base::BlockHasHotloop(num_loop);
         const auto tail_number  = Base::GetBlockLoopTailNum(num_loop);
         const auto RunPipeline  = [&](auto hot_loop_, auto tail_num_) {
@@ -560,6 +745,8 @@ struct GemmPipelineAgBgCrCompAsync : public BaseGemmPipelineAgBgCrCompAsync<Prob
                 a_element_func,
                 b_dram_block_window_tmp,
                 b_element_func,
+                scale_a_dram_window,
+                scale_b_dram_window,
                 num_loop,
                 p_smem);
         };
@@ -578,6 +765,9 @@ struct GemmPipelineAgBgCrCompAsync : public BaseGemmPipelineAgBgCrCompAsync<Prob
                                    const index_t num_loop,
                                    void* __restrict__ p_smem) const
     {
+        auto scale_a_dram_window = NullTileWindowType{};
+        auto scale_b_dram_window = NullTileWindowType{};
+
         const bool has_hot_loop = Base::BlockHasHotloop(num_loop);
         const auto tail_number  = Base::GetBlockLoopTailNum(num_loop);
 
@@ -587,6 +777,8 @@ struct GemmPipelineAgBgCrCompAsync : public BaseGemmPipelineAgBgCrCompAsync<Prob
                 element_wise::PassThrough{},
                 b_dram_block_window_tmp,
                 element_wise::PassThrough{},
+                scale_a_dram_window,
+                scale_b_dram_window,
                 num_loop,
                 p_smem);
         };
@@ -608,6 +800,9 @@ struct GemmPipelineAgBgCrCompAsync : public BaseGemmPipelineAgBgCrCompAsync<Prob
                                    index_t num_loop,
                                    void* p_smem) const
     {
+        auto scale_a_dram_window = NullTileWindowType{};
+        auto scale_b_dram_window = NullTileWindowType{};
+
         const bool has_hot_loop = Base::BlockHasHotloop(num_loop);
         const auto tail_number  = Base::GetBlockLoopTailNum(num_loop);
         const auto RunPipeline  = [&](auto hot_loop_, auto tail_num_) {
@@ -616,6 +811,8 @@ struct GemmPipelineAgBgCrCompAsync : public BaseGemmPipelineAgBgCrCompAsync<Prob
                 a_element_func,
                 ck_tile::make_tuple(b_dram_block_window_tmp),
                 b_element_func,
+                scale_a_dram_window,
+                scale_b_dram_window,
                 num_loop,
                 p_smem);
         };
@@ -634,6 +831,9 @@ struct GemmPipelineAgBgCrCompAsync : public BaseGemmPipelineAgBgCrCompAsync<Prob
                                    const index_t num_loop,
                                    void* __restrict__ p_smem) const
     {
+        auto scale_a_dram_window = NullTileWindowType{};
+        auto scale_b_dram_window = NullTileWindowType{};
+
         const bool has_hot_loop = Base::BlockHasHotloop(num_loop);
         const auto tail_number  = Base::GetBlockLoopTailNum(num_loop);
 
@@ -643,11 +843,25 @@ struct GemmPipelineAgBgCrCompAsync : public BaseGemmPipelineAgBgCrCompAsync<Prob
                 element_wise::PassThrough{},
                 ck_tile::make_tuple(b_dram_block_window_tmp),
                 element_wise::PassThrough{},
+                scale_a_dram_window,
+                scale_b_dram_window,
                 num_loop,
                 p_smem);
         };
 
         return Base::TailHandler(RunPipeline, has_hot_loop, tail_number);
+    }
+
+    [[nodiscard]] CK_TILE_HOST static const std::string GetName()
+    {
+        // clang-format off
+        constexpr index_t WaveNumM = BlockGemmShape::BlockWarps::at(I0{});
+        constexpr index_t WaveNumN = BlockGemmShape::BlockWarps::at(I1{});
+        return concat('_', "pipeline_AgBgCrCompAsync", 
+                      concat('x', MPerBlock, NPerBlock, KPerBlock),  BlockSize,
+                      concat('x', WaveNumM, WaveNumN),
+                      concat('x', kPadM, kPadN, kPadK));
+        // clang-format on
     }
 };
 } // namespace ck_tile

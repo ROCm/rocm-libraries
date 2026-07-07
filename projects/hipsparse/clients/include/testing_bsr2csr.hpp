@@ -1,5 +1,5 @@
 /* ************************************************************************
- * Copyright (C) 2020-2025 Advanced Micro Devices, Inc. All rights Reserved.
+ * Copyright (C) 2020-2026 Advanced Micro Devices, Inc. All rights Reserved.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -299,19 +299,19 @@ void testing_bsr2csr(Arguments argus)
 
     // Convert CSR matrix to BSR
     int nnzb;
-    host_csr_to_bsr<T>(dir,
-                       m,
-                       n,
-                       block_dim,
-                       nnzb,
-                       csr_idx_base,
-                       csr_row_ptr,
-                       csr_col_ind,
-                       csr_val,
-                       bsr_idx_base,
-                       hbsr_row_ptr,
-                       hbsr_col_ind,
-                       hbsr_val);
+    host_csr_to_bsr<int, int, T>(dir,
+                                 m,
+                                 n,
+                                 block_dim,
+                                 nnzb,
+                                 csr_idx_base,
+                                 csr_row_ptr,
+                                 csr_col_ind,
+                                 csr_val,
+                                 bsr_idx_base,
+                                 hbsr_row_ptr,
+                                 hbsr_col_ind,
+                                 hbsr_val);
 
     // Determine the size of the output CSR matrix based on the size of the input BSR matrix
     m = mb * block_dim;

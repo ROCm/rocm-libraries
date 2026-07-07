@@ -43,6 +43,8 @@
 
 BEGIN_ROCPRIM_NAMESPACE
 
+#ifndef DOXYGEN_DOCUMENTATION_BUILD // Do not document
+
 namespace detail
 {
 
@@ -131,6 +133,8 @@ inline hipError_t transform_impl(InputIterator     input,
 
 } // namespace detail
 
+#endif // DOXYGEN_DOCUMENTATION_BUILD
+
 /// \brief Parallel transform primitive for device level.
 ///
 /// transform function performs a device-wide transformation operation
@@ -161,6 +165,8 @@ inline hipError_t transform_impl(InputIterator     input,
 /// \parblock
 /// In this example a device-level transform operation is performed on an array of
 /// integer values (<tt>short</tt>s are transformed into <tt>int</tt>s).
+///
+/// The full example is [on GitHub](https://github.com/ROCm/rocm-libraries/tree/develop/projects/rocprim/example/rocprim/device/example_device_search.cpp).
 ///
 /// \code{.cpp}
 /// #include <rocprim/rocprim.hpp>

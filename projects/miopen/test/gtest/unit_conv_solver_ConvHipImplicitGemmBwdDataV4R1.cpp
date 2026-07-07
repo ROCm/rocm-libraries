@@ -85,24 +85,24 @@ auto GetConvTestCases(miopenDataType_t datatype)
 }
 
 template <miopenDataType_t datatype>
-const auto& GetTestParams()
+miopen::unit_tests::UnitTestConvSolverParams GetTestParams()
 {
-    static const auto params = [] {
-        Gpu supported_gpus = Gpu::gfx900 | Gpu::gfx906 | Gpu::gfx908 | Gpu::gfx90A | Gpu::gfx103X;
-        if constexpr(datatype != miopenFloat)
-        {
-            // gfx12 lacks v_mac_f32 (uses v_fmac_f32), so the FP32 path is blocked
-            // by GfxHasMissingFp32Intrinsics. FP16/BF16 use different asm and work.
-            supported_gpus = supported_gpus | Gpu::gfx94X | Gpu::gfx950 | Gpu::gfx120X;
-        }
-        auto p = miopen::unit_tests::UnitTestConvSolverParams(supported_gpus);
-        p.Tunable(5);
-        return p;
-    }();
-    return params;
+    Gpu supported_gpus = Gpu::gfx900 | Gpu::gfx906 | Gpu::gfx908 | Gpu::gfx90A | Gpu::gfx103X;
+    if constexpr(datatype != miopenFloat)
+    {
+         // gfx12 lacks v_mac_f32 (uses v_fmac_f32), so the FP32 path is blocked
+         // by GfxHasMissingFp32Intrinsics. FP16/BF16 use different asm and work.
+         supported_gpus = supported_gpus | Gpu::gfx94X | Gpu::gfx950 | Gpu::gfx120X;
+    }
+    auto p = miopen::unit_tests::UnitTestConvSolverParams(supported_gpus);
+    p.Tunable(5);
+    return p;
 }
 
-const auto& GetTestParamsFP32() { return GetTestParams<miopenFloat>(); }
+miopen::unit_tests::UnitTestConvSolverParams GetTestParamsFP32()
+{
+    return GetTestParams<miopenFloat>();
+}
 
 } // namespace
 

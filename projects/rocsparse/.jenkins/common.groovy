@@ -51,17 +51,10 @@ def runTestCommand (platform, project, gfilter, boolean rocmExamples=false, Stri
     platform.runCommand(this, command)
     //ROCM-Examples
     if (rocmExamples){
-        String buildString = ""
-        if (platform.os.contains("ubuntu")){
-            buildString += "sudo dpkg -i *.deb"
-        }
-        else {
-            buildString += "sudo rpm -i *.rpm"
-        }
         testCommand = """#!/usr/bin/env bash
                     set -ex
                     cd ${project.paths.project_build_prefix}/build/release/package
-                    ${buildString}
+                    ${auxiliary.installPackagesCommand(platform.jenkinsLabel, false, "")}
                     cd ../../..
                     testDirs=("Libraries/rocSPARSE")
                     git clone https://github.com/ROCm/rocm-examples.git
@@ -78,6 +71,22 @@ def runTestCommand (platform, project, gfilter, boolean rocmExamples=false, Stri
 
     }
 }
+
+
+def runHipDebugTestCommand (platform, project, gfilter, String dirmode = "release")
+{
+    def hmmTestCommand= """GTEST_LISTENER=NO_PASS_LINE_IN_LOG ./rocsparse-test --test-hip-debug --test-hip-debug-full  --gtest_output=xml --gtest_color=yes --gtest_filter=${gfilter}-*known_bug*"""
+
+    def command = """#!/usr/bin/env bash
+                set -ex
+                cd ${project.paths.project_build_prefix}/build/${dirmode}/clients/staging
+                export LD_LIBRARY_PATH=/opt/rocm/lib/
+                ${hmmTestCommand}
+            """
+
+    platform.runCommand(this, command)
+}
+
 
 def runTestWithSanitizerCommand (platform, project, gfilter, String dirmode = "release")
 {

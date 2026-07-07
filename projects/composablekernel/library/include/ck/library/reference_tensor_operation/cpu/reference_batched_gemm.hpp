@@ -10,6 +10,10 @@
 #include "ck/library/utility/host_tensor.hpp"
 #include <stdexcept>
 
+#if __clang_major__ >= 23
+#pragma clang diagnostic push
+#pragma clang diagnostic ignored "-Wlifetime-safety-intra-tu-suggestions"
+#endif
 namespace ck {
 namespace tensor_operation {
 namespace host {
@@ -422,3 +426,6 @@ struct ReferenceBatchedGemm_GQA : public device::BaseOperator
 } // namespace host
 } // namespace tensor_operation
 } // namespace ck
+#if __clang_major__ >= 23
+#pragma clang diagnostic pop
+#endif

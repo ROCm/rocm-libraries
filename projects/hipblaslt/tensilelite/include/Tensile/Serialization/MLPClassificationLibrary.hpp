@@ -32,6 +32,8 @@
 #include <cstddef>
 #include <unordered_set>
 
+#include <tensilelitehost/export.h>
+
 namespace TensileLite
 {
     namespace Serialization
@@ -185,3 +187,4 @@ namespace TensileLite
 
     } // namespace Serialization
 } // namespace TensileLite
+

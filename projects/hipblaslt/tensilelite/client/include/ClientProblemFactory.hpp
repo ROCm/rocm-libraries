@@ -92,14 +92,26 @@ namespace TensileLite
             std::vector<bool>                m_icacheFlushArgs;
             bool                             m_activationNoGuard;
             std::vector<ActivationType>      m_activationEnumArg;
+            // StreamK=5 hybrid-mode toggle values to test. Each element
+            // generates a separate ContractionProblemGemm variant with
+            // setParams().setStreamKTileSchedulingMode(value); the SK5
+            // kernel then runs the static (0), dynamic (1), or
+            // heuristic-picked AUTO (2) path accordingly. Empty or
+            // single-element vectors keep the host's default behavior.
+            std::vector<int>                 m_streamKHybridMode;
             size_t                           m_maxWorkspaceSize = 0;
-            rocisa::DataType                 m_computeInputType;
+            rocisa::DataType                 m_computeInputTypeA;
+            rocisa::DataType                 m_computeInputTypeB;
             rocisa::DataType                 m_f32XdlMathOp;
             rocisa::DataType                 m_activationComputeType;
             std::vector<std::vector<size_t>> m_problemSizes;
             bool                             m_useUserArgs;
             bool                             m_swizzleTensorA;
             bool                             m_swizzleTensorB;
+            int                              m_metadataLayout;
+            int                              m_mxBlockA;
+            int                              m_mxBlockB;
+            bool                             m_padMXScaleTensorFreeDim;
 
             TensorOps m_aOps;
             TensorOps m_bOps;

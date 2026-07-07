@@ -3,6 +3,7 @@
 #pragma once
 
 #include <algorithm>
+#include <hipdnn_data_sdk/utilities/ShapeUtilities.hpp>
 #include <hipdnn_frontend/Error.hpp>
 #include <hipdnn_frontend/Utilities.hpp>
 #include <hipdnn_frontend/attributes/TensorAttributes.hpp>
@@ -292,6 +293,95 @@ inline Error validateChannelOnlyTensorShape(const std::shared_ptr<graph::TensorA
                                 + " spatial dimension at index " + std::to_string(i)
                                 + " must be 1 for spatial batch normalization, got "
                                 + std::to_string(dims[i]));
+    }
+
+    return {ErrorCode::OK, ""};
+}
+
+// Validate the normalized shape that scale encodes. The normalized dims are the
+// maximal trailing suffix where scale[i] == input[i] — analogous to PyTorch's
+// `normalized_shape` parameter. Everything before is the "leading" region,
+// which must have scale[i] == 1 (with batch always leading). Specifically:
+//   - scale rank matches input rank
+//   - scale[0] == 1 (batch is broadcast)
+//   - at least one trailing dim of scale matches input (non-empty normalized shape)
+//   - in the leading region (dims before the normalized shape), scale[i] == 1
+//
+// Examples for input [N, C, H, W] (where C, H, W > 1):
+//   scale [1, C, H, W]  → accept (normalize over C, H, W)
+//   scale [1, 1, H, W]  → accept (normalize over H, W)
+//   scale [1, 1, 1, W]  → accept (normalize over W)
+//   scale [1, C, 1, 1]  → reject (no trailing match — scale[3]=1 vs W)
+//   scale [1, C, 1, W]  → reject (leading region has non-1: scale[1]=C)
+//   scale [1, 1, 1, 1]  → reject (no trailing match — input has non-1 last dim)
+//
+// Degenerate case — input [N, 1, 1, 1] (all-1 non-batch dims):
+//   scale [1, 1, 1, 1]  → accept (normalize over 1×1×1, invRms = 1/|x|)
+//
+// Uses tensor's name if set, otherwise uses fallbackName for error messages.
+// NOTE: This function expects tensor dimensions to be set - it will fail if not set
+inline Error validateScaleNormalizedShape(const std::shared_ptr<graph::TensorAttributes>& scale,
+                                          const std::shared_ptr<graph::TensorAttributes>& input,
+                                          const std::string& fallbackName = "Tensor")
+{
+    if(!scale)
+    {
+        return {ErrorCode::ATTRIBUTE_NOT_SET,
+                getTensorNameForError(scale, fallbackName) + " is not set"};
+    }
+
+    if(!input)
+    {
+        return {ErrorCode::ATTRIBUTE_NOT_SET,
+                getTensorNameForError(input, fallbackName) + " is not set"};
+    }
+
+    const auto& scaleDims = scale->get_dim();
+    const auto& inputDims = input->get_dim();
+
+    HIPDNN_RETURN_IF_NE(scaleDims.size(),
+                        inputDims.size(),
+                        ErrorCode::INVALID_VALUE,
+                        getTensorNameForError(scale, fallbackName) + " must match input rank");
+
+    // Check batch dimension is 1
+    HIPDNN_RETURN_IF_NE(scaleDims[0],
+                        1,
+                        ErrorCode::INVALID_VALUE,
+                        getTensorNameForError(scale, fallbackName)
+                            + " batch dimension (index 0) must be 1, got "
+                            + std::to_string(scaleDims[0]));
+
+    // Normalized shape = maximal trailing suffix of dims where scale[i] == input[i].
+    // The variable holds the index where the suffix starts; everything from that
+    // index on is normalized over, and everything before is leading (batch always leading).
+    // matchCount = number of trailing dims where scaleDims[i] == inputDims[i]
+    const auto [scaleMismatch, _]
+        = std::mismatch(scaleDims.rbegin(), scaleDims.rend(), inputDims.rbegin(), inputDims.rend());
+    const auto matchCount = static_cast<size_t>(std::distance(scaleDims.rbegin(), scaleMismatch));
+    const size_t reductionStart
+        = (matchCount >= scaleDims.size()) ? 1 : scaleDims.size() - matchCount;
+
+    // Normalized shape must be non-empty: RMSNorm needs at least one normalized dim.
+    HIPDNN_RETURN_IF_EQ(reductionStart,
+                        scaleDims.size(),
+                        ErrorCode::INVALID_VALUE,
+                        getTensorNameForError(scale, fallbackName)
+                            + " has no trailing dims matching input — RMSNorm requires "
+                              "at least one normalized dim");
+
+    // Leading region [1, reductionStart) must have scale[i] == 1. Catches sandwich
+    // cases (e.g. [1,2,3,3] / [1,2,1,3]) and leading-non-match cases
+    // (e.g. [1,2,3,3] / [1,5,3,3]).
+    for(size_t i = 1; i < reductionStart; ++i)
+    {
+        HIPDNN_RETURN_IF_NE(scaleDims[i],
+                            1,
+                            ErrorCode::INVALID_VALUE,
+                            getTensorNameForError(scale, fallbackName) + " dimension at index "
+                                + std::to_string(i)
+                                + " must be 1 (leading region before normalized shape), got "
+                                + std::to_string(scaleDims[i]));
     }
 
     return {ErrorCode::OK, ""};

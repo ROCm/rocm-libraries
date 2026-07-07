@@ -27,8 +27,7 @@
 
 #include <miopen/miopen.h>
 #include <miopen/errors.hpp>
-#include <miopen/solver/static_ck_common.hpp>
-#include <miopen/gemm_v2.hpp>
+#include <miopen/float_equal.hpp>
 
 #include "gtest_common.hpp"
 #include "unit_conv_solver.hpp"
@@ -100,7 +99,7 @@ TEST(CPU_UnitConvSolverToleranceTests_NONE, testSetAllUnique)
             {
                 for(auto tt : types)
                 {
-                    if(val == tol.Get(gg, tt))
+                    if(miopen::float_equal(val, tol.Get(gg, tt)))
                     {
                         matches.push_back({gg, tt});
                     }

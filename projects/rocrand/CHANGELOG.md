@@ -1,7 +1,25 @@
-# Changelog for rocRAND
+#Changelog for rocRAND
 
 Documentation for rocRAND is available at
 [https://rocm.docs.amd.com/projects/rocRAND/en/latest/](https://rocm.docs.amd.com/projects/rocRAND/en/latest/)
+
+## rocRAND 4.5.0 for ROCm 7.14
+
+### Added
+
+* gfx1250 support
+
+## Since last release ROCm 7.12
+
+### Added
+
+* gfx1150,gfx1152 and gfx1153 support
+* rocrand.dll now contains embedded file version metadata.
+
+### Resolved Issues
+
+* Fixed memory leak in unit tests.
+* Fixed incorrect Sobol64 number generation beyond offset 2^32.
 
 ## rocRAND 4.3.0 for ROCm 7.12
 

@@ -37,6 +37,11 @@ list( APPEND CMAKE_PREFIX_PATH /opt/rocm/llvm /opt/rocm )
 # CMake modules
 list(APPEND CMAKE_MODULE_PATH ${CMAKE_CURRENT_SOURCE_DIR}/cmake ${ROCM_PATH}/lib/cmake/hip /opt/rocm/lib/cmake/hip /opt/rocm/hip/cmake)
 
+# Root of the rocm-libraries monorepo (for shared infrastructure like CTest categories)
+if(NOT DEFINED ROCM_LIBRARIES_ROOT)
+  set(ROCM_LIBRARIES_ROOT "${CMAKE_CURRENT_SOURCE_DIR}/../..")
+endif()
+
 # Set a default build type if none was specified
 if(NOT CMAKE_BUILD_TYPE AND NOT CMAKE_CONFIGURATION_TYPES)
   message(STATUS "Setting build type to 'Release' as none was specified.")
@@ -80,8 +85,10 @@ option(BUILD_ROCSPARSE_ILP64 "Build rocSPARSE with rocsparse_int equal to int64_
 option(BUILD_COMPRESSED_DBG "Enable compressed debug symbols" ON)
 option(BUILD_WITH_ROCBLAS "Enable building rocSPARSE with rocBLAS" ON)
 option(BUILD_WITH_ROCTX "Enable building rocSPARSE with rocTX" ON)
+option(ROCSPARSE_ENABLE_ILU0_BOOST_SIGN "Preserve the pivot sign/phase in the ILU0 numeric boost" ON)
 option(BUILD_WITH_OFFLOAD_COMPRESS
        "Enable offload compression during compilation" ON)
+option(BUILD_WITH_ILDLT0 "Build rocSPARSE with incomplete LDL^T (zero fill-in) factorization support" ON)
 
 # Clients utilize rocsparse fortran API and a fortran compiler
 if( NOT BUILD_FORTRAN_CLIENTS )
@@ -115,6 +122,9 @@ if(BUILD_ADDRESS_SANITIZER)
   set(CMAKE_C_FLAGS "${CMAKE_C_FLAGS} -fsanitize=address -shared-libasan")
   set(CMAKE_C_LINK_EXECUTABLE "${CMAKE_C_LINK_EXECUTABLE} -fuse-ld=lld")
 
+  # Define a macro visible to both host and device compilation
+  add_compile_definitions(ROCSPARSE_WITH_ASAN)
+
   # Fortran not supported, add_link_options below invalid for fortran linking
   set(BUILD_FORTRAN_CLIENTS OFF)
 endif()
@@ -138,12 +148,19 @@ if(COMMAND rocm_check_target_ids)
         TARGETS "gfx908:xnack+;gfx90a:xnack+;gfx942:xnack+")
     else()
       rocm_check_target_ids(DEFAULT_GPU_TARGETS
-          TARGETS "gfx803;gfx900:xnack-;gfx906:xnack-;gfx908:xnack-;gfx90a:xnack-;gfx90a:xnack+;gfx942;gfx950;gfx1030;gfx1100;gfx1101;gfx1102;gfx1150;gfx1151;gfx1152;gfx1153;gfx1200;gfx1201")
+          TARGETS "gfx803;gfx900:xnack-;gfx906:xnack-;gfx908:xnack-"
+                  "gfx90a:xnack-;gfx90a:xnack+;gfx942;gfx950"
+                  "gfx1030;gfx1100;gfx1101;gfx1102"
+                  "gfx1150;gfx1151;gfx1152;gfx1153"
+                  "gfx1200;gfx1201;gfx1250")
     endif()
 else()
     # Use target ID syntax if supported for GPU_TARGETS
     if(TARGET_ID_SUPPORT)
-        set(DEFAULT_GPU_TARGETS "gfx803;gfx900:xnack-;gfx906:xnack-;gfx908:xnack-;gfx1030;gfx1100;gfx1101;gfx1102;gfx1150;gfx1151;gfx1152;gfx1153;gfx1200;gfx1201")
+        set(DEFAULT_GPU_TARGETS "gfx803;gfx900:xnack-;gfx906:xnack-;gfx908:xnack-"
+                                "gfx1030;gfx1100;gfx1101;gfx1102"
+                                "gfx1150;gfx1151;gfx1152;gfx1153"
+                                "gfx1200;gfx1201;gfx1250")
     else()
         set(DEFAULT_GPU_TARGETS "gfx803;gfx900;gfx906;gfx908")
     endif()
@@ -175,13 +192,25 @@ endif()
 message(STATUS "GPU_TARGETS: ${GPU_TARGETS}")
 
 # Setup version
-set(VERSION_STRING "4.6.0")
+set(VERSION_STRING "4.7.0")
 set(SOVERSION_STRING "1.0")
 set(MIN_ROCPRIM_VERSION "4.0.0" CACHE STRING "Minimum version of rocPRIM.")
 set(MIN_ROCBLAS_VERSION "4.1.0" CACHE STRING "Minimum version of rocBLAS.")
 
 rocm_setup_version(VERSION ${VERSION_STRING})
 set(rocsparse_SOVERSION ${SOVERSION_STRING})
+
+# Configure Windows version resource file
+if(WIN32)
+    string(TIMESTAMP ROCSPARSE_COPYRIGHT_YEAR "%Y")
+    if(rocsparse_VERSION_TWEAK)
+        set(ROCSPARSE_PRODUCT_VERSION_DISPLAY "${rocsparse_VERSION_MAJOR}.${rocsparse_VERSION_MINOR} (${rocsparse_VERSION_TWEAK})")
+    else()
+        set(ROCSPARSE_PRODUCT_VERSION_DISPLAY "${rocsparse_VERSION_MAJOR}.${rocsparse_VERSION_MINOR}")
+    endif()
+    configure_file("${CMAKE_CURRENT_SOURCE_DIR}/library/src/version.rc.in"
+                   "${PROJECT_BINARY_DIR}/version.rc" @ONLY)
+endif()
 
 # Find rocprim package
 find_package(rocprim REQUIRED)
@@ -205,6 +234,9 @@ endif( )
 
 if( BUILD_CLIENTS_ONLY OR BUILD_CLIENTS_SAMPLES OR BUILD_CLIENTS_TESTS OR BUILD_CLIENTS_BENCHMARKS )
   set( BUILD_CLIENTS ON )
+  if( BUILD_CLIENTS_TESTS )
+    enable_testing()
+  endif()
   if(NOT CLIENTS_OS)
     rocm_set_os_id(CLIENTS_OS)
     string(TOLOWER "${CLIENTS_OS}" CLIENTS_OS)
