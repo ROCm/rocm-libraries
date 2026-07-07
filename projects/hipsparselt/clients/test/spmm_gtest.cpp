@@ -42,7 +42,12 @@ namespace
     // In the general case of <Ti, To, Tc>, these tests do not apply, and if this
     // functor is called, an internal error message is generated. When converted
     // to bool, this functor returns false.
-    template <typename Ti, typename To = Ti, typename Tc = To, typename TBias = Ti, typename TGate = Ti, typename = void>
+    template <typename Ti,
+              typename To    = Ti,
+              typename Tc    = To,
+              typename TBias = Ti,
+              typename TGate = Ti,
+              typename       = void>
     struct spmm_testing : hipsparselt_test_invalid
     {
     };
@@ -75,7 +80,8 @@ namespace
             else if(!strcmp(arg.function, "spmm_batched"))
                 testing_spmm<Ti, To, Tc, TBias, TGate, hipsparselt_batch_type::batched>(arg);
             else if(!strcmp(arg.function, "spmm_strided_batched"))
-                testing_spmm<Ti, To, Tc, TBias, TGate, hipsparselt_batch_type::strided_batched>(arg);
+                testing_spmm<Ti, To, Tc, TBias, TGate, hipsparselt_batch_type::strided_batched>(
+                    arg);
             else if(!strcmp(arg.function, "spmm_bad_arg"))
                 testing_spmm_bad_arg<Ti, To, Tc>(arg);
             else if(!strcmp(arg.function, "aux_plan_assign"))
@@ -118,7 +124,7 @@ namespace
             {
                 if(arg.search)
                 {
-                    name << "_search"  << arg.search_iters;
+                    name << "_search" << arg.search_iters;
                 }
 
                 name << '_' << (arg.sparse_b ? "SB" : "SA");
@@ -150,6 +156,12 @@ namespace
                 if(arg.alpha_vector_scaling)
                 {
                     name << "_avs";
+                }
+
+                if(arg.gate_residual)
+                {
+                    name << "_gate_" << arg.stride_gate << "_"
+                         << hip_datatype_to_string(arg.gate_type);
                 }
 
                 name << '_' << (char)std::toupper(arg.transA) << (char)std::toupper(arg.transB);
