@@ -62,8 +62,9 @@ coverage GitHub Actions lane both invoke.
 
 - **Floor** (AIHPBLAS-3877): a single whole-project minimum. The value lives in **one place** —
   `fail_under` under `[tool.coverage.report]` in the top-level [`pyproject.toml`](../../../../pyproject.toml)
-  — and pytest-cov fails the run when whole-project coverage drops below it. There is no second
-  copy of the number in `tox.ini` or in CI YAML.
+  — and the combined-coverage `coverage report` step (in the env's `commands_post`) fails the run
+  when whole-project coverage drops below it. There is no second copy of the number in `tox.ini` or
+  in CI YAML.
 - **Ratchet** (AIHPBLAS-3878): a per-file no-regression guard. `coverage-baseline.json` (in this
   directory) pins each file's current coverage; `tools/coverage_ratchet.py check` (wired into the
   `coverage-unit` env's `commands_post`) fails the run if any file drops below its baseline by more
@@ -85,9 +86,11 @@ python Tensile/Tests/unit/characterization/tools/coverage_ratchet.py update --cu
 Then commit the reviewed `coverage-baseline.json` diff. Never widen the tolerance or blank the
 baseline to go green.
 
-> The committed baseline ships **seeded (empty)** and must be populated by one `update` run in a
-> real ROCm dev environment (with `rocisa` built) before the ratchet enforces anything. While the
-> `files` map is empty the ratchet is a no-op; the whole-project floor above still applies.
+> The committed baseline is **populated** (one entry per measured file) and the ratchet is
+> **active**. It was seeded from a real GPU-less `coverage-unit` run (with `rocisa` built); refresh
+> it with the `update` command above whenever an intentional change moves coverage. A brand-new
+> source file is not in the baseline yet, so the ratchet ignores it until the next `update` pins it
+> — the whole-project floor is the backstop for that window.
 
 ## Snapshot / golden discipline (governance)
 
