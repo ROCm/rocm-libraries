@@ -61,15 +61,15 @@ flatbuffers::FlatBufferBuilder
                                    hipdnn_flatbuffers_sdk::data_objects::DataType invRMSType)
 {
     const std::vector<int64_t> strides{48, 16, 4, 1};
-    const std::vector<int64_t> dims{1, 3, 4, 4};
+    const std::vector<int64_t> dims{2, 3, 4, 4};
 
     flatbuffers::FlatBufferBuilder builder;
     std::vector<::flatbuffers::Offset<hipdnn_flatbuffers_sdk::data_objects::TensorAttributes>>
         tensorAttributes;
 
-    const std::vector<int64_t> derivedDims = hipdnn_data_sdk::utilities::getDerivedShape(dims);
-    const std::vector<int64_t> derivedStrides = hipdnn_data_sdk::utilities::generateStrides(
-        derivedDims, hipdnn_data_sdk::utilities::extractStrideOrder(strides));
+    // Normalize bias/scale on first axis
+    const std::vector<int64_t> derivedDims{1, 3, 4, 4};
+    const std::vector<int64_t> derivedStrides{48, 16, 4, 1};
 
     tensorAttributes.push_back(hipdnn_flatbuffers_sdk::data_objects::CreateTensorAttributesDirect(
         builder, 1, "x", xType, &strides, &dims));
@@ -83,11 +83,9 @@ flatbuffers::FlatBufferBuilder
     tensorAttributes.push_back(hipdnn_flatbuffers_sdk::data_objects::CreateTensorAttributesDirect(
         builder, 4, "bias", biasType, &derivedStrides, &derivedDims));
 
-    // inv_rms should get norm stats shape [N, 1, H, W]
-    std::vector<int64_t> invRMSDims = dims;
-    invRMSDims[1] = 1;
-    std::vector<int64_t> invRMSStrides = strides;
-    invRMSStrides[0] = invRMSStrides[1];
+    // inv_rms stat shape is [N, 1, 1, 1, ...] when scale is [1, C, H, W ..]
+    const std::vector<int64_t> invRMSDims{2, 1, 1, 1};
+    const std::vector<int64_t> invRMSStrides{1, 1, 1, 1};
 
     tensorAttributes.push_back(hipdnn_flatbuffers_sdk::data_objects::CreateTensorAttributesDirect(
         builder, 5, "inv_rms", invRMSType, &invRMSStrides, &invRMSDims));
@@ -153,10 +151,9 @@ TEST(TestRMSnormValidator, MismatchIOTypes)
     const auto& graphNode = graph.getNode(0);
     const auto& attr = *graphNode.attributes_as_RMSNormAttributes();
 
-    // Data type of x and y tensors should match, expect exception when this isn't the case
+    // Data type of x and y tensors don't need to match
     RMSnormValidator validator(graph.getTensorMap());
-    EXPECT_THROW(validator.checkTensorConfigSupported(attr),
-                 hipdnn_plugin_sdk::HipdnnPluginException);
+    EXPECT_NO_THROW(validator.checkTensorConfigSupported(attr));
 }
 
 TEST(TestRMSnormValidator, UnsupportedScaleType)
