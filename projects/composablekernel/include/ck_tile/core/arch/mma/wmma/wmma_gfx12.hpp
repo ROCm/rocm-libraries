@@ -15,6 +15,8 @@
 #include "ck_tile/core/numeric/int8.hpp"
 #include "ck_tile/core/numeric/integer.hpp"
 #include "ck_tile/core/numeric/pk_int4.hpp"
+#include "ck_tile/core/numeric/pk_f6.hpp"
+#include "ck_tile/core/numeric/pk_fp4.hpp"
 #include "ck_tile/core/numeric/vector_type.hpp"
 #include "ck_tile/core/utility/bit_cast.hpp"
 #include "ck_tile/ops/gemm/warp/warp_gemm_params.hpp"
@@ -358,17 +360,19 @@ struct amdgcn_mma<fp32_t, fp32_t, fp32_t, 16u, 16u, 4u, CompilerTarget, MmaOpFam
 {
     static constexpr const char* instruction_name = "__builtin_amdgcn_wmma_f32_16x16x4_f32";
 
+    template <typename... Params>
     CK_TILE_DEVICE static CVecType
     exec(AVecType const& aVec, BVecType const& bVec, CVecType const& cVec)
     {
-        return {__builtin_amdgcn_wmma_f32_16x16x4_f32(0, // A_mod
+        using P = WarpGemmParamsParser<Params...>;
+        return {__builtin_amdgcn_wmma_f32_16x16x4_f32(false, // A_neg
                                                       aVec,
-                                                      0, // B_mod
+                                                      false, // B_neg
                                                       bVec,
                                                       0, // C_mod
                                                       cVec,
-                                                      0,   // matrix_a_reuse
-                                                      0)}; // matrix_b_reuse
+                                                      P::reuse_a,   // matrix_a_reuse
+                                                      P::reuse_b)}; // matrix_b_reuse
     }
 };
 
@@ -389,17 +393,19 @@ struct amdgcn_mma<bf16_t, bf16_t, fp32_t, 16u, 16u, 32u, CompilerTarget, MmaOpFa
 {
     static constexpr const char* instruction_name = "__builtin_amdgcn_wmma_f32_16x16x32_bf16";
 
+    template <typename... Params>
     CK_TILE_DEVICE static CVecType
     exec(AVecType const& aVec, BVecType const& bVec, CVecType const& cVec)
     {
-        return {__builtin_amdgcn_wmma_f32_16x16x32_bf16(0, // A_mod
+        using P = WarpGemmParamsParser<Params...>;
+        return {__builtin_amdgcn_wmma_f32_16x16x32_bf16(false, // A_neg
                                                         aVec,
-                                                        0, // B_mod
+                                                        false, // B_neg
                                                         bVec,
                                                         0, // C_mod
                                                         cVec,
-                                                        0,   // matrix_a_reuse
-                                                        0)}; // matrix_b_reuse
+                                                        P::reuse_a,   // matrix_a_reuse
+                                                        P::reuse_b)}; // matrix_b_reuse
     }
 };
 
@@ -420,17 +426,19 @@ struct amdgcn_mma<bf16_t, bf16_t, bf16_t, 16u, 16u, 32u, CompilerTarget, MmaOpFa
 {
     static constexpr const char* instruction_name = "__builtin_amdgcn_wmma_bf16_16x16x32_bf16";
 
+    template <typename... Params>
     CK_TILE_DEVICE static CVecType
     exec(AVecType const& aVec, BVecType const& bVec, CVecType const& cVec)
     {
-        return {__builtin_amdgcn_wmma_bf16_16x16x32_bf16(0, // A_mod
+        using P = WarpGemmParamsParser<Params...>;
+        return {__builtin_amdgcn_wmma_bf16_16x16x32_bf16(false, // A_neg
                                                          aVec,
-                                                         0, // B_mod
+                                                         false, // B_neg
                                                          bVec,
                                                          0, // C_mod
                                                          cVec,
-                                                         0,   // matrix_a_reuse
-                                                         0)}; // matrix_b_reuse
+                                                         P::reuse_a,   // matrix_a_reuse
+                                                         P::reuse_b)}; // matrix_b_reuse
     }
 };
 
@@ -451,15 +459,17 @@ struct amdgcn_mma<fp8_t, fp8_t, fp32_t, 16u, 16u, 64u, CompilerTarget, MmaOpFami
 {
     static constexpr const char* instruction_name = "__builtin_amdgcn_wmma_f32_16x16x64_fp8_fp8";
 
+    template <typename... Params>
     CK_TILE_DEVICE static CVecType
     exec(AVecType const& aVec, BVecType const& bVec, CVecType const& cVec)
     {
+        using P = WarpGemmParamsParser<Params...>;
         return {__builtin_amdgcn_wmma_f32_16x16x64_fp8_fp8(bit_cast<int32x8_t>(aVec),
                                                            bit_cast<int32x8_t>(bVec),
                                                            0, // C_mod
                                                            cVec,
-                                                           0,   // matrix_a_reuse
-                                                           0)}; // matrix_b_reuse
+                                                           P::reuse_a,   // matrix_a_reuse
+                                                           P::reuse_b)}; // matrix_b_reuse
     }
 };
 
@@ -480,15 +490,17 @@ struct amdgcn_mma<fp8_t, bf8_t, fp32_t, 16u, 16u, 64u, CompilerTarget, MmaOpFami
 {
     static constexpr const char* instruction_name = "__builtin_amdgcn_wmma_f32_16x16x64_fp8_bf8";
 
+    template <typename... Params>
     CK_TILE_DEVICE static CVecType
     exec(AVecType const& aVec, BVecType const& bVec, CVecType const& cVec)
     {
+        using P = WarpGemmParamsParser<Params...>;
         return {__builtin_amdgcn_wmma_f32_16x16x64_fp8_bf8(bit_cast<int32x8_t>(aVec),
                                                            bit_cast<int32x8_t>(bVec),
                                                            0, // C_mod
                                                            cVec,
-                                                           0,   // matrix_a_reuse
-                                                           0)}; // matrix_b_reuse
+                                                           P::reuse_a,   // matrix_a_reuse
+                                                           P::reuse_b)}; // matrix_b_reuse
     }
 };
 
@@ -509,15 +521,17 @@ struct amdgcn_mma<bf8_t, fp8_t, fp32_t, 16u, 16u, 64u, CompilerTarget, MmaOpFami
 {
     static constexpr const char* instruction_name = "__builtin_amdgcn_wmma_f32_16x16x64_bf8_fp8";
 
+    template <typename... Params>
     CK_TILE_DEVICE static CVecType
     exec(AVecType const& aVec, BVecType const& bVec, CVecType const& cVec)
     {
+        using P = WarpGemmParamsParser<Params...>;
         return {__builtin_amdgcn_wmma_f32_16x16x64_bf8_fp8(bit_cast<int32x8_t>(aVec),
                                                            bit_cast<int32x8_t>(bVec),
                                                            0, // C_mod
                                                            cVec,
-                                                           0,   // matrix_a_reuse
-                                                           0)}; // matrix_b_reuse
+                                                           P::reuse_a,   // matrix_a_reuse
+                                                           P::reuse_b)}; // matrix_b_reuse
     }
 };
 
@@ -538,15 +552,17 @@ struct amdgcn_mma<bf8_t, bf8_t, fp32_t, 16u, 16u, 64u, CompilerTarget, MmaOpFami
 {
     static constexpr const char* instruction_name = "__builtin_amdgcn_wmma_f32_16x16x64_bf8_bf8";
 
+    template <typename... Params>
     CK_TILE_DEVICE static CVecType
     exec(AVecType const& aVec, BVecType const& bVec, CVecType const& cVec)
     {
+        using P = WarpGemmParamsParser<Params...>;
         return {__builtin_amdgcn_wmma_f32_16x16x64_bf8_bf8(bit_cast<int32x8_t>(aVec),
                                                            bit_cast<int32x8_t>(bVec),
                                                            0, // C_mod
                                                            cVec,
-                                                           0,   // matrix_a_reuse
-                                                           0)}; // matrix_b_reuse
+                                                           P::reuse_a,   // matrix_a_reuse
+                                                           P::reuse_b)}; // matrix_b_reuse
     }
 };
 
@@ -567,15 +583,17 @@ struct amdgcn_mma<fp8_t, fp8_t, fp16_t, 16u, 16u, 64u, CompilerTarget, MmaOpFami
 {
     static constexpr const char* instruction_name = "__builtin_amdgcn_wmma_f16_16x16x64_fp8_fp8";
 
+    template <typename... Params>
     CK_TILE_DEVICE static CVecType
     exec(AVecType const& aVec, BVecType const& bVec, CVecType const& cVec)
     {
+        using P = WarpGemmParamsParser<Params...>;
         return {__builtin_amdgcn_wmma_f16_16x16x64_fp8_fp8(bit_cast<int32x8_t>(aVec),
                                                            bit_cast<int32x8_t>(bVec),
                                                            0, // C_mod
                                                            cVec,
-                                                           0,   // matrix_a_reuse
-                                                           0)}; // matrix_b_reuse
+                                                           P::reuse_a,   // matrix_a_reuse
+                                                           P::reuse_b)}; // matrix_b_reuse
     }
 };
 
@@ -596,15 +614,17 @@ struct amdgcn_mma<fp8_t, bf8_t, fp16_t, 16u, 16u, 64u, CompilerTarget, MmaOpFami
 {
     static constexpr const char* instruction_name = "__builtin_amdgcn_wmma_f16_16x16x64_fp8_bf8";
 
+    template <typename... Params>
     CK_TILE_DEVICE static CVecType
     exec(AVecType const& aVec, BVecType const& bVec, CVecType const& cVec)
     {
+        using P = WarpGemmParamsParser<Params...>;
         return {__builtin_amdgcn_wmma_f16_16x16x64_fp8_bf8(bit_cast<int32x8_t>(aVec),
                                                            bit_cast<int32x8_t>(bVec),
                                                            0, // C_mod
                                                            cVec,
-                                                           0,   // matrix_a_reuse
-                                                           0)}; // matrix_b_reuse
+                                                           P::reuse_a,   // matrix_a_reuse
+                                                           P::reuse_b)}; // matrix_b_reuse
     }
 };
 
@@ -625,15 +645,17 @@ struct amdgcn_mma<bf8_t, fp8_t, fp16_t, 16u, 16u, 64u, CompilerTarget, MmaOpFami
 {
     static constexpr const char* instruction_name = "__builtin_amdgcn_wmma_f16_16x16x64_bf8_fp8";
 
+    template <typename... Params>
     CK_TILE_DEVICE static CVecType
     exec(AVecType const& aVec, BVecType const& bVec, CVecType const& cVec)
     {
+        using P = WarpGemmParamsParser<Params...>;
         return {__builtin_amdgcn_wmma_f16_16x16x64_bf8_fp8(bit_cast<int32x8_t>(aVec),
                                                            bit_cast<int32x8_t>(bVec),
                                                            0, // C_mod
                                                            cVec,
-                                                           0,   // matrix_a_reuse
-                                                           0)}; // matrix_b_reuse
+                                                           P::reuse_a,   // matrix_a_reuse
+                                                           P::reuse_b)}; // matrix_b_reuse
     }
 };
 
@@ -654,15 +676,17 @@ struct amdgcn_mma<bf8_t, bf8_t, fp16_t, 16u, 16u, 64u, CompilerTarget, MmaOpFami
 {
     static constexpr const char* instruction_name = "__builtin_amdgcn_wmma_f16_16x16x64_bf8_bf8";
 
+    template <typename... Params>
     CK_TILE_DEVICE static CVecType
     exec(AVecType const& aVec, BVecType const& bVec, CVecType const& cVec)
     {
+        using P = WarpGemmParamsParser<Params...>;
         return {__builtin_amdgcn_wmma_f16_16x16x64_bf8_bf8(bit_cast<int32x8_t>(aVec),
                                                            bit_cast<int32x8_t>(bVec),
                                                            0, // C_mod
                                                            cVec,
-                                                           0,   // matrix_a_reuse
-                                                           0)}; // matrix_b_reuse
+                                                           P::reuse_a,   // matrix_a_reuse
+                                                           P::reuse_b)}; // matrix_b_reuse
     }
 };
 
@@ -683,16 +707,18 @@ struct amdgcn_mma<int8_t, int8_t, int32_t, 16u, 16u, 64u, CompilerTarget, MmaOpF
 {
     static constexpr const char* instruction_name = "__builtin_amdgcn_wmma_i32_16x16x64_iu8";
 
+    template <typename... Params>
     CK_TILE_DEVICE static CVecType
     exec(AVecType const& aVec, BVecType const& bVec, CVecType const& cVec)
     {
+        using P = WarpGemmParamsParser<Params...>;
         return {__builtin_amdgcn_wmma_i32_16x16x64_iu8(true, // A signedness
                                                        bit_cast<int32x8_t>(aVec),
                                                        true, // B signedness
                                                        bit_cast<int32x8_t>(bVec),
                                                        cVec,
-                                                       false,
-                                                       0)};
+                                                       P::reuse_a,   // matrix_a_reuse
+                                                       P::reuse_b)}; // matrix_b_reuse
     }
 };
 
@@ -713,15 +739,17 @@ struct amdgcn_mma<fp8_t, fp8_t, fp16_t, 16u, 16u, 128u, CompilerTarget, MmaOpFam
 {
     static constexpr const char* instruction_name = "__builtin_amdgcn_wmma_f16_16x16x128_fp8_fp8";
 
+    template <typename... Params>
     CK_TILE_DEVICE static CVecType
     exec(AVecType const& aVec, BVecType const& bVec, CVecType const& cVec)
     {
+        using P = WarpGemmParamsParser<Params...>;
         return {__builtin_amdgcn_wmma_f16_16x16x128_fp8_fp8(bit_cast<int32x16_t>(aVec),
                                                             bit_cast<int32x16_t>(bVec),
                                                             0, // C_mod
                                                             cVec,
-                                                            0,   // matrix_a_reuse
-                                                            0)}; // matrix_b_reuse
+                                                            P::reuse_a,   // matrix_a_reuse
+                                                            P::reuse_b)}; // matrix_b_reuse
     }
 };
 
@@ -742,15 +770,17 @@ struct amdgcn_mma<fp8_t, bf8_t, fp16_t, 16u, 16u, 128u, CompilerTarget, MmaOpFam
 {
     static constexpr const char* instruction_name = "__builtin_amdgcn_wmma_f16_16x16x128_fp8_bf8";
 
+    template <typename... Params>
     CK_TILE_DEVICE static CVecType
     exec(AVecType const& aVec, BVecType const& bVec, CVecType const& cVec)
     {
+        using P = WarpGemmParamsParser<Params...>;
         return {__builtin_amdgcn_wmma_f16_16x16x128_fp8_bf8(bit_cast<int32x16_t>(aVec),
                                                             bit_cast<int32x16_t>(bVec),
                                                             0, // C_mod
                                                             cVec,
-                                                            0,   // matrix_a_reuse
-                                                            0)}; // matrix_b_reuse
+                                                            P::reuse_a,   // matrix_a_reuse
+                                                            P::reuse_b)}; // matrix_b_reuse
     }
 };
 
@@ -771,15 +801,17 @@ struct amdgcn_mma<bf8_t, fp8_t, fp16_t, 16u, 16u, 128u, CompilerTarget, MmaOpFam
 {
     static constexpr const char* instruction_name = "__builtin_amdgcn_wmma_f16_16x16x128_bf8_fp8";
 
+    template <typename... Params>
     CK_TILE_DEVICE static CVecType
     exec(AVecType const& aVec, BVecType const& bVec, CVecType const& cVec)
     {
+        using P = WarpGemmParamsParser<Params...>;
         return {__builtin_amdgcn_wmma_f16_16x16x128_bf8_fp8(bit_cast<int32x16_t>(aVec),
                                                             bit_cast<int32x16_t>(bVec),
                                                             0, // C_mod
                                                             cVec,
-                                                            0,   // matrix_a_reuse
-                                                            0)}; // matrix_b_reuse
+                                                            P::reuse_a,   // matrix_a_reuse
+                                                            P::reuse_b)}; // matrix_b_reuse
     }
 };
 
@@ -800,15 +832,17 @@ struct amdgcn_mma<bf8_t, bf8_t, fp16_t, 16u, 16u, 128u, CompilerTarget, MmaOpFam
 {
     static constexpr const char* instruction_name = "__builtin_amdgcn_wmma_f16_16x16x128_bf8_bf8";
 
+    template <typename... Params>
     CK_TILE_DEVICE static CVecType
     exec(AVecType const& aVec, BVecType const& bVec, CVecType const& cVec)
     {
+        using P = WarpGemmParamsParser<Params...>;
         return {__builtin_amdgcn_wmma_f16_16x16x128_bf8_bf8(bit_cast<int32x16_t>(aVec),
                                                             bit_cast<int32x16_t>(bVec),
                                                             0, // C_mod
                                                             cVec,
-                                                            0,   // matrix_a_reuse
-                                                            0)}; // matrix_b_reuse
+                                                            P::reuse_a,   // matrix_a_reuse
+                                                            P::reuse_b)}; // matrix_b_reuse
     }
 };
 
@@ -827,47 +861,24 @@ struct amdgcn_mma<pk_fp6x16_t, pk_fp6x16_t, fp32_t, 16u, 16u, 128u, CompilerTarg
 : amdgcn_mma_base<pk_fp6x16_t, pk_fp6x16_t, fp32_t, 16u, 16u, 128u, 32u, 64, 1, 1, 1, 1, 8, 1, WmmaOp, MmaOpFamily::DENSE>
 // clang-format on
 {
+    static constexpr const char* instruction_name = "__builtin_amdgcn_wmma_f32_16x16x128_f8f6f4";
+
+    template <typename... Params>
     CK_TILE_DEVICE static CVecType
     exec(AVecType const& aVec, BVecType const& bVec, CVecType const& cVec)
     {
         // fp6 format = 2, data is 12 dwords per operand, pad to 16 dwords for the builtin
-        int32x16_t a_padded = {aVec.data[0],
-                               aVec.data[1],
-                               aVec.data[2],
-                               aVec.data[3],
-                               aVec.data[4],
-                               aVec.data[5],
-                               aVec.data[6],
-                               aVec.data[7],
-                               aVec.data[8],
-                               aVec.data[9],
-                               aVec.data[10],
-                               aVec.data[11],
-                               0,
-                               0,
-                               0,
-                               0};
-        int32x16_t b_padded = {bVec.data[0],
-                               bVec.data[1],
-                               bVec.data[2],
-                               bVec.data[3],
-                               bVec.data[4],
-                               bVec.data[5],
-                               bVec.data[6],
-                               bVec.data[7],
-                               bVec.data[8],
-                               bVec.data[9],
-                               bVec.data[10],
-                               bVec.data[11],
-                               0,
-                               0,
-                               0,
-                               0};
+        // clang-format off
+        int32x16_t a_padded = {aVec.data[0], aVec.data[1], aVec.data[2],  aVec.data[3],  aVec.data[4], aVec.data[5], aVec.data[6], aVec.data[7],
+                               aVec.data[8], aVec.data[9], aVec.data[10], aVec.data[11], 0, 0, 0, 0};
+        int32x16_t b_padded = {bVec.data[0], bVec.data[1], bVec.data[2],  bVec.data[3],  bVec.data[4], bVec.data[5], bVec.data[6], bVec.data[7],
+                               bVec.data[8], bVec.data[9], bVec.data[10], bVec.data[11], 0, 0, 0, 0};
+        // clang-format on
         return {__builtin_amdgcn_wmma_f32_16x16x128_f8f6f4(PackedDataTypeToFlag_v<pk_fp6x16_t>,
                                                            a_padded,
                                                            PackedDataTypeToFlag_v<pk_fp6x16_t>,
                                                            b_padded,
-                                                           0,
+                                                           0, // C_mod
                                                            cVec)};
     }
 };
@@ -887,6 +898,9 @@ struct amdgcn_mma<pk_fp4_t, pk_fp4_t, fp32_t, 16u, 16u, 128u, CompilerTarget, Mm
 : amdgcn_mma_base<pk_fp4_t, pk_fp4_t, fp32_t, 16u, 16u, 128u, 32u, 64, 1, 1, 1, 1, 8, 1, WmmaOp, MmaOpFamily::DENSE>
 // clang-format on
 {
+    static constexpr const char* instruction_name = "__builtin_amdgcn_wmma_f32_16x16x128_f8f6f4";
+
+    template <typename... Params>
     CK_TILE_DEVICE static CVecType
     exec(AVecType const& aVec, BVecType const& bVec, CVecType const& cVec)
     {
@@ -901,7 +915,7 @@ struct amdgcn_mma<pk_fp4_t, pk_fp4_t, fp32_t, 16u, 16u, 128u, CompilerTarget, Mm
                                                            a_padded,
                                                            PackedDataTypeToFlag_v<pk_fp4_t>,
                                                            b_padded,
-                                                           0,
+                                                           0, // C_mod
                                                            cVec)};
     }
 };
@@ -923,15 +937,17 @@ struct amdgcn_mma<fp8_t, fp8_t, fp32_t, 16u, 16u, 128u, CompilerTarget, MmaOpFam
 {
     static constexpr const char* instruction_name = "__builtin_amdgcn_wmma_f32_16x16x128_fp8_fp8";
 
+    template <typename... Params>
     CK_TILE_DEVICE static CVecType
     exec(AVecType const& aVec, BVecType const& bVec, CVecType const& cVec)
     {
+        using P = WarpGemmParamsParser<Params...>;
         return {__builtin_amdgcn_wmma_f32_16x16x128_fp8_fp8(bit_cast<int32x16_t>(aVec),
                                                             bit_cast<int32x16_t>(bVec),
                                                             0, // C_mod
                                                             cVec,
-                                                            0,   // matrix_a_reuse
-                                                            0)}; // matrix_b_reuse
+                                                            P::reuse_a,   // matrix_a_reuse
+                                                            P::reuse_b)}; // matrix_b_reuse
     }
 };
 
@@ -952,15 +968,17 @@ struct amdgcn_mma<fp8_t, bf8_t, fp32_t, 16u, 16u, 128u, CompilerTarget, MmaOpFam
 {
     static constexpr const char* instruction_name = "__builtin_amdgcn_wmma_f32_16x16x128_fp8_bf8";
 
+    template <typename... Params>
     CK_TILE_DEVICE static CVecType
     exec(AVecType const& aVec, BVecType const& bVec, CVecType const& cVec)
     {
+        using P = WarpGemmParamsParser<Params...>;
         return {__builtin_amdgcn_wmma_f32_16x16x128_fp8_bf8(bit_cast<int32x16_t>(aVec),
                                                             bit_cast<int32x16_t>(bVec),
                                                             0, // C_mod
                                                             cVec,
-                                                            0,   // matrix_a_reuse
-                                                            0)}; // matrix_b_reuse
+                                                            P::reuse_a,   // matrix_a_reuse
+                                                            P::reuse_b)}; // matrix_b_reuse
     }
 };
 
@@ -981,15 +999,17 @@ struct amdgcn_mma<bf8_t, fp8_t, fp32_t, 16u, 16u, 128u, CompilerTarget, MmaOpFam
 {
     static constexpr const char* instruction_name = "__builtin_amdgcn_wmma_f32_16x16x128_bf8_fp8";
 
+    template <typename... Params>
     CK_TILE_DEVICE static CVecType
     exec(AVecType const& aVec, BVecType const& bVec, CVecType const& cVec)
     {
+        using P = WarpGemmParamsParser<Params...>;
         return {__builtin_amdgcn_wmma_f32_16x16x128_bf8_fp8(bit_cast<int32x16_t>(aVec),
                                                             bit_cast<int32x16_t>(bVec),
                                                             0, // C_mod
                                                             cVec,
-                                                            0,   // matrix_a_reuse
-                                                            0)}; // matrix_b_reuse
+                                                            P::reuse_a,   // matrix_a_reuse
+                                                            P::reuse_b)}; // matrix_b_reuse
     }
 };
 
@@ -1010,15 +1030,17 @@ struct amdgcn_mma<bf8_t, bf8_t, fp32_t, 16u, 16u, 128u, CompilerTarget, MmaOpFam
 {
     static constexpr const char* instruction_name = "__builtin_amdgcn_wmma_f32_16x16x128_bf8_bf8";
 
+    template <typename... Params>
     CK_TILE_DEVICE static CVecType
     exec(AVecType const& aVec, BVecType const& bVec, CVecType const& cVec)
     {
+        using P = WarpGemmParamsParser<Params...>;
         return {__builtin_amdgcn_wmma_f32_16x16x128_bf8_bf8(bit_cast<int32x16_t>(aVec),
                                                             bit_cast<int32x16_t>(bVec),
                                                             0, // C_mod
                                                             cVec,
-                                                            0,   // matrix_a_reuse
-                                                            0)}; // matrix_b_reuse
+                                                            P::reuse_a,   // matrix_a_reuse
+                                                            P::reuse_b)}; // matrix_b_reuse
     }
 };
 
@@ -1039,17 +1061,19 @@ struct amdgcn_mma<fp16_t, fp16_t, fp32_t, 16u, 16u, 32u, CompilerTarget, MmaOpFa
 {
     static constexpr const char* instruction_name = "__builtin_amdgcn_wmma_f32_16x16x32_f16";
 
+    template <typename... Params>
     CK_TILE_DEVICE static CVecType
     exec(AVecType const& aVec, BVecType const& bVec, CVecType const& cVec)
     {
-        return {__builtin_amdgcn_wmma_f32_16x16x32_f16(0, // A_mod
+        using P = WarpGemmParamsParser<Params...>;
+        return {__builtin_amdgcn_wmma_f32_16x16x32_f16(false, // A_neg
                                                        aVec,
-                                                       0, // B_mod
+                                                       false, // B_neg
                                                        bVec,
                                                        0, // C_mod
                                                        cVec,
-                                                       0,   // matrix_a_reuse
-                                                       0)}; // matrix_b_reuse
+                                                       P::reuse_a,   // matrix_a_reuse
+                                                       P::reuse_b)}; // matrix_b_reuse
     }
 };
 
@@ -1070,17 +1094,19 @@ struct amdgcn_mma<fp16_t, fp16_t, fp16_t, 16u, 16u, 32u, CompilerTarget, MmaOpFa
 {
     static constexpr const char* instruction_name = "__builtin_amdgcn_wmma_f16_16x16x32_f16";
 
+    template <typename... Params>
     CK_TILE_DEVICE static CVecType
     exec(AVecType const& aVec, BVecType const& bVec, CVecType const& cVec)
     {
-        return {__builtin_amdgcn_wmma_f16_16x16x32_f16(0, // A_mod
+        using P = WarpGemmParamsParser<Params...>;
+        return {__builtin_amdgcn_wmma_f16_16x16x32_f16(false, // A_neg
                                                        aVec,
-                                                       0, // B_mod
+                                                       false, // B_neg
                                                        bVec,
                                                        0, // C_mod
                                                        cVec,
-                                                       0,   // matrix_a_reuse
-                                                       0)}; // matrix_b_reuse
+                                                       P::reuse_a,   // matrix_a_reuse
+                                                       P::reuse_b)}; // matrix_b_reuse
     }
 };
 
