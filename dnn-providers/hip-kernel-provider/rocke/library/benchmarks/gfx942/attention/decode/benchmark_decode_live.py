@@ -394,11 +394,11 @@ def main() -> int:
     print(f"bias   : {bias_tag}")
     print()
 
-    header = (
-        f"{'label':<22}  {'triton_us':>10}  "
-        + "  ".join(f"sms{s:>4}" for s in args.num_sms_sweep)
-        + "  {'best_sms':>8}  {'best_spd':>9}  path"
-    )
+header = (
+    f"{'label':<22}  {'triton_us':>10}  "
+    + "  ".join(f"sms{s:>4}" for s in args.num_sms_sweep)
+    + f"  {'best_sms':>8}  {'best_spd':>9}  path"
+)
     print(header)
     print("-" * len(header))
 
