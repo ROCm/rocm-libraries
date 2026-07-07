@@ -79,14 +79,31 @@ protected:
         xAttr.set_uid(BatchnormFwdTrainingTensorIds::X_UID);
         auto xTensorAttr = std::make_shared<graph::TensorAttributes>(std::move(xAttr));
 
+        std::vector<int64_t> scaleBiasDims;
+        const auto isChannelLast
+            = layout.name == TensorLayout::NHWC.name || layout.name == TensorLayout::NDHWC.name;
+        // {C, 1} for NHWC and NDHWC
+        // Note: We could've used {C} as the scaleBiasDims here but the frontend test uses getHostValue(0, cidx)
+        // on scale/bias tensors which requires at least 2D tensors.
+        if(isChannelLast)
+        {
+            scaleBiasDims.resize(2, 1);
+        }
+        // {C, 1, 1} for NCHW and {C, 1, 1, 1} for NCDHW
+        else
+        {
+            scaleBiasDims.resize(testCase.dims.size() - 1, 1);
+        }
+        scaleBiasDims[0] = testCase.dims[1];
+
         // Channel-only tensors are layout-agnostic, specifying stride order is unnecessary
         auto scaleAttr = makeTensorAttributes(
-            "scale", intermediateDataType, derivedDims, generateStrides(derivedDims));
+            "scale", intermediateDataType, scaleBiasDims, generateStrides(scaleBiasDims));
         scaleAttr.set_uid(BatchnormFwdTrainingTensorIds::SCALE_UID);
         auto scaleTensorAttr = std::make_shared<graph::TensorAttributes>(std::move(scaleAttr));
 
         auto biasAttr = makeTensorAttributes(
-            "bias", intermediateDataType, derivedDims, generateStrides(derivedDims));
+            "bias", intermediateDataType, scaleBiasDims, generateStrides(scaleBiasDims));
         biasAttr.set_uid(BatchnormFwdTrainingTensorIds::BIAS_UID);
         auto biasTensorAttr = std::make_shared<graph::TensorAttributes>(std::move(biasAttr));
 

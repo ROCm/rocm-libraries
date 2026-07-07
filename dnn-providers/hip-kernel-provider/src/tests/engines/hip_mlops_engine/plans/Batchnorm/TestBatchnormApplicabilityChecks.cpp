@@ -646,3 +646,530 @@ TEST(TestBatchnormValidator, MismatchStatShapes)
     EXPECT_THROW(validator.checkInferenceActivationTensorConfigSupported(attr, activAttrs),
                  hipdnn_plugin_sdk::HipdnnPluginException);
 }
+
+TEST(TestBatchnormValidator, ValidAffineShapeNchwFullRank)
+{
+    const std::vector<int64_t> dims{1, 3, 224, 224};
+    const std::vector<int64_t> strides{150528, 50176, 224, 1};
+
+    const std::vector<int64_t> affineDims{1, 3, 1, 1};
+    const std::vector<int64_t> affineStrides{3, 1, 1, 1};
+
+    const std::vector<int64_t> derivedDims = hipdnn_data_sdk::utilities::getDerivedShape(dims);
+    const std::vector<int64_t> derivedStrides = hipdnn_data_sdk::utilities::generateStrides(
+        derivedDims, hipdnn_data_sdk::utilities::extractStrideOrder(strides));
+
+    auto builder = createInvalidShapeBatchnormActivGraph(dims,
+                                                         strides,
+                                                         affineDims,
+                                                         affineStrides,
+                                                         affineDims,
+                                                         affineStrides,
+                                                         derivedDims,
+                                                         derivedStrides,
+                                                         derivedDims,
+                                                         derivedStrides,
+                                                         dims,
+                                                         strides,
+                                                         dims,
+                                                         strides);
+
+    const hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper graph(
+        builder.GetBufferPointer(), builder.GetSize());
+
+    const auto& node = graph.getNode(0);
+    const auto& attr = *node.attributes_as_BatchnormInferenceAttributes();
+
+    const auto& activNode = graph.getNode(1);
+    const auto& activAttrs = *activNode.attributes_as_PointwiseAttributes();
+
+    BatchnormValidator validator(graph.getTensorMap());
+    EXPECT_NO_THROW(validator.checkInferenceActivationTensorConfigSupported(attr, activAttrs));
+}
+
+TEST(TestBatchnormValidator, ValidAffineShapeNchwRank3)
+{
+    const std::vector<int64_t> dims{1, 3, 224, 224};
+    const std::vector<int64_t> strides{150528, 50176, 224, 1};
+
+    const std::vector<int64_t> affineDims{3, 1, 1};
+    const std::vector<int64_t> affineStrides{1, 1, 1};
+
+    const std::vector<int64_t> derivedDims = hipdnn_data_sdk::utilities::getDerivedShape(dims);
+    const std::vector<int64_t> derivedStrides = hipdnn_data_sdk::utilities::generateStrides(
+        derivedDims, hipdnn_data_sdk::utilities::extractStrideOrder(strides));
+
+    auto builder = createInvalidShapeBatchnormActivGraph(dims,
+                                                         strides,
+                                                         affineDims,
+                                                         affineStrides,
+                                                         affineDims,
+                                                         affineStrides,
+                                                         derivedDims,
+                                                         derivedStrides,
+                                                         derivedDims,
+                                                         derivedStrides,
+                                                         dims,
+                                                         strides,
+                                                         dims,
+                                                         strides);
+
+    const hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper graph(
+        builder.GetBufferPointer(), builder.GetSize());
+
+    const auto& node = graph.getNode(0);
+    const auto& attr = *node.attributes_as_BatchnormInferenceAttributes();
+
+    const auto& activNode = graph.getNode(1);
+    const auto& activAttrs = *activNode.attributes_as_PointwiseAttributes();
+
+    BatchnormValidator validator(graph.getTensorMap());
+    EXPECT_NO_THROW(validator.checkInferenceActivationTensorConfigSupported(attr, activAttrs));
+}
+
+TEST(TestBatchnormValidator, InValidAffineShapeNchwRank2)
+{
+    const std::vector<int64_t> dims{1, 3, 224, 224};
+    const std::vector<int64_t> strides{150528, 50176, 224, 1};
+
+    const std::vector<int64_t> affineDims{3, 1};
+    const std::vector<int64_t> affineStrides{1, 1};
+
+    const std::vector<int64_t> derivedDims = hipdnn_data_sdk::utilities::getDerivedShape(dims);
+    const std::vector<int64_t> derivedStrides = hipdnn_data_sdk::utilities::generateStrides(
+        derivedDims, hipdnn_data_sdk::utilities::extractStrideOrder(strides));
+
+    auto builder = createInvalidShapeBatchnormActivGraph(dims,
+                                                         strides,
+                                                         affineDims,
+                                                         affineStrides,
+                                                         affineDims,
+                                                         affineStrides,
+                                                         derivedDims,
+                                                         derivedStrides,
+                                                         derivedDims,
+                                                         derivedStrides,
+                                                         dims,
+                                                         strides,
+                                                         dims,
+                                                         strides);
+
+    const hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper graph(
+        builder.GetBufferPointer(), builder.GetSize());
+
+    const auto& node = graph.getNode(0);
+    const auto& attr = *node.attributes_as_BatchnormInferenceAttributes();
+
+    const auto& activNode = graph.getNode(1);
+    const auto& activAttrs = *activNode.attributes_as_PointwiseAttributes();
+
+    BatchnormValidator validator(graph.getTensorMap());
+    EXPECT_THROW(validator.checkInferenceActivationTensorConfigSupported(attr, activAttrs),
+                 hipdnn_plugin_sdk::HipdnnPluginException);
+}
+
+TEST(TestBatchnormValidator, InValidAffineShapeNchwRank1)
+{
+    const std::vector<int64_t> dims{1, 3, 224, 224};
+    const std::vector<int64_t> strides{150528, 50176, 224, 1};
+
+    const std::vector<int64_t> affineDims{3};
+    const std::vector<int64_t> affineStrides{1};
+
+    const std::vector<int64_t> derivedDims = hipdnn_data_sdk::utilities::getDerivedShape(dims);
+    const std::vector<int64_t> derivedStrides = hipdnn_data_sdk::utilities::generateStrides(
+        derivedDims, hipdnn_data_sdk::utilities::extractStrideOrder(strides));
+
+    auto builder = createInvalidShapeBatchnormActivGraph(dims,
+                                                         strides,
+                                                         affineDims,
+                                                         affineStrides,
+                                                         affineDims,
+                                                         affineStrides,
+                                                         derivedDims,
+                                                         derivedStrides,
+                                                         derivedDims,
+                                                         derivedStrides,
+                                                         dims,
+                                                         strides,
+                                                         dims,
+                                                         strides);
+
+    const hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper graph(
+        builder.GetBufferPointer(), builder.GetSize());
+
+    const auto& node = graph.getNode(0);
+    const auto& attr = *node.attributes_as_BatchnormInferenceAttributes();
+
+    const auto& activNode = graph.getNode(1);
+    const auto& activAttrs = *activNode.attributes_as_PointwiseAttributes();
+
+    BatchnormValidator validator(graph.getTensorMap());
+    EXPECT_THROW(validator.checkInferenceActivationTensorConfigSupported(attr, activAttrs),
+                 hipdnn_plugin_sdk::HipdnnPluginException);
+}
+
+TEST(TestBatchnormValidator, ValidAffineShapeNhwcFullRank)
+{
+    const std::vector<int64_t> dims{1, 3, 224, 224};
+    const std::vector<int64_t> strides{150528, 1, 672, 3}; // NHWC layout
+
+    const std::vector<int64_t> affineDims{1, 3, 1, 1};
+    const std::vector<int64_t> affineStrides{3, 1, 3, 3}; // NHWC layout
+
+    const std::vector<int64_t> derivedDims = hipdnn_data_sdk::utilities::getDerivedShape(dims);
+    const std::vector<int64_t> derivedStrides = hipdnn_data_sdk::utilities::generateStrides(
+        derivedDims, hipdnn_data_sdk::utilities::extractStrideOrder(strides));
+
+    auto builder = createInvalidShapeBatchnormActivGraph(dims,
+                                                         strides,
+                                                         affineDims,
+                                                         affineStrides,
+                                                         affineDims,
+                                                         affineStrides,
+                                                         derivedDims,
+                                                         derivedStrides,
+                                                         derivedDims,
+                                                         derivedStrides,
+                                                         dims,
+                                                         strides,
+                                                         dims,
+                                                         strides);
+
+    const hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper graph(
+        builder.GetBufferPointer(), builder.GetSize());
+
+    const auto& node = graph.getNode(0);
+    const auto& attr = *node.attributes_as_BatchnormInferenceAttributes();
+
+    const auto& activNode = graph.getNode(1);
+    const auto& activAttrs = *activNode.attributes_as_PointwiseAttributes();
+
+    BatchnormValidator validator(graph.getTensorMap());
+    EXPECT_NO_THROW(validator.checkInferenceActivationTensorConfigSupported(attr, activAttrs));
+}
+
+TEST(TestBatchnormValidator, ValidAffineShapeNhwcRank3)
+{
+    const std::vector<int64_t> dims{1, 3, 224, 224};
+    const std::vector<int64_t> strides{150528, 1, 672, 3}; // NHWC layout
+
+    const std::vector<int64_t> affineDims{3, 1, 1};
+    const std::vector<int64_t> affineStrides{1, 3, 3}; // Channel last layout
+
+    const std::vector<int64_t> derivedDims = hipdnn_data_sdk::utilities::getDerivedShape(dims);
+    const std::vector<int64_t> derivedStrides = hipdnn_data_sdk::utilities::generateStrides(
+        derivedDims, hipdnn_data_sdk::utilities::extractStrideOrder(strides));
+
+    auto builder = createInvalidShapeBatchnormActivGraph(dims,
+                                                         strides,
+                                                         affineDims,
+                                                         affineStrides,
+                                                         affineDims,
+                                                         affineStrides,
+                                                         derivedDims,
+                                                         derivedStrides,
+                                                         derivedDims,
+                                                         derivedStrides,
+                                                         dims,
+                                                         strides,
+                                                         dims,
+                                                         strides);
+
+    const hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper graph(
+        builder.GetBufferPointer(), builder.GetSize());
+
+    const auto& node = graph.getNode(0);
+    const auto& attr = *node.attributes_as_BatchnormInferenceAttributes();
+
+    const auto& activNode = graph.getNode(1);
+    const auto& activAttrs = *activNode.attributes_as_PointwiseAttributes();
+
+    BatchnormValidator validator(graph.getTensorMap());
+    EXPECT_NO_THROW(validator.checkInferenceActivationTensorConfigSupported(attr, activAttrs));
+}
+
+TEST(TestBatchnormValidator, ValidAffineShapeNhwcRank2)
+{
+    const std::vector<int64_t> dims{1, 3, 224, 224};
+    const std::vector<int64_t> strides{150528, 1, 672, 3}; // NHWC layout
+
+    const std::vector<int64_t> affineDims{3, 1};
+    const std::vector<int64_t> affineStrides{1, 3}; // Channel last layout
+
+    const std::vector<int64_t> derivedDims = hipdnn_data_sdk::utilities::getDerivedShape(dims);
+    const std::vector<int64_t> derivedStrides = hipdnn_data_sdk::utilities::generateStrides(
+        derivedDims, hipdnn_data_sdk::utilities::extractStrideOrder(strides));
+
+    auto builder = createInvalidShapeBatchnormActivGraph(dims,
+                                                         strides,
+                                                         affineDims,
+                                                         affineStrides,
+                                                         affineDims,
+                                                         affineStrides,
+                                                         derivedDims,
+                                                         derivedStrides,
+                                                         derivedDims,
+                                                         derivedStrides,
+                                                         dims,
+                                                         strides,
+                                                         dims,
+                                                         strides);
+
+    const hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper graph(
+        builder.GetBufferPointer(), builder.GetSize());
+
+    const auto& node = graph.getNode(0);
+    const auto& attr = *node.attributes_as_BatchnormInferenceAttributes();
+
+    const auto& activNode = graph.getNode(1);
+    const auto& activAttrs = *activNode.attributes_as_PointwiseAttributes();
+
+    BatchnormValidator validator(graph.getTensorMap());
+    EXPECT_NO_THROW(validator.checkInferenceActivationTensorConfigSupported(attr, activAttrs));
+}
+
+TEST(TestBatchnormValidator, ValidAffineShapeNhwcRank1)
+{
+    const std::vector<int64_t> dims{1, 3, 224, 224};
+    const std::vector<int64_t> strides{150528, 1, 672, 3}; // NHWC layout
+
+    const std::vector<int64_t> affineDims{3};
+    const std::vector<int64_t> affineStrides{1};
+
+    const std::vector<int64_t> derivedDims = hipdnn_data_sdk::utilities::getDerivedShape(dims);
+    const std::vector<int64_t> derivedStrides = hipdnn_data_sdk::utilities::generateStrides(
+        derivedDims, hipdnn_data_sdk::utilities::extractStrideOrder(strides));
+
+    auto builder = createInvalidShapeBatchnormActivGraph(dims,
+                                                         strides,
+                                                         affineDims,
+                                                         affineStrides,
+                                                         affineDims,
+                                                         affineStrides,
+                                                         derivedDims,
+                                                         derivedStrides,
+                                                         derivedDims,
+                                                         derivedStrides,
+                                                         dims,
+                                                         strides,
+                                                         dims,
+                                                         strides);
+
+    const hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper graph(
+        builder.GetBufferPointer(), builder.GetSize());
+
+    const auto& node = graph.getNode(0);
+    const auto& attr = *node.attributes_as_BatchnormInferenceAttributes();
+
+    const auto& activNode = graph.getNode(1);
+    const auto& activAttrs = *activNode.attributes_as_PointwiseAttributes();
+
+    BatchnormValidator validator(graph.getTensorMap());
+    EXPECT_NO_THROW(validator.checkInferenceActivationTensorConfigSupported(attr, activAttrs));
+}
+
+TEST(TestBatchnormValidator, InvalidAffineShapeNchwBatchDimNotOne)
+{
+    const std::vector<int64_t> dims{1, 3, 224, 224};
+    const std::vector<int64_t> strides{150528, 50176, 224, 1};
+
+    const std::vector<int64_t> affineDims{2, 3, 1, 1};
+    const std::vector<int64_t> affineStrides{3, 1, 1, 1};
+
+    const std::vector<int64_t> derivedDims = hipdnn_data_sdk::utilities::getDerivedShape(dims);
+    const std::vector<int64_t> derivedStrides = hipdnn_data_sdk::utilities::generateStrides(
+        derivedDims, hipdnn_data_sdk::utilities::extractStrideOrder(strides));
+
+    auto builder = createInvalidShapeBatchnormActivGraph(dims,
+                                                         strides,
+                                                         affineDims,
+                                                         affineStrides,
+                                                         affineDims,
+                                                         affineStrides,
+                                                         derivedDims,
+                                                         derivedStrides,
+                                                         derivedDims,
+                                                         derivedStrides,
+                                                         dims,
+                                                         strides,
+                                                         dims,
+                                                         strides);
+
+    const hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper graph(
+        builder.GetBufferPointer(), builder.GetSize());
+
+    const auto& node = graph.getNode(0);
+    const auto& attr = *node.attributes_as_BatchnormInferenceAttributes();
+
+    const auto& activNode = graph.getNode(1);
+    const auto& activAttrs = *activNode.attributes_as_PointwiseAttributes();
+
+    BatchnormValidator validator(graph.getTensorMap());
+    EXPECT_THROW(validator.checkInferenceActivationTensorConfigSupported(attr, activAttrs),
+                 hipdnn_plugin_sdk::HipdnnPluginException);
+}
+
+TEST(TestBatchnormValidator, InvalidAffineShapeNchwWrongChannelCount)
+{
+    const std::vector<int64_t> dims{1, 3, 224, 224};
+    const std::vector<int64_t> strides{150528, 50176, 224, 1};
+
+    const std::vector<int64_t> affineDims{1, 4, 1, 1};
+    const std::vector<int64_t> affineStrides{4, 1, 1, 1};
+
+    const std::vector<int64_t> derivedDims = hipdnn_data_sdk::utilities::getDerivedShape(dims);
+    const std::vector<int64_t> derivedStrides = hipdnn_data_sdk::utilities::generateStrides(
+        derivedDims, hipdnn_data_sdk::utilities::extractStrideOrder(strides));
+
+    auto builder = createInvalidShapeBatchnormActivGraph(dims,
+                                                         strides,
+                                                         affineDims,
+                                                         affineStrides,
+                                                         affineDims,
+                                                         affineStrides,
+                                                         derivedDims,
+                                                         derivedStrides,
+                                                         derivedDims,
+                                                         derivedStrides,
+                                                         dims,
+                                                         strides,
+                                                         dims,
+                                                         strides);
+
+    const hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper graph(
+        builder.GetBufferPointer(), builder.GetSize());
+
+    const auto& node = graph.getNode(0);
+    const auto& attr = *node.attributes_as_BatchnormInferenceAttributes();
+
+    const auto& activNode = graph.getNode(1);
+    const auto& activAttrs = *activNode.attributes_as_PointwiseAttributes();
+
+    BatchnormValidator validator(graph.getTensorMap());
+    EXPECT_THROW(validator.checkInferenceActivationTensorConfigSupported(attr, activAttrs),
+                 hipdnn_plugin_sdk::HipdnnPluginException);
+}
+
+TEST(TestBatchnormValidator, InvalidAffineShapeNhwcSpatialDimsNotOne)
+{
+    const std::vector<int64_t> dims{1, 3, 224, 224};
+    const std::vector<int64_t> strides{150528, 1, 672, 3}; // NHWC layout
+
+    const std::vector<int64_t> affineDims{1, 3, 3, 1};
+    const std::vector<int64_t> affineStrides{9, 1, 3, 3}; // NHWC layout
+
+    const std::vector<int64_t> derivedDims = hipdnn_data_sdk::utilities::getDerivedShape(dims);
+    const std::vector<int64_t> derivedStrides = hipdnn_data_sdk::utilities::generateStrides(
+        derivedDims, hipdnn_data_sdk::utilities::extractStrideOrder(strides));
+
+    auto builder = createInvalidShapeBatchnormActivGraph(dims,
+                                                         strides,
+                                                         affineDims,
+                                                         affineStrides,
+                                                         affineDims,
+                                                         affineStrides,
+                                                         derivedDims,
+                                                         derivedStrides,
+                                                         derivedDims,
+                                                         derivedStrides,
+                                                         dims,
+                                                         strides,
+                                                         dims,
+                                                         strides);
+
+    const hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper graph(
+        builder.GetBufferPointer(), builder.GetSize());
+
+    const auto& node = graph.getNode(0);
+    const auto& attr = *node.attributes_as_BatchnormInferenceAttributes();
+
+    const auto& activNode = graph.getNode(1);
+    const auto& activAttrs = *activNode.attributes_as_PointwiseAttributes();
+
+    BatchnormValidator validator(graph.getTensorMap());
+    EXPECT_THROW(validator.checkInferenceActivationTensorConfigSupported(attr, activAttrs),
+                 hipdnn_plugin_sdk::HipdnnPluginException);
+}
+
+TEST(TestBatchnormValidator, InvalidAffineShapeNhwcWrongChannelCount)
+{
+    const std::vector<int64_t> dims{1, 3, 224, 224};
+    const std::vector<int64_t> strides{150528, 1, 672, 3}; // NHWC layout
+
+    const std::vector<int64_t> affineDims{1, 4, 1, 1};
+    const std::vector<int64_t> affineStrides{4, 1, 4, 4}; // NHWC layout
+
+    const std::vector<int64_t> derivedDims = hipdnn_data_sdk::utilities::getDerivedShape(dims);
+    const std::vector<int64_t> derivedStrides = hipdnn_data_sdk::utilities::generateStrides(
+        derivedDims, hipdnn_data_sdk::utilities::extractStrideOrder(strides));
+
+    auto builder = createInvalidShapeBatchnormActivGraph(dims,
+                                                         strides,
+                                                         affineDims,
+                                                         affineStrides,
+                                                         affineDims,
+                                                         affineStrides,
+                                                         derivedDims,
+                                                         derivedStrides,
+                                                         derivedDims,
+                                                         derivedStrides,
+                                                         dims,
+                                                         strides,
+                                                         dims,
+                                                         strides);
+
+    const hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper graph(
+        builder.GetBufferPointer(), builder.GetSize());
+
+    const auto& node = graph.getNode(0);
+    const auto& attr = *node.attributes_as_BatchnormInferenceAttributes();
+
+    const auto& activNode = graph.getNode(1);
+    const auto& activAttrs = *activNode.attributes_as_PointwiseAttributes();
+
+    BatchnormValidator validator(graph.getTensorMap());
+    EXPECT_THROW(validator.checkInferenceActivationTensorConfigSupported(attr, activAttrs),
+                 hipdnn_plugin_sdk::HipdnnPluginException);
+}
+
+TEST(TestBatchnormValidator, MismatchIOAffineLayouts)
+{
+    const std::vector<int64_t> dims{1, 3, 224, 224};
+    const std::vector<int64_t> strides{150528, 50176, 224, 1};
+
+    const std::vector<int64_t> affineDims{3, 1};
+    const std::vector<int64_t> affineStrides{1, 3}; // Channel last layout
+
+    const std::vector<int64_t> derivedDims = hipdnn_data_sdk::utilities::getDerivedShape(dims);
+    const std::vector<int64_t> derivedStrides = hipdnn_data_sdk::utilities::generateStrides(
+        derivedDims, hipdnn_data_sdk::utilities::extractStrideOrder(strides));
+
+    auto builder = createInvalidShapeBatchnormActivGraph(dims,
+                                                         strides,
+                                                         affineDims,
+                                                         affineStrides,
+                                                         affineDims,
+                                                         affineStrides,
+                                                         derivedDims,
+                                                         derivedStrides,
+                                                         derivedDims,
+                                                         derivedStrides,
+                                                         dims,
+                                                         strides,
+                                                         dims,
+                                                         strides);
+
+    const hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper graph(
+        builder.GetBufferPointer(), builder.GetSize());
+
+    const auto& node = graph.getNode(0);
+    const auto& attr = *node.attributes_as_BatchnormInferenceAttributes();
+
+    const auto& activNode = graph.getNode(1);
+    const auto& activAttrs = *activNode.attributes_as_PointwiseAttributes();
+
+    BatchnormValidator validator(graph.getTensorMap());
+    EXPECT_THROW(validator.checkInferenceActivationTensorConfigSupported(attr, activAttrs),
+                 hipdnn_plugin_sdk::HipdnnPluginException);
+}
