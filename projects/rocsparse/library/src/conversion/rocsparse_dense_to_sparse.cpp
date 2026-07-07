@@ -26,6 +26,7 @@
 #include "rocsparse_handle.hpp"
 #include "rocsparse_utility.hpp"
 
+#include "rocsparse_dense2bell.hpp"
 #include "rocsparse_dense2coo.hpp"
 #include "rocsparse_dense2csx_impl.hpp"
 #include "rocsparse_nnz_impl.hpp"
@@ -92,8 +93,11 @@ namespace rocsparse
             }
             else if(mat_B->format == rocsparse_format_bell)
             {
-                std::cout << "AAAA" << std::endl;
-                *buffer_size = 4;
+                const int64_t mb = (mat_B->rows + mat_B->block_dim - 1) / mat_B->block_dim;
+
+                std::cout << "AAAA mb: " << mb << std::endl;
+
+                *buffer_size = sizeof(int64_t) * mb;
             }
             return rocsparse_status_success;
         }
@@ -147,6 +151,17 @@ namespace rocsparse
             else if(mat_B->format == rocsparse_format_bell)
             {
                 std::cout << "BBBB" << std::endl;
+                RETURN_IF_ROCSPARSE_ERROR(
+                    rocsparse::dense2bell_nnz_template(handle,
+                                                       mat_A->order,
+                                                       mat_A->rows,
+                                                       mat_A->cols,
+                                                       mat_B->descr,
+                                                       (const T*)mat_A->const_values,
+                                                       mat_A->ld,
+                                                       mat_B->block_dim,
+                                                       (int64_t*)temp_buffer,
+                                                       &mat_B->ell_cols));
                 return rocsparse_status_success;
             }
         }
@@ -208,6 +223,18 @@ namespace rocsparse
         if(mat_B->format == rocsparse_format_bell)
         {
             std::cout << "CCCC" << std::endl;
+
+            RETURN_IF_ROCSPARSE_ERROR(rocsparse::dense2bell_template(handle,
+                                                                     mat_A->order,
+                                                                     mat_A->rows,
+                                                                     mat_A->cols,
+                                                                     mat_B->descr,
+                                                                     (const T*)mat_A->const_values,
+                                                                     mat_A->ld,
+                                                                     mat_B->block_dim,
+                                                                     mat_B->ell_cols,
+                                                                     (T*)mat_B->val_data,
+                                                                     (I*)mat_B->col_data));
             return rocsparse_status_success;
         }
 
