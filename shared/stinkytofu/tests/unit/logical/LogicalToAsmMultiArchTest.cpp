@@ -184,6 +184,8 @@ static LogicalInstruction* createTestInstruction(logical::Opcode opcode) {
             return VBfeU32(vgpr(0), vgpr(1), vgpr(2), vgpr(3));
         case logical::VBfiB32:
             return VBfiB32(vgpr(0), vgpr(1), vgpr(2), vgpr(3));
+        case logical::VMovRelsD2B32:
+            return VMovRelsD2B32(vgpr(0), vgpr(1));
         case logical::VAccvgprReadB32:
             return VAccvgprReadB32(vgpr(0), vgpr(1));
         case logical::VAccvgprWrite:
@@ -336,6 +338,26 @@ static LogicalInstruction* createTestInstruction(logical::Opcode opcode) {
             return VCvtScaleSRF16toBF8(vgpr(0), vgpr(1), vgpr(2));
         case logical::VCvtPkF32toBF16:
             return VCvtPkF32toBF16(vgpr(0), vgpr(1), vgpr(2));
+        case logical::VCvtScalePk8F32toFP8:
+            return VCvtScalePk8F32toFP8(vgpr(0), vgpr(1), vgpr(2));
+        case logical::VCvtScalePk8F32toBF8:
+            return VCvtScalePk8F32toBF8(vgpr(0), vgpr(1), vgpr(2));
+        case logical::VCvtScaleSRPkF32toFP8:
+            return VCvtScaleSRPkF32toFP8(vgpr(0), vgpr(1), vgpr(2), vgpr(3));
+        case logical::VCvtFP8toF16:
+            return VCvtFP8toF16(vgpr(0), vgpr(1));
+        case logical::VCvtPkF32toFP16:
+            return VCvtPkF32toFP16(vgpr(0), vgpr(1), vgpr(2));
+        case logical::VCvtPkF32toF16:
+            return VCvtPkF32toF16(vgpr(0), vgpr(1), vgpr(2));
+        case logical::VRcpF64:
+            return VRcpF64(vgpr(0), vgpr(1));
+        case logical::VCvtF64toU32:
+            return VCvtF64toU32(vgpr(0), vgpr(1));
+        case logical::VCvtU32toF64:
+            return VCvtU32toF64(vgpr(0), vgpr(1));
+        case logical::PVCvtBF16toFP32:
+            return PVCvtBF16toFP32(vgpr(0), vgpr(1));
         case logical::DSBPermuteB32:
             return DSBPermuteB32(vgpr(0), vgpr(1));
         case logical::DSLoadU8:
@@ -374,6 +396,34 @@ static LogicalInstruction* createTestInstruction(logical::Opcode opcode) {
             return DSStore2B32(vgpr(0), vgpr(1), vgpr(2));
         case logical::DSStore2B64:
             return DSStore2B64(vgpr(0), vgpr(1), vgpr(2));
+        case logical::DSLoadB192:
+            return DSLoadB192(vgpr(0), vgpr(1));
+        case logical::DSLoadB96TrB6:
+            return DSLoadB96TrB6(vgpr(0), vgpr(1));
+        case logical::DSLoadB64TrB4:
+            return DSLoadB64TrB4(vgpr(0), vgpr(1));
+        case logical::DSLoadB64TrB8:
+            return DSLoadB64TrB8(vgpr(0), vgpr(1));
+        case logical::DSLoadB64TrB16:
+            return DSLoadB64TrB16(vgpr(0), vgpr(1));
+        case logical::DSLoadB128TrB16:
+            return DSLoadB128TrB16(vgpr(0), vgpr(1));
+        case logical::DSStoreB192:
+            return DSStoreB192(vgpr(0), vgpr(1));
+        case logical::DSStoreB8HID16:
+            return DSStoreB8HID16(vgpr(0), vgpr(1));
+        case logical::DSStoreD16HIB16:
+            return DSStoreD16HIB16(vgpr(0), vgpr(1));
+        case logical::DSLoadB16:
+            return DSLoadB16(vgpr(0), vgpr(1));
+        case logical::DSLoadD16HIU8:
+            return DSLoadD16HIU8(vgpr(0), vgpr(1));
+        case logical::DSLoadD16HIU16:
+            return DSLoadD16HIU16(vgpr(0), vgpr(1));
+        case logical::DSStoreU16:
+            return DSStoreU16(vgpr(0), vgpr(1));
+        case logical::DSStoreB256:
+            return DSStoreB256(vgpr(0), vgpr(1));
         case logical::BufferLoadU8:
             return BufferLoadU8(vgpr(0), vgpr(1));
         case logical::BufferLoadI8:
@@ -402,6 +452,10 @@ static LogicalInstruction* createTestInstruction(logical::Opcode opcode) {
             return BufferLoadD16B16(vgpr(0), vgpr(1));
         case logical::BufferLoadD16HIB16:
             return BufferLoadD16HIB16(vgpr(0), vgpr(1));
+        case logical::BufferLoadB16:
+            return BufferLoadB16(vgpr(0), vgpr(1));
+        case logical::BufferLoadB192:
+            return BufferLoadB192(vgpr(0), vgpr(1));
         case logical::BufferStoreB8:
             return BufferStoreB8(vgpr(0), vgpr(1), vgpr(2));
         case logical::BufferStoreD16HIU8:
@@ -418,6 +472,10 @@ static LogicalInstruction* createTestInstruction(logical::Opcode opcode) {
             return BufferStoreB96(vgpr(0), vgpr(1), vgpr(2));
         case logical::BufferStoreB128:
             return BufferStoreB128(vgpr(0), vgpr(1), vgpr(2));
+        case logical::BufferStoreD16U8:
+            return BufferStoreD16U8(vgpr(0), vgpr(1), vgpr(2));
+        case logical::BufferStoreD16B16:
+            return BufferStoreD16B16(vgpr(0), vgpr(1), vgpr(2));
         case logical::BufferAtomicAddF32:
             return BufferAtomicAddF32(vgpr(0), vgpr(1));
         case logical::BufferAtomicCmpswapB32:
@@ -452,6 +510,8 @@ static LogicalInstruction* createTestInstruction(logical::Opcode opcode) {
             return FlatLoadB96(vgpr(0), vgpr(1));
         case logical::FlatLoadB128:
             return FlatLoadB128(vgpr(0), vgpr(1));
+        case logical::FlatLoadB192:
+            return FlatLoadB192(vgpr(0), vgpr(1));
         case logical::FlatStoreB8:
             return FlatStoreB8(vgpr(0), vgpr(1), vgpr(2));
         case logical::FlatStoreD16HIB8:
@@ -468,16 +528,22 @@ static LogicalInstruction* createTestInstruction(logical::Opcode opcode) {
             return FlatStoreB96(vgpr(0), vgpr(1), vgpr(2));
         case logical::FlatStoreB128:
             return FlatStoreB128(vgpr(0), vgpr(1), vgpr(2));
+        case logical::FlatStoreD16B16:
+            return FlatStoreD16B16(vgpr(0), vgpr(1), vgpr(2));
         case logical::FlatAtomicCmpswapB32:
             return FlatAtomicCmpswapB32(vgpr(0), vgpr(1), vgpr(2));
         case logical::GlobalAtomicIncU32Saddr:
             return GlobalAtomicIncU32Saddr(vgpr(0), vgpr(1), vgpr(2), sgpr(0, 2));
+        case logical::FlatAtomicDecU32:
+            return FlatAtomicDecU32(vgpr(0), vgpr(1), vgpr(2));
         case logical::SAbsI32:
             return SAbsI32(sgpr(0), sgpr(1));
         case logical::SBarrier:
             return SBarrier();
         case logical::SNop:
             return SNop(literal(3));
+        case logical::SDelayAlu:
+            return SDelayAlu(literal(0));
         case logical::SMaxI32:
             return SMaxI32(sgpr(0), sgpr(1), sgpr(2));
         case logical::SMaxU32:
@@ -592,6 +658,22 @@ static LogicalInstruction* createTestInstruction(logical::Opcode opcode) {
             return VMovB64(vgpr(0), vgpr(1));
         case logical::VLShiftLeftOrB32:
             return VLShiftLeftOrB32(vgpr(0), vgpr(1), vgpr(2), vgpr(3));
+        case logical::VAddLShiftLeftU32:
+            return VAddLShiftLeftU32(vgpr(0), vgpr(1), vgpr(2), vgpr(3));
+        case logical::VLShiftLeftAddU32:
+            return VLShiftLeftAddU32(vgpr(0), vgpr(1), vgpr(2), vgpr(3));
+        case logical::VAddNCU64:
+            return VAddNCU64(vgpr(0), vgpr(1), vgpr(2));
+        case logical::VReadlaneB32:
+            return VReadlaneB32(vgpr(0), vgpr(1), vgpr(2));
+        case logical::VWritelaneB32:
+            return VWritelaneB32(vgpr(0), vgpr(1), vgpr(2));
+        case logical::VPermlane16SwapB32:
+            return VPermlane16SwapB32(vgpr(0), vgpr(1));
+        case logical::VPermlane32SwapB32:
+            return VPermlane32SwapB32(vgpr(0), vgpr(1));
+        case logical::VNop:
+            return VNop();
         case logical::MFMA:
             return MFMA("f32", "f32", 16, 16, 4, 1, false, vgpr(0), vgpr(1), vgpr(2));
         case logical::MXMFMA:
@@ -627,6 +709,62 @@ static LogicalInstruction* createTestInstruction(logical::Opcode opcode) {
             return SWaitXCnt(literal(0));
         case logical::SEndpgm:
             return SEndpgm();
+        case logical::SAddU64:
+            return SAddU64(sgpr(0), sgpr(1), sgpr(2));
+        case logical::SBfeU32:
+            return SBfeU32(sgpr(0), sgpr(1), sgpr(2));
+        case logical::SStoreB32:
+            return SStoreB32(sgpr(0), sgpr(2, 2), literal(0));
+        case logical::SStoreB64:
+            return SStoreB64(sgpr(0, 2), sgpr(4, 2), literal(0));
+        case logical::SStoreB128:
+            return SStoreB128(sgpr(0, 4), sgpr(8, 2), literal(0));
+        case logical::SStoreB256:
+            return SStoreB256(sgpr(0, 8), sgpr(16, 2), literal(0));
+        case logical::SStoreB512:
+            return SStoreB512(sgpr(0, 16), sgpr(32, 2), literal(0));
+        case logical::SAtomicInc:
+            return SAtomicInc(sgpr(0), sgpr(1), sgpr(2));
+        case logical::SAtomicDec:
+            return SAtomicDec(sgpr(0), sgpr(1));
+        case logical::SCSelectB64:
+            return SCSelectB64(sgpr(0), sgpr(1), sgpr(2));
+        case logical::SCmpKEQU32:
+            return SCmpKEQU32(sgpr(0), sgpr(1));
+        case logical::SCmpKGeU32:
+            return SCmpKGeU32(sgpr(0), sgpr(1));
+        case logical::SCmpKGtU32:
+            return SCmpKGtU32(sgpr(0), sgpr(1));
+        case logical::SCmpKLGU32:
+            return SCmpKLGU32(sgpr(0), sgpr(1));
+        case logical::SFlbitI32B32:
+            return SFlbitI32B32(sgpr(0), sgpr(1));
+        case logical::SSetPCB64:
+            return SSetPCB64(sgpr(0));
+        case logical::SSwapPCB64:
+            return SSwapPCB64(sgpr(0), sgpr(1));
+        case logical::SSleep:
+            return SSleep(literal(1));
+        case logical::SSetPrior:
+            return SSetPrior(literal(0));
+        case logical::SDcacheWb:
+            return SDcacheWb();
+        case logical::SSetVgprMsb:
+            return SSetVgprMsb(literal(0));
+        case logical::GlobalInv:
+            return GlobalInv();
+        case logical::GlobalWb:
+            return GlobalWb();
+        case logical::GlobalPrefetchB8:
+            return GlobalPrefetchB8(vgpr(0), vgpr(1));
+        case logical::GlobalLoadTR8B64:
+            return GlobalLoadTR8B64(vgpr(0), vgpr(1), vgpr(2));
+        case logical::GlobalLoadTR16B128:
+            return GlobalLoadTR16B128(vgpr(0), vgpr(1), vgpr(2));
+        case logical::SWaitAlu:
+            return nullptr;
+        case logical::SchedulingFence:
+            return nullptr;
         default:
             return nullptr;
     }
@@ -697,7 +835,7 @@ static const std::vector<OpcodeMnemonicPair> EXPECTED_LOWERING_GFX1250 = {
     {logical::VAddU32, "v_add_nc_u32"},
     {logical::VAddF32, "v_add_f32"},
     {logical::VSubF32, "v_sub_f32"},
-    {logical::VSubI32, "v_sub_nc_i32"},
+    {logical::VSubI32, "v_sub_i32"},
     {logical::VSubU32, "v_sub_nc_u32"},
     {logical::VMulF32, "v_mul_f32"},
     {logical::VMulLOU32, "v_mul_lo_u32"},
@@ -937,6 +1075,43 @@ TEST(LogicalToAsmComprehensive, AllInstructionsAllArchitectures) {
         logical::VCvtScalePkF16toBF8,
         logical::VCvtScaleSRF16toFP8,
         logical::VCvtScaleSRF16toBF8,
+        logical::SWaitAlu,
+        logical::SchedulingFence,
+        logical::DSLoadB64TrB16,
+        logical::GlobalLoadTR8B64,
+        logical::GlobalLoadTR16B128,
+        logical::SSetVgprMsb,
+        logical::SDcacheWb,
+        logical::VCvtFP8toF16,
+        logical::VCvtPkF32toFP16,
+        logical::SStoreB32,
+        logical::SStoreB64,
+        logical::SStoreB128,
+        logical::SStoreB256,
+        logical::SStoreB512,
+        logical::SAtomicInc,
+        logical::SAtomicDec,
+        logical::SCSelectB64,
+        logical::SCmpKEQU32,
+        logical::SCmpKGeU32,
+        logical::SCmpKGtU32,
+        logical::SCmpKLGU32,
+        logical::SFlbitI32B32,
+        logical::VReadlaneB32,
+        logical::VWritelaneB32,
+        logical::VPermlane16SwapB32,
+        logical::VPermlane32SwapB32,
+        logical::BufferLoadB16,
+        logical::BufferLoadB192,
+        logical::FlatLoadB192,
+        logical::BufferStoreD16U8,
+        logical::BufferStoreD16B16,
+        logical::FlatStoreD16B16,
+        logical::DSLoadB16,
+        logical::DSLoadD16HIU8,
+        logical::DSLoadD16HIU16,
+        logical::DSStoreU16,
+        logical::DSStoreB256,
     };
 
     // Architecture-specific instructions: only test on the listed architecture(s).
@@ -946,6 +1121,12 @@ TEST(LogicalToAsmComprehensive, AllInstructionsAllArchitectures) {
         // gfx1250 only
         {logical::TensorLoadToLds, {{12, 5, 0}}},
         {logical::MXMFMA, {{12, 5, 0}}},
+        {logical::DSLoadB96TrB6, {{12, 5, 0}}},
+        {logical::DSLoadB64TrB4, {{12, 5, 0}}},
+        {logical::DSLoadB64TrB8, {{12, 5, 0}}},
+        {logical::DSLoadB128TrB16, {{12, 5, 0}}},
+        {logical::DSLoadB192, {{12, 5, 0}}},
+        {logical::DSStoreB192, {{12, 5, 0}}},
     };
 
     std::cout << "Testing " << testedOpcodes.size() << " instructions on " << archs.size()
