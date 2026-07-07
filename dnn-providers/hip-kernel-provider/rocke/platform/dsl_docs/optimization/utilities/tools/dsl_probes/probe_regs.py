@@ -58,8 +58,12 @@ os.environ.setdefault("ROCKE_CPP_QUIET_FALLBACK", "1")
 
 
 def _bootstrap_rocke() -> None:
-    """Add the platform ``Python/`` dir to ``sys.path`` if rocke is not yet
-    importable. Set ``PYTHONPATH`` to override."""
+    """Add the platform package dir to ``sys.path`` if rocke is not yet
+    importable. Set ``PYTHONPATH`` to override.
+
+    The package root is ``platform/python`` (lowercase); older trees used
+    ``platform/Python``, so probe both to stay runnable on case-sensitive
+    filesystems regardless of vintage."""
     try:
         import rocke  # noqa: F401
 
@@ -68,10 +72,11 @@ def _bootstrap_rocke() -> None:
         pass
     here = Path(__file__).resolve()
     for parent in here.parents:
-        candidate = parent / "Python"
-        if (candidate / "rocke" / "__init__.py").exists():
-            sys.path.insert(0, str(candidate))
-            return
+        for pkg_dir in ("python", "Python"):
+            candidate = parent / pkg_dir
+            if (candidate / "rocke" / "__init__.py").exists():
+                sys.path.insert(0, str(candidate))
+                return
         if (parent / "rocke" / "__init__.py").exists():
             sys.path.insert(0, str(parent))
             return

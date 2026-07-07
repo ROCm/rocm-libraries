@@ -17,26 +17,24 @@ stride_a, stride_b, stride_c)``; grid ``(ceil(N/TN), ceil(M/TM), E)`` with
 ``block_id_z`` selecting the expert. RCR layout (A ``[M,K]``, B ``[N,K]``,
 C ``[M,N]`` row-major, per expert, packed contiguously over E).
 
-Levers (env-gated, default = the measured sweet spot for M/E=8192, N=1024,
-K=512, E=64 on gfx950 / MI355X):
+Levers are command-line flags (defaults = the measured sweet spot for
+M/E=8192, N=1024, K=512, E=64 on gfx950 / MI355X); use ``--no-<flag>`` to
+disable a boolean lever:
 
-* ``DTL=1``   async direct-to-LDS DMA (``async_buffer_load_lds_addr``,
+* ``--dtl``   async direct-to-LDS DMA (``async_buffer_load_lds_addr``,
               DRAM->LDS, double-buffered, vmcnt-overlapped). Best path.
-* ``DB=1``    register-prefetch double buffer (used when ``DTL=0``).
-* ``PRIO=1``  ``s_setprio(1/0)`` around the MFMA cluster (survives hipcc;
+* ``--db``    register-prefetch double buffer (used when ``--no-dtl``).
+* ``--prio``  ``s_setprio(1/0)`` around the MFMA cluster (survives hipcc;
               the comgr/LLVM-IR path could not keep this hint).
-* ``TM/TN/TK/WM/WN`` tile + warp-grid geometry.
-
-* ``SWZ=1``  st_16x32 LDS XOR swizzle (bank-conflict-free ds_reads); default on.
-* ``CHIP=1`` chiplet/super-tile grid remap (L2 locality across XCDs via a
-             chunked super-tile transform + WGM grouping); default on. ``XCDS``/
-             ``WGM`` tune the XCD count / super-tile group height.
-* ``EPIFUSE=1`` interleave each accumulator's C store with its final MFMA so
-             the store-issue + address VALU overlap the last K-tile's MFMAs;
-             default on.
-* ``PF=1``   register-prefetch-ahead (read next K-chunk frags before current
-             MFMAs). Neutral here -- the compiler already overlaps ds_read->mma.
-* ``PIN=1``  pin wave-uniform tile bases/expert offsets into SGPRs (~neutral).
+* ``--tm/--tn/--tk/--wm/--wn`` tile + warp-grid geometry.
+* ``--swz``   st_16x32 LDS XOR swizzle (bank-conflict-free ds_reads); default on.
+* ``--chip``  chiplet/super-tile grid remap (L2 locality across XCDs via a
+              chunked super-tile transform + WGM grouping); default on.
+              ``--xcds``/``--wgm`` tune the XCD count / super-tile group height.
+* ``--epifuse`` interleave each accumulator's C store with its final MFMA so
+              the store-issue + address VALU overlap the last K-tile's MFMAs;
+              default on.
+* ``--brrr``  NN weight layout (B=[E,K,N]) via the transpose-read path.
 
 Measured progression (this harness, default shape): single-buffer 446 ->
 double-buffer 552 -> +s_setprio 648 -> prefetch-before-barrier 676 ->
@@ -47,13 +45,13 @@ gfx950 (unified VGPR file -- no per-wave register reallocation, and occupancy
 is LDS-bound at 1 block/CU). See CASE_STUDY.md for the full analysis.
 
 Run:
-    PYTHONPATH=Python python3 \
-        Python/rocke/examples/gfx950/grouped_gemm/grouped_gemm_hip.py
+    PYTHONPATH=python python3 \
+        python/rocke/examples/gfx950/grouped_gemm/grouped_gemm_hip.py [--no-swz ...]
 """
 from __future__ import annotations
 
+import argparse
 import math
-import os
 
 from rocke.helpers.compile import compile_kernel_via_hipcc
 
@@ -63,38 +61,74 @@ from rocke.helpers.compile import compile_kernel_via_hipcc
 from rocke.instances.gfx950.grouped_gemm import build_custom_grouped  # noqa: F401
 
 
-def _main() -> int:
+def _parse_args(argv=None) -> argparse.Namespace:
+    p = argparse.ArgumentParser(
+        description="gfx950 hand-scheduled grouped bf16 GEMM harness"
+    )
+    # Problem shape.
+    p.add_argument("--m-total", type=int, default=524288)
+    p.add_argument("--n", type=int, default=1024)
+    p.add_argument("--k", type=int, default=512)
+    p.add_argument("--e", type=int, default=64)
+    # Tile / warp geometry + persistent-grid / chiplet knobs.
+    p.add_argument("--tm", type=int, default=256)
+    p.add_argument("--tn", type=int, default=256)
+    p.add_argument("--tk", type=int, default=64)
+    p.add_argument("--wm", type=int, default=2)
+    p.add_argument("--wn", type=int, default=4)
+    p.add_argument("--xcds", type=int, default=8)
+    p.add_argument("--wgm", type=int, default=8)
+    p.add_argument("--tpb", type=int, default=1)
+    # Boolean levers (defaults = measured production sweet spot). Use --no-<flag>
+    # to disable, e.g. --no-swz.
+    B = argparse.BooleanOptionalAction
+    p.add_argument("--dtl", action=B, default=True, help="async direct-to-LDS DMA")
+    p.add_argument("--db", action=B, default=True, help="register double-buffer")
+    p.add_argument("--prio", action=B, default=True, help="s_setprio around MFMAs")
+    p.add_argument("--swz", action=B, default=True, help="st_16x32 LDS XOR swizzle")
+    p.add_argument("--chip", action=B, default=True, help="chiplet super-tile remap")
+    p.add_argument("--asm", action=B, default=True, help="inline-asm ds_read")
+    p.add_argument("--deeppipe", action=B, default=True, help="deep operand pipeline")
+    p.add_argument("--epifuse", action=B, default=True, help="epilogue store fusion")
+    p.add_argument(
+        "--brrr", action=B, default=False, help="NN weight layout (B=[E,K,N])"
+    )
+    return p.parse_args(argv)
+
+
+def _main(argv=None) -> int:
     import torch  # local import: only the benchmark/verify path needs torch
     from rocke.runtime.launcher import KernelLauncher, LaunchConfig
     from rocke.instances.gfx950.grouped_gemm import GroupedGemmSpec, build_grouped_gemm
 
-    M_total, N, K, E = 524288, 1024, 512, 64
+    args = _parse_args(argv)
+    M_total, N, K, E = args.m_total, args.n, args.k, args.e
     m = M_total // E
     flops = 2 * M_total * N * K
 
-    # Build spec from env (defaults = production opts)
+    # Build the spec from command-line args (defaults = production opts).
     spec = GroupedGemmSpec(
         M=m,
         N=N,
         K=K,
         E=E,
-        TM=int(os.environ.get("TM", 256)),
-        TN=int(os.environ.get("TN", 256)),
-        TK=int(os.environ.get("TK", 64)),
-        WM=int(os.environ.get("WM", 2)),
-        WN=int(os.environ.get("WN", 4)),
-        dtl=os.environ.get("DTL", "1") == "1",
-        db=os.environ.get("DB", "1") == "1",
-        prio=os.environ.get("PRIO", "1") == "1",
-        swz=os.environ.get("SWZ", "1") == "1",
-        chiplet=os.environ.get("CHIP", "1") == "1",
-        chiplet_xcds=int(os.environ.get("XCDS", "8")),
-        chiplet_wgm=int(os.environ.get("WGM", "8")),
-        asm_reads=os.environ.get("ASM", "1") == "1",
-        deeppipe=os.environ.get("DEEPPIPE", "1") == "1",
-        epifuse=os.environ.get("EPIFUSE", "1") == "1",
-        b_rrr=os.environ.get("BRRR", "0") == "1",
-        tpb=int(os.environ.get("TPB", "1")),
+        TM=args.tm,
+        TN=args.tn,
+        TK=args.tk,
+        WM=args.wm,
+        WN=args.wn,
+        dtl=args.dtl,
+        db=args.db,
+        prio=args.prio,
+        swz=args.swz,
+        chiplet=args.chip,
+        chiplet_xcds=args.xcds,
+        chiplet_wgm=args.wgm,
+        asm_reads=args.asm,
+        deeppipe=args.deeppipe,
+        epifuse=args.epifuse,
+        b_rrr=args.brrr,
+        tpb=args.tpb,
     )
 
     kernel, BS, tm, tn = build_grouped_gemm(spec)
@@ -154,11 +188,7 @@ def _main() -> int:
     torch.cuda.synchronize()
     err = (C.float() - ref).abs().max().item()
     print(f"[ggemm] grid={grid} max_abs={err:.4f}  {'PASS' if err < 0.1 else 'FAIL'}")
-    if (
-        err >= 0.1
-        and os.environ.get("NOSTORE", "0") != "1"
-        and os.environ.get("STORESINK", "0") != "1"
-    ):
+    if err >= 0.1:
         return 1
     for _ in range(20):
         call()

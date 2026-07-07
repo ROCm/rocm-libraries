@@ -21,7 +21,7 @@ These are engine-level (not kernel-family) contracts, so they live in
 No GPU: pure text lowering (``lower_kernel_to_hip`` / ``lower_kernel_to_llvm``)
 and IRBuilder-level checks.
 
-Run:  PYTHONPATH=Python python3 tests/core/test_amdgpu_lowering_ops.py
+Run:  PYTHONPATH=python python3 tests/core/test_amdgpu_lowering_ops.py
 """
 
 from __future__ import annotations

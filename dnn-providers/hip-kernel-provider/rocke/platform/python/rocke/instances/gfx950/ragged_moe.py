@@ -161,7 +161,9 @@ def build_ragged_moe(spec: RaggedMoeSpec):
         cshuf = False  # OPSW has its own packed-store epilogue
     if cshuf:
         epifuse = False
-    if epifuse or cshuf:
+    # epifuse, cshuf, and opsw all read the routing weight from LDS in the
+    # store path (rw_lds), so they require the RWL buffer to be allocated.
+    if epifuse or cshuf or opsw:
         rwlds = True
     plog = spec.plog
     storesink = spec.storesink

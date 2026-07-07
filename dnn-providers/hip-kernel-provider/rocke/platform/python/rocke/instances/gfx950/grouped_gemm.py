@@ -14,7 +14,6 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 import math
-import os
 from typing import Optional
 
 from rocke.core.ir import BF16, I32, I64, IRBuilder, PtrType, VectorType
@@ -122,6 +121,23 @@ def build_custom_grouped(
     chiplet_xcds=8,
     asm_reads=False,
     tpb=1,
+    # Levers previously read from the environment (now explicit params so the
+    # builder is reentrant / free of process-global state). Defaults preserve the
+    # historical environment-variable defaults.
+    b_rrr=False,
+    deeppipe=True,
+    epifuse=True,
+    mfma32=False,
+    cshuf=False,
+    tr128=False,
+    permmasched=False,
+    cksched=False,
+    burstprio=False,
+    light_sync=False,
+    nostore=False,
+    storesink=False,
+    pipe=False,
+    vgprprobe=False,
     name="grouped_gemm",
 ):
     """Build the hand-scheduled grouped bf16 GEMM ``KernelDef``.
@@ -134,7 +150,6 @@ def build_custom_grouped(
     # bf16 per MAC -> halves LDS-read pressure (rocBLAS's NN trick, LdsUtil ~18% vs
     # our ~45%). And b_per_lane=4 == one ds_read_b64_tr_b16 -> the NN transpose-read
     # is a SINGLE op (vs 2x for 16x16x32).
-    mfma32 = os.environ.get("MFMA32", "0") == "1"
     if mfma32:
         from rocke.helpers.atoms import MfmaAtom
 
@@ -205,12 +220,11 @@ def build_custom_grouped(
 
     nbuf = 2 if (db or dtl) else 1
     ld = decode_mfma_lanes(b, atom, lane)
-    cshuf = os.environ.get("CSHUF", "0") == "1"
-    # RRR weight layout (B = [E,K,N], N-contiguous, like the Triton/CK references):
-    # stage B into LDS as a plain [TK,TN] tile and read the MFMA b-operand via the
-    # CK transpose LDS read (ds_read_b64_tr_b16), which delivers the SAME b-operand
-    # layout mma_ABt already consumes -> the MFMA is unchanged. Requires DTL.
-    b_rrr = os.environ.get("BRRR", "0") == "1"
+    # RRR weight layout (b_rrr; B = [E,K,N], N-contiguous, like the Triton/CK
+    # references): stage B into LDS as a plain [TK,TN] tile and read the MFMA
+    # b-operand via the CK transpose LDS read (ds_read_b64_tr_b16), which delivers
+    # the SAME b-operand layout mma_ABt already consumes -> the MFMA is unchanged.
+    # Requires DTL.
     if b_rrr:
         assert dtl and not cshuf, "BRRR requires DTL and is incompatible with CSHUF"
     if cshuf:
@@ -338,9 +352,9 @@ def build_custom_grouped(
         )
         return b.vec_bitcast(raw, frag_ty)
 
-    # ds_read_b128_tr_b16 would halve the B LDS-read ops, but llvm.amdgcn.ds.read.
-    # tr16.b128 is not in this ROCm's LLVM (only the b64 variant links) -> default off.
-    tr128 = os.environ.get("TR128", "0") == "1"  # 1 wide transpose-read vs 2x b64
+    # tr128 (param): ds_read_b128_tr_b16 would halve the B LDS-read ops, but
+    # llvm.amdgcn.ds.read.tr16.b128 is not in this ROCm's LLVM (only the b64
+    # variant links) -> default off.
 
     def _read_b_rrr(bi, kk):
         # B-operand from the plain [TK,TN] LDS tile via CK transpose-reads.
@@ -395,22 +409,17 @@ def build_custom_grouped(
         ]
         return a, bb
 
-    permmasched = os.environ.get("PERMMASCHED", "0") == "1"
-    # CK HotLoopScheduler: emit explicit sched_group_barrier MFMA:DS-read groups so
-    # the backend spreads the next chunk's (transpose) LDS reads evenly across the
-    # current chunk's MFMAs, hiding the ds_read latency behind the matrix ops.
-    cksched = os.environ.get("CKSCHED", "0") == "1"
+    # permmasched (param): per-mma scheduling barriers.
+    # cksched (param): CK HotLoopScheduler -- emit explicit sched_group_barrier
+    #   MFMA:DS-read groups so the backend spreads the next chunk's (transpose) LDS
+    #   reads evenly across the current chunk's MFMAs, hiding ds_read latency.
     SGB_MFMA, SGB_DSREAD = 0x008, 0x100
-    # Deep operand pipeline (full-drain current chunk, then issue next chunk's
-    # ds_reads so they overlap the MFMAs). Default ON with asm reads: small but
-    # consistent win (~+4 TF) over the compiler's schedule.
-    deeppipe = os.environ.get("DEEPPIPE", "1") == "1"
-    # BURSTPRIO: per-burst priority ping-pong. Drop s_setprio(0) for the
-    # lgkmcnt-drain + ds_read section of each chunk and raise s_setprio(1) only
-    # around the MFMA burst. With 2 waves/SIMD this yields the issue slots to the
-    # sibling wave's MFMAs while this wave stalls on its read drain (and vice
-    # versa) -- the producer/consumer overlap that hides ds_read+barrier latency.
-    burstprio = os.environ.get("BURSTPRIO", "0") == "1"
+    # deeppipe (param): deep operand pipeline -- full-drain current chunk, then
+    #   issue next chunk's ds_reads so they overlap the MFMAs. Default ON with asm.
+    # burstprio (param): per-burst priority ping-pong -- drop s_setprio(0) for the
+    #   lgkmcnt-drain + ds_read section of each chunk and raise s_setprio(1) only
+    #   around the MFMA burst, yielding issue slots to the sibling wave during the
+    #   read drain (the producer/consumer overlap that hides ds_read+barrier lat).
 
     def _mma_block(a_fr, b_fr, acc, n_ds=0, store_after=None):
         nmma = mm * nn
@@ -576,10 +585,6 @@ def build_custom_grouped(
             else:
                 dtl_load(b_rsrc, tb["b_eoff"], Bs[buf], tb["n_base"], kt, passes_b, 0)
 
-        import os as _os_ls
-
-        light_sync = _os_ls.environ.get("LIGHTSYNC", "0") == "1"
-
     def kloop(acc, tb, final_storer=None):
         if dtl:
             load_tile_dtl(0, 0, tb)  # prologue
@@ -639,20 +644,19 @@ def build_custom_grouped(
     cN = b.const_i32(N)
     warp_m_off = b.mul(warp_row, b.const_i32(WTM))
     warp_n_off = b.mul(warp_col, b.const_i32(WTN))
-    nostore = os.environ.get("NOSTORE", "0") == "1"  # diagnostic: skip C stores
-    # diagnostic: keep all stores (so accs are consumed -> MFMAs survive DCE) but
-    # collapse their addresses to c_per_lane per-lane slots -> write-combined, ~0
-    # HBM store traffic. (full - storesink) isolates the real store-BW cost with
-    # compute intact, unlike NOSTORE which DCEs the whole MFMA chain.
-    storesink = os.environ.get("STORESINK", "0") == "1"
+    # nostore (param, diagnostic): skip C stores.
+    # storesink (param, diagnostic): keep all stores (so accs are consumed -> MFMAs
+    #   survive DCE) but collapse their addresses to c_per_lane per-lane slots ->
+    #   write-combined, ~0 HBM store traffic. (full - storesink) isolates the real
+    #   store-BW cost with compute intact, unlike nostore which DCEs the MFMA chain.
 
     def store_c(addr, val):
         b.global_store(C, addr, val, align=2)
 
-    # EPIFUSE: instead of a serial store tail, issue each accumulator's stores right
-    # after its FINAL MFMA (last K-tile), so the store-issue + address VALU overlap
-    # the remaining MFMAs of that K-tile instead of running exposed after the loop.
-    epifuse = os.environ.get("EPIFUSE", "1") == "1"  # +~10-20 TF, default on
+    # epifuse (param): instead of a serial store tail, issue each accumulator's
+    # stores right after its FINAL MFMA (last K-tile), so the store-issue + address
+    # VALU overlap the remaining MFMAs of that K-tile instead of running exposed
+    # after the loop. +~10-20 TF, default on.
 
     def make_storer(tb):
         """Precompute the per-i lane base addresses for tile `tb`; return a
@@ -770,10 +774,9 @@ def build_custom_grouped(
             epilogue(accs, tb)
 
     # Persistent grid: when tpb>1, each block walks a grid-strided set of output
-    # tiles. PIPE adds a second accumulator set so tile j's epilogue stores (which
-    # read acc_prev) overlap tile (j+1)'s K-loop MFMAs (which write acc_cur) --
-    # without a WAR hazard forcing the K-loop's s_waitcnt to drain the stores.
-    pipe = os.environ.get("PIPE", "0") == "1"
+    # tiles. pipe (param) adds a second accumulator set so tile j's epilogue stores
+    # (which read acc_prev) overlap tile (j+1)'s K-loop MFMAs (which write acc_cur)
+    # -- without a WAR hazard forcing the K-loop's s_waitcnt to drain the stores.
     accs2 = [atom.zero_acc(b) for _ in range(mm * nn)] if (pipe and tpb > 1) else None
     n_mt = (M + TM - 1) // TM
     n_nt = (N + TN - 1) // TN
@@ -787,7 +790,6 @@ def build_custom_grouped(
         rem = b.mod(t, c_tpe)
         return b.mod(rem, c_nnt), b.div(rem, c_nnt), expert  # (nt, mt, expert)
 
-    vgprprobe = os.environ.get("VGPRPROBE", "0") == "1"
     if vgprprobe:
         # Feasibility probe for the bf16-packed store/compute overlap: keep tile
         # T's accumulators, cast to bf16 (~64 VGPR), LIVE across tile T+1's full
@@ -848,43 +850,10 @@ def build_grouped_gemm(spec: GroupedGemmSpec):
     row count (``M_total // E``).
 
     Only the production levers are exposed via ``GroupedGemmSpec``; the
-    experimental / diagnostic levers that ``build_custom_grouped`` reads from
-    the environment are forced off here so a spec fully determines the kernel.
+    experimental / diagnostic levers default off, so a spec fully determines the
+    kernel. Levers are passed as explicit parameters (no process-global env), so
+    the builder is reentrant.
     """
-    # build_custom_grouped takes some levers as parameters and reads the rest
-    # (b_rrr, deeppipe, epifuse) from the environment; drive those from the spec
-    # so the spec is the single source of truth.
-    if spec.b_rrr:
-        os.environ["BRRR"] = "1"
-    else:
-        os.environ.pop("BRRR", None)
-
-    if not spec.deeppipe:
-        os.environ["DEEPPIPE"] = "0"
-    else:
-        os.environ.pop("DEEPPIPE", None)  # default is 1
-
-    if not spec.epifuse:
-        os.environ["EPIFUSE"] = "0"
-    else:
-        os.environ.pop("EPIFUSE", None)  # default is 1
-
-    # Ensure experimental/diagnostic levers are OFF
-    for key in [
-        "MFMA32",
-        "CSHUF",
-        "TR128",
-        "PERMMASCHED",
-        "CKSCHED",
-        "BURSTPRIO",
-        "LIGHTSYNC",
-        "NOSTORE",
-        "STORESINK",
-        "PIPE",
-        "VGPRPROBE",
-    ]:
-        os.environ.pop(key, None)
-
     return build_custom_grouped(
         spec.M,
         spec.N,
@@ -905,6 +874,9 @@ def build_grouped_gemm(spec: GroupedGemmSpec):
         chiplet_wgm=spec.chiplet_wgm,
         chiplet_xcds=spec.chiplet_xcds,
         asm_reads=spec.asm_reads,
+        b_rrr=spec.b_rrr,
+        deeppipe=spec.deeppipe,
+        epifuse=spec.epifuse,
         tpb=spec.tpb,
         name=spec.name,
     )

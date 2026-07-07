@@ -163,6 +163,32 @@ def _name(v: Value) -> str:
     return v.name[1:] if v.name.startswith("%") else v.name
 
 
+# LDS vector-load/store element type -> ext_vector_type prefix (see the
+# _ROCKE_VEC typedefs in the prologue). fp8/bf8 share the i8 byte-storage view.
+_SMEM_VEC_PREFIX = {
+    "f16": "f16x",
+    "bf16": "bf16x",
+    "f32": "f32x",
+    "i32": "i32x",
+    "i16": "i16x",
+    "i8": "i8x",
+    "fp8e4m3": "i8x",
+    "bf8e5m2": "i8x",
+}
+
+
+def _smem_vec_prefix(elem_name: str, op_desc: str) -> str:
+    """Vector prefix for an LDS ``elem_type``. Validate rather than silently
+    falling back to f16 (which would reinterpret the bits of another type)."""
+    try:
+        return _SMEM_VEC_PREFIX[elem_name]
+    except KeyError:
+        raise NotImplementedError(
+            f"{op_desc}: unsupported LDS element type {elem_name!r} "
+            f"(supported: {sorted(_SMEM_VEC_PREFIX)})"
+        ) from None
+
+
 def _f32_literal(val: float) -> str:
     """Format a Python float for C++ float literal context.
 
@@ -443,16 +469,7 @@ class _Lowerer:
             raise RuntimeError("smem store_vN before smem_alloc was lowered")
         idx_str = "][".join(_name(i) for i in indices)
         elem_name = op.attrs.get("elem_type", "f16")
-        prefix = {
-            "f16": "f16x",
-            "bf16": "bf16x",
-            "f32": "f32x",
-            "i32": "i32x",
-            "i16": "i16x",
-            "i8": "i8x",
-            "fp8e4m3": "i8x",
-            "bf8e5m2": "i8x",
-        }.get(elem_name, "f16x")
+        prefix = _smem_vec_prefix(elem_name, "smem_store_vN")
         self._emit(
             f"*reinterpret_cast<{prefix}{vec}*>(&{storage}[{idx_str}]) = {_name(value)};"
         )
@@ -1088,6 +1105,13 @@ class _Lowerer:
         surrounding LDS writes/barriers.
         """
         import re as _re
+
+        # TODO: support multi-output inline asm (inline_asm_multi) in the HIP backend.
+        if len(op.results) > 1:
+            raise NotImplementedError(
+                "HIP backend inline asm supports at most one output; "
+                f"got {len(op.results)} (inline_asm_multi not yet lowered)"
+            )
 
         template = _re.sub(r"\$(\d+)", r"%\1", op.attrs["template"])
         parts = [c.strip() for c in op.attrs["constraints"].split(",") if c.strip()]
@@ -1752,18 +1776,8 @@ class _Lowerer:
         indices = op.operands[1:]
         n = int(op.attrs["vec"])
         elem_name = op.attrs.get("elem_type", "f16")
-        # Must mirror the element-type map in ``_op_tile_smem_store_vN``; the
-        # prior f16-only map silently reinterpreted i32/f32/i8 LDS loads as f16.
-        prefix = {
-            "f16": "f16x",
-            "bf16": "bf16x",
-            "f32": "f32x",
-            "i32": "i32x",
-            "i16": "i16x",
-            "i8": "i8x",
-            "fp8e4m3": "i8x",
-            "bf8e5m2": "i8x",
-        }.get(elem_name, "f16x")
+        # Validate rather than silently reinterpreting an unmapped type as f16.
+        prefix = _smem_vec_prefix(elem_name, "smem_load_vN")
         storage = smem.op.attrs.get("_storage")
         if storage is None:
             raise RuntimeError("smem load_vN before smem_alloc was lowered")

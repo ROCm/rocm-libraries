@@ -11,7 +11,7 @@ deterministic function of the spec (the invariant the representative-IR golden
 relies on). The on-GPU numeric coverage lives in the example harnesses under
 ``examples/gfx950/grouped_gemm/``.
 
-Run:  PYTHONPATH=Python python3 tests/instances/test_gfx950_grouped_gemm.py
+Run:  PYTHONPATH=python python3 tests/instances/test_gfx950_grouped_gemm.py
 """
 
 from __future__ import annotations
