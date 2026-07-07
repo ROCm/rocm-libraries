@@ -35,6 +35,7 @@
 
 #include <hip/hip_runtime.h>
 
+#include "origami/architecture.hpp"
 #include "origami/types.hpp"
 #include "origami/origami_export.h"
 
@@ -46,23 +47,16 @@ namespace origami {
  */
 class ORIGAMI_EXPORT hardware_t {
  public:
-  /**
-   * @brief Enumeration of supported GPU architectures.
-   *
-   */
-  enum class architecture_t {
-    gfx90a,
-    gfx942,
-    gfx950,
-    gfx1201,
-    gfx1100,
-    gfx1150,
-    gfx1151,
-    gfx1152,
-    gfx1153,
-    gfx1250,
-    Count
-  };
+  // Architecture identity and the microbenchmarked constants table now live in
+  // the HIP-free origami/architecture.hpp so that consumers without a ROCm
+  // toolchain (e.g. origami::comm) can reuse them. They are re-exposed here as
+  // members so that existing hardware_t::architecture_t / ::get_arch_constants /
+  // ::arch_name_to_enum / ::arch_enum_to_name / ::NO_MALL_AVAILABLE call sites
+  // continue to resolve unchanged.
+  using architecture_t         = ::origami::architecture_t;
+  using architecture_constants = ::origami::architecture_constants;
+
+  static constexpr double NO_MALL_AVAILABLE = ::origami::NO_MALL_AVAILABLE;
 
   /**
    * @brief Convert architecture name string to architecture_t enum.
@@ -71,17 +65,7 @@ class ORIGAMI_EXPORT hardware_t {
    * @return architecture_t Corresponding enum value, or Count if not recognized
    */
   static constexpr architecture_t arch_name_to_enum(std::string_view str) noexcept {
-    if (str == "gfx90a") return architecture_t::gfx90a;
-    if (str == "gfx942") return architecture_t::gfx942;
-    if (str == "gfx950") return architecture_t::gfx950;
-    if (str == "gfx1201") return architecture_t::gfx1201;
-    if (str == "gfx1100") return architecture_t::gfx1100;
-    if (str == "gfx1150") return architecture_t::gfx1150;
-    if (str == "gfx1151") return architecture_t::gfx1151;
-    if (str == "gfx1152") return architecture_t::gfx1152;
-    if (str == "gfx1153") return architecture_t::gfx1153;
-    if (str == "gfx1250") return architecture_t::gfx1250;
-    return architecture_t::Count;
+    return ::origami::arch_name_to_enum(str);
   }
 
   /**
@@ -91,53 +75,8 @@ class ORIGAMI_EXPORT hardware_t {
    * @return std::string_view Corresponding string value
    */
   static constexpr std::string_view arch_enum_to_name(architecture_t a) noexcept {
-    switch (a) {
-      case architecture_t::gfx90a: return "gfx90a";
-      case architecture_t::gfx942: return "gfx942";
-      case architecture_t::gfx950: return "gfx950";
-      case architecture_t::gfx1201: return "gfx1201";
-      case architecture_t::gfx1100: return "gfx1100";
-      case architecture_t::gfx1150: return "gfx1150";
-      case architecture_t::gfx1151: return "gfx1151";
-      case architecture_t::gfx1152: return "gfx1152";
-      case architecture_t::gfx1153: return "gfx1153";
-      case architecture_t::gfx1250: return "gfx1250";
-      default: return "unknown";
-    }
+    return ::origami::arch_enum_to_name(a);
   }
-
-  /**
-   * @brief Architecture-specific constants for memory and compute characteristics.
-   *
-   */
-  struct architecture_constants {
-    double mem1_perf_ratio;
-    double mem2_perf_ratio;
-    double mem3_perf_ratio;
-    size_t parallel_mi_cu;  ///< Number of parallel matrix instructions per compute unit
-    std::tuple<double, double, double>
-        mem_bw_per_wg_coefficients;  ///< Memory bandwidth coefficients per workgroup
-    double mem_clock_ratio;          ///< Memory clock ratio relative to compute clock
-
-    constexpr architecture_constants(double mem1_perf_ratio,
-                                     double mem2_perf_ratio,
-                                     double mem3_perf_ratio,
-                                     size_t parallel_mi_cu,
-                                     std::tuple<double, double, double> mem_bw_per_wg_coefficients,
-                                     double mem_clock_ratio)  // Obtained through microbenchmarking
-        : mem1_perf_ratio(mem1_perf_ratio)
-        , mem2_perf_ratio(mem2_perf_ratio)
-        , mem3_perf_ratio(mem3_perf_ratio)
-        , parallel_mi_cu(parallel_mi_cu)
-        , mem_bw_per_wg_coefficients(mem_bw_per_wg_coefficients)
-        , mem_clock_ratio(mem_clock_ratio) {}
-  };
-
-  /**
-   * MALL value for those architectures that do not support it.
-   * The value '1000' is just a big number.
-   */
-  static constexpr double NO_MALL_AVAILABLE = 1.21875121875121875122 * 1000;
 
   /**
    * @brief Get architecture-specific constants for a given architecture.
@@ -150,43 +89,7 @@ class ORIGAMI_EXPORT hardware_t {
    * @return architecture_constants Constants for the specified architecture
    */
   static constexpr architecture_constants get_arch_constants(architecture_t arch) {
-    switch (arch) {
-      case architecture_t::gfx90a:
-        return {5.5, 1.21875121875121875122 * 1.2, 1.2, 4, std::make_tuple(0, 0.03, 0), 1.5};
-      case architecture_t::gfx942:
-        return {17, 1.21875121875121875122 * 6, 4, 4, std::make_tuple(0, 0.015, 0), 1.5};
-      case architecture_t::gfx950:
-        return {17,
-                1.21875121875121875122 * 7,
-                6,
-                4,
-                std::make_tuple(-0.000013, 0.007070, 0.027355),
-                1.5};
-      case architecture_t::gfx1201:
-        return {5.74, 1.21875121875121875122 * 2.41, 0.464, 2, std::make_tuple(0, 0.17, 0), 1.5};
-      case architecture_t::gfx1100:
-        return {7.12, 1.21875121875121875122 * 3.48, 0.732, 2, std::make_tuple(0, 0.11, 0), 1.5};
-      case architecture_t::gfx1150:
-        // AMD Strix Point iGPU
-        return {1.497, NO_MALL_AVAILABLE, 0.077, 16, std::make_tuple(0, 0.18, 0), 1.5};
-      case architecture_t::gfx1151:
-        // AMD Strix Halo iGPU
-        return {2.47, 1.21875121875121875122 * 0.93, 0.215, 2, std::make_tuple(0, 0.22, 0), 1.5};
-      case architecture_t::gfx1152:
-        // AMD Radeon 840M iGPU
-        return {0.849, NO_MALL_AVAILABLE, 0.096, 4, std::make_tuple(0, 0.13, 0), 1.5};
-      case architecture_t::gfx1153:
-        // AMD Radeon 820M iGPU
-        return {0.240, NO_MALL_AVAILABLE, 0.066, 2, std::make_tuple(0, 0.19, 0), 1.5};
-      case architecture_t::gfx1250: {
-        // TODO: Update with real gfx1250 constants when available
-        auto c                       = get_arch_constants(architecture_t::gfx950);
-        c.mem2_perf_ratio            = NO_MALL_AVAILABLE;
-        c.mem_bw_per_wg_coefficients = std::make_tuple(0, 0.016, 0);
-        return c;
-      }
-      default: return {0, 0, 0, 0, std::make_tuple(0, 0, 0), 0};
-    }
+    return ::origami::get_arch_constants(arch);
   }
 
   /**
@@ -684,8 +587,7 @@ class ORIGAMI_EXPORT hardware_t {
    *                 correspond to `deviceId`
    * @return hardware_t Configured hardware instance for the device
    */
-  static hardware_t get_hardware_for_device(int deviceId,
-                                            hipDeviceProp_t const& prop);
+  static hardware_t get_hardware_for_device(int deviceId, hipDeviceProp_t const& prop);
 
   /**
    * @brief Create hardware_t instance for a specific architecture with specified parameters.

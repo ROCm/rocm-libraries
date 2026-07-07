@@ -63,8 +63,26 @@ set_target_properties(_pyorigami PROPERTIES
     LIBRARY_OUTPUT_DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}/src/origami"
 )
 
-# Link against origami library and HIP
-target_link_libraries(_pyorigami PRIVATE ${ORIGAMI_TARGET} hip::host)
+# Link against origami library and HIP. The comm bindings need the compiled
+# (hip-free) origami-comm library for the collective cost model's out-of-line
+# symbols; it is created alongside roc::origami in the parent CMake tree.
+set(ORIGAMI_COMM_TARGET "")
+if(TARGET roc::origami-comm)
+    set(ORIGAMI_COMM_TARGET roc::origami-comm)
+elseif(TARGET origami-comm)
+    set(ORIGAMI_COMM_TARGET origami-comm)
+endif()
+# The comm device bridge (system_from_device / system_from_hardware) is
+# HIP-dependent and lives in its own target; the bindings expose it so Python
+# callers can build a system_t from a live device.
+set(ORIGAMI_COMM_DEVICE_TARGET "")
+if(TARGET roc::origami-comm-device)
+    set(ORIGAMI_COMM_DEVICE_TARGET roc::origami-comm-device)
+elseif(TARGET origami-comm-device)
+    set(ORIGAMI_COMM_DEVICE_TARGET origami-comm-device)
+endif()
+target_link_libraries(_pyorigami PRIVATE ${ORIGAMI_TARGET} ${ORIGAMI_COMM_TARGET}
+                                         ${ORIGAMI_COMM_DEVICE_TARGET} hip::host)
 
 set_target_properties(_pyorigami PROPERTIES
     CXX_STANDARD 17                    # We can make this optional too if we want to support newer standards
@@ -191,6 +209,23 @@ if(ORIGAMI_BUILD_TESTING OR BUILD_TESTING)
 
     set_tests_properties(
         "Python: test_ranking_regression"
+        PROPERTIES
+            ENVIRONMENT
+            "PYTHONPATH=${CMAKE_CURRENT_SOURCE_DIR}/src:$ENV{PYTHONPATH}"
+            DEPENDS _pyorigami
+    )
+
+    # Run comm (collective cost model) binding regression tests. These
+    # correlate origami.comm against the same frozen golden CSVs the C++ comm
+    # suite checks, proving the bindings introduce no numerical drift.
+    add_test(
+        NAME "Python: test_comm_bindings"
+        COMMAND ${Python_EXECUTABLE} -m pytest tests/test_comm.py -v
+        WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}
+    )
+
+    set_tests_properties(
+        "Python: test_comm_bindings"
         PROPERTIES
             ENVIRONMENT
             "PYTHONPATH=${CMAKE_CURRENT_SOURCE_DIR}/src:$ENV{PYTHONPATH}"

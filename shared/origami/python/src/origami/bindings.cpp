@@ -9,6 +9,8 @@
 #include <nanobind/stl/unordered_map.h>
 #include <nanobind/stl/vector.h>
 #include "origami/attention.hpp"
+#include "origami/comm/hardware_device.hpp"
+#include "origami/comm/origami_comm.hpp"
 #include "origami/gemm.hpp"
 #include "origami/hardware.hpp"
 #include "origami/origami.hpp"
@@ -495,4 +497,320 @@ NB_MODULE(origami, m) {
         return origami::gemm::compute_timestep_latency(problem, hardware, config, context);
       },
       "Compute latency per K-complete MT wave (auto-creates context)");
+
+  // ───────────────────────────────────────────────────────────────────────
+  // origami.comm — analytical communication (collective) cost model.
+  //
+  // Mirrors origami::comm's public API: the byte-level entry point
+  // (predict_row), the tensor-level entry point (predict_tensor_collective),
+  // and the lower-level compute_collective_latency for codesign studies that
+  // sweep algorithms. Hardware/heuristics are exposed as the MI300X defaults so
+  // callers can predict without constructing a system, yet tweak them when
+  // they need to. The string-typed predict overloads are bound (op/dtype/
+  // framework as plain Python strings) because that is the ergonomic edge.
+  // ───────────────────────────────────────────────────────────────────────
+  namespace oc = origami::comm;
+  auto comm    = m.def_submodule("comm", "Analytical communication (collective) cost model.");
+
+  nanobind::enum_<oc::primitive_t>(
+      comm, "primitive_t", "The collective OPERATION (a problem property).")
+      .value("all_gather", oc::primitive_t::all_gather)
+      .value("reduce_scatter", oc::primitive_t::reduce_scatter)
+      .value("broadcast", oc::primitive_t::broadcast)
+      .value("all_reduce", oc::primitive_t::all_reduce)
+      .value("all_to_all", oc::primitive_t::all_to_all)
+      .export_values();
+
+  nanobind::enum_<oc::algorithm_t>(
+      comm, "algorithm_t", "The collective IMPLEMENTATION (a config/perf choice).")
+      .value("automatic", oc::algorithm_t::automatic)
+      .value("ring", oc::algorithm_t::ring)
+      .value("one_shot", oc::algorithm_t::one_shot)
+      .value("two_shot", oc::algorithm_t::two_shot)
+      .value("direct", oc::algorithm_t::direct)
+      .export_values();
+
+  nanobind::enum_<oc::framework_t>(
+      comm, "framework_t", "Caller software stack (sets the host-overhead floor).")
+      .value("raw", oc::framework_t::raw)
+      .value("rccl", oc::framework_t::rccl)
+      .value("nccl", oc::framework_t::nccl)
+      .value("torch", oc::framework_t::torch)
+      .value("jax", oc::framework_t::jax)
+      .value("mpi", oc::framework_t::mpi)
+      .export_values();
+
+  nanobind::enum_<oc::load_width_t>(
+      comm, "load_width_t", "Bytes moved per VMEM instruction (the enum value is the width).")
+      .value("DWORD", oc::load_width_t::DWORD)
+      .value("DWORDX4", oc::load_width_t::DWORDX4)
+      .value("DWORDX16", oc::load_width_t::DWORDX16)
+      .export_values();
+
+  // ── hardware_t: per-GPU compute/memory ceilings ──────────────────
+  nanobind::class_<oc::hardware_t>(comm, "hardware_t", "Per-GPU compute and memory ceilings.")
+      .def(nanobind::init<>())
+      .def_prop_ro(
+          "arch",
+          [](const oc::hardware_t& h) { return std::string{origami::arch_enum_to_name(h.arch)}; })
+      .def_rw("num_cu", &oc::hardware_t::num_cu)
+      .def_rw("num_xcd", &oc::hardware_t::num_xcd)
+      .def_rw("cu_per_xcd", &oc::hardware_t::cu_per_xcd)
+      .def_rw("clock_ghz", &oc::hardware_t::clock_ghz)
+      .def_rw("vmem_issue_rate", &oc::hardware_t::vmem_issue_rate)
+      .def_rw("valu_rate", &oc::hardware_t::valu_rate)
+      .def_rw("tcp_bw", &oc::hardware_t::tcp_bw)
+      .def_rw("mshr_depth_per_wave", &oc::hardware_t::mshr_depth_per_wave)
+      .def_rw("waves_per_wg", &oc::hardware_t::waves_per_wg)
+      .def_rw("xgmi_latency_cycles", &oc::hardware_t::xgmi_latency_cycles)
+      .def_rw("l2_bw_per_cu", &oc::hardware_t::l2_bw_per_cu)
+      .def_rw("mall_bw", &oc::hardware_t::mall_bw)
+      .def_rw("hbm_read_bw", &oc::hardware_t::hbm_read_bw)
+      .def_rw("hbm_write_bw", &oc::hardware_t::hbm_write_bw)
+      .def("cycles_to_us", &oc::hardware_t::cycles_to_us, "cycles"_a)
+      .def("cycles_to_ns", &oc::hardware_t::cycles_to_ns, "cycles"_a);
+
+  // ── comm_hardware_t: the inter-GPU fabric ────────────────────────
+  nanobind::class_<oc::comm_hardware_t>(comm, "comm_hardware_t", "Inter-GPU xGMI fabric ceilings.")
+      .def(nanobind::init<>())
+      .def_rw("link_bw", &oc::comm_hardware_t::link_bw)
+      .def_rw("num_peer_links", &oc::comm_hardware_t::num_peer_links)
+      .def_rw("num_sdma_engines", &oc::comm_hardware_t::num_sdma_engines)
+      .def_rw("sdma_read_bw", &oc::comm_hardware_t::sdma_read_bw)
+      .def_rw("sdma_write_bw", &oc::comm_hardware_t::sdma_write_bw)
+      .def_rw("atomic_latency_cycles", &oc::comm_hardware_t::atomic_latency_cycles)
+      .def_rw("launch_overhead_cycles", &oc::comm_hardware_t::launch_overhead_cycles)
+      .def_rw("clock_ghz", &oc::comm_hardware_t::clock_ghz);
+
+  // ── system_t: a GPU plus its fabric ──────────────────────────────
+  nanobind::class_<oc::system_t>(
+      comm, "system_t", "A GPU plus the fabric that joins it to its peers.")
+      .def(nanobind::init<>())
+      .def_rw("gpu", &oc::system_t::gpu)
+      .def_rw("fabric", &oc::system_t::fabric);
+
+  // ── heuristics_t: empirical fudge factors ────────────────────────
+  // Only the scalar knobs are exposed (the *_ns / *_cycles fit tables stay in
+  // C++); construct the default and flip these to run sensitivity studies.
+  nanobind::class_<oc::heuristics_t>(comm, "heuristics_t", "Empirical calibration knobs.")
+      .def(nanobind::init<>())
+      .def_rw("min_bytes_per_wg", &oc::heuristics_t::min_bytes_per_wg)
+      .def_rw("assume_rank_symmetry", &oc::heuristics_t::assume_rank_symmetry);
+
+  // ── gpu_topology_t: live per-device shape ────────────────────────
+  nanobind::class_<oc::gpu_topology_t>(
+      comm, "gpu_topology_t", "Per-device GPU topology (CU/XCD counts, L2 capacity).")
+      .def(
+          "__init__",
+          [](oc::gpu_topology_t* self,
+             hardware_t::architecture_t arch,
+             std::size_t num_cu,
+             std::size_t num_xcd,
+             std::size_t cu_per_xcd,
+             std::size_t l2_capacity_bytes) {
+            new (self) oc::gpu_topology_t{arch, num_cu, num_xcd, cu_per_xcd, l2_capacity_bytes};
+          },
+          "arch"_a,
+          "num_cu"_a,
+          "num_xcd"_a,
+          "cu_per_xcd"_a,
+          "l2_capacity_bytes"_a)
+      .def_rw("arch", &oc::gpu_topology_t::arch)
+      .def_rw("num_cu", &oc::gpu_topology_t::num_cu)
+      .def_rw("num_xcd", &oc::gpu_topology_t::num_xcd)
+      .def_rw("cu_per_xcd", &oc::gpu_topology_t::cu_per_xcd)
+      .def_rw("l2_capacity_bytes", &oc::gpu_topology_t::l2_capacity_bytes);
+
+  // ── arch_ceilings_t: calibrated per-architecture ceilings ────────
+  // Opaque handle produced by get_arch_ceilings and consumed by make_system; the
+  // native-unit fields are an implementation detail callers do not edit.
+  nanobind::class_<oc::arch_ceilings_t>(
+      comm, "arch_ceilings_t", "Calibrated per-architecture comm ceilings (native units).");
+
+  comm.def("get_arch_ceilings",
+           &oc::get_arch_ceilings,
+           "arch"_a,
+           "Calibrated communication ceilings for an architecture (raises if uncalibrated).");
+
+  comm.def("make_system",
+           &oc::make_system,
+           "ceilings"_a,
+           "topology"_a,
+           "clock_ghz"_a,
+           "Fuse calibrated ceilings, a topology, and a clock into a system_t.");
+
+  // ── Live-device system factories (HIP-dependent) ─────────────────
+  comm.def("system_from_hardware",
+           &oc::system_from_hardware,
+           "hardware"_a,
+           "Build a comm system_t from an origami.hardware_t (same device, one topology).");
+
+  comm.def("system_from_device",
+           &oc::system_from_device,
+           "device_id"_a,
+           "Build a comm system_t by querying a live HIP device (picks up CPX partitioning).");
+
+  // Default heuristics, bound as a module attribute (copy): pass straight
+  // into the predict functions, or mutate a copy for what-if studies. There is
+  // deliberately no hardcoded MI300X system attribute — build a system_t for the
+  // device you are about to run on via system_from_device / system_from_hardware,
+  // or from make_system with an explicit topology.
+  comm.attr("DEFAULT_HEURISTICS") = oc::DEFAULT_HEURISTICS;
+
+  // ── tile_shape_t: a 2D tile with a contiguity bit ────────────────
+  nanobind::class_<oc::tile_shape_t>(
+      comm, "tile_shape_t", "A 2D (m x n x dtype) tile with a contiguity bit.")
+      .def(nanobind::init<>())
+      .def_rw("m", &oc::tile_shape_t::m)
+      .def_rw("n", &oc::tile_shape_t::n)
+      .def_rw("dtype", &oc::tile_shape_t::dtype)
+      .def_rw("split_dim", &oc::tile_shape_t::split_dim)
+      .def_rw("contiguous", &oc::tile_shape_t::contiguous)
+      .def("bytes", &oc::tile_shape_t::bytes)
+      .def("elements", &oc::tile_shape_t::elements)
+      .def("cachelines", &oc::tile_shape_t::cachelines);
+
+  // ── comm_problem_t: the correctness inputs ───────────────────────
+  nanobind::class_<oc::comm_problem_t>(
+      comm, "comm_problem_t", "[M,N] tensor over num_gpus; the collective is a problem property.")
+      .def(
+          "__init__",
+          [](oc::comm_problem_t* self,
+             std::size_t M,
+             std::size_t N,
+             int num_gpus,
+             origami::data_type_t dtype,
+             int split_dim,
+             oc::primitive_t collective) {
+            new (self) oc::comm_problem_t{M, N, num_gpus, dtype, split_dim, collective};
+          },
+          "M"_a,
+          "N"_a,
+          "num_gpus"_a,
+          "dtype"_a      = origami::data_type_t::BFloat16,
+          "split_dim"_a  = 0,
+          "collective"_a = oc::primitive_t::all_reduce)
+      .def_rw("M", &oc::comm_problem_t::M)
+      .def_rw("N", &oc::comm_problem_t::N)
+      .def_rw("num_gpus", &oc::comm_problem_t::num_gpus)
+      .def_rw("dtype", &oc::comm_problem_t::dtype)
+      .def_rw("split_dim", &oc::comm_problem_t::split_dim)
+      .def_rw("collective", &oc::comm_problem_t::collective)
+      .def("message_bytes", &oc::comm_problem_t::message_bytes)
+      .def("gpu_tile_bytes", &oc::comm_problem_t::gpu_tile_bytes);
+
+  // ── comm_config_t: the performance inputs ────────────────────────
+  nanobind::class_<oc::comm_config_t>(
+      comm, "comm_config_t", "Workgroup-level execution config; carries the algorithm choice.")
+      .def(
+          "__init__",
+          [](oc::comm_config_t* self,
+             int num_wgs,
+             oc::load_width_t load_width,
+             int vgprs_for_data,
+             int min_bytes_per_wg,
+             oc::algorithm_t algorithm) {
+            oc::comm_config_t cfg{};
+            cfg.num_wgs          = num_wgs;
+            cfg.load_width       = load_width;
+            cfg.vgprs_for_data   = vgprs_for_data;
+            cfg.min_bytes_per_wg = min_bytes_per_wg;
+            cfg.algorithm        = algorithm;
+            new (self) oc::comm_config_t{cfg};
+          },
+          "num_wgs"_a,
+          "load_width"_a       = oc::load_width_t::DWORDX16,
+          "vgprs_for_data"_a   = 128,
+          "min_bytes_per_wg"_a = 16384,
+          "algorithm"_a        = oc::algorithm_t::automatic)
+      .def_rw("num_wgs", &oc::comm_config_t::num_wgs)
+      .def_rw("load_width", &oc::comm_config_t::load_width)
+      .def_rw("vgprs_for_data", &oc::comm_config_t::vgprs_for_data)
+      .def_rw("min_bytes_per_wg", &oc::comm_config_t::min_bytes_per_wg)
+      .def_rw("algorithm", &oc::comm_config_t::algorithm);
+
+  // ── tensor_collective_prediction_t: the rich tensor-level result ─
+  nanobind::class_<oc::tensor_collective_prediction_t>(
+      comm, "tensor_collective_prediction_t", "Result of predict_tensor_collective.")
+      .def_ro("predicted_us", &oc::tensor_collective_prediction_t::predicted_us)
+      .def_ro("op", &oc::tensor_collective_prediction_t::op)
+      .def_ro("input_shape", &oc::tensor_collective_prediction_t::input_shape)
+      .def_ro("dim", &oc::tensor_collective_prediction_t::dim)
+      .def_ro("world_size", &oc::tensor_collective_prediction_t::world_size)
+      .def_ro("nchannels", &oc::tensor_collective_prediction_t::nchannels)
+      .def_ro("dtype", &oc::tensor_collective_prediction_t::dtype)
+      .def_ro("per_rank_bytes", &oc::tensor_collective_prediction_t::per_rank_bytes)
+      .def_ro("wire_bytes_per_rank", &oc::tensor_collective_prediction_t::wire_bytes_per_rank)
+      .def_ro("msg_bytes", &oc::tensor_collective_prediction_t::msg_bytes)
+      .def_ro("gpu_tile", &oc::tensor_collective_prediction_t::gpu_tile)
+      .def_ro("framework", &oc::tensor_collective_prediction_t::framework)
+      .def_ro("framework_overhead_us", &oc::tensor_collective_prediction_t::framework_overhead_us)
+      .def("backend_us", &oc::tensor_collective_prediction_t::backend_us);
+
+  // ── predict_row: byte-level latency in microseconds ──────────────
+  comm.def(
+      "predict_row",
+      [](const std::string& primitive,
+         std::size_t msg_bytes,
+         int world_size,
+         int nchannels,
+         const oc::system_t& system,
+         std::size_t M,
+         std::size_t N,
+         int split_dim,
+         const oc::heuristics_t& heur) {
+        return oc::predict_row(
+            primitive, msg_bytes, world_size, nchannels, system, M, N, split_dim, heur);
+      },
+      "primitive"_a,
+      "msg_bytes"_a,
+      "world_size"_a,
+      "nchannels"_a,
+      "system"_a,
+      "M"_a         = 0,
+      "N"_a         = 0,
+      "split_dim"_a = 0,
+      "heur"_a      = oc::DEFAULT_HEURISTICS,
+      "Predict one collective call's latency in microseconds from a benchmark row.");
+
+  // ── predict_tensor_collective: shape/dtype-level prediction ──────
+  comm.def(
+      "predict_tensor_collective",
+      [](const std::string& op,
+         const std::vector<std::size_t>& input_shape,
+         const std::string& dtype,
+         int world_size,
+         const oc::system_t& system,
+         int dim,
+         int nchannels,
+         const std::string& framework,
+         const oc::heuristics_t& heur) {
+        return oc::predict_tensor_collective(
+            op, input_shape, dtype, world_size, system, dim, nchannels, framework, heur);
+      },
+      "op"_a,
+      "input_shape"_a,
+      "dtype"_a,
+      "world_size"_a,
+      "system"_a,
+      "dim"_a       = 0,
+      "nchannels"_a = 32,
+      "framework"_a = "raw",
+      "heur"_a      = oc::DEFAULT_HEURISTICS,
+      "Predict a collective's latency (microseconds) from a per-rank tensor shape.");
+
+  // ── compute_collective_latency: GPU cycles, for algorithm sweeps ─
+  comm.def(
+      "compute_collective_latency",
+      [](const oc::comm_problem_t& problem,
+         const oc::comm_config_t& config,
+         const oc::system_t& system,
+         const oc::heuristics_t& heur) {
+        return oc::compute_collective_latency(problem, config, system, heur);
+      },
+      "problem"_a,
+      "config"_a,
+      "system"_a,
+      "heur"_a = oc::DEFAULT_HEURISTICS,
+      "Predicted GPU cycles for the whole collective (max over ranks).");
 }
