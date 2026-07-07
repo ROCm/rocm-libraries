@@ -1,9 +1,7 @@
 // Copyright © Advanced Micro Devices, Inc., or its affiliates.
 // SPDX-License-Identifier: MIT
 
-#include <type_traits>
-
-#include "RMSNormCommon.hpp"
+#include "VectorTypes.hpp"
 
 constexpr unsigned int LOCAL_SIZE = HIP_PLUGIN_RMSNORM_LOCAL_SIZE;
 constexpr unsigned int INNER_SIZE = HIP_PLUGIN_RMSNORM_INNER_SIZE;
@@ -37,7 +35,7 @@ extern "C" __global__ void RMSnormFwd(const InputType* __restrict__ x,
     for(unsigned int i = lid; i < INNER_SIZE; i += LOCAL_SIZE)
     {
         size_t idx = o * INNER_SIZE * STRIDE + i * STRIDE + s;
-        float tmp = hip_kernel_provider::rmsnorm::to_float32<InputType>(x[idx]);
+        float tmp = hip_kernel_provider::cast<float>(x[idx]);
         pvar += tmp * tmp;
     }
 
@@ -64,12 +62,12 @@ extern "C" __global__ void RMSnormFwd(const InputType* __restrict__ x,
     for(unsigned int i = lid; i < INNER_SIZE; i += LOCAL_SIZE)
     {
         size_t idx = o * INNER_SIZE * STRIDE + i * STRIDE + s;
-        float y_val = hip_kernel_provider::rmsnorm::to_float32<InputType>(x[idx]) * prstd
-                      * hip_kernel_provider::rmsnorm::to_float32<ScaleType>(weight[i]);
+        float y_val = hip_kernel_provider::cast<float>(x[idx]) * prstd
+                      * hip_kernel_provider::cast<float>(weight[i]);
         if(bias != nullptr)
         {
-            y_val += hip_kernel_provider::rmsnorm::to_float32<ScaleType>(bias[i]);
+            y_val += hip_kernel_provider::cast<float>(bias[i]);
         }
-        y[idx] = hip_kernel_provider::rmsnorm::from_float32<OutputType>(y_val);
+        y[idx] = hip_kernel_provider::cast<OutputType>(y_val);
     }
 }

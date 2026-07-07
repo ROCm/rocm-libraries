@@ -19,12 +19,19 @@ endif()
 
 include("${CMAKE_CURRENT_LIST_DIR}/hipdnn_frontendTargets.cmake")
 
+# The nlohmann include dirs are attached to the in-tree targets via BUILD_INTERFACE
+# only, so they don't survive export. Re-attach them here for every installed target
+# whose headers pull in <nlohmann/json.hpp> -- both the direct-link and runtime-load
+# frontends.
 if(NOT HIPDNN_FRONTEND_SKIP_JSON_LIB AND TARGET nlohmann_json::nlohmann_json)
     get_target_property(_hipdnn_nlohmann_includes nlohmann_json::nlohmann_json INTERFACE_INCLUDE_DIRECTORIES)
     if(_hipdnn_nlohmann_includes)
-        get_property(_hipdnn_existing_includes TARGET hipdnn_frontend PROPERTY INTERFACE_INCLUDE_DIRECTORIES)
-        list(APPEND _hipdnn_existing_includes ${_hipdnn_nlohmann_includes})
-        set_property(TARGET hipdnn_frontend PROPERTY INTERFACE_INCLUDE_DIRECTORIES ${_hipdnn_existing_includes})
+        foreach(_hipdnn_fe_target hipdnn_frontend hipdnn_frontend_dynamic)
+            get_property(_hipdnn_existing_includes TARGET ${_hipdnn_fe_target} PROPERTY INTERFACE_INCLUDE_DIRECTORIES)
+            list(APPEND _hipdnn_existing_includes ${_hipdnn_nlohmann_includes})
+            set_property(TARGET ${_hipdnn_fe_target} PROPERTY INTERFACE_INCLUDE_DIRECTORIES ${_hipdnn_existing_includes})
+        endforeach()
+        unset(_hipdnn_fe_target)
     endif()
 endif()
 
