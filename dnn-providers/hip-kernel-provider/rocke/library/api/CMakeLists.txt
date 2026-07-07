@@ -126,16 +126,29 @@ install(TARGETS rocke_client EXPORT rocke-client
 
 if(ROCKE_CLIENT_ENABLE_TESTS)
     if(DEFINED ROCKE_CLIENT_PARENT_PROJECT)
-        # Embedded inside hip-kernel-provider: _add_test_target_internal registered
-        # rocke_client_tests and rocke_client_integration_tests under
-        # "rocke-client_TEST_TARGETS" (PROJECT_NAME at that call site). Re-append
-        # them to the parent's bucket so finalize_test_targets and
-        # install_provider_ctest_files in src/CMakeLists.txt pick them up.
-        # finalize_test_targets is intentionally NOT called here — the parent
-        # owns that call, and calling it twice would create duplicate alias
-        # targets (check, unit-check, ...) and fail configure with a CMake error.
-        set_property(GLOBAL APPEND PROPERTY ${ROCKE_CLIENT_PARENT_PROJECT}_TEST_TARGETS
-                     rocke_client_tests rocke_client_integration_tests)
+        # Embedded inside hip-kernel-provider: finalize_test_targets is NOT called
+        # here — the parent owns that call, and calling it twice creates duplicate
+        # alias targets (check, unit-check, ...) and fails configure.
+        #
+        # Rename the installed binaries to match the parent provider's artifact
+        # glob ("bin/<parent>*_test*") so TheRock's packaging captures them.
+        # Without this they install as "bin/rocke_client_tests" and miss the glob.
+        # Use EXTERNAL_TEST_INSTALL_STAGING rather than _TEST_TARGETS so the
+        # CTestTestfile entries reference the renamed binary paths, not the raw
+        # CMake target names.
+        string(REPLACE "-" "_" _rocke_client_parent_prefix "${ROCKE_CLIENT_PARENT_PROJECT}")
+        set_target_properties(rocke_client_tests PROPERTIES
+            OUTPUT_NAME "${_rocke_client_parent_prefix}_rocke_client_tests_test")
+        set_target_properties(rocke_client_integration_tests PROPERTIES
+            OUTPUT_NAME "${_rocke_client_parent_prefix}_rocke_client_integration_tests_test")
+        set_property(GLOBAL APPEND_STRING PROPERTY
+            "EXTERNAL_TEST_INSTALL_STAGING_${ROCKE_CLIENT_PARENT_PROJECT}"
+            "\n# rocke-client installed tests\n"
+            "add_test(rocke_client_tests \"../${_rocke_client_parent_prefix}_rocke_client_tests_test\")\n"
+            "set_tests_properties(rocke_client_tests PROPERTIES LABELS \"unit_test;quick\")\n"
+            "add_test(rocke_client_integration_tests \"../${_rocke_client_parent_prefix}_rocke_client_integration_tests_test\")\n"
+            "set_tests_properties(rocke_client_integration_tests PROPERTIES LABELS \"integration_test;quick\")\n"
+        )
     else()
         # Standalone build: rocke-client is the top-level project, so it owns
         # finalize_test_targets and its own installed CTestTestfile.
