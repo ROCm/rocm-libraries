@@ -1029,6 +1029,21 @@ def _tiled_cache_key(problem: UnifiedAttentionProblem) -> Tuple:
         _enable_gfx942_flash_mask_limit(problem),
         _enable_gfx942_flash_k_sliced_ring(problem),
         _enable_gfx942_flash_k_sliced_ldsseq(problem),
+        # bf16-wide non-ring geometry knobs: cfvst (HIPDNN_GFX942_BF16_CFVST) and
+        # small-tile double-K (HIPDNN_GFX942_D128_SMALLTILE_DK) affect num_warps,
+        # use_k_single_buffer, and tile_size in _tiled_spec_from_problem. When the
+        # ring is active these are overridden by the ring path and don't need
+        # separate key entries (ring geometry is already captured above).
+        (
+            (
+                _gfx942_bf16_wide_geometry(problem),
+                _gfx942_bf16_wide_tile_size(problem),
+                _gfx942_bf16_wide_use_cfvst(problem),
+            )
+            if _enable_gfx942_bf16_flash(problem)
+            and not _enable_gfx942_flash_k_sliced_ring(problem)
+            else None
+        ),
     )
 
 
@@ -1866,8 +1881,8 @@ def _tiled_spec_from_problem(
             block_m_per_warp=16,
         )
     if _enable_gfx942_bf16_flash(problem):
-        # gfx942 bf16 wide-K (32x32x8) transposed flash path. OPT-IN
-        # (HIPDNN_GFX942_BF16_WIDE=1); default dispatch is byte-identical.
+        # gfx942 bf16 wide-K (32x32x8) transposed flash path. DEFAULT-ON for
+        # eligible shapes (small_q_narrow excluded; see _enable_gfx942_bf16_flash).
         # Uses the CDNA3-legal mfma_f32_32x32x8_bf16 atom (the K=16 bf16 atom is
         # gfx950-only). The transposed orientation consumes V from strided LDS +
         # P^T from registers (no P_lds, no gfx950-only transpose reads).
@@ -3334,12 +3349,16 @@ def _get_2d_launch_meta(
     if meta_key in _2D_LAUNCH_META:
         return _2D_LAUNCH_META[meta_key]
     arch = _resolve_attention_arch()
-    num_warps = (
-        _select_gfx942_flash_num_warps(problem)
-        if _enable_gfx942_fp16_flash(problem)
-        else _select_2d_num_warps(problem)
-    )
-    block_m_per_warp = _select_2d_block_m_per_warp(problem)
+    if _enable_gfx942_bf16_flash(problem):
+        nw, _ = _gfx942_bf16_wide_geometry(problem)
+        num_warps = nw
+        block_m_per_warp = 32
+    elif _enable_gfx942_fp16_flash(problem):
+        num_warps = _select_gfx942_flash_num_warps(problem)
+        block_m_per_warp = _select_2d_block_m_per_warp(problem)
+    else:
+        num_warps = _select_2d_num_warps(problem)
+        block_m_per_warp = _select_2d_block_m_per_warp(problem)
     block_m = num_warps * block_m_per_warp
     block_q = (
         block_m // problem.num_queries_per_kv
