@@ -146,7 +146,14 @@ protected:
     void verifyGraph(hipdnn_frontend::graph::Graph& graph)
     {
         if(TestConfig::get().hasCaptureDir())
+        {
             captureGraphBundle(graph);
+            auto* info = ::testing::UnitTest::GetInstance()->current_test_info();
+            HIPDNN_SDK_LOG_INFO("Capture-only mode: skipping execution for "
+                                << (info ? info->test_suite_name() : "?") << "."
+                                << (info ? info->name() : "?"));
+            return;
+        }
 
         ASSERT_NO_FATAL_FAILURE(ensureEngineSupport(graph));
         if(testing::Test::IsSkipped())
