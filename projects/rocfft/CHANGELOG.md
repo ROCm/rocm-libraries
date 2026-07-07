@@ -5,13 +5,16 @@ Documentation for rocFFT is available at
 
 ## Since last release (ROCm 7.14)
 
+### Added
+
+* Added optional RCCL (ROCm Collective Communications Library) backend for single-node multi-GPU communication, enabled via `-DROCFFT_RCCL_ENABLE=ON`.
+
 ## rocFFT 1.0.38 for ROCm 7.14
 
 ### Added
 
 * Generalized multi-device computations for transforms such that each of the length dimension is fully covered either in all the input field's bricks or in all the output field's bricks, regardless of the type and placement of the transform. Note specifically for real transforms: the innermost length dimension must be fully covered in all the input (resp. output) field's bricks for real forward (resp. inverse) transforms.
 * Support for the gfx1250 architecture.
-* Added optional RCCL (ROCm Collective Communications Library) backend for single-node multi-GPU communication, enabled via `-DROCFFT_RCCL_ENABLE=ON`.
 
 ### Optimized
 
