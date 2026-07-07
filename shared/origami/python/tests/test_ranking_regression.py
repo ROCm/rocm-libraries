@@ -109,30 +109,13 @@ def result_to_config_tuple(result: origami.prediction_result_t) -> list[int]:
     ]
 
 
-def _leveled_estimation_pipeline() -> "origami.ranking_pipeline_t":
-    """A single estimation phase -> exercises the leveled coarse-to-fine cascade
-    (GemmModel::score_candidates -> score_estimation_leveled), matching the path
-    hipBLASLt uses when leveled estimation is enabled."""
-    phase = origami.ranking_phase_t()
-    phase.model = origami.model_t.gemm
-    phase.target = origami.target_t.tensilelite
-    phase.fidelity = origami.prediction_modes_t.estimation
-    pipeline = origami.ranking_pipeline_t()
-    pipeline.phases = [phase]
-    return pipeline
-
-
 def generate_rankings(
     arch_name: str,
     dtype: str,
     transA: origami.transpose_t = origami.transpose_t.T,
     transB: origami.transpose_t = origami.transpose_t.N,
-    variant: str = "flat",
 ) -> dict[str, list[list[int]]]:
     """Generate rankings for all test problem sizes.
-
-    variant="flat"    -> single-pass estimation (select_topk_configs).
-    variant="leveled" -> the leveled coarse-to-fine cascade via an estimation pipeline.
     
     Returns a dict mapping problem_key -> list of config tuples.
     Each config tuple is [mt_m, mt_n, mt_k, mi_m, mi_n, mi_k, occ, wgm].
@@ -149,18 +132,11 @@ def generate_rankings(
     if not configs:
         return {}
 
-    pipeline = _leveled_estimation_pipeline() if variant == "leveled" else None
-
     rankings = {}
     for m, n, k, batch in TEST_PROBLEM_SIZES:
         problem = create_problem(m, n, k, dtype, batch, transA, transB)
         try:
-            if pipeline is not None:
-                ranked = origami.rank_configs(
-                    problem, hardware, configs, origami.model_t.gemm, pipeline)[:TOP_K]
-            else:
-                ranked = origami.select_topk_configs(
-                    problem, hardware, configs, TOP_K, origami.model_t.gemm)
+            ranked = origami.select_topk_configs(problem, hardware, configs, TOP_K, origami.model_t.gemm)
             if ranked:
                 key = f"{m}x{n}x{k}x{batch}"
                 rankings[key] = [result_to_config_tuple(r) for r in ranked]
@@ -176,23 +152,18 @@ except ImportError:
     from yaml import SafeDumper, SafeLoader
 
 
-def get_baseline_path(arch_name: str, variant: str = "flat") -> Path:
-    """Get the path to the baseline file for an architecture / ranking variant.
-
-    variant "flat" is the single-pass estimation path (select_topk_configs);
-    "leveled" is the coarse-to-fine leveled cascade (estimation pipeline phase).
-    """
-    suffix = "" if variant == "flat" else f"_{variant}"
-    return BASELINE_DIR / f"{arch_name}{suffix}.yaml"
+def get_baseline_path(arch_name: str) -> Path:
+    """Get the path to the baseline file for an architecture."""
+    return BASELINE_DIR / f"{arch_name}.yaml"
 
 
 @lru_cache(maxsize=None)
-def load_arch_baseline(arch_name: str, variant: str = "flat") -> dict | None:
-    """Load and cache the full baseline for an architecture / variant.
+def load_arch_baseline(arch_name: str) -> dict | None:
+    """Load and cache the full baseline for an architecture.
     
     Returns the parsed YAML dict, or None if file doesn't exist.
     """
-    path = get_baseline_path(arch_name, variant)
+    path = get_baseline_path(arch_name)
     if not path.exists():
         return None
     
@@ -208,11 +179,10 @@ def transpose_key(transA: origami.transpose_t, transB: origami.transpose_t) -> s
 
 
 def load_baseline(
-    arch_name: str, dtype: str, transA: origami.transpose_t, transB: origami.transpose_t,
-    variant: str = "flat",
+    arch_name: str, dtype: str, transA: origami.transpose_t, transB: origami.transpose_t
 ) -> dict[str, list[list[int]]] | None:
-    """Load baseline rankings for a specific arch/dtype/transpose/variant combination."""
-    baseline = load_arch_baseline(arch_name, variant)
+    """Load baseline rankings for a specific arch/dtype/transpose combination."""
+    baseline = load_arch_baseline(arch_name)
     if baseline is None:
         return None
     
@@ -228,11 +198,10 @@ def save_baseline(
     transA: origami.transpose_t,
     transB: origami.transpose_t,
     rankings: dict[str, list[list[int]]],
-    variant: str = "flat",
 ) -> None:
-    """Save rankings to the architecture's YAML baseline file (per variant)."""
+    """Save rankings to the architecture's YAML baseline file."""
     BASELINE_DIR.mkdir(parents=True, exist_ok=True)
-    path = get_baseline_path(arch_name, variant)
+    path = get_baseline_path(arch_name)
     
     if path.exists():
         with open(path, "r") as f:
@@ -308,37 +277,33 @@ class TestRankingRegression:
     @pytest.mark.parametrize("dtype", SUPPORTED_DTYPES)
     @pytest.mark.parametrize("transA", TRANSPOSE_VALUES)
     @pytest.mark.parametrize("transB", TRANSPOSE_VALUES)
-    @pytest.mark.parametrize("variant", ["flat", "leveled"])
     def test_ranking_stability(
         self,
         arch_name: str,
         dtype: str,
         transA: origami.transpose_t,
         transB: origami.transpose_t,
-        variant: str,
         generate_baseline: bool,
     ):
-        """Test that rankings remain stable compared to baseline, for both the
-        single-pass ('flat') and the leveled coarse-to-fine ('leveled') paths."""
+        """Test that rankings remain stable compared to baseline."""
         trans_str = transpose_key(transA, transB)
-        tag = f"{arch_name}/{dtype}/{trans_str}/{variant}"
 
         if not is_dtype_supported(arch_name, dtype):
             pytest.skip(f"No {dtype} support for {arch_name}")
 
-        current = generate_rankings(arch_name, dtype, transA, transB, variant)
+        current = generate_rankings(arch_name, dtype, transA, transB)
 
         if not current:
-            pytest.skip(f"No valid configs generated for {tag}")
+            pytest.skip(f"No valid configs generated for {arch_name}/{dtype}/{trans_str}")
 
         if generate_baseline:
-            save_baseline(arch_name, dtype, transA, transB, current, variant)
-            pytest.skip(f"Generated baseline for {tag}")
+            save_baseline(arch_name, dtype, transA, transB, current)
+            pytest.skip(f"Generated baseline for {arch_name}/{dtype}/{trans_str}")
 
-        baseline = load_baseline(arch_name, dtype, transA, transB, variant)
+        baseline = load_baseline(arch_name, dtype, transA, transB)
         if baseline is None:
             pytest.fail(
-                f"No baseline file found for {tag}. "
+                f"No baseline file found for {arch_name}/{dtype}/{trans_str}. "
                 f"Run with --generate-baseline to create it."
             )
 
@@ -349,5 +314,5 @@ class TestRankingRegression:
             if len(differences) > 10:
                 diff_summary += f"\n... and {len(differences) - 10} more differences"
             pytest.fail(
-                f"Ranking regression detected for {tag}:\n{diff_summary}"
+                f"Ranking regression detected for {arch_name}/{dtype}/{trans_str}:\n{diff_summary}"
             )
