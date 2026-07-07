@@ -81,8 +81,6 @@ def makeIsaInfoMap(targetIsas: List[IsaVersion], cxxCompiler: str) -> Dict[IsaVe
     Returns:
         A map of ISA versions to capabilities.
     """
-    import os as _os
-    _diag = _os.environ.get("TENSILE_CAP_DIAG")
     isaInfoMap = {}
     ti = rocisa.rocIsa.getInstance()
     for v in targetIsas:
@@ -91,7 +89,10 @@ def makeIsaInfoMap(targetIsas: List[IsaVersion], cxxCompiler: str) -> Dict[IsaVe
         archCaps = ti.getIsaInfo(v).archCaps
         regCaps = ti.getIsaInfo(v).regCaps
         asmBugs = ti.getIsaInfo(v).asmBugs
-        if _diag and tuple(v) == (9, 4, 2) and not asmCaps.get("SupportedISA"):
+        # TEMP (AIHPBLAS-3877): gfx942 probing unsupported is always anomalous;
+        # dump the real compiler error/context once. Unconditional so it does not
+        # depend on env propagation through tox. To be reverted.
+        if tuple(v) == (9, 4, 2) and not asmCaps.get("SupportedISA"):
             _capDiagDump(v, cxxCompiler)
         isaInfoMap[v] = IsaInfo(asmCaps, archCaps, regCaps, asmBugs)
     return isaInfoMap
