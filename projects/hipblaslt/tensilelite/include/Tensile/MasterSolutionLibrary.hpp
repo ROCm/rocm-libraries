@@ -37,9 +37,7 @@
 #include <Tensile/Tensile.hpp>
 #include <Tensile/TensorOps.hpp>
 
-#include <Tensile/Macros.hpp>
-
-TENSILE_HIDDEN_BEGIN
+#include <tensilelitehost/export.h>
 
 namespace fs = std::filesystem;
 
@@ -405,4 +403,3 @@ namespace TensileLite
 
 } // namespace TensileLite
 
-TENSILE_HIDDEN_END
