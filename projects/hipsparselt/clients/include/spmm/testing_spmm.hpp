@@ -223,7 +223,7 @@ void testing_spmm_bad_arg(const Arguments& arg)
     CHECK_DEVICE_ALLOCATION(dC.memcheck());
     CHECK_DEVICE_ALLOCATION(dD.memcheck());
 
-    hipsparseLtHandle_t      handle_;
+    hipsparseLtHandle_t     handle_;
     hipsparseLtMatmulPlan_t plan_;
 
     hipsparselt_local_handle    handle{arg};
@@ -574,13 +574,21 @@ void testing_spmm(const Arguments& arg)
     hipsparselt_seedrand();
 
     // Gate ld and stride: from arg.ldg/arg.stride_gate; validated in client.cpp.
-    const int64_t ldg = arg.ldg;
-    const int64_t stride_gate
-        = do_strided_batched              ? arg.stride_gate
-          : orderD == HIPSPARSE_ORDER_COL ? ldg * N
-                                          : ldg * M;
+    const int64_t ldg = arg.ldg == -1 ? (orderD == HIPSPARSE_ORDER_COL ? M : N) : arg.ldg;
 
-    const size_t size_gate = arg.gate_residual ? (stride_gate == 0 ? (orderD == HIPSPARSE_ORDER_COL ? ldd * N : ldd * M) * num_batches : stride_gate * num_batches) : 0;
+    const int64_t stride_gate
+        = do_strided_batched
+              ? (arg.stride_gate == -1 ? (orderD == HIPSPARSE_ORDER_COL ? ldg * N : ldg * M)
+                                       : arg.stride_gate)
+          : do_batched ? (orderD == HIPSPARSE_ORDER_COL ? ldg * N : ldg * M)
+                       : 0;
+
+    const size_t size_gate
+        = arg.gate_residual
+              ? (stride_gate == 0
+                     ? (orderD == HIPSPARSE_ORDER_COL ? ldg * N : ldg * M) * num_batches
+                     : stride_gate * num_batches)
+              : 0;
 
     device_vector<TGate> dGate(size_gate, 1, HMM);
     CHECK_DEVICE_ALLOCATION(dGate.memcheck());
@@ -588,20 +596,15 @@ void testing_spmm(const Arguments& arg)
     if(arg.gate_residual)
     {
         hipsparselt_init<TGate>(hGate,
-                             orderD == HIPSPARSE_ORDER_COL ? M : N,
-                             orderD == HIPSPARSE_ORDER_COL ? N : M,
-                             ldg,
-                             stride_gate,
-                             num_batches);
+                                orderD == HIPSPARSE_ORDER_COL ? M : N,
+                                orderD == HIPSPARSE_ORDER_COL ? N : M,
+                                ldg,
+                                stride_gate,
+                                num_batches);
         CHECK_HIP_ERROR(dGate.transfer_from(hGate));
         // Create a mat descriptor for the gate using arg.gate_type
-        hipsparselt_local_mat_descr matGate(hipsparselt_matrix_type_dense,
-                                            handle,
-                                            M,
-                                            N,
-                                            ldg,
-                                            arg.gate_type,
-                                            orderD);
+        hipsparselt_local_mat_descr matGate(
+            hipsparselt_matrix_type_dense, handle, M, N, ldg, arg.gate_type, orderD);
         if(do_batched || do_strided_batched)
         {
             EXPECT_HIPSPARSE_STATUS(
@@ -619,17 +622,17 @@ void testing_spmm(const Arguments& arg)
         void* _dGate = dGate;
         EXPECT_HIPSPARSE_STATUS(
             hipsparseLtMatmulDescSetAttribute(handle,
-                                             matmul,
-                                             HIPSPARSELT_MATMUL_GATE_RESIDUAL_MAT_POINTER,
-                                             &_dGate,
-                                             sizeof(void*)),
+                                              matmul,
+                                              HIPSPARSELT_MATMUL_GATE_RESIDUAL_MAT_POINTER,
+                                              &_dGate,
+                                              sizeof(void*)),
             HIPSPARSE_STATUS_SUCCESS);
         EXPECT_HIPSPARSE_STATUS(
             hipsparseLtMatmulDescSetAttribute(handle,
-                                             matmul,
-                                             HIPSPARSELT_MATMUL_GATE_RESIDUAL_DESC,
-                                             &matGate,
-                                             sizeof(hipsparseLtMatDescriptor_t*)),
+                                              matmul,
+                                              HIPSPARSELT_MATMUL_GATE_RESIDUAL_DESC,
+                                              &matGate,
+                                              sizeof(hipsparseLtMatDescriptor_t*)),
             HIPSPARSE_STATUS_SUCCESS);
     }
 
@@ -683,7 +686,7 @@ void testing_spmm(const Arguments& arg)
     hipsparselt_local_matmul_alg_selection alg_sel(handle, matmul, HIPSPARSELT_MATMUL_ALG_DEFAULT);
 
     size_t workspace_size = 0, compressed_size = 0, compress_buffer_size = 0;
-    int config_max_id = 0;
+    int    config_max_id = 0;
     hipsparseLtMatmulAlgGetAttribute(
         handle, alg_sel, HIPSPARSELT_MATMUL_ALG_CONFIG_MAX_ID, &config_max_id, sizeof(int));
     {
@@ -721,7 +724,9 @@ void testing_spmm(const Arguments& arg)
     {
         if(arg.solution_index >= config_max_id)
         {
-            hipsparselt_cerr << "The given solution_index(" << arg.solution_index << ") is out of the rang [0, " << config_max_id - 1 << "]" << std::endl;
+            hipsparselt_cerr << "The given solution_index(" << arg.solution_index
+                             << ") is out of the rang [0, " << config_max_id - 1 << "]"
+                             << std::endl;
             return;
         }
         hipsparseLtMatmulAlgSetAttribute(
@@ -957,7 +962,7 @@ void testing_spmm(const Arguments& arg)
 #define bias_act_param M, N, ldd, hD_gold_act + pos, hD_gold_act + pos, hBias + bias_stride* i
 #define bias_param M, N, ldd, hD_gold_act + pos, hD_gold + pos, hBias + bias_stride* i
 #define gate_residual_param \
-    M, N, ldd, ldg, hD_gold_act + pos, hD_gold + pos, hGate.data() + stride_gate * i
+    M, N, ldd, ldg, hD_gold_act + pos, hD_gold + pos, hGate.data() + stride_gate* i
 
         for(int i = 0; i < num_batches; i++)
         {
@@ -981,7 +986,8 @@ void testing_spmm(const Arguments& arg)
                                                hD_gold_act + stride_d * i,
                                                ldd,
                                                tSizeD,
-                                               arg.alpha_vector_scaling ? hAlpahVector : (float*)nullptr,
+                                               arg.alpha_vector_scaling ? hAlpahVector
+                                                                        : (float*)nullptr,
                                                false);
 
                 auto pos = stride_d * i;
@@ -1068,11 +1074,9 @@ void testing_spmm(const Arguments& arg)
                 if(arg.gate_residual)
                 {
                     if(orderD == HIPSPARSE_ORDER_COL)
-                        gate_residual<Talpha, TGate, To, HIPSPARSE_ORDER_COL>(
-                            gate_residual_param);
+                        gate_residual<Talpha, TGate, To, HIPSPARSE_ORDER_COL>(gate_residual_param);
                     else
-                        gate_residual<Talpha, TGate, To, HIPSPARSE_ORDER_ROW>(
-                            gate_residual_param);
+                        gate_residual<Talpha, TGate, To, HIPSPARSE_ORDER_ROW>(gate_residual_param);
                 }
             }
 
@@ -1094,7 +1098,8 @@ void testing_spmm(const Arguments& arg)
                                            hD_gold + stride_d * i,
                                            ldd,
                                            tSizeD,
-                                           arg.alpha_vector_scaling ? hAlpahVector : (float*)nullptr,
+                                           arg.alpha_vector_scaling ? hAlpahVector
+                                                                    : (float*)nullptr,
                                            false);
         }
 #undef activation_act_param
@@ -1217,9 +1222,9 @@ void testing_spmm(const Arguments& arg)
         default:
             break;
         }
-#define argument_param_nb                                                                                 \
-    e_sparse_b, e_transA, e_transB, e_M, e_N, e_K, e_alpha, e_lda, e_stride_a, e_beta, e_ldb, e_stride_b, \
-        e_ldc, e_stride_c, e_ldd, e_stride_d
+#define argument_param_nb                                                                     \
+    e_sparse_b, e_transA, e_transB, e_M, e_N, e_K, e_alpha, e_lda, e_stride_a, e_beta, e_ldb, \
+        e_stride_b, e_ldc, e_stride_c, e_ldd, e_stride_d
 #define argument_param argument_param_nb, e_batch_count
 
         if(do_batched || do_strided_batched)
@@ -1689,11 +1694,7 @@ void testing_aux_plan_assign(const Arguments& arg)
     CHECK_HIP_ERROR(hipStreamDestroy(stream));
 }
 
-template <typename Ti,
-          typename To,
-          typename Tc,
-          typename TBias,
-          typename TGate = Ti>
+template <typename Ti, typename To, typename Tc, typename TBias, typename TGate = Ti>
 void testing_spmm_logging(const Arguments& arg)
 {
     Logger logger(arg.logging);
