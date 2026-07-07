@@ -127,13 +127,33 @@ macro(dapper_add_sharded_test)
     )
     set_tests_properties(miopen_gtest_sharded_dapper PROPERTIES
         FIXTURES_REQUIRED dapper_tests_fixture
-        FIXTURES_CLEANUP  dapper_final_fixture
     )
 
-    # Ensure all shards must complete before miopen_gtest_sharded_dapper runs
-    set_tests_properties(${MIOPEN_GTEST_SHARDS} PROPERTIES
-        FIXTURES_REQUIRED dapper_final_fixture
-    )
+    # Force miopen_gtest_sharded_dapper to run dead last so its analysis summary prints at the very
+    # end of the ctest output, not interleaved with (or buried under) the buffered output of
+    # long-running tests that are still finishing (test_conv3d, test_immed_conv3d, ...).
+    #
+    # We use the DEPENDS test property rather than a FIXTURES_CLEANUP fixture on purpose. DEPENDS
+    # only orders tests that are *already* selected to run; it never pulls extra tests into a run.
+    # A FIXTURES_REQUIRED-on-every-test scheme would instead auto-pull the dapper setup/shard chain
+    # into any subset run (e.g. `ctest -R conv_transposed_wrw`), which is slow and can fail because
+    # dapper_tests_generate would run without shard XML present.
+    #
+    # dapper must run after every other test. The shard tests are in this directory scope
+    # (MIOPEN_GTEST_SHARDS); the remaining tests are defined in the parent test/ directory, which is
+    # fully processed before this subdirectory is added (add_subdirectory(gtest) is its last
+    # statement), so the parent's TESTS directory property is complete and safe to read here.
+    get_property(_dapper_parent_tests DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}/.. PROPERTY TESTS)
+    set(_dapper_predecessors ${_dapper_parent_tests} ${MIOPEN_GTEST_SHARDS})
+    # dapper_tests_generate is already ordered before dapper via dapper_tests_fixture; exclude it and
+    # dapper itself from the dependency list.
+    list(REMOVE_ITEM _dapper_predecessors miopen_gtest_sharded_dapper dapper_tests_generate)
+    if(_dapper_predecessors)
+        set_property(TEST miopen_gtest_sharded_dapper APPEND PROPERTY
+            DEPENDS "${_dapper_predecessors}")
+    endif()
+    unset(_dapper_parent_tests)
+    unset(_dapper_predecessors)
 
     # CMake target equivalent to miopen_gtest_sharded_dapper
     add_custom_target(dapper_diff
