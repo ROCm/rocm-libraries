@@ -99,35 +99,35 @@ jobs:
           echo "pid_max=$(cat /proc/sys/kernel/pid_max 2>/dev/null) threads-max=$(cat /proc/sys/kernel/threads-max 2>/dev/null)"
           echo "cgroup v2 pids.max=$(cat /sys/fs/cgroup/pids.max 2>/dev/null) current=$(cat /sys/fs/cgroup/pids.current 2>/dev/null)"
           echo "cgroup v1 pids.max=$(cat /sys/fs/cgroup/pids/pids.max 2>/dev/null) current=$(cat /sys/fs/cgroup/pids/pids.current 2>/dev/null)"
-          # Write a real module so 'spawn'/'forkserver' can re-import it.
-          cat > /tmp/wprobe.py <<'PYEOF'
-          import os, sys, multiprocessing as mp
-          sys.path.insert(0, os.environ["TL_DIR"])
+          # Minimal reproducer test that exercises the exact fixture path
+          # (session isa_info_map -> gfx942 SupportedISA) under pytest, so we can
+          # compare serial vs pytest-xdist vs pytest-xdist+coverage in this
+          # container and isolate the trigger.
+          cat > /tmp/test_capprobe.py <<'PYEOF'
+          import pytest
           from Tensile.Toolchain.Validators import validateToolchain
           from Tensile.Common.Architectures import SUPPORTED_ISA
           from Tensile.Common.Capabilities import makeIsaInfoMap
 
-          # Mimic the per-xdist-worker session fixture: compute caps for ALL ISAs.
-          def fullProbe(_=0):
-              cxx = validateToolchain("amdclang++")
-              m = makeIsaInfoMap(list(SUPPORTED_ISA), cxx)
-              k = [k for k in m if tuple(k) == (9, 4, 2)][0]
-              return int(m[k].asmCaps.get("SupportedISA"))
+          @pytest.fixture(scope="session")
+          def cxx():
+              return validateToolchain("amdclang++")
 
-          if __name__ == "__main__":
-              for n in (4, 8):
-                  for method in ("fork", "spawn"):
-                      try:
-                          ctx = mp.get_context(method)
-                          with ctx.Pool(n) as pool:
-                              res = pool.map(fullProbe, range(n))
-                          print(f"{method} x{n}: gfx942 SupportedISA per-worker = {res} "
-                                f"(zeros={res.count(0)})", flush=True)
-                      except Exception as e:
-                          print(f"{method} x{n}: EXC {e!r}", flush=True)
+          @pytest.fixture(scope="session")
+          def isa_info_map(cxx):
+              return makeIsaInfoMap(SUPPORTED_ISA, cxx)
+
+          @pytest.mark.parametrize("i", range(8))
+          def test_gfx942_supported(isa_info_map, i):
+              k = [k for k in isa_info_map if tuple(k) == (9, 4, 2)][0]
+              assert isa_info_map[k].asmCaps["SupportedISA"], f"SupportedISA=0 (i={i})"
           PYEOF
-          TL_DIR="$PWD" PYTHONPATH="$PWD" "$PY" /tmp/wprobe.py
-          echo "diag rc=$?"
+          run() { echo "--- $1 ---"; PYTHONPATH="$PWD" "$PY" -m pytest -o addopts="" \
+            -p no:cacheprovider /tmp/test_capprobe.py "${@:2}" -q 2>&1 | tail -6; }
+          run "serial"
+          run "xdist-n4" -n 4
+          run "xdist-n4+cov" -n 4 --cov=Tensile --cov-report=
+          echo "diag done"
           exit 0
 
       - name: Upload coverage reports
