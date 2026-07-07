@@ -28,7 +28,11 @@ if(ROCKE_BUILD_PYENV)
     set(ROCKE_PYENV_DIR "${CMAKE_BINARY_DIR}/rocke-pyenv")
     set(ROCKE_PYENV_STAMP "${CMAKE_BINARY_DIR}/rocke-pyenv.stamp")
     if(WIN32)
-        set(_rocke_pyenv_python "${ROCKE_PYENV_DIR}/Scripts/python.exe")
+        # The venv mirrors the invoking interpreter's filename (python.exe or
+        # python3.exe depending on the installation).  Derive it from
+        # Python3_EXECUTABLE so the path always matches what venv actually creates.
+        cmake_path(GET Python3_EXECUTABLE FILENAME _rocke_py_name)
+        set(_rocke_pyenv_python "${ROCKE_PYENV_DIR}/Scripts/${_rocke_py_name}")
     else()
         set(_rocke_pyenv_python "${ROCKE_PYENV_DIR}/bin/python")
     endif()
