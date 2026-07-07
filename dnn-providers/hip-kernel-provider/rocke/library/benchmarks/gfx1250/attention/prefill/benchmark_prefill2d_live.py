@@ -20,7 +20,7 @@ Run:
 
     export AITER_PATH=<path/to/aiter>
     PYTHONPATH="python:${AITER_PATH}" \
-      python rocke/library/benchmarks/gfx1250/attention/benchmark_prefill2d_live.py \
+      python rocke/library/benchmarks/gfx1250/attention/prefill/benchmark_prefill2d_live.py \
         --shapes <path/to/unified_attention_shapes.jsonl> \
         --limit 20
 
