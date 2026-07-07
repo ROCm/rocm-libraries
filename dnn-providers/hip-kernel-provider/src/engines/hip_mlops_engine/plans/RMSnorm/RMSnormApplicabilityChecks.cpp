@@ -20,7 +20,7 @@ namespace hip_kernel_provider::rmsnorm
 
 void RMSnormValidator::checkTensorLayoutsAndDimsSupported(const std::vector<int64_t>& tensorIds)
 {
-    // Skip tensors with embedded scalar values (epsilon, momentum) - they don't have layouts or dimensions to validate
+    // Skip tensors with embedded scalar values (epsilon) - they don't have layouts or dimensions to validate
     std::vector<TensorDescriptor> tensors;
     tensors.reserve(tensorIds.size());
 
