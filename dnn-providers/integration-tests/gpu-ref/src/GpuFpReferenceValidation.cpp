@@ -1,13 +1,13 @@
 // Copyright © Advanced Micro Devices, Inc., or its affiliates.
 // SPDX-License-Identifier:  MIT
 
-#include <hipdnn_gpu_ref/GpuFpReferenceValidation.hpp>
+#include <hipdnn-gpu-ref/GpuFpReferenceValidation.hpp>
 
 #include <cstdint>
+#include <hipdnn-gpu-ref/detail/GpuRefKernelCompiler.hpp>
+#include <hipdnn-gpu-ref/detail/GpuRefValidatorHelpers.hpp>
+#include <hipdnn-gpu-ref/detail/HipRtcTypeName.hpp>
 #include <hipdnn_data_sdk/utilities/MigratableMemory.hpp>
-#include <hipdnn_gpu_ref/detail/GpuRefKernelCompiler.hpp>
-#include <hipdnn_gpu_ref/detail/GpuRefValidatorHelpers.hpp>
-#include <hipdnn_gpu_ref/detail/HipRtcTypeName.hpp>
 #include <stdexcept>
 
 namespace hipdnn_gpu_ref

@@ -1,9 +1,9 @@
 // Copyright © Advanced Micro Devices, Inc., or its affiliates.
 // SPDX-License-Identifier:  MIT
 
-#include <hipdnn_gpu_ref/detail/GpuRefValidatorHelpers.hpp>
+#include <hipdnn-gpu-ref/detail/GpuRefValidatorHelpers.hpp>
 
-#include <hipdnn_gpu_ref/detail/GpuRefHipError.hpp>
+#include <hipdnn-gpu-ref/detail/GpuRefHipError.hpp>
 
 #include <limits>
 #include <stdexcept>

@@ -12,7 +12,7 @@
 #include <flatbuffers/flatbuffers.h>
 #include <nlohmann/json.hpp>
 
-#include "harness/input_init/InputInitSpec.hpp"
+#include "harness/input-init/InputInitSpec.hpp"
 
 namespace hipdnn_integration_tests
 {

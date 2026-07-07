@@ -4,8 +4,8 @@
 #include <gtest/gtest.h>
 #include <hip/hip_runtime.h>
 
+#include <hipdnn-gpu-ref/detail/ShallowDeviceOnlyMigratableMemory.hpp>
 #include <hipdnn_data_sdk/utilities/Workspace.hpp>
-#include <hipdnn_gpu_ref/detail/ShallowDeviceOnlyMigratableMemory.hpp>
 #include <hipdnn_test_sdk/utilities/TestUtilities.hpp>
 
 #include <cstddef>

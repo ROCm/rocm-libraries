@@ -4,7 +4,7 @@
 #include <gtest/gtest.h>
 #include <hipdnn_test_sdk/utilities/TestUtilities.hpp>
 
-#include <hipdnn_gpu_ref/detail/GpuRefKernelCompiler.hpp>
+#include <hipdnn-gpu-ref/detail/GpuRefKernelCompiler.hpp>
 
 #include <stdexcept>
 
