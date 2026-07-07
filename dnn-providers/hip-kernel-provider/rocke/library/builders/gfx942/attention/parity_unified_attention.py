@@ -35,13 +35,13 @@ The harness:
 
 Run (needs torch + a gfx942 GPU):
 
-    PYTHONPATH=Python .venv/bin/python \\
-        Python/rocke/library/builders/gfx942/attention/parity_unified_attention.py \\
+    PYTHONPATH=python .venv/bin/python \\
+        python/rocke/library/builders/gfx942/attention/parity_unified_attention.py \\
         --scenario correctness
 
     # force the L4 (WG=64) fallback instead of the default wide4:
-    HIPDNN_GFX942_FLASH_WIDE=0 PYTHONPATH=Python .venv/bin/python \\
-        Python/rocke/library/builders/gfx942/attention/parity_unified_attention.py \\
+    HIPDNN_GFX942_FLASH_WIDE=0 PYTHONPATH=python .venv/bin/python \\
+        python/rocke/library/builders/gfx942/attention/parity_unified_attention.py \\
         --scenario Fp16_Prefill_GQA_S2048_D128
 """
 
@@ -122,7 +122,14 @@ def select_shapes(shapes: List[Shape], selectors: Optional[List[str]]) -> List[S
     for sel in selectors:
         if sel == "all":
             picked = shapes
-        elif sel in ("correctness", "perf", "decode"):
+        elif sel in (
+            "correctness",
+            "perf",
+            "decode",
+            "gqa_nqk_nonpow2",
+            "short_prefill",
+            "long_prefill",
+        ):
             picked = [s for s in shapes if s.group == sel]
         else:
             picked = [s for s in shapes if s.name == sel]
@@ -656,7 +663,7 @@ def main() -> int:
         "--scenario",
         action="append",
         default=None,
-        help="group (correctness|perf|all) or an exact shape name; repeatable",
+        help="group (correctness|perf|decode|short_prefill|long_prefill|gqa_nqk_nonpow2|all) or exact shape name; repeatable",
     )
     parser.add_argument("--attempts", type=int, default=30)
     parser.add_argument("--warmup", type=int, default=10)
