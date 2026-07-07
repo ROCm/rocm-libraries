@@ -19,7 +19,7 @@ Triton so you get the Triton baseline across the full set.
 Run:
 
     export AITER_PATH=<path/to/aiter>
-    PYTHONPATH="Python:${AITER_PATH}" \
+    PYTHONPATH="python:${AITER_PATH}" \
       python rocke/library/benchmarks/gfx1250/attention/benchmark_prefill2d_live.py \
         --shapes <path/to/unified_attention_shapes.jsonl> \
         --limit 20
