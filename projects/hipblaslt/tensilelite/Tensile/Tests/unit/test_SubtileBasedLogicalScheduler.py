@@ -4083,11 +4083,12 @@ class _InitCPool:
         return self._size
 
 
-def _initc_writer(has_wmma=False):
+def _initc_writer(has_wmma=False, has_wmma_arb_stall=False):
     from types import SimpleNamespace
     w = SimpleNamespace()
     w.states = SimpleNamespace(
         asmCaps={"HasWMMA_AccImmZero": has_wmma},
+        archCaps={"HasWmmaArbStallBit": has_wmma_arb_stall},
         regCaps={"MaxVgpr": 256},
     )
     w.vgprPool = _InitCPool()
@@ -4215,3 +4216,24 @@ class TestInitCMakeOpWiring:
 
         assert src.count("initD: [") == 5, f"expected 5 MFMAs (D self-reuse):\n{src[:600]}"
         assert w.vgprPool.size() == 100, "no pool growth expected"
+
+    def test_wmma_reuse_flags_on_gfx1250(self):
+        """gfx1250 initC WMMA instructions get reuseA/reuseB on all but the last."""
+        from rocisa.instruction import MFMAInstruction
+        s = LogicalScheduler.__new__(LogicalScheduler)
+        op = s._make_initC_op()
+
+        w = _initc_writer(has_wmma=True, has_wmma_arb_stall=True)
+        dtile = _InitCTileInfo([_InitCTile(0, 32, pool=w.vgprPool)])
+        module = op.build(self._Emitter(w, {"DirectToLds": True}, dtile))
+
+        mfmas = [inst for inst in module.flatitems() if isinstance(inst, MFMAInstruction)]
+        # 32 regs / 8 per inst = 4 chunks; last chunk scalar-zeroed, first 3 are MFMAs
+        assert len(mfmas) == 3, f"expected 3 WMMAs, got {len(mfmas)}"
+        # All but the last MFMA should have reuseA=True, reuseB=True
+        for mfma in mfmas[:-1]:
+            assert mfma.reuseA, f"expected reuseA on {mfma}"
+            assert mfma.reuseB, f"expected reuseB on {mfma}"
+        # Last MFMA should NOT have reuse (no successor)
+        assert not mfmas[-1].reuseA
+        assert not mfmas[-1].reuseB
