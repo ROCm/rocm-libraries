@@ -12,15 +12,6 @@
 #include "mma_traits.hpp"
 #include "mma_transforms.hpp"
 
-#if __clang_major__ >= 23
-#pragma clang diagnostic push
-#pragma clang diagnostic ignored "-Wlifetime-safety-intra-tu-suggestions"
-#endif
-
-#if CK_TILE_CONCEPTS && CK_TILE_CONCEPTS_HEADER
-#include <concepts>
-#endif
-
 namespace ck_tile::core::arch::mma {
 
 /**
@@ -159,20 +150,4 @@ struct MmaPipelineBase
         exec<Params...>(a, b, c, a_scale, b_scale);
     }
 };
-
-#if CK_TILE_CONCEPTS && CK_TILE_CONCEPTS_HEADER
-
-/**
- * @concept MmaPipelineI
- * @brief  Expresses the meta-data interface required for a CRTP MmaPipeline.
- */
-template <typename Derived>
-concept MmaPipelineInterface = std::derived_from<Derived, MmaPipelineBase<Derived>>;
-
-#endif // CK_TILE_CONCEPTS && CK_TILE_CONCEPTS_HEADER
-
 } // namespace ck_tile::core::arch::mma
-
-#if __clang_major__ >= 23
-#pragma clang diagnostic pop
-#endif

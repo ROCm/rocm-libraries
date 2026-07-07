@@ -150,7 +150,7 @@ struct WaveWiseMmaPipeline : public MmaPipelineBase<WaveWiseMmaPipeline<ADataTyp
                     ? 16
                     : MmaOp::kM / MmaOp::kCMBlocks;
 
-            // N size exluding blocks.
+            // N size excluding blocks.
             static constexpr index_t kBNLane = MmaOp::kN / MmaOp::kCNBlocks;
 
             // This value is the size of the middle K dimension, i.e. the second-fastest changing K
@@ -221,7 +221,7 @@ struct WaveWiseMmaPipeline : public MmaPipelineBase<WaveWiseMmaPipeline<ADataTyp
     static_assert(WaveTileK % MmaOp::kK == 0u, "WaveTileK must be a multiple of MmaOp::kK");
 
     // TODO: Why does this even need to be a template? The types should be known.
-    // NOTE: Here we have arrived at the Impl level. We known nothing about CTranspose here, we just
+    // NOTE: Here we have arrived at the Impl level. We know nothing about CTranspose here, we just
     // perform the intrinsic, potentially multiple times for K composition.
     template <typename... Params, typename ATensor, typename BTensor, typename CTensor>
     CK_TILE_DEVICE static void execImpl(ATensor& a, BTensor& b, CTensor& c)
