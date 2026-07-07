@@ -9,7 +9,7 @@
 #include <nanobind/stl/unordered_map.h>
 #include <nanobind/stl/vector.h>
 #include "origami/attention.hpp"
-#include "origami/formocast.hpp"
+#include "origami/simulator/tensilelite/formocast_simulator.hpp"
 #include "origami/gemm.hpp"
 #include "origami/hardware.hpp"
 #include "origami/origami.hpp"

@@ -12,7 +12,7 @@
 
 #include "origami/attention.hpp"
 #include "origami/estimation_leveled.hpp"
-#include "origami/formocast.hpp"
+#include "origami/simulator/tensilelite/formocast_simulator.hpp"
 #include "origami/gemm.hpp"
 #include "origami/model.hpp"
 

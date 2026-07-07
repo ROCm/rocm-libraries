@@ -28,7 +28,7 @@
 #include <stdexcept>
 #include <origami/origami.hpp>
 #include <rocisa/include/enum.hpp>
-#include <origami/formocast.hpp>
+#include <origami/simulator/tensilelite/formocast_simulator.hpp>
 
 #include <tensilelitehost/export.h>
 

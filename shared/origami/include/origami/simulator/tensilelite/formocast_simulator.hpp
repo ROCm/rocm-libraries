@@ -13,6 +13,7 @@
 #include <tuple>
 #include <iostream>
 #include <unordered_map>
+#include <origami/simulator/tensilelite/formocast.hpp>
 #include "origami/types.hpp"
 #include "origami/hardware.hpp"
 #include "origami/origami_export.h"

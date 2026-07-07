@@ -79,8 +79,8 @@ target_sources(origami-headers
         "${CMAKE_CURRENT_SOURCE_DIR}/include/origami/origami.hpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/include/origami/streamk.hpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/include/origami/types.hpp"
-        "${CMAKE_CURRENT_SOURCE_DIR}/include/origami/formocast.hpp"
-        "${CMAKE_CURRENT_SOURCE_DIR}/include/origami/formocast_internal.hpp"
+        "${CMAKE_CURRENT_SOURCE_DIR}/include/origami/simulator/tensilelite/formocast_simulator.hpp"
+        "${CMAKE_CURRENT_SOURCE_DIR}/include/origami/simulator/tensilelite/formocast.hpp"
         "${PROJECT_BINARY_DIR}/include/origami/origami_export.h"
 )
 target_include_directories(
@@ -104,8 +104,8 @@ target_sources(
             "${CMAKE_CURRENT_SOURCE_DIR}/src/common/streamk.cpp"
             "${CMAKE_CURRENT_SOURCE_DIR}/src/models/gemm/gemm_common.cpp"
             "${CMAKE_CURRENT_SOURCE_DIR}/src/models/gemm/estimation_leveled.cpp"
-            "${CMAKE_CURRENT_SOURCE_DIR}/src/models/gemm/formocast.cpp"
-            "${CMAKE_CURRENT_SOURCE_DIR}/src/models/gemm/formocast_internal.cpp"
+            "${CMAKE_CURRENT_SOURCE_DIR}/src/simulator/tensilelite/formocast_simulator.cpp"
+            "${CMAKE_CURRENT_SOURCE_DIR}/src/simulator/tensilelite/formocast.cpp"
             "${CMAKE_CURRENT_SOURCE_DIR}/src/models/gemm/formocast_wrapper.cpp"
             "${CMAKE_CURRENT_SOURCE_DIR}/src/models/attention/attention.cpp"
             "${CMAKE_CURRENT_SOURCE_DIR}/src/engine/origami.cpp"

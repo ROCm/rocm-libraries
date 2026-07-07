@@ -4,7 +4,7 @@
 #include <cstdint>
 
 #include "origami/gemm.hpp"
-#include "origami/formocast.hpp"
+#include "origami/simulator/tensilelite/formocast_simulator.hpp"
 #include "origami/types.hpp"
 
 namespace origami {

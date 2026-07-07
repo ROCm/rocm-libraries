@@ -29,7 +29,7 @@
 #include <catch2/matchers/catch_matchers_string.hpp>
 #include <limits>
 #include "common.hpp"
-#include "origami/formocast.hpp"
+#include "origami/simulator/tensilelite/formocast_simulator.hpp"
 
 using Catch::Approx;
 
