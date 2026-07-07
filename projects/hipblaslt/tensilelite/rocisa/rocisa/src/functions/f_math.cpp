@@ -704,11 +704,11 @@ void math_func(nb::module_ m)
     m.def("vectorMultiply64Bpe",
           nb::overload_cast<std::string, std::string, float, int, const std::string&>(
               &rocisa::vectorMultiply64Bpe<std::string, std::string, int>),
-            nb::arg("dst"),
-            nb::arg("src"),
-            nb::arg("bpe"),
-            nb::arg("tmp"),
-            nb::arg("comment")    = "");
+          nb::arg("dst"),
+          nb::arg("src"),
+          nb::arg("bpe"),
+          nb::arg("tmp"),
+          nb::arg("comment")    = "");
     m.def("scalarMultiplyBpe",
         nb::overload_cast<int, int, float, const std::string&>(
             &rocisa::scalarMultiplyBpe<int, int>),
