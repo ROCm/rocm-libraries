@@ -89,34 +89,4 @@ public:
         const hipdnn_flatbuffers_sdk::data_objects::BatchnormBackwardAttributes& bnBwdAttr);
 };
 
-// --- Batchnorm Type Configuration ---
-
-// hip-kernel-provider batchnorm requirements (based on underlying kernel constraints):
-// - IO tensors: same type (FLOAT, HALF, or BFLOAT16)
-// - Affine/Stat/Intermediate tensors: FLOAT only
-struct BnTensorTypes
-{
-    hipdnn_flatbuffers_sdk::data_objects::DataType io;
-    hipdnn_flatbuffers_sdk::data_objects::DataType affine;
-    hipdnn_flatbuffers_sdk::data_objects::DataType stat;
-    hipdnn_flatbuffers_sdk::data_objects::DataType intermediate;
-};
-
-namespace bn_type_configs
-{
-using DT = hipdnn_flatbuffers_sdk::data_objects::DataType;
-
-inline constexpr BnTensorTypes ALL_FLOAT = {DT::FLOAT, DT::FLOAT, DT::FLOAT, DT::FLOAT};
-inline constexpr BnTensorTypes HALF_IO = {DT::HALF, DT::FLOAT, DT::FLOAT, DT::FLOAT};
-inline constexpr BnTensorTypes BFLOAT16_IO = {DT::BFLOAT16, DT::FLOAT, DT::FLOAT, DT::FLOAT};
-
-inline constexpr std::array<BnTensorTypes, 3> VALID = {ALL_FLOAT, HALF_IO, BFLOAT16_IO};
-
-std::unordered_set<hipdnn_flatbuffers_sdk::data_objects::DataType> getAllowedIoTypes();
-std::unordered_set<hipdnn_flatbuffers_sdk::data_objects::DataType> getAllowedAffineTypes();
-std::unordered_set<hipdnn_flatbuffers_sdk::data_objects::DataType> getAllowedStatTypes();
-std::unordered_set<hipdnn_flatbuffers_sdk::data_objects::DataType> getAllowedIntermediateTypes();
-
-} // namespace bn_type_configs
-
 } // namespace hip_kernel_provider

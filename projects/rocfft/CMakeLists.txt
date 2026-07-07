@@ -223,6 +223,21 @@ if( ROCFFT_MPI_ENABLE )
   include_directories(SYSTEM ${MPI_INCLUDE_PATH})
 endif()
 
+# Internal (library-side) unit tests.  enable_testing() must be called
+# here, an ancestor of library/src, for ctest to discover them.
+option( ROCFFT_BUILD_INTERNAL_TESTS "Build internal (library-side) unit tests" OFF )
+option( ROCFFT_RUN_INTERNAL_TESTS "Run internal tests as part of the build" OFF )
+# GoogleTest filter for the build-time run; empty = all.
+set( ROCFFT_INTERNAL_TESTS_FILTER "" CACHE STRING
+  "GoogleTest filter applied to internal tests run at build time (empty = all)" )
+if( ROCFFT_RUN_INTERNAL_TESTS AND NOT ROCFFT_BUILD_INTERNAL_TESTS )
+  message( FATAL_ERROR
+    "ROCFFT_RUN_INTERNAL_TESTS=ON requires ROCFFT_BUILD_INTERNAL_TESTS=ON." )
+endif()
+if( ROCFFT_BUILD_INTERNAL_TESTS )
+  enable_testing()
+endif()
+
 add_subdirectory( library )
 
 include( clients/cmake/build-options.cmake )

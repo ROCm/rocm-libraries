@@ -294,7 +294,7 @@ plan_utils::MaskType classifyMask(const flatbuffers::FlatBufferBuilder& builder)
     return plan_utils::getMaskType(attrs);
 }
 
-TEST_F(TestSdpaFwdPlanBuilder, IsApplicable_RejectsCausalMaskAndBottomRightSetTogether)
+TEST_F(TestSdpaFwdPlanBuilder, IsApplicableRejectsCausalMaskAndBottomRightSetTogether)
 {
     using namespace hipdnn_flatbuffers_sdk::data_objects;
 
@@ -309,7 +309,7 @@ TEST_F(TestSdpaFwdPlanBuilder, IsApplicable_RejectsCausalMaskAndBottomRightSetTo
     EXPECT_THROW(classifyMask(builder), hipdnn_plugin_sdk::HipdnnPluginException);
 }
 
-TEST_F(TestSdpaFwdPlanBuilder, IsApplicable_PrefersCausalMaskOverWindowBounds)
+TEST_F(TestSdpaFwdPlanBuilder, IsApplicablePrefersCausalMaskOverWindowBounds)
 {
     using namespace hipdnn_flatbuffers_sdk::data_objects;
 
@@ -327,7 +327,7 @@ TEST_F(TestSdpaFwdPlanBuilder, IsApplicable_PrefersCausalMaskOverWindowBounds)
     EXPECT_EQ(maskType, plan_utils::MaskType::TOP_LEFT_CAUSAL);
 }
 
-TEST_F(TestSdpaFwdPlanBuilder, IsApplicable_PrefersBottomRightCausalOverTopLeftBounds)
+TEST_F(TestSdpaFwdPlanBuilder, IsApplicablePrefersBottomRightCausalOverTopLeftBounds)
 {
     using namespace hipdnn_flatbuffers_sdk::data_objects;
 
@@ -346,7 +346,7 @@ TEST_F(TestSdpaFwdPlanBuilder, IsApplicable_PrefersBottomRightCausalOverTopLeftB
     EXPECT_EQ(maskType, plan_utils::MaskType::BOTTOM_RIGHT_CAUSAL);
 }
 
-TEST_F(TestSdpaFwdPlanBuilder, IsApplicable_AcceptsConsistentCausalMaskAndBounds)
+TEST_F(TestSdpaFwdPlanBuilder, IsApplicableAcceptsConsistentCausalMaskAndBounds)
 {
     using namespace hipdnn_flatbuffers_sdk::data_objects;
 
@@ -364,7 +364,7 @@ TEST_F(TestSdpaFwdPlanBuilder, IsApplicable_AcceptsConsistentCausalMaskAndBounds
     EXPECT_EQ(maskType, plan_utils::MaskType::TOP_LEFT_CAUSAL);
 }
 
-TEST_F(TestSdpaFwdPlanBuilder, IsApplicable_PrefersBottomRightCausalOverWindowBounds)
+TEST_F(TestSdpaFwdPlanBuilder, IsApplicablePrefersBottomRightCausalOverWindowBounds)
 {
     using namespace hipdnn_flatbuffers_sdk::data_objects;
 
@@ -387,7 +387,7 @@ TEST_F(TestSdpaFwdPlanBuilder, IsApplicable_PrefersBottomRightCausalOverWindowBo
 // as unbounded (-1), so a partially specified trio still derives the mask it
 // describes.
 
-TEST_F(TestSdpaFwdPlanBuilder, MaskBoundsTrio_RightZeroLeftUnsetDerivesTopLeftCausal)
+TEST_F(TestSdpaFwdPlanBuilder, MaskBoundsTrioRightZeroLeftUnsetDerivesTopLeftCausal)
 {
     using namespace hipdnn_flatbuffers_sdk::data_objects;
 
@@ -405,7 +405,7 @@ TEST_F(TestSdpaFwdPlanBuilder, MaskBoundsTrio_RightZeroLeftUnsetDerivesTopLeftCa
     EXPECT_EQ(maskType, plan_utils::MaskType::TOP_LEFT_CAUSAL);
 }
 
-TEST_F(TestSdpaFwdPlanBuilder, MaskBoundsTrio_RightZeroBottomRightDerivesBottomRightCausal)
+TEST_F(TestSdpaFwdPlanBuilder, MaskBoundsTrioRightZeroBottomRightDerivesBottomRightCausal)
 {
     using namespace hipdnn_flatbuffers_sdk::data_objects;
 
@@ -422,7 +422,7 @@ TEST_F(TestSdpaFwdPlanBuilder, MaskBoundsTrio_RightZeroBottomRightDerivesBottomR
     EXPECT_EQ(maskType, plan_utils::MaskType::BOTTOM_RIGHT_CAUSAL);
 }
 
-TEST_F(TestSdpaFwdPlanBuilder, MaskBoundsTrio_ExplicitCausalBoundsDeriveTopLeftCausal)
+TEST_F(TestSdpaFwdPlanBuilder, MaskBoundsTrioExplicitCausalBoundsDeriveTopLeftCausal)
 {
     using namespace hipdnn_flatbuffers_sdk::data_objects;
 
@@ -439,7 +439,7 @@ TEST_F(TestSdpaFwdPlanBuilder, MaskBoundsTrio_ExplicitCausalBoundsDeriveTopLeftC
     EXPECT_EQ(maskType, plan_utils::MaskType::TOP_LEFT_CAUSAL);
 }
 
-TEST_F(TestSdpaFwdPlanBuilder, MaskBoundsTrio_BothUnsetDerivesNoMask)
+TEST_F(TestSdpaFwdPlanBuilder, MaskBoundsTrioBothUnsetDerivesNoMask)
 {
     using namespace hipdnn_flatbuffers_sdk::data_objects;
 
@@ -455,7 +455,7 @@ TEST_F(TestSdpaFwdPlanBuilder, MaskBoundsTrio_BothUnsetDerivesNoMask)
     EXPECT_EQ(maskType, plan_utils::MaskType::NO_MASK);
 }
 
-TEST_F(TestSdpaFwdPlanBuilder, MaskBoundsTrio_BothUnboundedDerivesNoMask)
+TEST_F(TestSdpaFwdPlanBuilder, MaskBoundsTrioBothUnboundedDerivesNoMask)
 {
     using namespace hipdnn_flatbuffers_sdk::data_objects;
 
@@ -471,7 +471,7 @@ TEST_F(TestSdpaFwdPlanBuilder, MaskBoundsTrio_BothUnboundedDerivesNoMask)
     EXPECT_EQ(maskType, plan_utils::MaskType::NO_MASK);
 }
 
-TEST_F(TestSdpaFwdPlanBuilder, MaskBoundsTrio_SymmetricWindowDerivesSlidingWindow)
+TEST_F(TestSdpaFwdPlanBuilder, MaskBoundsTrioSymmetricWindowDerivesSlidingWindow)
 {
     using namespace hipdnn_flatbuffers_sdk::data_objects;
 
@@ -487,7 +487,7 @@ TEST_F(TestSdpaFwdPlanBuilder, MaskBoundsTrio_SymmetricWindowDerivesSlidingWindo
     EXPECT_EQ(maskType, plan_utils::MaskType::SLIDING_WINDOW);
 }
 
-TEST_F(TestSdpaFwdPlanBuilder, MaskBoundsTrio_LeftOnlyDerivesSlidingWindow)
+TEST_F(TestSdpaFwdPlanBuilder, MaskBoundsTrioLeftOnlyDerivesSlidingWindow)
 {
     using namespace hipdnn_flatbuffers_sdk::data_objects;
 
