@@ -111,7 +111,7 @@ protected:
         GraphTensorBundle gpuBundle;
         GraphTensorBundle refBundle;
         this->generateBundles(graphObj, refBundle, gpuBundle);
-        this->synthesis().seedEntropy(convTestCase.seed);
+        this->synthesis().globalSeed(convTestCase.seed);
         auto gpuInit = this->initializeBundle(graphObj, gpuBundle);
         if(!gpuInit.filled)
         {

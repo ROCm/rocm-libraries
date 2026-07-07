@@ -396,7 +396,11 @@ private:
             }
         }
 
-        synthesizeInputs(fb, bundle.tensors, leafInputUids, _synthesisConfig);
+        auto synthResult = synthesizeInputs(fb, bundle.tensors, leafInputUids, _synthesisConfig);
+        if(!synthResult.filled)
+        {
+            return synthResult;
+        }
 
         auto missing = _synthesisConfig.unfilled(leafInputUids);
         if(!missing.empty())

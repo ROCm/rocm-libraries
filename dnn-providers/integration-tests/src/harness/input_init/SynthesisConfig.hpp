@@ -125,16 +125,6 @@ public:
         return *this;
     }
 
-    SynthesisConfig& seedEntropy(unsigned int s)
-    {
-        return globalSeed(s);
-    }
-
-    SynthesisConfig& fallbackSeed(unsigned int s)
-    {
-        return globalSeed(s);
-    }
-
     unsigned int getGlobalSeed() const
     {
         return _globalSeed;

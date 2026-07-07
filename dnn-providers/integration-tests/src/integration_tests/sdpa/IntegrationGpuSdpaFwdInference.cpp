@@ -180,7 +180,7 @@ protected:
         this->registerValidator(outputs.o, this->getTolerance(graphObj, outputs.o));
 
         this->setTestCaseNote(testCase.note);
-        this->synthesis().seedEntropy(testCase.seed);
+        this->synthesis().globalSeed(testCase.seed);
         this->verifyGraph(graphObj);
     }
 };

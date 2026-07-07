@@ -257,7 +257,7 @@ inline void setSdpaBackwardInitDefaults(const hipdnn_flatbuffers_sdk::data_objec
 
 // ── Dispatch ─────────────────────────────────────────────────────────────────
 
-inline void setInitDefaults(const hipdnn_flatbuffers_sdk::data_objects::Node& node,
+inline bool setInitDefaults(const hipdnn_flatbuffers_sdk::data_objects::Node& node,
                             SynthesisConfig& config)
 {
     using NA = hipdnn_flatbuffers_sdk::data_objects::NodeAttributes;
@@ -266,52 +266,70 @@ inline void setInitDefaults(const hipdnn_flatbuffers_sdk::data_objects::Node& no
     {
     case NA::BatchnormInferenceAttributes:
         setBatchnormInferenceInitDefaults(node, config);
-        break;
+        return true;
     case NA::BatchnormInferenceAttributesVarianceExt:
         setBatchnormInferenceVarianceInitDefaults(node, config);
-        break;
+        return true;
     case NA::BatchnormAttributes:
         setBatchnormTrainingInitDefaults(node, config);
-        break;
+        return true;
     case NA::BatchnormBackwardAttributes:
         setBatchnormBackwardInitDefaults(node, config);
-        break;
+        return true;
     case NA::LayernormAttributes:
         setLayernormInitDefaults(node, config);
-        break;
+        return true;
     case NA::LayernormBackwardAttributes:
         setLayernormBackwardInitDefaults(node, config);
-        break;
+        return true;
     case NA::RMSNormAttributes:
         setRmsnormInitDefaults(node, config);
-        break;
+        return true;
     case NA::RMSNormBackwardAttributes:
         setRmsnormBackwardInitDefaults(node, config);
-        break;
+        return true;
     case NA::BlockScaleDequantizeAttributes:
         setBlockScaleDequantizeInitDefaults(node, config);
-        break;
+        return true;
     case NA::SdpaAttributes:
         setSdpaForwardInitDefaults(node, config);
-        break;
+        return true;
     case NA::SdpaBackwardAttributes:
         setSdpaBackwardInitDefaults(node, config);
-        break;
+        return true;
+    case NA::PointwiseAttributes:
+    case NA::ConvolutionFwdAttributes:
+    case NA::ConvolutionBwdAttributes:
+    case NA::ConvolutionWrwAttributes:
+    case NA::MatmulAttributes:
+    case NA::ReductionAttributes:
+    case NA::ResampleFwdAttributes:
+    case NA::BlockScaleQuantizeAttributes:
+    case NA::CustomOpAttributes:
+    case NA::NONE:
+        return true;
     default:
-        break;
+        return false;
     }
 }
 
 // ── Free function: set defaults + fill ───────────────────────────────────────
 
-inline void synthesizeInputs(const hipdnn_flatbuffers_sdk::data_objects::Graph& graph,
-                             InputTensorMap& inputs,
-                             const std::vector<int64_t>& ownedUids,
-                             SynthesisConfig& config)
+inline SynthesisResult synthesizeInputs(const hipdnn_flatbuffers_sdk::data_objects::Graph& graph,
+                                        InputTensorMap& inputs,
+                                        const std::vector<int64_t>& ownedUids,
+                                        SynthesisConfig& config)
 {
     for(flatbuffers::uoffset_t i = 0; i < graph.nodes()->size(); ++i)
     {
-        setInitDefaults(*graph.nodes()->Get(i), config);
+        const auto& node = *graph.nodes()->Get(i);
+        if(!setInitDefaults(node, config))
+        {
+            const auto* name = node.name();
+            return SynthesisResult::unsupported(
+                "no input synthesis registered for op "
+                + std::string(name != nullptr ? name->c_str() : "(unnamed)"));
+        }
     }
 
     auto sortedUids = ownedUids;
@@ -324,6 +342,8 @@ inline void synthesizeInputs(const hipdnn_flatbuffers_sdk::data_objects::Graph& 
             = config.resolveSeed(uid).value_or(static_cast<unsigned int>(rng()));
         fill(*inputs.at(uid), config.get(uid), seed);
     }
+
+    return SynthesisResult::ok();
 }
 
 } // namespace hipdnn_integration_tests

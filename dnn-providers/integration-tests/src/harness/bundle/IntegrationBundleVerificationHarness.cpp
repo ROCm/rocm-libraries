@@ -322,8 +322,13 @@ bool IntegrationBundleVerificationHarness::synthesizeInputs()
         leafInputUids.push_back(uid);
     }
 
-    hipdnn_integration_tests::synthesizeInputs(
+    auto synthResult = hipdnn_integration_tests::synthesizeInputs(
         wrapper.getGraph(), inputs, leafInputUids, _synthesisConfig);
+    if(!synthResult.filled)
+    {
+        skipUnverifiable(synthResult.reason);
+        return false;
+    }
 
     auto missing = _synthesisConfig.unfilled(leafInputUids);
     if(!missing.empty())

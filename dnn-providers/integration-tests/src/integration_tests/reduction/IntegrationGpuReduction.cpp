@@ -85,7 +85,7 @@ protected:
 
         this->setTestCaseLayout(layout.name);
         this->setTestCaseNote(reductionTestCase.note);
-        this->synthesis().seedEntropy(reductionTestCase.seed);
+        this->synthesis().globalSeed(reductionTestCase.seed);
         this->verifyGraph(graphObj);
     }
 };

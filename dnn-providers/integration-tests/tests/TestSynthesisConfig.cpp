@@ -91,7 +91,7 @@ TEST(TestSynthesisConfig, ThreeTierPrecedence)
 
 TEST(TestSynthesisConfig, GetUnknownUidReturnsDefault)
 {
-    SynthesisConfig config;
+    const SynthesisConfig config;
     const auto fill = config.get(999);
 
     EXPECT_EQ(fill.kind, FillSpec::Kind::FREE);
@@ -139,7 +139,7 @@ TEST(TestSynthesisConfig, ResolveSeedPerTensor)
 
 TEST(TestSynthesisConfig, GlobalSeedDefaultValue)
 {
-    SynthesisConfig config;
+    const SynthesisConfig config;
     EXPECT_EQ(config.getGlobalSeed(), 42u);
 }
 
