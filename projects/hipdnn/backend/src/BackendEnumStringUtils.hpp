@@ -54,6 +54,10 @@ inline const char* hipdnnGetStatusString(hipdnnStatus_t status)
         return "HIPDNN_STATUS_INTERNAL_ERROR_DEVICE_ALLOCATION_FAILED";
     case HIPDNN_STATUS_EXECUTION_FAILED:
         return "HIPDNN_STATUS_EXECUTION_FAILED";
+    case HIPDNN_STATUS_PLUGIN_ERROR:
+        return "HIPDNN_STATUS_PLUGIN_ERROR";
+    case HIPDNN_STATUS_VERSION_MISMATCH:
+        return "HIPDNN_STATUS_VERSION_MISMATCH";
     default:
         return "HIPDNN_STATUS_UNKNOWN";
     }
