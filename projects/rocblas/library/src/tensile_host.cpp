@@ -1294,13 +1294,16 @@ rocblas_status runContractionProblem(const RocblasContractionProblem<Ti, To, Tc>
                 else
                 {
                     rocblas_internal_ostream msg;
-                    print_if_verbose(msg << "rocBLAS warning: hipBlasLT failed. ");
+                    print_if_verbose(
+                        msg
+                        << "rocBLAS warning: hipBlasLT failed. Fallback to other GEMM backend.");
                 }
             }
             catch(...)
             {
                 rocblas_internal_ostream msg;
-                print_if_verbose(msg << "rocBLAS warning: hipBlasLT exception encountered. ");
+                print_if_verbose(msg << "rocBLAS warning: hipBlasLT exception thrown. Fallback to "
+                                        "other GEMM backend.");
             }
         }
 #endif
