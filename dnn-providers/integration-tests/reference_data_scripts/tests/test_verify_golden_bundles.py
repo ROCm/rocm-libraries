@@ -112,6 +112,124 @@ class TestVerifyGoldenBundlesCli(unittest.TestCase):
 
         return graph_path
 
+    def write_sweep_bundle(
+        self, root: Path, relative_dir: Path, cases: list[dict[str, object]]
+    ) -> tuple[Path, Path]:
+        bundle_dir = root / relative_dir
+        bundle_dir.mkdir(parents=True)
+        template = {
+            "nodes": [
+                {
+                    "inputs": {"x_tensor_uid": 0},
+                    "outputs": {"y_tensor_uid": 1},
+                    "type": "TestOpAttributes",
+                    "name": "",
+                }
+            ],
+            "tensors": [
+                {
+                    "uid": 0,
+                    "name": "",
+                    "dims": "${case.dims}",
+                    "strides": "${case.strides}",
+                    "data_type": "${case.data_type}",
+                    "virtual": False,
+                },
+                {
+                    "uid": 1,
+                    "name": "",
+                    "dims": "${case.dims}",
+                    "strides": "${case.strides}",
+                    "data_type": "${case.data_type}",
+                    "virtual": False,
+                },
+            ],
+            "io_data_type": "${case.io_data_type}",
+            "compute_data_type": "float",
+            "intermediate_data_type": "float",
+            "name": "",
+        }
+        template_path = bundle_dir / "graph.template.json"
+        template_path.write_text(json.dumps(template))
+
+        sweep_path = bundle_dir / "sweep.json"
+        sweep_path.write_text(json.dumps({"version": 1, "cases": cases}))
+
+        return template_path, sweep_path
+
+    def write_sweep_golden_case(
+        self,
+        bundle_dir: Path,
+        case_id: str,
+        *,
+        input_bytes: bytes,
+        output_bytes: bytes,
+        write_input_tensor: bool = True,
+        write_output_tensor: bool = True,
+        write_tensor_manifest: bool = True,
+    ) -> Path:
+        case_dir = bundle_dir / "golden" / case_id
+        case_dir.mkdir(parents=True)
+        if write_input_tensor:
+            (case_dir / "tensor0.bin").write_bytes(input_bytes)
+        if write_output_tensor:
+            (case_dir / "tensor1.bin").write_bytes(output_bytes)
+        if write_tensor_manifest:
+            (case_dir / "tensors.dvc").write_text(
+                "\n".join(
+                    [
+                        "outs:",
+                        "- path: tensor0.bin",
+                        f"  size: {len(input_bytes)}",
+                        "- path: tensor1.bin",
+                        f"  size: {len(output_bytes)}",
+                    ]
+                )
+                + "\n"
+            )
+        return case_dir
+
+    def sweep_case(
+        self,
+        case_id: str,
+        *,
+        dims: tuple[int, ...] = (1,),
+        data_type: str = "float",
+        values_overrides: dict[str, object] | None = None,
+        tensor_uids: tuple[int, ...] = (0, 1),
+        metadata: dict[str, object] | None = None,
+        golden_path: str | None = "",
+    ) -> dict[str, object]:
+        values: dict[str, object] = {
+            "io_data_type": data_type,
+            "tensors": [
+                {
+                    "uid": uid,
+                    "data_type": data_type,
+                    "dims": list(dims),
+                    "strides": [1] * len(dims),
+                }
+                for uid in tensor_uids
+            ],
+        }
+        if values_overrides:
+            values.update(values_overrides)
+
+        case: dict[str, object] = {
+            "id": case_id,
+            "values": values,
+            "metadata": (
+                metadata
+                if metadata is not None
+                else {"generator": "manual", "reference_source": "manual"}
+            ),
+        }
+        if golden_path == "":
+            golden_path = f"golden/{case_id}/tensors.dvc"
+        if golden_path is not None:
+            case["golden"] = {"path": golden_path}
+        return case
+
     def test_valid_bundle_prints_canonical_path_and_full_test_name(self) -> None:
         with TemporaryDirectory() as tmpdir:
             root = Path(tmpdir)
@@ -316,6 +434,272 @@ class TestVerifyGoldenBundlesCli(unittest.TestCase):
                     completed = self.run_verifier(root)
 
                     self.assertEqual(completed.returncode, 0, completed.stderr)
+
+    def test_valid_sweep_bundle_prints_advisories(self) -> None:
+        with TemporaryDirectory() as tmpdir:
+            root = Path(tmpdir)
+            template_path, sweep_path = self.write_sweep_bundle(
+                root,
+                Path("quick/TestOp/Topology"),
+                [self.sweep_case("small_fp32")],
+            )
+            self.write_sweep_golden_case(
+                sweep_path.parent,
+                "small_fp32",
+                input_bytes=self.default_bytes("float"),
+                output_bytes=self.default_bytes("float"),
+            )
+
+            completed = self.run_verifier(root)
+
+            self.assertEqual(completed.returncode, 0, completed.stderr)
+            self.assertIn(
+                "canonical_path: quick/TestOp/Topology/sweep.json", completed.stdout
+            )
+            self.assertIn(
+                "full_test_name: quick_TestOp_Topology.small_fp32", completed.stdout
+            )
+
+    def test_sweep_duplicate_case_id_fails(self) -> None:
+        with TemporaryDirectory() as tmpdir:
+            root = Path(tmpdir)
+            self.write_sweep_bundle(
+                root,
+                Path("quick/TestOp/Topology"),
+                [
+                    self.sweep_case("small_fp32", golden_path=None),
+                    self.sweep_case("small_fp32", golden_path=None),
+                ],
+            )
+
+            completed = self.run_verifier(root)
+
+            self.assertEqual(completed.returncode, 1)
+            self.assertIn("duplicate case id 'small_fp32'", completed.stderr)
+
+    def test_sweep_case_id_must_be_snake_case(self) -> None:
+        with TemporaryDirectory() as tmpdir:
+            root = Path(tmpdir)
+            self.write_sweep_bundle(
+                root,
+                Path("quick/TestOp/Topology"),
+                [self.sweep_case("Small-FP32", golden_path=None)],
+            )
+
+            completed = self.run_verifier(root)
+
+            self.assertEqual(completed.returncode, 1)
+            self.assertIn("must be lowercase_snake_case", completed.stderr)
+
+    def test_sweep_missing_tensor_uid_fails(self) -> None:
+        with TemporaryDirectory() as tmpdir:
+            root = Path(tmpdir)
+            self.write_sweep_bundle(
+                root,
+                Path("quick/TestOp/Topology"),
+                [self.sweep_case("small_fp32", tensor_uids=(0,), golden_path=None)],
+            )
+
+            completed = self.run_verifier(root)
+
+            self.assertEqual(completed.returncode, 1)
+            self.assertIn(
+                "is missing tensor uid(s) [1] present in template graph",
+                completed.stderr,
+            )
+
+    def test_sweep_tensor_uid_not_in_template_fails(self) -> None:
+        with TemporaryDirectory() as tmpdir:
+            root = Path(tmpdir)
+            self.write_sweep_bundle(
+                root,
+                Path("quick/TestOp/Topology"),
+                [
+                    self.sweep_case(
+                        "small_fp32", tensor_uids=(0, 1, 99), golden_path=None
+                    )
+                ],
+            )
+
+            completed = self.run_verifier(root)
+
+            self.assertEqual(completed.returncode, 1)
+            self.assertIn(
+                "tensor uid is not present in template graph", completed.stderr
+            )
+
+    def test_sweep_missing_scalar_placeholder_fails(self) -> None:
+        with TemporaryDirectory() as tmpdir:
+            root = Path(tmpdir)
+            template_path, sweep_path = self.write_sweep_bundle(
+                root, Path("quick/TestOp/Topology"), []
+            )
+            case = self.sweep_case("small_fp32", golden_path=None)
+            del case["values"]["io_data_type"]
+            sweep_path.write_text(json.dumps({"version": 1, "cases": [case]}))
+
+            completed = self.run_verifier(root)
+
+            self.assertEqual(completed.returncode, 1)
+            self.assertIn(
+                "is missing placeholder value for 'io_data_type'", completed.stderr
+            )
+
+    def test_sweep_unused_values_entry_warns(self) -> None:
+        with TemporaryDirectory() as tmpdir:
+            root = Path(tmpdir)
+            self.write_sweep_bundle(
+                root,
+                Path("quick/TestOp/Topology"),
+                [
+                    self.sweep_case(
+                        "small_fp32",
+                        values_overrides={"layout": "nchw"},
+                        golden_path=None,
+                    )
+                ],
+            )
+
+            completed = self.run_verifier(root)
+
+            self.assertEqual(completed.returncode, 0, completed.stderr)
+            self.assertIn("has unused values entry 'layout'", completed.stderr)
+
+    def test_sweep_golden_path_must_reference_tensors_dvc(self) -> None:
+        with TemporaryDirectory() as tmpdir:
+            root = Path(tmpdir)
+            self.write_sweep_bundle(
+                root,
+                Path("quick/TestOp/Topology"),
+                [
+                    self.sweep_case(
+                        "small_fp32", golden_path="golden/small_fp32/notes.txt"
+                    )
+                ],
+            )
+
+            completed = self.run_verifier(root)
+
+            self.assertEqual(completed.returncode, 1)
+            self.assertIn(
+                "golden.path must reference a tensors.dvc file", completed.stderr
+            )
+
+    def test_sweep_missing_tensor_file_fails_with_manifest(self) -> None:
+        with TemporaryDirectory() as tmpdir:
+            root = Path(tmpdir)
+            template_path, sweep_path = self.write_sweep_bundle(
+                root,
+                Path("quick/TestOp/Topology"),
+                [self.sweep_case("small_fp32")],
+            )
+            self.write_sweep_golden_case(
+                sweep_path.parent,
+                "small_fp32",
+                input_bytes=self.default_bytes("float"),
+                output_bytes=self.default_bytes("float"),
+                write_output_tensor=False,
+            )
+
+            completed = self.run_verifier(root)
+
+            self.assertEqual(completed.returncode, 1)
+            self.assertIn("tensor uid 1", completed.stderr)
+            self.assertIn("missing tensor file", completed.stderr)
+
+    def test_sweep_nan_output_tensor_fails(self) -> None:
+        with TemporaryDirectory() as tmpdir:
+            root = Path(tmpdir)
+            template_path, sweep_path = self.write_sweep_bundle(
+                root,
+                Path("quick/TestOp/Topology"),
+                [self.sweep_case("small_fp32")],
+            )
+            self.write_sweep_golden_case(
+                sweep_path.parent,
+                "small_fp32",
+                input_bytes=self.default_bytes("float"),
+                output_bytes=struct.pack("<f", float("nan")),
+            )
+
+            completed = self.run_verifier(root)
+
+            self.assertEqual(completed.returncode, 1)
+            self.assertIn("tensor uid 1", completed.stderr)
+            self.assertIn("output tensor contains NaN/Inf", completed.stderr)
+
+    def test_sweep_case_metadata_missing_reference_source_fails(self) -> None:
+        with TemporaryDirectory() as tmpdir:
+            root = Path(tmpdir)
+            self.write_sweep_bundle(
+                root,
+                Path("quick/TestOp/Topology"),
+                [
+                    self.sweep_case(
+                        "small_fp32",
+                        metadata={"generator": "manual"},
+                        golden_path=None,
+                    )
+                ],
+            )
+
+            completed = self.run_verifier(root)
+
+            self.assertEqual(completed.returncode, 1)
+            self.assertIn(
+                "case 'small_fp32' metadata reference_source", completed.stderr
+            )
+
+    def test_sweep_bundle_missing_sweep_json_fails(self) -> None:
+        with TemporaryDirectory() as tmpdir:
+            root = Path(tmpdir)
+            bundle_dir = root / "quick/TestOp/Topology"
+            bundle_dir.mkdir(parents=True)
+            (bundle_dir / "graph.template.json").write_text(json.dumps({"nodes": []}))
+
+            completed = self.run_verifier(root)
+
+            self.assertEqual(completed.returncode, 1)
+            self.assertIn("missing sweep.json", completed.stderr)
+
+    def test_sweep_bundle_missing_template_fails(self) -> None:
+        with TemporaryDirectory() as tmpdir:
+            root = Path(tmpdir)
+            bundle_dir = root / "quick/TestOp/Topology"
+            bundle_dir.mkdir(parents=True)
+            (bundle_dir / "sweep.json").write_text(
+                json.dumps({"version": 1, "cases": []})
+            )
+
+            completed = self.run_verifier(root)
+
+            self.assertEqual(completed.returncode, 1)
+            self.assertIn("missing graph.template.json", completed.stderr)
+
+    def test_sweep_case_over_2mib_fails(self) -> None:
+        with TemporaryDirectory() as tmpdir:
+            root = Path(tmpdir)
+            output_elements = 2 * 1024 * 1024 // 4
+            template_path, sweep_path = self.write_sweep_bundle(
+                root,
+                Path("quick/TestOp/Topology"),
+                [self.sweep_case("large_fp32", dims=(output_elements,))],
+            )
+            self.write_sweep_golden_case(
+                sweep_path.parent,
+                "large_fp32",
+                input_bytes=self.filled_bytes("float", output_elements),
+                output_bytes=self.filled_bytes("float", output_elements),
+            )
+
+            completed = self.run_verifier(root)
+
+            self.assertEqual(completed.returncode, 1)
+            self.assertIn("bundle totals", completed.stderr)
+            self.assertIn(
+                "cannot have bundles larger than 2 MiB because they would quickly explode our test artifact sizes",
+                completed.stderr,
+            )
 
 
 if __name__ == "__main__":
