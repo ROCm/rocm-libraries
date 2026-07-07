@@ -156,12 +156,6 @@ The design must:
    tensor flatbuffer for round-trip yet is variant-pack-delivered
    ([§4.8](#48-frontend-variant-pack-injection)). The graph descriptor
    stays read-only after build.
-4. **A pass-by-value tensor is in exactly one of the three states**
-   ([§4.9](#49-state-reference)), selected by the
-   constructor/setter used; the four invalid combinations
-   ([§4.7](#47-frontend-validation)) are rejected. cuDNN enforces
-   analogous exclusivity in `validate()`
-   ([`graph_properties.h:70-94`](https://github.com/NVIDIA/cudnn-frontend/blob/c4ec01a28a26aa57021862de809cc257619f7516/include/cudnn_frontend/graph_properties.h#L70-L94)).
 
 ---
 
@@ -275,10 +269,7 @@ factory that delegates to it; no dedicated setter.
 
 `Graph::tensor(const TensorAttributes&)`
 ([`Graph.hpp`](../../frontend/include/hipdnn_frontend/Graph.hpp)) is
-retained, and — matching cuDNN's graph-level factories
-([`graph_interface.h:1765-1781`](https://github.com/NVIDIA/cudnn-frontend/blob/c4ec01a28a26aa57021862de809cc257619f7516/include/cudnn_frontend/graph_interface.h#L1765-L1781),
-[`graph_interface.h:2964-3004`](https://github.com/NVIDIA/cudnn-frontend/blob/c4ec01a28a26aa57021862de809cc257619f7516/include/cudnn_frontend/graph_interface.h#L2964-L3004)) —
-`graph.tensor(scalar, ScalarType)` overloads are added (one per supported
+retained, and `graph.tensor(scalar, ScalarType)` overloads are added (one per supported
 scalar type), each delegating to the `TensorAttributes(scalar, ScalarType)`
 constructor: `graph.tensor(v, ScalarType::RUNTIME_PARAM)` → frontend-injected and
 `graph.tensor(v, ScalarType::COMPILE_TIME_CONST)` → compile-time. Like cuDNN there is
@@ -325,22 +316,18 @@ This RFC aligns the backend `TensorDescriptor` attributes with cuDNN's
 backend descriptor names. The existing read-only
 `HIPDNN_ATTR_TENSOR_IS_BY_VALUE` (1307) — today derived from
 `value.type != NONE` — becomes a **settable** boolean carrying the
-umbrella `is_pass_by_value` flag, matching `CUDNN_ATTR_TENSOR_IS_BY_VALUE`
-(true whenever the tensor is a scalar operand). The existing
+umbrella `is_pass_by_value` flag, matching `CUDNN_ATTR_TENSOR_IS_BY_VALUE`.
+The existing
 `HIPDNN_ATTR_TENSOR_VALUE_EXT` is renamed `HIPDNN_ATTR_TENSOR_CONSTANT_VALUE`,
 matching `CUDNN_ATTR_TENSOR_CONSTANT_VALUE`, and carries the tensor's
 value. A new **settable** `HIPDNN_ATTR_TENSOR_IS_COMPILE_TIME_CONSTANT`
 (ID 1308) carries the compile-time-constant flag and is the authoritative
-baked/compile-time discriminator (true only for the compile-time-constant state). cuDNN needs no such
-flag because it discriminates compile-time by `CONSTANT_VALUE` presence
-and caches its runtime type-2 value in the frontend; hipDNN instead keeps
-a frontend-injected tensor's value in the flatbuffer for graph round-trip
-([§4.8](#48-frontend-variant-pack-injection)), so `CONSTANT_VALUE` is
-present for both the frontend-injected and compile-time-constant states and the explicit flag is required to tell them
-apart. All three round-trip through descriptor pack/unpack alongside each
-other; the precedent is the unpack of `HIPDNN_ATTR_TENSOR_IS_BY_VALUE` +
-`HIPDNN_ATTR_TENSOR_CONSTANT_VALUE` in
-[`DescriptorUnpackHelpers.hpp`](../../frontend/include/hipdnn_frontend/detail/DescriptorUnpackHelpers.hpp).
+baked/compile-time discriminator. cuDNN needs no such flag: it caches its runtime type-2 value in
+the frontend and writes `CONSTANT_VALUE` only for compile-time constants,
+so presence alone means compile-time. hipDNN may instead store a
+frontend-injected value in `CONSTANT_VALUE` for graph round-trip
+([§4.8](#48-frontend-variant-pack-injection)), so that presence no longer
+disambiguates the compile-time constant and the frontend-injected states.
 
 Providers read the flags through `isPassByValue()` and
 `isCompileTimeConstant()` accessors added to the op-graph tensor wrapper
@@ -354,9 +341,8 @@ The backend's runtime-pass-by-value feature signal is **derived from the
 per-tensor flags** ([§4.2](#42-tensor-schema-addition)): a graph requires
 runtime pass-by-value support iff it contains at least one tensor with
 `is_pass_by_value == true && is_compile_time_constant == false` (both
-runtime states). There is **no** graph-level schema field and **no** graph-level
-setter — the per-tensor flags are the single source of truth, and a
-separate graph boolean would only create a cache that can desync from them
+runtime states). The per-tensor flags are the single source of truth; the
+feature is derived from them rather than a graph-level flag
 ([§5.3](#53-derive-feature-detection-from-the-tensor-schema)).
 
 The backend computes the signal with a `readIsRuntimePassByValueEnabled` helper
@@ -387,15 +373,6 @@ variantPack[scale->get_uid()] = &scaleValue;   // host pointer
 graph.execute(handle, variantPack, workspace);
 ```
 
-This is exactly cuDNN-frontend's
-`extend_tensor_map_with_pass_by_value_tensors_` behavior
-([`graph_interface.h:190-212`](https://github.com/NVIDIA/cudnn-frontend/blob/c4ec01a28a26aa57021862de809cc257619f7516/include/cudnn_frontend/graph_interface.h#L190-L212)).
-The frontend
-variant-pack builder `detail::populateBaseVariantPackDescriptor`
-([`frontend/include/hipdnn_frontend/detail/VariantPackHelpers.hpp:19`](../../frontend/include/hipdnn_frontend/detail/VariantPackHelpers.hpp#L19))
-is unchanged: the host pointer is an ordinary
-`HIPDNN_ATTR_VARIANT_PACK_DATA_POINTERS` entry.
-
 ### 4.5 Provider contract
 
 A provider reporting plugin SDK API version `>= 1.2.0` must, for any
@@ -425,23 +402,18 @@ hipdnnEnginePluginExecuteOpGraph(hipdnnEnginePluginHandle_t handle,
 ```
 
 The runtime-slot discriminator is the conjunction
-`isPassByValue() && !isCompileTimeConstant()`: the umbrella flag alone is
-not sufficient, because a compile-time constant is *also*
-pass-by-value. Value presence is **not** the discriminator either — a frontend-injected
-(`RUNTIME_PARAM`) tensor carries a `HIPDNN_ATTR_TENSOR_CONSTANT_VALUE` in
-the flatbuffer yet is runtime — so the authoritative signal is
-`is_compile_time_constant` (`HIPDNN_ATTR_TENSOR_IS_COMPILE_TIME_CONSTANT`),
-exposed as `isCompileTimeConstant()`. The umbrella
-`HIPDNN_ATTR_TENSOR_IS_BY_VALUE` is true for all three states, so it
-cannot stand in for this check.
+`isPassByValue() && !isCompileTimeConstant()`. The umbrella
+`HIPDNN_ATTR_TENSOR_IS_BY_VALUE` is true for all three states and value
+presence does not disambiguate — a frontend-injected tensor carries a
+`CONSTANT_VALUE` yet is runtime ([§4.2](#42-tensor-schema-addition)) — so
+`is_compile_time_constant` (`isCompileTimeConstant()`) is the
+authoritative signal.
 
-**Frontend-injected caveat.** A `RUNTIME_PARAM` tensor carries a value
-(`HIPDNN_ATTR_TENSOR_CONSTANT_VALUE`) in the flatbuffer, but because
-`is_compile_time_constant == false` the provider MUST read the
-variant-pack slot and MUST NOT use that stored value; value presence must
-not be used to shortcut to the baked path here. Both runtime states reach the
-provider identically (a host pointer in `device_buffers`) and are handled
-the same.
+**Frontend-injected caveat.** Because such a tensor has
+`is_compile_time_constant == false`, the provider MUST read the
+variant-pack slot and MUST NOT use the stored value. Both runtime states
+reach the provider identically (a host pointer in `device_buffers`) and
+are handled the same.
 
 Each `hipdnnPluginDeviceBuffer_t` carries its `uid`, and
 [§4.2](#42-tensor-schema-addition) adds the `isPassByValue()` /
@@ -473,8 +445,7 @@ for (uint32_t i = 0; i < num_device_buffers; ++i) {
 ```
 
 The loop above runs on the **fresh-build** path, where the op graph is
-available. On a **deserialized** plan
-([RFC 0009](0009_CompiledPlanSerialization.md)) the op graph and
+available. On a **deserialized** execution plan the op graph and
 per-tensor attributes are not reconstructed
 ([§5.5](#55-deserialized-plan-support-via-the-provider-payload)): the
 plan is rebuilt from the engine ID, workspace size, a bare tensor-UID
@@ -486,8 +457,7 @@ supports runtime pass-by-value (reports `1.2.0`) must therefore:
    deserialize; the host-scalar identity is otherwise lost across
    serialization.
 2. **Version** that payload. The `plugin_payload` is opaque to hipDNN
-   and its versioning is plugin-owned
-   ([RFC 0009](0009_CompiledPlanSerialization.md#envelope-format)), so
+   and its versioning is plugin-owned, so
    the provider must stamp a format version (or kind) it can recognize.
 3. **Reject** a payload whose version/kind it cannot interpret,
    returning a deserialize error **before** reading any slot. This is
@@ -557,7 +527,7 @@ There is no per-symbol predicate (see
 core: the applicability filter
 ([`EnginePluginResourceManager.cpp:362`](../../backend/src/plugin/EnginePluginResourceManager.cpp#L362))
 is the single gate, applied when the plan is built. A serialized plan
-([RFC 0009](0009_CompiledPlanSerialization.md)) re-binds by the baked
+re-binds by the baked
 `engineId` with no version re-filter, but its runtime pass-by-value
 state lives in the provider's opaque payload, which the provider
 versions and validates on deserialize; that path is covered by the
@@ -594,10 +564,9 @@ runtime scalar: each is a predicate over the two flag bits and value
 baked `CONSTANT_VALUE` already in the descriptor. Rules 1 and 5 are
 reachable and frontend-testable. There is
 **no** "value present ⇒ compile-time mode" rule — that was the old
-two-state design; the frontend-injected state is value + runtime. These mirror cuDNN-frontend's
-`validate()` (the value⇒umbrella and virtual-exclusion analogues and the
-compile-time-constant constraints,
-[`graph_properties.h:70-94`](https://github.com/NVIDIA/cudnn-frontend/blob/c4ec01a28a26aa57021862de809cc257619f7516/include/cudnn_frontend/graph_properties.h#L70-L94)).
+two-state design; the frontend-injected state is value + runtime. The rule
+set mirrors cuDNN-frontend's `validate()`
+([`graph_properties.h:70-94`](https://github.com/NVIDIA/cudnn-frontend/blob/c4ec01a28a26aa57021862de809cc257619f7516/include/cudnn_frontend/graph_properties.h#L70-L94)).
 
 **Post-build immutability.** The compiled plan is frozen at build
 (`backendFinalize`, [§2.3](#23-constraints)): a scalar's baked value and
@@ -640,20 +609,20 @@ identical to a user-supplied slot: a host pointer under a runtime-discriminated 
 **Path scope.** Injection operates on the fresh-build path and the
 graph-(de)serialize path, where the tensor flatbuffer carries the value
 and both flags (so the frontend restores its cached copy after graph
-deserialize). On the [RFC 0009](0009_CompiledPlanSerialization.md)
-compiled-plan path, `deserializeBackendPlan` reconstructs no per-tensor
+deserialize). On the compiled-plan path, `deserializeBackendPlan` reconstructs no per-tensor
 attributes ([§5.5](#55-deserialized-plan-support-via-the-provider-payload);
 [`ExecutionPlanDescriptor.cpp:416-477`](../../backend/src/descriptors/ExecutionPlanDescriptor.cpp#L416-L477)),
-so the frontend has no value to inject; a frontend-injected tensor round-tripped through
-`to_compiled_plan_binary` therefore degrades to user-supplied semantics on that path
-— the caller must supply the value at execute. This limitation is explicit
-and covered by test ([§9](#9-testing-plan)).
+so the frontend lacks a value to inject. To address this, a frontend-injected tensor round-tripped through
+`to_compiled_plan_binary` degrades to user-supplied semantics
+— the caller must supply the value at execute (cuDNN avoids this: its
+serialize bundles `pass_by_values` with the plan JSON, so the value
+survives —
+[`graph_interface.h:1583-1593`](https://github.com/NVIDIA/cudnn-frontend/blob/c4ec01a28a26aa57021862de809cc257619f7516/include/cudnn_frontend/graph_interface.h#L1583-L1593),
+[`graph_interface.h:1666-1693`](https://github.com/NVIDIA/cudnn-frontend/blob/c4ec01a28a26aa57021862de809cc257619f7516/include/cudnn_frontend/graph_interface.h#L1666-L1693)).
+This limitation is explicit and covered by test ([§9](#9-testing-plan)).
 
-**Version-cost divergence from cuDNN.** cuDNN's type-2 runs on any engine
-because its runtime-fusion JIT can fold the value at build; hipDNN's frontend-injected state is
-variant-pack-delivered and therefore requires `1.2.0` even though the
-value is build-fixed. This is observable only as provider availability,
-never a wrong result.
+**Usage guidance.** a frontend-injected value is build-fixed and
+today functionally identical to a compile-time constant. However, it simultaneously costs the `1.2.0` provider floor and degrades to user-supplied on the compiled-plan path. Thus, `RUNTIME_PARAM` is strictly intended as a forward-compatibility mode, reserved for a future where the frontend re-injects a *different* snapshot per execute without a rebuild. Until then, prefer the compile-time constant for any value known at build.
 
 ### 4.9 State reference
 
@@ -701,10 +670,6 @@ fused-constant-vs-execute-time surface
    state is a function of the two flags plus value presence, so a second
    value slot is not needed.
 
-**Breaking changes** (from the current hipDNN API): `get_pass_by_value()`
-returns the value instead of `bool`, and its former bool-predicate role
-moves to `get_is_pass_by_value()` ([§4.1](#41-frontend-tensor-flag)).
-
 ### 5.2 Reuse the variant-pack pointer map
 
 **Decision**: transport every runtime scalar — user-supplied and
@@ -726,10 +691,11 @@ attribute range.
 
 **Trade-off**: the provider must consult the discriminator
 `isPassByValue() && !isCompileTimeConstant()` to know a slot holds a *host*
-pointer ([§4.9](#49-state-reference)). Frontend injection
-also adds build-time host storage and puts the `1.2.0` floor on a value
-fixed at build (the §4.8 divergence from cuDNN, whose type-2 runs on any
-engine) — observable only as provider availability, never a wrong result.
+pointer ([§4.9](#49-state-reference)). Frontend injection also adds
+build-time host storage and puts the `1.2.0` floor on a value fixed at
+build — for such values prefer the compile-time constant, which carries no
+floor; the cost is observable only as provider availability, never a wrong
+result.
 On the compiled-plan path the frontend has no reconstructed value to
 inject, so a frontend-injected tensor degrades to user-supplied after
 `to_compiled_plan_binary` ([§4.8](#48-frontend-variant-pack-injection)).
@@ -739,28 +705,23 @@ inject, so a frontend-injected tensor degrades to user-supplied after
 **Decision**: detect the feature from the per-tensor flags (any tensor
 with `is_pass_by_value && !is_compile_time_constant`, i.e. either runtime
 state) rather than a separate graph-level `is_pass_by_value_enabled` flag.
-The per-tensor schema is the single source of truth.
 
-**Rationale**: those flags are already mandatory — the discriminator is
-the only signal separating a runtime host-scalar slot from a device buffer
-or a baked constant ([§4.5](#45-provider-contract)). A graph-level flag
-would be a denormalized cache that can disagree with it, and unsafely: if
-it read `false` while a runtime tensor existed (e.g. a raw backend C-API
-caller set the tensor attribute but not the graph one), the filter would
-not elevate the required version and a sub-`1.2.0` plugin could read a
-host pointer as a device pointer. Deriving makes that desync
-unrepresentable and drops a schema field, a backend enum, and the
-serialize/deserialize/reset plumbing a graph flag would need.
+**Rationale**: those flags are already the mandatory discriminator
+separating a runtime host-scalar slot from a device buffer or a baked
+constant ([§4.5](#45-provider-contract)), so they are the single source of
+truth. A graph-level flag would be a denormalized cache that can disagree —
+and unsafely: a raw backend C-API caller could set the tensor attribute but
+not the graph one, leaving the filter reading `false` while a runtime
+tensor exists, so a sub-`1.2.0` plugin reads a host pointer as a device
+pointer. Deriving makes that desync unrepresentable. [RFC 0008](0008_OverridableTensorShapesDesign.md)
+uses a graph-level flag only because override shapes have no per-tensor
+field to derive from; runtime pass-by-value does, so mirroring it would
+import a desync risk override never had.
 
 **Trade-off**: a one-time `O(tensors)` walk of the already-materialized
 serialized graph per applicability query instead of a bool read —
-negligible, on a non-hot path over a flatbuffer already in hand
+negligible, on a non-hot path
 ([`EnginePluginResourceManager.cpp:341-407`](../../backend/src/plugin/EnginePluginResourceManager.cpp#L341-L407)).
-
-**Divergence from override**: [RFC 0008](0008_OverridableTensorShapesDesign.md)
-uses a graph-level flag because override has no per-tensor field to derive
-from; runtime pass-by-value does, so mirroring it would import a desync
-risk override never had.
 
 ### 5.4 Version-only filtering
 
@@ -783,25 +744,18 @@ host trusts the version contract. This is covered by integration tests
 ### 5.5 Deserialized-plan support via the provider payload
 
 **Decision**: add no execution-plan schema field and no hipDNN
-dispatch-time version gate. A provider that supports runtime
-pass-by-value persists the set of runtime pass-by-value UIDs into its
-opaque `plugin_payload` on serialize, reconstructs it on deserialize, and
-versions that payload so a plugin that cannot interpret it fails the
-deserialize rather than mis-reads it.
+dispatch-time version gate; the provider's opaque `plugin_payload` carries
+the runtime pass-by-value UID set across serialization, under the
+persist/version/reject obligations of
+[§4.6](#46-feature-detection-and-version-filtering).
 
-**Rationale**: on the fresh-build path the provider derives the UID set
-from the op graph ([§4.5](#45-provider-contract)); on the deserialized
-path the op graph is gone —
-`ExecutionPlanDescriptor::deserializeBackendPlan`
-([`ExecutionPlanDescriptor.cpp:416-477`](../../backend/src/descriptors/ExecutionPlanDescriptor.cpp#L416-L477))
-rebuilds from `engineId`, `workspace_size`, the opaque `plugin_payload`,
-and a bare `tensor_uids` list that does not distinguish host scalars from
-device tensors. The only place host-scalar identity can survive is the
-provider's own payload, which it already owns and versions, so skew safety
-reduces to that existing payload-versioning contract. This is exactly
-[RFC 0009](0009_CompiledPlanSerialization.md)'s payload-ownership rule:
-the envelope omits the op graph, so *"plugins that need graph-derived data
-must store it in their own payload"*
+**Rationale**: on the deserialized path the op graph is gone
+(`deserializeBackendPlan`, [§4.8](#48-frontend-variant-pack-injection)), so
+the only place host-scalar identity can survive is the provider's own
+payload, which it already owns and versions — skew safety reduces to that
+existing payload-versioning contract. This is exactly RFC 0009's
+payload-ownership rule: the envelope omits the op graph, so *"plugins that
+need graph-derived data must store it in their own payload"*
 ([RFC 0009, Envelope Format](0009_CompiledPlanSerialization.md#envelope-format)).
 
 **Trade-off**: deserialized-path safety rests on the provider obeying the
@@ -812,8 +766,8 @@ itself ([§7.1](#71-provider-reports-120-but-mishandles-host-pointers)). It
 is preferred over a sibling `is_pass_by_value_enabled` on
 `SerializedExecutionPlan` (peer to `is_override_shape_enabled`,
 [`execution_plan.fbs:12`](../../flatbuffers_sdk/schemas/execution_plan.fbs#L12))
-because it keeps host-scalar identity where RFC 0009 says graph-derived
-data belongs, not in a core gate the provider does not control.
+because it keeps host-scalar identity where the plugin payload owns
+graph-derived data, not in a core gate the provider does not control.
 
 **Retrofit limit**: the skew window closes only when the older
 same-`engineId` release already rejected payloads it could not interpret.
@@ -834,20 +788,10 @@ pass-by-value by reading host-scalar slots for tensors matching
 its reported API version to `1.2.0`. The compile-time constant needs no new provider;
 both runtime states need `1.2.0`. Each plugin migrates on its own schedule.
 
-**Breaking changes.** Reaching 1:1 cuDNN API parity changes two frontend
-accessors:
-
-- `get_pass_by_value()` now returns the value (a value/optional variant),
-  not `bool`; its former "is-pass-by-value" bool-predicate role moves to
-  the new `get_is_pass_by_value()`
-  ([§4.1](#41-frontend-tensor-flag)).
-- Internal callers that used `get_pass_by_value()` to mean "a baked value
-  exists" must switch to a value-presence check via `get_value_variant()`;
-  the known callsite is `createOrFindTensorDesc` in
-  [`DescriptorHelpers.hpp`](../../frontend/include/hipdnn_frontend/detail/DescriptorHelpers.hpp).
-
-These are source-level changes to a frontend header API; no wire format
-or plugin ABI is affected.
+**Breaking changes.** `get_pass_by_value()` becomes value-returning and
+its bool-predicate role moves to `get_is_pass_by_value()`
+([§4.1](#41-frontend-tensor-flag)); source-level only, no wire format or
+plugin ABI change.
 
 **Version skew.** An older plugin paired with a runtime pass-by-value graph is filtered
 out by the per-graph version gate
@@ -892,8 +836,10 @@ baseline. No data migration or plan invalidation is required.
 runtime pass-by-value slot as a device pointer (or otherwise mishandles
 the host scalar), producing wrong results.
 
-**Mitigation**: the version contract is the sole *capability* signal —
-by design there is no per-symbol safety net
+**Mitigation**: this is a plugin implementation bug, not a hipDNN defect —
+a provider that reports `1.2.0` asserts it reads host-scalar slots
+correctly. The version contract is the sole *capability* signal — by
+design there is no per-symbol safety net
 ([§5.4](#54-version-only-filtering)). The applicability filter rejects a
 plugin whose *reported version* is too low, but no core check can catch
 a plugin that truthfully reports `1.2.0` yet mishandles the host
@@ -930,8 +876,7 @@ slot kinds in one graph.
 
 ### 7.4 Downgraded provider mis-reads a serialized pass-by-value plan
 
-**Risk**: a compiled pass-by-value plan
-([RFC 0009](0009_CompiledPlanSerialization.md)) is serialized against a
+**Risk**: a compiled pass-by-value plan is serialized against a
 `1.2.0` provider, then deserialized where the same `engineId` resolves
 to a downgraded `< 1.2.0` build of that provider. Deserialize re-binds
 by `engineId` with no core version check
@@ -945,34 +890,33 @@ interpret before reading any slot, so a provider that practiced
 defensive payload versioning fails the deserialize cleanly. The build-time
 version filter ([§4.6](#46-feature-detection-and-version-filtering)) runs
 only on the fresh-build path, not on deserialize, so the safety of this
-path rests solely on plugin payload versioning. hipDNN core adds no gate
-here by design
-([§5.5](#55-deserialized-plan-support-via-the-provider-payload)); the
-residual case — a provider release that predates pass-by-value and never
-rejected unknown payloads — cannot be closed retroactively (§5.5
-retrofit limit) and is covered by the integration suite's payload
-round-trip and rejection tests ([§9](#9-testing-plan)).
+path rests solely on plugin payload versioning.
 
 ### 7.5 Provider reads the stored value of a RUNTIME_PARAM (runtime frontend-injected) tensor
 
 **Risk**: a frontend-injected (`RUNTIME_PARAM`) tensor carries a value
 (`HIPDNN_ATTR_TENSOR_CONSTANT_VALUE`) in the flatbuffer — yet its value
 must come from the frontend-injected variant-pack slot, not that stored
-value. A provider that shortcuts on value presence (rather than the
-`is_compile_time_constant` flag) would read the stale stored value instead
-of the injected one.
+value. A provider that shortcuts on value presence would read the stored value instead of the injected one.
 
 **Mitigation**: the authoritative discriminator is
 `is_compile_time_constant` (`HIPDNN_ATTR_TENSOR_IS_COMPILE_TIME_CONSTANT`),
-not value presence; a frontend-injected tensor has `is_compile_time_constant == false`,
-so the two-flag discriminator `isPassByValue() && !isCompileTimeConstant()`
-correctly routes it to the variant-pack slot ([§4.5](#45-provider-contract)).
-The frontend-injected end-to-end test asserts the injected value — not the stored one —
-reaches the provider. Note a frontend-injected tensor's value is **not** carried across
-compiled-plan ([RFC 0009](0009_CompiledPlanSerialization.md))
-serialization; on that path it degrades to caller-supplied (user-supplied semantics),
-covered by the compiled-plan round-trip test
-([§4.8](#48-frontend-variant-pack-injection)).
+not value presence; a frontend-injected tensor has
+`is_compile_time_constant == false`, so
+`isPassByValue() && !isCompileTimeConstant()` routes it to the
+variant-pack slot ([§4.5](#45-provider-contract)) and the end-to-end test
+asserts the injected value reaches the provider. However, reading the stored value
+is benign in the current model — the injected value is build-fixed
+and identical to the baked `CONSTANT_VALUE`
+([§4.8](#48-frontend-variant-pack-injection)), so wherever that value
+exists a provider would read the same scalar. The variant-pack rule exists
+for a uniform path with the user-supplied state (which stores no value) and
+to stay correct if the injected value ever becomes per-execute mutable. The
+value is serialized on the graph-(de)serialize path (as that same
+`CONSTANT_VALUE`, restored into the frontend cache on deserialize); only
+the compiled-plan path carries no per-tensor value, so there a
+frontend-injected tensor degrades to caller-supplied (user-supplied
+semantics).
 
 ---
 
@@ -1043,8 +987,8 @@ Add the frontend-injected machinery ([§4.8](#48-frontend-variant-pack-injection
 the `Graph` snapshots each `RUNTIME_PARAM` tensor's value into host-side
 storage at build (stable across execute), and `Graph::execute()` injects
 `uid → &cachedValue` (host pointer) into the variant pack before dispatch
-on the fresh-build and graph-(de)serialize paths. On the RFC 0009
-compiled-plan path no per-tensor value is reconstructed, so a frontend-injected tensor
+on the fresh-build and graph-(de)serialize paths. On the compiled-plan
+path no per-tensor value is reconstructed, so a frontend-injected tensor
 degrades to caller-supplied (user-supplied semantics); document the limitation.
 
 ### Step 6: Cross-cutting tests
