@@ -44,9 +44,9 @@ class TileKernelInstance : public KernelInstance
         constexpr int tile_k = SelectedKernel::TileK;
 
         const auto is_row = [](LayoutTag l) { return l == LayoutTag::RowMajor; };
-        const bool row_a = is_row(key_.signature.layout_a);
-        const bool row_b = is_row(key_.signature.layout_b);
-        const bool row_c = is_row(key_.signature.layout_c);
+        const bool row_a  = is_row(key_.signature.layout_a);
+        const bool row_b  = is_row(key_.signature.layout_b);
+        const bool row_c  = is_row(key_.signature.layout_c);
 
         const bool require_m = (!row_a) || (!row_c);
         const bool require_n = row_b || row_c;

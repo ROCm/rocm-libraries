@@ -14,7 +14,6 @@
 - changed-files:
   - any-glob-to-any-file: 'projects/hipblaslt/**/*'
   - any-glob-to-any-file: 'shared/origami/**/*'
-  - any-glob-to-any-file: 'shared/rocroller/**/*'
   - any-glob-to-any-file: 'shared/stinkytofu/**/*'
 
 "project: hipblaslt-provider":
@@ -74,6 +73,10 @@
 "project: none":
 - changed-files:
   - all-globs-to-all-files: ['!dnn-providers/**/*', '!projects/**/*', '!shared/**/*']
+
+"project: rocalution":
+- changed-files:
+  - any-glob-to-any-file: 'projects/rocalution/**/*'
 
 "project: rocblas":
 - changed-files:

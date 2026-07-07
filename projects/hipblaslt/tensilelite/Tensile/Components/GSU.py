@@ -22,14 +22,14 @@
 
 from rocisa import countInstruction
 from rocisa.code import Module, Label, RegSet, ValueSet
-from rocisa.container import ContinuousRegister, EXEC, SMEMModifiers, MUBUFModifiers, FLATModifiers, vgpr, sgpr, replaceHolder
+from rocisa.container import ContinuousRegister, EXEC, SMEMModifiers, MUBUFModifiers, FLATModifiers, vgpr, sgpr, replaceHolder, VCC
 from rocisa.enum import CacheScope
 from rocisa.instruction import SAddCU32, SAddU32, SAndB32, SLoadB32, SStoreB32, SBranch, \
     SCBranchSCC0, SCBranchSCC1, SCMovB32, SCSelectB32, SCmpEQU32, SCmpLgU32, SCmpLtU32, SCmpGtI32, \
     SLShiftLeftB64, SLShiftRightB32, SMovB32, SMovB64, SMulI32, SSubU32, SCmpEQI32, SEndpgm, \
     SCmpLeI32, VCmpGEI32, SSubI32, SCBranchSCC0, VMovB32, SLShiftLeftB32, SWaitCnt, SWaitXCnt, SBarrier, \
     SNop, SSleep, VAddF32, VAddI32, VReadfirstlaneB32, SMulHIU32, VAddPKF32, VCndMaskB32, SAtomicDec, \
-    SCmpEQU64, BufferStoreB32, BufferLoadB32, VMovB64, FlatAtomicDecU32
+    SCmpEQU64, BufferStoreB32, BufferLoadB32, VMovB64, FlatAtomicDecU32, VAddCOU32, VAddCCOU32
 from rocisa.functions import scalarStaticMultiply64, scalarUInt32DivideAndRemainder, vectorStaticMultiply
 
 from ..Common import ceilDivide, log2, print2, INDEX_CHARS
@@ -1126,30 +1126,41 @@ class GSUOn(GSU):
             module.add(SMovB32(dst=sgpr(tmpS01), src=0, comment="reset synchronizer"))
             module.add(SStoreB32(src=sgpr(tmpS01), base=sgpr("SrdSync", 2), soffset=0, smem=SMEMModifiers(glc=True), comment="reset synchronizer"))
         else:
-            # gfx1250 does not have s_store_b32, use buffer_store_b32 instead
-            tmpSgprBuffer = writer.sgprPool.checkOutAligned(4, 4, preventOverflow=False)
-            readVgpr = writer.vgprPool.checkOut(1, "syncReadVgpr")
-            module.add(VMovB32(dst=vgpr(tmpVgpr.idx), src=0, comment="0 for store data and vaddr offset"))
-            module.add(SMovB64(dst=sgpr(tmpSgprBuffer, 2), src=sgpr("SrdSync", 2)))
-            module.add(SMovB32(dst=sgpr(tmpSgprBuffer+2), src="BufferOOB"))
-            module.add(SMovB32(dst=sgpr(tmpSgprBuffer+3), src="Srd127_96"))
-            module.add(writer.shiftSrdByIdx(tmpSgprBuffer))
+            # Poll+clear via the same atomic channel as the producer's atomic_dec: a plain
+            # buffer load/store races with it on gfx1250's CU-partitioned L2. atomic_dec(wrap=0)
+            # always writes 0 and returns old, so it atomically reads-and-resets; spin until old==1.
+            addrVgpr = writer.vgprPool.checkOutAligned(2, 2, "syncDecAddr")
+            dataVgpr = writer.vgprPool.checkOut(1, "syncDecData")  # wrap value = 0
+            dstVgpr  = writer.vgprPool.checkOut(1, "syncDecDst")   # atomic return (old)
+            # EXEC is wave-width: 1 sgpr on wave32, 2 on wave64
+            numExecSgpr = 1 if kernel["WavefrontSize"] == 32 else 2
+            SMovExec    = SMovB32 if numExecSgpr == 1 else SMovB64
+            execSgpr    = writer.sgprPool.checkOutAligned(numExecSgpr, numExecSgpr, preventOverflow=False)
+
+            module.add(VMovB64(dst=vgpr(addrVgpr, 2), src=sgpr("SrdSync", 2), comment="synchronizer atomic address"))
+            module.add(VMovB32(dst=vgpr(dataVgpr), src=0, comment="atomic_dec wrap value = 0 (forces slot to 0)"))
+            module.add(SMovExec(dst=sgpr(execSgpr, numExecSgpr), src=EXEC(), comment="save EXEC"))
+            module.add(SMovExec(dst=EXEC(), src=1, comment="only lane 0 active"))
+
+            atomicFlat = FLATModifiers(scope=CacheScope.SCOPE_DEV) \
+                if writer.states.archCaps["DefaultScopeIsCULocal"] else None
             innerSpinLabel = Label(writer.labels.getNameInc("last_gsu_wg_busy_waiting_inner"), "")
             module.add(innerSpinLabel)
-            module.add(BufferLoadB32(dst=vgpr(readVgpr), vaddr=vgpr(tmpVgpr.idx), saddr=sgpr(tmpSgprBuffer, 4), soffset=0, \
-                                      mubuf=MUBUFModifiers(offen=True, scope=CacheScope.SCOPE_DEV), \
-                                      comment="get atomic_dec value"))
-            module.add(SWaitCnt(vlcnt=0, comment="wait for buffer load"))
-            module.add(VReadfirstlaneB32(dst=sgpr(tmpS01), src=vgpr(readVgpr), comment="read atomic_dec value"))
-            module.add(SCmpEQU32(src0=sgpr(tmpS01), src1=1, comment="last GSU WG?"))
+            if writer.states.archCaps["RequiresXCntForVolatileVMEM"]:
+                module.add(SWaitXCnt(xcnt=0, comment="drain in-flight VMEM before flat atomic"))
+            module.add(FlatAtomicDecU32(dst=vgpr(dstVgpr), addr=vgpr(addrVgpr, 2), data=vgpr(dataVgpr), \
+                                        modifier=atomicFlat, \
+                                        comment="atomic read+reset synchronizer (wrap=0 -> slot:=0)"))
+            module.add(SWaitCnt(vlcnt=0, comment="wait for atomic return"))
+            module.add(VReadfirstlaneB32(dst=sgpr(tmpS01), src=vgpr(dstVgpr), comment="read old synchronizer value"))
+            module.add(SCmpEQU32(src0=sgpr(tmpS01), src1=1, comment="last GSU WG? (producer signalled)"))
             module.add(SCBranchSCC0(labelName=innerSpinLabel.getLabelName(), comment="branch if false (retry)"))
-            writer.vgprPool.checkIn(readVgpr)
-            # Use tmpVgpr (=0) for both src data and vaddr offset
-            module.add(BufferStoreB32(src=vgpr(tmpVgpr.idx), vaddr=vgpr(tmpVgpr.idx), saddr=sgpr(tmpSgprBuffer, 4), soffset=0, \
-                                      mubuf=MUBUFModifiers(offen=True, scope=CacheScope.SCOPE_DEV), \
-                                      comment="reset synchronizer"))
-            module.add(SWaitCnt(vscnt=0, comment="wait for buffer store"))
-            writer.sgprPool.checkIn(tmpSgprBuffer)
+
+            module.add(SMovExec(dst=EXEC(), src=sgpr(execSgpr, numExecSgpr), comment="restore EXEC"))
+            writer.vgprPool.checkIn(addrVgpr)
+            writer.vgprPool.checkIn(dataVgpr)
+            writer.vgprPool.checkIn(dstVgpr)
+            writer.sgprPool.checkIn(execSgpr)
         module.add(SBranch(labelName=reductionBodyLabel.getLabelName(), comment=""))
 
         return module
@@ -1264,30 +1275,52 @@ class GSUOn(GSU):
             isGlc = True
             isSlc = True
             isNT  = False #bool(kernel["NonTemporalD"] & 0x4)
+            useBuffer = kernel["BufferStore"]
+            prevAddrVgpr = None
             for elementIdx in range(0, len(batchElements)):
                 addrCalc = ss.elementAddr[elementIdx]
                 data = ss.elementData[elementIdx]
-                addr0 = vgpr(addrCalc.addrDVgpr)
-                addr1 = sgpr("SrdD", 4)
+                addrDVgpr = addrCalc.addrDVgpr
+                if useBuffer:
+                    addr0 = vgpr(addrDVgpr)
+                    addr1 = sgpr("SrdD", 4)
+                else:
+                    addr0 = vgpr(addrDVgpr, 2)
+                    addr1 = ""
                 globalOffset = 0
 
-                if batchIdx == 0 and elementIdx == 0:
-                    addrDVgpr = addrCalc.addrDVgpr
+                # For buffer stores, only batch 0 / element 0 initializes the sgpr offset;
+                # subsequent batches keep incrementing.  For flat stores, prevAddrVgpr is
+                # local to partialWriteBatch and resets each call, so every first element
+                # must recompute the base address.
+                if (batchIdx == 0 and elementIdx == 0) or (not useBuffer and elementIdx == 0):
                     storeCodeGSUSK.add(vectorStaticMultiply(vgpr(addrDVgpr), vgpr("Serial"), storeWidth * writer.states.bpeCinternal, storeOffsetSgprRes))
-                    storeCodeGSUSK.add(SMovB32(dst=sgpr(storeOffsetSgpr), src=0, comment="Init sgpr offset for interleaved wave store"))
+                    if useBuffer:
+                        storeCodeGSUSK.add(SMovB32(dst=sgpr(storeOffsetSgpr), src=0, comment="Init sgpr offset for interleaved wave store"))
+                    else:
+                        # Flat store: build full 64-bit workspace address
+                        storeCodeGSUSK.add(VMovB32(dst=vgpr(addrDVgpr+1), src=0, comment="zero hi addr bits"))
+                        storeCodeGSUSK.add(VAddCOU32(dst=vgpr(addrDVgpr), dst1=VCC(), src0=sgpr("AddressD+0"), src1=vgpr(addrDVgpr), comment="add WS base lo"))
+                        storeCodeGSUSK.add(VAddCCOU32(dst=vgpr(addrDVgpr+1), dst1=VCC(), src0=sgpr("AddressD+1"), src1=vgpr(addrDVgpr+1), src2=VCC(), comment="add WS base hi"))
                 else:
                     # Use "NumThreads" instead of "MIWaveGroup" because LSU will not show in "MIWaveGroup"
                     increment = kernel["NumThreads"] * storeWidth * writer.states.bpeCinternal
-                    storeCodeGSUSK.add(SAddU32(dst=sgpr(storeOffsetSgpr), src0=sgpr(storeOffsetSgpr), src1=increment, comment="Increase sgpr offset for store"))
+                    if useBuffer:
+                        storeCodeGSUSK.add(SAddU32(dst=sgpr(storeOffsetSgpr), src0=sgpr(storeOffsetSgpr), src1=increment, comment="Increase sgpr offset for store"))
+                    else:
+                        # Flat store: compute address from previous element's addr + increment
+                        storeCodeGSUSK.add(VAddCOU32(dst=vgpr(addrDVgpr), dst1=VCC(), src0=increment, src1=vgpr(prevAddrVgpr), comment="Inc flat WS addr lo"))
+                        storeCodeGSUSK.add(VAddCCOU32(dst=vgpr(addrDVgpr+1), dst1=VCC(), src0=0, src1=vgpr(prevAddrVgpr+1), src2=VCC(), comment="Inc flat WS addr hi"))
+                prevAddrVgpr = addrDVgpr
 
                 sumIdx = ss.elementSumIdx[elementIdx]
                 if not kernel["StoreRemapVectorWidth"]:
                     # Only GSU>1 MBSK write to workspace (GSU1 MBSK will write to output buffer)
                     # so we need wsOffset to coalesced store to workspace buffer
-                    wsOffset = sgpr(storeOffsetSgpr)
+                    wsOffset = sgpr(storeOffsetSgpr) if useBuffer else None
                     wsScope = CacheScope.SCOPE_DEV \
                         if writer.states.archCaps["DefaultScopeIsCULocal"] else CacheScope.SCOPE_NONE
-                    storeCodeGSUSK.add(writer.chooseGlobalWrite(True, bps, sumIdx, rpv, \
+                    storeCodeGSUSK.add(writer.chooseGlobalWrite(useBuffer, bps, sumIdx, rpv, \
                         addr0, addr1, globalOffset, soffset=wsOffset, \
                         glc=isGlc, slc=isSlc, nt=isNT, hi16=0, scope=wsScope, comment="store WS"))
                 else:
@@ -1301,7 +1334,7 @@ class GSUOn(GSU):
         lastDataD = -1
         for elementIdx in range(0, len(batchElements)):
             if not ss.sharedColDVgprs:
-                addrCalc: AddrCalculation = ss.elementAddres[elementIdx]
+                addrCalc: AddrCalculation = ss.elementAddr[elementIdx]
                 addrDVgpr = addrCalc.addrDVgpr
                 addrGSUSyncVgprs    = addrCalc.addrGSUSyncVgprs
                 addrCVgpr = addrCalc.addrCVgpr
@@ -1309,7 +1342,7 @@ class GSUOn(GSU):
                 if addrCVgpr != addrDVgpr:
                     writer.vgprPool.checkIn(addrCVgpr)
                 if addrGSUSyncVgprs != None:
-                    writer.parentWriter.vgprPool.checkIn(addrGSUSyncVgprs)
+                    writer.vgprPool.checkIn(addrGSUSyncVgprs)
 
             data = ss.elementData[elementIdx]
             if data != 0:
@@ -1432,7 +1465,7 @@ class GSUOn(GSU):
         lastDataD = -1
         for elementIdx in range(0, len(batchElements)):
             if not ss.sharedColDVgprs:
-                addrCalc: AddrCalculation = ss.elementAddres[elementIdx]
+                addrCalc: AddrCalculation = ss.elementAddr[elementIdx]
                 addrDVgpr = addrCalc.addrDVgpr
                 addrGSUSyncVgprs    = addrCalc.addrGSUSyncVgprs
                 addrCVgpr = addrCalc.addrCVgpr
@@ -1440,7 +1473,7 @@ class GSUOn(GSU):
                 if addrCVgpr != addrDVgpr:
                     writer.vgprPool.checkIn(addrCVgpr)
                 if addrGSUSyncVgprs != None:
-                    writer.parentWriter.vgprPool.checkIn(addrGSUSyncVgprs)
+                    writer.vgprPool.checkIn(addrGSUSyncVgprs)
 
             data = ss.elementData[elementIdx]
             if data != 0:
@@ -1471,12 +1504,19 @@ class GSUOn(GSU):
         module.add(SAddU32(dst=sgpr("GSUStartWGIdx"), src0=sgpr("GSUStartWGIdx"), src1=sgpr(tmpS01), comment="starting WG index of each GSU WGs"))
         module.add(SAddU32(dst=sgpr(tmpS01), src0=sgpr("GSUStartWGIdx"), src1=sgpr("GSUSumIdx"), comment="(NumWorkGroups0*wg1+wg0)*GSU+NumWgPerBatch+GSUSumIdx"))
 
-        assert kernel["BufferStore"]
-        module.addComment("add offset to the base address of workspace buffer")
-        module.add(SMulHIU32(dst=sgpr(tmpS02), src0=sgpr(tmpS01), src1="MTOffset", comment="(MT0*MT1*bpeC)*WGIdx"))
-        module.add(SMulI32(dst=sgpr(tmpS01), src0=sgpr(tmpS01), src1="MTOffset", comment="(MT0*MT1*bpeC)*WGIdx"))
-        module.add(SAddU32(dst=sgpr("SrdD+0"), src0=sgpr("AddressD+0"), src1=sgpr(tmpS01), comment="add lo to SRD"))
-        module.add(SAddCU32(dst=sgpr("SrdD+1"), src0=sgpr("AddressD+1"), src1=sgpr(tmpS02), comment="add hi to SRD"))
+        if kernel["BufferStore"]:
+            module.addComment("add offset to the base address of workspace buffer")
+            module.add(SMulHIU32(dst=sgpr(tmpS02), src0=sgpr(tmpS01), src1="MTOffset", comment="(MT0*MT1*bpeC)*WGIdx"))
+            module.add(SMulI32(dst=sgpr(tmpS01), src0=sgpr(tmpS01), src1="MTOffset", comment="(MT0*MT1*bpeC)*WGIdx"))
+            module.add(SAddU32(dst=sgpr("SrdD+0"), src0=sgpr("AddressD+0"), src1=sgpr(tmpS01), comment="add lo to SRD"))
+            module.add(SAddCU32(dst=sgpr("SrdD+1"), src0=sgpr("AddressD+1"), src1=sgpr(tmpS02), comment="add hi to SRD"))
+        else:
+            # Flat store: compute workspace base into AddressD SGPRs (base + tile offset)
+            module.addComment("flat store: add tile offset to workspace base address")
+            module.add(SMulHIU32(dst=sgpr(tmpS02), src0=sgpr(tmpS01), src1="MTOffset", comment="(MT0*MT1*bpeC)*WGIdx"))
+            module.add(SMulI32(dst=sgpr(tmpS01), src0=sgpr(tmpS01), src1="MTOffset", comment="(MT0*MT1*bpeC)*WGIdx"))
+            module.add(SAddU32(dst=sgpr("AddressD+0"), src0=sgpr("AddressD+0"), src1=sgpr(tmpS01), comment="add lo tile offset"))
+            module.add(SAddCU32(dst=sgpr("AddressD+1"), src0=sgpr("AddressD+1"), src1=sgpr(tmpS02), comment="add hi tile offset"))
         module.addSpaceLine()
 
         return module
@@ -1540,6 +1580,7 @@ class GSUOn(GSU):
         loadOffsetSgpr = tmpSgpr.idx + 1
         storeOffsetSgprRes = ContinuousRegister(storeOffsetSgpr, 1)
         
+        useBuffer = kernel["BufferStore"]
         addr1 = sgpr(tmpS06, 4)
         addr0 = vgpr(vgproffset)
         bps = kernel["ProblemType"]["ComputeDataType"].numBytes() * gwvw
@@ -1578,15 +1619,23 @@ class GSUOn(GSU):
             # calculate the address for read from ws
             addrCalc = ss.elementAddr[0]
             addrDVgpr = addrCalc.addrDVgpr
-            module.add(SMovB32(sgpr(loadOffsetSgpr), 0, "Init sgpr offset for interleaved wave load"))
+            if useBuffer:
+                module.add(SMovB32(sgpr(loadOffsetSgpr), 0, "Init sgpr offset for interleaved wave load"))
             module.add(vectorStaticMultiply(vgpr(addrDVgpr), vgpr("Serial"), storeWidth * writer.states.bpeCinternal, storeOffsetSgprRes))
-            module.add(VMovB32(dst=vgpr(bufferOOB), src="BufferOOB"))
+            if useBuffer:
+                module.add(VMovB32(dst=vgpr(bufferOOB), src="BufferOOB"))
             module.addComment("synchronizer sum offset is equal to MTOffset (=MT0*MT1*bpeC)")
             module.add(SMulHIU32(dst=sgpr(tmpS06+1), src0="MTOffset", src1=sgpr("GSUStartWGIdx"), comment="(MT0*MT1*bpeC)*WGIdx"))
             module.add(SMulI32(dst=sgpr(tmpS06), src0="MTOffset", src1=sgpr("GSUStartWGIdx"), comment="(MT0*MT1*bpeC)*WGIdx"))
             module.add(SAddU32(dst=sgpr(tmpS06+0), src0=sgpr("AddressD+0"), src1=sgpr(tmpS06), comment="add lo to SRD"))
             module.add(SAddCU32(dst=sgpr(tmpS06+1), src0=sgpr("AddressD+1"), src1=sgpr(tmpS06+1), comment="add hi to SRD"))
-            module.add(SMovB64(sgpr(tmpS06+2, 2), sgpr("SrdD+2", 2), ""))
+            if useBuffer:
+                module.add(SMovB64(sgpr(tmpS06+2, 2), sgpr("SrdD+2", 2), ""))
+            else:
+                # Flat mode: build full 64-bit address in VGPR pair = sgpr base + per-thread offset
+                module.add(VMovB32(dst=vgpr(addrDVgpr+1), src=0, comment="zero hi addr bits"))
+                module.add(VAddCOU32(dst=vgpr(addrDVgpr), dst1=VCC(), src0=sgpr(tmpS06+0), src1=vgpr(addrDVgpr), comment="add WS base lo"))
+                module.add(VAddCCOU32(dst=vgpr(addrDVgpr+1), dst1=VCC(), src0=sgpr(tmpS06+1), src1=vgpr(addrDVgpr+1), src2=VCC(), comment="add WS base hi"))
 
             # for GSU < self.gsuThreshold, GSU-1 is passed to the reduction body
             module.add(SAndB32(dst=sgpr(tmpS02), src0=sgpr("GSU"), src1=writer.gsuMaskHex(kernel), comment="Restore GSU"))
@@ -1600,7 +1649,10 @@ class GSUOn(GSU):
         if not kernel["MbskPrefetchMethod"]:
             for elementIdx in range(0, len(batchElements)):
                 addrCalc: AddrCalculation = ss.elementAddr[elementIdx]
-                addr0 = vgpr(addrCalc.addrDVgpr)
+                if useBuffer:
+                    addr0 = vgpr(addrCalc.addrDVgpr)
+                else:
+                    addr0 = vgpr(addrCalc.addrDVgpr, 2)
 
                 # pre-load
                 SyncloadedData = 0
@@ -1620,19 +1672,32 @@ class GSUOn(GSU):
                 module.addComment("buffer load start")
                 for times in range(elementIdx, elementIdx+1):
                     if batchIdx != 0 or elementIdx != 0:
-                        module.add(SAddU32(dst=sgpr(loadOffsetSgpr), src0=sgpr(loadOffsetSgpr), src1=increment, comment="Increase sgpr offset for load"))
+                        if useBuffer:
+                            module.add(SAddU32(dst=sgpr(loadOffsetSgpr), src0=sgpr(loadOffsetSgpr), src1=increment, comment="Increase sgpr offset for load"))
                         module.add(SMulHIU32(dst=sgpr(tmpS06+1), src0="MTOffset", src1=sgpr("GSUStartWGIdx"), comment="(MT0*MT1*bpeC)*WGIdx"))
                         module.add(SMulI32(dst=sgpr(tmpS06), src0="MTOffset", src1=sgpr("GSUStartWGIdx"), comment="(MT0*MT1*bpeC)*WGIdx"))
                         module.add(SAddU32(dst=sgpr(tmpS06+0), src0=sgpr("AddressD+0"), src1=sgpr(tmpS06), comment="add lo to SRD"))
                         module.add(SAddCU32(dst=sgpr(tmpS06+1), src0=sgpr("AddressD+1"), src1=sgpr(tmpS06+1), comment="add hi to SRD"))
+                        if not useBuffer:
+                            # Flat mode: rebuild VGPR addr from new sgpr base + per-thread offset
+                            addrDVgpr = addrCalc.addrDVgpr
+                            module.add(vectorStaticMultiply(vgpr(addrDVgpr), vgpr("Serial"), storeWidth * writer.states.bpeCinternal, storeOffsetSgprRes))
+                            module.add(VMovB32(dst=vgpr(addrDVgpr+1), src=0, comment="zero hi addr bits"))
+                            module.add(VAddCOU32(dst=vgpr(addrDVgpr), dst1=VCC(), src0=sgpr(tmpS06+0), src1=vgpr(addrDVgpr), comment="add WS base lo"))
+                            module.add(VAddCCOU32(dst=vgpr(addrDVgpr+1), dst1=VCC(), src0=sgpr(tmpS06+1), src1=vgpr(addrDVgpr+1), src2=VCC(), comment="add WS base hi"))
 
                 vgprstart = ss.elementSumIdx[elementIdx]
                 dataType  = kernel["ProblemType"]["DestDataType"]
                 if dataType.isDouble() or dataType.isSingleComplex():
                     vgprstart = vgprstart*2
-                module.add(writer.chooseGlobalRead(True, bps, vgprstart, \
-                                addr0, addr1, soffset=sgpr(loadOffsetSgpr), offset=0, glc=True, slc=True, scope=gsuReadScope,\
-                                comment="load GSU WG %d element %d" % (SyncloadedData, elementIdx)))
+                if useBuffer:
+                    module.add(writer.chooseGlobalRead(useBuffer, bps, vgprstart, \
+                                    addr0, addr1, soffset=sgpr(loadOffsetSgpr), offset=0, glc=True, slc=True, scope=gsuReadScope,\
+                                    comment="load GSU WG %d element %d" % (SyncloadedData, elementIdx)))
+                else:
+                    module.add(writer.chooseGlobalRead(useBuffer, bps, vgprstart, \
+                                    addr0, addr1, soffset=0, offset=0, glc=True, slc=True, scope=gsuReadScope,\
+                                    comment="load GSU WG %d element %d" % (SyncloadedData, elementIdx)))
                 SyncloadedData += 1
 
                 # Init GSUSync for different batch
@@ -1654,14 +1719,27 @@ class GSUOn(GSU):
                     module.add(SCmpEQI32(src0=sgpr("GSUSync"), src1=0, comment=""))#GSUSync+GSUP1==GSU
                     module.add(SCBranchSCC1(labelName=SynchronizerAddEndlabel[i].getLabelName(), comment="SyncAddbranchhere"))
 
+                    if not useBuffer:
+                        # Flat mode: rebuild VGPR addr from updated sgpr base
+                        addrDVgpr = addrCalc.addrDVgpr
+                        module.add(vectorStaticMultiply(vgpr(addrDVgpr), vgpr("Serial"), storeWidth * writer.states.bpeCinternal, storeOffsetSgprRes))
+                        module.add(VMovB32(dst=vgpr(addrDVgpr+1), src=0, comment="zero hi addr bits"))
+                        module.add(VAddCOU32(dst=vgpr(addrDVgpr), dst1=VCC(), src0=sgpr(tmpS06+0), src1=vgpr(addrDVgpr), comment="add WS base lo"))
+                        module.add(VAddCCOU32(dst=vgpr(addrDVgpr+1), dst1=VCC(), src0=sgpr(tmpS06+1), src1=vgpr(addrDVgpr+1), src2=VCC(), comment="add WS base hi"))
+
                     if(kernel["ProblemType"]["DestDataType"].numRegisters() > 1):
-                        module.add(writer.chooseGlobalRead(True, bps, tmpVAdd+gwvw*kernel["ProblemType"]["DestDataType"].numRegisters()*i, \
-                                    addr0, addr1, soffset=0, offset=0, glc=True, slc=True, scope=gsuReadScope, \
+                        module.add(writer.chooseGlobalRead(useBuffer, bps, tmpVAdd+gwvw*kernel["ProblemType"]["DestDataType"].numRegisters()*i, \
+                                    addr0, addr1, soffset=0, offset=0, glc=True, slc=True, scope=gsuReadScope,  \
                                     comment="load GSU WG %d element %d" % (SyncloadedData, elementIdx)))
                     else:
-                        module.add(writer.chooseGlobalRead(True, bps, tmpVAdd+gwvw*i, \
-                                    addr0, addr1, soffset=sgpr(loadOffsetSgpr), offset=0, glc=True, slc=True, scope=gsuReadScope, \
-                                    comment="load GSU WG %d element %d" % (SyncloadedData, elementIdx)))
+                        if useBuffer:
+                            module.add(writer.chooseGlobalRead(useBuffer, bps, tmpVAdd+gwvw*i, \
+                                        addr0, addr1, soffset=sgpr(loadOffsetSgpr), offset=0, glc=True, slc=True, scope=gsuReadScope,  \
+                                        comment="load GSU WG %d element %d" % (SyncloadedData, elementIdx)))
+                        else:
+                            module.add(writer.chooseGlobalRead(useBuffer, bps, tmpVAdd+gwvw*i, \
+                                        addr0, addr1, soffset=0, offset=0, glc=True, slc=True, scope=gsuReadScope,  \
+                                        comment="load GSU WG %d element %d" % (SyncloadedData, elementIdx)))
                     SyncloadedData += 1
 
                 module.addComment("buffer load end")
@@ -1697,17 +1775,47 @@ class GSUOn(GSU):
                     module.add(SAddCU32(dst=sgpr(tmpS06+1), src0=sgpr(tmpS06+1), src1="MTOffsetH32", comment=""))
 
                     numSgpr = 1 if kernel["WavefrontSize"] == 32 else 2
-                    module.add(VCmpGEI32(dst=sgpr(tmpS05,numSgpr), src0=0, src1=sgpr("GSUSync"), comment=""))
-                    module.add(VCndMaskB32(dst=vgpr(GSUMvgpr), src1=vgpr(bufferOOB), src0=addr0, src2=sgpr(tmpS05,numSgpr), comment="protect if OOB"))
-
-                    if(kernel["ProblemType"]["DestDataType"].numRegisters() > 1):
-                        module.add(writer.chooseGlobalRead(True, bps, tmpVAdd+gwvw*kernel["ProblemType"]["DestDataType"].numRegisters()*i, \
-                                    vgpr(GSUMvgpr), addr1, soffset=0, offset=0, glc=True, slc=True, scope=gsuReadScope, \
-                                    comment="prefetch GSU WG element %d" % elementIdx))
+                    if useBuffer:
+                        module.add(VCmpGEI32(dst=sgpr(tmpS05,numSgpr), src0=0, src1=sgpr("GSUSync"), comment=""))
+                        module.add(VCndMaskB32(dst=vgpr(GSUMvgpr), src1=vgpr(bufferOOB), src0=addr0, src2=sgpr(tmpS05,numSgpr), comment="protect if OOB"))
+                        if(kernel["ProblemType"]["DestDataType"].numRegisters() > 1):
+                            module.add(writer.chooseGlobalRead(useBuffer, bps, tmpVAdd+gwvw*kernel["ProblemType"]["DestDataType"].numRegisters()*i, \
+                                        vgpr(GSUMvgpr), addr1, soffset=0, offset=0, glc=True, slc=True, scope=gsuReadScope, \
+                                        comment="prefetch GSU WG element %d" % elementIdx))
+                        else:
+                            module.add(writer.chooseGlobalRead(useBuffer, bps, tmpVAdd+gwvw*i, \
+                                        vgpr(GSUMvgpr), addr1, soffset=sgpr(loadOffsetSgpr), offset=0, glc=True, slc=True, scope=gsuReadScope, \
+                                        comment="prefetch GSU WG element %d" % elementIdx))
                     else:
-                        module.add(writer.chooseGlobalRead(True, bps, tmpVAdd+gwvw*i, \
-                                    vgpr(GSUMvgpr), addr1, soffset=sgpr(loadOffsetSgpr), offset=0, glc=True, slc=True, scope=gsuReadScope, \
-                                    comment="prefetch GSU WG element %d" % elementIdx))
+                        # Flat mode: skip prefetch and zero dest vgprs if OOB (GSUSync <= 0)
+                        # Buffer loads return 0 for OOB; flat must explicitly zero to match.
+                        numRegisters = kernel["ProblemType"]["DestDataType"].numRegisters()
+                        flatOobSkipLabel = Label(writer.labels.getNameInc("flat_oob_skip"), "skip flat prefetch if OOB")
+                        flatOobDoneLabel = Label(writer.labels.getNameInc("flat_oob_done"), "flat OOB done")
+                        module.add(SCmpLeI32(src0=sgpr("GSUSync"), src1=0, comment="GSUSync <= 0?"))
+                        module.add(SCBranchSCC1(labelName=flatOobSkipLabel.getLabelName(), comment="skip flat prefetch if OOB"))
+                        addrDVgpr = addrCalc.addrDVgpr
+                        module.add(vectorStaticMultiply(vgpr(addrDVgpr), vgpr("Serial"), storeWidth * writer.states.bpeCinternal, storeOffsetSgprRes))
+                        module.add(VMovB32(dst=vgpr(addrDVgpr+1), src=0, comment="zero hi addr bits"))
+                        module.add(VAddCOU32(dst=vgpr(addrDVgpr), dst1=VCC(), src0=sgpr(tmpS06+0), src1=vgpr(addrDVgpr), comment="add WS base lo"))
+                        module.add(VAddCCOU32(dst=vgpr(addrDVgpr+1), dst1=VCC(), src0=sgpr(tmpS06+1), src1=vgpr(addrDVgpr+1), src2=VCC(), comment="add WS base hi"))
+                        if numRegisters > 1:
+                            module.add(writer.chooseGlobalRead(useBuffer, bps, tmpVAdd+gwvw*numRegisters*i, \
+                                        addr0, addr1, soffset=0, offset=0, glc=True, slc=True, scope=gsuReadScope, \
+                                        comment="prefetch GSU WG element %d" % elementIdx))
+                        else:
+                            module.add(writer.chooseGlobalRead(useBuffer, bps, tmpVAdd+gwvw*i, \
+                                        addr0, addr1, soffset=0, offset=0, glc=True, slc=True, scope=gsuReadScope, \
+                                        comment="prefetch GSU WG element %d" % elementIdx))
+                        module.add(SBranch(labelName=flatOobDoneLabel.getLabelName(), comment="skip OOB zeroing"))
+                        module.add(flatOobSkipLabel)
+                        if numRegisters > 1:
+                            for j in range(gwvw * numRegisters):
+                                module.add(VMovB32(dst=vgpr(tmpVAdd+gwvw*numRegisters*i+j), src=0, comment="zero OOB prefetch vgpr"))
+                        else:
+                            for j in range(gwvw):
+                                module.add(VMovB32(dst=vgpr(tmpVAdd+gwvw*i+j), src=0, comment="zero OOB prefetch vgpr"))
+                        module.add(flatOobDoneLabel)
                     vlcnt += 1
 
                 module.addComment("buffer add end")

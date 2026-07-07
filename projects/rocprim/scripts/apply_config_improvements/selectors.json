@@ -118,6 +118,10 @@
     "transform": [
         "value_type"
     ],
+    "topk_air": [
+        "key_type",
+        "value_type"
+    ],
     "upper_bound": [
         "value_type",
         "output_type"

@@ -161,35 +161,35 @@ __device__ char
     llvm_amdgcn_raw_buffer_load_i8(int32x4_t buffer_resource,
                                    uint32_t  voffset,
                                    uint32_t  soffset,
-                                   int32_t   cache_op) __asm("llvm.amdgcn.raw.buffer.load.i8.v4i32");
+                                   int32_t   cache_op) __asm("llvm.amdgcn.raw.buffer.load.i8");
 
 // 2 bytes
 __device__ float16_t
     llvm_amdgcn_raw_buffer_load_f16(int32x4_t buffer_resource,
                                     uint32_t  voffset,
                                     uint32_t  soffset,
-                                    int32_t   cache_op) __asm("llvm.amdgcn.raw.buffer.load.f16.v4i32");
+                                    int32_t   cache_op) __asm("llvm.amdgcn.raw.buffer.load.f16");
 
 // 4 bytes
 __device__ float32_t
     llvm_amdgcn_raw_buffer_load_f32(int32x4_t buffer_resource,
                                     uint32_t  voffset,
                                     uint32_t  soffset,
-                                    int32_t   cache_op) __asm("llvm.amdgcn.raw.buffer.load.f32.v4i32");
+                                    int32_t   cache_op) __asm("llvm.amdgcn.raw.buffer.load.f32");
 
 // 8 bytes
 __device__ float32x2_t
     llvm_amdgcn_raw_buffer_load_f32x2(int32x4_t buffer_resource,
                                       uint32_t  voffset,
                                       uint32_t  soffset,
-                                      int32_t cache_op) __asm("llvm.amdgcn.raw.buffer.load.v2f32.v4i32");
+                                      int32_t cache_op) __asm("llvm.amdgcn.raw.buffer.load.v2f32");
 
 // 16 bytes
 __device__ float32x4_t
     llvm_amdgcn_raw_buffer_load_f32x4(int32x4_t buffer_resource,
                                       uint32_t  voffset,
                                       uint32_t  soffset,
-                                      int32_t cache_op) __asm("llvm.amdgcn.raw.buffer.load.v4f32.v4i32");
+                                      int32_t cache_op) __asm("llvm.amdgcn.raw.buffer.load.v4f32");
 
 // 4 bytes
 __device__ int32_t
@@ -219,7 +219,7 @@ __device__ void
                                     int32x4_t buffer_resource,
                                     uint32_t  voffset,
                                     uint32_t  soffset,
-                                    int32_t   cache_op) __asm("llvm.amdgcn.raw.buffer.store.i8.v4i32");
+                                    int32_t   cache_op) __asm("llvm.amdgcn.raw.buffer.store.i8");
 
 // 2 bytes
 __device__ void
@@ -227,7 +227,7 @@ __device__ void
                                      int32x4_t buffer_resource,
                                      uint32_t  voffset,
                                      uint32_t  soffset,
-                                     int32_t   cache_op) __asm("llvm.amdgcn.raw.buffer.store.f16.v4i32");
+                                     int32_t   cache_op) __asm("llvm.amdgcn.raw.buffer.store.f16");
 
 // 4 bytes
 __device__ void
@@ -235,7 +235,7 @@ __device__ void
                                      int32x4_t buffer_resource,
                                      uint32_t  voffset,
                                      uint32_t  soffset,
-                                     int32_t   cache_op) __asm("llvm.amdgcn.raw.buffer.store.f32.v4i32");
+                                     int32_t   cache_op) __asm("llvm.amdgcn.raw.buffer.store.f32");
 
 // 8 bytes
 __device__ void llvm_amdgcn_raw_buffer_store_f32x2(
@@ -243,7 +243,7 @@ __device__ void llvm_amdgcn_raw_buffer_store_f32x2(
     int32x4_t   buffer_resource,
     uint32_t    voffset,
     uint32_t    soffset,
-    int32_t     cache_op) __asm("llvm.amdgcn.raw.buffer.store.v2f32.v4i32");
+    int32_t     cache_op) __asm("llvm.amdgcn.raw.buffer.store.v2f32");
 
 // 16 bytes
 __device__ void llvm_amdgcn_raw_buffer_store_f32x4(
@@ -251,7 +251,7 @@ __device__ void llvm_amdgcn_raw_buffer_store_f32x4(
     int32x4_t   buffer_resource,
     uint32_t    voffset,
     uint32_t    soffset,
-    int32_t     cache_op) __asm("llvm.amdgcn.raw.buffer.store.v4f32.v4i32");
+    int32_t     cache_op) __asm("llvm.amdgcn.raw.buffer.store.v4f32");
 
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 

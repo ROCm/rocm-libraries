@@ -14,52 +14,6 @@
 namespace hip_kernel_provider
 {
 
-// --- Type Configuration Helpers ---
-
-std::unordered_set<hipdnn_flatbuffers_sdk::data_objects::DataType>
-    bn_type_configs::getAllowedIoTypes()
-{
-    std::unordered_set<hipdnn_flatbuffers_sdk::data_objects::DataType> types;
-    for(const auto& config : VALID)
-    {
-        types.insert(config.io);
-    }
-    return types;
-}
-
-std::unordered_set<hipdnn_flatbuffers_sdk::data_objects::DataType>
-    bn_type_configs::getAllowedAffineTypes()
-{
-    std::unordered_set<hipdnn_flatbuffers_sdk::data_objects::DataType> types;
-    for(const auto& config : VALID)
-    {
-        types.insert(config.affine);
-    }
-    return types;
-}
-
-std::unordered_set<hipdnn_flatbuffers_sdk::data_objects::DataType>
-    bn_type_configs::getAllowedStatTypes()
-{
-    std::unordered_set<hipdnn_flatbuffers_sdk::data_objects::DataType> types;
-    for(const auto& config : VALID)
-    {
-        types.insert(config.stat);
-    }
-    return types;
-}
-
-std::unordered_set<hipdnn_flatbuffers_sdk::data_objects::DataType>
-    bn_type_configs::getAllowedIntermediateTypes()
-{
-    std::unordered_set<hipdnn_flatbuffers_sdk::data_objects::DataType> types;
-    for(const auto& config : VALID)
-    {
-        types.insert(config.intermediate);
-    }
-    return types;
-}
-
 void BatchnormValidator::validateSpatialDimensions(const std::vector<int64_t>& ioDims)
 {
     if(ioDims.size() < 3)
@@ -109,14 +63,21 @@ void BatchnormValidator::checkTensorDataTypesSupported(
     const std::vector<int64_t>& statTensorIds,
     const std::vector<int64_t>& intermediateTensorIds)
 {
-    validateConsistentDataTypes(
-        ioTensorIds,
-        bn_type_configs::getAllowedIoTypes(),
-        "Batchnorm implementation supports only FLOAT, HALF, and BFLOAT16 data types for x, y, "
-        "dy, and dx tensors.",
-        "All IO tensors for batchnorm must have the same data type.");
+    const std::unordered_set<hipdnn_flatbuffers_sdk::data_objects::DataType> allowedIOTypes{
+        hipdnn_flatbuffers_sdk::data_objects::DataType::FLOAT,
+        hipdnn_flatbuffers_sdk::data_objects::DataType::BFLOAT16,
+        hipdnn_flatbuffers_sdk::data_objects::DataType::HALF};
+    for(const auto ioTensorId : ioTensorIds)
+    {
+        const auto& ioTensorAttr = core::utils::findTensorAttributes(_tensorMap, ioTensorId);
+        validateDataTypeIsSupported(ioTensorAttr.data_type(),
+                                    allowedIOTypes,
+                                    "Batchnorm implementation supports only FLOAT, HALF, and "
+                                    "BFLOAT16 data types for x, y, tensors");
+    }
 
-    const auto allowedAffineTypes = bn_type_configs::getAllowedAffineTypes();
+    const std::unordered_set<hipdnn_flatbuffers_sdk::data_objects::DataType> allowedAffineTypes{
+        hipdnn_flatbuffers_sdk::data_objects::DataType::FLOAT};
     if(allowedAffineTypes.size() == 1)
     {
         validateFixedDataType(affineTensorIds,
@@ -133,7 +94,8 @@ void BatchnormValidator::checkTensorDataTypesSupported(
             "All affine tensors for batchnorm must have the same data type.");
     }
 
-    const auto allowedStatTypes = bn_type_configs::getAllowedStatTypes();
+    const std::unordered_set<hipdnn_flatbuffers_sdk::data_objects::DataType> allowedStatTypes{
+        hipdnn_flatbuffers_sdk::data_objects::DataType::FLOAT};
     if(allowedStatTypes.size() == 1)
     {
         validateFixedDataType(statTensorIds,
@@ -149,8 +111,9 @@ void BatchnormValidator::checkTensorDataTypesSupported(
                                     "All stat tensors for batchnorm must have the same data type.");
     }
 
-    const auto allowedIntermediateTypes = bn_type_configs::getAllowedIntermediateTypes();
-    if(allowedIntermediateTypes.size() == 1)
+    const std::unordered_set<hipdnn_flatbuffers_sdk::data_objects::DataType>
+        allowedIntermediateTypes{hipdnn_flatbuffers_sdk::data_objects::DataType::FLOAT};
+    if(allowedStatTypes.size() == 1)
     {
         validateFixedDataType(
             intermediateTensorIds,
