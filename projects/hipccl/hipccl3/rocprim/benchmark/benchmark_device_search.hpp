@@ -114,7 +114,7 @@ struct device_search_benchmark : public primbench::benchmark_interface
                                         common::generate_limits<key_type>::max(),
                                         seed);
 
-        // Fill the input with random data, This might get changed or competely overwritten below.
+        // Fill the input with random data. This might get changed or completely overwritten below.
         std::vector<key_type> input
             = get_random_data<key_type>(items,
                                         common::generate_limits<key_type>::min(),
