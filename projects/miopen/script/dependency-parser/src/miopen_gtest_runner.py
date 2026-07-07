@@ -26,6 +26,10 @@ def split_gtest_filter_includes(filter_str):
         positives = [p for p in filter_str.split(":") if p]
         negatives = []
 
+    # If filter is negative-only, gtest includes all tests
+    if not positives:
+        positives = ["*"]
+
     return positives, negatives
 
 
@@ -34,6 +38,36 @@ def matches_any_filter(s, filters):
     Checks if a string 's' matches any of the wildcard patterns in 'filters'.
     """
     return any(fnmatch.fnmatch(s, pattern) for pattern in filters)
+
+
+def _fixed_prefix(pattern):
+    """
+    Return the literal portion of a wildcard pattern up to the first wildcard
+    metacharacter ('*', '?', '['). Dapper patterns only wildcard at the end, so
+    for them this is the full fixture name; category patterns may wildcard
+    anywhere, so this is just their leading literal.
+    """
+    for i, ch in enumerate(pattern):
+        if ch in "*?[":
+            return pattern[:i]
+    return pattern
+
+
+def patterns_overlap(dapper_pattern, category_pattern):
+    """
+    Return True if a dapper (prefix-style) pattern and a category (arbitrary
+    wildcard) pattern could match a common gtest fixture name.
+
+    fnmatch needs a concrete string on one side and a pattern on the other, so a
+    single stripped comparison is asymmetric and misses real overlaps. We test
+    both directions: the dapper pattern's literal prefix against the category
+    glob, and the category pattern's literal prefix against the dapper glob.
+    Either match means gtest would run at least one shared fixture, so the dapper
+    pattern belongs in the union.
+    """
+    return fnmatch.fnmatch(
+        _fixed_prefix(dapper_pattern), category_pattern
+    ) or fnmatch.fnmatch(_fixed_prefix(category_pattern), dapper_pattern)
 
 
 def _convert_xml_shards(json_data):
@@ -97,7 +131,7 @@ def calc_union_filter(gtest_filter_json: str, category_name: str, category_filte
     union_positives = [
         df
         for df in dapper_positives
-        if matches_any_filter(df.strip("*"), category_positives)
+        if any(patterns_overlap(df, cp) for cp in category_positives)
     ]
     deduped = list(dict.fromkeys(union_positives))
     duplicates_removed = len(union_positives) - len(deduped)
