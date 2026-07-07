@@ -51,8 +51,8 @@ CK-3D, which is **not** apples-to-apples. The three tables resolve that:
 ```bash
 cd <composablekernel-checkout>
 export AITER_PATH=<aiter-checkout>
-PYTHONPATH="Python:${AITER_PATH}" python \
-  Python/rocke/examples/gfx950/attention/parity_unified_attention.py \
+PYTHONPATH="python:${AITER_PATH}" python \
+  python/rocke/examples/gfx950/attention/parity_unified_attention.py \
   --attempts 30 --warmup 10 \
   --report /tmp/unified_attention_parity.json
 ```
@@ -765,8 +765,8 @@ variant per shape + bucket; writes a JSON to `--output-json`, default
 
 ```bash
 export AITER_PATH=<path/to/aiter>
-PYTHONPATH="Python:${AITER_PATH}" python \
-  Python/rocke/examples/gfx950/attention/benchmark_prefill2d_live.py \
+PYTHONPATH="python:${AITER_PATH}" python \
+  python/rocke/examples/gfx950/attention/benchmark_prefill2d_live.py \
   --shapes <path/to/unified_attention_shapes.jsonl> --variants prod combo fallback
 ```
 
@@ -777,8 +777,8 @@ CSV; the joined file is emitted to the path given by `--combined-csv`:
 
 ```bash
 export AITER_PATH=<path/to/aiter>
-PYTHONPATH="Python:${AITER_PATH}" python \
-  Python/rocke/examples/gfx950/attention/benchmark_prefill2d_traces.py \
+PYTHONPATH="python:${AITER_PATH}" python \
+  python/rocke/examples/gfx950/attention/benchmark_prefill2d_traces.py \
   --shapes <path/to/unified_attention_shapes.jsonl> \
   --combined-csv prefill2d_bf16_triton_ckdsl_perf.csv
 ```

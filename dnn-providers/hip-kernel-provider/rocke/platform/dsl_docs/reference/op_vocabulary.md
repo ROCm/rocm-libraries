@@ -1,6 +1,6 @@
 # IR Op Vocabulary
 
-Complete reference of operations recognized by `core/ir.py` and lowered to AMDGPU LLVM IR. The native Python lowerer (`core/lower_llvm.py`) and the C++ engine (`Cpp/`, reached through the `rocke_engine` extension) are two interchangeable engines that emit byte-identical IR for these ops; `core/backend.py` selects between them. Verified against the IR source. Each entry lists the operation name (as it appears in `print_ir`), the IRBuilder method, and the LLVM emission summary.
+Complete reference of operations recognized by `core/ir.py` and lowered to AMDGPU LLVM IR. The native Python lowerer (`core/lower_llvm.py`) and the C++ engine (`cpp/`, reached through the `rocke_engine` extension) are two interchangeable engines that emit byte-identical IR for these ops; `core/backend.py` selects between them. Verified against the IR source. Each entry lists the operation name (as it appears in `print_ir`), the IRBuilder method, and the LLVM emission summary.
 
 ## Arithmetic
 

@@ -109,7 +109,7 @@
     CUOccupancy: -1
     ClusterDim: [1, 1]
     ClusterLocalRead: 1
-    CodeObjectVersion: 4
+    CodeObjectVersion: "4"
     CompactLoopStore: false
     ConvertAfterDS: false
     CustomKernelName: ''
@@ -428,7 +428,7 @@
     CUOccupancy: -1
     ClusterDim: [1, 1]
     ClusterLocalRead: 1
-    CodeObjectVersion: 4
+    CodeObjectVersion: "4"
     CompactLoopStore: false
     ConvertAfterDS: false
     CustomKernelName: ''
@@ -747,7 +747,7 @@
     CUOccupancy: -1
     ClusterDim: [1, 1]
     ClusterLocalRead: 1
-    CodeObjectVersion: 4
+    CodeObjectVersion: "4"
     CompactLoopStore: false
     ConvertAfterDS: false
     CustomKernelName: ''
@@ -1066,7 +1066,7 @@
     CUOccupancy: -1
     ClusterDim: [1, 1]
     ClusterLocalRead: 1
-    CodeObjectVersion: 4
+    CodeObjectVersion: "4"
     CompactLoopStore: false
     ConvertAfterDS: false
     CustomKernelName: ''
@@ -1385,7 +1385,7 @@
     CUOccupancy: -1
     ClusterDim: [1, 1]
     ClusterLocalRead: 0
-    CodeObjectVersion: 4
+    CodeObjectVersion: "4"
     CompactLoopStore: false
     ConvertAfterDS: false
     CustomKernelName: ''
@@ -1704,7 +1704,7 @@
     CUOccupancy: -1
     ClusterDim: [1, 1]
     ClusterLocalRead: 1
-    CodeObjectVersion: 4
+    CodeObjectVersion: "4"
     CompactLoopStore: false
     ConvertAfterDS: false
     CustomKernelName: ''
@@ -2023,7 +2023,7 @@
     CUOccupancy: -1
     ClusterDim: [1, 1]
     ClusterLocalRead: 1
-    CodeObjectVersion: 4
+    CodeObjectVersion: "4"
     CompactLoopStore: false
     ConvertAfterDS: false
     CustomKernelName: ''
@@ -2342,7 +2342,7 @@
     CUOccupancy: -1
     ClusterDim: [1, 1]
     ClusterLocalRead: 1
-    CodeObjectVersion: 4
+    CodeObjectVersion: "4"
     CompactLoopStore: false
     ConvertAfterDS: false
     CustomKernelName: ''
@@ -2661,7 +2661,7 @@
     CUOccupancy: -1
     ClusterDim: [1, 1]
     ClusterLocalRead: 0
-    CodeObjectVersion: 4
+    CodeObjectVersion: "4"
     CompactLoopStore: false
     ConvertAfterDS: false
     CustomKernelName: ''
@@ -2980,7 +2980,7 @@
     CUOccupancy: -1
     ClusterDim: [1, 1]
     ClusterLocalRead: 1
-    CodeObjectVersion: 4
+    CodeObjectVersion: "4"
     CompactLoopStore: false
     ConvertAfterDS: false
     CustomKernelName: ''
@@ -3299,7 +3299,7 @@
     CUOccupancy: -1
     ClusterDim: [1, 1]
     ClusterLocalRead: 1
-    CodeObjectVersion: 4
+    CodeObjectVersion: "4"
     CompactLoopStore: false
     ConvertAfterDS: false
     CustomKernelName: ''
@@ -3618,7 +3618,7 @@
     CUOccupancy: -1
     ClusterDim: [1, 1]
     ClusterLocalRead: 1
-    CodeObjectVersion: 4
+    CodeObjectVersion: "4"
     CompactLoopStore: false
     ConvertAfterDS: false
     CustomKernelName: ''
@@ -3937,7 +3937,7 @@
     CUOccupancy: -1
     ClusterDim: [1, 1]
     ClusterLocalRead: 0
-    CodeObjectVersion: 4
+    CodeObjectVersion: "4"
     CompactLoopStore: false
     ConvertAfterDS: false
     CustomKernelName: ''
@@ -4256,7 +4256,7 @@
     CUOccupancy: -1
     ClusterDim: [1, 1]
     ClusterLocalRead: 1
-    CodeObjectVersion: 4
+    CodeObjectVersion: "4"
     CompactLoopStore: false
     ConvertAfterDS: false
     CustomKernelName: ''
@@ -4575,7 +4575,7 @@
     CUOccupancy: -1
     ClusterDim: [1, 1]
     ClusterLocalRead: 0
-    CodeObjectVersion: 4
+    CodeObjectVersion: "4"
     CompactLoopStore: false
     ConvertAfterDS: false
     CustomKernelName: Custom_Cijk_Alik_Bljk_F8B8BS_BH_SAB_NTD_UserArgs_shortname0_gfx950
@@ -4863,7 +4863,7 @@
     ClusterBarrier: false
     ClusterDim: [1, 1]
     ClusterLocalRead: 1
-    CodeObjectVersion: 4
+    CodeObjectVersion: "4"
     CompactLoopStore: false
     ConvertAfterDS: false
     CustomKernelName: ''
@@ -4891,7 +4891,7 @@
     ExtraMiLatencyLeft: 0
     ForceDisableShadowInit: false
     ForceUnrollSubIter: false
-    GlobalReadPerMfma: 1
+    GlobalReadPerMfma: 1.0
     GlobalReadVectorWidthA: 16
     GlobalReadVectorWidthB: 16
     GlobalSplitU: 0
