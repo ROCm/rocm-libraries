@@ -47,10 +47,28 @@ class _Gfx942Arch:
     def __enter__(self):
         self._old = au._RESOLVED_ATTENTION_ARCH
         au._RESOLVED_ATTENTION_ARCH = "gfx942"
+
+        # Keep tests hermetic: clear any env overrides that would affect routing.
+        self._env_keys = (
+            "HIPDNN_GFX942_K_SLICED_RING",
+            "HIPDNN_GFX942_FLASH_MLIM",
+            "HIPDNN_GFX942_FLASH_WIDE",
+            "HIPDNN_GFX942_BF16_CFVST",
+            "HIPDNN_GFX942_BF16_WIDE",
+        )
+        self._old_env = {k: os.environ.get(k) for k in self._env_keys}
+        for k in self._env_keys:
+            os.environ.pop(k, None)
+
         return self
 
     def __exit__(self, *_):
         au._RESOLVED_ATTENTION_ARCH = self._old
+        for k, v in self._old_env.items():
+            if v is None:
+                os.environ.pop(k, None)
+            else:
+                os.environ[k] = v
 
 
 class TestDensePipeRegistration(unittest.TestCase):
