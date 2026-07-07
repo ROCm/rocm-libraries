@@ -16,13 +16,13 @@ kernel symbol.
 
 Example:
 
-    PYTHONPATH=Python Python/rocke/.venv/bin/python \\
+    PYTHONPATH=python python/rocke/.venv/bin/python \\
       rocke/library/builders/gfx950/attention/benchmark_prefill2d_fastkv_regp.py \\
       --limit 10 --iterations 100 --warmup 10
 
 To reproduce the current best measured host-dispatch policy:
 
-    PYTHONPATH=Python Python/rocke/.venv/bin/python \\
+    PYTHONPATH=python python/rocke/.venv/bin/python \\
       rocke/library/builders/gfx950/attention/benchmark_prefill2d_fastkv_regp.py \\
       --smart-dispatch-policy latest
 """
