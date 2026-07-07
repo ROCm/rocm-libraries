@@ -1,4 +1,9 @@
 #!/usr/bin/env python3
+import sys
+
+if sys.version_info < (3, 10):
+    sys.exit("Python 3.10 or later is required.")
+
 """
 Enhanced Ninja Dependency Parser
 
@@ -9,7 +14,6 @@ used by multiple executables.
 
 import re
 import os
-import sys
 import subprocess
 from pathlib import Path
 from collections import defaultdict

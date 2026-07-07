@@ -23,10 +23,14 @@ Options:
   --folder        Relative path to comparing folder
 """
 
+import sys
+
+if sys.version_info < (3, 10):
+    sys.exit("Python 3.10 or later is required.")
+
 import json
 import os
 from pathlib import Path
-import sys
 import subprocess
 import xml.etree.ElementTree as ET
 

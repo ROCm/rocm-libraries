@@ -2,6 +2,11 @@
 # Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
 # SPDX-License-Identifier: MIT
 
+import sys
+
+if sys.version_info < (3, 10):
+    sys.exit("Python 3.10 or later is required.")
+
 """
 Unified CLI for Ninja Dependency Analysis and Selective Testing
 
@@ -15,7 +20,6 @@ Features:
 import argparse
 import os
 import subprocess
-import sys
 
 
 def run_dependency_parser(args):

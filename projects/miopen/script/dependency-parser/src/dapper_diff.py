@@ -1,7 +1,11 @@
+import sys
+
+if sys.version_info < (3, 10):
+    sys.exit("Python 3.10 or later is required.")
+
 import json
 import os
 import re
-import sys
 from miopen_gtest_runner import calc_union_filter
 
 
@@ -212,7 +216,9 @@ def analyze_sharded_gtest(input_file):
         f"Covered dapper fixture (forward|reverse)   : {expected_covered}|{net_covered_union}"
     )
     print(
-        f"Minimal Compliance Achieved?               : {dapper_compliance_result == "COMPLIANT"}"
+        "Minimal Compliance Achieved?               : {0}".format(
+            dapper_compliance_result == "COMPLIANT"
+        )
     )
     print(f"Dapper Compliance                          : {dapper_compliance_result}")
     print(

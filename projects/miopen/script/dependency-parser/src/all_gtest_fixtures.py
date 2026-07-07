@@ -1,10 +1,14 @@
 #!/usr/bin/env python3
+import sys
+
+if sys.version_info < (3, 10):
+    sys.exit("Python 3.10 or later is required.")
+
 import os
 import stat
 import resource
 import subprocess
 import json
-import sys
 from pathlib import Path
 
 
