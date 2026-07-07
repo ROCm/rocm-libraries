@@ -365,6 +365,14 @@ inline bool isGLOBALAtomic(const StinkyInstruction& inst) {
     return inst.is(InstFlag::IF_GLOBALAtomic);
 }
 
+inline bool isGLOBAL(const StinkyInstruction& inst) {
+    return isGLOBALLoad(inst) || isGLOBALStore(inst);
+}
+
+inline bool isGLOBALOrAtomic(const StinkyInstruction& inst) {
+    return isGLOBAL(inst) || isGLOBALAtomic(inst);
+}
+
 inline bool isSMemLoad(const StinkyInstruction& inst) {
     return inst.is(InstFlag::IF_SMemLoad);
 }

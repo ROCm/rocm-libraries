@@ -100,8 +100,7 @@ unsigned getNumWaitStates(const StinkyInstruction& inst) {
 bool instructionWaitsForVALU(const StinkyInstruction& inst) {
     return isDSRead(inst) || isDSWrite(inst) || isDSAtomic(inst) || isFLATLoad(inst) ||
            isFLATStore(inst) || isFLATAtomic(inst) || isMUBUFLoad(inst) || isMUBUFStore(inst) ||
-           isMUBUFAtomic(inst) || isGLOBALLoad(inst) || isGLOBALStore(inst) ||
-           isGLOBALAtomic(inst) || isTensorLoad(inst);
+           isMUBUFAtomic(inst) || isGLOBALOrAtomic(inst) || isTensorLoad(inst);
 }
 
 // ---------------------------------------------------------------------------
