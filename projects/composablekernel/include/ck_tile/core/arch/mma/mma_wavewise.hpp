@@ -144,6 +144,11 @@ struct WaveWiseMmaPipeline : public MmaPipelineBase<WaveWiseMmaPipeline<ADataTyp
             static constexpr index_t kN = MmaOp::kN;
             static constexpr index_t kK = MmaOp::kK;
 
+            // M size in blocks
+            static constexpr index_t kAMBlock = MmaOp::kCMBlocks;
+            // N size in blocks
+            static constexpr index_t kBNBlock = MmaOp::kCNBlocks;
+
             // M size excluding blocks. Dubious for gfx1250, needs attention.
             static constexpr index_t kAMLane =
                 is_target_id_any_of<CompilerTarget, amdgcn_target_id::GFX1250>()
