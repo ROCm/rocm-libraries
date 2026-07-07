@@ -226,11 +226,10 @@ def extract_gtext_fixtures(compile_commands: str, output_file: str, pp_folder: s
     hot_headers = _build_hot_headers(gtest_root) if gtest_root else set()
     tasks = [(gtest, file, hot_headers) for gtest, file in zip(gtests, files)]
 
-    # Leave cores free for the ninja dependency parser, which runs as a
-    # separate ctest concurrently. Reserve up to 16 cores, but never more than
-    # half the machine.
+    # Leave cores free for the dependency parser, which runs concurrently.
+    # Reserve up to half the machine, 32 cores max.
     cpu_count = os.cpu_count() or 1
-    reserved = min(16, cpu_count // 2)
+    reserved = min(32, cpu_count // 2)
     thread_count = max(1, cpu_count - reserved)
     with concurrent.futures.ThreadPoolExecutor(max_workers=thread_count) as executor:
         all_fixtures = executor.map(find_gtests_for_tu, tasks)
