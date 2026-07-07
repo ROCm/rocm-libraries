@@ -12,7 +12,7 @@ and libamd_comgr turns it into HSACO."
 
 The `KernelDef` is the boundary between authoring and lowering. Instance builders and helpers emit high-level operations into `KernelDef.body`. Lowerers walk that body and produce LLVM IR (production), HIP C++ (debug), or CK Tile C++ from selected specs (parity).
 
-There are two interchangeable lowering engines for the production LLVM-IR path: the native **Python** engine (`core/lower_llvm.py`) and a peer **C++** engine (`Cpp/`, a C99->C++20 port reached through the `rocke_engine` extension). They emit byte-identical LLVM IR. `ROCKE_BACKEND` (`cpp` | `python` | `both`) selects which one runs, resolved by `core/backend.py::resolve_backend`; the default is `cpp`, which auto-falls back to the Python engine when `rocke_engine` is not built. `both` runs both and asserts byte-identical output (the differential check).
+There are two interchangeable lowering engines for the production LLVM-IR path: the native **Python** engine (`core/lower_llvm.py`) and a peer **C++** engine (`cpp/`, a C99->C++20 port reached through the `rocke_engine` extension). They emit byte-identical LLVM IR. `ROCKE_BACKEND` (`cpp` | `python` | `both`) selects which one runs, resolved by `core/backend.py::resolve_backend`; the default is `cpp`, which auto-falls back to the Python engine when `rocke_engine` is not built. `both` runs both and asserts byte-identical output (the differential check).
 
 ## Layer Cake
 
@@ -33,7 +33,7 @@ core/passes.py
 
 core/lower_llvm.py
   Production backend (native Python engine): KernelDef -> AMDGPU LLVM IR text.
-  A peer C++ engine (Cpp/, via the rocke_engine extension) lowers the same
+  A peer C++ engine (cpp/, via the rocke_engine extension) lowers the same
   KernelDef to byte-identical LLVM IR and is the default backend.
 
 runtime/comgr.py
