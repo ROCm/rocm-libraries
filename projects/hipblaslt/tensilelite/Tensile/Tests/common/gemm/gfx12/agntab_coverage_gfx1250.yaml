@@ -5,6 +5,7 @@ GlobalParameters:
   NumElementsToValidate: -1
   NumWarmups: 1
   MaxEnqueuesPerSync: 1
+  SyncsPerBenchmark: 0
   SleepPercent: 0
   PrintSolutionRejectionReason: True
   DataInitTypeA: 23
