@@ -26,6 +26,50 @@ macro(_rocm_libs_suppress_rocm_toolchain_checks)
     endif()
 endmacro()
 
+# _rocm_libs_save_var(<name>)
+#
+# Save a normal, cache, and environment variable so it can be restored after
+# configuring third-party content.
+macro(_rocm_libs_save_var _name)
+    if(DEFINED CACHE{${_name}})
+        set(_rocm_libs_old_cache_${_name} $CACHE{${_name}})
+        unset(${_name} CACHE)
+    endif()
+    if(DEFINED ${_name})
+        set(_rocm_libs_old_${_name} ${${_name}})
+    endif()
+    if(DEFINED _rocm_libs_old_cache_${_name})
+        set(${_name} ${_rocm_libs_old_cache_${_name}} CACHE INTERNAL "")
+    endif()
+    if(DEFINED ENV{${_name}})
+        set(_rocm_libs_old_env_${_name} $ENV{${_name}})
+    endif()
+endmacro()
+
+# _rocm_libs_restore_var(<name>)
+#
+# Restore a variable saved by _rocm_libs_save_var().
+macro(_rocm_libs_restore_var _name)
+    if(DEFINED _rocm_libs_old_${_name})
+        set(${_name} ${_rocm_libs_old_${_name}})
+        unset(_rocm_libs_old_${_name})
+    else()
+        unset(${_name})
+    endif()
+    if(DEFINED _rocm_libs_old_cache_${_name})
+        set(${_name} ${_rocm_libs_old_cache_${_name}} CACHE INTERNAL "")
+        unset(_rocm_libs_old_cache_${_name})
+    else()
+        unset(${_name} CACHE)
+    endif()
+    if(DEFINED _rocm_libs_old_env_${_name})
+        set(ENV{${_name}} ${_rocm_libs_old_env_${_name}})
+        unset(_rocm_libs_old_env_${_name})
+    else()
+        unset(ENV{${_name}})
+    endif()
+endmacro()
+
 # _rocm_libs_restore_rocm_toolchain_checks()
 #
 # Reinstall ROCMChecks's watched-variable callback after a suppression window.
@@ -33,11 +77,15 @@ endmacro()
 # the callback, so restoring does not emit the messages being suppressed.
 macro(_rocm_libs_restore_rocm_toolchain_checks)
     if(COMMAND rocm_check_toolchain_var)
+        _rocm_libs_save_var(ROCM_WARN_TOOLCHAIN_VAR)
+        _rocm_libs_save_var(ROCM_ERROR_TOOLCHAIN_VAR)
+
         set(ROCM_WARN_TOOLCHAIN_VAR OFF)
         set(ROCM_ERROR_TOOLCHAIN_VAR OFF)
         include(ROCMChecks)
-        unset(ROCM_WARN_TOOLCHAIN_VAR)
-        unset(ROCM_ERROR_TOOLCHAIN_VAR)
+
+        _rocm_libs_restore_var(ROCM_ERROR_TOOLCHAIN_VAR)
+        _rocm_libs_restore_var(ROCM_WARN_TOOLCHAIN_VAR)
     endif()
 endmacro()
 
@@ -139,7 +187,7 @@ function(rocm_libs_declare_shared_deps)
     set(gtest_force_shared_crt ON CACHE BOOL "" FORCE)
     set(BUILD_GMOCK           ON  CACHE BOOL "" FORCE)
     set(INSTALL_GTEST         OFF CACHE BOOL "" FORCE)
-    set(_rocm_libs_saved_BUILD_SHARED_LIBS "${BUILD_SHARED_LIBS}")
+    _rocm_libs_save_var(BUILD_SHARED_LIBS)
     set(BUILD_SHARED_LIBS OFF)
     FetchContent_Declare(GTest
         URL      https://github.com/google/googletest/archive/refs/tags/v1.17.0.tar.gz
@@ -149,8 +197,7 @@ function(rocm_libs_declare_shared_deps)
     _rocm_libs_suppress_rocm_toolchain_checks()
     FetchContent_MakeAvailable(GTest)
     _rocm_libs_restore_rocm_toolchain_checks()
-    set(BUILD_SHARED_LIBS "${_rocm_libs_saved_BUILD_SHARED_LIBS}")
-    unset(_rocm_libs_saved_BUILD_SHARED_LIBS)
+    _rocm_libs_restore_var(BUILD_SHARED_LIBS)
 
     foreach(_lib gtest gtest_main gmock gmock_main)
         _create_missing_gtest_alias(${_lib})

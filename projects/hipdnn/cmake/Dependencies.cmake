@@ -34,11 +34,15 @@ endmacro()
 # the callback, so restoring does not emit the messages being suppressed.
 macro(_hipdnn_restore_rocm_toolchain_checks)
     if(COMMAND rocm_check_toolchain_var)
+        _save_var(ROCM_WARN_TOOLCHAIN_VAR)
+        _save_var(ROCM_ERROR_TOOLCHAIN_VAR)
+
         set(ROCM_WARN_TOOLCHAIN_VAR OFF)
         set(ROCM_ERROR_TOOLCHAIN_VAR OFF)
         include(ROCMChecks)
-        unset(ROCM_WARN_TOOLCHAIN_VAR)
-        unset(ROCM_ERROR_TOOLCHAIN_VAR)
+
+        _restore_var(ROCM_ERROR_TOOLCHAIN_VAR)
+        _restore_var(ROCM_WARN_TOOLCHAIN_VAR)
     endif()
 endmacro()
 
