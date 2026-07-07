@@ -86,9 +86,7 @@ namespace
                              "--incy",
                              incy,
                              "--batch_count",
-                             batch_count,
-                             "--alpha_stride",
-                             handle->get_stride_alpha());
+                             batch_count);
         if(layer_mode & rocblas_layer_mode_log_profile)
             logger.log_profile(handle,
                                rocblas_rot_name<T, V>,
@@ -99,9 +97,7 @@ namespace
                                "incy",
                                incy,
                                "batch_count",
-                               batch_count,
-                               "stride_alpha",
-                               handle->get_stride_alpha());
+                               batch_count);
 
         if(n <= 0 || batch_count <= 0)
             return rocblas_status_success;
@@ -131,21 +127,7 @@ namespace
         }
 
         rocblas_status status = ROCBLAS_API(rocblas_internal_rot_launcher)<API_INT, NB, T>(
-            handle,
-            n,
-            x,
-            0,
-            incx,
-            0,
-            y,
-            0,
-            incy,
-            0,
-            c,
-            handle->get_stride_alpha(),
-            s,
-            handle->get_stride_alpha(),
-            batch_count);
+            handle, n, x, 0, incx, 0, y, 0, incy, 0, c, 0, s, 0, batch_count);
         if(status != rocblas_status_success)
             return status;
 

@@ -125,7 +125,6 @@ namespace
                                                     c,
                                                     s,
                                                     cs_type,
-                                                    stride_0,
                                                     batch_count_1,
                                                     execution_type);
     }

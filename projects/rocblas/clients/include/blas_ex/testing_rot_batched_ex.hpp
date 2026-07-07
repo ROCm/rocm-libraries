@@ -150,10 +150,6 @@ void testing_rot_batched_ex(const Arguments& arg)
     int64_t incy        = arg.incy;
     int64_t batch_count = arg.batch_count;
 
-    // Per-batch c and s (alpha striding) share the alpha stride, device pointer mode only.
-    bool    ab_striding  = arg.alpha_beta_stride;
-    int64_t alpha_stride = ab_striding ? arg.stride_c : 0;
-
     rocblas_local_handle handle{arg};
     double               cpu_time_used;
     double norm_error_host_x = 0.0, norm_error_host_y = 0.0, norm_error_device_x = 0.0,
@@ -184,14 +180,14 @@ void testing_rot_batched_ex(const Arguments& arg)
     // Allocate host memory
     HOST_MEMCHECK(host_batch_vector<Tx>, hx, (N, incx, batch_count));
     HOST_MEMCHECK(host_batch_vector<Ty>, hy, (N, incy, batch_count));
-    HOST_MEMCHECK(host_vector<Tcs>, hc, (batch_count, alpha_stride));
-    HOST_MEMCHECK(host_vector<Tcs>, hs, (batch_count, alpha_stride));
+    HOST_MEMCHECK(host_vector<Tcs>, hc, (1, 1));
+    HOST_MEMCHECK(host_vector<Tcs>, hs, (1, 1));
 
     // Allocate device memory
     DEVICE_MEMCHECK(device_batch_vector<Tx>, dx, (N, incx, batch_count));
     DEVICE_MEMCHECK(device_batch_vector<Ty>, dy, (N, incy, batch_count));
-    DEVICE_MEMCHECK(device_vector<Tcs>, dc, (batch_count, alpha_stride));
-    DEVICE_MEMCHECK(device_vector<Tcs>, ds, (batch_count, alpha_stride));
+    DEVICE_MEMCHECK(device_vector<Tcs>, dc, (1, 1));
+    DEVICE_MEMCHECK(device_vector<Tcs>, ds, (1, 1));
 
     // Initialize data on host memory
     rocblas_init_vector(hx, arg, rocblas_client_alpha_sets_nan, true);
@@ -207,8 +203,7 @@ void testing_rot_batched_ex(const Arguments& arg)
 
     if(arg.unit_check || arg.norm_check)
     {
-        // Per-batch c and s (alpha striding) are only supported in device pointer mode.
-        if(arg.pointer_mode_host && !ab_striding)
+        if(arg.pointer_mode_host)
         {
             CHECK_ROCBLAS_ERROR(rocblas_set_pointer_mode(handle, rocblas_pointer_mode_host));
             CHECK_HIP_ERROR(dx.transfer_from(hx));
@@ -242,7 +237,6 @@ void testing_rot_batched_ex(const Arguments& arg)
             CHECK_HIP_ERROR(dc.transfer_from(hc));
             CHECK_HIP_ERROR(ds.transfer_from(hs));
 
-            handle.pre_test(arg);
             DAPI_CHECK(rocblas_rot_batched_ex_fn,
                        (handle,
                         N,
@@ -257,7 +251,6 @@ void testing_rot_batched_ex(const Arguments& arg)
                         cs_type,
                         batch_count,
                         execution_type));
-            handle.post_test(arg);
 
             if(arg.repeatability_check)
             {
@@ -283,8 +276,8 @@ void testing_rot_batched_ex(const Arguments& arg)
                     //Allocate device memory in new device
                     DEVICE_MEMCHECK(device_batch_vector<Tx>, dx_copy, (N, incx, batch_count));
                     DEVICE_MEMCHECK(device_batch_vector<Ty>, dy_copy, (N, incy, batch_count));
-                    DEVICE_MEMCHECK(device_vector<Tcs>, dc_copy, (batch_count, alpha_stride));
-                    DEVICE_MEMCHECK(device_vector<Tcs>, ds_copy, (batch_count, alpha_stride));
+                    DEVICE_MEMCHECK(device_vector<Tcs>, dc_copy, (1, 1));
+                    DEVICE_MEMCHECK(device_vector<Tcs>, ds_copy, (1, 1));
 
                     CHECK_HIP_ERROR(dc_copy.transfer_from(hc));
                     CHECK_HIP_ERROR(ds_copy.transfer_from(hs));
@@ -324,17 +317,11 @@ void testing_rot_batched_ex(const Arguments& arg)
         cpu_time_used = get_time_us_no_sync();
         for(int b = 0; b < batch_count; b++)
         {
-            ref_rot<Tx, Ty, Tcs, Tcs>(N,
-                                      hx_gold[b],
-                                      incx,
-                                      hy_gold[b],
-                                      incy,
-                                      (Tcs*)hc + b * alpha_stride,
-                                      (Tcs*)hs + b * alpha_stride);
+            ref_rot<Tx, Ty, Tcs, Tcs>(N, hx_gold[b], incx, hy_gold[b], incy, hc, hs);
         }
         cpu_time_used = get_time_us_no_sync() - cpu_time_used;
 
-        if(arg.pointer_mode_host && !ab_striding)
+        if(arg.pointer_mode_host)
         {
             if(arg.unit_check)
             {
@@ -382,7 +369,6 @@ void testing_rot_batched_ex(const Arguments& arg)
 
         hipStream_t stream;
         CHECK_ROCBLAS_ERROR(rocblas_get_stream(handle, &stream));
-        handle.pre_test(arg);
         for(int iter = 0; iter < total_calls; iter++)
         {
             if(iter == number_cold_calls)
@@ -403,7 +389,6 @@ void testing_rot_batched_ex(const Arguments& arg)
                            batch_count,
                            execution_type));
         }
-        handle.post_test(arg);
 
         gpu_time_used = get_time_us_sync(stream) - gpu_time_used;
 

@@ -75,12 +75,7 @@ namespace
                     name << '_' << arg.stride_y;
 
                 if(is_batched || is_strided)
-                {
                     name << '_' << arg.batch_count;
-
-                    if(arg.alpha_beta_stride)
-                        name << '_' << arg.stride_c;
-                }
             }
 
             if(arg.api & c_API_64)

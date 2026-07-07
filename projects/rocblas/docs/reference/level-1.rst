@@ -329,10 +329,6 @@ The ``rot`` functions support the ``_64`` interface. See the :ref:`ILP64 API` se
 
 The ``rot_batched`` functions support the ``_64`` interface. See the :ref:`ILP64 API` section.
 
-The ``rot_batched`` functions support ``rocblas_set_batch_alpha_stride`` when the ``rocblas_handle`` is
-in mode ``rocblas_pointer_mode_device``, which interprets ``c`` and ``s`` as per-batch device arrays (both
-sharing the alpha stride). This also applies to ``rot_batched_ex``.
-
 .. doxygenfunction:: rocblas_srot_strided_batched
    :outline:
 .. doxygenfunction:: rocblas_drot_strided_batched
@@ -346,10 +342,6 @@ sharing the alpha stride). This also applies to ``rot_batched_ex``.
 .. doxygenfunction:: rocblas_zdrot_strided_batched
 
 The ``rot_strided_batched`` functions support the ``_64`` interface. See the :ref:`ILP64 API` section.
-
-The ``rot_strided_batched`` functions support ``rocblas_set_batch_alpha_stride`` when the ``rocblas_handle`` is
-in mode ``rocblas_pointer_mode_device``, which interprets ``c`` and ``s`` as per-batch device arrays (both
-sharing the alpha stride). This also applies to ``rot_strided_batched_ex``.
 
 .. _rocblas_rotg:
 
