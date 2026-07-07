@@ -4,7 +4,7 @@
 """Generic decode attention benchmark: DSL split-KV 3D vs AITER Triton (gfx942).
 
 gfx942 sibling of
-``builders.gfx950.attention.benchmark_decode_live``.
+``benchmarks.gfx950.attention.decode.benchmark_decode_live``.
 
 Differences vs gfx950:
   * ``num_sms`` sweep defaults to ``30 60 80 120`` (gfx942 has 228 CUs).
@@ -13,11 +13,11 @@ Differences vs gfx950:
 
 Run::
 
-    python -m builders.gfx942.attention.benchmark_decode_live \\
-        --shapes library/builders/gfx950/qwen3_30b_a3b/qwen3_30b_a3b_shapes.json
+    python -m benchmarks.gfx942.attention.decode.benchmark_decode_live \\
+        --shapes library/benchmarks/gfx942/attention/decode/qwen3_30b_a3b_shapes.json
 
     # or with a custom sweep:
-    python -m builders.gfx942.attention.benchmark_decode_live \\
+    python -m benchmarks.gfx942.attention.decode.benchmark_decode_live \\
         --shapes shapes.json \\
         --num-sms-sweep 30 60 120 \\
         --output-json /tmp/decode_gfx942.json

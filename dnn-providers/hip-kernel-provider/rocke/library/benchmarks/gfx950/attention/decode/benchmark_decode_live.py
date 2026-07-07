@@ -9,11 +9,11 @@ shape. Baseline: AITER Triton unified_attention.
 
 Run::
 
-    python -m builders.gfx950.attention.benchmark_decode_live \\
-        --shapes library/builders/gfx950/qwen3_30b_a3b/qwen3_30b_a3b_shapes.json
+    python -m benchmarks.gfx950.attention.decode.benchmark_decode_live \\
+        --shapes library/benchmarks/gfx950/attention/decode/qwen3_30b_a3b_shapes.json
 
     # or multiple shapes files:
-    python -m builders.gfx950.attention.benchmark_decode_live \\
+    python -m benchmarks.gfx950.attention.decode.benchmark_decode_live \\
         --shapes shapes_a.json shapes_b.json \\
         --num-sms-sweep 60 120 152 304 \\
         --output-json /tmp/decode_gfx950.json
