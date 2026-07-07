@@ -80,7 +80,7 @@ static std::string BNModeToString(int bn_mode)
 
 inline miopenTuningPolicy_t GetTuningPolicy(void)
 {
-    auto str = env::value(MIOPEN_FIND_ENFORCE);
+    auto str = miopen::env::value(MIOPEN_FIND_ENFORCE);
     if(str.empty())
         return miopenTuningPolicy_t::miopenTuningPolicyNone;
     for(auto& c : str)
