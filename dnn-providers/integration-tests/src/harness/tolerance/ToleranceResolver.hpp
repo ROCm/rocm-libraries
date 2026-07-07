@@ -131,6 +131,8 @@ inline float toleranceForNode(data::NodeAttributes attrType, data::DataType data
         return toleranceForNodeAttributes<half>(attrType);
     case DT::BFLOAT16:
         return toleranceForNodeAttributes<bfloat16>(attrType);
+    case DT::DOUBLE:
+        return toleranceForNodeAttributes<float>(attrType);
     default:
         return 1e-3f;
     }

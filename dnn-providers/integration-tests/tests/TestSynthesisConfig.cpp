@@ -12,23 +12,23 @@ using namespace hipdnn_integration_tests;
 TEST(TestSynthesisConfig, SetDefaultWritesWhenEmpty)
 {
     SynthesisConfig config;
-    config.setDefault(1, TensorInit::free(-1.0f, 1.0f));
+    config.setDefault(1, FillSpec::free(-1.0f, 1.0f));
 
-    const auto init = config.get(1);
-    EXPECT_EQ(init.kind, TensorInit::Kind::FREE);
-    EXPECT_FLOAT_EQ(init.lo, -1.0f);
-    EXPECT_FLOAT_EQ(init.hi, 1.0f);
+    const auto fill = config.get(1);
+    EXPECT_EQ(fill.kind, FillSpec::Kind::FREE);
+    EXPECT_FLOAT_EQ(fill.lo, -1.0f);
+    EXPECT_FLOAT_EQ(fill.hi, 1.0f);
 }
 
 TEST(TestSynthesisConfig, SetDefaultDoesNotOverwrite)
 {
     SynthesisConfig config;
-    config.setDefault(1, TensorInit::free(-1.0f, 1.0f));
-    config.setDefault(1, TensorInit::free(-99.0f, 99.0f));
+    config.setDefault(1, FillSpec::free(-1.0f, 1.0f));
+    config.setDefault(1, FillSpec::free(-99.0f, 99.0f));
 
-    const auto init = config.get(1);
-    EXPECT_FLOAT_EQ(init.lo, -1.0f);
-    EXPECT_FLOAT_EQ(init.hi, 1.0f);
+    const auto fill = config.get(1);
+    EXPECT_FLOAT_EQ(fill.lo, -1.0f);
+    EXPECT_FLOAT_EQ(fill.hi, 1.0f);
 }
 
 // ── set (metadata / test code) ──────────────────────────────────────────────
@@ -36,34 +36,34 @@ TEST(TestSynthesisConfig, SetDefaultDoesNotOverwrite)
 TEST(TestSynthesisConfig, SetOverwritesDefault)
 {
     SynthesisConfig config;
-    config.setDefault(1, TensorInit::free(-1.0f, 1.0f));
-    config.set(1, TensorInit::free(-5.0f, 5.0f));
+    config.setDefault(1, FillSpec::free(-1.0f, 1.0f));
+    config.set(1, FillSpec::free(-5.0f, 5.0f));
 
-    const auto init = config.get(1);
-    EXPECT_FLOAT_EQ(init.lo, -5.0f);
-    EXPECT_FLOAT_EQ(init.hi, 5.0f);
+    const auto fill = config.get(1);
+    EXPECT_FLOAT_EQ(fill.lo, -5.0f);
+    EXPECT_FLOAT_EQ(fill.hi, 5.0f);
 }
 
 TEST(TestSynthesisConfig, SetOverwritesSet)
 {
     SynthesisConfig config;
-    config.set(1, TensorInit::free(-5.0f, 5.0f));
-    config.set(1, TensorInit::free(-10.0f, 10.0f));
+    config.set(1, FillSpec::free(-5.0f, 5.0f));
+    config.set(1, FillSpec::free(-10.0f, 10.0f));
 
-    const auto init = config.get(1);
-    EXPECT_FLOAT_EQ(init.lo, -10.0f);
-    EXPECT_FLOAT_EQ(init.hi, 10.0f);
+    const auto fill = config.get(1);
+    EXPECT_FLOAT_EQ(fill.lo, -10.0f);
+    EXPECT_FLOAT_EQ(fill.hi, 10.0f);
 }
 
 TEST(TestSynthesisConfig, SetDefaultDoesNotOverwriteSet)
 {
     SynthesisConfig config;
-    config.set(1, TensorInit::free(-5.0f, 5.0f));
-    config.setDefault(1, TensorInit::free(-99.0f, 99.0f));
+    config.set(1, FillSpec::free(-5.0f, 5.0f));
+    config.setDefault(1, FillSpec::free(-99.0f, 99.0f));
 
-    const auto init = config.get(1);
-    EXPECT_FLOAT_EQ(init.lo, -5.0f);
-    EXPECT_FLOAT_EQ(init.hi, 5.0f);
+    const auto fill = config.get(1);
+    EXPECT_FLOAT_EQ(fill.lo, -5.0f);
+    EXPECT_FLOAT_EQ(fill.hi, 5.0f);
 }
 
 // ── Three-tier precedence (the real contract) ───────────────────────────────
@@ -73,30 +73,30 @@ TEST(TestSynthesisConfig, ThreeTierPrecedence)
     SynthesisConfig config;
 
     // 1. Metadata sets a range (runs first via setBundle)
-    config.set(1, TensorInit::free(-1.0f, 1.0f));
+    config.set(1, FillSpec::free(-1.0f, 1.0f));
 
     // 2. Declaration function tries to set a default (emplace, should lose)
-    config.setDefault(1, TensorInit::free(-99.0f, 99.0f));
+    config.setDefault(1, FillSpec::free(-99.0f, 99.0f));
 
     // 3. Test body overwrites with its own range (runs after metadata)
-    config.set(1, TensorInit::free(-10.0f, 10.0f));
+    config.set(1, FillSpec::free(-10.0f, 10.0f));
 
-    const auto init = config.get(1);
-    EXPECT_EQ(init.kind, TensorInit::Kind::FREE);
-    EXPECT_FLOAT_EQ(init.lo, -10.0f);
-    EXPECT_FLOAT_EQ(init.hi, 10.0f);
+    const auto fill = config.get(1);
+    EXPECT_EQ(fill.kind, FillSpec::Kind::FREE);
+    EXPECT_FLOAT_EQ(fill.lo, -10.0f);
+    EXPECT_FLOAT_EQ(fill.hi, 10.0f);
 }
 
-// ── get returns default-constructed TensorInit for unknown uid ──────────────
+// ── get returns default-constructed FillSpec for unknown uid ────────────────
 
 TEST(TestSynthesisConfig, GetUnknownUidReturnsDefault)
 {
     SynthesisConfig config;
-    const auto init = config.get(999);
+    const auto fill = config.get(999);
 
-    EXPECT_EQ(init.kind, TensorInit::Kind::FREE);
-    EXPECT_FLOAT_EQ(init.lo, -1.0f);
-    EXPECT_FLOAT_EQ(init.hi, 1.0f);
+    EXPECT_EQ(fill.kind, FillSpec::Kind::FREE);
+    EXPECT_FLOAT_EQ(fill.lo, -1.0f);
+    EXPECT_FLOAT_EQ(fill.hi, 1.0f);
 }
 
 // ── unfilled only checks ownedUids ──────────────────────────────────────────
@@ -104,10 +104,10 @@ TEST(TestSynthesisConfig, GetUnknownUidReturnsDefault)
 TEST(TestSynthesisConfig, UnfilledReportsStructuredAndDerived)
 {
     SynthesisConfig config;
-    config.set(1, TensorInit::free(-1.0f, 1.0f));
-    config.set(2, TensorInit::structured());
-    config.set(3, TensorInit::derived());
-    config.set(4, TensorInit::fixed(0.5f));
+    config.set(1, FillSpec::free(-1.0f, 1.0f));
+    config.set(2, FillSpec::structured());
+    config.set(3, FillSpec::derived());
+    config.set(4, FillSpec::fixed(0.5f));
 
     const auto missing = config.unfilled({1, 2, 3, 4});
     EXPECT_EQ(missing.size(), 2u);
@@ -118,8 +118,8 @@ TEST(TestSynthesisConfig, UnfilledReportsStructuredAndDerived)
 TEST(TestSynthesisConfig, UnfilledIgnoresNonOwnedUids)
 {
     SynthesisConfig config;
-    config.set(1, TensorInit::free(-1.0f, 1.0f));
-    config.set(2, TensorInit::structured());
+    config.set(1, FillSpec::free(-1.0f, 1.0f));
+    config.set(2, FillSpec::structured());
 
     // Only check uid 1 — uid 2 (structured) is not owned, should be ignored
     const auto missing = config.unfilled({1});
@@ -137,20 +137,68 @@ TEST(TestSynthesisConfig, ResolveSeedPerTensor)
     EXPECT_EQ(config.resolveSeed(2), std::nullopt);
 }
 
-TEST(TestSynthesisConfig, FallbackSeedUsedWhenNoPerTensor)
+TEST(TestSynthesisConfig, GlobalSeedDefaultValue)
 {
     SynthesisConfig config;
-    config.fallbackSeed(42);
-
-    EXPECT_EQ(config.resolveSeed(1), 42u);
+    EXPECT_EQ(config.getGlobalSeed(), 42u);
 }
 
-TEST(TestSynthesisConfig, PerTensorSeedBeatssFallback)
+TEST(TestSynthesisConfig, GlobalSeedCanBeSet)
 {
     SynthesisConfig config;
-    config.fallbackSeed(42);
-    config.seed(1, 100);
+    config.globalSeed(123);
+    EXPECT_EQ(config.getGlobalSeed(), 123u);
+}
 
-    EXPECT_EQ(config.resolveSeed(1), 100u);
-    EXPECT_EQ(config.resolveSeed(2), 42u);
+// ── seed() does not block setDefault() (regression for the footgun) ─────────
+
+TEST(TestSynthesisConfig, SeedThenSetDefaultStillShowsUnfilled)
+{
+    SynthesisConfig config;
+    config.seed(1, 100);
+    config.setDefault(1, FillSpec::derived());
+
+    const auto missing = config.unfilled({1});
+    EXPECT_EQ(missing.size(), 1u);
+    EXPECT_EQ(missing[0], 1);
+}
+
+// ── JSON round-trip ─────────────────────────────────────────────────────────
+
+TEST(TestSynthesisConfig, ToJsonAndLoadFromJsonRoundTrip)
+{
+    SynthesisConfig original;
+    original.set(1, FillSpec::free(-2.0f, 2.0f));
+    original.set(2, FillSpec::fixed(0.5f));
+    original.set(3, FillSpec::structured());
+    original.seed(1, 42);
+
+    const auto json = original.toJson();
+
+    // Parse back into uid→json map (same format as BundleMetadata::inputs)
+    std::unordered_map<int64_t, nlohmann::json> inputMap;
+    for(const auto& [key, val] : json.items())
+    {
+        inputMap[std::stoll(key)] = val;
+    }
+
+    SynthesisConfig loaded;
+    loaded.loadFromJson(inputMap);
+
+    // Verify fills
+    const auto f1 = loaded.get(1);
+    EXPECT_EQ(f1.kind, FillSpec::Kind::FREE);
+    EXPECT_FLOAT_EQ(f1.lo, -2.0f);
+    EXPECT_FLOAT_EQ(f1.hi, 2.0f);
+
+    const auto f2 = loaded.get(2);
+    EXPECT_EQ(f2.kind, FillSpec::Kind::FIXED);
+    EXPECT_FLOAT_EQ(f2.value, 0.5f);
+
+    const auto f3 = loaded.get(3);
+    EXPECT_EQ(f3.kind, FillSpec::Kind::STRUCTURED);
+
+    // Verify seed survived
+    EXPECT_EQ(loaded.resolveSeed(1), 42u);
+    EXPECT_EQ(loaded.resolveSeed(2), std::nullopt);
 }

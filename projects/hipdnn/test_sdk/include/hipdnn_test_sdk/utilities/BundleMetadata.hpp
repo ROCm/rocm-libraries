@@ -140,9 +140,9 @@ inline std::optional<BundleMetadata> parseBundleMetadataJson(const nlohmann::jso
             }
             catch(const std::exception&)
             {
-                HIPDNN_SDK_LOG_WARN("Non-numeric inputs key \""
+                HIPDNN_SDK_LOG_WARN("Skipping non-numeric inputs key \""
                                     << key << "\" in " << (source.empty() ? "metadata" : source));
-                return std::nullopt;
+                continue;
             }
         }
         meta.inputs = std::move(inputMap);

@@ -473,16 +473,11 @@ public:
         meta["operation"] = suiteName;
         meta["generator"] = "capture-bundles";
         meta["generator_version"] = "1.0.0";
-        meta["seed"] = _synthesisConfig.getSeedEntropy();
+        meta["seed"] = _synthesisConfig.getGlobalSeed();
 
-        if(!_synthesisConfig.inits().empty())
+        if(!_synthesisConfig.fills().empty())
         {
-            nlohmann::json inputs;
-            for(const auto& [uid, init] : _synthesisConfig.inits())
-            {
-                inputs[std::to_string(uid)] = init.toJson();
-            }
-            meta["inputs"] = std::move(inputs);
+            meta["inputs"] = _synthesisConfig.toJson();
         }
 
         meta["notes"] = "Captured from C++ graph test " + suiteName + "." + caseName;

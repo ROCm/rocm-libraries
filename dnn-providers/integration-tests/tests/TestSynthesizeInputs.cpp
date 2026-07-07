@@ -363,7 +363,7 @@ SynthesisResult runSynthesis(const GraphResult& gr, const std::set<int64_t>& out
         for(const int64_t uid : missing)
         {
             const auto init = config.get(uid);
-            const char* kind = init.kind == TensorInit::Kind::STRUCTURED ? "structured" : "derived";
+            const char* kind = init.kind == FillSpec::Kind::STRUCTURED ? "structured" : "derived";
             msg += " uid=" + std::to_string(uid) + " (" + kind + ")";
         }
         return SynthesisResult::unsupported(msg);

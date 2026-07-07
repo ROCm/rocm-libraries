@@ -5,10 +5,12 @@
 
 #include <cstdint>
 #include <optional>
+#include <string>
 #include <unordered_map>
 #include <vector>
 
 #include <flatbuffers/flatbuffers.h>
+#include <nlohmann/json.hpp>
 
 #include "harness/input_init/InputInitSpec.hpp"
 
@@ -17,79 +19,82 @@ namespace hipdnn_integration_tests
 
 // Configuration for input tensor synthesis.
 //
-// One map holds TensorInit entries keyed by tensor uid. Two write modes:
+// Two maps for two independent concerns:
+//   _fills  — how to fill each tensor (kind + params)
+//   _seeds  — per-tensor seed overrides
 //
-//   set(uid, t)        — operator[], always overwrites. Tests and metadata
-//                        use this to force a specific init for a tensor.
-//   setDefault(uid, t) — try_emplace, no-op if uid already present.
+// One scalar:
+//   _globalSeed — seeds the RNG that generates per-tensor seeds
+//
+// Write modes:
+//   set(uid, f)        — operator[], always overwrites. Tests and metadata
+//                        use this to force a specific fill for a tensor.
+//   setDefault(uid, f) — try_emplace, no-op if uid already present.
 //                        Declaration functions use this to register
 //                        op-specific defaults without stomping overrides.
 //
-// Both metadata and test code call set(), so priority between them is
-// purely temporal: setBundle() runs before the test body, so test calls
-// overwrite metadata. Nothing in the type enforces this ordering.
-//
-// Seeds are independent of init values — setting a seed never stomps a range.
+// Seeds are independent of fills — setting a seed never creates a fill entry,
+// and setting a fill never touches the seed map.
 class SynthesisConfig
 {
 public:
-    static constexpr unsigned int K_DEFAULT_SEED_ENTROPY = 42;
+    static constexpr unsigned int K_DEFAULT_GLOBAL_SEED = 42;
 
     // ── Write (override) — tests and metadata ───────────────────────────
 
-    SynthesisConfig& set(int64_t uid, TensorInit t)
+    SynthesisConfig& set(int64_t uid, FillSpec f)
     {
-        _inits[uid] = t;
+        _fills[uid] = f;
         return *this;
     }
 
-    SynthesisConfig& set(flatbuffers::Optional<int64_t> uid, TensorInit t)
+    SynthesisConfig& set(flatbuffers::Optional<int64_t> uid, FillSpec f)
     {
         if(uid.has_value())
         {
-            set(*uid, t);
+            set(*uid, f);
         }
         return *this;
     }
 
     SynthesisConfig& range(int64_t uid, float lo, float hi)
     {
-        return set(uid, TensorInit::free(lo, hi));
+        return set(uid, FillSpec::free(lo, hi));
     }
 
     SynthesisConfig& fixed(int64_t uid, float value)
     {
-        return set(uid, TensorInit::fixed(value));
+        return set(uid, FillSpec::fixed(value));
     }
 
     // ── Write (default) — declaration functions ─────────────────────────
 
-    SynthesisConfig& setDefault(int64_t uid, TensorInit t)
+    SynthesisConfig& setDefault(int64_t uid, FillSpec f)
     {
-        _inits.try_emplace(uid, t);
+        _fills.try_emplace(uid, f);
         return *this;
     }
 
-    SynthesisConfig& setDefault(flatbuffers::Optional<int64_t> uid, TensorInit t)
+    SynthesisConfig& setDefault(flatbuffers::Optional<int64_t> uid, FillSpec f)
     {
         if(uid.has_value())
         {
-            setDefault(*uid, t);
+            setDefault(*uid, f);
         }
         return *this;
     }
 
     // ── Read ────────────────────────────────────────────────────────────
 
-    const std::unordered_map<int64_t, TensorInit>& inits() const
+    const std::unordered_map<int64_t, FillSpec>& fills() const
     {
-        return _inits;
+        return _fills;
     }
 
-    TensorInit get(int64_t uid) const
+    FillSpec get(int64_t uid) const
     {
-        auto it = _inits.find(uid);
-        return it != _inits.end() ? it->second : TensorInit{};
+        auto it = _fills.find(uid);
+        return it != _fills.end() ? it->second : FillSpec{};
     }
 
     std::vector<int64_t> unfilled(const std::vector<int64_t>& ownedUids) const
@@ -97,8 +102,8 @@ public:
         std::vector<int64_t> result;
         for(const int64_t uid : ownedUids)
         {
-            const auto init = get(uid);
-            if(init.kind != TensorInit::Kind::FREE && init.kind != TensorInit::Kind::FIXED)
+            const auto fill = get(uid);
+            if(fill.kind != FillSpec::Kind::FREE && fill.kind != FillSpec::Kind::FIXED)
             {
                 result.push_back(uid);
             }
@@ -110,41 +115,129 @@ public:
 
     SynthesisConfig& seed(int64_t uid, unsigned int value)
     {
-        _inits[uid].seed = value;
+        _seeds[uid] = value;
+        return *this;
+    }
+
+    SynthesisConfig& globalSeed(unsigned int s)
+    {
+        _globalSeed = s;
         return *this;
     }
 
     SynthesisConfig& seedEntropy(unsigned int s)
     {
-        _seedEntropy = s;
-        return *this;
+        return globalSeed(s);
     }
 
     SynthesisConfig& fallbackSeed(unsigned int s)
     {
-        _fixedSeed = s;
-        _seedEntropy = s;
-        return *this;
+        return globalSeed(s);
     }
 
-    unsigned int getSeedEntropy() const
+    unsigned int getGlobalSeed() const
     {
-        return _seedEntropy;
+        return _globalSeed;
     }
 
     std::optional<unsigned int> resolveSeed(int64_t uid) const
     {
-        if(auto it = _inits.find(uid); it != _inits.end() && it->second.seed.has_value())
+        if(auto it = _seeds.find(uid); it != _seeds.end())
         {
-            return it->second.seed;
+            return it->second;
         }
-        return _fixedSeed;
+        return std::nullopt;
+    }
+
+    // ── JSON boundary (serialization for capture/load) ──────────────────
+
+    nlohmann::json toJson() const
+    {
+        nlohmann::json inputs;
+        for(const auto& [uid, fill] : _fills)
+        {
+            nlohmann::json j;
+            j["kind"] = kindToString(fill.kind);
+            if(fill.kind == FillSpec::Kind::FREE)
+            {
+                j["lo"] = fill.lo;
+                j["hi"] = fill.hi;
+            }
+            if(fill.kind == FillSpec::Kind::FIXED)
+            {
+                j["value"] = fill.value;
+            }
+            if(auto it = _seeds.find(uid); it != _seeds.end())
+            {
+                j["seed"] = it->second;
+            }
+            inputs[std::to_string(uid)] = std::move(j);
+        }
+        return inputs;
+    }
+
+    void loadFromJson(const std::unordered_map<int64_t, nlohmann::json>& inputs)
+    {
+        for(const auto& [uid, j] : inputs)
+        {
+            FillSpec f;
+            if(j.contains("kind") && j["kind"].is_string())
+            {
+                f.kind = kindFromString(j["kind"].get<std::string>());
+            }
+            if(j.contains("lo") && j["lo"].is_number())
+            {
+                f.lo = j["lo"].get<float>();
+            }
+            if(j.contains("hi") && j["hi"].is_number())
+            {
+                f.hi = j["hi"].get<float>();
+            }
+            if(j.contains("value") && j["value"].is_number())
+            {
+                f.value = j["value"].get<float>();
+            }
+            set(uid, f);
+
+            if(j.contains("seed") && j["seed"].is_number_unsigned())
+            {
+                seed(uid, j["seed"].get<unsigned int>());
+            }
+        }
     }
 
 private:
-    std::unordered_map<int64_t, TensorInit> _inits;
-    std::optional<unsigned int> _fixedSeed;
-    unsigned int _seedEntropy = K_DEFAULT_SEED_ENTROPY;
+    std::unordered_map<int64_t, FillSpec> _fills;
+    std::unordered_map<int64_t, unsigned int> _seeds;
+    unsigned int _globalSeed = K_DEFAULT_GLOBAL_SEED;
+
+    static const char* kindToString(FillSpec::Kind k)
+    {
+        switch(k)
+        {
+        case FillSpec::Kind::FREE:
+            return "free";
+        case FillSpec::Kind::FIXED:
+            return "fixed";
+        case FillSpec::Kind::STRUCTURED:
+            return "structured";
+        case FillSpec::Kind::DERIVED:
+            return "derived";
+        default:
+            return "free";
+        }
+    }
+
+    static FillSpec::Kind kindFromString(const std::string& s)
+    {
+        if(s == "fixed")
+            return FillSpec::Kind::FIXED;
+        if(s == "structured")
+            return FillSpec::Kind::STRUCTURED;
+        if(s == "derived")
+            return FillSpec::Kind::DERIVED;
+        return FillSpec::Kind::FREE;
+    }
 };
 
 } // namespace hipdnn_integration_tests
