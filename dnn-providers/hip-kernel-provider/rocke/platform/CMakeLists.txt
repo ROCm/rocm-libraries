@@ -143,16 +143,16 @@ endif()
 set(ROCKE_PYTHON_INSTALL_DIR "${_ROCKE_DEFAULT_PYTHON_INSTALL_DIR}"
     CACHE STRING "Relative install destination for rocke and rocke_engine")
 
-# Sources live under Cpp/, in subfolders mirroring the rocke Python package
-# (Cpp/core/{ir,arch,isa,lower_llvm,lower_hip}, Cpp/helpers, Cpp/instances/{common,gfxNNNN},
-# Cpp/support). GLOB_RECURSE picks up every .cpp regardless of depth; the
-# pybind bindings under Cpp/bindings are a separate target and are excluded.
-file(GLOB_RECURSE ROCKE_CORE_SOURCES CONFIGURE_DEPENDS "${CMAKE_CURRENT_SOURCE_DIR}/Cpp/*.cpp")
-list(FILTER ROCKE_CORE_SOURCES EXCLUDE REGEX "/Cpp/bindings/")
+# Sources live under cpp/, in subfolders mirroring the rocke Python package
+# (cpp/core/{ir,arch,isa,lower_llvm,lower_hip}, cpp/helpers, cpp/instances/{common,gfxNNNN},
+# cpp/support). GLOB_RECURSE picks up every .cpp regardless of depth; the
+# pybind bindings under cpp/bindings are a separate target and are excluded.
+file(GLOB_RECURSE ROCKE_CORE_SOURCES CONFIGURE_DEPENDS "${CMAKE_CURRENT_SOURCE_DIR}/cpp/*.cpp")
+list(FILTER ROCKE_CORE_SOURCES EXCLUDE REGEX "/cpp/bindings/")
 
 add_library(rocke_core STATIC ${ROCKE_CORE_SOURCES})
 target_include_directories(rocke_core PUBLIC
-  $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/Cpp/include>
+  $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/cpp/include>
   $<INSTALL_INTERFACE:${CMAKE_INSTALL_INCLUDEDIR}>)
 
 # --- Engine freshness / provenance stamp -------------------------------------
@@ -172,7 +172,7 @@ string(TIMESTAMP ROCKE_BUILD_DATE "%Y%m%d" UTC)
 set(ROCKE_ENGINE_VERSION "1.0.0+${ROCKE_BUILD_DATE}")
 message(STATUS "rocke_core build-id: ${ROCKE_BUILD_ID}  version: ${ROCKE_ENGINE_VERSION}")
 set_source_files_properties(
-  "${CMAKE_CURRENT_SOURCE_DIR}/Cpp/core/rocke_build_id.cpp"
+  "${CMAKE_CURRENT_SOURCE_DIR}/cpp/core/rocke_build_id.cpp"
   PROPERTIES COMPILE_DEFINITIONS
   "ROCKE_BUILD_ID=${ROCKE_BUILD_ID};ROCKE_ENGINE_VERSION=${ROCKE_ENGINE_VERSION}")
 # Required so the .a can be linked into the shared rocke_provider plugin
@@ -188,7 +188,7 @@ if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/tests/CMakeLists.txt")
 endif()
 
 if(ROCKE_BUILD_PYBIND)
-  add_subdirectory(Cpp/bindings)
+  add_subdirectory(cpp/bindings)
 endif()
 
 # --- Installable engine + test artifacts -------------------------------------
@@ -197,7 +197,7 @@ install(TARGETS rocke_core
         ARCHIVE DESTINATION ${CMAKE_INSTALL_LIBDIR}
         LIBRARY DESTINATION ${CMAKE_INSTALL_LIBDIR}
         RUNTIME DESTINATION ${CMAKE_INSTALL_BINDIR})
-install(DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}/Cpp/include/"
+install(DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}/cpp/include/"
         DESTINATION ${CMAKE_INSTALL_INCLUDEDIR})
 install(EXPORT ckcTargets
         FILE ckcTargets.cmake
@@ -220,7 +220,7 @@ if(ROCKE_INSTALL_PYTHON_PACKAGE)
   # A *.py-only filter silently drops it and breaks ArchTarget.from_gfx(). Use
   # PATTERN + REGEX (distinct keywords) to drop only build cruft and keep
   # cmake-lint happy (a second PATTERN would trip its duplicate-keyword check).
-  install(DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}/Python/rocke"
+  install(DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}/python/rocke"
           DESTINATION "${_ROCKE_PKG_DEST}"
           PATTERN "__pycache__" EXCLUDE
           REGEX "\\.pyc$" EXCLUDE)

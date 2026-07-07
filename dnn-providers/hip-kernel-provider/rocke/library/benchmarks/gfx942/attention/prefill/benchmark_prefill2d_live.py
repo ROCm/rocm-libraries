@@ -27,7 +27,7 @@ gfx942 differences vs gfx950:
 Run:
 
     export AITER_PATH=<path/to/aiter>
-    PYTHONPATH="Python:${AITER_PATH}" \
+    PYTHONPATH="python:${AITER_PATH}" \
       python rocke/library/benchmarks/gfx942/attention/prefill/benchmark_prefill2d_live.py \
         --shapes <path/to/unified_attention_shapes.jsonl> \
         --variants prod combo fallback \

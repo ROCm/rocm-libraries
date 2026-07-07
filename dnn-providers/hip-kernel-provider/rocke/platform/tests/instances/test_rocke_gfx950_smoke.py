@@ -7,7 +7,7 @@ actual workloads remain the existing example/benchmark modules for attention,
 GEMM, and fused-MoE.
 
 Run on a gfx950 ROCm runner:
-  HIP_VISIBLE_DEVICES=0 PYTHONDONTWRITEBYTECODE=1 PYTHONPATH=Python \
+  HIP_VISIBLE_DEVICES=0 PYTHONDONTWRITEBYTECODE=1 PYTHONPATH=python \
     python tests/instances/test_rocke_gfx950_smoke.py
 """
 
@@ -22,7 +22,7 @@ import unittest
 from pathlib import Path
 
 _ROCKE = Path(__file__).resolve().parents[2]  # instances -> tests -> rocKE
-_PY_ROOT = _ROCKE / "Python"
+_PY_ROOT = _ROCKE / "python"
 _DEFAULT_BASELINE = _ROCKE / "tests" / "golden" / "rocke_gfx950_smoke_perf.json"
 _DEFAULT_REPORT = Path("/tmp/rocke_gfx950_smoke_perf_current.json")
 

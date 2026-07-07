@@ -18,7 +18,7 @@ It is the canonical workbench for closing the prefill-2D gap.
 Run:
 
     export AITER_PATH=<path/to/aiter>
-    PYTHONPATH="Python:${AITER_PATH}" \
+    PYTHONPATH="python:${AITER_PATH}" \
       python rocke/library/benchmarks/gfx950/attention/prefill/benchmark_prefill2d_live.py \
         --shapes <path/to/unified_attention_shapes.jsonl> \
         --variants prod combo fallback \
