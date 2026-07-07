@@ -29,7 +29,6 @@
 #include <thrust/detail/libcxx_wrapper/std/__functional/identity.h>
 #include <thrust/for_each.h>
 #include <thrust/functional.h>
-#include <thrust/iterator/detail/minimum_system.h>
 #include <thrust/iterator/zip_iterator.h>
 #include <thrust/system/detail/generic/copy.h>
 #include <thrust/transform.h>
