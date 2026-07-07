@@ -19,7 +19,8 @@ option( MIOPEN_USE_RNE_BFLOAT16 "Sets rounding scheme for bfloat16 type" ON )
 option( MIOPEN_FP8_IEEE_EXPONENT_BIAS "Sets the FP8 exponent bias to IEEE" OFF)
 option( MIOPEN_FP8_CLIPPING "Sets the FP8 clipping" ON)
 
-option( MIOPEN_FP8_CLIPPING "Sets the FP8 clipping" ON)
+# Note: MIOPEN_FP8_IEEE_EXPONENT_BIAS can be defaulted by
+# cmake/MiopenCkCompileDefs.cmake to stay aligned with composable_kernel FP8 mode.
 
 configure_file("${PROJECT_SOURCE_DIR}/include/miopen/config.h.in" "${PROJECT_BINARY_DIR}/include/miopen/config.h")
 
@@ -901,6 +902,7 @@ if(MIOPEN_USE_COMPOSABLEKERNEL)
             add_definitions(-DCK_EXPERIMENTAL_BUILDER)
         endif()
     endif()
+    miopen_apply_ck_compile_definitions(MIOpen)
 
     # Build per-GPU-target CK grouped conv shared libraries
     add_subdirectory(ck_impl)
