@@ -26943,7 +26943,7 @@ ROCSOLVER_EXPORT rocblas_status rocsolver_zsytrf_strided_batched(rocblas_handle 
 	\begin{array}{cccc}
         I & F_1    &        &        \\
           &        & \ddots & \ddots \\
-	  &        & I      & F_{n-1}\\
+          &        & I      & F_{n-1}\\
           &        &        & I
         \end{array}\right] = LU
     \f]
