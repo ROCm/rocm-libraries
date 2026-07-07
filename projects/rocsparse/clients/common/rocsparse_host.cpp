@@ -24,6 +24,8 @@
 #include "rocsparse_clients_routine_trace.hpp"
 #include "utility.hpp"
 
+#include <rocsparse/rocsparse-version.h>
+
 #include <limits>
 
 #ifdef _OPENMP
@@ -5741,17 +5743,19 @@ void host_bsric0(rocsparse_direction               direction,
                         {
                             if(direction == rocsparse_direction_row)
                             {
-                                local_sum = std::fma(bsr_val[block_dim * block_dim * l
-                                                             + block_dim * local_row_j + m],
-                                                     rocsparse_conj(bsr_val[idx]),
-                                                     local_sum);
+                                local_sum = std::fma(
+                                    bsr_val[idx],
+                                    rocsparse_conj(bsr_val[block_dim * block_dim * l
+                                                           + block_dim * local_row_j + m]),
+                                    local_sum);
                             }
                             else
                             {
-                                local_sum = std::fma(bsr_val[block_dim * block_dim * l
-                                                             + block_dim * m + local_row_j],
-                                                     rocsparse_conj(bsr_val[idx]),
-                                                     local_sum);
+                                local_sum = std::fma(
+                                    bsr_val[idx],
+                                    rocsparse_conj(bsr_val[block_dim * block_dim * l + block_dim * m
+                                                           + local_row_j]),
+                                    local_sum);
                             }
                         }
                     }
@@ -5823,6 +5827,22 @@ void host_bsric0(rocsparse_direction               direction,
             }
         }
     }
+}
+
+template <typename T>
+static inline T host_assign_ilu0_boost_value(const T& value, const T& boost_val)
+{
+#ifdef ROCSPARSE_WITH_ILU0_BOOST_SIGN
+    // Apply the boost magnitude (>= 0) along the direction of the original pivot
+    // so its sign (real) or phase (complex) is preserved and a negative boost can
+    // never swap the pivot sign, matching the device kernels.
+    const auto abs_value = std::abs(value);
+    const auto abs_boost = std::abs(boost_val);
+    return (abs_value > 0) ? (static_cast<T>(abs_boost) * (value / abs_value))
+                           : static_cast<T>(abs_boost);
+#else
+    return boost_val;
+#endif
 }
 
 template <typename T, typename U>
@@ -5975,7 +5995,9 @@ void host_bsrilu0(rocsparse_direction               dir,
 
                 if(boost)
                 {
-                    diag = (boost_tol >= std::abs(diag)) ? boost_val : diag;
+                    diag                             = (boost_tol >= std::abs(diag))
+                                                           ? host_assign_ilu0_boost_value(diag, boost_val)
+                                                           : diag;
                     bsr_val[BSR_IND(j, bi, bi, dir)] = diag;
                 }
                 else
@@ -6268,7 +6290,9 @@ void host_csrilu0(rocsparse_int                     M,
 
                 if(boost)
                 {
-                    diag_val        = (boost_tol >= std::abs(diag_val)) ? boost_val : diag_val;
+                    diag_val        = (boost_tol >= std::abs(diag_val))
+                                          ? host_assign_ilu0_boost_value(diag_val, boost_val)
+                                          : diag_val;
                     csr_val[diag_j] = diag_val;
                 }
                 else
@@ -6337,7 +6361,7 @@ void host_csrilu0(rocsparse_int                     M,
             {
                 if(std::abs(csr_val[diag_pos]) <= boost_tol)
                 {
-                    csr_val[diag_pos] = boost_val;
+                    csr_val[diag_pos] = host_assign_ilu0_boost_value(csr_val[diag_pos], boost_val);
                 }
             }
             else

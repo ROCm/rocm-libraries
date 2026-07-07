@@ -13,6 +13,32 @@ find_package(Python3 COMPONENTS Interpreter)
 
 findandcheckllvmsymbolizer()
 
+# YAML-driven CTest test categorisation for the *installed* tree only.
+# The shared helper apply_ctest_category_labels(yaml, install_test_file)
+# appends explicit set_property(TEST ...) blocks to the hand-rolled
+# install-tree CTestTestfile.cmake we generate in
+# install_hipdnn_ctest_files() below. Build-tree tests are intentionally
+# not labelled here -- if you need `ctest -L <tier>` in the build tree,
+# add per-directory apply_ctest_category_labels() calls in each
+# tests/CMakeLists.txt instead.
+set(_HIPDNN_TEST_CATEGORIES_YAML "${PROJECT_SOURCE_DIR}/test_categories.yaml")
+set(_HIPDNN_SHARED_CTEST "${ROCM_LIBRARIES_ROOT}/shared/ctest/TestCategories.cmake")
+if(EXISTS "${_HIPDNN_SHARED_CTEST}" AND EXISTS "${_HIPDNN_TEST_CATEGORIES_YAML}")
+    include("${_HIPDNN_SHARED_CTEST}")
+    message(STATUS "hipDNN: YAML-based CTest categorization enabled (install tree only)")
+else()
+    if(NOT EXISTS "${_HIPDNN_SHARED_CTEST}")
+        message(STATUS
+            "hipDNN: shared/ctest not found at ${_HIPDNN_SHARED_CTEST}; skipping CTest categories"
+        )
+    endif()
+    if(NOT EXISTS "${_HIPDNN_TEST_CATEGORIES_YAML}")
+        message(STATUS
+            "hipDNN: ${_HIPDNN_TEST_CATEGORIES_YAML} not found; skipping CTest categories"
+        )
+    endif()
+endif()
+
 set(CHECK_DEPENDS_GLOBAL "" CACHE INTERNAL "Accumulated global dependencies for test name validation" FORCE)
 set(CHECK_EXECUTABLE_PATHS_GLOBAL "" CACHE INTERNAL "Accumulated global check executable paths" FORCE)
 
@@ -41,7 +67,7 @@ function(_build_test_environment_list_internal OUT_VAR)
     set(${OUT_VAR} ${ENVIRONMENT_LIST} PARENT_SCOPE)
 endfunction() # _build_test_environment_list_internal
 
-# Creates a custom target to validate test names using a Python script
+# Creates a custom target and ctest test to validate test names using a Python script
 function(_create_test_name_validation_target_internal prefix_name)
     if(Python3_FOUND)
         # Write list of test executables with their paths to a file
@@ -68,6 +94,18 @@ function(_create_test_name_validation_target_internal prefix_name)
             ${prefix_name}-validate_test_names DEPENDS ${CMAKE_BINARY_DIR}/${prefix_name}_test_names_validated
             COMMENT "Validating test names"
         )
+
+        # Also register as a ctest test so it runs with ctest and appears in test results
+        add_test(
+            NAME ${prefix_name}_test_name_validation
+            COMMAND ${Python3_EXECUTABLE}
+                ${PROJECT_SOURCE_DIR}/cmake/scripts/test_name_validator.py
+                --test-executables ${TEST_EXECUTABLES_FILE}
+                --build-dir ${CMAKE_BINARY_DIR}
+                --strict
+            WORKING_DIRECTORY ${CMAKE_BINARY_DIR}
+        )
+        set_tests_properties(${prefix_name}_test_name_validation PROPERTIES LABELS "unit_test;integration_test;quick")
     else()
         message(WARNING "Python3 not found. Test name validation will be skipped.")
         add_custom_target(
@@ -220,15 +258,16 @@ function(_add_test_target_internal APPEND_FUNCTION_SUFFIX TARGET WORKING_DIR)
         ${TARGET} PROPERTIES RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/${CMAKE_INSTALL_BINDIR}"
     )
 
-    # Make test executables relocatable so they can find libraries when build directory is moved
-    # Include both the main lib directory and the engine plugin directories
+    # Make test executables prefer the build/install tree next to the executable before any
+    # toolchain paths. This prevents stale installed hipDNN libraries in /opt/rocm from shadowing
+    # the freshly built test dependencies.
     set_target_properties(
         ${TARGET}
         PROPERTIES
             INSTALL_RPATH
             "\$ORIGIN/../${CMAKE_INSTALL_LIBDIR};\$ORIGIN/../${CMAKE_INSTALL_LIBDIR}/hipdnn_plugins/engines"
+            BUILD_WITH_INSTALL_RPATH TRUE
             INSTALL_RPATH_USE_LINK_PATH TRUE
-            BUILD_RPATH_USE_ORIGIN TRUE
     )
 
     # Install test executables to bin directory
@@ -242,6 +281,9 @@ function(_add_test_target_internal APPEND_FUNCTION_SUFFIX TARGET WORKING_DIR)
 
     add_test(NAME ${TARGET} COMMAND ${TARGET} WORKING_DIRECTORY ${WORKING_DIR})
     set_tests_properties(${TARGET} PROPERTIES LABELS "${ALL_LABELS}")
+    if(DEFINED TEST_ENVIRONMENT)
+        set_tests_properties(${TARGET} PROPERTIES ENVIRONMENT "${TEST_ENVIRONMENT}")
+    endif()
 endfunction() # _add_test_target_internal
 
 # ~~~
@@ -286,6 +328,23 @@ function(install_hipdnn_ctest_files)
     foreach(test_target ${all_tests})
         file(APPEND "${INSTALLED_CTEST_FILE}" "add_test(${test_target} \"../${test_target}\")\n")
     endforeach()
+
+    # Bake the YAML-driven category labels into the installed
+    # CTestTestfile.cmake so `ctest --test-dir $THEROCK_BIN_DIR/hipdnn -L
+    # <tier>` works against the install tree.
+    #
+    # Passing INSTALLED_CTEST_FILE as the 2nd argument signals the shared
+    # helper that the snippet will be evaluated by ctest's own script
+    # interpreter (which does not implement
+    # get_property(DIRECTORY ... PROPERTY TESTS)), so it emits explicit
+    # per-test set_property() lines after auto-discovering the test
+    # names from the add_test() lines we just wrote above.
+    if(COMMAND apply_ctest_category_labels AND all_tests)
+        apply_ctest_category_labels(
+            "${_HIPDNN_TEST_CATEGORIES_YAML}"
+            "${INSTALLED_CTEST_FILE}"
+        )
+    endif()
 
     # Install the generated CTestTestfile.cmake to HIPDNN_CTEST_FILE_INSTALL_PATH
     install(FILES "${INSTALLED_CTEST_FILE}" DESTINATION ${HIPDNN_CTEST_FILE_INSTALL_PATH}

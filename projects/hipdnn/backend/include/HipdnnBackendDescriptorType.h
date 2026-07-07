@@ -286,4 +286,31 @@ typedef enum
      */
     HIPDNN_BACKEND_OPERATION_REDUCTION_DESCRIPTOR = 31,
 
+    /**
+     * @brief Resample forward operation descriptor
+     *
+     * Represents a resample forward operation (max, average, etc.).
+     * Takes an input tensor X and produces an output tensor Y,
+     * with optional index tensor IDX for max resample.
+     */
+    HIPDNN_BACKEND_OPERATION_RESAMPLE_FWD_DESCRIPTOR = 32,
+
+    /**
+     * @brief RMSNorm backward operation descriptor
+     *
+     * Represents an RMS normalization backward operation with gradient
+     * input (DY), input (X), scale, inverse RMS, and outputs
+     * DX, DScale, DBias (optional).
+     */
+    HIPDNN_BACKEND_OPERATION_RMSNORM_BACKWARD_DESCRIPTOR_EXT = 33,
+
+    /**
+     * @brief Profiling control descriptor (extension)
+     *
+     * Manages GPU timing via HIP events for autotuning workloads.
+     * Allows recording start/stop events on a stream extracted from
+     * a handle, synchronizing, and reading elapsed time.
+     */
+    HIPDNN_BACKEND_PROFILING_CONTROL_EXT = 34,
+
 } hipdnnBackendDescriptorType_t;

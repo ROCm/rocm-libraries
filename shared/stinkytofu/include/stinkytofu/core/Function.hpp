@@ -22,8 +22,11 @@
  * ************************************************************************ */
 #pragma once
 
+#include <cstdint>
 #include <iosfwd>
+#include <optional>
 #include <string>
+#include <unordered_map>
 
 #include "stinkytofu/Export.hpp"
 #include "stinkytofu/core/BasicBlock.hpp"
@@ -40,6 +43,7 @@ class STINKYTOFU_EXPORT Function {
     std::string name;
     BasicBlockList basicBlocks;  // List parent is this so BasicBlock::getParent() works
     GemmTileConfig gemmConfig;
+    std::unordered_map<std::string, uint64_t> metadata_;
 
    public:
     explicit Function(const std::string& name = "") : name(name), basicBlocks(this) {}
@@ -68,6 +72,26 @@ class STINKYTOFU_EXPORT Function {
         BasicBlock* bb = new BasicBlock(label);
         basicBlocks.insert(BasicBlockList::iterator(before), bb);
         return bb;
+    }
+
+    BasicBlock* createBasicBlockAfter(BasicBlock* after, const std::string& label = "") {
+        BasicBlock* bb = new BasicBlock(label);
+        auto it = BasicBlockList::iterator(after);
+        ++it;
+        basicBlocks.insert(it, bb);
+        return bb;
+    }
+
+    /// Detach every B -> succ edge from both sides.
+    void removeSuccessorEdges(BasicBlock& B) {
+        for (BasicBlock* succ : B.getSuccessors()) succ->removePredecessor(&B);
+        B.getSuccessors().clear();
+    }
+
+    /// Detach every pred -> B edge from both sides.
+    void removePredecessorEdges(BasicBlock& B) {
+        for (BasicBlock* pred : B.getPredecessors()) pred->removeSuccessor(&B);
+        B.getPredecessors().clear();
     }
 
     /// Clone IR and append to the given BasicBlock. Ownership is with the Function.
@@ -110,6 +134,19 @@ class STINKYTOFU_EXPORT Function {
     }
     const GemmTileConfig& getGemmTileConfig() const {
         return gemmConfig;
+    }
+
+    // Function metadata
+    void setMetaData(const std::string& key, uint64_t value) {
+        metadata_[key] = value;
+    }
+    std::optional<uint64_t> getMetaData(const std::string& key) const {
+        auto it = metadata_.find(key);
+        if (it == metadata_.end()) return std::nullopt;
+        return it->second;
+    }
+    bool hasMetaData(const std::string& key) const {
+        return metadata_.find(key) != metadata_.end();
     }
 
     // Iteration over basic blocks
