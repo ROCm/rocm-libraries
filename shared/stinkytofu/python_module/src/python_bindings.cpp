@@ -174,6 +174,7 @@ NB_MODULE(_stinkytofu, m) {
         .value("V", RegType::V, "Vector Register (VGPR)")
         .value("S", RegType::S, "Scalar Register (SGPR)")
         .value("A", RegType::A, "Accumulator Register (AGPR)")
+        .value("M", RegType::M, "Memory descriptor register (MGPR)")
         .value("ACC", RegType::ACC, "Accumulator Register (alternative)")
         .value("AGPR", RegType::AGPR, "Accumulator GPR")
         .value("VCC", RegType::VCC, "Vector Condition Code")
