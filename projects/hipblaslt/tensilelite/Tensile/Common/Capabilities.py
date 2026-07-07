@@ -28,45 +28,6 @@ from typing import List, Dict
 
 from .Types import IsaVersion, IsaInfo
 
-# TEMP DIAGNOSTIC (AIHPBLAS-3877): fires only when TENSILE_CAP_DIAG is set and a
-# normally-supported ISA probes as unsupported. Re-runs the exact tryAssembler
-# probe via subprocess to capture the real compiler stderr / errno plus process
-# context, which pytest surfaces under "Captured stderr setup". To be reverted.
-_CAP_DIAG_DUMPED = False
-
-
-def _capDiagDump(v, cxxCompiler):
-    global _CAP_DIAG_DUMPED
-    if _CAP_DIAG_DUMPED:
-        return
-    _CAP_DIAG_DUMPED = True
-    import os, sys, subprocess, resource
-    ctx = ""
-    try:
-        fds = len(os.listdir("/proc/self/fd")) if os.path.isdir("/proc/self/fd") else -1
-        soft, hard = resource.getrlimit(resource.RLIMIT_NOFILE)
-        ctx = (f"isa={tuple(v)} cxx={cxxCompiler} exists={os.path.exists(cxxCompiler)} "
-               f"cwd={os.getcwd()} cwd_writable={os.access(os.getcwd(), os.W_OK)} "
-               f"fds_open={fds} nofile={soft}/{hard} pid={os.getpid()} "
-               f"LD_LIBRARY_PATH={os.environ.get('LD_LIBRARY_PATH')!r}")
-    except Exception as e:
-        ctx = f"(context gather failed: {e!r})"
-    probe = ""
-    try:
-        gfx = "gfx%x%x%x" % (v[0], v[1], v[2])
-        cmd = [cxxCompiler, "-x", "assembler", "-target", "amdgcn-amdhsa",
-               "-mcpu=" + gfx, "-"]
-        r = subprocess.run(cmd, input=b"", capture_output=True)
-        probe = (f"subprocess.rc={r.returncode} "
-                 f"stderr={r.stderr.decode(errors='replace')[:800]!r}")
-    except Exception as e:
-        probe = f"subprocess raised {type(e).__name__}: {e}"
-    try:
-        sys.stderr.write(f"[CAPDIAG] {ctx} {probe}\n")
-        sys.stderr.flush()
-    except Exception:
-        pass
-
 
 def makeIsaInfoMap(targetIsas: List[IsaVersion], cxxCompiler: str) -> Dict[IsaVersion, IsaInfo]:
     """Computes the supported capabilities for requested ISAs and compiler.
@@ -89,10 +50,5 @@ def makeIsaInfoMap(targetIsas: List[IsaVersion], cxxCompiler: str) -> Dict[IsaVe
         archCaps = ti.getIsaInfo(v).archCaps
         regCaps = ti.getIsaInfo(v).regCaps
         asmBugs = ti.getIsaInfo(v).asmBugs
-        # TEMP (AIHPBLAS-3877): gfx942 probing unsupported is always anomalous;
-        # dump the real compiler error/context once. Unconditional so it does not
-        # depend on env propagation through tox. To be reverted.
-        if tuple(v) == (9, 4, 2) and not asmCaps.get("SupportedISA"):
-            _capDiagDump(v, cxxCompiler)
         isaInfoMap[v] = IsaInfo(asmCaps, archCaps, regCaps, asmBugs)
     return isaInfoMap

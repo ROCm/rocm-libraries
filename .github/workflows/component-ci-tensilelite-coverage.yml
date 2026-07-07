@@ -28,35 +28,6 @@ jobs:
         with:
           amdgpu_family: gfx94X-dcgpu
 
-      # TEMPORARY DIAGNOSTIC (AIHPBLAS-3877/3878): coverage-unit errors in this
-      # container because rocisa's SupportedISA probe
-      # (`amdclang++ -x assembler -target amdgcn-amdhsa -mcpu=<arch> -`) exits
-      # nonzero here while it succeeds on a normal ROCm install, which fails the
-      # characterization Solution fixtures and drags coverage below the floor.
-      # This surfaces the compiler's actual stderr/exit code. Remove once known.
-      - name: Diagnose SupportedISA assembler probe
-        shell: bash
-        run: |
-          set +e
-          echo "ROCM_PATH=$ROCM_PATH"
-          echo "--- candidate amdclang++ locations (validateToolchain order) ---"
-          CXX_PROBE=""
-          for d in "$ROCM_PATH/bin" "$ROCM_PATH/lib/llvm/bin" /opt/rocm/bin /opt/rocm/lib/llvm/bin; do
-            echo "[$d]"; ls -l "$d/amdclang++" 2>&1
-            if [ -z "$CXX_PROBE" ] && [ -x "$d/amdclang++" ]; then CXX_PROBE="$d/amdclang++"; fi
-          done
-          [ -z "$CXX_PROBE" ] && CXX_PROBE="$(command -v amdclang++)"
-          echo "--- resolved: $CXX_PROBE ---"
-          "$CXX_PROBE" --version 2>&1 | head -3
-          for arch in gfx942 gfx90a gfx950; do
-            echo "=== probe $arch (stderr shown) ==="
-            printf "" | "$CXX_PROBE" -x assembler -target amdgcn-amdhsa -mcpu=$arch - -o /tmp/probe_$arch.o
-            echo "exit=$?"
-          done
-          echo "--- device libs / bitcode present? ---"
-          ls -1 "$ROCM_PATH/amdgcn/bitcode" 2>&1 | head -5
-          exit 0
-
       - name: Install tox
         shell: bash
         run: pip install tox
@@ -67,6 +38,13 @@ jobs:
       # (coverage_ratchet.py, wired into the tox env's commands_post). No GPU or
       # client build is needed - coverage-unit skips the client build; the
       # compiler env below is only so rocisa builds during the tox run.
+      #
+      # PATH must include the ROCm toolchain bin dirs: setup-rocm sets ROCM_PATH
+      # but not PATH, and several characterization tests resolve the assembler
+      # via shutil.which("amdclang++"). Without it on PATH they initialize the
+      # process-wide rocisa singleton with a bogus compiler, which caches
+      # all-false gfx942 capabilities and cascades into ~200 Solution/codegen
+      # failures across the xdist workers (AIHPBLAS-3877).
       - name: Run coverage-unit (floor + ratchet)
         shell: bash
         working-directory: projects/hipblaslt/tensilelite
@@ -76,35 +54,9 @@ jobs:
           CMAKE_PREFIX_PATH: ${{ env.ROCM_PATH }}
           CMAKE_GENERATOR: Ninja
           LD_LIBRARY_PATH: ${{ env.ROCM_PATH }}/lib:${{ env.LD_LIBRARY_PATH }}
-          TENSILE_CAP_DIAG: "1"
-        run: tox -e coverage-unit
-
-      # TEMPORARY DIAGNOSTIC (AIHPBLAS-3877/3878): reproduce the exact
-      # makeIsaInfoMap path using the rocisa that tox just built in this
-      # container, since the raw shell probe above succeeds yet the
-      # characterization Solution fixtures still see SupportedISA=0. Uses the
-      # tox venv so it exercises the same rocisa build. Never fails the job.
-      - name: Diagnose makeIsaInfoMap in-process
-        if: always()
-        shell: bash
-        working-directory: projects/hipblaslt/tensilelite
-        env:
-          LD_LIBRARY_PATH: ${{ env.ROCM_PATH }}/lib:${{ env.LD_LIBRARY_PATH }}
         run: |
-          set +e
-          PY=.tox/coverage-unit/bin/python
-          [ -x "$PY" ] || { echo "no tox venv python at $PY"; exit 0; }
-          echo "LD_LIBRARY_PATH=$LD_LIBRARY_PATH"
-          echo "--- process limits ---"
-          echo "nproc=$(nproc) ulimit-u(soft)=$(ulimit -Su) ulimit-u(hard)=$(ulimit -Hu)"
-          echo "pid_max=$(cat /proc/sys/kernel/pid_max 2>/dev/null) threads-max=$(cat /proc/sys/kernel/threads-max 2>/dev/null)"
-          echo "cgroup v2 pids.max=$(cat /sys/fs/cgroup/pids.max 2>/dev/null) current=$(cat /sys/fs/cgroup/pids.current 2>/dev/null)"
-          echo "cgroup v1 pids.max=$(cat /sys/fs/cgroup/pids/pids.max 2>/dev/null) current=$(cat /sys/fs/cgroup/pids/pids.current 2>/dev/null)"
-          echo "job ulimit -n soft=$(ulimit -Sn) hard=$(ulimit -Hn)"
-          echo "The real signal is the [CAPDIAG] line(s) in the tox step's"
-          echo "'Captured stderr setup' output for the erroring Solution tests."
-          echo "diag done"
-          exit 0
+          export PATH="${ROCM_PATH}/bin:${ROCM_PATH}/lib/llvm/bin:${PATH}"
+          tox -e coverage-unit
 
       - name: Upload coverage reports
         if: always()
