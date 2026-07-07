@@ -17,7 +17,7 @@ CK Tile parity:
   selected spec dataclasses -> CK Tile C++ text  (core/lower_cktile.py)
 ```
 
-The production path (KernelDef SSA IR -> AMDGPU LLVM IR text) is served by either of two interchangeable engines that emit byte-identical IR: the native Python lowerer (`core/lower_llvm.py`) and a peer C++ engine (`Cpp/`, via the `rocke_engine` extension). The engine is selected by `core/backend.py::resolve_backend()` (explicit `backend=` argument, then `ROCKE_BACKEND` env of `python` / `cpp` / `both`, then the package default `cpp`); `cpp` falls back to the native lowerer when the extension is unbuilt. The IR-lowering contract described below is shared by both.
+The production path (KernelDef SSA IR -> AMDGPU LLVM IR text) is served by either of two interchangeable engines that emit byte-identical IR: the native Python lowerer (`core/lower_llvm.py`) and a peer C++ engine (`cpp/`, via the `rocke_engine` extension). The engine is selected by `core/backend.py::resolve_backend()` (explicit `backend=` argument, then `ROCKE_BACKEND` env of `python` / `cpp` / `both`, then the package default `cpp`); `cpp` falls back to the native lowerer when the extension is unbuilt. The IR-lowering contract described below is shared by both.
 
 ## Production Path
 
@@ -265,6 +265,6 @@ If you add a new builder operation, update in this order:
 1. `core/ir.py` — builder method and the op name + result type.
 2. `core/ir_print.py` — only if you want a clean MLIR-style debug print.
 3. `core/lower_llvm.py` — production lowering and any new `_INTRINSIC_DECLS` entry.
-4. the C++ engine (`Cpp/`) — port the same lowering so both engines stay byte-identical; the differential gate (`backend=both` / the harness under `tests/instances/differential/`) will flag any divergence.
+4. the C++ engine (`cpp/`) — port the same lowering so both engines stay byte-identical; the differential gate (`backend=both` / the harness under `tests/instances/differential/`) will flag any divergence.
 5. `core/lower_hip.py` — optional readable debug output.
 6. tests/examples that lower the op and assert the expected LLVM/ISA shape.

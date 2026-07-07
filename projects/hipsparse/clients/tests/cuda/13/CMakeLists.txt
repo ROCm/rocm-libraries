@@ -70,6 +70,7 @@ set(HIPSPARSE_TEST_YAMLS
     cuda/13/test_spmm_batched_coo.yaml
     cuda/13/test_spmm_batched_csc.yaml
     cuda/13/test_spmm_batched_csr.yaml
+    cuda/13/test_spmm_bell.yaml
     cuda/13/test_spmm_bsr.yaml
     cuda/13/test_spmm_coo.yaml
     cuda/13/test_spmm_csc.yaml

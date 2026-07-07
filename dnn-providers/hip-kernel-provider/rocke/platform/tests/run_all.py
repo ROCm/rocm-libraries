@@ -5,10 +5,10 @@
 # Cross-platform (Windows + Linux) CI/parent entrypoint for the rocKE engine.
 # One command runs: (1) the relative-path contract guard, (2) the byte-identity
 # gate, (3) the pytest suite, (4) ctest if a build dir exists. All paths are
-# derived relative to this file so the rocKE/ tree is copy-able verbatim.
+# derived relative to this file so the rocke/platform/ tree is copy-able verbatim.
 #
 # Usage:
-#   python rocKE/tests/run_all.py [--no-guard] [--no-gate] [--no-pytest]
+#   python rocke/platform/tests/run_all.py [--no-guard] [--no-gate] [--no-pytest]
 #       [--only SUBSTR] [--build-root DIR]
 
 from __future__ import annotations
@@ -25,7 +25,7 @@ ROCKE = Path(__file__).resolve().parents[1]  # tests -> rocKE
 TESTS = ROCKE / "tests"
 TOOLS = ROCKE / "tools"
 
-# Files that may reference an absolute repo path or a path that escapes rocKE/
+# Files that may reference an absolute repo path or a path that escapes rocke/platform/
 # break the verbatim-copy contract. Enforce on code/build files only (docs are
 # exempt). A clean run is required before the tree is dropped into another repo.
 _GUARD_SUFFIXES = {".py", ".cmake", ".toml", ".ini", ".sh", ".cfg"}
@@ -40,7 +40,7 @@ _FORBIDDEN = [
 
 
 def relative_path_guard() -> int:
-    """Fail if any code/build file under rocKE/ references an absolute repo path."""
+    """Fail if any code/build file under rocke/platform/ references an absolute repo path."""
     violations: list[str] = []
     for path in ROCKE.rglob("*"):
         if not path.is_file():
@@ -62,7 +62,9 @@ def relative_path_guard() -> int:
                         f"{path.relative_to(ROCKE)}:{i}: {line.strip()[:100]}"
                     )
     if violations:
-        print("RELATIVE-PATH GUARD: FAIL - absolute/repo paths found under rocKE/:")
+        print(
+            "RELATIVE-PATH GUARD: FAIL - absolute/repo paths found under rocke/platform/:"
+        )
         for v in violations:
             print(f"  {v}")
         return 1
