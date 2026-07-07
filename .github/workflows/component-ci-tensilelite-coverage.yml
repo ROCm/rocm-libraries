@@ -58,6 +58,42 @@ jobs:
           export PATH="${ROCM_PATH}/bin:${ROCM_PATH}/lib/llvm/bin:${PATH}"
           tox -e coverage-unit
 
+      # Informational (non-gating): attribute coverage to the two suites that
+      # make up the unit lane - characterization tests (the characterization/
+      # subtree) vs the pure unit tests. They are separated by path, not marker,
+      # so we re-measure each selection with the tox venv rocisa and render a
+      # job-summary card. Reuses the combined coverage.json from the gating step.
+      # Runs the same tests once each, so it roughly doubles the lane time; if the
+      # card proves useful this can be folded into the gating run (two runs +
+      # coverage combine) to reclaim that time. Never fails the job.
+      - name: Coverage split summary (characterization vs unit)
+        if: success()
+        shell: bash
+        working-directory: projects/hipblaslt/tensilelite
+        env:
+          LD_LIBRARY_PATH: ${{ env.ROCM_PATH }}/lib:${{ env.LD_LIBRARY_PATH }}
+        run: |
+          export PATH="${ROCM_PATH}/bin:${ROCM_PATH}/lib/llvm/bin:${PATH}"
+          export PYTHONPATH="$PWD"
+          PY=.tox/coverage-unit/bin/python
+          W="${TENSILE_NUM_PYTEST_WORKERS:-4}"
+          COVERAGE_FILE=.cov_char "$PY" -m pytest -m unit \
+            Tensile/Tests/unit/characterization \
+            --cov=Tensile --cov-config=pyproject.toml \
+            --cov-report=json:char.json --cov-report= --cov-fail-under=0 \
+            -n "$W" -p no:cacheprovider -q 2>&1 | tee /tmp/char_out.txt
+          COVERAGE_FILE=.cov_unit "$PY" -m pytest -m unit \
+            Tensile/Tests/unit --ignore=Tensile/Tests/unit/characterization \
+            --cov=Tensile --cov-config=pyproject.toml \
+            --cov-report=json:unit.json --cov-report= --cov-fail-under=0 \
+            -n "$W" -p no:cacheprovider -q 2>&1 | tee /tmp/unit_out.txt
+          char_n=$(grep -oE '[0-9]+ passed' /tmp/char_out.txt | head -1 | grep -oE '[0-9]+')
+          unit_n=$(grep -oE '[0-9]+ passed' /tmp/unit_out.txt | head -1 | grep -oE '[0-9]+')
+          "$PY" Tensile/Tests/unit/characterization/tools/coverage_split_summary.py \
+            --characterization char.json --unit unit.json --combined coverage.json \
+            --characterization-tests "${char_n:-0}" --unit-tests "${unit_n:-0}" || true
+          exit 0
+
       - name: Upload coverage reports
         if: always()
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
