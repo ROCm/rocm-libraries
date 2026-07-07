@@ -1174,10 +1174,13 @@ def _getExpectedTypes(validParams: dict[str, Union[int, list[Any], Any]]) -> dic
     """
     typeMap = {}
     for name, allowedValues in validParams.items():
-        if allowedValues == -1:
+        if isinstance(allowedValues, list):
+            assert len(allowedValues) > 0, f"Invalid parameter value: {name} = {allowedValues}"
+        else:  # Sentinel value -1 is allowed for all parameters
+            assert allowedValues == -1, f"Invalid parameter value: {name} = {allowedValues}"
             continue
-        if isinstance(allowedValues, list) and len(allowedValues) > 0:
-            typeMap[name] = set(type(v) for v in allowedValues)
+        
+        typeMap[name] = set(type(v) for v in allowedValues)
     return typeMap
 
 # Pre-compute once at import time so the per-Solution cost is a dict lookup.
