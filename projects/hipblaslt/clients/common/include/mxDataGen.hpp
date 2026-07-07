@@ -51,10 +51,6 @@ enum class MXScaleLayout
 
 #include <string_view>
 
-// Numeric value of hipblaslt_scaling_format::Block_32_UE8M0_32_8_EXT. Literal here
-// so HIP TUs avoid hipblaslt_datatype2string.hpp (pulls ostream).
-constexpr int kHipblasltScalingBlock32Ue8m0Gfx950Ext = 1001;
-
 // Default MX scale layout for a device architecture name (tensilelite client).
 MXScaleLayout mxScaleLayoutForArchName(std::string_view archName);
 
@@ -69,7 +65,7 @@ MXScaleLayout mxScaleLayoutForArchName(std::string_view archName);
 #include <vector>
 
 // Maps a block-scaling format and the active device to the scale swizzle layout.
-MXScaleLayout mxScaleLayoutForFormat(int scalingFormat);
+MXScaleLayout mxScaleLayoutForFormat(hipblaslt_scaling_format scalingFormat);
 
 // `scaleLayout` selects the post-generation scale memory layout. `initDevice`
 // selects the host vs device PRNG path; with MXInitDevice::Gpu, data/scale

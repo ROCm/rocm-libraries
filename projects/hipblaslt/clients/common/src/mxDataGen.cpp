@@ -904,9 +904,9 @@ MXScaleLayout mxScaleLayoutForArchName(std::string_view archName)
     return MXScaleLayout::kNone;
 }
 
-MXScaleLayout mxScaleLayoutForFormat(int scalingFormat)
+MXScaleLayout mxScaleLayoutForFormat(hipblaslt_scaling_format scalingFormat)
 {
-    if(scalingFormat == kHipblasltScalingBlock32Ue8m0Gfx950Ext)
+    if(scalingFormat == hipblaslt_scaling_format::Block_32_UE8M0_32_8_EXT)
         return MXScaleLayout::kGFX950;
     if(currentDeviceIsGfx1250())
         return MXScaleLayout::kGFX1250;
