@@ -572,7 +572,6 @@ using Gfx1250Intrinsics = ::testing::Types<
     amdgcn_mma<F32,  F32,  F32,  16u, 16u, 4u,   Target1250, MmaOpFamily::DENSE>, // wmma_f32_16x16x4_f32
     amdgcn_mma<BF16, BF16, F32,  16u, 16u, 32u,  Target1250, MmaOpFamily::DENSE>, // wmma_f32_16x16x32_bf16
     amdgcn_mma<BF16, BF16, BF16, 16u, 16u, 32u,  Target1250, MmaOpFamily::DENSE>, // wmma_bf16_16x16x32_bf16
-    amdgcn_mma<BF16, BF16, BF16, 16u, 16u, 32u,  Target1250, MmaOpFamily::DENSE>, // wmma_bf16f32_16x16x32_bf16
     amdgcn_mma<F8,   F8,   F32,  16u, 16u, 64u,  Target1250, MmaOpFamily::DENSE>, // wmma_f32_16x16x64_fp8_fp8
     amdgcn_mma<F8,   BF8,  F32,  16u, 16u, 64u,  Target1250, MmaOpFamily::DENSE>, // wmma_f32_16x16x64_fp8_bf8
     amdgcn_mma<BF8,  F8,   F32,  16u, 16u, 64u,  Target1250, MmaOpFamily::DENSE>, // wmma_f32_16x16x64_bf8_fp8
