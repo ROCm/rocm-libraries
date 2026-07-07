@@ -76,6 +76,7 @@ jobs:
           CMAKE_PREFIX_PATH: ${{ env.ROCM_PATH }}
           CMAKE_GENERATOR: Ninja
           LD_LIBRARY_PATH: ${{ env.ROCM_PATH }}/lib:${{ env.LD_LIBRARY_PATH }}
+          TENSILE_CAP_DIAG: "1"
         run: tox -e coverage-unit
 
       # TEMPORARY DIAGNOSTIC (AIHPBLAS-3877/3878): reproduce the exact
@@ -99,34 +100,9 @@ jobs:
           echo "pid_max=$(cat /proc/sys/kernel/pid_max 2>/dev/null) threads-max=$(cat /proc/sys/kernel/threads-max 2>/dev/null)"
           echo "cgroup v2 pids.max=$(cat /sys/fs/cgroup/pids.max 2>/dev/null) current=$(cat /sys/fs/cgroup/pids.current 2>/dev/null)"
           echo "cgroup v1 pids.max=$(cat /sys/fs/cgroup/pids/pids.max 2>/dev/null) current=$(cat /sys/fs/cgroup/pids/pids.current 2>/dev/null)"
-          # Minimal reproducer test that exercises the exact fixture path
-          # (session isa_info_map -> gfx942 SupportedISA) under pytest, so we can
-          # compare serial vs pytest-xdist vs pytest-xdist+coverage in this
-          # container and isolate the trigger.
-          cat > /tmp/test_capprobe.py <<'PYEOF'
-          import pytest
-          from Tensile.Toolchain.Validators import validateToolchain
-          from Tensile.Common.Architectures import SUPPORTED_ISA
-          from Tensile.Common.Capabilities import makeIsaInfoMap
-
-          @pytest.fixture(scope="session")
-          def cxx():
-              return validateToolchain("amdclang++")
-
-          @pytest.fixture(scope="session")
-          def isa_info_map(cxx):
-              return makeIsaInfoMap(SUPPORTED_ISA, cxx)
-
-          @pytest.mark.parametrize("i", range(8))
-          def test_gfx942_supported(isa_info_map, i):
-              k = [k for k in isa_info_map if tuple(k) == (9, 4, 2)][0]
-              assert isa_info_map[k].asmCaps["SupportedISA"], f"SupportedISA=0 (i={i})"
-          PYEOF
-          run() { echo "--- $1 ---"; PYTHONPATH="$PWD" "$PY" -m pytest -o addopts="" \
-            -p no:cacheprovider /tmp/test_capprobe.py "${@:2}" -q 2>&1 | tail -6; }
-          run "serial"
-          run "xdist-n4" -n 4
-          run "xdist-n4+cov" -n 4 --cov=Tensile --cov-report=
+          echo "job ulimit -n soft=$(ulimit -Sn) hard=$(ulimit -Hn)"
+          echo "The real signal is the [CAPDIAG] line(s) in the tox step's"
+          echo "'Captured stderr setup' output for the erroring Solution tests."
           echo "diag done"
           exit 0
 
