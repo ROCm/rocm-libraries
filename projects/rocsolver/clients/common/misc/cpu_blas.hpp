@@ -126,7 +126,7 @@ void cpu_hbadd(rocblas_fill uplo,
                T* C,
                rocblas_int ldc)
 {
-    using std::imag;
+    using std::imag, std::min, std::max;
 
     assert(n >= 0);
     assert(kd >= 0);
