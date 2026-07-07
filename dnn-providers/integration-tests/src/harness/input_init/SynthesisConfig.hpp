@@ -231,11 +231,17 @@ private:
     static FillSpec::Kind kindFromString(const std::string& s)
     {
         if(s == "fixed")
+        {
             return FillSpec::Kind::FIXED;
+        }
         if(s == "structured")
+        {
             return FillSpec::Kind::STRUCTURED;
+        }
         if(s == "derived")
+        {
             return FillSpec::Kind::DERIVED;
+        }
         return FillSpec::Kind::FREE;
     }
 };

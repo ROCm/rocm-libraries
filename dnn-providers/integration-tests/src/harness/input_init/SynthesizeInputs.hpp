@@ -320,7 +320,8 @@ inline void synthesizeInputs(const hipdnn_flatbuffers_sdk::data_objects::Graph& 
     std::mt19937 rng(config.getGlobalSeed());
     for(const int64_t uid : sortedUids)
     {
-        unsigned int seed = config.resolveSeed(uid).value_or(static_cast<unsigned int>(rng()));
+        const unsigned int seed
+            = config.resolveSeed(uid).value_or(static_cast<unsigned int>(rng()));
         fill(*inputs.at(uid), config.get(uid), seed);
     }
 }
