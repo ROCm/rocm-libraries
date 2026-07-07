@@ -35,7 +35,7 @@ class TestProviderEngineResultLegacyShape:
             status="success",
             cpu_build_time_ms=12.3,
             gpu_kernel_stats=_bench_stats(),
-            e2e_stats=_bench_stats(),
+            host_stats=_bench_stats(),
             elapsed_time_ms=200.0,
         )
         d = pe.to_dict()
@@ -98,7 +98,7 @@ class TestProviderEngineResultFullShape:
             status="success",
             cpu_build_time_ms=10.0,
             gpu_kernel_stats=_bench_stats(0.5),
-            e2e_stats=_bench_stats(1.0),
+            host_stats=_bench_stats(1.0),
             elapsed_time_ms=200.0,
             workspace_bytes=4096,
             analytical_flops=10**9,
