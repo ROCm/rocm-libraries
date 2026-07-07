@@ -24,13 +24,14 @@ else()
     target_compile_definitions(miopen_common_utils INTERFACE MIOPEN_USE_RNE_BFLOAT16=0)
 endif()
 
-# Backward-compatibility exception to the "not installed" rule above.
-# bfloat16 moved here from src/include/miopen/. External consumers that build
-# against the installed package (e.g. ROCm/MIFin) still include
-# <miopen/bfloat16.hpp>, which now forwards to <common_utils/bfloat16.hpp>.
-# Install just that one header so the forward resolves. Gated on the same option
-# that installs MIOpen's C++ headers (and thus the forwarding shim itself).
+# Exception to the "not installed" rule above (headers only; the target stays
+# build-only — no install(TARGETS)/export). Many installed MIOpen C++ headers
+# (src/include/miopen/*.hpp) include <common_utils/*.hpp>, so these headers are
+# part of the installed public surface transitively. Install the whole directory
+# so external consumers building against the install tree (e.g. ROCm/MIFin) can
+# resolve them. Gated on the same option that installs MIOpen's C++ headers, so
+# the two move together.
 if(MIOPEN_INSTALL_CXX_HEADERS)
-    install(FILES ${CMAKE_CURRENT_SOURCE_DIR}/include/common_utils/bfloat16.hpp
-            DESTINATION include/common_utils)
+    install(DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}/include/common_utils
+            DESTINATION include)
 endif()
