@@ -71,6 +71,34 @@ def _fmt_int(n: int) -> str:
     return f"{n:,}"
 
 
+def _aligned_table(
+    headers: list[str], rows: list[list[str]], right: set[int]
+) -> list[str]:
+    """Render a Markdown table whose columns line up as raw text too.
+
+    Cells are padded to a uniform per-column width so the pipes align even when
+    the surface shows the raw markdown instead of rendering it (e.g. a CI step
+    log). Columns whose index is in ``right`` are right-aligned (numbers); the
+    rest are left-aligned. The output is still valid GitHub-flavored Markdown.
+    """
+    widths = [
+        max(len(headers[i]), *(len(r[i]) for r in rows)) for i in range(len(headers))
+    ]
+
+    def fmt(cells: list[str]) -> str:
+        out = [
+            cells[i].rjust(widths[i]) if i in right else cells[i].ljust(widths[i])
+            for i in range(len(cells))
+        ]
+        return "| " + " | ".join(out) + " |"
+
+    sep = [
+        ("-" * (widths[i] - 1) + ":") if i in right else ("-" * widths[i])
+        for i in range(len(headers))
+    ]
+    return [fmt(headers), "| " + " | ".join(sep) + " |"] + [fmt(r) for r in rows]
+
+
 def build_markdown(
     char: dict, unit: dict, combined: dict | None,
     char_tests: int | None, unit_tests: int | None,
@@ -84,29 +112,38 @@ def build_markdown(
 
     def tests_cell(n): return _fmt_int(n) if n is not None else "-"
 
+    suite_rows = [
+        ["Characterization", tests_cell(char_tests), f"{_pct(char):.2f}%"],
+        ["Unit (non-characterization)", tests_cell(unit_tests), f"{_pct(unit):.2f}%"],
+    ]
+    if combined is not None:
+        suite_rows.append(["**Combined**", "", f"**{_pct(combined):.2f}%**"])
+
     rows = [
         "## TensileLite coverage: characterization vs unit",
         "",
-        "| Suite | Tests | Whole-project coverage |",
-        "| --- | ---: | ---: |",
-        f"| Characterization | {tests_cell(char_tests)} | {_pct(char):.2f}% |",
-        f"| Unit (non-characterization) | {tests_cell(unit_tests)} | {_pct(unit):.2f}% |",
-    ]
-    if combined is not None:
-        rows.append(f"| **Combined** | | **{_pct(combined):.2f}%** |")
-    rows += [
+        *_aligned_table(
+            ["Suite", "Tests", "Whole-project coverage"], suite_rows, right={1, 2}
+        ),
         "",
         "### Line-level contribution (executed lines)",
         "",
         "Percentages overlap, so they do not sum to the combined number. This is "
         "who actually reaches each line:",
         "",
-        "| Reached by | Executed lines | Share of union |",
-        "| --- | ---: | ---: |",
-        f"| Both suites | {_fmt_int(len(both))} | {len(both) / len(union) * 100:.1f}% |",
-        f"| Characterization only | {_fmt_int(len(char_only))} | {len(char_only) / len(union) * 100:.1f}% |",
-        f"| Unit only | {_fmt_int(len(unit_only))} | {len(unit_only) / len(union) * 100:.1f}% |",
-        f"| Union (any suite) | {_fmt_int(len(union))} | 100.0% |",
+        *_aligned_table(
+            ["Reached by", "Executed lines", "Share of union"],
+            [
+                ["Both suites", _fmt_int(len(both)),
+                 f"{len(both) / len(union) * 100:.1f}%"],
+                ["Characterization only", _fmt_int(len(char_only)),
+                 f"{len(char_only) / len(union) * 100:.1f}%"],
+                ["Unit only", _fmt_int(len(unit_only)),
+                 f"{len(unit_only) / len(union) * 100:.1f}%"],
+                ["Union (any suite)", _fmt_int(len(union)), "100.0%"],
+            ],
+            right={1, 2},
+        ),
         "",
     ]
     return "\n".join(rows)
