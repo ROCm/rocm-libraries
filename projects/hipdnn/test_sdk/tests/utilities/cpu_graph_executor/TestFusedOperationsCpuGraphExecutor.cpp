@@ -17,7 +17,7 @@
 
 using namespace hipdnn_test_sdk::utilities;
 using namespace hipdnn_test_sdk::detail;
-using namespace hipdnn_data_sdk::data_objects;
+using namespace hipdnn_flatbuffers_sdk::data_objects;
 using namespace hipdnn_data_sdk::utilities;
 using namespace ::testing;
 
@@ -28,17 +28,17 @@ class TestFusedOperationsCpuGraphExecutor : public ::testing::Test
 TEST_F(TestFusedOperationsCpuGraphExecutor, ConvAddMulFusedGraph)
 {
     auto tolerance = pointwise::getTolerance<float>();
-    std::vector<int64_t> xDims = {1, 1, 2, 2};
-    std::vector<int64_t> wDims = {1, 1, 1, 1};
-    std::vector<int64_t> yDims = {1, 1, 2, 2};
+    const std::vector<int64_t> xDims = {1, 1, 2, 2};
+    const std::vector<int64_t> wDims = {1, 1, 1, 1};
+    const std::vector<int64_t> yDims = {1, 1, 2, 2};
 
-    std::vector<int64_t> strides = {1, 1};
-    std::vector<int64_t> dilation = {1, 1};
-    std::vector<int64_t> padding = {0, 0};
+    const std::vector<int64_t> strides = {1, 1};
+    const std::vector<int64_t> dilation = {1, 1};
+    const std::vector<int64_t> padding = {0, 0};
 
-    float addConstant = 5.0f;
-    float multiplyConstant = 2.0f;
-    unsigned int seed = getGlobalTestSeed();
+    const float addConstant = 5.0f;
+    const float multiplyConstant = 2.0f;
+    const unsigned int seed = getGlobalTestSeed();
 
     // DIRECT TENSOR MANAGEMENT - Expert Architecture
     // Graph execution tensors
@@ -66,7 +66,9 @@ TEST_F(TestFusedOperationsCpuGraphExecutor, ConvAddMulFusedGraph)
     // BUILD 3-STEP FUSED GRAPH MANUALLY
     auto graph = std::make_shared<hipdnn_frontend::graph::Graph>();
     graph->set_name("ConvolutionAddMultiplyFusedTest");
-    graph->set_compute_data_type(hipdnn_frontend::DataType::FLOAT);
+    graph->set_io_data_type(hipdnn_frontend::DataType::FLOAT)
+        .set_compute_data_type(hipdnn_frontend::DataType::FLOAT)
+        .set_intermediate_data_type(hipdnn_frontend::DataType::FLOAT);
 
     int64_t uid = 1;
 
@@ -156,11 +158,11 @@ TEST_F(TestFusedOperationsCpuGraphExecutor, ConvAddMulFusedGraph)
     ASSERT_TRUE(validationResult.is_good()) << validationResult.get_message();
 
     // Execute the graph using CPU graph executor
-    CpuReferenceGraphExecutor graphExecutor;
     // Serialize the frontend graph to flatbuffer format
-    auto serializedGraph = graph->buildFlatbufferOperationGraph();
-    // Execute with correct 3-parameter signature
-    graphExecutor.execute(serializedGraph.data(), serializedGraph.size(), variantPack);
+    auto [serializedGraph, serErr] = graph->to_binary();
+    ASSERT_TRUE(serErr.is_good()) << serErr.get_message();
+    CpuReferenceGraphExecutor{}.execute(
+        serializedGraph.data(), serializedGraph.size(), variantPack);
 
     // Compute reference result manually: (conv(X, W) + 5.0) * 2.0
     // Step 1: Perform convolution
@@ -172,10 +174,10 @@ TEST_F(TestFusedOperationsCpuGraphExecutor, ConvAddMulFusedGraph)
     Tensor<float> tempAddOutput(yDims, TensorLayout::NHWC);
     auto* convOutputData = static_cast<float*>(tempConvOutput.memory().hostData());
     auto* addOutputData = static_cast<float*>(tempAddOutput.memory().hostData());
-    size_t elementCount = static_cast<size_t>(tempConvOutput.dims()[0])
-                          * static_cast<size_t>(tempConvOutput.dims()[1])
-                          * static_cast<size_t>(tempConvOutput.dims()[2])
-                          * static_cast<size_t>(tempConvOutput.dims()[3]);
+    const size_t elementCount = static_cast<size_t>(tempConvOutput.dims()[0])
+                                * static_cast<size_t>(tempConvOutput.dims()[1])
+                                * static_cast<size_t>(tempConvOutput.dims()[2])
+                                * static_cast<size_t>(tempConvOutput.dims()[3]);
 
     for(size_t i = 0; i < elementCount; ++i)
     {
@@ -190,7 +192,7 @@ TEST_F(TestFusedOperationsCpuGraphExecutor, ConvAddMulFusedGraph)
     }
 
     // Validate results
-    CpuFpReferenceValidation<float> cpuRefOutputValidation(tolerance, tolerance);
+    const CpuFpReferenceValidation<float> cpuRefOutputValidation(tolerance, tolerance);
 
     EXPECT_TRUE(cpuRefOutputValidation.allClose(refYTensor, yTensor));
 }

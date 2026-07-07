@@ -50,13 +50,12 @@
 #include "ResultFileReporter.hpp"
 #include "ResultReporter.hpp"
 
-#include <boost/algorithm/string/classification.hpp>
-#include <boost/algorithm/string/split.hpp>
-#include <boost/program_options.hpp>
+#include "ProgramOptions.hpp"
 
 #include <cstddef>
+#include <sstream>
 
-namespace po = boost::program_options;
+namespace po = Tensile::Client::po;
 
 namespace Tensile
 {
@@ -350,15 +349,20 @@ namespace Tensile
 
         std::vector<size_t> split_ints(std::string const& value)
         {
-            std::vector<std::string> parts;
-            boost::split(parts, value, boost::algorithm::is_any_of(",;"));
+            std::vector<std::string> parts = po::split_string(value, ",;");
 
             std::vector<size_t> rv;
             rv.reserve(parts.size());
 
             for(auto const& part : parts)
                 if(part != "")
-                    rv.push_back(boost::lexical_cast<size_t>(part));
+                {
+                    size_t             v;
+                    std::istringstream ss(part);
+                    if(!(ss >> v))
+                        throw std::runtime_error("Failed to parse size_t: " + part);
+                    rv.push_back(v);
+                }
 
             return rv;
         }
@@ -372,7 +376,7 @@ namespace Tensile
             for(auto const& str : inValue)
                 outValue.push_back(split_ints(str));
 
-            boost::any v(outValue);
+            std::any v(outValue);
 
             args.at(name).value() = v;
         }
@@ -386,12 +390,12 @@ namespace Tensile
             if(type == DataType::Float || type == DataType::Double || type == DataType::ComplexFloat
                || type == DataType::ComplexDouble || type == DataType::Int32)
             {
-                args.at("a-type").value()     = boost::any(type);
-                args.at("b-type").value()     = boost::any(type);
-                args.at("c-type").value()     = boost::any(type);
-                args.at("d-type").value()     = boost::any(type);
-                args.at("alpha-type").value() = boost::any(type);
-                args.at("beta-type").value()  = boost::any(type);
+                args.at("a-type").value()     = std::any(type);
+                args.at("b-type").value()     = std::any(type);
+                args.at("c-type").value()     = std::any(type);
+                args.at("d-type").value()     = std::any(type);
+                args.at("alpha-type").value() = std::any(type);
+                args.at("beta-type").value()  = std::any(type);
             }
         }
 

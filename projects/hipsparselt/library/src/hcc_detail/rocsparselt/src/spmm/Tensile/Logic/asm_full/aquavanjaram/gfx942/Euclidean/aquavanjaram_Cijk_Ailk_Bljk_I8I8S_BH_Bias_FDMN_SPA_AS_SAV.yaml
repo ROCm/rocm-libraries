@@ -92,16 +92,16 @@
     CodeObjectVersion: default
     CustomKernelName: ''
     DepthU: 64
-    DirectToLds: false
+    DirectToLds: 0
     DirectToLdsA: false
     DirectToLdsB: false
-    DirectToLdsMetadata: false
-    DirectToVgprSparseMetadata: 0
+    DirectToLdsMetadata: 0
+    DirectToVgprSparseMetadata: false
     EdgeType: ShiftPtr
     EnableF32XdlMathOp: false
     EnableMatrixInstruction: true
     ExpandPointerSwap: true
-    GlobalReadPerMfma: 1
+    GlobalReadPerMfma: 1.0
     GlobalReadVectorWidthA: 8
     GlobalReadVectorWidthB: 16
     GlobalReadVectorWidthMetadata: 4
@@ -242,11 +242,11 @@
     ThreadTileB: 1
     ThreadTileMetadata: 16
     TransposeLDS: 0
-    TransposeLDSMetadata: true
+    TransposeLDSMetadata: 1
     UnrollMajorLDSA: 0
     UnrollMajorLDSB: 0
     UnrollMajorLDSMetadata: true
-    Use64bShadowLimit: 1
+    Use64bShadowLimit: true
     UseInstOffsetForGRO: 0
     UseSgprForGRO: -1
     Valid: true
@@ -288,16 +288,16 @@
     CodeObjectVersion: default
     CustomKernelName: ''
     DepthU: 64
-    DirectToLds: false
+    DirectToLds: 0
     DirectToLdsA: false
     DirectToLdsB: false
-    DirectToLdsMetadata: false
-    DirectToVgprSparseMetadata: 0
+    DirectToLdsMetadata: 0
+    DirectToVgprSparseMetadata: false
     EdgeType: ShiftPtr
     EnableF32XdlMathOp: false
     EnableMatrixInstruction: true
     ExpandPointerSwap: true
-    GlobalReadPerMfma: 1
+    GlobalReadPerMfma: 1.0
     GlobalReadVectorWidthA: 8
     GlobalReadVectorWidthB: 16
     GlobalReadVectorWidthMetadata: 4
@@ -438,11 +438,11 @@
     ThreadTileB: 1
     ThreadTileMetadata: 16
     TransposeLDS: 1
-    TransposeLDSMetadata: true
+    TransposeLDSMetadata: 1
     UnrollMajorLDSA: false
     UnrollMajorLDSB: true
     UnrollMajorLDSMetadata: true
-    Use64bShadowLimit: 1
+    Use64bShadowLimit: true
     UseInstOffsetForGRO: 0
     UseSgprForGRO: -1
     Valid: true
@@ -484,15 +484,15 @@
     CodeObjectVersion: default
     CustomKernelName: ''
     DepthU: 64
-    DirectToLds: false
+    DirectToLds: 0
     DirectToLdsA: false
     DirectToLdsB: false
-    DirectToVgprSparseMetadata: 1
+    DirectToVgprSparseMetadata: true
     EdgeType: ShiftPtr
     EnableF32XdlMathOp: false
     EnableMatrixInstruction: true
     ExpandPointerSwap: true
-    GlobalReadPerMfma: 1
+    GlobalReadPerMfma: 1.0
     GlobalReadVectorWidthA: 8
     GlobalReadVectorWidthB: 16
     GlobalSplitU: 1
@@ -621,11 +621,11 @@
     ThreadTileA: 16
     ThreadTileB: 1
     TransposeLDS: 0
-    TransposeLDSMetadata: true
+    TransposeLDSMetadata: 1
     UnrollMajorLDSA: 0
     UnrollMajorLDSB: 0
     UnrollMajorLDSMetadata: true
-    Use64bShadowLimit: 1
+    Use64bShadowLimit: true
     UseInstOffsetForGRO: 0
     UseSgprForGRO: -1
     Valid: true
@@ -666,15 +666,15 @@
     CodeObjectVersion: default
     CustomKernelName: ''
     DepthU: 64
-    DirectToLds: false
+    DirectToLds: 0
     DirectToLdsA: false
     DirectToLdsB: false
-    DirectToVgprSparseMetadata: 1
+    DirectToVgprSparseMetadata: true
     EdgeType: ShiftPtr
     EnableF32XdlMathOp: false
     EnableMatrixInstruction: true
     ExpandPointerSwap: true
-    GlobalReadPerMfma: 1
+    GlobalReadPerMfma: 1.0
     GlobalReadVectorWidthA: 8
     GlobalReadVectorWidthB: 16
     GlobalSplitU: 1
@@ -803,11 +803,11 @@
     ThreadTileA: 16
     ThreadTileB: 1
     TransposeLDS: 1
-    TransposeLDSMetadata: true
+    TransposeLDSMetadata: 1
     UnrollMajorLDSA: false
     UnrollMajorLDSB: true
     UnrollMajorLDSMetadata: true
-    Use64bShadowLimit: 1
+    Use64bShadowLimit: true
     UseInstOffsetForGRO: 0
     UseSgprForGRO: -1
     Valid: true
@@ -848,16 +848,16 @@
     CodeObjectVersion: default
     CustomKernelName: ''
     DepthU: 64
-    DirectToLds: false
+    DirectToLds: 0
     DirectToLdsA: false
     DirectToLdsB: false
-    DirectToLdsMetadata: false
-    DirectToVgprSparseMetadata: 0
+    DirectToLdsMetadata: 0
+    DirectToVgprSparseMetadata: false
     EdgeType: ShiftPtr
     EnableF32XdlMathOp: false
     EnableMatrixInstruction: true
     ExpandPointerSwap: true
-    GlobalReadPerMfma: 1
+    GlobalReadPerMfma: 1.0
     GlobalReadVectorWidthA: 8
     GlobalReadVectorWidthB: 16
     GlobalReadVectorWidthMetadata: 4
@@ -998,11 +998,11 @@
     ThreadTileB: 1
     ThreadTileMetadata: 16
     TransposeLDS: 1
-    TransposeLDSMetadata: true
+    TransposeLDSMetadata: 1
     UnrollMajorLDSA: false
     UnrollMajorLDSB: true
     UnrollMajorLDSMetadata: true
-    Use64bShadowLimit: 1
+    Use64bShadowLimit: true
     UseInstOffsetForGRO: 0
     UseSgprForGRO: -1
     Valid: true
@@ -1044,15 +1044,15 @@
     CodeObjectVersion: default
     CustomKernelName: ''
     DepthU: 64
-    DirectToLds: false
+    DirectToLds: 0
     DirectToLdsA: false
     DirectToLdsB: false
-    DirectToVgprSparseMetadata: 1
+    DirectToVgprSparseMetadata: true
     EdgeType: ShiftPtr
     EnableF32XdlMathOp: false
     EnableMatrixInstruction: true
     ExpandPointerSwap: true
-    GlobalReadPerMfma: 1
+    GlobalReadPerMfma: 1.0
     GlobalReadVectorWidthA: 8
     GlobalReadVectorWidthB: 16
     GlobalSplitU: 1
@@ -1181,11 +1181,11 @@
     ThreadTileA: 16
     ThreadTileB: 1
     TransposeLDS: 0
-    TransposeLDSMetadata: true
+    TransposeLDSMetadata: 1
     UnrollMajorLDSA: 0
     UnrollMajorLDSB: 0
     UnrollMajorLDSMetadata: true
-    Use64bShadowLimit: 1
+    Use64bShadowLimit: true
     UseInstOffsetForGRO: 0
     UseSgprForGRO: -1
     Valid: true
@@ -1226,16 +1226,16 @@
     CodeObjectVersion: default
     CustomKernelName: ''
     DepthU: 64
-    DirectToLds: false
+    DirectToLds: 0
     DirectToLdsA: false
     DirectToLdsB: false
-    DirectToLdsMetadata: false
-    DirectToVgprSparseMetadata: 0
+    DirectToLdsMetadata: 0
+    DirectToVgprSparseMetadata: false
     EdgeType: ShiftPtr
     EnableF32XdlMathOp: false
     EnableMatrixInstruction: true
     ExpandPointerSwap: true
-    GlobalReadPerMfma: 1
+    GlobalReadPerMfma: 1.0
     GlobalReadVectorWidthA: 8
     GlobalReadVectorWidthB: 16
     GlobalReadVectorWidthMetadata: 4
@@ -1376,11 +1376,11 @@
     ThreadTileB: 1
     ThreadTileMetadata: 16
     TransposeLDS: 0
-    TransposeLDSMetadata: true
+    TransposeLDSMetadata: 1
     UnrollMajorLDSA: 0
     UnrollMajorLDSB: 0
     UnrollMajorLDSMetadata: true
-    Use64bShadowLimit: 1
+    Use64bShadowLimit: true
     UseInstOffsetForGRO: 0
     UseSgprForGRO: -1
     Valid: true
@@ -1422,16 +1422,16 @@
     CodeObjectVersion: default
     CustomKernelName: ''
     DepthU: 64
-    DirectToLds: false
+    DirectToLds: 0
     DirectToLdsA: false
     DirectToLdsB: false
-    DirectToLdsMetadata: false
-    DirectToVgprSparseMetadata: 0
+    DirectToLdsMetadata: 0
+    DirectToVgprSparseMetadata: false
     EdgeType: ShiftPtr
     EnableF32XdlMathOp: false
     EnableMatrixInstruction: true
     ExpandPointerSwap: true
-    GlobalReadPerMfma: 1
+    GlobalReadPerMfma: 1.0
     GlobalReadVectorWidthA: 8
     GlobalReadVectorWidthB: 16
     GlobalReadVectorWidthMetadata: 4
@@ -1572,11 +1572,11 @@
     ThreadTileB: 1
     ThreadTileMetadata: 16
     TransposeLDS: 1
-    TransposeLDSMetadata: true
+    TransposeLDSMetadata: 1
     UnrollMajorLDSA: false
     UnrollMajorLDSB: true
     UnrollMajorLDSMetadata: true
-    Use64bShadowLimit: 1
+    Use64bShadowLimit: true
     UseInstOffsetForGRO: 0
     UseSgprForGRO: -1
     Valid: true
@@ -1618,15 +1618,15 @@
     CodeObjectVersion: default
     CustomKernelName: ''
     DepthU: 64
-    DirectToLds: false
+    DirectToLds: 0
     DirectToLdsA: false
     DirectToLdsB: false
-    DirectToVgprSparseMetadata: 1
+    DirectToVgprSparseMetadata: true
     EdgeType: ShiftPtr
     EnableF32XdlMathOp: false
     EnableMatrixInstruction: true
     ExpandPointerSwap: true
-    GlobalReadPerMfma: 1
+    GlobalReadPerMfma: 1.0
     GlobalReadVectorWidthA: 8
     GlobalReadVectorWidthB: 16
     GlobalSplitU: 1
@@ -1755,11 +1755,11 @@
     ThreadTileA: 16
     ThreadTileB: 1
     TransposeLDS: 1
-    TransposeLDSMetadata: true
+    TransposeLDSMetadata: 1
     UnrollMajorLDSA: false
     UnrollMajorLDSB: true
     UnrollMajorLDSMetadata: true
-    Use64bShadowLimit: 1
+    Use64bShadowLimit: true
     UseInstOffsetForGRO: 0
     UseSgprForGRO: -1
     Valid: true
@@ -1800,16 +1800,16 @@
     CodeObjectVersion: default
     CustomKernelName: ''
     DepthU: 64
-    DirectToLds: false
+    DirectToLds: 0
     DirectToLdsA: false
     DirectToLdsB: false
-    DirectToLdsMetadata: false
-    DirectToVgprSparseMetadata: 0
+    DirectToLdsMetadata: 0
+    DirectToVgprSparseMetadata: false
     EdgeType: ShiftPtr
     EnableF32XdlMathOp: false
     EnableMatrixInstruction: true
     ExpandPointerSwap: true
-    GlobalReadPerMfma: 1
+    GlobalReadPerMfma: 1.0
     GlobalReadVectorWidthA: 8
     GlobalReadVectorWidthB: 16
     GlobalReadVectorWidthMetadata: 4
@@ -1950,11 +1950,11 @@
     ThreadTileB: 1
     ThreadTileMetadata: 16
     TransposeLDS: 1
-    TransposeLDSMetadata: true
+    TransposeLDSMetadata: 1
     UnrollMajorLDSA: false
     UnrollMajorLDSB: true
     UnrollMajorLDSMetadata: true
-    Use64bShadowLimit: 1
+    Use64bShadowLimit: true
     UseInstOffsetForGRO: 0
     UseSgprForGRO: -1
     Valid: true
@@ -1996,15 +1996,15 @@
     CodeObjectVersion: default
     CustomKernelName: ''
     DepthU: 64
-    DirectToLds: false
+    DirectToLds: 0
     DirectToLdsA: false
     DirectToLdsB: false
-    DirectToVgprSparseMetadata: 1
+    DirectToVgprSparseMetadata: true
     EdgeType: ShiftPtr
     EnableF32XdlMathOp: false
     EnableMatrixInstruction: true
     ExpandPointerSwap: true
-    GlobalReadPerMfma: 1
+    GlobalReadPerMfma: 1.0
     GlobalReadVectorWidthA: 8
     GlobalReadVectorWidthB: 16
     GlobalSplitU: 2
@@ -2133,11 +2133,11 @@
     ThreadTileA: 16
     ThreadTileB: 1
     TransposeLDS: 1
-    TransposeLDSMetadata: true
+    TransposeLDSMetadata: 1
     UnrollMajorLDSA: false
     UnrollMajorLDSB: true
     UnrollMajorLDSMetadata: true
-    Use64bShadowLimit: 1
+    Use64bShadowLimit: true
     UseInstOffsetForGRO: 0
     UseSgprForGRO: -1
     Valid: true
@@ -2178,16 +2178,16 @@
     CodeObjectVersion: default
     CustomKernelName: ''
     DepthU: 64
-    DirectToLds: false
+    DirectToLds: 0
     DirectToLdsA: false
     DirectToLdsB: false
-    DirectToLdsMetadata: false
-    DirectToVgprSparseMetadata: 0
+    DirectToLdsMetadata: 0
+    DirectToVgprSparseMetadata: false
     EdgeType: ShiftPtr
     EnableF32XdlMathOp: false
     EnableMatrixInstruction: true
     ExpandPointerSwap: true
-    GlobalReadPerMfma: 1
+    GlobalReadPerMfma: 1.0
     GlobalReadVectorWidthA: 8
     GlobalReadVectorWidthB: 16
     GlobalReadVectorWidthMetadata: 4
@@ -2328,11 +2328,11 @@
     ThreadTileB: 2
     ThreadTileMetadata: 32
     TransposeLDS: 1
-    TransposeLDSMetadata: true
+    TransposeLDSMetadata: 1
     UnrollMajorLDSA: false
     UnrollMajorLDSB: true
     UnrollMajorLDSMetadata: true
-    Use64bShadowLimit: 1
+    Use64bShadowLimit: true
     UseInstOffsetForGRO: 0
     UseSgprForGRO: -1
     Valid: true
@@ -2374,16 +2374,16 @@
     CodeObjectVersion: default
     CustomKernelName: ''
     DepthU: 64
-    DirectToLds: false
+    DirectToLds: 0
     DirectToLdsA: false
     DirectToLdsB: false
-    DirectToLdsMetadata: false
-    DirectToVgprSparseMetadata: 0
+    DirectToLdsMetadata: 0
+    DirectToVgprSparseMetadata: false
     EdgeType: ShiftPtr
     EnableF32XdlMathOp: false
     EnableMatrixInstruction: true
     ExpandPointerSwap: true
-    GlobalReadPerMfma: 1
+    GlobalReadPerMfma: 1.0
     GlobalReadVectorWidthA: 8
     GlobalReadVectorWidthB: 16
     GlobalReadVectorWidthMetadata: 4
@@ -2524,11 +2524,11 @@
     ThreadTileB: 2
     ThreadTileMetadata: 32
     TransposeLDS: 1
-    TransposeLDSMetadata: true
+    TransposeLDSMetadata: 1
     UnrollMajorLDSA: false
     UnrollMajorLDSB: true
     UnrollMajorLDSMetadata: true
-    Use64bShadowLimit: 1
+    Use64bShadowLimit: true
     UseInstOffsetForGRO: 0
     UseSgprForGRO: -1
     Valid: true
@@ -2570,16 +2570,16 @@
     CodeObjectVersion: default
     CustomKernelName: ''
     DepthU: 128
-    DirectToLds: false
+    DirectToLds: 0
     DirectToLdsA: false
     DirectToLdsB: false
-    DirectToLdsMetadata: false
-    DirectToVgprSparseMetadata: 0
+    DirectToLdsMetadata: 0
+    DirectToVgprSparseMetadata: false
     EdgeType: ShiftPtr
     EnableF32XdlMathOp: false
     EnableMatrixInstruction: true
     ExpandPointerSwap: true
-    GlobalReadPerMfma: 1
+    GlobalReadPerMfma: 1.0
     GlobalReadVectorWidthA: 8
     GlobalReadVectorWidthB: 16
     GlobalReadVectorWidthMetadata: 8
@@ -2594,7 +2594,7 @@
     InnerUnroll: 1
     InterleaveAlpha: 0
     KernelLanguage: Assembly
-    KernelNameMin: Cijk_Ailk_Bljk_I8I8S_BH_Bias_FDMN_SPA_AS_SAV_MT32x32x128_MI32x32x1_SN_LDSB0_AFC1_AFEM1_DTVSM0_GSU1_LPB16_LPM2_MIWT1_1_PLR3_SU0_SUS0_TLDS1_VWA1_VWB1_WG32_2_1
+    KernelNameMin: Cijk_Ailk_Bljk_I8I8S_BH_Bias_FDMN_SPA_AS_SAV_MT32x32x128_MI32x32x1_SN_LDSB0_AFC1_AFEM1_DTVSM0_GSU1_LPB16_LPM2_MIWT1_1_PLR1_SU0_SUS0_TLDS1_VWA1_VWB1_WG32_2_1
     LSCA: 32
     LSCB: 128
     LSCMetadata: 16
@@ -2692,13 +2692,13 @@
     PackedC1IdxChars: [J]
     PackedC1IndicesX: [1]
     PrefetchGlobalRead: 2
-    PrefetchLocalRead: 3
+    PrefetchLocalRead: 1
     PreloadKernArgs: false
     ScheduleGlobalRead: 1
     ScheduleIterAlg: 3
     ScheduleLocalWrite: 1
     SolutionIndex: 13
-    SolutionNameMin: Cijk_Ailk_Bljk_I8I8S_BH_Bias_FDMN_SPA_AS_SAV_MT32x32x128_MI32x32x1_SN_LDSB0_AFC1_AFEM1_DTVSM0_GSU1_LPB16_LPM2_MIWT1_1_PLR3_SU0_SUS0_TLDS1_VWA1_VWB1_WG32_2_1
+    SolutionNameMin: Cijk_Ailk_Bljk_I8I8S_BH_Bias_FDMN_SPA_AS_SAV_MT32x32x128_MI32x32x1_SN_LDSB0_AFC1_AFEM1_DTVSM0_GSU1_LPB16_LPM2_MIWT1_1_PLR1_SU0_SUS0_TLDS1_VWA1_VWB1_WG32_2_1
     SourceSwap: false
     StaggerU: 0
     StaggerUMapping: 0
@@ -2720,11 +2720,11 @@
     ThreadTileB: 1
     ThreadTileMetadata: 16
     TransposeLDS: 1
-    TransposeLDSMetadata: true
+    TransposeLDSMetadata: 1
     UnrollMajorLDSA: false
     UnrollMajorLDSB: true
     UnrollMajorLDSMetadata: true
-    Use64bShadowLimit: 1
+    Use64bShadowLimit: true
     UseInstOffsetForGRO: 0
     UseSgprForGRO: -1
     Valid: true
@@ -2766,15 +2766,15 @@
     CodeObjectVersion: default
     CustomKernelName: ''
     DepthU: 128
-    DirectToLds: false
+    DirectToLds: 0
     DirectToLdsA: false
     DirectToLdsB: false
-    DirectToVgprSparseMetadata: 1
+    DirectToVgprSparseMetadata: true
     EdgeType: ShiftPtr
     EnableF32XdlMathOp: false
     EnableMatrixInstruction: true
     ExpandPointerSwap: true
-    GlobalReadPerMfma: 1
+    GlobalReadPerMfma: 1.0
     GlobalReadVectorWidthA: 8
     GlobalReadVectorWidthB: 16
     GlobalSplitU: 1
@@ -2788,7 +2788,7 @@
     InnerUnroll: 1
     InterleaveAlpha: 0
     KernelLanguage: Assembly
-    KernelNameMin: Cijk_Ailk_Bljk_I8I8S_BH_Bias_FDMN_SPA_AS_SAV_MT32x32x128_MI32x32x1_SN_LDSB0_AFC1_AFEM8_DTVSM1_GSU1_LPB16_LPMn1_MIWT1_1_PLR3_SU0_SUS0_TLDS1_VWA1_VWB1_WG32_2_1
+    KernelNameMin: Cijk_Ailk_Bljk_I8I8S_BH_Bias_FDMN_SPA_AS_SAV_MT32x32x128_MI32x32x1_SN_LDSB0_AFC1_AFEM8_DTVSM1_GSU1_LPB16_LPMn1_MIWT1_1_PLR1_SU0_SUS0_TLDS1_VWA1_VWB1_WG32_2_1
     LSCA: 32
     LSCB: 128
     LSPA: 16
@@ -2877,13 +2877,13 @@
     PackedC1IdxChars: [J]
     PackedC1IndicesX: [1]
     PrefetchGlobalRead: 2
-    PrefetchLocalRead: 3
+    PrefetchLocalRead: 1
     PreloadKernArgs: false
     ScheduleGlobalRead: 1
     ScheduleIterAlg: 3
     ScheduleLocalWrite: 1
     SolutionIndex: 14
-    SolutionNameMin: Cijk_Ailk_Bljk_I8I8S_BH_Bias_FDMN_SPA_AS_SAV_MT32x32x128_MI32x32x1_SN_LDSB0_AFC1_AFEM8_DTVSM1_GSU1_LPB16_LPMn1_MIWT1_1_PLR3_SU0_SUS0_TLDS1_VWA1_VWB1_WG32_2_1
+    SolutionNameMin: Cijk_Ailk_Bljk_I8I8S_BH_Bias_FDMN_SPA_AS_SAV_MT32x32x128_MI32x32x1_SN_LDSB0_AFC1_AFEM8_DTVSM1_GSU1_LPB16_LPMn1_MIWT1_1_PLR1_SU0_SUS0_TLDS1_VWA1_VWB1_WG32_2_1
     SourceSwap: false
     StaggerU: 0
     StaggerUMapping: 0
@@ -2903,11 +2903,11 @@
     ThreadTileA: 16
     ThreadTileB: 1
     TransposeLDS: 1
-    TransposeLDSMetadata: true
+    TransposeLDSMetadata: 1
     UnrollMajorLDSA: false
     UnrollMajorLDSB: true
     UnrollMajorLDSMetadata: true
-    Use64bShadowLimit: 1
+    Use64bShadowLimit: true
     UseInstOffsetForGRO: 0
     UseSgprForGRO: -1
     Valid: true
@@ -2948,15 +2948,15 @@
     CodeObjectVersion: default
     CustomKernelName: ''
     DepthU: 128
-    DirectToLds: false
+    DirectToLds: 0
     DirectToLdsA: false
     DirectToLdsB: false
-    DirectToVgprSparseMetadata: 1
+    DirectToVgprSparseMetadata: true
     EdgeType: ShiftPtr
     EnableF32XdlMathOp: false
     EnableMatrixInstruction: true
     ExpandPointerSwap: true
-    GlobalReadPerMfma: 1
+    GlobalReadPerMfma: 1.0
     GlobalReadVectorWidthA: 8
     GlobalReadVectorWidthB: 16
     GlobalSplitU: 1
@@ -3085,11 +3085,11 @@
     ThreadTileA: 16
     ThreadTileB: 1
     TransposeLDS: 1
-    TransposeLDSMetadata: true
+    TransposeLDSMetadata: 1
     UnrollMajorLDSA: false
     UnrollMajorLDSB: true
     UnrollMajorLDSMetadata: true
-    Use64bShadowLimit: 1
+    Use64bShadowLimit: true
     UseInstOffsetForGRO: 0
     UseSgprForGRO: -1
     Valid: true
@@ -3130,16 +3130,16 @@
     CodeObjectVersion: default
     CustomKernelName: ''
     DepthU: 128
-    DirectToLds: false
+    DirectToLds: 0
     DirectToLdsA: false
     DirectToLdsB: false
-    DirectToLdsMetadata: false
-    DirectToVgprSparseMetadata: 0
+    DirectToLdsMetadata: 0
+    DirectToVgprSparseMetadata: false
     EdgeType: ShiftPtr
     EnableF32XdlMathOp: false
     EnableMatrixInstruction: true
     ExpandPointerSwap: true
-    GlobalReadPerMfma: 1
+    GlobalReadPerMfma: 1.0
     GlobalReadVectorWidthA: 8
     GlobalReadVectorWidthB: 16
     GlobalReadVectorWidthMetadata: 8
@@ -3154,7 +3154,7 @@
     InnerUnroll: 1
     InterleaveAlpha: 0
     KernelLanguage: Assembly
-    KernelNameMin: Cijk_Ailk_Bljk_I8I8S_BH_Bias_FDMN_SPA_AS_SAV_MT32x32x128_MI32x32x1_SN_LDSB0_AFC1_AFEM8_DTVSM0_GSU1_LPB16_LPM2_MIWT1_1_PLR3_SU4_SUS256_TLDS1_VWA1_VWB1_WG32_2_1
+    KernelNameMin: Cijk_Ailk_Bljk_I8I8S_BH_Bias_FDMN_SPA_AS_SAV_MT32x32x128_MI32x32x1_SN_LDSB0_AFC1_AFEM8_DTVSM0_GSU1_LPB16_LPM2_MIWT1_1_PLR1_SU4_SUS256_TLDS1_VWA1_VWB1_WG32_2_1
     LSCA: 32
     LSCB: 128
     LSCMetadata: 16
@@ -3252,13 +3252,13 @@
     PackedC1IdxChars: [J]
     PackedC1IndicesX: [1]
     PrefetchGlobalRead: 2
-    PrefetchLocalRead: 3
+    PrefetchLocalRead: 1
     PreloadKernArgs: false
     ScheduleGlobalRead: 1
     ScheduleIterAlg: 3
     ScheduleLocalWrite: 1
     SolutionIndex: 16
-    SolutionNameMin: Cijk_Ailk_Bljk_I8I8S_BH_Bias_FDMN_SPA_AS_SAV_MT32x32x128_MI32x32x1_SN_LDSB0_AFC1_AFEM8_DTVSM0_GSU1_LPB16_LPM2_MIWT1_1_PLR3_SU4_SUS256_TLDS1_VWA1_VWB1_WG32_2_1
+    SolutionNameMin: Cijk_Ailk_Bljk_I8I8S_BH_Bias_FDMN_SPA_AS_SAV_MT32x32x128_MI32x32x1_SN_LDSB0_AFC1_AFEM8_DTVSM0_GSU1_LPB16_LPM2_MIWT1_1_PLR1_SU4_SUS256_TLDS1_VWA1_VWB1_WG32_2_1
     SourceSwap: false
     StaggerU: 4
     StaggerUMapping: 0
@@ -3280,11 +3280,11 @@
     ThreadTileB: 1
     ThreadTileMetadata: 16
     TransposeLDS: 1
-    TransposeLDSMetadata: true
+    TransposeLDSMetadata: 1
     UnrollMajorLDSA: false
     UnrollMajorLDSB: true
     UnrollMajorLDSMetadata: true
-    Use64bShadowLimit: 1
+    Use64bShadowLimit: true
     UseInstOffsetForGRO: 0
     UseSgprForGRO: -1
     Valid: true
@@ -3326,15 +3326,15 @@
     CodeObjectVersion: default
     CustomKernelName: ''
     DepthU: 128
-    DirectToLds: false
+    DirectToLds: 0
     DirectToLdsA: false
     DirectToLdsB: false
-    DirectToVgprSparseMetadata: 1
+    DirectToVgprSparseMetadata: true
     EdgeType: ShiftPtr
     EnableF32XdlMathOp: false
     EnableMatrixInstruction: true
     ExpandPointerSwap: true
-    GlobalReadPerMfma: 1
+    GlobalReadPerMfma: 1.0
     GlobalReadVectorWidthA: 8
     GlobalReadVectorWidthB: 16
     GlobalSplitU: 1
@@ -3463,11 +3463,11 @@
     ThreadTileA: 16
     ThreadTileB: 1
     TransposeLDS: 1
-    TransposeLDSMetadata: true
+    TransposeLDSMetadata: 1
     UnrollMajorLDSA: false
     UnrollMajorLDSB: true
     UnrollMajorLDSMetadata: true
-    Use64bShadowLimit: 1
+    Use64bShadowLimit: true
     UseInstOffsetForGRO: 0
     UseSgprForGRO: -1
     Valid: true
@@ -3508,15 +3508,15 @@
     CodeObjectVersion: default
     CustomKernelName: ''
     DepthU: 128
-    DirectToLds: false
+    DirectToLds: 0
     DirectToLdsA: false
     DirectToLdsB: false
-    DirectToVgprSparseMetadata: 1
+    DirectToVgprSparseMetadata: true
     EdgeType: ShiftPtr
     EnableF32XdlMathOp: false
     EnableMatrixInstruction: true
     ExpandPointerSwap: true
-    GlobalReadPerMfma: 1
+    GlobalReadPerMfma: 1.0
     GlobalReadVectorWidthA: 8
     GlobalReadVectorWidthB: 16
     GlobalSplitU: 1
@@ -3530,7 +3530,7 @@
     InnerUnroll: 1
     InterleaveAlpha: 0
     KernelLanguage: Assembly
-    KernelNameMin: Cijk_Ailk_Bljk_I8I8S_BH_Bias_FDMN_SPA_AS_SAV_MT32x32x128_MI32x32x1_SN_LDSB0_AFC1_AFEM8_DTVSM1_GSU1_LPB16_LPMn1_MIWT1_1_PLR3_SU4_SUS256_TLDS1_VWA1_VWB1_WG32_2_1
+    KernelNameMin: Cijk_Ailk_Bljk_I8I8S_BH_Bias_FDMN_SPA_AS_SAV_MT32x32x128_MI32x32x1_SN_LDSB0_AFC1_AFEM8_DTVSM1_GSU1_LPB16_LPMn1_MIWT1_1_PLR1_SU4_SUS256_TLDS1_VWA1_VWB1_WG32_2_1
     LSCA: 32
     LSCB: 128
     LSPA: 16
@@ -3619,13 +3619,13 @@
     PackedC1IdxChars: [J]
     PackedC1IndicesX: [1]
     PrefetchGlobalRead: 2
-    PrefetchLocalRead: 3
+    PrefetchLocalRead: 1
     PreloadKernArgs: false
     ScheduleGlobalRead: 1
     ScheduleIterAlg: 3
     ScheduleLocalWrite: 1
     SolutionIndex: 18
-    SolutionNameMin: Cijk_Ailk_Bljk_I8I8S_BH_Bias_FDMN_SPA_AS_SAV_MT32x32x128_MI32x32x1_SN_LDSB0_AFC1_AFEM8_DTVSM1_GSU1_LPB16_LPMn1_MIWT1_1_PLR3_SU4_SUS256_TLDS1_VWA1_VWB1_WG32_2_1
+    SolutionNameMin: Cijk_Ailk_Bljk_I8I8S_BH_Bias_FDMN_SPA_AS_SAV_MT32x32x128_MI32x32x1_SN_LDSB0_AFC1_AFEM8_DTVSM1_GSU1_LPB16_LPMn1_MIWT1_1_PLR1_SU4_SUS256_TLDS1_VWA1_VWB1_WG32_2_1
     SourceSwap: false
     StaggerU: 4
     StaggerUMapping: 0
@@ -3645,11 +3645,11 @@
     ThreadTileA: 16
     ThreadTileB: 1
     TransposeLDS: 1
-    TransposeLDSMetadata: true
+    TransposeLDSMetadata: 1
     UnrollMajorLDSA: false
     UnrollMajorLDSB: true
     UnrollMajorLDSMetadata: true
-    Use64bShadowLimit: 1
+    Use64bShadowLimit: true
     UseInstOffsetForGRO: 0
     UseSgprForGRO: -1
     Valid: true
@@ -3690,16 +3690,16 @@
     CodeObjectVersion: default
     CustomKernelName: ''
     DepthU: 128
-    DirectToLds: false
+    DirectToLds: 0
     DirectToLdsA: false
     DirectToLdsB: false
-    DirectToLdsMetadata: false
-    DirectToVgprSparseMetadata: 0
+    DirectToLdsMetadata: 0
+    DirectToVgprSparseMetadata: false
     EdgeType: ShiftPtr
     EnableF32XdlMathOp: false
     EnableMatrixInstruction: true
     ExpandPointerSwap: true
-    GlobalReadPerMfma: 1
+    GlobalReadPerMfma: 1.0
     GlobalReadVectorWidthA: 8
     GlobalReadVectorWidthB: 16
     GlobalReadVectorWidthMetadata: 8
@@ -3714,7 +3714,7 @@
     InnerUnroll: 1
     InterleaveAlpha: 0
     KernelLanguage: Assembly
-    KernelNameMin: Cijk_Ailk_Bljk_I8I8S_BH_Bias_FDMN_SPA_AS_SAV_MT32x32x128_MI32x32x1_SN_LDSB0_AFC0_AFEM8_DTVSM0_GSUM_LPB16_LPM2_MIWT1_1_PLR3_SU4_SUS256_TLDS1_VWA1_VWB1_WG32_2_1
+    KernelNameMin: Cijk_Ailk_Bljk_I8I8S_BH_Bias_FDMN_SPA_AS_SAV_MT32x32x128_MI32x32x1_SN_LDSB0_AFC0_AFEM8_DTVSM0_GSUM_LPB16_LPM2_MIWT1_1_PLR1_SU4_SUS256_TLDS1_VWA1_VWB1_WG32_2_1
     LSCA: 32
     LSCB: 128
     LSCMetadata: 16
@@ -3812,13 +3812,13 @@
     PackedC1IdxChars: [J]
     PackedC1IndicesX: [1]
     PrefetchGlobalRead: 2
-    PrefetchLocalRead: 3
+    PrefetchLocalRead: 1
     PreloadKernArgs: false
     ScheduleGlobalRead: 1
     ScheduleIterAlg: 3
     ScheduleLocalWrite: 1
     SolutionIndex: 19
-    SolutionNameMin: Cijk_Ailk_Bljk_I8I8S_BH_Bias_FDMN_SPA_AS_SAV_MT32x32x128_MI32x32x1_SN_LDSB0_AFC0_AFEM8_DTVSM0_GSU2_LPB16_LPM2_MIWT1_1_PLR3_SU4_SUS256_TLDS1_VWA1_VWB1_WG32_2_1
+    SolutionNameMin: Cijk_Ailk_Bljk_I8I8S_BH_Bias_FDMN_SPA_AS_SAV_MT32x32x128_MI32x32x1_SN_LDSB0_AFC0_AFEM8_DTVSM0_GSU2_LPB16_LPM2_MIWT1_1_PLR1_SU4_SUS256_TLDS1_VWA1_VWB1_WG32_2_1
     SourceSwap: false
     StaggerU: 4
     StaggerUMapping: 0
@@ -3840,11 +3840,11 @@
     ThreadTileB: 1
     ThreadTileMetadata: 16
     TransposeLDS: 1
-    TransposeLDSMetadata: true
+    TransposeLDSMetadata: 1
     UnrollMajorLDSA: false
     UnrollMajorLDSB: true
     UnrollMajorLDSMetadata: true
-    Use64bShadowLimit: 1
+    Use64bShadowLimit: true
     UseInstOffsetForGRO: 0
     UseSgprForGRO: -1
     Valid: true
@@ -3886,16 +3886,16 @@
     CodeObjectVersion: default
     CustomKernelName: ''
     DepthU: 64
-    DirectToLds: false
+    DirectToLds: 0
     DirectToLdsA: false
     DirectToLdsB: false
-    DirectToLdsMetadata: false
-    DirectToVgprSparseMetadata: 0
+    DirectToLdsMetadata: 0
+    DirectToVgprSparseMetadata: false
     EdgeType: ShiftPtr
     EnableF32XdlMathOp: false
     EnableMatrixInstruction: true
-    ExpandPointerSwap: 1
-    GlobalReadPerMfma: 1
+    ExpandPointerSwap: true
+    GlobalReadPerMfma: 1.0
     GlobalReadVectorWidthA: 8
     GlobalReadVectorWidthB: 16
     GlobalReadVectorWidthMetadata: 8
@@ -4012,7 +4012,7 @@
     ScheduleLocalWrite: 1
     SolutionIndex: 20
     SolutionNameMin: Cijk_Ailk_Bljk_I8I8S_BH_Bias_FDMN_SPA_AS_SAV_MT256x128x64_MI32x32x32x1_SN_1LDSB0_AFC0_AF0EM8_GRVWA8_GRVWB16_GSU2_LBSPPA0_LBSPPM0_LPA0_LPB16_LPM2_MIWT2_4_NLCA1_PLR1_SUS256_WG128_2_1
-    SourceSwap: 0
+    SourceSwap: false
     StaggerU: 4
     StaggerUMapping: 0
     StaggerUStride: 256
@@ -4033,11 +4033,11 @@
     ThreadTileB: 4
     ThreadTileMetadata: 32
     TransposeLDS: 1
-    TransposeLDSMetadata: true
+    TransposeLDSMetadata: 1
     UnrollMajorLDSA: false
     UnrollMajorLDSB: true
     UnrollMajorLDSMetadata: true
-    Use64bShadowLimit: 1
+    Use64bShadowLimit: true
     UseInstOffsetForGRO: 0
     UseSgprForGRO: -1
     Valid: true
@@ -4079,16 +4079,16 @@
     CodeObjectVersion: default
     CustomKernelName: ''
     DepthU: 64
-    DirectToLds: false
+    DirectToLds: 0
     DirectToLdsA: false
     DirectToLdsB: false
-    DirectToLdsMetadata: false
-    DirectToVgprSparseMetadata: 0
+    DirectToLdsMetadata: 0
+    DirectToVgprSparseMetadata: false
     EdgeType: ShiftPtr
     EnableF32XdlMathOp: false
     EnableMatrixInstruction: true
-    ExpandPointerSwap: 1
-    GlobalReadPerMfma: 1
+    ExpandPointerSwap: true
+    GlobalReadPerMfma: 1.0
     GlobalReadVectorWidthA: 8
     GlobalReadVectorWidthB: 8
     GlobalReadVectorWidthMetadata: 8
@@ -4205,7 +4205,7 @@
     ScheduleLocalWrite: 1
     SolutionIndex: 21
     SolutionNameMin: Cijk_Ailk_Bljk_I8I8S_BH_Bias_FDMN_SPA_AS_SAV_MT256x160x64_MI32x32x32x1_SN_1LDSB0_AFC0_AF0EM8_GRVWA8_GRVWB8_GSU2_LBSPPA0_LBSPPM0_LPA0_LPB16_LPM2_MIWT2_5_NLCA1_PLR1_SUS128_WG128_2_1
-    SourceSwap: 0
+    SourceSwap: false
     StaggerU: 4
     StaggerUMapping: 0
     StaggerUStride: 128
@@ -4226,11 +4226,11 @@
     ThreadTileB: 5
     ThreadTileMetadata: 32
     TransposeLDS: 1
-    TransposeLDSMetadata: true
+    TransposeLDSMetadata: 1
     UnrollMajorLDSA: false
     UnrollMajorLDSB: true
     UnrollMajorLDSMetadata: true
-    Use64bShadowLimit: 1
+    Use64bShadowLimit: true
     UseInstOffsetForGRO: 0
     UseSgprForGRO: -1
     Valid: true
@@ -4272,16 +4272,16 @@
     CodeObjectVersion: default
     CustomKernelName: ''
     DepthU: 128
-    DirectToLds: false
+    DirectToLds: 0
     DirectToLdsA: false
     DirectToLdsB: false
-    DirectToLdsMetadata: false
-    DirectToVgprSparseMetadata: 0
+    DirectToLdsMetadata: 0
+    DirectToVgprSparseMetadata: false
     EdgeType: ShiftPtr
     EnableF32XdlMathOp: false
     EnableMatrixInstruction: true
-    ExpandPointerSwap: 1
-    GlobalReadPerMfma: 1
+    ExpandPointerSwap: true
+    GlobalReadPerMfma: 1.0
     GlobalReadVectorWidthA: 8
     GlobalReadVectorWidthB: 16
     GlobalReadVectorWidthMetadata: 8
@@ -4392,13 +4392,13 @@
     PackedC1IdxChars: [J]
     PackedC1IndicesX: [1]
     PrefetchGlobalRead: 2
-    PrefetchLocalRead: 3
+    PrefetchLocalRead: 1
     ScheduleGlobalRead: 1
     ScheduleIterAlg: 3
     ScheduleLocalWrite: 1
     SolutionIndex: 22
-    SolutionNameMin: Cijk_Ailk_Bljk_I8I8S_BH_Bias_FDMN_SPA_AS_SAV_MT128x128x128_MI32x32x32x1_SN_1LDSB0_AFC0_AF0EM1_GRVWA8_GRVWB16_GSU3_LBSPPA0_LBSPPM0_LPA0_LPB16_LPM2_MIWT1_4_NLCA1_PLR3_SUS128_WG128_2_1
-    SourceSwap: 0
+    SolutionNameMin: Cijk_Ailk_Bljk_I8I8S_BH_Bias_FDMN_SPA_AS_SAV_MT128x128x128_MI32x32x32x1_SN_1LDSB0_AFC0_AF0EM1_GRVWA8_GRVWB16_GSU3_LBSPPA0_LBSPPM0_LPA0_LPB16_LPM2_MIWT1_4_NLCA1_PLR1_SUS128_WG128_2_1
+    SourceSwap: false
     StaggerU: 4
     StaggerUMapping: 0
     StaggerUStride: 128
@@ -4419,11 +4419,11 @@
     ThreadTileB: 4
     ThreadTileMetadata: 16
     TransposeLDS: 1
-    TransposeLDSMetadata: true
+    TransposeLDSMetadata: 1
     UnrollMajorLDSA: false
     UnrollMajorLDSB: true
     UnrollMajorLDSMetadata: true
-    Use64bShadowLimit: 1
+    Use64bShadowLimit: true
     UseInstOffsetForGRO: 0
     UseSgprForGRO: -1
     Valid: true
@@ -4465,16 +4465,16 @@
     CodeObjectVersion: default
     CustomKernelName: ''
     DepthU: 64
-    DirectToLds: false
+    DirectToLds: 0
     DirectToLdsA: false
     DirectToLdsB: false
-    DirectToLdsMetadata: false
-    DirectToVgprSparseMetadata: 0
+    DirectToLdsMetadata: 0
+    DirectToVgprSparseMetadata: false
     EdgeType: ShiftPtr
     EnableF32XdlMathOp: false
     EnableMatrixInstruction: true
-    ExpandPointerSwap: 1
-    GlobalReadPerMfma: 1
+    ExpandPointerSwap: true
+    GlobalReadPerMfma: 1.0
     GlobalReadVectorWidthA: 8
     GlobalReadVectorWidthB: 16
     GlobalReadVectorWidthMetadata: 8
@@ -4591,7 +4591,7 @@
     ScheduleLocalWrite: 1
     SolutionIndex: 23
     SolutionNameMin: Cijk_Ailk_Bljk_I8I8S_BH_Bias_FDMN_SPA_AS_SAV_MT256x192x64_MI32x32x32x1_SN_1LDSB0_AFC0_AF0EM8_GRVWA8_GRVWB16_GSU2_LBSPPA0_LBSPPM0_LPA0_LPB16_LPM2_MIWT2_6_NLCA1_PLR1_SUS256_WG128_2_1
-    SourceSwap: 0
+    SourceSwap: false
     StaggerU: 4
     StaggerUMapping: 0
     StaggerUStride: 256
@@ -4612,11 +4612,11 @@
     ThreadTileB: 6
     ThreadTileMetadata: 32
     TransposeLDS: 1
-    TransposeLDSMetadata: true
+    TransposeLDSMetadata: 1
     UnrollMajorLDSA: false
     UnrollMajorLDSB: true
     UnrollMajorLDSMetadata: true
-    Use64bShadowLimit: 1
+    Use64bShadowLimit: true
     UseInstOffsetForGRO: 0
     UseSgprForGRO: -1
     Valid: true
@@ -4658,16 +4658,16 @@
     CodeObjectVersion: default
     CustomKernelName: ''
     DepthU: 64
-    DirectToLds: false
+    DirectToLds: 0
     DirectToLdsA: false
     DirectToLdsB: false
-    DirectToLdsMetadata: false
-    DirectToVgprSparseMetadata: 0
+    DirectToLdsMetadata: 0
+    DirectToVgprSparseMetadata: false
     EdgeType: ShiftPtr
     EnableF32XdlMathOp: false
     EnableMatrixInstruction: true
-    ExpandPointerSwap: 1
-    GlobalReadPerMfma: 1
+    ExpandPointerSwap: true
+    GlobalReadPerMfma: 1.0
     GlobalReadVectorWidthA: 16
     GlobalReadVectorWidthB: 16
     GlobalReadVectorWidthMetadata: 4
@@ -4784,7 +4784,7 @@
     ScheduleLocalWrite: 1
     SolutionIndex: 24
     SolutionNameMin: Cijk_Ailk_Bljk_I8I8S_BH_Bias_FDMN_SPA_AS_SAV_MT128x192x64_MI16x16x64x1_SN_1LDSB1_AFC1_AF0EM8_GRVWA16_GRVWB16_GSU1_LBSPPA2048_LBSPPM2048_LPA16_LPB32_LPM4_MIWT4_6_NLCA1_PLR1_SUS128_WG32_8_1
-    SourceSwap: 0
+    SourceSwap: false
     StaggerU: 4
     StaggerUMapping: 0
     StaggerUStride: 128
@@ -4805,11 +4805,11 @@
     ThreadTileB: 6
     ThreadTileMetadata: 16
     TransposeLDS: 1
-    TransposeLDSMetadata: true
+    TransposeLDSMetadata: 1
     UnrollMajorLDSA: false
     UnrollMajorLDSB: true
     UnrollMajorLDSMetadata: true
-    Use64bShadowLimit: 1
+    Use64bShadowLimit: true
     UseInstOffsetForGRO: 0
     UseSgprForGRO: -1
     Valid: true
@@ -4851,16 +4851,16 @@
     CodeObjectVersion: default
     CustomKernelName: ''
     DepthU: 64
-    DirectToLds: false
+    DirectToLds: 0
     DirectToLdsA: false
     DirectToLdsB: false
-    DirectToLdsMetadata: false
-    DirectToVgprSparseMetadata: 0
+    DirectToLdsMetadata: 0
+    DirectToVgprSparseMetadata: false
     EdgeType: ShiftPtr
     EnableF32XdlMathOp: false
     EnableMatrixInstruction: true
-    ExpandPointerSwap: 1
-    GlobalReadPerMfma: 1
+    ExpandPointerSwap: true
+    GlobalReadPerMfma: 1.0
     GlobalReadVectorWidthA: 16
     GlobalReadVectorWidthB: 8
     GlobalReadVectorWidthMetadata: 4
@@ -4977,7 +4977,7 @@
     ScheduleLocalWrite: 1
     SolutionIndex: 25
     SolutionNameMin: Cijk_Ailk_Bljk_I8I8S_BH_Bias_FDMN_SPA_AS_SAV_MT128x96x64_MI16x16x64x1_SN_1LDSB0_AFC1_AF0EM8_GRVWA16_GRVWB8_GSU1_LBSPPA2048_LBSPPM2048_LPA16_LPB32_LPM4_MIWT2_6_NLCA1_PLR1_SUS128_WG64_4_1
-    SourceSwap: 0
+    SourceSwap: false
     StaggerU: 4
     StaggerUMapping: 0
     StaggerUStride: 128
@@ -4998,11 +4998,11 @@
     ThreadTileB: 6
     ThreadTileMetadata: 8
     TransposeLDS: 1
-    TransposeLDSMetadata: true
+    TransposeLDSMetadata: 1
     UnrollMajorLDSA: false
     UnrollMajorLDSB: true
     UnrollMajorLDSMetadata: true
-    Use64bShadowLimit: 1
+    Use64bShadowLimit: true
     UseInstOffsetForGRO: 0
     UseSgprForGRO: -1
     Valid: true
@@ -5044,16 +5044,16 @@
     CodeObjectVersion: default
     CustomKernelName: ''
     DepthU: 64
-    DirectToLds: false
+    DirectToLds: 0
     DirectToLdsA: false
     DirectToLdsB: false
-    DirectToLdsMetadata: false
-    DirectToVgprSparseMetadata: 0
+    DirectToLdsMetadata: 0
+    DirectToVgprSparseMetadata: false
     EdgeType: ShiftPtr
     EnableF32XdlMathOp: false
     EnableMatrixInstruction: true
-    ExpandPointerSwap: 1
-    GlobalReadPerMfma: 1
+    ExpandPointerSwap: true
+    GlobalReadPerMfma: 1.0
     GlobalReadVectorWidthA: 16
     GlobalReadVectorWidthB: 8
     GlobalReadVectorWidthMetadata: 8
@@ -5170,7 +5170,7 @@
     ScheduleLocalWrite: 1
     SolutionIndex: 26
     SolutionNameMin: Cijk_Ailk_Bljk_I8I8S_BH_Bias_FDMN_SPA_AS_SAV_MT256x96x64_MI16x16x64x1_SN_1LDSB1_AFC1_AF0EM8_GRVWA16_GRVWB8_GSU1_LBSPPA4096_LBSPPM4096_LPA16_LPB32_LPM4_MIWT4_6_NLCA1_PLR1_SUS256_WG64_4_1
-    SourceSwap: 0
+    SourceSwap: false
     StaggerU: 4
     StaggerUMapping: 0
     StaggerUStride: 256
@@ -5191,11 +5191,11 @@
     ThreadTileB: 6
     ThreadTileMetadata: 16
     TransposeLDS: 1
-    TransposeLDSMetadata: true
+    TransposeLDSMetadata: 1
     UnrollMajorLDSA: false
     UnrollMajorLDSB: true
     UnrollMajorLDSMetadata: true
-    Use64bShadowLimit: 1
+    Use64bShadowLimit: true
     UseInstOffsetForGRO: 0
     UseSgprForGRO: -1
     Valid: true
@@ -5237,16 +5237,16 @@
     CodeObjectVersion: default
     CustomKernelName: ''
     DepthU: 64
-    DirectToLds: false
+    DirectToLds: 0
     DirectToLdsA: false
     DirectToLdsB: false
-    DirectToLdsMetadata: false
-    DirectToVgprSparseMetadata: 0
+    DirectToLdsMetadata: 0
+    DirectToVgprSparseMetadata: false
     EdgeType: ShiftPtr
     EnableF32XdlMathOp: false
     EnableMatrixInstruction: true
-    ExpandPointerSwap: 1
-    GlobalReadPerMfma: 1
+    ExpandPointerSwap: true
+    GlobalReadPerMfma: 1.0
     GlobalReadVectorWidthA: 16
     GlobalReadVectorWidthB: 8
     GlobalReadVectorWidthMetadata: 8
@@ -5363,7 +5363,7 @@
     ScheduleLocalWrite: 1
     SolutionIndex: 27
     SolutionNameMin: Cijk_Ailk_Bljk_I8I8S_BH_Bias_FDMN_SPA_AS_SAV_MT256x96x64_MI16x16x64x1_SN_1LDSB1_AFC1_AF0EM8_GRVWA16_GRVWB8_GSU1_LBSPPA4096_LBSPPM4096_LPA16_LPB32_LPM4_MIWT4_6_NLCA1_PLR1_SUS128_WG64_4_1
-    SourceSwap: 0
+    SourceSwap: false
     StaggerU: 4
     StaggerUMapping: 0
     StaggerUStride: 128
@@ -5384,11 +5384,11 @@
     ThreadTileB: 6
     ThreadTileMetadata: 16
     TransposeLDS: 1
-    TransposeLDSMetadata: true
+    TransposeLDSMetadata: 1
     UnrollMajorLDSA: false
     UnrollMajorLDSB: true
     UnrollMajorLDSMetadata: true
-    Use64bShadowLimit: 1
+    Use64bShadowLimit: true
     UseInstOffsetForGRO: 0
     UseSgprForGRO: -1
     Valid: true
@@ -5430,16 +5430,16 @@
     CodeObjectVersion: default
     CustomKernelName: ''
     DepthU: 64
-    DirectToLds: false
+    DirectToLds: 0
     DirectToLdsA: false
     DirectToLdsB: false
-    DirectToLdsMetadata: false
-    DirectToVgprSparseMetadata: 0
+    DirectToLdsMetadata: 0
+    DirectToVgprSparseMetadata: false
     EdgeType: ShiftPtr
     EnableF32XdlMathOp: false
     EnableMatrixInstruction: true
-    ExpandPointerSwap: 1
-    GlobalReadPerMfma: 1
+    ExpandPointerSwap: true
+    GlobalReadPerMfma: 1.0
     GlobalReadVectorWidthA: 16
     GlobalReadVectorWidthB: 8
     GlobalReadVectorWidthMetadata: 8
@@ -5556,7 +5556,7 @@
     ScheduleLocalWrite: 1
     SolutionIndex: 28
     SolutionNameMin: Cijk_Ailk_Bljk_I8I8S_BH_Bias_FDMN_SPA_AS_SAV_MT256x96x64_MI16x16x64x1_SN_1LDSB1_AFC1_AF0EM1_GRVWA16_GRVWB8_GSU1_LBSPPA4096_LBSPPM4096_LPA16_LPB32_LPM4_MIWT4_6_NLCA1_PLR1_SUS256_WG64_4_1
-    SourceSwap: 0
+    SourceSwap: false
     StaggerU: 4
     StaggerUMapping: 0
     StaggerUStride: 256
@@ -5577,11 +5577,11 @@
     ThreadTileB: 6
     ThreadTileMetadata: 16
     TransposeLDS: 1
-    TransposeLDSMetadata: true
+    TransposeLDSMetadata: 1
     UnrollMajorLDSA: false
     UnrollMajorLDSB: true
     UnrollMajorLDSMetadata: true
-    Use64bShadowLimit: 1
+    Use64bShadowLimit: true
     UseInstOffsetForGRO: 0
     UseSgprForGRO: -1
     Valid: true
@@ -5623,16 +5623,16 @@
     CodeObjectVersion: default
     CustomKernelName: ''
     DepthU: 64
-    DirectToLds: false
+    DirectToLds: 0
     DirectToLdsA: false
     DirectToLdsB: false
-    DirectToLdsMetadata: false
-    DirectToVgprSparseMetadata: 0
+    DirectToLdsMetadata: 0
+    DirectToVgprSparseMetadata: false
     EdgeType: ShiftPtr
     EnableF32XdlMathOp: false
     EnableMatrixInstruction: true
-    ExpandPointerSwap: 1
-    GlobalReadPerMfma: 1
+    ExpandPointerSwap: true
+    GlobalReadPerMfma: 1.0
     GlobalReadVectorWidthA: 16
     GlobalReadVectorWidthB: 16
     GlobalReadVectorWidthMetadata: 4
@@ -5749,7 +5749,7 @@
     ScheduleLocalWrite: 1
     SolutionIndex: 29
     SolutionNameMin: Cijk_Ailk_Bljk_I8I8S_BH_Bias_FDMN_SPA_AS_SAV_MT128x192x64_MI16x16x64x1_SN_1LDSB1_AFC1_AF0EM8_GRVWA16_GRVWB16_GSU1_LBSPPA2048_LBSPPM2048_LPA16_LPB32_LPM4_MIWT4_6_NLCA1_PLR1_SUS256_WG32_8_1
-    SourceSwap: 0
+    SourceSwap: false
     StaggerU: 4
     StaggerUMapping: 0
     StaggerUStride: 256
@@ -5770,11 +5770,11 @@
     ThreadTileB: 6
     ThreadTileMetadata: 16
     TransposeLDS: 1
-    TransposeLDSMetadata: true
+    TransposeLDSMetadata: 1
     UnrollMajorLDSA: false
     UnrollMajorLDSB: true
     UnrollMajorLDSMetadata: true
-    Use64bShadowLimit: 1
+    Use64bShadowLimit: true
     UseInstOffsetForGRO: 0
     UseSgprForGRO: -1
     Valid: true
@@ -5816,16 +5816,16 @@
     CodeObjectVersion: default
     CustomKernelName: ''
     DepthU: 64
-    DirectToLds: false
+    DirectToLds: 0
     DirectToLdsA: false
     DirectToLdsB: false
-    DirectToLdsMetadata: false
-    DirectToVgprSparseMetadata: 0
+    DirectToLdsMetadata: 0
+    DirectToVgprSparseMetadata: false
     EdgeType: ShiftPtr
     EnableF32XdlMathOp: false
     EnableMatrixInstruction: true
-    ExpandPointerSwap: 1
-    GlobalReadPerMfma: 1
+    ExpandPointerSwap: true
+    GlobalReadPerMfma: 1.0
     GlobalReadVectorWidthA: 16
     GlobalReadVectorWidthB: 16
     GlobalReadVectorWidthMetadata: 8
@@ -5942,7 +5942,7 @@
     ScheduleLocalWrite: 1
     SolutionIndex: 30
     SolutionNameMin: Cijk_Ailk_Bljk_I8I8S_BH_Bias_FDMN_SPA_AS_SAV_MT256x192x64_MI16x16x64x1_SN_1LDSB0_AFC1_AF0EM8_GRVWA16_GRVWB16_GSU1_LBSPPA4096_LBSPPM4096_LPA16_LPB32_LPM4_MIWT8_6_NLCA1_PLR1_SUS128_WG32_8_1
-    SourceSwap: 0
+    SourceSwap: false
     StaggerU: 4
     StaggerUMapping: 0
     StaggerUStride: 128
@@ -5963,11 +5963,11 @@
     ThreadTileB: 6
     ThreadTileMetadata: 32
     TransposeLDS: 1
-    TransposeLDSMetadata: true
+    TransposeLDSMetadata: 1
     UnrollMajorLDSA: false
     UnrollMajorLDSB: true
     UnrollMajorLDSMetadata: true
-    Use64bShadowLimit: 1
+    Use64bShadowLimit: true
     UseInstOffsetForGRO: 0
     UseSgprForGRO: -1
     Valid: true
@@ -6009,16 +6009,16 @@
     CodeObjectVersion: default
     CustomKernelName: ''
     DepthU: 64
-    DirectToLds: false
+    DirectToLds: 0
     DirectToLdsA: false
     DirectToLdsB: false
-    DirectToLdsMetadata: false
-    DirectToVgprSparseMetadata: 0
+    DirectToLdsMetadata: 0
+    DirectToVgprSparseMetadata: false
     EdgeType: ShiftPtr
     EnableF32XdlMathOp: false
     EnableMatrixInstruction: true
-    ExpandPointerSwap: 1
-    GlobalReadPerMfma: 1
+    ExpandPointerSwap: true
+    GlobalReadPerMfma: 1.0
     GlobalReadVectorWidthA: 8
     GlobalReadVectorWidthB: 16
     GlobalReadVectorWidthMetadata: 8
@@ -6135,7 +6135,7 @@
     ScheduleLocalWrite: 1
     SolutionIndex: 31
     SolutionNameMin: Cijk_Ailk_Bljk_I8I8S_BH_Bias_FDMN_SPA_AS_SAV_MT256x192x64_MI32x32x32x1_SN_1LDSB0_AFC1_AF0EM8_GRVWA8_GRVWB16_GSU1_LBSPPA0_LBSPPM0_LPA0_LPB16_LPM2_MIWT4_3_NLCA1_PLR1_SUS128_WG64_4_1
-    SourceSwap: 0
+    SourceSwap: false
     StaggerU: 4
     StaggerUMapping: 0
     StaggerUStride: 128
@@ -6156,11 +6156,11 @@
     ThreadTileB: 3
     ThreadTileMetadata: 64
     TransposeLDS: 1
-    TransposeLDSMetadata: true
+    TransposeLDSMetadata: 1
     UnrollMajorLDSA: false
     UnrollMajorLDSB: true
     UnrollMajorLDSMetadata: true
-    Use64bShadowLimit: 1
+    Use64bShadowLimit: true
     UseInstOffsetForGRO: 0
     UseSgprForGRO: -1
     Valid: true
@@ -6202,16 +6202,16 @@
     CodeObjectVersion: default
     CustomKernelName: ''
     DepthU: 64
-    DirectToLds: false
+    DirectToLds: 0
     DirectToLdsA: false
     DirectToLdsB: false
-    DirectToLdsMetadata: false
-    DirectToVgprSparseMetadata: 0
+    DirectToLdsMetadata: 0
+    DirectToVgprSparseMetadata: false
     EdgeType: ShiftPtr
     EnableF32XdlMathOp: false
     EnableMatrixInstruction: true
-    ExpandPointerSwap: 1
-    GlobalReadPerMfma: 1
+    ExpandPointerSwap: true
+    GlobalReadPerMfma: 1.0
     GlobalReadVectorWidthA: 8
     GlobalReadVectorWidthB: 16
     GlobalReadVectorWidthMetadata: 8
@@ -6328,7 +6328,7 @@
     ScheduleLocalWrite: 1
     SolutionIndex: 32
     SolutionNameMin: Cijk_Ailk_Bljk_I8I8S_BH_Bias_FDMN_SPA_AS_SAV_MT256x256x64_MI32x32x32x1_SN_1LDSB0_AFC1_AF0EM1_GRVWA8_GRVWB16_GSU1_LBSPPA0_LBSPPM0_LPA0_LPB16_LPM2_MIWT2_8_NLCA1_PLR1_SUS128_WG128_2_1
-    SourceSwap: 0
+    SourceSwap: false
     StaggerU: 4
     StaggerUMapping: 0
     StaggerUStride: 128
@@ -6349,11 +6349,11 @@
     ThreadTileB: 8
     ThreadTileMetadata: 32
     TransposeLDS: 1
-    TransposeLDSMetadata: true
+    TransposeLDSMetadata: 1
     UnrollMajorLDSA: false
     UnrollMajorLDSB: true
     UnrollMajorLDSMetadata: true
-    Use64bShadowLimit: 1
+    Use64bShadowLimit: true
     UseInstOffsetForGRO: 0
     UseSgprForGRO: -1
     Valid: true
@@ -6395,16 +6395,16 @@
     CodeObjectVersion: default
     CustomKernelName: ''
     DepthU: 64
-    DirectToLds: false
+    DirectToLds: 0
     DirectToLdsA: false
     DirectToLdsB: false
-    DirectToLdsMetadata: false
-    DirectToVgprSparseMetadata: 0
+    DirectToLdsMetadata: 0
+    DirectToVgprSparseMetadata: false
     EdgeType: ShiftPtr
     EnableF32XdlMathOp: false
     EnableMatrixInstruction: true
-    ExpandPointerSwap: 1
-    GlobalReadPerMfma: 1
+    ExpandPointerSwap: true
+    GlobalReadPerMfma: 1.0
     GlobalReadVectorWidthA: 8
     GlobalReadVectorWidthB: 16
     GlobalReadVectorWidthMetadata: 8
@@ -6521,7 +6521,7 @@
     ScheduleLocalWrite: 1
     SolutionIndex: 33
     SolutionNameMin: Cijk_Ailk_Bljk_I8I8S_BH_Bias_FDMN_SPA_AS_SAV_MT256x192x64_MI32x32x32x1_SN_1LDSB0_AFC1_AF0EM8_GRVWA8_GRVWB16_GSU1_LBSPPA0_LBSPPM0_LPA0_LPB16_LPM2_MIWT2_6_NLCA1_PLR1_SUS256_WG128_2_1
-    SourceSwap: 0
+    SourceSwap: false
     StaggerU: 4
     StaggerUMapping: 0
     StaggerUStride: 256
@@ -6542,11 +6542,11 @@
     ThreadTileB: 6
     ThreadTileMetadata: 32
     TransposeLDS: 1
-    TransposeLDSMetadata: true
+    TransposeLDSMetadata: 1
     UnrollMajorLDSA: false
     UnrollMajorLDSB: true
     UnrollMajorLDSMetadata: true
-    Use64bShadowLimit: 1
+    Use64bShadowLimit: true
     UseInstOffsetForGRO: 0
     UseSgprForGRO: -1
     Valid: true
@@ -6588,16 +6588,16 @@
     CodeObjectVersion: default
     CustomKernelName: ''
     DepthU: 64
-    DirectToLds: false
+    DirectToLds: 0
     DirectToLdsA: false
     DirectToLdsB: false
-    DirectToLdsMetadata: false
-    DirectToVgprSparseMetadata: 0
+    DirectToLdsMetadata: 0
+    DirectToVgprSparseMetadata: false
     EdgeType: ShiftPtr
     EnableF32XdlMathOp: false
     EnableMatrixInstruction: true
-    ExpandPointerSwap: 1
-    GlobalReadPerMfma: 1
+    ExpandPointerSwap: true
+    GlobalReadPerMfma: 1.0
     GlobalReadVectorWidthA: 8
     GlobalReadVectorWidthB: 16
     GlobalReadVectorWidthMetadata: 8
@@ -6714,7 +6714,7 @@
     ScheduleLocalWrite: 1
     SolutionIndex: 34
     SolutionNameMin: Cijk_Ailk_Bljk_I8I8S_BH_Bias_FDMN_SPA_AS_SAV_MT256x256x64_MI32x32x32x1_SN_1LDSB0_AFC1_AF0EM8_GRVWA8_GRVWB16_GSU1_LBSPPA0_LBSPPM0_LPA0_LPB16_LPM2_MIWT4_4_NLCA1_PLR1_SUS128_WG64_4_1
-    SourceSwap: 0
+    SourceSwap: false
     StaggerU: 4
     StaggerUMapping: 0
     StaggerUStride: 128
@@ -6735,11 +6735,11 @@
     ThreadTileB: 4
     ThreadTileMetadata: 64
     TransposeLDS: 1
-    TransposeLDSMetadata: true
+    TransposeLDSMetadata: 1
     UnrollMajorLDSA: false
     UnrollMajorLDSB: true
     UnrollMajorLDSMetadata: true
-    Use64bShadowLimit: 1
+    Use64bShadowLimit: true
     UseInstOffsetForGRO: 0
     UseSgprForGRO: -1
     Valid: true
@@ -6781,16 +6781,16 @@
     CodeObjectVersion: default
     CustomKernelName: ''
     DepthU: 64
-    DirectToLds: false
+    DirectToLds: 0
     DirectToLdsA: false
     DirectToLdsB: false
-    DirectToLdsMetadata: false
-    DirectToVgprSparseMetadata: 0
+    DirectToLdsMetadata: 0
+    DirectToVgprSparseMetadata: false
     EdgeType: ShiftPtr
     EnableF32XdlMathOp: false
     EnableMatrixInstruction: true
-    ExpandPointerSwap: 1
-    GlobalReadPerMfma: 1
+    ExpandPointerSwap: true
+    GlobalReadPerMfma: 1.0
     GlobalReadVectorWidthA: 8
     GlobalReadVectorWidthB: 16
     GlobalReadVectorWidthMetadata: 8
@@ -6907,7 +6907,7 @@
     ScheduleLocalWrite: 1
     SolutionIndex: 35
     SolutionNameMin: Cijk_Ailk_Bljk_I8I8S_BH_Bias_FDMN_SPA_AS_SAV_MT256x256x64_MI32x32x32x1_SN_1LDSB0_AFC1_AF0EM8_GRVWA8_GRVWB16_GSU1_LBSPPA0_LBSPPM0_LPA0_LPB16_LPM2_MIWT4_4_NLCA1_PLR1_SUS256_WG64_4_1
-    SourceSwap: 0
+    SourceSwap: false
     StaggerU: 4
     StaggerUMapping: 0
     StaggerUStride: 256
@@ -6928,11 +6928,11 @@
     ThreadTileB: 4
     ThreadTileMetadata: 64
     TransposeLDS: 1
-    TransposeLDSMetadata: true
+    TransposeLDSMetadata: 1
     UnrollMajorLDSA: false
     UnrollMajorLDSB: true
     UnrollMajorLDSMetadata: true
-    Use64bShadowLimit: 1
+    Use64bShadowLimit: true
     UseInstOffsetForGRO: 0
     UseSgprForGRO: -1
     Valid: true
@@ -6974,16 +6974,16 @@
     CodeObjectVersion: default
     CustomKernelName: ''
     DepthU: 64
-    DirectToLds: false
+    DirectToLds: 0
     DirectToLdsA: false
     DirectToLdsB: false
-    DirectToLdsMetadata: false
-    DirectToVgprSparseMetadata: 0
+    DirectToLdsMetadata: 0
+    DirectToVgprSparseMetadata: false
     EdgeType: ShiftPtr
     EnableF32XdlMathOp: false
     EnableMatrixInstruction: true
-    ExpandPointerSwap: 1
-    GlobalReadPerMfma: 1
+    ExpandPointerSwap: true
+    GlobalReadPerMfma: 1.0
     GlobalReadVectorWidthA: 8
     GlobalReadVectorWidthB: 16
     GlobalReadVectorWidthMetadata: 8
@@ -7100,7 +7100,7 @@
     ScheduleLocalWrite: 1
     SolutionIndex: 36
     SolutionNameMin: Cijk_Ailk_Bljk_I8I8S_BH_Bias_FDMN_SPA_AS_SAV_MT256x256x64_MI32x32x32x1_SN_1LDSB0_AFC1_AF0EM1_GRVWA8_GRVWB16_GSU1_LBSPPA0_LBSPPM0_LPA0_LPB16_LPM2_MIWT4_4_NLCA1_PLR1_SUS128_WG64_4_1
-    SourceSwap: 0
+    SourceSwap: false
     StaggerU: 4
     StaggerUMapping: 0
     StaggerUStride: 128
@@ -7121,11 +7121,11 @@
     ThreadTileB: 4
     ThreadTileMetadata: 64
     TransposeLDS: 1
-    TransposeLDSMetadata: true
+    TransposeLDSMetadata: 1
     UnrollMajorLDSA: false
     UnrollMajorLDSB: true
     UnrollMajorLDSMetadata: true
-    Use64bShadowLimit: 1
+    Use64bShadowLimit: true
     UseInstOffsetForGRO: 0
     UseSgprForGRO: -1
     Valid: true
@@ -7167,16 +7167,16 @@
     CodeObjectVersion: default
     CustomKernelName: ''
     DepthU: 64
-    DirectToLds: false
+    DirectToLds: 0
     DirectToLdsA: false
     DirectToLdsB: false
-    DirectToLdsMetadata: false
-    DirectToVgprSparseMetadata: 0
+    DirectToLdsMetadata: 0
+    DirectToVgprSparseMetadata: false
     EdgeType: ShiftPtr
     EnableF32XdlMathOp: false
     EnableMatrixInstruction: true
-    ExpandPointerSwap: 1
-    GlobalReadPerMfma: 1
+    ExpandPointerSwap: true
+    GlobalReadPerMfma: 1.0
     GlobalReadVectorWidthA: 8
     GlobalReadVectorWidthB: 16
     GlobalReadVectorWidthMetadata: 8
@@ -7293,7 +7293,7 @@
     ScheduleLocalWrite: 1
     SolutionIndex: 37
     SolutionNameMin: Cijk_Ailk_Bljk_I8I8S_BH_Bias_FDMN_SPA_AS_SAV_MT256x256x64_MI32x32x32x1_SN_1LDSB0_AFC1_AF0EM1_GRVWA8_GRVWB16_GSU1_LBSPPA0_LBSPPM0_LPA0_LPB16_LPM2_MIWT4_4_NLCA1_PLR1_SUS256_WG64_4_1
-    SourceSwap: 0
+    SourceSwap: false
     StaggerU: 4
     StaggerUMapping: 0
     StaggerUStride: 256
@@ -7314,11 +7314,11 @@
     ThreadTileB: 4
     ThreadTileMetadata: 64
     TransposeLDS: 1
-    TransposeLDSMetadata: true
+    TransposeLDSMetadata: 1
     UnrollMajorLDSA: false
     UnrollMajorLDSB: true
     UnrollMajorLDSMetadata: true
-    Use64bShadowLimit: 1
+    Use64bShadowLimit: true
     UseInstOffsetForGRO: 0
     UseSgprForGRO: -1
     Valid: true
@@ -7360,16 +7360,16 @@
     CodeObjectVersion: default
     CustomKernelName: ''
     DepthU: 64
-    DirectToLds: false
+    DirectToLds: 0
     DirectToLdsA: false
     DirectToLdsB: false
-    DirectToLdsMetadata: false
-    DirectToVgprSparseMetadata: 0
+    DirectToLdsMetadata: 0
+    DirectToVgprSparseMetadata: false
     EdgeType: ShiftPtr
     EnableF32XdlMathOp: false
     EnableMatrixInstruction: true
-    ExpandPointerSwap: 1
-    GlobalReadPerMfma: 1
+    ExpandPointerSwap: true
+    GlobalReadPerMfma: 1.0
     GlobalReadVectorWidthA: 8
     GlobalReadVectorWidthB: 16
     GlobalReadVectorWidthMetadata: 8
@@ -7486,7 +7486,7 @@
     ScheduleLocalWrite: 1
     SolutionIndex: 38
     SolutionNameMin: Cijk_Ailk_Bljk_I8I8S_BH_Bias_FDMN_SPA_AS_SAV_MT256x256x64_MI32x32x32x1_SN_1LDSB0_AFC1_AF0EM1_GRVWA8_GRVWB16_GSU1_LBSPPA0_LBSPPM0_LPA0_LPB16_LPM2_MIWT2_8_NLCA1_PLR1_SUS256_WG128_2_1
-    SourceSwap: 0
+    SourceSwap: false
     StaggerU: 4
     StaggerUMapping: 0
     StaggerUStride: 256
@@ -7507,11 +7507,11 @@
     ThreadTileB: 8
     ThreadTileMetadata: 32
     TransposeLDS: 1
-    TransposeLDSMetadata: true
+    TransposeLDSMetadata: 1
     UnrollMajorLDSA: false
     UnrollMajorLDSB: true
     UnrollMajorLDSMetadata: true
-    Use64bShadowLimit: 1
+    Use64bShadowLimit: true
     UseInstOffsetForGRO: 0
     UseSgprForGRO: -1
     Valid: true
@@ -7553,16 +7553,16 @@
     CodeObjectVersion: default
     CustomKernelName: ''
     DepthU: 64
-    DirectToLds: false
+    DirectToLds: 0
     DirectToLdsA: false
     DirectToLdsB: false
-    DirectToLdsMetadata: false
-    DirectToVgprSparseMetadata: 0
+    DirectToLdsMetadata: 0
+    DirectToVgprSparseMetadata: false
     EdgeType: ShiftPtr
     EnableF32XdlMathOp: false
     EnableMatrixInstruction: true
-    ExpandPointerSwap: 1
-    GlobalReadPerMfma: 1
+    ExpandPointerSwap: true
+    GlobalReadPerMfma: 1.0
     GlobalReadVectorWidthA: 8
     GlobalReadVectorWidthB: 16
     GlobalReadVectorWidthMetadata: 8
@@ -7679,7 +7679,7 @@
     ScheduleLocalWrite: 1
     SolutionIndex: 39
     SolutionNameMin: Cijk_Ailk_Bljk_I8I8S_BH_Bias_FDMN_SPA_AS_SAV_MT256x192x64_MI32x32x32x1_SN_1LDSB0_AFC1_AF0EM1_GRVWA8_GRVWB16_GSU1_LBSPPA0_LBSPPM0_LPA0_LPB16_LPM2_MIWT2_6_NLCA1_PLR1_SUS256_WG128_2_1
-    SourceSwap: 0
+    SourceSwap: false
     StaggerU: 4
     StaggerUMapping: 0
     StaggerUStride: 256
@@ -7700,11 +7700,11 @@
     ThreadTileB: 6
     ThreadTileMetadata: 32
     TransposeLDS: 1
-    TransposeLDSMetadata: true
+    TransposeLDSMetadata: 1
     UnrollMajorLDSA: false
     UnrollMajorLDSB: true
     UnrollMajorLDSMetadata: true
-    Use64bShadowLimit: 1
+    Use64bShadowLimit: true
     UseInstOffsetForGRO: 0
     UseSgprForGRO: -1
     Valid: true

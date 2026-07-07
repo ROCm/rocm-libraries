@@ -32,6 +32,7 @@ Definitions:
     - { M: 1, N: 256, K: 1 }
     - { M: 1, N: 257, K: 1 }
 
+  # Also used by matmul_fp16_accumulator_probe_small (initialization: fp16_accumulator_probe).
   - &small_matrix_size_range
     - { M: 8, N: 8, K: 8, lda: 8, ldb: 8, ldc: 8, ldd: 8 }
     - { M: 16, N: 16, K: 16, lda: 16, ldb: 16, ldc: 16, ldd: 16 }
@@ -75,6 +76,32 @@ Definitions:
     - { M: 2048, N: 262144, K: 1 }
     - { M: 3072, N: 131072, K: 1 }
     - { M: 4096, N: 131072, K: 1 }
+
+
+  ###########################################################################
+  # 32-bit / size_t overflow coverage (AIHPBLAS-3806).
+  #
+  # Modeled after rocBLAS's gemm_size_t tests: keep the compute region
+  # (M x N x K) moderate but inflate a leading dimension or a batch stride so
+  # that the output element index exceeds INT32_MAX (2^31 - 1), without
+  # requiring a full large-matrix allocation. This is the silent output-store
+  # correctness defect ROCM-26455.
+  #
+  # With ld = 1049100 and M = N = 2048 the maximum output element index is
+  #   (N-1)*ld + (M-1) = 2047*1049100 + 2047 = 2,147,509,747 > INT32_MAX,
+  # so the element index overflows int32 for every precision.
+  ###########################################################################
+
+  # Rotate the oversized leading dimension across A, B and the output C/D.
+  - &size_t_index_overflow
+    - { M: 2048, N: 2048, K: 2048, lda: 1049100, ldb:    2048, ldc:    2048, ldd:    2048 }
+    - { M: 2048, N: 2048, K: 2048, lda:    2048, ldb: 1049100, ldc:    2048, ldd:    2048 }
+    - { M: 2048, N: 2048, K: 2048, lda:    2048, ldb:    2048, ldc: 1049100, ldd: 1049100 }
+
+  # Output-only oversized leading dimension (C and D): the ROCM-26455 write
+  # path. K is kept small so the CPU reference / unit_check stays inexpensive.
+  - &size_t_output_overflow
+    - { M: 2048, N: 2048, K: 256, lda: 2048, ldb: 2048, ldc: 1049100, ldd: 1049100 }
 
 
   - &deepbench_sizes

@@ -29,6 +29,8 @@
 #include <Tensile/Debug.hpp>
 #include <Tensile/PredicateDebugger.hpp>
 
+#include <tensilelitehost/export.h>
+
 namespace TensileLite
 {
     /**
@@ -295,3 +297,4 @@ namespace TensileLite
         }
     };
 } // namespace TensileLite
+

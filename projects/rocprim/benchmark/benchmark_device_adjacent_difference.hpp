@@ -45,7 +45,7 @@
 #include <vector>
 
 template<typename Config>
-auto config_name()
+constexpr auto config_name()
 {
     if constexpr(std::is_same_v<Config, rocprim::default_config>)
     {
@@ -145,19 +145,18 @@ struct device_adjacent_difference_benchmark_generator
     {
         template<int ipt_num = primes[IptValueIndex]>
         auto operator()(std::vector<std::unique_ptr<primbench::benchmark_interface>>& storage)
-            -> std::enable_if_t<(ipt_num < max_items_per_thread_arg)>
         {
-            using generated_config = rocprim::adjacent_difference_config<BlockSize, ipt_num>;
+            if constexpr(ipt_num < max_items_per_thread_arg)
+            {
+                using generated_config = rocprim::adjacent_difference_config<BlockSize, ipt_num>;
 
-            storage.emplace_back(
-                std::make_unique<
-                    device_adjacent_difference_benchmark<T, Left, Aliasing, generated_config>>());
+                storage.emplace_back(
+                    std::make_unique<device_adjacent_difference_benchmark<T,
+                                                                          Left,
+                                                                          Aliasing,
+                                                                          generated_config>>());
+            }
         }
-
-        template<int ipt_num = primes[IptValueIndex]>
-        auto operator()(std::vector<std::unique_ptr<primbench::benchmark_interface>>&)
-            -> std::enable_if_t<!(ipt_num < max_items_per_thread_arg)>
-        {}
     };
 
     static void create(std::vector<std::unique_ptr<primbench::benchmark_interface>>& storage)

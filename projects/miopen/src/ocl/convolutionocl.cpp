@@ -1,28 +1,5 @@
-/*******************************************************************************
- *
- * MIT License
- *
- * Copyright (c) 2020 Advanced Micro Devices, Inc.
- *
- * Permission is hereby granted, free of charge, to any person obtaining a copy
- * of this software and associated documentation files (the "Software"), to deal
- * in the Software without restriction, including without limitation the rights
- * to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
- * copies of the Software, and to permit persons to whom the Software is
- * furnished to do so, subject to the following conditions:
- *
- * The above copyright notice and this permission notice shall be included in all
- * copies or substantial portions of the Software.
- *
- * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
- * IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
- * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
- * AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
- * LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
- * OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
- * SOFTWARE.
- *
- *******************************************************************************/
+// Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
+// SPDX-License-Identifier: MIT
 
 #include <miopen/convolution.hpp>
 
@@ -39,6 +16,7 @@
 #include <miopen/generic_search_controls.hpp>
 #include <miopen/invoker.hpp>
 #include <miopen/kernel.hpp>
+#include <miopen/kernel_tuning_mode.hpp>
 #include <miopen/solution.hpp>
 #include <miopen/tensor.hpp>
 #include <miopen/visit_float.hpp>
@@ -111,7 +89,7 @@ std::vector<miopenConvSolution_t> GetSolutions(const ExecutionContext& ctx,
     for(const auto& pair : fdb_record)
     {
         const auto algo = static_cast<miopenConvAlgorithm_t>(algo_resolver(pair.second.algorithm));
-        if(conv::IsAlgorithmDisabled(algo))
+        if(conv::IsAlgorithmDisabled(algo, problem))
             continue;
 
         const auto solver_id = solver::Id{pair.first};
@@ -282,6 +260,9 @@ std::vector<Solution> EvaluateConvSolutions(const ExecutionContext& ctx,
                                             const std::vector<solver::ConvSolution> solutions,
                                             bool model_result = false)
 {
+    // Set verification phase for kernel logging
+    ScopedKernelPhase phase_scope(KernelPhase::SolverTuning);
+
     std::vector<Solution> eval_sols;
 
     // test timing of solver reported by system db
@@ -300,15 +281,30 @@ std::vector<Solution> EvaluateConvSolutions(const ExecutionContext& ctx,
     {
         const auto id      = solver::Id{conv_sol->solver_id};
         const auto& solver = id.GetSolver();
+
+        // Log the solver being benchmarked during tuning/Find phase
         CompileSolution(id, ctx, problem);
+
+        if(IsLoggingKernel())
+        {
+            std::string solution_name = id.ToString();
+            LogSolutionName(solution_name, id.Value(), conv_sol->workspace_sz);
+        }
 
         std::vector<solver::ConvSolution> conv_sols;
         conv_sols.emplace_back(*conv_sol);
 
         AlgorithmName algo{
             ConvolutionAlgoToDirectionalString(id.GetAlgo(), problem.GetDirection())};
-        std::vector<Solution> eval_sol = EvaluateInvokers(
-            handle, conv_sols, algo, problem.MakeNetworkConfig(), invoke_ctx, core_result, false);
+        bool ocl_non_naive_succeeded   = false;
+        std::vector<Solution> eval_sol = EvaluateInvokers(handle,
+                                                          conv_sols,
+                                                          algo,
+                                                          problem.MakeNetworkConfig(),
+                                                          invoke_ctx,
+                                                          core_result,
+                                                          false,
+                                                          ocl_non_naive_succeeded);
 
         if(!eval_sol.empty())
             eval_sols.emplace_back(eval_sol.front());
@@ -362,64 +358,70 @@ std::vector<Solution> VerifiedFDBSolution(const ExecutionContext& ctx,
 {
     const auto& conv     = problem.GetConv();
     const auto& findMode = conv.findMode;
-    auto results         = UserFindDbRecord::TryLoad(ctx.GetStream(), problem, [&]() {
-        auto ctx_copy                       = ctx;
-        ctx_copy.use_dynamic_solutions_only = findMode.IsDynamicHybrid(ctx);
-        const auto params =
-            conv::ConvFindParameters{conv.IsWinograd3x3SupportedAndFast(ctx_copy, problem)};
+    auto results         = UserFindDbRecord::TryLoad(
+        ctx.GetStream(),
+        problem,
+        [&]() {
+            auto ctx_copy                       = ctx;
+            ctx_copy.use_dynamic_solutions_only = findMode.IsDynamicHybrid(ctx);
+            const auto params =
+                conv::ConvFindParameters{conv.IsWinograd3x3SupportedAndFast(ctx_copy, problem)};
 
-        auto conv_sols  = GetConvSolutions(ctx, problem, solutions);
-        auto eval_sols  = EvaluateConvSolutions(ctx, problem, invoke_ctx, conv_sols, model_result);
-        bool good_entry = HasGoodSolution(solutions, eval_sols, model_result);
+            auto conv_sols = GetConvSolutions(ctx, problem, solutions);
+            auto eval_sols =
+                EvaluateConvSolutions(ctx, problem, invoke_ctx, conv_sols, model_result);
+            bool good_entry = HasGoodSolution(solutions, eval_sols, model_result);
 
-        if(good_entry)
-        {
-            // system db result is good
-            // add to user fdb so this check is skipped next time
-            MIOPEN_LOG_I2("TrustVerify: Add system db entry to user db");
-            auto fallback          = FallbackPath();
-            auto core_result       = FindCoreResult();
-            core_result.is_optimal = true;
-            auto copy_sols         = conv.GetSolutions(ctx, problem, 4, &fallback, &invoke_ctx);
-            for(const auto& s : copy_sols)
+            if(good_entry)
             {
-                auto solution = Solution{solver::Id{s.solution_id}, s.time, s.workspace_size};
-                core_result.solutions.emplace_back(std::move(solution));
+                // system db result is good
+                // add to user fdb so this check is skipped next time
+                MIOPEN_LOG_I2("TrustVerify: Add system db entry to user db");
+                auto fallback          = FallbackPath();
+                auto core_result       = FindCoreResult();
+                core_result.is_optimal = true;
+                auto copy_sols         = conv.GetSolutions(ctx, problem, 4, &fallback, &invoke_ctx);
+                for(const auto& s : copy_sols)
+                {
+                    auto solution = Solution{solver::Id{s.solution_id}, s.time, s.workspace_size};
+                    core_result.solutions.emplace_back(std::move(solution));
+                }
+                return core_result;
             }
-            return core_result;
-        }
-        else
-        {
-            // entry considered bad, trigger tuning
-            MIOPEN_LOG_I2("TrustVerify: Regenerate entry for user db");
-            ctx_copy.do_search = true;
-            ctx_copy.db_update = true;
-
-            auto record = DbRecord(DbKinds::FindDb, problem);
-            if(env::enabled(MIOPEN_WARN_SEARCH))
-                MIOPEN_LOG_W("Find Start: " << record.GetKey() << ", findMode: " << findMode);
             else
-                MIOPEN_LOG_I("Find Start: " << record.GetKey() << ", findMode: " << findMode);
+            {
+                // entry considered bad, trigger tuning
+                MIOPEN_LOG_I2("TrustVerify: Regenerate entry for user db");
+                ctx_copy.do_search = true;
+                ctx_copy.db_update = true;
 
-            auto ret = FindCore(invoke_ctx,
-                                ctx_copy,
-                                problem,
-                                params,
-                                conv::GetConvSolverFinders(),
-                                std::nullopt,
-                                force_attach_binary);
+                auto record = DbRecord(DbKinds::FindDb, problem);
+                if(env::enabled(MIOPEN_WARN_SEARCH))
+                    MIOPEN_LOG_W("Find Start: " << record.GetKey() << ", findMode: " << findMode);
+                else
+                    MIOPEN_LOG_I("Find Start: " << record.GetKey() << ", findMode: " << findMode);
 
-            if(env::enabled(MIOPEN_WARN_SEARCH))
-                MIOPEN_LOG_W("Find Ended: " << record.GetKey());
-            else
-                MIOPEN_LOG_I("Find Ended: " << record.GetKey());
+                auto ret = FindCore(invoke_ctx,
+                                    ctx_copy,
+                                    problem,
+                                    params,
+                                    conv::GetConvSolverFinders(),
+                                    std::nullopt,
+                                    force_attach_binary);
 
-            ctx.generic_search_worst_time = ctx_copy.generic_search_worst_time;
-            ctx.generic_search_best_time  = ctx_copy.generic_search_best_time;
+                if(env::enabled(MIOPEN_WARN_SEARCH))
+                    MIOPEN_LOG_W("Find Ended: " << record.GetKey());
+                else
+                    MIOPEN_LOG_I("Find Ended: " << record.GetKey());
 
-            return ret;
-        }
-    });
+                ctx.generic_search_worst_time = ctx_copy.generic_search_worst_time;
+                ctx.generic_search_best_time  = ctx_copy.generic_search_best_time;
+
+                return ret;
+            }
+        },
+        /*path_suffix=*/"",
+        &invoke_ctx);
 
     return results;
 }
@@ -492,43 +494,48 @@ std::vector<Solution> FindConvolution(const ExecutionContext& ctx,
     }
     else
     {
-        results = UserFindDbRecord::TryLoad(ctx.GetStream(), problem, [&]() {
-            auto ctx_copy                       = ctx;
-            ctx_copy.use_dynamic_solutions_only = findMode.IsDynamicHybrid(ctx);
-            const auto params =
-                conv::ConvFindParameters{conv.IsWinograd3x3SupportedAndFast(ctx_copy, problem)};
+        results = UserFindDbRecord::TryLoad(
+            ctx.GetStream(),
+            problem,
+            [&]() {
+                auto ctx_copy                       = ctx;
+                ctx_copy.use_dynamic_solutions_only = findMode.IsDynamicHybrid(ctx);
+                const auto params =
+                    conv::ConvFindParameters{conv.IsWinograd3x3SupportedAndFast(ctx_copy, problem)};
 
-            if(findMode.IsTrustVerify(ctx))
-            {
-                MIOPEN_LOG_I2("TrustVerify: Generate entry for user db");
-                ctx_copy.do_search = true;
-                ctx_copy.db_update = true;
-            }
+                if(findMode.IsTrustVerify(ctx))
+                {
+                    MIOPEN_LOG_I2("TrustVerify: Generate entry for user db");
+                    ctx_copy.do_search = true;
+                    ctx_copy.db_update = true;
+                }
 
-            auto record = DbRecord(DbKinds::FindDb, problem);
-            if(env::enabled(MIOPEN_WARN_SEARCH))
-                MIOPEN_LOG_W("Find Start: " << record.GetKey() << ", findMode: " << findMode);
-            else
-                MIOPEN_LOG_I("Find Start: " << record.GetKey() << ", findMode: " << findMode);
+                auto record = DbRecord(DbKinds::FindDb, problem);
+                if(env::enabled(MIOPEN_WARN_SEARCH))
+                    MIOPEN_LOG_W("Find Start: " << record.GetKey() << ", findMode: " << findMode);
+                else
+                    MIOPEN_LOG_I("Find Start: " << record.GetKey() << ", findMode: " << findMode);
 
-            auto ret = FindCore(invoke_ctx,
-                                ctx_copy,
-                                problem,
-                                params,
-                                conv::GetConvSolverFinders(),
-                                std::nullopt,
-                                force_attach_binary);
+                auto ret = FindCore(invoke_ctx,
+                                    ctx_copy,
+                                    problem,
+                                    params,
+                                    conv::GetConvSolverFinders(),
+                                    std::nullopt,
+                                    force_attach_binary);
 
-            if(env::enabled(MIOPEN_WARN_SEARCH))
-                MIOPEN_LOG_W("Find Ended: " << record.GetKey());
-            else
-                MIOPEN_LOG_I("Find Ended: " << record.GetKey());
+                if(env::enabled(MIOPEN_WARN_SEARCH))
+                    MIOPEN_LOG_W("Find Ended: " << record.GetKey());
+                else
+                    MIOPEN_LOG_I("Find Ended: " << record.GetKey());
 
-            ctx.generic_search_worst_time = ctx_copy.generic_search_worst_time;
-            ctx.generic_search_best_time  = ctx_copy.generic_search_best_time;
+                ctx.generic_search_worst_time = ctx_copy.generic_search_worst_time;
+                ctx.generic_search_best_time  = ctx_copy.generic_search_best_time;
 
-            return ret;
-        });
+                return ret;
+            },
+            /*path_suffix=*/"",
+            &invoke_ctx);
     }
 
     if(env::enabled(MIOPEN_DEBUG_COMPILE_ONLY))
@@ -956,7 +963,7 @@ ConvolutionDescriptor::GetSolutionsFallback(const ExecutionContext& ctx,
                 const auto solver_id = solver::Id{kinder};
                 const auto sol       = solver_id.GetSolver();
                 const auto algo      = solver_id.GetAlgo();
-                if(conv::IsAlgorithmDisabled(algo))
+                if(conv::IsAlgorithmDisabled(algo, problem))
                     continue;
                 if(!sol.IsDynamic())
                     continue; // branch should never be taken
@@ -991,7 +998,7 @@ ConvolutionDescriptor::GetSolutionsFallback(const ExecutionContext& ctx,
             // solver_id is always valid here, because taken from registry.
             // Validity check is not required.
             const auto algo = solver_id.GetAlgo();
-            if(conv::IsAlgorithmDisabled(algo)) // Algos can be disabled globally.
+            if(conv::IsAlgorithmDisabled(algo, problem)) // Algos can be disabled globally.
                 continue;
             const auto& s = solver_id.GetSolver();
             // Let's allow non-dynamic later, if necessary.
@@ -1121,6 +1128,13 @@ void ConvolutionDescriptor::ConvolutionForwardImmediate(const Handle& handle,
         const auto invoker    = LoadOrPrepareInvoker(ctx, problem, solver_id);
         const auto invoke_ctx = conv::DataInvokeParams{
             tensors, workSpace, workSpaceSize, this->attribute.gfx90aFp16alt.GetFwd()};
+        if(IsLoggingKernel())
+        {
+            // Log the selected solver for execution phase kernel tracking
+            std::string solution_name =
+                (solver_id.Value() != 0) ? solver_id.ToString() : std::string("UNKNOWN");
+            LogSolutionName(solution_name, solver_id.Value(), workSpaceSize);
+        }
         invoker(handle, invoke_ctx);
     });
 }
@@ -1333,6 +1347,13 @@ void ConvolutionDescriptor::ConvolutionBackwardImmediate(const Handle& handle,
         const auto invoker    = LoadOrPrepareInvoker(ctx, problem, solver_id);
         const auto invoke_ctx = conv::DataInvokeParams{
             tensors, workSpace, workSpaceSize, this->attribute.gfx90aFp16alt.GetBwd()};
+        if(IsLoggingKernel())
+        {
+            // Log the selected solver for execution phase kernel tracking
+            std::string solution_name =
+                (solver_id.Value() != 0) ? solver_id.ToString() : std::string("UNKNOWN");
+            LogSolutionName(solution_name, solver_id.Value(), workSpaceSize);
+        }
         invoker(handle, invoke_ctx);
     });
 }
@@ -1540,6 +1561,10 @@ void ConvolutionDescriptor::ConvolutionWrwImmediate(const Handle& handle,
         const auto invoker    = LoadOrPrepareInvoker(ctx, problem, solver_id);
         const auto invoke_ctx = conv::WrWInvokeParams{
             tensors, workSpace, workSpaceSize, this->attribute.gfx90aFp16alt.GetWrW()};
+        if(IsLoggingKernel())
+        {
+            LogSolutionName(solver_id.ToString(), solver_id.Value(), workSpaceSize);
+        }
         invoker(handle, invoke_ctx);
     });
 }
@@ -1547,101 +1572,6 @@ void ConvolutionDescriptor::ConvolutionWrwImmediate(const Handle& handle,
 miopenMathType_t ConvolutionDescriptor::GetMathType() const
 {
     return static_cast<miopenMathType_t>(this->attribute.Get(MIOPEN_CONVOLUTION_ATTRIB_MATH_TYPE));
-}
-
-void ConvolutionBackwardBias(const Handle& handle,
-                             const void* alpha,
-                             const TensorDescriptor& dyDesc,
-                             ConstData_t dy,
-                             const void* beta,
-                             const TensorDescriptor& dbDesc,
-                             Data_t db)
-{
-    if(dy == nullptr || db == nullptr)
-    {
-        MIOPEN_THROW(miopenStatusBadParm);
-    }
-    if(dyDesc.GetLengths()[1] != dbDesc.GetLengths()[1])
-    {
-        MIOPEN_THROW(miopenStatusBadParm);
-    }
-    if(!float_equal(*(static_cast<const float*>(alpha)), 1.0) ||
-       !float_equal(*(static_cast<const float*>(beta)), 0))
-    {
-        MIOPEN_THROW("Only alpha=1 and beta=0 is supported");
-    }
-    if(miopen::CheckNumericsEnabled())
-    {
-        miopen::checkNumericsInput(handle, dyDesc, dy);
-    }
-
-    std::size_t out_n, out_k, stride_n, stride_k;
-    std::tie(out_n, out_k)       = tie_pick<0, 1>()(dyDesc.GetLengths());
-    std::tie(stride_n, stride_k) = tie_pick<0, 1>()(dyDesc.GetStrides());
-    std::string algo_name        = "miopenConvolutionBwdBias";
-    std::string program_name     = "MIOpenConvBwdBias.cl";
-    std::string kernel_name      = "MIOpenConvBwdB";
-    std::string network_config =
-        "convbwdbias-" +
-        std::string(dyDesc.GetType() == miopenFloat
-                        ? "fp32"
-                        : (dyDesc.GetType() == miopenHalf
-                               ? "fp16"
-                               : (dyDesc.GetType() == miopenBFloat16 ? "bfloat16" : "int32")));
-
-    std::string params;
-    std::size_t lcl_grp_size0 = 256;
-    std::size_t lcl_grp_size1 = 1;
-    std::size_t local_mem_sz  = 256;
-
-    std::size_t map_size         = std::accumulate(dyDesc.GetLengths().begin() + 2,
-                                           dyDesc.GetLengths().end(),
-                                           std::size_t(1),
-                                           std::multiplies<std::size_t>());
-    std::size_t read_unit        = 4;
-    std::size_t map_size_aligned = (map_size + (read_unit - 1)) / read_unit;
-    std::size_t off_pix          = map_size - (map_size / read_unit) * read_unit;
-    std::size_t total_work       = map_size_aligned * out_n;
-
-    params = " -DMLO_CONVBWD_GROUP_SZ0=" + std::to_string(lcl_grp_size0);
-    params += " -DMLO_CONVBWD_GROUP_SZ1=" + std::to_string(lcl_grp_size1);
-    params += " -DMLO_CONVBWDB_LCL_MEMSZ=" + std::to_string(local_mem_sz);
-    params += " -DMLO_CONVBWDB_UNITSIZE=" + std::to_string(read_unit);
-
-    params += GetDataTypeKernelParams(dyDesc.GetType());
-
-    const std::vector<size_t> vld = {lcl_grp_size0, size_t{1}, size_t{1}};
-    const std::vector<size_t> vgd = {lcl_grp_size0, size_t{256}, size_t{1}};
-
-    auto&& kernels = handle.GetKernels(algo_name, network_config);
-    if(!kernels.empty())
-    {
-        kernels.front()(dy,
-                        db,
-                        static_cast<unsigned>(out_k),
-                        static_cast<unsigned>(stride_k),
-                        static_cast<unsigned>(stride_n),
-                        static_cast<unsigned>(map_size_aligned),
-                        static_cast<unsigned>(off_pix),
-                        static_cast<unsigned>(total_work));
-    }
-    else
-    {
-        handle.AddKernel(algo_name, network_config, program_name, kernel_name, vld, vgd, params)(
-            dy,
-            db,
-            static_cast<unsigned>(out_k),
-            static_cast<unsigned>(stride_k),
-            static_cast<unsigned>(stride_n),
-            static_cast<unsigned>(map_size_aligned),
-            static_cast<unsigned>(off_pix),
-            static_cast<unsigned>(total_work));
-    }
-
-    if(miopen::CheckNumericsEnabled())
-    {
-        miopen::checkNumericsOutput(handle, dbDesc, db);
-    }
 }
 
 bool EnvEnableTF32()

@@ -27,6 +27,7 @@
 #ifndef OCL_SOLUTION_ADAPTER_HPP
 #define OCL_SOLUTION_ADAPTER_HPP
 
+#include <tensilelitehost/export.h>
 #include <Tensile/Tensile.hpp>
 #include <Tensile/ocl/OclFwd.hpp>
 

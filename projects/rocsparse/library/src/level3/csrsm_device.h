@@ -1,6 +1,6 @@
 /*! \file */
 /* ************************************************************************
- * Copyright (C) 2020-2025 Advanced Micro Devices, Inc. All rights Reserved.
+ * Copyright (C) 2020-2026 Advanced Micro Devices, Inc. All rights Reserved.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -28,7 +28,7 @@
 
 namespace rocsparse
 {
-    template <uint32_t BLOCKSIZE, uint32_t WF_SIZE, bool SLEEP, typename I, typename J, typename T>
+    template <uint32_t BLOCKSIZE, bool SLEEP, typename I, typename J, typename T>
     ROCSPARSE_DEVICE_ILF void csrsm_device(rocsparse_operation transB,
                                            J                   m,
                                            J                   nrhs,
@@ -36,15 +36,18 @@ namespace rocsparse
                                            const I* __restrict__ csr_row_ptr,
                                            const J* __restrict__ csr_col_ind,
                                            const T* __restrict__ csr_val,
-                                           T* __restrict__ B,
+                                           T*      B,
                                            int64_t ldb,
                                            int* __restrict__ done_array,
                                            const J* __restrict__ map,
-                                           J* __restrict__ zero_pivot,
+                                           J*                   zero_pivot,
                                            rocsparse_index_base idx_base,
                                            rocsparse_fill_mode  fill_mode,
                                            rocsparse_diag_type  diag_type)
     {
+        static_assert(BLOCKSIZE > 0 && (BLOCKSIZE & (BLOCKSIZE - 1)) == 0,
+                      "BLOCKSIZE must be a power of two.");
+
         // Index into the row map
         const J idx = hipBlockIdx_x % m;
 

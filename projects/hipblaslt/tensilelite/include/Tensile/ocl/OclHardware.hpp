@@ -28,6 +28,7 @@
 #define OCL_HARDWARE_HPP
 
 #include <Tensile/AMDGPU.hpp>
+#include <tensilelitehost/export.h>
 #include <Tensile/Tensile.hpp>
 
 namespace TensileLite

@@ -3,43 +3,82 @@
 
 /**
  * @file Logging.hpp
- * @brief Frontend logging initialization and convenience macros
- *
- * hipDNN uses a callback-based logging system (similar to Python's
- * `logging` module). The macros in this file — HIPDNN_FE_LOG_INFO,
- * HIPDNN_FE_LOG_WARN, etc. — auto-initialize on first use and tag every
- * message with "hipdnn_frontend" so you can filter frontend output from
- * backend or plugin messages.
+ * @brief Frontend logging configuration and log-level control
  *
  * Log verbosity is controlled by the `HIPDNN_LOG_LEVEL` environment
- * variable (e.g. `HIPDNN_LOG_LEVEL=info`).
+ * variable. Valid values (case-insensitive):
+ * | Value   | Effect                                      |
+ * |---------|---------------------------------------------|
+ * | `info`  | Informational messages and above             |
+ * | `warn`  | Warnings and above                          |
+ * | `error` | Errors and fatal messages only               |
+ * | `fatal` | Fatal messages only                          |
+ * | `off`   | Disable all logging (default)                |
+ *
+ * Example: `HIPDNN_LOG_LEVEL=warn`
  */
 
 #pragma once
 
+#include <hipdnn_backend.h>
 #include <hipdnn_data_sdk/logging/CallbackTypes.h>
 #include <hipdnn_data_sdk/logging/LogLevel.hpp>
 #include <hipdnn_data_sdk/logging/Logger.hpp>
+#include <hipdnn_frontend/Error.hpp>
+#include <hipdnn_frontend/detail/HipdnnBackendInterface.hpp>
+
+#ifdef HIPDNN_FRONTEND_RUNTIME_LOAD_BACKEND
+#include <atomic>
+
+#include <hipdnn_frontend/detail/DynamicBackendLibrary.hpp>
+#endif
 
 namespace hipdnn_frontend
 {
 
+/// @cond INTERNAL
+namespace detail
+{
+// The logging callback is resolved here (not through hipdnnBackend()) because
+// initializeFrontendLogging() fires from every HIPDNN_FE_LOG_* macro, including
+// during hipdnnBackend() construction. Going through the instance would re-enter.
+#ifdef HIPDNN_FRONTEND_RUNTIME_LOAD_BACKEND
+
+HIPDNN_HIDDEN inline hipdnnCallback_t resolveBackendLoggingCallback()
+{
+    static std::atomic<void*> s_cache{nullptr};
+    return resolveBackendSymbol<hipdnnCallback_t>(s_cache, "hipdnnLoggingCallback_ext");
+}
+
+#else
+
+HIPDNN_HIDDEN inline hipdnnCallback_t resolveBackendLoggingCallback()
+{
+    return hipdnnLoggingCallback_ext;
+}
+
+#endif
+
+// Lazily initializes and returns the backend instance. Defined in
+// BackendWrapper.hpp (which can't be included here due to a circular
+// dependency). The definition is always available before any call site.
+static std::shared_ptr<IHipdnnBackend> hipdnnBackend();
+
+} // namespace detail
+
 /// @brief Component name used for all frontend log messages
 inline constexpr const char* K_COMPONENT_NAME = "hipdnn_frontend";
 
-/**
- * @brief Initialize the frontend logging subsystem
- *
- * Registers a logging callback and reads the log level from the environment.
- * Subsequent calls are no-ops (initialization happens at most once per
- * shared object). The HIPDNN_FE_LOG_* macros call this automatically.
- *
- * @param fn Logging callback function (defaults to the backend-provided callback)
- * @return 0 on success or if already initialized, -1 if fn is null
- */
-HIPDNN_HIDDEN inline int32_t initializeFrontendLogging(hipdnnCallback_t fn
-                                                       = hipdnnLoggingCallback_ext)
+// Pass nullptr (the default) to route frontend logs to the backend's logging
+// callback, resolved according to the build's backend-loading mode. Returns -1
+// when no callback is available (e.g. the backend could not be loaded).
+HIPDNN_HIDDEN inline int32_t initializeFrontendLogging(hipdnnCallback_t fn = nullptr)
 {
+    if(fn == nullptr)
+    {
+        fn = detail::resolveBackendLoggingCallback();
+    }
+
     if(fn == nullptr)
     {
         return -1;
@@ -65,21 +104,9 @@ HIPDNN_HIDDEN inline int32_t initializeFrontendLogging(hipdnnCallback_t fn
 
     return 0;
 }
+/// @endcond
 
-/**
- * @name Frontend Logging Macros
- * @brief Auto-initializing logging macros for the hipDNN frontend
- *
- * These macros initialize logging on first use and emit messages with
- * "hipdnn_frontend" as the component name. Supports streaming syntax:
- * @code{.cpp}
- * HIPDNN_FE_LOG_INFO("value = " << x);
- * @endcode
- * @{
- */
-
-/** @def HIPDNN_FE_LOG_INFO
- *  @brief Log an informational message */
+/// @cond INTERNAL
 #define HIPDNN_FE_LOG_INFO(msg)                                                     \
     do                                                                              \
     {                                                                               \
@@ -87,8 +114,6 @@ HIPDNN_HIDDEN inline int32_t initializeFrontendLogging(hipdnnCallback_t fn
         HIPDNN_SDK_LOG_INFO_WITH_COMPONENT(hipdnn_frontend::K_COMPONENT_NAME, msg); \
     } while(0)
 
-/** @def HIPDNN_FE_LOG_WARN
- *  @brief Log a warning message */
 #define HIPDNN_FE_LOG_WARN(msg)                                                     \
     do                                                                              \
     {                                                                               \
@@ -96,8 +121,6 @@ HIPDNN_HIDDEN inline int32_t initializeFrontendLogging(hipdnnCallback_t fn
         HIPDNN_SDK_LOG_WARN_WITH_COMPONENT(hipdnn_frontend::K_COMPONENT_NAME, msg); \
     } while(0)
 
-/** @def HIPDNN_FE_LOG_ERROR
- *  @brief Log an error message */
 #define HIPDNN_FE_LOG_ERROR(msg)                                                     \
     do                                                                               \
     {                                                                                \
@@ -105,15 +128,13 @@ HIPDNN_HIDDEN inline int32_t initializeFrontendLogging(hipdnnCallback_t fn
         HIPDNN_SDK_LOG_ERROR_WITH_COMPONENT(hipdnn_frontend::K_COMPONENT_NAME, msg); \
     } while(0)
 
-/** @def HIPDNN_FE_LOG_FATAL
- *  @brief Log a fatal error message */
 #define HIPDNN_FE_LOG_FATAL(msg)                                                     \
     do                                                                               \
     {                                                                                \
         hipdnn_frontend::initializeFrontendLogging();                                \
         HIPDNN_SDK_LOG_FATAL_WITH_COMPONENT(hipdnn_frontend::K_COMPONENT_NAME, msg); \
     } while(0)
-/** @} */ // end of Frontend Logging Macros group
+/// @endcond
 
 // === Logging Callback and Log Level APIs ===
 
@@ -159,7 +180,7 @@ inline Error setUserLogCallback(hipdnnUserLogCallback_t callback,
                                 LogCallbackMode mode,
                                 hipdnnUserLogCallbackHandle_t userHandle)
 {
-    auto status = hipdnnSetUserLogCallback_ext(
+    auto status = detail::hipdnnBackend()->setUserLogCallbackExt(
         callback, minLevel, static_cast<hipdnnLogCallbackMode_t>(mode), userHandle);
     if(status != HIPDNN_STATUS_SUCCESS)
     {
@@ -182,8 +203,7 @@ inline Error setGlobalLogLevel(hipdnnSeverity_t level)
     // Update frontend's cache (in user executable)
     hipdnn_data_sdk::logging::setLogLevel(level);
 
-    // Update backend's cache (in backend shared library)
-    auto status = hipdnnBackendSetGlobalLogLevel_ext(level);
+    auto status = detail::hipdnnBackend()->backendSetGlobalLogLevelExt(level);
     if(status != HIPDNN_STATUS_SUCCESS)
     {
         return {ErrorCode::HIPDNN_BACKEND_ERROR, "Failed to set global log level"};
@@ -199,7 +219,7 @@ inline Error setGlobalLogLevel(hipdnnSeverity_t level)
  */
 inline Error getGlobalLogLevel(hipdnnSeverity_t& level)
 {
-    auto status = hipdnnBackendGetGlobalLogLevel_ext(&level);
+    auto status = detail::hipdnnBackend()->backendGetGlobalLogLevelExt(&level);
     if(status != HIPDNN_STATUS_SUCCESS)
     {
         return {ErrorCode::HIPDNN_BACKEND_ERROR, "Failed to get global log level"};

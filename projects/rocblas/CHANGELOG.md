@@ -3,6 +3,40 @@
 rocBLAS documentation is available at
 [https://rocm.docs.amd.com/projects/rocBLAS/en/latest/index.html](https://rocm.docs.amd.com/projects/rocBLAS/en/latest/index.html).
 
+## rocBLAS 5.6.0
+
+## rocBLAS 5.5.0 for ROCm 7.14
+
+### Added
+
+* Per-batch `alpha`/`beta` support for Level 2 batched and strided-batched `gemv` via `rocblas_set_batch_alpha_stride` and `rocblas_set_batch_beta_stride` (device pointer mode).
+* Per-batch `alpha` support for Level 2 batched and strided-batched `ger`, `geru`, and `gerc` via `rocblas_set_batch_alpha_stride` (device pointer mode).
+* Per-batch `alpha` (scalar vector) API support for `axpy_batched`, `axpy_strided_batched`, and their `_ex` forms through `rocblas_set_batch_alpha_stride` when `rocblas_handle` is in `rocblas_pointer_mode_device`.
+* support custom build with CMake arguments `GPU_TARGET=amdgcnspirv` when using `BUILD_WITH_TENSILE=OFF`
+
+### Resolved issues
+
+* Fix incorrect results on gfx12 in `trsv`, `asum`,  and `nrm2` with large `batch_count` exceeding 65536
+* Fix for `gemm` with very large `K` or inner product leading dimension for which element byte offset overflowed `int32`
+* Fixed `install.sh/rmake.py` builds when `CMAKE_GENERATOR=Ninja` is set
+
+## rocBLAS 5.4.0
+
+### Added
+
+* gfx1250 and gfx90c enabled.
+* Trace logging `ROCBLAS_LAYER=1` for `rocblas_gemm_ex_get_solutions`, `rocblas_gemm_batched_ex_get_solutions`, `rocblas_gemm_ex_get_solutions_by_type`, and `rocblas_gemm_batched_ex_get_solutions_by_type`.
+* Version and other properties to Windows `rocblas.dll`.
+* Support for `OpenBLAS` ILP64 API for host reference in clients.
+* Dockerfiles in `docker` directory to assist in setting up development.
+
+### Optimized
+* Improved the performance of Level 3 `geam` for pure transpose scale use cases.
+* Improved the performance of Level 2 `tpsv`.
+
+### Resolved issues
+* Fix for querying solutions when using `hipBLASLt` backend with `rocblas_gemm_batched_ex_get_solutions` if using null data pointers.
+
 ## rocBLAS 5.3.0
 
 ### Added

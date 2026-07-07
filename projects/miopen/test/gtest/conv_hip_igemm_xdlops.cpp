@@ -54,6 +54,7 @@ void Run2dDriver(miopenDataType_t prec)
     switch(prec)
     {
     case miopenInt8: params = GPU_ConvHipIgemmXdlops_I8::GetParam(); break;
+
     case miopenFloat8_fnuz:
     case miopenBFloat8_fnuz:
     case miopenHalf:
@@ -66,8 +67,6 @@ void Run2dDriver(miopenDataType_t prec)
                   "miopenDouble data "
                   "type not supported by "
                   "test_conv_hip_igemm_xdlops test";
-
-    default: params = GPU_ConvHipIgemmXdlops_I8::GetParam();
     }
 
     for(const auto& test_value : params)
@@ -107,7 +106,7 @@ std::vector<std::string> GetTestCases(const std::string& precision)
     std::string psd0        = " --pads_strides_dilations 0 0 1 1 1 1";
     std::string psd1        = " --pads_strides_dilations 1 1 1 1 1 1";
 
-    std::vector<std::string> test_cases = {
+    return {
         // clang-format off
     {precision + fwd + " --input 256 128  28 28 --weights 128  128  3 3" + output_int8 + layout + psd1},
     {precision + fwd + " --input 128 512  7  7  --weights 512  512  3 3" + output_int8 + layout + psd1},
@@ -133,8 +132,6 @@ std::vector<std::string> GetTestCases(const std::string& precision)
     {precision + bwd + " --input 256 256  56 56 --weights 256  64   1 1" + output_fp16 + layout + psd0}
         // clang-format on
     };
-
-    return test_cases;
 }
 
 } // namespace conv_hip_igemm_xdlops

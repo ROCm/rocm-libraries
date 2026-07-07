@@ -1,7 +1,10 @@
 TestParameters:
-  marks: [skip-gfx900, skip-gfx906, skip-gfx908, skip-gfx90a, skip-gfx950, skip-gfx1010, skip-gfx1011, skip-gfx1012, skip-gfx1030, skip-gfx1100, skip-gfx1101, skip-gfx1102, skip-gfx1200, skip-gfx1201] # not supported by arch
+  marks: [skip-gfx900, skip-gfx906, skip-gfx908, skip-gfx90a, skip-gfx950, skip-gfx1010, skip-gfx1011, skip-gfx1012, skip-gfx1030, skip-gfx1100, skip-gfx1101, skip-gfx1102, skip-gfx1200, skip-gfx1201, skip-gfx1250] # not supported by arch
 
 GlobalParameters:
+  SyncsPerBenchmark: 1
+  # SyncsPerBenchmark is not set to 0: this test uses LibraryLogic which
+  # requires benchmark data to build the library table.
   NumElementsToValidate: -1
   MinimumRequiredVersion: 5.0.0
   PrintLevel: 1
@@ -12,7 +15,6 @@ GlobalParameters:
   MaxWorkspaceSize: 13421772800
   DataInitTypeAlpha: 1
   DataInitTypeBeta: 0
-  NumElementsToValidate: -1
   BoundsCheck: 2
 
 BenchmarkProblems:
@@ -26,8 +28,8 @@ BenchmarkProblems:
       DestDataType: S
       ComputeDataType: S
       F32XdlMathOp: X
-      TransposeA: 0
-      TransposeB: 1
+      TransposeA: False
+      TransposeB: True
       UseBeta: True
       Batched: True
     - # BenchmarkProblemSizeGroup - Standard
@@ -43,7 +45,7 @@ BenchmarkProblems:
         - VectorWidthA: [1,2,4]
         - VectorWidthB: [1,2,4]
         - ScheduleIterAlg: [3]
-        - SourceSwap: [0,1]
+        - SourceSwap: [false, true]
       BenchmarkJoinParameters:
       BenchmarkFinalParameters:
         - ProblemSizes:
@@ -58,8 +60,8 @@ BenchmarkProblems:
       DestDataType: S
       ComputeDataType: S
       F32XdlMathOp: X
-      TransposeA: 1
-      TransposeB: 0
+      TransposeA: True
+      TransposeB: False
       UseBeta: True
       Batched: True
     - # BenchmarkProblemSizeGroup - Standard
@@ -75,7 +77,7 @@ BenchmarkProblems:
         - VectorWidthA: [1,2,4]
         - VectorWidthB: [1,2,4]
         - ScheduleIterAlg: [3]
-        - SourceSwap: [0,1]
+        - SourceSwap: [false, true]
         - LocalReadVectorWidth: [1,2,4]
       BenchmarkJoinParameters:
       BenchmarkFinalParameters:

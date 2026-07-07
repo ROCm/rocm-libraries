@@ -2,6 +2,26 @@
 
 Full documentation for hipCUB is available at [https://rocm.docs.amd.com/projects/hipCUB/en/latest/](https://rocm.docs.amd.com/projects/hipCUB/en/latest/).
 
+## hipCUB 4.5.0 for ROCm 7.14
+
+### Added
+
+* gfx1250 support
+
+### Upcoming changes
+
+* CCCL 2.8.x compatibility is deprecated. hipCUB and rocThrust will be brought forward to CCCL 3.0.x compatibility in an upcoming version.
+
+## Since last release ROCm 7.12
+
+### Optimizations
+
+* Reduced build times for unit tests.
+
+### Resolved issues
+
+* Fixed more memory leak issues with some unit tests.
+
 ## hipCUB-4.3.0 for ROCm 7.12
 
 ### Added

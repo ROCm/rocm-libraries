@@ -39,6 +39,18 @@ namespace rocRoller
             return false;
         }
 
+        bool Value::isEXEC() const
+        {
+            auto context = m_context.lock();
+            if(context && IsSpecial(m_regType))
+            {
+                return (
+                    (context->kernel()->wavefront_size() == 64 && m_regType == Type::EXEC)
+                    || (context->kernel()->wavefront_size() == 32 && m_regType == Type::EXEC_LO));
+            }
+            return false;
+        }
+
         /**
          * @brief Yields RegisterId for the registers associated with this allocation
          *

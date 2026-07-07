@@ -8,7 +8,9 @@
 
 #include "ck_tile/builder/testing/conv/ck_tile.hpp"
 #include "ck_tile/host/device_prop.hpp"
-#include "profiler/grouped_convolution_backward_weight_tile_algs.hpp"
+#ifdef CK_TILE_DISPATCHER
+#include "profiler/grouped_convolution_backward_weight_tile_dispatcher_algs.hpp"
+#endif
 #include "profiler/tile_profiler_utils.hpp"
 
 #include "profiler_operation_registry.hpp"
@@ -24,7 +26,7 @@ enum struct ConvLayout
     NGCHW_GKCYX_NGKHW, // 4
 };
 
-std::ostream& operator<<(std::ostream& os, const ConvLayout& layout)
+std::ostream& operator<<([[clang::lifetimebound]] std::ostream& os, const ConvLayout& layout)
 {
     using ck::operator<<;
     switch(layout)
@@ -61,7 +63,7 @@ enum struct ConvDataType
     F32_F32_F32_COMP_TF32 // 6
 };
 
-std::ostream& operator<<(std::ostream& os, const ConvDataType& data_type)
+std::ostream& operator<<([[clang::lifetimebound]] std::ostream& os, const ConvDataType& data_type)
 {
     using ck::operator<<;
     switch(data_type)
@@ -121,7 +123,10 @@ namespace ckt = ck_tile::builder::test;
 namespace ckp = ck_tile::builder::profiling;
 
 template <auto SIGNATURE>
-int call_profiler(const ckt::Args<SIGNATURE>& args, const std::string& split_k, bool time_kernel)
+int call_profiler(const ckt::Args<SIGNATURE>& args,
+                  const std::string& split_k,
+                  bool do_verification,
+                  bool time_kernel)
 {
     auto inputs  = ckt::alloc_inputs(args);
     auto outputs = ckt::alloc_outputs(args);
@@ -141,7 +146,9 @@ int call_profiler(const ckt::Args<SIGNATURE>& args, const std::string& split_k, 
                                    0 /*log_level*/,
                                    5 /*cold_iters*/,
                                    50 /*nrepeat_*/,
-                                   true /*is_gpu_timer_*/});
+                                   true /*is_gpu_timer_*/,
+                                   time_kernel /*flush_cache*/},
+            do_verification);
     if(time_kernel)
     {
         std::cout << "\nBest configuration parameters:" << "\n\tname: " << op_name
@@ -161,10 +168,11 @@ int profile_grouped_conv_bwd_weight_tile(int argc, char* argv[])
         return 1;
     }
 
-    const auto data_type      = static_cast<ConvDataType>(std::stoi(argv[2]));
-    const auto layout         = static_cast<ConvLayout>(std::stoi(argv[3]));
-    const bool time_kernel    = std::stoi(argv[7]);
-    const int num_dim_spatial = std::stoi(argv[8]);
+    const auto data_type       = static_cast<ConvDataType>(std::stoi(argv[2]));
+    const auto layout          = static_cast<ConvLayout>(std::stoi(argv[3]));
+    const bool do_verification = std::stoi(argv[4]);
+    const bool time_kernel     = std::stoi(argv[7]);
+    const int num_dim_spatial  = std::stoi(argv[8]);
 
     // 8 for control, 1 for num_dim_spatial, 4 for G/N/K/C, and 6 * num_dim_spatial, 1 for split-K
     if(argc != 8 + 1 + 4 + 6 * num_dim_spatial + 1)
@@ -198,6 +206,7 @@ int profile_grouped_conv_bwd_weight_tile(int argc, char* argv[])
                 return call_profiler<SIGNATURE>(
                     ckp::parse_conv_args<SIGNATURE>(conv_params_start_idx, argv),
                     split_k,
+                    do_verification,
                     time_kernel);
             }
             else if(data_type == ConvDataType::BF16_BF16_BF16)
@@ -206,6 +215,16 @@ int profile_grouped_conv_bwd_weight_tile(int argc, char* argv[])
                 return call_profiler<SIGNATURE>(
                     ckp::parse_conv_args<SIGNATURE>(conv_params_start_idx, argv),
                     split_k,
+                    do_verification,
+                    time_kernel);
+            }
+            else if(data_type == ConvDataType::F32_F32_F32)
+            {
+                constexpr auto SIGNATURE = ckp::SIGNATURE_NHWGC_FP32_BWD_WEIGHT;
+                return call_profiler<SIGNATURE>(
+                    ckp::parse_conv_args<SIGNATURE>(conv_params_start_idx, argv),
+                    split_k,
+                    do_verification,
                     time_kernel);
             }
         }
@@ -217,6 +236,7 @@ int profile_grouped_conv_bwd_weight_tile(int argc, char* argv[])
                 return call_profiler<SIGNATURE>(
                     ckp::parse_conv_args<SIGNATURE>(conv_params_start_idx, argv),
                     split_k,
+                    do_verification,
                     time_kernel);
             }
             else if(data_type == ConvDataType::BF16_BF16_BF16)
@@ -225,6 +245,16 @@ int profile_grouped_conv_bwd_weight_tile(int argc, char* argv[])
                 return call_profiler<SIGNATURE>(
                     ckp::parse_conv_args<SIGNATURE>(conv_params_start_idx, argv),
                     split_k,
+                    do_verification,
+                    time_kernel);
+            }
+            else if(data_type == ConvDataType::F32_F32_F32)
+            {
+                constexpr auto SIGNATURE = ckp::SIGNATURE_NDHWGC_FP32_BWD_WEIGHT;
+                return call_profiler<SIGNATURE>(
+                    ckp::parse_conv_args<SIGNATURE>(conv_params_start_idx, argv),
+                    split_k,
+                    do_verification,
                     time_kernel);
             }
         }

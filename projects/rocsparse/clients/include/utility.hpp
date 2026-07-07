@@ -29,12 +29,13 @@
 #pragma once
 #ifndef UTILITY_HPP
 #define UTILITY_HPP
-
 #include "rocsparse_clients_float16.hpp"
 #include "rocsparse_clients_routine_trace.hpp"
+#ifdef ROCSPARSE_DEBUGGING
+#include "rocsparse_clients_test_hip_debug_wrappers.hpp"
+#endif
 #include "rocsparse_matrix.hpp"
 #include "rocsparse_test.hpp"
-
 #include <hip/hip_runtime_api.h>
 #include <vector>
 
@@ -767,6 +768,21 @@ public:
         {
             throw(status);
         }
+    }
+
+    template <memory_mode::value_t MODE, typename T, typename I = rocsparse_int>
+    explicit rocsparse_local_spmat(bell_matrix<MODE, T, I>& h)
+        : rocsparse_local_spmat(h.m,
+                                h.n,
+                                h.bdir,
+                                h.bdim,
+                                h.width,
+                                h.ind,
+                                h.val,
+                                get_indextype<I>(),
+                                h.base,
+                                get_datatype<T>())
+    {
     }
 
     rocsparse_local_spmat(int64_t              m,

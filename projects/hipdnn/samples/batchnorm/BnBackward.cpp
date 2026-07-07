@@ -1,6 +1,7 @@
 // Copyright © Advanced Micro Devices, Inc., or its affiliates.
 // SPDX-License-Identifier:  MIT
 
+#include <cstdio>
 #include <iostream>
 #include <string>
 #include <unordered_map>
@@ -9,6 +10,7 @@
 #include <hipdnn_frontend.hpp>
 #include <hipdnn_test_sdk/utilities/CpuFpReferenceBatchnorm.hpp>
 #include <hipdnn_test_sdk/utilities/CpuFpReferenceValidation.hpp>
+#include <hipdnn_test_sdk/utilities/TensorDiff.hpp>
 #include <hipdnn_test_sdk/utilities/TestTolerances.hpp>
 
 #include "../utils/Helpers.hpp"
@@ -25,10 +27,10 @@ bool SampleRunner::operator()(const TensorLayout& layout)
     std::cout << "Running batch normalization backwards graph " << inputType << " [" << layout
               << "]" << (config.cpuValidation ? " (with CPU validation)" : "") << "...\n";
 
-    int64_t n = 16; // BATCH SIZE
-    int64_t c = 16; // CHANNELS (FEATURES)
-    int64_t h = 16; // HEIGHT (SPATIAL DIMENSION)
-    int64_t w = 16; // WIDTH (SPATIAL DIMENSION)
+    const int64_t n = 16; // BATCH SIZE
+    const int64_t c = 16; // CHANNELS (FEATURES)
+    const int64_t h = 16; // HEIGHT (SPATIAL DIMENSION)
+    const int64_t w = 16; // WIDTH (SPATIAL DIMENSION)
 
     auto graph = std::make_shared<graph::Graph>();
     graph->set_io_data_type(inputType)
@@ -49,7 +51,7 @@ bool SampleRunner::operator()(const TensorLayout& layout)
     dscale->set_output(true).set_data_type(intermediateType);
     dbias->set_output(true).set_data_type(intermediateType);
 
-    HIPDNN_FE_CHECK(graph->build(handle));
+    HIPDNN_FE_CHECK_SKIPPABLE(graph->build(handle));
     std::cout << "Graph build successful.\n";
 
     utilities::Tensor<InputType> dyTensor(dy->get_dim(), layout);
@@ -110,6 +112,7 @@ bool SampleRunner::operator()(const TensorLayout& layout)
                                                                       &savedInvVarTensor);
 
         auto tolerance = hipdnn_test_sdk::utilities::batchnorm::getToleranceBackward<InputType>();
+        auto floatTolerance = static_cast<float>(tolerance);
 
         auto dxValidator
             = hipdnn_test_sdk::utilities::CpuFpReferenceValidation<InputType>(tolerance, tolerance);
@@ -117,14 +120,25 @@ bool SampleRunner::operator()(const TensorLayout& layout)
             = hipdnn_test_sdk::utilities::CpuFpReferenceValidation<IntermediateType>(
                 static_cast<IntermediateType>(tolerance), static_cast<IntermediateType>(tolerance));
 
-        bool dxValid = dxValidator.allClose(dxRefTensor, dxTensor);
-        bool dscaleValid = dscaleDbiasValidator.allClose(dscaleRefTensor, dscaleTensor);
-        bool dbiasValid = dscaleDbiasValidator.allClose(dbiasRefTensor, dbiasTensor);
-
         std::cout << "CPU reference validation:\n";
-        std::cout << "  dx: " << (dxValid ? "successful" : "failed") << "\n";
-        std::cout << "  dscale: " << (dscaleValid ? "successful" : "failed") << "\n";
-        std::cout << "  dbias: " << (dbiasValid ? "successful" : "failed") << "\n";
+        const bool dxValid = hipdnn_test_sdk::utilities::validateAndReport<InputType>(
+            std::cout, "dx", dxValidator, dxRefTensor, dxTensor, floatTolerance, floatTolerance);
+        const bool dscaleValid
+            = hipdnn_test_sdk::utilities::validateAndReport<IntermediateType>(std::cout,
+                                                                              "dscale",
+                                                                              dscaleDbiasValidator,
+                                                                              dscaleRefTensor,
+                                                                              dscaleTensor,
+                                                                              floatTolerance,
+                                                                              floatTolerance);
+        const bool dbiasValid
+            = hipdnn_test_sdk::utilities::validateAndReport<IntermediateType>(std::cout,
+                                                                              "dbias",
+                                                                              dscaleDbiasValidator,
+                                                                              dbiasRefTensor,
+                                                                              dbiasTensor,
+                                                                              floatTolerance,
+                                                                              floatTolerance);
 
         validationPassed = dxValid && dscaleValid && dbiasValid;
     }
@@ -152,21 +166,26 @@ bool SampleRunner::operator()(const TensorLayout& layout)
 
 int main(int argc, char* argv[])
 {
-    auto config = parseCommandLineArgs(argc, argv);
-
-    auto [handle, handleError] = createHipdnnHandle();
-    HIPDNN_FE_CHECK(handleError);
-
-    bool allPassed = run(SampleRunner{*handle, config});
-
-    if(allPassed)
+    try
     {
-        std::cout << "All batch normalization backward runs completed successfully.\n";
-        return 0;
-    }
-    else
-    {
+        auto config = parseCommandLineArgs(argc, argv);
+
+        auto [handle, handleError] = createHipdnnHandle();
+        HIPDNN_FE_CHECK(handleError);
+
+        const bool allPassed = run(SampleRunner{*handle, config});
+
+        if(allPassed)
+        {
+            std::cout << "All batch normalization backward runs completed successfully.\n";
+            return 0;
+        }
         std::cout << "One or more batch normalization backward runs failed validation.\n";
+        return 1;
+    }
+    catch(const std::exception& e)
+    {
+        std::fprintf(stderr, "Unhandled exception: %s\n", e.what());
         return 1;
     }
 }

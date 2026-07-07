@@ -676,6 +676,7 @@ TYPED_TEST(VectorTests, TestVectorResizing)
 
   ASSERT_EQ(v.size(), 0lu);
 
+#ifndef ADDRESS_SANITIZER_BUILD
   // depending on sizeof(T), we will receive one
   // of two possible exceptions
   try
@@ -691,10 +692,15 @@ TYPED_TEST(VectorTests, TestVectorResizing)
   } // end catch
 
   ASSERT_EQ(v.size(), 0lu);
+#endif
 }
 
 TYPED_TEST(VectorTests, TestVectorReserving)
 {
+#ifdef ADDRESS_SANITIZER_BUILD
+  GTEST_SKIP() << "Skipping test due to memory constraints in address sanitizer build.";
+#endif
+  
   using Vector = typename TestFixture::input_type;
 
   SCOPED_TRACE(testing::Message() << "with device_id= " << test::set_device_from_ctest());
@@ -711,6 +717,7 @@ TYPED_TEST(VectorTests, TestVectorReserving)
 
   ASSERT_EQ(v.capacity(), old_capacity);
 
+#ifndef ADDRESS_SANITIZER_BUILD
   try
   {
     v.reserve(std::numeric_limits<size_t>::max());
@@ -721,6 +728,7 @@ TYPED_TEST(VectorTests, TestVectorReserving)
   {}
 
   ASSERT_EQ(v.capacity(), old_capacity);
+#endif
 }
 
 TEST(VectorTests, TestVectorUninitialisedCopy)

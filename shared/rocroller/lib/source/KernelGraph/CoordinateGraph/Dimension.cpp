@@ -199,8 +199,6 @@ namespace rocRoller
             , miTileSizes{miTileSizes.empty() ? subTileSizes : miTileSizes}
             , swizzleTileSizes{swizzleTileSizes.empty() ? subTileSizes : swizzleTileSizes}
         {
-            if(this->memoryType == MemoryType::LDS)
-                this->memoryType = MemoryType::WAVE_LDS;
             AssertFatal(layoutType != LayoutType::None, "Invalid layout type.");
         }
 
@@ -409,6 +407,7 @@ namespace rocRoller
         DEFAULT_DIM_NAME(Workgroup);
         DEFAULT_DIM_NAME(Workitem);
         DEFAULT_DIM_NAME(VGPR);
+        DEFAULT_DIM_NAME(VGPRBlockSet);
         DEFAULT_DIM_NAME(VGPRBlockNumber);
         DEFAULT_DIM_NAME(VGPRBlockIndex);
         DEFAULT_DIM_NAME(LDS);

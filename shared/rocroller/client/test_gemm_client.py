@@ -212,6 +212,7 @@ architecture:
   ArchString: gfxunknown
   Xnack: false
   Sramecc: false
+  AsicRevisionId: -1
 mac_m: 64
 mac_n: 64
 mac_k: 64
@@ -224,6 +225,9 @@ workgroup_size_y: 2
 workgroupMappingDim: -1
 workgroupRemapXCC: false
 workgroupRemapXCCValue: -1
+workgroup_cluster_size_x: 0
+workgroup_cluster_size_y: 0
+workgroup_cluster_size_z: 0
 load_A: BufferToLDSViaVGPR
 load_B: BufferToLDSViaVGPR
 padLDS_A: [0, 0]
@@ -254,6 +258,7 @@ types:
   scaleShuffleTileA: []
   scaleShuffleTileB: []
   scaleSkipPermlane: None
+  pretileA: []
   pretileB: []
 tailLoops: true
 streamK: None
@@ -276,6 +281,7 @@ architecture:
   ArchString: gfx90a
   Xnack: false
   Sramecc: false
+  AsicRevisionId: -1
 mac_m: 64
 mac_n: 64
 mac_k: 64
@@ -288,6 +294,9 @@ workgroup_size_y: 2
 workgroupMappingDim: -1
 workgroupRemapXCC: false
 workgroupRemapXCCValue: -1
+workgroup_cluster_size_x: 0
+workgroup_cluster_size_y: 0
+workgroup_cluster_size_z: 0
 load_A: BufferToLDSViaVGPR
 load_B: BufferToLDSViaVGPR
 padLDS_A: [0, 0]
@@ -319,6 +328,7 @@ types:
   scaleShuffleTileA: []
   scaleShuffleTileB: []
   scaleSkipPermlane: None
+  pretileA: []
   pretileB: []
 loadScale_A: BufferToVGPR
 loadScale_B: BufferToVGPR
@@ -339,6 +349,7 @@ architecture:
   ArchString: gfx1201
   Xnack: false
   Sramecc: false
+  AsicRevisionId: -1
 mac_m: 64
 mac_n: 64
 mac_k: 64
@@ -351,6 +362,9 @@ workgroup_size_y: 2
 workgroupMappingDim: -1
 workgroupRemapXCC: false
 workgroupRemapXCCValue: -1
+workgroup_cluster_size_x: 0
+workgroup_cluster_size_y: 0
+workgroup_cluster_size_z: 0
 load_A: BufferToLDSViaVGPR
 load_B: BufferToLDSViaVGPR
 padLDS_A: [0, 0]
@@ -382,6 +396,7 @@ types:
   scaleShuffleTileA: []
   scaleShuffleTileB: []
   scaleSkipPermlane: None
+  pretileA: []
   pretileB: []
 loadScale_A: BufferToVGPR
 loadScale_B: BufferToVGPR
@@ -786,6 +801,12 @@ def test_gemm_options(tmp_path):
     assert post["swizzleTileSize"]["k"] == 7
     assert post["swizzleTileSize"]["n"] == 11
     assert post["swizzleTileSize"]["l"] == 13
+
+    # pretileA
+    post = run_and_load_example_yaml(
+        [gemm, "example", example, "--wgts=256x256x256", "--pretileA=64x128"]
+    )
+    assert post["types"]["pretileA"] == [64, 128]
 
     # pretileB
     post = run_and_load_example_yaml(

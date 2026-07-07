@@ -43,10 +43,12 @@
 #include "rocprim/device/detail/lookback_scan_state.hpp"
 #include "rocprim/device/detail/ordered_block_id.hpp"
 
-BEGIN_ROCPRIM_NAMESPACE
-
 /// \addtogroup devicemodule
 /// @{
+
+BEGIN_ROCPRIM_NAMESPACE
+
+#ifndef DOXYGEN_SHOULD_SKIP_THIS // Do not document
 
 namespace detail
 {
@@ -363,6 +365,8 @@ inline hipError_t partition_impl(void*                       temporary_storage,
 
 } // namespace detail
 
+#endif // DOXYGEN_SHOULD_SKIP_THIS
+
 /// \brief Two-way parallel select primitive for device level using selection predicate.
 ///
 /// Performs a device-wide partition using selection predicate. Partition copies the values from
@@ -414,6 +418,8 @@ inline hipError_t partition_impl(void*                       temporary_storage,
 /// In this example a device-level two-way partition operation is performed on an array of integer
 /// values, even values are copied into the selected output and odd values are copied into rejected
 /// output.
+///
+/// The full example is [on GitHub](https://github.com/ROCm/rocm-libraries/tree/develop/projects/rocprim/example/rocprim/device/example_device_partition.cpp).
 ///
 /// \code{.cpp}
 /// #include <rocprim/rocprim.hpp>///
@@ -1102,9 +1108,9 @@ inline hipError_t partition_three_way(void*                       temporary_stor
                                                select_second_part_op);
 }
 
+END_ROCPRIM_NAMESPACE
+
 /// @}
 // end of group devicemodule
-
-END_ROCPRIM_NAMESPACE
 
 #endif // ROCPRIM_DEVICE_DEVICE_PARTITION_HPP_

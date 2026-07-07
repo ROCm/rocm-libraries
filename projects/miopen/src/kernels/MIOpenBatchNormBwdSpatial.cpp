@@ -159,9 +159,6 @@ struct MIOpenBatchNormBwdSpatialHIPImpl<0, FpType, FpPrecType, FpAccumType>
     static constexpr unsigned int nloopm = nloop - 1;
     static constexpr unsigned int snhw   = nloopm * segihw;
 
-    static constexpr unsigned int lcl_data_size =
-        mio_bn_config::use_amdgcn ? mio_bn_config::lds_gcn_size : mio_bn_config::lds_size;
-
     constexpr __forceinline__ __device__ void operator()(const FpType* __restrict x_in,
                                                          const FpType* __restrict dy_in,
                                                          FpType* __restrict dx_out,
@@ -245,28 +242,11 @@ struct MIOpenBatchNormBwdSpatialHIPImpl<0, FpType, FpPrecType, FpAccumType>
 
         __syncthreads();
 
-        __shared__ FpAccumType lcl_data_x[lcl_data_size];
-        __shared__ FpAccumType lcl_data_y[lcl_data_size];
-        if constexpr(mio_bn_config::use_amdgcn)
-        {
-            miopen::reduction::gcn_reduce2<FpAccumType, lcl_data_size>(
-                reinterpret_cast<FpAccumType&>(mean),
-                reinterpret_cast<FpAccumType&>(variance),
-                static_cast<FpAccumType>(INHW),
-                lcl_data_x,
-                lcl_data_y,
-                lid);
-        }
-        else
-        {
-            miopen::reduction::lds_reduce2<FpAccumType, lcl_data_size>(
-                reinterpret_cast<FpAccumType&>(mean),
-                reinterpret_cast<FpAccumType&>(variance),
-                static_cast<FpAccumType>(INHW),
-                lcl_data_x,
-                lcl_data_y,
-                lid);
-        }
+        miopen::reduction::reduce2<FpAccumType, mio_bn_config::lds_size>(
+            reinterpret_cast<FpAccumType&>(mean),
+            reinterpret_cast<FpAccumType&>(variance),
+            static_cast<FpAccumType>(INHW),
+            lid);
 
         variance = fma(-mean, mean, variance);
         if(variance < 0)
@@ -322,28 +302,11 @@ struct MIOpenBatchNormBwdSpatialHIPImpl<0, FpType, FpPrecType, FpAccumType>
 
         __syncthreads();
 
-        __shared__ FpAccumType lcl_data_x2[lcl_data_size];
-        __shared__ FpAccumType lcl_data_y2[lcl_data_size];
-        if constexpr(mio_bn_config::use_amdgcn)
-        {
-            miopen::reduction::gcn_reduce2<FpAccumType, lcl_data_size>(
-                reinterpret_cast<FpAccumType&>(ds),
-                reinterpret_cast<FpAccumType&>(db),
-                FpAccumType(1.0),
-                lcl_data_x2,
-                lcl_data_y2,
-                lid);
-        }
-        else
-        {
-            miopen::reduction::lds_reduce2<FpAccumType, lcl_data_size>(
-                reinterpret_cast<FpAccumType&>(ds),
-                reinterpret_cast<FpAccumType&>(db),
-                FpAccumType(1.0),
-                lcl_data_x2,
-                lcl_data_y2,
-                lid);
-        }
+        miopen::reduction::reduce2<FpAccumType, mio_bn_config::lds_size>(
+            reinterpret_cast<FpAccumType&>(ds),
+            reinterpret_cast<FpAccumType&>(db),
+            FpAccumType(1.0),
+            lid);
 
         if(lid < segment)
         {
@@ -387,8 +350,14 @@ struct MIOpenBatchNormBwdSpatialHIPImpl<0, FpType, FpPrecType, FpAccumType>
 template <typename FpType, typename FpPrecType, typename FpAccumType>
 struct MIOpenBatchNormBwdSpatialHIPImpl<1, FpType, FpPrecType, FpAccumType>
 {
-    static constexpr unsigned int read_size  = mio_config::layout_nhwc ? 1 : 4;
-    static constexpr unsigned int write_size = mio_config::layout_nhwc ? 1 : 2;
+    // For NCHW layout, the read/write loops process flattened NHW positions with vectorized
+    // memory accesses. When HW is not a multiple of the vector size, the last access in a
+    // channel crosses into the next channel's memory, corrupting results with data computed
+    // using the wrong channel's statistics. Fall back to scalar access when HW is not aligned.
+    static constexpr unsigned int read_size =
+        (!mio_config::layout_nhwc && mio_bn_config::hw % 4 == 0) ? 4 : 1;
+    static constexpr unsigned int write_size =
+        (!mio_config::layout_nhwc && mio_bn_config::hw % 2 == 0) ? 2 : 1;
 
     using fp_read_vec_type       = typename mapped_vector_type<FpType, read_size>::type;
     using fp_prec_read_vec_type  = typename mapped_vector_type<FpPrecType, read_size>::type;
@@ -407,9 +376,6 @@ struct MIOpenBatchNormBwdSpatialHIPImpl<1, FpType, FpPrecType, FpAccumType>
     static constexpr unsigned int remout =
         mio_bn_config::nhw - ((mio_bn_config::nhw / chunk) * chunk);
     static constexpr unsigned int lessout = mio_bn_config::nhw - remout;
-
-    static constexpr unsigned int lcl_data_size =
-        mio_bn_config::use_amdgcn ? mio_bn_config::lds_gcn_size : mio_bn_config::lds_size;
 
     __forceinline__ __device__ unsigned int getTensorIndex(unsigned int loopIndex)
     {
@@ -509,28 +475,11 @@ struct MIOpenBatchNormBwdSpatialHIPImpl<1, FpType, FpPrecType, FpAccumType>
         __syncthreads();
 
         // REDUCE MEAN AND VARIANCE -----------------------
-        __shared__ FpAccumType lcl_data_x[lcl_data_size];
-        __shared__ FpAccumType lcl_data_y[lcl_data_size];
-        if constexpr(mio_bn_config::use_amdgcn)
-        {
-            miopen::reduction::gcn_reduce2<FpAccumType, lcl_data_size>(
-                reinterpret_cast<FpAccumType&>(mean),
-                reinterpret_cast<FpAccumType&>(variance),
-                static_cast<FpAccumType>(INHW),
-                lcl_data_x,
-                lcl_data_y,
-                lid);
-        }
-        else
-        {
-            miopen::reduction::lds_reduce2<FpAccumType, lcl_data_size>(
-                reinterpret_cast<FpAccumType&>(mean),
-                reinterpret_cast<FpAccumType&>(variance),
-                static_cast<FpAccumType>(INHW),
-                lcl_data_x,
-                lcl_data_y,
-                lid);
-        }
+        miopen::reduction::reduce2<FpAccumType, mio_bn_config::lds_size>(
+            reinterpret_cast<FpAccumType&>(mean),
+            reinterpret_cast<FpAccumType&>(variance),
+            static_cast<FpAccumType>(INHW),
+            lid);
 
         // REDUCTION COMPLETE ---------------------------
         variance = fma(-mean, mean, variance);
@@ -548,7 +497,7 @@ struct MIOpenBatchNormBwdSpatialHIPImpl<1, FpType, FpPrecType, FpAccumType>
         constexpr unsigned int readUnrollHint =
             mio_bn_config::n > mio_bn_config::loop_unroll_max_n ? 4 : 2;
         static_unroll_count<unsigned int, 0, less4, grprd, readUnrollHint>{[&](unsigned int k) {
-            unsigned int l = k + (lid << 2 * (1 - mio_config::layout_nhwc));
+            unsigned int l = k + (lid * read_size);
             if(l < less4)
             {
                 unsigned int index     = getTensorIndex(l);
@@ -569,7 +518,7 @@ struct MIOpenBatchNormBwdSpatialHIPImpl<1, FpType, FpPrecType, FpAccumType>
 
         if constexpr(rem4 > 0)
         {
-            unsigned int index = getTensorIndex((lid << 2 * (1 - mio_config::layout_nhwc)) + less4);
+            unsigned int index = getTensorIndex((lid * read_size) + less4);
             if(index + read_size - 1 < mio_bn_config::nchw)
             {
                 fp_read_vec_type xread = *(reinterpret_cast<const fp_read_vec_type*>(x_in + index));
@@ -589,28 +538,11 @@ struct MIOpenBatchNormBwdSpatialHIPImpl<1, FpType, FpPrecType, FpAccumType>
 
         __syncthreads();
 
-        __shared__ FpAccumType lcl_data_x2[lcl_data_size];
-        __shared__ FpAccumType lcl_data_y2[lcl_data_size];
-        if constexpr(mio_bn_config::use_amdgcn)
-        {
-            miopen::reduction::gcn_reduce2<FpAccumType, lcl_data_size>(
-                reinterpret_cast<FpAccumType&>(ds),
-                reinterpret_cast<FpAccumType&>(db),
-                cast<FpAccumType>(1.0),
-                lcl_data_x2,
-                lcl_data_y2,
-                lid);
-        }
-        else
-        {
-            miopen::reduction::lds_reduce2<FpAccumType, lcl_data_size>(
-                reinterpret_cast<FpAccumType&>(ds),
-                reinterpret_cast<FpAccumType&>(db),
-                cast<FpAccumType>(1.0),
-                lcl_data_x2,
-                lcl_data_y2,
-                lid);
-        }
+        miopen::reduction::reduce2<FpAccumType, mio_bn_config::lds_size>(
+            reinterpret_cast<FpAccumType&>(ds),
+            reinterpret_cast<FpAccumType&>(db),
+            cast<FpAccumType>(1.0),
+            lid);
 
         __syncthreads();
 
@@ -707,8 +639,6 @@ struct MIOpenBatchNormBwdSpatialHIPImpl<1, FpType, FpPrecType, FpAccumType>
 template <typename FpType, typename FpPrecType, typename FpAccumType>
 struct MIOpenBatchNormBwdSpatialHIPImpl<3, FpType, FpPrecType, FpAccumType>
 {
-    static constexpr unsigned int lcl_data_size =
-        mio_bn_config::use_amdgcn ? mio_bn_config::lds_gcn_size : mio_bn_config::lds_size;
 
     constexpr __forceinline__ __device__ void operator()(const FpType* __restrict x_in,
                                                          const FpType* __restrict dy_in,
@@ -782,28 +712,11 @@ struct MIOpenBatchNormBwdSpatialHIPImpl<3, FpType, FpPrecType, FpAccumType>
         }
 
         // REDUCE MEAN AND VARIANCE -----------------------
-        __shared__ FpAccumType lcl_data_x[lcl_data_size];
-        __shared__ FpAccumType lcl_data_y[lcl_data_size];
-        if constexpr(mio_bn_config::use_amdgcn)
-        {
-            miopen::reduction::gcn_reduce2<FpAccumType, lcl_data_size>(
-                reinterpret_cast<FpAccumType&>(mean),
-                reinterpret_cast<FpAccumType&>(variance),
-                static_cast<FpAccumType>(INHW),
-                lcl_data_x,
-                lcl_data_y,
-                lid);
-        }
-        else
-        {
-            miopen::reduction::lds_reduce2<FpAccumType, lcl_data_size>(
-                reinterpret_cast<FpAccumType&>(mean),
-                reinterpret_cast<FpAccumType&>(variance),
-                static_cast<FpAccumType>(INHW),
-                lcl_data_x,
-                lcl_data_y,
-                lid);
-        }
+        miopen::reduction::reduce2<FpAccumType, mio_bn_config::lds_size>(
+            reinterpret_cast<FpAccumType&>(mean),
+            reinterpret_cast<FpAccumType&>(variance),
+            static_cast<FpAccumType>(INHW),
+            lid);
 
         // REDUCTION COMPLETE -----------------------
         variance = fma(-mean, mean, variance);
@@ -859,28 +772,11 @@ struct MIOpenBatchNormBwdSpatialHIPImpl<3, FpType, FpPrecType, FpAccumType>
 
         __syncthreads();
 
-        __shared__ FpAccumType lcl_data_x2[lcl_data_size];
-        __shared__ FpAccumType lcl_data_y2[lcl_data_size];
-        if constexpr(mio_bn_config::use_amdgcn)
-        {
-            miopen::reduction::gcn_reduce2<FpAccumType, lcl_data_size>(
-                reinterpret_cast<FpAccumType&>(ds),
-                reinterpret_cast<FpAccumType&>(db),
-                cast<FpAccumType>(1.0),
-                lcl_data_x2,
-                lcl_data_y2,
-                lid);
-        }
-        else
-        {
-            miopen::reduction::lds_reduce2<FpAccumType, lcl_data_size>(
-                reinterpret_cast<FpAccumType&>(ds),
-                reinterpret_cast<FpAccumType&>(db),
-                cast<FpAccumType>(1.0),
-                lcl_data_x2,
-                lcl_data_y2,
-                lid);
-        }
+        miopen::reduction::reduce2<FpAccumType, mio_bn_config::lds_size>(
+            reinterpret_cast<FpAccumType&>(ds),
+            reinterpret_cast<FpAccumType&>(db),
+            cast<FpAccumType>(1.0),
+            lid);
 
         __syncthreads();
 
@@ -1043,12 +939,9 @@ __launch_bounds__(MIO_BN_GRP0_FINAL* MIO_BN_GRP1_FINAL* MIO_BN_GRP2_FINAL)
     }
     else
     {
-        __shared__ fp_accum_c_type lcl_data_x[MIO_BN_GRP0_FINAL * MIO_BN_GRP1_FINAL *
-                                              MIO_BN_GRP2_FINAL / SHARED_MEMORY_SCALE];
-        __shared__ fp_accum_c_type lcl_data_y[MIO_BN_GRP0_FINAL * MIO_BN_GRP1_FINAL *
-                                              MIO_BN_GRP2_FINAL / SHARED_MEMORY_SCALE];
-        miopen::reduction::gcn_reduce2(
-            mean, variance, toAccumCType(INHW), lcl_data_x, lcl_data_y, ylid + zlid * ygrp_sz);
+        constexpr auto grp_final_total = MIO_BN_GRP0_FINAL * MIO_BN_GRP1_FINAL * MIO_BN_GRP2_FINAL;
+        miopen::reduction::reduce2<fp_accum_c_type, grp_final_total>(
+            mean, variance, toAccumCType(INHW), ylid + zlid * ygrp_sz);
     }
 
     variance    = miopen::fma(-mean, mean, variance);
@@ -1145,10 +1038,8 @@ extern "C" __global__ void __launch_bounds__(
     }
     else
     {
-        __shared__ fp_accum_c_type lcl_data_x[mio_bn_config::lds_gcn_size];
-        __shared__ fp_accum_c_type lcl_data_y[mio_bn_config::lds_gcn_size];
-        miopen::reduction::gcn_reduce2(
-            mean, variance, toAccumCType(1.0), lcl_data_x, lcl_data_y, ylid + zlid * ygrp_sz);
+        miopen::reduction::reduce2<fp_accum_c_type, mio_bn_config::lds_size>(
+            mean, variance, toAccumCType(1.0), ylid + zlid * ygrp_sz);
     }
 
     if(ylid == 0 && zlid == 0)
@@ -1308,10 +1199,8 @@ extern "C" __global__ void __launch_bounds__(
     }
     else
     {
-        __shared__ fp_accum_c_type lcl_data_x[mio_bn_config::lds_gcn_size];
-        __shared__ fp_accum_c_type lcl_data_y[mio_bn_config::lds_gcn_size];
-        miopen::reduction::gcn_reduce2(
-            dscale, dbias, toAccumCType(1.0), lcl_data_x, lcl_data_y, ylid + zlid * ygrp_sz);
+        miopen::reduction::reduce2<fp_accum_c_type, mio_bn_config::lds_size>(
+            dscale, dbias, toAccumCType(1.0), ylid + zlid * ygrp_sz);
     }
 
     if(ylid == 0 && zlid == 0)
@@ -1410,12 +1299,9 @@ __launch_bounds__(MIO_BN_GRP0_FINAL* MIO_BN_GRP1_FINAL* MIO_BN_GRP2_FINAL)
     }
     else
     {
-        __shared__ fp_accum_c_type lcl_data_x[MIO_BN_GRP0_FINAL * MIO_BN_GRP1_FINAL *
-                                              MIO_BN_GRP2_FINAL / SHARED_MEMORY_SCALE];
-        __shared__ fp_accum_c_type lcl_data_y[MIO_BN_GRP0_FINAL * MIO_BN_GRP1_FINAL *
-                                              MIO_BN_GRP2_FINAL / SHARED_MEMORY_SCALE];
-        miopen::reduction::gcn_reduce2(
-            dscale, dbias, toAccumCType(1.0), lcl_data_x, lcl_data_y, ylid + zlid * ygrp_sz);
+        constexpr auto grp_final_total = MIO_BN_GRP0_FINAL * MIO_BN_GRP1_FINAL * MIO_BN_GRP2_FINAL;
+        miopen::reduction::reduce2<fp_accum_c_type, grp_final_total>(
+            dscale, dbias, toAccumCType(1.0), ylid + zlid * ygrp_sz);
     }
 
     if(ylid == 0 && zlid == 0)

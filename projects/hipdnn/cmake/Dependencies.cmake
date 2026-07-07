@@ -14,7 +14,7 @@ if(HIPDNN_NO_DOWNLOAD)
 endif()
 
 # Dependencies where the local version should be used, if available
-set(_hipdnn_all_local_deps GTest flatbuffers spdlog nlohmann_json)
+set(_hipdnn_all_local_deps GTest flatbuffers spdlog nlohmann_json nanobind tsl-robin-map)
 # Dependencies where we never look for a local version
 set(_hipdnn_all_remote_deps)
 
@@ -39,8 +39,16 @@ function(hipdnn_add_dependency dep_name)
         else()
             message(
                 STATUS
-                    "Found ${dep_name}: ${${dep_name}_DIR} (found version \"${${dependency_name}_VERSION}\")"
+                    "Found ${dep_name}: ${${dep_name}_DIR} (found version \"${${dep_name}_VERSION}\")"
             )
+            set(${dep_name}_FOUND ${${dep_name}_FOUND} PARENT_SCOPE)
+            # Only export ${dep_name}_VERSION when the package config actually
+            # populated it. Some vendored or repackaged distributions skip
+            # setting it; exporting an empty string would mask the unset state
+            # in callers that branch on `if(DEFINED dep_VERSION)`.
+            if(DEFINED ${dep_name}_VERSION)
+                set(${dep_name}_VERSION "${${dep_name}_VERSION}" PARENT_SCOPE)
+            endif()
             foreach(VAR IN LISTS ${dep_name}_EXPORT_VARS)
                 set(${VAR} ${${VAR}} PARENT_SCOPE)
             endforeach()
@@ -158,7 +166,7 @@ endfunction()
 
 # Fetches FlatBuffers
 function(_fetch_flatbuffers VERSION HASH)
-    _determine_git_tag(v 25.9.23)
+    _determine_git_tag(v "${_HIPDNN_DEFAULT_FLATBUFFERS_VERSION}")
 
     _save_var(FLATBUFFERS_BUILD_FLATC)
     _save_var(FLATBUFFERS_INSTALL)
@@ -169,7 +177,7 @@ function(_fetch_flatbuffers VERSION HASH)
 
     set(FLATBUFFERS_BUILD_FLATC ON)
     set(FLATBUFFERS_INSTALL ON)
-    set(FLATBUFFERS_BUILD_FLATLIB OFF)
+    set(FLATBUFFERS_BUILD_FLATLIB ON)
     set(FLATBUFFERS_BUILD_TESTS OFF)
     set(FLATBUFFERS_BUILD_FLATHASH OFF)
     set(FLATBUFFERS_ENABLE_PCH ON)
@@ -191,11 +199,6 @@ function(_fetch_flatbuffers VERSION HASH)
     _restore_var(FLATBUFFERS_BUILD_FLATHASH)
     _restore_var(FLATBUFFERS_ENABLE_PCH)
 
-    set(HIP_DNN_FLATBUFFERS_INCLUDE_DIR ${flatbuffers_SOURCE_DIR}/include
-        CACHE PATH "Path to flatbuffers include"
-    )
-
-    _exclude_from_all(${flatbuffers_SOURCE_DIR})
     _mark_targets_as_system(${flatbuffers_SOURCE_DIR})
 endfunction()
 
@@ -211,7 +214,9 @@ function(_fetch_spdlog VERSION HASH)
         TRUE
     )
 
+    set(_HIPDNN_DISABLE_ROCM_CHECKS TRUE)
     fetchcontent_makeavailable(spdlog)
+    set(_HIPDNN_DISABLE_ROCM_CHECKS FALSE)
 
     set(HIP_DNN_SPDLOG_INCLUDE_DIR ${spdlog_SOURCE_DIR}/include CACHE PATH "Path to spdlog include")
 
@@ -228,15 +233,48 @@ function(_fetch_nlohmann_json VERSION HASH)
         json URL https://github.com/nlohmann/json/releases/download/v3.12.0/json.tar.xz
     )
 
+    set(JSON_Install ON CACHE BOOL "Install nlohmann_json CMake package files" FORCE)
+
     fetchcontent_makeavailable(json)
 
     set(HIP_DNN_NLOHMANN_JSON_INCLUDE_DIR ${json_SOURCE_DIR}/include
         CACHE PATH "Path to nlohmann::json include"
     )
 
-    _exclude_from_all(${json_SOURCE_DIR})
     _mark_targets_as_system(${json_SOURCE_DIR})
 
+endfunction()
+
+# Fetches tsl-robin-map
+function(_fetch_tsl-robin-map VERSION HASH)
+    fetchcontent_declare(
+        tsl-robin-map
+        GIT_REPOSITORY https://github.com/Tessil/robin-map.git
+        GIT_TAG v${VERSION}
+        DOWNLOAD_EXTRACT_TIMESTAMP TRUE
+    )
+
+    fetchcontent_makeavailable(tsl-robin-map)
+
+    _exclude_from_all(${tsl-robin-map_SOURCE_DIR})
+    _mark_targets_as_system(${tsl-robin-map_SOURCE_DIR})
+endfunction()
+
+# Fetches nanobind
+function(_fetch_nanobind VERSION HASH)
+    set(NB_USE_SUBMODULE_DEPS OFF)
+
+    fetchcontent_declare(
+        nanobind
+        GIT_REPOSITORY https://github.com/wjakob/nanobind.git
+        GIT_TAG v${VERSION}
+        DOWNLOAD_EXTRACT_TIMESTAMP TRUE
+    )
+
+    fetchcontent_makeavailable(nanobind)
+
+    _exclude_from_all(${nanobind_SOURCE_DIR})
+    _mark_targets_as_system(${nanobind_SOURCE_DIR})
 endfunction()
 
 # Utility functions, pulled from rocroller repo

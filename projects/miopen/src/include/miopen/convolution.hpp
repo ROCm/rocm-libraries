@@ -225,6 +225,11 @@ struct ConvolutionDescriptor : miopenConvolutionDescriptor
     MIOPEN_INTERNALS_EXPORT std::size_t
     GetWorkSpaceSize(ExecutionContext ctx, const conv::ProblemDescription& problem) const;
 
+    MIOPEN_INTERNALS_EXPORT void GetWorkSpaceSizeRange(ExecutionContext ctx,
+                                                       const conv::ProblemDescription& problem,
+                                                       std::size_t* minWorkspaceSize,
+                                                       std::size_t* maxWorkspaceSize) const;
+
     MIOPEN_INTERNALS_EXPORT void FindConvFwdAlgorithm(const Handle& handle,
                                                       const TensorDescriptor& xDesc,
                                                       ConstData_t x,
@@ -404,14 +409,6 @@ struct ConvolutionDescriptor : miopenConvolutionDescriptor
 private:
     void ValidateTensors(const ConvTensors& conv_tensors) const;
 };
-
-MIOPEN_INTERNALS_EXPORT void ConvolutionBackwardBias(const Handle& handle,
-                                                     const void* alpha,
-                                                     const TensorDescriptor& dyDesc,
-                                                     ConstData_t dy,
-                                                     const void* beta,
-                                                     const TensorDescriptor& dbDesc,
-                                                     Data_t db);
 
 MIOPEN_INTERNALS_EXPORT Invoker LoadOrPrepareInvoker(const ExecutionContext& ctx,
                                                      const conv::ProblemDescription& problem,

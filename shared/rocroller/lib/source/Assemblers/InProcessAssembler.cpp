@@ -67,7 +67,8 @@ namespace rocRoller
         size_t            dataOutSize   = 0;
         auto const        arch          = GPUArchitectureLibrary::getInstance()->GetArch(target);
         auto const        wavefrontSize = arch.GetCapability(GPUCapability::DefaultWavefrontSize);
-        std::string const targetID      = fmt::format("amdgcn-amd-amdhsa--{}", target.toString());
+        std::string const targetID
+            = fmt::format("amdgcn-amd-amdhsa--{}", target.toAssemblerString());
 
         amd_comgr_data_t        assemblyData, execData;
         amd_comgr_data_set_t    assemblyDataSet, relocatableDataSet, execDataSet;
@@ -78,7 +79,8 @@ namespace rocRoller
 
         const char* codeGenOptions[]
             = {"-mcode-object-version=5",
-               (wavefrontSize == 64) ? "-mwavefrontsize64" : "-mno-wavefrontsize64"};
+               (wavefrontSize == 64) ? "-mwavefrontsize64" : "-mno-wavefrontsize64",
+               "-Wno-unused-command-line-argument"};
         size_t codeGenOptionsCount = sizeof(codeGenOptions) / sizeof(codeGenOptions[0]);
 
         // Initialize Comgr data handles

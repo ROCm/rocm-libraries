@@ -603,6 +603,14 @@ def main():
     os_detect()
     args = parse_args()
 
+    # If the user (or container image) has set CMAKE_GENERATOR=Ninja in the
+    # environment, cmake will generate build.ninja regardless of what flags we
+    # pass. Honor that here so the configure and build steps stay in sync;
+    # otherwise the Linux default path runs `make` against a Ninja build dir.
+    if not args.ninja and os.environ.get("CMAKE_GENERATOR", "").lower() == "ninja":
+        print("CMAKE_GENERATOR=Ninja detected in environment; enabling --ninja")
+        args.ninja = True
+
     if args.ci_labels != "":
         label_modifiers( arg_into_list(args.ci_labels) )
     if args.ci_gfx != "":

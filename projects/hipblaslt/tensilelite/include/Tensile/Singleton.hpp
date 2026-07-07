@@ -28,6 +28,8 @@
 
 #include <mutex>
 
+#include <tensilelitehost/export.h>
+
 namespace TensileLite
 {
     template <typename Class>
@@ -44,3 +46,4 @@ namespace TensileLite
     private:
     };
 } // namespace TensileLite
+

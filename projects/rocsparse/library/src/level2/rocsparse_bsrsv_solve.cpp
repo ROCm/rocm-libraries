@@ -1,6 +1,6 @@
 /*! \file */
 /* ************************************************************************
- * Copyright (C) 2020-2025 Advanced Micro Devices, Inc. All rights Reserved.
+ * Copyright (C) 2020-2026 Advanced Micro Devices, Inc. All rights Reserved.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -104,7 +104,7 @@ namespace rocsparse
         y,                                                            \
         done_array,                                                   \
         (rocsparse_int*)trm_info->get_row_map(),                      \
-        (rocsparse_int*)bsrsv_info->get_zero_pivot(),                 \
+        (rocsparse_int*)bsrsv_info->get_position(),                   \
         descr->base,                                                  \
         descr->diag_type,                                             \
         dir,                                                          \
@@ -127,7 +127,7 @@ namespace rocsparse
         y,                                                            \
         done_array,                                                   \
         (rocsparse_int*)trm_info->get_row_map(),                      \
-        (rocsparse_int*)bsrsv_info->get_zero_pivot(),                 \
+        (rocsparse_int*)bsrsv_info->get_position(),                   \
         descr->base,                                                  \
         descr->diag_type,                                             \
         dir,                                                          \
@@ -174,7 +174,7 @@ namespace rocsparse
         y,                                                            \
         done_array,                                                   \
         (rocsparse_int*)trm_info->get_row_map(),                      \
-        (rocsparse_int*)bsrsv_info->get_zero_pivot(),                 \
+        (rocsparse_int*)bsrsv_info->get_position(),                   \
         descr->base,                                                  \
         descr->diag_type,                                             \
         dir,                                                          \
@@ -197,7 +197,7 @@ namespace rocsparse
         y,                                                            \
         done_array,                                                   \
         (rocsparse_int*)trm_info->get_row_map(),                      \
-        (rocsparse_int*)bsrsv_info->get_zero_pivot(),                 \
+        (rocsparse_int*)bsrsv_info->get_position(),                   \
         descr->base,                                                  \
         descr->diag_type,                                             \
         dir,                                                          \
@@ -212,10 +212,10 @@ namespace rocsparse
                             const T* __restrict__ bsr_val,
                             rocsparse_int block_dim,
                             const T* __restrict__ x,
-                            T* __restrict__ y,
+                            T* y,
                             int* __restrict__ done_array,
                             rocsparse_int* __restrict__ map,
-                            rocsparse_int* __restrict__ zero_pivot,
+                            rocsparse_int*       zero_pivot,
                             rocsparse_index_base idx_base,
                             rocsparse_diag_type  diag_type,
                             rocsparse_direction  dir,
@@ -247,10 +247,10 @@ namespace rocsparse
                             const T* __restrict__ bsr_val,
                             rocsparse_int block_dim,
                             const T* __restrict__ x,
-                            T* __restrict__ y,
+                            T* y,
                             int* __restrict__ done_array,
                             rocsparse_int* __restrict__ map,
-                            rocsparse_int* __restrict__ zero_pivot,
+                            rocsparse_int*       zero_pivot,
                             rocsparse_index_base idx_base,
                             rocsparse_diag_type  diag_type,
                             rocsparse_direction  dir,
@@ -282,10 +282,10 @@ namespace rocsparse
                              const T* __restrict__ bsr_val,
                              rocsparse_int block_dim,
                              const T* __restrict__ x,
-                             T* __restrict__ y,
+                             T* y,
                              int* __restrict__ done_array,
                              rocsparse_int* __restrict__ map,
-                             rocsparse_int* __restrict__ zero_pivot,
+                             rocsparse_int*       zero_pivot,
                              rocsparse_index_base idx_base,
                              rocsparse_diag_type  diag_type,
                              rocsparse_direction  dir,
@@ -317,10 +317,10 @@ namespace rocsparse
                              const T* __restrict__ bsr_val,
                              rocsparse_int block_dim,
                              const T* __restrict__ x,
-                             T* __restrict__ y,
+                             T* y,
                              int* __restrict__ done_array,
                              rocsparse_int* __restrict__ map,
-                             rocsparse_int* __restrict__ zero_pivot,
+                             rocsparse_int*       zero_pivot,
                              rocsparse_index_base idx_base,
                              rocsparse_diag_type  diag_type,
                              rocsparse_direction  dir,
@@ -376,7 +376,7 @@ namespace rocsparse
         ptr += ((sizeof(int) * mb - 1) / 256 + 1) * 256;
 
         // Initialize buffers
-        RETURN_IF_HIP_ERROR(hipMemsetAsync(done_array, 0, sizeof(int) * mb, stream));
+        RETURN_IF_HIP_ERROR(rocsparse_hipMemsetAsync(done_array, 0, sizeof(int) * mb, stream));
 
         auto                   bsrsv_info = info->get_bsrsv_info();
         rocsparse::trm_info_t* trm_info   = info->get_bsrsv_info(trans, descr->fill_mode);
@@ -390,7 +390,7 @@ namespace rocsparse
         {
             RETURN_IF_ROCSPARSE_ERROR(rocsparse::assign_async(
                 1,
-                reinterpret_cast<rocsparse_int*>(bsrsv_info->get_zero_pivot()),
+                reinterpret_cast<rocsparse_int*>(bsrsv_info->get_position()),
                 std::numeric_limits<rocsparse_int>::max(),
                 stream));
         }

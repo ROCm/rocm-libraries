@@ -48,7 +48,7 @@ void BatchNormInferenceGPU(const miopen::Handle& handle,
                            ConstData_t x,
                            const miopen::TensorDescriptor& yDesc,
                            Data_t y,
-                           const miopen::TensorDescriptor& bnScaleBiasMeanVarDesc,
+                           const miopen::TensorDescriptor& /*bnScaleBiasMeanVarDesc*/,
                            ConstData_t bnScale,
                            ConstData_t bnBias,
                            ConstData_t estimatedMean,
@@ -60,11 +60,11 @@ void BatchNormInferenceGPU(const miopen::Handle& handle,
     std::tie(n, c, h, w) = miopen::tien<4>(xDesc.GetLengths());
 
     // Setup the kernel launch parameters
-    if(xDesc.GetLayout_t() != yDesc.GetLayout_t())
+    if(xDesc.GetLayoutEnum() != yDesc.GetLayoutEnum())
     {
         throw std::runtime_error("Input and output tensor layout must be the same");
     }
-    bool isLayoutNHWC       = (xDesc.GetLayout_t() == miopenTensorNHWC);
+    const bool isLayoutNHWC = (xDesc.GetLayoutEnum() == miopenTensorNHWC);
     unsigned int in_cstride = h * w;
     size_t max_localsize    = 256;
     size_t xlocalsize, xgridsize, ylocalsize, ygridsize, zlocalsize, zgridsize;
@@ -110,6 +110,7 @@ void BatchNormInferenceGPU(const miopen::Handle& handle,
         {"MIO_BN_GRP2", zlocalsize},
         {"MIO_BN_GFX103X", (miopen::StartsWith(handle.GetDeviceName(), "gfx103") ? "1" : "0")},
         {"MIO_BN_GFX110X", (miopen::StartsWith(handle.GetDeviceName(), "gfx110") ? "1" : "0")},
+        {"MIO_BN_GFX115X", (miopen::StartsWith(handle.GetDeviceName(), "gfx115") ? "1" : "0")},
         {"MIO_BN_GFX120X", (miopen::StartsWith(handle.GetDeviceName(), "gfx120") ? "1" : "0")},
         {"MIO_LAYOUT_NHWC", static_cast<int>(isLayoutNHWC)},
         {"MIO_BN_VECTORIZE", static_cast<int>(vectorsize > 1)},

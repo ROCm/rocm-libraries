@@ -163,7 +163,7 @@ const ck_tile::stream_config stream_config{
 
 #define COMMON_ARGS                                                                              \
     init_method, static_cast<uint32_t>(ck_tile::EnvValue(CK_TILE_ENV(CK_TILE_TEST_SEED))), 1, 0, \
-        stream_config
+        1, stream_config
 
 auto EnableTestIf(bool condition)
 {
@@ -297,6 +297,7 @@ TEST(TestCkTileFmhaFwd, AppendKvWithBatchEffLensShouldFail)
         static_cast<uint32_t>(ck_tile::EnvValue(CK_TILE_ENV(CK_TILE_TEST_SEED))),
         0,
         1, // init_sink
+        0, // pack_gqa
         stream_config);
     ASSERT_EQ(result, fwd_result::invalid_args);
 }
@@ -342,6 +343,7 @@ TEST(TestCkTileFmhaFwd, SplitKvWithGroupPaddingShouldFail)
         static_cast<uint32_t>(ck_tile::EnvValue(CK_TILE_ENV(CK_TILE_TEST_SEED))),
         0,
         1, // init_sink
+        0, // pack_gqa
         stream_config);
     ASSERT_EQ(result, fwd_result::invalid_args);
 }
@@ -386,6 +388,7 @@ TEST(TestCkTileFmhaFwd, PagedKvWithGroupPaddingShouldFail)
         static_cast<uint32_t>(ck_tile::EnvValue(CK_TILE_ENV(CK_TILE_TEST_SEED))),
         0,
         1, // init_sink
+        0, // pack_gqa
         stream_config);
     ASSERT_EQ(result, fwd_result::invalid_args);
 }
@@ -601,6 +604,14 @@ TEST_P(Dropout, DataTypeConfig)
     auto [drop_seed, drop_offset, drop_prefs]                     = drop_seed_offset_prefs;
     auto [batch, nhead, nhead_k, seqlen_q, seqlen_k, mask_str]    = dims_mask;
 
+#if CK_TILE_WORKAROUND_ROCM_7_12_FP16_DROPOUT_MISCOMPILE
+    if constexpr(std::is_same_v<DataTypeConfig, FmhaFwdFp16>)
+    {
+        if(hdim_q > 128 && mode == mode_enum::batch)
+            GTEST_SKIP() << "Skipped: fp16 dropout d256 batch - compiler bug (ROCm >= 7.12)";
+    }
+#endif
+
     auto result = fmha_fwd_run<DataTypeConfig>(mode,
                                                batch,
                                                nhead,
@@ -727,6 +738,7 @@ INSTANTIATE_TEST_SUITE_P(TestCkTileFmhaFwd,
                                  Values(3, 4),
                                  Values(std::tuple{4, 3, 1, 200, 1024, "0"},
                                         std::tuple{2, 2, -1, 512, 2000, "0"},
+                                        std::tuple{2, 8, 2, 1, 1024, "0"},
                                         std::tuple{3, 2, -1, 230, 899, "t:128,128"})));
 
 TEST_P(SplitKV, DataTypeConfig)

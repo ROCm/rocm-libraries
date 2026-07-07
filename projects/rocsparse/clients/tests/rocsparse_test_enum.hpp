@@ -1,6 +1,6 @@
 /*! \file */
 /* ************************************************************************
-* Copyright (C) 2022-2025 Advanced Micro Devices, Inc. All rights Reserved.
+* Copyright (C) 2022-2026 Advanced Micro Devices, Inc. All rights Reserved.
 *
 * Permission is hereby granted, free of charge, to any person obtaining a copy
 * of this software and associated documentation files (the "Software"), to deal
@@ -30,9 +30,17 @@ static constexpr std::size_t countof2(T (&)[N])
 }
 
 // clang-format off
+#ifdef ROCSPARSE_WITH_ILDLT0
+#define ROCSPARSE_FOREACH_TEST_ENUM_ILDLT0    \
+  TRANSFORM_ROCSPARSE_TEST_ENUM(spildlt0)
+#else
+#define ROCSPARSE_FOREACH_TEST_ENUM_ILDLT0
+#endif
+
 #define ROCSPARSE_FOREACH_TEST_ENUM		                        \
   TRANSFORM_ROCSPARSE_TEST_ENUM(axpby)					        \
   TRANSFORM_ROCSPARSE_TEST_ENUM(axpyi)					        \
+  TRANSFORM_ROCSPARSE_TEST_ENUM(hip_debug)				\
   TRANSFORM_ROCSPARSE_TEST_ENUM(bsr2csr)				        \
   TRANSFORM_ROCSPARSE_TEST_ENUM(bsrgeam)				        \
   TRANSFORM_ROCSPARSE_TEST_ENUM(bsrgemm)			            \
@@ -76,6 +84,10 @@ static constexpr std::size_t countof2(T (&)[N])
   TRANSFORM_ROCSPARSE_TEST_ENUM(csrgemm)				        \
   TRANSFORM_ROCSPARSE_TEST_ENUM(csrgemm_reuse)			        \
   TRANSFORM_ROCSPARSE_TEST_ENUM(csric0)					        \
+  TRANSFORM_ROCSPARSE_TEST_ENUM(spic0)					        \
+  ROCSPARSE_FOREACH_TEST_ENUM_ILDLT0				        \
+  TRANSFORM_ROCSPARSE_TEST_ENUM(spilu0)					        \
+  TRANSFORM_ROCSPARSE_TEST_ENUM(sptrsv)					        \
   TRANSFORM_ROCSPARSE_TEST_ENUM(csricsv)				        \
   TRANSFORM_ROCSPARSE_TEST_ENUM(csritilu0)				        \
   TRANSFORM_ROCSPARSE_TEST_ENUM(csritilu0_ex)		            \

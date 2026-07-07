@@ -4,8 +4,8 @@
 #pragma once
 
 #include <gtest/gtest.h>
-#include <hipdnn_data_sdk/flatbuffer_utilities/GraphWrapper.hpp>
 #include <hipdnn_data_sdk/utilities/Workspace.hpp>
+#include <hipdnn_flatbuffers_sdk/flatbuffer_utilities/GraphWrapper.hpp>
 #include <hipdnn_frontend/Graph.hpp>
 #include <hipdnn_frontend/Utilities.hpp>
 #include <hipdnn_frontend/attributes/TensorAttributes.hpp>
@@ -13,6 +13,7 @@
 #include <hipdnn_plugin_sdk/PluginLogging.hpp>
 #include <hipdnn_test_sdk/utilities/CpuFpReferenceMiopenRmsValidation.hpp>
 #include <hipdnn_test_sdk/utilities/CpuFpReferenceValidation.hpp>
+#include <hipdnn_test_sdk/utilities/SdkFrontendTypeConversions.hpp>
 #include <hipdnn_test_sdk/utilities/VectorLoggingUtils.hpp>
 #include <hipdnn_test_sdk/utilities/cpu_graph_executor/CpuReferenceGraphExecutor.hpp>
 #include <hipdnn_test_sdk/utilities/cpu_graph_executor/GraphTensorBundle.hpp>
@@ -69,12 +70,30 @@ protected:
     virtual void runGraphTest(float tolerance) = 0;
 
 protected:
+    /// Predicate hook for derived fixtures to inspect errors returned from
+    /// engine-config-querying frontend calls (`Graph::build()`) and request a
+    /// skip. Returning a non-empty optional causes `verifyGraph()` to
+    /// `GTEST_SKIP()` with that string as the message prefix; the default is
+    /// `std::nullopt` so the subsequent `ASSERT_EQ(..., OK)` fires on any
+    /// error. The base harness intentionally has no knowledge of any specific
+    /// workaround -- subclasses own that mapping.
+    virtual std::optional<std::string>
+        shouldSkipOnEngineConfigResult(const hipdnn_frontend::Error& /*result*/)
+    {
+        return std::nullopt;
+    }
+
     void verifyGraph(hipdnn_frontend::graph::Graph& graph, unsigned int seed)
     {
         hipdnn_test_sdk::utilities::GraphTensorBundle gpuBundle, cpuBundle;
         std::vector<int64_t> outputTensorIds;
 
         auto result = graph.build(_handle);
+        if(auto skipReason = shouldSkipOnEngineConfigResult(result))
+        {
+            GTEST_SKIP() << *skipReason << " (graph.build): " << result.err_msg;
+        }
+        // Non-skip errors must still surface -- the next assertion is intentional.
         ASSERT_EQ(result.code, hipdnn_frontend::ErrorCode::OK) << result.err_msg;
 
         generateBundles(graph, cpuBundle, gpuBundle, outputTensorIds);
@@ -135,7 +154,9 @@ protected:
             _tensorIdToValidatorMap.insert(
                 {attr->get_uid(),
                  hipdnn_test_sdk::utilities::createAllCloseValidator(
-                     toSdkType(attr->get_data_type()), absoluteTolerance, relativeTolerance)});
+                     hipdnn_test_sdk::utilities::frontendToSdkDataType(attr->get_data_type()),
+                     absoluteTolerance,
+                     relativeTolerance)});
             _tensorIdToNameMap.insert({attr->get_uid(), attr->get_name()});
         });
     }
@@ -189,10 +210,11 @@ private:
     void executeCpuGraph(hipdnn_frontend::graph::Graph& graph,
                          hipdnn_test_sdk::utilities::GraphTensorBundle& bundle)
     {
-        auto flatbufferGraph = graph.buildFlatbufferOperationGraph();
+        auto [serializedGraph, serErr] = graph.to_binary();
+        ASSERT_TRUE(serErr.is_good()) << serErr.get_message();
 
         hipdnn_test_sdk::utilities::CpuReferenceGraphExecutor().execute(
-            flatbufferGraph.data(), flatbufferGraph.size(), bundle.toHostVariantPack());
+            serializedGraph.data(), serializedGraph.size(), bundle.toHostVariantPack());
     }
 
     std::string getOutputTensorName(int64_t tensorId)
@@ -213,8 +235,10 @@ private:
             return false;
         }
 
-        cpuBundle.tensors.insert({tensorId, createTensorFromAttribute(*tensorAttr)});
-        gpuBundle.tensors.insert({tensorId, createTensorFromAttribute(*tensorAttr)});
+        cpuBundle.tensors.insert(
+            {tensorId, hipdnn_test_sdk::utilities::createTensorFromAttribute(*tensorAttr)});
+        gpuBundle.tensors.insert(
+            {tensorId, hipdnn_test_sdk::utilities::createTensorFromAttribute(*tensorAttr)});
         _tensorIdToNameMap.insert({tensorId, tensorAttr->get_name()});
 
         return true;

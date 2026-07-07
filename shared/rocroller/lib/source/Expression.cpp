@@ -630,7 +630,7 @@ namespace rocRoller
 
         std::string toString(ResultType const& obj)
         {
-            return concatenate("{", obj.regType, ", ", obj.varType, "}");
+            return concatenate("{", obj.regType, ", ", obj.varType, ", ", obj.valueCount, "}");
         }
 
         std::ostream& operator<<(std::ostream& stream, ExpressionPtr const& expr)

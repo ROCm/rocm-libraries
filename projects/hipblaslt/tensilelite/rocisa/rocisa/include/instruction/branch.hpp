@@ -44,12 +44,22 @@ namespace rocisa
         {
         }
 
-        std::vector<InstructionInput> getParams() const
+        std::vector<InstructionInput> getParams() const override
         {
             return {labelName};
         }
 
-        std::string toString() const
+        std::vector<InstructionInput> getDstParams() const override
+        {
+            return {};
+        }
+
+        std::vector<InstructionInput> getSrcParams() const override
+        {
+            return {labelName};
+        }
+
+        virtual std::string toString() const override
         {
             return formatWithComment(instStr + " " + labelName);
         }
@@ -112,6 +122,25 @@ namespace rocisa
         }
     };
 
+    struct SAddPCI64_SIMM : public BranchInstruction
+    {
+        SAddPCI64_SIMM(const std::string& src, const std::string& comment = "")
+            : BranchInstruction(src, comment)
+        {
+            setInst("s_add_pc_i64");
+        }
+
+        SAddPCI64_SIMM(const SAddPCI64_SIMM& other)
+            : BranchInstruction(other)
+        {
+        }
+
+        std::shared_ptr<Item> clone() const override
+        {
+            return std::make_shared<SAddPCI64_SIMM>(*this);
+        }
+    };
+
     struct SCBranchVCCNZ : public BranchInstruction
     {
         SCBranchVCCNZ(const std::string& labelName, const std::string& comment = "")
@@ -152,6 +181,19 @@ namespace rocisa
 
     struct SSetPCB64 : public BranchInstruction
     {
+        // Optional long-branch target hint.
+        //
+        // When non-empty, this names the static label that the surrounding
+        // SLongBranch* helper sequence (s_getpc_b64 / s_add_i32 / s_add_u32 /
+        // s_addc_u32 / s_setpc_b64) is computing the address for. The
+        // StinkyTofu IR converter reads this field to wire a direct CFG edge
+        // instead of treating the s_setpc_b64 as an opaque indirect jump.
+        //
+        // This field is metadata only: it does NOT change toString() nor the
+        // emitted assembly. Empty string means "no hint" -- the instruction
+        // remains a generic indirect set-PC.
+        std::string longBranchLabel;
+
         SSetPCB64(const std::shared_ptr<Container>& src, const std::string& comment = "")
             : BranchInstruction("", comment)
             , srcs(src)
@@ -161,6 +203,7 @@ namespace rocisa
 
         SSetPCB64(const SSetPCB64& other)
             : BranchInstruction(other)
+            , longBranchLabel(other.longBranchLabel)
             , srcs(other.srcs ? other.srcs->clone() : nullptr)
         {
         }
@@ -168,6 +211,21 @@ namespace rocisa
         std::shared_ptr<Item> clone() const override
         {
             return std::make_shared<SSetPCB64>(*this);
+        }
+
+        std::vector<InstructionInput> getParams() const override
+        {
+            return {srcs};
+        }
+
+        std::vector<InstructionInput> getDstParams() const override
+        {
+            return {};
+        }
+
+        std::vector<InstructionInput> getSrcParams() const override
+        {
+            return {srcs};
         }
 
         std::string toString() const override
@@ -201,6 +259,21 @@ namespace rocisa
         std::shared_ptr<Item> clone() const override
         {
             return std::make_shared<SSwapPCB64>(*this);
+        }
+
+        std::vector<InstructionInput> getParams() const override
+        {
+            return {dst, srcs};
+        }
+
+        std::vector<InstructionInput> getDstParams() const override
+        {
+            return {dst};
+        }
+
+        std::vector<InstructionInput> getSrcParams() const override
+        {
+            return {srcs};
         }
 
         std::string toString() const override

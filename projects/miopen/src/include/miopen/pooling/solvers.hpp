@@ -305,22 +305,22 @@ struct PoolingFwdNCHWTransposingSolver
     using Problem      = miopen::pooling::ProblemDescription;
     using InvokeParams = miopen::pooling::FwdInvokeParams;
 
-    inline static auto GetTransposes()
+    inline static auto GetTransposes(const Problem& /*problem*/)
     {
         return std::array<ProblemTensorTransposeDescriptor<Problem, InvokeParams>, 2>{{
             {
                 &Problem::GetXDesc,
-                &Problem::GetXDesc,
                 &InvokeParams::xDesc,
-                {.as_input = &InvokeParams::x},
+                &InvokeParams::x, // x is input
+                nullptr,
                 "NCDHW",
                 true,
             },
             {
                 &Problem::GetYDesc,
-                &Problem::GetYDesc,
                 &InvokeParams::yDesc,
-                {.as_output = &InvokeParams::y},
+                nullptr,
+                &InvokeParams::y, // y is output
                 "NCDHW",
                 false,
             },
@@ -457,22 +457,22 @@ struct PoolingBwdNCHWTransposingSolver
     using Problem      = miopen::pooling::ProblemDescription;
     using InvokeParams = miopen::pooling::BwdInvokeParams;
 
-    inline static auto GetTransposes()
+    inline static auto GetTransposes(const Problem& /*problem*/)
     {
         return std::array<ProblemTensorTransposeDescriptor<Problem, InvokeParams>, 2>{{
             {
                 &Problem::GetXDesc,
-                &Problem::GetXDesc,
                 &InvokeParams::dxDesc,
-                {.as_output = &InvokeParams::dx},
+                nullptr,
+                &InvokeParams::dx, // dx is output
                 "NCDHW",
                 false,
             },
             {
                 &Problem::GetYDesc,
-                &Problem::GetYDesc,
                 &InvokeParams::dyDesc,
-                {.as_input = &InvokeParams::dy},
+                &InvokeParams::dy, // dy is input
+                nullptr,
                 "NCDHW",
                 true,
             },

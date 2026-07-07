@@ -34,10 +34,12 @@
 
 #include "detail/device_merge.hpp"
 
-BEGIN_ROCPRIM_NAMESPACE
-
 /// \addtogroup devicemodule
 /// @{
+
+BEGIN_ROCPRIM_NAMESPACE
+
+#ifndef DOXYGEN_SHOULD_SKIP_THIS // Do not document
 
 namespace detail
 {
@@ -217,6 +219,8 @@ inline hipError_t merge_impl(void*                temporary_storage,
 
 } // namespace detail
 
+#endif // DOXYGEN_SHOULD_SKIP_THIS
+
 /// \brief Parallel merge primitive for device level.
 ///
 /// \p merge function performs a device-wide merge.
@@ -257,6 +261,8 @@ inline hipError_t merge_impl(void*                temporary_storage,
 /// \returns \p hipSuccess (\p 0) after successful sort; otherwise a HIP runtime error of
 /// type \p hipError_t.
 ///
+/// The full example is [on GitHub](https://github.com/ROCm/rocm-libraries/tree/develop/projects/rocprim/example/rocprim/device/example_device_merge.cpp).
+///
 /// \par Example
 /// \parblock
 /// In this example a device-level ascending merge is performed on an array of
@@ -268,8 +274,8 @@ inline hipError_t merge_impl(void*                temporary_storage,
 /// // Prepare input and output (declare pointers, allocate device memory etc.)
 /// size_t input_size1;     // e.g., 4
 /// size_t input_size2;     // e.g., 4
-/// int * input1;           // e.g., [0, 1, 2, 3]
-/// int * input2;           // e.g., [0, 1, 2, 3]
+/// int * input1; // e.g., [0, 2, 4, 6]
+/// int * input2; // e.g., [1, 3, 5, 7]
 /// int * output;           // empty array of 8 elements
 ///
 /// size_t temporary_storage_size_bytes;
@@ -288,7 +294,7 @@ inline hipError_t merge_impl(void*                temporary_storage,
 ///     temporary_storage_ptr, temporary_storage_size_bytes,
 ///     input1, input2, output, input_size1, input_size2
 /// );
-/// // output: [0, 0, 1, 1, 2, 2, 3, 3]
+/// // output: [0, 1, 2, 3, 4, 5, 6, 7]
 /// \endcode
 /// \endparblock
 template<class Config = default_config,
@@ -454,9 +460,9 @@ inline hipError_t merge(void*                temporary_storage,
                                       debug_synchronous);
 }
 
+END_ROCPRIM_NAMESPACE
+
 /// @}
 // end of group devicemodule
-
-END_ROCPRIM_NAMESPACE
 
 #endif // ROCPRIM_DEVICE_DEVICE_MERGE_HPP_

@@ -39,10 +39,12 @@
 #include "detail/device_segmented_scan.hpp"
 #include "device_scan.hpp"
 
-BEGIN_ROCPRIM_NAMESPACE
-
 /// \addtogroup devicemodule
 /// @{
+
+BEGIN_ROCPRIM_NAMESPACE
+
+#ifndef DOXYGEN_SHOULD_SKIP_THIS // Do not document
 
 namespace detail
 {
@@ -141,6 +143,8 @@ inline hipError_t segmented_scan_impl(void*               temporary_storage,
 
 } // namespace detail
 
+#endif // DOXYGEN_SHOULD_SKIP_THIS
+
 /// \brief Parallel segmented inclusive scan primitive for device level.
 ///
 /// segmented_inclusive_scan function performs a device-wide inclusive scan operation
@@ -191,6 +195,8 @@ inline hipError_t segmented_scan_impl(void*               temporary_storage,
 /// In this example a device-level segmented inclusive min-scan operation is performed on
 /// an array of integer values (<tt>short</tt>s are scanned into <tt>int</tt>s) using custom operator.
 ///
+/// The full example is [on GitHub](https://github.com/ROCm/rocm-libraries/tree/develop/projects/rocprim/example/rocprim/device/example_device_segmented_scan.cpp).
+///
 /// \code{.cpp}
 /// #include <rocprim/rocprim.hpp>
 ///
@@ -219,7 +225,7 @@ inline hipError_t segmented_scan_impl(void*               temporary_storage,
 /// hipMalloc(&temporary_storage_ptr, temporary_storage_size_bytes);
 ///
 /// // perform scan
-/// rocprim::inclusive_scan(
+/// rocprim::segmented_inclusive_scan(
 ///     temporary_storage_ptr, temporary_storage_size_bytes,
 ///     input, output, segments, offsets, offsets + 1, min_op
 /// );
@@ -615,9 +621,9 @@ inline hipError_t segmented_exclusive_scan(void*               temporary_storage
         debug_synchronous);
 }
 
+END_ROCPRIM_NAMESPACE
+
 /// @}
 // end of group devicemodule
-
-END_ROCPRIM_NAMESPACE
 
 #endif // ROCPRIM_DEVICE_DEVICE_SEGMENTED_SCAN_HPP_

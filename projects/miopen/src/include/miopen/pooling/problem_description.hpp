@@ -66,8 +66,6 @@ struct ProblemDescription : ProblemDescriptionBase,
     const PoolingDescriptor& GetPooling() const { return pooling; }
     const TensorDescriptor& GetXDesc() const { return xDesc; }
     const TensorDescriptor& GetYDesc() const { return yDesc; }
-    TensorDescriptor& GetXDesc() { return xDesc; }
-    TensorDescriptor& GetYDesc() { return yDesc; }
 
     const TensorDescriptor& GetDXDesc() const
     {
@@ -187,8 +185,9 @@ private:
         {
         case Direction::Forward: return "Fwd";
         case Direction::Backward: return "Bwd";
-        default: MIOPEN_THROW(miopenStatusInvalidValue, "Wrong pooling direction provided");
         }
+
+        MIOPEN_THROW(miopenStatusInvalidValue, "Wrong pooling direction provided");
     }
     std::string GetModeStr() const
     {
@@ -197,8 +196,9 @@ private:
         case miopenPoolingMax: return "max";
         case miopenPoolingAverage: return "avg";
         case miopenPoolingAverageInclusive: return "avg_in";
-        default: MIOPEN_THROW(miopenStatusInvalidValue, "Wrong pooling mode provided");
         }
+
+        MIOPEN_THROW(miopenStatusInvalidValue, "Wrong pooling mode provided");
     }
 };
 

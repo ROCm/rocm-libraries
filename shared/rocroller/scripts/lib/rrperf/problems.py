@@ -194,6 +194,10 @@ class GEMMSolution:
     workgroupRemapXCC: bool = False
     workgroupRemapXCCValue: int = -1
 
+    workgroup_cluster_size_x: int = 0
+    workgroup_cluster_size_y: int = 0
+    workgroup_cluster_size_z: int = 0
+
     load_A: str = "BufferToLDSViaVGPR"
     load_B: str = "BufferToLDSViaVGPR"
     store: str = "VGPRToGlobalMemoryViaLDSWithBuffer"
@@ -217,6 +221,8 @@ class GEMMSolution:
     swizzleTileSize: MKNLTuple = MKNLTuple(0, 0, 0, 0)
     prefetchScale: bool = False
     pretileScale: bool = False
+
+    ldsBankSwizzle: str = "None"
 
     streamK: str = "None"
     numWGs: int = 0
