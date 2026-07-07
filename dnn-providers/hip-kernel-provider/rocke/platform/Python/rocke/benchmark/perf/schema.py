@@ -1,6 +1,6 @@
 # Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
 # SPDX-License-Identifier: MIT
-"""Measurement-record schema — the contract every rocke.benchmark.perf component speaks.
+"""Measurement-record schema - the contract every rocke.benchmark.perf component speaks.
 
 One record per (run, kernel, shape, config), composed from several primitives:
 
@@ -15,7 +15,7 @@ One record per (run, kernel, shape, config), composed from several primitives:
   captured_counters : which normalized counters this arch/run actually captured
   verify    : correctness (ok, max_abs_diff)
 
-`counters`/`resources`/`derived` are nullable — a record may carry only wall
+`counters`/`resources`/`derived` are nullable - a record may carry only wall
 (profiler unavailable) or only resources (no-GPU occupancy check). Keep the schema
 **additive-only** so old records stay readable. Stdlib only.
 """
@@ -37,11 +37,11 @@ IDENTITY_KEYS = ("arch", "kernel_name", "shape")
 PRIMARY_METRIC = "busy_cycles"      # from record["counters"]
 FALLBACK_METRIC = "ms_median"       # from record["wall"]
 
-# Static resource fields (from ELF notes; no GPU) — the occupancy primitive.
+# Static resource fields (from ELF notes; no GPU) - the occupancy primitive.
 RESOURCE_KEYS = ("vgpr", "agpr", "sgpr", "lds_bytes", "occupancy")
 
 # Fields that, when present, form the diagnostic panel a regression report shows
-# (dynamic counters + static resources — both help localize a change).
+# (dynamic counters + static resources - both help localize a change).
 PANEL_KEYS = ("busy_fraction", "l2_hit_rate", "waves", "wait_cycles", "occupancy", "lds_bytes")
 
 _REQUIRED_TOP = ("schema", "run", "kernel", "wall")
@@ -97,7 +97,7 @@ def identity(record: Mapping[str, Any]) -> tuple:
 
 
 def metric(record: Mapping[str, Any]) -> tuple[Optional[float], str]:
-    """Return (value, which) — the primary cycle metric if present, else wall.
+    """Return (value, which) - the primary cycle metric if present, else wall.
 
     `which` is "busy_cycles" or "ms_median" so callers/reports know which was used
     (never compare a cycles number against a wall number).
