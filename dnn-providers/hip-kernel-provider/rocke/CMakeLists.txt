@@ -34,7 +34,7 @@ if(ROCKE_BUILD_PYENV)
         OUTPUT "${ROCKE_PYENV_STAMP}"
         # --system-site-packages so the venv inherits the system ROCm torch
         # (it is never reinstalled here).
-        COMMAND "${Python3_EXECUTABLE}" -m venv --system-site-packages "${ROCKE_PYENV_DIR}"
+        COMMAND "${Python3_EXECUTABLE}" -m venv --system-site-packages --copies "${ROCKE_PYENV_DIR}"
         COMMAND "${ROCKE_PYENV_PYTHON}" -m pip install -q --upgrade pip "setuptools>=61" wheel
         # editable_mode=compat writes a .pth pointing at the source root, so even
         # newly added modules are importable without reinstalling.
