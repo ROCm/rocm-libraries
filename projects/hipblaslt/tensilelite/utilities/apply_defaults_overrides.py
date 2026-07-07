@@ -73,6 +73,12 @@ def compute_defaults(solutions: list[dict]) -> dict:
     n = len(solutions)
 
     for key in sorted(all_keys):
+        # Only keys present in EVERY solution are eligible to be defaulted.
+        # Otherwise expansion (defaults + overrides) would resurrect the key on
+        # the solutions that legitimately omitted it, breaking the round trip.
+        if any(key not in s for s in solutions):
+            continue
+
         counter: Counter = Counter()
         for s in solutions:
             if key in s:
@@ -117,8 +123,12 @@ def load_yaml(path: str) -> list:
 
 
 def dump_yaml(data: list, path: str) -> None:
-    with open(path, "w") as f:
+    # Write to a temp file in the same directory then atomically replace, so a
+    # crash/full-disk mid-write cannot leave the original file truncated.
+    tmp = f"{path}.tmp"
+    with open(tmp, "w") as f:
         yaml.dump(data, f, default_flow_style=None, Dumper=yaml.SafeDumper)
+    os.replace(tmp, path)
 
 
 # ---------------------------------------------------------------------------
