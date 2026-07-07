@@ -1832,9 +1832,47 @@ _ACC_LDS_ELEM_BYTES = 2
 
 
 def _kv_lds_elem_bytes(spec) -> int:
+    # Byte width of one K/V element as stored in LDS: 1 for the fp8 cache, else 2 (bf16/fp16).
     if getattr(spec, "kv_storage_dtype", None) in ("fp8", "bf8", "e4m3", "e5m2"):
         return 1
     return 2  # bf16 / fp16 K/V in LDS
+
+
+def _out_stripe_cols(head_size: int) -> int:
+    # Epilogue Acc_lds column count: the narrow 32-col stripe for d<=64, else HD.
+    return 32 if head_size <= 64 else head_size
+
+
+def _tiled_2d_lds_bytes(
+    *,
+    tile_size: int,
+    head_size: int,
+    block_m: int,
+    kv_elem_bytes: int,
+    k_slots: int,
+    v_slots: int = 1,
+    include_q_lds: bool = False,
+    include_p_lds: bool = False,
+    v_pad: int = 0,
+) -> int:
+    """Static LDS footprint (bytes) of a tiled-2D attention geometry -- the single
+    source of truth for the per-buffer tile arithmetic shared by the gfx942
+    admission gate (conservative: ``Q_lds``/``P_lds`` staged) and the gfx950
+    register-PV budget resolver (exact: Q/P^T register-resident). Callers pick
+    which buffers are LDS-resident; the tile math (K/V slots, the ``block_m<=2T``
+    Q alias, the ``OUT_STRIPE`` rule, the 16-bit Acc staging width) lives here so
+    the models cannot silently drift."""
+    k_bytes = k_slots * tile_size * head_size * kv_elem_bytes
+    v_bytes = v_slots * (tile_size + v_pad) * head_size * kv_elem_bytes
+    p_bytes = block_m * (tile_size + 8) * kv_elem_bytes if include_p_lds else 0
+    # Q aliases the K slab when it fits under the double-buffer window.
+    q_bytes = (
+        block_m * head_size * kv_elem_bytes
+        if include_q_lds and block_m > 2 * tile_size
+        else 0
+    )
+    acc_bytes = block_m * _out_stripe_cols(head_size) * _ACC_LDS_ELEM_BYTES
+    return k_bytes + v_bytes + p_bytes + q_bytes + acc_bytes
 
 
 def _acc_lds_bytes(spec) -> int:
@@ -1843,20 +1881,27 @@ def _acc_lds_bytes(spec) -> int:
     register-PV path this is the *only* LDS beyond the K/V tiles (Q, P^T and the
     running softmax stats are register-resident), so it is the full auxiliary term.
     Scales with ``num_warps``, ``block_m_per_warp`` and ``head_size``."""
-    out_stripe_cols = 32 if spec.head_size <= 64 else spec.head_size
     block_m = spec.num_warps * spec.block_m_per_warp
-    return block_m * out_stripe_cols * _ACC_LDS_ELEM_BYTES
+    return block_m * _out_stripe_cols(spec.head_size) * _ACC_LDS_ELEM_BYTES
 
 
 def _lds_bytes_regpv(spec) -> int:
     """Exact LDS footprint of the register-PV 2D path: the K/V tiles plus the
-    epilogue Acc_lds. Verified against comgr for the D256 T=128 K-double geometry:
-    ``(2+1)*128*256*2 (K/V) + 16*256*2 (Acc) = 196608 + 8192 = 204800``."""
-    wb = _kv_lds_elem_bytes(spec)
-    kbuf = 1 if spec.use_k_single_buffer else 2
-    vbuf = 2 if spec.use_v_double_buffer else 1
-    kv_bytes = (kbuf + vbuf) * spec.tile_size * spec.head_size * wb
-    return kv_bytes + _acc_lds_bytes(spec)
+    epilogue Acc_lds (Q/P^T/O register-resident). Verified against comgr for the
+    D256 T=128 K-double geometry: ``(2+1)*128*256*2 (K/V) + 16*256*2 (Acc) =
+    196608 + 8192 = 204800``."""
+    return _tiled_2d_lds_bytes(
+        tile_size=spec.tile_size,
+        head_size=spec.head_size,
+        block_m=spec.num_warps * spec.block_m_per_warp,
+        kv_elem_bytes=_kv_lds_elem_bytes(spec),
+        # getattr: the gfx942 spec class declares fewer schedule fields than gfx950,
+        # so default the absent ones (K double-buffered, V single-buffered).
+        k_slots=1 if getattr(spec, "use_k_single_buffer", False) else 2,
+        v_slots=2 if getattr(spec, "use_v_double_buffer", False) else 1,
+        include_q_lds=False,  # register-PV keeps Q in registers
+        include_p_lds=False,  # register-PV keeps P^T in registers
+    )
 
 
 def _lds_capacity_bytes() -> int:
@@ -1867,24 +1912,29 @@ def _lds_capacity_bytes() -> int:
 
 
 def _ldsfix_single_k(spec):
+    """Candidate: drop K's second (prefetch) buffer. Returns ``(spec, None)`` on
+    success, or ``(None, reason)`` when the lever cannot apply -- the reason is
+    surfaced in the resolver's diagnostic rather than silently swallowed."""
     if spec.use_k_single_buffer:
-        return None
+        return None, "K already single-buffered"
     # K-single needs Q to fit the lone K slot: block_m <= tile_size.
     if spec.num_warps * spec.block_m_per_warp > spec.tile_size:
-        return None
+        return None, "block_m > tile_size (Q would not fit the lone K slot)"
     try:
-        return replace(spec, use_k_single_buffer=True)
-    except Exception:
-        return None
+        return replace(spec, use_k_single_buffer=True), None
+    except ValueError as e:  # __post_init__ rejected the new combo
+        return None, f"rejected by spec validation: {e}"
 
 
 def _ldsfix_tile64(spec):
+    """Candidate: shrink the KV tile to T=64. Returns ``(spec, None)`` or
+    ``(None, reason)`` (see :func:`_ldsfix_single_k`)."""
     if spec.tile_size <= 64:
-        return None
+        return None, "tile_size already <= 64"
     try:
-        return replace(spec, tile_size=64)
-    except Exception:
-        return None
+        return replace(spec, tile_size=64), None
+    except ValueError as e:  # __post_init__ rejected the new combo
+        return None, f"rejected by spec validation: {e}"
 
 
 def _resolve_lds_budget(spec):
@@ -1902,17 +1952,39 @@ def _resolve_lds_budget(spec):
     cap = _lds_capacity_bytes()
     if _lds_bytes_regpv(spec) <= cap:
         return spec
-    single_k = _ldsfix_single_k(spec)
-    candidates = [single_k, _ldsfix_tile64(spec)]
-    if single_k is not None:
-        candidates.append(_ldsfix_tile64(single_k))
-    for cand in candidates:
-        if cand is not None and _lds_bytes_regpv(cand) <= cap:
+
+    tried = []  # per-lever diagnostics, surfaced if nothing fits
+
+    def _consider(label, cand, why):
+        if cand is None:
+            tried.append(f"{label} n/a ({why})")
+            return None
+        used = _lds_bytes_regpv(cand)
+        if used <= cap:
             return cand
+        tried.append(f"{label} still {used} B > {cap} B")
+        return None
+
+    # Cheapest-first ladder: single-buffer K, then T=64, then both.
+    single_k, why = _ldsfix_single_k(spec)
+    hit = _consider("single-K", single_k, why)
+    if hit is not None:
+        return hit
+    t64, why = _ldsfix_tile64(spec)
+    hit = _consider("T=64", t64, why)
+    if hit is not None:
+        return hit
+    if single_k is not None:
+        both, why = _ldsfix_tile64(single_k)
+        hit = _consider("single-K+T=64", both, why)
+        if hit is not None:
+            return hit
+
     raise RuntimeError(
         f"LDS budget: 2D register-PV D{spec.head_size} block_size={spec.block_size} "
         f"T={spec.tile_size} needs {_lds_bytes_regpv(spec)} B > cap {cap} B on "
-        f"{_resolve_attention_arch()}; no validated reduction (single-K, T=64) fits."
+        f"{_resolve_attention_arch()}; no validated reduction fits "
+        f"[{'; '.join(tried)}]."
     )
 
 

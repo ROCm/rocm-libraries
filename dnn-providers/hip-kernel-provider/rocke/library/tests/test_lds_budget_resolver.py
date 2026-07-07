@@ -73,14 +73,66 @@ class TestLdsBudgetResolver(unittest.TestCase):
         with mock.patch.object(au, "_resolve_attention_arch", return_value="gfx942"):
             self.assertIs(au._resolve_lds_budget(spec), spec)
 
-    def test_acc_lds_scales_with_geometry(self):
-        """The auxiliary term is the epilogue Acc_lds, computed from geometry
-        (BLOCK_M x OUT_STRIPE_COLS x 2), not a hard-coded constant."""
+    def test_regpv_footprint_uses_shared_helper(self):
+        """W: the register-PV footprint is the shared ``_tiled_2d_lds_bytes`` model
+        parameterised for the register-PV layout (Q/P^T dropped) -- a single source
+        of truth, so it cannot drift from the gfx942 admission gate."""
         with mock.patch.object(au, "_resolve_attention_arch", return_value="gfx950"):
             spec = au._tiled_spec_from_problem(_d256_bf16_long_prefill())
         block_m = spec.num_warps * spec.block_m_per_warp
-        out_stripe = 32 if spec.head_size <= 64 else spec.head_size
-        self.assertEqual(au._acc_lds_bytes(spec), block_m * out_stripe * 2)
+        expected = au._tiled_2d_lds_bytes(
+            tile_size=spec.tile_size,
+            head_size=spec.head_size,
+            block_m=block_m,
+            kv_elem_bytes=au._kv_lds_elem_bytes(spec),
+            k_slots=1 if spec.use_k_single_buffer else 2,
+            v_slots=2 if spec.use_v_double_buffer else 1,
+        )
+        self.assertEqual(au._lds_bytes_regpv(spec), expected)
+
+    def test_shared_helper_models_both_layouts(self):
+        """W: one helper serves both consumers -- the conservative gfx942 gate
+        layout (Q_lds/P_lds staged) and the exact register-PV layout (dropped)."""
+        common = dict(tile_size=128, head_size=256, block_m=16, kv_elem_bytes=2)
+        conservative = au._tiled_2d_lds_bytes(
+            k_slots=2, v_slots=1, include_q_lds=True, include_p_lds=True, **common
+        )
+        regpv = au._tiled_2d_lds_bytes(k_slots=2, v_slots=1, **common)
+        # Dropping the P_lds term makes the register-PV footprint the smaller of
+        # the two; the conservative gate estimate never under-counts it.
+        self.assertGreater(conservative, regpv)
+        self.assertEqual(regpv, 204800)  # matches the comgr-verified D256 number
+
+    def test_ldsfix_levers_report_reasons(self):
+        """S: the shrink levers return ``(None, reason)`` when they cannot apply,
+        so the resolver surfaces *why* rather than swallowing it."""
+        with mock.patch.object(au, "_resolve_attention_arch", return_value="gfx950"):
+            spec = au._tiled_spec_from_problem(_d256_bf16_long_prefill())
+        # single-K applies (returns a spec, no reason) ...
+        cand, why = au._ldsfix_single_k(replace(spec, use_k_single_buffer=False))
+        self.assertIsNotNone(cand)
+        self.assertIsNone(why)
+        # ... but is a no-op once K is already single-buffered (reason given).
+        cand, why = au._ldsfix_single_k(replace(spec, use_k_single_buffer=True))
+        self.assertIsNone(cand)
+        self.assertIn("single-buffered", why)
+        # tile64 is a no-op at T<=64.
+        cand, why = au._ldsfix_tile64(replace(spec, tile_size=64))
+        self.assertIsNone(cand)
+        self.assertIn("64", why)
+
+    def test_infeasible_budget_raises_with_lever_diagnostics(self):
+        """S: when no lever fits, the resolver raises with each attempted lever's
+        result -- a diagnostic, not a cryptic downstream comgr abort."""
+        with mock.patch.object(au, "_resolve_attention_arch", return_value="gfx950"):
+            spec = au._tiled_spec_from_problem(_d256_bf16_long_prefill())
+            # Force an impossibly small cap so even single-K + T=64 overflows.
+            with mock.patch.object(au, "_lds_capacity_bytes", return_value=1024):
+                with self.assertRaises(RuntimeError) as ctx:
+                    au._resolve_lds_budget(replace(spec, use_k_single_buffer=False))
+        msg = str(ctx.exception)
+        self.assertIn("single-K", msg)
+        self.assertIn("T=64", msg)
 
 
 if __name__ == "__main__":
