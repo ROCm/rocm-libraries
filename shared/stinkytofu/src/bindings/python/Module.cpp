@@ -23,16 +23,13 @@
 #include "stinkytofu/bindings/python/Module.hpp"
 
 #include <cstdint>
-#include <memory>
 #include <sstream>
 #include <unordered_map>
-#include <vector>
 
 #include "stinkytofu/ir/asm/StinkyAsmIR.hpp"
 #include "stinkytofu/pipeline/Backend.hpp"
 #include "stinkytofu/serialization/asm/StinkyAsmEmitter.hpp"
 #include "stinkytofu/serialization/asm/StinkyAsmPrinter.hpp"
-#include "stinkytofu/support/ErrorHandling.hpp"
 
 namespace stinkytofu {
 namespace {
@@ -68,7 +65,6 @@ struct StinkyAsmModule::Impl {
     std::unordered_map<std::string, InstructionGroupRange> instructionGroups;
 
     Function function;
-    std::vector<std::unique_ptr<Function>> calleeFunctions;
 
     // Total instruction encoding size in bytes (for .amdhsa_inst_pref_size). -1 if not set.
     int64_t totalInstructionBytes = -1;
@@ -136,56 +132,6 @@ const Function& StinkyAsmModule::getFunction() const {
     return pImpl->function;
 }
 
-Function& StinkyAsmModule::createFunction(std::string_view name, bool isCallee) {
-    if (name.empty()) {
-        report_fatal_error("Cannot create a callee Function with an empty name");
-    }
-    if (getFunction(name) != nullptr) {
-        report_fatal_error("Duplicate StinkyTofu Function name '" + std::string(name) +
-                           "' (names must be unique within the module)");
-    }
-    auto& func = pImpl->calleeFunctions.emplace_back(std::make_unique<Function>(std::string(name)));
-    func->setIsCallee(isCallee);
-    func->createBasicBlock("entry");
-    return *func;
-}
-
-Function* StinkyAsmModule::getFunction(std::string_view name) {
-    if (name.empty()) return &pImpl->function;
-    for (auto& func : pImpl->calleeFunctions) {
-        if (func && func->getName() == name) return func.get();
-    }
-    return nullptr;
-}
-
-const Function* StinkyAsmModule::getFunction(std::string_view name) const {
-    if (name.empty()) return &pImpl->function;
-    for (const auto& func : pImpl->calleeFunctions) {
-        if (func && func->getName() == name) return func.get();
-    }
-    return nullptr;
-}
-
-std::vector<Function*> StinkyAsmModule::getFunctions() {
-    std::vector<Function*> out;
-    out.reserve(1 + pImpl->calleeFunctions.size());
-    out.push_back(&pImpl->function);
-    for (auto& func : pImpl->calleeFunctions) out.push_back(func.get());
-    return out;
-}
-
-std::vector<const Function*> StinkyAsmModule::getFunctions() const {
-    std::vector<const Function*> out;
-    out.reserve(1 + pImpl->calleeFunctions.size());
-    out.push_back(&pImpl->function);
-    for (const auto& func : pImpl->calleeFunctions) out.push_back(func.get());
-    return out;
-}
-
-size_t StinkyAsmModule::numFunctions() const {
-    return 1 + pImpl->calleeFunctions.size();
-}
-
 std::string StinkyAsmModule::emitAssembly() const {
     // Configure the emitter with default options
     stinkytofu::AsmEmitterOptions options;
@@ -196,11 +142,7 @@ std::string StinkyAsmModule::emitAssembly() const {
     options.useSymbolicNames = true;  // Enable symbolic register names
 
     stinkytofu::StinkyAsmEmitter emitter(options);
-    std::string result = emitter.emit(getFunction());
-    for (const auto& callee : pImpl->calleeFunctions) {
-        if (callee) result += emitter.emit(*callee);
-    }
-    return result;
+    return emitter.emit(getFunction());
 }
 
 void StinkyAsmModule::runOptimizationPipeline() {
