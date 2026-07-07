@@ -811,35 +811,6 @@ struct amdgcn_mma<bf8_t, bf8_t, fp16_t, 16u, 16u, 128u, CompilerTarget, MmaOpFam
 
 /**
  * @struct amdgcn_mma
- * @brief Specialization of amdgcn_mma for fp8_t, fp8_t, fp32_t MMA operation on GFX1250
- * architecture.
- * @tparam CompilerTarget Current compiler target
- */
-// TODO: c++20 template <amdgcn_target CompilerTarget>
-// TODO: c++20 requires
-template <typename CompilerTarget>
-// clang-format off
-//               | A B C DataTypes      | MNK + WaveSize    |AParams |BPar |CPar |
-struct amdgcn_mma<fp8_t, fp8_t, fp32_t, 16u, 16u, 128u, CompilerTarget, MmaOpFamily::DENSE, enable_if_target_gfx1250_t<CompilerTarget>>
-: amdgcn_mma_base<fp8_t, fp8_t, fp32_t, 16u, 16u, 128u, 32u, 64, 1, 1, 1, 1, 8, 1, WmmaOp, MmaOpFamily::DENSE>
-// clang-format on
-{
-    static constexpr const char* instruction_name = "__builtin_amdgcn_wmma_f32_16x16x128_f8f6f4";
-
-    CK_TILE_DEVICE static CVecType
-    exec(AVecType const& aVec, BVecType const& bVec, CVecType const& cVec)
-    {
-        return {__builtin_amdgcn_wmma_f32_16x16x128_f8f6f4(PackedDataTypeToFlag_v<fp8_t>,
-                                                           bit_cast<int32x16_t>(aVec),
-                                                           PackedDataTypeToFlag_v<fp8_t>,
-                                                           bit_cast<int32x16_t>(bVec),
-                                                           0,
-                                                           cVec)};
-    }
-};
-
-/**
- * @struct amdgcn_mma
  * @brief Specialization of amdgcn_mma for fp6_t, fp6_t, fp32_t MMA operation on GFX1250
  * architecture.
  * @tparam CompilerTarget Current compiler target
@@ -929,6 +900,35 @@ struct amdgcn_mma<pk_fp4_t, pk_fp4_t, fp32_t, 16u, 16u, 128u, CompilerTarget, Mm
                                                            b_padded,
                                                            0,
                                                            cVec)};
+    }
+};
+
+/**
+ * @struct amdgcn_mma
+ * @brief Specialization of amdgcn_mma for fp8_t, fp8_t, fp32_t MMA operation on GFX1250
+ * architecture.
+ * @tparam CompilerTarget Current compiler target
+ */
+// TODO: c++20 template <amdgcn_target CompilerTarget>
+// TODO: c++20 requires
+template <typename CompilerTarget>
+// clang-format off
+//               | A B C DataTypes      | MNK + WaveSize    |AParams |BPar |CPar |
+struct amdgcn_mma<fp8_t, fp8_t, fp32_t, 16u, 16u, 128u, CompilerTarget, MmaOpFamily::DENSE, enable_if_target_gfx1250_t<CompilerTarget>>
+: amdgcn_mma_base<fp8_t, fp8_t, fp32_t, 16u, 16u, 128u, 32u, 64, 1, 1, 1, 1, 8, 1, WmmaOp, MmaOpFamily::DENSE>
+// clang-format on
+{
+    static constexpr const char* instruction_name = "__builtin_amdgcn_wmma_f32_16x16x128_fp8_fp8";
+
+    CK_TILE_DEVICE static CVecType
+    exec(AVecType const& aVec, BVecType const& bVec, CVecType const& cVec)
+    {
+        return {__builtin_amdgcn_wmma_f32_16x16x128_fp8_fp8(bit_cast<int32x16_t>(aVec),
+                                                            bit_cast<int32x16_t>(bVec),
+                                                            0, // C_mod
+                                                            cVec,
+                                                            0,   // matrix_a_reuse
+                                                            0)}; // matrix_b_reuse
     }
 };
 
