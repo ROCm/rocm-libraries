@@ -67,9 +67,6 @@ class zip_iterator;
 
 namespace detail
 {
-template <typename... Ts>
-using minimum_category = minimum_type<Ts...>;
-
 #if _THRUST_HAS_DEVICE_SYSTEM_STD
 template <typename IteratorTuple>
 struct make_zip_iterator_base
@@ -97,15 +94,10 @@ struct make_zip_iterator_base<_THRUST_STD::tuple<Its...>>
   using difference_type = it_difference_t<_THRUST_STD::tuple_element_t<0, _THRUST_STD::tuple<Its...>>>;
 
   // Iterator system is the minimum system tag in the iterator tuple
-  using system = _THRUST_STD::__type_fold_left<_THRUST_STD::__type_list<iterator_system_t<Its>...>,
-                                               any_system_tag,
-                                               _THRUST_STD::__type_quote_trait<minimum_system>>;
+  using system = minimum_system_t<iterator_system_t<Its>...>;
 
   // Traversal category is the minimum traversal category in the iterator tuple
-  using traversal_category =
-    _THRUST_STD::__type_fold_left<_THRUST_STD::__type_list<iterator_traversal_t<Its>...>,
-                                  random_access_traversal_tag,
-                                  _THRUST_STD::__type_quote_trait<minimum_category>>;
+  using traversal_category = minimum_type<iterator_traversal_t<Its>...>;
 
   // The iterator facade type from which the zip iterator will be derived.
   using type =
