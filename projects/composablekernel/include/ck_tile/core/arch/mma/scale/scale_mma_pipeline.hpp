@@ -174,11 +174,13 @@ struct ScaleMmaPipeline : public MmaPipelineBase<ScaleMmaPipeline<ADataType_, BD
     // Expose kCMLane for some callers (e.g. gemm_quant block policies)
     static constexpr index_t kCMLane = WarpGemmAttribute::Impl::kCMLane;
 
-    // Unsupported MmaOps with nonTrivial AttrNumAccess lead to issues in calculator.
+    // Unsupported MmaOps with nonTrivial AttrNumAccess / Swizzle lead to issues in calculator.
     static constexpr index_t AttrNumAccessAV_support =
         MmaOpTraits<MmaOp>::IsSupported ? AttrNumAccessAV : 1;
     static constexpr index_t AttrNumAccessBV_support =
         MmaOpTraits<MmaOp>::IsSupported ? AttrNumAccessBV : 1;
+    static constexpr index_t SwizzleFactor_support =
+        MmaOpTraits<MmaOp>::IsSupported ? SwizzleFactor : 1;
 
     // TODO: TileDistrEncCalc only supports K composition (kIter) and always gives post-compression
     // A layout.
@@ -186,7 +188,7 @@ struct ScaleMmaPipeline : public MmaPipelineBase<ScaleMmaPipeline<ADataType_, BD
     // CTranspose!
     using EncCalc           = TileDistrEncCalc<MmaOp,
                                                CTranspose,
-                                               SwizzleFactor,
+                                               SwizzleFactor_support,
                                                FragsK,
                                                AttrNumAccessAV_support,
                                                AttrNumAccessBV_support>;
