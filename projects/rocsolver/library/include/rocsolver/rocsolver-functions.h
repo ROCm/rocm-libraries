@@ -4911,7 +4911,7 @@ ROCSOLVER_EXPORT rocblas_status rocsolver_zgetf2_npvt_64(rocblas_handle handle,
     The factorization of matrix \f$A_l\f$ in the batch has the form
 
     \f[
-        A_l = L_lU_l
+        A_l = L_l U_l
     \f]
 
     where \f$L_l\f$ is lower triangular with unit
@@ -5025,7 +5025,7 @@ ROCSOLVER_EXPORT rocblas_status rocsolver_zgetf2_npvt_batched_64(rocblas_handle 
     The factorization of matrix \f$A_l\f$ in the batch has the form
 
     \f[
-        A_l = L_lU_l
+        A_l = L_l U_l
     \f]
 
     where \f$L_l\f$ is lower triangular with unit
@@ -5254,7 +5254,7 @@ ROCSOLVER_EXPORT rocblas_status rocsolver_zgetrf_npvt_64(rocblas_handle handle,
     The factorization of matrix \f$A_l\f$ in the batch has the form
 
     \f[
-        A_l = L_lU_l
+        A_l = L_l U_l
     \f]
 
     where \f$L_l\f$ is lower triangular with unit
@@ -5369,7 +5369,7 @@ ROCSOLVER_EXPORT rocblas_status rocsolver_zgetrf_npvt_batched_64(rocblas_handle 
     The factorization of matrix \f$A_l\f$ in the batch has the form
 
     \f[
-        A_l = L_lU_l
+        A_l = L_l U_l
     \f]
 
     where \f$L_l\f$ is lower triangular with unit
@@ -5608,7 +5608,7 @@ ROCSOLVER_EXPORT rocblas_status rocsolver_zgetf2_64(rocblas_handle handle,
     The factorization of matrix \f$A_l\f$ in the batch has the form
 
     \f[
-        A_l = P_lL_lU_l
+        A_l = P_l L_l U_l
     \f]
 
     where \f$P_l\f$ is a permutation matrix, \f$L_l\f$ is lower triangular with unit
@@ -5745,7 +5745,7 @@ ROCSOLVER_EXPORT rocblas_status rocsolver_zgetf2_batched_64(rocblas_handle handl
     The factorization of matrix \f$A_l\f$ in the batch has the form
 
     \f[
-        A_l = P_lL_lU_l
+        A_l = P_l L_l U_l
     \f]
 
     where \f$P_l\f$ is a permutation matrix, \f$L_l\f$ is lower triangular with unit
@@ -6006,7 +6006,7 @@ ROCSOLVER_EXPORT rocblas_status rocsolver_zgetrf_64(rocblas_handle handle,
     The factorization of matrix \f$A_l\f$ in the batch has the form
 
     \f[
-        A_l = P_lL_lU_l
+        A_l = P_l L_l U_l
     \f]
 
     where \f$P_l\f$ is a permutation matrix, \f$L_l\f$ is lower triangular with unit
@@ -6143,7 +6143,7 @@ ROCSOLVER_EXPORT rocblas_status rocsolver_zgetrf_batched_64(rocblas_handle handl
     The factorization of matrix \f$A_l\f$ in the batch has the form
 
     \f[
-        A_l = P_lL_lU_l
+        A_l = P_l L_l U_l
     \f]
 
     where \f$P_l\f$ is a permutation matrix, \f$L_l\f$ is lower triangular with unit
@@ -26119,9 +26119,9 @@ ROCSOLVER_EXPORT rocblas_status rocsolver_ztrtri_strided_batched(rocblas_handle 
 
     \f[
         U(k) = \left[ \begin{array}{ccc}
-        I_{k-s} & v & 0 \\
-        0 & I_s & 0 \\
-        0 & 0 & I_{n-k}
+        I_{k-s} & v   & 0       \\
+        0       & I_s & 0       \\
+        0       & 0   & I_{n-k}
         \end{array} \right]
     \f]
 
@@ -26129,9 +26129,9 @@ ROCSOLVER_EXPORT rocblas_status rocsolver_ztrtri_strided_batched(rocblas_handle 
 
     \f[
         L(k) = \left[ \begin{array}{ccc}
-        I_{k-1} & 0 & 0 \\
-        0 & I_s & 0 \\
-        0 & v & I_{n-k-s+1}
+        I_{k-1} & 0   & 0           \\
+        0       & I_s & 0           \\
+        0       & v   & I_{n-k-s+1}
         \end{array} \right].
     \f]
 
@@ -26245,9 +26245,9 @@ ROCSOLVER_EXPORT rocblas_status rocsolver_zsytf2(rocblas_handle handle,
 
     \f[
         U_l(k) = \left[ \begin{array}{ccc}
-        I_{k-s} & v & 0 \\
-        0 & I_s & 0 \\
-        0 & 0 & I_{n-k}
+        I_{k-s} & v   & 0       \\
+        0       & I_s & 0       \\
+        0       & 0   & I_{n-k}
         \end{array} \right]
     \f]
 
@@ -26255,9 +26255,9 @@ ROCSOLVER_EXPORT rocblas_status rocsolver_zsytf2(rocblas_handle handle,
 
     \f[
         L_l(k) = \left[ \begin{array}{ccc}
-        I_{k-1} & 0 & 0 \\
-        0 & I_s & 0 \\
-        0 & v & I_{n-k-s+1}
+        I_{k-1} & 0   & 0           \\
+        0       & I_s & 0           \\
+        0       & v   & I_{n-k-s+1}
         \end{array} \right].
     \f]
 
@@ -26386,9 +26386,9 @@ ROCSOLVER_EXPORT rocblas_status rocsolver_zsytf2_batched(rocblas_handle handle,
 
     \f[
         U_l(k) = \left[ \begin{array}{ccc}
-        I_{k-s} & v & 0 \\
-        0 & I_s & 0 \\
-        0 & 0 & I_{n-k}
+        I_{k-s} & v   & 0        \\
+        0       & I_s & 0        \\
+        0       & 0   & I_{n-k}
         \end{array} \right]
     \f]
 
@@ -26396,9 +26396,9 @@ ROCSOLVER_EXPORT rocblas_status rocsolver_zsytf2_batched(rocblas_handle handle,
 
     \f[
         L_l(k) = \left[ \begin{array}{ccc}
-        I_{k-1} & 0 & 0 \\
-        0 & I_s & 0 \\
-        0 & v & I_{n-k-s+1}
+        I_{k-1} & 0   & 0           \\
+        0       & I_s & 0           \\
+        0       & v   & I_{n-k-s+1}
         \end{array} \right].
     \f]
 
@@ -26535,9 +26535,9 @@ ROCSOLVER_EXPORT rocblas_status rocsolver_zsytf2_strided_batched(rocblas_handle 
 
     \f[
         U(k) = \left[ \begin{array}{ccc}
-        I_{k-s} & v & 0 \\
-        0 & I_s & 0 \\
-        0 & 0 & I_{n-k}
+        I_{k-s} & v   & 0       \\
+        0       & I_s & 0       \\
+        0       & 0   & I_{n-k}
         \end{array} \right]
     \f]
 
@@ -26545,9 +26545,9 @@ ROCSOLVER_EXPORT rocblas_status rocsolver_zsytf2_strided_batched(rocblas_handle 
 
     \f[
         L(k) = \left[ \begin{array}{ccc}
-        I_{k-1} & 0 & 0 \\
-        0 & I_s & 0 \\
-        0 & v & I_{n-k-s+1}
+        I_{k-1} & 0   & 0            \\
+        0       & I_s & 0            \\
+        0       & v   & I_{n-k-s+1}
         \end{array} \right].
     \f]
 
@@ -26661,9 +26661,9 @@ ROCSOLVER_EXPORT rocblas_status rocsolver_zsytrf(rocblas_handle handle,
 
     \f[
         U_l(k) = \left[ \begin{array}{ccc}
-        I_{k-s} & v & 0 \\
-        0 & I_s & 0 \\
-        0 & 0 & I_{n-k}
+        I_{k-s} & v   & 0        \\
+        0       & I_s & 0        \\
+        0       & 0   & I_{n-k}
         \end{array} \right]
     \f]
 
@@ -26671,9 +26671,9 @@ ROCSOLVER_EXPORT rocblas_status rocsolver_zsytrf(rocblas_handle handle,
 
     \f[
         L_l(k) = \left[ \begin{array}{ccc}
-        I_{k-1} & 0 & 0 \\
-        0 & I_s & 0 \\
-        0 & v & I_{n-k-s+1}
+        I_{k-1} & 0   & 0           \\
+        0       & I_s & 0           \\
+        0       & v   & I_{n-k-s+1}
         \end{array} \right].
     \f]
 
@@ -26802,9 +26802,9 @@ ROCSOLVER_EXPORT rocblas_status rocsolver_zsytrf_batched(rocblas_handle handle,
 
     \f[
         U_l(k) = \left[ \begin{array}{ccc}
-        I_{k-s} & v & 0 \\
-        0 & I_s & 0 \\
-        0 & 0 & I_{n-k}
+        I_{k-s} & v   & 0       \\
+        0       & I_s & 0       \\
+        0       & 0   & I_{n-k}
         \end{array} \right]
     \f]
 
@@ -26812,9 +26812,9 @@ ROCSOLVER_EXPORT rocblas_status rocsolver_zsytrf_batched(rocblas_handle handle,
 
     \f[
         L_l(k) = \left[ \begin{array}{ccc}
-        I_{k-1} & 0 & 0 \\
-        0 & I_s & 0 \\
-        0 & v & I_{n-k-s+1}
+        I_{k-1} & 0   & 0           \\
+        0       & I_s & 0           \\
+        0       & v   & I_{n-k-s+1}
         \end{array} \right].
     \f]
 
@@ -26921,11 +26921,11 @@ ROCSOLVER_EXPORT rocblas_status rocsolver_zsytrf_strided_batched(rocblas_handle 
 
     \f[
         M = \left[\begin{array}{ccccc}
-        B_1 & C_1\\
-        A_1 & B_2 & C_2\\
-         & \ddots & \ddots & \ddots \\
-         &  & A_{n-2} & B_{n-1} & C_{n-1}\\
-         &  &  & A_{n-1} & B_n
+        B_1 & C_1    &         &         &        \\
+        A_1 & B_2    & C_2     &         &        \\
+            & \ddots & \ddots  & \ddots  &        \\
+            &        & A_{n-2} & B_{n-1} & C_{n-1}\\
+            &        &         & A_{n-1} & B_n
         \end{array}\right]
     \f]
 
@@ -27521,11 +27521,11 @@ ROCSOLVER_EXPORT rocblas_status
 
     \f[
         MX = \left[\begin{array}{ccccc}
-        B_1 & C_1\\
-        A_1 & B_2 & C_2\\
-         & \ddots & \ddots & \ddots \\
-         &  & A_{n-2} & B_{n-1} & C_{n-1}\\
-         &  &  & A_{n-1} & B_n
+        B_1 & C_1    &         &         &         \\
+        A_1 & B_2    & C_2     &         &         \\
+            & \ddots & \ddots  & \ddots  &         \\
+            &        & A_{n-2} & B_{n-1} & C_{n-1} \\
+            &        &         & A_{n-1} & B_n
         \end{array}\right]\left[\begin{array}{c}
         X_1\\
         X_2\\
@@ -27643,12 +27643,12 @@ ROCSOLVER_EXPORT rocblas_status rocsolver_zgeblttrs_npvt(rocblas_handle handle,
     \details Each linear system has the form
 
     \f[
-        M_lX_l = \left[\begin{array}{ccccc}
-        B_{l1} & C_{l1}\\
-        A_{l1} & B_{l2} & C_{l2}\\
-         & \ddots & \ddots & \ddots \\
-         &  & A_{l(n-2)} & B_{l(n-1)} & C_{l(n-1)}\\
-         &  &  & A_{l(n-1)} & B_{ln}
+        M_l X_l = \left[\begin{array}{ccccc}
+        B_{l1} & C_{l1} &            &            &            \\
+        A_{l1} & B_{l2} & C_{l2}     &            &            \\
+               & \ddots & \ddots     & \ddots     &            \\
+               &        & A_{l(n-2)} & B_{l(n-1)} & C_{l(n-1)} \\
+               &        &            & A_{l(n-1)} & B_{ln}
         \end{array}\right]\left[\begin{array}{c}
         X_{l1}\\
         X_{l2}\\
@@ -27777,12 +27777,12 @@ ROCSOLVER_EXPORT rocblas_status rocsolver_zgeblttrs_npvt_batched(rocblas_handle 
     \details Each linear system has the form
 
     \f[
-        M_lX_l = \left[\begin{array}{ccccc}
-        B_{l1} & C_{l1}\\
-        A_{l1} & B_{l2} & C_{l2}\\
-         & \ddots & \ddots & \ddots \\
-         &  & A_{l(n-2)} & B_{l(n-1)} & C_{l(n-1)}\\
-         &  &  & A_{l(n-1)} & B_{ln}
+        M_l X_l = \left[\begin{array}{ccccc}
+        B_{l1} & C_{l1}  &            &            &            \\
+        A_{l1} & B_{l2}  & C_{l2}     &            &            \\
+               & \ddots  & \ddots     & \ddots     &            \\
+               &         & A_{l(n-2)} & B_{l(n-1)} & C_{l(n-1)} \\
+               &         &            & A_{l(n-1)} & B_{ln}
         \end{array}\right]\left[\begin{array}{c}
         X_{l1}\\
         X_{l2}\\
@@ -27951,12 +27951,12 @@ ROCSOLVER_EXPORT rocblas_status
     \details Each linear system has the form
 
     \f[
-        M_lX_l = \left[\begin{array}{ccccc}
-        B_{l1} & C_{ll}\\
-        A_{l1} & B_{ll} & C_{ll}\\
-         & \ddots & \ddots & \ddots \\
-         &  & A_{l(n-2)} & B_{l(n-1)} & C_{l(n-1)}\\
-         &  &  & A_{l(n-1)} & B_{ln}
+        M_l X_l = \left[\begin{array}{ccccc}
+        B_{l1} & C_{ll} &            &            &            \\
+        A_{l1} & B_{ll} & C_{ll}     &            &            \\
+               & \ddots & \ddots     & \ddots     &            \\
+               &        & A_{l(n-2)} & B_{l(n-1)} & C_{l(n-1)} \\
+               &        &            & A_{l(n-1)} & B_{ln}
         \end{array}\right]\left[\begin{array}{c}
         X_{l1}\\
         X_{l2}\\
