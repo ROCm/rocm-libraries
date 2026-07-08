@@ -168,16 +168,33 @@ namespace
                 size_t available_host   = rocsparse_memory_check::get_available_host_memory_gb();
                 size_t available_device = rocsparse_memory_check::get_available_device_memory_gb();
 
+                // HIP graph capture/launch keeps a second copy of the test's device
+                // working set resident across capture + launch, so the peak device
+                // usage of a graph_test case is roughly twice that of a normal run.
+                // On memory-constrained GPUs (e.g. the gfx110X family) the bsr*0
+                // graph_test cases OOM at hipGraphLaunch (ROCm/rocm-libraries#8592).
+                // Model that overhead here so the insufficient-memory filter below
+                // deterministically skips these cases on small cards instead of hard-
+                // failing the suite, mirroring how oversized configs are skipped.
+                size_t required_device = arg.device_memory_gb;
+                if(arg.graph_test)
+                {
+                    const size_t base = (required_device > 0) ? required_device : 1;
+                    required_device   = base * 2;
+                }
+
                 bool can_run = (arg.host_memory_gb <= available_host)
-                               && (arg.device_memory_gb <= available_device);
+                               && (required_device <= available_device);
 
                 if(!can_run)
                 {
                     std::cout << "SKIPPING TEST: Insufficient memory" << std::endl;
                     std::cout << "  Required host:   " << arg.host_memory_gb
                               << " GB (available: " << available_host << " GB)" << std::endl;
-                    std::cout << "  Required device: " << arg.device_memory_gb
-                              << " GB (available: " << available_device << " GB)" << std::endl;
+                    std::cout << "  Required device: " << required_device << " GB (available: "
+                              << available_device << " GB)"
+                              << (arg.graph_test ? " [graph_test: 2x capture overhead]" : "")
+                              << std::endl;
                 }
 
                 return can_run;
