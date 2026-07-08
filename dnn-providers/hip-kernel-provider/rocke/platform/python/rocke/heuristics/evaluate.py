@@ -64,6 +64,7 @@ def evaluate_model(
     predictor: Predictor,
     df: pd.DataFrame,
     feature_engine: GemmUniversalFeatureEngine,
+    op: str = "gemm_universal",
 ) -> dict:
     """Run full evaluation on a dataset. Returns a metrics dictionary.
 
@@ -75,6 +76,9 @@ def evaluate_model(
         Benchmark data in canonical schema.
     feature_engine : GemmUniversalFeatureEngine
         Feature engine matching the trained model.
+    op : str
+        Operation type, threaded into compute_tflops_efficiency to pick the
+        per-shape groupby columns.
 
     Returns
     -------
@@ -106,7 +110,7 @@ def evaluate_model(
     rmse = np.sqrt(np.mean((y_true - y_pred) ** 2))
     mae = np.mean(np.abs(y_true - y_pred))
 
-    eff_df = compute_tflops_efficiency(valid, "pred_tflops")
+    eff_df = compute_tflops_efficiency(valid, op, "pred_tflops")
 
     ndcg1_count = 0
     total_shapes = 0
@@ -150,7 +154,7 @@ def evaluate_model(
     def _slice_efficiency(slice_df):
         if len(slice_df) == 0:
             return {"count": 0}
-        eff = compute_tflops_efficiency(slice_df, "pred_tflops")
+        eff = compute_tflops_efficiency(slice_df, op, "pred_tflops")
         if len(eff) == 0:
             return {"count": 0}
         return {
@@ -208,7 +212,7 @@ def main():
     predictor = Predictor(args.model_dir, feature_engine=fe)
 
     print("Evaluating...")
-    results = evaluate_model(predictor, df, fe)
+    results = evaluate_model(predictor, df, fe, op=args.op)
 
     gm = results["global_metrics"]
     print("\nGlobal Metrics:")
