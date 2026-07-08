@@ -2915,7 +2915,9 @@ class Solution(collections.abc.Mapping):
         # (StaggerUStride) shoud be greater than or equal to (DepthU * bpeAB)
         target_stagger_stride = state["DepthU"] * bpeAB
         # Assert that it is an int or a float with no fractional part
-        assert target_stagger_stride.is_integer(), "StaggerUStride must be an int or a float with no fractional part"
+        is_integer = isinstance(target_stagger_stride, int) \
+                     or (isinstance(target_stagger_stride, float) and target_stagger_stride.is_integer())
+        assert is_integer, "StaggerUStride must be an int or a float with no fractional part"
         state["StaggerUStride"] = int(target_stagger_stride)
         state["_staggerStrideShift"] = 0
       else:
