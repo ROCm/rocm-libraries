@@ -184,8 +184,15 @@ class LocalReadMFMA(LocalRead):
         # VW=2 fold-M (e.g. wt4_vw2.yaml: MIWaveTile=4, VWA=2): partner permute
         #   ds_bpermute abs addr: nIdx*4 and nIdx*4+64 (sp3_mi400 §9.5.2).
         #   v2/v3 from v0/v1@relHigh; v0/v1 from v0/v1@relLow.
+        # VW=4 fold-M (e.g. wt8_vw4.yaml: MIWaveTile=8, VWA=4): stock vIdx1=+256B, partner +16 lanes (+64 bytes).
+        #   v4-v7 from v0-v3@addrHigh; v0-v3 from v0-v3@addrLow.
         # VW=1 fold-M: nIdx relBase + static offsets {0,64}.
-        permuteVariant = "wt4_vw2" if vectorWidth == 2 else "nidx"
+        if vectorWidth == 2:
+            permuteVariant = "wt4_vw2"
+        elif vectorWidth == 4:
+            permuteVariant = "wt8_vw4"
+        else:
+            permuteVariant = "nidx"
         return {
             "miWaveTile": miWaveTile,
             "vectorWidth": vectorWidth,
@@ -251,6 +258,53 @@ class LocalReadMFMA(LocalRead):
         writer.vgprPool.checkIn(vRelLow)
         writer.vgprPool.checkIn(vRelHigh)
 
+    def emitMxsFoldMWt8Vw4Permute(self, writer, kernel, tP, module, tc, bufferIdx, iui, valuiIdx, foldInfo):
+        """
+        MIWaveTile//VW==2 and VW==4 fold-M partner permute (wt8_vw4.yaml).
+        After 1x ds_load_b128 @0 with lro=wtid*16, gather partner lane data to match
+        stock 2x ds_load @0/@256. ds_bpermute abs addr: nIdx*4, nIdx*4+64 (partner +16 lanes).
+        """
+        ldsMemToken, ldsMemTokenIdx = self._getLdsReadMemToken(writer, kernel, tP)
+        halfSpanMask = foldInfo["halfSpanMask"]
+        vectorWidth = foldInfo["vectorWidth"]
+        partnerAddrDelta = 64
+
+        vNIdx = writer.vgprPool.checkOut(1, "mxs foldM nIdx")
+        vRelLow = writer.vgprPool.checkOut(1, "mxs foldM relLow")
+        vRelHigh = writer.vgprPool.checkOut(1, "mxs foldM relHigh")
+
+        srcVs = [
+            vgpr("Valu%s_X%u_I%u+%u" % (tc, bufferIdx, iui, valuiIdx + k))
+            for k in range(vectorWidth)
+        ]
+
+        module.addComment1(
+            "MXS VW=4 fold-M partner permute: addr=nIdx*4, addrHigh=nIdx*4+%u (ds_bpermute abs)"
+            % partnerAddrDelta)
+        module.add(SWaitCnt(dscnt=0, comment="drain MXS ds_load before cross-lane bpermute"))
+        module.add(VAndB32(dst=vgpr(vNIdx), src0=halfSpanMask, src1=vgpr("Serial"),
+                           comment="nIdx = wtid %% %u" % foldInfo["halfSpan"]))
+        module.add(VLShiftLeftB32(dst=vgpr(vRelLow), shiftHex=2, src=vgpr(vNIdx), comment="addr = nIdx * 4"))
+        module.add(VAddU32(dst=vgpr(vRelHigh), src0=vgpr(vRelLow), src1=partnerAddrDelta,
+                           comment="addrHigh = nIdx * 4 + %u" % partnerAddrDelta))
+
+        permutePlan = []
+        for k in range(vectorWidth):
+            permutePlan.append((vectorWidth + k, srcVs[k], vRelHigh))
+        for k in range(vectorWidth):
+            permutePlan.append((k, srcVs[k], vRelLow))
+
+        for permIdx, srcVgpr, relVgpr in permutePlan:
+            dstVgpr = vgpr("Valu%s_X%u_I%u+%u" % (tc, bufferIdx, iui, valuiIdx + permIdx))
+            perm = DSBPermuteB32(dst=dstVgpr, src0=vgpr(relVgpr), src1=srcVgpr,
+                                 comment="%s partner permute v%u sync LDS%u" % (tc, permIdx, ldsMemTokenIdx))
+            perm.setMemToken(ldsMemToken)
+            module.add(perm)
+
+        writer.vgprPool.checkIn(vNIdx)
+        writer.vgprPool.checkIn(vRelLow)
+        writer.vgprPool.checkIn(vRelHigh)
+
     def emitMxsFoldMPermute(self, writer, kernel, tP, module, tc, bufferIdx, iui, valuiIdx, foldInfo):
         """
         Re-distribute a folded MXS ds_load into MIWaveTile WMMA scale registers via ds_bpermute.
@@ -258,6 +312,9 @@ class LocalReadMFMA(LocalRead):
         """
         if foldInfo.get("permuteVariant") == "wt4_vw2":
             self.emitMxsFoldMWt4Vw2Permute(writer, kernel, tP, module, tc, bufferIdx, iui, valuiIdx, foldInfo)
+            return
+        if foldInfo.get("permuteVariant") == "wt8_vw4":
+            self.emitMxsFoldMWt8Vw4Permute(writer, kernel, tP, module, tc, bufferIdx, iui, valuiIdx, foldInfo)
             return
 
         ldsMemToken, ldsMemTokenIdx = self._getLdsReadMemToken(writer, kernel, tP)
