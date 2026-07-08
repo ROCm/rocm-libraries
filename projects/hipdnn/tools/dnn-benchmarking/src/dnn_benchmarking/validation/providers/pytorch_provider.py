@@ -12,6 +12,7 @@ from typing import Any, Dict, List, Optional, Set
 import numpy as np
 
 from ...common import torch_support
+from ...common.exceptions import UnsupportedGraphError
 from ...config.benchmark_config import ReferenceProviderName
 
 from ..reference_provider import (
@@ -56,7 +57,7 @@ def _torch_dtype_for_tensor(
         str(tensor_json.get("data_type", "float")).lower()
     )
     if dtype_name is None:
-        raise ValueError(
+        raise UnsupportedGraphError(
             f"PyTorch reference does not support tensor data_type "
             f"'{tensor_json.get('data_type')}' for tensor UID {tensor_json.get('uid')}"
         )
@@ -146,7 +147,8 @@ class PyTorchReferenceProvider(ReferenceProvider):
 
         Raises:
             ImportError: If PyTorch is not available.
-            ValueError: If graph contains unsupported operations.
+            UnsupportedGraphError: If the graph contains operations, attributes,
+                or parameters the PyTorch reference does not support.
         """
         if not self.is_available():
             raise ImportError(
@@ -158,7 +160,7 @@ class PyTorchReferenceProvider(ReferenceProvider):
         # Check for unsupported operations
         unsupported = self.get_unsupported_operations(graph_json)
         if unsupported:
-            raise ValueError(
+            raise UnsupportedGraphError(
                 f"Graph contains unsupported operations: {unsupported}. "
                 f"Supported: {list(self.supported_operations())}"
             )

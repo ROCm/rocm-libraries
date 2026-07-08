@@ -11,13 +11,10 @@ GlobalParameters:
   DataInitTypeB: 13 #13
   DataInitTypeBeta: 0
   DataInitTypeAlpha: 1
-  NewClient: 2
   CSVExportWinner: true
   CSVMergeSameProblemID: true
   Device: 0
   PrintSolutionRejectionReason: True
-  DeviceLDS: 163840
-  MaxLDS: 163840
   RotatingBufferSize: 512
   KeepBuildTmp: True
   #GenerateSourcesAndExit: True
@@ -62,7 +59,7 @@ BenchmarkProblems:
         - LocalReadVectorWidth: [8]
         - GlobalReadVectorWidthA: [8]
         - GlobalReadVectorWidthB: [8]
-        - StreamK: [1,2,3]
+        - StreamK: [3]
         - LdsPadA: [-1] #[-1]
         - LdsPadB: [-1] #[-1]
         - StaggerU: [0]
@@ -100,7 +97,7 @@ BenchmarkProblems:
         - LocalReadVectorWidth: [8]
         - GlobalReadVectorWidthA: [8]
         - GlobalReadVectorWidthB: [8]
-        - StreamK: [1,2,3]
+        - StreamK: [3]
         - LdsPadA: [-1] #[-1]
         - LdsPadB: [-1] #[-1]
         - StaggerU: [0]
