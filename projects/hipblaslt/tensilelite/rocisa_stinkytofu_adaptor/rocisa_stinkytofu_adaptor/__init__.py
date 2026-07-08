@@ -1,105 +1,11 @@
-################################################################################
-#
-# Copyright (C) 2025-2026 Advanced Micro Devices, Inc. All rights reserved.
-#
-# Permission is hereby granted, free of charge, to any person obtaining a copy
-# of this software and associated documentation files (the "Software"), to deal
-# in the Software without restriction, including without limitation the rights
-# to use, copy, modify, merge, publish, distribute, sublicense, and/or sell cop-
-# ies of the Software, and to permit persons to whom the Software is furnished
-# to do so, subject to the following conditions:
-#
-# The above copyright notice and this permission notice shall be included in all
-# copies or substantial portions of the Software.
-#
-# THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR IM-
-# PLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY, FITNESS
-# FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE AUTHORS OR
-# COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER
-# IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNE-
-# CTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
-################################################################################
-"""``rocisa_stinkytofu_adaptor`` — Tensilelite ``rocisa`` shim on top of stinkytofu.
+# Copyright Advanced Micro Devices, Inc., or its affiliates.
+# SPDX-License-Identifier: MIT
+"""rocisa-compatible facade backed by stinkytofu (gfx1250-only).
 
-What this file is:
-    Top-level package that mimics ``projects/hipblaslt/tensilelite/
-    rocisa/rocisa`` (the nanobind C++ bindings) so KernelWriter callers
-    can keep using ``from rocisa import ...`` unchanged. Activated only
-    when ``ROCISA_BACKEND=stinkytofu`` (see
-    ``projects/hipblaslt/tensilelite/rocisa/rocisa/__init__.py``);
-    reserved for ``gfx1250`` today.
-
-    Lives at ``projects/hipblaslt/tensilelite/rocisa_stinkytofu_adaptor/``
-    as a sibling of ``projects/hipblaslt/tensilelite/rocisa/`` —
-    intentionally a tensilelite-internal alternative backend rather than
-    a piece of ``shared/stinkytofu/``, because this is a *consumer* of
-    stinkytofu's Python binding (the dependency direction is
-    tensilelite → adapter → stinkytofu, never the other way). Transient:
-    planned to be deleted / drastically shrunk once gfx1250 KernelWriter
-    is rewritten against a real stinkytofu service API.
-
-What it does (real):
-    - Re-exports ``IsaInfo`` from ``base.py`` (the class definition
-      lives there to mirror ``rocisa/include/base.hpp:64-70``).
-    - ``rocIsa`` — singleton forwarding shell mirroring the C++ class.
-      Every method ``init`` / ``isInit`` / ``getIsaInfo`` /
-      ``getAsmCaps`` / ``getArchCaps`` / ``getRegCaps`` / ``getAsmBugs``
-      / ``setKernel`` / ``getKernel`` / ``getOutputOptions`` /
-      ``setOutputOptions`` / ``getData`` / ``setData`` /
-      ``getVgprIdx`` / ``setVgprIdx`` / ``getVgprMsb`` / ``setVgprMsb``
-      forwards to the module-level state in ``base.py``. The class is
-      kept (rather than collapsed into module functions) purely to
-      preserve the ``rocIsa.getInstance().method(...)`` call shape that
-      KernelWriter / Tensile / the C++ binding all expose.
-    - Submodules with real implementations: ``register`` (pool),
-      ``enum`` (real ``IntEnum``s), ``base`` (state + accessors,
-      ``KernelInfo`` / ``IsaInfo`` / ``OutputOptions``), ``caps``
-      (dynamic hardware caps), ``container`` (register refs, modifiers,
-      ``MemTokenData``), ``label`` (``LabelManager``), ``code`` /
-      ``instruction`` / ``macro`` (see each module — coverage varies).
-    - Submodule registration as ``rocisa.<submodule>`` for ``base``,
-      ``enum``, ``container``, ``code``, ``label``, ``instruction``,
-      ``functions``, ``asmpass``, ``macro``, ``register``.
-    - GLC/SLC asm keyword helpers: ``getGlcBitName`` / ``getSlcBitName`` read
-      active ISA asm caps via ``caps`` + ``rocIsa.getInstance()``.
-    - Stinkytofu binding probes: ``hasStinkyTofuBackend``,
-      ``isSupportedByStinkyTofu``, ``getRegisteredArchKeys`` delegate to the
-      standalone ``stinkytofu`` module (``_stinkytofu.so``).
-    - Stinkytofu asm-IR entry points: ``toStinkyTofuModule`` (``stinky_interop``)
-      lowers a Python ``code.Module`` through ``Module.to_stinky_asm`` →
-      ``stinkytofu.lower_logical_module``, matching the ``KernelWriter`` call
-      shape. ``StinkyAsmModule`` is the binding class when ``stinkytofu``
-      imports; otherwise a dummy placeholder. When a ``signature`` is passed,
-      emit prepends ``SignatureBase.toString()`` (text banner only — not the
-      full native stinkytofu signature conversion / metadata path).
-
-Not yet done or behind native parity:
-    - Module-level counters: ``count*``, ``findInstCount``, ``getMFMAs`` — dummy.
-    - ``asmpass``: ``rocIsaPass`` runs the real macro / text-variable passes;
-      ``removeDuplicatedFunction``, the ``doOpt()`` graph path,
-      ``insertDelayAlu``, and ``getCycles`` (always ``0`` on gfx1250) are
-      stubs or simplified vs the C++ implementation.
-    - ``toStinkyTofuModule(..., options=…)``: keyword accepted for API parity
-      with native rocisa, but values are **not** forwarded into
-      ``lower_logical_module`` (the binding still uses default
-      ``StinkyAsmModule::ModuleOptions`` there). Broadening ``to_stinky_logical``
-      coverage in ``instruction`` remains the main limiter on how much kernel
-      body reaches asm IR.
-    - ``macro`` submodule: only ``MacroVMagicDiv`` / ``VMagicDiv`` /
-      ``PseudoRandomGenerator*`` builder callables are still dummy
-      (see ``macro.py``). ``Macro`` / ``MacroInstruction`` IR types live
-      in ``code.py`` / ``instruction.py`` and are real.
-
-Design note — singleton state ownership:
-    All process-wide state that the C++ ``rocisa::rocIsa`` singleton
-    holds (KernelInfo / IsaInfo dict / current ISA / vgpr_idx /
-    vgpr_msb / OutputOptions / is_init / assembler_path) lives as
-    module-level globals in ``base.py``. The ``rocIsa`` class below
-    holds NO instance state -- every method is a one-line forwarder.
-    This breaks the prior cycle where ``base.py`` had to reach back
-    into the package facade via lazy imports to read its own flags,
-    and keeps the dependency direction one-way (``__init__`` depends
-    on ``base``, never the reverse).
+Activated via ``ROCISA_BACKEND=stinkytofu``; re-exports all rocisa submodules
+so KernelWriter can use ``from rocisa import ...`` unchanged.
+Not yet done: module-level counters, ``insertDelayAlu``, ``getCycles``,
+full ``toStinkyTofuModule`` options forwarding.
 """
 
 from __future__ import annotations

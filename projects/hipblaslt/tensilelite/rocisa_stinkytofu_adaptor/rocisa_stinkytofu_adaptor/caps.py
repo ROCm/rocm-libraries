@@ -1,49 +1,8 @@
-################################################################################
-#
-# Copyright (C) 2025-2026 Advanced Micro Devices, Inc. All rights reserved.
-#
-# Permission is hereby granted, free of charge, to any person obtaining a copy
-# of this software and associated documentation files (the "Software"), to deal
-# in the Software without restriction, including without limitation the rights
-# to use, copy, modify, merge, publish, distribute, sublicense, and/or sell cop-
-# ies of the Software, and to permit persons to whom the Software is furnished
-# to do so, subject to the following conditions:
-#
-# The above copyright notice and this permission notice shall be included in all
-# copies or substantial portions of the Software.
-#
-# THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR IM-
-# PLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY, FITNESS
-# FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE AUTHORS OR
-# COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER
-# IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNE-
-# CTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
-################################################################################
-"""ISA capability access for the logicalIR ``rocisa`` adaptor.
+# Copyright Advanced Micro Devices, Inc., or its affiliates.
+# SPDX-License-Identifier: MIT
+"""ISA capability bridge via stinkytofu.getHardwareCaps (dynamic comgr probing).
 
-What this file is:
-    Bridge between ``rocIsa.getIsaInfo`` / ``base.init`` and the four
-    capability dictionaries Tensile expects
-    (``asmCaps``, ``archCaps``, ``regCaps``, ``asmBugs``).
-
-What it does (real):
-    - ``getCaps`` — delegates to ``stinkytofu.getHardwareCaps`` (comgr +
-      mnemonic probes in ``shared/stinkytofu/.../HardwareCaps.cpp``).
-      Returns fresh shallow copies on every call. No static snapshot
-      table: probing is entirely dynamic and does not require the host
-      GPU to match the requested ISA (same model as rocisa ``llvm-mc`` /
-      comgr assembly probes).
-    - ``normalize_isa_key`` — coerces strings / tuples / IsaVersion-like
-      objects into ``(major, minor, patch)``.
-    - ``glc_bit_name_from_caps`` / ``slc_bit_name_from_caps`` — modifier
-      name helpers used by ``container.py`` and ``__init__.py``.
-
-Requirements:
-    - The compiled ``stinkytofu`` Python binding must be on ``PYTHONPATH``
-      (see ``tests/test.sh``). After editing ``HardwareCaps.cpp`` (or any
-      stinkytofu C++ source), rebuild ``stinkytofu_python`` so
-      ``import stinkytofu`` succeeds. Unregistered ISAs raise
-      ``KeyError`` with an empty ``asmCaps`` result.
+Returns asmCaps/archCaps/regCaps/asmBugs dicts; no static snapshot table.
 """
 
 from __future__ import annotations

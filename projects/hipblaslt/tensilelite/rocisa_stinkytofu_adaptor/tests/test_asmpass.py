@@ -1,9 +1,5 @@
-################################################################################
-#
-# Copyright (C) 2025-2026 Advanced Micro Devices, Inc. All rights reserved.
-#
+# Copyright Advanced Micro Devices, Inc., or its affiliates.
 # SPDX-License-Identifier: MIT
-################################################################################
 """Tests for ``rocisa_stinkytofu_adaptor.asmpass`` (``rocIsaPass`` Python port)."""
 
 from __future__ import annotations

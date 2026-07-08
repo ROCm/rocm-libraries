@@ -1,66 +1,9 @@
-################################################################################
-#
-# Copyright (C) 2025-2026 Advanced Micro Devices, Inc. All rights reserved.
-#
-# Permission is hereby granted, free of charge, to any person obtaining a copy
-# of this software and associated documentation files (the "Software"), to deal
-# in the Software without restriction, including without limitation the rights
-# to use, copy, modify, merge, publish, distribute, sublicense, and/or sell cop-
-# ies of the Software, and to permit persons to whom the Software is furnished
-# to do so, subject to the following conditions:
-#
-# The above copyright notice and this permission notice shall be included in all
-# copies or substantial portions of the Software.
-#
-# THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR IM-
-# PLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY, FITNESS
-# FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE AUTHORS OR
-# COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER
-# IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNE-
-# CTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
-################################################################################
-"""Shim for ``rocisa.register`` — stateful first-fit register allocator.
+# Copyright Advanced Micro Devices, Inc., or its affiliates.
+# SPDX-License-Identifier: MIT
+"""Stateful first-fit register allocator (1:1 port of register.hpp/cpp).
 
-What this file is:
-    1:1 Python port of ``rocisa/rocisa/include/register.hpp`` and
-    ``rocisa/src/register.cpp``. Tensile's KernelWriter relies on the
-    *exact* allocation behavior (e.g. AMDGPU ABI requires
-    ``KernArgAddress == SGPR0``); an off-by-one would silently produce
-    wrong asm. Includes the tail-grow overflow path and the rocisa
-    quirk where ``checkOutAligned``'s tail-walk skips index 0.
-
-    The pool is index-based — it knows nothing about register names.
-    The ``name -> idx`` mapping is the KernelWriter's concern
-    (``self.sgprs[name] = idx``).
-
-What it does (real):
-    - ``RegisterPool`` with the full method surface: ``checkOutAligned``
-      / ``checkOut`` / ``checkOutMulti``, ``checkIn``,
-      ``addFromCheckOut`` / ``removeFromCheckOut``, ``add`` /
-      ``addRange`` / ``remove``, ``growPool`` / ``appendPool``,
-      ``setOccupancyLimit`` / ``resetOccupancyLimit``,
-      ``available*`` / ``getPool`` / ``size`` / ``state`` /
-      ``checkFinalState``, ``__deepcopy__``.
-    - ``RegisterPool.Status`` — ``IntEnum`` (``Unavailable=0``,
-      ``Available=1``, ``InUse=2``); KernelWriterAssembly reads
-      ``spool[i].status == RegisterPool.Status.InUse`` directly.
-    - ``RegisterPool.Register`` — ``(status, tag)`` value object;
-      ``tag`` is a debug hint, not a unique key.
-    - 33-test suite at
-      ``projects/hipblaslt/tensilelite/rocisa_stinkytofu_adaptor/tests/test_register.py``.
-
-Not yet done:
-    - ``initTmps`` returns ``None``; the C++ implementation builds a
-      ``Module`` of ``SMovB32`` / ``VMovB32`` per Available slot.
-      Restore once those instruction shims return real ``Item``s for
-      emission (today ``VMovB32`` exists but init-temp wiring is still
-      unimplemented here).
-
-logicalIR correspondence:
-    None. ``StinkyRegister`` (``shared/stinkytofu/include/stinkytofu/
-    ir/asm/StinkyRegister.hpp``) is a value object only — it has no
-    allocator. The rocisa-compat surface needs first-fit allocation,
-    so the pool lives here in the adaptor.
+Fully implemented: checkOut/checkIn/growPool/occupancyLimit/deepcopy.
+Not yet done: initTmps (returns None until instruction shim wiring is complete).
 """
 
 from __future__ import annotations

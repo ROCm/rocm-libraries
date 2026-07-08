@@ -1,42 +1,9 @@
-################################################################################
-#
-# Copyright (C) 2025-2026 Advanced Micro Devices, Inc. All rights reserved.
-#
-# Permission is hereby granted, free of charge, to any person obtaining a copy
-# of this software and associated documentation files (the "Software"), to deal
-# in the Software without restriction, including without limitation the rights
-# to use, copy, modify, merge, publish, distribute, sublicense, and/or sell cop-
-# ies of the Software, and to permit persons to whom the Software is furnished
-# to do so, subject to the following conditions:
-#
-# The above copyright notice and this permission notice shall be included in all
-# copies or substantial portions of the Software.
-#
-# THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR IM-
-# PLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY, FITNESS
-# FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE AUTHORS OR
-# COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER
-# IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNE-
-# CTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
-################################################################################
-"""Shim for ``rocisa.asmpass``.
+# Copyright Advanced Micro Devices, Inc., or its affiliates.
+# SPDX-License-Identifier: MIT
+"""Python port of rocisa asm optimization passes.
 
-Python port of ``rocisa/rocisa/include/pass.hpp`` + ``rocisa/src/pass/pass.cpp``.
-All passes mutate the adaptor ``KernelBody`` / ``Module`` tree in place (no
-``_stinkytofu`` dependency).
-
-Implemented:
-    - ``rocIsaPassOption`` / ``rocIsaPassResult`` / ``rocIsaPass``
-    - ``macroToInstruction``, ``compositeToInstruction`` (no-op until
-      ``CompositeInstruction`` exposes ``getInstructions``),
-      ``convertTextVariablesToRegisters``
-    - ``getActFuncModuleName`` / ``getActFuncBranchModuleName``
-
-Deferred (no-op or stub):
-    - ``removeDuplicatedFunction`` (activation de-dup)
-    - ``buildGraph`` / ``removeDuplicateAssignment`` when ``doOpt()`` is true
-    - ``insertDelayAlu``
-    - ``getCycles`` returns ``0`` (matches native gfx1250 unsupported path)
+Implemented: macroToInstruction, compositeToInstruction, convertTextVariablesToRegisters.
+Not yet done: removeDuplicatedFunction, buildGraph, insertDelayAlu, getCycles (returns 0).
 """
 
 from __future__ import annotations

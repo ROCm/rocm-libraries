@@ -1,37 +1,9 @@
-################################################################################
-#
-# Copyright (C) 2025-2026 Advanced Micro Devices, Inc. All rights reserved.
-#
-# Permission is hereby granted, free of charge, to any person obtaining a copy
-# of this software and associated files (the "Software"), to deal in the
-# Software without restriction, including without limitation the rights to use,
-# copy, modify, merge, publish, distribute, sublicense, and/or sell copies of the
-# Software, and to permit persons to whom the Software is furnished to do so,
-# subject to the following conditions:
-#
-# The above copyright notice and this permission notice shall be included in all
-# copies or substantial portions of the Software.
-#
-# THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
-# IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
-# FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
-# AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
-# LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
-# OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
-# SOFTWARE.
-################################################################################
-"""StinkyTofu asm-IR wiring for the adapter (``toStinkyTofuModule`` / wrappers).
+# Copyright Advanced Micro Devices, Inc., or its affiliates.
+# SPDX-License-Identifier: MIT
+"""StinkyTofu asm-IR wiring: toStinkyTofuModule / emitAssembly entry points.
 
-KernelWriter calls ``rocisa.toStinkyTofuModule(body, arch, moduleName,
-signature=..., options=...)`` then ``runOptimizationPipeline()`` /
-``emitAssembly()``. The native rocisa binding lowers C++ ``rocisa::Module``
-inside stinkytofu. This adapter instead lowers the Python ``code.Module``
-tree via ``Module.to_stinky_asm`` (logical IR → ``lower_logical_module``).
-
-The standalone ``stinkytofu`` Python binding's ``lower_logical_module`` entry
-point currently fixes ``StinkyAsmModule::ModuleOptions`` to defaults; the
-``options`` dict is therefore accepted for API parity with native rocisa but
-is not yet threaded into that C++ path (extend ``_stinkytofu`` when needed).
+Lowers Python code.Module via Module.to_stinky_asm -> stinkytofu.lower_logical_module.
+The options dict is accepted for API parity but not yet forwarded to the C++ path.
 """
 
 from __future__ import annotations

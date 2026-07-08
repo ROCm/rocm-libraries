@@ -1,14 +1,8 @@
-################################################################################
-#
-# Copyright (C) 2026 Advanced Micro Devices, Inc. All rights reserved.
-#
+# Copyright Advanced Micro Devices, Inc., or its affiliates.
 # SPDX-License-Identifier: MIT
-################################################################################
-"""Internal helpers for ``rocisa.asmpass`` — Python port of ``pass.cpp``.
+"""Python port of rocisa asm-pass pipeline (pass.cpp).
 
-Mirrors the ordering and option gates in ``rocisa/rocisa/src/pass/pass.cpp``.
-All passes operate on the in-memory ``code.Module`` / ``code.Macro`` tree
-(rocisa-shaped IR), not on stinkytofu ``LogicalModule`` objects.
+Operates on the in-memory Module/Macro tree, not on stinkytofu LogicalModule.
 """
 
 from __future__ import annotations

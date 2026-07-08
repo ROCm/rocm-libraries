@@ -1,59 +1,9 @@
-################################################################################
-#
-# Copyright (C) 2025-2026 Advanced Micro Devices, Inc. All rights reserved.
-#
-# Permission is hereby granted, free of charge, to any person obtaining a copy
-# of this software and associated documentation files (the "Software"), to deal
-# in the Software without restriction, including without limitation the rights
-# to use, copy, modify, merge, publish, distribute, sublicense, and/or sell cop-
-# ies of the Software, and to permit persons to whom the Software is furnished
-# to do so, subject to the following conditions:
-#
-# The above copyright notice and this permission notice shall be included in all
-# copies or substantial portions of the Software.
-#
-# THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR IM-
-# PLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY, FITNESS
-# FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE AUTHORS OR
-# COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER
-# IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNE-
-# CTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
-################################################################################
-"""Shim for ``rocisa.functions``.
+# Copyright Advanced Micro Devices, Inc., or its affiliates.
+# SPDX-License-Identifier: MIT
+"""Composite KernelWriter helpers (ArgumentLoader, math, branch).
 
-What this file is:
-    Mirrors ``rocisa/rocisa/src/functions/`` — composite KernelWriter
-    helpers that emit IR sequences (vector divide / multiply, branch
-    helpers, magic-number division, argument loader, DS init).
-
-What it does (real):
-    - ``ArgumentLoader`` — kernel-argument offset accumulator and
-      ``SLoadB*`` emitter. ``loadKernArg`` / ``loadAllKernArg`` emit
-      real ``SLoadB{32,64,128,256,512}`` instructions matching the C++
-      logic in ``functions/argument.hpp``.
-
-What it does (real, math):
-    - Vector / scalar divide-and-remainder, ceil-divide, remainder,
-      magic division (``sMagicDiv`` / ``sMagicDiv2``), multiply /
-      multiply-add / Bpe family helpers — all ported from C++
-      ``functions/f_math.hpp``.
-
-What it does (real, branch):
-    - ``BranchIfZero`` / ``BranchIfNotZero`` — type-dispatched
-      compare-and-branch sequences ported from C++
-      ``functions/f_branch.hpp``.
-
-Not yet done (dummy):
-    - Cast helper: ``VSaturateCastInt``
-    - ``DSInit``
-
-Note on overloads:
-    nanobind exposes overload-resolved dispatch under one Python name,
-    so the shim exports one symbol per *name*, not per overload.
-
-logicalIR correspondence:
-    None. These reduce to several primitive instructions which DO have
-    logicalIR mappings, but the helpers themselves do not.
+Real: ArgumentLoader, vector/scalar divide, magic division, branch helpers.
+Not yet done: VSaturateCastInt, DSInit.
 """
 
 from __future__ import annotations

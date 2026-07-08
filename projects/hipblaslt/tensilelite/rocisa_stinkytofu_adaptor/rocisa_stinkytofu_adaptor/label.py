@@ -1,47 +1,8 @@
-################################################################################
-#
-# Copyright (C) 2025-2026 Advanced Micro Devices, Inc. All rights reserved.
-#
-# Permission is hereby granted, free of charge, to any person obtaining a copy
-# of this software and associated documentation files (the "Software"), to deal
-# in the Software without restriction, including without limitation the rights
-# to use, copy, modify, merge, publish, distribute, sublicense, and/or sell cop-
-# ies of the Software, and to permit persons to whom the Software is furnished
-# to do so, subject to the following conditions:
-#
-# The above copyright notice and this permission notice shall be included in all
-# copies or substantial portions of the Software.
-#
-# THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR IM-
-# PLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY, FITNESS
-# FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE AUTHORS OR
-# COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER
-# IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNE-
-# CTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
-################################################################################
-"""Shim for ``rocisa.label``.
+# Copyright Advanced Micro Devices, Inc., or its affiliates.
+# SPDX-License-Identifier: MIT
+"""Assembly label management (LabelManager + magicGenerator).
 
-What this file is:
-    Mirrors rocisa's label submodule -- assembly label management
-    (per-name use counts, uniqueness, prefix-scoped uniqueness). Pairs
-    with ``code.Label`` (the IR leaf node): ``LabelManager`` produces
-    name strings, ``Label`` wraps them as emittable Items.
-
-What it does (real):
-    - ``LabelManager`` -- per-kernel registry tracking how many times
-      each label name has been seen; serves up qualified strings
-      (``name`` for the first occurrence, ``name_<N>`` thereafter)
-      and produces collision-free random names via ``getUniqueName``
-      / ``getUniqueNamePrefix``.
-    - ``magicGenerator`` -- 16-character random ``[A-Z0-9]`` string
-      generator used as the entropy source for ``getUniqueName*``.
-
-Not yet done:
-    - None.
-
-logicalIR correspondence:
-    None. Label management is a pure asm-level concern and lives
-    entirely on the rocisa-shaped side of the lowering boundary.
+Fully implemented; no stinkytofu dependency.
 """
 
 from __future__ import annotations

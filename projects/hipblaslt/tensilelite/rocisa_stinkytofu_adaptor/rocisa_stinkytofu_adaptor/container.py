@@ -1,45 +1,9 @@
-################################################################################
-#
-# Copyright (C) 2025-2026 Advanced Micro Devices, Inc. All rights reserved.
-#
-# Permission is hereby granted, free of charge, to any person obtaining a copy
-# of this software and associated documentation files (the "Software"), to deal
-# in the Software without restriction, including without limitation the rights
-# to use, copy, modify, merge, publish, distribute, sublicense, and/or sell cop-
-# ies of the Software, and to permit persons to whom the Software is furnished
-# to do so, subject to the following conditions:
-#
-# The above copyright notice and this permission notice shall be included in all
-# copies or substantial portions of the Software.
-#
-# THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR IM-
-# PLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY, FITNESS
-# FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE AUTHORS OR
-# COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER
-# IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNE-
-# CTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
-################################################################################
-"""Shim for ``rocisa.container``.
+# Copyright Advanced Micro Devices, Inc., or its affiliates.
+# SPDX-License-Identifier: MIT
+"""Register references, factory helpers (sgpr/vgpr/accvgpr/mgpr), and asm modifiers.
 
-Register references (``RegisterContainer``, ``RegName``, ``Holder*``),
-factory helpers (``sgpr`` / ``vgpr`` / ``accvgpr`` / ``mgpr``,
-``replaceHolder``), asm modifier descriptors, hardware aliases
-(``VCC``, ``EXEC``, ``HWRegContainer``), and small value objects.
-
-Done (real):
-    - ``Container`` ABC (``toString`` / ``clone``)
-    - ``RegName``, ``RegisterContainer`` (:class:`Container`)   (T2)
-    - ``VCC``, ``EXEC``, ``EXECLO``, ``EXECHI``               (T4)
-    - ``HWRegContainer``                                      (T4)
-    - ``MemTokenData``                                        (T5)
-    - ``Holder``, ``HolderContainer``, ``replaceHolder``      (T2)
-    - ``sgpr`` / ``vgpr`` / ``accvgpr`` / ``mgpr``            (T3)
-    - ``ContinuousRegister``                                  (T3)
-
-Done (modifiers, T5.2):
-    - ``DS/FLAT/GLOBAL/MUBUF/SMEM/SDWA/DPP/VOP3P/True16Modifiers``
-      (``toString`` follows ``container.hpp`` + active ``rocIsa`` asm caps,
-      including gfx1250 ``th:`` / ``nv`` / ``scope:`` memory modifiers).
+All register containers, holders, HW aliases (VCC/EXEC), and modifier
+descriptors (DS/FLAT/GLOBAL/SMEM/SDWA/DPP/VOP3P/True16) are real.
 """
 
 from __future__ import annotations

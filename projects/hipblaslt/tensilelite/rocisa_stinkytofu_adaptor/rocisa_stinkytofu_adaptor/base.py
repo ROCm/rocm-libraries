@@ -1,90 +1,9 @@
-################################################################################
-#
-# Copyright (C) 2025-2026 Advanced Micro Devices, Inc. All rights reserved.
-#
-# Permission is hereby granted, free of charge, to any person obtaining a copy
-# of this software and associated documentation files (the "Software"), to deal
-# in the Software without restriction, including without limitation the rights
-# to use, copy, modify, merge, publish, distribute, sublicense, and/or sell cop-
-# ies of the Software, and to permit persons to whom the Software is furnished
-# to do so, subject to the following conditions:
-#
-# The above copyright notice and this permission notice shall be included in all
-# copies or substantial portions of the Software.
-#
-# THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR IM-
-# PLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY, FITNESS
-# FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE AUTHORS OR
-# COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER
-# IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNE-
-# CTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
-################################################################################
-"""Shim for ``rocisa.base``.
+# Copyright Advanced Micro Devices, Inc., or its affiliates.
+# SPDX-License-Identifier: MIT
+"""Process-wide rocIsa singleton state and code-composition root types.
 
-What this file is:
-    Mirrors ``rocisa/rocisa/src/base.cpp`` + ``rocisa/include/base.hpp``
-    — code-composition root types and the process-wide ``rocIsa``
-    singleton state.
-
-What it does (real):
-    - ``KernelInfo`` — current kernel ISA + wavefrontSize; picklable for
-      ``ParallelMap2`` workers.
-    - ``IsaInfo`` — asm/arch/reg/bug capability dicts holder; picklable.
-      (Defined here to mirror ``base.hpp:64-70``; re-exported from
-      ``rocisa_stinkytofu_adaptor.__init__`` so ``from rocisa import
-      IsaInfo`` keeps working.)
-    - ``OutputOptions`` — output toggles (just ``outputNoComment`` today);
-      picklable.
-    - Process-wide state mirror of ``rocisa::rocIsa`` (base.hpp:72-218):
-      ``_current_isa`` / ``_is_init`` / ``_assembler_path`` /
-      ``_kernel_info`` / ``_data`` (ISA -> IsaInfo) / ``_vgpr_idx`` /
-      ``_vgpr_msb`` / ``_current_output_options``. ALL ownership lives
-      here; ``rocIsa`` in ``__init__.py`` is a thin forwarding shell.
-    - Accessor functions:
-      ``init`` / ``isInit`` / ``getIsaInfo`` / ``getAsmCaps`` /
-      ``getArchCaps`` / ``getRegCaps`` / ``getAsmBugs`` / ``setKernel`` /
-      ``setKernelInfo`` / ``getKernel`` / ``getData`` / ``setData`` /
-      ``getVgprIdx`` / ``setVgprIdx`` / ``getVgprMsb`` / ``setVgprMsb`` /
-      ``getOutputOptions`` / ``setOutputOptions`` / ``outputNoComment``.
-    - ``Item`` — polymorphic root of the code composition tree; concrete
-      class with default ``toString`` / ``prettyPrint`` / ``countType`` /
-      ``countExactType`` and the seven capability proxies
-      (``getAsmCaps`` / ... / ``kernel``) forwarding to the accessors
-      above. Mirror of ``rocisa::Item`` (base.hpp:220-297).
-    - ``DummyItem`` — inert ``Item`` subclass whose ``countType`` is
-      hardcoded 0, mirror of ``rocisa::DummyItem`` (base.hpp:299-310).
-
-Not yet done (dummy):
-    - ``IsaVersion`` — used as a marker only today.
-
-Design note — singleton decomposition:
-    Earlier iterations housed ALL ``rocIsa`` state on the god-singleton
-    class in ``__init__.py``; code that needed to read a flag had to
-    ``rocIsa.getInstance().getXxx()`` even when the call site already
-    lived in ``base.py`` (which inverted the dependency direction and
-    forced lazy-import + try/except gymnastics to dodge cycles).
-    Now state lives here, in the module that already owns the data
-    classes (``KernelInfo`` / ``IsaInfo`` / ``OutputOptions``), and
-    ``rocIsa`` is a forwarding shell whose only job is to preserve the
-    public API surface that KernelWriter / Tensile callers use.
-
-    For C++ parity reference, this module mirrors rocisa C++ as:
-        base.py state            <-> rocisa::rocIsa::m_*  (base.hpp:212-217)
-        base.py accessor fns     <-> rocisa::rocIsa::*    (base.hpp:88-207)
-        __init__.py rocIsa shim  <-> nanobind binding     (base.cpp:104-150)
-
-Thread / process semantics:
-    All state below is process-wide (single instance per Python
-    interpreter). ``ParallelMap2`` workers get a fresh module-level
-    default and pick up Tensile's data via
-    ``rocIsa.getInstance().setData(pickled_data)`` /
-    ``setOutputOptions(...)`` in the worker init path. NOT thread-local.
-    The C++ original IS per-thread (``std::map<std::thread::id, ...>``);
-    Tensile / KernelWriter only ever read it back from the same thread
-    that wrote it (and across processes goes through pickle), so a
-    single per-process value is sufficient here. If true thread-locality
-    is ever needed, swap the globals below for ``threading.local()`` —
-    the accessor functions are the only places that need updating.
+Provides KernelInfo, IsaInfo, OutputOptions, Item, and all rocIsa accessors.
+Not yet done: IsaVersion is a marker only.
 """
 
 from __future__ import annotations

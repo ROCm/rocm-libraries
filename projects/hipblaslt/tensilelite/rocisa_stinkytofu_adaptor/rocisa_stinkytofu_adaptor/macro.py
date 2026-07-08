@@ -1,39 +1,8 @@
-################################################################################
-#
-# Copyright (C) 2025-2026 Advanced Micro Devices, Inc. All rights reserved.
-#
-# Permission is hereby granted, free of charge, to any person obtaining a copy
-# of this software and associated documentation files (the "Software"), to deal
-# in the Software without restriction, including without limitation the rights
-# to use, copy, modify, merge, publish, distribute, sublicense, and/or sell cop-
-# ies of the Software, and to permit persons to whom the Software is furnished
-# to do so, subject to the following conditions:
-#
-# The above copyright notice and this permission notice shall be included in all
-# copies or substantial portions of the Software.
-#
-# THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR IM-
-# PLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY, FITNESS
-# FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE AUTHORS OR
-# COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER
-# IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNE-
-# CTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
-################################################################################
-"""Shim for ``rocisa.macro``.
+# Copyright Advanced Micro Devices, Inc., or its affiliates.
+# SPDX-License-Identifier: MIT
+"""Composite macro builders (MacroVMagicDiv, PseudoRandomGenerator).
 
-What this file is:
-    Mirrors ``rocisa/rocisa/src/macro.cpp`` — composite macro builders
-    (magic-number divide, PRNG boilerplate).
-
-What it does (real):
-    - ``MacroVMagicDiv`` — macro definition for V_MAGIC_DIV
-    - ``VMagicDiv`` — inlined module equivalent of V_MAGIC_DIV
-    - ``PseudoRandomGenerator`` — macro definition for PRND_GENERATOR
-    - ``PseudoRandomGeneratorModule`` — inlined module equivalent
-
-logicalIR correspondence:
-    None. These reduce to several primitive instructions which DO have
-    logicalIR mappings, but the macro builders themselves do not.
+Macro/MacroInstruction IR types are real; builder callables are still dummy.
 """
 
 from __future__ import annotations

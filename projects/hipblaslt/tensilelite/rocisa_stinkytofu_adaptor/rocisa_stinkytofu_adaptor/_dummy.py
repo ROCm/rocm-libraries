@@ -1,43 +1,8 @@
-################################################################################
-#
-# Copyright (C) 2025-2026 Advanced Micro Devices, Inc. All rights reserved.
-#
-# Permission is hereby granted, free of charge, to any person obtaining a copy
-# of this software and associated documentation files (the "Software"), to deal
-# in the Software without restriction, including without limitation the rights
-# to use, copy, modify, merge, publish, distribute, sublicense, and/or sell cop-
-# ies of the Software, and to permit persons to whom the Software is furnished
-# to do so, subject to the following conditions:
-#
-# The above copyright notice and this permission notice shall be included in all
-# copies or substantial portions of the Software.
-#
-# THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR IM-
-# PLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY, FITNESS
-# FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE AUTHORS OR
-# COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER
-# IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNE-
-# CTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
-################################################################################
-"""Factory helpers for building rocisa-shaped dummies in the adaptor.
+# Copyright Advanced Micro Devices, Inc., or its affiliates.
+# SPDX-License-Identifier: MIT
+"""Factories for building rocisa-shaped class/function/enum stand-ins.
 
-What this file is:
-    Factories used by every ``rocisa_stinkytofu_adaptor.*`` shim to
-    produce class / function / enum stand-ins matching the nanobind
-    binding surface.
-
-What it does (real):
-    - ``make_dummy_class`` — class shim; metaclass handles class-level
-      attribute access (e.g. ``nb::def_static`` methods).
-    - ``make_dummy_func`` — function shim; prints when called.
-    - ``make_dummy_enum`` — real ``IntEnum`` matching nanobind's
-      ``nb::enum_`` + ``export_values()`` semantics; member ``.value`` /
-      ``.name`` and ``cls(0)`` round-trip.
-    - ``export_enum_values`` — replicates ``nb::export_values()`` at
-      module scope.
-
-Not yet done:
-    - None. Every helper here is real.
+All helpers here are real implementations (IntEnum, metaclass shims).
 """
 
 from __future__ import annotations
