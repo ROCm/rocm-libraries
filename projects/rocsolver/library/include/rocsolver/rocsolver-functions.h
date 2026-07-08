@@ -26939,8 +26939,8 @@ ROCSOLVER_EXPORT rocblas_status rocsolver_zsytrf_strided_batched(rocblas_handle 
             &        & A_{n-1} & E_n
         \end{array}\right] 
 
-	\left[
-	\begin{array}{cccc}
+        \left[
+        \begin{array}{cccc}
         I & F_1    &        &        \\
           &        & \ddots & \ddots \\
           &        & I      & F_{n-1}\\
@@ -27058,8 +27058,8 @@ ROCSOLVER_EXPORT rocblas_status rocsolver_zgeblttrf_npvt(rocblas_handle handle,
                & \ddots & \ddots     &      \\
                &        & A_{l(n-1)} & E_{ln}
         \end{array}\right] 
-	
-	\left[\begin{array}{cccc}
+
+        \left[\begin{array}{cccc}
         I & F_{l1}  &          &            \\
           & \ddots  & \ddots   &            \\
           &         & I        & F_{l(n-1)} \\
@@ -27189,8 +27189,8 @@ ROCSOLVER_EXPORT rocblas_status rocsolver_zgeblttrf_npvt_batched(rocblas_handle 
                & \ddots & \ddots     &       \\
                &        & A_{l(n-1)} & E_{ln}
         \end{array}\right] 
-	
-	\left[\begin{array}{cccc}
+ 
+        \left[\begin{array}{cccc}
         I & F_{l1} &         &             \\
           & \ddots & \ddots  &             \\
           &        & I       & F_{l(n-1)}  \\
@@ -27350,8 +27350,8 @@ ROCSOLVER_EXPORT rocblas_status
                & \ddots  & \ddots     &     \\
                &         & A_{l(n-1)} & E_{ln}
         \end{array}\right] 
-	
-	\left[\begin{array}{cccc}
+
+        \left[\begin{array}{cccc}
         I & F_{l1}  &        &            \\
           & \ddots  & \ddots &            \\
           &         & I      & F_{l(n-1)} \\
