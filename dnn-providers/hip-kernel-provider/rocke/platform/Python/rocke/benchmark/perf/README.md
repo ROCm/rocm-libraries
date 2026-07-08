@@ -5,7 +5,7 @@
 
 Reusable building blocks for measuring rocKE GPU kernels: hardware **counters**
 (cycles, cache, waves, instructions, stalls) via `rocprofv3`, static **occupancy**
-(VGPR/LDS/…) from a kernel's ELF notes, and **wall** time - composed into one
+(VGPR/LDS/...) from a kernel's ELF notes, plus real-world (**wall**) and profiled timing - composed into one
 `measurement/v1` record. The primary metric is cycle-based (`busy_cycles`), which is
 clock-invariant and so much less noisy than milliseconds.
 
@@ -78,7 +78,10 @@ framework) uses these same pieces.
 - `occupancy` - VGPR/AGPR/SGPR/LDS + a coarse occupancy estimate from an HSACO's
   ELF notes. No GPU required.
 - `harness` - profile a kernel-launch command under `rocprofv3` and **return** a
-  record (counters + resources + a separate un-profiled wall run).
+  record: counters + resources + `profiled` timing (from the profiled run) + a
+  separate un-profiled `wall` run. Options: `warmup=N` drops the launcher's cold
+  warmup dispatches from the counter medians; `per_dispatch=True` also emits raw
+  per-dispatch counters (`counter_samples`) for downstream profiling.
 - `aggregate` - reduce K repeated runs to a median + spread (noise bound).
 - `report` - serialize a record, extract the diagnostic panel, and diff two records.
 
@@ -92,22 +95,25 @@ JSON Lines** - nothing more.
 - `store` - append/read records in a user cache dir (`~/.cache/rocke-perf`;
   override with `$ROCKE_PERF_CACHE`). Append-only `history.jsonl`.
 - `selfcheck` - advisory improve/regress verdict, gated on
-  `max(threshold, k·spread)` so run-to-run noise isn't flagged.
+  `max(threshold, k*spread)` so run-to-run noise isn't flagged.
 - CLI: `python -m rocke.benchmark.perf.tool {profile,occupancy,compare}` (`--json`
   for machine output).
 
-**Scope boundary - the *system* is not here.** Fleet scheduling, central storage,
-dashboards, CI orchestration, at-scale analysis, and any **CSV / columnar / export**
-storage format are the concern of the external perf framework, which consumes the
-same records via the schema. (The harness *reads* `rocprofv3`'s CSV output only as
-an input to build a record - this package never produces or stores CSV.)
+**Scope boundary - the *system* is not here.** Which GPUs run and their scheduling,
+fleet orchestration, mass/central data storage, dashboards, at-scale analysis, and
+any **CSV / columnar / export** storage format are the concern of the external perf
+framework, which consumes the same records via the schema. (The harness *reads*
+`rocprofv3`'s CSV output only as an input to build a record - this package never
+produces or stores CSV.)
 
-## 3. The example - a demonstration, not a product surface (`examples/`)
+## 3. The GEMM sweep integration (`examples/`)
 
-- `examples/profile_gemm_sweep.py` shows how a consumer wires the primitives over
-  rocKE's **existing** GEMM sweep (`rocke.benchmark.gemm.fp16_rcr_sweep`, reusing its
-  enumeration) to produce one record per variant. Running an at-scale sweep would be
-  driven elsewhere; this is only a worked example of the wiring.
+- `examples/profile_gemm_sweep.py` drives the primitives over rocKE's **existing**
+  GEMM sweep (`rocke.benchmark.gemm.fp16_rcr_sweep`, reusing its enumeration) to
+  produce one record per variant. It ships in the repo as the reference for wiring
+  the primitives over a sweep. What it does NOT do is the *system* work - choosing
+  which GPUs run the sweep, scheduling, running it at scale, and storing mass
+  results - that stays with the external perf framework.
 
 ## Running
 
@@ -117,8 +123,10 @@ degrade to a wall-only record (and warn), so nothing hard-fails.
 
 ```
 # measure a kernel-launch command (must print a `PerfJSON:` line for wall metrics)
+#   --warmup N     drop the launcher's N warmup dispatches from the counter medians
+#   --per-dispatch also emit raw per-dispatch counters (counter_samples)
 python -m rocke.benchmark.perf.tool profile --arch gfx950 --op gemm \
-    --shape '{"M":512,"N":512,"K":512}' --repeats 3 -- <kernel launch argv...>
+    --shape '{"M":512,"N":512,"K":512}' --repeats 3 --warmup 5 -- <kernel launch argv...>
 
 # improve/regress from stored history
 python -m rocke.benchmark.perf.tool compare --all

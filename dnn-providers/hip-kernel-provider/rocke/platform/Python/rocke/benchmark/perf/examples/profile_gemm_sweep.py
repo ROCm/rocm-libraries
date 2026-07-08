@@ -1,24 +1,23 @@
 # Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
 # SPDX-License-Identifier: MIT
-"""EXAMPLE (not a product surface): profile rocKE's GEMM sweep with the primitives.
+"""GEMM sweep integration: profile rocKE's GEMM sweep with the primitives.
 
-This is a *demonstration* of how a consumer (a dev, an agent, or - with its own
-orchestration - an external perf framework) wires the rocke.benchmark.perf primitives over
-rocKE's EXISTING GEMM sweep. It deliberately does the minimum:
+The reference for wiring the `rocke.benchmark.perf` primitives over rocKE's EXISTING
+GEMM sweep. It:
 
   - reuses rocKE's own `rocke.benchmark.gemm.fp16_rcr_sweep` to expand + compile the
-    variant set (NO new enumeration / orchestration);
+    variant set (NO new enumeration);
   - for each compiled variant runs the pipeline (`harness.profile` x repeats ->
     `aggregate` -> `store`) to produce one record per variant;
   - self-checks each variant against its prior stored run.
 
-Boundary note: this stays firmly on the "produce + simple local store" side. It is
-single-box, writes only to the local user cache dir, and does NOT do the *system*
-things (fleet scheduling, central storage, dashboards, CI orchestration, at-scale
-analysis) - those belong to the external perf framework, which would drive the
-same primitives through its own orchestration rather than import this example.
+Boundary note: this stays on the "produce + simple local store" side. It is
+single-box and writes only to the local user cache dir. The *system* work - choosing
+which GPUs run the sweep, scheduling, running it at scale, and mass/central data
+storage - belongs to the external perf framework, which drives the same primitives
+through its own orchestration.
 
-Run: `python -m examples.profile_gemm_sweep --arch gfx950 --shape 512x512x512`
+Run: `python -m rocke.benchmark.perf.examples.profile_gemm_sweep --arch gfx950 --shape 512x512x512`
 (needs rocKE importable + a GPU). Identity = each variant's stable `cache_key`
 (so a re-run pairs); the compiled symbol is the profiler `match`. Stdlib only.
 """

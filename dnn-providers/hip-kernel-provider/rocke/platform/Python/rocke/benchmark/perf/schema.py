@@ -5,9 +5,9 @@
 One record per (run, kernel, shape, config), composed from several primitives:
 
   run       : invocation metadata (run_id, arch, commit, timestamp, ...)
-  kernel    : identity + launch config (name, op, shape, grid/block, dispatch_ref)
-              - grid/block + dispatch_ref let a consumer cross-reference an ATT
-                trace of the same kernel (the deep kernel-trace-analysis skill).
+  kernel    : identity + launch config (name, op, shape, grid/block, dispatch_symbol)
+              - grid/block + the dispatched symbol let a consumer cross-reference an
+                ATT trace of the same kernel (the deep kernel-trace-analysis skill).
   wall      : un-profiled run = real-world timing (ms_median, spread, tflops, gbs) [GPU]
   profiled  : timing of the profiled run (ms/tflops/gbs) - same execution as the
               counters, so a throughput can be correlated with a cycle reading [GPU]
@@ -15,6 +15,8 @@ One record per (run, kernel, shape, config), composed from several primitives:
   resources : occupancy primitive (ELF notes, NO GPU): vgpr/agpr/sgpr/lds/occupancy
   derived   : busy_fraction, l2_hit_rate, ...
   captured_counters : which normalized counters this arch/run actually captured
+  counter_samples   : OPT-IN raw per-dispatch counter values (all dispatches, keyed
+              by dispatch_id) for downstream profiling; absent unless requested [GPU]
   verify    : correctness (ok, max_abs_diff)
 
 `counters`/`resources`/`derived` are nullable - a record may carry only wall

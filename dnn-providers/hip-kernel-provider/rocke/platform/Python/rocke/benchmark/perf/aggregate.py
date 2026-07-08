@@ -10,12 +10,14 @@ median plus a spread, not one shot.
 `aggregate(records)` takes K records that share an identity
 (`schema.identity` = arch + kernel_name + shape) and returns ONE record where:
   - every counter is the **median** across the K runs;
-  - `wall.ms_median` / `wall.ms_spread_pct` + `wall.samples` summarize wall time;
+  - `wall` and `profiled` timings are each medianed (ms + spread + per-run samples);
   - `spread` carries the relative spread of the primary metric (`busy_cycles`) and
     of wall ms, so a consumer can gate a regression on `max(threshold, k*spread)`
     instead of a bare delta;
-  - `derived` is recomputed from the median counters;
-  - `n_samples` records K.
+  - `derived` is recomputed from the median counters (+ profiler_overhead_pct);
+  - `n_samples` records K;
+  - `counter_samples` (opt-in per-dispatch, if present) is passed through from the
+    first record - it is a per-run raw artifact, so pair it with `--repeats 1`.
 
 Pure and stdlib-only: writes nothing, runs no profiler. Mixing identities is a
 caller bug, so it raises rather than silently averaging unrelated kernels.

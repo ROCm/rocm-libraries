@@ -1,9 +1,12 @@
 # Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
 # SPDX-License-Identifier: MIT
-"""Examples - demonstrations of how a CONSUMER wires the rocke.benchmark.perf primitives.
+"""Examples - reference integrations that wire the rocke.benchmark.perf primitives.
 
-These are NOT part of the shipped tool surface. They show how a developer, an
-agent, or an external perf framework would drive the primitives for a given
-workflow. Each example is a thin consumer; the reusable logic lives in the
-`rocke.benchmark.perf` primitives (and the local store in `rocke.benchmark.perf.tool`).
+These ship in the repo as the reference for how a consumer (a developer, an agent,
+or the external perf framework) drives the primitives for a given workflow - e.g.
+`profile_gemm_sweep` over rocKE's GEMM sweep. Each is a thin consumer; the reusable
+logic lives in the `rocke.benchmark.perf` primitives (and the local store in
+`rocke.benchmark.perf.tool`). They do the produce + local-store side only; the
+*system* work (which GPUs run, scheduling, at-scale runs, mass data storage) is the
+external framework's.
 """
