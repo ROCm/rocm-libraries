@@ -337,6 +337,13 @@ if(_hipblaslt_mxdatagen_enabled)
     add_subdirectory(clients/common)
 endif()
 
+# Enable stinkytofu backend only when building for gfx1250+.
+string(REGEX MATCH "gfx1250" _has_gfx1250 "${GPU_TARGETS}")
+if(_has_gfx1250)
+    set(ROCISA_ENABLE_STINKYTOFU ON CACHE BOOL
+        "Enable stinkytofu backend integration (gfx1250+)" FORCE)
+endif()
+
 add_subdirectory(tensilelite)
 
 if(HIPBLASLT_ENABLE_HOST)

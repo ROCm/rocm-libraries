@@ -175,7 +175,13 @@ def _find_stale_sources(so_path, source_roots, build_dir):
     return stale
 
 
-if _BACKEND == "stinkytofu" and _load_stinkytofu_adapter():
+def _stinkytofu_available() -> bool:
+    """Return True only if the stinkytofu Python module was built and is importable."""
+    import importlib.util
+    return importlib.util.find_spec("stinkytofu") is not None
+
+
+if _BACKEND == "stinkytofu" and _stinkytofu_available() and _load_stinkytofu_adapter():
     # stinkytofu adapter active; wiring done inside _load_stinkytofu_adapter.
     pass
 else:

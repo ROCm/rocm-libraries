@@ -22,7 +22,9 @@
  * ************************************************************************ */
 #include <nanobind/nanobind.h>
 
+#ifdef ROCISA_HAS_STINKYTOFU
 #include "stinkytofu/pipeline/BackendRegistry.hpp"
+#endif
 
 namespace nb = nanobind;
 
@@ -37,11 +39,15 @@ void init_pass(nb::module_ m);
 void init_macro(nb::module_ m);
 void init_func(nb::module_ m);
 void init_register(nb::module_ m);
+#ifdef ROCISA_HAS_STINKYTOFU
 void init_stinkytofu(nb::module_ m);
+#endif
 
 NB_MODULE(_rocisa, m)
 {
+#ifdef ROCISA_HAS_STINKYTOFU
     stinkytofu::BackendRegistry::registerAllBackends();
+#endif
     m.doc() = "Module rocisa.";
     init_base(m);
     init_enum(m);
@@ -54,5 +60,7 @@ NB_MODULE(_rocisa, m)
     init_macro(m);
     init_func(m);
     init_register(m);
+#ifdef ROCISA_HAS_STINKYTOFU
     init_stinkytofu(m);
+#endif
 }
