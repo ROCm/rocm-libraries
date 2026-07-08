@@ -190,8 +190,14 @@ struct UnificationDispatcher
         (static_cast<int>(AttrNumAccessA) & static_cast<int>(WGAttrNumAccessEnum::PackedFlag)) != 0;
     static constexpr bool HasPackedFlagB =
         (static_cast<int>(AttrNumAccessB) & static_cast<int>(WGAttrNumAccessEnum::PackedFlag)) != 0;
+
+    static constexpr bool UsePackedNumAccessMfma = (AttrNumAccessAV != AttrNumAccessBV);
+    static constexpr bool UsePackedNumAccessWmma = HasPackedFlagA || HasPackedFlagB;
+
     static constexpr bool UsePackedNumAccess =
-        (AttrNumAccessAV != AttrNumAccessBV) || HasPackedFlagA || HasPackedFlagB;
+        !IsMx && !UseStructuredSparsity &&
+        (is_target_arch_cdna<decltype(getCMakeCompilerTarget())>() ? UsePackedNumAccessMfma
+                                                                   : UsePackedNumAccessWmma);
 
     using Type =
         typename MmaPipelineSelector<IsMx,
