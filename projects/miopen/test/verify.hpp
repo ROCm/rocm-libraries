@@ -133,7 +133,7 @@ struct square_diff_fn
     template <class T, class U>
     double operator()(T x, U y) const
     {
-        double diff = static_cast<double>(x - y);
+        double diff = static_cast<double>(x) - static_cast<double>(y);
         return diff * diff;
     }
 };
@@ -227,21 +227,22 @@ std::size_t mismatch_diff(R1&& r1, R2&& r2, T diff)
 template <class RefType, class ObsType>
 double rms_range(RefType&& ref, ObsType&& obs)
 {
-    std::size_t n = range_distance(ref);
-    if(n == range_distance(obs))
-    {
-        if(n == 0)
-            return 0;
-        double square_difference = range_product(ref, obs, 0.0, sum_fn{}, square_diff);
-        double mag1 = static_cast<double>(*std::max_element(ref.begin(), ref.end(), compare_mag));
-        // If reference is all 0, avoid dividing by 0 when normalizing
-        mag1              = (mag1 == 0.0) ? 1.0 : std::fabs(mag1);
-        double normalizer = std::max(mag1, std::numeric_limits<double>::min());
+    auto ref_size = range_distance(ref);
+    auto obs_size = range_distance(obs);
+    if(ref_size != obs_size)
+        return std::numeric_limits<double>::max();
 
-        return std::sqrt(square_difference) / (std::sqrt(n) * normalizer);
-    }
-    else
-        return double(std::numeric_limits<range_value<RefType>>::max());
+    if(ref_size == 0)
+        return 0.0;
+
+    double n                 = static_cast<double>(ref_size);
+    double square_difference = range_product(ref, obs, 0.0, sum_fn{}, square_diff);
+    double mag1 = static_cast<double>(*std::max_element(ref.begin(), ref.end(), compare_mag));
+    // If reference is all 0, avoid dividing by 0 when normalizing
+    mag1              = (mag1 == 0.0) ? 1.0 : std::fabs(mag1);
+    double normalizer = std::max(mag1, std::numeric_limits<double>::min());
+
+    return std::sqrt(square_difference) / (std::sqrt(n) * normalizer);
 }
 } // namespace miopen
 #endif
