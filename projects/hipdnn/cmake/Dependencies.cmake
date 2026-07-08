@@ -13,6 +13,39 @@ if(HIPDNN_NO_DOWNLOAD)
     )
 endif()
 
+# _hipdnn_suppress_rocm_toolchain_checks()
+#
+# Replace ROCMChecks's watched-variable callback with a no-op while a
+# third-party CMake project configures. Some dependencies mutate compiler flag
+# variables internally, and ROCMChecks reports those writes from variable_watch()
+# regardless of ROCM_WARN_TOOLCHAIN_VAR.
+macro(_hipdnn_suppress_rocm_toolchain_checks)
+    if(COMMAND rocm_check_toolchain_var)
+	# Dummy function
+	function(rocm_check_toolchain_var)
+        endfunction()
+    endif()
+endmacro()
+
+# _hipdnn_restore_rocm_toolchain_checks()
+#
+# Reinstall ROCMChecks's watched-variable callback after a suppression window.
+# The warning and error toggles are disabled only for the include that restores
+# the callback, so restoring does not emit the messages being suppressed.
+macro(_hipdnn_restore_rocm_toolchain_checks)
+    if(COMMAND rocm_check_toolchain_var)
+        _save_var(ROCM_WARN_TOOLCHAIN_VAR)
+        _save_var(ROCM_ERROR_TOOLCHAIN_VAR)
+
+        set(ROCM_WARN_TOOLCHAIN_VAR OFF)
+        set(ROCM_ERROR_TOOLCHAIN_VAR OFF)
+        include(ROCMChecks)
+
+        _restore_var(ROCM_ERROR_TOOLCHAIN_VAR)
+        _restore_var(ROCM_WARN_TOOLCHAIN_VAR)
+    endif()
+endmacro()
+
 # Dependencies where the local version should be used, if available
 set(_hipdnn_all_local_deps GTest flatbuffers spdlog nlohmann_json nanobind tsl-robin-map)
 # Dependencies where we never look for a local version
@@ -139,23 +172,9 @@ function(_fetch_gtest VERSION HASH)
     _save_var(BUILD_SHARED_LIBS)
     set(BUILD_SHARED_LIBS ${HIPDNN_GTEST_SHARED} CACHE INTERNAL "")
     set(INSTALL_GTEST OFF)
-    # Suppress ROCMChecks warnings from GTest's internal cmake modifying
-    # CMAKE_C_FLAGS/CMAKE_CXX_FLAGS. ROCMChecks uses variable_watch() and always
-    # prints regardless of ROCM_WARN_TOOLCHAIN_VAR. Override the callback with a
-    # flag-gated macro wrapper (same pattern as composablekernel/cmake/gtest.cmake).
-    # Must be a macro (not function) so the flag is read in the caller's scope.
-    if(ROCM_LIBS_SUPERBUILD AND COMMAND rocm_check_toolchain_var
-            AND NOT COMMAND _rocm_check_toolchain_var)
-        # Overrides ROCMChecks callback to suppress warnings from third-party code
-        macro(rocm_check_toolchain_var var access value list_file)
-            if(NOT _HIPDNN_DISABLE_ROCM_CHECKS)
-                _rocm_check_toolchain_var("${var}" "${access}" "${value}" "${list_file}")
-            endif()
-        endmacro()
-    endif()
-    set(_HIPDNN_DISABLE_ROCM_CHECKS TRUE)
+    _hipdnn_suppress_rocm_toolchain_checks()
     fetchcontent_makeavailable(googletest)
-    set(_HIPDNN_DISABLE_ROCM_CHECKS FALSE)
+    _hipdnn_restore_rocm_toolchain_checks()
     _restore_var(BUILD_SHARED_LIBS)
 
     _exclude_from_all(${googletest_SOURCE_DIR})
@@ -214,9 +233,9 @@ function(_fetch_spdlog VERSION HASH)
         TRUE
     )
 
-    set(_HIPDNN_DISABLE_ROCM_CHECKS TRUE)
+    _hipdnn_suppress_rocm_toolchain_checks()
     fetchcontent_makeavailable(spdlog)
-    set(_HIPDNN_DISABLE_ROCM_CHECKS FALSE)
+    _hipdnn_restore_rocm_toolchain_checks()
 
     set(HIP_DNN_SPDLOG_INCLUDE_DIR ${spdlog_SOURCE_DIR}/include CACHE PATH "Path to spdlog include")
 
