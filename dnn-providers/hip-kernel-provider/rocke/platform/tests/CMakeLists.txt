@@ -2,7 +2,7 @@
 # SPDX-License-Identifier: MIT
 #
 # By-layer C++ test registration for the rocKE engine. Included via
-# add_subdirectory(tests) from the top-level rocKE/CMakeLists.txt. All targets
+# add_subdirectory(tests) from the top-level rocke/platform/CMakeLists.txt. All targets
 # link the engine archive rocke_core (built by the parent). Paths are relative to
 # this file (tests/), keeping the tree copy-able.
 

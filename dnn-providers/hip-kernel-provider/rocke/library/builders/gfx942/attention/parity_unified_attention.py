@@ -35,13 +35,13 @@ The harness:
 
 Run (needs torch + a gfx942 GPU):
 
-    PYTHONPATH=Python .venv/bin/python \\
-        Python/rocke/library/builders/gfx942/attention/parity_unified_attention.py \\
+    PYTHONPATH=python .venv/bin/python \\
+        python/rocke/library/builders/gfx942/attention/parity_unified_attention.py \\
         --scenario correctness
 
     # force the L4 (WG=64) fallback instead of the default wide4:
-    HIPDNN_GFX942_FLASH_WIDE=0 PYTHONPATH=Python .venv/bin/python \\
-        Python/rocke/library/builders/gfx942/attention/parity_unified_attention.py \\
+    HIPDNN_GFX942_FLASH_WIDE=0 PYTHONPATH=python .venv/bin/python \\
+        python/rocke/library/builders/gfx942/attention/parity_unified_attention.py \\
         --scenario Fp16_Prefill_GQA_S2048_D128
 """
 

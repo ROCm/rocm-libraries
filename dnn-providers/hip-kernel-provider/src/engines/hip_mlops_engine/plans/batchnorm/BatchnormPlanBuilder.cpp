@@ -27,14 +27,6 @@ std::tuple<const hipdnn_flatbuffers_sdk::data_objects::BatchnormInferenceAttribu
     getBatchnormBackwardFusionNodeAttrs(
         const hipdnn_flatbuffers_sdk::flatbuffer_utilities::IGraph& opGraph)
 {
-    if(opGraph.nodeCount() != 3)
-    {
-        throw hipdnn_plugin_sdk::HipdnnPluginException(
-            HIPDNN_PLUGIN_STATUS_BAD_PARAM,
-            "Batchnorm fusion requires exactly 3 nodes. Graph has "
-                + std::to_string(opGraph.nodeCount()) + " nodes");
-    }
-
     const auto& bnInfAttr
         = opGraph.getNodeWrapper(0)
               .attributesAs<hipdnn_flatbuffers_sdk::data_objects::BatchnormInferenceAttributes>();

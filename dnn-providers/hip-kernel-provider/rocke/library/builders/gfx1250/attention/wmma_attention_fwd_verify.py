@@ -12,7 +12,7 @@ and compares the output against a numpy dense-attention reference:
 Must run on a gfx1250 device (e.g. GPU 2). ``head_size`` and ``seqlen_k`` must be
 multiples of 32 (the K=32 / BLOCK_K=32 tile); ``seqlen_q`` a multiple of 16.
 
-    PYTHONPATH=Python python3 -m builders.gfx1250.attention.wmma_attention_fwd_verify \
+    PYTHONPATH=python python3 -m builders.gfx1250.attention.wmma_attention_fwd_verify \
         --seqlen-q 64 --seqlen-k 64 --head-size 64 --heads 4
 
 The WMMA f32 accumulation order differs from numpy, so parity is judged within a

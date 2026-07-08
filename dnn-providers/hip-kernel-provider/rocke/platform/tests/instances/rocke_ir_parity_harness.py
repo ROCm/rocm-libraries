@@ -446,7 +446,7 @@ def cases():
     # gfx1250 is wave32/WMMA like gfx1201, but its fp16 atom is K=32 (16x16x32),
     # so warp_tile_k and tile_k are 32 rather than 16. NOTE: these lower through
     # the Python engine only -- the C++ engine has no gfx1250 ISA backend yet
-    # (rocke_ll_backend_for rejects gfx1250; see Cpp/core/lower_llvm/mma.cpp), so
+    # (rocke_ll_backend_for rejects gfx1250; see cpp/core/lower_llvm/mma.cpp), so
     # they are not part of the C-vs-Python byte-identity gate until that lands.
     add(
         "gemm",
