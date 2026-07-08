@@ -1,10 +1,31 @@
 find_package(GTest REQUIRED)
 
 include(GoogleTest)
-find_package(Python 3 REQUIRED COMPONENTS Interpreter)
 
-include(${CMAKE_CURRENT_LIST_DIR}/dapper.cmake)
-dapper_init()
+# Detect a TheRock build: TheRock injects THEROCK_SUBPROJECT_TARGET into every sub-project
+# configure (via CMAKE_PROJECT_TOP_LEVEL_INCLUDES). Dapper must be completely inert there.
+if(DEFINED THEROCK_SUBPROJECT_TARGET)
+  set(MIOPEN_BUILD_IN_THEROCK ON)
+else()
+  set(MIOPEN_BUILD_IN_THEROCK OFF)
+endif()
+
+if(MIOPEN_BUILD_IN_THEROCK)
+  # dapper_init() normally force-sets MIOPEN_TEST_SINGLE_GTEST / MIOPEN_TEST_DISCRETE. With
+  # Dapper skipped, restore the pre-Dapper default so the single aggregated gtest is built
+  # when discrete binaries are not (old `if(MIOPEN_TEST_DISCRETE) ... else() ... endif()`).
+  if(NOT DEFINED MIOPEN_TEST_SINGLE_GTEST)
+    if(MIOPEN_TEST_DISCRETE)
+      set(MIOPEN_TEST_SINGLE_GTEST OFF)
+    else()
+      set(MIOPEN_TEST_SINGLE_GTEST ON)
+    endif()
+  endif()
+else()
+  find_package(Python 3 REQUIRED COMPONENTS Interpreter)
+  include(${CMAKE_CURRENT_LIST_DIR}/dapper.cmake)
+  dapper_init()
+endif()
 
 if(MIOPEN_USE_HIPBLASLT)
   find_package(hipblaslt REQUIRED PATHS /opt/rocm $ENV{HIP_PATH})
@@ -241,11 +262,13 @@ function(add_gtest TEST_NAME TEST_CPP)
         set(GTEST_PARALLEL_LEVEL 4)
     endif()
 
-    file(REMOVE "${SHARDS_FILE}")
-    file(TOUCH "${SHARDS_FILE}")
     set(MIOPEN_GTEST_SHARDS "")
 
-    dapper_dev_filters()
+    if(NOT MIOPEN_BUILD_IN_THEROCK)
+      file(REMOVE "${SHARDS_FILE}")
+      file(TOUCH "${SHARDS_FILE}")
+      dapper_dev_filters()
+    endif()
 
     # cmake-lint: disable=E1120
     foreach(i RANGE 1 ${GTEST_PARALLEL_LEVEL})
@@ -259,7 +282,9 @@ function(add_gtest TEST_NAME TEST_CPP)
           --gtest_output=xml:${MIOPEN_GTEST_SHARD_XML}
         WORKING_DIRECTORY "${KERNELS_BINARY_DIR}"
       )
-      file(APPEND ${SHARDS_FILE} "${MIOPEN_GTEST_SHARD_XML}\n")
+      if(NOT MIOPEN_BUILD_IN_THEROCK)
+        file(APPEND ${SHARDS_FILE} "${MIOPEN_GTEST_SHARD_XML}\n")
+      endif()
       list(APPEND MIOPEN_GTEST_SHARDS ${MIOPEN_GTEST_SHARD})
 
       set_tests_properties(${MIOPEN_GTEST_SHARD} PROPERTIES
@@ -283,7 +308,9 @@ function(add_gtest TEST_NAME TEST_CPP)
       )
     endif()
 
-    dapper_add_sharded_test()
+    if(NOT MIOPEN_BUILD_IN_THEROCK)
+      dapper_add_sharded_test()
+    endif()
 
   endif()
   target_link_libraries(${TEST_NAME} BZip2::BZip2)
