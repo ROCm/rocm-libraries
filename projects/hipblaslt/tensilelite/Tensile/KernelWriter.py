@@ -8476,8 +8476,9 @@ class KernelWriter(metaclass=abc.ABCMeta):
       # ----------------------------
       # TODO: alignment hack, figure out a better solution
       vgprIdx = ((vgprIdx+1)//2)*2
-      # Avoid bank conflict between VgprA and VgprC
-      if(self.states.archCaps["VgprBank"]):
+      # Avoid bank conflict between VgprA and VgprC.
+      # Skip for WMMA_V3: VgprA and VgprC are loaded in different cycles.
+      if(self.states.archCaps["VgprBank"] and not self.states.asmCaps["HasWMMA_V3"]):
         if (self.states.c.startVgprValu % 4) != (vgprIdx % 4):
           vgprIdx += 2
       # dot2: alignment hack for wider local read
