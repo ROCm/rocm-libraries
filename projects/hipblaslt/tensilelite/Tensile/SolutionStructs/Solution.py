@@ -1599,10 +1599,9 @@ class Solution(collections.abc.Mapping):
         reject(state, printRejectionReason, "ScheduleGlobalRead not supported with Stream-K")
       if state["ScheduleLocalWrite"] != 1:
         reject(state, printRejectionReason, "ScheduleLocalWrite not supported with Stream-K")
-      isSia0TdmPgr = state["_ScheduleIterAlg"] == 0 \
-        and state["TDMInst"] == 3 \
-        and state["PrefetchGlobalRead"] in (1, 2)
-      if state["_ScheduleIterAlg"] not in (1, 2, 3) and not isSia0TdmPgr:
+      # SIA 0/1/2/3 are all supported with Stream-K (SIA 4 is remapped to
+      # _ScheduleIterAlg 0 upstream, so it is covered here too).
+      if state["_ScheduleIterAlg"] not in (0, 1, 2, 3):
         reject(state, printRejectionReason, "ScheduleIterAlg not supported with Stream-K")
       if not state["BufferStore"]:
         reject(state, printRejectionReason, "Stream-K requires BufferStore")
