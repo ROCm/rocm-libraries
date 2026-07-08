@@ -469,9 +469,8 @@ hybrid_mode_t select_hybrid_mode(const problem_t& problem,
                                  const hardware_t& hardware,
                                  const config_t& config,
                                  size_t sm_count_target) {
-  // Heuristic fit to measured SK5 on(SK4)/off(SK3) sweeps on MI350X (gfx950).
-  // Other architectures keep the static (SK3) sub-path until they are tuned
-  // in a follow-up PR.
+  // Fit on gfx950 (MI350X) sweeps only; other architectures stay static
+  // until tuned in a follow-up PR.
   if (hardware.arch != hardware_t::architecture_t::gfx950)
     return hybrid_mode_t::static_;
 
@@ -481,10 +480,8 @@ hybrid_mode_t select_hybrid_mode(const problem_t& problem,
   const size_t tiles = compute_number_of_output_tiles(
       MT_M, MT_N, problem.size.m, problem.size.n, batch);
 
-  // Below this many tiles there isn't enough work in the grid for dynamic
-  // per-XCD work queueing to find anything worth rebalancing -- static
-  // assignment is already close to optimal, and dynamic's extra bookkeeping
-  // is pure overhead.
+  // Too little work in the grid for dynamic rebalancing to be worth its
+  // overhead.
   if (tiles <= streamk_hybrid_defaults_t::MIN_TILES_FOR_DYNAMIC) return hybrid_mode_t::static_;
 
   size_t available_cus = (sm_count_target > 0)
@@ -492,29 +489,22 @@ hybrid_mode_t select_hybrid_mode(const problem_t& problem,
                              : hardware.N_CU;
   if (available_cus == 0) available_cus = hardware.N_CU;
 
-  // With no cotenant, a static tile assignment already matches the full CU
-  // count exactly, so there's no CU-count mismatch left for dynamic per-XCD
-  // work queueing to correct. Dynamic only starts paying off once a cotenant
-  // is actually holding some CUs away from this kernel -- even a single CU
-  // is enough to trigger it.
+  // No cotenant means static already matches the full CU count -- nothing
+  // left for dynamic to rebalance.
   const bool has_cotenant = available_cus < hardware.N_CU;
   if (!has_cotenant) return hybrid_mode_t::static_;
 
-  // A kernel with occupancy this low still has register/LDS headroom to
-  // spare, which is exactly the slack dynamic per-XCD work queueing needs to
-  // redistribute tiles around the cotenant's CUs. Once a cotenant is present
-  // and the grid is big enough, this alone is enough to go dynamic.
-  // (config.occupancy <= 0 means "unknown" -- fall through to the tiles-per-CU
-  // check below rather than assume the confident low-occupancy case.)
+  // Few wavefronts resident per CU means little overlap to absorb a
+  // cotenant's CU-count mismatch on its own, so dynamic rebalancing helps
+  // regardless of tiles_per_cu. (occupancy <= 0 means "unknown" -- fall
+  // through to the tiles_per_cu check instead.)
   if (config.occupancy > 0 &&
       config.occupancy <= streamk_hybrid_defaults_t::MAX_OCCUPANCY_FOR_UNCONDITIONAL_DYNAMIC)
     return hybrid_mode_t::dynamic;
 
-  // At higher occupancy the kernel is already using its CUs well, so dynamic
-  // per-XCD work queueing only pays off once the grid is heavily overloaded
-  // relative to the CUs actually available to it (tiles_per_cu, NOT the raw
-  // tile count checked above) -- otherwise its overhead outweighs whatever
-  // rebalancing room is left.
+  // At higher occupancy that overlap already absorbs small mismatches, so
+  // dynamic only pays off once the grid is heavily overloaded relative to
+  // the CUs actually available to it.
   const double tiles_per_cu =
       static_cast<double>(tiles) / static_cast<double>(available_cus);
   return (tiles_per_cu > streamk_hybrid_defaults_t::TILES_PER_CU_THRESHOLD_HIGH_OCCUPANCY)
