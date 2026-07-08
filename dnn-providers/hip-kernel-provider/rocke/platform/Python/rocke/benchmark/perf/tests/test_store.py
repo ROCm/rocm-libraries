@@ -1,7 +1,6 @@
 # Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
 # SPDX-License-Identifier: MIT
 """Unit tests for the local record store (pure, no GPU)."""
-import json
 import tempfile
 import unittest
 from pathlib import Path

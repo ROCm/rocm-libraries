@@ -19,7 +19,6 @@ import csv
 import glob
 import json
 import os
-import re
 import statistics
 import subprocess
 import tempfile
@@ -42,10 +41,12 @@ def _median(vals: Sequence[float]) -> Optional[float]:
     return statistics.median(vals) if vals else None
 
 
-def _write_pmc_input(raws: Sequence[str], path: Path) -> None:
-    # One counter per pass = always fits a single pass (robust; grouping is a
-    # later optimization). rocprofv3 -i replays the command once per pmc line.
-    path.write_text("".join(f"pmc: {r}\n" for r in raws))
+def _write_pmc_input(groups: Sequence[Sequence[str]], path: Path) -> None:
+    # One pmc line per group = one rocprofv3 pass = one kernel replay. Counters in a
+    # group are collected in a single execution, so they are mutually consistent
+    # (e.g. busy_cycles/wait_cycles from the same run). counters.group_counters packs
+    # as many counters per group as each hardware block's slots allow.
+    path.write_text("".join("pmc: " + " ".join(g) + "\n" for g in groups))
 
 
 def _run_rocprofv3(cmd: Sequence[str], pmc_input: Path, outdir: Path,
@@ -59,6 +60,11 @@ def _run_rocprofv3(cmd: Sequence[str], pmc_input: Path, outdir: Path,
     except (OSError, subprocess.SubprocessError):
         return False
     return proc.returncode == 0
+
+
+def _count_passes(outdir: Path) -> int:
+    """How many collection passes rocprofv3 actually ran (one `pmc_N` dir each)."""
+    return len([p for p in glob.glob(str(outdir / "pmc_*")) if Path(p).is_dir()])
 
 
 def _read_counter_csvs(outdir: Path) -> list[dict]:
@@ -151,13 +157,25 @@ def profile(cmd: Sequence[str], arch: str, *, match: Optional[str] = None,
         tmp = Path(tmp)
         outdir = tmp / "prof"
         ran = False
+        groups: list = []
         if sel:
             pmc = tmp / "pmc.txt"
-            _write_pmc_input(list(sel.values()), pmc)
+            groups = _counters.group_counters(list(sel.values()))
+            _write_pmc_input(groups, pmc)
             ran = _run_rocprofv3(cmd, pmc, outdir, env, timeout)
             if not ran:
                 _warn("rocprofv3 failed to run the kernel; counters unavailable "
                       "(wall-only record)")
+            else:
+                npass = _count_passes(outdir)
+                if npass > len(groups):
+                    # rocprofv3 split a group across passes -> those counters came
+                    # from different executions, so cross-counter ratios aren't
+                    # coherent.
+                    _warn(f"rocprofv3 used more passes ({npass}) than the "
+                          f"{len(groups)} counter group(s) requested; a group was "
+                          "split, so counters in it are not from one execution "
+                          "(check counters._BLOCK_SLOTS for this arch)")
         if ran:
             rows = _read_counter_csvs(outdir)
             target = _pick_target_kernel(rows, match)

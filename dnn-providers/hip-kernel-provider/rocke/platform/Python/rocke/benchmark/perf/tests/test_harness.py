@@ -1,9 +1,33 @@
 # Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
 # SPDX-License-Identifier: MIT
 """Unit tests for the harness's pure logic (no GPU; profiler monkeypatched)."""
+import tempfile
 import unittest
+from pathlib import Path
 
 from rocke.benchmark.perf import harness
+
+
+class TestPmcInput(unittest.TestCase):
+    def test_one_line_per_group(self):
+        with tempfile.TemporaryDirectory() as d:
+            p = Path(d) / "pmc.txt"
+            harness._write_pmc_input([["A", "B", "C"], ["D"]], p)
+            self.assertEqual(p.read_text(), "pmc: A B C\npmc: D\n")
+
+
+class TestCountPasses(unittest.TestCase):
+    def test_counts_pmc_dirs(self):
+        with tempfile.TemporaryDirectory() as d:
+            out = Path(d)
+            (out / "pmc_1" / "host").mkdir(parents=True)
+            (out / "pmc_2" / "host").mkdir(parents=True)
+            (out / "notapass").mkdir()
+            self.assertEqual(harness._count_passes(out), 2)
+
+    def test_zero_when_none(self):
+        with tempfile.TemporaryDirectory() as d:
+            self.assertEqual(harness._count_passes(Path(d)), 0)
 
 
 class TestPickTarget(unittest.TestCase):

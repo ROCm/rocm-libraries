@@ -3,7 +3,6 @@
 """Unit tests for the GEMM-sweep example's pure wiring (no GPU, no rocKE)."""
 import tempfile
 import unittest
-from pathlib import Path
 
 from rocke.benchmark.perf import schema
 from rocke.benchmark.perf.tool import store, selfcheck

@@ -6,7 +6,6 @@ import json
 import tempfile
 import unittest
 from contextlib import redirect_stdout
-from pathlib import Path
 
 from rocke.benchmark.perf import schema
 from rocke.benchmark.perf.tool import cli, store

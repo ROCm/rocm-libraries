@@ -17,7 +17,7 @@ Defaults: threshold 5% (fraction 0.05), noise_k 3. Stdlib only.
 """
 from __future__ import annotations
 
-from typing import Any, Mapping, Optional, Sequence
+from typing import Any, Mapping, Sequence
 
 from rocke.benchmark.perf import report as _report
 from . import store as _store

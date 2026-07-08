@@ -9,15 +9,30 @@ names to stable *normalized* names so downstream code (and any consumer) is
 arch-independent. A kernel is only ever compared against its own baseline on the
 same arch, so missing counters on one arch (null) are fine.
 
-`parse_list_avail` / `select` / `wanted_map` are pure (testable with a saved dump);
-`discover` runs the profiler. Stdlib only.
+`parse_list_avail` / `select` / `wanted_map` / `group_counters` are pure (testable
+without a GPU); `discover` runs the profiler. Stdlib only.
 """
 from __future__ import annotations
 
 import re
 import subprocess
 
-# Clock/wave counters that populate on both families (verified nonzero on gfx1201).
+# Hardware counter-slot budget per block: how many counters that block can drive in
+# ONE rocprofv3 pass. Counters from DIFFERENT blocks share a pass freely; only
+# same-block counters compete for that block's slots. Collecting counters in one
+# pass = one kernel execution, so they are mutually consistent (e.g. busy_cycles and
+# wait_cycles from the same run). Verified on-box (gfx90a/gfx950/gfx1201): our
+# 9-counter set (GRBM 2, SQ 5, TCC 2) all fits a single pass. Values are
+# conservative; overflowing a block just adds a pass (see `group_counters`).
+_BLOCK_SLOTS: dict[str, int] = {
+    "GRBM": 2, "SQ": 8, "TCC": 4, "GL2C": 4,  # L2 is TCC on CDNA, GL2C on RDNA
+    "TCP": 4, "TA": 4, "TD": 4, "CPC": 2, "CPF": 2,
+}
+_DEFAULT_SLOTS = 2  # unknown block: assume a small budget
+
+# Counters requested on every arch. GRBM (total_clocks, busy_cycles), SQ_BUSY_CYCLES,
+# and SQ_WAVES populate on both families; SQ_WAIT_ANY populates on CDNA but reads 0
+# on gfx1201/RDNA4 (the same SQ gap as the instruction counters below).
 _COMMON: dict[str, str] = {
     "total_clocks": "GRBM_COUNT",
     "busy_cycles": "GRBM_GUI_ACTIVE",   # primary regression metric
@@ -97,6 +112,45 @@ def parse_list_avail(text: str) -> set[str]:
 def select(arch: str, available: set[str]) -> dict[str, str]:
     """normalized -> raw for counters we want AND the GPU actually supports."""
     return {norm: raw for norm, raw in wanted_map(arch).items() if raw in available}
+
+
+def _block_of(raw: str) -> str:
+    """Hardware block a raw counter belongs to (e.g. SQ_INSTS_VALU -> 'SQ')."""
+    for b in _BLOCK_SLOTS:
+        if raw == b or raw.startswith(b + "_"):
+            return b
+    return raw.split("_", 1)[0]  # fallback: leading token
+
+
+def group_counters(raws: "list[str]") -> "list[list[str]]":
+    """Pack raw counters into minimal single-pass groups honoring per-block slots.
+
+    Counters from different blocks share a pass; same-block counters are chunked by
+    that block's slot budget (`_BLOCK_SLOTS`). Returns a list of groups, each a list
+    of raw names = one rocprofv3 pass = one kernel replay. Counters within a group
+    are collected in a single execution, so they are mutually consistent (e.g.
+    `busy_cycles`/`wait_cycles`, or `l2_hit`/`l2_miss`, from the same run). Fewer
+    groups = fewer replays. For our 9-counter set every block is under budget, so
+    this returns a single group (one pass) on all tested arches.
+    """
+    by_block: dict[str, list[str]] = {}
+    for r in raws:
+        by_block.setdefault(_block_of(r), []).append(r)
+    # chunk each block into slot-sized pieces, preserving order
+    block_chunks: list[list[list[str]]] = []
+    for block, items in by_block.items():
+        lim = _BLOCK_SLOTS.get(block, _DEFAULT_SLOTS)
+        block_chunks.append([items[i:i + lim] for i in range(0, len(items), lim)])
+    n_passes = max((len(c) for c in block_chunks), default=0)
+    groups: list[list[str]] = []
+    for i in range(n_passes):
+        g: list[str] = []
+        for chunks in block_chunks:
+            if i < len(chunks):
+                g.extend(chunks[i])
+        if g:
+            groups.append(g)
+    return groups
 
 
 def discover(arch: str, *, timeout: int = 60) -> dict[str, str]:
