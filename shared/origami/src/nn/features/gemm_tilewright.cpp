@@ -1,7 +1,7 @@
 // Copyright Advanced Micro Devices, Inc., or its affiliates.
 // SPDX-License-Identifier: MIT
 
-#include "origami/nn/features/gemm_tilewright_v1.hpp"
+#include "origami/nn/features/gemm_tilewright.hpp"
 
 #include "origami/hardware.hpp"
 #include "origami/types.hpp"

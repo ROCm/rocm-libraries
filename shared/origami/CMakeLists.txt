@@ -97,7 +97,7 @@ if(ORIGAMI_ENABLE_NN)
         BASE_DIRS "${CMAKE_CURRENT_SOURCE_DIR}/include"
         FILES
             "${CMAKE_CURRENT_SOURCE_DIR}/include/origami/nn/filter.hpp"
-            "${CMAKE_CURRENT_SOURCE_DIR}/include/origami/nn/features/gemm_tilewright_v1.hpp"
+            "${CMAKE_CURRENT_SOURCE_DIR}/include/origami/nn/features/gemm_tilewright.hpp"
     )
     target_compile_definitions(origami-headers INTERFACE ORIGAMI_ENABLE_NN=1)
 else()
@@ -128,7 +128,7 @@ if(ORIGAMI_ENABLE_NN)
     target_sources(
         origami
         PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/src/nn/filter.cpp"
-                "${CMAKE_CURRENT_SOURCE_DIR}/src/nn/features/gemm_tilewright_v1.cpp"
+                "${CMAKE_CURRENT_SOURCE_DIR}/src/nn/features/gemm_tilewright.cpp"
     )
 endif()
 
