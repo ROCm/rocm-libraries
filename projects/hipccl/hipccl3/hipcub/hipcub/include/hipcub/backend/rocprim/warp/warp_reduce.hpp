@@ -32,6 +32,7 @@
 
 #include "../../../config.hpp"
 
+#include "../thread/thread_reduce.hpp"
 #include "../util_ptx.hpp"
 
 #include <rocprim/warp/warp_reduce.hpp> // IWYU pragma: export
