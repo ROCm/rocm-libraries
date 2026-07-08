@@ -6,10 +6,11 @@
 #include <hipdnn_plugin_sdk/interfaces/IPlan.hpp>
 
 #include "SdpaBwdParams.hpp"
-#include "SdpaKernelUtils.hpp"
+#include "SdpaModuleCache.hpp"
 #include "core/Handle.hpp"
 #include "core/Settings.hpp"
 
+#include <memory>
 #include <optional>
 
 namespace asm_sdpa_engine
@@ -34,13 +35,13 @@ class SdpaBwdPlan : public hipdnn_plugin_sdk::IPlan<Handle>
 {
 public:
     /// A32 constructor: requires all 3 kernels (ODO, DQDKDV, DQ_CONVERT).
-    SdpaBwdPlan(HipModuleGuard odoKernel,
-                HipModuleGuard dqdkdvKernel,
-                std::optional<HipModuleGuard> postKernel,
+    SdpaBwdPlan(CachedModule odoKernel,
+                CachedModule dqdkdvKernel,
+                std::optional<CachedModule> postKernel,
                 SdpaBwdParams params);
 
     /// A16 constructor: requires only 2 kernels (ODO, DQDKDV).
-    SdpaBwdPlan(HipModuleGuard odoKernel, HipModuleGuard dqdkdvKernel, SdpaBwdParams params);
+    SdpaBwdPlan(CachedModule odoKernel, CachedModule dqdkdvKernel, SdpaBwdParams params);
 
     ~SdpaBwdPlan() override = default;
 
@@ -57,9 +58,9 @@ public:
                  void* workspace = nullptr) const override;
 
 private:
-    HipModuleGuard _odoKernel;
-    HipModuleGuard _dqdkdvKernel;
-    std::optional<HipModuleGuard> _postKernel; // nullopt when A16 (dq_convert not needed)
+    CachedModule _odoKernel;
+    CachedModule _dqdkdvKernel;
+    std::optional<CachedModule> _postKernel; // std::nullopt when A16 (dq_convert not needed)
     SdpaBwdParams _params;
 };
 

@@ -69,7 +69,7 @@ struct copy_benchmark : public primbench::benchmark_interface
         dim3 grid(items / items_per_block);
         dim3 block(BlockSize);
 
-        // primbench uses this to calculates the items/sec and bytes/sec
+        // primbench uses this to calculate the items/sec and bytes/sec
         state.set_items(items);
         state.add_reads<T>(items);
         state.add_writes<T>(items);

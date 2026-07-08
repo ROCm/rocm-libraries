@@ -136,6 +136,37 @@ if(ORIGAMI_BUILD_TESTING OR BUILD_TESTING)
             SKIP_RETURN_CODE 5  # Allow skipping tests without emitting an error
     )
 
+    # Run core origami binding tests (no torch required)
+    add_test(
+        NAME "Python: test_attention_bindings"
+        COMMAND ${Python_EXECUTABLE} -m pytest tests/test_attention.py -v
+        WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}
+    )
+
+    set_tests_properties(
+        "Python: test_attention_bindings"
+        PROPERTIES
+            ENVIRONMENT
+            "PYTHONPATH=${CMAKE_CURRENT_SOURCE_DIR}/src:$ENV{PYTHONPATH}"
+            DEPENDS _pyorigami
+    )
+
+    # Run selector tests (requires torch)
+    add_test(
+        NAME "Python: test_attention_selector"
+        COMMAND ${Python_EXECUTABLE} -m pytest tests/test_attention_selector.py -v
+        WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}
+    )
+
+    set_tests_properties(
+        "Python: test_attention_selector"
+        PROPERTIES
+            ENVIRONMENT
+            "PYTHONPATH=${CMAKE_CURRENT_SOURCE_DIR}/src:$ENV{PYTHONPATH}"
+            DEPENDS _pyorigami
+            SKIP_RETURN_CODE 5  # Allow skipping tests without emitting an error
+    )
+
     # Run hardware tests
     add_test(
         NAME "Python: test_hardware"

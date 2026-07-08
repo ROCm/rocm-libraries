@@ -32,8 +32,6 @@ import functools
 import itertools
 import json
 import multiprocessing
-import os
-import shutil
 import subprocess
 import tempfile
 from concurrent.futures import ProcessPoolExecutor, as_completed
@@ -929,12 +927,23 @@ _PROBED_CODEGEN_FLAGS = (
     ("-mllvm", "-amdgpu-coerce-illegal-types=1"),
 )
 
+# The single hipcc used for BOTH the flag-acceptance probe and the actual
+# compile/link. Pinned to match Old-TE, which builds via CMake's
+# CMAKE_CXX_COMPILER (== /opt/rocm/bin/hipcc in CK CI) and never reads $HIPCC;
+# ctypes_utils uses the same path. Keeping probe == compiler guarantees the
+# -mllvm flag decision reflects the compiler that actually builds the kernel.
+_HIPCC = "/opt/rocm/bin/hipcc"
+
+
+def _resolve_hipcc() -> str:
+    return _HIPCC
+
 
 @functools.lru_cache(maxsize=None)
 def _hipcc_accepts(flag_tuple: Tuple[str, ...]) -> bool:
     """Mirror CMake check_cxx_compiler_flag: does hipcc compile a trivial TU with
     these flags? Cached so the probe runs at most once per distinct flag set."""
-    hipcc = os.environ.get("HIPCC") or shutil.which("hipcc") or "/opt/rocm/bin/hipcc"
+    hipcc = _resolve_hipcc()
     try:
         with tempfile.TemporaryDirectory() as d:
             src = Path(d) / "probe.cpp"
@@ -986,7 +995,7 @@ def _build_compile_jobs(
     obj_file = lib_path.with_suffix(".o")
 
     compile_cmd = [
-        "/opt/rocm/bin/hipcc",
+        _resolve_hipcc(),
         "-c",
         "-fPIC",
         "-O3",
@@ -1013,7 +1022,7 @@ def _build_compile_jobs(
         str(obj_file),
     ]
     link_cmd = [
-        "/opt/rocm/bin/hipcc",
+        _resolve_hipcc(),
         "-shared",
         "-fPIC",
         f"--offload-arch={config.gfx_arch}",
@@ -1312,8 +1321,9 @@ def expand_sweep(
         n_div = wn * wtn
         if m_div <= 0 or n_div <= 0 or tm % m_div != 0 or tn % n_div != 0:
             continue
-        if not _is_power_of_two(tm // m_div) or not _is_power_of_two(tn // n_div):
-            continue
+        if epi == "cshuffle":
+            if not _is_power_of_two(tm // m_div) or not _is_power_of_two(tn // n_div):
+                continue
         seen.add(c.name)
         configs.append(c)
 
