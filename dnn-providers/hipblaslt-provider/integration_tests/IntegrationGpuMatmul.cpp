@@ -22,15 +22,11 @@ protected:
                   hipdnn_frontend::graph::Graph& graphObj) const override
     {
         auto aAttr = graph::makeTensorAttributes(
-            "a",
-            testParams.aDims,
-            this->generateInputStrideOrder(testParams.aDims, testParams.transA));
+            "a", testParams.aDims, generateInputStrideOrder(testParams.aDims, testParams.transA));
         auto aTensorAttr = std::make_shared<graph::TensorAttributes>(std::move(aAttr));
 
         auto bAttr = graph::makeTensorAttributes(
-            "b",
-            testParams.bDims,
-            this->generateInputStrideOrder(testParams.bDims, testParams.transB));
+            "b", testParams.bDims, generateInputStrideOrder(testParams.bDims, testParams.transB));
         auto bTensorAttr = std::make_shared<graph::TensorAttributes>(std::move(bAttr));
 
         graph::MatmulAttributes const matmulAttrs;
