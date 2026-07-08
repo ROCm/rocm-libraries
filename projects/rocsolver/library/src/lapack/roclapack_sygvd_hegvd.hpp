@@ -58,8 +58,17 @@ void rocsolver_sygvd_hegvd_getMemorySize(rocblas_handle handle,
                                          size_t* size_tau,
                                          size_t* size_pivots_workArr,
                                          size_t* size_iinfo,
-                                         bool* optim_mem)
+                                         bool* optim_mem,
+                                         size_t* size_Aband,
+                                         size_t* size_he2hb_work,
+                                         size_t* size_V_hb2st,
+                                         size_t* size_tau_hb2st)
 {
+    *size_Aband = 0;
+    *size_he2hb_work = 0;
+    *size_V_hb2st = 0;
+    *size_tau_hb2st = 0;
+
     // if quick return no need of workspace
     if(n == 0 || batch_count == 0)
     {
@@ -95,9 +104,10 @@ void rocsolver_sygvd_hegvd_getMemorySize(rocblas_handle handle,
     *size_work4 = std::max(*size_work4, temp4);
 
     // requirements for calling SYEV/HEEV
-    rocsolver_syevd_heevd_getMemorySize<BATCHED, T, S>(handle, evect, uplo, n, batch_count, &unused,
-                                                       &temp1, &temp2, &temp3, size_tmpz,
-                                                       size_splits, &temp4, size_tau, &temp5);
+    rocsolver_syevd_heevd_getMemorySize<BATCHED, T, S>(
+        handle, evect, uplo, n, batch_count, &unused, &temp1, &temp2, &temp3, size_tmpz,
+        size_splits, &temp4, size_tau, &temp5, size_Aband, size_he2hb_work, size_V_hb2st,
+        size_tau_hb2st);
     *size_work1 = std::max(*size_work1, temp1);
     *size_work2 = std::max(*size_work2, temp2);
     *size_work3 = std::max(*size_work3, temp3);
@@ -194,7 +204,11 @@ rocblas_status rocsolver_sygvd_hegvd_template(rocblas_handle handle,
                                               T* tau,
                                               void* pivots_workArr,
                                               rocblas_int* iinfo,
-                                              bool optim_mem)
+                                              bool optim_mem,
+                                              T* Aband,
+                                              T* he2hb_work,
+                                              T* V_hb2st,
+                                              T* tau_hb2st)
 {
     ROCSOLVER_ENTER("sygvd_hegvd", "itype:", itype, "evect:", evect, "uplo:", uplo, "n:", n,
                     "shiftA:", shiftA, "lda:", lda, "shiftB:", shiftB, "ldb:", ldb,
@@ -241,7 +255,8 @@ rocblas_status rocsolver_sygvd_hegvd_template(rocblas_handle handle,
 
     rocsolver_syevd_heevd_template<BATCHED, STRIDED, T>(
         handle, evect, uplo, n, A, shiftA, lda, strideA, D, strideD, E, strideE, iinfo, batch_count,
-        scalars, work1, work2, work3, tmpz, splits, (T*)work4, tau, (T**)pivots_workArr);
+        scalars, work1, work2, work3, tmpz, splits, (T*)work4, tau, (T**)pivots_workArr, Aband,
+        he2hb_work, V_hb2st, tau_hb2st);
 
     // combine info from POTRF with info from SYEV/HEEV
     ROCSOLVER_LAUNCH_KERNEL(sygv_update_info, gridReset, threads, 0, stream, info, iinfo, n,
