@@ -816,6 +816,77 @@ static const rocke_layout_map_t lm_wmma_gfx12_c
     = {ROCKE_MMA_ROLE_ACC, 8, 32, _wmma_gfx12_acc_16x16};
 
 /* =========================================================================
+ * op_id -> accumulator fragment length (the c_frag_len projection of
+ * target.py::_MMA_FRAGMENT_INFO).
+ * =========================================================================
+ *
+ * This is the arch SSOT that rocke.core.ir.IRBuilder.mma (rocke_b_mma) consults
+ * to size a tile.mma result vector from a bare op_id string; the ir bucket keeps
+ * no private copy. It mirrors _MMA_FRAGMENT_INFO's c_frag_len column exactly.
+ * Only atoms this engine can emit are listed: the Python SSOT also registers the
+ * gfx1250 WMMA atoms, but the C99 arch registry has no gfx1250 target, so those
+ * op_ids are intentionally absent here (the (0,0,0,64) fallback / unknown path).
+ */
+typedef struct rocke_ati_mma_frag_row
+{
+    const char* op_id;
+    int c_frag_len;
+} rocke_ati_mma_frag_row_t;
+
+static const rocke_ati_mma_frag_row_t rocke_ati_mma_frag[] = {
+    /* --- MFMA fp32 (wave64) --- */
+    {"mfma_f32_16x16x4_f32", 4},
+    {"mfma_f32_32x32x2_f32", 16},
+    /* --- MFMA f16 (wave64) --- */
+    {"mfma_f32_16x16x16_f16", 4},
+    {"mfma_f32_16x16x32_f16", 4},
+    {"mfma_f32_32x32x8_f16", 16},
+    {"mfma_f32_32x32x16_f16", 16},
+    {"mfma_f32_4x4x4_f16", 4},
+    /* --- MFMA bf16 (wave64) --- */
+    {"mfma_f32_16x16x16_bf16", 4},
+    {"mfma_f32_16x16x32_bf16", 4},
+    {"mfma_f32_32x32x8_bf16", 16},
+    {"mfma_f32_32x32x16_bf16", 16},
+    /* --- MFMA fp8 / bf8 (wave64) --- */
+    {"mfma_f32_16x16x32_fp8", 4},
+    {"mfma_f32_16x16x32_bf8", 4},
+    {"mfma_f32_32x32x16_fp8", 16},
+    {"mfma_f32_32x32x16_bf8", 16},
+    /* --- MFMA MX (wave64), frag lengths only --- */
+    {"mfma_f32_16x16x128_fp4", 4},
+    {"mfma_f32_16x16x96_fp6", 4},
+    {"mfma_f32_16x16x128_fp8", 4},
+    {"mfma_scale_f32_16x16x128_f8f6f4", 4},
+    /* --- WMMA f16 / bf16 (wave32, RDNA) --- */
+    {"wmma_f32_16x16x16_f16", 8},
+    {"wmma_f32_16x16x16_bf16", 8},
+    /* --- WMMA iu8 / iu4 (wave32, RDNA3/3.5) --- */
+    {"wmma_i32_16x16x16_iu8", 8},
+    {"wmma_i32_16x16x16_iu4", 8},
+    /* --- WMMA f16 / bf16 (wave32, RDNA4 / gfx12) --- */
+    {"wmma_gfx12_f32_16x16x16_f16", 8},
+    {"wmma_gfx12_f32_16x16x16_bf16", 8},
+};
+
+int rocke_arch_mma_c_frag_len(const char* op_id)
+{
+    size_t i;
+    if(!op_id)
+    {
+        return 0;
+    }
+    for(i = 0; i < sizeof(rocke_ati_mma_frag) / sizeof(rocke_ati_mma_frag[0]); ++i)
+    {
+        if(strcmp(rocke_ati_mma_frag[i].op_id, op_id) == 0)
+        {
+            return rocke_ati_mma_frag[i].c_frag_len;
+        }
+    }
+    return 0; /* unknown atom: the zero-length _frag_info fallback */
+}
+
+/* =========================================================================
  * Per-arch rocke_mma_op_t[] catalogs (the embedded arch_specs.json mma rows,
  * enriched with frag lengths + layout-map pointers, mirroring _build_mma_op).
  * =========================================================================

@@ -231,6 +231,26 @@ const rocke_mma_op_t* rocke_mma_catalog_op_for_shape(const rocke_mma_catalog_t* 
                                                      int n,
                                                      int k);
 
+/* ===================== bare-op_id SSOT lookups ======================== */
+/* These resolve a bare op_id string (no MmaOp / ArchTarget in hand) against the
+ * arch SSOT, so the ir bucket can size a tile.mma result without duplicating
+ * any atom metadata. They mirror the target.py module-level helpers that
+ * rocke.core.ir.IRBuilder.mma consults. */
+
+/* Accumulator fragment length for op_id -- the c_frag_len projection of
+ * target.py::_MMA_FRAGMENT_INFO (rocke_arch_mma_c_frag_len(op_id) ==
+ * target._frag_info(op_id).c_frag_len). Returns 0 for an unknown atom (the
+ * zero-length _FragInfo fallback). */
+int rocke_arch_mma_c_frag_len(const char* op_id);
+
+/* Normalised accumulator dtype for op_id, aggregated across every arch's
+ * catalog (mirrors target._op_id_c_dtype()[op_id]). The dtype is invariant
+ * across the arches that list an op_id, so the first catalog hit wins. Returns
+ * NULL for an op_id absent from every catalog (callers treat a miss as the
+ * default f32 accumulator). The returned string is an interned canonical key
+ * (e.g. "i32"/"fp32"); do not free. */
+const char* rocke_arch_mma_op_id_c_dtype(const char* op_id);
+
 /* ============================== arch target =========================== */
 
 /* Hardware-facts surface for one gfx target. Frozen; cheap to pass around.

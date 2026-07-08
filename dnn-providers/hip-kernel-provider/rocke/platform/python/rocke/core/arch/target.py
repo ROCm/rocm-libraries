@@ -622,9 +622,10 @@ _MMA_FRAGMENT_INFO: Dict[str, _FragInfo] = {
     # Unscaled fp8 K=128 hero atom (lowers through the f8f6f4 scale-MFMA
     # intrinsic; there is no dense plain fp8 K=128). A/B are 32 fp8 bytes per
     # lane (<8 x i32> at the intrinsic boundary), accumulator <4 x float> --
-    # same fragment widths as the f8f6f4 sibling below. Registered so the op_id
-    # (already in ir._MMA_C_FRAG_LEN) resolves to correct fragment lengths if
-    # added to the JSON catalog, instead of the zero-length _frag_info fallback.
+    # same fragment widths as the f8f6f4 sibling below. Registered here so the
+    # op_id resolves to correct fragment lengths (this table is the SSOT that
+    # ir.IRBuilder.mma consults) even before it is added to the JSON catalog,
+    # instead of hitting the zero-length _frag_info fallback.
     "mfma_f32_16x16x128_fp8": _FragInfo(32, 32, 4, 64),
     "mfma_scale_f32_16x16x128_f8f6f4": _FragInfo(32, 32, 4, 64),
     # --- WMMA f16 / bf16 (wave32, RDNA) ----------------------------------
@@ -932,6 +933,25 @@ def _load_specs() -> Dict[str, dict]:
     with open(_DATA_FILE, encoding="utf-8") as fh:
         doc = json.load(fh)
     return doc["arches"]
+
+
+@lru_cache(maxsize=1)
+def _op_id_c_dtype() -> Dict[str, str]:
+    """``op_id -> normalized accumulator dtype``, aggregated across every arch
+    row in the JSON catalog.
+
+    An ``op_id`` names a specific atom, so its accumulator dtype is invariant
+    across the arches that list it. This lets a caller that only has a bare
+    ``op_id`` string (e.g. :meth:`rocke.core.ir.IRBuilder.mma`) recover the
+    accumulator dtype from the SSOT without holding an :class:`ArchTarget`.
+    Op_ids that are frag-registered but not yet in the JSON catalog are absent
+    (callers should treat a miss as the default f32 accumulator).
+    """
+    out: Dict[str, str] = {}
+    for row in _load_specs().values():
+        for o in row["mma"]:
+            out[o["op_id"]] = normalize_dtype(o["c"])
+    return out
 
 
 def _build_mma_op(o: dict) -> MmaOp:
