@@ -513,8 +513,7 @@ endif()
 
 set(COVERAGE_TEST_OPTIONS "--smoketest;--gtest_filter=-*call*" CACHE STRING "Command line arguments for rocfft-test when generating a code coverage report")
 
-# Keep test sources and gtest out of the coverage report; we only want library code.
-# One flag per pattern; a single '|' regex breaks the shell-run export command.
+# Keep test sources and gtest out of the coverage report, one flag per pattern.
 set(COVERAGE_IGNORE_FLAGS
   -ignore-filename-regex=clients/tests
   -ignore-filename-regex=library/src/tests
