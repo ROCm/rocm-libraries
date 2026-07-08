@@ -31,6 +31,7 @@ import subprocess
 import sys
 import argparse
 import glob
+import json
 
 from datetime import datetime
 from pathlib import Path
@@ -44,7 +45,7 @@ from Tensile.Common.Architectures import detectGlobalCurrentISA, isaToGfx
 from Tensile.Common.Capabilities import makeIsaInfoMap
 from Tensile.Common.GlobalParameters import globalParameters, assignGlobalParameters, \
                                             restoreDefaultGlobalParameters
-from Tensile.Common.TimingInstrumentation import timing_context
+from Tensile.Common.TimingInstrumentation import timing_context, flush_timing_buffer
 from Tensile.Toolchain.Assembly import AssemblyToolchain, makeAssemblyToolchain
 from Tensile.Toolchain.Source import SourceToolchain, makeSourceToolchain
 from Tensile.Toolchain.Validators import validateToolchain, ToolchainDefaults
@@ -52,6 +53,7 @@ from Tensile.Utilities.Decorators.Profile import profile
 from Tensile import BenchmarkProblems
 from Tensile import ClientWriter
 from Tensile import LibraryIO
+from Tensile.backends.config import parse_backend_config
 from Tensile import LibraryLogic
 
 TENSILE_SCRIPT_DIR = Path(os.path.dirname(os.path.abspath(__file__)))
@@ -106,9 +108,10 @@ def executeStepsInConfig(
     # Benchmark Problems
     ##############################################################################
     gfxName = isaToGfx(next(iter(isaInfoMap)))
-    if "BenchmarkProblems" in config:
+    if "BenchmarkProblems" in config:       
         with timing_context("python_benchmark_problems"):
             BenchmarkProblems.main(
+                config.get("Backend", {}),
                 config["BenchmarkProblems"],
                 config["UseCache"],
                 asmToolchain,
@@ -124,6 +127,7 @@ def executeStepsInConfig(
                 buildOnly,
                 solutionPoolFiles,
             )
+        flush_timing_buffer()
         print1("")
 
     if buildOnly:
@@ -154,6 +158,7 @@ def executeStepsInConfig(
                     debugConfig.printIndexAssignmentInfo,
                     isaInfoMap,
                 )
+            flush_timing_buffer()
             print1("")
         else:
             print1("# LibraryLogic already done.")
@@ -177,6 +182,7 @@ def executeStepsInConfig(
                 deviceId,
                 gfxName,
             )
+        flush_timing_buffer()
         print1("")
 
 
@@ -227,6 +233,10 @@ def addCommonArguments(argParser):
     argParser.add_argument("--mx-scale-format", dest="MXScaleFormat", type=int, default=0, \
         help="MX scale data format (0=none, 1=pre-swizzle for GPU kernel layout)")
     argParser.add_argument("--rocm-agent-enumerator", default=None, action="store", dest="rocm_agent_enumerator")
+    argParser.add_argument("--cpu-only", dest="cpuOnly", action="store_true", default=False, \
+        help="Run the benchmark flow GPU-less for a target arch (requires --gpu-targets): spoof ISA "
+             "detection, skip the GPU clock-frequency probe, and stub the client launch with a "
+             "synthetic results CSV. For CPU-only CI/coverage; perf numbers are synthetic.")
     argParser.add_argument("--global-parameters", nargs="+", type=splitExtraParameters, default=[])
 
 
@@ -270,37 +280,25 @@ def get_gpu_max_frequency_smi(device_id):
     Get the maximum frequency of the specified GPU device
     '''
     try:
-        # Run rocm-smi command and capture output
-        result = subprocess.run(['rocm-smi', '-s'], capture_output=True, text=True)
+        # Run amd-smi command and capture the GFX clock info as JSON
+        result = subprocess.run(
+            ['amd-smi', 'metric', '-g', str(device_id), '--clock', '--json'],
+            capture_output=True, text=True)
 
         if result.returncode != 0:
-           print(f"Error running rocm-smi: {result.stderr}")
+           print(f"Error running amd-smi: {result.stderr}")
            return None
 
-        # Parse the output
-        lines = result.stdout.split('\n')
-        sclk_section = False
+        data = json.loads(result.stdout)
+        clocks = data['gpu_data'][0]['clock']
+
+        # Collect the max GFX (sclk) clock across all gfx engines/partitions
         frequencies = []
-
-        # Look for the sclk section of the specified device
-        for line in lines:
-            line = line.split(" ")
-            if 'sclk' in line and f"GPU{device_id}" in line:
-                sclk_section = True
-                continue
-
-           # Parse frequencies in the sclk section
-            if sclk_section:
-                for part in line:
-                    if part.endswith("Mhz"):
-                        try:
-                            frequency = part.replace("Mhz", "")
-                            frequencies.append(int(frequency))
-                        except ValueError:
-                            print(f"Error parsing frequency: {part}")
-                        break
-                if "socclk" in line:
-                    break
+        for name, info in clocks.items():
+            if name.startswith('gfx'):
+                max_clk = info.get('max_clk', {}).get('value')
+                if isinstance(max_clk, int):
+                    frequencies.append(max_clk)
 
         # Return the maximum frequency found
         return max(frequencies) if frequencies else None
@@ -569,6 +567,13 @@ def Tensile(userArgs):
     print1("# Restoring default globalParameters")
     restoreDefaultGlobalParameters()
 
+    # Stash the --cpu-only flag in undocumented internal plumbing so the deep seams
+    # (Architectures ISA spoof, frequency-probe skip, ClientWriter launch stub) can read
+    # it without threading a new parameter through executeStepsInConfig. Set AFTER
+    # restoreDefaultGlobalParameters() (which would otherwise clobber it back to the
+    # default False). Kept out of the documented --global-parameters surface.
+    globalParameters["CpuOnly"] = args.cpuOnly
+
     if args.LogicFormat:
         globalParameters['LogicFormat'] = args.LogicFormat
     if args.LibraryFormat:
@@ -601,20 +606,26 @@ def Tensile(userArgs):
             }]
         }
         config["BenchmarkProblems"] = [[base["ProblemType"], solParams]]
-
+    
     config["UseCache"] = useCache
     globalParameters["ConfigPath"] = configPaths
+
+    # Backend selection precedence:
+    # 1) YAML Backend (with strict validation)
+    # 2) tensile (default)
+    yaml_backend = config.get("Backend", None)
+    config["Backend"] = parse_backend_config(yaml_backend)
 
     asm_debug = config["GlobalParameters"].get("AsmDebug", False)
     device_id = config["GlobalParameters"].get("Device", int(args.device))
     UseEffLike = config["GlobalParameters"].get("UseEffLike", globalParameters["UseEffLike"])
     UseEffLike = False if isRhel8() else UseEffLike
 
-    if 'LibraryLogic' in config and UseEffLike and not buildOnly:
+    if 'LibraryLogic' in config and UseEffLike and not buildOnly and not globalParameters["CpuOnly"]:
         max_frequency = get_gpu_max_frequency(device_id)
 
         if not max_frequency or max_frequency <= 0:
-            max_frequency = get_gpu_max_frequency_smi(device_id) # Using rocm-smi just in case
+            max_frequency = get_gpu_max_frequency_smi(device_id) # Using amd-smi just in case
 
         if not max_frequency or max_frequency <= 0:
             print(f"Could not detect valid GPU frequency for device {device_id}")

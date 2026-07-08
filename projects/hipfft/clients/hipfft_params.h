@@ -171,6 +171,9 @@ public:
 
     bool is_preventing_auto_allocation_at_generation() const
     {
+        if(vram_footprint_workspace_probe_mode)
+            return true;
+
         if(auto_allocate != fft_auto_allocation_off)
             return false;
         // Let hipFFT sometimes auto-allocate nonetheless so that tests cover its
@@ -187,6 +190,26 @@ public:
         : fft_params(p)
     {
     }
+
+    // Copy constructor: copies all configuration but not plan handles or multi-GPU state
+    hipfft_params(const hipfft_params& p)
+        : fft_params(static_cast<const fft_params&>(p))
+        , plan(INVALID_PLAN_HANDLE)
+        , current_token() // no valid current_token yet (in copy) since plan is not copied
+        , hipfft_transform_type(p.hipfft_transform_type)
+        , inputType(p.inputType)
+        , outputType(p.outputType)
+        , direction(p.direction)
+        , int_length(p.int_length)
+        , ll_length(p.ll_length)
+        , xt_inBricks(p.xt_inBricks)
+        , xt_outBricks(p.xt_outBricks)
+        , auto_allocated_worksizes(p.auto_allocated_worksizes)
+        , vram_footprint_workspace_probe_mode(p.vram_footprint_workspace_probe_mode)
+    {
+        // xt_input and xt_output remain nullptr (default-initialized)
+    }
+
     hipfft_params(hipfft_params&& p) = default;
     hipfft_params& operator=(hipfft_params&& other) = default;
 
@@ -206,42 +229,70 @@ public:
         xt_output.reset();
     }
 
+    // reports the *minimal* VRAM footprints required by hipFFT to execute the
+    // transform with this object's configuration.
+    // Externally-allocated buffers are ignored herein as they can always be (and
+    // are) cleared at plan creation if found excessively large.
     std::vector<size_t> vram_footprint() override
     {
-        auto footprint = fft_params::io_vram_footprint();
-
-        auto add_work_footprint = [&footprint, this]() {
-            // io footprint has numbers for all devices, but work
-            // footprint might be smaller in length due to fewer
-            // devices being used
-            for(size_t i = 0; i < auto_allocated_worksizes.size(); ++i)
-            {
-                footprint[i] += auto_allocated_worksizes[i];
-            }
-            for(size_t i = 0; i < externally_managed_workareas.size(); ++i)
-            {
-                footprint[i] += externally_managed_workareas[i].size();
-            }
-        };
-
-        // auto-allocated plans fail here if not enough VRAM, skip these tests
+        // No device allocation should be attempted in this function: if one occurs and
+        // results in a failure herein, an std::logic_error needs to be thrown so that
+        // it's clear that this implementation needs revisions.
+        const std::string logic_error_msg_prefix{
+            "A failing device allocation caused hipfft_params::vram_footprint() to fail. "
+            "Intercepted exception's details:\n"};
         try
         {
-            if(create_plan() != fft_status_success)
+            auto footprint = fft_params::io_vram_footprint();
+            // Create a temporary copy of this object to measure workspace without
+            // modifying the original object's plan state.
+            hipfft_params temp_copy(*this);
+            // Force plan generation to avoid internal workspace allocation.
+            // Set the flag on the temporary copy only.
+            temp_copy.vram_footprint_workspace_probe_mode = true;
+
+            const auto plan_status = temp_copy.create_plan();
+            if(plan_status != fft_status_success)
             {
-                throw std::runtime_error("Plan creation or struct setup failed");
+                throw std::runtime_error("Plan creation or struct setup failed (temp_copy for "
+                                         "vram-probing purposes, error code: "
+                                         + std::to_string(plan_status) + ")");
             }
+            std::vector<size_t> required_worksizes(temp_copy.get_num_used_gpus());
+            required_worksizes[0] = absurd_init_worksize_estimate;
+            // replace the above by
+            //std::vector<size_t> required_worksizes(temp_copy.get_num_used_gpus(),
+            //                                       absurd_init_worksize_estimate);
+            // when hipFFT's mGPU workspace size query is fixed for multi-GPU
+            auto get_size_ret = hipfftGetSize(temp_copy.plan, required_worksizes.data());
+            if(get_size_ret != HIPFFT_SUCCESS)
+            {
+                throw std::runtime_error(
+                    "hipfftGetSize failed to query required workspace (return code: "
+                    + hipfftResult_string(get_size_ret) + ")");
+            }
+            if(std::any_of(required_worksizes.begin(), required_worksizes.end(), [](size_t s) {
+                   return s == absurd_init_worksize_estimate;
+               }))
+            {
+                throw std::runtime_error(
+                    "hipfftGetSize failed to query required workspace (absurd estimate value "
+                    "detected in output)");
+            }
+            if(footprint.size() < required_worksizes.size())
+                footprint.resize(required_worksizes.size(), 0);
+            for(size_t i = 0; i < required_worksizes.size(); ++i)
+                footprint[i] += required_worksizes[i];
+            return footprint;
         }
         catch(fft_params::work_buffer_alloc_failure& e)
         {
-            add_work_footprint();
-            std::stringstream msg;
-            msg << "Plan work buffer size (" << byte_sizes_to_str(footprint)
-                << " bytes raw data) too large for device";
-            throw ROCFFT_SKIP{msg.str()};
+            throw std::logic_error(logic_error_msg_prefix + e.what());
         }
-        add_work_footprint();
-        return footprint;
+        catch(const DEVICEBUF_MEM_USAGE& e)
+        {
+            throw std::logic_error(logic_error_msg_prefix + e.what());
+        }
     }
 
     fft_status setup_structs()
@@ -422,7 +473,8 @@ public:
         }
         }
 
-        if(ret == HIPFFT_SUCCESS && auto_allocate == fft_auto_allocation_off)
+        if(ret == HIPFFT_SUCCESS && auto_allocate == fft_auto_allocation_off
+           && !vram_footprint_workspace_probe_mode)
         {
             ret = set_externally_managed_work_areas();
         }
@@ -1238,10 +1290,8 @@ private:
     {
         // scale factor and multi-GPU and disabled auto-allocation need API
         // calls between create + init
-        if(scale_factor != 1.0 || multiGPU > 1 || mp_lib != fft_mp_lib_none
-           || auto_allocate == fft_auto_allocation_off)
-            return true;
-        return false;
+        return scale_factor != 1.0 || multiGPU > 1 || mp_lib != fft_mp_lib_none
+               || auto_allocate == fft_auto_allocation_off || vram_footprint_workspace_probe_mode;
     }
 
     // Not all plan options work with all creation types.  Return a
@@ -1571,6 +1621,7 @@ private:
     }
     static constexpr size_t absurd_init_worksize_estimate  = std::numeric_limits<size_t>::max();
     bool                    final_attempt_at_plan_creation = false;
+    bool                    vram_footprint_workspace_probe_mode = false;
 
     size_t get_num_used_gpus() const
     {
