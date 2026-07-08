@@ -1969,6 +1969,10 @@ namespace TensileLite
 
         uint32_t autoGsuVal = calculateAutoGSU(problem, &hardware);
         uint32_t gsu = problem.getParams().gsu() > 0 ? problem.getParams().gsu() : autoGsuVal;
+        // Runtime-effective accumulation mode; AdaptiveGemmGSUA can downgrade this from
+        // the solution's compiled sizeMapping.globalAccumulation (e.g. MBSK -> MultipleBuffer
+        // for small/low-tile problems).
+        size_t adaptiveGlobalAccumulation = problem.getAccumulation(hardware, sizeMapping, gsu);
 
         uint32_t skItersPerTile            = 0;
         uint32_t skTotalIters              = 0;
@@ -2428,8 +2432,14 @@ namespace TensileLite
                     rv.args.template append<void const*>("AmaxWS", inputs.ws);
                     break;
                 case CustomArgSemantic::AmaxSync:
-                case CustomArgSemantic::Synchronizer:
                     rv.args.template append<void const*>(toString(arg.semantic), inputs.Synchronizer);
+                    break;
+                case CustomArgSemantic::Synchronizer:
+                    // Real buffer only in MBSK mode; otherwise the reduction happens in a
+                    // separate kernel and the pointer must be null.
+                    rv.args.template append<void const*>(
+                        "Synchronizer",
+                        adaptiveGlobalAccumulation == 3 ? inputs.Synchronizer : nullptr);
                     break;
                 case CustomArgSemantic::DebugBuffer:
                     rv.args.template append<void const*>("DebugBuffer", nullptr);

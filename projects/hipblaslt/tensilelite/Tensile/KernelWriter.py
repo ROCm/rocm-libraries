@@ -10815,7 +10815,10 @@ class KernelWriter(metaclass=abc.ABCMeta):
       _reg("address", "AmaxSync")
 
     # -- MBSK (MultipleBufferSingleKernel) -------------------------------------
-    if kernel["GlobalSplitUAlgorithm"] == 'MultipleBufferSingleKernel':
+    # Must match the canonical condition used by Signature.py and elsewhere in
+    # this file (e.g. the ExpertSchedulingMode gate above): AdaptiveGemmGSUA=1
+    # also requires these trailing args, even for plain MultipleBuffer mode.
+    if kernel["GlobalSplitUAlgorithm"] == 'MultipleBufferSingleKernel' or kernel["AdaptiveGemmGSUA"] == 1:
       _reg("address", "AddressTD")
       _reg("address", "Synchronizer")
       _reg("uint32", "GSUSync")

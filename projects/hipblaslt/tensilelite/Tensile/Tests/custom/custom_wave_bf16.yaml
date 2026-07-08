@@ -9,8 +9,8 @@ GlobalParameters:
   DataInitTypeAlpha: 1
   DataInitTypeA: 3
   DataInitTypeB: 3
-  CSVExportWinner: 1
-  CSVMergeSameProblemID: 1
+  CSVExportWinner: true
+  CSVMergeSameProblemID: true
   Device: 0
   ValidateMetadata: True
 
@@ -22,8 +22,8 @@ BenchmarkProblems:
       DestDataType: s
       ComputeDataType: s
       HighPrecisionAccumulate: True
-      TransposeA: 1
-      TransposeB: 0
+      TransposeA: true
+      TransposeB: false
       UseBeta: True
       Batched: True
       UseBias: 0
@@ -72,17 +72,17 @@ BenchmarkProblems:
         - WorkGroupMappingXCCGroup: [-1]
         - GlobalSplitU: [1]
         - GlobalSplitUAlgorithm: ["MultipleBuffer"]
-        - GlobalReadPerMfma: [1]
+        - GlobalReadPerMfma: [1.0]
         - LocalWritePerMfma: [-1]
         - StoreRemapVectorWidth: [0]
         - StoreVectorWidth: [-1]
-        - SourceSwap: [1]
+        - SourceSwap: [true]
         - NumElementsPerBatchStore: [16]
         - ClusterLocalRead: [1]
         - NonTemporalA: [0]
         - NonTemporalB: [0]
-        - DirectToVgprA: [1]
-        - DirectToVgprB: [0]
+        - DirectToVgprA: [true]
+        - DirectToVgprB: [false]
       BenchmarkJoinParameters:
       BenchmarkFinalParameters:
         - ProblemSizes:
