@@ -46,7 +46,7 @@ void Dispatcher::ensure_workspace(std::size_t bytes) const
     {
         workspace_       = nullptr;
         workspace_bytes_ = 0;
-        throw std::runtime_error("Dispatcher: failed to allocate Stream-K reduction workspace");
+        throw DispatcherError("Dispatcher: failed to allocate Stream-K reduction workspace");
     }
     workspace_bytes_ = bytes;
 }
