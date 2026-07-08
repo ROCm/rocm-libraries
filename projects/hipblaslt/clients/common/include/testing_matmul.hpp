@@ -2754,6 +2754,7 @@ void testing_matmul_with_bias(const Arguments& arg,
         size_t scaleA_col = ((transA == HIPBLAS_OP_T) ? 1 : blockSize(arg.scaleA));
         if(isBlockScaling(arg.scaleA))
         {
+#if HIPBLASLT_ENABLE_MXDATAGENERATOR
             if(arg.initialization != hipblaslt_initialization::hpl
                && arg.initialization != hipblaslt_initialization::trig_float
                && arg.initialization != hipblaslt_initialization::uniform_01
@@ -2817,6 +2818,11 @@ void testing_matmul_with_bias(const Arguments& arg,
                 CHECK_HIP_ERROR(synchronize(dA[i], hA[i], block_count));
                 CHECK_HIP_ERROR(synchronize(dScaleA[i], hScaleA[i], block_count));
             }
+#else
+            hipblaslt_cout << "MX data initialization requires HIPBLASLT_ENABLE_MXDATAGENERATOR=ON at build time"
+                           << std::endl;
+            return;
+#endif
         }
         else
         {
@@ -2857,6 +2863,7 @@ void testing_matmul_with_bias(const Arguments& arg,
         size_t scaleB_col = ((transB == HIPBLAS_OP_T) ? blockSize(arg.scaleB) : 1);
         if(isBlockScaling(arg.scaleB))
         {
+#if HIPBLASLT_ENABLE_MXDATAGENERATOR
             // MX B always goes through mxDataGenerator (mirrors the A side above).
             if(arg.initialization != hipblaslt_initialization::hpl
                && arg.initialization != hipblaslt_initialization::trig_float
@@ -2921,6 +2928,11 @@ void testing_matmul_with_bias(const Arguments& arg,
                 CHECK_HIP_ERROR(synchronize(dB[i], hB[i], block_count));
                 CHECK_HIP_ERROR(synchronize(dScaleB[i], hScaleB[i], block_count));
             }
+#else
+            hipblaslt_cout << "MX data initialization requires HIPBLASLT_ENABLE_MXDATAGENERATOR=ON at build time"
+                           << std::endl;
+            return;
+#endif
         }
         else
         {
