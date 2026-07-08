@@ -4,12 +4,12 @@
 #include <hipdnn_plugin_sdk/PluginException.hpp>
 
 #include "MiopenUtils.hpp"
-#include "engines/plans/MiopenTanhPlan.hpp"
+#include "engines/plans/MiopenUnaryActivationPlan.hpp"
 
 namespace miopen_plugin
 {
 
-MiopenTanhPlan::MiopenTanhPlan(
+MiopenUnaryActivationPlan::MiopenUnaryActivationPlan(
     const hipdnn_flatbuffers_sdk::data_objects::PointwiseAttributes& attributes,
     const std::unordered_map<int64_t,
                              const hipdnn_flatbuffers_sdk::data_objects::TensorAttributes*>&
@@ -20,19 +20,19 @@ MiopenTanhPlan::MiopenTanhPlan(
 {
 }
 
-size_t MiopenTanhPlan::getWorkspaceSize([[maybe_unused]] const HipdnnMiopenHandle& handle) const
+size_t MiopenUnaryActivationPlan::getWorkspaceSize(
+    [[maybe_unused]] const HipdnnMiopenHandle& handle) const
 {
     return 0;
 }
 
-void MiopenTanhPlan::execute(const HipdnnMiopenHandle& handle,
-                             const hipdnnPluginDeviceBuffer_t* deviceBuffers,
-                             uint32_t numDeviceBuffers,
-                             [[maybe_unused]] void* workspace) const
+void MiopenUnaryActivationPlan::execute(const HipdnnMiopenHandle& handle,
+                                        const hipdnnPluginDeviceBuffer_t* deviceBuffers,
+                                        uint32_t numDeviceBuffers,
+                                        [[maybe_unused]] void* workspace) const
 {
     const auto inputBuffer
         = miopen_utils::findDeviceBuffer(_input.uid(), deviceBuffers, numDeviceBuffers);
-
     const auto outputBuffer
         = miopen_utils::findDeviceBuffer(_output.uid(), deviceBuffers, numDeviceBuffers);
 

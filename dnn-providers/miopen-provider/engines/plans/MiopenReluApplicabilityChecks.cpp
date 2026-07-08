@@ -1,26 +1,21 @@
 // Copyright © Advanced Micro Devices, Inc., or its affiliates.
 // SPDX-License-Identifier:  MIT
 
-#include <set>
-#include <unordered_map>
-
 #include <hipdnn_plugin_sdk/PluginException.hpp>
-#include <hipdnn_plugin_sdk/PluginLogging.hpp>
 
-#include "MiopenUtils.hpp"
 #include "engines/plans/MiopenReluApplicabilityChecks.hpp"
+#include "engines/plans/MiopenUnaryActivationChecks.hpp"
 
-namespace miopen_plugin
+namespace miopen_plugin::relu_applicability
 {
 
-namespace relu_applicability
-{
-
-using hipdnn_flatbuffers_sdk::data_objects::DataType;
-using hipdnn_flatbuffers_sdk::data_objects::NodeAttributes;
 using hipdnn_flatbuffers_sdk::data_objects::PointwiseAttributes;
 using hipdnn_flatbuffers_sdk::data_objects::PointwiseMode;
 
+// NOTE: this mirrors the branch order/fallthrough of
+// MiopenUtils::mapPointwiseModeToMiopenActivation exactly.
+// function accepts it and executes it as a Standard ReLU. Keeping this check structurally
+// identical to the mapping function prevents that kind of drift.
 void checkReluModeSupported(const PointwiseAttributes& attrs)
 {
     if(attrs.operation() != PointwiseMode::RELU_FWD)
@@ -31,141 +26,35 @@ void checkReluModeSupported(const PointwiseAttributes& attrs)
             "Supported mode: RELU_FWD");
     }
 
-    const bool hasLowerClip = attrs.relu_lower_clip().has_value();
-    const bool hasUpperClip = attrs.relu_upper_clip().has_value();
-    const bool hasLowerClipSlope = attrs.relu_lower_clip_slope().has_value();
+    const auto lowerClip = attrs.relu_lower_clip();
+    const auto upperClip = attrs.relu_upper_clip();
+    const auto lowerClipSlope = attrs.relu_lower_clip_slope();
 
-    const bool isClamp = hasLowerClip && hasUpperClip;
-    const bool isClippedRelu = !hasLowerClip && hasUpperClip;
-    const bool isLeakyRelu = hasLowerClipSlope;
-    const bool isStandardRelu = !hasLowerClip && !hasUpperClip && !hasLowerClipSlope;
-
-    if(isClamp || isClippedRelu || isLeakyRelu || isStandardRelu)
+    if(lowerClip && upperClip)
     {
-        return;
+        return; // Clamp
     }
-
-    throw hipdnn_plugin_sdk::HipdnnPluginException(
-        HIPDNN_PLUGIN_STATUS_BAD_PARAM,
-        "Relu plan builder: RELU_FWD with lower_clip requires "
-        "either upper_clip (Clamp) or lower_clip_slope (LeakyReLU)");
-}
-
-void checkReluTensorsSupported(
-    const PointwiseAttributes& attrs,
-    const std::unordered_map<int64_t,
-                             const hipdnn_flatbuffers_sdk::data_objects::TensorAttributes*>&
-        tensorMap)
-{
-    const auto& inputTensor
-        = miopen_utils::findTensorAttributes(tensorMap, attrs.in_0_tensor_uid());
-    const auto& outputTensor
-        = miopen_utils::findTensorAttributes(tensorMap, attrs.out_0_tensor_uid());
-
-    if(inputTensor.virtual_() || outputTensor.virtual_())
+    if(upperClip)
+    {
+        return; // Clipped ReLU
+    }
+    if(lowerClipSlope)
+    {
+        return; // Leaky ReLU
+    }
+    if(lowerClip && *lowerClip != 0.f)
     {
         throw hipdnn_plugin_sdk::HipdnnPluginException(
             HIPDNN_PLUGIN_STATUS_BAD_PARAM,
-            "Relu plan builder: input and output tensors must be non-virtual");
+            "Relu plan builder: standard relu with a non-zero lower_clip is not supported");
     }
 
-    const auto inputDtype = inputTensor.data_type();
-    const auto outputDtype = outputTensor.data_type();
-
-    if((inputDtype != DataType::FLOAT && inputDtype != DataType::HALF)
-       || (outputDtype != DataType::FLOAT && outputDtype != DataType::HALF))
-    {
-        throw hipdnn_plugin_sdk::HipdnnPluginException(
-            HIPDNN_PLUGIN_STATUS_BAD_PARAM,
-            "Relu plan builder: only FLOAT and HALF IO dtypes are supported");
-    }
-
-    if(inputDtype != outputDtype)
-    {
-        throw hipdnn_plugin_sdk::HipdnnPluginException(
-            HIPDNN_PLUGIN_STATUS_BAD_PARAM,
-            "Relu plan builder: input and output tensors must have the same data type");
-    }
-
-    const auto* inputDims = inputTensor.dims();
-    const auto* outputDims = outputTensor.dims();
-
-    if(inputDims == nullptr || outputDims == nullptr)
-    {
-        throw hipdnn_plugin_sdk::HipdnnPluginException(HIPDNN_PLUGIN_STATUS_BAD_PARAM,
-                                                       "Relu plan builder: tensor dims are null");
-    }
-
-    const auto rank = inputDims->size();
-
-    if(rank < 1 || rank > 4)
-    {
-        throw hipdnn_plugin_sdk::HipdnnPluginException(
-            HIPDNN_PLUGIN_STATUS_BAD_PARAM,
-            std::string("Relu plan builder: tensor rank must be between 1 and 4, got ")
-                + std::to_string(rank));
-    }
-
-    int64_t inputElementCount = 1;
-    for(const auto inputDim : *inputDims)
-    {
-        inputElementCount *= static_cast<int64_t>(inputDim);
-    }
-
-    int64_t outputElementCount = 1;
-    for(const auto outputDim : *outputDims)
-    {
-        outputElementCount *= static_cast<int64_t>(outputDim);
-    }
-
-    if(inputElementCount != outputElementCount)
-    {
-        throw hipdnn_plugin_sdk::HipdnnPluginException(
-            HIPDNN_PLUGIN_STATUS_BAD_PARAM,
-            "Relu plan builder: input and output tensors must have the same element count");
-    }
+    // Standard ReLU (including lower_clip == 0.0, which is a no-op lower clip).
 }
 
 bool isReluSupported(const hipdnn_flatbuffers_sdk::flatbuffer_utilities::IGraph& opGraph)
 {
-    if(opGraph.nodeCount() != 1)
-    {
-        HIPDNN_PLUGIN_LOG_INFO(
-            "Relu plan builder is applicable only for single-node graphs. Graph has "
-            << opGraph.nodeCount() << " nodes");
-        return false;
-    }
-
-    if(!opGraph.hasOnlySupportedAttributes(
-           std::set<NodeAttributes>{NodeAttributes::PointwiseAttributes}))
-    {
-        HIPDNN_PLUGIN_LOG_INFO("Relu plan builder is not applicable for this graph");
-        return false;
-    }
-
-    if(opGraph.getNode(0).compute_data_type() != DataType::FLOAT)
-    {
-        HIPDNN_PLUGIN_LOG_INFO(
-            "Relu plan builder only supports nodes with an fp32 compute_data_type");
-        return false;
-    }
-
-    const auto& attrs = opGraph.getNodeWrapper(0).attributesAs<PointwiseAttributes>();
-
-    try
-    {
-        checkReluModeSupported(attrs);
-        checkReluTensorsSupported(attrs, opGraph.getTensorMap());
-    }
-    catch(const std::exception& e)
-    {
-        HIPDNN_PLUGIN_LOG_INFO(e.what());
-        return false;
-    }
-
-    return true;
+    return unary_activation_applicability::isSupported(opGraph, "Relu", checkReluModeSupported);
 }
 
-} // namespace relu_applicability
-
-} // namespace miopen_plugin
+} // namespace miopen_plugin::relu_applicability
