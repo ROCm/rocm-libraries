@@ -179,10 +179,7 @@ void BatchnormValidator::checkTensorShapesSupported(const std::vector<int64_t>& 
     // Checks if the affine tensor shape is valid for broadcasting to the IO tensor shape as per
     // NumPy broadcasting rules with the constraint that the channel dimension must match.
     const auto isValidAffineShapeForIo
-        = [&ioTensorAttr](
-              const hipdnn_flatbuffers_sdk::data_objects::TensorAttributes& affineTensorAttr) {
-              const std::vector<int64_t> ioDims(ioTensorAttr.dims()->begin(),
-                                                ioTensorAttr.dims()->end());
+        = [&](const hipdnn_flatbuffers_sdk::data_objects::TensorAttributes& affineTensorAttr) {
               const std::vector<int64_t> affineDims(affineTensorAttr.dims()->begin(),
                                                     affineTensorAttr.dims()->end());
 

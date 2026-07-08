@@ -394,20 +394,20 @@ namespace
 {
 
 flatbuffers::FlatBufferBuilder
-    createInvalidShapeBatchnormActivGraph(const std::vector<int64_t>& xDims,
-                                          const std::vector<int64_t>& xStrides,
-                                          const std::vector<int64_t>& scaleDims,
-                                          const std::vector<int64_t>& scaleStrides,
-                                          const std::vector<int64_t>& biasDims,
-                                          const std::vector<int64_t>& biasStrides,
-                                          const std::vector<int64_t>& meanDims,
-                                          const std::vector<int64_t>& meansStrides,
-                                          const std::vector<int64_t>& invVarianceDims,
-                                          const std::vector<int64_t>& invVarianceStrides,
-                                          const std::vector<int64_t>& yDims,
-                                          const std::vector<int64_t>& yStrides,
-                                          const std::vector<int64_t>& dyDims,
-                                          const std::vector<int64_t>& dyStrides)
+    createExplicitShapeBatchnormActivGraph(const std::vector<int64_t>& xDims,
+                                           const std::vector<int64_t>& xStrides,
+                                           const std::vector<int64_t>& scaleDims,
+                                           const std::vector<int64_t>& scaleStrides,
+                                           const std::vector<int64_t>& biasDims,
+                                           const std::vector<int64_t>& biasStrides,
+                                           const std::vector<int64_t>& meanDims,
+                                           const std::vector<int64_t>& meansStrides,
+                                           const std::vector<int64_t>& invVarianceDims,
+                                           const std::vector<int64_t>& invVarianceStrides,
+                                           const std::vector<int64_t>& yDims,
+                                           const std::vector<int64_t>& yStrides,
+                                           const std::vector<int64_t>& dyDims,
+                                           const std::vector<int64_t>& dyStrides)
 {
     flatbuffers::FlatBufferBuilder builder;
     std::vector<::flatbuffers::Offset<hipdnn_flatbuffers_sdk::data_objects::TensorAttributes>>
@@ -533,20 +533,20 @@ TEST(TestBatchnormValidator, MismatchIOShapes)
     const std::vector<int64_t> derivedStrides = hipdnn_data_sdk::utilities::generateStrides(
         derivedDims, hipdnn_data_sdk::utilities::extractStrideOrder(strides));
 
-    auto builder = createInvalidShapeBatchnormActivGraph(xDims,
-                                                         xStrides,
-                                                         derivedDims,
-                                                         derivedStrides,
-                                                         derivedDims,
-                                                         derivedStrides,
-                                                         derivedDims,
-                                                         derivedStrides,
-                                                         derivedDims,
-                                                         derivedStrides,
-                                                         dims,
-                                                         strides,
-                                                         dims,
-                                                         strides);
+    auto builder = createExplicitShapeBatchnormActivGraph(xDims,
+                                                          xStrides,
+                                                          derivedDims,
+                                                          derivedStrides,
+                                                          derivedDims,
+                                                          derivedStrides,
+                                                          derivedDims,
+                                                          derivedStrides,
+                                                          derivedDims,
+                                                          derivedStrides,
+                                                          dims,
+                                                          strides,
+                                                          dims,
+                                                          strides);
 
     const hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper graph(
         builder.GetBufferPointer(), builder.GetSize());
@@ -575,20 +575,20 @@ TEST(TestBatchnormValidator, MismatchAffineShapes)
     const std::vector<int64_t> derivedStrides = hipdnn_data_sdk::utilities::generateStrides(
         derivedDims, hipdnn_data_sdk::utilities::extractStrideOrder(strides));
 
-    auto builder = createInvalidShapeBatchnormActivGraph(dims,
-                                                         strides,
-                                                         scaleDims,
-                                                         scaleStrides,
-                                                         derivedDims,
-                                                         derivedStrides,
-                                                         derivedDims,
-                                                         derivedStrides,
-                                                         derivedDims,
-                                                         derivedStrides,
-                                                         dims,
-                                                         strides,
-                                                         dims,
-                                                         strides);
+    auto builder = createExplicitShapeBatchnormActivGraph(dims,
+                                                          strides,
+                                                          scaleDims,
+                                                          scaleStrides,
+                                                          derivedDims,
+                                                          derivedStrides,
+                                                          derivedDims,
+                                                          derivedStrides,
+                                                          derivedDims,
+                                                          derivedStrides,
+                                                          dims,
+                                                          strides,
+                                                          dims,
+                                                          strides);
 
     const hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper graph(
         builder.GetBufferPointer(), builder.GetSize());
@@ -617,20 +617,20 @@ TEST(TestBatchnormValidator, MismatchStatShapes)
     const std::vector<int64_t> derivedStrides = hipdnn_data_sdk::utilities::generateStrides(
         derivedDims, hipdnn_data_sdk::utilities::extractStrideOrder(strides));
 
-    auto builder = createInvalidShapeBatchnormActivGraph(dims,
-                                                         strides,
-                                                         derivedDims,
-                                                         derivedStrides,
-                                                         derivedDims,
-                                                         derivedStrides,
-                                                         meanDims,
-                                                         meanStrides,
-                                                         derivedDims,
-                                                         derivedStrides,
-                                                         dims,
-                                                         strides,
-                                                         dims,
-                                                         strides);
+    auto builder = createExplicitShapeBatchnormActivGraph(dims,
+                                                          strides,
+                                                          derivedDims,
+                                                          derivedStrides,
+                                                          derivedDims,
+                                                          derivedStrides,
+                                                          meanDims,
+                                                          meanStrides,
+                                                          derivedDims,
+                                                          derivedStrides,
+                                                          dims,
+                                                          strides,
+                                                          dims,
+                                                          strides);
 
     const hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper graph(
         builder.GetBufferPointer(), builder.GetSize());
@@ -659,20 +659,20 @@ TEST(TestBatchnormValidator, ValidAffineShapeNchwFullRank)
     const std::vector<int64_t> derivedStrides = hipdnn_data_sdk::utilities::generateStrides(
         derivedDims, hipdnn_data_sdk::utilities::extractStrideOrder(strides));
 
-    auto builder = createInvalidShapeBatchnormActivGraph(dims,
-                                                         strides,
-                                                         affineDims,
-                                                         affineStrides,
-                                                         affineDims,
-                                                         affineStrides,
-                                                         derivedDims,
-                                                         derivedStrides,
-                                                         derivedDims,
-                                                         derivedStrides,
-                                                         dims,
-                                                         strides,
-                                                         dims,
-                                                         strides);
+    auto builder = createExplicitShapeBatchnormActivGraph(dims,
+                                                          strides,
+                                                          affineDims,
+                                                          affineStrides,
+                                                          affineDims,
+                                                          affineStrides,
+                                                          derivedDims,
+                                                          derivedStrides,
+                                                          derivedDims,
+                                                          derivedStrides,
+                                                          dims,
+                                                          strides,
+                                                          dims,
+                                                          strides);
 
     const hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper graph(
         builder.GetBufferPointer(), builder.GetSize());
@@ -699,20 +699,20 @@ TEST(TestBatchnormValidator, ValidAffineShapeNchwRank3)
     const std::vector<int64_t> derivedStrides = hipdnn_data_sdk::utilities::generateStrides(
         derivedDims, hipdnn_data_sdk::utilities::extractStrideOrder(strides));
 
-    auto builder = createInvalidShapeBatchnormActivGraph(dims,
-                                                         strides,
-                                                         affineDims,
-                                                         affineStrides,
-                                                         affineDims,
-                                                         affineStrides,
-                                                         derivedDims,
-                                                         derivedStrides,
-                                                         derivedDims,
-                                                         derivedStrides,
-                                                         dims,
-                                                         strides,
-                                                         dims,
-                                                         strides);
+    auto builder = createExplicitShapeBatchnormActivGraph(dims,
+                                                          strides,
+                                                          affineDims,
+                                                          affineStrides,
+                                                          affineDims,
+                                                          affineStrides,
+                                                          derivedDims,
+                                                          derivedStrides,
+                                                          derivedDims,
+                                                          derivedStrides,
+                                                          dims,
+                                                          strides,
+                                                          dims,
+                                                          strides);
 
     const hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper graph(
         builder.GetBufferPointer(), builder.GetSize());
@@ -739,20 +739,20 @@ TEST(TestBatchnormValidator, InValidAffineShapeNchwRank2)
     const std::vector<int64_t> derivedStrides = hipdnn_data_sdk::utilities::generateStrides(
         derivedDims, hipdnn_data_sdk::utilities::extractStrideOrder(strides));
 
-    auto builder = createInvalidShapeBatchnormActivGraph(dims,
-                                                         strides,
-                                                         affineDims,
-                                                         affineStrides,
-                                                         affineDims,
-                                                         affineStrides,
-                                                         derivedDims,
-                                                         derivedStrides,
-                                                         derivedDims,
-                                                         derivedStrides,
-                                                         dims,
-                                                         strides,
-                                                         dims,
-                                                         strides);
+    auto builder = createExplicitShapeBatchnormActivGraph(dims,
+                                                          strides,
+                                                          affineDims,
+                                                          affineStrides,
+                                                          affineDims,
+                                                          affineStrides,
+                                                          derivedDims,
+                                                          derivedStrides,
+                                                          derivedDims,
+                                                          derivedStrides,
+                                                          dims,
+                                                          strides,
+                                                          dims,
+                                                          strides);
 
     const hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper graph(
         builder.GetBufferPointer(), builder.GetSize());
@@ -780,20 +780,20 @@ TEST(TestBatchnormValidator, InValidAffineShapeNchwRank1)
     const std::vector<int64_t> derivedStrides = hipdnn_data_sdk::utilities::generateStrides(
         derivedDims, hipdnn_data_sdk::utilities::extractStrideOrder(strides));
 
-    auto builder = createInvalidShapeBatchnormActivGraph(dims,
-                                                         strides,
-                                                         affineDims,
-                                                         affineStrides,
-                                                         affineDims,
-                                                         affineStrides,
-                                                         derivedDims,
-                                                         derivedStrides,
-                                                         derivedDims,
-                                                         derivedStrides,
-                                                         dims,
-                                                         strides,
-                                                         dims,
-                                                         strides);
+    auto builder = createExplicitShapeBatchnormActivGraph(dims,
+                                                          strides,
+                                                          affineDims,
+                                                          affineStrides,
+                                                          affineDims,
+                                                          affineStrides,
+                                                          derivedDims,
+                                                          derivedStrides,
+                                                          derivedDims,
+                                                          derivedStrides,
+                                                          dims,
+                                                          strides,
+                                                          dims,
+                                                          strides);
 
     const hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper graph(
         builder.GetBufferPointer(), builder.GetSize());
@@ -821,20 +821,20 @@ TEST(TestBatchnormValidator, ValidAffineShapeNhwcFullRank)
     const std::vector<int64_t> derivedStrides = hipdnn_data_sdk::utilities::generateStrides(
         derivedDims, hipdnn_data_sdk::utilities::extractStrideOrder(strides));
 
-    auto builder = createInvalidShapeBatchnormActivGraph(dims,
-                                                         strides,
-                                                         affineDims,
-                                                         affineStrides,
-                                                         affineDims,
-                                                         affineStrides,
-                                                         derivedDims,
-                                                         derivedStrides,
-                                                         derivedDims,
-                                                         derivedStrides,
-                                                         dims,
-                                                         strides,
-                                                         dims,
-                                                         strides);
+    auto builder = createExplicitShapeBatchnormActivGraph(dims,
+                                                          strides,
+                                                          affineDims,
+                                                          affineStrides,
+                                                          affineDims,
+                                                          affineStrides,
+                                                          derivedDims,
+                                                          derivedStrides,
+                                                          derivedDims,
+                                                          derivedStrides,
+                                                          dims,
+                                                          strides,
+                                                          dims,
+                                                          strides);
 
     const hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper graph(
         builder.GetBufferPointer(), builder.GetSize());
@@ -861,20 +861,20 @@ TEST(TestBatchnormValidator, ValidAffineShapeNhwcRank3)
     const std::vector<int64_t> derivedStrides = hipdnn_data_sdk::utilities::generateStrides(
         derivedDims, hipdnn_data_sdk::utilities::extractStrideOrder(strides));
 
-    auto builder = createInvalidShapeBatchnormActivGraph(dims,
-                                                         strides,
-                                                         affineDims,
-                                                         affineStrides,
-                                                         affineDims,
-                                                         affineStrides,
-                                                         derivedDims,
-                                                         derivedStrides,
-                                                         derivedDims,
-                                                         derivedStrides,
-                                                         dims,
-                                                         strides,
-                                                         dims,
-                                                         strides);
+    auto builder = createExplicitShapeBatchnormActivGraph(dims,
+                                                          strides,
+                                                          affineDims,
+                                                          affineStrides,
+                                                          affineDims,
+                                                          affineStrides,
+                                                          derivedDims,
+                                                          derivedStrides,
+                                                          derivedDims,
+                                                          derivedStrides,
+                                                          dims,
+                                                          strides,
+                                                          dims,
+                                                          strides);
 
     const hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper graph(
         builder.GetBufferPointer(), builder.GetSize());
@@ -901,20 +901,20 @@ TEST(TestBatchnormValidator, ValidAffineShapeNhwcRank2)
     const std::vector<int64_t> derivedStrides = hipdnn_data_sdk::utilities::generateStrides(
         derivedDims, hipdnn_data_sdk::utilities::extractStrideOrder(strides));
 
-    auto builder = createInvalidShapeBatchnormActivGraph(dims,
-                                                         strides,
-                                                         affineDims,
-                                                         affineStrides,
-                                                         affineDims,
-                                                         affineStrides,
-                                                         derivedDims,
-                                                         derivedStrides,
-                                                         derivedDims,
-                                                         derivedStrides,
-                                                         dims,
-                                                         strides,
-                                                         dims,
-                                                         strides);
+    auto builder = createExplicitShapeBatchnormActivGraph(dims,
+                                                          strides,
+                                                          affineDims,
+                                                          affineStrides,
+                                                          affineDims,
+                                                          affineStrides,
+                                                          derivedDims,
+                                                          derivedStrides,
+                                                          derivedDims,
+                                                          derivedStrides,
+                                                          dims,
+                                                          strides,
+                                                          dims,
+                                                          strides);
 
     const hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper graph(
         builder.GetBufferPointer(), builder.GetSize());
@@ -941,20 +941,20 @@ TEST(TestBatchnormValidator, ValidAffineShapeNhwcRank1)
     const std::vector<int64_t> derivedStrides = hipdnn_data_sdk::utilities::generateStrides(
         derivedDims, hipdnn_data_sdk::utilities::extractStrideOrder(strides));
 
-    auto builder = createInvalidShapeBatchnormActivGraph(dims,
-                                                         strides,
-                                                         affineDims,
-                                                         affineStrides,
-                                                         affineDims,
-                                                         affineStrides,
-                                                         derivedDims,
-                                                         derivedStrides,
-                                                         derivedDims,
-                                                         derivedStrides,
-                                                         dims,
-                                                         strides,
-                                                         dims,
-                                                         strides);
+    auto builder = createExplicitShapeBatchnormActivGraph(dims,
+                                                          strides,
+                                                          affineDims,
+                                                          affineStrides,
+                                                          affineDims,
+                                                          affineStrides,
+                                                          derivedDims,
+                                                          derivedStrides,
+                                                          derivedDims,
+                                                          derivedStrides,
+                                                          dims,
+                                                          strides,
+                                                          dims,
+                                                          strides);
 
     const hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper graph(
         builder.GetBufferPointer(), builder.GetSize());
@@ -981,20 +981,20 @@ TEST(TestBatchnormValidator, InvalidAffineShapeNchwBatchDimNotOne)
     const std::vector<int64_t> derivedStrides = hipdnn_data_sdk::utilities::generateStrides(
         derivedDims, hipdnn_data_sdk::utilities::extractStrideOrder(strides));
 
-    auto builder = createInvalidShapeBatchnormActivGraph(dims,
-                                                         strides,
-                                                         affineDims,
-                                                         affineStrides,
-                                                         affineDims,
-                                                         affineStrides,
-                                                         derivedDims,
-                                                         derivedStrides,
-                                                         derivedDims,
-                                                         derivedStrides,
-                                                         dims,
-                                                         strides,
-                                                         dims,
-                                                         strides);
+    auto builder = createExplicitShapeBatchnormActivGraph(dims,
+                                                          strides,
+                                                          affineDims,
+                                                          affineStrides,
+                                                          affineDims,
+                                                          affineStrides,
+                                                          derivedDims,
+                                                          derivedStrides,
+                                                          derivedDims,
+                                                          derivedStrides,
+                                                          dims,
+                                                          strides,
+                                                          dims,
+                                                          strides);
 
     const hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper graph(
         builder.GetBufferPointer(), builder.GetSize());
@@ -1022,20 +1022,20 @@ TEST(TestBatchnormValidator, InvalidAffineShapeNchwWrongChannelCount)
     const std::vector<int64_t> derivedStrides = hipdnn_data_sdk::utilities::generateStrides(
         derivedDims, hipdnn_data_sdk::utilities::extractStrideOrder(strides));
 
-    auto builder = createInvalidShapeBatchnormActivGraph(dims,
-                                                         strides,
-                                                         affineDims,
-                                                         affineStrides,
-                                                         affineDims,
-                                                         affineStrides,
-                                                         derivedDims,
-                                                         derivedStrides,
-                                                         derivedDims,
-                                                         derivedStrides,
-                                                         dims,
-                                                         strides,
-                                                         dims,
-                                                         strides);
+    auto builder = createExplicitShapeBatchnormActivGraph(dims,
+                                                          strides,
+                                                          affineDims,
+                                                          affineStrides,
+                                                          affineDims,
+                                                          affineStrides,
+                                                          derivedDims,
+                                                          derivedStrides,
+                                                          derivedDims,
+                                                          derivedStrides,
+                                                          dims,
+                                                          strides,
+                                                          dims,
+                                                          strides);
 
     const hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper graph(
         builder.GetBufferPointer(), builder.GetSize());
@@ -1063,20 +1063,20 @@ TEST(TestBatchnormValidator, InvalidAffineShapeNhwcSpatialDimsNotOne)
     const std::vector<int64_t> derivedStrides = hipdnn_data_sdk::utilities::generateStrides(
         derivedDims, hipdnn_data_sdk::utilities::extractStrideOrder(strides));
 
-    auto builder = createInvalidShapeBatchnormActivGraph(dims,
-                                                         strides,
-                                                         affineDims,
-                                                         affineStrides,
-                                                         affineDims,
-                                                         affineStrides,
-                                                         derivedDims,
-                                                         derivedStrides,
-                                                         derivedDims,
-                                                         derivedStrides,
-                                                         dims,
-                                                         strides,
-                                                         dims,
-                                                         strides);
+    auto builder = createExplicitShapeBatchnormActivGraph(dims,
+                                                          strides,
+                                                          affineDims,
+                                                          affineStrides,
+                                                          affineDims,
+                                                          affineStrides,
+                                                          derivedDims,
+                                                          derivedStrides,
+                                                          derivedDims,
+                                                          derivedStrides,
+                                                          dims,
+                                                          strides,
+                                                          dims,
+                                                          strides);
 
     const hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper graph(
         builder.GetBufferPointer(), builder.GetSize());
@@ -1104,20 +1104,20 @@ TEST(TestBatchnormValidator, InvalidAffineShapeNhwcWrongChannelCount)
     const std::vector<int64_t> derivedStrides = hipdnn_data_sdk::utilities::generateStrides(
         derivedDims, hipdnn_data_sdk::utilities::extractStrideOrder(strides));
 
-    auto builder = createInvalidShapeBatchnormActivGraph(dims,
-                                                         strides,
-                                                         affineDims,
-                                                         affineStrides,
-                                                         affineDims,
-                                                         affineStrides,
-                                                         derivedDims,
-                                                         derivedStrides,
-                                                         derivedDims,
-                                                         derivedStrides,
-                                                         dims,
-                                                         strides,
-                                                         dims,
-                                                         strides);
+    auto builder = createExplicitShapeBatchnormActivGraph(dims,
+                                                          strides,
+                                                          affineDims,
+                                                          affineStrides,
+                                                          affineDims,
+                                                          affineStrides,
+                                                          derivedDims,
+                                                          derivedStrides,
+                                                          derivedDims,
+                                                          derivedStrides,
+                                                          dims,
+                                                          strides,
+                                                          dims,
+                                                          strides);
 
     const hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper graph(
         builder.GetBufferPointer(), builder.GetSize());
@@ -1145,20 +1145,20 @@ TEST(TestBatchnormValidator, MismatchIOAffineLayouts)
     const std::vector<int64_t> derivedStrides = hipdnn_data_sdk::utilities::generateStrides(
         derivedDims, hipdnn_data_sdk::utilities::extractStrideOrder(strides));
 
-    auto builder = createInvalidShapeBatchnormActivGraph(dims,
-                                                         strides,
-                                                         affineDims,
-                                                         affineStrides,
-                                                         affineDims,
-                                                         affineStrides,
-                                                         derivedDims,
-                                                         derivedStrides,
-                                                         derivedDims,
-                                                         derivedStrides,
-                                                         dims,
-                                                         strides,
-                                                         dims,
-                                                         strides);
+    auto builder = createExplicitShapeBatchnormActivGraph(dims,
+                                                          strides,
+                                                          affineDims,
+                                                          affineStrides,
+                                                          affineDims,
+                                                          affineStrides,
+                                                          derivedDims,
+                                                          derivedStrides,
+                                                          derivedDims,
+                                                          derivedStrides,
+                                                          dims,
+                                                          strides,
+                                                          dims,
+                                                          strides);
 
     const hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper graph(
         builder.GetBufferPointer(), builder.GetSize());
