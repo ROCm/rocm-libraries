@@ -262,7 +262,6 @@ TEST(TestBlockScaleDequantizeAttributes, LogicalAndStrictEquality)
         .set_block_size(32)
         .set_is_negative_scale(false);
 
-    // This should pass cleanly now that DataType matches
     EXPECT_TRUE(attrA.logicallyEquals(attrC));
     EXPECT_FALSE(attrA == attrC);
     EXPECT_TRUE(attrA != attrC);
@@ -274,7 +273,6 @@ TEST(TestBlockScaleDequantizeAttributes, LogicalAndStrictEquality)
         .set_block_size(16)
         .set_is_negative_scale(false);
 
-    // Sanity check: Ensure the vectors themselves are actually different
     ASSERT_NE(attrA.get_block_size(), attrD.get_block_size());
 
     EXPECT_FALSE(attrA.logicallyEquals(attrD));

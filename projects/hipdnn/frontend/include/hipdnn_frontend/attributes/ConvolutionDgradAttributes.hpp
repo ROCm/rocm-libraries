@@ -250,8 +250,6 @@ public:
      */
     bool strictEqualsImpl(const ConvDgradAttributes& other) const
     {
-        // Since there are no hidden metadata or tracking fields in this class,
-        // strict state equality mirrors structural logical equality perfectly.
         return logicallyEqualsImpl(other);
     }
 };

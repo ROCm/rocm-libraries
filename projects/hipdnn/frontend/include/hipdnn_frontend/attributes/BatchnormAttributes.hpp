@@ -346,18 +346,19 @@ public:
      */
     bool strictEqualsImpl(const BatchnormAttributes& other) const
     {
-        // Core maps, name, and compute data type are already evaluated by Attributes global operator==
-        if(peer_stats.size() != other.peer_stats.size())
+        if(!logicallyEqualsImpl(other))
         {
             return false;
         }
+
         for(size_t i = 0; i < peer_stats.size(); ++i)
         {
-            if(!peer_stats[i] && !other.peer_stats[i])
+            if(!peer_stats[i])
             {
-                continue;
+                continue; // Both are null (proven by logical checking step)
             }
-            if(!peer_stats[i] || !other.peer_stats[i] || !(*peer_stats[i] == *other.peer_stats[i]))
+
+            if(!(*peer_stats[i] == *other.peer_stats[i]))
             {
                 return false;
             }

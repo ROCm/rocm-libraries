@@ -159,6 +159,7 @@ public:
      * Compares core attributes common to all nodes, then delegates specific
      * property evaluation to the derived node subclass.
      */
+    // NOLINTNEXTLINE(readability-identifier-naming)
     bool logicallyEquals(const Attributes<DerivedT>& other) const
     {
         // Core mathematical metadata configuration must match across all nodes
@@ -184,18 +185,21 @@ public:
      */
     friend bool operator==(const Attributes<DerivedT>& lhs, const Attributes<DerivedT>& rhs)
     {
+        // Cast down to the actual concrete type
+        const auto& derivedLhs = static_cast<const DerivedT&>(lhs);
+        const auto& derivedRhs = static_cast<const DerivedT&>(rhs);
+
         // Check basic non-tensor base properties
         if(lhs.compute_data_type != rhs.compute_data_type || lhs.name != rhs.name)
         {
             return false;
         }
 
-        // Cast down to the actual concrete type
-        const auto& derivedLhs = static_cast<const DerivedT&>(lhs);
-        const auto& derivedRhs = static_cast<const DerivedT&>(rhs);
+        const Attributes<DerivedT>& baseLhsView = derivedLhs;
+        const Attributes<DerivedT>& baseRhsView = derivedRhs;
 
-        if(!compareMapsStrict(derivedLhs.inputs, derivedRhs.inputs)
-           || !compareMapsStrict(derivedLhs.outputs, derivedRhs.outputs))
+        if(!compareMapsStrict(baseLhsView.self().inputs, baseRhsView.self().inputs)
+           || !compareMapsStrict(baseLhsView.self().outputs, baseRhsView.self().outputs))
         {
             return false;
         }
@@ -214,11 +218,11 @@ private:
 
 protected:
     // Default fallback hooks for derived classes that do NOT have extra fields
-    bool logicallyEqualsImpl(const DerivedT&) const
+    bool logicallyEqualsImpl([[maybe_unused]] const DerivedT& other) const
     {
         return true;
     }
-    bool strictEqualsImpl(const DerivedT&) const
+    bool strictEqualsImpl([[maybe_unused]] const DerivedT& other) const
     {
         return true;
     }
@@ -325,6 +329,7 @@ private:
      * @return true If both maps represent the same functional mathematical state.
      * @return false If structural layouts or logical evaluations mismatch.
      */
+    // NOLINTNEXTLINE(readability-identifier-naming)
     template <typename MapT>
     static bool compareMapsLogical(const MapT& m1, const MapT& m2)
     {
@@ -332,6 +337,7 @@ private:
         {
             return false;
         }
+        // NOLINTNEXTLINE(readability-identifier-naming)
         for(const auto& [key, t1] : m1)
         {
             auto it = m2.find(key);

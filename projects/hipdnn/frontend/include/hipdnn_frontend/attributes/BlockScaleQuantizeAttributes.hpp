@@ -172,8 +172,6 @@ public:
      */
     bool strictEqualsImpl(const BlockScaleQuantizeAttributes& other) const
     {
-        // For this class, logical equality and strict state equality
-        // mirror each other as there are no non-functional tracking fields.
         return logicallyEqualsImpl(other);
     }
 

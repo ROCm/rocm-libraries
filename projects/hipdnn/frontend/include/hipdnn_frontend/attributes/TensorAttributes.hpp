@@ -396,7 +396,70 @@ public:
 
         return {ErrorCode::OK, ""};
     }
-    
+
+    /**
+     * @brief Checks if two tensors are logically identical in terms of shape,
+     * layout, data type, value, and structural role in the graph.
+     * @note This intentionally ignores the human-readable string name.
+     */
+    bool logicallyEquals(const TensorAttributes& other) const
+    {
+        if(this->_dataType != other._dataType)
+        {
+            return false;
+        }
+        if(this->_dim != other._dim)
+        {
+            return false;
+        }
+        if(this->_stride != other._stride)
+        {
+            return false;
+        }
+        if(this->_isVirtual != other._isVirtual)
+        {
+            return false;
+        }
+        // Compare pass-by-value scalar variants
+        if(this->_value != other._value)
+        {
+            return false;
+        }
+
+        return true;
+    }
+
+    /**
+     * @brief Absolute equality check including non-functional metadata like names.
+    */
+    bool operator==(const TensorAttributes& other) const
+    {
+
+        if(!logicallyEquals(other))
+        {
+            return false;
+        }
+        if(this->_name != other._name)
+        {
+            return false;
+        }
+        if(this->_uidSet != other._uidSet)
+        {
+            return false;
+        }
+        if(this->_uidSet && (this->_uid != other._uid))
+        {
+            return false;
+        }
+
+        return true;
+    }
+
+    bool operator!=(const TensorAttributes& other) const
+    {
+        return !(*this == other);
+    }
+
 private:
     int64_t _uid = 0;
     bool _uidSet = false;
@@ -406,6 +469,6 @@ private:
     std::vector<int64_t> _dim;
     bool _isVirtual = false;
     ValueVariant _value;
-    };
+};
 typedef TensorAttributes Tensor_attributes; ///< @brief Compatibility alias
 } // namespace hipdnn_frontend::graph
