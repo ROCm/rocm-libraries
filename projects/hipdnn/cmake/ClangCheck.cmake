@@ -30,9 +30,62 @@ verifyamdrocmcompiler(${CMAKE_CXX_COMPILER} "C++")
 if(ENABLE_CLANG_FORMAT)
     include(${CMAKE_CURRENT_LIST_DIR}/CheckToolVersion.cmake)
 
+    set(HIPDNN_CLANG_FORMAT_FILES_PER_INVOCATION
+        32
+        CACHE STRING "Maximum source files passed to each clang-format invocation"
+    )
+    if(HIPDNN_CLANG_FORMAT_FILES_PER_INVOCATION LESS 1)
+        message(FATAL_ERROR "HIPDNN_CLANG_FORMAT_FILES_PER_INVOCATION must be greater than 0")
+    endif()
+
+    set(HIPDNN_CLANG_FORMAT_JOBS
+        0
+        CACHE STRING "Maximum parallel clang-format invocations; 0 uses the host processor count"
+    )
+    if(HIPDNN_CLANG_FORMAT_JOBS LESS 0)
+        message(FATAL_ERROR "HIPDNN_CLANG_FORMAT_JOBS must be greater than or equal to 0")
+    endif()
+
+    # Adds format and check_format targets
+    function(add_clang_format_target TARGET_NAME FORMAT_MODE)
+        if(NOT FORMAT_MODE STREQUAL "check" AND NOT FORMAT_MODE STREQUAL "format")
+            message(FATAL_ERROR "FORMAT_MODE must be 'check' or 'format'")
+        endif()
+
+        if(WIN32)
+            find_program(HIPDNN_POWERSHELL_EXECUTABLE NAMES powershell.exe powershell REQUIRED)
+            add_custom_target(
+                ${TARGET_NAME}
+                COMMAND
+                    "${HIPDNN_POWERSHELL_EXECUTABLE}" -NoProfile -ExecutionPolicy Bypass -File
+                    "${CMAKE_CURRENT_LIST_DIR}/RunClangFormat.ps1" -ClangFormat
+                    "${CLANG_FORMAT_BINARY}" -SourceDir "${PROJECT_SOURCE_DIR}" -Mode
+                    "${FORMAT_MODE}" -FilesPerInvocation
+                    "${HIPDNN_CLANG_FORMAT_FILES_PER_INVOCATION}" -Jobs
+                    "${HIPDNN_CLANG_FORMAT_JOBS}"
+                WORKING_DIRECTORY "${PROJECT_SOURCE_DIR}"
+                VERBATIM
+                COMMENT "Running clang-format ${FORMAT_MODE} (${PROJECT_NAME})"
+            )
+        elseif(CMAKE_HOST_SYSTEM_NAME STREQUAL "Linux")
+            add_custom_target(
+                ${TARGET_NAME}
+                COMMAND
+                    /usr/bin/env bash "${CMAKE_CURRENT_LIST_DIR}/RunClangFormat.sh"
+                    "${CLANG_FORMAT_BINARY}" "${PROJECT_SOURCE_DIR}" "${FORMAT_MODE}"
+                    "${HIPDNN_CLANG_FORMAT_FILES_PER_INVOCATION}"
+                    "${HIPDNN_CLANG_FORMAT_JOBS}"
+                WORKING_DIRECTORY "${PROJECT_SOURCE_DIR}"
+                VERBATIM
+                COMMENT "Running clang-format ${FORMAT_MODE} (${PROJECT_NAME})"
+            )
+        else()
+            message(FATAL_ERROR "clang-format targets are only supported on Windows and Linux hosts")
+        endif()
+    endfunction()
+
     # Find and check clang-format version using unified function
     findandcheckclangformat()
-    set(_CLANG_FORMAT_SCRIPT "${CMAKE_CURRENT_LIST_DIR}/RunClangFormat.cmake")
 
     # Use prefixed target names in superbuild to avoid collisions
     if(ROCM_LIBS_SUPERBUILD)
@@ -43,25 +96,8 @@ if(ENABLE_CLANG_FORMAT)
         set(_FORMAT_TARGET format)
     endif()
 
-    add_custom_target(
-        ${_CHECK_FORMAT_TARGET}
-        COMMAND
-            "${CMAKE_COMMAND}" "-DCLANG_FORMAT_BINARY=${CLANG_FORMAT_BINARY}"
-            "-DFORMAT_SOURCE_DIR=${PROJECT_SOURCE_DIR}" "-DFORMAT_MODE=check" -P
-            "${_CLANG_FORMAT_SCRIPT}"
-        VERBATIM
-        COMMENT "Checking code format (${PROJECT_NAME})"
-    )
-
-    add_custom_target(
-        ${_FORMAT_TARGET}
-        COMMAND
-            "${CMAKE_COMMAND}" "-DCLANG_FORMAT_BINARY=${CLANG_FORMAT_BINARY}"
-            "-DFORMAT_SOURCE_DIR=${PROJECT_SOURCE_DIR}" "-DFORMAT_MODE=format" -P
-            "${_CLANG_FORMAT_SCRIPT}"
-        VERBATIM
-        COMMENT "Formatting code (${PROJECT_NAME})"
-    )
+    add_clang_format_target(${_CHECK_FORMAT_TARGET} check)
+    add_clang_format_target(${_FORMAT_TARGET} format)
 
     # Alias targets with consistent hyphenated naming
     add_custom_target(
