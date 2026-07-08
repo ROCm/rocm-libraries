@@ -176,12 +176,12 @@ def test_r7_incrementSrdMultipleRows_negative():
 
 
 # ---------------------------------------------------------------------------
-# Regression test: ROCM-25793 -- 32-bit overflow in SRD base address increment
+# Regression test: 32-bit overflow in SRD base address increment
 # ---------------------------------------------------------------------------
 
 
-def test_rocm25793_incrementSrd_must_handle_64bit_stride_product():
-    """ROCM-25793: incrementSrdMultipleRows must compute a full 64-bit
+def test_incrementSrd_must_handle_64bit_stride_product():
+    """incrementSrdMultipleRows must compute a full 64-bit
     stride*bpe product so the SRD high word gets the upper 32 bits,
     not just the carry from the low-word add.
 
@@ -227,7 +227,7 @@ def test_rocm25793_incrementSrd_must_handle_64bit_stride_product():
             bugs_found.append((label, asm))
 
     assert not bugs_found, (
-        "ROCM-25793 BUG DETECTED: SRD high-word increment uses literal 0 "
+        "BUG DETECTED: SRD high-word increment uses literal 0 "
         "instead of the upper 32 bits of stride*bpe. This causes GPU memory "
         "faults when stride*bpe >= 2^32.\n\n"
         + "\n".join(
