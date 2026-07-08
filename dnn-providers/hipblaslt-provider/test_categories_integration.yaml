@@ -8,22 +8,24 @@
 # GTest names, not hipblaslt_plugin_tests/hipblaslt_plugin_integration_tests
 # names.
 #
-# hipblaslt only implements matmul, so every tier is scoped to *Matmul* to
-# avoid pulling in conv/batchnorm/reduction/rmsnorm/sdpa coverage that no
-# engine in this provider's build supports (previously handled by a
-# GTEST_FILTER "*Matmul*" argument; the YAML test_patterns below are now the
-# source of truth for what runs, with GTEST_FILTER only scoping the plain
-# `hipblaslt-provider-external-integration-check` custom target used for
-# manual/local invocation).
+# hipblaslt only implements matmul, but test_patterns below are not scoped to
+# it: --test-engine HIPBLASLT_ENGINE pins the graph-support check in
+# IntegrationGraphVerificationHarness::checkEngineSupportOrSkip(), which
+# already GTEST_SKIPs (or, under --fail-on-unsupported, fails) any graph
+# HIPBLASLT_ENGINE doesn't support. Filtering by test name here would just
+# duplicate that check while hiding it from `ctest -V`; letting every op run
+# and rely on the generic skip keeps this YAML identical in shape to
+# miopen-provider's, since both wrap the same hipdnn_integration_tests binary.
 
 _common_excludes: &common_excludes
   - "*DISABLED*"
 
 test_categories:
   quick:
-    description: "Fast external integration coverage: Smoke matmul cases"
+    description: "Fast external integration coverage: Smoke GPU cases plus quick CPU golden-reference bundles"
     test_patterns:
-      - "Smoke/*Matmul*"
+      - "Smoke/*"
+      - "TestCpu*GoldenReference*"
     exclude: *common_excludes
     labels:
       - "quick"
@@ -31,9 +33,11 @@ test_categories:
       - "smoke"
 
   standard:
-    description: "Standard external integration coverage: same shape as quick (no Standard* matmul tier exists)"
+    description: "Standard external integration coverage: quick coverage plus standard CPU golden-reference bundles"
     test_patterns:
-      - "Smoke/*Matmul*"
+      - "Smoke/*"
+      - "TestCpu*GoldenReference*"
+      - "TestCpu*GoldenRefStd*"
     exclude: *common_excludes
     labels:
       - "standard"
@@ -41,9 +45,9 @@ test_categories:
       - "precheckin"
 
   comprehensive:
-    description: "Nightly comprehensive external integration coverage (all matmul suites)"
+    description: "Nightly comprehensive external integration coverage"
     test_patterns:
-      - "*Matmul*"
+      - "*"
     exclude: *common_excludes
     labels:
       - "comprehensive"
@@ -51,9 +55,9 @@ test_categories:
       - "extended"
 
   full:
-    description: "Complete external integration coverage (all matmul suites)"
+    description: "Complete external integration coverage"
     test_patterns:
-      - "*Matmul*"
+      - "*"
     exclude: *common_excludes
     labels:
       - "full"

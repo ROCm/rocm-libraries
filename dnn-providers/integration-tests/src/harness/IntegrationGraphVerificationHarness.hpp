@@ -38,6 +38,73 @@ namespace hipdnn_integration_tests
 using namespace hipdnn_data_sdk;
 using namespace hipdnn_frontend;
 
+// Checks whether any (or the pinned --test-engine) engine supports the
+// graph, skipping — or failing under --fail-on-unsupported — if not.
+// build_operation_graph() must already have been called. Records
+// support-matrix data (when testCaseNote/testCaseLayout are supplied) and
+// pins the preferred engine when --test-engine is set. Callers that don't
+// immediately return afterward must check
+// ::testing::Test::IsSkipped()/HasFatalFailure() themselves.
+//
+// Free function (not a IntegrationGraphVerificationHarness member) so plain
+// ::testing::Test fixtures that build ad hoc graphs outside the
+// tiered-test-case harness (e.g. IntegrationIsSupportedExtPerformance) can
+// reuse the same skip semantics instead of hard-asserting support.
+inline void checkEngineSupportOrSkip(hipdnn_frontend::graph::Graph& graph,
+                                     const std::string& testCaseNote = "",
+                                     const std::string& testCaseLayout = "")
+{
+    std::vector<int64_t> engineIds;
+    auto status = graph.get_ranked_engine_ids(engineIds);
+
+    // Record support information for the support matrix output
+    if(SupportMatrixCollector::get().isEnabled())
+    {
+        std::string testName;
+        auto* testInfo = ::testing::UnitTest::GetInstance()->current_test_info();
+        if(testInfo != nullptr)
+        {
+            testName = std::string(testInfo->test_suite_name()) + "." + testInfo->name();
+        }
+        SupportMatrixCollector::get().recordGraphSupport(graph.graph_attributes.get_name(),
+                                                         describeGraph(graph),
+                                                         testName,
+                                                         status.is_good() ? engineIds
+                                                                          : std::vector<int64_t>{},
+                                                         testCaseNote,
+                                                         testCaseLayout);
+    }
+
+    if(TestConfig::get().hasEngineName())
+    {
+        int64_t targetEngineId = TestConfig::get().getEngineId();
+        if(status.is_bad()
+           || std::find(engineIds.begin(), engineIds.end(), targetEngineId) == engineIds.end())
+        {
+            if(TestConfig::get().failOnUnsupported())
+            {
+                FAIL() << "Engine " << TestConfig::get().getEngineName()
+                       << " does not support this graph";
+            }
+            GTEST_SKIP() << "Engine " << TestConfig::get().getEngineName()
+                         << " does not support this graph";
+        }
+        // Prererred engine must be set before create_execution_plans.
+        graph.set_preferred_engine_id_ext(targetEngineId);
+    }
+    else
+    {
+        if(status.is_bad() || engineIds.empty())
+        {
+            if(TestConfig::get().failOnUnsupported())
+            {
+                FAIL() << "No engine supports this graph";
+            }
+            GTEST_SKIP() << "No engine supports this graph";
+        }
+    }
+}
+
 // NOLINTBEGIN (portability-template-virtual-member-function)
 template <typename DataType, typename TestCaseType>
 class IntegrationGraphVerificationHarness : public ::testing::TestWithParam<TestCaseType>
@@ -114,63 +181,11 @@ protected:
         return 0.0f;
     }
 
-    // Checks whether any (or the pinned --test-engine) engine supports the
-    // graph, skipping — or failing under --fail-on-unsupported — if not.
-    // build_operation_graph() must already have been called. Records
-    // support-matrix data and pins the preferred engine when --test-engine
-    // is set. Callers that don't immediately return afterward must check
-    // ::testing::Test::IsSkipped()/HasFatalFailure() themselves.
+    // Delegates to the free hipdnn_integration_tests::checkEngineSupportOrSkip(),
+    // forwarding this test case's note/layout for support-matrix recording.
     void checkEngineSupportOrSkip(hipdnn_frontend::graph::Graph& graph)
     {
-        std::vector<int64_t> engineIds;
-        auto status = graph.get_ranked_engine_ids(engineIds);
-
-        // Record support information for the support matrix output
-        if(SupportMatrixCollector::get().isEnabled())
-        {
-            std::string testName;
-            auto* testInfo = ::testing::UnitTest::GetInstance()->current_test_info();
-            if(testInfo != nullptr)
-            {
-                testName = std::string(testInfo->test_suite_name()) + "." + testInfo->name();
-            }
-            SupportMatrixCollector::get().recordGraphSupport(
-                graph.graph_attributes.get_name(),
-                describeGraph(graph),
-                testName,
-                status.is_good() ? engineIds : std::vector<int64_t>{},
-                _testCaseNote,
-                _testCaseLayout);
-        }
-
-        if(TestConfig::get().hasEngineName())
-        {
-            int64_t targetEngineId = TestConfig::get().getEngineId();
-            if(status.is_bad()
-               || std::find(engineIds.begin(), engineIds.end(), targetEngineId) == engineIds.end())
-            {
-                if(TestConfig::get().failOnUnsupported())
-                {
-                    FAIL() << "Engine " << TestConfig::get().getEngineName()
-                           << " does not support this graph";
-                }
-                GTEST_SKIP() << "Engine " << TestConfig::get().getEngineName()
-                             << " does not support this graph";
-            }
-            // Prererred engine must be set before create_execution_plans.
-            graph.set_preferred_engine_id_ext(targetEngineId);
-        }
-        else
-        {
-            if(status.is_bad() || engineIds.empty())
-            {
-                if(TestConfig::get().failOnUnsupported())
-                {
-                    FAIL() << "No engine supports this graph";
-                }
-                GTEST_SKIP() << "No engine supports this graph";
-            }
-        }
+        hipdnn_integration_tests::checkEngineSupportOrSkip(graph, _testCaseNote, _testCaseLayout);
     }
 
     void verifyGraph(hipdnn_frontend::graph::Graph& graph, unsigned int seed)
