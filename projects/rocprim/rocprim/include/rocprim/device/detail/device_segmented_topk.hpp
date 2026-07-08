@@ -21,12 +21,15 @@
 #ifndef ROCPRIM_DEVICE_DETAIL_DEVICE_SEGMENTED_TOPK_HPP_
 #define ROCPRIM_DEVICE_DETAIL_DEVICE_SEGMENTED_TOPK_HPP_
 
+#include "../../config.hpp"
 #include "../../detail/temp_storage.hpp"
+#include "../../iterator/constant_iterator.hpp"
+#include "../../iterator/counting_iterator.hpp"
+#include "../../iterator/transform_iterator.hpp"
+#include "../../type_traits.hpp"
+#include "../config_types.hpp"
+#include "../device_copy.hpp"
 #include "../device_segmented_radix_sort.hpp"
-#include "../device_transform.hpp"
-#include "rocprim/config.hpp"
-#include "rocprim/device/config_types.hpp"
-#include "rocprim/functional.hpp"
 
 BEGIN_ROCPRIM_NAMESPACE
 
@@ -66,6 +69,8 @@ struct device_segmented_topk_impl
     // key type must be a fundamental/integral type that supports radix sort without custom decomposer
     static_assert(!std::is_same_v<key_out_t, ::rocprim::empty_type>, "key_out_t empty!");
 
+    static constexpr bool with_values = !std::is_same_v<ValuesInputIterator, rocprim::empty_type>;
+
 public:
     static hipError_t impl(void*                             temporary_storage,
                            size_t&                           storage_size,
@@ -82,17 +87,18 @@ public:
                            const hipStream_t                 stream            = 0,
                            const bool                        debug_synchronous = false)
     {
-        ValuesInputIterator temp_values              = nullptr;
-        KeysInputIterator   temp_keys                = nullptr;
-        void*               temporary_storage_radix  = nullptr;
-        size_t              radix_storage_size_bytes = 0;
-        bool                ignored                  = false;
 
-        auto do_segmented_radix_sort = [&]()
+        KeysInputIterator   temp_keys       = nullptr;
+        ValuesInputIterator temp_values     = nullptr;
+        void*               scratch_storage = nullptr;
+
+        size_t segmented_radix_sort_size = 0;
+        bool   ignored                   = false;
+        auto   do_segmented_radix_sort   = [&]()
         {
             return detail::segmented_radix_sort_impl<default_config, Descending>(
-                temporary_storage_radix,
-                radix_storage_size_bytes,
+                scratch_storage,
+                segmented_radix_sort_size,
                 keys_input,
                 nullptr,
                 temp_keys,
@@ -110,43 +116,70 @@ public:
                 debug_synchronous);
         };
 
-        constexpr bool with_values = !std::is_same_v<ValuesInputIterator, rocprim::empty_type>;
+        size_t copy_keys_size = 0;
+        auto   do_copy_keys   = [&]()
+        {
+            return rocprim::batch_copy(
+                scratch_storage,
+                copy_keys_size,
+                rocprim::make_transform_iterator(begin_offsets,
+                                                 [=](auto offset) { return temp_keys + offset; }),
+                rocprim::make_transform_iterator(rocprim::make_counting_iterator(size_t{0}),
+                                                 [=](auto i) { return keys_output + i * K; }),
+                rocprim::make_constant_iterator(K),
+                segments,
+                stream,
+                debug_synchronous);
+        };
 
-        // Compute radix_storage_size_bytes: 'temporary_storage_radix' is still 'nullptr'
+        size_t copy_vals_size = 0;
+        auto   do_copy_vals   = [&]()
+        {
+            return rocprim::batch_copy(
+                scratch_storage,
+                copy_vals_size,
+                rocprim::make_transform_iterator(begin_offsets,
+                                                 [=](auto offset) { return temp_values + offset; }),
+                rocprim::make_transform_iterator(rocprim::make_counting_iterator(size_t{0}),
+                                                 [=](auto i) { return values_output + i * K; }),
+                rocprim::make_constant_iterator(K),
+                segments,
+                stream,
+                debug_synchronous);
+        };
+
+        // Compute required scratch storage for other passes.
         ROCPRIM_RETURN_ON_ERROR(do_segmented_radix_sort());
+        ROCPRIM_RETURN_ON_ERROR(do_copy_keys());
+        if constexpr(with_values)
+        {
+            ROCPRIM_RETURN_ON_ERROR(do_copy_vals());
+        }
 
-        // When keys and values are sorted we need temporary storage for both
+        const size_t scratch_storage_size
+            = std::max(segmented_radix_sort_size, std::max(copy_keys_size, copy_vals_size));
         ROCPRIM_RETURN_ON_ERROR(detail::temp_storage::partition(
             temporary_storage,
             storage_size,
             detail::temp_storage::make_linear_partition(
                 detail::temp_storage::ptr_aligned_array(&temp_keys, size),
                 detail::temp_storage::ptr_aligned_array(&temp_values, with_values ? size : 0),
-                detail::temp_storage::make_partition(&temporary_storage_radix, radix_storage_size_bytes))));
-
-        if (temporary_storage == nullptr)
+                detail::temp_storage::make_partition(&scratch_storage, scratch_storage_size))));
+        // Return temporary storage and early exit on no-ops.
+        if(temporary_storage == nullptr || segments == 0 || size == 0 || K == 0)
         {
             return hipSuccess;
         }
 
-        // Actually do the radix sort
+        // Execute segmented radix sort.
         ROCPRIM_RETURN_ON_ERROR(do_segmented_radix_sort());
 
-        for(size_t segment = 0; segment < segments; segment++)
+        // Copy the relevant results from the sorted buffer to the output.
+        // We use batch copy instead of normal copy through identity transform.
+        ROCPRIM_RETURN_ON_ERROR(do_copy_keys());
+        if constexpr(with_values)
         {
-            // Move first K keys from sorted temporary buffer to output
-            ROCPRIM_RETURN_ON_ERROR(rocprim::transform(temp_keys + begin_offsets[segment],
-                                                       keys_output + segment * K,
-                                                       K,
-                                                       rocprim::identity<>{}));
-            if constexpr(with_values)
-            {
-                // If values are provided, also move first K values to the output
-                ROCPRIM_RETURN_ON_ERROR(rocprim::transform(temp_values + begin_offsets[segment],
-                                                           values_output + segment * K,
-                                                           K,
-                                                           rocprim::identity<>{}));
-            }
+            ROCPRIM_RETURN_ON_ERROR(do_copy_vals());
         }
 
         return hipSuccess;
