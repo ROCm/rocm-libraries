@@ -7,7 +7,7 @@ from rocke.benchmark.perf import aggregate, schema
 
 
 def _rec(arch="gfx950", kernel="k", shape=None, *, busy=None, total=None,
-         ms=None, l2_hit=None, l2_miss=None):
+         ms=None, prof_ms=None, l2_hit=None, l2_miss=None):
     """Minimal schema-valid single-run record with the fields under test."""
     counters = {}
     if busy is not None:
@@ -18,20 +18,37 @@ def _rec(arch="gfx950", kernel="k", shape=None, *, busy=None, total=None,
         counters["l2_hit"] = l2_hit
     if l2_miss is not None:
         counters["l2_miss"] = l2_miss
-    wall = {}
-    if ms is not None:
-        wall["ms_median"] = ms
+    wall = {"ms_median": ms} if ms is not None else {}
+    profiled = {"ms_median": prof_ms} if prof_ms is not None else {}
     return {
         "schema": schema.SCHEMA_VERSION,
         "run": {"run_id": "r", "arch": arch, "timestamp": "t"},
         "kernel": {"kernel_name": kernel, "op": "gemm", "shape": shape or {"M": 8}},
         "wall": wall,
+        "profiled": profiled,
         "counters": counters,
         "resources": {},
         "derived": {},
         "captured_counters": sorted(counters),
         "verify": {},
     }
+
+
+class TestProfiled(unittest.TestCase):
+    def test_profiled_medianed_and_overhead(self):
+        # wall (real) faster than profiled (profiler overhead)
+        recs = [_rec(busy=b, total=1000, ms=1.0, prof_ms=1.2)
+                for b in (100, 110, 120)]
+        out = aggregate.aggregate(recs)
+        self.assertEqual(out["profiled"]["ms_median"], 1.2)
+        self.assertEqual(out["wall"]["ms_median"], 1.0)
+        self.assertAlmostEqual(out["derived"]["profiler_overhead_pct"], 20.0)
+
+    def test_no_overhead_when_profiled_absent(self):
+        recs = [_rec(busy=100, total=1000, ms=1.0) for _ in range(2)]
+        out = aggregate.aggregate(recs)
+        self.assertEqual(out["profiled"], {})
+        self.assertNotIn("profiler_overhead_pct", out["derived"])
 
 
 class TestAggregate(unittest.TestCase):

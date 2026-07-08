@@ -4,7 +4,8 @@
 
 Composes the primitives into one `rocke.bench.measurement/v1` record:
   counters  (PMU, rocprofv3)   +   resources (from the same rocprofv3 CSV)
-  +  wall (a separate un-profiled run)   ->  one record.
+  +  profiled (timing of the profiled run, correlates with counters)
+  +  wall (a separate un-profiled run = real-world timing)   ->  one record.
 
 Writes NOTHING (pure produce-side): a consumer decides where the record goes.
 Reuses rocke's `probe_rocprof_single` pattern - wrap a kernel-launch command with
@@ -50,7 +51,9 @@ def _write_pmc_input(groups: Sequence[Sequence[str]], path: Path) -> None:
 
 
 def _run_rocprofv3(cmd: Sequence[str], pmc_input: Path, outdir: Path,
-                   env: dict, timeout: int) -> bool:
+                   env: dict, timeout: int) -> tuple[bool, str]:
+    """Run the kernel under rocprofv3. Returns (ok, stdout) so the caller can also
+    parse the profiled run's PerfJSON (its timing correlates with the counters)."""
     try:
         proc = subprocess.run(
             ["rocprofv3", "-i", str(pmc_input), "-d", str(outdir),
@@ -58,8 +61,8 @@ def _run_rocprofv3(cmd: Sequence[str], pmc_input: Path, outdir: Path,
             capture_output=True, text=True, timeout=timeout, env=env,
         )
     except (OSError, subprocess.SubprocessError):
-        return False
-    return proc.returncode == 0
+        return False, ""
+    return proc.returncode == 0, (proc.stdout or "")
 
 
 def _count_passes(outdir: Path) -> int:
@@ -103,21 +106,26 @@ def _parse_perfjson(stdout: str) -> dict:
     return {}
 
 
+def _perf_from_stdout(stdout: str) -> dict:
+    """Timing metrics from a launcher's PerfJSON line (ms/tflops/gbs/pct_peak)."""
+    p = _parse_perfjson(stdout)
+    out: dict = {}
+    if "ms" in p:
+        out["ms_median"] = float(p["ms"])
+    for k in ("tflops", "gbps", "pct_peak"):
+        if k in p:
+            out["gbs" if k == "gbps" else k] = float(p[k])
+    return out
+
+
 def _wall(cmd: Sequence[str], env: dict, timeout: int) -> dict:
-    """Separate un-profiled run; parse the launcher's PerfJSON if it prints one."""
+    """Separate un-profiled run -> real-world timing (no profiler overhead)."""
     try:
         proc = subprocess.run(cmd, capture_output=True, text=True,
                               timeout=timeout, env=env)
     except (OSError, subprocess.SubprocessError):
         return {}
-    p = _parse_perfjson(proc.stdout or "")
-    wall: dict = {}
-    if "ms" in p:
-        wall["ms_median"] = float(p["ms"])
-    for k in ("tflops", "gbps", "pct_peak"):
-        if k in p:
-            wall["gbs" if k == "gbps" else k] = float(p[k])
-    return wall
+    return _perf_from_stdout(proc.stdout or "")
 
 
 def profile(cmd: Sequence[str], arch: str, *, match: Optional[str] = None,
@@ -150,6 +158,7 @@ def profile(cmd: Sequence[str], arch: str, *, match: Optional[str] = None,
     counters_out: dict = {}
     resources: dict = {}
     kmeta: dict = {}
+    prof_stdout = ""
     if not sel:
         _warn(f"no PMU counters available for {arch} "
               "(rocprofv3 missing/unsupported); producing a wall-only record")
@@ -162,7 +171,7 @@ def profile(cmd: Sequence[str], arch: str, *, match: Optional[str] = None,
             pmc = tmp / "pmc.txt"
             groups = _counters.group_counters(list(sel.values()))
             _write_pmc_input(groups, pmc)
-            ran = _run_rocprofv3(cmd, pmc, outdir, env, timeout)
+            ran, prof_stdout = _run_rocprofv3(cmd, pmc, outdir, env, timeout)
             if not ran:
                 _warn("rocprofv3 failed to run the kernel; counters unavailable "
                       "(wall-only record)")
@@ -215,6 +224,9 @@ def profile(cmd: Sequence[str], arch: str, *, match: Optional[str] = None,
                          "workgroup_size": _i("Workgroup_Size"),
                          "grid_size": _i("Grid_Size")}
 
+    # profiled: timing of the profiled run (same execution as the counters, so it
+    # correlates with them). wall: a separate un-profiled run (real-world timing).
+    profiled = _perf_from_stdout(prof_stdout)
     wall = _wall(cmd, env, timeout)
 
     derived: dict = {}
@@ -222,6 +234,9 @@ def profile(cmd: Sequence[str], arch: str, *, match: Optional[str] = None,
         derived["busy_fraction"] = counters_out.get("busy_cycles", 0) / counters_out["total_clocks"]
     if (counters_out.get("l2_hit", 0) + counters_out.get("l2_miss", 0)) > 0:
         derived["l2_hit_rate"] = counters_out["l2_hit"] / (counters_out["l2_hit"] + counters_out["l2_miss"])
+    if profiled.get("ms_median") and wall.get("ms_median"):
+        derived["profiler_overhead_pct"] = (
+            (profiled["ms_median"] - wall["ms_median"]) / wall["ms_median"] * 100.0)
 
     dispatched = kmeta.get("kernel_name", "") or (match or "")
     kernel_name = label or dispatched
@@ -237,6 +252,7 @@ def profile(cmd: Sequence[str], arch: str, *, match: Optional[str] = None,
                 "gpu_name": "", "rocm_version": ""},
         "kernel": kernel,
         "wall": wall,
+        "profiled": profiled,
         "counters": counters_out,
         "resources": resources,
         "derived": derived,

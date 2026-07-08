@@ -67,22 +67,22 @@ def _median_counters(records: Sequence[Mapping[str, Any]]) -> dict:
     return out
 
 
-def _median_wall(records: Sequence[Mapping[str, Any]]) -> dict:
-    """Aggregate the wall section: median ms + spread + per-run samples."""
-    ms_vals = [(r.get("wall") or {}).get("ms_median") for r in records]
+def _median_timing(records: Sequence[Mapping[str, Any]], section: str) -> dict:
+    """Aggregate a timing section ('wall' or 'profiled'): median ms + spread +
+    per-run samples + medianed throughput fields."""
+    ms_vals = [(r.get(section) or {}).get("ms_median") for r in records]
     ms_vals = [v for v in ms_vals if v is not None]
-    wall: dict = {}
+    out: dict = {}
     if ms_vals:
-        wall["ms_median"] = statistics.median(ms_vals)
-        wall["ms_spread_pct"] = _spread_pct(ms_vals)
-        wall["samples"] = [{"ms": v} for v in ms_vals]
-    # Throughput fields (medianed when present in the inputs).
+        out["ms_median"] = statistics.median(ms_vals)
+        out["ms_spread_pct"] = _spread_pct(ms_vals)
+        out["samples"] = [{"ms": v} for v in ms_vals]
     for k in ("tflops", "gbs", "pct_peak"):
-        vals = [(r.get("wall") or {}).get(k) for r in records]
+        vals = [(r.get(section) or {}).get(k) for r in records]
         m = _median([v for v in vals if v is not None])
         if m is not None:
-            wall[k] = m
-    return wall
+            out[k] = m
+    return out
 
 
 def _derived(counters: Mapping[str, Any]) -> dict:
@@ -112,16 +112,23 @@ def aggregate(records: Sequence[Mapping[str, Any]]) -> dict:
 
     base = records[0]
     counters = _median_counters(records)
-    wall = _median_wall(records)
+    wall = _median_timing(records, "wall")
+    profiled = _median_timing(records, "profiled")
 
     busy = [(r.get("counters") or {}).get(_schema.PRIMARY_METRIC) for r in records]
     spread = {"ms_pct": wall.get("ms_spread_pct"),
               "busy_cycles_pct": _spread_pct([v for v in busy if v is not None])}
 
+    derived = _derived(counters)
+    if profiled.get("ms_median") and wall.get("ms_median"):
+        derived["profiler_overhead_pct"] = (
+            (profiled["ms_median"] - wall["ms_median"]) / wall["ms_median"] * 100.0)
+
     out = copy.deepcopy(dict(base))
     out["wall"] = wall
+    out["profiled"] = profiled
     out["counters"] = counters
-    out["derived"] = _derived(counters)
+    out["derived"] = derived
     out["captured_counters"] = sorted(counters)
     out["spread"] = spread
     out["n_samples"] = len(records)

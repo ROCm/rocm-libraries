@@ -8,6 +8,17 @@ from pathlib import Path
 from rocke.benchmark.perf import harness
 
 
+class TestPerfFromStdout(unittest.TestCase):
+    def test_parses_perfjson(self):
+        out = harness._perf_from_stdout('noise\nPerfJSON: {"ms": 1.5, "tflops": 12.0, "gbps": 500.0}\n')
+        self.assertEqual(out["ms_median"], 1.5)
+        self.assertEqual(out["tflops"], 12.0)
+        self.assertEqual(out["gbs"], 500.0)     # gbps -> gbs
+
+    def test_empty_when_no_perfjson(self):
+        self.assertEqual(harness._perf_from_stdout("just logs\n"), {})
+
+
 class TestPmcInput(unittest.TestCase):
     def test_one_line_per_group(self):
         with tempfile.TemporaryDirectory() as d:
@@ -76,7 +87,7 @@ class TestProfileDegradation(unittest.TestCase):
 
     def test_rocprofv3_failure_warns(self):
         harness._counters.discover = lambda arch: {"busy_cycles": "GRBM_GUI_ACTIVE"}
-        harness._run_rocprofv3 = lambda *a, **k: False
+        harness._run_rocprofv3 = lambda *a, **k: (False, "")   # (ok, stdout)
         warns = []
         rec = harness.profile(["x"], "gfx950", op="op", shape={"M": 1},
                               warn=warns.append)

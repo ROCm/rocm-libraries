@@ -8,7 +8,9 @@ One record per (run, kernel, shape, config), composed from several primitives:
   kernel    : identity + launch config (name, op, shape, grid/block, dispatch_ref)
               - grid/block + dispatch_ref let a consumer cross-reference an ATT
                 trace of the same kernel (the deep kernel-trace-analysis skill).
-  wall      : wall-time primitive (ms_median, spread, tflops, gbs, % peak)   [GPU]
+  wall      : un-profiled run = real-world timing (ms_median, spread, tflops, gbs) [GPU]
+  profiled  : timing of the profiled run (ms/tflops/gbs) - same execution as the
+              counters, so a throughput can be correlated with a cycle reading [GPU]
   counters  : PMU-counter primitive (rocprofv3): cycles/cache/waves/insts/stalls [GPU]
   resources : occupancy primitive (ELF notes, NO GPU): vgpr/agpr/sgpr/lds/occupancy
   derived   : busy_fraction, l2_hit_rate, ...
