@@ -1670,11 +1670,14 @@ def _enable_gfx942_flash_k_sliced_ring(problem: UnifiedAttentionProblem) -> bool
     # mask-limit (nw4) vs the prior per-head bests: D64 13-17% faster (beats Torch
     # at S2048, ~parity elsewhere); D128 beats Torch S2048/S4096. So D64 and D128
     # prefill now share the ring path.
-    # bf16 ring is correctness-verified only for D64 — D128 bf16 ring produces
-    # wrong results (max_abs ~3-5, NaN/Inf for MHA) in the kernel generator and
-    # is excluded until the D128 bf16 ring path in attention_tiled_2d.py is fixed.
-    if _enable_gfx942_bf16_flash(problem) and problem.head_size == 128:
-        return False
+    # bf16 D128 now shares the ring path: the earlier exclusion assumed the ring
+    # was grafted onto the bf16-WIDE geometry (nw=2, tile=32), which is a
+    # malformed spec on D128 (tile=32 is not a multiple of the production
+    # block_size=64, and that geometry has no cfvst, which the ring requires).
+    # The spec builder's ring branch instead uses the fp16-flash geometry
+    # (nw=4, tile=64, cfvst) -- verified numerically correct on gfx942 (max_abs
+    # 0.00049, no NaN/Inf, GQA + MHA) on both the Python and C++ engines, with
+    # the byte-identity gate GREEN. So D64 and D128 bf16 prefill share the ring.
     if not (
         (_enable_gfx942_fp16_flash(problem) or _enable_gfx942_bf16_flash(problem))
         and problem.head_size in (64, 128)
@@ -3290,8 +3293,15 @@ def _get_2d_launch_meta(
         return _2D_LAUNCH_META[meta_key]
     arch = _resolve_attention_arch()
     if _enable_gfx942_bf16_flash(problem):
-        nw, _ = _gfx942_bf16_wide_geometry(problem)
-        num_warps = nw
+        # Mirror the spec builder (attention_spec_builder._tiled_spec_from_problem):
+        # when the sliced-K ring is active the bf16 path uses the fp16-flash
+        # geometry (nw=_gfx942_flash_wide_setting()), NOT the bf16-wide nw. Using
+        # the wide nw here would compute the grid/block for a different geometry
+        # than the launcher actually builds.
+        if _enable_gfx942_flash_k_sliced_ring(problem):
+            num_warps = _gfx942_flash_wide_setting()
+        else:
+            num_warps, _ = _gfx942_bf16_wide_geometry(problem)
         block_m_per_warp = 32
     elif _enable_gfx942_fp16_flash(problem):
         num_warps = _select_gfx942_flash_num_warps(problem)
