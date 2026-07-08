@@ -181,16 +181,13 @@ int dispatcher_run_grouped_gemm(int group_count,
         //   stride_A = ALayout row-major ? K : M
         //   stride_B = BLayout row-major ? N : K
         //   stride_E = CLayout row-major ? N : M  (CLayout is always RowMajor for grouped)
-        using RowMajor = ck_tile::tensor_layout::gemm::RowMajor;
-        const auto stride_A = std::is_same_v<ALayout, RowMajor>
-                                  ? static_cast<ck_tile::index_t>(K)
-                                  : static_cast<ck_tile::index_t>(M);
-        const auto stride_B = std::is_same_v<BLayout, RowMajor>
-                                  ? static_cast<ck_tile::index_t>(N)
-                                  : static_cast<ck_tile::index_t>(K);
-        const auto stride_E = std::is_same_v<CLayout, RowMajor>
-                                  ? static_cast<ck_tile::index_t>(N)
-                                  : static_cast<ck_tile::index_t>(M);
+        using RowMajor      = ck_tile::tensor_layout::gemm::RowMajor;
+        const auto stride_A = std::is_same_v<ALayout, RowMajor> ? static_cast<ck_tile::index_t>(K)
+                                                                : static_cast<ck_tile::index_t>(M);
+        const auto stride_B = std::is_same_v<BLayout, RowMajor> ? static_cast<ck_tile::index_t>(N)
+                                                                : static_cast<ck_tile::index_t>(K);
+        const auto stride_E = std::is_same_v<CLayout, RowMajor> ? static_cast<ck_tile::index_t>(N)
+                                                                : static_cast<ck_tile::index_t>(M);
         // k_batch=1 for numeric parity.
         descs.emplace_back(static_cast<const void*>(A_dev[g]),
                            static_cast<const void*>(B_dev[g]),

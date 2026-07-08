@@ -43,8 +43,7 @@ template <typename Layout>
 static constexpr inline auto is_row_major(Layout)
 {
     return ck_tile::bool_constant<
-        std::is_same_v<ck_tile::remove_cvref_t<Layout>,
-                       ck_tile::tensor_layout::gemm::RowMajor>>{};
+        std::is_same_v<ck_tile::remove_cvref_t<Layout>, ck_tile::tensor_layout::gemm::RowMajor>>{};
 }
 
 static std::vector<int> parse_csv_ints(const std::string& s)
@@ -55,19 +54,25 @@ static std::vector<int> parse_csv_ints(const std::string& s)
     {
         if(c == ',')
         {
-            if(!cur.empty()) { out.push_back(std::stoi(cur)); cur.clear(); }
+            if(!cur.empty())
+            {
+                out.push_back(std::stoi(cur));
+                cur.clear();
+            }
         }
         else
             cur.push_back(c);
     }
-    if(!cur.empty()) out.push_back(std::stoi(cur));
+    if(!cur.empty())
+        out.push_back(std::stoi(cur));
     return out;
 }
 
 static std::string get_opt(int argc, char** argv, const std::string& key, const std::string& def)
 {
     for(int i = 1; i < argc - 1; ++i)
-        if(key == argv[i]) return argv[i + 1];
+        if(key == argv[i])
+            return argv[i + 1];
     return def;
 }
 
@@ -166,8 +171,8 @@ int main(int argc, char** argv)
     {
         for(int i = 0; i < group_count; ++i)
         {
-            ck_tile::HostTensor<CDataType> ref(ck_tile::host_tensor_descriptor(
-                Ms[i], Ns[i], sC[i], is_row_major(CLayout{})));
+            ck_tile::HostTensor<CDataType> ref(
+                ck_tile::host_tensor_descriptor(Ms[i], Ns[i], sC[i], is_row_major(CLayout{})));
             ref.SetZero();
             ck_tile::reference_gemm<ADataType, BDataType, AccDataType, CDataType>(
                 a_host[i], b_host[i], ref);
@@ -176,11 +181,8 @@ int main(int argc, char** argv)
                 ck_tile::integer_divide_ceil(Ks[i], kbatch));
             const auto atol = ck_tile::get_absolute_threshold<ADataType, CDataType, AccDataType>(
                 maxv / kbatch, ck_tile::integer_divide_ceil(Ks[i], kbatch));
-            bool ok = ck_tile::check_err(c_host[i],
-                                         ref,
-                                         "group[" + std::to_string(i) + "]",
-                                         rtol,
-                                         atol);
+            bool ok =
+                ck_tile::check_err(c_host[i], ref, "group[" + std::to_string(i) + "]", rtol, atol);
             pass &= ok;
         }
         std::cout << "Verification: " << (pass ? "PASS" : "FAIL") << "\n";
