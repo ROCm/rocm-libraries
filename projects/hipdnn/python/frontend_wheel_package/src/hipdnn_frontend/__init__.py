@@ -11,6 +11,7 @@ high-level Python interface.
 
 import os
 import platform
+from importlib.metadata import PackageNotFoundError, version as _distribution_version
 
 _IS_WINDOWS = platform.system() == "Windows"
 
@@ -78,25 +79,25 @@ def _register_rocm_path_dir() -> None:
 if not _preload_via_rocm_sdk():
     _register_rocm_path_dir()
 
-# Import everything from the compiled extension module
+# Import the private compiled extension from inside this package. The supported
+# public import is `import hipdnn_frontend as hipdnn`; importing
+# `hipdnn_frontend_python` as a top-level module is intentionally unsupported.
 try:
-    # The compiled extension module
-    from hipdnn_frontend_python import *
+    from .hipdnn_frontend_python import *
 except ImportError as e:
-    # Fallback for development/editable installs
-    try:
-        from .hipdnn_frontend_python import *
-    except ImportError:
-        raise ImportError(
-            "Could not load the hipdnn_frontend_python compiled extension. Its "
-            "ROCm dependencies were not found. Install the ROCm wheels "
-            "(`pip install rocm[libraries]`), or set ROCM_PATH/HIP_PATH to a "
-            "ROCm install or build tree (on Windows the directory containing the "
-            f"ROCm DLLs under bin/).\nOriginal error: {e}"
-        ) from e
+    raise ImportError(
+        "Could not load the hipdnn_frontend compiled extension. Its "
+        "ROCm dependencies were not found. Install the ROCm wheels "
+        "(`pip install rocm[libraries]`), or set ROCM_PATH/HIP_PATH to a "
+        "ROCm install or build tree (on Windows the directory containing the "
+        f"ROCm DLLs under bin/).\nOriginal error: {e}"
+    ) from e
 
-# Package metadata
-__version__ = "@HIPDNN_FRONTEND_VERSION@"
+# Package metadata. The installed wheel metadata is generated from pyproject.toml.
+try:
+    __version__ = _distribution_version("hipdnn-frontend")
+except PackageNotFoundError:
+    __version__ = "0+unknown"
 __author__ = "Advanced Micro Devices, Inc."
 
 # Define what should be available when using "from hipdnn_frontend import *"

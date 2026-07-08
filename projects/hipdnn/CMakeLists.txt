@@ -188,8 +188,6 @@ if(DEFINED HIP_DNN_SKIP_TESTS)
 endif()
 option(HIPDNN_SKIP_TESTS "Skips building all tests" OFF)
 
-option(HIPDNN_BUILD_PYTHON_BINDINGS "Build Python bindings (requires Python and nanobind)" OFF)
-
 option(HIPDNN_ENABLE_COVERAGE "Build with code coverage flags" OFF)
 option(BUILD_ADDRESS_SANITIZER "Build with Address Sanitizer enabled" OFF)
 option(BUILD_THREAD_SANITIZER "Build with Thread Sanitizer enabled" OFF)
@@ -283,9 +281,9 @@ add_subdirectory(plugin_sdk)
 add_subdirectory(tests)
 add_subdirectory(tools)
 
-if(HIPDNN_BUILD_PYTHON_BINDINGS)
-    add_subdirectory(python)
-endif()
+# Python bindings are a standalone CMake project that consumes installed hipDNN
+# artifacts. Configure projects/hipdnn/python/frontend_bindings separately after
+# installing hipDNN.
 
 if(NOT HIPDNN_SKIP_TESTS)
     # Keep this after all build folders have been added so they have a chance to register their tests
