@@ -57,11 +57,10 @@ The rollout is additive at the schema and ABI level — no new backend entry, pl
   state (a 2-bit encoding, [§4.2](#42-state-reference)). The feature signal
   is derived s.t. a graph needs runtime pass-by-value iff some tensor has it
   enabled ([§4.4](#44-feature-signal-derived)).
-- Three **breaking changes** (all source-level): `get_pass_by_value()`
-  returns the value (not `bool`) and its former bool-predicate role moves to
-  `get_is_pass_by_value()` (cuDNN parity); and the plain constructor
-  `TensorAttributes(v)` now produces a runtime pass-by-value tensor with a default compile-time constant. Hence, a graph built
-  through it requires a `1.2.0` provider ([§4.3](#43-frontend-surface),
+- One **breaking change**, for cuDNN parity:
+  `get_pass_by_value()` returns the value (not `bool`), and its former
+  bool-predicate role moves to `get_is_pass_by_value()`
+  ([§4.3](#43-frontend-surface),
   [§6](#6-compatibility-versioning-and-rollback)).
 - A `1.2.0` plugin-SDK floor whenever a tensor is runtime pass-by-value. A compile-time constant bakes on the baseline `1.0.0`, exactly as
   before.
@@ -110,12 +109,12 @@ states ([§4.2](#42-state-reference)):
 
 ```cpp
 // compile-time constant — value baked, never overridable, no version elevation.
-auto c3 = graph.tensor(0.125f, ScalarType::COMPILE_TIME_CONST);
-c3->set_value(0.125f);                               // set_value → compile-time constant
+auto c1 = graph.tensor(TensorAttributes(0.125f));   // plain ctor → compile-time constant
+auto c2 = graph.tensor(0.125f, ScalarType::COMPILE_TIME_CONST);
+c1->set_value(0.125f);                              // set_value → compile-time constant
 
 // runtime with default — value baked as a default, overridable via the
 // variant pack in a future release (override filtered today). Requires 1.2.0.
-auto k  = graph.tensor(TensorAttributes(0.125f));   // plain ctor, matches cuDNN
 auto s2 = graph.tensor(0.125f, ScalarType::RUNTIME_PARAM);
 
 // runtime, user-supplied — value supplied at execute, not baked.
@@ -210,7 +209,7 @@ This is the append-only, defaulted-field pattern per [RFC 0005](0005_Versioning.
 a pre-feature graph deserialized in a runtime that understands the field
 reads `false` on every tensor.
 
-The scalar itself keeps using the table's existing `value: TensorValue` union (`tensor_attributes.fbs:61`). 
+The scalar itself keeps using the table's existing `value: TensorValue` union (`tensor_attributes.fbs:61`).
 
 The flag round-trips through descriptor
 pack/unpack alongside the `value`, so
@@ -251,8 +250,8 @@ orthogonal encoding ([§5.6](#56-no-is_compile_time_constant-flag)):
 | State | Creation (frontend) | runtime flag | `value` | `get_is_pass_by_value()` | `get_pass_by_value()` | `get_compile_time_constant()` | Delivery | Provider floor |
 |---|---|---|---|---|---|---|---|---|
 | **Runtime, user-supplied** | `set_as_runtime_parameter()`; or `set_is_pass_by_value(true)` with no value | true | ∅ | true | ∅ | ∅ | user supplies host ptr in variant pack | `1.2.0` |
-| **Runtime with default** | `TensorAttributes(v)` (plain ctor); `TensorAttributes(v, ScalarType::RUNTIME_PARAM)` | true | v | true | v | ∅ | baked default in `VALUE_EXT`; overridable via variant pack (override filtered + warned today, [§4.9](#49-execute-time-variant-pack-filter)) | `1.2.0` |
-| **Compile-time constant** | `set_value(v)`; `set_compile_time_constant(v)`; `TensorAttributes(v, ScalarType::COMPILE_TIME_CONST)` | false | v | true | ∅ | v | baked in op-graph flatbuffer, read via existing path | baseline `1.0.0` |
+| **Runtime with default** | `TensorAttributes(v, ScalarType::RUNTIME_PARAM)` | true | v | true | v | ∅ | baked default in `VALUE_EXT`; overridable via variant pack (override filtered + warned today, [§4.9](#49-execute-time-variant-pack-filter)) | `1.2.0` |
+| **Compile-time constant** | `TensorAttributes(v)` (plain ctor); `set_value(v)`; `set_compile_time_constant(v)`; `TensorAttributes(v, ScalarType::COMPILE_TIME_CONST)` | false | v | true | ∅ | v | baked in op-graph flatbuffer, read via existing path | baseline `1.0.0` |
 
 (∅ = empty / `std::monostate`.)
 
@@ -277,10 +276,12 @@ enum class ScalarType { RUNTIME_PARAM, COMPILE_TIME_CONST };
 
 **Constructors.**
 
-- `TensorAttributes(const T& scalar)` → the **runtime-with-default** state,
-  matching cuDNN's plain scalar constructor, which sets `pass_by_value` (its
-  runtime type-2)
-  ([`graph_properties.h:158-198`](https://github.com/NVIDIA/cudnn-frontend/blob/c4ec01a28a26aa57021862de809cc257619f7516/include/cudnn_frontend/graph_properties.h#L158-L198)).
+- `TensorAttributes(const T& scalar)` → the **compile-time constant** state,
+  delegating to `set_value`. This diverges from cuDNN, whose plain scalar
+  constructor is runtime pass-by-value (its type-2,
+  [`graph_properties.h:158-198`](https://github.com/NVIDIA/cudnn-frontend/blob/c4ec01a28a26aa57021862de809cc257619f7516/include/cudnn_frontend/graph_properties.h#L158-L198));
+  hipDNN bakes a constant instead so existing scalar graphs stay
+  non-breaking on the baseline.
 - `TensorAttributes(const T& scalar, ScalarType type)`: `RUNTIME_PARAM`
   → **runtime-with-default**, `COMPILE_TIME_CONST` → **compile-time constant**
   ([`graph_properties.h:200-271`](https://github.com/NVIDIA/cudnn-frontend/blob/c4ec01a28a26aa57021862de809cc257619f7516/include/cudnn_frontend/graph_properties.h#L200-L271)).
@@ -316,13 +317,11 @@ enum class ScalarType { RUNTIME_PARAM, COMPILE_TIME_CONST };
   value present`; mirrors cuDNN
   ([`graph_properties.h:374-377`](https://github.com/NVIDIA/cudnn-frontend/blob/c4ec01a28a26aa57021862de809cc257619f7516/include/cudnn_frontend/graph_properties.h#L374-L377)).
 
-**Breaking changes** (from the current hipDNN API): (a)
+**Breaking changes** (from the current hipDNN API, both source-level): (a)
 `get_pass_by_value()` returns the value instead of `bool`; (b) its former
-"is-pass-by-value" bool-predicate role moves to `get_is_pass_by_value()`;
-(c) the plain constructor `TensorAttributes(v)` now produces a
-runtime-with-default (flag set), so a graph built through it requires a
-`1.2.0` provider — existing build-known scalars should use `set_value` /
-`set_compile_time_constant`, which stay baseline `1.0.0`.
+"is-pass-by-value" bool-predicate role moves to `get_is_pass_by_value()`.
+`set_value` and the plain constructor keep baking a compile-time constant, so
+no graph built through the existing API changes its provider floor.
 
 `Graph::tensor(const TensorAttributes&)`
 ([`Graph.hpp`](../../frontend/include/hipdnn_frontend/Graph.hpp)) is
@@ -331,7 +330,7 @@ scalar type), each delegating to the `TensorAttributes(scalar, ScalarType)`
 constructor: `graph.tensor(v, ScalarType::RUNTIME_PARAM)` → runtime-with-default and
 `graph.tensor(v, ScalarType::COMPILE_TIME_CONST)` → compile-time. Like cuDNN there is
 no bare-scalar `graph.tensor(v)` overload; the plain default is reached
-via `graph.tensor(TensorAttributes(v))` (runtime-with-default).
+via `graph.tensor(TensorAttributes(v))` (compile-time constant).
 
 A pass-by-value tensor is a single-element host scalar, so the existing
 scalar conventions (dims/strides `{1}`) apply.
@@ -431,7 +430,7 @@ p.finalize();
 
 // Execute: device_buffers carries {uid, ptr} for every bound tensor. A
 // runtime pass-by-value slot is a HOST pointer whose value overrides the
-// seeded default. Today only a pure user-supplied scalar 
+// seeded default. Today only a pure user-supplied scalar
 // arrives here; a runtime-with-default override is filtered out and warned
 // by the frontend, and a compile-time constant is never runtime — so both
 // keep their baked value. However, runtime-with-default override
@@ -625,8 +624,9 @@ with no concept translation, and the 2-bit model
 ([§4.2](#42-state-reference)) covers cuDNN's full
 fused-constant-vs-execute-time surface
 ([`graph_properties.h:53-57`](https://github.com/NVIDIA/cudnn-frontend/blob/c4ec01a28a26aa57021862de809cc257619f7516/include/cudnn_frontend/graph_properties.h#L53-L57)).
-The plain scalar constructor now **matches** cuDNN (runtime-with-default),
-removing the earlier "plain-ctor bakes a constant" divergence.
+The plain scalar constructor **diverges** from cuDNN: cuDNN's plain ctor is
+runtime pass-by-value (its type-2), while hipDNN's bakes a compile-time
+constant so existing scalar graphs stay non-breaking on the baseline.
 
 **Divergences (decisions, not gaps)**:
 
@@ -641,6 +641,9 @@ removing the earlier "plain-ctor bakes a constant" divergence.
 2. `set_as_runtime_parameter()` **clears** any prior value, whereas cuDNN
    leaves `pass_by_value` set
    ([`graph_properties.h:394-400`](https://github.com/NVIDIA/cudnn-frontend/blob/c4ec01a28a26aa57021862de809cc257619f7516/include/cudnn_frontend/graph_properties.h#L394-L400)). We could later match this API by collecting an optional default value for the `set_as_runtime_parameter()` route without any added plugin changes.
+3. hipDNN's plain scalar constructor produces a compile-time constant, not
+   cuDNN's runtime type-2 (divergence above) — a deliberate choice to keep
+   existing `TensorAttributes(v)` scalar graphs on the baseline `1.0.0`.
 
 ### 5.2 Reuse the variant-pack pointer map
 
@@ -793,7 +796,7 @@ unset or garbage slot.
 numeric value at build time (it does not yet exist); it validates only
 that the tensor is structurally a scalar. This matches the existing
 behavior for required scalar parameters
-(`validateScalarParameter`). 
+(`validateScalarParameter`).
 
 ### 7.3 Host vs device pointer confusion in the shared map
 
@@ -879,11 +882,11 @@ cuDNN frontend method name verbatim** — no renames; only their internal
 derivation changes (from the single runtime bit + value presence). There is
 no stored `is_compile_time_constant` member; `get_compile_time_constant` /
 `get_has_compile_time_constant` are derived from `!runtime bit && value
-present`. Route the plain scalar constructor and `RUNTIME_PARAM` through the
-runtime-with-default state (runtime bit true, value stored) and `set_value` /
+present`. Route the plain scalar constructor, `set_value`, and
 `set_compile_time_constant` through the compile-time constant (runtime bit
-false, value stored). Change `get_pass_by_value()` to return the value
-variant (present iff `runtime bit && value present`, i.e.
+false, value stored) and `RUNTIME_PARAM` through the runtime-with-default
+state (runtime bit true, value stored). Change `get_pass_by_value()` to
+return the value variant (present iff `runtime bit && value present`, i.e.
 runtime-with-default), moving its former bool-predicate role to
 `get_is_pass_by_value()`, and migrate every internal value-presence caller
 off `get_pass_by_value()` onto `get_value_variant()` — the known callsite is
@@ -954,9 +957,9 @@ Test conventions follow [RFC 0006](0006_PluginAgnosticIntegrationTests.md). The 
   the state table ([§4.2](#42-state-reference)):
   `get_is_pass_by_value()` is `true` for all three by-value states;
   `get_pass_by_value()` returns the value only for the runtime-with-default
-  state (the plain-ctor / `RUNTIME_PARAM` path) and is empty for the other
-  two; `get_compile_time_constant()` returns the value only for the
-  compile-time constant (the `set_value` / `set_compile_time_constant` path)
+  state (the `RUNTIME_PARAM` path) and is empty for the other two;
+  `get_compile_time_constant()` returns the value only for the compile-time
+  constant (the plain ctor / `set_value` / `set_compile_time_constant` path)
   and is empty for the runtime states. `get_pass_by_value()` returns the
   *value* variant (not a `bool`), the breaking change from today's API.
 
@@ -1018,15 +1021,15 @@ Test conventions follow [RFC 0006](0006_PluginAgnosticIntegrationTests.md). The 
   `set_is_pass_by_value(true)` with no value); the user supplies the host
   pointer in the variant pack. Requires plugin floor `1.2.0`.
 - **Runtime with default** (`is_runtime_pass_by_value == true`,
-  value present): created by the plain scalar constructor
-  `TensorAttributes(v)`, `TensorAttributes(v, ScalarType::RUNTIME_PARAM)`, or
-  `graph.tensor(v, ScalarType::RUNTIME_PARAM)`; the value is baked in
+  value present): created by `TensorAttributes(v, ScalarType::RUNTIME_PARAM)`
+  or `graph.tensor(v, ScalarType::RUNTIME_PARAM)`; the value is baked in
   `HIPDNN_ATTR_TENSOR_VALUE_EXT` as a default, overridable via the variant
   pack in a future release (override filtered and warned today,
   [§4.9](#49-execute-time-variant-pack-filter)). Requires plugin floor
   `1.2.0` (its flag is set).
 - **Compile-time constant** (`is_runtime_pass_by_value == false`,
-  value present): created by `set_compile_time_constant(v)`,
+  value present): created by the plain scalar constructor
+  `TensorAttributes(v)`, `set_value(v)`, `set_compile_time_constant(v)`,
   `TensorAttributes(v, ScalarType::COMPILE_TIME_CONST)`, or
   `graph.tensor(v, ScalarType::COMPILE_TIME_CONST)`; the value is frozen
   into the op-graph flatbuffer via `HIPDNN_ATTR_TENSOR_VALUE_EXT` and read
