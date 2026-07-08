@@ -27,6 +27,7 @@
 #pragma once
 
 #include "auxiliary.hpp"
+#include "hipblaslt_scaling_format.hpp"
 #include "hipblaslt_ostream.hpp"
 #include <hipblaslt/hipblaslt.h>
 #include <string>
@@ -70,20 +71,6 @@ typedef enum class _hipblaslt_bias_source
     b = 2,
     d = 3,
 } hipblaslt_bias_source;
-
-typedef enum class _hipblaslt_scaling_format
-{
-    none                    = 0,
-    Scalar                  = 1,
-    Vector                  = 2,
-    Block_32_UE8M0          = 3,
-    Block_16_UE8M0          = 4,
-    Block_32_UE4M3          = 5,
-    Block_16_UE4M3          = 6,
-    Block_32_UE5M3          = 7,
-    Block_16_UE5M3          = 8,
-    Block_32_UE8M0_32_8_EXT = 1001,
-} hipblaslt_scaling_format;
 
 inline hipDataType scaleDataType(hipblaslt_scaling_format s)
 {

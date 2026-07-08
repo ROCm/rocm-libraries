@@ -49,10 +49,14 @@ enum class MXScaleLayout
     kGFX1250 = 2,
 };
 
+#include "hipblaslt_scaling_format.hpp"
 #include <string_view>
 
 // Default MX scale layout for a device architecture name (tensilelite client).
 MXScaleLayout mxScaleLayoutForArchName(std::string_view archName);
+
+// Maps a block-scaling format and the active device to the scale swizzle layout.
+MXScaleLayout mxScaleLayoutForFormat(hipblaslt_scaling_format scalingFormat);
 
 #if HIPBLASLT_ENABLE_MXDATAGENERATOR
 
@@ -63,9 +67,6 @@ MXScaleLayout mxScaleLayoutForArchName(std::string_view archName);
 #include <stdint.h>
 
 #include <vector>
-
-// Maps a block-scaling format and the active device to the scale swizzle layout.
-MXScaleLayout mxScaleLayoutForFormat(hipblaslt_scaling_format scalingFormat);
 
 // `scaleLayout` selects the post-generation scale memory layout. `initDevice`
 // selects the host vs device PRNG path; with MXInitDevice::Gpu, data/scale
