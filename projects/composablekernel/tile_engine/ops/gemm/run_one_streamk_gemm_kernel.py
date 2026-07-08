@@ -39,7 +39,15 @@ if gemm_pypath:
         if p and p not in sys.path:
             sys.path.insert(0, p)
 
-from gemm_utils import GemmProblem, GpuGemmRunner  # noqa: E402
+from gemm_utils import (  # noqa: E402
+    GemmProblem,
+    GpuGemmRunner,
+    _dtype_from_kernel_name,
+    _fp32_to_bf16_u16,
+    _bf16_u16_to_fp32,
+    _fp32_to_fp8_u8,
+    _fp8_u8_to_fp32,
+)
 import numpy as np  # noqa: E402
 
 
@@ -80,29 +88,21 @@ def _run_one(idx, so_path, prob_dict, kernel_name, verify=False, verify_tol=2e-2
             if verify:
                 # Reference uses the SAME quantized inputs the device sees, per the
                 # kernel's dtype (bf16/fp8/bf8 bit-quantization vs fp16), so the
-                # metric isolates compute error from input quantization. int8 is
-                # exact: the device multiplies the int8 values directly.
-                kdt = getattr(runner, "_dtype", "fp16")
+                # metric isolates compute error from input quantization. The dtype
+                # comes from the kernel name and the quantizers are the same module
+                # helpers GpuGemmRunner uses to build the device buffers, so host
+                # and device see identical inputs.
+                kdt = _dtype_from_kernel_name(runner.kernel_name)
                 if kdt == "bf16":
-                    Aq = GpuGemmRunner._bf16_decode(GpuGemmRunner._bf16_encode(A))
-                    Bq = GpuGemmRunner._bf16_decode(GpuGemmRunner._bf16_encode(B))
-                    ref = Aq @ Bq
-                elif kdt == "fp8":
-                    Aq = GpuGemmRunner._fp8_decode(GpuGemmRunner._fp8_encode(A))
-                    Bq = GpuGemmRunner._fp8_decode(GpuGemmRunner._fp8_encode(B))
-                    ref = Aq @ Bq
-                elif kdt == "bf8":
-                    Aq = GpuGemmRunner._bf8_decode(GpuGemmRunner._bf8_encode(A))
-                    Bq = GpuGemmRunner._bf8_decode(GpuGemmRunner._bf8_encode(B))
-                    ref = Aq @ Bq
-                elif kdt == "int8":
-                    Aq = A.astype(np.int8).astype(np.int32)
-                    Bq = B.astype(np.int8).astype(np.int32)
-                    ref = (Aq @ Bq).astype(np.float32)
-                else:
+                    Aq = _bf16_u16_to_fp32(_fp32_to_bf16_u16(A))
+                    Bq = _bf16_u16_to_fp32(_fp32_to_bf16_u16(B))
+                elif kdt in ("fp8", "bf8"):
+                    Aq = _fp8_u8_to_fp32(_fp32_to_fp8_u8(A, kdt), kdt)
+                    Bq = _fp8_u8_to_fp32(_fp32_to_fp8_u8(B, kdt), kdt)
+                else:  # fp16
                     Aq = A.astype(np.float16).astype(np.float32)
                     Bq = B.astype(np.float16).astype(np.float32)
-                    ref = Aq @ Bq
+                ref = Aq @ Bq
                 got = result.output.astype(np.float32)
                 denom = float(np.max(np.abs(ref))) or 1.0
                 max_rel = float(np.max(np.abs(got - ref)) / denom)

@@ -41,6 +41,15 @@ from typing import Any, Dict, List, Optional, Tuple
 
 import numpy as np
 
+# ml_dtypes provides the exact gfx942 fp8 formats (e4m3fnuz / e5m2fnuz) as numpy
+# dtypes, so fp8/bf8 host encoding matches the device bit-for-bit. Imported here
+# but only required by the fp8/bf8 code paths, so fp16/bf16-only users who lack
+# the package still work (the codec helpers raise a clear error if it's missing).
+try:
+    import ml_dtypes as _ml_dtypes
+except ImportError:  # pragma: no cover - only hit in envs without ml_dtypes
+    _ml_dtypes = None
+
 # Reuse the proven codegen/compile leaf helpers from the dispatcher's own
 # python layer. gemm_utils is a thin bridge on top of these.
 import ctypes_utils as _cu
@@ -410,6 +419,34 @@ def _bf16_u16_to_fp32(u16: np.ndarray) -> np.ndarray:
     return (u16.astype(np.uint32) << 16).view(np.float32)
 
 
+def _require_ml_dtypes(dtype: str):
+    """Return the ml_dtypes fp8 numpy dtype for gfx942 fp8/bf8, or raise a clear
+    error if ml_dtypes is unavailable. gfx942 uses the FNUZ encodings:
+    fp8 == e4m3fnuz, bf8 == e5m2fnuz."""
+    if _ml_dtypes is None:
+        raise RuntimeError(
+            f"{dtype} host encoding requires the 'ml_dtypes' package "
+            "(pip install ml_dtypes) for the gfx942 e4m3fnuz/e5m2fnuz formats"
+        )
+    return _ml_dtypes.float8_e4m3fnuz if dtype == "fp8" else _ml_dtypes.float8_e5m2fnuz
+
+
+def _fp32_to_fp8_u8(x: np.ndarray, dtype: str) -> np.ndarray:
+    """Encode fp32 -> gfx942 fp8/bf8 (FNUZ) bit pattern in a uint8 array.
+
+    sizeof(fp8_t) == sizeof(bf8_t) == 1, so the C ABI reads one byte per element.
+    ml_dtypes performs the correct round-to-nearest-even + saturation for the FNUZ
+    format, matching what the device conversion produces."""
+    f8 = _require_ml_dtypes(dtype)
+    return np.ascontiguousarray(x, dtype=np.float32).astype(f8).view(np.uint8)
+
+
+def _fp8_u8_to_fp32(u8: np.ndarray, dtype: str) -> np.ndarray:
+    """Decode a uint8 gfx942 fp8/bf8 (FNUZ) bit pattern back to fp32."""
+    f8 = _require_ml_dtypes(dtype)
+    return u8.view(f8).astype(np.float32)
+
+
 def _dtype_from_kernel_name(name: str) -> str:
     """Extract the dtype token from a kernel name like ``gemm_<dtype>_<layout>_...``."""
     parts = name.split("_")
@@ -477,6 +514,12 @@ class GpuGemmRunner:
             A_h = _fp32_to_bf16_u16(A_lay)
             B_h = _fp32_to_bf16_u16(B_lay)
             C_h = np.zeros(C_shape, dtype=np.uint16)
+        elif dtype in ("fp8", "bf8"):
+            # gfx942 fp8/bf8 inputs are 1 byte/element (FNUZ) and accumulate into
+            # an fp16 C (get_output_dtype), so C stays 2-byte fp16.
+            A_h = _fp32_to_fp8_u8(A_lay, dtype)
+            B_h = _fp32_to_fp8_u8(B_lay, dtype)
+            C_h = np.zeros(C_shape, dtype=np.float16)
         else:  # fp16 (default)
             A_h = np.ascontiguousarray(A_lay, dtype=np.float16)
             B_h = np.ascontiguousarray(B_lay, dtype=np.float16)

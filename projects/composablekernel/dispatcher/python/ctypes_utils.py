@@ -1392,10 +1392,6 @@ class KernelConfig:
     # "standard", "preshuffle", "multi_d", or "stream_k"
     variant: str = "standard"
 
-    # Stream-K reduction strategy ("atomic"/"linear"/"tree"); only used by the
-    # stream_k variant. Does not affect tile/arch validation.
-    reduction_strategy: str = "atomic"
-
     @property
     def layout(self) -> str:
         """Get layout string (e.g., 'rcr' for row-col-row)"""

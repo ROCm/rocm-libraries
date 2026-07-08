@@ -63,15 +63,15 @@ DEFAULT_PROBLEMS = [
 # Bridge surface for Stream-K. The dispatcher host path
 # (streamk_gemm_ctypes_lib.cpp) derives strides from the kernel's layouts and the
 # worker (run_one_streamk_gemm_kernel.py) reads dtype/layout off the kernel name,
-# so all 4 A/B/C layouts are supported. dtypes cover fp16 + bf16 + fp8 + bf8 (the
-# codecs the bridge runner implements); fp8/bf8 use the gfx942 FNUZ format and
-# accumulate into fp16. int8 is left out: it is blocked at the ck_tile engine
-# level, not the bridge -- the int8 kernel codegens but fails to COMPILE for
-# every reduction strategy (atomic/linear/tree). warp_gemm_dispatcher has no
-# Dispatcher<int8,int8,float,32,32,16,...> specialization for the streamk
-# CompV3 path, so WarpGemm resolves to `int` and the BlockUniversalGemmAsBsCr
-# WarpGemm::kM/kN static_asserts fail. The runner keeps an int8 codec ready for
-# when the engine adds that instantiation; this matches PR #8094 leaving int8 out.
+# so all 4 A/B/C layouts are supported. dtypes cover fp16 + bf16 + fp8 + bf8: the
+# bridge runner encodes fp16 natively, bf16 via bit-truncation, and fp8/bf8 via
+# ml_dtypes in the gfx942 FNUZ formats (e4m3fnuz / e5m2fnuz), which accumulate
+# into fp16. int8 is left out: it is blocked at the ck_tile engine level, not the
+# bridge -- the int8 kernel codegens but fails to COMPILE for every reduction
+# strategy (atomic/linear/tree). warp_gemm_dispatcher has no
+# Dispatcher<int8,int8,float,32,32,16,...> specialization for the streamk CompV3
+# path, so WarpGemm resolves to `int` and the BlockUniversalGemmAsBsCr
+# WarpGemm::kM/kN static_asserts fail; this matches PR #8094 leaving int8 out.
 SUPPORTED_DTYPES = ("fp16", "bf16", "fp8", "bf8")
 SUPPORTED_LAYOUTS = ("rcr", "rrr", "ccr", "crr")
 
