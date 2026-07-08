@@ -641,7 +641,7 @@ TYPED_TEST(RocprimDeviceSegmentedTopkTests, SegmentedTopkPairs)
                     h_input_map.insert({keys_input[i], values_input[i]});
                 }
 
-                // Varify keys & values are matching each other
+                // Verify keys & values are matching each other
                 for(unsigned int i = 0; i < k; ++i)
                 {
                     auto range = h_input_map.equal_range(

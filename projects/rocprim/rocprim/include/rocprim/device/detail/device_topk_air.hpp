@@ -320,7 +320,7 @@ struct device_topk_air_impl
     {
         // Item is the input of this iteration
         input,
-        // Item was the cadidate identified in the last iteration
+        // Item was the candidate identified in the last iteration
         candidate,
         // Item is neither the input nor the candidate
         discard
@@ -1186,7 +1186,7 @@ struct device_topk_air_impl
             digit_t digits[num_iterations];
             bool    is_candidate_in_prev_iteration = true;
             // It's actually faster to just directly extract all digits, instead of using runtime variable
-            // last_iteration to determin how many iterations needs to be loaded
+            // last_iteration to determine how many iterations needs to be loaded
             rocprim::detail::constexpr_for_lt<0, num_iterations, 1>(
                 [&](const auto i)
                 { digits[i] = extract_digit_of_cur_iteration<i>(key, decomposer); });
@@ -1223,9 +1223,9 @@ struct device_topk_air_impl
                && less_last_n_bits(digits[last_iteration], last_chosed_bin, cur_bits))
             { // Is candidate of last iteration
                 // This can be also done with thread counter, but in practice, this is super slow
-                // becasue there are a lot of threads even do not have a candidate to store, but if
+                // because there are a lot of threads even do not have a candidate to store, but if
                 // we use thread counter for it, we need to create a buffer to store the counter, which
-                // increases the use of register, so here we use atomicAdd once we have a cadidate to
+                // increases the use of register, so here we use atomicAdd once we have a candidate to
                 // output
                 const auto output_pos   = ::atomicAdd(&p_global_storage->output_pos, 1);
                 keys_output[output_pos] = key;

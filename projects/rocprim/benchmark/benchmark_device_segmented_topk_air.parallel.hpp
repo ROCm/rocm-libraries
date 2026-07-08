@@ -77,7 +77,7 @@ struct device_segmented_topk_air_benchmark : public primbench::benchmark_interfa
     using invoker       = rocprim::detail::device_segmented_topk_air_impl_invoker<
               Config,
               true,
-              false, // TODO: neede to change this to true, after adaptive is available
+              false, // TODO: need to change this to true, after adaptive is available
               Key*,
               Key*,
               Value*,

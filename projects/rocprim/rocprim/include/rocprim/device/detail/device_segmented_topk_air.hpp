@@ -328,7 +328,7 @@ struct device_segmented_topk_air_impl : BaseType
 
     template<unsigned int Iteration, unsigned int HistogramSize, class SharedStorageType>
     ROCPRIM_DEVICE ROCPRIM_FORCE_INLINE static void 
-    chose_pivot_bin(
+    choose_pivot_bin(
         SharedStorageType& storage,
         histogram_t<bins_per_thread> const& thread_bins,
         histogram_t<HistogramSize> const& block_local_histogram,
@@ -668,7 +668,7 @@ struct device_segmented_topk_air_impl : BaseType
                 ::rocprim::syncthreads();
 
                 // Chose the bin which contains the pivot
-                chose_pivot_bin<Iteration>(storage,
+                choose_pivot_bin<Iteration>(storage,
                                            thread_bins,
                                            storage.block_local_histogram,
                                            N_this_iteration,

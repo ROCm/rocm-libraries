@@ -195,7 +195,7 @@ void test_segmented_topk_air_keys(std::vector<typename Params::key_type> const& 
         HIP_CHECK(hipStreamCreate(&stream));
     }
 
-    // Verify ouput by using segmented_radix_sort_keys
+    // Verify output by using segmented_radix_sort_keys
     std::vector<offsets_type> h_sort_offsets{};
     for(std::remove_const_t<decltype(segments)> i = 0; i < segments + 1; ++i)
     {
@@ -383,7 +383,7 @@ void test_segmented_topk_air_pairs_unstable(
         HIP_CHECK(hipStreamCreate(&stream));
     }
 
-    // Verify ouput by using segmented_radix_sort_keys
+    // Verify output by using segmented_radix_sort_keys
     std::vector<offsets_type> h_sort_offsets{};
     for(std::remove_const_t<decltype(segments)> i = 0; i < segments + 1; ++i)
     {
