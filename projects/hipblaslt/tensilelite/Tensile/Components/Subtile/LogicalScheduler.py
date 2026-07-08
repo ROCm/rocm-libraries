@@ -3569,13 +3569,6 @@ class LogicalScheduler:
 
         exitLabels = [Label(f"ExitC{ui}", "") for ui in range(uf - 1)]
         module.add(loopBegin)
-        # Cross-iteration WG sync; placed outside the per-section module so
-        # insertClusterBarrier still finds the mid-body barrier for optimal
-        # cluster-signal placement.
-        if kernel.get("ClusterBarrier"):
-            from rocisa.instruction import SBarrier as _SBarrier
-            module.add(_SBarrier(True, False, False))
-            module.add(_SBarrier(True, True, False, "workgroup barrier wait"))
         # Debug: emit `s_mov_b32 m0, LoopCounterL; s_ttracedata` at the start of
         # every mainloop iteration so SQTT / trace decoders can identify iterations
         # (adds 2 instructions per iter). Gated by the EmitMainloopTraceMarker global.
