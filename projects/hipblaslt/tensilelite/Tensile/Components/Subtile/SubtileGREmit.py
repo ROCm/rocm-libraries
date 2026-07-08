@@ -24,7 +24,8 @@ from rocisa.container import DPPModifiers, EXEC, MUBUFModifiers, VCC, vgpr, sgpr
 from rocisa.enum import RegisterType
 from rocisa.instruction import (
     BufferLoadB128,
-    SAddCU32, SAddU32, SAddU64, SAndB32, SMovB32, SMovB64, SMulI32, SNop, SOrB32, SXorB32,
+    SAddCU32, SAddU32, SAddU64, SAndB32, SMaxI32, SMinU32, SMovB32, SMovB64, SMulI32,
+    SNop, SOrB32, SSubI32, SXorB32,
     SCBranchSCC1, SCmpEQU32, SEndpgm,
     SLShiftLeftB64, SLShiftRightB32,
     VAddU32, VAndB32, VCmpXEqU32,
@@ -1150,7 +1151,34 @@ def initTDMDescriptorSubtile(writer, kernel, tP):
 
   sizeShifterTile = sizeShifter
   mod.add(comp.setTensorTile0(descSgprName(1), sizeTile0, writer, sizeShifterTile))
-  mod.add(comp.setTensorTile1(descSgprName(1), sizeTile1 // numWaves, writer))
+
+  # Clamp each wave's Tile1 (free-dim-1) load extent to the valid remainder.
+  # tdmGlobalOffsetSubtile bases wave w at row w*(mt//numWaves), but the
+  # descriptor Dim1 does not bound the walk, so an edge tile (free dim < mt)
+  # reads past the tensor. setTensorTile1 takes a compile-time int, so write its
+  # field (+4[15:0]) with a runtime clamp. No-op when the tile fits.
+  perWaveRows = sizeTile1 // numWaves
+  if numWaves > 1:
+    with writer.allocTmpSgpr(2) as tileClampRes:
+      validRows = tileClampRes.idx
+      waveRowStart = tileClampRes.idx + 1
+      mod.add(VReadfirstlaneB32(sgpr(waveRowStart), vgpr("Serial"), "first tId"))
+      mod.add(SLShiftRightB32(sgpr(waveRowStart), ceil(log2(wavelen)), sgpr(waveRowStart),
+              "wId = fTid // wavelen"))
+      mod.add(SMulI32(sgpr(waveRowStart), sgpr(waveRowStart), perWaveRows,
+              f"waveGlobalRowStart = wId * {perWaveRows}"))
+      mod.add(SSubI32(dst=sgpr(validRows), src0=sgpr(sizeRefName(ti)), src1=sgpr(waveRowStart),
+              comment="Size_free - waveGlobalRowStart"))
+      mod.add(SMaxI32(dst=sgpr(validRows), src0=sgpr(validRows), src1=0,
+              comment="saturate negative remainder to 0"))
+      mod.add(SMinU32(dst=sgpr(validRows), src0=sgpr(validRows), src1=perWaveRows,
+              comment=f"clamp to per-wave rows ({perWaveRows})"))
+      mod.add(SAndB32(sgpr(f"{descSgprName(1)}+4"), sgpr(f"{descSgprName(1)}+4"),
+              hex(0xFFFF0000), "clear tile1 field"))
+      mod.add(SOrB32(sgpr(f"{descSgprName(1)}+4"), sgpr(f"{descSgprName(1)}+4"),
+              sgpr(validRows), "set tile1 = clamped validRows"))
+  else:
+    mod.add(comp.setTensorTile1(descSgprName(1), perWaveRows, writer))
   mod.add(comp.setTensorStride0(descSgprName(1), strideRefName(), sizeShifterTile))
   return mod
 
