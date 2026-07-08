@@ -5,6 +5,10 @@ rocBLAS documentation is available at
 
 ## rocBLAS 5.6.0
 
+### Resolved issues
+
+* Fix incorrect or NaN `gemm` results with a large free (`N`) dimension on GPUs whose grid Y/Z dimension is limited to 65536 (for example gfx1201); the Tensile launch in `rocblas_internal_gemm` is now chunked over `N`, matching the source-GEMM and ILP64 paths (rocm-libraries #8645)
+
 ## rocBLAS 5.5.0 for ROCm 7.14
 
 ### Added
