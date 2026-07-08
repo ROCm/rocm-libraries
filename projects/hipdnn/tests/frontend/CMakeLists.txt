@@ -151,7 +151,7 @@ endfunction()
 configure_hipdnn_public_frontend_test_target(hipdnn_public_frontend_tests)
 
 clang_tidy_check(hipdnn_public_frontend_tests)
-add_integration_test_target(hipdnn_public_frontend_tests ${CMAKE_CURRENT_BINARY_DIR})
+add_hipdnn_test(hipdnn_public_frontend_tests ${CMAKE_CURRENT_BINARY_DIR})
 
 add_executable(
     hipdnn_public_frontend_dynamic_load_tests
@@ -176,4 +176,4 @@ configure_hipdnn_public_frontend_test_target(hipdnn_public_frontend_dynamic_load
 add_dependencies(hipdnn_public_frontend_dynamic_load_tests hipdnn_backend)
 
 clang_tidy_check(hipdnn_public_frontend_dynamic_load_tests)
-add_integration_test_target(hipdnn_public_frontend_dynamic_load_tests ${CMAKE_CURRENT_BINARY_DIR})
+add_hipdnn_test(hipdnn_public_frontend_dynamic_load_tests ${CMAKE_CURRENT_BINARY_DIR})
