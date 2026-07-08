@@ -685,9 +685,9 @@ double norm_tolerance(hipDataType type)
     case HIP_R_64F:
         return 0.000000000001;
     case HIP_C_32F:
-        return 0.00001; 
+        return 0.00001;
     case HIP_C_64F:
-        return 0.000000000001;    
+        return 0.000000000001;
     case HIP_R_16F:
         return 0.01;
     case HIP_R_16BF:

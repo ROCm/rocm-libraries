@@ -414,7 +414,7 @@ private:
         }
         else if constexpr(std::is_same_v<T, std::complex<double>>)
         {
-            auto test = std::complex<double>(r, i); 
+            auto test = std::complex<double>(r, i);
             return std::complex<double>(r, i);
         }
         else if constexpr(std::is_same_v<T, hipblasLtHalf>)
@@ -621,7 +621,7 @@ inline void
         return;
     }
     switch(typeCompute)
-    { 
+    {
     case HIP_R_32F:
         dst.f32 *= src.f32;
         return;

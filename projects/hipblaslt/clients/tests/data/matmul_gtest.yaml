@@ -9,7 +9,7 @@ Definitions:
     - { alpha:  0, beta:  3 }
     - { alpha:  1, beta:  3 }
     - { alpha:  1, beta:  1 }
-  
+
   - &complex_alpha_beta_range
     - { alpha: 1, alphai: 0, beta: 0, betai: 0 } # Standard
     - { alpha: 0, alphai: 0, beta: 1, betai: 0 } # Pure C (Alpha Zero)
@@ -18,7 +18,7 @@ Definitions:
     - { alpha: 0, alphai: 2, beta: 0, betai: 0 } # Optimization Trap (Real=0)
     - { alpha: 1, alphai: 1, beta: 1, betai: -1 } # Cancellation/Signs
     - { alpha: 2, alphai: 3, beta: 4, betai: 5 } # General
- 
+
   - &complex_alpha_beta_range_small
     - { alpha: 1, alphai: 0, beta: 0, betai: 1 } # Imaginary Beta
     - { alpha: 2, alphai: 3, beta: 4, betai: 5 } # General
@@ -89,7 +89,7 @@ Tests:
   transB: N
   fortran: [ false, true ]
 
-# Added this test to mimic the rocblas test quick_gemm_batched_bad_arg_f32_r_bad_arg_F 
+# Added this test to mimic the rocblas test quick_gemm_batched_bad_arg_f32_r_bad_arg_F
 # which passes alpha, A and B as 0 but beta as non-zero with valid C and D.
 - name: matmul_general_batch_bad_arg
   category: pre_checkin
@@ -448,7 +448,7 @@ Tests:
   alpha_beta: *deepbench_alpha_beta_range
   transA_transB: *deepbench_transA_transB_range
   batch_mode: [0, 1]
-  batch_count: [1, 3]    
+  batch_count: [1, 3]
 
 - name: resnet50_fwd
   category: nightly

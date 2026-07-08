@@ -8,7 +8,7 @@ Datatypes:
         f16_r: 2
         f32_r: 0
         f64_r: 1
-        f32_c: 4 
+        f32_c: 4
         f64_c: 5
         i8_r: 3
         i32_r: 10
@@ -567,7 +567,7 @@ Real precisions 1 bytes: &real_precisions_mx
 rocRoller predicate: &rocroller_predicate
   - &unrollKPredicate
     { a_type: f8_r, b_type: f8_r, c_type: f32_r, d_type: f32_r, compute_type: c_f32_r, scaleA: 3, scaleB: 3, scale_type: f32_r, M: 128, N: 128, K: 96}
-    
+
 # The Arguments struct passed directly to C++. See hipblaslt_arguments.hpp.
 # The order of the entries is significant, so it can't simply be a dictionary.
 # The types on the RHS are eval'd for Python-recognized types including ctypes

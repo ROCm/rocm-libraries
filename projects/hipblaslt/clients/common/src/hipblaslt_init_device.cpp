@@ -745,7 +745,7 @@ void hipblaslt_init_device(ABC_dims                 abc,
                         return (i ^ j) & 1 ? value : negate(value);
                     });
                 }
-                } 
+                }
             }
             break;
         case hipblaslt_initialization::trig_float:
@@ -839,7 +839,7 @@ void hipblaslt_init_device(ABC_dims                 abc,
             break;
         case hipblaslt_initialization::zero:
             if constexpr(is_std_complex<T>::value)
-                fill_batch(A, M, N, lda, stride, batch_count, [make_std_complex] __host__ __device__ (size_t idx) -> T { 
+                fill_batch(A, M, N, lda, stride, batch_count, [make_std_complex] __host__ __device__ (size_t idx) -> T {
                     return make_std_complex(T_real(0), T_real(0));
                 });
             else
