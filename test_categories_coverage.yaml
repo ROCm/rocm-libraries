@@ -61,8 +61,11 @@ projects:
   # Header-only libraries: there is no shared library to instrument, so coverage
   # is collected from the instrumented test binaries (matched by name prefix and
   # staged from the build tree). test_binaries entries are name prefixes.
+  # Disabled for now (enabled: false) while the coverage flow is reworked to only
+  # handle shared-object components first; the config is kept here so header-only
+  # support can be re-enabled without re-deriving it.
   rocprim:
-    enabled: true
+    enabled: false
     coverage_objects:
       libraries: []
       test_binaries:
@@ -72,7 +75,7 @@ projects:
     test_category: quick
 
   hipcub:
-    enabled: true
+    enabled: false
     coverage_objects:
       libraries: []
       test_binaries:
@@ -82,7 +85,7 @@ projects:
     test_category: quick
 
   rocthrust:
-    enabled: true
+    enabled: false
     coverage_objects:
       libraries: []
       test_binaries:

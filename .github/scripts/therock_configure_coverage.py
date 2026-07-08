@@ -37,9 +37,15 @@ COVERAGE_PROJECT_METADATA = {
         "math-libs/rocBLAS",
         "-DTHEROCK_ENABLE_BLAS=ON -DTHEROCK_ENABLE_ALL=OFF",
     ),
-    # Header-only libraries: coverage comes from the instrumented test binaries
-    # (there is no shared library to instrument). All three build together in
-    # TheRock's PRIM group.
+}
+
+# Header-only libraries: coverage comes from the instrumented test binaries
+# (there is no shared library to instrument), which needs a different flow than
+# the .so-based components above. Disabled for now (kept here, not merged into
+# COVERAGE_PROJECT_METADATA, so no coverage jobs are emitted) while the flow is
+# reworked to only handle shared-object components first; re-enable by merging
+# these back into COVERAGE_PROJECT_METADATA once header-only support is ready.
+_DISABLED_HEADER_ONLY_COVERAGE_PROJECT_METADATA = {
     "rocprim": (
         "rocPRIM",
         "math-libs/rocPRIM",

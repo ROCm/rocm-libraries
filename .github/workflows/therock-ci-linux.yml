@@ -33,7 +33,6 @@ on:
       HIPDNN_CI_WEBHOOK_URL:
         required: false
 
-
 permissions:
   contents: read
 
