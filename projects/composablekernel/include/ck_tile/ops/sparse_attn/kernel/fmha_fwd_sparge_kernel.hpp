@@ -250,7 +250,12 @@ struct FmhaFwdSpargePreprocessOneSideKernel
             }
         }
 
-        Pipeline{}(slice, mean_out, sim_out, pp, smem_raw);
+        // Dispatch the WG-uniform smooth_k flag to a compile-time branch so the pipeline can drop the
+        // km load/subtract entirely on the Q side (and K side with smooth_k off).
+        if(pp.km_ptr != nullptr)
+            Pipeline{}(slice, mean_out, sim_out, pp, smem_raw, bool_constant<true>{});
+        else
+            Pipeline{}(slice, mean_out, sim_out, pp, smem_raw, bool_constant<false>{});
     }
 };
 
@@ -452,7 +457,11 @@ struct FmhaFwdSpargeQKQuantKernel
                       static_cast<long_index_t>(kargs.hdim)
             : nullptr;
 
-        Pipeline{}(slice, quant_out, scale_out, pp, smem_raw);
+        // Compile-time smooth_k branch so the km load/subtract is dropped on the Q side.
+        if(pp.km_ptr != nullptr)
+            Pipeline{}(slice, quant_out, scale_out, pp, smem_raw, bool_constant<true>{});
+        else
+            Pipeline{}(slice, quant_out, scale_out, pp, smem_raw, bool_constant<false>{});
     }
 };
 
@@ -526,21 +535,6 @@ struct FmhaFwdSpargeMaskPredictionKernel
         return static_cast<std::size_t>(Pipeline::GetSmemSize(hdim, num_k_blocks));
     }
 
-    CK_TILE_DEVICE static index_t
-    block_to_batch(const int32_t* seqstart_block_ptr, index_t batch, index_t g_block)
-    {
-        index_t lo = 0;
-        index_t hi = batch;
-        while(lo + 1 < hi)
-        {
-            const index_t mid = (lo + hi) / 2;
-            if(g_block < seqstart_block_ptr[mid])
-                hi = mid;
-            else
-                lo = mid;
-        }
-        return __builtin_amdgcn_readfirstlane(lo);
-    }
 
     CK_TILE_DEVICE void operator()(SpargeMaskPredictionKargs kargs) const
     {
@@ -552,7 +546,7 @@ struct FmhaFwdSpargeMaskPredictionKernel
             const index_t g_q_block = __builtin_amdgcn_readfirstlane(gid % kargs.total_q_blocks);
             const index_t head      = __builtin_amdgcn_readfirstlane(gid / kargs.total_q_blocks);
             const index_t kv_head   = __builtin_amdgcn_readfirstlane(head / kargs.nhead_ratio_qk);
-            const index_t b         = block_to_batch(
+            const index_t b         = sparge_block_to_batch(
                 kargs.seqstart_q_block_ptr, kargs.batch, g_q_block);
             const index_t qstart_b   = __builtin_amdgcn_readfirstlane(
                 kargs.seqstart_q_block_ptr[b]);

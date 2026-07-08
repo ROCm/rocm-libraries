@@ -26,6 +26,7 @@
 #include "../01_fmha/bias.hpp"
 #include "sparse_attention.h"
 #include "ck_tile/host/reference/reference_sparge_mask_prediction.hpp"
+#include "ck_tile/ops/sageattention/pipeline/tile_sageattn_traits.hpp"
 
 enum class sparse_attn_result
 {
@@ -33,6 +34,28 @@ enum class sparse_attn_result
     failure,
     skipped,
 };
+
+// Q/K tokens-per-scale for a qscale mode, from TileSageAttnTraits (single source of truth shared
+// with the device kernels). Used by the host reference dequant to match the device granularity.
+inline void sparge_sage_scale_sizes(const std::string& qscale,
+                                    ck_tile::index_t&  gran_q,
+                                    ck_tile::index_t&  gran_k)
+{
+    using QSE = ck_tile::BlockSageAttentionQuantScaleEnum;
+    const auto pick = [&](auto qse_const) {
+        using Tr = ck_tile::TileSageAttnTraits<false, false, false, false, qse_const.value>;
+        gran_q   = Tr::kBlockScaleSizeQ;
+        gran_k   = Tr::kBlockScaleSizeK;
+    };
+    if(qscale == "perthread")
+        pick(std::integral_constant<QSE, QSE::PERTHREAD>{});
+    else if(qscale == "perblock")
+        pick(std::integral_constant<QSE, QSE::BLOCKSCALE>{});
+    else if(qscale == "pertensor")
+        pick(std::integral_constant<QSE, QSE::PERTENSOR>{});
+    else // perwarp (default)
+        pick(std::integral_constant<QSE, QSE::PERWARP>{});
+}
 
 // Throws std::invalid_argument on bad input or length mismatch.
 inline std::vector<float> parse_csv_floats(const std::string& csv,
@@ -1902,13 +1925,11 @@ sparse_attn_result sparse_attn_fwd_run(
                 const bool sel_ok =
                     check_selection_agreement(device_mask, host_mask, "sparge_sage");
 
-                // Dequantize Q/K at this qscale's granularity (tokens/scale Q/K: perwarp 32/64,
-                // perthread 4/16, perblock 128/128, pertensor = whole (b,h)).
+                // Dequantize Q/K at this qscale's granularity (from TileSageAttnTraits; pertensor =
+                // whole (b,h)).
                 const bool qs_pertensor = (qscale == "pertensor");
-                const ck_tile::index_t gran_q =
-                    (qscale == "perthread") ? 4 : (qscale == "perblock") ? 128 : 32;
-                const ck_tile::index_t gran_k =
-                    (qscale == "perthread") ? 16 : (qscale == "perblock") ? 128 : 64;
+                ck_tile::index_t gran_q = 0, gran_k = 0;
+                sparge_sage_scale_sizes(qscale, gran_q, gran_k);
                 ck_tile::HostTensor<T> q_deq({batch, nhead, seqlen_q, hdim_q});
                 ck_tile::HostTensor<T> k_deq({batch, nhead_k, seqlen_k, hdim_q});
                 // smooth_k: subtract per-channel global K-mean before quant (K only; Q never).
@@ -2409,13 +2430,10 @@ sparse_attn_result sparse_attn_fwd_run(
             if(do_validation)
             {
                 pass = true;
-                // Per-qscale granularity (tokens/scale Q/K): perwarp 32/64, perthread 4/16,
-                // perblock 128/128, pertensor = whole sequence.
+                // Per-qscale granularity (from TileSageAttnTraits; pertensor = whole sequence).
                 const bool qs_pertensor = (qscale == "pertensor");
-                const ck_tile::index_t gran_q =
-                    (qscale == "perthread") ? 4 : (qscale == "perblock") ? 128 : 32;
-                const ck_tile::index_t gran_k =
-                    (qscale == "perthread") ? 16 : (qscale == "perblock") ? 128 : 64;
+                ck_tile::index_t gran_q = 0, gran_k = 0;
+                sparge_sage_scale_sizes(qscale, gran_q, gran_k);
                 const ck_tile::index_t scales_per_blk_q = block_size / gran_q;
                 const ck_tile::index_t scales_per_blk_k = block_size / gran_k;
                 // Packed-LUT geometry for decoding the device selection per sub-batch: offsets are

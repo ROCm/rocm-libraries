@@ -743,22 +743,25 @@ float sparge_sage_sparse_attention(const ck_tile::HostTensor<DataType_>& TQ,
             ck_tile::TileSageAttnTraits<false, false, false, false, QSE::PERTENSOR>::kBlockScaleSizeK <= kPpBlockSize,
             "block_scale_size must be <= pp_block_size (=128) or workspace scales-per-block (spb) collapses to 0");
     }
-    if(qscale == "perblock" || qscale == "pertensor")
+    // Q/K tokens-per-scale come from TileSageAttnTraits (the single source of truth shared with
+    // sageattn and the sparge_sage kernels); the string -> enum switch is the only host mapping.
+    // PERTENSOR uses one global per-(b,h) scale but is sized at 128 so the workspace's ceil(S/128)
+    // scales still cover the single scale the global-absmax quant writes.
     {
-        // PERTENSOR uses one global per-(b,h) scale; 128 keeps the workspace sizing
-        // (ceil(S/128) scales) >= the single scale the global-absmax quant writes.
-        args.block_scale_size_q = 128;
-        args.block_scale_size_k = 128;
-    }
-    else if(qscale == "perthread")
-    {
-        args.block_scale_size_q = 4;
-        args.block_scale_size_k = 16;
-    }
-    else // perwarp (default)
-    {
-        args.block_scale_size_q = 32;
-        args.block_scale_size_k = 64;
+        using QSE = ck_tile::BlockSageAttentionQuantScaleEnum;
+        const auto set_scale_sizes = [&](auto qse_const) {
+            using Tr = ck_tile::TileSageAttnTraits<false, false, false, false, qse_const.value>;
+            args.block_scale_size_q = Tr::kBlockScaleSizeQ;
+            args.block_scale_size_k = Tr::kBlockScaleSizeK;
+        };
+        if(qscale == "perthread")
+            set_scale_sizes(std::integral_constant<QSE, QSE::PERTHREAD>{});
+        else if(qscale == "perblock")
+            set_scale_sizes(std::integral_constant<QSE, QSE::BLOCKSCALE>{});
+        else if(qscale == "pertensor")
+            set_scale_sizes(std::integral_constant<QSE, QSE::PERTENSOR>{});
+        else // perwarp (default)
+            set_scale_sizes(std::integral_constant<QSE, QSE::PERWARP>{});
     }
     args.nhead_stride_v_descale = hdim_v;
     args.batch_stride_v_descale = nhead_k * hdim_v;
