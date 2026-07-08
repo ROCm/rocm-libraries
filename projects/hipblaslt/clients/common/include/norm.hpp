@@ -729,10 +729,96 @@ bool norm_check(double                 norm_error,
     if(compute_type == HIPBLAS_COMPUTE_32F_FAST_16BF && outputType == HIP_R_32F)
         tol = std::max(tol, 0.5);
 
+    if(compute_type == HIPBLAS_COMPUTE_32F_FAST_TF32 && outputType == HIP_R_32F)
+        tol = std::max(tol, 0.0005);
+
     if(static_cast<int>(inputTypeA) >= 0)
         tol = std::max(tol, norm_tolerance(inputTypeA));
     if(static_cast<int>(inputTypeB) >= 0)
         tol = std::max(tol, norm_tolerance(inputTypeB));
 
     return tol > 0.0 && norm_error < tol;
+}
+
+/* ===================== Magnitude-bias check ======================= */
+// alpha = <gpu, ref> / <ref, ref>; returns |alpha - 1|. An unbiased kernel
+// gives ~0, while round-toward-zero truncation (e.g. the gfx942 native XF32
+// MFMA) shrinks operand magnitudes and yields alpha < 1. Unlike a Frobenius
+// norm this isolates coherent magnitude bias from random rounding noise.
+template <typename T>
+double bias_check_general(
+    int64_t M, int64_t N, int64_t lda, int64_t stride_a, T* hCPU, T* hGPU, int64_t batch_count)
+{
+    if(M * N == 0)
+        return 0.0;
+    double dot = 0.0, refSq = 0.0;
+    for(int64_t b = 0; b < batch_count; b++)
+        for(int64_t j = 0; j < N; j++)
+            for(int64_t i = 0; i < M; i++)
+            {
+                size_t idx = i + j * size_t(lda) + b * size_t(stride_a);
+                double ref = double(hCPU[idx]);
+                double gpu = double(hGPU[idx]);
+                dot += gpu * ref;
+                refSq += ref * ref;
+            }
+    if(refSq == 0.0)
+        return 0.0;
+    return std::abs(dot / refSq - 1.0);
+}
+
+inline double bias_check_general(int64_t     M,
+                          int64_t     N,
+                          int64_t     lda,
+                          int64_t     stride_a,
+                          void*       hCPU,
+                          void*       hGPU,
+                          int64_t     batch_count,
+                          hipDataType type)
+{
+    switch(type)
+    {
+    case HIP_R_32F:
+        return bias_check_general<float>(
+            M, N, lda, stride_a, (float*)hCPU, (float*)hGPU, batch_count);
+    case HIP_R_64F:
+        return bias_check_general<double>(
+            M, N, lda, stride_a, (double*)hCPU, (double*)hGPU, batch_count);
+    case HIP_R_16F:
+        return bias_check_general<hipblasLtHalf>(
+            M, N, lda, stride_a, (hipblasLtHalf*)hCPU, (hipblasLtHalf*)hGPU, batch_count);
+    case HIP_R_16BF:
+        return bias_check_general<hip_bfloat16>(
+            M, N, lda, stride_a, (hip_bfloat16*)hCPU, (hip_bfloat16*)hGPU, batch_count);
+    case HIP_R_8F_E4M3_FNUZ:
+        return bias_check_general<hipblaslt_f8_fnuz>(
+            M, N, lda, stride_a, (hipblaslt_f8_fnuz*)hCPU, (hipblaslt_f8_fnuz*)hGPU, batch_count);
+    case HIP_R_8F_E5M2_FNUZ:
+        return bias_check_general<hipblaslt_bf8_fnuz>(
+            M, N, lda, stride_a, (hipblaslt_bf8_fnuz*)hCPU, (hipblaslt_bf8_fnuz*)hGPU, batch_count);
+    case HIP_R_8F_E4M3:
+        return bias_check_general<hipblaslt_f8>(
+            M, N, lda, stride_a, (hipblaslt_f8*)hCPU, (hipblaslt_f8*)hGPU, batch_count);
+    case HIP_R_8F_E5M2:
+        return bias_check_general<hipblaslt_bf8>(
+            M, N, lda, stride_a, (hipblaslt_bf8*)hCPU, (hipblaslt_bf8*)hGPU, batch_count);
+    default:
+        hipblaslt_cerr << "Error type in bias_check_general" << std::endl;
+        return 0.0;
+    }
+}
+
+// Tolerance for the magnitude-bias check (|alpha - 1|). Calibrated for the gfx942
+// native XF32 path: the in-kernel round-to-nearest keeps the bias within ~3.5e-4
+// (the round-half-up residual is largest at small K), while round-toward-zero
+// truncation gives ~7e-4, so 5e-4 (the tf32 unit roundoff 2^-11) separates them.
+// As with norm_check, an undefined (non-positive) tolerance fails, so enabling
+// bias_check on an uncalibrated compute type/output is caught, not silently skipped.
+inline bool bias_check(double bias_error, hipDataType outputType, hipblasComputeType_t compute_type)
+{
+    double tol = 0.0;
+    if(compute_type == HIPBLAS_COMPUTE_32F_FAST_TF32 && outputType == HIP_R_32F)
+        tol = 0.0005;
+
+    return tol > 0.0 && bias_error < tol;
 }

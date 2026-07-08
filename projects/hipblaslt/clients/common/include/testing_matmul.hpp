@@ -1285,6 +1285,42 @@ void check(hipStream_t                   stream,
             }
         }
 
+        if(arg.bias_check)
+        {
+            // Magnitude-bias check on D: alpha = <gpu,ref>/<ref,ref>, assert
+            // |alpha-1| is small. Catches round-toward-zero truncation (gfx942
+            // native XF32) that a norm tolerance can miss. Needs full-mantissa
+            // inputs (norm_dist/hpl); integer inputs are tf32-exact -> alpha==1.
+            double bias_error = 0.0;
+            if(batchMode != HIPBLASLT_BATCH_MODE_POINTER_ARRAY)
+            {
+                bias_error = bias_check_general(M[gemmIdx],
+                                                N[gemmIdx],
+                                                ldd[gemmIdx],
+                                                stride_d[gemmIdx],
+                                                hD_gold[gemmIdx].buf(),
+                                                hD_1[gemmIdx].buf(),
+                                                num_batches[gemmIdx],
+                                                To);
+            }
+            else
+            {
+                for(int batch = 0; batch < num_batches[gemmIdx]; batch++)
+                    bias_error = std::max(bias_error,
+                                          bias_check_general(M[gemmIdx],
+                                                             N[gemmIdx],
+                                                             ldd[gemmIdx],
+                                                             0,
+                                                             hD_gold[batch].buf(),
+                                                             hD_1[batch].buf(),
+                                                             1,
+                                                             To));
+            }
+            hipblaslt_error += bias_error;
+            if(arg.bias_check_assert)
+                CHECK_SUCCESS(bias_check(bias_error, To, arg.compute_type));
+        }
+
         if(arg.norm_check)
         {
             double norm_error = 0.0;

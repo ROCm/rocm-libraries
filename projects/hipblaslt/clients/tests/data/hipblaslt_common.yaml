@@ -632,6 +632,7 @@ Arguments:
   - norm_check: c_int8
   - allclose_check: c_int8
   - unit_check: c_int8
+  - bias_check: c_int8
   - timing: c_int8
   - transA: c_char
   - transB: c_char
@@ -657,6 +658,7 @@ Arguments:
   - use_e: c_bool
   - gradient: c_bool
   - norm_check_assert: c_bool
+  - bias_check_assert: c_bool
   - swizzle_a: c_bool
   - swizzle_b: c_bool
   - dump_matrix: c_bool
@@ -733,6 +735,7 @@ Defaults:
   norm_check: 0
   allclose_check: 0
   unit_check: 1
+  bias_check: 0
   timing: 0
   iters: 10
   cold_iters: 2
@@ -780,6 +783,7 @@ Defaults:
   amaxD: false
   grouped_gemm: 0
   norm_check_assert: true
+  bias_check_assert: true
   swizzle_a: false
   swizzle_b: false
   dump_matrix: false

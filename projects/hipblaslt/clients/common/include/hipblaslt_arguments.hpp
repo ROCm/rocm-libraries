@@ -163,6 +163,7 @@ struct Arguments
     int8_t norm_check;
     int8_t allclose_check;
     int8_t unit_check;
+    int8_t bias_check;
     int8_t timing;
 
     char transA;
@@ -191,6 +192,7 @@ struct Arguments
     bool                     use_e;
     bool                     gradient;
     bool                     norm_check_assert;
+    bool                     bias_check_assert;
     bool                     swizzle_a;
     bool                     swizzle_b;
     bool                     dump_matrix;
@@ -286,6 +288,7 @@ struct Arguments
     OPER(norm_check) SEP             \
     OPER(allclose_check) SEP         \
     OPER(unit_check) SEP             \
+    OPER(bias_check) SEP             \
     OPER(timing) SEP                 \
     OPER(transA) SEP                 \
     OPER(transB) SEP                 \
@@ -311,6 +314,7 @@ struct Arguments
     OPER(use_e) SEP                  \
     OPER(gradient) SEP               \
     OPER(norm_check_assert) SEP      \
+    OPER(bias_check_assert) SEP      \
     OPER(swizzle_a) SEP              \
     OPER(swizzle_b) SEP              \
     OPER(dump_matrix) SEP            \
