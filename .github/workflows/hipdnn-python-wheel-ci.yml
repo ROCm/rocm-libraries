@@ -51,7 +51,7 @@ jobs:
           python -m pip install --upgrade pip
           pip install --index-url "https://rocm.nightlies.amd.com/v2/$GPU_TARGET/" "rocm[libraries,devel]"
           rocm-sdk init
-          pip install build pytest
+          pip install build numpy pytest
 
           site_packages=$(python -c "import site; print(site.getsitepackages()[0])")
           rocm_sdk_path="$site_packages/_rocm_sdk_devel"
@@ -129,7 +129,7 @@ jobs:
           & $python -m pip install --upgrade pip
           & $python -m pip install --index-url "https://rocm.nightlies.amd.com/v2/$env:GPU_TARGET/" "rocm[libraries,devel]"
           & (Join-Path $env:VENV_PATH "Scripts\rocm-sdk.exe") init
-          & $python -m pip install build pytest
+          & $python -m pip install build numpy pytest
 
           $rocmSdkPath = (Join-Path $env:VENV_PATH "Lib\site-packages\_rocm_sdk_devel") -replace '\\', '/'
           "ROCM_SDK_PATH=$rocmSdkPath" | Out-File -FilePath $env:GITHUB_ENV -Append
