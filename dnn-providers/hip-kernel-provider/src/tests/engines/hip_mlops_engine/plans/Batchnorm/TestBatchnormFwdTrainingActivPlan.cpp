@@ -135,6 +135,46 @@ TEST(TestBatchnormFwdTrainingActivParams, HandlesMeanVariancePresent)
     EXPECT_EQ(params.invVariance()->uid(), bnAttrs->inv_variance_tensor_uid());
 }
 
+TEST(TestBatchnormFwdTrainingActivParams, HandlesRunningStatsPresent)
+{
+    auto builder
+        = hipdnn_test_sdk::utilities::createValidBatchnormFwdTrainingActivGraph(true, true);
+    const hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper graph(
+        builder.GetBufferPointer(), builder.GetSize());
+
+    const auto& bnNode = graph.getNode(0);
+    auto* bnAttrs = bnNode.attributes_as_BatchnormAttributes();
+    ASSERT_NE(bnAttrs, nullptr);
+
+    const auto& activNode = graph.getNode(1);
+    auto* activAttrs = activNode.attributes_as_PointwiseAttributes();
+    ASSERT_NE(activAttrs, nullptr);
+
+    const BatchnormFwdTrainingParams params(*bnAttrs, *activAttrs, graph.getTensorMap());
+
+    EXPECT_TRUE(params.hasRunningStats());
+}
+
+TEST(TestBatchnormFwdTrainingActivParams, HandlesRunningStatsPresentNoMeanVar)
+{
+    auto builder
+        = hipdnn_test_sdk::utilities::createValidBatchnormFwdTrainingActivGraph(false, true);
+    const hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper graph(
+        builder.GetBufferPointer(), builder.GetSize());
+
+    const auto& bnNode = graph.getNode(0);
+    auto* bnAttrs = bnNode.attributes_as_BatchnormAttributes();
+    ASSERT_NE(bnAttrs, nullptr);
+
+    const auto& activNode = graph.getNode(1);
+    auto* activAttrs = activNode.attributes_as_PointwiseAttributes();
+    ASSERT_NE(activAttrs, nullptr);
+
+    const BatchnormFwdTrainingParams params(*bnAttrs, *activAttrs, graph.getTensorMap());
+
+    EXPECT_TRUE(params.hasRunningStats());
+}
+
 TEST(TestBatchnormFwdTrainingActivParams, HandlesMeanVarianceMissing)
 {
     auto builder = hipdnn_test_sdk::utilities::createValidBatchnormFwdTrainingActivGraph(false);

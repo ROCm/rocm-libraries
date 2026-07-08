@@ -3,6 +3,12 @@
 Documentation for rocFFT is available at
 [https://rocm.docs.amd.com/projects/rocFFT/en/latest/](https://rocm.docs.amd.com/projects/rocFFT/en/latest/).
 
+## Since last release (ROCm 7.14)
+
+### Added
+
+* Added optional RCCL (ROCm Collective Communications Library) backend for single-node multi-GPU communication, enabled via `-DROCFFT_RCCL_ENABLE=ON`.
+
 ## rocFFT 1.0.38 for ROCm 7.14
 
 ### Added
