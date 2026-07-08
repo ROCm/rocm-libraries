@@ -4962,6 +4962,18 @@ class KernelWriter(metaclass=abc.ABCMeta):
     # Open persistent loop
     loopComponent = Component.PersistentLoop.find(self)
 
+    # Snapshot the tensor base so each persistent iteration can re-base
+    # Address{A,B} (advanced in place per iteration). PAP-off: PAP prefetches
+    # next-tile addresses ahead, which a top-of-loop re-base would clobber.
+    subtileTdmRebase = (kernel["enableTDMA"] and kernel["enableTDMB"]
+                        and kernel["UseSubtileImpl"]
+                        and not kernel["PrefetchAcrossPersistent"])
+    if subtileTdmRebase:
+      module.add(SMovB64(dst=sgpr("AddressABase", 2), src=sgpr("AddressA", 2),
+                         comment="snapshot tensor base A"))
+      module.add(SMovB64(dst=sgpr("AddressBBase", 2), src=sgpr("AddressB", 2),
+                         comment="snapshot tensor base B"))
+
     module.add(loopComponent.openPersistentLoop(self, kernel))
 
     atileInfo = self.states.a.tileInfo
@@ -5043,6 +5055,13 @@ class KernelWriter(metaclass=abc.ABCMeta):
       module.addComment("Allocating v%s for %s LR"%(str(tileInfo.sharedVgprLROffset), tileInfo.tc))
       module.addComment("Allocating v%s for %s LR Swap"%(str(tileInfo.sharedVgprLROffsetSwap), tileInfo.tc))
 
+    # Re-base Address{A,B} before this iteration's in-place offset adds (tile
+    # offset + StreamK K-offset + main-loop advance).
+    if subtileTdmRebase:
+      module.add(SMovB64(dst=sgpr("AddressA", 2), src=sgpr("AddressABase", 2),
+                         comment="re-base A to tensor base"))
+      module.add(SMovB64(dst=sgpr("AddressB", 2), src=sgpr("AddressBBase", 2),
+                         comment="re-base B to tensor base"))
     if hasTDM:
       module.add(tdmGlobalOffsetSubtile(self, kernel, tensorParametersA))
       module.add(initTDMDescriptorSubtile(self, kernel, tensorParametersA))
@@ -9414,6 +9433,12 @@ class KernelWriter(metaclass=abc.ABCMeta):
           requiredUnalignedSgprVar.append("SwapMXSB")
       if kernel["ProblemType"]["Sparse"] and kernel["LocalWriteUseSgprMetadata"]:
         requiredUnalignedSgprVar.append("SwapMetadata")
+
+    # Base snapshots for the subtile TDM persistent-loop re-base. Defined before
+    # the nonPostLoopSgpr population so they survive the loop, like AddressA/B.
+    if kernel["UseSubtileImpl"] and kernel["enableTDMA"] and kernel["enableTDMB"]:
+      self.defineSgpr("AddressABase", numSgprAddressA, 2)
+      self.defineSgpr("AddressBBase", numSgprAddressB, 2)
 
     # Actual allocation: prioritise 4-aligned SGPRs whenever the pool is
     # already on a 4-aligned boundary, otherwise consume unaligned ones.
