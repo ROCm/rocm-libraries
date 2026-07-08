@@ -92,8 +92,8 @@ void expectRaggedTensorRejected(const std::vector<uint8_t>& serializedGraph)
 {
     CpuReferenceGraphExecutor executor;
 
-    ASSERT_TRUE(executor.isApplicable(const_cast<uint8_t*>(serializedGraph.data()),
-                                      serializedGraph.size()))
+    ASSERT_TRUE(
+        executor.isApplicable(const_cast<uint8_t*>(serializedGraph.data()), serializedGraph.size()))
         << "Baseline (non-ragged) graph should be applicable";
 
     auto raggedGraph = makeGraphWithRaggedTensor(serializedGraph);
@@ -165,16 +165,17 @@ TEST(TestCpuReferenceRaggedRejection, Matmul)
 
 TEST(TestCpuReferenceRaggedRejection, Pointwise)
 {
-    auto [graph, bundle, variantPack] = buildPointwiseBinaryGraph({1, 3, 2, 2},
-                                                                  {1, 3, 2, 2},
-                                                                  {1, 3, 2, 2},
-                                                                  DataType::FLOAT,
-                                                                  DataType::FLOAT,
-                                                                  DataType::FLOAT,
-                                                                  DataType::FLOAT,
-                                                                  hipdnn_frontend::PointwiseMode::ADD,
-                                                                  1,
-                                                                  TensorLayout::NCHW);
+    auto [graph, bundle, variantPack]
+        = buildPointwiseBinaryGraph({1, 3, 2, 2},
+                                    {1, 3, 2, 2},
+                                    {1, 3, 2, 2},
+                                    DataType::FLOAT,
+                                    DataType::FLOAT,
+                                    DataType::FLOAT,
+                                    DataType::FLOAT,
+                                    hipdnn_frontend::PointwiseMode::ADD,
+                                    1,
+                                    TensorLayout::NCHW);
     expectRaggedTensorRejected(serialize(graph));
 }
 

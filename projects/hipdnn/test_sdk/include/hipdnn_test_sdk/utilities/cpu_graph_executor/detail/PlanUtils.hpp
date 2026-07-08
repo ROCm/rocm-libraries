@@ -101,11 +101,11 @@ DiagonalBandParams extractDiagonalBandParams(const SdpaAttributesType& nodeAttri
 
 // The CPU references do not support ragged tensors. Reject any graph that
 // contains one so the plan builder is reported as not applicable.
-#define CHECK_NO_RAGGED_TENSORS(tensor_map)                                       \
-    do                                                                            \
-    {                                                                             \
+#define CHECK_NO_RAGGED_TENSORS(tensor_map)                                        \
+    do                                                                             \
+    {                                                                              \
         if(!hipdnn_flatbuffers_sdk::utilities::hasNoRaggedTensorIds((tensor_map))) \
-        {                                                                         \
-            return false;                                                         \
-        }                                                                         \
+        {                                                                          \
+            return false;                                                          \
+        }                                                                          \
     } while(0)

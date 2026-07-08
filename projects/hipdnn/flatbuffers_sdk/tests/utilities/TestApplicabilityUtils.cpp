@@ -138,7 +138,7 @@ TEST(TestApplicabilityUtils, ListUnsupportedRaggedTensorIdsReturnsOnlyUnsupporte
     TensorMapBuilder builder;
     builder.addRagged(1, /*raggedOffsetUid=*/10); // ragged + supported
     builder.addRagged(2, /*raggedOffsetUid=*/11); // ragged + unsupported
-    builder.addDense(3);                          // dense
+    builder.addDense(3); // dense
     builder.addRagged(4, /*raggedOffsetUid=*/12); // ragged + unsupported
 
     EXPECT_THAT(listUnsupportedRaggedTensorIds(builder.map(), /*supportedRaggedIds=*/{1}),
@@ -148,7 +148,7 @@ TEST(TestApplicabilityUtils, ListUnsupportedRaggedTensorIdsReturnsOnlyUnsupporte
 TEST(TestApplicabilityUtils, ListUnsupportedRaggedTensorIdsIgnoresSupportedIdsThatAreNotRagged)
 {
     TensorMapBuilder builder;
-    builder.addDense(1);                          // dense, listed as supported
+    builder.addDense(1); // dense, listed as supported
     builder.addRagged(2, /*raggedOffsetUid=*/11); // ragged + unsupported
 
     // Supported ids that are dense (1) or absent (99) must not affect the result.
