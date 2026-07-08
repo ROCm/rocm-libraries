@@ -155,7 +155,7 @@ header change is a conscious decision when a `ROCKE_ADDR_BUFFER` producer lands.
 
 ```bash
 # Full fresh build (must succeed under -Werror)
-cmake -S Cpp -B /tmp/rocke_verify -DCMAKE_BUILD_TYPE=Release
+cmake -S cpp -B /tmp/rocke_verify -DCMAKE_BUILD_TYPE=Release
 cmake --build /tmp/rocke_verify -j
 
 # Byte-identity gate, both LLVM flavors (must be GREEN for all families)

@@ -244,12 +244,12 @@ ROCKE package and must not import from the CK Tile C++ dispatcher
 (`projects/composablekernel/dispatcher/`) or any other ck_tile asset. Concretely:
 
 - All target metadata, MMA catalogs, layout tables, and capability flags live
-  under `Python/rocke/core/arch/`.
+  under `python/rocke/core/arch/`.
 - ROCKE does not read `dispatcher/codegen/arch_specs.json` at runtime, build
   time, or test time.
 - ROCKE does not import `dispatcher/codegen/arch_filter.py` or any other
   dispatcher Python module.
-- `Python/rocke/` must be installable, importable, and testable without the
+- `python/rocke/` must be installable, importable, and testable without the
   dispatcher being present on disk.
 
 Parity with CK Tile / dispatcher capability lists is a soft goal enforced by
@@ -1250,7 +1250,7 @@ below is non-negotiable.
 - **Cold-start (first compile) is allowed to grow up to 20 %** to cover
   arch metadata load.
 - **Autotune winners must reproduce** on a ROCKE-owned benchmark manifest
-  (`Python/rocke/benchmark/` fixture, committed to the repo): every config
+  (`python/rocke/benchmark/` fixture, committed to the repo): every config
   the autotuner picks before the refactor must remain a legal pick after,
   with measured TFLOPS within 2 %.
 - **gfx950 LLVM IR must be byte-identical** at the end of Phase 3 (after
@@ -1311,7 +1311,7 @@ them. Implementers should read these before touching code:
 
 Use these as review checks when implementing the plan:
 
-- `Python/rocke/` does not import from `dispatcher/` at any time.
+- `python/rocke/` does not import from `dispatcher/` at any time.
 - `instances/` may query `ArchTarget`, but may not import LLVM intrinsic names
   or call ISA-named `IRBuilder` methods after Phase 1.
 - `core/ir.py` operation names do not contain gfx-specific names.

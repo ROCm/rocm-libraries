@@ -23,7 +23,7 @@ gate), not bit-for-bit.
 Must run on a device matching ``--arch`` (e.g. a SLURM cluster with
 ``--gres=gpu:gfx950-mi350x:1`` or ``--gres=gpu:gfx1151:1``).
 
-    PYTHONPATH=Python python3 -m builders.common.fmha_fwd_verify_hip \
+    PYTHONPATH=python python3 -m builders.common.fmha_fwd_verify_hip \
         --arch gfx950 --seqlen-q 64 --seqlen-k 64 --head-size 64 --heads 4
 """
 
