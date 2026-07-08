@@ -346,9 +346,10 @@ struct CShuffleEpilogue
             constexpr auto ToWords       = [](index_t elems) constexpr {
                 return (elems * DataTypeSize) / BytesPerBank;
             };
-            constexpr index_t BaseWords  = ToWords(BaseStrideElems);
-            constexpr index_t PadWords   = ((BaseWords % 2) == 0) ? 1 : 0;
-            constexpr auto PaddingAmount = PadWords * ElemsPer4B;
+            constexpr index_t BaseWords = ToWords(BaseStrideElems);
+            constexpr index_t PadWords  = ((BaseWords % 2) == 0) ? 1 : 0;
+            constexpr auto PaddingAmount =
+                isCTransposed ? PadWords * VectorLen : PadWords * ElemsPer4B;
 #else
             constexpr auto PaddingAmount = VectorLen;
 #endif
