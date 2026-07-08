@@ -299,6 +299,27 @@ struct GemmPipelineAgBgCrCompAsyncEightWaves : public BaseGemmPipelineAgBgCrComp
 
         return Base::TailHandler(RunPipeline, has_hot_loop, tail_number);
     }
+
+    // Quant kernel entry point. A/B are not tuples and HasHotLoop and TailNum are part of the
+    // Problem
+    template <typename ADramBlockWindowTmp,
+              typename BDramBlockWindowTmp,
+              typename std::enable_if_t<!is_detected<is_tuple, ADramBlockWindowTmp>::value &&
+                                            !is_detected<is_tuple, BDramBlockWindowTmp>::value,
+                                        bool>* = nullptr>
+    CK_TILE_DEVICE auto operator()(const ADramBlockWindowTmp& a_dram_block_window_tmp,
+                                   const BDramBlockWindowTmp& b_dram_block_window_tmp,
+                                   index_t num_loop,
+                                   void* p_smem) const
+    {
+        return PipelineImpl<Scheduler>{}.template operator()<Problem::HasHotLoop, Problem::TailNum>(
+            a_dram_block_window_tmp,
+            ck_tile::element_wise::PassThrough{},
+            b_dram_block_window_tmp,
+            ck_tile::element_wise::PassThrough{},
+            num_loop,
+            p_smem);
+    }
 };
 
 } // namespace ck_tile
