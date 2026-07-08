@@ -173,7 +173,7 @@ struct KernelKey
         bool pad_k = true; // Support arbitrary K dimensions via padding
 
         // Stream-K (workgroup K-stream) parameters
-        bool streamk = false;                                          // is a Stream-K kernel
+        bool streamk                         = false;                   // is a Stream-K kernel
         ReductionStrategy reduction_strategy = ReductionStrategy::None; // atomic / linear / tree
         bool workspace = false; // needs a device accumulation buffer (linear/tree)
     } algorithm;
