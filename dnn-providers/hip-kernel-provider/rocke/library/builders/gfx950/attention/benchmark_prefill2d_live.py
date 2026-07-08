@@ -18,7 +18,7 @@ It is the canonical workbench for closing the prefill-2D gap.
 Run:
 
     export AITER_PATH=<path/to/aiter>
-    PYTHONPATH="Python:${AITER_PATH}" \
+    PYTHONPATH="python:${AITER_PATH}" \
       python rocke/library/builders/gfx950/attention/benchmark_prefill2d_live.py \
         --shapes <path/to/unified_attention_shapes.jsonl> \
         --variants prod combo fallback \
@@ -256,8 +256,11 @@ class CkVariantBench:
             use_fp8=is_fp8,
             q_dtype=problem.q_dtype,
             num_warps=flags["num_warps"],
+            block_m_per_warp=flags["block_m_per_warp"],
             kv_storage_dtype=kv_storage_dtype,
             tile_size=tile_size,
+            use_mfma_32x32x8=flags["use_mfma_32x32"],
+            use_transposed_qk_32x32=flags["use_transposed_qk_32x32"],
         )
         if not ok:
             raise NotImplementedError(f"supports_tiled_2d: {reason}")

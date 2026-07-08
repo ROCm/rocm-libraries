@@ -6,7 +6,7 @@
 Run with a Python interpreter that has torch, triton, and AITER available:
 
     export AITER_PATH=<aiter-checkout>
-    PYTHONPATH="Python:${AITER_PATH}" python \\
+    PYTHONPATH="python:${AITER_PATH}" python \\
         rocke/library/builders/gfx950/attention/parity_unified_attention.py [--scenario name]
 
 The harness:
@@ -365,6 +365,49 @@ def default_scenarios() -> List[Scenario]:
             num_kv_heads=2,
             head_size=64,
             block_size=32,
+            dtype=torch.bfloat16,
+        ),
+        # NQK non-power-of-2 correctness cases: NQK does not divide BLOCK_M, so
+        # the padded-block-q path must mask the extra rows written by the CTA.
+        # NQK=5 (Hq=40, Hkv=8): real-world Llama-style head split.
+        Scenario(
+            name="gqa_nqk5_bf16_d128_b64",
+            seq_lens=[(1024, 1024), (512, 512)],
+            num_query_heads=40,
+            num_kv_heads=8,
+            head_size=128,
+            block_size=64,
+            dtype=torch.bfloat16,
+        ),
+        # NQK=7 (Hq=28, Hkv=4): another non-power-of-2 ratio.
+        Scenario(
+            name="gqa_nqk7_bf16_d128_b64",
+            seq_lens=[(1024, 1024), (512, 512)],
+            num_query_heads=28,
+            num_kv_heads=4,
+            head_size=128,
+            block_size=64,
+            dtype=torch.bfloat16,
+        ),
+        # NQK=3 (Hq=24, Hkv=8): smaller non-power-of-2.
+        Scenario(
+            name="gqa_nqk3_bf16_d128_b64",
+            seq_lens=[(1024, 1024), (512, 512)],
+            num_query_heads=24,
+            num_kv_heads=8,
+            head_size=128,
+            block_size=64,
+            dtype=torch.bfloat16,
+        ),
+        # NQK=8 baseline (divides BLOCK_M evenly): sanity check that the fix
+        # does not regress the power-of-2 path.
+        Scenario(
+            name="gqa_nqk8_bf16_d128_b64",
+            seq_lens=[(1024, 1024), (512, 512)],
+            num_query_heads=32,
+            num_kv_heads=4,
+            head_size=128,
+            block_size=64,
             dtype=torch.bfloat16,
         ),
     ]
