@@ -1578,3 +1578,247 @@ def test_320x320_bf16_preloop_1x5_offset_all():
         f"--- Expected ---\n{EXPECTED_PRELOOP_320x320_BF16_1x5_OFFSET_ALL}\n"
         f"--- Actual ---\n{actual}"
     )
+
+# ── F8/MXFP8 multi-DU schedule golden tests ───────────────────
+# Multi-DU MX (numUnroll>1 for the A/B data tensors) is produced by giving the
+# scale tensors a GR k-granularity larger than their per-uid k-window, so
+# SchedulerConfig.__post_init__ expands numSubIterK and sets numUnroll>1. These
+# golden dep-path dumps lock the current multi-DU schedule (including the
+# force_drain "wait_gr(0)" and the uid-tagged wrap-around GRs) before any
+# future scheduler refactor.
+
+def make_256x256_mxfp8_multi_du(partitionSizeN=0):
+    kernel = create_kernel(256, 256, fp4=True, depthU=256)
+    tiA = makeTileInfo('A', kernel)
+    tiB = makeTileInfo('B', kernel)
+    scaleTiA = makeTileInfo('MXSA', kernel)
+    scaleTiB = makeTileInfo('MXSB', kernel)
+    return SchedulerConfig(
+        numMFMATilesM=tiA.localMMATileGrid[0],
+        numMFMATilesN=tiB.localMMATileGrid[0],
+        numSubIterK=tiA.localMMATileGrid[1],
+        lrA=ReadGranularity(mn=1, k=1),
+        lrB=ReadGranularity(mn=1, k=1),
+        grA=ReadGranularity(mn=1, k=2),
+        grB=ReadGranularity(mn=1, k=2),
+        lrSA=ReadGranularity(mn=2, k=2),
+        lrSB=ReadGranularity(mn=2, k=2),
+        grSA=ReadGranularity(mn=scaleTiA.localMMATileGrid[0],
+                             k=scaleTiA.localMMATileGrid[1] * 2),
+        grSB=ReadGranularity(mn=scaleTiB.localMMATileGrid[0],
+                             k=scaleTiB.localMMATileGrid[1] * 2),
+        partitionSizeN=partitionSizeN,
+        pgr=1,
+    )
+
+EXPECTED_EMIT_DEP_ORDER_256x256_MXFP8_MULTI_DU_1x1 = """\
+MAINLOOP (dependency paths):
+  Partition 0:
+    subIterK=0:
+      MFMA: [ 0] MFMAs (MT n, subIterK 0  ) A : [0-7] , B : [0-7] <- [5]
+      preMFMA path 0:
+        [ 5] wait_lr    wait_lr
+      path 0:
+        [ 1] lr         LR A  (MT n, subIterK [1]) [0-7] uid=0
+        [ 2] lr         LR B  (MT n, subIterK [1]) [0-7] uid=0
+        [ 3] lr         LR SA (MT n, subIterK [2,3]) [0-7] uid=0
+      path 1:
+        [ 4] gr         GR A (MT n+1, subIterK [0,1]) ids [0-4] uid=0
+    subIterK=1:
+      MFMA: [ 0] MFMAs (MT n, subIterK 1  ) A : [0-7] , B : [0-7] <- [7]
+      preMFMA path 0:
+        [ 7] wait_lr    wait_lr
+      path 0:
+        [ 8] wait_gr    wait_gr(A=5,B=8)
+        [ 9] sync       sync
+        [10] lr_inc     lr_inc(A) uid=1
+        [11] lr_inc     lr_inc(B) uid=1
+        [ 1] lr         LR A  (MT n, subIterK [2]) [0-7] uid=1
+        [ 2] lr         LR B  (MT n, subIterK [2]) [0-7] uid=1
+        [ 3] lr         LR SB (MT n, subIterK [2,3]) [0-7] uid=0
+      path 1:
+        [ 4] gr         GR A (MT n+1, subIterK [0,1]) ids [5-7] uid=0
+        [ 6] gr_inc     gr_inc(A) uid=0
+        [ 5] gr         GR B (MT n+1, subIterK [0,1]) ids [0-0] uid=0
+    subIterK=2:
+      MFMA: [ 0] MFMAs (MT n, subIterK 2  ) A : [0-7] , B : [0-7] <- [9]
+      preMFMA path 0:
+        [ 9] wait_lr    wait_lr
+      path 0:
+        [10] wait_gr    wait_gr(A=8,B=1)
+        [11] sync       sync
+        [ 1] lr         LR A  (MT n, subIterK [3]) [0-7] uid=1
+        [ 2] lr         LR B  (MT n, subIterK [3]) [0-7] uid=1
+      path 1:
+        [ 3] gr         GR B (MT n+1, subIterK [0,1]) ids [1-7] uid=0
+        [ 6] gr_inc     gr_inc(B) uid=0
+        [ 4] gr         GR SA (MT n+1, subIterK [0,3]) ids [0-7] uid=0
+        [ 7] gr_inc     gr_inc(SA) uid=0
+        [ 5] gr         GR SB (MT n+1, subIterK [0,3]) ids [0-7] uid=0
+        [ 8] gr_inc     gr_inc(SB) uid=0
+    subIterK=3:
+      MFMA: [ 0] MFMAs (MT n, subIterK 3  ) A : [0-7] , B : [0-7] <- [10]
+      preMFMA path 0:
+        [10] wait_lr    wait_lr
+      path 0:
+        [11] wait_gr    wait_gr(B=8,SA=1,SB=1)
+        [12] sync       sync
+        [13] lr_inc     lr_inc(A) uid=0
+        [14] lr_inc     lr_inc(B) uid=0
+        [15] lr_inc     lr_inc(SA) uid=0
+        [16] lr_inc     lr_inc(SB) uid=0
+        [ 1] lr         LR A  (MT n+1, subIterK [0]) [0-7] uid=0
+        [ 2] lr         LR B  (MT n+1, subIterK [0]) [0-7] uid=0
+        [ 3] lr         LR SA (MT n+1, subIterK [0,1]) [0-7] uid=0
+        [ 4] lr         LR SB (MT n+1, subIterK [0,1]) [0-7] uid=0
+      path 1:
+        [ 5] gr         GR A (MT n+1, subIterK [2,3]) ids [0-3] uid=1
+        [ 6] gr         GR A (MT n+1, subIterK [2,3]) ids [4-7] uid=1
+        [ 8] gr_inc     gr_inc(A) uid=1
+        [ 7] gr         GR B (MT n+1, subIterK [2,3]) ids [0-7] uid=1
+        [ 9] gr_inc     gr_inc(B) uid=1
+"""
+
+
+def test_256x256_mxfp8_multi_du_1x1():
+    """Golden dep-path for the 256x256 MXFP8 multi-DU (numUnroll=2) schedule,
+    1x1 partition. Locks the wrap-around uid-tagged GRs and the wait_gr
+    inflight counts of the current multi-DU codepath."""
+    cfg = make_256x256_mxfp8_multi_du()
+    assert cfg.numSubIterK == 4
+    assert cfg.numUnroll['A'] == 2 and cfg.numUnroll['B'] == 2
+    sched = LogicalScheduler(cfg)
+    sched.emit()
+    actual = sched.print_emit_dep_order()
+    assert actual == EXPECTED_EMIT_DEP_ORDER_256x256_MXFP8_MULTI_DU_1x1, (
+        f"Emit dependency order mismatch.\n"
+        f"--- Expected ---\n{EXPECTED_EMIT_DEP_ORDER_256x256_MXFP8_MULTI_DU_1x1}\n"
+        f"--- Actual ---\n{actual}"
+    )
+
+EXPECTED_EMIT_DEP_ORDER_256x256_MXFP8_MULTI_DU_PARTN = """\
+MAINLOOP (dependency paths):
+  Partition 0:
+    subIterK=0:
+      MFMA: [ 0] MFMAs (MT n, subIterK 0  ) A : [0-7] , B : [0-5] <- [5]
+      preMFMA path 0:
+        [ 5] wait_lr    wait_lr
+      path 0:
+        [ 1] lr         LR A  (MT n, subIterK [1]) [0-7] uid=0
+        [ 2] lr         LR B  (MT n, subIterK [1]) [0-5] uid=0
+        [ 3] lr         LR SA (MT n, subIterK [2,3]) [0-7] uid=0
+      path 1:
+        [ 4] gr         GR A (MT n+1, subIterK [0,1]) ids [0-3] uid=0
+    subIterK=1:
+      MFMA: [ 0] MFMAs (MT n, subIterK 1  ) A : [0-7] , B : [0-5] <- [5]
+      preMFMA path 0:
+        [ 5] wait_lr    wait_lr
+      path 0:
+        [ 6] lr_inc     lr_inc(A) uid=1
+        [ 7] lr_inc     lr_inc(B) uid=1
+        [ 1] lr         LR A  (MT n, subIterK [2]) [0-7] uid=1
+        [ 2] lr         LR B  (MT n, subIterK [2]) [0-5] uid=1
+        [ 3] lr         LR SB (MT n, subIterK [2,3]) [0-5] uid=0
+      path 1:
+        [ 4] gr         GR A (MT n+1, subIterK [0,1]) ids [4-6] uid=0
+    subIterK=2:
+      MFMA: [ 0] MFMAs (MT n, subIterK 2  ) A : [0-7] , B : [0-5] <- [7]
+      preMFMA path 0:
+        [ 7] wait_lr    wait_lr
+      path 0:
+        [ 1] lr         LR A  (MT n, subIterK [3]) [0-7] uid=1
+        [ 2] lr         LR B  (MT n, subIterK [3]) [0-5] uid=1
+        [ 3] lr         LR SB (MT n, subIterK [0,1]) [6-7] uid=0
+      path 1:
+        [ 4] gr         GR A (MT n+1, subIterK [0,1]) ids [7-7] uid=0
+        [ 6] gr_inc     gr_inc(A) uid=0
+        [ 5] gr         GR B (MT n+1, subIterK [0,1]) ids [0-2] uid=0
+    subIterK=3:
+      MFMA: [ 0] MFMAs (MT n, subIterK 3  ) A : [0-7] , B : [0-5] <- [3]
+      preMFMA path 0:
+        [ 3] wait_lr    wait_lr
+      path 0:
+        [ 4] lr_inc     lr_inc(B) uid=0
+        [ 1] lr         LR B  (MT n, subIterK [0]) [6-7] uid=0
+      path 1:
+        [ 2] gr         GR B (MT n+1, subIterK [0,1]) ids [3-5] uid=0
+  Partition 1:
+    subIterK=0:
+      MFMA: [ 0] MFMAs (MT n, subIterK 0  ) A : [0-7] , B : [6-7] <- [4]
+      preMFMA path 0:
+        [ 4] wait_lr    wait_lr
+      path 0:
+        [ 5] wait_gr    wait_gr(B=3)
+        [ 6] sync       sync
+        [ 1] lr         LR B  (MT n, subIterK [1]) [6-7] uid=0
+      path 1:
+        [ 2] gr         GR SA (MT n+1, subIterK [0,3]) ids [0-7] uid=0
+        [ 3] gr_inc     gr_inc(SA) uid=0
+    subIterK=1:
+      MFMA: [ 0] MFMAs (MT n, subIterK 1  ) A : [0-7] , B : [6-7] <- [5]
+      preMFMA path 0:
+        [ 5] wait_lr    wait_lr
+      path 0:
+        [ 6] wait_gr    wait_gr(0)
+        [ 7] sync       sync
+        [ 8] lr_inc     lr_inc(B) uid=1
+        [ 1] lr         LR B  (MT n, subIterK [2]) [6-7] uid=1
+        [ 2] lr         LR SB (MT n, subIterK [2,3]) [6-7] uid=0
+      path 1:
+        [ 3] gr         GR SB (MT n+1, subIterK [0,3]) ids [0-7] uid=0
+        [ 4] gr_inc     gr_inc(SB) uid=0
+    subIterK=2:
+      MFMA: [ 0] MFMAs (MT n, subIterK 2  ) A : [0-7] , B : [6-7] <- [4]
+      preMFMA path 0:
+        [ 4] wait_lr    wait_lr
+      path 0:
+        [ 5] wait_gr    wait_gr(SB=1)
+        [ 6] sync       sync
+        [ 1] lr         LR B  (MT n, subIterK [3]) [6-7] uid=1
+      path 1:
+        [ 2] gr         GR B (MT n+1, subIterK [0,1]) ids [6-7] uid=0
+        [ 3] gr_inc     gr_inc(B) uid=0
+    subIterK=3:
+      MFMA: [ 0] MFMAs (MT n, subIterK 3  ) A : [0-7] , B : [6-7] <- [15]
+      preMFMA path 0:
+        [15] wait_lr    wait_lr
+      path 0:
+        [16] wait_gr    wait_gr(A=1,B=2,SA=1,SB=1)
+        [17] sync       sync
+        [18] lr_inc     lr_inc(A) uid=0
+        [19] lr_inc     lr_inc(B) uid=0
+        [20] lr_inc     lr_inc(SA) uid=0
+        [21] lr_inc     lr_inc(SB) uid=0
+        [ 1] lr         LR A  (MT n+1, subIterK [0]) [0-7] uid=0
+        [ 2] lr         LR B  (MT n+1, subIterK [0]) [0-5] uid=0
+        [ 3] lr         LR SA (MT n+1, subIterK [0,1]) [0-7] uid=0
+        [ 4] lr         LR SB (MT n+1, subIterK [0,1]) [0-5] uid=0
+      path 1:
+        [ 5] gr         GR A (MT n+1, subIterK [2,3]) ids [0-2] uid=1
+        [ 6] gr         GR A (MT n+1, subIterK [2,3]) ids [3-5] uid=1
+        [ 7] gr         GR A (MT n+1, subIterK [2,3]) ids [6-7] uid=1
+        [13] gr_inc     gr_inc(A) uid=1
+        [ 8] gr         GR B (MT n+1, subIterK [2,3]) ids [0-0] uid=1
+        [ 9] gr         GR B (MT n+1, subIterK [2,3]) ids [1-3] uid=1
+        [10] gr         GR B (MT n+1, subIterK [2,3]) ids [4-4] uid=1
+        [11] gr         GR B (MT n+1, subIterK [2,3]) ids [5-5] uid=1
+        [12] gr         GR B (MT n+1, subIterK [2,3]) ids [6-7] uid=1
+        [14] gr_inc     gr_inc(B) uid=1
+"""
+
+
+def test_256x256_mxfp8_multi_du_partition_remainder():
+    """Golden dep-path for the 256x256 MXFP8 multi-DU schedule with an uneven
+    N partition (remainder_last -> [6, 2]). Exercises the multi-DU
+    remainder-last partition split and the force_drain wait_gr(0)."""
+    cfg = make_256x256_mxfp8_multi_du(partitionSizeN=6)
+    assert cfg.partitionSizesN == [6, 2]
+    assert cfg.numUnroll['A'] == 2 and cfg.numUnroll['B'] == 2
+    sched = LogicalScheduler(cfg)
+    sched.emit()
+    actual = sched.print_emit_dep_order()
+    assert actual == EXPECTED_EMIT_DEP_ORDER_256x256_MXFP8_MULTI_DU_PARTN, (
+        f"Emit dependency order mismatch.\n"
+        f"--- Expected ---\n{EXPECTED_EMIT_DEP_ORDER_256x256_MXFP8_MULTI_DU_PARTN}\n"
+        f"--- Actual ---\n{actual}"
+    )

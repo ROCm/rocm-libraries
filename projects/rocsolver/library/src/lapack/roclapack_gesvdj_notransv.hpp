@@ -4,7 +4,7 @@
  *     Univ. of Tennessee, Univ. of California Berkeley,
  *     Univ. of Colorado Denver and NAG Ltd..
  *     April 2012
- * Copyright (C) 2020-2024 Advanced Micro Devices, Inc. All rights reserved.
+ * Copyright (C) 2020-2026 Advanced Micro Devices, Inc. All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -261,9 +261,7 @@ rocblas_status rocsolver_gesvdj_notransv_template(rocblas_handle handle,
     }
 
     // everything must be executed with scalars on the host
-    rocblas_pointer_mode old_mode;
-    rocblas_get_pointer_mode(handle, &old_mode);
-    rocblas_set_pointer_mode(handle, rocblas_pointer_mode_host);
+    rocblas_pointer_mode_saver saver(handle, rocblas_pointer_mode_host);
 
     bool leftv = left_svect != rocblas_svect_none;
     bool rightv = right_svect != rocblas_svect_none;
@@ -358,7 +356,6 @@ rocblas_status rocsolver_gesvdj_notransv_template(rocblas_handle handle,
                 m, batch_count, scalars, (T*)work2, (T*)work3, (T*)work4, (T**)work6_workArr);
     }
 
-    rocblas_set_pointer_mode(handle, old_mode);
     return rocblas_status_success;
 }
 

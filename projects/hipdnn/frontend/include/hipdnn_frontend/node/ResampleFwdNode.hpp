@@ -3,6 +3,7 @@
 #pragma once
 
 #include "Node.hpp"
+#include <hipdnn_data_sdk/utilities/ShapeUtilities.hpp>
 #include <hipdnn_frontend/Error.hpp>
 #include <hipdnn_frontend/attributes/GraphAttributes.hpp>
 #include <hipdnn_frontend/attributes/ResampleFwdAttributes.hpp>
@@ -36,6 +37,14 @@ public:
                     "ResampleFwdNode missing output Y for pre-validation"};
         }
 
+        const bool generateIndex = attributes.get_generate_index().value_or(false);
+        if(generateIndex && attributes.get_resample_mode() == ResampleMode::MAXPOOL
+           && !attributes.get_index())
+        {
+            return {ErrorCode::ATTRIBUTE_NOT_SET,
+                    "ResampleFwdNode missing output Index when index generation requested"};
+        }
+
         // Validate tensor ranks if dimensions are already set
         auto x = attributes.get_x();
         if(!x->get_dim().empty() && x->get_dim().size() < 3)
@@ -48,6 +57,19 @@ public:
         {
             return {ErrorCode::INVALID_VALUE,
                     "ResampleFwdNode output Y must have at least rank 3 (N, C, spatial...)"};
+        }
+
+        if(auto index = attributes.get_index())
+        {
+            switch(index->get_data_type())
+            {
+            case DataType::INT8:
+            case DataType::INT32:
+                break;
+            default:
+                return {ErrorCode::INVALID_VALUE,
+                        "ResampleFwdNode output Index type must be Int8 or Int32"};
+            }
         }
 
         return {};
@@ -100,14 +122,30 @@ public:
         // Infer output strides if not set
         if(y->get_stride().empty())
         {
-            std::vector<int64_t> yStrides(yDims.size());
-            yStrides.back() = 1;
-            for(int64_t i = static_cast<int64_t>(yDims.size()) - 2; i >= 0; --i)
+            auto& xStrides = x->get_stride();
+            if(!xStrides.empty())
             {
-                yStrides[static_cast<size_t>(i)]
-                    = yStrides[static_cast<size_t>(i + 1)] * yDims[static_cast<size_t>(i + 1)];
+                auto strideOrder = hipdnn_data_sdk::utilities::extractStrideOrder(xStrides);
+                y->set_stride(hipdnn_data_sdk::utilities::generateStrides(yDims, strideOrder));
             }
-            y->set_stride(yStrides);
+            else
+            {
+                auto strideOrder = hipdnn_data_sdk::utilities::strideOrderNhwc(yDims.size());
+                y->set_stride(hipdnn_data_sdk::utilities::generateStrides(yDims, strideOrder));
+            }
+        }
+
+        auto index = attributes.get_index();
+        if(index)
+        {
+            if(index->get_dim().empty())
+            {
+                index->set_dim(y->get_dim());
+            }
+            if(index->get_stride().empty())
+            {
+                index->set_stride(y->get_stride());
+            }
         }
 
         return {};
