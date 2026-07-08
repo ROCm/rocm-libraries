@@ -265,6 +265,7 @@ validParameters = { # we need to make sure this matches develop
     #
     "WaveSeparateGlobalReadA": [0, 1, 2],
     "WaveSeparateGlobalReadB": [0, 1, 2],
+    "WaveSeparateGlobalReadMetadata": [0, 1, 2],
     # Add an unrolled loop and NGLL loop with swapped GRA and GRB order.
     # which may change the tlb thrashing behavior.
     "UnrollLoopSwapGlobalReadOrder": [0, 1],
