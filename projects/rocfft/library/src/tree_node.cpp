@@ -1,4 +1,4 @@
-// Copyright (C) 2020 - 2025 Advanced Micro Devices, Inc. All rights reserved.
+// Copyright (C) 2020 - 2026 Advanced Micro Devices, Inc. All rights reserved.
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -30,6 +30,7 @@
 
 #include <limits>
 #include <sstream>
+#include <thread>
 
 SchemeTreeVec EmptySchemeTreeVec;
 SchemeVec     EmptySchemeVec;
@@ -555,7 +556,8 @@ void CommPointToPoint::ExecuteAsync(const rocfft_plan                     plan,
 
     if(LOG_PLAN_ENABLED())
     {
-        log_plan("CommPointToPoint\n");
+        log_plan("CommPointToPoint: " + std::to_string(numElems) + " elems, src "
+                 + srcLocation.str() + " -> dst " + destLocation.str() + "\n");
     }
 
     auto srcWithOffset = ptr_offset(
@@ -645,7 +647,7 @@ void CommPointToPoint::Wait()
 
 void CommPointToPoint::Print(rocfft_ostream& os, const int indent) const
 {
-    const std::string indentStr("    ", indent);
+    const std::string indentStr(indent * 4, ' ');
 
     os << indentStr << "CommPointToPoint " << precision_name(precision) << " "
        << PrintArrayType(arrayType) << ":"
@@ -659,6 +661,215 @@ void CommPointToPoint::Print(rocfft_ostream& os, const int indent) const
     os << indentStr << "  numElems: " << numElems << "\n";
     os << std::endl;
 }
+
+#ifdef ROCFFT_RCCL_ENABLE
+// RCCL AllToAll implementation
+void CommRCCLAllToAll::ExecuteAsync(const rocfft_plan                     plan,
+                                    void*                                 in_buffer[],
+                                    void*                                 out_buffer[],
+                                    const rocfft_execution_info_internal& info,
+                                    size_t                                multiPlanIdx,
+                                    const std::map<int, device_callback_t>&)
+{
+    const auto devices = rccl.get_devices();
+
+    if(LOG_PLAN_ENABLED())
+    {
+        log_plan("CommRCCLAllToAll: count_per_rank=" + std::to_string(count_per_rank)
+                 + ", ndevices=" + std::to_string(devices.size()) + ", " + precision_name(precision)
+                 + " " + PrintArrayType(arrayType) + "\n");
+    }
+
+    // collect per-rank send/recv pointers and streams.  the wrapper
+    // requires each vector to be sized num_ranks() and indexed by
+    // RCCL rank; agents[] is already in that order (see constructor).
+    //
+    // Buffer layout (disjoint send/recv):
+    //   sendBuffer:  slot[dst_rank] at offset dst_rank * count_per_rank
+    //                (populated by the pack step antecedents)
+    //   recvBuffer:  slot[src_rank] at offset src_rank * count_per_rank
+    //                (populated by the collective; read by unpack step)
+    std::vector<const void*> send_ptrs(agents.size(), nullptr);
+    std::vector<void*>       recv_ptrs(agents.size(), nullptr);
+    std::vector<hipStream_t> streams(agents.size(), nullptr);
+    for(size_t r = 0; r < agents.size(); ++r)
+    {
+        rocfft_scoped_device dev(devices[r]);
+        send_ptrs[r] = agents[r].sendBuffer.get(in_buffer, out_buffer, local_comm_rank, info);
+        recv_ptrs[r] = agents[r].recvBuffer.get(in_buffer, out_buffer, local_comm_rank, info);
+        streams[r]   = agents[r].stream;
+    }
+
+    // wrapper owns the ncclGroupStart/End scope and per-call
+    // hipSetDevice, so a single call fires the whole collective.
+    rccl.alltoall(send_ptrs, recv_ptrs, streams, count_per_rank, precision, arrayType);
+
+    // collective work is now enqueued on each agent's stream.
+    // record a completion event per agent so Wait() can synchronize
+    // on events (matching every other MultiPlanItem) rather than on
+    // streams directly.
+    for(size_t r = 0; r < agents.size(); ++r)
+    {
+        rocfft_scoped_device dev(devices[r]);
+        if(agents[r].event && hipEventRecord(agents[r].event, agents[r].stream) != hipSuccess)
+            throw std::runtime_error("hipEventRecord failed for RCCL AllToAll on device "
+                                     + std::to_string(devices[r]));
+    }
+}
+
+void CommRCCLAllToAll::Wait()
+{
+    // poll each completion event until the collective finishes
+    for(size_t r = 0; r < agents.size(); ++r)
+    {
+        if(!agents[r].event)
+            continue;
+
+        hipError_t status;
+        while((status = hipEventQuery(agents[r].event)) == hipErrorNotReady)
+            std::this_thread::yield();
+        if(status != hipSuccess)
+            throw std::runtime_error("hipEventQuery failed for RCCL AllToAll");
+    }
+}
+
+void CommRCCLAllToAll::Print(rocfft_ostream& os, const int indent) const
+{
+    const std::string indentStr(indent * 4, ' ');
+    const auto        devices = rccl.get_devices();
+
+    os << indentStr << "CommRCCLAllToAll " << precision_name(precision) << " "
+       << PrintArrayType(arrayType) << ":\n";
+    os << indentStr << "  count_per_rank: " << count_per_rank << "\n";
+    os << indentStr << "  num_ranks: " << agents.size() << "\n";
+    for(size_t r = 0; r < agents.size(); ++r)
+    {
+        os << indentStr << "  rank " << r << ": device=" << devices[r]
+           << " sendBuf=" << PrintBufferPtrOffset(agents[r].sendBuffer, 0)
+           << " recvBuf=" << PrintBufferPtrOffset(agents[r].recvBuffer, 0) << "\n";
+    }
+    os << std::endl;
+}
+
+// RCCL grouped send/recv implementation
+void CommRCCLGrouped::ExecuteAsync(const rocfft_plan                     plan,
+                                   void*                                 in_buffer[],
+                                   void*                                 out_buffer[],
+                                   const rocfft_execution_info_internal& info,
+                                   size_t                                multiPlanIdx,
+                                   const std::map<int, device_callback_t>&)
+{
+    if(LOG_PLAN_ENABLED())
+    {
+        size_t nsends = 0, nrecvs = 0;
+        for(const auto& t : transfers)
+        {
+            if(t.op == rccl_op::send)
+                ++nsends;
+            else
+                ++nrecvs;
+        }
+        log_plan("CommRCCLGrouped: " + std::to_string(nsends) + " sends, " + std::to_string(nrecvs)
+                 + " recvs, " + precision_name(precision) + " " + PrintArrayType(arrayType) + "\n");
+    }
+
+    if(transfers.empty())
+        return;
+
+    // batch all send/recv into one RCCL group; group.end() (ncclGroupEnd)
+    // is what enqueues the work, so event recording must happen after it
+    rocfft_rccl_group_t group;
+
+    for(auto& t : transfers)
+    {
+        if(t.local_location.comm_rank == local_comm_rank)
+        {
+            rocfft_scoped_device dev(t.local_location.device);
+
+            void* data_ptr = ptr_offset(t.buffer.get(in_buffer, out_buffer, local_comm_rank, info),
+                                        t.offset,
+                                        precision,
+                                        arrayType);
+
+            // endpoints are addressed by device id; the wrapper maps
+            // the peer device to its RCCL rank internally
+            switch(t.op)
+            {
+            case rccl_op::send:
+                rccl.send(data_ptr,
+                          t.count,
+                          t.peer_location.device,
+                          t.local_location.device,
+                          t.stream,
+                          precision,
+                          arrayType);
+                break;
+            case rccl_op::recv:
+                rccl.recv(data_ptr,
+                          t.count,
+                          t.peer_location.device,
+                          t.local_location.device,
+                          t.stream,
+                          precision,
+                          arrayType);
+                break;
+            }
+        }
+    }
+
+    // close the group explicitly so a launch failure throws before events record
+    group.end();
+
+    // record a completion event per local transfer so Wait() can
+    // synchronize on events (matching every other MultiPlanItem)
+    // rather than on streams directly.
+    for(auto& t : transfers)
+    {
+        if(t.event)
+        {
+            rocfft_scoped_device dev(t.local_location.device);
+            if(hipEventRecord(t.event, t.stream) != hipSuccess)
+                throw std::runtime_error("hipEventRecord failed for RCCL Grouped on device "
+                                         + std::to_string(t.local_location.device));
+        }
+    }
+}
+
+void CommRCCLGrouped::Wait()
+{
+    // poll each completion event until the transfer finishes
+    for(auto& t : transfers)
+    {
+        if(!t.event)
+            continue;
+
+        hipError_t status;
+        while((status = hipEventQuery(t.event)) == hipErrorNotReady)
+            std::this_thread::yield();
+        if(status != hipSuccess)
+            throw std::runtime_error("hipEventQuery failed for RCCL Grouped");
+    }
+}
+
+void CommRCCLGrouped::Print(rocfft_ostream& os, const int indent) const
+{
+    const std::string indentStr(indent * 4, ' ');
+
+    os << indentStr << "CommRCCLGrouped " << precision_name(precision) << " "
+       << PrintArrayType(arrayType) << ":\n";
+    os << indentStr << "  num_transfers: " << transfers.size() << "\n";
+    for(size_t i = 0; i < transfers.size(); ++i)
+    {
+        const auto& t       = transfers[i];
+        const bool  is_send = (t.op == rccl_op::send);
+        os << indentStr << "  " << (is_send ? "Send" : "Recv") << " " << t.count << " elems "
+           << (is_send ? "to" : "from") << " (comm_rank=" << t.peer_location.comm_rank
+           << ", device=" << t.peer_location.device << ")"
+           << " on device " << t.local_location.device << "\n";
+    }
+    os << std::endl;
+}
+#endif // ROCFFT_RCCL_ENABLE
 
 void CommScatter::ExecuteAsync(const rocfft_plan                     plan,
                                void*                                 in_buffer[],
