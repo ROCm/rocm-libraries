@@ -61,9 +61,8 @@ namespace TensileLite
         // rocisa::DataType to hipDataType for the data generator lives in
         // DataInitializationHelpers.hpp / namespace detail and supports
         // {Float4, Float6, BFloat6, Float8, BFloat8}. isMXFP4* above is kept
-        // because ReferenceValidator's per-solution re-validation logic is still
-        // wired only to the FP4-subtile preswizzle case (no behaviour change
-        // for non-FP4 MX).
+        // for FP4-only callers; per-solution preswizzle uses
+        // needsSolutionDependentMXPreswizzle.
         inline bool isMXTensor(const TensorDescriptor& tensor, size_t mxBlock)
         {
             if(mxBlock == 0)
@@ -909,50 +908,39 @@ namespace TensileLite
             virtual void preSolution(ContractionSolution* const solution) override
             {
                 m_currentSolution = solution;
-                // Re-init MX FP4/FP8 inputs once the solution is known (MI-based preSwizzle when enabled).
-                // Gate on m_mxScaleFormat so we only re-init when the user requested an MX scale layout;
-                // useScaleAB may be empty for MX kernels that use MXSA/MXSB, so do not gate on it.
+                // Re-init MX inputs for solution-dependent HostPreSwizzle.
                 if(m_currentSolution != nullptr
-                   && m_mxScaleFormat > 0
                    && m_currentGemmProblem != nullptr
-                   && !m_gpuPtrs.empty())
+                   && !m_gpuPtrs.empty()
+                   && needsSolutionDependentMXPreswizzle(*m_currentGemmProblem,
+                                                         m_currentSolution))
                 {
-                    // Per-solution re-init is needed only for the gfx950 FP4 subtile
-                    // preswizzle case (the preswizzle layout depends on the solution's
-                    // matrix instruction). Non-FP4 MX dtypes use the K-swizzle path which
-                    // is solution-independent, so they don't need re-running here.
-                    bool isMXFP4 = isMXFP4Problem(*m_currentGemmProblem);
-                    if(isMXFP4)
+                    initializeMXData(*m_currentGemmProblem);
+                    copyValidToGPUBuffer(*m_currentGemmProblem);
+                    copyInputs(m_gpuPtrs,
+                               m_gpuBatchPtrs,
+                               m_maxElements,
+                               m_groupedOffsets,
+                               *m_currentGemmProblem,
+                               hipMemcpyDeviceToDevice);
+                    // Sync CPU current buffers so the reference matches GPU data.
+                    for(int ti : {ContractionProblemGemm::TENSOR::A,
+                                  ContractionProblemGemm::TENSOR::B,
+                                  ContractionProblemGemm::TENSOR::MXSA,
+                                  ContractionProblemGemm::TENSOR::MXSB})
                     {
-                        initializeMXData(*m_currentGemmProblem);
-                        copyValidToGPUBuffer(*m_currentGemmProblem);
-                        copyInputs(m_gpuPtrs,
-                                   m_gpuBatchPtrs,
-                                   m_maxElements,
-                                   m_groupedOffsets,
-                                   *m_currentGemmProblem,
-                                   hipMemcpyDeviceToDevice);
-                        // Sync cpuInput.current from cpuInput.valid for MX
-                        // tensors so the CPU reference reads the regenerated
-                        // data that matches what the GPU received.
-                        for(int ti : {ContractionProblemGemm::TENSOR::A,
-                                      ContractionProblemGemm::TENSOR::B,
-                                      ContractionProblemGemm::TENSOR::MXSA,
-                                      ContractionProblemGemm::TENSOR::MXSB})
+                        auto& desc = m_currentGemmProblem->tensors()[ti];
+                        auto  it   = m_vdata[ti].pristine.find(desc.dataType());
+                        if(it == m_vdata[ti].pristine.end())
+                            continue;
+                        auto& p = it->second;
+                        if(p.cpuInput.valid && p.cpuInput.current)
                         {
-                            auto& desc = m_currentGemmProblem->tensors()[ti];
-                            auto  it   = m_vdata[ti].pristine.find(desc.dataType());
-                            if(it == m_vdata[ti].pristine.end())
-                                continue;
-                            auto& p = it->second;
-                            if(p.cpuInput.valid && p.cpuInput.current)
-                            {
-                                size_t bytes = multiplyElementSize(
-                                    p.maxElements, desc.elementBytes());
-                                std::memcpy(p.cpuInput.current.get(),
-                                            p.cpuInput.valid.get(),
-                                            bytes);
-                            }
+                            size_t bytes = multiplyElementSize(
+                                p.maxElements, desc.elementBytes());
+                            std::memcpy(p.cpuInput.current.get(),
+                                        p.cpuInput.valid.get(),
+                                        bytes);
                         }
                     }
                 }
@@ -1083,6 +1071,17 @@ namespace TensileLite
             void initializeConstantInputs(ContractionProblemGemm const& problem);
 
             void initializeMXData(ContractionProblemGemm const& problem);
+
+            // True when swizzled MX scales depend on the solution.
+            bool needsSolutionDependentMXPreswizzle(
+                ContractionProblemGemm const& problem,
+                ContractionSolution const*    solution) const
+            {
+                return isMXProblem(problem) && m_mxScaleFormat > 0
+                       && m_mxScaleLayout == MXScaleLayout::kGFX950
+                       && solution != nullptr
+                       && solution->problemType.mxScaleFormat == 1;
+            }
 
             void copyInputs(std::vector<void*>&               ptrs,
                             std::vector<void**>&              batchPtrs,
