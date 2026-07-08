@@ -37,15 +37,6 @@ set_target_properties( rocfft-internal-test PROPERTIES
 
 target_compile_options( rocfft-internal-test PRIVATE ${WARNING_FLAGS} )
 
-# Instrument for code coverage (no-op unless BUILD_CODE_COVERAGE is ON).
-rocfft_add_coverage_flags( rocfft-internal-test )
-if( BUILD_CODE_COVERAGE )
-  # rocfft_add_coverage_flags adds the link flag as INTERFACE (meant for
-  # libraries).  This is a leaf executable that links rocfft-function-pool
-  # directly, so the flag must be on its own link line too.
-  target_link_options( rocfft-internal-test PRIVATE -fprofile-instr-generate )
-endif()
-
 # Link rocfft-function-pool directly (not roc::rocfft, which would
 # duplicate the function_pool_data singleton).
 target_link_libraries( rocfft-internal-test PRIVATE
