@@ -33,6 +33,8 @@ namespace hipdnn_frontend::graph
  * auto dx = graph.conv_dgrad(dy, w, ConvDgradAttributes()
  *              .set_padding({1, 1})
  *              .set_stride({1, 1}));
+ * // Required before validation/build; strides may be omitted and inferred.
+ * dx->set_dim({N, C, H, W});
  * @endcode
  *
  * @see Graph::conv_dgrad(), ConvFpropAttributes, ConvWgradAttributes

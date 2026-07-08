@@ -18,7 +18,7 @@ It is the canonical workbench for closing the prefill-2D gap.
 Run:
 
     export AITER_PATH=<path/to/aiter>
-    PYTHONPATH="Python:${AITER_PATH}" \
+    PYTHONPATH="python:${AITER_PATH}" \
       python rocke/library/builders/gfx950/attention/benchmark_prefill2d_live.py \
         --shapes <path/to/unified_attention_shapes.jsonl> \
         --variants prod combo fallback \
@@ -256,8 +256,11 @@ class CkVariantBench:
             use_fp8=is_fp8,
             q_dtype=problem.q_dtype,
             num_warps=flags["num_warps"],
+            block_m_per_warp=flags["block_m_per_warp"],
             kv_storage_dtype=kv_storage_dtype,
             tile_size=tile_size,
+            use_mfma_32x32x8=flags["use_mfma_32x32"],
+            use_transposed_qk_32x32=flags["use_transposed_qk_32x32"],
         )
         if not ok:
             raise NotImplementedError(f"supports_tiled_2d: {reason}")
@@ -491,7 +494,7 @@ def main() -> int:
             try:
                 if v in ("prod", "ck3d"):
                     # production dispatch via run_unified_attention_torch
-                    ck_out, ck_ms = _run_prod(
+                    ck_out, ck_ms, kname = _run_prod(
                         shape,
                         data,
                         sw,
@@ -501,7 +504,6 @@ def main() -> int:
                         iters=args.iterations,
                         backend=("3d" if v == "ck3d" else "auto"),
                     )
-                    kname = v
                 else:
                     ck_out, ck_ms, kname = bench.run(
                         shape,
@@ -583,7 +585,12 @@ def main() -> int:
 def _run_prod(shape, data, sw, is_fp8, bench, *, warmup, iters, backend="auto"):
     """Time the production dispatcher run_unified_attention_torch."""
     import torch
-    from kernels import run_unified_attention_torch
+    from kernels import (
+        run_unified_attention_torch,
+        supports_native_unified_attention_tiled,
+        supports_native_unified_attention_3d_tiled,
+    )
+    from kernels.common.attention_unified import _tiled_spec_from_problem
     from rocke.runtime import synchronize_and_release, time_launches
 
     problem = bench._problem(shape, sw, is_fp8)
@@ -610,7 +617,23 @@ def _run_prod(shape, data, sw, is_fp8, bench, *, warmup, iters, backend="auto"):
 
     ms = time_launches(call_once, warmup=warmup, iters=iters, stream=hip_stream)
     synchronize_and_release(hip_stream)
-    return out, ms
+
+    prefer_2d = backend == "auto" and problem.select_path() == "2d"
+    if backend == "3d" or (backend == "auto" and not prefer_2d):
+        ok_3d, _ = supports_native_unified_attention_3d_tiled(problem)
+        if ok_3d:
+            instance_name = "3d"
+        else:
+            instance_name = "scalar"
+    elif backend in ("tiled", "auto"):
+        ok_t, _ = supports_native_unified_attention_tiled(problem)
+        instance_name = (
+            _tiled_spec_from_problem(problem).kernel_name() if ok_t else "scalar"
+        )
+    else:
+        instance_name = "scalar"
+
+    return out, ms, instance_name
 
 
 if __name__ == "__main__":

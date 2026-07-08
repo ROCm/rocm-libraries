@@ -31,6 +31,13 @@ import io
 import math
 
 from rocisa.code import Module
+from .ScheduleTypes import (
+    AnnotatedSchedule,
+    AugmentedSchedule,
+    EmittedSchedule,
+    LogicalSchedule,
+    PartitionSchedule,
+)
 
 from ...Common.GlobalParameters import globalParameters
 
@@ -53,6 +60,62 @@ def _checkout_tile(pool, numRegs, tag):
 def _checkin_tile(tile):
     """Return a contiguous tile to its pool via its base-register handle."""
     tile.regList.pool.checkIn(tile.regList.indices[0])
+
+
+def _hoistSetupBeforeLastMFMA(loopBody, setupInsts):
+    """Move loop-control setup (dec + compare) above the body's last MFMA.
+
+    Place the loop-control branch immediately after the last MFMA to hide
+    branching latency behind it. The decrement+compare that feed the branch's
+    SCC are normally emitted right after the body (MFMA; s_sub; s_cmp;
+    s_cbranch); hoisting them above the final MFMA produces (s_sub; s_cmp;
+    MFMA; s_cbranch) so the branch directly follows the MFMA.
+
+    The hoist is dependency-safe: SCC set by s_cmp survives the MFMA (which
+    never touches SCC), and the MFMA does not read LoopCounterL.
+
+    Falls back to appending the setup when the body has no MFMA (e.g. a skip
+    branch with no preceding compute), leaving behavior unchanged there.
+    Returns a rebuilt Module; the input is left untouched.
+    """
+    from rocisa.instruction import MFMAInstruction, MXMFMAInstruction
+
+    items = loopBody.flatitems()
+    lastMfma = -1
+    for idx, it in enumerate(items):
+        if isinstance(it, (MFMAInstruction, MXMFMAInstruction)):
+            lastMfma = idx
+
+    rebuilt = Module(loopBody.name)
+    if lastMfma < 0:
+        for it in items:
+            rebuilt.add(it)
+        for s in setupInsts:
+            rebuilt.add(s)
+        return rebuilt
+
+    for idx, it in enumerate(items):
+        if idx == lastMfma:
+            for s in setupInsts:
+                rebuilt.add(s)
+        rebuilt.add(it)
+    return rebuilt
+
+
+def _emitBodySetupBranch(module, loopBody, setupInsts, branch, hoist):
+    """Append a loop body, its dec+compare setup, and the trailing control branch.
+
+    When ``hoist`` is set, the setup is moved above the body's last MFMA (via
+    _hoistSetupBeforeLastMFMA) so the branch lands right after that MFMA to hide
+    branching latency. Otherwise the setup and branch simply follow the body.
+    """
+    if hoist:
+        module.add(_hoistSetupBeforeLastMFMA(loopBody, setupInsts))
+    else:
+        module.add(loopBody)
+        for s in setupInsts:
+            module.add(s)
+    module.add(branch)
 
 
 class Pass(IntEnum):
@@ -616,11 +679,13 @@ class LogicalScheduler:
         self.config = config
         self.tensors: List[str] = ['A', 'B'] + (['SA', 'SB'] if config.hasScale else [])
         self._completed: set = set()   # tracks which passes have run (Pass enum members)
-        self._partitions: Optional[List[List[SubIterKSlot]]] = None  # shared mutable state across passes
-        self._emitted: Optional[List[List[EmittedModule]]] = None
-        self._preloop_emitted: Optional[List[List[List[EmittedModule]]]] = None
-        self._ngll_emitted: Optional[List[List[List[EmittedModule]]]] = None
-        self._nll_emitted: Optional[List[List[List[EmittedModule]]]] = None
+        # Shared mutable state across passes. The same field holds different
+        # stage representations over time; see ScheduleTypes for stage meanings.
+        self._partitions: Optional[Union[LogicalSchedule, AnnotatedSchedule, AugmentedSchedule]] = None
+        self._emitted: Optional[EmittedSchedule] = None
+        self._preloop_emitted: Optional[EmittedSchedule] = None
+        self._ngll_emitted: Optional[EmittedSchedule] = None
+        self._nll_emitted: Optional[EmittedSchedule] = None
         # Tail-loop tile bookkeeping. Tail loop only use a subset of tiles, so we track which tileIds are
         # unused or freed for reuse within the tail loop.
         self._tail_unused_tile_ids: Dict[str, set] = {'A': set(), 'B': set(),
@@ -647,7 +712,7 @@ class LogicalScheduler:
         return {'A': (cfg._prefixM[piM], cfg._prefixM[piM + 1]),
                 'B': (cfg._prefixN[piN], cfg._prefixN[piN + 1])}
 
-    def place_LRs(self) -> List[List[SubIterKSlot]]:
+    def place_LRs(self) -> LogicalSchedule:
         """Place MFMAs and LRs based on read granularities.
 
         Returns a list of partitions, each containing a list of SubIterKSlots.
@@ -1381,7 +1446,7 @@ class LogicalScheduler:
                         partition=pi,
                         unrollId=uid))
 
-    def place_GRs(self) -> List[SubIterKSlot]:
+    def place_GRs(self) -> PartitionSchedule:
         """Place Global Reads by iterating MFMAs across partitions.
 
         Phase 1: Build ordered GR list from partition traversal respecting gr granularities.
@@ -2602,7 +2667,7 @@ class LogicalScheduler:
                 cross.append(dep)
         return same, cross
 
-    def emit(self) -> List[List[List[EmittedModule]]]:
+    def emit(self) -> EmittedSchedule:
         """Convert placements into EmittedModule chains per partition per subIterK.
 
         Returns [partition][subIterK][EmittedModule].
@@ -2759,7 +2824,7 @@ class LogicalScheduler:
             em.before = b
         return [em for em in emitted if em.moduleId not in removed_ids]
 
-    def build_ngll(self) -> List[List[List[EmittedModule]]]:
+    def build_ngll(self) -> EmittedSchedule:
         """NGLL (No Global Load Loop): mainloop without GR(n+2), GR_INC.
 
         WaitGR inflight counts are zeroed since no new GRs are in flight.
@@ -2789,7 +2854,7 @@ class LogicalScheduler:
         self._ngll_emitted = ngll
         return ngll
 
-    def build_nll(self) -> List[List[List[EmittedModule]]]:
+    def build_nll(self) -> EmittedSchedule:
         """NLL (No Load Loop): mainloop without GR, LR(n+1), GR_INC, LR_INC,
         WaitGR(n+1)+Sync. Keeps LR(n), MFMAs, WaitGR(n). WaitGR counts are
         zeroed only when no LR(n) remains in the last subIterK slot."""
@@ -3184,7 +3249,7 @@ class LogicalScheduler:
                     ))
         return result
 
-    def build_preloop(self) -> List[List[List[EmittedModule]]]:
+    def build_preloop(self) -> EmittedSchedule:
         """Build preloop: pipeline initialization sequence before mainloop.
 
         PGR=0: no preloop (mainloop only).
@@ -3293,7 +3358,7 @@ class LogicalScheduler:
             _MIN_MFMA_GAP_DS_READ_TO_WAIT_GFX1250,
         )
         from Tensile.Components.Subtile.WaitAluInsertion import (
-            insertLRSwapRawWaitAlu, setMatrixAReuse, insertLRSwapWarWaitAlu)
+            insertLRSwapRawWaitAlu, setMatrixReuse, insertLRSwapWarWaitAlu)
         from rocisa.code import Module, Label
         from rocisa.container import sgpr
         from rocisa.instruction import SCmpEQU32, SCBranchSCC0, SMovB32
@@ -3306,10 +3371,6 @@ class LogicalScheduler:
 
         module = Module(label)
         module.addComment0(f"{label} start")
-        if kernel.get("ClusterBarrier"):
-            from Tensile.Components.Subtile.ClusterBarrier import subtileClusterBarrier
-            for inst in subtileClusterBarrier(writer, kernel, label=label).flatitems():
-                module.add(inst)
         use_pap_preloop_skip = (
             label == "PRELOOP"
             and kernel.get("UseSubtileImpl")
@@ -3356,12 +3417,18 @@ class LogicalScheduler:
         # the final post-schedule order (no-op on other archs).
         module = insertLRSwapRawWaitAlu(module, writer, kernel)
         # gfx1250: enable WMMA matrix-A reuse on the final post-schedule order.
-        module = setMatrixAReuse(module, writer, kernel)
+        module = setMatrixReuse(module, writer, kernel, 'a')
+        module = setMatrixReuse(module, writer, kernel, 'b')
         # PGR=0 only: the unprefetched loop puts the ds_read of an LR offset
         # right before the swap that overwrites it.  PGR>=1 prefetch separates
         # them (swap hoisted ahead, dscnt drain between), so no WAR can form.
         if self.config.pgr == 0 and label.startswith("MAINLOOP"):
             module = insertLRSwapWarWaitAlu(module, writer, kernel)
+        # Cluster barrier: splice both halves against the final post-schedule order.
+        # Signal goes right after the mainloop's existing workgroup barrier (reusing
+        # that sync); the wait is appended at the end to hide its cross-CU latency.
+        from Tensile.Components.Subtile.ClusterBarrier import insertClusterBarrier
+        module = insertClusterBarrier(module, writer, kernel)
         return module
 
     def _emit_pgr2_tail_lw_align(self, kernel):
@@ -3422,6 +3489,10 @@ class LogicalScheduler:
 
         module = Module("MainAndExitLoops")
         uf = self.unroll_factor
+
+        # gfx1250 requires a loop-back/exit s_cbranch to be alone/first after an
+        # MFMA, so hoist the per-copy dec+compare above the body's last MFMA.
+        isGfx1250 = writer.states.archCaps.get("HasWmmaArbStallBit", False)
 
         def make_subtile_pap_module(skip_barrier=False):
             if (kernel.get("UseSubtileImpl")
@@ -3492,7 +3563,7 @@ class LogicalScheduler:
 
         # ── Mainloop ──
         module.addComment0("MAINLOOP")
-        loopBegin = Label("LoopBeginL", "")
+        loopBegin = Label("LoopBeginL", "", alignment=16)
 
         exitValue = self.config.pgr
 
@@ -3514,21 +3585,25 @@ class LogicalScheduler:
                 module.add(_SMovB32(dst=mgpr(0), src=sgpr("LoopCounterL"),
                                     comment="trace: M0 = LoopCounterL"))
                 module.add(_STtraceData(comment="trace: emit M0 to SQTT"))
-            module.add(self._emitLoop(writer, kernel, f"MAINLOOP_C{ui}",
-                                      self._emitted_per_unroll[ui]))
-            module.add(SSubU32(dst=sgpr("LoopCounterL"),
-                               src0=sgpr("LoopCounterL"), src1=1,
-                               comment=f"dec counterL (copy {ui})"))
-            module.add(SCmpEQU32(src0=sgpr("LoopCounterL"), src1=exitValue,
-                                 comment=f"counterL == {exitValue}? (copy {ui} exit)"))
+            loopBody = self._emitLoop(writer, kernel, f"MAINLOOP_C{ui}",
+                                      self._emitted_per_unroll[ui])
+            # dec + compare that produce the SCC the loop-control branch reads.
+            setupInsts = [
+                SSubU32(dst=sgpr("LoopCounterL"),
+                        src0=sgpr("LoopCounterL"), src1=1,
+                        comment=f"dec counterL (copy {ui})"),
+                SCmpEQU32(src0=sgpr("LoopCounterL"), src1=exitValue,
+                          comment=f"counterL == {exitValue}? (copy {ui} exit)"),
+            ]
             if ui < uf - 1:
-                module.add(SCBranchSCC1(
+                branch = SCBranchSCC1(
                     labelName=exitLabels[ui].getLabelName(),
-                    comment=f"copy {ui} exit → NGLL_C{ui}"))
+                    comment=f"copy {ui} exit → NGLL_C{ui}")
             else:
-                module.add(SCBranchSCC0(
+                branch = SCBranchSCC0(
                     labelName=loopBegin.getLabelName(),
-                    comment="restart mainloop"))
+                    comment="restart mainloop")
+            _emitBodySetupBranch(module, loopBody, setupInsts, branch, hoist=isGfx1250)
 
         # ── NGLL + NLL exit paths ──
         hasNGLL = self.config.pgr >= 2
@@ -3926,7 +4001,7 @@ class LogicalScheduler:
         return tensor.ljust(2)
 
 
-    def print_lr(self, partitions: List[List[SubIterKSlot]] = None) -> str:
+    def print_lr(self, partitions: Optional[LogicalSchedule] = None) -> str:
         """Print place_LRs output in design doc format."""
         if partitions is None:
             partitions = self._partitions
@@ -4105,7 +4180,7 @@ class LogicalScheduler:
         return f"{kind} {p.tensor} @P{part}:subIterK={slot}{uid}{mt}"
 
 
-    def print_emit(self, all_partitions: List[List[List[EmittedModule]]] = None) -> str:
+    def print_emit(self, all_partitions: Optional[EmittedSchedule] = None) -> str:
         """Print emit output: EmittedModule list with before-links."""
         if all_partitions is None:
             all_partitions = self._emitted
@@ -4140,7 +4215,7 @@ class LogicalScheduler:
             return f" uid={src.tiles.subIterK_start // per_uid_k}"
         return ""
 
-    def print_emit_dep_order(self, all_partitions: List[List[List[EmittedModule]]] = None) -> str:
+    def print_emit_dep_order(self, all_partitions: Optional[EmittedSchedule] = None) -> str:
         """Print emit output as dependency paths (same decomposition as _extractPathsFromBeforeDeps)."""
         from Tensile.Components.Subtile.InstructionScheduler import extractPathsFromBeforeDeps
         if all_partitions is None:

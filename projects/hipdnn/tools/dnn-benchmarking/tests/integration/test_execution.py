@@ -141,11 +141,11 @@ class TestExecution:
             # Benchmark
             result = executor.benchmark(handle, variant_pack)
 
-            # Should have 5 E2E timing values
-            assert len(result.e2e_timings) == 5
+            # Should have 5 host timing values
+            assert len(result.host_timings) == 5
 
-            # All E2E timings should be positive
-            for t in result.e2e_timings:
+            # All host timings should be positive
+            for t in result.host_timings:
                 assert t > 0
 
             # Should also have kernel timings (if HIP backend available)
@@ -200,7 +200,7 @@ class TestExecution:
             executor.warmup(handle, variant_pack)
             result = executor.benchmark(handle, variant_pack)
 
-            assert len(result.e2e_timings) == 5
+            assert len(result.host_timings) == 5
 
             # Get output (C matrix: [256, 1024])
             output_data = buffer_manager.get_output_data(3)
@@ -247,7 +247,7 @@ class TestExecution:
             executor.warmup(handle, variant_pack)
             result = executor.benchmark(handle, variant_pack)
 
-            assert len(result.e2e_timings) == 5
+            assert len(result.host_timings) == 5
 
             # Get output (same shape as input: [64, 128, 56, 56])
             output_data = buffer_manager.get_output_data(2)
@@ -293,7 +293,7 @@ class TestExecution:
             executor.warmup(handle, variant_pack)
             result = executor.benchmark(handle, variant_pack)
 
-            assert len(result.e2e_timings) == 5
+            assert len(result.host_timings) == 5
 
             # Get output (z: [128, 256, 14, 14])
             output_data = buffer_manager.get_output_data(3)
@@ -339,7 +339,7 @@ class TestExecution:
             executor.warmup(handle, variant_pack)
             result = executor.benchmark(handle, variant_pack)
 
-            assert len(result.e2e_timings) == 5
+            assert len(result.host_timings) == 5
 
             # Get output (y: [32, 64, 28, 28])
             output_data = buffer_manager.get_output_data(6)
@@ -602,7 +602,7 @@ class TestPyTorchReferenceValidation:
         assert len(reference_rows) == 1
         assert reference_rows[0].provider == "pytorch"
         assert reference_rows[0].status == "success"
-        assert reference_rows[0].e2e_stats is not None
+        assert reference_rows[0].host_stats is not None
         assert reference_rows[0].gpu_kernel_stats is not None
         assert engine_rows
         assert any(row.status == "success" for row in engine_rows)

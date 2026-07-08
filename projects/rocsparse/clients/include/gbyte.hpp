@@ -247,9 +247,10 @@ constexpr double gebsrmm_gbyte_count(rocsparse_int Mb,
 }
 
 template <typename A, typename B, typename C, typename I>
-constexpr double bellmm_gbyte_count(I Mb, I width, I block_dim, I nnz_B, I nnz_C, bool beta = false)
+constexpr double
+    bellmm_gbyte_count(I Mb, I ell_cols, I ell_block_size, I nnz_B, I nnz_C, bool beta = false)
 {
-    return (sizeof(A) * Mb * width * block_dim * block_dim + sizeof(I) * Mb * width
+    return (sizeof(A) * Mb * ell_cols * ell_block_size + sizeof(I) * Mb * ell_cols / ell_block_size
             + sizeof(B) * nnz_B + sizeof(C) * (nnz_C + (beta ? nnz_C : 0)))
            / 1e9;
 }

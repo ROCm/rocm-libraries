@@ -41,13 +41,13 @@ from pathlib import Path
 HERE = Path(__file__).resolve().parent
 ROCKE = HERE.parents[2]  # rocKE root (differential -> instances -> tests -> rocKE)
 CKC = ROCKE  # engine build root (cmake -S <ROCKE> produces librocke_core.a)
-PYROOT = ROCKE / "Python"  # holds rocke
+PYROOT = ROCKE / "python"  # holds rocke
 LIB_ROOT = (
     ROCKE.parent / "library"
 )  # kernels.*, builders.*, dispatch.* top-level packages
 PARITY = ROCKE / "tests" / "instances" / "parity"
 LIB_PARITY = ROCKE.parent / "library" / "tests" / "parity"
-INCLUDE = ROCKE / "Cpp" / "include"
+INCLUDE = ROCKE / "cpp" / "include"
 TMP = Path(tempfile.gettempdir()) / "rocke_diff"
 TMP.mkdir(parents=True, exist_ok=True)
 

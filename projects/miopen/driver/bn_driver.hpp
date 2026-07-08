@@ -601,9 +601,6 @@ int BatchNormDriver<TInput, Tref, TAcc, TScaleBias, TOut>::AllocateBuffersAndCop
 {
     status_t status = STATUS_SUCCESS;
     DEFINE_CONTEXT(ctx);
-#if MIOPEN_BACKEND_OPENCL
-    clGetCommandQueueInfo(q, CL_QUEUE_CONTEXT, sizeof(cl_context), &ctx, nullptr);
-#endif
     status |= in.AllocOnDeviceAndInit(q, ctx, GetTensorSize(&in.GetTensor().desc), buffer_check);
 
     if(isFwdInfer || isFwdTrain)
