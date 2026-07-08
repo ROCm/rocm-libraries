@@ -81,6 +81,14 @@ def _format_gtest_command_tail(
     return f"{tail}{extra_args_string}"
 
 
+def _ctest_python_command(is_windows):
+    """Python executable name for CTest rtest invocations at run time.
+
+    Windows Python installs typically expose ``python`` on PATH, not ``python3``.
+    """
+    return "python" if is_windows else "python3"
+
+
 def _format_category_command(
     use_rtest_driver,
     name_prefix,
@@ -90,12 +98,14 @@ def _format_category_command(
     category_name,
     test_yaml=None,
     command_args_string="",
+    is_windows=False,
 ):
     """Return the COMMAND tail for add_test (everything after COMMAND)."""
     if use_rtest_driver:
         rtest_script = _rtest_script_basename(name_prefix)
         rtest_set = f"ctest_{category_name}"
-        return f'"${{Python3_EXECUTABLE}}" {rtest_script} -t {rtest_set}{extra_args_string}'
+        py = _ctest_python_command(is_windows)
+        return f"{py} {rtest_script} -t {rtest_set}{extra_args_string}"
     return _format_gtest_command_tail(
         target_name,
         pattern_string,
@@ -117,12 +127,17 @@ def _format_install_add_test_line(
     gpu_arch=None,
     install_executable=None,
     install_command_args_string="",
+    is_windows=False,
 ):
     """One-line add_test(...) for install-time CTestTestfile fragments."""
     suffix = f"_{gpu_arch}" if gpu_arch else ""
     test_name = f"{name_prefix}_{category_name}{suffix}_suite"
     if use_rtest_driver:
-        py = shlex.quote(cmake_python3) if cmake_python3 else "python3"
+        py = (
+            shlex.quote(cmake_python3)
+            if cmake_python3
+            else _ctest_python_command(is_windows)
+        )
         rtest_script = _rtest_script_basename(name_prefix)
         rtest_set = f"ctest_{category_name}"
         return (
@@ -600,6 +615,7 @@ def main():
                 category_name,
                 test_yaml,
                 command_args_string,
+                is_windows=is_windows,
             )
             print(f"  COMMAND {cmd_tail}")
             print(f"  WORKING_DIRECTORY {working_dir}")
@@ -632,6 +648,7 @@ def main():
                             test_yaml,
                             install_executable=install_executable,
                             install_command_args_string=install_command_args_string,
+                            is_windows=is_windows,
                         )
                     )
                     env_prop = f' ENVIRONMENT "{env_string}"' if env_string else ""
@@ -768,6 +785,7 @@ def main():
                     category_name,
                     cat_test_yaml,
                     command_args_string,
+                    is_windows=is_windows,
                 )
                 print(f"  COMMAND {cmd_tail}")
                 print(f"  WORKING_DIRECTORY {working_dir}")
@@ -801,6 +819,7 @@ def main():
                                 gpu_arch=gpu_arch,
                                 install_executable=install_executable,
                                 install_command_args_string=install_command_args_string,
+                                is_windows=is_windows,
                             )
                         )
                         env_prop = f' ENVIRONMENT "{env_string}"' if env_string else ""
