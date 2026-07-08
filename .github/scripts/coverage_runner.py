@@ -1,6 +1,11 @@
 #!/usr/bin/env python3
 """Run tests with coverage profiling and/or generate coverage reports.
 
+NOTE: This script is currently NOT wired into the CI flow. The coverage report
+job in ``.github/workflows/therock-ci-coverage.yml`` now invokes ``llvm-profdata``
+and ``llvm-cov`` inline instead of going through this wrapper. It is kept here for
+reference / potential reuse; remove it if it is confirmed unnecessary.
+
 This is the report-time half of the coverage flow described in TheRock's coverage
 design docs. It is driven by the ``coverage_metadata.json`` produced by
 ``export_coverage_metadata.py`` and can either:

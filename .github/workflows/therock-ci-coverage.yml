@@ -140,10 +140,6 @@ jobs:
           find "${DIST}" -name 'librocm_sysdeps_*.so*' -exec cp -av {} "${STAGE}/bin/" \;
           # Demangler used by llvm-cov show for readable HTML.
           cp -av "${LLVM_BIN}/llvm-cxxfilt" "${STAGE}/bin/" 2>/dev/null || true
-          echo "Staged coverage objects:"
-          ls -lR "${STAGE}"
-          echo "llvm-profdata dependencies (in build env):"
-          ldd "${STAGE}/bin/llvm-profdata" || true
 
       - name: Export coverage metadata
         run: |
@@ -274,35 +270,51 @@ jobs:
           REPORT_DIR="${GITHUB_WORKSPACE}/coverage-report"
           mkdir -p "${REPORT_DIR}"
           METADATA="${OBJECTS_DIR}/coverage_metadata.json"
+          PROJECT="$(echo "${CMAKE_TARGET}" | tr '[:upper:]' '[:lower:]')"
 
-          # Drive merge + report from the build-time metadata. --skip-tests: the
-          # tests already ran in the package-test stage and uploaded their profraw.
-          python3 .github/scripts/coverage_runner.py \
-            --build-dir "${OBJECTS_DIR}" \
-            --metadata "${METADATA}" \
-            --coverage-dir "${REPORT_DIR}" \
-            --profraw-dir "${PROFRAW_DIR}" \
-            --skip-tests
+          # Version-matched llvm tools were staged next to their runtime libs by
+          # the build job; run them from there via LD_LIBRARY_PATH.
+          LLVM_BIN="${OBJECTS_DIR}/bin"
+          export LD_LIBRARY_PATH="${LLVM_BIN}:${LD_LIBRARY_PATH:-}"
+          chmod +x "${LLVM_BIN}/llvm-profdata" "${LLVM_BIN}/llvm-cov" "${LLVM_BIN}/llvm-cxxfilt" 2>/dev/null || true
 
-          # If no profraw was produced (e.g. a GPU family whose machines run only
-          # host-side tests that never exercise the instrumented library), the
-          # runner skips report generation and no coverage.info exists. Treat that
-          # as a clean no-op so the absence of data on one family does not fail CI.
-          if [[ ! -f "${REPORT_DIR}/coverage.info" ]]; then
-            echo "No coverage.info produced; skipping report post-processing for this build."
+          # Instrumented shared libraries to pass to llvm-cov as -object.
+          mapfile -t OBJECTS < <(find "${OBJECTS_DIR}/lib" -type f -name '*.so*' 2>/dev/null | sort)
+          mapfile -t PROFRAW_FILES < <(find "${PROFRAW_DIR}" -type f -name '*.profraw' 2>/dev/null | sort)
+
+          # Nothing to report when a build produced no profraw (e.g. a GPU family
+          # whose machines run only host-side tests that never exercise the
+          # instrumented library) or no instrumented object was staged. Treat as a
+          # clean no-op so one family's absence of data does not fail CI.
+          if [[ ${#PROFRAW_FILES[@]} -eq 0 || ${#OBJECTS[@]} -eq 0 ]]; then
+            echo "No profraw (${#PROFRAW_FILES[@]}) or instrumented object (${#OBJECTS[@]}); skipping report."
             exit 0
           fi
 
-          # Make lcov paths repo-relative so Codecov can map them to the source tree.
-          if [[ -f "${REPORT_DIR}/coverage.info" ]]; then
-            sed -i "s|${GITHUB_WORKSPACE}/||g" "${REPORT_DIR}/coverage.info"
-          fi
+          OBJ_ARGS=()
+          for o in "${OBJECTS[@]}"; do OBJ_ARGS+=(-object "${o}"); done
 
-          # Collect details for the reference links file. Header-only components
-          # have no .so; their instrumented objects are the staged test binaries.
+          IGNORE_RE="$(python3 -c "import json; print(json.load(open('${METADATA}')).get('ignore_filename_regex',''))")"
+          IGNORE_ARGS=()
+          if [[ -n "${IGNORE_RE}" ]]; then IGNORE_ARGS=("-ignore-filename-regex=${IGNORE_RE}"); fi
+
+          # Merge the per-binary profraw into one profile, then emit text, HTML and
+          # LCOV reports directly with the version-matched llvm tools.
+          PROFDATA="${REPORT_DIR}/${PROJECT}.profdata"
+          "${LLVM_BIN}/llvm-profdata" merge -sparse -o "${PROFDATA}" "${PROFRAW_FILES[@]}"
+          "${LLVM_BIN}/llvm-cov" report "${OBJ_ARGS[@]}" -instr-profile="${PROFDATA}" ${IGNORE_ARGS[@]+"${IGNORE_ARGS[@]}"} \
+            | tee "${REPORT_DIR}/code_cov_${PROJECT}.report"
+          "${LLVM_BIN}/llvm-cov" show "${OBJ_ARGS[@]}" -instr-profile="${PROFDATA}" ${IGNORE_ARGS[@]+"${IGNORE_ARGS[@]}"} \
+            -Xdemangler="${LLVM_BIN}/llvm-cxxfilt" --format=html --output-dir="${REPORT_DIR}"
+          "${LLVM_BIN}/llvm-cov" export "${OBJ_ARGS[@]}" -instr-profile="${PROFDATA}" ${IGNORE_ARGS[@]+"${IGNORE_ARGS[@]}"} \
+            --format=lcov > "${REPORT_DIR}/coverage.info"
+
+          # Make lcov paths repo-relative so Codecov can map them to the source tree.
+          sed -i "s|${GITHUB_WORKSPACE}/||g" "${REPORT_DIR}/coverage.info"
+
+          # Collect details for the reference links file.
           mapfile -t SOURCES < <(sed -n 's|^SF:||p' "${REPORT_DIR}/coverage.info" 2>/dev/null | sort -u)
-          mapfile -t OBJECTS < <( { find "${OBJECTS_DIR}/lib" -type f -name "*.so*" 2>/dev/null; find "${OBJECTS_DIR}/test" -type f 2>/dev/null; } | sort)
-          PROFRAW_COUNT=$(find "${PROFRAW_DIR}" -type f -name '*.profraw' 2>/dev/null | wc -l)
+          PROFRAW_COUNT=${#PROFRAW_FILES[@]}
 
           # Generate the reference text file with all relevant paths and links.
           LINKS_FILE="${REPORT_DIR}/coverage-report-links.txt"
@@ -318,7 +330,7 @@ jobs:
             echo
             echo "[Coverage config]"
             echo "  Config:  test_categories_coverage.yaml -> coverage_metadata.json"
-            echo "  Runner:  .github/scripts/coverage_runner.py (--skip-tests)"
+            echo "  Report:  llvm-profdata merge + llvm-cov (report/show/export), inline in this job"
             echo
             echo "[TheRock - where ${PROJECT_NAME} was packed for coverage]"
             echo "  Build TheRock ref: ${BUILD_THEROCK_REF}"
