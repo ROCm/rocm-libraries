@@ -24,6 +24,7 @@ Documentation for rocFFT is available at
 
 * Modified the `rocfft_plan_get_work_buffer_size` and `rocfft_execution_info_set_work_buffer` functions to get and set work memory for the current HIP device.
   * Multi-device transforms can require work memory on any of the devices used for input or output bricks, and the current device set at plan creation.  Users should loop over the set of devices used by the input/output of the transform and check the work memory requirements for each device.
+* Relaxed the usage requirements for `rocfft_setup` and `rocfft_cleanup`.
 
 ### Resolved issues
 

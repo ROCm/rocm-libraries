@@ -368,6 +368,54 @@ TEST(rocfft_UnitTest, log_levels)
     ROCFFT_CATCH_TEST_EXCEPTIONS;
 }
 
+TEST(rocfft_UnitTest, setup_cleanup_counter)
+{
+    if(hash_prob(random_seed, ::testing::UnitTest::GetInstance()->current_test_info()->name())
+       > unittest_prob)
+    {
+        GTEST_SKIP();
+    }
+    try
+    {
+        LocalCleanup cleanup([]() {
+            rocfft_cleanup();
+            rocfft_setup();
+        });
+        rocfft_cleanup();
+
+        constexpr size_t nsetups = 4;
+        for(auto ncleanups : {nsetups, nsetups + 1})
+        {
+            std::vector<std::thread>   setup_threads, cleanup_threads;
+            std::vector<rocfft_status> setup_statuses(nsetups, rocfft_status_failure);
+            std::vector<rocfft_status> cleanup_statuses(ncleanups, rocfft_status_failure);
+            for(size_t i = 0; i < nsetups; i++)
+                setup_threads.emplace_back([&, i]() { setup_statuses[i] = rocfft_setup(); });
+
+            for(auto& t : setup_threads)
+                t.join();
+
+            EXPECT_TRUE(
+                std::all_of(setup_statuses.begin(), setup_statuses.end(), [](rocfft_status status) {
+                    return status == rocfft_status_success;
+                }));
+
+            for(size_t i = 0; i < ncleanups; i++)
+                cleanup_threads.emplace_back([&, i]() { cleanup_statuses[i] = rocfft_cleanup(); });
+
+            for(auto& t : cleanup_threads)
+                t.join();
+
+            EXPECT_EQ(
+                std::any_of(cleanup_statuses.begin(),
+                            cleanup_statuses.end(),
+                            [](rocfft_status status) { return status != rocfft_status_success; }),
+                ncleanups > nsetups);
+        }
+    }
+    ROCFFT_CATCH_TEST_EXCEPTIONS
+}
+
 // Check whether logs can be emitted from multiple threads properly
 TEST(rocfft_UnitTest, log_multithreading)
 {
