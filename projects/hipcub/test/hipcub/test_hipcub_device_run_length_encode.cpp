@@ -485,12 +485,9 @@ void large_sizes_rle_test()
     SCOPED_TRACE(testing::Message() << "with device_id = " << device_id);
     HIP_CHECK(hipSetDevice(device_id));
 
-    using key_type        = size_t;
     using count_type      = size_t;
     using offset_type     = size_t;
     using iota_iterator_t = test_utils::counting_iterator<offset_type>;
-
-    const bool debug_synchronous = false;
 
     hipStream_t stream = 0; // default
     if constexpr(use_graphs)
