@@ -1021,3 +1021,14 @@ def known_arches() -> Tuple[str, ...]:
 def arch_from_isa(isa: str) -> str:
     """Extract the gfx token from an isa triple like ``amdgcn-amd-amdhsa--gfx942``."""
     return isa.rsplit("-", 1)[-1] if "-" in isa else isa
+
+
+def validate_arch(arch: str) -> None:
+    if arch is None:
+        raise ValueError(
+            "Could not detect a GPU architecture. Pass in an explicit architecture instead."
+        )
+    elif arch not in known_arches():
+        raise ValueError(
+            f"Unknown GPU architecture detected. Known architectures include: {known_arches()}"
+        )

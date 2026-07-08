@@ -16,7 +16,7 @@ from __future__ import annotations
 import pathlib
 import unittest
 
-from rocke.core.arch import ArchTarget, known_arches, normalize_dtype
+from rocke.core.arch import ArchTarget, known_arches, normalize_dtype, validate_arch
 from rocke.core.isa import Gfx9MfmaBackend, Gfx950Backend, backend_for
 
 _ROCKE_ROOT = pathlib.Path(__file__).resolve().parents[2] / "python" / "rocke"
@@ -112,6 +112,26 @@ class TestArchTarget(unittest.TestCase):
         self.assertEqual(normalize_dtype("half"), "fp16")
         self.assertEqual(normalize_dtype("bf16"), "bf16")
         self.assertEqual(normalize_dtype("f32"), "fp32")
+
+    def test_validate_arch_none(self):
+        """`validate_arch` should raise ValueError when arch is None."""
+        with self.assertRaises(ValueError) as ctx:
+            validate_arch(None)
+        self.assertIn("Could not detect", str(ctx.exception))
+        self.assertIn("Pass in an explicit", str(ctx.exception))
+
+    def test_validate_arch_unknown(self):
+        """`validate_arch` should raise ValueError for unknown arch."""
+        with self.assertRaises(ValueError) as ctx:
+            validate_arch("gfx9999")
+        self.assertIn("Unknown GPU architecture", str(ctx.exception))
+        self.assertIn("Known architecures include", str(ctx.exception))
+
+    def test_validate_arch_valid(self):
+        """`validate_arch` should not raise for known arches."""
+        for arch in known_arches():
+            # Should not raise
+            validate_arch(arch)
 
 
 class TestMmaCatalog(unittest.TestCase):

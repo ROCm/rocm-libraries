@@ -20,6 +20,7 @@ IR/lowering pipeline only. End-to-end runtime tests live in
 from __future__ import annotations
 
 import unittest
+from unittest.mock import patch, Mock
 
 import pytest
 
@@ -3083,13 +3084,46 @@ class TestExpandedPatternMatchers(unittest.TestCase):
 
 
 class TestLoweringRegistryBuild(unittest.TestCase):
-    """End-to-end ``can_lower`` + ``candidates`` + ``build`` smoke tests.
+    """Lowerer tests: candidate generation phase (GPU-agnostic).
 
-    These tests cover the path from a normalized fusion graph all the
-    way through HSACO build for each concrete lowerer. They do NOT
-    launch the kernels (no GPU); the goal is to confirm the lowerers
-    wire up a real launcher object on every supported region kind.
+    Tests that validate lowerers can recognize regions and generate
+    spec configurations without requiring GPU hardware. Architecture
+    is mocked to gfx950 so that tests can still run without a GPU.
     """
+
+    @classmethod
+    def setUpClass(cls):
+        """Mock HIP runtime dependencies for in-process testing without GPU.
+
+        These tests do not launch kernels or require a physical GPU. To achieve this, we mock:
+
+        - ``get_device_arch``: Returns a fixed architecture string (gfx950)
+          so the compiler targets a known ISA without querying the actual
+          device via ``hipGetDeviceProperties``.
+
+        - ``Runtime.load_module``: Bypasses ``hipModuleLoadData``. The
+          mock allows tests to validate that lowerers produce a well-formed
+          launcher object without requiring a GPU driver.
+
+        Individual tests can override these mocks (via nested ``patch``
+        context managers) to exercise error paths or architecture-specific
+        behavior.
+        """
+        cls.arch_patcher = patch(
+            "rocke.runtime.hip_module.get_device_arch", return_value="gfx950"
+        )
+
+        cls.load_module_patcher = patch(
+            "rocke.runtime.hip_module.Runtime.load_module", return_value=Mock()
+        )
+        cls.arch_patcher.start()
+        cls.load_module_patcher.start()
+
+    @classmethod
+    def tearDownClass(cls):
+        """Clean up HIP runtime mocks after all tests complete."""
+        cls.arch_patcher.stop()
+        cls.load_module_patcher.stop()
 
     def _toy_gemm_graph(self, with_epilogue=True):
         from rocke.helpers import FusionOp, FusionTensor, build_graph
@@ -3133,7 +3167,33 @@ class TestLoweringRegistryBuild(unittest.TestCase):
         for cfg in cfgs:
             self.assertTrue(hasattr(cfg.spec, "_fused_epilogue"))
 
-    @_requires_gpu
+    def test_gemm_epilogue_candidates_errors_on_invalid_arch(self):
+        from rocke.helpers import GemmEpilogueLowerer, GreedyFusionScheduler
+
+        graph = self._toy_gemm_graph(with_epilogue=True)
+        plan = GreedyFusionScheduler().schedule(graph)
+        region = plan.regions[0]
+        lowerer = GemmEpilogueLowerer()
+        # Override the original class mock to test the error case when get_device_arch returns None
+        with patch("rocke.runtime.hip_module.get_device_arch", return_value=None):
+            with self.assertRaises(ValueError) as ctx:
+                lowerer.candidates(graph, region)
+            self.assertIn("Could not detect", str(ctx.exception))
+
+    def test_gemm_epilogue_build_errors_on_invalid_arch(self):
+        from rocke.helpers import GemmEpilogueLowerer, GreedyFusionScheduler
+
+        graph = self._toy_gemm_graph(with_epilogue=True)
+        plan = GreedyFusionScheduler().schedule(graph)
+        region = plan.regions[0]
+        lowerer = GemmEpilogueLowerer()
+        cfgs = lowerer.candidates(graph, region)
+        # Override the original class mock to test the error case when get_device_arch returns None
+        with patch("rocke.runtime.hip_module.get_device_arch", return_value=None):
+            with self.assertRaises(ValueError) as ctx:
+                lowerer.build(cfgs[0])
+            self.assertIn("Could not detect", str(ctx.exception))
+
     def test_gemm_epilogue_build_emits_kernel_launcher(self):
         from rocke.helpers import GemmEpilogueLowerer, GreedyFusionScheduler
 
@@ -3149,7 +3209,6 @@ class TestLoweringRegistryBuild(unittest.TestCase):
         self.assertGreater(built.block_size, 0)
         self.assertEqual(built.extra.get("bias"), "bias")
 
-    @_requires_gpu
     def test_elementwise_lowerer_round_trips(self):
         from rocke.helpers import (
             ElementwiseLowerer,
@@ -3184,7 +3243,6 @@ class TestLoweringRegistryBuild(unittest.TestCase):
         self.assertEqual(built.spec.op, "relu")
         self.assertEqual(built.spec.dtype, "f16")
 
-    @_requires_gpu
     def test_reduction_lowerer_round_trips(self):
         from rocke.helpers import (
             FusionOp,
