@@ -24,7 +24,7 @@
  *
  *******************************************************************************/
 
-#include <miopen/conv/invokers/ocl_wrw_rdc.hpp>
+#include <miopen/conv/invokers/wrw_rdc.hpp>
 
 #include <miopen/conv/wrw_invoke_params.hpp>
 #include <miopen/handle.hpp>
@@ -35,7 +35,7 @@
 namespace miopen {
 namespace conv {
 
-InvokerFactory MakeOclWrWRdcInvokerFactory(bool twoKernels, size_t workspaceSize)
+InvokerFactory MakeWrWRdcInvokerFactory(bool twoKernels, size_t workspaceSize)
 {
     if(twoKernels)
     {
