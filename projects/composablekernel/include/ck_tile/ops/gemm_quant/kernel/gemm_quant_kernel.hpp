@@ -1111,7 +1111,9 @@ struct QuantGemmMultiDKernel
         const auto& ds_tensor_view = generate_tuple(
             [&](auto i) {
                 using DDataType_ = remove_cvref_t<std::tuple_element_t<i.value, DsDataType>>;
-                return make_tensor_view<address_space_enum::global>(
+                return make_tensor_view<address_space_enum::global,
+                                        memory_operation_enum::set,
+                                        amd_buffer_coherence_enum::SYSTEM_NT1>(
                     static_cast<const DDataType_*>(ds_ptr[i]), ds_desc[i]);
             },
             number<NumDTensor>{});
@@ -1187,7 +1189,9 @@ struct QuantGemmMultiDKernel
         const auto& c_tensor_view = [&]() {
             if constexpr(std::is_same_v<CLayout, tensor_layout::gemm::RowMajor>)
             {
-                return make_naive_tensor_view<address_space_enum::global, DstInMemOp>(
+                return make_naive_tensor_view<address_space_enum::global,
+                                              DstInMemOp,
+                                              amd_buffer_coherence_enum::SYSTEM_NT1>(
                     c_ptr,
                     make_tuple(kargs.M, kargs.N),
                     make_tuple(kargs.stride_C, 1),
@@ -1196,7 +1200,9 @@ struct QuantGemmMultiDKernel
             }
             else
             {
-                return make_naive_tensor_view<address_space_enum::global, DstInMemOp>(
+                return make_naive_tensor_view<address_space_enum::global,
+                                              DstInMemOp,
+                                              amd_buffer_coherence_enum::SYSTEM_NT1>(
                     c_ptr,
                     make_tuple(kargs.M, kargs.N),
                     make_tuple(1, kargs.stride_C),
