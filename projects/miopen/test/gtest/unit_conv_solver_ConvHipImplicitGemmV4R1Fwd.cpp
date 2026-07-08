@@ -62,7 +62,7 @@ miopen::unit_tests::UnitTestConvSolverParams GetTestParams()
     if constexpr(datatype != miopenFloat)
     {
         supported_gpus = supported_gpus | Gpu::gfx120X;
-    }  
+    }
     auto p = miopen::unit_tests::UnitTestConvSolverParams(supported_gpus);
     p.Tunable(5);
     p.SetConvAttrFp16Alt(0);
