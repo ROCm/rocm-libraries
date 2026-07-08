@@ -54,7 +54,7 @@ miopen::unit_tests::UnitTestConvSolverParams GetTestParams()
     if constexpr(datatype != miopenFloat)
     {
         supported_gpus = supported_gpus | Gpu::gfx120X;
-    }  
+    }
     auto p = miopen::unit_tests::UnitTestConvSolverParams(supported_gpus);
     p.Tunable(5);
     p.SetConvAttrFp16Alt(0);
@@ -62,7 +62,7 @@ miopen::unit_tests::UnitTestConvSolverParams GetTestParams()
     p.SetTolerance(Gpu::gfx908, miopenFloat, 40.0f);
     p.SetTolerance(Gpu::gfx90A, miopenFloat, 40.0f);
     p.SetTolerance(Gpu::gfx120X, miopenHalf, 250.0f);
-    p.SetTolerance(Gpu::gfx120X, miopenBFloat16, 30.0f); 
+    p.SetTolerance(Gpu::gfx120X, miopenBFloat16, 30.0f);
     return p;
 }
 
