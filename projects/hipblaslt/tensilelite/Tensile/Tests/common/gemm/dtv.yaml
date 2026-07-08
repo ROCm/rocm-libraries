@@ -17,7 +17,6 @@ GlobalParameters:
   DataInitTypeBeta: 1
   DataInitTypeBias: 13
   DataInitTypeScaleAlphaVec: 12
-  #MaxFileName: 256
 
 BenchmarkProblems:
   ########################################
@@ -182,7 +181,7 @@ BenchmarkProblems:
         - DirectToVgprA: [true]
         - UseSgprForGRO: [0,1]
         - TransposeLDS: [0,1]
-        - StreamK: [0,2]
+        - StreamK: [0,3]
         - Groups:
           -
             - MatrixInstruction: [16, 16, 16, 1,  1,   2, 1,  4,1 ]
@@ -278,7 +277,7 @@ BenchmarkProblems:
         #- SourceSwap: [0, 1]
         - DirectToVgprB: [true]
         - UseSgprForGRO: [0,1]
-        - StreamK: [0,1]
+        - StreamK: [0]
         - Groups:
           -
             - MatrixInstruction: [16, 16, 16, 1,  1,   1, 2,  1,4 ]
@@ -732,7 +731,7 @@ BenchmarkProblems:
         #- SourceSwap: [0, 1]
         - DirectToVgprB: [true]
         - UseSgprForGRO: [0,1]
-        - StreamK: [0,2]
+        - StreamK: [0]
         - Groups:
           -
             - MatrixInstruction: [16, 16, 16, 1,  1,   1, 2,  1,4 ]
@@ -824,7 +823,7 @@ BenchmarkProblems:
         - DirectToVgprA: [true]
         - UseSgprForGRO: [0,1]
         - TransposeLDS: [0,1]
-        - StreamK: [0,1]
+        - StreamK: [0]
         - Groups:
           -
             - MatrixInstruction: [16, 16,  4, 1,  1,   1, 1,  4,1 ]
@@ -995,7 +994,7 @@ BenchmarkProblems:
         - DirectToVgprA: [true]
         - UseSgprForGRO: [0,1]
         - TransposeLDS: [0,1]
-        - StreamK: [0,2]
+        - StreamK: [0]
         - Groups:
           -
             - MatrixInstruction: [16, 16,  4, 1,  1,   1, 1,  4,1 ]
@@ -1165,7 +1164,6 @@ BenchmarkProblems:
         - DirectToVgprA: [true]
         - UseSgprForGRO: [0,1]
         - TransposeLDS: [0,1]
-        #- StreamK: [0,1]
         - Groups:
           -
             - MatrixInstruction: [16, 16,  4, 1,  1,   1, 1,  4,1 ]
@@ -1246,7 +1244,6 @@ BenchmarkProblems:
         #- SourceSwap: [0, 1]
         - DirectToVgprB: [true]
         - UseSgprForGRO: [0,1]
-        #- StreamK: [0,3]
         - Groups:
           -
             - MatrixInstruction: [16, 16,  4, 1,  1,   1, 1,  1,4 ]
@@ -1671,7 +1668,6 @@ BenchmarkProblems:
         - UseSgprForGRO: [0,1]
         - TransposeLDS: [0,1]
         - ConvertAfterDS: [true]
-        #- StreamK: [0,2]
         - Groups:
           -
             - MatrixInstruction: [16, 16, 16, 1,  1,   2, 1,  4,1 ]
@@ -1759,7 +1755,6 @@ BenchmarkProblems:
         - DirectToVgprB: [true]
         - UseSgprForGRO: [0,1]
         - ConvertAfterDS: [true]
-        #- StreamK: [0,1]
         - Groups:
           -
             - MatrixInstruction: [16, 16, 16, 1,  1,   1, 2,  1,4 ]
@@ -1852,7 +1847,6 @@ BenchmarkProblems:
         - UseSgprForGRO: [0,1]
         - TransposeLDS: [0,1]
         - ConvertAfterDS: [true]
-        # - StreamK: [0,3]
         - Groups:
           -
             - MatrixInstruction: [16, 16, 16, 1,  1,   2, 1,  4,1 ]
