@@ -47,7 +47,7 @@ using namespace hipsparse_test;
 template <typename I, typename J, typename T>
 void testing_spmm_bsr_bad_arg(const Arguments& argus)
 {
-#if(!defined(CUDART_VERSION))
+#if(!defined(CUDART_VERSION) || CUDART_VERSION >= 12080)
     int64_t              mb         = 10;
     int64_t              kb         = 10;
     int64_t              n          = 10;
@@ -196,7 +196,7 @@ void testing_spmm_bsr_bad_arg(const Arguments& argus)
 template <typename I, typename J, typename T>
 void testing_spmm_bsr(Arguments argus)
 {
-#if(!defined(CUDART_VERSION))
+#if(!defined(CUDART_VERSION) || CUDART_VERSION >= 12080)
     J                    m         = argus.M;
     J                    n         = argus.N;
     J                    k         = argus.K;

@@ -14,6 +14,28 @@ dnn_provider_setup_version(hipblaslt_provider ${CMAKE_CURRENT_LIST_DIR})
 
 project(hipblaslt-provider VERSION ${HIPBLASLT_PROVIDER_VERSION} LANGUAGES CXX)
 
+# ----------------------------------------------------------------------------
+# TheRock Feature Flags
+#
+# See: https://github.com/ROCm/TheRock/blob/main/docs/development/flags.md
+#
+# These flags are injected during the project() call above via
+# CMAKE_PROJECT_TOP_LEVEL_INCLUDES (TheRock's build system), which only
+# populates the cache during that call. They must therefore be declared AFTER
+# project(): declared before, option() captures the pre-injection default
+# (typically OFF) and the injected value is silently ignored, leaving the
+# feature compiled out despite the flag being set.
+# ----------------------------------------------------------------------------
+option(HIPDNN_HIPBLASLT_PROVIDER_ENABLE_MX_GEMM
+    "Enable MX (microscaling) data-type support for GEMM" OFF
+)
+if(HIPDNN_HIPBLASLT_PROVIDER_ENABLE_MX_GEMM)
+    message(STATUS "hipblaslt-provider: MX GEMM support enabled")
+    add_compile_definitions(HIPDNN_HIPBLASLT_PROVIDER_ENABLE_MX_GEMM)
+else()
+    message(STATUS "hipblaslt-provider: MX GEMM support disabled")
+endif()
+
 # Root of the rocm-libraries monorepo (for shared infrastructure like CTest categories).
 # Used by the YAML-based test categorization wiring further down. Guarded with an EXISTS
 # check at the point of use so standalone / sparse checkouts that lack shared/ctest still build.
@@ -151,11 +173,13 @@ add_library(
     HipblasltContainer.cpp
     HipblasltPlugin.cpp
     HipblasltUtils.cpp
-    # Matmul-related files
     engines/plans/HipblasltMatmulPlan.cpp
     engines/plans/HipblasltMatmulPlanBuilder.cpp
+    $<$<BOOL:${HIPDNN_HIPBLASLT_PROVIDER_ENABLE_MX_GEMM}>:engines/plans/HipblasltMxMatmulPlan.cpp>
+    $<$<BOOL:${HIPDNN_HIPBLASLT_PROVIDER_ENABLE_MX_GEMM}>:engines/plans/HipblasltMxMatmulPlanBuilder.cpp>
     HipblasltMatmulDesc.cpp
     HipblasltMatrixLayout.cpp
+    HipblasltMatrixTransformDesc.cpp
 )
 target_include_directories(hipblaslt_plugin_private PUBLIC ${CMAKE_CURRENT_SOURCE_DIR})
 dnn_provider_generate_version_header(hipblaslt_provider hipblaslt_plugin_private ${CMAKE_CURRENT_LIST_DIR})

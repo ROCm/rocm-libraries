@@ -89,7 +89,7 @@ endif()
 # Using standardized versioning from rocm-cmake
 set ( ROCFFT_VERSION_MAJOR "1" )
 set ( ROCFFT_VERSION_MINOR "0" )
-set ( ROCFFT_VERSION_PATCH "38" )
+set ( ROCFFT_VERSION_PATCH "39" )
 set ( VERSION_STRING "${ROCFFT_VERSION_MAJOR}.${ROCFFT_VERSION_MINOR}.${ROCFFT_VERSION_PATCH}" )
 rocm_setup_version( VERSION ${VERSION_STRING} )
 
@@ -227,6 +227,8 @@ endif()
 # gated directly at the instrumentation sites (library/src) without toggling the
 # shared BUILD_CODE_COVERAGE variable.
 option(ROCFFT_ENABLE_COVERAGE "Enable code coverage" OFF)
+# Optional RCCL backend for single-node multi-GPU communication.
+option(ROCFFT_RCCL_ENABLE "Enable RCCL for optimized single-node multi-GPU communication" OFF)
 
 # Internal (library-side) unit tests.  enable_testing() must be called
 # here, an ancestor of library/src, for ctest to discover them.
