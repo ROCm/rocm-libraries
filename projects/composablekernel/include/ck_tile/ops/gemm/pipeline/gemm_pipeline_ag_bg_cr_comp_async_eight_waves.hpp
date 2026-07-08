@@ -315,11 +315,15 @@ struct GemmPipelineAgBgCrCompAsyncEightWaves : public BaseGemmPipelineAgBgCrComp
                                    index_t num_loop,
                                    void* p_smem) const
     {
+        using NullTileWindowType =
+            decltype(make_null_tile_window(make_tuple(number<0>{}, number<0>{})));
         return PipelineImpl<Scheduler>{}.template operator()<Problem::HasHotLoop, Problem::TailNum>(
             a_dram_block_window_tmp,
             ck_tile::element_wise::PassThrough{},
             b_dram_block_window_tmp,
             ck_tile::element_wise::PassThrough{},
+            NullTileWindowType{},
+            NullTileWindowType{},
             num_loop,
             p_smem);
     }
