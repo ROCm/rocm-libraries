@@ -77,61 +77,78 @@ rocblas_status rocblas_internal_gemm(rocblas_handle    handle,
 
 #ifdef BUILD_WITH_TENSILE
 
-    if(BATCHED)
+    // The grid Y/Z dimensions are hardware-limited (e.g. 65536 on gfx120x). Tensile gemm
+    // kernels map the free (n) dimension to grid.y, so a single launch with n beyond
+    // (limit * tile_n) silently drops the trailing workgroups and leaves those output
+    // columns uninitialized (wrong/NaN results). Chunk n so every Tensile launch stays
+    // within the limit, matching the chunking already done on the source-GEMM and _64 paths.
+    for(int64_t n_base = 0; n_base < n; n_base += c_i64_grid_YZ_chunk)
     {
-        status = rocblas_call_tensile(handle,
-                                      alpha,
-                                      beta,
-                                      A,
-                                      B,
-                                      C,
-                                      C, // gemm uses C matrix for output D
-                                      trans_a,
-                                      trans_b,
-                                      ldc, // gemm uses C matrix for output D
-                                      stride_c,
-                                      offset_c,
-                                      ldc,
-                                      stride_c,
-                                      offset_c,
-                                      lda,
-                                      stride_a,
-                                      offset_a,
-                                      ldb,
-                                      stride_b,
-                                      offset_b,
-                                      m,
-                                      n,
-                                      k,
-                                      batch_count);
-    }
-    else
-    {
-        status = rocblas_call_tensile(handle,
-                                      alpha,
-                                      beta,
-                                      A + offset_a,
-                                      B + offset_b,
-                                      C + offset_c,
-                                      C + offset_c,
-                                      trans_a,
-                                      trans_b,
-                                      ldc,
-                                      stride_c,
-                                      0,
-                                      ldc,
-                                      stride_c,
-                                      0,
-                                      lda,
-                                      stride_a,
-                                      0,
-                                      ldb,
-                                      stride_b,
-                                      0,
-                                      m,
-                                      n,
-                                      k,
-                                      batch_count);
+        rocblas_int    nblock  = rocblas_int(std::min<int64_t>(n - n_base, c_i64_grid_YZ_chunk));
+        rocblas_stride c_shift = n_base * ldc;
+        rocblas_stride b_shift = (trans_b == rocblas_operation_none) ? n_base * ldb : n_base;
+
+        if(BATCHED)
+        {
+            status = rocblas_call_tensile(handle,
+                                          alpha,
+                                          beta,
+                                          A,
+                                          B,
+                                          C,
+                                          C, // gemm uses C matrix for output D
+                                          trans_a,
+                                          trans_b,
+                                          ldc, // gemm uses C matrix for output D
+                                          stride_c,
+                                          offset_c + c_shift,
+                                          ldc,
+                                          stride_c,
+                                          offset_c + c_shift,
+                                          lda,
+                                          stride_a,
+                                          offset_a,
+                                          ldb,
+                                          stride_b,
+                                          offset_b + b_shift,
+                                          m,
+                                          nblock,
+                                          k,
+                                          batch_count);
+        }
+        else
+        {
+            status = rocblas_call_tensile(handle,
+                                          alpha,
+                                          beta,
+                                          A + offset_a,
+                                          B + offset_b + b_shift,
+                                          C + offset_c + c_shift,
+                                          C + offset_c + c_shift,
+                                          trans_a,
+                                          trans_b,
+                                          ldc,
+                                          stride_c,
+                                          0,
+                                          ldc,
+                                          stride_c,
+                                          0,
+                                          lda,
+                                          stride_a,
+                                          0,
+                                          ldb,
+                                          stride_b,
+                                          0,
+                                          m,
+                                          nblock,
+                                          k,
+                                          batch_count);
+        }
+
+        // On not_implemented (or any failure) stop and fall through to the source GEMM,
+        // which handles the full n itself.
+        if(status != rocblas_status_success)
+            break;
     }
 
     // Return the current status if an exception is thrown

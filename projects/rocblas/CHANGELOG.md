@@ -20,6 +20,9 @@ rocBLAS documentation is available at
 ### Upcoming changes
 
 * Deprecated the `ROCBLAS_USE_HIPBLASLT_BATCHED` environment variable. It is no longer required to disable only batched use of hipBLASLt due to optimizations. This env control is planned for removal in a future release.
+### Resolved issues
+
+* Fix incorrect or NaN `gemm` results with a large free (`N`) dimension on GPUs whose grid Y/Z dimension is limited to 65536 (for example gfx1201); the Tensile launch in `rocblas_internal_gemm` is now chunked over `N`, matching the source-GEMM and ILP64 paths (rocm-libraries #8645)
 
 ## rocBLAS 5.5.0 for ROCm 7.14
 
