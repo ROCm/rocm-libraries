@@ -75,6 +75,8 @@ dependencies = [
     "setuptools",
     "nanobind",
     "cmake",
+    "invoke",
+    "filelock",
     "numpy",
     "hip-python",
 ]

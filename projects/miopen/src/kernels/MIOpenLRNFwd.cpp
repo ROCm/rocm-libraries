@@ -268,8 +268,7 @@ __launch_bounds__(GROUP_SIZE_X* GROUP_SIZE_Y* group_size_z) extern "C" __global_
        aligned in the horizontal or vertical access we lift the if condition out of the loop
        termination if the height/width is a multiple of the vert/horiz pixels, enabling SIMD
        vectorizatiom of the loop body.
-       These optimizations were being done automatically by the OpenCL compiler prior to porting to
-       HIP.
+       These optimizations help the compiler with SIMD vectorization.
     */
     constexpr bool is_vert_aligned        = (VERT_ALIGNED == 1);
     constexpr bool is_horiz_aligned       = (HORIZ_ALIGNED == 1);
