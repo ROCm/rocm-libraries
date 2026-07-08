@@ -183,12 +183,25 @@ def ref_paged_attn(
         if q.shape[1] != k.shape[1]:
             k = torch.repeat_interleave(k, q.shape[1] // k.shape[1], dim=1)
             v = torch.repeat_interleave(v, q.shape[1] // v.shape[1], dim=1)
-        attn = torch.einsum("qhd,khd->hqk", q, k).float()
+        # Chunk the fp32 attn matrix over heads so peak memory stays bounded: the
+        # full [h, q, k] fp32 tensor is h*Sq*Sk*4 bytes (e.g. 128*8192*8192*4 =
+        # 32 GB), which OOMs the reference on large-head long-context shapes even
+        # though the kernel under test is fine. A per-head-chunk loop keeps the
+        # peak at chunk*Sq*Sk*4 with identical numerics.
+        num_heads = q.shape[1]
         empty_mask = torch.ones(query_len, kv_len, device=q.device)
         mask = torch.triu(empty_mask, diagonal=kv_len - query_len + 1).bool()
-        attn.masked_fill_(mask, float("-inf"))
-        attn = torch.softmax(attn, dim=-1).to(v.dtype)
-        out = torch.einsum("hqk,khd->qhd", attn, v)
+        head_bytes = query_len * kv_len * 4
+        chunk = max(1, min(num_heads, int(4 * 1024**3) // max(1, head_bytes)))
+        out_chunks = []
+        for h0 in range(0, num_heads, chunk):
+            h1 = min(num_heads, h0 + chunk)
+            attn = torch.einsum("qhd,khd->hqk", q[:, h0:h1], k[:, h0:h1]).float()
+            attn.masked_fill_(mask, float("-inf"))
+            attn = torch.softmax(attn, dim=-1).to(v.dtype)
+            out_chunks.append(torch.einsum("hqk,khd->qhd", attn, v[:, h0:h1]))
+            del attn
+        out = torch.cat(out_chunks, dim=1)
         outputs.append(out)
         start_idx += query_len
     return torch.cat(outputs, dim=0)
