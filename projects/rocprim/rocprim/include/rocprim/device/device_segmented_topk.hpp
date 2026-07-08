@@ -111,7 +111,6 @@ hipError_t topk_segmented_impl(void*                                 temporary_s
     // Ensure K is non-negative
     if(K < 0)
     {
-        std::cout << "K must be non-negative." << std::endl;
         return hipErrorInvalidValue;
     }
 
@@ -119,7 +118,6 @@ hipError_t topk_segmented_impl(void*                                 temporary_s
     {
         if(end_offsets[segment] - begin_offsets[segment] <= K)
         {
-            std::cout << "Each segment must have more than K elements." << segment << std::endl;
             // Ensure all segments have more than K elements.
             return hipErrorInvalidValue;
         }
