@@ -1,4 +1,4 @@
-// Copyright (c) 2023-2024 Advanced Micro Devices, Inc. All rights reserved.
+// Copyright (c) 2023-2026 Advanced Micro Devices, Inc. All rights reserved.
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -18,13 +18,22 @@
 // OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
 // THE SOFTWARE.
 
-#include "benchmarked_generators.hpp"
-#include "rng/threefry.hpp"
+#include "tuning_utils.hpp"
 
 namespace benchmark_tuning
 {
 
-template void add_all_benchmarks_for_generator<threefry4x64_20_generator_template>(
-    std::vector<benchmark::internal::Benchmark*>& benchmarks, const benchmark_config& config);
+void queue_threefry4x64_20(primbench::executor&       executor,
+                           size_t                     dimensions,
+                           size_t                     offset,
+                           bool                       benchmark_host,
+                           const std::vector<double>& poisson_lambdas)
+{
+    queue_generator<threefry4x64_20_generator_template>(executor,
+                                                        dimensions,
+                                                        offset,
+                                                        benchmark_host,
+                                                        poisson_lambdas);
+}
 
 } // namespace benchmark_tuning
