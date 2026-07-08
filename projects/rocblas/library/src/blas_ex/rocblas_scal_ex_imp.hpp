@@ -124,10 +124,10 @@ namespace
                                                                          n,
                                                                          alpha,
                                                                          alpha_type,
+                                                                         stride_0,
                                                                          x,
                                                                          x_type,
                                                                          incx,
-                                                                         stride_0,
                                                                          stride_0,
                                                                          batch_count_1,
                                                                          execution_type);

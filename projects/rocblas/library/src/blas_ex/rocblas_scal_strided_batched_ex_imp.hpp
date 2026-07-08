@@ -136,11 +136,11 @@ namespace
                                                                          n,
                                                                          alpha,
                                                                          alpha_type,
+                                                                         handle->get_stride_alpha(),
                                                                          x,
                                                                          x_type,
                                                                          incx,
                                                                          stridex,
-                                                                         handle->get_stride_alpha(),
                                                                          batch_count,
                                                                          execution_type);
     }

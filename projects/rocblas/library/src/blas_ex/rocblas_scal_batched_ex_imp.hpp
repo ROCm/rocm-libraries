@@ -130,11 +130,11 @@ namespace
                                                                         n,
                                                                         alpha,
                                                                         alpha_type,
+                                                                        handle->get_stride_alpha(),
                                                                         x,
                                                                         x_type,
                                                                         incx,
                                                                         stride_0,
-                                                                        handle->get_stride_alpha(),
                                                                         batch_count,
                                                                         execution_type);
     }
