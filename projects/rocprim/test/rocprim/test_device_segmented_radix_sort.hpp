@@ -375,6 +375,7 @@ inline void sort_keys_large_segments()
 
         common::device_ptr<key_type>    d_keys_input;
         common::device_ptr<key_type>    d_keys_output;
+        common::device_ptr<offset_type> d_offsets;
 
         if(!d_keys_input.resize_with_memory_check(size)
            || !d_keys_output.resize_with_memory_check(size)
@@ -483,7 +484,6 @@ inline void sort_keys_large_num_segments()
 
         common::device_ptr<key_type>    d_keys_input;
         common::device_ptr<key_type>    d_keys_output;
-        common::device_ptr<offset_type> d_offsets;
 
         if(!d_keys_input.resize_with_memory_check(size)
            || !d_keys_output.resize_with_memory_check(size))
