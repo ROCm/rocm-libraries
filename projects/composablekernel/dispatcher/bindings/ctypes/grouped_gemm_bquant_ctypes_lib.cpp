@@ -194,9 +194,8 @@ int dispatcher_run_bquant_gemm(const void* A,
     {
         std::cerr << "dispatcher_run_bquant_gemm: non-packed strides are not supported. "
                   << "Expected stride_A=" << K << " stride_B=" << K << " stride_BQ=" << QN_B
-                  << " stride_C=" << N << ", got stride_A=" << stride_A
-                  << " stride_B=" << stride_B << " stride_BQ=" << stride_BQ
-                  << " stride_C=" << stride_C << "\n";
+                  << " stride_C=" << N << ", got stride_A=" << stride_A << " stride_B=" << stride_B
+                  << " stride_BQ=" << stride_BQ << " stride_C=" << stride_C << "\n";
         return -1;
     }
 
