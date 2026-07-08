@@ -40,6 +40,8 @@
 
 #include <rocprim/device/config_types.hpp>
 #include <rocprim/device/device_segmented_reduce.hpp> // IWYU pragma: export
+#include <rocprim/iterator/counting_iterator.hpp> // IWYU pragma: export
+#include <rocprim/iterator/transform_iterator.hpp> // IWYU pragma: export
 #include <rocprim/type_traits.hpp> // IWYU pragma: export
 
 #include _HIPCUB_LIBCXX_INCLUDE(functional)
