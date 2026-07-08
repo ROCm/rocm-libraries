@@ -410,19 +410,17 @@ reference_sparge_mask_prediction(const HostTensor<T>& q_bhsd,
                         k_means(b, h, blk, d) -= (*km)(b, h, d);
     }
 
-    HostTensor<float> k_means_expand({batch, nhead, num_k_blocks, hdim});
+    // GQA K-head for a given Q-head. k_means/k_sim are [batch, nhead_k, ...]; index them directly
+    // through this mapping instead of materializing a full [batch, nhead, ...] expanded copy.
+    const index_t qk_head_ratio = nhead / nhead_k;
+    auto k_head = [qk_head_ratio](index_t h) { return h / qk_head_ratio; };
+
+    // Only the cheap per-block sim is expanded (1 float/block); k_means is indexed via k_head().
     HostTensor<float> k_sim_expand({batch, nhead, num_k_blocks});
     for(index_t b = 0; b < batch; ++b)
         for(index_t h = 0; h < nhead; ++h)
-        {
-            index_t h_k = h / (nhead / nhead_k);
             for(index_t blk = 0; blk < num_k_blocks; ++blk)
-            {
-                k_sim_expand(b, h, blk) = k_sim(b, h_k, blk);
-                for(index_t d = 0; d < hdim; ++d)
-                    k_means_expand(b, h, blk, d) = k_means(b, h_k, blk, d);
-            }
-        }
+                k_sim_expand(b, h, blk) = k_sim(b, k_head(h), blk);
 
     HostTensor<uint8_t> mask({batch, nhead, num_q_blocks, num_k_blocks});
     const index_t causal_delta =
@@ -458,6 +456,12 @@ reference_sparge_mask_prediction(const HostTensor<T>& q_bhsd,
                     for(index_t kj = 0; kj < num_k_blocks; ++kj)
                         mask(b, h, qi, kj) =
                             (kj >= causal_min_kj && kj <= causal_max_kj) ? 1 : 0;
+                    // Attention sink still applies on this early-out path: the device runs the sink
+                    // (force block 0, no causal check) AFTER the Q-sim union, so a low-sim Q block
+                    // must also keep block 0. Without this the device/reference selections diverge
+                    // under a sliding window where block 0 is outside the causal range.
+                    if(attention_sink && num_k_blocks > 0)
+                        mask(b, h, qi, 0) = 1;
                     continue;
                 }
 
@@ -478,7 +482,7 @@ reference_sparge_mask_prediction(const HostTensor<T>& q_bhsd,
                     {
                         float dot = 0.0f;
                         for(index_t d = 0; d < hdim; ++d)
-                            dot += q_means(b, h, qi, d) * k_means_expand(b, h, kj, d);
+                            dot += q_means(b, h, qi, d) * k_means(b, k_head(h), kj, d);
                         row[static_cast<size_t>(kj)] = dot * scale;
                     }
                 }
@@ -542,9 +546,6 @@ reference_sparge_mask_prediction(const HostTensor<T>& q_bhsd,
                             mask(b, h, qi, kj) = 1;
                 }
 
-                if(attention_sink && num_k_blocks > 0)
-                    mask(b, h, qi, 0) = 1;
-
                 if(causal_type)
                 {
                     for(index_t kj = 0; kj < causal_min_kj; ++kj)
@@ -552,6 +553,12 @@ reference_sparge_mask_prediction(const HostTensor<T>& q_bhsd,
                     for(index_t kj = causal_max_kj + 1; kj < num_k_blocks; ++kj)
                         mask(b, h, qi, kj) = 0;
                 }
+
+                // Attention sink AFTER the causal clamp so block 0 survives a sliding window
+                // (causal_min_kj > 0), matching the device (sink forces block 0 with no causal
+                // check, after every union). Same as the low-sim-Q early-out path above.
+                if(attention_sink && num_k_blocks > 0)
+                    mask(b, h, qi, 0) = 1;
             }
         }
     }
