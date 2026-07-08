@@ -350,10 +350,12 @@ struct FmhaFwdSpargeSageKernel
                                                 index_t seqlen_q_,
                                                 index_t hdim_v_)
     {
+        // Axis order matches the non-quant sparge kernel (nhead=x, batch=y, block=z) so the two
+        // sibling kernels that share the preprocess/mask-prediction use one grid convention.
         return dim3(nhead_,
+                    batch_size_,
                     integer_divide_ceil(seqlen_q_, SagePipeline::kM0) *
-                        integer_divide_ceil(hdim_v_, SagePipeline::kN1),
-                    batch_size_);
+                        integer_divide_ceil(hdim_v_, SagePipeline::kN1));
     }
 
     CK_TILE_DEVICE static constexpr auto GetTileIndex(const Kargs& kargs)
@@ -364,15 +366,15 @@ struct FmhaFwdSpargeSageKernel
                       "sage masked M-tile reversal assumes a single N1 tile "
                       "(hdim_v <= kN1)");
         const index_t num_tile_n1 = integer_divide_ceil(kargs.hdim_v, SagePipeline::kN1);
-        const index_t i_block     = blockIdx.y;
+        const index_t i_block     = blockIdx.z;
         const index_t i_nhead     = blockIdx.x;
-        const index_t i_batch     = blockIdx.z;
+        const index_t i_batch     = blockIdx.y;
         const index_t i_tile_m    = i_block / num_tile_n1;
         const index_t i_tile_n    = i_block - i_tile_m * num_tile_n1;
         if constexpr(kHasMask)
         {
             // Reverse M tile so masked (top) rows run last (assumes num_tile_n1 == 1).
-            return make_tuple(gridDim.y - 1 - i_tile_m, i_tile_n, i_nhead, i_batch);
+            return make_tuple(gridDim.z - 1 - i_tile_m, i_tile_n, i_nhead, i_batch);
         }
         else
         {
