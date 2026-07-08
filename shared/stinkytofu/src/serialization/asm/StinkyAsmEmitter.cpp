@@ -223,6 +223,9 @@ inline std::ostream& operator<<(std::ostream& os, const MUBUFModifiers& mubufMod
     } else if (mubufMod.nt) {
         os << " nt";
     }
+    if (mubufMod.nv != NonVolatile::NV_NONE) {
+        os << " " << toString(mubufMod.nv);
+    }
     if (mubufMod.lds) {
         os << " lds";
     }

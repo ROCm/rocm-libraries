@@ -2,7 +2,7 @@
 - gfx950
 - gfx950
 - [Device 75a0]
-- Activation: 1
+- Activation: true
   ActivationComputeDataType: 0
   ActivationFuncCall: false
   ActivationNoGuard: false

@@ -48,6 +48,14 @@ jobs:
           repository: "ROCm/TheRock"
           ref: ${{ inputs.therock_ref }}
 
+      - name: Checkout CI config
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          repository: ROCm/therock-ci-config
+          ref: main
+          path: ci-config
+        continue-on-error: true
+
       - name: Setting up Python
         uses: actions/setup-python@a309ff8b426b58ec0e2a45f0f869d46889d02405 # v6.2.0
         with:
@@ -58,6 +66,7 @@ jobs:
           PROJECTS_TO_TEST: ${{ inputs.projects_to_test }}
           TEST_TYPE: ${{ inputs.test_type }}
           AMDGPU_FAMILIES: ${{ inputs.amdgpu_families }}
+          CI_CONFIG_PATH: ci-config
         id: configure
         run: python ./build_tools/github_actions/fetch_test_configurations.py
 
@@ -75,7 +84,18 @@ jobs:
       artifact_run_id: ${{  github.run_id }}
       therock_ref: ${{ inputs.therock_ref }}
       amdgpu_families: ${{ inputs.amdgpu_families }}
-      test_runs_on: ${{ inputs.test_runs_on }}
+      # Per-component runner selection:
+      #   1. Multi-GPU components use the multi-GPU runner
+      #   2. CPU-only components use standard GitHub runners
+      #   3. Per-component runner (set by fetch_test_configurations.py)
+      test_runs_on: >-
+        ${{
+          (matrix.components.multi_gpu_runner != '' &&
+            matrix.components.multi_gpu_runner) ||
+          (matrix.components.linux_cpu_runner == true &&
+            'aws-linux-scale-rocm-prod') ||
+          matrix.components.test_runner
+        }}
       platform: ${{ inputs.platform }}
       component: ${{ toJSON(matrix.components) }}
     secrets: inherit
