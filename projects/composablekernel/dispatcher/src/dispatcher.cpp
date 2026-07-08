@@ -28,9 +28,12 @@ Dispatcher::~Dispatcher()
     }
 }
 
-void Dispatcher::ensure_workspace(std::size_t bytes) const
+void Dispatcher::ensure_workspace(std::size_t bytes, void* stream) const
 {
-    // Caller must hold workspace_mutex_ -- this mutates the shared buffer.
+    // Not thread-safe: mutates the Dispatcher-owned buffer. Safe because a
+    // Dispatcher is used from a single stream/thread (see the concurrency
+    // contract in dispatcher.hpp) -- there is no shared-buffer contention to
+    // guard against, so no lock is needed.
     if(bytes > workspace_bytes_)
     {
         if(workspace_)
@@ -44,8 +47,7 @@ void Dispatcher::ensure_workspace(std::size_t bytes) const
         {
             workspace_       = nullptr;
             workspace_bytes_ = 0;
-            throw std::runtime_error(
-                "Dispatcher: failed to allocate Stream-K reduction workspace");
+            throw std::runtime_error("Dispatcher: failed to allocate Stream-K reduction workspace");
         }
         workspace_bytes_ = bytes;
     }
@@ -55,7 +57,10 @@ void Dispatcher::ensure_workspace(std::size_t bytes) const
     // results. Doing it here makes correctness independent of whether the backend's
     // per-iteration preprocess reset runs (e.g. on the non-benchmarking nrepeat=1
     // path), mirroring the internal DeviceMem::SetZero() the standalone launch does.
-    if(bytes > 0 && hipMemset(workspace_, 0, bytes) != hipSuccess)
+    // Zeroed on the caller's stream so the reset is ordered against the kernel
+    // launch that follows (same stream) without an implicit device-wide sync.
+    if(bytes > 0 &&
+       hipMemsetAsync(workspace_, 0, bytes, static_cast<hipStream_t>(stream)) != hipSuccess)
     {
         throw std::runtime_error("Dispatcher: failed to zero Stream-K reduction workspace");
     }
@@ -112,18 +117,18 @@ float Dispatcher::run_fused(const void* a_ptr,
     kernel->set_benchmarking(benchmarking_);
 
     // Size and own the reduction workspace (0 for non-Stream-K and for Atomic).
-    // For Linear/Tree the buffer is shared mutable state, so serialize the whole
-    // size->zero->launch sequence: the kernel reads/writes workspace_ for the
-    // duration of run(), so the lock must cover the launch, not just sizing.
+    // For Linear/Tree the Dispatcher owns and reuses the buffer; no lock is taken
+    // because a Dispatcher is single-stream (see the concurrency contract in
+    // dispatcher.hpp). The buffer is zeroed on the caller's stream and the kernel
+    // launches on the same stream, so the reset is correctly ordered.
     const std::size_t ws_bytes = kernel->get_workspace_size(problem);
     if(ws_bytes > 0)
     {
-        std::lock_guard<std::mutex> lock(workspace_mutex_);
-        ensure_workspace(ws_bytes); // grows if needed AND zeroes ws_bytes
+        ensure_workspace(ws_bytes, stream); // grows if needed AND zeroes ws_bytes on `stream`
         return kernel->run(a_ptr, b_ptr, c_ptr, d_ptrs, workspace_, problem, stream);
     }
 
-    // No workspace needed (non-Stream-K / Atomic): no shared state, no lock.
+    // No workspace needed (non-Stream-K / Atomic): nothing to size or zero.
     return kernel->run(a_ptr, b_ptr, c_ptr, d_ptrs, nullptr, problem, stream);
 }
 
@@ -152,18 +157,18 @@ float Dispatcher::run_explicit(const std::string& kernel_id,
     kernel->set_benchmarking(benchmarking_);
 
     // Size and own the reduction workspace (0 for non-Stream-K and for Atomic).
-    // For Linear/Tree the buffer is shared mutable state, so serialize the whole
-    // size->zero->launch sequence: the kernel reads/writes workspace_ for the
-    // duration of run(), so the lock must cover the launch, not just sizing.
+    // For Linear/Tree the Dispatcher owns and reuses the buffer; no lock is taken
+    // because a Dispatcher is single-stream (see the concurrency contract in
+    // dispatcher.hpp). The buffer is zeroed on the caller's stream and the kernel
+    // launches on the same stream, so the reset is correctly ordered.
     const std::size_t ws_bytes = kernel->get_workspace_size(problem);
     if(ws_bytes > 0)
     {
-        std::lock_guard<std::mutex> lock(workspace_mutex_);
-        ensure_workspace(ws_bytes); // grows if needed AND zeroes ws_bytes
+        ensure_workspace(ws_bytes, stream); // grows if needed AND zeroes ws_bytes on `stream`
         return kernel->run(a_ptr, b_ptr, c_ptr, d_ptrs, workspace_, problem, stream);
     }
 
-    // No workspace needed (non-Stream-K / Atomic): no shared state, no lock.
+    // No workspace needed (non-Stream-K / Atomic): nothing to size or zero.
     return kernel->run(a_ptr, b_ptr, c_ptr, d_ptrs, nullptr, problem, stream);
 }
 
