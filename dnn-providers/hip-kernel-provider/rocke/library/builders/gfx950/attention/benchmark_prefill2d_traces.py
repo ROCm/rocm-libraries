@@ -10,7 +10,7 @@ Triton CSV by ``shape_signature``.
 
 Example:
 
-    PYTHONPATH=Python python \\
+    PYTHONPATH=python python \\
       rocke/library/builders/gfx950/attention/benchmark_prefill2d_traces.py
 
 The default paths point at the local MLSE benchmark checkout used to collect
