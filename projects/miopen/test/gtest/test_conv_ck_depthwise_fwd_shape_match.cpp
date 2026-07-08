@@ -111,7 +111,8 @@ INSTANTIATE_TEST_SUITE_P(Smoke,
                                           testing::Values(miopenConvolutionAlgoDirect),
                                           testing::ValuesIn(GetConvTestCases(miopenHalf))));
 
-// Guard against applicability expansion: a shape with no matching compiled instance is inapplicable.
+// Guard against applicability expansion: a shape with no matching compiled instance is
+// inapplicable.
 INSTANTIATE_TEST_SUITE_P(
     Smoke,
     CPU_UnitTestConvCkDepthwiseFwdShapeMatchDevApplicability_NONE,
