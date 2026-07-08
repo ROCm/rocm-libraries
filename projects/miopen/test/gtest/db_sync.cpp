@@ -790,6 +790,14 @@ void CheckFDBEntry(size_t thread_index,
             auto db         = miopen::GetDb(ctx);
             const auto solv = id.GetSolver();
 
+            // DBSYNC-DIAG: some stale perf configs reference CK kernel_ids that
+            // no longer exist in the current build; CK's loader THROWS (aborts
+            // the whole test) instead of returning NotApplicable. Wrap the
+            // per-solver validation so we log the offending (fdb-key, solver)
+            // and continue, letting one run enumerate ALL bad entries.
+            try
+            {
+
             // Skip MLIR
             if(miopen::StartsWith(id.ToString(), "ConvMlir"))
             {
@@ -919,6 +927,17 @@ void CheckFDBEntry(size_t thread_index,
                 EXPECT_TRUE(!pdb_entry_exists)
                     << '[' << (++failures) << "] " //
                     << "Non-Tunable solver found in PDB" << solv.GetSolverDbId();
+
+            } // end try (DBSYNC-DIAG)
+            catch(const std::exception& e)
+            {
+                ADD_FAILURE() << '[' << (++failures) << "] " //
+                              << "DBSYNC-DIAG CK/exception fdb-key:" << kinder.first
+                              << ", solver:" << val.solver_id << ", what():" << e.what();
+                MIOPEN_LOG_E("DBSYNC-DIAG threw fdb-key:"
+                             << kinder.first << ", solver:" << val.solver_id << ", what():"
+                             << e.what());
+            }
             ++fdb_idx;
         }
         if(kidx % 100 == 0)

@@ -1019,8 +1019,7 @@ struct DeviceGroupedConvFwd : public DeviceGroupedConvFwdMultipleABD<NDimSpatial
             << "SubTileW: " << SubTileW << ", "
             << "InVectorWidth: " << InVectorWidth<< ", "
             << "OutVectorWidth: " << OutVectorWidth<< ", "
-            << "RequirePadding: " << RequirePadding << ">"
-            << std::endl;
+            << "RequirePadding: " << RequirePadding << ">";
         // clang-format on
 
         return str.str();
