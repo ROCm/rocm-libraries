@@ -70,6 +70,15 @@ class Dispatcher
     /// Frees the dispatcher-owned Stream-K reduction workspace, if any.
     ~Dispatcher();
 
+    /// The Dispatcher owns a raw HIP reduction workspace that it frees in the
+    /// destructor, so it must not be copied (a copy would double-free the buffer)
+    /// nor moved (no use-case, and consistent with the single-stream contract
+    /// above). Non-copyable, non-movable.
+    Dispatcher(const Dispatcher&)            = delete;
+    Dispatcher& operator=(const Dispatcher&) = delete;
+    Dispatcher(Dispatcher&&)                 = delete;
+    Dispatcher& operator=(Dispatcher&&)      = delete;
+
     void set_arch(const std::string& arch) { gfx_arch_ = arch; }
     [[nodiscard]] const std::string& arch() const { return gfx_arch_; }
 

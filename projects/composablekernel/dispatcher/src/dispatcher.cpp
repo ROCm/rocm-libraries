@@ -47,7 +47,7 @@ void Dispatcher::ensure_workspace(std::size_t bytes, void* stream) const
         {
             workspace_       = nullptr;
             workspace_bytes_ = 0;
-            throw std::runtime_error("Dispatcher: failed to allocate Stream-K reduction workspace");
+            throw DispatcherError("Dispatcher: failed to allocate Stream-K reduction workspace");
         }
         workspace_bytes_ = bytes;
     }
@@ -62,7 +62,7 @@ void Dispatcher::ensure_workspace(std::size_t bytes, void* stream) const
     if(bytes > 0 &&
        hipMemsetAsync(workspace_, 0, bytes, static_cast<hipStream_t>(stream)) != hipSuccess)
     {
-        throw std::runtime_error("Dispatcher: failed to zero Stream-K reduction workspace");
+        throw DispatcherError("Dispatcher: failed to zero Stream-K reduction workspace");
     }
 }
 
