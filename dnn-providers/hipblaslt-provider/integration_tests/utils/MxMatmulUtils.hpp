@@ -6,6 +6,7 @@
 #include <string_view>
 
 #include <hipdnn_test_sdk/utilities/ArchMatch.hpp>
+#include <hipdnn_test_sdk/utilities/Seeds.hpp>
 
 #include "MatmulUtils.hpp"
 

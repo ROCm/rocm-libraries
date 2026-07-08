@@ -258,6 +258,52 @@ if(NOT HIPDNN_SKIP_TESTS)
         message(STATUS "hipblaslt-provider: shared/ctest or test_categories.yaml not found, skipping YAML-based CTest categories")
     endif()
 
+    # Must run before the CTestTestfile install below so the staged snippet
+    # can be folded into the labeled file and labeled there.
+    if(NOT TARGET hipdnn_integration_tests)
+        find_package(hipdnn_integration_tests CONFIG QUIET)
+    endif()
+
+    if(TARGET hipdnn_integration_tests)
+        add_external_integration_test_target(
+            TARGET_NAME    ${PROJECT_NAME}-external-integration-check
+            PLUGIN_TARGET  hipblaslt_plugin
+            ENGINE_NAME    HIPBLASLT_ENGINE
+            INSTALL_SUBDIR hipblaslt_plugin
+            TEST_CONFIG    ${CMAKE_CURRENT_SOURCE_DIR}/config/HIPBLASLT_ENGINE.toml
+            GTEST_FILTER   "*Matmul*"
+        )
+        message(STATUS "Created ${PROJECT_NAME}-external-integration-check target")
+
+        # This is a pre-registered CTest test (not a GTest binary), so it is
+        # labeled via apply_ctest_category_labels()/test_categories_external.yaml.
+        if(HIPBLASLTPROVIDER_CTEST_INSTALL_FILE)
+            # Fold the staged add_test() into the labeled file before labeling;
+            # apply_ctest_category_labels() scans the file's add_test() names.
+            get_property(_external_staging GLOBAL
+                PROPERTY "EXTERNAL_TEST_INSTALL_STAGING_hipblaslt_plugin"
+            )
+            if(_external_staging)
+                file(APPEND "${HIPBLASLTPROVIDER_CTEST_INSTALL_FILE}"
+                     "\n# External integration test (cross-provider suite)\n${_external_staging}"
+                )
+            endif()
+            if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/test_categories_external.yaml")
+                # Install tree.
+                apply_ctest_category_labels(
+                    "${CMAKE_CURRENT_SOURCE_DIR}/test_categories_external.yaml"
+                    "${HIPBLASLTPROVIDER_CTEST_INSTALL_FILE}"
+                )
+                # Build tree (so a local `ctest -L <tier>` selects it too).
+                apply_ctest_category_labels(
+                    "${CMAKE_CURRENT_SOURCE_DIR}/test_categories_external.yaml"
+                )
+            endif()
+        endif()
+    else()
+        message(STATUS "hipdnn_integration_tests not found - skipping external-integration-check")
+    endif()
+
     # For standalone builds we need to install the ctest files.
     # When YAML-based categorization is active, install the generated install_CTestTestfile.cmake
     # to bin/hipblaslt_plugin/ so TheRock CI's test_runner.py can drive `ctest -L quick`

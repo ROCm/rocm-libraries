@@ -1,0 +1,31 @@
+# Integration test configuration for HIPBLASLT_ENGINE
+# Filters use GTest-style globs: * matches any sequence of characters
+# Later entries take precedence over earlier ones when multiple filters match
+
+[meta]
+version = 1
+
+# -- Test Skips --
+# Skip tests on specific architectures (or globally if 'archs' is omitted).
+# Each entry requires:
+#   archs:   optional array of substrings matched against the device's raw
+#            gcnArchName (e.g. "gfx942" matches "gfx942:sramecc+:xnack-").
+#            Omit or leave empty to skip on every arch.
+#   filters: array of GTest globs matched against the full GTest name
+#   reason:  human-readable string surfaced in the GTEST_SKIP message
+# First matching entry wins.
+
+# ROCm/rocm-libraries#8033 — hipblasLtMatmulAlgoGetHeuristic returns 0
+# algorithms on gfx12 (gfx1200, gfx1201, gfx1250, ...) for FP16 with
+# transA=T, transB=T, and a bias-fused epilogue (BIAS, RELU_BIAS,
+# GELU_BIAS, SWISH_BIAS_EXT, CLAMP_BIAS_EXT). Every neighboring cell (no
+# bias, BF16/FP32 with bias, FP16 with any other transpose pair) returns
+# at least one algorithm.
+#
+# Replaces the same-arch carve-out previously enforced at runtime by
+# IS_HIPBLASLT_GFX12_FP16_TT_BIAS / shouldSkipOnEngineConfigResult in
+# dnn-providers/hipblaslt-provider/integration_tests/TestWorkarounds.hpp.
+[[test_skips]]
+archs   = ["gfx12"]
+filters = ["*MatmulBias*Fp16*"]
+reason  = "ROCm/rocm-libraries#8033 — hipblasLtMatmulAlgoGetHeuristic returns no algorithms for FP16 with transA=T, transB=T and any bias-fused epilogue on gfx12"
