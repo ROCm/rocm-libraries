@@ -25,9 +25,7 @@ namespace hipdnn_data_sdk::utilities
  * allocator template parameter — pinned-vs-pageable is a property of the wrapped
  * buffer, not the wrapper.
  *
- * @note Host-only, matching ShallowTensor: device access throws. The RFC's
- * "rawDeviceData() returns the borrowed pointer" is only exercised by the ASM engine
- * plan layer (workstream I4), out of scope for ALMIOPEN-2124.
+ * @note Host-only, matching ShallowTensor: device access throws.
  */
 template <typename T>
 class ShallowRaggedTensor : public RaggedTensorBase<T>

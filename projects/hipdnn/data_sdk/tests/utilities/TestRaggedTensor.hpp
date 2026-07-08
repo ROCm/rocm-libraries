@@ -37,7 +37,7 @@ inline int64_t seqExtent(const std::vector<int64_t>& offsets, int64_t seqStride,
     return (offsets[static_cast<size_t>(b) + 1] - offsets[static_cast<size_t>(b)]) / seqStride;
 }
 
-/// elementCount/elementSpace/isPacked reporting (RFC §4.5.6/4.5.7).
+/// elementCount/elementSpace/isPacked reporting (RFC 0014 §4.5.6/4.5.7).
 template <typename T>
 inline void checkReporting(const TensorBase<T>& tensor, int64_t total)
 {

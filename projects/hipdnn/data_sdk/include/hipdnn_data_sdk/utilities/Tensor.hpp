@@ -304,7 +304,7 @@ public:
      * hardcoded: physical memory is always BSHD, so batch (logical index 0) carries
      * the largest stride and the sequence axis carries the next-largest. This makes
      * the sequence axis logical index 1 for BSHD and logical index 2 for BHSD without
-     * special-casing. See ALMIOPEN-2124 implementation plan §2.2.
+     * special-casing.
      */
     struct RaggedCompositeIndex
     {
@@ -537,11 +537,6 @@ public:
      * Dense tensors return an empty vector (the iterator then uses Linear/Composite
      * indexing as today). Ragged tensors override this to expose their offset table,
      * which the iterator snapshots once to build a RaggedCompositeIndex.
-     *
-     * @note The literal RFC §4.5 traversal hook `virtual IndexType makeIndex(bool)` is
-     * not implementable on the non-templated ITensor base: IndexType is scoped to the
-     * (const/non-const) iterator template. This non-templated data hook keeps all
-     * template-dependent index types iterator-internal. See ALMIOPEN-2124 plan §2.1.
      */
     virtual std::vector<int64_t> raggedRowOffsets() const
     {
@@ -566,7 +561,7 @@ protected:
      * Ragged tensors override this to base each batch at `ragged_offset[b]`, which
      * makes every addressing path (getHostValue/setHostValue/operator(),
      * CompositeIndex::getValue, TensorView) ragged-aware at once. The argument-count
-     * check stays in the non-virtual getIndex forwarder. See ALMIOPEN-2124 plan §2.1.
+     * check stays in the non-virtual getIndex forwarder.
      */
     virtual int64_t getIndexImpl(const std::vector<int64_t>& indices) const
     {

@@ -35,9 +35,7 @@ namespace hipdnn_data_sdk::utilities
  * No CRTP is required because `memory()` is already virtual on `TensorBase<T>`.
  *
  * @note Physical memory layout is assumed BSHD with batch at logical index 0, so the
- * sequence (ragged) axis is the unique non-batch axis with the maximal stride. This
- * holds for all in-scope AITER FMHA configs (BSHD and BHSD logical orders). See RFC
- * 0014 §4.5/§4.6 and the ALMIOPEN-2124 implementation plan.
+ * sequence (ragged) axis is the unique non-batch axis with the maximal stride.
  */
 template <typename T>
 class RaggedTensorBase : public TensorBase<T>
@@ -54,8 +52,8 @@ public:
         // Structural checks first, so readOffset below only sees a supported element size.
         validateRaggedStructure();
 
-        // Snapshot and validate the B+1 offset table (RFC 0014 §4.5, plan §2.2). Reading
-        // the aux may trigger a device->host sync if it lives in device memory.
+        // Snapshot and validate the B+1 offset table. Reading the aux may trigger a device->host
+        // sync if it lives in device memory.
         const std::vector<int64_t> offsets = collectRowOffsets();
         validateRaggedOffsets(offsets);
 
@@ -81,7 +79,7 @@ public:
         return _strides;
     }
 
-    // Iterated elements == ragged_offset[B] (RFC §4.5.6).
+    // Iterated elements == ragged_offset[B] (RFC 0014 §4.5.6).
     size_t elementCount() const override
     {
         return _iteratedElementCount;
@@ -95,7 +93,7 @@ public:
 
     // Diverges from the dense convention `_packed = (elementCount == elementSpace)`:
     // those are equal here, yet the buffer is neither prod(dims) elements long nor
-    // regularly strided, so it must not be treated as a flat dense buffer (RFC §4.5.7).
+    // regularly strided, so it must not be treated as a flat dense buffer (RFC 0014 §4.5.7).
     bool isPacked() const override
     {
         return false;
@@ -129,7 +127,7 @@ protected:
                                     int64_t{0});
     }
 
-    // Type-erased read of ragged_offset[b], widened to int64_t (RFC §4.5.1).
+    // Type-erased read of ragged_offset[b], widened to int64_t (RFC 0014 §4.5.1).
     int64_t readOffset(size_t b) const
     {
         const void* p = _raggedOffset->hostDataOffsetFromIndex(static_cast<int64_t>(b));
@@ -144,7 +142,7 @@ protected:
         }
     }
 
-    // Constructor-time structural validation, shared by both concrete types (RFC §4.5.5).
+    // Constructor-time structural validation, shared by both concrete types (RFC 0014 §4.5.5).
     void validateRaggedStructure() const
     {
         if(_raggedOffset == nullptr)
@@ -187,7 +185,7 @@ protected:
         return offsets;
     }
 
-    // Sequence (ragged) axis == the non-batch axis with the largest stride (plan §2.2).
+    // Sequence (ragged) axis == the non-batch axis with the largest stride.
     std::pair<int, int64_t> sequenceAxisAndStride() const
     {
         int seqAxis = 1;
@@ -204,8 +202,8 @@ protected:
     }
 
     // Validates offset contents: offset[0] == 0, monotonic non-decreasing, each per-batch
-    // block a whole number of sequence rows, and per-batch extent <= S_max (RFC §4.5,
-    // plan §2.2; mirrored as debug asserts in RaggedCompositeIndex).
+    // block a whole number of sequence rows, and per-batch extent <= S_max (RFC 0014 §4.5 mirrored
+    // as debug asserts in RaggedCompositeIndex).
     void validateRaggedOffsets(const std::vector<int64_t>& offsets) const
     {
         if(offsets.empty())

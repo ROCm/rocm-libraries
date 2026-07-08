@@ -189,7 +189,7 @@ TEST(TestRaggedTensor, RaggedOffsetAccessor)
 }
 
 // ============================================================================
-// Structural validation failures (RFC §4.5.5)
+// Structural validation failures (RFC 0014 §4.5.5)
 // ============================================================================
 
 TEST(TestRaggedTensor, ValidationNullAuxThrows)
@@ -224,7 +224,7 @@ TEST(TestRaggedTensor, ValidationBadElementSizeThrows)
 }
 
 // ============================================================================
-// Offset-content validation at construction (all build modes, ALMIOPEN-2124 §2.2)
+// Offset-content validation at construction (all build modes, RFC 0014 §4.5)
 // ============================================================================
 
 TEST(TestRaggedTensor, ValidationOffsetZeroNotZeroThrows)
