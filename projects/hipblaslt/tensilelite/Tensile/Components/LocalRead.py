@@ -184,15 +184,22 @@ class LocalReadMFMA(LocalRead):
         # VW=2 fold-M (e.g. wt4_vw2.yaml: MIWaveTile=4, VWA=2): partner permute
         #   ds_bpermute abs addr: nIdx*4 and nIdx*4+64 (sp3_mi400 §9.5.2).
         #   v2/v3 from v0/v1@relHigh; v0/v1 from v0/v1@relLow.
-        # VW=4 fold-M (e.g. wt8_vw4.yaml: MIWaveTile=8, VWA=4): stock vIdx1=+256B, partner +16 lanes (+64 bytes).
-        #   v4-v7 from v0-v3@addrHigh; v0-v3 from v0-v3@addrLow.
+        # VW>=4 fold-M (wt8_vw4, wt16_vw8, ...): stock vIdx1 = MIWaveGroupShape*mxUnit bytes;
+        #   ds_bpermute abs addr nIdx*4 and nIdx*4+partnerAddrDelta (partner +16 lanes).
         # VW=1 fold-M: nIdx relBase + static offsets {0,64}.
         if vectorWidth == 2:
             permuteVariant = "wt4_vw2"
-        elif vectorWidth == 4:
-            permuteVariant = "wt8_vw4"
+        elif vectorWidth >= 4:
+            permuteVariant = "abs_perm"
         else:
             permuteVariant = "nidx"
+        mxTc = tc[3]
+        mxUnit = kernel["MatrixInstK"] // kernel["ProblemType"]["MXBlock%s" % mxTc]
+        miWaveGroupShape = (
+            kernel["MatrixInstM"] * kernel["MatrixInstBM"] * kernel["MIWaveGroup"][tile01] * vectorWidth
+        )
+        stockHiOffset = miWaveGroupShape * mxUnit
+        partnerAddrDelta = stockHiOffset // vectorWidth
         return {
             "miWaveTile": miWaveTile,
             "vectorWidth": vectorWidth,
@@ -203,6 +210,8 @@ class LocalReadMFMA(LocalRead):
             "halfWaveBytes": halfWaveBytes,
             "baseRelShift": (vectorWidth * bpr).bit_length() - 1,
             "permuteVariant": permuteVariant,
+            "partnerAddrDelta": partnerAddrDelta,
+            "stockHiOffset": stockHiOffset,
         }
 
     @staticmethod
@@ -258,16 +267,17 @@ class LocalReadMFMA(LocalRead):
         writer.vgprPool.checkIn(vRelLow)
         writer.vgprPool.checkIn(vRelHigh)
 
-    def emitMxsFoldMWt8Vw4Permute(self, writer, kernel, tP, module, tc, bufferIdx, iui, valuiIdx, foldInfo):
+    def emitMxsFoldMAbsPermute(self, writer, kernel, tP, module, tc, bufferIdx, iui, valuiIdx, foldInfo):
         """
-        MIWaveTile//VW==2 and VW==4 fold-M partner permute (wt8_vw4.yaml).
-        After 1x ds_load_b128 @0 with lro=wtid*16, gather partner lane data to match
-        stock 2x ds_load @0/@256. ds_bpermute abs addr: nIdx*4, nIdx*4+64 (partner +16 lanes).
+        MIWaveTile//VW==2 and VW>=4 fold-M partner permute (wt8_vw4, wt16_vw8, ...).
+        After fold ds_load(s) with lro=wtid*(VW*4), gather partner lane data to match
+        stock 2x ds_load @0/@stockHiOffset. ds_bpermute abs addr: nIdx*4, nIdx*4+partnerAddrDelta.
         """
         ldsMemToken, ldsMemTokenIdx = self._getLdsReadMemToken(writer, kernel, tP)
         halfSpanMask = foldInfo["halfSpanMask"]
         vectorWidth = foldInfo["vectorWidth"]
-        partnerAddrDelta = 64
+        partnerAddrDelta = foldInfo["partnerAddrDelta"]
+        stockHiOffset = foldInfo["stockHiOffset"]
 
         vNIdx = writer.vgprPool.checkOut(1, "mxs foldM nIdx")
         vRelLow = writer.vgprPool.checkOut(1, "mxs foldM relLow")
@@ -279,8 +289,8 @@ class LocalReadMFMA(LocalRead):
         ]
 
         module.addComment1(
-            "MXS VW=4 fold-M partner permute: addr=nIdx*4, addrHigh=nIdx*4+%u (ds_bpermute abs)"
-            % partnerAddrDelta)
+            "MXS VW=%u fold-M partner permute: addr=nIdx*4, addrHigh=nIdx*4+%u (stock@+%u, ds_bpermute abs)"
+            % (vectorWidth, partnerAddrDelta, stockHiOffset))
         module.add(SWaitCnt(dscnt=0, comment="drain MXS ds_load before cross-lane bpermute"))
         module.add(VAndB32(dst=vgpr(vNIdx), src0=halfSpanMask, src1=vgpr("Serial"),
                            comment="nIdx = wtid %% %u" % foldInfo["halfSpan"]))
@@ -313,8 +323,8 @@ class LocalReadMFMA(LocalRead):
         if foldInfo.get("permuteVariant") == "wt4_vw2":
             self.emitMxsFoldMWt4Vw2Permute(writer, kernel, tP, module, tc, bufferIdx, iui, valuiIdx, foldInfo)
             return
-        if foldInfo.get("permuteVariant") == "wt8_vw4":
-            self.emitMxsFoldMWt8Vw4Permute(writer, kernel, tP, module, tc, bufferIdx, iui, valuiIdx, foldInfo)
+        if foldInfo.get("permuteVariant") == "abs_perm":
+            self.emitMxsFoldMAbsPermute(writer, kernel, tP, module, tc, bufferIdx, iui, valuiIdx, foldInfo)
             return
 
         ldsMemToken, ldsMemTokenIdx = self._getLdsReadMemToken(writer, kernel, tP)
@@ -783,9 +793,16 @@ class LocalReadMFMA(LocalRead):
 
         valufIdx = 0
         for vIdx in range(0, numVectorsPerTile):
+            foldBaseValuiIdx = valufIdx
+            if mxsFoldM:
+                localReadCode = imod.add(Module("LocalRead%s Valu%u"%(tc, foldBaseValuiIdx)))
             for eIdx in range(0, numReadsPerVector):
-                valuiIdx = int(valufIdx)
-                localReadCode = imod.add(Module("LocalRead%s Valu%u"%(tc, valuiIdx)))
+                if mxsFoldM:
+                    valuiIdx = foldBaseValuiIdx + eIdx * numVgpr
+                    readModule = localReadCode
+                else:
+                    valuiIdx = int(valufIdx)
+                    readModule = imod.add(Module("LocalRead%s Valu%u"%(tc, valuiIdx)))
                 destVgpr = vgpr("Valu%s_X%u_I%u+%u"%(tc, bufferIdx, iui, valuiIdx), numVgpr)
 
                 # load read instruction
@@ -808,12 +825,13 @@ class LocalReadMFMA(LocalRead):
 
                 ds = DSModifiers(na=1, offset=paramList[0])
                 LocalReadX = instruction.getInst()
-                self._emitLdsRead(writer, kernel, tP, LocalReadX, dst=destVgpr, src=srcAddr, ds=ds, module=localReadCode, comment=comment)
+                self._emitLdsRead(writer, kernel, tP, LocalReadX, dst=destVgpr, src=srcAddr, ds=ds, module=readModule, comment=comment)
 
-                if mxsFoldM:
-                    self.emitMxsFoldMPermute(writer, kernel, tP, localReadCode, tc, bufferIdx, iui, valuiIdx, foldInfo)
-                    valufIdx += foldInfo["numPermutes"] - numVgpr
-                valufIdx += numVgpr
+                if not mxsFoldM:
+                    valufIdx += numVgpr
+            if mxsFoldM:
+                self.emitMxsFoldMPermute(writer, kernel, tP, localReadCode, tc, bufferIdx, iui, foldBaseValuiIdx, foldInfo)
+                valufIdx = foldBaseValuiIdx + foldInfo["numPermutes"]
 
         return imod, pack, packPre
 
