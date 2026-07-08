@@ -6,30 +6,30 @@
 #include <hipdnn_flatbuffers_sdk/data_objects/data_types_generated.h>
 #include <hipdnn_flatbuffers_sdk/data_objects/graph_generated.h>
 #include <hipdnn_flatbuffers_sdk/flatbuffer_utilities/FlatbufferTypeHelpers.hpp>
-#include <hipdnn_test_sdk/utilities/cpu_graph_executor/detail/LayernormFpropPlan.hpp>
+#include <hipdnn_test_sdk/utilities/cpu_graph_executor/detail/LayernormBpropPlan.hpp>
 #include <ostream>
 
 namespace hipdnn_test_sdk::detail
 {
 
-struct LayernormFpropSignatureKey
+struct LayernormBpropSignatureKey
 {
     const hipdnn_flatbuffers_sdk::data_objects::NodeAttributes nodeType
         = hipdnn_flatbuffers_sdk::data_objects::NodeAttributes::LayernormAttributes;
-    hipdnn_flatbuffers_sdk::data_objects::DataType xDataType;
+    hipdnn_flatbuffers_sdk::data_objects::DataType dyDataType;
     hipdnn_flatbuffers_sdk::data_objects::DataType scaleBiasDataType;
     hipdnn_flatbuffers_sdk::data_objects::DataType meanInvVarianceDataType;
     hipdnn_flatbuffers_sdk::data_objects::DataType outputDataType;
     hipdnn_flatbuffers_sdk::data_objects::DataType computeDataType;
 
-    LayernormFpropSignatureKey() = default;
-    constexpr LayernormFpropSignatureKey(
-        hipdnn_flatbuffers_sdk::data_objects::DataType x,
+    LayernormBpropSignatureKey() = default;
+    constexpr LayernormBpropSignatureKey(
+        hipdnn_flatbuffers_sdk::data_objects::DataType dy,
         hipdnn_flatbuffers_sdk::data_objects::DataType scaleBias,
         hipdnn_flatbuffers_sdk::data_objects::DataType meanInvVariance,
         hipdnn_flatbuffers_sdk::data_objects::DataType output,
         hipdnn_flatbuffers_sdk::data_objects::DataType compute)
-        : xDataType(x)
+        : dyDataType(dy)
         , scaleBiasDataType(scaleBias)
         , meanInvVarianceDataType(meanInvVariance)
         , outputDataType(output)
@@ -37,36 +37,38 @@ struct LayernormFpropSignatureKey
     {
     }
 
-    LayernormFpropSignatureKey(
+    LayernormBpropSignatureKey(
         const hipdnn_flatbuffers_sdk::data_objects::Node& node,
         const std::unordered_map<int64_t,
                                  const hipdnn_flatbuffers_sdk::data_objects::TensorAttributes*>&
             tensorMap)
     {
-        const auto* nodeAttributes = node.attributes_as_LayernormAttributes();
+        const auto* nodeAttributes = node.attributes_as_LayernormBackwardAttributes();
         if(nodeAttributes == nullptr)
         {
-            throw std::runtime_error("Node attributes could not be cast to LayernormAttributes");
+            throw std::runtime_error(
+                "Node attributes could not be cast to LayernormBackwardAttributes");
         }
 
+        auto dyTensorAttr = tensorMap.at(nodeAttributes->dy_tensor_uid());
         auto xTensorAttr = tensorMap.at(nodeAttributes->x_tensor_uid());
-        auto yTensorAttr = tensorMap.at(nodeAttributes->y_tensor_uid());
+        auto dxTensorAttr = tensorMap.at(nodeAttributes->dx_tensor_uid());
 
-        if(xTensorAttr == nullptr || yTensorAttr == nullptr)
+        if(dyTensorAttr == nullptr || xTensorAttr == nullptr || dxTensorAttr == nullptr)
         {
             throw std::runtime_error("One or more tensor attributes could not be found in the map, "
                                      "failed to construct key");
         }
 
-        xDataType = xTensorAttr->data_type();
-        outputDataType = yTensorAttr->data_type();
+        dyDataType = dyTensorAttr->data_type();
+        outputDataType = dxTensorAttr->data_type();
         computeDataType = node.compute_data_type();
 
         // Scale/bias type: use scale tensor type
         auto scaleTensorAttr = tensorMap.at(nodeAttributes->scale_tensor_uid());
         scaleBiasDataType = scaleTensorAttr->data_type();
 
-        // Mean/inv_variance type: use mean if present, otherwise default to IO type (x type)
+        // Mean/inv_variance type: use mean if present, otherwise default to IO type (dy type)
         if(nodeAttributes->mean_tensor_uid().has_value())
         {
             auto meanTensorAttr = tensorMap.at(nodeAttributes->mean_tensor_uid().value());
@@ -74,41 +76,41 @@ struct LayernormFpropSignatureKey
         }
         else
         {
-            meanInvVarianceDataType = xDataType;
+            meanInvVarianceDataType = dyDataType;
         }
     }
 
-    std::size_t operator()(const LayernormFpropSignatureKey& k) const noexcept
+    std::size_t operator()(const LayernormBpropSignatureKey& k) const noexcept
     {
         return k.hashSelf();
     }
 
     constexpr std::size_t hashSelf() const
     {
-        return static_cast<std::size_t>(nodeType) ^ (static_cast<std::size_t>(xDataType) << 4)
+        return static_cast<std::size_t>(nodeType) ^ (static_cast<std::size_t>(dyDataType) << 4)
                ^ (static_cast<std::size_t>(scaleBiasDataType) << 8)
                ^ (static_cast<std::size_t>(meanInvVarianceDataType) << 12)
                ^ (static_cast<std::size_t>(outputDataType) << 16)
                ^ (static_cast<std::size_t>(computeDataType) << 20);
     }
 
-    bool operator==(const LayernormFpropSignatureKey& other) const noexcept
+    bool operator==(const LayernormBpropSignatureKey& other) const noexcept
     {
-        return nodeType == other.nodeType && xDataType == other.xDataType
+        return nodeType == other.nodeType && dyDataType == other.dyDataType
                && scaleBiasDataType == other.scaleBiasDataType
                && meanInvVarianceDataType == other.meanInvVarianceDataType
                && outputDataType == other.outputDataType
                && computeDataType == other.computeDataType;
     }
 
-    static std::unordered_map<LayernormFpropSignatureKey,
+    static std::unordered_map<LayernormBpropSignatureKey,
                               std::unique_ptr<IGraphNodePlanBuilder>,
-                              LayernormFpropSignatureKey>
+                              LayernormBpropSignatureKey>
         getPlanBuilders()
     {
-        std::unordered_map<LayernormFpropSignatureKey,
+        std::unordered_map<LayernormBpropSignatureKey,
                            std::unique_ptr<IGraphNodePlanBuilder>,
-                           LayernormFpropSignatureKey>
+                           LayernormBpropSignatureKey>
             map;
 
         addPlanBuilder<hipdnn_flatbuffers_sdk::data_objects::DataType::FLOAT,
@@ -161,21 +163,21 @@ struct LayernormFpropSignatureKey
         return map;
     }
 
-    template <hipdnn_flatbuffers_sdk::data_objects::DataType XDataTypeEnum,
+    template <hipdnn_flatbuffers_sdk::data_objects::DataType DyDataTypeEnum,
               hipdnn_flatbuffers_sdk::data_objects::DataType ScaleBiasDataTypeEnum,
               hipdnn_flatbuffers_sdk::data_objects::DataType MeanInvVarianceDataTypeEnum,
               hipdnn_flatbuffers_sdk::data_objects::DataType OutputDataTypeEnum,
               hipdnn_flatbuffers_sdk::data_objects::DataType ComputeDataTypeEnum>
-    static void addPlanBuilder(std::unordered_map<LayernormFpropSignatureKey,
+    static void addPlanBuilder(std::unordered_map<LayernormBpropSignatureKey,
                                                   std::unique_ptr<IGraphNodePlanBuilder>,
-                                                  LayernormFpropSignatureKey>& map)
+                                                  LayernormBpropSignatureKey>& map)
     {
-        map[LayernormFpropSignatureKey(XDataTypeEnum,
+        map[LayernormBpropSignatureKey(DyDataTypeEnum,
                                        ScaleBiasDataTypeEnum,
                                        MeanInvVarianceDataTypeEnum,
                                        OutputDataTypeEnum,
                                        ComputeDataTypeEnum)]
-            = std::make_unique<LayernormFpropPlanBuilder<XDataTypeEnum,
+            = std::make_unique<LayernormBpropPlanBuilder<DyDataTypeEnum,
                                                          ScaleBiasDataTypeEnum,
                                                          MeanInvVarianceDataTypeEnum,
                                                          OutputDataTypeEnum,
@@ -183,10 +185,10 @@ struct LayernormFpropSignatureKey
     }
 };
 
-inline std::ostream& operator<<(std::ostream& os, const LayernormFpropSignatureKey& key)
+inline std::ostream& operator<<(std::ostream& os, const LayernormBpropSignatureKey& key)
 {
-    os << "Layernorm(x=" << key.xDataType << ", scale=" << key.scaleBiasDataType
-       << ", meanInvVar=" << key.meanInvVarianceDataType << ", y=" << key.outputDataType
+    os << "Layernorm(dyX=" << key.dyDataType << ", scale=" << key.scaleBiasDataType
+       << ", meanInvVar=" << key.meanInvVarianceDataType << ", dxDscaleDbias=" << key.outputDataType
        << ", compute=" << key.computeDataType << ")";
     return os;
 }
