@@ -233,13 +233,19 @@ def _run_triton(
 def _run_dsl(shape: DecodeShape, data: dict, num_sms: int, *, warmup: int, iters: int):
     """Time DSL run_unified_attention_torch for one num_sms value.
 
+    Uses :func:`~dispatch.attention.dispatch_attention` to select the
+    registered kernel candidate (2d-tiled or 3d split-KV) for this shape,
+    then exercises the same production path as the provider.
+
     Returns (ms, path_name) or (None, None) on failure.
     """
     from rocke.runtime import synchronize_and_release, time_launches
     import torch
 
     try:
+        from dispatch.attention import AttentionRequest, dispatch_attention
         from kernels import UnifiedAttentionProblem, run_unified_attention_torch  # type: ignore
+        from kernels.common.attention_unified import _resolve_attention_arch
     except ImportError:
         return None, None
 
@@ -247,6 +253,24 @@ def _run_dsl(shape: DecodeShape, data: dict, num_sms: int, *, warmup: int, iters
     out = torch.empty_like(data["q"])
 
     try:
+        arch = _resolve_attention_arch()
+        req = AttentionRequest(
+            batch=shape.batch,
+            nhead_q=shape.num_query_heads,
+            nhead_k=shape.num_kv_heads,
+            seqlen_q=shape.seqlen_q,
+            seqlen_k=shape.seqlen_k,
+            hdim_q=shape.head_size,
+            hdim_v=shape.head_size,
+            arch=arch,
+            dtype=shape.dtype,
+            kv_block_size=shape.block_size,
+            num_sms=num_sms,
+        )
+        result = dispatch_attention(req)
+        path = result.spec.path  # "2d" or "3d"
+        run_backend = "tiled" if path == "2d" else path
+
         prob = UnifiedAttentionProblem(
             total_q=shape.batch * shape.seqlen_q,
             num_seqs=shape.batch,
@@ -262,7 +286,6 @@ def _run_dsl(shape: DecodeShape, data: dict, num_sms: int, *, warmup: int, iters
             use_qq_bias=data["qq_bias"] is not None,
             num_sms=num_sms,
         )
-        path = prob.select_path()
 
         def call_once():
             run_unified_attention_torch(
@@ -278,6 +301,7 @@ def _run_dsl(shape: DecodeShape, data: dict, num_sms: int, *, warmup: int, iters
                 softcap=data["softcap"],
                 alibi_slopes=data["alibi_slopes"],
                 qq_bias=data["qq_bias"],
+                backend=run_backend,
                 stream=hip_stream,
             )
 
@@ -430,11 +454,11 @@ def main() -> int:
     print(f"bias   : {bias_tag}")
     print()
 
-header = (
-    f"{'label':<22}  {'triton_us':>10}  "
-    + "  ".join(f"sms{s:>4}" for s in args.num_sms_sweep)
-    + f"  {'best_sms':>8}  {'best_spd':>9}  path"
-)
+    header = (
+        f"{'label':<22}  {'triton_us':>10}  "
+        + "  ".join(f"sms{s:>4}" for s in args.num_sms_sweep)
+        + f"  {'best_sms':>8}  {'best_spd':>9}  path"
+    )
     print(header)
     print("-" * len(header))
 

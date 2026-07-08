@@ -7,11 +7,11 @@
     "num_seqs": 1,
     "total_q": 512,
     "max_seqlen_k": 512,
-    "triton_ms": 0.04715744018554688,
+    "triton_ms": 0.046236119270324706,
     "variants": {
       "prod": {
-        "ms": 0.0764746379852295,
-        "speedup": 0.6166415615416837,
+        "ms": 0.07586599826812744,
+        "speedup": 0.6094445512588643,
         "max_abs": 0.0009765625,
         "ok": true,
         "kernel": "rocke_uattn2d_tiled_d128_b64_h32kv8_bf16_w2_wpe2_regpv"
@@ -21,7 +21,7 @@
       }
     },
     "best_variant": "prod",
-    "best_speedup": 0.6166415615416837
+    "best_speedup": 0.6094445512588643
   },
   {
     "signature": "d128_b64_h32kv8_q1024_k1024_ns1_tq1024_sw0_sc0_sinks0_bfloat16",
@@ -31,11 +31,11 @@
     "num_seqs": 1,
     "total_q": 1024,
     "max_seqlen_k": 1024,
-    "triton_ms": 0.07169961929321289,
+    "triton_ms": 0.06991869926452637,
     "variants": {
       "prod": {
-        "ms": 0.20235271453857423,
-        "speedup": 0.35432991080307397,
+        "ms": 0.2018266487121582,
+        "speedup": 0.346429471582037,
         "max_abs": 0.001953125,
         "ok": true,
         "kernel": "rocke_uattn2d_tiled_d128_b64_h32kv8_bf16_w2_wpe2_regpv"
@@ -45,7 +45,7 @@
       }
     },
     "best_variant": "prod",
-    "best_speedup": 0.35432991080307397
+    "best_speedup": 0.346429471582037
   },
   {
     "signature": "d128_b64_h32kv8_q2048_k2048_ns1_tq2048_sw0_sc0_sinks0_bfloat16",
@@ -55,11 +55,11 @@
     "num_seqs": 1,
     "total_q": 2048,
     "max_seqlen_k": 2048,
-    "triton_ms": 0.1749612045288086,
+    "triton_ms": 0.17385700225830078,
     "variants": {
       "prod": {
-        "ms": 0.6609912109375,
-        "speedup": 0.26469520567551397,
+        "ms": 0.6603487396240234,
+        "speedup": 0.2632805846760427,
         "max_abs": 0.0009765625,
         "ok": true,
         "kernel": "rocke_uattn2d_tiled_d128_b64_h32kv8_bf16_w2_wpe2_regpv"
@@ -69,7 +69,7 @@
       }
     },
     "best_variant": "prod",
-    "best_speedup": 0.26469520567551397
+    "best_speedup": 0.2632805846760427
   },
   {
     "signature": "d128_b64_h32kv8_q4096_k4096_ns1_tq4096_sw0_sc0_sinks0_bfloat16",
@@ -79,11 +79,11 @@
     "num_seqs": 1,
     "total_q": 4096,
     "max_seqlen_k": 4096,
-    "triton_ms": 0.5467383193969727,
+    "triton_ms": 0.5427186584472656,
     "variants": {
       "prod": {
-        "ms": 2.3918406677246096,
-        "speedup": 0.22858475766159303,
+        "ms": 2.390052490234375,
+        "speedup": 0.22707394949055915,
         "max_abs": 0.001953125,
         "ok": true,
         "kernel": "rocke_uattn2d_tiled_d128_b64_h32kv8_bf16_w2_wpe2_regpv"
@@ -93,7 +93,7 @@
       }
     },
     "best_variant": "prod",
-    "best_speedup": 0.22858475766159303
+    "best_speedup": 0.22707394949055915
   },
   {
     "signature": "d128_b64_h32kv8_q8192_k8192_ns1_tq8192_sw0_sc0_sinks0_bfloat16",
@@ -103,11 +103,11 @@
     "num_seqs": 1,
     "total_q": 8192,
     "max_seqlen_k": 8192,
-    "triton_ms": 1.9310882568359375,
+    "triton_ms": 1.8985360717773438,
     "variants": {
       "prod": {
-        "ms": 9.331875610351563,
-        "speedup": 0.20693463323641398,
+        "ms": 9.262396240234375,
+        "speedup": 0.20497245232614916,
         "max_abs": 0.001953125,
         "ok": true,
         "kernel": "rocke_uattn2d_tiled_d128_b64_h32kv8_bf16_w2_wpe2_regpv"
@@ -117,7 +117,7 @@
       }
     },
     "best_variant": "prod",
-    "best_speedup": 0.20693463323641398
+    "best_speedup": 0.20497245232614916
   },
   {
     "signature": "d128_b64_h40kv8_q512_k512_ns1_tq512_sw0_sc0_sinks0_bfloat16",
@@ -127,11 +127,11 @@
     "num_seqs": 1,
     "total_q": 512,
     "max_seqlen_k": 512,
-    "triton_ms": 0.04591780185699463,
+    "triton_ms": 0.04480884075164795,
     "variants": {
       "prod": {
-        "ms": 0.08960328102111817,
-        "speedup": 0.5124567017381035,
+        "ms": 0.08979649543762207,
+        "speedup": 0.49900433790063453,
         "max_abs": 0.0009765625,
         "ok": true,
         "kernel": "rocke_uattn2d_tiled_d128_b64_h40kv8_bf16_w2_wpe2_regpv"
@@ -141,7 +141,7 @@
       }
     },
     "best_variant": "prod",
-    "best_speedup": 0.5124567017381035
+    "best_speedup": 0.49900433790063453
   },
   {
     "signature": "d128_b64_h40kv8_q1024_k1024_ns1_tq1024_sw0_sc0_sinks0_bfloat16",
@@ -151,11 +151,11 @@
     "num_seqs": 1,
     "total_q": 1024,
     "max_seqlen_k": 1024,
-    "triton_ms": 0.0787803602218628,
+    "triton_ms": 0.07860551834106445,
     "variants": {
       "prod": {
-        "ms": 0.24744060516357422,
-        "speedup": 0.3183808905162671,
+        "ms": 0.24712301254272462,
+        "speedup": 0.3180825514073664,
         "max_abs": 0.001953125,
         "ok": true,
         "kernel": "rocke_uattn2d_tiled_d128_b64_h40kv8_bf16_w2_wpe2_regpv"
@@ -165,7 +165,7 @@
       }
     },
     "best_variant": "prod",
-    "best_speedup": 0.3183808905162671
+    "best_speedup": 0.3180825514073664
   },
   {
     "signature": "d128_b64_h40kv8_q2048_k2048_ns1_tq2048_sw0_sc0_sinks0_bfloat16",
@@ -175,11 +175,11 @@
     "num_seqs": 1,
     "total_q": 2048,
     "max_seqlen_k": 2048,
-    "triton_ms": 0.21546634674072265,
+    "triton_ms": 0.2116334342956543,
     "variants": {
       "prod": {
-        "ms": 0.8389556884765625,
-        "speedup": 0.2568268499758102,
+        "ms": 0.8391326141357421,
+        "speedup": 0.2522049920722298,
         "max_abs": 0.001953125,
         "ok": true,
         "kernel": "rocke_uattn2d_tiled_d128_b64_h40kv8_bf16_w2_wpe2_regpv"
@@ -189,7 +189,7 @@
       }
     },
     "best_variant": "prod",
-    "best_speedup": 0.2568268499758102
+    "best_speedup": 0.2522049920722298
   },
   {
     "signature": "d128_b64_h40kv8_q4096_k4096_ns1_tq4096_sw0_sc0_sinks0_bfloat16",
@@ -199,11 +199,11 @@
     "num_seqs": 1,
     "total_q": 4096,
     "max_seqlen_k": 4096,
-    "triton_ms": 0.6688565063476563,
+    "triton_ms": 0.6666410064697266,
     "variants": {
       "prod": {
-        "ms": 3.1286611938476563,
-        "speedup": 0.21378361698701237,
+        "ms": 3.124969787597656,
+        "speedup": 0.21332718451086588,
         "max_abs": 0.0009765625,
         "ok": true,
         "kernel": "rocke_uattn2d_tiled_d128_b64_h40kv8_bf16_w2_wpe2_regpv"
@@ -213,7 +213,7 @@
       }
     },
     "best_variant": "prod",
-    "best_speedup": 0.21378361698701237
+    "best_speedup": 0.21332718451086588
   },
   {
     "signature": "d128_b64_h40kv8_q8192_k8192_ns1_tq8192_sw0_sc0_sinks0_bfloat16",
@@ -223,11 +223,11 @@
     "num_seqs": 1,
     "total_q": 8192,
     "max_seqlen_k": 8192,
-    "triton_ms": 2.481159362792969,
+    "triton_ms": 2.466330871582031,
     "variants": {
       "prod": {
-        "ms": 12.703994140625,
-        "speedup": 0.19530545553848178,
+        "ms": 12.627186279296875,
+        "speedup": 0.19531911678738337,
         "max_abs": 0.0009765625,
         "ok": true,
         "kernel": "rocke_uattn2d_tiled_d128_b64_h40kv8_bf16_w2_wpe2_regpv"
@@ -237,7 +237,7 @@
       }
     },
     "best_variant": "prod",
-    "best_speedup": 0.19530545553848178
+    "best_speedup": 0.19531911678738337
   },
   {
     "signature": "d128_b64_h28kv4_q512_k512_ns1_tq512_sw0_sc0_sinks0_bfloat16",
@@ -247,11 +247,11 @@
     "num_seqs": 1,
     "total_q": 512,
     "max_seqlen_k": 512,
-    "triton_ms": 0.045788722038269045,
+    "triton_ms": 0.04447207927703858,
     "variants": {
       "prod": {
-        "ms": 0.07696616172790527,
-        "speedup": 0.5949201702449927,
+        "ms": 0.07701826095581055,
+        "speedup": 0.5774225323336574,
         "max_abs": 0.001953125,
         "ok": true,
         "kernel": "rocke_uattn2d_tiled_d128_b64_h28kv4_bf16_w2_wpe2_regpv"
@@ -261,7 +261,7 @@
       }
     },
     "best_variant": "prod",
-    "best_speedup": 0.5949201702449927
+    "best_speedup": 0.5774225323336574
   },
   {
     "signature": "d128_b64_h28kv4_q1024_k1024_ns1_tq1024_sw0_sc0_sinks0_bfloat16",
@@ -271,11 +271,11 @@
     "num_seqs": 1,
     "total_q": 1024,
     "max_seqlen_k": 1024,
-    "triton_ms": 0.06792131900787353,
+    "triton_ms": 0.06801191806793212,
     "variants": {
       "prod": {
-        "ms": 0.20642208099365233,
-        "speedup": 0.32904095666956373,
+        "ms": 0.20630334854125976,
+        "speedup": 0.32966948209437347,
         "max_abs": 0.001953125,
         "ok": true,
         "kernel": "rocke_uattn2d_tiled_d128_b64_h28kv4_bf16_w2_wpe2_regpv"
@@ -285,7 +285,7 @@
       }
     },
     "best_variant": "prod",
-    "best_speedup": 0.32904095666956373
+    "best_speedup": 0.32966948209437347
   },
   {
     "signature": "d128_b64_h28kv4_q2048_k2048_ns1_tq2048_sw0_sc0_sinks0_bfloat16",
@@ -295,11 +295,11 @@
     "num_seqs": 1,
     "total_q": 2048,
     "max_seqlen_k": 2048,
-    "triton_ms": 0.16540435791015626,
+    "triton_ms": 0.16486967086791993,
     "variants": {
       "prod": {
-        "ms": 0.6799485015869141,
-        "speedup": 0.24326012561851865,
+        "ms": 0.680066146850586,
+        "speedup": 0.24243181583355985,
         "max_abs": 0.001953125,
         "ok": true,
         "kernel": "rocke_uattn2d_tiled_d128_b64_h28kv4_bf16_w2_wpe2_regpv"
@@ -309,7 +309,7 @@
       }
     },
     "best_variant": "prod",
-    "best_speedup": 0.24326012561851865
+    "best_speedup": 0.24243181583355985
   },
   {
     "signature": "d128_b64_h28kv4_q4096_k4096_ns1_tq4096_sw0_sc0_sinks0_bfloat16",
@@ -319,11 +319,11 @@
     "num_seqs": 1,
     "total_q": 4096,
     "max_seqlen_k": 4096,
-    "triton_ms": 0.48411342620849607,
+    "triton_ms": 0.4900714111328125,
     "variants": {
       "prod": {
-        "ms": 2.459497375488281,
-        "speedup": 0.19683429266208735,
+        "ms": 2.45902587890625,
+        "speedup": 0.19929493842935533,
         "max_abs": 0.0078125,
         "ok": true,
         "kernel": "rocke_uattn2d_tiled_d128_b64_h28kv4_bf16_w2_wpe2_regpv"
@@ -333,7 +333,7 @@
       }
     },
     "best_variant": "prod",
-    "best_speedup": 0.19683429266208735
+    "best_speedup": 0.19929493842935533
   },
   {
     "signature": "d128_b64_h28kv4_q8192_k8192_ns1_tq8192_sw0_sc0_sinks0_bfloat16",
@@ -343,11 +343,11 @@
     "num_seqs": 1,
     "total_q": 8192,
     "max_seqlen_k": 8192,
-    "triton_ms": 1.7072027587890626,
+    "triton_ms": 1.7006610107421876,
     "variants": {
       "prod": {
-        "ms": 9.409854125976562,
-        "speedup": 0.18142712266667446,
+        "ms": 9.38287109375,
+        "speedup": 0.18125166526853498,
         "max_abs": 0.001953125,
         "ok": true,
         "kernel": "rocke_uattn2d_tiled_d128_b64_h28kv4_bf16_w2_wpe2_regpv"
@@ -357,7 +357,7 @@
       }
     },
     "best_variant": "prod",
-    "best_speedup": 0.18142712266667446
+    "best_speedup": 0.18125166526853498
   },
   {
     "signature": "d128_b64_h64kv8_q512_k512_ns1_tq512_sw0_sc0_sinks0_bfloat16",
@@ -367,11 +367,11 @@
     "num_seqs": 1,
     "total_q": 512,
     "max_seqlen_k": 512,
-    "triton_ms": 0.04893115997314453,
+    "triton_ms": 0.045095901489257816,
     "variants": {
       "prod": {
-        "ms": 0.11916582107543945,
-        "speedup": 0.41061404630584497,
+        "ms": 0.1175981616973877,
+        "speedup": 0.3834745444856692,
         "max_abs": 0.00390625,
         "ok": true,
         "kernel": "rocke_uattn2d_tiled_d128_b64_h64kv8_bf16_w2_wpe2_regpv"
@@ -381,7 +381,7 @@
       }
     },
     "best_variant": "prod",
-    "best_speedup": 0.41061404630584497
+    "best_speedup": 0.3834745444856692
   },
   {
     "signature": "d128_b64_h64kv8_q1024_k1024_ns1_tq1024_sw0_sc0_sinks0_bfloat16",
@@ -391,11 +391,11 @@
     "num_seqs": 1,
     "total_q": 1024,
     "max_seqlen_k": 1024,
-    "triton_ms": 0.09787154197692871,
+    "triton_ms": 0.09908692359924316,
     "variants": {
       "prod": {
-        "ms": 0.35068737030029296,
-        "speedup": 0.279084878058544,
+        "ms": 0.35071048736572263,
+        "speedup": 0.282531966305059,
         "max_abs": 0.0009765625,
         "ok": true,
         "kernel": "rocke_uattn2d_tiled_d128_b64_h64kv8_bf16_w2_wpe2_regpv"
@@ -405,7 +405,7 @@
       }
     },
     "best_variant": "prod",
-    "best_speedup": 0.279084878058544
+    "best_speedup": 0.282531966305059
   },
   {
     "signature": "d128_b64_h64kv8_q2048_k2048_ns1_tq2048_sw0_sc0_sinks0_bfloat16",
@@ -415,11 +415,11 @@
     "num_seqs": 1,
     "total_q": 2048,
     "max_seqlen_k": 2048,
-    "triton_ms": 0.2796873474121094,
+    "triton_ms": 0.2811624526977539,
     "variants": {
       "prod": {
-        "ms": 1.2311666870117188,
-        "speedup": 0.2271726081956985,
+        "ms": 1.231175994873047,
+        "speedup": 0.22836901780784483,
         "max_abs": 0.001953125,
         "ok": true,
         "kernel": "rocke_uattn2d_tiled_d128_b64_h64kv8_bf16_w2_wpe2_regpv"
@@ -429,7 +429,7 @@
       }
     },
     "best_variant": "prod",
-    "best_speedup": 0.2271726081956985
+    "best_speedup": 0.22836901780784483
   },
   {
     "signature": "d128_b64_h64kv8_q4096_k4096_ns1_tq4096_sw0_sc0_sinks0_bfloat16",
@@ -439,11 +439,11 @@
     "num_seqs": 1,
     "total_q": 4096,
     "max_seqlen_k": 4096,
-    "triton_ms": 0.9423636627197266,
+    "triton_ms": 0.9395143890380859,
     "variants": {
       "prod": {
-        "ms": 4.640202026367188,
-        "speedup": 0.2030867745337163,
+        "ms": 4.63154052734375,
+        "speedup": 0.20285138033260605,
         "max_abs": 0.001953125,
         "ok": true,
         "kernel": "rocke_uattn2d_tiled_d128_b64_h64kv8_bf16_w2_wpe2_regpv"
@@ -453,7 +453,7 @@
       }
     },
     "best_variant": "prod",
-    "best_speedup": 0.2030867745337163
+    "best_speedup": 0.20285138033260605
   },
   {
     "signature": "d128_b64_h64kv8_q8192_k8192_ns1_tq8192_sw0_sc0_sinks0_bfloat16",
@@ -463,11 +463,11 @@
     "num_seqs": 1,
     "total_q": 8192,
     "max_seqlen_k": 8192,
-    "triton_ms": 3.67005615234375,
+    "triton_ms": 3.6453323364257812,
     "variants": {
       "prod": {
-        "ms": 18.493927001953125,
-        "speedup": 0.1984465577243902,
+        "ms": 18.44177978515625,
+        "speedup": 0.1976670570245016,
         "max_abs": 0.0009765625,
         "ok": true,
         "kernel": "rocke_uattn2d_tiled_d128_b64_h64kv8_bf16_w2_wpe2_regpv"
@@ -477,7 +477,7 @@
       }
     },
     "best_variant": "prod",
-    "best_speedup": 0.1984465577243902
+    "best_speedup": 0.1976670570245016
   },
   {
     "signature": "d128_b64_h128kv8_q512_k512_ns1_tq512_sw0_sc0_sinks0_bfloat16",
@@ -487,11 +487,11 @@
     "num_seqs": 1,
     "total_q": 512,
     "max_seqlen_k": 512,
-    "triton_ms": 0.060653581619262695,
+    "triton_ms": 0.062051582336425784,
     "variants": {
       "prod": {
-        "ms": 0.20520889282226562,
-        "speedup": 0.29556994721371865,
+        "ms": 0.20506210327148439,
+        "speedup": 0.3025989753663791,
         "max_abs": 0.001953125,
         "ok": true,
         "kernel": "rocke_uattn2d_tiled_d128_b64_h128kv8_bf16_w2_wpe2_regpv"
@@ -501,7 +501,7 @@
       }
     },
     "best_variant": "prod",
-    "best_speedup": 0.29556994721371865
+    "best_speedup": 0.3025989753663791
   },
   {
     "signature": "d128_b64_h128kv8_q1024_k1024_ns1_tq1024_sw0_sc0_sinks0_bfloat16",
@@ -511,11 +511,11 @@
     "num_seqs": 1,
     "total_q": 1024,
     "max_seqlen_k": 1024,
-    "triton_ms": 0.1641986083984375,
+    "triton_ms": 0.16416948318481445,
     "variants": {
       "prod": {
-        "ms": 0.6611636352539062,
-        "speedup": 0.24834791214035906,
+        "ms": 0.6610472106933594,
+        "speedup": 0.24834759231889098,
         "max_abs": 0.001953125,
         "ok": true,
         "kernel": "rocke_uattn2d_tiled_d128_b64_h128kv8_bf16_w2_wpe2_regpv"
@@ -525,7 +525,7 @@
       }
     },
     "best_variant": "prod",
-    "best_speedup": 0.24834791214035906
+    "best_speedup": 0.24834759231889098
   },
   {
     "signature": "d128_b64_h128kv8_q2048_k2048_ns1_tq2048_sw0_sc0_sinks0_bfloat16",
@@ -535,11 +535,11 @@
     "num_seqs": 1,
     "total_q": 2048,
     "max_seqlen_k": 2048,
-    "triton_ms": 0.5017386245727539,
+    "triton_ms": 0.5010039901733399,
     "variants": {
       "prod": {
-        "ms": 2.390172119140625,
-        "speedup": 0.20991736141293105,
+        "ms": 2.3892172241210936,
+        "speedup": 0.209693779667791,
         "max_abs": 0.00390625,
         "ok": true,
         "kernel": "rocke_uattn2d_tiled_d128_b64_h128kv8_bf16_w2_wpe2_regpv"
@@ -549,7 +549,7 @@
       }
     },
     "best_variant": "prod",
-    "best_speedup": 0.20991736141293105
+    "best_speedup": 0.209693779667791
   },
   {
     "signature": "d128_b64_h128kv8_q4096_k4096_ns1_tq4096_sw0_sc0_sinks0_bfloat16",
@@ -559,11 +559,11 @@
     "num_seqs": 1,
     "total_q": 4096,
     "max_seqlen_k": 4096,
-    "triton_ms": 1.7745590209960938,
+    "triton_ms": 1.7801153564453125,
     "variants": {
       "prod": {
-        "ms": 9.29718994140625,
-        "speedup": 0.19087047077449318,
+        "ms": 9.25523193359375,
+        "speedup": 0.19233611531484382,
         "max_abs": 0.00390625,
         "ok": true,
         "kernel": "rocke_uattn2d_tiled_d128_b64_h128kv8_bf16_w2_wpe2_regpv"
@@ -573,7 +573,7 @@
       }
     },
     "best_variant": "prod",
-    "best_speedup": 0.19087047077449318
+    "best_speedup": 0.19233611531484382
   },
   {
     "signature": "d128_b64_h128kv8_q8192_k8192_ns1_tq8192_sw0_sc0_sinks0_bfloat16",
@@ -583,11 +583,11 @@
     "num_seqs": 1,
     "total_q": 8192,
     "max_seqlen_k": 8192,
-    "triton_ms": 7.253489379882812,
+    "triton_ms": 7.2401416015625,
     "variants": {
       "prod": {
-        "ms": 37.4260546875,
-        "speedup": 0.19380854969747638,
+        "ms": 37.1233251953125,
+        "speedup": 0.19502944748270287,
         "max_abs": 0.001953125,
         "ok": true,
         "kernel": "rocke_uattn2d_tiled_d128_b64_h128kv8_bf16_w2_wpe2_regpv"
@@ -597,7 +597,7 @@
       }
     },
     "best_variant": "prod",
-    "best_speedup": 0.19380854969747638
+    "best_speedup": 0.19502944748270287
   },
   {
     "signature": "d128_b64_h64kv4_q512_k512_ns1_tq512_sw0_sc0_sinks0_bfloat16",
@@ -607,11 +607,11 @@
     "num_seqs": 1,
     "total_q": 512,
     "max_seqlen_k": 512,
-    "triton_ms": 0.04647510051727295,
+    "triton_ms": 0.04880526065826416,
     "variants": {
       "prod": {
-        "ms": 0.12054659843444825,
-        "speedup": 0.38553639107905263,
+        "ms": 0.11943440437316895,
+        "speedup": 0.40863653077528395,
         "max_abs": 0.001953125,
         "ok": true,
         "kernel": "rocke_uattn2d_tiled_d128_b64_h64kv4_bf16_w2_wpe2_regpv"
@@ -621,7 +621,7 @@
       }
     },
     "best_variant": "prod",
-    "best_speedup": 0.38553639107905263
+    "best_speedup": 0.40863653077528395
   },
   {
     "signature": "d128_b64_h64kv4_q1024_k1024_ns1_tq1024_sw0_sc0_sinks0_bfloat16",
@@ -631,11 +631,11 @@
     "num_seqs": 1,
     "total_q": 1024,
     "max_seqlen_k": 1024,
-    "triton_ms": 0.10055352210998535,
+    "triton_ms": 0.10494440078735351,
     "variants": {
       "prod": {
-        "ms": 0.3557566452026367,
-        "speedup": 0.28264692582962353,
+        "ms": 0.3558639907836914,
+        "speedup": 0.2949003088405845,
         "max_abs": 0.001953125,
         "ok": true,
         "kernel": "rocke_uattn2d_tiled_d128_b64_h64kv4_bf16_w2_wpe2_regpv"
@@ -645,7 +645,7 @@
       }
     },
     "best_variant": "prod",
-    "best_speedup": 0.28264692582962353
+    "best_speedup": 0.2949003088405845
   },
   {
     "signature": "d128_b64_h64kv4_q2048_k2048_ns1_tq2048_sw0_sc0_sinks0_bfloat16",
@@ -655,11 +655,11 @@
     "num_seqs": 1,
     "total_q": 2048,
     "max_seqlen_k": 2048,
-    "triton_ms": 0.28162742614746095,
+    "triton_ms": 0.2830155181884766,
     "variants": {
       "prod": {
-        "ms": 1.2487465667724609,
-        "speedup": 0.2255280884378018,
+        "ms": 1.2483396911621094,
+        "speedup": 0.22671354615426081,
         "max_abs": 0.0009765625,
         "ok": true,
         "kernel": "rocke_uattn2d_tiled_d128_b64_h64kv4_bf16_w2_wpe2_regpv"
@@ -669,7 +669,7 @@
       }
     },
     "best_variant": "prod",
-    "best_speedup": 0.2255280884378018
+    "best_speedup": 0.22671354615426081
   },
   {
     "signature": "d128_b64_h64kv4_q4096_k4096_ns1_tq4096_sw0_sc0_sinks0_bfloat16",
@@ -679,11 +679,11 @@
     "num_seqs": 1,
     "total_q": 4096,
     "max_seqlen_k": 4096,
-    "triton_ms": 0.9472484588623047,
+    "triton_ms": 0.9404309844970703,
     "variants": {
       "prod": {
-        "ms": 4.659046325683594,
-        "speedup": 0.20331380987574116,
+        "ms": 4.658869323730468,
+        "speedup": 0.20185820188320816,
         "max_abs": 0.0078125,
         "ok": true,
         "kernel": "rocke_uattn2d_tiled_d128_b64_h64kv4_bf16_w2_wpe2_regpv"
@@ -693,7 +693,7 @@
       }
     },
     "best_variant": "prod",
-    "best_speedup": 0.20331380987574116
+    "best_speedup": 0.20185820188320816
   },
   {
     "signature": "d128_b64_h64kv4_q8192_k8192_ns1_tq8192_sw0_sc0_sinks0_bfloat16",
@@ -703,11 +703,11 @@
     "num_seqs": 1,
     "total_q": 8192,
     "max_seqlen_k": 8192,
-    "triton_ms": 3.7786279296875,
+    "triton_ms": 3.7706253051757814,
     "variants": {
       "prod": {
-        "ms": 18.5086669921875,
-        "speedup": 0.20415451481635372,
+        "ms": 18.439329833984374,
+        "speedup": 0.20448819664944537,
         "max_abs": 0.001953125,
         "ok": true,
         "kernel": "rocke_uattn2d_tiled_d128_b64_h64kv4_bf16_w2_wpe2_regpv"
@@ -717,7 +717,7 @@
       }
     },
     "best_variant": "prod",
-    "best_speedup": 0.20415451481635372
+    "best_speedup": 0.20448819664944537
   },
   {
     "signature": "d128_b64_h32kv32_q512_k512_ns1_tq512_sw0_sc0_sinks0_bfloat16",
@@ -727,11 +727,11 @@
     "num_seqs": 1,
     "total_q": 512,
     "max_seqlen_k": 512,
-    "triton_ms": 0.04600841999053955,
+    "triton_ms": 0.04668757915496826,
     "variants": {
       "prod": {
-        "ms": 0.15161742210388185,
-        "speedup": 0.3034507469663778,
+        "ms": 0.15175368309020995,
+        "speedup": 0.30765368065047116,
         "max_abs": 0.001953125,
         "ok": true,
         "kernel": "rocke_uattn2d_tiled_d128_b64_h32kv32_bf16_wpe2_regpv"
@@ -741,7 +741,7 @@
       }
     },
     "best_variant": "prod",
-    "best_speedup": 0.3034507469663778
+    "best_speedup": 0.30765368065047116
   },
   {
     "signature": "d128_b64_h32kv32_q1024_k1024_ns1_tq1024_sw0_sc0_sinks0_bfloat16",
@@ -751,11 +751,11 @@
     "num_seqs": 1,
     "total_q": 1024,
     "max_seqlen_k": 1024,
-    "triton_ms": 0.07575778007507324,
+    "triton_ms": 0.07541458129882812,
     "variants": {
       "prod": {
-        "ms": 0.2742720603942871,
-        "speedup": 0.2762139897376555,
+        "ms": 0.27321996688842776,
+        "speedup": 0.2760214861222952,
         "max_abs": 0.0009765625,
         "ok": true,
         "kernel": "rocke_uattn2d_tiled_d128_b64_h32kv32_bf16_w2_wpe2_regpv"
@@ -765,7 +765,7 @@
       }
     },
     "best_variant": "prod",
-    "best_speedup": 0.2762139897376555
+    "best_speedup": 0.2760214861222952
   },
   {
     "signature": "d128_b64_h32kv32_q2048_k2048_ns1_tq2048_sw0_sc0_sinks0_bfloat16",
@@ -775,11 +775,11 @@
     "num_seqs": 1,
     "total_q": 2048,
     "max_seqlen_k": 2048,
-    "triton_ms": 0.19067539215087892,
+    "triton_ms": 0.19041816711425782,
     "variants": {
       "prod": {
-        "ms": 0.9019281005859375,
-        "speedup": 0.21140863892255565,
+        "ms": 0.9027793884277344,
+        "speedup": 0.21092436264621298,
         "max_abs": 0.0009765625,
         "ok": true,
         "kernel": "rocke_uattn2d_tiled_d128_b64_h32kv32_bf16_w2_wpe2_regpv"
@@ -789,7 +789,7 @@
       }
     },
     "best_variant": "prod",
-    "best_speedup": 0.21140863892255565
+    "best_speedup": 0.21092436264621298
   },
   {
     "signature": "d128_b64_h32kv32_q4096_k4096_ns1_tq4096_sw0_sc0_sinks0_bfloat16",
@@ -799,11 +799,11 @@
     "num_seqs": 1,
     "total_q": 4096,
     "max_seqlen_k": 4096,
-    "triton_ms": 0.5815131378173828,
+    "triton_ms": 0.5815832901000977,
     "variants": {
       "prod": {
-        "ms": 3.3026556396484374,
-        "speedup": 0.1760744083749779,
+        "ms": 3.3029098510742188,
+        "speedup": 0.17608209618889448,
         "max_abs": 0.0009765625,
         "ok": true,
         "kernel": "rocke_uattn2d_tiled_d128_b64_h32kv32_bf16_w2_wpe2_regpv"
@@ -813,7 +813,7 @@
       }
     },
     "best_variant": "prod",
-    "best_speedup": 0.1760744083749779
+    "best_speedup": 0.17608209618889448
   },
   {
     "signature": "d128_b64_h32kv32_q8192_k8192_ns1_tq8192_sw0_sc0_sinks0_bfloat16",
@@ -823,11 +823,11 @@
     "num_seqs": 1,
     "total_q": 8192,
     "max_seqlen_k": 8192,
-    "triton_ms": 2.010218048095703,
+    "triton_ms": 2.013322448730469,
     "variants": {
       "prod": {
-        "ms": 12.688707275390625,
-        "speedup": 0.1584257564199989,
+        "ms": 12.671025390625,
+        "speedup": 0.15889183287566291,
         "max_abs": 0.001953125,
         "ok": true,
         "kernel": "rocke_uattn2d_tiled_d128_b64_h32kv32_bf16_w2_wpe2_regpv"
@@ -837,7 +837,7 @@
       }
     },
     "best_variant": "prod",
-    "best_speedup": 0.1584257564199989
+    "best_speedup": 0.15889183287566291
   },
   {
     "signature": "d128_b64_h40kv40_q512_k512_ns1_tq512_sw0_sc0_sinks0_bfloat16",
@@ -847,11 +847,11 @@
     "num_seqs": 1,
     "total_q": 512,
     "max_seqlen_k": 512,
-    "triton_ms": 0.04640933990478516,
+    "triton_ms": 0.04918211936950684,
     "variants": {
       "prod": {
-        "ms": 0.18885602951049804,
-        "speedup": 0.2457392545267154,
+        "ms": 0.18720415115356445,
+        "speedup": 0.26271917084339924,
         "max_abs": 0.00048828125,
         "ok": true,
         "kernel": "rocke_uattn2d_tiled_d128_b64_h40kv40_bf16_wpe2_regpv"
@@ -861,7 +861,7 @@
       }
     },
     "best_variant": "prod",
-    "best_speedup": 0.2457392545267154
+    "best_speedup": 0.26271917084339924
   },
   {
     "signature": "d128_b64_h40kv40_q1024_k1024_ns1_tq1024_sw0_sc0_sinks0_bfloat16",
@@ -871,11 +871,11 @@
     "num_seqs": 1,
     "total_q": 1024,
     "max_seqlen_k": 1024,
-    "triton_ms": 0.09156539916992187,
+    "triton_ms": 0.09117449760437012,
     "variants": {
       "prod": {
-        "ms": 0.3274778747558594,
-        "speedup": 0.2796078948484246,
+        "ms": 0.3270920944213867,
+        "speedup": 0.27874259011259284,
         "max_abs": 0.0009765625,
         "ok": true,
         "kernel": "rocke_uattn2d_tiled_d128_b64_h40kv40_bf16_w2_wpe2_regpv"
@@ -885,7 +885,7 @@
       }
     },
     "best_variant": "prod",
-    "best_speedup": 0.2796078948484246
+    "best_speedup": 0.27874259011259284
   },
   {
     "signature": "d128_b64_h40kv40_q2048_k2048_ns1_tq2048_sw0_sc0_sinks0_bfloat16",
@@ -895,11 +895,11 @@
     "num_seqs": 1,
     "total_q": 2048,
     "max_seqlen_k": 2048,
-    "triton_ms": 0.23255653381347657,
+    "triton_ms": 0.2364775085449219,
     "variants": {
       "prod": {
-        "ms": 1.1092955017089843,
-        "speedup": 0.2096434479858606,
+        "ms": 1.1089344024658203,
+        "speedup": 0.2132475176341286,
         "max_abs": 0.0009765625,
         "ok": true,
         "kernel": "rocke_uattn2d_tiled_d128_b64_h40kv40_bf16_w2_wpe2_regpv"
@@ -909,7 +909,7 @@
       }
     },
     "best_variant": "prod",
-    "best_speedup": 0.2096434479858606
+    "best_speedup": 0.2132475176341286
   },
   {
     "signature": "d128_b64_h40kv40_q4096_k4096_ns1_tq4096_sw0_sc0_sinks0_bfloat16",
@@ -919,11 +919,11 @@
     "num_seqs": 1,
     "total_q": 4096,
     "max_seqlen_k": 4096,
-    "triton_ms": 0.6997774505615234,
+    "triton_ms": 0.7006600952148437,
     "variants": {
       "prod": {
-        "ms": 4.0962130737304685,
-        "speedup": 0.17083521730089787,
+        "ms": 4.0987155151367185,
+        "speedup": 0.17094626173182265,
         "max_abs": 0.0078125,
         "ok": true,
         "kernel": "rocke_uattn2d_tiled_d128_b64_h40kv40_bf16_w2_wpe2_regpv"
@@ -933,7 +933,7 @@
       }
     },
     "best_variant": "prod",
-    "best_speedup": 0.17083521730089787
+    "best_speedup": 0.17094626173182265
   },
   {
     "signature": "d128_b64_h40kv40_q8192_k8192_ns1_tq8192_sw0_sc0_sinks0_bfloat16",
@@ -943,11 +943,11 @@
     "num_seqs": 1,
     "total_q": 8192,
     "max_seqlen_k": 8192,
-    "triton_ms": 2.5233895874023435,
+    "triton_ms": 2.52634765625,
     "variants": {
       "prod": {
-        "ms": 15.851483154296876,
-        "speedup": 0.15918949431039997,
+        "ms": 15.818348388671875,
+        "speedup": 0.15970995164445956,
         "max_abs": 0.0009765625,
         "ok": true,
         "kernel": "rocke_uattn2d_tiled_d128_b64_h40kv40_bf16_w2_wpe2_regpv"
@@ -957,7 +957,7 @@
       }
     },
     "best_variant": "prod",
-    "best_speedup": 0.15918949431039997
+    "best_speedup": 0.15970995164445956
   },
   {
     "signature": "d64_b32_h64kv8_q2048_k2048_ns1_tq2048_sw0_sc0_sinks0_bfloat16",
@@ -967,25 +967,25 @@
     "num_seqs": 1,
     "total_q": 2048,
     "max_seqlen_k": 2048,
-    "triton_ms": 0.162611141204834,
+    "triton_ms": 0.16139949798583986,
     "variants": {
       "prod": {
-        "ms": 0.5748166275024414,
-        "speedup": 0.282892201485844,
+        "ms": 0.5750089645385742,
+        "speedup": 0.28069040300155607,
         "max_abs": 0.0078125,
         "ok": true,
         "kernel": "rocke_uattn2d_tiled_d64_b32_h64kv8_bf16_w4_wpe2_mw32_regpv"
       },
       "fallback": {
-        "ms": 0.5427667999267578,
-        "speedup": 0.29959669829985386,
+        "ms": 0.5433607864379882,
+        "speedup": 0.29703928221227976,
         "max_abs": 0.00390625,
         "ok": true,
         "kernel": "rocke_uattn2d_tiled_d64_b32_t64_h64kv8_bf16_w2_wpe2"
       }
     },
     "best_variant": "fallback",
-    "best_speedup": 0.29959669829985386
+    "best_speedup": 0.29703928221227976
   },
   {
     "signature": "d64_b32_h64kv8_q4096_k4096_ns1_tq4096_sw0_sc0_sinks0_bfloat16",
@@ -995,25 +995,25 @@
     "num_seqs": 1,
     "total_q": 4096,
     "max_seqlen_k": 4096,
-    "triton_ms": 0.517719497680664,
+    "triton_ms": 0.5203854751586914,
     "variants": {
       "prod": {
-        "ms": 2.010078582763672,
-        "speedup": 0.2575618197816165,
+        "ms": 2.0042469787597654,
+        "speedup": 0.25964139184119295,
         "max_abs": 0.0078125,
         "ok": true,
         "kernel": "rocke_uattn2d_tiled_d64_b32_h64kv8_bf16_w4_wpe2_mw32_regpv"
       },
       "fallback": {
-        "ms": 2.0079359436035156,
-        "speedup": 0.2578366602430283,
+        "ms": 2.0058738708496096,
+        "speedup": 0.2594308060547578,
         "max_abs": 0.0009765625,
         "ok": true,
         "kernel": "rocke_uattn2d_tiled_d64_b32_t64_h64kv8_bf16_w2_wpe2"
       }
     },
-    "best_variant": "fallback",
-    "best_speedup": 0.2578366602430283
+    "best_variant": "prod",
+    "best_speedup": 0.25964139184119295
   },
   {
     "signature": "d64_b32_h64kv8_q8192_k8192_ns1_tq8192_sw0_sc0_sinks0_bfloat16",
@@ -1023,25 +1023,25 @@
     "num_seqs": 1,
     "total_q": 8192,
     "max_seqlen_k": 8192,
-    "triton_ms": 1.908880615234375,
+    "triton_ms": 1.9069941711425782,
     "variants": {
       "prod": {
-        "ms": 7.643104858398438,
-        "speedup": 0.24975198569163268,
+        "ms": 7.63050537109375,
+        "speedup": 0.2499171520626597,
         "max_abs": 0.00390625,
         "ok": true,
         "kernel": "rocke_uattn2d_tiled_d64_b32_h64kv8_bf16_w4_wpe2_mw32_regpv"
       },
       "fallback": {
-        "ms": 7.899785766601562,
-        "speedup": 0.2416370103737083,
+        "ms": 7.874325561523437,
+        "speedup": 0.2421787308948443,
         "max_abs": 0.001953125,
         "ok": true,
         "kernel": "rocke_uattn2d_tiled_d64_b32_t64_h64kv8_bf16_w2_wpe2"
       }
     },
     "best_variant": "prod",
-    "best_speedup": 0.24975198569163268
+    "best_speedup": 0.2499171520626597
   },
   {
     "signature": "d64_b32_h64kv8_q1024_k1024_ns2_tq2048_sw0_sc0_sinks0_bfloat16",
@@ -1051,24 +1051,24 @@
     "num_seqs": 2,
     "total_q": 2048,
     "max_seqlen_k": 1024,
-    "triton_ms": 0.10055452346801758,
+    "triton_ms": 0.10299934387207031,
     "variants": {
       "prod": {
-        "ms": 0.3098732948303223,
-        "speedup": 0.32450206308703805,
+        "ms": 0.3083448791503906,
+        "speedup": 0.3340394176672346,
         "max_abs": 0.0078125,
         "ok": true,
         "kernel": "rocke_uattn2d_tiled_d64_b32_h64kv8_bf16_w4_wpe2_mw32_regpv"
       },
       "fallback": {
-        "ms": 0.29674543380737306,
-        "speedup": 0.33885786270696494,
+        "ms": 0.2972561264038086,
+        "speedup": 0.34650032319990104,
         "max_abs": 0.00390625,
         "ok": true,
         "kernel": "rocke_uattn2d_tiled_d64_b32_t64_h64kv8_bf16_w2_wpe2"
       }
     },
     "best_variant": "fallback",
-    "best_speedup": 0.33885786270696494
+    "best_speedup": 0.34650032319990104
   }
 ]
