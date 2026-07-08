@@ -39,6 +39,14 @@ using hipdnn_frontend::PointwiseMode_t;
 using hipdnn_frontend::ReductionMode_t;
 using hipdnn_frontend::ResampleMode_t;
 
+struct KernelCache
+{
+};
+
+struct DeviceProperties
+{
+};
+
 // Other cuDNN FE-namespace enums (NumericalNote_t, NormMode_t, RngDistribution_t,
 // DescriptorType_t, MoeGroupedMatmulMode_t, TensorReordering_t, ReshapeMode_t)
 // are not aliased yet: hipDNN does not publish them and their nodes are out of

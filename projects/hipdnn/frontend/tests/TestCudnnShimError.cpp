@@ -25,9 +25,9 @@ static_assert(std::is_same_v<cfe::error_code_t, hipdnn_frontend::error_code_t>,
 
 namespace
 {
-// Mirror a hipified consumer: bring the shim names into scope so the bare
-// macro identifiers (error_code_t, error_t) resolve as they do upstream.
-using namespace hipdnn_frontend::compatibility::cudnn_frontend;
+using cfe::error_code_t;
+using cfe::error_object;
+using cfe::error_t;
 
 TEST(TestCudnnShimError, DefaultObjectIsOkAndGood)
 {

@@ -3465,7 +3465,6 @@ public:
         return *this;
     }
 
-#ifdef HIPDNN_ENABLE_SDPA
     /// Enable or disable runtime tensor-shape overrides for this graph.
     Graph& set_override_shape_enabled(bool enabled) // NOLINT(readability-identifier-naming)
     {
@@ -3486,7 +3485,6 @@ public:
     {
         return _isOverrideShapeEnabled;
     }
-#endif // HIPDNN_ENABLE_SDPA
 
     /**
      * @brief Create a new tensor with similar properties to an existing tensor
