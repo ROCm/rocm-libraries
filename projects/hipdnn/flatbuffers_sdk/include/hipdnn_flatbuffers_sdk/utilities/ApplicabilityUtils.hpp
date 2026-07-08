@@ -3,6 +3,11 @@
 
 #pragma once
 
+#include <algorithm>
+#include <cstdint>
+#include <unordered_map>
+#include <vector>
+
 #include <hipdnn_flatbuffers_sdk/data_objects/tensor_attributes_generated.h>
 
 namespace hipdnn_flatbuffers_sdk::utilities
@@ -23,7 +28,7 @@ inline std::vector<int64_t> listUnsupportedRaggedTensorIds(
 
     for(auto& [id, attrs] : tensorMap)
     {
-        if(attrs->ragged_offset_tensor_uid().has_value() && isSupportedRaggedTensor(id))
+        if(attrs->ragged_offset_tensor_uid().has_value() && !isSupportedRaggedTensor(id))
         {
             unsupportedRaggedIds.push_back(id);
         }
