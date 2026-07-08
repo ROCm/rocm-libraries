@@ -108,21 +108,6 @@ hipError_t topk_segmented_impl(void*                                 temporary_s
                      typename std::iterator_traits<ValuesOutputIterator>::value_type>::value,
         "ValuesInputIterator and ValuesOutputIterator must have the same value_type");
 
-    // Ensure K is non-negative
-    if(K < 0)
-    {
-        return hipErrorInvalidValue;
-    }
-
-    for(size_t segment = 0; segment < segments; segment++)
-    {
-        if(end_offsets[segment] - begin_offsets[segment] <= K)
-        {
-            // Ensure all segments have more than K elements.
-            return hipErrorInvalidValue;
-        }
-    }
-
     // Default is radix based segmented topk, check we can actually use it
     using radix_checker
         = radix_segmented_topk_condition_checker<KeysInputIterator, BinaryFunction, Decomposer>;
