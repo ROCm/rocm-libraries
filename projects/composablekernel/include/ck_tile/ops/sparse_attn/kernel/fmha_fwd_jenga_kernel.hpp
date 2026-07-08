@@ -464,8 +464,10 @@ struct FmhaFwdJengaKernel
             }
             else
             {
+                // Cast i_batch to long_index_t at the head of the product so the batch*head*blocks
+                // index stays 64-bit (matches the sparge kernel).
                 return base +
-                       static_cast<long_index_t>(i_batch * kargs.num_head_q + i_nhead) *
+                       (static_cast<long_index_t>(i_batch) * kargs.num_head_q + i_nhead) *
                            ck_tile::integer_divide_ceil(kargs.seqlen_q, FmhaPipeline::kM0) *
                            ck_tile::integer_divide_ceil(kargs.seqlen_k, FmhaPipeline::kN0) +
                        i_tile_m *
