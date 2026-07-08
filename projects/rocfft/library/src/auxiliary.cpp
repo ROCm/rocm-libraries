@@ -24,6 +24,9 @@
 #include "../../shared/environment.h"
 #include "../../shared/rocfft_hip.h"
 #include "logging.h"
+#ifdef ROCFFT_RCCL_ENABLE
+#include "rccl_wrapper.h"
+#endif
 #include "repo.h"
 #include "rocfft/rocfft-version.h"
 #include "rocfft/rocfft.h"
@@ -166,6 +169,10 @@ try
     // rocfft_setup() + plan creation will start from scratch
     Repo::Clear();
     RTCCache::single.reset();
+
+#ifdef ROCFFT_RCCL_ENABLE
+    rocfft_rccl_comm_t::reset_all();
+#endif
 
     TuningBenchmarker::GetSingleton().Clean();
 

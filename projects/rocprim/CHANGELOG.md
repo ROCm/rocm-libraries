@@ -11,9 +11,14 @@ Full documentation for rocPRIM is available at [https://rocm.docs.amd.com/projec
 
 * Added a parallel `device_topk`, which finds the largest/smallest K elements from an input array of keys.
 
+### Optimizations
+
+* Improved performance for the fallback path of lookback scan where the flag can't be fit into the same atomic load/store.
+
 ### Changed
 
 * Updated the documentation on how to run rocPrim tests on multiple GPUs in parallel.
+* Combined and simplified seperate assertion templates using `std::is_floating_point`, `rocprim::half`, and `rocprim::bfloat16` to use `rocprim::is_floating_point`
 
 ### Removed
 

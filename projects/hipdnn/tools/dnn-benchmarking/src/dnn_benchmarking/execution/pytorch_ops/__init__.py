@@ -8,7 +8,10 @@ Used by both PyTorchReferenceProvider (CPU) and PyTorchCudaExecutor (CUDA).
 """
 
 from ._registry import (
+    CompiledGraph,
+    CompiledOp,
     OpHandler,
+    compile_graph,
     execute_graph,
     get_handler,
     get_supported_operations,
@@ -16,6 +19,7 @@ from ._registry import (
     register_handler,
     supports_graph,
 )
+from ._common import ReplayTensors
 from ._warnings import get_reference_warnings
 
 # Import handler submodules so their @register_handler decorators run.
@@ -32,11 +36,15 @@ from .handlers import (  # noqa: F401
 
 __all__ = [
     "OpHandler",
+    "CompiledOp",
+    "CompiledGraph",
+    "ReplayTensors",
     "register_handler",
     "get_handler",
     "get_supported_operations",
     "supports_graph",
     "get_unsupported_operations",
+    "compile_graph",
     "execute_graph",
     "get_reference_warnings",
 ]
