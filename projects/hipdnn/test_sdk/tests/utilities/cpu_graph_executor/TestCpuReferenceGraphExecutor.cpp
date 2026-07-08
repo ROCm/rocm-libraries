@@ -304,6 +304,39 @@ public:
             serializedGraph.data(), serializedGraph.size(), variantPack);
     }
 
+    static void runLayernormBackwardTest(
+        hipdnn_flatbuffers_sdk::data_objects::DataType inputDataType,
+        hipdnn_flatbuffers_sdk::data_objects::DataType scaleBiasDataType,
+        hipdnn_flatbuffers_sdk::data_objects::DataType meanInvVarianceDataType,
+        hipdnn_flatbuffers_sdk::data_objects::DataType computeDataType)
+    {
+        const unsigned int seed = getGlobalTestSeed();
+        const std::vector<int64_t> dims = {1, 3, 14, 14};
+
+        auto graph = buildLayernormBpropGraph(inputDataType,
+                                              scaleBiasDataType,
+                                              meanInvVarianceDataType,
+                                              computeDataType,
+                                              dims,
+                                              2, // normalize over last 2 dims
+                                              TensorLayout::NCHW);
+
+        auto result = graph->validate();
+        ASSERT_EQ(result.code, hipdnn_frontend::ErrorCode::OK) << result.err_msg;
+
+        auto [serializedGraph, serErr] = graph->to_binary();
+        ASSERT_TRUE(serErr.is_good()) << serErr.get_message();
+        const GraphWrapper graphWrapper(serializedGraph.data(), serializedGraph.size());
+
+        LayernormBpropTensorBundle tensorBundle(
+            graphWrapper.getNodeWrapper(0), graphWrapper.getTensorMap(), seed);
+
+        auto variantPack = tensorBundle.toHostVariantPack();
+
+        CpuReferenceGraphExecutor().execute(
+            serializedGraph.data(), serializedGraph.size(), variantPack);
+    }
+
     static void runRMSNormTest(hipdnn_flatbuffers_sdk::data_objects::DataType inputDataType,
                                hipdnn_flatbuffers_sdk::data_objects::DataType scaleDataType,
                                hipdnn_flatbuffers_sdk::data_objects::DataType computeDataType)
@@ -627,6 +660,22 @@ TEST(TestCpuReferenceGraphExecutor, LayernormAllHalfs)
 TEST(TestCpuReferenceGraphExecutor, LayernormAllBFloat16)
 {
     TestCpuReferenceGraphExecutor::runLayernormTest(
+        DataType::BFLOAT16, DataType::BFLOAT16, DataType::BFLOAT16, DataType::BFLOAT16);
+}
+
+TEST(TestCpuReferenceGraphExecutor, LayernormBackwardAllFloats)
+{
+    TestCpuReferenceGraphExecutor::runLayernormBackwardTest(
+        DataType::FLOAT, DataType::FLOAT, DataType::FLOAT, DataType::FLOAT);
+}
+TEST(TestCpuReferenceGraphExecutor, LayernormBackwardAllHalfs)
+{
+    TestCpuReferenceGraphExecutor::runLayernormBackwardTest(
+        DataType::HALF, DataType::HALF, DataType::HALF, DataType::HALF);
+}
+TEST(TestCpuReferenceGraphExecutor, LayernormBackwardAllBFloat16)
+{
+    TestCpuReferenceGraphExecutor::runLayernormBackwardTest(
         DataType::BFLOAT16, DataType::BFLOAT16, DataType::BFLOAT16, DataType::BFLOAT16);
 }
 

@@ -22,6 +22,33 @@ def _format_extra_args(extra_args):
     return " " + " ".join(shlex.quote(str(a)) for a in extra_args)
 
 
+def _cmake_quote(value):
+    """Quote one value as a CMake bracket argument."""
+    text = str(value)
+    for level in range(10):
+        marker = "=" * level
+        if f"]{marker}]" not in text:
+            return f"[{marker}[{text}]{marker}]"
+    raise ValueError("Unable to quote CMake argument")
+
+
+def _format_cmake_args(args):
+    """Format a list of command arguments for generated CMake add_test()."""
+    if not args:
+        return ""
+    return " " + " ".join(_cmake_quote(arg) for arg in args)
+
+
+def _dedupe_preserve_order(values):
+    seen = set()
+    result = []
+    for value in values:
+        if value not in seen:
+            seen.add(value)
+            result.append(value)
+    return result
+
+
 # Allowlist patterns for YAML-sourced values
 _IDENTIFIER_RE = re.compile(r"^[\w\-\.]+$")
 _GTEST_PATTERN_RE = re.compile(r"^[\w\*\.\-/]+$")
@@ -233,6 +260,45 @@ def main():
             'the target name and each suite gets RESOURCE_GROUPS "1,<resource>:1" applied.'
         ),
     )
+    parser.add_argument(
+        "--test-name-prefix",
+        default=None,
+        help="Optional prefix for generated CTest names. Defaults to target_name.",
+    )
+    parser.add_argument(
+        "--command-arg",
+        action="append",
+        default=[],
+        help="Additional build-tree command argument. May be repeated.",
+    )
+    parser.add_argument(
+        "--install-command-arg",
+        action="append",
+        default=[],
+        help="Additional install-tree command argument. May be repeated.",
+    )
+    parser.add_argument(
+        "--install-executable",
+        default=None,
+        help="Install-tree executable path. Defaults to ../target_name.",
+    )
+    parser.add_argument(
+        "--additional-label",
+        action="append",
+        default=[],
+        help="Additional CTest label to append to every generated suite. May be repeated.",
+    )
+    parser.add_argument(
+        "--environment",
+        action="append",
+        default=[],
+        help=(
+            "Additional ENVIRONMENT entry (KEY=VALUE) applied to every generated "
+            "suite, e.g. CMake-side TEST_ENVIRONMENT (ASAN symbolizer path, "
+            "coverage LLVM_PROFILE_FILE). May be repeated. Overrides a "
+            "same-keyed execution_settings.environment entry from the YAML."
+        ),
+    )
 
     args = parser.parse_args()
 
@@ -241,14 +307,42 @@ def main():
     working_dir = args.working_dir
     install_test_file = args.install_test_file
     resource_group = args.resource_group
+    if args.test_name_prefix is not None:
+        err = validate_identifier(args.test_name_prefix)
+        if err is not None:
+            print(f"Error: invalid --test-name-prefix value: {err}", file=sys.stderr)
+            sys.exit(1)
+    for label in args.additional_label:
+        err = validate_identifier(label)
+        if err is not None:
+            print(f"Error: invalid --additional-label value: {err}", file=sys.stderr)
+            sys.exit(1)
+    cli_env_overrides = {}
+    for entry in args.environment:
+        if "=" not in entry:
+            print(
+                f"Error: invalid --environment value {entry!r}: expected KEY=VALUE",
+                file=sys.stderr,
+            )
+            sys.exit(1)
+        key, value = entry.split("=", 1)
+        cli_env_overrides[key] = value
     if resource_group is not None:
         err = validate_identifier(resource_group)
         if err is not None:
             print(f"Error: invalid --resource-group value: {err}", file=sys.stderr)
             sys.exit(1)
-    name_prefix = f"{target_name}_{resource_group}" if resource_group else target_name
+    base_name_prefix = args.test_name_prefix if args.test_name_prefix else target_name
+    name_prefix = (
+        f"{base_name_prefix}_{resource_group}" if resource_group else base_name_prefix
+    )
     resource_groups_prop = (
         f' RESOURCE_GROUPS "1,{resource_group}:1"' if resource_group else ""
+    )
+    command_args_string = _format_cmake_args(args.command_arg)
+    install_command_args_string = _format_cmake_args(args.install_command_arg)
+    install_executable = (
+        args.install_executable if args.install_executable else f"../{target_name}"
     )
 
     config = load_yaml(yaml_file)
@@ -281,7 +375,8 @@ def main():
         execution_settings = config.get("execution_settings", {})
         timeouts = execution_settings.get("category_timeouts", {})
         timeout_multiplier = execution_settings.get("timeout_multiplier", 1)
-        env_dict = execution_settings.get("environment", {}) or {}
+        env_dict = dict(execution_settings.get("environment", {}) or {})
+        env_dict.update(cli_env_overrides)
         env_string = (
             ";".join(f"{k}={v}" for k, v in env_dict.items()) if env_dict else None
         )
@@ -364,7 +459,8 @@ def main():
             else:
                 pattern_string = positive_string
 
-            label_string = '"' + ";".join(labels) + '"'
+            combined_labels = _dedupe_preserve_order(labels + args.additional_label)
+            label_string = '"' + ";".join(combined_labels) + '"'
 
             # =======================================================================
             # Write category test to CMake file and install file.
@@ -372,7 +468,7 @@ def main():
             print("add_test(")
             print(f"  NAME {name_prefix}_{category_name}_suite")
             print(
-                f"  COMMAND {target_name} --gtest_filter={pattern_string}{extra_args_string}"
+                f"  COMMAND {target_name}{command_args_string} --gtest_filter={pattern_string}{extra_args_string}"
             )
             print(f"  WORKING_DIRECTORY {working_dir}")
             print(")")
@@ -393,7 +489,7 @@ def main():
             if install_file_handle:
                 try:
                     install_file_handle.write(
-                        f'add_test({name_prefix}_{category_name}_suite "../{target_name}" --gtest_filter={pattern_string}{extra_args_string})\n'
+                        f"add_test({name_prefix}_{category_name}_suite {_cmake_quote(install_executable)}{install_command_args_string} --gtest_filter={pattern_string}{extra_args_string})\n"
                     )
                     env_prop = f' ENVIRONMENT "{env_string}"' if env_string else ""
                     install_file_handle.write(
@@ -507,8 +603,9 @@ def main():
 
                 pattern_string = positive_string + "-" + combined_exclude_string
 
-                # Build label string: category_labels + ex_gpu_<arch> label
-                combined_labels = cat_labels + [ex_gpu_label]
+                combined_labels = _dedupe_preserve_order(
+                    cat_labels + args.additional_label + [ex_gpu_label]
+                )
                 label_string = '"' + ";".join(combined_labels) + '"'
 
                 # =======================================================================
@@ -518,7 +615,7 @@ def main():
                 print("add_test(")
                 print(f"  NAME {name_prefix}_{category_name}_{gpu_arch}_suite")
                 print(
-                    f"  COMMAND {target_name} --gtest_filter={pattern_string}{cat_extra_args_string}"
+                    f"  COMMAND {target_name}{command_args_string} --gtest_filter={pattern_string}{cat_extra_args_string}"
                 )
                 print(f"  WORKING_DIRECTORY {working_dir}")
                 print(")")
@@ -539,7 +636,7 @@ def main():
                 if install_file_handle:
                     try:
                         install_file_handle.write(
-                            f'add_test({name_prefix}_{category_name}_{gpu_arch}_suite "../{target_name}" --gtest_filter={pattern_string}{cat_extra_args_string})\n'
+                            f"add_test({name_prefix}_{category_name}_{gpu_arch}_suite {_cmake_quote(install_executable)}{install_command_args_string} --gtest_filter={pattern_string}{cat_extra_args_string})\n"
                         )
                         env_prop = f' ENVIRONMENT "{env_string}"' if env_string else ""
                         install_file_handle.write(
