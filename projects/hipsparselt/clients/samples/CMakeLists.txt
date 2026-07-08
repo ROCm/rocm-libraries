@@ -1,6 +1,9 @@
 # Copyright Advanced Micro Devices, Inc., or its affiliates.
 # SPDX-License-Identifier: MIT
 
+include(CheckCXXCompilerFlag)
+check_cxx_compiler_flag("-mf16c" HIPSPARSELT_CXX_HAS_MF16C)
+
 set(SAMPLE_EXECUTABLES example_spmm_strided_batched example_prune_strip example_compress)
 
 foreach(sample_name ${SAMPLE_EXECUTABLES})
@@ -9,9 +12,9 @@ foreach(sample_name ${SAMPLE_EXECUTABLES})
   target_compile_features(${sample_name} PRIVATE cxx_std_17)
 
   if(CMAKE_COMPILER_IS_GNUCXX OR CMAKE_CXX_COMPILER_ID MATCHES "Clang")
-    if(CMAKE_SYSTEM_PROCESSOR MATCHES "x86_64")
+    if(HIPSPARSELT_CXX_HAS_MF16C)
       target_compile_options(${sample_name} PRIVATE -mf16c)
-    end()
+    endif()
     target_compile_definitions(${sample_name} PRIVATE HIPSPARSELT_INTERNAL_API)
   endif()
 
