@@ -67,6 +67,19 @@ protected:
 
         yTensorAttr->set_output(true);
 
+        auto validateResult = graphObj.validate();
+        if(validateResult.is_bad())
+        {
+            throw std::runtime_error("Failed to validate graph: " + validateResult.get_message());
+        }
+
+        auto buildResult = graphObj.build_operation_graph(getSharedHandle());
+        if(buildResult.is_bad())
+        {
+            throw std::runtime_error("Failed to build operation graph: "
+                                     + buildResult.get_message());
+        }
+
         this->registerValidator(yTensorAttr, tolerance);
 
         this->verifyGraph(graphObj, testCase.seed);
