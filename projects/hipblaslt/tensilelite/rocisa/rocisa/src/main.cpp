@@ -45,6 +45,8 @@ void init_stinkytofu(nb::module_ m);
 
 NB_MODULE(_rocisa, m)
 {
+    nb::set_leak_warnings(false);
+
 #ifdef ROCISA_HAS_STINKYTOFU
     stinkytofu::BackendRegistry::registerAllBackends();
 #endif
