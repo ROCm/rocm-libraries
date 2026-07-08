@@ -3,15 +3,18 @@
 
 """Operation-handler registry and graph execution."""
 
-from typing import Any, Callable, Dict, List, Optional, Set
+from typing import Any, Callable, Dict, List, Optional, Set, Tuple
 
 import torch
 
 from ...common.exceptions import UnsupportedGraphError
 
 
-# Type alias for operation handlers
-OpHandler = Callable[[Dict[str, Any], Dict[int, torch.Tensor], Dict[str, Any]], None]
+# Type aliases for operation planners.
+# CompiledOp replays a planned op against a live tensor map.
+CompiledOp = Callable[[Dict[int, torch.Tensor]], None]
+# OpHandler plans an op once from its node + graph JSON, returning a CompiledOp.
+OpHandler = Callable[[Dict[str, Any], Dict[str, Any]], CompiledOp]
 
 # Registry of operation handlers
 _OP_HANDLERS: Dict[str, OpHandler] = {}
@@ -87,11 +90,76 @@ def get_unsupported_operations(graph_json: Dict[str, Any]) -> List[str]:
     return unsupported
 
 
+class CompiledGraph:
+    """A graph compiled once into replayable per-op closures."""
+
+    def __init__(self, ops: List[Tuple[str, CompiledOp]]) -> None:
+        self._ops = ops
+
+    def execute(self, tensors: Dict[int, torch.Tensor]) -> None:
+        """Replay every compiled op against the provided tensor map.
+
+        Args:
+            tensors: Mapping of tensor UID to torch.Tensor.
+
+        Raises:
+            UnsupportedGraphError: If an op fails at runtime.
+        """
+        for op_type, run in self._ops:
+            try:
+                run(tensors)
+            except UnsupportedGraphError:
+                raise
+            except ValueError as e:
+                # A handler's ValueError signals an unsupported graph feature;
+                # normalize to UnsupportedGraphError so callers skip it. Any
+                # other exception is a real failure and propagates as an error.
+                raise UnsupportedGraphError(
+                    f"PyTorch reference could not execute {op_type!r} with the provided "
+                    f"dtypes/parameters: {e}"
+                ) from e
+
+
+def compile_graph(graph_json: Dict[str, Any]) -> CompiledGraph:
+    """Compile all graph operations into replayable closures once.
+
+    Args:
+        graph_json: The graph as a parsed JSON dictionary.
+
+    Returns:
+        A CompiledGraph that replays the planned ops on each execute().
+
+    Raises:
+        UnsupportedGraphError: If the graph contains an operation, attribute, or
+            parameter the PyTorch reference does not support.
+    """
+    ops: List[Tuple[str, CompiledOp]] = []
+    for node in graph_json.get("nodes", []):
+        op_type = node.get("type")
+        planner = _OP_HANDLERS.get(op_type)
+        if planner is None:
+            raise UnsupportedGraphError(f"Unsupported operation type: {op_type}")
+        try:
+            op = planner(node, graph_json)
+        except UnsupportedGraphError:
+            raise
+        except ValueError as e:
+            # A planner raises ValueError to signal a graph feature it cannot
+            # represent; normalize to UnsupportedGraphError so callers skip it.
+            # Any other exception is an unexpected failure and propagates.
+            raise UnsupportedGraphError(
+                f"PyTorch reference could not execute {op_type!r} with the provided "
+                f"dtypes/parameters: {e}"
+            ) from e
+        ops.append((op_type, op))
+    return CompiledGraph(ops)
+
+
 def execute_graph(
     graph_json: Dict[str, Any],
     tensors: Dict[int, torch.Tensor],
 ) -> None:
-    """Execute all graph operations in order.
+    """Compile and execute all graph operations in order.
 
     Args:
         graph_json: The graph as a parsed JSON dictionary.
@@ -101,21 +169,4 @@ def execute_graph(
         UnsupportedGraphError: If the graph contains an operation, attribute, or
             parameter the PyTorch reference does not support.
     """
-    for node in graph_json.get("nodes", []):
-        op_type = node.get("type")
-        handler = _OP_HANDLERS.get(op_type)
-        if handler is None:
-            raise UnsupportedGraphError(f"Unsupported operation type: {op_type}")
-        try:
-            handler(node, tensors, graph_json)
-        except UnsupportedGraphError:
-            raise
-        except ValueError as e:
-            # Handlers raise ValueError to signal a graph feature they cannot
-            # represent (unsupported attribute/param/operation); normalize it to
-            # UnsupportedGraphError so callers skip it. Any other exception is an
-            # unexpected failure and propagates as an error rather than a skip.
-            raise UnsupportedGraphError(
-                f"PyTorch reference could not execute {op_type!r} with the provided "
-                f"dtypes/parameters: {e}"
-            ) from e
+    compile_graph(graph_json).execute(tensors)
