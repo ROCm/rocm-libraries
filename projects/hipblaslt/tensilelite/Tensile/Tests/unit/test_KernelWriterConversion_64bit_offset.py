@@ -47,12 +47,13 @@ class TestKernelWriterConversion64BitOffset:
             self.source = f.read()
 
     def test_byteOffsetD_declared_as_uint64(self):
-        """byteOffsetD must be declared with uint64Str type."""
-        assert "self.uint64Str, destTypeStr" in self.source or \
-               'uint64Str' in self.source
-        pattern = r'byteOffsetD\s*=\s*idxD\s*\*\s*sizeof'
+        """byteOffsetD must be declared with self.uint64Str type."""
+        pattern = (
+            r'kStr\s*\+=\s*".*%s byteOffsetD\s*=\s*idxD\s*\*\s*sizeof\(%s\)'
+            r'.*"\s*%\s*\(\s*self\.uint64Str\s*,\s*destTypeStr'
+        )
         assert re.search(pattern, self.source), \
-            "Expected byteOffsetD = idxD * sizeof(...) pattern in source"
+            "Expected byteOffsetD declaration to use self.uint64Str"
 
     def test_buffer_store_uses_byteOffsetD(self):
         """All buffer_store calls in the store section must use byteOffsetD."""
@@ -70,7 +71,7 @@ class TestKernelWriterConversion64BitOffset:
             if "buffer_store" in line and "kStr" in line
         ]
         for line in store_lines:
-            assert "idxD * sizeof" not in line, \
+            assert not re.search(r"idxD\s*\*\s*sizeof", line), \
                 f"Found deprecated inline idxD*sizeof in buffer_store: {line.strip()}"
 
 
