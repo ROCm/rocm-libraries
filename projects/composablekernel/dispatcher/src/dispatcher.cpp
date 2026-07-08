@@ -28,27 +28,42 @@ Dispatcher::~Dispatcher()
     }
 }
 
-void Dispatcher::ensure_workspace(std::size_t bytes) const
+void Dispatcher::ensure_workspace(std::size_t bytes, void* stream) const
 {
-    if(bytes <= workspace_bytes_)
+    // Not thread-safe: mutates the Dispatcher-owned buffer. Safe because a
+    // Dispatcher is used from a single stream/thread (see the concurrency
+    // contract in dispatcher.hpp) -- there is no shared-buffer contention to
+    // guard against, so no lock is needed.
+    if(bytes > workspace_bytes_)
     {
-        return; // current buffer is big enough (also covers bytes == 0)
+        if(workspace_)
+        {
+            (void)hipFree(workspace_);
+            workspace_       = nullptr;
+            workspace_bytes_ = 0;
+        }
+
+        if(hipMalloc(&workspace_, bytes) != hipSuccess)
+        {
+            workspace_       = nullptr;
+            workspace_bytes_ = 0;
+            throw DispatcherError("Dispatcher: failed to allocate Stream-K reduction workspace");
+        }
+        workspace_bytes_ = bytes;
     }
 
-    if(workspace_)
+    // Zero the region the kernel will use. Linear/Tree reductions accumulate into
+    // this buffer and read it before writing, so a stale/garbage buffer corrupts
+    // results. Doing it here makes correctness independent of whether the backend's
+    // per-iteration preprocess reset runs (e.g. on the non-benchmarking nrepeat=1
+    // path), mirroring the internal DeviceMem::SetZero() the standalone launch does.
+    // Zeroed on the caller's stream so the reset is ordered against the kernel
+    // launch that follows (same stream) without an implicit device-wide sync.
+    if(bytes > 0 &&
+       hipMemsetAsync(workspace_, 0, bytes, static_cast<hipStream_t>(stream)) != hipSuccess)
     {
-        (void)hipFree(workspace_);
-        workspace_       = nullptr;
-        workspace_bytes_ = 0;
+        throw DispatcherError("Dispatcher: failed to zero Stream-K reduction workspace");
     }
-
-    if(hipMalloc(&workspace_, bytes) != hipSuccess)
-    {
-        workspace_       = nullptr;
-        workspace_bytes_ = 0;
-        throw DispatcherError("Dispatcher: failed to allocate Stream-K reduction workspace");
-    }
-    workspace_bytes_ = bytes;
 }
 
 void Dispatcher::set_heuristic(HeuristicFunction heuristic)
@@ -102,15 +117,19 @@ float Dispatcher::run_fused(const void* a_ptr,
     kernel->set_benchmarking(benchmarking_);
 
     // Size and own the reduction workspace (0 for non-Stream-K and for Atomic).
+    // For Linear/Tree the Dispatcher owns and reuses the buffer; no lock is taken
+    // because a Dispatcher is single-stream (see the concurrency contract in
+    // dispatcher.hpp). The buffer is zeroed on the caller's stream and the kernel
+    // launches on the same stream, so the reset is correctly ordered.
     const std::size_t ws_bytes = kernel->get_workspace_size(problem);
-    void* workspace            = nullptr;
     if(ws_bytes > 0)
     {
-        ensure_workspace(ws_bytes);
-        workspace = workspace_;
+        ensure_workspace(ws_bytes, stream); // grows if needed AND zeroes ws_bytes on `stream`
+        return kernel->run(a_ptr, b_ptr, c_ptr, d_ptrs, workspace_, problem, stream);
     }
 
-    return kernel->run(a_ptr, b_ptr, c_ptr, d_ptrs, workspace, problem, stream);
+    // No workspace needed (non-Stream-K / Atomic): nothing to size or zero.
+    return kernel->run(a_ptr, b_ptr, c_ptr, d_ptrs, nullptr, problem, stream);
 }
 
 float Dispatcher::run_explicit(const std::string& kernel_id,
@@ -138,15 +157,19 @@ float Dispatcher::run_explicit(const std::string& kernel_id,
     kernel->set_benchmarking(benchmarking_);
 
     // Size and own the reduction workspace (0 for non-Stream-K and for Atomic).
+    // For Linear/Tree the Dispatcher owns and reuses the buffer; no lock is taken
+    // because a Dispatcher is single-stream (see the concurrency contract in
+    // dispatcher.hpp). The buffer is zeroed on the caller's stream and the kernel
+    // launches on the same stream, so the reset is correctly ordered.
     const std::size_t ws_bytes = kernel->get_workspace_size(problem);
-    void* workspace            = nullptr;
     if(ws_bytes > 0)
     {
-        ensure_workspace(ws_bytes);
-        workspace = workspace_;
+        ensure_workspace(ws_bytes, stream); // grows if needed AND zeroes ws_bytes on `stream`
+        return kernel->run(a_ptr, b_ptr, c_ptr, d_ptrs, workspace_, problem, stream);
     }
 
-    return kernel->run(a_ptr, b_ptr, c_ptr, d_ptrs, workspace, problem, stream);
+    // No workspace needed (non-Stream-K / Atomic): nothing to size or zero.
+    return kernel->run(a_ptr, b_ptr, c_ptr, d_ptrs, nullptr, problem, stream);
 }
 
 bool Dispatcher::validate(const void* a_ptr,
