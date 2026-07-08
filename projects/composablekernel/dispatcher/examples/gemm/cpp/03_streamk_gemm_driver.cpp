@@ -42,14 +42,14 @@ template <typename Layout>
 static constexpr inline auto is_row_major(Layout)
 {
     return ck_tile::bool_constant<
-        std::is_same_v<ck_tile::remove_cvref_t<Layout>,
-                       ck_tile::tensor_layout::gemm::RowMajor>>{};
+        std::is_same_v<ck_tile::remove_cvref_t<Layout>, ck_tile::tensor_layout::gemm::RowMajor>>{};
 }
 
 static std::string get_opt(int argc, char** argv, const std::string& key, const std::string& def)
 {
     for(int i = 1; i < argc - 1; ++i)
-        if(key == argv[i]) return argv[i + 1];
+        if(key == argv[i])
+            return argv[i + 1];
     return def;
 }
 
@@ -79,9 +79,9 @@ int main(int argc, char** argv)
     // shot. Run a separate --validate 0 pass to collect apple-to-apple perf numbers.
     if(validate)
     {
-        warmup        = 0;
-        repeat        = 1;
-        flush_cache   = false;
+        warmup         = 0;
+        repeat         = 1;
+        flush_cache    = false;
         rotating_count = 1;
     }
 
@@ -122,9 +122,9 @@ int main(int argc, char** argv)
         nullptr, true, /*log=*/0, warmup, repeat, gpu_timer, flush_cache, rotating_count};
     float ave_time = SelectedKernel::launch(args, s);
 
-    const std::size_t flop  = std::size_t(2) * M * N * K;
-    const std::size_t bytes = sizeof(ADataType) * M * K + sizeof(BDataType) * K * N +
-                              sizeof(CDataType) * M * N;
+    const std::size_t flop = std::size_t(2) * M * N * K;
+    const std::size_t bytes =
+        sizeof(ADataType) * M * K + sizeof(BDataType) * K * N + sizeof(CDataType) * M * N;
     const float tflops = static_cast<float>(flop) / 1.E9 / ave_time;
     const float gbps   = static_cast<float>(bytes) / 1.E6 / ave_time;
     std::cout << "Perf: " << std::setw(10) << ave_time << " ms, " << tflops << " TFlops, " << gbps
@@ -168,7 +168,7 @@ int main(int argc, char** argv)
             ck_tile::get_absolute_threshold<CDataType, CDataType, CDataType>(maxv, kbatch);
         const auto rtol = std::max(rtol_base, rtol_split_k);
         const auto atol = std::max(atol_base, atol_split_k);
-        pass = ck_tile::check_err(c_host, ref, "streamk", rtol, atol);
+        pass            = ck_tile::check_err(c_host, ref, "streamk", rtol, atol);
         std::cout << "Verification: " << (pass ? "PASS" : "FAIL") << "\n";
     }
 

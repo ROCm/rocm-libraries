@@ -174,13 +174,13 @@ int dispatcher_run_gemm(
     // hardcoded, so every layout (rcr/rrr/ccr/crr/...) works. A RowMajor R x C
     // matrix has leading dim C; a ColumnMajor one has leading dim R.
     //   A is M x K, B is K x N, C is M x N.
-    using RowMajor             = ck_tile::tensor_layout::gemm::RowMajor;
-    const ck_tile::index_t lda = static_cast<ck_tile::index_t>(
-        std::is_same_v<ALayout, RowMajor> ? K : M);
-    const ck_tile::index_t ldb = static_cast<ck_tile::index_t>(
-        std::is_same_v<BLayout, RowMajor> ? N : K);
-    const ck_tile::index_t ldc = static_cast<ck_tile::index_t>(
-        std::is_same_v<CLayout, RowMajor> ? N : M);
+    using RowMajor = ck_tile::tensor_layout::gemm::RowMajor;
+    const ck_tile::index_t lda =
+        static_cast<ck_tile::index_t>(std::is_same_v<ALayout, RowMajor> ? K : M);
+    const ck_tile::index_t ldb =
+        static_cast<ck_tile::index_t>(std::is_same_v<BLayout, RowMajor> ? N : K);
+    const ck_tile::index_t ldc =
+        static_cast<ck_tile::index_t>(std::is_same_v<CLayout, RowMajor> ? N : M);
     // k_batch is fixed to 1 inside StreamKHostArgs.
     ck_tile::StreamKHostArgs args(static_cast<const void*>(A_dev),
                                   static_cast<const void*>(B_dev),

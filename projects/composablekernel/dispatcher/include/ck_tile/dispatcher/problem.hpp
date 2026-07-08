@@ -61,7 +61,7 @@ struct Problem
     bool enable_validation; // Enable output validation against reference
 
     // Stream-K request: which reduction strategy the caller wants (None = non-Stream-K)
-    bool streamk = false;
+    bool streamk                         = false;
     ReductionStrategy reduction_strategy = ReductionStrategy::None;
 
     /// Default constructor with sensible defaults
@@ -306,8 +306,8 @@ class ProblemBuilder
     /// Request a Stream-K kernel with a given reduction strategy
     ProblemBuilder& stream_k(ReductionStrategy strategy = ReductionStrategy::Atomic)
     {
-        problem_.streamk             = true;
-        problem_.reduction_strategy  = strategy;
+        problem_.streamk            = true;
+        problem_.reduction_strategy = strategy;
         return *this;
     }
 

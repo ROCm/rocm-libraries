@@ -58,8 +58,7 @@ template <typename Layout>
 static constexpr inline auto is_row_major(Layout)
 {
     return ck_tile::bool_constant<
-        std::is_same_v<ck_tile::remove_cvref_t<Layout>,
-                       ck_tile::tensor_layout::gemm::RowMajor>>{};
+        std::is_same_v<ck_tile::remove_cvref_t<Layout>, ck_tile::tensor_layout::gemm::RowMajor>>{};
 }
 
 // Map a ck_tile element type to the dispatcher's DataType enum so the registry
@@ -89,8 +88,7 @@ static constexpr DataType dtype_enum_of()
 template <typename Layout>
 static constexpr LayoutTag layout_tag_of()
 {
-    return std::is_same_v<ck_tile::remove_cvref_t<Layout>,
-                          ck_tile::tensor_layout::gemm::RowMajor>
+    return std::is_same_v<ck_tile::remove_cvref_t<Layout>, ck_tile::tensor_layout::gemm::RowMajor>
                ? LayoutTag::RowMajor
                : LayoutTag::ColMajor;
 }
@@ -98,7 +96,8 @@ static constexpr LayoutTag layout_tag_of()
 static std::string get_opt(int argc, char** argv, const std::string& key, const std::string& def)
 {
     for(int i = 1; i < argc - 1; ++i)
-        if(key == argv[i]) return argv[i + 1];
+        if(key == argv[i])
+            return argv[i + 1];
     return def;
 }
 
@@ -123,7 +122,8 @@ static KernelKey make_streamk_key(ReductionStrategy strategy)
     key.signature.num_d_tensors       = 0;
     key.signature.structured_sparsity = false;
 
-    key.algorithm.tile_shape      = {SelectedKernel::TileM, SelectedKernel::TileN, SelectedKernel::TileK};
+    key.algorithm.tile_shape = {
+        SelectedKernel::TileM, SelectedKernel::TileN, SelectedKernel::TileK};
     key.algorithm.warp_tile_shape = {static_cast<std::uint8_t>(SelectedKernel::WarpTileM),
                                      static_cast<std::uint8_t>(SelectedKernel::WarpTileN),
                                      static_cast<std::uint8_t>(SelectedKernel::WarpTileK)};
@@ -142,9 +142,9 @@ static KernelKey make_streamk_key(ReductionStrategy strategy)
     key.algorithm.pad_k           = SelectedKernel::kPadK;
 
     // The Stream-K selection axis (the whole point of this path).
-    key.algorithm.streamk             = true;
-    key.algorithm.reduction_strategy  = strategy;
-    key.algorithm.workspace           = (strategy != ReductionStrategy::Atomic);
+    key.algorithm.streamk            = true;
+    key.algorithm.reduction_strategy = strategy;
+    key.algorithm.workspace          = (strategy != ReductionStrategy::Atomic);
 
     key.gfx_arch = GFX_ARCH;
     return key;
@@ -152,31 +152,32 @@ static KernelKey make_streamk_key(ReductionStrategy strategy)
 
 static ReductionStrategy parse_strategy(const std::string& s)
 {
-    if(s == "linear") return ReductionStrategy::Linear;
-    if(s == "tree") return ReductionStrategy::Tree;
+    if(s == "linear")
+        return ReductionStrategy::Linear;
+    if(s == "tree")
+        return ReductionStrategy::Tree;
     return ReductionStrategy::Atomic;
 }
 
 int main(int argc, char** argv)
 {
-    const ck_tile::index_t M = std::stoll(get_opt(argc, argv, "--m", "3840"));
-    const ck_tile::index_t N = std::stoll(get_opt(argc, argv, "--n", "4096"));
-    const ck_tile::index_t K = std::stoll(get_opt(argc, argv, "--k", "2048"));
-    const bool validate      = get_opt(argc, argv, "--validate", "1") != "0";
-    const ReductionStrategy strategy =
-        parse_strategy(get_opt(argc, argv, "--strategy", "atomic"));
+    const ck_tile::index_t M         = std::stoll(get_opt(argc, argv, "--m", "3840"));
+    const ck_tile::index_t N         = std::stoll(get_opt(argc, argv, "--n", "4096"));
+    const ck_tile::index_t K         = std::stoll(get_opt(argc, argv, "--k", "2048"));
+    const bool validate              = get_opt(argc, argv, "--validate", "1") != "0";
+    const ReductionStrategy strategy = parse_strategy(get_opt(argc, argv, "--strategy", "atomic"));
 
     std::cout << "Kernel: " << KERNEL_NAME << "\n";
-    std::cout << "M=" << M << " N=" << N << " K=" << K
-              << " strategy=" << to_string(strategy) << "\n";
+    std::cout << "M=" << M << " N=" << N << " K=" << K << " strategy=" << to_string(strategy)
+              << "\n";
 
     // --- Register the kernel into the global registry ---------------------------
     KernelKey key = make_streamk_key(strategy);
     auto kernel   = create_generated_streamk_kernel<SelectedKernel,
-                                                  ADataType,
-                                                  BDataType,
-                                                  CDataType,
-                                                  AccDataType>(key, KERNEL_NAME);
+                                                    ADataType,
+                                                    BDataType,
+                                                    CDataType,
+                                                    AccDataType>(key, KERNEL_NAME);
     Registry::instance().clear();
     Registry::instance().register_kernel(kernel, Priority::High);
     std::cout << "Registered kernels: " << Registry::instance().size()
@@ -230,9 +231,9 @@ int main(int argc, char** argv)
         return 1;
     }
 
-    const std::size_t flop  = std::size_t(2) * M * N * K;
-    const std::size_t bytes = sizeof(ADataType) * M * K + sizeof(BDataType) * K * N +
-                              sizeof(CDataType) * M * N;
+    const std::size_t flop = std::size_t(2) * M * N * K;
+    const std::size_t bytes =
+        sizeof(ADataType) * M * K + sizeof(BDataType) * K * N + sizeof(CDataType) * M * N;
     const float tflops = static_cast<float>(flop) / 1.E9 / ave_time;
     const float gbps   = static_cast<float>(bytes) / 1.E6 / ave_time;
     std::cout << "Perf: " << std::setw(10) << ave_time << " ms, " << tflops << " TFlops, " << gbps
