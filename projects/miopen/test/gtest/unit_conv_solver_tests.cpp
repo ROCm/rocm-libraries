@@ -28,6 +28,8 @@
 #include <miopen/miopen.h>
 #include <miopen/errors.hpp>
 #include <miopen/float_equal.hpp>
+#include <miopen/gemm_v2.hpp>
+#include <miopen/solver/static_ck_common.hpp>
 
 #include "gtest_common.hpp"
 #include "unit_conv_solver.hpp"
