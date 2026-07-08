@@ -8,6 +8,7 @@ orjson
 yappi
 tox
 invoke
+filelock
 numpy
 hip-python
 nanobind>=2.0

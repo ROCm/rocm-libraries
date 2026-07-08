@@ -7,11 +7,11 @@
     "num_seqs": 1,
     "total_q": 512,
     "max_seqlen_k": 512,
-    "triton_ms": 0.04715744018554688,
+    "triton_ms": 0.04687920093536377,
     "variants": {
       "prod": {
-        "ms": 0.0764746379852295,
-        "speedup": 0.6166415615416837,
+        "ms": 0.07663740158081055,
+        "speedup": 0.6117013360106142,
         "max_abs": 0.0009765625,
         "ok": true,
         "kernel": "rocke_uattn2d_tiled_d128_b64_h32kv8_bf16_w2_wpe2_regpv"
@@ -21,7 +21,7 @@
       }
     },
     "best_variant": "prod",
-    "best_speedup": 0.6166415615416837
+    "best_speedup": 0.6117013360106142
   },
   {
     "signature": "d128_b64_h32kv8_q1024_k1024_ns1_tq1024_sw0_sc0_sinks0_bfloat16",
@@ -31,21 +31,21 @@
     "num_seqs": 1,
     "total_q": 1024,
     "max_seqlen_k": 1024,
-    "triton_ms": 0.07169961929321289,
+    "triton_ms": 0.06977918148040771,
     "variants": {
       "prod": {
-        "ms": 0.20235271453857423,
-        "speedup": 0.35432991080307397,
+        "ms": 0.1056643009185791,
+        "speedup": 0.6603855878834318,
         "max_abs": 0.001953125,
         "ok": true,
-        "kernel": "rocke_uattn2d_tiled_d128_b64_h32kv8_bf16_w2_wpe2_regpv"
+        "kernel": "rocke_uattn2d_tiled_d128_b64_h32kv8_bf16_w2_wpe2_mw32_mfma32x8_stqk_s1_mask1_hoist_mlim_kvcpall_k1buf"
       },
       "fallback": {
         "error": "NotImplementedError('supports_tiled_2d: tiled 2D kernel: estimated LDS 115200 B (BLOCK_M=32, T=128, HD=128) exceeds the gfx942 65536 B LDS budget; comgr CODEGEN would fail')"
       }
     },
     "best_variant": "prod",
-    "best_speedup": 0.35432991080307397
+    "best_speedup": 0.6603855878834318
   },
   {
     "signature": "d128_b64_h32kv8_q2048_k2048_ns1_tq2048_sw0_sc0_sinks0_bfloat16",
@@ -55,21 +55,21 @@
     "num_seqs": 1,
     "total_q": 2048,
     "max_seqlen_k": 2048,
-    "triton_ms": 0.1749612045288086,
+    "triton_ms": 0.17495153427124024,
     "variants": {
       "prod": {
-        "ms": 0.6609912109375,
-        "speedup": 0.26469520567551397,
-        "max_abs": 0.0009765625,
+        "ms": 0.2899810028076172,
+        "speedup": 0.6033206747247122,
+        "max_abs": 0.001953125,
         "ok": true,
-        "kernel": "rocke_uattn2d_tiled_d128_b64_h32kv8_bf16_w2_wpe2_regpv"
+        "kernel": "rocke_uattn2d_tiled_d128_b64_h32kv8_bf16_w2_wpe2_mw32_mfma32x8_stqk_s1_mask1_hoist_mlim_kvcpall_k1buf"
       },
       "fallback": {
         "error": "NotImplementedError('supports_tiled_2d: tiled 2D kernel: estimated LDS 115200 B (BLOCK_M=32, T=128, HD=128) exceeds the gfx942 65536 B LDS budget; comgr CODEGEN would fail')"
       }
     },
     "best_variant": "prod",
-    "best_speedup": 0.26469520567551397
+    "best_speedup": 0.6033206747247122
   },
   {
     "signature": "d128_b64_h32kv8_q4096_k4096_ns1_tq4096_sw0_sc0_sinks0_bfloat16",
@@ -79,21 +79,21 @@
     "num_seqs": 1,
     "total_q": 4096,
     "max_seqlen_k": 4096,
-    "triton_ms": 0.5467383193969727,
+    "triton_ms": 0.5434370803833007,
     "variants": {
       "prod": {
-        "ms": 2.3918406677246096,
-        "speedup": 0.22858475766159303,
+        "ms": 0.9200336456298828,
+        "speedup": 0.590670877053901,
         "max_abs": 0.001953125,
         "ok": true,
-        "kernel": "rocke_uattn2d_tiled_d128_b64_h32kv8_bf16_w2_wpe2_regpv"
+        "kernel": "rocke_uattn2d_tiled_d128_b64_h32kv8_bf16_w2_wpe2_mw32_mfma32x8_stqk_s1_mask1_hoist_mlim_kvcpall_k1buf"
       },
       "fallback": {
         "error": "NotImplementedError('supports_tiled_2d: tiled 2D kernel: estimated LDS 115200 B (BLOCK_M=32, T=128, HD=128) exceeds the gfx942 65536 B LDS budget; comgr CODEGEN would fail')"
       }
     },
     "best_variant": "prod",
-    "best_speedup": 0.22858475766159303
+    "best_speedup": 0.590670877053901
   },
   {
     "signature": "d128_b64_h32kv8_q8192_k8192_ns1_tq8192_sw0_sc0_sinks0_bfloat16",
@@ -103,21 +103,21 @@
     "num_seqs": 1,
     "total_q": 8192,
     "max_seqlen_k": 8192,
-    "triton_ms": 1.9310882568359375,
+    "triton_ms": 1.9332412719726562,
     "variants": {
       "prod": {
-        "ms": 9.331875610351563,
-        "speedup": 0.20693463323641398,
+        "ms": 3.4132254028320315,
+        "speedup": 0.5663971885268994,
         "max_abs": 0.001953125,
         "ok": true,
-        "kernel": "rocke_uattn2d_tiled_d128_b64_h32kv8_bf16_w2_wpe2_regpv"
+        "kernel": "rocke_uattn2d_tiled_d128_b64_h32kv8_bf16_w2_wpe2_mw32_mfma32x8_stqk_s1_mask1_hoist_mlim_kvcpall_k1buf"
       },
       "fallback": {
         "error": "NotImplementedError('supports_tiled_2d: tiled 2D kernel: estimated LDS 115200 B (BLOCK_M=32, T=128, HD=128) exceeds the gfx942 65536 B LDS budget; comgr CODEGEN would fail')"
       }
     },
     "best_variant": "prod",
-    "best_speedup": 0.20693463323641398
+    "best_speedup": 0.5663971885268994
   },
   {
     "signature": "d128_b64_h40kv8_q512_k512_ns1_tq512_sw0_sc0_sinks0_bfloat16",
@@ -127,11 +127,11 @@
     "num_seqs": 1,
     "total_q": 512,
     "max_seqlen_k": 512,
-    "triton_ms": 0.04591780185699463,
+    "triton_ms": 0.051392822265625,
     "variants": {
       "prod": {
-        "ms": 0.08960328102111817,
-        "speedup": 0.5124567017381035,
+        "ms": 0.08997453689575195,
+        "speedup": 0.5711929623507899,
         "max_abs": 0.0009765625,
         "ok": true,
         "kernel": "rocke_uattn2d_tiled_d128_b64_h40kv8_bf16_w2_wpe2_regpv"
@@ -141,7 +141,7 @@
       }
     },
     "best_variant": "prod",
-    "best_speedup": 0.5124567017381035
+    "best_speedup": 0.5711929623507899
   },
   {
     "signature": "d128_b64_h40kv8_q1024_k1024_ns1_tq1024_sw0_sc0_sinks0_bfloat16",
@@ -151,21 +151,21 @@
     "num_seqs": 1,
     "total_q": 1024,
     "max_seqlen_k": 1024,
-    "triton_ms": 0.0787803602218628,
+    "triton_ms": 0.07701387882232666,
     "variants": {
       "prod": {
-        "ms": 0.24744060516357422,
-        "speedup": 0.3183808905162671,
+        "ms": 0.12640166282653809,
+        "speedup": 0.6092790007676826,
         "max_abs": 0.001953125,
         "ok": true,
-        "kernel": "rocke_uattn2d_tiled_d128_b64_h40kv8_bf16_w2_wpe2_regpv"
+        "kernel": "rocke_uattn2d_tiled_d128_b64_h40kv8_bf16_w2_wpe2_mw32_mfma32x8_stqk_s1_mask1_hoist_mlim_kvcpall_k1buf"
       },
       "fallback": {
         "error": "NotImplementedError('supports_tiled_2d: tiled 2D kernel: estimated LDS 115200 B (BLOCK_M=32, T=128, HD=128) exceeds the gfx942 65536 B LDS budget; comgr CODEGEN would fail')"
       }
     },
     "best_variant": "prod",
-    "best_speedup": 0.3183808905162671
+    "best_speedup": 0.6092790007676826
   },
   {
     "signature": "d128_b64_h40kv8_q2048_k2048_ns1_tq2048_sw0_sc0_sinks0_bfloat16",
@@ -175,21 +175,21 @@
     "num_seqs": 1,
     "total_q": 2048,
     "max_seqlen_k": 2048,
-    "triton_ms": 0.21546634674072265,
+    "triton_ms": 0.20995059967041016,
     "variants": {
       "prod": {
-        "ms": 0.8389556884765625,
-        "speedup": 0.2568268499758102,
+        "ms": 0.3569248962402344,
+        "speedup": 0.5882206645767275,
         "max_abs": 0.001953125,
         "ok": true,
-        "kernel": "rocke_uattn2d_tiled_d128_b64_h40kv8_bf16_w2_wpe2_regpv"
+        "kernel": "rocke_uattn2d_tiled_d128_b64_h40kv8_bf16_w2_wpe2_mw32_mfma32x8_stqk_s1_mask1_hoist_mlim_kvcpall_k1buf"
       },
       "fallback": {
         "error": "NotImplementedError('supports_tiled_2d: tiled 2D kernel: estimated LDS 115200 B (BLOCK_M=32, T=128, HD=128) exceeds the gfx942 65536 B LDS budget; comgr CODEGEN would fail')"
       }
     },
     "best_variant": "prod",
-    "best_speedup": 0.2568268499758102
+    "best_speedup": 0.5882206645767275
   },
   {
     "signature": "d128_b64_h40kv8_q4096_k4096_ns1_tq4096_sw0_sc0_sinks0_bfloat16",
@@ -199,21 +199,21 @@
     "num_seqs": 1,
     "total_q": 4096,
     "max_seqlen_k": 4096,
-    "triton_ms": 0.6688565063476563,
+    "triton_ms": 0.6614436340332032,
     "variants": {
       "prod": {
-        "ms": 3.1286611938476563,
-        "speedup": 0.21378361698701237,
+        "ms": 1.2055043029785155,
+        "speedup": 0.5486862488992637,
         "max_abs": 0.0009765625,
         "ok": true,
-        "kernel": "rocke_uattn2d_tiled_d128_b64_h40kv8_bf16_w2_wpe2_regpv"
+        "kernel": "rocke_uattn2d_tiled_d128_b64_h40kv8_bf16_w2_wpe2_mw32_mfma32x8_stqk_s1_mask1_hoist_mlim_kvcpall_k1buf"
       },
       "fallback": {
         "error": "NotImplementedError('supports_tiled_2d: tiled 2D kernel: estimated LDS 115200 B (BLOCK_M=32, T=128, HD=128) exceeds the gfx942 65536 B LDS budget; comgr CODEGEN would fail')"
       }
     },
     "best_variant": "prod",
-    "best_speedup": 0.21378361698701237
+    "best_speedup": 0.5486862488992637
   },
   {
     "signature": "d128_b64_h40kv8_q8192_k8192_ns1_tq8192_sw0_sc0_sinks0_bfloat16",
@@ -223,21 +223,21 @@
     "num_seqs": 1,
     "total_q": 8192,
     "max_seqlen_k": 8192,
-    "triton_ms": 2.481159362792969,
+    "triton_ms": 2.465537414550781,
     "variants": {
       "prod": {
-        "ms": 12.703994140625,
-        "speedup": 0.19530545553848178,
+        "ms": 4.632809143066407,
+        "speedup": 0.5321905864049622,
         "max_abs": 0.0009765625,
         "ok": true,
-        "kernel": "rocke_uattn2d_tiled_d128_b64_h40kv8_bf16_w2_wpe2_regpv"
+        "kernel": "rocke_uattn2d_tiled_d128_b64_h40kv8_bf16_w2_wpe2_mw32_mfma32x8_stqk_s1_mask1_hoist_mlim_kvcpall_k1buf"
       },
       "fallback": {
         "error": "NotImplementedError('supports_tiled_2d: tiled 2D kernel: estimated LDS 115200 B (BLOCK_M=32, T=128, HD=128) exceeds the gfx942 65536 B LDS budget; comgr CODEGEN would fail')"
       }
     },
     "best_variant": "prod",
-    "best_speedup": 0.19530545553848178
+    "best_speedup": 0.5321905864049622
   },
   {
     "signature": "d128_b64_h28kv4_q512_k512_ns1_tq512_sw0_sc0_sinks0_bfloat16",
@@ -247,11 +247,11 @@
     "num_seqs": 1,
     "total_q": 512,
     "max_seqlen_k": 512,
-    "triton_ms": 0.045788722038269045,
+    "triton_ms": 0.045994777679443356,
     "variants": {
       "prod": {
-        "ms": 0.07696616172790527,
-        "speedup": 0.5949201702449927,
+        "ms": 0.07784257888793945,
+        "speedup": 0.5908691404694656,
         "max_abs": 0.001953125,
         "ok": true,
         "kernel": "rocke_uattn2d_tiled_d128_b64_h28kv4_bf16_w2_wpe2_regpv"
@@ -261,7 +261,7 @@
       }
     },
     "best_variant": "prod",
-    "best_speedup": 0.5949201702449927
+    "best_speedup": 0.5908691404694656
   },
   {
     "signature": "d128_b64_h28kv4_q1024_k1024_ns1_tq1024_sw0_sc0_sinks0_bfloat16",
@@ -271,21 +271,21 @@
     "num_seqs": 1,
     "total_q": 1024,
     "max_seqlen_k": 1024,
-    "triton_ms": 0.06792131900787353,
+    "triton_ms": 0.0686429786682129,
     "variants": {
       "prod": {
-        "ms": 0.20642208099365233,
-        "speedup": 0.32904095666956373,
+        "ms": 0.10501799583435059,
+        "speedup": 0.653630628949408,
         "max_abs": 0.001953125,
         "ok": true,
-        "kernel": "rocke_uattn2d_tiled_d128_b64_h28kv4_bf16_w2_wpe2_regpv"
+        "kernel": "rocke_uattn2d_tiled_d128_b64_h28kv4_bf16_w2_wpe2_mw32_mfma32x8_stqk_s1_mask1_hoist_mlim_kvcpall_k1buf"
       },
       "fallback": {
         "error": "NotImplementedError('supports_tiled_2d: tiled 2D kernel: estimated LDS 115200 B (BLOCK_M=32, T=128, HD=128) exceeds the gfx942 65536 B LDS budget; comgr CODEGEN would fail')"
       }
     },
     "best_variant": "prod",
-    "best_speedup": 0.32904095666956373
+    "best_speedup": 0.653630628949408
   },
   {
     "signature": "d128_b64_h28kv4_q2048_k2048_ns1_tq2048_sw0_sc0_sinks0_bfloat16",
@@ -295,21 +295,21 @@
     "num_seqs": 1,
     "total_q": 2048,
     "max_seqlen_k": 2048,
-    "triton_ms": 0.16540435791015626,
+    "triton_ms": 0.16309906005859376,
     "variants": {
       "prod": {
-        "ms": 0.6799485015869141,
-        "speedup": 0.24326012561851865,
+        "ms": 0.27126752853393554,
+        "speedup": 0.6012480039172476,
         "max_abs": 0.001953125,
         "ok": true,
-        "kernel": "rocke_uattn2d_tiled_d128_b64_h28kv4_bf16_w2_wpe2_regpv"
+        "kernel": "rocke_uattn2d_tiled_d128_b64_h28kv4_bf16_w2_wpe2_mw32_mfma32x8_stqk_s1_mask1_hoist_mlim_kvcpall_k1buf"
       },
       "fallback": {
         "error": "NotImplementedError('supports_tiled_2d: tiled 2D kernel: estimated LDS 115200 B (BLOCK_M=32, T=128, HD=128) exceeds the gfx942 65536 B LDS budget; comgr CODEGEN would fail')"
       }
     },
     "best_variant": "prod",
-    "best_speedup": 0.24326012561851865
+    "best_speedup": 0.6012480039172476
   },
   {
     "signature": "d128_b64_h28kv4_q4096_k4096_ns1_tq4096_sw0_sc0_sinks0_bfloat16",
@@ -319,21 +319,21 @@
     "num_seqs": 1,
     "total_q": 4096,
     "max_seqlen_k": 4096,
-    "triton_ms": 0.48411342620849607,
+    "triton_ms": 0.4837174987792969,
     "variants": {
       "prod": {
-        "ms": 2.459497375488281,
-        "speedup": 0.19683429266208735,
+        "ms": 0.8252207946777343,
+        "speedup": 0.5861673650240461,
         "max_abs": 0.0078125,
         "ok": true,
-        "kernel": "rocke_uattn2d_tiled_d128_b64_h28kv4_bf16_w2_wpe2_regpv"
+        "kernel": "rocke_uattn2d_tiled_d128_b64_h28kv4_bf16_w2_wpe2_mw32_mfma32x8_stqk_s1_mask1_hoist_mlim_kvcpall_k1buf"
       },
       "fallback": {
         "error": "NotImplementedError('supports_tiled_2d: tiled 2D kernel: estimated LDS 115200 B (BLOCK_M=32, T=128, HD=128) exceeds the gfx942 65536 B LDS budget; comgr CODEGEN would fail')"
       }
     },
     "best_variant": "prod",
-    "best_speedup": 0.19683429266208735
+    "best_speedup": 0.5861673650240461
   },
   {
     "signature": "d128_b64_h28kv4_q8192_k8192_ns1_tq8192_sw0_sc0_sinks0_bfloat16",
@@ -343,21 +343,21 @@
     "num_seqs": 1,
     "total_q": 8192,
     "max_seqlen_k": 8192,
-    "triton_ms": 1.7072027587890626,
+    "triton_ms": 1.6889488220214843,
     "variants": {
       "prod": {
-        "ms": 9.409854125976562,
-        "speedup": 0.18142712266667446,
-        "max_abs": 0.001953125,
+        "ms": 3.0576956176757815,
+        "speedup": 0.5523600231030483,
+        "max_abs": 0.0009765625,
         "ok": true,
-        "kernel": "rocke_uattn2d_tiled_d128_b64_h28kv4_bf16_w2_wpe2_regpv"
+        "kernel": "rocke_uattn2d_tiled_d128_b64_h28kv4_bf16_w2_wpe2_mw32_mfma32x8_stqk_s1_mask1_hoist_mlim_kvcpall_k1buf"
       },
       "fallback": {
         "error": "NotImplementedError('supports_tiled_2d: tiled 2D kernel: estimated LDS 115200 B (BLOCK_M=32, T=128, HD=128) exceeds the gfx942 65536 B LDS budget; comgr CODEGEN would fail')"
       }
     },
     "best_variant": "prod",
-    "best_speedup": 0.18142712266667446
+    "best_speedup": 0.5523600231030483
   },
   {
     "signature": "d128_b64_h64kv8_q512_k512_ns1_tq512_sw0_sc0_sinks0_bfloat16",
@@ -367,11 +367,11 @@
     "num_seqs": 1,
     "total_q": 512,
     "max_seqlen_k": 512,
-    "triton_ms": 0.04893115997314453,
+    "triton_ms": 0.04626582145690918,
     "variants": {
       "prod": {
-        "ms": 0.11916582107543945,
-        "speedup": 0.41061404630584497,
+        "ms": 0.11795182228088379,
+        "speedup": 0.39224338007033394,
         "max_abs": 0.00390625,
         "ok": true,
         "kernel": "rocke_uattn2d_tiled_d128_b64_h64kv8_bf16_w2_wpe2_regpv"
@@ -381,7 +381,7 @@
       }
     },
     "best_variant": "prod",
-    "best_speedup": 0.41061404630584497
+    "best_speedup": 0.39224338007033394
   },
   {
     "signature": "d128_b64_h64kv8_q1024_k1024_ns1_tq1024_sw0_sc0_sinks0_bfloat16",
@@ -391,21 +391,21 @@
     "num_seqs": 1,
     "total_q": 1024,
     "max_seqlen_k": 1024,
-    "triton_ms": 0.09787154197692871,
+    "triton_ms": 0.09776249885559082,
     "variants": {
       "prod": {
-        "ms": 0.35068737030029296,
-        "speedup": 0.279084878058544,
+        "ms": 0.15840262413024903,
+        "speedup": 0.6171772683210355,
         "max_abs": 0.0009765625,
         "ok": true,
-        "kernel": "rocke_uattn2d_tiled_d128_b64_h64kv8_bf16_w2_wpe2_regpv"
+        "kernel": "rocke_uattn2d_tiled_d128_b64_h64kv8_bf16_w2_wpe2_mw32_mfma32x8_stqk_s1_mask1_hoist_mlim_kvcpall_k1buf"
       },
       "fallback": {
         "error": "NotImplementedError('supports_tiled_2d: tiled 2D kernel: estimated LDS 115200 B (BLOCK_M=32, T=128, HD=128) exceeds the gfx942 65536 B LDS budget; comgr CODEGEN would fail')"
       }
     },
     "best_variant": "prod",
-    "best_speedup": 0.279084878058544
+    "best_speedup": 0.6171772683210355
   },
   {
     "signature": "d128_b64_h64kv8_q2048_k2048_ns1_tq2048_sw0_sc0_sinks0_bfloat16",
@@ -415,21 +415,21 @@
     "num_seqs": 1,
     "total_q": 2048,
     "max_seqlen_k": 2048,
-    "triton_ms": 0.2796873474121094,
+    "triton_ms": 0.2809161376953125,
     "variants": {
       "prod": {
-        "ms": 1.2311666870117188,
-        "speedup": 0.2271726081956985,
+        "ms": 0.4797840118408203,
+        "speedup": 0.5855054165258701,
         "max_abs": 0.001953125,
         "ok": true,
-        "kernel": "rocke_uattn2d_tiled_d128_b64_h64kv8_bf16_w2_wpe2_regpv"
+        "kernel": "rocke_uattn2d_tiled_d128_b64_h64kv8_bf16_w2_wpe2_mw32_mfma32x8_stqk_s1_mask1_hoist_mlim_kvcpall_k1buf"
       },
       "fallback": {
         "error": "NotImplementedError('supports_tiled_2d: tiled 2D kernel: estimated LDS 115200 B (BLOCK_M=32, T=128, HD=128) exceeds the gfx942 65536 B LDS budget; comgr CODEGEN would fail')"
       }
     },
     "best_variant": "prod",
-    "best_speedup": 0.2271726081956985
+    "best_speedup": 0.5855054165258701
   },
   {
     "signature": "d128_b64_h64kv8_q4096_k4096_ns1_tq4096_sw0_sc0_sinks0_bfloat16",
@@ -439,21 +439,21 @@
     "num_seqs": 1,
     "total_q": 4096,
     "max_seqlen_k": 4096,
-    "triton_ms": 0.9423636627197266,
+    "triton_ms": 0.9380023193359375,
     "variants": {
       "prod": {
-        "ms": 4.640202026367188,
-        "speedup": 0.2030867745337163,
+        "ms": 1.7110252380371094,
+        "speedup": 0.548210685899651,
         "max_abs": 0.001953125,
         "ok": true,
-        "kernel": "rocke_uattn2d_tiled_d128_b64_h64kv8_bf16_w2_wpe2_regpv"
+        "kernel": "rocke_uattn2d_tiled_d128_b64_h64kv8_bf16_w2_wpe2_mw32_mfma32x8_stqk_s1_mask1_hoist_mlim_kvcpall_k1buf"
       },
       "fallback": {
         "error": "NotImplementedError('supports_tiled_2d: tiled 2D kernel: estimated LDS 115200 B (BLOCK_M=32, T=128, HD=128) exceeds the gfx942 65536 B LDS budget; comgr CODEGEN would fail')"
       }
     },
     "best_variant": "prod",
-    "best_speedup": 0.2030867745337163
+    "best_speedup": 0.548210685899651
   },
   {
     "signature": "d128_b64_h64kv8_q8192_k8192_ns1_tq8192_sw0_sc0_sinks0_bfloat16",
@@ -463,21 +463,21 @@
     "num_seqs": 1,
     "total_q": 8192,
     "max_seqlen_k": 8192,
-    "triton_ms": 3.67005615234375,
+    "triton_ms": 3.622785949707031,
     "variants": {
       "prod": {
-        "ms": 18.493927001953125,
-        "speedup": 0.1984465577243902,
-        "max_abs": 0.0009765625,
+        "ms": 6.608651733398437,
+        "speedup": 0.5481883591169431,
+        "max_abs": 0.001953125,
         "ok": true,
-        "kernel": "rocke_uattn2d_tiled_d128_b64_h64kv8_bf16_w2_wpe2_regpv"
+        "kernel": "rocke_uattn2d_tiled_d128_b64_h64kv8_bf16_w2_wpe2_mw32_mfma32x8_stqk_s1_mask1_hoist_mlim_kvcpall_k1buf"
       },
       "fallback": {
         "error": "NotImplementedError('supports_tiled_2d: tiled 2D kernel: estimated LDS 115200 B (BLOCK_M=32, T=128, HD=128) exceeds the gfx942 65536 B LDS budget; comgr CODEGEN would fail')"
       }
     },
     "best_variant": "prod",
-    "best_speedup": 0.1984465577243902
+    "best_speedup": 0.5481883591169431
   },
   {
     "signature": "d128_b64_h128kv8_q512_k512_ns1_tq512_sw0_sc0_sinks0_bfloat16",
@@ -487,11 +487,11 @@
     "num_seqs": 1,
     "total_q": 512,
     "max_seqlen_k": 512,
-    "triton_ms": 0.060653581619262695,
+    "triton_ms": 0.06112366199493408,
     "variants": {
       "prod": {
-        "ms": 0.20520889282226562,
-        "speedup": 0.29556994721371865,
+        "ms": 0.20535322189331054,
+        "speedup": 0.2976513415829937,
         "max_abs": 0.001953125,
         "ok": true,
         "kernel": "rocke_uattn2d_tiled_d128_b64_h128kv8_bf16_w2_wpe2_regpv"
@@ -501,7 +501,7 @@
       }
     },
     "best_variant": "prod",
-    "best_speedup": 0.29556994721371865
+    "best_speedup": 0.2976513415829937
   },
   {
     "signature": "d128_b64_h128kv8_q1024_k1024_ns1_tq1024_sw0_sc0_sinks0_bfloat16",
@@ -511,21 +511,21 @@
     "num_seqs": 1,
     "total_q": 1024,
     "max_seqlen_k": 1024,
-    "triton_ms": 0.1641986083984375,
+    "triton_ms": 0.16417451858520507,
     "variants": {
       "prod": {
-        "ms": 0.6611636352539062,
-        "speedup": 0.24834791214035906,
-        "max_abs": 0.001953125,
+        "ms": 0.2753922080993652,
+        "speedup": 0.5961480163809453,
+        "max_abs": 0.00390625,
         "ok": true,
-        "kernel": "rocke_uattn2d_tiled_d128_b64_h128kv8_bf16_w2_wpe2_regpv"
+        "kernel": "rocke_uattn2d_tiled_d128_b64_h128kv8_bf16_w2_wpe2_mw32_mfma32x8_stqk_s1_mask1_hoist_mlim_kvcpall_k1buf"
       },
       "fallback": {
         "error": "NotImplementedError('supports_tiled_2d: tiled 2D kernel: estimated LDS 115200 B (BLOCK_M=32, T=128, HD=128) exceeds the gfx942 65536 B LDS budget; comgr CODEGEN would fail')"
       }
     },
     "best_variant": "prod",
-    "best_speedup": 0.24834791214035906
+    "best_speedup": 0.5961480163809453
   },
   {
     "signature": "d128_b64_h128kv8_q2048_k2048_ns1_tq2048_sw0_sc0_sinks0_bfloat16",
@@ -535,21 +535,21 @@
     "num_seqs": 1,
     "total_q": 2048,
     "max_seqlen_k": 2048,
-    "triton_ms": 0.5017386245727539,
+    "triton_ms": 0.4937963104248047,
     "variants": {
       "prod": {
-        "ms": 2.390172119140625,
-        "speedup": 0.20991736141293105,
+        "ms": 0.8849897766113282,
+        "speedup": 0.5579683782513019,
         "max_abs": 0.00390625,
         "ok": true,
-        "kernel": "rocke_uattn2d_tiled_d128_b64_h128kv8_bf16_w2_wpe2_regpv"
+        "kernel": "rocke_uattn2d_tiled_d128_b64_h128kv8_bf16_w2_wpe2_mw32_mfma32x8_stqk_s1_mask1_hoist_mlim_kvcpall_k1buf"
       },
       "fallback": {
         "error": "NotImplementedError('supports_tiled_2d: tiled 2D kernel: estimated LDS 115200 B (BLOCK_M=32, T=128, HD=128) exceeds the gfx942 65536 B LDS budget; comgr CODEGEN would fail')"
       }
     },
     "best_variant": "prod",
-    "best_speedup": 0.20991736141293105
+    "best_speedup": 0.5579683782513019
   },
   {
     "signature": "d128_b64_h128kv8_q4096_k4096_ns1_tq4096_sw0_sc0_sinks0_bfloat16",
@@ -559,21 +559,21 @@
     "num_seqs": 1,
     "total_q": 4096,
     "max_seqlen_k": 4096,
-    "triton_ms": 1.7745590209960938,
+    "triton_ms": 1.7651588439941406,
     "variants": {
       "prod": {
-        "ms": 9.29718994140625,
-        "speedup": 0.19087047077449318,
-        "max_abs": 0.00390625,
+        "ms": 3.328255310058594,
+        "speedup": 0.5303556006233984,
+        "max_abs": 0.001953125,
         "ok": true,
-        "kernel": "rocke_uattn2d_tiled_d128_b64_h128kv8_bf16_w2_wpe2_regpv"
+        "kernel": "rocke_uattn2d_tiled_d128_b64_h128kv8_bf16_w2_wpe2_mw32_mfma32x8_stqk_s1_mask1_hoist_mlim_kvcpall_k1buf"
       },
       "fallback": {
         "error": "NotImplementedError('supports_tiled_2d: tiled 2D kernel: estimated LDS 115200 B (BLOCK_M=32, T=128, HD=128) exceeds the gfx942 65536 B LDS budget; comgr CODEGEN would fail')"
       }
     },
     "best_variant": "prod",
-    "best_speedup": 0.19087047077449318
+    "best_speedup": 0.5303556006233984
   },
   {
     "signature": "d128_b64_h128kv8_q8192_k8192_ns1_tq8192_sw0_sc0_sinks0_bfloat16",
@@ -583,21 +583,21 @@
     "num_seqs": 1,
     "total_q": 8192,
     "max_seqlen_k": 8192,
-    "triton_ms": 7.253489379882812,
+    "triton_ms": 7.1994580078125,
     "variants": {
       "prod": {
-        "ms": 37.4260546875,
-        "speedup": 0.19380854969747638,
+        "ms": 13.088619384765625,
+        "speedup": 0.5500548068646752,
         "max_abs": 0.001953125,
         "ok": true,
-        "kernel": "rocke_uattn2d_tiled_d128_b64_h128kv8_bf16_w2_wpe2_regpv"
+        "kernel": "rocke_uattn2d_tiled_d128_b64_h128kv8_bf16_w2_wpe2_mw32_mfma32x8_stqk_s1_mask1_hoist_mlim_kvcpall_k1buf"
       },
       "fallback": {
         "error": "NotImplementedError('supports_tiled_2d: tiled 2D kernel: estimated LDS 115200 B (BLOCK_M=32, T=128, HD=128) exceeds the gfx942 65536 B LDS budget; comgr CODEGEN would fail')"
       }
     },
     "best_variant": "prod",
-    "best_speedup": 0.19380854969747638
+    "best_speedup": 0.5500548068646752
   },
   {
     "signature": "d128_b64_h64kv4_q512_k512_ns1_tq512_sw0_sc0_sinks0_bfloat16",
@@ -607,11 +607,11 @@
     "num_seqs": 1,
     "total_q": 512,
     "max_seqlen_k": 512,
-    "triton_ms": 0.04647510051727295,
+    "triton_ms": 0.04599637985229492,
     "variants": {
       "prod": {
-        "ms": 0.12054659843444825,
-        "speedup": 0.38553639107905263,
+        "ms": 0.11976960182189941,
+        "speedup": 0.38404051739850287,
         "max_abs": 0.001953125,
         "ok": true,
         "kernel": "rocke_uattn2d_tiled_d128_b64_h64kv4_bf16_w2_wpe2_regpv"
@@ -621,7 +621,7 @@
       }
     },
     "best_variant": "prod",
-    "best_speedup": 0.38553639107905263
+    "best_speedup": 0.38404051739850287
   },
   {
     "signature": "d128_b64_h64kv4_q1024_k1024_ns1_tq1024_sw0_sc0_sinks0_bfloat16",
@@ -631,21 +631,21 @@
     "num_seqs": 1,
     "total_q": 1024,
     "max_seqlen_k": 1024,
-    "triton_ms": 0.10055352210998535,
+    "triton_ms": 0.10195334434509278,
     "variants": {
       "prod": {
-        "ms": 0.3557566452026367,
-        "speedup": 0.28264692582962353,
+        "ms": 0.16040563583374023,
+        "speedup": 0.6355970213588192,
         "max_abs": 0.001953125,
         "ok": true,
-        "kernel": "rocke_uattn2d_tiled_d128_b64_h64kv4_bf16_w2_wpe2_regpv"
+        "kernel": "rocke_uattn2d_tiled_d128_b64_h64kv4_bf16_w2_wpe2_mw32_mfma32x8_stqk_s1_mask1_hoist_mlim_kvcpall_k1buf"
       },
       "fallback": {
         "error": "NotImplementedError('supports_tiled_2d: tiled 2D kernel: estimated LDS 115200 B (BLOCK_M=32, T=128, HD=128) exceeds the gfx942 65536 B LDS budget; comgr CODEGEN would fail')"
       }
     },
     "best_variant": "prod",
-    "best_speedup": 0.28264692582962353
+    "best_speedup": 0.6355970213588192
   },
   {
     "signature": "d128_b64_h64kv4_q2048_k2048_ns1_tq2048_sw0_sc0_sinks0_bfloat16",
@@ -655,21 +655,21 @@
     "num_seqs": 1,
     "total_q": 2048,
     "max_seqlen_k": 2048,
-    "triton_ms": 0.28162742614746095,
+    "triton_ms": 0.2763590431213379,
     "variants": {
       "prod": {
-        "ms": 1.2487465667724609,
-        "speedup": 0.2255280884378018,
-        "max_abs": 0.0009765625,
+        "ms": 0.4839287567138672,
+        "speedup": 0.5710738187950688,
+        "max_abs": 0.001953125,
         "ok": true,
-        "kernel": "rocke_uattn2d_tiled_d128_b64_h64kv4_bf16_w2_wpe2_regpv"
+        "kernel": "rocke_uattn2d_tiled_d128_b64_h64kv4_bf16_w2_wpe2_mw32_mfma32x8_stqk_s1_mask1_hoist_mlim_kvcpall_k1buf"
       },
       "fallback": {
         "error": "NotImplementedError('supports_tiled_2d: tiled 2D kernel: estimated LDS 115200 B (BLOCK_M=32, T=128, HD=128) exceeds the gfx942 65536 B LDS budget; comgr CODEGEN would fail')"
       }
     },
     "best_variant": "prod",
-    "best_speedup": 0.2255280884378018
+    "best_speedup": 0.5710738187950688
   },
   {
     "signature": "d128_b64_h64kv4_q4096_k4096_ns1_tq4096_sw0_sc0_sinks0_bfloat16",
@@ -679,21 +679,21 @@
     "num_seqs": 1,
     "total_q": 4096,
     "max_seqlen_k": 4096,
-    "triton_ms": 0.9472484588623047,
+    "triton_ms": 0.9426249694824219,
     "variants": {
       "prod": {
-        "ms": 4.659046325683594,
-        "speedup": 0.20331380987574116,
+        "ms": 1.691146697998047,
+        "speedup": 0.5573880554527213,
         "max_abs": 0.0078125,
         "ok": true,
-        "kernel": "rocke_uattn2d_tiled_d128_b64_h64kv4_bf16_w2_wpe2_regpv"
+        "kernel": "rocke_uattn2d_tiled_d128_b64_h64kv4_bf16_w2_wpe2_mw32_mfma32x8_stqk_s1_mask1_hoist_mlim_kvcpall_k1buf"
       },
       "fallback": {
         "error": "NotImplementedError('supports_tiled_2d: tiled 2D kernel: estimated LDS 115200 B (BLOCK_M=32, T=128, HD=128) exceeds the gfx942 65536 B LDS budget; comgr CODEGEN would fail')"
       }
     },
     "best_variant": "prod",
-    "best_speedup": 0.20331380987574116
+    "best_speedup": 0.5573880554527213
   },
   {
     "signature": "d128_b64_h64kv4_q8192_k8192_ns1_tq8192_sw0_sc0_sinks0_bfloat16",
@@ -703,21 +703,21 @@
     "num_seqs": 1,
     "total_q": 8192,
     "max_seqlen_k": 8192,
-    "triton_ms": 3.7786279296875,
+    "triton_ms": 3.7281329345703127,
     "variants": {
       "prod": {
-        "ms": 18.5086669921875,
-        "speedup": 0.20415451481635372,
+        "ms": 6.624691772460937,
+        "speedup": 0.5627632292370619,
         "max_abs": 0.001953125,
         "ok": true,
-        "kernel": "rocke_uattn2d_tiled_d128_b64_h64kv4_bf16_w2_wpe2_regpv"
+        "kernel": "rocke_uattn2d_tiled_d128_b64_h64kv4_bf16_w2_wpe2_mw32_mfma32x8_stqk_s1_mask1_hoist_mlim_kvcpall_k1buf"
       },
       "fallback": {
         "error": "NotImplementedError('supports_tiled_2d: tiled 2D kernel: estimated LDS 115200 B (BLOCK_M=32, T=128, HD=128) exceeds the gfx942 65536 B LDS budget; comgr CODEGEN would fail')"
       }
     },
     "best_variant": "prod",
-    "best_speedup": 0.20415451481635372
+    "best_speedup": 0.5627632292370619
   },
   {
     "signature": "d128_b64_h32kv32_q512_k512_ns1_tq512_sw0_sc0_sinks0_bfloat16",
@@ -727,11 +727,11 @@
     "num_seqs": 1,
     "total_q": 512,
     "max_seqlen_k": 512,
-    "triton_ms": 0.04600841999053955,
+    "triton_ms": 0.046603398323059084,
     "variants": {
       "prod": {
-        "ms": 0.15161742210388185,
-        "speedup": 0.3034507469663778,
+        "ms": 0.1516117763519287,
+        "speedup": 0.307386401270578,
         "max_abs": 0.001953125,
         "ok": true,
         "kernel": "rocke_uattn2d_tiled_d128_b64_h32kv32_bf16_wpe2_regpv"
@@ -741,7 +741,7 @@
       }
     },
     "best_variant": "prod",
-    "best_speedup": 0.3034507469663778
+    "best_speedup": 0.307386401270578
   },
   {
     "signature": "d128_b64_h32kv32_q1024_k1024_ns1_tq1024_sw0_sc0_sinks0_bfloat16",
@@ -751,21 +751,21 @@
     "num_seqs": 1,
     "total_q": 1024,
     "max_seqlen_k": 1024,
-    "triton_ms": 0.07575778007507324,
+    "triton_ms": 0.07565514087677001,
     "variants": {
       "prod": {
-        "ms": 0.2742720603942871,
-        "speedup": 0.2762139897376555,
+        "ms": 0.11739452362060547,
+        "speedup": 0.6444520454912496,
         "max_abs": 0.0009765625,
         "ok": true,
-        "kernel": "rocke_uattn2d_tiled_d128_b64_h32kv32_bf16_w2_wpe2_regpv"
+        "kernel": "rocke_uattn2d_tiled_d128_b64_h32kv32_bf16_w2_wpe2_mw32_mfma32x8_stqk_s1_mask1_hoist_mlim_kvcpall_k1buf"
       },
       "fallback": {
         "error": "NotImplementedError('supports_tiled_2d: tiled 2D kernel: estimated LDS 115200 B (BLOCK_M=32, T=128, HD=128) exceeds the gfx942 65536 B LDS budget; comgr CODEGEN would fail')"
       }
     },
     "best_variant": "prod",
-    "best_speedup": 0.2762139897376555
+    "best_speedup": 0.6444520454912496
   },
   {
     "signature": "d128_b64_h32kv32_q2048_k2048_ns1_tq2048_sw0_sc0_sinks0_bfloat16",
@@ -775,21 +775,21 @@
     "num_seqs": 1,
     "total_q": 2048,
     "max_seqlen_k": 2048,
-    "triton_ms": 0.19067539215087892,
+    "triton_ms": 0.18957706451416015,
     "variants": {
       "prod": {
-        "ms": 0.9019281005859375,
-        "speedup": 0.21140863892255565,
+        "ms": 0.31447668075561525,
+        "speedup": 0.6028334567086182,
         "max_abs": 0.0009765625,
         "ok": true,
-        "kernel": "rocke_uattn2d_tiled_d128_b64_h32kv32_bf16_w2_wpe2_regpv"
+        "kernel": "rocke_uattn2d_tiled_d128_b64_h32kv32_bf16_w2_wpe2_mw32_mfma32x8_stqk_s1_mask1_hoist_mlim_kvcpall_k1buf"
       },
       "fallback": {
         "error": "NotImplementedError('supports_tiled_2d: tiled 2D kernel: estimated LDS 115200 B (BLOCK_M=32, T=128, HD=128) exceeds the gfx942 65536 B LDS budget; comgr CODEGEN would fail')"
       }
     },
     "best_variant": "prod",
-    "best_speedup": 0.21140863892255565
+    "best_speedup": 0.6028334567086182
   },
   {
     "signature": "d128_b64_h32kv32_q4096_k4096_ns1_tq4096_sw0_sc0_sinks0_bfloat16",
@@ -799,21 +799,21 @@
     "num_seqs": 1,
     "total_q": 4096,
     "max_seqlen_k": 4096,
-    "triton_ms": 0.5815131378173828,
+    "triton_ms": 0.5766911315917969,
     "variants": {
       "prod": {
-        "ms": 3.3026556396484374,
-        "speedup": 0.1760744083749779,
-        "max_abs": 0.0009765625,
+        "ms": 1.0107083129882812,
+        "speedup": 0.5705811698399312,
+        "max_abs": 0.001953125,
         "ok": true,
-        "kernel": "rocke_uattn2d_tiled_d128_b64_h32kv32_bf16_w2_wpe2_regpv"
+        "kernel": "rocke_uattn2d_tiled_d128_b64_h32kv32_bf16_w2_wpe2_mw32_mfma32x8_stqk_s1_mask1_hoist_mlim_kvcpall_k1buf"
       },
       "fallback": {
         "error": "NotImplementedError('supports_tiled_2d: tiled 2D kernel: estimated LDS 115200 B (BLOCK_M=32, T=128, HD=128) exceeds the gfx942 65536 B LDS budget; comgr CODEGEN would fail')"
       }
     },
     "best_variant": "prod",
-    "best_speedup": 0.1760744083749779
+    "best_speedup": 0.5705811698399312
   },
   {
     "signature": "d128_b64_h32kv32_q8192_k8192_ns1_tq8192_sw0_sc0_sinks0_bfloat16",
@@ -823,21 +823,21 @@
     "num_seqs": 1,
     "total_q": 8192,
     "max_seqlen_k": 8192,
-    "triton_ms": 2.010218048095703,
+    "triton_ms": 2.0111936950683593,
     "variants": {
       "prod": {
-        "ms": 12.688707275390625,
-        "speedup": 0.1584257564199989,
-        "max_abs": 0.001953125,
+        "ms": 3.6751513671875,
+        "speedup": 0.5472410505386816,
+        "max_abs": 0.00390625,
         "ok": true,
-        "kernel": "rocke_uattn2d_tiled_d128_b64_h32kv32_bf16_w2_wpe2_regpv"
+        "kernel": "rocke_uattn2d_tiled_d128_b64_h32kv32_bf16_w2_wpe2_mw32_mfma32x8_stqk_s1_mask1_hoist_mlim_kvcpall_k1buf"
       },
       "fallback": {
         "error": "NotImplementedError('supports_tiled_2d: tiled 2D kernel: estimated LDS 115200 B (BLOCK_M=32, T=128, HD=128) exceeds the gfx942 65536 B LDS budget; comgr CODEGEN would fail')"
       }
     },
     "best_variant": "prod",
-    "best_speedup": 0.1584257564199989
+    "best_speedup": 0.5472410505386816
   },
   {
     "signature": "d128_b64_h40kv40_q512_k512_ns1_tq512_sw0_sc0_sinks0_bfloat16",
@@ -847,11 +847,11 @@
     "num_seqs": 1,
     "total_q": 512,
     "max_seqlen_k": 512,
-    "triton_ms": 0.04640933990478516,
+    "triton_ms": 0.0505260181427002,
     "variants": {
       "prod": {
-        "ms": 0.18885602951049804,
-        "speedup": 0.2457392545267154,
+        "ms": 0.18899711608886718,
+        "speedup": 0.2673375085731079,
         "max_abs": 0.00048828125,
         "ok": true,
         "kernel": "rocke_uattn2d_tiled_d128_b64_h40kv40_bf16_wpe2_regpv"
@@ -861,7 +861,7 @@
       }
     },
     "best_variant": "prod",
-    "best_speedup": 0.2457392545267154
+    "best_speedup": 0.2673375085731079
   },
   {
     "signature": "d128_b64_h40kv40_q1024_k1024_ns1_tq1024_sw0_sc0_sinks0_bfloat16",
@@ -871,21 +871,21 @@
     "num_seqs": 1,
     "total_q": 1024,
     "max_seqlen_k": 1024,
-    "triton_ms": 0.09156539916992187,
+    "triton_ms": 0.09134269714355468,
     "variants": {
       "prod": {
-        "ms": 0.3274778747558594,
-        "speedup": 0.2796078948484246,
-        "max_abs": 0.0009765625,
+        "ms": 0.14169371604919434,
+        "speedup": 0.6446488926286724,
+        "max_abs": 0.001953125,
         "ok": true,
-        "kernel": "rocke_uattn2d_tiled_d128_b64_h40kv40_bf16_w2_wpe2_regpv"
+        "kernel": "rocke_uattn2d_tiled_d128_b64_h40kv40_bf16_w2_wpe2_mw32_mfma32x8_stqk_s1_mask1_hoist_mlim_kvcpall_k1buf"
       },
       "fallback": {
         "error": "NotImplementedError('supports_tiled_2d: tiled 2D kernel: estimated LDS 115200 B (BLOCK_M=32, T=128, HD=128) exceeds the gfx942 65536 B LDS budget; comgr CODEGEN would fail')"
       }
     },
     "best_variant": "prod",
-    "best_speedup": 0.2796078948484246
+    "best_speedup": 0.6446488926286724
   },
   {
     "signature": "d128_b64_h40kv40_q2048_k2048_ns1_tq2048_sw0_sc0_sinks0_bfloat16",
@@ -895,21 +895,21 @@
     "num_seqs": 1,
     "total_q": 2048,
     "max_seqlen_k": 2048,
-    "triton_ms": 0.23255653381347657,
+    "triton_ms": 0.23188194274902343,
     "variants": {
       "prod": {
-        "ms": 1.1092955017089843,
-        "speedup": 0.2096434479858606,
+        "ms": 0.3723236083984375,
+        "speedup": 0.6227967754891274,
         "max_abs": 0.0009765625,
         "ok": true,
-        "kernel": "rocke_uattn2d_tiled_d128_b64_h40kv40_bf16_w2_wpe2_regpv"
+        "kernel": "rocke_uattn2d_tiled_d128_b64_h40kv40_bf16_w2_wpe2_mw32_mfma32x8_stqk_s1_mask1_hoist_mlim_kvcpall_k1buf"
       },
       "fallback": {
         "error": "NotImplementedError('supports_tiled_2d: tiled 2D kernel: estimated LDS 115200 B (BLOCK_M=32, T=128, HD=128) exceeds the gfx942 65536 B LDS budget; comgr CODEGEN would fail')"
       }
     },
     "best_variant": "prod",
-    "best_speedup": 0.2096434479858606
+    "best_speedup": 0.6227967754891274
   },
   {
     "signature": "d128_b64_h40kv40_q4096_k4096_ns1_tq4096_sw0_sc0_sinks0_bfloat16",
@@ -919,21 +919,21 @@
     "num_seqs": 1,
     "total_q": 4096,
     "max_seqlen_k": 4096,
-    "triton_ms": 0.6997774505615234,
+    "triton_ms": 0.693729019165039,
     "variants": {
       "prod": {
-        "ms": 4.0962130737304685,
-        "speedup": 0.17083521730089787,
+        "ms": 1.2395684814453125,
+        "speedup": 0.5596536452396439,
         "max_abs": 0.0078125,
         "ok": true,
-        "kernel": "rocke_uattn2d_tiled_d128_b64_h40kv40_bf16_w2_wpe2_regpv"
+        "kernel": "rocke_uattn2d_tiled_d128_b64_h40kv40_bf16_w2_wpe2_mw32_mfma32x8_stqk_s1_mask1_hoist_mlim_kvcpall_k1buf"
       },
       "fallback": {
         "error": "NotImplementedError('supports_tiled_2d: tiled 2D kernel: estimated LDS 115200 B (BLOCK_M=32, T=128, HD=128) exceeds the gfx942 65536 B LDS budget; comgr CODEGEN would fail')"
       }
     },
     "best_variant": "prod",
-    "best_speedup": 0.17083521730089787
+    "best_speedup": 0.5596536452396439
   },
   {
     "signature": "d128_b64_h40kv40_q8192_k8192_ns1_tq8192_sw0_sc0_sinks0_bfloat16",
@@ -943,21 +943,21 @@
     "num_seqs": 1,
     "total_q": 8192,
     "max_seqlen_k": 8192,
-    "triton_ms": 2.5233895874023435,
+    "triton_ms": 2.499236755371094,
     "variants": {
       "prod": {
-        "ms": 15.851483154296876,
-        "speedup": 0.15918949431039997,
-        "max_abs": 0.0009765625,
+        "ms": 4.550702209472656,
+        "speedup": 0.5491980446817042,
+        "max_abs": 0.001953125,
         "ok": true,
-        "kernel": "rocke_uattn2d_tiled_d128_b64_h40kv40_bf16_w2_wpe2_regpv"
+        "kernel": "rocke_uattn2d_tiled_d128_b64_h40kv40_bf16_w2_wpe2_mw32_mfma32x8_stqk_s1_mask1_hoist_mlim_kvcpall_k1buf"
       },
       "fallback": {
         "error": "NotImplementedError('supports_tiled_2d: tiled 2D kernel: estimated LDS 115200 B (BLOCK_M=32, T=128, HD=128) exceeds the gfx942 65536 B LDS budget; comgr CODEGEN would fail')"
       }
     },
     "best_variant": "prod",
-    "best_speedup": 0.15918949431039997
+    "best_speedup": 0.5491980446817042
   },
   {
     "signature": "d64_b32_h64kv8_q2048_k2048_ns1_tq2048_sw0_sc0_sinks0_bfloat16",
@@ -967,25 +967,25 @@
     "num_seqs": 1,
     "total_q": 2048,
     "max_seqlen_k": 2048,
-    "triton_ms": 0.162611141204834,
+    "triton_ms": 0.16141658782958984,
     "variants": {
       "prod": {
-        "ms": 0.5748166275024414,
-        "speedup": 0.282892201485844,
-        "max_abs": 0.0078125,
+        "ms": 0.23938444137573242,
+        "speedup": 0.6742985755545993,
+        "max_abs": 0.001953125,
         "ok": true,
-        "kernel": "rocke_uattn2d_tiled_d64_b32_h64kv8_bf16_w4_wpe2_mw32_regpv"
+        "kernel": "rocke_uattn2d_tiled_d64_b32_t64_h64kv8_bf16_w4_wpe2_mw32_mfma32x8_stqk_s1_mask1_hoist_mlim_qdir_kvcpall_cfvst_ksring"
       },
       "fallback": {
-        "ms": 0.5427667999267578,
-        "speedup": 0.29959669829985386,
+        "ms": 0.5423473739624023,
+        "speedup": 0.2976258309324457,
         "max_abs": 0.00390625,
         "ok": true,
         "kernel": "rocke_uattn2d_tiled_d64_b32_t64_h64kv8_bf16_w2_wpe2"
       }
     },
-    "best_variant": "fallback",
-    "best_speedup": 0.29959669829985386
+    "best_variant": "prod",
+    "best_speedup": 0.6742985755545993
   },
   {
     "signature": "d64_b32_h64kv8_q4096_k4096_ns1_tq4096_sw0_sc0_sinks0_bfloat16",
@@ -995,25 +995,25 @@
     "num_seqs": 1,
     "total_q": 4096,
     "max_seqlen_k": 4096,
-    "triton_ms": 0.517719497680664,
+    "triton_ms": 0.5178052902221679,
     "variants": {
       "prod": {
-        "ms": 2.010078582763672,
-        "speedup": 0.2575618197816165,
-        "max_abs": 0.0078125,
+        "ms": 0.76405029296875,
+        "speedup": 0.6777110027799523,
+        "max_abs": 0.0009765625,
         "ok": true,
-        "kernel": "rocke_uattn2d_tiled_d64_b32_h64kv8_bf16_w4_wpe2_mw32_regpv"
+        "kernel": "rocke_uattn2d_tiled_d64_b32_t64_h64kv8_bf16_w4_wpe2_mw32_mfma32x8_stqk_s1_mask1_hoist_mlim_qdir_kvcpall_cfvst_ksring"
       },
       "fallback": {
-        "ms": 2.0079359436035156,
-        "speedup": 0.2578366602430283,
+        "ms": 2.005054931640625,
+        "speedup": 0.2582499272468693,
         "max_abs": 0.0009765625,
         "ok": true,
         "kernel": "rocke_uattn2d_tiled_d64_b32_t64_h64kv8_bf16_w2_wpe2"
       }
     },
-    "best_variant": "fallback",
-    "best_speedup": 0.2578366602430283
+    "best_variant": "prod",
+    "best_speedup": 0.6777110027799523
   },
   {
     "signature": "d64_b32_h64kv8_q8192_k8192_ns1_tq8192_sw0_sc0_sinks0_bfloat16",
@@ -1023,25 +1023,25 @@
     "num_seqs": 1,
     "total_q": 8192,
     "max_seqlen_k": 8192,
-    "triton_ms": 1.908880615234375,
+    "triton_ms": 1.9034640502929687,
     "variants": {
       "prod": {
-        "ms": 7.643104858398438,
-        "speedup": 0.24975198569163268,
-        "max_abs": 0.00390625,
+        "ms": 2.8135757446289062,
+        "speedup": 0.6765284545570406,
+        "max_abs": 0.001953125,
         "ok": true,
-        "kernel": "rocke_uattn2d_tiled_d64_b32_h64kv8_bf16_w4_wpe2_mw32_regpv"
+        "kernel": "rocke_uattn2d_tiled_d64_b32_t64_h64kv8_bf16_w4_wpe2_mw32_mfma32x8_stqk_s1_mask1_hoist_mlim_qdir_kvcpall_cfvst_ksring"
       },
       "fallback": {
-        "ms": 7.899785766601562,
-        "speedup": 0.2416370103737083,
+        "ms": 7.841571044921875,
+        "speedup": 0.24274013962108185,
         "max_abs": 0.001953125,
         "ok": true,
         "kernel": "rocke_uattn2d_tiled_d64_b32_t64_h64kv8_bf16_w2_wpe2"
       }
     },
     "best_variant": "prod",
-    "best_speedup": 0.24975198569163268
+    "best_speedup": 0.6765284545570406
   },
   {
     "signature": "d64_b32_h64kv8_q1024_k1024_ns2_tq2048_sw0_sc0_sinks0_bfloat16",
@@ -1051,24 +1051,24 @@
     "num_seqs": 2,
     "total_q": 2048,
     "max_seqlen_k": 1024,
-    "triton_ms": 0.10055452346801758,
+    "triton_ms": 0.10055512428283692,
     "variants": {
       "prod": {
-        "ms": 0.3098732948303223,
-        "speedup": 0.32450206308703805,
-        "max_abs": 0.0078125,
+        "ms": 0.14645509719848632,
+        "speedup": 0.6865935444128483,
+        "max_abs": 0.001953125,
         "ok": true,
-        "kernel": "rocke_uattn2d_tiled_d64_b32_h64kv8_bf16_w4_wpe2_mw32_regpv"
+        "kernel": "rocke_uattn2d_tiled_d64_b32_t64_h64kv8_bf16_w4_wpe2_mw32_mfma32x8_stqk_s1_mask1_hoist_mlim_qdir_kvcpall_cfvst_ksring"
       },
       "fallback": {
-        "ms": 0.29674543380737306,
-        "speedup": 0.33885786270696494,
+        "ms": 0.2968263816833496,
+        "speedup": 0.33876747650452366,
         "max_abs": 0.00390625,
         "ok": true,
         "kernel": "rocke_uattn2d_tiled_d64_b32_t64_h64kv8_bf16_w2_wpe2"
       }
     },
-    "best_variant": "fallback",
-    "best_speedup": 0.33885786270696494
+    "best_variant": "prod",
+    "best_speedup": 0.6865935444128483
   }
 ]
