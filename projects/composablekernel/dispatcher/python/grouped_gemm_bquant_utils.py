@@ -278,7 +278,11 @@ class BQuantDispatcherLib:
         """
         Call dispatcher_run_bquant_gemm with ctypes-wrapped pointers.
 
-        A, B, BQ, C should be numpy arrays (contiguous).
+        A, B, BQ, C must be numpy arrays (C-contiguous, packed).
+        B should be a packed (K, N) C-contiguous array — the kernel interprets
+        it as column-major via stride_B=K, not via numpy's Fortran-order flag.
+        C must be the array that will receive output; a non-contiguous C would
+        produce a temporary copy that is not returned to the caller.
         Returns (status, time_ms).
         """
         import numpy as np
@@ -345,13 +349,17 @@ class BQuantGpuGemmRunner:
     def kernel_name(self) -> str:
         return self._lib.get_kernel_name()
 
-    def run(self, A, B, BQ, problem: BQuantGemmProblem) -> BQuantGemmResult:
+    def run(self, A, B, BQ, problem: BQuantGemmProblem, c_dtype=None) -> BQuantGemmResult:
         """
         Run BQuantGrouped GEMM.
 
-        A   shape: (M, K)           dtype: fp8/bf8
-        B   shape: (K, N) col-major  dtype: fp8/bf8
-        BQ  shape: (QK_B, QN_B)     dtype: float/fp8
+        A       shape: (M, K)           dtype: fp8/bf8
+        B       shape: (K, N) col-major  dtype: fp8/bf8
+        BQ      shape: (QK_B, QN_B)     dtype: float/fp8
+        c_dtype numpy dtype for the output C buffer.  Defaults to np.float16
+                (correct for fp8/bf8/fp8i4/bf8i4 variants).  Pass np.bfloat16
+                for MX variants (mx_bf16bf16, mx_bf16bf8, mx_bf16fp4) whose
+                CDataType is bf16.
         Returns BQuantGemmResult with C shape (M, N).
         """
         import numpy as np
@@ -360,8 +368,11 @@ class BQuantGpuGemmRunner:
         QK_B    = problem.QK_B
         QN_B    = problem.QN_B
 
-        # Output buffer — dtype matches CDataType (half for fp8/bf8 variants)
-        C = np.zeros((M, N), dtype=np.float16)
+        if c_dtype is None:
+            c_dtype = np.float16
+
+        # Output buffer — dtype must match the compiled kernel's CDataType.
+        C = np.zeros((M, N), dtype=c_dtype)
 
         # Strides (in elements, row-major for A and C; col-major for B means stride = K)
         stride_A  = K   # A is row-major [M, K]
@@ -563,7 +574,7 @@ def setup_multiple_bquant_dispatchers(
         if hpp is None:
             return idx, None
 
-        so = so_dir / f"lib{cfg.name}.so"
+        so = so_dir / f"lib{cfg.name}_{arch}.so"
         if so.exists():
             log.info("  [cached] %s", so.name)
             return idx, so

@@ -34,7 +34,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Dict, List, Optional, Tuple
 
-from codegen_common import make_bquant_kernel_name
+from codegen_common import make_bquant_kernel_name, bquant_effective_epilogue
 
 logging.basicConfig(level=logging.INFO, format="%(levelname)s: %(message)s")
 log = logging.getLogger(__name__)
@@ -265,14 +265,13 @@ class BQuantKernelHeaderGenerator:
         preshuffle_bquant = str(spec.preshuffle_bquant).lower()
         double_smem_buffer = str(spec.double_smem_buffer).lower()
 
-        # TiledMMAPermuteN = (N_Repeat % 2 == 0) where N_Repeat = TileN / (WarpN * WarpTileN)
-        # Mirrors GemmConfig::TiledMMAPermuteN in gemm_utils.hpp.
-        n_repeat = t.tile_n // (t.warp_n * t.warp_tile_n)
-        tiled_mma_permute_n = (n_repeat % 2 == 0)
-        # PermuteNEpilogue is used when quant_group_n == 1 and TiledMMAPermuteN is true;
-        # CShuffleEpilogue otherwise. Mirrors run_gemm_quant_example.inc:
-        #   TiledPermuteN = (BQuantGroupSize::kN > 1) ? false : GemmConfig::TiledMMAPermuteN
-        use_permute_n_epilogue = tiled_mma_permute_n and spec.quant_group_n == 1
+        # Determine which epilogue the kernel will use, mirroring run_gemm_quant_example.inc.
+        # Delegates to bquant_effective_epilogue (same logic used by make_bquant_kernel_name)
+        # so the generated C++ and the kernel name always agree.
+        use_permute_n_epilogue = (
+            bquant_effective_epilogue(t.tile_n, t.warp_n, t.warp_tile_n, spec.quant_group_n)
+            == "permute_n"
+        )
 
         # Build the epilogue block outside the f-string to keep it readable.
         # PermuteNEpilogueProblem takes two extra trailing args (false, 1) vs CShuffleEpilogueProblem.

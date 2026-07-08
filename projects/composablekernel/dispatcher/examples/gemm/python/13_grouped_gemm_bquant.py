@@ -19,10 +19,10 @@ Requirements:
   - CK include path discoverable relative to this repo
 
 Usage:
-  python3 13_bquant_gemm.py                     # fp8, 1x1x128 groups, M=16 N=64 K=256
-  python3 13_bquant_gemm.py --dtype bf8
-  python3 13_bquant_gemm.py --dtype fp8 --M 32 --N 128 --K 512 --quant-group-k 128
-  python3 13_bquant_gemm.py --no-verify         # skip CPU reference check
+  python3 13_grouped_gemm_bquant.py                     # fp8, 1x1x128 groups, M=16 N=64 K=256
+  python3 13_grouped_gemm_bquant.py --dtype bf8
+  python3 13_grouped_gemm_bquant.py --dtype fp8 --M 32 --N 128 --K 512 --quant-group-k 128
+  python3 13_grouped_gemm_bquant.py --no-verify         # skip CPU reference check
 """
 
 import argparse
@@ -59,7 +59,7 @@ def _float32_to_fp8(arr: np.ndarray, dtype: str) -> np.ndarray:
     """Encode float32 values as fp8 bytes (uint8 view of the fp8 bit pattern).
 
     dtype: "fp8" -> float8_e4m3fn, "bf8" -> float8_e5m2.
-    Falls back to saturating the float32 values to [-448, 448] and storing as
+    Falls back to clamping the float32 values to [-2.0, 2.0] and storing as
     uint8 when ml_dtypes is not installed; the bit patterns are not true fp8 in
     that case but the buffer has the correct element size (1 byte/element).
     """

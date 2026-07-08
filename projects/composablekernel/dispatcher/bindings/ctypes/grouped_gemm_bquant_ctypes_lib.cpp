@@ -186,6 +186,20 @@ int dispatcher_run_bquant_gemm(const void* A,
         }
     }
 
+    // This implementation only supports packed (contiguous) layouts.
+    // Device buffers are allocated and copied as M*K, K*N, QK_B*QN_B, M*N packed arrays.
+    // Non-packed strides would cause the kernel to index into a differently-sized buffer,
+    // producing incorrect results or out-of-bounds accesses.
+    if(stride_A != K || stride_B != K || stride_BQ != QN_B || stride_C != N)
+    {
+        std::cerr << "dispatcher_run_bquant_gemm: non-packed strides are not supported. "
+                  << "Expected stride_A=" << K << " stride_B=" << K << " stride_BQ=" << QN_B
+                  << " stride_C=" << N << ", got stride_A=" << stride_A
+                  << " stride_B=" << stride_B << " stride_BQ=" << stride_BQ
+                  << " stride_C=" << stride_C << "\n";
+        return -1;
+    }
+
     const ADataType* A_host  = static_cast<const ADataType*>(A);
     const BDataType* B_host  = static_cast<const BDataType*>(B);
     const QDataType* BQ_host = static_cast<const QDataType*>(BQ);
