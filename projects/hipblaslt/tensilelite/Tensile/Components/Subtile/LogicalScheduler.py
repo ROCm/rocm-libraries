@@ -62,6 +62,62 @@ def _checkin_tile(tile):
     tile.regList.pool.checkIn(tile.regList.indices[0])
 
 
+def _hoistSetupBeforeLastMFMA(loopBody, setupInsts):
+    """Move loop-control setup (dec + compare) above the body's last MFMA.
+
+    Place the loop-control branch immediately after the last MFMA to hide
+    branching latency behind it. The decrement+compare that feed the branch's
+    SCC are normally emitted right after the body (MFMA; s_sub; s_cmp;
+    s_cbranch); hoisting them above the final MFMA produces (s_sub; s_cmp;
+    MFMA; s_cbranch) so the branch directly follows the MFMA.
+
+    The hoist is dependency-safe: SCC set by s_cmp survives the MFMA (which
+    never touches SCC), and the MFMA does not read LoopCounterL.
+
+    Falls back to appending the setup when the body has no MFMA (e.g. a skip
+    branch with no preceding compute), leaving behavior unchanged there.
+    Returns a rebuilt Module; the input is left untouched.
+    """
+    from rocisa.instruction import MFMAInstruction, MXMFMAInstruction
+
+    items = loopBody.flatitems()
+    lastMfma = -1
+    for idx, it in enumerate(items):
+        if isinstance(it, (MFMAInstruction, MXMFMAInstruction)):
+            lastMfma = idx
+
+    rebuilt = Module(loopBody.name)
+    if lastMfma < 0:
+        for it in items:
+            rebuilt.add(it)
+        for s in setupInsts:
+            rebuilt.add(s)
+        return rebuilt
+
+    for idx, it in enumerate(items):
+        if idx == lastMfma:
+            for s in setupInsts:
+                rebuilt.add(s)
+        rebuilt.add(it)
+    return rebuilt
+
+
+def _emitBodySetupBranch(module, loopBody, setupInsts, branch, hoist):
+    """Append a loop body, its dec+compare setup, and the trailing control branch.
+
+    When ``hoist`` is set, the setup is moved above the body's last MFMA (via
+    _hoistSetupBeforeLastMFMA) so the branch lands right after that MFMA to hide
+    branching latency. Otherwise the setup and branch simply follow the body.
+    """
+    if hoist:
+        module.add(_hoistSetupBeforeLastMFMA(loopBody, setupInsts))
+    else:
+        module.add(loopBody)
+        for s in setupInsts:
+            module.add(s)
+    module.add(branch)
+
+
 class Pass(IntEnum):
     """Scheduler passes in dependency order.
 
@@ -3315,10 +3371,6 @@ class LogicalScheduler:
 
         module = Module(label)
         module.addComment0(f"{label} start")
-        if kernel.get("ClusterBarrier"):
-            from Tensile.Components.Subtile.ClusterBarrier import subtileClusterBarrier
-            for inst in subtileClusterBarrier(writer, kernel, label=label).flatitems():
-                module.add(inst)
         use_pap_preloop_skip = (
             label == "PRELOOP"
             and kernel.get("UseSubtileImpl")
@@ -3372,6 +3424,11 @@ class LogicalScheduler:
         # them (swap hoisted ahead, dscnt drain between), so no WAR can form.
         if self.config.pgr == 0 and label.startswith("MAINLOOP"):
             module = insertLRSwapWarWaitAlu(module, writer, kernel)
+        # Cluster barrier: splice both halves against the final post-schedule order.
+        # Signal goes right after the mainloop's existing workgroup barrier (reusing
+        # that sync); the wait is appended at the end to hide its cross-CU latency.
+        from Tensile.Components.Subtile.ClusterBarrier import insertClusterBarrier
+        module = insertClusterBarrier(module, writer, kernel)
         return module
 
     def _emit_pgr2_tail_lw_align(self, kernel):
@@ -3432,6 +3489,10 @@ class LogicalScheduler:
 
         module = Module("MainAndExitLoops")
         uf = self.unroll_factor
+
+        # gfx1250 requires a loop-back/exit s_cbranch to be alone/first after an
+        # MFMA, so hoist the per-copy dec+compare above the body's last MFMA.
+        isGfx1250 = writer.states.archCaps.get("HasWmmaArbStallBit", False)
 
         def make_subtile_pap_module(skip_barrier=False):
             if (kernel.get("UseSubtileImpl")
@@ -3502,7 +3563,7 @@ class LogicalScheduler:
 
         # ── Mainloop ──
         module.addComment0("MAINLOOP")
-        loopBegin = Label("LoopBeginL", "")
+        loopBegin = Label("LoopBeginL", "", alignment=16)
 
         exitValue = self.config.pgr
 
@@ -3524,21 +3585,25 @@ class LogicalScheduler:
                 module.add(_SMovB32(dst=mgpr(0), src=sgpr("LoopCounterL"),
                                     comment="trace: M0 = LoopCounterL"))
                 module.add(_STtraceData(comment="trace: emit M0 to SQTT"))
-            module.add(self._emitLoop(writer, kernel, f"MAINLOOP_C{ui}",
-                                      self._emitted_per_unroll[ui]))
-            module.add(SSubU32(dst=sgpr("LoopCounterL"),
-                               src0=sgpr("LoopCounterL"), src1=1,
-                               comment=f"dec counterL (copy {ui})"))
-            module.add(SCmpEQU32(src0=sgpr("LoopCounterL"), src1=exitValue,
-                                 comment=f"counterL == {exitValue}? (copy {ui} exit)"))
+            loopBody = self._emitLoop(writer, kernel, f"MAINLOOP_C{ui}",
+                                      self._emitted_per_unroll[ui])
+            # dec + compare that produce the SCC the loop-control branch reads.
+            setupInsts = [
+                SSubU32(dst=sgpr("LoopCounterL"),
+                        src0=sgpr("LoopCounterL"), src1=1,
+                        comment=f"dec counterL (copy {ui})"),
+                SCmpEQU32(src0=sgpr("LoopCounterL"), src1=exitValue,
+                          comment=f"counterL == {exitValue}? (copy {ui} exit)"),
+            ]
             if ui < uf - 1:
-                module.add(SCBranchSCC1(
+                branch = SCBranchSCC1(
                     labelName=exitLabels[ui].getLabelName(),
-                    comment=f"copy {ui} exit → NGLL_C{ui}"))
+                    comment=f"copy {ui} exit → NGLL_C{ui}")
             else:
-                module.add(SCBranchSCC0(
+                branch = SCBranchSCC0(
                     labelName=loopBegin.getLabelName(),
-                    comment="restart mainloop"))
+                    comment="restart mainloop")
+            _emitBodySetupBranch(module, loopBody, setupInsts, branch, hoist=isGfx1250)
 
         # ── NGLL + NLL exit paths ──
         hasNGLL = self.config.pgr >= 2

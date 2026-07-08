@@ -835,6 +835,9 @@ TEST(TestBackendEnumStringUtils, GetStatusString)
                  "HIPDNN_STATUS_INTERNAL_ERROR_DEVICE_ALLOCATION_FAILED");
     EXPECT_STREQ(hipdnnGetStatusString(HIPDNN_STATUS_EXECUTION_FAILED),
                  "HIPDNN_STATUS_EXECUTION_FAILED");
+    EXPECT_STREQ(hipdnnGetStatusString(HIPDNN_STATUS_PLUGIN_ERROR), "HIPDNN_STATUS_PLUGIN_ERROR");
+    EXPECT_STREQ(hipdnnGetStatusString(HIPDNN_STATUS_VERSION_MISMATCH),
+                 "HIPDNN_STATUS_VERSION_MISMATCH");
 
     EXPECT_STREQ(hipdnnGetStatusString(static_cast<hipdnnStatus_t>(-1)), "HIPDNN_STATUS_UNKNOWN");
 }

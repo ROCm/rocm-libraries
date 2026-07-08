@@ -253,15 +253,15 @@ from cheapest to most expensive:
 3. `python -m rocke.run_manifest <hsaco> <manifest>.json --verify` —
    per-kernel verification: loads HSACO, builds inputs, runs the
    kernel, compares against the in-process NumPy/torch reference.
-4. `python Python/rocke/examples/common/ck_tile_parity.py --op all` — small
+4. `python python/rocke/examples/common/ck_tile_parity.py --op all` — small
    ops vs torch reference (20 cases, deterministic with seed=0).
-5. `python Python/rocke/examples/common/parity_extended_kernels.py --op all`
+5. `python python/rocke/examples/common/parity_extended_kernels.py --op all`
    — MoE / Block-scale / MX and non-attention extended kernels.
    FMHA / sage / sparse attention coverage moved to the library:
    `PYTHONPATH=rocke/library python3 -m builders.common.parity_fmha_extended --arch <arch>`
-6. `python Python/rocke/examples/gfx950/attention/parity_unified_attention.py`
+6. `python python/rocke/examples/gfx950/attention/parity_unified_attention.py`
    — attention parity (Triton + ref vs CK DSL paths).
-7. `python Python/rocke/examples/common/hip_lowering_parity.py` — production
+7. `python python/rocke/examples/common/hip_lowering_parity.py` — production
    LLVM lowering vs HIP-debug lowering audit (non-attention specs).
    Attention lowering audit:
    `PYTHONPATH=rocke/library python3 -m builders.common.hip_lowering_attention_parity`
@@ -3165,14 +3165,14 @@ importable — the conventional layout is to set it to the
 From the `composablekernel` checkout root:
 
 ```bash
-export PYTHONPATH=Python
+export PYTHONPATH=python
 ```
 
 ### 19.2 The single validation block
 
 ```bash
 cd <composablekernel-checkout>
-export PYTHONPATH=Python
+export PYTHONPATH=python
 
 PYTHONDONTWRITEBYTECODE=1 python tests/test_rocke.py
 PYTHONDONTWRITEBYTECODE=1 python python/test/test_rocke_examples.py
@@ -3181,13 +3181,13 @@ OUT_DIR="${OUT_DIR:-$(mktemp -d)}"
 python -m rocke.examples.common.bake_off_implicit_gemm --output-dir "$OUT_DIR"
 python -m rocke.run_manifest "$OUT_DIR"/*.hsaco "$OUT_DIR"/manifest.json --verify
 
-python Python/rocke/examples/common/distribution_reduce_demo.py --M 32 --N 4096
-python Python/rocke/examples/common/distribution_2d_add_demo.py --H 64 --W 128
-python Python/rocke/examples/common/ck_tile_parity.py --op all
+python python/rocke/examples/common/distribution_reduce_demo.py --M 32 --N 4096
+python python/rocke/examples/common/distribution_2d_add_demo.py --H 64 --W 128
+python python/rocke/examples/common/ck_tile_parity.py --op all
 
 export AITER_PATH=<aiter-checkout>
-PYTHONPATH="Python:${AITER_PATH}" python \
-  Python/rocke/examples/gfx950/attention/parity_unified_attention.py \
+PYTHONPATH="python:${AITER_PATH}" python \
+  python/rocke/examples/gfx950/attention/parity_unified_attention.py \
   --scenario decode_d128_b16 --attempts 1 --warmup 0 --paths auto,2d,3d
 ```
 
