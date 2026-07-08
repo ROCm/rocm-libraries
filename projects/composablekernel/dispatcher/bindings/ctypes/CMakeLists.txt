@@ -186,6 +186,68 @@ else()
 endif()
 
 # =============================================================================
+# GroupedGemm AQuant ctypes Library
+# =============================================================================
+
+file(GLOB AQUANT_GEMM_KERNEL_HEADERS "${CMAKE_BINARY_DIR}/generated_kernels/grouped_gemm_aquant_*.hpp")
+if(AQUANT_GEMM_KERNEL_HEADERS)
+    list(GET AQUANT_GEMM_KERNEL_HEADERS 0 AQUANT_GEMM_KERNEL_HEADER)
+    message(STATUS "Found AQuant GEMM kernel for ctypes lib: ${AQUANT_GEMM_KERNEL_HEADER}")
+
+    add_ctypes_library(dispatcher_grouped_gemm_aquant_lib
+        grouped_gemm_aquant_ctypes_lib.cpp
+        KERNEL_HEADER ${AQUANT_GEMM_KERNEL_HEADER}
+    )
+    target_compile_definitions(dispatcher_grouped_gemm_aquant_lib PRIVATE
+        CK_TILE_SINGLE_KERNEL_INCLUDE
+        GFX_ARCH="gfx950"
+    )
+else()
+    message(STATUS "No AQuant GEMM kernel found for ctypes lib - building without kernel")
+    add_library(dispatcher_grouped_gemm_aquant_lib SHARED grouped_gemm_aquant_ctypes_lib.cpp)
+    target_include_directories(dispatcher_grouped_gemm_aquant_lib PRIVATE
+        ${PROJECT_SOURCE_DIR}/include
+        ${PROJECT_SOURCE_DIR}/dispatcher/include
+    )
+    target_link_libraries(dispatcher_grouped_gemm_aquant_lib PRIVATE hip::device)
+    set_target_properties(dispatcher_grouped_gemm_aquant_lib PROPERTIES
+        POSITION_INDEPENDENT_CODE ON
+        CXX_STANDARD 17
+    )
+endif()
+
+# =============================================================================
+# GroupedGemm ABQuant ctypes Library
+# =============================================================================
+
+file(GLOB ABQUANT_GEMM_KERNEL_HEADERS "${CMAKE_BINARY_DIR}/generated_kernels/grouped_gemm_abquant_*.hpp")
+if(ABQUANT_GEMM_KERNEL_HEADERS)
+    list(GET ABQUANT_GEMM_KERNEL_HEADERS 0 ABQUANT_GEMM_KERNEL_HEADER)
+    message(STATUS "Found ABQuant GEMM kernel for ctypes lib: ${ABQUANT_GEMM_KERNEL_HEADER}")
+
+    add_ctypes_library(dispatcher_grouped_gemm_abquant_lib
+        grouped_gemm_abquant_ctypes_lib.cpp
+        KERNEL_HEADER ${ABQUANT_GEMM_KERNEL_HEADER}
+    )
+    target_compile_definitions(dispatcher_grouped_gemm_abquant_lib PRIVATE
+        CK_TILE_SINGLE_KERNEL_INCLUDE
+        GFX_ARCH="gfx950"
+    )
+else()
+    message(STATUS "No ABQuant GEMM kernel found for ctypes lib - building without kernel")
+    add_library(dispatcher_grouped_gemm_abquant_lib SHARED grouped_gemm_abquant_ctypes_lib.cpp)
+    target_include_directories(dispatcher_grouped_gemm_abquant_lib PRIVATE
+        ${PROJECT_SOURCE_DIR}/include
+        ${PROJECT_SOURCE_DIR}/dispatcher/include
+    )
+    target_link_libraries(dispatcher_grouped_gemm_abquant_lib PRIVATE hip::device)
+    set_target_properties(dispatcher_grouped_gemm_abquant_lib PROPERTIES
+        POSITION_INDEPENDENT_CODE ON
+        CXX_STANDARD 17
+    )
+endif()
+
+# =============================================================================
 # GPU Helper Executable
 # =============================================================================
 
