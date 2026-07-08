@@ -23,7 +23,7 @@ size_t MiopenBinaryPointwisePlanBuilder::getMaxWorkspaceSize(
     [[maybe_unused]] const hipdnn_flatbuffers_sdk::flatbuffer_utilities::IGraph& opGraph,
     [[maybe_unused]] const HipdnnMiopenSettings& executionSettings) const
 {
-    // Element-wise addition operations do not require workspace memory.
+    // Binary pointwise operations handled by this builder do not require workspace memory.
     return 0u;
 }
 
@@ -34,7 +34,7 @@ void MiopenBinaryPointwisePlanBuilder::initializeExecutionSettings(
         engineConfig,
     [[maybe_unused]] HipdnnMiopenSettings& executionSettings) const
 {
-    // No execution settings are needed for addition operations.
+    // Binary pointwise operations do not require custom execution settings.
 }
 
 void MiopenBinaryPointwisePlanBuilder::buildPlan(
@@ -61,7 +61,7 @@ std::vector<hipdnn_flatbuffers_sdk::data_objects::KnobT>
         [[maybe_unused]] const HipdnnMiopenHandle& handle,
         [[maybe_unused]] const hipdnn_flatbuffers_sdk::flatbuffer_utilities::IGraph& opGraph) const
 {
-    // Addition operations do not expose any custom tuning knobs.
+    // Binary pointwise operations do not expose any custom tuning knobs.
     return {};
 }
 

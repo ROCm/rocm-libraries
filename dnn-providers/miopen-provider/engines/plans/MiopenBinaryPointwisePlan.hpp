@@ -41,10 +41,8 @@ public:
                  void* workspace = nullptr) const override;
 
 private:
-    // Store the mode (ADD or MUL) to map miopenTensorOpAdd or miopenTensorOpMul during execute
     hipdnn_flatbuffers_sdk::data_objects::PointwiseMode _mode;
 
-    // MIOpen specific wrapped structures
     MiopenTensor _input0;
     MiopenTensor _input1;
     MiopenTensor _output;

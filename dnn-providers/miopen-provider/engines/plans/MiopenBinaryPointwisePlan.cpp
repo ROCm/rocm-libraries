@@ -51,6 +51,7 @@ void MiopenBinaryPointwisePlan::execute(const HipdnnMiopenHandle& handle,
     case hipdnn_flatbuffers_sdk::data_objects::PointwiseMode::SUB:
         miopenOp = miopenTensorOpAdd; // Subtraction emulated via addition: A + (-1 * B)
         alpha2 = -1.0f; // Flip sign of second input
+        break;
     case hipdnn_flatbuffers_sdk::data_objects::PointwiseMode::MUL:
         miopenOp = miopenTensorOpMul;
         break;
@@ -58,7 +59,7 @@ void MiopenBinaryPointwisePlan::execute(const HipdnnMiopenHandle& handle,
         miopenOp = miopenTensorOpMin;
         break;
     case hipdnn_flatbuffers_sdk::data_objects::PointwiseMode::MAX:
-        miopenOp = miopenTensorOpMin;
+        miopenOp = miopenTensorOpMax;
         break;
     default:
         throw hipdnn_plugin_sdk::HipdnnPluginException(
@@ -66,6 +67,8 @@ void MiopenBinaryPointwisePlan::execute(const HipdnnMiopenHandle& handle,
             "Binary pointwise execution: unsupported operation mode encountered.");
     }
 
+    // Implements MIOpen scaling contract: C = op(alpha1 * A, alpha2 * B) + beta * C
+    // Subtraction is emulated using miopenTensorOpAdd with alpha2 = -1.0f
     THROW_ON_MIOPEN_FAILURE(miopenOpTensor(handle.miopenHandle,
                                            miopenOp,
                                            &alpha1,

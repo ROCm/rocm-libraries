@@ -59,8 +59,7 @@ constexpr const char* getModeName()
 }
 
 template <typename DataType, hipdnn_frontend::PointwiseMode Mode>
-class BinaryPointwiseForward
-    : public IntegrationGraphVerificationHarness<DataType, PointwiseTestCase>
+class BinaryPointwise : public IntegrationGraphVerificationHarness<DataType, PointwiseTestCase>
 {
 protected:
     void runGraphTest(float tolerance, const TensorLayout& layout = TensorLayout::NCHW)
