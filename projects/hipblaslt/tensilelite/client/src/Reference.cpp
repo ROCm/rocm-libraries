@@ -2754,6 +2754,12 @@ namespace TensileLite
 #endif // defined(TENSILE_USE_BF6) && defined(TENSILE_USE_FP4) && defined(TENSILE_USE_BF16)
 #endif // !_WIN32
 #if defined(TENSILE_USE_FP8_BF8) && defined(TENSILE_USE_FP4)
+            // F4 data (both A and B), F8 dest
+            case TypedGemm_F4_F8_S::TypeId():
+            {
+                return ReferenceSolution<TypedGemm_F4_F8_S, float>::SolveCPU(
+                    problem, inputs, elementsToValidate);
+            }
             // DestDataType: S
             case TypedGemm_F8F4_S_S::TypeId():
             {
