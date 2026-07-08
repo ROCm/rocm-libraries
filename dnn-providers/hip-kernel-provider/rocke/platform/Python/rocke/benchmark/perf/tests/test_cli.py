@@ -132,9 +132,10 @@ class TestProfileCmd(unittest.TestCase):
         self.calls = []
 
         def fake_profile(cmd, arch, *, match=None, label=None, op="unknown",
-                         shape=None, warmup=0, warn=None):
+                         shape=None, warmup=0, per_dispatch=False, warn=None):
             self.calls.append({"cmd": cmd, "match": match, "label": label,
-                               "op": op, "shape": shape, "warmup": warmup})
+                               "op": op, "shape": shape, "warmup": warmup,
+                               "per_dispatch": per_dispatch})
             return _rec(arch=arch, kernel=(label or "dispatched_sym"),
                         shape=shape, busy=1000)
         cli_mod._harness.profile = fake_profile

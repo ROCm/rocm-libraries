@@ -107,6 +107,29 @@ def _counter_medians(trows: list[dict], raw_to_norm: dict, warmup: int) -> dict:
     return out
 
 
+def _counter_samples(trows: list[dict], raw_to_norm: dict) -> list[dict]:
+    """Per-dispatch normalized counter values for the target kernel (raw signal).
+
+    Returns one dict per dispatch, `{"dispatch_id": int, <normalized>: value, ...}`,
+    sorted by `Dispatch_Id`. Includes ALL dispatches (warmup NOT dropped) so
+    downstream tooling can slice warmup vs steady-state itself. Opt-in (see
+    `profile(per_dispatch=True)`) because it is much larger than the aggregate.
+    """
+    by_disp: dict[int, dict] = {}
+    for r in trows:
+        cn = r.get("Counter_Name", "")
+        if cn not in raw_to_norm:
+            continue
+        try:
+            did = int(float(r.get("Dispatch_Id", 0)))
+            val = float(r["Counter_Value"])
+        except (ValueError, KeyError, TypeError):
+            continue
+        d = by_disp.setdefault(did, {"dispatch_id": did})
+        d[raw_to_norm[cn]] = int(val) if val == int(val) else val
+    return [by_disp[k] for k in sorted(by_disp)]
+
+
 def _pick_target_kernel(rows: list[dict], match: Optional[str]) -> Optional[str]:
     """Busiest non-helper kernel whose name CONTAINS `match` (substring).
 
@@ -160,7 +183,8 @@ def _wall(cmd: Sequence[str], env: dict, timeout: int) -> dict:
 def profile(cmd: Sequence[str], arch: str, *, match: Optional[str] = None,
             label: Optional[str] = None, op: str = "unknown",
             shape: Optional[dict] = None, warmup: int = 0,
-            env: Optional[dict] = None, timeout: int = 1800,
+            per_dispatch: bool = False, env: Optional[dict] = None,
+            timeout: int = 1800,
             warn: Optional[Callable[[str], None]] = None) -> dict:
     """Profile the kernel launched by `cmd` and return a measurement record.
 
@@ -178,6 +202,10 @@ def profile(cmd: Sequence[str], arch: str, *, match: Optional[str] = None,
     dispatch and the CSV has no warmup flag, so the caller supplies the count -
     e.g. the launcher's warmup_iters). Default 0 = keep all dispatches.
 
+    `per_dispatch`: also emit a `counter_samples` section - the raw per-dispatch
+    counter values (all dispatches, keyed by Dispatch_Id) for downstream profiling.
+    Opt-in (off by default) because it is much larger than the aggregate.
+
     `warn(msg)` (optional) is called on each degradation (no counters selected,
     profiler failed, no matching dispatch, counters didn't populate) so a caller
     can surface it instead of the record silently degrading to wall-only.
@@ -193,6 +221,7 @@ def profile(cmd: Sequence[str], arch: str, *, match: Optional[str] = None,
     counters_out: dict = {}
     resources: dict = {}
     kmeta: dict = {}
+    samples: list = []
     prof_stdout = ""
     if not sel:
         _warn(f"no PMU counters available for {arch} "
@@ -230,6 +259,8 @@ def profile(cmd: Sequence[str], arch: str, *, match: Optional[str] = None,
             trows = [r for r in rows if r.get("Kernel_Name") == target] if target else []
             # median per counter across the target kernel's dispatches, warmup dropped
             counters_out = _counter_medians(trows, raw_to_norm, warmup)
+            if per_dispatch:
+                samples = _counter_samples(trows, raw_to_norm)
             if target and not counters_out:
                 _warn(f"kernel {target!r} matched but no requested counters "
                       "populated (arch counter gap?)")
@@ -283,5 +314,7 @@ def profile(cmd: Sequence[str], arch: str, *, match: Optional[str] = None,
         "captured_counters": sorted(counters_out),
         "verify": {},
     }
+    if per_dispatch:
+        record["counter_samples"] = samples   # raw per-dispatch values (opt-in)
     _schema.validate(record)
     return record

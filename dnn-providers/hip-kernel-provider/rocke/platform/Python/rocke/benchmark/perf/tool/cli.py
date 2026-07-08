@@ -58,7 +58,8 @@ def _cmd_profile(a: argparse.Namespace) -> int:
     for _ in range(max(1, a.repeats)):
         samples.append(_harness.profile(
             cmd, a.arch, match=a.match_kernel, label=a.kernel_name,
-            op=a.op, shape=shape, warmup=a.warmup, warn=_warn))
+            op=a.op, shape=shape, warmup=a.warmup,
+            per_dispatch=a.per_dispatch, warn=_warn))
     rec = _aggregate.aggregate(samples)
 
     identity = _schema.identity(rec)
@@ -139,6 +140,8 @@ def _build_parser() -> argparse.ArgumentParser:
     pr.add_argument("--warmup", type=int, default=0,
                     help="leading warmup dispatches to drop from counter medians "
                          "(match the launcher's warmup_iters)")
+    pr.add_argument("--per-dispatch", dest="per_dispatch", action="store_true",
+                    help="also emit raw per-dispatch counter values (counter_samples)")
     pr.add_argument("--threshold", type=float, default=_selfcheck.DEFAULT_THRESHOLD)
     pr.add_argument("--noise-k", dest="noise_k", type=float,
                     default=_selfcheck.DEFAULT_NOISE_K)

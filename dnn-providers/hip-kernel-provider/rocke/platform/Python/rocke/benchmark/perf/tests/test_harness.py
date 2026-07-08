@@ -68,6 +68,25 @@ class TestCounterMedians(unittest.TestCase):
         self.assertEqual(harness._counter_medians(rows, {"C1": "cyc"}, warmup=0), {})
 
 
+class TestCounterSamples(unittest.TestCase):
+    def test_per_dispatch_sorted_all_dispatches(self):
+        rows = [
+            {"Dispatch_Id": "3", "Counter_Name": "H", "Counter_Value": "30"},
+            {"Dispatch_Id": "3", "Counter_Name": "M", "Counter_Value": "3"},
+            {"Dispatch_Id": "1", "Counter_Name": "H", "Counter_Value": "10"},
+            {"Dispatch_Id": "1", "Counter_Name": "M", "Counter_Value": "1"},
+        ]
+        out = harness._counter_samples(rows, {"H": "l2_hit", "M": "l2_miss"})
+        # sorted by dispatch_id, warmup NOT dropped, each dispatch has both counters
+        self.assertEqual([s["dispatch_id"] for s in out], [1, 3])
+        self.assertEqual(out[0], {"dispatch_id": 1, "l2_hit": 10, "l2_miss": 1})
+        self.assertEqual(out[1], {"dispatch_id": 3, "l2_hit": 30, "l2_miss": 3})
+
+    def test_ignores_unrequested_counters(self):
+        rows = [{"Dispatch_Id": "1", "Counter_Name": "X", "Counter_Value": "9"}]
+        self.assertEqual(harness._counter_samples(rows, {"H": "l2_hit"}), [])
+
+
 class TestPickTarget(unittest.TestCase):
     def _rows(self, *names):
         return [{"Kernel_Name": n} for n in names]
