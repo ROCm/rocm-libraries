@@ -103,7 +103,7 @@ class TestHelperFunctions(unittest.TestCase):
             "/usr/bin/python3",
             test_yaml="smoke.yaml",
         )
-        self.assertIn('add_test(rocblas-test_quick_suite "../rocblas-test"', line)
+        self.assertIn("add_test(rocblas-test_quick_suite [[../rocblas-test]]", line)
         self.assertIn("--yaml smoke.yaml", line)
 
 
