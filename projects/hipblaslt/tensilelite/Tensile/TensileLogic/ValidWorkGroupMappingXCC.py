@@ -56,7 +56,8 @@ def _report_xcc_failure(filepath: Path, solution: dict, detail: str) -> None:
 def _cu_count_from_path(filepath: Path) -> int:
     """Extract CU count from any path component matching *_Ncu (e.g. gfx942_38cu -> 38)."""
     for part in filepath.parts:
-        match = re.search(r"_(\d+)cu$", part, re.IGNORECASE)
+        # Suffix-literal case mutations are equivalent while IGNORECASE is active.
+        match = re.search(r"_(\d+)cu$", part, re.IGNORECASE)  # pragma: no mutate
         if match:
             return int(match.group(1))
     return 0
