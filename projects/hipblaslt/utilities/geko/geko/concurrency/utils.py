@@ -36,6 +36,50 @@ def parallel_for(fn: Callable[[T], R], seq: Sequence[T], n_jobs: int = 64) -> Li
     return joblib.Parallel(n_jobs=n_jobs)(joblib.delayed(fn)(el) for el in seq)
 
 
+def _terminate_process_tree_windows(proc: subprocess.Popen, terminate_timeout: float) -> None:
+    # On Windows, taskkill /T reliably tears down the full child tree.
+    subprocess.run(
+        ["taskkill", "/PID", str(proc.pid), "/T", "/F"],
+        stdout=subprocess.DEVNULL,
+        stderr=subprocess.DEVNULL,
+        check=False,
+    )
+    try:
+        proc.wait(timeout=terminate_timeout)
+    except subprocess.TimeoutExpired:
+        proc.kill()
+        proc.wait()
+
+
+def _terminate_process_tree_posix(proc: subprocess.Popen, proc_name: str, terminate_timeout: float) -> None:
+    # On POSIX, kill the process group if the child is its group leader.
+    try:
+        pgid = os.getpgid(proc.pid)
+    except ProcessLookupError:
+        return
+
+    if pgid == proc.pid:
+        try:
+            os.killpg(pgid, signal.SIGTERM)
+            proc.wait(timeout=terminate_timeout)
+            return
+        except subprocess.TimeoutExpired:
+            logger.warning(
+                f"Config={proc_name} did not exit after SIGTERM; sending SIGKILL to process group"
+            )
+            os.killpg(pgid, signal.SIGKILL)
+            proc.wait()
+            return
+
+    # Fallback when child was not started in a dedicated process group.
+    proc.terminate()
+    try:
+        proc.wait(timeout=terminate_timeout)
+    except subprocess.TimeoutExpired:
+        proc.kill()
+        proc.wait()
+
+
 def wait_process_or_stop(
     proc: subprocess.Popen,
     stop_event,
@@ -52,49 +96,6 @@ def wait_process_or_stop(
         poll_interval: Seconds between stop checks while process is running.
         terminate_timeout: Seconds to wait after terminate() before kill().
     """
-    def _terminate_process_tree() -> None:
-        # On Windows, taskkill /T reliably tears down the full child tree.
-        if os.name == "nt":
-            subprocess.run(
-                ["taskkill", "/PID", str(proc.pid), "/T", "/F"],
-                stdout=subprocess.DEVNULL,
-                stderr=subprocess.DEVNULL,
-                check=False,
-            )
-            try:
-                proc.wait(timeout=terminate_timeout)
-            except subprocess.TimeoutExpired:
-                proc.kill()
-                proc.wait()
-            return
-
-        # On POSIX, kill the process group if the child is its group leader.
-        try:
-            pgid = os.getpgid(proc.pid)
-        except ProcessLookupError:
-            return
-
-        if pgid == proc.pid:
-            try:
-                os.killpg(pgid, signal.SIGTERM)
-                proc.wait(timeout=terminate_timeout)
-                return
-            except subprocess.TimeoutExpired:
-                logger.warning(
-                    f"Config={proc_name} did not exit after SIGTERM; sending SIGKILL to process group"
-                )
-                os.killpg(pgid, signal.SIGKILL)
-                proc.wait()
-                return
-
-        # Fallback when child was not started in a dedicated process group.
-        proc.terminate()
-        try:
-            proc.wait(timeout=terminate_timeout)
-        except subprocess.TimeoutExpired:
-            proc.kill()
-            proc.wait()
-
     while proc.poll() is None:
         if not stop_event.wait(timeout=poll_interval):
             continue
@@ -102,7 +103,10 @@ def wait_process_or_stop(
         logger.warning(
             f"Stop requested while running config={proc_name}; terminating subprocess"
         )
-        _terminate_process_tree()
+        if os.name == "nt":
+            _terminate_process_tree_windows(proc, terminate_timeout)
+        else:
+            _terminate_process_tree_posix(proc, proc_name, terminate_timeout)
         break
 
 
