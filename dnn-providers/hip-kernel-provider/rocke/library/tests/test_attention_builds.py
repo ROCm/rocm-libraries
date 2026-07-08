@@ -875,9 +875,7 @@ class TestAttentionHelpers(unittest.TestCase):
         ``TypeError`` here (its gate signature lacked the parameter), which
         broke the gfx950 SDPA dispatch path for ``backend in {tiled, auto}``.
         """
-        from unittest import mock
         from kernels import supports_native_unified_attention_tiled
-        import kernels.common.attention_unified as au
 
         p = UnifiedAttentionProblem(
             total_q=128,
@@ -929,7 +927,6 @@ class TestAttentionHelpers(unittest.TestCase):
         runtime would not pick) while still failing on a ``TypeError`` (the
         signature-drift class).
         """
-        from unittest import mock
         import kernels.common.attention_unified as au
         from kernels import (
             supports_native_unified_attention,
@@ -992,7 +989,6 @@ class TestAttentionHelpers(unittest.TestCase):
         here is a latent wrong-CTA-count trap for any future caller. Pin them
         equal.
         """
-        from unittest import mock
         import kernels.common.attention_unified as au
 
         p = UnifiedAttentionProblem(
@@ -1025,8 +1021,6 @@ class TestAttentionHelpers(unittest.TestCase):
         missing-field break that took out production decode), mirroring the 2D
         dispatch test one path over.
         """
-        from unittest import mock
-        import kernels.common.attention_unified as au
         from kernels import supports_native_unified_attention_3d_tiled
 
         p = UnifiedAttentionProblem(
@@ -1061,7 +1055,6 @@ class TestAttentionHelpers(unittest.TestCase):
         ignored-field contract that lets the shared builder pass those kwargs
         unconditionally.
         """
-        from unittest import mock
         import kernels.common.attention_unified as au
 
         p = UnifiedAttentionProblem(
@@ -1100,7 +1093,6 @@ class TestAttentionHelpers(unittest.TestCase):
         whichever branch fires on the relevant arch, pinning the largest
         (~25-flag) silent surface.
         """
-        from unittest import mock
         import kernels.common.attention_unified as au
 
         def problem(**kw):
@@ -1222,7 +1214,6 @@ class TestAttentionHelpers(unittest.TestCase):
         global->LDS DMA (``raw.ptr.buffer.load.lds``) -- and that it does NOT emit
         the gfx950 wide 16x16x32 MFMA. Pure codegen, no GPU.
         """
-        from unittest import mock
         import kernels.common.attention_unified as au
 
         with _patch_resolved_arch("gfx942"):
@@ -1700,7 +1691,7 @@ class TestAttentionHarnessTimers(unittest.TestCase):
 
         # Import torch BEFORE patching sys.modules so torch stays in the
         # parent process's module table after ``mock.patch.dict`` exits.
-        pytest.importorskip("torch")  # noqa: F841
+        pytest.importorskip("torch")
 
         # The harness moved into the library tree (builders/); resolve it via the
         # package system (editable-installed) rather than a hardcoded path, then
