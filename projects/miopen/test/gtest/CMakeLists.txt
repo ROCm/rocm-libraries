@@ -267,8 +267,6 @@ function(add_gtest TEST_NAME TEST_CPP)
       )
     endforeach()
 
-    dapper_add_sharded_test()
-
     # HipGraphExist was filtered out of the shards above (LLVM JIT OOM under concurrent GPU memory
     # pressure). Register it as a single RUN_SERIAL entry so ctest runs it alone, never alongside
     # another test on the GPU. Skipped when there is no GPU, since these are *GPU* tests.
@@ -284,6 +282,8 @@ function(add_gtest TEST_NAME TEST_CPP)
         ENVIRONMENT "MIOPEN_USER_DB_PATH=${CMAKE_CURRENT_BINARY_DIR};MIOPEN_INVOKED_FROM_CTEST=1"
       )
     endif()
+
+    dapper_add_sharded_test()
 
   endif()
   target_link_libraries(${TEST_NAME} BZip2::BZip2)

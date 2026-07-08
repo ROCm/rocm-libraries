@@ -127,6 +127,7 @@ macro(dapper_add_sharded_test)
     )
     set_tests_properties(miopen_gtest_sharded_dapper PROPERTIES
         FIXTURES_REQUIRED dapper_tests_fixture
+        RUN_SERIAL TRUE
     )
 
     # Force miopen_gtest_sharded_dapper to run dead last so its analysis summary prints at the very
