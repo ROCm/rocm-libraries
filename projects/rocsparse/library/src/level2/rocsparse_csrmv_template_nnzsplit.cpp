@@ -176,9 +176,15 @@
     const int nprocs = 2 * handle->properties.multiProcessorCount;                           \
     if(nnz / (nprocs * CSRMV_BLOCKSIZE * CSRMV_NNZ_PER_THREAD_1) < CSRMV_BLOCKS_PER_CU)      \
     {                                                                                        \
+        /* Too little work to saturate the device: finest granularity for max occupancy. */ \
         macro_to_launch(CSRMV_BLOCKSIZE, CSRMV_NNZ_PER_THREAD_0);                            \
     }                                                                                        \
-    else if(nnz / (nprocs * CSRMV_BLOCKSIZE * CSRMV_NNZ_PER_THREAD_2) < CSRMV_BLOCKS_PER_CU) \
+    else if((m > 0 ? (nnz / m) : nnz) < CSRMV_NNZSPLIT_LOW_DENSITY)                          \
+    {                                                                                        \
+        /* Sparse rows: latency-bound, so favour occupancy with 1 nnz/thread. */             \
+        macro_to_launch(CSRMV_BLOCKSIZE, CSRMV_NNZ_PER_THREAD_0);                            \
+    }                                                                                        \
+    else if((m > 0 ? (nnz / m) : nnz) < CSRMV_NNZSPLIT_HIGH_DENSITY)                         \
     {                                                                                        \
         macro_to_launch(CSRMV_BLOCKSIZE, CSRMV_NNZ_PER_THREAD_1);                            \
     }                                                                                        \
@@ -187,11 +193,21 @@
         macro_to_launch(CSRMV_BLOCKSIZE, CSRMV_NNZ_PER_THREAD_2);                            \
     }
 
-#define CSRMV_BLOCKSIZE 256
+// Block size for the nnzsplit kernels. 128 (over 256) keeps each block spanning
+// fewer rows, which shortens the per-element dichotomic row search and cuts
+// atomic traffic at row/block boundaries. Tuned on gfx1201 (RDNA4, wave32).
+#define CSRMV_BLOCKSIZE 128
 #define CSRMV_NNZ_PER_THREAD_0 1
 #define CSRMV_NNZ_PER_THREAD_1 4
 #define CSRMV_NNZ_PER_THREAD_2 8
 #define CSRMV_BLOCKS_PER_CU 10
+
+// Density thresholds (average nnz per row) that select the nnz-per-thread
+// granularity. Sparse rows are latency-bound and prefer high occupancy
+// (NNZ_PER_THREAD=1); denser rows amortize per-block overhead with more work
+// per thread. Tuned on gfx1201 (RDNA4, wave32).
+#define CSRMV_NNZSPLIT_LOW_DENSITY 32
+#define CSRMV_NNZSPLIT_HIGH_DENSITY 96
 
 template <uint32_t BLOCKSIZE, uint32_t NNZ_PER_THREAD, typename I, typename J, typename A>
 rocsparse_status csrmv_analysis_nnzsplit(rocsparse_handle          handle,
