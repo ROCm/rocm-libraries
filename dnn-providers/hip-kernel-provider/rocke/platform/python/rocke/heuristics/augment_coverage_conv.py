@@ -49,12 +49,19 @@ import numpy as np
 import pandas as pd
 
 from .generate_coverage_conv import HEADER, SHAPE_COLS
-from .sample_shapes_conv import (
-    _channel_bucket,
-    _group_type,
-    _spatial_bucket,
-    write_csv,
+from .shard_shapes import (
+    OP_CONFIGS as _OP_CONFIGS,
+    _conv_channel_bucket as _channel_bucket,
+    _conv_group_type as _group_type,
+    _conv_spatial_bucket as _spatial_bucket,
+    write_csv as _write_csv_generic,
 )
+
+_CONV_CONFIG = _OP_CONFIGS["conv"]
+
+
+def write_csv(rows, path):
+    _write_csv_generic(rows, path, _CONV_CONFIG)
 
 # Drop shapes where any GEMM dimension is smaller than the smallest tile.
 MIN_TILE = 32
@@ -301,7 +308,7 @@ def generate_targeted(
 
 
 def _bucket_key(shape: tuple) -> tuple:
-    """Stratification key matching sample_shapes_conv.py buckets."""
+    """Stratification key matching shard_shapes.py conv buckets."""
     N, G, C, K, Hi = shape[0], shape[1], shape[2], shape[3], shape[4]
     Y, X = shape[6], shape[7]
     filter_size = f"{Y}x{X}"

@@ -186,7 +186,7 @@ def load_shapes_from_csvs(paths: Sequence[Path]) -> List[Tuple[int, ...]]:
     """Load and deduplicate shapes from one or more CSV files.
 
     Accepts any CSV produced by generate_coverage_conv.py,
-    sample_shapes_conv.py, or augment_coverage_conv.py — all share the same
+    shard_shapes.py, or augment_coverage_conv.py — all share the same
     column format: N, G, C, K, Hi, Wi, Y, X, stride_h, stride_w, pad_h, pad_w
     """
     seen: set[Tuple[int, ...]] = set()
@@ -441,7 +441,7 @@ def generate(
     """Build + benchmark the (config x shape) grid and write the training parquet.
 
     ``shape_csvs``: if provided, shapes are loaded from these CSV files
-    (output of generate_coverage_conv.py / sample_shapes_conv.py /
+    (output of generate_coverage_conv.py / shard_shapes.py /
     augment_coverage_conv.py) and ``shape_set`` is ignored.
 
     ``cache_dir``, ``isa``, ``warmup_iters``, ``timed_iters`` are accepted for
@@ -490,7 +490,7 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
         metavar="CSV",
         help=(
             "One or more shape CSVs produced by generate_coverage_conv.py, "
-            "sample_shapes_conv.py, or augment_coverage_conv.py. "
+            "shard_shapes.py, or augment_coverage_conv.py. "
             "Mutually exclusive with --shape-set."
         ),
     )
