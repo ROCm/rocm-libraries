@@ -485,8 +485,7 @@ hybrid_mode_t select_hybrid_mode(const problem_t& problem,
   // per-XCD work queueing to find anything worth rebalancing -- static
   // assignment is already close to optimal, and dynamic's extra bookkeeping
   // is pure overhead.
-  constexpr size_t MIN_TILES_FOR_DYNAMIC = 480;
-  if (tiles <= MIN_TILES_FOR_DYNAMIC) return hybrid_mode_t::static_;
+  if (tiles <= streamk_hybrid_defaults_t::MIN_TILES_FOR_DYNAMIC) return hybrid_mode_t::static_;
 
   size_t available_cus = (sm_count_target > 0)
                              ? std::min<size_t>(sm_count_target, hardware.N_CU)
@@ -507,8 +506,8 @@ hybrid_mode_t select_hybrid_mode(const problem_t& problem,
   // and the grid is big enough, this alone is enough to go dynamic.
   // (config.occupancy <= 0 means "unknown" -- fall through to the tiles-per-CU
   // check below rather than assume the confident low-occupancy case.)
-  constexpr int MAX_OCCUPANCY_FOR_UNCONDITIONAL_DYNAMIC = 3;
-  if (config.occupancy > 0 && config.occupancy <= MAX_OCCUPANCY_FOR_UNCONDITIONAL_DYNAMIC)
+  if (config.occupancy > 0 &&
+      config.occupancy <= streamk_hybrid_defaults_t::MAX_OCCUPANCY_FOR_UNCONDITIONAL_DYNAMIC)
     return hybrid_mode_t::dynamic;
 
   // At higher occupancy the kernel is already using its CUs well, so dynamic
@@ -518,9 +517,9 @@ hybrid_mode_t select_hybrid_mode(const problem_t& problem,
   // rebalancing room is left.
   const double tiles_per_cu =
       static_cast<double>(tiles) / static_cast<double>(available_cus);
-  constexpr double TILES_PER_CU_THRESHOLD_HIGH_OCCUPANCY = 8.41;
-  return (tiles_per_cu > TILES_PER_CU_THRESHOLD_HIGH_OCCUPANCY) ? hybrid_mode_t::dynamic
-                                                                : hybrid_mode_t::static_;
+  return (tiles_per_cu > streamk_hybrid_defaults_t::TILES_PER_CU_THRESHOLD_HIGH_OCCUPANCY)
+             ? hybrid_mode_t::dynamic
+             : hybrid_mode_t::static_;
 }
 }  // namespace streamk
 }  // namespace origami
