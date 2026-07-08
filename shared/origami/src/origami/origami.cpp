@@ -12,6 +12,7 @@
 #include "origami/gemm.hpp"
 #include "origami/logger.hpp"
 #include "origami/math.hpp"
+#include "origami/nn/config.hpp"
 #include "origami/origami.hpp"
 #include "origami/streamk.hpp"
 #include "origami/types.hpp"
@@ -588,10 +589,10 @@ double compute_ranked_latency(const problem_t& problem,
 
 }  // namespace
 
-std::vector<prediction_result_t> rank_configs(const problem_t& problem,
-                                              const hardware_t& hardware,
-                                              const std::vector<config_t>& configs,
-                                              model_t model) {
+std::vector<prediction_result_t> rank_configs_analytical(const problem_t& problem,
+                                                         const hardware_t& hardware,
+                                                         const std::vector<config_t>& configs,
+                                                         model_t model) {
   if (configs.empty()) { throw std::runtime_error("No configurations provided."); }
 
   struct prediction_result_wrapper_t {
@@ -752,6 +753,34 @@ std::vector<prediction_result_t> rank_configs(const problem_t& problem,
              << " latency=" << results[0].latency);
 
   return results;
+}
+
+std::vector<prediction_result_t> rank_configs(const problem_t& problem,
+                                              const hardware_t& hardware,
+                                              const std::vector<config_t>& configs,
+                                              rank_options_t options) {
+#if ORIGAMI_ENABLE_NN
+  if (options.inference != inference_mode_t::analytical) {
+    if (options.inference == inference_mode_t::nn) {
+      throw std::runtime_error("NN inference not yet implemented (Phase 2)");
+    }
+    // nn_fallback: fall through to analytical until model loaders exist.
+  }
+#else
+  if (options.inference == inference_mode_t::nn) {
+    throw std::runtime_error("origami built without NN support (ORIGAMI_ENABLE_NN=OFF)");
+  }
+#endif
+  return rank_configs_analytical(problem, hardware, configs, options.analytical_model);
+}
+
+std::vector<prediction_result_t> rank_configs(const problem_t& problem,
+                                              const hardware_t& hardware,
+                                              const std::vector<config_t>& configs,
+                                              model_t model) {
+  rank_options_t options;
+  options.analytical_model = model;
+  return rank_configs(problem, hardware, configs, options);
 }
 
 prediction_result_t select_config_mnk(size_t M,

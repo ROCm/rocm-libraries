@@ -28,6 +28,7 @@
 
 #include <functional>
 #include <set>
+#include <stdexcept>
 #include <tuple>
 #include <vector>
 
@@ -96,6 +97,25 @@ ORIGAMI_EXPORT std::vector<prediction_result_t> rank_configs(const problem_t& pr
                                               const hardware_t& hardware,
                                               const std::vector<config_t>& configs,
                                               model_t model = model_t::gemm);
+
+/**
+ * @brief Rank configurations with analytical or ML inference options.
+ *
+ * When @p options.inference is analytical (default), behavior matches the
+ * model_t overload. When inference is nn or nn_fallback, ML backends are used
+ * when available (Phase 2+); nn_fallback falls back to analytical on miss.
+ *
+ * @param problem Problem description (M, N, K, etc.)
+ * @param hardware Hardware characteristics (@see origami::hardware_t)
+ * @param configs List of candidate configurations to rank
+ * @param options Ranking options (analytical model, inference mode, NN backend)
+ * @return std::vector<prediction_result_t> Configurations ranked by performance
+ * @throws std::runtime_error if @p configs is empty, or if inference=nn with no model
+ */
+ORIGAMI_EXPORT std::vector<prediction_result_t> rank_configs(const problem_t& problem,
+                                              const hardware_t& hardware,
+                                              const std::vector<config_t>& configs,
+                                              rank_options_t options);
 
 /**
  * @brief Select best configuration based only on M, N, K dimensions with default settings.
