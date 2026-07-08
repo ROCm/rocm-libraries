@@ -78,6 +78,35 @@ def _read_counter_csvs(outdir: Path) -> list[dict]:
     return rows
 
 
+def _counter_medians(trows: list[dict], raw_to_norm: dict, warmup: int) -> dict:
+    """normalized -> median counter value across the target kernel's dispatches.
+
+    Drops the first `warmup` dispatches per counter (ordered by `Dispatch_Id`) so
+    the counters exclude cold-cache warmup launches and line up with the timed-only
+    wall/profiled ms. Each counter's rows come from a single collection pass (a
+    counter lives in one group), so per-counter ordering is that run's launch order.
+    """
+    by_raw: dict[str, list[tuple[int, float]]] = {}
+    for r in trows:
+        cn = r.get("Counter_Name", "")
+        if cn not in raw_to_norm:
+            continue
+        try:
+            did = int(float(r.get("Dispatch_Id", 0)))
+            val = float(r["Counter_Value"])
+        except (ValueError, KeyError, TypeError):
+            continue
+        by_raw.setdefault(cn, []).append((did, val))
+    out: dict = {}
+    for raw, pairs in by_raw.items():
+        pairs.sort(key=lambda p: p[0])          # launch order
+        kept = pairs[warmup:] or pairs          # keep all if warmup >= dispatches
+        m = _median([v for _, v in kept])
+        if m is not None:
+            out[raw_to_norm[raw]] = int(m) if m == int(m) else m
+    return out
+
+
 def _pick_target_kernel(rows: list[dict], match: Optional[str]) -> Optional[str]:
     """Busiest non-helper kernel whose name CONTAINS `match` (substring).
 
@@ -130,8 +159,9 @@ def _wall(cmd: Sequence[str], env: dict, timeout: int) -> dict:
 
 def profile(cmd: Sequence[str], arch: str, *, match: Optional[str] = None,
             label: Optional[str] = None, op: str = "unknown",
-            shape: Optional[dict] = None, env: Optional[dict] = None,
-            timeout: int = 1800, warn: Optional[Callable[[str], None]] = None) -> dict:
+            shape: Optional[dict] = None, warmup: int = 0,
+            env: Optional[dict] = None, timeout: int = 1800,
+            warn: Optional[Callable[[str], None]] = None) -> dict:
     """Profile the kernel launched by `cmd` and return a measurement record.
 
     `cmd` is a kernel-launch command (list of argv). `arch` selects the counter map.
@@ -142,6 +172,11 @@ def profile(cmd: Sequence[str], arch: str, *, match: Optional[str] = None,
       - `label`: the *identity* name written to the record (what comparison pairs
         on). Set a stable `label` so an optimization that renames the dispatched
         symbol still pairs across runs. If omitted, the dispatched symbol is used.
+
+    `warmup`: number of leading (warmup) dispatches to drop per counter, so the
+    counter medians exclude cold-cache warmup launches (rocprofv3 records every
+    dispatch and the CSV has no warmup flag, so the caller supplies the count -
+    e.g. the launcher's warmup_iters). Default 0 = keep all dispatches.
 
     `warn(msg)` (optional) is called on each degradation (no counters selected,
     profiler failed, no matching dispatch, counters didn't populate) so a caller
@@ -193,19 +228,8 @@ def profile(cmd: Sequence[str], arch: str, *, match: Optional[str] = None,
                       + (f" for match={match!r}" if match else "")
                       + "; counters empty")
             trows = [r for r in rows if r.get("Kernel_Name") == target] if target else []
-            # counters: median per raw counter across the target kernel dispatches
-            by_raw: dict[str, list[float]] = {}
-            for r in trows:
-                cn = r.get("Counter_Name", "")
-                if cn in raw_to_norm:
-                    try:
-                        by_raw.setdefault(cn, []).append(float(r["Counter_Value"]))
-                    except (ValueError, KeyError):
-                        pass
-            for raw, vals in by_raw.items():
-                m = _median(vals)
-                if m is not None:
-                    counters_out[raw_to_norm[raw]] = int(m) if m == int(m) else m
+            # median per counter across the target kernel's dispatches, warmup dropped
+            counters_out = _counter_medians(trows, raw_to_norm, warmup)
             if target and not counters_out:
                 _warn(f"kernel {target!r} matched but no requested counters "
                       "populated (arch counter gap?)")

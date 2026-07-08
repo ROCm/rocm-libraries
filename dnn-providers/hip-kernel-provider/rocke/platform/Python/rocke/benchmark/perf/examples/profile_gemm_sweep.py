@@ -51,16 +51,18 @@ def _launch_cmd(v: Variant) -> list[str]:
 
 
 def profile_variants(variants: Sequence[Variant], arch: str, *, repeats: int = 3,
-                     cache=None, warn=None) -> list[dict]:
+                     warmup: int = 0, cache=None, warn=None) -> list[dict]:
     """Profile each compiled variant -> aggregate -> store. Returns the records.
 
-    `label` = variant.cache_key (stable identity); `match` = compiled symbol.
+    `label` = variant.cache_key (stable identity); `match` = compiled symbol;
+    `warmup` = warmup dispatches to drop from counter medians (the manifest's
+    warmup_iters, so counters exclude cold-cache warmup).
     """
     records: list[dict] = []
     for v in variants:
         samples = [_harness.profile(_launch_cmd(v), arch, match=v.kernel_name,
                                     label=v.cache_key, op="gemm",
-                                    shape=dict(v.shape), warn=warn)
+                                    shape=dict(v.shape), warmup=warmup, warn=warn)
                    for _ in range(max(1, repeats))]
         rec = _aggregate.aggregate(samples)
         _store.append(rec, cache=cache)
@@ -69,14 +71,19 @@ def profile_variants(variants: Sequence[Variant], arch: str, *, repeats: int = 3
 
 
 def _build_variants(shapes: Sequence[tuple], arch: str,
-                    output_dir: Path) -> list[Variant]:
-    """Reuse rocKE's sweep to expand + compile variants (lazy rocKE import)."""
+                    output_dir: Path) -> "tuple[list[Variant], int]":
+    """Reuse rocKE's sweep to expand + compile variants (lazy rocKE import).
+
+    Returns (variants, warmup_iters) - warmup_iters is the sweep config's warmup
+    count, which the manifest uses, so the caller can drop it from counter medians.
+    """
     from rocke.benchmark.gemm import fp16_rcr_sweep as sw   # noqa: WPS433 (lazy)
 
     gemm_shapes = tuple(
         sw.GemmSweepShape(M=m, N=n, K=k, label=(rest[0] if rest else ""))
         for (m, n, k, *rest) in shapes)
-    plan = sw.expand_sweep(sw.GemmSweepConfig(arch=arch, shapes=gemm_shapes))
+    cfg = sw.GemmSweepConfig(arch=arch, shapes=gemm_shapes)
+    plan = sw.expand_sweep(cfg)
     builds = sw.compile_sweep_variants(plan, output_dir)
     by_key = {b.cache_key: b for b in builds}
     variants: list[Variant] = []
@@ -88,15 +95,16 @@ def _build_variants(shapes: Sequence[tuple], arch: str,
             cache_key=v.cache_key, kernel_name=b.kernel_name,
             hsaco=b.hsaco_path, manifest=b.manifest_path,
             shape={"M": v.shape.M, "N": v.shape.N, "K": v.shape.K}))
-    return variants
+    return variants, cfg.warmup_iters
 
 
 def profile_sweep(shapes: Sequence[tuple], arch: str, *, repeats: int = 3,
                   cache=None, output_dir=None, warn=None) -> list[dict]:
     """Expand+compile rocKE's GEMM sweep, then profile each variant into the store."""
     out = Path(output_dir) if output_dir else Path(tempfile.mkdtemp(prefix="rbsweep_"))
-    variants = _build_variants(shapes, arch, out)
-    return profile_variants(variants, arch, repeats=repeats, cache=cache, warn=warn)
+    variants, warmup = _build_variants(shapes, arch, out)
+    return profile_variants(variants, arch, repeats=repeats, warmup=warmup,
+                            cache=cache, warn=warn)
 
 
 def _parse_shape(text: str) -> tuple:

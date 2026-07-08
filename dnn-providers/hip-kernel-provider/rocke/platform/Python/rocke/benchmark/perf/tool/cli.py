@@ -58,7 +58,7 @@ def _cmd_profile(a: argparse.Namespace) -> int:
     for _ in range(max(1, a.repeats)):
         samples.append(_harness.profile(
             cmd, a.arch, match=a.match_kernel, label=a.kernel_name,
-            op=a.op, shape=shape, warn=_warn))
+            op=a.op, shape=shape, warmup=a.warmup, warn=_warn))
     rec = _aggregate.aggregate(samples)
 
     identity = _schema.identity(rec)
@@ -136,6 +136,9 @@ def _build_parser() -> argparse.ArgumentParser:
                     help="substring of the dispatched symbol to profile; "
                          "default = busiest non-helper dispatch")
     pr.add_argument("--repeats", type=int, default=1)
+    pr.add_argument("--warmup", type=int, default=0,
+                    help="leading warmup dispatches to drop from counter medians "
+                         "(match the launcher's warmup_iters)")
     pr.add_argument("--threshold", type=float, default=_selfcheck.DEFAULT_THRESHOLD)
     pr.add_argument("--noise-k", dest="noise_k", type=float,
                     default=_selfcheck.DEFAULT_NOISE_K)

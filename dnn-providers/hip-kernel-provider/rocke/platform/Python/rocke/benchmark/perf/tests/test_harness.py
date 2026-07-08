@@ -41,6 +41,33 @@ class TestCountPasses(unittest.TestCase):
             self.assertEqual(harness._count_passes(Path(d)), 0)
 
 
+class TestCounterMedians(unittest.TestCase):
+    def _rows(self, did_val_pairs, counter="C1"):
+        # one CSV row per (dispatch, counter)
+        return [{"Dispatch_Id": str(d), "Counter_Name": counter,
+                 "Counter_Value": str(v)} for d, v in did_val_pairs]
+
+    def test_drops_leading_warmup_by_dispatch_order(self):
+        # dispatches out of order in the list; warmup=2 drops the 2 lowest ids
+        rows = self._rows([(3, 30), (1, 1000), (2, 900), (4, 40), (5, 50)])
+        out = harness._counter_medians(rows, {"C1": "cyc"}, warmup=2)
+        # kept dispatches 3,4,5 -> values 30,40,50 -> median 40 (warmup 1,2 dropped)
+        self.assertEqual(out["cyc"], 40)
+
+    def test_warmup_zero_keeps_all(self):
+        rows = self._rows([(1, 10), (2, 20), (3, 30)])
+        self.assertEqual(harness._counter_medians(rows, {"C1": "cyc"}, warmup=0)["cyc"], 20)
+
+    def test_warmup_ge_dispatches_keeps_all(self):
+        rows = self._rows([(1, 10), (2, 20)])
+        # dropping 5 would leave nothing -> fall back to all
+        self.assertEqual(harness._counter_medians(rows, {"C1": "cyc"}, warmup=5)["cyc"], 15)
+
+    def test_ignores_unrequested_counters(self):
+        rows = self._rows([(1, 10)], counter="OTHER")
+        self.assertEqual(harness._counter_medians(rows, {"C1": "cyc"}, warmup=0), {})
+
+
 class TestPickTarget(unittest.TestCase):
     def _rows(self, *names):
         return [{"Kernel_Name": n} for n in names]

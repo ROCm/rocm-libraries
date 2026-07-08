@@ -10,7 +10,7 @@ from rocke.benchmark.perf.examples import profile_gemm_sweep as ex
 
 
 def _fake_record(cmd, arch, *, match=None, label=None, op="unknown",
-                 shape=None, warn=None, _busy=[100]):
+                 shape=None, warmup=0, warn=None, _busy=[100]):
     """Stand-in for harness.profile: identity from label, counters from a counter."""
     counters = {"busy_cycles": _busy[0], "total_clocks": 1000}
     return {
