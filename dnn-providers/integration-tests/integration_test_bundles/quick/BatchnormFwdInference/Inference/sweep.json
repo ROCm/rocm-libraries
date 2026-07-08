@@ -1,0 +1,1055 @@
+{
+  "version": 1,
+  "cases": [
+    {
+      "id": "small_fp32_nchw",
+      "values": {
+        "io_data_type": "float",
+        "tensors": [
+          {
+            "uid": 0,
+            "data_type": "float",
+            "dims": [
+              2,
+              3,
+              4,
+              5
+            ],
+            "strides": [
+              60,
+              20,
+              5,
+              1
+            ]
+          },
+          {
+            "uid": 1,
+            "data_type": "float",
+            "dims": [
+              1,
+              3,
+              1,
+              1
+            ],
+            "strides": [
+              3,
+              1,
+              1,
+              1
+            ]
+          },
+          {
+            "uid": 2,
+            "data_type": "float",
+            "dims": [
+              1,
+              3,
+              1,
+              1
+            ],
+            "strides": [
+              3,
+              1,
+              1,
+              1
+            ]
+          },
+          {
+            "uid": 3,
+            "data_type": "float",
+            "dims": [
+              1,
+              3,
+              1,
+              1
+            ],
+            "strides": [
+              3,
+              1,
+              1,
+              1
+            ]
+          },
+          {
+            "uid": 4,
+            "data_type": "float",
+            "dims": [
+              1,
+              3,
+              1,
+              1
+            ],
+            "strides": [
+              3,
+              1,
+              1,
+              1
+            ]
+          },
+          {
+            "uid": 5,
+            "data_type": "float",
+            "dims": [
+              2,
+              3,
+              4,
+              5
+            ],
+            "strides": [
+              60,
+              20,
+              5,
+              1
+            ]
+          }
+        ]
+      },
+      "golden": {
+        "path": "golden/small_fp32_nchw/tensors.dvc"
+      },
+      "metadata": {
+        "format_version": 1,
+        "operation": "BatchnormFwdInference",
+        "generator": "generate_batchnorm_fwd_golden.py",
+        "generator_version": "1.0.0",
+        "generated_at": "2026-06-18T00:00:00Z",
+        "reference_source": "PyTorch 2.12.0+rocm7.2",
+        "reference_strategy": "pytorch_native_batchnorm",
+        "rocm_version": "7.2",
+        "seed": 42,
+        "notes": "Dummy metadata (placeholder) \u2014 nchw fp32 Small batchnorm inference."
+      }
+    },
+    {
+      "id": "large_fp32_nchw",
+      "values": {
+        "io_data_type": "float",
+        "tensors": [
+          {
+            "uid": 0,
+            "data_type": "float",
+            "dims": [
+              3,
+              4,
+              50,
+              50
+            ],
+            "strides": [
+              10000,
+              2500,
+              50,
+              1
+            ]
+          },
+          {
+            "uid": 1,
+            "data_type": "float",
+            "dims": [
+              1,
+              4,
+              1,
+              1
+            ],
+            "strides": [
+              4,
+              1,
+              1,
+              1
+            ]
+          },
+          {
+            "uid": 2,
+            "data_type": "float",
+            "dims": [
+              1,
+              4,
+              1,
+              1
+            ],
+            "strides": [
+              4,
+              1,
+              1,
+              1
+            ]
+          },
+          {
+            "uid": 3,
+            "data_type": "float",
+            "dims": [
+              1,
+              4,
+              1,
+              1
+            ],
+            "strides": [
+              4,
+              1,
+              1,
+              1
+            ]
+          },
+          {
+            "uid": 4,
+            "data_type": "float",
+            "dims": [
+              1,
+              4,
+              1,
+              1
+            ],
+            "strides": [
+              4,
+              1,
+              1,
+              1
+            ]
+          },
+          {
+            "uid": 5,
+            "data_type": "float",
+            "dims": [
+              3,
+              4,
+              50,
+              50
+            ],
+            "strides": [
+              10000,
+              2500,
+              50,
+              1
+            ]
+          }
+        ]
+      },
+      "golden": {
+        "path": "golden/large_fp32_nchw/tensors.dvc"
+      },
+      "metadata": {
+        "format_version": 1,
+        "operation": "BatchnormFwdInference",
+        "generator": "generate_batchnorm_fwd_golden.py",
+        "generator_version": "1.0.0",
+        "generated_at": "2026-06-18T00:00:00Z",
+        "reference_source": "PyTorch 2.12.0+rocm7.2",
+        "reference_strategy": "pytorch_native_batchnorm",
+        "rocm_version": "7.2",
+        "seed": 42,
+        "notes": "Dummy metadata (placeholder) \u2014 nchw fp32 Large batchnorm inference."
+      }
+    },
+    {
+      "id": "tiny_fp32_nchw",
+      "values": {
+        "io_data_type": "float",
+        "tensors": [
+          {
+            "uid": 0,
+            "data_type": "float",
+            "dims": [
+              1,
+              2,
+              3,
+              4
+            ],
+            "strides": [
+              24,
+              12,
+              4,
+              1
+            ]
+          },
+          {
+            "uid": 1,
+            "data_type": "float",
+            "dims": [
+              1,
+              2,
+              1,
+              1
+            ],
+            "strides": [
+              2,
+              1,
+              1,
+              1
+            ]
+          },
+          {
+            "uid": 2,
+            "data_type": "float",
+            "dims": [
+              1,
+              2,
+              1,
+              1
+            ],
+            "strides": [
+              2,
+              1,
+              1,
+              1
+            ]
+          },
+          {
+            "uid": 3,
+            "data_type": "float",
+            "dims": [
+              1,
+              2,
+              1,
+              1
+            ],
+            "strides": [
+              2,
+              1,
+              1,
+              1
+            ]
+          },
+          {
+            "uid": 4,
+            "data_type": "float",
+            "dims": [
+              1,
+              2,
+              1,
+              1
+            ],
+            "strides": [
+              2,
+              1,
+              1,
+              1
+            ]
+          },
+          {
+            "uid": 5,
+            "data_type": "float",
+            "dims": [
+              1,
+              2,
+              3,
+              4
+            ],
+            "strides": [
+              24,
+              12,
+              4,
+              1
+            ]
+          }
+        ]
+      },
+      "golden": {
+        "path": "golden/tiny_fp32_nchw/tensors.dvc"
+      },
+      "metadata": {
+        "format_version": 1,
+        "operation": "BatchnormFwdInference",
+        "generator": "generate_batchnorm_fwd_golden.py",
+        "generator_version": "1.0.0",
+        "generated_at": "2026-06-18T00:00:00Z",
+        "reference_source": "PyTorch 2.12.0+rocm7.2",
+        "reference_strategy": "pytorch_native_batchnorm",
+        "rocm_version": "7.2",
+        "seed": 42,
+        "notes": "Dummy metadata (placeholder) \u2014 nchw fp32 Tiny batchnorm inference."
+      }
+    },
+    {
+      "id": "small_fp16_nchw",
+      "values": {
+        "io_data_type": "half",
+        "tensors": [
+          {
+            "uid": 0,
+            "data_type": "half",
+            "dims": [
+              2,
+              3,
+              4,
+              5
+            ],
+            "strides": [
+              60,
+              20,
+              5,
+              1
+            ]
+          },
+          {
+            "uid": 1,
+            "data_type": "float",
+            "dims": [
+              1,
+              3,
+              1,
+              1
+            ],
+            "strides": [
+              3,
+              1,
+              1,
+              1
+            ]
+          },
+          {
+            "uid": 2,
+            "data_type": "float",
+            "dims": [
+              1,
+              3,
+              1,
+              1
+            ],
+            "strides": [
+              3,
+              1,
+              1,
+              1
+            ]
+          },
+          {
+            "uid": 3,
+            "data_type": "float",
+            "dims": [
+              1,
+              3,
+              1,
+              1
+            ],
+            "strides": [
+              3,
+              1,
+              1,
+              1
+            ]
+          },
+          {
+            "uid": 4,
+            "data_type": "float",
+            "dims": [
+              1,
+              3,
+              1,
+              1
+            ],
+            "strides": [
+              3,
+              1,
+              1,
+              1
+            ]
+          },
+          {
+            "uid": 5,
+            "data_type": "half",
+            "dims": [
+              2,
+              3,
+              4,
+              5
+            ],
+            "strides": [
+              60,
+              20,
+              5,
+              1
+            ]
+          }
+        ]
+      },
+      "golden": {
+        "path": "golden/small_fp16_nchw/tensors.dvc"
+      },
+      "metadata": {
+        "format_version": 1,
+        "operation": "BatchnormFwdInference",
+        "generator": "generate_batchnorm_fwd_golden.py",
+        "generator_version": "1.0.0",
+        "generated_at": "2026-06-18T00:00:00Z",
+        "reference_source": "PyTorch 2.12.0+rocm7.2",
+        "reference_strategy": "pytorch_native_batchnorm",
+        "rocm_version": "7.2",
+        "seed": 42,
+        "notes": "Dummy metadata (placeholder) \u2014 nchw fp16 Small batchnorm inference."
+      }
+    },
+    {
+      "id": "small_bfp16_nchw",
+      "values": {
+        "io_data_type": "bfloat16",
+        "tensors": [
+          {
+            "uid": 0,
+            "data_type": "bfloat16",
+            "dims": [
+              2,
+              3,
+              4,
+              5
+            ],
+            "strides": [
+              60,
+              20,
+              5,
+              1
+            ]
+          },
+          {
+            "uid": 1,
+            "data_type": "float",
+            "dims": [
+              1,
+              3,
+              1,
+              1
+            ],
+            "strides": [
+              3,
+              1,
+              1,
+              1
+            ]
+          },
+          {
+            "uid": 2,
+            "data_type": "float",
+            "dims": [
+              1,
+              3,
+              1,
+              1
+            ],
+            "strides": [
+              3,
+              1,
+              1,
+              1
+            ]
+          },
+          {
+            "uid": 3,
+            "data_type": "float",
+            "dims": [
+              1,
+              3,
+              1,
+              1
+            ],
+            "strides": [
+              3,
+              1,
+              1,
+              1
+            ]
+          },
+          {
+            "uid": 4,
+            "data_type": "float",
+            "dims": [
+              1,
+              3,
+              1,
+              1
+            ],
+            "strides": [
+              3,
+              1,
+              1,
+              1
+            ]
+          },
+          {
+            "uid": 5,
+            "data_type": "bfloat16",
+            "dims": [
+              2,
+              3,
+              4,
+              5
+            ],
+            "strides": [
+              60,
+              20,
+              5,
+              1
+            ]
+          }
+        ]
+      },
+      "golden": {
+        "path": "golden/small_bfp16_nchw/tensors.dvc"
+      },
+      "metadata": {
+        "format_version": 1,
+        "operation": "BatchnormFwdInference",
+        "generator": "generate_batchnorm_fwd_golden.py",
+        "generator_version": "1.0.0",
+        "generated_at": "2026-06-18T00:00:00Z",
+        "reference_source": "PyTorch 2.12.0+rocm7.2",
+        "reference_strategy": "pytorch_native_batchnorm",
+        "rocm_version": "7.2",
+        "seed": 42,
+        "notes": "Dummy metadata (placeholder) \u2014 nchw bf16 Small batchnorm inference."
+      }
+    },
+    {
+      "id": "small_fp32_ncdhw",
+      "values": {
+        "io_data_type": "float",
+        "tensors": [
+          {
+            "uid": 0,
+            "data_type": "float",
+            "dims": [
+              2,
+              3,
+              4,
+              5,
+              6
+            ],
+            "strides": [
+              360,
+              120,
+              30,
+              6,
+              1
+            ]
+          },
+          {
+            "uid": 1,
+            "data_type": "float",
+            "dims": [
+              1,
+              3,
+              1,
+              1,
+              1
+            ],
+            "strides": [
+              3,
+              1,
+              1,
+              1,
+              1
+            ]
+          },
+          {
+            "uid": 2,
+            "data_type": "float",
+            "dims": [
+              1,
+              3,
+              1,
+              1,
+              1
+            ],
+            "strides": [
+              3,
+              1,
+              1,
+              1,
+              1
+            ]
+          },
+          {
+            "uid": 3,
+            "data_type": "float",
+            "dims": [
+              1,
+              3,
+              1,
+              1,
+              1
+            ],
+            "strides": [
+              3,
+              1,
+              1,
+              1,
+              1
+            ]
+          },
+          {
+            "uid": 4,
+            "data_type": "float",
+            "dims": [
+              1,
+              3,
+              1,
+              1,
+              1
+            ],
+            "strides": [
+              3,
+              1,
+              1,
+              1,
+              1
+            ]
+          },
+          {
+            "uid": 5,
+            "data_type": "float",
+            "dims": [
+              2,
+              3,
+              4,
+              5,
+              6
+            ],
+            "strides": [
+              360,
+              120,
+              30,
+              6,
+              1
+            ]
+          }
+        ]
+      },
+      "golden": {
+        "path": "golden/small_fp32_ncdhw/tensors.dvc"
+      },
+      "metadata": {
+        "format_version": 1,
+        "operation": "BatchnormFwdInference",
+        "generator": "generate_batchnorm_fwd_golden.py",
+        "generator_version": "1.0.0",
+        "generated_at": "2026-06-18T00:00:00Z",
+        "reference_source": "PyTorch 2.12.0+rocm7.2",
+        "reference_strategy": "pytorch_native_batchnorm",
+        "rocm_version": "7.2",
+        "seed": 42,
+        "notes": "Dummy metadata (placeholder) \u2014 ncdhw fp32 Small batchnorm inference."
+      }
+    },
+    {
+      "id": "nchw_bfp16_n1_c3_h14_w14",
+      "values": {
+        "io_data_type": "bfloat16",
+        "tensors": [
+          {
+            "uid": 0,
+            "data_type": "bfloat16",
+            "dims": [
+              1,
+              3,
+              14,
+              14
+            ],
+            "strides": [
+              588,
+              196,
+              14,
+              1
+            ]
+          },
+          {
+            "uid": 1,
+            "data_type": "float",
+            "dims": [
+              1,
+              3,
+              1,
+              1
+            ],
+            "strides": [
+              3,
+              1,
+              1,
+              1
+            ]
+          },
+          {
+            "uid": 2,
+            "data_type": "float",
+            "dims": [
+              1,
+              3,
+              1,
+              1
+            ],
+            "strides": [
+              3,
+              1,
+              1,
+              1
+            ]
+          },
+          {
+            "uid": 3,
+            "data_type": "float",
+            "dims": [
+              1,
+              3,
+              1,
+              1
+            ],
+            "strides": [
+              3,
+              1,
+              1,
+              1
+            ]
+          },
+          {
+            "uid": 4,
+            "data_type": "float",
+            "dims": [
+              1,
+              3,
+              1,
+              1
+            ],
+            "strides": [
+              3,
+              1,
+              1,
+              1
+            ]
+          },
+          {
+            "uid": 5,
+            "data_type": "bfloat16",
+            "dims": [
+              1,
+              3,
+              14,
+              14
+            ],
+            "strides": [
+              588,
+              196,
+              14,
+              1
+            ]
+          }
+        ]
+      },
+      "metadata": {
+        "format_version": 1,
+        "operation": "BatchnormFwdInference"
+      }
+    },
+    {
+      "id": "nchw_fp16_n1_c3_h14_w14",
+      "values": {
+        "io_data_type": "half",
+        "tensors": [
+          {
+            "uid": 0,
+            "data_type": "half",
+            "dims": [
+              1,
+              3,
+              14,
+              14
+            ],
+            "strides": [
+              588,
+              196,
+              14,
+              1
+            ]
+          },
+          {
+            "uid": 1,
+            "data_type": "float",
+            "dims": [
+              1,
+              3,
+              1,
+              1
+            ],
+            "strides": [
+              3,
+              1,
+              1,
+              1
+            ]
+          },
+          {
+            "uid": 2,
+            "data_type": "float",
+            "dims": [
+              1,
+              3,
+              1,
+              1
+            ],
+            "strides": [
+              3,
+              1,
+              1,
+              1
+            ]
+          },
+          {
+            "uid": 3,
+            "data_type": "float",
+            "dims": [
+              1,
+              3,
+              1,
+              1
+            ],
+            "strides": [
+              3,
+              1,
+              1,
+              1
+            ]
+          },
+          {
+            "uid": 4,
+            "data_type": "float",
+            "dims": [
+              1,
+              3,
+              1,
+              1
+            ],
+            "strides": [
+              3,
+              1,
+              1,
+              1
+            ]
+          },
+          {
+            "uid": 5,
+            "data_type": "half",
+            "dims": [
+              1,
+              3,
+              14,
+              14
+            ],
+            "strides": [
+              588,
+              196,
+              14,
+              1
+            ]
+          }
+        ]
+      },
+      "metadata": {
+        "format_version": 1,
+        "operation": "BatchnormFwdInference"
+      }
+    },
+    {
+      "id": "nchw_fp32_n1_c3_h14_w14",
+      "values": {
+        "io_data_type": "float",
+        "tensors": [
+          {
+            "uid": 0,
+            "data_type": "float",
+            "dims": [
+              1,
+              3,
+              14,
+              14
+            ],
+            "strides": [
+              588,
+              196,
+              14,
+              1
+            ]
+          },
+          {
+            "uid": 1,
+            "data_type": "float",
+            "dims": [
+              1,
+              3,
+              1,
+              1
+            ],
+            "strides": [
+              3,
+              1,
+              1,
+              1
+            ]
+          },
+          {
+            "uid": 2,
+            "data_type": "float",
+            "dims": [
+              1,
+              3,
+              1,
+              1
+            ],
+            "strides": [
+              3,
+              1,
+              1,
+              1
+            ]
+          },
+          {
+            "uid": 3,
+            "data_type": "float",
+            "dims": [
+              1,
+              3,
+              1,
+              1
+            ],
+            "strides": [
+              3,
+              1,
+              1,
+              1
+            ]
+          },
+          {
+            "uid": 4,
+            "data_type": "float",
+            "dims": [
+              1,
+              3,
+              1,
+              1
+            ],
+            "strides": [
+              3,
+              1,
+              1,
+              1
+            ]
+          },
+          {
+            "uid": 5,
+            "data_type": "float",
+            "dims": [
+              1,
+              3,
+              14,
+              14
+            ],
+            "strides": [
+              588,
+              196,
+              14,
+              1
+            ]
+          }
+        ]
+      },
+      "metadata": {
+        "format_version": 1,
+        "operation": "BatchnormFwdInference"
+      }
+    }
+  ]
+}
