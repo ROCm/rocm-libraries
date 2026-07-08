@@ -63,6 +63,7 @@ _CONV_CONFIG = _OP_CONFIGS["conv"]
 def write_csv(rows, path):
     _write_csv_generic(rows, path, _CONV_CONFIG)
 
+
 # Drop shapes where any GEMM dimension is smaller than the smallest tile.
 MIN_TILE = 32
 

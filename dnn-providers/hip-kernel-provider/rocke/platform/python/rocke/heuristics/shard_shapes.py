@@ -158,8 +158,19 @@ def gemm_bucket_key(row: tuple) -> tuple:
 
 
 CONV_HEADER = [
-    "N", "G", "C", "K", "Hi", "Wi", "Y", "X",
-    "stride_h", "stride_w", "pad_h", "pad_w", "direction",
+    "N",
+    "G",
+    "C",
+    "K",
+    "Hi",
+    "Wi",
+    "Y",
+    "X",
+    "stride_h",
+    "stride_w",
+    "pad_h",
+    "pad_w",
+    "direction",
 ]
 
 CONV_SHAPE_COLS = CONV_HEADER[:-1]
@@ -421,14 +432,30 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
     parser = argparse.ArgumentParser(
         description="Merge, stratified-sample, and shard shapes for any rocke op."
     )
-    parser.add_argument("--op", required=True, help="Op family (conv, gemm, moe, norm, ...)")
+    parser.add_argument(
+        "--op", required=True, help="Op family (conv, gemm, moe, norm, ...)"
+    )
     parser.add_argument("--inputs", nargs="+", required=True, help="Input shape CSVs")
     parser.add_argument("--out", required=True, help="Output merged CSV")
-    parser.add_argument("--target", type=int, default=None, help="Target shape count after sampling")
-    parser.add_argument("--shards", type=int, default=0, help="If >0, write shard_00.csv ... shard_NN.csv")
-    parser.add_argument("--shard_dir", default="shards", help="Directory for shard CSVs")
+    parser.add_argument(
+        "--target", type=int, default=None, help="Target shape count after sampling"
+    )
+    parser.add_argument(
+        "--shards",
+        type=int,
+        default=0,
+        help="If >0, write shard_00.csv ... shard_NN.csv",
+    )
+    parser.add_argument(
+        "--shard_dir", default="shards", help="Directory for shard CSVs"
+    )
     parser.add_argument("--seed", type=int, default=42)
-    parser.add_argument("--min-tile", type=int, default=32, help="Minimum tile dim for ops with tileability filter")
+    parser.add_argument(
+        "--min-tile",
+        type=int,
+        default=32,
+        help="Minimum tile dim for ops with tileability filter",
+    )
     args = parser.parse_args(argv)
 
     config = get_config(args.op)
@@ -438,7 +465,10 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
     if config is None:
         generic_header, _ = load_csv_generic(Path(args.inputs[0]))
         config = OpShapeConfig(header=generic_header)
-        print(f"Op '{args.op}' has no registered config; using generic CSV mode", file=sys.stderr)
+        print(
+            f"Op '{args.op}' has no registered config; using generic CSV mode",
+            file=sys.stderr,
+        )
 
     # Load and deduplicate
     seen: set[tuple] = set()
@@ -460,10 +490,15 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
     # Op-specific filtering
     all_shapes, n_dropped = filter_shapes(all_shapes, config.filter_fn, args.min_tile)
     if n_dropped:
-        print(f"Dropped {n_dropped} shapes by filter; {len(all_shapes)} remain", file=sys.stderr)
+        print(
+            f"Dropped {n_dropped} shapes by filter; {len(all_shapes)} remain",
+            file=sys.stderr,
+        )
 
     # Stats before sampling
-    stats_fn = _STATS_FN.get(args.op, lambda rows, label: print_stats(rows, label, config.bucket_fn))
+    stats_fn = _STATS_FN.get(
+        args.op, lambda rows, label: print_stats(rows, label, config.bucket_fn)
+    )
     stats_fn(all_shapes, "Before sampling")
 
     # Sample
@@ -471,7 +506,9 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
         sampled = all_shapes
         print(f"Using all {len(all_shapes)} shapes (no sampling).", file=sys.stderr)
     else:
-        sampled = stratified_sample(all_shapes, args.target, config.bucket_fn, seed=args.seed)
+        sampled = stratified_sample(
+            all_shapes, args.target, config.bucket_fn, seed=args.seed
+        )
 
     stats_fn(sampled, "After sampling")
 
