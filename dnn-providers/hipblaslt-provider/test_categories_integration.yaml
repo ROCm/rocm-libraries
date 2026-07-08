@@ -1,0 +1,69 @@
+# Copyright © Advanced Micro Devices, Inc., or its affiliates.
+# SPDX-License-Identifier: MIT
+#
+# hipblaslt-provider external integration Test Categories Configuration.
+#
+# This file is applied to hipdnn_integration_tests when it is run against the
+# hipblaslt provider plugin. These patterns match hipdnn_integration_tests
+# GTest names, not hipblaslt_plugin_tests/hipblaslt_plugin_integration_tests
+# names.
+#
+# hipblaslt only implements matmul, so every tier is scoped to *Matmul* to
+# avoid pulling in conv/batchnorm/reduction/rmsnorm/sdpa coverage that no
+# engine in this provider's build supports (previously handled by a
+# GTEST_FILTER "*Matmul*" argument; the YAML test_patterns below are now the
+# source of truth for what runs, with GTEST_FILTER only scoping the plain
+# `hipblaslt-provider-external-integration-check` custom target used for
+# manual/local invocation).
+
+_common_excludes: &common_excludes
+  - "*DISABLED*"
+
+test_categories:
+  quick:
+    description: "Fast external integration coverage: Smoke matmul cases"
+    test_patterns:
+      - "Smoke/*Matmul*"
+    exclude: *common_excludes
+    labels:
+      - "quick"
+      - "pre-commit"
+      - "smoke"
+
+  standard:
+    description: "Standard external integration coverage: same shape as quick (no Standard* matmul tier exists)"
+    test_patterns:
+      - "Smoke/*Matmul*"
+    exclude: *common_excludes
+    labels:
+      - "standard"
+      - "pr"
+      - "precheckin"
+
+  comprehensive:
+    description: "Nightly comprehensive external integration coverage (all matmul suites)"
+    test_patterns:
+      - "*Matmul*"
+    exclude: *common_excludes
+    labels:
+      - "comprehensive"
+      - "nightly"
+      - "extended"
+
+  full:
+    description: "Complete external integration coverage (all matmul suites)"
+    test_patterns:
+      - "*Matmul*"
+    exclude: *common_excludes
+    labels:
+      - "full"
+      - "all"
+
+execution_settings:
+  default_timeout: 300
+  timeout_multiplier: 1
+  category_timeouts:
+    quick: 300
+    standard: 2700
+    comprehensive: 25200
+    full: 28800
