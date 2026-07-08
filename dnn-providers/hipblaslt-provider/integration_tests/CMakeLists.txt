@@ -15,7 +15,6 @@ endif()
 add_executable(
     hipblaslt_plugin_integration_tests
     main.cpp
-    $<$<BOOL:${HIPDNN_HIPBLASLT_PROVIDER_ENABLE_MX_GEMM}>:IntegrationGpuMxMatmul.cpp>
     $<$<BOOL:${HIPDNN_HIPBLASLT_PROVIDER_ENABLE_MX_GEMM}>:IntegrationGpuMxMatmulUnsupported.cpp>
 )
 

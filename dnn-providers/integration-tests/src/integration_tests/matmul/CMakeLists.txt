@@ -7,4 +7,5 @@ target_sources(${INTEGRATION_TESTS_EXE}
         IntegrationGpuMatmulActiv.cpp
         IntegrationGpuMatmulBias.cpp
         IntegrationGpuMatmulBiasActiv.cpp
+        IntegrationGpuMxMatmul.cpp
 )
