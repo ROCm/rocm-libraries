@@ -686,7 +686,7 @@ def main() -> int:
                 # Correctness is gated against Triton; N/A when --no-triton.
                 err = _compare(ck_out, tri_out) if tri_out is not None else None
                 ok = (err <= args.tol) if err is not None else None
-                spd = (tri_ms / ck_ms) if (tri_ms and ck_ms > 0) else None
+                spd = (tri_ms / ck_ms) if (tri_ms is not None and ck_ms > 0) else None
                 rec["variants"][v] = {
                     "ms": ck_ms,
                     "speedup": spd,
@@ -696,22 +696,22 @@ def main() -> int:
                 }
                 # Rank best by Triton speedup when available, else raw latency.
                 if ok is not False:
-                    if tri_ms and spd is not None:
+                    if tri_ms is not None and spd is not None:
                         if best is None or spd > best[1]:
                             best = (v, spd)
-                    elif not tri_ms:
+                    elif tri_ms is None:
                         if best is None or ck_ms < best[1]:
                             best = (v, ck_ms)
             except Exception as exc:  # noqa: BLE001
                 rec["variants"][v] = {"error": repr(exc)}
         rec["best_variant"] = best[0] if best else None
-        rec["best_speedup_vs_triton"] = best[1] if (best and tri_ms) else None
+        rec["best_speedup_vs_triton"] = best[1] if (best and tri_ms is not None) else None
         best_ms = rec["variants"][best[0]]["ms"] if best else None
         rec["best_speedup_vs_aoTriton"] = (
             aot_ms / best_ms if (aot_ms and best_ms) else None
         )
         results.append(rec)
-        tri_str = f"tri={tri_ms * 1000:.1f}us" if tri_ms else "tri=N/A"
+        tri_str = f"tri={tri_ms * 1000:.1f}us" if tri_ms is not None else "tri=N/A"
         aot_str = f"aot={aot_ms * 1000:.1f}us" if aot_ms else "aot=N/A"
         parts = []
         for v in args.variants:
