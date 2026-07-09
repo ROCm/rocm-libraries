@@ -272,6 +272,17 @@ orthogonal encoding ([§5.6](#56-no-is_compile_time_constant-flag)):
 
 (∅ = empty / `std::monostate`.)
 
+**Runtime-with-default is one state, read differently at each layer.** The
+backend/provider contract treats it as override-capable — a variant-pack
+value, if present, overrides the baked default ([§4.6](#46-provider-contract)).
+The frontend does not yet exercise that: a variant-pack override for a scalar
+carrying a value is rejected before reaching the backend
+([§4.9](#49-execute-time-variant-pack-filter)), so `Graph::execute()` never
+delivers the override and only the baked default is used. It is thus reachable
+only by a direct backend-API caller today; the frontend may expose the
+override in a future release. Wherever behavior is described below, "frontend"
+and "backend" qualify which layer is meant.
+
 ### 4.3 Frontend surface
 
 Pass-by-value tensors mirror cuDNN-frontend's public surface 1:1, with the
@@ -295,7 +306,7 @@ enum class ScalarType { RUNTIME_PARAM, COMPILE_TIME_CONST };
 
 - `TensorAttributes(const T& scalar)` → the **compile-time constant** state,
   delegating to `set_value`. This diverges from cuDNN, whose plain scalar
-  constructor is runtime pass-by-value — "type-2" in cuDNN's terms, a runtime
+  constructor is runtime pass-by-value — a runtime
   scalar whose value arrives via the variant pack
   ([`graph_properties.h:158-198`](https://github.com/NVIDIA/cudnn-frontend/blob/c4ec01a28a26aa57021862de809cc257619f7516/include/cudnn_frontend/graph_properties.h#L158-L198));
   hipDNN bakes a constant instead so existing scalar graphs stay
@@ -409,24 +420,36 @@ rejected at execute ([§4.9](#49-execute-time-variant-pack-filter)).
 A provider reporting plugin SDK API version `>= 1.2.0` must, for any tensor
 matching the runtime discriminator `isRuntimePassByValue()` (the
 user-supplied and runtime-with-default states), read the scalar from that
-UID's slot in the `device_buffers` array **as a host pointer** at execute
-time, using it to override any seeded default. A compile-time constant
-(`isRuntimePassByValue() == false`) is read from the op-graph flatbuffer as
-today.
+UID's slot in the `device_buffers` array **as a host pointer** whenever a
+variant-pack entry is present, using it to override any baked default; when
+no variant-pack entry is present it uses the baked default (`VALUE_EXT`). A
+compile-time constant (`isRuntimePassByValue() == false`) is read from the
+op-graph flatbuffer as today.
 
 **Capability assertion.** Reporting `>= 1.2.0` asserts runtime
 pass-by-value capability. A provider that reports `>= 1.2.0` but cannot
 serve a particular runtime pass-by-value graph MUST decline it rather than mis-serve it by
 reading the host-scalar slot as a device pointer.
 
+**Override capability.** For any `isRuntimePassByValue()` tensor the contract
+is that a variant-pack value, when present, overrides a baked default. An
+engine that folds the scalar into a compiled kernel and cannot re-read it
+from the variant-pack pointer at execute therefore MUST decline any graph
+with `isRuntimePassByValue() == true`, **even when the flatbuffer carries a
+value** — it cannot guarantee the required override, so serving the graph
+would silently ignore a user's runtime value.
+
 **Defaulted-tensor caveat.** A runtime-with-default tensor carries a baked
-value read as its default; a variant-pack override is rejected at the
-frontend today ([§4.9](#49-execute-time-variant-pack-filter)), so no
-host pointer for its UID reaches `device_buffers` and the provider uses the
-baked default — but the tensor's flag still puts the graph at the `1.2.0`
-floor. A compile-time constant is `isRuntimePassByValue() == false` and never
-appears in `device_buffers` as a host scalar. Only a user-supplied scalar
-arrives as a host pointer.
+value read as its default. The frontend and backend diverge here: the
+frontend rejects a variant-pack override for such a UID today
+([§4.9](#49-execute-time-variant-pack-filter)), so through `Graph::execute()`
+no host pointer for its UID reaches `device_buffers` and the provider uses
+the baked default — while the backend/provider contract above already honors
+an override if one is present (e.g. from a direct backend-API caller).
+Either way the tensor's flag puts the graph at the `1.2.0` floor. A
+compile-time constant is `isRuntimePassByValue() == false` and never appears
+in `device_buffers` as a host scalar. Only a user-supplied scalar arrives as
+a host pointer through the frontend.
 
 Each `hipdnnPluginDeviceBuffer_t` carries its `uid`, and
 [§4.1](#41-tensor-schema-addition) adds the `isRuntimePassByValue()`
@@ -498,7 +521,8 @@ provider must therefore:
    `engineId` to a newer payload, dereferencing a host pointer as device
    memory — a memory-unsafe failure, not merely a wrong result.
 
-These three obligations are part of what reporting `1.2.0` means — the
+These deserialization obligations are only part of what reporting `1.2.0`
+means — they carry the
 same trust-the-version contract as reading the host-scalar slot itself —
 because hipDNN core performs no version check on the deserialized path
 ([§4.7](#47-feature-detection-and-version-filtering)). The hipDNN
@@ -609,8 +633,8 @@ A runtime-with-default or compile-time scalar instead carries its
 value baked in the tensor flatbuffer (`VALUE_EXT`).
 
 **Forwarded-UID filter.** `Graph::execute()` forwards to the provider only
-the UIDs of pure user-supplied scalars, **rejecting** any variant-pack entry
-whose UID carries a baked value 
+the UIDs of pure (non-defaulted) user-supplied scalars, **rejecting** any
+variant-pack entry whose UID carries a baked value
 — such a value can never be overridden today, so supplying one is a caller
 error and `Graph::execute()` returns an error rather than silently ignoring
 it. A runtime-with-default tensor still requires `1.2.0` (its flag is set).
@@ -618,11 +642,14 @@ it. A runtime-with-default tensor still requires `1.2.0` (its flag is set).
 **Compiled-plan path.** On the compiled-plan path `deserializeBackendPlan`
 reconstructs no per-tensor attributes
 ([§5.5](#55-deserialized-plan-support-via-the-provider-payload);
-[`ExecutionPlanDescriptor.cpp:416-477`](../../backend/src/descriptors/ExecutionPlanDescriptor.cpp#L416-L477)),
+[`ExecutionPlanDescriptor.cpp:425-485`](../../backend/src/descriptors/ExecutionPlanDescriptor.cpp#L425-L485)),
 so a runtime-with-default tensor round-tripped through `to_compiled_plan_binary`
-loses its baked default and degrades to user-supplied semantics — the caller must
-supply the value at execute. cuDNN avoids this: its serialize bundles
-`pass_by_values` with the plan JSON, so the value survives.
+loses its baked default at the hipDNN layer and degrades to user-supplied
+semantics unless the provider persists the value in its `plugin_payload`
+([§4.6](#46-provider-contract)) and restores it on deserialize. Graph
+serialization is unaffected — the baked `VALUE_EXT` survives a graph
+serialize/deserialize; only the compiled-plan path drops it, and cuDNN
+avoids even that by bundling `pass_by_values` with the plan JSON.
 This limitation is explicit and covered by test ([§9](#9-testing-plan)).
 The forwarded-UID error check ([§4.9](#49-execute-time-variant-pack-filter))
 does not run on this path: with no per-tensor attributes reconstructed, the
@@ -635,7 +662,7 @@ override from its own payload; the core does not.
 for a value supplied at execute. The runtime-with-default state is
 functionally a compile-time constant today — a variant-pack override is
 rejected — yet it carries the `1.2.0` floor, so it narrows engine
-applicability for no present benefit; reserve it for potential future use.
+applicability for no present benefit; _reserve it for potential future use_.
 
 ### 4.10 Serialized-graph reader-version guard
 
@@ -704,7 +731,7 @@ rest of the surface mirrors cuDNN name-for-name.
    leaves `pass_by_value` set
    ([`graph_properties.h:394-400`](https://github.com/NVIDIA/cudnn-frontend/blob/c4ec01a28a26aa57021862de809cc257619f7516/include/cudnn_frontend/graph_properties.h#L394-L400)). We could later match this API by collecting an optional default value for the `set_as_runtime_parameter()` route without any added plugin changes.
 3. hipDNN's plain scalar constructor produces a compile-time constant, not
-   cuDNN's runtime type-2 — a deliberate choice to keep
+   cuDNN's runtime pass-by-value scalar — a deliberate choice to keep
    existing `TensorAttributes(v)` scalar graphs on the baseline `1.0.0`.
 
 ### 5.2 Reuse the variant-pack pointer map
