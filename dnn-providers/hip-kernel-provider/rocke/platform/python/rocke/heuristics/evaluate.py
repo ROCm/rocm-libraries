@@ -204,8 +204,11 @@ def main():
     df = build_training_dataset(args.data_dir, op_type=args.op, dtype=args.dtype)
     print(f"  {len(df)} rows, {df.groupby(['m', 'n', 'k']).ngroups} shapes")
 
-    fe = GemmUniversalFeatureEngine()
-    predictor = Predictor(args.model_dir, feature_engine=fe)
+    # Predictor builds the op-appropriate feature engine from the model's recorded
+    # hardware_profile (feature_spec.json); reuse it so evaluation features match
+    # exactly what the model was trained/served with.
+    predictor = Predictor(args.model_dir)
+    fe = predictor._feature_engine
 
     print("Evaluating...")
     results = evaluate_model(predictor, df, fe)

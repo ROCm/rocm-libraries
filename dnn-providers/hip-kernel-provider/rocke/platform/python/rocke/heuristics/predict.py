@@ -33,6 +33,30 @@ import pandas as pd
 from feature_engine import GemmUniversalFeatureEngine
 
 
+def _make_feature_engine(op_type: Optional[str], hw_profile: dict):
+    """Construct the op-appropriate feature engine with the model's recorded
+    hardware profile. Mirrors train.get_feature_engine (lazy per-op imports);
+    defaults to the GEMM engine for a missing/unknown op_type (older models)."""
+    op = op_type or "gemm_universal"
+    if op == "grouped_conv":
+        from feature_engine_grouped_conv import GroupedConvFeatureEngine
+
+        return GroupedConvFeatureEngine(**hw_profile)
+    if op == "fmha":
+        from feature_engine import FmhaFeatureEngine
+
+        return FmhaFeatureEngine(**hw_profile)
+    if op == "norm":
+        from feature_engine import NormFeatureEngine
+
+        return NormFeatureEngine(**hw_profile)
+    if op == "moe":
+        from feature_engine import MoeFeatureEngine
+
+        return MoeFeatureEngine(**hw_profile)
+    return GemmUniversalFeatureEngine(**hw_profile)
+
+
 class Predictor:
     """Loads trained models and feature spec for kernel performance prediction.
 
@@ -65,7 +89,13 @@ class Predictor:
         if feature_engine is not None:
             self._feature_engine = feature_engine
         else:
-            self._feature_engine = GemmUniversalFeatureEngine()
+            # Reconstruct the exact hardware profile the model was trained with
+            # (feature_spec.json) so inference features match training, and pick the
+            # op-appropriate engine. Falls back to GEMM + defaults for older models.
+            hw_profile = self._spec.get("hardware_profile", {})
+            self._feature_engine = _make_feature_engine(
+                self._spec.get("op_type"), hw_profile
+            )
 
         # Build a column index map so models trained with an older (smaller)
         # feature set still work with a feature engine that has since been

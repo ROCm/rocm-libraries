@@ -22,8 +22,14 @@ import json
 import pandas as pd
 from pathlib import Path
 
+# Bytes per element per dtype, used for the bandwidth (GB/s) target. Previously
+# hardcoded to 2 (fp16), which made the fp8/bf8 bandwidth target ~2x wrong.
+DTYPE_BYTES = {"fp8": 1, "bf8": 1, "int8": 1, "fp16": 2, "bf16": 2, "fp32": 4}
 
-def convert_json_to_parquet(json_file: Path, output_file: Path, arch: str = "gfx950"):
+
+def convert_json_to_parquet(
+    json_file: Path, output_file: Path, arch: str = "gfx950", capture_hw: bool = False
+):
     """Convert benchmark JSON to parquet training data format."""
 
     print(f"Loading {json_file}...")
@@ -80,9 +86,10 @@ def convert_json_to_parquet(json_file: Path, output_file: Path, arch: str = "gfx
                 # Valid run - include performance metrics
                 row["measured_tflops"] = benchmark["tflops"]
                 row["latency_ms"] = benchmark["avg_time_ms"]
-                # Calculate bandwidth if needed
+                # Calculate bandwidth if needed (dtype-aware bytes/element)
                 m, n, k = benchmark["m"], benchmark["n"], benchmark["k"]
-                bytes_transferred = (m * k + k * n + m * n) * 2  # FP16 = 2 bytes
+                bpe = DTYPE_BYTES.get(dtype, 2)
+                bytes_transferred = (m * k + k * n + m * n) * bpe
                 if benchmark["avg_time_ms"] > 0:
                     row["bandwidth_gb_s"] = (bytes_transferred / 1e9) / (
                         benchmark["avg_time_ms"] / 1000
@@ -114,6 +121,22 @@ def convert_json_to_parquet(json_file: Path, output_file: Path, arch: str = "gfx
         df.loc[mem_mask, "pad_n"] = True
         df.loc[mem_mask, "pad_k"] = True
         print(f"  ✓ Fixed {mem_count:,} _mem kernel rows")
+        print()
+
+    # Capture per-arch hardware profile (rocminfo) into hw_* columns so training/
+    # eval use real per-arch values instead of gfx950-ish defaults. Must run on a
+    # node that HAS the target GPU.
+    if capture_hw:
+        try:
+            from data_pipeline import get_hardware_profile
+
+            hw = get_hardware_profile()
+            numeric_hw = {k: v for k, v in hw.items() if isinstance(v, (int, float))}
+            for k, v in numeric_hw.items():
+                df[f"hw_{k}"] = v
+            print(f"Captured hardware profile ({len(numeric_hw)} fields): {numeric_hw}")
+        except Exception as e:  # noqa: BLE001
+            print(f"WARNING: hardware capture failed ({e}); proceeding without hw_* columns")
         print()
 
     # Save to parquet
@@ -211,6 +234,12 @@ def main():
     parser.add_argument("--output", type=str, required=True, help="Output parquet file")
     parser.add_argument("--arch", type=str, default="gfx950", help="GPU architecture")
     parser.add_argument(
+        "--capture_hw",
+        action="store_true",
+        help="Capture GPU hardware profile via rocminfo into hw_* columns "
+        "(run on a node with the target GPU)",
+    )
+    parser.add_argument(
         "--merge_with", type=str, nargs="*", help="Additional parquet files to merge"
     )
 
@@ -220,7 +249,7 @@ def main():
     output_file = Path(args.output)
 
     # Convert JSON to parquet (writes output_file as a side effect)
-    convert_json_to_parquet(input_file, output_file, args.arch)
+    convert_json_to_parquet(input_file, output_file, args.arch, args.capture_hw)
 
     # Merge if requested
     if args.merge_with:

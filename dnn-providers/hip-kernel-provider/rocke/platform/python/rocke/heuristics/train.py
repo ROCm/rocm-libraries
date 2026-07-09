@@ -789,6 +789,10 @@ def main():
             json.dump(importances, f, indent=2)
 
     log_targets_used = sorted(LOG_TARGETS & set(targets)) if use_log else []
+    # Effective hardware profile the feature engine used (from captured hw_* cols
+    # or defaults). Recorded so inference (Python Predictor / evaluate.py / the
+    # C++ dispatcher tie-break) uses the SAME values -> no train/inference skew.
+    hw_profile = {k: v for k, v in getattr(fe, "_hw", {}).items() if k != "total_simds"}
     spec = {
         "op_type": operation,
         "dtype": args.dtype,
@@ -798,9 +802,15 @@ def main():
         "targets": targets,
         "log_targets": log_targets_used,
         "params": params,
+        "hardware_profile": hw_profile,
     }
     with open(out_dir / "feature_spec.json", "w") as f:
         json.dump(spec, f, indent=2)
+    # Plain key=value sidecar so the C++ deploy path (no JSON dep) can load the
+    # exact same HardwareProfile the model was trained with.
+    with open(out_dir / "hw_profile.env", "w") as f:
+        for k, v in hw_profile.items():
+            f.write(f"{k}={v}\n")
 
     # Compute unique shapes based on operation type
     if operation == "gemm_universal":
