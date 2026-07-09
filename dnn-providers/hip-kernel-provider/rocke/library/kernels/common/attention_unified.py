@@ -2036,6 +2036,7 @@ def _tiled_spec_from_problem(
     from builders.common.attention_spec_builder import (
         _tiled_spec_from_problem as _impl,
     )
+
     _spec = _impl(problem)
     return _resolve_lds_budget(_spec)
 
