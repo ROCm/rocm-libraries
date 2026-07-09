@@ -32,9 +32,7 @@
 #include <thrust/iterator/iterator_facade.h>
 #include <thrust/iterator/iterator_traits.h>
 
-#if !_THRUST_HAS_DEVICE_SYSTEM_STD
-#  include <type_traits>
-#endif
+#include _THRUST_STD_INCLUDE(type_traits)
 
 THRUST_NAMESPACE_BEGIN
 
@@ -53,7 +51,7 @@ namespace detail
 // If T is use_default, return the result of invoking DefaultNullaryFn, otherwise return T.
 template <class T, class DefaultNullaryFn>
 using replace_if_use_default =
-  typename ::internal::If<_THRUST_STD::is_same_v<T, use_default>, DefaultNullaryFn, identity_<T>>::type;
+  typename ::internal::If<_THRUST_STD::is_same_v<T, use_default>, DefaultNullaryFn, _THRUST_STD::type_identity<T>>::type;
 
 // A metafunction which computes an iterator_adaptor's base class, a specialization of iterator_facade.
 template <typename Derived,
