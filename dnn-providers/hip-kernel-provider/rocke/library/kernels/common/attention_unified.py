@@ -1167,8 +1167,6 @@ def _enable_single_batch_combo(problem: UnifiedAttentionProblem) -> bool:
         return False
     if problem.use_fp8:
         return False
-    if problem.use_alibi or problem.use_qq_bias:
-        return False
     if problem.softcap > 0 or problem.use_sinks:
         return False
     if problem.sliding_window > 0:
@@ -1345,8 +1343,6 @@ def _enable_transposed_qk_32x32(problem: UnifiedAttentionProblem) -> bool:
     if problem.dtype not in ("bf16", "fp16"):
         return False
     if problem.use_fp8:
-        return False
-    if problem.use_alibi or problem.use_qq_bias:
         return False
     if problem.softcap > 0 or problem.use_sinks:
         return False
@@ -1691,13 +1687,11 @@ def _enable_register_pv(problem: UnifiedAttentionProblem) -> bool:
         return False
     if problem.sliding_window > 0:
         return False
-    if problem.softcap > 0:
-        return False
-    if problem.use_alibi:
-        return False
-    if problem.use_qq_bias:
-        return False
     if _kv_storage_dtype(problem) is not None:
+        return False
+    # register-pv v1 does not implement softcap, ALiBi, or QQ-bias paths;
+    # the spec __post_init__ enforces this.
+    if problem.softcap > 0 or problem.use_alibi or problem.use_qq_bias:
         return False
     # use_register_pv requires the 16x16x32 MFMA path; it conflicts with
     # use_mfma_32x32. When the 32x32 path is selected we leave it disabled
@@ -1745,8 +1739,6 @@ def _enable_combo_2d(problem: UnifiedAttentionProblem) -> bool:
     # reads. ``_enable_fp8_mfma_qk`` is forced off for the combo so the
     # in-LDS-fp8 mode (incompatible with the bf16 32x32 reads) never fires.
     # This takes the fp8 prefill cohort from ~0.5x to ~0.9x vs Triton-2d.
-    if problem.use_alibi or problem.use_qq_bias or problem.softcap > 0:
-        return False
     if problem.head_size != 64 or problem.block_size != 32:
         return False
     if problem.num_queries_per_kv != 8:
@@ -1783,6 +1775,10 @@ def _enable_transposed_subflags(problem: UnifiedAttentionProblem) -> bool:
     sliding window (the SW combo keeps its own nw2/T32 mask handling).
     """
     if problem.sliding_window > 0:
+        return False
+    # use_transposed_mask_limit (and the other VALU sub-flags) do not support
+    # softcap, ALiBi or QQ bias; the spec __post_init__ enforces this.
+    if problem.softcap > 0 or problem.use_alibi or problem.use_qq_bias:
         return False
     return _enable_transposed_qk_32x32(problem)
 
@@ -1930,7 +1926,10 @@ def _tiled_spec_from_problem(
     subflags = _enable_transposed_subflags(problem)
     scalar_state = combo or subflags
     skip_legacy_qreg = combo or subflags
-    mask_opts = combo_no_sw or subflags
+    # use_transposed_mask_limit requires no softcap/alibi/qq_bias (spec enforces
+    # this); subflags already gates on them, and combo_no_sw must too.
+    has_bias = problem.softcap > 0 or problem.use_alibi or problem.use_qq_bias
+    mask_opts = (combo_no_sw and not has_bias) or subflags
     # gfx950-only schedule fields: the gfx942 2D spec class does not declare
     # ``use_v_double_buffer`` / ``use_sched_barrier``, and the default gfx942
     # forward reaches this shared return (no flash opt-in). Pass them only when
