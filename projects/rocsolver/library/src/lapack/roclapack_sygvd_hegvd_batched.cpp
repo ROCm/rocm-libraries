@@ -82,7 +82,7 @@ try
     size_t size_splits, size_tmpz;
     // size of temporary info array
     size_t size_iinfo;
-    // 2-stage workspace sizes
+    // 2-stage workspace sizes (will be 0 for batch_count > 1)
     size_t size_Aband, size_he2hb_work, size_V_hb2st, size_tau_hb2st;
     rocsolver_sygvd_hegvd_getMemorySize<true, false, T, S>(
         handle, itype, evect, uplo, n, batch_count, &size_scalars, &size_work1, &size_work2,
@@ -92,16 +92,12 @@ try
     if(rocblas_is_device_memory_size_query(handle))
         return rocblas_set_optimal_device_memory_size(handle, size_scalars, size_work1, size_work2,
                                                       size_work3, size_work4, size_tmpz, size_splits,
-                                                      size_tau, size_pivots_workArr, size_iinfo,
-                                                      size_Aband, size_he2hb_work, size_V_hb2st,
-                                                      size_tau_hb2st);
+                                                      size_tau, size_pivots_workArr, size_iinfo);
 
     // memory workspace allocation
     void *scalars, *work1, *work2, *work3, *work4, *tmpz, *splits, *tau, *pivots_workArr, *iinfo;
-    void *Aband, *he2hb_work, *V_hb2st, *tau_hb2st;
     rocblas_device_malloc mem(handle, size_scalars, size_work1, size_work2, size_work3, size_work4,
-                              size_tmpz, size_splits, size_tau, size_pivots_workArr, size_iinfo,
-                              size_Aband, size_he2hb_work, size_V_hb2st, size_tau_hb2st);
+                              size_tmpz, size_splits, size_tau, size_pivots_workArr, size_iinfo);
 
     if(!mem)
         return rocblas_status_memory_error;
@@ -116,19 +112,15 @@ try
     tau = mem[7];
     pivots_workArr = mem[8];
     iinfo = mem[9];
-    Aband = mem[10];
-    he2hb_work = mem[11];
-    V_hb2st = mem[12];
-    tau_hb2st = mem[13];
     if(size_scalars > 0)
         init_scalars(handle, (T*)scalars);
 
-    // execution
+    // execution (2-stage path never taken for batch_count > 1)
     return rocsolver_sygvd_hegvd_template<true, false, T>(
         handle, itype, evect, uplo, n, A, shiftA, lda, strideA, B, shiftB, ldb, strideB, D, strideD,
         E, strideE, info, batch_count, (T*)scalars, work1, work2, work3, work4, (S*)tmpz,
-        (rocblas_int*)splits, (T*)tau, pivots_workArr, (rocblas_int*)iinfo, optim_mem, (T*)Aband,
-        (T*)he2hb_work, (T*)V_hb2st, (T*)tau_hb2st);
+        (rocblas_int*)splits, (T*)tau, pivots_workArr, (rocblas_int*)iinfo, optim_mem, nullptr,
+        nullptr, nullptr, nullptr);
 }
 catch(...)
 {

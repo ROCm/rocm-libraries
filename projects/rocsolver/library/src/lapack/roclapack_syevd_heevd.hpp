@@ -137,8 +137,8 @@ void rocsolver_syevd_heevd_getMemorySize(rocblas_handle handle,
     if(BATCHED)
         *size_workArr = std::max(*size_workArr, 2 * sizeof(T*) * batch_count);
 
-    // requirements for 2-stage path (used when n > SYEVD_2STAGE_SWITCHSIZE)
-    if(n > SYEVD_2STAGE_SWITCHSIZE)
+    // requirements for 2-stage path (he2hb does not support batch_count > 1)
+    if(n > SYEVD_2STAGE_SWITCHSIZE && batch_count == 1)
     {
         const rocblas_int kd = SYEVD_2STAGE_KD;
         const rocblas_int nb = SYEVD_2STAGE_NB;
@@ -313,8 +313,8 @@ void rocsolver_syevd_heevd_getMemorySize(rocblas_handle handle,
     if(BATCHED)
         *size_workArr = std::max(*size_workArr, 2 * sizeof(T*) * batch_count);
 
-    // requirements for 2-stage path (used when n > SYEVD_2STAGE_SWITCHSIZE)
-    if(n > SYEVD_2STAGE_SWITCHSIZE)
+    // requirements for 2-stage path (he2hb does not support batch_count > 1)
+    if(n > SYEVD_2STAGE_SWITCHSIZE && batch_count == 1)
     {
         const rocblas_int kd = SYEVD_2STAGE_KD;
         const rocblas_int nb = SYEVD_2STAGE_NB;
@@ -458,7 +458,7 @@ rocblas_status rocsolver_syevd_heevd_template(rocblas_handle handle,
     // TODO: Scale the matrix
 
     // 2-stage path: he2hb + hb2st + unmtr_hb2st + ormqr
-    if(n > SYEVD_2STAGE_SWITCHSIZE)
+    if(n > SYEVD_2STAGE_SWITCHSIZE && batch_count == 1)
     {
         const rocblas_int kd = SYEVD_2STAGE_KD;
         const rocblas_int nb = SYEVD_2STAGE_NB;
@@ -577,21 +577,11 @@ rocblas_status rocsolver_syevd_heevd_template(rocblas_handle handle,
 
                 // Apply Q_he2hb from left: tmptau_W := Q_he2hb * tmptau_W
                 // Householder vectors V are stored in A below diagonal kd
-                // For BATCHED=true, A is T* const* and C is T*, so the adapter overload is
-                // selected (void return). For BATCHED=false, A and C are both T* so the
-                // status-returning overload is selected.
-                if constexpr(BATCHED)
+                // 2-stage is only reached when batch_count == 1, so BATCHED is always false
+                // here at runtime; the if constexpr prevents instantiation for BATCHED=true
+                // where A would be T* const* (incompatible with the T* A overload).
+                if constexpr(!BATCHED)
                 {
-                    // void adapter: T* const A[], T* C — workArr used as workArr2
-                    rocsolver_ormqr_unmqr_template<BATCHED, STRIDED, T>(
-                        handle, rocblas_side_left, rocblas_operation_none, n, n, k_he2hb, A,
-                        shiftA, lda, strideA, tau, n, tmptau_W, 0, ldw, strideW, batch_count,
-                        ormqr_scalars, ormqr_AbyxORwork, ormqr_diagORtmptr, ormqr_trfact,
-                        ormqr_workArr, workArr);
-                }
-                else
-                {
-                    // status-returning overload: T* A, T* C
                     ROCBLAS_CHECK(rocsolver_ormqr_unmqr_template<BATCHED, STRIDED, T>(
                         handle, rocblas_side_left, rocblas_operation_none, n, n, k_he2hb, A,
                         shiftA, lda, strideA, tau, n, tmptau_W, 0, ldw, strideW, batch_count,
@@ -754,7 +744,7 @@ rocblas_status rocsolver_syevd_heevd_template(rocblas_handle handle,
     // TODO: Scale the matrix
 
     // 2-stage path: he2hb + hb2st + unmtr_hb2st + ormqr
-    if(n > SYEVD_2STAGE_SWITCHSIZE)
+    if(n > SYEVD_2STAGE_SWITCHSIZE && batch_count == 1)
     {
         const rocblas_int kd = SYEVD_2STAGE_KD;
         const rocblas_int nb = SYEVD_2STAGE_NB;
@@ -873,21 +863,11 @@ rocblas_status rocsolver_syevd_heevd_template(rocblas_handle handle,
 
                 // Apply Q_he2hb from left: tmptau_W := Q_he2hb * tmptau_W
                 // Householder vectors V are stored in A below diagonal kd
-                // For BATCHED=true, A is T* const* and C is T*, so the adapter overload is
-                // selected (void return). For BATCHED=false, A and C are both T* so the
-                // status-returning overload is selected.
-                if constexpr(BATCHED)
+                // 2-stage is only reached when batch_count == 1, so BATCHED is always false
+                // here at runtime; the if constexpr prevents instantiation for BATCHED=true
+                // where A would be T* const* (incompatible with the T* A overload).
+                if constexpr(!BATCHED)
                 {
-                    // void adapter: T* const A[], T* C — workArr used as workArr2
-                    rocsolver_ormqr_unmqr_template<BATCHED, STRIDED, T>(
-                        handle, rocblas_side_left, rocblas_operation_none, n, n, k_he2hb, A,
-                        shiftA, lda, strideA, tau, n, tmptau_W, 0, ldw, strideW, batch_count,
-                        ormqr_scalars, ormqr_AbyxORwork, ormqr_diagORtmptr, ormqr_trfact,
-                        ormqr_workArr, workArr);
-                }
-                else
-                {
-                    // status-returning overload: T* A, T* C
                     ROCBLAS_CHECK(rocsolver_ormqr_unmqr_template<BATCHED, STRIDED, T>(
                         handle, rocblas_side_left, rocblas_operation_none, n, n, k_he2hb, A,
                         shiftA, lda, strideA, tau, n, tmptau_W, 0, ldw, strideW, batch_count,
