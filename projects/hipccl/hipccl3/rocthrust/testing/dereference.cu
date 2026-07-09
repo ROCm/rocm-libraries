@@ -15,7 +15,6 @@
  *  limitations under the License.
  */
 
-#include <thrust/detail/libcxx_wrapper/std/__functional/identity.h>
 #include <thrust/device_ptr.h>
 #include <thrust/device_vector.h>
 #include <thrust/functional.h>
@@ -74,8 +73,8 @@ void TestDeviceDereferenceTransformIterator()
   thrust::device_vector<int> input = unittest::random_integers<int>(100);
   thrust::device_vector<int> output(input.size(), 0);
 
-  simple_copy(thrust::make_transform_iterator(input.begin(), ::internal::identity{}),
-              thrust::make_transform_iterator(input.end(), ::internal::identity{}),
+  simple_copy(thrust::make_transform_iterator(input.begin(), _THRUST_STD::identity{}),
+              thrust::make_transform_iterator(input.end(), _THRUST_STD::identity{}),
               output.begin());
 
   ASSERT_EQUAL(input, output);
@@ -87,8 +86,8 @@ void TestDeviceDereferenceTransformIteratorInputConversion()
   thrust::device_vector<int> input = unittest::random_integers<int>(100);
   thrust::device_vector<double> output(input.size(), 0);
 
-  simple_copy(thrust::make_transform_iterator(input.begin(), ::internal::identity{}),
-              thrust::make_transform_iterator(input.end(), ::internal::identity{}),
+  simple_copy(thrust::make_transform_iterator(input.begin(), _THRUST_STD::identity{}),
+              thrust::make_transform_iterator(input.end(), _THRUST_STD::identity{}),
               output.begin());
 
   ASSERT_EQUAL(input == output, true);
@@ -100,8 +99,8 @@ void TestDeviceDereferenceTransformIteratorOutputConversion()
   thrust::device_vector<int> input = unittest::random_integers<int>(100);
   thrust::device_vector<double> output(input.size(), 0);
 
-  simple_copy(thrust::make_transform_iterator(input.begin(), ::internal::identity{}),
-              thrust::make_transform_iterator(input.end(), ::internal::identity{}),
+  simple_copy(thrust::make_transform_iterator(input.begin(), _THRUST_STD::identity{}),
+              thrust::make_transform_iterator(input.end(), _THRUST_STD::identity{}),
               output.begin());
 
   ASSERT_EQUAL(input == output, true);
