@@ -27,8 +27,8 @@
 #pragma once
 
 #ifdef TENSILE_USE_HIP
-#include <hip/hip_runtime.h>
 #include <hip/hip_fp8.h>
+#include <hip/hip_runtime.h>
 #endif
 
 // comment out following macro to disable FP8/BF8 types
@@ -88,7 +88,7 @@ namespace Tensile
     // across all translation units. As a static header variable each .cpp got
     // its own copy, so toggling it from the client (main.cpp) never reached the
     // reference TU (Reference.cpp) and the f8 host reference stayed FNUZ.
-    inline bool            hip_f8_bias_mode_bit_host   = true;
+    inline bool hip_f8_bias_mode_bit_host = true;
 
     static __global__ void set_hip_f8_bias_mode_bit(bool v)
     {
