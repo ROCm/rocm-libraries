@@ -336,7 +336,8 @@ def run_sweep(
         ]
         print(f"[gen_conv] {' '.join(cmd)}", file=sys.stderr, flush=True)
         result = subprocess.run(cmd, timeout=7200)
-        if result.returncode not in (0, 1):
+        # 0 = success, 1 = no data for some shapes, 2 = validator-gap triage
+        if result.returncode not in (0, 1, 2):
             print(
                 f"[gen_conv] ERROR: sweep binary exited {result.returncode}",
                 file=sys.stderr,
