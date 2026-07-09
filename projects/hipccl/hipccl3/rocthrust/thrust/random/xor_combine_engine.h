@@ -37,6 +37,8 @@
 #include <thrust/random/detail/xor_combine_engine_max.h>
 
 #include _THRUST_STD_INCLUDE(cstddef) // for size_t
+#include _THRUST_STD_INCLUDE(type_traits)
+
 #include <iostream>
 
 THRUST_NAMESPACE_BEGIN
@@ -98,8 +100,8 @@ public:
    */
   using result_type = typename thrust::detail::eval_if<
     (sizeof(typename base2_type::result_type) > sizeof(typename base1_type::result_type)),
-    thrust::detail::identity_<typename base2_type::result_type>,
-    thrust::detail::identity_<typename base1_type::result_type>>::type;
+    _THRUST_STD::type_identity<typename base2_type::result_type>,
+    _THRUST_STD::type_identity<typename base1_type::result_type>>::type;
 
   /*! The size of the first shift used in the generation algorithm.
    */
