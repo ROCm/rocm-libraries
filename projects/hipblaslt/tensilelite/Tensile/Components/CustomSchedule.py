@@ -738,7 +738,7 @@ class RegisterSchedule:
             "WavefrontSize": 64,
             "Use64bShadowLimit": 1,
             "ForceUnrollSubIter": False,
-            "SwapGlobalReadOrder": False,
+            "SwapGlobalReadOrder": 0,
             "UsePLRPack": False,
             "UseF32XEmulation": False,
             "UseDirect32XEmulation": False,
@@ -1037,7 +1037,7 @@ def _get_schedule_192x256x64_16bit(kernel, useLDSTr, TLDS):
         # TODO: This schedule can be improved when BC are resolved for MT192
         # Note: A/B Global read orders are swapped
         # i.e. GRA contains GR for B
-        kernel["SwapGlobalReadOrder"] = True
+        kernel["SwapGlobalReadOrder"] = 1
         optSchedule = {
             'SYNC'    : [[12,13, 47,48,49,50,51, 52,53, 56,56, 95]],
             'GRIncB' : [[0,1,2,3,4,5,6,7,8]],
@@ -1215,7 +1215,7 @@ def _get_schedule_256x192x64_16bit(kernel, useLDSTr, TLDS):
         nglshift = nllshift = 14 # vmcnt shift for ngl and nll
         opt1 = ScheduleInfo(2, numMfma, optSchedule, syncCode, nglshift, nllshift)
     elif isNT(kernel) and useLDSTr and TLDS == 0:
-        kernel["SwapGlobalReadOrder"] = True
+        kernel["SwapGlobalReadOrder"] = 1
         #index and code pair
         syncTable = [-1, SWaitCnt(dscnt=0, vlcnt=-1, vscnt=-1, comment="for LRB1"),
                      29, SWaitCnt(dscnt=5, vlcnt=-1, vscnt=-1, comment="wait for LRB0. For code path 0, this is actually wait for LRB0 + 1/16 LRA0"),
@@ -1253,7 +1253,7 @@ def _get_schedule_256x192x64_16bit(kernel, useLDSTr, TLDS):
         nglshift = nllshift = 14 # vmcnt shift for ngl and nll
         opt1 = ScheduleInfo(2, numMfma, optSchedule, syncCode, nglshift, nllshift)
     elif isNN(kernel) and useLDSTr and TLDS == 1:
-        kernel["SwapGlobalReadOrder"] = True
+        kernel["SwapGlobalReadOrder"] = 1
         #index and code pair
         syncTable = [-1, SWaitCnt(dscnt=0, vlcnt=-1, vscnt=-1, comment="wait for LRA1"),
                      15, SWaitCnt(dscnt=4, vlcnt=-1, vscnt=-1, comment="wait for LRB0"),
@@ -1480,7 +1480,7 @@ def _get_schedule_256x256x64_16bit(kernel, useLDSTr, TLDS):
                     SWaitCnt(dscnt=3, vlcnt=-1, vscnt=-1, comment="Wait for LRA1 to complete"),
                     SWaitCnt(dscnt=0, vlcnt=-1, vscnt=-1, comment="Wait for LRB1 to complete")]
         if isTT(kernel):
-            kernel["SwapGlobalReadOrder"] = True
+            kernel["SwapGlobalReadOrder"] = 1
 
             optSchedule['GRIncA'], optSchedule['GRIncB'] = optSchedule['GRIncB'], optSchedule['GRIncA']
             optSchedule['LRA0'], optSchedule['LRB0'] = optSchedule['LRB0'], optSchedule['LRA0']
@@ -1556,7 +1556,7 @@ def _get_schedule_160x256x64_16bit(kernel, useLDSTr, TLDS):
         nglshift = nllshift = 13 # vmcnt shift for ngl and nll
         opt1 = ScheduleInfo(2, numMfma, optSchedule, syncCode, nglshift, nllshift)
     elif isNN(kernel) and useLDSTr and TLDS==1:
-        kernel["SwapGlobalReadOrder"] = True
+        kernel["SwapGlobalReadOrder"] = 1
         optSchedule = {
             'SYNC'   : [[-1,
             12, 12, # Wait for B
@@ -1642,7 +1642,7 @@ def _get_schedule_96x256x64_16bit(kernel, useLDSTr, TLDS):
     nglshift = nllshift = 11
 
     if isTN(kernel) and TLDS==1:
-        kernel["SwapGlobalReadOrder"] = True
+        kernel["SwapGlobalReadOrder"] = 1
 
         syncTable = [
             7, SWaitCnt(dscnt=8, vlcnt=-1, vscnt=-1, comment="Finish all LRA1s and LRB1s"),
@@ -1847,7 +1847,7 @@ def _get_schedule_256x160x64_16bit(kernel, useLDSTr, TLDS):
     nglshift = nllshift = 0 # vmcnt shift for ngl and nll
     numMfma = 80
     if isNN(kernel) and useLDSTr and TLDS==1:
-        kernel["SwapGlobalReadOrder"] = True
+        kernel["SwapGlobalReadOrder"] = 1
         optSchedule = {
             'SYNC'   : [[-1,
             12,12, # Wait for LRB0
@@ -1935,7 +1935,7 @@ def _get_schedule_256x160x64_16bit(kernel, useLDSTr, TLDS):
         opt1 = ScheduleInfo(2, numMfma, optSchedule, syncCode, nglshift, nllshift)
     elif isNT(kernel) and useLDSTr and TLDS==0:
         nglshift = nllshift = 0
-        kernel["SwapGlobalReadOrder"] = True
+        kernel["SwapGlobalReadOrder"] = 1
         optSchedule = {
             'SYNC': [[-1,17,17,57,57]],
             'GRA': [[16,17,20,20,24,24,28,28,31,31]],
@@ -2114,7 +2114,7 @@ def _get_schedule_256x208x64_16bit(kernel, useLDSTr, TLDS):
         nglshift = nllshift = 34
 
     elif isNN(kernel) and useLDSTr and TLDS==1:
-        kernel["SwapGlobalReadOrder"] = True
+        kernel["SwapGlobalReadOrder"] = 1
         nglshift = nllshift = 0
 
         optSchedule = {
@@ -2349,7 +2349,7 @@ def _get_schedule_224x128x64_16bit(kernel, useLDSTr, TLDS):
         # Global read scheduling:
         # Each GR has two instructions (addr update + buffer_load), so we list them explicitly as
         # two adjacent MFMA indices per GR.
-        kernel["SwapGlobalReadOrder"] = True
+        kernel["SwapGlobalReadOrder"] = 1
         numCodePaths = 2
 
         syncTable = [
@@ -2660,7 +2660,7 @@ def _get_schedule_192x320x64_16bit(kernel, useLDSTr, TLDS):
     }
 
     kernel["MfmaInitCVgprs"] = True
-    kernel["SwapGlobalReadOrder"] = False
+    kernel["SwapGlobalReadOrder"] = 0
     syncCode = syncs.get_code()
     nglshift = nllshift = num_gr
     opt1 = ScheduleInfo(1, numMfma, optSchedule, syncCode, nglshift, nllshift, nllZeroDscnt)
@@ -2759,7 +2759,7 @@ def _get_schedule_256x224x64_16bit(kernel, useLDSTr, TLDS):
         nglshift = nllshift = 15
 
     elif isNN(kernel) and useLDSTr and TLDS == 1:
-        kernel["SwapGlobalReadOrder"] = True
+        kernel["SwapGlobalReadOrder"] = 1
         #index and code pair
         syncTable = [-1, SWaitCnt(dscnt=0, vlcnt=-1, vscnt=-1, comment="wait for LRA1"),
                      17, SWaitCnt(dscnt=4, vlcnt=-1, vscnt=-1, comment="wait for LRB0"),
@@ -2819,7 +2819,7 @@ def _get_schedule_320x192x64_16bit(kernel, useLDSTr, TLDS):
     nglshift = nllshift = 0 # vmcnt shift for ngl and nll
 
     if isNN(kernel) and useLDSTr and TLDS == 1:
-        kernel["SwapGlobalReadOrder"] = True
+        kernel["SwapGlobalReadOrder"] = 1
         syncTable = [
             -1, SWaitCnt(dscnt=0, vlcnt=-1, vscnt=-1, comment="wait for LRA1 "),
             19, SWaitCnt(dscnt=7, vlcnt=-1, vscnt=-1, comment="before DirectToLds load, ensure LRB0 have finished"),
@@ -2858,7 +2858,7 @@ def _get_schedule_320x192x64_16bit(kernel, useLDSTr, TLDS):
         syncCode = syncTable[1::2]
         nglshift = nllshift = 16
     elif isTN(kernel) and TLDS==1:
-        kernel["SwapGlobalReadOrder"] = True
+        kernel["SwapGlobalReadOrder"] = 1
         # Note: A/B Global read orders are swapped
         # i.e. GRA contains GR for B
         optSchedule = {
@@ -2898,7 +2898,7 @@ def _get_schedule_320x192x64_16bit(kernel, useLDSTr, TLDS):
         ]
         nglshift = nllshift = 16
     elif isNT(kernel) and useLDSTr and TLDS == 0:
-        kernel["SwapGlobalReadOrder"] = True
+        kernel["SwapGlobalReadOrder"] = 1
         # Note: A/B Global read orders are swapped
         # i.e. GRA contains GR for B
         optSchedule = {
@@ -3018,7 +3018,7 @@ def _get_schedule_240x256x64_16bit(kernel, useLDSTr, TLDS):
     optSchedule = dict()
     syncCode = []
     if isTN(kernel) and TLDS==1:
-        kernel["SwapGlobalReadOrder"] = False
+        kernel["SwapGlobalReadOrder"] = 0
         optSchedule = {
             'SYNC': [[-1,
                       14,
@@ -3244,7 +3244,7 @@ def _get_schedule_208x256x64_16bit(kernel, useLDSTr, TLDS):
     nglshift = nllshift = num_gr
 
     kernel["MfmaInitCVgprs"] = True
-    kernel["SwapGlobalReadOrder"] = False
+    kernel["SwapGlobalReadOrder"] = 0
     opt1 = ScheduleInfo(1, numMfma, optSchedule, syncCode, nglshift, nllshift)
     return True, opt1
 
@@ -5635,7 +5635,7 @@ def _get_schedule_224x320x64_16bit(kernel, useLDSTr, TLDS):
     syncCode = []
     nglshift = nllshift = 0 # vmcnt shift for ngl and nll
     kernel["MfmaInitCVgprs"] = True
-    kernel["SwapGlobalReadOrder"] = False
+    kernel["SwapGlobalReadOrder"] = 0
 
     if isTN(kernel) and useLDSTr and TLDS==1:
         syncTable = [
