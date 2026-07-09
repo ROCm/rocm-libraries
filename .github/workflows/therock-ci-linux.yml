@@ -171,3 +171,16 @@ jobs:
       platform: "linux"
       test_type: ${{ inputs.test_type }}
     secrets: inherit
+
+  rocm-test-linux:
+    name: ROCm System Tests (${{ inputs.amdgpu_families }})
+    needs: [therock-build-linux]
+    if: ${{ inputs.amdgpu_families == 'gfx94X-dcgpu' }}
+    uses: ./.github/workflows/rocm-system-tests.yml
+    with:
+      name: "linux-${{ inputs.amdgpu_families }}"
+      runs_on: ${{ inputs.test_runs_on }}
+      artifact_group: ${{ inputs.amdgpu_families }}
+      run_id: ${{ github.run_id }}
+      tests_filters: "ci.nightly and hw.gpu"
+    secrets: inherit
