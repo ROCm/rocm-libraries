@@ -5,6 +5,7 @@
 
 #include <chrono>
 #include <hipdnn_frontend.hpp>
+#include <hipdnn_test_sdk/utilities/TestUtilities.hpp>
 #include <iostream>
 
 #include "harness/IntegrationGraphVerificationHarness.hpp"
