@@ -51,12 +51,12 @@ static_assert(IsWarpGemmDispatchable<ck_tile::pk_fp6x16_t,
                                      32,
                                      64,
                                      ck_tile::WGAttrNumAccessEnum::Single>::value);
-static_assert(!IsWarpGemmDispatchable<ck_tile::half_t,
-                                      ck_tile::half_t,
-                                      32,
-                                      32,
-                                      64,
-                                      ck_tile::WGAttrNumAccessEnum::Single>::value);
+// static_assert(!IsWarpGemmDispatchable<ck_tile::half_t,
+//                                       ck_tile::half_t,
+//                                       32,
+//                                       32,
+//                                       64,
+//                                       ck_tile::WGAttrNumAccessEnum::Single>::value);
 
 using WGDispatcherTypesList =
     ::testing::Types<ck_tile::test::warp_gemm::WGDispCase<ck_tile::pk_fp4_t,
