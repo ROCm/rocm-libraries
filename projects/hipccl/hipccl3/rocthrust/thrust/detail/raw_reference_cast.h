@@ -31,10 +31,8 @@
 #include <thrust/detail/type_traits/has_nested_type.h>
 #include <thrust/tuple.h>
 
-#if !_THRUST_HAS_DEVICE_SYSTEM_STD
-#  include <type_traits>
-#  include <utility>
-#endif
+#include _THRUST_STD_INCLUDE(type_traits)
+#include _THRUST_STD_INCLUDE(utility)
 
 // the order of declarations and definitions in this file is totally goofy
 // this header defines raw_reference_cast, which has a few overloads towards the bottom of the file
@@ -107,7 +105,8 @@ namespace raw_reference_detail
 
 // wrapped references are unwrapped using raw_reference, otherwise, return T
 template <typename T>
-struct raw_reference_tuple_helper : eval_if<can_unwrap<_THRUST_STD::remove_cv_t<T>>, raw_reference<T>, identity_<T>>
+struct raw_reference_tuple_helper
+    : eval_if<can_unwrap<_THRUST_STD::remove_cv_t<T>>, raw_reference<T>, _THRUST_STD::type_identity<T>>
 {};
 
 // recurse on tuples
