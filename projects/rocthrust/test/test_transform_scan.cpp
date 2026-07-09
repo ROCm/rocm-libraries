@@ -15,7 +15,6 @@
  *  limitations under the License.
  */
 
-#include <thrust/detail/libcxx_wrapper/std/__functional/identity.h>
 #include <thrust/functional.h>
 #include <thrust/iterator/counting_iterator.h>
 #include <thrust/iterator/discard_iterator.h>
@@ -448,20 +447,20 @@ TYPED_TEST(TransformScanVariablesTests, TestValueCategoryDeduction)
   vec.assign((T*) a_h, a_h + 10);
 
   thrust::transform_inclusive_scan(
-    thrust::device, vec.cbegin(), vec.cend(), vec.begin(), ::internal::identity{}, _THRUST_LIBCXX::maximum<>{});
+    thrust::device, vec.cbegin(), vec.cend(), vec.begin(), _THRUST_STD::identity{}, _THRUST_LIBCXX::maximum<>{});
 
   ASSERT_EQ((thrust::device_vector<T>{5, 5, 5, 8, 8, 8, 8, 8, 8, 9}), vec);
 
   vec.assign((T*) a_h, a_h + 10);
 
   thrust::transform_inclusive_scan(
-    thrust::device, vec.cbegin(), vec.cend(), vec.begin(), ::internal::identity{}, T{}, _THRUST_LIBCXX::maximum<>{});
+    thrust::device, vec.cbegin(), vec.cend(), vec.begin(), _THRUST_STD::identity{}, T{}, _THRUST_LIBCXX::maximum<>{});
 
   ASSERT_EQ((thrust::device_vector<T>{5, 5, 5, 8, 8, 8, 8, 8, 8, 9}), vec);
 
   vec.assign((T*) a_h, a_h + 10);
   thrust::transform_exclusive_scan(
-    thrust::device, vec.cbegin(), vec.cend(), vec.begin(), ::internal::identity{}, T{}, _THRUST_LIBCXX::maximum<>{});
+    thrust::device, vec.cbegin(), vec.cend(), vec.begin(), _THRUST_STD::identity{}, T{}, _THRUST_LIBCXX::maximum<>{});
 
   ASSERT_EQ((thrust::device_vector<T>{0, 5, 5, 5, 8, 8, 8, 8, 8, 8}), vec);
 }

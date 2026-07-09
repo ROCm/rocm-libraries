@@ -26,7 +26,6 @@
 #  pragma system_header
 #endif // no system header
 #include <thrust/detail/internal_functional.h>
-#include <thrust/detail/libcxx_wrapper/std/__functional/identity.h>
 #include <thrust/for_each.h>
 #include <thrust/functional.h>
 #include <thrust/iterator/zip_iterator.h>
@@ -46,14 +45,14 @@ template <typename DerivedPolicy, typename InputIterator, typename OutputIterato
 THRUST_HOST_DEVICE OutputIterator
 copy(thrust::execution_policy<DerivedPolicy>& exec, InputIterator first, InputIterator last, OutputIterator result)
 {
-  return thrust::transform(exec, first, last, result, ::internal::identity{});
+  return thrust::transform(exec, first, last, result, _THRUST_STD::identity{});
 } // end copy()
 
 template <typename DerivedPolicy, typename InputIterator, typename Size, typename OutputIterator>
 THRUST_HOST_DEVICE OutputIterator
 copy_n(thrust::execution_policy<DerivedPolicy>& exec, InputIterator first, Size n, OutputIterator result)
 {
-  using xfrm_type = ::internal::identity;
+  using xfrm_type = _THRUST_STD::identity;
 
   using functor_type = thrust::detail::unary_transform_functor<xfrm_type>;
 

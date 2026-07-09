@@ -16,7 +16,6 @@
  */
 
 #include <thrust/count.h>
-#include <thrust/detail/libcxx_wrapper/std/__functional/identity.h>
 #include <thrust/iterator/discard_iterator.h>
 #include <thrust/iterator/retag.h>
 #include <thrust/iterator/zip_iterator.h>
@@ -163,7 +162,7 @@ void TestStablePartitionStencilSimple()
 
   Vector stencil{0, 1, 0, 0, 1};
 
-  Iterator iter = thrust::stable_partition(data.begin(), data.end(), stencil.begin(), ::internal::identity{});
+  Iterator iter = thrust::stable_partition(data.begin(), data.end(), stencil.begin(), _THRUST_STD::identity{});
 
   Vector ref{2, 2, 1, 1, 3};
 
@@ -206,7 +205,7 @@ void TestStablePartitionCopyStencilSimple()
   Vector false_results(3);
 
   thrust::pair<typename Vector::iterator, typename Vector::iterator> ends = thrust::stable_partition_copy(
-    data.begin(), data.end(), stencil.begin(), true_results.begin(), false_results.begin(), ::internal::identity{});
+    data.begin(), data.end(), stencil.begin(), true_results.begin(), false_results.begin(), _THRUST_STD::identity{});
 
   Vector true_ref(2, 2);
 
