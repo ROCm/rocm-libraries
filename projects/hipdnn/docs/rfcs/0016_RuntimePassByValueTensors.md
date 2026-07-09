@@ -121,10 +121,15 @@ c1->set_compile_time_constant(0.125f);             // explicit compile-time cons
 // value ctors only for a build-known default; for a variant-pack override use
 // set_as_runtime_parameter() (below). A future release may honor it. Needs 1.2.0.
 auto s2 = graph.tensor(0.125f, ScalarType::RUNTIME_PARAM);
+// getters: get_pass_by_value() -> value; get_compile_time_constant() -> empty;
+// get_is_pass_by_value() -> true.
 
 // runtime, user-supplied — value supplied at execute, not baked.
 auto scale = graph.tensor(...);
 scale->set_as_runtime_parameter();
+// getters: get_pass_by_value() -> empty; get_compile_time_constant() -> empty;
+// get_is_pass_by_value() -> true. set_is_pass_by_value(true) on a valueless
+// tensor is the equivalent setter path.
 
 // at execute: the value is a HOST pointer in the variant pack, keyed by uid.
 float scaleValue = 0.125f;
@@ -1031,11 +1036,18 @@ Also validate at execute that every required user-supplied UID is present in the
 one as for any other missing tensor; this runs on the fresh-build path only
 (the compiled-plan path has no per-tensor attributes to check).
 
-### Step 6: Cross-cutting tests
+### Step 6: Test harness, references, and cross-cutting tests
 
-Fake plugins (one at `1.2.0` consuming the host scalar, one below it)
-and the 2-bit state / version-floor / filter-and-reject / end-to-end matrix
-([§9](#9-testing-plan)).
+Extend the shared integration harness
+([RFC 0006](0006_PluginAgnosticIntegrationTests.md)) to populate **host**
+scalar values into the variant pack keyed by uid
+(`variantPack[t.uid()] = &hostVal`) for runtime pass-by-value tensors — it
+today only generates device pointers or skips scalars as constants. Update
+the CPU and GPU reference implementations to read a pass-by-value scalar
+(host value for a runtime tensor, baked value for a constant) so expected
+results match. Add fake plugins (one at `1.2.0` consuming the host scalar,
+one below it) and the 2-bit state / version-floor / filter-and-reject /
+end-to-end matrix ([§9](#9-testing-plan)).
 
 ### Step 7: Provider adoption
 
@@ -1096,6 +1108,14 @@ Test conventions follow [RFC 0006](0006_PluginAgnosticIntegrationTests.md). The 
   plugin that cannot interpret a newer payload version rejects it at
   deserialize.
 
+- **Non-supporting plugin, both paths.** A single baseline (`< 1.2.0`) plugin,
+  against a graph with a runtime pass-by-value tensor, is dropped from the
+  applicable set (the graph is declined for it — never dispatched to read a
+  host scalar it cannot handle); the *same* plugin, against a graph whose
+  scalars are all compile-time constants, remains applicable and serves it
+  unchanged. Confirms a plugin that never adopts the feature keeps working for
+  compile-time scalars and can never silently mis-serve a runtime one.
+
 - **Execute-time filter + reject.** Supplying a variant-pack value for a
   defaulted (value-carrying) UID makes `Graph::execute()` return an error;
   assert the error fires and that, absent an override, the baked default
@@ -1125,19 +1145,48 @@ Test conventions follow [RFC 0006](0006_PluginAgnosticIntegrationTests.md). The 
   return an error on the fresh-build path (op graph available), matching a
   missing input/output tensor.
 
-- **Runtime-default vs runtime-only provider paths** *(integration; initially
-  skipped)*. Exercise both a runtime-with-default graph (baked default, no
-  override delivered) and a pure user-supplied graph (host scalar in the
-  variant pack) end-to-end; the two carry different provider expectations
-  (baked-value read vs host-pointer read), so both are needed to confirm each
-  is handled correctly.
+- **Runtime-default vs runtime-only provider paths** *(plugin integration;
+  skipped until a plugin reports `1.2.0` runtime pass-by-value support, then
+  run against that plugin)*. Once a plugin adopts the feature, the harness
+  feeds it host scalars (below); exercise both a runtime-with-default graph
+  (baked default, no override delivered) and a pure user-supplied graph (host
+  scalar in the variant pack) end-to-end. The two carry different provider
+  expectations (baked-value read vs host-pointer read), so both are needed to
+  confirm each is handled correctly.
 
-- **Constant-operation runtime-value regression** *(integration; initially
-  skipped)*. For each operation that takes a compile-time-constant scalar
-  today, add a variant that sneaks in a runtime pass-by-value tensor with an
-  obvious sentinel value; assert the result reflects the runtime value (or the
-  graph is declined), catching providers updated incorrectly or mishandling
-  pass-by-value scalars.
+- **Constant-operation runtime-value regression** *(plugin integration;
+  skipped until a plugin reports `1.2.0` runtime pass-by-value support, then
+  run against that plugin)*. For each operation that takes a
+  compile-time-constant scalar today, add a variant that sneaks in a runtime
+  pass-by-value tensor with an obvious sentinel value; assert the result
+  reflects the runtime value (or the graph is declined), catching providers
+  updated incorrectly or mishandling pass-by-value scalars.
+
+- **Harness host-value injection.** The shared integration harness
+  ([RFC 0006](0006_PluginAgnosticIntegrationTests.md)) populates a **host**
+  scalar into the variant pack keyed by uid (`variantPack[t.uid()] =
+  &hostVal`) for a runtime pass-by-value tensor — the capability this epic
+  adds; today the harness only generates device pointers or skips scalars as
+  constants. Assert the CPU and GPU references read the pass-by-value scalar
+  (host value for a runtime tensor, baked value for a constant) and produce
+  matching expected results (e.g. a Batchnorm `epsilon`). Every runtime
+  delivery test above depends on this.
+
+- **Mixed multi-scalar graph.** A single op carrying more than one
+  pass-by-value scalar in different states (e.g. a compile-time-constant
+  `alpha` plus a user-supplied runtime `beta`) executes with each delivered
+  or baked correctly and independently.
+
+- **Backend attribute derivation.** After a descriptor round-trip,
+  `HIPDNN_ATTR_TENSOR_IS_BY_VALUE` (1307) reads `true` for all three by-value
+  states (the derived umbrella), while `HIPDNN_ATTR_TENSOR_IS_RUNTIME_PASS_BY_VALUE`
+  (1308) reads `true` only for the two runtime states — confirming the
+  umbrella stays derived and only the runtime bit is stored
+  ([§4.1](#41-tensor-schema-addition)).
+
+- **Post-build setter warning.** Calling a value/mode setter after
+  `backendFinalize` logs a warning and does not alter the compiled plan
+  ([§4.8](#48-frontend-validation) post-build immutability).
 
 ---
 
