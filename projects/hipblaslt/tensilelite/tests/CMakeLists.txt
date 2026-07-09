@@ -211,6 +211,52 @@ foreach(PATH fast slow)
 endforeach()
 
 #################################################
+#     Complex C/Z tests                         #
+#################################################
+# Complex support is intentionally scoped to homogeneous plain GEMMs:
+# A/B/C/D and alpha/beta are all c32 or all c64. Auxiliary features are
+# rejected by cpu-gemm-driver for complex types.
+set(COMPLEX_SIZES -M 37 -N 41 -K 19)
+foreach(PATH fast slow)
+    if("${PATH}" STREQUAL "fast")
+        set(PATH_FLAGS --tryFastPath)
+    else()
+        set(PATH_FLAGS "")
+    endif()
+
+    foreach(TYPE c32 c64)
+        foreach(TRANS NN TN NT TT)
+            get_trans_flags(${TRANS} TFLAGS)
+            add_cpu_gemm_test(${PATH}_${TYPE}_${TRANS}
+                ARGS ${COMPLEX_SIZES} ${TFLAGS} --type ${TYPE} --validate ${PATH_FLAGS}
+            )
+        endforeach()
+
+        add_cpu_gemm_test(${PATH}_${TYPE}_ComplexAlphaBeta
+            ARGS ${COMPLEX_SIZES} --type ${TYPE} --alpha 0.75 --alphaImag -0.5 --beta -0.25 --betaImag 0.125 --validate ${PATH_FLAGS}
+        )
+        add_cpu_gemm_test(${PATH}_${TYPE}_ConjAConjB
+            ARGS ${COMPLEX_SIZES} --type ${TYPE} --conjA --conjB --alpha -0.25 --alphaImag 0.875 --beta 0.5 --betaImag -0.375 --validate ${PATH_FLAGS}
+        )
+        add_cpu_gemm_test(${PATH}_${TYPE}_TT_ConjB_Batched
+            ARGS ${COMPLEX_SIZES} --transA --transB --type ${TYPE} --conjB --beta 0.5 --betaImag 0.25 --batchCount 2 --validate ${PATH_FLAGS}
+        )
+    endforeach()
+endforeach()
+
+add_test(
+    NAME "CPUGemm.fast_c32_Bias_Rejected"
+    COMMAND cpu-gemm-driver ${COMPLEX_SIZES} --type c32 --bias --validate --tryFastPath
+)
+set_tests_properties("CPUGemm.fast_c32_Bias_Rejected" PROPERTIES WILL_FAIL TRUE)
+
+add_test(
+    NAME "CPUGemm.fast_c32_MixedReal_Rejected"
+    COMMAND cpu-gemm-driver ${COMPLEX_SIZES} --type c32 --typeB f32 --validate --tryFastPath
+)
+set_tests_properties("CPUGemm.fast_c32_MixedReal_Rejected" PROPERTIES WILL_FAIL TRUE)
+
+#################################################
 #        FP8 tests (fast & slow)                #
 #################################################
 if(NOT WIN32)

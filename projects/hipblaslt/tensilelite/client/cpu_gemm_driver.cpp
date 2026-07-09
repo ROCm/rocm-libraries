@@ -28,6 +28,7 @@
 #include <cassert>
 #include <chrono>
 #include <cmath>
+#include <complex>
 #include <iostream>
 #include <random>
 #include <stdexcept>
@@ -77,6 +78,16 @@ namespace
     template <typename T>
     struct TypeTraits;
 
+    template <typename T>
+    struct IsStdComplex : std::false_type
+    {
+    };
+
+    template <typename T>
+    struct IsStdComplex<std::complex<T>> : std::true_type
+    {
+    };
+
     template <>
     struct TypeTraits<float>
     {
@@ -87,6 +98,18 @@ namespace
     struct TypeTraits<double>
     {
         static constexpr rocisa::DataType value = rocisa::DataType::Double;
+    };
+
+    template <>
+    struct TypeTraits<std::complex<float>>
+    {
+        static constexpr rocisa::DataType value = rocisa::DataType::ComplexFloat;
+    };
+
+    template <>
+    struct TypeTraits<std::complex<double>>
+    {
+        static constexpr rocisa::DataType value = rocisa::DataType::ComplexDouble;
     };
 
     template <>
@@ -173,19 +196,77 @@ namespace
     {
         switch(t)
         {
-        case rocisa::DataType::Float:    return [](float v) { return v; };
-        case rocisa::DataType::Half:     return &quantizeThroughNarrow<TensileLite::Half>;
-        case rocisa::DataType::BFloat16: return &quantizeThroughNarrow<TensileLite::BFloat16>;
+        case rocisa::DataType::Float:
+            return [](float v) { return v; };
+        case rocisa::DataType::Half:
+            return &quantizeThroughNarrow<TensileLite::Half>;
+        case rocisa::DataType::BFloat16:
+            return &quantizeThroughNarrow<TensileLite::BFloat16>;
 #ifdef TENSILE_USE_FP8_BF8
-        case rocisa::DataType::Float8:        return &quantizeThroughNarrow<TensileLite::Float8>;
-        case rocisa::DataType::BFloat8:       return &quantizeThroughNarrow<TensileLite::BFloat8>;
-        case rocisa::DataType::Float8_fnuz:   return &quantizeThroughNarrow<TensileLite::Float8_fnuz>;
-        case rocisa::DataType::BFloat8_fnuz:  return &quantizeThroughNarrow<TensileLite::BFloat8_fnuz>;
+        case rocisa::DataType::Float8:
+            return &quantizeThroughNarrow<TensileLite::Float8>;
+        case rocisa::DataType::BFloat8:
+            return &quantizeThroughNarrow<TensileLite::BFloat8>;
+        case rocisa::DataType::Float8_fnuz:
+            return &quantizeThroughNarrow<TensileLite::Float8_fnuz>;
+        case rocisa::DataType::BFloat8_fnuz:
+            return &quantizeThroughNarrow<TensileLite::BFloat8_fnuz>;
 #endif
         default:
             throw std::runtime_error("Unsupported compute-input type for golden GEMM quantizer.");
         }
     }
+
+    template <typename T>
+    T makeInputValue(float real, float imag)
+    {
+        if constexpr(IsStdComplex<T>::value)
+        {
+            using Real = typename T::value_type;
+            return T(static_cast<Real>(real), static_cast<Real>(imag));
+        }
+        else
+        {
+            return static_cast<T>(real);
+        }
+    }
+
+    template <typename T>
+    double absDiff(T observed, T expected)
+    {
+        if constexpr(IsStdComplex<T>::value)
+            return static_cast<double>(std::abs(observed - expected));
+        else
+            return static_cast<double>(std::abs(observed - expected));
+    }
+
+    template <typename T>
+    T maybeConjugate(T value, bool conjugate)
+    {
+        if constexpr(IsStdComplex<T>::value)
+            return conjugate ? std::conj(value) : value;
+        else
+            return value;
+    }
+
+    template <typename AT, typename BT>
+    struct AccumulationTypeFor
+    {
+        using type = std::
+            conditional_t<std::is_same_v<AT, double> && std::is_same_v<BT, double>, double, float>;
+    };
+
+    template <>
+    struct AccumulationTypeFor<std::complex<float>, std::complex<float>>
+    {
+        using type = std::complex<float>;
+    };
+
+    template <>
+    struct AccumulationTypeFor<std::complex<double>, std::complex<double>>
+    {
+        using type = std::complex<double>;
+    };
 
 #ifndef _WIN32
     struct MXGemmOperand
@@ -197,22 +278,19 @@ namespace
 
         bool empty() const
         {
-            return scale == nullptr && block == 0 && strideFree == 0
-                   && strideKBlock == 0;
+            return scale == nullptr && block == 0 && strideFree == 0 && strideKBlock == 0;
         }
     };
 
-    bool validateMXGemmOperands(const MXGemmOperand& mxA,
-                                const MXGemmOperand& mxB)
+    bool validateMXGemmOperands(const MXGemmOperand& mxA, const MXGemmOperand& mxB)
     {
         const bool hasMXA = !mxA.empty();
         const bool hasMXB = !mxB.empty();
 
         if(hasMXA != hasMXB)
         {
-            throw std::runtime_error(
-                "CPU reference GEMM requires MX operands for both A and B, "
-                "or for neither side.");
+            throw std::runtime_error("CPU reference GEMM requires MX operands for both A and B, "
+                                     "or for neither side.");
         }
 
         if(!hasMXA)
@@ -220,14 +298,13 @@ namespace
 
         auto validateSide = [](const char* name, const MXGemmOperand& operand) {
             if(!operand.scale)
-                throw std::runtime_error(std::string("CPU reference GEMM MX ")
-                                         + name + " operand has no scale data.");
+                throw std::runtime_error(std::string("CPU reference GEMM MX ") + name
+                                         + " operand has no scale data.");
             if(operand.block <= 0)
-                throw std::runtime_error(std::string("CPU reference GEMM MX ")
-                                         + name + " operand has a non-positive block.");
+                throw std::runtime_error(std::string("CPU reference GEMM MX ") + name
+                                         + " operand has a non-positive block.");
             if(operand.strideFree == 0 || operand.strideKBlock == 0)
-                throw std::runtime_error(std::string("CPU reference GEMM MX ")
-                                         + name
+                throw std::runtime_error(std::string("CPU reference GEMM MX ") + name
                                          + " operand requires non-zero scale strides.");
         };
 
@@ -247,6 +324,8 @@ namespace
                          size_t         k,
                          bool           transA,
                          bool           transB,
+                         bool           conjA,
+                         bool           conjB,
                          AccumT         alpha,
                          AccumT         beta,
                          const AccumT*  biasVec       = nullptr,
@@ -259,10 +338,10 @@ namespace
                          QuantizeFn     quantizeB     = nullptr
 #ifndef _WIN32
                          ,
-                         MXGemmOperand  mxA           = {},
-                         MXGemmOperand  mxB           = {}
+                         MXGemmOperand mxA = {},
+                         MXGemmOperand mxB = {}
 #endif
-                         )
+    )
     {
 
         switch(activation)
@@ -271,9 +350,8 @@ namespace
         case ActivationType::Relu:
             break;
         default:
-            throw std::runtime_error(
-                "Unsupported activation for CPU reference GEMM "
-                "(supported: None, Relu).");
+            throw std::runtime_error("Unsupported activation for CPU reference GEMM "
+                                     "(supported: None, Relu).");
         }
         size_t strideAK = transA ? 1 : m;
         size_t strideAM = transA ? k : 1;
@@ -304,33 +382,34 @@ namespace
                 // for each side.
                 if(hasMX)
                 {
-                    size_t step     = static_cast<size_t>(
-                        std::min(mxA.block, mxB.block));
+                    size_t step = static_cast<size_t>(std::min(mxA.block, mxB.block));
                     for(size_t lBase = 0; lBase < k; lBase += step)
                     {
                         AccumT blockSum = AccumT(0);
                         for(size_t t = 0; t < step; t++)
                         {
                             size_t l    = lBase + t;
-                            AccumT aVal = a[i * strideAM + l * strideAK];
-                            AccumT bVal = b[l * strideBK + j * strideBN];
-                            if(quantizeA) aVal = static_cast<AccumT>(quantizeA(static_cast<float>(aVal)));
-                            if(quantizeB) bVal = static_cast<AccumT>(quantizeB(static_cast<float>(bVal)));
-                            blockSum += AccumT(MathOpAccumT(aVal))
-                                      * AccumT(MathOpAccumT(bVal));
+                            AccumT aVal = maybeConjugate(a[i * strideAM + l * strideAK], conjA);
+                            AccumT bVal = maybeConjugate(b[l * strideBK + j * strideBN], conjB);
+                            if constexpr(!IsStdComplex<AccumT>::value)
+                            {
+                                if(quantizeA)
+                                    aVal = static_cast<AccumT>(quantizeA(static_cast<float>(aVal)));
+                                if(quantizeB)
+                                    bVal = static_cast<AccumT>(quantizeB(static_cast<float>(bVal)));
+                            }
+                            blockSum += AccumT(MathOpAccumT(aVal)) * AccumT(MathOpAccumT(bVal));
                         }
 
                         size_t blkA = lBase / static_cast<size_t>(mxA.block);
                         size_t blkB = lBase / static_cast<size_t>(mxB.block);
 
-                        size_t mxsaIdx = i * mxA.strideFree
-                                        + blkA * mxA.strideKBlock;
-                        size_t mxsbIdx = j * mxB.strideFree
-                                        + blkB * mxB.strideKBlock;
+                        size_t mxsaIdx = i * mxA.strideFree + blkA * mxA.strideKBlock;
+                        size_t mxsbIdx = j * mxB.strideFree + blkB * mxB.strideKBlock;
 
                         AccumT mxScale
                             = static_cast<AccumT>(static_cast<float>(mxA.scale[mxsaIdx]))
-                            * static_cast<AccumT>(static_cast<float>(mxB.scale[mxsbIdx]));
+                              * static_cast<AccumT>(static_cast<float>(mxB.scale[mxsbIdx]));
                         sum += blockSum * mxScale;
                     }
                 }
@@ -339,10 +418,15 @@ namespace
                 {
                     for(size_t l = 0; l < k; l++)
                     {
-                        AccumT aVal = a[i * strideAM + l * strideAK];
-                        AccumT bVal = b[l * strideBK + j * strideBN];
-                        if(quantizeA) aVal = static_cast<AccumT>(quantizeA(static_cast<float>(aVal)));
-                        if(quantizeB) bVal = static_cast<AccumT>(quantizeB(static_cast<float>(bVal)));
+                        AccumT aVal = maybeConjugate(a[i * strideAM + l * strideAK], conjA);
+                        AccumT bVal = maybeConjugate(b[l * strideBK + j * strideBN], conjB);
+                        if constexpr(!IsStdComplex<AccumT>::value)
+                        {
+                            if(quantizeA)
+                                aVal = static_cast<AccumT>(quantizeA(static_cast<float>(aVal)));
+                            if(quantizeB)
+                                bVal = static_cast<AccumT>(quantizeB(static_cast<float>(bVal)));
+                        }
                         sum += AccumT(MathOpAccumT(aVal)) * AccumT(MathOpAccumT(bVal));
                     }
                 }
@@ -353,21 +437,29 @@ namespace
                 if(scaleBVec)
                     effectiveAlpha *= static_cast<AccumT>(scaleBVec[j]);
                 if(scaleAlphaVec)
-                    effectiveAlpha *= static_cast<AccumT>(
-                        scaleAlphaVec[factorDim == 0 ? i : j]);
+                    effectiveAlpha *= static_cast<AccumT>(scaleAlphaVec[factorDim == 0 ? i : j]);
 
                 AccumT result = effectiveAlpha * sum + beta * c[i + j * m];
 
                 if(biasVec)
                     result += static_cast<AccumT>(biasVec[i]);
 
-                if(activation == ActivationType::Relu)
+                if constexpr(IsStdComplex<AccumT>::value)
                 {
-                    result = std::max(AccumT(0), result);
+                    if(activation != ActivationType::None)
+                        throw std::runtime_error(
+                            "Activation is not supported for complex CPU GEMM.");
                 }
                 else
                 {
-                    assert(activation == ActivationType::None);
+                    if(activation == ActivationType::Relu)
+                    {
+                        result = std::max(AccumT(0), result);
+                    }
+                    else
+                    {
+                        assert(activation == ActivationType::None);
+                    }
                 }
 
                 d[i + j * m] = result;
@@ -384,17 +476,19 @@ namespace
  * AccumulateT: The type used for accumulation (currently restricted to float).
  */
 template <typename InputAT, typename InputBT = InputAT, typename AccumulateT = float>
-int runGemm(size_t         m,
-            size_t         n,
-            size_t         k,
-            bool           transA,
-            bool           transB,
-            float          alpha,
-            float          beta,
-            bool           validate,
-            bool           tryFastPath,
-            bool           useBias,
-            ActivationType activation,
+int runGemm(size_t             m,
+            size_t             n,
+            size_t             k,
+            bool               transA,
+            bool               transB,
+            float              alpha,
+            float              alphaImag,
+            float              beta,
+            float              betaImag,
+            bool               validate,
+            bool               tryFastPath,
+            bool               useBias,
+            ActivationType     activation,
             bool               useScaleAlphaVec,
             const std::string& useScaleAB,
             int                factorDim,
@@ -403,7 +497,9 @@ int runGemm(size_t         m,
             int                mxBlockA      = 0,
             int                mxBlockB      = 0,
             size_t             batchCount    = 1,
-            bool               isTF32        = false)
+            bool               isTF32        = false,
+            bool               conjA         = false,
+            bool               conjB         = false)
 {
     if(batchCount == 0)
     {
@@ -412,8 +508,10 @@ int runGemm(size_t         m,
     }
     constexpr rocisa::DataType dtypeEnumA = TypeTraits<InputAT>::value;
     constexpr rocisa::DataType dtypeEnumB = TypeTraits<InputBT>::value;
-    if(computeInputA == rocisa::DataType::None) computeInputA = dtypeEnumA;
-    if(computeInputB == rocisa::DataType::None) computeInputB = dtypeEnumB;
+    if(computeInputA == rocisa::DataType::None)
+        computeInputA = dtypeEnumA;
+    if(computeInputB == rocisa::DataType::None)
+        computeInputB = dtypeEnumB;
 
 #ifndef _WIN32
     constexpr bool isInputAFP4 = std::is_same_v<InputAT, Float4x2>;
@@ -443,7 +541,8 @@ int runGemm(size_t         m,
             return 1;
         }
         auto checkSide = [&](const char* name, int b) -> int {
-            if(b <= 0) return 0;
+            if(b <= 0)
+                return 0;
             if((b & (b - 1)) != 0)
             {
                 std::cerr << "Error: " << name << " (" << b << ") must be a power of 2"
@@ -458,14 +557,16 @@ int runGemm(size_t         m,
             }
             if(k % static_cast<size_t>(b) != 0)
             {
-                std::cerr << "Error: K (" << k << ") must be a multiple of " << name
-                          << " (" << b << ")" << std::endl;
+                std::cerr << "Error: K (" << k << ") must be a multiple of " << name << " (" << b
+                          << ")" << std::endl;
                 return 1;
             }
             return 0;
         };
-        if(int rc = checkSide("mxBlockA", mxBlockA)) return rc;
-        if(int rc = checkSide("mxBlockB", mxBlockB)) return rc;
+        if(int rc = checkSide("mxBlockA", mxBlockA))
+            return rc;
+        if(int rc = checkSide("mxBlockB", mxBlockB))
+            return rc;
 
         // Asymmetric MX (mxBlockA != mxBlockB) is only supported on the fast
         // path. The production slow path's MX inner loop uses a single scale
@@ -476,42 +577,54 @@ int runGemm(size_t         m,
         if(mxBlockA != mxBlockB && !tryFastPath)
         {
             std::cerr << "Error: asymmetric MX (mxBlockA=" << mxBlockA
-                      << " != mxBlockB=" << mxBlockB
-                      << ") is only supported on the fast path "
+                      << " != mxBlockB=" << mxBlockB << ") is only supported on the fast path "
                       << "(use --tryFastPath)." << std::endl;
             return 1;
         }
     }
 
     // Calculate strides assuming standard column-major packed storage
-    size_t lda        = transA ? k : m;
-    size_t ldb        = transB ? n : k;
-    size_t ldc        = m;
+    size_t lda = transA ? k : m;
+    size_t ldb = transB ? n : k;
+    size_t ldc = m;
 
     // C/D and alpha/beta types: use AccumulateT's DataType
     constexpr rocisa::DataType accumDtypeEnum = TypeTraits<AccumulateT>::value;
 
+    // Host memory uses packed column-major slices for each batch.
+    size_t numA = m * k;
+    size_t numB = k * n;
+    size_t numC = m * n;
+
     // Define the contraction problem (geometry, strides, types)
-    ContractionProblemGemm contraction
-        = ContractionProblemGemm::GEMM_Strides(transA,
-                                               transB,
-                                               dtypeEnumA,
-                                               dtypeEnumB,
-                                               accumDtypeEnum,
-                                               accumDtypeEnum,
-                                               m,
-                                               n,
-                                               k,
-                                               batchCount,
-                                               lda,
-                                               -1,
-                                               ldb,
-                                               -1,
-                                               ldc,
-                                               -1,
-                                               ldc,
-                                               -1,
-                                               static_cast<double>(beta));
+    TensorOps aOps;
+    TensorOps bOps;
+    TensorOps nop;
+    if(conjA)
+        aOps.push_back(TensorOp::ComplexConjugate());
+    if(conjB)
+        bOps.push_back(TensorOp::ComplexConjugate());
+
+    TensorDescriptor tensorA = transA
+                                   ? TensorDescriptor("a", dtypeEnumA, {k, m, batchCount}, {1, lda, numA})
+                                   : TensorDescriptor("a", dtypeEnumA, {m, k, batchCount}, {1, lda, numA});
+    TensorDescriptor tensorB = transB
+                                   ? TensorDescriptor("b", dtypeEnumB, {n, k, batchCount}, {1, ldb, numB})
+                                   : TensorDescriptor("b", dtypeEnumB, {k, n, batchCount}, {1, ldb, numB});
+    TensorDescriptor tensorC("c", accumDtypeEnum, {m, n, batchCount}, {1, ldc, numC});
+    TensorDescriptor tensorD("d", accumDtypeEnum, {m, n, batchCount}, {1, ldc, numC});
+
+    ContractionProblemGemm contraction = ContractionProblemGemm::GEMM(transA,
+                                                                      transB,
+                                                                      tensorA,
+                                                                      aOps,
+                                                                      tensorB,
+                                                                      bOps,
+                                                                      tensorC,
+                                                                      nop,
+                                                                      tensorD,
+                                                                      nop,
+                                                                      static_cast<double>(beta));
 
     contraction.setComputeInputTypeA(computeInputA);
     contraction.setComputeInputTypeB(computeInputB);
@@ -521,11 +634,7 @@ int runGemm(size_t         m,
     if(isTF32)
         contraction.setF32XdlMathOp(rocisa::DataType::XFloat32);
 
-    // Allocate host memory for inputs and outputs. Each batch slice is packed.
-    size_t numA = m * k;
-    size_t numB = k * n;
-    size_t numC = m * n;
-
+    // Allocate host memory for inputs and outputs.
     size_t storageA, storageB;
 #ifndef _WIN32
     if constexpr(isFP4)
@@ -573,12 +682,24 @@ int runGemm(size_t         m,
         // Drawing from the entire grid (not just the powers of two near zero)
         // exercises the MX-scale path with values whose products span more of
         // the FP4 range, while still being exactly representable.
-        constexpr float fp4Values[]
-            = {-6.0f, -4.0f, -3.0f, -2.0f, -1.5f, -1.0f, -0.5f, 0.0f,
-                0.5f,  1.0f,  1.5f,  2.0f,  3.0f,  4.0f,  6.0f};
-        constexpr int fp4ValueCount = sizeof(fp4Values) / sizeof(fp4Values[0]);
+        constexpr float                 fp4Values[]   = {-6.0f,
+                                                         -4.0f,
+                                                         -3.0f,
+                                                         -2.0f,
+                                                         -1.5f,
+                                                         -1.0f,
+                                                         -0.5f,
+                                                         0.0f,
+                                                         0.5f,
+                                                         1.0f,
+                                                         1.5f,
+                                                         2.0f,
+                                                         3.0f,
+                                                         4.0f,
+                                                         6.0f};
+        constexpr int                   fp4ValueCount = sizeof(fp4Values) / sizeof(fp4Values[0]);
         std::uniform_int_distribution<> fp4Dist(0, fp4ValueCount - 1);
-        auto randomFp4 = [&]() { return fp4Values[fp4Dist(gen)]; };
+        auto                            randomFp4 = [&]() { return fp4Values[fp4Dist(gen)]; };
 
         // Pack 2 logical FP4 values per byte (Float4x2). When the logical
         // element count is odd, the second slot of the last byte has no
@@ -612,23 +733,24 @@ int runGemm(size_t         m,
                 // FP4 mixed-input init unsupported in this branch; the FP4-only
                 // path above handles the pure FP4 case. Mixed FP4/non-FP4
                 // dispatch is rejected at the dispatcher level.
-                throw std::runtime_error(
-                    "Mixed FP4 / non-FP4 input is not supported.");
+                throw std::runtime_error("Mixed FP4 / non-FP4 input is not supported.");
             }
             else
 #endif
-            if(quantizes)
+                if(quantizes)
             {
                 // Values representable in storage but not on the compute-input grid -
                 // for storage=Half/compute=F8N, values like 0.7 that Half holds
                 // exactly but F8N rounds to 0.625 or 0.75.
-                std::generate(vec.begin(), vec.end(),
-                              [&]() { return static_cast<T>(realDist(gen)); });
+                std::generate(vec.begin(), vec.end(), [&]() {
+                    return makeInputValue<T>(realDist(gen), realDist(gen));
+                });
             }
             else
             {
-                std::generate(vec.begin(), vec.end(),
-                              [&]() { return static_cast<T>(randomGen()); });
+                std::generate(vec.begin(), vec.end(), [&]() {
+                    return makeInputValue<T>(randomGen(), randomGen());
+                });
             }
         };
 
@@ -637,7 +759,9 @@ int runGemm(size_t         m,
         initOperand(a, quantizesA);
         initOperand(b, quantizesB);
     }
-    std::generate(c.begin(), c.end(), [&]() { return static_cast<AccumulateT>(randomGen()); });
+    std::generate(c.begin(), c.end(), [&]() {
+        return makeInputValue<AccumulateT>(randomGen(), randomGen());
+    });
 
     // Optional feature buffers — typed as AccumulateT so the slow path's
     // GetValue(alphaType, ...) reads the correct byte width.
@@ -647,7 +771,9 @@ int runGemm(size_t         m,
     if(useBias)
     {
         biasVec.resize(m);
-        std::generate(biasVec.begin(), biasVec.end(), [&]() { return static_cast<AccumulateT>(randomGen()); });
+        std::generate(biasVec.begin(), biasVec.end(), [&]() {
+            return makeInputValue<AccumulateT>(randomGen(), randomGen());
+        });
         contraction.setUseBias(1);
         contraction.setBias(accumDtypeEnum, m, m);
     }
@@ -656,7 +782,9 @@ int runGemm(size_t         m,
     {
         size_t scaleAlphaVecLen = (factorDim == 0) ? m : n;
         scaleAlphaVecBuf.resize(scaleAlphaVecLen);
-        std::generate(scaleAlphaVecBuf.begin(), scaleAlphaVecBuf.end(), [&]() { return static_cast<AccumulateT>(randomGen()); });
+        std::generate(scaleAlphaVecBuf.begin(), scaleAlphaVecBuf.end(), [&]() {
+            return makeInputValue<AccumulateT>(randomGen(), randomGen());
+        });
         contraction.setUseScaleAlphaVec(1);
         contraction.setScaleAlphaVec(accumDtypeEnum, scaleAlphaVecLen, factorDim);
     }
@@ -664,10 +792,10 @@ int runGemm(size_t         m,
     // Random scale generator: magnitude in (1, 100], integer values to avoid rounding issues, sign random.
     // Excludes 0 and ±1 so missing/incorrect scaling is never masked.
     std::uniform_int_distribution<int> scaleDis(2, 100);
-    auto scaleGen = [&]() -> AccumulateT {
-        AccumulateT sign = binary_distribution(gen) ? AccumulateT(1) : AccumulateT(-1);
-        int         mag  = scaleDis(gen);
-        return sign * static_cast<AccumulateT>(mag);
+    auto                               scaleGen = [&]() -> AccumulateT {
+        auto sign = binary_distribution(gen) ? 1.0f : -1.0f;
+        int  mag  = scaleDis(gen);
+        return makeInputValue<AccumulateT>(sign * static_cast<float>(mag), 0.0f);
     };
 
     std::vector<AccumulateT> scaleABuf;
@@ -715,8 +843,10 @@ int runGemm(size_t         m,
             // stride (and analogous for B). Default padScaleTensor=true would
             // round M up to next 32 and K/mxBlockA/B up to next 8, breaking
             // the index math below.
-            contraction.setMXScaleA(rocisa::DataType::E8, mxBlockA, /*saStride=*/{}, /*padScaleTensor=*/false);
-            contraction.setMXScaleB(rocisa::DataType::E8, mxBlockB, /*sbStride=*/{}, /*padScaleTensor=*/false);
+            contraction.setMXScaleA(
+                rocisa::DataType::E8, mxBlockA, /*saStride=*/{}, /*padScaleTensor=*/false);
+            contraction.setMXScaleB(
+                rocisa::DataType::E8, mxBlockB, /*sbStride=*/{}, /*padScaleTensor=*/false);
 
             size_t nmxsa = contraction.mxsa().totalLogicalElements();
             size_t nmxsb = contraction.mxsb().totalLogicalElements();
@@ -741,9 +871,10 @@ int runGemm(size_t         m,
     }
 #endif
 
-    ContractionInputs inputs(a.data(), b.data(), c.data(), d.data(),
-                             static_cast<AccumulateT>(alpha),
-                             static_cast<AccumulateT>(beta));
+    AccumulateT alphaValue = makeInputValue<AccumulateT>(alpha, alphaImag);
+    AccumulateT betaValue  = makeInputValue<AccumulateT>(beta, betaImag);
+
+    ContractionInputs inputs(a.data(), b.data(), c.data(), d.data(), alphaValue, betaValue);
     inputs.bias          = useBias ? biasVec.data() : nullptr;
     inputs.scaleAlphaVec = useScaleAlphaVec ? scaleAlphaVecBuf.data() : nullptr;
     inputs.scaleA        = (useScaleAB != "none") ? scaleABuf.data() : nullptr;
@@ -761,9 +892,8 @@ int runGemm(size_t         m,
 
     if(tryFastPath && !TensileLite::Client::isFastPathEligible(contraction))
     {
-        throw std::runtime_error(
-            "--tryFastPath was requested but the problem is not eligible "
-            "for the fast CPU GEMM path.");
+        throw std::runtime_error("--tryFastPath was requested but the problem is not eligible "
+                                 "for the fast CPU GEMM path.");
     }
 
     // Execute the 'device under test'.
@@ -868,9 +998,12 @@ int runGemm(size_t         m,
                     k,
                     transA,
                     transB,
-                    static_cast<AccumulateT>(
-                        (useScaleAB == "Scalar") ? alpha * scaleABuf[0] * scaleBBuf[0] : alpha),
-                    static_cast<AccumulateT>(beta),
+                    conjA,
+                    conjB,
+                    static_cast<AccumulateT>((useScaleAB == "Scalar")
+                                                 ? alphaValue * scaleABuf[0] * scaleBBuf[0]
+                                                 : alphaValue),
+                    betaValue,
                     useBias ? biasVec.data() : nullptr,
                     useScaleAlphaVec ? scaleAlphaVecBuf.data() : nullptr,
                     activation,
@@ -881,25 +1014,32 @@ int runGemm(size_t         m,
                     quantB
 #ifndef _WIN32
                     ,
-                    MXGemmOperand{
-                        (isFP4 && mxBlockA > 0) ? mxsa.data() + batch * mxsaBatchStride : nullptr,
-                        mxBlockA,
-                        mxsaStrideM,
-                        mxsaStrideKBlk},
-                    MXGemmOperand{
-                        (isFP4 && mxBlockB > 0) ? mxsb.data() + batch * mxsbBatchStride : nullptr,
-                        mxBlockB,
-                        mxsbStrideN,
-                        mxsbStrideKBlk}
+                    MXGemmOperand{(isFP4 && mxBlockA > 0) ? mxsa.data() + batch * mxsaBatchStride
+                                                          : nullptr,
+                                  mxBlockA,
+                                  mxsaStrideM,
+                                  mxsaStrideKBlk},
+                    MXGemmOperand{(isFP4 && mxBlockB > 0) ? mxsb.data() + batch * mxsbBatchStride
+                                                          : nullptr,
+                                  mxBlockB,
+                                  mxsbStrideN,
+                                  mxsbStrideKBlk}
 #endif
                 );
             }
         };
 
-        if(isTF32)
-            runGoldenRef(XFloat32{});
-        else
+        if constexpr(IsStdComplex<AccumulateT>::value)
+        {
             runGoldenRef(AccumulateT{});
+        }
+        else
+        {
+            if(isTF32)
+                runGoldenRef(XFloat32{});
+            else
+                runGoldenRef(AccumulateT{});
+        }
 
         // Compare results — reduced-precision types need wider tolerance.
         // TF32 loses 13 of 23 mantissa bits; errors accumulate over K.
@@ -910,18 +1050,16 @@ int runGemm(size_t         m,
 
         for(size_t i = 0; i < totalC; i++)
         {
-            double valDut = static_cast<double>(d[i]);
-            double valRef = static_cast<double>(dRef[i]);
-            double diff   = std::abs(valDut - valRef);
-            maxDiff       = std::max(maxDiff, diff);
+            double diff = absDiff(d[i], dRef[i]);
+            maxDiff     = std::max(maxDiff, diff);
 
             if(diff > tolerance)
             {
                 allClose = false;
                 if(i < 10)
                 {
-                    std::cout << "Mismatch at " << i << ": observed=" << valDut
-                              << " expected=" << valRef << " diff=" << diff << std::endl;
+                    std::cout << "Mismatch at " << i << ": observed=" << d[i]
+                              << " expected=" << dRef[i] << " diff=" << diff << std::endl;
                 }
             }
         }
@@ -950,22 +1088,52 @@ int main(int argc, char* argv[])
         "K", po::value<size_t>()->default_value(128), "Matrix K dimension")(
         "transA", po::value<bool>()->default_value(false), "Transpose A")(
         "transB", po::value<bool>()->default_value(false), "Transpose B")(
+        "conjA", po::value<bool>()->default_value(false), "Conjugate A")(
+        "conjB", po::value<bool>()->default_value(false), "Conjugate B")(
         "alpha", po::value<float>()->default_value(1.0f), "Alpha scalar")(
+        "alphaImag",
+        po::value<float>()->default_value(0.0f),
+        "Alpha imaginary component for complex types")(
         "beta", po::value<float>()->default_value(0.0f), "Beta scalar")(
-        "type", po::value<std::string>()->default_value("f32"), "Data type for A and B (f32, f64, tf32, f16, bf16, f8, bf8, f8fnuz, bf8fnuz, f4)")(
-        "typeA", po::value<std::string>()->default_value(""), "Override A storage type (defaults to --type)")(
-        "typeB", po::value<std::string>()->default_value(""), "Override B storage type (defaults to --type)")(
-        "computeInputA", po::value<std::string>()->default_value(""), "Override A compute-input type for MAC (defaults to --typeA). Set smaller than storage to mimic kernels that quantize A.")(
-        "computeInputB", po::value<std::string>()->default_value(""), "Override B compute-input type for MAC (defaults to --typeB). Set smaller than storage to mimic kernels that quantize B.")(
+        "betaImag",
+        po::value<float>()->default_value(0.0f),
+        "Beta imaginary component for complex types")(
+        "type",
+        po::value<std::string>()->default_value("f32"),
+        "Data type for A and B (f32, f64, c32, c64, tf32, f16, bf16, f8, bf8, f8fnuz, bf8fnuz, "
+        "f4)")("typeA",
+               po::value<std::string>()->default_value(""),
+               "Override A storage type (defaults to --type)")(
+        "typeB",
+        po::value<std::string>()->default_value(""),
+        "Override B storage type (defaults to --type)")(
+        "computeInputA",
+        po::value<std::string>()->default_value(""),
+        "Override A compute-input type for MAC (defaults to --typeA). Set smaller than storage to "
+        "mimic kernels that quantize A.")(
+        "computeInputB",
+        po::value<std::string>()->default_value(""),
+        "Override B compute-input type for MAC (defaults to --typeB). Set smaller than storage to "
+        "mimic kernels that quantize B.")(
         "validate", po::value<bool>()->default_value(true), "Run validation against ref")(
         "tryFastPath", po::value<bool>()->default_value(false), "Use optimized path")(
         "bias", po::value<bool>()->default_value(false), "Enable bias vector")(
         "activation", po::value<std::string>()->default_value("none"), "Activation (none, relu)")(
         "scaleAlphaVec", po::value<bool>()->default_value(false), "Enable per-row alpha scaling")(
-        "factorDim", po::value<int>()->default_value(0), "ScaleAlphaVec dimension: 0=row(M), 1=col(N)")(
-        "useScaleAB", po::value<std::string>()->default_value("none"), "ScaleAB mode (none, Scalar, Vector)")(
-        "mxBlockA", po::value<int>()->default_value(0), "MX block size for the A side (FP4 only, must be power of 2; both --mxBlockA and --mxBlockB must be set together)")(
-        "mxBlockB", po::value<int>()->default_value(0), "MX block size for the B side (FP4 only, must be power of 2; both --mxBlockA and --mxBlockB must be set together)")(
+        "factorDim",
+        po::value<int>()->default_value(0),
+        "ScaleAlphaVec dimension: 0=row(M), 1=col(N)")(
+        "useScaleAB",
+        po::value<std::string>()->default_value("none"),
+        "ScaleAB mode (none, Scalar, Vector)")(
+        "mxBlockA",
+        po::value<int>()->default_value(0),
+        "MX block size for the A side (FP4 only, must be power of 2; both --mxBlockA and "
+        "--mxBlockB must be set together)")(
+        "mxBlockB",
+        po::value<int>()->default_value(0),
+        "MX block size for the B side (FP4 only, must be power of 2; both --mxBlockA and "
+        "--mxBlockB must be set together)")(
         "batchCount", po::value<size_t>()->default_value(1), "Batch count (default 1)");
 
     po::variables_map vm;
@@ -986,47 +1154,107 @@ int main(int argc, char* argv[])
         return 0;
     }
 
-    size_t      m                = vm["M"].as<size_t>();
-    size_t      n                = vm["N"].as<size_t>();
-    size_t      k                = vm["K"].as<size_t>();
-    bool        transA           = vm["transA"].as<bool>();
-    bool        transB           = vm["transB"].as<bool>();
-    float       alpha            = vm["alpha"].as<float>();
-    float       beta             = vm["beta"].as<float>();
-    std::string typeStr          = vm["type"].as<std::string>();
-    std::string typeAStr         = vm["typeA"].as<std::string>();
-    std::string typeBStr         = vm["typeB"].as<std::string>();
-    if(typeAStr.empty()) typeAStr = typeStr;
-    if(typeBStr.empty()) typeBStr = typeStr;
+    size_t      m         = vm["M"].as<size_t>();
+    size_t      n         = vm["N"].as<size_t>();
+    size_t      k         = vm["K"].as<size_t>();
+    bool        transA    = vm["transA"].as<bool>();
+    bool        transB    = vm["transB"].as<bool>();
+    bool        conjA     = vm["conjA"].as<bool>();
+    bool        conjB     = vm["conjB"].as<bool>();
+    float       alpha     = vm["alpha"].as<float>();
+    float       alphaImag = vm["alphaImag"].as<float>();
+    float       beta      = vm["beta"].as<float>();
+    float       betaImag  = vm["betaImag"].as<float>();
+    std::string typeStr   = vm["type"].as<std::string>();
+    std::string typeAStr  = vm["typeA"].as<std::string>();
+    std::string typeBStr  = vm["typeB"].as<std::string>();
+    if(typeAStr.empty())
+        typeAStr = typeStr;
+    if(typeBStr.empty())
+        typeBStr = typeStr;
     std::string computeInputAStr = vm["computeInputA"].as<std::string>();
     std::string computeInputBStr = vm["computeInputB"].as<std::string>();
-    if(computeInputAStr.empty()) computeInputAStr = typeAStr;
-    if(computeInputBStr.empty()) computeInputBStr = typeBStr;
+    if(computeInputAStr.empty())
+        computeInputAStr = typeAStr;
+    if(computeInputBStr.empty())
+        computeInputBStr = typeBStr;
 
     auto strToDataType = [](const std::string& s, rocisa::DataType& out) -> bool {
-        if(s == "f32")            { out = rocisa::DataType::Float;        return true; }
-        if(s == "f64")            { out = rocisa::DataType::Double;       return true; }
-        if(s == "tf32")           { out = rocisa::DataType::Float;        return true; }
-        if(s == "f16")            { out = rocisa::DataType::Half;         return true; }
-        if(s == "bf16")           { out = rocisa::DataType::BFloat16;     return true; }
+        if(s == "f32")
+        {
+            out = rocisa::DataType::Float;
+            return true;
+        }
+        if(s == "f64")
+        {
+            out = rocisa::DataType::Double;
+            return true;
+        }
+        if(s == "c32")
+        {
+            out = rocisa::DataType::ComplexFloat;
+            return true;
+        }
+        if(s == "c64")
+        {
+            out = rocisa::DataType::ComplexDouble;
+            return true;
+        }
+        if(s == "tf32")
+        {
+            out = rocisa::DataType::Float;
+            return true;
+        }
+        if(s == "f16")
+        {
+            out = rocisa::DataType::Half;
+            return true;
+        }
+        if(s == "bf16")
+        {
+            out = rocisa::DataType::BFloat16;
+            return true;
+        }
 #ifdef TENSILE_USE_FP8_BF8
-        if(s == "f8")             { out = rocisa::DataType::Float8;       return true; }
-        if(s == "bf8")            { out = rocisa::DataType::BFloat8;      return true; }
-        if(s == "f8fnuz")         { out = rocisa::DataType::Float8_fnuz;  return true; }
-        if(s == "bf8fnuz")        { out = rocisa::DataType::BFloat8_fnuz; return true; }
+        if(s == "f8")
+        {
+            out = rocisa::DataType::Float8;
+            return true;
+        }
+        if(s == "bf8")
+        {
+            out = rocisa::DataType::BFloat8;
+            return true;
+        }
+        if(s == "f8fnuz")
+        {
+            out = rocisa::DataType::Float8_fnuz;
+            return true;
+        }
+        if(s == "bf8fnuz")
+        {
+            out = rocisa::DataType::BFloat8_fnuz;
+            return true;
+        }
 #endif
 #ifndef _WIN32
-        if(s == "f4")             { out = rocisa::DataType::Float4;       return true; }
+        if(s == "f4")
+        {
+            out = rocisa::DataType::Float4;
+            return true;
+        }
 #endif
         return false;
     };
 
     rocisa::DataType computeInputA, computeInputB;
-    if(!strToDataType(computeInputAStr, computeInputA)) {
+    if(!strToDataType(computeInputAStr, computeInputA))
+    {
         std::cerr << "Unknown computeInputA: " << computeInputAStr << std::endl;
         return 1;
     }
-    if(!strToDataType(computeInputBStr, computeInputB)) {
+    if(!strToDataType(computeInputBStr, computeInputB))
+    {
         std::cerr << "Unknown computeInputB: " << computeInputBStr << std::endl;
         return 1;
     }
@@ -1051,16 +1279,43 @@ int main(int argc, char* argv[])
     if((mxBlockA > 0) != (mxBlockB > 0))
     {
         std::cerr << "Error: --mxBlockA and --mxBlockB must both be > 0 "
-                  << "(mxBlockA=" << mxBlockA << ", mxBlockB=" << mxBlockB << ")"
-                  << std::endl;
+                  << "(mxBlockA=" << mxBlockA << ", mxBlockB=" << mxBlockB << ")" << std::endl;
         return 1;
     }
 
     if((mxBlockA > 0 || mxBlockB > 0) && typeStr != "f4")
     {
-        std::cerr << "Error: mxBlockA/mxBlockB is only supported for type f4, not "
-                  << typeStr << std::endl;
+        std::cerr << "Error: mxBlockA/mxBlockB is only supported for type f4, not " << typeStr
+                  << std::endl;
         return 1;
+    }
+
+    auto isComplexTypeName = [](const std::string& s) { return s == "c32" || s == "c64"; };
+    bool isComplexProblem
+        = isComplexTypeName(typeAStr) || isComplexTypeName(typeBStr) || isComplexTypeName(typeStr);
+    if(isComplexProblem)
+    {
+        if(typeAStr != typeBStr || typeAStr != typeStr)
+        {
+            std::cerr
+                << "Error: complex CPU GEMM driver tests require homogeneous c32 or c64 types."
+                << std::endl;
+            return 1;
+        }
+        if(computeInputAStr != typeAStr || computeInputBStr != typeBStr)
+        {
+            std::cerr << "Error: complex CPU GEMM driver tests require compute-input type to match "
+                         "storage type."
+                      << std::endl;
+            return 1;
+        }
+        if(useBias || useScaleAlphaVec || useScaleAB != "none" || activationStr != "none")
+        {
+            std::cerr << "Error: complex CPU GEMM driver tests only support plain GEMM plus "
+                         "beta/conjugation."
+                      << std::endl;
+            return 1;
+        }
     }
 
 #ifndef _WIN32
@@ -1092,10 +1347,13 @@ int main(int argc, char* argv[])
         return 1;
     }
 
-    std::cout << "Running GEMM with: M=" << m << " N=" << n << " K=" << k
-              << " TypeA=" << typeAStr << " TypeB=" << typeBStr
-              << " ComputeInA=" << computeInputAStr << " ComputeInB=" << computeInputBStr
-              << " FastPath=" << tryFastPath;
+    std::cout << "Running GEMM with: M=" << m << " N=" << n << " K=" << k << " TypeA=" << typeAStr
+              << " TypeB=" << typeBStr << " ComputeInA=" << computeInputAStr
+              << " ComputeInB=" << computeInputBStr << " FastPath=" << tryFastPath;
+    if(conjA)
+        std::cout << " ConjA=1";
+    if(conjB)
+        std::cout << " ConjB=1";
     if(typeAStr == "tf32" || typeBStr == "tf32")
         std::cout << " MathOp=XFloat32";
     std::cout << std::endl;
@@ -1104,50 +1362,130 @@ int main(int argc, char* argv[])
     // runGemm<A,B>(...). Asymmetric A/B is required to repro mixed-precision
     // bugs in the fast-path validator (e.g. F8N x Half).
     // tf32 = float storage + XFloat32 math-op. Dispatched as float with isTF32 flag.
-    bool isTF32 = (typeAStr == "tf32" || typeBStr == "tf32");
+    bool isTF32              = (typeAStr == "tf32" || typeBStr == "tf32");
     auto resolveAccumStorage = [](std::string& s) {
-        if(s == "tf32") s = "f32";
+        if(s == "tf32")
+            s = "f32";
     };
     resolveAccumStorage(typeAStr);
     resolveAccumStorage(typeBStr);
 
     auto dispatchB = [&](auto aTag) -> int {
-        using AT = decltype(aTag);
+        using AT   = decltype(aTag);
         auto callB = [&](auto bTag) -> int {
             using BT = decltype(bTag);
 #ifndef _WIN32
-            constexpr bool isMixedFP4 = std::is_same_v<AT, Float4x2>
-                                        != std::is_same_v<BT, Float4x2>;
+            constexpr bool isMixedFP4
+                = std::is_same_v<AT, Float4x2> != std::is_same_v<BT, Float4x2>;
             if constexpr(isMixedFP4)
             {
-                std::cerr << "Error: mixed FP4 / non-FP4 input is not supported."
-                          << std::endl;
+                std::cerr << "Error: mixed FP4 / non-FP4 input is not supported." << std::endl;
                 return 1;
             }
             else
 #endif
             {
-                // Promote AccumulateT to double when both A and B storage are double (f64).
-                using AccT = std::conditional_t<
-                    std::is_same_v<AT, double> && std::is_same_v<BT, double>, double, float>;
-                return runGemm<AT, BT, AccT>(
-                    m, n, k, transA, transB, alpha, beta, validate, tryFastPath,
-                    useBias, activation, useScaleAlphaVec, useScaleAB, factorDim,
-                    computeInputA, computeInputB, mxBlockA, mxBlockB, batchCount, isTF32);
+                constexpr bool isComplexA = IsStdComplex<AT>::value;
+                constexpr bool isComplexB = IsStdComplex<BT>::value;
+                if constexpr(isComplexA || isComplexB)
+                {
+                    if constexpr(isComplexA != isComplexB || !std::is_same_v<AT, BT>)
+                    {
+                        std::cerr << "Error: complex CPU GEMM driver tests require homogeneous c32 or c64 types."
+                                  << std::endl;
+                        return 1;
+                    }
+                    else if(useBias || useScaleAlphaVec || useScaleAB != "none"
+                            || activation != ActivationType::None || isTF32)
+                    {
+                        std::cerr << "Error: complex CPU GEMM driver tests only support plain GEMM plus beta/conjugation."
+                                  << std::endl;
+                        return 1;
+                    }
+                    else
+                    {
+                        using AccT = typename AccumulationTypeFor<AT, BT>::type;
+                        return runGemm<AT, BT, AccT>(m,
+                                                     n,
+                                                     k,
+                                                     transA,
+                                                     transB,
+                                                     alpha,
+                                                     alphaImag,
+                                                     beta,
+                                                     betaImag,
+                                                     validate,
+                                                     tryFastPath,
+                                                     useBias,
+                                                     activation,
+                                                     useScaleAlphaVec,
+                                                     useScaleAB,
+                                                     factorDim,
+                                                     computeInputA,
+                                                     computeInputB,
+                                                     mxBlockA,
+                                                     mxBlockB,
+                                                     batchCount,
+                                                     isTF32,
+                                                     conjA,
+                                                     conjB);
+                    }
+                }
+                else
+                {
+                    using AccT = typename AccumulationTypeFor<AT, BT>::type;
+                    return runGemm<AT, BT, AccT>(m,
+                                                 n,
+                                                 k,
+                                                 transA,
+                                                 transB,
+                                                 alpha,
+                                                 alphaImag,
+                                                 beta,
+                                                 betaImag,
+                                                 validate,
+                                                 tryFastPath,
+                                                 useBias,
+                                                 activation,
+                                                 useScaleAlphaVec,
+                                                 useScaleAB,
+                                                 factorDim,
+                                                 computeInputA,
+                                                 computeInputB,
+                                                 mxBlockA,
+                                                 mxBlockB,
+                                                 batchCount,
+                                                 isTF32,
+                                                 conjA,
+                                                 conjB);
+                }
             }
         };
-        if(typeBStr == "f32")        return callB(float{});
-        if(typeBStr == "f64")        return callB(double{});
-        if(typeBStr == "f16")        return callB(Half{});
-        if(typeBStr == "bf16")       return callB(BFloat16{});
+        if(typeBStr == "f32")
+            return callB(float{});
+        if(typeBStr == "f64")
+            return callB(double{});
+        if(typeBStr == "c32")
+            return callB(std::complex<float>{});
+        if(typeBStr == "c64")
+            return callB(std::complex<double>{});
+        if(typeBStr == "f16")
+            return callB(Half{});
+        if(typeBStr == "bf16")
+            return callB(BFloat16{});
 #ifdef TENSILE_USE_FP8_BF8
-        if(typeBStr == "f8")         return callB(Float8{});
-        if(typeBStr == "bf8")        return callB(BFloat8{});
-        if(typeBStr == "f8fnuz")     return callB(Float8_fnuz{});
-        if(typeBStr == "bf8fnuz")    return callB(BFloat8_fnuz{});
+        if(typeBStr == "f8")
+            return callB(Float8{});
+        if(typeBStr == "bf8")
+            return callB(BFloat8{});
+        if(typeBStr == "f8fnuz")
+            return callB(Float8_fnuz{});
+        if(typeBStr == "bf8fnuz")
+            return callB(BFloat8_fnuz{});
 #endif
 #ifndef _WIN32
-        if(typeBStr == "f4")         return callB(Float4x2{});
+        if(typeBStr == "f4")
+            return callB(Float4x2{});
 #endif
         std::cerr << "Unknown typeB: " << typeBStr << std::endl;
         return 1;
@@ -1155,18 +1493,31 @@ int main(int argc, char* argv[])
 
     try
     {
-        if(typeAStr == "f32")        return dispatchB(float{});
-        if(typeAStr == "f64")        return dispatchB(double{});
-        if(typeAStr == "f16")        return dispatchB(Half{});
-        if(typeAStr == "bf16")       return dispatchB(BFloat16{});
+        if(typeAStr == "f32")
+            return dispatchB(float{});
+        if(typeAStr == "f64")
+            return dispatchB(double{});
+        if(typeAStr == "c32")
+            return dispatchB(std::complex<float>{});
+        if(typeAStr == "c64")
+            return dispatchB(std::complex<double>{});
+        if(typeAStr == "f16")
+            return dispatchB(Half{});
+        if(typeAStr == "bf16")
+            return dispatchB(BFloat16{});
 #ifdef TENSILE_USE_FP8_BF8
-        if(typeAStr == "f8")         return dispatchB(Float8{});
-        if(typeAStr == "bf8")        return dispatchB(BFloat8{});
-        if(typeAStr == "f8fnuz")     return dispatchB(Float8_fnuz{});
-        if(typeAStr == "bf8fnuz")    return dispatchB(BFloat8_fnuz{});
+        if(typeAStr == "f8")
+            return dispatchB(Float8{});
+        if(typeAStr == "bf8")
+            return dispatchB(BFloat8{});
+        if(typeAStr == "f8fnuz")
+            return dispatchB(Float8_fnuz{});
+        if(typeAStr == "bf8fnuz")
+            return dispatchB(BFloat8_fnuz{});
 #endif
 #ifndef _WIN32
-        if(typeAStr == "f4")         return dispatchB(Float4x2{});
+        if(typeAStr == "f4")
+            return dispatchB(Float4x2{});
 #endif
         std::cerr << "Unknown typeA: " << typeAStr << std::endl;
         return 1;

@@ -32,9 +32,11 @@
 #include "TypedId.hpp"
 
 #include <cmath>
+#include <complex>
 #include <cstddef>
 #include <iostream>
 #include <omp.h>
+#include <type_traits>
 
 #define MAX_OMP_THREADS 64
 #if defined(_MSC_VER)
@@ -48,6 +50,15 @@ namespace TensileLite
 
     namespace
     {
+        template <typename T>
+        struct IsStdComplex : std::false_type
+        {
+        };
+
+        template <typename T>
+        struct IsStdComplex<std::complex<T>> : std::true_type
+        {
+        };
 
         // Helper to load data from various source types into an AccumT buffer.
         // Sub-float types go through float first since they lack operator AccumT().
@@ -59,6 +70,18 @@ namespace TensileLite
             for(size_t i = 0; i < N; ++i)
             {
                 buffer[i] = static_cast<AccumT>(static_cast<float>(sPtr[i]));
+            }
+            return buffer;
+        }
+
+        template <typename AccumT, typename SrcType>
+        std::vector<AccumT> loadToPreserve(void const* src, size_t N)
+        {
+            std::vector<AccumT> buffer(N);
+            const SrcType*      sPtr = static_cast<const SrcType*>(src);
+            for(size_t i = 0; i < N; ++i)
+            {
+                buffer[i] = static_cast<AccumT>(sPtr[i]);
             }
             return buffer;
         }
@@ -224,6 +247,38 @@ namespace TensileLite
                         m_ptr     = m_storage.data();
                     }
                 }
+                else if(type == rocisa::DataType::ComplexFloat)
+                {
+                    if constexpr(std::is_same_v<AccumT, std::complex<float>>)
+                    {
+                        m_ptr = static_cast<const std::complex<float>*>(ptr);
+                    }
+                    else if constexpr(IsStdComplex<AccumT>::value)
+                    {
+                        m_storage = loadToPreserve<AccumT, std::complex<float>>(ptr, N);
+                        m_ptr     = m_storage.data();
+                    }
+                    else
+                    {
+                        throw std::runtime_error("Unsupported type for ShadowBuffer");
+                    }
+                }
+                else if(type == rocisa::DataType::ComplexDouble)
+                {
+                    if constexpr(std::is_same_v<AccumT, std::complex<double>>)
+                    {
+                        m_ptr = static_cast<const std::complex<double>*>(ptr);
+                    }
+                    else if constexpr(IsStdComplex<AccumT>::value)
+                    {
+                        m_storage = loadToPreserve<AccumT, std::complex<double>>(ptr, N);
+                        m_ptr     = m_storage.data();
+                    }
+                    else
+                    {
+                        throw std::runtime_error("Unsupported type for ShadowBuffer");
+                    }
+                }
                 else if(type == rocisa::DataType::Half)
                 {
                     m_storage = loadTo<AccumT, TensileLite::Half>(ptr, N);
@@ -273,12 +328,23 @@ namespace TensileLite
                 // where we hold a writable shadow copy (not for the
                 // direct-pointer Float case, which is already at full
                 // precision and never narrower than itself).
-                if(computeInputType != rocisa::DataType::None
-                   && computeInputType != type
-                   && !m_storage.empty())
+                if constexpr(IsStdComplex<AccumT>::value)
                 {
-                    quantizeThroughComputeInputType(m_storage, computeInputType);
-                    m_ptr = m_storage.data();
+                    if(computeInputType != rocisa::DataType::None && computeInputType != type)
+                    {
+                        throw std::runtime_error(
+                            "Unsupported complex compute-input type for ShadowBuffer");
+                    }
+                }
+                else
+                {
+                    if(computeInputType != rocisa::DataType::None
+                       && computeInputType != type
+                       && !m_storage.empty())
+                    {
+                        quantizeThroughComputeInputType(m_storage, computeInputType);
+                        m_ptr = m_storage.data();
+                    }
                 }
             }
 
@@ -1151,6 +1217,44 @@ namespace TensileLite
             return multiply<Accumulator, MathOpAccum>(aVal, bVal);
         }
 
+        bool isComplexDataType(rocisa::DataType t)
+        {
+            return t == rocisa::DataType::ComplexFloat
+                   || t == rocisa::DataType::ComplexDouble;
+        }
+
+        rocisa::DataType resolvedReferenceAlphaType(ContractionProblemGemm const& problem)
+        {
+            auto alphaType = problem.alphaType();
+            if(alphaType == rocisa::DataType::None)
+            {
+                alphaType = problem.a().dataType() == rocisa::DataType::BFloat16
+                                ? rocisa::DataType::Float
+                                : problem.d().dataType();
+            }
+            return alphaType;
+        }
+
+        rocisa::DataType resolvedReferenceBetaType(ContractionProblemGemm const& problem,
+                                                   rocisa::DataType              alphaType)
+        {
+            auto betaType = problem.betaType();
+            if(betaType == rocisa::DataType::None)
+            {
+                betaType = alphaType;
+            }
+            return betaType;
+        }
+
+        bool hasComplexConjugateOp(TensorOps const& ops)
+        {
+            for(auto const& op : ops)
+            {
+                if(op.type == TensorOp::Type::ComplexConjugate)
+                    return true;
+            }
+            return false;
+        }
 
         bool isFastPathEligible(ContractionProblemGemm const& problem)
         {
@@ -1164,7 +1268,8 @@ namespace TensileLite
 
             auto isSupportedOutputType = [](rocisa::DataType t) {
                 return t == rocisa::DataType::Float || t == rocisa::DataType::Double
-                       || t == rocisa::DataType::Half || t == rocisa::DataType::BFloat16;
+                       || t == rocisa::DataType::Half || t == rocisa::DataType::BFloat16
+                       || isComplexDataType(t);
             };
 
             auto isSupportedInputType = [&](rocisa::DataType t) {
@@ -1195,6 +1300,55 @@ namespace TensileLite
                     + " C=" + TensileLite::ToString(problem.c().dataType())
                     + " D=" + TensileLite::ToString(problem.d().dataType());
                 return rejectFast(detail.c_str());
+            }
+
+            bool hasComplex = isComplexDataType(problem.a().dataType())
+                              || isComplexDataType(problem.b().dataType())
+                              || isComplexDataType(problem.c().dataType())
+                              || isComplexDataType(problem.d().dataType());
+            if(hasComplex)
+            {
+                auto complexType = problem.d().dataType();
+                if(!isComplexDataType(complexType)
+                   || problem.a().dataType() != complexType
+                   || problem.b().dataType() != complexType
+                   || problem.c().dataType() != complexType)
+                {
+                    return rejectFast("mixed_complex_types");
+                }
+
+                auto alphaType = resolvedReferenceAlphaType(problem);
+                auto betaType  = resolvedReferenceBetaType(problem, alphaType);
+                if(alphaType != complexType || betaType != complexType)
+                    return rejectFast("complex_alpha_beta_type");
+
+                if(problem.computeInputTypeA() != complexType
+                   || problem.computeInputTypeB() != complexType)
+                {
+                    return rejectFast("complex_compute_input_type");
+                }
+
+                if(problem.f32XdlMathOp() == rocisa::DataType::XFloat32)
+                    return rejectFast("complex_xf32");
+
+                if(problem.useGradient())
+                    return rejectFast("complex_gradient");
+                if(problem.outputAmaxD())
+                    return rejectFast("complex_amaxD");
+                if(problem.useE())
+                    return rejectFast("complex_useE");
+                if(problem.useScaleCD())
+                    return rejectFast("complex_scaleCD");
+                if(problem.useBias())
+                    return rejectFast("complex_bias");
+                if(!problem.useScaleAB().empty())
+                    return rejectFast("complex_scaleAB");
+                if(problem.useScaleAlphaVec())
+                    return rejectFast("complex_scaleAlphaVec");
+                if(problem.activationType() != ActivationType::None)
+                    return rejectFast("complex_activation");
+                if(problem.mxBlockA() > 0 || problem.mxBlockB() > 0)
+                    return rejectFast("complex_mx");
             }
 
             constexpr size_t FAST_BLOCK_K = 8;
@@ -1295,7 +1449,8 @@ namespace TensileLite
                                                                 size_t        sizeM,
                                                                 size_t        sizeK,
                                                                 size_t        strideMA,
-                                                                size_t        strideKA)
+                                                                size_t        strideKA,
+                                                                bool          conjugate)
         {
             for(size_t km = 0; km < BLOCK_K; ++km)
             {
@@ -1306,7 +1461,8 @@ namespace TensileLite
                     if(global_k < sizeK && global_m < sizeM)
                     {
                         auto offset = global_m * strideMA + global_k * strideKA;
-                        aReg[km * BLOCK_M + mm] = curBatchA[offset];
+                        aReg[km * BLOCK_M + mm]
+                            = Transform<AccumT>::Input(curBatchA[offset], conjugate);
                     }
                     else
                     {
@@ -1324,7 +1480,8 @@ namespace TensileLite
                                                                 size_t        sizeN,
                                                                 size_t        sizeK,
                                                                 size_t        strideNB,
-                                                                size_t        strideKB)
+                                                                size_t        strideKB,
+                                                                bool          conjugate)
         {
             for(size_t kn = 0; kn < BLOCK_K; ++kn)
             {
@@ -1335,7 +1492,9 @@ namespace TensileLite
                     if(global_k < sizeK && global_n < sizeN)
                     {
                         bReg[kn * BLOCK_N + nn]
-                            = curBatchB[global_n * strideNB + global_k * strideKB];
+                            = Transform<AccumT>::Input(
+                                curBatchB[global_n * strideNB + global_k * strideKB],
+                                conjugate);
                     }
                     else
                     {
@@ -1459,6 +1618,9 @@ namespace TensileLite
             size_t strideNB = problem.b().strides()[indexNB];
             size_t strideKB = problem.b().strides()[indexKB];
 
+            bool aConjugate = hasComplexConjugateOp(problem.aOps());
+            bool bConjugate = hasComplexConjugateOp(problem.bOps());
+
             size_t indexND  = problem.freeIndices()[1].d;
             size_t strideND = problem.d().strides()[indexND];
             size_t strideNC = problem.c().strides()[indexND];
@@ -1494,6 +1656,16 @@ namespace TensileLite
             }
             else if(problem.d().dataType() == rocisa::DataType::Double
                     && std::is_same_v<AccumT, double>)
+            {
+                ptrD = static_cast<AccumT*>(inputs.d);
+            }
+            else if(problem.d().dataType() == rocisa::DataType::ComplexFloat
+                    && std::is_same_v<AccumT, std::complex<float>>)
+            {
+                ptrD = static_cast<AccumT*>(inputs.d);
+            }
+            else if(problem.d().dataType() == rocisa::DataType::ComplexDouble
+                    && std::is_same_v<AccumT, std::complex<double>>)
             {
                 ptrD = static_cast<AccumT*>(inputs.d);
             }
@@ -1618,7 +1790,8 @@ namespace TensileLite
                                                                     sizeM,
                                                                     sizeK,
                                                                     strideMA,
-                                                                    strideKA);
+                                                                    strideKA,
+                                                                    aConjugate);
                                 loadFastPathBTile<BLOCK_K, BLOCK_N>(curBatchB,
                                                                     bReg.data(),
                                                                     n0,
@@ -1626,7 +1799,8 @@ namespace TensileLite
                                                                     sizeN,
                                                                     sizeK,
                                                                     strideNB,
-                                                                    strideKB);
+                                                                    strideKB,
+                                                                    bConjugate);
 
                                 std::array<AccumT, BLOCK_M * BLOCK_N> tilePartial = {0};
                                 innerFastPathReduction<BLOCK_M, BLOCK_N, BLOCK_K, MathOpAccumT>(
@@ -1667,7 +1841,8 @@ namespace TensileLite
                                                                     sizeM,
                                                                     sizeK,
                                                                     strideMA,
-                                                                    strideKA);
+                                                                    strideKA,
+                                                                    aConjugate);
                                 loadFastPathBTile<BLOCK_K, BLOCK_N>(curBatchB,
                                                                     bReg.data(),
                                                                     n0,
@@ -1675,7 +1850,8 @@ namespace TensileLite
                                                                     sizeN,
                                                                     sizeK,
                                                                     strideNB,
-                                                                    strideKB);
+                                                                    strideKB,
+                                                                    bConjugate);
                                 innerFastPathReduction<BLOCK_M, BLOCK_N, BLOCK_K, MathOpAccumT>(
                                     aReg.data(), bReg.data(), cReg.data());
                             }
@@ -1805,15 +1981,18 @@ namespace TensileLite
             }
 
             // 6. Write Back
-            if(problem.d().dataType() == rocisa::DataType::Half)
+            if constexpr(!IsStdComplex<AccumT>::value)
             {
-                storeFrom<AccumT, TensileLite::Half>(
-                    inputs.d, shadowD, problem.d().totalAllocatedElements());
-            }
-            else if(problem.d().dataType() == rocisa::DataType::BFloat16)
-            {
-                storeFrom<AccumT, TensileLite::BFloat16>(
-                    inputs.d, shadowD, problem.d().totalAllocatedElements());
+                if(problem.d().dataType() == rocisa::DataType::Half)
+                {
+                    storeFrom<AccumT, TensileLite::Half>(
+                        inputs.d, shadowD, problem.d().totalAllocatedElements());
+                }
+                else if(problem.d().dataType() == rocisa::DataType::BFloat16)
+                {
+                    storeFrom<AccumT, TensileLite::BFloat16>(
+                        inputs.d, shadowD, problem.d().totalAllocatedElements());
+                }
             }
 
         }
@@ -2293,21 +2472,8 @@ namespace TensileLite
         uint64_t getInputContractionInputsTypeId(ContractionProblemGemm const& problem)
         {
             // retreive alpha/beta type set via setAlpha/BetaType()
-            auto alphaType = problem.alphaType();
-            auto betaType  = problem.betaType();
-
-            // Backward-compatible: when setAlpha/BetaType() wasn't called, use the old way
-            // Could remove after rocBLAS is updated
-            if(alphaType == rocisa::DataType::None)
-            {
-                alphaType = problem.a().dataType() == rocisa::DataType::BFloat16
-                                ? rocisa::DataType::Float
-                                : problem.d().dataType();
-            }
-            if(betaType == rocisa::DataType::None)
-            {
-                betaType = alphaType;
-            }
+            auto alphaType = resolvedReferenceAlphaType(problem);
+            auto betaType  = resolvedReferenceBetaType(problem, alphaType);
 
             if(problem.useE())
             {
@@ -3135,9 +3301,17 @@ namespace TensileLite
             if(tryFastPath && isDenseEnoughForFastPath && isFastPathEligible(problem))
             {
                 ScopedTimer timer("solve_cpu_fast");
+                bool isComplexFloat
+                    = (problem.d().dataType() == rocisa::DataType::ComplexFloat);
+                bool isComplexDouble
+                    = (problem.d().dataType() == rocisa::DataType::ComplexDouble);
                 bool isDouble = (problem.d().dataType() == rocisa::DataType::Double);
                 if(isDouble)
                     solveCPUFast<double>(problem, inputs);
+                else if(isComplexDouble)
+                    solveCPUFast<std::complex<double>>(problem, inputs);
+                else if(isComplexFloat)
+                    solveCPUFast<std::complex<float>>(problem, inputs);
                 else if(problem.f32XdlMathOp() == rocisa::DataType::XFloat32)
                     solveCPUFast<float, XFloat32>(problem, inputs);
                 else
