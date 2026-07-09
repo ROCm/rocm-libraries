@@ -230,7 +230,7 @@ class SpinnyThing:
     def increment(self, value=1):
         sys.stdout.write("\b" + self.chars[self.index])  # pragma: no mutate
         sys.stdout.flush()
-        self.index = (self.index + 1) % len(self.chars)
+        self.index = (self.index + value) % len(self.chars)
 
     def finish(self):
         sys.stdout.write("\b*\n")

@@ -358,13 +358,14 @@ are behaviorally equivalent on the specific public surface under test:
 - `Tensile.TensileLogic.ValidWorkGroupMappingXCC.x__cu_count_from_path__mutmut_9` —
   changing `cu` to `CU` inside the regex literal is equivalent because the search
   uses `re.IGNORECASE`.
-- `Tensile.TensileLogic.ValidWorkGroupMappingXCC.x__validateWorkGroupMappingXCC__mutmut_14` —
-  within this validator, an absent `WorkGroupMappingXCC` key is accepted whether
-  the local fallback is `-1` or `+1`; the function does not persist the fallback,
-  and `1` is a positive power of two that divides every positive CU count.
-- `Tensile.Common.Utilities.xǁSpinnyThingǁincrement__mutmut_1` — the hidden
-  mutant function changes only the unused `value` default from `1` to `2`; the
-  body ignores `value`, so no runtime behavior changes.
+
+Two former survivors are intentionally no longer accepted equivalents:
+`Tensile.TensileLogic.ValidWorkGroupMappingXCC.x__validateWorkGroupMappingXCC__mutmut_14`
+is avoided by making the missing-key / `-1` sentinel branch explicit before
+reading the fixed `WorkGroupMappingXCC` value, and
+`Tensile.Common.Utilities.xǁSpinnyThingǁincrement__mutmut_1` is killable because
+`SpinnyThing.increment` now uses its `value` parameter to advance by caller
+selected steps.
 
 ## D16 — BufferLoad/BufferStore promoted to Required Parameters
 **Context** kernel basename hash changes across all archs; assembly verified unchanged/correct; no err or kernel-count changes."

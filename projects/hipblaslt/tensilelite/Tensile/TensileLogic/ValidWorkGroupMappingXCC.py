@@ -69,10 +69,11 @@ def _validateWorkGroupMappingXCC(solution: dict, filepath: Path) -> bool:
         if cu_count <= 0:
             return True  # Not a CU-variant directory; skip this check
 
-        xcc = solution.get("WorkGroupMappingXCC", -1)
-        if xcc == -1:
+        xcc_minus_one = "WorkGroupMappingXCC" not in solution or solution["WorkGroupMappingXCC"] == -1
+        if xcc_minus_one:
             return True
 
+        xcc = solution["WorkGroupMappingXCC"]
         if xcc <= 0:
             _report_xcc_failure(filepath, solution, f"WorkGroupMappingXCC must be -1 or positive (WorkGroupMappingXCC={xcc})")
             return False
