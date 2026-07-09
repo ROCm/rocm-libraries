@@ -72,18 +72,31 @@ def arg_into_list(arg) -> list:
     arg = re.sub(r"['\"]|['\']",'', arg)
     return arg.split(';')
 
+def rocm_executable(exe_name: str, therock_bin_dir: str | None = None) -> str:
+  bin_dir = therock_bin_dir or os.environ.get("THEROCK_BIN_DIR")
+  if bin_dir:
+    candidate = Path(bin_dir) / exe_name
+    if candidate.exists():
+      return str(candidate)
+  hip_dir = os.environ.get("HIP_PATH")
+  if hip_dir:
+    candidate = Path(hip_dir) / "bin" / exe_name
+    if candidate.exists():
+      return str(candidate)
+  return exe_name  # hope it's on PATH
+
 def vram_detect():
     global OS_info
     OS_info["VRAM"] = 0
     if os.name == "nt":
-        cmd = "hipinfo.exe"
+        cmd = rocm_executable("hipinfo.exe")
         process = subprocess.run([cmd], stdout=subprocess.PIPE)
         for line_in in process.stdout.decode().splitlines():
             if 'totalGlobalMem' in line_in:
                 OS_info["VRAM"] = float(line_in.split()[1])
                 break
     else:
-        cmd = "rocminfo"
+        cmd = rocm_executable("rocminfo")
         process = subprocess.run([cmd], stdout=subprocess.PIPE)
         for line_in in process.stdout.decode().splitlines():
             match = re.search(r'.*Size:.*([0-9]+)\(.*\).*KB', line_in, re.IGNORECASE)
