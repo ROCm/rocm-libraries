@@ -9,6 +9,11 @@
 // Default mode uses compact tensors and the RUN_UNTIL_STABLE strategy. Use
 // --strategy=average to benchmark with FIXED_AVERAGE instead, --iterations=N to
 // set the iteration count, and --large for larger tensor dimensions.
+//
+// --graph= selects the operation to autotune:
+//   conv       conv_fprop; MIOpen exhaustive/benchmarking search does real work.
+//   batchnorm  batchnorm_inference; two engines compete (HIP_MLOPS vs MIOPEN)
+//              and autotune picks the faster one.
 
 #include <algorithm>
 #include <filesystem>
@@ -48,25 +53,22 @@ static std::string getEngineName(int64_t engineId)
     }
 }
 
-// --- ConvGraph helper ---
+// --- Graph helpers ---
 
-/// All state needed to run autotune scenarios against a convolution graph.
-struct ConvGraphState
+// All state needed to run autotune scenarios against a graph, independent of
+// the operation. The variant pack is keyed by tensor UID; scenarios treat it as
+// opaque. tensors keeps the device buffers alive for the graph's lifetime.
+struct GraphState
 {
     std::shared_ptr<graph::Graph> graph;
-    std::shared_ptr<graph::Tensor_attributes> xAttr;
-    std::shared_ptr<graph::Tensor_attributes> wAttr;
-    std::shared_ptr<graph::Tensor_attributes> yAttr;
-    std::unique_ptr<utilities::Tensor<float>> xTensor;
-    std::unique_ptr<utilities::Tensor<float>> wTensor;
-    std::unique_ptr<utilities::Tensor<float>> yTensor;
     std::unordered_map<int64_t, void*> variantPack;
+    std::vector<std::unique_ptr<utilities::Tensor<float>>> tensors;
 };
 
 /// Creates a convolution fprop graph, validates it, builds the operation graph,
 /// and allocates device tensors. Does NOT call build() (that is the simple path).
 /// For autotune, call add_*() + autotune() after this function.
-static ConvGraphState buildConvGraph(hipdnnHandle_t handle, bool largeMode)
+static GraphState buildConvGraph(hipdnnHandle_t handle, bool largeMode)
 {
     // Tensor dimensions: compact by default for fast completion, larger with --large
     // for meaningful timing differentiation.
@@ -122,17 +124,95 @@ static ConvGraphState buildConvGraph(hipdnnHandle_t handle, bool largeMode)
     variantPack[wAttr->get_uid()] = wTensor->memory().deviceData();
     variantPack[yAttr->get_uid()] = yTensor->memory().deviceData();
 
-    ConvGraphState state;
+    GraphState state;
     state.graph = std::move(graph);
-    state.xAttr = std::move(xAttr);
-    state.wAttr = std::move(wAttr);
-    state.yAttr = std::move(yAttr);
-    state.xTensor = std::move(xTensor);
-    state.wTensor = std::move(wTensor);
-    state.yTensor = std::move(yTensor);
     state.variantPack = std::move(variantPack);
+    state.tensors.push_back(std::move(xTensor));
+    state.tensors.push_back(std::move(wTensor));
+    state.tensors.push_back(std::move(yTensor));
 
     return state;
+}
+
+// Creates a batchnorm_inference graph, validates it, builds the operation graph,
+// and allocates device tensors. Surfaces HIP_MLOPS_ENGINE and MIOPEN_ENGINE as
+// competing engines for autotune. fp32 IO/stats/compute, NCHW.
+static GraphState buildBatchNormGraph(hipdnnHandle_t handle, bool largeMode)
+{
+    const int64_t n = largeMode ? 32 : 1;
+    const int64_t c = largeMode ? 128 : 16;
+    const int64_t h = largeMode ? 32 : 16;
+    const int64_t w = largeMode ? 32 : 16;
+
+    const auto ioType = hipdnn_frontend::DataType::FLOAT;
+    const auto layout = utilities::TensorLayout::NCHW;
+
+    auto graph = std::make_shared<graph::Graph>();
+    graph->set_io_data_type(ioType)
+        .set_intermediate_data_type(hipdnn_frontend::DataType::FLOAT)
+        .set_compute_data_type(hipdnn_frontend::DataType::FLOAT);
+
+    auto xAttr = createTensor({n, c, h, w}, ioType, layout);
+    auto meanAttr = createTensor({1, c, 1, 1}, hipdnn_frontend::DataType::FLOAT, layout);
+    auto invVarAttr = createTensor({1, c, 1, 1}, hipdnn_frontend::DataType::FLOAT, layout);
+    auto scaleAttr = createTensor({1, c, 1, 1}, hipdnn_frontend::DataType::FLOAT, layout);
+    auto biasAttr = createTensor({1, c, 1, 1}, hipdnn_frontend::DataType::FLOAT, layout);
+
+    graph::BatchnormInferenceAttributes bnAttributes;
+    bnAttributes.set_name("autotune_batchnorm_inference");
+
+    auto yAttr = graph->batchnorm_inference(
+        xAttr, meanAttr, invVarAttr, scaleAttr, biasAttr, bnAttributes);
+    yAttr->set_output(true);
+
+    HIPDNN_FE_CHECK(graph->validate());
+    HIPDNN_FE_CHECK(graph->build_operation_graph(handle));
+
+    auto xTensor = std::make_unique<utilities::Tensor<float>>(xAttr->get_dim(), layout);
+    auto meanTensor = std::make_unique<utilities::Tensor<float>>(meanAttr->get_dim(), layout);
+    auto invVarTensor = std::make_unique<utilities::Tensor<float>>(invVarAttr->get_dim(), layout);
+    auto scaleTensor = std::make_unique<utilities::Tensor<float>>(scaleAttr->get_dim(), layout);
+    auto biasTensor = std::make_unique<utilities::Tensor<float>>(biasAttr->get_dim(), layout);
+    auto yTensor = std::make_unique<utilities::Tensor<float>>(yAttr->get_dim(), layout);
+
+    xTensor->fillWithRandomValues(0.0f, 1.0f);
+    meanTensor->fillWithRandomValues(0.0f, 1.0f);
+    invVarTensor->fillWithRandomValues(0.1f, 1.0f);
+    scaleTensor->fillWithRandomValues(0.0f, 1.0f);
+    biasTensor->fillWithRandomValues(0.0f, 1.0f);
+    yTensor->fillWithValue(0.0f);
+
+    std::unordered_map<int64_t, void*> variantPack;
+    variantPack[xAttr->get_uid()] = xTensor->memory().deviceData();
+    variantPack[meanAttr->get_uid()] = meanTensor->memory().deviceData();
+    variantPack[invVarAttr->get_uid()] = invVarTensor->memory().deviceData();
+    variantPack[scaleAttr->get_uid()] = scaleTensor->memory().deviceData();
+    variantPack[biasAttr->get_uid()] = biasTensor->memory().deviceData();
+    variantPack[yAttr->get_uid()] = yTensor->memory().deviceData();
+
+    GraphState state;
+    state.graph = std::move(graph);
+    state.variantPack = std::move(variantPack);
+    state.tensors.push_back(std::move(xTensor));
+    state.tensors.push_back(std::move(meanTensor));
+    state.tensors.push_back(std::move(invVarTensor));
+    state.tensors.push_back(std::move(scaleTensor));
+    state.tensors.push_back(std::move(biasTensor));
+    state.tensors.push_back(std::move(yTensor));
+
+    return state;
+}
+
+enum class GraphOp
+{
+    CONV,
+    BATCH_NORM
+};
+
+static GraphState buildGraph(GraphOp op, hipdnnHandle_t handle, bool largeMode)
+{
+    return op == GraphOp::BATCH_NORM ? buildBatchNormGraph(handle, largeMode)
+                                     : buildConvGraph(handle, largeMode);
 }
 
 // --- Scenario 1: Quick Autotune ---
@@ -140,13 +220,11 @@ static ConvGraphState buildConvGraph(hipdnnHandle_t handle, bool largeMode)
 /// Simplest possible autotune flow:
 /// add_all_engines() -> autotune() -> execute()
 static void demonstrateStandardAutotune(hipdnnHandle_t handle,
-                                        bool largeMode,
+                                        GraphState& state,
                                         AutotuneStrategy strategy,
                                         int iterations)
 {
     std::cout << "\n=== Scenario 1: Quick Autotune ===\n";
-
-    auto state = buildConvGraph(handle, largeMode);
 
     // Discover and add all available engines
     HIPDNN_FE_CHECK(state.graph->add_all_engines());
@@ -186,16 +264,7 @@ static void demonstrateStandardAutotune(hipdnnHandle_t handle,
     // Execute with the autotuned engine
     HIPDNN_FE_CHECK(state.graph->execute(handle, state.variantPack, execWorkspace.get()));
 
-    // Verify output
-    state.yTensor->memory().markDeviceModified();
-    const auto* yHostPtr = state.yTensor->memory().hostData();
-    std::cout << "  Execution OK, output[0..4]: ";
-    for(int i = 0; i < 5; ++i)
-    {
-        std::cout << yHostPtr[i] << " ";
-    }
-    std::cout << '\n';
-
+    std::cout << "  Execution OK\n";
     std::cout << "  Autotuned successfully.\n";
 }
 
@@ -204,13 +273,11 @@ static void demonstrateStandardAutotune(hipdnnHandle_t handle,
 /// Uses EXHAUSTIVE mode and inspects the ranked results.
 /// Prints a table showing all engines with timing and status.
 static void demonstrateExhaustiveAutotune(hipdnnHandle_t handle,
-                                          bool largeMode,
+                                          GraphState& state,
                                           AutotuneStrategy strategy,
                                           int iterations)
 {
     std::cout << "\n=== Scenario 2: Exhaustive Autotune ===\n";
-
-    auto state = buildConvGraph(handle, largeMode);
 
     // Discover and add all available engines
     HIPDNN_FE_CHECK(state.graph->add_all_engines());
@@ -246,9 +313,9 @@ static void demonstrateExhaustiveAutotune(hipdnnHandle_t handle,
     // Print ranked results table
     std::cout << "  " << std::left << std::setw(6) << "Rank" << std::setw(30) << "Engine"
               << std::setw(12) << "Min (ms)" << std::setw(12) << "Avg (ms)" << std::setw(14)
-              << "Workspace" << std::setw(10) << "Converged" << std::setw(12) << "Exhaustive"
-              << '\n';
-    std::cout << "  " << std::string(96, '-') << '\n';
+              << "Workspace" << std::setw(10) << "Converged" << std::setw(8) << "Iters"
+              << std::setw(12) << "Exhaustive" << '\n';
+    std::cout << "  " << std::string(104, '-') << '\n';
 
     for(const auto& result : results)
     {
@@ -263,13 +330,14 @@ static void demonstrateExhaustiveAutotune(hipdnnHandle_t handle,
             std::cout << std::setw(12) << std::fixed << std::setprecision(4) << result.minTimeMs
                       << std::setw(12) << std::fixed << std::setprecision(4) << result.avgTimeMs
                       << std::setw(14) << result.workspaceSize << std::setw(10)
-                      << (result.converged ? "yes" : "no") << std::setw(12)
-                      << (result.ranExhaustive ? "yes" : "no");
+                      << (result.converged ? "yes" : "no") << std::setw(8) << result.iterationsRun
+                      << std::setw(12) << (result.ranExhaustive ? "yes" : "no");
         }
         else
         {
             std::cout << std::setw(12) << "n/a" << std::setw(12) << "n/a" << std::setw(14)
-                      << result.workspaceSize << std::setw(10) << "n/a" << std::setw(12) << "n/a";
+                      << result.workspaceSize << std::setw(10) << "n/a" << std::setw(8) << "n/a"
+                      << std::setw(12) << "n/a";
             if(!result.errorMessage.empty())
             {
                 std::cout << " [" << result.errorMessage << "]";
@@ -321,13 +389,11 @@ static void demonstrateExhaustiveAutotune(hipdnnHandle_t handle,
 /// results with succeeded=false. If the fastest plan is too large, the
 /// next-best plan that fits is selected automatically.
 static void demonstrateFilteredAutotune(hipdnnHandle_t handle,
-                                        bool largeMode,
+                                        GraphState& state,
                                         AutotuneStrategy strategy,
                                         int iterations)
 {
     std::cout << "\n=== Scenario 3: Filtered Autotune (Workspace Constrained) ===\n";
-
-    auto state = buildConvGraph(handle, largeMode);
 
     // Step 1: Discover available engines
     std::vector<EngineConfigInfo> configs;
@@ -402,15 +468,13 @@ static void demonstrateFilteredAutotune(hipdnnHandle_t handle,
 /// Autotunes and saves results to a JSON config file that can be reused via
 /// HIPDNN_HEUR_CONFIG_PATH environment variable.
 static void demonstrateSaveToConfigFile(hipdnnHandle_t handle,
-                                        bool largeMode,
+                                        GraphState& state,
                                         AutotuneStrategy strategy,
                                         int iterations)
 {
     std::cout << "\n=== Scenario 4: Save Results to Config File ===\n";
 
     const std::filesystem::path configFile = "sample_autotune_results.json";
-
-    auto state = buildConvGraph(handle, largeMode);
 
     // Discover and add all available engines
     HIPDNN_FE_CHECK(state.graph->add_all_engines());
@@ -459,13 +523,11 @@ static void demonstrateSaveToConfigFile(hipdnnHandle_t handle,
 /// Demonstrates the compiled-plan autotune path (cuDNN-compatible workflow):
 /// create_execution_plans() -> build_plans(ALL) -> autotune() -> execute()
 static void demonstrateCompiledPlanAutotune(hipdnnHandle_t handle,
-                                            bool largeMode,
+                                            GraphState& state,
                                             AutotuneStrategy strategy,
                                             int iterations)
 {
     std::cout << "\n=== Scenario 5: Compiled-Plan Autotune ===\n";
-
-    auto state = buildConvGraph(handle, largeMode);
 
     // Create execution plans using fallback heuristic mode
     HIPDNN_FE_CHECK(state.graph->create_execution_plans({HeuristicMode::FALLBACK}));
@@ -501,8 +563,9 @@ static void demonstrateCompiledPlanAutotune(hipdnnHandle_t handle,
 
     // Print results table (ranked by autotune performance)
     std::cout << "  " << std::left << std::setw(6) << "Rank" << std::setw(30) << "Plan Name"
-              << std::setw(14) << "Workspace" << std::setw(12) << "Time (ms)" << '\n';
-    std::cout << "  " << std::string(62, '-') << '\n';
+              << std::setw(14) << "Workspace" << std::setw(12) << "Time (ms)" << std::setw(8)
+              << "Iters" << '\n';
+    std::cout << "  " << std::string(70, '-') << '\n';
 
     for(size_t i = 0; i < results.size(); ++i)
     {
@@ -515,11 +578,12 @@ static void demonstrateCompiledPlanAutotune(hipdnnHandle_t handle,
 
         if(result.succeeded)
         {
-            std::cout << std::setw(12) << std::fixed << std::setprecision(4) << result.minTimeMs;
+            std::cout << std::setw(12) << std::fixed << std::setprecision(4) << result.minTimeMs
+                      << std::setw(8) << result.iterationsRun;
         }
         else
         {
-            std::cout << std::setw(12) << "FAIL";
+            std::cout << std::setw(12) << "FAIL" << std::setw(8) << "n/a";
         }
         std::cout << '\n';
     }
@@ -542,11 +606,9 @@ static void demonstrateCompiledPlanAutotune(hipdnnHandle_t handle,
 /// Demonstrates the cuDNN-compatible manual benchmark loop:
 /// create_execution_plans() -> build_plans(ALL) -> plan-indexed iteration
 /// with HIP event timing and workspace filtering.
-static void demonstrateManualBenchmarkLoop(hipdnnHandle_t handle, bool largeMode)
+static void demonstrateManualBenchmarkLoop(hipdnnHandle_t handle, GraphState& state)
 {
     std::cout << "\n=== Scenario 6: Manual Benchmark Loop ===\n";
-
-    auto state = buildConvGraph(handle, largeMode);
 
     // Create execution plans and build all candidates
     HIPDNN_FE_CHECK(state.graph->create_execution_plans({HeuristicMode::FALLBACK}));
@@ -662,6 +724,7 @@ struct AutotuneSampleConfig
     bool largeMode = false;
     AutotuneStrategy strategy = AutotuneStrategy::RUN_UNTIL_STABLE; // --strategy
     int iterations = 0; // -- iterations; 0 = strategy defaults, >0 = override
+    GraphOp graphOp = GraphOp::CONV; // --graph
 };
 
 static AutotuneSampleConfig parseArgs(int argc, char** argv)
@@ -677,6 +740,9 @@ static AutotuneSampleConfig parseArgs(int argc, char** argv)
             std::cout
                 << "Usage: " << argv[0] << " [OPTIONS]\n"
                 << "  --scenario=N    Run specific scenario (1-6, default=all)\n"
+                << "  --graph=G       Operation to autotune: conv (default) or batchnorm.\n"
+                << "                  conv exercises MIOpen exhaustive tuning; batchnorm\n"
+                << "                  shows cross-engine selection (HIP_MLOPS vs MIOPEN).\n"
                 << "  --large         Use larger tensor dimensions\n"
                 << "  --strategy=S    Benchmarking strategy: stable (RUN_UNTIL_STABLE,\n"
                 << "                  default) or average (FIXED_AVERAGE)\n"
@@ -714,6 +780,23 @@ static AutotuneSampleConfig parseArgs(int argc, char** argv)
         else if(arg == "--large")
         {
             cfg.largeMode = true;
+        }
+        else if(arg.rfind("--graph=", 0) == 0)
+        {
+            const std::string value = arg.substr(8);
+            if(value == "conv")
+            {
+                cfg.graphOp = GraphOp::CONV;
+            }
+            else if(value == "batchnorm")
+            {
+                cfg.graphOp = GraphOp::BATCH_NORM;
+            }
+            else
+            {
+                std::cerr << "Invalid --graph: " << value << " (use conv or batchnorm)\n";
+                exit(EXIT_FAILURE);
+            }
         }
         else if(arg.rfind("--strategy=", 0) == 0)
         {
@@ -780,34 +863,36 @@ int main(int argc, char* argv[])
         hipdnnHandle_t handle = nullptr;
         HIPDNN_CHECK(hipdnnCreate(&handle));
 
+        // Each scenario runs against a fresh graph built for the selected operation.
         if(config.scenario == 0 || config.scenario == 1)
         {
-            demonstrateStandardAutotune(
-                handle, config.largeMode, config.strategy, config.iterations);
+            auto state = buildGraph(config.graphOp, handle, config.largeMode);
+            demonstrateStandardAutotune(handle, state, config.strategy, config.iterations);
         }
         if(config.scenario == 0 || config.scenario == 2)
         {
-            demonstrateExhaustiveAutotune(
-                handle, config.largeMode, config.strategy, config.iterations);
+            auto state = buildGraph(config.graphOp, handle, config.largeMode);
+            demonstrateExhaustiveAutotune(handle, state, config.strategy, config.iterations);
         }
         if(config.scenario == 0 || config.scenario == 3)
         {
-            demonstrateFilteredAutotune(
-                handle, config.largeMode, config.strategy, config.iterations);
+            auto state = buildGraph(config.graphOp, handle, config.largeMode);
+            demonstrateFilteredAutotune(handle, state, config.strategy, config.iterations);
         }
         if(config.scenario == 0 || config.scenario == 4)
         {
-            demonstrateSaveToConfigFile(
-                handle, config.largeMode, config.strategy, config.iterations);
+            auto state = buildGraph(config.graphOp, handle, config.largeMode);
+            demonstrateSaveToConfigFile(handle, state, config.strategy, config.iterations);
         }
         if(config.scenario == 0 || config.scenario == 5)
         {
-            demonstrateCompiledPlanAutotune(
-                handle, config.largeMode, config.strategy, config.iterations);
+            auto state = buildGraph(config.graphOp, handle, config.largeMode);
+            demonstrateCompiledPlanAutotune(handle, state, config.strategy, config.iterations);
         }
         if(config.scenario == 0 || config.scenario == 6)
         {
-            demonstrateManualBenchmarkLoop(handle, config.largeMode);
+            auto state = buildGraph(config.graphOp, handle, config.largeMode);
+            demonstrateManualBenchmarkLoop(handle, state);
         }
 
         HIPDNN_CHECK(hipdnnDestroy(handle));
