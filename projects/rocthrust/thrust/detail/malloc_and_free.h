@@ -63,9 +63,7 @@ malloc(const thrust::detail::execution_policy_base<DerivedPolicy>& exec, std::si
 }
 
 // XXX WAR nvbug 992955
-#if defined(__NVCC__) || defined(_NVHPC_CUDA)                                  \
-  || (defined(__CUDA__) && THRUST_HOST_COMPILER == THRUST_HOST_COMPILER_CLANG) \
-  || THRUST_HOST_COMPILER == THRUST_HOST_COMPILER_NVRTC
+#if THRUST_HAS_CUDA_COMPILER()
 #  if CUDART_VERSION < 5000
 
 // cudafe generates unqualified calls to free(int *volatile)
@@ -77,7 +75,7 @@ inline THRUST_HOST_DEVICE void free(int* volatile ptr)
 }
 
 #  endif // CUDART_VERSION
-#endif // _CCCL_CUDA_COMPILER
+#endif // THRUST_CUDA_COMPILER
 
 THRUST_EXEC_CHECK_DISABLE
 template <typename DerivedPolicy, typename Pointer>

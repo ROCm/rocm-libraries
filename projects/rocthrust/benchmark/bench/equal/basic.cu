@@ -1,5 +1,5 @@
 // SPDX-FileCopyrightText: Copyright (c) 2024, NVIDIA CORPORATION. All rights reserved.
-// SPDX-FileCopyrightText: Modifications Copyright (c) 2025 Advanced Micro Devices, Inc. All rights reserved.
+// SPDX-FileCopyrightText: Modifications Copyright (c) 2025-2026 Advanced Micro Devices, Inc. All rights reserved.
 // SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 
 // Benchmark utils
@@ -100,10 +100,9 @@ void run_benchmark(benchmark::State& state,
   }
 
 template <class Benchmark>
-void add_benchmarks(
-  const std::string& name, std::vector<benchmark::internal::Benchmark*>& benchmarks, const std::string seed_type)
+void add_benchmarks(const std::string& name, std::vector<benchmark::Benchmark*>& benchmarks, const std::string seed_type)
 {
-  std::vector<benchmark::internal::Benchmark*> bs;
+  std::vector<benchmark::Benchmark*> bs;
   BENCHMARK_TYPE(int8_t)
   BENCHMARK_TYPE(int16_t)
   BENCHMARK_TYPE(int32_t)
@@ -131,7 +130,7 @@ int main(int argc, char* argv[])
   benchmark::AddCustomContext("seed", seed_type);
 
   // Add benchmark
-  std::vector<benchmark::internal::Benchmark*> benchmarks;
+  std::vector<benchmark::Benchmark*> benchmarks;
   add_benchmarks<basic>("basic", benchmarks, seed_type);
 
   // Use manual timing

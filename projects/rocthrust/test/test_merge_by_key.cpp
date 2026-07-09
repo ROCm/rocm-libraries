@@ -1,6 +1,6 @@
 /*
  *  Copyright 2008-2013 NVIDIA Corporation
- *  Modifications Copyright© 2019-2025 Advanced Micro Devices, Inc. All rights reserved.
+ *  Modifications Copyright© 2019-2026 Advanced Micro Devices, Inc. All rights reserved.
  *
  *  Licensed under the Apache License, Version 2.0 (the "License");
  *  you may not use this file except in compliance with the License.
@@ -181,7 +181,7 @@ TEST(MergeByKeyTests, TestMergeByKeyDispatchImplicit)
 template <typename T, typename CompareOp, typename... Args>
 auto call_merge_by_key(Args&&... args) -> decltype(thrust::merge_by_key(std::forward<Args>(args)...))
 {
-  THRUST_IF_CONSTEXPR (_THRUST_STD::is_void<CompareOp>::value)
+  if constexpr (_THRUST_STD::is_void<CompareOp>::value)
   {
     return thrust::merge_by_key(std::forward<Args>(args)...);
   }
@@ -226,7 +226,7 @@ TYPED_TEST(MergeByKeyTestsClass, TestMergeByKey)
         const thrust::host_vector<T> h_a_vals(random_vals.begin(), random_vals.begin() + size_a);
         const thrust::host_vector<T> h_b_vals(random_vals.begin() + size_a, random_vals.end());
 
-        THRUST_IF_CONSTEXPR (_THRUST_STD::is_void<compare_function>::value)
+        if constexpr (_THRUST_STD::is_void<compare_function>::value)
         {
           thrust::stable_sort(h_a_keys.begin(), h_a_keys.end());
           thrust::stable_sort(h_b_keys.begin(), h_b_keys.end());

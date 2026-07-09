@@ -1,6 +1,6 @@
 /*
  *  Copyright 2008-2013 NVIDIA Corporation
- *  Modifications Copyright© 2019-2025 Advanced Micro Devices, Inc. All rights reserved.
+ *  Modifications Copyright© 2019-2026 Advanced Micro Devices, Inc. All rights reserved.
  *
  *  Licensed under the Apache License, Version 2.0 (the "License");
  *  you may not use this file except in compliance with the License.
@@ -24,6 +24,8 @@
 #include "test_param_fixtures.hpp"
 #include "test_real_assertions.hpp"
 #include "test_utils.hpp"
+
+#include _THRUST_STD_INCLUDE(cstdint)
 
 TESTS_DEFINE(SingleValueTests, NumericalTestsParams);
 
@@ -1011,10 +1013,10 @@ void TestBoundsWithBigIndexesHelper(int magnitude)
   thrust::counting_iterator<long long> end = begin + (1ll << magnitude);
   ASSERT_EQ(thrust::distance(begin, end), 1ll << magnitude);
 
-  thrust::detail::intmax_t distance_low_value =
+  _THRUST_STD::intmax_t distance_low_value =
     thrust::distance(begin, thrust::lower_bound(thrust::device, begin, end, 17));
 
-  thrust::detail::intmax_t distance_high_value =
+  _THRUST_STD::intmax_t distance_high_value =
     thrust::distance(begin, thrust::lower_bound(thrust::device, begin, end, (1ll << magnitude) - 17));
 
   ASSERT_EQ(distance_low_value, 16);

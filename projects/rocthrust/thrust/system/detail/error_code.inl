@@ -54,10 +54,10 @@ error_code ::error_code(int val, const error_category& cat)
 template <typename ErrorCodeEnum>
 error_code ::error_code(ErrorCodeEnum e
 // XXX WAR msvc's problem with enable_if
-#if THRUST_HOST_COMPILER != THRUST_HOST_COMPILER_MSVC
+#if !THRUST_COMPILER(MSVC)
                         ,
                         _THRUST_STD::enable_if_t<is_error_code_enum<ErrorCodeEnum>::value>*
-#endif // THRUST_HOST_COMPILER != THRUST_HOST_COMPILER_MSVC
+#endif // !THRUST_COMPILER(MSVC)
 )
 {
   *this = make_error_code(e);
@@ -71,11 +71,11 @@ void error_code ::assign(int val, const error_category& cat)
 
 template <typename ErrorCodeEnum>
 // XXX WAR msvc's problem with enable_if
-#if THRUST_HOST_COMPILER != THRUST_HOST_COMPILER_MSVC
+#if !THRUST_COMPILER(MSVC)
 _THRUST_STD::enable_if_t<is_error_code_enum<ErrorCodeEnum>::value, error_code>&
 #else
 error_code&
-#endif // THRUST_HOST_COMPILER != THRUST_HOST_COMPILER_MSVC
+#endif // !THRUST_COMPILER(MSVC)
 error_code ::operator=(ErrorCodeEnum e)
 {
   *this = make_error_code(e);

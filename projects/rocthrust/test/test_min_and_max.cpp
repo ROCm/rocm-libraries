@@ -1,6 +1,6 @@
 /*
  *  Copyright 2008-2013 NVIDIA Corporation
- *  Modifications Copyright© 2025 Advanced Micro Devices, Inc. All rights reserved.
+ *  Modifications Copyright© 2026 Advanced Micro Devices, Inc. All rights reserved.
  *
  *  Licensed under the Apache License, Version 2.0 (the "License");
  *  you may not use this file except in compliance with the License.
@@ -46,32 +46,28 @@ TYPED_TEST(MinAndMaxTests, TestMin)
 
   // 2 < 3
   T two(2), three(3);
-  ASSERT_EQ(two, thrust::min THRUST_PREVENT_MACRO_SUBSTITUTION(two, three));
-  ASSERT_EQ(two, thrust::min THRUST_PREVENT_MACRO_SUBSTITUTION(two, three, thrust::less<T>()));
+  ASSERT_EQ(two, _THRUST_STD::min(two, three));
+  ASSERT_EQ(two, _THRUST_STD::min(two, three, thrust::less<T>()));
 
-  ASSERT_EQ(two, thrust::min THRUST_PREVENT_MACRO_SUBSTITUTION(three, two));
-  ASSERT_EQ(two, thrust::min THRUST_PREVENT_MACRO_SUBSTITUTION(three, two, thrust::less<T>()));
+  ASSERT_EQ(two, _THRUST_STD::min(three, two));
+  ASSERT_EQ(two, _THRUST_STD::min(three, two, thrust::less<T>()));
 
-  ASSERT_EQ(three, thrust::min THRUST_PREVENT_MACRO_SUBSTITUTION(two, three, thrust::greater<T>()));
-  ASSERT_EQ(three, thrust::min THRUST_PREVENT_MACRO_SUBSTITUTION(three, two, thrust::greater<T>()));
+  ASSERT_EQ(three, _THRUST_STD::min(two, three, thrust::greater<T>()));
+  ASSERT_EQ(three, _THRUST_STD::min(three, two, thrust::greater<T>()));
 
   using KV = key_value<T, T>;
   KV two_and_two(two, two);
   KV two_and_three(two, three);
 
   // the first element breaks ties
-  ASSERT_EQ_QUIET(two_and_two, thrust::min THRUST_PREVENT_MACRO_SUBSTITUTION(two_and_two, two_and_three));
-  ASSERT_EQ_QUIET(two_and_three, thrust::min THRUST_PREVENT_MACRO_SUBSTITUTION(two_and_three, two_and_two));
+  ASSERT_EQ_QUIET(two_and_two, _THRUST_STD::min(two_and_two, two_and_three));
+  ASSERT_EQ_QUIET(two_and_three, _THRUST_STD::min(two_and_three, two_and_two));
 
-  ASSERT_EQ_QUIET(two_and_two,
-                  thrust::min THRUST_PREVENT_MACRO_SUBSTITUTION(two_and_two, two_and_three, thrust::less<KV>()));
-  ASSERT_EQ_QUIET(two_and_three,
-                  thrust::min THRUST_PREVENT_MACRO_SUBSTITUTION(two_and_three, two_and_two, thrust::less<KV>()));
+  ASSERT_EQ_QUIET(two_and_two, _THRUST_STD::min(two_and_two, two_and_three, thrust::less<KV>()));
+  ASSERT_EQ_QUIET(two_and_three, _THRUST_STD::min(two_and_three, two_and_two, thrust::less<KV>()));
 
-  ASSERT_EQ_QUIET(two_and_two,
-                  thrust::min THRUST_PREVENT_MACRO_SUBSTITUTION(two_and_two, two_and_three, thrust::greater<KV>()));
-  ASSERT_EQ_QUIET(two_and_three,
-                  thrust::min THRUST_PREVENT_MACRO_SUBSTITUTION(two_and_three, two_and_two, thrust::greater<KV>()));
+  ASSERT_EQ_QUIET(two_and_two, _THRUST_STD::min(two_and_two, two_and_three, thrust::greater<KV>()));
+  ASSERT_EQ_QUIET(two_and_three, _THRUST_STD::min(two_and_three, two_and_two, thrust::greater<KV>()));
 }
 
 TYPED_TEST(MinAndMaxTests, TestMax)
@@ -82,30 +78,26 @@ TYPED_TEST(MinAndMaxTests, TestMax)
 
   // 2 < 3
   T two(2), three(3);
-  ASSERT_EQ(three, thrust::max THRUST_PREVENT_MACRO_SUBSTITUTION(two, three));
-  ASSERT_EQ(three, thrust::max THRUST_PREVENT_MACRO_SUBSTITUTION(two, three, thrust::less<T>()));
+  ASSERT_EQ(three, _THRUST_STD::max(two, three));
+  ASSERT_EQ(three, _THRUST_STD::max(two, three, thrust::less<T>()));
 
-  ASSERT_EQ(three, thrust::max THRUST_PREVENT_MACRO_SUBSTITUTION(three, two));
-  ASSERT_EQ(three, thrust::max THRUST_PREVENT_MACRO_SUBSTITUTION(three, two, thrust::less<T>()));
+  ASSERT_EQ(three, _THRUST_STD::max(three, two));
+  ASSERT_EQ(three, _THRUST_STD::max(three, two, thrust::less<T>()));
 
-  ASSERT_EQ(two, thrust::max THRUST_PREVENT_MACRO_SUBSTITUTION(two, three, thrust::greater<T>()));
-  ASSERT_EQ(two, thrust::max THRUST_PREVENT_MACRO_SUBSTITUTION(three, two, thrust::greater<T>()));
+  ASSERT_EQ(two, _THRUST_STD::max(two, three, thrust::greater<T>()));
+  ASSERT_EQ(two, _THRUST_STD::max(three, two, thrust::greater<T>()));
 
   using KV = key_value<T, T>;
   KV two_and_two(two, two);
   KV two_and_three(two, three);
 
   // the first element breaks ties
-  ASSERT_EQ_QUIET(two_and_two, thrust::max THRUST_PREVENT_MACRO_SUBSTITUTION(two_and_two, two_and_three));
-  ASSERT_EQ_QUIET(two_and_three, thrust::max THRUST_PREVENT_MACRO_SUBSTITUTION(two_and_three, two_and_two));
+  ASSERT_EQ_QUIET(two_and_two, _THRUST_STD::max(two_and_two, two_and_three));
+  ASSERT_EQ_QUIET(two_and_three, _THRUST_STD::max(two_and_three, two_and_two));
 
-  ASSERT_EQ_QUIET(two_and_two,
-                  thrust::max THRUST_PREVENT_MACRO_SUBSTITUTION(two_and_two, two_and_three, thrust::less<KV>()));
-  ASSERT_EQ_QUIET(two_and_three,
-                  thrust::max THRUST_PREVENT_MACRO_SUBSTITUTION(two_and_three, two_and_two, thrust::less<KV>()));
+  ASSERT_EQ_QUIET(two_and_two, _THRUST_STD::max(two_and_two, two_and_three, thrust::less<KV>()));
+  ASSERT_EQ_QUIET(two_and_three, _THRUST_STD::max(two_and_three, two_and_two, thrust::less<KV>()));
 
-  ASSERT_EQ_QUIET(two_and_two,
-                  thrust::max THRUST_PREVENT_MACRO_SUBSTITUTION(two_and_two, two_and_three, thrust::greater<KV>()));
-  ASSERT_EQ_QUIET(two_and_three,
-                  thrust::max THRUST_PREVENT_MACRO_SUBSTITUTION(two_and_three, two_and_two, thrust::greater<KV>()));
+  ASSERT_EQ_QUIET(two_and_two, _THRUST_STD::max(two_and_two, two_and_three, thrust::greater<KV>()));
+  ASSERT_EQ_QUIET(two_and_three, _THRUST_STD::max(two_and_three, two_and_two, thrust::greater<KV>()));
 }

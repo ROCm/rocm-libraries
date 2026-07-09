@@ -1,6 +1,6 @@
 /*
  *  Copyright 2008-2013 NVIDIA Corporation
- *  Modifications Copyright© 2019-2025 Advanced Micro Devices, Inc. All rights reserved.
+ *  Modifications Copyright© 2019-2026 Advanced Micro Devices, Inc. All rights reserved.
  *
  *  Licensed under the Apache License, Version 2.0 (the "License");
  *  you may not use this file except in compliance with the License.
@@ -37,7 +37,7 @@ void TestVectorManipulation(size_t n)
   ASSERT_EQUAL(test1.size(), n);
   ASSERT_EQUAL((test1 == std::vector<T>(n, T(3))), true);
 
-#if (THRUST_HOST_COMPILER == THRUST_HOST_COMPILER_MSVC) && (_MSC_VER <= 1400)
+#if THRUST_COMPILER(MSVC, <=, 14)
   // XXX MSVC 2005's STL unintentionally uses adl to dispatch advance which
   //     produces an ambiguity between std::advance & thrust::advance
   //     don't produce a KNOWN_FAILURE, just ignore the issue

@@ -1,6 +1,6 @@
 /*
- *  Copyright 2008-2025 NVIDIA Corporation
- *  Modifications Copyright (c) 2025, Advanced Micro Devices, Inc.  All rights reserved.
+ *  Copyright 2008-2018 NVIDIA Corporation
+ *  Modifications Copyright (c) 2026, Advanced Micro Devices, Inc.  All rights reserved.
  *
  *  Licensed under the Apache License, Version 2.0 (the "License");
  *  you may not use this file except in compliance with the License.
@@ -45,53 +45,8 @@
 #if !_THRUST_HAS_DEVICE_SYSTEM_STD
 #  include <cstddef>
 #  include <type_traits>
+#  include <utility>
 #endif
-
-THRUST_NAMESPACE_BEGIN
-
-// define null_type for backwards compatibility
-struct THRUST_DEPRECATED_BECAUSE("Please remove null_type from parameters to tuple<...>") null_type
-{};
-
-THRUST_SUPPRESS_DEPRECATED_PUSH
-
-#ifndef THRUST_DOXYGEN_INVOKED
-
-THRUST_HOST_DEVICE inline bool operator==(const null_type&, const null_type&)
-{
-  return true;
-}
-
-THRUST_HOST_DEVICE inline bool operator>=(const null_type&, const null_type&)
-{
-  return true;
-}
-
-THRUST_HOST_DEVICE inline bool operator<=(const null_type&, const null_type&)
-{
-  return true;
-}
-
-THRUST_HOST_DEVICE inline bool operator!=(const null_type&, const null_type&)
-{
-  return false;
-}
-
-THRUST_HOST_DEVICE inline bool operator<(const null_type&, const null_type&)
-{
-  return false;
-}
-
-THRUST_HOST_DEVICE inline bool operator>(const null_type&, const null_type&)
-{
-  return false;
-}
-
-#endif
-
-THRUST_SUPPRESS_DEPRECATED_POP
-
-THRUST_NAMESPACE_END
 
 // If 'libcudacxx' or 'libhipcxx' is available (_THRUST_HAS_DEVICE_SYSTEM_STD), we will
 // use the implementations provided there. Otherwise we will fall back to an older
@@ -198,127 +153,12 @@ using _THRUST_STD::tie;
 
 THRUST_NAMESPACE_END
 
-_THRUST_STD_NAMESPACE_BEGIN
-THRUST_SUPPRESS_DEPRECATED_PUSH
-
-template <>
-struct tuple_size<tuple<THRUST_NS_QUALIFIER::null_type,
-                        THRUST_NS_QUALIFIER::null_type,
-                        THRUST_NS_QUALIFIER::null_type,
-                        THRUST_NS_QUALIFIER::null_type,
-                        THRUST_NS_QUALIFIER::null_type,
-                        THRUST_NS_QUALIFIER::null_type,
-                        THRUST_NS_QUALIFIER::null_type,
-                        THRUST_NS_QUALIFIER::null_type,
-                        THRUST_NS_QUALIFIER::null_type,
-                        THRUST_NS_QUALIFIER::null_type>> : tuple_size<tuple<>>
-{};
-
-template <class T0>
-struct tuple_size<tuple<T0,
-                        THRUST_NS_QUALIFIER::null_type,
-                        THRUST_NS_QUALIFIER::null_type,
-                        THRUST_NS_QUALIFIER::null_type,
-                        THRUST_NS_QUALIFIER::null_type,
-                        THRUST_NS_QUALIFIER::null_type,
-                        THRUST_NS_QUALIFIER::null_type,
-                        THRUST_NS_QUALIFIER::null_type,
-                        THRUST_NS_QUALIFIER::null_type,
-                        THRUST_NS_QUALIFIER::null_type>> : tuple_size<tuple<T0>>
-{};
-
-template <class T0, class T1>
-struct tuple_size<tuple<T0,
-                        T1,
-                        THRUST_NS_QUALIFIER::null_type,
-                        THRUST_NS_QUALIFIER::null_type,
-                        THRUST_NS_QUALIFIER::null_type,
-                        THRUST_NS_QUALIFIER::null_type,
-                        THRUST_NS_QUALIFIER::null_type,
-                        THRUST_NS_QUALIFIER::null_type,
-                        THRUST_NS_QUALIFIER::null_type,
-                        THRUST_NS_QUALIFIER::null_type>> : tuple_size<tuple<T0, T1>>
-{};
-
-template <class T0, class T1, class T2>
-struct tuple_size<tuple<T0,
-                        T1,
-                        T2,
-                        THRUST_NS_QUALIFIER::null_type,
-                        THRUST_NS_QUALIFIER::null_type,
-                        THRUST_NS_QUALIFIER::null_type,
-                        THRUST_NS_QUALIFIER::null_type,
-                        THRUST_NS_QUALIFIER::null_type,
-                        THRUST_NS_QUALIFIER::null_type,
-                        THRUST_NS_QUALIFIER::null_type>> : tuple_size<tuple<T0, T1, T2>>
-{};
-
-template <class T0, class T1, class T2, class T3>
-struct tuple_size<tuple<T0,
-                        T1,
-                        T2,
-                        T3,
-                        THRUST_NS_QUALIFIER::null_type,
-                        THRUST_NS_QUALIFIER::null_type,
-                        THRUST_NS_QUALIFIER::null_type,
-                        THRUST_NS_QUALIFIER::null_type,
-                        THRUST_NS_QUALIFIER::null_type,
-                        THRUST_NS_QUALIFIER::null_type>> : tuple_size<tuple<T0, T1, T2, T3>>
-{};
-
-template <class T0, class T1, class T2, class T3, class T4>
-struct tuple_size<tuple<T0,
-                        T1,
-                        T2,
-                        T3,
-                        T4,
-                        THRUST_NS_QUALIFIER::null_type,
-                        THRUST_NS_QUALIFIER::null_type,
-                        THRUST_NS_QUALIFIER::null_type,
-                        THRUST_NS_QUALIFIER::null_type,
-                        THRUST_NS_QUALIFIER::null_type>> : tuple_size<tuple<T0, T1, T2, T3, T4>>
-{};
-
-template <class T0, class T1, class T2, class T3, class T4, class T5>
-struct tuple_size<tuple<T0,
-                        T1,
-                        T2,
-                        T3,
-                        T4,
-                        T5,
-                        THRUST_NS_QUALIFIER::null_type,
-                        THRUST_NS_QUALIFIER::null_type,
-                        THRUST_NS_QUALIFIER::null_type,
-                        THRUST_NS_QUALIFIER::null_type>> : tuple_size<tuple<T0, T1, T2, T3, T4, T5>>
-{};
-
-template <class T0, class T1, class T2, class T3, class T4, class T5, class T6>
-struct tuple_size<
-  tuple<T0, T1, T2, T3, T4, T5, T6, THRUST_NS_QUALIFIER::null_type, THRUST_NS_QUALIFIER::null_type, THRUST_NS_QUALIFIER::null_type>>
-    : tuple_size<tuple<T0, T1, T2, T3, T4, T5, T6>>
-{};
-
-template <class T0, class T1, class T2, class T3, class T4, class T5, class T6, class T7>
-struct tuple_size<tuple<T0, T1, T2, T3, T4, T5, T6, T7, THRUST_NS_QUALIFIER::null_type, THRUST_NS_QUALIFIER::null_type>>
-    : tuple_size<tuple<T0, T1, T2, T3, T4, T5, T6, T7>>
-{};
-
-template <class T0, class T1, class T2, class T3, class T4, class T5, class T6, class T7, class T8>
-struct tuple_size<tuple<T0, T1, T2, T3, T4, T5, T6, T7, T8, THRUST_NS_QUALIFIER::null_type>>
-    : tuple_size<tuple<T0, T1, T2, T3, T4, T5, T6, T7, T8>>
-{};
-
-THRUST_SUPPRESS_DEPRECATED_POP
-_THRUST_STD_NAMESPACE_END
-
-#else
+#else // TODO(libhipcxx): remove this path of code once libhipcxx gets ready
 
 #  include <thrust/detail/tuple.inl>
 #  include <thrust/pair.h>
 
 THRUST_NAMESPACE_BEGIN
-
-THRUST_SUPPRESS_DEPRECATED_PUSH
 
 /*! \addtogroup utility
  *  \{
@@ -416,7 +256,7 @@ get(const detail::cons<HT, TT>& t);
  *  \see tuple
  */
 template <class... Ts>
-THRUST_HOST_DEVICE tuple(Ts...) -> tuple<Ts...>;
+tuple(Ts...) -> tuple<Ts...>;
 
 /*! \cond
  */
@@ -445,7 +285,9 @@ struct pair;
  *  \see tuple
  */
 template <class T1, class T2>
-THRUST_HOST_DEVICE tuple(pair<T1, T2>) -> tuple<T1, T2>;
+tuple(pair<T1, T2>) -> tuple<T1, T2>;
+
+THRUST_SUPPRESS_DEPRECATED_PUSH
 
 /*! \brief \p tuple is a class template that can be instantiated with up to ten
  *  arguments. Each template argument specifies the type of element in the \p
@@ -746,6 +588,8 @@ public:
 /*! \endcond
  */
 
+THRUST_SUPPRESS_DEPRECATED_POP
+
 /*! This version of \p make_tuple creates a new \c tuple object from a
  *  single object.
  *
@@ -918,7 +762,23 @@ tie(T0& t0, T1& t1, T2& t2, T3& t3, T4& t4, T5& t5, T6& t6, T7& t7, T8& t8, T9& 
 /*! \} // utility
  */
 
-THRUST_SUPPRESS_DEPRECATED_POP
+#  ifndef THRUST_DOXYGEN_INVOKED
+namespace internal
+{
+template <typename F, typename Tuple, size_t... Is>
+constexpr auto apply_tuple_impl(F&& f, Tuple&& t, ::std::index_sequence<Is...>)
+{
+  return f(get<Is>(::std::forward<Tuple>(t))...);
+}
+} // namespace internal
+
+template <typename F, typename Tuple>
+constexpr auto apply(F&& f, Tuple&& t)
+{
+  constexpr ::std::size_t N = tuple_size<::std::remove_reference_t<Tuple>>::value;
+  return internal::apply_tuple_impl(::std::forward<F>(f), ::std::forward<Tuple>(t), ::std::make_index_sequence<N>{});
+}
+#  endif
 
 THRUST_NAMESPACE_END
 
@@ -1058,7 +918,6 @@ struct tuple_size<THRUST_NS_QUALIFIER::tuple<T0, T1, T2, T3, T4, T5, T6, T7, T8,
 {};
 
 THRUST_SUPPRESS_DEPRECATED_POP
-
 _THRUST_STD_NAMESPACE_END
 
 #endif // _THRUST_HAS_DEVICE_SYSTEM_STD
