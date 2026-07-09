@@ -24,6 +24,7 @@ import os
 import sys
 import subprocess
 import shlex
+import shutil
 import argparse
 import pathlib
 import platform
@@ -72,37 +73,36 @@ def arg_into_list(arg) -> list:
     arg = re.sub(r"['\"]|['\']",'', arg)
     return arg.split(';')
 
-def rocm_executable(exe_name: str, therock_bin_dir: str | None = None) -> str:
-  bin_dir = therock_bin_dir or os.environ.get("THEROCK_BIN_DIR")
+def rocm_executable(exe_name: str) -> str:
+  if shutil.which(exe_name):
+    return exe_name
+  bin_dir = os.environ.get("ROCM_PATH") or os.environ.get("HIP_PATH")
   if bin_dir:
-    candidate = pathlib.Path(bin_dir) / exe_name
+    candidate = pathlib.Path(bin_dir) / "bin" / exe_name
     if candidate.exists():
-      return str(candidate)
-  hip_dir = os.environ.get("HIP_PATH")
-  if hip_dir:
-    candidate = pathlib.Path(hip_dir) / "bin" / exe_name
-    if candidate.exists():
-      return str(candidate)
-  return exe_name  # hope it's on PATH
+        return str(candidate)
+  return None
 
 def vram_detect():
     global OS_info
     OS_info["VRAM"] = 0
     if os.name == "nt":
         cmd = rocm_executable("hipinfo.exe")
-        process = subprocess.run([cmd], stdout=subprocess.PIPE)
-        for line_in in process.stdout.decode().splitlines():
-            if 'totalGlobalMem' in line_in:
-                OS_info["VRAM"] = float(line_in.split()[1])
-                break
+        if cmd is not None: 
+            process = subprocess.run([cmd], stdout=subprocess.PIPE)
+            for line_in in process.stdout.decode().splitlines():
+                if 'totalGlobalMem' in line_in:
+                    OS_info["VRAM"] = float(line_in.split()[1])
+                    break
     else:
         cmd = rocm_executable("rocminfo")
-        process = subprocess.run([cmd], stdout=subprocess.PIPE)
-        for line_in in process.stdout.decode().splitlines():
-            match = re.search(r'.*Size:.*([0-9]+)\(.*\).*KB', line_in, re.IGNORECASE)
-            if match:
-                OS_info["VRAM"] = float(match.group(1))/(1024*1024)
-                break
+        if cmd is not None: 
+            process = subprocess.run([cmd], stdout=subprocess.PIPE)
+            for line_in in process.stdout.decode().splitlines():
+                match = re.search(r'.*Size:.*([0-9]+)\(.*\).*KB', line_in, re.IGNORECASE)
+                if match:
+                    OS_info["VRAM"] = float(match.group(1))/(1024*1024)
+                    break
 
 def os_detect():
     global OS_info
