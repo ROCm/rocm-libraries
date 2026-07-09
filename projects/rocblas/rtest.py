@@ -75,12 +75,12 @@ def arg_into_list(arg) -> list:
 def rocm_executable(exe_name: str, therock_bin_dir: str | None = None) -> str:
   bin_dir = therock_bin_dir or os.environ.get("THEROCK_BIN_DIR")
   if bin_dir:
-    candidate = Path(bin_dir) / exe_name
+    candidate = pathlib.Path(bin_dir) / exe_name
     if candidate.exists():
       return str(candidate)
   hip_dir = os.environ.get("HIP_PATH")
   if hip_dir:
-    candidate = Path(hip_dir) / "bin" / exe_name
+    candidate = pathlib.Path(hip_dir) / "bin" / exe_name
     if candidate.exists():
       return str(candidate)
   return exe_name  # hope it's on PATH
