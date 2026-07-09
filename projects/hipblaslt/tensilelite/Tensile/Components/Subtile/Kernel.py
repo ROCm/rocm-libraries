@@ -931,10 +931,15 @@ def _zeroRegRange(module, writer, tileInfo, firstReg, totalRegs, isAgpr):
     module.add(tileCopyInst(dst=tileAlias(lastChunkBase + i), src=0,
                             comment="init%s zero-src v%u" % (tileInfo.tc, lastChunkBase + i)))
   if numInst > 1:
-    module.add(SNop(waitState=1, comment="wait for vgpr before matrix inst"))
-    # gfx1250: all initC WMMAs share the same A/B source — enable matrix reuse
+    # gfx1250 runs in expert scheduling mode, wait explicitly on the VALU dest.
+    isGfx1250 = writer.states.archCaps.get("HasWmmaArbStallBit", False)
+    if isGfx1250:
+      module.add(SWaitAlu(va_vdst=0, comment="wait for vgpr writes before matrix inst"))
+    else:
+      module.add(SNop(waitState=1, comment="wait for vgpr before matrix inst"))
+    # gfx1250: all initC MFMAs share the same A/B source, so enable matrix reuse
     # on all but the last (the last has no successor to reuse into).
-    canReuse = useWmma and writer.states.archCaps.get("HasWmmaArbStallBit", False)
+    canReuse = useWmma and isGfx1250
     for i in range(numInst - 1):
       r = firstReg + i * regsPerInst
       reuseHint = {'reuseA': True, 'reuseB': True} if canReuse and i < numInst - 2 else {}
