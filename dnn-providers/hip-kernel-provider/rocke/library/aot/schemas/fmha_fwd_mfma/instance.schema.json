@@ -1,0 +1,181 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "rocke.aot.instance.sdpa_fwd.fmha_fwd_mfma/v1",
+  "title": "SDPA forward FMHA MFMA AOT instance",
+  "allOf": [
+    {
+      "$ref": "../instance.schema.json"
+    },
+    {
+      "type": "object",
+      "properties": {
+        "name": {
+          "type": "string",
+          "pattern": "^sdpa_fwd_fmha_fwd_mfma_fp16_bshd_gfx[0-9A-Za-z]+_q[0-9]+_k[0-9]+_hq[0-9]+_hkv[0-9]+_d(32|64|128|192|256)_none$"
+        },
+        "op": {
+          "const": "sdpa_fwd"
+        },
+        "family": {
+          "const": "fmha_fwd_mfma"
+        },
+        "compile_spec": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "dtype",
+            "canonical_layout",
+            "seqlen_q",
+            "seqlen_k",
+            "num_query_heads",
+            "num_kv_heads",
+            "head_size",
+            "mask_mode",
+            "block_size_q",
+            "block_size_k"
+          ],
+          "properties": {
+            "dtype": {
+              "enum": ["fp16", "f16", "half"]
+            },
+            "canonical_layout": {
+              "const": "BSHD"
+            },
+            "seqlen_q": {
+              "type": "integer",
+              "minimum": 1,
+              "multipleOf": 16
+            },
+            "seqlen_k": {
+              "type": "integer",
+              "minimum": 1,
+              "multipleOf": 16
+            },
+            "num_query_heads": {
+              "type": "integer",
+              "minimum": 1
+            },
+            "num_kv_heads": {
+              "type": "integer",
+              "minimum": 1
+            },
+            "head_size": {
+              "enum": [32, 64, 128, 192, 256]
+            },
+            "mask_mode": {
+              "const": "none"
+            },
+            "block_size_q": {
+              "type": "integer",
+              "minimum": 1
+            },
+            "block_size_k": {
+              "type": "integer",
+              "minimum": 1
+            }
+          }
+        },
+        "selection": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["batch", "attribute_constraints"],
+          "properties": {
+            "batch": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": ["min", "max"],
+              "properties": {
+                "min": {
+                  "type": "integer",
+                  "minimum": 1
+                },
+                "max": {
+                  "type": "integer",
+                  "minimum": 1
+                }
+              }
+            },
+            "attribute_constraints": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": [
+                "mask_mode",
+                "dropout_probability",
+                "scale_policy",
+                "padding_mask",
+                "alibi_mask"
+              ],
+              "properties": {
+                "mask_mode": {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "required": ["equals"],
+                  "properties": {
+                    "equals": {
+                      "const": "none"
+                    }
+                  }
+                },
+                "dropout_probability": {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "required": ["equals"],
+                  "properties": {
+                    "equals": {
+                      "const": 0.0
+                    }
+                  }
+                },
+                "scale_policy": {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "required": ["equals"],
+                  "properties": {
+                    "equals": {
+                      "const": "default_1_over_sqrt_d"
+                    }
+                  }
+                },
+                "padding_mask": {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "required": ["equals"],
+                  "properties": {
+                    "equals": {
+                      "const": false
+                    }
+                  }
+                },
+                "alibi_mask": {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "required": ["equals"],
+                  "properties": {
+                    "equals": {
+                      "const": false
+                    }
+                  }
+                }
+              }
+            }
+          }
+        },
+        "test_profiles": {
+          "type": "array",
+          "minItems": 1,
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["batch"],
+            "properties": {
+              "batch": {
+                "type": "integer",
+                "minimum": 1
+              }
+            }
+          }
+        }
+      }
+    }
+  ]
+}

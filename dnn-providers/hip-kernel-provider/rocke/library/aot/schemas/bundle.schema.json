@@ -1,0 +1,84 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "hipdnn.rocke.bundle/v1",
+  "title": "hipDNN rocKE per-arch AOT bundle manifest",
+  "description": "Per-architecture sidecar manifest aggregating the rocke.aot.sidecar/v1 sidecars packed into one .kpack. The kpack C runtime is byte-oriented, so this manifest is the selection/launch index; selection, launch, and args_signature are carried through unchanged from the per-instance sidecars.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema",
+    "producer",
+    "engine_build_id",
+    "llvm_flavor",
+    "arch",
+    "kpack",
+    "entries"
+  ],
+  "properties": {
+    "schema": {
+      "const": "hipdnn.rocke.bundle/v1"
+    },
+    "producer": {
+      "const": "rocKE"
+    },
+    "engine_build_id": {
+      "type": "string",
+      "minLength": 1
+    },
+    "llvm_flavor": {
+      "type": "string",
+      "minLength": 1
+    },
+    "arch": {
+      "type": "string",
+      "pattern": "^gfx[0-9A-Za-z]+$"
+    },
+    "kpack": {
+      "type": "string",
+      "pattern": "\\.kpack$"
+    },
+    "entries": {
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "cache_key",
+          "toc_key",
+          "symbol",
+          "selection",
+          "launch",
+          "args_signature"
+        ],
+        "properties": {
+          "cache_key": {
+            "type": "string",
+            "minLength": 1
+          },
+          "toc_key": {
+            "type": "string",
+            "pattern": "^rocke/[^/]+/[^/]+/.+$"
+          },
+          "symbol": {
+            "type": "string",
+            "minLength": 1
+          },
+          "selection": {
+            "type": "object"
+          },
+          "launch": {
+            "type": "object"
+          },
+          "args_signature": {
+            "type": "array",
+            "minItems": 1,
+            "items": {
+              "type": "object"
+            }
+          }
+        }
+      }
+    }
+  }
+}

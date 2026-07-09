@@ -8,3 +8,8 @@
 # The library Python (kernels/, builders/, dispatch/) is BUILD-TIME ONLY and is
 # intentionally not installed.
 add_subdirectory(api)
+
+# aot/: build-time producer for provider-owned rocKE AOT artifacts (loose HSACO +
+# sidecars), packed into per-arch .kpack + bundle manifests and installed beside
+# the provider plugin data. Python + CMake only; no compiled targets.
+add_subdirectory(aot)

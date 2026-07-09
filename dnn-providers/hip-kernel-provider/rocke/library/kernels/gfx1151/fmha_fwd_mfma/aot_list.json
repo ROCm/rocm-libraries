@@ -1,0 +1,55 @@
+[
+  {
+    "schema": "rocke.aot.instance/v1",
+    "name": "sdpa_fwd_fmha_fwd_mfma_fp16_bshd_gfx1151_q64_k64_hq4_hkv4_d64_none",
+    "op": "sdpa_fwd",
+    "family": "fmha_fwd_mfma",
+    "arch": "gfx1151",
+    "compile_spec": {
+      "dtype": "fp16",
+      "canonical_layout": "BSHD",
+      "seqlen_q": 64,
+      "seqlen_k": 64,
+      "num_query_heads": 4,
+      "num_kv_heads": 4,
+      "head_size": 64,
+      "block_size_q": 16,
+      "block_size_k": 64,
+      "mask_mode": "none"
+    },
+    "selection": {
+      "batch": {
+        "min": 1,
+        "max": 64
+      },
+      "attribute_constraints": {
+        "mask_mode": {
+          "equals": "none"
+        },
+        "dropout_probability": {
+          "equals": 0.0
+        },
+        "scale_policy": {
+          "equals": "default_1_over_sqrt_d"
+        },
+        "padding_mask": {
+          "equals": false
+        },
+        "alibi_mask": {
+          "equals": false
+        }
+      }
+    },
+    "test_profiles": [
+      {
+        "batch": 1
+      },
+      {
+        "batch": 2
+      },
+      {
+        "batch": 64
+      }
+    ]
+  }
+]

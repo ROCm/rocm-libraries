@@ -1,0 +1,28 @@
+# rocke AOT producer + kpack packer: build-time Python dependencies.
+#
+# The whole AOT build (rocke_aot_build.py), the kpack packer (rocke_kpack_pack.py),
+# and the CTest-driven Python suites run under ${ROCKE_PYENV_PYTHON} — the
+# build-local editable venv from rocke/CMakeLists.txt. That venv installs
+# `platform` with deps but `library` with --no-deps, so these third-party
+# packages cannot ride on library/pyproject.toml. They are installed here via a
+# `pip install -r library/aot/requirements.txt` line in the rocke-pyenv step.
+#
+# `rocm_kpack` itself is NOT a pip dependency: it is consumed from source through
+# ${ROCKE_KPACK_PYTHON_DIR} on PYTHONPATH (TheRock / -D override / ambient env).
+# The entries below are exactly what its Python modules import at runtime plus
+# the schema validator and the test harness.
+
+# Formal JSON Schema validation for instance / sidecar / bundle schemas.
+jsonschema>=4.20
+
+# rocm_kpack.compression imports `zstandard`; rocm_kpack.kpack imports `msgpack`.
+zstandard>=0.22
+msgpack>=1.0
+
+# Numeric verifier and generated-artifact smoke tests. (Also a platform dep, but
+# the AOT tree owns its own build-time environment, so declare it explicitly.)
+numpy>=1.24
+
+# CTest-driven Python unit tests + the --fail-under=90 coverage gate.
+pytest>=7.0
+pytest-cov>=4.0

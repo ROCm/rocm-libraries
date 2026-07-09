@@ -7,9 +7,6 @@
 #                 ordering; both complete before src/ (added by the parent) reads
 #                 the staged CTest entries.
 #   - platform/ : the authoring SDK + engine (former rocKE/).
-add_subdirectory(library)
-add_subdirectory(platform)
-
 # ---------------------------------------------------------------------------
 # rocke-pyenv: build-time editable Python environment.
 #
@@ -17,19 +14,41 @@ add_subdirectory(platform)
 # dispatch) live under two separate source roots. Rather than scatter sys.path
 # surgery across every script/test, we editable-install BOTH into a build-local
 # venv. Editable installs point at live source, so code edits need no reinstall;
-# the install only re-runs when a pyproject.toml changes (gated by the stamp).
-# Build-time Python codegen should use ${ROCKE_PYENV_PYTHON} and depend on the
-# stamp. See rocke/BUILDING.md.
+# the install only re-runs when a pyproject.toml (or the AOT requirements)
+# changes (gated by the stamp). Build-time Python codegen should use
+# ${ROCKE_PYENV_PYTHON} and depend on ${ROCKE_PYENV_STAMP}. See rocke/BUILDING.md.
+#
+# The path variables are defined *before* the subdirectories so the AOT tree
+# (library/aot) can reference ${ROCKE_PYENV_PYTHON}/${ROCKE_PYENV_STAMP}; the
+# custom command that actually builds the venv is emitted after, so its file
+# output is resolvable as a cross-directory dependency.
 # ---------------------------------------------------------------------------
 option(ROCKE_BUILD_PYENV "Create the build-local editable rocke Python env" ON)
 if(ROCKE_BUILD_PYENV)
     find_package(Python3 COMPONENTS Interpreter REQUIRED)
 
     set(ROCKE_PYENV_DIR "${CMAKE_BINARY_DIR}/rocke-pyenv")
-    set(ROCKE_PYENV_STAMP "${CMAKE_BINARY_DIR}/rocke-pyenv.stamp")
-    set(ROCKE_PYENV_PYTHON "${ROCKE_PYENV_DIR}/bin/python"
+    set(ROCKE_PYENV_STAMP "${CMAKE_BINARY_DIR}/rocke-pyenv.stamp"
+        CACHE FILEPATH "Stamp file gating the rocke editable Python env")
+    # venv puts the interpreter under Scripts/ on Windows, bin/ elsewhere.
+    if(WIN32)
+        set(_ROCKE_PYENV_PYTHON_REL "Scripts/python.exe")
+    else()
+        set(_ROCKE_PYENV_PYTHON_REL "bin/python")
+    endif()
+    set(ROCKE_PYENV_PYTHON "${ROCKE_PYENV_DIR}/${_ROCKE_PYENV_PYTHON_REL}"
         CACHE FILEPATH "Interpreter for the rocke editable Python env")
+endif()
 
+# library/ first to mirror the historical rocke-client-before-rocKE ordering;
+# both complete before src/ (added by the parent) reads the staged CTest
+# entries. library/aot consumes the pyenv variables defined above.
+add_subdirectory(library)
+add_subdirectory(platform)
+
+if(ROCKE_BUILD_PYENV)
+    set(_ROCKE_AOT_REQUIREMENTS
+        "${CMAKE_CURRENT_SOURCE_DIR}/library/aot/requirements.txt")
     add_custom_command(
         OUTPUT "${ROCKE_PYENV_STAMP}"
         # --system-site-packages so the venv inherits the system ROCm torch
@@ -44,10 +63,15 @@ if(ROCKE_BUILD_PYENV)
         COMMAND "${ROCKE_PYENV_PYTHON}" -m pip install -q --no-deps
                 --config-settings editable_mode=compat
                 -e "${CMAKE_CURRENT_SOURCE_DIR}/library"
+        # library is installed --no-deps, so the AOT producer + kpack packer
+        # third-party deps (jsonschema, zstandard, msgpack, ...) live here. This
+        # is their only home; see library/aot/requirements.txt.
+        COMMAND "${ROCKE_PYENV_PYTHON}" -m pip install -q -r "${_ROCKE_AOT_REQUIREMENTS}"
         COMMAND "${CMAKE_COMMAND}" -E touch "${ROCKE_PYENV_STAMP}"
         DEPENDS "${CMAKE_CURRENT_SOURCE_DIR}/platform/pyproject.toml"
                 "${CMAKE_CURRENT_SOURCE_DIR}/library/pyproject.toml"
-        COMMENT "rocke-pyenv: editable-installing platform + library"
+                "${_ROCKE_AOT_REQUIREMENTS}"
+        COMMENT "rocke-pyenv: editable-installing platform + library (+ AOT deps)"
         VERBATIM)
 
     add_custom_target(rocke-pyenv ALL

@@ -1,0 +1,287 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "rocke.aot.sidecar.sdpa_fwd.fmha_fwd_mfma/v1",
+  "title": "SDPA forward FMHA MFMA AOT sidecar",
+  "allOf": [
+    {
+      "$ref": "../sidecar.schema.json"
+    },
+    {
+      "type": "object",
+      "properties": {
+        "cache_key": {
+          "type": "string",
+          "pattern": "^sdpa_fwd:fmha_fwd_mfma:fmha_fwd_mfma:dense_fmha_fwd:fp16_bshd_blockq16_blockk[0-9]+:gfx[0-9A-Za-z]+:hipkg-sdpa-fwd-fmha-mfma/v1:[0-9a-f]{64}:[0-9a-f]{64}$"
+        },
+        "artifact": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "hsaco_filename",
+            "symbol",
+            "hsaco_sha256",
+            "hsaco_size"
+          ],
+          "properties": {
+            "hsaco_filename": {
+              "type": "string",
+              "pattern": "^sdpa_fwd_fmha_fwd_mfma_fp16_bshd_gfx[0-9A-Za-z]+_q[0-9]+_k[0-9]+_hq[0-9]+_hkv[0-9]+_d(32|64|128|192|256)_none\\.hsaco$"
+            },
+            "symbol": {
+              "type": "string",
+              "pattern": "^rocke_fmha_fwd_mfma_"
+            },
+            "hsaco_sha256": {
+              "type": "string",
+              "pattern": "^[0-9a-f]{64}$"
+            },
+            "hsaco_size": {
+              "type": "integer",
+              "minimum": 1
+            }
+          }
+        },
+        "selection": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "op",
+            "arch",
+            "dtypes",
+            "canonical_layout",
+            "shape_constraints",
+            "attribute_constraints"
+          ],
+          "properties": {
+            "op": {
+              "const": "sdpa_fwd"
+            },
+            "arch": {
+              "type": "string",
+              "pattern": "^gfx[0-9A-Za-z]+$"
+            },
+            "dtypes": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": ["q", "k", "v", "o", "acc"],
+              "properties": {
+                "q": {
+                  "const": "fp16"
+                },
+                "k": {
+                  "const": "fp16"
+                },
+                "v": {
+                  "const": "fp16"
+                },
+                "o": {
+                  "const": "fp16"
+                },
+                "acc": {
+                  "const": "fp32"
+                }
+              }
+            },
+            "canonical_layout": {
+              "const": "BSHD"
+            },
+            "shape_constraints": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": [
+                "batch",
+                "seqlen_q",
+                "seqlen_k",
+                "num_query_heads",
+                "num_kv_heads",
+                "head_size"
+              ],
+              "properties": {
+                "batch": {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "required": ["min", "max"],
+                  "properties": {
+                    "min": {
+                      "type": "integer",
+                      "minimum": 1
+                    },
+                    "max": {
+                      "type": "integer",
+                      "minimum": 1
+                    }
+                  }
+                },
+                "seqlen_q": {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "required": ["equals", "multiple_of"],
+                  "properties": {
+                    "equals": {
+                      "type": "integer",
+                      "minimum": 1,
+                      "multipleOf": 16
+                    },
+                    "multiple_of": {
+                      "const": 16
+                    }
+                  }
+                },
+                "seqlen_k": {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "required": ["equals", "multiple_of"],
+                  "properties": {
+                    "equals": {
+                      "type": "integer",
+                      "minimum": 1,
+                      "multipleOf": 16
+                    },
+                    "multiple_of": {
+                      "const": 16
+                    }
+                  }
+                },
+                "num_query_heads": {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "required": ["equals"],
+                  "properties": {
+                    "equals": {
+                      "type": "integer",
+                      "minimum": 1
+                    }
+                  }
+                },
+                "num_kv_heads": {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "required": ["equals"],
+                  "properties": {
+                    "equals": {
+                      "type": "integer",
+                      "minimum": 1
+                    }
+                  }
+                },
+                "head_size": {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "required": ["equals"],
+                  "properties": {
+                    "equals": {
+                      "enum": [32, 64, 128, 192, 256]
+                    }
+                  }
+                }
+              }
+            },
+            "attribute_constraints": {
+              "type": "object"
+            }
+          }
+        },
+        "launch": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "shared_mem_bytes",
+            "grid_formula",
+            "block",
+            "tile_sizes"
+          ],
+          "properties": {
+            "shared_mem_bytes": {
+              "type": "integer",
+              "minimum": 0
+            },
+            "grid_formula": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": ["x", "y", "z"],
+              "properties": {
+                "x": {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "required": ["ceil_div"],
+                  "properties": {
+                    "ceil_div": {
+                      "type": "array",
+                      "minItems": 2,
+                      "maxItems": 2
+                    }
+                  }
+                },
+                "y": {
+                  "const": "num_query_heads"
+                },
+                "z": {
+                  "const": "batch"
+                }
+              }
+            },
+            "block": {
+              "type": "array",
+              "minItems": 3,
+              "maxItems": 3,
+              "items": {
+                "type": "integer",
+                "minimum": 1
+              }
+            },
+            "tile_sizes": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": ["block_q", "block_k", "head_size", "wave_size"],
+              "properties": {
+                "block_q": {
+                  "const": 16
+                },
+                "block_k": {
+                  "type": "integer",
+                  "minimum": 1
+                },
+                "head_size": {
+                  "enum": [32, 64, 128, 192, 256]
+                },
+                "wave_size": {
+                  "enum": [32, 64]
+                }
+              }
+            }
+          }
+        },
+        "args_signature": {
+          "type": "array",
+          "minItems": 1,
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["name", "type", "kind", "size_bytes", "alignment"],
+            "properties": {
+              "name": {
+                "type": "string",
+                "minLength": 1
+              },
+              "type": {
+                "type": "string",
+                "minLength": 1
+              },
+              "kind": {
+                "enum": ["pointer", "scalar"]
+              },
+              "size_bytes": {
+                "type": "integer",
+                "minimum": 1
+              },
+              "alignment": {
+                "type": "integer",
+                "minimum": 1
+              }
+            }
+          }
+        }
+      }
+    }
+  ]
+}

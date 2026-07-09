@@ -1,0 +1,70 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "rocke.aot.instance/v1",
+  "title": "rocKE client AOT instance envelope",
+  "description": "Common top-level envelope for checked-in rocKE client AOT instance descriptions. Operation-specific schemas constrain compile_spec, selection, and test_profiles.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema",
+    "name",
+    "op",
+    "family",
+    "arch",
+    "compile_spec",
+    "selection",
+    "test_profiles"
+  ],
+  "properties": {
+    "schema": {
+      "const": "rocke.aot.instance/v1"
+    },
+    "name": {
+      "type": "string",
+      "minLength": 1
+    },
+    "op": {
+      "type": "string",
+      "minLength": 1
+    },
+    "family": {
+      "type": "string",
+      "minLength": 1
+    },
+    "arch": {
+      "type": "string",
+      "pattern": "^gfx[0-9A-Za-z]+$"
+    },
+    "compile_spec": {
+      "type": "object"
+    },
+    "selection": {
+      "type": "object",
+      "properties": {
+        "attribute_constraints": {
+          "type": "object",
+          "additionalProperties": {
+            "type": "object",
+            "minProperties": 1,
+            "additionalProperties": false,
+            "properties": {
+              "equals": true,
+              "not_equals": true,
+              "one_of": {
+                "type": "array",
+                "minItems": 1
+              }
+            }
+          }
+        }
+      },
+      "additionalProperties": true
+    },
+    "test_profiles": {
+      "type": "array",
+      "items": {
+        "type": "object"
+      }
+    }
+  }
+}

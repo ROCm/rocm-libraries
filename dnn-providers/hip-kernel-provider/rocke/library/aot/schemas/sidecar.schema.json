@@ -1,0 +1,40 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "rocke.aot.sidecar/v1",
+  "title": "rocKE client AOT sidecar envelope",
+  "description": "Common top-level envelope for generated rocKE client AOT sidecar files. Operation-specific schemas constrain artifact, selection, launch, and args_signature.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema",
+    "cache_key",
+    "artifact",
+    "selection",
+    "launch",
+    "args_signature"
+  ],
+  "properties": {
+    "schema": {
+      "const": "rocke.aot.sidecar/v1"
+    },
+    "cache_key": {
+      "type": "string",
+      "minLength": 1
+    },
+    "artifact": {
+      "type": "object"
+    },
+    "selection": {
+      "type": "object"
+    },
+    "launch": {
+      "type": "object"
+    },
+    "args_signature": {
+      "type": "array",
+      "items": {
+        "type": "object"
+      }
+    }
+  }
+}
