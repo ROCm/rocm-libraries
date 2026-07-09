@@ -67,7 +67,7 @@ def create_base_kernel():
         "TransposeLDS": 0,
         "ForceUnrollSubIter": False,
         "SwapGlobalReadOrder": False, # For asserting it gets set
-        "UsePLRPack": False, # For asserting it gets set
+        "UsePLRPack": 0, # For asserting it gets set
         "UseF32XEmulation": False,
         "VectorWidthA": 1,
         "VectorWidthB": 1,
