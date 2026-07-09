@@ -3,10 +3,14 @@
 Documentation for rocSPARSE is available at
 [https://rocm.docs.amd.com/projects/rocSPARSE/en/latest/](https://rocm.docs.amd.com/projects/rocSPARSE/en/latest/).
 
-## rocSPARSE changes since ROCm 7.14.0
+## (Unreleased) rocSPARSE 5.0.0
 
 ### Added
+* Add Blocked ELL format support to `rocsparse_dense_to_sparse` routine.
 * Add `rocsparse_bell_set_pointers`.
+
+### Resolved issues
+* Fixed `rocsparse_spmm` with Blocked ELL sparse format which was previously not computing the correct result.
 
 ## rocSPARSE 4.7.0 for ROCm 7.14
 
