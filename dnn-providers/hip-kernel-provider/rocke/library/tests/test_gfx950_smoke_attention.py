@@ -104,6 +104,28 @@ class TestGfx950AttentionSmoke(unittest.TestCase):
         else:
             self.fail(f"unknown perf direction {ref['direction']!r} for {name}")
 
+    def _run_scenario(self, scenario: str, timeout: int = 900) -> tuple[str, list]:
+        with tempfile.TemporaryDirectory(prefix="rocke_attn_gfx950_") as tmp:
+            report = Path(tmp) / "attention.json"
+            out = self._run(
+                "-m",
+                "builders.gfx950.attention.parity_unified_attention",
+                "--scenario",
+                scenario,
+                "--attempts",
+                "2",
+                "--warmup",
+                "1",
+                "--skip-triton",
+                "--paths",
+                "auto",
+                "--report",
+                str(report),
+                timeout=timeout,
+            )
+            rows = json.loads(report.read_text())
+        return out, rows
+
     def test_attention_decode_smoke(self):
         with tempfile.TemporaryDirectory(prefix="rocke_attn_gfx950_") as tmp:
             report = Path(tmp) / "attention.json"
@@ -134,6 +156,22 @@ class TestGfx950AttentionSmoke(unittest.TestCase):
                 "max_abs": float(rows[0]["ck_auto_vs_ref"]["max_abs"]),
             },
         )
+
+    def test_attention_decode_bias_smoke(self):
+        """Correctness check for decode with softcap + ALiBi + QQ-bias (fp16 and bf16)."""
+        for scenario in ("decode_bias_d128_b16", "decode_bias_bf16_d128_b16"):
+            with self.subTest(scenario=scenario):
+                out, rows = self._run_scenario(scenario)
+                self.assertIn("ck-auto", out, f"{scenario}: DSL path not exercised")
+                self.assertNotIn("FAIL", out, f"{scenario}: correctness failure")
+                for row in rows:
+                    max_abs = float(row["ck_auto_vs_ref"]["max_abs"])
+                    self.assertLess(
+                        max_abs,
+                        5e-2,
+                        f"{scenario} seq={row.get('seq_lens')}: "
+                        f"max_abs {max_abs:.3e} exceeds 5e-2",
+                    )
 
 
 if __name__ == "__main__":
