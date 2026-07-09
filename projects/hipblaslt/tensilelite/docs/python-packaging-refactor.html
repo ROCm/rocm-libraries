@@ -1,0 +1,611 @@
+<!-- Copyright Advanced Micro Devices, Inc., or its affiliates. -->
+<!-- SPDX-License-Identifier: MIT -->
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>TensileLite Python Packaging Refactor</title>
+  <style>
+    :root {
+      color-scheme: light;
+      --background: #f8f4ea;
+      --text: #151515;
+      --muted: #5e5a52;
+      --rule: #d8d0c2;
+      --code-bg: #ede6d8;
+      --table-bg: #fffdf8;
+      --link: #784b12;
+      --link-hover: #4a2f0d;
+      --accent: #b46b24;
+    }
+
+    * {
+      box-sizing: border-box;
+    }
+
+    html {
+      background: var(--background);
+      color: var(--text);
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+      font-size: 16px;
+      line-height: 1.65;
+      scroll-behavior: smooth;
+    }
+
+    body {
+      margin: 0;
+      min-height: 100vh;
+    }
+
+    .page {
+      display: grid;
+      grid-template-columns: 230px minmax(0, 1fr);
+      gap: 48px;
+      width: min(1420px, 100%);
+      margin: 0 auto;
+      padding: 56px 32px 72px;
+    }
+
+    nav {
+      align-self: start;
+      border-right: 1px solid var(--rule);
+      color: var(--muted);
+      padding-right: 22px;
+      position: sticky;
+      top: 32px;
+      max-height: calc(100vh - 64px);
+      overflow: auto;
+    }
+
+    nav h2 {
+      color: var(--text);
+      font-size: 0.82rem;
+      font-weight: 700;
+      margin: 0 0 12px;
+      text-transform: uppercase;
+    }
+
+    nav ol {
+      list-style: none;
+      margin: 0;
+      padding: 0;
+    }
+
+    nav li {
+      margin: 0 0 6px;
+    }
+
+    nav .toc-level-3 {
+      padding-left: 14px;
+    }
+
+    nav a {
+      border-radius: 4px;
+      color: var(--muted);
+      display: block;
+      font-size: 0.9rem;
+      line-height: 1.35;
+      padding: 4px 0;
+      text-decoration: none;
+    }
+
+    nav a:hover {
+      color: var(--link-hover);
+    }
+
+    main {
+      min-width: 0;
+    }
+
+    article {
+      max-width: 86ch;
+    }
+
+    h1,
+    h2,
+    h3 {
+      color: var(--text);
+      font-weight: 760;
+      line-height: 1.2;
+      margin: 0;
+    }
+
+    h1 {
+      border-bottom: 2px solid var(--text);
+      font-size: 2.35rem;
+      margin-bottom: 34px;
+      padding-bottom: 22px;
+    }
+
+    h2 {
+      border-top: 1px solid var(--rule);
+      font-size: 1.55rem;
+      margin-top: 46px;
+      padding-top: 28px;
+    }
+
+    h3 {
+      font-size: 1.12rem;
+      margin-top: 32px;
+    }
+
+    p {
+      margin: 16px 0;
+    }
+
+    ul,
+    ol {
+      margin: 16px 0 20px;
+      padding-left: 1.45rem;
+    }
+
+    li {
+      margin: 7px 0;
+      padding-left: 0.2rem;
+    }
+
+    a {
+      color: var(--link);
+    }
+
+    code {
+      background: var(--code-bg);
+      border: 1px solid rgba(21, 21, 21, 0.08);
+      border-radius: 4px;
+      color: var(--text);
+      font-family: "SFMono-Regular", Consolas, "Liberation Mono", Menlo, monospace;
+      font-size: 0.92em;
+      padding: 0.12em 0.32em;
+    }
+
+    pre {
+      background: var(--code-bg);
+      border: 1px solid var(--rule);
+      border-left: 4px solid var(--accent);
+      border-radius: 6px;
+      color: var(--text);
+      line-height: 1.5;
+      margin: 20px 0;
+      overflow: auto;
+      padding: 16px 18px;
+    }
+
+    pre code {
+      background: transparent;
+      border: 0;
+      border-radius: 0;
+      display: block;
+      font-size: 0.88rem;
+      padding: 0;
+      white-space: pre;
+    }
+
+    .table-wrap {
+      max-width: calc(100vw - 360px);
+      margin: 22px 0 28px;
+      overflow-x: auto;
+      width: min(1080px, calc(100vw - 360px));
+    }
+
+    table {
+      background: var(--table-bg);
+      border-collapse: collapse;
+      border: 1px solid var(--rule);
+      min-width: 920px;
+      table-layout: fixed;
+      width: 100%;
+    }
+
+    th,
+    td {
+      border: 1px solid var(--rule);
+      padding: 10px 12px;
+      text-align: left;
+      vertical-align: top;
+      overflow-wrap: anywhere;
+      word-break: normal;
+    }
+
+    td code,
+    th code {
+      overflow-wrap: anywhere;
+      word-break: break-word;
+    }
+
+    th {
+      background: #ece2d1;
+      color: var(--text);
+      font-weight: 700;
+    }
+
+    td {
+      color: #202020;
+    }
+
+    ::selection {
+      background: #dbc197;
+      color: #111;
+    }
+
+    @media (max-width: 980px) {
+      .page {
+        display: block;
+        padding: 32px 22px 56px;
+      }
+
+      nav {
+        border-bottom: 1px solid var(--rule);
+        border-right: 0;
+        margin-bottom: 32px;
+        max-height: none;
+        padding: 0 0 20px;
+        position: static;
+      }
+
+      nav ol {
+        columns: 2;
+        column-gap: 28px;
+      }
+
+      article {
+        max-width: 100%;
+      }
+
+      .table-wrap {
+        max-width: 100%;
+        width: 100%;
+      }
+
+      h1 {
+        font-size: 2rem;
+      }
+    }
+
+    @media (max-width: 620px) {
+      .page {
+        padding: 24px 16px 44px;
+      }
+
+      nav ol {
+        columns: 1;
+      }
+
+      h1 {
+        font-size: 1.72rem;
+      }
+
+      h2 {
+        font-size: 1.32rem;
+      }
+
+      table {
+        min-width: 620px;
+      }
+    }
+  </style>
+</head>
+<body>
+  <div class="page">
+    <nav aria-label="Table of contents">
+      <h2>Contents</h2>
+      <ol>
+<li class="toc-level-2"><a href="#problem">Problem</a></li>
+<li class="toc-level-2"><a href="#goals">Goals</a></li>
+<li class="toc-level-2"><a href="#non-goals">Non-goals</a></li>
+<li class="toc-level-2"><a href="#target-package-shape">Target Package Shape</a></li>
+<li class="toc-level-2"><a href="#native-dependency-strategy">Native Dependency Strategy</a></li>
+<li class="toc-level-2"><a href="#native-artifact-packaging-boundary">Native Artifact Packaging Boundary</a></li>
+<li class="toc-level-2"><a href="#command-line-interface">Command-Line Interface</a></li>
+<li class="toc-level-2"><a href="#build-system-integration">Build-System Integration</a></li>
+<li class="toc-level-3"><a href="#cmake-and-source-tree-caller-inventory">CMake And Source-Tree Caller Inventory</a></li>
+<li class="toc-level-2"><a href="#package-data">Package Data</a></li>
+<li class="toc-level-2"><a href="#legacy-import-compatibility">Legacy Import Compatibility</a></li>
+<li class="toc-level-2"><a href="#migration-plan">Migration Plan</a></li>
+<li class="toc-level-2"><a href="#downstream-dependency-model">Downstream Dependency Model</a></li>
+<li class="toc-level-2"><a href="#validation">Validation</a></li>
+<li class="toc-level-2"><a href="#open-questions">Open Questions</a></li>
+      </ol>
+    </nav>
+    <main>
+      <article>
+<h1 id="tensilelite-python-packaging-refactor">TensileLite Python Packaging Refactor</h1>
+<h2 id="problem">Problem</h2>
+<p><code>projects/hipblaslt/tensilelite/Tensile</code> is the hipBLASLt fork of the rocBLAS Tensile generator, but the Python package, import paths, and command names still look like upstream Tensile:</p>
+<ul>
+  <li>The distribution metadata currently publishes as <code>tensile</code>.</li>
+  <li>The import namespace is the top-level <code>Tensile</code> package.</li>
+  <li>Many in-repo callers execute files under <code>Tensile/bin</code> or patch <code>sys.path</code> so that <code>import Tensile</code> and <code>import rocisa</code> resolve from a source or build tree.</li>
+  <li>CMake installs raw Python source trees for test artifacts instead of consuming an installed Python package.</li>
+</ul>
+<p>This leaves no clean way for another project, such as GEKO, to declare a normal Python dependency on the TensileLite assets. It also keeps the legacy rocBLAS Tensile tool and the TensileLite fork ambiguous in both Python imports and executable names.</p>
+<h2 id="goals">Goals</h2>
+<ul>
+  <li>Publish the TensileLite generator assets as a normal Python package.</li>
+  <li>Use a canonical package name that cannot be confused with legacy rocBLAS Tensile.</li>
+  <li>Provide import paths that identify the code as TensileLite.</li>
+  <li>Replace source-tree executable files and <code>PYTHONPATH</code> mutation with supported module entry points and console scripts.</li>
+  <li>Let downstream projects depend on TensileLite through standard packaging metadata.</li>
+  <li>Keep the existing hipBLASLt CMake device-library build working throughout the migration.</li>
+</ul>
+<h2 id="non-goals">Non-goals</h2>
+<ul>
+  <li>Do not change code generation semantics.</li>
+  <li>Do not change the C++ TensileLite host-library ABI.</li>
+  <li>Do not rename generated kernel artifacts or library logic file formats.</li>
+  <li>Do not require GEKO or other downstream projects to vendor the tensilelite source tree.</li>
+</ul>
+<h2 id="target-package-shape">Target Package Shape</h2>
+<p>Use these canonical names:</p>
+<ul>
+  <li>Python distribution: <code>tensilelite</code></li>
+  <li>Python import namespace: <code>tensilelite</code></li>
+  <li>Required native dependency: <code>rocisa</code></li>
+  <li>Required Python dependency for the existing command surface: <code>pandas</code></li>
+</ul>
+<p>The package should install only the TensileLite namespace. A normal install of <code>tensilelite</code> should not claim the top-level <code>Tensile</code> package, because that recreates the conflict with legacy Tensile.</p>
+<p>The package should expose stable public modules for downstream users and build tools:</p>
+<pre><code class="language-python">import tensilelite
+from tensilelite.create_library import main as create_library_main
+from tensilelite.logic import main as logic_main</code></pre>
+<p>The first implementation can preserve the current CamelCase module filenames internally if that reduces churn, but public docs and new callers should use the <code>tensilelite</code> namespace. Over time, internal imports should be moved to relative imports or to the new namespace so the implementation no longer depends on <code>Tensile</code>.</p>
+<h2 id="native-dependency-strategy">Native Dependency Strategy</h2>
+<p>TensileLite depends on <code>rocisa</code>, a HIP/nanobind native extension that currently builds from the in-repository <code>rocisa/</code> project. For this refactor, assume <code>rocisa</code> is installed locally into the same Python environment before <code>tensilelite</code> is installed or exercised. Supported local setups should include:</p>
+<ul>
+  <li>developer mode: build/install <code>rocisa</code> from the workspace, for example through the existing <code>invoke rocisa</code> flow or an editable install;</li>
+  <li>package-test mode: build a local <code>rocisa</code> wheel first, then install the local <code>rocisa</code> wheel and the local <code>tensilelite</code> wheel into a clean venv.</li>
+</ul>
+<p>Publishing or otherwise distributing <code>rocisa</code> as a normal resolvable dependency is a separate prerequisite for a fully self-contained downstream dependency chain. Until then, downstream setup instructions for projects such as GEKO must state the local <code>rocisa</code> installation precondition.</p>
+<p><code>pandas</code> must be added as a runtime dependency because <code>TensileGenerateSummations</code> is part of the existing command surface and the current implementation imports <code>pandas</code> at module import time.</p>
+<h2 id="native-artifact-packaging-boundary">Native Artifact Packaging Boundary</h2>
+<p>The <code>tensilelite/</code> source tree contains more than the Python generator. It also contains the native <code>rocisa</code> extension, the C++ <code>tensilelite-host</code> runtime library, benchmark/client executables, C++ tests, static headers copied by codegen, and hand-written assembly custom kernels.</p>
+<p>Use this packaging split:</p>
+<ul>
+  <li><code>tensilelite</code> Python distribution: Python codegen modules plus package data needed by codegen, including static source headers, <code>CustomKernels/*.s</code>, and <code>known_bugs.yaml</code>.</li>
+  <li><code>rocisa</code> native distribution: the compiled <code>_rocisa</code> Python extension and its Python package. This is required by codegen and should be a separate native wheel/package rather than bundled into the <code>tensilelite</code> wheel.</li>
+  <li>ROCm/system packages: ROCm compiler tools and native runtime libraries, including <code>amdclang++</code>, <code>clang-offload-bundler</code>, <code>hipconfig</code>, HIP runtime libraries, <code>libstinkytofu</code>, <code>liborigami</code>, and related ROCm libraries.</li>
+  <li>ROCm/system packages, not the Python codegen wheel: <code>tensilelite-host</code>, <code>tensilelite-client</code>, <code>cpu-gemm-driver</code>, and C++ tests.</li>
+</ul>
+<p>This keeps the Python codegen wheel mostly Python/data-only, isolates native ABI and rebuild churn in <code>rocisa</code>, and leaves ROCm toolchain artifacts in ROCm&#x27;s normal packaging channel.</p>
+<p>Python package managers cannot install or express all of these native ROCm requirements as normal Python dependencies. <code>pip</code> can install Python distributions and native Python wheels, but it cannot install a ROCm compiler toolchain or system shared libraries from apt/rpm-style packages. <code>uv</code> improves the developer workflow by supporting workspaces, local/path dependency sources, lock/sync workflows, and building distributions, but it has the same boundary: it resolves and installs Python packages, not ROCm system packages. For local development, <code>uv</code> can point <code>tensilelite</code> at a workspace <code>rocisa</code>; for published metadata, local <code>tool.uv.sources</code> entries must not be the only dependency story.</p>
+<p>For now, document the local precondition: install a matching local <code>rocisa</code> package and have the ROCm toolchain/system libraries available. Later, when <code>rocisa</code> is published on an internal or public Python index, <code>tensilelite</code> should declare a normal versioned <code>rocisa</code> dependency, while still validating external ROCm tools at CLI/configure time.</p>
+<h2 id="command-line-interface">Command-Line Interface</h2>
+<p>Replace checked-in executable files under <code>Tensile/bin</code> with <code>pyproject.toml</code> entry points. The only new public command should be <code>tensilelite</code>, with subcommands for the existing tools. The following checked-in <code>Tensile/bin</code> files exist today and define the initial command surface:</p>
+<div class="table-wrap">
+<table>
+<thead><tr><th>Current file</th><th>Current callable</th><th>Target command</th><th>Backward-compatible alias</th></tr></thead>
+<tbody>
+<tr><td><code>Tensile</code></td><td><code>Tensile.Tensile.main()</code></td><td>deferred; source-tree/developer workflow until package assumptions are removed</td><td><code>Tensile</code></td></tr>
+<tr><td><code>TensileBenchmarkCluster</code></td><td><code>Tensile.TensileBenchmarkCluster.main()</code></td><td><code>tensilelite benchmark-cluster</code></td><td><code>TensileBenchmarkCluster</code></td></tr>
+<tr><td><code>TensileCreateLibrary</code></td><td><code>Tensile.TensileCreateLibrary.run()</code></td><td><code>tensilelite create-library</code></td><td><code>TensileCreateLibrary</code></td></tr>
+<tr><td><code>TensileGenerateSummations</code></td><td><code>Tensile.GenerateSummations.GenerateSummations(sys.argv[1:])</code></td><td><code>tensilelite generate-summations</code></td><td><code>TensileGenerateSummations</code></td></tr>
+<tr><td><code>TensileLibLogicToYaml</code></td><td><code>Tensile.TensileLibLogicToYaml.main()</code></td><td><code>tensilelite liblogic-to-yaml</code></td><td><code>TensileLibLogicToYaml</code></td></tr>
+<tr><td><code>TensileLogic</code></td><td><code>Tensile.TensileLogic.main()</code></td><td><code>tensilelite logic</code></td><td><code>TensileLogic</code></td></tr>
+<tr><td><code>TensileMergeLibrary</code></td><td><code>Tensile.TensileMergeLibrary.main()</code></td><td><code>tensilelite merge-library</code></td><td><code>TensileMergeLibrary</code></td></tr>
+<tr><td><code>TensileRetuneLibrary</code></td><td><code>Tensile.TensileRetuneLibrary.main()</code></td><td><code>tensilelite retune-library</code></td><td><code>TensileRetuneLibrary</code></td></tr>
+<tr><td><code>TensileUpdateLibrary</code></td><td><code>Tensile.TensileUpdateLibrary.main()</code></td><td><code>tensilelite update-library</code></td><td><code>TensileUpdateLibrary</code></td></tr>
+</tbody>
+</table>
+</div>
+<p>The current installed package also exposes two console scripts that are not checked-in <code>Tensile/bin</code> files:</p>
+<div class="table-wrap">
+<table>
+<thead><tr><th>Current console script</th><th>Current callable</th><th>Target command</th><th>Decision</th></tr></thead>
+<tbody>
+<tr><td><code>TensileGetPath</code></td><td><code>Tensile.PrintTensileRoot()</code></td><td><code>tensilelite get-path</code> or remove</td><td>Keep only as a temporary compatibility alias if installed-package users rely on it.</td></tr>
+<tr><td><code>TensileVerifyStinkyElfText</code></td><td><code>Tensile.verify_stinky_comment_vs_elf_text.main(argv=None)</code></td><td><code>tensilelite verify-stinky-elf-text</code></td><td>Keep as a temporary compatibility alias unless the tool is declared out of scope.</td></tr>
+</tbody>
+</table>
+</div>
+<p>First packaged release support matrix:</p>
+<div class="table-wrap">
+<table>
+<thead><tr><th>Mode</th><th>Status</th><th>Rationale</th></tr></thead>
+<tbody>
+<tr><td><code>tensilelite create-library</code></td><td>Supported</td><td>Required by hipBLASLt device-library generation and downstream library builds.</td></tr>
+<tr><td><code>tensilelite logic</code></td><td>Supported</td><td>Required for logic validation and <code>--check-all</code>.</td></tr>
+<tr><td><code>tensilelite run</code></td><td>Deferred</td><td>The current workflow assumes checkout-relative configs, <code>build_tmp</code>, <code>Tensile/bin</code>, and a source-tree/prebuilt client flow. Keep <code>Tensile/bin/Tensile</code> as a developer/source-tree workflow until those assumptions are removed.</td></tr>
+<tr><td><code>tensilelite generate-summations</code></td><td>Supported if retained from <code>Tensile/bin</code></td><td>Requires <code>pandas</code> and removal of the subprocess call to <code>Tensile/bin/TensileCreateLibrary</code>.</td></tr>
+<tr><td><code>tensilelite benchmark-cluster</code>, <code>merge-library</code>, <code>retune-library</code>, <code>update-library</code>, <code>liblogic-to-yaml</code>, <code>verify-stinky-elf-text</code>, <code>get-path</code></td><td>Compatibility or developer tools</td><td>Each must be classified as supported, compatibility-only, developer-only, or removed before publishing.</td></tr>
+</tbody>
+</table>
+</div>
+<p>The first packaged public CLI should focus on <code>create-library</code> and <code>logic</code>. Other modes should be promoted only after their source-tree assumptions, dependencies, and validation coverage are explicitly resolved.</p>
+<p>Do not add new executable-per-tool names such as <code>tensilelite-create-library</code>. Those names add a second public command family without solving a compatibility problem.</p>
+<p>Each tool currently has its own argv contract: most <code>main()</code> functions parse <code>sys.argv</code>, <code>TensileCreateLibrary.run()</code> parses process-global arguments, and <code>TensileGenerateSummations</code> takes an argv list directly. Normalizing those into subcommand functions is required migration work. The final dispatcher should call subcommands through explicit <code>argv</code> parameters and should only read or rewrite <code>sys.argv</code> at the outermost compatibility boundary.</p>
+<p>The new package metadata should have one primary entry point plus legacy aliases for the retained compatibility commands:</p>
+<pre><code class="language-toml">[project.scripts]
+tensilelite = &quot;tensilelite.cli:main&quot;
+Tensile = &quot;tensilelite.cli.compat:tensile&quot;
+TensileBenchmarkCluster = &quot;tensilelite.cli.compat:benchmark_cluster&quot;
+TensileCreateLibrary = &quot;tensilelite.cli.compat:create_library&quot;
+TensileGenerateSummations = &quot;tensilelite.cli.compat:generate_summations&quot;
+TensileLibLogicToYaml = &quot;tensilelite.cli.compat:liblogic_to_yaml&quot;
+TensileLogic = &quot;tensilelite.cli.compat:logic&quot;
+TensileMergeLibrary = &quot;tensilelite.cli.compat:merge_library&quot;
+TensileRetuneLibrary = &quot;tensilelite.cli.compat:retune_library&quot;
+TensileUpdateLibrary = &quot;tensilelite.cli.compat:update_library&quot;
+TensileGetPath = &quot;tensilelite.cli.compat:get_path&quot;
+TensileVerifyStinkyElfText = &quot;tensilelite.cli.compat:verify_stinky_elf_text&quot;</code></pre>
+<p>The package should also provide <code>tensilelite/__main__.py</code> so <code>python -m tensilelite ...</code> uses the same dispatcher as the installed <code>tensilelite</code> console script.</p>
+<p>Each compatibility alias must flow through the new CLI dispatcher instead of calling the old implementation directly. The alias should prepend the matching subcommand and pass a <code>compat_path</code> value into the new main path:</p>
+<pre><code class="language-python">def create_library(argv: Sequence[str] | None = None) -&gt; int:
+    args = sys.argv[1:] if argv is None else list(argv)
+    return main(
+        [&quot;create-library&quot;, *args],
+        compat_path=(&quot;TensileCreateLibrary&quot;, &quot;tensilelite create-library&quot;),
+    )</code></pre>
+<p>The shared main/subcommand functions should print a deprecation warning when <code>compat_path</code> is set:</p>
+<pre><code class="language-text">TensileCreateLibrary is deprecated and will be removed in a future release.
+Use `tensilelite create-library` instead.</code></pre>
+<p>This keeps warning text, exit behavior, logging, and argument parsing on the new code path while preserving the old command names for existing scripts.</p>
+<h2 id="build-system-integration">Build-System Integration</h2>
+<p>The hipBLASLt build should treat TensileLite as an installed Python package in the build Python environment:</p>
+<ol>
+  <li>Install <code>tensilelite</code> and <code>rocisa</code> into the build venv, preferably editable during local development and as wheels in packaging tests.</li>
+  <li>Replace <code>HIPBLASLT_PYTHON_COMMAND</code> path injection with package execution.</li>
+  <li>Invoke device-library generation with:</li>
+</ol>
+<pre><code class="language-bash">python -m tensilelite create-library ...</code></pre>
+<ol start="4">
+  <li>Invoke logic validation with:</li>
+</ol>
+<pre><code class="language-bash">python -m tensilelite logic ...</code></pre>
+<ol start="5">
+  <li>Replace <code>HIPBLASLT_INSTALL_TENSILELITE_TEST_ARTIFACTS</code> raw source installs with installation of the package wheel and any required test data.</li>
+</ol>
+<p>The current CMake call sites that execute <code>Tensile/bin/TensileLogic</code> or <code>python -m Tensile.TensileCreateLibrary</code> should be converted after the new entry points exist. This removes the build&#x27;s dependence on a particular source-tree layout.</p>
+<p>The CMake cutover must update <code>HipBLASLtCodegen.cmake</code> and <code>hipblaslt_python.cmake</code> together. Today, CMake constructs a Python command that injects <code>PYTHONPATH</code>, invokes <code>Tensile/bin/TensileLogic</code>, invokes <code>python -m Tensile.TensileCreateLibrary</code>, passes <code>--known-bugs</code> as an explicit source-tree path, and lists that file in custom-command dependencies. The packaged command path must choose one <code>known_bugs.yaml</code> source of truth:</p>
+<ul>
+  <li>keep an explicit <code>--known-bugs &lt;path&gt;</code> argument in CMake until the package resource path can be resolved cleanly at configure time; or</li>
+  <li>make <code>tensilelite logic --check-all</code> default to the packaged <code>known_bugs.yaml</code>, remove the explicit CMake argument, and update the CMake stamp/dependency model so edits to the installed/editable package still trigger validation when needed.</li>
+</ul>
+<p>Do not move <code>known_bugs.yaml</code> behind package resources in one step while leaving CMake hard-coded to the old source-tree file path.</p>
+<h3 id="cmake-and-source-tree-caller-inventory">CMake And Source-Tree Caller Inventory</h3>
+<p>The package refactor must remove all in-repo dependencies on the legacy <code>Tensile</code> import namespace and source-tree command paths. The following known callers must be migrated or explicitly removed:</p>
+<div class="table-wrap">
+<table>
+<thead><tr><th>Caller</th><th>Current behavior</th><th>Target behavior</th><th>Notes</th></tr></thead>
+<tbody>
+<tr><td><code>cmake/hipblaslt_python.cmake</code></td><td>Builds <code>HIPBLASLT_PYTHON_COMMAND</code> by setting <code>PYTHONPATH</code> to the build <code>rocisa</code> path and source-tree <code>tensilelite</code>.</td><td>Use the selected build Python with installed/editable <code>tensilelite</code> and <code>rocisa</code>; add configure-time <code>import tensilelite, rocisa</code> validation.</td><td>Defines the command environment used by codegen steps.</td></tr>
+<tr><td>top-level <code>CMakeLists.txt</code> Python setup</td><td>Chooses bundled Python mode or raw <code>Python_EXECUTABLE</code> and may build <code>_rocisa</code> as a dependency.</td><td>Ensure package install/editable setup happens before CMake generator steps, and validate imports with the exact build Python.</td><td>Non-bundled Python currently does not prove dependencies are importable.</td></tr>
+<tr><td><code>cmake/HipBLASLtCodegen.cmake</code></td><td>Runs <code>${_codegen_dir}/Tensile/bin/TensileLogic</code> and <code>python -m Tensile.TensileCreateLibrary</code>.</td><td>Run <code>python -m tensilelite logic</code> and <code>python -m tensilelite create-library</code>.</td><td>Must resolve the <code>known_bugs.yaml</code> source-of-truth and CMake <code>DEPENDS</code> behavior.</td></tr>
+<tr><td><code>device-library/CMakeLists.txt</code></td><td>Calls <code>hipblaslt_create_device_library</code> with source logic path and build output path.</td><td>Keep logic/output semantics while routing generation through installed <code>tensilelite</code>.</td><td>Integration caller for device-library generation.</td></tr>
+<tr><td><code>device-library/extops/CMakeLists.txt</code></td><td>Runs <code>LayerNormGenerator.py</code>, <code>SoftmaxGenerator.py</code>, <code>AMaxGenerator.py</code>, and <code>ExtOpCreateLibrary.py</code> by source-tree path.</td><td>Package these generators as <code>tensilelite</code> modules/subcommands or declare ext-op source-tree generation out of scope.</td><td>These scripts import <code>Tensile.*</code> today and are part of the device-library build when extops are enabled.</td></tr>
+<tr><td>top-level <code>CMakeLists.txt</code> test-artifact install</td><td>Installs raw <code>tensilelite/Tensile/</code> and selected <code>Tensile/bin</code> scripts under <code>share/hipblaslt/tensilelite</code>.</td><td>Install the package wheel and explicit test data/artifacts, not the raw legacy package tree.</td><td>Controlled by <code>HIPBLASLT_INSTALL_TENSILELITE_TEST_ARTIFACTS</code>.</td></tr>
+<tr><td><code>tensilelite/pyproject.toml</code></td><td>Distribution is <code>tensile</code>; scripts point at <code>Tensile.*</code>; pytest/mutmut config names <code>Tensile</code>.</td><td>Rename distribution to <code>tensilelite</code>, discover the new namespace, update script targets, and update test/tool config paths.</td><td>Current installed scripts do not match the full <code>Tensile/bin</code> surface.</td></tr>
+<tr><td><code>tensilelite/MANIFEST.in</code></td><td>Broadly includes <code>Tensile</code> files and selected <code>Tensile/bin</code> launchers.</td><td>Replace with an intentional package-data allowlist for the new namespace.</td><td>Avoid sdist/wheel drift.</td></tr>
+<tr><td><code>tensilelite/tox.ini</code>, <code>pytest.ini</code>, and pyproject test config</td><td>Run tests against source-tree <code>Tensile/Tests</code>, <code>--cov=Tensile</code>, and <code>PYTHONPATH={toxinidir}</code>.</td><td>Add installed-wheel environments with no source-tree <code>PYTHONPATH</code>; update coverage/test paths to <code>tensilelite</code>.</td><td>Source-tree tests can mask packaging failures.</td></tr>
+<tr><td>pre-commit tooling</td><td>Maps affected files and imports using <code>Tensile</code> module/test paths.</td><td>Map affected files and imports using <code>tensilelite</code> paths.</td><td>Otherwise developer gates keep preserving the old namespace.</td></tr>
+<tr><td><code>scripts/run_tensile_logic_check.py</code></td><td>Mutates <code>sys.path</code>, finds build-tree <code>rocisa</code>, and imports <code>Tensile.TensileLogic</code>.</td><td>Invoke the installed package API or <code>python -m tensilelite logic</code>.</td><td>Keep cross-platform behavior, but remove source-tree import assumptions.</td></tr>
+<tr><td><code>scripts/run_tensile_logic_check.sh</code> and <code>scripts/README.md</code></td><td>Wrap/document the Python script and source-tree <code>known_bugs.yaml</code>.</td><td>Document the installed package command and chosen known-bugs behavior.</td><td>Keep convenience wrapper if useful.</td></tr>
+<tr><td><code>install.sh</code></td><td>Installs <code>tensilelite/requirements.txt</code> into a venv rather than installing the package.</td><td>Install local <code>rocisa</code> and <code>tensilelite</code> package/editable into the venv.</td><td>Requirements-only setup can leave imports dependent on the source checkout.</td></tr>
+<tr><td><code>tensilelite/cmake/tensilelite_auto_build.cmake</code></td><td>Generates deprecated wrappers around <code>${source}/Tensile/bin/*</code>.</td><td>Remove the source-tree wrapper path or regenerate wrappers around <code>python -m tensilelite ...</code>.</td><td>If kept, it must not depend on <code>Tensile/bin</code>.</td></tr>
+<tr><td><code>tensilelite/LayerNormGenerator.py</code>, <code>SoftmaxGenerator.py</code>, <code>AMaxGenerator.py</code></td><td>Ext-op generator scripts import <code>Tensile.Common.*</code> and are run by CMake path.</td><td>Move under the <code>tensilelite</code> package and expose module/subcommand entry points.</td><td>Active with extops; depends on <code>rocisa</code> and toolchain globals.</td></tr>
+<tr><td><code>tensilelite/ExtOpCreateLibrary.py</code></td><td>CMake runs the raw script by path.</td><td>Move under the <code>tensilelite</code> package and expose a module/subcommand.</td><td>Does not import <code>Tensile</code>, but is still a source-layout dependency.</td></tr>
+<tr><td><code>tensilelite/Tensile/bin/*</code></td><td>Checked-in launchers patch <code>sys.path</code> and import <code>Tensile.*</code>.</td><td>Replace with console-script aliases routed through <code>tensilelite.cli</code>.</td><td>Preserve temporarily only for compatibility warnings.</td></tr>
+<tr><td><code>Tensile/ClientWriter.py</code></td><td>Builds command strings using <code>ROOT_PATH + &quot;/bin/TensileCreateLibrary&quot;</code>.</td><td>Use the new dispatcher or an in-process create-library API.</td><td>Required before <code>Tensile/bin</code> can be removed.</td></tr>
+<tr><td><code>Tensile/GenerateSummations.py</code></td><td>Locates <code>bin/TensileCreateLibrary</code> relative to <code>__file__</code> and shells out to it.</td><td>Use the new dispatcher or an in-process create-library API.</td><td>Also requires <code>pandas</code>.</td></tr>
+<tr><td><code>Tensile/ClientExecutable.py</code></td><td>Uses <code>SOURCE_PATH</code> as a CMake source directory for client builds.</td><td>Require a prebuilt client or replace with a supported packaged client-build flow.</td><td><code>Tensile/Source</code> has no <code>CMakeLists.txt</code> in this tree.</td></tr>
+<tr><td><code>Tensile/__init__.py</code> path constants</td><td>Exposes <code>ROOT_PATH</code>, <code>SOURCE_PATH</code>, and <code>CUSTOM_KERNEL_PATH</code>; internal modules consume them.</td><td>Replace with resource helpers under <code>tensilelite</code>.</td><td>Do not preserve these as default public API in the canonical wheel.</td></tr>
+<tr><td><code>Tensile/Tensile.py</code></td><td>Constructs <code>Configs/</code> and <code>Tests/</code> paths relative to source file and documents <code>Tensile/bin/Tensile</code>.</td><td>Defer packaged <code>run</code>, or require external configs/prebuilt client and remove source-tree fallbacks.</td><td><code>Tensile/Configs</code> is absent in this tree.</td></tr>
+<tr><td><code>TensileCreateLibrary.copyStaticFiles</code></td><td>Copies headers from <code>SOURCE_PATH</code>.</td><td>Use a resource helper such as <code>copy_static_headers(output_dir)</code>.</td><td>Needed for library generation.</td></tr>
+<tr><td>custom-kernel loaders</td><td>Read <code>CustomKernels/*.s</code> through <code>CUSTOM_KERNEL_PATH</code>.</td><td>Use resource helpers such as <code>read_custom_kernel(name)</code> and <code>list_custom_kernels()</code>.</td><td>Needed for custom-kernel support.</td></tr>
+<tr><td><code>Tensile/TensileBenchmarkCluster.py</code></td><td>Derives <code>RootTensileDir</code> from <code>__file__</code> for script/docker paths.</td><td>Use explicit external paths or package resources if still supported.</td><td>Exposed by an existing console script.</td></tr>
+<tr><td><code>Tensile/TensileCreateLibrary/__main__.py</code></td><td>Supports old <code>python -m Tensile.TensileCreateLibrary</code>.</td><td>Use <code>python -m tensilelite create-library</code>; keep old module mode only in compatibility package if needed.</td><td>CMake currently depends on old module mode.</td></tr>
+<tr><td><code>Tensile/verify_stinky_comment_vs_elf_text.py</code></td><td>Documents old module CLI and is exposed by <code>TensileVerifyStinkyElfText</code>.</td><td>Move to <code>tensilelite verify-stinky-elf-text</code> or developer-only module.</td><td>Decide support level before publishing.</td></tr>
+<tr><td><code>Tensile/Tests/conftest.py</code>, common test helpers, and subprocess tests</td><td>Mutate <code>sys.path</code> and forward <code>PYTHONPATH</code> so subprocesses import <code>Tensile</code>.</td><td>Installed-wheel tests must import <code>tensilelite</code> without adding source root.</td><td>This is the main way tests can hide packaging breakage.</td></tr>
+<tr><td><code>Tensile/Tests/**</code></td><td>Tests import, patch, or importlib-load <code>Tensile.*</code>; some load files by relative legacy paths.</td><td>Migrate tests to <code>tensilelite.*</code>; keep old-name checks only in explicit compatibility tests.</td><td>Broad churn; snapshots may pin old names/text.</td></tr>
+<tr><td>docs, examples, readmes, and test data comments</td><td>Document commands such as <code>Tensile/bin/Tensile</code>, <code>Tensile/bin/TensileCreateLibrary</code>, <code>Tensile/bin/TensileLogic</code>, <code>Tensile/Tests</code>, and requirements-only setup.</td><td>Update to package install/editable setup and <code>python -m tensilelite ...</code> commands, or mark source-tree developer workflows explicitly.</td><td>Includes README, CONTRIBUTING, AGENTS files, custom-kernel docs, utility docs, and config readmes.</td></tr>
+<tr><td>documentation tooling metadata</td><td>Targets <code>projects/hipblaslt/tensilelite/Tensile</code>.</td><td>Point to the new package/source layout.</td><td>Tooling-only, but otherwise docs tooling may miss new files.</td></tr>
+</tbody>
+</table>
+</div>
+<p>Before publishing a canonical <code>tensilelite</code>-only wheel, all in-repo imports of <code>Tensile.*</code>, invocations of <code>Tensile/bin</code>, and source-tree <code>PYTHONPATH</code> assumptions must be gone. The only remaining legacy-name references should be compatibility entry-point definitions, explicit compatibility tests, and deprecation documentation.</p>
+<h2 id="package-data">Package Data</h2>
+<p>The package-data contract should support the features currently reachable from <code>Tensile/bin</code> without copying the entire current source tree:</p>
+<ul>
+  <li>Library logic YAML generation in the existing source-tree <code>run</code> pipeline primarily needs Python modules and its input benchmark data. It does not need static source headers, <code>known_bugs.yaml</code>, or CMake helper files just to analyze benchmark CSV/YAML data and write <code>3_LibraryLogic/*.yaml</code>.</li>
+  <li>Library generation (<code>tensilelite create-library</code>) needs the static source headers copied today by <code>copyStaticFiles</code>: <code>TensileTypes.h</code>, <code>tensile_bfloat16.h</code>, <code>tensile_float8_bfloat8.h</code>, <code>KernelHeader.h</code>, <code>ReductionTemplate.h</code>, and <code>memory_gfx.h</code>.</li>
+  <li><code>CustomKernels/*.s</code> must be included if packaged TensileLite supports custom kernel workflows. Benchmark configs can request custom kernels with <code>CustomKernels</code>, logic files can reference <code>CustomKernelName</code>, and codegen reads the matching assembly file from <code>CustomKernels/</code>.</li>
+  <li><code>known_bugs.yaml</code> should be included if the packaged <code>tensilelite logic --check-all</code> command is expected to provide the same default documented-skip behavior as the hipBLASLt CMake validation gate. It is not needed for producing LibraryLogic YAMLs or code objects.</li>
+  <li>CMake helper files from <code>Tensile/Source</code> should not be included by default for the <code>Tensile/bin</code> feature boundary. They appear to be legacy support for an older CMake-based client/source workflow; in this tree, <code>Tensile/Source</code> has no <code>CMakeLists.txt</code>, and the active client path expects a prebuilt client.</li>
+</ul>
+<p>Package-data decisions:</p>
+<ul>
+  <li>Include the static source headers required by <code>copyStaticFiles</code>.</li>
+  <li>Include <code>CustomKernels/*.s</code>; custom kernel support is part of the current command surface and codegen reads these files by name.</li>
+  <li>Include <code>TensileLogic/known_bugs.yaml</code> only as validation support for <code>tensilelite logic --check-all</code>; it is not a generation input.</li>
+  <li>Exclude <code>Tensile/Source/EnableWarnings.cmake</code> and <code>Tensile/Source/FindOpenCL.cmake</code> from the wheel unless a supported packaged workflow is found that still uses them. A repository scan found no tracked callers outside the files themselves.</li>
+  <li>Rewrite <code>MANIFEST.in</code> as part of this step. The current manifest recursively includes broad <code>Tensile</code> file globs, a partial <code>rocisa</code> source snapshot, selected <code>Tensile/bin</code> launchers, a stale <code>Tensile/Ops/gen_assembly.sh</code> entry, and <code>requirements.txt</code>. The source distribution and wheel must use the same intentional package-data allowlist.</li>
+</ul>
+<p>Current <code>MANIFEST.in</code> risks to address:</p>
+<ul>
+  <li><code>recursive-include Tensile *.py *.h *.hpp *.cpp *.txt *.cmake *.yaml</code> is over-broad. It can pull tests, test YAML, CMake snippets, and local generated files such as <code>Tensile/Tests/unit/build_tmp</code> artifacts into sdists, and those files can also enter wheels when setuptools package-data inclusion is left implicit.</li>
+  <li><code>recursive-include rocisa *.cpp *.hpp *.txt</code> conflicts with the native dependency split. <code>rocisa</code> has its own scikit-build package and should be built or installed as a separate local dependency, not partially vendored into the <code>tensilelite</code> sdist. The broad rule can also capture <code>rocisa/build</code> artifacts such as <code>CMakeCache.txt</code> and generated native sources.</li>
+  <li><code>include Tensile/bin/Tensile Tensile/bin/TensileCreateLibrary</code> preserves only part of the checked-in legacy launcher surface. <code>TensileCreateLibrary</code> is still reached by source-tree callers such as <code>ClientWriter</code> and <code>GenerateSummations</code>, so those callers must move to the new dispatcher or an in-process API before <code>Tensile/bin</code> is removed from package data.</li>
+  <li>The current manifest is also not a complete legacy-workflow preservation mechanism. It omits other checked-in launchers and data such as <code>Tensile/bin/TensileLogic</code>, <code>TensileMergeLibrary</code>, <code>.ambr</code> snapshots, <code>.csv</code> test data, <code>.gz</code> fixtures, <code>Tensile/Source/winners.awk</code>, and <code>multigpu.sh</code>. The refactor should not fix that by broadening package data; unsupported source-tree workflows should stay out of the canonical wheel.</li>
+  <li><code>include Tensile/Ops/gen_assembly.sh</code> is stale in this checkout because the referenced path does not exist. Remove it unless a supported replacement workflow is identified.</li>
+  <li><code>include requirements.txt</code> should not be treated as runtime dependency metadata. Runtime dependencies belong in <code>pyproject.toml</code>; if <code>requirements.txt</code> remains, it is a developer/bootstrap helper and must not be allowed to drift into the published package contract.</li>
+</ul>
+<p>Target manifest and wheel-data rules:</p>
+<ul>
+  <li>Prefer explicit wheel data in <code>pyproject.toml</code>; consider setting <code>tool.setuptools.include-package-data = false</code> so future broad <code>MANIFEST.in</code> matches cannot silently enter wheels.</li>
+  <li>Replace the legacy manifest with a strict allowlist for the new <code>tensilelite</code> namespace. Do not carry forward <code>recursive-include Tensile ...</code> or <code>recursive-include rocisa ...</code>.</li>
+  <li>Add package data only for the static headers, <code>CustomKernels/*.s</code>, and the chosen <code>known_bugs.yaml</code> resource if the new CLI defaults to it.</li>
+  <li>Add explicit source-distribution exclusions while the old tree exists: <code>prune rocisa</code>, <code>prune */build</code>, <code>prune */build_tmp</code>, <code>prune Tensile/Tests</code>, <code>recursive-exclude * CMakeCache.txt</code>, <code>recursive-exclude * install_manifest.txt</code>, and <code>global-exclude *.py[cod] __pycache__</code>.</li>
+  <li>Do not package <code>Tensile/bin</code> files in the canonical wheel. Temporary legacy command names should be console-script aliases routed through <code>tensilelite.cli</code>, not checked-in launcher files.</li>
+</ul>
+<p>Code should access these files through <code>importlib.resources</code> instead of constructing paths from <code>__file__</code> and assuming a checkout layout. Any path that must remain user-visible should have an explicit API. Internal callers that currently construct source-tree paths, including <code>ClientWriter</code>, <code>GenerateSummations</code>, <code>TensileCreateLibrary.copyStaticFiles</code>, and custom-kernel loading, must be converted before <code>Tensile/bin</code> and the top-level <code>Tensile</code> package are removed from the canonical wheel.</p>
+<p>Suggested resource helper APIs:</p>
+<ul>
+  <li><code>copy_static_headers(output_dir)</code>: copy the static header set needed by generated libraries.</li>
+  <li><code>read_custom_kernel(name)</code> and <code>list_custom_kernels()</code>: read/list bundled custom kernel assembly resources without exposing package layout.</li>
+  <li><code>default_known_bugs_path()</code> or <code>load_default_known_bugs()</code>: expose <code>known_bugs.yaml</code> for validation. If CMake needs a real filesystem path, use a helper that materializes or resolves the resource intentionally.</li>
+</ul>
+<h2 id="legacy-import-compatibility">Legacy Import Compatibility</h2>
+<p>The canonical <code>tensilelite</code> wheel should not install a top-level <code>Tensile</code> package once the new namespace is ready. A same-wheel shim would make every <code>tensilelite</code> install claim the legacy <code>Tensile</code> namespace, recreate the naming conflict this refactor is meant to remove, and keep APIs such as <code>Tensile.ROOT_PATH</code>, <code>Tensile.SOURCE_PATH</code>, and <code>Tensile.CUSTOM_KERNEL_PATH</code> alive by default.</p>
+<p>If external users need a short-lived transition path for <code>import Tensile.*</code>, ship it as a separate opt-in compatibility distribution, for example <code>tensilelite-tensile-compat</code>. That package should:</p>
+<ul>
+  <li>depend on a tightly matched <code>tensilelite</code> version;</li>
+  <li>install the top-level <code>Tensile</code> namespace only in the compatibility package;</li>
+  <li>warn visibly on <code>import Tensile</code>, preferably with a <code>FutureWarning</code>-based custom warning because <code>DeprecationWarning</code> is often hidden;</li>
+  <li>include a specific removal release in the warning text;</li>
+  <li>document that it is mutually exclusive with any other package that owns the <code>Tensile</code> import namespace.</li>
+</ul>
+<p>The compatibility package must avoid loading implementation modules twice. A naive <code>__path__</code> shim can make <code>Tensile.Common.DataType</code> and <code>tensilelite.Common.DataType</code> become different module objects, splitting module globals, class identities, caches, and <code>globalParameters</code>. If an import compatibility package is required, it should use a prefix-rewriting import hook or equivalent module-aliasing layer so lazy imports such as <code>Tensile.Common.DataType</code> resolve to the same module objects as <code>tensilelite.Common.DataType</code>. A top-level <code>sys.modules[&quot;Tensile&quot;] = tensilelite</code> alias alone is not sufficient for submodule imports that have not yet been loaded.</p>
+<p>The main <code>tensilelite</code> wheel should still keep temporary <code>Tensile*</code> console-script aliases during the transition. Console-script aliases do not claim the Python <code>Tensile</code> namespace and can safely route through <code>tensilelite.cli</code> with <code>compat_path</code> warnings.</p>
+<h2 id="migration-plan">Migration Plan</h2>
+<ol>
+  <li>Add the new package metadata. Rename the distribution from <code>tensile</code> to <code>tensilelite</code>, add <code>rocisa</code> as a dependency, split runtime dependencies from dev/test tools, add the <code>tensilelite</code> console script, and add legacy <code>Tensile*</code> aliases that dispatch through the new CLI with <code>compat_path</code>. Single-source the package version so <code>pyproject.toml</code>, runtime <code>__version__</code>, and any generated/config version references cannot drift.</li>
+  <li>Add the new import namespace. Introduce <code>tensilelite</code> as the supported import path. Keep the implementation thin at first if needed, but make all new callers use the new namespace.</li>
+  <li>Convert internal and in-repo imports. Move every in-repo import and reference from <code>Tensile.*</code> to relative imports or <code>tensilelite.*</code>. Update tests, CMake Python invocations, helper scripts, docs, and test fixtures. This is the main behavioral risk. Existing characterization tests are useful but insufficient by themselves because many tests still import <code>Tensile</code> or modify <code>sys.path</code> to emulate the old source-tree layout. The tests must be migrated to import <code>tensilelite</code> and CI must include an installed-wheel test that does not place the source-tree <code>Tensile</code> package on <code>sys.path</code>.</li>
+  <li>Deprecate legacy entry points. Keep <code>Tensile</code>, <code>TensileCreateLibrary</code>, and related command names only as warnings-backed compatibility aliases for a defined release window. Do not require those aliases for hipBLASLt&#x27;s own build, and do not add new <code>tensilelite-*</code> executable aliases.</li>
+  <li>Replace implicit source-tree asset reads. Move the static headers, <code>CustomKernels/*.s</code>, and <code>known_bugs.yaml</code> behind explicit resource-access helpers. As part of this step, verify that <code>Tensile/Source/EnableWarnings.cmake</code> and <code>Tensile/Source/FindOpenCL.cmake</code> remain unused; if so, leave them out of package data and consider removing them from the source tree in a follow-up cleanup. Convert internal callers that shell out to <code>Tensile/bin</code>, such as <code>ClientWriter</code> and <code>GenerateSummations</code>, to use the new dispatcher or an in-process API.</li>
+  <li>Confirm the supported CLI surface. Verify whether <code>tensilelite run</code> remains functional in this fork. The current <code>Tensile.py</code> references a <code>Configs</code> directory that is not present in this tree; either document that configs must be supplied externally, restore the required package data, or remove/rename the advertised mode before publishing the new CLI.</li>
+  <li>Stop installing the top-level <code>Tensile</code> package. Once in-repo and downstream callers have migrated, remove the <code>Tensile</code> package from the canonical wheel. <code>pip install tensilelite</code> should make <code>import tensilelite</code> work and <code>import Tensile</code> fail. If a short transition for legacy Python imports is required, use a separate opt-in compatibility package as described above; do not keep <code>Tensile</code> as a shim inside the main wheel. Exit criteria for this step: no in-repo CMake/script/test/doc caller invokes <code>Tensile/bin</code>, no in-repo code imports <code>Tensile.*</code>, no test fixture adds the source-tree <code>Tensile</code> package to <code>PYTHONPATH</code>, and installed-wheel CI passes without the source tree on <code>PYTHONPATH</code>. The only remaining legacy-name references should be compatibility entry-point definitions, explicit compatibility tests, and deprecation documentation.</li>
+</ol>
+<h2 id="downstream-dependency-model">Downstream Dependency Model</h2>
+<p>GEKO and other consumers should be able to declare:</p>
+<pre><code class="language-toml">[project]
+dependencies = [
+  &quot;tensilelite&gt;=5.0&quot;,
+]</code></pre>
+<p>Until <code>rocisa</code> is published or otherwise resolvable as a normal package dependency, this downstream dependency model also requires installing a matching local <code>rocisa</code> build into the same environment.</p>
+<p>For monorepo or source-based development before publication, downstreams can use a direct reference to the subdirectory:</p>
+<pre><code class="language-toml">tensilelite @ git+https://github.com/ROCm/rocm-libraries.git@develop#subdirectory=projects/hipblaslt/tensilelite</code></pre>
+<p>That dependency should provide importable APIs and command-line tools without requiring GEKO to set <code>PYTHONPATH</code>, copy <code>Tensile/bin</code>, or know the hipBLASLt repository layout.</p>
+<h2 id="validation">Validation</h2>
+<p>The refactor should be validated in both package and hipBLASLt build modes:</p>
+<ul>
+  <li>Build or install a local <code>rocisa</code> package into the test environment first.</li>
+  <li>Build an sdist and wheel with <code>python -m build</code>.</li>
+  <li>Inspect the sdist and wheel contents in CI, for example with <code>tar tf</code> and wheel zip listing, and fail if the canonical package contains <code>Tensile/</code>, <code>Tensile/bin</code>, <code>Tensile/Tests</code>, <code>rocisa/build</code>, <code>CMakeCache.txt</code>, <code>install_manifest.txt</code>, or other generated build artifacts.</li>
+  <li>Fail package-content validation if the required static headers, <code>CustomKernels/*.s</code>, or the chosen <code>known_bugs.yaml</code> resource are missing.</li>
+  <li>Install the local <code>rocisa</code> package and the <code>tensilelite</code> wheel into a clean venv and verify <code>import tensilelite</code>.</li>
+  <li>Verify a clean venv does not import top-level <code>Tensile</code> from the new package once the compatibility window ends.</li>
+  <li>Run <code>tensilelite --help</code> and subcommand <code>--help</code> checks for every supported mode, and compare key exit-code and usage/error-message behavior against the legacy commands during the compatibility window.</li>
+  <li>Run compatibility alias smoke tests and verify each one prints the deprecation warning with the replacement <code>tensilelite &lt;subcommand&gt;</code> command.</li>
+  <li>Run <code>tox -e unit</code> from <code>tensilelite</code>.</li>
+  <li>Run installed-wheel tests without adding the source tree or <code>Tensile/</code> to <code>PYTHONPATH</code>.</li>
+  <li>Run a scoped hipBLASLt device-library build with <code>TENSILELITE_LOGIC_FILTER</code>.</li>
+  <li>Run <code>scripts/run_tensile_logic_check.py</code> after it has been converted to the installed package API.</li>
+  <li>Build or smoke-test a GEKO environment that depends on <code>tensilelite</code> without extra path configuration, after installing the local <code>rocisa</code> dependency.</li>
+  <li>Run grep gates that fail on accidental legacy namespace or source-tree command use, excluding generated outputs. The exact patterns can evolve, but should cover <code>Tensile/bin</code>, <code>python -m Tensile</code>, <code>TensileCreateLibrary</code>, <code>TensileLogic</code>, <code>TensileGetPath</code>, <code>TensileVerifyStinkyElfText</code>, <code>PYTHONPATH</code>, <code>sys.path</code> mutation, <code>from Tensile</code>, <code>import Tensile</code>, <code>ROOT_PATH</code>, <code>SOURCE_PATH</code>, <code>CUSTOM_KERNEL_PATH</code>, <code>Tensile/Tests</code>, and <code>--cov=Tensile</code>.</li>
+  <li>Run ext-op device-library generation if extops remain supported by the packaged build path.</li>
+</ul>
+<h2 id="open-questions">Open Questions</h2>
+<ul>
+  <li>How long should legacy <code>Tensile*</code> command aliases remain available?</li>
+  <li>Should <code>TensileGetPath</code> remain as a compatibility alias, become <code>tensilelite get-path</code>, or be removed with a documented replacement?</li>
+  <li>Is <code>TensileVerifyStinkyElfText</code> part of the supported packaged command surface, or should it remain an internal/developer-only tool?</li>
+  <li>Which later release, if any, should promote <code>tensilelite run</code> from source-tree/developer workflow to public packaged CLI, and what exact external-config and prebuilt-client contract should it require?</li>
+  <li>Should CMake continue passing an explicit <code>--known-bugs</code> path, or should <code>tensilelite logic --check-all</code> use the packaged <code>known_bugs.yaml</code> by default?</li>
+  <li>Should a separate compatibility package provide the old top-level <code>Tensile</code> namespace for users that cannot migrate immediately?</li>
+  <li>Should the ROCm binary package install Python wheels directly, or continue to place package contents under <code>share/hipblaslt</code> for test artifacts?</li>
+</ul>
+      </article>
+    </main>
+  </div>
+</body>
+</html>
