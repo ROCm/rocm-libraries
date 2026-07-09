@@ -62,6 +62,10 @@ option(OPTIMAL "Build specialized kernels for small matrix sizes" ON)
 option(ROCSOLVER_FIND_PACKAGE_LAPACK_CONFIG "Skip module mode search for LAPACK" ON)
 option(ROCSOLVER_USE_INTERNAL_BLAS "Use internal implementation of GEMM and TRSM for debugging." OFF)
 option(ROCSOLVER_USE_REFERENCE_SECULAR_EQUATIONS_SOLVER "Use LAPACK like implementation of secular equations solver" ON)
+# Feature flag for the 2-stage eigensolver reduction (he2hb/sy2sb). On by default;
+# set OFF for the A/B "disabled" arm.
+# Declared at top level so both the library and the test client observe a consistent value.
+option(ROCSOLVER_ENABLE_EIG_2STAGE "Enable 2-stage eigensolver reduction (he2hb/sy2sb)" ON)
 
 # Add our CMake helper files to the lookup path
 list(APPEND CMAKE_MODULE_PATH "${CMAKE_CURRENT_SOURCE_DIR}/cmake")

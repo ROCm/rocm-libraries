@@ -515,6 +515,12 @@ if(ROCSOLVER_USE_REFERENCE_SECULAR_EQUATIONS_SOLVER)
   target_compile_definitions(rocsolver PRIVATE ROCSOLVER_USE_REFERENCE_SECULAR_EQUATIONS_SOLVER)
 endif()
 
+# Feature flag: 2-stage eigensolver reduction (he2hb/sy2sb). Option is declared
+# at the top-level CMakeLists.txt so the library and test client stay in sync.
+if(ROCSOLVER_ENABLE_EIG_2STAGE)
+  target_compile_definitions(rocsolver PRIVATE ROCSOLVER_ENABLE_EIG_2STAGE)
+endif()
+
 target_compile_definitions(rocsolver PRIVATE
   ROCM_USE_FLOAT16
   ROCBLAS_INTERNAL_API
