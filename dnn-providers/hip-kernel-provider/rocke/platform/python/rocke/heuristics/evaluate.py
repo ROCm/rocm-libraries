@@ -24,7 +24,7 @@ import pandas as pd
 from data_pipeline import build_training_dataset
 from feature_engine import GemmUniversalFeatureEngine
 from predict import Predictor
-from train import compute_tflops_efficiency
+from train import compute_tflops_efficiency, get_feature_engine
 
 
 def classify_shape_family(m: int, n: int, k: int) -> str:
@@ -206,9 +206,17 @@ def main():
 
     print(f"Loading data from {args.data_dir}...")
     df = build_training_dataset(args.data_dir, op_type=args.op, dtype=args.dtype)
-    print(f"  {len(df)} rows, {df.groupby(['m', 'n', 'k']).ngroups} shapes")
+    # Shape-count print keyed on columns that exist for this op (gemm has m/n/k;
+    # fmha/others don't). Fall back to a plain row count if the gemm cols are absent.
+    if {"m", "n", "k"}.issubset(df.columns):
+        print(f"  {len(df)} rows, {df.groupby(['m', 'n', 'k']).ngroups} shapes")
+    else:
+        print(f"  {len(df)} rows")
 
-    fe = GemmUniversalFeatureEngine()
+    # Use the op-appropriate feature engine (fmha -> FmhaFeatureEngine, etc.),
+    # not the hardcoded GEMM one — otherwise evaluate extracts the wrong features
+    # for non-gemm ops.
+    fe = get_feature_engine(args.op)
     predictor = Predictor(args.model_dir, feature_engine=fe)
 
     print("Evaluating...")
