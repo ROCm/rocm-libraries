@@ -390,7 +390,7 @@ private:
   template <
     bool Dummy,
     class Deleter =
-      typename thrust::detail::dependent_type<typename thrust::detail::identity_<deleter_type>::type, Dummy>::type>
+      typename thrust::detail::dependent_type<typename _THRUST_STD::type_identity<deleter_type>::type, Dummy>::type>
   using EnableIfDeleterDefaultConstructible =
     std::enable_if_t<std::is_default_constructible_v<Deleter> && !std::is_pointer_v<Deleter>>;
 
@@ -413,7 +413,7 @@ private:
   template <
     bool Dummy,
     class Deleter =
-      typename thrust::detail::dependent_type<typename thrust::detail::identity_<deleter_type>::type, Dummy>::type>
+      typename thrust::detail::dependent_type<typename _THRUST_STD::type_identity<deleter_type>::type, Dummy>::type>
   using EnableIfDeleterDefaultDelete = std::enable_if_t<std::is_same_v<Deleter, default_delete<T>>>;
 
 public:
@@ -751,7 +751,7 @@ private:
   template <
     bool Dummy,
     class Deleter =
-      typename thrust::detail::dependent_type<typename thrust::detail::identity_<deleter_type>::type, Dummy>::type>
+      typename thrust::detail::dependent_type<typename _THRUST_STD::type_identity<deleter_type>::type, Dummy>::type>
   using EnableIfDeleterDefaultConstructible =
     std::enable_if_t<std::is_default_constructible_v<Deleter> && !std::is_pointer_v<Deleter>>;
 
@@ -763,12 +763,12 @@ private:
   using EnableIfPointerConvertible = std::enable_if_t<std::is_same_v<Pp, pointer>>;
 
   template <bool Dummy,
-            class Tp = typename thrust::detail::dependent_type<typename thrust::detail::identity_<element_type>::type,
+            class Tp = typename thrust::detail::dependent_type<typename _THRUST_STD::type_identity<element_type>::type,
                                                                Dummy>::type>
   using EnableIfTriviallyDestructible = std::enable_if_t<std::is_trivially_destructible_v<Tp>>;
 
   template <bool Dummy,
-            class Tp = typename thrust::detail::dependent_type<typename thrust::detail::identity_<element_type>::type,
+            class Tp = typename thrust::detail::dependent_type<typename _THRUST_STD::type_identity<element_type>::type,
                                                                Dummy>::type>
   using EnableIfNotTriviallyDestructible = std::enable_if_t<!std::is_trivially_destructible_v<Tp>>;
 
@@ -787,7 +787,7 @@ private:
   template <
     bool Dummy,
     class Deleter =
-      typename thrust::detail::dependent_type<typename thrust::detail::identity_<deleter_type>::type, Dummy>::type>
+      typename thrust::detail::dependent_type<typename _THRUST_STD::type_identity<deleter_type>::type, Dummy>::type>
   using EnableIfDeleterDefaultDelete = std::enable_if_t<std::is_same_v<Deleter, default_delete<T[]>>>;
 
 public:

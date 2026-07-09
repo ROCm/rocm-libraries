@@ -192,7 +192,7 @@ struct tuple_meta_accumulate;
 template <class BinaryMetaFun, typename StartType>
 struct tuple_meta_accumulate<thrust::tuple<>, BinaryMetaFun, StartType>
 {
-  using type = typename thrust::detail::identity_<StartType>::type;
+  using type = typename _THRUST_STD::type_identity<StartType>::type;
 };
 
 template <class BinaryMetaFun, typename StartType, typename T, typename... Ts>
