@@ -154,7 +154,7 @@ PoolingForwardNaive::GetSolution(const ExecutionContext&,
     ///
     /// \anchor naive_pooling_max_grid_size
     /// * Assumption: Max grid size is >= 2^32-1 (4G-1) i.e. std::max<unint32_t>.
-    ///   Currently this limitation is valid for both ROCm HIP and OCL runtimes.
+    ///   Currently this limitation is valid for the ROCm HIP runtime.
     ///
     /// Another problem with this simple approach is finding out the optimal workgroup size.
     /// The trivial solution is {1,1,1}, but this would lead to under-utilization of GPU, because

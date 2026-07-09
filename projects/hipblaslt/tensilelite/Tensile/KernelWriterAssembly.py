@@ -6026,7 +6026,7 @@ class KernelWriterAssembly(KernelWriter):
     skipInitCVmovLabel = None
     if initCIterWmma:
       loopIdx = 0
-      EndCounter = kernel["PrefetchGlobalRead"] if not kernel["SuppressNoLoadLoop"] else kernel["PrefetchGlobalRead"]-1
+      EndCounter = self.unrollLoopEntryEndCounter(kernel)  # match openLoop's loop-entry guard
       loopCounter = self.loopCounter(kernel, loopIdx)
       loopChar = self.states.indexChars[ \
           kernel["ProblemType"]["IndicesSummation"][loopIdx]]
@@ -7515,6 +7515,23 @@ class KernelWriterAssembly(KernelWriter):
     return value
 
   ##############################################################################
+  # Unrolled-loop entry threshold
+  ##############################################################################
+  def unrollLoopEntryEndCounter(self, kernel):
+    """Threshold T for the unrolled loop: the main (global-load) unrolled loop
+    body -- and therefore the InitCIterWmma cloned iter0 that zeroes C -- runs
+    iff LoopCounter > T."""
+    pgr = kernel["PrefetchGlobalRead"]
+    if pgr == 1:
+      return 0 if kernel["SuppressNoLoadLoop"] else 1
+    if pgr == 2:
+      return (0 if kernel["HalfPLR"] else 1) if kernel["SuppressNoLoadLoop"] else 2
+    if pgr >= 3:
+      # openLoop early-exits to NoGlobalLoadLoop for LoopCounter <= PGR.
+      return pgr
+    return 0
+
+  ##############################################################################
   # Open Loop
   ##############################################################################
   def openLoop(self, kernel, tPA, tPB, loopIdx, noLabelGen=False, beginLabelOnly=False, nta=0, ntb=0):
@@ -7555,20 +7572,6 @@ class KernelWriterAssembly(KernelWriter):
     # PGL needs a skip-check here if not bufferload
     # If kernel["SuppressNoLoadLoop"] we don't have a special loop for the 'last iter'
     loopCounter = self.loopCounter(kernel, loopIdx)
-    if tailLoop:
-      endCounter = 0
-    elif kernel["PrefetchGlobalRead"] == 1:
-      if kernel["SuppressNoLoadLoop"]:
-        endCounter =  0
-      else:
-        endCounter = 1
-    elif kernel["PrefetchGlobalRead"] >= 2:
-      if kernel["SuppressNoLoadLoop"]:
-        endCounter =  0 if kernel["HalfPLR"] else 1
-      else:
-        endCounter = 2
-    else:
-      endCounter =  0
 
     if tailLoop:
       # begin loop
@@ -7582,8 +7585,8 @@ class KernelWriterAssembly(KernelWriter):
         if kernel["PrefetchGlobalRead"] >= 2 and kernel["AssertSummationElementMultiple"] % (kernel["DepthU"] * 2) != 0 and not kernel["SuppressNoLoadLoop"]:
           module.add(SCmpEQU32(
               src0=loopCounter, \
-              src1=hex(endCounter-1), \
-              comment="LoopCounter%s < EndCounter"%(loopChar) ))
+              src1=hex(1), \
+              comment="LoopCounter%s == 1 (PGR>=2, not Suppress: single-loop -> toPGR1)"%(loopChar) ))
           toPGR1 = Label.getFormatting(self.labels.getName("toPGR1"))
           module.add(SCBranchSCC1(labelName=toPGR1, comment="PGR=2 but only 1 loop, toPGR1"))
         if kernel["PrefetchGlobalRead"] >= 3:
@@ -7598,7 +7601,7 @@ class KernelWriterAssembly(KernelWriter):
           module.add(SCBranchSCC1(labelName=jumpLabel.getLabelName(), \
                     comment="do not enter Loop%s"%loopChar ))
           # early exit 2 (loopCounter==PGR) to first NGLL (need GR Inc)
-          endCounter = kernel["PrefetchGlobalRead"]
+          endCounter = self.unrollLoopEntryEndCounter(kernel)  # == PGR
           module.add(SCmpLeU32(
               src0=loopCounter, \
               src1=hex(endCounter), \
@@ -7608,6 +7611,7 @@ class KernelWriterAssembly(KernelWriter):
           module.add(SCBranchSCC1(labelName=jumpLabel.getLabelName(), \
                     comment="do not enter Loop%s"%loopChar ))
         else:
+          endCounter = self.unrollLoopEntryEndCounter(kernel)
           module.add(SCmpLeU32(
               src0=loopCounter, \
               src1=hex(endCounter), \
@@ -18125,7 +18129,7 @@ class KernelWriterAssembly(KernelWriter):
     elif (not kernel["DirectToLdsA"]) and kernel["DirectToLdsB"]:
       # (no DTLA) + DTLB (need to put DTLB first)
       return True
-    elif kernel["SwapGlobalReadOrder"] == True:
+    elif kernel["SwapGlobalReadOrder"] == 1:
       return True
     return False
 

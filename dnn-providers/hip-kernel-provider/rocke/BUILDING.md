@@ -4,7 +4,7 @@
 
 | Root | Packages | Installed in product? |
 |------|----------|-----------------------|
-| `platform/Python` | `rocke` (authoring SDK + engine frontend) | yes (wheel / CMake) |
+| `platform/python` | `rocke` (authoring SDK + engine frontend) | yes (wheel / CMake) |
 | `library`         | `kernels`, `builders`, `dispatch` (SDPA/MHA) | **no** — build-time only |
 
 The package import name is `rocke`; the SDPA product lives under separate
@@ -88,7 +88,7 @@ ROCm PyTorch must come from the ROCm wheel index for your system (see
 ## Daily loop
 
 1. One-time: build (CMake makes the venv) or run the manual setup.
-2. Edit any `.py` under `platform/Python/rocke/` or `library/` — changes are
+2. Edit any `.py` under `platform/python/rocke/` or `library/` — changes are
    live, no reinstall.
 3. Run scripts/tests against the venv interpreter.
 4. Re-run the install only after adding a **new top-level package** or changing
@@ -125,7 +125,7 @@ reports IR drift for 6 `conv/*` cases. The golden hashes track the C++ engine's
 output; #8841 (cshuffle) changed the Python lowerer's conv epilogue IR, so the
 Python-fallback hashes differ until the goldens are regenerated. Like the
 datalayout guard it reproduces identically on `develop` and is unrelated to the
-platform/library split — build the C++ engine (`platform/Cpp/`) to run this test
+platform/library split — build the C++ engine (`platform/cpp/`) to run this test
 against its intended baseline. Everything else is green; GPU-only tests skip
 without a device.
 
@@ -142,6 +142,6 @@ Override the roots for out-of-tree consumption with `ROCKE_PLATFORM_ROOT`,
 
 ## C++ engine
 
-The platform C++ engine (`platform/Cpp/` → `librocke_core.a`) and its
+The platform C++ engine (`platform/cpp/` → `librocke_core.a`) and its
 `rocke_engine` pybind binding are built by CMake, not pip, and are intentionally
 not part of any wheel. See `platform/BUILD.md`.
