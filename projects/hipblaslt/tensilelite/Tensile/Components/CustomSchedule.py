@@ -739,7 +739,7 @@ class RegisterSchedule:
             "Use64bShadowLimit": 1,
             "ForceUnrollSubIter": False,
             "SwapGlobalReadOrder": 0,
-            "UsePLRPack": False,
+            "UsePLRPack": 0,
             "UseF32XEmulation": False,
             "UseDirect32XEmulation": False,
             "MfmaInitCVgprs": False,
@@ -1397,7 +1397,7 @@ def _get_schedule_256x256x64_16bit(kernel, useLDSTr, TLDS):
                     SWaitCnt(dscnt=5, vlcnt=-1, vscnt=-1, comment="Wait for LRA1 and 3/8 LRB1 to complete")]
         nglshift = nllshift = 16
     elif isNT(kernel) and not useLDSTr and TLDS == 0:
-        kernel["UsePLRPack"] = True
+        kernel["UsePLRPack"] = 1
 
         optSchedule = {
             'SYNC'   : [[12,13, 36,44, 56,59, 66,68, 73,92]],
@@ -1441,7 +1441,7 @@ def _get_schedule_256x256x64_16bit(kernel, useLDSTr, TLDS):
                     SWaitCnt(dscnt=0, vlcnt=-1, vscnt=-1, comment="Wait for LRB1 to complete")]
         nglshift = nllshift = 16
     elif (isNN(kernel) or isTT(kernel)) and not useLDSTr and TLDS == 1:
-        kernel["UsePLRPack"] = True
+        kernel["UsePLRPack"] = 1
 
         optSchedule = {
             'SYNC'   : [[8, 12,13, 36,44, 56,59, 66,68, 74, 127]],
@@ -3442,7 +3442,7 @@ def _get_schedule_128x192x32_TF32(kernel, useLDSTr, TLDS):
         # TODO: Add NN schedule in upcoming PR
         return False, None
     elif isTN(kernel) and not useLDSTr and TLDS==1:
-        kernel["UsePLRPack"] = True
+        kernel["UsePLRPack"] = 1
         kernel["UseMFMAF32XEmulation"] = False
         kernel["UseDot2F32XEmulation"] = False
         syncTable = [
@@ -3507,7 +3507,7 @@ def _get_schedule_192x256x32_TF32(kernel, useLDSTr, TLDS):
     mfmaReorder = []
     nglshift = nllshift = 0 # vmcnt shift for ngl and nll
     if isTN(kernel) and not useLDSTr and TLDS==1:
-        kernel["UsePLRPack"] = True
+        kernel["UsePLRPack"] = 1
         kernel["UseMFMAF32XEmulation"] = True
         kernel["UseDot2F32XEmulation"] = False
 
@@ -3640,7 +3640,7 @@ def _get_schedule_192x256x32_TF32(kernel, useLDSTr, TLDS):
 
         nglshift = nllshift = 14 # vmcnt shift for ngl and nll
     elif isNN(kernel) and TLDS==1 and kernel["VectorWidthA"] == 1:
-        kernel["UsePLRPack"] = True
+        kernel["UsePLRPack"] = 1
         kernel["UseMFMAF32XEmulation"] = True
         kernel["UseDot2F32XEmulation"] = False
 
@@ -3836,7 +3836,7 @@ def _get_schedule_256x192x32_TF32(kernel, useLDSTr, TLDS):
     syncCode = []
     nglshift = nllshift = 0 # vmcnt shift for ngl and nll
     if isTN(kernel) and not useLDSTr and TLDS == 1:
-        kernel["UsePLRPack"] = True
+        kernel["UsePLRPack"] = 1
         kernel["UseMFMAF32XEmulation"] = False
         kernel["UseDot2F32XEmulation"] = False
         numPackInstr = 24 
@@ -3922,7 +3922,7 @@ def _get_schedule_256x192x32_TF32(kernel, useLDSTr, TLDS):
         opt1 = ScheduleInfo(2, numMfma, optSchedule, syncCode, nglshift, nllshift)
 
     elif isNN(kernel) and TLDS==1 and kernel["VectorWidthA"] == 1:
-        kernel["UsePLRPack"] = True
+        kernel["UsePLRPack"] = 1
         kernel["UseMFMAF32XEmulation"] = True
         
         numLrReadA = 32 
@@ -4116,7 +4116,7 @@ def _get_schedule_256x256x32_TF32(kernel, useLDSTr, TLDS):
     syncCode = []
     nglshift = nllshift = 0
     if isTN(kernel) and not useLDSTr and TLDS==1:
-        kernel["UsePLRPack"] = True
+        kernel["UsePLRPack"] = 1
         kernel["UseMFMAF32XEmulation"] = True
         kernel["UseDot2F32XEmulation"] = False
         # This schedule follows similar pattern as 192x256x32 TF32 schedule
@@ -4236,7 +4236,7 @@ def _get_schedule_256x256x32_TF32(kernel, useLDSTr, TLDS):
 
         nglshift = nllshift = 16 # vmcnt shift for ngl and nll
     elif isNT(kernel) and not useLDSTr and TLDS==0 and kernel["VectorWidthA"] == 4 and kernel["VectorWidthB"] == 4:
-        kernel["UsePLRPack"] = True
+        kernel["UsePLRPack"] = 1
         kernel["UseMFMAF32XEmulation"] = True
         kernel["UseDot2F32XEmulation"] = False
         swap_idx =   [1,2,3, # depend on DS1 
@@ -4323,7 +4323,7 @@ def _get_schedule_192x128x32_TF32(kernel, useLDSTr, TLDS):
     nglshift = nllshift = 0 # vmcnt shift for ngl and nll
     if isTN(kernel) and useLDSTr and TLDS==1:
 
-        kernel["UsePLRPack"] = True
+        kernel["UsePLRPack"] = 1
         kernel["UseMFMAF32XEmulation"] = False
         kernel["UseDot2F32XEmulation"] = False
         # Used the following constrains to create schedule
@@ -4483,7 +4483,7 @@ def _get_schedule_128x128x32_TF32(kernel, useLDSTr, TLDS):
         snopCode = [s[1] for s in snops]
  
     kernel["MfmaInitCVgprs"] = True
-    kernel["UsePLRPack"] = True
+    kernel["UsePLRPack"] = 1
     opt1 = ScheduleInfo(1, n_mfma, optSchedule, syncCode, nglshift, nllshift, snopCode=snopCode)
     return True, opt1
 
@@ -4666,7 +4666,7 @@ def _get_schedule_128x128x32_TF32_plr1(kernel, useLDSTr, TLDS):
     nglshift = nllshift = num_gr
 
     kernel["MfmaInitCVgprs"] = True
-    kernel["UsePLRPack"] = True
+    kernel["UsePLRPack"] = 1
     kernel["UseMFMAF32XEmulation"] = True
     kernel["UseDot2F32XEmulation"] = False
     opt1 = ScheduleInfo(num_code_paths, n_mfma, optSchedule, syncCode, nglshift, nllshift)
@@ -4798,7 +4798,7 @@ def _get_schedule_128x128x64_TF32(kernel, useLDSTr, TLDS):
     kernel["MfmaInitCVgprs"] = True
     kernel["UseMFMAF32XEmulation"] = True
     kernel["UseDot2F32XEmulation"] = False
-    kernel["UsePLRPack"] = True
+    kernel["UsePLRPack"] = 1
     opt1 = ScheduleInfo(2, n_mfma, optSchedule, syncCode, nglshift, nllshift)
     return True, opt1
 
@@ -4817,7 +4817,7 @@ def _get_schedule_128x256x32_TF32(kernel, useLDSTr, TLDS):
     mfmaReorder = []
     nglshift = nllshift = 0
     if isTN(kernel) and not useLDSTr and TLDS==1:
-        kernel["UsePLRPack"] = True
+        kernel["UsePLRPack"] = 1
         kernel["UseMFMAF32XEmulation"] = True
         kernel["UseDot2F32XEmulation"] = False
 
@@ -4986,7 +4986,7 @@ def _get_schedule_128x256x32_TF32(kernel, useLDSTr, TLDS):
         nglshift = nllshift = 12 # vmcnt shift for ngl and nll
     elif isNN(kernel) and TLDS==1:
         return False, None
-        # kernel["UsePLRPack"] = True
+        # kernel["UsePLRPack"] = 1
         # kernel["UseMFMAF32XEmulation"] = True
         # kernel["UseDot2F32XEmulation"] = False
 
@@ -5138,7 +5138,7 @@ def _get_schedule_128x160x64_TF32(kernel, useLDSTr, TLDS):
 
     if isTN(kernel) and not useLDSTr and TLDS==1:
         kernel["UseMFMAF32XEmulation"] = True
-        kernel["UsePLRPack"] = True
+        kernel["UsePLRPack"] = 1
 
         grinca = [0,0,1,1,2,2,3,3,4]
         grincb = [4,5,5,6,6,7,7,8,8]
@@ -5229,7 +5229,7 @@ def _get_schedule_256x128x32_TF32(kernel, useLDSTr, TLDS):
     if isTN(kernel) and useLDSTr and TLDS==1:
         kernel["UseMFMAF32XEmulation"] = False
         kernel["UseDot2F32XEmulation"] = False
-        kernel["UsePLRPack"] = True
+        kernel["UsePLRPack"] = 1
         numPackInstr = 24 
         numPackIndices = numPackInstr // 2 # Assign 2 pack instructions per mfma index
 
@@ -5331,7 +5331,7 @@ def _get_schedule_64x128x64_TF32(kernel, useLDSTr, TLDS):
 
     if isTN(kernel) and not useLDSTr and TLDS==1:
         kernel["UseMFMAF32XEmulation"] = True
-        kernel["UsePLRPack"] = True
+        kernel["UsePLRPack"] = 1
 
         grinca = [0,0,1,1,2,2,3,3,4]
         grincb = [4,5,5,6,6,7,7,8,8]
@@ -5437,7 +5437,7 @@ def _get_schedule_160x128x64_TF32(kernel, useLDSTr, TLDS):
 
     if isNN(kernel) and useLDSTr and TLDS==1:
         kernel["UseMFMAF32XEmulation"] = True
-        kernel["UsePLRPack"] = True
+        kernel["UsePLRPack"] = 1
         syncs.add(11, dscnt=8, comment="wait for LRB0 before pack to complete")
         syncs.add(16, dscnt=8, barrier=True, comment="wait for LRB0 before pack to complete", barrier_comment="barrier for GRA")
         syncs.add(33, dscnt=0, comment="wait for LRA0 before pack to complete")
