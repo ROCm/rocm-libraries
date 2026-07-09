@@ -109,10 +109,13 @@ namespace rocisa
                     kStr = isa[0] < 11 ? "short_d16_hi" : "d16_hi_b16";
                     break;
                 case InstType::INST_TR8_B64:
-                    kStr = isa <= std::array<int, 3>{12, 0, 1} ? "tr_b64" : "";
+                    // All gfx12 (RDNA4 12.0/12.1 and CDNA5 gfx1250 12.5+) accept
+                    // "tr_b64" as a compatibility alias (same encoding as the
+                    // gfx1250 canonical "tr8_b64"; amdclang normalizes on disasm).
+                    kStr = isa < std::array<int, 3>{13, 0, 0} ? "tr_b64" : "";
                     break;
                 case InstType::INST_TR16_B128:
-                    kStr = isa <= std::array<int, 3>{12, 0, 1} ? "tr_b128" : "";
+                    kStr = isa < std::array<int, 3>{13, 0, 0} ? "tr_b128" : "";
                     break;
                 default:
                     break;
