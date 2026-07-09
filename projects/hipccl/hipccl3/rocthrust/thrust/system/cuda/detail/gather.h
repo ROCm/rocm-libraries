@@ -40,8 +40,6 @@
 #  include <thrust/iterator/permutation_iterator.h>
 #  include <thrust/system/cuda/detail/transform.h>
 
-#  include <cuda/std/__functional/identity.h>
-
 THRUST_NAMESPACE_BEGIN
 namespace cuda_cub
 {

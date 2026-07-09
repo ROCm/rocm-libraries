@@ -40,7 +40,6 @@
 #if THRUST_HAS_HIP_COMPILER()
 #  include <thrust/system/hip/config.h>
 
-#  include <thrust/detail/libcxx_wrapper/std/__functional/identity.h>
 #  include <thrust/distance.h>
 #  include <thrust/functional.h>
 #  include <thrust/system/hip/detail/execution_policy.h>
@@ -82,7 +81,7 @@ template <class Derived, class InputIt, class OutputIt>
 OutputIt THRUST_HIP_RUNTIME_FUNCTION device_to_device(
   execution_policy<Derived>& policy, InputIt first, InputIt last, OutputIt result, _THRUST_STD::false_type)
 {
-  return hip_rocprim::transform(policy, first, last, result, ::internal::identity{});
+  return hip_rocprim::transform(policy, first, last, result, _THRUST_STD::identity{});
 }
 
 template <class Derived, class InputIt, class OutputIt>

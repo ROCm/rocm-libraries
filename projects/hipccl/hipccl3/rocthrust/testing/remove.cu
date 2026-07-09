@@ -16,7 +16,6 @@
  */
 
 #include <thrust/count.h>
-#include <thrust/detail/libcxx_wrapper/std/__functional/identity.h>
 #include <thrust/functional.h>
 #include <thrust/iterator/discard_iterator.h>
 #include <thrust/iterator/retag.h>
@@ -210,7 +209,7 @@ void TestRemoveIfStencilSimple()
   Vector data{1, 2, 1, 3, 2};
   Vector stencil{0, 1, 0, 0, 1};
 
-  typename Vector::iterator end = thrust::remove_if(data.begin(), data.end(), stencil.begin(), ::internal::identity{});
+  typename Vector::iterator end = thrust::remove_if(data.begin(), data.end(), stencil.begin(), _THRUST_STD::identity{});
 
   ASSERT_EQUAL(end - data.begin(), 3);
   data.resize(end - data.begin());
@@ -320,7 +319,7 @@ void TestRemoveCopyIfStencilSimple()
   Vector result(5);
 
   typename Vector::iterator end =
-    thrust::remove_copy_if(data.begin(), data.end(), stencil.begin(), result.begin(), ::internal::identity{});
+    thrust::remove_copy_if(data.begin(), data.end(), stencil.begin(), result.begin(), _THRUST_STD::identity{});
 
   ASSERT_EQUAL(end - result.begin(), 3);
   result.resize(end - result.begin());
