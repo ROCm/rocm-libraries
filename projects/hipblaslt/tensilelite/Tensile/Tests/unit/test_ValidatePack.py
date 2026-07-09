@@ -1325,7 +1325,7 @@ class TestValidatePackTF32MFMA4x4x4MultipleTiles(CMSValidationTestBase):
         # Minimal kernel config for 128x256x32 TF32 NT validation
         kernel = {
             "UseF32XEmulation": True, "UseDirect32XEmulation": True, "UseMFMAF32XEmulation": True,
-            "ForceUnrollSubIter": True, "DirectToLds": True, "SwapGlobalReadOrder": False,
+            "ForceUnrollSubIter": True, "DirectToLds": True, "SwapGlobalReadOrder": 0,
             "UsePLRPack": True, "MIWaveTileA": 4, "MIWaveTileB": 8, "Use64bShadowLimit": 1,
             "VectorWidthA": 1, "VectorWidthB": 1,
             "ProblemType": {"TLUA": True, "TLUB": True},

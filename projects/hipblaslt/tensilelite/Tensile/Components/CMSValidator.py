@@ -2481,7 +2481,7 @@ def isValid(scheduleInfo: 'ScheduleInfo', context: dict) -> tuple[bool, str]:
         ctx = ValidatorPassContext(
             kernel=kernel,
             mfma_reorder=scheduleInfo.mfmaReorder or [],
-            swap_global_read_order=kernel.get("SwapGlobalReadOrder", False),
+            swap_global_read_order=kernel.get("SwapGlobalReadOrder", 0),
         )
 
         timeline = create_unified_timeline(scheduleInfo, kernel, code_path)
