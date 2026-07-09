@@ -30,6 +30,8 @@
 #  pragma system_header
 #endif // no system header
 
+#include _THRUST_STD_INCLUDE(type_traits)
+
 THRUST_NAMESPACE_BEGIN
 namespace detail
 {
