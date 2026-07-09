@@ -42,9 +42,9 @@
 
 #if _THRUST_HAS_DEVICE_SYSTEM_STD
 #  include _THRUST_LIBCXX_INCLUDE(__iterator/discard_iterator.h)
-#else
-#  include <type_traits>
 #endif
+
+#include _THRUST_STD_INCLUDE(type_traits)
 
 THRUST_NAMESPACE_BEGIN
 
@@ -217,8 +217,8 @@ struct device_destroy_functor
 template <typename System, typename T>
 struct destroy_functor
     : thrust::detail::eval_if<_THRUST_STD::is_convertible<System, thrust::host_system_tag>::value,
-                              thrust::detail::identity_<host_destroy_functor<T>>,
-                              thrust::detail::identity_<device_destroy_functor<T>>>
+                              _THRUST_STD::type_identity<host_destroy_functor<T>>,
+                              _THRUST_STD::type_identity<device_destroy_functor<T>>>
 {};
 
 template <typename T>
