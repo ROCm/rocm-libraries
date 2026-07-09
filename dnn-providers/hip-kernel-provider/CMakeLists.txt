@@ -15,6 +15,12 @@ dnn_provider_setup_version(hip_kernel_provider ${CMAKE_CURRENT_LIST_DIR})
 
 project(hip-kernel-provider VERSION ${HIP_KERNEL_PROVIDER_VERSION} LANGUAGES CXX)
 
+# shared/ctest is only present in a full rocm-libraries checkout; guard the check at the
+# point of use so standalone / sparse checkouts that lack shared/ctest still build.
+if(NOT DEFINED ROCM_LIBRARIES_ROOT)
+    set(ROCM_LIBRARIES_ROOT "${CMAKE_CURRENT_SOURCE_DIR}/../..")
+endif()
+
 if(NOT WIN32 AND DEFINED ROCM_PATH)
     # Only set if not already specified by user
     if(CMAKE_INSTALL_PREFIX_INITIALIZED_TO_DEFAULT)

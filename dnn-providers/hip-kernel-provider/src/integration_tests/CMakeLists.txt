@@ -61,22 +61,6 @@ if(ENABLE_ASM_SDPA_ENGINE)
     endif()
 endif()
 
-if(ENABLE_HIP_MLOPS_ENGINE)
-    target_sources(hip_kernel_provider_integration_tests PRIVATE
-        hip_mlops_engine/Batchnorm/IntegrationGpuBatchnormForwardInference.cpp
-        hip_mlops_engine/Batchnorm/IntegrationGpuBatchnormForwardInferenceWithVariance.cpp
-        hip_mlops_engine/Batchnorm/IntegrationGpuBatchnormForwardInferenceAndActivation.cpp
-        hip_mlops_engine/Batchnorm/IntegrationGpuBatchnormForwardInferenceWithVarianceAndActivation.cpp
-        hip_mlops_engine/Batchnorm/IntegrationGpuBatchnormForwardTraining.cpp
-        hip_mlops_engine/Batchnorm/IntegrationGpuBatchnormFwdTrainingActiv.cpp
-        hip_mlops_engine/Batchnorm/IntegrationGpuBatchnormBackward.cpp
-        hip_mlops_engine/Batchnorm/IntegrationGpuBatchnormBackwardActivation.cpp
-        hip_mlops_engine/RMSnorm/IntegrationGpuRMSnormForward.cpp
-        hip_mlops_engine/RMSnorm/IntegrationGpuRMSnormBackward.cpp
-        hip_mlops_engine/Layernorm/IntegrationGpuLayernormForward.cpp
-    )
-endif()
-
 clang_tidy_check(hip_kernel_provider_integration_tests)
 
 add_integration_test_target(hip_kernel_provider_integration_tests ${CMAKE_CURRENT_BINARY_DIR}

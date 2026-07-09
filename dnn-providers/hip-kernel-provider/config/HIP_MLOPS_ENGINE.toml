@@ -1,0 +1,27 @@
+# Integration test configuration for HIP_MLOPS_ENGINE
+# Filters use GTest-style globs: * matches any sequence of characters
+# Later entries take precedence over earlier ones when multiple filters match
+
+[meta]
+version = 1
+
+# -- Test Skips --
+# Skip tests on specific architectures (or globally if 'archs' is omitted).
+# Each entry requires:
+#   archs:   optional array of substrings matched against the device's raw
+#            gcnArchName (e.g. "gfx942" matches "gfx942:sramecc+:xnack-").
+#            Omit or leave empty to skip on every arch.
+#   filters: array of GTest globs matched against the full GTest name
+#   reason:  human-readable string surfaced in the GTEST_SKIP message
+# First matching entry wins.
+#
+# -- Tolerance Overrides --
+# Override default tolerances for specific tests or groups of tests.
+# Each entry requires:
+#   filters: array of glob patterns matched against the full GTest name
+#   atol: absolute tolerance
+#   rtol: relative tolerance
+#
+# No HIP_MLOPS_ENGINE-specific skips or tolerance overrides are known yet.
+# Add [[test_skips]] / [[tolerance_overrides]] entries here as issues are found,
+# mirroring dnn-providers/miopen-provider/config/MIOPEN_ENGINE.toml.
