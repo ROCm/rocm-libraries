@@ -339,10 +339,8 @@ class InstructionEmitter:
         """Emit GL2 prefetch loads (global_prefetch_b8) for all tensors."""
         writer = self.writer
         kernel = self.kernel
-        tPA = self.tensorParametersMap.get('A')
-        tPB = self.tensorParametersMap.get('B')
-        if tPA is None or tPB is None:
-            return []
+        tPA = self.tensorParametersMap['A']
+        tPB = self.tensorParametersMap['B']
         mod = writer.gl2PrefetchIssueLoad(kernel, tPA, tPB)
         return list(mod.flatitems())
 
@@ -355,10 +353,8 @@ class InstructionEmitter:
         """
         writer = self.writer
         kernel = self.kernel
-        tPA = self.tensorParametersMap.get('A')
-        tPB = self.tensorParametersMap.get('B')
-        if tPA is None or tPB is None:
-            return []
+        tPA = self.tensorParametersMap['A']
+        tPB = self.tensorParametersMap['B']
         from rocisa.code import Module
         from rocisa.instruction import SCmpLeU32, SCMovB32
         from rocisa.container import sgpr
