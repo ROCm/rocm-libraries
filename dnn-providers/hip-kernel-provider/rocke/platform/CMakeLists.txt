@@ -252,6 +252,18 @@ if(ROCKE_INSTALL_TESTS)
             DESTINATION ${ROCKE_TEST_INSTALL_DIR})
     install(FILES "${CMAKE_CURRENT_SOURCE_DIR}/tests/golden/rocke_representative_ir_sha256.json"
             DESTINATION ${ROCKE_TEST_INSTALL_DIR}/golden)
+
+    # Install the full pytest suite for installed/artifact test execution.
+    # Excludes: C/C++ parity emitters (compiled against rocke_core at build time),
+    # the differential harness (needs compiler + source), and run_all.py (dev runner).
+    install(DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}/tests/"
+            DESTINATION "${ROCKE_TEST_INSTALL_DIR}/tests"
+            PATTERN "__pycache__" EXCLUDE
+            REGEX "\\.pyc$" EXCLUDE
+            PATTERN "*.c" EXCLUDE
+            PATTERN "*.cpp" EXCLUDE
+            PATTERN "differential" EXCLUDE
+            PATTERN "run_all.py" EXCLUDE)
   endif()
 
   set(_ROCKE_INSTALLED_CTEST_ENTRIES "")
@@ -265,21 +277,30 @@ if(ROCKE_INSTALL_TESTS)
   endforeach()
 
   if(ROCKE_INSTALL_PYTHON_TESTS)
-    # Stage the Python import smoke in both modes. It sits next to the
-    # CTestTestfile (provider: bin/<subdir>/, standalone: bin/rocke/ -> "../"), so
-    # the same "${ROCKE_TEST_CTEST_REL}" prefix reaches it. The co-located rocke
-    # package is captured by TheRock's test-artifact includes in provider mode.
+    # Python test entries invoke via "python" (resolved from PATH at test time)
+    # rather than executing the .py directly, so they work on Windows where
+    # shebangs are not supported. The CI test environment activates a venv with
+    # requirements-test.txt before running ctest.
     string(APPEND _ROCKE_INSTALLED_CTEST_ENTRIES
-           "add_test(rocke_python_import_smoke \"${ROCKE_TEST_CTEST_REL}rocke_installed_smoke.py\")\n")
+           "add_test(rocke_python_import_smoke python \"${ROCKE_TEST_CTEST_REL}rocke_installed_smoke.py\")\n")
     string(APPEND _ROCKE_INSTALLED_CTEST_ENTRIES
            "set_tests_properties(rocke_python_import_smoke PROPERTIES LABELS \"ckc;python;quick\")\n")
 
-    # Golden IR byte-stability gate (host-only, no GPU). Reached via the same
-    # relative prefix as the smoke; imports the co-located rocke package + harness.
     string(APPEND _ROCKE_INSTALLED_CTEST_ENTRIES
-           "add_test(rocke_golden_static \"${ROCKE_TEST_CTEST_REL}rocke_installed_golden_test.py\")\n")
+           "add_test(rocke_golden_static python \"${ROCKE_TEST_CTEST_REL}rocke_installed_golden_test.py\")\n")
     string(APPEND _ROCKE_INSTALLED_CTEST_ENTRIES
            "set_tests_properties(rocke_golden_static PROPERTIES LABELS \"ckc;python;golden;host;quick\")\n")
+
+    # Full pytest suite. PYTHONPATH points at the CTestTestfile's working
+    # directory (which contains the installed rocke package) so `import rocke`
+    # resolves without the source-tree sys.path shims.
+    string(APPEND _ROCKE_INSTALLED_CTEST_ENTRIES
+           "add_test(rocke_pytest python -m pytest \"${ROCKE_TEST_CTEST_REL}tests\" -v --timeout=60)\n")
+    string(APPEND _ROCKE_INSTALLED_CTEST_ENTRIES
+           "set_tests_properties(rocke_pytest PROPERTIES\n"
+           "  LABELS \"ckc\\;python\\;quick\"\n"
+           "  ENVIRONMENT \"PYTHONPATH=.\"\n"
+           "  TIMEOUT 300)\n")
   endif()
 
   if(ROCKE_INSTALL_PROVIDER_CTEST_SUBDIR)

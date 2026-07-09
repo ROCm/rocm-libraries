@@ -35,8 +35,15 @@ from rocke_ir_parity_harness import (  # noqa: E402 -- after sys.path shim
     current_flavor,
 )
 
-_PY_ROOT = Path(__file__).resolve().parents[1] / "python"
-_EXAMPLES = _PY_ROOT / "rocke" / "examples"
+_HERE = Path(__file__).resolve().parents[0]
+_PY_ROOT = Path(__file__).resolve().parents[1] / "Python"
+_EXAMPLES = (
+    # Installed layout: tests/ is a sibling of rocke/ (no Python/ wrapper)
+    _HERE.parent / "rocke" / "examples"
+    if (_HERE.parent / "rocke" / "examples").is_dir()
+    # Source-tree layout: tests/ is under rocke/platform/, package at Python/rocke/
+    else _PY_ROOT / "rocke" / "examples"
+)
 _GOLDEN = (
     Path(__file__).resolve().parents[0]
     / "golden"
