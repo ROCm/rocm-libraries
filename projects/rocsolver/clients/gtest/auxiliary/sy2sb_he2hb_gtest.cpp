@@ -34,14 +34,18 @@ using ::testing::ValuesIn;
 using namespace std;
 
 template <typename I>
-using sy2sb_he2hb_tuple = std::tuple<vector<I>, vector<I>>;
+using sy2sb_he2hb_tuple = std::tuple<vector<I>, vector<I>, printable_char>;
 
 // each matrix_size_range is a {n, lda}
 
 // each blk_range is a {kd, nb}
 
-// case when n = 0, kd = 0 will also execute the bad arguments test
+// each uplo_range is {uplo}
+
+// case when n = 0, kd = 0, uplo = L will also execute the bad arguments test
 // (null handle, null pointers and invalid values)
+
+const vector<printable_char> uplo_range = {'L', 'U', 'F'};
 
 // for checkin_lapack tests
 const vector<vector<int>> size_range = {
@@ -107,9 +111,11 @@ Arguments sy2sb_he2hb_setup_arguments(sy2sb_he2hb_tuple<I> tup)
 {
     vector<I> size = std::get<0>(tup);
     vector<I> blk = std::get<1>(tup);
+    char uplo = std::get<2>(tup);
 
     Arguments arg;
 
+    arg.set<char>("uplo", uplo);
     arg.set<I>("n", size[0]);
     arg.set<I>("lda", size[1]);
     arg.set<I>("kd", blk[0]);
@@ -134,7 +140,7 @@ protected:
     {
         Arguments arg = sy2sb_he2hb_setup_arguments(this->GetParam());
 
-        if(arg.peek<I>("n") == 0 && arg.peek<I>("kd") == 0)
+        if(arg.peek<I>("n") == 0 && arg.peek<I>("kd") == 0 && arg.peek<char>("uplo") == 'L')
             testing_sy2sb_he2hb_bad_arg<T, I>();
 
         testing_sy2sb_he2hb<T, I>(arg);
@@ -193,16 +199,22 @@ TEST_P(SY2SB_HE2HB_64, __double_complex)
 
 INSTANTIATE_TEST_SUITE_P(daily_lapack,
                          SY2SB_HE2HB,
-                         Combine(ValuesIn(large_size_range), ValuesIn(large_blk_range)));
+                         Combine(ValuesIn(large_size_range),
+                                 ValuesIn(large_blk_range),
+                                 ValuesIn(uplo_range)));
 
 INSTANTIATE_TEST_SUITE_P(checkin_lapack,
                          SY2SB_HE2HB,
-                         Combine(ValuesIn(size_range), ValuesIn(blk_range)));
+                         Combine(ValuesIn(size_range), ValuesIn(blk_range), ValuesIn(uplo_range)));
 
 INSTANTIATE_TEST_SUITE_P(daily_lapack,
                          SY2SB_HE2HB_64,
-                         Combine(ValuesIn(large_size_range_64), ValuesIn(large_blk_range_64)));
+                         Combine(ValuesIn(large_size_range_64),
+                                 ValuesIn(large_blk_range_64),
+                                 ValuesIn(uplo_range)));
 
 INSTANTIATE_TEST_SUITE_P(checkin_lapack,
                          SY2SB_HE2HB_64,
-                         Combine(ValuesIn(size_range_64), ValuesIn(blk_range_64)));
+                         Combine(ValuesIn(size_range_64),
+                                 ValuesIn(blk_range_64),
+                                 ValuesIn(uplo_range)));
