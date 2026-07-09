@@ -19,12 +19,15 @@
 #include <sys/wait.h>
 #include <unistd.h>
 
+#include <algorithm>
 #include <array>
 #include <chrono>
+#include <condition_variable>
 #include <cstdint>
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
+#include <deque>
 #include <exception>
 #include <fstream>
 #include <future>
@@ -33,6 +36,7 @@
 #include <optional>
 #include <sstream>
 #include <string>
+#include <thread>
 #include <vector>
 
 #include "comgr.hpp"
@@ -595,6 +599,47 @@ TimingResult execLaunchAndTime(
     return {std::nullopt, true};
 }
 
+// Bounded concurrency guard for parallel compilation.
+struct CompileSemaphore
+{
+    std::mutex mu;
+    std::condition_variable cv;
+    int available;
+
+    explicit CompileSemaphore(int n)
+        : available(n)
+    {
+    }
+    void acquire()
+    {
+        std::unique_lock<std::mutex> lk(mu);
+        cv.wait(lk, [&] { return available > 0; });
+        --available;
+    }
+    void release()
+    {
+        std::lock_guard<std::mutex> lk(mu);
+        ++available;
+        cv.notify_one();
+    }
+};
+
+static CompileSemaphore* gCompileSem = nullptr;
+
+static CompileResult boundedCompile(const ConvCase& cse,
+                                    std::int64_t Ho,
+                                    std::int64_t Wo,
+                                    const Candidate& cand,
+                                    const std::string& arch_bare)
+{
+    if(gCompileSem)
+        gCompileSem->acquire();
+    auto cr = compileCandidate(cse, Ho, Wo, cand, arch_bare);
+    if(gCompileSem)
+        gCompileSem->release();
+    return cr;
+}
+
 ShapeSweepResult
     runConvSweep(const ConvCase& cse, const hipDeviceProp_t& props, int candidateTimeoutS)
 {
@@ -622,33 +667,48 @@ ShapeSweepResult
     static constexpr int kExecTimeoutS = 5;
     const auto compileTimeout = std::chrono::seconds(candidateTimeoutS);
 
+    // Launch all compiles in parallel (bounded by gCompileSem).
+    // Compile is CPU-only; exec is GPU-only and runs sequentially below.
+    struct CompileSlot
+    {
+        std::size_t idx;
+        std::future<CompileResult> fut;
+    };
+    std::vector<CompileSlot> slots;
+    slots.reserve(candidates.size());
+    for(std::size_t i = 0; i < candidates.size(); ++i)
+        slots.push_back(
+            {i,
+             std::async(
+                 std::launch::async, boundedCompile, cse, Ho, Wo, candidates[i], arch_bare)});
+
     std::vector<std::future<CompileResult>> compileGraveyard;
 
     std::size_t ok = 0, errors = 0, timeouts = 0, compileTimeouts = 0;
     std::size_t prevalidRejects = 0;
-    for(const auto& cand : candidates)
+    for(auto& slot : slots)
     {
-        // Phase 1: Compile (std::async with timeout — no GPU, safe to thread).
-        auto compileFut
-            = std::async(std::launch::async, compileCandidate, cse, Ho, Wo, cand, arch_bare);
+        const auto& cand = candidates[slot.idx];
 
-        if(compileFut.wait_for(compileTimeout) == std::future_status::timeout)
+        if(slot.fut.wait_for(compileTimeout) == std::future_status::timeout)
         {
             ++compileTimeouts;
             std::cerr << "[Sweep]   COMPILE_TIMEOUT: " << cse.name << " tile(" << cand.tile_m << ","
                       << cand.tile_n << "," << cand.tile_k << ") pipeline=" << cand.pipeline
                       << " exceeded " << candidateTimeoutS << "s compile limit\n";
-            compileGraveyard.push_back(std::move(compileFut));
+            compileGraveyard.push_back(std::move(slot.fut));
             continue;
         }
 
-        CompileResult cr = compileFut.get();
+        CompileResult cr = slot.fut.get();
+        std::cerr << "[Sweep]   COMPILED: " << cse.name << " tile(" << cand.tile_m << ","
+                  << cand.tile_n << "," << cand.tile_k << ") pipeline=" << cand.pipeline
+                  << " lower=" << cr.lower_ms << "ms comgr=" << cr.comgr_ms << "ms"
+                  << (cr.is_error ? " FAILED" : "") << "\n";
+
         if(cr.is_error)
         {
             ++errors;
-            std::cerr << "[Sweep]   COMPILE_ERROR: " << cse.name << " tile(" << cand.tile_m << ","
-                      << cand.tile_n << "," << cand.tile_k << ") pipeline=" << cand.pipeline
-                      << " (lower=" << cr.lower_ms << "ms comgr=" << cr.comgr_ms << "ms)\n";
             continue;
         }
         if(cr.grid[0] == 0 || cr.grid[1] == 0)
@@ -657,9 +717,7 @@ ShapeSweepResult
             continue;
         }
 
-        // Phase 2: Pre-validate — load HSACO + check resource limits.
-        // No GPU dispatch, just metadata queries. Catches kernels that
-        // would fail or hang due to excessive register pressure.
+        // Pre-validate — load HSACO + check resource limits (no GPU dispatch).
         if(!preValidateCandidate(cr))
         {
             ++prevalidRejects;
@@ -669,7 +727,7 @@ ShapeSweepResult
             continue;
         }
 
-        // Phase 3: Time via fork+exec helper (isolated HIP context).
+        // Time via fork+exec helper (isolated HIP context, sequential).
         TimingResult res = execLaunchAndTime(cr, cse, Ho, Wo, kExecTimeoutS);
 
         if(res.timed_out)
@@ -734,7 +792,8 @@ ShapeSweepResult
 int sweepMain(const std::string& shapesPath,
               const std::string& outPath,
               const std::string& dtype,
-              int candidateTimeoutS)
+              int candidateTimeoutS,
+              int compileThreads)
 {
     if(dtype != "fp16")
     {
@@ -762,6 +821,14 @@ int sweepMain(const std::string& shapesPath,
     if(!gCsvWriter.active)
         return 1;
 
+    if(compileThreads <= 0)
+    {
+        int hw = (int)std::thread::hardware_concurrency();
+        compileThreads = std::clamp(hw / 4, 2, 8);
+    }
+    CompileSemaphore sem(compileThreads);
+    gCompileSem = &sem;
+
     hipDeviceProp_t props{};
     if(hipGetDeviceProperties(&props, 0) != hipSuccess)
     {
@@ -770,6 +837,7 @@ int sweepMain(const std::string& shapesPath,
     }
     std::cerr << "[Sweep] device: " << props.name << " (" << props.gcnArchName << ")\n";
     std::cerr << "[Sweep] per-candidate timeout: " << candidateTimeoutS << "s\n";
+    std::cerr << "[Sweep] compile threads: " << compileThreads << "\n";
 
     // HIP context warmup
     {
@@ -804,6 +872,8 @@ int sweepMain(const std::string& shapesPath,
         std::cerr << ", " << totalErrors
                   << " CANDIDATE ERRORS (pre-validated but compile/run failed — TRIAGE REQUIRED)";
     std::cerr << " ===\n";
+
+    gCompileSem = nullptr;
 
     if(totalErrors > 0)
     {

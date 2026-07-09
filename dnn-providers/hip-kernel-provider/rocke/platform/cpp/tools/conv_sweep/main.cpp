@@ -8,27 +8,31 @@
 int sweepMain(const std::string& shapesPath,
               const std::string& outPath,
               const std::string& dtype,
-              int candidateTimeoutS);
+              int candidateTimeoutS,
+              int compileThreads);
 
 static void usage(const char* argv0)
 {
     std::cerr
         << "Usage: " << argv0
         << " --shapes <shapes.csv> --out <out.csv>"
-           " [--dtype fp16] [--candidate-timeout <s>]\n"
+           " [--dtype fp16] [--candidate-timeout <s>] [--compile-threads <n>]\n"
         << "\n"
         << "  --shapes              CSV of conv shapes to sweep (N,G,C,K,Hi,Wi,Y,X,...)\n"
         << "  --out                 Output CSV path; header is written if the file is new,\n"
         << "                        rows are appended if it already exists.\n"
         << "  --dtype               Data type (default: fp16).\n"
         << "  --candidate-timeout   Per-candidate wall-clock limit in seconds (default: 120).\n"
-        << "                        Candidates that exceed this limit are skipped and logged.\n";
+        << "                        Candidates that exceed this limit are skipped and logged.\n"
+        << "  --compile-threads     Max parallel compilations (default: auto = hw_threads/4,\n"
+        << "                        clamped to 2-8). Set to 1 for sequential compilation.\n";
 }
 
 int main(int argc, char** argv)
 {
     std::string shapesPath, outPath, dtype = "fp16";
     int candidateTimeoutS = 120;
+    int compileThreads = 0;
 
     for(int i = 1; i < argc; ++i)
     {
@@ -40,6 +44,8 @@ int main(int argc, char** argv)
             dtype = argv[++i];
         else if(std::strcmp(argv[i], "--candidate-timeout") == 0 && i + 1 < argc)
             candidateTimeoutS = std::stoi(argv[++i]);
+        else if(std::strcmp(argv[i], "--compile-threads") == 0 && i + 1 < argc)
+            compileThreads = std::stoi(argv[++i]);
         else
         {
             std::cerr << "Unknown argument: " << argv[i] << "\n";
@@ -54,5 +60,5 @@ int main(int argc, char** argv)
         return 1;
     }
 
-    return sweepMain(shapesPath, outPath, dtype, candidateTimeoutS);
+    return sweepMain(shapesPath, outPath, dtype, candidateTimeoutS, compileThreads);
 }
