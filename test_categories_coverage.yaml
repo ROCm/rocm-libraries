@@ -14,39 +14,6 @@
 #     per instrumented binary so parallel tests do not clobber each other.
 #   * `test_category` is the ctest label coverage tests run under.
 projects:
-  hiprand:
-    enabled: true
-    coverage_objects:
-      # hipRAND is a thin wrapper; coverage is collected from the wrapper lib.
-      libraries:
-        - libhiprand.so
-      test_binaries: []
-    ignore_filename_regex: '.*/test/.*|.*/tests/.*|.*/_deps/.*|.*deps.*'
-    llvm_profile_pattern: '%m'
-    test_category: quick
-
-  rocrand:
-    enabled: true
-    coverage_objects:
-      # Coverage is collected from the rocRAND device library.
-      libraries:
-        - librocrand.so
-      test_binaries: []
-    ignore_filename_regex: '.*/test/.*|.*/tests/.*|.*/benchmark/.*|.*/_deps/.*|.*deps.*'
-    llvm_profile_pattern: '%m'
-    test_category: quick
-
-  rocfft:
-    enabled: true
-    coverage_objects:
-      # Coverage is collected from the rocFFT library.
-      libraries:
-        - librocfft.so
-      test_binaries: []
-    ignore_filename_regex: '.*/test/.*|.*/tests/.*|.*/clients/.*|.*/_deps/.*|.*deps.*'
-    llvm_profile_pattern: '%m'
-    test_category: quick
-
   rocblas:
     enabled: true
     coverage_objects:
@@ -55,38 +22,5 @@ projects:
         - librocblas.so
       test_binaries: []
     ignore_filename_regex: '.*/test/.*|.*/tests/.*|.*/clients/.*|.*[Tt]ensile.*|.*/_deps/.*|.*deps.*'
-    llvm_profile_pattern: '%m'
-    test_category: quick
-
-  # Header-only libraries: there is no shared library to instrument, so coverage
-  # is collected from the instrumented test binaries (matched by name prefix and
-  # staged from the build tree). test_binaries entries are name prefixes.
-  rocprim:
-    enabled: true
-    coverage_objects:
-      libraries: []
-      test_binaries:
-        - test_
-    ignore_filename_regex: '.*/test/.*|.*/benchmark/.*|.*/gtest/.*|.*/_deps/.*|.*deps.*'
-    llvm_profile_pattern: '%m'
-    test_category: quick
-
-  hipcub:
-    enabled: true
-    coverage_objects:
-      libraries: []
-      test_binaries:
-        - test_hipcub_
-    ignore_filename_regex: '.*/test/.*|.*/benchmark/.*|.*/gtest/.*|.*/_deps/.*|.*deps.*'
-    llvm_profile_pattern: '%m'
-    test_category: quick
-
-  rocthrust:
-    enabled: true
-    coverage_objects:
-      libraries: []
-      test_binaries:
-        - test_thrust_
-    ignore_filename_regex: '.*/testing/.*|.*/test/.*|.*/benchmark/.*|.*/gtest/.*|.*/_deps/.*|.*deps.*'
     llvm_profile_pattern: '%m'
     test_category: quick

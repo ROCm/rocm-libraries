@@ -17,43 +17,10 @@ SCRIPT_DIR = Path(__file__).resolve().parent
 # to just this project so the coverage job does not inherit the (possibly merged)
 # mega-group options that would otherwise build unrelated components.
 COVERAGE_PROJECT_METADATA = {
-    "hiprand": (
-        "hipRAND",
-        "ml-libs/hipRAND",
-        "-DTHEROCK_ENABLE_RAND=ON -DTHEROCK_ENABLE_ALL=OFF",
-    ),
-    "rocrand": (
-        "rocRAND",
-        "math-libs/rocRAND",
-        "-DTHEROCK_ENABLE_RAND=ON -DTHEROCK_ENABLE_ALL=OFF",
-    ),
-    "rocfft": (
-        "rocFFT",
-        "math-libs/rocFFT",
-        "-DTHEROCK_ENABLE_FFT=ON -DTHEROCK_ENABLE_RAND=ON -DTHEROCK_ENABLE_ALL=OFF",
-    ),
     "rocblas": (
         "rocBLAS",
         "math-libs/rocBLAS",
         "-DTHEROCK_ENABLE_BLAS=ON -DTHEROCK_ENABLE_ALL=OFF",
-    ),
-    # Header-only libraries: coverage comes from the instrumented test binaries
-    # (there is no shared library to instrument). All three build together in
-    # TheRock's PRIM group.
-    "rocprim": (
-        "rocPRIM",
-        "math-libs/rocPRIM",
-        "-DTHEROCK_ENABLE_PRIM=ON -DTHEROCK_ENABLE_ALL=OFF",
-    ),
-    "hipcub": (
-        "hipCUB",
-        "math-libs/hipCUB",
-        "-DTHEROCK_ENABLE_PRIM=ON -DTHEROCK_ENABLE_ALL=OFF",
-    ),
-    "rocthrust": (
-        "rocThrust",
-        "math-libs/rocThrust",
-        "-DTHEROCK_ENABLE_PRIM=ON -DTHEROCK_ENABLE_ALL=OFF",
     ),
 }
 
