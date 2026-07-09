@@ -437,40 +437,36 @@ template<class T,
 __global__ __launch_bounds__(BlockSize)
 void warp_reduce_op_kernel(T* device_input, T* device_output)
 {
-    if constexpr(!test_utils::device_test_enabled_for_warp_size_v<LogicalWarpSize>)
+    if constexpr(test_utils::device_test_enabled_for_warp_size_v<LogicalWarpSize>)
     {
-        // This point should never be actually reached; tests are filtered out at runtime
-        // if the device does not support the LogicalWarpSize
-        return;
-    }
+        constexpr unsigned int warps_no = test_utils::max(BlockSize / LogicalWarpSize, 1u);
+        const unsigned int     warp_id  = test_utils::logical_warp_id<LogicalWarpSize>();
+        unsigned int           index    = hipThreadIdx_x + (hipBlockIdx_x * hipBlockDim_x);
 
-    constexpr unsigned int warps_no = test_utils::max(BlockSize / LogicalWarpSize, 1u);
-    const unsigned int     warp_id  = test_utils::logical_warp_id<LogicalWarpSize>();
-    unsigned int           index    = hipThreadIdx_x + (hipBlockIdx_x * hipBlockDim_x);
+        T value = device_input[index];
 
-    T value = device_input[index];
+        using wreduce_t = hipcub::WarpReduce<T, LogicalWarpSize>;
+        __shared__
+        typename wreduce_t::TempStorage storage[warps_no];
 
-    using wreduce_t = hipcub::WarpReduce<T, LogicalWarpSize>;
-    __shared__
-    typename wreduce_t::TempStorage storage[warps_no];
+        // 2. Compile-time dispatch based on ReductionOp type
+        if constexpr(std::is_same_v<ReductionOp, test_utils::plus>)
+        {
+            value = wreduce_t(storage[warp_id]).Sum(value);
+        }
+        else if constexpr(std::is_same_v<ReductionOp, test_utils::maximum>)
+        {
+            value = wreduce_t(storage[warp_id]).Max(value);
+        }
+        else if constexpr(std::is_same_v<ReductionOp, test_utils::minimum>)
+        {
+            value = wreduce_t(storage[warp_id]).Min(value);
+        }
 
-    // 2. Compile-time dispatch based on ReductionOp type
-    if constexpr(std::is_same_v<ReductionOp, test_utils::plus>)
-    {
-        value = wreduce_t(storage[warp_id]).Sum(value);
-    }
-    else if constexpr(std::is_same_v<ReductionOp, test_utils::maximum>)
-    {
-        value = wreduce_t(storage[warp_id]).Max(value);
-    }
-    else if constexpr(std::is_same_v<ReductionOp, test_utils::minimum>)
-    {
-        value = wreduce_t(storage[warp_id]).Min(value);
-    }
-
-    if(hipThreadIdx_x % LogicalWarpSize == 0)
-    {
-        device_output[index / LogicalWarpSize] = value;
+        if(hipThreadIdx_x % LogicalWarpSize == 0)
+        {
+            device_output[index / LogicalWarpSize] = value;
+        }
     }
 }
 
