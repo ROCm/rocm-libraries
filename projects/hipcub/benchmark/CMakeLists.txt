@@ -98,7 +98,6 @@ endfunction()
 # ****************************************************************************
 # Benchmarks
 # ****************************************************************************
-# TODO: Ensure all benchmarks are commented back in!
 add_hipcub_benchmark(benchmark_block_adjacent_difference.cpp)
 add_hipcub_benchmark(benchmark_block_discontinuity.cpp)
 add_hipcub_benchmark(benchmark_block_exchange.cpp)
@@ -128,9 +127,9 @@ add_hipcub_benchmark(benchmark_device_segmented_radix_sort.cpp)
 add_hipcub_benchmark(benchmark_device_segmented_reduce.cpp)
 add_hipcub_benchmark(benchmark_device_segmented_sort.cpp)
 add_hipcub_benchmark(benchmark_device_select.cpp)
-#add_hipcub_benchmark(benchmark_warp_exchange.cpp)
-#add_hipcub_benchmark(benchmark_warp_load.cpp)
-#add_hipcub_benchmark(benchmark_warp_reduce.cpp)
-#add_hipcub_benchmark(benchmark_warp_scan.cpp)
-#add_hipcub_benchmark(benchmark_warp_store.cpp)
-#add_hipcub_benchmark(benchmark_warp_merge_sort.cpp)
+add_hipcub_benchmark(benchmark_warp_exchange.cpp)
+add_hipcub_benchmark(benchmark_warp_load.cpp)
+add_hipcub_benchmark(benchmark_warp_merge_sort.cpp)
+add_hipcub_benchmark(benchmark_warp_reduce.cpp)
+add_hipcub_benchmark(benchmark_warp_scan.cpp)
+add_hipcub_benchmark(benchmark_warp_store.cpp)
