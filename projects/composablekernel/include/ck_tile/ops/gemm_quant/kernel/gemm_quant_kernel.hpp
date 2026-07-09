@@ -1238,6 +1238,20 @@ struct QuantGemmMultiDKernel
         return c_block_window;
     }
 
+    CK_TILE_HOST_DEVICE static constexpr bool IsLargeTensorMOffsettingSupported()
+    {
+        // Large tensor support (when M is large, N and K are relatively small)
+        // Quantization methods other than RowColQuant may require changes
+        bool suitable = kQuantType == QuantType::RowColQuant;
+        suitable      = suitable && std::is_same_v<tensor_layout::gemm::RowMajor, ALayout>;
+        static_for<0, NumDTensor, 1>{}([&](auto i) {
+            using DiLayout = remove_cvref_t<std::tuple_element_t<i.value, DsLayout>>;
+            suitable       = suitable && std::is_same_v<tensor_layout::gemm::RowMajor, DiLayout>;
+        });
+        suitable = suitable && std::is_same_v<tensor_layout::gemm::RowMajor, CLayout>;
+        return suitable;
+    }
+
     CK_TILE_HOST static bool IsSupportedArgument(const KernelArgs& kargs)
     {
         // k_batch must be a positive integer.
@@ -1607,6 +1621,52 @@ struct QuantGemmMultiDKernel
                 return false;
             }
         }
+
+        const bool any_large_tensor = [&] {
+            constexpr size_t SizeLimit = (size_t{1} << 31);
+
+            auto is_large_tensor = [](auto layout,
+                                      index_t rows,
+                                      index_t cols,
+                                      index_t stride,
+                                      auto data_type) {
+                constexpr size_t PackedSize =
+                    ck_tile::numeric_traits<remove_cvref_t<decltype(data_type)>>::PackedSize;
+
+                const size_t n =
+                    std::is_same_v<tensor_layout::gemm::RowMajor, remove_cvref_t<decltype(layout)>>
+                        ? rows
+                        : cols;
+                return n * stride * sizeof(data_type) / PackedSize >= SizeLimit;
+            };
+
+            bool r = false;
+
+            r = r || is_large_tensor(ALayout{}, kargs.M, kargs.K, kargs.stride_A, ADataType{});
+            r = r || is_large_tensor(BLayout{}, kargs.K, kargs.N, kargs.stride_B, BDataType{});
+            static_for<0, NumDTensor, 1>{}([&](auto i) {
+                using DiLayout   = remove_cvref_t<std::tuple_element_t<i.value, DsLayout>>;
+                using DiDataType = remove_cvref_t<std::tuple_element_t<i.value, DsDataType>>;
+
+                r = r ||
+                    is_large_tensor(DiLayout{}, kargs.M, kargs.N, kargs.stride_Ds[i], DiDataType{});
+            });
+            r = r || is_large_tensor(CLayout{}, kargs.M, kargs.N, kargs.stride_C, CDataType{});
+            return r;
+        }();
+
+        if(any_large_tensor)
+        {
+            if constexpr(!IsLargeTensorMOffsettingSupported())
+            {
+                if(ck_tile::EnvIsEnabled(CK_TILE_ENV(CK_TILE_LOGGING)))
+                {
+                    CK_TILE_ERROR("Can't support large tensors with the provided layouts!");
+                }
+                return false;
+            }
+        }
+
         return true;
     }
 
@@ -1857,19 +1917,9 @@ struct QuantGemmMultiDKernel
 
         std::array<const void*, NumDTensor> ds_ptr = kargs.ds_ptr;
 
-        // Large tensor support (when M is large, N and K are relatively small)
-        constexpr bool offset_ptrs_by_tile_coords = [] {
-            bool suitable = kQuantType == QuantType::RowColQuant;
-            suitable      = suitable && std::is_same_v<tensor_layout::gemm::RowMajor, ALayout>;
-            static_for<0, NumDTensor, 1>{}([&](auto i) {
-                using DiLayout = remove_cvref_t<std::tuple_element_t<i.value, DsLayout>>;
-                suitable = suitable && std::is_same_v<tensor_layout::gemm::RowMajor, DiLayout>;
-            });
-            suitable = suitable && std::is_same_v<tensor_layout::gemm::RowMajor, CLayout>;
-            return suitable;
-        }();
-        if constexpr(offset_ptrs_by_tile_coords)
+        if constexpr(IsLargeTensorMOffsettingSupported())
         {
+            // Offset pointers in the M dimension
             a_ptr += static_cast<std::ptrdiff_t>(i_m) * kargs.stride_A;
             aq_ptr += i_m;
             static_for<0, NumDTensor, 1>{}([&](auto i) {
