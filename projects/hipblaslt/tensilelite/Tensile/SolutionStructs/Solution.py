@@ -2463,10 +2463,9 @@ class Solution(collections.abc.Mapping):
       if math.prod(state["MIWaveGroup"]) <= 1:
         reject(state, printRejectionReason, "TDM + PrefetchAcrossPersistent requires wave-separated mode (prod(MIWaveGroup) > 1)")
         return
-      # TDMSplit + PAP is not yet validated on MX-scaled inputs.
-      if state["TDMSplit"] and (state["ProblemType"]["MXBlockA"] or state["ProblemType"]["MXBlockB"]):
-        reject(state, printRejectionReason, "TDMSplit + PrefetchAcrossPersistent not yet supported with MX-scaled inputs")
-        return
+      # Multi-wave TDMSplit recomputes split increments transiently instead of
+      # persisting SGPRs, so MX-scaled SK+PAP tiles are allowed here; the
+      # SGPR-overflow check still drops any tile that overflows.
 
     # Wave-separated TDM splits waves by parity (even=A, odd=B) and requires
     # numComp = numWaves//2 to be a power of two; equivalently, numWaves

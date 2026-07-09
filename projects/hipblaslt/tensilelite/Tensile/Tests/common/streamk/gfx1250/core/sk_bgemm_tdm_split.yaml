@@ -90,5 +90,6 @@ BenchmarkProblems:
           - Exact: [128, 128, 1, 192]  #tail
           - Exact: [129, 128, 1, 128]  #edge-m
           - Exact: [128, 129, 1, 128]  #edge-n
+          - Exact: [128, 128, 1, 128, 128, 128, 160, 128]  #square-tile multi-wave TDMSplit: LDA!=LDB exercises per-wave parity stride recompute
         - ActivationArgs:
           - [Enum: none]
