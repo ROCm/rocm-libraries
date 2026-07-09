@@ -601,11 +601,22 @@ class KernelWriterAssembly(KernelWriter):
 
   def defineSgpr(self, name, numSgprs, align=1):
     if numSgprs == 0: return Module()
-    # check if previous define sgprs are being used..
+    # Temporarily mark parked (freeSgprVarPool) vars in-use so this checkout does
+    # not grab their registers, then restore them afterwards. A parked var may
+    # already be borrowed as a main-loop temp (its registers currently checked
+    # out) -- e.g. StreamK parks SrdWS specifically for reuse during the main
+    # loop. In that case its registers are not Available, this checkout cannot
+    # grab them anyway, and setSgprToInUseState would raise; skip such vars and
+    # only restore the ones we actually flipped back to in-use here.
+    protected = []
     for s in self.states.freeSgprVarPool:
-      self.setSgprToInUseState(s)
+      try:
+        self.setSgprToInUseState(s)
+        protected.append(s)
+      except RuntimeError:
+        pass
     ret = RegSet("s", "sgpr"+name, self.defineSgprIdx(name, numSgprs, align))
-    for s in self.states.freeSgprVarPool:
+    for s in protected:
       self.setSgprToFreeState(s)
     return ret
 
@@ -8519,11 +8530,17 @@ class KernelWriterAssembly(KernelWriter):
       self.argLoader.setOffset(argOffset) # Restore offset
 
     # define the rest sgprs
+    # PostLoopStoreInNll (Step 4b) early-reserves SrdD in the common allocator
+    # (defineVariableSgprs) before the main loop so the FUSED NLL can compute the
+    # store SRD and so SrdD never overlaps the parked SrdWS; skip re-defining SrdD
+    # here when already present. SrdC is always defined here (it is never reserved
+    # early for the PLSIN path).
     if (not self.states.doShadowInit) and kernel["BufferStore"]:
-      self.defineSgpr("SrdD", 4, 4)
+      if "SrdD" not in self.sgprs:
+        self.defineSgpr("SrdD", 4, 4)
+        module.add(RegSet("s", "sgprSrdD", self.sgprs["SrdD"]))
       self.defineSgpr("SrdC", 4, 4)
       module.add(RegSet("s", "sgprSrdC", self.sgprs["SrdC"]))
-      module.add(RegSet("s", "sgprSrdD", self.sgprs["SrdD"]))
     if (kernel["ProblemType"]["UseScaleAB"] == "Vector"):
       self.defineSgpr("SrdScaleA", 4, 4)
       self.defineSgpr("SrdScaleB", 4, 4)
@@ -13511,7 +13528,10 @@ class KernelWriterAssembly(KernelWriter):
       self.vgprPool.checkIn(tmpVgprGSU)
     module.add(gsuFlatLabel)
 
-  def computeStoreSrdStart(self, kernel, srdTcList: list, sgprBpeList = [], useSize: list = [], noMultipleBuffer = False):
+  def computeStoreSrdStart(self, kernel, srdTcList: list, sgprBpeList = [], useSize: list = [], noMultipleBuffer = False, labelSuffix: str = ""):
+    # labelSuffix disambiguates per-channel labels for a second emission of the store
+    # SRD compute (PostLoopStoreInNll FUSED store uses suffix="Fused"); default ""
+    # keeps every other caller byte-identical.
     module = Module("computeStoreSrdStart")
 
     if useSize:
@@ -13607,10 +13627,11 @@ class KernelWriterAssembly(KernelWriter):
         assert len(srdTcList) == len(sgprBpeList)
         if addToSrd:
           for mat, sgprBpe, us in zip(srdTcList, sgprBpeList, useSize):
-            generalBatchedGemmLoad = Label(label="GeneralBatchedGemmLoad"+mat, comment="Computing the Batch Matrix's base address for General Batched GEMM")
-            generalBatchedGemmLoad_End = Label(label="GeneralBatchedGemmLoad"+mat+"_End", comment="End of label GeneralBatchedGemmLoad"+mat)
-            argTypeChecks = Label(label="ArgTypeChecks"+mat, comment="Checks for ArgType to General Batched or non-General Batched")
-            stridedBatchedGemmLoad = Label(label="StridedBatchedGemmLoad"+mat, comment="Computing the Batch Matrix's base address for Strided Batched GEMM")            
+            matL = mat + labelSuffix
+            generalBatchedGemmLoad = Label(label="GeneralBatchedGemmLoad"+matL, comment="Computing the Batch Matrix's base address for General Batched GEMM")
+            generalBatchedGemmLoad_End = Label(label="GeneralBatchedGemmLoad"+matL+"_End", comment="End of label GeneralBatchedGemmLoad"+matL)
+            argTypeChecks = Label(label="ArgTypeChecks"+matL, comment="Checks for ArgType to General Batched or non-General Batched")
+            stridedBatchedGemmLoad = Label(label="StridedBatchedGemmLoad"+matL, comment="Computing the Batch Matrix's base address for Strided Batched GEMM")            
             bpe = self.states.bpeCinternal if mat =="Bias" else (self.states.bpeE if mat == "E" else self.states.bpeCexternal)
             if mat == "Gate":
               bpe = self.states.bpeGate
@@ -13813,8 +13834,50 @@ class KernelWriterAssembly(KernelWriter):
 
     return module
 
-  def globalWriteWorkGroupInit(self, kernel):
+  def globalWriteWorkGroupInit(self, kernel, skipUndefine=False, channels=None, labelSuffix="", noMultipleBuffer=False):
+    # skipUndefine: PostLoopStoreInNll emits this store-init twice — an early
+    # copy hoisted into the FUSED NLL (before endSummation) and the usual
+    # post-loop copy. The emit-time undefineSgpr(AddressC)/undefineSgpr(GSULog2BpeC)
+    # calls must run exactly once (double-undefine errors) and must not reclaim
+    # AddressC before the post-loop copy still needs it. So the NLL copy passes
+    # skipUndefine=True (no reclaim) and the authoritative post-loop copy
+    # (skipUndefine=False, default) performs the single reclaim. The runtime SRD
+    # compute is idempotent (allocPostLoopSrd re-copies Address*->Srd*+0:1 and
+    # computeStoreSrdStart offsets Srd*, never Address*), so running it twice at
+    # runtime recomputes SrdC/SrdD identically.
+    #
+    # channels (Step 4b-2): None emits the historical full C+D store-SRD init,
+    # byte-identical to the pre-PostLoopStoreInNll path. PostLoopStoreInNll splits
+    # it by channel to hoist SrdD's value before the main loop for the FUSED NLL
+    # while leaving SrdC (and the PLAIN fallback arm) post-loop:
+    #   * ["D"] pre-main-loop -> compute SrdD only (fused stores to D; beta==0 so
+    #                            C is never read),
+    #   * ["C"] post-loop     -> compute SrdC only (SrdD already valid from the
+    #                            pre-loop copy; recomputing D post-loop would also
+    #                            re-emit the D SRD-init labels and duplicate them).
+    # Per-channel labels (RegularSrdInitialization{C,D}, GeneralBatchedGemmLoad{C,D})
+    # stay single-copy so nothing collides, and for every fused-eligible config
+    # (GSU != MultipleBuffer, StreamK == 0, non-packed) the shared
+    # computeStoreSrdStart tail (GSU/SK computeStoreSrdStart, PackedSize) is a
+    # no-op, so it is harmless whether it runs once (None) or once per channel call.
     module = Module("globalWriteWorkGroupInit")
+    if not kernel["BufferStore"]:
+      return module
+
+    if channels is not None:
+      bpeByCh = {"C": "GSULog2BpeC", "D": "GSULog2BpeD"}
+      for ch in channels:
+        module.add(self.allocPostLoopSrd(ch, kernel, labelSuffix=labelSuffix))
+      sgprBpeList = [bpeByCh[ch] for ch in channels] if kernel["GlobalSplitU"] != 0 else []
+      module.add(self.computeStoreSrdStart(kernel, list(channels), sgprBpeList=sgprBpeList,
+                                           noMultipleBuffer=noMultipleBuffer, labelSuffix=labelSuffix))
+      if not skipUndefine and "C" in channels:
+        if kernel["GlobalSplitU"] != 0:
+          module.add(self.undefineSgpr("GSULog2BpeC"))
+        if kernel["StreamK"] == 0:
+          module.add(self.undefineSgpr("AddressC"))
+      return module
+
     if kernel["BufferStore"]:
       module.add(self.allocPostLoopSrd("D", kernel))
       module.add(self.allocPostLoopSrd("C", kernel))
@@ -13847,16 +13910,713 @@ class KernelWriterAssembly(KernelWriter):
         self.sgprBpeList = [sgprLog2BpeC, sgprLog2BpeD]
 
       module.add(self.computeStoreSrdStart(kernel, ["C", "D"], sgprBpeList=self.sgprBpeList))
-      if kernel["GlobalSplitU"] != 0:
-        module.add(self.undefineSgpr("GSULog2BpeC"))
-      if kernel["StreamK"] == 0:
-        module.add(self.undefineSgpr("AddressC"))
+      if not skipUndefine:
+        if kernel["GlobalSplitU"] != 0:
+          module.add(self.undefineSgpr("GSULog2BpeC"))
+        if kernel["StreamK"] == 0:
+          module.add(self.undefineSgpr("AddressC"))
 
       if self.states.streamK.emitsWorkspaceReductionBpe and not kernel["StreamKForceDPOnly"]:
         if not kernel["StoreRemapVectorWidth"]:
           self.sgprPool.checkIn(sgprLog2BpeD)
           self.sgprPool.checkIn(sgprLog2BpeC)
     return module
+
+  ##############################################################################
+  # PostLoopStoreInNll: reusable subtile store-init builder
+  ##############################################################################
+  def buildSubtileStoreInitModule(self, kernel, skipUndefine=False, channels=None, labelSuffix="", noMultipleBuffer=False):
+    """Single source of truth for the subtile post-loop store initialization.
+
+    Wraps the store-address setup (SrdC/SrdD via globalWriteWorkGroupInit) in one
+    Module so both the current post-loop fallback AND the PostLoopStoreInNll fused
+    NLL (Step 4) build byte-identical init from the same builder — a fused-store
+    kernel must set up SrdC/SrdD exactly as the fallback does.
+
+    Preconditions (identical to the post-loop path, enforced by the caller):
+      * endSummation has run (SGPRs reclaimed; SrdC/SrdD defined),
+      * SrdD/SrdC have been removed from the free pool.
+
+    Guard (SubtileMGuard/NGuard) computation and the early GR-dead SGPR reclaim
+    are relocated in Step 4 (where the init is hoisted into the NLL and can be
+    GPU-verified); Step 3 is a byte-identical extraction of the existing path.
+    """
+    module = Module("SubtileStoreInit")
+    module.add(self.globalWriteWorkGroupInit(kernel, skipUndefine=skipUndefine, channels=channels,
+                                             labelSuffix=labelSuffix, noMultipleBuffer=noMultipleBuffer))
+    return module
+
+  def buildSubtileFusedDrainProbe(self, kernel):
+    """Step 4c measurement probe: reserve the paired-store's arch-VGPR footprint at
+    the FUSED NLL drain to measure whether it spills past the VGPR ceiling.
+
+    The fused 256x256 kernel already sits near the unified VGPR ceiling (arch +
+    AGPR accumulators). The NLL's terminal-subIterK MFMAs keep the LR tile VGPRs
+    live, and DirectToLds means there are no large G2L destination VGPRs to
+    reclaim — so the injected paired store adds arch-VGPR pressure on top of the
+    live tiles. This probe checks out a representative store footprint (cvt vPack +
+    coord/coutRowPtr + addr scratch), forces it onto the high-water via a dummy
+    write, then checks it back in. It emits no functional work and self-cleans, so
+    the FUSED copy stays dead code and the post-loop path is untouched — only the
+    reported .vgpr_count/.vgpr_spill_count change, quantifying the headroom before
+    the real materialization + GR-offset reclaim lands."""
+    module = Module("SubtileFusedDrainProbe")
+    module.addComment0("PostLoopStoreInNll 4c PROBE: measure paired-store VGPR footprint at NLL drain")
+    # cvtVgprStruct.vgprBf16Temp (vPack): 4 VGPRs, 4-aligned for buffer_store_dwordx4.
+    vPack = self.vgprPool.checkOutAligned(4, 4, tag="fusedDrainProbe_vPack")
+    # coord0/coord1/coutRowPtrD (write indices) + address scratch held to the store.
+    vIdx  = self.vgprPool.checkOut(3, tag="fusedDrainProbe_writeIdx")
+    vAddr = self.vgprPool.checkOutAligned(2, 2, tag="fusedDrainProbe_addr")
+    module.add(VMovB32(dst=vgpr(vPack), src=0, comment="probe: touch vPack (high-water)"))
+    module.add(VMovB32(dst=vgpr(vIdx),  src=0, comment="probe: touch write-index"))
+    module.add(VMovB32(dst=vgpr(vAddr), src=0, comment="probe: touch addr scratch"))
+    self.vgprPool.checkIn(vAddr)
+    self.vgprPool.checkIn(vIdx)
+    self.vgprPool.checkIn(vPack)
+    return module
+
+  def loadFusedEpilogueStoreSgprs(self, kernel):
+    """Fused-NLL epilogue kernarg loader (dispatcher).
+
+    Splits the single contiguous ~13-SGPR epilogue kernarg block (see
+    _loadFusedEpilogueStoreSgprsContig) into per-slot contiguous chunks
+    (scaleAB / scaleCD / SAV / bias+type+stride / factorDim / E / activation)
+    so the LARGEST contiguous SGPR request drops from ~13 to <=4. That lets the
+    fused store pack into the lent drain-era holes (SrdA/B/C/WS, Swap*, LocalWrite*,
+    StreamKLocal*) instead of extending .sgpr_count past budget on large macro tiles
+    (MT>=256x256 fp4 previously overflowed at sgprs=105). Each chunk is contiguous in
+    BOTH SGPR space and its kernarg memory region, so both the normal KernArgAddress
+    path and the SupportUserArgs external-struct path load per chunk.
+
+    Falls back to the proven contiguous loader when (a) the scalar-ScaleAB preload
+    offset fix is needed (input datatype wider than MAC datatype reorganizes the
+    leading Address load), or (b) some numStoreSgprNames entry is not covered by a
+    known slot (defensive: never leave an epilogue symbol undefined)."""
+    module = Module("loadFusedEpilogueStoreSgprs")
+    definedNames = []
+    if not self.states.numStoreSgprToLoad:
+      return module, definedNames
+
+    # (a) preload offset special-casing -> proven contiguous path
+    if kernel["ProblemType"]["UseScaleAB"] == "Scalar":
+      if (kernel["ProblemType"]["DataTypeA"].numRegisters() > kernel["ProblemType"]["MacDataTypeA"].numRegisters()) or \
+         (kernel["ProblemType"]["DataTypeB"].numRegisters() > kernel["ProblemType"]["MacDataTypeB"].numRegisters()):
+        return self._loadFusedEpilogueStoreSgprsContig(kernel)
+
+    runActivation = True if ((kernel["ProblemType"]["ActivationType"] != 'none') \
+        and kernel["ActivationFused"]) else False
+    supportUA = kernel["ProblemType"]["SupportUserArgs"]
+    ui = self.states.userArgsInfo if supportUA else None
+
+    # --- build ordered per-slot chunks (present slots only) ---
+    # each chunk: names, sizes, dwords, packedOff (bytes, packed KernArgAddress
+    # layout), extOff (bytes, fixed external-struct layout w/ gaps), extActType.
+    chunks = []
+    packedOff = [0]
+    extOff = 0
+    names = self.states.numStoreSgprNames
+    def _present(name):
+      return name in names
+    def _addChunk(cnames, csizes, extByteOff, extActType=False):
+      dwords = sum(csizes)
+      chunks.append(dict(names=cnames, sizes=csizes, dwords=dwords,
+                         packedOff=packedOff[0], extOff=extByteOff, extActType=extActType))
+      packedOff[0] += dwords * 4
+
+    # scaleA + scaleB (kept in one chunk when both present)
+    sabNames = []; sabSizes = []
+    if _present("AddressScaleA"): sabNames.append("AddressScaleA"); sabSizes.append(self.states.numSgprAddressScaleA)
+    if _present("AddressScaleB"): sabNames.append("AddressScaleB"); sabSizes.append(self.states.numSgprAddressScaleB)
+    if sabNames: _addChunk(sabNames, sabSizes, extOff)
+    if supportUA: extOff += ui.scaleASize + ui.scaleBSize
+    # scaleC + scaleD
+    scdNames = []; scdSizes = []
+    if _present("AddressScaleC"): scdNames.append("AddressScaleC"); scdSizes.append(self.states.numSgprAddressScaleC)
+    if _present("AddressScaleD"): scdNames.append("AddressScaleD"); scdSizes.append(self.states.numSgprAddressScaleD)
+    if scdNames: _addChunk(scdNames, scdSizes, extOff)
+    if supportUA: extOff += ui.scaleCSize + ui.scaleDSize
+    # ScaleAlphaVec
+    if _present("AddressScaleAlphaVec"): _addChunk(["AddressScaleAlphaVec"], [self.states.rpga], extOff)
+    if supportUA: extOff += ui.scaleAlphaVecSize
+    # bias (AddressBias + BiasType + BiasStride must stay contiguous)
+    if _present("AddressBias"):
+      bNames = ["AddressBias"]; bSizes = [self.states.numSgprAddressBias]
+      if _present("BiasType"):   bNames.append("BiasType");   bSizes.append(self.states.BiasType)
+      if _present("BiasStride"): bNames.append("BiasStride"); bSizes.append(self.states.BiasStride)
+      _addChunk(bNames, bSizes, extOff)
+    if supportUA: extOff += ui.biasSize
+    # factorDim
+    if _present("FactorDim"): _addChunk(["FactorDim"], [1], extOff)
+    if supportUA: extOff += ui.factorDimSize
+    # E (AddressE + StridesE)
+    if _present("AddressE"):
+      eNames = ["AddressE"]; eSizes = [self.states.rpga]
+      if _present("StridesE"): eNames.append("StridesE"); eSizes.append(self.states.e.numSgprStrides)
+      _addChunk(eNames, eSizes, extOff)
+    if supportUA: extOff += ui.eSize
+    # activation args (+ ActivationType)
+    actNames = kernel["ProblemType"]["ActivationType"].getAdditionalArgStringList() if runActivation else []
+    actPresent = [n for n in actNames if _present(n)]
+    if runActivation and (actPresent or _present("ActivationType")):
+      aNames = []; aSizes = []
+      for n in actPresent:
+        aNames.append(n); aSizes.append(self.states.numActivationArgSize)
+      hasActType = _present("ActivationType")
+      if hasActType:
+        aNames.append("ActivationType"); aSizes.append(1)
+      _addChunk(aNames, aSizes, extOff, extActType=hasActType)
+    if supportUA: extOff += ui.activationSize
+
+    # (b) coverage check: every numStoreSgprNames entry must be in a chunk
+    covered = set()
+    for ch in chunks:
+      covered.update(ch["names"])
+    if (not chunks) or (covered != set(names)):
+      return self._loadFusedEpilogueStoreSgprsContig(kernel)
+
+    # --- allocate each chunk as its own contiguous block ---
+    for ch in chunks:
+      idxVec = self.defineMultiSgprIndex(ch["names"], ch["sizes"], align=4)
+      ch["startSgpr"] = idxVec[0]
+      for nm in ch["names"]:
+        module.add(RegSet("s", "sgpr"+nm, self.sgprs[nm]))
+        definedNames.append(nm)
+
+    def _loadChunksNormal():
+      argOffset = self.argLoader.getOffset()
+      for ch in chunks:
+        self.argLoader.setOffset(argOffset + ch["packedOff"])
+        module.addModuleAsFlatItems(self.argLoader.loadAllKernArg(ch["startSgpr"], "KernArgAddress", ch["dwords"]))
+      self.argLoader.setOffset(argOffset)
+
+    if supportUA:
+      extReadEpilogueLabel    = Label(label=self.labels.getNameInc("LoadExternalEpilogueStruct"), comment="")
+      extReadEpilogueLabelEnd = Label(label=self.labels.getNameInc("LoadExternalEpilogueStructEnd"), comment="")
+      module.addComment0("Check if custom structure pointer is null")
+      module.add(SCmpEQU32(src0=sgpr("ArgType"), src1=2, comment="ArgType == 2 ?"))
+      module.add(SCBranchSCC1(labelName=extReadEpilogueLabel.getLabelName(), comment="branch if ArgType == 2"))
+      _loadChunksNormal()
+      module.add(SBranch(extReadEpilogueLabelEnd.getLabelName()))
+      module.add(extReadEpilogueLabel)
+      extBase = self.externalArgLoader.getOffset()
+      for ch in chunks:
+        if ch["extActType"]:
+          # ActivationType sits at the TOP of the fixed activation region; load the
+          # activation args (if any) from the region base and ActivationType from
+          # (base + activationSize - 4). SGPRs are contiguous (args then type).
+          argsDwords = ch["dwords"] - 1
+          if argsDwords > 0:
+            self.externalArgLoader.setOffset(extBase + ch["extOff"])
+            module.addModuleAsFlatItems(self.externalArgLoader.loadAllKernArg(ch["startSgpr"], "KernArgAddress", argsDwords))
+          self.externalArgLoader.setOffset(extBase + ch["extOff"] + ui.activationSize - 4)
+          module.addModuleAsFlatItems(self.externalArgLoader.loadAllKernArg(ch["startSgpr"] + argsDwords, "KernArgAddress", 1))
+        else:
+          self.externalArgLoader.setOffset(extBase + ch["extOff"])
+          module.addModuleAsFlatItems(self.externalArgLoader.loadAllKernArg(ch["startSgpr"], "KernArgAddress", ch["dwords"]))
+      self.externalArgLoader.setOffset(extBase)
+      module.add(extReadEpilogueLabelEnd)
+    else:
+      _loadChunksNormal()
+    return module, definedNames
+
+  def _loadFusedEpilogueStoreSgprsContig(self, kernel):
+    """Replicate endSummation's epilogue store-kernarg define+load for the FUSED NLL.
+
+    The bias/SAV/scale epilogue reads its source kernargs (AddressScaleAlphaVec,
+    AddressBias, BiasType/Stride, activation args -- everything in numStoreSgprNames)
+    which endSummation only defines+loads AFTER the NLL. On StreamK the main loop
+    clobbers those registers (endSummation re-loads them), so at the fused NLL point
+    they hold garbage AND their symbols are undefined. This is a faithful copy of the
+    endSummation loader (both the normal KernArgAddress path and the SupportUserArgs
+    external-struct path), scoped to the store kernargs, so the fused store reads valid
+    data. endSummation is left untouched: it re-defines+re-loads the same args for the
+    PLAIN post-loop store. Returns (module, definedNames) so the caller reclaims the
+    transient SGPRs (see buildSubtileFusedStore cleanup) before endSummation runs.
+
+    argLoader/externalArgLoader offsets are backed up and restored, and numStoreSgprInst
+    counters are NOT written (endSummation recomputes them), so no shared state drifts.
+    """
+    module = Module("loadFusedEpilogueStoreSgprs")
+    definedNames = []
+    if not self.states.numStoreSgprToLoad:
+      return module, definedNames
+
+    runActivation = True if ((kernel["ProblemType"]["ActivationType"] != 'none') \
+        and kernel["ActivationFused"]) else False
+
+    def fixPreloadOffset(offset, sgpxIdxVec, numStoreSgprToLoad):
+      item = None
+      startVgprName = sgpxIdxVec[0]
+      if kernel["ProblemType"]["UseScaleAB"] == "Scalar":
+        if (kernel["ProblemType"]["DataTypeA"].numRegisters() > kernel["ProblemType"]["MacDataTypeA"].numRegisters()) and (kernel["ProblemType"]["DataTypeB"].numRegisters() > kernel["ProblemType"]["MacDataTypeB"].numRegisters()):
+          self.argLoader.setOffset(offset + ((self.states.rpga * self.states.bpr) * 2))
+        elif kernel["ProblemType"]["DataTypeA"].numRegisters() > kernel["ProblemType"]["MacDataTypeA"].numRegisters():
+          self.argLoader.setOffset(offset + (self.states.rpga * self.states.bpr))
+        elif kernel["ProblemType"]["DataTypeB"].numRegisters() > kernel["ProblemType"]["MacDataTypeB"].numRegisters():
+          item = self.argLoader.loadKernArg(self.sgprs["AddressScaleA"], "KernArgAddress", dword=2)
+          if len(sgpxIdxVec) > 1:
+            startVgprName = sgpxIdxVec[1]
+          numStoreSgprToLoad -= self.states.rpga
+          self.argLoader.setOffset(offset + ((self.states.rpga * self.states.bpr) * 2))
+      return (item, startVgprName, numStoreSgprToLoad)
+
+    sgpxIdxVec = self.defineMultiSgprIndex(self.states.numStoreSgprNames, self.states.numStoreSgprNameSizes, align=4)
+    definedNames = list(self.states.numStoreSgprNames)
+    for name in self.states.numStoreSgprNames:
+        module.add(RegSet("s", "sgpr"+name, self.sgprs[name]))
+    if kernel["ProblemType"]["SupportUserArgs"]:
+      extReadEpilogueLabel    = Label(label=self.labels.getNameInc("LoadExternalEpilogueStruct"), comment="")
+      extReadEpilogueLabelEnd = Label(label=self.labels.getNameInc("LoadExternalEpilogueStructEnd"), comment="")
+      module.addComment0("Check if custom structure pointer is null")
+      module.add(SCmpEQU32(src0=sgpr("ArgType"), src1=2, comment="ArgType == 2 ?"))
+      module.add(SCBranchSCC1(labelName=extReadEpilogueLabel.getLabelName(), comment="branch if ArgType == 2"))
+      argOffset = self.argLoader.getOffset() # Backup offset
+      numStoreSgprToLoad = self.states.numStoreSgprToLoad
+      (item, startVgprName, numStoreSgprToLoad) = fixPreloadOffset(argOffset, sgpxIdxVec, numStoreSgprToLoad)
+      if item:
+        module.add(item)
+      module.addModuleAsFlatItems(self.argLoader.loadAllKernArg(startVgprName, "KernArgAddress", numStoreSgprToLoad))
+      self.argLoader.setOffset(argOffset) # Restore offset
+      module.add(SBranch(extReadEpilogueLabelEnd.getLabelName()))
+      module.add(extReadEpilogueLabel)
+      extArgOffset = self.externalArgLoader.getOffset()
+      backupExtArgOffset = extArgOffset
+      loadList = [[-1, 0, extArgOffset]]
+      extArgOffset += self.states.userArgsInfo.scaleASize
+      if (kernel["ProblemType"]["UseScaleAB"] == "Scalar" and (not self.states.preloadScaleA)) or kernel["ProblemType"]["UseScaleAB"] == "Vector":
+        if loadList[-1][0] == -1:
+          loadList[-1][0] = self.sgprs["AddressScaleA"]
+        loadList[-1][1] += self.states.userArgsInfo.scaleASize
+      else:
+        loadList.append([-1, 0, extArgOffset])
+      extArgOffset += self.states.userArgsInfo.scaleBSize
+      if (kernel["ProblemType"]["UseScaleAB"] == "Scalar" and (not self.states.preloadScaleB)) or kernel["ProblemType"]["UseScaleAB"] == "Vector":
+        if loadList[-1][0] == -1:
+          loadList[-1][0] = self.sgprs["AddressScaleB"]
+        loadList[-1][1] += self.states.userArgsInfo.scaleBSize
+      else:
+        loadList.append([-1, 0, extArgOffset])
+      extArgOffset += self.states.userArgsInfo.scaleCSize + self.states.userArgsInfo.scaleDSize
+      if kernel["ProblemType"]["UseScaleCD"]:
+        if loadList[-1][0] == -1:
+          loadList[-1][0] = self.sgprs["AddressScaleC"]
+        loadList[-1][1] += self.states.userArgsInfo.scaleCSize + self.states.userArgsInfo.scaleDSize
+      else:
+        loadList.append([-1, 0, extArgOffset])
+      extArgOffset += self.states.userArgsInfo.scaleAlphaVecSize
+      if kernel["ProblemType"]["UseScaleAlphaVec"]:
+        if loadList[-1][0] == -1:
+          loadList[-1][0] = self.sgprs["AddressScaleAlphaVec"]
+        loadList[-1][1] += self.states.userArgsInfo.scaleAlphaVecSize
+      else:
+        loadList.append([-1, 0, extArgOffset])
+      extArgOffset += self.states.userArgsInfo.biasSize
+      if self.states.numSgprAddressBias:
+        biasLoadSize = (self.states.numSgprAddressBias + self.states.BiasType + self.states.BiasStride) * 4
+        if loadList[-1][0] == -1:
+          loadList[-1][0] = self.sgprs["AddressBias"]
+        loadList[-1][1] += biasLoadSize
+        if biasLoadSize < self.states.userArgsInfo.biasSize:
+          loadList.append([-1, 0, extArgOffset])
+      else:
+          loadList.append([-1, 0, extArgOffset])
+
+      extArgOffset += self.states.userArgsInfo.factorDimSize
+      if self.states.FactorDim == 3:
+        if loadList[-1][0] == -1:
+          loadList[-1][0] = self.sgprs["FactorDim"]
+        loadList[-1][1] += self.states.userArgsInfo.factorDimSize
+      else:
+        loadList.append([-1, 0, extArgOffset])
+
+      extArgOffset += self.states.userArgsInfo.eSize
+      if kernel["ProblemType"]["UseE"]:
+        if loadList[-1][0] == -1:
+          loadList[-1][0] = self.sgprs["AddressE"]
+        loadList[-1][1] += self.states.userArgsInfo.eSize
+      else:
+        loadList.append([-1, 0, extArgOffset])
+      extArgOffset += self.states.userArgsInfo.activationSize
+      if runActivation:
+        needActTypeArg = 1 if self.states.numActivationTypeArgSize else 0
+        actNames = kernel["ProblemType"]["ActivationType"].getAdditionalArgStringList()
+        actLoadSize = (len(actNames) * self.states.numActivationArgSize + needActTypeArg) * 4
+        if (actLoadSize == self.states.userArgsInfo.activationSize) or len(actNames) > 0:
+          if loadList[-1][0] == -1:
+            loadList[-1][0] = self.sgprs[actNames[0]]
+          loadList[-1][1] += actLoadSize
+        else:
+          loadList.append(["ActivationType", actLoadSize])
+          loadList.append([-1, 0, extArgOffset - (needActTypeArg * 4)])
+      else:
+        loadList.append([-1, 0, extArgOffset])
+      for loadInfo in loadList:
+        if loadInfo[0] == -1:
+          continue
+        dwordLen = loadInfo[1] // 4
+        self.externalArgLoader.setOffset(loadInfo[2])
+        module.addModuleAsFlatItems(self.externalArgLoader.loadAllKernArg(loadInfo[0], "KernArgAddress", dwordLen))
+      self.externalArgLoader.setOffset(backupExtArgOffset)
+      module.add(extReadEpilogueLabelEnd)
+    else:
+      argOffset = self.argLoader.getOffset() # Backup offset
+      numStoreSgprToLoad = self.states.numStoreSgprToLoad
+      (item, startVgprName, numStoreSgprToLoad) = fixPreloadOffset(argOffset, sgpxIdxVec, numStoreSgprToLoad)
+      if item:
+        module.add(item)
+      module.addModuleAsFlatItems(self.argLoader.loadAllKernArg(startVgprName, "KernArgAddress", numStoreSgprToLoad))
+      self.argLoader.setOffset(argOffset) # Restore offset
+    return module, definedNames
+
+  def buildSubtileFusedStore(self, kernel, tPA, tPB):
+    """4d-3a (Option B): emit the beta0/NonEdge D store INSIDE the FUSED NLL.
+
+    Mirrors the restricted OptNLL store (see the NLL prefetch path ~L9860):
+    globalWriteElements is called with noGSUBranch=True, applyAlpha=True,
+    betas=[False], edge=False so ONLY the beta0/NonEdge paired dwordx4 stores are
+    emitted — no C load (SrdC), no beta/edge/StreamK/GSU/activation branches. The
+    applyAlpha multiply carries the effective alpha (with scaleA*scaleB folded in for
+    scalar UseScaleAB); the fold + StreamK Alpha save/restore happen inside
+    globalWriteElements so the later PLAIN post-loop store is unaffected. That
+    is exactly the store the front guard already guarantees at runtime
+    (PostLoopHasTail==0 && beta==0 && NonEdge), so SrdC is never referenced (only
+    SrdD is hoisted, 4b-2) and no undefined-symbol / SGPR-overflow problem arises.
+
+    endSummation has NOT run at the NLL emit point, so this re-establishes the
+    store prerequisites it normally provides — serializedStore, codes.accVgprRead
+    (mapAcctoArchRegs), and a c.startVgprValu ValuC base — from the in-NLL register
+    pool (drain-era holes; the serialized subtile store uses a small rotating
+    window, see 4c). Every writer field touched is saved and restored so the
+    post-loop PLAIN store path stays byte-identical.
+    """
+    from .KernelWriterModules import mapAcctoArchRegs
+    module = Module("SubtileFusedStore")
+    module.addComment0("PostLoopStoreInNll 4d-3a: beta0/NonEdge D store inside FUSED NLL")
+
+    # --- drain outstanding NLL summation memory traffic (normally guaranteed by
+    # endSummation before the post-loop store). The paired dwordx4 store's
+    # ds_bpermute lane-reorder is tracked by dscnt, and its Phase2 s_waitcnt is
+    # computed RELATIVE to the pending counter assuming a post-loop context where
+    # nothing else is outstanding. At the terminal NLL point the last MFMA
+    # subiterations' local reads (dscnt) and DirectToLds global loads (vlcnt) are
+    # still in flight, so the relative wait is off-by-N and the pairing permute
+    # reads stale data -> scattered wrong values in the paired (upper-16) columns.
+    # s_nop cannot fix this (it only burns cycles, never waits on async counters);
+    # a full dscnt/vlcnt/vscnt=0 drain (mirrors endSummation L8075) does. ---
+    module.add(SWaitCnt(dscnt=0, vlcnt=0, vscnt=0,
+                        comment="PostLoopStoreInNll: drain NLL DS/global traffic before fused store"))
+
+    # --- save the post-loop-store state we are about to establish early ---
+    savedSerialized    = self.states.serializedStore
+    savedAccVgprRead   = self.codes.accVgprRead
+    savedStartVgprValu = self.states.c.startVgprValu
+    savedCoord0        = self.vgprs.coord0
+    savedCoord1        = self.vgprs.coord1
+
+    # --- lend main-loop-dead SGPRs to the store (non-destructively) ---
+    # At the terminal NLL point the main loop is complete, so its LDS-write /
+    # double-buffer-swap SGPRs are dead. Post-loop frees them via
+    # undefineSubtileMainLoopSgprs before its store; in-NLL they are still marked
+    # in-use, starving the store (sgprPool has only ~5 free). addSgprVarToPool
+    # returns the register to the pool WITHOUT undefining the symbol (see the
+    # "reclaim them to use as temps" note in defineVariableSgprs), so the
+    # later-emitted PLAIN NLL / post-loop that reference these symbols stay valid.
+    # We remove them again after the store to restore the pool state exactly.
+    lentSgprs = []
+    # Also lend the global-read SRDs (SrdA/SrdB/SrdMXSA/SrdMXSB): they are 4-aligned
+    # 4-reg blocks, dead during the NLL drain (all global loads are complete), and
+    # endSummation reclaims them the same way (addSgprVarToPool) right after. Lending
+    # them here gives the transient store SRDs (SrdD + the bias/SAV/scale epilogue
+    # SRDs) genuinely-free 4-aligned blocks to reuse, so the fused store does not
+    # extend the SGPR pool past budget when the bias/SAV epilogue is enabled.
+    # SrdC (4-aligned, 4 regs) is dead here: the fused front guard guarantees
+    # beta==0, so C is never read by the fused store. Lending it hands the epilogue
+    # a genuinely-free 4-aligned block (the scarcest resource for the bias/SAV/D
+    # SRDs). StreamKLocalStart/StreamKLocalEnd must NOT be lent: although the fused
+    # front guard consumes them *before* this body, the POST-LOOP dedup guard
+    # (emitFusedStoreGuard at the DoPostLoopStore site) re-reads them to re-decide
+    # owner-vs-partial. Reusing them as store temps clobbers their runtime content,
+    # so under the UserArgs (ArgType==3) path an owner that just fused mis-evaluates
+    # the dedup guard, falls into the post-loop writePartials path with a garbage
+    # partials index, and does an OOB workspace store (illegal memory access at
+    # multi-tile sizes in hipblaslt-bench). The persistent loop counters
+    # (StreamKIter/StreamKIterEnd) are likewise NOT lent (live across tiles).
+    # SrdWS (workspace SRD, 4-aligned) is dead for a full-tile owner (it writes D
+    # directly, no workspace), and is contiguous with Swap*/LocalWrite*/StreamKLocal*
+    # in the persistent layout -- lending it turns that region into a single ~14-reg
+    # Available run so the contiguous ~13-reg epilogue kernarg block (first-fit in
+    # checkOutMulti) packs in there instead of extending the pool past budget.
+    for _name in ("LocalWriteBaseAddrA", "LocalWriteBaseAddrB",
+                  "LocalWriteBaseAddrMXSA", "LocalWriteBaseAddrMXSB",
+                  "SwapA", "SwapB", "SwapMXSA", "SwapMXSB",
+                  "SrdA", "SrdB", "SrdMXSA", "SrdMXSB",
+                  "SrdC", "SrdWS"):
+      if _name in self.sgprs and _name not in self.states.freeSgprVarPool:
+        self.addSgprVarToPool(_name)
+        lentSgprs.append(_name)
+
+    # --- lend main-loop-dead input VGPR tiles to the store (large macro tiles) ---
+    # For macro tiles > 256x256 the scheduler kept the terminal MFMAs in the loop
+    # (no weave), so every input VGPR tile (A/B/scaleA/scaleB) is dead at this
+    # terminal NLL point. The loop already peaks at 256 arch VGPRs; if the store's
+    # temporaries (valuC window / coord0/1 / element batch) checked out fresh
+    # registers on top, the high-water mark would exceed the single-wave occupancy
+    # budget and codegen would reject the kernel. Mark the dead tiles Available
+    # (addFromCheckOut is non-destructive: it frees the checked-out block WITHOUT
+    # reassigning its index) so the store batch first-fits into the freed holes and
+    # the watermark stays at the loop peak. We removeFromCheckOut (mark in-use
+    # again) after the store so the later-emitted PLAIN NLL arm and the end-of-kernel
+    # deallocVgprTiles see the exact original pool state. try/except guards tiles a
+    # tail path may have already released (already checked-in -> not lendable).
+    # Protected arch-VGPR set = every D-output tile register. For spill tiles
+    # (MIWaveTile product > 64) the >256th accumulators are parked in these VGPRs
+    # (which may alias dead input-tile VGPRs); a lent-then-reused register there
+    # would clobber a live spilled accumulator, corrupting D for both the fused
+    # store and the later post-loop store. Skip any input tile that overlaps.
+    _protected = set()
+    if kernel.get("UseSubtileImpl") and getattr(self.states, "d", None) is not None \
+       and getattr(self.states.d, "tileInfo", None) is not None:
+      for _vt in self.states.d.tileInfo.vgprTiles:
+        if getattr(_vt.regList, "is_vgpr", False):
+          for _idx in _vt.regList.indices:
+            _protected.add(_idx)
+    lentVgprs = []
+    for _base, _size in (getattr(self.states, "subtileFusedLendVgprs", None) or []):
+      if any((_base + _k) in _protected for _k in range(_size)):
+        continue
+      try:
+        self.vgprPool.addFromCheckOut(_base)
+        lentVgprs.append(_base)
+      except Exception:
+        pass
+
+    # --- establish store prerequisites (normally done by endSummation) ---
+    self.states.serializedStore = True
+    if getattr(self.states, "maxLimitAgprs", None) is None:
+      self.states.maxLimitAgprs = self.states.regCaps["PhysicalMaxVgpr"] - self.states.regCaps["MaxVgpr"]
+    spilledVgprBase = None
+    if kernel.get("UseSubtileImpl"):
+      for vtile in self.states.d.tileInfo.vgprTiles:
+        if vtile.regList.is_vgpr:
+          spilledVgprBase = vtile.regList.indices[0]
+          break
+    self.codes.accVgprRead = mapAcctoArchRegs(kernel, self.states.maxLimitAgprs, write=False, spilledVgprBase=spilledVgprBase)
+
+    # ValuC base marker (serialized subtile store reads accs into a small window)
+    fusedStartVgprValu = self.vgprPool.checkOutAligned(1, 4, tag="fusedStore_startVgprValu")
+    self.states.c.startVgprValu = fusedStartVgprValu
+    module.add(RegSet("v", "vgprValuC", fusedStartVgprValu))
+
+    # --- NonEdge guard SGPRs (normally allocated at post-loop L5159-5165, after
+    # mainLoop). Allocate them NLL-locally from the drain-era pool and undefine
+    # after the store so the post-loop PLAIN arm's own defines stay independent. ---
+    savedStoreAlign8   = getattr(self.states, "storeAlign8", False)
+    savedM32Sgpr       = getattr(self.states, "subtileM32ValidBlocksSgpr", None)
+    savedN16Sgpr       = getattr(self.states, "subtileN16ValidBlocksSgpr", None)
+    savedTotalMOffSgpr = getattr(self.states, "subtileTotalMOffsetSgpr", None)
+    savedMBlockSize    = getattr(self.states, "subtileMBlockSize", 0)
+    self.states.storeAlign8 = True
+    # Use defineSgpr (not defineSgprIdx) so the checkout skips vars currently
+    # parked in freeSgprVarPool. On StreamK the workspace SRD (SrdWS) is parked
+    # here (reused as a main-loop temp) and defineSgprIdx would grab its
+    # registers, making the later post-loop removeSgprVarFromPool("SrdWS") fail
+    # ("not in Available state"). defineSgpr temporarily marks the parked vars
+    # in-use across the checkout, so the guard SGPRs land on genuinely-free
+    # registers. Also protects the just-lent LocalWriteBaseAddr/Swap SGPRs above.
+    module.add(self.defineSgpr("SubtileMGuard", 1))
+    module.add(self.defineSgpr("SubtileNGuard", 1))
+    self.states.subtileM32ValidBlocksSgpr = self.sgprs["SubtileMGuard"]
+    self.states.subtileN16ValidBlocksSgpr = self.sgprs["SubtileNGuard"]
+
+    # --- external D bpe: the GSU==1 store arm normally sets bpeCexternal to the
+    # external (DestDataType) bpe. Our noGSUBranch=True call skips the gsuLimit>1
+    # block that does this, so bpeCexternal would keep its internal (fp32, bpe=4)
+    # value. The paired-store column address compensates via a >>1, but the
+    # per-N-group SrdD 'incToNextRow' increment (StrideD1J * numRows * bpe) does
+    # NOT, so an fp32 bpe doubled the N-stride -> every N-group landed 2x too far,
+    # leaving the odd 16-col blocks unwritten (device=0). Set the external bf16
+    # bpe here (matching the GSU1 arm) and restore afterwards. ---
+    savedBpeCext = self.states.bpeCexternal
+    self.states.bpeCexternal = self.states.bpeCexternalGSU1
+
+    # --- transient store SRD (SrdD) for the FUSED NLL (SGPR-defer) ---
+    # SrdD is no longer reserved early / hoisted pre-loop (that cost 4 main-loop-
+    # resident SGPRs and overflowed MT256x256 fp4). Define it here from the drain-era
+    # pool and compute its full value, then undefine after the store (below) so
+    # endSummation re-defines SrdD for the PLAIN / SkipToEnd post-loop store.
+    #
+    # Use defineSgprIdx (UNPROTECTED) so the 4-aligned checkout reuses a dead-during-
+    # fused 4-aligned block — on StreamK the parked SrdWS (workspace SRD, not touched
+    # by the beta0/full-tile fused store) — instead of extending the pool. This keeps
+    # .sgpr_count from growing. Safe because SrdD is undefined below BEFORE SrdWS / the
+    # lent main-loop SGPRs are reclaimed, so no live var overlaps it.
+    #
+    # SrdD value: the SAME store-init builder the post-loop store uses, but with
+    # labelSuffix="Fused" so its per-channel SRD-init labels do not collide with the
+    # post-loop D-init, channels=["D"] only (beta==0 per the front guard => C is never
+    # read), skipUndefine=True (keep AddressD/GSULog2Bpe* live for the post-loop store),
+    # and noMultipleBuffer=True (skip the GSU/SK reduction tails — a full-tile owner
+    # writes straight to D, no workspace reduction).
+    # --- load the epilogue store kernargs FIRST (before SrdD / the transient SRDs) ---
+    # loadFusedEpilogueStoreSgprs allocates a single contiguous ~13-SGPR block
+    # (Address*, BiasType/Stride, activation args via defineMultiSgprIndex). It is the
+    # largest transient allocation, so it must grab the widest contiguous lent hole
+    # (SrdWS+Swap*+LocalWrite*+StreamKLocal* form a ~14-reg run) BEFORE the 4-reg SRDs
+    # (SrdD/SrdBias/SrdScaleAlphaVec) fragment it. Allocating it after those SRDs left
+    # no 13-wide contiguous hole low, forcing the block to extend the pool past budget
+    # (drove .sgpr_count to 105 -> overflow on MT>=256). Doing it first packs the block
+    # into the low holes and keeps .sgpr_count within budget.
+    fusedEpilogueArgs = []
+    # Scalar UseScaleAB also needs the epilogue kernargs loaded here: the scaleA*scaleB
+    # factor is folded into Alpha *inside* globalWriteElements (see the scale-read at
+    # ~L15655 and the Alpha fold at ~L15927), which SLoadB32s from AddressScaleA/B.
+    # Those Address* pointers are part of numStoreSgprNames that endSummation only
+    # loads AFTER the NLL, so without this the fold would read garbage. Include the
+    # scalar case so the fused store's applyAlpha=True path (below) scales correctly
+    # even for scalar-ScaleAB kernels that have no SAV/vector-ScaleAB/bias epilogue.
+    fusedNeedsEpilogue = (kernel["ProblemType"]["UseScaleAlphaVec"]
+                          or (kernel["ProblemType"]["UseScaleAB"] != 0)
+                          or self.states.useBias != DataDirection.NONE)
+    if fusedNeedsEpilogue:
+      _epMod, fusedEpilogueArgs = self.loadFusedEpilogueStoreSgprs(kernel)
+      module.add(_epMod)
+
+    fusedDefinedSrdD = "SrdD" not in self.sgprs
+    if fusedDefinedSrdD:
+      module.add(RegSet("s", "sgprSrdD", self.defineSgprIdx("SrdD", 4, 4)))
+      # Unique suffix per emission: the NLL (and thus this fused store) is emitted more
+      # than once at codegen time (e.g. odd/even PLR variants), and each copy re-emits
+      # the D SRD-init labels, so a fixed suffix would collide across NLL variants.
+      self._fusedStoreEmitCount = getattr(self, "_fusedStoreEmitCount", 0) + 1
+      fusedSuffix = "Fused%d" % self._fusedStoreEmitCount
+      module.add(self.buildSubtileStoreInitModule(kernel, skipUndefine=True, channels=["D"],
+                                                  labelSuffix=fusedSuffix, noMultipleBuffer=True))
+
+    # --- transient epilogue store SRDs (Bias / ScaleAlphaVec / vector-ScaleA/B) ---
+    # These SRD *symbols* are RegSet only in endSummation (defineVariableSgprs),
+    # textually AFTER this fused NLL store. Their VALUES, however, are computed inside
+    # globalWriteElements below (allocPostLoopSrdSuppress etc.), which references
+    # sgpr("Srd<chan>") -- so without a live RegSet the fused store fails to assemble
+    # ("expected absolute expression" on the SRD-base s_mov). The non-StreamK path only
+    # "worked" because the symbol forward-resolved onto registers that happened to be
+    # free at the drain; StreamK's register map differs and it breaks. Define them here
+    # (UNPROTECTED, like SrdD) on genuinely-free drain-era registers and tear them down
+    # after the store so endSummation re-defines them for the PLAIN post-loop store.
+    # (Epilogue store kernargs were already loaded above, before SrdD, so the large
+    # contiguous block packs into the low lent holes -- see the note there.)
+    fusedEpilogueSrds = []
+    def _fusedDefineEpilogueSrd(name):
+      if name not in self.sgprs:
+        module.add(RegSet("s", "sgpr"+name, self.defineSgprIdx(name, 4, 4)))
+        fusedEpilogueSrds.append(name)
+    if kernel["ProblemType"]["UseScaleAB"] == "Vector":
+      _fusedDefineEpilogueSrd("SrdScaleA")
+      _fusedDefineEpilogueSrd("SrdScaleB")
+    if kernel["ProblemType"]["UseScaleAlphaVec"]:
+      _fusedDefineEpilogueSrd("SrdScaleAlphaVec")
+    if self.states.useBias != DataDirection.NONE:
+      _fusedDefineEpilogueSrd("SrdBias")
+
+    # --- write indices (coord0/1, coutRowPtrD) + restricted beta0/NonEdge store ---
+    module.add(self.notLocalSplitUGlobalWriteIndices(kernel))
+    (fullVws, elements, fullVws_1, elements_1) = self.notLocalFullTileElements(kernel)
+    # 4d-3b weave: route accvgpr reads PER PAIR (into each pair's Phase1) instead of
+    # the up-front batch block, so terminal MFMAs can later be interleaved between
+    # Phase1/Phase2 to hide the ds_bpermute latency (see GlobalWriteBatch weave path).
+    savedWeave = getattr(self.states, "subtileFusedWeave", False)
+    self.states.subtileFusedWeave = True
+    # StreamK: this store is a full-tile owner (front guard guaranteed), so suppress
+    # the SK workspace store-branches / partials / fixup — write D directly.
+    savedFusedFullTile = getattr(self.states, "subtileFusedFullTileStore", False)
+    self.states.subtileFusedFullTileStore = True
+    # applyAlpha=True: apply the effective alpha (= user Alpha, with scaleA*scaleB
+    # folded in for scalar UseScaleAB) to the accumulators before the paired D store.
+    # globalWriteElements does the scalar-ScaleAB->Alpha fold internally and, for
+    # StreamK, saves/restores the original Alpha around this call (see the oldAlpha
+    # save at ~L15940 and restore at endLabel ~L16314), so the later PLAIN post-loop
+    # store re-folds from the correct original Alpha (no double scaling). With
+    # applyAlpha=False the fold was computed but never applied, dropping scaleA*scaleB
+    # (and any non-unit alpha) and producing wrong D for UseScaleAB kernels. beta==0
+    # and full-tile are guaranteed by the front guard, so no C-read/edge path is added.
+    storeModule, _ = self.globalWriteElements(
+      kernel, tPA, tPB,
+      [fullVws[0]], [fullVws_1[0]], [elements[0]], [elements_1[0]],
+      noGSUBranch=True, applyAlpha=True, betas=[False], edge=False)
+    self.states.subtileFusedFullTileStore = savedFusedFullTile
+    self.states.subtileFusedWeave = savedWeave
+    module.add(storeModule)
+    self.cleanupGlobalWrite(kernel)
+    self.states.bpeCexternal = savedBpeCext
+
+    # --- release NLL-local transient SrdD + guard SGPRs, restore PLAIN store state ---
+    # Undefine SrdD BEFORE reclaiming the lent main-loop SGPRs below so its registers
+    # are returned to the pool first (no reclaim conflict), and so endSummation
+    # re-defines SrdD for the PLAIN / SkipToEnd post-loop store.
+    if fusedDefinedSrdD:
+      module.add(self.undefineSgpr("SrdD"))
+      # undefineSgpr checks the registers back in but leaves the (now-stale) symbol
+      # in self.sgprs; drop it so endSummation's `"SrdD" not in self.sgprs` guard
+      # fires and re-defines SrdD (fresh index + RegSet) for the post-loop store.
+      self.sgprs.pop("SrdD", None)
+    # Tear down the transient epilogue SRDs. globalWriteElements already frees some of
+    # them internally (SrdScaleAlphaVec / SrdScaleA / SrdScaleB via undefineSgpr) but
+    # leaves others live (SrdBias). checkIn only the ones still InUse (double-checkIn
+    # or a second `.set ...,UNDEF` would corrupt the pool / assembler), then pop every
+    # stale symbol so endSummation's defineVariableSgprs re-defines them cleanly for
+    # the PLAIN post-loop store.
+    _spool = self.sgprPool.getPool()
+    for _name in reversed(fusedEpilogueSrds):
+      _idx = self.sgprs.get(_name)
+      if _idx is not None and _idx < len(_spool) and \
+         _spool[_idx].status == RegisterPool.Status.InUse:
+        module.add(self.undefineSgpr(_name))
+      self.sgprs.pop(_name, None)
+    # Reclaim the transient epilogue store kernargs (defineMultiSgprIndex block from
+    # loadFusedEpilogueStoreSgprs). The undefine block in globalWriteElements is gated
+    # off for the fused store (subtileFusedFullTileStore), so these stay InUse here;
+    # checkIn only the still-InUse ones and pop the symbols so endSummation's
+    # defineMultiSgprIndex re-defines + re-loads them cleanly for the post-loop store.
+    for _name in reversed(fusedEpilogueArgs):
+      _idx = self.sgprs.get(_name)
+      if _idx is not None and _idx < len(_spool) and \
+         _spool[_idx].status == RegisterPool.Status.InUse:
+        module.add(self.undefineSgpr(_name))
+      self.sgprs.pop(_name, None)
+    module.add(self.undefineSgpr("SubtileNGuard"))
+    module.add(self.undefineSgpr("SubtileMGuard"))
+    self.states.subtileMBlockSize         = savedMBlockSize
+    self.states.subtileTotalMOffsetSgpr   = savedTotalMOffSgpr
+    self.states.subtileN16ValidBlocksSgpr = savedN16Sgpr
+    self.states.subtileM32ValidBlocksSgpr = savedM32Sgpr
+    self.states.storeAlign8               = savedStoreAlign8
+    self.vgprPool.checkIn(fusedStartVgprValu)
+    self.vgprs.coord1           = savedCoord1
+    self.vgprs.coord0           = savedCoord0
+    self.states.c.startVgprValu = savedStartVgprValu
+    self.codes.accVgprRead      = savedAccVgprRead
+    self.states.serializedStore = savedSerialized
+    # Reclaim the lent main-loop SGPRs (mark in-use again) so the pool state is
+    # exactly what the subsequently-emitted PLAIN NLL / post-loop expect.
+    for _name in reversed(lentSgprs):
+      self.removeSgprVarFromPool(_name)
+    # Reclaim the lent input VGPR tiles (mark in-use again) so the PLAIN NLL arm and
+    # the end-of-kernel deallocVgprTiles observe the exact original pool state.
+    for _base in reversed(lentVgprs):
+      self.vgprPool.removeFromCheckOut(_base)
+
+    return module
+
+  def subtileStoreInitInlineOp(self):
+    """InlineModuleOp wrapping buildSubtileStoreInitModule for NLL injection (Step 4).
+
+    The subtile scheduler emits an InlineModuleOp by calling build(emitter); the
+    emitter exposes .writer/.kernel, so the store-init is built from the same
+    buildSubtileStoreInitModule used by the fallback post-loop path. Unused until
+    Step 4 anchors it into the FUSED NLL's subIterK 0..S-2 MFMA gaps."""
+    from .Components.Subtile.LogicalScheduler import InlineModuleOp
+    return InlineModuleOp(
+      build=lambda em: em.writer.buildSubtileStoreInitModule(em.kernel),
+      label="postloop_store_init")
 
   ##############################################################################
   # LocalSplitU: Global Write Indices
@@ -14034,12 +14794,16 @@ class KernelWriterAssembly(KernelWriter):
         module.add(SLShiftRightB32(sgprHi, 7, sgprHi))
     return module
  
-  def allocPostLoopSrd(self, ch: str, kernel):   
+  def allocPostLoopSrd(self, ch: str, kernel, labelSuffix: str = ""):
+    # labelSuffix disambiguates the labels when this SRD-init is emitted a second
+    # time (PostLoopStoreInNll: the FUSED NLL store computes SrdD with suffix="Fused"
+    # while the post-loop store keeps the default ""), so the two copies never collide.
     module = Module("allocPostLoopSrd")
-    GeneralBatchedGemmSrdInitiation = Label(label="GeneralBatchedGemmSrdInitiation"+ch, comment="Handling General Batched GEMM SRD initialization")
-    GeneralBatchedGemmSrdInitiation_End = Label(label="GeneralBatchedGemmSrdInitiation"+ch+"_End", comment="End of handling General Batched GEMM SRD initialization")
-    ArgTypeCheckLabel = Label(label="ArgTypeCheck"+ch, comment="Check if ArgType is for General Batched GEMM for "+ch)
-    RegularSrdInitialization = Label(label="RegularSrdInitialization"+ch, comment="Regular SRD initialization for non-General Batched GEMM for "+ch)
+    chL = ch + labelSuffix
+    GeneralBatchedGemmSrdInitiation = Label(label="GeneralBatchedGemmSrdInitiation"+chL, comment="Handling General Batched GEMM SRD initialization")
+    GeneralBatchedGemmSrdInitiation_End = Label(label="GeneralBatchedGemmSrdInitiation"+chL+"_End", comment="End of handling General Batched GEMM SRD initialization")
+    ArgTypeCheckLabel = Label(label="ArgTypeCheck"+chL, comment="Check if ArgType is for General Batched GEMM for "+ch)
+    RegularSrdInitialization = Label(label="RegularSrdInitialization"+chL, comment="Regular SRD initialization for non-General Batched GEMM for "+ch)
     gsuComponent = Component.GSU.find(self)
     module.add(gsuComponent.initializeSrd(self, ArgTypeCheckLabel, GeneralBatchedGemmSrdInitiation_End, kernel, ch))
     if kernel["ProblemType"]["SupportUserArgs"]:
@@ -14937,6 +15701,89 @@ class KernelWriterAssembly(KernelWriter):
   # tmpSgpr is one temp sgpr
   # betaLabel is label to branch to if beta != 0
   ##############################################################################
+  def emitFusedStoreGuard(self, kernel, targetLabel, longBranch=False):
+    """PostLoopStoreInNll: single source of truth for the fused-store eligibility
+    guard, shared by the NLL front guard (targetLabel = PLAIN NLL) and the post-loop
+    dedup (targetLabel = do-the-store). Branches to targetLabel unless ALL hold:
+      * no tail loop follows this NLL   (SizesSum % DepthU == 0),
+      * beta == 0,
+      * this WG covers a full MacroTile in M and N (requireFullTile).
+    Emitting the identical checks at both sites means the FUSED-vs-store decision can
+    never diverge, so no persistent "did-fuse" flag (PostLoopStored) is needed and the
+    "no-tail" bit needs no persistent SGPR (PostLoopHasTail) either -- every input
+    (SizesSum, Beta, sizes, WorkGroup/NumWorkGroups) is loop-invariant and live at
+    both sites, and all temps here are freed before the store's own temps peak.
+    DepthU is a power of two for every eligible (fp4 + UseSubtileImpl) config, so the
+    tail test reduces to a single s_and.
+
+    Milestone 1 adds the StreamK full-tile-owner condition here so both the front
+    guard and the dedup inherit it automatically.
+
+    longBranch: emit every guard branch to targetLabel as a 32-bit long branch.
+    Required at the NLL front-guard site, where targetLabel (the PLAIN NLL) sits
+    past the whole FUSED store body -- with bias/SAV the epilogue-kernarg loader
+    bloats that body beyond the +-simm16 short-branch range. The post-loop dedup
+    site keeps the default short branches (its targetLabel is adjacent).
+    """
+    module = Module("FusedStoreGuard")
+    depthU = kernel["DepthU"]
+    assert (depthU & (depthU - 1)) == 0, \
+      "PostLoopStoreInNll assumes DepthU is a power of two"
+    module.addComment1("Fused-store guard: FUSED iff (no tail) && beta==0 && full-tile(M,N), else -> %s" % targetLabel.getLabelName())
+    with self.allocTmpSgpr(1, tag="fusedStoreGuard_tail") as tmpSgprInfo:
+      module.add(SAndB32(dst=sgpr(tmpSgprInfo.idx),
+                         src0=sgpr("SizesSum+%u" % self.states.unrollIdx),
+                         src1=depthU - 1,
+                         comment="tail = SizesSum %% DepthU (0 => NLL terminal, no tail)"))
+      module.add(SCmpEQU32(src0=sgpr(tmpSgprInfo.idx), src1=0,
+                           comment="fused guard: NLL terminal (no tail)?"))
+      if longBranch:
+        module.add(self.longBranchScc0(targetLabel, posNeg=1,
+                                       comment="has tail -> not fused (long)"))
+      else:
+        module.add(SCBranchSCC0(labelName=targetLabel.getLabelName(),
+                                comment="has tail -> not fused"))
+    # beta==0 (checkIsBetaZero emits nothing when UseBeta is False -> stays eligible).
+    # A long branch needs 3 scratch SGPRs, so widen the temp alloc in that mode.
+    with self.allocTmpSgpr(3 if longBranch else 1, tag="fusedStoreGuard_beta") as tmpSgprInfo:
+      module.add(self.checkIsBetaZero(kernel, tmpSgprInfo, targetLabel, isLongBranch=longBranch, posNeg=1))
+    # full-tile in M and N (the branch-free fused store is only valid on a complete tile).
+    with self.allocTmpSgpr(4, tag="fusedStoreGuard_edge") as tmpSgprInfo:
+      module.add(self.checkIsEdgeSubtile(kernel, tmpSgprInfo, targetLabel,
+                                         isSize1=False, requireFullTile=True, isLongBranch=longBranch))
+      module.add(self.checkIsEdgeSubtile(kernel, tmpSgprInfo, targetLabel,
+                                         isSize1=True, requireFullTile=True, isLongBranch=longBranch))
+    # StreamK full-tile OWNER: only a WG that both started (StreamKLocalStart==0) and
+    # finished (StreamKLocalEnd==ItersPerTile) this output tile computed the whole K
+    # range, so it may store D directly. Split contributors must take the target
+    # (PLAIN) path -> workspace partials + fixup reduction. Mirrors the owner test in
+    # StreamK.storeBranchesCommon. Only meaningful when the workspace/fixup path can be
+    # reached (non-atomic, not force-DP-only); StreamK==0 has no such SGPRs.
+    if kernel["StreamK"] > 0 and not kernel["StreamKAtomic"] and not kernel["StreamKForceDPOnly"]:
+      module.addComment1("StreamK fused guard: full-tile owner (start==0 && end==ItersPerTile) else -> %s" % targetLabel.getLabelName())
+      module.add(SCmpEQU32(src0=sgpr("StreamKLocalStart"), src1=0,
+                           comment="fused guard: wg started this tile?"))
+      if longBranch:
+        module.add(self.longBranchScc0(targetLabel, posNeg=1,
+                                       comment="not tile start -> not fused (split contributor, long)"))
+      else:
+        module.add(SCBranchSCC0(labelName=targetLabel.getLabelName(),
+                                comment="not tile start -> not fused (split contributor)"))
+      sIpt = self.acquireStreamKConstSgpr(kernel, "ItersPerTile")
+      if self.isStreamKConstantsToVgprEnabled(kernel):
+        module.add(VReadfirstlaneB32(dst=sgpr(sIpt), src=vgpr(self.states.skConstVgprs["ItersPerTile"]),
+                                     comment="ItersPerTile const -> sgpr"))
+      module.add(SCmpEQU32(src0=sgpr("StreamKLocalEnd"), src1=sgpr(sIpt),
+                           comment="fused guard: wg finished this tile?"))
+      self.releaseStreamKConstSgpr(sIpt)
+      if longBranch:
+        module.add(self.longBranchScc0(targetLabel, posNeg=1,
+                                       comment="not tile finish -> not fused (split contributor, long)"))
+      else:
+        module.add(SCBranchSCC0(labelName=targetLabel.getLabelName(),
+                                comment="not tile finish -> not fused (split contributor)"))
+    return module
+
   def checkIsBetaZero(self, kernel, tmpSgprInfo, betaLabel, isLongBranch=False, placeHolder=None, posNeg: int=0):
     module = Module("checkIsBetaZero label %s"%betaLabel)
     assert(isinstance(betaLabel, Label))
@@ -14977,12 +15824,15 @@ class KernelWriterAssembly(KernelWriter):
   # tmpSgpr must have at least 4 free SGPRs (same as checkIsEdge).
   # isEdgeTarget is the label to branch to when the tile IS an edge.
   ##############################################################################
-  def checkIsEdgeSubtile(self, kernel, tmpSgprInfo, isEdgeTarget, isSize1=False, isLongBranch=False):
+  def checkIsEdgeSubtile(self, kernel, tmpSgprInfo, isEdgeTarget, isSize1=False, isLongBranch=False, requireFullTile=False):
     assert(isinstance(isEdgeTarget, Label))
     isEdgeTargetLabel = isEdgeTarget.getLabelName()
     module = Module("checkIsEdgeSubtile")
     dim = "N (isSize1)" if isSize1 else "M"
-    module.addComment1("Edge/NonEdge store path check (%s): subtile-aligned remainder -> NonEdge paired store; unaligned -> Edge scalar store" % dim)
+    if requireFullTile:
+      module.addComment1("Full-tile store path check (%s): remainder==0 -> full MacroTile (branch-free fused store); any remainder -> fall back" % dim)
+    else:
+      module.addComment1("Edge/NonEdge store path check (%s): subtile-aligned remainder -> NonEdge paired store; unaligned -> Edge scalar store" % dim)
     tmpS0  = tmpSgprInfo.idx
     tmpS1  = tmpS0 + 1
     tmpS23 = tmpS1 + 1
@@ -14999,6 +15849,8 @@ class KernelWriterAssembly(KernelWriter):
       divisor   = kernel["MacroTile0"]
       destBpe   = int(kernel["ProblemType"]["DestDataType"].numBytes()) if self.states.storeAlign8 else 1
       alignSize = 16 // destBpe  # storeAlign8: dwordx4 store width (16B) / destBpe; else: 16
+      if requireFullTile:
+        alignSize = divisor  # only a zero MT0 remainder passes -> full MacroTile in M
       wgSgpr    = "WorkGroup0"
       nwgSgpr   = "NumWorkGroups0"
       # tmpS0 = SizeI % MT0  (the trailing-row count for the last WG)
@@ -15011,6 +15863,8 @@ class KernelWriterAssembly(KernelWriter):
     else:
       divisor   = kernel["MacroTile1"]
       alignSize  = 1 if self.states.storeAlign8 else kernel["MatrixInstN"]
+      if requireFullTile:
+        alignSize = divisor  # only a zero MT1 remainder passes -> full MacroTile in N
       wgSgpr    = "WorkGroup1"
       nwgSgpr   = "NumWorkGroups1"
       # tmpS0 = SizeJ % MT1
@@ -15717,8 +16571,15 @@ class KernelWriterAssembly(KernelWriter):
         if len(factorDims) > 1:
           module.add(labelDimEnd)
 
-      # Undefine LDS load related sgprs
-      if gsuLimit > 1 and gsuLimitIdx == 0:
+      # Undefine LDS load related sgprs.
+      #   The fused NLL store (subtileFusedFullTileStore) must NOT tear the epilogue
+      #   Address*/Srd* symbols down here: the FUSED NLL is emitted more than once (PLR
+      #   variants) and the later PLAIN post-loop store references the same Address*
+      #   kernargs, so undefining them in the fused pass leaves them UNDEF for those
+      #   downstream consumers ("expected absolute expression"). The fused caller
+      #   reclaims its own transient Srd* SGPRs (see buildSubtileFusedStore cleanup).
+      _fusedFullTile = getattr(self.states, "subtileFusedFullTileStore", False)
+      if (not _fusedFullTile) and gsuLimit > 1 and gsuLimitIdx == 0:
         if kernel["ProblemType"]["UseScaleAB"]:
           if not self.states.preloadScaleA:
             module.add(self.setSgprToFreeState("AddressScaleA"))
@@ -15731,7 +16592,7 @@ class KernelWriterAssembly(KernelWriter):
         if kernel["ProblemType"]["UseScaleAlphaVec"]:
           module.add(self.setSgprToFreeState("AddressScaleAlphaVec"))
           module.add(self.setSgprToFreeState("SrdScaleAlphaVec"))
-      else:
+      elif not _fusedFullTile:
         if kernel["ProblemType"]["UseScaleAB"]:
           if not self.states.preloadScaleA:
             module.add(self.undefineSgpr("AddressScaleA"))
@@ -16002,7 +16863,15 @@ class KernelWriterAssembly(KernelWriter):
       # branch B1 or B0
       skPartialsLabel = Label(label=self.labels.getNameInc("SK_Partials"), comment="")
       skComponent = Component.StreamK.find(self)
-      module.add(skComponent.storeBranches(self, kernel, skPartialsLabel, vectorWidths_1, elements_1, tmpVgpr.idx, cvtVgprStruct))
+      # PostLoopStoreInNll: the FUSED NLL store runs only for a StreamK full-tile
+      # OWNER (front guard: StreamKLocalStart==0 && StreamKLocalEnd==ItersPerTile),
+      # which computed the entire tile and writes D directly -- no workspace
+      # partials, no fixup/reduction. Suppress the SK store-branches + writePartials
+      # (their deferred Fixup/Partials blocks are emitted only by the post-loop store,
+      # so referencing them from the NLL would leave undefined symbols).
+      fusedFullTileStore = getattr(self.states, "subtileFusedFullTileStore", False)
+      if not fusedFullTileStore:
+        module.add(skComponent.storeBranches(self, kernel, skPartialsLabel, vectorWidths_1, elements_1, tmpVgpr.idx, cvtVgprStruct))
 
       # support dynamic MBSK/MB selection by checking synchronizer after bias write
       if kernel["AdaptiveGemmGSUA"] == 1:
@@ -16136,7 +17005,8 @@ class KernelWriterAssembly(KernelWriter):
         self.sgprPool.checkIn(activationSetPCStruct.sgprOffsetActivation)
         self.sgprPool.checkIn(activationSetPCStruct.sgprOffsetBack)
 
-      module.add(skComponent.writePartials(self, kernel, skPartialsLabel, vectorWidths_1, elements_1, tmpVgpr.idx, cvtVgprStruct, endLabel))
+      if not fusedFullTileStore:
+        module.add(skComponent.writePartials(self, kernel, skPartialsLabel, vectorWidths_1, elements_1, tmpVgpr.idx, cvtVgprStruct, endLabel))
 
       # End label
       module.add(endLabel)
@@ -16478,6 +17348,21 @@ class KernelWriterAssembly(KernelWriter):
         actTempSgpr = tmpSgpr # Get sgpr start address, should always be the same
         elementSgprs = tmpSgpr + ss.cfg.numTempSgprPerBatch
         codeAccVgprRead = deepcopy(self.codes.accVgprRead) if self.states.serializedStore else None
+        # PostLoopStoreInNll 4d-3b weave: when ActivationType=all, this activation
+        # loop duplicates the entire fused-store body once per activation type. The
+        # terminal-MFMA weave groups are consumed exactly once (tracked by
+        # subtileWeaveEmitted, whose instruction objects get a module parent when
+        # emitted), so without a per-type re-arm only the FIRST activation block
+        # would receive the woven terminal MFMAs -- every other block's accumulators
+        # would be missing their final K-slice contribution (correct output only for
+        # the activation type that happens to be emitted first). Re-arm a fresh deep
+        # copy of the pristine master groups and reset the emitted set / pair counter
+        # for each activation type so every duplicated store weaves its own MFMAs.
+        _weaveMaster = getattr(self.states, "subtileWeaveMfmaGroupsMaster", None)
+        if _weaveMaster is not None:
+          self.states.subtileWeaveMfmaGroups = deepcopy(_weaveMaster)
+          self.states.subtileWeaveEmitted = set()
+          self.states.subtileWeavePairCounter = 0
         mulAlpha = self.codes.mulAlphaMultipleBuffer if (kernel["_GlobalAccumulation"] == 'MultipleBuffer' or kernel["_GlobalAccumulation"] == 'MultipleBufferSingleKernel') else self.codes.mulAlphaOther
         codeMulAlpha = deepcopy(mulAlpha) if self.states.serializedStore else None
 

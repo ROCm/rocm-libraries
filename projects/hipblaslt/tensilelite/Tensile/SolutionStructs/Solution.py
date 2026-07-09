@@ -4456,6 +4456,83 @@ class Solution(collections.abc.Mapping):
 
     _disableUnsupportedRuntimeStaggerU(state)
 
+    # PostLoopStoreInNll optimization check (self-contained gate).
+    # Scope: fp4-input (MXFP4) + UseSubtileImpl only. Fuses the 16bit paired
+    # buffer_store_dwordx4 (sba=0 + sba=1) into the NLL. Auto-disable (do NOT
+    # reject) whenever any precondition fails so unrelated configs are unaffected.
+    if state["PostLoopStoreInNll"]:
+      isFloat4 = state["ProblemType"]["DataTypeA"].isFloat4() or \
+                 state["ProblemType"]["DataTypeB"].isFloat4()
+      isgfx950 = isa[:2] == (9, 5)
+      destType = state["ProblemType"]["DestDataType"]
+      # The fused store is _emit16bitSubtilePairedStore: it only exists for a
+      # bf16/half dest with HPA on wave64, and not for the StreamK workspace
+      # (MultipleBuffer*) accumulation paths.
+      pairedStoreAvailable = (
+        (destType.isBFloat16() or destType.isHalf()) and
+        state["ProblemType"]["HighPrecisionAccumulate"] and
+        state["WavefrontSize"] != 32 and
+        state["_GlobalAccumulation"] not in ("MultipleBufferSingleKernel", "MultipleBuffer")
+      )
+      # Barrier-free-store precondition: only StoreRemapVectorWidth>0 puts an
+      # s_barrier *inside* the ds_bpermute paired store (LDS remap + barriers) and
+      # uses an entirely different store mechanism, so it stays excluded. Bias /
+      # scaleAlphaVec / scaleAB-vector / activation are LDS-staged with their
+      # s_barriers *outside* the per-pair Phase1/Phase2 weave window (upfront LDS
+      # write/read syncs + a post-store subtile drain barrier), so the MFMA weave
+      # never crosses one. Their only hazard is ordering: the epilogue rewrites
+      # ValuC, which in weave mode is populated by the per-pair accvgpr_read that
+      # was sunk into Phase1 -- GlobalWriteBatch relocates those reads ahead of the
+      # epilogue when it touches ValuC (see _weaveReadBeforeEpilogue), keeping the
+      # result correct. The barrier-free property comes from the ds_bpermute-based
+      # paired store, not from MIArchVgpr: the AGPR-accumulate path
+      # (MIArchVgpr=False) is the validated fp4-subtile store, whereas
+      # MIArchVgpr=True fp4 subtile is currently broken at baseline.
+      barrierFreeStore = (
+        state["StoreRemapVectorWidth"] == 0
+      )
+      # StreamK support: only the non-atomic reduction (SK3/4/5) is eligible.
+      # Atomic StreamK has no full-tile SK_Store branch to attach the fused store
+      # to (storeBranchesCommon early-returns for StreamKAtomic), so exclude it.
+      # For non-atomic StreamK the fused final-D store is taken only by full-tile
+      # owner WGs (StreamKLocalStart==0 && StreamKLocalEnd==ItersPerTile), gated by
+      # the StreamK full-tile condition in the fused front guard (LogicalScheduler);
+      # partial / fixup WGs fall through to the PLAIN NLL + workspace store path.
+      # The SrdD/SrdWS register collision is resolved by reserving SrdD in the
+      # common early-allocation block (see KernelWriter defineVariableSgprs).
+      streamKAtomicFree = not (state["StreamK"] and state["StreamKAtomic"])
+      # Spill tiles: when the per-wave accumulator count exceeds the 256-AGPR cap
+      # (MIWaveTile product > 64 for the 16x16 MI used by fp4), the >256th
+      # accumulators spill into arch VGPRs. The fused store must copy those spilled
+      # accumulators through a ValuC working window and also check out its store
+      # element batch; keeping the window disjoint from the live spilled
+      # accumulators pushes arch VGPRs past the single-wave occupancy budget
+      # (validated: MT320x256 / MT256x320 overflow at occ=1 even after lending the
+      # dead input tiles to the store pool). Non-spill large tiles (e.g. MT320x128)
+      # and all <=256x256 tiles are unaffected. Fall back to the normal (non-fused)
+      # post-loop store for spill tiles.
+      miwt = state["MIWaveTile"]
+      spillFree = (miwt[0] * miwt[1] <= 64)
+      # Bias / ScaleAlphaVec / vector-ScaleAB epilogues are now supported under the
+      # weave: their store SRDs (SrdBias, SrdScaleAlphaVec, SrdScaleA/B) and the
+      # backing Address* kernargs are defined+loaded up front by
+      # loadFusedEpilogueStoreSgprs (replicating endSummation's epilogue store-kernarg
+      # setup) before the fused NLL store, so the store no longer references
+      # as-yet-undefined symbols. The larger epilogue body pushes the NLL exit /
+      # fused-guard branches past +-simm16; those are emitted as 32-bit long branches
+      # (gated on postLoopStoreInNll), so bias/SAV no longer needs to be excluded.
+      if (not isFloat4) or \
+         (not state["UseSubtileImpl"]) or \
+         (not isgfx950) or \
+         (not state["EnableMatrixInstruction"]) or \
+         (state["PrefetchGlobalRead"] < 1) or \
+         (not state["BufferStore"]) or \
+         (not pairedStoreAvailable) or \
+         (not streamKAtomicFree) or \
+         (not barrierFreeStore) or \
+         (not spillFree):
+        state["PostLoopStoreInNll"] = False
+
     # Determine if we can load directly-to-Vgpr
     # need to check after state["LocalReadVectorWidth"] = -1 is resolved
     if state["DirectToVgprA"]:
@@ -5789,6 +5866,19 @@ class Solution(collections.abc.Mapping):
       # Turn off ONLL for now
       # TODO: support ONLL if necessary
       state["OptNoLoadLoop"] = 0
+
+    # PostLoopStoreInNll fuses the final D store INTO the No-Load Loop, so it is
+    # meaningless (and codegen-fatal) without an NLL. The subtile emit path builds
+    # a structural NLL whenever PrefetchGlobalRead >= 1 (see build_nll) and never
+    # reads OptNoLoadLoop -- that flag only controls the classic (non-subtile) NLL
+    # and is force-disabled by UseScaleAB above (5602). So gate PLSIN on the actual
+    # structural-NLL condition (PGR >= 1) rather than OptNoLoadLoop; this keeps PLSIN
+    # eligible for UseScaleAB subtile kernels (their scaleA*scaleB is applied via the
+    # fused store's alpha fold, see buildSubtileFusedStore) while still opting out any
+    # kernel that genuinely has no NLL. The main gate above already enforces PGR >= 1,
+    # so this is a defensive re-check.
+    if state["PostLoopStoreInNll"] and state["PrefetchGlobalRead"] < 1:
+      state["PostLoopStoreInNll"] = False
 
     # if state["GlobalSplitU"] > 1 or state["GlobalSplitU"] == -1:
     #   if state["ProblemType"]["SupportUserArgs"] and state["_GlobalAccumulation"] != 'MultipleBufferSingleKernel':
