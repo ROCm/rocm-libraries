@@ -261,3 +261,8 @@ else:
 def hasStinkyTofuBackend() -> bool:
     """Return True if rocisa was built with StinkyTofu backend support."""
     return hasattr(_rocisa, "isSupportedByStinkyTofu")
+
+
+if not hasattr(_rocisa, "isSupportedByStinkyTofu"):
+    def isSupportedByStinkyTofu(version) -> bool:
+        return False
