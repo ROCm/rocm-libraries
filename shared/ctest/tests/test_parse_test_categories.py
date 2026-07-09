@@ -15,7 +15,6 @@ _PARSER = _CTEST_DIR / "parse_test_categories.py"
 sys.path.insert(0, str(_CTEST_DIR))
 import parse_test_categories as ptc  # noqa: E402
 
-
 MINIMAL_YAML = """
 test_categories:
   quick:
@@ -170,7 +169,9 @@ class TestHelperFunctions(unittest.TestCase):
             None,
             is_windows=True,
         )
-        self.assertIn('add_test(rocblas-test_quick_suite python "../rocblas_rtest.py"', line)
+        self.assertIn(
+            'add_test(rocblas-test_quick_suite python "../rocblas_rtest.py"', line
+        )
 
     def test_format_category_command_direct_gtest(self):
         cmd = ptc._format_category_command(
@@ -333,7 +334,9 @@ class TestCliIntegration(unittest.TestCase):
         )
         self.assertEqual(result.returncode, 0, msg=result.stderr)
         self.assertIsNotNone(install_contents)
-        self.assertIn("add_test(rocblas-test_quick_suite [[../provider_gtest]]", install_contents)
+        self.assertIn(
+            "add_test(rocblas-test_quick_suite [[../provider_gtest]]", install_contents
+        )
         self.assertIn("[[--test-config]] [[config.json]]", install_contents)
         self.assertIn("--gtest_filter=*quick*", install_contents)
 
@@ -343,7 +346,9 @@ class TestCliIntegration(unittest.TestCase):
         self.assertIn("validation error", result.stderr)
 
     def test_cli_invalid_environment_exits_nonzero(self):
-        result, _ = self._run_parser(PATTERNS_ONLY_YAML, "--environment", "not-a-kv-pair")
+        result, _ = self._run_parser(
+            PATTERNS_ONLY_YAML, "--environment", "not-a-kv-pair"
+        )
         self.assertNotEqual(result.returncode, 0)
         self.assertIn("invalid --environment value", result.stderr)
 
