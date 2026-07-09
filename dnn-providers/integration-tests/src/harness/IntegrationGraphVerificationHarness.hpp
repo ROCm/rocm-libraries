@@ -30,6 +30,7 @@
 #include "harness/SharedHandle.hpp"
 #include "harness/SupportMatrixCollector.hpp"
 #include "harness/TestConfig.hpp"
+#include "harness/TomlGuards.hpp"
 
 namespace hipdnn_integration_tests
 {
@@ -58,15 +59,9 @@ protected:
         ASSERT_EQ(hipInit(0), hipSuccess);
         ASSERT_EQ(hipGetDevice(&_deviceId), hipSuccess);
 
-        // Check for any engine specific test skips
-        if(auto* info = ::testing::UnitTest::GetInstance()->current_test_info(); info != nullptr)
+        if(auto reason = checkTomlSkip(currentTestName()))
         {
-            const std::string testName = std::string(info->test_suite_name()) + "." + info->name();
-            if(auto skipReason = TestConfig::get().findSkipForTest(testName))
-            {
-                GTEST_SKIP() << "[arch " << TestConfig::get().getCurrentArch() << "] "
-                             << *skipReason;
-            }
+            GTEST_SKIP() << "[arch " << TestConfig::get().getCurrentArch() << "] " << *reason;
         }
     }
 
@@ -254,25 +249,9 @@ protected:
                            float absoluteTolerance,
                            float relativeTolerance)
     {
-        // Check for per-test tolerance override from TOML config
         float finalAtol = absoluteTolerance;
         float finalRtol = relativeTolerance;
-
-        auto* testInfo = ::testing::UnitTest::GetInstance()->current_test_info();
-        if(testInfo != nullptr)
-        {
-            std::string testName
-                = std::string(testInfo->test_suite_name()) + "." + testInfo->name();
-            auto override = TestConfig::get().findToleranceOverride(testName);
-            if(override.has_value())
-            {
-                finalAtol = override->atol;
-                finalRtol = override->rtol;
-                HIPDNN_PLUGIN_LOG_INFO("Tolerance override applied for " << testName
-                                                                         << ": atol=" << finalAtol
-                                                                         << " rtol=" << finalRtol);
-            }
-        }
+        applyTomlToleranceOverride(currentTestName(), finalAtol, finalRtol);
 
         // Since the graph can infer properties + Ids, we defer validator registration until right
         // before validation in verifyGraph

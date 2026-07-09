@@ -119,6 +119,15 @@ void ExecutionPlanDescriptor::getAttribute(hipdnnBackendAttributeName_t attribut
                   arrayOfElements,
                   "ExecutionPlanDescriptor failed to get engine global index");
         break;
+    case HIPDNN_ATTR_EXECUTION_PLAN_IS_OVERRIDE_SHAPE_ENABLED_EXT:
+        getScalar(isOverrideShapeEnabled(),
+                  HIPDNN_TYPE_BOOLEAN,
+                  attributeType,
+                  requestedElementCount,
+                  elementCount,
+                  arrayOfElements,
+                  "ExecutionPlanDescriptor failed to get override shape enabled flag");
+        break;
     case HIPDNN_ATTR_EXECUTION_PLAN_HANDLE:
     case HIPDNN_ATTR_EXECUTION_PLAN_COMPUTED_INTERMEDIATE_UIDS:
     case HIPDNN_ATTR_EXECUTION_PLAN_RUN_ONLY_INTERMEDIATE_UIDS:

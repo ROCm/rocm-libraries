@@ -104,6 +104,8 @@ struct invoker
 
 void test_scan_mixed_types(size_t num_values)
 {
+  CHECK_ASAN_ENABLEMENT();
+	
   // Since fp addition is non-associative, the results may be slightly off
   // from the reference.
   // This is primarily handled by using `compare_almost_equal` to do a fuzzy

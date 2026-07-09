@@ -64,7 +64,7 @@ This table lists all operations supported in hipDNN:
    * - Convolution Dgrad
      - ``FP16``, ``BFP16``, ``FP32``
      - NCHW, NHWC, NCDHW, NDHWC
-     - Cross-correlation only²
+     - Cross-correlation only², explicit ``dx`` dimensions⁶
    * - Convolution Forward
      - ``FP16``, ``BFP16``, ``FP32``
      - NCHW, NHWC, NCDHW, NDHWC
@@ -76,11 +76,11 @@ This table lists all operations supported in hipDNN:
    * - Convolution Wgrad
      - ``FP16``, ``BFP16``, ``FP32``
      - NCHW, NHWC, NCDHW, NDHWC
-     - Cross-correlation only²
+     - Cross-correlation only², explicit ``dw`` dimensions⁶
 
 .. note::
 
-  - For annotations ¹ through ⁴, see :ref:`operations`.
+  - For annotations ¹ through ⁴ and ⁶, see :ref:`operations`.
   - For annotation ⁵, see :ref:`detailed` for more information.
 
 .. _detailed:
@@ -133,6 +133,7 @@ Operation notes
   - **Convolution Forward + (Bias) + Activation**: Combines convolution forward, optional bias addition, and forward activation.
 
 - ⁴ **Batchnorm Training Running Statistics**: Batchnorm training only supports computing batch statistics (mean and inverse variance) without updating running statistics.
+- ⁶ **Convolution Backward Output Dimensions**: Convolution Dgrad requires explicit ``dx`` dimensions matching the original forward input tensor. Convolution Wgrad requires explicit ``dw`` dimensions matching the original forward weights tensor. These dimensions aren't inferred from ``dy`` and the other convolution tensors because floor division in the forward spatial formula can make multiple input or kernel shapes map to the same output-gradient shape. Output strides may still be inferred once explicit dimensions are present.
 
 - **Activation Functions**: Supports ReLU, Clipped ReLU (with configurable upper clip), and CLAMP (with configurable lower/upper clips).
 - **Sparse Support**: All operations only work with dense tensors.

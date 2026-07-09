@@ -46,9 +46,7 @@
 #include "origami/origami.hpp"
 #include "origami/streamk.hpp"
 
-#include <Tensile/Macros.hpp>
-
-TENSILE_HIDDEN_BEGIN
+#include <tensilelitehost/export.h>
 
 #define TENSILE_COMMON_KERNEL_ARGS_SIZE 16
 
@@ -105,7 +103,7 @@ namespace TensileLite
         int    CUs              = 0;
     };
 
-    extern PerfModel perf;
+    extern TENSILELITEHOST_EXPORT PerfModel perf;
 
     struct BufferLoadCheckPacket
     {
@@ -223,7 +221,7 @@ namespace TensileLite
      * Can generate `KernelInvocation` objects to solve a particular problem
      * given a set of `ContractionInputs`.
      */
-    class ContractionSolution : public Solution
+    class TENSILELITEHOST_EXPORT ContractionSolution : public Solution
     {
     public:
         using Problem             = ContractionProblemGemm;
@@ -708,15 +706,14 @@ namespace TensileLite
     };
 
     template <typename TAct>
-    void setDeviceUserArgs(std::vector<ContractionSolution::Problem> const& problems,
+    TENSILELITEHOST_EXPORT void setDeviceUserArgs(std::vector<ContractionSolution::Problem> const& problems,
                            ContractionSolution::GroupedInputs const&        inputs,
                            DeviceUserArguments<TAct>*                       args);
 
-    std::ostream& operator<<(std::ostream&                                      stream,
+    TENSILELITEHOST_EXPORT std::ostream& operator<<(std::ostream&                                      stream,
                              ContractionSolution::StaticPerformanceModel const& spm);
-    std::ostream& operator<<(std::ostream&                                    stream,
+    TENSILELITEHOST_EXPORT std::ostream& operator<<(std::ostream&                                    stream,
                              ContractionSolution::ProjectedPerformance const& spm);
-    std::ostream& operator<<(std::ostream& stream, BufferLoadCheckPacket const& st);
+    TENSILELITEHOST_EXPORT std::ostream& operator<<(std::ostream& stream, BufferLoadCheckPacket const& st);
 } // namespace TensileLite
 
-TENSILE_HIDDEN_END

@@ -39,7 +39,6 @@
 #include <Tensile/TensorOps.hpp>
 #include <Tensile/Utils.hpp>
 
-TENSILE_HIDDEN_BEGIN
 namespace TensileLite
 {
     /**
@@ -47,7 +46,7 @@ namespace TensileLite
  * @{
  */
     // These are parameters that are used in predicate, and also are kernel arguments.
-    class TENSILE_API ContractionProblemParameters
+    class TENSILELITEHOST_EXPORT ContractionProblemParameters
     {
     public:
         void setGSU(int16_t gsu)
@@ -202,7 +201,7 @@ namespace TensileLite
      * \addtogroup Problem
      * @{
      */
-    class TENSILE_API ContractionProblemGemm;
+    class TENSILELITEHOST_EXPORT ContractionProblemGemm;
 
     struct ConstantDescriptor
     {
@@ -210,7 +209,7 @@ namespace TensileLite
         rocisa::DataType dataType;
     };
 
-    class TENSILE_API ContractionProblem : public Problem
+    class TENSILELITEHOST_EXPORT ContractionProblem : public Problem
     {
     public:
         ContractionProblem(size_t size, size_t workspaceSize = 0);
@@ -327,7 +326,7 @@ namespace TensileLite
      * summations, etc. This is decoupled from any particular pointers, which
      * are provided in ContractionInputs objects.
      */
-    class TENSILE_API ContractionProblemGemm : public ContractionProblem
+    class TENSILELITEHOST_EXPORT ContractionProblemGemm : public ContractionProblem
     {
     public:
         enum TENSOR : int
@@ -1526,7 +1525,7 @@ namespace TensileLite
         }
     };
 
-    struct TENSILE_API ContractionInputs : public ProblemInputs
+    struct TENSILELITEHOST_EXPORT ContractionInputs : public ProblemInputs
     {
         ContractionInputs();
         virtual ~ContractionInputs();
@@ -1601,7 +1600,7 @@ namespace TensileLite
         bool                gpu = false;
     };
 
-    struct TENSILE_API ContractionGroupedInputs : public ProblemInputs
+    struct TENSILELITEHOST_EXPORT ContractionGroupedInputs : public ProblemInputs
     {
         std::vector<ContractionInputs> grouped;
         void*                          ws = nullptr;
@@ -1618,25 +1617,24 @@ namespace TensileLite
     {
     };
 
-    TENSILE_API std::ostream& operator<<(std::ostream&                 stream,
+    TENSILELITEHOST_EXPORT std::ostream& operator<<(std::ostream&                 stream,
                                          ContractionProblemGemm const& contraction);
 
-    TENSILE_API std::ostream& operator<<(std::ostream&                            stream,
+    TENSILELITEHOST_EXPORT std::ostream& operator<<(std::ostream&                            stream,
                                          ContractionProblemGemm::FreeIndex const& free);
-    TENSILE_API std::ostream& operator<<(std::ostream&                             stream,
+    TENSILELITEHOST_EXPORT std::ostream& operator<<(std::ostream&                             stream,
                                          ContractionProblemGemm::BatchIndex const& batch);
-    TENSILE_API std::ostream& operator<<(std::ostream&                             stream,
+    TENSILELITEHOST_EXPORT std::ostream& operator<<(std::ostream&                             stream,
                                          ContractionProblemGemm::BoundIndex const& bound);
 
-    TENSILE_API std::istream& operator>>(std::istream&                      stream,
+    TENSILELITEHOST_EXPORT std::istream& operator>>(std::istream&                      stream,
                                          ContractionProblemGemm::FreeIndex& free);
-    TENSILE_API std::istream& operator>>(std::istream&                       stream,
+    TENSILELITEHOST_EXPORT std::istream& operator>>(std::istream&                       stream,
                                          ContractionProblemGemm::BatchIndex& batch);
-    TENSILE_API std::istream& operator>>(std::istream&                       stream,
+    TENSILELITEHOST_EXPORT std::istream& operator>>(std::istream&                       stream,
                                          ContractionProblemGemm::BoundIndex& bound);
 
     /**
      * @}
      */
 } // namespace TensileLite
-TENSILE_HIDDEN_END
