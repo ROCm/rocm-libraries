@@ -52,8 +52,9 @@ RUN apt-get update && apt-get install -y \
     && rm -rf /var/lib/apt/lists/*
 
 # linux-tools-{common,generic} provide the `perf` binary required by
-# dnn-benchmarking's `--perf` source (CPU cycles/IPC). Two runtime
-# gotchas the apt install can't fix:
+# dnn-benchmarking's `--perf` source (CPU cycles/IPC). dnn-benchmarking has
+# moved to its own repo: https://github.com/ROCm/dnn-benchmarking. Two
+# runtime gotchas the apt install can't fix:
 #
 #  * Container kernel mismatch — the perf wrapper dispatches to
 #    `perf_<kernel-version>`. If that build isn't present, perf
@@ -66,7 +67,8 @@ RUN apt-get update && apt-get install -y \
 #    on the host first, or accept user-space-only counters
 #    (cycles:u / instructions:u — dnn-benchmarking records these
 #    unconditionally and surfaces the paranoid value next to the
-#    None kernel fields). See docs/troubleshooting.md.
+#    None kernel fields). See
+#    https://github.com/ROCm/dnn-benchmarking/blob/main/docs/troubleshooting.md.
 
 # Install DVC. The dvc.org/deb apt repo has been unreachable, so install the
 # official .deb package directly. It bundles all remote backends (incl. S3),
