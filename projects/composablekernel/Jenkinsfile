@@ -589,89 +589,12 @@ pipeline {
         {
             when {
                 beforeAgent true
-                expression { env.SHOULD_RUN_CI.toBoolean() }
+                expression { env.SHOULD_RUN_CI.toBoolean() && params.RUN_CK_TILE_SPARSE_ATTN_TESTS.toBoolean() }
             }
-            parallel
-            {
-                stage("Run CK_TILE_SPARSE_ATTN Tests on gfx90a")
-                {
-                    when {
-                        beforeAgent true
-                        expression { params.RUN_CK_TILE_SPARSE_ATTN_TESTS.toBoolean() }
-                    }
-                    agent{ label rocmnode("gfx90a") }
-                    environment{
-                        setup_args = "NO_CK_BUILD"
-                        execute_args = ck.build_and_run_sparse_attn("gfx90a")
-                    }
-                    steps{
-                        deleteDir()
-                        script {
-                            loadCk()
-                            ck.buildHipClangJobAndReboot(setup_args:setup_args, build_type: 'Release', execute_cmd: execute_args)
-                        }
-                        cleanWs()
-                    }
-                }
-                stage("Run CK_TILE_SPARSE_ATTN Tests on gfx942")
-                {
-                    when {
-                        beforeAgent true
-                        expression { params.RUN_CK_TILE_SPARSE_ATTN_TESTS.toBoolean() }
-                    }
-                    agent{ label rocmnode("gfx942") }
-                    environment{
-                        setup_args = "NO_CK_BUILD"
-                        execute_args = ck.build_and_run_sparse_attn("gfx942")
-                    }
-                    steps{
-                        deleteDir()
-                        script {
-                            loadCk()
-                            ck.buildHipClangJobAndReboot(setup_args:setup_args, build_type: 'Release', execute_cmd: execute_args)
-                        }
-                        cleanWs()
-                    }
-                }
-                stage("Run CK_TILE_SPARSE_ATTN Tests on gfx950")
-                {
-                    when {
-                        beforeAgent true
-                        expression { params.RUN_CK_TILE_SPARSE_ATTN_TESTS.toBoolean() }
-                    }
-                    agent{ label rocmnode("gfx950") }
-                    environment{
-                        setup_args = "NO_CK_BUILD"
-                        execute_args = ck.build_and_run_sparse_attn("gfx950")
-                    }
-                    steps{
-                        deleteDir()
-                        script {
-                            loadCk()
-                            ck.buildHipClangJobAndReboot(setup_args:setup_args, build_type: 'Release', execute_cmd: execute_args)
-                        }
-                        cleanWs()
-                    }
-                }
-                stage("Run CK_TILE_SPARSE_ATTN Tests on gfx1201")
-                {
-                    when {
-                        beforeAgent true
-                        expression { params.RUN_CK_TILE_SPARSE_ATTN_TESTS.toBoolean() }
-                    }
-                    agent{ label rocmnode("gfx1201") }
-                    environment{
-                        setup_args = "NO_CK_BUILD"
-                        execute_args = ck.build_and_run_sparse_attn("gfx1201")
-                    }
-                    steps{
-                        deleteDir()
-                        script {
-                            loadCk()
-                            ck.buildHipClangJobAndReboot(setup_args:setup_args, build_type: 'Release', execute_cmd: execute_args)
-                        }
-                        cleanWs()
-                    }
+            steps{
+                script {
+                    loadCk()
+                    ck.runSparseAttnStages(["gfx90a", "gfx942", "gfx950", "gfx1201"], params.BUILD_COMPILER)
                 }
             }
         }
