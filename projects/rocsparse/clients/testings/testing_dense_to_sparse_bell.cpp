@@ -110,11 +110,6 @@ void testing_dense_to_sparse_bell(const Arguments& arg)
     I mn = (order == rocsparse_order_column) ? m : n;
     I nm = (order == rocsparse_order_column) ? n : m;
 
-    std::cout << "m: " << m << " n: " << n << " ld: " << ld << std::endl;
-    std::cout << "mn: " << mn << " nm: " << nm << std::endl;
-    std::cout << "mb: " << mb << " nb: " << nb << std::endl;
-    std::cout << "ell_block_size: " << ell_block_size << std::endl;
-
     // Index and data type
     rocsparse_indextype itype = get_indextype<I>();
     rocsparse_datatype  ttype = get_datatype<T>();
@@ -162,17 +157,6 @@ void testing_dense_to_sparse_bell(const Arguments& arg)
                                           : static_cast<T>(0);
         }
     }
-
-    // std::cout << "A" << std::endl;
-    // for(I j = 0; j < nm; ++j)
-    // {
-    //     for(int64_t i = 0; i < ld; ++i)
-    //     {
-    //         std::cout << h_dense_val[j * ld + i] << " ";
-    //     }
-    //     std::cout << "" << std::endl;
-    // }
-    // std::cout << "" << std::endl;
 
     // Transfer.
     CHECK_HIP_ERROR(
@@ -228,10 +212,6 @@ void testing_dense_to_sparse_bell(const Arguments& arg)
                                              &idx_base_tmp,
                                              &data_type_tmp));
 
-    std::cout << "num_rows_tmp: " << num_rows_tmp << " num_cols_tmp: " << num_cols_tmp
-              << " ell_block_dim_tmp: " << ell_block_dim_tmp << " ell_cols_tmp: " << ell_cols_tmp
-              << std::endl;
-
     // Allocate memory on device
     device_vector<I> d_bell_col_ind(mb * ell_cols_tmp / ell_block_dim_tmp);
     device_vector<T> d_bell_val(m * ell_cols_tmp);
@@ -256,20 +236,6 @@ void testing_dense_to_sparse_bell(const Arguments& arg)
                                   sizeof(T) * m * ell_cols_tmp,
                                   hipMemcpyDeviceToHost));
 
-        // std::cout << "h_bell_col_ind_gpu" << std::endl;
-        // for(size_t i = 0; i < h_bell_col_ind_gpu.size(); i++)
-        // {
-        //     std::cout << h_bell_col_ind_gpu[i] << " ";
-        // }
-        // std::cout << "" << std::endl;
-
-        // std::cout << "h_bell_val_gpu" << std::endl;
-        // for(size_t i = 0; i < h_bell_val_gpu.size(); i++)
-        // {
-        //     std::cout << h_bell_val_gpu[i] << " ";
-        // }
-        // std::cout << "" << std::endl;
-
         host_vector<I> h_bell_col_ind_cpu(mb * ell_cols_tmp / ell_block_dim_tmp);
         host_vector<T> h_bell_val_cpu(m * ell_cols_tmp);
 
@@ -284,20 +250,6 @@ void testing_dense_to_sparse_bell(const Arguments& arg)
                            ell_cols_cpu,
                            h_bell_val_cpu,
                            h_bell_col_ind_cpu);
-
-        // std::cout << "h_bell_col_ind_cpu" << std::endl;
-        // for(size_t i = 0; i < h_bell_col_ind_cpu.size(); i++)
-        // {
-        //     std::cout << h_bell_col_ind_cpu[i] << " ";
-        // }
-        // std::cout << "" << std::endl;
-
-        // std::cout << "h_bell_val_cpu" << std::endl;
-        // for(size_t i = 0; i < h_bell_val_cpu.size(); i++)
-        // {
-        //     std::cout << h_bell_val_cpu[i] << " ";
-        // }
-        // std::cout << "" << std::endl;
 
         h_bell_col_ind_cpu.unit_check(h_bell_col_ind_gpu);
         h_bell_val_cpu.unit_check(h_bell_val_gpu);
