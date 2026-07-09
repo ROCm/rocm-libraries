@@ -398,6 +398,13 @@ def build_hsaco_from_llvm_ir(
 
     # Fail fast + clean on an IR-flavor / comgr-vintage mismatch rather than
     # letting comgr SIGABRT in codegen (see _assert_ir_flavor_matches_lib).
+    # Load comgr *before* the gate: resolved_lib_path() is first-existing until
+    # _lib is set, but _load_lib() picks first-*loadable*. With many roots
+    # emitted newest-first, an existing-but-unloadable install would otherwise
+    # let the gate validate the wrong vintage and pass, then the real lib aborts
+    # in codegen. Loading first makes the gate read the lib actually used. Free:
+    # the compile below loads comgr anyway.
+    _resolve_lib()
     _assert_ir_flavor_matches_lib(ir_text)
 
     # Handles are created lazily below; declare them up front so the

@@ -162,8 +162,14 @@ def _rocm_root_libdirs() -> List[str]:
     seen: set = set()
 
     def _add(d: str) -> None:
-        if d and d not in seen and os.path.isdir(d):
-            seen.add(d)
+        # De-dupe on the resolved real path so a symlinked root and its target
+        # don't both get probed; keep the original string for readable candidate
+        # paths.
+        if not d:
+            return
+        rp = os.path.realpath(d)
+        if rp and rp not in seen and os.path.isdir(rp):
+            seen.add(rp)
             roots.append(d)
 
     # Tier 1: explicit env roots win over any globbed install.
