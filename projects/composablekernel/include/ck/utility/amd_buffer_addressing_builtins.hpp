@@ -203,9 +203,9 @@ llvm_amdgcn_raw_buffer_atomic_max_fp64(double vdata,
 
 template <index_t N, AmdBufferCoherenceEnum coherence = AmdBufferCoherenceEnum::DefaultCoherence>
 __device__ typename vector_type<int8_t, N>::type
-amd_buffer_load_impl_raw(__amdgpu_buffer_rsrc_t src_wave_buffer_resource,
-                         index_t src_thread_addr_offset,
-                         index_t src_wave_addr_offset)
+amd_buffer_load_impl_raw([[maybe_unused]] __amdgpu_buffer_rsrc_t src_wave_buffer_resource,
+                         [[maybe_unused]] index_t src_thread_addr_offset,
+                         [[maybe_unused]] index_t src_wave_addr_offset)
 {
     static_assert(N == 1 || N == 2 || N == 4 || N == 8 || N == 16 || N == 32 || N == 64,
                   "wrong! not implemented");
@@ -340,10 +340,10 @@ amd_buffer_load_impl(__amdgpu_buffer_rsrc_t src_wave_buffer_resource,
 
 template <index_t N, AmdBufferCoherenceEnum coherence = AmdBufferCoherenceEnum::DefaultCoherence>
 __device__ void
-amd_buffer_store_impl_raw(const typename vector_type<int8_t, N>::type src_thread_data,
-                          __amdgpu_buffer_rsrc_t dst_wave_buffer_resource,
-                          index_t dst_thread_addr_offset,
-                          index_t dst_wave_addr_offset)
+amd_buffer_store_impl_raw([[maybe_unused]] const typename vector_type<int8_t, N>::type src_thread_data,
+                          [[maybe_unused]] __amdgpu_buffer_rsrc_t dst_wave_buffer_resource,
+                          [[maybe_unused]] index_t dst_thread_addr_offset,
+                          [[maybe_unused]] index_t dst_wave_addr_offset)
 {
     static_assert(N == 1 || N == 2 || N == 4 || N == 8 || N == 16 || N == 32 || N == 64,
                   "wrong! not implemented");
