@@ -7,6 +7,7 @@
 #include <algorithm>
 #include <gtest/gtest.h>
 #include <hip/hip_runtime.h>
+#include <limits>
 #include <memory>
 #include <unordered_map>
 #include <vector>
@@ -71,7 +72,10 @@ protected:
             EXPECT_LE(r.iterationsRun, config.maxIterations);
             EXPECT_GT(r.avgTimeMs, 0.0f);
             EXPECT_GE(r.stddevMs, 0.0f);
-            EXPECT_LE(r.minTimeMs, r.avgTimeMs);
+            // Float rounding in the averaging (sum/n) can push avg one ULP below the
+            // raw min sample when all iterations are near-identical; allow a few ULP.
+            const float avgTolerance = 4.0f * std::numeric_limits<float>::epsilon();
+            EXPECT_LE(r.minTimeMs, r.avgTimeMs * (1.0f + avgTolerance));
         }
         EXPECT_TRUE(checkedAnySucceeded) << "No engine succeeded for strategy smoke test";
     }
