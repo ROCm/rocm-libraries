@@ -335,6 +335,21 @@ class WaitcntBrackets {
         const True16Modifiers* true16Mod = inst.getModifier<True16Modifiers>();
 
         if (ct == CT_VA_VDST) {
+            size_t srcIdx = 0;
+            for (size_t i = 0; i < inst.getNumSrcRegs(); ++i) {
+                const auto& reg = inst.getSrcReg(i);
+                if (reg.dataType != StinkyRegister::Type::Register) continue;
+                if (reg.reg.type != RegType::V) continue;
+                HighBitSel half = srcHalfSel(true16Mod, srcIdx);
+                ++srcIdx;
+                for (uint16_t off = 0; off < reg.reg.num; ++off) {
+                    RegKey k = keyer.producerKey(reg.reg.idx + off, half);
+                    scores[k][CT_VA_VDST] = curr;
+                    PASS_DEBUG(std::cerr << "[InsertWaitAlu]     score=" << curr << " on v" << k.idx
+                                         << "(" << halfName(k.half) << ") " << eventName(ev)
+                                         << "\n");
+                }
+            }
             size_t destIdx = 0;
             for (size_t i = 0; i < inst.getNumDestRegs(); ++i) {
                 const auto& reg = inst.getDestReg(i);
