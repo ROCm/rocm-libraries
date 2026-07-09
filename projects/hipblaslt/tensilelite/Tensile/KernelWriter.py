@@ -2619,6 +2619,16 @@ class KernelWriter(metaclass=abc.ABCMeta):
             else:
               dscnt = localWrites  # this only survives if writes are at the end
 
+      # XF32 lrvwTile>1 on WMMA_V3 (gfx1250): the transpose (packPreCode) rewrites T0/X0 in place
+      # right after the ds_load issues them, but the consumer is the NEXT iteration -- so the swap
+      # can clobber not-yet-landed loads. dscnt can't tell the just-issued loads from the ones still
+      # needed, so full-drain. dscnt is a single combined DS counter (reads+writes), so this also
+      # drains the writes; that over-sync is the cost the TODO below removes. Scoped to WMMA_V3:
+      # the MFMA XF32 path (gfx950) handles the transpose in its pack code and does not need this.
+      # TODO: move the transpose next to its consumer instead of forcing dscnt=0.
+      if kernel["UseF32XEmulation"] and (self.states.lrvwTileA > 1 or self.states.lrvwTileB > 1) \
+         and self.states.asmCaps["HasWMMA_V3"]:
+        dscnt = 0
       waitCode.comment += " old=%u, new=%u newLW=%u newLR=%u" % (waitCode.dscnt, dscnt, localWrites, localReads)
       if iteration == 0:
         waitCode.comment += " for iteration == 0"
@@ -7172,9 +7182,8 @@ class KernelWriter(metaclass=abc.ABCMeta):
     # Exempt from forcing lrvwTile=1:
     #   - MFMA-based XF32 emulation (gfx950): pack code already handles lrvwTile > 1
     #   - CMS kernels: schedules are designed with lrvwTile > 1 and manage pack-code placement explicitly
-    # Non-MFMA XF32 (e.g. gfx1250 WMMA) without CMS must use lrvwTile=1 because
-    # the default scheduler's local reads don't match the XF32 pack code's expectations.
-    # TODO: implement extra logic to swap vgprs after local read to suport lrvwTile > 1 for numBytes >= 4 + MIInputPerThread > 1
+    #   - WMMA_V3 XF32 emulation (gfx1250): local reads swap vgprs after read and the scheduler
+    #     drains dependent local reads before the pack code, so lrvwTile > 1 is supported
     isCMS = kernel["UseCustomMainLoopSchedule"]
     isMfmaXf32 = kernel["UseMFMAF32XEmulation"]
     forceLrvwTile1A = kernel["ProblemType"]["MacDataTypeA"].numBytes() >= 4 and \
