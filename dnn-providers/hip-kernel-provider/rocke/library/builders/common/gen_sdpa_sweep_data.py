@@ -22,6 +22,7 @@ Usage::
 from __future__ import annotations
 
 import sys
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Dict, List, Optional, Sequence
 
@@ -55,6 +56,89 @@ _SDPA_PROBLEMS = [
 ]
 
 
+# Config-grid axes, swept per problem around the selector-chosen default and
+# filtered by ``supports_tiled_2d`` so only buildable configs survive. A picker
+# needs multiple valid configs per shape to have anything to rank; one derived
+# spec per problem (the old behaviour) gave it nothing to learn.
+_GRID_NUM_WARPS = (1, 2, 4)
+_GRID_BLOCK_M_PER_WARP = (16, 32)
+# tile_size (T) grid is derived per problem from block_size (T is a multiple of
+# the paged-KV block): {1x, 2x, 4x} block_size.
+_GRID_TILE_MULT = (1, 2, 4)
+
+
+@dataclass
+class _SdpaCandidate:
+    """One (problem, tiled-spec) grid point. The adapter callbacks read config
+    columns from ``tiled`` (the actual swept config) and problem columns from
+    ``problem``."""
+
+    problem: object
+    tiled: object
+
+
+def _default_tiled_spec(prob: object):
+    """The selector-chosen 2D tiled spec for a problem (the grid anchor, with all
+    arch-specific flags set correctly)."""
+    from kernels.common import attention_unified as au
+
+    return au._tiled_spec_from_problem(prob)
+
+
+def _grid_tiled_specs(prob: object, arch: str) -> List[object]:
+    """Valid tiled-spec grid points for a problem.
+
+    Varies (num_warps, block_m_per_warp, tile_size) around the default spec via
+    ``dataclasses.replace`` (so every other subtle flag stays as the selectors
+    set it), and keeps only the points ``supports_tiled_2d`` accepts. The default
+    spec itself is always included first (deduped) so a problem never yields zero
+    candidates even if the grid is fully pruned.
+    """
+    import dataclasses
+
+    from kernels import supports_tiled_2d
+
+    default = _default_tiled_spec(prob)
+    seen: set = set()
+    out: List[object] = []
+
+    def _accept(spec) -> None:
+        key = (spec.num_warps, spec.block_m_per_warp, spec.tile_size)
+        if key in seen:
+            return
+        ok, _reason = supports_tiled_2d(
+            head_size=spec.head_size,
+            block_size=spec.block_size,
+            dtype=spec.dtype,
+            num_queries_per_kv=prob.num_queries_per_kv,
+            use_alibi=spec.use_alibi,
+            use_qq_bias=spec.use_qq_bias,
+            use_fp8=prob.use_fp8,
+            q_dtype=prob.q_dtype,
+            num_warps=spec.num_warps,
+            block_m_per_warp=spec.block_m_per_warp,
+            kv_storage_dtype=spec.kv_storage_dtype,
+            tile_size=spec.tile_size,
+            arch=arch,
+        )
+        if ok:
+            seen.add(key)
+            out.append(spec)
+
+    # Default first (guaranteed valid — the selectors produced it).
+    _accept(default)
+
+    bs = int(prob.block_size)
+    for nw in _GRID_NUM_WARPS:
+        for bm in _GRID_BLOCK_M_PER_WARP:
+            for mult in _GRID_TILE_MULT:
+                cand = dataclasses.replace(
+                    default, num_warps=nw, block_m_per_warp=bm, tile_size=bs * mult
+                )
+                _accept(cand)
+    return out
+
+
 def _sdpa_enumerate(arch: str, max_shapes: Optional[int]) -> List[object]:
     from kernels.common.attention_unified import UnifiedAttentionProblem
 
@@ -76,49 +160,36 @@ def _sdpa_enumerate(arch: str, max_shapes: Optional[int]) -> List[object]:
             dtype=dtype,
             sliding_window=sw,
         )
-        specs.append(prob)
+        # One candidate per valid grid point (multiple configs per problem).
+        for tiled in _grid_tiled_specs(prob, arch):
+            specs.append(_SdpaCandidate(problem=prob, tiled=tiled))
     return specs
 
 
-def _sdpa_tiled_spec(prob: object):
-    """Derive the (deterministic, problem-driven) 2D tiled spec for a problem."""
-    from kernels.common import attention_unified as au
+def _sdpa_build(cand: object):
+    from kernels import build_unified_attention_2d_tiled
 
-    return au._tiled_spec_from_problem(prob)
-
-
-def _sdpa_build(prob: object):
-    from kernels import build_unified_attention_2d
-    from kernels.common.attention_unified import UnifiedAttention2DSpec
-
-    # The scalar 2D path builds on every supported arch and exercises the same
-    # problem geometry; the tiled spec is used only for the feature columns.
-    # ``build_unified_attention_2d`` takes a 2D *spec* (which wraps the problem),
-    # not a bare ``UnifiedAttentionProblem``.
-    return build_unified_attention_2d(UnifiedAttention2DSpec(problem=prob))
+    # Build the explicit tiled spec for this grid point (arch-dispatched). This
+    # is the actual swept config, not a problem-derived default.
+    return build_unified_attention_2d_tiled(cand.tiled)
 
 
-def _sdpa_config_columns(prob: object) -> Dict[str, object]:
-    """Recover the 68-feature kernel columns from the problem-driven tiled spec.
+def _sdpa_config_columns(cand: object) -> Dict[str, object]:
+    """Recover the 68-feature kernel columns from this grid point's tiled spec.
 
     The FMHA feature layout treats ``tm0`` as the per-warp query block
-    (``block_q``, fixed at 16 in the C++ ``FmhaKernelConfig::from_manifest``),
-    ``tn0`` as the tile_size T, ``tk0``/``tk0max`` as head_size, ``tn1`` as
-    hdim_v, and ``tk1`` as T -- exactly mirroring the C++ derivation so the
-    Python and runtime feature vectors agree field-for-field.
+    (``block_q`` = block_m_per_warp), ``tn0`` as the tile_size T, ``tk0``/
+    ``tk0max`` as head_size, ``tn1`` as hdim_v, and ``tk1`` as T -- exactly
+    mirroring the C++ derivation so the Python and runtime feature vectors agree
+    field-for-field.
     """
-    T = 64
-    block_q = 16
+    spec = cand.tiled
+    prob = cand.problem
+    T = int(getattr(spec, "tile_size", None) or (2 * int(prob.block_size)))
+    block_q = int(getattr(spec, "block_m_per_warp", 16))
     pipeline = 1  # qr_async
     mask = 0
-    sink = False
-    try:
-        spec = _sdpa_tiled_spec(prob)
-        T = int(getattr(spec, "tile_size", T))
-        block_q = int(getattr(spec, "block_m_per_warp", block_q))
-        sink = bool(getattr(spec, "use_sinks", False))
-    except Exception:
-        pass
+    sink = bool(getattr(spec, "use_sinks", False))
 
     hd = int(prob.head_size)
     return {
@@ -145,7 +216,8 @@ def _sdpa_config_columns(prob: object) -> Dict[str, object]:
     }
 
 
-def _sdpa_problem_columns(prob: object) -> Dict[str, object]:
+def _sdpa_problem_columns(cand: object) -> Dict[str, object]:
+    prob = cand.problem
     return {
         "batch": int(prob.num_seqs),
         "seqlen_q": int(prob.max_seqlen_q),
@@ -159,13 +231,24 @@ def _sdpa_problem_columns(prob: object) -> Dict[str, object]:
     }
 
 
-def _sdpa_flops(prob: object) -> float:
+def _sdpa_flops(cand: object) -> float:
+    prob = cand.problem
     b = prob.num_seqs
     hq = prob.num_query_heads
     sq = prob.max_seqlen_q
     sk = prob.max_seqlen_k
     d = prob.head_size
     return float(2.0 * b * hq * sq * sk * (d + d))
+
+
+def _sdpa_spec_name(cand: object) -> str:
+    prob = cand.problem
+    spec = cand.tiled
+    return (
+        f"sdpa_b{prob.num_seqs}_sq{prob.max_seqlen_q}_sk{prob.max_seqlen_k}"
+        f"_hq{prob.num_query_heads}_hk{prob.num_kv_heads}_d{prob.head_size}"
+        f"_{prob.dtype}_nw{spec.num_warps}_bm{spec.block_m_per_warp}_T{spec.tile_size}"
+    )
 
 
 # =====================================================================
@@ -179,11 +262,7 @@ def build_sdpa_adapter() -> OpAdapter:
         op_type="fmha",
         enumerate_specs=_sdpa_enumerate,
         build_kernel=_sdpa_build,
-        spec_name=lambda p: (
-            p.kernel_name()
-            if hasattr(p, "kernel_name")
-            else f"sdpa_b{p.num_seqs}_sq{p.max_seqlen_q}_sk{p.max_seqlen_k}"
-        ),
+        spec_name=_sdpa_spec_name,
         config_columns=_sdpa_config_columns,
         problem_columns=_sdpa_problem_columns,
         flops=_sdpa_flops,
