@@ -214,7 +214,7 @@ endif()
 if(HIPCUB_SWAP_TO_LEGACY_AND_IGNORE_PROJECT_VERSIONING)
   message(WARNING "Do rely on HIPCUB_SWAP_TO_LEGACY_AND_IGNORE_PROJECT_VERSIONING! It will be removed without warning!")
 
-  # 'GIT_PATH' is set by including 'cmake/Depedencies.cmake'.
+  # 'GIT_PATH' is set by including 'cmake/Dependencies.cmake'.
   if(NOT DEFINED GIT_PATH)
     message(FATAL_ERROR "Git could not be found on the system!")
   endif()
