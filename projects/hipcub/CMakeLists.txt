@@ -20,8 +20,8 @@
 # OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 # SOFTWARE.
 
-cmake_minimum_required(VERSION 3.18 FATAL_ERROR)
-cmake_policy(VERSION 3.18...3.25)
+cmake_minimum_required(VERSION 3.19 FATAL_ERROR)
+cmake_policy(VERSION 3.19...3.25)
 
 # ROCm libraries root (for shared/ctest and other shared resources).
 # Only set the default when not already defined (e.g. by superproject /
@@ -222,17 +222,24 @@ if(HIPCUB_SWAP_TO_LEGACY_AND_IGNORE_PROJECT_VERSIONING)
   set(HIPCUB_LEGACY_REPO_DIR "${CMAKE_CURRENT_BINARY_DIR}/hipcub-legacy-src")
   set(HIPCUB_LEGACY_TAG "therock-7.13")
 
-  find_path(FOUND_HIPCUB_LEGACY NAMES "." PATHS "${CMAKE_CURRENT_BINARY_DIR}/hipcub-legacy-src" NO_CACHE NO_DEFAULT_PATH)
+  find_path(FOUND_HIPCUB_LEGACY NAMES "." PATHS "${HIPCUB_LEGACY_REPO_DIR}" NO_CACHE NO_DEFAULT_PATH)
   if(${FOUND_HIPCUB_LEGACY} STREQUAL "FOUND_HIPCUB_LEGACY-NOTFOUND")
     # If not found, use a sparse checkout to download it.
-    execute_process(COMMAND ${GIT_PATH} clone --branch ${HIPCUB_LEGACY_TAG} --no-checkout --depth=1 --filter=tree:0 https://github.com/ROCm/rocm-libraries.git "${HIPCUB_LEGACY_REPO_DIR}")
+    # Any failure here is treated as fatal.
+    execute_process(COMMAND ${GIT_PATH} clone --branch ${HIPCUB_LEGACY_TAG} --no-checkout --depth=1 --filter=tree:0 https://github.com/ROCm/rocm-libraries.git "${HIPCUB_LEGACY_REPO_DIR}"
+                    COMMAND_ERROR_IS_FATAL ANY)
     execute_process(COMMAND ${GIT_PATH} sparse-checkout init --cone
-                    WORKING_DIRECTORY "${HIPCUB_LEGACY_REPO_DIR}")
+                    WORKING_DIRECTORY "${HIPCUB_LEGACY_REPO_DIR}"
+                    COMMAND_ERROR_IS_FATAL ANY)
     execute_process(COMMAND ${GIT_PATH} sparse-checkout set "projects/hipcub"
-                    WORKING_DIRECTORY "${HIPCUB_LEGACY_REPO_DIR}")
-    execute_process(COMMAND ${GIT_PATH} checkout ${HIPCUB_LEGACY_TAG}
-                    WORKING_DIRECTORY "${HIPCUB_LEGACY_REPO_DIR}")
+                    WORKING_DIRECTORY "${HIPCUB_LEGACY_REPO_DIR}"
+                    COMMAND_ERROR_IS_FATAL ANY)
   endif()
+  # Always ensure we checkout the right tag.
+  # This also ensures the repository is valid.
+  execute_process(COMMAND ${GIT_PATH} checkout ${HIPCUB_LEGACY_TAG}
+                  WORKING_DIRECTORY "${HIPCUB_LEGACY_REPO_DIR}"
+                  COMMAND_ERROR_IS_FATAL ANY)
   set(HIPCUB_LEGACY_DIR "${HIPCUB_LEGACY_REPO_DIR}/projects/hipcub")
 
   set(CMAKE_CURRENT_SOURCE_DIR_OLD ${CMAKE_CURRENT_SOURCE_DIR})
