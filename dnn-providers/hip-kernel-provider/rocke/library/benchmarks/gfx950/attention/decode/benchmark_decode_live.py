@@ -357,8 +357,7 @@ def _run_aoTriton(
         softcap = data["softcap"]
 
         # scaled_dot_product_attention does not support alibi, qq_bias or
-        # softcap — fall back to _run_triton (AITER unified_attention with
-        # paged KV) when any bias is active so the reference is fair.
+        # softcap
         use_bias = alibi_slopes is not None or data["qq_bias"] is not None or softcap
         if use_bias:
             return None
