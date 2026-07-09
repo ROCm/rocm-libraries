@@ -253,7 +253,6 @@ TYPED_TEST(HipcubDeviceSegmentedReduceOp, ReduceFixedSize)
     constexpr unsigned int max_segment_length = TestFixture::params::max_segment_length;
 
     using result_type = output_type;
-    using offset_type = unsigned int;
 
     const input_type init = test_utils::convert_to_device<input_type>(TestFixture::params::init);
     reduce_op_type   reduce_op;
