@@ -207,6 +207,7 @@ run_hipblaslt_bench_smoke() {
         --config "${ROCJITSU_CONFIG}" \
         -- "${HIPBLASLT_BENCH}" \
           --precision f32_r \
+          --initialization zero \
           -m 128 \
           -n 128 \
           -k 128 \
