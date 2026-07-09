@@ -115,54 +115,110 @@ else()
     message(STATUS "rocKE AOT build: libamd_comgr from ${_ROCKE_COMGR_LIB}")
 endif()
 
-# libamd_comgr's dependency closure (libclang-cpp, libLLVM, and the vendored
-# rocm_sysdeps libs such as librocm_sysdeps_z) lives in the compiler toolchain,
-# not next to comgr. At build time comgr is a BUILD_DEP staged on its own, so its
-# $ORIGIN rpath siblings (llvm/lib, rocm_sysdeps/lib) are absent, while those
-# libs live in the amd-llvm toolchain stage. Rather than chase individual deps,
-# forward the whole toolchain lib set so dlopen(libamd_comgr) resolves the entire
-# closure -- and keeps resolving as comgr gains LLVM/sysdep deps, since they all
-# land in these same dirs.
+# libamd_comgr's dependency closure (libclang-cpp, libLLVM, the vendored
+# rocm_sysdeps libs, ...) lives in the amd-llvm toolchain, staged separately from
+# comgr, so comgr's own $ORIGIN rpath cannot find it at build time and the AOT
+# tool's dlopen(libamd_comgr) needs those directories on its search path.
 #
-# Derive the toolchain lib root from the compiler resource dir
-# (.../lib/llvm/lib/clang/<ver>): llvm/lib is two levels up, the toolchain lib
-# root two more, and rocm_sysdeps/lib sits beside llvm under it. Mirrors
-# TheRock's own resource-dir probe in therock_subproject_dep_provider.
+# Rather than hardcode the toolchain layout, ask CMake's runtime-dependency
+# resolver -- file(GET_RUNTIME_DEPENDENCIES), the machinery behind
+# install(RUNTIME_DEPENDENCY_SET) -- to read comgr's actual closure and forward
+# the exact directories it resolves. comgr declares amd-llvm as a RUNTIME_DEP, so
+# the toolchain (located via the compiler) is where the resolver looks; the set we
+# forward is whatever comgr genuinely pulls, and anything left unresolved is
+# reported at configure instead of failing as a runtime OSError.
 set(_ROCKE_COMGR_DEP_LIBDIRS "")
-if(NOT "${_ROCKE_COMGR_LIB}" STREQUAL "" AND CMAKE_CXX_COMPILER)
-    execute_process(
-        COMMAND "${CMAKE_CXX_COMPILER}" --print-resource-dir
-        OUTPUT_VARIABLE _ROCKE_CLANG_RESOURCE_DIR
-        OUTPUT_STRIP_TRAILING_WHITESPACE
-        RESULT_VARIABLE _ROCKE_CLANG_RD_RESULT
-    )
-    if(_ROCKE_CLANG_RD_RESULT EQUAL 0 AND _ROCKE_CLANG_RESOURCE_DIR)
-        # .../lib/llvm/lib/clang/<ver> -> .../lib/llvm/lib -> .../lib
-        get_filename_component(_ROCKE_LLVM_LIB_DIR "${_ROCKE_CLANG_RESOURCE_DIR}" DIRECTORY)
-        get_filename_component(_ROCKE_LLVM_LIB_DIR "${_ROCKE_LLVM_LIB_DIR}" DIRECTORY)
-        get_filename_component(_ROCKE_TOOLCHAIN_LIB_DIR "${_ROCKE_LLVM_LIB_DIR}" DIRECTORY)
-        get_filename_component(_ROCKE_TOOLCHAIN_LIB_DIR "${_ROCKE_TOOLCHAIN_LIB_DIR}" DIRECTORY)
-        get_filename_component(_ROCKE_LLVM_ROOT "${_ROCKE_LLVM_LIB_DIR}" DIRECTORY)
-        get_filename_component(_ROCKE_TOOLCHAIN_ROOT "${_ROCKE_TOOLCHAIN_LIB_DIR}" DIRECTORY)
-        # Probe both layouts (POSIX keeps deps in lib/, Windows beside exes in
-        # bin/) and keep whichever exist: LLVM/clang libs, vendored rocm_sysdeps,
-        # comgr-adjacent libs, and the toolchain bin.
-        foreach(_dir
-                "${_ROCKE_LLVM_LIB_DIR}"
-                "${_ROCKE_LLVM_ROOT}/bin"
-                "${_ROCKE_TOOLCHAIN_LIB_DIR}/rocm_sysdeps/lib"
-                "${_ROCKE_TOOLCHAIN_LIB_DIR}/rocm_sysdeps/bin"
-                "${_ROCKE_TOOLCHAIN_LIB_DIR}"
-                "${_ROCKE_TOOLCHAIN_ROOT}/bin")
-            if(IS_DIRECTORY "${_dir}")
-                list(APPEND _ROCKE_COMGR_DEP_LIBDIRS "${_dir}")
+if(NOT "${_ROCKE_COMGR_LIB}" STREQUAL "")
+    # Search roots for the resolver: comgr's own dir plus the amd-llvm toolchain
+    # that owns its deps, derived from the compiler. Probe both the POSIX (lib/)
+    # and Windows (bin/) layouts and keep whichever exist.
+    set(_ROCKE_COMGR_SEARCH_DIRS "")
+    get_filename_component(_ROCKE_COMGR_LIB_DIR "${_ROCKE_COMGR_LIB}" DIRECTORY)
+    list(APPEND _ROCKE_COMGR_SEARCH_DIRS "${_ROCKE_COMGR_LIB_DIR}")
+    if(CMAKE_CXX_COMPILER)
+        execute_process(
+            COMMAND "${CMAKE_CXX_COMPILER}" --print-resource-dir
+            OUTPUT_VARIABLE _ROCKE_CLANG_RESOURCE_DIR
+            OUTPUT_STRIP_TRAILING_WHITESPACE
+            RESULT_VARIABLE _ROCKE_CLANG_RD_RESULT
+        )
+        if(_ROCKE_CLANG_RD_RESULT EQUAL 0 AND _ROCKE_CLANG_RESOURCE_DIR)
+            # .../lib/llvm/lib/clang/<ver> -> .../lib/llvm/lib -> .../lib
+            get_filename_component(_ROCKE_LLVM_LIB_DIR "${_ROCKE_CLANG_RESOURCE_DIR}" DIRECTORY)
+            get_filename_component(_ROCKE_LLVM_LIB_DIR "${_ROCKE_LLVM_LIB_DIR}" DIRECTORY)
+            get_filename_component(_ROCKE_LLVM_ROOT "${_ROCKE_LLVM_LIB_DIR}" DIRECTORY)
+            get_filename_component(_ROCKE_TC_LIB_DIR "${_ROCKE_LLVM_ROOT}" DIRECTORY)
+            get_filename_component(_ROCKE_TC_ROOT "${_ROCKE_TC_LIB_DIR}" DIRECTORY)
+            foreach(_cand
+                    "${_ROCKE_LLVM_LIB_DIR}"
+                    "${_ROCKE_LLVM_ROOT}/bin"
+                    "${_ROCKE_TC_LIB_DIR}/rocm_sysdeps/lib"
+                    "${_ROCKE_TC_LIB_DIR}/rocm_sysdeps/bin"
+                    "${_ROCKE_TC_LIB_DIR}"
+                    "${_ROCKE_TC_ROOT}/bin")
+                if(IS_DIRECTORY "${_cand}")
+                    list(APPEND _ROCKE_COMGR_SEARCH_DIRS "${_cand}")
+                endif()
+            endforeach()
+        endif()
+    endif()
+    list(REMOVE_DUPLICATES _ROCKE_COMGR_SEARCH_DIRS)
+
+    # file(GET_RUNTIME_DEPENDENCIES) needs a resolver tool; outside install() its
+    # platform vars may be unset. Configure them from CMAKE_OBJDUMP when present,
+    # else skip cleanly and fall back to the search roots (never fatal).
+    set(_ROCKE_GRD_OK FALSE)
+    if(CMAKE_OBJDUMP AND EXISTS "${CMAKE_OBJDUMP}")
+        if(NOT CMAKE_GET_RUNTIME_DEPENDENCIES_PLATFORM)
+            if(WIN32)
+                set(CMAKE_GET_RUNTIME_DEPENDENCIES_PLATFORM "windows+pe")
+            elseif(APPLE)
+                set(CMAKE_GET_RUNTIME_DEPENDENCIES_PLATFORM "macos+macho")
+            else()
+                set(CMAKE_GET_RUNTIME_DEPENDENCIES_PLATFORM "linux+elf")
             endif()
+            set(CMAKE_GET_RUNTIME_DEPENDENCIES_TOOL "objdump")
+            set(CMAKE_GET_RUNTIME_DEPENDENCIES_COMMAND "${CMAKE_OBJDUMP}")
+        endif()
+        set(_ROCKE_GRD_OK TRUE)
+    endif()
+
+    if(_ROCKE_GRD_OK)
+        # POST_EXCLUDE drops OS/system libraries (already on the loader's default
+        # path); we only forward toolchain-provided dependency directories.
+        # cmake-lint: disable=E1126
+        file(GET_RUNTIME_DEPENDENCIES
+            LIBRARIES "${_ROCKE_COMGR_LIB}"
+            RESOLVED_DEPENDENCIES_VAR _ROCKE_COMGR_RESOLVED
+            UNRESOLVED_DEPENDENCIES_VAR _ROCKE_COMGR_UNRESOLVED
+            DIRECTORIES ${_ROCKE_COMGR_SEARCH_DIRS}
+            POST_EXCLUDE_REGEXES
+                "^/usr/" "^/lib/" "^/lib64/" "^/bin/"
+                "^/System/" "[Ss]ystem32"
+        )
+        foreach(_dep IN LISTS _ROCKE_COMGR_RESOLVED)
+            get_filename_component(_ROCKE_DEP_DIR "${_dep}" DIRECTORY)
+            list(APPEND _ROCKE_COMGR_DEP_LIBDIRS "${_ROCKE_DEP_DIR}")
         endforeach()
         list(REMOVE_DUPLICATES _ROCKE_COMGR_DEP_LIBDIRS)
-        if(_ROCKE_COMGR_DEP_LIBDIRS)
+        if(_ROCKE_COMGR_UNRESOLVED)
             message(STATUS
-                "rocKE AOT build: libamd_comgr dep dirs ${_ROCKE_COMGR_DEP_LIBDIRS}")
+                "rocKE AOT build: libamd_comgr deps left to the default loader "
+                "path: ${_ROCKE_COMGR_UNRESOLVED}")
         endif()
+    endif()
+
+    if(_ROCKE_COMGR_DEP_LIBDIRS)
+        message(STATUS
+            "rocKE AOT build: libamd_comgr dependency dirs (resolved) "
+            "${_ROCKE_COMGR_DEP_LIBDIRS}")
+    else()
+        # Resolver skipped or produced nothing usable: forward the toolchain
+        # search roots so the build still resolves comgr's deps.
+        set(_ROCKE_COMGR_DEP_LIBDIRS ${_ROCKE_COMGR_SEARCH_DIRS})
+        message(STATUS
+            "rocKE AOT build: runtime-dependency resolver unavailable; forwarding "
+            "toolchain search dirs ${_ROCKE_COMGR_DEP_LIBDIRS}")
     endif()
 endif()
 
