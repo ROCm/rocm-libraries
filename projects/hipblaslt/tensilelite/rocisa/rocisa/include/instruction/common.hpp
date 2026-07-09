@@ -1948,6 +1948,96 @@ namespace rocisa
         }
     };
 
+    // buffer_wbl2 sc0 sc1 emits a system-scope L2 write-back on gfx950 (CDNA4).
+    // Unlike GlobalWb (which emits `global_wb scope:...`, gfx1250 syntax not
+    // accepted by the gfx950 MC backend), this uses the sc0/sc1 bit modifier.
+    // System scope = both sc0+sc1; device scope = sc1 only. No register operands.
+    struct BufferWbl2 : public Instruction
+    {
+        CacheScope scope;
+
+        BufferWbl2(CacheScope scope = CacheScope::SCOPE_SYS, const std::string& comment = "")
+            : Instruction(InstType::INST_NOTYPE, comment)
+            , scope(scope)
+        {
+            setInst("buffer_wbl2");
+        }
+
+        BufferWbl2(const BufferWbl2& other)
+            : Instruction(other)
+            , scope(other.scope)
+        {
+        }
+
+        std::shared_ptr<Item> clone() const override
+        {
+            return std::make_shared<BufferWbl2>(*this);
+        }
+
+        std::vector<InstructionInput> getParams() const override { return {}; }
+        std::vector<InstructionInput> getDstParams() const override { return {}; }
+        std::vector<InstructionInput> getSrcParams() const override { return {}; }
+
+        std::string toString() const override
+        {
+            std::string kStr = instStr;
+            if(scope == CacheScope::SCOPE_SYS)
+            {
+                kStr += " " + getGlcBitName();  // sc0
+                kStr += " " + getSlcBitName();  // sc1
+            }
+            else if(scope == CacheScope::SCOPE_DEV)
+            {
+                kStr += " " + getSlcBitName();  // sc1 only
+            }
+            return formatWithComment(kStr);
+        }
+    };
+
+    // buffer_inv sc0 sc1 emits a system-scope L2 invalidate on gfx950 (CDNA4).
+    // Consumer-side acquire counterpart to BufferWbl2. Same scope→bit rules.
+    struct BufferInv : public Instruction
+    {
+        CacheScope scope;
+
+        BufferInv(CacheScope scope = CacheScope::SCOPE_SYS, const std::string& comment = "")
+            : Instruction(InstType::INST_NOTYPE, comment)
+            , scope(scope)
+        {
+            setInst("buffer_inv");
+        }
+
+        BufferInv(const BufferInv& other)
+            : Instruction(other)
+            , scope(other.scope)
+        {
+        }
+
+        std::shared_ptr<Item> clone() const override
+        {
+            return std::make_shared<BufferInv>(*this);
+        }
+
+        std::vector<InstructionInput> getParams() const override { return {}; }
+        std::vector<InstructionInput> getDstParams() const override { return {}; }
+        std::vector<InstructionInput> getSrcParams() const override { return {}; }
+
+        std::string toString() const override
+        {
+            std::string kStr = instStr;
+            if(scope == CacheScope::SCOPE_SYS)
+            {
+                kStr += " " + getGlcBitName();  // sc0
+                kStr += " " + getSlcBitName();  // sc1
+            }
+            else if(scope == CacheScope::SCOPE_DEV)
+            {
+                kStr += " " + getSlcBitName();  // sc1 only
+            }
+            return formatWithComment(kStr);
+        }
+    };
+
     struct SNop : public Instruction
     {
         SNop(int waitState, const std::string& comment = "")

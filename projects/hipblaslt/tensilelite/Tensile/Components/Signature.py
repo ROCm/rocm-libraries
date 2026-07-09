@@ -30,6 +30,81 @@ from ..Activation import ActivationType
 
 from dataclasses import dataclass, field
 
+# Fused GEMM.A2A kernarg segment layout (Task 5).
+#
+# When kernel["FusedGemmA2A"] is set, the Signature appends a fixed-size segment
+# of kernarg metadata at the very end of the kernarg buffer (after every GEMM /
+# store arg). These args are registered as kernarg metadata ONLY -- they are
+# deliberately NOT loaded in the prologue (no defineSgpr, not counted in
+# numSgprToLoad). The A2A fusion logic runs solely in the D-store epilogue
+# (Task 6-9), so the epilogue reads each arg on demand via
+# loadKernArg(..., sgprOffset=hex(fused_base + intra-offset), dword=...) into a
+# scratch SGPR that is freed immediately after use. A WG maps to a single
+# dst_rank, so it reads exactly one recv_ptr + one flag_ptr (via a switch on
+# dst_rank), never the whole array.
+#
+# The array slot count is a COMPILE-TIME constant (8), independent of the runtime
+# world size W; unused slots cost nothing here because nothing enters SGPR.
+FUSED_A2A_MAX_RANKS = 8
+
+# Intra-segment byte layout, in emission order. Pointers are 8 bytes
+# (SIG_GLOBALBUFFER), scalars are 4 bytes (u32). Task 6-9 add fused_base (the
+# byte offset of recv_ptr_0 in kernarg memory, exposed as
+# writer.states.fusedA2AKernArgBase) to these to get an absolute sgprOffset.
+def fusedA2AKernArgLayout():
+    """Return {argName: intra-segment byte offset} for the fused-A2A segment.
+
+    The offsets are relative to the segment base (recv_ptr_0 == 0). Order and
+    sizes MUST match the addArg() sequence in SignatureDefault.__call__:
+      recv_ptr_0..7  : 8B each  (remote recv base pointers, incl. self)
+      flag_ptr_0..7  : 8B each  (remote flag base pointers)
+      counter_ptr    : 8B       (this device's counter base)
+      FusedMyRank    : 4B (u32)
+      FusedTarget    : 4B (u32)  == M_tiles * tiles_per_rank
+      FusedW         : 4B (u32)  world size
+      FusedNShard    : 4B (u32)
+      FusedDrain     : 4B (u32)  runtime drain flag (NOT a compile-time gate)
+    """
+    layout = {}
+    off = 0
+    for j in range(FUSED_A2A_MAX_RANKS):
+        layout["recv_ptr_%u" % j] = off
+        off += 8
+    for j in range(FUSED_A2A_MAX_RANKS):
+        layout["flag_ptr_%u" % j] = off
+        off += 8
+    layout["counter_ptr"] = off
+    off += 8
+    for name in ("FusedMyRank", "FusedTarget", "FusedW", "FusedNShard", "FusedDrain"):
+        layout[name] = off
+        off += 4
+    return layout
+
+# Total bytes of the fused-A2A kernarg segment.
+FUSED_A2A_SEGMENT_BYTES = (2 * FUSED_A2A_MAX_RANKS + 1) * 8 + 5 * 4
+
+def _currentKernArgOffset(signature) -> int:
+    """Byte offset the NEXT addArg() would receive (== accumulated kernarg size).
+
+    SignatureCodeMeta accumulates a running byte offset per arg but does not
+    expose it to Python. We recover it from the already-emitted metadata: each
+    arg prints ``.size:`` and ``.offset:`` lines, so the next offset is the last
+    arg's offset + size. This keeps the fused-segment base byte-identical to
+    what Signature actually emits, with no rocisa C++ change.
+    """
+    text = str(signature)
+    lastSize = None
+    lastOffset = None
+    for line in text.splitlines():
+        s = line.strip()
+        if s.startswith(".size:"):
+            lastSize = int(s.split(":", 1)[1].strip())
+        elif s.startswith(".offset:"):
+            lastOffset = int(s.split(":", 1)[1].strip())
+    if lastOffset is None or lastSize is None:
+        return 0
+    return lastOffset + lastSize
+
 @dataclass
 class UserArgumentsInfo:
     # Common args
@@ -346,6 +421,30 @@ class SignatureDefault(Signature):
             writer.states.batchOffsetBKernArgOffset = signature.offset - commonArgsSize
             signature.addArg("batchOffsetB", SVK.SIG_VALUE, "u64")
             userArgumentsInfo.gemmArgumentSize += 32  # 4 offsets * 8 bytes each
+
+        # Fused GEMM.A2A kernarg metadata (Task 5). Registered LAST so the fused
+        # args occupy the tail of the kernarg buffer. These are metadata-only:
+        # no defineSgpr / no numSgprToLoad change -- the epilogue (Task 6-9)
+        # reads each on demand by absolute byte offset. See the module-level
+        # fusedA2AKernArgLayout() docstring for the offset contract.
+        if kernel["FusedGemmA2A"]:
+            # Byte offset of the first fused arg (recv_ptr_0) in kernarg memory,
+            # i.e. the accumulated size of every preceding kernarg. Recover it
+            # from the metadata already emitted so it matches Signature exactly.
+            fusedBase = _currentKernArgOffset(signature)
+            for j in range(FUSED_A2A_MAX_RANKS):
+                signature.addArg("recv_ptr_%u" % j, SVK.SIG_GLOBALBUFFER, "void", "generic")
+            for j in range(FUSED_A2A_MAX_RANKS):
+                signature.addArg("flag_ptr_%u" % j, SVK.SIG_GLOBALBUFFER, "void", "generic")
+            signature.addArg("counter_ptr", SVK.SIG_GLOBALBUFFER, "void", "generic")
+            signature.addArg("FusedMyRank", SVK.SIG_VALUE, "u32")
+            signature.addArg("FusedTarget", SVK.SIG_VALUE, "u32")
+            signature.addArg("FusedW",      SVK.SIG_VALUE, "u32")
+            signature.addArg("FusedNShard", SVK.SIG_VALUE, "u32")
+            signature.addArg("FusedDrain",  SVK.SIG_VALUE, "u32")
+            # Publish the segment base for the epilogue (Task 6-9). Absolute
+            # offset of arg X = fusedA2AKernArgBase + fusedA2AKernArgLayout()[X].
+            writer.states.fusedA2AKernArgBase = fusedBase
 
         activationType = ActivationType("all")
         for name in activationType.getAdditionalArgStringList():

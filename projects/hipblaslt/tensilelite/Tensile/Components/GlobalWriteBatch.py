@@ -21,10 +21,11 @@
 ################################################################################
 
 from rocisa.code import Label, Module, RegSet, TextBlock
-from rocisa.container import SMEMModifiers, VOP3PModifiers, MUBUFModifiers, \
+from rocisa.container import SMEMModifiers, VOP3PModifiers, MUBUFModifiers, GLOBALModifiers, \
   SDWAModifiers, replaceHolder, EXEC, VCC, vgpr, sgpr, ContinuousRegister, mgpr
-from rocisa.enum import CvtType, HighBitSel, RoundType, SaturateCastType, SelectBit
-from rocisa.instruction import BufferAtomicAddF32, BufferAtomicCmpswapB32, \
+from rocisa.enum import CvtType, HighBitSel, RoundType, SaturateCastType, SelectBit, CacheScope
+from rocisa.instruction import BufferAtomicAddF32, BufferAtomicCmpswapB32, BufferWbl2, \
+  GlobalAtomicAddU32, GlobalLoadB32, GlobalStoreB32, \
   BufferAtomicCmpswapB64, BufferStoreB16, BufferStoreB32, BufferStoreB64, BufferStoreB128, DSBPermuteB32, FlatAtomicCmpswapB32, \
   SAddCU32, SAddU32, SAndB32, \
   SAndB64, SAtomicDec, SBarrier, SBranch, SCBranchExecNZ, SCBranchExecZ, \
@@ -37,7 +38,7 @@ from rocisa.instruction import BufferAtomicAddF32, BufferAtomicCmpswapB32, \
   VCvtFP8toF32, VCvtI32toF32, VCvtPkBF8toF32, VCvtPkF32toBF16, VCvtPkF32toFP16, VCvtPkFP8toF32, \
   VFmaF32, VFmaF64, VFmaPKF32, VFmaMixF32, VAndB32, VLShiftLeftB32, VPermlane16SwapB32, VPermlane32SwapB32, \
   VLShiftRightB32, VMacF32, VMadMixF32, VMaxF32, VMovB32, VMovB64, VMulF32, VMulF64, \
-  VMulLOU32, VMulPKF16, VMulPKF32, VPackF16toB32, VReadfirstlaneB32, VRndneF32, VCvtBF16toFP32
+  VMulLOU32, VMulPKF16, VMulPKF32, VPackF16toB32, VReadfirstlaneB32, VRndneF32, VCvtBF16toFP32, VSubU32
 from rocisa.functions import vectorStaticMultiply
 
 from ..Common import DataDirection, SemanticVersion, isSubtileMultiDU
@@ -51,6 +52,9 @@ from ..AsmAddressCalculation import AddrCalculation
 from ..Components.PackData import formatting, PackData_F16, PackData_BF16, PackData_FLOAT8, PackData_FLOAT8_fnuz
 from rocisa.instruction import ECvtF16toF32, ECvtPkFP8toF32, ECvtPkBF8toF32
 from ..KernelWriterModules import hasSequentialValuC
+# NOTE: fusedA2AKernArgLayout / FUSED_A2A_MAX_RANKS are imported lazily inside the
+# fused-A2A methods (from .Signature) to avoid a circular import at module load time
+# (Component.py does `from .Components import *`, which re-enters this module).
 
 from math import ceil, log2
 
@@ -359,6 +363,14 @@ class GlobalWriteBatchWriter:
     if isMultiDU:
       self._emitAdd(module)
     self._epilog(module)
+    # fused-A2A cross-card handshake (design spec section 2.3): emitted ONCE per
+    # store path, at the LAST batch, after all PUSH stores of this WG are issued.
+    # A WG computes its whole tile across all batches, so "after the tile is done"
+    # == after the last batch. The tail is runtime-gated to PUSH WGs and elects a
+    # single last WG per dst_rank to release (wbl2 + system flag). See
+    # _emitFusedA2AHandshake.
+    if self.kernel["FusedGemmA2A"] and self.batchIdx == self.numBatches - 1:
+      self._emitFusedA2AHandshake(module)
     # CompactLoopStore CLS countdown tail: emit countdown + branch + s_endpgm at
     # END of the CLS-loop body (= last batch of batchesPerCLSBody). Gated by
     # CompactLoopStore so non-CLS .s matches baseline (no CLS tail emit).
@@ -2183,16 +2195,19 @@ class GlobalWriteBatchWriter:
                 storeCodeModule.add(SCBranchSCC0(labelName=fallbackLabel.getLabelName(),
                                                  comment=f"only d0={tt0-1} valid -> scalar fallback"))
                 tmpStoreCode = self._emit16bitSubtilePairedStore(partnerAddrCalc, sumIdx0, sumIdx1, prefixOffset, tt0 - 1, blockIdxM=blockIdxM, blockIdxN=blockIdxN)
-                storeCodeModule.add(tmpStoreCode)
+                self._addSubtileStore(storeCodeModule, blockIdxN, tmpStoreCode,
+                                      self._fusedA2APushBuilder([partnerElementIdx, elementIdx]))
                 storeCodeModule.add(SBranch(labelName=afterPairedLabel.getLabelName(),
                                             comment="skip scalar fallback"))
                 storeCodeModule.add(fallbackLabel)
                 tmpFallbackCode = self._emit16bitSubtileScalarStore(partnerAddrCalc, sumIdx0, prefixOffset, tt0 - 1, blockIdxM=blockIdxM, blockIdxN=blockIdxN)
-                storeCodeModule.add(tmpFallbackCode)
+                self._addSubtileStore(storeCodeModule, blockIdxN, tmpFallbackCode,
+                                      self._fusedA2APushBuilder([partnerElementIdx]))
                 storeCodeModule.add(afterPairedLabel)
               else:
                 tmpStoreCode = self._emit16bitSubtilePairedStore(partnerAddrCalc, sumIdx0, sumIdx1, prefixOffset, tt0 - 1, blockIdxM=blockIdxM, blockIdxN=blockIdxN)
-                storeCodeModule.add(tmpStoreCode)
+                self._addSubtileStore(storeCodeModule, blockIdxN, tmpStoreCode,
+                                      self._fusedA2APushBuilder([partnerElementIdx, elementIdx]))
               if skipLabel is not None:
                 storeCodeModule.add(skipLabel)
               self.storesIssued += 1
@@ -2205,7 +2220,8 @@ class GlobalWriteBatchWriter:
               sumIdx0 = self.ss.elementSumIdx[elementIdx]
               prefixOffset = self.parentWriter.states.c.startVgprValu
               tmpStoreCode = self._emit16bitSubtileScalarStore(addrCalc, sumIdx0, prefixOffset, tt0, blockIdxM=blockIdxM, blockIdxN=blockIdxN)
-              storeCodeModule.add(tmpStoreCode)
+              self._addSubtileStore(storeCodeModule, blockIdxN, tmpStoreCode,
+                                    self._fusedA2APushBuilder([elementIdx]))
               if orphanSkipLabel is not None:
                 storeCodeModule.add(orphanSkipLabel)
               self.storesIssued += 1
@@ -2227,7 +2243,8 @@ class GlobalWriteBatchWriter:
               sumIdx0 = self.ss.elementSumIdx[elementIdx]
               prefixOffset = self.parentWriter.states.c.startVgprValu
               tmpStoreCode = self._emit16bitSubtileScalarStore(addrCalc, sumIdx0, prefixOffset, tt0, blockIdxM=blockIdxM, blockIdxN=blockIdxN)
-              storeCodeModule.add(tmpStoreCode)
+              self._addSubtileStore(storeCodeModule, blockIdxN, tmpStoreCode,
+                                    self._fusedA2APushBuilder([elementIdx]))
               if orphanSkipLabel is not None:
                 storeCodeModule.add(orphanSkipLabel)
               self.storesIssued += 1
@@ -2253,6 +2270,7 @@ class GlobalWriteBatchWriter:
                                      mGuardOffset=1, rowScaleShift=rowScaleShift)
             storeCodeModule.add(self.getEdgeMovInstType()(EXEC(), sgpr(self.tmpS01, self.laneSGPRC), "apply exec mask"))
           # _emitOverrideRows reused from the top of this store loop (see _lookaheadRowInc).
+          # TODO Task 7: also route regular/TD store paths through _fusedA2ADispatch.
           tmpStoreCode = self.parentWriter.addStore(self.kernel, self.ss, 'D', addrCalc, sumIdx, self.tmpS01, self.edge, elementIdx, self.batchIdx,
                                                    overrideAfterPrimerRows=_emitOverrideRows, comment="store D")
           storeCodeModule.add(tmpStoreCode)
@@ -2401,6 +2419,643 @@ class GlobalWriteBatchWriter:
     module.add(VPermlane32SwapB32(dst=vgpr(vPack+1), src=vgpr(vPack+3), comment="swap dwords 1↔3"))
 
     return module
+
+  # N-tile threshold splitting PUSH (all-to-all) columns from locally-owned columns.
+  _FUSED_A2A_AN_TILES = 40
+
+  def _addSubtileStore(self, targetModule, blockIdxN: int, storeModule: Module, pushBuilder=None):
+    """Add a 16bit subtile store, routing through the fused-A2A dispatch when enabled.
+
+    When FusedGemmA2A is off the store Module is added verbatim (output byte-identical
+    to the non-fused path); when on, a RUNTIME dispatch on WorkGroup1 (the owning N-tile)
+    decides between the local D store (storeModule) and the remote all-to-all PUSH store
+    (built by pushBuilder).
+
+    pushBuilder: optional zero-arg callable returning a Module that stores this element
+                 to the remote recv[W,M,n_shard] layout.  Required for the PUSH branch;
+                 when None the local storeModule is used for both branches (skeleton).
+    """
+    if self.kernel["FusedGemmA2A"]:
+      self._fusedA2ADispatch(targetModule, blockIdxN, storeModule, pushBuilder)
+    else:
+      targetModule.add(storeModule)
+
+  def _fusedA2APushBuilder(self, elementIdxList):
+    """Return a zero-arg callable building the PUSH store for the given store elements.
+
+    elementIdxList: the element indices whose (sumIdx, coordOffset0, coordOffset1) form the
+                    subtile M-blocks packed into this store (1 for scalar/orphan, 2 for paired).
+    Returns None when FusedGemmA2A is off so callers can pass it unconditionally.
+    """
+    if not self.kernel["FusedGemmA2A"]:
+      return None
+    groups = [(self.ss.elementSumIdx[ei], self.ss.elementCoord0[ei], self.ss.elementCoord1[ei])
+              for ei in elementIdxList]
+    return lambda: self._emitFusedA2APushStore(groups)
+
+  def _fusedA2ADispatch(self, targetModule, blockIdxN: int, storeModule: Module, pushBuilder=None):
+    """Route a D-store by owning N-tile for FusedGemmA2A (RUNTIME decision).
+
+    A workgroup owns one MacroTile1-wide N column-block, identified at RUNTIME by
+    WorkGroup1 (the global N-tile index).  Workgroups whose N-tile is in the first AN
+    columns (WorkGroup1 < _FUSED_A2A_AN_TILES) are the all-to-all "PUSH" workgroups:
+    their output is redirected to the remote recv[W,M,n_shard] buffer (built by
+    pushBuilder) instead of the local D output.  Workgroups at/above are locally owned
+    and use the regular local store.
+
+    Both code paths are emitted and guarded by a runtime SCC compare/branch on
+    WorkGroup1 vs _FUSED_A2A_AN_TILES, so each WG executes exactly one path at run time.
+    (blockIdxN = element[0] is only the N wave-block WITHIN a macro-tile (0..15) and must
+    NOT gate this decision; the owning N-tile is a per-WG runtime value in WorkGroup1.)
+    _FUSED_A2A_AN_TILES is a hardcoded constant for now; deriving it from a real problem
+    parameter is a separate follow-up.
+
+    When pushBuilder is None (dispatch-only skeleton) the PUSH branch falls back to the
+    local store so GEMM numerics stay intact.
+    """
+    kw = self.parentWriter
+    localLabel = Label(kw.labels.getNameInc("fusedA2A_dispatch_local"),
+                       f"fused-A2A: WorkGroup1 >= {self._FUSED_A2A_AN_TILES} -> local store")
+    afterLabel = Label(kw.labels.getNameInc("fusedA2A_dispatch_after"),
+                       "fused-A2A: after PUSH/local dispatch")
+    # Runtime gate: PUSH when WorkGroup1 < AN_tiles, else local store.
+    tmpS = kw.sgprPool.checkOut(1, tag="fusedA2A_dispatchGate", preventOverflow=False)
+    targetModule.addComment0(f"fused-A2A dispatch: runtime gate WorkGroup1 < {self._FUSED_A2A_AN_TILES} ? PUSH : local")
+    targetModule.add(SMovB32(dst=sgpr(tmpS), src=self._FUSED_A2A_AN_TILES,
+                             comment=f"AN_tiles = {self._FUSED_A2A_AN_TILES}"))
+    targetModule.add(SCmpGtU32(src0=sgpr(tmpS), src1=sgpr("WorkGroup1"),
+                               comment=f"AN_tiles > WorkGroup1? (this WG's N-tile in PUSH region)"))
+    targetModule.add(SCBranchSCC0(labelName=localLabel.getLabelName(),
+                                  comment="WorkGroup1 >= AN_tiles -> local store"))
+    kw.sgprPool.checkIn(tmpS)
+    # PUSH branch (WorkGroup1 < AN_tiles): remote all-to-all store.
+    targetModule.addComment0("fused-A2A dispatch: PUSH branch (remote recv[W,M,n_shard])")
+    if pushBuilder is not None:
+      targetModule.add(pushBuilder())
+    else:
+      targetModule.add(storeModule)
+    targetModule.add(SBranch(labelName=afterLabel.getLabelName(), comment="skip local store"))
+    # Local branch (WorkGroup1 >= AN_tiles): regular local D store.
+    targetModule.add(localLabel)
+    targetModule.addComment0("fused-A2A dispatch: local branch (local D store)")
+    targetModule.add(storeModule)
+    targetModule.add(afterLabel)
+
+  def _fusedA2ALoadRecvBase(self, module, recvBaseSgpr, shardBaseSgpr, nShardSgpr, tmpSgpr):
+    """Switch-load recv_ptr[dst_rank] into recvBaseSgpr and dst_rank*n_shard into shardBaseSgpr.
+
+    recv_ptr[dst_rank] is NOT in an SGPR (Task 5 registered it as kernarg metadata only),
+    so per the Task 5 contract this reads exactly one recv base pointer on demand via a
+    switch over the compile-time-constant kernarg slots.  dst_rank is a per-WG runtime
+    constant: since n_shard is a multiple of MacroTile1 (design guarantees (AN/W)%256==0),
+    every 256-column macro-tile lies entirely within one destination rank's shard, so
+    dst_rank = (WorkGroup1 * MacroTile1) / n_shard is the same for all lanes in the WG.
+
+    Rather than divide by the runtime n_shard, the switch scans candidate ranks j
+    (0..MAX-1): rank j is the destination when this WG's first N column
+    (n_col_base_wg = WorkGroup1*MT1) is >= j*n_shard.  Ranks are contiguous, so the
+    HIGHEST matching j wins; the forward scan keeps overwriting recvBase/shardBase with
+    each qualifying rank.  Ranks j >= FusedW never qualify (n_col_base_wg < AN = W*n_shard),
+    so unused slots are harmless even though all MAX slots are visited at compile time.
+
+    Args:
+      module:        Module to append instructions to.
+      recvBaseSgpr:  2-SGPR pair (aligned) to receive recv_ptr[dst_rank].
+      shardBaseSgpr: 1 SGPR to receive dst_rank*n_shard (element units).
+      nShardSgpr:    1 SGPR pre-loaded with FusedNShard (n_shard, element units).
+      tmpSgpr:       2 scratch SGPRs; tmpSgpr+0 holds n_col_base_wg, tmpSgpr+1 shard_lo.
+    """
+    from .Signature import fusedA2AKernArgLayout, FUSED_A2A_MAX_RANKS
+    layout = fusedA2AKernArgLayout()
+    fusedBase = self.parentWriter.states.fusedA2AKernArgBase
+
+    # n_col_base_wg = WorkGroup1 * MacroTile1  (this WG's first output N column).
+    module.add(SMulI32(dst=sgpr(tmpSgpr), src0=sgpr("WorkGroup1"), src1=self.kernel["MacroTile1"],
+                       comment="n_col_base_wg = WorkGroup1 * MT1"))
+
+    # Rank 0 default: recv base = recv_ptr_0, shard_base = 0 (winner unless a higher rank matches).
+    module.add(self.parentWriter.argLoader.loadKernArg(recvBaseSgpr, "KernArgAddress",
+      sgprOffset=hex(fusedBase + layout["recv_ptr_0"]), dword=2))
+    module.add(SMovB32(dst=sgpr(shardBaseSgpr), src=0, comment="shard_base = 0 (rank 0)"))
+
+    for j in range(1, FUSED_A2A_MAX_RANKS):
+      skipLabel = Label(self.parentWriter.labels.getNameInc("fusedA2A_recv_skip%u" % j),
+                        f"n_col_base_wg below rank {j}")
+      # shard_lo = j * n_shard; if n_col_base_wg < shard_lo this rank (and all higher) lose.
+      module.add(SMulI32(dst=sgpr(tmpSgpr + 1), src0=sgpr(nShardSgpr), src1=j,
+                         comment=f"cand shard_lo = {j} * n_shard"))
+      module.add(SCmpGtU32(src0=sgpr(tmpSgpr + 1), src1=sgpr(tmpSgpr),
+                           comment=f"shard_lo > n_col_base_wg? (WG below rank {j})"))
+      module.add(SCBranchSCC1(labelName=skipLabel.getLabelName(),
+                              comment=f"below rank {j}: keep current winner"))
+      # Rank j qualifies (highest so far): overwrite winner recv base + shard_base.
+      module.add(self.parentWriter.argLoader.loadKernArg(recvBaseSgpr, "KernArgAddress",
+        sgprOffset=hex(fusedBase + layout["recv_ptr_%u" % j]), dword=2))
+      module.add(SMovB32(dst=sgpr(shardBaseSgpr), src=sgpr(tmpSgpr + 1),
+                         comment=f"shard_base = {j} * n_shard"))
+      module.add(skipLabel)
+    module.add(SWaitCnt(kmcnt=0, comment="wait recv_ptr[dst_rank] load"))
+
+  # Number of consecutive M-rows a lane owns per subtile output group (MFMA vector width).
+  _FUSED_A2A_MROWS = 4
+
+  def _emitFusedA2APushStore(self, groups) -> Module:
+    """Emit the remote all-to-all PUSH store for one subtile store element.
+
+    Redirects the PUSH-column output from the local D buffer (column-major [M, GN], M
+    contiguous) to the remote recv buffer laid out row-major [W, M, n_shard] (n_shard
+    contiguous) -- the byte-identical layout the baseline all_to_all produces on the
+    destination rank (design spec section 1 / section 3.3 repack rule
+    out[:, :AN].view(M, W, n_shard).transpose -> [W, M, n_shard]).
+
+    recv element offset (elements, before *bpe), on destination card recv_ptr[dst_rank]:
+        my_rank * (M * n_shard)      slot for the source rank (recv[my_rank])
+      + m_global * n_shard           row within the slot
+      + n_local                      column within the shard, n_local = n_global - dst_rank*n_shard
+    where dst_rank = n_global // n_shard (per-WG constant), m/n_global are per-lane.
+
+    Because recv is transposed relative to D (M is the slow/strided dim here, not the fast
+    dim), the lane's 4 consecutive M-rows are n_shard*bpe apart -- so this emits one
+    buffer_store_b16 per M-row (a scatter) rather than the contiguous dwordx2 the local
+    store uses.
+
+    Device scope only (plain buffer_store): this validates the L2 layout.  The
+    system-scope fence + counter/flag handshake are deferred to Task 8.
+
+    Args:
+      groups: list of (sumIdx, coordOffset0, coordOffset1) tuples, one per subtile M-block
+              packed into this store (1 for a scalar/orphan element, 2 for a paired element).
+              coordOffset0/1 are the compile-time element M/N offsets from coord0/coord1.
+    """
+    kw = self.parentWriter
+    module = Module("fusedA2APushStore")
+    isFp16 = self.kernel["ProblemType"]["DestDataType"].isHalf()
+    VCvtPkF32to16 = VCvtPkF32toFP16 if isFp16 else VCvtPkF32toBF16
+    typeStr = "fp16" if isFp16 else "bf16"
+    bpe = kw.states.bpeCexternalGSU1  # 16bit dest == 2
+    prefixOffset = kw.states.c.startVgprValu
+
+    ntd = self.kernel["NonTemporalD"]
+    isGlc = bool(ntd & 0x1)
+    isSlc = bool(ntd & 0x2)
+    isNT  = bool(ntd & 0x4)
+
+    module.addComment1(f"fused-A2A PUSH store -> recv[W,M,n_shard] ({typeStr}, device scope)")
+
+    # --- kernarg reads (on demand, per Task 5 contract): my_rank + n_shard ---
+    myRankSgpr = kw.sgprPool.checkOut(1, tag="fusedA2A_myRank", preventOverflow=False)
+    nShardSgpr = kw.sgprPool.checkOut(1, tag="fusedA2A_nShard", preventOverflow=False)
+    from .Signature import fusedA2AKernArgLayout
+    layout = fusedA2AKernArgLayout()
+    fusedBase = kw.states.fusedA2AKernArgBase
+    module.add(kw.argLoader.loadKernArg(myRankSgpr, "KernArgAddress",
+      sgprOffset=hex(fusedBase + layout["FusedMyRank"]), dword=1))
+    module.add(kw.argLoader.loadKernArg(nShardSgpr, "KernArgAddress",
+      sgprOffset=hex(fusedBase + layout["FusedNShard"]), dword=1))
+    module.add(SWaitCnt(kmcnt=0, comment="wait FusedMyRank / FusedNShard"))
+
+    # --- switch-load recv_ptr[dst_rank] + shard_base (dst_rank*n_shard) ---
+    recvSrd = kw.sgprPool.checkOutAligned(4, 4, tag="fusedA2A_recvSrd", preventOverflow=False)
+    shardBaseSgpr = kw.sgprPool.checkOut(1, tag="fusedA2A_shardBase", preventOverflow=False)
+    tmpSgpr2 = kw.sgprPool.checkOut(2, tag="fusedA2A_recvSwitchTmp", preventOverflow=False)
+    # recv base pointer lands in recvSrd+0/+1 (SRD base words).
+    self._fusedA2ALoadRecvBase(module, recvSrd, shardBaseSgpr, nShardSgpr, tmpSgpr2)
+
+    # slotElem = my_rank * M * n_shard  (recv[my_rank] slot base, in elements).
+    slotSgpr = kw.sgprPool.checkOut(1, tag="fusedA2A_slot", preventOverflow=False)
+    module.add(SMulI32(dst=sgpr(slotSgpr), src0=sgpr(myRankSgpr), src1=sgpr("SizeI"),
+                       comment="my_rank * M"))
+    module.add(SMulI32(dst=sgpr(slotSgpr), src0=sgpr(slotSgpr), src1=sgpr(nShardSgpr),
+                       comment="slotElem = my_rank * M * n_shard"))
+
+    # Finish the recv SRD: limit word (BufferOOB) + config word (Srd127_96).
+    module.add(SMovB32(dst=sgpr(recvSrd + 2), src="BufferOOB", comment="recv SRD num_records"))
+    module.add(SMovB32(dst=sgpr(recvSrd + 3), src="Srd127_96", comment="recv SRD config"))
+
+    # --- per-lane address VGPRs ---
+    # nShardBpe (per M-row byte step) into a VGPR for the scatter.
+    vRecvAddr  = kw.vgprPool.checkOut(1, tag="fusedA2A_recvAddr")
+    vNLocal    = kw.vgprPool.checkOut(1, tag="fusedA2A_nLocal")
+    vTmp       = kw.vgprPool.checkOut(1, tag="fusedA2A_tmp")
+    vPack      = kw.vgprPool.checkOut(2, tag="fusedA2A_pack")  # 2 dwords = 4 16bit values
+    vNShardBpe = kw.vgprPool.checkOut(1, tag="fusedA2A_nShardBpe")
+
+    coord0 = kw.vgprs.coord0
+    coord1 = kw.vgprs.coord1
+
+    # nShardBpe = n_shard * bpe  (byte stride between adjacent M-rows in recv).
+    module.add(SMulI32(dst=sgpr(tmpSgpr2), src0=sgpr(nShardSgpr), src1=bpe,
+                       comment="n_shard * bpe (M-row byte stride)"))
+    module.add(VMovB32(dst=vgpr(vNShardBpe), src=sgpr(tmpSgpr2), comment="n_shard*bpe -> vgpr"))
+
+    def vc(sumIdx, vi):
+      idx = sumIdx + vi - prefixOffset
+      return vgpr("ValuC+" + str(idx))
+
+    for (sumIdx, coordOffset0, coordOffset1) in groups:
+      module.addComment1(f"PUSH group coordOff0={coordOffset0} coordOff1={coordOffset1}: pack 4 M-rows, scatter b16")
+      # Pack the 4 f32 accumulators (this lane's 4 M-rows at fixed N-col) into 2 dwords.
+      module.add(VCvtPkF32to16(dst=vgpr(vPack + 0), src0=vc(sumIdx, 0), src1=vc(sumIdx, 1),
+                               comment=f"M-row+0/+1 -> {typeStr}"))
+      module.add(VCvtPkF32to16(dst=vgpr(vPack + 1), src0=vc(sumIdx, 2), src1=vc(sumIdx, 3),
+                               comment=f"M-row+2/+3 -> {typeStr}"))
+      module.add(SNop(waitState=0, comment=f"delay after pk_{typeStr}"))
+
+      # n_local = coord1 + coordOffset1 - shard_base   (per-lane N within the shard).
+      # coordOffset0/1 are compile-time ints; move to an SGPR first because v_add_u32
+      # rejects large inline literals on gfx950 (tmpSgpr2 is free after the recv switch).
+      if coordOffset1:
+        module.add(SMovB32(dst=sgpr(tmpSgpr2), src=coordOffset1, comment=f"coordOffset1={coordOffset1}"))
+        module.add(VAddU32(dst=vgpr(vNLocal), src0=vgpr(coord1), src1=sgpr(tmpSgpr2),
+                           comment=f"n_global = coord1 + {coordOffset1}"))
+        module.add(VSubU32(dst=vgpr(vNLocal), src0=vgpr(vNLocal), src1=sgpr(shardBaseSgpr),
+                           comment="n_local = n_global - shard_base"))
+      else:
+        module.add(VSubU32(dst=vgpr(vNLocal), src0=vgpr(coord1), src1=sgpr(shardBaseSgpr),
+                           comment="n_local = coord1 - shard_base"))
+
+      # m_base = coord0 + coordOffset0  (per-lane global M row of the group's first value).
+      # recvElemBase = (slotElem + m_base * n_shard) + n_local
+      #             --> byte = recvElemBase * bpe
+      if coordOffset0:
+        module.add(SMovB32(dst=sgpr(tmpSgpr2), src=coordOffset0, comment=f"coordOffset0={coordOffset0}"))
+        module.add(VAddU32(dst=vgpr(vTmp), src0=vgpr(coord0), src1=sgpr(tmpSgpr2),
+                           comment=f"m_base = coord0 + {coordOffset0}"))
+        module.add(VMulLOU32(dst=vgpr(vTmp), src0=vgpr(vTmp), src1=sgpr(nShardSgpr),
+                             comment="m_base * n_shard"))
+      else:
+        module.add(VMulLOU32(dst=vgpr(vTmp), src0=vgpr(coord0), src1=sgpr(nShardSgpr),
+                             comment="m_base * n_shard"))
+      module.add(VAddU32(dst=vgpr(vTmp), src0=vgpr(vTmp), src1=sgpr(slotSgpr),
+                         comment="+ slotElem (my_rank*M*n_shard)"))
+      module.add(VAddU32(dst=vgpr(vRecvAddr), src0=vgpr(vTmp), src1=vgpr(vNLocal),
+                         comment="recvElemBase = slot + m_base*n_shard + n_local"))
+      module.add(VLShiftLeftB32(dst=vgpr(vRecvAddr), shiftHex=int(log2(bpe)), src=vgpr(vRecvAddr),
+                                comment="recv byte offset = recvElemBase * bpe"))
+
+      # Scatter: one buffer_store_b16 per M-row (rows are n_shard*bpe apart in recv).
+      for row in range(self._FUSED_A2A_MROWS):
+        # 16bit value for this row: lo/hi of vPack dword row//2.
+        srcVgpr = vPack + (row // 2)
+        # Extract the correct 16bit half into vTmp when row is odd (hi half).
+        if row % 2 == 1:
+          module.add(VLShiftRightB32(dst=vgpr(vTmp), shiftHex=16, src=vgpr(srcVgpr),
+                                     comment=f"M-row+{row}: hi 16bit -> lo"))
+          storeSrc = vTmp
+        else:
+          storeSrc = srcVgpr
+        module.add(BufferStoreB16(
+          src=vgpr(storeSrc),
+          vaddr=vgpr(vRecvAddr),
+          saddr=sgpr(recvSrd, 4),
+          soffset=0,
+          mubuf=MUBUFModifiers(offen=True, offset12=0, glc=isGlc, slc=isSlc, nt=isNT),
+          comment=f"recv scatter M-row+{row} (device scope)"))
+        if row != self._FUSED_A2A_MROWS - 1:
+          module.add(VAddU32(dst=vgpr(vRecvAddr), src0=vgpr(vRecvAddr), src1=vgpr(vNShardBpe),
+                             comment="advance recv addr by n_shard*bpe (next M-row)"))
+
+    module.add(SNop(waitState=0, comment="WAR: latch store src before next batch overwrites pack"))
+
+    # Release temporaries.
+    kw.vgprPool.checkIn(vNShardBpe)
+    kw.vgprPool.checkIn(vPack)
+    kw.vgprPool.checkIn(vTmp)
+    kw.vgprPool.checkIn(vNLocal)
+    kw.vgprPool.checkIn(vRecvAddr)
+    kw.sgprPool.checkIn(slotSgpr)
+    kw.sgprPool.checkIn(tmpSgpr2)
+    kw.sgprPool.checkIn(shardBaseSgpr)
+    kw.sgprPool.checkIn(recvSrd)
+    kw.sgprPool.checkIn(nShardSgpr)
+    kw.sgprPool.checkIn(myRankSgpr)
+    return module
+
+  def _fusedA2ALoadFlagBaseAndRank(self, module, flagBaseSgpr, dstRankSgpr, nShardSgpr, tmpSgpr):
+    """Switch-load flag_ptr[dst_rank] into flagBaseSgpr and the integer dst_rank into dstRankSgpr.
+
+    Same highest-matching-rank scan as _fusedA2ALoadRecvBase (dst_rank is the
+    largest j with j*n_shard <= n_col_base_wg = WorkGroup1*MT1), but captures the
+    numeric dst_rank (for counter[dst_rank]) and reads flag_ptr[dst_rank] (Task 5
+    kernarg metadata, not in prologue SGPR).
+
+    Args:
+      module:       Module to append instructions to.
+      flagBaseSgpr: 2-SGPR pair (aligned) to receive flag_ptr[dst_rank].
+      dstRankSgpr:  1 SGPR to receive dst_rank (integer rank index).
+      nShardSgpr:   1 SGPR pre-loaded with FusedNShard (n_shard, element units).
+      tmpSgpr:      2 scratch SGPRs; tmpSgpr+0 holds n_col_base_wg, tmpSgpr+1 shard_lo.
+    """
+    from .Signature import fusedA2AKernArgLayout, FUSED_A2A_MAX_RANKS
+    layout = fusedA2AKernArgLayout()
+    fusedBase = self.parentWriter.states.fusedA2AKernArgBase
+
+    # n_col_base_wg = WorkGroup1 * MacroTile1 (this WG's first output N column).
+    module.add(SMulI32(dst=sgpr(tmpSgpr), src0=sgpr("WorkGroup1"), src1=self.kernel["MacroTile1"],
+                       comment="n_col_base_wg = WorkGroup1 * MT1"))
+
+    # Rank 0 default: flag base = flag_ptr_0, dst_rank = 0 (winner unless higher rank matches).
+    module.add(self.parentWriter.argLoader.loadKernArg(flagBaseSgpr, "KernArgAddress",
+      sgprOffset=hex(fusedBase + layout["flag_ptr_0"]), dword=2))
+    module.add(SMovB32(dst=sgpr(dstRankSgpr), src=0, comment="dst_rank = 0 (default)"))
+
+    for j in range(1, FUSED_A2A_MAX_RANKS):
+      skipLabel = Label(self.parentWriter.labels.getNameInc("fusedA2A_flag_skip%u" % j),
+                        f"n_col_base_wg below rank {j}")
+      module.add(SMulI32(dst=sgpr(tmpSgpr + 1), src0=sgpr(nShardSgpr), src1=j,
+                         comment=f"cand shard_lo = {j} * n_shard"))
+      module.add(SCmpGtU32(src0=sgpr(tmpSgpr + 1), src1=sgpr(tmpSgpr),
+                           comment=f"shard_lo > n_col_base_wg? (WG below rank {j})"))
+      module.add(SCBranchSCC1(labelName=skipLabel.getLabelName(),
+                              comment=f"below rank {j}: keep current winner"))
+      module.add(self.parentWriter.argLoader.loadKernArg(flagBaseSgpr, "KernArgAddress",
+        sgprOffset=hex(fusedBase + layout["flag_ptr_%u" % j]), dword=2))
+      module.add(SMovB32(dst=sgpr(dstRankSgpr), src=j, comment=f"dst_rank = {j}"))
+      module.add(skipLabel)
+    module.add(SWaitCnt(kmcnt=0, comment="wait flag_ptr[dst_rank] load"))
+
+  def _fusedA2ALoadFlagBaseByRank(self, module, flagBaseSgpr, rankSgpr):
+    """Switch-load flag_ptr[rankSgpr] into flagBaseSgpr, selecting on a runtime rank SGPR.
+
+    Sibling of _fusedA2ALoadFlagBaseAndRank, but the rank is an explicit runtime value
+    (used by DRAIN: the elected last WG polls THIS card's own flag buffer flag_ptr[my_rank]).
+    flag_ptr[j] is kernarg metadata only (Task 5), so this reads exactly one flag base on
+    demand via a compile-time switch: rank 0 is the default; for each candidate j the load
+    fires only when rankSgpr == j.  Slots j >= FusedW are never selected at run time.
+
+    Args:
+      module:       Module to append instructions to.
+      flagBaseSgpr: 2-SGPR pair (aligned) to receive flag_ptr[rankSgpr].
+      rankSgpr:     1 SGPR holding the rank index to select.
+    """
+    from .Signature import fusedA2AKernArgLayout, FUSED_A2A_MAX_RANKS
+    layout = fusedA2AKernArgLayout()
+    fusedBase = self.parentWriter.states.fusedA2AKernArgBase
+
+    # Rank 0 default: flag base = flag_ptr_0 (overwritten if rankSgpr matches a higher rank).
+    module.add(self.parentWriter.argLoader.loadKernArg(flagBaseSgpr, "KernArgAddress",
+      sgprOffset=hex(fusedBase + layout["flag_ptr_0"]), dword=2))
+
+    for j in range(1, FUSED_A2A_MAX_RANKS):
+      skipLabel = Label(self.parentWriter.labels.getNameInc("fusedA2A_selfflag_skip%u" % j),
+                        f"rank != {j}")
+      module.add(SCmpEQU32(src0=sgpr(rankSgpr), src1=j,
+                           comment=f"rank == {j}?"))
+      module.add(SCBranchSCC0(labelName=skipLabel.getLabelName(),
+                              comment=f"rank != {j}: keep current base"))
+      module.add(self.parentWriter.argLoader.loadKernArg(flagBaseSgpr, "KernArgAddress",
+        sgprOffset=hex(fusedBase + layout["flag_ptr_%u" % j]), dword=2))
+      module.add(skipLabel)
+    module.add(SWaitCnt(kmcnt=0, comment="wait flag_ptr[my_rank] load"))
+
+  # READY value written into the destination card's flag slot (design spec 2.3).
+  _FUSED_A2A_FLAG_READY = 1
+
+  def _emitFusedA2AHandshake(self, module: Module):
+    """Emit the cross-card handshake for PUSH workgroups (design spec section 2.3).
+
+    Runs ONCE per WG (last batch of the store path), gated at RUNTIME to PUSH WGs
+    (WorkGroup1 < AN_tiles, same gate as the PUSH store dispatch).  Sequence, per
+    the design spec 2.3 timing (rank_0 supplying rank_1 example):
+      (1) s_waitcnt vscnt(0)         -- this WG's scatter stores reached L2 before
+                                        it decrements the counter (correctness key:
+                                        else the elected last WG wbl2's incomplete data).
+      (2) s_barrier + wave-0 gate    -- the counter atomic + election fire ONCE per WG,
+                                        not per lane (StreamK single-writer blueprint).
+      (3) old = atomic_add(counter[dst_rank], 1)   device scope, RETURN pre-op (sc0).
+      (4) if old+1 != FusedTarget -> not the last WG -> skip the release.
+      (5) elected last WG: buffer_wbl2 sc0 sc1 (flush this card's data for dst_rank
+          across xGMI) + s_waitcnt vscnt(0) (wait wbl2) + store flag_ptr[dst_rank]
+          [my_rank] = READY  system scope (sc0 sc1).
+
+    Only the elected last WG does wbl2+flag, so there are exactly W wbl2 and W flag
+    writes per card (granularity aligned, spec 2.3).  DRAIN-side poll (self flag) and
+    the consumer-side acquire (buffer_inv) are later tasks (Task 9 / Task 13).
+    """
+    kw = self.parentWriter
+    module.addComment2("fused-A2A cross-card handshake (design spec 2.3): counter election + wbl2 + system flag")
+
+    afterLabel = Label(kw.labels.getNameInc("fusedA2A_handshake_after"),
+                       "fused-A2A: after handshake (non-PUSH WGs skip)")
+    skipReleaseLabel = Label(kw.labels.getNameInc("fusedA2A_handshake_notlast"),
+                             "fused-A2A: not the last WG for dst_rank -> skip release")
+
+    # --- runtime PUSH gate (same as the store dispatch): PUSH iff WorkGroup1 < AN_tiles. ---
+    gateSgpr = kw.sgprPool.checkOut(1, tag="fusedA2A_hsGate", preventOverflow=False)
+    module.add(SMovB32(dst=sgpr(gateSgpr), src=self._FUSED_A2A_AN_TILES,
+                       comment=f"AN_tiles = {self._FUSED_A2A_AN_TILES}"))
+    module.add(SCmpGtU32(src0=sgpr(gateSgpr), src1=sgpr("WorkGroup1"),
+                         comment="AN_tiles > WorkGroup1? (this WG in PUSH region)"))
+    kw.sgprPool.checkIn(gateSgpr)
+    module.add(SCBranchSCC0(labelName=afterLabel.getLabelName(),
+                            comment="WorkGroup1 >= AN_tiles -> not a PUSH WG, skip handshake"))
+
+    # Restore full EXEC: the store loop may leave a partial edge mask, but the
+    # wave-0 election reads VReadfirstlaneB32(Serial) which needs lane 0 active.
+    module.add(self.getEdgeMovInstType()(EXEC(), -1, "fused-A2A: full exec before wave-0 election"))
+
+    # (1) ensure this WG's scatter stores are in L2 before touching the counter.
+    module.add(SWaitCnt(vscnt=0, comment="fused-A2A: my PUSH stores reached L2 (spec 2.3 step 2)"))
+
+    # --- kernarg reads (on demand, Task 5 contract): my_rank, target, n_shard. ---
+    from .Signature import fusedA2AKernArgLayout
+    layout = fusedA2AKernArgLayout()
+    fusedBase = kw.states.fusedA2AKernArgBase
+    myRankSgpr = kw.sgprPool.checkOut(1, tag="fusedA2A_hsMyRank", preventOverflow=False)
+    targetSgpr = kw.sgprPool.checkOut(1, tag="fusedA2A_hsTarget", preventOverflow=False)
+    nShardSgpr = kw.sgprPool.checkOut(1, tag="fusedA2A_hsNShard", preventOverflow=False)
+    module.add(kw.argLoader.loadKernArg(myRankSgpr, "KernArgAddress",
+      sgprOffset=hex(fusedBase + layout["FusedMyRank"]), dword=1))
+    module.add(kw.argLoader.loadKernArg(targetSgpr, "KernArgAddress",
+      sgprOffset=hex(fusedBase + layout["FusedTarget"]), dword=1))
+    module.add(kw.argLoader.loadKernArg(nShardSgpr, "KernArgAddress",
+      sgprOffset=hex(fusedBase + layout["FusedNShard"]), dword=1))
+
+    # counter_ptr (dword=2) into an aligned pair.
+    counterPtrSgpr = kw.sgprPool.checkOutAligned(2, 2, tag="fusedA2A_hsCounterPtr", preventOverflow=False)
+    module.add(kw.argLoader.loadKernArg(counterPtrSgpr, "KernArgAddress",
+      sgprOffset=hex(fusedBase + layout["counter_ptr"]), dword=2))
+    module.add(SWaitCnt(kmcnt=0, comment="wait FusedMyRank/Target/NShard/counter_ptr"))
+
+    # --- switch-load flag_ptr[dst_rank] + numeric dst_rank. ---
+    flagBaseSgpr = kw.sgprPool.checkOutAligned(2, 2, tag="fusedA2A_hsFlagBase", preventOverflow=False)
+    dstRankSgpr  = kw.sgprPool.checkOut(1, tag="fusedA2A_hsDstRank", preventOverflow=False)
+    tmpSgpr2     = kw.sgprPool.checkOut(2, tag="fusedA2A_hsSwitchTmp", preventOverflow=False)
+    self._fusedA2ALoadFlagBaseAndRank(module, flagBaseSgpr, dstRankSgpr, nShardSgpr, tmpSgpr2)
+
+    # (2) all waves in this WG finished their PUSH stores + the L2 wait; elect a
+    # single writer (wave 0) so the counter atomic fires once per WG, not per lane.
+    module.add(SBarrier(comment="fused-A2A: all waves done before counter election"))
+    serialSgpr = kw.sgprPool.checkOut(1, tag="fusedA2A_hsSerial", preventOverflow=False)
+    module.add(VReadfirstlaneB32(dst=sgpr(serialSgpr), src=vgpr("Serial"),
+                                 comment="wave 0 elects the WG's single counter writer"))
+    module.add(SCmpEQU32(src0=sgpr(serialSgpr), src1=0, comment="wave 0?"))
+    kw.sgprPool.checkIn(serialSgpr)
+    module.add(SCBranchSCC0(labelName=afterLabel.getLabelName(),
+                            comment="non-wave-0 -> skip (single writer per WG)"))
+
+    # Wave 0 still has EXEC=-1 (set above so VReadfirstlaneB32(Serial) saw lane 0).
+    # The counter increment + flag store below are VECTOR memory ops on a lane-
+    # uniform address; under all-ones EXEC every active lane would issue them, so
+    # the counter would jump by wavefrontSize per WG and the old+1==target election
+    # never fires. Narrow EXEC to a single lane (thread 0, the same lane whose
+    # Serial==0 passed the gate) so the atomic + flag store issue exactly once per
+    # WG. Mirrors the file's mask-EXEC-before-atomic idiom (see lines 3112, 3160).
+    module.add(self.getEdgeMovInstType()(EXEC(), 1, "fused-A2A: isolate lane 0 for the once-per-WG counter atomic + flag store"))
+
+    # (3) counter[dst_rank] address = counter_ptr + dst_rank*4; atomic_add returns pre-op.
+    module.add(SLShiftLeftB32(dst=sgpr(tmpSgpr2), src=sgpr(dstRankSgpr), shiftHex=2,
+                              comment="dst_rank * 4 (u32 counter byte offset)"))
+    module.add(SAddU32(dst=sgpr(counterPtrSgpr), src0=sgpr(counterPtrSgpr), src1=sgpr(tmpSgpr2),
+                       comment="counter[dst_rank] lo = counter_ptr + dst_rank*4"))
+    module.add(SAddCU32(dst=sgpr(counterPtrSgpr + 1), src0=sgpr(counterPtrSgpr + 1), src1=0,
+                        comment="counter[dst_rank] hi (carry)"))
+    vCntAddr = kw.vgprPool.checkOutAligned(2, 2, tag="fusedA2A_hsCntAddr")
+    vOne     = kw.vgprPool.checkOut(1, tag="fusedA2A_hsOne")
+    vOld     = kw.vgprPool.checkOut(1, tag="fusedA2A_hsOld")
+    module.add(VMovB32(dst=vgpr(vCntAddr + 0), src=sgpr(counterPtrSgpr + 0), comment="counter addr lo -> vgpr"))
+    module.add(VMovB32(dst=vgpr(vCntAddr + 1), src=sgpr(counterPtrSgpr + 1), comment="counter addr hi -> vgpr"))
+    module.add(VMovB32(dst=vgpr(vOne), src=1, comment="counter increment = 1"))
+    offSaddr = vgpr("off", 1, False, False, True)
+    module.add(GlobalAtomicAddU32(
+      dst=vgpr(vOld), vaddr=vgpr(vCntAddr, 2), data=vgpr(vOne), saddr=offSaddr,
+      modifier=GLOBALModifiers(glc=True, slc=False, scope=CacheScope.SCOPE_NONE),
+      comment="old = atomic_add(counter[dst_rank], 1) device scope, return pre-op (sc0)"))
+    module.add(SWaitCnt(vlcnt=0, comment="fused-A2A: wait counter atomic return (load counter)"))
+
+    # (4) last WG for dst_rank iff old+1 == FusedTarget; else skip the release.
+    module.add(VReadfirstlaneB32(dst=sgpr(tmpSgpr2), src=vgpr(vOld), comment="old -> sgpr"))
+    module.add(SAddU32(dst=sgpr(tmpSgpr2), src0=sgpr(tmpSgpr2), src1=1, comment="old + 1"))
+    module.add(SCmpEQU32(src0=sgpr(tmpSgpr2), src1=sgpr(targetSgpr),
+                         comment="old+1 == FusedTarget? (this WG is the last for dst_rank)"))
+    module.add(SCBranchSCC0(labelName=skipReleaseLabel.getLabelName(),
+                            comment="not the last WG -> skip wbl2 + flag"))
+
+    # (5) elected last WG: release this card's data for dst_rank + set remote flag.
+    module.add(BufferWbl2(scope=CacheScope.SCOPE_SYS,
+                          comment="fused-A2A: flush data for dst_rank across xGMI (system scope, sc0 sc1)"))
+    module.add(SWaitCnt(vscnt=0, comment="fused-A2A: wait wbl2 complete (spec 2.3 step 4)"))
+    # remote flag address = flag_ptr[dst_rank] + my_rank*4 (flag[my_rank] slot on dest).
+    module.add(SLShiftLeftB32(dst=sgpr(tmpSgpr2), src=sgpr(myRankSgpr), shiftHex=2,
+                              comment="my_rank * 4 (dest flag slot byte offset)"))
+    module.add(SAddU32(dst=sgpr(flagBaseSgpr), src0=sgpr(flagBaseSgpr), src1=sgpr(tmpSgpr2),
+                       comment="flag[my_rank] lo = flag_ptr[dst_rank] + my_rank*4"))
+    module.add(SAddCU32(dst=sgpr(flagBaseSgpr + 1), src0=sgpr(flagBaseSgpr + 1), src1=0,
+                        comment="flag[my_rank] hi (carry)"))
+    vFlagAddr = kw.vgprPool.checkOutAligned(2, 2, tag="fusedA2A_hsFlagAddr")
+    vReady    = kw.vgprPool.checkOut(1, tag="fusedA2A_hsReady")
+    module.add(VMovB32(dst=vgpr(vFlagAddr + 0), src=sgpr(flagBaseSgpr + 0), comment="flag addr lo -> vgpr"))
+    module.add(VMovB32(dst=vgpr(vFlagAddr + 1), src=sgpr(flagBaseSgpr + 1), comment="flag addr hi -> vgpr"))
+    module.add(VMovB32(dst=vgpr(vReady), src=self._FUSED_A2A_FLAG_READY, comment="READY value"))
+    module.add(GlobalStoreB32(
+      vaddr=vgpr(vFlagAddr, 2), src=vgpr(vReady), saddr=offSaddr,
+      modifier=GLOBALModifiers(glc=True, slc=True, scope=CacheScope.SCOPE_NONE, isStore=True),
+      comment="flag_ptr[dst_rank][my_rank] = READY (system scope, sc0 sc1)"))
+    module.add(SWaitCnt(vscnt=0, comment="fused-A2A: wait flag store issued"))
+
+    # --- DRAIN barrier (design spec 2.4): make kernel-exit == this card received ---
+    # all its incoming data.  The WG that elected counter[dst_rank] (=j), after setting
+    # rank j's remote flag above, confirms THIS card's recv[j] slot arrived here by
+    # polling THIS card's own flag buffer at flag_ptr[my_rank] + j*4.  j==my_rank has no
+    # remote producer (recv[my_rank] is written locally), so it self-sets that slot
+    # instead of polling (else it would spin on a signal that never comes).  Gated at
+    # RUNTIME by the FusedDrain kernarg (not a compile-time gate: a compile-time gate
+    # would fork the fused kernel into drain-on/off variants).  Still single-lane EXEC.
+    skipDrainLabel = Label(kw.labels.getNameInc("fusedA2A_drain_skip"),
+                           "fused-A2A: FusedDrain==0 -> no drain barrier")
+    drainPollLabel = Label(kw.labels.getNameInc("fusedA2A_drain_poll"),
+                           "fused-A2A: DRAIN poll self flag[j] until READY")
+    drainSelfSetLabel = Label(kw.labels.getNameInc("fusedA2A_drain_selfset"),
+                              "fused-A2A: DRAIN j==my_rank -> self-set flag[my_rank]")
+
+    # runtime gate: FusedDrain == 0 -> skip the whole barrier.
+    drainSgpr = kw.sgprPool.checkOut(1, tag="fusedA2A_drainFlag", preventOverflow=False)
+    module.add(kw.argLoader.loadKernArg(drainSgpr, "KernArgAddress",
+      sgprOffset=hex(fusedBase + layout["FusedDrain"]), dword=1))
+    module.add(SWaitCnt(kmcnt=0, comment="wait FusedDrain"))
+    module.add(SCmpEQU32(src0=sgpr(drainSgpr), src1=0, comment="FusedDrain == 0?"))
+    kw.sgprPool.checkIn(drainSgpr)
+    module.add(SCBranchSCC1(labelName=skipDrainLabel.getLabelName(),
+                            comment="FusedDrain==0 -> skip drain barrier"))
+
+    # self flag base = flag_ptr[my_rank] (THIS card's own flag buffer). Reuses flagBaseSgpr
+    # (its previous remote value flag_ptr[dst_rank] is no longer needed after the store above).
+    self._fusedA2ALoadFlagBaseByRank(module, flagBaseSgpr, myRankSgpr)
+
+    # j == my_rank -> self-set (no remote producer); else poll.
+    module.add(SCmpEQU32(src0=sgpr(dstRankSgpr), src1=sgpr(myRankSgpr),
+                         comment="dst_rank == my_rank? (recv[my_rank] is local, no remote producer)"))
+    module.add(SCBranchSCC1(labelName=drainSelfSetLabel.getLabelName(),
+                            comment="j==my_rank -> self-set flag[my_rank], skip poll"))
+
+    # poll path: flag[j] address = flag_ptr[my_rank] + j*4 (source rank j's slot on this card).
+    module.add(SLShiftLeftB32(dst=sgpr(tmpSgpr2), src=sgpr(dstRankSgpr), shiftHex=2,
+                              comment="j * 4 (self flag slot byte offset)"))
+    module.add(SAddU32(dst=sgpr(flagBaseSgpr), src0=sgpr(flagBaseSgpr), src1=sgpr(tmpSgpr2),
+                       comment="self flag[j] lo = flag_ptr[my_rank] + j*4"))
+    module.add(SAddCU32(dst=sgpr(flagBaseSgpr + 1), src0=sgpr(flagBaseSgpr + 1), src1=0,
+                        comment="self flag[j] hi (carry)"))
+    module.add(VMovB32(dst=vgpr(vFlagAddr + 0), src=sgpr(flagBaseSgpr + 0), comment="self flag addr lo -> vgpr"))
+    module.add(VMovB32(dst=vgpr(vFlagAddr + 1), src=sgpr(flagBaseSgpr + 1), comment="self flag addr hi -> vgpr"))
+    # spin: system-scope load (sc0 sc1) bypasses this card's stale L2 (0) to read the HBM
+    # truth written by the remote producer; loop until == READY.
+    module.add(drainPollLabel)
+    module.add(GlobalLoadB32(
+      dst=vgpr(vReady), vaddr=vgpr(vFlagAddr, 2), saddr=offSaddr,
+      modifier=GLOBALModifiers(glc=True, slc=True, scope=CacheScope.SCOPE_NONE, isStore=False),
+      comment="poll self flag[j] (system scope, sc0 sc1)"))
+    module.add(SWaitCnt(vlcnt=0, comment="fused-A2A: wait poll load"))
+    module.add(VReadfirstlaneB32(dst=sgpr(tmpSgpr2), src=vgpr(vReady), comment="flag[j] -> sgpr"))
+    module.add(SCmpEQU32(src0=sgpr(tmpSgpr2), src1=self._FUSED_A2A_FLAG_READY,
+                         comment="flag[j] == READY?"))
+    module.add(SCBranchSCC0(labelName=drainPollLabel.getLabelName(),
+                            comment="not READY yet -> spin (poll again)"))
+    module.add(SBranch(labelName=skipDrainLabel.getLabelName(),
+                       comment="flag[j] READY -> drain done"))
+
+    # self-set path (j==my_rank): system-scope store of READY to flag_ptr[my_rank] + my_rank*4
+    # (matches the remote-flag store + poll load scope so the system-scope downstream reader sees it).
+    module.add(drainSelfSetLabel)
+    module.add(SLShiftLeftB32(dst=sgpr(tmpSgpr2), src=sgpr(myRankSgpr), shiftHex=2,
+                              comment="my_rank * 4 (self flag slot byte offset)"))
+    module.add(SAddU32(dst=sgpr(flagBaseSgpr), src0=sgpr(flagBaseSgpr), src1=sgpr(tmpSgpr2),
+                       comment="self flag[my_rank] lo = flag_ptr[my_rank] + my_rank*4"))
+    module.add(SAddCU32(dst=sgpr(flagBaseSgpr + 1), src0=sgpr(flagBaseSgpr + 1), src1=0,
+                        comment="self flag[my_rank] hi (carry)"))
+    module.add(VMovB32(dst=vgpr(vFlagAddr + 0), src=sgpr(flagBaseSgpr + 0), comment="self flag addr lo -> vgpr"))
+    module.add(VMovB32(dst=vgpr(vFlagAddr + 1), src=sgpr(flagBaseSgpr + 1), comment="self flag addr hi -> vgpr"))
+    module.add(VMovB32(dst=vgpr(vReady), src=self._FUSED_A2A_FLAG_READY, comment="READY value"))
+    module.add(GlobalStoreB32(
+      vaddr=vgpr(vFlagAddr, 2), src=vgpr(vReady), saddr=offSaddr,
+      modifier=GLOBALModifiers(glc=True, slc=True, scope=CacheScope.SCOPE_NONE, isStore=True),
+      comment="flag_ptr[my_rank][my_rank] = READY (system scope, sc0 sc1)"))
+    module.add(SWaitCnt(vscnt=0, comment="fused-A2A: wait self-set flag store issued"))
+    module.add(skipDrainLabel)
+    # No buffer_inv here: this kernel does not read recv; acquire is the recv-reader's job.
+    # TODO Task 13: multi-card DRAIN validation (poll path across real xGMI producers).
+
+    kw.vgprPool.checkIn(vReady)
+    kw.vgprPool.checkIn(vFlagAddr)
+
+    module.add(skipReleaseLabel)
+    kw.vgprPool.checkIn(vOld)
+    kw.vgprPool.checkIn(vOne)
+    kw.vgprPool.checkIn(vCntAddr)
+    kw.sgprPool.checkIn(tmpSgpr2)
+    kw.sgprPool.checkIn(dstRankSgpr)
+    kw.sgprPool.checkIn(flagBaseSgpr)
+    kw.sgprPool.checkIn(counterPtrSgpr)
+    kw.sgprPool.checkIn(nShardSgpr)
+    kw.sgprPool.checkIn(targetSgpr)
+    kw.sgprPool.checkIn(myRankSgpr)
+    # Restore full EXEC before falling through to afterLabel: wave 0 narrowed EXEC
+    # to a single lane for the counter atomic + flag store, but the CLS look-ahead
+    # emitted after the handshake (emit(): emitCoord1Advance) issues a VECTOR
+    # VAddCOU32 on coord1 that needs all lanes active. The two early gate branches
+    # (PUSH gate, wave-0 gate) jump straight to afterLabel and bypass this restore,
+    # which is correct -- neither of those paths narrowed EXEC.
+    module.add(self.getEdgeMovInstType()(EXEC(), -1, "fused-A2A: restore full exec after single-lane handshake"))
+    module.add(afterLabel)
 
   def _emitSubtileOobGuard(self, targetModule, blockIdxM: int, blockIdxN: int, labelPrefix: str = "subtile_skip_store"):
     """Emit M/N OOB guard branches for UseSubtileImpl NonEdge stores.

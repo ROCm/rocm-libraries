@@ -1710,6 +1710,16 @@ class Solution(collections.abc.Mapping):
       reject(state, printRejectionReason, "Either GSU or StreamK must be enabled")
       return
 
+    if state["FusedGemmA2A"]:
+      if state["StreamK"] != 0:
+        reject(state, printRejectionReason, "FusedGemmA2A requires StreamK=0 (data-parallel carrier)")
+        return
+      # Divisibility over the runtime world size W is checked client-side;
+      # at compile time we only guarantee the M tile is aligned.
+      if state["MacroTile0"] != 256 or state["MacroTile1"] != 256:
+        reject(state, printRejectionReason, "FusedGemmA2A stage-1 assumes MT256x256 (champion config)")
+        return
+
     if state["GlobalSplitU"] == 0 and state["AdaptiveGemmGSUA"] == 1:
       reject(state, printRejectionReason, "AdaptiveGemmGSUA requires GSU enablement")
       return

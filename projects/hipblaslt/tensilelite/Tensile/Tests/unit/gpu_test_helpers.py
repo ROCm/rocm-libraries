@@ -188,6 +188,8 @@ def _create_kernel(cfg, mi_wave_group=None, inst_k=32, bpe=2):
         "MIWaveGroup": MIWaveGroup,
         "WavefrontSize": WAVESIZE,
         "UseSubtileImpl": True,
+        # Non-fused store-D default; GlobalWriteBatch reads this key unconditionally.
+        "FusedGemmA2A": 0,
         "ISA": (9, 5, 0),
         "NonTemporalA": 0,
         "NonTemporalB": 0,

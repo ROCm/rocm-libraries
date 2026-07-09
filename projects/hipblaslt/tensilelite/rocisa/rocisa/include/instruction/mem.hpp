@@ -2228,6 +2228,69 @@ namespace rocisa
         std::shared_ptr<RegisterContainer> dst;
     };
 
+    // global_atomic_add dst, vaddr, data, saddr sc0  — 32-bit integer atomic add
+    // with return-of-pre-op-value on gfx950 (CDNA4). Return semantics come from
+    // the sc0 bit (GLOBALModifiers glc=True), NOT th:TH_ATOMIC_RETURN (which is
+    // gfx1250 syntax). sc1 (slc) selects scope: 0=device, 1=system. For the
+    // fused-A2A counter election we want device scope (slc=False) + return
+    // (glc=True). dst receives the pre-op value.
+    struct GlobalAtomicAddU32 : public GlobalWriteInstruction
+    {
+        std::shared_ptr<Container>     vaddr;
+        std::shared_ptr<Container>     saddr;
+        std::optional<GLOBALModifiers> modifier;
+
+        GlobalAtomicAddU32(const std::shared_ptr<RegisterContainer>& dst,
+                           const std::shared_ptr<RegisterContainer>& vaddr,
+                           const std::shared_ptr<RegisterContainer>& data,
+                           const std::shared_ptr<RegisterContainer>& saddr,
+                           std::optional<GLOBALModifiers>            modifier = std::nullopt,
+                           const std::string&                        comment  = "")
+            : GlobalWriteInstruction(InstType::INST_B32, data, comment)
+            , vaddr(vaddr)
+            , saddr(saddr)
+            , modifier(modifier)
+            , dst(dst)
+        {
+            setInst("global_atomic_add");
+        }
+
+        GlobalAtomicAddU32(const GlobalAtomicAddU32& other)
+            : GlobalWriteInstruction(other)
+            , vaddr(other.vaddr ? other.vaddr->clone() : nullptr)
+            , saddr(other.saddr ? other.saddr->clone() : nullptr)
+            , modifier(other.modifier)
+            , dst(other.dst ? other.dst->clone2() : nullptr)
+        {
+        }
+
+        std::shared_ptr<Item> clone() const override
+        {
+            return std::make_shared<GlobalAtomicAddU32>(*this);
+        }
+
+        std::vector<InstructionInput> getParams() const override { return {vaddr, srcData, saddr}; }
+        std::vector<InstructionInput> getDstParams() const override { return {dst}; }
+        std::vector<InstructionInput> getSrcParams() const override { return {vaddr, srcData, saddr}; }
+
+        std::string getArgStr() const
+        {
+            return dst->toString() + ", " + vaddr->toString() + ", "
+                 + srcData->toString() + ", " + saddr->toString();
+        }
+
+        std::string toString() const override
+        {
+            std::string kStr = instStr + " " + getArgStr();
+            if(modifier)
+                kStr += modifier->toString();
+            return formatWithComment(kStr);
+        }
+
+    private:
+        std::shared_ptr<RegisterContainer> dst;
+    };
+
     struct GLOBALStoreInstruction : public GlobalWriteInstruction
     {
         std::shared_ptr<Container>     vaddr;

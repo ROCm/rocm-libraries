@@ -926,6 +926,15 @@ validParameters = { # we need to make sure this matches develop
     #   2 = No partials
     #   3 = Nofixup and no partials
     "DebugStreamK": [0, 1, 2, 3],
+    # FusedGemmA2A: fuse an all-to-all (PUSH along N) into the GEMM epilogue.
+    # 0 = off (standard data-parallel GEMM). 1 = on: the first AN columns are
+    # PUSHed to remote recv[W,M,n_shard] slots, the remaining columns stored
+    # locally. Requires StreamK=0 (data-parallel carrier). See ROCM-27524.
+    "FusedGemmA2A": [0, 1],
+    # FusedA2ADrain: when FusedGemmA2A=1, the last WG per rank polls its own
+    # flag after setting the remote flag, so kernel exit == data received
+    # (barrier semantics, downstream needs no sync). Default 1.
+    "FusedA2ADrain": [0, 1],
     # Persistent-kernel debug: when True, the persistent loop never exits.
     # Used as a co-tenant load kernel for contended-perf benchmarking.
     # Termination is via process death. Requires StreamK = 3.
