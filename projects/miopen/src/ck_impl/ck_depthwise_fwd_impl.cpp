@@ -352,15 +352,20 @@ struct CKArgs
 // tiling/divisibility -- it does NOT reject a shape-mismatched instance -- so without this check
 // the tuner could select e.g. a FilterSize=5 instance for a 3x3 problem and record it as the
 // winning perf config. That config is invalid for the problem and later fails to build. Require
-// the instance's compile-time shape to match the problem exactly before treating it as applicable.
+// the instance's compile-time shape to match the problem before treating it as applicable.
+//
+// The compile-time Pad_H/Pad_W is the instance's (symmetric) left padding; match it against the
+// problem's left padding only. The right padding (rPadding) is a runtime value MIOpen adjusts down
+// for strided problems whose input size is not evenly divisible, so it is legitimately asymmetric
+// (rPad < lPad) and must NOT be part of the compile-time match -- CK handles the actual right pad
+// at run time. Requiring lPadding == rPadding here wrongly rejects every strided instance.
 template <typename DeviceOp>
 bool InstanceShapeMatchesProblem(const CKArgs& a)
 {
     using G = typename DeviceOp::GridwiseConvFwd;
-    return G::Filter_Y == a.Y && G::Filter_X == a.X &&                              //
+    return G::Filter_Y == a.Y && G::Filter_X == a.X &&                               //
            G::Stride_H == a.filter_stride[0] && G::Stride_W == a.filter_stride[1] && //
            G::Pad_H == a.lPadding[0] && G::Pad_W == a.lPadding[1] &&                 //
-           a.lPadding[0] == a.rPadding[0] && a.lPadding[1] == a.rPadding[1] &&       //
            G::Dilation_Y == a.filter_dilation[0] && G::Dilation_X == a.filter_dilation[1];
 }
 
@@ -371,7 +376,7 @@ std::vector<std::string> FillValidKernels(const ProblemDescription& problem)
     std::vector<std::string> valid_kernels;
 
     ck::static_for<0, kernelCount, 1>{}([&](auto i) -> void {
-        auto conv_ptr = std::get<i>(DeviceConvFwdFactory{});
+        auto conv_ptr  = std::get<i>(DeviceConvFwdFactory{});
         using DeviceOp = ck::remove_cvref_t<decltype(conv_ptr)>;
         if(!InstanceShapeMatchesProblem<DeviceOp>(ck_args))
             return; // instance is specialized for a different filter/stride/pad/dilation
@@ -412,7 +417,7 @@ bool CheckCKApplicability(const ProblemDescription& problem)
     ck::static_for<0, kernelCount, 1>{}([&](auto i) -> void {
         if(found)
             return;
-        auto conv_ptr = std::get<i>(DeviceConvFwdFactory{});
+        auto conv_ptr  = std::get<i>(DeviceConvFwdFactory{});
         using DeviceOp = ck::remove_cvref_t<decltype(conv_ptr)>;
         if(!InstanceShapeMatchesProblem<DeviceOp>(ck_args))
             return; // instance is specialized for a different filter/stride/pad/dilation
@@ -451,10 +456,9 @@ bool CheckIsArgSupported(const ProblemDescription& problem, const std::string& k
     bool supported                 = false;
 
     ck::static_for<0, kernelCount, 1>{}([&](auto i) -> void {
-        auto conv_ptr = std::get<i>(DeviceConvFwdFactory{});
+        auto conv_ptr  = std::get<i>(DeviceConvFwdFactory{});
         using DeviceOp = ck::remove_cvref_t<decltype(conv_ptr)>;
-        if(conv_ptr.GetTypeString() == kernel_id &&
-           InstanceShapeMatchesProblem<DeviceOp>(ck_args))
+        if(conv_ptr.GetTypeString() == kernel_id && InstanceShapeMatchesProblem<DeviceOp>(ck_args))
         {
             auto argument_ptr = conv_ptr.MakeArgumentPointer(
                 nullptr,
