@@ -107,6 +107,15 @@ void testing_ormtr_unmtr_hb2st_bad_arg()
     CHECK_HIP_ERROR(dTau.memcheck());
     CHECK_HIP_ERROR(dC.memcheck());
 
+#ifndef ROCSOLVER_ENABLE_EIG_2STAGE
+    // unmtr_hb2st is gated behind ROCSOLVER_ENABLE_EIG_2STAGE; when the flag is off the
+    // entry points must report rocblas_status_not_implemented instead of running.
+    EXPECT_ROCBLAS_STATUS(rocsolver_ormtr_unmtr_hb2st(handle, side, trans, m, n, kd, dV.data(), ldv,
+                                                      dTau.data(), dC.data(), ldc),
+                          rocblas_status_not_implemented);
+    return;
+#endif
+
     // check bad arguments
     ormtr_unmtr_hb2st_checkBadArgs<decltype(dV.data()), I>(handle, side, trans, m, n, kd, dV.data(),
                                                            ldv, dTau.data(), dC.data(), ldc);
@@ -460,6 +469,17 @@ void testing_ormtr_unmtr_hb2st(Arguments& argus)
     rocblas_side side = char2rocblas_side(sideC);
     rocblas_operation trans = char2rocblas_operation(transC);
     rocblas_int hot_calls = argus.iters;
+
+#ifndef ROCSOLVER_ENABLE_EIG_2STAGE
+    // unmtr_hb2st is gated behind ROCSOLVER_ENABLE_EIG_2STAGE; when the flag is off the
+    // entry points must report rocblas_status_not_implemented instead of running.
+    EXPECT_ROCBLAS_STATUS(rocsolver_ormtr_unmtr_hb2st(handle, side, trans, m, n, kd, // opts
+                                                      (T*)nullptr, ldv, // V
+                                                      (T*)nullptr, // tau
+                                                      (T*)nullptr, ldc), // C
+                          rocblas_status_not_implemented);
+    return;
+#endif
 
     // check non-supported values
     bool invalid_value = (side == rocblas_side_both

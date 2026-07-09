@@ -153,8 +153,12 @@ rocblas_status rocsolver_sormtr_sb2st(rocblas_handle handle,
                                       float* C,
                                       const rocblas_int ldc)
 {
+#ifdef ROCSOLVER_ENABLE_EIG_2STAGE
     return rocsolver::rocsolver_ormtr_unmtr_hb2st_impl<float, rocblas_int>(handle, side, trans, m, n,
                                                                            kd, V, ldv, tau, C, ldc);
+#else
+    return rocblas_status_not_implemented;
+#endif
 }
 
 rocblas_status rocsolver_dormtr_sb2st(rocblas_handle handle,
@@ -169,8 +173,12 @@ rocblas_status rocsolver_dormtr_sb2st(rocblas_handle handle,
                                       double* C,
                                       const rocblas_int ldc)
 {
+#ifdef ROCSOLVER_ENABLE_EIG_2STAGE
     return rocsolver::rocsolver_ormtr_unmtr_hb2st_impl<double, rocblas_int>(
         handle, side, trans, m, n, kd, V, ldv, tau, C, ldc);
+#else
+    return rocblas_status_not_implemented;
+#endif
 }
 
 rocblas_status rocsolver_cunmtr_hb2st(rocblas_handle handle,
@@ -185,8 +193,12 @@ rocblas_status rocsolver_cunmtr_hb2st(rocblas_handle handle,
                                       rocblas_float_complex* C,
                                       const rocblas_int ldc)
 {
+#ifdef ROCSOLVER_ENABLE_EIG_2STAGE
     return rocsolver::rocsolver_ormtr_unmtr_hb2st_impl<rocblas_float_complex, rocblas_int>(
         handle, side, trans, m, n, kd, V, ldv, tau, C, ldc);
+#else
+    return rocblas_status_not_implemented;
+#endif
 }
 
 rocblas_status rocsolver_zunmtr_hb2st(rocblas_handle handle,
@@ -201,8 +213,12 @@ rocblas_status rocsolver_zunmtr_hb2st(rocblas_handle handle,
                                       rocblas_double_complex* C,
                                       const rocblas_int ldc)
 {
+#ifdef ROCSOLVER_ENABLE_EIG_2STAGE
     return rocsolver::rocsolver_ormtr_unmtr_hb2st_impl<rocblas_double_complex, rocblas_int>(
         handle, side, trans, m, n, kd, V, ldv, tau, C, ldc);
+#else
+    return rocblas_status_not_implemented;
+#endif
 }
 
 rocblas_status rocsolver_sormtr_sb2st_64(rocblas_handle handle,
@@ -217,7 +233,7 @@ rocblas_status rocsolver_sormtr_sb2st_64(rocblas_handle handle,
                                          float* C,
                                          const int64_t ldc)
 {
-#ifdef HAVE_ROCBLAS_64
+#if defined(ROCSOLVER_ENABLE_EIG_2STAGE) && defined(HAVE_ROCBLAS_64)
     return rocsolver::rocsolver_ormtr_unmtr_hb2st_impl<float, int64_t>(handle, side, trans, m, n,
                                                                        kd, V, ldv, tau, C, ldc);
 #else
@@ -237,7 +253,7 @@ rocblas_status rocsolver_dormtr_sb2st_64(rocblas_handle handle,
                                          double* C,
                                          const int64_t ldc)
 {
-#ifdef HAVE_ROCBLAS_64
+#if defined(ROCSOLVER_ENABLE_EIG_2STAGE) && defined(HAVE_ROCBLAS_64)
     return rocsolver::rocsolver_ormtr_unmtr_hb2st_impl<double, int64_t>(handle, side, trans, m, n,
                                                                         kd, V, ldv, tau, C, ldc);
 #else
@@ -257,7 +273,7 @@ rocblas_status rocsolver_cunmtr_hb2st_64(rocblas_handle handle,
                                          rocblas_float_complex* C,
                                          const int64_t ldc)
 {
-#ifdef HAVE_ROCBLAS_64
+#if defined(ROCSOLVER_ENABLE_EIG_2STAGE) && defined(HAVE_ROCBLAS_64)
     return rocsolver::rocsolver_ormtr_unmtr_hb2st_impl<rocblas_float_complex, int64_t>(
         handle, side, trans, m, n, kd, V, ldv, tau, C, ldc);
 #else
@@ -277,7 +293,7 @@ rocblas_status rocsolver_zunmtr_hb2st_64(rocblas_handle handle,
                                          rocblas_double_complex* C,
                                          const int64_t ldc)
 {
-#ifdef HAVE_ROCBLAS_64
+#if defined(ROCSOLVER_ENABLE_EIG_2STAGE) && defined(HAVE_ROCBLAS_64)
     return rocsolver::rocsolver_ormtr_unmtr_hb2st_impl<rocblas_double_complex, int64_t>(
         handle, side, trans, m, n, kd, V, ldv, tau, C, ldc);
 #else
