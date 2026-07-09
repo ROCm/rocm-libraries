@@ -20,7 +20,7 @@
  *
  * ************************************************************************ */
 
-#ifdef BUILD_WITH_TENSILE
+#if defined(BUILD_WITH_TENSILE) || defined(BUILD_WITH_HIPBLASLT)
 #include "../blas3/Tensile/gemm_tensile.hpp"
 #endif
 #include "../../src/src64/blas_ex/rocblas_gemm_ex_64.hpp"
@@ -185,7 +185,7 @@ bool rocblas_use_gemv_in_gemm(rocblas_handle    handle,
 // if no Tensile then we use rocblas_internal_gemm_ex_typecasting_64 and rocblas_internal_gemm_ex_64
 // with source kernels so don't even provide rocblas_internal_gemm_ex
 
-#ifdef BUILD_WITH_TENSILE
+#if defined(BUILD_WITH_TENSILE) || defined(BUILD_WITH_HIPBLASLT)
 
 template <bool BATCHED, typename TScal, typename TiConstPtr, typename ToConstPtr, typename ToPtr>
 rocblas_status rocblas_internal_gemm_ex(rocblas_handle     handle,
@@ -661,7 +661,7 @@ rocblas_status gemm_ex_typecasting(rocblas_handle     handle,
     return status;
 }
 
-#endif // BUILD_WITH_TENSILE
+#endif // BUILD_WITH_TENSILE || BUILD_WITH_HIPBLASLT
 
 template <bool BATCHED>
 rocblas_status rocblas_gemm_ex_template(rocblas_handle    handle,
@@ -720,7 +720,7 @@ rocblas_status rocblas_gemm_ex_template(rocblas_handle    handle,
         stride_b, beta, c, offsetCin, ldc, stride_c, d, offsetDin, ldd, stride_d, batch_count, \
         algo, solution_index, rocblas_gemm_flags(flags)
 
-#ifdef BUILD_WITH_TENSILE
+#if defined(BUILD_WITH_TENSILE) || defined(BUILD_WITH_HIPBLASLT)
     if(!sourceSolutionBased)
     {
         if(a_type == rocblas_datatype_f64_r && b_type == rocblas_datatype_f64_r
@@ -799,14 +799,17 @@ rocblas_status rocblas_gemm_ex_template(rocblas_handle    handle,
             rb_status = rocblas_status_not_implemented;
         }
 
-        return rb_status;
+        // Return if backend succeeded or failed with a real error.
+        // Otherwise fall through to rocBLAS source GEMM (same as blas3 gemm).
+        if(rb_status != rocblas_status_not_implemented)
+            return rb_status;
     }
     else
 #endif
     {
         sourceSolutionBased = true;
     }
-    // use source 64 kernels if no tensile
+    // use source kernels when explicitly requested or backend is not_implemented
 
     if(flags & rocblas_gemm_flags_check_solution_index)
     {

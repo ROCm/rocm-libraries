@@ -57,7 +57,7 @@ class TestDispatchGemmRuntime(unittest.TestCase):
         env = dict(os.environ)
         # Keep the package under test first even when this test is invoked from
         # a different working directory.
-        py_root = str(Path(__file__).resolve().parents[4] / "Python")
+        py_root = str(Path(__file__).resolve().parents[4] / "python")
         env["PYTHONPATH"] = py_root + os.pathsep + env.get("PYTHONPATH", "")
         cmd = [
             sys.executable,

@@ -18,10 +18,10 @@ const std::vector<RockeClientContainer::EngineDefinition>&
     RockeClientContainer::getEngineDefinitions()
 {
     static const std::vector<EngineDefinition> s_engineDefinitions = {
-        {hipdnn_data_sdk::utilities::ROCKE_ENGINE_ID,
-         []() -> std::unique_ptr<hipdnn_plugin_sdk::IEngine<RockeClientHandle,
-                                                            RockeClientSettings,
-                                                            RockeClientContext>> {
+        {.id = hipdnn_data_sdk::utilities::ROCKE_ENGINE_ID,
+         .createEngine = []() -> std::unique_ptr<hipdnn_plugin_sdk::IEngine<RockeClientHandle,
+                                                                            RockeClientSettings,
+                                                                            RockeClientContext>> {
              return std::make_unique<RockeClientEngine>();
          }},
     };

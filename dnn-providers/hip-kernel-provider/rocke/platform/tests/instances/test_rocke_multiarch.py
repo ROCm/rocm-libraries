@@ -7,7 +7,7 @@ the GEMM family policy, the gfx950 byte-identical guarantee, the hybrid-layout
 back-compat shim, and the architectural isolation rules from
 ``dsl_docs/architecture/multi_arch_data_layout.md`` ("Review Rules").
 
-Run:  PYTHONPATH=Python python3 tests/instances/test_rocke_multiarch.py
+Run:  PYTHONPATH=python python3 tests/instances/test_rocke_multiarch.py
 These tests need no GPU.
 """
 
@@ -19,7 +19,7 @@ import unittest
 from rocke.core.arch import ArchTarget, known_arches, normalize_dtype
 from rocke.core.isa import Gfx9MfmaBackend, Gfx950Backend, backend_for
 
-_ROCKE_ROOT = pathlib.Path(__file__).resolve().parents[2] / "Python" / "rocke"
+_ROCKE_ROOT = pathlib.Path(__file__).resolve().parents[2] / "python" / "rocke"
 
 
 class TestArchTarget(unittest.TestCase):

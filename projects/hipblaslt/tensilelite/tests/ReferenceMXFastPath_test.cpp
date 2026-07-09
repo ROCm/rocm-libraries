@@ -16,12 +16,17 @@ using namespace TensileLite::Client;
 
 namespace
 {
-    ContractionProblemGemm makeMXFP8Problem(size_t M, size_t N, size_t K, int mxBlock)
+    ContractionProblemGemm makeMXProblem(rocisa::DataType typeA,
+                                         rocisa::DataType typeB,
+                                         size_t           M,
+                                         size_t           N,
+                                         size_t           K,
+                                         int              mxBlock)
     {
         auto problem = ContractionProblemGemm::GEMM_Strides(false,
                                                             false,
-                                                            rocisa::DataType::Float8,
-                                                            rocisa::DataType::Float8,
+                                                            typeA,
+                                                            typeB,
                                                             rocisa::DataType::Float,
                                                             rocisa::DataType::Float,
                                                             M,
@@ -40,8 +45,8 @@ namespace
 
         problem.setMXScaleA(rocisa::DataType::E8, mxBlock, {}, /*padScaleTensor=*/false);
         problem.setMXScaleB(rocisa::DataType::E8, mxBlock, {}, /*padScaleTensor=*/false);
-        problem.setComputeInputTypeA(rocisa::DataType::Float8);
-        problem.setComputeInputTypeB(rocisa::DataType::Float8);
+        problem.setComputeInputTypeA(typeA);
+        problem.setComputeInputTypeB(typeB);
         problem.setAlphaType(rocisa::DataType::Float);
         problem.setBetaType(rocisa::DataType::Float);
         return problem;
@@ -71,6 +76,30 @@ namespace
     }
 } // namespace
 
+#ifndef _WIN32
+
+TEST(ReferenceMXFastPath, RejectsMixedInputTypesWithMXFP4)
+{
+    const size_t M       = 64;
+    const size_t N       = 64;
+    const size_t K       = 128;
+    const int    mxBlock = 32;
+
+    auto problemA = makeMXProblem(
+        rocisa::DataType::Float4, rocisa::DataType::Float, M, N, K, mxBlock);
+    EXPECT_FALSE(isFastPathEligible(problemA));
+
+    auto problemB = makeMXProblem(
+        rocisa::DataType::Float, rocisa::DataType::Float4, M, N, K, mxBlock);
+    EXPECT_FALSE(isFastPathEligible(problemB));
+
+    auto problemBoth = makeMXProblem(
+        rocisa::DataType::Float4, rocisa::DataType::Float4, M, N, K, mxBlock);
+    EXPECT_TRUE(isFastPathEligible(problemBoth));
+}
+
+#endif
+
 #ifdef TENSILE_USE_FP8_BF8
 
 TEST(ReferenceMXFastPath, MatchesSlowPathForScaledFP8Gemm)
@@ -80,7 +109,8 @@ TEST(ReferenceMXFastPath, MatchesSlowPathForScaledFP8Gemm)
     const size_t K       = 128;
     const int    mxBlock = 32;
 
-    auto problem = makeMXFP8Problem(M, N, K, mxBlock);
+    auto problem = makeMXProblem(
+        rocisa::DataType::Float8, rocisa::DataType::Float8, M, N, K, mxBlock);
     ASSERT_TRUE(isFastPathEligible(problem));
 
     std::vector<Float8> a(M * K);
@@ -118,7 +148,8 @@ TEST(ReferenceMXFastPath, MatchesSlowPathWithBetaAndBias)
     const size_t K       = 96;
     const int    mxBlock = 32;
 
-    auto problem = makeMXFP8Problem(M, N, K, mxBlock);
+    auto problem = makeMXProblem(
+        rocisa::DataType::Float8, rocisa::DataType::Float8, M, N, K, mxBlock);
     problem.setUseBias(1);
     problem.setBias(rocisa::DataType::Float, M, M);
     ASSERT_TRUE(isFastPathEligible(problem));

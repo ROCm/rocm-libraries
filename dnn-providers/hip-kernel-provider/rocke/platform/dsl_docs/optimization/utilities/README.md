@@ -57,23 +57,16 @@ GPU attached and runs in well under one second per variant. The
 `stage{1,3,4,5}` tiers complement it with rocprof- and trace-based
 analysis once a real launch is in flight.
 
-Some scripts assume the original MLSE repository layout. When running them from
-this vendored location, set `PYTHONPATH` explicitly to the relevant tool
-subdirectories and CK DSL Python root.
+The `benchmark_rocke_unified_attention` benchmark moved from the platform
+`stage1_benchmark/` directory to the library. Run it with `rocke/library` on
+`PYTHONPATH` from the provider root:
 
 ```bash
-cd <repo>/dnn-providers/hip-kernel-provider/rocKE
-
-PYTHONPATH=rocke/library \
-  python3 -m builders.common.benchmark_rocke_unified_attention \
-  --shapes dsl_docs/optimization/utilities/tools/stage1_benchmark/tests/aiter_ua_prefill2d_allbf16.json \
+PYTHONPATH=rocke/library python3 -m builders.common.benchmark_rocke_unified_attention \
+  --shapes rocke/library/builders/gfx950/attention/aiter_ua_prefill2d_allbf16.json \
   --dtype bf16 \
   --limit 1
 ```
-
-> **Note**: `benchmark_rocke_unified_attention.py` moved from the platform
-> `stage1_benchmark/` directory to
-> `rocke/library/builders/common/benchmark_rocke_unified_attention.py`.
 
 ## Profiling Note
 

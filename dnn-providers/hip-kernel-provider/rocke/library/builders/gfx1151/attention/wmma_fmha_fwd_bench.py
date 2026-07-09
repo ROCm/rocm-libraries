@@ -11,7 +11,7 @@ from global memory.
 
 Must run on a gfx1151 device.
 
-    PYTHONPATH=Python python3 -m builders.gfx1151.attention.wmma_fmha_fwd_bench \
+    PYTHONPATH=python python3 -m builders.gfx1151.attention.wmma_fmha_fwd_bench \
         --seqlen-q 512 --seqlen-k 512 --head-size 128 --heads 8 --batch 4
 """
 

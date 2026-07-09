@@ -17,14 +17,14 @@ Spec dataclass -> build_*() -> KernelDef -> lower -> .ll -> comgr -> HSACO -> la
 ## Layout (layers mirror across languages)
 
 ```
-rocKE/
-  Python/rocke/        # authoring frontend (import rocke)
+rocke/platform/
+  python/rocke/        # authoring frontend (import rocke)
     core/               # IR, passes, lower_llvm/lower_hip, arch, isa, backend, serialize
     helpers/            # tensor views, atoms, epilogues, schedules, manifest, ...
     instances/<arch>/   # spec-driven kernels (common, gfx942, gfx950, gfx1151, gfx1201, gfx1250)
     runtime/            # comgr, hip_module, launcher (Python-only)
     dispatch/ analysis/ benchmark/ heuristics/ examples/   # Python-only
-  Cpp/                  # C++20 engine (mirrors the Python layers)
+  cpp/                  # C++20 engine (mirrors the Python layers)
     include/rocke/        # public extern "C" ABI (flat) - the provider/bindings contract
     core/ helpers/ instances/ support/
     bindings/           # rocke_engine pybind module -> links librocke_core.a
@@ -35,7 +35,7 @@ rocKE/
 
 ## The #1 invariant: byte-identity
 
-The Python engine (`core/lower_llvm.py`) and the C++ engine (`Cpp/`) MUST emit the
+The Python engine (`core/lower_llvm.py`) and the C++ engine (`cpp/`) MUST emit the
 **same LLVM-IR bytes** for every kernel family. Any op/instance/atom/fusion/arch
 change must be made in **both** engines in the same change. Prove it:
 
@@ -50,10 +50,10 @@ A change is done only when the gate is GREEN for every family at both flavors.
 
 ```bash
 # PYTHONPATH for the Python package
-export PYTHONPATH=<rocKE>/Python                 # then: import rocke
+export PYTHONPATH=<rocke/platform>/python                 # then: import rocke
 
 # build the C++ engine + the C++ unit-test binaries (so ctest has something to run)
-cmake -S <rocKE> -B /tmp/rocke -DCMAKE_BUILD_TYPE=Release
+cmake -S <rocke/platform> -B /tmp/rocke -DCMAKE_BUILD_TYPE=Release
 cmake --build /tmp/rocke -j
 
 # relative-path guard + byte-identity gate + pytest; also runs ctest only when
@@ -84,7 +84,7 @@ review:
   or import test rather than relying on an existing differently named test.
 - Keep the Test plan checklist current and mention any deferred lane explicitly.
 
-Requirements: use a virtualenv outside the `rocKE/` tree for GPU/numeric lanes
+Requirements: use a virtualenv outside the `rocke/platform/` tree for GPU/numeric lanes
 so torch, numpy, and pytest resolve from the same interpreter without the
 relative-path guard scanning local venv metadata. For now, use `~/rocKE-venv`:
 
@@ -117,13 +117,13 @@ virtualenv described above.
 Run local numeric coverage only when that hardware is actually present:
 
 ```bash
-PYTHONPATH=<rocKE>/Python ~/rocke-venv/bin/python \
+PYTHONPATH=<rocke/platform>/python ~/rocke-venv/bin/python \
   tests/instances/test_rocke_numeric.py
 ```
 
 If the current machine has no suitable local GPU, do **not** fake the lane or use
 CPU torch. Use the remote GPU path instead: see
-`Python/rocke/benchmark/remote_test/README.md`. In short, configure a site-local
+`python/rocke/benchmark/remote_test/README.md`. In short, configure a site-local
 SSH/Slurm target outside the repo (for example via `~/.rocke_env`), then run:
 
 ```bash
@@ -140,15 +140,15 @@ GPU node.
 
 - **Byte-identity**: mirror every emission change in both engines; re-run the gate.
   If you intend to change emitted output, re-bless the golden in the same change.
-- **Relative paths only**: no file under `rocKE/` may hardcode an absolute repo
-  path or a path escaping `rocKE/`. `tests/run_all.py` enforces this with a grep
+- **Relative paths only**: no file under `rocke/platform/` may hardcode an absolute repo
+  path or a path escaping `rocke/platform/`. `tests/run_all.py` enforces this with a grep
   guard; keep anchors derived from `__file__` / `CMAKE_CURRENT_SOURCE_DIR`.
 - **Never `ruff check --fix` emitter code** (`core`, `helpers`, `instances`): the
   IR builder is side-effecting (`b.const_i32(8)` emits an op even if its handle is
   unused), so F841 autofix silently changes kernels. Lint with `ruff check` (no
   `--fix`).
 - **Cross-platform**: do not add bash/Linux-specific helper scripts. Scripts
-  under `rocKE/` are Python, not `.sh`; use `tempfile`, `os.cpu_count()`,
+  under `rocke/platform/` are Python, not `.sh`; use `tempfile`, `os.cpu_count()`,
   `pathlib`, `shutil.which` - no `/tmp`, `nproc`, `sudo`, or shell-only flows.
 - **Default arch is `gfx950`** (the byte-identity baseline). Do not change the
   codegen default; for on-GPU runs, prefer the local device via
