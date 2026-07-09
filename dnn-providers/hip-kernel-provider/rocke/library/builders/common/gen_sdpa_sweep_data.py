@@ -342,7 +342,24 @@ def _sdpa_benchmark(cand: object) -> Dict[str, object]:
 
     flops = attention_flops(shape, data["query_lens"], data["kv_lens_list"])
     tflops = (flops / 1e12) / (latency_ms / 1e3) if latency_ms > 0 else 0.0
-    return {"tflops": tflops, "latency_ms": latency_ms, "correct": correct}
+
+    # Bytes moved: Q + O (per-token) + K + V (per KV token), all at dtype width.
+    # Attention decode is memory-bound, so this bandwidth head is meaningful — and
+    # train.py trains a bandwidth model per op, so it must be > 0 for valid rows.
+    bpe = out.element_size()
+    d = int(prob.head_size)
+    tot_q = int(prob.total_q)
+    tot_kv = sum(int(x) for x in data["kv_lens_list"])
+    bytes_moved = float(
+        tot_q * int(prob.num_query_heads) * d * 2  # Q read + O write
+        + tot_kv * int(prob.num_kv_heads) * d * 2   # K + V read
+    ) * bpe
+    bandwidth_gb_s = (bytes_moved / 1e9) / (latency_ms / 1e3) if latency_ms > 0 else 0.0
+
+    return {
+        "tflops": tflops, "latency_ms": latency_ms,
+        "bandwidth_gb_s": bandwidth_gb_s, "correct": correct,
+    }
 
 
 # =====================================================================

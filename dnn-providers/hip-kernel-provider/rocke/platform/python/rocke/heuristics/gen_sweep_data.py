@@ -582,6 +582,7 @@ def generate(
         # exception degrades that one row to 0 rather than aborting the sweep.
         measured_tflops = 0.0
         latency_ms = 0.0
+        bandwidth_gb_s = 0.0
         correct: Optional[bool] = None
         bench_error: Optional[str] = None
         if rec.ok and adapter.benchmark is not None:
@@ -589,6 +590,7 @@ def generate(
                 res = adapter.benchmark(spec)
                 measured_tflops = float(res.get("tflops", 0.0) or 0.0)
                 latency_ms = float(res.get("latency_ms", 0.0) or 0.0)
+                bandwidth_gb_s = float(res.get("bandwidth_gb_s", 0.0) or 0.0)
                 if "correct" in res:
                     correct = bool(res["correct"])
                 if measured_tflops > 0:
@@ -603,10 +605,10 @@ def generate(
             "measured_tflops": measured_tflops,
             "latency_ms": latency_ms,
             # train.py's TARGET_COLUMNS trains a bandwidth head for every op, so
-            # the column must exist. Attention is latency/tflops-bound (no
-            # meaningful GEMM-style bandwidth), so emit 0.0 — the bandwidth head
-            # trains on zeros and is simply not used for ranking.
-            "bandwidth_gb_s": 0.0,
+            # the column must exist AND be > 0 for valid rows (train_final_model
+            # filters on target > 0). The benchmark supplies a real value when it
+            # can; 0.0 only on build-only / unbenchmarked rows (already invalid).
+            "bandwidth_gb_s": bandwidth_gb_s,
             # is_valid = built AND (not benchmarked, or benchmarked correct).
             # A kernel that builds but fails a correctness check is NOT a valid
             # training row (it would poison the oracle-best selection).
