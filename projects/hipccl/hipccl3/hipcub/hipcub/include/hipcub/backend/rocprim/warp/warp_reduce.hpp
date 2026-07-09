@@ -37,6 +37,9 @@
 
 #include <rocprim/warp/warp_reduce.hpp> // IWYU pragma: export
 
+#include _HIPCUB_LIBCXX_INCLUDE(functional)
+#include _HIPCUB_STD_INCLUDE(functional)
+
 BEGIN_HIPCUB_NAMESPACE
 
 namespace detail
