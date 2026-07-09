@@ -112,7 +112,7 @@ struct QuantGemmMultiDHostArgs
 {
     const void* a_ptr;
     const void* b_ptr;
-    const std::array<const void*, NumDTensor> ds_ptr;
+    std::array<const void*, NumDTensor> ds_ptr;
     void* c_ptr;
     const void* aq_ptr;
     const void* bq_ptr;
@@ -124,7 +124,7 @@ struct QuantGemmMultiDHostArgs
     index_t QK_B;
     index_t stride_A;
     index_t stride_B;
-    const std::array<index_t, NumDTensor> stride_Ds;
+    std::array<index_t, NumDTensor> stride_Ds;
     index_t stride_C;
     index_t stride_AQ;
     index_t stride_BQ;
@@ -137,7 +137,7 @@ struct QuantGemmMultiDKernelArgs
     const void* b_ptr;
     const void* aq_ptr;
     const void* bq_ptr;
-    const std::array<const void*, NumDTensor> ds_ptr;
+    std::array<const void*, NumDTensor> ds_ptr;
     void* c_ptr;
     index_t M;
     index_t N;
@@ -146,7 +146,7 @@ struct QuantGemmMultiDKernelArgs
     index_t QK_B;
     index_t stride_A;
     index_t stride_B;
-    const std::array<index_t, NumDTensor> stride_Ds;
+    std::array<index_t, NumDTensor> stride_Ds;
     index_t stride_C;
     index_t stride_AQ;
     index_t stride_BQ;
@@ -1496,12 +1496,17 @@ struct QuantGemmMultiDKernel
             }
         }
 
-        bool DTensorIsValid = {true};
+        bool ds_are_valid = true;
         static_for<0, NumDTensor, 1>{}([&](auto index) {
             using DiLayout = remove_cvref_t<std::tuple_element_t<index.value, DsLayout>>;
-            if(std::is_same_v<DiLayout, CLayout> == false)
+            // TODO: different layouts of C and Ds are not tested and may require changes
+            if(!std::is_same_v<DiLayout, CLayout>)
             {
-                DTensorIsValid = false;
+                if(ck_tile::EnvIsEnabled(CK_TILE_ENV(CK_TILE_LOGGING)))
+                {
+                    CK_TILE_ERROR("Tensors D and C have different layouts");
+                }
+                ds_are_valid = false;
             }
             if constexpr(std::is_same_v<DiLayout, tensor_layout::gemm::RowMajor>)
             {
@@ -1512,7 +1517,7 @@ struct QuantGemmMultiDKernel
                         CK_TILE_ERROR("Can't support N for tensor D that is not a multiple of "
                                       "NPerBlock without padding!");
                     }
-                    DTensorIsValid = false;
+                    ds_are_valid = false;
                 }
                 if(kargs.N % EpiloguePipeline::GetVectorSizeD(index) != 0)
                 {
@@ -1520,7 +1525,7 @@ struct QuantGemmMultiDKernel
                     {
                         CK_TILE_ERROR("N is not a multiple of vector load size for D tensor!");
                     }
-                    DTensorIsValid = false;
+                    ds_are_valid = false;
                 }
             }
             else
@@ -1532,7 +1537,7 @@ struct QuantGemmMultiDKernel
                         CK_TILE_ERROR("Can't support M for tensor D that is not a multiple of "
                                       "MPerBlock without padding!");
                     }
-                    DTensorIsValid = false;
+                    ds_are_valid = false;
                 }
                 if(kargs.M % EpiloguePipeline::GetVectorSizeD(index) != 0)
                 {
@@ -1540,11 +1545,11 @@ struct QuantGemmMultiDKernel
                     {
                         CK_TILE_ERROR("M is not a multiple of vector load size for D tensor!");
                     }
-                    DTensorIsValid = false;
+                    ds_are_valid = false;
                 }
             }
         });
-        if(!DTensorIsValid)
+        if(!ds_are_valid)
         {
             return false;
         }
