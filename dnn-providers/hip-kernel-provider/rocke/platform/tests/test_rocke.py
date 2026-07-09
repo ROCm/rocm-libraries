@@ -85,9 +85,10 @@ from rocke.instances import (
 #
 # A separate handful drive the lowerer all the way through
 # ``hipModuleLoadData``, which blocks indefinitely on a host with no ROCm
-# GPU (no ``/dev/kfd``). Those are skipped when no GPU device node is
-# present. The probe is deliberately torch-free (the point of this suite is
-# torch-independence) and avoids issuing any HIP call that could itself hang.
+# GPU (no ``/dev/kfd`` or ``/dev/dxg``). Those are skipped when no GPU device
+# node is present. The probe is deliberately torch-free (the point of this
+# suite is torch-independence) and avoids issuing any HIP call that could
+# itself hang.
 
 try:  # torch is optional; gate torch-facing tests on its presence.
     import torch as _torch  # noqa: F401
@@ -98,13 +99,15 @@ except Exception:  # pragma: no cover - depends on the environment
 
 import os as _os
 
-# A ROCm GPU exposes the kernel-fusion device node at /dev/kfd. Its absence
-# means launches/module loads cannot succeed and would hang; skip then.
-_HAVE_GPU = _os.path.exists("/dev/kfd")
+# A ROCm GPU exposes a device node the runtime can open: /dev/kfd on native
+# Linux, or /dev/dxg under WSL, where ROCm reaches the GPU through the DXG
+# bridge. Absence of both means launches/module loads cannot succeed and would
+# hang; skip then.
+_HAVE_GPU = _os.path.exists("/dev/kfd") or _os.path.exists("/dev/dxg")
 
 _requires_torch = unittest.skipUnless(_HAVE_TORCH, "requires torch")
 _requires_gpu = unittest.skipUnless(
-    _HAVE_GPU, "requires a ROCm GPU (no /dev/kfd device node present)"
+    _HAVE_GPU, "requires a ROCm GPU (no /dev/kfd or /dev/dxg device node present)"
 )
 
 
