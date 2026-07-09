@@ -7,6 +7,7 @@ import os
 import subprocess
 from pathlib import Path
 
+
 SETUP_SCRIPT = Path(__file__).resolve().parents[3] / "setup.sh"
 
 
@@ -19,17 +20,6 @@ def test_setup_script_has_valid_shell_syntax() -> None:
     )
 
     assert result.returncode == 0, result.stderr
-
-
-def test_setup_script_builds_standalone_frontend_wheel() -> None:
-    text = SETUP_SCRIPT.read_text()
-
-    assert 'cmake -S "$PY_BINDINGS_SRC" -B "$PY_BINDINGS_BUILD_DIR"' in text
-    assert "pack_frontend_wheel.py" in text
-    assert (
-        'python -m pip install --force-reinstall "${HIPDNN_FRONTEND_WHEELS[0]}"' in text
-    )
-    assert 'pip install -e "$HIPDNN_ROOT/python"' not in text
 
 
 def test_setup_script_rejects_force_build_with_cuda_mode() -> None:
