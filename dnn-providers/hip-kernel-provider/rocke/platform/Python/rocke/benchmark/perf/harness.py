@@ -50,15 +50,28 @@ def _write_pmc_input(groups: Sequence[Sequence[str]], path: Path) -> None:
     path.write_text("".join("pmc: " + " ".join(g) + "\n" for g in groups))
 
 
-def _run_rocprofv3(cmd: Sequence[str], pmc_input: Path, outdir: Path,
-                   env: dict, timeout: int) -> tuple[bool, str]:
+def _run_rocprofv3(
+    cmd: Sequence[str], pmc_input: Path, outdir: Path, env: dict, timeout: int
+) -> tuple[bool, str]:
     """Run the kernel under rocprofv3. Returns (ok, stdout) so the caller can also
     parse the profiled run's PerfJSON (its timing correlates with the counters)."""
     try:
         proc = subprocess.run(
-            ["rocprofv3", "-i", str(pmc_input), "-d", str(outdir),
-             "--output-format", "csv", "--", *cmd],
-            capture_output=True, text=True, timeout=timeout, env=env,
+            [
+                "rocprofv3",
+                "-i",
+                str(pmc_input),
+                "-d",
+                str(outdir),
+                "--output-format",
+                "csv",
+                "--",
+                *cmd,
+            ],
+            capture_output=True,
+            text=True,
+            timeout=timeout,
+            env=env,
         )
     except (OSError, subprocess.SubprocessError):
         return False, ""
@@ -99,8 +112,8 @@ def _counter_medians(trows: list[dict], raw_to_norm: dict, warmup: int) -> dict:
         by_raw.setdefault(cn, []).append((did, val))
     out: dict = {}
     for raw, pairs in by_raw.items():
-        pairs.sort(key=lambda p: p[0])          # launch order
-        kept = pairs[warmup:] or pairs          # keep all if warmup >= dispatches
+        pairs.sort(key=lambda p: p[0])  # launch order
+        kept = pairs[warmup:] or pairs  # keep all if warmup >= dispatches
         m = _median([v for _, v in kept])
         if m is not None:
             out[raw_to_norm[raw]] = int(m) if m == int(m) else m
@@ -173,19 +186,28 @@ def _perf_from_stdout(stdout: str) -> dict:
 def _wall(cmd: Sequence[str], env: dict, timeout: int) -> dict:
     """Separate un-profiled run -> real-world timing (no profiler overhead)."""
     try:
-        proc = subprocess.run(cmd, capture_output=True, text=True,
-                              timeout=timeout, env=env)
+        proc = subprocess.run(
+            cmd, capture_output=True, text=True, timeout=timeout, env=env
+        )
     except (OSError, subprocess.SubprocessError):
         return {}
     return _perf_from_stdout(proc.stdout or "")
 
 
-def profile(cmd: Sequence[str], arch: str, *, match: Optional[str] = None,
-            label: Optional[str] = None, op: str = "unknown",
-            shape: Optional[dict] = None, warmup: int = 0,
-            per_dispatch: bool = False, env: Optional[dict] = None,
-            timeout: int = 1800,
-            warn: Optional[Callable[[str], None]] = None) -> dict:
+def profile(
+    cmd: Sequence[str],
+    arch: str,
+    *,
+    match: Optional[str] = None,
+    label: Optional[str] = None,
+    op: str = "unknown",
+    shape: Optional[dict] = None,
+    warmup: int = 0,
+    per_dispatch: bool = False,
+    env: Optional[dict] = None,
+    timeout: int = 1800,
+    warn: Optional[Callable[[str], None]] = None,
+) -> dict:
     """Profile the kernel launched by `cmd` and return a measurement record.
 
     `cmd` is a kernel-launch command (list of argv). `arch` selects the counter map.
@@ -210,12 +232,13 @@ def profile(cmd: Sequence[str], arch: str, *, match: Optional[str] = None,
     profiler failed, no matching dispatch, counters didn't populate) so a caller
     can surface it instead of the record silently degrading to wall-only.
     """
+
     def _warn(msg: str) -> None:
         if warn:
             warn(msg)
 
     env = {**os.environ, **(env or {})}
-    sel = _counters.discover(arch)               # normalized -> raw
+    sel = _counters.discover(arch)  # normalized -> raw
     raw_to_norm = {raw: norm for norm, raw in sel.items()}
 
     counters_out: dict = {}
@@ -224,8 +247,10 @@ def profile(cmd: Sequence[str], arch: str, *, match: Optional[str] = None,
     samples: list = []
     prof_stdout = ""
     if not sel:
-        _warn(f"no PMU counters available for {arch} "
-              "(rocprofv3 missing/unsupported); producing a wall-only record")
+        _warn(
+            f"no PMU counters available for {arch} "
+            "(rocprofv3 missing/unsupported); producing a wall-only record"
+        )
     with tempfile.TemporaryDirectory(prefix="rocke_perf_prof_") as tmp:
         tmp = Path(tmp)
         outdir = tmp / "prof"
@@ -237,47 +262,65 @@ def profile(cmd: Sequence[str], arch: str, *, match: Optional[str] = None,
             _write_pmc_input(groups, pmc)
             ran, prof_stdout = _run_rocprofv3(cmd, pmc, outdir, env, timeout)
             if not ran:
-                _warn("rocprofv3 failed to run the kernel; counters unavailable "
-                      "(wall-only record)")
+                _warn(
+                    "rocprofv3 failed to run the kernel; counters unavailable "
+                    "(wall-only record)"
+                )
             else:
                 npass = _count_passes(outdir)
                 if npass > len(groups):
                     # rocprofv3 split a group across passes -> those counters came
                     # from different executions, so cross-counter ratios aren't
                     # coherent.
-                    _warn(f"rocprofv3 used more passes ({npass}) than the "
-                          f"{len(groups)} counter group(s) requested; a group was "
-                          "split, so counters in it are not from one execution "
-                          "(check counters._BLOCK_SLOTS for this arch)")
+                    _warn(
+                        f"rocprofv3 used more passes ({npass}) than the "
+                        f"{len(groups)} counter group(s) requested; a group was "
+                        "split, so counters in it are not from one execution "
+                        "(check counters._BLOCK_SLOTS for this arch)"
+                    )
         if ran:
             rows = _read_counter_csvs(outdir)
             target = _pick_target_kernel(rows, match)
             if target is None:
-                _warn("no matching kernel dispatch in profiler output"
-                      + (f" for match={match!r}" if match else "")
-                      + "; counters empty")
-            trows = [r for r in rows if r.get("Kernel_Name") == target] if target else []
+                _warn(
+                    "no matching kernel dispatch in profiler output"
+                    + (f" for match={match!r}" if match else "")
+                    + "; counters empty"
+                )
+            trows = (
+                [r for r in rows if r.get("Kernel_Name") == target] if target else []
+            )
             # median per counter across the target kernel's dispatches, warmup dropped
             counters_out = _counter_medians(trows, raw_to_norm, warmup)
             if per_dispatch:
                 samples = _counter_samples(trows, raw_to_norm)
             if target and not counters_out:
-                _warn(f"kernel {target!r} matched but no requested counters "
-                      "populated (arch counter gap?)")
+                _warn(
+                    f"kernel {target!r} matched but no requested counters "
+                    "populated (arch counter gap?)"
+                )
             # resources + kernel meta come free in the same CSV (static per kernel)
             if trows:
                 r0 = trows[0]
+
                 def _i(k):
                     try:
                         return int(float(r0.get(k, 0)))
                     except (ValueError, TypeError):
                         return 0
-                resources = {"vgpr": _i("VGPR_Count"), "agpr": _i("Accum_VGPR_Count"),
-                             "sgpr": _i("SGPR_Count"), "lds_bytes": _i("LDS_Block_Size"),
-                             "source": "rocprofv3"}
-                kmeta = {"kernel_name": r0.get("Kernel_Name", target or ""),
-                         "workgroup_size": _i("Workgroup_Size"),
-                         "grid_size": _i("Grid_Size")}
+
+                resources = {
+                    "vgpr": _i("VGPR_Count"),
+                    "agpr": _i("Accum_VGPR_Count"),
+                    "sgpr": _i("SGPR_Count"),
+                    "lds_bytes": _i("LDS_Block_Size"),
+                    "source": "rocprofv3",
+                }
+                kmeta = {
+                    "kernel_name": r0.get("Kernel_Name", target or ""),
+                    "workgroup_size": _i("Workgroup_Size"),
+                    "grid_size": _i("Grid_Size"),
+                }
 
     # profiled: timing of the profiled run (same execution as the counters, so it
     # correlates with them). wall: a separate un-profiled run (real-world timing).
@@ -286,25 +329,39 @@ def profile(cmd: Sequence[str], arch: str, *, match: Optional[str] = None,
 
     derived: dict = {}
     if counters_out.get("total_clocks"):
-        derived["busy_fraction"] = counters_out.get("busy_cycles", 0) / counters_out["total_clocks"]
+        derived["busy_fraction"] = (
+            counters_out.get("busy_cycles", 0) / counters_out["total_clocks"]
+        )
     if (counters_out.get("l2_hit", 0) + counters_out.get("l2_miss", 0)) > 0:
-        derived["l2_hit_rate"] = counters_out["l2_hit"] / (counters_out["l2_hit"] + counters_out["l2_miss"])
+        derived["l2_hit_rate"] = counters_out["l2_hit"] / (
+            counters_out["l2_hit"] + counters_out["l2_miss"]
+        )
     if profiled.get("ms_median") and wall.get("ms_median"):
         derived["profiler_overhead_pct"] = (
-            (profiled["ms_median"] - wall["ms_median"]) / wall["ms_median"] * 100.0)
+            (profiled["ms_median"] - wall["ms_median"]) / wall["ms_median"] * 100.0
+        )
 
     dispatched = kmeta.get("kernel_name", "") or (match or "")
     kernel_name = label or dispatched
-    kernel: dict = {"kernel_name": kernel_name, "op": op, "shape": shape or {},
-                    "grid": [kmeta.get("grid_size", 0)],
-                    "block": [kmeta.get("workgroup_size", 0)]}
+    kernel: dict = {
+        "kernel_name": kernel_name,
+        "op": op,
+        "shape": shape or {},
+        "grid": [kmeta.get("grid_size", 0)],
+        "block": [kmeta.get("workgroup_size", 0)],
+    }
     if label and dispatched and dispatched != label:
-        kernel["dispatch_symbol"] = dispatched   # keep the real symbol for debugging
+        kernel["dispatch_symbol"] = dispatched  # keep the real symbol for debugging
 
     record = {
         "schema": _schema.SCHEMA_VERSION,
-        "run": {"run_id": f"{_utc()}", "arch": arch, "timestamp": _utc(),
-                "gpu_name": "", "rocm_version": ""},
+        "run": {
+            "run_id": f"{_utc()}",
+            "arch": arch,
+            "timestamp": _utc(),
+            "gpu_name": "",
+            "rocm_version": "",
+        },
         "kernel": kernel,
         "wall": wall,
         "profiled": profiled,
@@ -315,6 +372,6 @@ def profile(cmd: Sequence[str], arch: str, *, match: Optional[str] = None,
         "verify": {},
     }
     if per_dispatch:
-        record["counter_samples"] = samples   # raw per-dispatch values (opt-in)
+        record["counter_samples"] = samples  # raw per-dispatch values (opt-in)
     _schema.validate(record)
     return record

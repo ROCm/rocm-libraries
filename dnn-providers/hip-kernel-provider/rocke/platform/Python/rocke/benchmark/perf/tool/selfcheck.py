@@ -22,13 +22,17 @@ from typing import Any, Mapping, Sequence
 from rocke.benchmark.perf import report as _report
 from . import store as _store
 
-DEFAULT_THRESHOLD = 0.05   # 5% relative change
-DEFAULT_NOISE_K = 3.0      # flag only past k * observed spread
+DEFAULT_THRESHOLD = 0.05  # 5% relative change
+DEFAULT_NOISE_K = 3.0  # flag only past k * observed spread
 
 
-def compare(previous: Mapping[str, Any], current: Mapping[str, Any], *,
-            threshold: float = DEFAULT_THRESHOLD,
-            noise_k: float = DEFAULT_NOISE_K) -> dict:
+def compare(
+    previous: Mapping[str, Any],
+    current: Mapping[str, Any],
+    *,
+    threshold: float = DEFAULT_THRESHOLD,
+    noise_k: float = DEFAULT_NOISE_K,
+) -> dict:
     """Advisory verdict comparing `current` against `previous`.
 
     Returns a dict with `verdict` in {regressed, improved, within_noise, unknown},
@@ -60,9 +64,13 @@ def compare(previous: Mapping[str, Any], current: Mapping[str, Any], *,
     }
 
 
-def check_history(records: Sequence[Mapping[str, Any]], identity: tuple, *,
-                  threshold: float = DEFAULT_THRESHOLD,
-                  noise_k: float = DEFAULT_NOISE_K) -> dict:
+def check_history(
+    records: Sequence[Mapping[str, Any]],
+    identity: tuple,
+    *,
+    threshold: float = DEFAULT_THRESHOLD,
+    noise_k: float = DEFAULT_NOISE_K,
+) -> dict:
     """Compare the two most recent runs of `identity` in a record history.
 
     `records` is what `store.load()` returns (append order). Returns a
@@ -76,8 +84,10 @@ def check_history(records: Sequence[Mapping[str, Any]], identity: tuple, *,
 
 
 _TAG = {
-    "regressed": "REGRESSED", "improved": "improved",
-    "within_noise": "within noise", "unknown": "unknown",
+    "regressed": "REGRESSED",
+    "improved": "improved",
+    "within_noise": "within noise",
+    "unknown": "unknown",
     "no_baseline": "no baseline",
 }
 
@@ -88,24 +98,34 @@ def format_result(result: Mapping[str, Any]) -> str:
     tag = _TAG.get(verdict, verdict)
     if verdict == "no_baseline":
         ident = result.get("identity", {})
-        return (f"[{tag}] {ident.get('arch','')}  {ident.get('kernel_name','')}  "
-                f"{ident.get('shape','') or '(no shape)'}  "
-                f"({result.get('n_runs', 0)} run(s), need 2)")
+        return (
+            f"[{tag}] {ident.get('arch','')}  {ident.get('kernel_name','')}  "
+            f"{ident.get('shape','') or '(no shape)'}  "
+            f"({result.get('n_runs', 0)} run(s), need 2)"
+        )
 
     d = result.get("diff", {})
     ident = d.get("identity", {})
-    lines = [f"[{tag}] {ident.get('arch','')}  {ident.get('kernel_name','')}  "
-             f"{ident.get('shape','') or '(no shape)'}"]
+    lines = [
+        f"[{tag}] {ident.get('arch','')}  {ident.get('kernel_name','')}  "
+        f"{ident.get('shape','') or '(no shape)'}"
+    ]
     metric = result.get("metric")
     pct = result.get("pct_change")
     if pct is not None:
         floor = result.get("floor_pct")
-        lines.append(f"  {metric}: {d.get('baseline'):g} -> {d.get('current'):g}  "
-                     f"({pct:+.1f}%, floor {floor:.1f}%)")
+        lines.append(
+            f"  {metric}: {d.get('baseline'):g} -> {d.get('current'):g}  "
+            f"({pct:+.1f}%, floor {floor:.1f}%)"
+        )
     else:
-        lines.append(f"  {metric}: not directly comparable "
-                     f"(baseline={d.get('baseline')}, current={d.get('current')})")
+        lines.append(
+            f"  {metric}: not directly comparable "
+            f"(baseline={d.get('baseline')}, current={d.get('current')})"
+        )
     for k, e in (d.get("panel") or {}).items():
         if "delta" in e:
-            lines.append(f"    {k}: {e['baseline']:g} -> {e['current']:g} ({e['delta']:+g})")
+            lines.append(
+                f"    {k}: {e['baseline']:g} -> {e['current']:g} ({e['delta']:+g})"
+            )
     return "\n".join(lines)

@@ -45,12 +45,26 @@ Variant = namedtuple("Variant", "cache_key kernel_name hsaco manifest shape")
 def _launch_cmd(v: Variant) -> list[str]:
     """The kernel-launch command for a variant: rocKE's run_manifest."""
     m, n, k = v.shape["M"], v.shape["N"], v.shape["K"]
-    return [sys.executable, "-m", "rocke.run_manifest",
-            v.hsaco, v.manifest, "--shape", f"{m},{n},{k}"]
+    return [
+        sys.executable,
+        "-m",
+        "rocke.run_manifest",
+        v.hsaco,
+        v.manifest,
+        "--shape",
+        f"{m},{n},{k}",
+    ]
 
 
-def profile_variants(variants: Sequence[Variant], arch: str, *, repeats: int = 3,
-                     warmup: int = 0, cache=None, warn=None) -> list[dict]:
+def profile_variants(
+    variants: Sequence[Variant],
+    arch: str,
+    *,
+    repeats: int = 3,
+    warmup: int = 0,
+    cache=None,
+    warn=None,
+) -> list[dict]:
     """Profile each compiled variant -> aggregate -> store. Returns the records.
 
     `label` = variant.cache_key (stable identity); `match` = compiled symbol;
@@ -59,28 +73,39 @@ def profile_variants(variants: Sequence[Variant], arch: str, *, repeats: int = 3
     """
     records: list[dict] = []
     for v in variants:
-        samples = [_harness.profile(_launch_cmd(v), arch, match=v.kernel_name,
-                                    label=v.cache_key, op="gemm",
-                                    shape=dict(v.shape), warmup=warmup, warn=warn)
-                   for _ in range(max(1, repeats))]
+        samples = [
+            _harness.profile(
+                _launch_cmd(v),
+                arch,
+                match=v.kernel_name,
+                label=v.cache_key,
+                op="gemm",
+                shape=dict(v.shape),
+                warmup=warmup,
+                warn=warn,
+            )
+            for _ in range(max(1, repeats))
+        ]
         rec = _aggregate.aggregate(samples)
         _store.append(rec, cache=cache)
         records.append(rec)
     return records
 
 
-def _build_variants(shapes: Sequence[tuple], arch: str,
-                    output_dir: Path) -> "tuple[list[Variant], int]":
+def _build_variants(
+    shapes: Sequence[tuple], arch: str, output_dir: Path
+) -> "tuple[list[Variant], int]":
     """Reuse rocKE's sweep to expand + compile variants (lazy rocKE import).
 
     Returns (variants, warmup_iters) - warmup_iters is the sweep config's warmup
     count, which the manifest uses, so the caller can drop it from counter medians.
     """
-    from rocke.benchmark.gemm import fp16_rcr_sweep as sw   # noqa: WPS433 (lazy)
+    from rocke.benchmark.gemm import fp16_rcr_sweep as sw  # noqa: WPS433 (lazy)
 
     gemm_shapes = tuple(
         sw.GemmSweepShape(M=m, N=n, K=k, label=(rest[0] if rest else ""))
-        for (m, n, k, *rest) in shapes)
+        for (m, n, k, *rest) in shapes
+    )
     cfg = sw.GemmSweepConfig(arch=arch, shapes=gemm_shapes)
     plan = sw.expand_sweep(cfg)
     builds = sw.compile_sweep_variants(plan, output_dir)
@@ -90,20 +115,33 @@ def _build_variants(shapes: Sequence[tuple], arch: str,
         b = by_key.get(v.cache_key)
         if not b or not b.ok:
             continue
-        variants.append(Variant(
-            cache_key=v.cache_key, kernel_name=b.kernel_name,
-            hsaco=b.hsaco_path, manifest=b.manifest_path,
-            shape={"M": v.shape.M, "N": v.shape.N, "K": v.shape.K}))
+        variants.append(
+            Variant(
+                cache_key=v.cache_key,
+                kernel_name=b.kernel_name,
+                hsaco=b.hsaco_path,
+                manifest=b.manifest_path,
+                shape={"M": v.shape.M, "N": v.shape.N, "K": v.shape.K},
+            )
+        )
     return variants, cfg.warmup_iters
 
 
-def profile_sweep(shapes: Sequence[tuple], arch: str, *, repeats: int = 3,
-                  cache=None, output_dir=None, warn=None) -> list[dict]:
+def profile_sweep(
+    shapes: Sequence[tuple],
+    arch: str,
+    *,
+    repeats: int = 3,
+    cache=None,
+    output_dir=None,
+    warn=None,
+) -> list[dict]:
     """Expand+compile rocKE's GEMM sweep, then profile each variant into the store."""
     out = Path(output_dir) if output_dir else Path(tempfile.mkdtemp(prefix="rbsweep_"))
     variants, warmup = _build_variants(shapes, arch, out)
-    return profile_variants(variants, arch, repeats=repeats, warmup=warmup,
-                            cache=cache, warn=warn)
+    return profile_variants(
+        variants, arch, repeats=repeats, warmup=warmup, cache=cache, warn=warn
+    )
 
 
 def _parse_shape(text: str) -> tuple:
@@ -119,28 +157,43 @@ def _parse_shape(text: str) -> tuple:
 def main(argv: Optional[Sequence[str]] = None) -> int:
     p = argparse.ArgumentParser(
         prog="examples.profile_gemm_sweep",
-        description="EXAMPLE: drive rocke.benchmark.perf primitives over rocKE's GEMM sweep.")
+        description="EXAMPLE: drive rocke.benchmark.perf primitives over rocKE's GEMM sweep.",
+    )
     p.add_argument("--arch", default="gfx950")
-    p.add_argument("--shape", action="append", default=None,
-                   help="MxNxK[:label]; repeatable (default: a small demo set)")
+    p.add_argument(
+        "--shape",
+        action="append",
+        default=None,
+        help="MxNxK[:label]; repeatable (default: a small demo set)",
+    )
     p.add_argument("--repeats", type=int, default=3)
     p.add_argument("--cache", default=None)
     p.add_argument("--output-dir", dest="output_dir", default=None)
     p.add_argument("--json", action="store_true")
     a = p.parse_args(argv)
 
-    shapes = [_parse_shape(s) for s in a.shape] if a.shape else [
-        (128, 128, 64, "small"), (512, 512, 512, "balanced")]
+    shapes = (
+        [_parse_shape(s) for s in a.shape]
+        if a.shape
+        else [(128, 128, 64, "small"), (512, 512, 512, "balanced")]
+    )
     warn = lambda m: print(f"warning: {m}", file=sys.stderr)
-    recs = profile_sweep(shapes, a.arch, repeats=a.repeats, cache=a.cache,
-                         output_dir=a.output_dir, warn=warn)
+    recs = profile_sweep(
+        shapes,
+        a.arch,
+        repeats=a.repeats,
+        cache=a.cache,
+        output_dir=a.output_dir,
+        warn=warn,
+    )
 
     # Self-check each variant against its prior stored run (reuses selfcheck).
     history = _store.load(cache=a.cache)
     checks = [_selfcheck.check_history(history, _schema.identity(r)) for r in recs]
     if a.json:
-        print(json.dumps({"records": recs, "selfcheck": checks},
-                         sort_keys=True, indent=2))
+        print(
+            json.dumps({"records": recs, "selfcheck": checks}, sort_keys=True, indent=2)
+        )
     else:
         print(f"profiled {len(recs)} variant(s) on {a.arch}:")
         for r, c in zip(recs, checks):

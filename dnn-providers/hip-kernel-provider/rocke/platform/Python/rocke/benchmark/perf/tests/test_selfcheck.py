@@ -7,8 +7,18 @@ from rocke.benchmark.perf import schema
 from rocke.benchmark.perf.tool import selfcheck
 
 
-def _rec(arch="gfx950", kernel="k", shape=None, *, busy=None, total=None,
-         ms=None, l2_hit=None, l2_miss=None, spread=None):
+def _rec(
+    arch="gfx950",
+    kernel="k",
+    shape=None,
+    *,
+    busy=None,
+    total=None,
+    ms=None,
+    l2_hit=None,
+    l2_miss=None,
+    spread=None
+):
     counters = {}
     if busy is not None:
         counters["busy_cycles"] = busy
@@ -43,19 +53,19 @@ def _rec(arch="gfx950", kernel="k", shape=None, *, busy=None, total=None,
 class TestCompare(unittest.TestCase):
     def test_real_regression_flagged(self):
         prev = _rec(busy=1000, total=1000)
-        cur = _rec(busy=1100, total=1000)          # +10%, > 5% floor
+        cur = _rec(busy=1100, total=1000)  # +10%, > 5% floor
         r = selfcheck.compare(prev, cur)
         self.assertEqual(r["verdict"], "regressed")
         self.assertAlmostEqual(r["pct_change"], 10.0)
 
     def test_small_change_within_noise(self):
         prev = _rec(busy=1000, total=1000)
-        cur = _rec(busy=1020, total=1000)          # +2%, < 5% floor
+        cur = _rec(busy=1020, total=1000)  # +2%, < 5% floor
         self.assertEqual(selfcheck.compare(prev, cur)["verdict"], "within_noise")
 
     def test_improvement_flagged(self):
         prev = _rec(busy=1000, total=1000)
-        cur = _rec(busy=900, total=1000)           # -10%
+        cur = _rec(busy=900, total=1000)  # -10%
         self.assertEqual(selfcheck.compare(prev, cur)["verdict"], "improved")
 
     def test_noise_floor_uses_spread(self):
@@ -78,13 +88,13 @@ class TestCompare(unittest.TestCase):
         self.assertAlmostEqual(panel["l2_hit_rate"]["delta"], -0.4)
 
     def test_metric_mismatch_unknown(self):
-        prev = _rec(busy=1000, total=1000)         # busy_cycles
-        cur = _rec(ms=2.0)                          # ms only
+        prev = _rec(busy=1000, total=1000)  # busy_cycles
+        cur = _rec(ms=2.0)  # ms only
         self.assertEqual(selfcheck.compare(prev, cur)["verdict"], "unknown")
 
     def test_fallback_to_wall_when_no_counters(self):
         prev = _rec(ms=1.0)
-        cur = _rec(ms=1.2)                          # +20% on ms
+        cur = _rec(ms=1.2)  # +20% on ms
         r = selfcheck.compare(prev, cur)
         self.assertEqual(r["metric"], "ms_median")
         self.assertEqual(r["verdict"], "regressed")
@@ -97,9 +107,11 @@ class TestCheckHistory(unittest.TestCase):
         self.assertEqual(selfcheck.check_history(recs, ident)["verdict"], "no_baseline")
 
     def test_compares_two_most_recent(self):
-        recs = [_rec(busy=1000, total=1000),
-                _rec(busy=1005, total=1000),        # prev (2nd most recent)
-                _rec(busy=1200, total=1000)]        # current -> regressed vs 1005
+        recs = [
+            _rec(busy=1000, total=1000),
+            _rec(busy=1005, total=1000),  # prev (2nd most recent)
+            _rec(busy=1200, total=1000),
+        ]  # current -> regressed vs 1005
         ident = schema.identity(recs[0])
         r = selfcheck.check_history(recs, ident)
         self.assertEqual(r["verdict"], "regressed")
@@ -107,11 +119,13 @@ class TestCheckHistory(unittest.TestCase):
         self.assertAlmostEqual(r["diff"]["current"], 1200)
 
     def test_ignores_other_identities(self):
-        recs = [_rec(kernel="a", busy=1000, total=1000),
-                _rec(kernel="b", busy=9999, total=1000),
-                _rec(kernel="a", busy=1010, total=1000)]
+        recs = [
+            _rec(kernel="a", busy=1000, total=1000),
+            _rec(kernel="b", busy=9999, total=1000),
+            _rec(kernel="a", busy=1010, total=1000),
+        ]
         ident = schema.identity(_rec(kernel="a"))
-        r = selfcheck.check_history(recs, ident)     # only the two "a" runs compared
+        r = selfcheck.check_history(recs, ident)  # only the two "a" runs compared
         self.assertEqual(r["verdict"], "within_noise")
 
 

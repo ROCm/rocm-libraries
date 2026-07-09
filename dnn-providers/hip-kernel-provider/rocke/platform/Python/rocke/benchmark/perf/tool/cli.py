@@ -56,26 +56,45 @@ def _cmd_profile(a: argparse.Namespace) -> int:
     _warn = lambda m: print(f"warning: {m}", file=sys.stderr)
     samples = []
     for _ in range(max(1, a.repeats)):
-        samples.append(_harness.profile(
-            cmd, a.arch, match=a.match_kernel, label=a.kernel_name,
-            op=a.op, shape=shape, warmup=a.warmup,
-            per_dispatch=a.per_dispatch, warn=_warn))
+        samples.append(
+            _harness.profile(
+                cmd,
+                a.arch,
+                match=a.match_kernel,
+                label=a.kernel_name,
+                op=a.op,
+                shape=shape,
+                warmup=a.warmup,
+                per_dispatch=a.per_dispatch,
+                warn=_warn,
+            )
+        )
     rec = _aggregate.aggregate(samples)
 
     identity = _schema.identity(rec)
     prior = _store.records_for(_store.load(cache=a.cache), identity)
     if prior:
-        result = _selfcheck.compare(prior[-1], rec,
-                                    threshold=a.threshold, noise_k=a.noise_k)
+        result = _selfcheck.compare(
+            prior[-1], rec, threshold=a.threshold, noise_k=a.noise_k
+        )
     else:
-        result = {"verdict": "no_baseline", "n_runs": len(prior),
-                  "identity": {"arch": identity[0], "kernel_name": identity[1],
-                               "shape": identity[2]}}
+        result = {
+            "verdict": "no_baseline",
+            "n_runs": len(prior),
+            "identity": {
+                "arch": identity[0],
+                "kernel_name": identity[1],
+                "shape": identity[2],
+            },
+        }
     if not a.no_store:
         _store.append(rec, cache=a.cache)
 
-    _emit({"record": rec, "selfcheck": result}, as_json=a.json,
-          human=_report.format_record(rec) + "\n" + _selfcheck.format_result(result))
+    _emit(
+        {"record": rec, "selfcheck": result},
+        as_json=a.json,
+        human=_report.format_record(rec) + "\n" + _selfcheck.format_result(result),
+    )
     return 1 if result.get("verdict") == "regressed" else 0
 
 
@@ -87,8 +106,10 @@ def _cmd_occupancy(a: argparse.Namespace) -> int:
         raise SystemExit(f"occupancy: cannot read {a.hsaco}: {e}")
     res = _occupancy.resources(data, a.arch)
     if not res:
-        raise SystemExit("occupancy: could not read ELF notes "
-                         "(need llvm-readelf and a valid HSACO)")
+        raise SystemExit(
+            "occupancy: could not read ELF notes "
+            "(need llvm-readelf and a valid HSACO)"
+        )
     human = "\n".join(f"{k}: {v}" for k, v in res.items())
     _emit(res, as_json=a.json, human=human)
     return 0
@@ -101,14 +122,22 @@ def _cmd_compare(a: argparse.Namespace) -> int:
     else:
         if not (a.arch and a.kernel_name):
             raise SystemExit("compare: give --arch and --kernel-name, or --all")
-        identities = [(a.arch, a.kernel_name, _schema.shape_signature(_shape_arg(a.shape)))]
+        identities = [
+            (a.arch, a.kernel_name, _schema.shape_signature(_shape_arg(a.shape)))
+        ]
 
-    results = [_selfcheck.check_history(records, ident,
-                                        threshold=a.threshold, noise_k=a.noise_k)
-               for ident in identities]
+    results = [
+        _selfcheck.check_history(
+            records, ident, threshold=a.threshold, noise_k=a.noise_k
+        )
+        for ident in identities
+    ]
     regressed = any(r.get("verdict") == "regressed" for r in results)
-    _emit(results, as_json=a.json,
-          human="\n".join(_selfcheck.format_result(r) for r in results) or "(no history)")
+    _emit(
+        results,
+        as_json=a.json,
+        human="\n".join(_selfcheck.format_result(r) for r in results) or "(no history)",
+    )
     return 1 if regressed else 0
 
 
@@ -117,53 +146,79 @@ def _build_parser() -> argparse.ArgumentParser:
     # defaults so a value given at one position isn't clobbered by the other;
     # main() fills the real defaults.
     common = argparse.ArgumentParser(add_help=False)
-    common.add_argument("--json", action="store_true", default=argparse.SUPPRESS,
-                        help="emit JSON (for agents)")
-    common.add_argument("--cache", default=argparse.SUPPRESS,
-                        help="override the cache dir")
+    common.add_argument(
+        "--json",
+        action="store_true",
+        default=argparse.SUPPRESS,
+        help="emit JSON (for agents)",
+    )
+    common.add_argument(
+        "--cache", default=argparse.SUPPRESS, help="override the cache dir"
+    )
 
     p = argparse.ArgumentParser(prog="rocke.benchmark.perf.tool", parents=[common])
     sub = p.add_subparsers(dest="command", required=True)
 
-    pr = sub.add_parser("profile", parents=[common],
-                        help="measure -> aggregate -> store -> self-check")
+    pr = sub.add_parser(
+        "profile", parents=[common], help="measure -> aggregate -> store -> self-check"
+    )
     pr.add_argument("--arch", required=True)
     pr.add_argument("--op", default="unknown")
     pr.add_argument("--shape", default=None, help="JSON object, e.g. '{\"M\":512}'")
-    pr.add_argument("--kernel-name", dest="kernel_name", default=None,
-                    help="identity name for pairing (stable across edits that "
-                         "rename the dispatched symbol); default = dispatched symbol")
-    pr.add_argument("--match-kernel", dest="match_kernel", default=None,
-                    help="substring of the dispatched symbol to profile; "
-                         "default = busiest non-helper dispatch")
+    pr.add_argument(
+        "--kernel-name",
+        dest="kernel_name",
+        default=None,
+        help="identity name for pairing (stable across edits that "
+        "rename the dispatched symbol); default = dispatched symbol",
+    )
+    pr.add_argument(
+        "--match-kernel",
+        dest="match_kernel",
+        default=None,
+        help="substring of the dispatched symbol to profile; "
+        "default = busiest non-helper dispatch",
+    )
     pr.add_argument("--repeats", type=int, default=1)
-    pr.add_argument("--warmup", type=int, default=0,
-                    help="leading warmup dispatches to drop from counter medians "
-                         "(match the launcher's warmup_iters)")
-    pr.add_argument("--per-dispatch", dest="per_dispatch", action="store_true",
-                    help="also emit raw per-dispatch counter values (counter_samples)")
+    pr.add_argument(
+        "--warmup",
+        type=int,
+        default=0,
+        help="leading warmup dispatches to drop from counter medians "
+        "(match the launcher's warmup_iters)",
+    )
+    pr.add_argument(
+        "--per-dispatch",
+        dest="per_dispatch",
+        action="store_true",
+        help="also emit raw per-dispatch counter values (counter_samples)",
+    )
     pr.add_argument("--threshold", type=float, default=_selfcheck.DEFAULT_THRESHOLD)
-    pr.add_argument("--noise-k", dest="noise_k", type=float,
-                    default=_selfcheck.DEFAULT_NOISE_K)
+    pr.add_argument(
+        "--noise-k", dest="noise_k", type=float, default=_selfcheck.DEFAULT_NOISE_K
+    )
     pr.add_argument("--no-store", dest="no_store", action="store_true")
     pr.add_argument("cmd", nargs=argparse.REMAINDER, help="-- <kernel launch argv>")
     pr.set_defaults(func=_cmd_profile)
 
-    oc = sub.add_parser("occupancy", parents=[common],
-                        help="ELF-note resources for an HSACO (no GPU)")
+    oc = sub.add_parser(
+        "occupancy", parents=[common], help="ELF-note resources for an HSACO (no GPU)"
+    )
     oc.add_argument("hsaco")
     oc.add_argument("--arch", required=True)
     oc.set_defaults(func=_cmd_occupancy)
 
-    cm = sub.add_parser("compare", parents=[common],
-                        help="improve/regress from stored history (no GPU)")
+    cm = sub.add_parser(
+        "compare", parents=[common], help="improve/regress from stored history (no GPU)"
+    )
     cm.add_argument("--arch", default=None)
     cm.add_argument("--kernel-name", dest="kernel_name", default=None)
     cm.add_argument("--shape", default=None, help="JSON object, e.g. '{\"M\":512}'")
     cm.add_argument("--all", action="store_true", help="every identity in history")
     cm.add_argument("--threshold", type=float, default=_selfcheck.DEFAULT_THRESHOLD)
-    cm.add_argument("--noise-k", dest="noise_k", type=float,
-                    default=_selfcheck.DEFAULT_NOISE_K)
+    cm.add_argument(
+        "--noise-k", dest="noise_k", type=float, default=_selfcheck.DEFAULT_NOISE_K
+    )
     cm.set_defaults(func=_cmd_compare)
     return p
 

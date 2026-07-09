@@ -63,7 +63,9 @@ def parse_notes(hsaco_bytes: bytes) -> dict:
         try:
             out = subprocess.run(
                 [readelf, "--notes", f.name],
-                capture_output=True, text=True, timeout=30,
+                capture_output=True,
+                text=True,
+                timeout=30,
             )
         except (OSError, subprocess.SubprocessError):
             return {}

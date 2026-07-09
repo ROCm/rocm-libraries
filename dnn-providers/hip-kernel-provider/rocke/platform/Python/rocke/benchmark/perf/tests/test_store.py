@@ -39,7 +39,7 @@ class TestStore(unittest.TestCase):
         store.append(r1, cache=self.cache)
         store.append(r2, cache=self.cache)
         got = store.load(cache=self.cache)
-        self.assertEqual(got, [r1, r2])          # order + values preserved
+        self.assertEqual(got, [r1, r2])  # order + values preserved
 
     def test_load_missing_is_empty(self):
         self.assertEqual(store.load(cache=self.cache), [])
@@ -55,10 +55,11 @@ class TestStore(unittest.TestCase):
 
     def test_env_var_resolution(self):
         import os
+
         old = os.environ.get("ROCKE_PERF_CACHE")
         try:
             os.environ["ROCKE_PERF_CACHE"] = str(self.cache)
-            store.append(_rec(busy=7))           # no explicit cache -> env
+            store.append(_rec(busy=7))  # no explicit cache -> env
             got = store.load()
             self.assertEqual(got[-1]["counters"]["busy_cycles"], 7)
         finally:
@@ -73,18 +74,23 @@ class TestStore(unittest.TestCase):
             store.append(bad, cache=self.cache)
 
     def test_group_by_identity(self):
-        recs = [_rec(kernel="a", shape={"M": 8}, busy=1),
-                _rec(kernel="a", shape={"M": 8}, busy=2),
-                _rec(kernel="b", shape={"M": 8}, busy=3),
-                _rec(kernel="a", shape={"M": 16}, busy=4)]
+        recs = [
+            _rec(kernel="a", shape={"M": 8}, busy=1),
+            _rec(kernel="a", shape={"M": 8}, busy=2),
+            _rec(kernel="b", shape={"M": 8}, busy=3),
+            _rec(kernel="a", shape={"M": 16}, busy=4),
+        ]
         groups = store.group_by_identity(recs)
-        self.assertEqual(len(groups), 3)         # (a,M=8), (b,M=8), (a,M=16)
+        self.assertEqual(len(groups), 3)  # (a,M=8), (b,M=8), (a,M=16)
         a8 = schema.identity(_rec(kernel="a", shape={"M": 8}))
         self.assertEqual([r["counters"]["busy_cycles"] for r in groups[a8]], [1, 2])
 
     def test_records_for_filters_identity(self):
-        recs = [_rec(kernel="a", busy=1), _rec(kernel="b", busy=2),
-                _rec(kernel="a", busy=3)]
+        recs = [
+            _rec(kernel="a", busy=1),
+            _rec(kernel="b", busy=2),
+            _rec(kernel="a", busy=3),
+        ]
         ident = schema.identity(_rec(kernel="a"))
         got = store.records_for(recs, ident)
         self.assertEqual([r["counters"]["busy_cycles"] for r in got], [1, 3])

@@ -44,8 +44,9 @@ def history_path(cache: Optional[os.PathLike | str] = None) -> Path:
     return cache_dir(cache) / _HISTORY
 
 
-def append(record: Mapping[str, Any], *,
-           cache: Optional[os.PathLike | str] = None) -> Path:
+def append(
+    record: Mapping[str, Any], *, cache: Optional[os.PathLike | str] = None
+) -> Path:
     """Validate and append one record as a JSON line. Returns the history path."""
     _schema.validate(record)
     p = history_path(cache)

@@ -6,8 +6,18 @@ import unittest
 from rocke.benchmark.perf import aggregate, schema
 
 
-def _rec(arch="gfx950", kernel="k", shape=None, *, busy=None, total=None,
-         ms=None, prof_ms=None, l2_hit=None, l2_miss=None):
+def _rec(
+    arch="gfx950",
+    kernel="k",
+    shape=None,
+    *,
+    busy=None,
+    total=None,
+    ms=None,
+    prof_ms=None,
+    l2_hit=None,
+    l2_miss=None
+):
     """Minimal schema-valid single-run record with the fields under test."""
     counters = {}
     if busy is not None:
@@ -37,8 +47,7 @@ def _rec(arch="gfx950", kernel="k", shape=None, *, busy=None, total=None,
 class TestProfiled(unittest.TestCase):
     def test_profiled_medianed_and_overhead(self):
         # wall (real) faster than profiled (profiler overhead)
-        recs = [_rec(busy=b, total=1000, ms=1.0, prof_ms=1.2)
-                for b in (100, 110, 120)]
+        recs = [_rec(busy=b, total=1000, ms=1.0, prof_ms=1.2) for b in (100, 110, 120)]
         out = aggregate.aggregate(recs)
         self.assertEqual(out["profiled"]["ms_median"], 1.2)
         self.assertEqual(out["wall"]["ms_median"], 1.0)
@@ -53,8 +62,10 @@ class TestProfiled(unittest.TestCase):
 
 class TestAggregate(unittest.TestCase):
     def test_median_and_spread(self):
-        recs = [_rec(busy=b, total=1000, ms=m)
-                for b, m in [(100, 1.0), (110, 2.0), (120, 3.0)]]
+        recs = [
+            _rec(busy=b, total=1000, ms=m)
+            for b, m in [(100, 1.0), (110, 2.0), (120, 3.0)]
+        ]
         out = aggregate.aggregate(recs)
         self.assertEqual(out["counters"]["busy_cycles"], 110)
         self.assertEqual(out["wall"]["ms_median"], 2.0)
@@ -77,8 +88,10 @@ class TestAggregate(unittest.TestCase):
         self.assertEqual(out["wall"]["ms_spread_pct"], 0.0)
 
     def test_derived_recomputed_from_medians(self):
-        recs = [_rec(busy=b, total=1000, l2_hit=h, l2_miss=m)
-                for b, h, m in [(500, 90, 10), (600, 80, 20), (700, 70, 30)]]
+        recs = [
+            _rec(busy=b, total=1000, l2_hit=h, l2_miss=m)
+            for b, h, m in [(500, 90, 10), (600, 80, 20), (700, 70, 30)]
+        ]
         out = aggregate.aggregate(recs)
         # medians: busy 600, total 1000, l2_hit 80, l2_miss 20
         self.assertAlmostEqual(out["derived"]["busy_fraction"], 0.6)

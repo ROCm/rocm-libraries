@@ -118,13 +118,16 @@ def aggregate(records: Sequence[Mapping[str, Any]]) -> dict:
     profiled = _median_timing(records, "profiled")
 
     busy = [(r.get("counters") or {}).get(_schema.PRIMARY_METRIC) for r in records]
-    spread = {"ms_pct": wall.get("ms_spread_pct"),
-              "busy_cycles_pct": _spread_pct([v for v in busy if v is not None])}
+    spread = {
+        "ms_pct": wall.get("ms_spread_pct"),
+        "busy_cycles_pct": _spread_pct([v for v in busy if v is not None]),
+    }
 
     derived = _derived(counters)
     if profiled.get("ms_median") and wall.get("ms_median"):
         derived["profiler_overhead_pct"] = (
-            (profiled["ms_median"] - wall["ms_median"]) / wall["ms_median"] * 100.0)
+            (profiled["ms_median"] - wall["ms_median"]) / wall["ms_median"] * 100.0
+        )
 
     out = copy.deepcopy(dict(base))
     out["wall"] = wall

@@ -25,8 +25,15 @@ import subprocess
 # 9-counter set (GRBM 2, SQ 5, TCC 2) all fits a single pass. Values are
 # conservative; overflowing a block just adds a pass (see `group_counters`).
 _BLOCK_SLOTS: dict[str, int] = {
-    "GRBM": 2, "SQ": 8, "TCC": 4, "GL2C": 4,  # L2 is TCC on CDNA, GL2C on RDNA
-    "TCP": 4, "TA": 4, "TD": 4, "CPC": 2, "CPF": 2,
+    "GRBM": 2,
+    "SQ": 8,
+    "TCC": 4,
+    "GL2C": 4,  # L2 is TCC on CDNA, GL2C on RDNA
+    "TCP": 4,
+    "TA": 4,
+    "TD": 4,
+    "CPC": 2,
+    "CPF": 2,
 }
 _DEFAULT_SLOTS = 2  # unknown block: assume a small budget
 
@@ -35,7 +42,7 @@ _DEFAULT_SLOTS = 2  # unknown block: assume a small budget
 # on gfx1201/RDNA4 (the same SQ gap as the instruction counters below).
 _COMMON: dict[str, str] = {
     "total_clocks": "GRBM_COUNT",
-    "busy_cycles": "GRBM_GUI_ACTIVE",   # primary regression metric
+    "busy_cycles": "GRBM_GUI_ACTIVE",  # primary regression metric
     "sq_busy_cycles": "SQ_BUSY_CYCLES",
     "waves": "SQ_WAVES",
     "wait_cycles": "SQ_WAIT_ANY",
@@ -140,7 +147,7 @@ def group_counters(raws: "list[str]") -> "list[list[str]]":
     block_chunks: list[list[list[str]]] = []
     for block, items in by_block.items():
         lim = _BLOCK_SLOTS.get(block, _DEFAULT_SLOTS)
-        block_chunks.append([items[i:i + lim] for i in range(0, len(items), lim)])
+        block_chunks.append([items[i : i + lim] for i in range(0, len(items), lim)])
     n_passes = max((len(c) for c in block_chunks), default=0)
     groups: list[list[str]] = []
     for i in range(n_passes):

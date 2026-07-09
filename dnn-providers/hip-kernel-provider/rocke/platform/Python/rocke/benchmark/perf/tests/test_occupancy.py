@@ -16,7 +16,7 @@ class TestResourcesSourceTag(unittest.TestCase):
     def test_source_tagged_elf_notes(self):
         occupancy.parse_notes = lambda b: {"vgpr": 24, "sgpr": 16, "lds_bytes": 2048}
         res = occupancy.resources(b"fake", "gfx950")
-        self.assertEqual(res["source"], "elf_notes")   # distinguishes from rocprofv3
+        self.assertEqual(res["source"], "elf_notes")  # distinguishes from rocprofv3
         self.assertEqual(res["vgpr"], 24)
         self.assertIsNotNone(res["occupancy"])
 
@@ -28,8 +28,8 @@ class TestResourcesSourceTag(unittest.TestCase):
 class TestOccupancyEstimate(unittest.TestCase):
     def test_estimate_is_capped(self):
         # tiny VGPR -> capped at max_waves_per_simd, not unbounded
-        est = occupancy._occupancy_estimate(4, "gfx950")   # maps to cdna caps
-        self.assertEqual(est, 8)   # cdna max_waves_per_simd
+        est = occupancy._occupancy_estimate(4, "gfx950")  # maps to cdna caps
+        self.assertEqual(est, 8)  # cdna max_waves_per_simd
 
     def test_zero_vgpr_none(self):
         self.assertIsNone(occupancy._occupancy_estimate(0, "gfx950"))

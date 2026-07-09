@@ -6,9 +6,23 @@ import unittest
 from rocke.benchmark.perf import report, schema
 
 
-def _rec(arch="gfx950", kernel="k", shape=None, *, busy=None, total=None,
-         ms=None, waves=None, wait=None, l2_hit=None, l2_miss=None,
-         occupancy=None, lds_bytes=None, spread=None, n=None):
+def _rec(
+    arch="gfx950",
+    kernel="k",
+    shape=None,
+    *,
+    busy=None,
+    total=None,
+    ms=None,
+    waves=None,
+    wait=None,
+    l2_hit=None,
+    l2_miss=None,
+    occupancy=None,
+    lds_bytes=None,
+    spread=None,
+    n=None
+):
     counters = {}
     if busy is not None:
         counters["busy_cycles"] = busy
@@ -62,8 +76,16 @@ class TestSerialize(unittest.TestCase):
 
 class TestPanel(unittest.TestCase):
     def test_panel_pulls_from_all_sections(self):
-        rec = _rec(busy=980, total=1000, waves=16384, wait=50, l2_hit=9, l2_miss=1,
-                   occupancy=12, lds_bytes=2048)
+        rec = _rec(
+            busy=980,
+            total=1000,
+            waves=16384,
+            wait=50,
+            l2_hit=9,
+            l2_miss=1,
+            occupancy=12,
+            lds_bytes=2048,
+        )
         p = report.panel(rec)
         # derived
         self.assertAlmostEqual(p["busy_fraction"], 0.98)
@@ -96,8 +118,8 @@ class TestDiff(unittest.TestCase):
         self.assertAlmostEqual(d["pct_change"], -10.0)
 
     def test_metric_mismatch_omits_pct(self):
-        base = _rec(busy=1000, total=1000)     # primary = busy_cycles
-        cur = _rec(ms=2.0)                       # only wall -> ms_median
+        base = _rec(busy=1000, total=1000)  # primary = busy_cycles
+        cur = _rec(ms=2.0)  # only wall -> ms_median
         d = report.diff(base, cur)
         self.assertTrue(d["metric_mismatch"])
         self.assertNotIn("pct_change", d)
@@ -117,7 +139,9 @@ class TestDiff(unittest.TestCase):
 
 class TestFormatting(unittest.TestCase):
     def test_format_record_smoke(self):
-        rec = _rec(busy=1000, total=1050, waves=16384, spread={"busy_cycles_pct": 2.1}, n=5)
+        rec = _rec(
+            busy=1000, total=1050, waves=16384, spread={"busy_cycles_pct": 2.1}, n=5
+        )
         txt = report.format_record(rec)
         self.assertIn("gfx950", txt)
         self.assertIn("busy_cycles", txt)
@@ -125,8 +149,10 @@ class TestFormatting(unittest.TestCase):
         self.assertIn("panel", txt)
 
     def test_format_diff_smoke(self):
-        txt = report.format_diff(_rec(busy=1000, total=1000),
-                                 _rec(busy=1100, total=1000, spread={"busy_cycles_pct": 2.0}))
+        txt = report.format_diff(
+            _rec(busy=1000, total=1000),
+            _rec(busy=1100, total=1000, spread={"busy_cycles_pct": 2.0}),
+        )
         self.assertIn("SLOWER", txt)
         self.assertIn("+10.0%", txt)
 

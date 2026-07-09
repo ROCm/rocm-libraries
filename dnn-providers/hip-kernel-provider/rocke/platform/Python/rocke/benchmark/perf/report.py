@@ -76,7 +76,9 @@ def format_record(record: Mapping[str, Any]) -> str:
     if p:
         lines.append("  panel:")
         for k, v in p.items():
-            lines.append(f"    {k}: {v:g}" if isinstance(v, (int, float)) else f"    {k}: {v}")
+            lines.append(
+                f"    {k}: {v:g}" if isinstance(v, (int, float)) else f"    {k}: {v}"
+            )
     cap = record.get("captured_counters") or []
     if cap:
         lines.append(f"  captured: {', '.join(cap)}")
@@ -94,9 +96,11 @@ def diff(baseline: Mapping[str, Any], current: Mapping[str, Any]) -> dict:
     b_val, b_which = _schema.metric(baseline)
     c_val, c_which = _schema.metric(current)
     out: dict = {
-        "identity": {"arch": _schema.identity(current)[0],
-                     "kernel_name": _schema.identity(current)[1],
-                     "shape": _schema.identity(current)[2]},
+        "identity": {
+            "arch": _schema.identity(current)[0],
+            "kernel_name": _schema.identity(current)[1],
+            "shape": _schema.identity(current)[2],
+        },
         "metric": c_which,
         "baseline": b_val,
         "current": c_val,
@@ -123,24 +127,32 @@ def format_diff(baseline: Mapping[str, Any], current: Mapping[str, Any]) -> str:
     """Human-readable diff view built from `diff`."""
     d = diff(baseline, current)
     ident = d["identity"]
-    lines = [f"{ident['arch']}  {ident['kernel_name']}  {ident['shape'] or '(no shape)'}"]
+    lines = [
+        f"{ident['arch']}  {ident['kernel_name']}  {ident['shape'] or '(no shape)'}"
+    ]
     if d.get("metric_mismatch"):
-        lines.append(f"  metric mismatch: baseline vs current use different metrics "
-                     f"(current={d['metric']}); values not directly comparable")
+        lines.append(
+            f"  metric mismatch: baseline vs current use different metrics "
+            f"(current={d['metric']}); values not directly comparable"
+        )
         lines.append(f"    baseline={d['baseline']}  current={d['current']}")
     elif d.get("pct_change") is not None:
         arrow = "SLOWER" if d["slower"] else "faster"
         sp = d.get("spread_pct")
         sp_txt = f"  (noise ~{sp:.1f}%)" if sp is not None else ""
-        lines.append(f"  {d['metric']}: {d['baseline']:g} -> {d['current']:g}  "
-                     f"({d['pct_change']:+.1f}%, {arrow}){sp_txt}")
+        lines.append(
+            f"  {d['metric']}: {d['baseline']:g} -> {d['current']:g}  "
+            f"({d['pct_change']:+.1f}%, {arrow}){sp_txt}"
+        )
     else:
         lines.append(f"  {d['metric']}: {d['baseline']} -> {d['current']}")
     if d["panel"]:
         lines.append("  panel change:")
         for k, e in d["panel"].items():
             if "delta" in e:
-                lines.append(f"    {k}: {e['baseline']:g} -> {e['current']:g} ({e['delta']:+g})")
+                lines.append(
+                    f"    {k}: {e['baseline']:g} -> {e['current']:g} ({e['delta']:+g})"
+                )
             else:
                 lines.append(f"    {k}: {e['baseline']} -> {e['current']}")
     return "\n".join(lines)

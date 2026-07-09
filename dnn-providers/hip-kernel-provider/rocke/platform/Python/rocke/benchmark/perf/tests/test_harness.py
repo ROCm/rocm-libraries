@@ -10,10 +10,12 @@ from rocke.benchmark.perf import harness
 
 class TestPerfFromStdout(unittest.TestCase):
     def test_parses_perfjson(self):
-        out = harness._perf_from_stdout('noise\nPerfJSON: {"ms": 1.5, "tflops": 12.0, "gbps": 500.0}\n')
+        out = harness._perf_from_stdout(
+            'noise\nPerfJSON: {"ms": 1.5, "tflops": 12.0, "gbps": 500.0}\n'
+        )
         self.assertEqual(out["ms_median"], 1.5)
         self.assertEqual(out["tflops"], 12.0)
-        self.assertEqual(out["gbs"], 500.0)     # gbps -> gbs
+        self.assertEqual(out["gbs"], 500.0)  # gbps -> gbs
 
     def test_empty_when_no_perfjson(self):
         self.assertEqual(harness._perf_from_stdout("just logs\n"), {})
@@ -44,8 +46,10 @@ class TestCountPasses(unittest.TestCase):
 class TestCounterMedians(unittest.TestCase):
     def _rows(self, did_val_pairs, counter="C1"):
         # one CSV row per (dispatch, counter)
-        return [{"Dispatch_Id": str(d), "Counter_Name": counter,
-                 "Counter_Value": str(v)} for d, v in did_val_pairs]
+        return [
+            {"Dispatch_Id": str(d), "Counter_Name": counter, "Counter_Value": str(v)}
+            for d, v in did_val_pairs
+        ]
 
     def test_drops_leading_warmup_by_dispatch_order(self):
         # dispatches out of order in the list; warmup=2 drops the 2 lowest ids
@@ -56,12 +60,16 @@ class TestCounterMedians(unittest.TestCase):
 
     def test_warmup_zero_keeps_all(self):
         rows = self._rows([(1, 10), (2, 20), (3, 30)])
-        self.assertEqual(harness._counter_medians(rows, {"C1": "cyc"}, warmup=0)["cyc"], 20)
+        self.assertEqual(
+            harness._counter_medians(rows, {"C1": "cyc"}, warmup=0)["cyc"], 20
+        )
 
     def test_warmup_ge_dispatches_keeps_all(self):
         rows = self._rows([(1, 10), (2, 20)])
         # dropping 5 would leave nothing -> fall back to all
-        self.assertEqual(harness._counter_medians(rows, {"C1": "cyc"}, warmup=5)["cyc"], 15)
+        self.assertEqual(
+            harness._counter_medians(rows, {"C1": "cyc"}, warmup=5)["cyc"], 15
+        )
 
     def test_ignores_unrequested_counters(self):
         rows = self._rows([(1, 10)], counter="OTHER")
@@ -98,7 +106,8 @@ class TestPickTarget(unittest.TestCase):
     def test_substring_match(self):
         rows = self._rows("mygemm_tile64_pad8", "mygemm_tile64_pad8", "other_k")
         self.assertEqual(
-            harness._pick_target_kernel(rows, "mygemm"), "mygemm_tile64_pad8")
+            harness._pick_target_kernel(rows, "mygemm"), "mygemm_tile64_pad8"
+        )
 
     def test_helpers_skipped(self):
         rows = self._rows("__amd_rocclr_fillBuffer", "__hip_x", "realk")
@@ -115,7 +124,7 @@ class TestProfileDegradation(unittest.TestCase):
         self._orig_disc = harness._counters.discover
         self._orig_run = harness._run_rocprofv3
         self._orig_wall = harness._wall
-        harness._wall = lambda cmd, env, timeout: {}   # no subprocess
+        harness._wall = lambda cmd, env, timeout: {}  # no subprocess
 
     def tearDown(self):
         harness._counters.discover = self._orig_disc
@@ -125,18 +134,25 @@ class TestProfileDegradation(unittest.TestCase):
     def test_no_counters_warns_and_wall_only(self):
         harness._counters.discover = lambda arch: {}
         warns = []
-        rec = harness.profile(["x"], "gfx1201", label="mylabel", op="op",
-                              shape={"M": 1}, warn=warns.append)
+        rec = harness.profile(
+            ["x"],
+            "gfx1201",
+            label="mylabel",
+            op="op",
+            shape={"M": 1},
+            warn=warns.append,
+        )
         self.assertEqual(rec["kernel"]["kernel_name"], "mylabel")  # label = identity
         self.assertEqual(rec["counters"], {})
         self.assertTrue(any("no PMU counters" in w for w in warns))
 
     def test_rocprofv3_failure_warns(self):
         harness._counters.discover = lambda arch: {"busy_cycles": "GRBM_GUI_ACTIVE"}
-        harness._run_rocprofv3 = lambda *a, **k: (False, "")   # (ok, stdout)
+        harness._run_rocprofv3 = lambda *a, **k: (False, "")  # (ok, stdout)
         warns = []
-        rec = harness.profile(["x"], "gfx950", op="op", shape={"M": 1},
-                              warn=warns.append)
+        rec = harness.profile(
+            ["x"], "gfx950", op="op", shape={"M": 1}, warn=warns.append
+        )
         self.assertEqual(rec["counters"], {})
         self.assertTrue(any("rocprofv3 failed" in w for w in warns))
 

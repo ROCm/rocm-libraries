@@ -38,15 +38,22 @@ IDENTITY_KEYS = ("arch", "kernel_name", "shape")
 
 # Primary regression metric is clock-invariant (cycles); wall time is the fallback
 # when the profiler was unavailable.
-PRIMARY_METRIC = "busy_cycles"      # from record["counters"]
-FALLBACK_METRIC = "ms_median"       # from record["wall"]
+PRIMARY_METRIC = "busy_cycles"  # from record["counters"]
+FALLBACK_METRIC = "ms_median"  # from record["wall"]
 
 # Static resource fields (from ELF notes; no GPU) - the occupancy primitive.
 RESOURCE_KEYS = ("vgpr", "agpr", "sgpr", "lds_bytes", "occupancy")
 
 # Fields that, when present, form the diagnostic panel a regression report shows
 # (dynamic counters + static resources - both help localize a change).
-PANEL_KEYS = ("busy_fraction", "l2_hit_rate", "waves", "wait_cycles", "occupancy", "lds_bytes")
+PANEL_KEYS = (
+    "busy_fraction",
+    "l2_hit_rate",
+    "waves",
+    "wait_cycles",
+    "occupancy",
+    "lds_bytes",
+)
 
 _REQUIRED_TOP = ("schema", "run", "kernel", "wall")
 _REQUIRED_RUN = ("run_id", "arch", "timestamp")
