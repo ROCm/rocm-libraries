@@ -120,7 +120,7 @@ struct BlockFmhaPipelineQRKSVSAsyncSparge
                const KDramBlockWindowTmp& k_dram_block_window_tmp,
                const VDramBlockWindowTmp& v_dram_block_window_tmp,
                const BiasDramBlockWindowTmp& bias_dram_block_window_tmp, // NO_BIAS / ALIBI: unused
-               PositionEncoding position_encoding,                        // ALIBI: Alibi<...>; else: empty
+               PositionEncoding position_encoding, // ALIBI: Alibi<...>; else: empty
                const int* kv_block_idx_ptr,
                int kv_blocks,
                FmhaMask mask,
@@ -147,9 +147,8 @@ struct BlockFmhaPipelineQRKSVSAsyncSparge
 
         constexpr auto LdsSeq = Policy::template GetLdsBufferSequence<Problem>();
 
-        float* const skip_scratch =
-            reinterpret_cast<float*>(reinterpret_cast<char*>(smem_ptr) +
-                                     Policy::template GetSmemSize<Problem>());
+        float* const skip_scratch = reinterpret_cast<float*>(
+            reinterpret_cast<char*>(smem_ptr) + Policy::template GetSmemSize<Problem>());
 
         auto k_lds_ptr   = reinterpret_cast<KDataType*>(smem_ptr);
         auto k_lds_store = generate_tuple(
@@ -231,11 +230,11 @@ struct BlockFmhaPipelineQRKSVSAsyncSparge
                              k_dram_block_window_tmp.get_window_lengths(),
                              {seqlen_k_start, 0});
 
-        auto k_dram_window = make_tile_window(
-            k_dram_block_window.get_bottom_tensor_view(),
-            k_dram_block_window.get_window_lengths(),
-            k_dram_block_window.get_window_origin(),
-            Policy::template MakeKDramTileDistribution<Problem>());
+        auto k_dram_window =
+            make_tile_window(k_dram_block_window.get_bottom_tensor_view(),
+                             k_dram_block_window.get_window_lengths(),
+                             k_dram_block_window.get_window_origin(),
+                             Policy::template MakeKDramTileDistribution<Problem>());
         k_dram_window.init_raw();
         constexpr auto k_oob_ck = bool_constant<true>{};
         constexpr auto k_pre_np = bool_constant<false>{};
@@ -277,23 +276,24 @@ struct BlockFmhaPipelineQRKSVSAsyncSparge
         static_assert(1 <= k1_loops);
 
         // pv-skip: m_local is taken after bias, so the predicate is valid for NO_BIAS/ALIBI/
-        // ELEMENTWISE. Threshold in log2 units; soft-cap disables it (raw-QK units no longer apply).
+        // ELEMENTWISE. Threshold in log2 units; soft-cap disables it (raw-QK units no longer
+        // apply).
         const float pvthreshd_eff =
             pvthreshd_per_head
                 ? reinterpret_cast<const float*>(pvthreshd_per_head)[block_indices.qo_head_idx]
                 : pvthreshd;
-        const bool stage2_enabled = (pvthreshd_eff > 0.0f) && !kHasLogitsSoftCap;
+        const bool stage2_enabled  = (pvthreshd_eff > 0.0f) && !kHasLogitsSoftCap;
         const float skip_threshold = -pvthreshd_eff;
 
         auto compute_skip_flag = [&](const auto& m_local_t, const auto& m_ij_t) -> bool {
             if(!stage2_enabled)
                 return false;
-            float lane_max_diff = -ck_tile::numeric<float>::infinity();
+            float lane_max_diff    = -ck_tile::numeric<float>::infinity();
             constexpr auto m_spans = remove_cvref_t<decltype(m_ij_t)>::get_distributed_spans();
             sweep_tile_span(m_spans[number<0>{}], [&](auto idx0) {
                 constexpr auto i_idx = make_tuple(idx0);
-                const float diff = static_cast<float>(m_local_t[i_idx]) -
-                                   static_cast<float>(m_ij_t[i_idx]);
+                const float diff =
+                    static_cast<float>(m_local_t[i_idx]) - static_cast<float>(m_ij_t[i_idx]);
                 if(diff > lane_max_diff)
                     lane_max_diff = diff;
             });
@@ -309,7 +309,7 @@ struct BlockFmhaPipelineQRKSVSAsyncSparge
                 skip_scratch[warp_id] = lane_max_diff;
             block_sync_lds();
             float block_max_diff = -ck_tile::numeric<float>::infinity();
-            #pragma unroll
+#pragma unroll
             for(index_t w = 0; w < kNumWarps; ++w)
             {
                 const float v = skip_scratch[w];
@@ -358,7 +358,7 @@ struct BlockFmhaPipelineQRKSVSAsyncSparge
                 (i_total_loops + 1 < num_total_loop)
                     ? __builtin_amdgcn_readfirstlane(kv_block_idx_ptr[i_total_loops + 1])
                     : 0;
-            auto v_buf    = load_tile(v_dram_window, number<-1>{}, bool_constant<false>{});
+            auto v_buf           = load_tile(v_dram_window, number<-1>{}, bool_constant<false>{});
             const auto bias_tile = [&]() {
                 if constexpr(BiasEnum != BlockAttentionBiasEnum::NO_BIAS)
                     return load_tile(bias_dram_window);
@@ -468,7 +468,8 @@ struct BlockFmhaPipelineQRKSVSAsyncSparge
             const bool skip_block = compute_skip_flag(m_local, m);
 
             __builtin_amdgcn_sched_barrier(0x7F);
-            // K tail and V share this LDS buffer: barrier so gemm_0's K reads finish before V store.
+            // K tail and V share this LDS buffer: barrier so gemm_0's K reads finish before V
+            // store.
             if constexpr(LdsSeq.at(number<k0_loops - 1>{}) == LdsSeq.at(number<k0_loops>{}))
             {
                 __builtin_amdgcn_s_barrier();
@@ -496,8 +497,7 @@ struct BlockFmhaPipelineQRKSVSAsyncSparge
             if constexpr(k1_loops > 1)
             {
                 move_tile_window(v_dram_window, {0, kK1});
-                v_buf =
-                    load_tile(v_dram_window, number<-1>{}, bool_constant<false>{});
+                v_buf = load_tile(v_dram_window, number<-1>{}, bool_constant<false>{});
             }
             __builtin_amdgcn_sched_barrier(0);
 
@@ -516,18 +516,18 @@ struct BlockFmhaPipelineQRKSVSAsyncSparge
 
             if(!skip_block)
             {
-                auto p_compute = make_static_distributed_tensor<SMPLComputeDataType>(
-                    s.get_tile_distribution());
+                auto p_compute =
+                    make_static_distributed_tensor<SMPLComputeDataType>(s.get_tile_distribution());
                 constexpr auto p_spans = decltype(p_compute)::get_distributed_spans();
                 sweep_tile_span(p_spans[number<0>{}], [&](auto idx0) {
                     constexpr auto i_idx = make_tuple(idx0);
 #if CK_TILE_FMHA_FWD_FAST_EXP2
-                    // BIAS/ALIBI/SoftCap pre-scaled s_acc above; NO_BIAS folds scale_s into exp2 here.
+                    // BIAS/ALIBI/SoftCap pre-scaled s_acc above; NO_BIAS folds scale_s into exp2
+                    // here.
                     constexpr bool s_acc_prescaled =
                         (BiasEnum != BlockAttentionBiasEnum::NO_BIAS) || kHasLogitsSoftCap;
-                    auto row_max = s_acc_prescaled
-                                       ? get_validated_m(m[i_idx])
-                                       : scale_s * get_validated_m(m[i_idx]);
+                    auto row_max = s_acc_prescaled ? get_validated_m(m[i_idx])
+                                                   : scale_s * get_validated_m(m[i_idx]);
 #endif
                     sweep_tile_span(p_spans[number<1>{}], [&](auto idx1) {
                         constexpr auto i_j_idx = make_tuple(idx0, idx1);
@@ -585,19 +585,17 @@ struct BlockFmhaPipelineQRKSVSAsyncSparge
                     static_for<0, k1_loops - 1, 1>{}([&](auto i_k1) {
                         if constexpr(i_k1 != 0 && i_k1 < k1_loops - 1)
                         {
-                            v_buf = load_tile(
-                                v_dram_window, number<-1>{}, bool_constant<false>{});
+                            v_buf = load_tile(v_dram_window, number<-1>{}, bool_constant<false>{});
                         }
                         block_sync_lds();
-                        gemm_1(o_acc,
-                               get_slice_tile(p,
-                                              sequence<0, i_k1 * kK1>{},
-                                              sequence<kM0, (i_k1 + 1) * kK1>{}),
-                               get_slice_tile(
-                                   v_lds_window,
-                                   sequence<(LdsSeq.at(number<k0_loops + i_k1>{})) * kN1, 0>{},
-                                   sequence<(LdsSeq.at(number<k0_loops + i_k1>{}) + 1) * kN1,
-                                            kK1>{}));
+                        gemm_1(
+                            o_acc,
+                            get_slice_tile(
+                                p, sequence<0, i_k1 * kK1>{}, sequence<kM0, (i_k1 + 1) * kK1>{}),
+                            get_slice_tile(
+                                v_lds_window,
+                                sequence<(LdsSeq.at(number<k0_loops + i_k1>{})) * kN1, 0>{},
+                                sequence<(LdsSeq.at(number<k0_loops + i_k1>{}) + 1) * kN1, kK1>{}));
 
                         if constexpr(std::is_same_v<VLayout,
                                                     ck_tile::tensor_layout::gemm::RowMajor>)
@@ -628,9 +626,8 @@ struct BlockFmhaPipelineQRKSVSAsyncSparge
                 {
                     block_sync_lds();
                     gemm_1(o_acc,
-                           get_slice_tile(p,
-                                          sequence<0, (k1_loops - 1) * kK1>{},
-                                          sequence<kM0, kN0>{}),
+                           get_slice_tile(
+                               p, sequence<0, (k1_loops - 1) * kK1>{}, sequence<kM0, kN0>{}),
                            get_slice_tile(
                                v_lds_window,
                                sequence<(LdsSeq.at(number<k0_loops + k1_loops - 1>{})) * kN1, 0>{},
@@ -654,7 +651,8 @@ struct BlockFmhaPipelineQRKSVSAsyncSparge
             i_total_loops++;
             if(i_total_loops < num_total_loop)
             {
-                // bias must follow K's delta jump; otherwise non-contiguous LUT blocks misalign bias.
+                // bias must follow K's delta jump; otherwise non-contiguous LUT blocks misalign
+                // bias.
                 if constexpr(BiasEnum != BlockAttentionBiasEnum::NO_BIAS)
                     move_tile_window(bias_dram_window, {0, kN0 * block_idx});
                 // v_dram_window already sits at this block's end (prefetch + per-k1 moves), so the

@@ -28,40 +28,40 @@ namespace ck_tile {
 // they use; GridSize() exposes work-group counts so the caller never recomputes them.
 struct SpargePreprocessOneSideKargs
 {
-    const void* data;  // K or Q input
+    const void* data; // K or Q input
 
     // Batch: [B,H,num_blocks,D] / [B,H,num_blocks]. Group: batch-outer/head-mid packed,
     // per-batch block [H, blocks_b] (means with trailing D), concatenated across batch.
     float* means;
-    float* sim;  // nullable when simthreshold <= 0
+    float* sim; // nullable when simthreshold <= 0
 
     index_t batch;
     index_t nhead;
-    index_t seqlen;     // batch mode: per-sequence length
+    index_t seqlen; // batch mode: per-sequence length
     index_t hdim;
     index_t block_size;
-    index_t num_blocks;  // batch: per-sequence; group: max across batches
+    index_t num_blocks; // batch: per-sequence; group: max across batches
 
     index_t batch_stride;
     index_t head_stride;
     index_t seq_stride;
 
     float simthreshold;
-    const float* km_ptr;  // K smoothing km[B,H,D]; nullptr disables (Q side: always nullptr).
+    const float* km_ptr; // K smoothing km[B,H,D]; nullptr disables (Q side: always nullptr).
 
     // Group / varlen mode (batch leaves all nullptr / 0).
-    const int32_t* seqstart_ptr        = nullptr;
-    const int32_t* seqlen_ptr          = nullptr;
-    const int32_t* seqstart_block_ptr  = nullptr;
-    index_t        total_blocks        = 0;
+    const int32_t* seqstart_ptr       = nullptr;
+    const int32_t* seqlen_ptr         = nullptr;
+    const int32_t* seqstart_block_ptr = nullptr;
+    index_t total_blocks              = 0;
 
     // Quant outputs (sparge_sage): int8 buffer matches the raw input token layout (hdim stride 1,
     // same batch/head/seq strides); scale_out is [batch, nhead, num_block_scale],
     // num_block_scale = ceil(seqlen / tokens_per_scale).
-    int8_t*  quant_out        = nullptr;
-    float*   scale_out        = nullptr;
-    index_t  tokens_per_scale = 0;       // PERWARP: Q=32, K=64
-    index_t  num_block_scale  = 0;       // ceil(seqlen / tokens_per_scale) (batch mode)
+    int8_t* quant_out        = nullptr;
+    float* scale_out         = nullptr;
+    index_t tokens_per_scale = 0; // PERWARP: Q=32, K=64
+    index_t num_block_scale  = 0; // ceil(seqlen / tokens_per_scale) (batch mode)
 };
 
 // Fused K+Q preprocess: one launch covers both sides. The grid x axis concatenates the K
@@ -74,8 +74,9 @@ struct SpargePreprocessFusedKargs
 };
 
 // Binary search: largest b with seqstart_block_ptr[b] <= g_block. readfirstlane -> SGPR.
-CK_TILE_DEVICE index_t
-sparge_block_to_batch(const int32_t* seqstart_block_ptr, index_t batch, index_t g_block)
+CK_TILE_DEVICE index_t sparge_block_to_batch(const int32_t* seqstart_block_ptr,
+                                             index_t batch,
+                                             index_t g_block)
 {
     index_t lo = 0;
     index_t hi = batch;
@@ -94,17 +95,17 @@ sparge_block_to_batch(const int32_t* seqstart_block_ptr, index_t batch, index_t 
 // (x=block, y=head, z=batch). Group: x = total_blocks, binary search over seqstart_block_ptr
 // recovers (batch, block_in_batch); y = head.
 template <typename InputType_,
-          bool kIsGroupMode_                              = false,
-          index_t kBlockSize_                             = 256,
-          BlockSageAttentionQuantScaleEnum QScale_        = BlockSageAttentionQuantScaleEnum::NO_SCALE,
-          typename QuantType_                             = int8_t>
+          bool kIsGroupMode_                       = false,
+          index_t kBlockSize_                      = 256,
+          BlockSageAttentionQuantScaleEnum QScale_ = BlockSageAttentionQuantScaleEnum::NO_SCALE,
+          typename QuantType_                      = int8_t>
 struct FmhaFwdSpargePreprocessOneSideKernel
 {
     using InputType = remove_cvref_t<InputType_>;
     using QuantType = remove_cvref_t<QuantType_>;
     using Pipeline  = BlockSpargePreprocessPipeline<InputType, kBlockSize_, QScale_, QuantType>;
 
-    static constexpr bool kIsGroupMode = kIsGroupMode_;
+    static constexpr bool kIsGroupMode                       = kIsGroupMode_;
     static constexpr BlockSageAttentionQuantScaleEnum QScale = QScale_;
     static constexpr bool kDoQuant = (QScale_ != BlockSageAttentionQuantScaleEnum::NO_SCALE);
 
@@ -114,9 +115,8 @@ struct FmhaFwdSpargePreprocessOneSideKernel
     CK_TILE_HOST static dim3 GridSize(const SpargePreprocessOneSideKargs& kargs)
     {
         if constexpr(kIsGroupMode)
-            return dim3(static_cast<uint32_t>(kargs.total_blocks),
-                        static_cast<uint32_t>(kargs.nhead),
-                        1);
+            return dim3(
+                static_cast<uint32_t>(kargs.total_blocks), static_cast<uint32_t>(kargs.nhead), 1);
         else
             return dim3(static_cast<uint32_t>(kargs.num_blocks),
                         static_cast<uint32_t>(kargs.nhead),
@@ -138,11 +138,14 @@ struct FmhaFwdSpargePreprocessOneSideKernel
 
     // Body extracted so the fused K+Q kernel can re-dispatch with synthetic grid coords (gx/gy/gz).
     CK_TILE_DEVICE static void run_side(const SpargePreprocessOneSideKargs& kargs,
-                                        index_t gx, index_t gy, index_t gz, char* smem_raw)
+                                        index_t gx,
+                                        index_t gy,
+                                        index_t gz,
+                                        char* smem_raw)
     {
-        index_t      head_id, batch_id, block_id;
+        index_t head_id, batch_id, block_id;
         long_index_t batch_offset;
-        index_t      seqlen_actual;
+        index_t seqlen_actual;
         long_index_t mean_out_off;
         long_index_t sim_out_off;
         long_index_t km_bh_off;
@@ -153,31 +156,27 @@ struct FmhaFwdSpargePreprocessOneSideKernel
         {
             const index_t g_block = __builtin_amdgcn_readfirstlane(gx);
             head_id               = __builtin_amdgcn_readfirstlane(gy);
-            batch_id              = sparge_block_to_batch(
-                kargs.seqstart_block_ptr, kargs.batch, g_block);
-            const index_t start_b = __builtin_amdgcn_readfirstlane(
-                kargs.seqstart_block_ptr[batch_id]);
+            batch_id = sparge_block_to_batch(kargs.seqstart_block_ptr, kargs.batch, g_block);
+            const index_t start_b =
+                __builtin_amdgcn_readfirstlane(kargs.seqstart_block_ptr[batch_id]);
             block_id = g_block - start_b;
             // Batch-outer/head-mid packed: per-batch [H, X_b] (X_b = blocks of this batch),
             // concatenated across batch. packed_idx = Xstart_b*H + head*X_b + local.
-            const index_t x_b = __builtin_amdgcn_readfirstlane(
-                kargs.seqstart_block_ptr[batch_id + 1] - start_b);
+            const index_t x_b =
+                __builtin_amdgcn_readfirstlane(kargs.seqstart_block_ptr[batch_id + 1] - start_b);
 
-            const long_index_t start =
-                static_cast<long_index_t>(kargs.seqstart_ptr[batch_id]);
-            batch_offset  = start * kargs.seq_stride;
-            seqlen_actual = __builtin_amdgcn_readfirstlane(
+            const long_index_t start = static_cast<long_index_t>(kargs.seqstart_ptr[batch_id]);
+            batch_offset             = start * kargs.seq_stride;
+            seqlen_actual            = __builtin_amdgcn_readfirstlane(
                 kargs.seqlen_ptr != nullptr
                     ? kargs.seqlen_ptr[batch_id]
                     : (kargs.seqstart_ptr[batch_id + 1] - kargs.seqstart_ptr[batch_id]));
 
-            const long_index_t packed_idx =
-                static_cast<long_index_t>(start_b) * kargs.nhead +
-                static_cast<long_index_t>(head_id) * x_b + block_id;
-            mean_out_off = packed_idx * kargs.hdim;
-            sim_out_off  = packed_idx;
-            km_bh_off =
-                static_cast<long_index_t>(batch_id) * kargs.nhead + head_id;
+            const long_index_t packed_idx = static_cast<long_index_t>(start_b) * kargs.nhead +
+                                            static_cast<long_index_t>(head_id) * x_b + block_id;
+            mean_out_off       = packed_idx * kargs.hdim;
+            sim_out_off        = packed_idx;
+            km_bh_off          = static_cast<long_index_t>(batch_id) * kargs.nhead + head_id;
             scale_packed_block = packed_idx;
         }
         else
@@ -189,18 +188,15 @@ struct FmhaFwdSpargePreprocessOneSideKernel
             batch_offset  = static_cast<long_index_t>(batch_id) * kargs.batch_stride;
             seqlen_actual = kargs.seqlen;
 
-            const long_index_t bh =
-                static_cast<long_index_t>(batch_id) * kargs.nhead + head_id;
-            mean_out_off = bh * static_cast<long_index_t>(kargs.num_blocks) * kargs.hdim +
+            const long_index_t bh = static_cast<long_index_t>(batch_id) * kargs.nhead + head_id;
+            mean_out_off          = bh * static_cast<long_index_t>(kargs.num_blocks) * kargs.hdim +
                            static_cast<long_index_t>(block_id) * kargs.hdim;
-            sim_out_off  = bh * kargs.num_blocks + block_id;
-            km_bh_off    = bh;
+            sim_out_off = bh * kargs.num_blocks + block_id;
+            km_bh_off   = bh;
         }
 
-        const auto* slice =
-            reinterpret_cast<const InputType*>(kargs.data) +
-            batch_offset +
-            static_cast<long_index_t>(head_id) * kargs.head_stride;
+        const auto* slice = reinterpret_cast<const InputType*>(kargs.data) + batch_offset +
+                            static_cast<long_index_t>(head_id) * kargs.head_stride;
         float* mean_out = kargs.means + mean_out_off;
         float* sim_out  = (kargs.sim != nullptr) ? kargs.sim + sim_out_off : nullptr;
 
@@ -211,32 +207,31 @@ struct FmhaFwdSpargePreprocessOneSideKernel
         pp.block_id     = block_id;
         pp.stride_seq   = kargs.seq_stride;
         pp.simthreshold = kargs.simthreshold;
-        pp.km_ptr       = kargs.km_ptr
-            ? kargs.km_ptr + km_bh_off * static_cast<long_index_t>(kargs.hdim) : nullptr;
+        pp.km_ptr = kargs.km_ptr ? kargs.km_ptr + km_bh_off * static_cast<long_index_t>(kargs.hdim)
+                                 : nullptr;
 
         // Quant outputs (sparge_sage). int8 shares the raw input token layout; the pipeline
         // re-applies the block_id*block_size window. Scales: batch [batch, nhead, num_block_scale];
         // group packed by the same batch-outer/head-mid block index * scales_per_block.
         if constexpr(kDoQuant)
         {
-            const index_t tps = kargs.tokens_per_scale;
-            pp.quant_out       = nullptr;
-            pp.scale_out       = nullptr;
+            const index_t tps   = kargs.tokens_per_scale;
+            pp.quant_out        = nullptr;
+            pp.scale_out        = nullptr;
             pp.tokens_per_scale = tps;
             pp.quant_stride_seq = kargs.seq_stride;
             if(kargs.quant_out != nullptr && tps > 0)
             {
                 // quant origin = (batch, head) seq start; pipeline re-applies the block window.
                 pp.quant_out = reinterpret_cast<QuantType*>(kargs.quant_out) + batch_offset +
-                              static_cast<long_index_t>(head_id) * kargs.head_stride;
+                               static_cast<long_index_t>(head_id) * kargs.head_stride;
                 const index_t scales_per_block = kargs.block_size / tps;
                 if constexpr(kIsGroupMode)
                 {
                     // scale origin = packed block index * scales_per_block (contiguous per-(b,h)
                     // run, indexed by k_abs_pos / tps in the attention kernel).
                     pp.scale_out = kargs.scale_out +
-                                   scale_packed_block *
-                                       static_cast<long_index_t>(scales_per_block);
+                                   scale_packed_block * static_cast<long_index_t>(scales_per_block);
                 }
                 else
                 {
@@ -250,8 +245,8 @@ struct FmhaFwdSpargePreprocessOneSideKernel
             }
         }
 
-        // Dispatch the WG-uniform smooth_k flag to a compile-time branch so the pipeline can drop the
-        // km load/subtract entirely on the Q side (and K side with smooth_k off).
+        // Dispatch the WG-uniform smooth_k flag to a compile-time branch so the pipeline can drop
+        // the km load/subtract entirely on the Q side (and K side with smooth_k off).
         if(pp.km_ptr != nullptr)
             Pipeline{}(slice, mean_out, sim_out, pp, smem_raw, bool_constant<true>{});
         else
@@ -266,9 +261,11 @@ template <typename InputType_,
           index_t kBlockSize_                      = 256,
           BlockSageAttentionQuantScaleEnum QScale_ = BlockSageAttentionQuantScaleEnum::NO_SCALE,
           typename QuantType_                      = int8_t>
-struct FmhaFwdSpargePreprocessKKernel
-    : FmhaFwdSpargePreprocessOneSideKernel<InputType_, kIsGroupMode_, kBlockSize_, QScale_,
-                                           QuantType_>
+struct FmhaFwdSpargePreprocessKKernel : FmhaFwdSpargePreprocessOneSideKernel<InputType_,
+                                                                             kIsGroupMode_,
+                                                                             kBlockSize_,
+                                                                             QScale_,
+                                                                             QuantType_>
 {
 };
 
@@ -277,9 +274,11 @@ template <typename InputType_,
           index_t kBlockSize_                      = 256,
           BlockSageAttentionQuantScaleEnum QScale_ = BlockSageAttentionQuantScaleEnum::NO_SCALE,
           typename QuantType_                      = int8_t>
-struct FmhaFwdSpargePreprocessQKernel
-    : FmhaFwdSpargePreprocessOneSideKernel<InputType_, kIsGroupMode_, kBlockSize_, QScale_,
-                                           QuantType_>
+struct FmhaFwdSpargePreprocessQKernel : FmhaFwdSpargePreprocessOneSideKernel<InputType_,
+                                                                             kIsGroupMode_,
+                                                                             kBlockSize_,
+                                                                             QScale_,
+                                                                             QuantType_>
 {
 };
 
@@ -292,13 +291,15 @@ template <typename InputType_,
           typename QuantType_                      = int8_t>
 struct FmhaFwdSpargePreprocessFusedKernel
 {
-    using Side =
-        FmhaFwdSpargePreprocessOneSideKernel<InputType_, kIsGroupMode_, kBlockSize_, QScale_,
-                                             QuantType_>;
+    using Side = FmhaFwdSpargePreprocessOneSideKernel<InputType_,
+                                                      kIsGroupMode_,
+                                                      kBlockSize_,
+                                                      QScale_,
+                                                      QuantType_>;
 
-    static constexpr bool    kIsGroupMode = kIsGroupMode_;
-    static constexpr index_t kBlockSize   = Side::kBlockSize;
-    static constexpr index_t kBlockPerCu  = Side::kBlockPerCu;
+    static constexpr bool kIsGroupMode   = kIsGroupMode_;
+    static constexpr index_t kBlockSize  = Side::kBlockSize;
+    static constexpr index_t kBlockPerCu = Side::kBlockPerCu;
 
     CK_TILE_HOST_DEVICE static index_t k_xblocks(const SpargePreprocessFusedKargs& kargs)
     {
@@ -311,9 +312,9 @@ struct FmhaFwdSpargePreprocessFusedKernel
 
     CK_TILE_HOST static dim3 GridSize(const SpargePreprocessFusedKargs& kargs)
     {
-        const uint32_t x  = static_cast<uint32_t>(k_xblocks(kargs) + q_xblocks(kargs));
-        const uint32_t ny = static_cast<uint32_t>(
-            kargs.k.nhead > kargs.q.nhead ? kargs.k.nhead : kargs.q.nhead);
+        const uint32_t x = static_cast<uint32_t>(k_xblocks(kargs) + q_xblocks(kargs));
+        const uint32_t ny =
+            static_cast<uint32_t>(kargs.k.nhead > kargs.q.nhead ? kargs.k.nhead : kargs.q.nhead);
         if constexpr(kIsGroupMode_)
             return dim3(x, ny, 1);
         else
@@ -322,10 +323,7 @@ struct FmhaFwdSpargePreprocessFusedKernel
 
     CK_TILE_HOST static constexpr dim3 BlockSize() { return dim3(kBlockSize); }
 
-    CK_TILE_HOST static std::size_t GetSmemSize(index_t hdim)
-    {
-        return Side::GetSmemSize(hdim);
-    }
+    CK_TILE_HOST static std::size_t GetSmemSize(index_t hdim) { return Side::GetSmemSize(hdim); }
 
     CK_TILE_DEVICE void operator()(SpargePreprocessFusedKargs kargs) const
     {
@@ -337,7 +335,7 @@ struct FmhaFwdSpargePreprocessFusedKernel
         if(gx < k_x)
         {
             if(gy >= kargs.k.nhead)
-                return;  // GQA: K side has fewer heads than grid y.
+                return; // GQA: K side has fewer heads than grid y.
             Side::run_side(kargs.k, gx, gy, gz, smem_raw);
         }
         else
@@ -355,18 +353,18 @@ struct FmhaFwdSpargePreprocessFusedKernel
 // scale_out[batch_id * nhead + head_id] for both modes.
 struct SpargeQKQuantKargs
 {
-    const void* x_ptr;     // bf16 X (Q or K)
-    void*       quant_ptr; // quant X output
-    float*      scale_ptr; // [batch, nhead] one scale per (batch, head)
+    const void* x_ptr; // bf16 X (Q or K)
+    void* quant_ptr;   // quant X output
+    float* scale_ptr;  // [batch, nhead] one scale per (batch, head)
 
     index_t batch;
     index_t nhead;
-    index_t seqlen;        // batch mode: per-sequence length
+    index_t seqlen; // batch mode: per-sequence length
     index_t hdim;
 
     index_t batch_stride_x; // bf16 X strides
     index_t nhead_stride_x;
-    index_t stride_x;       // token stride
+    index_t stride_x; // token stride
 
     index_t batch_stride_quant; // quant X strides
     index_t nhead_stride_quant;
@@ -380,7 +378,9 @@ struct SpargeQKQuantKargs
     const int32_t* seqlen_ptr   = nullptr; // [batch] (nullptr -> diff of seqstart)
 };
 
-template <typename InputType_, bool kIsGroupMode_ = false, index_t kBlockSize_ = 256,
+template <typename InputType_,
+          bool kIsGroupMode_  = false,
+          index_t kBlockSize_ = 256,
           typename QuantType_ = int8_t>
 struct FmhaFwdSpargeQKQuantKernel
 {
@@ -388,15 +388,13 @@ struct FmhaFwdSpargeQKQuantKernel
     using QuantType = remove_cvref_t<QuantType_>;
     using Pipeline  = BlockSpargeQKQuantPipeline<InputType, kBlockSize_, QuantType>;
 
-    static constexpr bool    kIsGroupMode = kIsGroupMode_;
-    static constexpr index_t kBlockSize   = Pipeline::kBlockSize;
-    static constexpr index_t kBlockPerCu  = 4;
+    static constexpr bool kIsGroupMode   = kIsGroupMode_;
+    static constexpr index_t kBlockSize  = Pipeline::kBlockSize;
+    static constexpr index_t kBlockPerCu = 4;
 
     CK_TILE_HOST static dim3 GridSize(const SpargeQKQuantKargs& kargs)
     {
-        return dim3(static_cast<uint32_t>(kargs.nhead),
-                    static_cast<uint32_t>(kargs.batch),
-                    1);
+        return dim3(static_cast<uint32_t>(kargs.nhead), static_cast<uint32_t>(kargs.batch), 1);
     }
 
     CK_TILE_HOST static constexpr dim3 BlockSize() { return dim3(kBlockSize); }
@@ -414,14 +412,13 @@ struct FmhaFwdSpargeQKQuantKernel
         const index_t batch_id = static_cast<index_t>(blockIdx.y);
 
         long_index_t x_batch_off, quant_batch_off;
-        index_t      seqlen_actual;
+        index_t seqlen_actual;
         if constexpr(kIsGroupMode)
         {
-            const long_index_t start =
-                static_cast<long_index_t>(kargs.seqstart_ptr[batch_id]);
-            x_batch_off     = start * kargs.stride_x;
-            quant_batch_off = start * kargs.stride_quant;
-            seqlen_actual  = __builtin_amdgcn_readfirstlane(
+            const long_index_t start = static_cast<long_index_t>(kargs.seqstart_ptr[batch_id]);
+            x_batch_off              = start * kargs.stride_x;
+            quant_batch_off          = start * kargs.stride_quant;
+            seqlen_actual            = __builtin_amdgcn_readfirstlane(
                 kargs.seqlen_ptr != nullptr
                     ? kargs.seqlen_ptr[batch_id]
                     : (kargs.seqstart_ptr[batch_id + 1] - kargs.seqstart_ptr[batch_id]));
@@ -433,29 +430,26 @@ struct FmhaFwdSpargeQKQuantKernel
             seqlen_actual   = kargs.seqlen;
         }
 
-        const auto* slice =
-            reinterpret_cast<const InputType*>(kargs.x_ptr) + x_batch_off +
-            static_cast<long_index_t>(head_id) * kargs.nhead_stride_x;
-        auto* quant_out =
-            reinterpret_cast<QuantType*>(kargs.quant_ptr) + quant_batch_off +
-            static_cast<long_index_t>(head_id) * kargs.nhead_stride_quant;
+        const auto* slice = reinterpret_cast<const InputType*>(kargs.x_ptr) + x_batch_off +
+                            static_cast<long_index_t>(head_id) * kargs.nhead_stride_x;
+        auto* quant_out = reinterpret_cast<QuantType*>(kargs.quant_ptr) + quant_batch_off +
+                          static_cast<long_index_t>(head_id) * kargs.nhead_stride_quant;
 
         // One global scale per (batch, head); packed [batch, nhead].
         float* scale_out =
-            kargs.scale_ptr +
-            static_cast<long_index_t>(batch_id) * kargs.nhead + head_id;
+            kargs.scale_ptr + static_cast<long_index_t>(batch_id) * kargs.nhead + head_id;
 
         typename Pipeline::Params pp;
-        pp.seqlen          = seqlen_actual;
-        pp.hdim            = kargs.hdim;
+        pp.seqlen           = seqlen_actual;
+        pp.hdim             = kargs.hdim;
         pp.stride_seq       = kargs.stride_x;
         pp.quant_stride_seq = kargs.stride_quant;
         // smooth_k: per-channel km[batch, nhead, hdim] for this (batch, head).
-        pp.km_ptr = kargs.km_ptr
-            ? kargs.km_ptr +
-                  (static_cast<long_index_t>(batch_id) * kargs.nhead + head_id) *
-                      static_cast<long_index_t>(kargs.hdim)
-            : nullptr;
+        pp.km_ptr =
+            kargs.km_ptr
+                ? kargs.km_ptr + (static_cast<long_index_t>(batch_id) * kargs.nhead + head_id) *
+                                     static_cast<long_index_t>(kargs.hdim)
+                : nullptr;
 
         // Compile-time smooth_k branch so the km load/subtract is dropped on the Q side.
         if(pp.km_ptr != nullptr)
@@ -469,10 +463,10 @@ struct SpargeMaskPredictionKargs
 {
     const float* k_means;
     const float* q_means;
-    const float* k_sim;            // nullable when simthreshold <= 0
+    const float* k_sim; // nullable when simthreshold <= 0
     const float* q_sim;
-    int32_t* lut_out;              // batch: [B,Hq,nq,nk]; group: batch-outer/head-mid packed
-    int32_t* valid_block_num_out;  // batch: [B,Hq,nq]; group: batch-outer/head-mid packed (q)
+    int32_t* lut_out;             // batch: [B,Hq,nq,nk]; group: batch-outer/head-mid packed
+    int32_t* valid_block_num_out; // batch: [B,Hq,nq]; group: batch-outer/head-mid packed (q)
 
     index_t batch;
     index_t nhead_q;
@@ -481,7 +475,7 @@ struct SpargeMaskPredictionKargs
     index_t num_q_blocks;
     index_t num_k_blocks;
     index_t hdim;
-    float scale;            // softmax scale for q/k mean scores (caller-provided)
+    float scale; // softmax scale for q/k mean scores (caller-provided)
     float cdfthreshd;
     float topk;
     float simthreshold;
@@ -503,9 +497,9 @@ struct SpargeMaskPredictionKargs
     const int32_t* seqlen_k_ptr          = nullptr;
     const int32_t* seqstart_q_block_ptr  = nullptr;
     const int32_t* seqstart_k_block_ptr  = nullptr;
-    const int32_t* mask_batch_offset_ptr  = nullptr;
-    index_t        total_q_blocks        = 0;
-    index_t        total_k_blocks        = 0;
+    const int32_t* mask_batch_offset_ptr = nullptr;
+    index_t total_q_blocks               = 0;
+    index_t total_k_blocks               = 0;
 };
 
 template <bool kIsGroupMode_ = false, index_t kMaxKBlocksPow2_ = 256, index_t kBlockSize_ = 256>
@@ -535,7 +529,6 @@ struct FmhaFwdSpargeMaskPredictionKernel
         return static_cast<std::size_t>(Pipeline::GetSmemSize(hdim, num_k_blocks));
     }
 
-
     CK_TILE_DEVICE void operator()(SpargeMaskPredictionKargs kargs) const
     {
         extern __shared__ char smem_raw[];
@@ -546,22 +539,18 @@ struct FmhaFwdSpargeMaskPredictionKernel
             const index_t g_q_block = __builtin_amdgcn_readfirstlane(gid % kargs.total_q_blocks);
             const index_t head      = __builtin_amdgcn_readfirstlane(gid / kargs.total_q_blocks);
             const index_t kv_head   = __builtin_amdgcn_readfirstlane(head / kargs.nhead_ratio_qk);
-            const index_t b         = sparge_block_to_batch(
-                kargs.seqstart_q_block_ptr, kargs.batch, g_q_block);
-            const index_t qstart_b   = __builtin_amdgcn_readfirstlane(
-                kargs.seqstart_q_block_ptr[b]);
-            const index_t kstart_b   = __builtin_amdgcn_readfirstlane(
-                kargs.seqstart_k_block_ptr[b]);
+            const index_t b =
+                sparge_block_to_batch(kargs.seqstart_q_block_ptr, kargs.batch, g_q_block);
+            const index_t qstart_b = __builtin_amdgcn_readfirstlane(kargs.seqstart_q_block_ptr[b]);
+            const index_t kstart_b = __builtin_amdgcn_readfirstlane(kargs.seqstart_k_block_ptr[b]);
             const index_t q_block_in_b = g_q_block - qstart_b;
 
             const index_t seqlen_q_b = __builtin_amdgcn_readfirstlane(
-                kargs.seqlen_q_ptr
-                    ? kargs.seqlen_q_ptr[b]
-                    : (kargs.seqstart_q_ptr[b + 1] - kargs.seqstart_q_ptr[b]));
+                kargs.seqlen_q_ptr ? kargs.seqlen_q_ptr[b]
+                                   : (kargs.seqstart_q_ptr[b + 1] - kargs.seqstart_q_ptr[b]));
             const index_t seqlen_k_b = __builtin_amdgcn_readfirstlane(
-                kargs.seqlen_k_ptr
-                    ? kargs.seqlen_k_ptr[b]
-                    : (kargs.seqstart_k_ptr[b + 1] - kargs.seqstart_k_ptr[b]));
+                kargs.seqlen_k_ptr ? kargs.seqlen_k_ptr[b]
+                                   : (kargs.seqstart_k_ptr[b + 1] - kargs.seqstart_k_ptr[b]));
             const index_t num_q_blocks_b =
                 ck_tile::integer_divide_ceil(seqlen_q_b, kargs.block_size);
             const index_t num_k_blocks_b =
@@ -576,72 +565,68 @@ struct FmhaFwdSpargeMaskPredictionKernel
                  static_cast<long_index_t>(head) * num_q_blocks_b) *
                 kargs.hdim;
             const float* q_means_view = kargs.q_means + q_means_view_off;
-            const float* q_sim_view = (kargs.q_sim != nullptr)
-                ? kargs.q_sim +
-                    static_cast<long_index_t>(qstart_b) * kargs.nhead_q +
-                    static_cast<long_index_t>(head) * num_q_blocks_b
-                : nullptr;
+            const float* q_sim_view =
+                (kargs.q_sim != nullptr)
+                    ? kargs.q_sim + static_cast<long_index_t>(qstart_b) * kargs.nhead_q +
+                          static_cast<long_index_t>(head) * num_q_blocks_b
+                    : nullptr;
 
             const long_index_t k_means_view_off =
                 (static_cast<long_index_t>(kstart_b) * kargs.nhead_k +
                  static_cast<long_index_t>(kv_head) * num_k_blocks_b) *
                 kargs.hdim;
             const float* k_means_view = kargs.k_means + k_means_view_off;
-            const float* k_sim_view = (kargs.k_sim != nullptr)
-                ? kargs.k_sim +
-                    static_cast<long_index_t>(kstart_b) * kargs.nhead_k +
-                    static_cast<long_index_t>(kv_head) * num_k_blocks_b
-                : nullptr;
+            const float* k_sim_view =
+                (kargs.k_sim != nullptr)
+                    ? kargs.k_sim + static_cast<long_index_t>(kstart_b) * kargs.nhead_k +
+                          static_cast<long_index_t>(kv_head) * num_k_blocks_b
+                    : nullptr;
 
             const long_index_t lut_xstart_b =
                 static_cast<long_index_t>(kargs.mask_batch_offset_ptr[b]);
             const long_index_t lut_x_b =
                 static_cast<long_index_t>(kargs.mask_batch_offset_ptr[b + 1]) - lut_xstart_b;
-            int32_t* lut_row =
-                kargs.lut_out +
-                lut_xstart_b * kargs.nhead_q +
-                static_cast<long_index_t>(head) * lut_x_b +
-                static_cast<long_index_t>(q_block_in_b) * num_k_blocks_b;
-            int32_t* vbn_ptr =
-                kargs.valid_block_num_out +
-                static_cast<long_index_t>(qstart_b) * kargs.nhead_q +
-                static_cast<long_index_t>(head) * num_q_blocks_b +
-                q_block_in_b;
+            int32_t* lut_row = kargs.lut_out + lut_xstart_b * kargs.nhead_q +
+                               static_cast<long_index_t>(head) * lut_x_b +
+                               static_cast<long_index_t>(q_block_in_b) * num_k_blocks_b;
+            int32_t* vbn_ptr = kargs.valid_block_num_out +
+                               static_cast<long_index_t>(qstart_b) * kargs.nhead_q +
+                               static_cast<long_index_t>(head) * num_q_blocks_b + q_block_in_b;
 
-            const float head_cdfthreshd   = kargs.cdfthreshd_per_head
-                ? kargs.cdfthreshd_per_head[head] : kargs.cdfthreshd;
-            const float head_topk          = kargs.topk_per_head
-                ? kargs.topk_per_head[head] : kargs.topk;
+            const float head_cdfthreshd =
+                kargs.cdfthreshd_per_head ? kargs.cdfthreshd_per_head[head] : kargs.cdfthreshd;
+            const float head_topk = kargs.topk_per_head ? kargs.topk_per_head[head] : kargs.topk;
             const float head_simthreshold = kargs.simthreshold_per_head
-                ? kargs.simthreshold_per_head[head] : kargs.simthreshold;
+                                                ? kargs.simthreshold_per_head[head]
+                                                : kargs.simthreshold;
 
             typename Pipeline::MaskRunArgs args;
-            args.k_means      = k_means_view;
-            args.q_means      = q_means_view;
-            args.k_sim        = k_sim_view;
-            args.q_sim        = q_sim_view;
-            args.lut_row      = lut_row;
-            args.vbn_ptr      = vbn_ptr;
-            args.b            = 0;
-            args.head         = 0;
-            args.kv_head      = 0;
-            args.q_block      = q_block_in_b;
-            args.nhead_q      = 1;
-            args.nhead_k      = 1;
-            args.num_q_blocks = num_q_blocks_b;
-            args.num_k_blocks = num_k_blocks_b;
-            args.hdim         = kargs.hdim;
+            args.k_means           = k_means_view;
+            args.q_means           = q_means_view;
+            args.k_sim             = k_sim_view;
+            args.q_sim             = q_sim_view;
+            args.lut_row           = lut_row;
+            args.vbn_ptr           = vbn_ptr;
+            args.b                 = 0;
+            args.head              = 0;
+            args.kv_head           = 0;
+            args.q_block           = q_block_in_b;
+            args.nhead_q           = 1;
+            args.nhead_k           = 1;
+            args.num_q_blocks      = num_q_blocks_b;
+            args.num_k_blocks      = num_k_blocks_b;
+            args.hdim              = kargs.hdim;
             args.head_cdfthreshd   = head_cdfthreshd;
-            args.head_topk          = head_topk;
+            args.head_topk         = head_topk;
             args.head_simthreshold = head_simthreshold;
-            args.causal_type    = kargs.causal_type;
-            args.attention_sink = kargs.attention_sink;
-            args.seqlen_q       = seqlen_q_b;
-            args.seqlen_k       = seqlen_k_b;
-            args.block_size     = kargs.block_size;
-            args.window_left    = kargs.window_left;
-            args.window_right   = kargs.window_right;
-            args.scale          = kargs.scale;
+            args.causal_type       = kargs.causal_type;
+            args.attention_sink    = kargs.attention_sink;
+            args.seqlen_q          = seqlen_q_b;
+            args.seqlen_k          = seqlen_k_b;
+            args.block_size        = kargs.block_size;
+            args.window_left       = kargs.window_left;
+            args.window_right      = kargs.window_right;
+            args.scale             = kargs.scale;
             Pipeline{}.run_with_indices(args, smem_raw);
         }
         else
@@ -696,10 +681,18 @@ struct FmhaFwdSpargeKernel
     using ODataType    = ck_tile::remove_cvref_t<typename FmhaPipeline::ODataType>;
     using SaccDataType = ck_tile::remove_cvref_t<typename FmhaPipeline::SaccDataType>;
 
-    using PreprocessKKernel       = FmhaFwdSpargePreprocessKKernel<QDataType, FmhaPipeline::kIsGroupMode, FmhaPipeline::kBlockSize>;
-    using PreprocessQKernel       = FmhaFwdSpargePreprocessQKernel<QDataType, FmhaPipeline::kIsGroupMode, FmhaPipeline::kBlockSize>;
-    using PreprocessFusedKernel   = FmhaFwdSpargePreprocessFusedKernel<QDataType, FmhaPipeline::kIsGroupMode, FmhaPipeline::kBlockSize>;
-    using MaskPredictionKernel    = FmhaFwdSpargeMaskPredictionKernel<FmhaPipeline::kIsGroupMode, 256, FmhaPipeline::kBlockSize>;
+    using PreprocessKKernel     = FmhaFwdSpargePreprocessKKernel<QDataType,
+                                                                 FmhaPipeline::kIsGroupMode,
+                                                                 FmhaPipeline::kBlockSize>;
+    using PreprocessQKernel     = FmhaFwdSpargePreprocessQKernel<QDataType,
+                                                                 FmhaPipeline::kIsGroupMode,
+                                                                 FmhaPipeline::kBlockSize>;
+    using PreprocessFusedKernel = FmhaFwdSpargePreprocessFusedKernel<QDataType,
+                                                                     FmhaPipeline::kIsGroupMode,
+                                                                     FmhaPipeline::kBlockSize>;
+    using MaskPredictionKernel  = FmhaFwdSpargeMaskPredictionKernel<FmhaPipeline::kIsGroupMode,
+                                                                    256,
+                                                                    FmhaPipeline::kBlockSize>;
 
     using VLayout = ck_tile::remove_cvref_t<typename FmhaPipeline::VLayout>;
 
@@ -741,7 +734,7 @@ struct FmhaFwdSpargeKernel
         const void* v_ptr;
         void* o_ptr;
 
-        const void* lut_ptr;             // delta-encoded
+        const void* lut_ptr; // delta-encoded
         const void* valid_block_num_ptr;
 
         ck_tile::index_t seqlen_q;
@@ -816,8 +809,7 @@ struct FmhaFwdSpargeKernel
         const void* pvthreshd_per_head_ptr;
     };
 
-    using Kargs =
-        std::conditional_t<kIsGroupMode, FmhaFwdGroupModeKargs, FmhaFwdBatchModeKargs>;
+    using Kargs = std::conditional_t<kIsGroupMode, FmhaFwdGroupModeKargs, FmhaFwdBatchModeKargs>;
 
     struct BlockIndices
     {
@@ -856,13 +848,13 @@ struct FmhaFwdSpargeKernel
               ck_tile::index_t window_size_left,
               ck_tile::index_t window_size_right,
               ck_tile::index_t mask_type,
-              float pvthreshd                = 0.0f,
-              const void* pvthreshd_per_head = nullptr,
-              const void* bias_ptr              = nullptr,
+              float pvthreshd                    = 0.0f,
+              const void* pvthreshd_per_head     = nullptr,
+              const void* bias_ptr               = nullptr,
               ck_tile::index_t stride_bias       = 0,
               ck_tile::index_t nhead_stride_bias = 0,
               ck_tile::index_t batch_stride_bias = 0,
-              float logits_soft_cap             = 0.0f)
+              float logits_soft_cap              = 0.0f)
     {
         Kargs kargs{{q_ptr,
                      k_ptr,
@@ -950,8 +942,8 @@ struct FmhaFwdSpargeKernel
               ck_tile::index_t window_size_left,
               ck_tile::index_t window_size_right,
               ck_tile::index_t mask_type,
-              float pvthreshd                = 0.0f,
-              const void* pvthreshd_per_head = nullptr,
+              float pvthreshd                    = 0.0f,
+              const void* pvthreshd_per_head     = nullptr,
               const void* bias_ptr               = nullptr,
               ck_tile::index_t stride_bias       = 0,
               ck_tile::index_t nhead_stride_bias = 0,
@@ -1085,14 +1077,12 @@ struct FmhaFwdSpargeKernel
 
         if constexpr(kIsGroupMode)
         {
-            const long_index_t qstart =
-                static_cast<long_index_t>(kargs.seqstart_q_ptr[i_batch]);
-            const long_index_t kstart =
-                static_cast<long_index_t>(kargs.seqstart_k_ptr[i_batch]);
-            batch_offset_q = qstart * kargs.stride_q;
-            batch_offset_k = kstart * kargs.stride_k;
-            batch_offset_v = kstart * kargs.stride_v;
-            batch_offset_o = qstart * kargs.stride_o;
+            const long_index_t qstart = static_cast<long_index_t>(kargs.seqstart_q_ptr[i_batch]);
+            const long_index_t kstart = static_cast<long_index_t>(kargs.seqstart_k_ptr[i_batch]);
+            batch_offset_q            = qstart * kargs.stride_q;
+            batch_offset_k            = kstart * kargs.stride_k;
+            batch_offset_v            = kstart * kargs.stride_v;
+            batch_offset_o            = qstart * kargs.stride_o;
 
             seqlen_q_actual =
                 kargs.seqlen_q_ptr != nullptr
@@ -1108,10 +1098,10 @@ struct FmhaFwdSpargeKernel
         }
         else
         {
-            batch_offset_q = static_cast<long_index_t>(i_batch) * kargs.batch_stride_q;
-            batch_offset_k = static_cast<long_index_t>(i_batch) * kargs.batch_stride_k;
-            batch_offset_v = static_cast<long_index_t>(i_batch) * kargs.batch_stride_v;
-            batch_offset_o = static_cast<long_index_t>(i_batch) * kargs.batch_stride_o;
+            batch_offset_q  = static_cast<long_index_t>(i_batch) * kargs.batch_stride_q;
+            batch_offset_k  = static_cast<long_index_t>(i_batch) * kargs.batch_stride_k;
+            batch_offset_v  = static_cast<long_index_t>(i_batch) * kargs.batch_stride_v;
+            batch_offset_o  = static_cast<long_index_t>(i_batch) * kargs.batch_stride_o;
             seqlen_q_actual = kargs.seqlen_q;
             seqlen_k_actual = kargs.seqlen_k;
         }
@@ -1137,27 +1127,23 @@ struct FmhaFwdSpargeKernel
         // new_index = Xstart_b*H + head*X_b + local.
         const long_index_t lut_xstart_b = [&]() -> long_index_t {
             if constexpr(kIsGroupMode)
-                return __builtin_amdgcn_readfirstlane(
-                    kargs.mask_batch_offset_ptr[i_batch]);
+                return __builtin_amdgcn_readfirstlane(kargs.mask_batch_offset_ptr[i_batch]);
             return 0;
         }();
         const long_index_t lut_x_b = [&]() -> long_index_t {
             if constexpr(kIsGroupMode)
-                return __builtin_amdgcn_readfirstlane(
-                           kargs.mask_batch_offset_ptr[i_batch + 1]) -
+                return __builtin_amdgcn_readfirstlane(kargs.mask_batch_offset_ptr[i_batch + 1]) -
                        lut_xstart_b;
             return 0;
         }();
         const long_index_t vbn_xstart_b = [&]() -> long_index_t {
             if constexpr(kIsGroupMode)
-                return __builtin_amdgcn_readfirstlane(
-                    kargs.seqstart_q_block_ptr[i_batch]);
+                return __builtin_amdgcn_readfirstlane(kargs.seqstart_q_block_ptr[i_batch]);
             return 0;
         }();
         const long_index_t vbn_x_b = [&]() -> long_index_t {
             if constexpr(kIsGroupMode)
-                return __builtin_amdgcn_readfirstlane(
-                           kargs.seqstart_q_block_ptr[i_batch + 1]) -
+                return __builtin_amdgcn_readfirstlane(kargs.seqstart_q_block_ptr[i_batch + 1]) -
                        vbn_xstart_b;
             return 0;
         }();
@@ -1167,8 +1153,7 @@ struct FmhaFwdSpargeKernel
             {
                 const index_t k_blocks_b =
                     ck_tile::integer_divide_ceil(seqlen_k_actual, FmhaPipeline::kN0);
-                return base +
-                       lut_xstart_b * kargs.num_head_q +
+                return base + lut_xstart_b * kargs.num_head_q +
                        static_cast<long_index_t>(i_nhead) * lut_x_b +
                        static_cast<long_index_t>(i_tile_m) * k_blocks_b;
             }
@@ -1188,19 +1173,17 @@ struct FmhaFwdSpargeKernel
             const auto* base = reinterpret_cast<const int*>(kargs.valid_block_num_ptr);
             if constexpr(kIsGroupMode)
             {
-                return base[
-                    vbn_xstart_b * kargs.num_head_q +
-                    static_cast<long_index_t>(i_nhead) * vbn_x_b +
-                    static_cast<long_index_t>(i_tile_m)];
+                return base[vbn_xstart_b * kargs.num_head_q +
+                            static_cast<long_index_t>(i_nhead) * vbn_x_b +
+                            static_cast<long_index_t>(i_tile_m)];
             }
             else
             {
                 const index_t num_q_blocks =
                     ck_tile::integer_divide_ceil(kargs.seqlen_q, FmhaPipeline::kM0);
-                return base[
-                    (static_cast<long_index_t>(i_batch) * kargs.num_head_q + i_nhead) *
-                        num_q_blocks +
-                    i_tile_m];
+                return base[(static_cast<long_index_t>(i_batch) * kargs.num_head_q + i_nhead) *
+                                num_q_blocks +
+                            i_tile_m];
             }
         }();
 
@@ -1324,9 +1307,8 @@ struct FmhaFwdSpargeKernel
             else
             {
                 const BiasDataType* null_bias = static_cast<const BiasDataType*>(nullptr);
-                const auto dummy_naive = make_naive_tensor_view<address_space_enum::global>(
-                    null_bias,
-                    make_tuple(1, 1), make_tuple(1, 1), number<1>{}, number<1>{});
+                const auto dummy_naive        = make_naive_tensor_view<address_space_enum::global>(
+                    null_bias, make_tuple(1, 1), make_tuple(1, 1), number<1>{}, number<1>{});
                 const auto dummy = pad_tensor_view(
                     dummy_naive,
                     make_tuple(number<FmhaPipeline::kM0>{}, number<FmhaPipeline::kN0>{}),

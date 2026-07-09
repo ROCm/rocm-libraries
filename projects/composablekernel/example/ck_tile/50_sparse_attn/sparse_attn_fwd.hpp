@@ -76,7 +76,7 @@ struct FmhaMasks
 // sparge_sage quantized type config: INT8 Q/K, FP8 V/P, bf16 O. Input (pre-quant) Q/K are bf16.
 struct SpargeSageI8Fp8Bf16
 {
-    using InputDataType       = ck_tile::bf16_t;   // original Q/K dtype (preprocess input)
+    using InputDataType       = ck_tile::bf16_t; // original Q/K dtype (preprocess input)
     using QDataType           = ck_tile::int8_t;
     using KDataType           = ck_tile::int8_t;
     using VDataType           = ck_tile::fp8_t;
@@ -148,24 +148,24 @@ struct fmha_jenga_fwd_args
 
     // Group-mode cu_seqlens (all nullptr in batch mode). cu_seqlen_*_ptr reserved
     // for ABI parity with 01_fmha; ignored by kernel today (no padded varlen).
-    const void* seqstart_q_ptr   = nullptr;
-    const void* seqstart_k_ptr   = nullptr;
-    const void* seqlen_q_ptr     = nullptr;  // optional override of seqstart_*_ptr deltas
-    const void* seqlen_k_ptr     = nullptr;
-    const void* cu_seqlen_q_ptr  = nullptr;
-    const void* cu_seqlen_k_ptr  = nullptr;
+    const void* seqstart_q_ptr  = nullptr;
+    const void* seqstart_k_ptr  = nullptr;
+    const void* seqlen_q_ptr    = nullptr; // optional override of seqstart_*_ptr deltas
+    const void* seqlen_k_ptr    = nullptr;
+    const void* cu_seqlen_q_ptr = nullptr;
+    const void* cu_seqlen_k_ptr = nullptr;
 
     // Group-mode block offset tables.
-    const void* seqstart_q_block_ptr   = nullptr;
-    const void* mask_batch_offset_ptr  = nullptr;
+    const void* seqstart_q_block_ptr  = nullptr;
+    const void* mask_batch_offset_ptr = nullptr;
 
     // ALIBI: bias_ptr = [nhead] (rank=1) or [1] (rank=0) slope buffer.
-    const void*      bias_ptr           = nullptr;
-    ck_tile::index_t stride_bias        = 0;
-    ck_tile::index_t nhead_stride_bias  = 0;
-    ck_tile::index_t batch_stride_bias  = 0;
+    const void* bias_ptr               = nullptr;
+    ck_tile::index_t stride_bias       = 0;
+    ck_tile::index_t nhead_stride_bias = 0;
+    ck_tile::index_t batch_stride_bias = 0;
 
-    float logits_soft_cap = 0.0f;  // NO_BIAS only
+    float logits_soft_cap = 0.0f; // NO_BIAS only
 };
 
 struct fmha_vsa_fwd_args
@@ -211,21 +211,21 @@ struct fmha_vsa_fwd_args
 
     // Group-mode cu_seqlens (all nullptr in batch mode). cu_seqlen_*_ptr reserved
     // for ABI parity with 01_fmha; ignored by kernel today (no padded varlen).
-    const void* seqstart_q_ptr   = nullptr;
-    const void* seqstart_k_ptr   = nullptr;
-    const void* seqlen_q_ptr     = nullptr;  // optional override of seqstart_*_ptr deltas
-    const void* seqlen_k_ptr     = nullptr;
-    const void* cu_seqlen_q_ptr  = nullptr;
-    const void* cu_seqlen_k_ptr  = nullptr;
+    const void* seqstart_q_ptr  = nullptr;
+    const void* seqstart_k_ptr  = nullptr;
+    const void* seqlen_q_ptr    = nullptr; // optional override of seqstart_*_ptr deltas
+    const void* seqlen_k_ptr    = nullptr;
+    const void* cu_seqlen_q_ptr = nullptr;
+    const void* cu_seqlen_k_ptr = nullptr;
 
     // Group-mode block offset tables. seqstart_q_block_ptr also offsets valid_block_num_ptr.
-    const void* seqstart_q_block_ptr = nullptr;
+    const void* seqstart_q_block_ptr  = nullptr;
     const void* mask_batch_offset_ptr = nullptr;
 
-    const void*      bias_ptr           = nullptr;
-    ck_tile::index_t stride_bias        = 0;
-    ck_tile::index_t nhead_stride_bias  = 0;
-    ck_tile::index_t batch_stride_bias  = 0;
+    const void* bias_ptr               = nullptr;
+    ck_tile::index_t stride_bias       = 0;
+    ck_tile::index_t nhead_stride_bias = 0;
+    ck_tile::index_t batch_stride_bias = 0;
 
     float logits_soft_cap = 0.0f;
 };
@@ -396,7 +396,7 @@ auto fmha_fwd_create_kargs_and_grids(fmha_vsa_fwd_args args)
     return ck_tile::make_tuple(kargs, grids);
 }
 
-// Pattern-matching trait — not used to instantiate the kernel directly.
+// Pattern-matching trait -- not used to instantiate the kernel directly.
 template <ck_tile::index_t HDim_,
           typename DataType_,
           ck_tile::index_t kM0_,
@@ -414,7 +414,7 @@ template <ck_tile::index_t HDim_,
           bool kPadD_,
           bool kPadDv_,
           bool kUseTrLoad_,
-          bool kIsGroupMode_ = false,
+          bool kIsGroupMode_                        = false,
           ck_tile::BlockAttentionBiasEnum BiasEnum_ = ck_tile::BlockAttentionBiasEnum::NO_BIAS>
 struct fmha_jenga_fwd_traits_
 {
@@ -446,9 +446,9 @@ struct fmha_jenga_fwd_traits
     std::string data_type;
     bool is_v_rowmajor;
     mask_enum mask_type;
-    bool is_group_mode = false;
-    int  bias_type     = 0;      // 0=no_bias, 1=elementwise, 2=alibi
-    bool has_logits_soft_cap = false;  // NO_BIAS only
+    bool is_group_mode       = false;
+    int bias_type            = 0;     // 0=no_bias, 1=elementwise, 2=alibi
+    bool has_logits_soft_cap = false; // NO_BIAS only
 };
 
 float fmha_jenga_fwd(fmha_jenga_fwd_traits, fmha_jenga_fwd_args, const ck_tile::stream_config&);
@@ -456,7 +456,7 @@ float fmha_jenga_fwd(fmha_jenga_fwd_traits, fmha_jenga_fwd_args, const ck_tile::
 template <typename Traits_>
 float fmha_jenga_fwd_(const ck_tile::stream_config&, fmha_jenga_fwd_args);
 
-// Sparge: preprocess → mask prediction → attention.
+// Sparge: preprocess -> mask prediction -> attention.
 struct fmha_sparge_fwd_args
 {
     const void* q_ptr;
@@ -499,14 +499,14 @@ struct fmha_sparge_fwd_args
     ck_tile::index_t causal_type = 0;
     bool attention_sink          = false;
 
-    const void* bias_ptr             = nullptr;
+    const void* bias_ptr               = nullptr;
     ck_tile::index_t stride_bias       = 0;
     ck_tile::index_t nhead_stride_bias = 0;
     ck_tile::index_t batch_stride_bias = 0;
 
     float logits_soft_cap = 0.0f;
 
-    // Internal — codegen overwrites.
+    // Internal -- codegen overwrites.
     const void* internal_lut_ptr = nullptr;
     const void* internal_vbn_ptr = nullptr;
 
@@ -518,17 +518,17 @@ struct fmha_sparge_fwd_args
 
     // Group-mode cu_seqlens (all nullptr in batch mode). cu_seqlen_*_ptr reserved
     // for ABI parity with 01_fmha; ignored by kernel today (no padded varlen).
-    const void* seqstart_q_ptr   = nullptr;
-    const void* seqstart_k_ptr   = nullptr;
-    const void* seqlen_q_ptr     = nullptr;  // optional override of seqstart_*_ptr deltas
-    const void* seqlen_k_ptr     = nullptr;
-    const void* cu_seqlen_q_ptr  = nullptr;
-    const void* cu_seqlen_k_ptr  = nullptr;
+    const void* seqstart_q_ptr  = nullptr;
+    const void* seqstart_k_ptr  = nullptr;
+    const void* seqlen_q_ptr    = nullptr; // optional override of seqstart_*_ptr deltas
+    const void* seqlen_k_ptr    = nullptr;
+    const void* cu_seqlen_q_ptr = nullptr;
+    const void* cu_seqlen_k_ptr = nullptr;
 
     // Group-mode block offset tables. seqstart_q_block_ptr offsets q_means/q_sim/vbn;
     // seqstart_k_block_ptr offsets k_means/k_sim.
-    const void* seqstart_q_block_ptr = nullptr;
-    const void* seqstart_k_block_ptr = nullptr;
+    const void* seqstart_q_block_ptr  = nullptr;
+    const void* seqstart_k_block_ptr  = nullptr;
     const void* mask_batch_offset_ptr = nullptr;
 
     // Group-mode block totals (zero in batch mode); codegen uses these to size workspace.
@@ -540,13 +540,13 @@ struct fmha_sparge_fwd_args
 // Sparge workspace layout: [km | k_means | q_means | k_sim | q_sim | LUT | vbn].
 struct sparge_workspace_layout
 {
-    std::size_t km_off,      km_bytes;
+    std::size_t km_off, km_bytes;
     std::size_t k_means_off, k_means_bytes;
     std::size_t q_means_off, q_means_bytes;
-    std::size_t k_sim_off,   k_sim_bytes;
-    std::size_t q_sim_off,   q_sim_bytes;
-    std::size_t lut_off,     lut_bytes;
-    std::size_t vbn_off,     vbn_bytes;
+    std::size_t k_sim_off, k_sim_bytes;
+    std::size_t q_sim_off, q_sim_bytes;
+    std::size_t lut_off, lut_bytes;
+    std::size_t vbn_off, vbn_bytes;
     std::size_t total_bytes;
 };
 
@@ -563,13 +563,27 @@ inline sparge_workspace_layout compute_sparge_workspace_layout(const fmha_sparge
 
     sparge_workspace_layout L{};
     std::size_t off = 0;
-    L.km_off      = off; L.km_bytes      = a.hp.smooth_k ? B * Hk * D * sizeof(float) : 0; off += L.km_bytes;
-    L.k_means_off = off; L.k_means_bytes = B * Hk * N_k * D * sizeof(float);                off += L.k_means_bytes;
-    L.q_means_off = off; L.q_means_bytes = B * Hq * N_q * D * sizeof(float);                off += L.q_means_bytes;
-    L.k_sim_off   = off; L.k_sim_bytes   = sim ? B * Hk * N_k * sizeof(float) : 0;          off += L.k_sim_bytes;
-    L.q_sim_off   = off; L.q_sim_bytes   = sim ? B * Hq * N_q * sizeof(float) : 0;          off += L.q_sim_bytes;
-    L.lut_off     = off; L.lut_bytes     = B * Hq * N_q * N_k * sizeof(int32_t);            off += L.lut_bytes;
-    L.vbn_off     = off; L.vbn_bytes     = B * Hq * N_q * sizeof(int32_t);                  off += L.vbn_bytes;
+    L.km_off        = off;
+    L.km_bytes      = a.hp.smooth_k ? B * Hk * D * sizeof(float) : 0;
+    off += L.km_bytes;
+    L.k_means_off   = off;
+    L.k_means_bytes = B * Hk * N_k * D * sizeof(float);
+    off += L.k_means_bytes;
+    L.q_means_off   = off;
+    L.q_means_bytes = B * Hq * N_q * D * sizeof(float);
+    off += L.q_means_bytes;
+    L.k_sim_off   = off;
+    L.k_sim_bytes = sim ? B * Hk * N_k * sizeof(float) : 0;
+    off += L.k_sim_bytes;
+    L.q_sim_off   = off;
+    L.q_sim_bytes = sim ? B * Hq * N_q * sizeof(float) : 0;
+    off += L.q_sim_bytes;
+    L.lut_off   = off;
+    L.lut_bytes = B * Hq * N_q * N_k * sizeof(int32_t);
+    off += L.lut_bytes;
+    L.vbn_off   = off;
+    L.vbn_bytes = B * Hq * N_q * sizeof(int32_t);
+    off += L.vbn_bytes;
     L.total_bytes = off;
     return L;
 }
@@ -582,11 +596,10 @@ inline sparge_workspace_layout compute_sparge_workspace_layout(const fmha_sparge
 //   q_sim    : [Hq, total_q_blocks]
 //   LUT      : [Hq, sum_b(q_blocks[b] * k_blocks[b])]  int32
 //   vbn      : [Hq, total_q_blocks]                    int32
-inline sparge_workspace_layout compute_sparge_workspace_layout_group(
-    const fmha_sparge_fwd_args& a,
-    int32_t total_q_blocks,
-    int32_t total_k_blocks,
-    int32_t total_qk_blocks)
+inline sparge_workspace_layout compute_sparge_workspace_layout_group(const fmha_sparge_fwd_args& a,
+                                                                     int32_t total_q_blocks,
+                                                                     int32_t total_k_blocks,
+                                                                     int32_t total_qk_blocks)
 {
     const auto B   = static_cast<std::size_t>(a.batch);
     const auto Hk  = static_cast<std::size_t>(a.nhead_k);
@@ -599,17 +612,30 @@ inline sparge_workspace_layout compute_sparge_workspace_layout_group(
 
     sparge_workspace_layout L{};
     std::size_t off = 0;
-    L.km_off      = off; L.km_bytes      = a.hp.smooth_k ? B * Hk * D * sizeof(float) : 0; off += L.km_bytes;
-    L.k_means_off = off; L.k_means_bytes = Hk * Tk * D * sizeof(float);                    off += L.k_means_bytes;
-    L.q_means_off = off; L.q_means_bytes = Hq * Tq * D * sizeof(float);                    off += L.q_means_bytes;
-    L.k_sim_off   = off; L.k_sim_bytes   = sim ? Hk * Tk * sizeof(float) : 0;              off += L.k_sim_bytes;
-    L.q_sim_off   = off; L.q_sim_bytes   = sim ? Hq * Tq * sizeof(float) : 0;              off += L.q_sim_bytes;
-    L.lut_off     = off; L.lut_bytes     = Hq * Tqk * sizeof(int32_t);                     off += L.lut_bytes;
-    L.vbn_off     = off; L.vbn_bytes     = Hq * Tq * sizeof(int32_t);                      off += L.vbn_bytes;
+    L.km_off        = off;
+    L.km_bytes      = a.hp.smooth_k ? B * Hk * D * sizeof(float) : 0;
+    off += L.km_bytes;
+    L.k_means_off   = off;
+    L.k_means_bytes = Hk * Tk * D * sizeof(float);
+    off += L.k_means_bytes;
+    L.q_means_off   = off;
+    L.q_means_bytes = Hq * Tq * D * sizeof(float);
+    off += L.q_means_bytes;
+    L.k_sim_off   = off;
+    L.k_sim_bytes = sim ? Hk * Tk * sizeof(float) : 0;
+    off += L.k_sim_bytes;
+    L.q_sim_off   = off;
+    L.q_sim_bytes = sim ? Hq * Tq * sizeof(float) : 0;
+    off += L.q_sim_bytes;
+    L.lut_off   = off;
+    L.lut_bytes = Hq * Tqk * sizeof(int32_t);
+    off += L.lut_bytes;
+    L.vbn_off   = off;
+    L.vbn_bytes = Hq * Tq * sizeof(int32_t);
+    off += L.vbn_bytes;
     L.total_bytes = off;
     return L;
 }
-
 
 template <typename FmhaKernel>
 auto fmha_fwd_create_kargs_and_grids(fmha_sparge_fwd_args args)
@@ -715,7 +741,7 @@ template <ck_tile::index_t HDim_,
           bool kPadSK_,
           bool kPadD_,
           bool kPadDv_,
-          bool kIsGroupMode_ = false,
+          bool kIsGroupMode_                        = false,
           ck_tile::BlockAttentionBiasEnum BiasEnum_ = ck_tile::BlockAttentionBiasEnum::NO_BIAS>
 struct fmha_sparge_fwd_traits_
 {
@@ -763,7 +789,7 @@ template <ck_tile::index_t HDim_,
           bool kPadD_,
           bool kPadDv_,
           bool kUseTrLoad_,
-          bool kIsGroupMode_ = false,
+          bool kIsGroupMode_                        = false,
           ck_tile::BlockAttentionBiasEnum BiasEnum_ = ck_tile::BlockAttentionBiasEnum::NO_BIAS>
 using fmha_vsa_fwd_traits_ = fmha_jenga_fwd_traits_<HDim_,
                                                     DataType_,
@@ -798,9 +824,9 @@ float fmha_vsa_fwd_(const ck_tile::stream_config&, fmha_vsa_fwd_args);
 // V is host-quantized FP8 with per-channel v_descale.
 struct fmha_sparge_sage_fwd_args
 {
-    const void* q_ptr;        // original fp16/bf16 (for preprocess)
+    const void* q_ptr; // original fp16/bf16 (for preprocess)
     const void* k_ptr;
-    const void* v_ptr;        // FP8 (host-quantized)
+    const void* v_ptr; // FP8 (host-quantized)
     void* o_ptr;
 
     const void* v_descale_ptr; // [batch, nhead_k, hdim_v] per-channel
@@ -839,10 +865,10 @@ struct fmha_sparge_sage_fwd_args
     ck_tile::index_t mask_type         = 0; // ck_tile::GenericAttentionMaskEnum
 
     // Attention sink: force-include the first K block in selection (shared mask-pred feature).
-    bool attention_sink                = false;
+    bool attention_sink = false;
 
     // Gemma-style logits soft-cap (0 = disabled; NO_BIAS only). Matches sparge.
-    float logits_soft_cap              = 0.0f;
+    float logits_soft_cap = 0.0f;
 
     // v_descale layout strides (matches sageattn per-channel).
     ck_tile::index_t nhead_stride_v_descale = 0;
@@ -858,9 +884,10 @@ struct fmha_sparge_sage_fwd_args
     // K by km before quantizing (official SpargeAttn); nullptr disables. Q is never centered.
     const void* km_ptr = nullptr;
 
-    // Bias buffer. ALIBI: slope array (rank-1 [nhead] => stride_bias=0; rank-2 => stride_bias=nhead).
-    // ELEMENTWISE: dense [.., Sq, Sk]; stride_bias = Sk row stride, nhead/batch strides select plane.
-    const void*      bias_ptr          = nullptr;
+    // Bias buffer. ALIBI: slope array (rank-1 [nhead] => stride_bias=0; rank-2 =>
+    // stride_bias=nhead). ELEMENTWISE: dense [.., Sq, Sk]; stride_bias = Sk row stride, nhead/batch
+    // strides select plane.
+    const void* bias_ptr               = nullptr;
     ck_tile::index_t stride_bias       = 0;
     ck_tile::index_t nhead_stride_bias = 0;
     ck_tile::index_t batch_stride_bias = 0;
@@ -875,21 +902,21 @@ struct fmha_sparge_sage_fwd_args
     const void* seqlen_k_ptr          = nullptr;
     const void* seqstart_q_block_ptr  = nullptr;
     const void* seqstart_k_block_ptr  = nullptr;
-    const void* mask_batch_offset_ptr  = nullptr;
-    ck_tile::index_t total_q_blocks  = 0;
-    ck_tile::index_t total_k_blocks  = 0;
-    ck_tile::index_t total_qk_blocks = 0;
-    ck_tile::index_t total_q_tokens  = 0;
-    ck_tile::index_t total_k_tokens  = 0;
+    const void* mask_batch_offset_ptr = nullptr;
+    ck_tile::index_t total_q_blocks   = 0;
+    ck_tile::index_t total_k_blocks   = 0;
+    ck_tile::index_t total_qk_blocks  = 0;
+    ck_tile::index_t total_q_tokens   = 0;
+    ck_tile::index_t total_k_tokens   = 0;
 };
 
 // sparge_sage workspace adds quant Q/K + per-warp scales after the sparge region:
 // [k_means | q_means | k_sim | q_sim | lut | vbn | q_quant | k_quant | q_scale | k_scale].
 struct sparge_sage_workspace_layout
 {
-    sparge_workspace_layout base;     // k_means .. vbn (sim disabled here; offsets reused)
-    std::size_t q_quant_off,  q_quant_bytes;
-    std::size_t k_quant_off,  k_quant_bytes;
+    sparge_workspace_layout base; // k_means .. vbn (sim disabled here; offsets reused)
+    std::size_t q_quant_off, q_quant_bytes;
+    std::size_t k_quant_off, k_quant_bytes;
     std::size_t q_scale_off, q_scale_bytes;
     std::size_t k_scale_off, k_scale_bytes;
     std::size_t num_block_scale_q, num_block_scale_k; // per (batch, head) row count
@@ -901,37 +928,43 @@ compute_sparge_sage_workspace_layout(const fmha_sparge_sage_fwd_args& a)
 {
     // Build a sparge args proxy to reuse the base layout (sim disabled, smooth_k off).
     fmha_sparge_fwd_args proxy{};
-    proxy.batch        = a.batch;
-    proxy.nhead_q      = a.nhead_q;
-    proxy.nhead_k      = a.nhead_k;
-    proxy.hdim_q       = a.hdim_q;
-    proxy.seqlen_q     = a.seqlen_q;
-    proxy.seqlen_k     = a.seqlen_k;
-    proxy.pp_block_size = a.pp_block_size;
+    proxy.batch           = a.batch;
+    proxy.nhead_q         = a.nhead_q;
+    proxy.nhead_k         = a.nhead_k;
+    proxy.hdim_q          = a.hdim_q;
+    proxy.seqlen_q        = a.seqlen_q;
+    proxy.seqlen_k        = a.seqlen_k;
+    proxy.pp_block_size   = a.pp_block_size;
     proxy.hp.simthreshold = a.hp.simthreshold; // size sim buffers when sim selection is on
     proxy.hp.smooth_k     = false;
 
     sparge_sage_workspace_layout L{};
-    L.base = compute_sparge_workspace_layout(proxy);
+    L.base          = compute_sparge_workspace_layout(proxy);
     std::size_t off = L.base.total_bytes;
 
-    const auto B   = static_cast<std::size_t>(a.batch);
-    const auto Hq  = static_cast<std::size_t>(a.nhead_q);
-    const auto Hk  = static_cast<std::size_t>(a.nhead_k);
-    const auto D   = static_cast<std::size_t>(a.hdim_q);
-    const auto Sq  = static_cast<std::size_t>(a.seqlen_q);
-    const auto Sk  = static_cast<std::size_t>(a.seqlen_k);
+    const auto B  = static_cast<std::size_t>(a.batch);
+    const auto Hq = static_cast<std::size_t>(a.nhead_q);
+    const auto Hk = static_cast<std::size_t>(a.nhead_k);
+    const auto D  = static_cast<std::size_t>(a.hdim_q);
+    const auto Sq = static_cast<std::size_t>(a.seqlen_q);
+    const auto Sk = static_cast<std::size_t>(a.seqlen_k);
 
     L.num_block_scale_q =
         (Sq + static_cast<std::size_t>(a.block_scale_size_q) - 1) / a.block_scale_size_q;
     L.num_block_scale_k =
         (Sk + static_cast<std::size_t>(a.block_scale_size_k) - 1) / a.block_scale_size_k;
 
-    L.q_quant_off = off; L.q_quant_bytes = B * Hq * Sq * D * sizeof(int8_t); off += L.q_quant_bytes;
-    L.k_quant_off = off; L.k_quant_bytes = B * Hk * Sk * D * sizeof(int8_t); off += L.k_quant_bytes;
-    L.q_scale_off = off; L.q_scale_bytes = B * Hq * L.num_block_scale_q * sizeof(float);
+    L.q_quant_off   = off;
+    L.q_quant_bytes = B * Hq * Sq * D * sizeof(int8_t);
+    off += L.q_quant_bytes;
+    L.k_quant_off   = off;
+    L.k_quant_bytes = B * Hk * Sk * D * sizeof(int8_t);
+    off += L.k_quant_bytes;
+    L.q_scale_off   = off;
+    L.q_scale_bytes = B * Hq * L.num_block_scale_q * sizeof(float);
     off += L.q_scale_bytes;
-    L.k_scale_off = off; L.k_scale_bytes = B * Hk * L.num_block_scale_k * sizeof(float);
+    L.k_scale_off   = off;
+    L.k_scale_bytes = B * Hk * L.num_block_scale_k * sizeof(float);
     off += L.k_scale_bytes;
     L.total_bytes = off;
     return L;
@@ -962,23 +995,31 @@ compute_sparge_sage_workspace_layout_group(const fmha_sparge_sage_fwd_args& a)
         proxy, a.total_q_blocks, a.total_k_blocks, a.total_qk_blocks);
     std::size_t off = L.base.total_bytes;
 
-    const auto Hq  = static_cast<std::size_t>(a.nhead_q);
-    const auto Hk  = static_cast<std::size_t>(a.nhead_k);
-    const auto D   = static_cast<std::size_t>(a.hdim_q);
-    const auto Tqt = static_cast<std::size_t>(a.total_q_tokens);
-    const auto Tkt = static_cast<std::size_t>(a.total_k_tokens);
-    const auto Tqb = static_cast<std::size_t>(a.total_q_blocks);
-    const auto Tkb = static_cast<std::size_t>(a.total_k_blocks);
+    const auto Hq    = static_cast<std::size_t>(a.nhead_q);
+    const auto Hk    = static_cast<std::size_t>(a.nhead_k);
+    const auto D     = static_cast<std::size_t>(a.hdim_q);
+    const auto Tqt   = static_cast<std::size_t>(a.total_q_tokens);
+    const auto Tkt   = static_cast<std::size_t>(a.total_k_tokens);
+    const auto Tqb   = static_cast<std::size_t>(a.total_q_blocks);
+    const auto Tkb   = static_cast<std::size_t>(a.total_k_blocks);
     const auto spb_q = static_cast<std::size_t>(a.pp_block_size / a.block_scale_size_q);
     const auto spb_k = static_cast<std::size_t>(a.pp_block_size / a.block_scale_size_k);
 
     L.num_block_scale_q = spb_q; // unused in group attention path (block-packed); kept for parity
     L.num_block_scale_k = spb_k;
 
-    L.q_quant_off = off; L.q_quant_bytes = Hq * Tqt * D * sizeof(int8_t); off += L.q_quant_bytes;
-    L.k_quant_off = off; L.k_quant_bytes = Hk * Tkt * D * sizeof(int8_t); off += L.k_quant_bytes;
-    L.q_scale_off = off; L.q_scale_bytes = Hq * Tqb * spb_q * sizeof(float); off += L.q_scale_bytes;
-    L.k_scale_off = off; L.k_scale_bytes = Hk * Tkb * spb_k * sizeof(float); off += L.k_scale_bytes;
+    L.q_quant_off   = off;
+    L.q_quant_bytes = Hq * Tqt * D * sizeof(int8_t);
+    off += L.q_quant_bytes;
+    L.k_quant_off   = off;
+    L.k_quant_bytes = Hk * Tkt * D * sizeof(int8_t);
+    off += L.k_quant_bytes;
+    L.q_scale_off   = off;
+    L.q_scale_bytes = Hq * Tqb * spb_q * sizeof(float);
+    off += L.q_scale_bytes;
+    L.k_scale_off   = off;
+    L.k_scale_bytes = Hk * Tkb * spb_k * sizeof(float);
+    off += L.k_scale_bytes;
     L.total_bytes = off;
     return L;
 }
@@ -986,20 +1027,20 @@ compute_sparge_sage_workspace_layout_group(const fmha_sparge_sage_fwd_args& a)
 template <ck_tile::index_t HDim_,
           typename InputDataType_,
           ck_tile::BlockSageAttentionQuantScaleEnum QScale_,
-          bool kHasMask_                          = false,
-          bool kIsGroupMode_                      = false,
+          bool kHasMask_                            = false,
+          bool kIsGroupMode_                        = false,
           ck_tile::BlockAttentionBiasEnum BiasEnum_ = ck_tile::BlockAttentionBiasEnum::NO_BIAS,
-          bool kQKFp8_                            = false>
+          bool kQKFp8_                              = false>
 struct fmha_sparge_sage_fwd_traits_
 {
-    static constexpr ck_tile::index_t HDim          = HDim_;
-    using InputDataType                             = ck_tile::remove_cvref_t<InputDataType_>;
-    static constexpr auto QScale                    = QScale_;
-    static constexpr bool kHasMask                  = kHasMask_;
-    static constexpr bool kIsGroupMode              = kIsGroupMode_;
-    static constexpr auto BiasEnum                  = BiasEnum_;
+    static constexpr ck_tile::index_t HDim = HDim_;
+    using InputDataType                    = ck_tile::remove_cvref_t<InputDataType_>;
+    static constexpr auto QScale           = QScale_;
+    static constexpr bool kHasMask         = kHasMask_;
+    static constexpr bool kIsGroupMode     = kIsGroupMode_;
+    static constexpr auto BiasEnum         = BiasEnum_;
     // false: INT8 Q/K (i8fp8bf16). true: FP8 Q/K (fp8bf16).
-    static constexpr bool kQKFp8                    = kQKFp8_;
+    static constexpr bool kQKFp8 = kQKFp8_;
 };
 
 struct fmha_sparge_sage_fwd_traits
@@ -1010,7 +1051,7 @@ struct fmha_sparge_sage_fwd_traits
     std::string qscale;    // "perwarp"
     bool is_group_mode = false;
     bool has_mask      = false;
-    int  bias_type     = 0; // 0=no_bias, 2=alibi (1=elementwise BLOCKED)
+    int bias_type      = 0; // 0=no_bias, 2=alibi (1=elementwise BLOCKED)
 };
 
 float fmha_sparge_sage_fwd(fmha_sparge_sage_fwd_traits,

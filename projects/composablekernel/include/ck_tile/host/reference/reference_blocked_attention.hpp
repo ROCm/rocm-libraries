@@ -25,19 +25,19 @@ void reference_blocked_attention(
     index_t BLKQ,
     index_t BLKK,
     AccT scale,
-    int causal_type           = 0,
-    int window_left           = -1,
-    int window_right          = -1,
-    AccT logits_soft_cap      = AccT{0},
+    int causal_type               = 0,
+    int window_left               = -1,
+    int window_right              = -1,
+    AccT logits_soft_cap          = AccT{0},
     const HostTensor<BiasT>* bias = nullptr,
-    int bias_rank             = 0,
+    int bias_rank                 = 0,
     // Stage-2 pv-skip: skip a selected K-block when every Q-row's block-peak (raw QK + bias/scale)
     // is > pvthreshd below the running max. <=0 disables; pvthreshd_per_head overrides per head.
     // Works with bias too; disabled on the soft-cap path.
-    AccT pvthreshd            = AccT{0},
+    AccT pvthreshd                               = AccT{0},
     const std::vector<float>* pvthreshd_per_head = nullptr,
     // sage path: round-trip each softmax prob through fp8_t before PV, mirroring the device P->fp8.
-    bool quant_p_fp8          = false)
+    bool quant_p_fp8 = false)
 {
     auto q_lengths   = q.get_lengths();
     index_t batch    = q_lengths[0];
@@ -140,7 +140,8 @@ void reference_blocked_attention(
                                            type_convert<AccT>(k(b, hk, sk, d));
                                 // device adds bias (in raw-QK units == bias/scale) before the peak.
                                 if(has_bias)
-                                    raw += type_convert<AccT>((*bias)(bias_b, bias_h, sq, sk)) / scale;
+                                    raw +=
+                                        type_convert<AccT>((*bias)(bias_b, bias_h, sq, sk)) / scale;
                                 row_peak = std::max(row_peak, raw);
                             }
                             m_local[static_cast<size_t>(sq - q_start)] = row_peak;
@@ -149,17 +150,16 @@ void reference_blocked_attention(
                         AccT block_max_diff = -std::numeric_limits<AccT>::infinity();
                         for(index_t r = 0; r < n_rows; ++r)
                         {
-                            const AccT ml = m_local[static_cast<size_t>(r)];
-                            const AccT mn = std::max(run_max[static_cast<size_t>(r)], ml);
+                            const AccT ml  = m_local[static_cast<size_t>(r)];
+                            const AccT mn  = std::max(run_max[static_cast<size_t>(r)], ml);
                             block_max_diff = std::max(block_max_diff, ml - mn);
                         }
                         const bool skip = (block_max_diff < -pvthreshd_eff);
                         if(skip)
                             continue; // run_max unchanged
                         for(index_t r = 0; r < n_rows; ++r)
-                            run_max[static_cast<size_t>(r)] =
-                                std::max(run_max[static_cast<size_t>(r)],
-                                         m_local[static_cast<size_t>(r)]);
+                            run_max[static_cast<size_t>(r)] = std::max(
+                                run_max[static_cast<size_t>(r)], m_local[static_cast<size_t>(r)]);
                         active_k_indices.push_back(kb);
                     }
                     relevant_k_indices.swap(active_k_indices);
@@ -191,8 +191,8 @@ void reference_blocked_attention(
                             AccT score = AccT{0};
                             for(index_t d = 0; d < hdim; ++d)
                             {
-                                score +=
-                                    type_convert<AccT>(q(b, h, sq, d)) * type_convert<AccT>(k(b, hk, sk, d));
+                                score += type_convert<AccT>(q(b, h, sq, d)) *
+                                         type_convert<AccT>(k(b, hk, sk, d));
                             }
                             // fmha order: scale -> soft-cap -> +bias (cap and bias both optional).
                             score = has_soft_cap
@@ -207,8 +207,7 @@ void reference_blocked_attention(
                         }
                     }
 
-                    const bool all_masked =
-                        (max_score == -std::numeric_limits<AccT>::infinity());
+                    const bool all_masked = (max_score == -std::numeric_limits<AccT>::infinity());
 
                     // Keep P unnormalized; divide PV by p_denom at the end (device flow never
                     // normalizes P before PV, so fp8-P slots in cleanly).
@@ -255,8 +254,8 @@ void reference_blocked_attention(
 
                                 for(index_t sk = k_start; sk < k_end; ++sk)
                                 {
-                                    out_val += scores[score_idx] *
-                                               type_convert<AccT>(v(b, hk, sk, dv));
+                                    out_val +=
+                                        scores[score_idx] * type_convert<AccT>(v(b, hk, sk, dv));
                                     score_idx++;
                                 }
                             }

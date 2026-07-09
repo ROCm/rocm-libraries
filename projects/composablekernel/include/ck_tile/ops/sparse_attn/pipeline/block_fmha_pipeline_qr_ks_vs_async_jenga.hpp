@@ -141,7 +141,7 @@ struct BlockFmhaPipelineQRKSVSAsyncJenga
                const KDramBlockWindowTmp& k_dram_block_window_tmp,
                const VDramBlockWindowTmp& v_dram_block_window_tmp,
                const BiasDramBlockWindowTmp& bias_dram_block_window_tmp, // ELEMENTWISE only
-               PositionEncoding position_encoding,                        // ALIBI only
+               PositionEncoding position_encoding,                       // ALIBI only
                const bool* block_relation_onehot_ptr,
                FmhaMask mask,
                float scale_s,
@@ -255,11 +255,11 @@ struct BlockFmhaPipelineQRKSVSAsyncJenga
                              k_dram_block_window_tmp.get_window_lengths(),
                              {seqlen_k_start, 0});
 
-        auto k_dram_window = make_tile_window(
-            k_dram_block_window.get_bottom_tensor_view(),
-            k_dram_block_window.get_window_lengths(),
-            k_dram_block_window.get_window_origin(),
-            Policy::template MakeKDramTileDistribution<Problem>());
+        auto k_dram_window =
+            make_tile_window(k_dram_block_window.get_bottom_tensor_view(),
+                             k_dram_block_window.get_window_lengths(),
+                             k_dram_block_window.get_window_origin(),
+                             Policy::template MakeKDramTileDistribution<Problem>());
         k_dram_window.init_raw();
         constexpr auto k_oob_ck = bool_constant<true>{};
         constexpr auto k_pre_np = bool_constant<false>{};
@@ -367,7 +367,7 @@ struct BlockFmhaPipelineQRKSVSAsyncJenga
             async_load_fence();
             __builtin_amdgcn_s_barrier();
 
-            auto v_buf = load_tile(v_dram_window, number<-1>{}, bool_constant<false>{});
+            auto v_buf           = load_tile(v_dram_window, number<-1>{}, bool_constant<false>{});
             const auto bias_tile = [&]() {
                 if constexpr(BiasEnum == BlockAttentionBiasEnum::ELEMENTWISE_BIAS)
                     return load_tile(bias_dram_window);
@@ -465,21 +465,19 @@ struct BlockFmhaPipelineQRKSVSAsyncJenga
 
             const auto s = cast_tile<SMPLComputeDataType>(s_acc);
             auto m_local = block_tile_reduce<SMPLComputeDataType>(
-                s,
-                sequence<1>{},
-                f_max,
-                -numeric<SMPLComputeDataType>::infinity());
+                s, sequence<1>{}, f_max, -numeric<SMPLComputeDataType>::infinity());
             block_tile_reduce_sync(m_local, f_max, bool_constant<false>{});
 
             const auto m_old = m;
             tile_elementwise_inout(
                 [](auto& e0, auto e1, auto e2) { e0 = max(e1, e2); }, m, m_old, m_local);
 
-            auto p_compute = make_static_distributed_tensor<SMPLComputeDataType>(
-                s.get_tile_distribution());
+            auto p_compute =
+                make_static_distributed_tensor<SMPLComputeDataType>(s.get_tile_distribution());
 
             __builtin_amdgcn_sched_barrier(0x7F);
-            // K tail and V share this LDS buffer: barrier so gemm_0's K reads finish before V store.
+            // K tail and V share this LDS buffer: barrier so gemm_0's K reads finish before V
+            // store.
             if constexpr(LdsSeq.at(number<k0_loops - 1>{}) == LdsSeq.at(number<k0_loops>{}))
             {
                 __builtin_amdgcn_s_barrier();
@@ -497,7 +495,8 @@ struct BlockFmhaPipelineQRKSVSAsyncJenga
 
             if constexpr(k1_loops > 1)
             {
-                // Compiler workaround: moving v_dram window right after load_tile spills to scratch.
+                // Compiler workaround: moving v_dram window right after load_tile spills to
+                // scratch.
                 move_tile_window(v_dram_window, {0, kK1});
                 v_buf = load_tile(v_dram_window, number<-1>{}, bool_constant<false>{});
             }
@@ -522,9 +521,8 @@ struct BlockFmhaPipelineQRKSVSAsyncJenga
 #if CK_TILE_FMHA_FWD_FAST_EXP2
                 constexpr bool s_acc_prescaled =
                     (BiasEnum != BlockAttentionBiasEnum::NO_BIAS) || kHasLogitsSoftCap;
-                auto row_max = s_acc_prescaled
-                                   ? get_validated_m(m[i_idx])
-                                   : scale_s * get_validated_m(m[i_idx]);
+                auto row_max = s_acc_prescaled ? get_validated_m(m[i_idx])
+                                               : scale_s * get_validated_m(m[i_idx]);
 #endif
                 sweep_tile_span(p_spans[number<1>{}], [&](auto idx1) {
                     constexpr auto i_j_idx = make_tuple(idx0, idx1);
@@ -548,8 +546,7 @@ struct BlockFmhaPipelineQRKSVSAsyncJenga
                 constexpr auto i_idx = make_tuple(idx0);
 #if CK_TILE_FMHA_FWD_FAST_EXP2
                 const auto tmp = [&]() {
-                    if constexpr((BiasEnum != BlockAttentionBiasEnum::NO_BIAS) ||
-                                 kHasLogitsSoftCap)
+                    if constexpr((BiasEnum != BlockAttentionBiasEnum::NO_BIAS) || kHasLogitsSoftCap)
                     {
                         // s_acc was already scaled above in the BIAS/LOGITS_SOFT_CAP path.
                         return exp2(m_old[i_idx] - get_validated_m(m[i_idx]));
@@ -582,8 +579,7 @@ struct BlockFmhaPipelineQRKSVSAsyncJenga
                 static_for<0, k1_loops - 1, 1>{}([&](auto i_k1) {
                     if constexpr(i_k1 != 0 && i_k1 < k1_loops - 1)
                     {
-                        v_buf = load_tile(
-                            v_dram_window, number<-1>{}, bool_constant<false>{});
+                        v_buf = load_tile(v_dram_window, number<-1>{}, bool_constant<false>{});
                     }
                     block_sync_lds();
                     gemm_1(o_acc,

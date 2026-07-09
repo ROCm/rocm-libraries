@@ -65,8 +65,8 @@ struct FmhaFwdSpargeSageKernel
                       QScaleEnum == BlockSageAttentionQuantScaleEnum::PERTENSOR,
                   "sparge_sage: PERWARP|BLOCKSCALE|PERTHREAD|PERTENSOR only");
 
-    using AttentionVariant = remove_cvref_t<typename SagePipeline::AttentionVariant>;
-    using AttnMask         = remove_cvref_t<typename SagePipeline::AttnMask>;
+    using AttentionVariant         = remove_cvref_t<typename SagePipeline::AttentionVariant>;
+    using AttnMask                 = remove_cvref_t<typename SagePipeline::AttnMask>;
     static constexpr bool kHasMask = AttnMask::IsMasking;
 
     static constexpr bool kUseAsyncCopy = SagePipeline::Policy::AsyncCopy;
@@ -92,7 +92,7 @@ struct FmhaFwdSpargeSageKernel
 
         index_t num_head_q;
         index_t nhead_ratio_qk;
-        float   scale_s;
+        float scale_s;
 
         index_t stride_q;
         index_t stride_k;
@@ -122,32 +122,33 @@ struct FmhaFwdSpargeSageKernel
         index_t window_size_right;
         GenericAttentionMaskEnum mask_type;
 
-        // ALIBI: slope array; stride_bias=0 -> slope[i_nhead] (shared), else slope[b*stride_bias+h].
-        // ELEMENTWISE_BIAS: dense [.., Sq, Sk]; stride_bias = row stride, nhead/batch select (b,h).
-        const void* bias_ptr           = nullptr;
-        index_t     stride_bias        = 0;
-        index_t     nhead_stride_bias  = 0;
-        index_t     batch_stride_bias  = 0;
+        // ALIBI: slope array; stride_bias=0 -> slope[i_nhead] (shared), else
+        // slope[b*stride_bias+h]. ELEMENTWISE_BIAS: dense [.., Sq, Sk]; stride_bias = row stride,
+        // nhead/batch select (b,h).
+        const void* bias_ptr      = nullptr;
+        index_t stride_bias       = 0;
+        index_t nhead_stride_bias = 0;
+        index_t batch_stride_bias = 0;
 
         // Group / varlen (batch leaves all nullptr / 0). seqstart_*_ptr: per-batch token starts.
         // seqstart_q_block_ptr / mask_batch_offset_ptr: packed VBN/LUT offsets; q/k descale use the
         // same block-packed scheme (block_id * scales_per_block). quant Q/K and descale nhead
         // strides carry packed totals (host: total_tokens*hdim and total_*_scale).
-        const int32_t* seqstart_q_ptr       = nullptr;
-        const int32_t* seqstart_k_ptr       = nullptr;
-        const int32_t* seqlen_q_ptr         = nullptr;
-        const int32_t* seqlen_k_ptr         = nullptr;
-        const int32_t* seqstart_q_block_ptr = nullptr;
-        const int32_t* seqstart_k_block_ptr = nullptr;
+        const int32_t* seqstart_q_ptr        = nullptr;
+        const int32_t* seqstart_k_ptr        = nullptr;
+        const int32_t* seqlen_q_ptr          = nullptr;
+        const int32_t* seqlen_k_ptr          = nullptr;
+        const int32_t* seqstart_q_block_ptr  = nullptr;
+        const int32_t* seqstart_k_block_ptr  = nullptr;
         const int32_t* mask_batch_offset_ptr = nullptr;
-        index_t        batch                = 0;
+        index_t batch                        = 0;
 
         // pv-skip: runtime PV-norm block skip (log2 units; 0 = disabled). per_head ptr (length
         // nhead_q, nullable) overrides the scalar per Q-head.
-        float          pvthreshd            = 0.0f;
-        const void*    pvthreshd_per_head_ptr = nullptr;
+        float pvthreshd                    = 0.0f;
+        const void* pvthreshd_per_head_ptr = nullptr;
 
-        float          logits_soft_cap      = 0.0f; // 0 = disabled
+        float logits_soft_cap = 0.0f; // 0 = disabled
     };
 
     CK_TILE_HOST static Kargs MakeKargs(const void* q_ptr,
@@ -186,13 +187,13 @@ struct FmhaFwdSpargeSageKernel
                                         index_t batch_stride_v_descale,
                                         index_t block_scale_size_q,
                                         index_t block_scale_size_k,
-                                        index_t window_size_left   = -1,
-                                        index_t window_size_right  = -1,
-                                        index_t mask_type          = 0,
-                                        const void* bias_ptr       = nullptr,
-                                        index_t stride_bias        = 0,
-                                        index_t nhead_stride_bias  = 0,
-                                        index_t batch_stride_bias  = 0)
+                                        index_t window_size_left  = -1,
+                                        index_t window_size_right = -1,
+                                        index_t mask_type         = 0,
+                                        const void* bias_ptr      = nullptr,
+                                        index_t stride_bias       = 0,
+                                        index_t nhead_stride_bias = 0,
+                                        index_t batch_stride_bias = 0)
     {
         Kargs kargs;
         kargs.q_ptr               = q_ptr;
@@ -283,15 +284,15 @@ struct FmhaFwdSpargeSageKernel
                                              const int32_t* seqstart_k_block_ptr,
                                              const int32_t* mask_batch_offset_ptr,
                                              index_t batch,
-                                             index_t window_size_left   = -1,
-                                             index_t window_size_right  = -1,
-                                             index_t mask_type          = 0,
-                                             const void* bias_ptr       = nullptr,
-                                             index_t stride_bias        = 0,
-                                             index_t nhead_stride_bias  = 0,
-                                             index_t batch_stride_bias  = 0)
+                                             index_t window_size_left  = -1,
+                                             index_t window_size_right = -1,
+                                             index_t mask_type         = 0,
+                                             const void* bias_ptr      = nullptr,
+                                             index_t stride_bias       = 0,
+                                             index_t nhead_stride_bias = 0,
+                                             index_t batch_stride_bias = 0)
     {
-        Kargs kargs = MakeKargs(q_ptr,
+        Kargs kargs                 = MakeKargs(q_ptr,
                                 k_ptr,
                                 v_ptr,
                                 o_ptr,
@@ -334,21 +335,19 @@ struct FmhaFwdSpargeSageKernel
                                 stride_bias,
                                 nhead_stride_bias,
                                 batch_stride_bias);
-        kargs.seqstart_q_ptr       = seqstart_q_ptr;
-        kargs.seqstart_k_ptr       = seqstart_k_ptr;
-        kargs.seqlen_q_ptr         = seqlen_q_ptr;
-        kargs.seqlen_k_ptr         = seqlen_k_ptr;
-        kargs.seqstart_q_block_ptr = seqstart_q_block_ptr;
-        kargs.seqstart_k_block_ptr = seqstart_k_block_ptr;
+        kargs.seqstart_q_ptr        = seqstart_q_ptr;
+        kargs.seqstart_k_ptr        = seqstart_k_ptr;
+        kargs.seqlen_q_ptr          = seqlen_q_ptr;
+        kargs.seqlen_k_ptr          = seqlen_k_ptr;
+        kargs.seqstart_q_block_ptr  = seqstart_q_block_ptr;
+        kargs.seqstart_k_block_ptr  = seqstart_k_block_ptr;
         kargs.mask_batch_offset_ptr = mask_batch_offset_ptr;
-        kargs.batch                = batch;
+        kargs.batch                 = batch;
         return kargs;
     }
 
-    CK_TILE_HOST static constexpr auto GridSize(index_t batch_size_,
-                                                index_t nhead_,
-                                                index_t seqlen_q_,
-                                                index_t hdim_v_)
+    CK_TILE_HOST static constexpr auto
+    GridSize(index_t batch_size_, index_t nhead_, index_t seqlen_q_, index_t hdim_v_)
     {
         // Axis order matches the non-quant sparge kernel (nhead=x, batch=y, block=z) so the two
         // sibling kernels that share the preprocess/mask-prediction use one grid convention.
@@ -415,22 +414,20 @@ struct FmhaFwdSpargeSageKernel
         long_index_t batch_offset_k;
         long_index_t batch_offset_v;
         long_index_t batch_offset_o;
-        index_t      seqlen_q_actual;
-        index_t      seqlen_k_actual;
+        index_t seqlen_q_actual;
+        index_t seqlen_k_actual;
         // Group: token starts from seqstart; per-batch scale starts use the same
         // batch-outer/head-mid packed block scheme as means/LUT.
         long_index_t q_scale_block_start = 0; // packed scale-block start for (batch,head) in q
         long_index_t k_scale_block_start = 0; // packed scale-block start for (batch,kv_head) in k
         if constexpr(kIsGroupMode)
         {
-            const long_index_t qstart =
-                static_cast<long_index_t>(kargs.seqstart_q_ptr[i_batch]);
-            const long_index_t kstart =
-                static_cast<long_index_t>(kargs.seqstart_k_ptr[i_batch]);
-            batch_offset_q = qstart * kargs.stride_q;
-            batch_offset_k = kstart * kargs.stride_k;
-            batch_offset_v = kstart * kargs.stride_v;
-            batch_offset_o = qstart * kargs.stride_o;
+            const long_index_t qstart = static_cast<long_index_t>(kargs.seqstart_q_ptr[i_batch]);
+            const long_index_t kstart = static_cast<long_index_t>(kargs.seqstart_k_ptr[i_batch]);
+            batch_offset_q            = qstart * kargs.stride_q;
+            batch_offset_k            = kstart * kargs.stride_k;
+            batch_offset_v            = kstart * kargs.stride_v;
+            batch_offset_o            = qstart * kargs.stride_o;
 
             seqlen_q_actual =
                 kargs.seqlen_q_ptr != nullptr
@@ -445,34 +442,30 @@ struct FmhaFwdSpargeSageKernel
                 return;
 
             // Packed scale-block start = (bstart*nhead + head*blocks_b) * scales_per_blk.
-            const index_t scales_per_blk_q =
-                SagePipeline::kM0 / kargs.block_scale_size_q;
-            const index_t scales_per_blk_k =
-                SagePipeline::kN0 / kargs.block_scale_size_k;
+            const index_t scales_per_blk_q = SagePipeline::kM0 / kargs.block_scale_size_q;
+            const index_t scales_per_blk_k = SagePipeline::kN0 / kargs.block_scale_size_k;
             const index_t q_bstart =
                 __builtin_amdgcn_readfirstlane(kargs.seqstart_q_block_ptr[i_batch]);
-            const index_t q_blocks_b = __builtin_amdgcn_readfirstlane(
-                kargs.seqstart_q_block_ptr[i_batch + 1] - q_bstart);
+            const index_t q_blocks_b =
+                __builtin_amdgcn_readfirstlane(kargs.seqstart_q_block_ptr[i_batch + 1] - q_bstart);
             const index_t k_bstart =
                 __builtin_amdgcn_readfirstlane(kargs.seqstart_k_block_ptr[i_batch]);
-            const index_t k_blocks_b = __builtin_amdgcn_readfirstlane(
-                kargs.seqstart_k_block_ptr[i_batch + 1] - k_bstart);
-            q_scale_block_start =
-                (static_cast<long_index_t>(q_bstart) * kargs.num_head_q +
-                 static_cast<long_index_t>(i_nhead) * q_blocks_b) *
-                scales_per_blk_q;
+            const index_t k_blocks_b =
+                __builtin_amdgcn_readfirstlane(kargs.seqstart_k_block_ptr[i_batch + 1] - k_bstart);
+            q_scale_block_start = (static_cast<long_index_t>(q_bstart) * kargs.num_head_q +
+                                   static_cast<long_index_t>(i_nhead) * q_blocks_b) *
+                                  scales_per_blk_q;
             const index_t nhead_k = kargs.num_head_q / kargs.nhead_ratio_qk;
-            k_scale_block_start =
-                (static_cast<long_index_t>(k_bstart) * nhead_k +
-                 static_cast<long_index_t>(i_nhead_k) * k_blocks_b) *
-                scales_per_blk_k;
+            k_scale_block_start   = (static_cast<long_index_t>(k_bstart) * nhead_k +
+                                   static_cast<long_index_t>(i_nhead_k) * k_blocks_b) *
+                                  scales_per_blk_k;
         }
         else
         {
-            batch_offset_q = static_cast<long_index_t>(i_batch) * kargs.batch_stride_q;
-            batch_offset_k = static_cast<long_index_t>(i_batch) * kargs.batch_stride_k;
-            batch_offset_v = static_cast<long_index_t>(i_batch) * kargs.batch_stride_v;
-            batch_offset_o = static_cast<long_index_t>(i_batch) * kargs.batch_stride_o;
+            batch_offset_q  = static_cast<long_index_t>(i_batch) * kargs.batch_stride_q;
+            batch_offset_k  = static_cast<long_index_t>(i_batch) * kargs.batch_stride_k;
+            batch_offset_v  = static_cast<long_index_t>(i_batch) * kargs.batch_stride_v;
+            batch_offset_o  = static_cast<long_index_t>(i_batch) * kargs.batch_stride_o;
             seqlen_q_actual = kargs.seqlen_q;
             seqlen_k_actual = kargs.seqlen_k;
         }
@@ -509,15 +502,12 @@ struct FmhaFwdSpargeSageKernel
             }
             else
             {
-                const index_t num_q_blocks =
-                    integer_divide_ceil(kargs.seqlen_q, SagePipeline::kM0);
-                const index_t num_k_blocks =
-                    integer_divide_ceil(kargs.seqlen_k, SagePipeline::kN0);
-                return base +
-                       ((static_cast<long_index_t>(i_batch) * kargs.num_head_q + i_nhead) *
-                            num_q_blocks +
-                        i_tile_m) *
-                           num_k_blocks;
+                const index_t num_q_blocks = integer_divide_ceil(kargs.seqlen_q, SagePipeline::kM0);
+                const index_t num_k_blocks = integer_divide_ceil(kargs.seqlen_k, SagePipeline::kN0);
+                return base + ((static_cast<long_index_t>(i_batch) * kargs.num_head_q + i_nhead) *
+                                   num_q_blocks +
+                               i_tile_m) *
+                                  num_k_blocks;
             }
         }();
         const int valid_block_num_value = [&]() -> int {
@@ -535,8 +525,7 @@ struct FmhaFwdSpargeSageKernel
             }
             else
             {
-                const index_t num_q_blocks =
-                    integer_divide_ceil(kargs.seqlen_q, SagePipeline::kM0);
+                const index_t num_q_blocks = integer_divide_ceil(kargs.seqlen_q, SagePipeline::kM0);
                 return base[(static_cast<long_index_t>(i_batch) * kargs.num_head_q + i_nhead) *
                                 num_q_blocks +
                             i_tile_m];
@@ -552,11 +541,10 @@ struct FmhaFwdSpargeSageKernel
                 ? kargs.q_descale_ptr +
                       static_cast<long_index_t>(i_batch) * kargs.batch_stride_q_descale +
                       static_cast<long_index_t>(i_nhead) * kargs.nhead_stride_q_descale
-            : kIsGroupMode
-                ? kargs.q_descale_ptr + q_scale_block_start
-                : kargs.q_descale_ptr +
-                      static_cast<long_index_t>(i_batch) * kargs.batch_stride_q_descale +
-                      static_cast<long_index_t>(i_nhead) * kargs.nhead_stride_q_descale;
+            : kIsGroupMode ? kargs.q_descale_ptr + q_scale_block_start
+                           : kargs.q_descale_ptr +
+                                 static_cast<long_index_t>(i_batch) * kargs.batch_stride_q_descale +
+                                 static_cast<long_index_t>(i_nhead) * kargs.nhead_stride_q_descale;
         const float* k_descale_ptr =
             (QScaleEnum == BlockSageAttentionQuantScaleEnum::PERTENSOR)
                 ? kargs.k_descale_ptr +
@@ -640,9 +628,10 @@ struct FmhaFwdSpargeSageKernel
             {i_m0, 0});
         auto k_dram_window = make_tile_window(
             k_dram, make_tuple(number<SagePipeline::kN0>{}, number<SagePipeline::kK0>{}), {0, 0});
-        auto v_dram_window = make_tile_window(
-            v_dram, make_tuple(number<SagePipeline::kN1>{}, number<SagePipeline::kK1>{}),
-            {i_n1, 0});
+        auto v_dram_window =
+            make_tile_window(v_dram,
+                             make_tuple(number<SagePipeline::kN1>{}, number<SagePipeline::kK1>{}),
+                             {i_n1, 0});
 
         // ELEMENTWISE_BIAS: dense [.., Sq, Sk] for this (batch, head); pipeline loads [M0,N0] tiles
         // into the gemm0 C (s_acc) distribution and advances by the LUT delta. NO_BIAS / ALIBI get
@@ -673,7 +662,7 @@ struct FmhaFwdSpargeSageKernel
             else
             {
                 const BiasDataType* null_bias = static_cast<const BiasDataType*>(nullptr);
-                const auto dummy_naive = make_naive_tensor_view<address_space_enum::global>(
+                const auto dummy_naive        = make_naive_tensor_view<address_space_enum::global>(
                     null_bias, make_tuple(1, 1), make_tuple(1, 1), number<1>{}, number<1>{});
                 const auto dummy = pad_tensor_view(
                     dummy_naive,
@@ -741,33 +730,32 @@ struct FmhaFwdSpargeSageKernel
         const index_t q_scale_idx =
             q_scale_idx_raw < max_q_scale_idx ? q_scale_idx_raw : max_q_scale_idx;
         // PERTENSOR: single per-(b,h) scalar; other modes index by scale-block.
-        const float q_descale =
-            (QScaleEnum == BlockSageAttentionQuantScaleEnum::PERTENSOR) ? q_descale_ptr[0]
-                                                                       : q_descale_ptr[q_scale_idx];
+        const float q_descale = (QScaleEnum == BlockSageAttentionQuantScaleEnum::PERTENSOR)
+                                    ? q_descale_ptr[0]
+                                    : q_descale_ptr[q_scale_idx];
 
         BlockIndices block_indices{i_batch, i_nhead, i_nhead_k};
 
-        auto o_acc_tile = SagePipeline{}.template operator()<BiasEnum>(
-                                         q_dram_window,
-                                         k_dram_window,
-                                         v_dram_window,
-                                         bias_dram_window,
-                                         lut_row,
-                                         valid_block_num_value,
-                                         mask,
-                                         position_encoding,
-                                         kargs.scale_s,
-                                         variant,
-                                         variant_params,
-                                         block_indices,
-                                         smem_ptr,
-                                         nullptr,
-                                         k_descale_ptr,
-                                         v_descale_ptr,
-                                         q_descale,
-                                         kargs.pvthreshd,
-                                         kargs.pvthreshd_per_head_ptr,
-                                         kargs.logits_soft_cap);
+        auto o_acc_tile = SagePipeline{}.template operator()<BiasEnum>(q_dram_window,
+                                                                       k_dram_window,
+                                                                       v_dram_window,
+                                                                       bias_dram_window,
+                                                                       lut_row,
+                                                                       valid_block_num_value,
+                                                                       mask,
+                                                                       position_encoding,
+                                                                       kargs.scale_s,
+                                                                       variant,
+                                                                       variant_params,
+                                                                       block_indices,
+                                                                       smem_ptr,
+                                                                       nullptr,
+                                                                       k_descale_ptr,
+                                                                       v_descale_ptr,
+                                                                       q_descale,
+                                                                       kargs.pvthreshd,
+                                                                       kargs.pvthreshd_per_head_ptr,
+                                                                       kargs.logits_soft_cap);
 
         auto o_dram = [&]() {
             const auto o_dram_naive = make_naive_tensor_view<address_space_enum::global>(
@@ -781,9 +769,10 @@ struct FmhaFwdSpargeSageKernel
                 make_tuple(number<SagePipeline::kM0>{}, number<SagePipeline::kN1>{}),
                 sequence<kPadSeqLenQ, kPadHeadDimV>{});
         }();
-        auto o_dram_window = make_tile_window(
-            o_dram, make_tuple(number<SagePipeline::kM0>{}, number<SagePipeline::kN1>{}),
-            {i_m0, i_n1});
+        auto o_dram_window =
+            make_tile_window(o_dram,
+                             make_tuple(number<SagePipeline::kM0>{}, number<SagePipeline::kN1>{}),
+                             {i_m0, i_n1});
 
         EpiloguePipeline{}(o_dram_window, o_acc_tile, nullptr);
     }

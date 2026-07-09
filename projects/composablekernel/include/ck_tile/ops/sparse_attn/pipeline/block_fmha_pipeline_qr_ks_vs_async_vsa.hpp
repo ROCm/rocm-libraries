@@ -137,11 +137,11 @@ struct BlockFmhaPipelineQRKSVSAsyncVSA
               typename AttentionVariantParams,
               typename BlockIndices>
     CK_TILE_HOST_DEVICE auto
-    operator()(const QDramBlockWindowTmp& q_dram_block_window_tmp, // M0*K0 tile
-               const KDramBlockWindowTmp& k_dram_block_window_tmp, // N0*K0 tile
-               const VDramBlockWindowTmp& v_dram_block_window_tmp, // N1*K1 tile
+    operator()(const QDramBlockWindowTmp& q_dram_block_window_tmp,       // M0*K0 tile
+               const KDramBlockWindowTmp& k_dram_block_window_tmp,       // N0*K0 tile
+               const VDramBlockWindowTmp& v_dram_block_window_tmp,       // N1*K1 tile
                const BiasDramBlockWindowTmp& bias_dram_block_window_tmp, // ELEMENTWISE only
-               PositionEncoding position_encoding,                        // ALIBI only
+               PositionEncoding position_encoding,                       // ALIBI only
                const int* kv_block_idx_ptr,
                int kv_blocks,
                FmhaMask mask,
@@ -266,7 +266,7 @@ struct BlockFmhaPipelineQRKSVSAsyncVSA
 
         // ELEMENTWISE-only; advance follows V (LUT-driven).
         const auto q_origin_for_bias = q_dram_block_window_tmp.get_window_origin();
-        auto bias_dram_window = [&]() {
+        auto bias_dram_window        = [&]() {
             if constexpr(BiasEnum == BlockAttentionBiasEnum::ELEMENTWISE_BIAS)
             {
                 return make_tile_window(
@@ -335,7 +335,7 @@ struct BlockFmhaPipelineQRKSVSAsyncVSA
                 (i_total_loops + 1 < num_total_loop)
                     ? __builtin_amdgcn_readfirstlane(kv_block_idx_ptr[i_total_loops + 1])
                     : 0;
-            auto v_buf    = load_tile(v_dram_window, number<-1>{}, bool_constant<false>{});
+            auto v_buf           = load_tile(v_dram_window, number<-1>{}, bool_constant<false>{});
             const auto bias_tile = [&]() {
                 if constexpr(BiasEnum == BlockAttentionBiasEnum::ELEMENTWISE_BIAS)
                     return load_tile(bias_dram_window);
@@ -360,7 +360,8 @@ struct BlockFmhaPipelineQRKSVSAsyncVSA
             }
             else if constexpr(kHasLogitsSoftCap)
             {
-                // Gemma soft cap: variant params have already folded sm_scale (and log2e if FAST_EXP2).
+                // Gemma soft cap: variant params have already folded sm_scale (and log2e if
+                // FAST_EXP2).
                 for(index_t i = 0; i < s_acc.thread_buf_.size(); ++i)
                 {
                     s_acc.thread_buf_[i] = variant.LogitsTransform(variant_params,
@@ -438,11 +439,12 @@ struct BlockFmhaPipelineQRKSVSAsyncVSA
             tile_elementwise_inout(
                 [](auto& e0, auto e1, auto e2) { e0 = max(e1, e2); }, m, m_old, m_local);
 
-            auto p_compute = make_static_distributed_tensor<SMPLComputeDataType>(
-                s.get_tile_distribution());
+            auto p_compute =
+                make_static_distributed_tensor<SMPLComputeDataType>(s.get_tile_distribution());
 
             __builtin_amdgcn_sched_barrier(0x7F);
-            // K tail and V share this LDS buffer: barrier so gemm_0's K reads finish before V store.
+            // K tail and V share this LDS buffer: barrier so gemm_0's K reads finish before V
+            // store.
             if constexpr(LdsSeq.at(number<k0_loops - 1>{}) == LdsSeq.at(number<k0_loops>{}))
             {
                 __builtin_amdgcn_s_barrier();
@@ -496,9 +498,8 @@ struct BlockFmhaPipelineQRKSVSAsyncVSA
 #if CK_TILE_FMHA_FWD_FAST_EXP2
                 constexpr bool s_acc_prescaled =
                     (BiasEnum != BlockAttentionBiasEnum::NO_BIAS) || kHasLogitsSoftCap;
-                auto row_max = s_acc_prescaled
-                                   ? get_validated_m(m[i_idx])
-                                   : scale_s * get_validated_m(m[i_idx]);
+                auto row_max = s_acc_prescaled ? get_validated_m(m[i_idx])
+                                               : scale_s * get_validated_m(m[i_idx]);
 #endif
                 sweep_tile_span(p_spans[number<1>{}], [&](auto idx1) {
                     constexpr auto i_j_idx = make_tuple(idx0, idx1);
@@ -522,8 +523,7 @@ struct BlockFmhaPipelineQRKSVSAsyncVSA
                 constexpr auto i_idx = make_tuple(idx0);
 #if CK_TILE_FMHA_FWD_FAST_EXP2
                 const auto tmp = [&]() {
-                    if constexpr((BiasEnum != BlockAttentionBiasEnum::NO_BIAS) ||
-                                 kHasLogitsSoftCap)
+                    if constexpr((BiasEnum != BlockAttentionBiasEnum::NO_BIAS) || kHasLogitsSoftCap)
                     {
                         // s_acc was prescaled.
                         return exp2(m_old[i_idx] - get_validated_m(m[i_idx]));
@@ -553,8 +553,7 @@ struct BlockFmhaPipelineQRKSVSAsyncVSA
                 static_for<0, k1_loops - 1, 1>{}([&](auto i_k1) {
                     if constexpr(i_k1 != 0 && i_k1 < k1_loops - 1)
                     {
-                        v_buf =
-                            load_tile(v_dram_window, number<-1>{}, bool_constant<false>{});
+                        v_buf = load_tile(v_dram_window, number<-1>{}, bool_constant<false>{});
                     }
                     block_sync_lds();
                     gemm_1(o_acc,

@@ -142,8 +142,7 @@ struct FmhaFwdVSAKernel
         ck_tile::index_t batch;
     };
 
-    using Kargs =
-        std::conditional_t<kIsGroupMode, FmhaFwdGroupModeKargs, FmhaFwdBatchModeKargs>;
+    using Kargs = std::conditional_t<kIsGroupMode, FmhaFwdGroupModeKargs, FmhaFwdBatchModeKargs>;
 
     struct BlockIndices
     {
@@ -404,14 +403,12 @@ struct FmhaFwdVSAKernel
 
         if constexpr(kIsGroupMode)
         {
-            const long_index_t qstart =
-                static_cast<long_index_t>(kargs.seqstart_q_ptr[i_batch]);
-            const long_index_t kstart =
-                static_cast<long_index_t>(kargs.seqstart_k_ptr[i_batch]);
-            batch_offset_q = qstart * kargs.stride_q;
-            batch_offset_k = kstart * kargs.stride_k;
-            batch_offset_v = kstart * kargs.stride_v;
-            batch_offset_o = qstart * kargs.stride_o;
+            const long_index_t qstart = static_cast<long_index_t>(kargs.seqstart_q_ptr[i_batch]);
+            const long_index_t kstart = static_cast<long_index_t>(kargs.seqstart_k_ptr[i_batch]);
+            batch_offset_q            = qstart * kargs.stride_q;
+            batch_offset_k            = kstart * kargs.stride_k;
+            batch_offset_v            = kstart * kargs.stride_v;
+            batch_offset_o            = qstart * kargs.stride_o;
 
             seqlen_q_actual =
                 kargs.seqlen_q_ptr != nullptr
@@ -427,10 +424,10 @@ struct FmhaFwdVSAKernel
         }
         else
         {
-            batch_offset_q = static_cast<long_index_t>(i_batch) * kargs.batch_stride_q;
-            batch_offset_k = static_cast<long_index_t>(i_batch) * kargs.batch_stride_k;
-            batch_offset_v = static_cast<long_index_t>(i_batch) * kargs.batch_stride_v;
-            batch_offset_o = static_cast<long_index_t>(i_batch) * kargs.batch_stride_o;
+            batch_offset_q  = static_cast<long_index_t>(i_batch) * kargs.batch_stride_q;
+            batch_offset_k  = static_cast<long_index_t>(i_batch) * kargs.batch_stride_k;
+            batch_offset_v  = static_cast<long_index_t>(i_batch) * kargs.batch_stride_v;
+            batch_offset_o  = static_cast<long_index_t>(i_batch) * kargs.batch_stride_o;
             seqlen_q_actual = kargs.seqlen_q;
             seqlen_k_actual = kargs.seqlen_k;
         }
@@ -447,23 +444,23 @@ struct FmhaFwdVSAKernel
             static_cast<long_index_t>(i_nhead / kargs.nhead_ratio_qk) * kargs.nhead_stride_v +
             batch_offset_v;
 
-        // sparse LUT/vbn. Batch: rectangular. Group: batch-outer/head-mid packed, per-batch [H, X_b]
-        // (LUT X_b = q_b*k_b via mask_batch_offset_ptr, vbn X_b = q_b via seqstart_q_block_ptr);
-        // new_index = Xstart_b*H + head*X_b + local.
+        // sparse LUT/vbn. Batch: rectangular. Group: batch-outer/head-mid packed, per-batch [H,
+        // X_b] (LUT X_b = q_b*k_b via mask_batch_offset_ptr, vbn X_b = q_b via
+        // seqstart_q_block_ptr); new_index = Xstart_b*H + head*X_b + local.
         const int* lut_ptr = [&]() -> const int* {
             const auto* base = reinterpret_cast<const int*>(kargs.lut_ptr);
             if constexpr(kIsGroupMode)
             {
                 const index_t k_blocks_b =
                     ck_tile::integer_divide_ceil(seqlen_k_actual, FmhaPipeline::kN0);
-                const long_index_t xstart_b = __builtin_amdgcn_readfirstlane(
-                    kargs.mask_batch_offset_ptr[i_batch]);
-                const long_index_t x_b = __builtin_amdgcn_readfirstlane(
-                    kargs.mask_batch_offset_ptr[i_batch + 1]) - xstart_b;
-                const long_index_t off =
-                    xstart_b * kargs.num_head_q +
-                    static_cast<long_index_t>(i_nhead) * x_b +
-                    static_cast<long_index_t>(i_tile_m) * k_blocks_b;
+                const long_index_t xstart_b =
+                    __builtin_amdgcn_readfirstlane(kargs.mask_batch_offset_ptr[i_batch]);
+                const long_index_t x_b =
+                    __builtin_amdgcn_readfirstlane(kargs.mask_batch_offset_ptr[i_batch + 1]) -
+                    xstart_b;
+                const long_index_t off = xstart_b * kargs.num_head_q +
+                                         static_cast<long_index_t>(i_nhead) * x_b +
+                                         static_cast<long_index_t>(i_tile_m) * k_blocks_b;
                 return base + off;
             }
             else
@@ -474,30 +471,28 @@ struct FmhaFwdVSAKernel
                        (static_cast<long_index_t>(i_batch) * kargs.num_head_q + i_nhead) *
                            ck_tile::integer_divide_ceil(kargs.seqlen_q, FmhaPipeline::kM0) *
                            ck_tile::integer_divide_ceil(kargs.seqlen_k, FmhaPipeline::kN0) +
-                       i_tile_m *
-                           ck_tile::integer_divide_ceil(kargs.seqlen_k, FmhaPipeline::kN0);
+                       i_tile_m * ck_tile::integer_divide_ceil(kargs.seqlen_k, FmhaPipeline::kN0);
             }
         }();
         const int valid_block_num_value = [&]() -> int {
             const auto* base = reinterpret_cast<const int*>(kargs.valid_block_num_ptr);
             if constexpr(kIsGroupMode)
             {
-                const long_index_t xstart_b = __builtin_amdgcn_readfirstlane(
-                    kargs.seqstart_q_block_ptr[i_batch]);
-                const long_index_t x_b = __builtin_amdgcn_readfirstlane(
-                    kargs.seqstart_q_block_ptr[i_batch + 1]) - xstart_b;
-                const long_index_t off =
-                    xstart_b * kargs.num_head_q +
-                    static_cast<long_index_t>(i_nhead) * x_b +
-                    static_cast<long_index_t>(i_tile_m);
+                const long_index_t xstart_b =
+                    __builtin_amdgcn_readfirstlane(kargs.seqstart_q_block_ptr[i_batch]);
+                const long_index_t x_b =
+                    __builtin_amdgcn_readfirstlane(kargs.seqstart_q_block_ptr[i_batch + 1]) -
+                    xstart_b;
+                const long_index_t off = xstart_b * kargs.num_head_q +
+                                         static_cast<long_index_t>(i_nhead) * x_b +
+                                         static_cast<long_index_t>(i_tile_m);
                 return base[off];
             }
             else
             {
-                return base[
-                    (static_cast<long_index_t>(i_batch) * kargs.num_head_q + i_nhead) *
-                        ck_tile::integer_divide_ceil(kargs.seqlen_q, FmhaPipeline::kM0) +
-                    i_tile_m];
+                return base[(static_cast<long_index_t>(i_batch) * kargs.num_head_q + i_nhead) *
+                                ck_tile::integer_divide_ceil(kargs.seqlen_q, FmhaPipeline::kM0) +
+                            i_tile_m];
             }
         }();
 
@@ -627,13 +622,15 @@ struct FmhaFwdVSAKernel
         auto bias_dram_window = [&]() {
             if constexpr(BiasEnum == BlockAttentionBiasEnum::ELEMENTWISE_BIAS)
             {
-                const auto* bp =
-                    reinterpret_cast<const BiasDataType*>(kargs.bias_ptr) +
-                    static_cast<long_index_t>(i_batch) * kargs.batch_stride_bias +
-                    static_cast<long_index_t>(i_nhead) * kargs.nhead_stride_bias;
+                const auto* bp = reinterpret_cast<const BiasDataType*>(kargs.bias_ptr) +
+                                 static_cast<long_index_t>(i_batch) * kargs.batch_stride_bias +
+                                 static_cast<long_index_t>(i_nhead) * kargs.nhead_stride_bias;
                 const auto bias_naive = make_naive_tensor_view<address_space_enum::global>(
-                    bp, make_tuple(seqlen_q_actual, seqlen_k_actual),
-                    make_tuple(kargs.stride_bias, 1), number<1>{}, number<1>{});
+                    bp,
+                    make_tuple(seqlen_q_actual, seqlen_k_actual),
+                    make_tuple(kargs.stride_bias, 1),
+                    number<1>{},
+                    number<1>{});
                 const auto bias_dram = pad_tensor_view(
                     bias_naive,
                     make_tuple(number<FmhaPipeline::kM0>{}, number<FmhaPipeline::kN0>{}),
@@ -646,7 +643,7 @@ struct FmhaFwdVSAKernel
             else
             {
                 const BiasDataType* null_bias = static_cast<const BiasDataType*>(nullptr);
-                const auto dummy_naive = make_naive_tensor_view<address_space_enum::global>(
+                const auto dummy_naive        = make_naive_tensor_view<address_space_enum::global>(
                     null_bias, make_tuple(1, 1), make_tuple(1, 1), number<1>{}, number<1>{});
                 const auto dummy = pad_tensor_view(
                     dummy_naive,

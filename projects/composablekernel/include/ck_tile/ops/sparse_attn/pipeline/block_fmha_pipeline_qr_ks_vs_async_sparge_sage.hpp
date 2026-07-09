@@ -184,9 +184,8 @@ struct BlockFmhaPipelineQRKSVSAsyncSpargeSage
         constexpr auto LdsSeq = Policy::template GetLdsBufferSequence<Problem>();
 
         // pv-skip cross-warp reduction scratch (tail reserved in GetSmemSize).
-        float* const skip_scratch =
-            reinterpret_cast<float*>(reinterpret_cast<char*>(smem_ptr) +
-                                     Policy::template GetSmemSize<Problem>());
+        float* const skip_scratch = reinterpret_cast<float*>(
+            reinterpret_cast<char*>(smem_ptr) + Policy::template GetSmemSize<Problem>());
 
         // K tile in LDS
         auto k_lds_ptr   = reinterpret_cast<KDataType*>(smem_ptr);
@@ -261,9 +260,9 @@ struct BlockFmhaPipelineQRKSVSAsyncSpargeSage
         // sparge LUT graft: K/V windows traverse LUT-selected K-blocks (LUT entries index
         // K-blocks; multiply by kN0). k_abs_pos tracks the selected block's absolute K position
         // for descale-follow-LUT.
-        const int seqlen_k_start = kv_block_idx_ptr[0] * kN0;
+        const int seqlen_k_start  = kv_block_idx_ptr[0] * kN0;
         const auto num_total_loop = kv_blocks;
-        index_t k_abs_pos = seqlen_k_start;
+        index_t k_abs_pos         = seqlen_k_start;
 
         if constexpr(AttnMask::IsMasking || kPadSeqLenK)
         {
@@ -281,11 +280,11 @@ struct BlockFmhaPipelineQRKSVSAsyncSpargeSage
                              k_dram_block_window_tmp.get_window_lengths(),
                              {seqlen_k_start, 0});
 
-        auto k_dram_window = make_tile_window(
-            k_dram_block_window.get_bottom_tensor_view(),
-            k_dram_block_window.get_window_lengths(),
-            k_dram_block_window.get_window_origin(),
-            Policy::template MakeKDramTileDistribution<Problem>());
+        auto k_dram_window =
+            make_tile_window(k_dram_block_window.get_bottom_tensor_view(),
+                             k_dram_block_window.get_window_lengths(),
+                             k_dram_block_window.get_window_origin(),
+                             Policy::template MakeKDramTileDistribution<Problem>());
         k_dram_window.init_raw();
         constexpr auto k_oob_ck = bool_constant<true>{};
         constexpr auto k_pre_np = bool_constant<false>{};
@@ -302,11 +301,10 @@ struct BlockFmhaPipelineQRKSVSAsyncSpargeSage
         auto bias_dram_window = [&]() {
             if constexpr(BiasEnum == BlockAttentionBiasEnum::ELEMENTWISE_BIAS)
             {
-                return make_tile_window(
-                    bias_dram_block_window_tmp.get_bottom_tensor_view(),
-                    bias_dram_block_window_tmp.get_window_lengths(),
-                    {q_origin.at(number<0>{}), seqlen_k_start},
-                    SaccBlockTileType{}.get_tile_distribution());
+                return make_tile_window(bias_dram_block_window_tmp.get_bottom_tensor_view(),
+                                        bias_dram_block_window_tmp.get_window_lengths(),
+                                        {q_origin.at(number<0>{}), seqlen_k_start},
+                                        SaccBlockTileType{}.get_tile_distribution());
             }
             else
             {
@@ -333,10 +331,11 @@ struct BlockFmhaPipelineQRKSVSAsyncSpargeSage
         constexpr index_t kWarpSz = get_warp_size();
 
         // pv-skip: skip a block when every Q-row's block-peak is > pvthreshd below the running
-        // max. m_local is taken after bias, so the predicate is valid for NO_BIAS/ALIBI/ELEMENTWISE.
-        // On skip m == m_old (rescale 1, l unchanged) and p_compute is zeroed; V-LDS stores /
-        // window moves / k_abs_pos stay unconditional to keep descale aligned.
-        // soft-cap disables pv-skip (raw-QK units no longer match; cap already bounds the range).
+        // max. m_local is taken after bias, so the predicate is valid for
+        // NO_BIAS/ALIBI/ELEMENTWISE. On skip m == m_old (rescale 1, l unchanged) and p_compute is
+        // zeroed; V-LDS stores / window moves / k_abs_pos stay unconditional to keep descale
+        // aligned. soft-cap disables pv-skip (raw-QK units no longer match; cap already bounds the
+        // range).
         const float pvthreshd_eff =
             pvthreshd_per_head
                 ? reinterpret_cast<const float*>(pvthreshd_per_head)[block_indices.qo_head_idx]
@@ -347,12 +346,12 @@ struct BlockFmhaPipelineQRKSVSAsyncSpargeSage
         auto compute_skip_flag = [&](const auto& m_local_t, const auto& m_ij_t) -> bool {
             if(!stage2_enabled)
                 return false;
-            float lane_max_diff = -ck_tile::numeric<float>::infinity();
+            float lane_max_diff    = -ck_tile::numeric<float>::infinity();
             constexpr auto m_spans = remove_cvref_t<decltype(m_ij_t)>::get_distributed_spans();
             sweep_tile_span(m_spans[number<0>{}], [&](auto idx0) {
                 constexpr auto i_idx = make_tuple(idx0);
-                const float diff     = static_cast<float>(m_local_t[i_idx]) -
-                                       static_cast<float>(m_ij_t[i_idx]);
+                const float diff =
+                    static_cast<float>(m_local_t[i_idx]) - static_cast<float>(m_ij_t[i_idx]);
                 if(diff > lane_max_diff)
                     lane_max_diff = diff;
             });
@@ -384,7 +383,8 @@ struct BlockFmhaPipelineQRKSVSAsyncSpargeSage
             float k_descale = 1.0f;
             if constexpr(QScaleEnum == BlockSageAttentionQuantScaleEnum::BLOCKSCALE)
             {
-                // descale-follow-LUT: index by the real absolute position of this LUT-selected block
+                // descale-follow-LUT: index by the real absolute position of this LUT-selected
+                // block
                 const index_t kv_idx = k_abs_pos / Problem::kBlockScaleSizeK;
                 k_descale            = k_descale_ptr[kv_idx];
             }
@@ -404,7 +404,8 @@ struct BlockFmhaPipelineQRKSVSAsyncSpargeSage
             float k_scales_perwarp[kNumKScalesPW > 0 ? kNumKScalesPW : 1] = {};
             if constexpr(QScaleEnum == BlockSageAttentionQuantScaleEnum::PERWARP)
             {
-                // descale-follow-LUT: index by the real absolute position of this LUT-selected block
+                // descale-follow-LUT: index by the real absolute position of this LUT-selected
+                // block
                 const index_t kv_idx = k_abs_pos / Problem::kBlockScaleSizeK;
 #pragma unroll
                 for(index_t i = 0; i < kNumKScalesPW; i++)
@@ -413,7 +414,8 @@ struct BlockFmhaPipelineQRKSVSAsyncSpargeSage
             float k_scales_reg[kNumKScalesPT > 0 ? kNumKScalesPT : 1] = {};
             if constexpr(QScaleEnum == BlockSageAttentionQuantScaleEnum::PERTHREAD)
             {
-                // descale-follow-LUT: index by the real absolute position of this LUT-selected block
+                // descale-follow-LUT: index by the real absolute position of this LUT-selected
+                // block
                 const index_t k_global_start    = k_abs_pos;
                 const index_t k_scale_start_idx = k_global_start / Problem::kBlockScaleSizeK;
 #pragma unroll
@@ -567,7 +569,7 @@ struct BlockFmhaPipelineQRKSVSAsyncSpargeSage
                 // BLOCKSCALE/PERTENSOR: scalar dequant = q_descale_value * k_descale (k_descale
                 // is per-block descale-follow-LUT for BLOCKSCALE, k_descale_ptr[0] for PERTENSOR).
                 const float qk_descale = q_descale_value * k_descale;
-                s_acc = tile_elementwise_in(scales<float>(qk_descale), s_acc);
+                s_acc                  = tile_elementwise_in(scales<float>(qk_descale), s_acc);
             }
             else
             {
@@ -579,10 +581,8 @@ struct BlockFmhaPipelineQRKSVSAsyncSpargeSage
             // exp(cap*tanh(scale*s/cap)). cap == 0 disables.
             if(logits_soft_cap > 0.0f)
             {
-                const float sc        = (scale_s != 0.0f)
-                                            ? scale_s / ck_tile::log2e_v<float>
-                                            : 1.0f;
-                const float scc       = sc / logits_soft_cap;
+                const float sc  = (scale_s != 0.0f) ? scale_s / ck_tile::log2e_v<float> : 1.0f;
+                const float scc = sc / logits_soft_cap;
                 const float cap_div_sc = logits_soft_cap / sc;
                 tile_elementwise_inout(
                     [&](auto& x) {
@@ -614,10 +614,9 @@ struct BlockFmhaPipelineQRKSVSAsyncSpargeSage
             // ELEMENTWISE_BIAS: add bias*log2e/scale_s so exp2(scale_s*...) restores bias*log2e.
             if constexpr(BiasEnum == BlockAttentionBiasEnum::ELEMENTWISE_BIAS)
             {
-                const auto bias_tile  = load_tile(bias_dram_window);
-                const float bias_gain = (scale_s != 0.0f)
-                                            ? (ck_tile::log2e_v<float> / scale_s)
-                                            : 0.0f;
+                const auto bias_tile = load_tile(bias_dram_window);
+                const float bias_gain =
+                    (scale_s != 0.0f) ? (ck_tile::log2e_v<float> / scale_s) : 0.0f;
                 tile_elementwise_inout(
                     [&bias_gain](auto& x, const auto& y) {
                         x += bias_gain * type_convert<SaccDataType>(y);
@@ -660,10 +659,7 @@ struct BlockFmhaPipelineQRKSVSAsyncSpargeSage
 
             const auto s = cast_tile<SMPLComputeDataType>(s_acc);
             auto m_local = block_tile_reduce<SMPLComputeDataType>(
-                s,
-                sequence<1>{},
-                f_max,
-                -numeric<SMPLComputeDataType>::infinity());
+                s, sequence<1>{}, f_max, -numeric<SMPLComputeDataType>::infinity());
             block_tile_reduce_sync(m_local, f_max, bool_constant<false>{});
 
             const auto m_old = m;
@@ -674,11 +670,12 @@ struct BlockFmhaPipelineQRKSVSAsyncSpargeSage
             // (same raw-QK basis as sparge + host ref). See pvthreshd_eff comment above.
             const bool skip_block = compute_skip_flag(m_local, m);
 
-            auto p_compute = make_static_distributed_tensor<SMPLComputeDataType>(
-                s.get_tile_distribution());
+            auto p_compute =
+                make_static_distributed_tensor<SMPLComputeDataType>(s.get_tile_distribution());
 
             __builtin_amdgcn_sched_barrier(0x7F);
-            // K tail and V share this LDS buffer: barrier so gemm_0's K reads finish before V store.
+            // K tail and V share this LDS buffer: barrier so gemm_0's K reads finish before V
+            // store.
             if constexpr(LdsSeq.at(number<k0_loops - 1>{}) == LdsSeq.at(number<k0_loops>{}))
             {
                 __builtin_amdgcn_s_barrier();
@@ -694,9 +691,7 @@ struct BlockFmhaPipelineQRKSVSAsyncSpargeSage
                                    sequence<(LdsSeq.at(number<k0_loops>{})) * kN1, 0>{},
                                    sequence<(LdsSeq.at(number<k0_loops>{}) + 1) * kN1, kK1>{});
 
-                store_tile(
-                    v_lds_window_tmp,
-                    tile_elementwise_in(v_element_func, v_shuffle_tmp));
+                store_tile(v_lds_window_tmp, tile_elementwise_in(v_element_func, v_shuffle_tmp));
             }
             else
             {
@@ -704,18 +699,14 @@ struct BlockFmhaPipelineQRKSVSAsyncSpargeSage
                     get_slice_tile(v_lds_window,
                                    sequence<(LdsSeq.at(number<k0_loops>{})) * kN1, 0>{},
                                    sequence<(LdsSeq.at(number<k0_loops>{}) + 1) * kN1, kK1>{});
-                store_tile(v_lds_window_tmp,
-                           tile_elementwise_in(v_element_func, v_buf));
+                store_tile(v_lds_window_tmp, tile_elementwise_in(v_element_func, v_buf));
             }
 
             if constexpr(k1_loops > 1)
             {
                 // Compiler workaround: moving the window right after load_tile spills to scratch.
-                move_tile_window(
-                    v_dram_window,
-                    {0, kK1});
-                v_buf = load_tile(
-                    v_dram_window, number<-1>{}, bool_constant<false>{});
+                move_tile_window(v_dram_window, {0, kK1});
+                v_buf = load_tile(v_dram_window, number<-1>{}, bool_constant<false>{});
             }
             __builtin_amdgcn_sched_barrier(0);
 
@@ -735,7 +726,8 @@ struct BlockFmhaPipelineQRKSVSAsyncSpargeSage
             constexpr auto p_spans = decltype(p_compute)::get_distributed_spans();
             sweep_tile_span(p_spans[number<0>{}], [&](auto idx0) {
                 constexpr auto i_idx = make_tuple(idx0);
-                // precompute row_max = scale_s*m - shift so exp2(scale_s*s - row_max) folds the shift.
+                // precompute row_max = scale_s*m - shift so exp2(scale_s*s - row_max) folds the
+                // shift.
                 auto validated_m = get_validated_m(m[i_idx]);
                 auto row_max     = scale_s * validated_m;
                 if constexpr(QScaleEnum == BlockSageAttentionQuantScaleEnum::BLOCKSCALE ||
@@ -770,7 +762,7 @@ struct BlockFmhaPipelineQRKSVSAsyncSpargeSage
                 const auto m_new = get_validated_m(m[i_idx]);
                 auto row_max     = scale_s * m_new;
                 const auto tmp   = exp2(scale_s * m_old[i_idx] - row_max);
-                l(i_idx) = tmp * l(i_idx) + rowsum_p[i_idx];
+                l(i_idx)         = tmp * l(i_idx) + rowsum_p[i_idx];
                 sweep_tile_span(o_spans[number<1>{}], [&](auto idx1) {
                     constexpr auto i_j_idx = make_tuple(idx0, idx1);
                     o_acc(i_j_idx) *= tmp;
@@ -797,8 +789,7 @@ struct BlockFmhaPipelineQRKSVSAsyncSpargeSage
                 static_for<0, k1_loops - 1, 1>{}([&](auto i_k1) {
                     if constexpr(i_k1 != 0 && i_k1 < k1_loops - 1)
                     {
-                        v_buf = load_tile(
-                            v_dram_window, number<-1>{}, bool_constant<false>{});
+                        v_buf = load_tile(v_dram_window, number<-1>{}, bool_constant<false>{});
                     }
                     block_sync_lds();
                     gemm_1(o_acc,
@@ -819,8 +810,7 @@ struct BlockFmhaPipelineQRKSVSAsyncSpargeSage
                             sequence<(LdsSeq.at(number<k0_loops + i_k1 + 1>{})) * kN1, 0>{},
                             sequence<(LdsSeq.at(number<k0_loops + i_k1 + 1>{}) + 1) * kN1, kK1>{});
                         store_tile(v_lds_window_tmp,
-                                   tile_elementwise_in(v_element_func,
-                                                       v_shuffle_tmp));
+                                   tile_elementwise_in(v_element_func, v_shuffle_tmp));
                     }
                     else
                     {
@@ -828,8 +818,7 @@ struct BlockFmhaPipelineQRKSVSAsyncSpargeSage
                             v_lds_window,
                             sequence<(LdsSeq.at(number<k0_loops + i_k1 + 1>{})) * kN1, 0>{},
                             sequence<(LdsSeq.at(number<k0_loops + i_k1 + 1>{}) + 1) * kN1, kK1>{});
-                        store_tile(v_lds_window_tmp,
-                                   tile_elementwise_in(v_element_func, v_buf));
+                        store_tile(v_lds_window_tmp, tile_elementwise_in(v_element_func, v_buf));
                     }
                     if constexpr(i_k1 < k1_loops - 1)
                         move_tile_window(v_dram_window, {0, kK1});
@@ -839,7 +828,8 @@ struct BlockFmhaPipelineQRKSVSAsyncSpargeSage
             if(i_total_loops < num_total_loop)
             {
                 // Window advance by the LUT block delta. V already advanced kN0 in this loop, so it
-                // needs an extra (block_idx-1)*kN0; K needs block_idx*kN0. k_abs_pos drives k descale.
+                // needs an extra (block_idx-1)*kN0; K needs block_idx*kN0. k_abs_pos drives k
+                // descale.
                 k_abs_pos += kN0 * block_idx;
 
                 // bias follows K's LUT delta; otherwise non-contiguous LUT blocks misalign bias.
@@ -902,7 +892,7 @@ struct BlockFmhaPipelineQRKSVSAsyncSpargeSage
             sweep_tile_span(o_tmp_spans[number<0>{}], [&](auto idx0) {
                 sweep_tile_span(o_tmp_spans[number<1>{}], [&](auto idx1) {
                     constexpr auto i_j_idx = make_tuple(idx0, idx1);
-                    const auto tile_idx = get_x_indices_from_distributed_indices(
+                    const auto tile_idx    = get_x_indices_from_distributed_indices(
                         o_acc.get_tile_distribution(), i_j_idx);
                     const index_t channel_idx = tile_idx.at(number<1>{});
                     const float v_scale       = v_descale_lds[channel_idx];
@@ -965,31 +955,31 @@ struct BlockFmhaPipelineQRKSVSAsyncSpargeSage
                float logits_soft_cap                  = 0.0f) const
     {
         return operator()<BiasEnum>(q_dram_block_window_tmp,
-                          identity{},
-                          k_dram_block_window_tmp,
-                          identity{},
-                          v_dram_block_window_tmp,
-                          identity{},
-                          identity{},
-                          identity{},
-                          identity{},
-                          bias_dram_block_window_tmp,
-                          kv_block_idx_ptr,
-                          kv_blocks,
-                          mask,
-                          position_encoding,
-                          scale_s,
-                          variant,
-                          variant_params,
-                          block_indices,
-                          smem_ptr,
-                          q_descale_ptr,
-                          k_descale_ptr,
-                          v_descale_ptr,
-                          q_descale_value,
-                          pvthreshd,
-                          pvthreshd_per_head,
-                          logits_soft_cap);
+                                    identity{},
+                                    k_dram_block_window_tmp,
+                                    identity{},
+                                    v_dram_block_window_tmp,
+                                    identity{},
+                                    identity{},
+                                    identity{},
+                                    identity{},
+                                    bias_dram_block_window_tmp,
+                                    kv_block_idx_ptr,
+                                    kv_blocks,
+                                    mask,
+                                    position_encoding,
+                                    scale_s,
+                                    variant,
+                                    variant_params,
+                                    block_indices,
+                                    smem_ptr,
+                                    q_descale_ptr,
+                                    k_descale_ptr,
+                                    v_descale_ptr,
+                                    q_descale_value,
+                                    pvthreshd,
+                                    pvthreshd_per_head,
+                                    logits_soft_cap);
     }
 };
 
