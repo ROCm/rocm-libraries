@@ -397,8 +397,8 @@ struct DeviceSegmentedReduce
             temp_storage_bytes,
             d_in,
             d_out,
-            num_segments,
-            segment_size,
+            static_cast<size_t>(num_segments),
+            static_cast<unsigned int>(segment_size),
             ::hipcub::detail::convert_result_type<InputIteratorT, OutputIteratorT>(reduction_op),
             initial_value,
             stream);
