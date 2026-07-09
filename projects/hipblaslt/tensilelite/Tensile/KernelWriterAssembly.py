@@ -1047,6 +1047,25 @@ class KernelWriterAssembly(KernelWriter):
     if kernel["UseMFMAF32XEmulation"]:
       self.moduleVgprMacroValuB_T.add(RegSet("v", "IdentityMatrix", self.states.startVgprIdentityMatrix, 0))
 
+  def _emitGL2PrefetchAddrRegSets(self, module, kernel, tPA, tPB):
+    """Emit RegSet declarations for GL2 prefetch address vgprs (A, B, and MX scale variants)."""
+    if not kernel["PrefetchGL2"]:
+      return
+    for label, tP, stateObj in [("A", tPA, self.states.a),
+                                ("B", tPB, self.states.b)]:
+      for i in range(tP["gl2nlp"]):
+        for j in range(tP["gl2nlc"]):
+          module.add(RegSet("v", f"vgprGL2PrefetchAddr{label}_{i}_{j}",
+              stateObj.startVgprGL2PrefetchAddr + (i * tP["gl2nlc"] + j) * self.states.rpga))
+    for mxKey, tP, label, stateObj in [("MXBlockA", tPA, "MXSA", self.states.mxsa),
+                                       ("MXBlockB", tPB, "MXSB", self.states.mxsb)]:
+      if kernel["ProblemType"][mxKey]:
+        mx = tP["MX"]
+        for i in range(mx["gl2nlp"]):
+          for j in range(mx["gl2nlc"]):
+            module.add(RegSet("v", f"vgprGL2PrefetchAddr{label}_{i}_{j}",
+                stateObj.startVgprGL2PrefetchAddr + (i * mx["gl2nlc"] + j) * self.states.rpga))
+
   def macroAndSet(self, kernel, tPA, tPB) -> Module:
     module = Module("MacroNSet")
     module.add(MacroVMagicDiv(kernel["MagicDivAlg"]))
@@ -1548,21 +1567,7 @@ class KernelWriterAssembly(KernelWriter):
         module.add(RegSet("v", "vgprAlphaTmp", \
             self.states.startVgprAlphaTmp))
 
-      if kernel["PrefetchGL2"]:
-        for i in range(tPA["gl2nlp"]):
-          for j in range(tPA["gl2nlc"]):
-            module.add(RegSet("v", f"vgprGL2PrefetchAddrA_{i}_{j}", self.states.a.startVgprGL2PrefetchAddr + (i * tPA["gl2nlc"] + j) * self.states.rpga))
-        for i in range(tPB["gl2nlp"]):
-          for j in range(tPB["gl2nlc"]):
-            module.add(RegSet("v", f"vgprGL2PrefetchAddrB_{i}_{j}", self.states.b.startVgprGL2PrefetchAddr + (i * tPB["gl2nlc"] + j) * self.states.rpga)) 
-        if kernel["ProblemType"]["MXBlockA"]:
-          for i in range(tPA["MX"]["gl2nlp"]):
-            for j in range(tPA["MX"]["gl2nlc"]):
-              module.add(RegSet("v", f"vgprGL2PrefetchAddrMXSA_{i}_{j}", self.states.mxsa.startVgprGL2PrefetchAddr + (i * tPA["MX"]["gl2nlc"] + j) * self.states.rpga))
-        if kernel["ProblemType"]["MXBlockB"]:
-          for i in range(tPB["MX"]["gl2nlp"]):
-            for j in range(tPB["MX"]["gl2nlc"]):
-              module.add(RegSet("v", f"vgprGL2PrefetchAddrMXSB_{i}_{j}", self.states.mxsb.startVgprGL2PrefetchAddr + (i * tPB["MX"]["gl2nlc"] + j) * self.states.rpga))
+      self._emitGL2PrefetchAddrRegSets(module, kernel, tPA, tPB)
 
       module.add(RegSet("v", "vgprSerial", self.states.startVgprSerial))
 
@@ -1598,21 +1603,7 @@ class KernelWriterAssembly(KernelWriter):
       module.add(RegSet("v", "vgprSerial", self.states.startVgprSerial))
       #self.vgprPool.remove(self.states.startVgprSerial, 1)
       #module.addComment0("Need %u vgprs for GR A"%(self.states.a.tileInfo.numGRPerSubtile))
-      if kernel["PrefetchGL2"]:
-        for i in range(tPA["gl2nlp"]):
-          for j in range(tPA["gl2nlc"]):
-            module.add(RegSet("v", f"vgprGL2PrefetchAddrA_{i}_{j}", self.states.a.startVgprGL2PrefetchAddr + (i * tPA["gl2nlc"] + j) * self.states.rpga))
-        for i in range(tPB["gl2nlp"]):
-          for j in range(tPB["gl2nlc"]):
-            module.add(RegSet("v", f"vgprGL2PrefetchAddrB_{i}_{j}", self.states.b.startVgprGL2PrefetchAddr + (i * tPB["gl2nlc"] + j) * self.states.rpga))
-        if kernel["ProblemType"]["MXBlockA"]:
-          for i in range(tPA["MX"]["gl2nlp"]):
-            for j in range(tPA["MX"]["gl2nlc"]):
-              module.add(RegSet("v", f"vgprGL2PrefetchAddrMXSA_{i}_{j}", self.states.mxsa.startVgprGL2PrefetchAddr + (i * tPA["MX"]["gl2nlc"] + j) * self.states.rpga))
-        if kernel["ProblemType"]["MXBlockB"]:
-          for i in range(tPB["MX"]["gl2nlp"]):
-            for j in range(tPB["MX"]["gl2nlc"]):
-              module.add(RegSet("v", f"vgprGL2PrefetchAddrMXSB_{i}_{j}", self.states.mxsb.startVgprGL2PrefetchAddr + (i * tPB["MX"]["gl2nlc"] + j) * self.states.rpga))
+      self._emitGL2PrefetchAddrRegSets(module, kernel, tPA, tPB)
       return
 
     if not kernel["UseSubtileImpl"]:
