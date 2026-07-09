@@ -236,7 +236,8 @@ value by that name. The existing read-only `HIPDNN_ATTR_TENSOR_IS_BY_VALUE`
 (1307) — today derived from `value.type != NONE` — is **renamed**
 `HIPDNN_ATTR_TENSOR_IS_RUNTIME_PASS_BY_VALUE` and made **settable**, true
 only for the two runtime states; its wire identity stays the integer
-`1307`.
+`1307`. No new stored attribute is introduced for the by-value umbrella or
+the has-constant query; both are derived at the wrapper (below).
 
 **Deserialize invariant.** The value is read from the union whenever it is
 present (`value.type != NONE`), and the flag is read
@@ -249,7 +250,12 @@ which keys the value-read on `IS_BY_VALUE == true`, to a value-presence gate.
 Providers read the flag through a `isRuntimePassByValue()` accessor added
 to the op-graph tensor wrapper
 ([`ITensorAttributesWrapper`](../../flatbuffers_sdk/include/hipdnn_flatbuffers_sdk/flatbuffer_utilities/TensorAttributesWrapper.hpp)). It is the accessor the provider
-example in [§4.6](#46-provider-contract) consumes.
+example in [§4.6](#46-provider-contract) consumes. For cuDNN porting parity
+the wrapper also exposes two **derived** queries — `isByValue()` (the umbrella,
+`value present || is_runtime_pass_by_value`, true for every by-value state) and
+`hasCompileTimeConstant()` (`!is_runtime_pass_by_value && value present`) —
+both computed from the flag and value presence, not stored, so no second
+discriminator can desync from the flag.
 
 ### 4.2 State reference
 
@@ -913,14 +919,17 @@ Rename the existing read-only `HIPDNN_ATTR_TENSOR_IS_BY_VALUE` (1307) to a
 **settable** `HIPDNN_ATTR_TENSOR_IS_RUNTIME_PASS_BY_VALUE` carrying the
 `is_runtime_pass_by_value` flag (true for the runtime states), and update the
 `BackendEnumStringUtils` string. Keep `HIPDNN_ATTR_TENSOR_VALUE_EXT` (1306)
-as-is (value union). No 1308 / `IS_COMPILE_TIME_CONSTANT` attribute is
+as-is (value union) and add `HIPDNN_ATTR_TENSOR_CONSTANT_VALUE` as an alias
+for it (same integer). No 1308 / `IS_COMPILE_TIME_CONSTANT` attribute is
 introduced. Change the descriptor unpack value-read gate
 ([`DescriptorUnpackHelpers.hpp`](../../frontend/include/hipdnn_frontend/detail/DescriptorUnpackHelpers.hpp))
 from `IS_BY_VALUE`-gated to **value-presence-gated** (read the value
 whenever the union is present), and read the runtime flag independently.
 Wire both through the existing `TensorDescriptor` get/set-attribute and
 pack/unpack paths. Add the `isRuntimePassByValue()` accessor to
-`ITensorAttributesWrapper`. No operation-graph attribute is added.
+`ITensorAttributesWrapper`, plus the derived `isByValue()` and
+`hasCompileTimeConstant()` queries (computed from the flag + value presence,
+not stored). No operation-graph attribute is added.
 
 ### Step 3: Version constant and filter
 
