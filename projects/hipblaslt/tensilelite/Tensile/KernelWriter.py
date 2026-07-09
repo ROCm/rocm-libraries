@@ -377,6 +377,9 @@ class StateValues:
   WGMTransformLevels: int                = -1
   tailloopInNll: bool                    = False
   tailloopInNllmaxUnit: int              = 0
+  postLoopStoreInNll: bool               = False
+  postLoopStoreInjected: bool            = False
+  postLoopSrdDHoisted: bool              = False
   staggerUCode: bool                     = 0
   scheduleGROverBarrier: bool            = False
   numLDSBlk: int                         = 0
@@ -5078,6 +5081,33 @@ class KernelWriter(metaclass=abc.ABCMeta):
     if self.do["executeToPrefetchEnd"]:
       module.add(self.functionEnd(kernel, addLabel=False))
 
+    # PostLoopStoreInNll: compute the loop-invariant tail guard SGPR before the
+    # main loop. calculateLoopNumIter(-1) only materializes the tail counter AFTER
+    # emitMainAndExitLoops, but the fused-store front guard (emitted at the top of
+    # the NLL, inside mainLoop) needs "does a tail run?" available up front. DepthU
+    # is a power of two for every eligible (fp4 + UseSubtileImpl) config, so
+    # (SizesSum % DepthU) reduces to a single AND: the result is 0 iff the NLL is
+    # terminal (no tail). Beta is tested directly from the persistent sgprBeta at
+    # the guard site (it stays live through the main loop), so no snapshot is made
+    # here. The write-index VGPRs stay drain-anchored and are materialized in the
+    # NLL builder (see emitMainAndExitLoops); the existing post-loop
+    # notLocalSplitUGlobalWriteIndices call is kept intact for the fallback arm.
+    # PostLoopStoreInNll SGPR-defer: no persistent pre-loop flags. The former
+    # PostLoopHasTail (no-tail bit) is recomputed transiently inside the shared
+    # emitFusedStoreGuard, and the former PostLoopStored (did-fuse dedup bit) is
+    # eliminated -- the post-loop dedup re-evaluates the same guard instead of
+    # carrying a bit across endSummation (see post-loop code below). Both flags being
+    # persistent added +2 to the store-path SGPR peak (MT256x256 fp4 hit 104 > 102).
+
+      # Step 4b (SGPR-defer): SrdD's value is NO LONGER hoisted before the main loop.
+      # Hoisting required SrdD to be main-loop-resident (4 SGPRs across the loop),
+      # overflowing MT256x256 fp4. Instead SrdD is computed lazily on each path that
+      # needs it: the PLAIN / SkipToEnd post-loop store computes it after endSummation's
+      # reclaim (globalWriteWorkGroupInit channels=None, baseline behavior), and the
+      # FUSED NLL store defines a transient SrdD from the drain-era pool
+      # (buildSubtileFusedStore). postLoopSrdDHoisted stays False so the post-loop init
+      # emits the full C+D SRD compute.
+
     module.add(mainLoop(self, kernel))
 
     # Deallocate offset registers
@@ -5135,13 +5165,40 @@ class KernelWriter(metaclass=abc.ABCMeta):
       if not self.states.doShadowInit:
         self.removeSgprVarFromPool("SrdD")
         self.removeSgprVarFromPool("SrdC")
-        module.add(self.globalWriteWorkGroupInit(kernel))
+        # Step 4b-2: if SrdD's value was already hoisted before the main loop, the
+        # post-loop copy must compute only SrdC (channels=["C"]) — SrdD is already
+        # valid and re-emitting its SRD-init would duplicate the D labels. When the
+        # hoist did not run (non-fused, doShadowInit, or SrdD pre-defined) fall back
+        # to the full C+D init (channels=None), byte-identical to the legacy path.
+        module.add(self.buildSubtileStoreInitModule(
+          kernel,
+          channels=["C"] if self.states.postLoopSrdDHoisted else None))
 
       ####################################
       # NOT LocalSplitU
       ####################################
 
 
+
+      # 4d-3a dedup (flag-free): re-evaluate the SAME fused-store guard. A WG whose
+      # FUSED NLL already stored D re-passes the guard here and branches over the
+      # whole post-loop store; any WG that took the PLAIN arm / K<DepthU SkipToEnd
+      # fast-exit fails the guard (has-tail, or non-full-tile, or beta!=0) and falls
+      # through to store normally. This replaces the persistent PostLoopStored flag
+      # (all guard inputs are loop-invariant and still live post-endSummation). When
+      # the feature is off, no guard/branch is emitted (byte-identical).
+      postLoopStoreDedupLabel = None
+      if self.states.postLoopStoreInNll:
+        postLoopStoreDedupLabel = Label("SkipPostLoopStore", "")
+        doPostLoopStoreLabel = Label("DoPostLoopStore", "")
+        # Guard branches target the adjacent doPostLoopStoreLabel -> short is fine.
+        module.add(self.emitFusedStoreGuard(kernel, doPostLoopStoreLabel))
+        # The skip-over-store jump spans the entire post-loop store body, which with
+        # bias/SAV exceeds the +-simm16 short-branch range -> emit a 32-bit long branch.
+        with self.allocTmpSgpr(3, tag="postLoopStoreDedup_longBranch") as tmpSgprInfo:
+          module.add(SLongBranchPositive(postLoopStoreDedupLabel, tmpSgprInfo,
+                     comment="FUSED NLL already stored D -> skip redundant post-loop store (long)"))
+        module.add(doPostLoopStoreLabel)
 
       # global write indices
       module.addComment1("not-LocalSplitU: global write indices")
@@ -5151,6 +5208,8 @@ class KernelWriter(metaclass=abc.ABCMeta):
       #module.addComment1("not-LocalSplitU: global write")
       storeModule, deferredGSU0 = self.notLocalSplitUGlobalWrite(kernel, tensorParametersA, tensorParametersB)
       module.add(storeModule)
+      if postLoopStoreDedupLabel is not None:
+        module.add(postLoopStoreDedupLabel)
 
       if not (kernel["UseSubtileImpl"] and kernel["MIArchVgpr"] and self._subtileDtileBaseVgpr is not None):
         self.vgprPool.checkIn(self.states.c.startVgprValu)
@@ -5247,7 +5306,21 @@ class KernelWriter(metaclass=abc.ABCMeta):
     # Variants that mark keepsConstantsInSgpr=True (the dynamic
     # per-XCD path references SK kernarg constants directly) cannot
     # cache them in VGPRs on gfx1250.
-    return kernel["ISA"] == IsaVersion(12,5,0) and not self.states.streamK.keepsConstantsInSgpr
+    if self.states.streamK.keepsConstantsInSgpr:
+      return False
+    if kernel["ISA"] == IsaVersion(12,5,0):
+      return True
+    # gfx950 + PostLoopStoreInNll: the fused epilogue store (subtile) needs
+    # transient SGPRs while the main-loop + StreamK SGPRs are still live, and the
+    # base kernel already sits near the SGPR cap (~100/102). Caching the StreamK
+    # constant kernargs (ItersPerTile/MagicNumber/MagicShift/SKItersPerWG[/skGrid/
+    # skTiles]) in statically-allocated VGPRs -- values preserved across the
+    # persistent tile loop, read back via v_readfirstlane at use sites -- frees
+    # those SGPRs for the fused store. Scoped to PLSIN so non-fused gfx950 StreamK
+    # kernels are unaffected.
+    if kernel["ISA"] == IsaVersion(9,5,0) and kernel["StreamK"] and kernel.get("PostLoopStoreInNll"):
+      return True
+    return False
 
   def acquireStreamKConstSgpr(self, kernel, name):
     if self.isStreamKConstantsToVgprEnabled(kernel):
@@ -6862,6 +6935,16 @@ class KernelWriter(metaclass=abc.ABCMeta):
     #exit(1)
 
     self.states.tailloopInNll = kernel["TailloopInNll"]
+    # PostLoopStoreInNll: fuse the fp4+UseSubtileImpl paired dwordx4 store into the
+    # NLL. Solution-level gating already narrowed this to eligible configs; here we
+    # just snapshot it and reset the per-kernel "already injected" flag.
+    self.states.postLoopStoreInNll = kernel["PostLoopStoreInNll"]
+    self.states.postLoopStoreInjected = False
+    # Step 4b-2: set True once SrdD's value is computed before the main loop, so
+    # the post-loop store-init emits only the C channel (D already done) instead
+    # of the full C+D init. Reset per kernel; only the pre-main-loop D-hoist below
+    # flips it on.
+    self.states.postLoopSrdDHoisted = False
     hasMx = kernel["ProblemType"]["MXBlockA"] or kernel["ProblemType"]["MXBlockB"]
     usesTDM = kernel["enableTDMA"] or kernel["enableTDMB"]
     usesDTL = kernel["DirectToLdsA"] or kernel["DirectToLdsB"]
@@ -9167,7 +9250,26 @@ class KernelWriter(metaclass=abc.ABCMeta):
 
     # the sgprs overlap with wg ids
     # TODO: For subtileimpl, consider shadowInit param as well
-    if self.states.doShadowInit and kernel["BufferStore"]:
+    # PostLoopStoreInNll (fp4 subtile weave) reserves SrdD here too — even though
+    # subtile kernels never set doShadowInit — so SrdD gets a stable index in the
+    # common allocator *before* the deferred loop places SrdWS. This is what
+    # prevents the SrdD/SrdWS register-pool collision on StreamK (the old bespoke
+    # mid-loop SrdD define grabbed the parked SrdWS registers). The value of SrdD
+    # is still computed early (before the main loop) in the kernel body. SrdC is
+    # NOT reserved early for the PLSIN path: it is only needed by the post-loop
+    # beta/C path and is defined in endSummation, so it stays free as a main-loop
+    # temp (parking it through the whole loop would let a temp grab its registers).
+    # PostLoopStoreInNll (fp4 subtile weave) SGPR-defer: SrdD is intentionally NOT
+    # reserved early here. Reserving it early made it main-loop-resident (survives
+    # via nonPostLoopSgpr), costing 4 SGPRs across the whole loop and overflowing
+    # MT256x256 fp4. Baseline defines SrdD only *after* endSummation's reclaim, so
+    # it never costs main-loop SGPRs. We mirror that: the PLAIN / SkipToEnd post-loop
+    # store computes SrdD after the reclaim (globalWriteWorkGroupInit channels=None),
+    # and the FUSED NLL store defines a *transient* SrdD from the drain-era pool
+    # (buildSubtileFusedStore). Only doShadowInit (never set for subtile) reserves
+    # SrdD/SrdC early.
+    earlyStoreSrd = self.states.doShadowInit
+    if earlyStoreSrd and kernel["BufferStore"]:
       self.defineSgpr("SrdD", 4, 4)
       self.defineSgpr("SrdC", 4, 4)
 

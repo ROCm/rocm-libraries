@@ -3402,6 +3402,236 @@ class LogicalScheduler:
                 comment=f"PGR=2 tail align: parity-swap LW_base for {tc}"))
         return module
 
+    def _emitNllMaybeFused(self, writer, kernel, label, emitted_3d):
+        """Emit the NLL, optionally as a FUSED/PLAIN dual variant (PostLoopStoreInNll).
+
+        Non-fused kernels: byte-identical to the stock single-NLL emission (early
+        return of the plain `_emitLoop`).
+
+        Fused kernels: emit a runtime front guard, then the FUSED copy, then the
+        PLAIN copy. The guard (Step 4d-2) selects FUSED only when the NLL is terminal
+        (no tail) and beta==0; every other case falls through to PLAIN. In Step 4d-2
+        the FUSED copy is still identical to PLAIN (no stores injected yet) and both
+        arms fall through to the unchanged post-loop store, so GPU output is correct
+        regardless of which arm runs — this just makes the FUSED block reachable so it
+        is actually exercised. Step 4d-3a relocates the store into the FUSED copy and
+        adds the NonEdge condition + stored_flag dedup. FUSED/guard labels carry the
+        site suffix so the two per-unroll emit sites never collide.
+        """
+        from rocisa.code import Module, Label
+        from rocisa.instruction import SBranch
+
+        plain = self._emitLoop(writer, kernel, label, emitted_3d)
+        if not getattr(writer.states, "postLoopStoreInNll", False):
+            return plain
+
+        module = Module(f"{label}_MaybeFused")
+        doneLabel = Label(f"{label}_PostFusedNLL", "")
+        plainLabel = Label(f"{label}_PlainNLL", "")
+        # Runtime front guard: fall through to FUSED only when both hold, else PLAIN.
+        module.add(self._emitFusedFrontGuard(writer, kernel, label, plainLabel))
+        # 4d-3b weave: pull the terminal-subIterK (last K) MFMAs OUT of the FUSED loop
+        # and stash them grouped by store-pair (accBase//8) so the fused store can
+        # interleave each pair's 2 MFMAs across its ds_bpermute window. If extraction
+        # is not well-formed (unexpected acc layout), groups is None -> store falls
+        # back to emitting all MFMAs up front (monolithic 4d-3a, still correct).
+        # LA = how many store-pairs ahead a pair's terminal MFMAs are issued (the
+        # MFMA->accvgpr_read latency window). The first LA pairs keep their MFMAs in
+        # the loop (natural large distance); pairs >= LA are woven.
+        weaveLA = 4
+        fusedEmitted = copy.deepcopy(emitted_3d)
+        # Macro tiles larger than 256x256 peak at 256 arch VGPRs in the loop, so the
+        # fused store's temporaries (valuC window, coord0/1, and the element batch)
+        # cannot coexist with the still-live input VGPR tiles without pushing the
+        # arch-VGPR high-water mark past the single-wave occupancy budget. For those
+        # tiles: (a) keep the terminal MFMAs IN the loop (no weave) so every input
+        # tile is dead before the store, and (b) hand the now-dead input-tile VGPRs
+        # to buildSubtileFusedStore to lend to the store pool (non-destructively) so
+        # the store batch reuses the freed holes instead of extending the watermark.
+        # Tiles <= 256x256 keep the existing weave (they already fit at occupancy).
+        largeTile = (kernel["MacroTile0"] > 256) or (kernel["MacroTile1"] > 256)
+        if largeTile:
+            weaveGroups = None
+            # Carry (base, size) per input tile so buildSubtileFusedStore can skip
+            # any tile that overlaps the spilled-accumulator arch-VGPR region. For
+            # spill tiles (MIWaveTile product > 64) the loop parks the >256th
+            # accumulators in dead input-tile VGPRs; those must stay reserved so the
+            # store's accvgpr read (and the subsequent post-loop store) can recover
+            # them. Lending such a tile lets a store temp reuse it and clobber a live
+            # spilled accumulator -> wrong D. Non-overlapping input tiles are safe.
+            lendTiles = []
+            for _tl in (self.vgprTilesA, self.vgprTilesB,
+                        self.vgprTilesSA, self.vgprTilesSB):
+                for _t in _tl:
+                    if getattr(_t.regList, "is_vgpr", False) and _t.regList.indices:
+                        lendTiles.append((_t.regList.indices[0], len(_t.regList.indices)))
+            writer.states.subtileFusedLendVgprs = lendTiles
+        else:
+            weaveGroups = self._extractTerminalMfmaGroups(fusedEmitted, keepInLoop=weaveLA)
+            writer.states.subtileFusedLendVgprs = []
+        savedGroups = getattr(writer.states, "subtileWeaveMfmaGroups", None)
+        savedMaster = getattr(writer.states, "subtileWeaveMfmaGroupsMaster", None)
+        # weaveGroups is the pristine master: its terminal-MFMA instruction objects
+        # are NEVER added to a module directly. The fused store body is duplicated
+        # once per activation type (ActivationType=all), and each duplicate must
+        # receive its OWN woven terminal MFMAs. _weaveEmitGroup adds objects to a
+        # module (setting their parent), so re-emitting the same objects into a
+        # second activation block is impossible. Instead the activation loop
+        # deep-copies this master per type (re-arming subtileWeaveEmitted). Keep the
+        # master pristine and expose an initial working copy for the first type.
+        writer.states.subtileWeaveMfmaGroupsMaster = weaveGroups
+        writer.states.subtileWeaveMfmaGroups = copy.deepcopy(weaveGroups) if weaveGroups is not None else None
+        writer.states.subtileWeaveLookahead = weaveLA
+        writer.states.subtileWeavePairCounter = 0
+        writer.states.subtileWeaveEmitted = set()
+        module.add(self._emitLoop(writer, kernel, f"{label}_FUSED", fusedEmitted))
+        # 4d-3a/3b: the beta0/NonEdge D store at the end of the FUSED NLL. With
+        # subtileWeaveMfmaGroups set, the store interleaves the terminal MFMAs
+        # (4d-3b latency hiding); otherwise it is monolithic (4d-3a).
+        module.add(writer.buildSubtileFusedStore(kernel, writer.tPA, writer.tPB))
+        writer.states.subtileWeaveMfmaGroups = savedGroups
+        writer.states.subtileWeaveMfmaGroupsMaster = savedMaster
+        # No "did-fuse" flag: the post-loop store dedups by re-evaluating the same
+        # emitFusedStoreGuard (a WG that fused here will re-pass the guard there and
+        # skip the redundant store). See kernelBodySubtile post-loop dedup.
+        # doneLabel is past the entire PLAIN NLL body -> use a 32-bit long branch
+        # (the bias/SAV FUSED store pushes this jump out of short-branch range).
+        from rocisa.instruction import SLongBranchPositive
+        with writer.allocTmpSgpr(3, tag="fusedNllDone_longBranch") as tmpSgprInfo:
+            module.add(SLongBranchPositive(doneLabel, tmpSgprInfo,
+                       comment="PostLoopStoreInNll: FUSED done, skip PLAIN NLL (long)"))
+        module.add(plainLabel)
+        module.add(plain)
+        module.add(doneLabel)
+        return module
+
+    def _extractTerminalMfmaGroups(self, emitted_3d, keepInLoop=0):
+        """4d-3b: remove the terminal-subIterK (last K) MFMA instructions from the
+        FUSED loop and return them grouped by store-pair index.
+
+        emitted_3d: [partition][subIterK][EmittedModule]  (instructions already
+        materialized). The last subIterK slot of each partition holds the terminal
+        MFMA EmittedModule (opType 'mfma'); its instructions accumulate the FINAL
+        acc values (the K<last partials stay in the loop). MFMA C[a,b] writes
+        acc[4a+32b:+3]; the per-pair store reads acc[8p:8p+8], so an MFMA belongs to
+        store-pair p = (accBase // 8). We clear the extracted instructions from the
+        loop and return {p: [mfma insts]}.
+
+        keepInLoop: the first `keepInLoop` store-pairs' MFMAs are LEFT in the loop
+        (not extracted). Those pairs are stored first, so their accs must be ready
+        with the loop's natural (large) MFMA->accvgpr distance; there is no earlier
+        weave slot to give them that distance. Only pairs >= keepInLoop are woven,
+        each issued `keepInLoop` pairs ahead of its accvgpr_read (see GlobalWriteBatch
+        weave), which supplies the MFMA->acc latency window.
+
+        Returns None (caller falls back to monolithic store) if the layout is not the
+        expected 2-MFMA-per-pair contiguous form, so correctness never depends on the
+        weave.
+        """
+        import re
+        accRe = re.compile(r'acc\[(\d+)\s*:')
+        mfmaEms = []   # (EmittedModule, [all its mfma insts])
+        allInsts = []
+        for partition in emitted_3d:
+            if not partition:
+                continue
+            for em in partition[-1]:  # last subIterK slot's EmittedModules
+                if em.opType == 'mfma' and em.instructions:
+                    mfmaEms.append((em, list(em.instructions)))
+                    allInsts.extend(em.instructions)
+        if not allInsts:
+            return None
+        # Validate the acc layout on ALL terminal MFMAs before mutating anything.
+        pairOf = {}
+        groupsAll = {}
+        for inst in allInsts:
+            m = accRe.search(str(inst))
+            if not m:
+                return None  # unexpected: an MFMA without an acc dst -> bail safely (loop unchanged)
+            p = int(m.group(1)) // 8
+            pairOf[id(inst)] = p
+            groupsAll.setdefault(p, []).append(inst)
+        # Expect exactly 2 MFMAs per pair (sba=0 tile + sba=1 tile).
+        if any(len(v) != 2 for v in groupsAll.values()):
+            return None
+        # Valid. Extract pairs >= keepInLoop for weaving; keep the rest in the loop.
+        groups = {p: v for p, v in groupsAll.items() if p >= keepInLoop}
+        for em, insts in mfmaEms:
+            em.instructions = [i for i in insts if pairOf[id(i)] < keepInLoop]
+        return groups
+
+    def _emitFusedFrontGuard(self, writer, kernel, label, plainLabel):
+        """Loop-invariant front guard for PostLoopStoreInNll: fall through to the
+        FUSED NLL only when the NLL is terminal (no tail loop), beta==0, and the
+        tile is subtile-aligned (NonEdge); otherwise branch to `plainLabel` (the
+        PLAIN NLL).
+
+        - PostLoopHasTail (SizesSum % DepthU, computed before the main loop) is 0 iff
+          the NLL is the terminal K-step (no flat tail loop follows).
+        - beta==0 is required because the fused paired store writes D directly without
+          the read-C / alpha*acc+beta*C path.
+        - Full-tile (Option A): the fused store is emitted branch-free (no per-pair
+          OOB guards / scalar fallback / align8 exec mask), which is only correct when
+          THIS workgroup covers a complete MacroTile in both M and N. "NonEdge" is not
+          sufficient — checkIsEdgeSubtile treats an 8-aligned M remainder (and any N
+          remainder under storeAlign8) as NonEdge, but those are partial tiles that need
+          the guards. So the front guard here uses requireFullTile=True: FUSED only when
+          the last WG remainder is exactly 0 (SizeI%MT0==0 && SizeJ%MT1==0); interior WGs
+          are always full and stay FUSED-eligible. Partial edge-strip WGs fall back to the
+          PLAIN NLL + edge-capable post-loop store.
+        """
+        from rocisa.code import Module
+
+        module = Module(f"{label}_FusedFrontGuard")
+        module.addComment1("PostLoopStoreInNll front guard: FUSED iff (no tail) && beta==0 && full-tile, else PLAIN")
+        # Shared guard (single source of truth, also used by the post-loop dedup): the
+        # no-tail test is recomputed transiently from SizesSum here (no persistent
+        # PostLoopHasTail SGPR).
+        # plainLabel sits past the whole FUSED store body; with bias/SAV that body
+        # exceeds the +-simm16 short-branch range, so force 32-bit long branches.
+        module.add(writer.emitFusedStoreGuard(kernel, plainLabel, longBranch=True))
+        return module
+
+    def _inject_fused_drain(self, writer, kernel, emitted_3d):
+        """Insert the FUSED-NLL drain module (write-index/cvt materialization) right
+        after the NLL's global-read drain (wait_gr), in the FUSED copy only.
+
+        Mirrors emitMainAndExitLoops.inject_pap_after_nll_drain: find the wait_gr
+        EmittedModule, then place a new EmittedModule after it (and after any sync
+        that chains off it) by re-pointing that drain's before-consumers at the new
+        module. The module is built eagerly (like the PAP module) so it lands as
+        already-emitted instructions with source=None. Step 4c uses
+        buildSubtileFusedDrainProbe to measure VGPR headroom at the drain; Step 4d
+        swaps in the real materialization. Caller passes a deepcopy, so this mutates
+        in place. Returns emitted_3d unchanged if no drain is found."""
+        drain_module = writer.buildSubtileFusedDrainProbe(kernel)
+
+        def insert_after_drain(em_list):
+            wait_gr = next((em for em in em_list if em.opType == 'wait_gr'), None)
+            if wait_gr is None:
+                return False
+            tail_id = wait_gr.moduleId
+            sync = next((em for em in em_list
+                         if em.opType == 'sync' and em.before == tail_id), None)
+            if sync is not None:
+                tail_id = sync.moduleId
+
+            new_id = max(em.moduleId for em in em_list) + 1
+            consumers = [em for em in em_list if em.before == tail_id]
+            em_list.append(EmittedModule(moduleId=new_id,
+                                         instructions=[drain_module],
+                                         before=tail_id,
+                                         source=None))
+            for consumer in consumers:
+                consumer.before = new_id
+            return True
+
+        for partition_emitted in emitted_3d:
+            for em_list in partition_emitted:
+                if insert_after_drain(em_list):
+                    return emitted_3d
+        return emitted_3d
+
     def emitMainAndExitLoops(self, writer, kernel, tensorParametersA=None, tensorParametersB=None):
         """Emit preloop + mainloop + NGLL + NLL exit paths (no tail).
 
@@ -3414,8 +3644,14 @@ class LogicalScheduler:
         """
         from rocisa.code import Module, Label
         from rocisa.instruction import (SSubU32, SCmpEQU32, SCBranchSCC0,
-                                        SCBranchSCC1, SBranch)
+                                        SCBranchSCC1, SBranch, SLongBranchPositive)
         from rocisa.container import sgpr
+
+        # PostLoopStoreInNll bias/SAV bloats the FUSED NLL bodies so the exit-loop
+        # branches that jump across them (to SkipToEnd / ExitC{ui}) overflow the
+        # +-simm16 short-branch range. Emit those as 32-bit long branches, gated so
+        # every other kernel keeps the original short branches (byte-identical).
+        plsin = getattr(writer.states, "postLoopStoreInNll", False)
 
         assert Pass.POPULATE in self._completed, \
             "populate_instructions() must be called before emitMainAndExitLoops()"
@@ -3483,8 +3719,12 @@ class LogicalScheduler:
         if not kernel["NoTailLoop"]:
             module.add(SCmpEQU32(src0=sgpr("LoopCounterL"), src1=0,
                                  comment="K < DepthU? skip to tail loop"))
-            module.add(SCBranchSCC1(labelName=endLabel.getLabelName(),
-                                    comment="K < DepthU: only tail loop runs"))
+            if plsin:
+                module.add(writer.longBranchScc1(endLabel, posNeg=1,
+                           comment="K < DepthU: only tail loop runs (long)"))
+            else:
+                module.add(SCBranchSCC1(labelName=endLabel.getLabelName(),
+                                        comment="K < DepthU: only tail loop runs"))
 
         # ── Preloop ──
         module.add(self._emitLoop(writer, kernel, "PRELOOP",
@@ -3522,9 +3762,13 @@ class LogicalScheduler:
             module.add(SCmpEQU32(src0=sgpr("LoopCounterL"), src1=exitValue,
                                  comment=f"counterL == {exitValue}? (copy {ui} exit)"))
             if ui < uf - 1:
-                module.add(SCBranchSCC1(
-                    labelName=exitLabels[ui].getLabelName(),
-                    comment=f"copy {ui} exit → NGLL_C{ui}"))
+                if plsin:
+                    module.add(writer.longBranchScc1(exitLabels[ui], posNeg=1,
+                               comment=f"copy {ui} exit → NGLL_C{ui} (long)"))
+                else:
+                    module.add(SCBranchSCC1(
+                        labelName=exitLabels[ui].getLabelName(),
+                        comment=f"copy {ui} exit → NGLL_C{ui}"))
             else:
                 module.add(SCBranchSCC0(
                     labelName=loopBegin.getLabelName(),
@@ -3553,11 +3797,16 @@ class LogicalScheduler:
         if nll_ft == 0:
             module.add(Label("SkipToNLL", ""))
         module.addComment0(f"NLL_C{last}")
-        module.add(self._emitLoop(writer, kernel, f"NLL_C{last}",
+        module.add(self._emitNllMaybeFused(writer, kernel, f"NLL_C{last}",
                                   inject_pap_after_nll_drain(self._nll_per_unroll[nll_ft])))
         module.add(self._emit_pgr2_tail_lw_align(kernel))
-        module.add(SBranch(labelName=endLabel.getLabelName(),
-                           comment="skip other exit paths"))
+        if plsin:
+            with writer.allocTmpSgpr(3, tag="nllLastExit_longBranch") as tmpSgprInfo:
+                module.add(SLongBranchPositive(endLabel, tmpSgprInfo,
+                           comment="skip other exit paths (long)"))
+        else:
+            module.add(SBranch(labelName=endLabel.getLabelName(),
+                               comment="skip other exit paths"))
 
         for ui in range(uf - 1):
             nll_idx = (ui + pgr) % uf
@@ -3569,12 +3818,17 @@ class LogicalScheduler:
             if nll_idx == 0:
                 module.add(Label("SkipToNLL", ""))
             module.addComment0(f"NLL_C{ui}")
-            module.add(self._emitLoop(writer, kernel, f"NLL_C{ui}",
+            module.add(self._emitNllMaybeFused(writer, kernel, f"NLL_C{ui}",
                                       inject_pap_after_nll_drain(self._nll_per_unroll[nll_idx])))
             module.add(self._emit_pgr2_tail_lw_align(kernel))
             if ui < uf - 2:
-                module.add(SBranch(labelName=endLabel.getLabelName(),
-                                   comment="skip other exit paths"))
+                if plsin:
+                    with writer.allocTmpSgpr(3, tag="nllExit_longBranch") as tmpSgprInfo:
+                        module.add(SLongBranchPositive(endLabel, tmpSgprInfo,
+                                   comment="skip other exit paths (long)"))
+                else:
+                    module.add(SBranch(labelName=endLabel.getLabelName(),
+                                       comment="skip other exit paths"))
 
         module.add(endLabel)
 

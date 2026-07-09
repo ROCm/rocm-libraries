@@ -1057,6 +1057,10 @@ validParameters = { # we need to make sure this matches develop
     # Need certain conditions to use TailloopInNll optimization
     # - NT transpose or AssertSummationElementMultiple * bpeGR is multiple of 4 (with BufferLoad + ShiftPtr)
     "TailloopInNll": [False, True],
+    # Fuse the D-tile buffer_store into the No-Load-Loop (NLL) so early-completed
+    # accumulator pairs are stored while the final-K-step MFMAs for later pairs run.
+    # Scoped to fp4-input (MXFP4) + UseSubtileImpl on gfx950; auto-disabled otherwise.
+    "PostLoopStoreInNll": [False, True],
     # Schedule global read instructions over barrier sync.
     # Only for DirectToLdsA+B + PGR>=2.
     # -1: auto (enable this for PGR>=3)
