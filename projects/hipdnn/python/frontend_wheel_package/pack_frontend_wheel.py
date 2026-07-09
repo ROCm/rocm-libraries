@@ -80,8 +80,6 @@ setup(
 logger = logging.getLogger(__name__)
 
 
-
-
 def is_native_extension(path: Path) -> bool:
     return (
         path.is_file()
@@ -122,11 +120,15 @@ def find_native_extension(build_dir: Path) -> Path:
     for directory in preferred_extension_dirs(build_dir):
         if not directory.is_dir():
             continue
-        matches = sorted(path for path in directory.iterdir() if is_native_extension(path))
+        matches = sorted(
+            path for path in directory.iterdir() if is_native_extension(path)
+        )
         if matches:
             return matches[0]
 
-    matches = sorted(path for path in build_dir.rglob("*") if is_searchable_candidate(path))
+    matches = sorted(
+        path for path in build_dir.rglob("*") if is_searchable_candidate(path)
+    )
     if not matches:
         raise SystemExit(
             f"No native extension named {NATIVE_EXT_PREFIXES[0]}* with suffix "
@@ -158,18 +160,31 @@ def validate_pkg_dir(pkg_dir: Path) -> None:
         )
 
 
-def stage_package_from_build(*, build_dir: Path, package_dir: Path, extension: Path | None) -> Path:
-    if PACKAGE_TEMPLATE_DIR.name != EXPECTED_PKG_NAME or not PACKAGE_TEMPLATE_DIR.is_dir():
-        raise SystemExit(f"Package template directory is missing: {PACKAGE_TEMPLATE_DIR}")
+def stage_package_from_build(
+    *, build_dir: Path, package_dir: Path, extension: Path | None
+) -> Path:
+    if (
+        PACKAGE_TEMPLATE_DIR.name != EXPECTED_PKG_NAME
+        or not PACKAGE_TEMPLATE_DIR.is_dir()
+    ):
+        raise SystemExit(
+            f"Package template directory is missing: {PACKAGE_TEMPLATE_DIR}"
+        )
 
     if package_dir.exists():
         shutil.rmtree(package_dir)
     package_dir.parent.mkdir(parents=True, exist_ok=True)
     shutil.copytree(PACKAGE_TEMPLATE_DIR, package_dir, ignore=PACKAGE_TREE_IGNORE)
 
-    native_extension = extension.resolve() if extension is not None else find_native_extension(build_dir)
+    native_extension = (
+        extension.resolve()
+        if extension is not None
+        else find_native_extension(build_dir)
+    )
     if not is_native_extension(native_extension):
-        raise SystemExit(f"--extension is not a hipDNN Python native extension: {native_extension}")
+        raise SystemExit(
+            f"--extension is not a hipDNN Python native extension: {native_extension}"
+        )
     shutil.copy2(native_extension, package_dir / native_extension.name)
     return package_dir
 
@@ -213,7 +228,9 @@ def build_wheel(*, staged_pkg_dir: Path, wheel_dir: Path) -> list[Path]:
 
         built_wheels = sorted(temp_wheel_dir.glob("hipdnn_frontend-*.whl"))
         if not built_wheels:
-            raise SystemExit(f"python -m build produced no hipdnn_frontend wheel in {temp_wheel_dir}")
+            raise SystemExit(
+                f"python -m build produced no hipdnn_frontend wheel in {temp_wheel_dir}"
+            )
 
         for stale_wheel in wheel_dir.glob("hipdnn_frontend-*.whl"):
             stale_wheel.unlink()
@@ -273,7 +290,9 @@ def main() -> int:
         )
 
     wheels = build_wheel(staged_pkg_dir=staged_pkg_dir, wheel_dir=wheel_dir)
-    logger.info("Wheel(s) written to %s: %s", wheel_dir, [wheel.name for wheel in wheels])
+    logger.info(
+        "Wheel(s) written to %s: %s", wheel_dir, [wheel.name for wheel in wheels]
+    )
     return 0
 
 

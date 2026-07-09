@@ -30,10 +30,10 @@ jobs:
     env:
       BUILD_DIR: build/hipdnn-python
       GPU_TARGET: gfx94X-dcgpu
-      ROCM_SDK_PATH: ${{ runner.temp }}/rocm-sdk
-      SUPERBUILD_ARTIFACT_DIR: ${{ runner.temp }}/hipdnn-rocm-sdk-artifact
+      ROCM_SDK_PATH: /tmp/rocm-sdk
+      SUPERBUILD_ARTIFACT_DIR: /tmp/hipdnn-rocm-sdk-artifact
       SUPERBUILD_RUN_ID: ${{ github.event_name == 'workflow_run' && github.event.workflow_run.id || inputs.superbuild_run_id }}
-      VENV_PATH: ${{ runner.temp }}/rocm_wheels
+      VENV_PATH: /tmp/rocm_wheels
     steps:
       - name: Checkout repository
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
