@@ -113,6 +113,12 @@ class OpAdapter:
     config_columns: Callable[[object], Dict[str, object]]
     problem_columns: Callable[[object], Dict[str, object]]
     flops: Callable[[object], float]
+    # Optional GPU benchmark: measure a built spec and return
+    # {"tflops": float, "latency_ms": float, "correct": bool}. When present and a
+    # spec builds, generate() records the real numbers instead of leaving
+    # measured_tflops=0. Absent (None) → build-only rows (measured_tflops=0), the
+    # historical behaviour for ops without a launcher.
+    benchmark: Optional[Callable[[object], Dict[str, object]]] = None
 
 
 # =====================================================================
@@ -563,23 +569,47 @@ def generate(
 
     rows: List[Dict[str, object]] = []
     n_built = 0
+    n_measured = 0
     for i, spec in enumerate(specs):
         rec = _build_spec(adapter, spec, cache_dir, isa)
         if rec.ok:
             n_built += 1
-        # Perf measurement requires a launcher + GPU; in its absence
-        # measured_tflops stays 0 and is_valid tracks build success so the
-        # model can still learn the (large) build-failure surface. When a
-        # launcher is wired the same rows are re-measured in place.
+
+        # Perf measurement: when the adapter provides a benchmark and the spec
+        # built, launch + time it on the GPU and record real numbers. Without a
+        # benchmark (or on a build failure) measured_tflops stays 0 and is_valid
+        # tracks build success — the historical build-only behaviour. A benchmark
+        # exception degrades that one row to 0 rather than aborting the sweep.
+        measured_tflops = 0.0
+        latency_ms = 0.0
+        correct: Optional[bool] = None
+        bench_error: Optional[str] = None
+        if rec.ok and adapter.benchmark is not None:
+            try:
+                res = adapter.benchmark(spec)
+                measured_tflops = float(res.get("tflops", 0.0) or 0.0)
+                latency_ms = float(res.get("latency_ms", 0.0) or 0.0)
+                if "correct" in res:
+                    correct = bool(res["correct"])
+                if measured_tflops > 0:
+                    n_measured += 1
+            except Exception as e:  # noqa: BLE001 - one bad kernel must not kill the sweep
+                bench_error = f"{type(e).__name__}: {e}"
+
         row: Dict[str, object] = {
             "op_type": adapter.op_type,
             "arch": arch,
             "kernel_name": rec.name,
-            "measured_tflops": 0.0,
-            "latency_ms": 0.0,
-            "is_valid": bool(rec.ok),
+            "measured_tflops": measured_tflops,
+            "latency_ms": latency_ms,
+            # is_valid = built AND (not benchmarked, or benchmarked correct).
+            # A kernel that builds but fails a correctness check is NOT a valid
+            # training row (it would poison the oracle-best selection).
+            "is_valid": bool(rec.ok) and (correct is not False),
             "build_ok": bool(rec.ok),
             "build_error": rec.error,
+            "correct": correct,
+            "bench_error": bench_error,
             "run_id": 0,
         }
         row.update(rec.problem)
@@ -588,8 +618,9 @@ def generate(
         if (i + 1) % 50 == 0:
             print(f"[gen]   built {n_built}/{i + 1} ...", file=sys.stderr, flush=True)
 
+    bench_note = f", measured {n_measured}" if adapter.benchmark is not None else ""
     print(
-        f"[gen] op={op} built {n_built}/{len(specs)} variants OK",
+        f"[gen] op={op} built {n_built}/{len(specs)} variants OK{bench_note}",
         file=sys.stderr,
         flush=True,
     )

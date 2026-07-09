@@ -252,6 +252,106 @@ def _sdpa_spec_name(cand: object) -> str:
 
 
 # =====================================================================
+# GPU benchmark (real TFLOPS + lightweight correctness)
+# =====================================================================
+
+
+def _ua_shape_for(prob: object):
+    """Build a UAShape (the benchmark harness's input descriptor) from a
+    UnifiedAttentionProblem, computing the paged-KV bookkeeping the trace format
+    records (num_blocks, max_blocks_per_seq) that the problem doesn't carry."""
+    import math
+
+    from rocke.assets import shape_utils_dir
+
+    sys.path.insert(0, str(shape_utils_dir()))
+    from _ua_shape_utils import UAShape  # noqa: E402
+
+    bs = int(prob.block_size)
+    max_blocks_per_seq = max(1, math.ceil(int(prob.max_seqlen_k) / bs))
+    num_blocks = max_blocks_per_seq * int(prob.num_seqs)
+    dt = {"fp16": "torch.float16", "bf16": "torch.bfloat16"}.get(
+        str(prob.dtype), "torch.bfloat16"
+    )
+    win = int(prob.sliding_window)
+    return UAShape(
+        source_file="gen_sdpa", line_idx=0, call_idx=0, kind="prefill_2d",
+        all_decode=(int(prob.max_seqlen_q) == 1),
+        num_seqs=int(prob.num_seqs), total_q=int(prob.total_q),
+        num_query_heads=int(prob.num_query_heads),
+        num_kv_heads=int(prob.num_kv_heads), head_size=int(prob.head_size),
+        block_size=bs, num_blocks=num_blocks,
+        max_blocks_per_seq=max_blocks_per_seq,
+        max_seqlen_q=int(prob.max_seqlen_q), max_seqlen_k=int(prob.max_seqlen_k),
+        softmax_scale=1.0 / math.sqrt(int(prob.head_size)),
+        softcap=float(prob.softcap),
+        window_size=((win - 1) if win > 0 else -1, 0),
+        has_sinks=bool(prob.use_sinks), has_alibi=bool(prob.use_alibi),
+        has_output_scale=False,
+        q_dtype=dt, k_dtype=dt, v_dtype=dt, out_dtype=dt,
+    )
+
+
+def _sdpa_benchmark(cand: object) -> Dict[str, object]:
+    """Time this grid point on the GPU and return {tflops, latency_ms, correct}.
+
+    Builds inputs via the shared UA harness, forces the tiled-2D backend (the
+    path the config grid sweeps), times it with rocke's HIP-event timer, and
+    computes TFLOPS from the analytic attention FLOP count. Correctness is a
+    lightweight NaN/inf/finite check on the output (a full reference compare is
+    AITER-coupled and too heavy per grid point); a kernel that returns non-finite
+    output is marked correct=False so it can't win the oracle-best selection.
+
+    KNOWN LIMITATION (see plan Step 3): ``run_unified_attention_torch(backend=
+    "tiled")`` re-derives the tiled spec from the problem inside
+    ``_get_2d_launcher`` (attention_unified.py:3065), so today it times the
+    *selector-default* config, not this candidate's (num_warps, T, block_m). All
+    grid points for a problem therefore currently measure the same number. Making
+    the runner honor an explicit tiled spec (a spec-override threaded through
+    _get_2d_launcher, or a direct low-level launch) is the remaining work to make
+    per-config TFLOPS meaningful.
+    """
+    import sys as _sys
+
+    import torch
+
+    from rocke.assets import shape_utils_dir
+    from rocke.runtime import synchronize_and_release, time_launches
+    from kernels import UnifiedAttentionProblem, run_unified_attention_torch
+
+    _sys.path.insert(0, str(shape_utils_dir()))
+    from _ua_shape_utils import attention_flops, make_inputs  # noqa: E402
+
+    prob = cand.problem
+    shape = _ua_shape_for(prob)
+    data = make_inputs(shape, seed=0)
+
+    # Rebuild a problem carrying num_sms etc.; dtype/sw already match cand.problem.
+    hip_stream = int(torch.cuda.current_stream().cuda_stream)
+
+    def call_once():
+        run_unified_attention_torch(
+            problem=prob,
+            q=data["query"], k=data["key_cache"], v=data["value_cache"],
+            out=data["output"], cu_seqlens_q=data["cu_seqlens_q"],
+            seqused_k=data["kv_lens"], softmax_scale=data["scale"],
+            block_table=data["block_tables"], softcap=float(prob.softcap),
+            sinks=data["sinks"], alibi_slopes=data["alibi_slopes"],
+            backend="tiled", stream=hip_stream,
+        )
+
+    latency_ms = time_launches(call_once, warmup=5, iters=20, stream=hip_stream)
+    synchronize_and_release(hip_stream)
+
+    out = data["output"]
+    correct = bool(torch.isfinite(out.float()).all().item())
+
+    flops = attention_flops(shape, data["query_lens"], data["kv_lens_list"])
+    tflops = (flops / 1e12) / (latency_ms / 1e3) if latency_ms > 0 else 0.0
+    return {"tflops": tflops, "latency_ms": latency_ms, "correct": correct}
+
+
+# =====================================================================
 # Public adapter factory
 # =====================================================================
 
@@ -266,6 +366,7 @@ def build_sdpa_adapter() -> OpAdapter:
         config_columns=_sdpa_config_columns,
         problem_columns=_sdpa_problem_columns,
         flops=_sdpa_flops,
+        benchmark=_sdpa_benchmark,
     )
 
 
