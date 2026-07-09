@@ -158,6 +158,13 @@ namespace
     };
 #endif
 
+    constexpr const char* ComplexHomogeneousTypeError
+        = "Error: complex CPU GEMM driver tests require homogeneous c32 or c64 types.";
+    constexpr const char* ComplexComputeInputTypeError
+        = "Error: complex CPU GEMM driver tests require compute-input type to match storage type.";
+    constexpr const char* ComplexUnsupportedFeatureError
+        = "Error: complex CPU GEMM driver tests only support plain GEMM plus beta/conjugation.";
+
     // A slow, easy to understand, golden reference implementation of GEMM.
     // Used strictly for validating the correctness of the optimized path.
     // Calculates, for each element (i, j):
@@ -234,10 +241,22 @@ namespace
     template <typename T>
     double absDiff(T observed, T expected)
     {
+        return static_cast<double>(std::abs(observed - expected));
+    }
+
+    template <typename T>
+    double descriptorBetaValue(float beta, float betaImag)
+    {
+        // ContractionProblemGemm only stores real beta metadata. For a
+        // pure-imaginary complex beta, passing 0 would make normalize() elide
+        // C. Use a non-special nonzero sentinel; the true beta still travels in
+        // ContractionInputs.
         if constexpr(IsStdComplex<T>::value)
-            return static_cast<double>(std::abs(observed - expected));
-        else
-            return static_cast<double>(std::abs(observed - expected));
+        {
+            if(beta == 0.0f && betaImag != 0.0f)
+                return 2.0;
+        }
+        return static_cast<double>(beta);
     }
 
     template <typename T>
@@ -267,6 +286,48 @@ namespace
     {
         using type = std::complex<double>;
     };
+
+    bool isComplexTypeName(const std::string& s)
+    {
+        return s == "c32" || s == "c64";
+    }
+
+    int validateComplexDriverOptions(const std::string& typeStr,
+                                     const std::string& typeAStr,
+                                     const std::string& typeBStr,
+                                     const std::string& computeInputAStr,
+                                     const std::string& computeInputBStr,
+                                     bool               useBias,
+                                     bool               useScaleAlphaVec,
+                                     const std::string& useScaleAB,
+                                     ActivationType     activation)
+    {
+        bool isComplexProblem
+            = isComplexTypeName(typeAStr) || isComplexTypeName(typeBStr)
+              || isComplexTypeName(typeStr);
+        if(!isComplexProblem)
+            return 0;
+
+        if(typeAStr != typeBStr || typeAStr != typeStr || !isComplexTypeName(typeAStr))
+        {
+            std::cerr << ComplexHomogeneousTypeError << std::endl;
+            return 1;
+        }
+
+        if(computeInputAStr != typeAStr || computeInputBStr != typeBStr)
+        {
+            std::cerr << ComplexComputeInputTypeError << std::endl;
+            return 1;
+        }
+
+        if(useBias || useScaleAlphaVec || useScaleAB != "none" || activation != ActivationType::None)
+        {
+            std::cerr << ComplexUnsupportedFeatureError << std::endl;
+            return 1;
+        }
+
+        return 0;
+    }
 
 #ifndef _WIN32
     struct MXGemmOperand
@@ -473,7 +534,7 @@ namespace
  * Handles memory allocation, data initialization, execution, and validation.
  *
  * InputT: The C++ type used for storage of A and B matrices (e.g. float, half).
- * AccumulateT: The type used for accumulation (currently restricted to float).
+ * AccumulateT: The type used for accumulation and C/D storage.
  */
 template <typename InputAT, typename InputBT = InputAT, typename AccumulateT = float>
 int runGemm(size_t             m,
@@ -613,6 +674,7 @@ int runGemm(size_t             m,
                                    : TensorDescriptor("b", dtypeEnumB, {k, n, batchCount}, {1, ldb, numB});
     TensorDescriptor tensorC("c", accumDtypeEnum, {m, n, batchCount}, {1, ldc, numC});
     TensorDescriptor tensorD("d", accumDtypeEnum, {m, n, batchCount}, {1, ldc, numC});
+    double           betaForDescriptor = descriptorBetaValue<AccumulateT>(beta, betaImag);
 
     ContractionProblemGemm contraction = ContractionProblemGemm::GEMM(transA,
                                                                       transB,
@@ -624,7 +686,7 @@ int runGemm(size_t             m,
                                                                       nop,
                                                                       tensorD,
                                                                       nop,
-                                                                      static_cast<double>(beta));
+                                                                      betaForDescriptor);
 
     contraction.setComputeInputTypeA(computeInputA);
     contraction.setComputeInputTypeB(computeInputB);
@@ -1290,34 +1352,6 @@ int main(int argc, char* argv[])
         return 1;
     }
 
-    auto isComplexTypeName = [](const std::string& s) { return s == "c32" || s == "c64"; };
-    bool isComplexProblem
-        = isComplexTypeName(typeAStr) || isComplexTypeName(typeBStr) || isComplexTypeName(typeStr);
-    if(isComplexProblem)
-    {
-        if(typeAStr != typeBStr || typeAStr != typeStr)
-        {
-            std::cerr
-                << "Error: complex CPU GEMM driver tests require homogeneous c32 or c64 types."
-                << std::endl;
-            return 1;
-        }
-        if(computeInputAStr != typeAStr || computeInputBStr != typeBStr)
-        {
-            std::cerr << "Error: complex CPU GEMM driver tests require compute-input type to match "
-                         "storage type."
-                      << std::endl;
-            return 1;
-        }
-        if(useBias || useScaleAlphaVec || useScaleAB != "none" || activationStr != "none")
-        {
-            std::cerr << "Error: complex CPU GEMM driver tests only support plain GEMM plus "
-                         "beta/conjugation."
-                      << std::endl;
-            return 1;
-        }
-    }
-
 #ifndef _WIN32
     if((typeAStr == "f4") != (typeBStr == "f4"))
     {
@@ -1345,6 +1379,19 @@ int main(int argc, char* argv[])
     {
         std::cerr << "Unknown activation: " << activationStr << std::endl;
         return 1;
+    }
+
+    if(int rc = validateComplexDriverOptions(typeStr,
+                                             typeAStr,
+                                             typeBStr,
+                                             computeInputAStr,
+                                             computeInputBStr,
+                                             useBias,
+                                             useScaleAlphaVec,
+                                             useScaleAB,
+                                             activation))
+    {
+        return rc;
     }
 
     std::cout << "Running GEMM with: M=" << m << " N=" << n << " K=" << k << " TypeA=" << typeAStr
@@ -1387,49 +1434,12 @@ int main(int argc, char* argv[])
             {
                 constexpr bool isComplexA = IsStdComplex<AT>::value;
                 constexpr bool isComplexB = IsStdComplex<BT>::value;
-                if constexpr(isComplexA || isComplexB)
+                constexpr bool invalidMixedComplex
+                    = (isComplexA || isComplexB) && (isComplexA != isComplexB || !std::is_same_v<AT, BT>);
+                if constexpr(invalidMixedComplex)
                 {
-                    if constexpr(isComplexA != isComplexB || !std::is_same_v<AT, BT>)
-                    {
-                        std::cerr << "Error: complex CPU GEMM driver tests require homogeneous c32 or c64 types."
-                                  << std::endl;
-                        return 1;
-                    }
-                    else if(useBias || useScaleAlphaVec || useScaleAB != "none"
-                            || activation != ActivationType::None || isTF32)
-                    {
-                        std::cerr << "Error: complex CPU GEMM driver tests only support plain GEMM plus beta/conjugation."
-                                  << std::endl;
-                        return 1;
-                    }
-                    else
-                    {
-                        using AccT = typename AccumulationTypeFor<AT, BT>::type;
-                        return runGemm<AT, BT, AccT>(m,
-                                                     n,
-                                                     k,
-                                                     transA,
-                                                     transB,
-                                                     alpha,
-                                                     alphaImag,
-                                                     beta,
-                                                     betaImag,
-                                                     validate,
-                                                     tryFastPath,
-                                                     useBias,
-                                                     activation,
-                                                     useScaleAlphaVec,
-                                                     useScaleAB,
-                                                     factorDim,
-                                                     computeInputA,
-                                                     computeInputB,
-                                                     mxBlockA,
-                                                     mxBlockB,
-                                                     batchCount,
-                                                     isTF32,
-                                                     conjA,
-                                                     conjB);
-                    }
+                    std::cerr << ComplexHomogeneousTypeError << std::endl;
+                    return 1;
                 }
                 else
                 {

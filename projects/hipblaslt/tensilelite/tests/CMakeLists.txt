@@ -100,6 +100,13 @@ function(add_cpu_gemm_test TEST_NAME)
     )
 endfunction()
 
+function(add_cpu_gemm_rejected_test TEST_NAME)
+    cmake_parse_arguments(ARG "" "" "ARGS" ${ARGN})
+
+    add_cpu_gemm_test(${TEST_NAME} ARGS ${ARG_ARGS})
+    set_tests_properties("CPUGemm.${TEST_NAME}" PROPERTIES WILL_FAIL TRUE)
+endfunction()
+
 # Default test sizes. Non-tile-aligned to stress remainder handling.
 # f32 and f16/bf16 use different sizes to increase coverage diversity.
 set(F32_SIZES -M 133 -N 147 -K 165)
@@ -235,6 +242,15 @@ foreach(PATH fast slow)
         add_cpu_gemm_test(${PATH}_${TYPE}_ComplexAlphaBeta
             ARGS ${COMPLEX_SIZES} --type ${TYPE} --alpha 0.75 --alphaImag -0.5 --beta -0.25 --betaImag 0.125 --validate ${PATH_FLAGS}
         )
+        add_cpu_gemm_test(${PATH}_${TYPE}_PureImagBeta
+            ARGS ${COMPLEX_SIZES} --type ${TYPE} --beta 0 --betaImag 0.625 --validate ${PATH_FLAGS}
+        )
+        add_cpu_gemm_test(${PATH}_${TYPE}_ConjA
+            ARGS ${COMPLEX_SIZES} --type ${TYPE} --conjA --alpha 0.625 --alphaImag -0.375 --beta -0.5 --betaImag 0.25 --validate ${PATH_FLAGS}
+        )
+        add_cpu_gemm_test(${PATH}_${TYPE}_ConjB
+            ARGS ${COMPLEX_SIZES} --type ${TYPE} --conjB --alpha -0.75 --alphaImag 0.5 --beta 0.25 --betaImag -0.625 --validate ${PATH_FLAGS}
+        )
         add_cpu_gemm_test(${PATH}_${TYPE}_ConjAConjB
             ARGS ${COMPLEX_SIZES} --type ${TYPE} --conjA --conjB --alpha -0.25 --alphaImag 0.875 --beta 0.5 --betaImag -0.375 --validate ${PATH_FLAGS}
         )
@@ -244,17 +260,33 @@ foreach(PATH fast slow)
     endforeach()
 endforeach()
 
-add_test(
-    NAME "CPUGemm.fast_c32_Bias_Rejected"
-    COMMAND cpu-gemm-driver ${COMPLEX_SIZES} --type c32 --bias --validate --tryFastPath
+add_cpu_gemm_rejected_test(fast_c32_Bias_Rejected
+    ARGS ${COMPLEX_SIZES} --type c32 --bias --validate --tryFastPath
 )
-set_tests_properties("CPUGemm.fast_c32_Bias_Rejected" PROPERTIES WILL_FAIL TRUE)
 
-add_test(
-    NAME "CPUGemm.fast_c32_MixedReal_Rejected"
-    COMMAND cpu-gemm-driver ${COMPLEX_SIZES} --type c32 --typeB f32 --validate --tryFastPath
+add_cpu_gemm_rejected_test(fast_c32_Activation_Rejected
+    ARGS ${COMPLEX_SIZES} --type c32 --activation relu --validate --tryFastPath
 )
-set_tests_properties("CPUGemm.fast_c32_MixedReal_Rejected" PROPERTIES WILL_FAIL TRUE)
+
+add_cpu_gemm_rejected_test(fast_c32_ScaleAlphaVec_Rejected
+    ARGS ${COMPLEX_SIZES} --type c32 --scaleAlphaVec --validate --tryFastPath
+)
+
+add_cpu_gemm_rejected_test(fast_c32_ScaleABScalar_Rejected
+    ARGS ${COMPLEX_SIZES} --type c32 --useScaleAB Scalar --validate --tryFastPath
+)
+
+add_cpu_gemm_rejected_test(fast_c32_MixedReal_Rejected
+    ARGS ${COMPLEX_SIZES} --type c32 --typeB f32 --validate --tryFastPath
+)
+
+add_cpu_gemm_rejected_test(fast_c32_MixedC64_Rejected
+    ARGS ${COMPLEX_SIZES} --type c32 --typeB c64 --validate --tryFastPath
+)
+
+add_cpu_gemm_rejected_test(fast_c64_Activation_Rejected
+    ARGS ${COMPLEX_SIZES} --type c64 --activation relu --validate --tryFastPath
+)
 
 #################################################
 #        FP8 tests (fast & slow)                #

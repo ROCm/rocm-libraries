@@ -1581,8 +1581,8 @@ namespace TensileLite
         // Solve GEMM problems using efficient tiled CPU code.
         // This function assumes the problem is eligible for the fast path — callers
         // must check isFastPathEligible() first.
-        // AccumT: accumulation precision (float or double).
-        // MathOpAccumT: when set to XFloat32, each A/B operand is truncated
+        // AccumT: accumulation precision and C/D storage type.
+        // MathOpAccumT: for real GEMM, when set to XFloat32, each A/B operand is truncated
         // to 10-bit mantissa before multiply (simulating TF32 hardware behavior).
         // Default matches AccumT (no-op cast with identical codegen).
         template <typename AccumT = float, typename MathOpAccumT = AccumT>
