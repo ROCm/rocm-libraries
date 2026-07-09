@@ -11,11 +11,11 @@ clock-invariant and so much less noisy than milliseconds.
 
 ## Quick start (for testers)
 
-Everything runs out of `platform/Python` (no build step - rocKE runs Python-only
+Everything runs out of `platform/python` (no build step - rocKE runs Python-only
 here). Set the path once:
 
 ```
-cd dnn-providers/hip-kernel-provider/rocke/platform/Python
+cd dnn-providers/hip-kernel-provider/rocke/platform/python
 export PYTHONPATH=$PWD
 ```
 
@@ -117,7 +117,7 @@ produces or stores CSV.)
 
 ## Running
 
-Needs `PYTHONPATH` pointing at `platform/Python`. Live counters need a GPU +
+Needs `PYTHONPATH` pointing at `platform/python`. Live counters need a GPU +
 `rocprofv3`; occupancy needs `llvm-readelf`. Without a profiler the primitives
 degrade to a wall-only record (and warn), so nothing hard-fails.
 
@@ -152,5 +152,5 @@ so a record never overstates coverage.
 Pure and GPU-free:
 
 ```
-cd platform/Python && python -m unittest discover -s rocke/benchmark/perf/tests
+cd platform/python && python -m unittest discover -s rocke/benchmark/perf/tests
 ```

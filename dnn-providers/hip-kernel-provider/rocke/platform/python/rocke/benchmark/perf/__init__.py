@@ -2,7 +2,7 @@
 # SPDX-License-Identifier: MIT
 """rocke.benchmark.perf - rocKE kernel performance PRIMITIVES (pure library, produce side).
 
-Lives at `rocke/platform/Python/rocke/benchmark/perf/`, alongside the other
+Lives at `rocke/platform/python/rocke/benchmark/perf/`, alongside the other
 `benchmark/` harnesses; invoked by rocKE kernel-launch commands.
 
 LAYER 1 - primitives (this package). Pure: they RETURN records / values and write
