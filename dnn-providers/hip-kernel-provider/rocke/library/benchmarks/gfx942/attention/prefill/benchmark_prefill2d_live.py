@@ -30,7 +30,7 @@ Run:
     PYTHONPATH="python:${AITER_PATH}" \
       python rocke/library/benchmarks/gfx942/attention/prefill/benchmark_prefill2d_live.py \
         --shapes <path/to/unified_attention_shapes.jsonl> \
-        --variants prod combo fallback \
+        --variants auto combo fallback \
         --limit 20
 """
 
@@ -560,9 +560,11 @@ def main() -> int:
         "--variants",
         nargs="+",
         default=None,
-        help="CK DSL variants to sweep: prod combo combo_nw1 combo_nw2 fallback. "
-        "Defaults to [prod, combo, fallback] for fp16/all, [prod, fallback] for bf16 "
-        "(combo is fp16-only on gfx942).",
+        help="variants: 'auto' = production dispatch, what ships "
+        "(run_unified_attention_torch backend=auto, resolver-picked geometry); "
+        "'ck3d' = force 3D split-KV; or a forced preset (combo, combo_nw1, "
+        "combo_nw2, fallback). Defaults to [auto, combo, fallback] for fp16/all, "
+        "[auto, fallback] for bf16 (combo is fp16-only on gfx942).",
     )
     ap.add_argument("--limit", type=int, default=None)
     ap.add_argument("--stride", type=int, default=1, help="subsample every Nth shape")
@@ -599,9 +601,9 @@ def main() -> int:
     # Resolve default variant list: combo is fp16-only, so omit it for bf16 runs.
     if args.variants is None:
         if args.dtype == "bf16":
-            args.variants = ["prod", "fallback"]
+            args.variants = ["auto", "fallback"]
         else:
-            args.variants = ["prod", "combo", "fallback"]
+            args.variants = ["auto", "combo", "fallback"]
 
     # Baseline-framework selection. Default runs both; --no-* skip; --all forces both.
     run_triton = not args.no_triton
@@ -708,8 +710,8 @@ def main() -> int:
         for v in args.variants:
             _progress(f"{tag}  - ck:{v} (comgr JIT on first use)")
             try:
-                if v in ("prod", "ck3d"):
-                    ck_out, ck_ms, kname = _run_prod(
+                if v in ("auto", "ck3d"):
+                    ck_out, ck_ms, kname = _run_dispatch(
                         shape,
                         data,
                         sw,
@@ -848,7 +850,7 @@ def main() -> int:
     return 0
 
 
-def _run_prod(shape, data, sw, is_fp8, bench, *, warmup, iters, backend="auto"):
+def _run_dispatch(shape, data, sw, is_fp8, bench, *, warmup, iters, backend="auto"):
     """Time the production path via the platform dispatcher.
 
     Builds an :class:`~dispatch.attention.AttentionRequest` and calls

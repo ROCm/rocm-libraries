@@ -21,7 +21,7 @@ Run:
     PYTHONPATH="python:${AITER_PATH}" \
       python rocke/library/builders/gfx950/attention/benchmark_prefill2d_live.py \
         --shapes <path/to/unified_attention_shapes.jsonl> \
-        --variants prod combo fallback \
+        --variants auto combo fallback \
         --limit 20
 """
 
@@ -522,8 +522,10 @@ def main() -> int:
     ap.add_argument(
         "--variants",
         nargs="+",
-        default=["prod", "combo", "fallback"],
-        help="CK DSL variants to sweep: prod combo fallback r4_t32 combo_sw",
+        default=["auto", "combo", "fallback"],
+        help="variants: 'auto' = production dispatch, what ships "
+        "(run_unified_attention_torch backend=auto, resolver-picked geometry); "
+        "'ck3d' = force 3D split-KV; or a forced preset (combo, fallback, r4_t32, ...)",
     )
     ap.add_argument("--limit", type=int, default=None)
     ap.add_argument("--stride", type=int, default=1, help="subsample every Nth shape")
@@ -659,9 +661,9 @@ def main() -> int:
         for v in args.variants:
             _progress(f"{tag}  - ck:{v} (comgr JIT on first use)")
             try:
-                if v in ("prod", "ck3d"):
+                if v in ("auto", "ck3d"):
                     # production dispatch via run_unified_attention_torch
-                    ck_out, ck_ms, kname = _run_prod(
+                    ck_out, ck_ms, kname = _run_dispatch(
                         shape,
                         data,
                         sw,
@@ -787,7 +789,7 @@ def main() -> int:
     return 0
 
 
-def _run_prod(shape, data, sw, is_fp8, bench, *, warmup, iters, backend="auto"):
+def _run_dispatch(shape, data, sw, is_fp8, bench, *, warmup, iters, backend="auto"):
     """Time the production path via the platform dispatcher.
 
     Builds an :class:`~dispatch.attention.AttentionRequest` and calls
