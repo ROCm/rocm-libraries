@@ -232,12 +232,12 @@ hipDNN keeps it in the tensor flatbuffer instead.
 **Backend attributes.** `HIPDNN_ATTR_TENSOR_VALUE_EXT` (1306) is kept as-is;
 `HIPDNN_ATTR_TENSOR_CONSTANT_VALUE` is added as an alias for it (same integer
 `1306`, no wire change) to ease porting cuDNN code that queries the constant
-value by that name. The existing read-only `HIPDNN_ATTR_TENSOR_IS_BY_VALUE`
-(1307) — today derived from `value.type != NONE` — is **renamed**
-`HIPDNN_ATTR_TENSOR_IS_RUNTIME_PASS_BY_VALUE` and made **settable**, true
-only for the two runtime states; its wire identity stays the integer
-`1307`. No new stored attribute is introduced for the by-value umbrella or
-the has-constant query; both are derived at the wrapper (below).
+value by that name. `HIPDNN_ATTR_TENSOR_IS_BY_VALUE` (1307) is **kept** with
+its original "any by-value" meaning (`value present || runtime flag`), now
+read-only and **derived**. A new
+integer `HIPDNN_ATTR_TENSOR_IS_RUNTIME_PASS_BY_VALUE` (1308), is true only for
+the runtime pass-by-value states. Only the runtime bit is stored; the by-value umbrella
+(1307) and the has-constant query stay derived at the wrapper (below).
 
 **Deserialize invariant.** The value is read from the union whenever it is
 present (`value.type != NONE`), and the flag is read
@@ -418,8 +418,7 @@ rejected at execute ([§4.9](#49-execute-time-variant-pack-filter)).
 ### 4.6 Provider contract
 
 A provider reporting plugin SDK API version `>= 1.2.0` must, for any tensor
-matching the runtime discriminator `isRuntimePassByValue()` (the
-user-supplied and runtime-with-default states), read the scalar from that
+matching the runtime discriminator `isRuntimePassByValue()`, read the scalar from that
 UID's slot in the `device_buffers` array **as a host pointer** whenever a
 variant-pack entry is present, using it to override any baked default; when
 no variant-pack entry is present it uses the baked default (`VALUE_EXT`). A
@@ -639,6 +638,15 @@ variant-pack entry whose UID carries a baked value
 error and `Graph::execute()` returns an error rather than silently ignoring
 it. A runtime-with-default tensor still requires `1.2.0` (its flag is set).
 
+**Missing-value check.** Symmetrically, on the fresh-build path (op graph
+available) `Graph::execute()` verifies that every pure user-supplied UID
+(runtime flag set, no baked value) has an entry in the variant pack, and
+returns an error if one is missing — the same treatment as a missing input or
+output tensor, rather than letting the provider read an unset slot. A
+runtime-with-default or compile-time scalar has a baked value, so it is never
+required in the variant pack. The compiled-plan path reconstructs no
+per-tensor attributes and cannot run this check (see below).
+
 **Compiled-plan path.** On the compiled-plan path `deserializeBackendPlan`
 reconstructs no per-tensor attributes
 ([§5.5](#55-deserialized-plan-support-via-the-provider-payload);
@@ -692,7 +700,7 @@ The guard is **two numbers**: the graph's stamped `min_reader_version` and a
 supported stamp, `1` as of this RFC). On deserialize, the core rejects any
 graph whose `min_reader_version` exceeds its `K_GRAPH_READER_VERSION`,
 returning a clean error before interpreting any tensor — never silently
-mis-reading a gated field. This mirrors the existing plan-version check with `PLAN_SERIALIZATION_VERSION`. 
+mis-reading a gated field. This mirrors the existing plan-version check with `PLAN_SERIALIZATION_VERSION`.
 
 **Bootstrapping limit.** A core predating this field cannot read it, so it
 cannot self-guard against this first stamped graph; that residual exposure is
@@ -880,11 +888,15 @@ correctly.
 insert its UID into the variant-pack map, so the provider reads an
 unset or garbage slot.
 
-**Mitigation**: documented contract. The frontend cannot validate the
-numeric value at build time (it does not yet exist); it validates only
-that the tensor is structurally a scalar. This matches the existing
-behavior for required scalar parameters
-(`validateScalarParameter`).
+**Mitigation**: execute-time validation. On the fresh-build path the op graph
+is available, so `Graph::execute()` checks that every required user-supplied
+UID (runtime flag set, no baked value) is present in the variant pack and
+returns an error if one is missing — the same treatment as any other missing
+input/output tensor ([§4.9](#49-execute-time-variant-pack-filter)). The
+frontend still cannot validate the numeric value at build (it does not yet
+exist), only that the tensor is structurally a scalar
+(`validateScalarParameter`). The compiled-plan-only path reconstructs no
+per-tensor attributes, so it loses this check — a documented limitation.
 
 ### 7.3 Host vs device pointer confusion in the shared map
 
@@ -942,13 +954,17 @@ reject coverage.
 
 ### Step 2: Backend descriptor and enums
 
-Rename the existing read-only `HIPDNN_ATTR_TENSOR_IS_BY_VALUE` (1307) to a
-**settable** `HIPDNN_ATTR_TENSOR_IS_RUNTIME_PASS_BY_VALUE` carrying the
-`is_runtime_pass_by_value` flag (true for the runtime states), and update the
-`BackendEnumStringUtils` string. Keep `HIPDNN_ATTR_TENSOR_VALUE_EXT` (1306)
-as-is (value union) and add `HIPDNN_ATTR_TENSOR_CONSTANT_VALUE` as an alias
-for it (same integer). No 1308 / `IS_COMPILE_TIME_CONSTANT` attribute is
-introduced. Change the descriptor unpack value-read gate
+`HIPDNN_ATTR_TENSOR_IS_BY_VALUE` (1307) is **kept** with its original
+"any by-value" meaning, now read-only-**derived** (`value present ||
+is_runtime_pass_by_value`) so existing readers are unaffected. Add a new
+**settable** attribute `HIPDNN_ATTR_TENSOR_IS_RUNTIME_PASS_BY_VALUE` (1308)
+carrying the `is_runtime_pass_by_value` flag (true for the runtime states),
+and update the `BackendEnumStringUtils` string. Keep
+`HIPDNN_ATTR_TENSOR_VALUE_EXT` (1306) as-is (value union) and add
+`HIPDNN_ATTR_TENSOR_CONSTANT_VALUE` as an alias for it (same integer). The
+by-value umbrella (1307) and the has-constant query stay **derived**, not
+separately stored; only the runtime bit (1308) is stored. Change the
+descriptor unpack value-read gate
 ([`DescriptorUnpackHelpers.hpp`](../../frontend/include/hipdnn_frontend/detail/DescriptorUnpackHelpers.hpp))
 from `IS_BY_VALUE`-gated to **value-presence-gated** (read the value
 whenever the union is present), and read the runtime flag independently.
@@ -1010,6 +1026,10 @@ The provider reads the schema value as the default for
 the value-carrying states. On the compiled-plan path no per-tensor value is
 reconstructed, so a runtime-with-default tensor degrades to user-supplied
 semantics; document the limitation.
+
+Also validate at execute that every required user-supplied UID is present in the variant pack, erroring on a missing
+one as for any other missing tensor; this runs on the fresh-build path only
+(the compiled-plan path has no per-tensor attributes to check).
 
 ### Step 6: Cross-cutting tests
 
@@ -1099,6 +1119,25 @@ Test conventions follow [RFC 0006](0006_PluginAgnosticIntegrationTests.md). The 
   rejects it with a clean error at deserialize (never silently dropping the
   flag), while a graph of only compile-time constants stamps `0` and loads on
   every core ([§4.10](#410-serialized-graph-reader-version-guard)).
+
+- **Missing required value.** A graph with a user-supplied (#1) tensor whose
+  UID is absent from the variant pack at execute makes `Graph::execute()`
+  return an error on the fresh-build path (op graph available), matching a
+  missing input/output tensor.
+
+- **Runtime-default vs runtime-only provider paths** *(integration; initially
+  skipped)*. Exercise both a runtime-with-default graph (baked default, no
+  override delivered) and a pure user-supplied graph (host scalar in the
+  variant pack) end-to-end; the two carry different provider expectations
+  (baked-value read vs host-pointer read), so both are needed to confirm each
+  is handled correctly.
+
+- **Constant-operation runtime-value regression** *(integration; initially
+  skipped)*. For each operation that takes a compile-time-constant scalar
+  today, add a variant that sneaks in a runtime pass-by-value tensor with an
+  obvious sentinel value; assert the result reflects the runtime value (or the
+  graph is declined), catching providers updated incorrectly or mishandling
+  pass-by-value scalars.
 
 ---
 
