@@ -151,6 +151,18 @@ struct TileDistrEncCalc
         sequence<2, 2>,
         sequence<0, 2>>;
 
+    template <index_t NumAccess, index_t CompressionRatio>
+    using AWarpDstrEnc32x16gfx1250 = tile_distribution_encoding<
+        sequence<MmaOp::kARepeat>,
+        tuple<sequence<MmaOp::kM / MmaOp::kCMPerLane, MmaOp::kCMPerLane>,
+              sequence<NumAccess,
+                       MmaOp::kK / MmaOp::kABKPerLane,
+                       MmaOp::kABKPerLane / NumAccess / CompressionRatio * kIter>>,
+        tuple<sequence<2, 0, 1>>,
+        tuple<sequence<1, 0, 1>>,
+        sequence<1, 2, 2>,
+        sequence<0, 0, 2>>;
+
     static constexpr auto get_cwarp_dstr_encoding()
     {
         // TODO: Big kludge: some higher level code can not deal with extra trivial dimensions in
@@ -217,10 +229,16 @@ struct TileDistrEncCalc
 
     static constexpr index_t compressionRatioA = UncompressedA ? 1 : MmaOp::kCompressionRatio;
 
+    static_assert(!MmaOp::Is32x16 || SFactor == 1,
+                  "Swizzle is not supported for specializations with M != N.");
+
     using AEnc_ = std::conditional_t<
-        (SFactor > 1),
-        AWarpDstrEncSwizzle<MmaOp::kARepeat, NumAccessA, compressionRatioA>,
-        ABWarpDstrEnc<MmaOp::kM, MmaOp::kARepeat, NumAccessA, compressionRatioA>>;
+        (MmaOp::Is32x16),
+        AWarpDstrEnc32x16gfx1250<NumAccessA, compressionRatioA>,
+        std::conditional_t<
+            (SFactor > 1),
+            AWarpDstrEncSwizzle<MmaOp::kARepeat, NumAccessA, compressionRatioA>,
+            ABWarpDstrEnc<MmaOp::kM, MmaOp::kARepeat, NumAccessA, compressionRatioA>>>;
     using BEnc_ = ABWarpDstrEnc<MmaOp::kN, MmaOp::kBRepeat, NumAccessB>;
 
     public:

@@ -309,7 +309,9 @@ struct MmaLayoutTestKernel
 template <typename MmaOp, bool CTranspose, index_t SFactor> // TODO: C++20 concept for MmaOp
 void run_mma_layout_test_single()
 {
-    if constexpr(MmaOp::kCMNumAccess % SFactor == 0)
+    if constexpr(MmaOp::kCMNumAccess % SFactor == 0 &&
+                 (!MmaOp::Is32x16 ||
+                  SFactor == 1)) // No swizzle support for 32x16 specializations on gfx1250
     {
         constexpr uint32_t total_cases = MmaOp::kM * MmaOp::kN * MmaOp::kK;
         ck_tile::DeviceMem d_errors(total_cases * sizeof(uint32_t));
