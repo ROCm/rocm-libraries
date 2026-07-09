@@ -43,10 +43,14 @@ std::vector<std::reference_wrapper<const AotInstance>>
 
 const char* defaultArtifactRoot()
 {
-    // TODO(kpack): replace this placeholder with the real installed artifact root
-    // (predicted: an install-prefix-relative share/ path resolved next to the
-    // loaded plugin, with an env override for tests). Nothing reads it yet.
-    return "share/hipdnn_plugins/rocke-client/aot";
+    // Plugin-relative root for the installed rocKE AOT bundles. They install
+    // next to the loaded engine plugin at
+    //   <plugin_dir>/hip_kernel_provider/rocke/<arch>/
+    // holding rocke_client_<arch>.kpack, its rocke_client_<arch>.json sidecar,
+    // and rocke's per-arch kernel-selection heuristics. loadDefault() resolves
+    // <plugin_dir> from the loaded plugin and appends the device <arch>. Nothing
+    // reads it yet (Phase-1 catalog is empty); the dispatcher-wiring work does.
+    return "hip_kernel_provider/rocke";
 }
 
 } // namespace rocke_client::dispatcher

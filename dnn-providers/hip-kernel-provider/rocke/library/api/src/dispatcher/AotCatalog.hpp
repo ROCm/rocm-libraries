@@ -30,10 +30,13 @@ public:
 
     // The production catalog source.
     //
-    // TODO(kpack): once PR #8866's kpack packaging + install rules land, this must:
-    //   1. resolve the installed artifact root (see defaultArtifactRoot());
-    //   2. discover per-arch instance lists (kernels/<op>/<family>/<arch>/aot_list.json
-    //      or the kpack index -- source format TBD by the kpack ticket);
+    // TODO(kpack): once the kpack packaging + install rules land (this ticket),
+    // this must:
+    //   1. resolve the loaded plugin's directory and the per-arch bundle root
+    //      <plugin_dir>/hip_kernel_provider/rocke/<arch>/ (see defaultArtifactRoot());
+    //   2. read that arch's rocke_client_<arch>.kpack + rocke_client_<arch>.json
+    //      bundle manifest (the installed source of truth; aot_list.json is a
+    //      build-time input and is not installed);
     //   3. parse each instance (compile_spec + selection.batch + attribute_constraints)
     //      into AotInstance, mirroring rocke_client_aot.instance_schema semantics;
     //   4. (plan-construction, separate) index the matching sidecars by cache_key.
@@ -60,12 +63,10 @@ private:
     std::vector<AotInstance> _instances;
 };
 
-// The placeholder root under which installed AOT artifacts are expected to live.
-//
-// TODO(kpack): confirm with the kpack/packaging work where PR #8866 artifacts are
-// installed (predicted: an install-prefix-relative share/ path resolved next to
-// the loaded plugin, overridable by an env var for testing). This is a
-// placeholder string only; nothing reads from it yet.
+// The plugin-relative root under which installed per-arch rocKE AOT bundles live:
+// <plugin_dir>/hip_kernel_provider/rocke/<arch>/. loadDefault() resolves the
+// loaded plugin's directory at runtime and appends the device arch. This is a
+// path constant only; nothing reads from it yet (Phase-1 catalog is empty).
 const char* defaultArtifactRoot();
 
 } // namespace rocke_client::dispatcher
