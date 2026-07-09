@@ -37,10 +37,7 @@
 #include <thrust/iterator/iterator_categories.h>
 
 #include _THRUST_STD_INCLUDE(iterator)
-
-#if !_THRUST_HAS_DEVICE_SYSTEM_STD
-#  include <type_traits>
-#endif
+#include _THRUST_STD_INCLUDE(type_traits)
 
 THRUST_NAMESPACE_BEGIN
 
@@ -194,7 +191,7 @@ struct iterator_facade_category
 {
   using type = typename ::internal::If<
     is_iterator_category<CategoryOrTraversal>,
-    identity_<CategoryOrTraversal>,
+    _THRUST_STD::type_identity<CategoryOrTraversal>,
     iterator_facade_category_impl<CategoryOrSystem, CategoryOrTraversal, ValueParam, Reference>>::type;
 }; // end iterator_facade_category
 
