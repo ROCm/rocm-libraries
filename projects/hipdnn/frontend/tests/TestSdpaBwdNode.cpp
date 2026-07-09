@@ -326,9 +326,9 @@ TEST(TestSdpaBwdNode, PreValidateFailsSeqKvMismatch)
     EXPECT_EQ(err.code, error_code_t::INVALID_VALUE);
 }
 
-TEST(TestSdpaBwdNode, PreValidateSucceedsGQADifferentKVHeads)
+TEST(TestSdpaBwdNode, PreValidateFailsKVHeadCountMismatch)
 {
-    // K num_kv_heads=2, V num_kv_heads=4 — both divide Q num_heads=8
+    // K=2, V=4 — both divide Q=8, but K != V is now rejected
     auto q = makeTensor4D(2, 8, 16, 64);
     auto k = makeTensor4D(2, 2, 32, 64);
     auto v = makeTensor4D(2, 4, 32, 64);
@@ -337,7 +337,7 @@ TEST(TestSdpaBwdNode, PreValidateSucceedsGQADifferentKVHeads)
     const GraphAttributes graphAttrs;
     const SdpaBwdNode node(std::move(attrs), graphAttrs);
     auto err = node.pre_validate_node();
-    EXPECT_EQ(err.code, error_code_t::OK) << err.err_msg;
+    EXPECT_EQ(err.code, error_code_t::INVALID_VALUE);
 }
 
 TEST(TestSdpaBwdNode, PreValidateFailsInvalidGQAVHeads)

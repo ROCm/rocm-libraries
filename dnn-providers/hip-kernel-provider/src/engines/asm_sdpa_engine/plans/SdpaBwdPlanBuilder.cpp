@@ -551,17 +551,6 @@ bool SdpaBwdPlanBuilder::isApplicable(
         vTensor->dims()->size() != 4,
         "v tensor must be rank 4 (Actual rank: " + std::to_string(vTensor->dims()->size()) + ")");
 
-    // GQA: SdpaBwdPlan packs ratio = nhead_q / nhead_k (integer division) into
-    // the dqdkdv kernarg.  A fractional ratio is a kernel-correctness violation
-    // (silent truncation), not a "no row matches" registry miss, so reject it
-    // here rather than letting buildPlan succeed and execute corrupt dQ/dK/dV.
-    auto numHeadsQ = qTensor->dims()->Get(1);
-    auto numHeadsKv = kTensor->dims()->Get(1);
-    HIP_KERNEL_RETURN_FALSE_IF(numHeadsKv == 0 || numHeadsQ % numHeadsKv != 0,
-                               "GQA requires nhead_q % nhead_k == 0 (Actual: nhead_q="
-                                   + std::to_string(numHeadsQ)
-                                   + ", nhead_k=" + std::to_string(numHeadsKv) + ")");
-
     // Stats is FP32 (LSE from forward pass)
     HIP_KERNEL_RETURN_FALSE_IF(statsTensor->data_type() != DataType::FLOAT,
                                "stats tensor datatype must be FP32 (Actual type: "

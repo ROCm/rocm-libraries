@@ -207,12 +207,6 @@ bool SdpaFwdPlanBuilder::isApplicable(
                                    + ", k tensor: " + EnumNameDataType(kTensor->data_type())
                                    + ", v tensor: " + EnumNameDataType(vTensor->data_type()) + ")");
 
-    HIP_KERNEL_RETURN_FALSE_IF(
-        kTensor->dims()->Get(1) != vTensor->dims()->Get(1),
-        "k tensor and v tensor must shared the same head count (Actual value: k = "
-            + std::to_string(kTensor->dims()->Get(1))
-            + " v = " + std::to_string(vTensor->dims()->Get(1)) + ")");
-
     auto dataTypeId = getDataTypeIdentifier(
         qTensor->data_type(), kTensor->data_type(), vTensor->data_type(), oTensor->data_type());
 

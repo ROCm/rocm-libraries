@@ -116,7 +116,15 @@ public:
                                   + std::to_string(numHeads)
                                   + ", num_heads_v=" + std::to_string(numHeadsV));
 
-        // Rule 5: Optional attention mask validation
+        // Rule 5: K and V must have the same head count
+        HIPDNN_RETURN_IF_NE(numHeadsK,
+                            numHeadsV,
+                            ErrorCode::INVALID_VALUE,
+                            "SdpaFwdNode: K and V must have the same head count. num_heads_k="
+                                + std::to_string(numHeadsK)
+                                + ", num_heads_v=" + std::to_string(numHeadsV));
+
+        // Rule 6: Optional attention mask validation
         const auto attnMask = attributes.get_bias();
         if(attnMask)
         {
@@ -148,14 +156,14 @@ public:
             }
         }
 
-        // Rule 6: Optional scale must be a scalar tensor (volume == 1)
+        // Rule 7: Optional scale must be a scalar tensor (volume == 1)
         const auto scale = attributes.get_attn_scale();
         if(scale)
         {
             HIPDNN_CHECK_ERROR(detail::validateScalarParameter(scale, "SCALE tensor"));
         }
 
-        // Rule 7: If O has dims already set, validate them
+        // Rule 8: If O has dims already set, validate them
         const auto& oDims = o->get_dim();
         if(!oDims.empty())
         {
