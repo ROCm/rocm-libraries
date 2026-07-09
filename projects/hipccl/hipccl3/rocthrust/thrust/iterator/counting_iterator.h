@@ -157,7 +157,7 @@ using unit_stride = compile_time_value<1>;
 //!                                              thrust::make_counting_iterator(8),
 //!                                              stencil.begin(),
 //!                                              indices.begin(),
-//!                                              ::internal::identity{});
+//!                                              _THRUST_STD::identity{});
 //!  // indices now contains [1,2,5,7]
 //!
 //!  return 0;
