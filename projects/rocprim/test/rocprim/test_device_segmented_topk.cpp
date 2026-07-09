@@ -51,7 +51,7 @@ template<class KeyType,
          bool Descending          = false,
          class Decomposer         = rocprim::identity_decomposer,
          class Config             = rocprim::default_config,
-         bool Ordered             = true,
+         bool Ordered             = false,
          bool Deterministic       = false,
          bool Stable              = false,
          bool UseGraphs           = false,
@@ -303,7 +303,7 @@ TYPED_TEST(RocprimDeviceSegmentedTopkTests, SegmentedTopkKey)
     using config                         = typename TestFixture::config;
     using size_in_type                   = unsigned int;
     using size_out_type                  = unsigned int;
-    constexpr bool ordered               = true;
+    constexpr bool ordered               = TestFixture::ordered;
     constexpr bool deterministic         = TestFixture::deterministic;
     constexpr bool stable                = TestFixture::stable;
     const bool     debug_synchronous     = TestFixture::debug_synchronous;
@@ -460,7 +460,7 @@ TYPED_TEST(RocprimDeviceSegmentedTopkTests, SegmentedTopkPairs)
     using config                         = typename TestFixture::config;
     using size_in_type                   = unsigned int;
     using size_out_type                  = unsigned int;
-    constexpr bool ordered               = true;
+    constexpr bool ordered               = TestFixture::ordered;
     constexpr bool deterministic         = TestFixture::deterministic;
     constexpr bool stable                = TestFixture::stable;
     const bool     debug_synchronous     = TestFixture::debug_synchronous;

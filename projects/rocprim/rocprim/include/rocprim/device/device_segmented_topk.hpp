@@ -21,16 +21,11 @@
 #ifndef ROCPRIM_DEVICE_DEVICE_SEGMENTED_TOPK_HPP_
 #define ROCPRIM_DEVICE_DEVICE_SEGMENTED_TOPK_HPP_
 
-#include "../common.hpp"
 #include "../config.hpp"
-#include "../detail/temp_storage.hpp"
 
-#include "device_merge_sort.hpp"
-#include "device_segmented_radix_sort.hpp"
-#include "device_transform.hpp"
-#include "rocprim/device/detail/device_segmented_topk.hpp"
+#include "detail/device_segmented_topk.hpp"
+#include "detail/device_segmented_topk_air.hpp"
 
-#include <iostream>
 #include <iterator>
 #include <type_traits>
 
@@ -111,55 +106,79 @@ hipError_t topk_segmented_impl(void*                                 temporary_s
     // Default is radix based segmented topk, check we can actually use it
     using radix_checker
         = radix_segmented_topk_condition_checker<KeysInputIterator, BinaryFunction, Decomposer>;
-    static_assert(UseRadix && radix_checker::use_radix,
-                  "Invalid parameters passed to radix based topk implementation!");
 
-    // Check implementation properties
-    static_assert(!radix_checker::is_custom_decomposer,
-                  "Radix based segmented TopK does not support custom keys");
-    static_assert(Ordered || Stable,
-                  "Radix based segmented TopK currently only supports ordered output");
-    static_assert(Deterministic == false,
-                  "Radix based segmented TopK does not support determinism");
-    if constexpr(Ordered || Stable)
+    if constexpr(UseRadix)
     {
-        if constexpr(radix_checker::use_radix)
-        {
-            auto ret = detail::device_segmented_topk_impl<KeysInputIterator,
-                                                          KeysOutputIterator,
-                                                          ValuesInputIterator,
-                                                          ValuesOutputIterator,
-                                                          OffsetIterator,
-                                                          SizeIn,
-                                                          SizeOut,
-                                                          Descending,
-                                                          Decomposer>::impl(temporary_storage,
-                                                                            storage_size,
-                                                                            keys_input,
-                                                                            keys_output,
-                                                                            values_input,
-                                                                            values_output,
-                                                                            size,
-                                                                            K,
-                                                                            segments,
-                                                                            begin_offsets,
-                                                                            end_offsets,
-                                                                            decomposer,
-                                                                            stream,
-                                                                            debug_synchronous);
-            return ret;
-        }
-        else
-        {
-            return hipErrorNotSupported; // TODO: Not implemented yet
-        }
+        // When we request radix-based sorting, check if the input types actually support
+        // the radix decomposers.
+        static_assert(radix_checker::use_radix,
+                      "'UseRadix = true' requires the key type to support radix-based sorting");
+    }
+
+    // Naive segmented top-k:
+    // * Radix-sortable types only
+    // * Ordered
+    // * NOT deterministic
+    // * Stable
+    // TODO: naive *could* support a custom decomposer, but this is currently not implemented.
+    constexpr bool can_use_naive
+        = UseRadix && !Deterministic && !radix_checker::is_custom_decomposer;
+
+    // Segmented top-k air:
+    // * Radix-sortable types only
+    // * NOT ordered
+    // * NOT deterministic
+    // * NOT stable
+    constexpr bool can_use_air = UseRadix && !Ordered && !Stable && !Deterministic;
+
+    if constexpr(can_use_air)
+    {
+        return detail::device_segmented_topk_air<Config, !Descending>(temporary_storage,
+                                                                      storage_size,
+                                                                      keys_input,
+                                                                      keys_output,
+                                                                      values_input,
+                                                                      values_output,
+                                                                      size,
+                                                                      K,
+                                                                      segments,
+                                                                      begin_offsets,
+                                                                      end_offsets,
+                                                                      decomposer,
+                                                                      stream,
+                                                                      debug_synchronous);
+    }
+    else if constexpr(can_use_naive)
+    {
+        return detail::device_segmented_topk_impl<KeysInputIterator,
+                                                  KeysOutputIterator,
+                                                  ValuesInputIterator,
+                                                  ValuesOutputIterator,
+                                                  OffsetIterator,
+                                                  SizeIn,
+                                                  SizeOut,
+                                                  Descending,
+                                                  Decomposer>::impl(temporary_storage,
+                                                                    storage_size,
+                                                                    keys_input,
+                                                                    keys_output,
+                                                                    values_input,
+                                                                    values_output,
+                                                                    size,
+                                                                    K,
+                                                                    segments,
+                                                                    begin_offsets,
+                                                                    end_offsets,
+                                                                    decomposer,
+                                                                    stream,
+                                                                    debug_synchronous);
     }
     else
     {
-        return hipErrorNotSupported; // TODO: Not implemented yet.
+        static_assert(false, "The requested segmented top-k implementation is not supported!");
     }
 
-    return hipSuccess;
+    return hipErrorNotSupported;
 }
 
 } // namespace detail
@@ -214,8 +233,6 @@ hipError_t topk_segmented_impl(void*                                 temporary_s
 /// \par Example
 /// \parblock
 /// In this example a device-level ascending segmented top-k is performed on an array.
-///
-/// TODO: The full example is [on GitHub](https://github.com/ROCm/rocm-libraries/tree/develop/projects/rocprim/example/rocprim/device/example_device_topk.cpp).
 ///
 /// \code{.cpp}
 /// #include <rocprim/rocprim.hpp>
