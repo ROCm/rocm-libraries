@@ -15,7 +15,6 @@
  *  limitations under the License.
  */
 
-#include <thrust/detail/libcxx_wrapper/std/__functional/identity.h>
 #include <thrust/detail/libcxx_wrapper/std/__iterator/iterator_traits.h>
 #include <thrust/iterator/counting_iterator.h>
 #include <thrust/iterator/permutation_iterator.h>
@@ -295,7 +294,7 @@ void TestPermutationIteratorWithCountingIterator()
     thrust::transform(thrust::make_permutation_iterator(input, index),
                       thrust::make_permutation_iterator(input, index + 4),
                       output.begin(),
-                      ::internal::identity{});
+                      _THRUST_STD::identity{});
 
     Vector ref{0, 1, 2, 3};
     ASSERT_EQUAL(output, ref);

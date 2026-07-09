@@ -462,7 +462,7 @@ transform_if(InputIterator first, InputIterator last, ForwardIterator result, Un
  *  int stencil[10] = { 1, 0, 1,  0, 1, 0, 1,  0, 1, 0};
  *
  *  _THRUST_STD::negate<int> op;
- *  ::internal::identity identity;
+ *  _THRUST_STD::identity identity;
  *
  *  thrust::transform_if(thrust::host, data, data + 10, stencil, data, op, identity); // in-place transformation
  *
@@ -534,7 +534,7 @@ THRUST_HOST_DEVICE ForwardIterator transform_if(
  *  int stencil[10] = { 1, 0, 1,  0, 1, 0, 1,  0, 1, 0};
  *
  *  _THRUST_STD::negate<int> op;
- *  ::internal::identity identity;
+ *  _THRUST_STD::identity identity;
  *
  *  thrust::transform_if(data, data + 10, stencil, data, op, identity); // in-place transformation
  *
@@ -616,7 +616,7 @@ ForwardIterator transform_if(
  *  int output[6];
  *
  *  _THRUST_STD::plus<int> op;
- *  ::internal::identity identity;
+ *  _THRUST_STD::identity identity;
  *
  *  thrust::transform_if(thrust::host, input1, input1 + 6, input2, stencil, output, op, identity);
  *
@@ -696,7 +696,7 @@ THRUST_HOST_DEVICE ForwardIterator transform_if(
  *  int output[6];
  *
  *  _THRUST_STD::plus<int> op;
- *  ::internal::identity identity;
+ *  _THRUST_STD::identity identity;
  *
  *  thrust::transform_if(input1, input1 + 6, input2, stencil, output, op, identity);
  *

@@ -15,7 +15,6 @@
  *  limitations under the License.
  */
 
-#include <thrust/detail/libcxx_wrapper/std/__functional/identity.h>
 #include <thrust/functional.h>
 #include <thrust/transform.h>
 
@@ -214,7 +213,7 @@ THRUST_DISABLE_BROKEN_GCC_VECTORIZER void TestIdentityFunctionalVector()
 {
   Vector input{0, 1, 2, 3};
   Vector output(4);
-  thrust::transform(input.begin(), input.end(), output.begin(), ::internal::identity{});
+  thrust::transform(input.begin(), input.end(), output.begin(), _THRUST_STD::identity{});
   ASSERT_EQUAL(input, output);
 }
 DECLARE_VECTOR_UNITTEST(TestIdentityFunctionalVector);
@@ -292,7 +291,7 @@ THRUST_DISABLE_BROKEN_GCC_VECTORIZER void TestNot1()
 
   Vector output(5);
 
-  thrust::transform(input.begin(), input.end(), output.begin(), _THRUST_STD::not_fn(::internal::identity{}));
+  thrust::transform(input.begin(), input.end(), output.begin(), _THRUST_STD::not_fn(_THRUST_STD::identity{}));
 
   Vector ref{0, 1, 0, 0, 1};
   ASSERT_EQUAL(output, ref);
