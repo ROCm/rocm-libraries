@@ -24,7 +24,7 @@ import pandas as pd
 from data_pipeline import build_training_dataset
 from feature_engine import GemmUniversalFeatureEngine
 from predict import Predictor
-from train import compute_tflops_efficiency, get_feature_engine
+from train import compute_group_keys, compute_tflops_efficiency, get_feature_engine
 
 
 def classify_shape_family(m: int, n: int, k: int) -> str:
@@ -116,7 +116,12 @@ def evaluate_model(
     total_shapes = 0
     topk_hits = {3: 0, 5: 0, 10: 0}
 
-    for (m, n, k), group in valid.groupby(["m", "n", "k"]):
+    # Group candidate kernels by problem shape using the op's own group keys
+    # (m/n/k for gemm, the attention dims for fmha, etc.) rather than hardcoding
+    # gemm columns.
+    valid = valid.copy()
+    valid["_shape_group"] = compute_group_keys(valid, op)
+    for _shape, group in valid.groupby("_shape_group"):
         if group["measured_tflops"].max() <= 0:
             continue
         total_shapes += 1
@@ -164,18 +169,19 @@ def evaluate_model(
             "min": float(eff["efficiency"].min()),
         }
 
-    valid["shape_family"] = valid.apply(
-        lambda r: classify_shape_family(r["m"], r["n"], r["k"]), axis=1
-    )
-    valid["k_regime"] = valid["k"].apply(classify_k_regime)
-
+    # Shape-family / K-regime breakdowns are GEMM-specific (they classify by
+    # m/n/k). Only compute them for gemm_universal; other ops get empty dicts.
     shape_family_metrics = {}
-    for family, group in valid.groupby("shape_family"):
-        shape_family_metrics[family] = _slice_efficiency(group)
-
     k_regime_metrics = {}
-    for regime, group in valid.groupby("k_regime"):
-        k_regime_metrics[regime] = _slice_efficiency(group)
+    if op == "gemm_universal" and {"m", "n", "k"}.issubset(valid.columns):
+        valid["shape_family"] = valid.apply(
+            lambda r: classify_shape_family(r["m"], r["n"], r["k"]), axis=1
+        )
+        valid["k_regime"] = valid["k"].apply(classify_k_regime)
+        for family, group in valid.groupby("shape_family"):
+            shape_family_metrics[family] = _slice_efficiency(group)
+        for regime, group in valid.groupby("k_regime"):
+            k_regime_metrics[regime] = _slice_efficiency(group)
 
     pipeline_metrics = {}
     if "pipeline" in valid.columns:
