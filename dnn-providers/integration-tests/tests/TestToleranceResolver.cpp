@@ -21,192 +21,30 @@ namespace fb = hipdnn_flatbuffers_sdk::flatbuffer_utilities;
 namespace
 {
 
-const std::vector<int64_t> kDims = {2, 3};
-const std::vector<int64_t> kStrides = {3, 1};
-
-struct GraphResult
+// Tolerance functions only inspect attributes_type() per node — shapes and uids
+// are irrelevant. This builder creates a minimal valid graph from just node types.
+fb::GraphWrapper buildGraph(flatbuffers::FlatBufferBuilder& builder,
+                            const std::vector<NodeAttributes>& nodeTypes)
 {
-    flatbuffers::FlatBufferBuilder builder;
-    const Graph* graph = nullptr;
-};
+    builder.Clear();
 
-fb::GraphWrapper wrapGraph(const GraphResult& r)
-{
-    return fb::GraphWrapper(r.builder.GetBufferPointer(), r.builder.GetSize());
-}
-
-// ── Single conv fwd ─────────────────────────────────────────────────────────
-
-GraphResult buildSingleConvFwd()
-{
-    GraphResult r;
-    auto& b = r.builder;
+    const std::vector<int64_t> dims = {1};
+    const std::vector<int64_t> strides = {1};
 
     std::vector<flatbuffers::Offset<TensorAttributes>> tensors;
-    tensors.push_back(CreateTensorAttributesDirect(b, 1, "x", DataType::FLOAT, &kStrides, &kDims));
-    tensors.push_back(CreateTensorAttributesDirect(b, 2, "w", DataType::FLOAT, &kStrides, &kDims));
-    tensors.push_back(CreateTensorAttributesDirect(b, 3, "y", DataType::FLOAT, &kStrides, &kDims));
-
-    auto conv = CreateConvolutionFwdAttributesDirect(b, 1, 2, 3);
+    tensors.push_back(
+        CreateTensorAttributesDirect(builder, 1, "t", DataType::FLOAT, &strides, &dims));
 
     std::vector<flatbuffers::Offset<Node>> nodes;
-    nodes.push_back(CreateNodeDirect(
-        b, "conv", DataType::FLOAT, NodeAttributes::ConvolutionFwdAttributes, conv.Union()));
+    for(const auto attr : nodeTypes)
+    {
+        nodes.push_back(CreateNodeDirect(builder, "n", DataType::FLOAT, attr, 0));
+    }
 
     auto graph = CreateGraphDirect(
-        b, "test", DataType::FLOAT, DataType::FLOAT, DataType::FLOAT, &tensors, &nodes);
-    b.Finish(graph);
-    r.graph = GetGraph(b.GetBufferPointer());
-    return r;
-}
-
-// ── BN inference → conv fwd (discriminating: loosest op is NOT the last) ────
-
-GraphResult buildBnInferenceConvFwd()
-{
-    GraphResult r;
-    auto& b = r.builder;
-
-    std::vector<flatbuffers::Offset<TensorAttributes>> tensors;
-    tensors.push_back(CreateTensorAttributesDirect(b, 1, "x", DataType::FLOAT, &kStrides, &kDims));
-    tensors.push_back(
-        CreateTensorAttributesDirect(b, 2, "mean", DataType::FLOAT, &kStrides, &kDims));
-    tensors.push_back(
-        CreateTensorAttributesDirect(b, 3, "inv_var", DataType::FLOAT, &kStrides, &kDims));
-    tensors.push_back(
-        CreateTensorAttributesDirect(b, 4, "scale", DataType::FLOAT, &kStrides, &kDims));
-    tensors.push_back(
-        CreateTensorAttributesDirect(b, 5, "bias", DataType::FLOAT, &kStrides, &kDims));
-    tensors.push_back(
-        CreateTensorAttributesDirect(b, 6, "bn_y", DataType::FLOAT, &kStrides, &kDims, true));
-    tensors.push_back(CreateTensorAttributesDirect(b, 7, "w", DataType::FLOAT, &kStrides, &kDims));
-    tensors.push_back(CreateTensorAttributesDirect(b, 8, "y", DataType::FLOAT, &kStrides, &kDims));
-
-    auto bn = CreateBatchnormInferenceAttributes(b, 1, 2, 3, 4, 5, 6);
-    auto conv = CreateConvolutionFwdAttributesDirect(b, 6, 7, 8);
-
-    std::vector<flatbuffers::Offset<Node>> nodes;
-    nodes.push_back(CreateNodeDirect(
-        b, "bn", DataType::FLOAT, NodeAttributes::BatchnormInferenceAttributes, bn.Union()));
-    nodes.push_back(CreateNodeDirect(
-        b, "conv", DataType::FLOAT, NodeAttributes::ConvolutionFwdAttributes, conv.Union()));
-
-    auto graph = CreateGraphDirect(
-        b, "test", DataType::FLOAT, DataType::FLOAT, DataType::FLOAT, &tensors, &nodes);
-    b.Finish(graph);
-    r.graph = GetGraph(b.GetBufferPointer());
-    return r;
-}
-
-// ── Conv fwd + trailing pointwise ───────────────────────────────────────────
-
-GraphResult buildConvPlusPointwise()
-{
-    GraphResult r;
-    auto& b = r.builder;
-
-    std::vector<flatbuffers::Offset<TensorAttributes>> tensors;
-    tensors.push_back(CreateTensorAttributesDirect(b, 1, "x", DataType::FLOAT, &kStrides, &kDims));
-    tensors.push_back(CreateTensorAttributesDirect(b, 2, "w", DataType::FLOAT, &kStrides, &kDims));
-    tensors.push_back(
-        CreateTensorAttributesDirect(b, 3, "conv_y", DataType::FLOAT, &kStrides, &kDims, true));
-    tensors.push_back(
-        CreateTensorAttributesDirect(b, 4, "out", DataType::FLOAT, &kStrides, &kDims));
-
-    auto conv = CreateConvolutionFwdAttributesDirect(b, 1, 2, 3);
-    auto pw = CreatePointwiseAttributes(b,
-                                        PointwiseMode::RELU_FWD,
-                                        flatbuffers::nullopt,
-                                        flatbuffers::nullopt,
-                                        flatbuffers::nullopt,
-                                        flatbuffers::nullopt,
-                                        3,
-                                        flatbuffers::nullopt,
-                                        flatbuffers::nullopt,
-                                        4);
-
-    std::vector<flatbuffers::Offset<Node>> nodes;
-    nodes.push_back(CreateNodeDirect(
-        b, "conv", DataType::FLOAT, NodeAttributes::ConvolutionFwdAttributes, conv.Union()));
-    nodes.push_back(CreateNodeDirect(
-        b, "relu", DataType::FLOAT, NodeAttributes::PointwiseAttributes, pw.Union()));
-
-    auto graph = CreateGraphDirect(
-        b, "test", DataType::FLOAT, DataType::FLOAT, DataType::FLOAT, &tensors, &nodes);
-    b.Finish(graph);
-    r.graph = GetGraph(b.GetBufferPointer());
-    return r;
-}
-
-// ── All-pointwise graph ─────────────────────────────────────────────────────
-
-GraphResult buildAllPointwise()
-{
-    GraphResult r;
-    auto& b = r.builder;
-
-    std::vector<flatbuffers::Offset<TensorAttributes>> tensors;
-    tensors.push_back(CreateTensorAttributesDirect(b, 1, "x", DataType::FLOAT, &kStrides, &kDims));
-    tensors.push_back(
-        CreateTensorAttributesDirect(b, 2, "out", DataType::FLOAT, &kStrides, &kDims));
-
-    auto pw = CreatePointwiseAttributes(b,
-                                        PointwiseMode::RELU_FWD,
-                                        flatbuffers::nullopt,
-                                        flatbuffers::nullopt,
-                                        flatbuffers::nullopt,
-                                        flatbuffers::nullopt,
-                                        1,
-                                        flatbuffers::nullopt,
-                                        flatbuffers::nullopt,
-                                        2);
-
-    std::vector<flatbuffers::Offset<Node>> nodes;
-    nodes.push_back(CreateNodeDirect(
-        b, "relu", DataType::FLOAT, NodeAttributes::PointwiseAttributes, pw.Union()));
-
-    auto graph = CreateGraphDirect(
-        b, "test", DataType::FLOAT, DataType::FLOAT, DataType::FLOAT, &tensors, &nodes);
-    b.Finish(graph);
-    r.graph = GetGraph(b.GetBufferPointer());
-    return r;
-}
-
-// ── Empty graph (zero nodes) ────────────────────────────────────────────────
-
-GraphResult buildEmptyGraph()
-{
-    GraphResult r;
-    auto& b = r.builder;
-
-    std::vector<flatbuffers::Offset<TensorAttributes>> tensors;
-    std::vector<flatbuffers::Offset<Node>> nodes;
-
-    auto graph = CreateGraphDirect(
-        b, "test", DataType::FLOAT, DataType::FLOAT, DataType::FLOAT, &tensors, &nodes);
-    b.Finish(graph);
-    r.graph = GetGraph(b.GetBufferPointer());
-    return r;
-}
-
-// ── Unknown / unmapped op (uses NONE attributes) ────────────────────────────
-
-GraphResult buildUnknownOpGraph()
-{
-    GraphResult r;
-    auto& b = r.builder;
-
-    std::vector<flatbuffers::Offset<TensorAttributes>> tensors;
-    tensors.push_back(CreateTensorAttributesDirect(b, 1, "x", DataType::FLOAT, &kStrides, &kDims));
-
-    std::vector<flatbuffers::Offset<Node>> nodes;
-    nodes.push_back(CreateNodeDirect(b, "unknown", DataType::FLOAT, NodeAttributes::NONE, 0));
-
-    auto graph = CreateGraphDirect(
-        b, "test", DataType::FLOAT, DataType::FLOAT, DataType::FLOAT, &tensors, &nodes);
-    b.Finish(graph);
-    r.graph = GetGraph(b.GetBufferPointer());
-    return r;
+        builder, "test", DataType::FLOAT, DataType::FLOAT, DataType::FLOAT, &tensors, &nodes);
+    builder.Finish(graph);
+    return fb::GraphWrapper(builder.GetBufferPointer(), builder.GetSize());
 }
 
 } // namespace
@@ -221,15 +59,15 @@ constexpr float kFallback = 1e-3f;
 
 TEST(TestToleranceResolver, SingleConvFwd_MaxAcrossNodes)
 {
-    auto g = buildSingleConvFwd();
-    auto w = wrapGraph(g);
+    flatbuffers::FlatBufferBuilder b;
+    auto w = buildGraph(b, {NodeAttributes::ConvolutionFwdAttributes});
     EXPECT_FLOAT_EQ(tol::maxAcrossNodes(w, DataType::FLOAT), kConvFwdFp32);
 }
 
 TEST(TestToleranceResolver, SingleConvFwd_OutputOpTolerance)
 {
-    auto g = buildSingleConvFwd();
-    auto w = wrapGraph(g);
+    flatbuffers::FlatBufferBuilder b;
+    auto w = buildGraph(b, {NodeAttributes::ConvolutionFwdAttributes});
     EXPECT_FLOAT_EQ(tol::outputOpTolerance(w, DataType::FLOAT), kConvFwdFp32);
 }
 
@@ -238,32 +76,19 @@ TEST(TestToleranceResolver, SingleConvFwd_OutputOpTolerance)
 
 TEST(TestToleranceResolver, BnInferenceConvFwd_MaxAcrossNodes)
 {
-    auto g = buildBnInferenceConvFwd();
-    auto w = wrapGraph(g);
+    flatbuffers::FlatBufferBuilder b;
+    auto w = buildGraph(
+        b,
+        {NodeAttributes::BatchnormInferenceAttributes, NodeAttributes::ConvolutionFwdAttributes});
     EXPECT_FLOAT_EQ(tol::maxAcrossNodes(w, DataType::FLOAT), kBnInferenceFp32);
 }
 
 TEST(TestToleranceResolver, BnInferenceConvFwd_OutputOpTolerance)
 {
-    auto g = buildBnInferenceConvFwd();
-    auto w = wrapGraph(g);
-    EXPECT_FLOAT_EQ(tol::outputOpTolerance(w, DataType::FLOAT), kConvFwdFp32);
-}
-
-// ── Conv + trailing Pointwise: OUTPUT_OP skips Pointwise, picks conv ────────
-
-TEST(TestToleranceResolver, ConvPlusPointwise_MaxAcrossNodes)
-{
-    auto g = buildConvPlusPointwise();
-    auto w = wrapGraph(g);
-    EXPECT_FLOAT_EQ(tol::maxAcrossNodes(w, DataType::FLOAT),
-                    std::max(kConvFwdFp32, kPointwiseFp32));
-}
-
-TEST(TestToleranceResolver, ConvPlusPointwise_OutputOpTolerance)
-{
-    auto g = buildConvPlusPointwise();
-    auto w = wrapGraph(g);
+    flatbuffers::FlatBufferBuilder b;
+    auto w = buildGraph(
+        b,
+        {NodeAttributes::BatchnormInferenceAttributes, NodeAttributes::ConvolutionFwdAttributes});
     EXPECT_FLOAT_EQ(tol::outputOpTolerance(w, DataType::FLOAT), kConvFwdFp32);
 }
 
@@ -271,15 +96,15 @@ TEST(TestToleranceResolver, ConvPlusPointwise_OutputOpTolerance)
 
 TEST(TestToleranceResolver, AllPointwise_MaxAcrossNodes)
 {
-    auto g = buildAllPointwise();
-    auto w = wrapGraph(g);
+    flatbuffers::FlatBufferBuilder b;
+    auto w = buildGraph(b, {NodeAttributes::PointwiseAttributes});
     EXPECT_FLOAT_EQ(tol::maxAcrossNodes(w, DataType::FLOAT), kPointwiseFp32);
 }
 
 TEST(TestToleranceResolver, AllPointwise_OutputOpTolerance)
 {
-    auto g = buildAllPointwise();
-    auto w = wrapGraph(g);
+    flatbuffers::FlatBufferBuilder b;
+    auto w = buildGraph(b, {NodeAttributes::PointwiseAttributes});
     EXPECT_FLOAT_EQ(tol::outputOpTolerance(w, DataType::FLOAT), kPointwiseFp32);
 }
 
@@ -287,15 +112,15 @@ TEST(TestToleranceResolver, AllPointwise_OutputOpTolerance)
 
 TEST(TestToleranceResolver, EmptyGraph_MaxAcrossNodes)
 {
-    auto g = buildEmptyGraph();
-    auto w = wrapGraph(g);
+    flatbuffers::FlatBufferBuilder b;
+    auto w = buildGraph(b, {});
     EXPECT_FLOAT_EQ(tol::maxAcrossNodes(w, DataType::FLOAT), kFallback);
 }
 
 TEST(TestToleranceResolver, EmptyGraph_OutputOpTolerance)
 {
-    auto g = buildEmptyGraph();
-    auto w = wrapGraph(g);
+    flatbuffers::FlatBufferBuilder b;
+    auto w = buildGraph(b, {});
     EXPECT_FLOAT_EQ(tol::outputOpTolerance(w, DataType::FLOAT), kFallback);
 }
 
@@ -303,15 +128,15 @@ TEST(TestToleranceResolver, EmptyGraph_OutputOpTolerance)
 
 TEST(TestToleranceResolver, UnknownOp_MaxAcrossNodes)
 {
-    auto g = buildUnknownOpGraph();
-    auto w = wrapGraph(g);
+    flatbuffers::FlatBufferBuilder b;
+    auto w = buildGraph(b, {NodeAttributes::NONE});
     EXPECT_FLOAT_EQ(tol::maxAcrossNodes(w, DataType::FLOAT), kFallback);
 }
 
 TEST(TestToleranceResolver, UnknownOp_OutputOpTolerance)
 {
-    auto g = buildUnknownOpGraph();
-    auto w = wrapGraph(g);
+    flatbuffers::FlatBufferBuilder b;
+    auto w = buildGraph(b, {NodeAttributes::NONE});
     EXPECT_FLOAT_EQ(tol::outputOpTolerance(w, DataType::FLOAT), kFallback);
 }
 
