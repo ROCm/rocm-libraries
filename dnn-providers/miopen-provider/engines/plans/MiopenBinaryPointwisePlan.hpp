@@ -10,7 +10,6 @@
 #include <hipdnn_plugin_sdk/interfaces/IPlan.hpp>
 
 #include "HipdnnMiopenHandle.hpp"
-#include "MiopenActivationDescriptor.hpp"
 #include "MiopenTensor.hpp"
 
 namespace miopen_plugin

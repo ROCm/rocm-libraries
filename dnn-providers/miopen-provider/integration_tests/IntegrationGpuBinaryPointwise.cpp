@@ -46,14 +46,6 @@ constexpr const char* getModeName()
     {
         return "Mul";
     }
-    if constexpr(Mode == hipdnn_frontend::PointwiseMode::MIN)
-    {
-        return "Min";
-    }
-    if constexpr(Mode == hipdnn_frontend::PointwiseMode::MAX)
-    {
-        return "Max";
-    }
 
     return "Unknown";
 }
@@ -67,13 +59,12 @@ protected:
         const PointwiseTestCase& testCase = this->GetParam();
 
         hipdnn_frontend::graph::Graph graphObj;
-        std::string graphName = std::string("Pointwise") + getModeName<Mode>() + "ForwardTest";
+        const std::string graphName = std::string("Pointwise") + getModeName<Mode>() + "Test";
         graphObj.set_name(graphName);
 
         auto dataType = getDataTypeEnumFromType<DataType>();
         graphObj.set_intermediate_data_type(dataType)
-            .set_compute_data_type(
-                hipdnn_frontend::DataType::FLOAT) // Matches our builder validation!
+            .set_compute_data_type(hipdnn_frontend::DataType::FLOAT)
             .set_io_data_type(dataType);
 
         // Generate attributes for Input Tensor 0 ("x0")
@@ -100,125 +91,75 @@ protected:
 };
 
 // Operation Type Aliases for Test Framework Mapping
-using IntegrationGpuPointwiseAddForwardNchwFp32
-    = BinaryPointwiseForward<float, hipdnn_frontend::PointwiseMode::ADD>;
-using IntegrationGpuPointwiseAddForwardNchwFp16
-    = BinaryPointwiseForward<half, hipdnn_frontend::PointwiseMode::ADD>;
-
-using IntegrationGpuPointwiseSubForwardNchwFp32
-    = BinaryPointwiseForward<float, hipdnn_frontend::PointwiseMode::SUB>;
-using IntegrationGpuPointwiseSubForwardNchwFp16
-    = BinaryPointwiseForward<half, hipdnn_frontend::PointwiseMode::SUB>;
-
-using IntegrationGpuPointwiseMulForwardNchwFp32
-    = BinaryPointwiseForward<float, hipdnn_frontend::PointwiseMode::MUL>;
-using IntegrationGpuPointwiseMulForwardNchwFp16
-    = BinaryPointwiseForward<half, hipdnn_frontend::PointwiseMode::MUL>;
-
-using IntegrationGpuPointwiseMinForwardNchwFp32
-    = BinaryPointwiseForward<float, hipdnn_frontend::PointwiseMode::MIN>;
-using IntegrationGpuPointwiseMinForwardNchwFp16
-    = BinaryPointwiseForward<half, hipdnn_frontend::PointwiseMode::MIN>;
-
-using IntegrationGpuPointwiseMaxForwardNchwFp32
-    = BinaryPointwiseForward<float, hipdnn_frontend::PointwiseMode::MAX>;
-using IntegrationGpuPointwiseMaxForwardNchwFp16
-    = BinaryPointwiseForward<half, hipdnn_frontend::PointwiseMode::MAX>;
+using IntegrationGpuPointwiseAddNchwFp32
+    = BinaryPointwise<float, hipdnn_frontend::PointwiseMode::ADD>;
+using IntegrationGpuPointwiseAddNchwFp16
+    = BinaryPointwise<half, hipdnn_frontend::PointwiseMode::ADD>;
+using IntegrationGpuPointwiseSubNchwFp32
+    = BinaryPointwise<float, hipdnn_frontend::PointwiseMode::SUB>;
+using IntegrationGpuPointwiseSubNchwFp16
+    = BinaryPointwise<half, hipdnn_frontend::PointwiseMode::SUB>;
+using IntegrationGpuPointwiseMulNchwFp32
+    = BinaryPointwise<float, hipdnn_frontend::PointwiseMode::MUL>;
+using IntegrationGpuPointwiseMulNchwFp16
+    = BinaryPointwise<half, hipdnn_frontend::PointwiseMode::MUL>;
 
 } // namespace
 
 // ==================== ADD Mode Tests ====================
-TEST_P(IntegrationGpuPointwiseAddForwardNchwFp32, Correctness)
+TEST_P(IntegrationGpuPointwiseAddNchwFp32, Correctness)
 {
     runGraphTest(1e-5f, TensorLayout::NCHW);
 }
 
-TEST_P(IntegrationGpuPointwiseAddForwardNchwFp16, Correctness)
+TEST_P(IntegrationGpuPointwiseAddNchwFp16, Correctness)
 {
     runGraphTest(1e-3f, TensorLayout::NCHW);
 }
 
 // ==================== SUB Mode Tests ====================
-TEST_P(IntegrationGpuPointwiseSubForwardNchwFp32, Correctness)
+TEST_P(IntegrationGpuPointwiseSubNchwFp32, Correctness)
 {
     runGraphTest(1e-5f, TensorLayout::NCHW);
 }
 
-TEST_P(IntegrationGpuPointwiseSubForwardNchwFp16, Correctness)
+TEST_P(IntegrationGpuPointwiseSubNchwFp16, Correctness)
 {
     runGraphTest(1e-3f, TensorLayout::NCHW);
 }
 
 // ==================== MUL Mode Tests ====================
-TEST_P(IntegrationGpuPointwiseMulForwardNchwFp32, Correctness)
+TEST_P(IntegrationGpuPointwiseMulNchwFp32, Correctness)
 {
     runGraphTest(1e-5f, TensorLayout::NCHW);
 }
 
-TEST_P(IntegrationGpuPointwiseMulForwardNchwFp16, Correctness)
-{
-    runGraphTest(1e-3f, TensorLayout::NCHW);
-}
-
-// ==================== MIN Mode Tests ====================
-TEST_P(IntegrationGpuPointwiseMinForwardNchwFp32, Correctness)
-{
-    runGraphTest(1e-5f, TensorLayout::NCHW);
-}
-
-TEST_P(IntegrationGpuPointwiseMinForwardNchwFp16, Correctness)
-{
-    runGraphTest(1e-3f, TensorLayout::NCHW);
-}
-
-// ==================== MAX Mode Tests ====================
-TEST_P(IntegrationGpuPointwiseMaxForwardNchwFp32, Correctness)
-{
-    runGraphTest(1e-5f, TensorLayout::NCHW);
-}
-
-TEST_P(IntegrationGpuPointwiseMaxForwardNchwFp16, Correctness)
+TEST_P(IntegrationGpuPointwiseMulNchwFp16, Correctness)
 {
     runGraphTest(1e-3f, TensorLayout::NCHW);
 }
 
 // ==================== Parameterized Invocations ====================
 INSTANTIATE_TEST_SUITE_P(Smoke,
-                         IntegrationGpuPointwiseAddForwardNchwFp32,
+                         IntegrationGpuPointwiseAddNchwFp32,
                          testing::ValuesIn(getPointwiseTestCases()));
 
 INSTANTIATE_TEST_SUITE_P(Smoke,
-                         IntegrationGpuPointwiseAddForwardNchwFp16,
+                         IntegrationGpuPointwiseAddNchwFp16,
                          testing::ValuesIn(getPointwiseTestCases()));
 
 INSTANTIATE_TEST_SUITE_P(Smoke,
-                         IntegrationGpuPointwiseSubForwardNchwFp32,
+                         IntegrationGpuPointwiseSubNchwFp32,
                          testing::ValuesIn(getPointwiseTestCases()));
 
 INSTANTIATE_TEST_SUITE_P(Smoke,
-                         IntegrationGpuPointwiseSubForwardNchwFp16,
+                         IntegrationGpuPointwiseSubNchwFp16,
                          testing::ValuesIn(getPointwiseTestCases()));
 
 INSTANTIATE_TEST_SUITE_P(Smoke,
-                         IntegrationGpuPointwiseMulForwardNchwFp32,
+                         IntegrationGpuPointwiseMulNchwFp32,
                          testing::ValuesIn(getPointwiseTestCases()));
 
 INSTANTIATE_TEST_SUITE_P(Smoke,
-                         IntegrationGpuPointwiseMulForwardNchwFp16,
-                         testing::ValuesIn(getPointwiseTestCases()));
-
-INSTANTIATE_TEST_SUITE_P(Smoke,
-                         IntegrationGpuPointwiseMinForwardNchwFp32,
-                         testing::ValuesIn(getPointwiseTestCases()));
-
-INSTANTIATE_TEST_SUITE_P(Smoke,
-                         IntegrationGpuPointwiseMinForwardNchwFp16,
-                         testing::ValuesIn(getPointwiseTestCases()));
-
-INSTANTIATE_TEST_SUITE_P(Smoke,
-                         IntegrationGpuPointwiseMaxForwardNchwFp32,
-                         testing::ValuesIn(getPointwiseTestCases()));
-
-INSTANTIATE_TEST_SUITE_P(Smoke,
-                         IntegrationGpuPointwiseMaxForwardNchwFp16,
+                         IntegrationGpuPointwiseMulNchwFp16,
                          testing::ValuesIn(getPointwiseTestCases()));

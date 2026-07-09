@@ -9,6 +9,21 @@
 namespace miopen_plugin
 {
 
+namespace
+{
+int64_t getIn1TensorUidOrThrow(
+    const hipdnn_flatbuffers_sdk::data_objects::PointwiseAttributes& attributes)
+{
+    if(!attributes.in_1_tensor_uid())
+    {
+        throw hipdnn_plugin_sdk::HipdnnPluginException(
+            HIPDNN_PLUGIN_STATUS_BAD_PARAM,
+            "MiopenBinaryPointwisePlan: missing in_1_tensor_uid for binary pointwise operation");
+    }
+    return *attributes.in_1_tensor_uid();
+}
+} // namespace
+
 MiopenBinaryPointwisePlan::MiopenBinaryPointwisePlan(
     const hipdnn_flatbuffers_sdk::data_objects::PointwiseAttributes& attributes,
     const std::unordered_map<int64_t,
@@ -16,7 +31,7 @@ MiopenBinaryPointwisePlan::MiopenBinaryPointwisePlan(
         tensorMap)
     : _mode(attributes.operation())
     , _input0(miopen_utils::createTensor(tensorMap, attributes.in_0_tensor_uid()))
-    , _input1(miopen_utils::createTensor(tensorMap, *attributes.in_1_tensor_uid()))
+    , _input1(miopen_utils::createTensor(tensorMap, getIn1TensorUidOrThrow(attributes)))
     , _output(miopen_utils::createTensor(tensorMap, attributes.out_0_tensor_uid()))
 {
 }
@@ -55,10 +70,10 @@ void MiopenBinaryPointwisePlan::execute(const HipdnnMiopenHandle& handle,
     case hipdnn_flatbuffers_sdk::data_objects::PointwiseMode::MUL:
         miopenOp = miopenTensorOpMul;
         break;
-    case hipdnn_flatbuffers_sdk::data_objects::PointwiseMode::MIN:
+    case hipdnn_flatbuffers_sdk::data_objects::PointwiseMode::MIN_OP:
         miopenOp = miopenTensorOpMin;
         break;
-    case hipdnn_flatbuffers_sdk::data_objects::PointwiseMode::MAX:
+    case hipdnn_flatbuffers_sdk::data_objects::PointwiseMode::MAX_OP:
         miopenOp = miopenTensorOpMax;
         break;
     default:

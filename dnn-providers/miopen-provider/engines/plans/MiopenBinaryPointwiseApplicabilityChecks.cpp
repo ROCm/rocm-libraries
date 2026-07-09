@@ -25,11 +25,11 @@ void checkModeSupported(const PointwiseAttributes& attrs)
 {
     const auto mode = attrs.operation();
     if(mode != PointwiseMode::ADD && mode != PointwiseMode::SUB && mode != PointwiseMode::MUL
-       && mode != PointwiseMode::MIN && mode != PointwiseMode::MAX)
+       && mode != PointwiseMode::MIN_OP && mode != PointwiseMode::MAX_OP)
     {
         throw hipdnn_plugin_sdk::HipdnnPluginException(
             HIPDNN_PLUGIN_STATUS_BAD_PARAM,
-            "Binary pointwise plan builder: unsupported pointwise mode."
+            "Binary pointwise plan builder: unsupported pointwise mode. "
             "Supported mode: ADD, SUB, MUL, MIN, MAX");
     }
 }
@@ -40,7 +40,7 @@ void checkTensorsSupported(
                              const hipdnn_flatbuffers_sdk::data_objects::TensorAttributes*>&
         tensorMap)
 {
-    // Extract both inputs (in_0 AND in_1) and the signle output (out_0)
+    // Extract both inputs (in_0 AND in_1) and the single output (out_0)
     const auto& inputTensor0
         = miopen_utils::findTensorAttributes(tensorMap, attrs.in_0_tensor_uid());
 
