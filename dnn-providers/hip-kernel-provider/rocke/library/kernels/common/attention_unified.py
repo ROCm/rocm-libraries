@@ -3056,13 +3056,23 @@ def _select_2d_compile_backend(problem: UnifiedAttentionProblem) -> str:
 def _get_2d_launcher(
     problem: UnifiedAttentionProblem,
     cache_key: Tuple,
+    tiled_spec: Optional[object] = None,
 ) -> KernelLauncher:
+    """Compile+cache the tiled-2D kernel for a problem.
+
+    ``tiled_spec`` (default None) overrides the selector-derived spec — used by
+    the data-gen sweep to build/benchmark an EXPLICIT config
+    (num_warps/tile_size/block_m) rather than the one the selectors would pick.
+    The caller MUST fold the override's knobs into ``cache_key`` so overridden
+    configs get their own cache slots (see _tiled_cache_key). When None the path
+    is byte-identical to the pre-override behaviour.
+    """
     if cache_key in _2D_LAUNCHERS:
         return _2D_LAUNCHERS[cache_key]
     if cache_key not in _ATTN_TILED_CACHE:
         arch = _resolve_attention_arch()
         _, build_unified_attention_2d_tiled, _ = _tiled_2d_impl(arch)
-        spec = _tiled_spec_from_problem(problem)
+        spec = tiled_spec if tiled_spec is not None else _tiled_spec_from_problem(problem)
         kernel = build_unified_attention_2d_tiled(spec, arch=arch)
         backend = _select_2d_compile_backend(problem)
         if backend == "hipcc":
@@ -3091,12 +3101,18 @@ def _get_2d_launcher(
 def _get_2d_launch_meta(
     problem: UnifiedAttentionProblem,
     cache_key: Tuple,
+    tiled_spec: Optional[object] = None,
 ) -> _Attention2DLaunchMeta:
     meta_key = cache_key + ("total_q", int(problem.total_q))
     if meta_key in _2D_LAUNCH_META:
         return _2D_LAUNCH_META[meta_key]
     arch = _resolve_attention_arch()
-    if _enable_gfx942_bf16_flash(problem):
+    if tiled_spec is not None:
+        # Explicit-config override: the grid/block geometry must match the
+        # kernel that was actually built (from tiled_spec), not the selectors.
+        num_warps = int(tiled_spec.num_warps)
+        block_m_per_warp = int(tiled_spec.block_m_per_warp)
+    elif _enable_gfx942_bf16_flash(problem):
         nw, _ = _gfx942_bf16_wide_geometry(problem)
         num_warps = nw
         block_m_per_warp = 32
@@ -3173,6 +3189,7 @@ def run_unified_attention_torch(
     k_scale: float = 1.0,
     v_scale: float = 1.0,
     out_scale: float = 1.0,
+    tiled_spec: Optional[object] = None,
 ):
     """Launch a CK DSL attention kernel on torch tensors.
 
@@ -3180,6 +3197,12 @@ def run_unified_attention_torch(
       - `"tiled"`: force the optimized MFMA path; raises if unsupported.
       - `"scalar"`: force the slow correctness kernel.
       - `"auto"`: prefer tiled when supported, else scalar.
+
+    ``tiled_spec`` (default None): an explicit ``UnifiedAttention2DTiledSpec`` to
+    build+launch instead of the selector-derived one. Used by the heuristics
+    data-gen sweep to benchmark a SPECIFIC config (num_warps/tile_size/block_m);
+    production callers leave it None (byte-identical to prior behaviour). Only
+    honored on the tiled path (implies/requires backend != "scalar").
 
     ``alibi_slopes`` is an optional `[num_query_heads]` f32 tensor; when
     supplied, the kernel applies the ALiBi linear bias on each row.
@@ -3275,7 +3298,14 @@ def run_unified_attention_torch(
         # a replay skips supports + cache_key + the kernarg pack -- the host
         # overhead that otherwise dominates tiny-shape latency. Skipped when the
         # caller is already capturing the forward (they take precedence).
-        if _enable_2d_graph_replay(problem) and not _torch_stream_capturing():
+        # An explicit tiled_spec override bypasses the graph cache: graphs are
+        # keyed by problem/shape, not by the overridden config, so a replay would
+        # run the wrong kernel. The data-gen sweep always takes the direct path.
+        if (
+            tiled_spec is None
+            and _enable_2d_graph_replay(problem)
+            and not _torch_stream_capturing()
+        ):
             graphed = _run_2d_graphed(
                 problem,
                 q=q,
@@ -3306,7 +3336,17 @@ def run_unified_attention_torch(
             # built on cache miss inside _get_2d_launcher and for grid
             # math below.
             key = _tiled_cache_key(problem)
-            launcher = _get_2d_launcher(problem, key)
+            # An explicit config override gets its own cache slots so it never
+            # collides with the selector-default (or other overrides) for the
+            # same problem — otherwise all grid points would share one launcher.
+            if tiled_spec is not None:
+                key = key + (
+                    "override",
+                    int(tiled_spec.num_warps),
+                    int(tiled_spec.block_m_per_warp),
+                    int(tiled_spec.tile_size or 0),
+                )
+            launcher = _get_2d_launcher(problem, key, tiled_spec=tiled_spec)
             vals = _attn_values(
                 problem=problem,
                 q=q,
@@ -3332,7 +3372,7 @@ def run_unified_attention_torch(
             # The dispatcher must launch with the same BLOCK_Q/threads the
             # kernel was built for. Cache that fixed metadata per kernel key so
             # repeated same-shape calls avoid selector math on the hot path.
-            meta = _get_2d_launch_meta(problem, key)
+            meta = _get_2d_launch_meta(problem, key, tiled_spec=tiled_spec)
             return launcher(
                 vals,
                 config=LaunchConfig(

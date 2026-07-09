@@ -295,21 +295,14 @@ def _ua_shape_for(prob: object):
 def _sdpa_benchmark(cand: object) -> Dict[str, object]:
     """Time this grid point on the GPU and return {tflops, latency_ms, correct}.
 
-    Builds inputs via the shared UA harness, forces the tiled-2D backend (the
-    path the config grid sweeps), times it with rocke's HIP-event timer, and
-    computes TFLOPS from the analytic attention FLOP count. Correctness is a
-    lightweight NaN/inf/finite check on the output (a full reference compare is
-    AITER-coupled and too heavy per grid point); a kernel that returns non-finite
-    output is marked correct=False so it can't win the oracle-best selection.
-
-    KNOWN LIMITATION (see plan Step 3): ``run_unified_attention_torch(backend=
-    "tiled")`` re-derives the tiled spec from the problem inside
-    ``_get_2d_launcher`` (attention_unified.py:3065), so today it times the
-    *selector-default* config, not this candidate's (num_warps, T, block_m). All
-    grid points for a problem therefore currently measure the same number. Making
-    the runner honor an explicit tiled spec (a spec-override threaded through
-    _get_2d_launcher, or a direct low-level launch) is the remaining work to make
-    per-config TFLOPS meaningful.
+    Builds inputs via the shared UA harness, forces the tiled-2D backend with
+    THIS candidate's explicit tiled spec (via ``tiled_spec=`` — the runner builds
+    and launches that exact num_warps/T/block_m config, not the selector
+    default), times it with rocke's HIP-event timer, and computes TFLOPS from the
+    analytic attention FLOP count. Correctness is a lightweight NaN/inf/finite
+    check on the output (a full reference compare is AITER-coupled and too heavy
+    per grid point); a kernel that returns non-finite output is marked
+    correct=False so it can't win the oracle-best selection.
     """
     import sys as _sys
 
@@ -338,6 +331,7 @@ def _sdpa_benchmark(cand: object) -> Dict[str, object]:
             block_table=data["block_tables"], softcap=float(prob.softcap),
             sinks=data["sinks"], alibi_slopes=data["alibi_slopes"],
             backend="tiled", stream=hip_stream,
+            tiled_spec=cand.tiled,  # benchmark THIS grid point's exact config
         )
 
     latency_ms = time_launches(call_once, warmup=5, iters=20, stream=hip_stream)
