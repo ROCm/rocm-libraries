@@ -1,12 +1,11 @@
 // Copyright © Advanced Micro Devices, Inc., or its affiliates.
 // SPDX-License-Identifier: MIT
 
-// HIP port of the MIOpenConvFwd_LxL_11 OpenCL kernel.
+// MIOpenConvFwd_LxL_11 kernel.
 // Implements a tiled, LDS-cached forward convolution optimised for large
 // filters with stride > 1 (canonical use-case: 11x11 kernel, stride 4).
 //
-// All algorithm parameters are injected at compile time via -D defines
-// (same macro names as the original OpenCL kernel).
+// All algorithm parameters are injected at compile time via -D defines.
 
 #ifndef MIOPEN_HIP_RUNTIME_COMPILE
 #include <hip/hip_runtime.h>
@@ -22,8 +21,7 @@ __device__ uint iDiv_legacy(uint v, uint d)
 
 __device__ uint iMod(uint v, uint u, uint d) { return v - __mul24(u, d); }
 
-// float_types.h uses FLOAT / FLOAT_ACCUM for HIP and _FLOAT / _FLOAT_ACCUM for OpenCL.
-// This kernel uses the _FLOAT / _FLOAT_ACCUM names throughout; alias them for HIP.
+// This kernel uses the _FLOAT / _FLOAT_ACCUM names throughout; alias them.
 #ifdef __HIP_PLATFORM_AMD__
 #ifndef _FLOAT
 #define _FLOAT FLOAT
@@ -32,7 +30,7 @@ __device__ uint iMod(uint v, uint u, uint d) { return v - __mul24(u, d); }
 #endif
 
 // ---------------------------------------------------------------------------
-// Compile-time derived constants (mirror the OpenCL kernel header block)
+// Compile-time derived constants
 // ---------------------------------------------------------------------------
 
 #ifndef MLO_N_FILTER_SPLITS1

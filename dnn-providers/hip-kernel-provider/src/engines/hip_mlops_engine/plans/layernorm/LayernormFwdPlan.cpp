@@ -2,6 +2,8 @@
 // SPDX-License-Identifier:  MIT
 
 #include "LayernormFwdPlan.hpp"
+#include "compilation/KernelCompileOptions.hpp"
+#include "engines/hip_mlops_engine/plans/PlanUtils.hpp"
 
 #include "compilation/IKernelCompiler.hpp"
 #include "core/Utils.hpp"
@@ -90,9 +92,6 @@ size_t LayernormFwdPlan::getWorkspaceSize([[maybe_unused]] const Handle& handle)
 void LayernormFwdPlan::compile(const IKernelCompiler& kernelCompiler,
                                const hipDeviceProp_t& deviceProperties)
 {
-    // Determine data type configuration
-    auto xDataType = _params.x()->data_type();
-
     // Extract dimensions from x tensor
     const auto* xDims = _params.x()->dims();
     const auto* xStrides = _params.x()->strides();
@@ -135,31 +134,27 @@ void LayernormFwdPlan::compile(const IKernelCompiler& kernelCompiler,
     const long zlocalsize = 1;
     const long zgridsize = 1;
 
+    // Determine input/output data type configuration
+    const auto inputDataType = _params.x()->data_type();
+    const auto outputDataType = _params.y()->data_type();
+    const auto scaleBiasDataType = _params.scale()->data_type();
+    const auto meanInvVarianceDataType
+        = (_params.mean() == nullptr) ? inputDataType : _params.mean()->data_type();
+    const std::string inputTypeString = getKernelParamTypeString(inputDataType);
+    const std::string outputTypeString = getKernelParamTypeString(outputDataType);
+    const std::string scaleBiasTypeString = getKernelParamTypeString(scaleBiasDataType);
+    const std::string meanInvVarianceTypeString = getKernelParamTypeString(meanInvVarianceDataType);
+
     // Prepare compilation options
-    std::vector<std::string> options;
-    auto rocmPath
-        = hipdnn_data_sdk::utilities::trim(hipdnn_data_sdk::utilities::getEnv("ROCM_PATH"));
-    if(!rocmPath.empty())
-    {
-        auto rocmIncludeArg = "-I" + rocmPath + "/include";
-        options.emplace_back(rocmIncludeArg);
-        HIPDNN_PLUGIN_LOG_INFO(
-            "LayernormFwdPlan: HIPRTC compile ROCm include path: " << rocmIncludeArg);
-    }
-    options.emplace_back(
-        std::string("-DHIP_PLUGIN_USE_FP32=")
-        + (xDataType == hipdnn_flatbuffers_sdk::data_objects::DataType::FLOAT ? "1" : "0"));
-    options.emplace_back(
-        std::string("-DHIP_PLUGIN_USE_FP16=")
-        + (xDataType == hipdnn_flatbuffers_sdk::data_objects::DataType::HALF ? "1" : "0"));
-    options.emplace_back(
-        std::string("-DHIP_PLUGIN_USE_BFP16=")
-        + (xDataType == hipdnn_flatbuffers_sdk::data_objects::DataType::BFLOAT16 ? "1" : "0"));
-    options.emplace_back(std::string("-DOUTER_SIZE=") + std::to_string(outerSize));
-    options.emplace_back(std::string("-DINNER_SIZE=") + std::to_string(innerSize));
-    options.emplace_back(std::string("-DSTRIDE=") + std::to_string(stride));
-    options.emplace_back(std::string("-DLOCAL_SIZE=") + std::to_string(xlocalsize));
-    options.emplace_back(std::string("--offload-arch=") + deviceProperties.gcnArchName);
+    KernelCompileOptions options(_params.x(), deviceProperties);
+    options.add("HIP_PLUGIN_LAYERNORM_OUTER_SIZE", outerSize);
+    options.add("HIP_PLUGIN_LAYERNORM_INNER_SIZE", innerSize);
+    options.add("HIP_PLUGIN_LAYERNORM_STRIDE", stride);
+    options.add("HIP_PLUGIN_LAYERNORM_LOCAL_SIZE", xlocalsize);
+    options.add("HIP_PLUGIN_LAYERNORM_INPUT_TYPE", inputTypeString);
+    options.add("HIP_PLUGIN_LAYERNORM_OUTPUT_TYPE", outputTypeString);
+    options.add("HIP_PLUGIN_LAYERNORM_SCALE_BIAS_TYPE", scaleBiasTypeString);
+    options.add("HIP_PLUGIN_LAYERNORM_MEAN_INV_VARIANCE_TYPE", meanInvVarianceTypeString);
 
     // Compile kernel and configure launch dimensions
     _compiledProgram = kernelCompiler.compile("LayernormFwd.cpp", options);

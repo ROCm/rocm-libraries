@@ -107,6 +107,13 @@ namespace rocisa
                 {
                     if(regContainer->regType == "acc")
                         continue;
+                    if(regContainer->regIdx < 0)
+                    {
+                        std::cerr << "ERROR: negative regIdx detected!" << std::endl;
+                        std::cerr << "  regContainer: " << regContainer->toString() << std::endl;
+                        std::cerr << "  instruction:  " << item->toString() << std::endl;
+                        throw std::runtime_error("GPR index out of range (negative regIdx)");
+                    }
                     for(int i = regContainer->regIdx;
                         i < regContainer->regIdx + regContainer->regNum;
                         ++i)

@@ -1,7 +1,7 @@
 /******************************************************************************
  * Copyright (c) 2010-2011, Duane Merrill.  All rights reserved.
  * Copyright (c) 2011-2018, NVIDIA CORPORATION.  All rights reserved.
- * Modifications Copyright (c) 2021-2025, Advanced Micro Devices, Inc.  All rights reserved.
+ * Modifications Copyright (c) 2021-2026, Advanced Micro Devices, Inc.  All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions are met:
@@ -85,14 +85,14 @@ T asm_thread_load(void* ptr)
         ROCPRIM_DEVICE ROCPRIM_INLINE type asm_thread_load<cache_modifier, type>(void* ptr) \
         {                                                                                   \
             interim_type retval;                                                            \
-            if ROCPRIM_AMDGCN_CONSTEXPR(ROCPRIM_IS_RDNA4())                                 \
+            if(ROCPRIM_IS_RDNA4())                                                          \
             {                                                                               \
                 asm volatile(#asm_operator " %0, %1 th:TH_DEFAULT scope:SCOPE_DEV\n\t"      \
                                            "s_wait_loadcnt_dscnt(%2)"                       \
                              : "=&v"(retval)                                                \
                              : "v"(ptr), "I"(0x00));                                        \
             }                                                                               \
-            else if ROCPRIM_AMDGCN_CONSTEXPR(ROCPRIM_IS_CDNA3())                            \
+            else if(ROCPRIM_IS_CDNA3())                                                     \
             {                                                                               \
                 asm volatile(#asm_operator " %0, %1 sc0 nt\n\t"                             \
                                            "s_waitcnt(%2)"                                  \

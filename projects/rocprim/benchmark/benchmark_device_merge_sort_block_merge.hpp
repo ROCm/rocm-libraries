@@ -117,6 +117,7 @@ private:
         common::device_ptr<Value> d_values_input;
 
         value_ptr_type values_ptr;
+        common::device_ptr<Value> d_values;
         if constexpr(!std::is_same_v<val, rocprim::empty_type>)
         {
             using value_type = Value;
@@ -125,7 +126,7 @@ private:
             std::iota(values_input.begin(), values_input.end(), 0);
 
             d_values_input = common::device_ptr<Value>(values_input);
-            common::device_ptr<value_type> d_values(items);
+            d_values = common::device_ptr<value_type>(items);
             values_ptr = d_values.get();
         }
         else

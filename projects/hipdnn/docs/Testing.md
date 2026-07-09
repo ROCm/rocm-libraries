@@ -17,9 +17,15 @@ ninja check
 # Run all tests with additional details
 ninja check-verbose
 
-# Run specific test categories
-ninja unit-check        # Unit tests only. Also `unit-check-verbose`.
-ninja integration-check # Integration tests only. Also `integration-check-verbose`.
+# Run YAML-defined test categories. Each category in test_categories.yaml creates
+# both `<category>-check` and `<category>-check-verbose`.
+ninja quick-check
+ninja standard-check
+ninja unit-check        # Current unit-test category.
+ninja integration-check # Current integration-test category.
+
+# Run all tests with additional details for one category
+ninja quick-check-verbose
 
 # Run with Address Sanitizer
 cmake -GNinja -DBUILD_ADDRESS_SANITIZER=ON ..

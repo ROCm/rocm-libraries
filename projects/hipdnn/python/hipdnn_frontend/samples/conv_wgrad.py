@@ -86,6 +86,7 @@ def run_convolution_wgrad():
     print("\nBuilding convolution backward weights operation...")
     # Perform convolution backward weights (wgrad)
     dw = graph.conv_wgrad(dy, x, conv_attributes)
+    dw.set_dim([k, c, r, s])
 
     # Mark the output tensor
     if dw:

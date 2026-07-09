@@ -97,24 +97,20 @@ template <typename T>
     return {};
 }
 
-/// Returns the global index of the engine backing a finalized execution-plan
-/// descriptor, or std::nullopt if the backend cannot report it. Lets callers
-/// recover the engine of a plan attached via deserialize so a later
-/// serialize() can re-query that engine's plan-serialization capability.
-[[nodiscard]] inline std::optional<int64_t>
-    getExecutionPlanEngineId(hipdnnBackendDescriptor_t planDesc)
+/// Gets a scalar attribute, returning std::nullopt when the backend cannot
+/// report it instead of surfacing an error.
+template <typename T>
+[[nodiscard]] inline std::optional<T> getNullableAttrScalar(hipdnnBackendDescriptor_t desc,
+                                                            hipdnnBackendAttributeName_t attrName,
+                                                            hipdnnBackendAttributeType_t attrType,
+                                                            const std::string& errorContext)
 {
-    int64_t engineId = 0;
-    if(getDescriptorAttrScalar<int64_t>(planDesc,
-                                        HIPDNN_ATTR_EXECUTION_PLAN_ENGINE_GLOBAL_INDEX_EXT,
-                                        HIPDNN_TYPE_INT64,
-                                        engineId,
-                                        "execution plan engine global index")
-           .is_bad())
+    T value{};
+    if(getDescriptorAttrScalar<T>(desc, attrName, attrType, value, errorContext).is_bad())
     {
         return std::nullopt;
     }
-    return engineId;
+    return value;
 }
 
 /// Gets a string attribute (char array) from a backend descriptor.

@@ -6,11 +6,16 @@
 #include <algorithm>
 #include <cctype>
 #include <filesystem>
+#include <fstream>
+#include <optional>
 #include <set>
 #include <stdexcept>
 #include <string>
 #include <unordered_map>
+#include <unordered_set>
 #include <vector>
+
+#include <nlohmann/json.hpp>
 
 #include <hipdnn_plugin_sdk/PluginLogging.hpp>
 
@@ -18,44 +23,58 @@ namespace hipdnn_integration_tests::golden
 {
 
 // Naming types, kept together. DerivedTestName is the output of deriveTestName()
-// (naming only); DiscoveredBundle is what discoverBundles() returns for
-// registration — the same two name fields plus the graph .json path to load.
-// They overlap by design: one is a short-lived intermediate, the other the
-// stored record. See deriveTestName() below for how the names are built.
-
-// The two halves of a GTest identifier, as registered via RegisterTest().
-// GTest joins them with '.' to form the full name: "{suiteName}.{testName}".
+// for direct graph bundles; DiscoveredBundle is what discoverBundles() returns
+// for registration. GTest joins suiteName and testName with '.' to form the full
+// registered name.
 //
-//   suiteName — the bundle's directory path relative to the data root, with each
-//               segment joined by '_'. Groups bundles that share a folder path.
-//   testName  — the graph .json file stem (why the test exists), e.g. "Small".
-//
-// Example: quick/BatchnormFwdInference/ncdhw/fp32/Small/Small.json
-//   suiteName = "quick_BatchnormFwdInference_ncdhw_fp32_Small"
-//   testName  = "Small"
-//   full GTest name = "quick_BatchnormFwdInference_ncdhw_fp32_Small.Small"
+// Template sweeps use the sweep directory as the suite and each cases[].id as a
+// logical test. Direct bundles use the relative folder path as the suite and the
+// graph .json stem as the test.
 struct DerivedTestName
 {
     std::string suiteName;
     std::string testName;
 };
 
-// One registerable test bundle: a DerivedTestName plus the bundle's graph .json
-// path the harness loads at run time. This is the unit discoverBundles returns —
-// one per test that gets RegisterTest'd.
-struct DiscoveredBundle
+// A template-sweep case selected from a sweep root: the shared
+// graph.template.json and the cases[].id it expands. Present on a
+// DiscoveredBundle exactly when that bundle is a template-sweep case.
+struct SweepCase
 {
-    std::filesystem::path jsonPath; // absolute path to the bundle graph .json
-    std::string suiteName; // GTest suite, e.g. "quick_BatchnormFwdInference_ncdhw_fp32_Small"
-    std::string testName; // GTest test, e.g. "Small"
+    std::filesystem::path templatePath; // graph.template.json shared by the sweep
+    std::string caseId; // logical case selected from cases[]
 };
 
-// Generic recursive file scanner: returns every file under `directory` whose
-// extension matches `extension` (e.g. ".json"), sorted for deterministic test
-// ordering. It carries NO bundle knowledge — graph-vs-companion filtering is
-// layered on top by the caller (see isGraphFile / discoverBundles). This is the
-// clean split called for in ALMIOPEN-1968: a generic scan, with bundle filtering
-// applied separately rather than baked into the directory walk.
+// One registerable bundle test. Direct bundles load jsonPath as a graph .json.
+// Template-sweep cases load jsonPath as sweep.json and carry a SweepCase naming
+// the graph.template.json and the cases[] entry to expand. diagnosticPath() is
+// only for logs/errors and names the logical sweep case.
+struct DiscoveredBundle
+{
+    std::filesystem::path jsonPath; // graph .json for single bundles, sweep.json for sweep cases
+    std::string suiteName;
+    std::string testName;
+    std::optional<SweepCase> sweep; // set iff this is a template-sweep case
+
+    bool isTemplateSweepCase() const
+    {
+        return sweep.has_value();
+    }
+
+    std::filesystem::path diagnosticPath() const
+    {
+        if(!isTemplateSweepCase())
+        {
+            return jsonPath;
+        }
+
+        return {jsonPath.string() + "#" + sweep->caseId};
+    }
+};
+
+// Generic recursive file scanner. It carries no bundle knowledge; graph vs
+// companion vs sweep filtering is layered on top by isGraphFile() and
+// discoverBundles().
 inline std::vector<std::filesystem::path>
     scanFilesByExtension(const std::filesystem::path& directory, const std::string& extension)
 {
@@ -71,12 +90,9 @@ inline std::vector<std::filesystem::path>
     return paths;
 }
 
-// Returns every leaf directory at or under `root` (a leaf has no subdirectories),
-// including `root` itself when it has no subdirectories. A leaf is where a bundle
-// is expected to live, so the caller uses this to reject leaf folders that hold
-// no graph .json (an authoring mistake — an empty bundle folder). Intermediate
-// directories (those with subdirectories) are just path segments and are not
-// returned.
+// Returns every leaf directory at or under root. Leaf folders with no graph .json
+// are warned as likely incomplete bundles, except for recognized sweep roots and
+// sweep golden-data leaves.
 inline std::vector<std::filesystem::path> findLeafDirectories(const std::filesystem::path& root)
 {
     std::set<std::filesystem::path> withSubdir;
@@ -102,55 +118,64 @@ inline std::vector<std::filesystem::path> findLeafDirectories(const std::filesys
     return leaves;
 }
 
-// Companion file "kinds" — the suffixes that mark a .json as a companion of a
-// graph rather than a graph itself. A companion is either "{Name}.{kind}.json"
-// (e.g. Small.meta.json) or the bare "{kind}.json" (e.g. meta.json). When a new
-// companion type is added (e.g. per-graph claims, RFC 0015), add its kind here —
-// this one list is the single place discovery learns about it.
+// Companion file kinds that mark a .json as metadata for a graph instead of a
+// graph test. Add future companion suffixes here so discovery has one exclusion
+// list.
 inline const std::set<std::string>& companionKinds()
 {
     static const std::set<std::string> s_kinds = {"meta"};
     return s_kinds;
 }
 
-// Discovery predicate (ALLOWLIST): true only for a bundle GRAPH .json — the file
-// that should become a test. A .json is a COMPANION (not a graph) when its name
-// is "{kind}.json" or "{Name}.{kind}.json" for a known kind in companionKinds();
-// everything else is a graph.
+inline bool isSweepTemplateFile(const std::filesystem::path& jsonPath)
+{
+    return jsonPath.filename() == "graph.template.json";
+}
+
+inline bool isSweepManifestFile(const std::filesystem::path& jsonPath)
+{
+    return jsonPath.filename() == "sweep.json";
+}
+
+inline bool isSweepBundleRoot(const std::filesystem::path& directory)
+{
+    return std::filesystem::exists(directory / "graph.template.json")
+           && std::filesystem::exists(directory / "sweep.json");
+}
+
+// Discovery predicate: true only for a direct bundle graph .json.
 //
-// We match the trailing dotted segment against the known-kind list rather than
-// rejecting "any dotted stem". That distinction matters: a legitimate graph may
-// embed dots in its name (e.g. model.fp16.json, resnet50.v2.json), and the
-// "drop a folder, it runs" contract for ad-hoc customer bundles means such a
-// file must still be discovered as a graph — not silently dropped as if it were
-// a companion. Only recognized companion kinds are excluded.
+// Known companion files are excluded when their whole stem is a companion kind
+// ("meta.json") or their final dotted segment is a companion kind
+// ("Small.meta.json"). Other dotted names remain valid graphs, e.g.
+// "model.fp16.json" or "resnet50.v2.json".
+//
+// Template-sweep control files ("graph.template.json" and "sweep.json") are not
+// direct graph tests; discoverSweepCases() registers logical tests for them.
 inline bool isGraphFile(const std::filesystem::path& jsonPath)
 {
     if(jsonPath.extension() != ".json")
     {
         return false;
     }
-    const auto stem = jsonPath.stem().string();
+    if(isSweepTemplateFile(jsonPath) || isSweepManifestFile(jsonPath))
+    {
+        return false;
+    }
 
-    // Bare companion: "meta.json" (stem == "meta").
+    const auto stem = jsonPath.stem().string();
     if(companionKinds().count(stem) != 0)
     {
         return false;
     }
 
-    // Suffixed companion: "{Name}.{kind}.json" — check the segment after the
-    // last '.'. A graph whose name merely contains dots (kind not recognized)
-    // falls through and is treated as a graph.
     const auto dot = stem.rfind('.');
     return dot == std::string::npos || companionKinds().count(stem.substr(dot + 1)) == 0;
 }
 
-// Maps any non-[alnum_] char to '_' so a path segment is a legal GTest name
-// component. Required, not redundant: bundle tests register via RegisterTest(),
-// which (unlike INSTANTIATE_TEST_SUITE_P's IsValidParamName) performs NO name
-// validation — this is the only thing keeping bundle test names legal. Repairs
-// rather than rejects because folder names legitimately contain '-'/'.' (e.g.
-// "resnet50-layer3.v2").
+// Maps any non-[alnum_] character to '_' so user-provided path segments and case
+// ids are legal GTest name components. RegisterTest() does not validate names, so
+// this is the safety boundary for ad-hoc customer bundle folders.
 inline std::string sanitizeForGtest(const std::string& input)
 {
     std::string result;
@@ -162,40 +187,18 @@ inline std::string sanitizeForGtest(const std::string& input)
     return result;
 }
 
-// Derives the GTest suite and test names from the bundle's path relative to the
-// data root. Convention: a bundle lives in its own folder containing the graph
-// .json, at least one folder below the root: {dir...}/{bundle}/{file}.json.
-//   suiteName = the relative directory path, segments sanitized and joined by '_'
-//   testName  = the .json file stem
-// e.g. quick/Batchnorm/ncdhw/fp32/Small/Small.json (rel. to root) ->
-//   suite "quick_Batchnorm_ncdhw_fp32_Small", test "Small".
-// A flat customer drop case_23421/graph.json -> suite "case_23421", test "graph".
-//
-// NOTE — divergence from RFC 0011 §4.3: the RFC derives op/layout/dtype from the
-// *graph JSON* and uses fixed tier folders. We deliberately impose NO structure:
-// any folder containing a graph .json is a runnable bundle, named purely from its
-// path. Structural correctness (layout, label-vs-graph consistency, well-formed
-// bundles) is enforced out-of-band by the Python bundle verifier, not here, so
-// "drop a folder, it runs" works for ad-hoc customer bundles.
-//
-// Consequence: op/dtype are NOT separable from the joined suite string. Tolerance
-// lookup (ALMIOPEN-1969) must read op/dtype from the graph JSON, not the folder.
-//
-// Throws if the .json sits directly at the data root (no folder above it), since
-// that yields an empty suite name.
-inline DerivedTestName deriveTestName(const std::filesystem::path& jsonPath,
-                                      const std::filesystem::path& bundleDir)
+// Builds the GTest suite from the bundle path relative to the data root by
+// sanitizing each segment and joining with '_'. Sweep roots must live below the
+// data root; direct bundles have a compatibility exception in deriveTestName()
+// for --golden-data-dir pointing directly at a bundle folder.
+inline std::string deriveSuiteName(const std::filesystem::path& relativeDir,
+                                   const std::filesystem::path& sourcePath)
 {
-    const auto relative = std::filesystem::relative(jsonPath, bundleDir);
-    const auto relativeDir = relative.parent_path();
-
     if(relativeDir.empty())
     {
-        // --gd points directly at a bundle folder (the .json is at the root).
-        // Use the folder name as the suite so "--gd .../graph_only_bundle" works.
-        const std::string suite = sanitizeForGtest(bundleDir.filename().string());
-        const std::string test = sanitizeForGtest(jsonPath.stem().string());
-        return {suite, test};
+        throw std::runtime_error(
+            "Bundle content must live in a sub-folder of the data root, not at the root itself: "
+            + sourcePath.string());
     }
 
     std::string suite;
@@ -207,66 +210,232 @@ inline DerivedTestName deriveTestName(const std::filesystem::path& jsonPath,
         }
         suite += sanitizeForGtest(segment.string());
     }
-
-    const std::string test = sanitizeForGtest(jsonPath.stem().string());
-
-    return {suite, test};
+    return suite;
 }
 
-// Recursively discovers bundles under the data root. Every graph .json (see
-// isGraphFile — i.e. any .json that is not a companion) is a bundle; its GTest
-// name comes from its path via deriveTestName. No fixed folder structure is
-// required — see deriveTestName for the rationale (structure is validated
-// out-of-band by the Python verifier).
+// Derives direct-bundle GTest names from path only:
+//   suiteName = relative directory path, sanitized and joined by '_'
+//   testName  = graph .json stem, sanitized
 //
-// Graceful handling:
-//   - a leaf folder (no subdirectories) that contains no graph .json is warned
-//     and skipped. Partial DVC pulls can leave empty folders; aborting the
-//     entire binary would prevent all other tests from running. A completely
-//     empty data root returns an empty vector (no bundles).
-//
-// Hard errors (throw):
-//   - a generated test-name collision: two bundles whose paths sanitize to the
-//     same GTest name (naming both paths so the clash is obvious).
-inline std::vector<DiscoveredBundle> discoverBundles(const std::filesystem::path& bundleDir)
+// This deliberately diverges from RFC 0011's fixed tier/op/layout/dtype folder
+// structure. Discovery imposes no semantic folder schema so "drop a folder, it
+// runs" works for ad-hoc bundles; structural validation belongs to the bundle
+// verifier, not registration.
+inline DerivedTestName deriveTestName(const std::filesystem::path& jsonPath,
+                                      const std::filesystem::path& bundleDir)
 {
-    std::vector<DiscoveredBundle> bundles;
-    std::unordered_map<std::string, std::filesystem::path> nameToPath;
+    const auto relative = std::filesystem::relative(jsonPath, bundleDir);
+    const auto relativeDir = relative.parent_path();
+    if(relativeDir.empty())
+    {
+        return {sanitizeForGtest(bundleDir.filename().string()),
+                sanitizeForGtest(jsonPath.stem().string())};
+    }
 
-    // Every leaf directory must hold at least one graph .json (non-meta).
+    return {deriveSuiteName(relativeDir, jsonPath), sanitizeForGtest(jsonPath.stem().string())};
+}
+
+inline bool isDescendantOf(const std::filesystem::path& path, const std::filesystem::path& ancestor)
+{
+    const auto normalizedPath = path.lexically_normal();
+    const auto normalizedAncestor = ancestor.lexically_normal();
+
+    auto pathIt = normalizedPath.begin();
+    auto ancestorIt = normalizedAncestor.begin();
+    for(; pathIt != normalizedPath.end() && ancestorIt != normalizedAncestor.end();
+        ++pathIt, ++ancestorIt)
+    {
+        if(*pathIt != *ancestorIt)
+        {
+            return false;
+        }
+    }
+
+    return ancestorIt == normalizedAncestor.end();
+}
+
+// A sweep root is any directory with both graph.template.json and sweep.json.
+// It registers one logical test per cases[].id, and normal graph discovery skips
+// every JSON file below it so templates, manifests, and golden metadata do not
+// become direct tests.
+inline std::vector<std::filesystem::path>
+    findSweepDirectories(const std::filesystem::path& bundleDir)
+{
+    std::set<std::filesystem::path> sweepDirs;
+    if(isSweepBundleRoot(bundleDir))
+    {
+        sweepDirs.insert(bundleDir);
+    }
+
+    for(const auto& entry : std::filesystem::recursive_directory_iterator(bundleDir))
+    {
+        if(entry.is_directory() && isSweepBundleRoot(entry.path()))
+        {
+            sweepDirs.insert(entry.path());
+        }
+    }
+
+    return {sweepDirs.begin(), sweepDirs.end()};
+}
+
+// Golden tensor directories under a sweep are leaves by design; they are data,
+// not incomplete bundle folders, so empty-leaf warnings skip them.
+inline bool isSweepGoldenLeaf(const std::filesystem::path& leaf,
+                              const std::vector<std::filesystem::path>& sweepDirs)
+{
+    return std::any_of(sweepDirs.begin(), sweepDirs.end(), [&](const auto& sweepDir) {
+        return isDescendantOf(leaf, sweepDir / "golden");
+    });
+}
+
+inline void warnOnEmptyLeafFolders(const std::filesystem::path& bundleDir,
+                                   const std::vector<std::filesystem::path>& sweepDirs)
+{
     for(const auto& leaf : findLeafDirectories(bundleDir))
     {
-        const bool hasGraph = std::any_of(std::filesystem::directory_iterator(leaf),
-                                          std::filesystem::directory_iterator(),
-                                          [](const std::filesystem::directory_entry& e) {
-                                              return e.is_regular_file() && isGraphFile(e.path());
-                                          });
+        if(isSweepBundleRoot(leaf) || isSweepGoldenLeaf(leaf, sweepDirs))
+        {
+            continue;
+        }
+
+        const bool hasGraph
+            = std::any_of(std::filesystem::directory_iterator(leaf),
+                          std::filesystem::directory_iterator(),
+                          [](const std::filesystem::directory_entry& entry) {
+                              return entry.is_regular_file() && isGraphFile(entry.path());
+                          });
         if(!hasGraph)
         {
             HIPDNN_PLUGIN_LOG_WARN("Skipping empty bundle leaf folder (no graph .json): " << leaf);
         }
     }
+}
 
-    for(const auto& jsonPath : scanFilesByExtension(bundleDir, ".json"))
+// Reads and validates the registration-time shape of sweep.json. Full case
+// validation happens during loading, but discovery needs cases[] ids to be
+// strings and unique so GTest names are deterministic and collision checks are
+// meaningful.
+inline std::vector<std::string> readSweepCaseIds(const std::filesystem::path& sweepPath)
+{
+    std::ifstream stream(sweepPath);
+    if(!stream)
     {
-        if(!isGraphFile(jsonPath))
+        throw std::runtime_error("Could not open sweep manifest: " + sweepPath.string());
+    }
+
+    const auto sweepJson = nlohmann::json::parse(stream, nullptr, /*allow_exceptions=*/false);
+    if(sweepJson.is_discarded())
+    {
+        throw std::runtime_error("Sweep manifest is not parseable JSON: " + sweepPath.string());
+    }
+    if(!sweepJson.contains("cases") || !sweepJson.at("cases").is_array())
+    {
+        throw std::runtime_error("Sweep manifest missing cases[] array: " + sweepPath.string());
+    }
+
+    std::unordered_set<std::string> seenIds;
+    std::vector<std::string> caseIds;
+    caseIds.reserve(sweepJson.at("cases").size());
+
+    for(const auto& caseJson : sweepJson.at("cases"))
+    {
+        if(!caseJson.is_object() || !caseJson.contains("id") || !caseJson.at("id").is_string())
         {
-            continue; // companion (.meta.json, future .claims.json, ...), not a graph
+            throw std::runtime_error("Sweep case missing string id: " + sweepPath.string());
         }
 
-        const DerivedTestName derived = deriveTestName(jsonPath, bundleDir);
+        const auto caseId = caseJson.at("id").get<std::string>();
+        if(!seenIds.insert(caseId).second)
+        {
+            throw std::runtime_error("Duplicate sweep case id '" + caseId + "' in "
+                                     + sweepPath.string());
+        }
+        caseIds.push_back(caseId);
+    }
 
-        auto fullName = derived.suiteName + "." + derived.testName;
+    return caseIds;
+}
+
+// Converts one sweep root into registerable logical tests. The suite name comes
+// from the sweep directory; the test name comes from the sanitized case id.
+inline std::vector<DiscoveredBundle> discoverSweepCases(const std::filesystem::path& sweepDir,
+                                                        const std::filesystem::path& bundleDir)
+{
+    const auto sweepPath = sweepDir / "sweep.json";
+    const auto templatePath = sweepDir / "graph.template.json";
+    const auto suiteName
+        = deriveSuiteName(std::filesystem::relative(sweepDir, bundleDir), sweepPath);
+
+    std::vector<DiscoveredBundle> bundles;
+    for(const auto& caseId : readSweepCaseIds(sweepPath))
+    {
+        bundles.push_back(
+            {sweepPath, suiteName, sanitizeForGtest(caseId), SweepCase{templatePath, caseId}});
+    }
+
+    return bundles;
+}
+
+// Recursively discovers all registerable bundle tests under the data root.
+//
+// Direct bundles: every graph .json accepted by isGraphFile() becomes one test.
+// Template sweeps: every sweep root becomes one test per cases[].id, and all JSON
+// below the sweep root is skipped by direct graph discovery.
+//
+// Graceful handling:
+//   - leaf folders without a graph .json warn and skip, so partial DVC pulls or
+//     empty customer folders do not prevent other tests from registering.
+//
+// Hard errors:
+//   - a malformed sweep manifest (unparseable, missing cases[], or a non-string
+//     or duplicate case id) throws: a checked-in manifest must be coherent, so a
+//     broken sweep fails the run rather than silently dropping its cases.
+//   - generated GTest name collisions throw and name both diagnostic paths.
+inline std::vector<DiscoveredBundle> discoverBundles(const std::filesystem::path& bundleDir)
+{
+    std::vector<DiscoveredBundle> bundles;
+    std::unordered_map<std::string, std::filesystem::path> nameToPath;
+
+    const auto sweepDirs = findSweepDirectories(bundleDir);
+    warnOnEmptyLeafFolders(bundleDir, sweepDirs);
+
+    auto registerBundle = [&](DiscoveredBundle bundle) {
+        const auto fullName = bundle.suiteName + "." + bundle.testName;
+        const auto diagnosticPath = bundle.diagnosticPath();
         auto it = nameToPath.find(fullName);
         if(it != nameToPath.end())
         {
             throw std::runtime_error("Bundle name collision: '" + fullName
                                      + "' produced by both:\n  " + it->second.string() + "\n  "
-                                     + jsonPath.string());
+                                     + diagnosticPath.string());
         }
-        nameToPath[fullName] = jsonPath;
+        nameToPath[fullName] = diagnosticPath;
+        bundles.push_back(std::move(bundle));
+    };
 
-        bundles.push_back({jsonPath, derived.suiteName, derived.testName});
+    for(const auto& sweepDir : sweepDirs)
+    {
+        for(auto& bundle : discoverSweepCases(sweepDir, bundleDir))
+        {
+            registerBundle(std::move(bundle));
+        }
+    }
+
+    for(const auto& jsonPath : scanFilesByExtension(bundleDir, ".json"))
+    {
+        if(std::any_of(sweepDirs.begin(), sweepDirs.end(), [&](const auto& sweepDir) {
+               return isDescendantOf(jsonPath, sweepDir);
+           }))
+        {
+            continue;
+        }
+        if(!isGraphFile(jsonPath))
+        {
+            continue;
+        }
+
+        const DerivedTestName derived = deriveTestName(jsonPath, bundleDir);
+        registerBundle({jsonPath, derived.suiteName, derived.testName, std::nullopt});
     }
 
     return bundles;

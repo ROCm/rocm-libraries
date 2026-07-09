@@ -171,6 +171,8 @@ TEST(TestHipblasltUtils, TensorDataTypeToHipblasltDataType)
     EXPECT_EQ(hipblaslt_utils::tensorDataTypeToHipDataType(DataType::HALF), HIP_R_16F);
     EXPECT_EQ(hipblaslt_utils::tensorDataTypeToHipDataType(DataType::BFLOAT16), HIP_R_16BF);
     EXPECT_EQ(hipblaslt_utils::tensorDataTypeToHipDataType(DataType::INT8), HIP_R_8I);
+    EXPECT_EQ(hipblaslt_utils::tensorDataTypeToHipDataType(DataType::FP8_E4M3), HIP_R_8F_E4M3);
+    EXPECT_EQ(hipblaslt_utils::tensorDataTypeToHipDataType(DataType::FP8_E5M2), HIP_R_8F_E5M2);
 }
 
 TEST(TestHipblasltUtils, TensorDataTypeToHipblasltDataTypeThrowsOnUnsupported)
@@ -242,4 +244,20 @@ TEST(TestHipblasltUtils, FindTensorAttributesThrowsIfNotFound)
 
     EXPECT_THROW(hipblaslt_utils::findTensorAttributes(attrMap, 1),
                  hipdnn_plugin_sdk::HipdnnPluginException);
+}
+
+// ============================================================================
+// IsTypeFp8Ocp
+// ============================================================================
+
+TEST(TestHipblasltUtils, IsTypeFp8Ocp)
+{
+    using namespace hipdnn_flatbuffers_sdk::data_objects;
+
+    EXPECT_TRUE(hipblaslt_utils::isTypeFp8Ocp(DataType::FP8_E4M3));
+    EXPECT_TRUE(hipblaslt_utils::isTypeFp8Ocp(DataType::FP8_E5M2));
+    EXPECT_FALSE(hipblaslt_utils::isTypeFp8Ocp(DataType::FP8_E8M0));
+    EXPECT_FALSE(hipblaslt_utils::isTypeFp8Ocp(DataType::FLOAT));
+    EXPECT_FALSE(hipblaslt_utils::isTypeFp8Ocp(DataType::HALF));
+    EXPECT_FALSE(hipblaslt_utils::isTypeFp8Ocp(DataType::BFLOAT16));
 }

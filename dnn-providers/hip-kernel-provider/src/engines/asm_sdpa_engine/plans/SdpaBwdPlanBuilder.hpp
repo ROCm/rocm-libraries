@@ -3,6 +3,7 @@
 
 #pragma once
 
+#include "SdpaModuleCache.hpp"
 #include "core/Context.hpp"
 #include "core/Handle.hpp"
 #include "core/Settings.hpp"
@@ -17,6 +18,12 @@ namespace asm_sdpa_engine
 class SdpaBwdPlanBuilder : public hipdnn_plugin_sdk::IPlanBuilder<Handle, Settings, Context>
 {
 public:
+    static SdpaModuleCache& moduleCache()
+    {
+        static SdpaModuleCache s_cache;
+        return s_cache;
+    }
+
     bool isApplicable(
         const Handle& handle,
         const hipdnn_flatbuffers_sdk::flatbuffer_utilities::IGraph& opGraph) const override;

@@ -26,14 +26,10 @@
 
 #pragma once
 
-#include <Tensile/Macros.hpp>
-
-#ifdef TENSILE_DEFAULT_SERIALIZATION
+#include <tensilelitehost/export.h>
 
 #include <Tensile/Singleton.hpp>
 #include <Tensile/Tensile.hpp>
-
-TENSILE_HIDDEN_BEGIN
 
 namespace TensileLite
 {
@@ -45,7 +41,7 @@ namespace TensileLite
  * stored in the executable via EmbedData/EmbeddedData.
  */
     template <typename MyProblem, typename MySolution = typename MyProblem::Solution>
-    class TENSILE_API EmbeddedLibrary : public LazySingleton<EmbeddedLibrary<MyProblem, MySolution>>
+    class TENSILELITEHOST_EXPORT EmbeddedLibrary : public LazySingleton<EmbeddedLibrary<MyProblem, MySolution>>
     {
     public:
         using Singleton = LazySingleton<EmbeddedLibrary<MyProblem, MySolution>>;
@@ -103,6 +99,3 @@ namespace TensileLite
 
 } // namespace TensileLite
 
-TENSILE_HIDDEN_END
-
-#endif
