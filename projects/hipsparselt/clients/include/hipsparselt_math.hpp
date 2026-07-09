@@ -30,9 +30,6 @@
 #include <cmath>
 #include <hip/hip_runtime.h>
 #include <hipsparselt/hipsparselt.h>
-#if defined(__x86_64__) || defined(__i386__)
-#include <immintrin.h>
-#endif
 #include <type_traits>
 
 /* ============================================================================================ */
