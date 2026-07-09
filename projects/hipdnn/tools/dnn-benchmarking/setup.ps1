@@ -79,6 +79,7 @@ $PSNativeCommandUseErrorActionPreference = $false
 # --- Paths -----------------------------------------------------------------
 $ScriptDir   = $PSScriptRoot
 $HipdnnRoot  = (Resolve-Path (Join-Path $ScriptDir '..\..')).Path
+$BuildDir = Join-Path $HipdnnRoot 'build'
 $BindingsRoot  = Join-Path $HipdnnRoot 'python'
 $BindingsSrc   = Join-Path $BindingsRoot 'frontend_bindings'
 $BindingsBuild = Join-Path $BuildDir 'python'
