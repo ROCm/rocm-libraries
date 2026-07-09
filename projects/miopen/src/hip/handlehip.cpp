@@ -24,9 +24,7 @@
 #include <miopen/filesystem.hpp>
 #include <miopen/load_file.hpp>
 
-#if MIOPEN_USE_COMPOSABLEKERNEL
 #include <miopen/solver/ck_impl_lib_loader.hpp>
-#endif
 
 #ifndef _WIN32
 #include <unistd.h>
@@ -61,11 +59,7 @@ namespace {
 // virtual GetTargetProperties on a not-yet-fully-constructed Handle.
 void PrefetchComposableKernel(const std::string& device_name)
 {
-#if MIOPEN_USE_COMPOSABLEKERNEL
     (void)solver::CkImplLibLoader::Get(device_name);
-#else
-    (void)device_name;
-#endif
 }
 
 hipError_t hip_mem_get_info_wrapper(std::size_t* const free, std::size_t* const total)

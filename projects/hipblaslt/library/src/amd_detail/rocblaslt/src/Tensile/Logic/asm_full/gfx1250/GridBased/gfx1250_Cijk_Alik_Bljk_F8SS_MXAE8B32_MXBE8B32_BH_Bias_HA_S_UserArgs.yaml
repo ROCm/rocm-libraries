@@ -320,7 +320,7 @@
     SpaceFillingAlgo: []
     StaggerU: 0
     StaggerUMapping: 0
-    StaggerUStride: 256.0
+    StaggerUStride: 256
     StorePriorityOpt: false
     StoreRemapVectorWidth: 0
     StoreSwapAddr: false

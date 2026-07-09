@@ -21,13 +21,14 @@
 #   - MatrixInstruction: [16, 16, 128, 1, 1, 1, 1, 2, 2] (MX WMMA)
 #   - TDMInst=3 + MXLoadInst=TDM + MXScaleFormat=InMemorySwizzle (required for gfx1250 MX)
 #   - WavefrontSize: 32
-#   - StreamK=[1, 2, 3] (mode 4 is dynamic; StreamKAtomic=1 requires SGEMM not MX)
+#   - StreamK=[3] only (mode 4 and 5 have keepsConstantsInSgpr=True, disabling
+#     isStreamKConstantsToVgprEnabled; StreamKAtomic=1 requires SGEMM not MX)
 #   - StreamKXCCMapping=[0] (XCCMapping=3 overflows SGPRs on gfx1250)
-#   - isStreamKConstantsToVgprEnabled=True for gfx1250 (ISA=(12,5,0)), covers lines 315-409
+#   - isStreamKConstantsToVgprEnabled=True for gfx1250 (ISA=(12,5,0)) only for mode 3
 #
 # StreamK family sweep:
-#   StreamK=[1, 2, 3] x StreamKAtomic=[0] x StreamKXCCMapping=[0]
-#   => 3 valid combos
+#   StreamK=[3] x StreamKAtomic=[0] x StreamKXCCMapping=[0]
+#   => 1 valid combo (modes 4 and 5 suppress isStreamKConstantsToVgprEnabled)
 GlobalParameters:
   SyncsPerBenchmark: 0
   MinimumRequiredVersion: 5.0.0
@@ -48,7 +49,7 @@ BenchmarkProblems:
   #   - HasInvWbDevFences=True -> StreamKMemoryOrderingDevScopeFences (lines 206-246)
   #   - RequiresXCntForVolatileVMEM=True -> preVolatileVmem SWaitXCnt (lines 151-152)
   #   - version[:2]==(12,5) -> shiftSrd gfx125x block (lines 276-287)
-  #   - ISA=(12,5,0), StreamK!=4 -> isStreamKConstantsToVgprEnabled=True (lines 315-409)
+  #   - ISA=(12,5,0), StreamK=3 (keepsConstantsInSgpr=False) -> isStreamKConstantsToVgprEnabled=True
   ########################################
   -
     - # ProblemType: MX-F8 TN
@@ -98,7 +99,7 @@ BenchmarkProblems:
         - VectorWidthB: [-1]
         - LocalReadVectorWidth: [-1]
         - StoreVectorWidth: [-1]
-        - StreamK: [1, 2, 3]
+        - StreamK: [3]
         - StreamKAtomic: [0]
         - StreamKXCCMapping: [0]
         - StaggerU: [0]

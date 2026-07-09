@@ -184,25 +184,4 @@ size_t guessNormalizedDim(
     return normalizedDimMin > 0 ? normalizedDimMin : normalizedDimMax;
 }
 
-size_t guessNormalizedDim(
-    const int64_t ioTensorId,
-    const std::optional<int64_t> affineTensorId,
-    const std::optional<int64_t> statTensorId,
-    const std::unordered_map<int64_t,
-                             const hipdnn_flatbuffers_sdk::data_objects::TensorAttributes*>&
-        tensorMap)
-{
-    const auto* ioAttr = &core::utils::findTensorAttributes(tensorMap, ioTensorId);
-    const std::optional<const hipdnn_flatbuffers_sdk::data_objects::TensorAttributes*> affineAttr
-        = affineTensorId.has_value()
-              ? std::optional(&core::utils::findTensorAttributes(tensorMap, affineTensorId.value()))
-              : std::nullopt;
-    const std::optional<const hipdnn_flatbuffers_sdk::data_objects::TensorAttributes*> statAttr
-        = statTensorId.has_value()
-              ? std::optional(&core::utils::findTensorAttributes(tensorMap, statTensorId.value()))
-              : std::nullopt;
-
-    return guessNormalizedDim(ioAttr, affineAttr, statAttr);
-}
-
 } // namespace hip_kernel_provider::layernorm

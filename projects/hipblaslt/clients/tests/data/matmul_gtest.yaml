@@ -2874,6 +2874,105 @@ Tests:
   beta: 0.0
   gpu_arch: '9(0a|42)'
 
+###############################################################################
+# 32-bit / size_t overflow coverage (AIHPBLAS-3806).
+#
+# These cases catch INT32 element-index overflow (element index > 2^31 - 1) in
+# the TensileLite addressing path -- the silent output-store correctness defect
+# ROCM-26455, reproduced by the bf16 gate below. They are modeled after
+# rocBLAS's gemm_size_t tests: M/N/K stay moderate while a leading dimension or
+# batch stride is inflated so the output (or input) element index crosses 2^31.
+# Full unit_check is used so both memory faults AND silent corruption are caught.
+#
+# Memory note: these allocate several GiB. On GPUs without enough memory the
+# harness reports the allocation failure as a skip (CHECK_DEVICE_ALLOCATION),
+# so the cases are safe to keep enabled; they only run for real on large-memory
+# parts. Gated to the gfx9 data-center arches where the defect manifests.
+###############################################################################
+
+# Systematic element-index overflow sweep (f32), rotating the
+# oversized leading dimension across A, B and the output C/D.
+- name: matmul_size_t_index_overflow
+  category: stress
+  function:
+    matmul: *single_precision
+  matrix_size: *size_t_index_overflow
+  transA: [ N, T ]
+  transB: [ N, T ]
+  alpha: 2.0
+  beta: 4.0
+  initialization: integer_exact
+  unit_check: 1
+  gpu_arch: '9(0a|42|50)'
+
+# Same sweep in f16 and bf16 (bf16 is the precision of the ROCM-26455 defect). This sweep
+# stays on rand_int rather than integer_exact: an input-side leading-dimension
+# overflow needs the oversized ld multiplied by K (transA=N / transB=T), which
+# requires K=2048, but integer_exact deliberately caps 16-bit at K<=512 for exact
+# representability and would skip the whole sweep. The bit-exact integer_exact
+# path covers the output-side defect via matmul_size_t_output_overflow_bf16_ROCM26455.
+- name: matmul_size_t_index_overflow_hpa
+  category: stress
+  function:
+    matmul:
+      - *hpa_half_precision
+      - *hpa_bf16_precision
+  matrix_size: *size_t_index_overflow
+  transA: [ N, T ]
+  transB: [ N, T ]
+  alpha: 2.0
+  beta: 4.0
+  initialization: rand_int
+  unit_check: 1
+  gpu_arch: '9(0a|42|50)'
+
+# Concrete ROCM-26455 reproducer: bf16, transA=N / transB=T, with bias and
+# a scaleAlpha vector (the Cijk_Ailk_Bjlk_BBS_BH_Bias_HA_S_SAV kernel family),
+# driven onto an oversized output leading dimension so the output buffer index
+# crosses 2^31 -> silent wrong results (a correctness defect in the output-store
+# address path). When the
+# output-store fix lands this case FAILs pre-fix / PASSes post-fix; until then it
+# is registered in known_bugs.yaml (skipped on the affected gfx942/gfx950 arches)
+# so the reproducer can land ahead of the fix -- remove that known_bugs entry to
+# re-activate it as an enforced bit-exact gate. integer_exact initialization fills
+# A/B/C with {0,1,2} and bias/scaleAlphaVec with small integers, keeping the whole
+# epilogue integer-valued so the harness can demand a bit-exact (tol=0) match.
+# K=256 stays under the 16-bit exact-representability cap.
+- name: matmul_size_t_output_overflow_bf16_ROCM26455
+  category: pre_checkin
+  function:
+    matmul: *hpa_bf16_precision
+  matrix_size: *size_t_output_overflow
+  transA: N
+  transB: T
+  alpha: 1.0
+  beta: 0.0
+  bias_vector: 1
+  bias_type: f32_r
+  scaleAlpha_vector: 1
+  initialization: integer_exact
+  unit_check: 1
+  gpu_arch: '9(42|50)'
+
+# Strided-batched output: inflate stride_c/stride_d so stride * bpe crosses 2^31
+# for the per-batch base offset, while the per-batch compute stays at 64x64x64.
+# For bf16 (bpe = 2), stride = 1073741824 (2^30) -> 2^31 bytes for batch index 1.
+- name: matmul_size_t_batch_stride_overflow
+  category: stress
+  function:
+    matmul: *hpa_bf16_precision
+  matrix_size:
+    - { M: 64, N: 64, K: 64, lda: 64, ldb: 64, ldc: 64, ldd: 64,
+        stride_a: 4096, stride_b: 4096, stride_c: 1073741824, stride_d: 1073741824 }
+  batch_count: 2
+  transA: N
+  transB: T
+  alpha: 1.0
+  beta: 0.0
+  initialization: integer_exact
+  unit_check: 1
+  gpu_arch: '9(0a|42|50)'
+
 
 - name: matmul_96_complex
   category: pre_checkin

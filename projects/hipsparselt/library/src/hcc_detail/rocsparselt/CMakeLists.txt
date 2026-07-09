@@ -28,4 +28,4 @@ target_include_directories(hipsparselt PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/src/
 set(tensile_source_files "${CMAKE_CURRENT_SOURCE_DIR}/src/tensile_host.cpp")
 list(APPEND hipsparselt_source_backend ${tensile_source_files})
 
-target_link_libraries(hipsparselt PRIVATE tensilelite::tensilelite-host)
+target_link_libraries(hipsparselt PRIVATE roc::tensilelite-host)

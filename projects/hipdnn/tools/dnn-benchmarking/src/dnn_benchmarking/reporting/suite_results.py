@@ -106,7 +106,7 @@ class ProviderEngineResult:
             counted as pass/fail engine combinations.
         cpu_build_time_ms: CPU graph-build time.
         gpu_kernel_stats: GPU kernel timing statistics.
-        e2e_stats: End-to-end wall-clock timing statistics.
+        host_stats: Host-side submission timing statistics.
         correctness: Correctness comparison result.
         error_message: Error message only (no partial timing on error).
         skip_reason: Reason this combination was skipped.
@@ -162,7 +162,7 @@ class ProviderEngineResult:
     plugin_path: Optional[str] = None
     cpu_build_time_ms: Optional[float] = None
     gpu_kernel_stats: Optional[BenchmarkStats] = None
-    e2e_stats: Optional[BenchmarkStats] = None
+    host_stats: Optional[BenchmarkStats] = None
     elapsed_time_ms: float = 0.0
     correctness: Optional[CorrectnessResult] = None
     error_message: Optional[str] = None
@@ -234,7 +234,7 @@ class ProviderEngineResult:
             d["gpu_kernel_stats"] = (
                 self.gpu_kernel_stats.to_dict() if self.gpu_kernel_stats else None
             )
-            d["e2e_stats"] = self.e2e_stats.to_dict() if self.e2e_stats else None
+            d["host_stats"] = self.host_stats.to_dict() if self.host_stats else None
             d["elapsed_time_ms"] = self.elapsed_time_ms
 
             # Always-on metric fields — emit only when populated.

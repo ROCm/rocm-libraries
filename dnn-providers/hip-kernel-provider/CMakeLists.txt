@@ -141,16 +141,14 @@ file(MAKE_DIRECTORY ${HIPDNN_BUILD_PLUGIN_ENGINE_DIR})
 
 if(HIPKERNELPROVIDER_ENABLE_ROCKE)
     message(STATUS "rocKE features enabled")
-    add_subdirectory(rocke-client)
 
-    # Build + install the rocKE smoke tests into the hip_kernel_provider CTest
-    # bucket when explicitly enabled. add_subdirectory(rocKE) must precede src/
-    # so rocKE's installed CTest entries are staged into
-    # EXTERNAL_TEST_INSTALL_STAGING_hip_kernel_provider before the provider emits
-    # bin/hip_kernel_provider/CTestTestfile.cmake.
+    # rocke/ = library (api / provider plugin) + platform (engine). The engine's
+    # installed CTest entries stage into
+    # EXTERNAL_TEST_INSTALL_STAGING_hip_kernel_provider, so add_subdirectory(rocke)
+    # must precede src/ below, which emits bin/hip_kernel_provider/CTestTestfile.cmake.
     set(ROCKE_INSTALL_PROVIDER_CTEST_SUBDIR "hip_kernel_provider")
     set(ROCKE_INSTALL_STANDALONE_CTEST OFF)
-    add_subdirectory(rocKE)
+    add_subdirectory(rocke)
 else()
     message(STATUS "rocKE features disabled")
 endif()
