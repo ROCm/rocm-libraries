@@ -9,7 +9,7 @@
 
 #include "common.hpp"
 #include "origami/nn/config.hpp"
-#include "origami/nn/features/gemm_tilewright_v1.hpp"
+#include "origami/nn/features/gemm_tilewright.hpp"
 #include "origami/nn/filter.hpp"
 #include "origami/origami.hpp"
 
@@ -46,7 +46,7 @@ TEST_CASE("NN: rank_configs rank_options_t matches model_t overload", "[nn]") {
   }
 }
 
-TEST_CASE("NN: rank_configs inference=nn throws before Phase 2", "[nn]") {
+TEST_CASE("NN: rank_configs inference=nn throws without model", "[nn]") {
   const auto hardware = make_hardware(950);
   const auto problem  = make_problem(1024, 1024, 1024);
   std::vector<origami::config_t> configs = {make_config(128, 128, 32)};

@@ -25,6 +25,7 @@ option(ORIGAMI_ENABLE_PYTHON "Enable Python bindings." OFF)
 option(ORIGAMI_BUILD_TESTING "Build tests." OFF)
 option(ORIGAMI_ENABLE_FETCH "Auto-fetch dependencies with FetchContent" ON)
 option(ORIGAMI_ENABLE_NN "Build NN feature/filter stack (Phase 1+)." ON)
+option(ORIGAMI_ENABLE_NN_TILEWRIGHT "Build tilewright NN backend (requires shared/tilewright)." ON)
 
 find_package(hip REQUIRED)
 
@@ -98,10 +99,17 @@ if(ORIGAMI_ENABLE_NN)
         FILES
             "${CMAKE_CURRENT_SOURCE_DIR}/include/origami/nn/filter.hpp"
             "${CMAKE_CURRENT_SOURCE_DIR}/include/origami/nn/features/gemm_tilewright.hpp"
+            "${CMAKE_CURRENT_SOURCE_DIR}/include/origami/nn/nn.hpp"
     )
     target_compile_definitions(origami-headers INTERFACE ORIGAMI_ENABLE_NN=1)
+    if(ORIGAMI_ENABLE_NN_TILEWRIGHT AND EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/../tilewright/CMakeLists.txt")
+        target_compile_definitions(origami-headers INTERFACE ORIGAMI_ENABLE_NN_TILEWRIGHT=1)
+    else()
+        target_compile_definitions(origami-headers INTERFACE ORIGAMI_ENABLE_NN_TILEWRIGHT=0)
+    endif()
 else()
     target_compile_definitions(origami-headers INTERFACE ORIGAMI_ENABLE_NN=0)
+    target_compile_definitions(origami-headers INTERFACE ORIGAMI_ENABLE_NN_TILEWRIGHT=0)
 endif()
 
 set_target_properties(origami-headers PROPERTIES VERIFY_INTERFACE_HEADER_SETS ON)
@@ -129,7 +137,25 @@ if(ORIGAMI_ENABLE_NN)
         origami
         PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/src/nn/filter.cpp"
                 "${CMAKE_CURRENT_SOURCE_DIR}/src/nn/features/gemm_tilewright.cpp"
+                "${CMAKE_CURRENT_SOURCE_DIR}/src/nn/types.cpp"
+                "${CMAKE_CURRENT_SOURCE_DIR}/src/nn/model_registry.cpp"
+                "${CMAKE_CURRENT_SOURCE_DIR}/src/nn/dispatch.cpp"
     )
+    if(ORIGAMI_ENABLE_NN_TILEWRIGHT AND EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/../tilewright/CMakeLists.txt")
+        if(NOT TARGET roc::tilewright)
+            set(TILEWRIGHT_ENABLE_INSTALL OFF CACHE BOOL "" FORCE)
+            set(TILEWRIGHT_BUILD_TESTING OFF CACHE BOOL "" FORCE)
+            set(TILEWRIGHT_ENABLE_HIPBLASLT_BACKEND OFF CACHE BOOL "" FORCE)
+            set(TILEWRIGHT_ENABLE_YAML ON CACHE BOOL "" FORCE)
+            add_subdirectory("${CMAKE_CURRENT_SOURCE_DIR}/../tilewright"
+                             "${CMAKE_CURRENT_BINARY_DIR}/tilewright"
+                             EXCLUDE_FROM_ALL)
+        endif()
+        target_link_libraries(origami PRIVATE roc::tilewright)
+        target_compile_definitions(origami PRIVATE ORIGAMI_ENABLE_NN_TILEWRIGHT=1)
+    else()
+        target_compile_definitions(origami PRIVATE ORIGAMI_ENABLE_NN_TILEWRIGHT=0)
+    endif()
 endif()
 
 target_link_libraries(origami PRIVATE hip::host)
@@ -143,6 +169,7 @@ if(ORIGAMI_BUILD_TESTING OR BUILD_TESTING)
     add_subdirectory(tests)
 endif()
 
+if(ORIGAMI_STANDALONE)
 rocm_install(TARGETS origami)
 
 install(TARGETS origami-headers
@@ -191,3 +218,4 @@ rocm_create_package(
     LDCONFIG
     LDCONFIG_DIR ${ORIGAMI_CONFIG_DIR}
 )
+endif()

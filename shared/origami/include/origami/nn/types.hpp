@@ -28,6 +28,7 @@
 
 #include <cstddef>
 #include <cstdint>
+#include <string>
 
 namespace origami::nn {
 
@@ -38,6 +39,22 @@ constexpr model_handle_t invalid_handle = -1;
 enum class backend_id_t : std::uint8_t {
   tilewright_v1,
   embedding_similarity_v1,
+};
+
+struct feature_layout_t {
+  std::string catalog_id;
+  std::string feature_names_hash;
+  std::uint32_t query_dim       = 0;
+  std::uint32_t item_dim        = 0;
+  std::uint32_t interaction_dim = 0;
+};
+
+struct model_info_t {
+  backend_id_t     backend = backend_id_t::tilewright_v1;
+  std::string      arch;
+  feature_layout_t features;
+  std::uint32_t    n_cells  = 0;
+  std::uint32_t    n_splits = 0;
 };
 
 /// Backend-specific knobs passed through rank_options_t::nn.
@@ -51,6 +68,9 @@ struct inference_options_t {
 struct library_models_t {
   model_handle_t tilewright           = invalid_handle;
   model_handle_t embedding_similarity = invalid_handle;
+
+  bool has(backend_id_t backend) const;
+  model_handle_t get(backend_id_t backend) const;
 };
 
 }  // namespace origami::nn

@@ -13,6 +13,7 @@
 #include "origami/logger.hpp"
 #include "origami/math.hpp"
 #include "origami/nn/config.hpp"
+#include "origami/nn/detail/recommender.hpp"
 #include "origami/origami.hpp"
 #include "origami/streamk.hpp"
 #include "origami/types.hpp"
@@ -760,11 +761,21 @@ std::vector<prediction_result_t> rank_configs(const problem_t& problem,
                                               const std::vector<config_t>& configs,
                                               rank_options_t options) {
 #if ORIGAMI_ENABLE_NN
+  options = nn::detail::resolve_rank_options(options);
+
   if (options.inference != inference_mode_t::analytical) {
-    if (options.inference == inference_mode_t::nn) {
-      throw std::runtime_error("NN inference not yet implemented (Phase 2)");
+    if (const nn::model_handle_t handle = nn::detail::resolve_model_handle(options);
+        handle >= 0) {
+      if (auto results = nn::detail::try_rank_with_model(
+              handle, problem, hardware, configs, options.nn)) {
+        return *results;
+      }
+      if (options.inference == inference_mode_t::nn) {
+        throw std::runtime_error("NN inference failed");
+      }
+    } else if (options.inference == inference_mode_t::nn) {
+      throw std::runtime_error("No NN model loaded for selected backend");
     }
-    // nn_fallback: fall through to analytical until model loaders exist.
   }
 #else
   if (options.inference == inference_mode_t::nn) {

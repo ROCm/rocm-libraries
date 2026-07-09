@@ -32,6 +32,11 @@
 
 #include <Tensile/UtilsOrigami.hpp>
 
+#include <origami/nn/config.hpp>
+#if ORIGAMI_ENABLE_NN
+#  include <origami/nn/nn.hpp>
+#endif
+
 #include <tensilelitehost/export.h>
 
 namespace TensileLite
@@ -50,6 +55,10 @@ namespace TensileLite
     {
         std::vector<std::pair<int, std::shared_ptr<MySolution>>> solution_list;
         std::vector<origami::config_t>                           origami_config_list;
+
+#if ORIGAMI_ENABLE_NN
+        origami::nn::library_models_t nn_models;
+#endif
 
         mutable std::atomic<bool> lastFindTopRetAll = false;
 
@@ -183,8 +192,12 @@ namespace TensileLite
                 .b_mx_block_size = 0, // MX Data types come from rocroller
             };
 
+            origami::rank_options_t rank_options;
+#if ORIGAMI_ENABLE_NN
+            rank_options.library_models = &nn_models;
+#endif
             auto prediction_result = origami::rank_configs(
-                origami_problem, *(pAMDGPU->analyticalHardware), origami_config_list);
+                origami_problem, *(pAMDGPU->analyticalHardware), origami_config_list, rank_options);
 
             for(const auto& r : prediction_result)
             {
