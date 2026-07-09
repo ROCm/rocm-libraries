@@ -585,6 +585,34 @@ def _enable_k_single_buffer(problem: UnifiedAttentionProblem) -> bool:
     return _enable_d128_small_tile(problem) and problem.block_size >= 32
 
 
+def _d256_gfx950_fast(problem: "UnifiedAttentionProblem") -> bool:
+    """Route the D256 gfx950 bf16 prefill cohort to the 32x32
+    transposed fast path + FA3-style softmax<->MFMA interleave.
+
+    Gates the three launch-critical geometry selectors (num_warps / tile_size /
+    block_m_per_warp) so the builder spec, ``_tiled_cache_key`` and
+    ``_get_2d_launch_meta`` all agree; the remaining codegen flags (32x32 MFMA,
+    transposed stack, register_pv off, K single-buffer, interleave mode2/g4) are
+    applied by the spec override in ``_tiled_spec_from_problem``. Narrow +
+    arch/feature-guarded: every other shape is byte-identical.
+
+    Perf (MI355X, direct-launch sweep, fp32-ref max_abs=1.5625e-02): +interleave
+    mode2 g4 gives +9.1% @ Sq4096 and +10.1% @ Sq8192 over the 32x32 base.
+    """
+    return (
+        _resolve_attention_arch() == "gfx950"
+        and problem.head_size == 256
+        and problem.dtype == "bf16"
+        and not problem.use_fp8
+        and problem.sliding_window == 0
+        and problem.softcap == 0
+        and not problem.use_sinks
+        and not problem.use_alibi
+        and not problem.use_qq_bias
+        and problem.max_seqlen_q > 1
+    )
+
+
 def _select_2d_tile_size(problem: UnifiedAttentionProblem) -> int:
     """Choose ``tile_size`` (T) for the tiled 2D kernel.
 
@@ -612,6 +640,8 @@ def _select_2d_tile_size(problem: UnifiedAttentionProblem) -> int:
     ``T = block_size`` (single block per iter, 32 tokens) — measured
     1.15-1.30× win on every FP8 SW long-prefill shape.
     """
+    if _d256_gfx950_fast(problem):
+        return 64
     if _resolve_attention_arch() == "gfx1250":
         # gfx1250 v1 consumes exactly one 32-token paged-KV block per WMMA
         # iteration; wider T needs separate multi-block block-table handling.
@@ -754,6 +784,8 @@ def _select_2d_num_warps(problem: UnifiedAttentionProblem) -> int:
       - an LDS-budget check (``<= 96 KiB`` so we keep >= 1 CTA/CU on
         MI355X comfortably).
     """
+    if _d256_gfx950_fast(problem):
+        return 2
     if _resolve_attention_arch() == "gfx1250":
         # A gfx1250 workgroup is one wave32 in the v1 WMMA tiled path.
         return 1
@@ -2045,6 +2077,39 @@ def _tiled_spec_from_problem(
     )
 
     _spec = _impl(problem)
+    # D256 gfx950 bf16 prefill fast route. The default builder routes
+    # head_size==256 to the 16x16 register_pv body (~0.24x torch.compile). The
+    # 32x32 transposed constellation is LEGAL for D256 (use_mfma_32x32 needs only
+    # head_size%16==0) and ~4.5-5.9x faster; the FA3-style softmax<->MFMA
+    # interleave (mode2 g4) adds a further +9-10% by hiding the exposed v_exp
+    # behind the QK/PV MFMA at the kernel's low (4 waves/CU) occupancy. Geometry
+    # (num_warps / tile_size / block_m_per_warp) is set by the gated selectors
+    # above so the cache key + launch meta agree; here we set the codegen flags.
+    # The cohort is uniquely keyed by head_size==256, so the (unkeyed) interleave
+    # + codegen overrides cannot collide with any other shape. _resolve_lds_budget
+    # no-ops here (register_pv=False, fits the 160 KB cap at 64 KB).
+    if _d256_gfx950_fast(problem):
+        _spec = replace(
+            _spec,
+            use_mfma_32x32=True,
+            use_transposed_qk_32x32=True,
+            use_q_direct_reg=True,
+            use_transposed_half_local_pv=True,
+            use_transposed_scalar_state=True,
+            use_transposed_mask_once=True,
+            use_transposed_mask_limit=True,
+            use_mask_phase_split=True,
+            use_register_pv=False,
+            use_k_single_buffer=True,
+            use_v_double_buffer=False,
+            use_early_v_schedule=False,
+            use_sched_barrier=False,
+            use_softmax_mfma_interleave=True,
+            softmax_interleave_mode=2,
+            softmax_interleave_groups=4,
+            use_fast_paged_kv_desc=False,
+            use_mfma32_skip_legacy_qreg=False,
+        )
     return _resolve_lds_budget(_spec)
 
 
@@ -2089,6 +2154,8 @@ def _select_2d_block_m_per_warp(problem: UnifiedAttentionProblem) -> int:
     Gate: ``max_seqlen_q > 256 and num_seqs >= 2``. Below this, mw=16
     is consistently within noise of mw=32 in the per-shape sweep.
     """
+    if _d256_gfx950_fast(problem):
+        return 32
     if _resolve_attention_arch() == "gfx1250":
         return 16
     # mw=32 (BLOCK_M = 32 * num_warps) only pays off when a path actually
