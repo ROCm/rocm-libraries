@@ -27,11 +27,11 @@
 #include <type_traits>
 
 // RAII wrapper around HIP objects (or rocfft objects if TSuccess == rocfft_status_success)
-template <typename T, auto TCreate, auto TDestroy, auto TSuccess = hipSuccess>
+template <typename T, auto TCreate, auto TDestroy, auto TSuccess = hipSuccess, auto Tinit = nullptr>
 struct hip_object_wrapper_t
 {
     hip_object_wrapper_t()
-        : obj(nullptr)
+        : obj(Tinit)
         , owned(true)
     {
     }
@@ -63,7 +63,7 @@ struct hip_object_wrapper_t
         if(obj && owned)
         {
             (void)TDestroy(obj);
-            obj = nullptr;
+            obj = Tinit;
         }
     }
 
@@ -78,7 +78,7 @@ struct hip_object_wrapper_t
 
     operator bool() const
     {
-        return obj != nullptr;
+        return obj != Tinit;
     }
 
     ~hip_object_wrapper_t()
@@ -92,7 +92,7 @@ struct hip_object_wrapper_t
         : obj(other.obj)
         , owned(other.owned)
     {
-        other.obj   = nullptr;
+        other.obj   = Tinit;
         other.owned = false;
     }
 

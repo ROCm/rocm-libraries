@@ -27,6 +27,7 @@
 #include <gtest/gtest.h>
 #include <limits>
 #include <numeric>
+#include <optional>
 #include <random>
 #include <set>
 #include <sstream>
@@ -49,57 +50,43 @@ DISABLE_WARNING_RETURN_TYPE
 DISABLE_WARNING_POP
 #endif
 
+// Minimum number of random probes per device in hipfftXt data distribution verification
+extern size_t min_probes_per_dev_for_xt;
+
+// Token string for manual hipfftXt test (set from CLI in gtest_main.cpp)
+extern std::string hipfftxt_test_token;
+
 template <>
 struct is_fft_enum<hipfftXtSubFormat, true> : std::true_type
 {
 };
 
-inline void validate_or_throw(hipfftXtSubFormat subformat, const std::string& func_name)
+template <>
+struct fft_enum_map<hipfftXtSubFormat>
 {
-    switch(subformat)
-    {
-    case HIPFFT_XT_FORMAT_INPLACE:
-        [[fallthrough]];
-    case HIPFFT_XT_FORMAT_INPLACE_SHUFFLED:
-        [[fallthrough]];
-    case HIPFFT_XT_FORMAT_INPUT:
-        [[fallthrough]];
-    case HIPFFT_XT_FORMAT_OUTPUT:
-        [[fallthrough]];
-    case HIPFFT_XT_FORMAT_1D_INPUT_SHUFFLED:
-        [[fallthrough]];
-    case HIPFFT_FORMAT_UNDEFINED:
-        return;
-    default:
-        throw std::invalid_argument("invalid/undefined subformat for " + func_name);
-    }
-}
+    static constexpr std::string_view type_name = "multi-device descriptor subformat";
+    static constexpr std::pair<hipfftXtSubFormat, std::string_view> entries[] = {
+        {HIPFFT_XT_FORMAT_INPUT, "HIPFFT_XT_FORMAT_INPUT"},
+        {HIPFFT_XT_FORMAT_OUTPUT, "HIPFFT_XT_FORMAT_OUTPUT"},
+        {HIPFFT_XT_FORMAT_INPLACE, "HIPFFT_XT_FORMAT_INPLACE"},
+        {HIPFFT_XT_FORMAT_INPLACE_SHUFFLED, "HIPFFT_XT_FORMAT_INPLACE_SHUFFLED"},
+        {HIPFFT_XT_FORMAT_1D_INPUT_SHUFFLED, "HIPFFT_XT_FORMAT_1D_INPUT_SHUFFLED"},
+        {HIPFFT_FORMAT_UNDEFINED, "HIPFFT_FORMAT_UNDEFINED"},
+    };
+};
 
-static std::string format_name(const hipfftXtSubFormat& subformat)
+// Deterministic, order-independent PRNG for a single test case (and possible I/O
+// role being tested). Seeding from random_seed plus a hash of the case's canonical
+// token makes each test's random sampling reproducible in isolation -- independent
+// of test execution order or sharding, and exactly reproducible via --hipfftxt_test_token.
+// The io argument may be irrelevant and omitted in some contexts; a default value
+// of fft_io_in is used then.
+static std::mt19937 make_test_prng(const std::string& token, fft_io io = fft_io::fft_io_in)
 {
-    switch(subformat)
-    {
-    case HIPFFT_XT_FORMAT_INPUT:
-        return "HIPFFT_XT_FORMAT_INPUT";
-    case HIPFFT_XT_FORMAT_OUTPUT:
-        return "HIPFFT_XT_FORMAT_OUTPUT";
-    case HIPFFT_XT_FORMAT_INPLACE:
-        return "HIPFFT_XT_FORMAT_INPLACE";
-    case HIPFFT_XT_FORMAT_INPLACE_SHUFFLED:
-        return "HIPFFT_XT_FORMAT_INPLACE_SHUFFLED";
-    case HIPFFT_XT_FORMAT_1D_INPUT_SHUFFLED:
-        return "HIPFFT_XT_FORMAT_1D_INPUT_SHUFFLED";
-    case HIPFFT_FORMAT_UNDEFINED:
-        return "HIPFFT_FORMAT_UNDEFINED";
-    default:
-        throw std::invalid_argument("Unexpected value of hipfftXtSubFormat given to format_name()");
-    }
-}
-
-std::mt19937& get_prng()
-{
-    static std::mt19937 prng(random_seed);
-    return prng;
+    std::seed_seq seed{static_cast<size_t>(random_seed),
+                       static_cast<size_t>(std::hash<std::string>{}(token)),
+                       static_cast<size_t>(io)};
+    return std::mt19937(seed);
 }
 
 #ifdef __HIP_PLATFORM_AMD__
@@ -110,18 +97,20 @@ static constexpr bool rocfft_backend = false;
 
 struct hipfftxt_test_params_t
 {
-    hipfftxt_test_params_t(fft_transform_type  _dft_type,
-                           hipfftXtSubFormat   _input_desc_format,
-                           size_t              _ngpus,
-                           size_t              _batch,
-                           std::vector<size_t> _transform_lengths,
-                           fft_precision       _precision)
+    hipfftxt_test_params_t(fft_transform_type               _dft_type,
+                           hipfftXtSubFormat                _input_desc_format,
+                           size_t                           _ngpus,
+                           size_t                           _batch,
+                           std::vector<size_t>              _transform_lengths,
+                           fft_precision                    _precision,
+                           std::optional<hipfftXtSubFormat> _output_desc_format = std::nullopt)
         : dft_type(_dft_type)
         , input_desc_format(_input_desc_format)
         , ngpus(_ngpus)
         , batch(_batch)
         , transform_lengths(_transform_lengths)
         , precision(_precision)
+        , explicit_output_desc_format(_output_desc_format)
     {
         if(ngpus <= 1)
             throw std::invalid_argument("hipfftxt_test_params_t: requires more than 1 GPU");
@@ -137,11 +126,16 @@ struct hipfftxt_test_params_t
                 "hipfftxt_test_params_t: batch and transform lengths must be non-zero");
         }
         validate_enums_or_throw("hipfftxt_test_params_t", dft_type, input_desc_format, precision);
+        if(explicit_output_desc_format)
+        {
+            validate_or_throw(*explicit_output_desc_format, "hipfftxt_test_params_t");
+        }
         // precision can only be single or double for hipfftxt tests, so check that here.
         if(precision != fft_precision_single && precision != fft_precision_double)
             throw std::invalid_argument(
                 "hipfftxt_test_params_t: precision must be single or double for hipfftxt tests");
     }
+
     const fft_transform_type  dft_type;
     const hipfftXtSubFormat   input_desc_format;
     const size_t              ngpus;
@@ -348,25 +342,115 @@ struct hipfftxt_test_params_t
         return ret;
     }
 
+    // produces a token string that reflects the test parameters' member values, e.g.,
+    // single_real_inverse_input_fmt_HIPFFT_XT_FORMAT_INPLACE_output_fmt_HIPFFT_XT_FORMAT_INPLACE_batch_64_lengths_32_36_ngpus_5
     inline std::string str() const
     {
         std::ostringstream oss;
-        oss << (precision == fft_precision_single ? "single" : "double") << "_"
-            << fft_transform_type_name(dft_type) << "_" << format_name(input_desc_format)
-            << "_batch_" << batch << "_lengths_";
+        oss << fft_enum_to_string(precision) << token_sep << fft_enum_to_string(dft_type)
+            << token_sep << input_fmt_tag << token_sep << fft_enum_to_string(input_desc_format)
+            << token_sep << output_fmt_tag << token_sep << fft_enum_to_string(output_desc_format())
+            << token_sep << batch_tag << token_sep << batch << token_sep << lengths_tag
+            << token_sep;
         for(auto len : transform_lengths)
-            oss << len << "_";
-        oss << "ngpus_" << ngpus;
+            oss << len << token_sep;
+        oss << ngpus_tag << token_sep << ngpus;
 
         return oss.str();
     }
 
+    // Constructs a hipfftxt_test_params_t object from a token string (as produced by str()).
+    static hipfftxt_test_params_t make_from_token(std::string_view token)
+    {
+        const auto* token_raw = token.data();
+        size_t      pos       = 0;
+
+        // Helper: expect and consume a separator, optionally followed by a tag and another
+        // separator. With no tag: consumes one token_sep. With a tag: consumes
+        // token_sep + tag + token_sep.
+        auto expect_sep = [&](std::string_view tag = {}) {
+            if(token.substr(pos, token_sep.size()) != token_sep)
+                throw std::invalid_argument(
+                    "make_from_token: expected separator"
+                    + (tag.empty() ? std::string{} : " before " + std::string(tag)));
+            pos += token_sep.size();
+            if(!tag.empty())
+            {
+                if(token.substr(pos, tag.size()) != tag)
+                    throw std::invalid_argument("make_from_token: expected tag: "
+                                                + std::string(tag));
+                pos += tag.size();
+                if(token.substr(pos, token_sep.size()) != token_sep)
+                    throw std::invalid_argument("make_from_token: expected separator after "
+                                                + std::string(tag));
+                pos += token_sep.size();
+            }
+        };
+
+        // Helper: parse a size_t at pos up to the next separator, advancing pos past
+        // the digits to the separator position. Caller must ensure pos is at the start
+        // of digit characters (not at a separator).
+        auto parse_size = [&](std::string_view context) -> size_t {
+            auto next_pos = token.find(token_sep, pos);
+            // possibly a trailing value in the token, with no separator after it
+            if(next_pos == std::string_view::npos)
+                next_pos = token.size();
+            if(next_pos <= pos)
+                throw std::invalid_argument("make_from_token: empty field for "
+                                            + std::string(context));
+            size_t ret = std::stoull(std::string(token.substr(pos, next_pos - pos)));
+            pos        = next_pos;
+            return ret;
+        };
+
+        // Parse precision
+        const auto precision = fft_enum_from_string<fft_precision>(token_raw, pos);
+        expect_sep();
+        // Parse dft_type
+        const auto dft_type = fft_enum_from_string<fft_transform_type>(token_raw, pos);
+        // Parse input_format
+        expect_sep(input_fmt_tag);
+        const auto input_desc_format = fft_enum_from_string<hipfftXtSubFormat>(token_raw, pos);
+        // Optionally parse output_format
+        std::optional<hipfftXtSubFormat> explicit_output;
+        if(token.substr(pos, token_sep.size()) == token_sep
+           && token.substr(pos + token_sep.size(), output_fmt_tag.size()) == output_fmt_tag)
+        {
+            expect_sep(output_fmt_tag);
+            explicit_output = fft_enum_from_string<hipfftXtSubFormat>(token_raw, pos);
+        }
+        // Parse batch
+        expect_sep(batch_tag);
+        const size_t batch = parse_size("batch");
+        // Parse lengths: parse first value, then continue while separator isn't followed by ngpus
+        expect_sep(lengths_tag);
+        std::vector<size_t> transform_lengths;
+        transform_lengths.push_back(parse_size("transform lengths"));
+        while(token.substr(pos, token_sep.size()) == token_sep
+              && token.substr(pos + token_sep.size(), ngpus_tag.size()) != ngpus_tag)
+        {
+            pos += token_sep.size(); // skip separator before next length
+            transform_lengths.push_back(parse_size("transform lengths"));
+        }
+        // Parse ngpus
+        expect_sep(ngpus_tag);
+        const size_t ngpus = parse_size("ngpus");
+        // Construct and return the test parameters object
+        return hipfftxt_test_params_t(dft_type,
+                                      input_desc_format,
+                                      ngpus,
+                                      batch,
+                                      transform_lengths,
+                                      precision,
+                                      explicit_output);
+    }
+
     friend std::ostream& operator<<(std::ostream& stream, const hipfftxt_test_params_t& params)
     {
-        stream << "precision: " << (params.precision == fft_precision_single ? "single" : "double")
-               << ", "
-               << "dft type: " << fft_transform_type_name(params.dft_type) << ", "
-               << "input format: " << format_name(params.input_desc_format) << ", "
+        stream << "precision: " << fft_enum_to_string(params.precision) << ", "
+               << "dft type: " << fft_enum_to_string(params.dft_type) << ", "
+               << "input subformat: " << fft_enum_to_string(params.input_desc_format) << ", "
+               << "output subformat: " << fft_enum_to_string(params.output_desc_format()) << ", "
                << "ngpus: " << params.ngpus << ", "
                << "batch: " << params.batch << ", "
                << "transform lengths: (";
@@ -376,14 +460,15 @@ struct hipfftxt_test_params_t
         return stream;
     }
 
-    fft_params make_params_for_reference_cpu() const
+    fft_params get_global_data_params() const
     {
         fft_params tmp;
         tmp.length    = transform_lengths;
         tmp.precision = precision;
-        // always do it out-of-place for reference CPU (requirement for reference_fft_data_t construction)
-        // but use the same data layout as the test case's global strides/distances (in-place or
-        // out-of-place) for direct use in hipfftXtMemcpy of input data.
+        // Always set it out-of-place so that we can use it as is for reference CPU (requirement
+        // for construction of reference_fft_data_t objects) but use the same data layout as the
+        // test case's global strides/distances (regardless of test placement) so that the
+        // reference results' input data can be funneled into the test's hipfftXtMemcpy as is.
         tmp.placement      = fft_placement_notinplace;
         tmp.transform_type = dft_type;
         tmp.nbatch         = batch;
@@ -396,76 +481,158 @@ struct hipfftxt_test_params_t
         return tmp;
     }
 
-    inline hipfftXtSubFormat output_desc_format() const
+    static hipfftXtSubFormat natural_output_desc_format_for(const hipfftXtSubFormat input_format,
+                                                            const size_t            batch_sz)
     {
+        if(batch_sz == 0)
+            throw std::invalid_argument(
+                "hipfftxt_test_params_t::natural_output_desc_format_for: batch_sz must be > 0");
         // Possible use case of HIPFFT_XT_FORMAT_1D_INPUT_SHUFFLED is unclear yet
         // (to be investigated with cuFFT backend)
-        switch(input_desc_format)
+        switch(input_format)
         {
         case HIPFFT_XT_FORMAT_INPUT:
             [[fallthrough]];
         case HIPFFT_XT_FORMAT_1D_INPUT_SHUFFLED:
             return HIPFFT_XT_FORMAT_OUTPUT;
         case HIPFFT_XT_FORMAT_OUTPUT:
+            // somewhat questionable to use HIPFFT_XT_FORMAT_OUTPUT as input, but seems tolerated
+            // (and correctly handled) by some cases with cuFFT backend (some real transform use
+            // cases were found to crash though)
             return HIPFFT_XT_FORMAT_INPUT;
+        // in-place formats are modified through execution only for unbatched use cases
+        // (slab decompositions are used for the unbatched cases motivating the flip,
+        // batched cases are embarrassingly parallel and don't require any flip)
         case HIPFFT_XT_FORMAT_INPLACE:
-            return HIPFFT_XT_FORMAT_INPLACE_SHUFFLED;
+            return batch_sz == 1 ? HIPFFT_XT_FORMAT_INPLACE_SHUFFLED : HIPFFT_XT_FORMAT_INPLACE;
         case HIPFFT_XT_FORMAT_INPLACE_SHUFFLED:
-            return HIPFFT_XT_FORMAT_INPLACE;
+            return batch_sz == 1 ? HIPFFT_XT_FORMAT_INPLACE : HIPFFT_XT_FORMAT_INPLACE_SHUFFLED;
         case HIPFFT_FORMAT_UNDEFINED:
             return HIPFFT_FORMAT_UNDEFINED;
         default:
             throw std::runtime_error("Invalid value of input descriptor's format detected in "
-                                     "hipfftxt_test_params_t::output_desc_format()");
+                                     "hipfftxt_test_params_t::natural_output_desc_format_for()");
         }
     }
 
-    // Return true if the input_desc_format is a valid format for the transform of interest.
-    // Notes:
-    // - "validity" is defined by the existence of an implementation with cuFFT backend.
-    // - the cases below have been verified but may not be exhaustive, e.g., unbatched 1D
-    //   cases are yet to be determined.
-    inline bool has_valid_input_format() const
+    inline hipfftXtSubFormat output_desc_format() const
     {
-        if(batch == 1)
+        if(explicit_output_desc_format.has_value())
+            return explicit_output_desc_format.value();
+        return natural_output_desc_format_for(input_desc_format, batch);
+    }
+
+    // Returns true iff the given subformat is known to be accepted, i.e., iff a multi-device descriptor
+    // can be successfully allocated by the "source of truth" implementation to match (cufft).
+    // The following table was determined through observation of the test outcomes using
+    // - 8 V100 devices with CUDA 12.9;
+    // - 4 H100 devices with CUDA 13.1.
+    // No difference between either of the above was observed. Versions of CUDA following 13.1 may change
+    // the accepted/rejected subformats, so this predicate may need updates, e.g., with compilation-defined
+    // guards/tweaks.
+    // ______________________________________________________________________________________________
+    // |                    |                     batch == 1                      |    batch > 1    |
+    // |                    |-----------------|-----------------|-----------------|-----------------|
+    // |                    |    rank == 1    |     rank == 2   |    rank == 3    |  1 <= rank <= 3 |
+    // |                    |-----------------|-----------------|-----------------|-----------------|
+    // | subformat          | R2C | C2R | C2C | R2C | C2R | C2C | R2C | C2R | C2C | R2C | C2R | C2C |
+    // |--------------------|-----|-----|-----|-----|-----|-----|-----|-----|-----|-----|-----|-----|
+    // | INPUT              |  /  |  /  |  Y? |  -  |  -  |  -  |  -  |  -  |  -  |  Y  |  Y  |  Y  |
+    // | OUTPUT             |  /  |  /  |  Y? |  -  |  -  |  -  |  -  |  -  |  -  |  Y  |  Y  |  Y  |
+    // | INPLACE            |  /  |  /  |  Y? |  Y  |  -  |  Y  |  Y  |  Y  |  Y  |  Y  |  Y  |  Y  |
+    // | INPLACE_SHUFFLED   |  /  |  /  |  Y? |  -  |  Y  |  Y  |  Y  |  Y  |  Y  |  -  |  -  |  -  |
+    // | 1D_INPUT_SHUFFLED  |  /  |  /  |  Y? |  -  |  -  |  -  |  -  |  -  |  -  |  -  |  -  |  -  |
+    // | UNDEFINED          |  -  |  -  |  -  |  -  |  -  |  -  |  -  |  -  |  -  |  -  |  -  |  -  |
+    // ----------------------------------------------------------------------------------------------
+    // Legend: Y = accepted, Y? = accepted but unverified through execution, - = rejected,
+    //         / = unreachable (no such plan can be created, i.e., multi-device plan creation fails
+    //         for real 1D unbatched transforms).
+    inline bool accepts_descriptor_format(const hipfftXtSubFormat& subformat) const
+    {
+        validate_or_throw(subformat, "hipfftxt_test_params_t::accepts_descriptor_format");
+        if(subformat == HIPFFT_FORMAT_UNDEFINED)
+            return false;
+        // HIPFFT_XT_FORMAT_1D_INPUT_SHUFFLED is only for unbatched 1D C2C cases
+        if(subformat == HIPFFT_XT_FORMAT_1D_INPUT_SHUFFLED)
+            return transform_lengths.size() == 1 && batch == 1 && is_complex(dft_type);
+        if(batch > 1)
         {
-            // the following in-place configurations are known to be valid
-            switch(dft_type)
-            {
-            case fft_transform_type_real_forward:
-                return input_desc_format == HIPFFT_XT_FORMAT_INPLACE;
-            case fft_transform_type_real_inverse:
-                return input_desc_format == HIPFFT_XT_FORMAT_INPLACE_SHUFFLED;
-            case fft_transform_type_complex_forward:
-                [[fallthrough]];
-            case fft_transform_type_complex_inverse:
-                return input_desc_format == HIPFFT_XT_FORMAT_INPLACE
-                       || input_desc_format == HIPFFT_XT_FORMAT_INPLACE_SHUFFLED;
-            default:
-                throw std::logic_error(
-                    "Unexpected dft_type in hipfftxt_test_params_t::has_valid_input_format()");
-            }
+            // anything else than HIPFFT_XT_FORMAT_INPLACE_SHUFFLED goes for
+            // multi-batch transforms
+            return subformat != HIPFFT_XT_FORMAT_INPLACE_SHUFFLED;
+        }
+        // logic specific to multi-device unbatched cases below.
+        if(transform_lengths.size() == 1
+           && (subformat == HIPFFT_XT_FORMAT_INPUT || subformat == HIPFFT_XT_FORMAT_OUTPUT))
+        {
+            // If not doing HIPFFT_XT_FORMAT_1D_INPUT_SHUFFLED -> HIPFFT_XT_FORMAT_OUTPUT
+            // (which is caught/verified above), 1D unbatched transforms must do
+            // HIPFFT_XT_FORMAT_INPUT -> HIPFFT_XT_FORMAT_OUTPUT
+            return true;
+        }
+        // The following in-place subformats are known to be valid
+        switch(dft_type)
+        {
+        case fft_transform_type_real_forward:
+            return subformat == HIPFFT_XT_FORMAT_INPLACE
+                   || (transform_lengths.size() > 2
+                       && subformat == HIPFFT_XT_FORMAT_INPLACE_SHUFFLED);
+        case fft_transform_type_real_inverse:
+            return subformat == HIPFFT_XT_FORMAT_INPLACE_SHUFFLED
+                   || (transform_lengths.size() > 2 && subformat == HIPFFT_XT_FORMAT_INPLACE);
+        case fft_transform_type_complex_forward:
+            [[fallthrough]];
+        case fft_transform_type_complex_inverse:
+            return subformat == HIPFFT_XT_FORMAT_INPLACE
+                   || subformat == HIPFFT_XT_FORMAT_INPLACE_SHUFFLED;
+        default:
+            throw std::logic_error("Unexpected dft_type in "
+                                   "hipfftxt_test_params_t::accepts_descriptor_format()");
+        }
+    }
+
+    // Return true iff the current backend has an implementation for the given subformat.
+    // Unlike accepts_descriptor_format (which reflects what the "source of truth" cuFFT backend
+    // accepts), this predicate accounts for backends that only partially implement the full set
+    // of accepted subformats. On the cuFFT backend every accepted subformat is by definition
+    // implemented, so this always returns true for accepted formats there. On the rocFFT backend,
+    // some accepted subformats may not yet be implemented, and this returns false for those,
+    // allowing the test to verify that the appropriate HIPFFT_NOT_IMPLEMENTED error code is
+    // returned rather than attempting a full execution.
+    inline bool has_implementation_for_descriptor_format(const hipfftXtSubFormat& subformat) const
+    {
+        if(!accepts_descriptor_format(subformat))
+            return false;
+        if constexpr(!rocfft_backend)
+        {
+            // Existence of an implementation *defines* whether the format is acceptable
+            return true;
         }
         else
         {
-            // Out-of-place cases (i.e., HIPFFT_XT_FORMAT_INPUT to HIPFFT_XT_FORMAT_OUTPUT) with
-            // fewer devices than batch size are known to be valid. In-place usage may or may not
-            // be valid (not clear yet, to be verified).
-            return input_desc_format == HIPFFT_XT_FORMAT_INPUT && ngpus <= batch;
+            // Not supporting unbatched 1D transforms for now.
+            if(batch == 1 && transform_lengths.size() == 1)
+                return false;
+            // Not supporting batched transforms if the number of GPUs exceeds
+            // the batch size
+            if(batch > 1 && ngpus > batch)
+                return false;
+            return true;
         }
     }
 
-    inline bool expects_implementation() const
-    {
-        if(!has_valid_input_format())
-            return false;
-        // multi-batch multi-gpu transforms are not implemented yet for rocFFT backend
-        if constexpr(rocfft_backend)
-            return batch == 1;
-        return true;
-    }
-
 private:
+    // Token format constants shared by str() and make_from_token() to guarantee
+    // consistency.
+    static constexpr std::string_view token_sep      = "_";
+    static constexpr std::string_view input_fmt_tag  = "input_fmt";
+    static constexpr std::string_view output_fmt_tag = "output_fmt";
+    static constexpr std::string_view batch_tag      = "batch";
+    static constexpr std::string_view lengths_tag    = "lengths";
+    static constexpr std::string_view ngpus_tag      = "ngpus";
+
+    const std::optional<hipfftXtSubFormat> explicit_output_desc_format;
+
     static int get_device_index(size_t global_span, size_t num_devices, size_t global_idx)
     {
         if(global_idx >= global_span)
@@ -482,15 +649,34 @@ private:
 };
 
 // Parameters are real/complex, direction, format, dimension, and number of GPUs.
-class hipfftxtexec : public ::testing::TestWithParam<hipfftxt_test_params_t>
+class hipfftXtGeneralizedUsage : public ::testing::TestWithParam<hipfftxt_test_params_t>
 {
 };
 
+// Verify that the data distributed across GPU buffers in `desc` matches the corresponding
+// elements in `global_data`, a host buffer representing the full logical array (potentially
+// with padding for in-place real transforms).
+//
+// Strategy: randomly sample valid (batch_idx, multi_idx) coordinates in the global data
+// space, map each to
+// - the corresponding element in `global_data` (determined via `global_buffer_index`);
+// - the relevant element in one of the (*desc).descriptor->data buffers (determined via
+//   get_local_buffer_index).
+// The host- and device-residing elements are then compared to ensure an exact match.
+// Sampling continues until every GPU's chunk has been probed at least `min_probes_per_dev`
+// times. A bail-out at 10,000 * min_probes_per_dev * ngpus total iterations guards against
+// infinite loops (e.g., if the test-side sampling/partitioning logic has an unidentified
+// bug).
+//
+// Note: probabilistic (not exhaustive) coverage, reproducible under a fixed random seed.
 static void verify_data_distribution(const hipfftLibXtDesc_wrapper_t& desc,
                                      const hostbuf&                   global_data,
-                                     const hipfftxt_test_params_t&    params)
+                                     const hipfftxt_test_params_t&    params,
+                                     const size_t                     min_probes_per_dev)
 {
     const auto desc_subformat = static_cast<hipfftXtSubFormat>((*desc).subFormat);
+    if(min_probes_per_dev == 0)
+        throw std::invalid_argument("verify_data_distribution: min_probes_per_dev must be > 0");
     if(desc_subformat != params.input_desc_format && desc_subformat != params.output_desc_format())
     {
         throw std::invalid_argument("verify_data_distribution: descriptor format does not match "
@@ -533,24 +719,28 @@ static void verify_data_distribution(const hipfftLibXtDesc_wrapper_t& desc,
     // explored at least once
     std::uniform_int_distribution<size_t> batch_rng(0, params.batch - 1);
     const auto                            global_logical_span = params.logical_spans(desc_io_label);
-    std::set<int>                         explored_chunk_ids;
-    size_t                                count = 0;
-    while(explored_chunk_ids.size() < params.ngpus)
+    std::vector<size_t>                   count_per_chunk(params.ngpus, 0);
+    // Per-case, per-I/O-role PRNG: sampling is reproducible independent of test order.
+    auto prng = make_test_prng(params.str(), desc_io_label);
+    while(std::any_of(count_per_chunk.begin(), count_per_chunk.end(), [&](const auto& count) {
+        return count < min_probes_per_dev;
+    }))
     {
         // sanity check to avoid infinite loop in case of a bug in the random sampling logic
-        if(count > 10000 * params.ngpus)
+        if(sum(count_per_chunk.begin(), count_per_chunk.end())
+           > 10000 * min_probes_per_dev * params.ngpus)
         {
             throw std::logic_error(
-                "Possible test logic error in verify_data_distribution: some device's chunk of "
-                "data was not explored despite 10,000 times the number of GPUs worth of random "
-                "samples being drawn from the global data space.");
+                "Possible test logic error in verify_data_distribution: some chunk of data was not "
+                "explored as often as expected despite 10,000 times the minimum number of probes "
+                "per device being drawn from the global data space.");
         }
-        const auto          random_global_batch_idx = batch_rng(get_prng());
+        const auto          random_global_batch_idx = batch_rng(prng);
         std::vector<size_t> random_global_multi_idx;
         for(size_t dim = 0; dim < global_logical_span.size(); ++dim)
         {
             std::uniform_int_distribution<size_t> dim_rng(0, global_logical_span[dim] - 1);
-            random_global_multi_idx.push_back(dim_rng(get_prng()));
+            random_global_multi_idx.push_back(dim_rng(prng));
         }
         const auto global_buffer_index = params.global_buffer_index(
             random_global_batch_idx, random_global_multi_idx, desc_io_label);
@@ -582,11 +772,11 @@ static void verify_data_distribution(const hipfftLibXtDesc_wrapper_t& desc,
         const auto* global_elem = static_cast<const char*>(global_data.data()) + global_byte_offset;
         std::memcpy(&host_elem, global_elem, elem_sz);
         ASSERT_EQ(std::memcmp(&device_elem, &host_elem, elem_sz), 0)
-            << io_name(desc_io_label) << " data mismatch on device index " << dev_idx << " (GPU id "
-            << (*desc).descriptor->GPUs[dev_idx] << ") at local buffer index " << local_buffer_index
-            << " expected to match global buffer index " << global_buffer_index
-            << " corresponding to global batch index " << random_global_batch_idx
-            << " and global multi-index (" <<
+            << fft_enum_to_string(desc_io_label) << " data mismatch on device index " << dev_idx
+            << " (GPU id " << (*desc).descriptor->GPUs[dev_idx] << ") at local buffer index "
+            << local_buffer_index << " expected to match global buffer index "
+            << global_buffer_index << " corresponding to global batch index "
+            << random_global_batch_idx << " and global multi-index (" <<
             [&] {
                 std::ostringstream oss;
                 for(size_t i = 0; i < random_global_multi_idx.size(); ++i)
@@ -596,8 +786,7 @@ static void verify_data_distribution(const hipfftLibXtDesc_wrapper_t& desc,
             << "):\ndevice element value=" << print(device_elem)
             << " whereas host value=" << print(host_elem);
 
-        explored_chunk_ids.insert(dev_idx);
-        count++;
+        count_per_chunk[dev_idx]++;
     }
 }
 
@@ -606,309 +795,461 @@ static void verify_data_distribution(const hipfftLibXtDesc_wrapper_t& desc,
 //
 // This test validates the full lifecycle of a multi-GPU FFT:
 //   1. Plan creation (unbatched 1D, 2D, or 3D) with hipfftMakePlan{1d,2d,3d} or
-//      hipfftMakePlanMany (batched).
+//      hipfftMakePlanMany (batched). For configurations known to be unsupported
+//      (e.g., multi-batch on ROCm, real 1D unbatched, non-power-of-2 1D unbatched),
+//      the test asserts the expected failure code and returns early.
 //   2. Descriptor allocation via hipfftXtMalloc with the parameterized sub-format.
+//      For invalid or unimplemented subformats, the test verifies the expected error
+//      code and continues/returns as appropriate.
 //   3. Host-to-device data transfer via hipfftXtMemcpy (HIPFFT_COPY_HOST_TO_DEVICE).
-//   4. Verification that input data is correctly distributed across GPU buffers according to the
-//      expected partitioning scheme.
+//   4. Verification that input data is correctly distributed across GPU buffers
+//      (probabilistic sampling via verify_data_distribution).
 //   5. Execution of the transform via hipfftXtExecDescriptor.
 //   6. Device-to-host transfer of results via hipfftXtMemcpy (HIPFFT_COPY_DEVICE_TO_HOST).
-//   7. Verification that output data distribution across GPUs matches the expected output format.
-//   8. Accuracy comparison of the multi-GPU output against a single-CPU FFTW reference, using
-//      an L-infinity norm tolerance scaled by machine epsilon, reference norm, and log(N).
+//   7. Verification that output data distribution across GPUs matches the expected
+//      output format (probabilistic sampling via verify_data_distribution).
+//   8. Accuracy comparison of the multi-GPU output against a single-CPU FFTW reference,
+//      using an L-infinity norm tolerance scaled by machine epsilon, reference norm,
+//      and log(N).
 //
-// For unsupported configurations (e.g., multi-batch on ROCm backend), the test verifies that
-// an appropriate error code (e.g., HIPFFT_NOT_IMPLEMENTED) is returned and exits early.
-TEST_P(hipfftxtexec, data_distribution_and_execution)
+// Steps 3-8 are only reached for fully-supported, multi-dimensional (or batched)
+// configurations with natural output descriptor formats. The test skips early for:
+//   - non-natural explicit output descriptor formats (test infrastructure not yet extended)
+//   - HIPFFT_XT_FORMAT_OUTPUT used as input descriptor format (crashes cuFFT for some cases)
+//   - configurations where any device's data chunk is empty (semantics unclear)
+TEST_P(hipfftXtGeneralizedUsage, AllocH2DCopyExecD2HCopyVerify)
+try
 {
-    try
-    {
-        const auto& params = GetParam();
-        const auto  rank   = params.transform_lengths.size();
+    const auto& params = GetParam();
+    const auto  rank   = params.transform_lengths.size();
 
-        // Create FFTW reference for comparison
-        reference_fft_data_t reference_results{params.make_params_for_reference_cpu()};
-        if(params.expects_implementation() && reference_results.needs_computing())
+    // Create FFTW reference for comparison if full support is expected for the test parameters
+    std::optional<reference_fft_data_t> reference_results;
+    // No Test-side support for unbatched 1D transforms yet, so no need to create reference
+    // results for those.
+    if((params.batch > 1 || params.transform_lengths.size() > 1)
+       && params.has_implementation_for_descriptor_format(params.input_desc_format)
+       && params.has_implementation_for_descriptor_format(params.output_desc_format()))
+    {
+        if(!fftw_compare)
         {
-            if(reference_results.needs_input_initialization())
-                reference_results.initialize_input(fft_input_generator_host);
-            reference_results.launch_async_compute();
+            GTEST_SKIP() << "Test requires FFTW comparison for the given parameters "
+                            "(fftw_compare == false in this run)";
         }
 
-        std::vector<int> gpus(params.ngpus);
-        std::iota(gpus.begin(), gpus.end(), 0);
-        std::shuffle(gpus.begin(), gpus.end(), get_prng());
-        std::vector<size_t> workSize(params.ngpus, std::numeric_limits<size_t>::max());
-
-        // Create the xt plan and descriptor:
-        hipfftHandle_wrapper_t plan;
-
-        auto hipfft_rt = plan.alloc_with_err();
-        ASSERT_EQ(hipfft_rt, HIPFFT_SUCCESS);
-
-        hipfft_rt = hipfftXtSetGPUs(plan, gpus.size(), gpus.data());
-        ASSERT_EQ(hipfft_rt, HIPFFT_SUCCESS) << "hipfftXtSetGPUs failed";
-
-        if(verbose > 2)
-            std::cout << "Creating plan...\n";
-        if(params.batch > 1)
+        const auto global_data_params = params.get_global_data_params();
+        reference_results.emplace(global_data_params);
+        // reference_fft_data_t objects are unaware of this test's intention to feed
+        // the reference results' input data as is into hipfftXtMemcpy, and the object
+        // construction may have decided to re-use cached results that may have slightly
+        // different strides in input data (e.g. if testing an in-place real fwd transform
+        // right after testing the very same transform out-of-place and vice versa)
+        // --> Verify that the reference results' input data's strides and distances
+        // match what we expect in global params
+        if(reference_results->get_params().istride != global_data_params.istride
+           || reference_results->get_params().idist != global_data_params.idist)
         {
-            std::vector<int> lengths_int(params.transform_lengths.begin(),
-                                         params.transform_lengths.end());
-            hipfft_rt = hipfftMakePlanMany(plan,
-                                           lengths_int.size(),
-                                           lengths_int.data(),
-                                           nullptr,
-                                           0,
-                                           0,
-                                           nullptr,
-                                           0,
-                                           0,
-                                           params.hipfft_transform_type(),
-                                           params.batch,
-                                           workSize.data());
+            if(verbose)
+            {
+                std::cout << "Reference results' input data's strides/distances do not match "
+                             "expected global params: clearing cache and re-initializing "
+                             "reference results\n";
+            }
+            reference_results.reset();
+            reference_fft_data_t::clear_cache();
+            reference_results.emplace(global_data_params);
+        }
+        if(reference_results->needs_computing())
+        {
+            if(reference_results->needs_input_initialization())
+                reference_results->initialize_input(fft_input_generator_host);
+            reference_results->launch_async_compute();
+        }
+    }
+
+    std::vector<int> gpus(params.ngpus);
+    std::iota(gpus.begin(), gpus.end(), 0);
+    auto shuffle_prng = make_test_prng(params.str());
+    std::shuffle(gpus.begin(), gpus.end(), shuffle_prng);
+    std::vector<size_t> workSize(params.ngpus, std::numeric_limits<size_t>::max());
+
+    // Create the xt plan and descriptor:
+    hipfftHandle_wrapper_t plan;
+
+    auto hipfft_rt = plan.alloc_with_err();
+    ASSERT_EQ(hipfft_rt, HIPFFT_SUCCESS);
+
+    hipfft_rt = hipfftXtSetGPUs(plan, gpus.size(), gpus.data());
+    ASSERT_EQ(hipfft_rt, HIPFFT_SUCCESS) << "hipfftXtSetGPUs failed";
+
+    if(verbose)
+        std::cout << "Creating plan...\n";
+    if(params.batch > 1)
+    {
+        std::vector<int> lengths_int(params.transform_lengths.begin(),
+                                     params.transform_lengths.end());
+        hipfft_rt = hipfftMakePlanMany(plan,
+                                       lengths_int.size(),
+                                       lengths_int.data(),
+                                       nullptr,
+                                       0,
+                                       0,
+                                       nullptr,
+                                       0,
+                                       0,
+                                       params.hipfft_transform_type(),
+                                       params.batch,
+                                       workSize.data());
+    }
+    else
+    {
+        switch(rank)
+        {
+        case 1:
+            hipfft_rt = hipfftMakePlan1d(plan,
+                                         params.transform_lengths[0],
+                                         params.hipfft_transform_type(),
+                                         1 /* unbatched case*/,
+                                         workSize.data());
             if constexpr(rocfft_backend)
             {
                 ASSERT_EQ(hipfft_rt, HIPFFT_NOT_IMPLEMENTED)
-                    << "multi-batch multi-gpu transforms should return not implemented";
-                GTEST_SUCCEED();
-                return;
+                    << "Unbatched multi-gpu 1D transforms should return not implemented";
+                if(verbose)
+                    std::cout << "Plan creation failed as expected for unbatched multi-gpu 1D "
+                                 "transform with rocFFT backend : "
+                              << hipfftResult_string(hipfft_rt) << std::endl;
+                return; // early exit from test for unsupported configuration
             }
             else
             {
-                ASSERT_EQ(hipfft_rt, HIPFFT_SUCCESS)
-                    << "hipfftMakePlanMany failed with return code " << hipfft_rt << "="
-                    << hipfftResult_string(hipfft_rt);
-            }
-        }
-        else
-        {
-            switch(rank)
-            {
-            case 1:
-                hipfft_rt = hipfftMakePlan1d(plan,
-                                             params.transform_lengths[0],
-                                             params.hipfft_transform_type(),
-                                             1 /* unbatched case*/,
-                                             workSize.data());
-                if constexpr(rocfft_backend)
+                if(is_real(params.dft_type))
                 {
-                    ASSERT_EQ(hipfft_rt, HIPFFT_NOT_IMPLEMENTED)
-                        << "Unbatched multi-gpu 1D transforms should return not implemented";
-                    GTEST_SUCCEED();
+                    // cuFFT backend does not support unbatched real multi-gpu 1D transforms
+                    ASSERT_NE(hipfft_rt, HIPFFT_SUCCESS)
+                        << "Unbatched real multi-gpu 1D transform is expected to fail at plan "
+                           "creation";
+                    if(verbose)
+                    {
+                        std::cout << "Unbatched real multi-gpu 1D transform failed as expected "
+                                     "at plan creation"
+                                  << std::endl;
+                    }
                     return;
                 }
-                break;
-            case 2:
-                hipfft_rt = hipfftMakePlan2d(plan,
-                                             params.transform_lengths[0],
-                                             params.transform_lengths[1],
-                                             params.hipfft_transform_type(),
-                                             workSize.data());
-                break;
-            case 3:
-                hipfft_rt = hipfftMakePlan3d(plan,
-                                             params.transform_lengths[0],
-                                             params.transform_lengths[1],
-                                             params.transform_lengths[2],
-                                             params.hipfft_transform_type(),
-                                             workSize.data());
-                break;
-            default:
-                FAIL() << "Test infrastructure only supports 2D and 3D transforms";
-            }
-            ASSERT_EQ(hipfft_rt, HIPFFT_SUCCESS)
-                << "hipfftMakePlan" << rank << "d failed with return code " << hipfft_rt << "="
-                << hipfftResult_string(hipfft_rt);
-        }
-        ASSERT_TRUE(std::all_of(workSize.begin(), workSize.end(), [](size_t sz) {
-            return sz < std::numeric_limits<size_t>::max();
-        })) << "some worksize wasn't set at plan creation time";
-        if(verbose > 2)
-        {
-            std::cout << "Plan created.\n";
-            std::cout << "Allocating descriptor...\n";
-        }
-
-        hipfftLibXtDesc_wrapper_t input_desc, output_desc;
-        for(auto io : {fft_io_in, fft_io_out})
-        {
-            if(io == fft_io_out && params.placement() == fft_placement_inplace)
-            {
-                output_desc = hipfftLibXtDesc_wrapper_t::make_nonowned(input_desc.get_raw());
-                continue;
-            }
-            auto&      io_desc = io == fft_io_in ? input_desc : output_desc;
-            const auto io_desc_format
-                = io == fft_io_in ? params.input_desc_format : params.output_desc_format();
-            hipfft_rt = io_desc.alloc_with_err(plan, io_desc_format);
-            if(!params.has_valid_input_format())
-            {
-                // The parameters' I/O descriptor format is/are invalid (validity defined by
-                // what cuFFT supports) for the targeted transform, so hipfftXtMalloc is expected
-                // to fail. If not, hipfftxt_test_params_t::has_valid_input_format may needs to be
-                // revised.
-                if(hipfft_rt == HIPFFT_SUCCESS)
-                    throw std::logic_error(
-                        "hipfftXtMalloc completed successfully for an invalid "
-                        "descriptor format(s) (test-side revisions may be needed)");
-                continue;
-            }
-            // we may have unimplemented cases (e.g., multi-batch on ROCm backend), so check for that
-            if(!params.expects_implementation())
-            {
-                if constexpr(rocfft_backend)
+                else if(params.transform_lengths[0] % params.ngpus != 0
+                        || (params.transform_lengths[0] & (params.transform_lengths[0] - 1)) != 0)
                 {
-                    ASSERT_EQ(hipfft_rt, HIPFFT_NOT_IMPLEMENTED)
-                        << "hipfftXtMalloc did not return HIPFFT_NOT_IMPLEMENTED for a "
-                           "supposedly unimplemented use case (returned code "
-                        << hipfft_rt << " = " << hipfftResult_string(hipfft_rt) << " for "
-                        << io_name(io) << " descriptor)";
+                    // cuFFT backend does not support unbatched multi-gpu 1D transforms with
+                    // non-evenly divisible lengths nor with non-power-of-two lengths
+                    ASSERT_NE(hipfft_rt, HIPFFT_SUCCESS)
+                        << "Unbatched multi-gpu 1D transform with length "
+                        << params.transform_lengths[0] << " and ngpus " << params.ngpus
+                        << " is expected to fail at plan creation (unevenly divisible length "
+                           "or non-power-of-two length)";
+                    if(verbose)
+                        std::cout << "Unbatched multi-gpu 1D transform with length "
+                                  << params.transform_lengths[0] << " and ngpus " << params.ngpus
+                                  << " failed as expected at plan creation (unevenly divisible "
+                                     "length or non-power-of-two length)"
+                                  << std::endl;
+                    return; // early exit from test for unsupported configuration
                 }
-                else
-                {
-                    throw std::logic_error(
-                        "Test logic error: an implementation must be expected with cufft backend "
-                        "for all test parameters with valid I/O descriptor formats.");
-                }
-                continue;
             }
-            // valid case with an expected implementation
-            ASSERT_EQ(hipfft_rt, HIPFFT_SUCCESS)
-                << " hipfftXtMalloc failed for " << io_name(io) << " descriptor with code "
-                << hipfft_rt << " (" << hipfftResult_string(hipfft_rt) << ")";
-            // verify the content of the created descriptor
-            ASSERT_EQ(static_cast<hipfftXtSubFormat>((*io_desc).subFormat), io_desc_format)
-                << io_name(io) << " descriptor subFormat does not match requested format";
-            ASSERT_EQ((*io_desc).descriptor->nGPUs, static_cast<int>(params.ngpus))
-                << io_name(io) << " descriptor nGPUs does not match requested ngpus";
-            for(size_t dev_idx = 0; dev_idx < gpus.size(); ++dev_idx)
-            {
-                ASSERT_EQ((*io_desc).descriptor->GPUs[dev_idx], gpus[dev_idx])
-                    << io_name(io) << " descriptor device[" << dev_idx << "] ("
-                    << (*io_desc).descriptor->GPUs[dev_idx] << ") does not match requested GPU ID"
-                    << gpus[dev_idx];
-                if(verbose > 3)
-                    std::cout << "buffer " << dev_idx
-                              << " size: " << (*io_desc).descriptor->size[dev_idx] << " = "
-                              << byte_size_to_str((*io_desc).descriptor->size[dev_idx]) << "\n";
-                // TODO: handle case where some GPUs don't have data because there isn't enough to go
-                // around (particularly for multi-batch cases).
-                ASSERT_NE((*io_desc).descriptor->size[dev_idx], size_t(0))
-                    << io_name(io) << " gpu buffer size is zero for gpu " << dev_idx;
-            }
+            break;
+        case 2:
+            hipfft_rt = hipfftMakePlan2d(plan,
+                                         params.transform_lengths[0],
+                                         params.transform_lengths[1],
+                                         params.hipfft_transform_type(),
+                                         workSize.data());
+            break;
+        case 3:
+            hipfft_rt = hipfftMakePlan3d(plan,
+                                         params.transform_lengths[0],
+                                         params.transform_lengths[1],
+                                         params.transform_lengths[2],
+                                         params.hipfft_transform_type(),
+                                         workSize.data());
+            break;
+        default:
+            FAIL() << "Test infrastructure only supports 2D and 3D transforms";
         }
-        if(!params.expects_implementation())
-        {
-            // no need to proceed any further for unimplemented cases (e.g., multi-batch on ROCm backend)
-            GTEST_SUCCEED();
-            return;
-        }
-        if(params.batch == 1 && params.transform_lengths.size() == 1)
-        {
-            GTEST_SKIP() << "Skipping unbatched 1D transform test case (no test-side support yet)";
-            return;
-        }
-
-        if(verbose > 2)
-        {
-            std::cout << "Descriptor allocated.\n";
-            std::cout << "Starting host-to-device hipfftXtMemcpy...\n";
-        }
-
-        hipfft_rt = hipfftXtMemcpy(plan,
-                                   input_desc.get_raw(),
-                                   reference_results.get_buffers<fft_io_in>().front().data(),
-                                   HIPFFT_COPY_HOST_TO_DEVICE);
-        ASSERT_EQ(hipfft_rt, HIPFFT_SUCCESS)
-            << "hipfftXtMemcpy H2D"
-            << " failed with code " << hipfft_rt << " (" << hipfftResult_string(hipfft_rt) << ")";
-
-        if(verbose > 2)
-        {
-            std::cout << "Finished host-to-device hipfftXtMemcpy.\n";
-            std::cout << "Verifying input data distribution across GPUs...\n";
-        }
-        verify_data_distribution(
-            input_desc, reference_results.get_buffers<fft_io_in>().front(), params);
-
-        if(verbose > 2)
-        {
-            std::cout << "Verified input data distribution across GPUs.\n";
-            std::cout << "Executing plan...\n";
-        }
-        // Execute the plan
-        hipfft_rt = hipfftXtExecDescriptor(plan, input_desc, output_desc, params.hipfft_exec_dir());
-        ASSERT_EQ(hipfft_rt, HIPFFT_SUCCESS)
-            << "hipfftXtExecDescriptor failed with code " << hipfft_rt << " ("
-            << hipfftResult_string(hipfft_rt) << ")";
-        if(params.placement() == fft_placement_inplace)
-        {
-            ASSERT_EQ(input_desc.get_raw(), output_desc.get_raw())
-                << "in-place transform should have same input and output descriptors";
-            // check that the descriptor's subformat was updated to the expected
-            // output format after execution
-            ASSERT_EQ((*input_desc).subFormat, params.output_desc_format())
-                << "in-place transform's descriptor subFormat was not updated to the expected "
-                   "output format after execution";
-        }
-
-        if(verbose > 2)
-        {
-            std::cout << "Plan executed.\n";
-            std::cout << "Starting device-to-host hipfftXtMemcpy...\n";
-        }
-        std::vector<hostbuf> mgpu_output(1);
-        mgpu_output[0].alloc(params.global_byte_size(fft_io_out));
-
-        hipfft_rt = hipfftXtMemcpy(
-            plan, mgpu_output[0].data(), output_desc.get_raw(), HIPFFT_COPY_DEVICE_TO_HOST);
-        ASSERT_EQ(hipfft_rt, HIPFFT_SUCCESS)
-            << "hipfftXtMemcpy D2H"
-            << " failed with code " << hipfft_rt << " (" << hipfftResult_string(hipfft_rt) << ")";
-        if(verbose > 2)
-        {
-            std::cout << "Finished device-to-host hipfftXtMemcpy.\n";
-            std::cout << "Verifying output data distribution across GPUs...\n";
-        }
-        verify_data_distribution(output_desc, mgpu_output[0], params);
-        if(verbose > 2)
-        {
-            std::cout << "Verified output data distribution across GPUs.\n";
-            std::cout << "Verifying accuracy of results...\n";
-        }
-
-        // Compare multi-GPU output against FFTW reference
-        const auto total_length
-            = product(params.transform_lengths.begin(), params.transform_lengths.end());
-        const auto   cpu_output_norm = reference_results.get_norm<fft_io_out>(params.batch).get();
-        const double linf_cutoff
-            = type_epsilon(params.precision) * cpu_output_norm.l_inf * log(total_length);
-
-        const auto diff = distance(reference_results.get_buffers<fft_io_out>(),
-                                   mgpu_output,
-                                   params.logical_spans(fft_io_out),
-                                   params.batch /* may be smaller than ref_cpu_params' */,
-                                   params.precision,
-                                   reference_results.get_params().otype,
-                                   reference_results.get_params().ostride,
-                                   reference_results.get_params().odist,
-                                   reference_results.get_params().otype,
-                                   params.global_strides(fft_io_out),
-                                   params.global_dist(fft_io_out),
-                                   nullptr,
-                                   linf_cutoff,
-                                   {0},
-                                   {0});
-        if(verbose > 1)
-            std::cout << "linf: " << diff.l_inf << " l2: " << diff.l_2 << " cutoff: " << linf_cutoff
-                      << "\n";
-        EXPECT_LE(diff.l_inf, linf_cutoff) << "l_inf tolerance failure. cutoff: " << linf_cutoff;
-        if(verbose > 2)
-            std::cout << "Accuracy verified. Test completed.\n";
     }
-    ROCFFT_CATCH_TEST_EXCEPTIONS
+    ASSERT_EQ(hipfft_rt, HIPFFT_SUCCESS) << "Plan creation failed with return code " << hipfft_rt
+                                         << "=" << hipfftResult_string(hipfft_rt);
+    ASSERT_TRUE(std::all_of(workSize.begin(), workSize.end(), [](size_t sz) {
+        return sz < std::numeric_limits<size_t>::max();
+    })) << "some worksize wasn't set at plan creation time";
+    if(verbose)
+    {
+        std::cout << "Plan created.\n";
+        std::cout << "Allocating descriptor...\n";
+    }
+
+    hipfftLibXtDesc_wrapper_t input_desc, output_desc;
+    for(auto io : {fft_io_in, fft_io_out})
+    {
+        if(io == fft_io_out && params.placement() == fft_placement_inplace)
+        {
+            output_desc = hipfftLibXtDesc_wrapper_t::make_nonowned(input_desc.get_raw());
+            continue;
+        }
+        auto&      io_desc = io == fft_io_in ? input_desc : output_desc;
+        const auto io_desc_format
+            = io == fft_io_in ? params.input_desc_format : params.output_desc_format();
+        hipfft_rt = io_desc.alloc_with_err(plan, io_desc_format);
+        if(!params.accepts_descriptor_format(io_desc_format))
+        {
+            // The parameters' I/O descriptor format is/are invalid (validity defined by
+            // what cuFFT supports) for the targeted transform, so hipfftXtMalloc is expected
+            // to fail. If not, hipfftxt_test_params_t::accepts_descriptor_format may need
+            // to be revised.
+            if(hipfft_rt == HIPFFT_SUCCESS)
+                throw std::logic_error(
+                    "hipfftXtMalloc completed successfully on " + fft_enum_to_string(io)
+                    + " for supposedly invalid descriptor format "
+                    + fft_enum_to_string(io_desc_format) + " (test-side revisions may be needed)");
+            if(verbose)
+            {
+                std::cout << "hipfftXtMalloc failed as anticipated on " + fft_enum_to_string(io)
+                                 + " for descriptor format " + fft_enum_to_string(io_desc_format)
+                          << std::endl;
+            }
+            continue;
+        }
+        if constexpr(!rocfft_backend)
+        {
+            if(!params.has_implementation_for_descriptor_format(io_desc_format))
+                throw std::logic_error(
+                    "Test logic error: an implementation must be expected with cufft backend "
+                    "if the given subformat is labeled acceptable.");
+        }
+        // we may have known unimplemented cases with rocFFT backend, so check for that
+        const auto expected_ret = params.has_implementation_for_descriptor_format(io_desc_format)
+                                      ? HIPFFT_SUCCESS
+                                      : HIPFFT_NOT_IMPLEMENTED;
+        ASSERT_EQ(hipfft_rt, expected_ret)
+            << "Unexpected error code returned by hipfftXtMalloc when allocating the "
+            << fft_enum_to_string(io) << " descriptor of format "
+            << fft_enum_to_string(io_desc_format) << "(returned code " << hipfft_rt << " = "
+            << hipfftResult_string(hipfft_rt) << ", while expected returned code was "
+            << expected_ret << " = " << hipfftResult_string(expected_ret) << ")";
+        if(!params.has_implementation_for_descriptor_format(io_desc_format))
+        {
+            // our job here is done: the proper unimplemented error code was returned
+            // to user, no need to proceed any further for unimplemented cases
+            if(verbose)
+            {
+                std::cout << "Lack of implementation for hipfftXtMalloc with descriptor format "
+                                 + fft_enum_to_string(io_desc_format)
+                          << " was adequately reported" << std::endl;
+            }
+            continue;
+        }
+        // verify the content of the created descriptor
+        ASSERT_EQ(static_cast<hipfftXtSubFormat>((*io_desc).subFormat), io_desc_format)
+            << fft_enum_to_string(io) << " descriptor subFormat does not match requested format";
+        ASSERT_EQ((*io_desc).descriptor->nGPUs, static_cast<int>(params.ngpus))
+            << fft_enum_to_string(io) << " descriptor nGPUs does not match requested ngpus";
+        for(size_t dev_idx = 0; dev_idx < gpus.size(); ++dev_idx)
+        {
+            ASSERT_EQ((*io_desc).descriptor->GPUs[dev_idx], gpus[dev_idx])
+                << fft_enum_to_string(io) << " descriptor device[" << dev_idx << "] ("
+                << (*io_desc).descriptor->GPUs[dev_idx] << ") does not match requested GPU ID"
+                << gpus[dev_idx];
+            if(verbose > 2)
+                std::cout << "buffer " << dev_idx
+                          << " size: " << (*io_desc).descriptor->size[dev_idx] << " = "
+                          << byte_size_to_str((*io_desc).descriptor->size[dev_idx]) << "\n";
+            if((*io_desc).descriptor->size[dev_idx] > 0)
+            {
+                ASSERT_NE((*io_desc).descriptor->data[dev_idx], nullptr)
+                    << fft_enum_to_string(io) << " gpu buffer pointer is null for device index "
+                    << dev_idx << " despite non-zero size " << (*io_desc).descriptor->size[dev_idx]
+                    << " = " << byte_size_to_str((*io_desc).descriptor->size[dev_idx]);
+            }
+        }
+    }
+
+    if(verbose)
+        std::cout << "Descriptor allocation(s) tested.\n";
+
+    if(!params.has_implementation_for_descriptor_format(params.input_desc_format)
+       || !params.has_implementation_for_descriptor_format(params.output_desc_format()))
+    {
+        // no need to proceed any further for unimplemented cases (e.g., multi-batch on ROCm backend)
+        if(verbose)
+        {
+            std::cout << "Lack of implementation for hipfftXtMalloc with descriptor format(s) "
+                             + fft_enum_to_string(params.input_desc_format) + " and/or "
+                             + fft_enum_to_string(params.output_desc_format())
+                      << " was adequately reported" << std::endl;
+        }
+        return; // early exit from test for unsupported configuration
+    }
+
+    if(params.batch == 1 && params.transform_lengths.size() == 1)
+    {
+        GTEST_SKIP() << "Unbatched 1D transforms are not supported by the test infrastructure "
+                        "yet: no verification of the execution steps of the test";
+    }
+    if(output_desc.get_raw() != input_desc.get_raw() /* out-of-place usage */
+       && params.output_desc_format()
+              != hipfftxt_test_params_t::natural_output_desc_format_for(params.input_desc_format,
+                                                                        params.batch))
+    {
+        GTEST_SKIP() << "Copy and execution steps of test implementation were not verified for "
+                        "non-natural output descriptor format: expanding test implementation "
+                        "required for testing full execution of this configuration";
+    }
+    if(params.input_desc_format == HIPFFT_XT_FORMAT_OUTPUT)
+    {
+        GTEST_SKIP() << "test skips copy and execution steps for input descriptor format "
+                        "HIPFFT_XT_FORMAT_OUTPUT: questionable usefulness of such a test, "
+                        "and/or dramatic failures to expect if the test were to be attempted";
+    }
+    // TODO: handle case where some GPUs don't have data because there isn't enough to go
+    // around (particularly for multi-batch cases). For multi-GPU transforms, if some
+    // device's data chunk is empty, the expected behavior and/or reliability of this test
+    // may need to be revised. Skip such cases for now, if ever attempted somehow
+    if(std::any_of((*input_desc).descriptor->data,
+                   (*input_desc).descriptor->data + (*input_desc).descriptor->nGPUs,
+                   [](auto ptr) { return ptr == nullptr; })
+       || std::any_of((*output_desc).descriptor->data,
+                      (*output_desc).descriptor->data + (*output_desc).descriptor->nGPUs,
+                      [](auto ptr) { return ptr == nullptr; }))
+    {
+        GTEST_SKIP() << "Some device's data chunk is empty for this multi-GPU transform, "
+                        "expected full-execution behavior is unclear and/or test reliability "
+                        "may be compromised, skipping test";
+    }
+
+    if(verbose)
+        std::cout << "Starting host-to-device hipfftXtMemcpy...\n";
+
+    hipfft_rt = hipfftXtMemcpy(plan,
+                               input_desc.get_raw(),
+                               reference_results->get_buffers<fft_io_in>().front().data(),
+                               HIPFFT_COPY_HOST_TO_DEVICE);
+    ASSERT_EQ(hipfft_rt, HIPFFT_SUCCESS)
+        << "hipfftXtMemcpy H2D"
+        << " failed with code " << hipfft_rt << " (" << hipfftResult_string(hipfft_rt) << ")";
+
+    if(verbose)
+    {
+        std::cout << "Finished host-to-device hipfftXtMemcpy.\n";
+        std::cout << "Verifying input data distribution across GPUs...\n";
+    }
+    verify_data_distribution(input_desc,
+                             reference_results->get_buffers<fft_io_in>().front(),
+                             params,
+                             min_probes_per_dev_for_xt);
+
+    if(verbose)
+    {
+        std::cout << "Verified input data distribution across GPUs.\n";
+        std::cout << "Executing plan...\n";
+    }
+    // Execute the plan
+    hipfft_rt = hipfftXtExecDescriptor(plan, input_desc, output_desc, params.hipfft_exec_dir());
+    ASSERT_EQ(hipfft_rt, HIPFFT_SUCCESS) << "hipfftXtExecDescriptor failed with code " << hipfft_rt
+                                         << " (" << hipfftResult_string(hipfft_rt) << ")";
+    if(params.placement() == fft_placement_inplace)
+    {
+        ASSERT_EQ(input_desc.get_raw(), output_desc.get_raw())
+            << "in-place transform should have same input and output descriptors";
+        // check that the descriptor's subformat was updated (resp. not updated) to
+        // the expected output subformat after execution for unbatched (resp. batched) cases
+        ASSERT_EQ((*input_desc).subFormat, params.output_desc_format())
+            << "in-place transform's descriptor subFormat on output ("
+            << fft_enum_to_string(static_cast<const hipfftXtSubFormat>((*input_desc).subFormat))
+            << ") is not as expected after execution ("
+            << fft_enum_to_string(params.output_desc_format()) << ")";
+    }
+
+    if(verbose)
+    {
+        std::cout << "Plan executed.\n";
+        std::cout << "Starting device-to-host hipfftXtMemcpy...\n";
+    }
+    std::vector<hostbuf> mgpu_output(1);
+    mgpu_output[0].alloc(params.global_byte_size(fft_io_out));
+
+    hipfft_rt = hipfftXtMemcpy(
+        plan, mgpu_output[0].data(), output_desc.get_raw(), HIPFFT_COPY_DEVICE_TO_HOST);
+    ASSERT_EQ(hipfft_rt, HIPFFT_SUCCESS)
+        << "hipfftXtMemcpy D2H"
+        << " failed with code " << hipfft_rt << " (" << hipfftResult_string(hipfft_rt) << ")";
+    if(verbose)
+    {
+        std::cout << "Finished device-to-host hipfftXtMemcpy.\n";
+        std::cout << "Verifying output data distribution across GPUs...\n";
+    }
+    verify_data_distribution(output_desc, mgpu_output[0], params, min_probes_per_dev_for_xt);
+    if(verbose)
+    {
+        std::cout << "Verified output data distribution across GPUs.\n";
+        std::cout << "Verifying accuracy of results...\n";
+    }
+
+    // Compare multi-GPU output against FFTW reference
+    const auto total_length
+        = product(params.transform_lengths.begin(), params.transform_lengths.end());
+    const auto   cpu_output_norm = reference_results->get_norm<fft_io_out>(params.batch).get();
+    const double linf_cutoff
+        = type_epsilon(params.precision) * cpu_output_norm.l_inf * log(total_length);
+
+    const auto diff = distance(reference_results->get_buffers<fft_io_out>(),
+                               mgpu_output,
+                               params.logical_spans(fft_io_out),
+                               params.batch /* may be smaller than ref_cpu_params' */,
+                               params.precision,
+                               reference_results->get_params().otype,
+                               reference_results->get_params().ostride,
+                               reference_results->get_params().odist,
+                               reference_results->get_params().otype,
+                               params.global_strides(fft_io_out),
+                               params.global_dist(fft_io_out),
+                               nullptr,
+                               linf_cutoff,
+                               {0},
+                               {0});
+    if(verbose > 1)
+        std::cout << "linf: " << diff.l_inf << " l2: " << diff.l_2 << " cutoff: " << linf_cutoff
+                  << "\n";
+
+    switch(params.precision)
+    {
+    case fft_precision_single:
+        max_linf_eps_single = std::max(
+            max_linf_eps_single,
+            diff.l_inf / cpu_output_norm.l_inf
+                / log(product(params.transform_lengths.begin(), params.transform_lengths.end())));
+        max_l2_eps_single = std::max(max_l2_eps_single,
+                                     diff.l_2 / cpu_output_norm.l_2
+                                         * sqrt(log2(product(params.transform_lengths.begin(),
+                                                             params.transform_lengths.end()))));
+        break;
+    case fft_precision_double:
+        max_linf_eps_double = std::max(
+            max_linf_eps_double,
+            diff.l_inf / cpu_output_norm.l_inf
+                / log(product(params.transform_lengths.begin(), params.transform_lengths.end())));
+        max_l2_eps_double = std::max(max_l2_eps_double,
+                                     diff.l_2 / cpu_output_norm.l_2
+                                         * sqrt(log2(product(params.transform_lengths.begin(),
+                                                             params.transform_lengths.end()))));
+        break;
+    default:
+        throw std::logic_error("Unexpected precision in hipfftXtGeneralizedUsage test");
+    }
+
+    EXPECT_LE(diff.l_inf, linf_cutoff) << "l_inf tolerance failure. cutoff: " << linf_cutoff;
+    if(verbose)
+        std::cout << "Accuracy verified. Test completed.\n";
 }
+ROCFFT_CATCH_TEST_EXCEPTIONS
 
 // Note: order test parameters so that caching of reference results is leveraged
 static std::vector<hipfftxt_test_params_t> test_params_for_hipfftxt_execution_tests()
@@ -927,15 +1268,17 @@ static std::vector<hipfftxt_test_params_t> test_params_for_hipfftxt_execution_te
                 // devices have some work to do
                 for(const auto& batch : {MAX_HIP_DESCRIPTOR_GPUS, 1})
                 {
-                    // some test parameters have invalid input descriptor's subformat or
-                    // unimplemented support for it. The test consuming these parameters
-                    // actually verifies that by checking the various error codes returned
-                    // by hipFFT.
-                    // Note: feeding hipfftXtExecDescriptor an input descriptor with
-                    // HIPFFT_XT_FORMAT_OUTPUT as a subformat would serve no other purpose
-                    // than to verifying that the function rejects the arguments. Generalizing
-                    // the test to that end is not worth the effort. If ever considered critical,
-                    // the implementation of some adhoc test should be considered.
+                    // Some test parameters have unacceptable descriptors' subformat and/or unimplemented
+                    // support for it. The test consuming these parameters actually verifies that by checking
+                    // the various error codes returned by hipFFT and choosing early skips when appropriate.
+                    // Note: adding HIPFFT_XT_FORMAT_OUTPUT to the scope of possible *input* descriptor's
+                    // subformat below could conceptually be used to verify that hipfftXtExecDescriptor rejects
+                    // that possible use case. However, the cufft backend's does NOT explicitly reject it; such
+                    // usage was found to actually segfault for real forward transforms though, which is why the
+                    // test suite does not cover that possible (though questionable) use case.
+                    // NOTE: the output descriptor's subformat is always derived from the input descriptor's
+                    // subformat and the transform type, so it is not explicitly parameterized here (see
+                    // hipfftxt_test_params_t::output_desc_format).
                     for(const auto& input_subformat : {HIPFFT_XT_FORMAT_INPLACE,
                                                        HIPFFT_XT_FORMAT_INPLACE_SHUFFLED,
                                                        HIPFFT_XT_FORMAT_INPUT,
@@ -972,9 +1315,31 @@ static std::vector<hipfftxt_test_params_t> test_params_for_hipfftxt_execution_te
     return params;
 }
 
-INSTANTIATE_TEST_SUITE_P(hipfftxttest,
-                         hipfftxtexec,
-                         ::testing::ValuesIn(test_params_for_hipfftxt_execution_tests()),
-                         [](const testing::TestParamInfo<hipfftxtexec::ParamType>& info) {
-                             return info.param.str();
-                         });
+INSTANTIATE_TEST_SUITE_P(
+    hipfftXtSuite,
+    hipfftXtGeneralizedUsage,
+    ::testing::ValuesIn(test_params_for_hipfftxt_execution_tests()),
+    [](const testing::TestParamInfo<hipfftXtGeneralizedUsage::ParamType>& info) {
+        return info.param.str();
+    });
+
+// The list of test parameters dynamically generated in the instantiation above may be empty
+// if only one device is available and/or if very low test probabilities are used. The following
+// ensures such cases do not make gtest report an error due to uninstantiated hipfftXtGeneralizedUsage.
+GTEST_ALLOW_UNINSTANTIATED_PARAMETERIZED_TEST(hipfftXtGeneralizedUsage);
+
+// Manual hipfftXt test: when --hipfftxt_test_token is provided, build params from it and run.
+static std::vector<hipfftxt_test_params_t> test_params_for_manual_hipfftxt_test()
+{
+    if(hipfftxt_test_token.empty())
+        return {};
+    return {hipfftxt_test_params_t::make_from_token(hipfftxt_test_token)};
+}
+
+INSTANTIATE_TEST_SUITE_P(
+    manualHipfftXtTest,
+    hipfftXtGeneralizedUsage,
+    ::testing::ValuesIn(test_params_for_manual_hipfftxt_test()),
+    [](const testing::TestParamInfo<hipfftXtGeneralizedUsage::ParamType>& info) {
+        return info.param.str();
+    });
