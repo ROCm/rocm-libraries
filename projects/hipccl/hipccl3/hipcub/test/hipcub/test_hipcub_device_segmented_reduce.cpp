@@ -66,7 +66,7 @@ using Params1 = ::testing::Types<
     params1<float, float, test_utils::plus, 123, 100, 200>,
     params1<test_utils::half, test_utils::half, test_utils::maximum, 50, 2, 10>,
     params1<test_utils::bfloat16, test_utils::bfloat16, test_utils::maximum, 50, 2, 10>,
-    params1<unsigned int, unsigned int, test_utils::plus, 0, 1000, true>>;
+    params1<unsigned int, unsigned int, test_utils::plus, 0, 0, 1000, true>>;
 
 TYPED_TEST_SUITE(HipcubDeviceSegmentedReduceOp, Params1);
 
