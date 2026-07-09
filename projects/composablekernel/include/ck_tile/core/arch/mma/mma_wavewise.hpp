@@ -166,6 +166,7 @@ struct WaveWiseMmaPipeline : public MmaPipelineBase<WaveWiseMmaPipeline<ADataTyp
             static constexpr index_t kCM0PerLane = MmaOp::kCMNumAccess;
             static constexpr index_t kCM1PerLane = MmaOp::kCMPerLane / MmaOp::kCMNumAccess;
 
+            // TODO: This might be wrong for gfx1250 M=32 intrinsics.
             static constexpr index_t kAMBlock = MmaOp::kCMBlocks;
             static constexpr index_t kBNBlock = MmaOp::kCNBlocks;
         };
@@ -182,11 +183,13 @@ struct WaveWiseMmaPipeline : public MmaPipelineBase<WaveWiseMmaPipeline<ADataTyp
     // Expose kCMLane for some callers (e.g. gemm_quant block policies)
     static constexpr index_t kCMLane = WarpGemmAttribute::Impl::kCMLane;
 
-    // Unsupported MmaOps with nonTrivial AttrNumAccess lead to issues in calculator.
+    // Unsupported MmaOps with nonTrivial AttrNumAccess / Swizzle lead to issues in calculator.
     static constexpr index_t AttrNumAccessAV_support =
         MmaOpTraits<MmaOp>::IsSupported ? AttrNumAccessAV : 1;
     static constexpr index_t AttrNumAccessBV_support =
         MmaOpTraits<MmaOp>::IsSupported ? AttrNumAccessBV : 1;
+    static constexpr index_t SwizzleFactor_support =
+        MmaOpTraits<MmaOp>::IsSupported ? SwizzleFactor : 1;
 
     // TODO: TileDistrEncCalc only supports K composition (kIter) and always gives post-compression
     // A layout.
@@ -194,7 +197,7 @@ struct WaveWiseMmaPipeline : public MmaPipelineBase<WaveWiseMmaPipeline<ADataTyp
     // CTranspose!
     using EncCalc           = TileDistrEncCalc<MmaOp,
                                                CTranspose,
-                                               SwizzleFactor,
+                                               SwizzleFactor_support,
                                                FragsK,
                                                AttrNumAccessAV_support,
                                                AttrNumAccessBV_support,

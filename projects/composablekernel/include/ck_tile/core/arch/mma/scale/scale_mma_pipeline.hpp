@@ -158,6 +158,7 @@ struct ScaleMmaPipeline : public MmaPipelineBase<ScaleMmaPipeline<ADataType_, BD
             static constexpr index_t kCM0PerLane = MmaOp::kCMNumAccess;
             static constexpr index_t kCM1PerLane = MmaOp::kCMPerLane / MmaOp::kCMNumAccess;
 
+            // TODO: This might be wrong for gfx1250 M=32 intrinsics.
             static constexpr index_t kAMBlock = MmaOp::kCMBlocks;
             static constexpr index_t kBNBlock = MmaOp::kCNBlocks;
 
@@ -184,11 +185,13 @@ struct ScaleMmaPipeline : public MmaPipelineBase<ScaleMmaPipeline<ADataType_, BD
     // Since each byte is 0x7F, implicit narrowing to 4 bytes is still correct.
     static constexpr int64_t kIdentityScale = 0x7F7F7F7F7F7F7F7Fll;
 
-    // Unsupported MmaOps with nonTrivial AttrNumAccess lead to issues in calculator.
+    // Unsupported MmaOps with nonTrivial AttrNumAccess / Swizzle lead to issues in calculator.
     static constexpr index_t AttrNumAccessAV_support =
         MmaOpTraits<MmaOp>::IsSupported ? AttrNumAccessAV : 1;
     static constexpr index_t AttrNumAccessBV_support =
         MmaOpTraits<MmaOp>::IsSupported ? AttrNumAccessBV : 1;
+    static constexpr index_t SwizzleFactor_support =
+        MmaOpTraits<MmaOp>::IsSupported ? SwizzleFactor : 1;
 
     // TODO: TileDistrEncCalc only supports K composition (kIter) and always gives post-compression
     // A layout.
@@ -196,7 +199,7 @@ struct ScaleMmaPipeline : public MmaPipelineBase<ScaleMmaPipeline<ADataType_, BD
     // CTranspose!
     using EncCalc           = TileDistrEncCalc<MmaOp,
                                                CTranspose,
-                                               SwizzleFactor,
+                                               SwizzleFactor_support,
                                                FragsK,
                                                AttrNumAccessAV_support,
                                                AttrNumAccessBV_support>;
