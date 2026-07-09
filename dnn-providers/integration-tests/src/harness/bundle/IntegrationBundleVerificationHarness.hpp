@@ -80,7 +80,7 @@ public:
 
         if(_bundle != nullptr && _bundle->metadata.seed.has_value())
         {
-            _synthesisConfig.globalSeed(static_cast<unsigned int>(*_bundle->metadata.seed));
+            _synthesisConfig.setGlobalSeed(static_cast<unsigned int>(*_bundle->metadata.seed));
         }
 
         if(_bundle != nullptr && _bundle->metadata.inputs.has_value())

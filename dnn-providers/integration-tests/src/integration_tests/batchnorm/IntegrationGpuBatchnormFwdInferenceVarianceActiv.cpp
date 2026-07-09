@@ -151,11 +151,11 @@ public:
     BatchnormFwdInferenceVarianceActiv()
     {
         this->synthesis()
-            .range(BnInfVarActivTensorIds::X_UID, -1.0f, 1.0f)
-            .range(BnInfVarActivTensorIds::MEAN_UID, -1.0f, 1.0f)
-            .range(BnInfVarActivTensorIds::VARIANCE_UID, 0.1f, 1.0f)
-            .range(BnInfVarActivTensorIds::SCALE_UID, -1.0f, 1.0f)
-            .range(BnInfVarActivTensorIds::BIAS_UID, -1.0f, 1.0f);
+            .setRange(BnInfVarActivTensorIds::X_UID, -1.0f, 1.0f)
+            .setRange(BnInfVarActivTensorIds::MEAN_UID, -1.0f, 1.0f)
+            .setRange(BnInfVarActivTensorIds::VARIANCE_UID, 0.1f, 1.0f)
+            .setRange(BnInfVarActivTensorIds::SCALE_UID, -1.0f, 1.0f)
+            .setRange(BnInfVarActivTensorIds::BIAS_UID, -1.0f, 1.0f);
     }
 
 protected:
@@ -170,7 +170,7 @@ protected:
 
         this->setTestCaseLayout(layout.name);
         this->setTestCaseNote(bnTestCase.note);
-        this->synthesis().globalSeed(bnTestCase.seed);
+        this->synthesis().setGlobalSeed(bnTestCase.seed);
         this->verifyGraph(graphObj);
     }
 };

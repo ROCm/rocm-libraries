@@ -23,6 +23,7 @@ add_executable(hipdnn_integration_tests_unit_tests
     TestBundleVerificationHarness.cpp
     TestSynthesisConfig.cpp
     TestSynthesizeInputs.cpp
+    TestToleranceResolver.cpp
     TestVerificationModePaths.cpp
     TestErrorPaths.cpp
 )

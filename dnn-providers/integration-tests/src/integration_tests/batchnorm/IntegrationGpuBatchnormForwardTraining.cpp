@@ -210,11 +210,11 @@ public:
     BatchnormForwardTraining()
     {
         this->synthesis()
-            .range(BatchnormFwdTrainingTensorIds::X_UID, -1.0f, 1.0f)
-            .range(BatchnormFwdTrainingTensorIds::SCALE_UID, -2.0f, 2.0f)
-            .range(BatchnormFwdTrainingTensorIds::BIAS_UID, -2.0f, 2.0f)
-            .range(BatchnormFwdTrainingTensorIds::PREV_RUNNING_MEAN_UID, -2.0f, 2.0f)
-            .range(BatchnormFwdTrainingTensorIds::PREV_RUNNING_VARIANCE_UID, -2.0f, 2.0f);
+            .setRange(BatchnormFwdTrainingTensorIds::X_UID, -1.0f, 1.0f)
+            .setRange(BatchnormFwdTrainingTensorIds::SCALE_UID, -2.0f, 2.0f)
+            .setRange(BatchnormFwdTrainingTensorIds::BIAS_UID, -2.0f, 2.0f)
+            .setRange(BatchnormFwdTrainingTensorIds::PREV_RUNNING_MEAN_UID, -2.0f, 2.0f)
+            .setRange(BatchnormFwdTrainingTensorIds::PREV_RUNNING_VARIANCE_UID, -2.0f, 2.0f);
     }
 
 protected:
@@ -246,11 +246,12 @@ protected:
         this->setTestCaseLayout(layout.name);
         this->setTestCaseNote(bnTestCase.note);
         this->synthesis()
-            .seed(BatchnormFwdTrainingTensorIds::X_UID, bnTestCase.seed)
-            .seed(BatchnormFwdTrainingTensorIds::SCALE_UID, bnTestCase.seed + 1)
-            .seed(BatchnormFwdTrainingTensorIds::BIAS_UID, bnTestCase.seed + 2)
-            .seed(BatchnormFwdTrainingTensorIds::PREV_RUNNING_MEAN_UID, bnTestCase.seed + 1000)
-            .seed(BatchnormFwdTrainingTensorIds::PREV_RUNNING_VARIANCE_UID, bnTestCase.seed + 2000);
+            .setSeed(BatchnormFwdTrainingTensorIds::X_UID, bnTestCase.seed)
+            .setSeed(BatchnormFwdTrainingTensorIds::SCALE_UID, bnTestCase.seed + 1)
+            .setSeed(BatchnormFwdTrainingTensorIds::BIAS_UID, bnTestCase.seed + 2)
+            .setSeed(BatchnormFwdTrainingTensorIds::PREV_RUNNING_MEAN_UID, bnTestCase.seed + 1000)
+            .setSeed(BatchnormFwdTrainingTensorIds::PREV_RUNNING_VARIANCE_UID,
+                     bnTestCase.seed + 2000);
         this->verifyGraph(graphObj);
     }
 };

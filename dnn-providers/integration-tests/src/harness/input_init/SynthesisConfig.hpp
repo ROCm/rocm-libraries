@@ -57,12 +57,12 @@ public:
         return *this;
     }
 
-    SynthesisConfig& range(int64_t uid, float lo, float hi)
+    SynthesisConfig& setRange(int64_t uid, float lo, float hi)
     {
         return set(uid, FillSpec::free(lo, hi));
     }
 
-    SynthesisConfig& fixed(int64_t uid, float value)
+    SynthesisConfig& setFixed(int64_t uid, float value)
     {
         return set(uid, FillSpec::fixed(value));
     }
@@ -91,7 +91,7 @@ public:
         return _fills;
     }
 
-    FillSpec get(int64_t uid) const
+    FillSpec fill(int64_t uid) const
     {
         auto it = _fills.find(uid);
         return it != _fills.end() ? it->second : FillSpec{};
@@ -102,8 +102,8 @@ public:
         std::vector<int64_t> result;
         for(const int64_t uid : ownedUids)
         {
-            const auto fill = get(uid);
-            if(fill.kind != FillSpec::Kind::FREE && fill.kind != FillSpec::Kind::FIXED)
+            const auto f = fill(uid);
+            if(f.kind != FillSpec::Kind::FREE && f.kind != FillSpec::Kind::FIXED)
             {
                 result.push_back(uid);
             }
@@ -113,19 +113,19 @@ public:
 
     // ── Seed config ─────────────────────────────────────────────────────
 
-    SynthesisConfig& seed(int64_t uid, unsigned int value)
+    SynthesisConfig& setSeed(int64_t uid, unsigned int value)
     {
         _seeds[uid] = value;
         return *this;
     }
 
-    SynthesisConfig& globalSeed(unsigned int s)
+    SynthesisConfig& setGlobalSeed(unsigned int s)
     {
         _globalSeed = s;
         return *this;
     }
 
-    unsigned int getGlobalSeed() const
+    unsigned int globalSeed() const
     {
         return _globalSeed;
     }
@@ -163,6 +163,14 @@ public:
             }
             inputs[std::to_string(uid)] = std::move(j);
         }
+        for(const auto& [uid, seedVal] : _seeds)
+        {
+            auto key = std::to_string(uid);
+            if(!inputs.contains(key))
+            {
+                inputs[key] = nlohmann::json{{"seed", seedVal}};
+            }
+        }
         return inputs;
     }
 
@@ -170,28 +178,28 @@ public:
     {
         for(const auto& [uid, j] : inputs)
         {
-            FillSpec f;
             if(j.contains("kind") && j["kind"].is_string())
             {
+                FillSpec f;
                 f.kind = kindFromString(j["kind"].get<std::string>());
+                if(j.contains("lo") && j["lo"].is_number())
+                {
+                    f.lo = j["lo"].get<float>();
+                }
+                if(j.contains("hi") && j["hi"].is_number())
+                {
+                    f.hi = j["hi"].get<float>();
+                }
+                if(j.contains("value") && j["value"].is_number())
+                {
+                    f.value = j["value"].get<float>();
+                }
+                set(uid, f);
             }
-            if(j.contains("lo") && j["lo"].is_number())
-            {
-                f.lo = j["lo"].get<float>();
-            }
-            if(j.contains("hi") && j["hi"].is_number())
-            {
-                f.hi = j["hi"].get<float>();
-            }
-            if(j.contains("value") && j["value"].is_number())
-            {
-                f.value = j["value"].get<float>();
-            }
-            set(uid, f);
 
             if(j.contains("seed") && j["seed"].is_number_unsigned())
             {
-                seed(uid, j["seed"].get<unsigned int>());
+                setSeed(uid, j["seed"].get<unsigned int>());
             }
         }
     }

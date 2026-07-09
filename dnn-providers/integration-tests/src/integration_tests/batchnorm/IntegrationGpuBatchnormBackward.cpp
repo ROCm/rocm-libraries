@@ -129,15 +129,15 @@ public:
     BatchnormBackward()
     {
         this->synthesis()
-            .range(BatchnormBwdTensorIds::X_UID, -1.0f, 1.0f)
-            .range(BatchnormBwdTensorIds::DY_UID, -0.1f, 0.1f)
-            .range(BatchnormBwdTensorIds::SCALE_UID, -0.1f, 0.1f);
+            .setRange(BatchnormBwdTensorIds::X_UID, -1.0f, 1.0f)
+            .setRange(BatchnormBwdTensorIds::DY_UID, -0.1f, 0.1f)
+            .setRange(BatchnormBwdTensorIds::SCALE_UID, -0.1f, 0.1f);
 
         if constexpr(!CalcStats)
         {
             this->synthesis()
-                .range(BatchnormBwdTensorIds::MEAN_UID, -0.1f, 0.1f)
-                .range(BatchnormBwdTensorIds::INV_VARIANCE_UID, 1.9f, 2.0f);
+                .setRange(BatchnormBwdTensorIds::MEAN_UID, -0.1f, 0.1f)
+                .setRange(BatchnormBwdTensorIds::INV_VARIANCE_UID, 1.9f, 2.0f);
         }
     }
 
@@ -156,7 +156,7 @@ protected:
 
         this->setTestCaseLayout(layout.name);
         this->setTestCaseNote(bnTestCase.note);
-        this->synthesis().globalSeed(bnTestCase.seed);
+        this->synthesis().setGlobalSeed(bnTestCase.seed);
         this->verifyGraph(graphObj);
     }
 };

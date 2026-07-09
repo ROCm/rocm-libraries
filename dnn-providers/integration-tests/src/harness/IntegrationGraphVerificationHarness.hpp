@@ -85,20 +85,7 @@ protected:
 
     virtual void runGraphTest() = 0;
 
-    // Determine the FINAL tolerance for an output tensor: an aggregation-policy
-    // default plus the TOML per-test override, both via
-    // harness/tolerance/ToleranceResolver.hpp. The resolver is keyed on the
-    // serialized flatbuffer graph: we serialize with to_binary() and read the
-    // output tensor's dtype from the flatbuffer.
-    //
-    // Policy = maxAcrossNodes (the conservative default, shared with the bundle
-    // harness). The old graph harness used the last non-Pointwise op (the "root
-    // op"), which could be too tight — it attributes the whole output's tolerance
-    // to one op and ignores upstream error accumulation. maxAcrossNodes is the
-    // correct floor: it is never tighter than the root op, so it cannot
-    // manufacture a false failure, and for the common case (one real op +
-    // activation) it equals the root-op tolerance anyway. The returned value is
-    // already overridden, so registerValidator stores it as-is.
+    // Resolve tolerance for an output tensor via ToleranceResolver (max-across-nodes + TOML override).
     float getTolerance(const hipdnn_frontend::graph::Graph& graph,
                        const std::shared_ptr<hipdnn_frontend::graph::TensorAttributes>& output)
     {
@@ -484,7 +471,7 @@ public:
         meta["operation"] = suiteName;
         meta["generator"] = "capture-bundles";
         meta["generator_version"] = "1.0.0";
-        meta["seed"] = _synthesisConfig.getGlobalSeed();
+        meta["seed"] = _synthesisConfig.globalSeed();
 
         if(!_synthesisConfig.fills().empty())
         {

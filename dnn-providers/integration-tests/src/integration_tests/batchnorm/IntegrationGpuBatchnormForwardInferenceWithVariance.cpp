@@ -119,11 +119,11 @@ public:
     BatchnormForwardInferenceWithVariance()
     {
         this->synthesis()
-            .range(BnInfVarTensorIds::X_UID, -1.0f, 1.0f)
-            .range(BnInfVarTensorIds::MEAN_UID, -1.0f, 1.0f)
-            .range(BnInfVarTensorIds::VARIANCE_UID, 0.1f, 1.0f)
-            .range(BnInfVarTensorIds::SCALE_UID, -1.0f, 1.0f)
-            .range(BnInfVarTensorIds::BIAS_UID, -1.0f, 1.0f);
+            .setRange(BnInfVarTensorIds::X_UID, -1.0f, 1.0f)
+            .setRange(BnInfVarTensorIds::MEAN_UID, -1.0f, 1.0f)
+            .setRange(BnInfVarTensorIds::VARIANCE_UID, 0.1f, 1.0f)
+            .setRange(BnInfVarTensorIds::SCALE_UID, -1.0f, 1.0f)
+            .setRange(BnInfVarTensorIds::BIAS_UID, -1.0f, 1.0f);
     }
 
 protected:
@@ -138,7 +138,7 @@ protected:
 
         this->setTestCaseLayout(layout.name);
         this->setTestCaseNote(bnTestCase.note);
-        this->synthesis().globalSeed(bnTestCase.seed);
+        this->synthesis().setGlobalSeed(bnTestCase.seed);
         this->verifyGraph(graphObj);
     }
 };

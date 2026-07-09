@@ -248,11 +248,11 @@ public:
     BatchnormFwdTrainingActivation()
     {
         this->synthesis()
-            .range(BatchnormFwdTrainingActivTensorIds::X_UID, -1.0f, 1.0f)
-            .range(BatchnormFwdTrainingActivTensorIds::SCALE_UID, -2.0f, 2.0f)
-            .range(BatchnormFwdTrainingActivTensorIds::BIAS_UID, -2.0f, 2.0f)
-            .range(BatchnormFwdTrainingActivTensorIds::PREV_RUNNING_MEAN_UID, -2.0f, 2.0f)
-            .range(BatchnormFwdTrainingActivTensorIds::PREV_RUNNING_VARIANCE_UID, 0.1f, 2.0f);
+            .setRange(BatchnormFwdTrainingActivTensorIds::X_UID, -1.0f, 1.0f)
+            .setRange(BatchnormFwdTrainingActivTensorIds::SCALE_UID, -2.0f, 2.0f)
+            .setRange(BatchnormFwdTrainingActivTensorIds::BIAS_UID, -2.0f, 2.0f)
+            .setRange(BatchnormFwdTrainingActivTensorIds::PREV_RUNNING_MEAN_UID, -2.0f, 2.0f)
+            .setRange(BatchnormFwdTrainingActivTensorIds::PREV_RUNNING_VARIANCE_UID, 0.1f, 2.0f);
     }
 
 protected:
@@ -284,12 +284,13 @@ protected:
         this->setTestCaseLayout(layout.name);
         this->setTestCaseNote(bnTestCase.note);
         this->synthesis()
-            .seed(BatchnormFwdTrainingActivTensorIds::X_UID, bnTestCase.seed)
-            .seed(BatchnormFwdTrainingActivTensorIds::SCALE_UID, bnTestCase.seed + 1)
-            .seed(BatchnormFwdTrainingActivTensorIds::BIAS_UID, bnTestCase.seed + 2)
-            .seed(BatchnormFwdTrainingActivTensorIds::PREV_RUNNING_MEAN_UID, bnTestCase.seed + 1000)
-            .seed(BatchnormFwdTrainingActivTensorIds::PREV_RUNNING_VARIANCE_UID,
-                  bnTestCase.seed + 2000);
+            .setSeed(BatchnormFwdTrainingActivTensorIds::X_UID, bnTestCase.seed)
+            .setSeed(BatchnormFwdTrainingActivTensorIds::SCALE_UID, bnTestCase.seed + 1)
+            .setSeed(BatchnormFwdTrainingActivTensorIds::BIAS_UID, bnTestCase.seed + 2)
+            .setSeed(BatchnormFwdTrainingActivTensorIds::PREV_RUNNING_MEAN_UID,
+                     bnTestCase.seed + 1000)
+            .setSeed(BatchnormFwdTrainingActivTensorIds::PREV_RUNNING_VARIANCE_UID,
+                     bnTestCase.seed + 2000);
         this->verifyGraph(graphObj);
     }
 };

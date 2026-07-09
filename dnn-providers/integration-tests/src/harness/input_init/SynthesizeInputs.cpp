@@ -306,12 +306,12 @@ SynthesisResult synthesizeInputs(const hipdnn_flatbuffers_sdk::data_objects::Gra
     auto sortedUids = ownedUids;
     std::sort(sortedUids.begin(), sortedUids.end());
 
-    std::mt19937 rng(config.getGlobalSeed());
+    std::mt19937 rng(config.globalSeed());
     for(const int64_t uid : sortedUids)
     {
         const unsigned int seed
             = config.resolveSeed(uid).value_or(static_cast<unsigned int>(rng()));
-        auto fillResult = fill(*inputs.at(uid), config.get(uid), seed);
+        auto fillResult = fill(*inputs.at(uid), config.fill(uid), seed);
         if(!fillResult.filled)
         {
             return SynthesisResult::unsupported("uid " + std::to_string(uid) + ": "

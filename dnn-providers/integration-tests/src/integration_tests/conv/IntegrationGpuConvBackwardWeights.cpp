@@ -95,7 +95,7 @@ protected:
 
         this->setTestCaseLayout(layout.name);
         this->setTestCaseNote(convTestCase.note);
-        this->synthesis().globalSeed(convTestCase.seed);
+        this->synthesis().setGlobalSeed(convTestCase.seed);
         this->verifyGraph(graphObj);
     }
 };
@@ -122,7 +122,7 @@ protected:
         {
             if(!bundle.isOutput(uid))
             {
-                this->synthesis().range(uid, -10.0f, 10.0f);
+                this->synthesis().setRange(uid, -10.0f, 10.0f);
             }
         }
         return ConvBackwardWeights<DataType>::initializeBundle(graph, bundle);
