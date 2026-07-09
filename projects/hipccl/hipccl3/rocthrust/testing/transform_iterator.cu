@@ -16,7 +16,6 @@
  */
 
 #include <thrust/copy.h>
-#include <thrust/detail/libcxx_wrapper/std/__functional/identity.h>
 #include <thrust/detail/libcxx_wrapper/std/__iterator/iterator_traits.h>
 #include <thrust/functional.h>
 #include <thrust/iterator/counting_iterator.h>
@@ -211,7 +210,7 @@ void TestTransformIteratorReferenceAndValueType()
     static_assert(is_same<decltype(it_tr_fwd)::reference, bool&&>::value, "");
     static_assert(is_same<decltype(it_tr_fwd)::value_type, bool>::value, "");
 
-    [[maybe_unused]] auto it_tr_cid = thrust::make_transform_iterator(it, ::internal::identity{});
+    [[maybe_unused]] auto it_tr_cid = thrust::make_transform_iterator(it, _THRUST_STD::identity{});
     static_assert(is_same<decltype(it_tr_cid)::reference, bool>::value, ""); // special handling by
                                                                              // transform_iterator_reference
     static_assert(is_same<decltype(it_tr_cid)::value_type, bool>::value, "");
@@ -236,7 +235,7 @@ void TestTransformIteratorReferenceAndValueType()
     static_assert(is_same<decltype(it_tr_fwd)::reference, bool&&>::value, ""); // wrapped reference is decayed
     static_assert(is_same<decltype(it_tr_fwd)::value_type, bool>::value, "");
 
-    [[maybe_unused]] auto it_tr_cid = thrust::make_transform_iterator(it, ::internal::identity{});
+    [[maybe_unused]] auto it_tr_cid = thrust::make_transform_iterator(it, _THRUST_STD::identity{});
     static_assert(is_same<decltype(it_tr_cid)::reference, bool>::value, ""); // special handling by
                                                                              // transform_iterator_reference
     static_assert(is_same<decltype(it_tr_cid)::value_type, bool>::value, "");
@@ -261,7 +260,7 @@ void TestTransformIteratorReferenceAndValueType()
     static_assert(is_same<decltype(it_tr_fwd)::reference, bool&&>::value, ""); // proxy reference is decayed
     static_assert(is_same<decltype(it_tr_fwd)::value_type, bool>::value, "");
 
-    [[maybe_unused]] auto it_tr_cid = thrust::make_transform_iterator(it, ::internal::identity{});
+    [[maybe_unused]] auto it_tr_cid = thrust::make_transform_iterator(it, _THRUST_STD::identity{});
     static_assert(is_same<decltype(it_tr_cid)::reference, bool>::value, ""); // special handling by
                                                                              // transform_iterator_reference
     static_assert(is_same<decltype(it_tr_cid)::value_type, bool>::value, "");
@@ -273,7 +272,7 @@ void TestTransformIteratorIdentity()
 {
   thrust::device_vector<int> v(3, 42);
 
-  ASSERT_EQUAL(*thrust::make_transform_iterator(v.begin(), ::internal::identity{}), 42);
+  ASSERT_EQUAL(*thrust::make_transform_iterator(v.begin(), _THRUST_STD::identity{}), 42);
   using namespace thrust::placeholders;
   ASSERT_EQUAL(*thrust::make_transform_iterator(v.begin(), _1), 42);
 }
