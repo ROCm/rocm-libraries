@@ -395,6 +395,16 @@ TEST(SortTests, TestSortBoolDescending)
   }
 }
 
+// See also: https://github.com/NVIDIA/cccl/issues/4919
+TEST(SortTests, TestSortTrivial)
+{
+  thrust::host_vector<int> h_data = {1, 0, -1, -2, -3};
+  thrust::host_vector<int> ref    = {-3, -2, -1, 0, 1};
+
+  thrust::sort(h_data.begin(), h_data.end());
+  ASSERT_EQ(h_data, ref);
+}
+
 #ifndef _WIN32
 // TODO: refactor this test into a different set of tests
 __global__ THRUST_HIP_LAUNCH_BOUNDS_DEFAULT void SortKernel(int const N, int* array)
