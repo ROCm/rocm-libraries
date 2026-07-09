@@ -1516,9 +1516,7 @@ struct segment
     SegmentOffsetT begin = _HIPCUB_STD::numeric_limits<SegmentOffsetT>::min();
     SegmentOffsetT end   = _HIPCUB_STD::numeric_limits<SegmentOffsetT>::max();
 
-    HIPCUB_HOST_DEVICE
-    segment()
-        = default;
+    segment() = default;
 
     HIPCUB_HOST_DEVICE
     constexpr segment(SegmentOffsetT b, SegmentOffsetT e)
