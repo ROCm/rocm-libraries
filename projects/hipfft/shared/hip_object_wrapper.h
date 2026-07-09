@@ -32,14 +32,14 @@ struct hip_object_wrapper_t
 {
     hip_object_wrapper_t()
         : obj(nullptr)
+        , owned(true)
     {
     }
 
     template <typename... Args>
     void alloc(Args&&... arg)
     {
-        free();
-        const auto ret = TCreate(&obj, std::forward<Args>(arg)...);
+        const auto ret = alloc_with_err(std::forward<Args>(arg)...);
         if(ret != TSuccess)
         {
             if constexpr(std::is_same_v<decltype(TSuccess), hipError_t>)
@@ -53,12 +53,14 @@ struct hip_object_wrapper_t
     auto alloc_with_err(Args&&... arg)
     {
         free();
-        return TCreate(&obj, std::forward<Args>(arg)...);
+        auto ret = TCreate(&obj, std::forward<Args>(arg)...);
+        owned    = (ret == TSuccess);
+        return ret;
     }
 
     void free()
     {
-        if(obj)
+        if(obj && owned)
         {
             (void)TDestroy(obj);
             obj = nullptr;
@@ -88,18 +90,35 @@ struct hip_object_wrapper_t
     hip_object_wrapper_t& operator=(const hip_object_wrapper_t&) = delete;
     hip_object_wrapper_t(hip_object_wrapper_t&& other)
         : obj(other.obj)
+        , owned(other.owned)
     {
-        other.obj = nullptr;
+        other.obj   = nullptr;
+        other.owned = false;
     }
 
     hip_object_wrapper_t& operator=(hip_object_wrapper_t&& other)
     {
         std::swap(obj, other.obj);
+        std::swap(owned, other.owned);
         return *this;
     }
 
+    static hip_object_wrapper_t make_nonowned(T p)
+    {
+        hip_object_wrapper_t ret;
+        ret.obj   = p;
+        ret.owned = false;
+        return ret;
+    }
+
+    const T get_raw() const
+    {
+        return obj;
+    }
+
 private:
-    T obj;
+    T    obj;
+    bool owned = true;
 };
 
 typedef hip_object_wrapper_t<hipStream_t, hipStreamCreate, hipStreamDestroy>  hipStream_wrapper_t;
