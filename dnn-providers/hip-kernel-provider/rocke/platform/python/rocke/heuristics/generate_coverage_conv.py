@@ -49,6 +49,9 @@ HEADER = [
 SHAPE_COLS = HEADER[:-1]
 
 
+MIN_TILE = 32
+
+
 def conv_shape_valid(N, G, C, K, Hi, Wi, Y, X, stride_h, stride_w, pad_h, pad_w):
     if C % G != 0 or K % G != 0:
         return False
@@ -56,7 +59,13 @@ def conv_shape_valid(N, G, C, K, Hi, Wi, Y, X, stride_h, stride_w, pad_h, pad_w)
         return False
     Ho = (Hi + 2 * pad_h - Y) // stride_h + 1
     Wo = (Wi + 2 * pad_w - X) // stride_w + 1
-    return Ho >= 1 and Wo >= 1
+    if Ho < 1 or Wo < 1:
+        return False
+    # Tileability: GEMM dimensions must meet minimum tile size.
+    M = N * Ho * Wo
+    N_gemm = K
+    K_gemm = (C // G) * Y * X
+    return M >= MIN_TILE and N_gemm >= MIN_TILE and K_gemm >= MIN_TILE
 
 
 def generate_wide_shapes():

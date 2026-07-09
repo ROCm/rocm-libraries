@@ -48,7 +48,6 @@ from typing import Callable, Dict, List, Optional, Sequence, Tuple
 class OpShapeConfig:
     header: List[str]
     bucket_fn: Optional[Callable[[tuple], tuple]] = None
-    filter_fn: Optional[Callable[[tuple, int], bool]] = None
     extra_columns: Dict[str, str] = field(default_factory=dict)
 
 
@@ -94,16 +93,6 @@ def conv_bucket_key(row: tuple) -> tuple:
         _conv_channel_bucket(C, K),
     )
 
-
-def conv_tileability_filter(row: tuple, min_tile: int) -> bool:
-    """Return True if the shape is tileable (should be kept)."""
-    N, G, C, K, Hi, Wi, Y, X, sh, sw, ph, pw = row
-    Ho = (Hi + 2 * ph - Y) // sh + 1
-    Wo = (Wi + 2 * pw - X) // sw + 1
-    M = N * Ho * Wo
-    N_gemm = K
-    K_gemm = (C // G) * Y * X
-    return M >= min_tile and N_gemm >= min_tile and K_gemm >= min_tile
 
 
 # ── Gemm bucketing ──────────────────────────────────────────────────────────
@@ -182,7 +171,6 @@ OP_CONFIGS: Dict[str, OpShapeConfig] = {
     "conv": OpShapeConfig(
         header=CONV_HEADER,
         bucket_fn=conv_bucket_key,
-        filter_fn=conv_tileability_filter,
         extra_columns={"direction": "forward"},
     ),
     "gemm": OpShapeConfig(
@@ -304,28 +292,34 @@ def stratified_sample(
     return selected
 
 
-def filter_shapes(
+def shard_shapes(
     shapes: List[tuple],
-    filter_fn: Optional[Callable[[tuple, int], bool]],
-    min_tile: int,
-) -> Tuple[List[tuple], int]:
-    """Apply per-op filter. Returns (kept, n_dropped)."""
-    if filter_fn is None:
-        return shapes, 0
-    kept = [s for s in shapes if filter_fn(s, min_tile)]
-    return kept, len(shapes) - len(kept)
+    num_shards: int,
+    bucket_fn: Optional[Callable[[tuple], tuple]] = None,
+) -> List[List[tuple]]:
+    """Split shapes into num_shards chunks, stratified by bucket when possible."""
+    if bucket_fn is None:
+        # No bucketing — sequential chunks.
+        chunk_size = math.ceil(len(shapes) / num_shards)
+        return [
+            shapes[i * chunk_size : (i + 1) * chunk_size]
+            for i in range(num_shards)
+            if shapes[i * chunk_size : (i + 1) * chunk_size]
+        ]
 
+    # Group by bucket, then round-robin across shards.
+    buckets: Dict[tuple, List[tuple]] = defaultdict(list)
+    for s in shapes:
+        buckets[bucket_fn(s)].append(s)
 
-def shard_shapes(shapes: List[tuple], num_shards: int) -> List[List[tuple]]:
-    """Split shapes into num_shards chunks."""
-    n = len(shapes)
-    chunk_size = math.ceil(n / num_shards)
-    shards = []
-    for i in range(num_shards):
-        chunk = shapes[i * chunk_size : (i + 1) * chunk_size]
-        if chunk:
-            shards.append(chunk)
-    return shards
+    shards: List[List[tuple]] = [[] for _ in range(num_shards)]
+    idx = 0
+    for _key in sorted(buckets):
+        for s in buckets[_key]:
+            shards[idx % num_shards].append(s)
+            idx += 1
+
+    return [s for s in shards if s]
 
 
 # ── Stats printing ───────────────────────────────────────────────────────────
@@ -440,22 +434,23 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
     parser.add_argument(
         "--target", type=int, default=None, help="Target shape count after sampling"
     )
-    parser.add_argument(
+    shard_group = parser.add_mutually_exclusive_group()
+    shard_group.add_argument(
         "--shards",
         type=int,
         default=0,
         help="If >0, write shard_00.csv ... shard_NN.csv",
     )
+    shard_group.add_argument(
+        "--shapes-per-shard",
+        type=int,
+        default=None,
+        help="Max shapes per shard; computes --shards automatically",
+    )
     parser.add_argument(
         "--shard_dir", default="shards", help="Directory for shard CSVs"
     )
     parser.add_argument("--seed", type=int, default=42)
-    parser.add_argument(
-        "--min-tile",
-        type=int,
-        default=32,
-        help="Minimum tile dim for ops with tileability filter",
-    )
     args = parser.parse_args(argv)
 
     config = get_config(args.op)
@@ -485,15 +480,7 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
             file=sys.stderr,
         )
 
-    print(f"Total unique shapes before filtering: {len(all_shapes)}", file=sys.stderr)
-
-    # Op-specific filtering
-    all_shapes, n_dropped = filter_shapes(all_shapes, config.filter_fn, args.min_tile)
-    if n_dropped:
-        print(
-            f"Dropped {n_dropped} shapes by filter; {len(all_shapes)} remain",
-            file=sys.stderr,
-        )
+    print(f"Total unique shapes: {len(all_shapes)}", file=sys.stderr)
 
     # Stats before sampling
     stats_fn = _STATS_FN.get(
@@ -516,10 +503,15 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
     write_csv(sampled, Path(args.out), config)
     print(f"\nWrote {len(sampled)} shapes to {args.out}", file=sys.stderr)
 
+    # Resolve --shapes-per-shard into a shard count
+    if args.shapes_per_shard is not None and args.shapes_per_shard > 0:
+        args.shards = math.ceil(len(sampled) / args.shapes_per_shard)
+        print(f"shapes_per_shard={args.shapes_per_shard} -> {args.shards} shards", file=sys.stderr)
+
     # Shard
     if args.shards > 0:
         shard_dir = Path(args.shard_dir)
-        chunks = shard_shapes(sampled, args.shards)
+        chunks = shard_shapes(sampled, args.shards, bucket_fn=config.bucket_fn)
         for i, chunk in enumerate(chunks):
             shard_path = shard_dir / f"shard_{i:02d}.csv"
             write_csv(chunk, shard_path, config)
