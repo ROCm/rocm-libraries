@@ -1,0 +1,115 @@
+{
+  "gpu": "AMD Instinct MI355X",
+  "model": "Qwen3-30B-A3B",
+  "batch": 2,
+  "methodology": "pure_dsl_vs_aiter_production_pipeline",
+  "baselines": {
+    "rmsnorm": "aiter.rmsnorm2d_fwd_with_add",
+    "gemm": "torch.matmul (hipBLASLt)",
+    "attention": "aiter unified_attention backend=triton",
+    "topk": "aiter.moe_fused_gate",
+    "moe_sort": "aiter.moe_sorting_opus_fwd",
+    "moe_e2e": "aiter.fused_moe (2-stage CK)"
+  },
+  "decode_layers": [
+    {
+      "name": "rmsnorm",
+      "baseline_us": 5.836259722709656,
+      "dsl_us": 0.45400500297546387,
+      "speedup": 12.855055967356972,
+      "notes": "AITER fused-add+norm vs DSL add_rmsnorm2d_bf16"
+    },
+    {
+      "name": "qkv_proj",
+      "baseline_us": 12.259329557418823,
+      "dsl_us": 7.755280137062073,
+      "speedup": 1.5807719825402744,
+      "notes": "M=2 N=2560 K=2048 RCR bf16 DTLA+chiplet"
+    },
+    {
+      "name": "decode_attn",
+      "baseline_us": 51.58454418182373,
+      "dsl_us": 53.43616485595703,
+      "speedup": 0.9653489227918107,
+      "notes": "kv=1024 GQA-8 hdim=64 path=3d num_sms=30"
+    },
+    {
+      "name": "o_proj",
+      "baseline_us": 11.87732458114624,
+      "dsl_us": 6.742269992828369,
+      "speedup": 1.7616210258236373,
+      "notes": "M=2 N=2048 K=2048 RCR bf16 DTLA+chiplet"
+    },
+    {
+      "name": "rmsnorm_post_attn",
+      "baseline_us": 5.836259722709656,
+      "dsl_us": 0.45400500297546387,
+      "speedup": 12.855055967356972,
+      "notes": "same shape"
+    },
+    {
+      "name": "rmsnorm_pre_moe",
+      "baseline_us": 5.836259722709656,
+      "dsl_us": 0.45400500297546387,
+      "speedup": 12.855055967356972,
+      "notes": "same shape"
+    },
+    {
+      "name": "router_topk",
+      "baseline_us": 13.304140567779541,
+      "dsl_us": 0.4528050124645233,
+      "speedup": 29.38161063051815,
+      "notes": "T=2 E=128 K=8"
+    },
+    {
+      "name": "moe_e2e",
+      "baseline_us": 100.43445587158203,
+      "dsl_us": 94.24699783325195,
+      "speedup": 1.0656515133699787,
+      "notes": "AITER 2-stage CK vs DSL preshuffle+skip+slot1+graph"
+    }
+  ],
+  "prefill_attention": [
+    {
+      "name": "prefill_sq128",
+      "baseline_us": 26.985085010528564,
+      "dsl_us": 30.1475191116333,
+      "speedup": 0.8951013484925724,
+      "notes": "sq=128 cfg=nw1_mw16_T8"
+    },
+    {
+      "name": "prefill_sq256",
+      "baseline_us": 27.422690391540527,
+      "dsl_us": 34.463560581207275,
+      "speedup": 0.7957010224443819,
+      "notes": "sq=256 cfg=nw2_mw16_T8"
+    },
+    {
+      "name": "prefill_sq512",
+      "baseline_us": 27.198688983917236,
+      "dsl_us": 40.96622943878174,
+      "speedup": 0.6639295184479169,
+      "notes": "sq=512 cfg=nw2_mw32_T4_tr"
+    },
+    {
+      "name": "prefill_sq1024",
+      "baseline_us": 27.199690341949463,
+      "dsl_us": 55.7429838180542,
+      "speedup": 0.48794823095099454,
+      "notes": "sq=1024 cfg=nw4_mw32_T4_tr"
+    },
+    {
+      "name": "prefill_sq2048",
+      "baseline_us": 51.989545822143555,
+      "dsl_us": 120.44866561889648,
+      "speedup": 0.4316323933935489,
+      "notes": "sq=2048 cfg=nw4_mw32_T8_tr"
+    }
+  ],
+  "summary": {
+    "total_baseline_us": 206.96857392787933,
+    "total_dsl_us": 163.99553284049034,
+    "e2e_speedup": 1.2620378759291362,
+    "total_saved_us": 42.97304108738899
+  }
+}

@@ -12,13 +12,10 @@ GlobalParameters:
   DataInitTypeAlpha: 1
   DataInitTypeA: 12
   DataInitTypeB: 13
-  NewClient: 2
   CSVExportWinner: true
   CSVMergeSameProblemID: true
   Device: 0
   RotatingBufferSize: 512
-  DeviceLDS: 163840
-  MaxLDS: 163840
   PrintSolutionRejectionReason: True
   DisableAsmComments : True
 

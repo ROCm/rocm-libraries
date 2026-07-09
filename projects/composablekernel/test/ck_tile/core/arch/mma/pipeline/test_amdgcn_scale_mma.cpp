@@ -4,19 +4,16 @@
 #include "pipeline_tests_helper.hpp"
 
 #include "ck_tile/core/arch/arch.hpp"
-#include "ck_tile/core/arch/mma/amdgcn_mma.hpp"
 #include "ck_tile/core/arch/mma/mma.hpp"
-#include "ck_tile/core/arch/mma/mma_op_family.hpp"
-#include "ck_tile/core/arch/mma/mma_selector.hpp"
-#include "ck_tile/core/arch/mma/mma_traits.hpp"
 #include "ck_tile/core/arch/mma/scale/scale_mma_pipeline.hpp"
 #include "ck_tile/core/numeric/float8.hpp"
+#include "ck_tile/core/numeric/integer.hpp"
 #include "ck_tile/core/numeric/pk_fp4.hpp"
+#include "ck_tile/core/numeric/vector_type.hpp"
 #include "ck_tile/core/utility/functional.hpp"
 
 #include <gtest/gtest.h>
 
-#include <cstdint>
 #include <iostream>
 #include <type_traits>
 
@@ -29,9 +26,9 @@ using CompilerTargetGfx950 = decltype(make_amdgcn_gfx9_target<amdgcn_target_id::
 template <typename AType,
           typename BType,
           typename CType,
-          std::uint32_t WaveTileM,
-          std::uint32_t WaveTileN,
-          std::uint32_t WaveTileK>
+          uint32_t WaveTileM,
+          uint32_t WaveTileN,
+          uint32_t WaveTileK>
 void ScaleMfmaGfx950Specialization_impl()
 {
     using TestScaleMma = amdgcn_mma<AType,
@@ -40,7 +37,6 @@ void ScaleMfmaGfx950Specialization_impl()
                                     WaveTileM,
                                     WaveTileN,
                                     WaveTileK,
-                                    DefaultScaleMfmaCtrlFlags,
                                     CompilerTargetGfx950,
                                     MmaOpFamily::SCALE>;
 
@@ -79,16 +75,13 @@ TEST(ScaleMMATrait, ScaleMfmaGfx950Specialization)
     std::cout << "GFX950 scale MFMA specialization is correct" << std::endl;
 }
 
-// TODO: It seems like the ExecSignature concept (and hence MmaOpI) can not be made to work for a
-// templated device function for some reason. Disable test for now and fix this once we are using
-// the variadic template pack for flags...
-#if CK_TILE_CONCEPTS && CK_TILE_CONCEPTS_HEADER && 0
+#if CK_TILE_CONCEPTS && CK_TILE_CONCEPTS_HEADER
 template <typename AType,
           typename BType,
           typename CType,
-          std::uint32_t WaveTileM,
-          std::uint32_t WaveTileN,
-          std::uint32_t WaveTileK>
+          uint32_t WaveTileM,
+          uint32_t WaveTileN,
+          uint32_t WaveTileK>
 void TestConceptRequirements_impl()
 {
     using TestScaleMma = amdgcn_mma<AType,
@@ -97,7 +90,6 @@ void TestConceptRequirements_impl()
                                     WaveTileM,
                                     WaveTileN,
                                     WaveTileK,
-                                    DefaultScaleMfmaCtrlFlags,
                                     CompilerTargetGfx950,
                                     MmaOpFamily::SCALE>;
 
@@ -107,7 +99,7 @@ void TestConceptRequirements_impl()
 
 TEST(ScaleMMATrait, TestConceptRequirements)
 {
-#if CK_TILE_CONCEPTS && CK_TILE_CONCEPTS_HEADER && 0
+#if CK_TILE_CONCEPTS && CK_TILE_CONCEPTS_HEADER
     TestConceptRequirements_impl<fp8_t, fp8_t, fp32_t, 16u, 16u, 128u>();
     TestConceptRequirements_impl<bf8_t, bf8_t, fp32_t, 16u, 16u, 128u>();
     TestConceptRequirements_impl<pk_fp4_t, pk_fp4_t, fp32_t, 16u, 16u, 128u>();
@@ -127,9 +119,9 @@ void ScaleSelector_impl()
             using Selected = typename MmaDefaultSelector<AType,
                                                          BType,
                                                          CType,
-                                                         static_cast<std::uint32_t>(i),
-                                                         static_cast<std::uint32_t>(i),
-                                                         static_cast<std::uint32_t>(k_factor * i),
+                                                         static_cast<uint32_t>(i),
+                                                         static_cast<uint32_t>(i),
+                                                         static_cast<uint32_t>(k_factor * i),
                                                          CompilerTargetGfx950,
                                                          MmaOpFamily::SCALE>::SelectedOp;
             static constexpr bool isValid =
@@ -163,9 +155,9 @@ template <typename AType,
           typename CType,
           typename ScaleAType,
           typename ScaleBType,
-          std::uint32_t WaveTileM,
-          std::uint32_t WaveTileN,
-          std::uint32_t WaveTileK>
+          uint32_t WaveTileM,
+          uint32_t WaveTileN,
+          uint32_t WaveTileK>
 struct ScalePipelineKernel
 {
     static constexpr int kBlockSize = mma_pipeline_test::getCMakeWaveSize();
@@ -216,9 +208,7 @@ struct ScalePipelineKernel
             constexpr int32_t replicate_byte = 0x01010101;
             ScaleAType scale_a               = 126u * replicate_byte;
             ScaleBType scale_b               = 129u * replicate_byte;
-            static constexpr index_t opselA  = 0;
-            static constexpr index_t opselB  = 0;
-            Pipeline::template exec<opselA, opselB>(a, b, c, scale_a, scale_b);
+            Pipeline::template exec<OpSelA<0>, OpSelB<0>>(a, b, c, scale_a, scale_b);
             __builtin_memcpy(
                 static_cast<uint8_t*>(c_per_lane) + lane * sizeof(CTensor), &c, sizeof(CTensor));
         }
@@ -228,9 +218,9 @@ struct ScalePipelineKernel
 template <typename AType,
           typename BType,
           typename CType,
-          std::uint32_t WaveTileM,
-          std::uint32_t WaveTileN,
-          std::uint32_t WaveTileK>
+          uint32_t WaveTileM,
+          uint32_t WaveTileN,
+          uint32_t WaveTileK>
 struct ScalePipelineFactory
 {
     template <typename Target>
@@ -256,13 +246,13 @@ struct ScalePipelineFactory
 template <typename AType,
           typename BType,
           typename CType,
-          std::uint32_t WaveTileM,
-          std::uint32_t WaveTileN,
-          std::uint32_t WaveTileK>
+          uint32_t WaveTileM,
+          uint32_t WaveTileN,
+          uint32_t WaveTileK>
 void MmaSelector_Scale_Real_impl()
 {
-    using ScaleAType = std::int32_t;
-    using ScaleBType = std::int32_t;
+    using ScaleAType = int32_t;
+    using ScaleBType = int32_t;
 
     const auto should_skip = [](amdgcn_target_id currentArchId) {
         bool isSupportedMfma = (currentArchId == amdgcn_target_id::GFX950);
@@ -346,9 +336,9 @@ TEST(ScaleMMATrait, MmaSelector_Scale_BF8_BF8_F32_32x32x64_Real)
 //           typename CType,
 //           typename ScaleAType,
 //           typename ScaleBType,
-//           std::uint32_t WaveTileM,
-//           std::uint32_t WaveTileN,
-//           std::uint32_t WaveTileK,
+//           uint32_t WaveTileM,
+//           uint32_t WaveTileN,
+//           uint32_t WaveTileK,
 //           MmaAccumPolicy AccumPolicy>
 // struct ScaleWaveWisePipelineKernel
 // {
@@ -399,9 +389,7 @@ TEST(ScaleMMATrait, MmaSelector_Scale_BF8_BF8_F32_32x32x64_Real)
 //             constexpr int32_t replicate_byte = 0x01010101;
 //             ScaleAType scale_a               = 126u * replicate_byte;
 //             ScaleBType scale_b               = 129u * replicate_byte;
-//             static constexpr index_t opselA  = 0;
-//             static constexpr index_t opselB  = 0;
-//             Pipeline::template exec<opselA, opselB>(a, b, c, scale_a, scale_b);
+//             Pipeline::template exec<OpSelA<0>, OpSelB<0>>(a, b, c, scale_a, scale_b);
 //             __builtin_memcpy(
 //                 static_cast<uint8_t*>(c_per_lane) + lane * sizeof(CTensor), &c, sizeof(CTensor));
 //         }
@@ -411,9 +399,9 @@ TEST(ScaleMMATrait, MmaSelector_Scale_BF8_BF8_F32_32x32x64_Real)
 // template <typename AType,
 //           typename BType,
 //           typename CType,
-//           std::uint32_t WaveTileM,
-//           std::uint32_t WaveTileN,
-//           std::uint32_t WaveTileK,
+//           uint32_t WaveTileM,
+//           uint32_t WaveTileN,
+//           uint32_t WaveTileK,
 //           MmaAccumPolicy AccumPolicy>
 // struct ScaleWaveWisePipelineFactory
 // {
@@ -438,9 +426,9 @@ TEST(ScaleMMATrait, MmaSelector_Scale_BF8_BF8_F32_32x32x64_Real)
 // template <typename AType,
 //           typename BType,
 //           typename CType,
-//           std::uint32_t WaveTileM,
-//           std::uint32_t WaveTileN,
-//           std::uint32_t WaveTileK,
+//           uint32_t WaveTileM,
+//           uint32_t WaveTileN,
+//           uint32_t WaveTileK,
 //           MmaAccumPolicy AccumPolicy = MmaAccumPolicy::ROW_MAJOR>
 // void MmaSelector_Scale_WaveWise_Real_impl()
 // {

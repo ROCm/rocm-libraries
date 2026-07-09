@@ -9,7 +9,6 @@ GlobalParameters:
   PrintSolutionRejectionReason: True
   Device: 0
   CMakeBuildType: Release
-  MergeFiles: False
   KernelTime: True
   MaxWorkspaceSize: 13421772800
   DataInitTypeAlpha: 1
@@ -20,8 +19,6 @@ GlobalParameters:
   KeepBuildTmp: True
   #EnqueuesPerSync: 10
   #NumWarmups: 1
-  MaxLDS: 163840
-  DeviceLDS: 163840
   #AsmDebug: True
 
 BenchmarkProblems:

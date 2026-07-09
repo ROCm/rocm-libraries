@@ -11,6 +11,7 @@
 #include <fstream>
 #include <optional>
 #include <string>
+#include <string_view>
 
 #include <hipdnn_data_sdk/logging/Logger.hpp>
 #include <hipdnn_test_sdk/utilities/ArchMatch.hpp>
@@ -46,6 +47,88 @@ struct BundleMetadata
 };
 
 // ---------------------------------------------------------------------------
+/// Parse metadata from a JSON object.
+///
+/// Returns std::nullopt when the object is missing required fields or carries an
+/// unsupported format version. Never throws.
+inline std::optional<BundleMetadata> parseBundleMetadataJson(const nlohmann::json& json,
+                                                             std::string_view source = {})
+{
+    if(!json.is_object())
+    {
+        if(source.empty())
+        {
+            HIPDNN_SDK_LOG_WARN("Metadata JSON is not an object");
+        }
+        else
+        {
+            HIPDNN_SDK_LOG_WARN(source << " is not a metadata JSON object");
+        }
+        return std::nullopt;
+    }
+
+    if(!json.contains("format_version") || !json["format_version"].is_number_integer())
+    {
+        if(source.empty())
+        {
+            HIPDNN_SDK_LOG_WARN("Metadata missing or invalid format_version");
+        }
+        else
+        {
+            HIPDNN_SDK_LOG_WARN(source << " missing or invalid format_version");
+        }
+        return std::nullopt;
+    }
+
+    const int version = json["format_version"].get<int>();
+    if(version != 1)
+    {
+        if(source.empty())
+        {
+            HIPDNN_SDK_LOG_WARN("Metadata has unsupported format_version " << version);
+        }
+        else
+        {
+            HIPDNN_SDK_LOG_WARN(source << " has unsupported format_version " << version);
+        }
+        return std::nullopt;
+    }
+
+    BundleMetadata meta;
+    meta.formatVersion = version;
+
+    auto readString = [&](const char* key) -> std::optional<std::string> {
+        if(json.contains(key) && json[key].is_string())
+        {
+            return json[key].get<std::string>();
+        }
+        return std::nullopt;
+    };
+
+    auto readInt64 = [&](const char* key) -> std::optional<int64_t> {
+        if(json.contains(key) && json[key].is_number_integer())
+        {
+            return json[key].get<int64_t>();
+        }
+        return std::nullopt;
+    };
+
+    meta.generator = readString("generator");
+    meta.generatorVersion = readString("generator_version");
+    meta.generatedAt = readString("generated_at");
+    meta.gpuArchitecture = readString("gpu_architecture");
+    meta.rocmVersion = readString("rocm_version");
+    meta.referenceSource = readString("reference_source");
+    meta.referenceSourceHash = readString("reference_source_hash");
+    meta.referenceStrategy = readString("reference_strategy");
+    meta.operation = readString("operation");
+    meta.generationCommand = readString("generation_command");
+    meta.notes = readString("notes");
+    meta.seed = readInt64("seed");
+    meta.minimumVramMb = readInt64("minimum_vram_mb");
+
+    return meta;
+}
 // Reader
 // ---------------------------------------------------------------------------
 
@@ -82,54 +165,7 @@ inline std::optional<BundleMetadata> loadBundleMetadata(const std::filesystem::p
         }
 
         auto json = nlohmann::json::parse(file);
-
-        if(!json.contains("format_version") || !json["format_version"].is_number_integer())
-        {
-            HIPDNN_SDK_LOG_WARN(path << " missing or invalid format_version");
-            return std::nullopt;
-        }
-
-        const int version = json["format_version"].get<int>();
-        if(version != 1)
-        {
-            HIPDNN_SDK_LOG_WARN(path << " has unsupported format_version " << version);
-            return std::nullopt;
-        }
-
-        BundleMetadata meta;
-        meta.formatVersion = version;
-
-        auto readString = [&](const char* key) -> std::optional<std::string> {
-            if(json.contains(key) && json[key].is_string())
-            {
-                return json[key].get<std::string>();
-            }
-            return std::nullopt;
-        };
-
-        auto readInt64 = [&](const char* key) -> std::optional<int64_t> {
-            if(json.contains(key) && json[key].is_number_integer())
-            {
-                return json[key].get<int64_t>();
-            }
-            return std::nullopt;
-        };
-
-        meta.generator = readString("generator");
-        meta.generatorVersion = readString("generator_version");
-        meta.generatedAt = readString("generated_at");
-        meta.gpuArchitecture = readString("gpu_architecture");
-        meta.rocmVersion = readString("rocm_version");
-        meta.referenceSource = readString("reference_source");
-        meta.referenceSourceHash = readString("reference_source_hash");
-        meta.referenceStrategy = readString("reference_strategy");
-        meta.operation = readString("operation");
-        meta.generationCommand = readString("generation_command");
-        meta.notes = readString("notes");
-        meta.seed = readInt64("seed");
-        meta.minimumVramMb = readInt64("minimum_vram_mb");
-
-        return meta;
+        return parseBundleMetadataJson(json, path.string());
     }
     catch(const std::exception& e)
     {

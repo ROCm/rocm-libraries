@@ -76,6 +76,7 @@ set(UNIT_ASM_TEST_FILES
     unit/asm/AccumulateInstructionSizePassRunTest.cpp
     unit/asm/StinkyRemoveWaitCntPassTest.cpp
     unit/asm/StinkyWmmaVgprReorderPassTest.cpp
+    unit/asm/RemoveInstructionPassTest.cpp
     unit/asm/BasicBlockTest.cpp
     unit/asm/DumpStinkyFunctionPassTest.cpp
     unit/asm/StinkySignatureTest.cpp

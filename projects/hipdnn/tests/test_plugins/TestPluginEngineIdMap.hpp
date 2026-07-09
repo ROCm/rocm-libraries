@@ -47,3 +47,11 @@ HIPDNN_MAP_TO_ID(MalformedVersionPlugin, -16);
 
 // Version-zero plugin reports a parseable but too-low API version.
 HIPDNN_MAP_TO_ID(VersionZeroPlugin, -17);
+
+// Autotune test plugins.
+HIPDNN_MAP_TO_ID(AutotunePlugin, -18);
+HIPDNN_MAP_TO_ID(AutotunePluginEngineB, -19);
+HIPDNN_MAP_TO_ID(AutotunePluginEngineC, -20);
+HIPDNN_MAP_TO_ID(AutotunePluginEngineFails, -21);
+HIPDNN_MAP_TO_ID(AutotunePluginEnginePrimingOnlyFails, -22);
+HIPDNN_MAP_TO_ID(AutotunePluginEngineWorkspaceGrows, -23);

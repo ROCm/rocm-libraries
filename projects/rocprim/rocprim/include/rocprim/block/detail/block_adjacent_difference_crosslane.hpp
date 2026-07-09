@@ -426,7 +426,7 @@ private:
         {
             // We have to know after compiling SPIR-V whether DPP is available.
             // Therefore, this check cannot be done at the C++ constexpr-level.
-            if ROCPRIM_AMDGCN_CONSTEXPR(ROCPRIM_HAS_DPP() && !ROCPRIM_HAS_PERMLANE())
+            if(ROCPRIM_HAS_DPP() && !ROCPRIM_HAS_PERMLANE())
             {
                 // 0x138: row_shr:1 (gets lane_id - 1)
                 // 0x134: row_shl:1 (gets lane_id + 1)

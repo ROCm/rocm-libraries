@@ -4,13 +4,9 @@
 #pragma once
 
 #include "ck_tile/core/arch/arch.hpp"
-#include "ck_tile/core/arch/mma/mfma/mfma.hpp"
-#include "ck_tile/core/arch/mma/mma_traits.hpp"
-#include "ck_tile/core/arch/mma/scale/scale.hpp"
-#include "ck_tile/core/arch/mma/sparse/sparse.hpp"
+#include "ck_tile/core/arch/mma/mma.hpp"
 #include "ck_tile/core/arch/mma/utility/tile_distribution_encoding_calculator.hpp"
 #include "ck_tile/core/arch/mma/utility/tile_distribution_encoding_register_mapper.hpp"
-#include "ck_tile/core/arch/mma/wmma/wmma.hpp"
 #include "ck_tile/core/numeric/bfloat16.hpp"
 #include "ck_tile/core/numeric/float8.hpp"
 #include "ck_tile/core/numeric/half.hpp"
@@ -23,6 +19,7 @@
 #include "ck_tile/host/hip_check_error.hpp"
 #include "ck_tile/host/kernel_launch.hpp"
 #include "ck_tile/host/stream_config.hpp"
+#include "ck_tile/ops/gemm/warp/warp_gemm_params.hpp"
 
 #include <gtest/gtest.h>
 #include <hip/hip_runtime.h>
@@ -154,16 +151,17 @@ CK_TILE_DEVICE pk_bf6x16_t packed_one(int off)
  * @brief Device kernel that performs C = AB using a given Mma op
  * @tparam MmaOp Intrinsic (amdgcn_mma) to be tested
  */
-template <typename MmaOp> // TODO: C++20 concept for MmaOp
+template <typename MmaOp, bool CTranspose, index_t SFactor> // TODO: C++20 concept for MmaOp
 struct MmaLayoutTestKernel
 {
     static constexpr int kBlockSize = MmaOp::WaveSize;
 
     __device__ void operator()(uint32_t* error_flags) const
     {
-        using ARegMap = TileDistrEncRegMap<typename TileDistrEncCalc<MmaOp>::AWarpDstrEncoding>;
-        using BRegMap = TileDistrEncRegMap<typename TileDistrEncCalc<MmaOp>::BWarpDstrEncoding>;
-        using CRegMap = TileDistrEncRegMap<typename TileDistrEncCalc<MmaOp>::CWarpDstrEncoding>;
+        using EncCalc = TileDistrEncCalc<MmaOp, CTranspose, SFactor>;
+        using ARegMap = TileDistrEncRegMap<typename EncCalc::AWarpDstrEncoding>;
+        using BRegMap = TileDistrEncRegMap<typename EncCalc::BWarpDstrEncoding>;
+        using CRegMap = TileDistrEncRegMap<typename EncCalc::CWarpDstrEncoding>;
 
         if constexpr(MmaOpTraits<MmaOp>::IsSupported)
         {
@@ -256,12 +254,10 @@ struct MmaLayoutTestKernel
             {
                 // The actual scale is computed as pow(2, scale - 127), so:
                 // 125 -> 2^-2 and 129 -> 2^2.
-                int scale_A                     = 125;
-                int scale_B                     = 129;
-                static constexpr index_t opselA = 0;
-                static constexpr index_t opselB = 0;
-                c_frag =
-                    MmaOp::template exec<opselA, opselB>(a_frag, b_frag, c_frag, scale_A, scale_B);
+                int scale_A = 125;
+                int scale_B = 129;
+                c_frag      = MmaOp::template exec<OpSelA<0>, OpSelB<0>>(
+                    a_frag, b_frag, c_frag, scale_A, scale_B);
             }
             else
             {
@@ -294,6 +290,47 @@ struct MmaLayoutTestKernel
     }
 };
 
+template <typename MmaOp, bool CTranspose, index_t SFactor> // TODO: C++20 concept for MmaOp
+void run_mma_layout_test_single()
+{
+    if constexpr(MmaOp::kCMNumAccess % SFactor == 0)
+    {
+        constexpr uint32_t total_cases = MmaOp::kM * MmaOp::kN * MmaOp::kK;
+        ck_tile::DeviceMem d_errors(total_cases * sizeof(uint32_t));
+        std::vector<uint32_t> h_errors(total_cases, 0u);
+
+        auto* d_error_ptr = static_cast<uint32_t*>(d_errors.GetDeviceBuffer());
+
+        (void)hipGetLastError();
+
+        using Kernel = MmaLayoutTestKernel<MmaOp, CTranspose, SFactor>;
+
+        ck_tile::launch_kernel(
+            ck_tile::stream_config{nullptr, false, 0, 0, 1},
+            ck_tile::make_kernel(
+                Kernel{}, dim3(total_cases), dim3(MmaOp::WaveSize), 0, d_error_ptr));
+
+        HIP_CHECK_ERROR(hipMemcpyAsync(
+            h_errors.data(), d_error_ptr, d_errors.GetBufferSize(), hipMemcpyDeviceToHost));
+        HIP_CHECK_ERROR(hipStreamSynchronize(nullptr));
+
+        for(uint32_t case_idx = 0; case_idx < total_cases; ++case_idx)
+        {
+            const uint32_t m = case_idx / (MmaOp::kK * MmaOp::kN);
+            const uint32_t k = (case_idx / MmaOp::kN) % MmaOp::kK;
+            const uint32_t n = case_idx % MmaOp::kN;
+
+            EXPECT_EQ(h_errors[case_idx], 0u) << "Mismatch for m=" << m << " k=" << k << " n=" << n;
+        }
+    }
+    else
+    {
+        printf("Skipping incompatible SFactor %d for intrinsic %s\n",
+               SFactor,
+               MmaOp::instruction_name);
+    }
+}
+
 /**
  * @brief Test driver: runs the test for a given MMA configuration.
  *
@@ -324,32 +361,12 @@ void run_mma_layout_test()
     EXPECT_EQ(props.warpSize, static_cast<int>(MmaOp::WaveSize))
         << "Device wavesize " << props.warpSize << " != Mma wavesize " << MmaOp::WaveSize;
 
-    constexpr uint32_t total_cases = MmaOp::kM * MmaOp::kN * MmaOp::kK;
-    ck_tile::DeviceMem d_errors(total_cases * sizeof(uint32_t));
-    std::vector<uint32_t> h_errors(total_cases, 0u);
-
-    auto* d_error_ptr = static_cast<uint32_t*>(d_errors.GetDeviceBuffer());
-
-    (void)hipGetLastError();
-
-    using Kernel = MmaLayoutTestKernel<MmaOp>;
-
-    ck_tile::launch_kernel(
-        ck_tile::stream_config{nullptr, false, 0, 0, 1},
-        ck_tile::make_kernel(Kernel{}, dim3(total_cases), dim3(MmaOp::WaveSize), 0, d_error_ptr));
-
-    HIP_CHECK_ERROR(hipMemcpyAsync(
-        h_errors.data(), d_error_ptr, d_errors.GetBufferSize(), hipMemcpyDeviceToHost));
-    HIP_CHECK_ERROR(hipStreamSynchronize(nullptr));
-
-    for(uint32_t case_idx = 0; case_idx < total_cases; ++case_idx)
-    {
-        const uint32_t m = case_idx / (MmaOp::kK * MmaOp::kN);
-        const uint32_t k = (case_idx / MmaOp::kN) % MmaOp::kK;
-        const uint32_t n = case_idx % MmaOp::kN;
-
-        EXPECT_EQ(h_errors[case_idx], 0u) << "Mismatch for m=" << m << " k=" << k << " n=" << n;
-    }
+    // Try all possible Swizzle factors. Incompatible intrinsics are skipped.
+    // CTranspose does not work with current test kernel.
+    run_mma_layout_test_single<MmaOp, false, 1>();
+    run_mma_layout_test_single<MmaOp, false, 2>();
+    run_mma_layout_test_single<MmaOp, false, 4>();
+    run_mma_layout_test_single<MmaOp, false, 8>();
 }
 
 // Lists of intrinsics to test.
@@ -357,145 +374,185 @@ void run_mma_layout_test()
 
 // available on all gfx9 (gfx908, gfx90a, gfx942, gfx950)
 using Gfx9CommonIntrinsics = ::testing::Types<
-    amdgcn_mma<F32,  F32,  F32,  32u, 64u, 1u,   DefaultMfmaCtrlFlags,       TestTarget, MmaOpFamily::DENSE>,  // mfma_f32_32x32x1f32
-    amdgcn_mma<F32,  F32,  F32,  64u, 32u, 1u,   DefaultMfmaCtrlFlags,       TestTarget, MmaOpFamily::DENSE>,  // mfma_f32_32x32x1f32
-    amdgcn_mma<F32,  F32,  F32,  16u, 64u, 1u,   DefaultMfmaCtrlFlags,       TestTarget, MmaOpFamily::DENSE>,  // mfma_f32_16x16x1f32
-    amdgcn_mma<F32,  F32,  F32,  64u, 16u, 1u,   DefaultMfmaCtrlFlags,       TestTarget, MmaOpFamily::DENSE>,  // mfma_f32_16x16x1f32
-    amdgcn_mma<F32,  F32,  F32,  4u,  64u, 1u,   DefaultMfmaCtrlFlags,       TestTarget, MmaOpFamily::DENSE>,  // mfma_f32_4x4x1f32
-    amdgcn_mma<F32,  F32,  F32,  64u, 4u,  1u,   DefaultMfmaCtrlFlags,       TestTarget, MmaOpFamily::DENSE>,  // mfma_f32_4x4x1f32
-    amdgcn_mma<F32,  F32,  F32,  32u, 32u, 2u,   DefaultMfmaCtrlFlags,       TestTarget, MmaOpFamily::DENSE>,  // mfma_f32_32x32x2f32
-    amdgcn_mma<F32,  F32,  F32,  16u, 16u, 4u,   DefaultMfmaCtrlFlags,       TestTarget, MmaOpFamily::DENSE>,  // mfma_f32_16x16x4f32
-    amdgcn_mma<F16,  F16,  F32,  32u, 64u, 4u,   DefaultMfmaCtrlFlags,       TestTarget, MmaOpFamily::DENSE>,  // mfma_f32_32x32x4f16
-    amdgcn_mma<F16,  F16,  F32,  64u, 32u, 4u,   DefaultMfmaCtrlFlags,       TestTarget, MmaOpFamily::DENSE>,  // mfma_f32_32x32x4f16
-    amdgcn_mma<F16,  F16,  F32,  16u, 64u, 4u,   DefaultMfmaCtrlFlags,       TestTarget, MmaOpFamily::DENSE>,  // mfma_f32_16x16x4f16
-    amdgcn_mma<F16,  F16,  F32,  64u, 16u, 4u,   DefaultMfmaCtrlFlags,       TestTarget, MmaOpFamily::DENSE>,  // mfma_f32_16x16x4f16
-    amdgcn_mma<F16,  F16,  F32,  4u,  64u, 4u,   DefaultMfmaCtrlFlags,       TestTarget, MmaOpFamily::DENSE>,  // mfma_f32_4x4x4f16
-    amdgcn_mma<F16,  F16,  F32,  64u, 4u,  4u,   DefaultMfmaCtrlFlags,       TestTarget, MmaOpFamily::DENSE>,  // mfma_f32_4x4x4f16
-    amdgcn_mma<F16,  F16,  F32,  32u, 32u, 8u,   DefaultMfmaCtrlFlags,       TestTarget, MmaOpFamily::DENSE>,  // mfma_f32_32x32x8f16
-    amdgcn_mma<F16,  F16,  F32,  16u, 16u, 16u,  DefaultMfmaCtrlFlags,       TestTarget, MmaOpFamily::DENSE>,  // mfma_f32_16x16x16f16
-    amdgcn_mma<I8,   I8,   I32,  32u, 64u, 4u,   DefaultMfmaCtrlFlags,       TestTarget, MmaOpFamily::DENSE>,  // mfma_i32_32x32x4i8
-    amdgcn_mma<I8,   I8,   I32,  64u, 32u, 4u,   DefaultMfmaCtrlFlags,       TestTarget, MmaOpFamily::DENSE>,  // mfma_i32_32x32x4i8
-    amdgcn_mma<I8,   I8,   I32,  16u, 64u, 4u,   DefaultMfmaCtrlFlags,       TestTarget, MmaOpFamily::DENSE>,  // mfma_i32_16x16x4i8
-    amdgcn_mma<I8,   I8,   I32,  64u, 16u, 4u,   DefaultMfmaCtrlFlags,       TestTarget, MmaOpFamily::DENSE>,  // mfma_i32_16x16x4i8
-    amdgcn_mma<I8,   I8,   I32,  4u,  64u, 4u,   DefaultMfmaCtrlFlags,       TestTarget, MmaOpFamily::DENSE>,  // mfma_i32_4x4x4i8
-    amdgcn_mma<I8,   I8,   I32,  64u, 4u,  4u,   DefaultMfmaCtrlFlags,       TestTarget, MmaOpFamily::DENSE>   // mfma_i32_4x4x4i8
+    amdgcn_mma<F32,  F32,  F32,  32u, 64u, 1u,   TestTarget, MmaOpFamily::DENSE>,  // mfma_f32_32x32x1f32
+    amdgcn_mma<F32,  F32,  F32,  64u, 32u, 1u,   TestTarget, MmaOpFamily::DENSE>,  // mfma_f32_32x32x1f32
+    amdgcn_mma<F32,  F32,  F32,  16u, 64u, 1u,   TestTarget, MmaOpFamily::DENSE>,  // mfma_f32_16x16x1f32
+    amdgcn_mma<F32,  F32,  F32,  64u, 16u, 1u,   TestTarget, MmaOpFamily::DENSE>,  // mfma_f32_16x16x1f32
+    amdgcn_mma<F32,  F32,  F32,  4u,  64u, 1u,   TestTarget, MmaOpFamily::DENSE>,  // mfma_f32_4x4x1f32
+    amdgcn_mma<F32,  F32,  F32,  64u, 4u,  1u,   TestTarget, MmaOpFamily::DENSE>,  // mfma_f32_4x4x1f32
+    amdgcn_mma<F32,  F32,  F32,  32u, 32u, 2u,   TestTarget, MmaOpFamily::DENSE>,  // mfma_f32_32x32x2f32
+    amdgcn_mma<F32,  F32,  F32,  16u, 16u, 4u,   TestTarget, MmaOpFamily::DENSE>,  // mfma_f32_16x16x4f32
+    amdgcn_mma<F16,  F16,  F32,  32u, 64u, 4u,   TestTarget, MmaOpFamily::DENSE>,  // mfma_f32_32x32x4f16
+    amdgcn_mma<F16,  F16,  F32,  64u, 32u, 4u,   TestTarget, MmaOpFamily::DENSE>,  // mfma_f32_32x32x4f16
+    amdgcn_mma<F16,  F16,  F32,  16u, 64u, 4u,   TestTarget, MmaOpFamily::DENSE>,  // mfma_f32_16x16x4f16
+    amdgcn_mma<F16,  F16,  F32,  64u, 16u, 4u,   TestTarget, MmaOpFamily::DENSE>,  // mfma_f32_16x16x4f16
+    amdgcn_mma<F16,  F16,  F32,  4u,  64u, 4u,   TestTarget, MmaOpFamily::DENSE>,  // mfma_f32_4x4x4f16
+    amdgcn_mma<F16,  F16,  F32,  64u, 4u,  4u,   TestTarget, MmaOpFamily::DENSE>,  // mfma_f32_4x4x4f16
+    amdgcn_mma<F16,  F16,  F32,  32u, 32u, 8u,   TestTarget, MmaOpFamily::DENSE>,  // mfma_f32_32x32x8f16
+    amdgcn_mma<F16,  F16,  F32,  16u, 16u, 16u,  TestTarget, MmaOpFamily::DENSE>,  // mfma_f32_16x16x16f16
+    amdgcn_mma<I8,   I8,   I32,  32u, 64u, 4u,   TestTarget, MmaOpFamily::DENSE>,  // mfma_i32_32x32x4i8
+    amdgcn_mma<I8,   I8,   I32,  64u, 32u, 4u,   TestTarget, MmaOpFamily::DENSE>,  // mfma_i32_32x32x4i8
+    amdgcn_mma<I8,   I8,   I32,  16u, 64u, 4u,   TestTarget, MmaOpFamily::DENSE>,  // mfma_i32_16x16x4i8
+    amdgcn_mma<I8,   I8,   I32,  64u, 16u, 4u,   TestTarget, MmaOpFamily::DENSE>,  // mfma_i32_16x16x4i8
+    amdgcn_mma<I8,   I8,   I32,  4u,  64u, 4u,   TestTarget, MmaOpFamily::DENSE>,  // mfma_i32_4x4x4i8
+    amdgcn_mma<I8,   I8,   I32,  64u, 4u,  4u,   TestTarget, MmaOpFamily::DENSE>   // mfma_i32_4x4x4i8
 >;
 using Gfx908andGfx90aIntrinsics = ::testing::Types<
-    amdgcn_mma<BF16, BF16, F32,  32u, 64u, 2u,   DefaultMfmaCtrlFlags,       TestTarget, MmaOpFamily::DENSE>,  // mfma_f32_32x32x2bf16
-    amdgcn_mma<BF16, BF16, F32,  64u, 32u, 2u,   DefaultMfmaCtrlFlags,       TestTarget, MmaOpFamily::DENSE>,  // mfma_f32_32x32x2bf16
-    amdgcn_mma<BF16, BF16, F32,  16u, 64u, 2u,   DefaultMfmaCtrlFlags,       TestTarget, MmaOpFamily::DENSE>,  // mfma_f32_16x16x2bf16
-    amdgcn_mma<BF16, BF16, F32,  64u, 16u, 2u,   DefaultMfmaCtrlFlags,       TestTarget, MmaOpFamily::DENSE>,  // mfma_f32_16x16x2bf16
-    amdgcn_mma<BF16, BF16, F32,  4u,  64u, 2u,   DefaultMfmaCtrlFlags,       TestTarget, MmaOpFamily::DENSE>,  // mfma_f32_4x4x2bf16
-    amdgcn_mma<BF16, BF16, F32,  64u, 4u,  2u,   DefaultMfmaCtrlFlags,       TestTarget, MmaOpFamily::DENSE>,  // mfma_f32_4x4x2bf16
-    amdgcn_mma<BF16, BF16, F32,  32u, 32u, 4u,   DefaultMfmaCtrlFlags,       TestTarget, MmaOpFamily::DENSE>,  // mfma_f32_32x32x4bf16
-    amdgcn_mma<BF16, BF16, F32,  16u, 16u, 8u,   DefaultMfmaCtrlFlags,       TestTarget, MmaOpFamily::DENSE>,  // mfma_f32_16x16x8bf16
-    amdgcn_mma<I8,   I8,   I32,  32u, 32u, 8u,   DefaultMfmaCtrlFlags,       TestTarget, MmaOpFamily::DENSE>,  // mfma_i32_32x32x8i8
-    amdgcn_mma<I8,   I8,   I32,  16u, 16u, 16u,  DefaultMfmaCtrlFlags,       TestTarget, MmaOpFamily::DENSE>   // mfma_i32_16x16x16i8
+    amdgcn_mma<BF16, BF16, F32,  32u, 64u, 2u,   TestTarget, MmaOpFamily::DENSE>,  // mfma_f32_32x32x2bf16
+    amdgcn_mma<BF16, BF16, F32,  64u, 32u, 2u,   TestTarget, MmaOpFamily::DENSE>,  // mfma_f32_32x32x2bf16
+    amdgcn_mma<BF16, BF16, F32,  16u, 64u, 2u,   TestTarget, MmaOpFamily::DENSE>,  // mfma_f32_16x16x2bf16
+    amdgcn_mma<BF16, BF16, F32,  64u, 16u, 2u,   TestTarget, MmaOpFamily::DENSE>,  // mfma_f32_16x16x2bf16
+    amdgcn_mma<BF16, BF16, F32,  4u,  64u, 2u,   TestTarget, MmaOpFamily::DENSE>,  // mfma_f32_4x4x2bf16
+    amdgcn_mma<BF16, BF16, F32,  64u, 4u,  2u,   TestTarget, MmaOpFamily::DENSE>,  // mfma_f32_4x4x2bf16
+    amdgcn_mma<BF16, BF16, F32,  32u, 32u, 4u,   TestTarget, MmaOpFamily::DENSE>,  // mfma_f32_32x32x4bf16
+    amdgcn_mma<BF16, BF16, F32,  16u, 16u, 8u,   TestTarget, MmaOpFamily::DENSE>,  // mfma_f32_16x16x8bf16
+    amdgcn_mma<I8,   I8,   I32,  32u, 32u, 8u,   TestTarget, MmaOpFamily::DENSE>,  // mfma_i32_32x32x8i8
+    amdgcn_mma<I8,   I8,   I32,  16u, 16u, 16u,  TestTarget, MmaOpFamily::DENSE>   // mfma_i32_16x16x16i8
 >;
 using Gfx90aAndHigherIntrinsics = ::testing::Types<
-    amdgcn_mma<BF16, BF16, F32,  32u, 64u, 4u,   DefaultMfmaCtrlFlags,       TestTarget, MmaOpFamily::DENSE>,  // mfma_f32_32x32x4bf16_1k
-    amdgcn_mma<BF16, BF16, F32,  64u, 32u, 4u,   DefaultMfmaCtrlFlags,       TestTarget, MmaOpFamily::DENSE>,  // mfma_f32_32x32x4bf16_1k
-    amdgcn_mma<BF16, BF16, F32,  16u, 64u, 4u,   DefaultMfmaCtrlFlags,       TestTarget, MmaOpFamily::DENSE>,  // mfma_f32_16x16x4bf16_1k
-    amdgcn_mma<BF16, BF16, F32,  64u, 16u, 4u,   DefaultMfmaCtrlFlags,       TestTarget, MmaOpFamily::DENSE>,  // mfma_f32_16x16x4bf16_1k
-    amdgcn_mma<BF16, BF16, F32,  4u,  64u, 4u,   DefaultMfmaCtrlFlags,       TestTarget, MmaOpFamily::DENSE>,  // mfma_f32_4x4x4bf16_1k
-    amdgcn_mma<BF16, BF16, F32,  64u, 4u,  4u,   DefaultMfmaCtrlFlags,       TestTarget, MmaOpFamily::DENSE>,  // mfma_f32_4x4x4bf16_1k
-    amdgcn_mma<BF16, BF16, F32,  32u, 32u, 8u,   DefaultMfmaCtrlFlags,       TestTarget, MmaOpFamily::DENSE>,  // mfma_f32_32x32x8bf16_1k
-    amdgcn_mma<BF16, BF16, F32,  16u, 16u, 16u,  DefaultMfmaCtrlFlags,       TestTarget, MmaOpFamily::DENSE>,  // mfma_f32_16x16x16bf16_1k
-    amdgcn_mma<F64,  F64,  F64,  16u, 16u, 4u,   DefaultMfmaCtrlFlags,       TestTarget, MmaOpFamily::DENSE>,  // mfma_f64_16x16x4f64
-    amdgcn_mma<F64,  F64,  F64,  4u,  16u, 4u,   DefaultMfmaCtrlFlags,       TestTarget, MmaOpFamily::DENSE>,  // mfma_f64_4x4x4f64
-    amdgcn_mma<F64,  F64,  F64,  16u, 4u,  4u,   DefaultMfmaCtrlFlags,       TestTarget, MmaOpFamily::DENSE>   // mfma_f64_4x4x4f64
+    amdgcn_mma<BF16, BF16, F32,  32u, 64u, 4u,   TestTarget, MmaOpFamily::DENSE>,  // mfma_f32_32x32x4bf16_1k
+    amdgcn_mma<BF16, BF16, F32,  64u, 32u, 4u,   TestTarget, MmaOpFamily::DENSE>,  // mfma_f32_32x32x4bf16_1k
+    amdgcn_mma<BF16, BF16, F32,  16u, 64u, 4u,   TestTarget, MmaOpFamily::DENSE>,  // mfma_f32_16x16x4bf16_1k
+    amdgcn_mma<BF16, BF16, F32,  64u, 16u, 4u,   TestTarget, MmaOpFamily::DENSE>,  // mfma_f32_16x16x4bf16_1k
+    amdgcn_mma<BF16, BF16, F32,  4u,  64u, 4u,   TestTarget, MmaOpFamily::DENSE>,  // mfma_f32_4x4x4bf16_1k
+    amdgcn_mma<BF16, BF16, F32,  64u, 4u,  4u,   TestTarget, MmaOpFamily::DENSE>,  // mfma_f32_4x4x4bf16_1k
+    amdgcn_mma<BF16, BF16, F32,  32u, 32u, 8u,   TestTarget, MmaOpFamily::DENSE>,  // mfma_f32_32x32x8bf16_1k
+    amdgcn_mma<BF16, BF16, F32,  16u, 16u, 16u,  TestTarget, MmaOpFamily::DENSE>,  // mfma_f32_16x16x16bf16_1k
+    amdgcn_mma<F64,  F64,  F64,  16u, 16u, 4u,   TestTarget, MmaOpFamily::DENSE>,  // mfma_f64_16x16x4f64
+    amdgcn_mma<F64,  F64,  F64,  4u,  16u, 4u,   TestTarget, MmaOpFamily::DENSE>,  // mfma_f64_4x4x4f64
+    amdgcn_mma<F64,  F64,  F64,  16u, 4u,  4u,   TestTarget, MmaOpFamily::DENSE>   // mfma_f64_4x4x4f64
 >;
 using Gfx942AndHigherIntrinsics = ::testing::Types<
-    amdgcn_mma<I8,   I8,   I32,  16u, 16u, 32u,  DefaultMfmaCtrlFlags,                TestTarget, MmaOpFamily::DENSE>,  // mfma_i32_16x16x32_i8
-    amdgcn_mma<I8,   I8,   I32,  32u, 32u, 16u,  DefaultMfmaCtrlFlags,                TestTarget, MmaOpFamily::DENSE>,  // mfma_i32_32x32x16_i8
-    amdgcn_mma<BF8,  BF8,  F32,  16u, 16u, 32u,  DefaultMfmaCtrlFlags,                TestTarget, MmaOpFamily::DENSE>,  // mfma_f32_16x16x32_bf8_bf8
-    amdgcn_mma<BF8,  F8,   F32,  16u, 16u, 32u,  DefaultMfmaCtrlFlags,                TestTarget, MmaOpFamily::DENSE>,  // mfma_f32_16x16x32_bf8_fp8
-    amdgcn_mma<F8,   BF8,  F32,  16u, 16u, 32u,  DefaultMfmaCtrlFlags,                TestTarget, MmaOpFamily::DENSE>,  // mfma_f32_16x16x32_fp8_bf8
-    amdgcn_mma<F8,   F8,   F32,  16u, 16u, 32u,  DefaultMfmaCtrlFlags,                TestTarget, MmaOpFamily::DENSE>,  // mfma_f32_16x16x32_fp8_fp8
-    amdgcn_mma<BF8,  BF8,  F32,  32u, 32u, 16u,  DefaultMfmaCtrlFlags,                TestTarget, MmaOpFamily::DENSE>,  // mfma_f32_32x32x16_bf8_bf8
-    amdgcn_mma<BF8,  F8,   F32,  32u, 32u, 16u,  DefaultMfmaCtrlFlags,                TestTarget, MmaOpFamily::DENSE>,  // mfma_f32_32x32x16_bf8_fp8
-    amdgcn_mma<F8,   BF8,  F32,  32u, 32u, 16u,  DefaultMfmaCtrlFlags,                TestTarget, MmaOpFamily::DENSE>,  // mfma_f32_32x32x16_fp8_bf8
-    amdgcn_mma<F8,   F8,   F32,  32u, 32u, 16u,  DefaultMfmaCtrlFlags,                TestTarget, MmaOpFamily::DENSE>,  // mfma_f32_32x32x16_fp8_fp8
-    amdgcn_mma<F16,  F16,  F32,  16u, 16u, 32u,  DefaultSparseMfmaCtrlFlags,          TestTarget, MmaOpFamily::SPARSE>, // smfmac_f32_16x16x32_f16
-    amdgcn_mma<F16,  F16,  F32,  32u, 32u, 16u,  DefaultSparseMfmaCtrlFlags,          TestTarget, MmaOpFamily::SPARSE>, // smfmac_f32_32x32x16_f16
-    amdgcn_mma<BF16, BF16, F32,  16u, 16u, 32u,  DefaultSparseMfmaCtrlFlags,          TestTarget, MmaOpFamily::SPARSE>, // smfmac_f32_16x16x32_bf16
-    amdgcn_mma<BF16, BF16, F32,  32u, 32u, 16u,  DefaultSparseMfmaCtrlFlags,          TestTarget, MmaOpFamily::SPARSE>, // smfmac_f32_32x32x16_bf16
-    amdgcn_mma<I8,   I8,   I32,  16u, 16u, 64u,  DefaultSparseMfmaCtrlFlags,          TestTarget, MmaOpFamily::SPARSE>, // smfmac_i32_16x16x64_i8
-    amdgcn_mma<I8,   I8,   I32,  32u, 32u, 32u,  DefaultSparseMfmaCtrlFlags,          TestTarget, MmaOpFamily::SPARSE>, // smfmac_i32_32x32x32_i8
-    amdgcn_mma<BF8,  BF8,  F32,  16u, 16u, 64u,  DefaultSparseMfmaCtrlFlags,          TestTarget, MmaOpFamily::SPARSE>, // smfmac_f32_16x16x64_bf8_bf8
-    amdgcn_mma<BF8,  F8,   F32,  16u, 16u, 64u,  DefaultSparseMfmaCtrlFlags,          TestTarget, MmaOpFamily::SPARSE>, // smfmac_f32_16x16x64_bf8_fp8
-    amdgcn_mma<F8,   BF8,  F32,  16u, 16u, 64u,  DefaultSparseMfmaCtrlFlags,          TestTarget, MmaOpFamily::SPARSE>, // smfmac_f32_16x16x64_fp8_bf8
-    amdgcn_mma<F8,   F8,   F32,  16u, 16u, 64u,  DefaultSparseMfmaCtrlFlags,          TestTarget, MmaOpFamily::SPARSE>, // smfmac_f32_16x16x64_fp8_fp8
-    amdgcn_mma<BF8,  BF8,  F32,  32u, 32u, 32u,  DefaultSparseMfmaCtrlFlags,          TestTarget, MmaOpFamily::SPARSE>, // smfmac_f32_32x32x32_bf8_bf8
-    amdgcn_mma<BF8,  F8,   F32,  32u, 32u, 32u,  DefaultSparseMfmaCtrlFlags,          TestTarget, MmaOpFamily::SPARSE>, // smfmac_f32_32x32x32_bf8_fp8
-    amdgcn_mma<F8,   BF8,  F32,  32u, 32u, 32u,  DefaultSparseMfmaCtrlFlags,          TestTarget, MmaOpFamily::SPARSE>, // smfmac_f32_32x32x32_fp8_bf8
-    amdgcn_mma<F8,   F8,   F32,  32u, 32u, 32u,  DefaultSparseMfmaCtrlFlags,          TestTarget, MmaOpFamily::SPARSE>  // smfmac_f32_32x32x32_fp8_fp8
+    amdgcn_mma<I8,   I8,   I32,  16u, 16u, 32u,  TestTarget, MmaOpFamily::DENSE>,  // mfma_i32_16x16x32_i8
+    amdgcn_mma<I8,   I8,   I32,  32u, 32u, 16u,  TestTarget, MmaOpFamily::DENSE>,  // mfma_i32_32x32x16_i8
+    amdgcn_mma<BF8,  BF8,  F32,  16u, 16u, 32u,  TestTarget, MmaOpFamily::DENSE>,  // mfma_f32_16x16x32_bf8_bf8
+    amdgcn_mma<BF8,  F8,   F32,  16u, 16u, 32u,  TestTarget, MmaOpFamily::DENSE>,  // mfma_f32_16x16x32_bf8_fp8
+    amdgcn_mma<F8,   BF8,  F32,  16u, 16u, 32u,  TestTarget, MmaOpFamily::DENSE>,  // mfma_f32_16x16x32_fp8_bf8
+    amdgcn_mma<F8,   F8,   F32,  16u, 16u, 32u,  TestTarget, MmaOpFamily::DENSE>,  // mfma_f32_16x16x32_fp8_fp8
+    amdgcn_mma<BF8,  BF8,  F32,  32u, 32u, 16u,  TestTarget, MmaOpFamily::DENSE>,  // mfma_f32_32x32x16_bf8_bf8
+    amdgcn_mma<BF8,  F8,   F32,  32u, 32u, 16u,  TestTarget, MmaOpFamily::DENSE>,  // mfma_f32_32x32x16_bf8_fp8
+    amdgcn_mma<F8,   BF8,  F32,  32u, 32u, 16u,  TestTarget, MmaOpFamily::DENSE>,  // mfma_f32_32x32x16_fp8_bf8
+    amdgcn_mma<F8,   F8,   F32,  32u, 32u, 16u,  TestTarget, MmaOpFamily::DENSE>,  // mfma_f32_32x32x16_fp8_fp8
+    amdgcn_mma<F16,  F16,  F32,  16u, 16u, 32u,  TestTarget, MmaOpFamily::SPARSE>, // smfmac_f32_16x16x32_f16
+    amdgcn_mma<F16,  F16,  F32,  32u, 32u, 16u,  TestTarget, MmaOpFamily::SPARSE>, // smfmac_f32_32x32x16_f16
+    amdgcn_mma<BF16, BF16, F32,  16u, 16u, 32u,  TestTarget, MmaOpFamily::SPARSE>, // smfmac_f32_16x16x32_bf16
+    amdgcn_mma<BF16, BF16, F32,  32u, 32u, 16u,  TestTarget, MmaOpFamily::SPARSE>, // smfmac_f32_32x32x16_bf16
+    amdgcn_mma<I8,   I8,   I32,  16u, 16u, 64u,  TestTarget, MmaOpFamily::SPARSE>, // smfmac_i32_16x16x64_i8
+    amdgcn_mma<I8,   I8,   I32,  32u, 32u, 32u,  TestTarget, MmaOpFamily::SPARSE>, // smfmac_i32_32x32x32_i8
+    amdgcn_mma<BF8,  BF8,  F32,  16u, 16u, 64u,  TestTarget, MmaOpFamily::SPARSE>, // smfmac_f32_16x16x64_bf8_bf8
+    amdgcn_mma<BF8,  F8,   F32,  16u, 16u, 64u,  TestTarget, MmaOpFamily::SPARSE>, // smfmac_f32_16x16x64_bf8_fp8
+    amdgcn_mma<F8,   BF8,  F32,  16u, 16u, 64u,  TestTarget, MmaOpFamily::SPARSE>, // smfmac_f32_16x16x64_fp8_bf8
+    amdgcn_mma<F8,   F8,   F32,  16u, 16u, 64u,  TestTarget, MmaOpFamily::SPARSE>, // smfmac_f32_16x16x64_fp8_fp8
+    amdgcn_mma<BF8,  BF8,  F32,  32u, 32u, 32u,  TestTarget, MmaOpFamily::SPARSE>, // smfmac_f32_32x32x32_bf8_bf8
+    amdgcn_mma<BF8,  F8,   F32,  32u, 32u, 32u,  TestTarget, MmaOpFamily::SPARSE>, // smfmac_f32_32x32x32_bf8_fp8
+    amdgcn_mma<F8,   BF8,  F32,  32u, 32u, 32u,  TestTarget, MmaOpFamily::SPARSE>, // smfmac_f32_32x32x32_fp8_bf8
+    amdgcn_mma<F8,   F8,   F32,  32u, 32u, 32u,  TestTarget, MmaOpFamily::SPARSE>  // smfmac_f32_32x32x32_fp8_fp8
 >;
 using Gfx942Intrinsics = ::testing::Types<
-    amdgcn_mma<TF32, TF32, F32,  16u, 16u, 8u,   DefaultMfmaCtrlFlags,       TestTarget, MmaOpFamily::DENSE>,  // mfma_f32_16x16x8_xf32
-    amdgcn_mma<TF32, TF32, F32,  32u, 32u, 4u,   DefaultMfmaCtrlFlags,       TestTarget, MmaOpFamily::DENSE>   // mfma_f32_32x32x4_xf32
+    amdgcn_mma<TF32, TF32, F32,  16u, 16u, 8u,   TestTarget, MmaOpFamily::DENSE>,  // mfma_f32_16x16x8_xf32
+    amdgcn_mma<TF32, TF32, F32,  32u, 32u, 4u,   TestTarget, MmaOpFamily::DENSE>   // mfma_f32_32x32x4_xf32
 >;
 using Gfx950Intrinsics = ::testing::Types<
-    amdgcn_mma<F16,  F16,  F32,  16u, 16u, 32u,  DefaultMfmaCtrlFlags,                TestTarget, MmaOpFamily::DENSE>,  // mfma_f32_16x16x32_f16
-    amdgcn_mma<BF16, BF16, F32,  16u, 16u, 32u,  DefaultMfmaCtrlFlags,                TestTarget, MmaOpFamily::DENSE>,  // mfma_f32_16x16x32_bf16
-    amdgcn_mma<F16,  F16,  F32,  32u, 32u, 16u,  DefaultMfmaCtrlFlags,                TestTarget, MmaOpFamily::DENSE>,  // mfma_f32_32x32x16_f16
-    amdgcn_mma<BF16, BF16, F32,  32u, 32u, 16u,  DefaultMfmaCtrlFlags,                TestTarget, MmaOpFamily::DENSE>,  // mfma_f32_32x32x16_bf16
-    amdgcn_mma<I8,   I8,   I32,  16u, 16u, 64u,  DefaultMfmaCtrlFlags,                TestTarget, MmaOpFamily::DENSE>,  // mfma_i32_16x16x64_i8
-    amdgcn_mma<I8,   I8,   I32,  32u, 32u, 32u,  DefaultMfmaCtrlFlags,                TestTarget, MmaOpFamily::DENSE>,  // mfma_i32_32x32x32_i8
-    amdgcn_mma<F8,   F8,   F32,  16u, 16u, 128u, DefaultScaleMfmaCtrlFlags,           TestTarget, MmaOpFamily::SCALE>,  // mfma_scale_f32_16x16x128_f8f6f4
-    amdgcn_mma<BF8,  BF8,  F32,  16u, 16u, 128u, DefaultScaleMfmaCtrlFlags,           TestTarget, MmaOpFamily::SCALE>,  // mfma_scale_f32_16x16x128_f8f6f4
-    amdgcn_mma<F4,   F4,   F32,  16u, 16u, 128u, DefaultScaleMfmaCtrlFlags,           TestTarget, MmaOpFamily::SCALE>,  // mfma_scale_f32_16x16x128_f8f6f4
-    amdgcn_mma<F6,   F6,   F32,  16u, 16u, 128u, DefaultScaleMfmaCtrlFlags,           TestTarget, MmaOpFamily::SCALE>,  // mfma_scale_f32_16x16x128_f8f6f4
-    amdgcn_mma<BF6,  BF6,  F32,  16u, 16u, 128u, DefaultScaleMfmaCtrlFlags,           TestTarget, MmaOpFamily::SCALE>,  // mfma_scale_f32_16x16x128_f8f6f4
-    amdgcn_mma<F8,   F8,   F32,  32u, 32u, 64u,  DefaultScaleMfmaCtrlFlags,           TestTarget, MmaOpFamily::SCALE>,  // mfma_scale_f32_32x32x64_f8f6f4
-    amdgcn_mma<BF8,  BF8,  F32,  32u, 32u, 64u,  DefaultScaleMfmaCtrlFlags,           TestTarget, MmaOpFamily::SCALE>,  // mfma_scale_f32_32x32x64_f8f6f4
-    amdgcn_mma<F4,   F4,   F32,  32u, 32u, 64u,  DefaultScaleMfmaCtrlFlags,           TestTarget, MmaOpFamily::SCALE>,  // mfma_scale_f32_32x32x64_f8f6f4
-    amdgcn_mma<F6,   F6,   F32,  32u, 32u, 64u,  DefaultScaleMfmaCtrlFlags,           TestTarget, MmaOpFamily::SCALE>,  // mfma_scale_f32_32x32x64_f8f6f4
-    amdgcn_mma<BF6,  BF6,  F32,  32u, 32u, 64u,  DefaultScaleMfmaCtrlFlags,           TestTarget, MmaOpFamily::SCALE>,  // mfma_scale_f32_32x32x64_f8f6f4
-    amdgcn_mma<F16,  F16,  F32,  16u, 16u, 64u,  DefaultSparseMfmaCtrlFlags,          TestTarget, MmaOpFamily::SPARSE>, // smfmac_f32_16x16x64_f16
-    amdgcn_mma<F16,  F16,  F32,  32u, 32u, 32u,  DefaultSparseMfmaCtrlFlags,          TestTarget, MmaOpFamily::SPARSE>, // smfmac_f32_32x32x32_f16
-    amdgcn_mma<BF16, BF16, F32,  16u, 16u, 64u,  DefaultSparseMfmaCtrlFlags,          TestTarget, MmaOpFamily::SPARSE>, // smfmac_f32_16x16x64_bf16
-    amdgcn_mma<BF16, BF16, F32,  32u, 32u, 32u,  DefaultSparseMfmaCtrlFlags,          TestTarget, MmaOpFamily::SPARSE>, // smfmac_f32_32x32x32_bf16
-    amdgcn_mma<I8,   I8,   I32,  16u, 16u, 128u, DefaultSparseMfmaCtrlFlags,          TestTarget, MmaOpFamily::SPARSE>, // smfmac_i32_16x16x128_i8
-    amdgcn_mma<I8,   I8,   I32,  32u, 32u, 64u,  DefaultSparseMfmaCtrlFlags,          TestTarget, MmaOpFamily::SPARSE>, // smfmac_i32_32x32x64_i8
-    amdgcn_mma<BF8,  BF8,  F32,  16u, 16u, 128u, DefaultSparseMfmaCtrlFlags,          TestTarget, MmaOpFamily::SPARSE>, // smfmac_f32_16x16x128_bf8_bf8
-    amdgcn_mma<BF8,  F8,   F32,  16u, 16u, 128u, DefaultSparseMfmaCtrlFlags,          TestTarget, MmaOpFamily::SPARSE>, // smfmac_f32_16x16x128_bf8_fp8
-    amdgcn_mma<F8,   BF8,  F32,  16u, 16u, 128u, DefaultSparseMfmaCtrlFlags,          TestTarget, MmaOpFamily::SPARSE>, // smfmac_f32_16x16x128_fp8_bf8
-    amdgcn_mma<F8,   F8,   F32,  16u, 16u, 128u, DefaultSparseMfmaCtrlFlags,          TestTarget, MmaOpFamily::SPARSE>, // smfmac_f32_16x16x128_fp8_fp8
-    amdgcn_mma<BF8,  BF8,  F32,  32u, 32u, 64u,  DefaultSparseMfmaCtrlFlags,          TestTarget, MmaOpFamily::SPARSE>, // smfmac_f32_32x32x64_bf8_bf8
-    amdgcn_mma<BF8,  F8,   F32,  32u, 32u, 64u,  DefaultSparseMfmaCtrlFlags,          TestTarget, MmaOpFamily::SPARSE>, // smfmac_f32_32x32x64_bf8_fp8
-    amdgcn_mma<F8,   BF8,  F32,  32u, 32u, 64u,  DefaultSparseMfmaCtrlFlags,          TestTarget, MmaOpFamily::SPARSE>, // smfmac_f32_32x32x64_fp8_bf8
-    amdgcn_mma<F8,   F8,   F32,  32u, 32u, 64u,  DefaultSparseMfmaCtrlFlags,          TestTarget, MmaOpFamily::SPARSE>  // smfmac_f32_32x32x64_fp8_fp8
+    amdgcn_mma<F16,  F16,  F32,  16u, 16u, 32u,  TestTarget, MmaOpFamily::DENSE>,  // mfma_f32_16x16x32_f16
+    amdgcn_mma<BF16, BF16, F32,  16u, 16u, 32u,  TestTarget, MmaOpFamily::DENSE>,  // mfma_f32_16x16x32_bf16
+    amdgcn_mma<F16,  F16,  F32,  32u, 32u, 16u,  TestTarget, MmaOpFamily::DENSE>,  // mfma_f32_32x32x16_f16
+    amdgcn_mma<BF16, BF16, F32,  32u, 32u, 16u,  TestTarget, MmaOpFamily::DENSE>,  // mfma_f32_32x32x16_bf16
+    amdgcn_mma<I8,   I8,   I32,  16u, 16u, 64u,  TestTarget, MmaOpFamily::DENSE>,  // mfma_i32_16x16x64_i8
+    amdgcn_mma<I8,   I8,   I32,  32u, 32u, 32u,  TestTarget, MmaOpFamily::DENSE>,  // mfma_i32_32x32x32_i8
+    amdgcn_mma<F8,   F8,   F32,  16u, 16u, 128u, TestTarget, MmaOpFamily::SCALE>,  // mfma_scale_f32_16x16x128_f8f6f4
+    amdgcn_mma<F8,   BF8,  F32,  16u, 16u, 128u, TestTarget, MmaOpFamily::SCALE>,  // mfma_scale_f32_16x16x128_f8f6f4
+    amdgcn_mma<F8,   F4,   F32,  16u, 16u, 128u, TestTarget, MmaOpFamily::SCALE>,  // mfma_scale_f32_16x16x128_f8f6f4
+    amdgcn_mma<F8,   F6,   F32,  16u, 16u, 128u, TestTarget, MmaOpFamily::SCALE>,  // mfma_scale_f32_16x16x128_f8f6f4
+    amdgcn_mma<F8,   BF6,  F32,  16u, 16u, 128u, TestTarget, MmaOpFamily::SCALE>,  // mfma_scale_f32_16x16x128_f8f6f4
+    amdgcn_mma<BF8,  F8,   F32,  16u, 16u, 128u, TestTarget, MmaOpFamily::SCALE>,  // mfma_scale_f32_16x16x128_f8f6f4
+    amdgcn_mma<BF8,  BF8,  F32,  16u, 16u, 128u, TestTarget, MmaOpFamily::SCALE>,  // mfma_scale_f32_16x16x128_f8f6f4
+    amdgcn_mma<BF8,  F4,   F32,  16u, 16u, 128u, TestTarget, MmaOpFamily::SCALE>,  // mfma_scale_f32_16x16x128_f8f6f4
+    amdgcn_mma<BF8,  F6,   F32,  16u, 16u, 128u, TestTarget, MmaOpFamily::SCALE>,  // mfma_scale_f32_16x16x128_f8f6f4
+    amdgcn_mma<BF8,  BF6,  F32,  16u, 16u, 128u, TestTarget, MmaOpFamily::SCALE>,  // mfma_scale_f32_16x16x128_f8f6f4
+    amdgcn_mma<F4,   F8,   F32,  16u, 16u, 128u, TestTarget, MmaOpFamily::SCALE>,  // mfma_scale_f32_16x16x128_f8f6f4
+    amdgcn_mma<F4,   BF8,  F32,  16u, 16u, 128u, TestTarget, MmaOpFamily::SCALE>,  // mfma_scale_f32_16x16x128_f8f6f4
+    amdgcn_mma<F4,   F4,   F32,  16u, 16u, 128u, TestTarget, MmaOpFamily::SCALE>,  // mfma_scale_f32_16x16x128_f8f6f4
+    amdgcn_mma<F4,   F6,   F32,  16u, 16u, 128u, TestTarget, MmaOpFamily::SCALE>,  // mfma_scale_f32_16x16x128_f8f6f4
+    amdgcn_mma<F4,   BF6,  F32,  16u, 16u, 128u, TestTarget, MmaOpFamily::SCALE>,  // mfma_scale_f32_16x16x128_f8f6f4
+    amdgcn_mma<F6,   F8,   F32,  16u, 16u, 128u, TestTarget, MmaOpFamily::SCALE>,  // mfma_scale_f32_16x16x128_f8f6f4
+    amdgcn_mma<F6,   BF8,  F32,  16u, 16u, 128u, TestTarget, MmaOpFamily::SCALE>,  // mfma_scale_f32_16x16x128_f8f6f4
+    amdgcn_mma<F6,   F4,   F32,  16u, 16u, 128u, TestTarget, MmaOpFamily::SCALE>,  // mfma_scale_f32_16x16x128_f8f6f4
+    amdgcn_mma<F6,   F6,   F32,  16u, 16u, 128u, TestTarget, MmaOpFamily::SCALE>,  // mfma_scale_f32_16x16x128_f8f6f4
+    amdgcn_mma<F6,   BF6,  F32,  16u, 16u, 128u, TestTarget, MmaOpFamily::SCALE>,  // mfma_scale_f32_16x16x128_f8f6f4
+    amdgcn_mma<BF6,  F8,   F32,  16u, 16u, 128u, TestTarget, MmaOpFamily::SCALE>,  // mfma_scale_f32_16x16x128_f8f6f4
+    amdgcn_mma<BF6,  BF8,  F32,  16u, 16u, 128u, TestTarget, MmaOpFamily::SCALE>,  // mfma_scale_f32_16x16x128_f8f6f4
+    amdgcn_mma<BF6,  F4,   F32,  16u, 16u, 128u, TestTarget, MmaOpFamily::SCALE>,  // mfma_scale_f32_16x16x128_f8f6f4
+    amdgcn_mma<BF6,  F6,   F32,  16u, 16u, 128u, TestTarget, MmaOpFamily::SCALE>,  // mfma_scale_f32_16x16x128_f8f6f4
+    amdgcn_mma<BF6,  BF6,  F32,  16u, 16u, 128u, TestTarget, MmaOpFamily::SCALE>,  // mfma_scale_f32_16x16x128_f8f6f4
+    amdgcn_mma<F8,   F8,   F32,  32u, 32u, 64u,  TestTarget, MmaOpFamily::SCALE>,  // mfma_scale_f32_32x32x64_f8f6f4
+    amdgcn_mma<F8,   BF8,  F32,  32u, 32u, 64u,  TestTarget, MmaOpFamily::SCALE>,  // mfma_scale_f32_32x32x64_f8f6f4
+    amdgcn_mma<F8,   F4,   F32,  32u, 32u, 64u,  TestTarget, MmaOpFamily::SCALE>,  // mfma_scale_f32_32x32x64_f8f6f4
+    amdgcn_mma<F8,   F6,   F32,  32u, 32u, 64u,  TestTarget, MmaOpFamily::SCALE>,  // mfma_scale_f32_32x32x64_f8f6f4
+    amdgcn_mma<F8,   BF6,  F32,  32u, 32u, 64u,  TestTarget, MmaOpFamily::SCALE>,  // mfma_scale_f32_32x32x64_f8f6f4
+    amdgcn_mma<BF8,  F8,   F32,  32u, 32u, 64u,  TestTarget, MmaOpFamily::SCALE>,  // mfma_scale_f32_32x32x64_f8f6f4
+    amdgcn_mma<BF8,  BF8,  F32,  32u, 32u, 64u,  TestTarget, MmaOpFamily::SCALE>,  // mfma_scale_f32_32x32x64_f8f6f4
+    amdgcn_mma<BF8,  F4,   F32,  32u, 32u, 64u,  TestTarget, MmaOpFamily::SCALE>,  // mfma_scale_f32_32x32x64_f8f6f4
+    amdgcn_mma<BF8,  F6,   F32,  32u, 32u, 64u,  TestTarget, MmaOpFamily::SCALE>,  // mfma_scale_f32_32x32x64_f8f6f4
+    amdgcn_mma<BF8,  BF6,  F32,  32u, 32u, 64u,  TestTarget, MmaOpFamily::SCALE>,  // mfma_scale_f32_32x32x64_f8f6f4
+    amdgcn_mma<F4,   F8,   F32,  32u, 32u, 64u,  TestTarget, MmaOpFamily::SCALE>,  // mfma_scale_f32_32x32x64_f8f6f4
+    amdgcn_mma<F4,   BF8,  F32,  32u, 32u, 64u,  TestTarget, MmaOpFamily::SCALE>,  // mfma_scale_f32_32x32x64_f8f6f4
+    amdgcn_mma<F4,   F4,   F32,  32u, 32u, 64u,  TestTarget, MmaOpFamily::SCALE>,  // mfma_scale_f32_32x32x64_f8f6f4
+    amdgcn_mma<F4,   F6,   F32,  32u, 32u, 64u,  TestTarget, MmaOpFamily::SCALE>,  // mfma_scale_f32_32x32x64_f8f6f4
+    amdgcn_mma<F4,   BF6,  F32,  32u, 32u, 64u,  TestTarget, MmaOpFamily::SCALE>,  // mfma_scale_f32_32x32x64_f8f6f4
+    amdgcn_mma<F6,   F8,   F32,  32u, 32u, 64u,  TestTarget, MmaOpFamily::SCALE>,  // mfma_scale_f32_32x32x64_f8f6f4
+    amdgcn_mma<F6,   BF8,  F32,  32u, 32u, 64u,  TestTarget, MmaOpFamily::SCALE>,  // mfma_scale_f32_32x32x64_f8f6f4
+    amdgcn_mma<F6,   F4,   F32,  32u, 32u, 64u,  TestTarget, MmaOpFamily::SCALE>,  // mfma_scale_f32_32x32x64_f8f6f4
+    amdgcn_mma<F6,   F6,   F32,  32u, 32u, 64u,  TestTarget, MmaOpFamily::SCALE>,  // mfma_scale_f32_32x32x64_f8f6f4
+    amdgcn_mma<F6,   BF6,  F32,  32u, 32u, 64u,  TestTarget, MmaOpFamily::SCALE>,  // mfma_scale_f32_32x32x64_f8f6f4
+    amdgcn_mma<BF6,  F8,   F32,  32u, 32u, 64u,  TestTarget, MmaOpFamily::SCALE>,  // mfma_scale_f32_32x32x64_f8f6f4
+    amdgcn_mma<BF6,  BF8,  F32,  32u, 32u, 64u,  TestTarget, MmaOpFamily::SCALE>,  // mfma_scale_f32_32x32x64_f8f6f4
+    amdgcn_mma<BF6,  F4,   F32,  32u, 32u, 64u,  TestTarget, MmaOpFamily::SCALE>,  // mfma_scale_f32_32x32x64_f8f6f4
+    amdgcn_mma<BF6,  F6,   F32,  32u, 32u, 64u,  TestTarget, MmaOpFamily::SCALE>,  // mfma_scale_f32_32x32x64_f8f6f4
+    amdgcn_mma<BF6,  BF6,  F32,  32u, 32u, 64u,  TestTarget, MmaOpFamily::SCALE>,  // mfma_scale_f32_32x32x64_f8f6f4
+    amdgcn_mma<F16,  F16,  F32,  16u, 16u, 64u,  TestTarget, MmaOpFamily::SPARSE>, // smfmac_f32_16x16x64_f16
+    amdgcn_mma<F16,  F16,  F32,  32u, 32u, 32u,  TestTarget, MmaOpFamily::SPARSE>, // smfmac_f32_32x32x32_f16
+    amdgcn_mma<BF16, BF16, F32,  16u, 16u, 64u,  TestTarget, MmaOpFamily::SPARSE>, // smfmac_f32_16x16x64_bf16
+    amdgcn_mma<BF16, BF16, F32,  32u, 32u, 32u,  TestTarget, MmaOpFamily::SPARSE>, // smfmac_f32_32x32x32_bf16
+    amdgcn_mma<I8,   I8,   I32,  16u, 16u, 128u, TestTarget, MmaOpFamily::SPARSE>, // smfmac_i32_16x16x128_i8
+    amdgcn_mma<I8,   I8,   I32,  32u, 32u, 64u,  TestTarget, MmaOpFamily::SPARSE>, // smfmac_i32_32x32x64_i8
+    amdgcn_mma<BF8,  BF8,  F32,  16u, 16u, 128u, TestTarget, MmaOpFamily::SPARSE>, // smfmac_f32_16x16x128_bf8_bf8
+    amdgcn_mma<BF8,  F8,   F32,  16u, 16u, 128u, TestTarget, MmaOpFamily::SPARSE>, // smfmac_f32_16x16x128_bf8_fp8
+    amdgcn_mma<F8,   BF8,  F32,  16u, 16u, 128u, TestTarget, MmaOpFamily::SPARSE>, // smfmac_f32_16x16x128_fp8_bf8
+    amdgcn_mma<F8,   F8,   F32,  16u, 16u, 128u, TestTarget, MmaOpFamily::SPARSE>, // smfmac_f32_16x16x128_fp8_fp8
+    amdgcn_mma<BF8,  BF8,  F32,  32u, 32u, 64u,  TestTarget, MmaOpFamily::SPARSE>, // smfmac_f32_32x32x64_bf8_bf8
+    amdgcn_mma<BF8,  F8,   F32,  32u, 32u, 64u,  TestTarget, MmaOpFamily::SPARSE>, // smfmac_f32_32x32x64_bf8_fp8
+    amdgcn_mma<F8,   BF8,  F32,  32u, 32u, 64u,  TestTarget, MmaOpFamily::SPARSE>, // smfmac_f32_32x32x64_fp8_bf8
+    amdgcn_mma<F8,   F8,   F32,  32u, 32u, 64u,  TestTarget, MmaOpFamily::SPARSE>  // smfmac_f32_32x32x64_fp8_fp8
 >;
 using Gfx11Intrinsics = ::testing::Types<
-    amdgcn_mma<F16,  F16,  F32,  16u, 16u, 16u,  DefaultWmmaCtrlFlags,                Target11,   MmaOpFamily::DENSE>,  // wmma_f32_16x16x16_f16_w32
-    amdgcn_mma<BF16, BF16, F32,  16u, 16u, 16u,  DefaultWmmaCtrlFlags,                Target11,   MmaOpFamily::DENSE>,  // wmma_f32_16x16x16_bf16_w32
-    amdgcn_mma<I8,   I8,   I32,  16u, 16u, 16u,  DefaultWmmaCtrlFlags,                Target11,   MmaOpFamily::DENSE>,  // wmma_i32_16x16x16_iu8_w32
-    amdgcn_mma<I4,   I4,   I32,  16u, 16u, 16u,  DefaultWmmaCtrlFlags,                Target11,   MmaOpFamily::DENSE>   // wmma_i32_16x16x16_iu4_w32
+    amdgcn_mma<F16,  F16,  F32,  16u, 16u, 16u,  Target11,   MmaOpFamily::DENSE>,  // wmma_f32_16x16x16_f16_w32
+    amdgcn_mma<BF16, BF16, F32,  16u, 16u, 16u,  Target11,   MmaOpFamily::DENSE>,  // wmma_f32_16x16x16_bf16_w32
+    amdgcn_mma<I8,   I8,   I32,  16u, 16u, 16u,  Target11,   MmaOpFamily::DENSE>,  // wmma_i32_16x16x16_iu8_w32
+    amdgcn_mma<I4,   I4,   I32,  16u, 16u, 16u,  Target11,   MmaOpFamily::DENSE>   // wmma_i32_16x16x16_iu4_w32
 >;
 using Gfx12Intrinsics = ::testing::Types<
-    amdgcn_mma<F16,  F16,  F32,  16u, 16u, 16u,  DefaultWmmaCtrlFlags,                Target12,   MmaOpFamily::DENSE>,  // wmma_f32_16x16x16_f16_w32_gfx12
-    amdgcn_mma<BF16, BF16, F32,  16u, 16u, 16u,  DefaultWmmaCtrlFlags,                Target12,   MmaOpFamily::DENSE>,  // wmma_f32_16x16x16_bf16_w32_gfx12
-    amdgcn_mma<F16,  F16,  F16,  16u, 16u, 16u,  DefaultWmmaCtrlFlags,                Target12,   MmaOpFamily::DENSE>,  // wmma_f16_16x16x16_f16_w32_gfx12
-    amdgcn_mma<BF16, BF16, BF16, 16u, 16u, 16u,  DefaultWmmaCtrlFlags,                Target12,   MmaOpFamily::DENSE>,  // wmma_bf16_16x16x16_bf16_w32_gfx12
-    amdgcn_mma<I8,   I8,   I32,  16u, 16u, 16u,  DefaultWmmaCtrlFlags,                Target12,   MmaOpFamily::DENSE>,  // wmma_i32_16x16x16_iu8_w32_gfx12
-    amdgcn_mma<F8,   F8,   F32,  16u, 16u, 16u,  DefaultWmmaCtrlFlags,                Target12,   MmaOpFamily::DENSE>,  // wmma_f32_16x16x16_fp8_fp8_w32_gfx12
-    amdgcn_mma<F8,   BF8,  F32,  16u, 16u, 16u,  DefaultWmmaCtrlFlags,                Target12,   MmaOpFamily::DENSE>,  // wmma_f32_16x16x16_fp8_bf8_w32_gfx12
-    amdgcn_mma<BF8,  F8,   F32,  16u, 16u, 16u,  DefaultWmmaCtrlFlags,                Target12,   MmaOpFamily::DENSE>,  // wmma_f32_16x16x16_bf8_fp8_w32_gfx12
-    amdgcn_mma<BF8,  BF8,  F32,  16u, 16u, 16u,  DefaultWmmaCtrlFlags,                Target12,   MmaOpFamily::DENSE>,  // wmma_f32_16x16x16_bf8_bf8_w32_gfx12
-    amdgcn_mma<I4,   I4,   I32,  16u, 16u, 16u,  DefaultWmmaCtrlFlags,                Target12,   MmaOpFamily::DENSE>,  // wmma_i32_16x16x16_iu4_w32_gfx12
-    amdgcn_mma<I4,   I4,   I32,  16u, 16u, 32u,  DefaultWmmaCtrlFlags,                Target12,   MmaOpFamily::DENSE>,  // wmma_i32_16x16x32_iu4_w32_gfx12
-    amdgcn_mma<F16,  F16,  F32,  16u, 16u, 32u,  DefaultWmmaCtrlFlags,                Target12,   MmaOpFamily::SPARSE>, // swmmac_f32_16x16x32_f16_w32
-    amdgcn_mma<BF16, BF16, F32,  16u, 16u, 32u,  DefaultWmmaCtrlFlags,                Target12,   MmaOpFamily::SPARSE>, // swmmac_f32_16x16x32_bf16_w32
-    amdgcn_mma<F16,  F16,  F16,  16u, 16u, 32u,  DefaultWmmaCtrlFlags,                Target12,   MmaOpFamily::SPARSE>, // swmmac_f16_16x16x32_f16_w32
-    amdgcn_mma<BF16, BF16, BF16, 16u, 16u, 32u,  DefaultWmmaCtrlFlags,                Target12,   MmaOpFamily::SPARSE>, // swmmac_bf16_16x16x32_bf16_w32
-    amdgcn_mma<I8,   I8,   I32,  16u, 16u, 32u,  DefaultWmmaCtrlFlags,                Target12,   MmaOpFamily::SPARSE>, // swmmac_i32_16x16x32_iu8_w32
-    amdgcn_mma<F8,   F8,   F32,  16u, 16u, 32u,  DefaultWmmaCtrlFlags,                Target12,   MmaOpFamily::SPARSE>, // swmmac_f32_16x16x32_fp8_fp8_w32
-    amdgcn_mma<F8,   BF8,  F32,  16u, 16u, 32u,  DefaultWmmaCtrlFlags,                Target12,   MmaOpFamily::SPARSE>, // swmmac_f32_16x16x32_fp8_bf8_w32
-    amdgcn_mma<BF8,  F8,   F32,  16u, 16u, 32u,  DefaultWmmaCtrlFlags,                Target12,   MmaOpFamily::SPARSE>, // swmmac_f32_16x16x32_bf8_fp8_w32
-    amdgcn_mma<BF8,  BF8,  F32,  16u, 16u, 32u,  DefaultWmmaCtrlFlags,                Target12,   MmaOpFamily::SPARSE>, // swmmac_f32_16x16x32_bf8_bf8_w32
-    amdgcn_mma<I4,   I4,   I32,  16u, 16u, 32u,  DefaultWmmaCtrlFlags,                Target12,   MmaOpFamily::SPARSE>, // swmmac_i32_16x16x32_iu4_w32
-    amdgcn_mma<I4,   I4,   I32,  16u, 16u, 64u,  DefaultWmmaCtrlFlags,                Target12,   MmaOpFamily::SPARSE>  // swmmac_i32_16x16x64_iu4_w32
+    amdgcn_mma<F16,  F16,  F32,  16u, 16u, 16u,  Target12,   MmaOpFamily::DENSE>,  // wmma_f32_16x16x16_f16_w32_gfx12
+    amdgcn_mma<BF16, BF16, F32,  16u, 16u, 16u,  Target12,   MmaOpFamily::DENSE>,  // wmma_f32_16x16x16_bf16_w32_gfx12
+    amdgcn_mma<F16,  F16,  F16,  16u, 16u, 16u,  Target12,   MmaOpFamily::DENSE>,  // wmma_f16_16x16x16_f16_w32_gfx12
+    amdgcn_mma<BF16, BF16, BF16, 16u, 16u, 16u,  Target12,   MmaOpFamily::DENSE>,  // wmma_bf16_16x16x16_bf16_w32_gfx12
+    amdgcn_mma<I8,   I8,   I32,  16u, 16u, 16u,  Target12,   MmaOpFamily::DENSE>,  // wmma_i32_16x16x16_iu8_w32_gfx12
+    amdgcn_mma<F8,   F8,   F32,  16u, 16u, 16u,  Target12,   MmaOpFamily::DENSE>,  // wmma_f32_16x16x16_fp8_fp8_w32_gfx12
+    amdgcn_mma<F8,   BF8,  F32,  16u, 16u, 16u,  Target12,   MmaOpFamily::DENSE>,  // wmma_f32_16x16x16_fp8_bf8_w32_gfx12
+    amdgcn_mma<BF8,  F8,   F32,  16u, 16u, 16u,  Target12,   MmaOpFamily::DENSE>,  // wmma_f32_16x16x16_bf8_fp8_w32_gfx12
+    amdgcn_mma<BF8,  BF8,  F32,  16u, 16u, 16u,  Target12,   MmaOpFamily::DENSE>,  // wmma_f32_16x16x16_bf8_bf8_w32_gfx12
+    amdgcn_mma<I4,   I4,   I32,  16u, 16u, 16u,  Target12,   MmaOpFamily::DENSE>,  // wmma_i32_16x16x16_iu4_w32_gfx12
+    amdgcn_mma<I4,   I4,   I32,  16u, 16u, 32u,  Target12,   MmaOpFamily::DENSE>,  // wmma_i32_16x16x32_iu4_w32_gfx12
+    amdgcn_mma<F16,  F16,  F32,  16u, 16u, 32u,  Target12,   MmaOpFamily::SPARSE>, // swmmac_f32_16x16x32_f16_w32
+    amdgcn_mma<BF16, BF16, F32,  16u, 16u, 32u,  Target12,   MmaOpFamily::SPARSE>, // swmmac_f32_16x16x32_bf16_w32
+    amdgcn_mma<F16,  F16,  F16,  16u, 16u, 32u,  Target12,   MmaOpFamily::SPARSE>, // swmmac_f16_16x16x32_f16_w32
+    amdgcn_mma<BF16, BF16, BF16, 16u, 16u, 32u,  Target12,   MmaOpFamily::SPARSE>, // swmmac_bf16_16x16x32_bf16_w32
+    amdgcn_mma<I8,   I8,   I32,  16u, 16u, 32u,  Target12,   MmaOpFamily::SPARSE>, // swmmac_i32_16x16x32_iu8_w32
+    amdgcn_mma<F8,   F8,   F32,  16u, 16u, 32u,  Target12,   MmaOpFamily::SPARSE>, // swmmac_f32_16x16x32_fp8_fp8_w32
+    amdgcn_mma<F8,   BF8,  F32,  16u, 16u, 32u,  Target12,   MmaOpFamily::SPARSE>, // swmmac_f32_16x16x32_fp8_bf8_w32
+    amdgcn_mma<BF8,  F8,   F32,  16u, 16u, 32u,  Target12,   MmaOpFamily::SPARSE>, // swmmac_f32_16x16x32_bf8_fp8_w32
+    amdgcn_mma<BF8,  BF8,  F32,  16u, 16u, 32u,  Target12,   MmaOpFamily::SPARSE>, // swmmac_f32_16x16x32_bf8_bf8_w32
+    amdgcn_mma<I4,   I4,   I32,  16u, 16u, 32u,  Target12,   MmaOpFamily::SPARSE>, // swmmac_i32_16x16x32_iu4_w32
+    amdgcn_mma<I4,   I4,   I32,  16u, 16u, 64u,  Target12,   MmaOpFamily::SPARSE>  // swmmac_i32_16x16x64_iu4_w32
 >;
 // clang-format on
 

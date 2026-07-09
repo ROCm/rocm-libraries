@@ -27,6 +27,7 @@
 
 #include <hipdnn_test_sdk/utilities/FileUtilities.hpp>
 
+#include "harness/EngineNotApplicableError.hpp"
 #include "harness/golden/IntegrationGraphGoldenReferenceVerificationHarness.hpp"
 #include "harness/golden/IntegrationTestBundle.hpp"
 
@@ -204,7 +205,8 @@ TEST_F(TestGoldenHarnessFixture, ExecutorThrowsYieldsSkip)
     runCapturing(
         loadRunnableBundle("throws"),
         [](std::unordered_map<int64_t, void*>&) {
-            throw std::runtime_error("engine does not support this graph");
+            throw hipdnn_integration_tests::EngineNotApplicableError(
+                "engine does not support this graph");
         },
         &results);
 

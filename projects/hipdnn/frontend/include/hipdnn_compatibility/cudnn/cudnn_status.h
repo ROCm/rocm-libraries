@@ -7,11 +7,9 @@
  * @file cudnn_status.h
  * @brief cuDNN library status/return codes for the hipDNN compatibility shim.
  *
- * Split out of `cudnn.h` so that the status enum can be included without pulling
- * in the C entry points. `cudnn.h` includes this for its public `cudnnStatus_t`
- * type, and `detail/status_translation.h` includes it directly — letting the
- * translation header be genuinely self-contained instead of depending on
- * `cudnn.h` (which would otherwise create an include cycle).
+ * Split out of `cudnn.h` so the status enum can be included without the C entry
+ * points — this lets `detail/status_translation.h` stay self-contained and
+ * avoids an include cycle.
  */
 
 #pragma once

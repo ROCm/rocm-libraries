@@ -4,7 +4,6 @@ GlobalParameters:
   SyncsPerBenchmark: 0
   NumElementsToValidate: -1
   KernelTime: True
-  NewClient: 2
   BoundsCheck: 0
   PrintSolutionRejectionReason: True
   PrintWinnersOnly: True

@@ -2,9 +2,14 @@
 // SPDX-License-Identifier: MIT
 
 #pragma once
+
 #include "ck_tile/core/arch/arch.hpp"
+#include "ck_tile/core/arch/mma/amdgcn_mma.hpp"
 #include "ck_tile/core/arch/mma/mma_op_family.hpp"
 #include "ck_tile/core/arch/mma/mma_traits.hpp"
+#include "ck_tile/core/numeric/integer.hpp"
+
+#include <type_traits>
 
 namespace ck_tile::core::arch::mma {
 
@@ -49,7 +54,6 @@ struct MmaDefaultSelector
                                   WaveTileM,
                                   WaveTileN,
                                   WaveTileK,
-                                  void,
                                   amdgcn_target<>,
                                   MmaOpFamily::UNDEFINED>;
 };
@@ -88,7 +92,6 @@ template <typename ADataType,
           uint32_t WaveTileM,
           uint32_t WaveTileN,
           uint32_t WaveTileKTest,
-          typename CtrlFlags,
           typename CompilerTarget, // TODO: c++20 amdgcn_target_arch_id CompilerTarget>
           MmaOpFamily OpFamily>
 struct MmaKSearchSelector
@@ -102,7 +105,6 @@ struct MmaKSearchSelector
                                    WaveTileM,
                                    WaveTileN,
                                    WaveTileKTest,
-                                   CtrlFlags,
                                    CompilerTarget,
                                    OpFamily>;
 
@@ -118,7 +120,6 @@ struct MmaKSearchSelector
                                                                       WaveTileM,
                                                                       WaveTileN,
                                                                       WaveTileKTest / 2u,
-                                                                      CtrlFlags,
                                                                       CompilerTarget,
                                                                       OpFamily>::SelectedOp>;
 };
@@ -128,7 +129,6 @@ template <typename ADataType,
           typename CDataType,
           uint32_t WaveTileM,
           uint32_t WaveTileN,
-          typename CtrlFlags,
           typename CompilerTarget, // TODO: c++20 amdgcn_target_arch_id CompilerTarget>
           MmaOpFamily OpFamily>
 struct MmaKSearchSelector<ADataType,
@@ -137,25 +137,12 @@ struct MmaKSearchSelector<ADataType,
                           WaveTileM,
                           WaveTileN,
                           0u,
-                          CtrlFlags,
                           CompilerTarget,
                           OpFamily>
 {
     // Recursion endpoint: unsupported default implementation.
-    using SelectedOp = amdgcn_mma<ADataType,
-                                  BDataType,
-                                  CDataType,
-                                  1u,
-                                  1u,
-                                  1u,
-                                  CtrlFlags,
-                                  CompilerTarget,
-                                  OpFamily>;
+    using SelectedOp =
+        amdgcn_mma<ADataType, BDataType, CDataType, 1u, 1u, 1u, CompilerTarget, OpFamily>;
 };
 
 } // namespace ck_tile::core::arch::mma
-
-// Include the implementations
-#include "wmma/wmma_selector.hpp"
-#include "mfma/mfma_selector.hpp"
-#include "sparse/sparse_selector.hpp"

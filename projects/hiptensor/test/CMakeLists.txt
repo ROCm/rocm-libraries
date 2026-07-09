@@ -339,6 +339,7 @@ add_subdirectory(00_unit)
 add_subdirectory(01_contraction)
 add_subdirectory(02_elementwise)
 add_subdirectory(03_reduction)
+add_subdirectory(python)
 
 # Bake YAML-driven category labels into each install-tree
 # CTestTestfile.cmake fragment so `ctest --test-dir

@@ -94,14 +94,11 @@ class LocalReadVALU(LocalRead):
                     #     tP["bpe"], \
                     #     paramList[-1]))
                 # paramTuple = tuple(paramList)
-                num = paramList[0] //65536
+                num = paramList[0] // 65536
                 paramList[0] = paramList[0] - num * 65536
-                srcVgpr=vgpr("LocalReadAddr%s+%d"%(tc,num))
+                srcAddr = vgpr("LocalReadAddr%s+%d"%(tc, num))
 
                 if numOffsets == 1:
-                    addrIdx = paramList[0] // 65536
-                    srcAddr=vgpr("LocalReadAddr%s+%u"%(tc, addrIdx))
-                    paramList[0] -= addrIdx * 65536
                     ds = DSModifiers(na=1, offset=paramList[0])
                 if numOffsets == 2:
                     ds = DSModifiers(na=2, offset0=paramList[0], offset1=paramList[1])
@@ -981,8 +978,9 @@ class LocalReadMFMA(LocalRead):
                             perpStrideInv = permBlock // perpStride
                             inv4K = perpStrideInv * (4 % perpStride) + 4 // perpStride
                             offset_val += inv4K * kernel["MacroTile%s"%tc] * tP["bpeDS"]
-                        if ((subTileIdx == 0 and subIterLoadCount < totalLoads // numSubTiles) \
-                            or (subTileIdx == 1 and subIterLoadCount >= totalLoads // numSubTiles) \
+                        splitPoint = max(totalLoads // numSubTiles, 1) if numSubTiles > 1 else totalLoads
+                        if ((subTileIdx == 0 and subIterLoadCount < splitPoint) \
+                            or (subTileIdx == 1 and subIterLoadCount >= splitPoint) \
                             or numSubTiles == 1) or writer.states.inTailLoop:
                             imod.add(localReadCode)
                         subIterLoadCount += 1
@@ -1654,6 +1652,7 @@ class LocalReadMFMA(LocalRead):
 
                             addrIdx = paramList[0] // 65536
                             srcAddr=vgpr("LocalReadAddr%s+%u"%(tc, addrIdx))
+                            tdmFullLdsOffset = paramList[0]
                             paramList[0] -= addrIdx * 65536
 
                             if numOffsets == 1:
@@ -1669,7 +1668,14 @@ class LocalReadMFMA(LocalRead):
                                 # indexTranpose case, disable index conversion for local read
                                 destVgpr = self.getVgprForEmu(writer, kernel, tc, bufferIdx, iui, index, lrvwTile, vgprLen=numVgpr, dst=False, localRead=True)
 
-                            self._emitLdsRead(writer, kernel, tP, LocalReadX, dst=destVgpr, src=srcAddr, ds=ds, module=localReadCodeT, comment=comment)
+                            # When numVectorsPerTile==1 the per-wave reads never cross the TDMSplit
+                            # half boundary (only vIdx=0 exists), so the byte-offset half classifier
+                            # would tag every read half0 and leave the half1 tensor_load un-waited.
+                            # Such reads' combined region depends on BOTH half loads -> carry both
+                            # half tokens.
+                            tdmBothHalves = (kernel["TDMSplit"] and not kernel["ProblemType"]["Sparse"]
+                                             and not tP.get("isM", False) and numVectorsPerTile == 1)
+                            self._emitLdsRead(writer, kernel, tP, LocalReadX, dst=destVgpr, src=srcAddr, ds=ds, module=localReadCodeT, ldsByteOffset=tdmFullLdsOffset, bothHalves=tdmBothHalves, comment=comment)
                             # TODO - handle vector-load
                             with writer.allocTmpSgpr(1, tag="LocalReadVALU_tmpSgprInfo2") as tmpSgprInfo:
                                 tmpSgpr = tmpSgprInfo.idx
@@ -1715,8 +1721,9 @@ class LocalReadMFMA(LocalRead):
                                         localReadCodeT.add(writer.assert_eq( dbgVgpr, 1.0) )
 
                             addPackLR = False
-                            if ((subTileIdx == 0 and subIterLoadCount < totalLoads // numSubTiles) \
-                               or (subTileIdx == 1 and subIterLoadCount >= totalLoads // numSubTiles) \
+                            splitPoint = max(totalLoads // numSubTiles, 1) if numSubTiles > 1 else totalLoads
+                            if ((subTileIdx == 0 and subIterLoadCount < splitPoint) \
+                               or (subTileIdx == 1 and subIterLoadCount >= splitPoint) \
                                or numSubTiles == 1) or writer.states.inTailLoop:
                                 addPackLR = True
 

@@ -10,23 +10,18 @@
 #include "ck_tile/core/config.hpp"
 #include "ck_tile/core/numeric/ext_vector_base.hpp"
 #include "ck_tile/core/numeric/integer.hpp"
+#include "ck_tile/core/numeric/numeric.hpp"
 #include "ck_tile/core/numeric/vector_type.hpp"
 #include "ck_tile/core/utility/ignore.hpp"
 #include "ck_tile/core/utility/type_traits.hpp"
 #include "ck_tile/ops/common/utils.hpp"
 
-#include <cstdint>
 #include <stdio.h>
 #include <type_traits>
 #if CK_TILE_CONCEPTS && CK_TILE_CONCEPTS_HEADER
 #include <concepts>
-#include <utility>
 #endif
 
-#if __clang_major__ >= 23
-#pragma clang diagnostic push
-#pragma clang diagnostic ignored "-Wlifetime-safety-intra-tu-suggestions"
-#endif
 namespace ck_tile::core::arch::mma {
 
 /**---------------------------------------------------
@@ -247,24 +242,13 @@ CK_TILE_HOST_DEVICE constexpr const char* to_string(Unsupported) { return "Unsup
 #if CK_TILE_CONCEPTS && CK_TILE_CONCEPTS_HEADER
 
 /**
- * @concept HasExecSignature
- * @brief  Helper concept for exec signature check.
- */
-template <typename MmaOp, typename... ExecArgs>
-concept HasExecSignature = requires {
-    {
-        MmaOp::exec(typename MmaOp::AVecType{},
-                    typename MmaOp::BVecType{},
-                    typename MmaOp::CVecType{},
-                    std::declval<ExecArgs>()...)
-    } -> std::convertible_to<typename MmaOp::CVecType>;
-};
-
-/**
  * @concept MmaOpI
  * @brief  Expresses the meta-data interface required for each MmaOp policy.
  */
 // TODO: Make sure this actually matches amdgcn_mma.
+// NOTE: It is no longer possible to perform a check on the exec() function, since it is now
+// templated over the variadic WarpGemmParams template pack for intrinsic flags. It seems like
+// concepts do not work for templated device functions.
 template <typename MmaOp>
 concept MmaOpI = requires(MmaOp op) {
     // Requires an op context
@@ -287,7 +271,7 @@ concept MmaOpI = requires(MmaOp op) {
     { MmaOp::kCMPerLane } -> std::convertible_to<unsigned int>;
     { MmaOp::kCMNumAccess } -> std::convertible_to<unsigned int>;
     { MmaOp::kCompressionRatio } -> std::convertible_to<unsigned int>;
-} && (HasExecSignature<MmaOp> || HasExecSignature<MmaOp, int> || HasExecSignature<MmaOp, int, int>);
+};
 
 #endif // CK_TILE_CONCEPTS && CK_TILE_CONCEPTS_HEADER
 
@@ -305,7 +289,6 @@ concept MmaOpI = requires(MmaOp op) {
  *  @tparam FragM M-dimension of mma intrinsic (MmaTile)
  *  @tparam FragN N-dimension of mma intrinsic (MmaTile)
  *  @tparam FragK K-dimension of mma intrinsic (MmaTile)
- *  @tparam CtrlFlags Control flags for mma operation
  *  @tparam CompilerTarget The current compiler target
  *  @tparam OpFamily_ The type of operation (dense, sparse, scale, etc.)
  *  @tparam Enabler SFINAE enabler
@@ -316,7 +299,6 @@ template <typename ADataType,
           uint32_t FragM,
           uint32_t FragN,
           uint32_t FragK,
-          typename CtrlFlags,
           typename CompilerTarget,
           MmaOpFamily OpFamily_,
           typename Enabler = void>
@@ -326,7 +308,8 @@ struct amdgcn_mma : amdgcn_mma_base<fp32_t, fp32_t, fp32_t, 1u, 1u, 1u, 1u, 1, 1
 // clang-format on
 {
     // This is a default pass-through implementation that doesn't do anything practical.
-    CK_TILE_DEVICE static auto
+    template <typename... Params>
+    CK_TILE_DEVICE static CVecType
     exec(AVecType const& regsA, BVecType const& regsB, CVecType const& regsC)
     {
         // Prints once across all thread blocks and threads.
@@ -344,10 +327,9 @@ struct amdgcn_mma : amdgcn_mma_base<fp32_t, fp32_t, fp32_t, 1u, 1u, 1u, 1u, 1, 1
 template <typename ADataType,
           typename BDataType,
           typename CDataType,
-          std::uint32_t FragM,
-          std::uint32_t FragN,
-          std::uint32_t FragK,
-          typename CtrlFlags,
+          uint32_t FragM,
+          uint32_t FragN,
+          uint32_t FragK,
           typename CompilerTarget,
           MmaOpFamily OpFamily_,
           typename Enabler = void>
@@ -357,7 +339,6 @@ CK_TILE_HOST_DEVICE void print(amdgcn_mma<ADataType,
                                           FragM,
                                           FragN,
                                           FragK,
-                                          CtrlFlags,
                                           CompilerTarget,
                                           OpFamily_,
                                           Enabler> const& mmaObj)
@@ -392,14 +373,7 @@ CK_TILE_HOST_DEVICE void print(amdgcn_mma<ADataType,
     printf("               kCNBlocks                : %d\n", mmaObj.kCNBlocks);
     printf("               CBlockDimInVecDim        : %d\n", mmaObj.CBlockDimInVecDim);
     printf("Instruction    name                     : %s\n", ObjType::instruction_name);
-    if constexpr(!std::is_same_v<CtrlFlags, void>)
-    {
-        print_flags(CtrlFlags{});
-    }
     print(CompilerTarget{});
 }
 
 } // namespace ck_tile::core::arch::mma
-#if __clang_major__ >= 23
-#pragma clang diagnostic pop
-#endif

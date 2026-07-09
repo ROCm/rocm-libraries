@@ -37,11 +37,11 @@ namespace rocsparse
                                                  J                   block_dim,
                                                  const I* __restrict__ bsr_row_ptr,
                                                  const J* __restrict__ bsr_col_ind,
-                                                 T* __restrict__ bsr_val,
+                                                 T* bsr_val,
                                                  const I* __restrict__ bsr_diag_ind,
                                                  int32_t* __restrict__ block_done,
                                                  const J* __restrict__ block_map,
-                                                 J* __restrict__ zero_pivot,
+                                                 J*                   zero_pivot,
                                                  rocsparse_index_base idx_base)
     {
         static constexpr uint32_t BSRDIM = 16;
@@ -399,14 +399,14 @@ namespace rocsparse
                             J                   mb,
                             const I* __restrict__ bsr_row_ptr,
                             const J* __restrict__ bsr_col_ind,
-                            T* __restrict__ bsr_val,
+                            T*      bsr_val,
                             int64_t bsr_val_stride,
                             const I* __restrict__ bsr_diag_ind,
                             J bsr_dim,
                             int32_t* __restrict__ done_array,
                             int64_t done_array_stride,
                             const J* __restrict__ map,
-                            J* __restrict__ zero_pivot,
+                            J*                   zero_pivot,
                             int64_t              zero_pivot_stride,
                             rocsparse_index_base idx_base)
     {

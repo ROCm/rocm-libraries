@@ -148,6 +148,7 @@ def check_for_non_skippable_path(paths: Optional[Iterable[str]]) -> bool:
 THEROCK_CI_PATTERNS = [
     ".github/workflows/therock*",
     ".github/scripts/therock*",
+    ".github/actions/ci-env/action.yml",
 ]
 
 

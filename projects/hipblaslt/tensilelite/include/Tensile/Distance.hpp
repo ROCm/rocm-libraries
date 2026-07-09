@@ -28,9 +28,7 @@
 
 #include <cmath>
 
-#include <Tensile/Macros.hpp>
-
-TENSILE_HIDDEN_BEGIN
+#include <tensilelitehost/export.h>
 
 namespace TensileLite
 {
@@ -415,4 +413,3 @@ namespace TensileLite
     } // namespace Matching
 } // namespace TensileLite
 
-TENSILE_HIDDEN_END

@@ -35,6 +35,12 @@ When a user asks for a workflow covered by a project skill, tell them the projec
   - Runs tests against an existing superbuild with per-component selection (`hipdnn`, `miopen`, `hipblaslt`, `hip-kernel`, `integration-tests`, or `all`), unit/integration scope, optional `--filter=<gtest_pattern>`, `--verbose`, and `--keep-going`. Handles Windows DLL PATH and the `hip-kernel-provider` target naming quirk automatically.
   - Suggest this skill when the user asks to run, filter, or triage tests against a superbuild they have already configured. It does not configure or build — pair it with `$hipdnn-superbuild` in Codex or `/hipdnn-superbuild` in Claude first.
 
+## Commit & PR Conventions
+
+Commit messages and PR titles must follow [Conventional Commits](https://www.conventionalcommits.org/): `type(optional-scope): short description`, where `type` is one of `feat`, `fix`, `docs`, `style`, `refactor`, `perf`, `test`, `build`, `ci`, `chore`, or `revert`. Keep PR titles between 10 and 80 characters, and never include `WIP` or `do not merge`. The Libraries PR Bot gates any PR whose title does not match.
+
+Tracking references (a `JIRA ID :` / `ISSUE ID :` line, a closing keyword such as `Closes #123`, or a plain `#123`) belong in the PR body, not the title; the bot requires one. Use the `pr-summary` skill to draft conforming PR titles and bodies.
+
 ## Project Overview & Architecture
 
 hipDNN is a graph-based deep learning library for AMD GPUs with a plugin-based architecture.
@@ -77,8 +83,9 @@ cmake -GNinja ..
 
 ninja              # Build everything
 ninja check        # Build and run ALL tests
-ninja unit-check   # Unit tests only (faster)
-ninja integration-check  # Integration tests only
+ninja quick-check  # Build and run the YAML-defined quick category
+ninja unit-check   # YAML-defined unit category
+ninja integration-check  # YAML-defined integration category
 ninja doxygen      # Generate Doxygen docs (output: build/docs/html/)
 ```
 
@@ -106,7 +113,7 @@ cmake -B build -GNinja -DROCM_LIBS_ENABLE_COMPONENTS="hipdnn;miopen-provider;hip
 cmake --build build
 ```
 
-In the superbuild, targets are prefixed with the project name (e.g., `hipdnn-check`, `miopen-provider-unit-check`).
+In the superbuild, targets are prefixed with the project name (e.g., `hipdnn-check`, `hipdnn-quick-check`, `miopen-provider-quick-check`).
 
 ### 3. Standalone Provider Build (fallback — provider not in superbuild)
 

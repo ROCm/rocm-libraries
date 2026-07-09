@@ -5,15 +5,19 @@
 #include "ck_tile/core/arch/arch.hpp"
 #include "ck_tile/core/arch/mma/mma_op_family.hpp"
 #include "ck_tile/core/arch/mma/mma_pipeline.hpp"
+#include "ck_tile/core/arch/mma/mma_traits.hpp"
 #include "ck_tile/core/arch/mma/mma_wavewise.hpp"
 #include "ck_tile/core/arch/mma/scale/scale_selector.hpp"
 #include "ck_tile/core/arch/mma/scale/scale_transforms.hpp"
+#include "ck_tile/core/arch/mma/utility/tile_distribution_encoding_calculator.hpp"
 #include "ck_tile/core/config.hpp"
+#include "ck_tile/core/container/thread_buffer.hpp"
+#include "ck_tile/core/numeric/integer.hpp"
+#include "ck_tile/core/tensor/static_distributed_tensor.hpp"
+#include "ck_tile/core/tensor/tile_distribution.hpp"
+#include "ck_tile/core/utility/type_traits.hpp"
 
-#include <cstdint>
-#include <tuple>
 #include <type_traits>
-#include <utility>
 
 namespace ck_tile::core::arch::mma {
 
@@ -32,7 +36,7 @@ namespace ck_tile::core::arch::mma {
  * @tparam WaveTileN       Mma WaveTile N dimension
  * @tparam WaveTileK       Mma WaveTile K dimension
  * @tparam AccumPolicy     The fragment order of the accum. registers (row or col major frag order)
- * @tparam CTranspose      Swaps A and B input vectors and interprets C with transposed layout.
+ * @tparam CTranspose_     Swaps A and B input vectors and interprets C with transposed layout.
  * @tparam SwizzleFactor   Swizzlefactor for Tile Distribution Encoding calculation.
  * @tparam AttrNumAccessAV Extra unmerge factor for vector dimension for A vec, see amdgcn_mma.hpp.
  * @tparam AttrNumAccessBV Extra unmerge factor for vector dimension for B vec, see amdgcn_mma.hpp.
@@ -47,7 +51,7 @@ template <typename ADataType_,
           uint32_t WaveTileN,
           uint32_t WaveTileK,
           MmaAccumPolicy AccumPolicy = MmaAccumPolicy::ROW_MAJOR,
-          bool CTranspose            = false,
+          bool CTranspose_           = false,
           index_t SwizzleFactor      = 1,
           index_t AttrNumAccessAV    = 1,
           index_t AttrNumAccessBV    = AttrNumAccessAV,
@@ -67,20 +71,28 @@ template <typename ADataType_,
           typename MmaTransforms = // TODO: c++20 MmaTransformsI MmaTransforms =
           typename MmaTransformsDefaultSelector<MmaOp_, CompilerTarget>::SelectedTransforms>
 // clang-format off
-struct ScaleMmaPipeline : public MmaPipelineBase<static_cast<int>(MmaPipelineOptionFlag::NONE), ScaleMmaPipeline<ADataType_, BDataType_, CDataType_, WaveTileM, WaveTileN, WaveTileK, AccumPolicy, CTranspose, SwizzleFactor, AttrNumAccessAV, AttrNumAccessBV, CompilerTarget, MmaOp_, MmaTransforms>>
+struct ScaleMmaPipeline : public MmaPipelineBase<ScaleMmaPipeline<ADataType_, BDataType_, CDataType_, WaveTileM, WaveTileN, WaveTileK, AccumPolicy, CTranspose_, SwizzleFactor, AttrNumAccessAV, AttrNumAccessBV, CompilerTarget, MmaOp_, MmaTransforms>>
 {
-    using Base = MmaPipelineBase<static_cast<int>(MmaPipelineOptionFlag::NONE), ScaleMmaPipeline<ADataType_, BDataType_, CDataType_, WaveTileM, WaveTileN, WaveTileK, AccumPolicy, CTranspose, SwizzleFactor, AttrNumAccessAV, AttrNumAccessBV, CompilerTarget, MmaOp_, MmaTransforms>>;
+    using Base = MmaPipelineBase<ScaleMmaPipeline<ADataType_, BDataType_, CDataType_, WaveTileM, WaveTileN, WaveTileK, AccumPolicy, CTranspose_, SwizzleFactor, AttrNumAccessAV, AttrNumAccessBV, CompilerTarget, MmaOp_, MmaTransforms>>;
     // clang-format on
 
-    using MmaOp = MmaOp_; // Expose the selected MmaOp
+    using MmaOp                      = MmaOp_; // Expose the selected MmaOp
+    static constexpr bool CTranspose = CTranspose_;
 
-    using ADataType = typename MmaOp::ADataType;
-    using BDataType = typename MmaOp::BDataType;
+    static_assert(!MmaOpTraits<MmaOp>::IsSupported ||
+                  std::is_same_v<typename MmaOp::ADataType, ADataType_>);
+    static_assert(!MmaOpTraits<MmaOp>::IsSupported ||
+                  std::is_same_v<typename MmaOp::BDataType, BDataType_>);
+    static_assert(!MmaOpTraits<MmaOp>::IsSupported ||
+                  std::is_same_v<typename MmaOp::CDataType, CDataType_>);
+
+    // In the old WarpGemm system, CTranspose swaps ADataType and BDataType at the Attribute and
+    // WarpGemm level, but not at the Impl level.
+    using ADataType =
+        std::conditional_t<CTranspose, typename MmaOp::BDataType, typename MmaOp::ADataType>;
+    using BDataType =
+        std::conditional_t<CTranspose, typename MmaOp::ADataType, typename MmaOp::BDataType>;
     using CDataType = typename MmaOp::CDataType;
-
-    static_assert(!MmaOpTraits<MmaOp>::IsSupported || std::is_same_v<ADataType, ADataType_>);
-    static_assert(!MmaOpTraits<MmaOp>::IsSupported || std::is_same_v<BDataType, BDataType_>);
-    static_assert(!MmaOpTraits<MmaOp>::IsSupported || std::is_same_v<CDataType, CDataType_>);
 
     // WaveTile dimensions (Used to be fragment dims but higher level expects these to include k
     // iteration!)
@@ -116,9 +128,42 @@ struct ScaleMmaPipeline : public MmaPipelineBase<static_cast<int>(MmaPipelineOpt
     {
         struct Impl
         {
-            static constexpr index_t kCNLane = MmaOp::kN / MmaOp::kCNBlocks;
-            static constexpr index_t kK      = MmaOp::kK;
+            static constexpr index_t kM = MmaOp::kM;
+            static constexpr index_t kN = MmaOp::kN;
+            static constexpr index_t kK = MmaOp::kK;
+
+            // M size excluding blocks. Dubious for gfx1250, needs attention.
+            static constexpr index_t kAMLane =
+                is_target_id_any_of<CompilerTarget, amdgcn_target_id::GFX1250>()
+                    ? 16
+                    : MmaOp::kM / MmaOp::kCMBlocks;
+
+            // N size exluding blocks.
+            static constexpr index_t kBNLane = MmaOp::kN / MmaOp::kCNBlocks;
+
+            // This value is the size of the middle K dimension, i.e. the second-fastest changing K
+            // dimension of the layout unmerge operations.
+            static constexpr index_t kABKLane = MmaOp::kK / MmaOp::kABKPerLane;
+
+            // Seems like identical definition for MFMA, and does not exist for WMMA.
+            static constexpr index_t kABKPerLane = MmaOp::kABKPerLane;
+
+            static constexpr index_t kCMLane     = MmaOp::kM / MmaOp::kCMBlocks / MmaOp::kCMPerLane;
+            static constexpr index_t kCNLane     = MmaOp::kN / MmaOp::kCNBlocks;
+            static constexpr index_t kCM0PerLane = MmaOp::kCMNumAccess;
+            static constexpr index_t kCM1PerLane = MmaOp::kCMPerLane / MmaOp::kCMNumAccess;
+
+            // TODO: We probably want a separate pipeline for the scale16 intrinsics.
+            static constexpr index_t kScaleGranularity = 32;
         };
+
+        // Overall handling of AttrNumAccess in CK Tile is a big mess. This definition will probably
+        // work for most MFMA intrinsics but not for WMMA, which in the CK Tile system has a sort of
+        // "canonical" unmerge of the K dimension which happens *before* the "true" attrNumAccess.
+        // Further complicating factor are packNumAccess, differing A/B numAccess values, and the
+        // recent complication of AttrNumAccess by for some reason adding the datatype packedness
+        // into it.
+        static constexpr index_t AttrNumAccessV = AttrNumAccessAV;
     };
 
     // Unsupported MmaOps with nonTrivial AttrNumAccess lead to issues in calculator.
@@ -128,7 +173,9 @@ struct ScaleMmaPipeline : public MmaPipelineBase<static_cast<int>(MmaPipelineOpt
         MmaOpTraits<MmaOp>::IsSupported ? AttrNumAccessBV : 1;
 
     // TODO: TileDistrEncCalc only supports K composition (kIter) and always gives post-compression
-    // A layout. No Swizzle support yet.
+    // A layout.
+    // NOTE: TileDistrEncCalc swaps the A and B tile distribution encodings internally in case of
+    // CTranspose!
     using EncCalc           = TileDistrEncCalc<MmaOp,
                                                CTranspose,
                                                SwizzleFactor,
@@ -145,15 +192,10 @@ struct ScaleMmaPipeline : public MmaPipelineBase<static_cast<int>(MmaPipelineOpt
 
     // Full static distributed tensor types including composition. This is the baseline input and
     // output format for all exec and transform functions.
+    // NOTE: ADataType AND AWarpDstr are already swapped here in case of CTranspose!
     using AWarpTensor = static_distributed_tensor<ADataType, AWarpDstr>;
     using BWarpTensor = static_distributed_tensor<BDataType, BWarpDstr>;
     using CWarpTensor = static_distributed_tensor<CDataType, CWarpDstr>;
-
-    // We use these thread_buffer types internally in a number of places, because it allows us to
-    // directly select the ext_vectors for individual MmaOp calls.
-    using AThreadBufType = thread_buffer<typename MmaOp::AVecType, FragsM * FragsK>;
-    using BThreadBufType = thread_buffer<typename MmaOp::BVecType, FragsN * FragsK>;
-    using CThreadBufType = thread_buffer<typename MmaOp::CVecType, FragsM * FragsN>;
 
     // Transforms
     using ATransform = typename MmaTransforms::ATransform;
@@ -170,8 +212,9 @@ struct ScaleMmaPipeline : public MmaPipelineBase<static_cast<int>(MmaPipelineOpt
     static_assert(WaveTileK % MmaOp::kK == 0u, "WaveTileK must be a multiple of MmaOp::kK");
 
     // TODO: Why does this even need to be a template? The types should be known.
-    template <index_t opselA,
-              index_t opselB,
+    // NOTE: Here we have arrived at the Impl level. We known nothing about CTranspose here, we just
+    // perform the intrinsic, potentially multiple times for K composition.
+    template <typename... Params,
               typename ATensor,
               typename BTensor,
               typename CTensor,
@@ -180,10 +223,10 @@ struct ScaleMmaPipeline : public MmaPipelineBase<static_cast<int>(MmaPipelineOpt
     CK_TILE_DEVICE static void
     execImpl(ATensor& a, BTensor& b, CTensor& c, ScaleADataType& scale_A, ScaleBDataType& scale_B)
     {
-        static_assert(
-            detail::is_similiar_distributed_tensor_v<remove_cvref_t<CTensor>, CWarpTensor> &&
-            detail::is_similiar_distributed_tensor_v<remove_cvref_t<ATensor>, AWarpTensor> &&
-            detail::is_similiar_distributed_tensor_v<remove_cvref_t<BTensor>, BWarpTensor>);
+        // Thread_buffer types allow us to select the ext_vectors for individual MmaOp calls.
+        using AThreadBufType = thread_buffer<typename MmaOp::AVecType, FragsM * FragsK>;
+        using BThreadBufType = thread_buffer<typename MmaOp::BVecType, FragsN * FragsK>;
+        using CThreadBufType = thread_buffer<typename MmaOp::CVecType, FragsM * FragsN>;
 
         auto& a_buf = reinterpret_cast<const AThreadBufType&>(a);
         auto& b_buf = reinterpret_cast<const BThreadBufType&>(b);
@@ -198,11 +241,11 @@ struct ScaleMmaPipeline : public MmaPipelineBase<static_cast<int>(MmaPipelineOpt
                     for(uint32_t bk = 0u; bk < FragsK; ++bk)
                     {
                         c_buf.at(bm * FragsN + bn) =
-                            MmaOp::template exec<opselA, opselB>(a_buf.at(bm * FragsK + bk),
-                                                                 b_buf.at(bn * FragsK + bk),
-                                                                 c_buf.at(bm * FragsN + bn),
-                                                                 scale_A,
-                                                                 scale_B);
+                            MmaOp::template exec<Params...>(a_buf.at(bm * FragsK + bk),
+                                                            b_buf.at(bn * FragsK + bk),
+                                                            c_buf.at(bm * FragsN + bn),
+                                                            scale_A,
+                                                            scale_B);
                     }
                 }
             }
@@ -216,11 +259,11 @@ struct ScaleMmaPipeline : public MmaPipelineBase<static_cast<int>(MmaPipelineOpt
                     for(uint32_t bk = 0u; bk < FragsK; ++bk)
                     {
                         c_buf.at(bm * FragsN + bn) =
-                            MmaOp::template exec<opselA, opselB>(a_buf.at(bm * FragsK + bk),
-                                                                 b_buf.at(bn * FragsK + bk),
-                                                                 c_buf.at(bm * FragsN + bn),
-                                                                 scale_A,
-                                                                 scale_B);
+                            MmaOp::template exec<Params...>(a_buf.at(bm * FragsK + bk),
+                                                            b_buf.at(bn * FragsK + bk),
+                                                            c_buf.at(bm * FragsN + bn),
+                                                            scale_A,
+                                                            scale_B);
                     }
                 }
             }

@@ -40,6 +40,7 @@ list(APPEND CMAKE_MODULE_PATH ${CMAKE_CURRENT_SOURCE_DIR}/cmake
 )
 
 option(HIPKERNELPROVIDER_ENABLE_TESTS "Build tests" ON)
+option(HIPKERNELPROVIDER_ENABLE_ROCKE "Build rocKE engine and smoke tests" OFF)
 option(ENABLE_ASM_SDPA_ENGINE "Build the ASM SDPA engine" ON)
 option(ENABLE_HIP_MLOPS_ENGINE "Build the HIP kernel engine" ON)
 
@@ -138,9 +139,20 @@ message(STATUS "Plugin build directory: ${HIPDNN_BUILD_PLUGIN_ENGINE_DIR}")
 message(STATUS "Plugin install directory: ${HIPDNN_INSTALL_PLUGIN_ENGINE_DIR}")
 file(MAKE_DIRECTORY ${HIPDNN_BUILD_PLUGIN_ENGINE_DIR})
 
-# ============================================================================
-# Plugin library targets and tests
-# ============================================================================
+if(HIPKERNELPROVIDER_ENABLE_ROCKE)
+    message(STATUS "rocKE features enabled")
+
+    # rocke/ = library (api / provider plugin) + platform (engine). The engine's
+    # installed CTest entries stage into
+    # EXTERNAL_TEST_INSTALL_STAGING_hip_kernel_provider, so add_subdirectory(rocke)
+    # must precede src/ below, which emits bin/hip_kernel_provider/CTestTestfile.cmake.
+    set(ROCKE_INSTALL_PROVIDER_CTEST_SUBDIR "hip_kernel_provider")
+    set(ROCKE_INSTALL_STANDALONE_CTEST OFF)
+    add_subdirectory(rocke)
+else()
+    message(STATUS "rocKE features disabled")
+endif()
+
 add_subdirectory(src)
 
 # ============================================================================

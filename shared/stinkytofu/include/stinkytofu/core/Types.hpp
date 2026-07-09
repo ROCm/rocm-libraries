@@ -23,6 +23,7 @@
 #pragma once
 
 #include <array>
+#include <climits>
 #include <cstdint>
 #include <string>
 #include <vector>
@@ -76,6 +77,9 @@ struct PassFeatureConfig {
         /// Modeled cycles until one tensor_load_to_lds credit frees. Fed from the
         /// cost/cycle model; varies with layout and problem size.
         int globalReadDrainLatency = 0;
+        int dsReadQueueDepth = 0;
+        int dsReadDrainLatency = 0;
+        int dsReadPerWmma = INT_MAX;
     };
 
     LoopConfig loopConfig;

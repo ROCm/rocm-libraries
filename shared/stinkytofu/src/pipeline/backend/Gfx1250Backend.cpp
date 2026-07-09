@@ -46,7 +46,9 @@
 #include "stinkytofu/transforms/asm/LoopRegionRemarkPass.hpp"
 #include "stinkytofu/transforms/asm/MemTokenConsistencyCheckPass.hpp"
 #include "stinkytofu/transforms/asm/RederiveExpertScopePass.hpp"
+#include "stinkytofu/transforms/asm/RegionClonePass.hpp"
 #include "stinkytofu/transforms/asm/RemoveDelayAluPass.hpp"
+#include "stinkytofu/transforms/asm/RemoveInstructionPass.hpp"
 #include "stinkytofu/transforms/asm/RemoveWaitAluPass.hpp"
 #include "stinkytofu/transforms/asm/SetMatrixReusePass.hpp"
 #include "stinkytofu/transforms/asm/StinkyBuildImplicitDependencyPass.hpp"
@@ -148,8 +150,6 @@ bool buildGfx1250Pipeline(PassManager& pm, StinkyAsmModule& module, const PassBu
                                                   /*plrValue=*/moduleOptions.PrefetchLocalRead));
     }
 
-    pm.addPass(createInsertVgprMsbPass());
-
     if (moduleOptions.EnableESM2) {
         // expertScheduleMode2 region (label_ASM_Start..noLoadLoopBody): wait-alu + mode2
         // lifecycle. Must precede the kernel-wide CFGBuilder — ScopeAdaptor needs the flat
@@ -169,6 +169,14 @@ bool buildGfx1250Pipeline(PassManager& pm, StinkyAsmModule& module, const PassBu
         }
     }
 
+    // Build the CFG after the flat region splice-backs so RegionClonePass can match its
+    // start BB by label. InsertVgprMsb runs after RegionClonePass so the cloned BB gets
+    // its MSB computed for its actual operands (chain-head src C is zeroed, so it must not
+    // inherit the loop's src C MSB).
+    pm.addPass(createCFGBuilderPass());
+    pm.addPass(createRegionClonePass(moduleOptions.CloneList));
+    pm.addPass(createInsertVgprMsbPass());
+
     pm.addPass(createCFGBuilderPass());
     pm.addPass(createMemTokenConsistencyCheckPass());
 
@@ -185,6 +193,10 @@ bool buildGfx1250Pipeline(PassManager& pm, StinkyAsmModule& module, const PassBu
     // When StinkyTofuCostOutputDir is set, dump pass debug (per-instruction + summary) to
     // <outputDir>/<kernel>/accumulate_instruction_size_pass_debug.txt (same layout as Backend).
     pm.addPass(createAccumulateInstructionSizePass(module));
+
+    if (auto pass = createRemoveInstructionPass(moduleOptions.RemoveInstructions)) {
+        pm.addPass(std::move(pass));
+    }
 
     return true;
 }

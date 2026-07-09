@@ -5,29 +5,22 @@
 
 /**
  * @file cudnn_runtime_version.h
- * @brief cuDNN **runtime library** version claimed by the hipDNN shim.
+ * @brief cuDNN runtime-library version claimed by the shim.
  *
- * NVIDIA's `cudnnGetVersion()` (and the `CUDNN_VERSION` macro) report the cuDNN
- * *runtime library* version — e.g. `90500` == 9.5.0 — which is distinct from the
- * cuDNN *frontend* version (`CUDNN_FRONTEND_VERSION`, see
- * `cudnn_frontend_version.h`). Upstream samples gate on this as a runtime
- * version (`cudnnGetVersion() < 90500`, `>= 91400`, ...), so the shim claims a
- * cuDNN 9.x runtime version here. `cudnn.h`'s `cudnnGetVersion()` returns
- * `CUDNN_VERSION` from this header.
+ * `cudnnGetVersion()` / `CUDNN_VERSION` report the cuDNN *runtime* version (e.g.
+ * `90500` == 9.5.0), distinct from the *frontend* version in
+ * `cudnn_frontend_version.h`. Upstream samples gate on it (`cudnnGetVersion() >=
+ * 91400`, …), so the shim claims a 9.x runtime here; `cudnn.h`'s
+ * `cudnnGetVersion()` returns `CUDNN_VERSION`. The claimed 9.22.0 matches what
+ * cuDNN FE v1.24.0 recommends.
  *
- * The claimed version (9.22.0) matches the runtime the pinned cuDNN frontend
- * v1.24.0 release notes recommend (9.22.0 and later).
- *
- * @note TODO: the exact runtime version claimed (9.22.0) tracks
- *       the FE v1.24.0 recommendation for now; revisit before attempting a
- *       PyTorch integration.
+ * @note TODO: revisit the exact claimed version before a PyTorch integration.
  */
 
 #pragma once
 
-// These must remain preprocessor macros (not an enum) to mirror NVIDIA's
-// `cudnn.h`/`cudnn_version.h`, where consumers gate on `CUDNN_VERSION` in `#if`
-// directives that an enum cannot satisfy. Suppress modernize-macro-to-enum.
+// Must remain preprocessor macros, not an enum: consumers gate on `CUDNN_VERSION`
+// in `#if` directives that an enum cannot satisfy.
 // NOLINTBEGIN(modernize-macro-to-enum,cppcoreguidelines-macro-to-enum)
 #define CUDNN_MAJOR 9
 #define CUDNN_MINOR 22
