@@ -508,6 +508,13 @@ def _compare(a, b) -> float:
     return float((a - b).abs().max().item())
 
 
+def _progress(msg: str) -> None:
+    """Flushed, timestamped heartbeat so long silent JIT/compile stretches are visible."""
+    import time as _t
+
+    print(f"[{_t.strftime('%H:%M:%S')}] {msg}", flush=True)
+
+
 def main() -> int:
     ap = argparse.ArgumentParser()
     ap.add_argument("--shapes", nargs="+", type=Path, required=True)
@@ -537,7 +544,41 @@ def main() -> int:
     ap.add_argument(
         "--output-json", type=Path, default=Path("/tmp/prefill2d_live.json")
     )
+    ap.add_argument(
+        "--no-triton",
+        action="store_true",
+        help="skip the Triton baseline lane; CK correctness (gated vs Triton) is "
+        "then reported as N/A and speedup-vs-Triton is omitted",
+    )
+    ap.add_argument(
+        "--no-aotriton",
+        action="store_true",
+        help="skip the AOTriton (flash SDPA) baseline lane",
+    )
+    ap.add_argument(
+        "--all",
+        action="store_true",
+        help="run all baseline frameworks (Triton + AOTriton); overrides --no-*",
+    )
     args = ap.parse_args()
+    # Baseline-framework selection. Default runs both; --no-* skip; --all forces both.
+    run_triton = not args.no_triton
+    run_aotriton = not args.no_aotriton
+    if args.all:
+        run_triton = run_aotriton = True
+
+    # A partial run (some baseline framework skipped) is NOT a canonical
+    # baseline; never overwrite the requested (possibly committed) perf file.
+    partial = not (run_triton and run_aotriton)
+    if partial and "partial" not in args.output_json.name:
+        args.output_json = args.output_json.with_name(
+            args.output_json.stem + ".partial" + args.output_json.suffix
+        )
+        print(
+            f"WARNING: partial run (triton={run_triton} aotriton={run_aotriton}); "
+            f"redirecting output to {args.output_json} to protect the canonical baseline",
+            file=sys.stderr,
+        )
 
     import torch
 
@@ -561,6 +602,7 @@ def main() -> int:
         shapes = shapes[: args.limit]
     print(f"device: {torch.cuda.get_device_name(0)}")
     print(f"shapes: {len(shapes)}  variants: {args.variants}")
+    print(f"frameworks: triton={run_triton}  aotriton={run_aotriton}")
 
     bench = CkVariantBench(num_sms=args.num_sms)
     results = []
@@ -568,26 +610,39 @@ def main() -> int:
         sw = shape.window_size[0] + 1 if shape.window_size[0] >= 0 else 0
         is_fp8 = "float8" in shape.k_dtype
         tag = f"[{i}/{len(shapes)}] {shape.signature}"
+        _progress(f"{tag}  sw={sw} fp8={int(is_fp8)} - start")
         try:
             data = make_inputs(shape, seed=args.seed, cap_blocks=args.cap_blocks)
-            tri_out, tri_ms = _run_triton_live(
-                shape, data, sw, is_fp8, warmup=args.warmup, iters=args.iterations
-            )
         except Exception as exc:  # noqa: BLE001
-            print(f"{tag}  TRITON FAIL: {exc!r}")
+            print(f"{tag}  MAKE_INPUTS FAIL: {exc!r}")
             traceback.print_exc()
             continue
 
-        # AOTriton flash baseline (best-effort; skipped for FP8 / ineligible shapes).
+        # Triton baseline (also the CK correctness reference). Optional via --no-triton.
+        tri_out, tri_ms = None, None
+        if run_triton:
+            _progress(f"{tag}  - triton (JIT on first shape)")
+            try:
+                tri_out, tri_ms = _run_triton_live(
+                    shape, data, sw, is_fp8, warmup=args.warmup, iters=args.iterations
+                )
+            except Exception as exc:  # noqa: BLE001
+                print(f"{tag}  TRITON FAIL: {exc!r}")
+                traceback.print_exc()
+                continue
+
+        # AOTriton flash baseline (best-effort). Optional via --no-aotriton.
         aot_ms = None
-        try:
-            _, aot_ms = _run_aoTriton_live(
-                shape, data, sw, is_fp8, warmup=args.warmup, iters=args.iterations
-            )
-        except NotImplementedError as exc:
-            print(f"{tag}  AOTRITON SKIP: {exc}")
-        except Exception as exc:  # noqa: BLE001
-            print(f"{tag}  AOTRITON FAIL: {exc!r}")
+        if run_aotriton:
+            _progress(f"{tag}  - aotriton (flash SDPA)")
+            try:
+                _, aot_ms = _run_aoTriton_live(
+                    shape, data, sw, is_fp8, warmup=args.warmup, iters=args.iterations
+                )
+            except NotImplementedError as exc:
+                print(f"{tag}  AOTRITON SKIP: {exc}")
+            except Exception as exc:  # noqa: BLE001
+                print(f"{tag}  AOTRITON FAIL: {exc!r}")
 
         rec = {
             "signature": shape.signature,
@@ -602,6 +657,7 @@ def main() -> int:
         }
         best = None
         for v in args.variants:
+            _progress(f"{tag}  - ck:{v} (comgr JIT on first use)")
             try:
                 if v in ("prod", "ck3d"):
                     # production dispatch via run_unified_attention_torch
@@ -625,9 +681,10 @@ def main() -> int:
                         warmup=args.warmup,
                         iters=args.iterations,
                     )
-                err = _compare(ck_out, tri_out)
-                ok = err <= args.tol
-                spd = tri_ms / ck_ms if ck_ms > 0 else 0.0
+                # Correctness is gated against Triton; N/A when --no-triton.
+                err = _compare(ck_out, tri_out) if tri_out is not None else None
+                ok = (err <= args.tol) if err is not None else None
+                spd = (tri_ms / ck_ms) if (tri_ms and ck_ms > 0) else None
                 rec["variants"][v] = {
                     "ms": ck_ms,
                     "speedup": spd,
@@ -635,31 +692,45 @@ def main() -> int:
                     "ok": ok,
                     "kernel": kname,
                 }
-                if ok and (best is None or spd > best[1]):
-                    best = (v, spd)
+                # Rank best by Triton speedup when available, else raw latency.
+                if ok is not False:
+                    if tri_ms and spd is not None:
+                        if best is None or spd > best[1]:
+                            best = (v, spd)
+                    elif not tri_ms:
+                        if best is None or ck_ms < best[1]:
+                            best = (v, ck_ms)
             except Exception as exc:  # noqa: BLE001
                 rec["variants"][v] = {"error": repr(exc)}
         rec["best_variant"] = best[0] if best else None
-        rec["best_speedup_vs_triton"] = best[1] if best else 0.0
+        rec["best_speedup_vs_triton"] = best[1] if (best and tri_ms) else None
         best_ms = rec["variants"][best[0]]["ms"] if best else None
         rec["best_speedup_vs_aoTriton"] = (
             aot_ms / best_ms if (aot_ms and best_ms) else None
         )
         results.append(rec)
+        tri_str = f"tri={tri_ms * 1000:.1f}us" if tri_ms else "tri=N/A"
         aot_str = f"aot={aot_ms * 1000:.1f}us" if aot_ms else "aot=N/A"
-        vs = "  ".join(
-            f"{v}={rec['variants'][v].get('speedup', 0):.2f}x"
-            f"{'' if rec['variants'][v].get('ok') else '!'}"
-            for v in args.variants
-            if "speedup" in rec["variants"][v]
-        )
+        parts = []
+        for v in args.variants:
+            d = rec["variants"][v]
+            if "ms" not in d:
+                parts.append(f"{v}=ERR")
+            elif d.get("speedup") is not None:
+                mark = "" if d.get("ok") is not False else "!"
+                parts.append(f"{v}={d['speedup']:.2f}x{mark}")
+            else:
+                parts.append(f"{v}={d['ms'] * 1000:.1f}us")
+        vs = "  ".join(parts)
         aot_spd_str = (
             f" aot_spd={rec['best_speedup_vs_aoTriton']:.2f}x"
             if rec["best_speedup_vs_aoTriton"] is not None
             else ""
         )
+        best_spd = rec["best_speedup_vs_triton"]
+        best_str = f"={best_spd:.2f}x(tri)" if best_spd is not None else " (by latency)"
         print(
-            f"{tag} sw={sw} fp8={int(is_fp8)} tri={tri_ms * 1000:.1f}us {aot_str} | {vs} | best={rec['best_variant']}={rec['best_speedup_vs_triton']:.2f}x(tri){aot_spd_str}"
+            f"{tag} sw={sw} fp8={int(is_fp8)} {tri_str} {aot_str} | {vs} | best={rec['best_variant']}{best_str}{aot_spd_str}"
         )
 
     args.output_json.write_text(json.dumps(results, indent=2, default=str))
@@ -679,14 +750,18 @@ def main() -> int:
     for b in sorted(buckets):
         rs = buckets[b]
         tri_spds = [
-            r["best_speedup_vs_triton"] for r in rs if r["best_speedup_vs_triton"] > 0
+            r["best_speedup_vs_triton"] for r in rs if (r.get("best_speedup_vs_triton") or 0) > 0
         ]
         aot_spds = [
             r["best_speedup_vs_aoTriton"]
             for r in rs
             if r.get("best_speedup_vs_aoTriton")
         ]
-        tri_part = f"vs_tri={_gm(tri_spds):.3f}x  wins={sum(1 for x in tri_spds if x > 1)}/{len(tri_spds)}"
+        tri_part = (
+            f"vs_tri={_gm(tri_spds):.3f}x  wins={sum(1 for x in tri_spds if x > 1)}/{len(tri_spds)}"
+            if tri_spds
+            else "vs_tri=N/A (--no-triton)"
+        )
         aot_part = (
             f"  vs_aot={_gm(aot_spds):.3f}x (n={len(aot_spds)})" if aot_spds else ""
         )
