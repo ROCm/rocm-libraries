@@ -1992,10 +1992,7 @@ namespace TensileLite
             case InitMode::Zero:
             case InitMode::One:
             case InitMode::Two:
-            case InitMode::NegOne:
             case InitMode::Max:
-            case InitMode::DenormMin:
-            case InitMode::DenormMax:
             case InitMode::NaN:
             case InitMode::Inf:
             case InitMode::BadInput:

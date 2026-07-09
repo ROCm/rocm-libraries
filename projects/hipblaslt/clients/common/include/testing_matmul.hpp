@@ -2750,6 +2750,17 @@ void testing_matmul_with_bias(const Arguments& arg,
 
         hipblaslt_seedrand();
 
+#if HIPBLASLT_ENABLE_MXDATAGENERATOR
+        hipDeviceProp_t mxProp{};
+        if(isBlockScaling(arg.scaleA) || isBlockScaling(arg.scaleB))
+            CHECK_HIP_ERROR(hipGetDeviceProperties(&mxProp, 0));
+        auto mxScaleLayoutForFormat = [&](hipblaslt_scaling_format const& fmt) -> MXScaleLayout {
+            if(fmt == hipblaslt_scaling_format::Block_32_UE8M0_32_8_EXT)
+                return MXScaleLayout::GFX950;
+            return mxScaleLayoutForArchName(mxProp.gcnArchName);
+        };
+#endif
+
         size_t scaleA_row = ((transA == HIPBLAS_OP_T) ? blockSize(arg.scaleA) : 1);
         size_t scaleA_col = ((transA == HIPBLAS_OP_T) ? 1 : blockSize(arg.scaleA));
         if(isBlockScaling(arg.scaleA))
@@ -2763,20 +2774,26 @@ void testing_matmul_with_bias(const Arguments& arg,
                && arg.initialization != hipblaslt_initialization::rand_int
                && arg.initialization != hipblaslt_initialization::uniform_low_precision)
             {
+#ifdef GOOGLE_TEST
+                GTEST_SKIP() << "unsupported MX initialization: "
+                             << hipblaslt_initialization2string(arg.initialization);
+#else
                 hipblaslt_cout << "Initialization of microscaling data only allows hpl, trig_float, "
                                   "uniform_01, zero, norm_dist, rand_int or uniform_low_precision, not "
                                << hipblaslt_initialization2string(arg.initialization) << std::endl;
                 return;
+#endif
             }
             if(arg.algo_method == 1)
             {
+#ifdef GOOGLE_TEST
+                GTEST_SKIP() << "MX data types do not support algorithm \"all\"";
+#else
                 hipblaslt_cout << "MX data types do not support algorithm \"all\"" << std::endl;
                 return;
+#endif
             }
-            MXScaleLayout const scaleLayoutA
-                = arg.scaleA == hipblaslt_scaling_format::Block_32_UE8M0_32_8_EXT
-                      ? MXScaleLayout::GFX950
-                      : MXScaleLayout::None;
+            MXScaleLayout const scaleLayoutA = mxScaleLayoutForFormat(arg.scaleA);
             size_t dataBatchBytesA  = (num_batches[i] > 1) ? elementsToBytes(stride_a[i], TiA) : 0;
             size_t scaleBatchBytesA = (num_batches[i] > 1) ? size_scaleAVec[i] : 0;
             std::vector<float> refAAll;
@@ -2807,9 +2824,13 @@ void testing_matmul_with_bias(const Arguments& arg,
             CHECK_HIP_ERROR(synchronize(dA[i], hA[i], block_count));
             CHECK_HIP_ERROR(synchronize(dScaleA[i], hScaleA[i], block_count));
 #else
+#ifdef GOOGLE_TEST
+            GTEST_SKIP() << "MX data initialization requires HIPBLASLT_ENABLE_MXDATAGENERATOR=ON at build time";
+#else
             hipblaslt_cout << "MX data initialization requires HIPBLASLT_ENABLE_MXDATAGENERATOR=ON at build time"
                            << std::endl;
             return;
+#endif
 #endif
         }
         else
@@ -2861,20 +2882,26 @@ void testing_matmul_with_bias(const Arguments& arg,
                && arg.initialization != hipblaslt_initialization::rand_int
                && arg.initialization != hipblaslt_initialization::uniform_low_precision)
             {
+#ifdef GOOGLE_TEST
+                GTEST_SKIP() << "unsupported MX initialization: "
+                             << hipblaslt_initialization2string(arg.initialization);
+#else
                 hipblaslt_cout << "Initialization of microscaling data only allows hpl, trig_float, "
                                   "uniform_01, zero, norm_dist, rand_int or uniform_low_precision, not "
                                << hipblaslt_initialization2string(arg.initialization) << std::endl;
                 return;
+#endif
             }
             if(arg.algo_method == 1)
             {
+#ifdef GOOGLE_TEST
+                GTEST_SKIP() << "MX data types do not support algorithm \"all\"";
+#else
                 hipblaslt_cout << "MX data types do not support algorithm \"all\"" << std::endl;
                 return;
+#endif
             }
-            MXScaleLayout const scaleLayoutB
-                = arg.scaleB == hipblaslt_scaling_format::Block_32_UE8M0_32_8_EXT
-                      ? MXScaleLayout::GFX950
-                      : MXScaleLayout::None;
+            MXScaleLayout const scaleLayoutB = mxScaleLayoutForFormat(arg.scaleB);
             size_t             dataBatchBytesB    = (num_batches[i] > 1)
                                                         ? elementsToBytes(stride_b[i], TiB)
                                                         : 0;
@@ -2907,9 +2934,13 @@ void testing_matmul_with_bias(const Arguments& arg,
             CHECK_HIP_ERROR(synchronize(dB[i], hB[i], block_count));
             CHECK_HIP_ERROR(synchronize(dScaleB[i], hScaleB[i], block_count));
 #else
+#ifdef GOOGLE_TEST
+            GTEST_SKIP() << "MX data initialization requires HIPBLASLT_ENABLE_MXDATAGENERATOR=ON at build time";
+#else
             hipblaslt_cout << "MX data initialization requires HIPBLASLT_ENABLE_MXDATAGENERATOR=ON at build time"
                            << std::endl;
             return;
+#endif
 #endif
         }
         else

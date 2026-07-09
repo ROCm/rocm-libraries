@@ -14,8 +14,14 @@
 
 namespace
 {
+    // OCP FP4 E2M1 max-normal magnitude; the "uniform_low_precision" init
+    // method draws uniformly from [-FP4E2M1Max, FP4E2M1Max].
     constexpr double FP4E2M1Max = 6.0;
 
+    // Per-DTYPE integer range for the legacy "rand_int" init method, mirroring
+    // the hand-tuned ranges in `random_int<T>` (see hipblaslt_init_device.cpp).
+    // Each range fits inside the DTYPE's max normal so satConvertToType doesn't
+    // saturate.
     inline std::pair<int, int> randIntRangeFor(hipDataType dataType)
     {
         switch(static_cast<int>(dataType))
@@ -33,6 +39,10 @@ namespace
         }
     }
 
+    // Per-DTYPE std_dev for the legacy "norm_dist" init method. MX block scaling
+    // pre-normalises each block to ~[-1, 1], so on FP4 std=1 lands ~20% of
+    // samples in the round-to-zero bin; widening to 5 cuts that to ~4% (measured).
+    // Other MX widths are already tight enough at std=1.
     inline double normDistStdDevFor(hipDataType dataType)
     {
         switch(static_cast<int>(dataType))
@@ -122,6 +132,9 @@ namespace
                                     std::string_view const scaleInitMethod,
                                     hipDataType            dataType)
     {
+        // Optional decoupled scale init: when scaleInitMethod differs from the
+        // data init and canDecoupleScaleInit() approves the pairing, wire the
+        // scale generator to scaleInitMethod instead of mirroring data init.
         if(scaleInitMethod.empty())
             return;
 
@@ -136,6 +149,7 @@ namespace
 template <typename DT>
 std::vector<uint8_t> unpackData(std::vector<uint8_t> const& packedBytes, size_t elementCount)
 {
+    // Only F4 and F6 need to unpack data.
     static_assert(std::is_same_v<DT, DGen::ocp_e2m1_mxfp4>
                   || std::is_same_v<DT, DGen::ocp_e2m1_mxfp4_e5m3>
                   || std::is_same_v<DT, DGen::ocp_e2m1_mxfp4_e4m3>
@@ -179,6 +193,7 @@ std::vector<uint8_t> unpackData(std::vector<uint8_t> const& packedBytes, size_t 
 template <typename DT>
 void packData(std::vector<uint8_t> const& dataBytes, uint8_t* packedData)
 {
+    // Only F4 and F6 need to pack data.
     static_assert(std::is_same_v<DT, DGen::ocp_e2m1_mxfp4>
                   || std::is_same_v<DT, DGen::ocp_e2m1_mxfp4_e5m3>
                   || std::is_same_v<DT, DGen::ocp_e2m1_mxfp4_e4m3>
@@ -234,6 +249,19 @@ void packData(std::vector<uint8_t> const& dataBytes, uint8_t* packedData)
     }
 }
 
+/**
+ * @brief Align data with scale and return reference floats
+ *
+ * mxDataGenerator returns data and scale in which every consecutive
+ * 32 data share a scale (i.e., data 0-31 use scale 0, data 32-63 use
+ * scale 1, etc.). But when doing matrix multiplication with non-transpose
+ * matrix A or transpose matrix B, the data and scale are accessed in a
+ * different order (see the example in comment below). This function
+ * re-arranges the data to let the data use the correct scale.
+ * Note, the passed-in dataBytes will be changed due to the rearrangement.
+ *
+ * @return float values of generated MX type data aligned with scale
+ */
 template <typename DT>
 std::vector<float> getAlignedFloat(std::vector<uint8_t>&              dataBytes,
                                    std::vector<uint8_t> const&        scaleBytes,
@@ -244,10 +272,38 @@ std::vector<float> getAlignedFloat(std::vector<uint8_t>&              dataBytes,
     std::vector<float>   refFloat(sizes[0] * sizes[1], 0.0);
     std::vector<uint8_t> alignedDataBytes(dataBytes.size());
 
-    if(isMatrixA)
+    if(isMatrixA) // non-transpose
     {
         int M = sizes[0];
         int K = sizes[1];
+
+        // For example, assume matrix A is 128x128 and elementsPerMXBlock is 32.
+        // Before aligned,
+        //
+        //  mk     m     k       scale ID
+        //  0      0     0           0
+        //  1      1     0           1     (data at index 1 use scale 1 not 0)
+        //  2      2     0           2
+        //            ...
+        //  127   127    0          127
+        //
+        //  128    0     1           0
+        //  129    1     1           1
+        //            ...
+        //  255   127    1          127
+        //            ...
+        //
+        // To align data with scale,
+        //
+        //  mk     m     k       scale ID      data id
+        //  0      0     0           0            0
+        //  1      1     0           1           32
+        //  2      2     0           2           64
+        //            ...
+        // 127    127    0          127        4064 (127 x 32)
+        //
+        // We move data at index 32 to index 1 (because the index 1
+        // is using scale 1), data at index 64 to index 2, and so on.
 
 #pragma omp parallel for
         for(size_t mk = 0; mk < M * K; ++mk)
@@ -263,7 +319,7 @@ std::vector<float> getAlignedFloat(std::vector<uint8_t>&              dataBytes,
         }
         std::swap(dataBytes, alignedDataBytes);
     }
-    else
+    else // transpose matrixB
     {
         int N = sizes[0];
         int K = sizes[1];
@@ -308,6 +364,9 @@ std::vector<float> generateData(T                           dgen,
 
     std::vector<uint8_t> scaleBytes = dgen.getScaleBytes();
 
+    // Apply per-architecture scale swizzle on top of the natural-packed
+    // scales mxDataGenerator wrote. Layouts are mutually exclusive by
+    // construction (single enum), so no validation is needed here.
     size_t const scaleRows
         = (elementsPerMXBlock > 0) ? static_cast<size_t>(sizes[0]) / static_cast<size_t>(elementsPerMXBlock) : 0;
     size_t const scaleCols = static_cast<size_t>(sizes[1]);
@@ -336,9 +395,13 @@ std::vector<float> generateData(T                           dgen,
 
     if((isMatrixA && isTranspose) || (!isMatrixA && !isTranspose))
     {
+        // For (1) transposed matrixA and (2) non-transposed matrixB,
+        // return the reference float directly since they are aligned already.
         return dgen.getReferenceFloat();
     }
 
+    // For types smaller than 8-bit, mxDataGenerator returns packed data (i.e., two FP4 will be
+    // stored in a uint8_t), so unpacking the data is required before converting them to float
     if constexpr(std::is_same_v<DT, DGen::ocp_e5m2_mxfp8>
                  || std::is_same_v<DT, DGen::ocp_e4m3_mxfp8>)
     {
@@ -354,6 +417,7 @@ std::vector<float> generateData(T                           dgen,
         auto         unpackedDataBytes = unpackData<DT>(dataBytes, elementCount);
         auto ret               = getAlignedFloat<DT>(
             unpackedDataBytes, scaleBytes, {sizes[0], sizes[1]}, elementsPerMXBlock, isMatrixA);
+        // GPU expects the data are packed
         packData<DT>(unpackedDataBytes, static_cast<uint8_t*>(data));
         return ret;
     }
@@ -365,6 +429,7 @@ std::vector<float> generateData(T                           dgen,
         auto         unpackedDataBytes = unpackData<DT>(dataBytes, elementCount);
         auto ret               = getAlignedFloat<DT>(
             unpackedDataBytes, scaleBytes, {sizes[0], sizes[1]}, elementsPerMXBlock, isMatrixA);
+        // GPU expects the data are packed
         packData<DT>(unpackedDataBytes, static_cast<uint8_t*>(data));
         return ret;
     }
@@ -374,6 +439,13 @@ std::vector<float> generateData(T                           dgen,
     }
 }
 
+/**
+ * @brief CPU path for MX matrix/scale initialization.
+ *
+ * Generates packed data and scale bytes on the host, optionally applies
+ * arch-specific scale swizzle (GFX950 / GFX1250), and returns the
+ * dequantized reference float vector callers validate against.
+ */
 std::vector<float> generateMXInput(hipDataType            dataType,
                                    hipDataType            scaleType,
                                    void*                  data,

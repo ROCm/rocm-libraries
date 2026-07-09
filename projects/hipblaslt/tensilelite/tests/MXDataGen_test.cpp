@@ -262,21 +262,22 @@ INSTANTIATE_TEST_SUITE_P(
 // against.
 // ============================================================================
 
-namespace
+// Params: {dataType, initMethod}
+class MXDataGenModeTest
+    : public ::testing::TestWithParam<std::tuple<hipDataType, std::string>>
 {
+protected:
     // OCP FP4 E2M1 max-normal magnitude; "uniform_low_precision" draws data
     // uniformly from [-6, 6], so dequantized values must stay within that range.
-    constexpr float kFP4E2M1Max = 6.0f;
+    static constexpr float FP4E2M1Max = 6.0f;
 
     // Run generateMXInput for one (dtype, mode) and return the dequantized
-    // reference floats. The packed data buffer is sized per dtype: FP4 packs
-    // two elements per byte, FP8 is one byte per element. isMatrixA == isTranspose
-    // takes the aligned path, so getReferenceFloat() is returned directly.
-    std::vector<float> runMXMode(hipDataType            dataType,
-                                 std::string_view const initMethod,
-                                 uint64_t               rows    = 256,
-                                 uint64_t               cols    = 256,
-                                 int                    mxBlock = 32)
+    // reference floats. FP4 packs two elements per byte; FP8 is one byte per element.
+    static std::vector<float> runMXMode(hipDataType            dataType,
+                                        std::string_view const initMethod,
+                                        uint64_t               rows    = 256,
+                                        uint64_t               cols    = 256,
+                                        int                    mxBlock = 32)
     {
         const uint64_t numElements  = rows * cols;
         const size_t   bytesPerData = (dataType == (hipDataType)HIP_R_4F_E2M1)
@@ -303,12 +304,6 @@ namespace
                                -1.0f,
                                1.0f);
     }
-} // namespace
-
-// Params: {dataType, initMethod}
-class MXDataGenModeTest
-    : public ::testing::TestWithParam<std::tuple<hipDataType, std::string>>
-{
 };
 
 /** @brief Every wired init mode must generate without throwing and yield finite data. */
@@ -340,7 +335,7 @@ INSTANTIATE_TEST_SUITE_P(
 /** @brief "zero" mode must produce all-zero dequantized output. */
 TEST(MXDataGenInitMode, ZeroFP4IsAllZero)
 {
-    auto ref = runMXMode((hipDataType)HIP_R_4F_E2M1, "zero");
+    auto ref = MXDataGenModeTest::runMXMode((hipDataType)HIP_R_4F_E2M1, "zero");
     ASSERT_FALSE(ref.empty());
     for(float v : ref)
         EXPECT_EQ(v, 0.0f) << "zero mode produced non-zero value " << v;
@@ -348,7 +343,7 @@ TEST(MXDataGenInitMode, ZeroFP4IsAllZero)
 
 TEST(MXDataGenInitMode, ZeroFP8IsAllZero)
 {
-    auto ref = runMXMode(HIP_R_8F_E4M3, "zero");
+    auto ref = MXDataGenModeTest::runMXMode(HIP_R_8F_E4M3, "zero");
     ASSERT_FALSE(ref.empty());
     for(float v : ref)
         EXPECT_EQ(v, 0.0f) << "zero mode produced non-zero value " << v;
@@ -363,14 +358,14 @@ TEST(MXDataGenInitMode, ZeroFP8IsAllZero)
  */
 TEST(MXDataGenInitMode, UniformLowPrecisionFP4WithinRange)
 {
-    auto ref = runMXMode((hipDataType)HIP_R_4F_E2M1, "uniform_low_precision");
+    auto ref = MXDataGenModeTest::runMXMode((hipDataType)HIP_R_4F_E2M1, "uniform_low_precision");
     ASSERT_FALSE(ref.empty());
 
     bool anyNonZero = false;
     for(float v : ref)
     {
         EXPECT_TRUE(std::isfinite(v)) << "non-finite uniform_low_precision value " << v;
-        EXPECT_LE(std::abs(v), kFP4E2M1Max + 1e-3f)
+        EXPECT_LE(std::abs(v), MXDataGenModeTest::FP4E2M1Max + 1e-3f)
             << "uniform_low_precision value " << v << " outside [-6, 6]";
         anyNonZero = anyNonZero || (v != 0.0f);
     }

@@ -271,10 +271,8 @@ namespace DGen
     inline bool isConstantScaleInitMode(DataInitMode const& mode)
     {
         return std::holds_alternative<Ones>(mode) || std::holds_alternative<Zeros>(mode)
-               || std::holds_alternative<Twos>(mode) || std::holds_alternative<NegOnes>(mode)
-               || std::holds_alternative<MaxVals>(mode) || std::holds_alternative<DenormMins>(mode)
-               || std::holds_alternative<DenormMaxs>(mode) || std::holds_alternative<NaNs>(mode)
-               || std::holds_alternative<Infs>(mode);
+               || std::holds_alternative<Twos>(mode) || std::holds_alternative<MaxVals>(mode)
+               || std::holds_alternative<NaNs>(mode) || std::holds_alternative<Infs>(mode);
     }
 
     // Phase 1: random-like data init + constant scale init (e.g. Bounded + Ones).
