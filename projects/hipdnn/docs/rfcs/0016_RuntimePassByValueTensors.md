@@ -229,9 +229,11 @@ are correct after graph deserialize. cuDNN keeps its analogous
 [`graph_interface.h:1666-1673`](https://github.com/NVIDIA/cudnn-frontend/blob/c4ec01a28a26aa57021862de809cc257619f7516/include/cudnn_frontend/graph_interface.h#L1666-L1673));
 hipDNN keeps it in the tensor flatbuffer instead.
 
-**Backend attributes.** `HIPDNN_ATTR_TENSOR_VALUE_EXT` (1306) is kept as-is.
-The existing read-only `HIPDNN_ATTR_TENSOR_IS_BY_VALUE` (1307) — today
-derived from `value.type != NONE` — is **renamed**
+**Backend attributes.** `HIPDNN_ATTR_TENSOR_VALUE_EXT` (1306) is kept as-is;
+`HIPDNN_ATTR_TENSOR_CONSTANT_VALUE` is added as an alias for it (same integer
+`1306`, no wire change) to ease porting cuDNN code that queries the constant
+value by that name. The existing read-only `HIPDNN_ATTR_TENSOR_IS_BY_VALUE`
+(1307) — today derived from `value.type != NONE` — is **renamed**
 `HIPDNN_ATTR_TENSOR_IS_RUNTIME_PASS_BY_VALUE` and made **settable**, true
 only for the two runtime states; its wire identity stays the integer
 `1307`.
@@ -307,10 +309,9 @@ enum class ScalarType { RUNTIME_PARAM, COMPILE_TIME_CONST };
   flag true and **clears** any prior value (a deliberate divergence from
   cuDNN, whose `set_as_runtime_parameter` leaves `pass_by_value` set,
   [`graph_properties.h:394-400`](https://github.com/NVIDIA/cudnn-frontend/blob/c4ec01a28a26aa57021862de809cc257619f7516/include/cudnn_frontend/graph_properties.h#L394-L400)).
-- `set_is_pass_by_value(bool)` — retained (cuDNN has it,
+- `set_is_pass_by_value(bool)` — retained (cuDNN source:
   [`graph_properties.h:367-371`](https://github.com/NVIDIA/cudnn-frontend/blob/c4ec01a28a26aa57021862de809cc257619f7516/include/cudnn_frontend/graph_properties.h#L367-L371));
-  sets **only** the runtime flag and leaves any stored value untouched (unlike
-  `set_as_runtime_parameter()`, which clears it). So `true` on a value-carrying
+  sets **only** the runtime flag and leaves any stored value untouched. So `true` on a value-carrying
   tensor yields runtime-with-default; `true` with no value yields user-supplied.
 
 **Getters** (derived from the runtime flag + value presence).
@@ -392,6 +393,10 @@ value is a **host pointer** to the scalar:
 float scaleValue = 0.125f;
 variantPack[scale->get_uid()] = &scaleValue;   // host pointer
 ```
+
+A compile-time constant or runtime-with-default carries a baked value and
+is **not** placed in the variant pack; supplying one for such a UID is
+rejected at execute ([§4.9](#49-execute-time-variant-pack-filter)).
 
 ### 4.6 Provider contract
 
@@ -602,10 +607,7 @@ the UIDs of pure user-supplied scalars, **rejecting** any variant-pack entry
 whose UID carries a baked value 
 — such a value can never be overridden today, so supplying one is a caller
 error and `Graph::execute()` returns an error rather than silently ignoring
-it. (cuDNN instead silently ignores the entry: its execute template never
-reads a user pointer for a baked/pass-by-value UID,
-[`graph_interface.h:2140-2153`](https://github.com/NVIDIA/cudnn-frontend/blob/c4ec01a28a26aa57021862de809cc257619f7516/include/cudnn_frontend/graph_interface.h#L2140-L2153).)
-A runtime-with-default tensor still requires `1.2.0` (its flag is set).
+it. A runtime-with-default tensor still requires `1.2.0` (its flag is set).
 
 **Compiled-plan path.** On the compiled-plan path `deserializeBackendPlan`
 reconstructs no per-tensor attributes
@@ -616,6 +618,11 @@ loses its baked default and degrades to user-supplied semantics — the caller m
 supply the value at execute. cuDNN avoids this: its serialize bundles
 `pass_by_values` with the plan JSON, so the value survives.
 This limitation is explicit and covered by test ([§9](#9-testing-plan)).
+The forwarded-UID error check ([§4.9](#49-execute-time-variant-pack-filter))
+does not run on this path: with no per-tensor attributes reconstructed, the
+core cannot identify which UIDs carry a baked value, so a variant-pack entry
+is accepted as an ordinary binding. A provider MAY reject an unexpected
+override from its own payload; the core does not.
 
 **Usage guidance.** Prefer one of the two endpoints: `set_value` /
 `set_compile_time_constant` for a build-known value or `set_as_runtime_parameter`
@@ -678,21 +685,20 @@ fused-constant-vs-execute-time surface
 The plain scalar constructor is a deliberate divergence (see below); the
 rest of the surface mirrors cuDNN name-for-name.
 
-**Divergences (decisions, not gaps)**:
+**Divergences**:
 
 1. hipDNN stores a single `is_runtime_pass_by_value` flag (runtime-only)
    and a single re-used value member, whereas cuDNN stores an
    `is_pass_by_value` umbrella plus a separate `has_compile_time_constant`
    and two value members (`pass_by_value`, `compile_time_constant_value`,
    [`graph_properties.h:118-123`](https://github.com/NVIDIA/cudnn-frontend/blob/c4ec01a28a26aa57021862de809cc257619f7516/include/cudnn_frontend/graph_properties.h#L118-L123)).
-   The frontend getters (`get_is_pass_by_value`, `get_compile_time_constant`,
-   `get_has_compile_time_constant`) are derived from the runtime flag + value
+   The frontend getters are derived from the runtime flag + value
    presence for porting parity.
 2. `set_as_runtime_parameter()` **clears** any prior value, whereas cuDNN
    leaves `pass_by_value` set
    ([`graph_properties.h:394-400`](https://github.com/NVIDIA/cudnn-frontend/blob/c4ec01a28a26aa57021862de809cc257619f7516/include/cudnn_frontend/graph_properties.h#L394-L400)). We could later match this API by collecting an optional default value for the `set_as_runtime_parameter()` route without any added plugin changes.
 3. hipDNN's plain scalar constructor produces a compile-time constant, not
-   cuDNN's runtime type-2 (divergence above) — a deliberate choice to keep
+   cuDNN's runtime type-2 — a deliberate choice to keep
    existing `TensorAttributes(v)` scalar graphs on the baseline `1.0.0`.
 
 ### 5.2 Reuse the variant-pack pointer map
