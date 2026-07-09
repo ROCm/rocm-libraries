@@ -28,15 +28,17 @@ if(ROCKE_BUILD_PYENV)
     find_package(Python3 COMPONENTS Interpreter REQUIRED)
 
     set(ROCKE_PYENV_DIR "${CMAKE_BINARY_DIR}/rocke-pyenv")
-    set(ROCKE_PYENV_STAMP "${CMAKE_BINARY_DIR}/rocke-pyenv.stamp"
-        CACHE FILEPATH "Stamp file gating the rocke editable Python env")
-    # venv puts the interpreter under Scripts/ on Windows, bin/ elsewhere.
+    set(ROCKE_PYENV_STAMP "${CMAKE_BINARY_DIR}/rocke-pyenv.stamp")
     if(WIN32)
-        set(_ROCKE_PYENV_PYTHON_REL "Scripts/python.exe")
+        # The venv mirrors the invoking interpreter's filename (python.exe or
+        # python3.exe depending on the installation).  Derive it from
+        # Python3_EXECUTABLE so the path always matches what venv actually creates.
+        cmake_path(GET Python3_EXECUTABLE FILENAME _rocke_py_name)
+        set(_rocke_pyenv_python "${ROCKE_PYENV_DIR}/Scripts/${_rocke_py_name}")
     else()
-        set(_ROCKE_PYENV_PYTHON_REL "bin/python")
+        set(_rocke_pyenv_python "${ROCKE_PYENV_DIR}/bin/python")
     endif()
-    set(ROCKE_PYENV_PYTHON "${ROCKE_PYENV_DIR}/${_ROCKE_PYENV_PYTHON_REL}"
+    set(ROCKE_PYENV_PYTHON "${_rocke_pyenv_python}"
         CACHE FILEPATH "Interpreter for the rocke editable Python env")
 endif()
 
@@ -53,7 +55,7 @@ if(ROCKE_BUILD_PYENV)
         OUTPUT "${ROCKE_PYENV_STAMP}"
         # --system-site-packages so the venv inherits the system ROCm torch
         # (it is never reinstalled here).
-        COMMAND "${Python3_EXECUTABLE}" -m venv --system-site-packages "${ROCKE_PYENV_DIR}"
+        COMMAND "${Python3_EXECUTABLE}" -m venv --system-site-packages --copies "${ROCKE_PYENV_DIR}"
         COMMAND "${ROCKE_PYENV_PYTHON}" -m pip install -q --upgrade pip "setuptools>=61" wheel
         # editable_mode=compat writes a .pth pointing at the source root, so even
         # newly added modules are importable without reinstalling.
