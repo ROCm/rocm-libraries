@@ -16,6 +16,13 @@ using hipdnn_flatbuffers_sdk::data_objects::DataType;
 using hipdnn_flatbuffers_sdk::data_objects::NodeAttributes;
 using hipdnn_flatbuffers_sdk::data_objects::PointwiseAttributes;
 
+namespace
+{
+
+// Generic IO-tensor validation shared by every unary pointwise activation:
+// non-virtual, FLOAT/HALF only, matching dtypes, rank in [1, 4], matching element counts.
+// `opName` is used only to make exception/log messages activation-specific
+// (e.g. "Relu plan builder: ...").
 void checkTensorsSupported(
     const PointwiseAttributes& attrs,
     const std::unordered_map<int64_t,
@@ -55,11 +62,22 @@ void checkTensorsSupported(
 
     const auto* inputDims = inputTensor.dims();
     const auto* outputDims = outputTensor.dims();
+    const auto* inputStrides = inputTensor.strides();
+    const auto* outputStrides = outputTensor.strides();
 
-    if(inputDims == nullptr || outputDims == nullptr)
+    if(inputDims == nullptr || outputDims == nullptr || inputStrides == nullptr
+       || outputStrides == nullptr)
     {
         throw hipdnn_plugin_sdk::HipdnnPluginException(
-            HIPDNN_PLUGIN_STATUS_BAD_PARAM, opName + " plan builder: tensor dims are null");
+            HIPDNN_PLUGIN_STATUS_BAD_PARAM,
+            opName + " plan builder: tensor dims or strides are null");
+    }
+
+    if(inputDims->size() != inputStrides->size() || outputDims->size() != outputStrides->size())
+    {
+        throw hipdnn_plugin_sdk::HipdnnPluginException(
+            HIPDNN_PLUGIN_STATUS_BAD_PARAM,
+            opName + " plan builder: tensor dims and strides size mismatch");
     }
 
     const auto rank = inputDims->size();
@@ -91,6 +109,8 @@ void checkTensorsSupported(
             opName + " plan builder: input and output tensors must have the same element count");
     }
 }
+
+} // namespace
 
 bool isSupported(const hipdnn_flatbuffers_sdk::flatbuffer_utilities::IGraph& opGraph,
                  const std::string& opName,

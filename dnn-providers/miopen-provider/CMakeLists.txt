@@ -185,6 +185,7 @@ add_library(
     engines/MiopenEngine.cpp
     engines/plans/MiopenUnaryActivationPlan.cpp
     engines/plans/MiopenUnaryActivationChecks.cpp
+    engines/plans/MiopenUnaryActivationPlanBuilder.cpp
     engines/plans/MiopenTanhApplicabilityChecks.cpp
     engines/plans/MiopenSigmoidApplicabilityChecks.cpp
     engines/plans/MiopenReluApplicabilityChecks.cpp

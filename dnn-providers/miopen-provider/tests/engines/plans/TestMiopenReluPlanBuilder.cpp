@@ -10,7 +10,8 @@
 #include <hipdnn_test_sdk/utilities/TestUtilities.hpp>
 
 #include "HipdnnMiopenHandle.hpp"
-#include "engines/plans/MiopenReluPlanBuilder.hpp"
+#include "engines/plans/MiopenReluApplicabilityChecks.hpp"
+#include "engines/plans/MiopenUnaryActivationPlanBuilder.hpp"
 
 using namespace miopen_plugin;
 using namespace hipdnn_test_sdk::utilities;
@@ -269,7 +270,7 @@ protected:
         _dummyHandle = std::make_unique<HipdnnMiopenHandle>();
     }
 
-    MiopenReluPlanBuilder _planBuilder;
+    MiopenUnaryActivationPlanBuilder _planBuilder{"Relu", relu_applicability::isReluSupported};
     std::unique_ptr<HipdnnMiopenHandle> _dummyHandle;
     MockEngineConfig _mockEngineConfig;
 };

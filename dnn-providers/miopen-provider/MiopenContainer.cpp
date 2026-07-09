@@ -7,9 +7,10 @@
 #include "engines/plans/MiopenBatchnormPlanBuilder.hpp"
 #include "engines/plans/MiopenConvFwdBiasActivPlanBuilder.hpp"
 #include "engines/plans/MiopenConvPlanBuilder.hpp"
-#include "engines/plans/MiopenReluPlanBuilder.hpp"
-#include "engines/plans/MiopenSigmoidPlanBuilder.hpp"
-#include "engines/plans/MiopenTanhPlanBuilder.hpp"
+#include "engines/plans/MiopenReluApplicabilityChecks.hpp"
+#include "engines/plans/MiopenSigmoidApplicabilityChecks.hpp"
+#include "engines/plans/MiopenTanhApplicabilityChecks.hpp"
+#include "engines/plans/MiopenUnaryActivationPlanBuilder.hpp"
 
 #include <hipdnn_data_sdk/utilities/EngineNames.hpp>
 #include <hipdnn_plugin_sdk/PluginLogging.hpp>
@@ -51,9 +52,12 @@ const std::vector<MiopenContainer::EngineDefinition>& MiopenContainer::getEngine
              engine->addPlanBuilder(std::make_unique<MiopenBatchnormFwdTrainingPlanBuilder>());
              engine->addPlanBuilder(std::make_unique<MiopenConvPlanBuilder>(false));
              engine->addPlanBuilder(std::make_unique<MiopenConvFwdBiasActivPlanBuilder>(false));
-             engine->addPlanBuilder(std::make_unique<MiopenReluPlanBuilder>());
-             engine->addPlanBuilder(std::make_unique<MiopenTanhPlanBuilder>());
-             engine->addPlanBuilder(std::make_unique<MiopenSigmoidPlanBuilder>());
+             engine->addPlanBuilder(std::make_unique<MiopenUnaryActivationPlanBuilder>(
+                 "Relu", relu_applicability::isReluSupported));
+             engine->addPlanBuilder(std::make_unique<MiopenUnaryActivationPlanBuilder>(
+                 "Tanh", tanh_applicability::isTanhSupported));
+             engine->addPlanBuilder(std::make_unique<MiopenUnaryActivationPlanBuilder>(
+                 "Sigmoid", sigmoid_applicability::isSigmoidSupported));
              return engine;
          }},
 

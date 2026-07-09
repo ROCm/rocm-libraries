@@ -9,7 +9,8 @@
 #include <hipdnn_test_sdk/utilities/TestUtilities.hpp>
 
 #include "HipdnnMiopenHandle.hpp"
-#include "engines/plans/MiopenSigmoidPlanBuilder.hpp"
+#include "engines/plans/MiopenSigmoidApplicabilityChecks.hpp"
+#include "engines/plans/MiopenUnaryActivationPlanBuilder.hpp"
 
 using namespace miopen_plugin;
 using namespace hipdnn_test_sdk::utilities;
@@ -214,7 +215,8 @@ protected:
         _dummyHandle = std::make_unique<HipdnnMiopenHandle>();
     }
 
-    MiopenSigmoidPlanBuilder _planBuilder;
+    MiopenUnaryActivationPlanBuilder _planBuilder{"Sigmoid",
+                                                  sigmoid_applicability::isSigmoidSupported};
     std::unique_ptr<HipdnnMiopenHandle> _dummyHandle;
     MockEngineConfig _mockEngineConfig;
 };

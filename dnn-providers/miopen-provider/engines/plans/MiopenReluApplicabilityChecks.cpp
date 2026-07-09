@@ -12,10 +12,9 @@ namespace miopen_plugin::relu_applicability
 using hipdnn_flatbuffers_sdk::data_objects::PointwiseAttributes;
 using hipdnn_flatbuffers_sdk::data_objects::PointwiseMode;
 
-// NOTE: this mirrors the branch order/fallthrough of
-// MiopenUtils::mapPointwiseModeToMiopenActivation exactly.
-// function accepts it and executes it as a Standard ReLU. Keeping this check structurally
-// identical to the mapping function prevents that kind of drift.
+// NOTE: Keep this check's branch order identical to MiopenUtils::mapPointwiseModeToMiopenActivation.
+// If this check accepts a parameter combination that the mapping cannot represent, MIOpen may
+// silently execute the op as a standard ReLU, leading to incorrect results.
 void checkReluModeSupported(const PointwiseAttributes& attrs)
 {
     if(attrs.operation() != PointwiseMode::RELU_FWD)

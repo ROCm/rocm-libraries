@@ -9,7 +9,8 @@
 #include <hipdnn_test_sdk/utilities/TestUtilities.hpp>
 
 #include "HipdnnMiopenHandle.hpp"
-#include "engines/plans/MiopenTanhPlanBuilder.hpp"
+#include "engines/plans/MiopenTanhApplicabilityChecks.hpp"
+#include "engines/plans/MiopenUnaryActivationPlanBuilder.hpp"
 
 using namespace miopen_plugin;
 using namespace hipdnn_test_sdk::utilities;
@@ -214,7 +215,7 @@ protected:
         _dummyHandle = std::make_unique<HipdnnMiopenHandle>();
     }
 
-    MiopenTanhPlanBuilder _planBuilder;
+    MiopenUnaryActivationPlanBuilder _planBuilder{"Tanh", tanh_applicability::isTanhSupported};
     std::unique_ptr<HipdnnMiopenHandle> _dummyHandle;
     MockEngineConfig _mockEngineConfig;
 };
