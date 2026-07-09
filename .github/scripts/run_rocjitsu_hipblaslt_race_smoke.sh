@@ -110,7 +110,7 @@ mkdir -p "${RACE_REPORT_DIR}"
 
 export ROCM_PATH
 export PATH="${ROCM_PATH}/bin:${ROCM_PATH}/lib/llvm/bin:${PATH}"
-export LD_LIBRARY_PATH="${ROCM_PATH}/lib:${ROCM_PATH}/lib/llvm/lib:${LD_LIBRARY_PATH:-}"
+export LD_LIBRARY_PATH="${ROCM_PATH}/lib:${ROCM_PATH}/lib/rocm_sysdeps/lib:${ROCM_PATH}/lib/llvm/lib:${LD_LIBRARY_PATH:-}"
 export PYTHONPATH="${TENSILELITE_ROOT}${PYTHONPATH:+:${PYTHONPATH}}"
 
 echo "ROCM_PATH=${ROCM_PATH}"

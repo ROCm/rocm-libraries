@@ -244,7 +244,7 @@ jobs:
       - name: Verify TensileLite Python environment
         run: |
           export PYTHONPATH="${ROCM_PATH}/share/hipblaslt/tensilelite${PYTHONPATH:+:${PYTHONPATH}}"
-          export LD_LIBRARY_PATH="${ROCM_PATH}/lib:${ROCM_PATH}/lib/llvm/lib${LD_LIBRARY_PATH:+:${LD_LIBRARY_PATH}}"
+          export LD_LIBRARY_PATH="${ROCM_PATH}/lib:${ROCM_PATH}/lib/rocm_sysdeps/lib:${ROCM_PATH}/lib/llvm/lib${LD_LIBRARY_PATH:+:${LD_LIBRARY_PATH}}"
           "${VENV_DIR}/bin/python" - <<'PY'
           import filelock
           import joblib
