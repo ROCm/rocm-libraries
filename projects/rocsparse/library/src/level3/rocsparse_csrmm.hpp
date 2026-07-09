@@ -144,21 +144,31 @@ namespace rocsparse
                                        const void*               csr_col_ind,
                                        size_t*                   buffer_size);
 
-    rocsparse_status csrmm_analysis(rocsparse_handle          handle,
-                                    rocsparse_operation       trans_A,
-                                    rocsparse_csrmm_alg       alg,
-                                    int64_t                   m,
-                                    int64_t                   n,
-                                    int64_t                   k,
-                                    int64_t                   nnz,
-                                    const rocsparse_mat_descr descr,
-                                    rocsparse_datatype        csr_val_datatype,
-                                    const void*               csr_val,
-                                    rocsparse_indextype       csr_row_ptr_indextype,
-                                    const void*               csr_row_ptr,
-                                    rocsparse_indextype       csr_col_ind_indextype,
-                                    const void*               csr_col_ind,
-                                    void*                     temp_buffer);
+    // When \p alg is the format default, csrmm_analysis resolves it to a concrete
+    // load-balanced algorithm: it computes the matrix's line-nnz profile from
+    // \p csr_row_ptr into \p profile (a non-op if already known) and applies
+    // csrmm_select_default_alg with \p is_batched. Passing a null \p profile (or
+    // an explicit \p alg) skips the auto-selection and runs the analysis for the
+    // given algorithm unchanged. The reduction inside compute_line_nnz_profile
+    // synchronizes, so this must only be called on the non-capturing analysis
+    // stage.
+    rocsparse_status csrmm_analysis(rocsparse_handle             handle,
+                                    rocsparse_operation          trans_A,
+                                    rocsparse_csrmm_alg          alg,
+                                    int64_t                      m,
+                                    int64_t                      n,
+                                    int64_t                      k,
+                                    int64_t                      nnz,
+                                    const rocsparse_mat_descr    descr,
+                                    rocsparse_datatype           csr_val_datatype,
+                                    const void*                  csr_val,
+                                    rocsparse_indextype          csr_row_ptr_indextype,
+                                    const void*                  csr_row_ptr,
+                                    rocsparse_indextype          csr_col_ind_indextype,
+                                    const void*                  csr_col_ind,
+                                    bool                         is_batched,
+                                    rocsparse::line_nnz_profile* profile,
+                                    void*                        temp_buffer);
 
     // Auto-selection of a load-balanced CSR SpMM algorithm for the format
     // default (rocsparse_csrmm_alg_default). The expensive structural input -
@@ -191,41 +201,48 @@ namespace rocsparse
                                   const rocsparse::line_nnz_profile& profile,
                                   rocsparse_csrmm_alg&               alg);
 
-    rocsparse_status csrmm(rocsparse_handle          handle,
-                           rocsparse_operation       trans_A,
-                           rocsparse_operation       trans_B,
-                           rocsparse_csrmm_alg       alg,
-                           int64_t                   m,
-                           int64_t                   n,
-                           int64_t                   k,
-                           int64_t                   nnz,
-                           int64_t                   batch_count_A,
-                           int64_t                   offsets_batch_stride_A,
-                           int64_t                   columns_values_batch_stride_A,
-                           rocsparse_datatype        alpha_datatype,
-                           const void*               alpha,
-                           const rocsparse_mat_descr descr,
-                           rocsparse_datatype        csr_val_datatype,
-                           const void*               csr_val,
-                           rocsparse_indextype       csr_row_ptr_indextype,
-                           const void*               csr_row_ptr,
-                           rocsparse_indextype       csr_col_ind_indextype,
-                           const void*               csr_col_ind,
-                           rocsparse_datatype        dense_B_datatype,
-                           const void*               dense_B,
-                           int64_t                   ldb,
-                           int64_t                   batch_count_B,
-                           int64_t                   batch_stride_B,
-                           rocsparse_order           order_B,
-                           rocsparse_datatype        beta_datatype,
-                           const void*               beta,
-                           rocsparse_datatype        dense_C_datatype,
-                           void*                     dense_C,
-                           int64_t                   ldc,
-                           int64_t                   batch_count_C,
-                           int64_t                   batch_stride_C,
-                           rocsparse_order           order_C,
-                           void*                     temp_buffer,
-                           bool                      force_conj_A);
+    // When \p alg is the format default and \p profile is non-null and known,
+    // csrmm resolves it to the same load-balanced algorithm chosen at analysis by
+    // re-applying csrmm_select_default_alg from the cached \p profile (the batch
+    // flag is derived from batch_count_A/B/C). This is a pure, launch-free O(1)
+    // step, so the capture-sensitive compute stage stays free of kernels and
+    // synchronizations. A null/unknown \p profile keeps the row-split default.
+    rocsparse_status csrmm(rocsparse_handle                   handle,
+                           rocsparse_operation                trans_A,
+                           rocsparse_operation                trans_B,
+                           rocsparse_csrmm_alg                alg,
+                           int64_t                            m,
+                           int64_t                            n,
+                           int64_t                            k,
+                           int64_t                            nnz,
+                           int64_t                            batch_count_A,
+                           int64_t                            offsets_batch_stride_A,
+                           int64_t                            columns_values_batch_stride_A,
+                           rocsparse_datatype                 alpha_datatype,
+                           const void*                        alpha,
+                           const rocsparse_mat_descr          descr,
+                           rocsparse_datatype                 csr_val_datatype,
+                           const void*                        csr_val,
+                           rocsparse_indextype                csr_row_ptr_indextype,
+                           const void*                        csr_row_ptr,
+                           rocsparse_indextype                csr_col_ind_indextype,
+                           const void*                        csr_col_ind,
+                           rocsparse_datatype                 dense_B_datatype,
+                           const void*                        dense_B,
+                           int64_t                            ldb,
+                           int64_t                            batch_count_B,
+                           int64_t                            batch_stride_B,
+                           rocsparse_order                    order_B,
+                           rocsparse_datatype                 beta_datatype,
+                           const void*                        beta,
+                           rocsparse_datatype                 dense_C_datatype,
+                           void*                              dense_C,
+                           int64_t                            ldc,
+                           int64_t                            batch_count_C,
+                           int64_t                            batch_stride_C,
+                           rocsparse_order                    order_C,
+                           const rocsparse::line_nnz_profile* profile,
+                           void*                              temp_buffer,
+                           bool                               force_conj_A);
 
 }

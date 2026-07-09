@@ -288,19 +288,14 @@ namespace rocsparse
             const int64_t n = mat_C->cols;
             const int64_t k = mat_A->cols;
 
-            // Auto-select a load-balanced CSR SpMM algorithm for row-skewed
-            // matrices when the caller left the algorithm on default. The choice
-            // is a deterministic function of one cached structural quantity (the
-            // longest row's non-zero count), computed once on the preprocess
-            // (analysis) stage - a non-capturing stage where device work is
-            // expected - and cached on the descriptor. The pure O(1) selector
-            // then re-derives the same algorithm on the compute stage without
-            // launching any kernel on the capture-sensitive path.
-            //
-            // buffer_size runs before the profile exists, so it cannot know the
-            // eventual choice; it sizes for the largest auto-selectable kernel
-            // (nnz-split). row-split needs no buffer, so that is a safe upper
-            // bound for whichever kernel preprocess/compute end up using.
+            // The load-balanced default-algorithm auto-selection lives in the
+            // csrmm layer (csrmm_buffer_size / csrmm_analysis / csrmm): buffer_size
+            // sizes conservatively for the largest auto-selectable kernel, analysis
+            // computes and caches the structural line-nnz profile and resolves the
+            // default from it, and compute re-derives the same choice from the
+            // cached profile without launching a kernel. The profile is owned by
+            // the spmat descriptor and passed in by pointer so the reduction runs
+            // once, on the non-capturing analysis stage.
             const bool is_batched
                 = (mat_A->batch_count > 1) || (mat_B->batch_count > 1) || (mat_C->batch_count > 1);
 
@@ -308,15 +303,9 @@ namespace rocsparse
             {
             case rocsparse_spmm_stage_buffer_size:
             {
-                rocsparse_csrmm_alg size_alg = csrmm_alg;
-                if(csrmm_alg == rocsparse_csrmm_alg_default && trans_A == rocsparse_operation_none
-                   && !is_batched)
-                {
-                    size_alg = rocsparse_csrmm_alg_nnz_split;
-                }
                 RETURN_IF_ROCSPARSE_ERROR(rocsparse::csrmm_buffer_size(handle,
                                                                        trans_A,
-                                                                       size_alg,
+                                                                       csrmm_alg,
                                                                        m,
                                                                        n,
                                                                        k,
@@ -334,18 +323,6 @@ namespace rocsparse
             }
             case rocsparse_spmm_stage_preprocess:
             {
-                RETURN_IF_ROCSPARSE_ERROR(
-                    (rocsparse::compute_line_nnz_profile(handle,
-                                                         mat_A->row_type,
-                                                         m,
-                                                         mat_A->nnz,
-                                                         mat_A->const_row_data,
-                                                         mat_A->line_profile)));
-                rocsparse::csrmm_select_default_alg(trans_A,
-                                                    is_batched,
-                                                    handle->properties.multiProcessorCount,
-                                                    mat_A->line_profile,
-                                                    csrmm_alg);
                 RETURN_IF_ROCSPARSE_ERROR(rocsparse::csrmm_analysis(handle,
                                                                     trans_A,
                                                                     csrmm_alg,
@@ -360,16 +337,13 @@ namespace rocsparse
                                                                     mat_A->const_row_data,
                                                                     mat_A->col_type,
                                                                     mat_A->const_col_data,
+                                                                    is_batched,
+                                                                    &mat_A->line_profile,
                                                                     temp_buffer));
                 return rocsparse_status_success;
             }
             case rocsparse_spmm_stage_compute:
             {
-                rocsparse::csrmm_select_default_alg(trans_A,
-                                                    is_batched,
-                                                    handle->properties.multiProcessorCount,
-                                                    mat_A->line_profile,
-                                                    csrmm_alg);
                 RETURN_IF_ROCSPARSE_ERROR(rocsparse::csrmm(handle,
                                                            trans_A,
                                                            trans_B,
@@ -404,6 +378,7 @@ namespace rocsparse
                                                            mat_C->batch_count,
                                                            mat_C->batch_stride,
                                                            mat_C->order,
+                                                           &mat_A->line_profile,
                                                            temp_buffer,
                                                            false));
                 return rocsparse_status_success;
@@ -420,40 +395,22 @@ namespace rocsparse
             const int64_t n = mat_C->cols;
             const int64_t k = mat_A->cols;
 
-            // Same default-algorithm auto-selection as the CSR branch. CSC is
-            // delegated to csrmm with the operation flipped (a non-transposed
-            // CSC multiply is a transposed CSR multiply over the column-pointer
-            // array, and vice versa). The load-balanced kernels only apply to
-            // the non-transposed csrmm path, i.e. a transposed CSC multiply, and
-            // the structural skew that matters is then the longest CSC column -
-            // its column-pointer array (const_col_data / col_type, length k+1)
-            // acting as the implicit CSR row pointer. The csrmm helpers gate on
-            // that effective operation, so the none case is left unchanged.
-            //
-            // As in the CSR branch, the profile is computed on the preprocess
-            // (analysis) stage and cached; buffer_size runs first and therefore
-            // sizes conservatively for the nnz-split kernel whenever the default
-            // algorithm could be upgraded (the effective csrmm operation is
-            // non-transposed and the multiply is single-batch).
-            const rocsparse_operation csr_trans_A = (trans_A == rocsparse_operation_none)
-                                                        ? rocsparse_operation_transpose
-                                                        : rocsparse_operation_none;
-            const bool                is_batched
+            // As in the CSR branch, the default-algorithm auto-selection lives in
+            // the cscmm layer (cscmm_buffer_size / cscmm_analysis / cscmm), which
+            // handles the CSC->csrmm operation flip, builds the profile from the
+            // column-pointer array, and gates the upgrade on the effective csrmm
+            // operation. The profile is owned by the spmat descriptor and passed
+            // in by pointer.
+            const bool is_batched
                 = (mat_A->batch_count > 1) || (mat_B->batch_count > 1) || (mat_C->batch_count > 1);
 
             switch(stage)
             {
             case rocsparse_spmm_stage_buffer_size:
             {
-                rocsparse_csrmm_alg size_alg = csrmm_alg;
-                if(csrmm_alg == rocsparse_csrmm_alg_default
-                   && csr_trans_A == rocsparse_operation_none && !is_batched)
-                {
-                    size_alg = rocsparse_csrmm_alg_nnz_split;
-                }
                 RETURN_IF_ROCSPARSE_ERROR(rocsparse::cscmm_buffer_size(handle,
                                                                        trans_A,
-                                                                       size_alg,
+                                                                       csrmm_alg,
                                                                        m,
                                                                        n,
                                                                        k,
@@ -471,18 +428,6 @@ namespace rocsparse
             }
             case rocsparse_spmm_stage_preprocess:
             {
-                RETURN_IF_ROCSPARSE_ERROR(
-                    (rocsparse::compute_line_nnz_profile(handle,
-                                                         mat_A->col_type,
-                                                         k,
-                                                         mat_A->nnz,
-                                                         mat_A->const_col_data,
-                                                         mat_A->line_profile)));
-                rocsparse::csrmm_select_default_alg(csr_trans_A,
-                                                    is_batched,
-                                                    handle->properties.multiProcessorCount,
-                                                    mat_A->line_profile,
-                                                    csrmm_alg);
                 RETURN_IF_ROCSPARSE_ERROR(rocsparse::cscmm_analysis(handle,
                                                                     trans_A,
                                                                     csrmm_alg,
@@ -497,16 +442,13 @@ namespace rocsparse
                                                                     mat_A->const_col_data,
                                                                     mat_A->row_type,
                                                                     mat_A->const_row_data,
+                                                                    is_batched,
+                                                                    &mat_A->line_profile,
                                                                     temp_buffer));
                 return rocsparse_status_success;
             }
             case rocsparse_spmm_stage_compute:
             {
-                rocsparse::csrmm_select_default_alg(csr_trans_A,
-                                                    is_batched,
-                                                    handle->properties.multiProcessorCount,
-                                                    mat_A->line_profile,
-                                                    csrmm_alg);
                 RETURN_IF_ROCSPARSE_ERROR(rocsparse::cscmm(handle,
                                                            trans_A,
                                                            trans_B,
@@ -541,6 +483,7 @@ namespace rocsparse
                                                            mat_C->batch_count,
                                                            mat_C->batch_stride,
                                                            mat_C->order,
+                                                           &mat_A->line_profile,
                                                            temp_buffer));
                 return rocsparse_status_success;
             }

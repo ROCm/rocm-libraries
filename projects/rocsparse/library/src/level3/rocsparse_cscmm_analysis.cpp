@@ -1,6 +1,6 @@
 /*! \file */
 /* ************************************************************************
- * Copyright (C) 2025 Advanced Micro Devices, Inc. All rights Reserved.
+ * Copyright (C) 2025-2026 Advanced Micro Devices, Inc. All rights Reserved.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -122,8 +122,8 @@ namespace rocsparse
         else
         {
 #ifndef NDEBUG
-            std::cout << "invalid precision configuration: "
-                      << "i_type: " << rocsparse::enum_utils::to_string(i_type_) << std::endl
+            std::cout << "invalid precision configuration: " << "i_type: "
+                      << rocsparse::enum_utils::to_string(i_type_) << std::endl
                       << ", j_type: " << rocsparse::enum_utils::to_string(j_type_) << std::endl
                       << ", a_type: " << rocsparse::enum_utils::to_string(a_type_) << std::endl;
 
@@ -143,8 +143,8 @@ namespace rocsparse
 #endif
 
             std::stringstream sstr;
-            sstr << "invalid precision configuration: "
-                 << "i_type: " << rocsparse::enum_utils::to_string(i_type_)
+            sstr << "invalid precision configuration: " << "i_type: "
+                 << rocsparse::enum_utils::to_string(i_type_)
                  << ", j_type: " << rocsparse::enum_utils::to_string(j_type_)
                  << ", a_type: " << rocsparse::enum_utils::to_string(a_type_);
 
@@ -157,23 +157,42 @@ namespace rocsparse
     }
 }
 
-rocsparse_status rocsparse::cscmm_analysis(rocsparse_handle          handle,
-                                           rocsparse_operation       trans_A,
-                                           rocsparse_csrmm_alg       alg,
-                                           int64_t                   m,
-                                           int64_t                   n,
-                                           int64_t                   k,
-                                           int64_t                   nnz,
-                                           const rocsparse_mat_descr descr,
-                                           rocsparse_datatype        csc_val_datatype,
-                                           const void*               csc_val,
-                                           rocsparse_indextype       csc_col_ptr_indextype,
-                                           const void*               csc_col_ptr,
-                                           rocsparse_indextype       csc_row_ind_indextype,
-                                           const void*               csc_row_ind,
-                                           void*                     temp_buffer)
+rocsparse_status rocsparse::cscmm_analysis(rocsparse_handle             handle,
+                                           rocsparse_operation          trans_A,
+                                           rocsparse_csrmm_alg          alg,
+                                           int64_t                      m,
+                                           int64_t                      n,
+                                           int64_t                      k,
+                                           int64_t                      nnz,
+                                           const rocsparse_mat_descr    descr,
+                                           rocsparse_datatype           csc_val_datatype,
+                                           const void*                  csc_val,
+                                           rocsparse_indextype          csc_col_ptr_indextype,
+                                           const void*                  csc_col_ptr,
+                                           rocsparse_indextype          csc_row_ind_indextype,
+                                           const void*                  csc_row_ind,
+                                           bool                         is_batched,
+                                           rocsparse::line_nnz_profile* profile,
+                                           void*                        temp_buffer)
 {
     ROCSPARSE_ROUTINE_TRACE;
+
+    // A non-transposed CSC multiply is delegated to csrmm as a transposed
+    // multiply (and vice versa); the load-balanced kernels only apply to the
+    // non-transposed csrmm path. Build the profile from the column-pointer array
+    // (length k+1, acting as the effective CSR row pointer) and select with the
+    // flipped operation, mirroring the CSR analysis stage.
+    if(alg == rocsparse_csrmm_alg_default && profile != nullptr)
+    {
+        RETURN_IF_ROCSPARSE_ERROR(rocsparse::compute_line_nnz_profile(
+            handle, csc_col_ptr_indextype, k, nnz, csc_col_ptr, *profile));
+        const rocsparse_operation effective_trans_A = (trans_A == rocsparse_operation_none)
+                                                          ? rocsparse_operation_transpose
+                                                          : rocsparse_operation_none;
+        rocsparse::csrmm_select_default_alg(
+            effective_trans_A, is_batched, handle->properties.multiProcessorCount, *profile, alg);
+    }
+
     rocsparse::cscmm_analysis_t f;
     RETURN_IF_ROCSPARSE_ERROR(rocsparse::cscmm_analysis_find(
         &f, csc_col_ptr_indextype, csc_row_ind_indextype, csc_val_datatype));

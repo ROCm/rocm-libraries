@@ -292,8 +292,8 @@ namespace rocsparse
         else
         {
 #ifndef NDEBUG
-            std::cout << "invalid precision configuration: "
-                      << "t_type: " << rocsparse::enum_utils::to_string(t_type_) << std::endl
+            std::cout << "invalid precision configuration: " << "t_type: "
+                      << rocsparse::enum_utils::to_string(t_type_) << std::endl
                       << ", i_type: " << rocsparse::enum_utils::to_string(i_type_) << std::endl
                       << ", j_type: " << rocsparse::enum_utils::to_string(j_type_) << std::endl
                       << ", a_type: " << rocsparse::enum_utils::to_string(a_type_) << std::endl
@@ -322,8 +322,8 @@ namespace rocsparse
 #endif
 
             std::stringstream sstr;
-            sstr << "invalid precision configuration: "
-                 << "t_type: " << rocsparse::enum_utils::to_string(t_type_)
+            sstr << "invalid precision configuration: " << "t_type: "
+                 << rocsparse::enum_utils::to_string(t_type_)
                  << ", i_type: " << rocsparse::enum_utils::to_string(i_type_)
                  << ", j_type: " << rocsparse::enum_utils::to_string(j_type_)
                  << ", a_type: " << rocsparse::enum_utils::to_string(a_type_)
@@ -339,44 +339,58 @@ namespace rocsparse
     }
 }
 
-rocsparse_status rocsparse::cscmm(rocsparse_handle          handle,
-                                  rocsparse_operation       trans_A,
-                                  rocsparse_operation       trans_B,
-                                  rocsparse_csrmm_alg       alg,
-                                  int64_t                   m,
-                                  int64_t                   n,
-                                  int64_t                   k,
-                                  int64_t                   nnz,
-                                  int64_t                   batch_count_A,
-                                  int64_t                   offsets_batch_stride_A,
-                                  int64_t                   rows_values_batch_stride_A,
-                                  rocsparse_datatype        alpha_datatype,
-                                  const void*               alpha,
-                                  const rocsparse_mat_descr descr,
-                                  rocsparse_datatype        csc_val_datatype,
-                                  const void*               csc_val,
-                                  rocsparse_indextype       csc_col_ptr_indextype,
-                                  const void*               csc_col_ptr,
-                                  rocsparse_indextype       csc_row_ind_indextype,
-                                  const void*               csc_row_ind,
-                                  rocsparse_datatype        dense_B_datatype,
-                                  const void*               dense_B,
-                                  int64_t                   ldb,
-                                  int64_t                   batch_count_B,
-                                  int64_t                   batch_stride_B,
-                                  rocsparse_order           order_B,
-                                  rocsparse_datatype        beta_datatype,
-                                  const void*               beta,
-                                  rocsparse_datatype        dense_C_datatype,
-                                  void*                     dense_C,
-                                  int64_t                   ldc,
-                                  int64_t                   batch_count_C,
-                                  int64_t                   batch_stride_C,
-                                  rocsparse_order           order_C,
-                                  void*                     temp_buffer)
+rocsparse_status rocsparse::cscmm(rocsparse_handle                   handle,
+                                  rocsparse_operation                trans_A,
+                                  rocsparse_operation                trans_B,
+                                  rocsparse_csrmm_alg                alg,
+                                  int64_t                            m,
+                                  int64_t                            n,
+                                  int64_t                            k,
+                                  int64_t                            nnz,
+                                  int64_t                            batch_count_A,
+                                  int64_t                            offsets_batch_stride_A,
+                                  int64_t                            rows_values_batch_stride_A,
+                                  rocsparse_datatype                 alpha_datatype,
+                                  const void*                        alpha,
+                                  const rocsparse_mat_descr          descr,
+                                  rocsparse_datatype                 csc_val_datatype,
+                                  const void*                        csc_val,
+                                  rocsparse_indextype                csc_col_ptr_indextype,
+                                  const void*                        csc_col_ptr,
+                                  rocsparse_indextype                csc_row_ind_indextype,
+                                  const void*                        csc_row_ind,
+                                  rocsparse_datatype                 dense_B_datatype,
+                                  const void*                        dense_B,
+                                  int64_t                            ldb,
+                                  int64_t                            batch_count_B,
+                                  int64_t                            batch_stride_B,
+                                  rocsparse_order                    order_B,
+                                  rocsparse_datatype                 beta_datatype,
+                                  const void*                        beta,
+                                  rocsparse_datatype                 dense_C_datatype,
+                                  void*                              dense_C,
+                                  int64_t                            ldc,
+                                  int64_t                            batch_count_C,
+                                  int64_t                            batch_stride_C,
+                                  rocsparse_order                    order_C,
+                                  const rocsparse::line_nnz_profile* profile,
+                                  void*                              temp_buffer)
 {
 
     ROCSPARSE_ROUTINE_TRACE;
+
+    // Re-derive the analysis-time choice from the cached profile with the flipped
+    // operation (see cscmm_analysis). Pure and launch-free.
+    if(alg == rocsparse_csrmm_alg_default && profile != nullptr)
+    {
+        const bool is_batched = (batch_count_A > 1) || (batch_count_B > 1) || (batch_count_C > 1);
+        const rocsparse_operation effective_trans_A = (trans_A == rocsparse_operation_none)
+                                                          ? rocsparse_operation_transpose
+                                                          : rocsparse_operation_none;
+        rocsparse::csrmm_select_default_alg(
+            effective_trans_A, is_batched, handle->properties.multiProcessorCount, *profile, alg);
+    }
+
     rocsparse::cscmm_t f;
     RETURN_IF_ROCSPARSE_ERROR(rocsparse::cscmm_find(&f,
                                                     alpha_datatype,

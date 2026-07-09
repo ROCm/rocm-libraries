@@ -42,11 +42,11 @@ Tests:
   indextype: *i32i32_i64i32_i64i64
   precision: *single_double_precisions_complex_real
 
-# Default-algorithm auto-selection: an extremely row-skewed matrix must resolve
-# the default to the load-balanced nnz-split kernel, while an extremely uniform
-# matrix must keep row-split. The check is on the requested temp-buffer size (a
-# deterministic, architecture-independent proxy for the selected kernel) and so
-# builds its own matrices, ignoring the index/precision below.
+# Default-algorithm auto-selection. Drives the full buffer_size -> preprocess ->
+# compute pipeline on an extremely row-skewed and an extremely uniform matrix and
+# checks the default result against the analytic product and both explicit
+# load-balanced kernels. The test builds its own matrices, so it ignores the
+# index/precision below.
 - name: spmm_csr_extra
   category: quick
   function: spmm_csr_extra
