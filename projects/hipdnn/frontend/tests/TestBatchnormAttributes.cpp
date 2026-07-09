@@ -473,39 +473,39 @@ TEST(TestBatchnormAttributes, LogicalAndStrictEquality)
     EXPECT_TRUE(attr1.logicallyEquals(attr2));
 
     // Test Custom Peer Stats Vector Matrix Structural Differences
-    auto peerTensor1_attr1 = std::make_shared<hipdnn_frontend::graph::TensorAttributes>();
-    peerTensor1_attr1->set_uid(12)
+    auto peerTensor1Attr1 = std::make_shared<hipdnn_frontend::graph::TensorAttributes>();
+    peerTensor1Attr1->set_uid(12)
         .set_name("Peer1")
         .set_data_type(hipdnn_frontend::DataType::FLOAT)
         .set_dim({1, 2, 3, 4})
         .set_stride({5, 6, 7, 8});
 
-    auto peerTensor2_attr1 = std::make_shared<hipdnn_frontend::graph::TensorAttributes>();
-    peerTensor2_attr1->set_uid(13)
+    auto peerTensor2Attr1 = std::make_shared<hipdnn_frontend::graph::TensorAttributes>();
+    peerTensor2Attr1->set_uid(13)
         .set_name("Peer2")
         .set_data_type(hipdnn_frontend::DataType::FLOAT)
         .set_dim({1, 2, 3, 4})
         .set_stride({5, 6, 7, 8});
 
-    auto peerTensor1_attr2 = std::make_shared<hipdnn_frontend::graph::TensorAttributes>();
-    peerTensor1_attr2->set_uid(12)
+    auto peerTensor1Attr2 = std::make_shared<hipdnn_frontend::graph::TensorAttributes>();
+    peerTensor1Attr2->set_uid(12)
         .set_name("Peer1")
         .set_data_type(hipdnn_frontend::DataType::FLOAT)
         .set_dim({1, 2, 3, 4})
         .set_stride({5, 6, 7, 8});
 
-    auto peerTensor2_attr2 = std::make_shared<hipdnn_frontend::graph::TensorAttributes>();
-    peerTensor2_attr2->set_uid(13)
+    auto peerTensor2Attr2 = std::make_shared<hipdnn_frontend::graph::TensorAttributes>();
+    peerTensor2Attr2->set_uid(13)
         .set_name("Peer2")
         .set_data_type(hipdnn_frontend::DataType::FLOAT)
         .set_dim({1, 2, 3, 4})
         .set_stride({5, 6, 7, 8});
 
-    attr1.set_peer_stats({peerTensor1_attr1, peerTensor2_attr1});
-    attr2.set_peer_stats({peerTensor1_attr2}); // Sizing mismatch
+    attr1.set_peer_stats({peerTensor1Attr1, peerTensor2Attr1});
+    attr2.set_peer_stats({peerTensor1Attr2}); // Sizing mismatch
     EXPECT_FALSE(attr1.logicallyEquals(attr2));
 
-    attr2.set_peer_stats({peerTensor1_attr2, peerTensor2_attr2});
+    attr2.set_peer_stats({peerTensor1Attr2, peerTensor2Attr2});
     EXPECT_TRUE(attr1.logicallyEquals(attr2));
 
     EXPECT_TRUE(attr1 == attr2);
@@ -533,7 +533,7 @@ TEST(TestBatchnormAttributes, LogicalAndStrictEquality)
         .set_dim({1, 2, 3, 4})
         .set_stride({5, 6, 7, 8});
 
-    attr2.set_peer_stats({peerTensor1_attr2, logicalMatchPeer2});
+    attr2.set_peer_stats({peerTensor1Attr2, logicalMatchPeer2});
 
     // Expecting: peer_stats custom strictEqualsImpl fails, but logicallyEqualsImpl passes
     EXPECT_FALSE(attr1 == attr2);

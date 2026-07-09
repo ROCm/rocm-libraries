@@ -220,11 +220,11 @@ protected:
     // Default fallback hooks for derived classes that do NOT have extra fields
     bool logicallyEqualsImpl([[maybe_unused]] const DerivedT& other) const
     {
-        return true;
+        return false;
     }
     bool strictEqualsImpl([[maybe_unused]] const DerivedT& other) const
     {
-        return true;
+        return false;
     }
 
     /**
