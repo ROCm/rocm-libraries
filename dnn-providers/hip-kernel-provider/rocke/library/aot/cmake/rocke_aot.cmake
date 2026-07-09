@@ -115,14 +115,20 @@ else()
     message(STATUS "rocKE AOT build: libamd_comgr from ${_ROCKE_COMGR_LIB}")
 endif()
 
-# libamd_comgr has a DT_NEEDED on libclang-cpp / libLLVM, which live in the
-# toolchain's LLVM lib dir (TheRock layout: <root>/lib/llvm/lib) -- a *different*
-# directory than comgr itself (<root>/lib), and typically a different staged
-# prefix (comgr is a BUILD_DEP; the LLVM libs come from the amd-llvm toolchain).
-# Ask the compiler for its resource dir (.../lib/llvm/lib/clang/<ver>) and derive
-# the LLVM lib dir from it so the AOT tool's dlopen(libamd_comgr) resolves those
-# deps. Mirrors TheRock's own resource-dir probe in therock_subproject_dep_provider.
-set(_ROCKE_COMGR_DEP_LIBDIR "")
+# libamd_comgr's dependency closure (libclang-cpp, libLLVM, and the vendored
+# rocm_sysdeps libs such as librocm_sysdeps_z) lives in the compiler toolchain,
+# not next to comgr. At build time comgr is a BUILD_DEP staged on its own, so its
+# $ORIGIN rpath siblings (llvm/lib, rocm_sysdeps/lib) are absent, while those
+# libs live in the amd-llvm toolchain stage. Rather than chase individual deps,
+# forward the whole toolchain lib set so dlopen(libamd_comgr) resolves the entire
+# closure -- and keeps resolving as comgr gains LLVM/sysdep deps, since they all
+# land in these same dirs.
+#
+# Derive the toolchain lib root from the compiler resource dir
+# (.../lib/llvm/lib/clang/<ver>): llvm/lib is two levels up, the toolchain lib
+# root two more, and rocm_sysdeps/lib sits beside llvm under it. Mirrors
+# TheRock's own resource-dir probe in therock_subproject_dep_provider.
+set(_ROCKE_COMGR_DEP_LIBDIRS "")
 if(NOT "${_ROCKE_COMGR_LIB}" STREQUAL "" AND CMAKE_CXX_COMPILER)
     execute_process(
         COMMAND "${CMAKE_CXX_COMPILER}" --print-resource-dir
@@ -131,17 +137,31 @@ if(NOT "${_ROCKE_COMGR_LIB}" STREQUAL "" AND CMAKE_CXX_COMPILER)
         RESULT_VARIABLE _ROCKE_CLANG_RD_RESULT
     )
     if(_ROCKE_CLANG_RD_RESULT EQUAL 0 AND _ROCKE_CLANG_RESOURCE_DIR)
-        # .../lib/llvm/lib/clang/<ver> -> .../lib/llvm/lib
-        get_filename_component(_ROCKE_LLVM_LIB_DIR
-            "${_ROCKE_CLANG_RESOURCE_DIR}" DIRECTORY)
-        get_filename_component(_ROCKE_LLVM_LIB_DIR
-            "${_ROCKE_LLVM_LIB_DIR}" DIRECTORY)
-        file(GLOB _ROCKE_CLANG_CPP "${_ROCKE_LLVM_LIB_DIR}/libclang-cpp.so*")
-        if(_ROCKE_CLANG_CPP)
-            set(_ROCKE_COMGR_DEP_LIBDIR "${_ROCKE_LLVM_LIB_DIR}")
+        # .../lib/llvm/lib/clang/<ver> -> .../lib/llvm/lib -> .../lib
+        get_filename_component(_ROCKE_LLVM_LIB_DIR "${_ROCKE_CLANG_RESOURCE_DIR}" DIRECTORY)
+        get_filename_component(_ROCKE_LLVM_LIB_DIR "${_ROCKE_LLVM_LIB_DIR}" DIRECTORY)
+        get_filename_component(_ROCKE_TOOLCHAIN_LIB_DIR "${_ROCKE_LLVM_LIB_DIR}" DIRECTORY)
+        get_filename_component(_ROCKE_TOOLCHAIN_LIB_DIR "${_ROCKE_TOOLCHAIN_LIB_DIR}" DIRECTORY)
+        get_filename_component(_ROCKE_LLVM_ROOT "${_ROCKE_LLVM_LIB_DIR}" DIRECTORY)
+        get_filename_component(_ROCKE_TOOLCHAIN_ROOT "${_ROCKE_TOOLCHAIN_LIB_DIR}" DIRECTORY)
+        # Probe both layouts (POSIX keeps deps in lib/, Windows beside exes in
+        # bin/) and keep whichever exist: LLVM/clang libs, vendored rocm_sysdeps,
+        # comgr-adjacent libs, and the toolchain bin.
+        foreach(_dir
+                "${_ROCKE_LLVM_LIB_DIR}"
+                "${_ROCKE_LLVM_ROOT}/bin"
+                "${_ROCKE_TOOLCHAIN_LIB_DIR}/rocm_sysdeps/lib"
+                "${_ROCKE_TOOLCHAIN_LIB_DIR}/rocm_sysdeps/bin"
+                "${_ROCKE_TOOLCHAIN_LIB_DIR}"
+                "${_ROCKE_TOOLCHAIN_ROOT}/bin")
+            if(IS_DIRECTORY "${_dir}")
+                list(APPEND _ROCKE_COMGR_DEP_LIBDIRS "${_dir}")
+            endif()
+        endforeach()
+        list(REMOVE_DUPLICATES _ROCKE_COMGR_DEP_LIBDIRS)
+        if(_ROCKE_COMGR_DEP_LIBDIRS)
             message(STATUS
-                "rocKE AOT build: libamd_comgr deps (libclang-cpp) from "
-                "${_ROCKE_COMGR_DEP_LIBDIR}")
+                "rocKE AOT build: libamd_comgr dep dirs ${_ROCKE_COMGR_DEP_LIBDIRS}")
         endif()
     endif()
 endif()
@@ -206,21 +226,32 @@ function(rocke_client_aot_pythonpath_environment OUT_VAR)
         "PYTHONDONTWRITEBYTECODE=1"
     )
     # Forward the explicit libamd_comgr path (compile_kernel honors ROCKE_COMGR_LIB)
-    # and prepend comgr's dir plus the toolchain LLVM lib dir (libclang-cpp /
-    # libLLVM) to LD_LIBRARY_PATH so the loader resolves comgr's NEEDED libs. Only
-    # when comgr was resolved; otherwise the resolver's fallback applies.
+    # and comgr's whole dependency-dir set so the AOT tool's dlopen resolves the
+    # full chain on both platforms. POSIX: fold the dirs into LD_LIBRARY_PATH for
+    # the dynamic loader. Windows: forward them in ROCKE_COMGR_DEP_DIRS, which the
+    # comgr loader feeds to os.add_dll_directory (PATH is not a reliable dependent
+    # DLL search path under Python's secure DLL loading). Only when comgr resolved.
     if(NOT "${_ROCKE_COMGR_LIB}" STREQUAL "")
         get_filename_component(_ROCKE_COMGR_LIB_DIR "${_ROCKE_COMGR_LIB}" DIRECTORY)
         list(APPEND _ROCKE_CLIENT_AOT_ENV "ROCKE_COMGR_LIB=${_ROCKE_COMGR_LIB}")
-        set(_ROCKE_LDLIB_DIRS "${_ROCKE_COMGR_LIB_DIR}")
-        if(NOT "${_ROCKE_COMGR_DEP_LIBDIR}" STREQUAL "")
-            list(APPEND _ROCKE_LDLIB_DIRS "${_ROCKE_COMGR_DEP_LIBDIR}")
+        set(_ROCKE_DEP_DIRS "${_ROCKE_COMGR_LIB_DIR}" ${_ROCKE_COMGR_DEP_LIBDIRS})
+        list(REMOVE_DUPLICATES _ROCKE_DEP_DIRS)
+        if(WIN32)
+            # Escape the ';' list separator so cmake -E env passes a single
+            # ';'-joined string (os.pathsep on Windows).
+            string(REPLACE ";" "\\;" _ROCKE_DEP_DIRS_ENV "${_ROCKE_DEP_DIRS}")
+        else()
+            list(JOIN _ROCKE_DEP_DIRS ":" _ROCKE_DEP_DIRS_ENV)
         endif()
-        if(DEFINED ENV{LD_LIBRARY_PATH} AND NOT "$ENV{LD_LIBRARY_PATH}" STREQUAL "")
-            list(APPEND _ROCKE_LDLIB_DIRS "$ENV{LD_LIBRARY_PATH}")
+        list(APPEND _ROCKE_CLIENT_AOT_ENV "ROCKE_COMGR_DEP_DIRS=${_ROCKE_DEP_DIRS_ENV}")
+        if(NOT WIN32)
+            set(_ROCKE_LDLIB_DIRS ${_ROCKE_DEP_DIRS})
+            if(DEFINED ENV{LD_LIBRARY_PATH} AND NOT "$ENV{LD_LIBRARY_PATH}" STREQUAL "")
+                list(APPEND _ROCKE_LDLIB_DIRS "$ENV{LD_LIBRARY_PATH}")
+            endif()
+            list(JOIN _ROCKE_LDLIB_DIRS ":" _ROCKE_LDLIB_PATH)
+            list(APPEND _ROCKE_CLIENT_AOT_ENV "LD_LIBRARY_PATH=${_ROCKE_LDLIB_PATH}")
         endif()
-        list(JOIN _ROCKE_LDLIB_DIRS ":" _ROCKE_LDLIB_PATH)
-        list(APPEND _ROCKE_CLIENT_AOT_ENV "LD_LIBRARY_PATH=${_ROCKE_LDLIB_PATH}")
     endif()
     set(${OUT_VAR} "${_ROCKE_CLIENT_AOT_ENV}" PARENT_SCOPE)
 endfunction()
