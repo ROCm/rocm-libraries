@@ -224,10 +224,7 @@ std::tuple<Transformer*, Config, float*> build_transformer(const char *checkpoin
 
       // Initialize RunState
       // Use placement-new so we don't try to assign to unique_ptrs that think they already point at something
-      // Workaround: HIP compiler bug with `new (ptr) T(func())` on device memory.
-      // Receive into a local first, then move into the target.
-      RunState local = malloc_run_state(&t->config);
-      new (&t->state) RunState(std::move(local));
+      new (&t->state) RunState(malloc_run_state(&t->config));
     }, transformer, weights_ptr, shared_weights
   ).join();
 
