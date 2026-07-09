@@ -48,7 +48,7 @@
 #include <thrust/system/cuda/detail/util.h>
 #include <thrust/type_traits/is_contiguous_iterator.h>
 
-#include <cuda/std/__type_traits/void_t.h>
+#include <cuda/std/type_traits>
 
 #include <nv/target>
 
@@ -233,7 +233,7 @@ struct has_enough_shmem_impl<V, A, S, typelist<>>
   {
     value = V
   };
-  using type = ::cuda::std::conditional_t<value, _THRUST_STD::true_type, _THRUST_STD::false_type>;
+  using type = ::cuda::std::conditional_t<value, ::cuda::std::true_type, ::cuda::std::false_type>;
 };
 
 template <class Agent, size_t MAX_SHMEM>
@@ -296,7 +296,7 @@ struct return_Plan
 
 template <class Agent>
 struct get_plan
-    : ::cuda::std::conditional<has_Plan<Agent>::value, return_Plan<Agent>, thrust::detail::identity_<AgentPlan>>::type
+    : ::cuda::std::conditional<has_Plan<Agent>::value, return_Plan<Agent>, ::cuda::std::type_identity<AgentPlan>>::type
 {};
 
 // returns AgentPlan corresponding to a given ptx version
