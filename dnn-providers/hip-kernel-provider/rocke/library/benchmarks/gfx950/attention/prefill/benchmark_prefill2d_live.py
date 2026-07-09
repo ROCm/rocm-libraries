@@ -583,19 +583,71 @@ def main() -> int:
 
 
 def _run_prod(shape, data, sw, is_fp8, bench, *, warmup, iters, backend="auto"):
-    """Time the production dispatcher run_unified_attention_torch."""
+    """Time the production path via the platform dispatcher.
+
+    Builds an :class:`~dispatch.attention.AttentionRequest` and calls
+    :func:`~dispatch.attention.dispatch_attention` to select the registered
+    kernel candidate (2d-tiled or 3d split-KV).  The resolved path drives
+    ``run_unified_attention_torch`` so the benchmark exercises exactly the same
+    code path as the production provider.
+    """
     import torch
-    from kernels import (
-        run_unified_attention_torch,
-        supports_native_unified_attention_tiled,
-        supports_native_unified_attention_3d_tiled,
-    )
-    from kernels.common.attention_unified import _tiled_spec_from_problem
+    from dispatch.attention import AttentionRequest, dispatch_attention
+    from kernels import run_unified_attention_torch
+    from kernels.common.attention_unified import _resolve_attention_arch
     from rocke.runtime import synchronize_and_release, time_launches
+
+    arch = _resolve_attention_arch()
+    dtype_str = "bf16" if shape.q_dtype == "torch.bfloat16" else "fp16"
+    req = AttentionRequest(
+        batch=shape.num_seqs,
+        nhead_q=shape.num_query_heads,
+        nhead_k=shape.num_kv_heads,
+        seqlen_q=shape.max_seqlen_q,
+        seqlen_k=shape.max_seqlen_k,
+        hdim_q=shape.head_size,
+        hdim_v=shape.head_size,
+        arch=arch,
+        dtype=dtype_str,
+        sliding_window=sw,
+        kv_block_size=shape.block_size,
+        num_sms=bench.num_sms,
+    )
+
+    # Force path when caller requests a specific one (e.g. backend="3d").
+    if backend != "auto":
+        req = AttentionRequest(**{**req.__dict__, "algorithm": f"unified_{backend}"})
+
+    try:
+        result = dispatch_attention(req)
+        dispatched_path = result.spec.path  # "2d" or "3d"
+    except ValueError:
+        # No registered candidate supports this shape — fall back to scalar label.
+        dispatched_path = backend if backend != "auto" else "scalar"
+
+    run_backend = "tiled" if dispatched_path == "2d" else dispatched_path
 
     problem = bench._problem(shape, sw, is_fp8)
     out = torch.empty_like(data["query"])
     hip_stream = _bench_stream_handle()
+
+    # Report the tiling-level kernel name (includes num_warps / tile_size / etc.)
+    # so the benchmark output is comparable to the pre-dispatcher baseline.
+    if run_backend == "tiled":
+        from kernels import supports_native_unified_attention_tiled
+        from kernels.common.attention_unified import _tiled_spec_from_problem
+
+        ok_t, _ = supports_native_unified_attention_tiled(problem)
+        instance_name = (
+            _tiled_spec_from_problem(problem).kernel_name() if ok_t else "scalar"
+        )
+    elif run_backend == "3d":
+        from kernels import supports_native_unified_attention_3d_tiled
+
+        ok_3d, _ = supports_native_unified_attention_3d_tiled(problem)
+        instance_name = "3d" if ok_3d else "scalar"
+    else:
+        instance_name = "scalar"
 
     def call_once():
         run_unified_attention_torch(
@@ -611,28 +663,12 @@ def _run_prod(shape, data, sw, is_fp8, bench, *, warmup, iters, backend="auto"):
             softcap=float(shape.softcap),
             sinks=data["sinks"],
             alibi_slopes=data["alibi_slopes"],
-            backend=backend,
+            backend=run_backend,
             stream=hip_stream,
         )
 
     ms = time_launches(call_once, warmup=warmup, iters=iters, stream=hip_stream)
     synchronize_and_release(hip_stream)
-
-    prefer_2d = backend == "auto" and problem.select_path() == "2d"
-    if backend == "3d" or (backend == "auto" and not prefer_2d):
-        ok_3d, _ = supports_native_unified_attention_3d_tiled(problem)
-        if ok_3d:
-            instance_name = "3d"
-        else:
-            instance_name = "scalar"
-    elif backend in ("tiled", "auto"):
-        ok_t, _ = supports_native_unified_attention_tiled(problem)
-        instance_name = (
-            _tiled_spec_from_problem(problem).kernel_name() if ok_t else "scalar"
-        )
-    else:
-        instance_name = "scalar"
-
     return out, ms, instance_name
 
 
