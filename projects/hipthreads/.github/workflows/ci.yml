@@ -51,7 +51,7 @@ jobs:
       run: |
         source .venv/bin/activate
         pip install \
-          --index-url https://rocm.nightlies.amd.com/v2/gfx120X-all/ \
+          --index-url https://rocm.nightlies.amd.com/whl-multi-arch/ \
           "rocm[libraries,devel]"
         rocm-sdk init
         
