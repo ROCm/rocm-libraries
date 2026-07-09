@@ -10,9 +10,10 @@ on:
   pull_request:
     types: [opened, synchronize, reopened]
     paths:
+      - '.github/workflows/hipdnn-python-wheel-ci.yml'
+      - '.github/workflows/hipdnn-superbuild-ci.yml'
       - 'projects/hipdnn/**'
       - 'dnn-providers/**'
-
 permissions:
   contents: read
 
@@ -29,6 +30,7 @@ jobs:
         shell: bash
     env:
       BUILD_DIR: B:\build
+      HIPDNN_ARTIFACT_DIR: B:\hipdnn-artifacts
       VENV_PATH: B:\rocm_wheels
       GPU_TARGET: gfx1151
       # Multi-arch nightly device extra (rocm[...,device-<DEVICE_TARGET>]).
@@ -131,6 +133,36 @@ jobs:
       #- name: Run tests
       #  run: ctest --test-dir build --output-on-failure
 
+      - name: Patch ROCm SDK with superbuild outputs
+        shell: pwsh
+        run: cmake --install build --prefix $env:ROCM_SDK_PATH
+
+      - name: Verify patched ROCm SDK
+        shell: pwsh
+        run: |
+          $requiredPaths = @(
+            (Join-Path $env:ROCM_SDK_PATH "lib\cmake\hip\hip-config.cmake"),
+            (Join-Path $env:ROCM_SDK_PATH "lib\cmake\hipdnn_backend\hipdnn_backendConfig.cmake")
+          )
+          foreach ($path in $requiredPaths) {
+            if (-not (Test-Path $path)) { throw "Missing expected ROCm SDK file: $path" }
+          }
+
+      - name: Package patched ROCm SDK artifact
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Force $env:HIPDNN_ARTIFACT_DIR | Out-Null
+          tar -C $env:ROCM_SDK_PATH -czf (Join-Path $env:HIPDNN_ARTIFACT_DIR 'hipdnn-rocm-sdk-windows.tar.gz') .
+          if ($LASTEXITCODE -ne 0) { throw "Failed to package patched ROCm SDK" }
+
+      - name: Upload patched ROCm SDK artifact
+        uses: actions/upload-artifact@bbbca2ddaa5d8feaa63e36b76fdaad77386f024f # v7.0.0
+        with:
+          name: hipdnn-rocm-sdk-windows-${{ env.GPU_TARGET }}
+          path: ${{ env.HIPDNN_ARTIFACT_DIR }}\hipdnn-rocm-sdk-windows.tar.gz
+          if-no-files-found: error
+          retention-days: 3
+
   hipdnn-linux-superbuild:
     name: HipDNN Linux Superbuild
     runs-on: azure-linux-scale-rocm
@@ -138,6 +170,7 @@ jobs:
       GPU_TARGET: gfx94X-dcgpu
       # Multi-arch nightly device extra (rocm[...,device-<DEVICE_TARGET>]).
       DEVICE_TARGET: gfx942
+      HIPDNN_ARTIFACT_DIR: ${{ runner.temp }}/hipdnn-artifacts
     steps:
       - name: Runner health status
         run: |
@@ -216,6 +249,29 @@ jobs:
 
       - name: Run tests
         run: ctest --test-dir build --output-on-failure
+
+      - name: Patch ROCm SDK with superbuild outputs
+        run: cmake --install build --prefix "$ROCM_SDK_PATH"
+
+      - name: Verify patched ROCm SDK
+        run: |
+          set -euo pipefail
+          test -f "$ROCM_SDK_PATH/lib/cmake/hip/hip-config.cmake"
+          test -f "$ROCM_SDK_PATH/lib/cmake/hipdnn_backend/hipdnn_backendConfig.cmake"
+
+      - name: Package patched ROCm SDK artifact
+        run: |
+          set -euo pipefail
+          mkdir -p "$HIPDNN_ARTIFACT_DIR"
+          tar -C "$ROCM_SDK_PATH" -czf "$HIPDNN_ARTIFACT_DIR/hipdnn-rocm-sdk-linux.tar.gz" .
+
+      - name: Upload patched ROCm SDK artifact
+        uses: actions/upload-artifact@bbbca2ddaa5d8feaa63e36b76fdaad77386f024f # v7.0.0
+        with:
+          name: hipdnn-rocm-sdk-linux-${{ env.GPU_TARGET }}
+          path: ${{ env.HIPDNN_ARTIFACT_DIR }}/hipdnn-rocm-sdk-linux.tar.gz
+          if-no-files-found: error
+          retention-days: 3
 
   hipdnn_build_summary:
     name: hipDNN Superbuild Summary

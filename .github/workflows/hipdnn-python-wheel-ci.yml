@@ -4,34 +4,59 @@
 name: hipDNN Python Wheel CI
 
 on:
-  pull_request:
-    paths:
-      - ".github/workflows/hipdnn-python-wheel-ci.yml"
-      - "projects/hipdnn/**"
+  workflow_run:
+    workflows: ["hipDNN Superbuild CI"]
+    types: [completed]
   workflow_dispatch:
+    inputs:
+      superbuild_run_id:
+        description: "Completed hipDNN Superbuild CI run ID to download artifacts from"
+        required: true
+        type: string
 
 permissions:
+  actions: read
   contents: read
 
 concurrency:
-  group: ${{ github.workflow }}-${{ github.event.number || github.sha }}
+  group: ${{ github.workflow }}-${{ github.event_name == 'workflow_run' && github.event.workflow_run.head_sha || github.sha }}
   cancel-in-progress: true
 
 jobs:
   linux-python-wheel:
     name: Linux Python Wheel
+    if: ${{ github.event_name == 'workflow_dispatch' || github.event.workflow_run.conclusion == 'success' }}
     runs-on: azure-linux-scale-rocm
     env:
       BUILD_DIR: build/hipdnn-python
       GPU_TARGET: gfx94X-dcgpu
+      ROCM_SDK_PATH: ${{ runner.temp }}/rocm-sdk
+      SUPERBUILD_ARTIFACT_DIR: ${{ runner.temp }}/hipdnn-rocm-sdk-artifact
+      SUPERBUILD_RUN_ID: ${{ github.event_name == 'workflow_run' && github.event.workflow_run.id || inputs.superbuild_run_id }}
       VENV_PATH: ${{ runner.temp }}/rocm_wheels
     steps:
       - name: Checkout repository
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
         with:
+          repository: ${{ github.event_name == 'workflow_run' && github.event.workflow_run.head_repository.full_name || github.repository }}
+          ref: ${{ github.event_name == 'workflow_run' && github.event.workflow_run.head_sha || github.sha }}
           sparse-checkout: |
             .github
             projects/hipdnn
+
+      - name: Download Linux patched ROCm SDK artifact
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
+        with:
+          name: hipdnn-rocm-sdk-linux-${{ env.GPU_TARGET }}
+          path: ${{ env.SUPERBUILD_ARTIFACT_DIR }}
+          github-token: ${{ github.token }}
+          run-id: ${{ env.SUPERBUILD_RUN_ID }}
+
+      - name: Extract Linux patched ROCm SDK artifact
+        run: |
+          set -euo pipefail
+          mkdir -p "$ROCM_SDK_PATH"
+          tar -C "$ROCM_SDK_PATH" -xzf "$SUPERBUILD_ARTIFACT_DIR/hipdnn-rocm-sdk-linux.tar.gz"
 
       - name: Set up Python
         uses: actions/setup-python@a309ff8b426b58ec0e2a45f0f869d46889d02405 # v6.2.0
@@ -43,19 +68,13 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y ninja-build
 
-      - name: Install ROCm wheels
+      - name: Install Python build dependencies
         run: |
           set -euo pipefail
           python -m venv "$VENV_PATH"
           source "$VENV_PATH/bin/activate"
           python -m pip install --upgrade pip
-          pip install --index-url "https://rocm.nightlies.amd.com/v2/$GPU_TARGET/" "rocm[libraries,devel]"
-          rocm-sdk init
           pip install build numpy pytest
-
-          site_packages=$(python -c "import site; print(site.getsitepackages()[0])")
-          rocm_sdk_path="$site_packages/_rocm_sdk_devel"
-          echo "ROCM_SDK_PATH=$rocm_sdk_path" >> "$GITHUB_ENV"
           echo "$VENV_PATH/bin" >> "$GITHUB_PATH"
 
       - name: Configure frontend bindings
@@ -89,6 +108,7 @@ jobs:
 
   windows-python-wheel:
     name: Windows Python Wheel
+    if: ${{ github.event_name == 'workflow_dispatch' || github.event.workflow_run.conclusion == 'success' }}
     runs-on: azure-windows-scale-rocm
     defaults:
       run:
@@ -96,6 +116,9 @@ jobs:
     env:
       BUILD_DIR: B:\build\hipdnn-python
       GPU_TARGET: gfx1151
+      ROCM_SDK_PATH: B:\rocm-sdk
+      SUPERBUILD_ARTIFACT_DIR: B:\hipdnn-rocm-sdk-artifact
+      SUPERBUILD_RUN_ID: ${{ github.event_name == 'workflow_run' && github.event.workflow_run.id || inputs.superbuild_run_id }}
       VENV_PATH: B:\rocm_wheels
     steps:
       - name: Configure git longpaths
@@ -104,9 +127,25 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
         with:
+          repository: ${{ github.event_name == 'workflow_run' && github.event.workflow_run.head_repository.full_name || github.repository }}
+          ref: ${{ github.event_name == 'workflow_run' && github.event.workflow_run.head_sha || github.sha }}
           sparse-checkout: |
             .github
             projects/hipdnn
+
+      - name: Download Windows patched ROCm SDK artifact
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
+        with:
+          name: hipdnn-rocm-sdk-windows-${{ env.GPU_TARGET }}
+          path: ${{ env.SUPERBUILD_ARTIFACT_DIR }}
+          github-token: ${{ github.token }}
+          run-id: ${{ env.SUPERBUILD_RUN_ID }}
+
+      - name: Extract Windows patched ROCm SDK artifact
+        run: |
+          New-Item -ItemType Directory -Force $env:ROCM_SDK_PATH | Out-Null
+          tar -C $env:ROCM_SDK_PATH -xzf (Join-Path $env:SUPERBUILD_ARTIFACT_DIR "hipdnn-rocm-sdk-windows.tar.gz")
+          if ($LASTEXITCODE -ne 0) { throw "Failed to extract patched ROCm SDK" }
 
       - name: Set up Python
         uses: actions/setup-python@a309ff8b426b58ec0e2a45f0f869d46889d02405 # v6.2.0
@@ -122,17 +161,13 @@ jobs:
           choco source add -n=internal -s http://10.0.167.96:8081/repository/choco-group/ --priority=1
           choco install --no-progress -y ninja --version 1.12.1
 
-      - name: Install ROCm wheels
+      - name: Install Python build dependencies
         run: |
           python -m venv $env:VENV_PATH
           $python = Join-Path $env:VENV_PATH "Scripts\python.exe"
           & $python -m pip install --upgrade pip
-          & $python -m pip install --index-url "https://rocm.nightlies.amd.com/v2/$env:GPU_TARGET/" "rocm[libraries,devel]"
-          & (Join-Path $env:VENV_PATH "Scripts\rocm-sdk.exe") init
           & $python -m pip install build numpy pytest
 
-          $rocmSdkPath = (Join-Path $env:VENV_PATH "Lib\site-packages\_rocm_sdk_devel") -replace '\\', '/'
-          "ROCM_SDK_PATH=$rocmSdkPath" | Out-File -FilePath $env:GITHUB_ENV -Append
           (Join-Path $env:VENV_PATH "Scripts") | Out-File -FilePath $env:GITHUB_PATH -Append
 
       - name: Configure frontend bindings
@@ -166,5 +201,6 @@ jobs:
         run: |
           $python = Join-Path $env:VENV_PATH "Scripts\python.exe"
           $env:ROCM_PATH = $env:ROCM_SDK_PATH
-          $env:PATH = "$env:ROCM_SDK_PATH/bin;$env:PATH"
+          $env:HIP_PATH = $env:ROCM_SDK_PATH
+          $env:PATH = "$env:ROCM_SDK_PATH/bin;$env:ROCM_SDK_PATH/lib;$env:PATH"
           & $python -m pytest -q projects/hipdnn/python/frontend_wheel_package/tests
