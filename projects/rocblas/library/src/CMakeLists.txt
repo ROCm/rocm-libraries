@@ -104,22 +104,21 @@ if( BUILD_WITH_TENSILE )
     set_target_properties( TensileHost PROPERTIES POSITION_INDEPENDENT_CODE ON )
   endif()
 
-  set( Tensile_SRC
-    tensile_host.cpp
-  )
-
-  if(BUILD_WITH_HIPBLASLT)
-    set( HipBlasLT_SRC
-      hipblaslt_host.cpp
-    )
-  endif()
-
-  set( rocblas_ex_source
-    ${Tensile_SRC}
-    ${HipBlasLT_SRC}
-  )
-
 endif() # BUILD_WITH_TENSILE
+
+# tensile_host.cpp is always compiled: Tensile paths are gated by BUILD_WITH_TENSILE in the source.
+set( rocblas_tensile_host_cpp tensile_host.cpp )
+
+set( HipBlasLT_SRC "" )
+if(BUILD_WITH_HIPBLASLT)
+  set( HipBlasLT_SRC
+    hipblaslt_host.cpp
+  )
+endif()
+
+set( rocblas_ex_source
+  ${HipBlasLT_SRC}
+)
 
 # tensile includes have internal guards for BUILD_WITH_TENSILE to allow source gemm
 set( Tensile_INC
@@ -661,6 +660,7 @@ add_library( rocblas
   ${rocblas_blas3_source_no_tensile}
   ${rocblas_blas2_source}
   ${rocblas_ex_source}
+  ${rocblas_tensile_host_cpp}
   ${rocblas_ex_source_no_tensile}
   ${rocblas_blas1_source}
   ${relative_rocblas_headers_public}
@@ -698,10 +698,6 @@ if( BUILD_WITH_TENSILE )
     target_link_libraries( rocblas PRIVATE TensileHost )
   endif()
 
-  if(BUILD_WITH_HIPBLASLT)
-    target_link_libraries( rocblas PRIVATE roc::hipblaslt )
-  endif()
-
   if( NOT BUILD_SHARED_LIBS )
     target_compile_definitions( rocblas PRIVATE ROCBLAS_STATIC_LIB )
 
@@ -736,7 +732,12 @@ if( BUILD_WITH_TENSILE )
 
   endif()
 
-  target_compile_definitions( rocblas PRIVATE ${TENSILE_DEFINES} ${HIPBLASLT_DEFINES})
+  target_compile_definitions( rocblas PRIVATE ${TENSILE_DEFINES} )
+endif()
+
+if( BUILD_WITH_HIPBLASLT )
+  target_link_libraries( rocblas PRIVATE roc::hipblaslt )
+  target_compile_definitions( rocblas PRIVATE ${HIPBLASLT_DEFINES} )
 endif()
 
 #set_target_properties( rocblas PROPERTIES CXX_VISIBILITY_PRESET "hidden" C_VISIBILITY_PRESET "hidden" VISIBILITY_INLINES_HIDDEN ON )
