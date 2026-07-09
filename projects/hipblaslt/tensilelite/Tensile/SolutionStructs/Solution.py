@@ -997,6 +997,31 @@ class Solution(collections.abc.Mapping):
     # Skip GRVW range check for subtile impl: scale uses serial*loadWidth DTL addressing, not standard GRVW chunks
     if grvw not in [1,2,4,8,16,32] and not state["UseSubtileImpl"]:
       validDepthU = False
+    # TDM uses tensor_load_to_lds (not per-thread buffer_load), so the
+    # per-thread NumLoads* tile-split params are meaningless — normalize them
+    # to 1 so the later setGlobalLoadTileDimClassic nlc/nlp checks stay
+    # consistent. GRVW is kept as small as possible so small-size solution
+    # rejection still fires, but the global-read width (GRVW*bpe/bpr) must map
+    # to a real load instruction: the smallest is b8 = 0.25 dwords (1 byte),
+    # and the matcher requires width to be a whole multiple of it. That means
+    # GRVW*bpe must be a whole number of bytes. For sub-byte types GRVW=1 is
+    # too small (FP4: 0.5B -> 0.125 dw; FP6: 0.75B -> 0.1875 dw), so bump GRVW
+    # to the minimum that yields an integer byte count: FP4 -> 2 (1 byte),
+    # FP6 -> 4 (3 bytes = exactly 4 packed 6-bit elements).
+    usesTDM = tc in ("A", "B", "MXSA", "MXSB") and state["TDMInst"] == 3
+    if usesTDM:
+      tdmGrvw = 1
+      if tc in ("A", "B"):
+        if state["ProblemType"]["DataType%s"%tc].isFloat4():
+          tdmGrvw = 2
+        elif state["ProblemType"]["DataType%s"%tc].is6bitFloat():
+          tdmGrvw = 4
+      state["GlobalReadVectorWidth%s"%tc] = tdmGrvw
+      state["NumLoads%s"%tc] = 1
+      state["NumLoadsCoalesced%s"%tc] = 1
+      state["NumLoadsPerpendicular%s"%tc] = 1
+      return validDepthU
+
     if totalVectors % state["NumThreads"] != 0:
       reject(state, printRejectionReason, "totalVectors%s %u %% NumThreads %u != 0" \
           % (tc, totalVectors, state["NumThreads"]))
