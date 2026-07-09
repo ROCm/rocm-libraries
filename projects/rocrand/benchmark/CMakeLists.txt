@@ -68,7 +68,19 @@ function(add_benchmark benchmark_src)
   elseif(HIP_COMPILER STREQUAL "nvcc")
     target_link_libraries(${BENCHMARK_TARGET} PRIVATE nvidia-ml)
   else()
-    target_link_libraries(${BENCHMARK_TARGET} PRIVATE amd_smi)
+    # primbench uses AMD SMI for optional GPU monitoring. Treat it as a soft
+    # dependency: enable monitoring only when the amd-smi dev header is
+    # available, otherwise build the benchmark without monitoring instead of
+    # failing to compile. This keeps narrowed component builds that do not stage
+    # the amd-smi dev headers (e.g. code-coverage builds) working.
+    find_path(ROCRAND_AMDSMI_INCLUDE_DIR amd_smi/amdsmi.h HINTS ENV ROCM_PATH PATH_SUFFIXES include)
+    if(ROCRAND_AMDSMI_INCLUDE_DIR)
+      target_include_directories(${BENCHMARK_TARGET} PRIVATE ${ROCRAND_AMDSMI_INCLUDE_DIR})
+      target_link_libraries(${BENCHMARK_TARGET} PRIVATE amd_smi)
+    else()
+      message(STATUS "AMD SMI headers not found; building ${BENCHMARK_TARGET} without primbench GPU monitoring")
+      target_compile_definitions(${BENCHMARK_TARGET} PRIVATE PRIMBENCH_NO_MONITORING)
+    endif()
   endif()
 
   set_target_properties(${BENCHMARK_TARGET}
