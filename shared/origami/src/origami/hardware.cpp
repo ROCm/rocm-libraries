@@ -90,6 +90,7 @@ size_t cus_per_multiProcessorCount(hardware_t::architecture_t arch) {
     case hardware_t::architecture_t::gfx1151:
     case hardware_t::architecture_t::gfx1152:
     case hardware_t::architecture_t::gfx1153:
+    case hardware_t::architecture_t::gfx1200:  // RDNA4
     case hardware_t::architecture_t::gfx1201:  // RDNA4
       return 2;
     default:
@@ -179,6 +180,7 @@ size_t hardware_t::get_default_num_xcds(architecture_t arch) {
     case architecture_t::gfx90a:  return 1;
     case architecture_t::gfx942:  return 8;
     case architecture_t::gfx950:  return 8;
+    case architecture_t::gfx1200: return 1;
     case architecture_t::gfx1201: return 1;
     case architecture_t::gfx1100: return 1;
     case architecture_t::gfx1150: return 1;
@@ -249,6 +251,7 @@ bool hardware_t::has_MALL() const {
     case architecture_t::gfx90a:
     case architecture_t::gfx942:
     case architecture_t::gfx950:
+    case architecture_t::gfx1200:
     case architecture_t::gfx1201:
     case architecture_t::gfx1100:
     case architecture_t::gfx1151:
@@ -269,6 +272,7 @@ bool hardware_t::has_native_TF32() const {
       return true;
     case architecture_t::gfx90a:
     case architecture_t::gfx950:
+    case architecture_t::gfx1200:
     case architecture_t::gfx1201:
     case architecture_t::gfx1100:
     case architecture_t::gfx1150:

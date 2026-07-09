@@ -13,9 +13,7 @@
 #include "static_unroll.hpp"
 
 // NOTE: This header should be independent from batchnorm_functions.hpp
-// Even in OpenCL implementation, these functions are only enabled under
-// certain conditions. But now, these templates will not be compiled before
-// calling them.
+// These templates will not be compiled before calling them.
 namespace miopen {
 namespace reduction {
 

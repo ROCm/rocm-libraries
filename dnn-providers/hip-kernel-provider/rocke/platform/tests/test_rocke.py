@@ -21,6 +21,8 @@ from __future__ import annotations
 
 import unittest
 
+import pytest
+
 from rocke import (
     F16,
     I32,
@@ -2417,7 +2419,7 @@ class TestFusionPlanner(unittest.TestCase):
     """CPU-only coverage for the graph-capture fusion planner."""
 
     def test_explain_matmul_bias_relu_scale(self):
-        import torch
+        torch = pytest.importorskip("torch")
         from rocke.helpers import explain_fn
 
         def fn(A, B, bias):
@@ -2435,7 +2437,7 @@ class TestFusionPlanner(unittest.TestCase):
         )
 
     def test_explain_matmul_only(self):
-        import torch
+        torch = pytest.importorskip("torch")
         from rocke.helpers import explain_fn
 
         def fn(A, B):
@@ -2447,7 +2449,7 @@ class TestFusionPlanner(unittest.TestCase):
         self.assertEqual(info["epilogue_ops"], [])
 
     def test_explain_unsupported_graph(self):
-        import torch
+        torch = pytest.importorskip("torch")
         from rocke.helpers import explain_fn
 
         def fn(A):
@@ -2458,7 +2460,7 @@ class TestFusionPlanner(unittest.TestCase):
         self.assertIn("no registered", info["reason"])
 
     def test_compile_fn_exposes_plan_without_launching(self):
-        import torch
+        torch = pytest.importorskip("torch")
         from rocke.helpers import compile_fn
 
         def fn(A, B, bias):
@@ -2469,7 +2471,7 @@ class TestFusionPlanner(unittest.TestCase):
         self.assertEqual(compiled.match["bias_arg_name"], "bias")
 
     def test_dtype_to_ir_accepts_torch_aliases(self):
-        import torch
+        torch = pytest.importorskip("torch")
         from rocke.core.ir import BF16, F16, F32
         from rocke.helpers import dtype_to_ir
 
@@ -2917,7 +2919,7 @@ class TestExpandedPatternMatchers(unittest.TestCase):
     """Verify the new patterns in ``_PATTERN_TABLE`` match expected fns."""
 
     def test_explain_matmul_gelu(self):
-        import torch
+        torch = pytest.importorskip("torch")
         from rocke.helpers import explain_fn
 
         def fn(A, B):
@@ -2929,7 +2931,7 @@ class TestExpandedPatternMatchers(unittest.TestCase):
         self.assertEqual(info["bias_arg_name"], None)
 
     def test_explain_matmul_bias_silu(self):
-        import torch
+        torch = pytest.importorskip("torch")
         from rocke.helpers import explain_fn
 
         def fn(A, B, bias):
@@ -2944,7 +2946,7 @@ class TestExpandedPatternMatchers(unittest.TestCase):
         self.assertEqual(info["bias_arg_name"], "bias")
 
     def test_explain_matmul_with_residual(self):
-        import torch
+        torch = pytest.importorskip("torch")
         from rocke.helpers import explain_fn
 
         def fn(A, B, bias, residual):
@@ -2961,7 +2963,7 @@ class TestExpandedPatternMatchers(unittest.TestCase):
         self.assertEqual(len(info["residual_arg_names"]), 1)
 
     def test_explain_pointwise_chain(self):
-        import torch
+        torch = pytest.importorskip("torch")
         from rocke.helpers import explain_fn
 
         def fn(A):
@@ -2973,7 +2975,7 @@ class TestExpandedPatternMatchers(unittest.TestCase):
         self.assertEqual(info["a_arg_name"], "A")
 
     def test_explain_pointwise_binary_chain(self):
-        import torch
+        torch = pytest.importorskip("torch")
         from rocke.helpers import explain_fn
 
         def fn(A, B):
@@ -2988,7 +2990,7 @@ class TestExpandedPatternMatchers(unittest.TestCase):
         self.assertEqual(info["extra_attrs"]["unary_chain"], ("relu",))
 
     def test_explain_matmul_scale_clamp(self):
-        import torch
+        torch = pytest.importorskip("torch")
         from rocke.helpers import explain_fn
 
         def fn(A, B):
@@ -3002,7 +3004,7 @@ class TestExpandedPatternMatchers(unittest.TestCase):
         )
 
     def test_explain_rowwise_reduction_sum(self):
-        import torch
+        torch = pytest.importorskip("torch")
         from rocke.helpers import explain_fn
 
         def fn(A):
@@ -3014,7 +3016,7 @@ class TestExpandedPatternMatchers(unittest.TestCase):
         self.assertEqual(info["extra_attrs"]["reduce_op"], "sum")
 
     def test_explain_rowwise_reduction_mean(self):
-        import torch
+        torch = pytest.importorskip("torch")
         from rocke.helpers import explain_fn
 
         def fn(A):
@@ -3404,7 +3406,7 @@ class TestWorkspaceMaterialize(unittest.TestCase):
 
     def test_materialize_with_fake_pool_binds_tensors(self):
         # Use the real WorkspacePool with a CPU "device" via torch.
-        import torch
+        torch = pytest.importorskip("torch")
         from rocke.helpers import materialize_plan
         from rocke.runtime.launcher import WorkspacePool
 
@@ -3426,7 +3428,7 @@ class TestValidationHarness(unittest.TestCase):
     """The fusion validation runner must produce well-formed reports."""
 
     def test_benchmark_case_runs_torch_eager_baseline(self):
-        import torch
+        torch = pytest.importorskip("torch")
         from rocke.helpers import BenchmarkCase, run_fusion_validation_matrix
 
         def ref_fn(x, y):
