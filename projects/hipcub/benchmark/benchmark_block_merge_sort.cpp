@@ -1,6 +1,6 @@
 // MIT License
 //
-// Copyright (c) 2021-2024 Advanced Micro Devices, Inc. All rights reserved.
+// Copyright (c) 2021-2026 Advanced Micro Devices, Inc. All rights reserved.
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -52,7 +52,7 @@ void sort_keys_kernel(const T* input, T* output, CompareOp compare_op)
     T keys[ItemsPerThread];
     hipcub::LoadDirectStriped<BlockSize>(lid, input + block_offset, keys);
 
-#pragma nounroll
+    _CCCL_PRAGMA_NOUNROLL()
     for(unsigned int trial = 0; trial < Trials; trial++)
     {
         hipcub::BlockMergeSort<T, BlockSize, ItemsPerThread> sort;
@@ -82,7 +82,7 @@ void sort_pairs_kernel(const T* input, T* output, CompareOp compare_op)
         values[i] = keys[i] + T(1);
     }
 
-#pragma nounroll
+    _CCCL_PRAGMA_NOUNROLL()
     for(unsigned int trial = 0; trial < Trials; trial++)
     {
         hipcub::BlockMergeSort<T, BlockSize, ItemsPerThread, T> sort;

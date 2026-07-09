@@ -1,6 +1,6 @@
 // MIT License
 //
-// Copyright (c) 2017-2025 Advanced Micro Devices, Inc. All rights reserved.
+// Copyright (c) 2017-2026 Advanced Micro Devices, Inc. All rights reserved.
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -24,7 +24,6 @@
 
 // hipcub API
 #include <hipcub/block/block_reduce.hpp>
-#include <hipcub/thread/thread_operators.hpp>
 
 // Params for tests
 template<class T,
@@ -129,8 +128,9 @@ void reduce_kernel(T* device_output, T* device_output_reductions)
     const unsigned int                         index = (hipBlockIdx_x * BlockSize) + hipThreadIdx_x;
     T                                          value = device_output[index];
     using breduce_t = hipcub::BlockReduce<T, BlockSize, Algorithm>;
-    __shared__ typename breduce_t::TempStorage temp_storage;
-    value = breduce_t(temp_storage).Reduce(value, hipcub::Sum());
+    __shared__
+    typename breduce_t::TempStorage temp_storage;
+    value = breduce_t(temp_storage).Reduce(value, test_utils::plus{});
     if(hipThreadIdx_x == 0)
     {
         device_output_reductions[hipBlockIdx_x] = value;
@@ -337,8 +337,9 @@ void reduce_valid_kernel(T*                 device_output,
     const unsigned int                         index = (hipBlockIdx_x * BlockSize) + hipThreadIdx_x;
     T                                          value = device_output[index];
     using breduce_t = hipcub::BlockReduce<T, BlockSize, Algorithm>;
-    __shared__ typename breduce_t::TempStorage temp_storage;
-    value = breduce_t(temp_storage).Reduce(value, hipcub::Sum(), valid_items);
+    __shared__
+    typename breduce_t::TempStorage temp_storage;
+    value = breduce_t(temp_storage).Reduce(value, test_utils::plus{}, valid_items);
     if(hipThreadIdx_x == 0)
     {
         device_output_reductions[hipBlockIdx_x] = value;
@@ -606,7 +607,7 @@ void reduce_array_kernel(T* device_output, T* device_output_reductions)
     T                                          reduction;
     using breduce_t = hipcub::BlockReduce<T, BlockSize, Algorithm>;
     __shared__ typename breduce_t::TempStorage temp_storage;
-    reduction = breduce_t(temp_storage).Reduce(in_out, hipcub::Sum());
+    reduction = breduce_t(temp_storage).Reduce(in_out, test_utils::plus{});
 
     if(hipThreadIdx_x == 0)
     {

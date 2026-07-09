@@ -1,7 +1,7 @@
 /******************************************************************************
  * Copyright (c) 2010-2011, Duane Merrill.  All rights reserved.
  * Copyright (c) 2011-2018, NVIDIA CORPORATION.  All rights reserved.
- * Modifications Copyright (c) 2017-2025, Advanced Micro Devices, Inc.  All rights reserved.
+ * Modifications Copyright (c) 2017-2026, Advanced Micro Devices, Inc.  All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions are met:
@@ -155,7 +155,7 @@ struct DevicePartition
              typename NumItemsT>
     HIPCUB_RUNTIME_FUNCTION
     static hipError_t If(void*                     d_temp_storage,
-                         std::size_t&              temp_storage_bytes,
+                         size_t&                   temp_storage_bytes,
                          InputIteratorT            d_in,
                          FirstOutputIteratorT      d_first_part_out,
                          SecondOutputIteratorT     d_second_part_out,
@@ -190,7 +190,7 @@ struct DevicePartition
              typename NumItemsT>
     HIPCUB_DETAIL_DEPRECATED_DEBUG_SYNCHRONOUS HIPCUB_RUNTIME_FUNCTION
     static hipError_t If(void*                     d_temp_storage,
-                         std::size_t&              temp_storage_bytes,
+                         size_t&                   temp_storage_bytes,
                          InputIteratorT            d_in,
                          FirstOutputIteratorT      d_first_part_out,
                          SecondOutputIteratorT     d_second_part_out,

@@ -1,7 +1,7 @@
 /******************************************************************************
  * Copyright (c) 2010-2011, Duane Merrill.  All rights reserved.
  * Copyright (c) 2011-2018, NVIDIA CORPORATION.  All rights reserved.
- * Modifications Copyright (c) 2017-2025, Advanced Micro Devices, Inc.  All rights reserved.
+ * Modifications Copyright (c) 2017-2026, Advanced Micro Devices, Inc.  All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions are met:
@@ -61,24 +61,25 @@ HIPCUB_FORCEINLINE bool may_overflow(LevelT  lower_level,
                                      ::std::true_type /* is_integral */)
 {
     return static_cast<IntArithmeticT>(upper_level - lower_level)
-           > (::std::numeric_limits<IntArithmeticT>::max() / static_cast<IntArithmeticT>(num_bins));
+           > (_HIPCUB_STD::numeric_limits<IntArithmeticT>::max()
+              / static_cast<IntArithmeticT>(num_bins));
 }
 
 template<class SampleT, class CommonT>
 struct int_arithmetic_t
 {
-    using type = ::std::conditional_t<
-        sizeof(SampleT) + sizeof(CommonT) <= sizeof(uint32_t),
-        uint32_t,
-#if HIPCUB_IS_INT128_ENABLED
-        ::std::conditional_t<(::std::is_same<CommonT, __int128_t>::value
-                              || ::std::is_same<CommonT, __uint128_t>::value),
-                             CommonT,
-                             uint64_t>
+    using type
+        = ::std::conditional_t<sizeof(SampleT) + sizeof(CommonT) <= sizeof(uint32_t),
+                               uint32_t,
+#if _CCCL_HAS_INT128()
+                               ::std::conditional_t<(::std::is_same_v<CommonT, __int128_t>
+                                                     || ::std::is_same_v<CommonT, __uint128_t>),
+                                                    CommonT,
+                                                    uint64_t>
 #else
-        uint64_t
+                               uint64_t
 #endif
-        >;
+                               >;
 };
 
 // If potential overflow is detected, returns hipErrorInvalidValue, otherwise hipSuccess.
@@ -86,7 +87,7 @@ template<typename SampleIteratorT, typename LevelT>
 HIPCUB_HOST_DEVICE
 HIPCUB_FORCEINLINE hipError_t check_overflow(LevelT lower_level, LevelT upper_level, int num_levels)
 {
-    using sample_type      = typename std::iterator_traits<SampleIteratorT>::value_type;
+    using sample_type      = it_value_t<SampleIteratorT>;
     using common_type      = typename hipcub::common_type<LevelT, sample_type>::type;
     static_assert(std::is_convertible<common_type, int>::value,
                   "The common type of `LevelT` and `SampleT` must be "

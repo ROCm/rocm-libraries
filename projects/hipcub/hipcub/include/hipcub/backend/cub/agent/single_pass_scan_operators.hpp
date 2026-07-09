@@ -1,7 +1,7 @@
 /******************************************************************************
  * Copyright (c) 2011, Duane Merrill.  All rights reserved.
  * Copyright (c) 2011-2018, NVIDIA CORPORATION.  All rights reserved.
- * Modifications Copyright (c) 2024-2025, Advanced Micro Devices, Inc. All rights reserved.
+ * Modifications Copyright (c) 2024-2026, Advanced Micro Devices, Inc. All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions are met:
@@ -46,10 +46,9 @@ using BlockScanRunningPrefixOp = cub::BlockScanRunningPrefixOp<T, ScanOpT>;
 template<typename T,
          typename ScanOpT,
          typename ScanTileStateT,
-         int LEGACY_PTX_ARCH        = 0,
          typename DelayConstructorT = cub::detail::default_delay_constructor_t<T>>
 using TilePrefixCallbackOp
-    = cub::TilePrefixCallbackOp<T, ScanOpT, ScanTileStateT, LEGACY_PTX_ARCH, DelayConstructorT>;
+    = cub::TilePrefixCallbackOp<T, ScanOpT, ScanTileStateT, DelayConstructorT>;
 
 template<typename ValueT,
          typename KeyT,

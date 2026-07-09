@@ -1,7 +1,7 @@
 /******************************************************************************
  * Copyright (c) 2011, Duane Merrill.  All rights reserved.
  * Copyright (c) 2011-2018, NVIDIA CORPORATION.  All rights reserved.
- * Modifications Copyright (c) 2021-2024, Advanced Micro Devices, Inc.  All rights reserved.
+ * Modifications Copyright (c) 2021-2026, Advanced Micro Devices, Inc.  All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions are met:
@@ -123,12 +123,12 @@ public:
         HIPCUB_CLANG_SUPPRESS_DEPRECATED_PUSH
         this->total_tiles           = static_cast<int>(hipcub::DivideAndRoundUp(num_items_, tile_items));
         HIPCUB_CLANG_SUPPRESS_DEPRECATED_POP
-        this->grid_size             = min(total_tiles, max_grid_size);
+        this->grid_size             = _HIPCUB_STD::min(total_tiles, max_grid_size);
         int avg_tiles_per_block     = total_tiles / grid_size;
         // leftover grains go to big blocks:
         this->big_shares            = total_tiles - (avg_tiles_per_block * grid_size);
-        this->normal_share_items    = avg_tiles_per_block * tile_items;
-        this->normal_base_offset    = big_shares * tile_items;
+        this->normal_share_items    = static_cast<OffsetT>(avg_tiles_per_block) * tile_items;
+        this->normal_base_offset    = static_cast<OffsetT>(big_shares) * tile_items;
         this->big_share_items       = normal_share_items + tile_items;
     }
 
@@ -154,7 +154,7 @@ public:
         {
             // This thread block gets a normal share of grains (avg_tiles_per_block)
             block_offset = normal_base_offset + (block_id * normal_share_items);
-            block_end = min(num_items, block_offset + normal_share_items);
+            block_end    = _HIPCUB_STD::min(num_items, block_offset + normal_share_items);
         }
         // Else default past-the-end
     }

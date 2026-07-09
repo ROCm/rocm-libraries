@@ -1,7 +1,7 @@
 /******************************************************************************
  * Copyright (c) 2010-2011, Duane Merrill.  All rights reserved.
  * Copyright (c) 2011-2018, NVIDIA CORPORATION.  All rights reserved.
- * Modifications Copyright (c) 2017-2025, Advanced Micro Devices, Inc.  All rights reserved.
+ * Modifications Copyright (c) 2017-2026, Advanced Micro Devices, Inc.  All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions are met:
@@ -279,12 +279,7 @@ private:
     template <>
     struct LoadInternal<WARP_LOAD_TRANSPOSE>
     {
-        using WarpExchangeT = WarpExchange<
-            InputT,
-            ITEMS_PER_THREAD,
-            LOGICAL_WARP_THREADS,
-            ARCH
-        >;
+        using WarpExchangeT = WarpExchange<InputT, ITEMS_PER_THREAD, LOGICAL_WARP_THREADS>;
         using TempStorage = typename WarpExchangeT::TempStorage;
         TempStorage& temp_storage;
         int linear_tid;

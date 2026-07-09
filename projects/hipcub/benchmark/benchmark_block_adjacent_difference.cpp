@@ -1,6 +1,6 @@
 // MIT License
 //
-// Copyright (c) 2020-2022 Advanced Micro Devices, Inc. All rights reserved.
+// Copyright (c) 2020-2026 Advanced Micro Devices, Inc. All rights reserved.
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -63,7 +63,7 @@ struct subtract_left
 
         hipcub::BlockAdjacentDifference<T, BlockSize> adjacent_difference;
 
-#pragma nounroll
+        _CCCL_PRAGMA_NOUNROLL()
         for(unsigned int trial = 0; trial < trials; trial++)
         {
             T output[ItemsPerThread];
@@ -106,7 +106,7 @@ struct subtract_left_partial_tile
         // Try to evenly distribute the length of tile_sizes between all the trials
         const auto tile_size_diff = (BlockSize * ItemsPerThread) / trials + 1;
 
-#pragma nounroll
+        _CCCL_PRAGMA_NOUNROLL()
         for(unsigned int trial = 0; trial < trials; trial++)
         {
             T output[ItemsPerThread];
@@ -150,7 +150,7 @@ struct subtract_right
 
         hipcub::BlockAdjacentDifference<T, BlockSize> adjacent_difference;
 
-#pragma nounroll
+        _CCCL_PRAGMA_NOUNROLL()
         for(unsigned int trial = 0; trial < trials; trial++)
         {
             T output[ItemsPerThread];
@@ -193,7 +193,7 @@ struct subtract_right_partial_tile
         // Try to evenly distribute the length of tile_sizes between all the trials
         const auto tile_size_diff = (BlockSize * ItemsPerThread) / trials + 1;
 
-#pragma nounroll
+        _CCCL_PRAGMA_NOUNROLL()
         for(unsigned int trial = 0; trial < trials; trial++)
         {
             T output[ItemsPerThread];
@@ -221,8 +221,8 @@ template<class Benchmark,
          bool         WithTile,
          unsigned int Trials = 100>
 auto run_benchmark(benchmark::State& state, hipStream_t stream, size_t N)
-    -> std::enable_if_t<!std::is_same<Benchmark, subtract_left_partial_tile>::value
-                        && !std::is_same<Benchmark, subtract_right_partial_tile>::value>
+    -> std::enable_if_t<!std::is_same_v<Benchmark, subtract_left_partial_tile>
+                        && !std::is_same_v<Benchmark, subtract_right_partial_tile>>
 {
     constexpr auto items_per_block = BlockSize * ItemsPerThread;
     const auto     num_blocks      = (N + items_per_block - 1) / items_per_block;
@@ -271,8 +271,8 @@ template<class Benchmark,
          bool         WithTile,
          unsigned int Trials = 100>
 auto run_benchmark(benchmark::State& state, hipStream_t stream, size_t N)
-    -> std::enable_if_t<std::is_same<Benchmark, subtract_left_partial_tile>::value
-                        || std::is_same<Benchmark, subtract_right_partial_tile>::value>
+    -> std::enable_if_t<std::is_same_v<Benchmark, subtract_left_partial_tile>
+                        || std::is_same_v<Benchmark, subtract_right_partial_tile>>
 {
     constexpr auto items_per_block = BlockSize * ItemsPerThread;
     const auto     num_blocks      = (N + items_per_block - 1) / items_per_block;
@@ -352,7 +352,7 @@ void add_benchmarks(const std::string&                            name,
                                                        BENCHMARK_TYPE(long long, 256, false),
                                                        BENCHMARK_TYPE(double, 256, false)};
 
-    if(!std::is_same<Benchmark, subtract_right_partial_tile>::value)
+    if(!std::is_same_v<Benchmark, subtract_right_partial_tile>)
     {
         bs.insert(bs.end(),
                   {BENCHMARK_TYPE(int, 256, true),

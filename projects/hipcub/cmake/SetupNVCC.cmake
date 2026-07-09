@@ -1,6 +1,6 @@
 # MIT License
 #
-# Copyright (c) 2018-2024 Advanced Micro Devices, Inc. All rights reserved.
+# Copyright (c) 2018-2026 Advanced Micro Devices, Inc. All rights reserved.
 #
 # Permission is hereby granted, free of charge, to any person obtaining a copy
 # of this software and associated documentation files (the "Software"), to deal
@@ -123,6 +123,6 @@ if (NOT _HIPCUB_HIP_NVCC_FLAGS_SET)
     set(_HIPCUB_HIP_NVCC_FLAGS_SET ON CACHE INTERNAL "")
 endif()
 
-# Ignore warnings about #pragma unroll
+# Ignore warnings about _CCCL_PRAGMA_UNROLL_FULL()
 # and about deprecated CUDA function(s) used in hip/nvcc_detail/hip_runtime_api.h
 # set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} ${HIP_CPP_CONFIG_FLAGS_STRIP} -Wno-unknown-pragmas -Wno-deprecated-declarations" CACHE STRING "compile flags" FORCE)

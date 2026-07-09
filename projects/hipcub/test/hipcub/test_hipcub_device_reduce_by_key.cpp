@@ -1,6 +1,6 @@
 // MIT License
 //
-// Copyright (c) 2017-2025 Advanced Micro Devices, Inc. All rights reserved.
+// Copyright (c) 2017-2026 Advanced Micro Devices, Inc. All rights reserved.
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -52,23 +52,23 @@ public:
 };
 
 using Params = ::testing::Types<
-    params<int, int, hipcub::Sum, 1, 1>,
-    params<double, int, hipcub::Sum, 3, 5>,
-    params<float, int, hipcub::Sum, 1, 10>,
-    params<unsigned long long, float, hipcub::Min, 1, 30>,
-    params<int, unsigned int, hipcub::Max, 20, 100, short>,
-    params<float, unsigned long long, hipcub::Max, 100, 400>,
-    params<unsigned int, unsigned int, hipcub::Sum, 200, 600>,
-    params<double, int, hipcub::Sum, 100, 2000>,
-    params<int, unsigned int, hipcub::Sum, 1000, 5000>,
-    params<unsigned int, int, hipcub::Sum, 2048, 2048>,
-    params<unsigned int, double, hipcub::Min, 1000, 50000>,
-    params<long long, short, hipcub::Sum, 1000, 10000, long long>,
-    params<unsigned long long, unsigned long long, hipcub::Sum, 100000, 100000>,
+    params<int, int, test_utils::plus, 1, 1>,
+    params<double, int, test_utils::plus, 3, 5>,
+    params<float, int, test_utils::plus, 1, 10>,
+    params<unsigned long long, float, test_utils::minimum, 1, 30>,
+    params<int, unsigned int, test_utils::maximum, 20, 100, short>,
+    params<float, unsigned long long, test_utils::maximum, 100, 400>,
+    params<unsigned int, unsigned int, test_utils::plus, 200, 600>,
+    params<double, int, test_utils::plus, 100, 2000>,
+    params<int, unsigned int, test_utils::plus, 1000, 5000>,
+    params<unsigned int, int, test_utils::plus, 2048, 2048>,
+    params<unsigned int, double, test_utils::minimum, 1000, 50000>,
+    params<long long, short, test_utils::plus, 1000, 10000, long long>,
+    params<unsigned long long, unsigned long long, test_utils::plus, 100000, 100000>,
     // Sum for half and bfloat will result in values too big due to limited range.
-    params<test_utils::half, test_utils::half, hipcub::Max, 3, 100>,
-    params<test_utils::bfloat16, test_utils::bfloat16, hipcub::Max, 20, 100>,
-    params<int, int, hipcub::Sum, 1, 1, int, true>>;
+    params<test_utils::half, test_utils::half, test_utils::maximum, 3, 100>,
+    params<test_utils::bfloat16, test_utils::bfloat16, test_utils::maximum, 20, 100>,
+    params<int, int, test_utils::plus, 1, 1, int, true>>;
 
 TYPED_TEST_SUITE(HipcubDeviceReduceByKey, Params);
 
@@ -89,7 +89,7 @@ TYPED_TEST(HipcubDeviceReduceByKey, ReduceByKey)
         std::uniform_int_distribution<test_utils::convert_to_fundamental_t<key_type>>>::type;
 
     reduce_op_type reduce_op;
-    hipcub::Equality key_compare_op;
+    test_utils::equal key_compare_op;
 
     hipStream_t stream = 0; // default
     if(TestFixture::params::use_graphs)
@@ -136,7 +136,7 @@ TYPED_TEST(HipcubDeviceReduceByKey, ReduceByKey)
                 const size_t key_count = key_count_dis(gen);
                 current_key += key_delta_dis(gen);
 
-                const size_t end = std::min(size, offset + key_count);
+                const size_t end = _HIPCUB_STD::min(size, offset + key_count);
                 for(size_t i = offset; i < end; i++)
                 {
                     keys_input[i] = test_utils::convert_to_device<key_type>(current_key);

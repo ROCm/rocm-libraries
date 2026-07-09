@@ -1,7 +1,7 @@
 /******************************************************************************
  * Copyright (c) 2010-2011, Duane Merrill.  All rights reserved.
  * Copyright (c) 2011-2018, NVIDIA CORPORATION.  All rights reserved.
- * Modifications Copyright (c) 2017-2025, Advanced Micro Devices, Inc.  All rights reserved.
+ * Modifications Copyright (c) 2017-2026, Advanced Micro Devices, Inc.  All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions are met:
@@ -66,7 +66,6 @@
 #include "device/device_segmented_reduce.hpp"
 #include "device/device_segmented_sort.hpp"
 #include "device/device_select.hpp"
-#include "device/device_spmv.hpp"
 #include "device/device_transform.hpp"
 
 // Grid
@@ -79,15 +78,10 @@
 #include "iterator/arg_index_input_iterator.hpp"
 #include "iterator/cache_modified_input_iterator.hpp"
 #include "iterator/cache_modified_output_iterator.hpp"
-#include "iterator/constant_input_iterator.hpp"
-#include "iterator/counting_input_iterator.hpp"
-#include "iterator/discard_output_iterator.hpp"
 #include "iterator/tex_obj_input_iterator.hpp"
-#include "iterator/transform_input_iterator.hpp"
 
 // Thread
 #include "thread/thread_load.hpp"
-#include "thread/thread_operators.hpp"
 #include "thread/thread_reduce.hpp"
 #include "thread/thread_scan.hpp"
 #include "thread/thread_search.hpp"

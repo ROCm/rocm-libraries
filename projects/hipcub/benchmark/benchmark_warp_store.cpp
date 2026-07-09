@@ -1,6 +1,6 @@
 // MIT License
 //
-// Copyright (c) 2021-2024 Advanced Micro Devices, Inc. All rights reserved.
+// Copyright (c) 2021-2026 Advanced Micro Devices, Inc. All rights reserved.
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -40,7 +40,7 @@ __device__ auto warp_store_benchmark(T* d_output)
     -> std::enable_if_t<benchmark_utils::device_test_enabled_for_warp_size_v<LogicalWarpSize>>
 {
     T thread_data[ItemsPerThread];
-#pragma unroll
+    _CCCL_PRAGMA_UNROLL_FULL()
     for(unsigned i = 0; i < ItemsPerThread; ++i)
     {
         thread_data[i] = static_cast<T>(i);

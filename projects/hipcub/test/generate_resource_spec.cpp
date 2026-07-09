@@ -10,7 +10,7 @@
 // ./enum_device <output file>
 //
 //  Sample output:
-// 	{
+//     {
 //   "version": {
 //     "major": 1,
 //     "minor": 0
@@ -113,7 +113,7 @@ int main(int argc, char* argv[])
 
     // Add one object for each gfxID.
     // Each gfxID-keyed object will contain an array of device IDs.
-    unsigned int key_index = 0;
+    size_t key_index = 0;
     for(auto& name_it : names_to_ids)
     {
         out_file << "      \"" << name_it.first << "\": [" << std::endl;
@@ -124,7 +124,7 @@ int main(int argc, char* argv[])
         // to have a consistent output on each run so that the resource
         // spec file stays the same.
         std::sort(name_it.second.begin(), name_it.second.end());
-        unsigned int id_index = 0;
+        size_t id_index = 0;
         for(const auto& id_it : name_it.second)
         {
             out_file << "        {" << std::endl;
