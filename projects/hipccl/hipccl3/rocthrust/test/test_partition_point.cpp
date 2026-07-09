@@ -15,7 +15,6 @@
  *  limitations under the License.
  */
 
-#include <thrust/detail/libcxx_wrapper/std/__functional/identity.h>
 #include <thrust/functional.h>
 #include <thrust/iterator/retag.h>
 #include <thrust/partition.h>
@@ -48,11 +47,11 @@ TYPED_TEST(PartitionPointVectorTests, TestPartitionPointSimple)
 
   Iterator last = v.begin() + 4;
   Iterator ref  = first + 3;
-  ASSERT_EQ_QUIET(ref, thrust::partition_point(first, last, ::internal::identity{}));
+  ASSERT_EQ_QUIET(ref, thrust::partition_point(first, last, _THRUST_STD::identity{}));
 
   last = v.begin() + 3;
   ref  = last;
-  ASSERT_EQ_QUIET(ref, thrust::partition_point(first, last, ::internal::identity{}));
+  ASSERT_EQ_QUIET(ref, thrust::partition_point(first, last, _THRUST_STD::identity{}));
 }
 
 TYPED_TEST(PartitionPointVectorTests, TestPartitionPoint)
