@@ -162,6 +162,7 @@ struct SparseMmaPipeline : public MmaPipelineBase<SparseMmaPipeline<ADataType_, 
             static constexpr index_t kCM0PerLane = MmaOp::kCMNumAccess;
             static constexpr index_t kCM1PerLane = MmaOp::kCMPerLane / MmaOp::kCMNumAccess;
 
+            // TODO: This might be wrong for gfx1250 M=32 intrinsics.
             static constexpr index_t kAMBlock = MmaOp::kCMBlocks;
             static constexpr index_t kBNBlock = MmaOp::kCNBlocks;
         };
@@ -178,6 +179,14 @@ struct SparseMmaPipeline : public MmaPipelineBase<SparseMmaPipeline<ADataType_, 
     // Expose kCMLane for some callers (e.g. gemm_quant block policies)
     static constexpr index_t kCMLane = WarpGemmAttribute::Impl::kCMLane;
 
+    // Unsupported MmaOps with nonTrivial AttrNumAccess / Swizzle lead to issues in calculator.
+    static constexpr index_t AttrNumAccessAV_support =
+        MmaOpTraits<MmaOp>::IsSupported ? AttrNumAccessAV : 1;
+    static constexpr index_t AttrNumAccessBV_support =
+        MmaOpTraits<MmaOp>::IsSupported ? AttrNumAccessBV : 1;
+    static constexpr index_t SwizzleFactor_support =
+        MmaOpTraits<MmaOp>::IsSupported ? SwizzleFactor : 1;
+
     // TODO: TileDistrEncCalc only supports K composition (kIter). Setting UncompressedA to true
     // ensures that we get a tile distribution for the uncompressed A matrix, which is what the
     // higher level caller will show up with (external).
@@ -185,10 +194,10 @@ struct SparseMmaPipeline : public MmaPipelineBase<SparseMmaPipeline<ADataType_, 
     // CTranspose!
     using EncCalc           = TileDistrEncCalc<MmaOp,
                                                CTranspose,
-                                               SwizzleFactor,
+                                               SwizzleFactor_support,
                                                FragsK,
-                                               AttrNumAccessAV,
-                                               AttrNumAccessBV,
+                                               AttrNumAccessAV_support,
+                                               AttrNumAccessBV_support,
                                                true>; // UncompressedA
     using AWarpDstrEncoding = typename EncCalc::AWarpDstrEncoding;
     using BWarpDstrEncoding = typename EncCalc::BWarpDstrEncoding;
