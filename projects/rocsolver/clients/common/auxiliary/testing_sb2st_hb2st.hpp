@@ -151,6 +151,15 @@ void testing_sb2st_hb2st_bad_arg()
     CHECK_HIP_ERROR(dV.memcheck());
     CHECK_HIP_ERROR(dTau.memcheck());
 
+#ifndef ROCSOLVER_ENABLE_EIG_2STAGE
+    // hb2st is gated behind ROCSOLVER_ENABLE_EIG_2STAGE; when the flag is off the
+    // entry points must report rocblas_status_not_implemented instead of running.
+    EXPECT_ROCBLAS_STATUS(rocsolver_sb2st_hb2st(handle, rocblas_fill_lower, n, kd, dAband.data(), ldab,
+                                                dD.data(), dE.data(), dV.data(), ldv, dTau.data()),
+                          rocblas_status_not_implemented);
+    return;
+#endif
+
     // check bad arguments
     sb2st_hb2st_checkBadArgs(handle, n, kd, dAband.data(), ldab, dD.data(), dE.data(), dV.data(),
                              ldv, dTau.data());
@@ -348,6 +357,18 @@ void testing_sb2st_hb2st(Arguments& argus)
 
     rocblas_fill uplo = char2rocblas_fill(uploC);
     rocblas_int hot_calls = argus.iters;
+
+#ifndef ROCSOLVER_ENABLE_EIG_2STAGE
+    // hb2st is gated behind ROCSOLVER_ENABLE_EIG_2STAGE; when the flag is off the
+    // entry points must report rocblas_status_not_implemented instead of running.
+    EXPECT_ROCBLAS_STATUS(rocsolver_sb2st_hb2st(handle, uplo, n, kd, // opts
+                                                (T*)nullptr, ldab, // Aband
+                                                (S*)nullptr, (S*)nullptr, // D, E
+                                                (T*)nullptr, ldv, // V
+                                                (T*)nullptr), // tau
+                          rocblas_status_not_implemented);
+    return;
+#endif
 
     // determine sizes
     size_t size_Aband = ldab * n;
