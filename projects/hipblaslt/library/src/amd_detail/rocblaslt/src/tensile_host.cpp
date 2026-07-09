@@ -2929,8 +2929,20 @@ namespace
                     tensileLibPath.string());
 #endif
                 if(!lib)
-                    std::cerr << "\nrocblaslt error: Could not load " << tensileLibPath
-                              << std::endl;
+                {
+                    std::cerr
+                        << "\nrocblaslt error: Could not load " << tensileLibPath
+                        << "\n"
+                        << "  Common causes:\n"
+                        << "  - Tensile Processor enum missing this GPU (e.g. gfx1031/1032/1034/1035):\n"
+                        << "    library file exists but fails to deserialize with "
+                           "'Enum not found! <gfx>'.\n"
+                        << "  - Library built for a different architecture than the running GPU.\n"
+                        << "  - Corrupt or incomplete TensileLibrary_lazy_*.dat install.\n"
+                        << "  Override search path with HIPBLASLT_TENSILE_LIBPATH if needed.\n"
+                        << "  See also: TensileLite msgpack load errors printed above "
+                           "(if any).\n";
+                }
                 else
                 {
                     using MSL

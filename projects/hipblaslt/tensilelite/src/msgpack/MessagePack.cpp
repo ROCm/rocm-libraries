@@ -24,6 +24,7 @@
  *
  *******************************************************************************/
 
+#include <iostream>
 #include <Tensile/msgpack/MessagePack.hpp>
 
 #include <Tensile/msgpack/Loading.hpp>
@@ -256,8 +257,14 @@ namespace TensileLite
         }
         catch(std::runtime_error const& exc)
         {
-            if(Debug::Instance().printDataInit())
-                std::cout << "Error loading msgpack data:\n" << exc.what() << std::endl;
+            // Always surface library-load failures: debug-gated logging previously
+            // hid actionable errors such as "Enum not found! gfx1032" when a
+            // Tensile .dat referenced a Processor enum value missing from the
+            // binary (common on consumer RDNA2). std::cerr is used so messages
+            // remain visible without TENSILE debug flags.
+            std::cerr << "TensileLite: failed to load msgpack library '"
+                      << filename << "':\n"
+                      << exc.what() << std::endl;
 
             return nullptr;
         }
@@ -292,8 +299,8 @@ namespace TensileLite
         }
         catch(std::runtime_error const& exc)
         {
-            if(Debug::Instance().printDataInit())
-                std::cout << "Error loading msgpack data:" << std::endl << exc.what() << std::endl;
+            std::cerr << "TensileLite: failed to load msgpack library data:\n"
+                      << exc.what() << std::endl;
 
             return nullptr;
         }
