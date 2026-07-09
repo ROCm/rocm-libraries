@@ -143,7 +143,7 @@ struct ScaleMmaPipeline : public MmaPipelineBase<ScaleMmaPipeline<ADataType_, BD
                     ? 16
                     : MmaOp::kM / MmaOp::kCMBlocks;
 
-            // N size exluding blocks.
+            // N size excluding blocks.
             static constexpr index_t kBNLane = MmaOp::kN / MmaOp::kCNBlocks;
 
             // This value is the size of the middle K dimension, i.e. the second-fastest changing K
@@ -158,6 +158,9 @@ struct ScaleMmaPipeline : public MmaPipelineBase<ScaleMmaPipeline<ADataType_, BD
             static constexpr index_t kCM0PerLane = MmaOp::kCMNumAccess;
             static constexpr index_t kCM1PerLane = MmaOp::kCMPerLane / MmaOp::kCMNumAccess;
 
+            static constexpr index_t kAMBlock = MmaOp::kCMBlocks;
+            static constexpr index_t kBNBlock = MmaOp::kCNBlocks;
+
             // TODO: We probably want a separate pipeline for the scale16 intrinsics.
             static constexpr index_t kScaleGranularity = 32;
         };
@@ -170,6 +173,16 @@ struct ScaleMmaPipeline : public MmaPipelineBase<ScaleMmaPipeline<ADataType_, BD
         // into it.
         static constexpr index_t AttrNumAccessV = AttrNumAccessAV;
     };
+
+    // Expose kCMLane for some callers (e.g. gemm_quant block policies)
+    static constexpr index_t kCMLane = WarpGemmAttribute::Impl::kCMLane;
+
+    // Scale intrinsics have no "no-scale" opcode.
+    // Packed e8m0_t, bias 127 = 0x7F => 2^(127-127) = 1 for each byte.
+    // For architectures with a wider scale operand, e.g. gfx1250 scale16: 8 packed bytes
+    // For architectures with a narrower scale operand, e.g. gfx950 scale8: 4 packed bytes
+    // Since each byte is 0x7F, implicit narrowing to 4 bytes is still correct.
+    static constexpr int64_t kIdentityScale = 0x7F7F7F7F7F7F7F7Fll;
 
     // Unsupported MmaOps with nonTrivial AttrNumAccess lead to issues in calculator.
     static constexpr index_t AttrNumAccessAV_support =
@@ -217,7 +230,7 @@ struct ScaleMmaPipeline : public MmaPipelineBase<ScaleMmaPipeline<ADataType_, BD
     static_assert(WaveTileK % MmaOp::kK == 0u, "WaveTileK must be a multiple of MmaOp::kK");
 
     // TODO: Why does this even need to be a template? The types should be known.
-    // NOTE: Here we have arrived at the Impl level. We known nothing about CTranspose here, we just
+    // NOTE: Here we have arrived at the Impl level. We know nothing about CTranspose here, we just
     // perform the intrinsic, potentially multiple times for K composition.
     template <typename... Params,
               typename ATensor,
