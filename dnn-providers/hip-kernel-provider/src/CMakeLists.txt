@@ -74,9 +74,9 @@ set_target_properties(hip_kernel_provider PROPERTIES
 # Tests
 # ============================================================================
 if(HIPKERNELPROVIDER_ENABLE_TESTS)
-    set(HIPKERNELPROVIDER_GTEST_CATEGORIES_YAML "${CMAKE_CURRENT_SOURCE_DIR}/../test_categories.yaml")
-    set(HIPKERNELPROVIDER_CTEST_CATEGORIES_YAML "${CMAKE_CURRENT_SOURCE_DIR}/../test_categories_external.yaml")
-    set(HIPKERNELPROVIDER_INTEGRATION_CATEGORIES_YAML "${CMAKE_CURRENT_SOURCE_DIR}/../test_categories_integration.yaml")
+    set(HIPKERNELPROVIDER_GTEST_CATEGORIES_YAML "${CMAKE_CURRENT_SOURCE_DIR}/../HIP_MLOPS_ENGINE_test_categories.yaml")
+    set(HIPKERNELPROVIDER_CTEST_CATEGORIES_YAML "${CMAKE_CURRENT_SOURCE_DIR}/../HIP_MLOPS_ENGINE_test_categories_external.yaml")
+    set(HIPKERNELPROVIDER_INTEGRATION_CATEGORIES_YAML "${CMAKE_CURRENT_SOURCE_DIR}/../HIP_MLOPS_ENGINE_test_categories_integration.yaml")
     set(HIPKERNELPROVIDER_CTEST_INSTALL_FILE "")
     set(HIPKERNELPROVIDER_YAML_CATEGORIZATION_ENABLED FALSE)
     if(EXISTS "${HIPKERNELPROVIDER_GTEST_CATEGORIES_YAML}"
@@ -172,7 +172,7 @@ if(HIPKERNELPROVIDER_ENABLE_TESTS)
         message(STATUS "Created ${PROJECT_NAME}-external-integration-check target")
 
         # This is a pre-registered CTest test (not a GTest binary), so it is
-        # labeled via apply_ctest_category_labels()/test_categories_external.yaml.
+        # labeled via apply_ctest_category_labels()/HIP_MLOPS_ENGINE_test_categories_external.yaml.
         if(HIPKERNELPROVIDER_YAML_CATEGORIZATION_ENABLED)
             if(HIPKERNELPROVIDER_CTEST_INSTALL_FILE)
                 # Fold the staged add_test() into the labeled file before labeling;

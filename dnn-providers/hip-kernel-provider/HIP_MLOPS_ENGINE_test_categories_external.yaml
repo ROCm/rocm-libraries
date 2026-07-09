@@ -4,8 +4,9 @@
 # hip-kernel-provider CTest Categories (RFC0010).
 #
 # hip-kernel-provider's GTest binaries are categorised by the GTest-filtered
-# categories in test_categories.yaml. This file labels the *pre-registered*
-# (non-GTest) CTest tests that share this provider's check targets.
+# categories in HIP_MLOPS_ENGINE_test_categories.yaml. This file labels the
+# *pre-registered* (non-GTest) CTest tests that share this provider's check
+# targets.
 #
 # The only such test today is the generated <project>_test_name_validation
 # meta-test (see dnn-providers/cmake/Tests.cmake
@@ -19,7 +20,7 @@
 # The pattern is the exact CTest test name (hip-kernel-provider_test_name_validation)
 # so it matches only the validation meta-test and never the
 # external-integration-check target, which is categorised separately via
-# test_categories_integration.yaml.
+# HIP_MLOPS_ENGINE_test_categories_integration.yaml.
 test_categories:
   quick:
     description: "Pre-registered CTest meta-checks (test-name validation)"

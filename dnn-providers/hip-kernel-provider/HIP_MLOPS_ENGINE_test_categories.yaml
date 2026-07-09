@@ -28,8 +28,9 @@
 #
 # These categories apply to hip_kernel_provider_tests and
 # hip_kernel_provider_integration_tests. The external hipdnn_integration_tests
-# suite (run against HIP_MLOPS_ENGINE) uses test_categories_integration.yaml
-# because it has different GTest naming conventions.
+# suite (run against HIP_MLOPS_ENGINE) uses
+# HIP_MLOPS_ENGINE_test_categories_integration.yaml because it has different
+# GTest naming conventions.
 test_categories:
   quick:
     description: "Fast sanity checks (target: < 5 min) - excludes Full* parameterised expansions"
