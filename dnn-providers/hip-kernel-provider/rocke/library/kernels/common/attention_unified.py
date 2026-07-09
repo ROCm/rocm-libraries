@@ -1875,7 +1875,14 @@ _ACC_LDS_ELEM_BYTES = 2
 
 def _kv_lds_elem_bytes(spec) -> int:
     # Byte width of one K/V element as stored in LDS: 1 for the fp8 cache, else 2 (bf16/fp16).
-    if getattr(spec, "kv_storage_dtype", None) in ("fp8", "bf8", "e4m3", "e5m2"):
+    if getattr(spec, "kv_storage_dtype", None) in (
+        "fp8e4m3",
+        "bf8e5m2",
+        "fp8",
+        "bf8",
+        "e4m3",
+        "e5m2",
+    ):
         return 1
     return 2  # bf16 / fp16 K/V in LDS
 

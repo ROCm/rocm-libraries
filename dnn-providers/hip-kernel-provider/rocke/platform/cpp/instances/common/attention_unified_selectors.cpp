@@ -798,8 +798,8 @@ static int attn_kv_lds_elem_bytes(const rocke_attention_tiled_2d_spec_t* s)
 {
     const char* kv = s->kv_storage_dtype;
     if(kv != NULL
-       && (strcmp(kv, "fp8") == 0 || strcmp(kv, "bf8") == 0 || strcmp(kv, "e4m3") == 0
-           || strcmp(kv, "e5m2") == 0))
+       && (strcmp(kv, "fp8e4m3") == 0 || strcmp(kv, "bf8e5m2") == 0 || strcmp(kv, "fp8") == 0
+           || strcmp(kv, "bf8") == 0 || strcmp(kv, "e4m3") == 0 || strcmp(kv, "e5m2") == 0))
         return 1;
     return 2; /* bf16 / fp16 K/V in LDS */
 }
