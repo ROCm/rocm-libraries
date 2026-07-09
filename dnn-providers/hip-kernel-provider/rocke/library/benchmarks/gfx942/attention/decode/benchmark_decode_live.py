@@ -243,7 +243,7 @@ def _run_dsl(shape: DecodeShape, data: dict, num_sms: int, *, warmup: int, iters
     registered kernel candidate (2d-tiled or 3d split-KV) for this shape,
     then exercises the same production path as the provider.
 
-    Returns (ms, path_name) or (None, None) on failure.
+    Returns (ms, path_name, kernel_name) or (None, None, None) on failure.
     """
     from rocke.runtime import synchronize_and_release, time_launches
     import torch
@@ -251,13 +251,15 @@ def _run_dsl(shape: DecodeShape, data: dict, num_sms: int, *, warmup: int, iters
     try:
         from dispatch.attention import AttentionRequest, dispatch_attention
         from kernels import UnifiedAttentionProblem, run_unified_attention_torch  # type: ignore
+        from kernels.common.attention_unified import _resolve_attention_arch
     except ImportError:
-        return None, None
+        return None, None, None
 
     hip_stream = _bench_stream_handle()
     out = torch.empty_like(data["q"])
 
     try:
+        arch = _resolve_attention_arch()
         req = AttentionRequest(
             batch=shape.batch,
             nhead_q=shape.num_query_heads,
@@ -266,13 +268,14 @@ def _run_dsl(shape: DecodeShape, data: dict, num_sms: int, *, warmup: int, iters
             seqlen_k=shape.seqlen_k,
             hdim_q=shape.head_size,
             hdim_v=shape.head_size,
-            arch=ARCH,
+            arch=arch,
             dtype=shape.dtype,
             kv_block_size=shape.block_size,
             num_sms=num_sms,
         )
         result = dispatch_attention(req)
         path = result.spec.path  # "2d" or "3d"
+        kernel_name = result.spec.kernel_name()
         run_backend = "tiled" if path == "2d" else path
 
         prob = UnifiedAttentionProblem(
@@ -311,9 +314,9 @@ def _run_dsl(shape: DecodeShape, data: dict, num_sms: int, *, warmup: int, iters
 
         ms = time_launches(call_once, warmup=warmup, iters=iters, stream=hip_stream)
         synchronize_and_release(hip_stream)
-        return ms, path
+        return ms, path, kernel_name
     except Exception:
-        return None, None
+        return None, None, None
 
 
 def _run_aoTriton(
@@ -322,16 +325,15 @@ def _run_aoTriton(
     """Time AOTriton flash SDPA for decode. Returns ms or None on failure.
 
     Reconstructs dense [B, H, S_k, D] KV from the paged cache outside the
-    timed region. Decode shapes have seqlen_q=1 so is_causal=False (a single
-    query attending all keys is identical to causal at q=1, but flash requires
-    non-causal for seqlen_q < seqlen_k on some backends).
+    timed region. Passes the same bias operands (softcap, alibi_slopes,
+    qq_bias) as the DSL run when they are present in data, so that both
+    baselines measure equivalent workloads.
     """
     import torch
     from torch.nn.attention import SDPBackend, sdpa_kernel
     from rocke.runtime import synchronize_and_release, time_launches
 
     try:
-        num_blks = (shape.seqlen_k + shape.block_size - 1) // shape.block_size
         nrep = shape.num_query_heads // shape.num_kv_heads
 
         ks, vs = [], []
@@ -348,9 +350,6 @@ def _run_aoTriton(
                 ]
             )
 
-        dtype = data["q"].dtype
-        device = data["q"].device
-
         kh = torch.stack([k.transpose(0, 1) for k in ks], dim=0)  # [B, nhk, S_k, D]
         vh = torch.stack([v.transpose(0, 1) for v in vs], dim=0)
         kh = kh.repeat_interleave(nrep, dim=1).contiguous()
@@ -360,6 +359,14 @@ def _run_aoTriton(
         qh = data["q"].unsqueeze(2).contiguous()
 
         scale = data["scale"]
+        alibi_slopes = data["alibi_slopes"]
+        softcap = data["softcap"]
+
+        # scaled_dot_product_attention does not support alibi, qq_bias or
+        # softcap
+        use_bias = alibi_slopes is not None or data["qq_bias"] is not None or softcap
+        if use_bias:
+            return None
 
         # Probe eligibility.
         with sdpa_kernel([SDPBackend.FLASH_ATTENTION]):
@@ -486,7 +493,7 @@ def main() -> int:
     header = (
         f"{'label':<22}  {'triton_us':>10}  {'aot_us':>10}  "
         + "  ".join(f"sms{s:>4}" for s in args.num_sms_sweep)
-        + f"  {'best_sms':>8}  {'best_spd':>9}  path"
+        + f"  {'best_sms':>8}  {'best_spd':>9}  path  kernel"
     )
     print(header)
     print("-" * len(header))
@@ -518,9 +525,10 @@ def main() -> int:
         best_sms: Optional[int] = None
         best_ms: Optional[float] = None
         best_path: str = "n/a"
+        best_kernel_name: str = "n/a"
 
         for sms in args.num_sms_sweep:
-            ms, path = _run_dsl(
+            ms, path, kname = _run_dsl(
                 shape, data, sms, warmup=args.warmup, iters=args.iterations
             )
             if ms is not None:
@@ -529,6 +537,7 @@ def main() -> int:
                     best_ms = ms
                     best_sms = sms
                     best_path = path or "n/a"
+                    best_kernel_name = kname or "n/a"
             else:
                 dsl_results[sms] = {"ms": None, "path": None}
 
@@ -550,7 +559,8 @@ def main() -> int:
         )
         print(
             f"{shape.label:<22}  {tri_us:>10.1f}  {aot_us:>10.1f}  {sms_cols}"
-            f"  {best_sms or '-':>8}  {best_spd:>8.3f}x(tri)  {aot_spd_str}(aot)  {best_path}"
+            f"  {best_sms or '-':>8}  {best_spd:>8.3f}x(tri)  {aot_spd_str}(aot)"
+            f"  {best_path}  {best_kernel_name}"
         )
 
         results.append(
