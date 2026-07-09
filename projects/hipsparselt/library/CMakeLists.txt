@@ -29,9 +29,8 @@ if(HIPSPARSELT_ENABLE_HIP)
 endif()
 
 if(CMAKE_CXX_COMPILER_ID MATCHES "Clang")
-    if(CMAKE_SYSTEM_PROCESSOR MATCHES "x86_64")
-        # Enable F16C intrinsics
-       target_compile_options(hipsparselt PRIVATE -mf16c)
+    if(HIPSPARSELT_CXX_HAS_MF16C)
+        target_compile_options(hipsparselt PRIVATE -mf16c)
     endif()
 endif()
 

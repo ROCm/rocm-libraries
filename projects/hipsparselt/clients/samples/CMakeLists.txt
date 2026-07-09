@@ -1,9 +1,6 @@
 # Copyright Advanced Micro Devices, Inc., or its affiliates.
 # SPDX-License-Identifier: MIT
 
-include(CheckCXXCompilerFlag)
-check_cxx_compiler_flag("-mf16c" HIPSPARSELT_CXX_HAS_MF16C)
-
 set(SAMPLE_EXECUTABLES example_spmm_strided_batched example_prune_strip example_compress)
 
 foreach(sample_name ${SAMPLE_EXECUTABLES})
