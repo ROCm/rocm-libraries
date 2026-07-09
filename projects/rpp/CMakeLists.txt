@@ -326,6 +326,8 @@ if(NOT DEFINED SIMD_ENABLE)
 endif()
 
 add_library(${PROJECT_NAME} SHARED api/rpp.h $<TARGET_OBJECTS:modules>)
+# Enable fast-math to replace Ofast
+target_compile_options(${PROJECT_NAME} PRIVATE -ffast-math)
 if("${SIMD_ENABLE}" STREQUAL "1")
     target_compile_definitions(${PROJECT_NAME} PUBLIC ENABLE_SIMD_INTRINSICS=1)
     message("-- ${Green}${PROJECT_NAME} set to build with ENABLE_SIMD_INTRINSICS${ColourReset}")
