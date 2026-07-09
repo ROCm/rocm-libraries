@@ -16,7 +16,6 @@
  */
 
 #include <thrust/detail/libcxx_wrapper/__cccl_config.h>
-#include <thrust/detail/libcxx_wrapper/std/__functional/identity.h>
 #include <thrust/detail/type_traits.h>
 #include <thrust/device_ptr.h>
 #include <thrust/iterator/constant_iterator.h>
@@ -61,7 +60,7 @@ void TestIsContiguousIterator()
 
   using ConstantIterator  = thrust::constant_iterator<int>;
   using CountingIterator  = thrust::counting_iterator<int>;
-  using TransformIterator = thrust::transform_iterator<::internal::identity, HostVector::iterator>;
+  using TransformIterator = thrust::transform_iterator<_THRUST_STD::identity, HostVector::iterator>;
   using ZipIterator       = thrust::zip_iterator<HostIteratorTuple>;
 
   ASSERT_EQUAL((bool) thrust::is_contiguous_iterator<ConstantIterator>::value, false);

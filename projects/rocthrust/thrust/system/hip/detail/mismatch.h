@@ -40,7 +40,6 @@
 #if THRUST_HAS_HIP_COMPILER()
 #  include <thrust/system/hip/config.h>
 
-#  include <thrust/detail/libcxx_wrapper/std/__functional/identity.h>
 #  include <thrust/distance.h>
 #  include <thrust/iterator/zip_iterator.h>
 #  include <thrust/pair.h>
@@ -189,7 +188,7 @@ mismatch(execution_policy<Derived>& policy, InputIt1 first1, InputIt1 last1, Inp
   const auto transform_first =
     detail::transform_pair_of_input_iterators_t<bool, InputIt1, InputIt2, BinaryPred>(first1, first2, binary_pred);
   const auto result = hip_rocprim::find_if_not(
-    policy, transform_first, transform_first + _THRUST_STD::distance(first1, last1), ::internal::identity{});
+    policy, transform_first, transform_first + _THRUST_STD::distance(first1, last1), _THRUST_STD::identity{});
   return thrust::make_pair(first1 + _THRUST_STD::distance(transform_first, result),
                            first2 + _THRUST_STD::distance(transform_first, result));
 
