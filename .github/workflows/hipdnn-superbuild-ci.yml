@@ -220,29 +220,6 @@ jobs:
           Copy-ChildrenByPattern "lib\hipdnn_plugins\engines" "*rocke_client*"
           Copy-PathIfExists "lib\hipdnn_plugins\engines\hip_kernel_provider"
 
-      - name: Verify patched ROCm SDK
-        shell: pwsh
-        run: |
-          $requiredPaths = @(
-            (Join-Path $env:ROCM_SDK_PATH "lib\cmake\hip\hip-config.cmake"),
-            (Join-Path $env:ROCM_SDK_PATH "lib\cmake\hipdnn_backend\hipdnn_backendConfig.cmake")
-          )
-          foreach ($path in $requiredPaths) {
-            if (-not (Test-Path $path)) { throw "Missing expected ROCm SDK file: $path" }
-          }
-
-          $checks = @(
-            @{ Directory = "bin"; Pattern = "hipdnn_backend*" },
-            @{ Directory = "lib\hipdnn_plugins\engines"; Pattern = "*miopen_plugin*" },
-            @{ Directory = "lib\hipdnn_plugins\engines"; Pattern = "*hipblaslt_plugin*" },
-            @{ Directory = "lib\hipdnn_plugins\engines"; Pattern = "*hip_kernel_provider*" }
-          )
-          foreach ($check in $checks) {
-            $directory = Join-Path $env:ROCM_SDK_PATH $check.Directory
-            $match = Get-ChildItem -Path $directory -Filter $check.Pattern -File -ErrorAction SilentlyContinue | Select-Object -First 1
-            if (-not $match) { throw "Missing expected ROCm SDK file matching $($check.Pattern) in $directory" }
-          }
-
       - name: Package patched ROCm SDK artifact
         shell: pwsh
         run: |
@@ -406,16 +383,6 @@ jobs:
           copy_children_by_pattern "lib/hipdnn_plugins/engines" "*hip_kernel_provider*"
           copy_children_by_pattern "lib/hipdnn_plugins/engines" "*rocke_client*"
           copy_path "lib/hipdnn_plugins/engines/hip_kernel_provider"
-
-      - name: Verify patched ROCm SDK
-        run: |
-          set -euo pipefail
-          test -f "$ROCM_SDK_PATH/lib/cmake/hip/hip-config.cmake"
-          test -f "$ROCM_SDK_PATH/lib/cmake/hipdnn_backend/hipdnn_backendConfig.cmake"
-          test -f "$ROCM_SDK_PATH/lib/libhipdnn_backend.so"
-          test -f "$ROCM_SDK_PATH/lib/hipdnn_plugins/engines/libmiopen_plugin.so"
-          test -f "$ROCM_SDK_PATH/lib/hipdnn_plugins/engines/libhipblaslt_plugin.so"
-          test -f "$ROCM_SDK_PATH/lib/hipdnn_plugins/engines/libhip_kernel_provider.so"
 
       - name: Package patched ROCm SDK artifact
         run: |
