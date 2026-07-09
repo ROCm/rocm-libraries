@@ -260,9 +260,10 @@ else:
 
 def hasStinkyTofuBackend() -> bool:
     """Return True if rocisa was built with StinkyTofu backend support."""
-    return hasattr(_rocisa, "isSupportedByStinkyTofu")
+    _mod = globals().get("_rocisa")
+    return _mod is not None and hasattr(_mod, "isSupportedByStinkyTofu")
 
 
-if not hasattr(_rocisa, "isSupportedByStinkyTofu"):
+if not hasStinkyTofuBackend():
     def isSupportedByStinkyTofu(version) -> bool:
         return False
