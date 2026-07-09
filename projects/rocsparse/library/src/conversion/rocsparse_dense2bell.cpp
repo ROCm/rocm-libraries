@@ -76,16 +76,44 @@ rocsparse_status rocsparse::dense2bell_nnz_template(rocsparse_handle          ha
                                        ell_block_size,
                                        nnzb_per_row);
 
-    std::vector<int64_t> hnnzb_per_row(mb, 0);
-    RETURN_IF_HIP_ERROR(
-        hipMemcpy(hnnzb_per_row.data(), nnzb_per_row, sizeof(int64_t) * mb, hipMemcpyDeviceToHost));
+    // Reduce nnzb_per_row (device, size mb) down to a single maximum using two
+    // kernels so that no reduction is performed on the host.
+    constexpr uint32_t REDUCE_BLOCKSIZE = 256;
 
-    std::cout << "hnnzb_per_row" << std::endl;
-    for(size_t i = 0; i < hnnzb_per_row.size(); i++)
-    {
-        std::cout << hnnzb_per_row[i] << " ";
-    }
-    std::cout << "" << std::endl;
+    int64_t* workspace = nullptr;
+    RETURN_IF_HIP_ERROR(
+        rocsparse_hipMallocAsync(&workspace, sizeof(int64_t) * REDUCE_BLOCKSIZE, stream));
+
+    // Stage 1: each of the REDUCE_BLOCKSIZE blocks reduces a grid-strided slice of
+    // nnzb_per_row into workspace[blockIdx].
+    RETURN_IF_HIPLAUNCHKERNELGGL_ERROR(
+        (rocsparse::dense2bell_max_nnzb_part1_kernel<REDUCE_BLOCKSIZE>),
+        dim3(REDUCE_BLOCKSIZE),
+        dim3(REDUCE_BLOCKSIZE),
+        0,
+        stream,
+        mb,
+        nnzb_per_row,
+        workspace);
+
+    // Stage 2: a single block reduces the workspace array into workspace[0].
+    RETURN_IF_HIPLAUNCHKERNELGGL_ERROR(
+        (rocsparse::dense2bell_max_nnzb_part2_kernel<REDUCE_BLOCKSIZE>),
+        dim3(1),
+        dim3(REDUCE_BLOCKSIZE),
+        0,
+        stream,
+        workspace);
+
+    int64_t max_nnzb_per_row = 0;
+    RETURN_IF_HIP_ERROR(rocsparse_hipMemcpyAsync(
+        &max_nnzb_per_row, workspace, sizeof(int64_t), hipMemcpyDeviceToHost, stream));
+    RETURN_IF_HIP_ERROR(rocsparse_hipStreamSynchronize(stream));
+
+    RETURN_IF_HIP_ERROR(rocsparse_hipFreeAsync(workspace, stream));
+
+    // ell_cols is expressed in columns, i.e. the block width scaled by the block size.
+    *ell_cols = max_nnzb_per_row * ell_block_size;
 
     return rocsparse_status_success;
 }
@@ -118,6 +146,38 @@ rocsparse_status rocsparse::dense2bell_template(rocsparse_handle          handle
                          ell_cols,
                          (void*&)bell_val,
                          (void*&)bell_col_ind);
+
+    // Stream
+    hipStream_t stream = handle->stream;
+
+    const int64_t mb              = (m + ell_block_size - 1) / ell_block_size;
+    const int64_t ell_block_width = ell_cols / ell_block_size;
+
+    if(mb == 0 || ell_block_width == 0)
+    {
+        return rocsparse_status_success;
+    }
+
+    // Zero the value array so that padded ELL slots (and structural zeros that the
+    // fill kernel skips at the matrix boundary) are well defined.
+    RETURN_IF_HIP_ERROR(
+        rocsparse_hipMemsetAsync(bell_val, 0, sizeof(T) * m * ell_cols, stream));
+
+    RETURN_IF_HIPLAUNCHKERNELGGL_ERROR((rocsparse::dense2bell_fill_kernel<256>),
+                                       dim3(mb),
+                                       dim3(256),
+                                       0,
+                                       stream,
+                                       m,
+                                       n,
+                                       A,
+                                       ld,
+                                       order,
+                                       ell_block_size,
+                                       ell_block_width,
+                                       descr->base,
+                                       bell_val,
+                                       bell_col_ind);
 
     return rocsparse_status_success;
 }

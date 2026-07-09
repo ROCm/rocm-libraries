@@ -72,8 +72,6 @@ namespace rocsparse
                                               size_t*                       buffer_size,
                                               void*                         temp_buffer)
     {
-        std::cout << "dense_to_sparse_template" << std::endl;
-
         ROCSPARSE_ROUTINE_TRACE;
 
         if(temp_buffer == nullptr)
@@ -94,8 +92,6 @@ namespace rocsparse
             else if(mat_B->format == rocsparse_format_bell)
             {
                 const int64_t mb = (mat_B->rows + mat_B->block_dim - 1) / mat_B->block_dim;
-
-                std::cout << "AAAA mb: " << mb << std::endl;
 
                 *buffer_size = sizeof(int64_t) * mb;
             }
@@ -150,7 +146,6 @@ namespace rocsparse
             }
             else if(mat_B->format == rocsparse_format_bell)
             {
-                std::cout << "BBBB" << std::endl;
                 RETURN_IF_ROCSPARSE_ERROR(
                     rocsparse::dense2bell_nnz_template(handle,
                                                        mat_A->order,
@@ -222,8 +217,6 @@ namespace rocsparse
         // BELL
         if(mat_B->format == rocsparse_format_bell)
         {
-            std::cout << "CCCC" << std::endl;
-
             RETURN_IF_ROCSPARSE_ERROR(rocsparse::dense2bell_template(handle,
                                                                      mat_A->order,
                                                                      mat_A->rows,
@@ -393,8 +386,6 @@ try
 
     ROCSPARSE_CHECKARG(1, mat_A, (mat_A->batch_count != 1), rocsparse_status_not_implemented);
     ROCSPARSE_CHECKARG(2, mat_B, (mat_B->batch_count != 1), rocsparse_status_not_implemented);
-
-    std::cout << "mat_B->format: " << mat_B->format << std::endl;
 
     rocsparse::dense_to_sparse_t f;
     if(mat_B->format == rocsparse_format_csc)

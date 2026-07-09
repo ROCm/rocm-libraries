@@ -7771,7 +7771,10 @@ void host_dense_to_bell(I                     m,
                 {
                     for(I c = 0; c < ell_block_size; c++)
                     {
-                        const T val_A = A[ld * (ell_block_size * i + r) + ell_block_size * j + c];
+                        const T val_A
+                            = ((ell_block_size * i + r) < m && (ell_block_size * j + c) < n)
+                                  ? A[ld * (ell_block_size * i + r) + ell_block_size * j + c]
+                                  : static_cast<T>(0);
                         if(val_A != static_cast<T>(0))
                         {
                             block_col_found = true;
@@ -7798,9 +7801,13 @@ void host_dense_to_bell(I                     m,
         bell_col_ind.resize(mb * ell_cols / ell_block_size);
         bell_val.resize(m * ell_cols);
 
+        const I ell_block_width = ell_cols / ell_block_size;
+
+        std::fill(bell_val.begin(), bell_val.end(), static_cast<T>(0));
+
         for(I i = 0; i < mb; i++)
         {
-            I index = (ell_cols / ell_block_size) * i;
+            I slot = 0;
             for(I j = 0; j < nb; j++)
             {
                 bool block_col_found = false;
@@ -7808,7 +7815,10 @@ void host_dense_to_bell(I                     m,
                 {
                     for(I c = 0; c < ell_block_size; c++)
                     {
-                        const T val_A = A[ld * (ell_block_size * i + r) + ell_block_size * j + c];
+                        const T val_A
+                            = ((ell_block_size * i + r) < m && (ell_block_size * j + c) < n)
+                                  ? A[ld * (ell_block_size * i + r) + ell_block_size * j + c]
+                                  : static_cast<T>(0);
                         if(val_A != static_cast<T>(0))
                         {
                             block_col_found = true;
@@ -7823,31 +7833,31 @@ void host_dense_to_bell(I                     m,
 
                 if(block_col_found)
                 {
-                    bell_col_ind[index] = j;
-                    index++;
+                    bell_col_ind[i * ell_block_width + slot] = j + base;
+
+                    // Copy the whole block (including its structural zeros) into the ELL slot.
+                    for(I r = 0; r < ell_block_size; r++)
+                    {
+                        const int64_t gr = ell_block_size * i + r;
+                        if(gr >= m)
+                        {
+                            continue;
+                        }
+                        for(I c = 0; c < ell_block_size; c++)
+                        {
+                            const int64_t gc  = ell_block_size * j + c;
+                            const T       val = (gc < n) ? A[ld * gr + gc] : static_cast<T>(0);
+                            bell_val[gr * ell_cols + slot * ell_block_size + c] = val;
+                        }
+                    }
+
+                    slot++;
                 }
             }
 
-            for(I j = index; j < ell_cols / ell_block_size; j++)
+            for(I s = slot; s < ell_block_width; s++)
             {
-                bell_col_ind[j] = -1;
-            }
-        }
-
-        std::cout << "bell_val.size(): " << bell_val.size() << " m: " << m << " n: " << n << std::endl;
-
-        for(I i = 0; i < m; i++)
-        {
-            int64_t index = ell_cols * i;
-            for(I j = 0; j < n; j++)
-            {
-                const T val = A[ld * i + j];
-
-                if(val != static_cast<T>(0))
-                {
-                    bell_val[index] = val;
-                    index++;
-                }
+                bell_col_ind[i * ell_block_width + s] = base - 1;
             }
         }
     }
@@ -7863,7 +7873,10 @@ void host_dense_to_bell(I                     m,
                 {
                     for(I c = 0; c < ell_block_size; c++)
                     {
-                        const T val_A = A[ld * (ell_block_size * j + c) + ell_block_size * i + r];
+                        const T val_A
+                            = ((ell_block_size * i + r) < m && (ell_block_size * j + c) < n)
+                                  ? A[ld * (ell_block_size * j + c) + ell_block_size * i + r]
+                                  : static_cast<T>(0);
                         if(val_A != static_cast<T>(0))
                         {
                             block_col_found = true;
@@ -7890,9 +7903,13 @@ void host_dense_to_bell(I                     m,
         bell_col_ind.resize(mb * ell_cols / ell_block_size);
         bell_val.resize(m * ell_cols);
 
+        const I ell_block_width = ell_cols / ell_block_size;
+
+        std::fill(bell_val.begin(), bell_val.end(), static_cast<T>(0));
+
         for(I i = 0; i < mb; i++)
         {
-            I index = (ell_cols / ell_block_size) * i;
+            I slot = 0;
             for(I j = 0; j < nb; j++)
             {
                 bool block_col_found = false;
@@ -7900,7 +7917,10 @@ void host_dense_to_bell(I                     m,
                 {
                     for(I c = 0; c < ell_block_size; c++)
                     {
-                        const T val_A = A[ld * (ell_block_size * j + c) + ell_block_size * i + r];
+                        const T val_A
+                            = ((ell_block_size * i + r) < m && (ell_block_size * j + c) < n)
+                                  ? A[ld * (ell_block_size * j + c) + ell_block_size * i + r]
+                                  : static_cast<T>(0);
                         if(val_A != static_cast<T>(0))
                         {
                             block_col_found = true;
@@ -7915,32 +7935,31 @@ void host_dense_to_bell(I                     m,
 
                 if(block_col_found)
                 {
-                    bell_col_ind[index] = j;
-                    index++;
+                    bell_col_ind[i * ell_block_width + slot] = j + base;
+
+                    // Copy the whole block (including its structural zeros) into the ELL slot.
+                    for(I r = 0; r < ell_block_size; r++)
+                    {
+                        const int64_t gr = ell_block_size * i + r;
+                        if(gr >= m)
+                        {
+                            continue;
+                        }
+                        for(I c = 0; c < ell_block_size; c++)
+                        {
+                            const int64_t gc  = ell_block_size * j + c;
+                            const T       val = (gc < n) ? A[ld * gc + gr] : static_cast<T>(0);
+                            bell_val[gr * ell_cols + slot * ell_block_size + c] = val;
+                        }
+                    }
+
+                    slot++;
                 }
             }
 
-            for(I j = index; j < ell_cols / ell_block_size; j++)
+            for(I s = slot; s < ell_block_width; s++)
             {
-                bell_col_ind[j] = -1;
-            }
-        }
-
-        std::cout << "bell_val.size(): " << bell_val.size() << " m: " << m << " n: " << n
-                  << std::endl;
-
-        for(I i = 0; i < m; i++)
-        {
-            int64_t index = ell_cols * i;
-            for(I j = 0; j < n; j++)
-            {
-                const T val = A[ld * j + i];
-
-                if(val != static_cast<T>(0))
-                {
-                    bell_val[index] = val;
-                    index++;
-                }
+                bell_col_ind[i * ell_block_width + s] = base - 1;
             }
         }
     }

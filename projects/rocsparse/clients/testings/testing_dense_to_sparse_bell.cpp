@@ -137,24 +137,42 @@ void testing_dense_to_sparse_bell(const Arguments& arg)
         }
     }
 
+    // Randomly mark whole ELL blocks as zero so that the converted blocked ELL matrix
+    // actually contains empty blocks. Roughly 40% of the blocks are kept non-zero.
+    std::vector<char> block_nonzero(mb * nb);
+    for(I bi = 0; bi < mb; ++bi)
+    {
+        for(I bj = 0; bj < nb; ++bj)
+        {
+            block_nonzero[bi * nb + bj] = (random_cached_generator_exact<int>(1, 10) <= 4) ? 1 : 0;
+        }
+    }
+
     for(I j = 0; j < nm; ++j)
     {
         for(I i = 0; i < mn; ++i)
         {
-            h_dense_val[j * ld + i] = random_cached_generator<T>(0, 9);
+            const I row  = (order == rocsparse_order_column) ? i : j;
+            const I col  = (order == rocsparse_order_column) ? j : i;
+            const I brow = row / ell_block_size;
+            const I bcol = col / ell_block_size;
+
+            h_dense_val[j * ld + i] = block_nonzero[brow * nb + bcol]
+                                          ? random_cached_generator<T>(0, 9)
+                                          : static_cast<T>(0);
         }
     }
 
-    std::cout << "A" << std::endl;
-    for(I j = 0; j < nm; ++j)
-    {
-        for(int64_t i = 0; i < ld; ++i)
-        {
-            std::cout << h_dense_val[j * ld + i] << " ";
-        }
-        std::cout << "" << std::endl;
-    }
-    std::cout << "" << std::endl;
+    // std::cout << "A" << std::endl;
+    // for(I j = 0; j < nm; ++j)
+    // {
+    //     for(int64_t i = 0; i < ld; ++i)
+    //     {
+    //         std::cout << h_dense_val[j * ld + i] << " ";
+    //     }
+    //     std::cout << "" << std::endl;
+    // }
+    // std::cout << "" << std::endl;
 
     // Transfer.
     CHECK_HIP_ERROR(
@@ -177,8 +195,6 @@ void testing_dense_to_sparse_bell(const Arguments& arg)
     size_t buffer_size;
     CHECK_ROCSPARSE_ERROR(
         rocsparse_dense_to_sparse(handle, mat_dense, mat_sparse, alg, &buffer_size, nullptr));
-
-    std::cout << "buffer_size: " << buffer_size << std::endl;
 
     // Allocate temporary buffer on device
     device_vector<I> d_temp_buffer(buffer_size);
@@ -240,19 +256,19 @@ void testing_dense_to_sparse_bell(const Arguments& arg)
                                   sizeof(T) * m * ell_cols_tmp,
                                   hipMemcpyDeviceToHost));
 
-        std::cout << "h_bell_col_ind_gpu" << std::endl;
-        for(size_t i = 0; i < h_bell_col_ind_gpu.size(); i++)
-        {
-            std::cout << h_bell_col_ind_gpu[i] << " ";
-        }
-        std::cout << "" << std::endl;
+        // std::cout << "h_bell_col_ind_gpu" << std::endl;
+        // for(size_t i = 0; i < h_bell_col_ind_gpu.size(); i++)
+        // {
+        //     std::cout << h_bell_col_ind_gpu[i] << " ";
+        // }
+        // std::cout << "" << std::endl;
 
-        std::cout << "h_bell_val_gpu" << std::endl;
-        for(size_t i = 0; i < h_bell_val_gpu.size(); i++)
-        {
-            std::cout << h_bell_val_gpu[i] << " ";
-        }
-        std::cout << "" << std::endl;
+        // std::cout << "h_bell_val_gpu" << std::endl;
+        // for(size_t i = 0; i < h_bell_val_gpu.size(); i++)
+        // {
+        //     std::cout << h_bell_val_gpu[i] << " ";
+        // }
+        // std::cout << "" << std::endl;
 
         host_vector<I> h_bell_col_ind_cpu(mb * ell_cols_tmp / ell_block_dim_tmp);
         host_vector<T> h_bell_val_cpu(m * ell_cols_tmp);
@@ -269,56 +285,50 @@ void testing_dense_to_sparse_bell(const Arguments& arg)
                            h_bell_val_cpu,
                            h_bell_col_ind_cpu);
 
-        std::cout << "h_bell_col_ind_cpu" << std::endl;
-        for(size_t i = 0; i < h_bell_col_ind_cpu.size(); i++)
-        {
-            std::cout << h_bell_col_ind_cpu[i] << " ";
-        }
-        std::cout << "" << std::endl;
-
-        std::cout << "h_bell_val_cpu" << std::endl;
-        for(size_t i = 0; i < h_bell_val_cpu.size(); i++)
-        {
-            std::cout << h_bell_val_cpu[i] << " ";
-        }
-        std::cout << "" << std::endl;
-
-        //     h_coo_row_ind_cpu.unit_check(h_coo_row_ind_gpu);
-        //     h_coo_col_ind_cpu.unit_check(h_coo_col_ind_gpu);
-        //     h_coo_val_cpu.unit_check(h_coo_val_gpu);
-        // }
-
-        // if(arg.timing)
+        // std::cout << "h_bell_col_ind_cpu" << std::endl;
+        // for(size_t i = 0; i < h_bell_col_ind_cpu.size(); i++)
         // {
-
-        //     const double gpu_time_used
-        //         = rocsparse_clients::run_benchmark(arg,
-        //                                            rocsparse_dense_to_sparse,
-        //                                            handle,
-        //                                            mat_dense,
-        //                                            mat_sparse,
-        //                                            alg,
-        //                                            &buffer_size,
-        //                                            d_temp_buffer);
-
-        //     double gbyte_count = dense2coo_gbyte_count<T>(m, n, (I)nnz);
-        //     double gpu_gbyte   = get_gpu_gbyte(gpu_time_used, gbyte_count);
-
-        //     display_timing_info(display_key_t::order,
-        //                         order,
-        //                         display_key_t::M,
-        //                         m,
-        //                         display_key_t::N,
-        //                         n,
-        //                         display_key_t::LD,
-        //                         ld,
-        //                         display_key_t::nnz,
-        //                         nnz,
-        //                         display_key_t::bandwidth,
-        //                         gpu_gbyte,
-        //                         display_key_t::time_ms,
-        //                         get_gpu_time_msec(gpu_time_used));
+        //     std::cout << h_bell_col_ind_cpu[i] << " ";
         // }
+        // std::cout << "" << std::endl;
+
+        // std::cout << "h_bell_val_cpu" << std::endl;
+        // for(size_t i = 0; i < h_bell_val_cpu.size(); i++)
+        // {
+        //     std::cout << h_bell_val_cpu[i] << " ";
+        // }
+        // std::cout << "" << std::endl;
+
+        h_bell_col_ind_cpu.unit_check(h_bell_col_ind_gpu);
+        h_bell_val_cpu.unit_check(h_bell_val_gpu);
+    }
+
+    if(arg.timing)
+    {
+        const double gpu_time_used = rocsparse_clients::run_benchmark(arg,
+                                                                      rocsparse_dense_to_sparse,
+                                                                      handle,
+                                                                      mat_dense,
+                                                                      mat_sparse,
+                                                                      alg,
+                                                                      &buffer_size,
+                                                                      d_temp_buffer);
+
+        double gbyte_count = dense2bell_gbyte_count<T>(m, n, (I)ell_cols_tmp, block_dim);
+        double gpu_gbyte   = get_gpu_gbyte(gpu_time_used, gbyte_count);
+
+        display_timing_info(display_key_t::M,
+                            m,
+                            display_key_t::N,
+                            n,
+                            display_key_t::LD,
+                            ld,
+                            display_key_t::order,
+                            order,
+                            display_key_t::bandwidth,
+                            gpu_gbyte,
+                            display_key_t::time_ms,
+                            get_gpu_time_msec(gpu_time_used));
     }
 }
 
