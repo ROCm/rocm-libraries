@@ -172,7 +172,7 @@ if(ROCKE_CLIENT_ENABLE_TESTS)
         set_target_properties(rocke_client_integration_tests PROPERTIES
             OUTPUT_NAME "${_rocke_client_parent_prefix}_rocke_client_integration_tests_test")
         set_property(GLOBAL APPEND_STRING PROPERTY
-            "EXTERNAL_TEST_INSTALL_STAGING_${ROCKE_CLIENT_PARENT_PROJECT}"
+            "EXTERNAL_TEST_INSTALL_STAGING_${_rocke_client_parent_prefix}"
             "\n# rocke-client installed tests\n"
             "add_test(rocke_client_tests \"../${_rocke_client_parent_prefix}_rocke_client_tests_test\")\n"
             "set_tests_properties(rocke_client_tests PROPERTIES LABELS \"unit_test;quick\")\n"
