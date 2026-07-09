@@ -43,23 +43,21 @@
 // We temporarily add a limit on OMP_NUM_THREADS in order to un-block
 // theRock CI, which is using OMP_NUM_THREADS in order to reduce
 // CPU over-subscription when running multiple tests on the same node.
+// If the environment variable is set incorrectly, return the max int value.
+// Also, floor the value at 1.
 static int getenv_OMP_NUM_THREADS()
 {
-    const char* env_char      = std::getenv("OMP_NUM_THREADS");
-    int         ompnumthreads = std::numeric_limits<int>::max();
+    const char* env_char = std::getenv("OMP_NUM_THREADS");
     if(env_char != nullptr)
     {
-        auto [ptr, ec] = std::from_chars(env_char, env_char + strlen(env_char), ompnumthreads);
-        if(ec == std::errc::invalid_argument)
+        int ompnumthreads = std::numeric_limits<int>::max();
+        auto [ptr, ec]    = std::from_chars(env_char, env_char + strlen(env_char), ompnumthreads);
+        if(ec != std::errc())
         {
-            throw std::runtime_error("OMP_NUM_THREADS is not a valid number");
-        }
-        else if(ec == std::errc::result_out_of_range)
-        {
-            throw std::runtime_error("OMP_NUM_THREADS exceeds int limits");
+            return std::max<int>(1, ompnumthreads);
         }
     }
-    return ompnumthreads;
+    return std::numeric_limits<int>::max();
 }
 
 static unsigned int rocfft_concurrency()
@@ -68,9 +66,8 @@ static unsigned int rocfft_concurrency()
     cpu_set_t cpuset;
     if(sched_getaffinity(0, sizeof(cpuset), &cpuset) == 0)
     {
-        return std::max<unsigned int>(1, std::min(CPU_COUNT(&cpuset), getenv_OMP_NUM_THREADS()));
+        return std::min(CPU_COUNT(&cpuset), getenv_OMP_NUM_THREADS());
     }
 #endif
-    return std::max<unsigned int>(
-        1, std::min<unsigned int>(std::thread::hardware_concurrency(), getenv_OMP_NUM_THREADS()));
+    return std::min<unsigned int>(std::thread::hardware_concurrency(), getenv_OMP_NUM_THREADS());
 }
