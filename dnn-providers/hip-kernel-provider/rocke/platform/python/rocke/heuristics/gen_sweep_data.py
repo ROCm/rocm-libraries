@@ -602,6 +602,11 @@ def generate(
             "kernel_name": rec.name,
             "measured_tflops": measured_tflops,
             "latency_ms": latency_ms,
+            # train.py's TARGET_COLUMNS trains a bandwidth head for every op, so
+            # the column must exist. Attention is latency/tflops-bound (no
+            # meaningful GEMM-style bandwidth), so emit 0.0 — the bandwidth head
+            # trains on zeros and is simply not used for ranking.
+            "bandwidth_gb_s": 0.0,
             # is_valid = built AND (not benchmarked, or benchmarked correct).
             # A kernel that builds but fails a correctness check is NOT a valid
             # training row (it would poison the oracle-best selection).
