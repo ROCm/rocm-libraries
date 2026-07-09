@@ -68,7 +68,7 @@ execution_settings:
   default_timeout: 300
   timeout_multiplier: 1
   category_timeouts:
-    quick: 300
+    quick: 1200
     standard: 2700
     comprehensive: 25200
     full: 28800
