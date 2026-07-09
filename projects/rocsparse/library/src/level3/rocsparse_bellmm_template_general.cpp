@@ -1,6 +1,6 @@
 /*! \file */
 /* ************************************************************************
- * Copyright (C) 2021-2025 Advanced Micro Devices, Inc. All rights Reserved.
+ * Copyright (C) 2021-2026 Advanced Micro Devices, Inc. All rights Reserved.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -23,6 +23,7 @@
  * ************************************************************************ */
 
 #include "bellmm_device_general.h"
+#include "rocsparse_float16.hpp"
 #include "rocsparse_utility.hpp"
 
 namespace rocsparse
@@ -37,12 +38,11 @@ namespace rocsparse
     ROCSPARSE_KERNEL(BELL_BLOCK_DIM* BLK_SIZE_Y)
     void bellmm_general_blockdim_kernel(rocsparse_operation trans_A,
                                         rocsparse_operation trans_B,
-                                        rocsparse_direction dir_A,
                                         I                   Mb,
                                         I                   N,
                                         ROCSPARSE_DEVICE_HOST_SCALAR_PARAMS(T, alpha),
                                         I bell_cols,
-                                        I block_dim,
+                                        I bell_block_dim,
                                         const I* __restrict__ bell_col_ind,
                                         const A* __restrict__ bell_val,
                                         const B* __restrict__ dense_B,
@@ -65,12 +65,11 @@ namespace rocsparse
 
         rocsparse::bellmm_general_blockdim_device<BELL_BLOCK_DIM, BLK_SIZE_Y, T>(trans_A,
                                                                                  trans_B,
-                                                                                 dir_A,
                                                                                  Mb,
                                                                                  N,
                                                                                  alpha,
                                                                                  bell_cols,
-                                                                                 block_dim,
+                                                                                 bell_block_dim,
                                                                                  bell_col_ind,
                                                                                  bell_val,
                                                                                  dense_B,
@@ -87,12 +86,11 @@ namespace rocsparse
     rocsparse_status bellmm_template_general(rocsparse_handle          handle,
                                              rocsparse_operation       trans_A,
                                              rocsparse_operation       trans_B,
-                                             rocsparse_direction       dir_A,
                                              I                         mb,
                                              I                         n,
                                              I                         kb,
                                              I                         bell_cols,
-                                             I                         block_dim,
+                                             I                         bell_block_dim,
                                              const T*                  alpha,
                                              const rocsparse_mat_descr descr,
                                              const I*                  bell_col_ind,
@@ -118,9 +116,6 @@ namespace rocsparse
                 "This function is designed for trans_A = rocsparse_operation_none.");
         }
 
-        //
-        // What happends if A needs to be transposed?
-        //
         RETURN_IF_HIPLAUNCHKERNELGGL_ERROR((rocsparse::bellmm_general_blockdim_kernel<32, 32, T>),
                                            bellmm_blocks,
                                            bellmm_threads,
@@ -128,12 +123,11 @@ namespace rocsparse
                                            stream,
                                            trans_A,
                                            trans_B,
-                                           dir_A,
                                            mb,
                                            n,
                                            ROCSPARSE_DEVICE_HOST_SCALAR_ARGS(handle, alpha),
                                            bell_cols,
-                                           block_dim,
+                                           bell_block_dim,
                                            bell_col_ind,
                                            bell_val,
                                            dense_B,
@@ -154,7 +148,6 @@ namespace rocsparse
     template rocsparse_status rocsparse::bellmm_template_general(rocsparse_handle    handle,         \
                                                                  rocsparse_operation trans_A,        \
                                                                  rocsparse_operation trans_B,        \
-                                                                 rocsparse_direction dir_A,          \
                                                                  ITYPE               mb,             \
                                                                  ITYPE               n,              \
                                                                  ITYPE               kb,             \

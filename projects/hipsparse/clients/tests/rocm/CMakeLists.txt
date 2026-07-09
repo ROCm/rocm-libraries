@@ -211,6 +211,7 @@ set(HIPSPARSE_TEST_YAMLS
     rocm/test_spmm_batched_coo.yaml
     rocm/test_spmm_batched_csc.yaml
     rocm/test_spmm_batched_csr.yaml
+    rocm/test_spmm_bell.yaml
     rocm/test_spmm_bsr.yaml
     rocm/test_spmm_coo.yaml
     rocm/test_spmm_csc.yaml

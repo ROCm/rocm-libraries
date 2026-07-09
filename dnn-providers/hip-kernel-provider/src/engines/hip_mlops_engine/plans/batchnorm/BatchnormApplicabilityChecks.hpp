@@ -30,7 +30,7 @@ private:
 
     // --- Component Validators ---
 
-    void checkTensorLayoutsAndDimsSupported() override;
+    void checkTensorLayoutsAndDimsSupported(const std::vector<int64_t>& tensorIds) override;
 
     void checkTensorDataTypesSupported(const std::vector<int64_t>& ioTensorIds,
                                        const std::vector<int64_t>& affineTensorIds,
