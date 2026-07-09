@@ -5,6 +5,7 @@
 
 #include <hipdnn_flatbuffers_sdk/data_objects/convolution_fwd_attributes_generated.h>
 #include <hipdnn_flatbuffers_sdk/data_objects/graph_generated.h>
+#include <hipdnn_plugin_sdk/GlobalKnobDefines.hpp>
 #include <hipdnn_plugin_sdk/PluginException.hpp>
 #include <hipdnn_plugin_sdk/PluginLogging.hpp>
 
@@ -16,8 +17,16 @@ namespace example_provider
 
 static constexpr int64_t DEFAULT_BLOCK_SIZE = 256;
 
-ConvFwdPlanBuilder::ConvFwdPlanBuilder(const IKernelCompiler& compiler)
+ConvFwdPlanBuilder::ConvFwdPlanBuilder(const IKernelCompiler& compiler,
+                                       uint64_t normalSpinNs,
+                                       uint64_t primedSpinNs,
+                                       bool isExhaustive,
+                                       size_t workspaceBytes)
     : _compiler(compiler)
+    , _normalSpinNs(normalSpinNs)
+    , _primedSpinNs(primedSpinNs)
+    , _isExhaustive(isExhaustive)
+    , _workspaceBytes(workspaceBytes)
 {
 }
 
@@ -77,8 +86,9 @@ size_t ConvFwdPlanBuilder::getMaxWorkspaceSize(
     const hipdnn_flatbuffers_sdk::flatbuffer_utilities::IGraph& /*opGraph*/,
     const ExampleProviderSettings& /*executionSettings*/) const
 {
-    // The convolution kernel in this engine does not require a workspace.
-    return 0;
+    // The convolution kernel needs no workspace; a non-zero value reports a synthetic
+    // requirement so workspace-based engine filtering can be demonstrated.
+    return _workspaceBytes;
 }
 
 void ConvFwdPlanBuilder::initializeExecutionSettings(
@@ -94,6 +104,22 @@ void ConvFwdPlanBuilder::initializeExecutionSettings(
         const auto& intVal = knobSetting.valueAs<hipdnn_flatbuffers_sdk::data_objects::IntValue>();
         executionSettings.blockSize = intVal.value();
     }
+
+    if(_isExhaustive && engineConfig.hasKnobSetting(hipdnn_plugin_sdk::BENCHMARKING_KNOB_NAME))
+    {
+        const auto& knobSetting
+            = engineConfig.getKnobSettingByName(hipdnn_plugin_sdk::BENCHMARKING_KNOB_NAME);
+        const auto& intVal = knobSetting.valueAs<hipdnn_flatbuffers_sdk::data_objects::IntValue>();
+        if(intVal.value() != 0)
+        {
+            // The exhaustive priming pass sets this knob; record that priming has occurred so the
+            // following timing pass uses the shorter spin.
+            _primed.store(true, std::memory_order_relaxed);
+        }
+    }
+
+    const bool usePrimed = _isExhaustive && _primed.load(std::memory_order_relaxed);
+    executionSettings.spinNanoseconds = usePrimed ? _primedSpinNs : _normalSpinNs;
 }
 
 void ConvFwdPlanBuilder::buildPlan(
@@ -211,7 +237,9 @@ void ConvFwdPlanBuilder::buildPlan(
                                padW,
                                strideH,
                                strideW,
-                               blockSize};
+                               blockSize,
+                               settings.spinNanoseconds,
+                               _workspaceBytes};
     auto plan = std::make_unique<ConvFwdPlan>(params);
     plan->compile(_compiler);
 
@@ -241,6 +269,28 @@ std::vector<hipdnn_flatbuffers_sdk::data_objects::KnobT> ConvFwdPlanBuilder::get
     knob.constraint.Set(std::move(constraint));
 
     knobs.push_back(std::move(knob));
+
+    if(_isExhaustive)
+    {
+        // Registering this knob is what makes the framework treat this engine as
+        // exhaustive-capable and run the priming pass for it.
+        hipdnn_flatbuffers_sdk::data_objects::KnobT benchmarkingKnob;
+        benchmarkingKnob.knob_id = hipdnn_plugin_sdk::BENCHMARKING_KNOB_NAME;
+        benchmarkingKnob.description = "Enable exhaustive benchmarking priming";
+
+        hipdnn_flatbuffers_sdk::data_objects::IntValueT benchmarkingDefault;
+        benchmarkingDefault.value = 0;
+        benchmarkingKnob.default_value.Set(benchmarkingDefault);
+
+        hipdnn_flatbuffers_sdk::data_objects::IntConstraintT benchmarkingConstraint;
+        benchmarkingConstraint.min_value = 0;
+        benchmarkingConstraint.max_value = 1;
+        benchmarkingConstraint.valid_values = {0, 1};
+        benchmarkingKnob.constraint.Set(std::move(benchmarkingConstraint));
+
+        knobs.push_back(std::move(benchmarkingKnob));
+    }
+
     return knobs;
 }
 

@@ -7,6 +7,7 @@
 #include <hipdnn_plugin_sdk/PluginLogging.hpp>
 
 #include "engines/ExampleProviderUtils.hpp"
+#include "hip/HipUtils.hpp"
 #include "hip/IKernelCompiler.hpp"
 
 #include <limits>
@@ -29,7 +30,7 @@ void ConvFwdPlan::compile(const IKernelCompiler& kernelCompiler)
 
 size_t ConvFwdPlan::getWorkspaceSize(const ExampleProviderHandle& /*handle*/) const
 {
-    return 0;
+    return _params.workspaceBytes;
 }
 
 void ConvFwdPlan::execute(const ExampleProviderHandle& handle,
@@ -60,6 +61,15 @@ void ConvFwdPlan::execute(const ExampleProviderHandle& handle,
     _kernel->setBlockSize(blockSizeU, 1, 1);
     _kernel->setGridSize(gridSize, 1, 1);
 
+    // The kernel spins for a fixed wall-clock duration after computing the real convolution;
+    // wall_clock64() counts GPU shader-clock cycles, so pass the clock rate to convert
+    // nanoseconds to cycles. hipDeviceProp_t::clockRate is in kHz.
+    int deviceId = 0;
+    HIP_CHECK(hipGetDevice(&deviceId));
+    hipDeviceProp_t deviceProps{};
+    HIP_CHECK(hipGetDeviceProperties(&deviceProps, deviceId));
+    auto clockMHz = static_cast<unsigned long long>(deviceProps.clockRate) / 1000ULL;
+
     auto n = static_cast<int>(_params.n);
     auto c = static_cast<int>(_params.c);
     auto h = static_cast<int>(_params.h);
@@ -73,6 +83,7 @@ void ConvFwdPlan::execute(const ExampleProviderHandle& handle,
     auto padW = static_cast<int>(_params.padW);
     auto strideH = static_cast<int>(_params.strideH);
     auto strideW = static_cast<int>(_params.strideW);
+    auto spinNs = static_cast<unsigned long long>(_params.spinNanoseconds);
 
     _kernel->launch(handle.getStream(),
                     input,
@@ -90,7 +101,9 @@ void ConvFwdPlan::execute(const ExampleProviderHandle& handle,
                     padH,
                     padW,
                     strideH,
-                    strideW);
+                    strideW,
+                    spinNs,
+                    clockMHz);
 }
 
 } // namespace example_provider

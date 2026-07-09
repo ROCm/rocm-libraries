@@ -29,24 +29,62 @@ namespace example_provider
 // E.g. HIPDNN_REGISTER_ENGINE(EXAMPLE_PROVIDER_RELU_ENGINE) will create
 // EXAMPLE_PROVIDER_RELU_ENGINE_NAME with the value "EXAMPLE_PROVIDER_RELU_ENGINE" and
 // EXAMPLE_PROVIDER_RELU_ENGINE_ID with the hash-derived integer ID for the engine.
-HIPDNN_REGISTER_ENGINE(EXAMPLE_PROVIDER_RELU_ENGINE)
-HIPDNN_REGISTER_ENGINE(EXAMPLE_PROVIDER_CONV_FWD_ENGINE)
+HIPDNN_REGISTER_ENGINE(RELU_ENGINE)
+HIPDNN_REGISTER_ENGINE(CONV_FAST)
+HIPDNN_REGISTER_ENGINE(CONV_MEDIUM)
+HIPDNN_REGISTER_ENGINE(CONV_SLOW)
+HIPDNN_REGISTER_ENGINE(CONV_EXHAUSTIVE)
+
+// Post-convolution spin durations (nanoseconds) for the demo engines. Every engine computes a real
+// convolution and then busy-waits for its duration; the autotune framework ranks candidates by
+// measured GPU time, so these distinct durations produce a deterministic winner. The exhaustive
+// engine spins long until its priming pass runs, then short.
+static constexpr uint64_t SPIN_EXHAUSTIVE_PRIMED_NS = 1'000'000;
+static constexpr uint64_t SPIN_CONV_FWD_NS = 2'000'000;
+static constexpr uint64_t SPIN_MEDIUM_NS = 5'000'000;
+static constexpr uint64_t SPIN_EXHAUSTIVE_NORMAL_NS = 8'000'000;
+static constexpr uint64_t SPIN_SLOW_NS = 10'000'000;
+
+// CONV_FAST reports a synthetic workspace requirement above the sample's 64 MiB filter so it is
+// excluded by workspace-constrained autotune; the other engines report no workspace requirement.
+static constexpr size_t CONV_FAST_WORKSPACE_BYTES = size_t{128} * 1024 * 1024;
 
 const std::vector<ExampleProviderContainer::EngineDefinition>&
     ExampleProviderContainer::getEngineDefinitions()
 {
     static const std::vector<EngineDefinition> s_engineDefinitions = {
-        {EXAMPLE_PROVIDER_RELU_ENGINE_ID,
+        {RELU_ENGINE_ID,
          [](const IKernelCompiler& compiler) -> ExampleProviderEnginePtr {
-             auto engine = std::make_unique<ExampleProviderEngine>(EXAMPLE_PROVIDER_RELU_ENGINE_ID);
+             auto engine = std::make_unique<ExampleProviderEngine>(RELU_ENGINE_ID);
              engine->addPlanBuilder(std::make_unique<ReluPlanBuilder>(compiler));
              return engine;
          }},
-        {EXAMPLE_PROVIDER_CONV_FWD_ENGINE_ID,
+        {CONV_FAST_ID,
          [](const IKernelCompiler& compiler) -> ExampleProviderEnginePtr {
-             auto engine
-                 = std::make_unique<ExampleProviderEngine>(EXAMPLE_PROVIDER_CONV_FWD_ENGINE_ID);
-             engine->addPlanBuilder(std::make_unique<ConvFwdPlanBuilder>(compiler));
+             auto engine = std::make_unique<ExampleProviderEngine>(CONV_FAST_ID);
+             engine->addPlanBuilder(std::make_unique<ConvFwdPlanBuilder>(
+                 compiler, SPIN_CONV_FWD_NS, SPIN_CONV_FWD_NS, false, CONV_FAST_WORKSPACE_BYTES));
+             return engine;
+         }},
+        {CONV_MEDIUM_ID,
+         [](const IKernelCompiler& compiler) -> ExampleProviderEnginePtr {
+             auto engine = std::make_unique<ExampleProviderEngine>(CONV_MEDIUM_ID);
+             engine->addPlanBuilder(std::make_unique<ConvFwdPlanBuilder>(
+                 compiler, SPIN_MEDIUM_NS, SPIN_MEDIUM_NS, false));
+             return engine;
+         }},
+        {CONV_SLOW_ID,
+         [](const IKernelCompiler& compiler) -> ExampleProviderEnginePtr {
+             auto engine = std::make_unique<ExampleProviderEngine>(CONV_SLOW_ID);
+             engine->addPlanBuilder(
+                 std::make_unique<ConvFwdPlanBuilder>(compiler, SPIN_SLOW_NS, SPIN_SLOW_NS, false));
+             return engine;
+         }},
+        {CONV_EXHAUSTIVE_ID,
+         [](const IKernelCompiler& compiler) -> ExampleProviderEnginePtr {
+             auto engine = std::make_unique<ExampleProviderEngine>(CONV_EXHAUSTIVE_ID);
+             engine->addPlanBuilder(std::make_unique<ConvFwdPlanBuilder>(
+                 compiler, SPIN_EXHAUSTIVE_NORMAL_NS, SPIN_EXHAUSTIVE_PRIMED_NS, true));
              return engine;
          }},
     };

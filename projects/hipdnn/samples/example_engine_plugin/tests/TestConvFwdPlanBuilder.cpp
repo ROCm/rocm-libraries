@@ -34,7 +34,7 @@ protected:
 
     void SetUp() override
     {
-        _planBuilder = std::make_unique<ConvFwdPlanBuilder>(_mockCompiler);
+        _planBuilder = std::make_unique<ConvFwdPlanBuilder>(_mockCompiler, 0, 0, false);
     }
 };
 

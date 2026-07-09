@@ -30,6 +30,8 @@ struct ConvFwdParams
     int64_t strideH; // Vertical stride.
     int64_t strideW; // Horizontal stride.
     int64_t blockSize; // HIP thread block size for the kernel launch.
+    uint64_t spinNanoseconds = 0; // Busy-wait duration for the spin demo kernel (0 = no spin).
+    size_t workspaceBytes = 0; // Synthetic workspace requirement reported by the compiled plan.
 };
 
 } // namespace example_provider

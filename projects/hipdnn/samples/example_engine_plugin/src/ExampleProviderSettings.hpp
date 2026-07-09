@@ -3,6 +3,8 @@
 
 #pragma once
 
+#include <cstdint>
+
 // TEMPLATE ADAPTATION: Use this struct if your plugin supports knobs. Rename the struct
 // and replace the fields with your own settings.
 // These fields are populated by your PlanBuilder's initializeExecutionSettings()
@@ -21,4 +23,7 @@ struct ExampleProviderSettings
     /// Thread block size for the convolution kernel.
     /// Controlled by the "BLOCK_SIZE" knob.
     int64_t blockSize = 256;
+
+    /// Busy-wait duration for the spin demo kernel, in nanoseconds.
+    uint64_t spinNanoseconds = 0;
 };

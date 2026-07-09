@@ -22,7 +22,9 @@ extern "C" __global__ void conv_forward_naive_kernel(const float* input,
                                                      int padH,
                                                      int padW,
                                                      int strideH,
-                                                     int strideW)
+                                                     int strideW,
+                                                     unsigned long long spinNs,
+                                                     unsigned long long clockMHz)
 {
     IndexType idx = blockIdx.x * blockDim.x + threadIdx.x;
     IndexType totalOutputElements = static_cast<IndexType>(N) * K * outH * outW;
@@ -62,4 +64,13 @@ extern "C" __global__ void conv_forward_naive_kernel(const float* input,
 
     // Output: NKHW layout (same as NCHW with K output channels)
     output[idx] = sum;
+
+    // Real convolution result is written; delay completion by a fixed wall-clock duration so the
+    // autotune framework measures a deterministic per-engine GPU time. wall_clock64() advances at
+    // the GPU shader clock, so convert the requested nanoseconds to that clock's cycles.
+    unsigned long long spinCycles = spinNs * clockMHz / 1000ULL;
+    unsigned long long start = wall_clock64();
+    while(wall_clock64() - start < spinCycles)
+    {
+    }
 }
