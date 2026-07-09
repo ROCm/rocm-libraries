@@ -96,7 +96,7 @@ with nothing re-reading it at execute time (the build path is detailed in
 Serving N values for the same scalar today therefore requires N
 distinct compiled graphs and N cached execution plans. The backend
 already anticipates this gap: `TensorDescriptor::finalize()`
-([`backend/src/descriptors/TensorDescriptor.cpp`](../../backend/src/descriptors/TensorDescriptor.cpp)) carries the comment
+([`backend/src/descriptors/TensorDescriptor.cpp`](https://github.com/ROCm/rocm-libraries/blob/ce7ea204012bd0e0013485b919f86b7f071c6aa2/projects/hipdnn/backend/src/descriptors/TensorDescriptor.cpp)) carries the comment
 "Pass-by-value tensors are currently required to supply a value at
 descriptor creation time. In the future, pass-by-value tensors may
 also support setting values through variant packs." This RFC realizes
@@ -190,7 +190,7 @@ set_value(scalar)            // frontend: stores into ValueVariant _value
 
 Pass-by-value status is *implicit*: the frontend's
 `Tensor_attributes::get_pass_by_value()`
-([`frontend/include/hipdnn_frontend/attributes/TensorAttributes.hpp:97`](../../frontend/include/hipdnn_frontend/attributes/TensorAttributes.hpp#L97))
+([`frontend/include/hipdnn_frontend/attributes/TensorAttributes.hpp:97`](https://github.com/ROCm/rocm-libraries/blob/ce7ea204012bd0e0013485b919f86b7f071c6aa2/projects/hipdnn/frontend/include/hipdnn_frontend/attributes/TensorAttributes.hpp#L97))
 returns `!std::holds_alternative<std::monostate>(_value)`, i.e. "a value
 has been set." The backend exposes a *read-only*
 `HIPDNN_ATTR_TENSOR_IS_BY_VALUE` (1307) derived from
@@ -249,12 +249,12 @@ present (`value.type != NONE`), and the flag is read
 independently. This is what makes a legacy baked scalar (value present, flag
 absent → `false`) deserialize correctly as a compile-time constant. It
 changes the current descriptor unpack gate in
-[`DescriptorUnpackHelpers.hpp`](../../frontend/include/hipdnn_frontend/detail/DescriptorUnpackHelpers.hpp),
+[`DescriptorUnpackHelpers.hpp`](https://github.com/ROCm/rocm-libraries/blob/ce7ea204012bd0e0013485b919f86b7f071c6aa2/projects/hipdnn/frontend/include/hipdnn_frontend/detail/DescriptorUnpackHelpers.hpp),
 which keys the value-read on `IS_BY_VALUE == true`, to a value-presence gate.
 
 Providers read the flag through a `isRuntimePassByValue()` accessor added
 to the op-graph tensor wrapper
-([`ITensorAttributesWrapper`](../../flatbuffers_sdk/include/hipdnn_flatbuffers_sdk/flatbuffer_utilities/TensorAttributesWrapper.hpp)). It is the accessor the provider
+([`ITensorAttributesWrapper`](https://github.com/ROCm/rocm-libraries/blob/ce7ea204012bd0e0013485b919f86b7f071c6aa2/projects/hipdnn/flatbuffers_sdk/include/hipdnn_flatbuffers_sdk/flatbuffer_utilities/TensorAttributesWrapper.hpp)). It is the accessor the provider
 example in [§4.6](#46-provider-contract) consumes. For cuDNN porting parity
 the wrapper also exposes two **derived** queries — `isByValue()` (the umbrella,
 `value present || is_runtime_pass_by_value`, true for every by-value state) and
@@ -359,7 +359,7 @@ enum class ScalarType { RUNTIME_PARAM, COMPILE_TIME_CONST };
 no graph built through the existing API changes its provider floor.
 
 `Graph::tensor(const TensorAttributes&)`
-([`Graph.hpp`](../../frontend/include/hipdnn_frontend/Graph.hpp)) is
+([`Graph.hpp`](https://github.com/ROCm/rocm-libraries/blob/ce7ea204012bd0e0013485b919f86b7f071c6aa2/projects/hipdnn/frontend/include/hipdnn_frontend/Graph.hpp)) is
 retained, and `graph.tensor(scalar, ScalarType)` overloads are added (one per supported
 scalar type), each delegating to the `TensorAttributes(scalar, ScalarType)`
 constructor: `graph.tensor(v, ScalarType::RUNTIME_PARAM)` → runtime-with-default and
@@ -373,7 +373,7 @@ scalar conventions (dims/strides `{1}`) apply.
 Unlike override shapes — whose frontend setters
 (`set_override_shape_enabled` and the override execute overload) are
 compiled only under `#ifdef HIPDNN_ENABLE_SDPA` in
-[`Graph.hpp`](../../frontend/include/hipdnn_frontend/Graph.hpp) — the
+[`Graph.hpp`](https://github.com/ROCm/rocm-libraries/blob/ce7ea204012bd0e0013485b919f86b7f071c6aa2/projects/hipdnn/frontend/include/hipdnn_frontend/Graph.hpp) — the
 pass-by-value frontend API is **not** SDPA-gated. Scalar operands such
 as epsilon, alpha, and beta are general, not SDPA-specific, so
 `set_is_pass_by_value` is always compiled.
@@ -547,7 +547,7 @@ the rest of this section covers how that signal — alongside the override
 flag — becomes a version floor.
 
 `computeMinimumPluginApiVersion`
-([`backend/src/plugin/EnginePluginResourceManager.cpp:86-99`](../../backend/src/plugin/EnginePluginResourceManager.cpp#L86-L99)) becomes
+([`backend/src/plugin/EnginePluginResourceManager.cpp:86-99`](https://github.com/ROCm/rocm-libraries/blob/ce7ea204012bd0e0013485b919f86b7f071c6aa2/projects/hipdnn/backend/src/plugin/EnginePluginResourceManager.cpp#L86-L99)) becomes
 feature-aware. Today it maps a single override-shape boolean to either
 the baseline `1.0.0` or the override minimum `1.1.0`. It is extended to
 also account for the pass-by-value flag and return the **maximum** of the
@@ -560,19 +560,19 @@ per-feature minimums:
 | Runtime pass-by-value — any tensor `is_runtime_pass_by_value == true` (user-supplied or runtime-with-default), with or without override | `1.2.0` |
 
 A new version constant is added in
-[`plugin_sdk/include/hipdnn_plugin_sdk/PluginVersionConstants.hpp`](../../plugin_sdk/include/hipdnn_plugin_sdk/PluginVersionConstants.hpp):
+[`plugin_sdk/include/hipdnn_plugin_sdk/PluginVersionConstants.hpp`](https://github.com/ROCm/rocm-libraries/blob/ce7ea204012bd0e0013485b919f86b7f071c6aa2/projects/hipdnn/plugin_sdk/include/hipdnn_plugin_sdk/PluginVersionConstants.hpp):
 
 ```cpp
 inline constexpr std::string_view K_PASS_BY_VALUE_MIN_API_VERSION = "1.2.0";
 ```
 
 and the canonical ABI macros in
-[`plugin_sdk/include/hipdnn_plugin_sdk/engine_api_version.h`](../../plugin_sdk/include/hipdnn_plugin_sdk/engine_api_version.h) bump
+[`plugin_sdk/include/hipdnn_plugin_sdk/engine_api_version.h`](https://github.com/ROCm/rocm-libraries/blob/ce7ea204012bd0e0013485b919f86b7f071c6aa2/projects/hipdnn/plugin_sdk/include/hipdnn_plugin_sdk/engine_api_version.h) bump
 `HIPDNN_ENGINE_API_VERSION_MINOR` from `1` to `2`
 (`HIPDNN_ENGINE_API_VERSION = "1.2.0"`).
 
 **Filtering is version-only.** `getApplicableEngineIds`
-([`EnginePluginResourceManager.cpp:341-407`](../../backend/src/plugin/EnginePluginResourceManager.cpp#L341-L407)) already skips any plugin
+([`EnginePluginResourceManager.cpp:341-407`](https://github.com/ROCm/rocm-libraries/blob/ce7ea204012bd0e0013485b919f86b7f071c6aa2/projects/hipdnn/backend/src/plugin/EnginePluginResourceManager.cpp#L341-L407)) already skips any plugin
 whose `parsedApiVersion() < requiredVersion` (line 362). Once
 `requiredVersion` is `1.2.0` for a pass-by-value graph, every plugin
 reporting less — including the `1.0.0` fallback assigned to plugins
@@ -623,7 +623,7 @@ scalar after build is the variant pack at execute
 ([§4.5](#45-execute-time-transport)).
 
 `detail::validateScalarParameter`
-([`frontend/include/hipdnn_frontend/node/detail/Utilities.hpp`](../../frontend/include/hipdnn_frontend/node/detail/Utilities.hpp), ~line
+([`frontend/include/hipdnn_frontend/node/detail/Utilities.hpp`](https://github.com/ROCm/rocm-libraries/blob/ce7ea204012bd0e0013485b919f86b7f071c6aa2/projects/hipdnn/frontend/include/hipdnn_frontend/node/detail/Utilities.hpp), ~line
 475) today gates required scalar inputs (epsilon, SDPA scale, etc.) on the
 pre-RFC bool `get_pass_by_value()` ("a value has been set"). Since that name
 is repurposed to return the value, the check moves to the derived umbrella
@@ -636,7 +636,10 @@ in the variant pack at `Graph::execute()` ([§4.5](#45-execute-time-transport)).
 A runtime-with-default or compile-time scalar instead carries its
 value baked in the tensor flatbuffer (`VALUE_EXT`).
 
-**Forwarded-UID filter.** `Graph::execute()` forwards to the provider only
+**Forwarded-UID filter (frontend).** This filter is the **frontend** half of
+the split named in [§4.2](#42-state-reference); the backend/provider honoring
+of a present override is the other half ([§4.6](#46-provider-contract)).
+`Graph::execute()` forwards to the provider only
 the UIDs of pure (non-defaulted) user-supplied scalars, **rejecting** any
 variant-pack entry whose UID carries a baked value
 — such a value can never be overridden today, so supplying one is a caller
@@ -655,7 +658,7 @@ per-tensor attributes and cannot run this check (see below).
 **Compiled-plan path.** On the compiled-plan path `deserializeBackendPlan`
 reconstructs no per-tensor attributes
 ([§5.5](#55-deserialized-plan-support-via-the-provider-payload);
-[`ExecutionPlanDescriptor.cpp:425-485`](../../backend/src/descriptors/ExecutionPlanDescriptor.cpp#L425-L485)),
+[`ExecutionPlanDescriptor.cpp:425-486`](https://github.com/ROCm/rocm-libraries/blob/ce7ea204012bd0e0013485b919f86b7f071c6aa2/projects/hipdnn/backend/src/descriptors/ExecutionPlanDescriptor.cpp#L425-L486)),
 so a runtime-with-default tensor round-tripped through `to_compiled_plan_binary`
 loses its baked default at the hipDNN layer and degrades to user-supplied
 semantics unless the provider persists the value in its `plugin_payload`
@@ -782,7 +785,7 @@ field to derive from; runtime pass-by-value does.
 **Trade-off**: a one-time `O(tensors)` walk of the already-materialized
 serialized graph per applicability query instead of a bool read —
 negligible, on a non-hot path
-([`EnginePluginResourceManager.cpp:341-407`](../../backend/src/plugin/EnginePluginResourceManager.cpp#L341-L407)).
+([`EnginePluginResourceManager.cpp:341-407`](https://github.com/ROCm/rocm-libraries/blob/ce7ea204012bd0e0013485b919f86b7f071c6aa2/projects/hipdnn/backend/src/plugin/EnginePluginResourceManager.cpp#L341-L407)).
 
 ### 5.4 Version-only filtering
 
@@ -970,7 +973,7 @@ and update the `BackendEnumStringUtils` string. Keep
 by-value umbrella (1307) and the has-constant query stay **derived**, not
 separately stored; only the runtime bit (1308) is stored. Change the
 descriptor unpack value-read gate
-([`DescriptorUnpackHelpers.hpp`](../../frontend/include/hipdnn_frontend/detail/DescriptorUnpackHelpers.hpp))
+([`DescriptorUnpackHelpers.hpp`](https://github.com/ROCm/rocm-libraries/blob/ce7ea204012bd0e0013485b919f86b7f071c6aa2/projects/hipdnn/frontend/include/hipdnn_frontend/detail/DescriptorUnpackHelpers.hpp))
 from `IS_BY_VALUE`-gated to **value-presence-gated** (read the value
 whenever the union is present), and read the runtime flag independently.
 Wire both through the existing `TensorDescriptor` get/set-attribute and
@@ -982,7 +985,7 @@ not stored). No operation-graph attribute is added.
 ### Step 3: Version constant and filter
 
 Add `K_PASS_BY_VALUE_MIN_API_VERSION = "1.2.0"` to
-[`PluginVersionConstants.hpp`](../../plugin_sdk/include/hipdnn_plugin_sdk/PluginVersionConstants.hpp); bump [`engine_api_version.h`](../../plugin_sdk/include/hipdnn_plugin_sdk/engine_api_version.h) minor to `2`.
+[`PluginVersionConstants.hpp`](https://github.com/ROCm/rocm-libraries/blob/ce7ea204012bd0e0013485b919f86b7f071c6aa2/projects/hipdnn/plugin_sdk/include/hipdnn_plugin_sdk/PluginVersionConstants.hpp); bump [`engine_api_version.h`](https://github.com/ROCm/rocm-libraries/blob/ce7ea204012bd0e0013485b919f86b7f071c6aa2/projects/hipdnn/plugin_sdk/include/hipdnn_plugin_sdk/engine_api_version.h) minor to `2`.
 Add a `readIsRuntimePassByValueEnabled(graphDesc)` helper that scans the
 serialized op graph and returns `true` iff any tensor has
 `is_runtime_pass_by_value == true` (either runtime state; no
@@ -1012,7 +1015,7 @@ runtime-with-default), moving its former bool-predicate role to
 `get_is_pass_by_value()`, and migrate every internal value-presence caller
 off `get_pass_by_value()` onto `get_value_variant()` — the known callsite is
 `createOrFindTensorDesc` in
-[`DescriptorHelpers.hpp`](../../frontend/include/hipdnn_frontend/detail/DescriptorHelpers.hpp)
+[`DescriptorHelpers.hpp`](https://github.com/ROCm/rocm-libraries/blob/ce7ea204012bd0e0013485b919f86b7f071c6aa2/projects/hipdnn/frontend/include/hipdnn_frontend/detail/DescriptorHelpers.hpp)
 (writes the baked value); `search` for `get_pass_by_value()` to enumerate
 the rest. Add the `graph.tensor(scalar, ScalarType)` factory overloads
 ([§4.3](#43-frontend-surface)). Add the frontend validations
