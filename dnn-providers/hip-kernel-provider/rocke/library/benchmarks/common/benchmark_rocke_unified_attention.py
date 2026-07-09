@@ -11,11 +11,11 @@ Run it as a library module (rocke + the library packages are editable-installed;
 `_ua_shape_utils` is located via ``rocke.assets.shape_utils_dir()``):
 
     # All BF16 prefill-2D shapes from both trace files (deduped):
-    PYTHONPATH=rocke/library python3 -m builders.common.benchmark_rocke_unified_attention \\
+    PYTHONPATH=rocke/library python3 -m benchmarks.common.benchmark_rocke_unified_attention \\
         --shapes <shapes1.json> <shapes2.json> --output results/rocke_ua_prefill2d.csv
 
     # Single shape by call_idx
-    PYTHONPATH=rocke/library python3 -m builders.common.benchmark_rocke_unified_attention \\
+    PYTHONPATH=rocke/library python3 -m benchmarks.common.benchmark_rocke_unified_attention \\
         --shapes <shapes.json> --call-idx 0 --limit 1
 """
 
