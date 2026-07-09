@@ -88,6 +88,7 @@
 #include <hipdnn_frontend/attributes/CustomOpAttributes.hpp>
 #include <hipdnn_frontend/attributes/GraphAttributes.hpp>
 #include <hipdnn_frontend/attributes/LayernormAttributes.hpp>
+#include <hipdnn_frontend/attributes/LayernormBackwardAttributes.hpp>
 #include <hipdnn_frontend/attributes/MatmulAttributes.hpp>
 #include <hipdnn_frontend/attributes/PointwiseAttributes.hpp>
 #include <hipdnn_frontend/attributes/RMSNormAttributes.hpp>
@@ -124,6 +125,7 @@
 #include <hipdnn_frontend/node/ConvolutionWgradNode.hpp>
 #include <hipdnn_frontend/node/CustomOpNode.hpp>
 #include <hipdnn_frontend/node/LayerNormNode.hpp>
+#include <hipdnn_frontend/node/LayernormBackwardNode.hpp>
 #include <hipdnn_frontend/node/MatmulNode.hpp>
 #include <hipdnn_frontend/node/Node.hpp>
 #include <hipdnn_frontend/node/PointwiseNode.hpp>
@@ -4897,6 +4899,91 @@ public:
             std::make_shared<LayerNormNode>(std::move(attributes), graph_attributes));
 
         return {y, mean, invVariance};
+    }
+
+    /** @brief Layer normalization backward pass
+     *
+     * Computes gradients with respect to input, scale, and bias.
+     *
+     * Formula:
+     * @code
+     * x_hat  = (x - mean) * invVariance
+     * dscale = sum(rstd * dy * (x - mean))                                  // sum over normalized dims
+     * dbias  = sum(dy)                                                      // sum over normalized dims
+     * a      = rstd³ * (sum(dy * scale * x) - sum(dy * scale) * mean) / m   // sum over normalized dims
+     * b      = rstd * sum(dy * scale) / m - a * mean                        // sum over normalized dims
+     * dx     = rstd * dy * scale - a * x - b
+     * @endcode
+     * where m = product of normalized dims.
+     *
+     * @param dy Upstream gradient (loss gradient w.r.t. output, same shape as x)
+     * @param x Original input from forward pass
+     * @param scale Scale (gamma)
+     * @param attributes Configuration; optional epsilon and optionally set saved mean and inverse
+     *        variance from the forward pass via set_saved_mean_and_inv_variance()
+     * @return Array of 3 output tensors:
+     *         - [0] dx: Gradient w.r.t. input (same shape as x)
+     *         - [1] dscale: Gradient w.r.t. scale
+     *         - [2] dbias: Gradient w.r.t. bias
+     *
+     * @see hipdnn_frontend::graph::LayernormBackwardAttributes
+     */
+    // NOLINTBEGIN(readability-identifier-naming)
+    std::array<std::shared_ptr<TensorAttributes>, 3>
+        layernorm_backward(std::shared_ptr<TensorAttributes> dy,
+                           std::shared_ptr<TensorAttributes> x,
+                           std::shared_ptr<TensorAttributes> scale,
+                           LayernormBackwardAttributes attributes)
+    // NOLINTEND(readability-identifier-naming)
+    {
+        if(attributes.get_name().empty())
+        {
+            attributes.set_name("LayernormBackward_" + std::to_string(_sub_nodes.size()));
+        }
+        if(dy->get_name().empty())
+        {
+            dy->set_name(attributes.get_name() + "::DY");
+        }
+        if(x->get_name().empty())
+        {
+            x->set_name(attributes.get_name() + "::X");
+        }
+        if(scale->get_name().empty())
+        {
+            scale->set_name(attributes.get_name() + "::SCALE");
+        }
+
+        auto mean = attributes.get_mean();
+        if(mean && mean->get_name().empty())
+        {
+            mean->set_name(attributes.get_name() + "::MEAN");
+        }
+        auto invVariance = attributes.get_inv_variance();
+        if(invVariance && invVariance->get_name().empty())
+        {
+            invVariance->set_name(attributes.get_name() + "::INV_VARIANCE");
+        }
+        auto epsilon = attributes.get_epsilon();
+        if(epsilon && epsilon->get_name().empty())
+        {
+            epsilon->set_name(attributes.get_name() + "::EPSILON");
+        }
+
+        auto dx = outputTensor(attributes.get_name() + "::DX");
+        auto dscale = outputTensor(attributes.get_name() + "::DSCALE");
+        auto dbias = outputTensor(attributes.get_name() + "::DBIAS");
+
+        attributes.set_dy(std::move(dy));
+        attributes.set_x(std::move(x));
+        attributes.set_scale(std::move(scale));
+        attributes.set_dx(dx);
+        attributes.set_dscale(dscale);
+        attributes.set_dbias(dbias);
+
+        _sub_nodes.emplace_back(
+            std::make_shared<LayernormBackwardNode>(std::move(attributes), graph_attributes));
+
+        return {dx, dscale, dbias};
     }
 
     /** @brief RMS normalization forward pass
