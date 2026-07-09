@@ -5,6 +5,7 @@
 #if MIOPEN_ENABLE_AI_IMMED_MODE_FALLBACK
 
 #include <string>
+#include <vector>
 
 // Thin, header-light entry point for the perf-config picker, callable from the
 // generic FindSolutionImpl template without dragging the conv-specific or
@@ -21,12 +22,14 @@ namespace ai {
 namespace lgbm {
 namespace pcfg {
 
-// Returns a serializable perf-config string for `solver_db_id` on this problem +
-// GPU, or "" to abstain (picker disabled, no model for the solver, unknown
-// bucket, or the model chose the default config). Env-gated internally.
-std::string MaybePickConfig(const std::string& solver_db_id,
-                            const conv::ProblemDescription& problem,
-                            const Handle& handle);
+// Returns the ranked (best->worst) serializable perf-config descriptors for
+// `solver_db_id` on this problem + GPU, for the caller's first-valid walk. A ""
+// element means "use the solver default config" (walk terminator). Returns an
+// empty vector to abstain (picker disabled, no model for the solver, or unknown
+// bucket). Env-gated internally (MIOPEN_DEBUG_LGBM_PCFG).
+std::vector<std::string> MaybePickConfig(const std::string& solver_db_id,
+                                         const conv::ProblemDescription& problem,
+                                         const Handle& handle);
 
 } // namespace pcfg
 } // namespace lgbm

@@ -179,29 +179,45 @@ auto FindSolutionImpl(rank<1>,
     // conv problems, when no perf_cfg was passed and the perf-db (+alt) missed
     // and no search ran — i.e. exactly where GetDefaultPerformanceConfig would
     // otherwise be used. Perf-db records remain authoritative ("perf-db wins").
-    // The picked string is validated by IsValidPerformanceConfig; on miss/invalid
-    // we fall through to the default below, so behavior never regresses.
+    //
+    // First-valid ranked walk (FIRST_VALID_FIX.md): the picker returns candidates
+    // ordered best->worst by model score. We walk that order and take the first
+    // config that passes IsValidPerformanceConfig — the bucket-argmax is globally
+    // good but frequently invalid for a specific OOD shape, and committing to an
+    // invalid top-1 forced the whole Find down to ConvDirectNaive (10-24x slower).
+    // A "" entry means the model preferred the solver default: stop and use it.
+    // Exhausting the walk falls through to GetDefaultPerformanceConfig below — we
+    // never leave the solver on an invalid config.
     if constexpr(std::is_same_v<Problem, ::miopen::conv::ProblemDescription>)
     {
         if(perf_cfg.empty() && !enforce.IsDbClean(context) &&
            !(context.do_search || enforce.IsSearch(context)))
         {
-            const auto picked =
+            const auto ranked =
                 ai::lgbm::pcfg::MaybePickConfig(s.SolverDbId(), problem, context.GetStream());
-            if(!picked.empty())
+            using PerformanceConfig =
+                decltype(s.GetDefaultPerformanceConfig(context, problem));
+            for(const auto& desc : ranked)
             {
-                using PerformanceConfig =
-                    decltype(s.GetDefaultPerformanceConfig(context, problem));
+                if(desc.empty())
+                {
+                    // Model preferred the solver default; it outranks the rest, so
+                    // stop and let the default fallthrough below handle it.
+                    MIOPEN_LOG_I2("lgbm_pcfg: default config outranks candidates for "
+                                  << s.SolverDbId());
+                    break;
+                }
                 PerformanceConfig cfg{};
-                cfg.Deserialize(picked);
+                cfg.Deserialize(desc);
                 if(s.IsValidPerformanceConfig(context, problem, cfg))
                 {
                     MIOPEN_LOG_I2("lgbm_pcfg: using picked config for " << s.SolverDbId());
                     return s.GetSolution(context, problem, cfg);
                 }
-                MIOPEN_LOG_I2("lgbm_pcfg: picked config invalid for " << s.SolverDbId()
-                                                                      << "; using default");
             }
+            if(!ranked.empty())
+                MIOPEN_LOG_I2("lgbm_pcfg: no valid config in ranked walk for " << s.SolverDbId()
+                                                                              << "; using default");
         }
     }
 #endif

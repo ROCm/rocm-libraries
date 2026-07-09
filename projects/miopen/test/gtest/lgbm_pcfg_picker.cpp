@@ -177,10 +177,11 @@ protected:
     }
 };
 
-TEST_F(CPU_LgbmPcfgPickerFixture, ReproducesExportedPick)
+TEST_F(CPU_LgbmPcfgPickerFixture, ReproducesExportedRanking)
 {
-    int total = 0;
-    int match = 0;
+    int total      = 0;
+    int top1_match = 0;
+    int rank_match = 0;
 
     for(auto sit = vectors_by_solver.begin(); sit != vectors_by_solver.end(); ++sit)
     {
@@ -217,16 +218,39 @@ TEST_F(CPU_LgbmPcfgPickerFixture, ReproducesExportedPick)
             const std::string llvm_target = v.at("llvm_target").get<std::string>();
             const auto prefix =
                 BuildPrefix(v.at("problem_inputs"), v.at("gpu_inputs"), llvm_target, with_gfx_code);
-            const std::string picked   = ScorePickForTest(solver, prefix, descs, args);
-            const std::string expected = v.at("expected_desc").get<std::string>();
+            const auto ranked = ScorePickForTest(solver, prefix, descs, args);
             ++total;
-            if(picked == expected)
-                ++match;
+            if(ranked.empty())
+                continue;
+
+            // Top-1 must equal expected_desc (the argmax contract).
+            if(ranked.front() == v.at("expected_desc").get<std::string>())
+                ++top1_match;
+
+            // The C ranking's head must reproduce expected_ranked exactly (the
+            // first-valid walk consumes this order). expected_ranked is the top-N
+            // by score; compare element-wise up to its length.
+            bool rank_ok = true;
+            if(v.contains("expected_ranked"))
+            {
+                const auto& exp = v.at("expected_ranked");
+                for(std::size_t i = 0; i < exp.size(); ++i)
+                {
+                    if(i >= ranked.size() || ranked[i] != exp[i].get<std::string>())
+                    {
+                        rank_ok = false;
+                        break;
+                    }
+                }
+            }
+            if(rank_ok)
+                ++rank_match;
         }
     }
 
     ASSERT_GT(total, 0);
-    EXPECT_EQ(match, total) << match << "/" << total << " exported picks reproduced";
+    EXPECT_EQ(top1_match, total) << top1_match << "/" << total << " top-1 picks reproduced";
+    EXPECT_EQ(rank_match, total) << rank_match << "/" << total << " ranked orders reproduced";
 }
 
 } // namespace

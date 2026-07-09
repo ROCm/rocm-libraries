@@ -13,9 +13,12 @@
 
 MIOPEN_DECLARE_ENV_VAR_BOOL(MIOPEN_DEBUG_LGBM_PCFG)
 
+#include <algorithm>
 #include <array>
 #include <cmath>
+#include <cstddef>
 #include <limits>
+#include <numeric>
 #include <string>
 #include <unordered_map>
 #include <vector>
@@ -221,24 +224,27 @@ void FillProblemPrefix(std::vector<double>& prefix,
         prefix.push_back(static_cast<double>(GfxCode(gfx_id)));
 }
 
-// Score the bucket's candidates and return the argmax descriptor (lambdarank:
-// higher score = predicted faster). Returns "" when the winner is the default
-// config (empty descriptor) or the bucket is empty.
-std::string ArgmaxOverBucket(PredictFn predict,
-                             const SolverModel& model,
-                             const std::vector<double>& prefix,
-                             const std::vector<Candidate>& cands)
+// Score every candidate in the bucket and return their descriptors ordered
+// best->worst by predicted speed (lambdarank: higher score = faster). The sort
+// is stable, so equal scores keep catalog order and element [0] is exactly the
+// argmax (today's single pick). A "" element = the solver default config, which
+// the caller treats as a walk terminator. Empty result iff the bucket is empty.
+// See FIRST_VALID_FIX.md: the caller walks this order and takes the first config
+// that passes IsValidPerformanceConfig.
+std::vector<std::string> RankBucket(PredictFn predict,
+                                    const SolverModel& model,
+                                    const std::vector<double>& prefix,
+                                    const std::vector<Candidate>& cands)
 {
     if(cands.empty())
-        return "";
+        return {};
 
     std::vector<LgbmEntry> row(static_cast<std::size_t>(model.feat_count));
     // Fill the constant problem+GPU prefix once.
     for(int i = 0; i < model.prob_feat_count; ++i)
         SetNumeric(row[i], prefix[static_cast<std::size_t>(i)]);
 
-    double best_score = -std::numeric_limits<double>::infinity();
-    std::size_t top   = 0;
+    std::vector<double> scores(cands.size());
     for(std::size_t c = 0; c < cands.size(); ++c)
     {
         const auto& args = cands[c].args;
@@ -248,32 +254,41 @@ std::string ArgmaxOverBucket(PredictFn predict,
 
         double s = 0.0;
         predict(row.data(), /*pred_margin=*/0, &s);
-        if(s > best_score)
-        {
-            best_score = s;
-            top        = c;
-        }
+        scores[c] = s;
     }
-    return cands[top].desc; // "" => default config (abstain)
+
+    std::vector<std::size_t> order(cands.size());
+    std::iota(order.begin(), order.end(), std::size_t{0});
+    // Stable descending sort: ties preserve catalog order so order[0] matches the
+    // Python model's argmax (which uses np.argmax = first max on ties).
+    std::stable_sort(order.begin(), order.end(), [&](std::size_t a, std::size_t b) {
+        return scores[a] > scores[b];
+    });
+
+    std::vector<std::string> ranked;
+    ranked.reserve(order.size());
+    for(const auto idx : order)
+        ranked.push_back(cands[idx].desc);
+    return ranked;
 }
 
 } // namespace
 
-std::string PickConfig(const std::string& solver_name,
-                       const conv::ProblemDescription& problem,
-                       const Handle& handle)
+std::vector<std::string> PickConfig(const std::string& solver_name,
+                                    const conv::ProblemDescription& problem,
+                                    const Handle& handle)
 {
     const auto& meta = LgbmPcfgMetadata::Get();
     if(!meta.IsReady())
-        return "";
+        return {};
 
     const SolverModel* model = meta.Find(solver_name);
     if(model == nullptr)
-        return ""; // no perf-config model for this solver
+        return {}; // no perf-config model for this solver
 
     const auto pit = PredictTable().find(solver_name);
     if(pit == PredictTable().end())
-        return ""; // no compiled predictor (model/predictor mismatch)
+        return {}; // no compiled predictor (model/predictor mismatch)
 
     const std::string gfx_id = handle.GetDeviceName();
     const std::string key    = gfx_id + "|" +
@@ -284,57 +299,58 @@ std::string PickConfig(const std::string& solver_name,
     if(bit == model->buckets.end())
     {
         MIOPEN_LOG_I2("lgbm_pcfg: no bucket " << key << " for " << solver_name << "; abstain");
-        return "";
+        return {};
     }
 
     std::vector<double> prefix;
     FillProblemPrefix(prefix, problem, handle, gfx_id, model->has_gfx_code);
 
-    std::string desc = ArgmaxOverBucket(pit->second, *model, prefix, bit->second);
-    if(desc.empty())
-        MIOPEN_LOG_I2("lgbm_pcfg: " << solver_name << " picked default config; abstain");
-    else
-        MIOPEN_LOG_I2("lgbm_pcfg: " << solver_name << " picked " << desc);
-    return desc;
+    auto ranked = RankBucket(pit->second, *model, prefix, bit->second);
+    if(!ranked.empty())
+        MIOPEN_LOG_I2("lgbm_pcfg: " << solver_name << " ranked " << ranked.size()
+                                    << " configs, top=\""
+                                    << (ranked.front().empty() ? "<default>" : ranked.front())
+                                    << "\"");
+    return ranked;
 }
 
-std::string ScorePickForTest(const std::string& solver_name,
-                             const std::vector<double>& prob_feature_prefix,
-                             const std::vector<std::string>& cand_descs,
-                             const std::vector<std::vector<double>>& cand_args)
+std::vector<std::string> ScorePickForTest(const std::string& solver_name,
+                                          const std::vector<double>& prob_feature_prefix,
+                                          const std::vector<std::string>& cand_descs,
+                                          const std::vector<std::vector<double>>& cand_args)
 {
     const auto& meta = LgbmPcfgMetadata::Get();
     if(!meta.IsReady())
-        return "";
+        return {};
     const SolverModel* model = meta.Find(solver_name);
     if(model == nullptr)
-        return "";
+        return {};
     const auto pit = PredictTable().find(solver_name);
     if(pit == PredictTable().end())
-        return "";
+        return {};
     if(prob_feature_prefix.size() != static_cast<std::size_t>(model->prob_feat_count) ||
        cand_descs.size() != cand_args.size() || cand_descs.empty())
-        return "";
+        return {};
 
     std::vector<Candidate> cands;
     cands.reserve(cand_descs.size());
     for(std::size_t i = 0; i < cand_descs.size(); ++i)
     {
         if(cand_args[i].size() != static_cast<std::size_t>(model->arg_count))
-            return "";
+            return {};
         cands.push_back(Candidate{cand_descs[i], cand_args[i]});
     }
-    return ArgmaxOverBucket(pit->second, *model, prob_feature_prefix, cands);
+    return RankBucket(pit->second, *model, prob_feature_prefix, cands);
 }
 
-std::string MaybePickConfig(const std::string& solver_db_id,
-                            const conv::ProblemDescription& problem,
-                            const Handle& handle)
+std::vector<std::string> MaybePickConfig(const std::string& solver_db_id,
+                                         const conv::ProblemDescription& problem,
+                                         const Handle& handle)
 {
     // Env gate lives here so the MIOPEN_DEBUG_LGBM_PCFG declaration has a single
     // home and the generic FindSolutionImpl template stays env-var agnostic.
     if(env::disabled(MIOPEN_DEBUG_LGBM_PCFG))
-        return "";
+        return {};
     return PickConfig(solver_db_id, problem, handle);
 }
 
