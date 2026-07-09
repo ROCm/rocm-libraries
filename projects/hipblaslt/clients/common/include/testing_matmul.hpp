@@ -2773,26 +2773,18 @@ void testing_matmul_with_bias(const Arguments& arg,
                 hipblaslt_cout << "MX data types do not support algorithm \"all\"" << std::endl;
                 return;
             }
-            MXScaleLayout const scaleLayoutA = mxScaleLayoutForFormat(arg.scaleA);
+            MXScaleLayout const scaleLayoutA
+                = arg.scaleA == hipblaslt_scaling_format::Block_32_UE8M0_32_8_EXT
+                      ? MXScaleLayout::GFX950
+                      : MXScaleLayout::None;
             size_t dataBatchBytesA  = (num_batches[i] > 1) ? elementsToBytes(stride_a[i], TiA) : 0;
             size_t scaleBatchBytesA = (num_batches[i] > 1) ? size_scaleAVec[i] : 0;
             std::vector<float> refAAll;
             refAAll.reserve(static_cast<size_t>(A_row[i]) * A_col[i] * num_batches[i]);
-            // GPU init writes straight to device buffers; only transA == T
-            // exercises the on-device PRNG, other layouts silently fall back
-            // to the CPU path (which needs host pointers + a re-sync).
-            bool const easyLayoutA      = (transA == HIPBLAS_OP_T);
-            MXInitDevice const initDevA = easyLayoutA ? MXInitDevice::Gpu : MXInitDevice::Cpu;
             for(int64_t b = 0; b < num_batches[i]; b++)
             {
-                auto* dataPtrA  = easyLayoutA ? reinterpret_cast<uint8_t*>(dA[i].buf())
-                                                    + b * dataBatchBytesA
-                                              : reinterpret_cast<uint8_t*>(hA[i].buf())
-                                                    + b * dataBatchBytesA;
-                auto* scalePtrA = easyLayoutA ? reinterpret_cast<uint8_t*>(dScaleA[i].buf())
-                                                    + b * scaleBatchBytesA
-                                              : reinterpret_cast<uint8_t*>(hScaleA[i].buf())
-                                                    + b * scaleBatchBytesA;
+                auto* dataPtrA  = reinterpret_cast<uint8_t*>(hA[i].buf()) + b * dataBatchBytesA;
+                auto* scalePtrA = reinterpret_cast<uint8_t*>(hScaleA[i].buf()) + b * scaleBatchBytesA;
                 auto batchRef
                     = generateMXInput(TiA,
                                       scaleDataType(arg.scaleA),
@@ -2808,16 +2800,12 @@ void testing_matmul_with_bias(const Arguments& arg,
                                       scaleLayoutA,
                                       hipblaslt_initialization2string(arg.initialization),
                                       /*min_val=*/-1.0f,
-                                      /*max_val=*/1.0f,
-                                      initDevA);
+                                      /*max_val=*/1.0f);
                 refAAll.insert(refAAll.end(), batchRef.begin(), batchRef.end());
             }
             refA.emplace_back(std::move(refAAll));
-            if(!easyLayoutA)
-            {
-                CHECK_HIP_ERROR(synchronize(dA[i], hA[i], block_count));
-                CHECK_HIP_ERROR(synchronize(dScaleA[i], hScaleA[i], block_count));
-            }
+            CHECK_HIP_ERROR(synchronize(dA[i], hA[i], block_count));
+            CHECK_HIP_ERROR(synchronize(dScaleA[i], hScaleA[i], block_count));
 #else
             hipblaslt_cout << "MX data initialization requires HIPBLASLT_ENABLE_MXDATAGENERATOR=ON at build time"
                            << std::endl;
@@ -2883,26 +2871,20 @@ void testing_matmul_with_bias(const Arguments& arg,
                 hipblaslt_cout << "MX data types do not support algorithm \"all\"" << std::endl;
                 return;
             }
-            MXScaleLayout const scaleLayoutB = mxScaleLayoutForFormat(arg.scaleB);
+            MXScaleLayout const scaleLayoutB
+                = arg.scaleB == hipblaslt_scaling_format::Block_32_UE8M0_32_8_EXT
+                      ? MXScaleLayout::GFX950
+                      : MXScaleLayout::None;
             size_t             dataBatchBytesB    = (num_batches[i] > 1)
                                                         ? elementsToBytes(stride_b[i], TiB)
                                                         : 0;
             size_t             scaleBatchBytesB   = (num_batches[i] > 1) ? size_scaleBVec[i] : 0;
             std::vector<float> refBAll;
             refBAll.reserve(static_cast<size_t>(B_row[i]) * B_col[i] * num_batches[i]);
-            // GPU overload's easy-layout for B is transB == N.
-            bool const easyLayoutB      = (transB == HIPBLAS_OP_N);
-            MXInitDevice const initDevB = easyLayoutB ? MXInitDevice::Gpu : MXInitDevice::Cpu;
             for(int64_t b = 0; b < num_batches[i]; b++)
             {
-                auto* dataPtrB  = easyLayoutB ? reinterpret_cast<uint8_t*>(dB[i].buf())
-                                                    + b * dataBatchBytesB
-                                              : reinterpret_cast<uint8_t*>(hB[i].buf())
-                                                    + b * dataBatchBytesB;
-                auto* scalePtrB = easyLayoutB ? reinterpret_cast<uint8_t*>(dScaleB[i].buf())
-                                                    + b * scaleBatchBytesB
-                                              : reinterpret_cast<uint8_t*>(hScaleB[i].buf())
-                                                    + b * scaleBatchBytesB;
+                auto* dataPtrB  = reinterpret_cast<uint8_t*>(hB[i].buf()) + b * dataBatchBytesB;
+                auto* scalePtrB = reinterpret_cast<uint8_t*>(hScaleB[i].buf()) + b * scaleBatchBytesB;
                 auto batchRef
                     = generateMXInput(TiB,
                                       scaleDataType(arg.scaleB),
@@ -2918,16 +2900,12 @@ void testing_matmul_with_bias(const Arguments& arg,
                                       scaleLayoutB,
                                       hipblaslt_initialization2string(arg.initialization),
                                       /*min_val=*/-1.0f,
-                                      /*max_val=*/1.0f,
-                                      initDevB);
+                                      /*max_val=*/1.0f);
                 refBAll.insert(refBAll.end(), batchRef.begin(), batchRef.end());
             }
             refB.emplace_back(std::move(refBAll));
-            if(!easyLayoutB)
-            {
-                CHECK_HIP_ERROR(synchronize(dB[i], hB[i], block_count));
-                CHECK_HIP_ERROR(synchronize(dScaleB[i], hScaleB[i], block_count));
-            }
+            CHECK_HIP_ERROR(synchronize(dB[i], hB[i], block_count));
+            CHECK_HIP_ERROR(synchronize(dScaleB[i], hScaleB[i], block_count));
 #else
             hipblaslt_cout << "MX data initialization requires HIPBLASLT_ENABLE_MXDATAGENERATOR=ON at build time"
                            << std::endl;

@@ -3156,25 +3156,6 @@ Tests:
   bias_vector: 1
   scaleAlpha_vector: 1
   activation_type: [none, relu, gelu, sigmoid, swish]
-  # uniform_01 (Bounded [0, 1]) instead of trig_float to dodge the relu /
-  # gelu / swish boundary. The combination of:
-  #   * `trig_float` distribution clustering values near zero,
-  #   * FP4 quantisation snapping near-zero values to {-1.5, -1.0, -0.5,
-  #     0, +0.5, +1.0, +1.5} -- so a single ULP of noise can flip the
-  #     sign of the activation input,
-  #   * scaleAlpha_vector multiplying small entries (so post-activation
-  #     differences are amplified relative to the sum), and
-  #   * GPU's non-associative F32 reduction differing from the CPU
-  #     reference at the ULP level
-  # is enough to push the elementwise norm past the 0.3 tolerance for
-  # ~60% of the matmul_subtile_fp4_scaleAlphaVec configurations. There
-  # is no kernel bug here -- the GPU and CPU paths agree to within FP4
-  # precision, just not within the test's stricter norm tolerance when
-  # the data clusters near the activation discontinuity at x=0.
-  # `uniform_01` produces strictly positive inputs, so relu / swish /
-  # gelu don't see the discontinuity. The other subtile FP4 tests
-  # (basic, asymmetric, large-MN, etc.) keep `trig_float` because they
-  # don't combine scaleAlpha_vector with relu-family activations.
   initialization: uniform_01
   unit_check: 0
   norm_check: 1

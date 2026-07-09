@@ -56,13 +56,6 @@ namespace TensileLite
                 || isMXFP4Tensor(problem.b(), problem.mxBlockB());
         }
 
-        // Generalised MX predicate. Used by initializeMXData (which drives
-        // mxDataGenerator for any supported MX side); the mapping from
-        // rocisa::DataType to hipDataType for the data generator lives in
-        // DataInitializationHelpers.hpp / namespace detail and supports
-        // {Float4, Float6, BFloat6, Float8, BFloat8}. isMXFP4* above is kept
-        // for FP4-only callers; per-solution preswizzle uses
-        // needsSolutionDependentMXPreswizzle.
         inline bool isMXTensor(const TensorDescriptor& tensor, size_t mxBlock)
         {
             if(mxBlock == 0)
@@ -1078,7 +1071,7 @@ namespace TensileLite
                 ContractionSolution const*    solution) const
             {
                 return isMXProblem(problem) && m_mxScaleFormat > 0
-                       && m_mxScaleLayout == MXScaleLayout::kGFX950
+                       && m_mxScaleLayout == MXScaleLayout::GFX950
                        && solution != nullptr
                        && solution->problemType.mxScaleFormat == 1;
             }
@@ -1182,9 +1175,7 @@ namespace TensileLite
             ContractionProblemGemm const* m_currentGemmProblem = nullptr;
 
             int m_mxScaleFormat = 0;
-            // Set from gcnArchName via mxScaleLayoutForArchName; only consulted
-            // on MX paths gated by m_mxScaleFormat > 0.
-            MXScaleLayout m_mxScaleLayout = MXScaleLayout::kNone;
+            MXScaleLayout m_mxScaleLayout = MXScaleLayout::None;
             // Set by initializeMXData when a preswizzled scale was uploaded
             // straight into gpuInput.valid (i.e. copySwizzledToGPUBuffer can
             // hand back gpuInput.valid as-is rather than re-swizzling).

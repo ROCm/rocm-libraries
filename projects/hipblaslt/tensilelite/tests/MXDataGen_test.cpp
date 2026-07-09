@@ -77,7 +77,7 @@ TEST_P(MXDataGenFP4Test, ZeroFrequencyWithinBounds)
                     mxBlock,
                     1,
                     true,
-                    MXScaleLayout::kNone,
+                    MXScaleLayout::None,
                     "Bounded",
                     -1.0f,
                     1.0f);
@@ -135,13 +135,13 @@ TEST_P(MXGeneratorDeterminismTest, GeneratorOutputIsDeterministic)
                     data1.data(), scale1.data(),
                     rows, cols, rows, isTranspose,
                     mxBlock, 1, isMatrixA,
-                    MXScaleLayout::kNone, "Bounded", -1.f, 1.f);
+                    MXScaleLayout::None, "Bounded", -1.f, 1.f);
 
     generateMXInput((hipDataType)HIP_R_4F_E2M1, HIP_R_8F_UE8M0,
                     data2.data(), scale2.data(),
                     rows, cols, rows, isTranspose,
                     mxBlock, 1, isMatrixA,
-                    MXScaleLayout::kNone, "Bounded", -1.f, 1.f);
+                    MXScaleLayout::None, "Bounded", -1.f, 1.f);
 
     EXPECT_EQ(data1, data2)
         << "FP4 data is non-deterministic";
@@ -169,8 +169,8 @@ INSTANTIATE_TEST_SUITE_P(
 // ============================================================================
 // PreSwizzle scale tests
 //
-// Verify generateMXInput with MXScaleLayout::kGFX950 produces scale data
-// that is a permutation of the unswizzled (kNone) layout. The actual
+// Verify generateMXInput with MXScaleLayout::GFX950 produces scale data
+// that is a permutation of the unswizzled (None) layout. The actual
 // swizzle parameters (swizzleTileMN=32, tileK=8, subTileK=MiK/mxBlock) are
 // hard-coded inside `generateMXInput` -- callers just pick the layout.
 // ============================================================================
@@ -202,7 +202,7 @@ TEST_P(MXPreSwizzleTest, ScaleIsPermutationOfUnswizzled)
                     rows, cols, rows,
                     isTranspose,
                     mxBlock, 1, isMatrixA,
-                    MXScaleLayout::kNone,
+                    MXScaleLayout::None,
                     "Bounded", -1.0f, 1.0f);
 
     // Generate with preSwizzle
@@ -212,7 +212,7 @@ TEST_P(MXPreSwizzleTest, ScaleIsPermutationOfUnswizzled)
                     rows, cols, rows,
                     isTranspose,
                     mxBlock, 1, isMatrixA,
-                    MXScaleLayout::kGFX950,
+                    MXScaleLayout::GFX950,
                     "Bounded", -1.0f, 1.0f);
 
     // The scale buffers must be different
@@ -298,7 +298,7 @@ namespace
                                mxBlock,
                                1,
                                /*isMatrixA=*/true,
-                               MXScaleLayout::kNone,
+                               MXScaleLayout::None,
                                initMethod,
                                -1.0f,
                                1.0f);
@@ -402,11 +402,10 @@ TEST(MXDataGenDecoupledScale, BoundedDataWithUnityScales)
                                mxBlock,
                                1,
                                /*isMatrixA=*/true,
-                               MXScaleLayout::kNone,
+                               MXScaleLayout::None,
                                "Bounded",
                                -1.0f,
                                1.0f,
-                               MXInitDevice::Cpu,
                                "Ones");
 
     ASSERT_FALSE(ref.empty());
@@ -456,7 +455,7 @@ TEST(MXDataGenDecoupledScale, MatchingInitUnchangedFromDefault)
                     mxBlock,
                     1,
                     true,
-                    MXScaleLayout::kNone,
+                    MXScaleLayout::None,
                     "Bounded",
                     -1.f,
                     1.f);
@@ -472,11 +471,10 @@ TEST(MXDataGenDecoupledScale, MatchingInitUnchangedFromDefault)
                     mxBlock,
                     1,
                     true,
-                    MXScaleLayout::kNone,
+                    MXScaleLayout::None,
                     "Bounded",
                     -1.f,
                     1.f,
-                    MXInitDevice::Cpu,
                     "Bounded");
 
     EXPECT_EQ(dataA, dataB);
@@ -485,10 +483,10 @@ TEST(MXDataGenDecoupledScale, MatchingInitUnchangedFromDefault)
 
 TEST(MXScaleLayoutArch, MapsArchNameToScaleLayout)
 {
-    EXPECT_EQ(mxScaleLayoutForArchName("gfx950"), MXScaleLayout::kGFX950);
-    EXPECT_EQ(mxScaleLayoutForArchName("gfx950:sramecc+:xnack-"), MXScaleLayout::kGFX950);
-    EXPECT_EQ(mxScaleLayoutForArchName("gfx1250"), MXScaleLayout::kGFX1250);
-    EXPECT_EQ(mxScaleLayoutForArchName("gfx1250:xnack-"), MXScaleLayout::kGFX1250);
-    EXPECT_EQ(mxScaleLayoutForArchName("gfx942"), MXScaleLayout::kNone);
-    EXPECT_EQ(mxScaleLayoutForArchName("gfx90a"), MXScaleLayout::kNone);
+    EXPECT_EQ(mxScaleLayoutForArchName("gfx950"), MXScaleLayout::GFX950);
+    EXPECT_EQ(mxScaleLayoutForArchName("gfx950:sramecc+:xnack-"), MXScaleLayout::GFX950);
+    EXPECT_EQ(mxScaleLayoutForArchName("gfx1250"), MXScaleLayout::GFX1250);
+    EXPECT_EQ(mxScaleLayoutForArchName("gfx1250:xnack-"), MXScaleLayout::GFX1250);
+    EXPECT_EQ(mxScaleLayoutForArchName("gfx942"), MXScaleLayout::None);
+    EXPECT_EQ(mxScaleLayoutForArchName("gfx90a"), MXScaleLayout::None);
 }

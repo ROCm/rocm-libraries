@@ -2065,14 +2065,10 @@ namespace TensileLite
             m_mxPreswizzledA = false;
             m_mxPreswizzledB = false;
 
-            // Per-side scale layout: kGFX950 (only when scale dims are
-            // tile-divisible, since preSwizzleScalesGFX950 doesn't pad), kGFX1250
-            // (pads internally so always applicable), or kNone when
-            // --mx-scale-format=0.
-            MXScaleLayout layoutA = MXScaleLayout::kNone;
-            MXScaleLayout layoutB = MXScaleLayout::kNone;
+            MXScaleLayout layoutA = MXScaleLayout::None;
+            MXScaleLayout layoutB = MXScaleLayout::None;
 
-            if(m_mxScaleFormat > 0 && m_mxScaleLayout == MXScaleLayout::kGFX950
+            if(m_mxScaleFormat > 0 && m_mxScaleLayout == MXScaleLayout::GFX950
                && m_currentSolution != nullptr)
             {
                 auto const&      mi            = m_currentSolution->sizeMapping.matrixInstruction;
@@ -2090,7 +2086,7 @@ namespace TensileLite
                         size_t      scaleRowsA = mxsaSizes[0];
                         size_t      scaleColsA = mxsaSizes[1];
                         if(scaleRowsA % tileK == 0 && scaleColsA % swizzleTileMN == 0)
-                            layoutA = MXScaleLayout::kGFX950;
+                            layoutA = MXScaleLayout::GFX950;
                     }
 
                     if(problem.mxBlockB() > 0 && MiK % problem.mxBlockB() == 0)
@@ -2101,16 +2097,16 @@ namespace TensileLite
                         size_t      scaleRowsB = mxsbSizes[0];
                         size_t      scaleColsB = mxsbSizes[1];
                         if(scaleRowsB % tileK == 0 && scaleColsB % swizzleTileMN == 0)
-                            layoutB = MXScaleLayout::kGFX950;
+                            layoutB = MXScaleLayout::GFX950;
                     }
                 }
             }
-            else if(m_mxScaleFormat > 0 && m_mxScaleLayout == MXScaleLayout::kGFX1250)
+            else if(m_mxScaleFormat > 0 && m_mxScaleLayout == MXScaleLayout::GFX1250)
             {
                 if(problem.mxBlockA() > 0)
-                    layoutA = MXScaleLayout::kGFX1250;
+                    layoutA = MXScaleLayout::GFX1250;
                 if(problem.mxBlockB() > 0)
-                    layoutB = MXScaleLayout::kGFX1250;
+                    layoutB = MXScaleLayout::GFX1250;
             }
 
             // We pass cpuInput.valid (host) pointers because the CPU reference
@@ -2189,11 +2185,10 @@ namespace TensileLite
                                       isMatrixA ? mxBlock : 1,
                                       isMatrixA ? 1 : mxBlock,
                                       isMatrixA,
-                                      MXScaleLayout::kNone,
+                                      MXScaleLayout::None,
                                       initModeToMXMethod(dataInitMode),
                                       -1.0f,
                                       1.0f,
-                                      MXInitDevice::Cpu,
                                       initModeToMXMethod(scaleInitMode));
                       if(kFast)
                           restrideMXScaleBufferKFast(
@@ -2203,7 +2198,7 @@ namespace TensileLite
                   // When the kernel needs a swizzled scale, regenerate it with the
                   // requested layout straight into gpuInput.valid; the cpuInput.valid
                   // copy stays canonical for the CPU reference.
-                  if(swizzleLayout != MXScaleLayout::kNone && pristineScale.gpuInput.valid)
+                  if(swizzleLayout != MXScaleLayout::None && pristineScale.gpuInput.valid)
                   {
                       size_t const eltSize
                           = DataTypeInfo::Get(scaleDesc.dataType()).elementSize;
@@ -2213,7 +2208,7 @@ namespace TensileLite
                       // The scale tensor is allocated unpadded on gfx1250, so size
                       // the staging buffer for the padded worst case.
                       size_t swizzledScaleElems = canonicalScaleElems;
-                      if(swizzleLayout == MXScaleLayout::kGFX1250 && mxBlock > 0)
+                      if(swizzleLayout == MXScaleLayout::GFX1250 && mxBlock > 0)
                       {
                           size_t const slowDim = static_cast<size_t>(cols);
                           size_t const fastDim
@@ -2249,7 +2244,6 @@ namespace TensileLite
                                           initModeToMXMethod(dataInitMode),
                                           -1.0f,
                                           1.0f,
-                                          MXInitDevice::Cpu,
                                           initModeToMXMethod(scaleInitMode));
                       }
                       HIP_CHECK_EXC(hipMemcpy(pristineScale.gpuInput.valid.get(),
@@ -2859,7 +2853,7 @@ namespace TensileLite
                         // Fallback K-dimension swizzle for the case where
                         // initializeMXData did NOT pre-produce a swizzled
                         // scale into gpuInput.valid (e.g. m_mxScaleLayout is
-                        // kNone on this arch but the kernel still requests a
+                        // None on this arch but the kernel still requests a
                         // swizzled scale format). gfx950 is excluded by the
                         // branches above. Batch dim (if present) goes at the
                         // front; pad/reshape/permute operate natively on N-D
