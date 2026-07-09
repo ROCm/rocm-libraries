@@ -4,7 +4,7 @@
 
 Pure codegen (no GPU, no subprocess). The resolver deterministically shrinks an
 over-budget register-PV 2D spec until it fits the arch LDS cap, and is a strict
-no-op for every already-fitting / non-register-PV / non-gfx950 config.
+no-op for every already-fitting or non-register-PV config, on any arch.
 
 The load-bearing case: bf16 head_dim=256 long prefill on gfx950 overflows LDS at
 the default (K double-buffered) geometry -- 204800 B > the 163840 B cap -- and the
@@ -65,13 +65,19 @@ class TestLdsBudgetResolver(unittest.TestCase):
             self.assertLessEqual(au._lds_bytes_regpv(fitted), au._lds_capacity_bytes())
             self.assertIs(au._resolve_lds_budget(fitted), fitted)
 
-    def test_resolver_is_noop_off_gfx950(self):
-        """On a non-gfx950 arch the resolver never engages -- it returns the spec
-        unchanged (the footprint model is only validated for gfx950)."""
+    def test_resolver_arch_agnostic_targets_dynamic_cap(self):
+        """Arch-agnostic: the resolver targets whatever LDS cap the arch-target
+        API reports -- not a hard-coded gfx950 / 163840 constant. Same D256
+        K-double geometry (204800 B): with a larger reported cap it already fits
+        and is returned byte-identical; with a tiny cap it engages and raises."""
         with mock.patch.object(au, "_resolve_attention_arch", return_value="gfx950"):
             spec = au._tiled_spec_from_problem(_d256_bf16_long_prefill())
-        with mock.patch.object(au, "_resolve_attention_arch", return_value="gfx942"):
-            self.assertIs(au._resolve_lds_budget(spec), spec)
+            k_double = replace(spec, use_k_single_buffer=False)  # 204800 B
+            with mock.patch.object(au, "_lds_capacity_bytes", return_value=262144):
+                self.assertIs(au._resolve_lds_budget(k_double), k_double)
+            with mock.patch.object(au, "_lds_capacity_bytes", return_value=65536):
+                with self.assertRaises(RuntimeError):
+                    au._resolve_lds_budget(replace(spec, use_k_single_buffer=False))
 
     def test_regpv_footprint_uses_shared_helper(self):
         """W: the register-PV footprint is the shared ``_tiled_2d_lds_bytes`` model

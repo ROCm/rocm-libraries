@@ -1991,14 +1991,20 @@ def _resolve_lds_budget(spec):
     the arch LDS cap, using only compile-validated reductions. Returns the same
     spec unchanged when it already fits or the path is not register-PV (so all
     currently-compiling configs stay byte-identical)."""
-    # Validated on gfx950 (CDNA4): register-PV stages K/V tiles + the epilogue Acc_lds. The
-    # mechanism is arch-general (reads the cap dynamically); other arches' 2D
-    # footprint models are not yet validated, so engage only where proven.
-    if _resolve_attention_arch() != "gfx950" or not getattr(
-        spec, "use_register_pv", False
-    ):
+    # Arch-agnostic: the resolver keys off the register-PV path (whose footprint
+    # model it owns) and the target arch's LDS cap read *dynamically* from the
+    # arch-target API -- no hard-coded arch name or capacity. It engages for any
+    # register-PV 2D spec over that arch's cap. Validated on gfx950 (CDNA4); a
+    # strict no-op on other arches because their over-budget 2D specs are already
+    # filtered upstream by the (more conservative, Q/P-staged) ``supports_tiled_2d``
+    # gate, so any spec that reaches the resolver there already fits -> every
+    # currently-compiling config stays byte-identical.
+    if not getattr(spec, "use_register_pv", False):
         return spec
-    cap = _lds_capacity_bytes()
+    try:
+        cap = _lds_capacity_bytes()
+    except Exception:
+        return spec  # arch has no declared LDS cap -> nothing to resolve against
     if _lds_bytes_regpv(spec) <= cap:
         return spec
 
