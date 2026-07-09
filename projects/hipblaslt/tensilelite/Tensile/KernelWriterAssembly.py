@@ -18129,7 +18129,7 @@ class KernelWriterAssembly(KernelWriter):
     elif (not kernel["DirectToLdsA"]) and kernel["DirectToLdsB"]:
       # (no DTLA) + DTLB (need to put DTLB first)
       return True
-    elif kernel["SwapGlobalReadOrder"] == True:
+    elif kernel["SwapGlobalReadOrder"] == 1:
       return True
     return False
 
