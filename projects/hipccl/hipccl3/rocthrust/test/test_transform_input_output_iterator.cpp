@@ -16,7 +16,6 @@
  */
 
 #include <thrust/copy.h>
-#include <thrust/detail/libcxx_wrapper/std/__functional/identity.h>
 #include <thrust/detail/libcxx_wrapper/std/__iterator/iterator_traits.h>
 #include <thrust/functional.h>
 #include <thrust/iterator/counting_iterator.h>
@@ -197,8 +196,8 @@ TYPED_TEST(TransformInputOutputIteratorVariableUnitTests, TestTransformInputOutp
 
     // run on host (uses forward iterator negate)
     thrust::inclusive_scan(
-      thrust::make_transform_input_output_iterator(h_data.begin(), _THRUST_STD::negate<T>(), ::internal::identity{}),
-      thrust::make_transform_input_output_iterator(h_data.end(), _THRUST_STD::negate<T>(), ::internal::identity{}),
+      thrust::make_transform_input_output_iterator(h_data.begin(), _THRUST_STD::negate<T>(), _THRUST_STD::identity{}),
+      thrust::make_transform_input_output_iterator(h_data.end(), _THRUST_STD::negate<T>(), _THRUST_STD::identity{}),
       h_result.begin());
     // run on device (uses reverse iterator negate)
     thrust::inclusive_scan(
