@@ -31,6 +31,7 @@ jobs:
     env:
       BUILD_DIR: B:\build
       HIPDNN_ARTIFACT_DIR: B:\hipdnn-artifacts
+      HIPDNN_INSTALL_PREFIX: B:\hipdnn-install
       VENV_PATH: B:\rocm_wheels
       GPU_TARGET: gfx1151
       # Multi-arch nightly device extra (rocm[...,device-<DEVICE_TARGET>]).
@@ -133,9 +134,91 @@ jobs:
       #- name: Run tests
       #  run: ctest --test-dir build --output-on-failure
 
-      - name: Patch ROCm SDK with superbuild outputs
+      - name: Stage superbuild install output
         shell: pwsh
-        run: cmake --install build --prefix $env:ROCM_SDK_PATH
+        run: |
+          Remove-Item -Recurse -Force $env:HIPDNN_INSTALL_PREFIX -ErrorAction SilentlyContinue
+          cmake --install build --prefix $env:HIPDNN_INSTALL_PREFIX
+
+      - name: Patch ROCm SDK with selected superbuild outputs
+        shell: pwsh
+        run: |
+          function Remove-PathIfExists($Path) {
+            if (Test-Path $Path) {
+              Remove-Item -Recurse -Force $Path
+            }
+          }
+
+          function Copy-PathIfExists($RelativePath) {
+            $source = Join-Path $env:HIPDNN_INSTALL_PREFIX $RelativePath
+            if (-not (Test-Path $source)) {
+              return
+            }
+            $destination = Join-Path $env:ROCM_SDK_PATH $RelativePath
+            New-Item -ItemType Directory -Force (Split-Path $destination -Parent) | Out-Null
+            Copy-Item -Recurse -Force $source $destination
+          }
+
+          function Copy-ChildrenByPattern($RelativeDir, $Pattern) {
+            $sourceDir = Join-Path $env:HIPDNN_INSTALL_PREFIX $RelativeDir
+            if (-not (Test-Path $sourceDir)) {
+              return
+            }
+            $destinationDir = Join-Path $env:ROCM_SDK_PATH $RelativeDir
+            New-Item -ItemType Directory -Force $destinationDir | Out-Null
+            Get-ChildItem -Path $sourceDir -Filter $Pattern | ForEach-Object {
+              Copy-Item -Recurse -Force $_.FullName $destinationDir
+            }
+          }
+
+          Remove-PathIfExists (Join-Path $env:ROCM_SDK_PATH "include\hipdnn")
+          Get-ChildItem -Path (Join-Path $env:ROCM_SDK_PATH "lib\cmake") -Filter "hipdnn_*" -ErrorAction SilentlyContinue | Remove-Item -Recurse -Force
+          Remove-PathIfExists (Join-Path $env:ROCM_SDK_PATH "lib\cmake\ckc")
+          Get-ChildItem -Path (Join-Path $env:ROCM_SDK_PATH "lib") -File -ErrorAction SilentlyContinue |
+            Where-Object {
+              $_.Name -like "libhipdnn*" -or
+              $_.Name -like "hipdnn*.lib" -or
+              $_.Name -like "librocke*" -or
+              $_.Name -like "rocke*.lib" -or
+              $_.Name -like "libckc*" -or
+              $_.Name -like "ckc*.lib"
+            } |
+            Remove-Item -Force
+          Get-ChildItem -Path (Join-Path $env:ROCM_SDK_PATH "bin") -File -ErrorAction SilentlyContinue |
+            Where-Object {
+              $_.Name -like "hipdnn_backend*" -or
+              $_.Name -like "hipdnn_list_engines*" -or
+              $_.Name -like "rocke_core*"
+            } |
+            Remove-Item -Force
+          $engineDir = Join-Path $env:ROCM_SDK_PATH "lib\hipdnn_plugins\engines"
+          Get-ChildItem -Path $engineDir -File -ErrorAction SilentlyContinue |
+            Where-Object {
+              $_.Name -like "*miopen_plugin*" -or
+              $_.Name -like "*hipblaslt_plugin*" -or
+              $_.Name -like "*hip_kernel_provider*" -or
+              $_.Name -like "*rocke_client*"
+            } |
+            Remove-Item -Force
+          Remove-PathIfExists (Join-Path $engineDir "hip_kernel_provider")
+
+          Copy-PathIfExists "include\hipdnn"
+          Copy-PathIfExists "lib\cmake\ckc"
+          Copy-ChildrenByPattern "lib\cmake" "hipdnn_*"
+          Copy-ChildrenByPattern "lib" "libhipdnn*"
+          Copy-ChildrenByPattern "lib" "hipdnn*.lib"
+          Copy-ChildrenByPattern "lib" "librocke*"
+          Copy-ChildrenByPattern "lib" "rocke*.lib"
+          Copy-ChildrenByPattern "lib" "libckc*"
+          Copy-ChildrenByPattern "lib" "ckc*.lib"
+          Copy-ChildrenByPattern "bin" "hipdnn_backend*"
+          Copy-ChildrenByPattern "bin" "hipdnn_list_engines*"
+          Copy-ChildrenByPattern "bin" "rocke_core*"
+          Copy-ChildrenByPattern "lib\hipdnn_plugins\engines" "*miopen_plugin*"
+          Copy-ChildrenByPattern "lib\hipdnn_plugins\engines" "*hipblaslt_plugin*"
+          Copy-ChildrenByPattern "lib\hipdnn_plugins\engines" "*hip_kernel_provider*"
+          Copy-ChildrenByPattern "lib\hipdnn_plugins\engines" "*rocke_client*"
+          Copy-PathIfExists "lib\hipdnn_plugins\engines\hip_kernel_provider"
 
       - name: Verify patched ROCm SDK
         shell: pwsh
@@ -146,6 +229,18 @@ jobs:
           )
           foreach ($path in $requiredPaths) {
             if (-not (Test-Path $path)) { throw "Missing expected ROCm SDK file: $path" }
+          }
+
+          $checks = @(
+            @{ Directory = "bin"; Pattern = "hipdnn_backend*" },
+            @{ Directory = "lib\hipdnn_plugins\engines"; Pattern = "*miopen_plugin*" },
+            @{ Directory = "lib\hipdnn_plugins\engines"; Pattern = "*hipblaslt_plugin*" },
+            @{ Directory = "lib\hipdnn_plugins\engines"; Pattern = "*hip_kernel_provider*" }
+          )
+          foreach ($check in $checks) {
+            $directory = Join-Path $env:ROCM_SDK_PATH $check.Directory
+            $match = Get-ChildItem -Path $directory -Filter $check.Pattern -File -ErrorAction SilentlyContinue | Select-Object -First 1
+            if (-not $match) { throw "Missing expected ROCm SDK file matching $($check.Pattern) in $directory" }
           }
 
       - name: Package patched ROCm SDK artifact
@@ -171,6 +266,7 @@ jobs:
       # Multi-arch nightly device extra (rocm[...,device-<DEVICE_TARGET>]).
       DEVICE_TARGET: gfx942
       HIPDNN_ARTIFACT_DIR: ${{ runner.temp }}/hipdnn-artifacts
+      HIPDNN_INSTALL_PREFIX: ${{ runner.temp }}/hipdnn-install
     steps:
       - name: Runner health status
         run: |
@@ -250,14 +346,76 @@ jobs:
       - name: Run tests
         run: ctest --test-dir build --output-on-failure
 
-      - name: Patch ROCm SDK with superbuild outputs
-        run: cmake --install build --prefix "$ROCM_SDK_PATH"
+      - name: Stage superbuild install output
+        run: rm -rf "$HIPDNN_INSTALL_PREFIX" && cmake --install build --prefix "$HIPDNN_INSTALL_PREFIX"
+
+      - name: Patch ROCm SDK with selected superbuild outputs
+        run: |
+          set -euo pipefail
+          shopt -s nullglob
+
+          copy_path() {
+            local relative_path="$1"
+            local source_path="$HIPDNN_INSTALL_PREFIX/$relative_path"
+            local destination_path="$ROCM_SDK_PATH/$relative_path"
+            if [[ ! -e "$source_path" ]]; then
+              return
+            fi
+            mkdir -p "$(dirname "$destination_path")"
+            cp -a "$source_path" "$destination_path"
+          }
+
+          copy_children_by_pattern() {
+            local relative_dir="$1"
+            local pattern="$2"
+            local source_dir="$HIPDNN_INSTALL_PREFIX/$relative_dir"
+            local destination_dir="$ROCM_SDK_PATH/$relative_dir"
+            if [[ ! -d "$source_dir" ]]; then
+              return
+            fi
+            mkdir -p "$destination_dir"
+            for source_path in "$source_dir"/$pattern; do
+              cp -a "$source_path" "$destination_dir/"
+            done
+          }
+
+          rm -rf "$ROCM_SDK_PATH/include/hipdnn"
+          rm -rf "$ROCM_SDK_PATH"/lib/cmake/ckc
+          rm -f "$ROCM_SDK_PATH"/lib/librocke* "$ROCM_SDK_PATH"/lib/libckc*
+          rm -f "$ROCM_SDK_PATH"/bin/rocke_core*
+          rm -rf "$ROCM_SDK_PATH"/lib/cmake/hipdnn_*
+          rm -f "$ROCM_SDK_PATH"/lib/libhipdnn*
+          rm -f "$ROCM_SDK_PATH"/bin/hipdnn_backend* "$ROCM_SDK_PATH"/bin/hipdnn_list_engines*
+          rm -f "$ROCM_SDK_PATH"/lib/hipdnn_plugins/engines/*miopen_plugin*
+          rm -f "$ROCM_SDK_PATH"/lib/hipdnn_plugins/engines/*hipblaslt_plugin*
+          rm -f "$ROCM_SDK_PATH"/lib/hipdnn_plugins/engines/*hip_kernel_provider*
+          rm -f "$ROCM_SDK_PATH"/lib/hipdnn_plugins/engines/*rocke_client*
+          rm -rf "$ROCM_SDK_PATH"/lib/hipdnn_plugins/engines/hip_kernel_provider
+
+          copy_path "include/hipdnn"
+          copy_path "lib/cmake/ckc"
+          copy_children_by_pattern "lib/cmake" "hipdnn_*"
+          copy_children_by_pattern "lib" "libhipdnn*"
+          copy_children_by_pattern "lib" "librocke*"
+          copy_children_by_pattern "lib" "libckc*"
+          copy_children_by_pattern "bin" "hipdnn_backend*"
+          copy_children_by_pattern "bin" "hipdnn_list_engines*"
+          copy_children_by_pattern "bin" "rocke_core*"
+          copy_children_by_pattern "lib/hipdnn_plugins/engines" "*miopen_plugin*"
+          copy_children_by_pattern "lib/hipdnn_plugins/engines" "*hipblaslt_plugin*"
+          copy_children_by_pattern "lib/hipdnn_plugins/engines" "*hip_kernel_provider*"
+          copy_children_by_pattern "lib/hipdnn_plugins/engines" "*rocke_client*"
+          copy_path "lib/hipdnn_plugins/engines/hip_kernel_provider"
 
       - name: Verify patched ROCm SDK
         run: |
           set -euo pipefail
           test -f "$ROCM_SDK_PATH/lib/cmake/hip/hip-config.cmake"
           test -f "$ROCM_SDK_PATH/lib/cmake/hipdnn_backend/hipdnn_backendConfig.cmake"
+          test -f "$ROCM_SDK_PATH/lib/libhipdnn_backend.so"
+          test -f "$ROCM_SDK_PATH/lib/hipdnn_plugins/engines/libmiopen_plugin.so"
+          test -f "$ROCM_SDK_PATH/lib/hipdnn_plugins/engines/libhipblaslt_plugin.so"
+          test -f "$ROCM_SDK_PATH/lib/hipdnn_plugins/engines/libhip_kernel_provider.so"
 
       - name: Package patched ROCm SDK artifact
         run: |
