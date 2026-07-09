@@ -551,6 +551,8 @@ bool SdpaBwdPlanBuilder::isApplicable(
         vTensor->dims()->size() != 4,
         "v tensor must be rank 4 (Actual rank: " + std::to_string(vTensor->dims()->size()) + ")");
 
+    auto numHeadsQ = qTensor->dims()->Get(1);
+
     // Stats is FP32 (LSE from forward pass)
     HIP_KERNEL_RETURN_FALSE_IF(statsTensor->data_type() != DataType::FLOAT,
                                "stats tensor datatype must be FP32 (Actual type: "
