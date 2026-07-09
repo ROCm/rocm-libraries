@@ -594,19 +594,27 @@ struct CShuffleEpilogue
         // Check if scales are EmptyScale first (no scaling needed)
         if constexpr(std::is_same_v<ScaleM, EmptyScale> && std::is_same_v<ScaleN, EmptyScale>)
         {
-            // No scaling needed - this is a no-op
-            return lds_tile;
+            // No scaling needed
+            return cast_tile<CComputeDataType>(lds_tile);
         }
         // Check if scales are scalar AccDataType
-        else if constexpr(std::is_same_v<ScaleM, AccDataType> &&
-                          std::is_same_v<ScaleN, AccDataType>)
+        else if constexpr(std::is_same_v<ScaleM, CComputeDataType> &&
+                          std::is_same_v<ScaleN, CComputeDataType>)
         {
             // Handle scalar scales
-            const AccDataType scale_m = scale_m_window;
-            const AccDataType scale_n = scale_n_window;
-            tile_elementwise_inout([&](auto& element) { element = element * scale_m * scale_n; },
-                                   lds_tile);
-            return lds_tile;
+            const CComputeDataType scale_m = scale_m_window;
+            const CComputeDataType scale_n = scale_n_window;
+
+            auto scaled_lds_tile =
+                make_static_distributed_tensor<CComputeDataType>(lds_tile.get_tile_distribution());
+
+            tile_elementwise_inout(
+                [&](auto& scaled_element, const auto& element) {
+                    scaled_element = type_convert<CComputeDataType>(element) * scale_m * scale_n;
+                },
+                scaled_lds_tile,
+                lds_tile);
+            return scaled_lds_tile;
         }
         // Otherwise, assume they are tile windows that can be loaded
         else
@@ -780,7 +788,7 @@ struct CShuffleEpilogue
         constexpr bool has_scales =
             !std::is_same_v<ScaleM, EmptyScale> && !std::is_same_v<ScaleN, EmptyScale>;
         constexpr bool has_scalar_scales =
-            std::is_same_v<ScaleM, AccDataType> && std::is_same_v<ScaleN, AccDataType>;
+            std::is_same_v<ScaleM, CComputeDataType> && std::is_same_v<ScaleN, CComputeDataType>;
         auto scale_m_window = [&]() {
             if constexpr(has_scalar_scales)
             {
