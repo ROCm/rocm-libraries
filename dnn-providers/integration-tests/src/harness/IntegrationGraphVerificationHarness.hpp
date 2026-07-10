@@ -96,7 +96,7 @@ inline void checkEngineSupportOrSkip(hipdnn_frontend::graph::Graph& graph,
             GTEST_SKIP() << "Engine " << TestConfig::get().getEngineName()
                          << " does not support this graph";
         }
-        // Prererred engine must be set before create_execution_plans.
+        // Preferred engine must be set before create_execution_plans.
         graph.set_preferred_engine_id_ext(targetEngineId);
     }
     else
