@@ -34,6 +34,28 @@ private:
     hipblasLtHandle_t h_ = nullptr;
 };
 
+class MatrixLayout
+{
+public:
+    MatrixLayout(hipDataType dtype, uint64_t rows, uint64_t cols, int64_t ld)
+    {
+        HIPBLASLT_CHECK(hipblasLtMatrixLayoutCreate(&l_, dtype, rows, cols, ld));
+    }
+    ~MatrixLayout() { if(l_) hipblasLtMatrixLayoutDestroy(l_); }
+    MatrixLayout(const MatrixLayout&) = delete;
+    MatrixLayout& operator=(const MatrixLayout&) = delete;
+
+    void set_attribute(hipblasLtMatrixLayoutAttribute_t attr, int32_t value)
+    {
+        HIPBLASLT_CHECK(hipblasLtMatrixLayoutSetAttribute(l_, attr, &value, sizeof(value)));
+    }
+    std::uintptr_t ptr() const { return reinterpret_cast<std::uintptr_t>(l_); }
+    hipblasLtMatrixLayout_t raw() const { return l_; }
+
+private:
+    hipblasLtMatrixLayout_t l_ = nullptr;
+};
+
 } // namespace
 
 void init_descriptors(nb::module_& m)
@@ -48,4 +70,11 @@ void init_descriptors(nb::module_& m)
             self.close();
             return false;
         });
+
+    nb::class_<MatrixLayout>(m, "MatrixLayout")
+        .def(nb::init<hipDataType, uint64_t, uint64_t, int64_t>(),
+             nb::arg("dtype"), nb::arg("rows"), nb::arg("cols"), nb::arg("ld"))
+        .def("set_attribute", &MatrixLayout::set_attribute,
+             nb::arg("attr"), nb::arg("value"))
+        .def_prop_ro("ptr", &MatrixLayout::ptr);
 }
