@@ -412,7 +412,6 @@ void BatchnormFwdTrainingPlan::compile(const IKernelCompiler& kernelCompiler,
     options.update("HIP_PLUGIN_BN_GRP0", xlocalsize);
     options.update("HIP_PLUGIN_BN_GRP1", ylocalsize);
     options.update("HIP_PLUGIN_BN_GRP2", zlocalsize);
-    options.update("HIP_PLUGIN_BN_VECTORIZE", vectorsize > 1);
     options.update("HIP_PLUGIN_BN_VEC_SIZE", vectorsize);
     options.update("HIP_PLUGIN_BN_STASH_METHOD", stashMethod);
 
