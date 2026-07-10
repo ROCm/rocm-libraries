@@ -2069,9 +2069,8 @@ int BatchNormDriver<TInput, Tref, TAcc, TScaleBias, TOut>::VerifyBackward()
     if(!back)
         return miopenStatusSuccess;
 
-    const Tref maxrms =
-        static_cast<Tref>(((sizeof(TInput) == 4) ? RMSTOL_FP32 : RMSTOL_FP16) * 1000);
-    bool anError = false;
+    const Tref maxrms = static_cast<Tref>((sizeof(TInput) == 4) ? RMSTOL_FP32 : RMSTOL_FP16);
+    bool anError      = false;
 
     RunBackwardCPU();
 

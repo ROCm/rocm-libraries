@@ -4,7 +4,7 @@
 
 Pure codegen (no GPU, no subprocess). The resolver deterministically shrinks an
 over-budget register-PV 2D spec until it fits the arch LDS cap, and is a strict
-no-op for every already-fitting / non-register-PV / non-gfx950 config.
+no-op for every already-fitting or non-register-PV config, on any arch.
 
 The load-bearing case: bf16 head_dim=256 long prefill on gfx950 overflows LDS at
 the default (K double-buffered) geometry -- 204800 B > the 163840 B cap -- and the
@@ -39,6 +39,17 @@ def _d256_bf16_long_prefill(block_size: int = 64, max_seqlen: int = 4096):
 
 
 class TestLdsBudgetResolver(unittest.TestCase):
+    def setUp(self):
+        # The production D256 gfx950 fast route (``_d256_gfx950_fast``) targets
+        # this exact cohort (D256 / gfx950 / bf16 prefill) and overrides
+        # ``use_register_pv=False``, which would bypass the resolver under test.
+        # Disable it here so these unit tests exercise the register-PV LDS-shrink
+        # path directly, decoupled from the production routing decision -- which
+        # is covered separately by ``TestD256ProductionRouting`` below.
+        _p = mock.patch.object(au, "_d256_gfx950_fast", return_value=False)
+        _p.start()
+        self.addCleanup(_p.stop)
+
     def test_d256_gfx950_bf16_prefill_shrinks_to_fit(self):
         """D256 bf16 register-PV overflows at the default geometry; the resolver
         must single-buffer K so the resolved spec fits the gfx950 160 KB cap."""
@@ -65,13 +76,19 @@ class TestLdsBudgetResolver(unittest.TestCase):
             self.assertLessEqual(au._lds_bytes_regpv(fitted), au._lds_capacity_bytes())
             self.assertIs(au._resolve_lds_budget(fitted), fitted)
 
-    def test_resolver_is_noop_off_gfx950(self):
-        """On a non-gfx950 arch the resolver never engages -- it returns the spec
-        unchanged (the footprint model is only validated for gfx950)."""
+    def test_resolver_arch_agnostic_targets_dynamic_cap(self):
+        """Arch-agnostic: the resolver targets whatever LDS cap the arch-target
+        API reports -- not a hard-coded gfx950 / 163840 constant. Same D256
+        K-double geometry (204800 B): with a larger reported cap it already fits
+        and is returned byte-identical; with a tiny cap it engages and raises."""
         with mock.patch.object(au, "_resolve_attention_arch", return_value="gfx950"):
             spec = au._tiled_spec_from_problem(_d256_bf16_long_prefill())
-        with mock.patch.object(au, "_resolve_attention_arch", return_value="gfx942"):
-            self.assertIs(au._resolve_lds_budget(spec), spec)
+            k_double = replace(spec, use_k_single_buffer=False)  # 204800 B
+            with mock.patch.object(au, "_lds_capacity_bytes", return_value=262144):
+                self.assertIs(au._resolve_lds_budget(k_double), k_double)
+            with mock.patch.object(au, "_lds_capacity_bytes", return_value=65536):
+                with self.assertRaises(RuntimeError):
+                    au._resolve_lds_budget(replace(spec, use_k_single_buffer=False))
 
     def test_regpv_footprint_uses_shared_helper(self):
         """W: the register-PV footprint is the shared ``_tiled_2d_lds_bytes`` model
@@ -133,6 +150,33 @@ class TestLdsBudgetResolver(unittest.TestCase):
         msg = str(ctx.exception)
         self.assertIn("single-K", msg)
         self.assertIn("T=64", msg)
+
+
+class TestD256ProductionRouting(unittest.TestCase):
+    """Production routing (``_d256_gfx950_fast`` live, not mocked): the
+    D256 / gfx950 / bf16 prefill cohort is served by the 32x32 transposed fast
+    path, NOT the register-PV LDS-shrink resolver. This is the routing the PR
+    introduces; the resolver becomes a no-op for it (register-PV disabled)."""
+
+    def test_d256_gfx950_prefill_routes_to_fast_path(self):
+        with mock.patch.object(au, "_resolve_attention_arch", return_value="gfx950"):
+            problem = _d256_bf16_long_prefill()
+            # The cohort matches the fast-route predicate ...
+            self.assertTrue(au._d256_gfx950_fast(problem))
+            spec = au._tiled_spec_from_problem(problem)
+            # ... so the built spec is the 32x32 interleave fast path, not
+            # register-PV: register-PV is off and the 32x32 stack is on.
+            self.assertFalse(spec.use_register_pv)
+            self.assertTrue(spec.use_mfma_32x32)
+            self.assertTrue(spec.use_transposed_qk_32x32)
+            self.assertTrue(spec.use_softmax_mfma_interleave)
+            self.assertEqual(spec.softmax_interleave_mode, 2)
+            self.assertEqual(spec.softmax_interleave_groups, 4)
+            # The fast route single-buffers K itself, so the spec fits the cap
+            # and the resolver is a strict no-op (register-PV off -> same object).
+            self.assertTrue(spec.use_k_single_buffer)
+            self.assertIs(au._resolve_lds_budget(spec), spec)
+            self.assertLessEqual(au._lds_bytes_regpv(spec), au._lds_capacity_bytes())
 
 
 if __name__ == "__main__":

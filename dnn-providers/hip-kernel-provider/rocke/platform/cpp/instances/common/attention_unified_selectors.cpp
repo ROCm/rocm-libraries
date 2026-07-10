@@ -830,13 +830,17 @@ bool rocke_unified_attn_resolve_lds_budget(rocke_attention_tiled_2d_spec_t* spec
                                            size_t reason_cap)
 {
     const char* arch = rocke_unified_attn_resolve_arch();
-    /* Validated on gfx950 (CDNA4) register-PV only; other arches' 2D footprint
-     * models are not yet validated, so engage only where proven. No-op = fits,
-     * which keeps every currently-compiling spec byte-identical. */
-    if(strcmp(arch, "gfx950") != 0 || !spec->use_register_pv)
+    /* Arch-agnostic: key off the register-PV path + the target arch's LDS cap
+     * read dynamically from the arch-target API (no hard-coded arch or capacity).
+     * Validated on gfx950 (CDNA4); a strict no-op on other arches because their
+     * over-budget 2D specs are filtered upstream by the (more conservative)
+     * supports_tiled_2d gate, so any spec reaching the resolver already fits. */
+    if(!spec->use_register_pv)
         return true;
     const rocke_arch_target_t* t = rocke_arch_target_from_gfx(arch);
-    int cap = (t != NULL) ? t->lds_capacity_bytes : 163840;
+    if(t == NULL)
+        return true; /* arch has no declared LDS cap -> nothing to resolve against */
+    int cap = t->lds_capacity_bytes;
     if(attn_lds_bytes_regpv(spec) <= cap)
         return true;
 
