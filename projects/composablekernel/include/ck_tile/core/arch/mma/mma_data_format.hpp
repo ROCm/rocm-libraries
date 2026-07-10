@@ -13,7 +13,7 @@
 
 namespace ck_tile::core::arch::mma {
 
-// Utility for converting the datatype of the A or B input matrix in a scale intrinsics to the
+// Utility for converting the datatype of the A or B input matrix in an intrinsics to the
 // appropriate datatype flag. Note that this is not the same as the flag indicating the scale
 // datatype, see ScaleDataTypeToEnum.
 template <typename T>
