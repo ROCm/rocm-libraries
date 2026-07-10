@@ -76,7 +76,9 @@ execution_settings:
   default_timeout: 300
   timeout_multiplier: 1
   category_timeouts:
-    quick: 1200 # temporarily bumped to 20 min while quick runs the full Smoke/* set (see tier remapping above)
+    # Temporarily bumped to 20 min while quick runs the full Smoke/* set (see
+    # tier remapping above). Tracked by ROCm/rocm-libraries#6864.
+    quick: 1200
     standard: 2700
     comprehensive: 25200
     full: 28800
