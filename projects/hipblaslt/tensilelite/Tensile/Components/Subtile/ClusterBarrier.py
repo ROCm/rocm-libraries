@@ -15,6 +15,8 @@ from rocisa.container import sgpr
 from rocisa.instruction import (SBarrier, SCBranchSCC0, SCmpEQU32,
                                 MFMAInstruction, MXMFMAInstruction)
 
+from Tensile.Components.Subtile.SubtileMemToken import tagModuleBarriers
+
 _isWgBarrier = lambda x: isinstance(x, SBarrier) and "s_barrier_wait -1" in str(x)
 
 
@@ -40,6 +42,7 @@ def subtileClusterBarrierSignal(writer, kernel) -> Module:
     mod.add(SCBranchSCC0(skipPreSignal.getLabelName(), "only wave 0 signals the cluster"))
     mod.add(SBarrier(True, False, True, "cluster_barrier signal"))
     mod.add(skipPreSignal)
+    tagModuleBarriers(mod, writer, kernel)
     return mod
 
 
@@ -47,6 +50,7 @@ def subtileClusterBarrierWait(writer, kernel) -> Module:
     """The all-waves cluster_barrier wait that closes the handshake."""
     mod = Module("subtile_cluster_barrier_wait")
     mod.add(SBarrier(True, True, True, "cluster_barrier wait"))
+    tagModuleBarriers(mod, writer, kernel)
     return mod
 
 
@@ -121,6 +125,7 @@ def insertClusterBarrier(module, writer, kernel):
         head = Module(module.name)
         head.add(SBarrier(True, False, False))
         head.add(SBarrier(True, True, False, "workgroup barrier wait"))
+        tagModuleBarriers(head, writer, kernel)
         for s in signalItems:
             head.add(s)
         for inst in result.flatitems():

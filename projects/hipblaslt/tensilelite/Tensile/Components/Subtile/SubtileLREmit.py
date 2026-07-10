@@ -29,6 +29,7 @@ from rocisa.instruction import (
 from .SubtileGeometry import (
     LRTag_1x1, LRTag_1x2, LRTag_TLU1,
 )
+from .SubtileMemToken import flipLrReadToken, tagDsRead
 from .SubtileScaleEmit import emitScaleLRLDSSwap
 
 
@@ -641,7 +642,7 @@ def localReadResetOffsetsSubtile(writer, kernel):
   return module
 
 
-def emitSingleDsRead(tileInfo, sId0, sId1, subIterK, dstTile, swizzled=True):
+def emitSingleDsRead(tileInfo, sId0, sId1, subIterK, dstTile, swizzled=True, writer=None):
   """Emit DSLoadB128 instruction(s) for one MMA tile within a subtile.
 
   For wave32 tiles with 8 VGPRs, emits two DSLoadB128 instructions
@@ -651,12 +652,9 @@ def emitSingleDsRead(tileInfo, sId0, sId1, subIterK, dstTile, swizzled=True):
       tileInfo:  TileInfo (for subtileSize, loadRatioGR, sharedVgprLROffset, tc)
       sId0:      Subtile row index (used for offset computation)
       subIterK:  subIterK index within the subtile (maps to mfmaC; subtileShape[0]=1 so mfmaR=0)
-      dstTile:   RegisterTileInfo \u2014 destination vgpr tile for the load
+      dstTile:   RegisterTileInfo — destination vgpr tile for the load
       swizzled:  If True, LDS uses swizzled subtile layout; if False, contiguous K-row layout
-
-  Returns a Module. For tiles with numRegs > 4 (e.g. FP8 8-VGPR tiles), emits
-  multiple ds_read_b128 instructions (one per 4 VGPRs), each using the next
-  sharedVgprLROffset entry.
+      writer:    KernelWriter (optional; tags MemTokenData when provided)
   """
   REGS_PER_DS_READ = tileInfo.loadWidthLR // 4  # load width in bytes / 4 bytes per VGPR
 
@@ -689,11 +687,14 @@ def emitSingleDsRead(tileInfo, sId0, sId1, subIterK, dstTile, swizzled=True):
   module = Module()
   for readIdx in range(numReadsForTile):
     addrVgpr = tileInfo.sharedVgprLROffset[mfmaId * numReadsForTile + readIdx]
-    module.add(DSLoadB128(
+    inst = DSLoadB128(
         dst=vgpr(dstVgpr + readIdx * REGS_PER_DS_READ, REGS_PER_DS_READ),
         src=vgpr(addrVgpr),
         ds=DSModifiers(offset=offset),
-        comment="Subtile%s[%u, %u] subIterK=%u read=%u" % (tileInfo.tc, sId0, sId1, subIterK, readIdx)))
+        comment="Subtile%s[%u, %u] subIterK=%u read=%u" % (tileInfo.tc, sId0, sId1, subIterK, readIdx))
+    if writer is not None:
+      tagDsRead(inst, writer)
+    module.add(inst)
   return module
 
 
@@ -775,7 +776,9 @@ def localReadDTLInitCommonSwapVgpr(writer, kernel):
 def localReadLDSBufferSwap(tc, writer, kernel):
   if tc in ['A', 'B']:
     ti_ = writer.states.a.tileInfo if tc == 'A' else writer.states.b.tileInfo
-    return ti_.emitLRLDSBufferSwap(writer, kernel)
+    module = ti_.emitLRLDSBufferSwap(writer, kernel)
   else:
     ti_ = writer.states.mxsa.tileInfo if tc == 'MXSA' else writer.states.mxsb.tileInfo
-    return emitScaleLRLDSSwap(ti_, writer, kernel)
+    module = emitScaleLRLDSSwap(ti_, writer, kernel)
+  flipLrReadToken(writer)
+  return module

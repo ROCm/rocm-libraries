@@ -27,6 +27,8 @@ from rocisa.instruction import (
     VLShiftLeftB32, VLShiftRightB32,
 )
 
+from .SubtileMemToken import tagDtlLoad, tagDsRead
+
 
 # ---------------------------------------------------------------------------
 # Scale GR offset
@@ -438,9 +440,11 @@ def globalReadDoScaleSubtile(tc, writer, kernel):
 
   # DTL load: data goes directly from global memory to LDS (no intermediate VGPR)
   mubuf = MUBUFModifiers(offen=True, offset12=0, glc=isGlc, slc=isSlc, nt=isNT, lds=True)
-  module.add(BufferLoadB128(dst=None, vaddr=vgpr(tileInfo.sharedVgprGROffset[0]),
-                            saddr=sgpr("Srd%s" % tc, 4), soffset=0, mubuf=mubuf,
-                            comment="scale%s: DTL b128 load" % tc))
+  inst = BufferLoadB128(dst=None, vaddr=vgpr(tileInfo.sharedVgprGROffset[0]),
+                        saddr=sgpr("Srd%s" % tc, 4), soffset=0, mubuf=mubuf,
+                        comment="scale%s: DTL b128 load" % tc)
+  tagDtlLoad(inst, writer)
+  module.add(inst)
 
   return module
 
@@ -471,10 +475,12 @@ def emitSubtileScaleDsRead(tc, writer, kernel, scaleGroupIdx):
     groupStride = 2 * tileInfo.subtileSize
   dsOffset = groupStride * scaleGroupIdx
   vdst = tileInfo.vgprTiles[4 * scaleGroupIdx].regList.indices[0]
-  module.add(DSLoadB32(dst=vgpr(vdst),
-                       src=vgpr(tileInfo.sharedVgprLROffset[0]),
-                       ds=DSModifiers(offset=dsOffset),
-                       comment="scale%s[group%u]: load 4B from LDS" % (tc, scaleGroupIdx)))
+  inst = DSLoadB32(dst=vgpr(vdst),
+                   src=vgpr(tileInfo.sharedVgprLROffset[0]),
+                   ds=DSModifiers(offset=dsOffset),
+                   comment="scale%s[group%u]: load 4B from LDS" % (tc, scaleGroupIdx))
+  tagDsRead(inst, writer)
+  module.add(inst)
   return module
 
 def localReadDoScaleSubtile(tc, writer, kernel):

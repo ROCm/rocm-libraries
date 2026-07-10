@@ -37,6 +37,12 @@ from .SubtileGeometry import (
     RegList,
     GRTag_1x1, GRTag_1x2, GRTag_2x2, GRTag_TLU1,
 )
+from .SubtileMemToken import (
+    flipGrWriteTokens,
+    flipTensorLoadToken,
+    tagDtlLoad,
+    tagTensorLoad,
+)
 from .SubtileScaleEmit import emitScaleGRLDSSwap
 
 from math import ceil, log, log2, prod
@@ -862,7 +868,7 @@ def _graTileAssignment_legacy(writer, kernel, useSwizzling=True):
 ##################################################
 # Subroutine to generate GR load code
 #
-def emitSingleBufferLoad(tileInfo, kernel, sId0, sId1):
+def emitSingleBufferLoad(tileInfo, kernel, sId0, sId1, writer=None):
   """Emit buffer_load instructions for a single subtile (sId0, sId1).
 
   When loadRatioGR > 1, multiple local subtiles share the same global read.
@@ -872,6 +878,7 @@ def emitSingleBufferLoad(tileInfo, kernel, sId0, sId1):
       tileInfo: TileInfo or TileInfo for the tensor component
       sId0:     Subtile row index
       sId1:     Subtile column index (K-dimension)
+      writer:   KernelWriter (optional; tags MemTokenData when provided)
   """
   module = Module()
 
@@ -881,8 +888,11 @@ def emitSingleBufferLoad(tileInfo, kernel, sId0, sId1):
       tc = tileInfo.tc
       group0 = "tdm%sGroup0" % tc
       group1 = "tdm%sGroup1" % tc
-      module.add(TensorLoadToLds(sgpr(group0, 4), sgpr(group1, 8), None, None,
-                                 comment="TDM: global->LDS for %s" % tc))
+      inst = TensorLoadToLds(sgpr(group0, 4), sgpr(group1, 8), None, None,
+                             comment="TDM: global->LDS for %s" % tc)
+      if writer is not None:
+        tagTensorLoad(inst, writer)
+      module.add(inst)
     return module
 
   linearId = tileInfo.getLocalSubtileLinearId(sId0, sId1)
@@ -913,14 +923,17 @@ def emitSingleBufferLoad(tileInfo, kernel, sId0, sId1):
 
     soffset = regList.ref(0) if len(regList) > 0 and useSgpr else 0
     voff = tileInfo.sharedVgprGROffset[i] if useSgpr or len(regList) == 0 else regList.indices[i]
-    module.add(BufferLoadB128(dst=None, vaddr=vgpr(voff), saddr=sgpr("Srd%s"%tc, 4), soffset=soffset, mubuf=mubuf, comment="grBaseId = %u, i= %u"%(grBaseId , i)))
+    inst = BufferLoadB128(dst=None, vaddr=vgpr(voff), saddr=sgpr("Srd%s"%tc, 4), soffset=soffset, mubuf=mubuf, comment="grBaseId = %u, i= %u"%(grBaseId , i))
+    if writer is not None:
+      tagDtlLoad(inst, writer)
+    module.add(inst)
 
   return module
 
 
 def emitSubtileBufferLoad(tc, writer, kernel, subtileId):
   tileInfo = writer.states.a.tileInfo if tc == 'A' else writer.states.b.tileInfo
-  return emitSingleBufferLoad(tileInfo, kernel, subtileId[0], subtileId[1])
+  return emitSingleBufferLoad(tileInfo, kernel, subtileId[0], subtileId[1], writer=writer)
 
 ##################################################
 # Subroutine to generate GR load code
@@ -986,11 +999,16 @@ def globalReadLDSBufferSwap(tc, writer, kernel):
       module.add(SXorB32(dst=sgpr(ldsAddrSgpr), src0=sgpr(ldsAddrSgpr), src1=sgpr(swapSgpr), comment=""))
       group0 = "tdm%sGroup0" % tc
       module.add(SMovB32(dst=sgpr("%s+1" % group0), src=sgpr(ldsAddrSgpr), comment="sync descriptor LDS addr"))
+      flipTensorLoadToken(writer)
       return module
-    return ti_.emitGRLDSBufferSwap(writer, kernel)
+    module = ti_.emitGRLDSBufferSwap(writer, kernel)
+    flipGrWriteTokens(writer)
+    return module
   else:
     ti_ = writer.states.mxsa.tileInfo if tc == 'MXSA' else writer.states.mxsb.tileInfo
-    return emitScaleGRLDSSwap(ti_, writer, kernel)
+    module = emitScaleGRLDSSwap(ti_, writer, kernel)
+    flipGrWriteTokens(writer)
+    return module
 
 
 

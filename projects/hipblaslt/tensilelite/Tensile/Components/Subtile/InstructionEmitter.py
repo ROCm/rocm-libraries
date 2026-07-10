@@ -19,6 +19,11 @@ from Tensile.Components.Subtile.SubtileLREmit import (
 from Tensile.Components.Subtile.SubtileScaleEmit import (
     globalReadDoScaleSubtile, globalReadScalePtrUpdates,
 )
+from Tensile.Components.Subtile.SubtileMemToken import (
+    initSubtileMemTokens,
+    tagBarrier,
+    tagDsRead,
+)
 from rocisa.code import Module
 from rocisa.instruction import (
     SWaitCnt, SBarrier, DSLoadB32, SCmpEQU32, SCmpLeU32,
@@ -125,6 +130,8 @@ class InstructionEmitter:
             self._per_uid_k['SA'] = config.numSubIterK // config.numUnroll.get('SA', 1)
             self._per_uid_k['SB'] = config.numSubIterK // config.numUnroll.get('SB', 1)
 
+        initSubtileMemTokens(writer, kernel)
+
         # Dispatch table — unroll_iter is passed for mfma/lr
         self._dispatch = {
             'mfma':         lambda em, ui: self.emit_mfma(em.source, ui),
@@ -226,7 +233,8 @@ class InstructionEmitter:
                     dstTile = vgprTiles[tile_map[tileId]]
                     swizzled = self.writer.states.subtileLdsSwizzle
                     module.add(emitSingleDsRead(
-                        ti, tileId, subtileK, subIterK_within, dstTile, swizzled=swizzled))
+                        ti, tileId, subtileK, subIterK_within, dstTile,
+                        swizzled=swizzled, writer=self.writer))
         elif tensor in ('SA', 'SB'):
             tc = 'MXSA' if tensor == 'SA' else 'MXSB'
             ti = self.tileInfoMap[tensor]
@@ -239,11 +247,13 @@ class InstructionEmitter:
                 numKGroups = ti.lrLocalSubtileGrid[1]
                 dsOffset = int(ti.lrSubtileSize) * (scaleGroupIdx * numKGroups + kGroupIdx)
                 vdst = next(iter(vgprTilesScale[tile_map[groupKey]]))
-                module.add(DSLoadB32(
+                inst = DSLoadB32(
                     dst=vgpr(vdst),
                     src=vgpr(ti.sharedVgprLROffset[0]),
                     ds=DSModifiers(offset=dsOffset),
-                    comment=f"scale{tc}[group{scaleGroupIdx},K={placement.tiles.subIterK_start}]: load 4B from LDS"))
+                    comment=f"scale{tc}[group{scaleGroupIdx},K={placement.tiles.subIterK_start}]: load 4B from LDS")
+                tagDsRead(inst, self.writer)
+                module.add(inst)
         return list(module.flatitems())
 
     def emit_gr(self, placement):
@@ -257,7 +267,7 @@ class InstructionEmitter:
             for tileId in range(placement.tiles.tileId_start, placement.tiles.tileId_end, grGran.mn):
                 for k in range(placement.tiles.subIterK_start, placement.tiles.subIterK_end, grGran.k):
                     subtileK = (k - uid_k_base) // self.subtileShapeK
-                    module.add(emitSingleBufferLoad(ti, self.kernel, tileId, subtileK))
+                    module.add(emitSingleBufferLoad(ti, self.kernel, tileId, subtileK, writer=self.writer))
         elif tensor in ('SA', 'SB'):
             tc = 'MXSA' if tensor == 'SA' else 'MXSB'
             module.add(globalReadDoScaleSubtile(tc, self.writer, self.kernel))
@@ -304,7 +314,9 @@ class InstructionEmitter:
                          comment="Wait for LR to complete")]
 
     def emit_sync(self):
-        return [SBarrier(comment="Barrier")]
+        barrier = SBarrier(comment="Barrier")
+        tagBarrier(barrier, self.writer, self.kernel)
+        return [barrier]
 
     def emit_inline(self, source):
         """Emit a writer-built Module supplied by an InlineModuleOp callback."""
