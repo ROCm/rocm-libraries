@@ -34,25 +34,102 @@ from rocke.heuristics.gen_sweep_data import OpAdapter, generate
 # =====================================================================
 
 
+@dataclass(frozen=True)
+class SdpaGraphShape:
+    """One SDPA problem, described in the hipDNN ``SdpaGraphConfig`` vocabulary
+    (``api/src/tests/dispatcher/SdpaGraphFixture.hpp``) rather than a positional
+    tuple. Field names/units match the graph the runtime dispatcher will
+    featurize, so a swept shape is expressible as a hipDNN SDPA graph by
+    construction -- the eventual consumer, not torch, defines the shape.
+
+    Kernel-capability note: the rocKE 2D tiled kernel
+    (``UnifiedAttentionProblem``) carries a SINGLE ``head_size`` and only the
+    canonical BSHD layout. So ``head_size_qk`` and ``head_size_v`` MUST be equal
+    and ``layout`` MUST be "BSHD" today; :meth:`to_problem` asserts loudly rather
+    than silently mis-lowering. The separate QK/V fields are kept so the corpus
+    can already *express* MLA-style shapes (they map to the model's hdim_q/hdim_v
+    features) the moment the kernel gains support -- at which point the assert
+    relaxes, not the schema.
+    """
+
+    batch: int
+    seqlen_q: int
+    seqlen_k: int
+    num_query_heads: int
+    num_kv_heads: int
+    head_size_qk: int
+    head_size_v: int
+    dtype: str
+    sliding_window: int = 0
+    layout: str = "BSHD"  # BSHD (canonical) | BHSD -- kernel only does BSHD today
+    block_size: int = 16  # paged-KV block; 16 across the supported corpus
+
+    def to_problem(self, UnifiedAttentionProblem):
+        """Lower to a UnifiedAttentionProblem, asserting the kernel-unsupported
+        axes are within what the tiled kernel accepts (fail loud, never silently
+        mis-map). ``num_query_heads`` must be an integer multiple of
+        ``num_kv_heads`` (GQA)."""
+        if self.head_size_qk != self.head_size_v:
+            raise ValueError(
+                f"head_size_qk ({self.head_size_qk}) != head_size_v "
+                f"({self.head_size_v}); the 2D tiled kernel has a single "
+                "head_size. Split-head-dim (MLA) shapes are expressible here but "
+                "not yet buildable -- drop them until the kernel supports it."
+            )
+        if self.layout != "BSHD":
+            raise ValueError(
+                f"layout {self.layout!r} unsupported; the tiled kernel is "
+                "canonical BSHD only."
+            )
+        if self.num_query_heads % self.num_kv_heads != 0:
+            raise ValueError(
+                f"num_query_heads ({self.num_query_heads}) must be a multiple of "
+                f"num_kv_heads ({self.num_kv_heads}) for a valid GQA ratio."
+            )
+        return UnifiedAttentionProblem(
+            total_q=self.batch * self.seqlen_q,
+            num_seqs=self.batch,
+            num_query_heads=self.num_query_heads,
+            num_kv_heads=self.num_kv_heads,
+            head_size=self.head_size_qk,
+            block_size=self.block_size,
+            max_seqlen_q=self.seqlen_q,
+            max_seqlen_k=self.seqlen_k,
+            dtype=self.dtype,
+            sliding_window=self.sliding_window,
+        )
+
+
+def _S(batch, seqlen_q, seqlen_k, num_query_heads, num_kv_heads, head_size,
+       dtype, sliding_window=0):
+    """Terse builder for the common case (head_size_qk == head_size_v, BSHD,
+    block_size 16). Use SdpaGraphShape(...) directly for the exceptions."""
+    return SdpaGraphShape(
+        batch=batch, seqlen_q=seqlen_q, seqlen_k=seqlen_k,
+        num_query_heads=num_query_heads, num_kv_heads=num_kv_heads,
+        head_size_qk=head_size, head_size_v=head_size,
+        dtype=dtype, sliding_window=sliding_window,
+    )
+
+
 _SDPA_PROBLEMS = [
-    # (batch, sq, sk, hq, hk, hd, block_size, dtype, sliding_window)
     # Decode (seqlen_q == 1) across batch + GQA ratios.
-    (1, 1, 1024, 32, 32, 128, 16, "fp16", 0),
-    (8, 1, 2048, 32, 8, 128, 16, "fp16", 0),
-    (16, 1, 4096, 32, 8, 128, 16, "bf16", 0),
-    (32, 1, 512, 64, 8, 64, 16, "bf16", 0),
+    _S(1, 1, 1024, 32, 32, 128, "fp16"),
+    _S(8, 1, 2048, 32, 8, 128, "fp16"),
+    _S(16, 1, 4096, 32, 8, 128, "bf16"),
+    _S(32, 1, 512, 64, 8, 64, "bf16"),
     # Short prefill (q <= 256).
-    (1, 128, 128, 32, 32, 128, 16, "fp16", 0),
-    (4, 256, 256, 32, 8, 128, 16, "bf16", 0),
+    _S(1, 128, 128, 32, 32, 128, "fp16"),
+    _S(4, 256, 256, 32, 8, 128, "bf16"),
     # Medium prefill (256 < q <= 1024).
-    (1, 512, 512, 32, 32, 64, 16, "fp16", 0),
-    (4, 1024, 1024, 32, 8, 128, 16, "bf16", 0),
+    _S(1, 512, 512, 32, 32, 64, "fp16"),
+    _S(4, 1024, 1024, 32, 8, 128, "bf16"),
     # Long prefill (q > 1024).
-    (1, 2048, 2048, 16, 16, 128, 16, "bf16", 0),
-    (2, 4096, 4096, 32, 4, 64, 16, "bf16", 0),
+    _S(1, 2048, 2048, 16, 16, 128, "bf16"),
+    _S(2, 4096, 4096, 32, 4, 64, "bf16"),
     # Sliding-window variants.
-    (1, 1024, 1024, 32, 8, 128, 16, "bf16", 256),
-    (4, 2048, 2048, 32, 8, 64, 16, "fp16", 512),
+    _S(1, 1024, 1024, 32, 8, 128, "bf16", sliding_window=256),
+    _S(4, 2048, 2048, 32, 8, 64, "fp16", sliding_window=512),
 ]
 
 
@@ -147,19 +224,8 @@ def _sdpa_enumerate(arch: str, max_shapes: Optional[int]) -> List[object]:
         problems = problems[:max_shapes]
 
     specs: List[object] = []
-    for batch, sq, sk, hq, hk, hd, bs, dtype, sw in problems:
-        prob = UnifiedAttentionProblem(
-            total_q=batch * sq,
-            num_seqs=batch,
-            num_query_heads=hq,
-            num_kv_heads=hk,
-            head_size=hd,
-            block_size=bs,
-            max_seqlen_q=sq,
-            max_seqlen_k=sk,
-            dtype=dtype,
-            sliding_window=sw,
-        )
+    for shape in problems:
+        prob = shape.to_problem(UnifiedAttentionProblem)
         # One candidate per valid grid point (multiple configs per problem).
         for tiled in _grid_tiled_specs(prob, arch):
             specs.append(_SdpaCandidate(problem=prob, tiled=tiled))
