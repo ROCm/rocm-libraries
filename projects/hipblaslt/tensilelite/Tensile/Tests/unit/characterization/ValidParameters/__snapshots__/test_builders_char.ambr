@@ -1614,7 +1614,7 @@
         2,
         4,
       ]),
-      'len': 8,
+      'len': 9,
       'type': 'list',
     }),
     'BufferLoad': dict({
