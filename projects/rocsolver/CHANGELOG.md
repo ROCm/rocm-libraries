@@ -24,8 +24,6 @@ Full documentation for rocSOLVER is available at the [rocSOLVER documentation](h
 
 * Support added for the gfx1250 architecture.
 
-### Changed
-### Removed
 ### Optimized
 
 * Refined `potf2_run_small` dispatch by `BS2` to avoid over-generating specialized kernels while preserving runtime bounds checks on `nb`.
