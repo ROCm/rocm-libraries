@@ -84,7 +84,7 @@
     BufferStore: true
     CheckDimOverflow: 0
     CheckTensorDimAsserts: false
-    ClusterLocalRead: false
+    ClusterLocalRead: 0
     CodeObjectVersion: default
     CustomKernelName: ''
     DebugStreamK: 0
@@ -102,7 +102,7 @@
     EnableF32XdlMathOp: false
     EnableMatrixInstruction: false
     EnableMatrixInstructionStore: false
-    ExpandPointerSwap: 0
+    ExpandPointerSwap: false
     ExtraLatencyForLR: 0
     ExtraMiLatencyLeft: 0
     ForceStoreSC1: false
@@ -117,7 +117,7 @@
     GlobalReadCoalesceGroupB: true
     GlobalReadCoalesceVectorA: true
     GlobalReadCoalesceVectorB: true
-    GlobalReadPerMfma: 1
+    GlobalReadPerMfma: 1.0
     GlobalReadVectorWidth: -1
     GlobalSplitU: 32
     GlobalSplitUAlgorithm: MultipleBuffer
@@ -216,8 +216,8 @@
     PersistentKernelAlongBatch: false
     PrefetchAcrossPersistent: 0
     PrefetchAcrossPersistentMode: 0
-    PrefetchGlobalRead: true
-    PrefetchLocalRead: true
+    PrefetchGlobalRead: 1
+    PrefetchLocalRead: 1
     PreloadKernelArguments: 0
     ProblemType:
       AllowNoFreeDims: false
@@ -314,7 +314,7 @@
     UnrollMajorLDSA: false
     UnrollMajorLDSB: false
     UnrollMemFence: false
-    Use64bShadowLimit: 1
+    Use64bShadowLimit: true
     UseInstOffsetForGRO: 0
     UseSgprForGRO: -1
     Valid: true
@@ -362,7 +362,7 @@
     BufferStore: true
     CheckDimOverflow: 0
     CheckTensorDimAsserts: false
-    ClusterLocalRead: false
+    ClusterLocalRead: 0
     CodeObjectVersion: default
     CustomKernelName: ''
     DebugStreamK: 0
@@ -380,7 +380,7 @@
     EnableF32XdlMathOp: false
     EnableMatrixInstruction: false
     EnableMatrixInstructionStore: false
-    ExpandPointerSwap: 0
+    ExpandPointerSwap: false
     ExtraLatencyForLR: 0
     ExtraMiLatencyLeft: 0
     ForceStoreSC1: false
@@ -395,7 +395,7 @@
     GlobalReadCoalesceGroupB: true
     GlobalReadCoalesceVectorA: true
     GlobalReadCoalesceVectorB: true
-    GlobalReadPerMfma: 1
+    GlobalReadPerMfma: 1.0
     GlobalReadVectorWidth: -1
     GlobalSplitU: 1
     GlobalSplitUAlgorithm: SingleBuffer
@@ -494,8 +494,8 @@
     PersistentKernelAlongBatch: false
     PrefetchAcrossPersistent: 0
     PrefetchAcrossPersistentMode: 0
-    PrefetchGlobalRead: true
-    PrefetchLocalRead: true
+    PrefetchGlobalRead: 1
+    PrefetchLocalRead: 1
     PreloadKernelArguments: 0
     ProblemType:
       AllowNoFreeDims: false
@@ -592,7 +592,7 @@
     UnrollMajorLDSA: false
     UnrollMajorLDSB: false
     UnrollMemFence: false
-    Use64bShadowLimit: 1
+    Use64bShadowLimit: true
     UseInstOffsetForGRO: 0
     UseSgprForGRO: -1
     Valid: true
@@ -640,7 +640,7 @@
     BufferStore: true
     CheckDimOverflow: 0
     CheckTensorDimAsserts: false
-    ClusterLocalRead: false
+    ClusterLocalRead: 0
     CodeObjectVersion: default
     CustomKernelName: ''
     DebugStreamK: 0
@@ -658,7 +658,7 @@
     EnableF32XdlMathOp: false
     EnableMatrixInstruction: false
     EnableMatrixInstructionStore: false
-    ExpandPointerSwap: 0
+    ExpandPointerSwap: false
     ExtraLatencyForLR: 0
     ExtraMiLatencyLeft: 0
     ForceStoreSC1: false
@@ -673,7 +673,7 @@
     GlobalReadCoalesceGroupB: true
     GlobalReadCoalesceVectorA: true
     GlobalReadCoalesceVectorB: true
-    GlobalReadPerMfma: 1
+    GlobalReadPerMfma: 1.0
     GlobalReadVectorWidth: -1
     GlobalSplitU: 32
     GlobalSplitUAlgorithm: MultipleBuffer
@@ -772,8 +772,8 @@
     PersistentKernelAlongBatch: false
     PrefetchAcrossPersistent: 0
     PrefetchAcrossPersistentMode: 0
-    PrefetchGlobalRead: true
-    PrefetchLocalRead: true
+    PrefetchGlobalRead: 1
+    PrefetchLocalRead: 1
     PreloadKernelArguments: 0
     ProblemType:
       AllowNoFreeDims: false
@@ -870,7 +870,7 @@
     UnrollMajorLDSA: false
     UnrollMajorLDSB: false
     UnrollMemFence: false
-    Use64bShadowLimit: 1
+    Use64bShadowLimit: true
     UseInstOffsetForGRO: 0
     UseSgprForGRO: -1
     Valid: true
