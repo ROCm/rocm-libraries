@@ -1,25 +1,5 @@
-/* ************************************************************************
- * Copyright (C) 2025-2026 Advanced Micro Devices, Inc.
- *
- * Permission is hereby granted, free of charge, to any person obtaining a copy
- * of this software and associated documentation files (the "Software"), to deal
- * in the Software without restriction, including without limitation the rights
- * to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
- * copies of the Software, and to permit persons to whom the Software is
- * furnished to do so, subject to the following conditions:
- *
- * The above copyright notice and this permission notice shall be included in
- * all copies or substantial portions of the Software.
- *
- * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
- * IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
- * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
- * AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
- * LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
- * OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
- * THE SOFTWARE.
- *
- * ************************************************************************ */
+// Copyright Advanced Micro Devices, Inc., or its affiliates.
+// SPDX-License-Identifier: MIT
 #include "stinkytofu/transforms/asm/FlattenCalleesPass.hpp"
 
 #include <utility>
@@ -38,41 +18,41 @@
 namespace stinkytofu {
 namespace {
 
-/// First CALLEE_BODY marker in \p func (program order), or nullptr.
+/// First function ASM placement marker in \p func (program order), or nullptr.
 StinkyInstruction* findFirstMarker(Function& func) {
     for (BasicBlock& bb : func) {
         for (IRBase& ir : bb) {
             auto* inst = dyn_cast<StinkyInstruction>(&ir);
-            if (inst && isCalleeBody(*inst)) return inst;
+            if (inst && isFunctionAsmPlacementMarker(*inst)) return inst;
         }
     }
     return nullptr;
 }
 
-/// Callee Function in \p functions whose name matches \p name, or nullptr.
+/// Function in \p functions whose name matches \p name, or nullptr.
 Function* findFunctionByName(const std::vector<Function*>& functions, const std::string& name) {
     for (Function* f : functions)
         if (f != nullptr && f->getName() == name) return f;
     return nullptr;
 }
 
-/// Move the named callee's instructions in program order to right after the
-/// marker, then erase the marker. Callee name comes from the marker's LabelData.
+/// Move the named function's instructions in program order to right after the
+/// marker, then erase the marker. Function name comes from the marker's LabelData.
 /// Instructions are moved, not cloned (insertIR relinks each node).
-void spliceCalleeAtMarker(StinkyInstruction* marker, const std::vector<Function*>& functions) {
+void spliceFunctionAtMarker(StinkyInstruction* marker, const std::vector<Function*>& functions) {
     BasicBlock* hostBlock = marker->getParent();
     IRList::iterator markerIt(marker);
 
     // Anchor: node after the marker (may be end()); inserting before it keeps the
-    // callee body between the marker and what originally followed.
+    // function body between the marker and what originally followed.
     IRList::iterator insertPos = markerIt;
     ++insertPos;
 
     const auto* nameMod = marker->getModifier<LabelData>();
-    Function* callee = nameMod != nullptr ? findFunctionByName(functions, nameMod->label) : nullptr;
-    if (callee != nullptr) {
-        for (BasicBlock& calleeBlock : *callee) {
-            for (auto it = calleeBlock.begin(); it != calleeBlock.end();) {
+    Function* target = nameMod != nullptr ? findFunctionByName(functions, nameMod->label) : nullptr;
+    if (target != nullptr) {
+        for (BasicBlock& targetBlock : *target) {
+            for (auto it = targetBlock.begin(); it != targetBlock.end();) {
                 IRBase* node = it.getNodePtr();
                 ++it;  // advance before the move detaches the node
                 hostBlock->insertIR(insertPos, node);
@@ -101,11 +81,11 @@ class FlattenCalleesPassImpl : public Pass {
     PreservedAnalyses run(Function& func, PassContext& /*passCtx*/,
                           AnalysisManager& /*AM*/) override {
         // One marker per iteration (each splice erases one, so this terminates).
-        // Markers from a spliced-in callee land in the stream and resolve on a
-        // later iteration (nested callees); a marker for an already-emptied
-        // callee inlines nothing and is just erased.
+        // Markers from a spliced-in callable function land in the stream and
+        // resolve on a later iteration (nested callables); a marker for an
+        // already-emptied function inlines nothing and is just erased.
         while (StinkyInstruction* marker = findFirstMarker(func)) {
-            spliceCalleeAtMarker(marker, functions);
+            spliceFunctionAtMarker(marker, functions);
         }
         return PreservedAnalyses::none();
     }

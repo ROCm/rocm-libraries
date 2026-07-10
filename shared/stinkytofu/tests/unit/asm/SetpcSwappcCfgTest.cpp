@@ -132,6 +132,18 @@ TEST_F(SetpcSwappcCfgTest, SetpcWithLabelDataYieldsDirectCFGEdge) {
         << "Target block must list the s_setpc_b64 source block as a predecessor.";
 }
 
+TEST_F(SetpcSwappcCfgTest, EndOfFunctionRecognizesKernelExitAndSetpcReturn) {
+    AsmIRBuilder builder(*entry, arch);
+    StinkyInstruction* endpgm = builder.create(getMCIDByUOp(GFX::s_endpgm, arch));
+    StinkyInstruction* setpcReturn = createSetpc(entry, /*srcSGPR=*/30);
+    StinkyInstruction* setpcBranch = createSetpc(entry, /*srcSGPR=*/62);
+    setpcBranch->addModifier<LabelData>(LabelData{"label_target"});
+
+    EXPECT_TRUE(isEndOfFunction(*endpgm));
+    EXPECT_TRUE(isEndOfFunction(*setpcReturn));
+    EXPECT_FALSE(isEndOfFunction(*setpcBranch));
+}
+
 // A normal s_branch must still build a single successor edge to its labelled
 // target. Sanity check that the new fall-through rule did not regress
 // unconditional-branch handling.

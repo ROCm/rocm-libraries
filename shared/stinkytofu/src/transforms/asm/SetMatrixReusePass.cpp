@@ -153,8 +153,8 @@ class SetMatrixReusePassImpl : public StinkyInstPass {
 
     PreservedAnalyses run(Function& func, PassContext& /*passCtx*/,
                           AnalysisManager& /*AM*/) override {
-        // Whole-kernel: process the entry function and every callee in
-        // isolation so reuse never chains across a function boundary. Falls
+        // Whole-kernel: process the entry function and every callable function
+        // in isolation so reuse never chains across a function boundary. Falls
         // back to the single pipeline Function when no function list is given.
         if (!functions.empty()) {
             for (Function* f : functions) {

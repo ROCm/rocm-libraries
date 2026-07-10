@@ -51,8 +51,8 @@ class RemoveDelayAluPassImpl : public Pass {
     }
 
     PreservedAnalyses run(Function& func, PassContext& passCtx, AnalysisManager& /*AM*/) override {
-        // Whole-kernel: strip the entry function and every callee. Falls back to
-        // the single pipeline Function when no function list is given.
+        // Whole-kernel: strip the entry function and every callable function.
+        // Falls back to the single pipeline Function when no function list is given.
         if (!functions.empty()) {
             for (Function* f : functions) {
                 if (f) removeInFunction(*f, passCtx);

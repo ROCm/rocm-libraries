@@ -38,8 +38,8 @@ STINKYTOFU_EXPORT std::unique_ptr<Pass> createRemoveInstructionPass();
 
 /// Removes every instruction whose unified opcode is in \p opcodes. Returns nullptr when empty.
 /// When \p functions is non-empty, removal spans that whole-kernel list (entry
-/// function plus callees); otherwise only the single Function the pipeline runs
-/// it on.
+/// function plus callable functions); otherwise only the single Function the
+/// pipeline runs it on.
 STINKYTOFU_EXPORT std::unique_ptr<Pass> createRemoveInstructionPass(
     std::vector<UnifiedOpcode> opcodes, std::vector<Function*> functions = {});
 

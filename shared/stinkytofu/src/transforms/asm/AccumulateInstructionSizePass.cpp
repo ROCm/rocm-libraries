@@ -162,12 +162,12 @@ class AccumulateInstructionSizePass : public StinkyInstPass {
             }
         }
 
-        // Whole-kernel: callee functions are emitted into the same image after
+        // Whole-kernel: callable functions are emitted into the same image after
         // the entry function (see StinkyAsmModule::emitAssembly), so their bytes
         // must be counted for the .amdhsa_inst_pref_size total. m_byteOffsetBase
         // carries across functions so label byte offsets stay monotonic in the
-        // linked image. Falls back to the single pipeline Function when the
-        // pass is not bound to a module.
+        // linked image. Falls back to the single pipeline Function when the pass
+        // is not bound to a module.
         if (m_moduleForTotalBytes) {
             for (Function* f : m_moduleForTotalBytes->getFunctions()) {
                 if (f) accumulateFunction(*f, passCtx);

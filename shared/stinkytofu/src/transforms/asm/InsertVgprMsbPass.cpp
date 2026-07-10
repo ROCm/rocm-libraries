@@ -170,9 +170,9 @@ class InsertVgprMsbPassImpl : public Pass {
         if (msbMode == VgprMsbMode::None) return preserveCFGAnalyses();
 
         // Whole-kernel: the VGPR MSB hardware register is reset conservatively at
-        // each label, so every function (entry + callees) must materialize its
-        // own s_set_vgpr_msb for its high-VGPR operands. Falls back to the single
-        // pipeline Function when no function list is given.
+        // each label, so every function (entry + callable functions) must
+        // materialize its own s_set_vgpr_msb for its high-VGPR operands. Falls
+        // back to the single pipeline Function when no function list is given.
         if (!functions.empty()) {
             for (Function* f : functions) {
                 if (f) runOnFunction(*f, archId, msbMode);

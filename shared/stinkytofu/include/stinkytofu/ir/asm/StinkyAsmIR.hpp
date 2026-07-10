@@ -296,19 +296,26 @@ class STINKYTOFU_EXPORT AsmIRBuilder : public IRBuilder {
         return create(&fenceMCID);
     }
 
-    /// Creates a callee-body splice marker (emits no assembly): marks where the
-    /// named callee body originally sat so FlattenCalleesPass can re-inline it.
-    /// IF_HasSideEffect pins its position; callee name held in a LabelData.
-    StinkyInstruction* createCalleeBody(const std::string& calleeName) {
-        static const HwInstDesc calleeBodyMCID{GFX::CALLEE_BODY,
-                                               GFX::CALLEE_BODY,
-                                               0,
-                                               0,
-                                               0,
-                                               "CALLEE_BODY",
-                                               makeFlagSet({InstFlag::IF_HasSideEffect})};
-        StinkyInstruction* inst = create(&calleeBodyMCID);
-        inst->addModifier<LabelData>(LabelData{calleeName});
+    /// Creates a pseudo marker for the ASM placement of a function body.
+    /// It records where the named function should appear in the final linear ASM stream.
+    /// e.g.
+    ///   st.func @entry() {
+    ///     ^label_ASM_End:
+    ///       FUNCTION_ASM_PLACEMENT_MARKER "label_Activation_Relu_VW1"
+    ///   }
+    ///
+    ///   st.func @label_Activation_Relu_VW1() {
+    ///     ...
+    ///   }
+    ///
+    ///   This means that the function body will be placed at the ^label_ASM_End position in the
+    ///   final linear ASM stream.
+    StinkyInstruction* createFunctionAsmPlacementMarker(const std::string& functionName) {
+        static const HwInstDesc functionAsmPlacementMarkerMCID{
+            GFX::FUNCTION_ASM_PLACEMENT_MARKER, GFX::FUNCTION_ASM_PLACEMENT_MARKER,       0, 0, 0,
+            "FUNCTION_ASM_PLACEMENT_MARKER",    makeFlagSet({InstFlag::IF_HasSideEffect})};
+        StinkyInstruction* inst = create(&functionAsmPlacementMarkerMCID);
+        inst->addModifier<LabelData>(LabelData{functionName});
         return inst;
     }
 
@@ -399,18 +406,18 @@ inline bool isFence(const StinkyInstruction& inst) {
     return inst.getUnifiedOpcode() == GFX::FENCE;
 }
 
-/// Check if instruction is a callee-body splice marker (see createCalleeBody).
-/// Marks a callee body's original position for FlattenCalleesPass; emits nothing.
-inline bool isCalleeBody(const StinkyInstruction& inst) {
-    return inst.getUnifiedOpcode() == GFX::CALLEE_BODY;
+/// Check if instruction is a function ASM placement marker.
+inline bool isFunctionAsmPlacementMarker(const StinkyInstruction& inst) {
+    return inst.getUnifiedOpcode() == GFX::FUNCTION_ASM_PLACEMENT_MARKER;
 }
 
 /// Check if instruction is a pseudo instruction (LABEL, PHI, FENCE, or
-/// CALLEE_BODY) that should be skipped for def-use chain processing of "real"
-/// instructions.
+/// FUNCTION_ASM_PLACEMENT_MARKER) that should be skipped for def-use chain
+/// processing of "real" instructions.
 inline bool isPseudoInst(const StinkyInstruction* inst) {
     return inst->getUnifiedOpcode() == GFX::LABEL || inst->getUnifiedOpcode() == GFX::PHI ||
-           inst->getUnifiedOpcode() == GFX::FENCE || inst->getUnifiedOpcode() == GFX::CALLEE_BODY;
+           inst->getUnifiedOpcode() == GFX::FENCE ||
+           inst->getUnifiedOpcode() == GFX::FUNCTION_ASM_PLACEMENT_MARKER;
 }
 
 inline bool isGlobalMemLoad(const StinkyInstruction& inst) {
@@ -476,17 +483,19 @@ inline bool isUnconditionalBranch(const StinkyInstruction& inst) {
     return isBranch(inst) && !isConditionalBranch(inst);
 }
 
-/// True for program-terminating instructions (s_endpgm): the wave ends here, so
-/// the block has no successors and must not fall through to the next block.
-inline bool isEndOfProgram(const StinkyInstruction& inst) {
-    return inst.getUnifiedOpcode() == GFX::s_endpgm;
+/// True when the instruction ends the current Function: kernel exit (`s_endpgm`)
+/// or a register-target `s_setpc_b64` return. Annotated `s_setpc_b64` is a
+/// branch to a known label, not a function return.
+inline bool isEndOfFunction(const StinkyInstruction& inst) {
+    if (inst.getUnifiedOpcode() == GFX::s_endpgm) return true;
+    return inst.getUnifiedOpcode() == GFX::s_setpc_b64 && inst.getModifier<LabelData>() == nullptr;
 }
 
 inline bool isIndirectBranch(const StinkyInstruction& inst) {
     return inst.is(InstFlag::IF_IndirectBranch);
 }
 
-/// True for register-target branches and terminators (IF_Branch), not for calls.
+/// True for call-like control transfers (IF_Call, e.g. s_swappc_b64), not branches.
 inline bool isCall(const StinkyInstruction& inst) {
     return inst.is(InstFlag::IF_Call);
 }

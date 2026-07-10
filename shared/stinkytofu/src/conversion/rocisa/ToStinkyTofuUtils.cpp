@@ -1153,17 +1153,17 @@ static std::shared_ptr<StinkyAsmModule> toStinkyTofuModule(
         }
         callableDefPathByName.emplace(fnName, defPath);
 
-        // Mark where this callee body originally sat so FlattenCalleesPass can
-        // re-inline it here (preserves the single linear stream / emission order
-        // SwPrefetch assumes). CALLEE_BODY pseudo, callee name in LabelData.
+        // Mark where this callable function body belongs in the final linear ASM
+        // stream. FlattenCalleesPass consumes the marker for SwPrefetch's legacy
+        // single-stream view. Function name is stored in LabelData.
         irBuilder.setInsertionPoint(*currentBB);
-        irBuilder.createCalleeBody(fnName);
+        irBuilder.createFunctionAsmPlacementMarker(fnName);
 
-        Function& callee = stinkyAsmModule.createFunction(fnName, /*isCallee=*/true);
-        BasicBlock* calleeEntry = callee.getEntryBlock();
-        assert(calleeEntry && "createFunction must provide an entry block");
-        bbStack.push_back(calleeEntry);
-        currentBB = calleeEntry;
+        Function& callable = stinkyAsmModule.createFunction(fnName, /*isCallable=*/true);
+        BasicBlock* callableEntry = callable.getEntryBlock();
+        assert(callableEntry && "createFunction must provide an entry block");
+        bbStack.push_back(callableEntry);
+        currentBB = callableEntry;
         irBuilder.setInsertionPoint(*currentBB);
         return ModuleSubtreeAction::Recurse;
     };
@@ -1171,7 +1171,7 @@ static std::shared_ptr<StinkyAsmModule> toStinkyTofuModule(
     ModuleLeave onModuleLeave = [&](const rocisa::Module& subMod,
                                     const std::vector<const std::string*>& /*names*/) {
         if (!subMod.isCallable) return;
-        assert(bbStack.size() > 1 && "onModuleLeave underflow (callee Function not pushed)");
+        assert(bbStack.size() > 1 && "onModuleLeave underflow (callable Function not pushed)");
         bbStack.pop_back();
         currentBB = bbStack.back();
         irBuilder.setInsertionPoint(*currentBB);
@@ -1473,9 +1473,9 @@ void init_stinkytofu(nb::module_ m) {  // NOLINT(misc-use-internal-linkage)
              "<dir>/<kernel_name>/aggregated_instruction_cost.txt")
         .def("getOutputDir", &StinkyAsmModuleWithSignature::getOutputDir)
         .def("numFunctions", &StinkyAsmModuleWithSignature::numFunctions,
-             "Number of Functions in the lowered module (entry kernel + callees)")
+             "Number of Functions in the lowered module (entry + callable functions)")
         .def("getFunctionNames", &StinkyAsmModuleWithSignature::getFunctionNames,
-             "List every Function name in this module (entry first, then callees)")
+             "List every Function name in this module (entry first, then callable functions)")
         .def("hasFunction", &StinkyAsmModuleWithSignature::hasFunction, nb::arg("name"),
              "Return true when the lowered module contains a Function with the given name")
         .def("getModule", &StinkyAsmModuleWithSignature::getModule)

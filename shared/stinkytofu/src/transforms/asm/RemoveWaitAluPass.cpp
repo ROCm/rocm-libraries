@@ -71,8 +71,8 @@ class RemoveWaitAluPassImpl : public Pass {
         const uint16_t schedModeId = HwReg::schedModeId(arch);
         const HwReg::SubField depMode = HwReg::schedModeDepMode(arch);
 
-        // Whole-kernel: scrub the entry function and every callee. Falls back to
-        // the single pipeline Function when no function list is given.
+        // Whole-kernel: scrub the entry function and every callable function.
+        // Falls back to the single pipeline Function when no function list is given.
         if (!functions.empty()) {
             for (Function* f : functions) {
                 if (f) removeInFunction(*f, passCtx, schedModeId, depMode);

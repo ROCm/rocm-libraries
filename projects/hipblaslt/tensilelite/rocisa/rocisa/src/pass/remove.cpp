@@ -75,28 +75,11 @@ namespace rocisa
 
     void _replaceActBranchLabel(std::shared_ptr<Module> module, std::vector<std::string> labels)
     {
-        auto canonicalizeDuplicateActivationLabel = [&labels](const std::string& name) {
-            if(labels.empty())
+        auto canonicalizeExactDuplicateLabel = [&labels](const std::string& name) {
+            if(labels.size() < 2)
                 return name;
-            if(std::find(labels.begin() + 1, labels.end(), name) != labels.end())
-                return labels[0];
-            if(name.rfind("label_Activation_", 0) != 0)
-                return name;
-
-            std::string labelFirst      = labels[0];
-            int         numUnderScores = std::count(labelFirst.begin(), labelFirst.end(), '_');
-            auto        partFirst      = labelFirst.rfind("_");
-            auto        part           = name.rfind("_");
-            if(partFirst == std::string::npos || part == std::string::npos)
-                return name;
-
-            std::string lastPostfix = labelFirst.substr(partFirst + 1);
-            int         numUS       = std::count(name.begin(), name.end(), '_');
-            if(numUnderScores == numUS)
-                return name.substr(0, part) + "_" + lastPostfix;
-            if(numUnderScores == numUS - 1)
-                return name.substr(0, part);
-            return name;
+            return std::find(labels.begin() + 1, labels.end(), name) != labels.end() ? labels[0]
+                                                                                      : name;
         };
 
         for(auto item : module->items())
@@ -166,7 +149,7 @@ namespace rocisa
             {
                 for(auto& callee : swappc->calleeFuncs)
                 {
-                    callee = canonicalizeDuplicateActivationLabel(callee);
+                    callee = canonicalizeExactDuplicateLabel(callee);
                 }
             }
         }

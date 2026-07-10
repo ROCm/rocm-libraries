@@ -213,12 +213,12 @@ class STINKYTOFU_EXPORT StinkyAsmModule {
     const Function& getFunction() const;
 
     /**
-     * @brief Create a named callee Function.
+     * @brief Create a named callable Function.
      *
      * Function names must be unique within the module. The returned Function has
      * an entry BasicBlock already created.
      */
-    Function& createFunction(std::string_view name, bool isCallee = true);
+    Function& createFunction(std::string_view name, bool isCallable = true);
 
     /**
      * @brief Look up a Function by name. Empty name returns the entry Function.
@@ -227,13 +227,13 @@ class STINKYTOFU_EXPORT StinkyAsmModule {
     const Function* getFunction(std::string_view name) const;
 
     /**
-     * @brief Return all Functions in emission order: entry first, then callees.
+     * @brief Return all Functions in emission order: entry first, then callable functions.
      */
     std::vector<Function*> getFunctions();
     std::vector<const Function*> getFunctions() const;
 
     /**
-     * @brief Number of Functions (entry + callees).
+     * @brief Number of Functions (entry + callable functions).
      */
     size_t numFunctions() const;
 

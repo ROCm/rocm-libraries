@@ -103,8 +103,8 @@ bool buildGfx1250Pipeline(PassManager& pm, StinkyAsmModule& module, const PassBu
 
     const bool runScheduler = optLevel != OptLevel::O0;
     if (runScheduler || moduleOptions.EnableESM2) {
-        // strip delay_alu before scheduling (whole-kernel: entry + callees, so a
-        // callee's stale delay_alu don't survive into the emitted stream)
+        // strip delay_alu before scheduling (whole-kernel: entry + callable functions,
+        // so stale delay_alu does not survive into the emitted stream)
         pm.addPass(createRemoveDelayAluPass(module.getFunctions()));
         // strip s_wait_alu before scheduling (whole-kernel)
         pm.addPass(createRemoveWaitAluPass(module.getFunctions()));
@@ -178,7 +178,7 @@ bool buildGfx1250Pipeline(PassManager& pm, StinkyAsmModule& module, const PassBu
     pm.addPass(createCFGBuilderPass());
     pm.addPass(createRegionClonePass(moduleOptions.CloneList));
     // Pass the whole-kernel function list so MSB is materialized for the entry function and
-    // every callee (each function owns its VGPR MSB hardware state).
+    // every callable function (each function owns its VGPR MSB hardware state).
     pm.addPass(createInsertVgprMsbPass(module.getFunctions()));
 
     pm.addPass(createCFGBuilderPass());
@@ -190,13 +190,13 @@ bool buildGfx1250Pipeline(PassManager& pm, StinkyAsmModule& module, const PassBu
     }
     pm.addPass(createEstimateAsmCyclesPass());
     // Whole-kernel reuse on final instruction order (O0 and O1+; after scheduler + VGPR MSB).
-    // Pass the whole-kernel function list so the pass walks the entry function plus every callee,
+    // Pass the whole-kernel function list so the pass walks the entry plus callable functions,
     // each in isolation (reuse never chains across a call site or a function boundary).
     pm.addPass(createSetMatrixReusePass(module.getFunctions()));
 
-    // Re-merge callees into the entry at their original positions so
+    // Re-merge callable functions into the entry at their ASM placement markers so
     // SwPrefetchInsertionPass sees a single linear stream / legacy emission
-    // order. After the multi-function passes above; no-op with no callees.
+    // order. After the multi-function passes above; no-op with no callable functions.
     //
     // WARNING: temporary workaround; see FlattenCalleesPass. Remove once
     // SwPrefetchInsertionPass handles multiple functions directly.
@@ -208,7 +208,8 @@ bool buildGfx1250Pipeline(PassManager& pm, StinkyAsmModule& module, const PassBu
     // <outputDir>/<kernel>/accumulate_instruction_size_pass_debug.txt (same layout as Backend).
     pm.addPass(createAccumulateInstructionSizePass(module));
 
-    // Pass the whole-kernel function list so removal applies kernel-wide (entry + callees).
+    // Pass the whole-kernel function list so removal applies kernel-wide
+    // (entry + callable functions).
     if (auto pass =
             createRemoveInstructionPass(moduleOptions.RemoveInstructions, module.getFunctions())) {
         pm.addPass(std::move(pass));

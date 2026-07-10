@@ -133,8 +133,9 @@ class RemoveInstructionPassImpl : public StinkyInstPass {
         return preserveCFGAnalyses();
     }
 
-    /// Bind the whole-kernel function list so run() strips every function (entry
-    /// + callees). When empty, only the single pipeline Function is processed.
+    /// Bind the whole-kernel function list so run() strips every function
+    /// (entry + callable functions). When empty, only the single pipeline
+    /// Function is processed.
     void setFunctions(std::vector<Function*> functions) {
         functions_ = std::move(functions);
     }

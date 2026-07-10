@@ -38,8 +38,8 @@ class Function;
 /// every field including hold_cnt is no-wait. Pre-pass for InsertWaitAluPass so
 /// existing mode1 artifacts cannot mislead the new mode2 placement.
 /// When \p functions is non-empty, this spans that whole-kernel list (entry
-/// function plus callees); otherwise only the single Function the pipeline runs
-/// it on.
+/// function plus callable functions); otherwise only the single Function the
+/// pipeline runs it on.
 STINKYTOFU_EXPORT std::unique_ptr<Pass> createRemoveWaitAluPass(
     std::vector<Function*> functions = {});
 

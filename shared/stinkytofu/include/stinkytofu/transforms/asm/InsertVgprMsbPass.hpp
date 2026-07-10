@@ -43,9 +43,9 @@ class Function;
 /// inserts an s_nop before s_set_vgpr_msb to satisfy hardware constraints.
 ///
 /// When \p functions is non-empty the pass processes that whole-kernel list
-/// (entry function plus callees), since the MSB state is a hardware register
-/// that each function must establish for itself; when empty it processes only
-/// the single Function the pipeline runs it on.
+/// (entry function plus callable functions), since the MSB state is a hardware
+/// register that each function must establish for itself; when empty it
+/// processes only the single Function the pipeline runs it on.
 STINKYTOFU_EXPORT std::unique_ptr<Pass> createInsertVgprMsbPass(
     std::vector<Function*> functions = {});
 
