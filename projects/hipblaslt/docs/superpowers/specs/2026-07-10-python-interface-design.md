@@ -204,28 +204,98 @@ which is acceptable because the audience thinks in these attributes anyway.
   in, or hand a `DeviceArray` out, zero-copy — without those frameworks being
   dependencies.
 
-**Dtype handling — two tiers:**
+### fp8 element-type surface
 
-- **Tier 1 — numpy-native / `ml_dtypes`** (f32, f64, f16, i32, i8, plus bf16 and
-  some fp8 via `ml_dtypes`): `from_numpy` maps the numpy/`ml_dtypes` dtype →
-  `hipDataType` and copies bytes. `ml_dtypes` is an approved dependency — it is
-  the de-facto standard (JAX/TF) and gives real narrow-type host representations
-  rather than f32 stand-ins, shrinking Tier 2.
-- **Tier 2 — types numpy/`ml_dtypes` cannot represent** (fp6, fp4, e8m0 scales,
-  xfloat32): the `DeviceArray` holds packed bytes tagged with a `pyhipblaslt`
-  dtype enum; the library treats them as opaque device bytes. Explicit
-  conversion helpers (`pack_*` / `unpack_*`) do the bit-level encode/decode in
-  C++ **by reusing hipBLASLt's own conversion routines** (from
-  `hipblaslt_float8.h` etc.), so the Python encode matches what the library uses
-  internally bit-for-bit — critical for correctness work. Sub-byte types
-  (fp4/fp6) carry packing/layout subtleties that the helpers own so the user
-  never hand-packs nibbles.
+"fp8" in this repo is not one type but **five** element types, split along two
+axes — E4M3 vs. E5M2 (exponent/mantissa split), and **FNUZ vs. OCP** (AMD's
+finite-only encoding vs. the OCP standard) — plus an extended E5M3 variant
+(`hipblaslt_float8.h`, `hipblaslt-types.h`):
+
+| Element type | Wrapper / enum | Notes |
+|---|---|---|
+| E4M3 FNUZ | `hipblaslt_f8_fnuz` | gfx94x / MI300 flavor |
+| E5M2 FNUZ | `hipblaslt_bf8_fnuz` | gfx94x / MI300 flavor |
+| E4M3 OCP | OCP E4M3 | OCP standard, gfx95x / MI350 |
+| E5M2 OCP | OCP E5M2 | OCP standard |
+| E5M3 EXT | `HIP_R_8F_E5M3_EXT = 34` | extended variant |
+
+**Which fp8 types are usable is a runtime property of the GPU arch** (FNUZ on
+MI300, OCP on MI350), not a property of the binding. The binding therefore
+exposes **all five** uniformly; when the current arch cannot run a combination,
+the library returns `HIPBLAS_STATUS_NOT_SUPPORTED`, which the status-checking
+layer (see Error handling) surfaces as a clean Python exception. The binding
+does not pre-filter by arch — it lets the device report support, which is the
+honest behavior for a correctness tool.
+
+### Dtype host representation and ground-truth encoding
+
+- **Host representation: `ml_dtypes`.** `ml_dtypes` is an approved dependency
+  (de-facto standard; JAX/TF) and provides numpy-compatible scalar types for
+  most of the narrow surface: `float8_e4m3fn`, `float8_e5m2`,
+  `float8_e4m3fnuz`, `float8_e5m2fnuz`, `float8_e8m0fnu` (the MX scale type),
+  `float6_e2m3fn`, `float6_e3m2fn`, and `float4_e2m1fn`. This lets a host
+  reference array be a *real* narrow-type array (inspectable as numpy) rather
+  than an f32 stand-in. Caveats: (1) fp6/fp4/e8m0 are recent `ml_dtypes`
+  additions, so the implementation plan must pin a minimum version and degrade
+  gracefully if a type is absent; (2) `ml_dtypes` gives scalar *semantics*, not
+  device *packing* — it stores sub-byte types one-value-per-byte, whereas the
+  GPU wants them bit-packed.
+- **Ground-truth encoding: hipBLASLt's own C++ converters.** The authoritative
+  encode/decode of *device* bytes reuses hipBLASLt's own conversion routines
+  (from `hipblaslt_float8.h` etc.) via `pack_*` / `unpack_*` helpers, so the
+  Python-produced device bytes match what the library uses internally
+  bit-for-bit — critical for correctness work. The sub-byte packing/layout for
+  fp4 (4-bit) and fp6 (6-bit) is owned by these helpers so the user never
+  hand-packs nibbles, even when `ml_dtypes` supplies the scalar type.
+- **Cross-check test.** A test asserts `ml_dtypes` encoding == hipBLASLt encoding
+  bit-for-bit. Any divergence (a rounding-mode or FNUZ-edge difference) is itself
+  a finding — exactly the class of bug this tool exists to catch.
+
+The only element type with likely no `ml_dtypes` equivalent is **E5M3 EXT**,
+which remains a pack/unpack-helper-only ("Tier 2") type. `xfloat32` is likewise
+handled via helpers.
 
 **Reference-precision stance.** Host reference math is computed at *widened*
 precision (e.g. f32) and compared against the narrow GPU result with an
 appropriate tolerance, because a correctness investigation wants "is the GPU
 result within expected error of the true math," not "does it match another
 low-precision computation."
+
+## Block scaling and MX types
+
+MX (microscaling) is **not a data type — it is a block-scaling scheme**: an MX
+tensor is a narrow element type (fp8 / fp6 / fp4) plus a separate tensor of
+per-block scale factors. hipBLASLt models this through the
+`hipblasLtMatmulMatrixScale_t` enum, set via the `A_SCALE_MODE` / `B_SCALE_MODE`
+descriptor attributes (`hipblaslt.h`). The relevant modes:
+
+| Scale mode | Meaning | Header status |
+|---|---|---|
+| `SCALAR_32F` (0) | one f32 scale for the whole tensor (non-MX fp8 default) | supported |
+| `VEC32_UE8M0` (2) | UE8M0 scale per 32-element block — OCP **MXFP** | supported |
+| `BLK32_UE8M0_32_8_EXT` (1001) | UE8M0 per-32-block, pre-swizzled for the kernel | supported |
+| `OUTER_VEC_32F` (3) | per-row/col f32 vectors (A: M elems, B: N elems) | supported |
+| `VEC16_UE4M3` (1), `VEC128_32F` (4), `BLK128x128_32F` (5), `VEC16_UE8M0_EXT` (1002), `VEC32_UE4M3_EXT` (1003), `VEC16/32_UE5M3_EXT` (1004/5) | other block sizes / scale encodings | "Not supported yet" |
+
+Design implications:
+
+- **Control plane is already covered by the generic-attribute design.** Selecting
+  an MX mode is just `desc.set_attribute(A_SCALE_MODE, VEC32_UE8M0)` — no new
+  binding code, and the coverage harness enumerates these scale-mode values
+  automatically.
+- **Data plane needs scale-tensor support** the base `DeviceArray` design did not
+  yet call out: a `DeviceArray` must be able to hold a **block-scale tensor**
+  (e.g. UE8M0 bytes, one per 32-element block) alongside the element tensor.
+  Helpers must (a) build the block-scale tensor from a reference (per-block max →
+  UE8M0 exponent), (b) apply the block scales when computing the numpy reference
+  so the CPU comparison matches MX math, and (c) own the **pre-swizzle** layout
+  for mode 1001 so the user never hand-arranges it.
+- **Coverage must distinguish "enum exists" from "library supports it."** Many
+  scale modes are "Not supported yet," and support is additionally
+  arch-dependent. The coverage harness enumerates all scale modes but marks the
+  unsupported ones `xfail` / `skip` via a runtime probe, so the meta-test stays
+  green while still tracking the full surface and flips to a real test
+  automatically when support lands upstream.
 
 ## Error handling and correctness safeguards
 
@@ -249,14 +319,22 @@ source of silent wrongness:
 
 - **Tier 1: surface coverage.** `test_api_coverage.py` parses the public enums
   from the headers (via `_coverage.py`) — `HIPBLASLT_MATMUL_DESC_*`,
-  `EPILOGUE_*`, layout/preference attributes, supported `hipDataType` / compute
-  types — to auto-generate the denominator, and asserts each value is referenced
-  by the suite. CI-gated, target ~100%; goes red when upstream adds an enum.
+  `EPILOGUE_*`, `hipblasLtMatmulMatrixScale_t` (scale modes), layout/preference
+  attributes, supported `hipDataType` / compute types — to auto-generate the
+  denominator, and asserts each value is referenced by the suite. CI-gated,
+  target ~100%; goes red when upstream adds an enum. Values the library reports
+  as unsupported (via runtime probe — e.g. "Not supported yet" scale modes, or
+  arch-gated fp8 encodings) are enumerated but marked `xfail` / `skip` so the
+  meta-test stays green while still tracking the full surface.
 - **Tier 2: numerical correctness.** For each compute-path knob, a pytest
   comparing the GPU result against a numpy/scipy reference on a representative
   small problem, with dtype-appropriate tolerance. Parametrized over the
-  dtype × transpose × epilogue matrix (representatively sampled, not
-  exhaustive).
+  dtype × transpose × epilogue × scale-mode matrix (representatively sampled,
+  not exhaustive). MX cases build a block-scale tensor and apply it in the numpy
+  reference so the comparison reflects MX math.
+- **Encoding cross-check.** A test asserts `ml_dtypes` narrow-type encoding ==
+  hipBLASLt converter encoding, bit-for-bit, across the fp8/fp6/fp4/e8m0 types
+  both support. Divergence is a reportable finding, not a test-infra bug.
 - **Known bugs as `xfail`.** Mirror the existing `known_bugs.yaml` concept with
   `pytest.mark.xfail(reason=...)` so known-bad algo/dtype combinations are
   documented, not hidden.
@@ -277,4 +355,7 @@ scope for v1.
   strategy per Python × ROCm combination. (The user has opinions here to capture
   in the plan.)
 - Exact `HeuristicResult` field surface and `Algo` identifier representation.
-- Which specific fp8 variants come from `ml_dtypes` vs. Tier-2 helpers.
+- Minimum `ml_dtypes` version pin (fp6/fp4/e8m0 are recent additions) and the
+  graceful-degradation path when an installed version lacks a narrow type.
+- Representation of the block-scale tensor on `DeviceArray` and the exact
+  pre-swizzle layout for `BLK32_UE8M0_32_8_EXT` (mode 1001).
