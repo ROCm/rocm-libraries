@@ -906,6 +906,11 @@ class Solution(collections.abc.Mapping):
       reject(state, printRejectionReason,
              "ClusterBarrier requires asmCaps['HasClusterBarrier'] (s_barrier_wait -3 support).")
 
+    print("VectorWidthA = ", state["VectorWidthA"])
+    print("MIWaveTileA = ", state["MIWaveTile"][0])
+    if (state["MIWaveTile"][0] // state["VectorWidthA"]) != 2:
+      reject(state, printRejectionReason, "no neet to be tested")
+
     # done
     state["AssignedProblemIndependentDerivedParameters"] = True
 
