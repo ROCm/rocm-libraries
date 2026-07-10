@@ -22,6 +22,7 @@ find_package(hipblaslt REQUIRED)
 nanobind_add_module(_core NB_SUPPRESS_WARNINGS
     "${CMAKE_CURRENT_SOURCE_DIR}/src/module.cpp"
     "${CMAKE_CURRENT_SOURCE_DIR}/src/enums.cpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/src/device_array.cpp"
     "${CMAKE_CURRENT_SOURCE_DIR}/src/descriptors.cpp"
 )
 target_include_directories(_core PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/src")
