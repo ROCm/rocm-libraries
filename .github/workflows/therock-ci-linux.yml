@@ -172,8 +172,8 @@ jobs:
       test_type: ${{ inputs.test_type }}
     secrets: inherit
 
-  rocjitsu-race-smoke-linux:
-    name: rocjitsu race smoke (${{ inputs.amdgpu_families }})
+  rocjitsu-race-check-linux:
+    name: rocjitsu race check (${{ inputs.amdgpu_families }})
     needs: [therock-build-linux]
     # This is a narrow post-build instrumentation job for hipBLASLt on gfx950.
     # Normal package tests cover broad functionality; this job fetches the BLAS
@@ -200,12 +200,14 @@ jobs:
       ROCJITSU_SOURCE_DIR: ${{ github.workspace }}/rocm-systems/emulation/rocjitsu
       ROCJITSU_BUILD_DIR: ${{ github.workspace }}/rocjitsu-build
       RACE_REPORT_DIR: ${{ github.workspace }}/race-reports
+      # Per-workload timeouts are below the job timeout so the script can report
+      # which workload failed and still upload race-reports on exit.
       RACE_TIMEOUT_SECONDS: "180"
       TENSILELITE_TIMEOUT_SECONDS: "420"
     steps:
       # The job needs three inputs in one workspace:
       #   1. TheRock actions/scripts to fetch the exact artifacts from this run.
-      #   2. This rocm-libraries checkout for the race-smoke driver script.
+      #   2. This rocm-libraries checkout for the race-check driver script.
       #   3. rocm-systems source for rocjitsu until rocjitsu is packaged as a
       #      complete runnable artifact.
       - name: Checkout TheRock repository
@@ -245,7 +247,7 @@ jobs:
             ninja-build
 
       # Pull the BLAS runtime and test payload from the current TheRock build.
-      # This is what keeps the smoke aligned with the exact hipBLASLt and
+      # This is what keeps the check aligned with the exact hipBLASLt and
       # TensileLite artifacts produced by the PR, rather than an image-local or
       # previously installed ROCm tree.
       - name: Run setup test environment workflow
@@ -279,9 +281,9 @@ jobs:
           print("rocisa:", rocisa.__file__)
           PY
 
-      - name: Run rocjitsu race smoke
+      - name: Run rocjitsu race check
         timeout-minutes: 75
-        run: bash rocm-libraries/.github/scripts/run_rocjitsu_hipblaslt_race_smoke.sh
+        run: bash rocm-libraries/.github/scripts/run_rocjitsu_hipblaslt_race_check.sh
 
       # Upload even on failure. The report directory contains the per-workload
       # stdout logs, rocjitsu sink files, race.log files, generated reduced
