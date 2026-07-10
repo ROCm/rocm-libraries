@@ -17,16 +17,11 @@ import hipdnn_frontend as hipdnn
 
 @functools.lru_cache(maxsize=1)
 def _gpu_available():
-    """Return True if a GPU device can be allocated, False otherwise.
-
-    Probes by attempting a tiny device allocation, which performs a hipMalloc
-    and raises when no usable device is present.
-    """
+    """Return True when HIP reports at least one visible GPU device."""
     try:
-        hipdnn.DeviceBuffer(1)
+        return hipdnn.hip_get_device_count() > 0
     except Exception:
         return False
-    return True
 
 
 def pytest_configure(config):
