@@ -3,9 +3,9 @@
 """Sampling primitive - reduce K single-run records to one aggregate (pure).
 
 A single profiled run is noisy even with the clock-invariant cycle metric (cache
-state, scheduling, contention still vary - see the design doc's noise appendix). So
-the honest unit of comparison is *several* runs of the same kernel reduced to a
-median plus a spread, not one shot.
+state, scheduling, and contention still vary run to run). So the honest unit of
+comparison is *several* runs of the same kernel reduced to a median plus a spread,
+not one shot.
 
 `aggregate(records)` takes K records that share an identity
 (`schema.identity` = arch + kernel_name + shape) and returns ONE record where:

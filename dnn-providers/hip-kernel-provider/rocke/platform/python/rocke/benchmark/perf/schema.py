@@ -7,7 +7,7 @@ One record per (run, kernel, shape, config), composed from several primitives:
   run       : invocation metadata (run_id, arch, commit, timestamp, ...)
   kernel    : identity + launch config (name, op, shape, grid/block, dispatch_symbol)
               - grid/block + the dispatched symbol let a consumer cross-reference an
-                ATT trace of the same kernel (the deep kernel-trace-analysis skill).
+                ATT trace of the same kernel.
   wall      : un-profiled run = real-world timing (ms_median, spread, tflops, gbs) [GPU]
   profiled  : timing of the profiled run (ms/tflops/gbs) - same execution as the
               counters, so a throughput can be correlated with a cycle reading [GPU]
