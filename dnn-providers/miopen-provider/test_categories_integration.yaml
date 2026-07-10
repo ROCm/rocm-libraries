@@ -68,7 +68,11 @@ execution_settings:
   default_timeout: 300
   timeout_multiplier: 1
   category_timeouts:
-    quick: 300
+    # Interim workaround: Windows runners show high runtime variance and
+    # intermittently exceed 5 minutes on "quick" tests. Revert once per-OS
+    # timeouts (or the underlying flakiness) are resolved; tracked in
+    # https://github.com/ROCm/rocm-libraries/issues/6864.
+    quick: 1200
     standard: 2700
     comprehensive: 25200
     full: 28800
