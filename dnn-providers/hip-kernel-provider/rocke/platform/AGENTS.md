@@ -106,6 +106,39 @@ PY
 same virtualenv if it is missing. Do **not** use the default PyPI CPU torch for
 GPU/numeric lanes. On-GPU lanes also need a HIP-visible device + ROCm `comgr`.
 
+### torch is OPTIONAL
+
+rocke is consumed downstream by PyTorch, so a hard dependency on torch would be
+circular. torch is therefore **optional** and the only hard dep is `numpy`
+(`pyproject.toml` / `requirements.txt`). torch is needed only for three lanes:
+
+1. the `torch.fx` fusion frontend (`torch_backend.py`, `helpers/fuse.py`
+   graph capture);
+2. torch-tensor launch integration (`runtime/torch_module.py`);
+3. on-GPU numeric verification against torch eager.
+
+Everything else runs torch-free: IR build, lower, `comgr` compile, numpy launch,
+the byte-identity gate, and the CPU test suite (torch-only tests `importorskip`;
+GPU tests skip via a torch-free `/dev/kfd` probe). `tests/run_all.py` is GREEN
+with neither torch nor a GPU installed.
+
+### ROCm library discovery (libamd_comgr / libamdhip64)
+
+The runtime resolves the ROCm shared libs WITHOUT importing torch
+(`runtime/hip_module._candidate_lib_paths` / `_rocm_root_libdirs`), in priority
+order:
+
+1. explicit full-path override env var (`ROCKE_COMGR_LIB`, `ROCKE_HIP_LIB`);
+2. torch-bundled `<torch>/lib/lib*.so` — opportunistic fast-path **only if torch
+   is already imported** (never imports torch to get it);
+3. a real ROCm install discovered without torch: `$ROCM_PATH` / `$ROCM_HOME` →
+   `<root>/lib`, then globbed `/opt/rocm*/core-*/lib` and `/opt/rocm*/lib`,
+   newest version first;
+4. bare `lib<name>.so` on the dynamic linker's search path (last resort).
+
+If you hit `cannot load libamd_comgr.so` in a torch-less process, set
+`ROCM_PATH` (or `ROCKE_COMGR_LIB`) to point at your ROCm install.
+
 ## Hardware requirements for numeric tests
 
 Most rocKE tests are CPU-only lowering, serialization, byte-identity, or static
@@ -153,6 +186,11 @@ GPU node.
 - **Default arch is `gfx950`** (the byte-identity baseline). Do not change the
   codegen default; for on-GPU runs, prefer the local device via
   `rocke.runtime.hip_module.get_device_arch()` and fall back to `gfx950`.
+- **torch is optional, never import it from a library to gain a side effect.**
+  numpy is the only hard dep. torch is needed only for the fusion frontend,
+  torch-tensor launch, and on-GPU torch-eager numeric checks; gate it behind
+  `importorskip` in tests and lazy/guarded imports in code. The ROCm-lib
+  resolver must keep discovering `comgr`/HIP without importing torch.
 
 ## dsl_docs
 
@@ -215,3 +253,5 @@ dual-engine vs Python-only split.
 | `ROCKE_BACKEND` | `cpp` (default) \| `python` \| `both` (differential assert) |
 | `ROCKE_CPP_STRICT` | `1` = raise instead of silently falling back to Python when `rocke_engine` isn't built |
 | `ROCKE_LLVM_FLAVOR` | `llvm20` \| `llvm22` (must match the ROCm `comgr` in use) |
+| `ROCM_PATH` / `ROCM_HOME` | ROCm install root; `<root>/lib` is searched for `comgr`/HIP before the globbed `/opt/rocm*` trees |
+| `ROCKE_COMGR_LIB` / `ROCKE_HIP_LIB` | explicit full path to `libamd_comgr` / `libamdhip64`; wins over all discovery |
