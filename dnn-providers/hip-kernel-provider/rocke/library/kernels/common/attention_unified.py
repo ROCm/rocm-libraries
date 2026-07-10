@@ -1027,6 +1027,13 @@ def _tiled_cache_key(problem: UnifiedAttentionProblem) -> Tuple:
         _select_2d_tile_size(problem),
         _select_2d_waves_per_eu(problem),
         _select_2d_block_m_per_warp(problem),
+        # Layer-2 override marker: flips the key exactly when the D256 gfx950
+        # codegen override applies in `_tiled_spec_from_problem`, so the key stays
+        # faithful to the built kernel (key === built kernel) without duplicating
+        # the override's flags here. The override is a hand-pinned exception that
+        # deliberately lives ABOVE the autotuner-regenerable `_enable_*` helpers
+        # below; keying on the predicate (not the flags) keeps that layering.
+        _d256_gfx950_fast(problem),
         _enable_mfma_32x32(problem),
         _enable_transposed_qk_32x32(problem),
         _enable_transposed_half_local_pv(problem),
