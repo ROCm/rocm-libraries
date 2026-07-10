@@ -161,7 +161,7 @@ TEST_F(IntegrationBatchnormInferenceVarianceExtDescriptorLifting,
     EXPECT_EQ(tensorMap[K_BN_INF_VAR_EXT_EPSILON_UID]->get_stride(),
               toVec(K_BN_INF_VAR_EXT_EPSILON_STRIDES));
     EXPECT_EQ(tensorMap[K_BN_INF_VAR_EXT_EPSILON_UID]->get_data_type(), DataType::FLOAT);
-    EXPECT_TRUE(tensorMap[K_BN_INF_VAR_EXT_EPSILON_UID]->get_pass_by_value());
+    EXPECT_TRUE(tensorMap[K_BN_INF_VAR_EXT_EPSILON_UID]->get_is_pass_by_value());
     ASSERT_TRUE(tensorMap[K_BN_INF_VAR_EXT_EPSILON_UID]->get_pass_by_value<float>().has_value());
     EXPECT_FLOAT_EQ(tensorMap[K_BN_INF_VAR_EXT_EPSILON_UID]->get_pass_by_value<float>().value(),
                     1e-5f);

@@ -71,6 +71,7 @@ add_executable(
     TestSdpaBackwardAttributes.cpp
     TestSdpaBwdNode.cpp
     TestSdpaFwdNode.cpp
+    TestPassByValueExecuteFilter.cpp
     TestPointwiseAttributes.cpp
     TestPointwiseNode.cpp
     TestReductionAttributes.cpp

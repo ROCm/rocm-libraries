@@ -8,9 +8,13 @@
 #include <cstring>
 #include <hipdnn_data_sdk/types.hpp>
 #include <hipdnn_frontend/detail/DescriptorHelpers.hpp>
+#include <hipdnn_frontend/detail/DescriptorUnpackHelpers.hpp>
 #include <hipdnn_frontend/detail/KnobPacker.hpp>
 #include <hipdnn_frontend/knob/KnobSetting.hpp>
 #include <hipdnn_test_sdk/utilities/ToVec.hpp>
+#include <map>
+#include <memory>
+#include <vector>
 
 #include "fake_backend/BackendTestMatchers.hpp"
 #include "fake_backend/MockHipdnnBackend.hpp"
@@ -71,7 +75,8 @@ protected:
     void expectTensorSetAttributes(int64_t uid,
                                    const std::string& name,
                                    const std::vector<int64_t>& dims,
-                                   const std::vector<int64_t>& strides)
+                                   const std::vector<int64_t>& strides,
+                                   bool isRuntime = false)
     {
         EXPECT_CALL(*_mockBackend,
                     backendSetAttribute(_,
@@ -111,6 +116,13 @@ protected:
                                         HIPDNN_TYPE_BOOLEAN,
                                         1,
                                         pointsToScalar<bool>(false)))
+            .WillOnce(Return(HIPDNN_STATUS_SUCCESS));
+        EXPECT_CALL(*_mockBackend,
+                    backendSetAttribute(_,
+                                        HIPDNN_ATTR_TENSOR_IS_RUNTIME_PASS_BY_VALUE,
+                                        HIPDNN_TYPE_BOOLEAN,
+                                        1,
+                                        pointsToScalar<bool>(isRuntime)))
             .WillOnce(Return(HIPDNN_STATUS_SUCCESS));
     }
 
@@ -485,7 +497,7 @@ TEST_F(TestDescriptorHelpers, EnsureTensorDescSetsPassByValue)
 
     expectCreateAndDestroyDescriptor();
     // set_value() resets dims and strides to {1}, so expect scalar dimensions
-    expectTensorSetAttributes(K_DEFAULT_TENSOR_UID, "tensor_42", {1}, {1});
+    expectTensorSetAttributes(K_DEFAULT_TENSOR_UID, "tensor_42", {1}, {1}, /*isRuntime*/ true);
 
     // Expect the value attribute to be set as raw bytes via HIPDNN_TYPE_CHAR
     EXPECT_CALL(*_mockBackend,
@@ -512,7 +524,7 @@ TEST_F(TestDescriptorHelpers, EnsureTensorDescSetsPassByValueDouble)
     constexpr double K_TENSOR_VALUE = 2.718281828;
 
     expectCreateAndDestroyDescriptor();
-    expectTensorSetAttributes(K_DEFAULT_TENSOR_UID, "tensor_42", {1}, {1});
+    expectTensorSetAttributes(K_DEFAULT_TENSOR_UID, "tensor_42", {1}, {1}, /*isRuntime*/ true);
 
     EXPECT_CALL(*_mockBackend,
                 backendSetAttribute(_,
@@ -539,7 +551,7 @@ TEST_F(TestDescriptorHelpers, EnsureTensorDescSetsPassByValueHalf)
     auto tensorValue = half(1.5f);
 
     expectCreateAndDestroyDescriptor();
-    expectTensorSetAttributes(K_DEFAULT_TENSOR_UID, "tensor_42", {1}, {1});
+    expectTensorSetAttributes(K_DEFAULT_TENSOR_UID, "tensor_42", {1}, {1}, /*isRuntime*/ true);
 
     EXPECT_CALL(*_mockBackend,
                 backendSetAttribute(_,
@@ -566,7 +578,7 @@ TEST_F(TestDescriptorHelpers, EnsureTensorDescSetsPassByValueBfloat16)
     auto tensorValue = bfloat16(1.5f);
 
     expectCreateAndDestroyDescriptor();
-    expectTensorSetAttributes(K_DEFAULT_TENSOR_UID, "tensor_42", {1}, {1});
+    expectTensorSetAttributes(K_DEFAULT_TENSOR_UID, "tensor_42", {1}, {1}, /*isRuntime*/ true);
 
     EXPECT_CALL(*_mockBackend,
                 backendSetAttribute(_,
@@ -592,7 +604,7 @@ TEST_F(TestDescriptorHelpers, EnsureTensorDescSetsPassByValueUint8)
     constexpr uint8_t K_TENSOR_VALUE = 200;
 
     expectCreateAndDestroyDescriptor();
-    expectTensorSetAttributes(K_DEFAULT_TENSOR_UID, "tensor_42", {1}, {1});
+    expectTensorSetAttributes(K_DEFAULT_TENSOR_UID, "tensor_42", {1}, {1}, /*isRuntime*/ true);
 
     EXPECT_CALL(*_mockBackend,
                 backendSetAttribute(_,
@@ -618,7 +630,7 @@ TEST_F(TestDescriptorHelpers, EnsureTensorDescSetsPassByValueInt32)
     constexpr int32_t K_TENSOR_VALUE = -42;
 
     expectCreateAndDestroyDescriptor();
-    expectTensorSetAttributes(K_DEFAULT_TENSOR_UID, "tensor_42", {1}, {1});
+    expectTensorSetAttributes(K_DEFAULT_TENSOR_UID, "tensor_42", {1}, {1}, /*isRuntime*/ true);
 
     EXPECT_CALL(*_mockBackend,
                 backendSetAttribute(_,
@@ -773,4 +785,423 @@ TEST_F(TestDescriptorHelpers, CreateKnobSettingDescriptorFailsOnFinalize)
     auto err = createKnobSettingDescriptor(setting, desc);
     EXPECT_TRUE(err.is_bad());
     EXPECT_EQ(err.code, ErrorCode::HIPDNN_BACKEND_ERROR);
+}
+
+// ============================================================================
+// Pass-by-value pack -> unpack round-trip tests (RFC-0016 §4.2)
+//
+// These exercise the real pack path (createOrFindTensorDesc) writing into an
+// in-memory backend, then the real unpack path (unpackTensorAttributes) reading
+// the same finalized descriptor back. This defends the end-to-end contract that
+// the by-value classification (runtime flag + stored value) survives a full
+// serialize/deserialize round-trip and reconstructs the correct getter matrix.
+// ============================================================================
+
+namespace
+{
+
+// A minimal in-memory backend: stores raw attribute bytes on set and serves them
+// on get, implementing the two-phase (count query, then value fetch) protocol the
+// frontend helpers rely on. HIPDNN_ATTR_TENSOR_IS_BY_VALUE is derived from the
+// presence of HIPDNN_ATTR_TENSOR_VALUE_EXT, mirroring the real TensorDescriptor.
+class StoringBackend
+{
+public:
+    // Number of bytes one element of the given attribute type occupies.
+    static size_t unitSize(hipdnnBackendAttributeType_t type)
+    {
+        switch(type)
+        {
+        case HIPDNN_TYPE_INT64:
+            return sizeof(int64_t);
+        case HIPDNN_TYPE_BOOLEAN:
+            return sizeof(bool);
+        case HIPDNN_TYPE_CHAR:
+            return sizeof(char);
+        case HIPDNN_TYPE_DATA_TYPE:
+            return sizeof(hipdnnDataType_t);
+        default:
+            return 0;
+        }
+    }
+
+    void wire(Mock_hipdnn_backend& mock)
+    {
+        ON_CALL(mock, backendCreateDescriptor(_, _))
+            .WillByDefault(
+                Invoke([this](hipdnnBackendDescriptorType_t, hipdnnBackendDescriptor_t* out) {
+                    _descriptors.push_back(std::make_unique<int>(0));
+                    const auto desc
+                        = reinterpret_cast<hipdnnBackendDescriptor_t>(_descriptors.back().get());
+                    _store[desc]; // create empty attribute map
+                    *out = desc;
+                    return HIPDNN_STATUS_SUCCESS;
+                }));
+
+        ON_CALL(mock, backendDestroyDescriptor(_)).WillByDefault(Return(HIPDNN_STATUS_SUCCESS));
+        ON_CALL(mock, backendFinalize(_)).WillByDefault(Return(HIPDNN_STATUS_SUCCESS));
+
+        ON_CALL(mock, backendSetAttribute(_, _, _, _, _))
+            .WillByDefault(Invoke([this](hipdnnBackendDescriptor_t desc,
+                                         hipdnnBackendAttributeName_t name,
+                                         hipdnnBackendAttributeType_t type,
+                                         int64_t count,
+                                         const void* arr) {
+                const size_t bytes = static_cast<size_t>(count) * unitSize(type);
+                Attr attr;
+                attr.count = count;
+                attr.bytes.resize(bytes);
+                if(bytes != 0 && arr != nullptr)
+                {
+                    std::memcpy(attr.bytes.data(), arr, bytes);
+                }
+                _store[desc][name] = std::move(attr);
+                return HIPDNN_STATUS_SUCCESS;
+            }));
+
+        ON_CALL(mock, backendGetAttribute(_, _, _, _, _, _))
+            .WillByDefault(Invoke([this](hipdnnBackendDescriptor_t desc,
+                                         hipdnnBackendAttributeName_t name,
+                                         hipdnnBackendAttributeType_t /*type*/,
+                                         int64_t requested,
+                                         int64_t* outCount,
+                                         void* arr) {
+                const auto descIt = _store.find(desc);
+                if(descIt == _store.end())
+                {
+                    return HIPDNN_STATUS_BAD_PARAM;
+                }
+
+                // IS_BY_VALUE is read-only and derived from value presence.
+                if(name == HIPDNN_ATTR_TENSOR_IS_BY_VALUE)
+                {
+                    const bool present = descIt->second.count(HIPDNN_ATTR_TENSOR_VALUE_EXT) != 0;
+                    if(outCount != nullptr)
+                    {
+                        *outCount = 1;
+                    }
+                    if(arr != nullptr && requested > 0)
+                    {
+                        std::memcpy(arr, &present, sizeof(bool));
+                    }
+                    return HIPDNN_STATUS_SUCCESS;
+                }
+
+                const auto attrIt = descIt->second.find(name);
+                if(attrIt == descIt->second.end())
+                {
+                    // Attribute never set: model a legacy/absent field as empty.
+                    // Scalar readers leave their default (e.g. false) untouched.
+                    if(outCount != nullptr)
+                    {
+                        *outCount = 0;
+                    }
+                    return HIPDNN_STATUS_SUCCESS;
+                }
+
+                if(outCount != nullptr)
+                {
+                    *outCount = attrIt->second.count;
+                }
+                if(arr != nullptr && requested > 0 && !attrIt->second.bytes.empty())
+                {
+                    std::memcpy(arr, attrIt->second.bytes.data(), attrIt->second.bytes.size());
+                }
+                return HIPDNN_STATUS_SUCCESS;
+            }));
+    }
+
+private:
+    struct Attr
+    {
+        int64_t count = 0;
+        std::vector<uint8_t> bytes;
+    };
+    std::map<hipdnnBackendDescriptor_t, std::map<hipdnnBackendAttributeName_t, Attr>> _store;
+    std::vector<std::unique_ptr<int>> _descriptors;
+};
+
+} // namespace
+
+class TestDescriptorHelpersRoundTrip : public ::testing::Test
+{
+protected:
+    std::shared_ptr<::testing::NiceMock<Mock_hipdnn_backend>> _backend;
+    StoringBackend _storage;
+
+    void SetUp() override
+    {
+        _backend = std::make_shared<::testing::NiceMock<Mock_hipdnn_backend>>();
+        _storage.wire(*_backend);
+        IHipdnnBackend::setInstance(_backend);
+    }
+
+    void TearDown() override
+    {
+        IHipdnnBackend::resetInstance();
+        _backend.reset();
+    }
+
+    // Packs the tensor into a fresh backend descriptor, finalizes it, then unpacks
+    // it back into a new TensorAttributes. Returns the reconstructed tensor.
+    static std::shared_ptr<TensorAttributes> roundTrip(const std::shared_ptr<TensorAttributes>& in)
+    {
+        std::unordered_map<int64_t, ScopedHipdnnBackendDescriptor> tensorDescs;
+        const auto packErr = createOrFindTensorDesc(tensorDescs, in);
+        EXPECT_TRUE(packErr.is_good()) << packErr.err_msg;
+        const auto it = tensorDescs.find(in->get_uid());
+        EXPECT_TRUE(it != tensorDescs.end());
+        if(it == tensorDescs.end())
+        {
+            return nullptr;
+        }
+        std::shared_ptr<TensorAttributes> out;
+        const auto unpackErr = unpackTensorAttributes(it->second.get(), out);
+        EXPECT_TRUE(unpackErr.is_good()) << unpackErr.get_message();
+        return out;
+    }
+
+    // Builds a scalar tensor carrying only a UID/data_type/dims/strides so the
+    // pack path succeeds; callers layer the by-value state on top.
+    static std::shared_ptr<TensorAttributes> makeScalar(int64_t uid, DataType dt)
+    {
+        auto tensor = std::make_shared<TensorAttributes>();
+        tensor->set_uid(uid).set_data_type(dt).set_dim({1}).set_stride({1});
+        return tensor;
+    }
+};
+
+// --- Compile-time constant: set_value() -> flag false, value survives ---------
+
+TEST_F(TestDescriptorHelpersRoundTrip, CompileTimeConstantFloatSurvives)
+{
+    constexpr float K_VALUE = 3.5f;
+    auto in = makeScalar(1, DataType::FLOAT);
+    in->set_compile_time_constant(K_VALUE);
+
+    const auto out = roundTrip(in);
+    ASSERT_NE(out, nullptr);
+    EXPECT_FALSE(out->get_is_runtime_pass_by_value());
+    EXPECT_TRUE(out->get_is_pass_by_value());
+    ASSERT_TRUE(out->get_compile_time_constant<float>().has_value());
+    EXPECT_FLOAT_EQ(out->get_compile_time_constant<float>().value(), K_VALUE);
+    EXPECT_FALSE(out->get_pass_by_value<float>().has_value());
+}
+
+TEST_F(TestDescriptorHelpersRoundTrip, CompileTimeConstantInt64Survives)
+{
+    constexpr int64_t K_VALUE = -987654321012LL;
+    auto in = makeScalar(2, DataType::INT64);
+    in->set_compile_time_constant(K_VALUE);
+
+    const auto out = roundTrip(in);
+    ASSERT_NE(out, nullptr);
+    EXPECT_FALSE(out->get_is_runtime_pass_by_value());
+    EXPECT_TRUE(out->get_is_pass_by_value());
+    ASSERT_TRUE(out->get_compile_time_constant<int64_t>().has_value());
+    EXPECT_EQ(out->get_compile_time_constant<int64_t>().value(), K_VALUE);
+    EXPECT_FALSE(out->get_pass_by_value<int64_t>().has_value());
+}
+
+TEST_F(TestDescriptorHelpersRoundTrip, CompileTimeConstantBoolSurvives)
+{
+    constexpr bool K_VALUE = true;
+    auto in = makeScalar(3, DataType::BOOLEAN);
+    in->set_compile_time_constant(K_VALUE);
+
+    const auto out = roundTrip(in);
+    ASSERT_NE(out, nullptr);
+    EXPECT_FALSE(out->get_is_runtime_pass_by_value());
+    EXPECT_TRUE(out->get_is_pass_by_value());
+    ASSERT_TRUE(out->get_compile_time_constant<bool>().has_value());
+    EXPECT_EQ(out->get_compile_time_constant<bool>().value(), K_VALUE);
+    EXPECT_FALSE(out->get_pass_by_value<bool>().has_value());
+}
+
+// --- Runtime-with-default: TensorAttributes(v, RUNTIME_PARAM) -----------------
+// flag true + value survives -> get_pass_by_value<T>() == v.
+
+TEST_F(TestDescriptorHelpersRoundTrip, RuntimeWithDefaultFloatSurvives)
+{
+    constexpr float K_VALUE = 1.25f;
+    auto in = makeScalar(4, DataType::FLOAT);
+    in->set_value(K_VALUE);
+    in->set_is_pass_by_value(true); // value + runtime flag == runtime-with-default
+
+    const auto out = roundTrip(in);
+    ASSERT_NE(out, nullptr);
+    EXPECT_TRUE(out->get_is_runtime_pass_by_value());
+    EXPECT_TRUE(out->get_is_pass_by_value());
+    ASSERT_TRUE(out->get_pass_by_value<float>().has_value());
+    EXPECT_FLOAT_EQ(out->get_pass_by_value<float>().value(), K_VALUE);
+    EXPECT_FALSE(out->get_compile_time_constant<float>().has_value());
+}
+
+TEST_F(TestDescriptorHelpersRoundTrip, RuntimeWithDefaultInt64Survives)
+{
+    constexpr int64_t K_VALUE = 42424242424242LL;
+    auto in = makeScalar(5, DataType::INT64);
+    in->set_value(K_VALUE);
+    in->set_is_pass_by_value(true);
+
+    const auto out = roundTrip(in);
+    ASSERT_NE(out, nullptr);
+    EXPECT_TRUE(out->get_is_runtime_pass_by_value());
+    EXPECT_TRUE(out->get_is_pass_by_value());
+    ASSERT_TRUE(out->get_pass_by_value<int64_t>().has_value());
+    EXPECT_EQ(out->get_pass_by_value<int64_t>().value(), K_VALUE);
+    EXPECT_FALSE(out->get_compile_time_constant<int64_t>().has_value());
+}
+
+TEST_F(TestDescriptorHelpersRoundTrip, RuntimeWithDefaultBoolSurvives)
+{
+    constexpr bool K_VALUE = true;
+    auto in = makeScalar(6, DataType::BOOLEAN);
+    in->set_value(K_VALUE);
+    in->set_is_pass_by_value(true);
+
+    const auto out = roundTrip(in);
+    ASSERT_NE(out, nullptr);
+    EXPECT_TRUE(out->get_is_runtime_pass_by_value());
+    EXPECT_TRUE(out->get_is_pass_by_value());
+    ASSERT_TRUE(out->get_pass_by_value<bool>().has_value());
+    EXPECT_EQ(out->get_pass_by_value<bool>().value(), K_VALUE);
+    EXPECT_FALSE(out->get_compile_time_constant<bool>().has_value());
+}
+
+// --- Runtime user-supplied: set_as_runtime_parameter() -----------------------
+// flag true, no value -> both typed getters nullopt, umbrella true.
+
+TEST_F(TestDescriptorHelpersRoundTrip, RuntimeUserSuppliedHasFlagNoValue)
+{
+    auto in = makeScalar(7, DataType::FLOAT);
+    in->set_as_runtime_parameter(); // clears value, sets flag
+    in->set_dim({1}).set_stride({1}); // set_as_runtime_parameter left dims intact; keep scalar
+
+    const auto out = roundTrip(in);
+    ASSERT_NE(out, nullptr);
+    EXPECT_TRUE(out->get_is_runtime_pass_by_value());
+    EXPECT_TRUE(out->get_is_pass_by_value());
+    EXPECT_FALSE(out->get_pass_by_value<float>().has_value());
+    EXPECT_FALSE(out->get_compile_time_constant<float>().has_value());
+    EXPECT_TRUE(std::holds_alternative<std::monostate>(out->get_value_variant()));
+}
+
+// --- Legacy: value present, runtime flag never written to the descriptor ------
+// Unpacks as a compile-time constant (flag defaults false).
+
+TEST_F(TestDescriptorHelpersRoundTrip, LegacyDescriptorWithoutRuntimeFlagIsCompileTimeConst)
+{
+    constexpr float K_VALUE = 7.75f;
+
+    // Hand-build a descriptor the way an older serializer would: value bytes and
+    // IS_BY_VALUE-implying VALUE_EXT are present, but IS_RUNTIME_PASS_BY_VALUE is
+    // never set. This exercises the unpack default-false path.
+    const ScopedHipdnnBackendDescriptor desc(HIPDNN_BACKEND_TENSOR_DESCRIPTOR);
+    ASSERT_TRUE(desc.valid());
+    constexpr int64_t K_UID = 8;
+    ASSERT_TRUE(setDescriptorAttrScalar(
+                    desc.get(), HIPDNN_ATTR_TENSOR_UNIQUE_ID, HIPDNN_TYPE_INT64, K_UID, "uid")
+                    .is_good());
+    ASSERT_TRUE(
+        setDescriptorAttrDataType(desc.get(), HIPDNN_ATTR_TENSOR_DATA_TYPE, DataType::FLOAT, "dt")
+            .is_good());
+    ASSERT_TRUE(setDescriptorAttrVec(desc.get(),
+                                     HIPDNN_ATTR_TENSOR_DIMENSIONS,
+                                     HIPDNN_TYPE_INT64,
+                                     std::vector<int64_t>{1},
+                                     "dims")
+                    .is_good());
+    ASSERT_TRUE(setDescriptorAttrVec(desc.get(),
+                                     HIPDNN_ATTR_TENSOR_STRIDES,
+                                     HIPDNN_TYPE_INT64,
+                                     std::vector<int64_t>{1},
+                                     "strides")
+                    .is_good());
+    ASSERT_TRUE(setDescriptorAttrScalar(
+                    desc.get(), HIPDNN_ATTR_TENSOR_IS_VIRTUAL, HIPDNN_TYPE_BOOLEAN, false, "virt")
+                    .is_good());
+    ASSERT_TRUE(setDescriptorAttrTensorValue(desc.get(), K_VALUE, "value").is_good());
+    ASSERT_TRUE(finalizeDescriptor(desc.get(), "legacy tensor").is_good());
+
+    std::shared_ptr<TensorAttributes> out;
+    const auto unpackErr = unpackTensorAttributes(desc.get(), out);
+    ASSERT_TRUE(unpackErr.is_good()) << unpackErr.get_message();
+    ASSERT_NE(out, nullptr);
+    EXPECT_FALSE(out->get_is_runtime_pass_by_value());
+    EXPECT_TRUE(out->get_is_pass_by_value());
+    ASSERT_TRUE(out->get_compile_time_constant<float>().has_value());
+    EXPECT_FLOAT_EQ(out->get_compile_time_constant<float>().value(), K_VALUE);
+    EXPECT_FALSE(out->get_pass_by_value<float>().has_value());
+}
+
+// --- Mixed set: several scalar tensors of different types + states together ---
+
+TEST_F(TestDescriptorHelpersRoundTrip, MixedScalarTensorsRoundTripIndependently)
+{
+    // Compile-time const float.
+    constexpr float K_CT_FLOAT = 2.5f;
+    auto ctFloat = makeScalar(10, DataType::FLOAT);
+    ctFloat->set_compile_time_constant(K_CT_FLOAT);
+
+    // Runtime-with-default int64.
+    constexpr int64_t K_RT_INT = 123456789LL;
+    auto rtInt = makeScalar(11, DataType::INT64);
+    rtInt->set_value(K_RT_INT);
+    rtInt->set_is_pass_by_value(true);
+
+    // Runtime user-supplied bool (flag only, no value).
+    auto rtBool = makeScalar(12, DataType::BOOLEAN);
+    rtBool->set_as_runtime_parameter();
+    rtBool->set_dim({1}).set_stride({1});
+
+    // Compile-time const bool.
+    constexpr bool K_CT_BOOL = true;
+    auto ctBool = makeScalar(13, DataType::BOOLEAN);
+    ctBool->set_compile_time_constant(K_CT_BOOL);
+
+    // Pack all four into one shared descriptor map, then unpack each descriptor.
+    std::unordered_map<int64_t, ScopedHipdnnBackendDescriptor> tensorDescs;
+    for(const auto& t : {ctFloat, rtInt, rtBool, ctBool})
+    {
+        const auto packErr = createOrFindTensorDesc(tensorDescs, t);
+        ASSERT_TRUE(packErr.is_good()) << packErr.err_msg;
+    }
+    ASSERT_EQ(tensorDescs.size(), 4u);
+
+    const auto unpack = [&](int64_t uid) {
+        std::shared_ptr<TensorAttributes> out;
+        const auto err = unpackTensorAttributes(tensorDescs.at(uid).get(), out);
+        EXPECT_TRUE(err.is_good()) << err.get_message();
+        return out;
+    };
+
+    const auto outCtFloat = unpack(10);
+    ASSERT_NE(outCtFloat, nullptr);
+    EXPECT_FALSE(outCtFloat->get_is_runtime_pass_by_value());
+    ASSERT_TRUE(outCtFloat->get_compile_time_constant<float>().has_value());
+    EXPECT_FLOAT_EQ(outCtFloat->get_compile_time_constant<float>().value(), K_CT_FLOAT);
+    EXPECT_FALSE(outCtFloat->get_pass_by_value<float>().has_value());
+
+    const auto outRtInt = unpack(11);
+    ASSERT_NE(outRtInt, nullptr);
+    EXPECT_TRUE(outRtInt->get_is_runtime_pass_by_value());
+    ASSERT_TRUE(outRtInt->get_pass_by_value<int64_t>().has_value());
+    EXPECT_EQ(outRtInt->get_pass_by_value<int64_t>().value(), K_RT_INT);
+    EXPECT_FALSE(outRtInt->get_compile_time_constant<int64_t>().has_value());
+
+    const auto outRtBool = unpack(12);
+    ASSERT_NE(outRtBool, nullptr);
+    EXPECT_TRUE(outRtBool->get_is_runtime_pass_by_value());
+    EXPECT_TRUE(outRtBool->get_is_pass_by_value());
+    EXPECT_FALSE(outRtBool->get_pass_by_value<bool>().has_value());
+    EXPECT_FALSE(outRtBool->get_compile_time_constant<bool>().has_value());
+    EXPECT_TRUE(std::holds_alternative<std::monostate>(outRtBool->get_value_variant()));
+
+    const auto outCtBool = unpack(13);
+    ASSERT_NE(outCtBool, nullptr);
+    EXPECT_FALSE(outCtBool->get_is_runtime_pass_by_value());
+    ASSERT_TRUE(outCtBool->get_compile_time_constant<bool>().has_value());
+    EXPECT_EQ(outCtBool->get_compile_time_constant<bool>().value(), K_CT_BOOL);
+    EXPECT_FALSE(outCtBool->get_pass_by_value<bool>().has_value());
 }

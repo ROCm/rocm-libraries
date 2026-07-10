@@ -860,6 +860,7 @@ struct GraphT : public ::flatbuffers::NativeTable {
   std::vector<std::unique_ptr<hipdnn_flatbuffers_sdk::data_objects::NodeT>> nodes{};
   ::flatbuffers::Optional<int64_t> preferred_engine_id = ::flatbuffers::nullopt;
   bool is_override_shape_enabled = false;
+  uint32_t min_reader_version = 0;
   GraphT() = default;
   GraphT(const GraphT &o);
   GraphT(GraphT&&) FLATBUFFERS_NOEXCEPT = default;
@@ -877,7 +878,8 @@ struct Graph FLATBUFFERS_FINAL_CLASS : private ::flatbuffers::Table {
     VT_TENSORS = 12,
     VT_NODES = 14,
     VT_PREFERRED_ENGINE_ID = 16,
-    VT_IS_OVERRIDE_SHAPE_ENABLED = 18
+    VT_IS_OVERRIDE_SHAPE_ENABLED = 18,
+    VT_MIN_READER_VERSION = 20
   };
   const ::flatbuffers::String *name() const {
     return GetPointer<const ::flatbuffers::String *>(VT_NAME);
@@ -927,6 +929,12 @@ struct Graph FLATBUFFERS_FINAL_CLASS : private ::flatbuffers::Table {
   bool mutate_is_override_shape_enabled(bool _is_override_shape_enabled = 0) {
     return SetField<uint8_t>(VT_IS_OVERRIDE_SHAPE_ENABLED, static_cast<uint8_t>(_is_override_shape_enabled), 0);
   }
+  uint32_t min_reader_version() const {
+    return GetField<uint32_t>(VT_MIN_READER_VERSION, 0);
+  }
+  bool mutate_min_reader_version(uint32_t _min_reader_version = 0) {
+    return SetField<uint32_t>(VT_MIN_READER_VERSION, _min_reader_version, 0);
+  }
   bool Verify(::flatbuffers::Verifier &verifier) const {
     return VerifyTableStart(verifier) &&
            VerifyOffset(verifier, VT_NAME) &&
@@ -942,6 +950,7 @@ struct Graph FLATBUFFERS_FINAL_CLASS : private ::flatbuffers::Table {
            verifier.VerifyVectorOfTables(nodes()) &&
            VerifyField<int64_t>(verifier, VT_PREFERRED_ENGINE_ID, 8) &&
            VerifyField<uint8_t>(verifier, VT_IS_OVERRIDE_SHAPE_ENABLED, 1) &&
+           VerifyField<uint32_t>(verifier, VT_MIN_READER_VERSION, 4) &&
            verifier.EndTable();
   }
   GraphT *UnPack(const ::flatbuffers::resolver_function_t *_resolver = nullptr) const;
@@ -977,6 +986,9 @@ struct GraphBuilder {
   void add_is_override_shape_enabled(bool is_override_shape_enabled) {
     fbb_.AddElement<uint8_t>(Graph::VT_IS_OVERRIDE_SHAPE_ENABLED, static_cast<uint8_t>(is_override_shape_enabled), 0);
   }
+  void add_min_reader_version(uint32_t min_reader_version) {
+    fbb_.AddElement<uint32_t>(Graph::VT_MIN_READER_VERSION, min_reader_version, 0);
+  }
   explicit GraphBuilder(::flatbuffers::FlatBufferBuilder &_fbb)
         : fbb_(_fbb) {
     start_ = fbb_.StartTable();
@@ -997,9 +1009,11 @@ inline ::flatbuffers::Offset<Graph> CreateGraph(
     ::flatbuffers::Offset<::flatbuffers::Vector<::flatbuffers::Offset<hipdnn_flatbuffers_sdk::data_objects::TensorAttributes>>> tensors = 0,
     ::flatbuffers::Offset<::flatbuffers::Vector<::flatbuffers::Offset<hipdnn_flatbuffers_sdk::data_objects::Node>>> nodes = 0,
     ::flatbuffers::Optional<int64_t> preferred_engine_id = ::flatbuffers::nullopt,
-    bool is_override_shape_enabled = false) {
+    bool is_override_shape_enabled = false,
+    uint32_t min_reader_version = 0) {
   GraphBuilder builder_(_fbb);
   if(preferred_engine_id) { builder_.add_preferred_engine_id(*preferred_engine_id); }
+  builder_.add_min_reader_version(min_reader_version);
   builder_.add_nodes(nodes);
   builder_.add_tensors(tensors);
   builder_.add_name(name);
@@ -1019,7 +1033,8 @@ inline ::flatbuffers::Offset<Graph> CreateGraphDirect(
     const std::vector<::flatbuffers::Offset<hipdnn_flatbuffers_sdk::data_objects::TensorAttributes>> *tensors = nullptr,
     const std::vector<::flatbuffers::Offset<hipdnn_flatbuffers_sdk::data_objects::Node>> *nodes = nullptr,
     ::flatbuffers::Optional<int64_t> preferred_engine_id = ::flatbuffers::nullopt,
-    bool is_override_shape_enabled = false) {
+    bool is_override_shape_enabled = false,
+    uint32_t min_reader_version = 0) {
   auto name__ = name ? _fbb.CreateString(name) : 0;
   auto tensors__ = tensors ? _fbb.CreateVector<::flatbuffers::Offset<hipdnn_flatbuffers_sdk::data_objects::TensorAttributes>>(*tensors) : 0;
   auto nodes__ = nodes ? _fbb.CreateVector<::flatbuffers::Offset<hipdnn_flatbuffers_sdk::data_objects::Node>>(*nodes) : 0;
@@ -1032,7 +1047,8 @@ inline ::flatbuffers::Offset<Graph> CreateGraphDirect(
       tensors__,
       nodes__,
       preferred_engine_id,
-      is_override_shape_enabled);
+      is_override_shape_enabled,
+      min_reader_version);
 }
 
 ::flatbuffers::Offset<Graph> CreateGraph(::flatbuffers::FlatBufferBuilder &_fbb, const GraphT *_o, const ::flatbuffers::rehasher_function_t *_rehasher = nullptr);
@@ -1095,7 +1111,8 @@ inline bool operator==(const GraphT &lhs, const GraphT &rhs) {
       (lhs.tensors.size() == rhs.tensors.size() && std::equal(lhs.tensors.cbegin(), lhs.tensors.cend(), rhs.tensors.cbegin(), [](std::unique_ptr<hipdnn_flatbuffers_sdk::data_objects::TensorAttributesT> const &a, std::unique_ptr<hipdnn_flatbuffers_sdk::data_objects::TensorAttributesT> const &b) { return (a == b) || (a && b && *a == *b); })) &&
       (lhs.nodes.size() == rhs.nodes.size() && std::equal(lhs.nodes.cbegin(), lhs.nodes.cend(), rhs.nodes.cbegin(), [](std::unique_ptr<hipdnn_flatbuffers_sdk::data_objects::NodeT> const &a, std::unique_ptr<hipdnn_flatbuffers_sdk::data_objects::NodeT> const &b) { return (a == b) || (a && b && *a == *b); })) &&
       (lhs.preferred_engine_id == rhs.preferred_engine_id) &&
-      (lhs.is_override_shape_enabled == rhs.is_override_shape_enabled);
+      (lhs.is_override_shape_enabled == rhs.is_override_shape_enabled) &&
+      (lhs.min_reader_version == rhs.min_reader_version);
 }
 
 inline bool operator!=(const GraphT &lhs, const GraphT &rhs) {
@@ -1109,7 +1126,8 @@ inline GraphT::GraphT(const GraphT &o)
         intermediate_data_type(o.intermediate_data_type),
         io_data_type(o.io_data_type),
         preferred_engine_id(o.preferred_engine_id),
-        is_override_shape_enabled(o.is_override_shape_enabled) {
+        is_override_shape_enabled(o.is_override_shape_enabled),
+        min_reader_version(o.min_reader_version) {
   tensors.reserve(o.tensors.size());
   for (const auto &tensors_ : o.tensors) { tensors.emplace_back((tensors_) ? new hipdnn_flatbuffers_sdk::data_objects::TensorAttributesT(*tensors_) : nullptr); }
   nodes.reserve(o.nodes.size());
@@ -1125,6 +1143,7 @@ inline GraphT &GraphT::operator=(GraphT o) FLATBUFFERS_NOEXCEPT {
   std::swap(nodes, o.nodes);
   std::swap(preferred_engine_id, o.preferred_engine_id);
   std::swap(is_override_shape_enabled, o.is_override_shape_enabled);
+  std::swap(min_reader_version, o.min_reader_version);
   return *this;
 }
 
@@ -1145,6 +1164,7 @@ inline void Graph::UnPackTo(GraphT *_o, const ::flatbuffers::resolver_function_t
   { auto _e = nodes(); if (_e) { _o->nodes.resize(_e->size()); for (::flatbuffers::uoffset_t _i = 0; _i < _e->size(); _i++) { if(_o->nodes[_i]) { _e->Get(_i)->UnPackTo(_o->nodes[_i].get(), _resolver); } else { _o->nodes[_i] = std::unique_ptr<hipdnn_flatbuffers_sdk::data_objects::NodeT>(_e->Get(_i)->UnPack(_resolver)); } } } else { _o->nodes.resize(0); } }
   { auto _e = preferred_engine_id(); _o->preferred_engine_id = _e; }
   { auto _e = is_override_shape_enabled(); _o->is_override_shape_enabled = _e; }
+  { auto _e = min_reader_version(); _o->min_reader_version = _e; }
 }
 
 inline ::flatbuffers::Offset<Graph> Graph::Pack(::flatbuffers::FlatBufferBuilder &_fbb, const GraphT* _o, const ::flatbuffers::rehasher_function_t *_rehasher) {
@@ -1163,6 +1183,7 @@ inline ::flatbuffers::Offset<Graph> CreateGraph(::flatbuffers::FlatBufferBuilder
   auto _nodes = _o->nodes.size() ? _fbb.CreateVector<::flatbuffers::Offset<hipdnn_flatbuffers_sdk::data_objects::Node>> (_o->nodes.size(), [](size_t i, _VectorArgs *__va) { return CreateNode(*__va->__fbb, __va->__o->nodes[i].get(), __va->__rehasher); }, &_va ) : 0;
   auto _preferred_engine_id = _o->preferred_engine_id;
   auto _is_override_shape_enabled = _o->is_override_shape_enabled;
+  auto _min_reader_version = _o->min_reader_version;
   return hipdnn_flatbuffers_sdk::data_objects::CreateGraph(
       _fbb,
       _name,
@@ -1172,7 +1193,8 @@ inline ::flatbuffers::Offset<Graph> CreateGraph(::flatbuffers::FlatBufferBuilder
       _tensors,
       _nodes,
       _preferred_engine_id,
-      _is_override_shape_enabled);
+      _is_override_shape_enabled,
+      _min_reader_version);
 }
 
 inline bool VerifyNodeAttributes(::flatbuffers::Verifier &verifier, const void *obj, NodeAttributes type) {

@@ -27,6 +27,14 @@ namespace hipdnn_frontend::graph
 using hipdnn_data_sdk::types::bfloat16;
 using hipdnn_data_sdk::types::half;
 
+/// @brief Selects how a pass-by-value scalar is treated: a runtime parameter
+/// (supplied via the variant pack at execute time) or a compile-time constant.
+enum class ScalarType
+{
+    RUNTIME_PARAM,
+    COMPILE_TIME_CONST
+};
+
 /**
  * @class TensorAttributes
  * @brief Describes the properties and configuration of a tensor
@@ -80,9 +88,14 @@ public:
     TensorAttributes() = default;
 
     /**
-     * @brief Construct a pass-by-value tensor from a scalar
+     * @brief Construct a runtime-with-default pass-by-value tensor from a scalar
      * @tparam T Scalar type (float, double, half, hip_bfloat16, uint8_t, int32_t, int64_t, bool)
-     * @param scalar The scalar value to store in the tensor
+     * @param scalar The scalar value to store as the baked default
+     *
+     * Matches cuDNN's plain scalar constructor: the tensor is runtime
+     * pass-by-value with a baked default (runtime flag set), flooring the
+     * provider at 1.2.0. Use ScalarType::COMPILE_TIME_CONST or
+     * set_compile_time_constant() for a baseline-1.0.0 baked constant.
      */
     template <typename T>
     TensorAttributes(const T& scalar)
@@ -91,34 +104,113 @@ public:
     }
 
     /**
-     * @brief Check if this tensor is a pass-by-value tensor
-     * @return true if the tensor contains an embedded scalar value
+     * @brief Construct a pass-by-value tensor from a scalar with an explicit mode
+     * @tparam T Scalar type
+     * @param scalar The scalar value to store in the tensor
+     * @param type RUNTIME_PARAM => runtime-with-default; COMPILE_TIME_CONST => compile-time constant
      */
-    bool get_pass_by_value() const // NOLINT(readability-identifier-naming)
+    template <typename T>
+    TensorAttributes(const T& scalar, ScalarType type)
     {
-        return !std::holds_alternative<std::monostate>(_value);
+        set_value(scalar);
+        if(type == ScalarType::COMPILE_TIME_CONST)
+        {
+            _isRuntimePassByValue = false;
+        }
     }
 
     /**
-     * @brief Get the pass-by-value scalar of a specific type
+     * @brief Check if this tensor is a pass-by-value tensor
+     * @return true if the tensor contains an embedded scalar value
+     */
+    bool get_is_pass_by_value() const // NOLINT(readability-identifier-naming)
+    {
+        return _isRuntimePassByValue || !std::holds_alternative<std::monostate>(_value);
+    }
+
+    /**
+     * @brief Get the runtime pass-by-value scalar of a specific type
      * @tparam T The expected scalar type
-     * @return The scalar value if it matches type T, std::nullopt otherwise
+     * @return The scalar value if this is runtime-with-default and matches T, std::nullopt otherwise
      */
     template <typename T>
     std::optional<T> get_pass_by_value() const // NOLINT(readability-identifier-naming)
     {
-        if(auto p = std::get_if<T>(&_value))
+        if(_isRuntimePassByValue)
         {
-            return *p;
+            if(auto p = std::get_if<T>(&_value))
+            {
+                return *p;
+            }
         }
         return std::nullopt;
     }
 
     /**
-     * @brief Set a pass-by-value scalar in this tensor
+     * @brief Get the runtime pass-by-value scalar as a type-erased variant
+     * @return The value variant only for runtime-with-default, empty otherwise
+     */
+    ValueVariant get_pass_by_value() const // NOLINT(readability-identifier-naming)
+    {
+        return _isRuntimePassByValue && !std::holds_alternative<std::monostate>(_value)
+                   ? _value
+                   : ValueVariant{};
+    }
+
+    /**
+     * @brief Get the compile-time constant scalar of a specific type
+     * @tparam T The expected scalar type
+     * @return The scalar value if this is a compile-time constant and matches T, std::nullopt otherwise
+     */
+    template <typename T>
+    std::optional<T> get_compile_time_constant() const // NOLINT(readability-identifier-naming)
+    {
+        if(!_isRuntimePassByValue)
+        {
+            if(auto p = std::get_if<T>(&_value))
+            {
+                return *p;
+            }
+        }
+        return std::nullopt;
+    }
+
+    /**
+     * @brief Get the compile-time constant scalar as a type-erased variant
+     * @return The value variant only for a compile-time constant, empty otherwise
+     */
+    ValueVariant get_compile_time_constant() const // NOLINT(readability-identifier-naming)
+    {
+        return !_isRuntimePassByValue && !std::holds_alternative<std::monostate>(_value)
+                   ? _value
+                   : ValueVariant{};
+    }
+
+    /**
+     * @brief Check whether this tensor carries a compile-time constant value
+     */
+    bool get_has_compile_time_constant() const // NOLINT(readability-identifier-naming)
+    {
+        return !_isRuntimePassByValue && !std::holds_alternative<std::monostate>(_value);
+    }
+
+    /**
+     * @brief Raw accessor for the stored runtime pass-by-value flag
+     */
+    bool get_is_runtime_pass_by_value() const // NOLINT(readability-identifier-naming)
+    {
+        return _isRuntimePassByValue;
+    }
+
+    /**
+     * @brief Set a runtime-with-default pass-by-value scalar in this tensor
      * @tparam T Scalar type (float, double, half, hip_bfloat16, uint8_t, int32_t, int64_t, bool)
-     * @param v The scalar value
+     * @param v The scalar value stored as the baked default
      * @return Reference to this for method chaining
+     *
+     * Sets the runtime pass-by-value flag (matching cuDNN's plain scalar path),
+     * so the tensor floors the provider at 1.2.0. Use set_compile_time_constant()
+     * for a baseline-1.0.0 baked constant.
      */
     template <typename T>
     TensorAttributes& set_value(T v) // NOLINT(readability-identifier-naming)
@@ -134,6 +226,7 @@ public:
                                          std::is_same<T, bool>>,
                       "Unsupported type for Tensor_attributes::set_value");
         _value = v;
+        _isRuntimePassByValue = true;
         _dataType = getDataTypeEnumFromType<T>();
         _dim = _stride = {1};
         return *this;
@@ -155,6 +248,42 @@ public:
     TensorAttributes& clear_value() // NOLINT(readability-identifier-naming)
     {
         _value = {};
+        return *this;
+    }
+
+    /**
+     * @brief Set a compile-time constant scalar in this tensor
+     * @tparam T Scalar type
+     * @param v The scalar value
+     * @return Reference to this for method chaining
+     */
+    template <typename T>
+    TensorAttributes& set_compile_time_constant(T v) // NOLINT(readability-identifier-naming)
+    {
+        set_value(v);
+        _isRuntimePassByValue = false;
+        return *this;
+    }
+
+    /**
+     * @brief Mark this tensor as a runtime pass-by-value parameter, clearing any stored value
+     * @return Reference to this for method chaining
+     */
+    TensorAttributes& set_as_runtime_parameter() // NOLINT(readability-identifier-naming)
+    {
+        clear_value();
+        _isRuntimePassByValue = true;
+        return *this;
+    }
+
+    /**
+     * @brief Set only the runtime pass-by-value flag, leaving any stored value intact
+     * @param b Whether this tensor is a runtime pass-by-value scalar
+     * @return Reference to this for method chaining
+     */
+    TensorAttributes& set_is_pass_by_value(bool b) // NOLINT(readability-identifier-naming)
+    {
+        _isRuntimePassByValue = b;
         return *this;
     }
 
@@ -377,7 +506,10 @@ public:
                     "Tensor " + _name + " does not have a data type set"};
         }
 
-        HIPDNN_RETURN_IF_TRUE(_isVirtual && get_pass_by_value(),
+        HIPDNN_RETURN_IF_TRUE(_isVirtual && _isRuntimePassByValue,
+                              ErrorCode::INVALID_VALUE,
+                              "Tensor " + _name + " cannot be virtual and runtime pass by value");
+        HIPDNN_RETURN_IF_TRUE(_isVirtual && !std::holds_alternative<std::monostate>(_value),
                               ErrorCode::INVALID_VALUE,
                               "Tensor " + _name + " cannot be virtual and pass by value");
         HIPDNN_RETURN_IF_NE(_dim.size(),
@@ -405,6 +537,7 @@ private:
     std::vector<int64_t> _stride;
     std::vector<int64_t> _dim;
     bool _isVirtual = false;
+    bool _isRuntimePassByValue = false;
     ValueVariant _value;
 };
 typedef TensorAttributes Tensor_attributes; ///< @brief Compatibility alias

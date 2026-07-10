@@ -11,6 +11,8 @@
 #include <hipdnn_test_sdk/utilities/FlatbufferGraphTestUtils.hpp>
 #include <hipdnn_test_sdk/utilities/TestUtilities.hpp>
 #include <test_plugins/TestPluginConstants.hpp>
+#include <array>
+#include <cstdint>
 #include <vector>
 
 using namespace backend_test;
@@ -367,4 +369,198 @@ TEST_F(IntegrationGraphDescriptorApi, GetGraphNameViaCApi)
 
     hipdnnBackendDestroyDescriptor(desc);
     EXPECT_EQ(hipdnnDestroy(handle), HIPDNN_STATUS_SUCCESS);
+}
+
+// ============================================================================
+// RFC-0016 §4.2 serialized-graph reader-version guard.
+//
+// deserializeGraph() must reject a serialized Graph whose min_reader_version
+// exceeds what this build understands (K_GRAPH_READER_VERSION == 1), and must
+// accept versions 0 and 1. Exercised through the public C API
+// hipdnnBackendCreateAndDeserializeGraph_ext, which surfaces the guard's
+// HipdnnException as HIPDNN_STATUS_NOT_SUPPORTED.
+//
+// Complementary contract: a graph built via the backend API stamps
+// min_reader_version == 1 iff some tensor is runtime pass-by-value, else 0.
+// ============================================================================
+
+namespace
+{
+// Serialize an otherwise-valid reduction graph whose min_reader_version is
+// forced to `readerVersion`. Round-trips through GraphT so the field is stamped
+// regardless of the flatbuffer default-elision behavior.
+flatbuffers::DetachedBuffer serializeReductionGraphWithReaderVersion(uint32_t readerVersion)
+{
+    auto builder = hipdnn_test_sdk::utilities::createValidReductionGraph();
+    const auto* graphFb
+        = hipdnn_flatbuffers_sdk::data_objects::GetGraph(builder.GetBufferPointer());
+    hipdnn_flatbuffers_sdk::data_objects::GraphT graphT;
+    graphFb->UnPackTo(&graphT);
+    graphT.min_reader_version = readerVersion;
+
+    flatbuffers::FlatBufferBuilder rebuilder;
+    rebuilder.Finish(hipdnn_flatbuffers_sdk::data_objects::Graph::Pack(rebuilder, &graphT));
+    return rebuilder.Release();
+}
+
+// Read back the stamped min_reader_version from a graph built and serialized
+// through the backend C API. `runtimePassByValue` toggles the runtime flag on
+// the reduction input tensor.
+uint32_t buildAndReadStampedReaderVersion(bool runtimePassByValue)
+{
+    const std::vector<int64_t> inDims     = {4, 8};
+    const std::vector<int64_t> inStrides  = {8, 1};
+    const std::vector<int64_t> outDims    = {1, 8};
+    const std::vector<int64_t> outStrides = {8, 1};
+
+    std::vector<hipdnnBackendDescriptor_t> owned;
+    const auto cleanup = [&owned]() {
+        for(auto* d : owned)
+        {
+            hipdnnBackendDestroyDescriptor(d);
+        }
+    };
+
+    hipdnnBackendDescriptor_t xDesc = nullptr;
+    EXPECT_EQ(hipdnnBackendCreateDescriptor(HIPDNN_BACKEND_TENSOR_DESCRIPTOR, &xDesc),
+              HIPDNN_STATUS_SUCCESS);
+    owned.push_back(xDesc);
+    setAllTensorAttributes(xDesc, 1, "input", inDims, inStrides);
+    if(::testing::Test::HasFatalFailure())
+    {
+        cleanup();
+        return 0;
+    }
+    if(runtimePassByValue)
+    {
+        bool flag = true;
+        EXPECT_EQ(hipdnnBackendSetAttribute(xDesc,
+                                            HIPDNN_ATTR_TENSOR_IS_RUNTIME_PASS_BY_VALUE,
+                                            HIPDNN_TYPE_BOOLEAN,
+                                            1,
+                                            &flag),
+                  HIPDNN_STATUS_SUCCESS);
+    }
+    EXPECT_EQ(hipdnnBackendFinalize(xDesc), HIPDNN_STATUS_SUCCESS);
+
+    hipdnnBackendDescriptor_t yDesc
+        = createAndFinalizeTensorDesc(2, "output", outDims, outStrides);
+    owned.push_back(yDesc);
+
+    hipdnnBackendDescriptor_t opDesc = nullptr;
+    EXPECT_EQ(hipdnnBackendCreateDescriptor(HIPDNN_BACKEND_OPERATION_REDUCTION_DESCRIPTOR, &opDesc),
+              HIPDNN_STATUS_SUCCESS);
+    owned.push_back(opDesc);
+    EXPECT_EQ(hipdnnBackendSetAttribute(opDesc,
+                                        HIPDNN_ATTR_OPERATION_REDUCTION_XDESC,
+                                        HIPDNN_TYPE_BACKEND_DESCRIPTOR,
+                                        1,
+                                        static_cast<const void*>(&xDesc)),
+              HIPDNN_STATUS_SUCCESS);
+    EXPECT_EQ(hipdnnBackendSetAttribute(opDesc,
+                                        HIPDNN_ATTR_OPERATION_REDUCTION_YDESC,
+                                        HIPDNN_TYPE_BACKEND_DESCRIPTOR,
+                                        1,
+                                        static_cast<const void*>(&yDesc)),
+              HIPDNN_STATUS_SUCCESS);
+    const hipdnnReduceTensorOp_t reduceOp = HIPDNN_REDUCE_TENSOR_ADD;
+    EXPECT_EQ(hipdnnBackendSetAttribute(
+                  opDesc, HIPDNN_ATTR_REDUCTION_OPERATOR, HIPDNN_TYPE_REDUCTION_OPERATOR_TYPE, 1, &reduceOp),
+              HIPDNN_STATUS_SUCCESS);
+    const hipdnnDataType_t compType = HIPDNN_DATA_FLOAT;
+    EXPECT_EQ(hipdnnBackendSetAttribute(
+                  opDesc, HIPDNN_ATTR_REDUCTION_COMP_TYPE, HIPDNN_TYPE_DATA_TYPE, 1, &compType),
+              HIPDNN_STATUS_SUCCESS);
+    EXPECT_EQ(hipdnnBackendFinalize(opDesc), HIPDNN_STATUS_SUCCESS);
+
+    hipdnnBackendDescriptor_t graphDesc = nullptr;
+    EXPECT_EQ(hipdnnBackendCreateDescriptor(HIPDNN_BACKEND_OPERATIONGRAPH_DESCRIPTOR, &graphDesc),
+              HIPDNN_STATUS_SUCCESS);
+    owned.push_back(graphDesc);
+    const std::array<hipdnnBackendDescriptor_t, 1> ops = {opDesc};
+    EXPECT_EQ(hipdnnBackendSetAttribute(graphDesc,
+                                        HIPDNN_ATTR_OPERATIONGRAPH_OPS,
+                                        HIPDNN_TYPE_BACKEND_DESCRIPTOR,
+                                        1,
+                                        static_cast<const void*>(ops.data())),
+              HIPDNN_STATUS_SUCCESS);
+
+    size_t size = 0;
+    EXPECT_EQ(hipdnnBackendGetSerializedBinaryGraph_ext(graphDesc, 0, &size, nullptr),
+              HIPDNN_STATUS_SUCCESS);
+    EXPECT_GT(size, 0u);
+    if(::testing::Test::HasFatalFailure() || size == 0)
+    {
+        cleanup();
+        return 0;
+    }
+
+    std::vector<uint8_t> buffer(size);
+    EXPECT_EQ(hipdnnBackendGetSerializedBinaryGraph_ext(graphDesc, size, &size, buffer.data()),
+              HIPDNN_STATUS_SUCCESS);
+
+    const auto* graphFb = hipdnn_flatbuffers_sdk::data_objects::GetGraph(buffer.data());
+    EXPECT_NE(graphFb, nullptr);
+    const uint32_t stamped = graphFb != nullptr ? graphFb->min_reader_version() : 0;
+
+    cleanup();
+    return stamped;
+}
+} // namespace
+
+// A serialized graph demanding a reader newer than this build (min_reader_version
+// == 2 > K_GRAPH_READER_VERSION == 1) must be rejected, not silently accepted.
+TEST_F(IntegrationGraphDescriptorApi, DeserializeRejectsFutureReaderVersion)
+{
+    const flatbuffers::DetachedBuffer serialized = serializeReductionGraphWithReaderVersion(2);
+
+    hipdnnBackendDescriptor_t descriptor = nullptr;
+    EXPECT_EQ(hipdnnBackendCreateAndDeserializeGraph_ext(
+                  &descriptor, serialized.data(), serialized.size()),
+              HIPDNN_STATUS_NOT_SUPPORTED);
+    EXPECT_EQ(descriptor, nullptr);
+}
+
+// min_reader_version == 1 sits at this build's ceiling and must deserialize.
+TEST_F(IntegrationGraphDescriptorApi, DeserializeAcceptsReaderVersionOne)
+{
+    const flatbuffers::DetachedBuffer serialized = serializeReductionGraphWithReaderVersion(1);
+
+    hipdnnBackendDescriptor_t descriptor = nullptr;
+    EXPECT_EQ(hipdnnBackendCreateAndDeserializeGraph_ext(
+                  &descriptor, serialized.data(), serialized.size()),
+              HIPDNN_STATUS_SUCCESS);
+    EXPECT_NE(descriptor, nullptr);
+    hipdnnBackendDestroyDescriptor(descriptor);
+}
+
+// min_reader_version == 0 is the legacy/default floor and must deserialize.
+TEST_F(IntegrationGraphDescriptorApi, DeserializeAcceptsReaderVersionZero)
+{
+    const flatbuffers::DetachedBuffer serialized = serializeReductionGraphWithReaderVersion(0);
+
+    hipdnnBackendDescriptor_t descriptor = nullptr;
+    EXPECT_EQ(hipdnnBackendCreateAndDeserializeGraph_ext(
+                  &descriptor, serialized.data(), serialized.size()),
+              HIPDNN_STATUS_SUCCESS);
+    EXPECT_NE(descriptor, nullptr);
+    hipdnnBackendDestroyDescriptor(descriptor);
+}
+
+// A graph carrying a runtime pass-by-value tensor stamps min_reader_version == 1
+// so that older readers refuse it (mirrors the guard rejection above).
+TEST_F(IntegrationGraphDescriptorApi, StampsMinReaderVersionOneForRuntimePassByValue)
+{
+    const uint32_t stamped = buildAndReadStampedReaderVersion(/*runtimePassByValue=*/true);
+    ASSERT_FALSE(::testing::Test::HasFatalFailure());
+    EXPECT_EQ(stamped, 1u);
+}
+
+// A graph with only ordinary/compile-time tensors stamps min_reader_version == 0
+// so legacy readers still accept it.
+TEST_F(IntegrationGraphDescriptorApi, StampsMinReaderVersionZeroForOrdinaryGraph)
+{
+    const uint32_t stamped = buildAndReadStampedReaderVersion(/*runtimePassByValue=*/false);
+    ASSERT_FALSE(::testing::Test::HasFatalFailure());
+    EXPECT_EQ(stamped, 0u);
 }

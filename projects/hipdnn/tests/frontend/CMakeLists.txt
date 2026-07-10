@@ -56,6 +56,7 @@ add_executable(
     IntegrationMatmulDescriptorLowering.cpp
     IntegrationPointwiseDescriptorLifting.cpp
     IntegrationPointwiseDescriptorLowering.cpp
+    IntegrationPassByValueVersionFilter.cpp
     IntegrationResampleFwdDescriptorLifting.cpp
     IntegrationResampleFwdDescriptorLowering.cpp
     IntegrationReductionDescriptorLifting.cpp

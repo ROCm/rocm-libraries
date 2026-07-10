@@ -9,9 +9,11 @@
 #include <hipdnn_frontend/attributes/TensorAttributes.hpp>
 #include <hipdnn_frontend/detail/BackendWrapper.hpp>
 #include <hipdnn_frontend/detail/ScopedHipdnnBackendDescriptor.hpp>
+#include <memory>
 #include <optional>
 #include <string>
 #include <unordered_map>
+#include <unordered_set>
 #include <variant>
 #include <vector>
 
@@ -67,7 +69,7 @@ inline Error setDescriptorAttrScalar(hipdnnBackendDescriptor_t desc,
 }
 
 // Overload for std::monostate — this is unreachable when guarded by
-// get_pass_by_value(), but required for std::visit to compile.
+// a value-presence check, but required for std::visit to compile.
 inline Error setDescriptorAttrTensorValue(hipdnnBackendDescriptor_t /*desc*/,
                                           std::monostate /*value*/,
                                           const std::string& errorContext)
@@ -211,7 +213,7 @@ inline Error
                                                isVirtual,
                                                "tensor is_virtual"));
 
-    if(tensor->get_pass_by_value())
+    if(!std::holds_alternative<std::monostate>(tensor->get_value_variant()))
     {
         HIPDNN_CHECK_ERROR(std::visit(
             [&](auto&& arg) -> Error {
@@ -219,6 +221,12 @@ inline Error
             },
             tensor->get_value_variant()));
     }
+
+    HIPDNN_CHECK_ERROR(setDescriptorAttrScalar(desc.get(),
+                                               HIPDNN_ATTR_TENSOR_IS_RUNTIME_PASS_BY_VALUE,
+                                               HIPDNN_TYPE_BOOLEAN,
+                                               tensor->get_is_runtime_pass_by_value(),
+                                               "tensor is_runtime_pass_by_value"));
 
     HIPDNN_CHECK_ERROR(finalizeDescriptor(desc.get(), "tensor descriptor"));
 
@@ -279,6 +287,38 @@ inline Error ensureAndSetTensorArrayRef(
                                              static_cast<int64_t>(descPtrs.size()),
                                              static_cast<const void*>(descPtrs.data())),
         "Failed to set " + errorContext);
+    return {};
+}
+
+// Validates the variant pack against pass-by-value tensor state at execute time.
+// The only hard requirement is that a PURE runtime pass-by-value tensor (flag
+// set, no baked value/default) MUST have a host-supplied scalar in the variant
+// pack. Tensors that already carry a value (compile-time constant OR
+// runtime-with-default) may harmlessly appear in the variant pack — callers
+// routinely build the pack from every tensor UID, and the backend ignores the
+// pointer for by-value tensors (the baked value/default wins). Ordinary tensors
+// are not this helper's concern.
+inline Error validatePassByValueVariantPack(
+    const std::unordered_set<std::shared_ptr<graph::TensorAttributes>>& tensors,
+    const std::unordered_map<int64_t, void*>& variantPack)
+{
+    for(const auto& tensor : tensors)
+    {
+        if(!tensor)
+        {
+            continue;
+        }
+        const bool hasValue = !std::holds_alternative<std::monostate>(tensor->get_value_variant());
+        const bool isRuntime = tensor->get_is_runtime_pass_by_value();
+        if(isRuntime && !hasValue)
+        {
+            const int64_t uid = tensor->get_uid();
+            HIPDNN_RETURN_IF_TRUE(variantPack.count(uid) == 0,
+                                  ErrorCode::INVALID_VALUE,
+                                  "Runtime pass-by-value tensor uid " + std::to_string(uid)
+                                      + " requires a host-supplied scalar in the variant pack");
+        }
+    }
     return {};
 }
 

@@ -202,7 +202,7 @@ protected:
         }
         tensors.scale = std::make_shared<TensorAttributes>(std::move(scaleAttr));
 
-        tensors.epsilon = std::make_shared<TensorAttributes>(1e-5f);
+        tensors.epsilon = std::make_shared<TensorAttributes>(1e-5f, ScalarType::COMPILE_TIME_CONST);
         tensors.epsilon->set_name("epsilon");
         if(useManualUids)
         {

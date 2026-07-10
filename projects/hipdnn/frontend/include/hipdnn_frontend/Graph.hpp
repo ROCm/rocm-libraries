@@ -4325,6 +4325,15 @@ public:
                     "from_compiled_plan_binary() first."};
         }
 
+        // On the fresh-build path (subtree present), validate the variant pack against
+        // pass-by-value tensor state. Plan-only objects have no subtree to inspect.
+        if(!_sub_nodes.empty())
+        {
+            std::unordered_set<std::shared_ptr<TensorAttributes>> allTensors;
+            gatherHipdnnTensorsSubtree(allTensors);
+            HIPDNN_CHECK_ERROR(detail::validatePassByValueVariantPack(allTensors, variantPack));
+        }
+
         auto variantPackDesc = std::make_unique<detail::ScopedHipdnnBackendDescriptor>(
             HIPDNN_BACKEND_VARIANT_PACK_DESCRIPTOR);
         if(!variantPackDesc || !variantPackDesc->valid())
@@ -5982,6 +5991,19 @@ public:
         auto newTensor = std::make_shared<TensorAttributes>(tensor);
 
         return newTensor;
+    }
+
+    /**
+     * @brief Create a pass-by-value scalar tensor with an explicit mode
+     * @tparam T Scalar type
+     * @param scalar The scalar value
+     * @param type RUNTIME_PARAM => runtime-with-default; COMPILE_TIME_CONST => compile-time constant
+     * @return Shared pointer to the created tensor attributes
+     */
+    template <typename T>
+    static std::shared_ptr<TensorAttributes> tensor(const T& scalar, ScalarType type)
+    {
+        return tensor(TensorAttributes(scalar, type));
     }
 };
 

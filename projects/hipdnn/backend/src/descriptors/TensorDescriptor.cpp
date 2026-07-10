@@ -112,6 +112,15 @@ void TensorDescriptor::getAttribute(hipdnnBackendAttributeName_t attributeName,
                   "TensorDescriptor::getAttribute()");
         break;
     }
+    case HIPDNN_ATTR_TENSOR_IS_RUNTIME_PASS_BY_VALUE:
+        getScalar(_data.is_runtime_pass_by_value,
+                  HIPDNN_TYPE_BOOLEAN,
+                  attributeType,
+                  requestedElementCount,
+                  elementCount,
+                  arrayOfElements,
+                  "TensorDescriptor::getAttribute()");
+        break;
     default:
         throw HipdnnException(HIPDNN_STATUS_NOT_SUPPORTED,
                               "TensorDescriptor::getAttribute: attributeName not supported");
@@ -173,6 +182,14 @@ void TensorDescriptor::setAttribute(hipdnnBackendAttributeName_t attributeName,
         break;
     case HIPDNN_ATTR_TENSOR_VALUE_EXT:
         setTensorValue(attributeType, elementCount, arrayOfElements);
+        break;
+    case HIPDNN_ATTR_TENSOR_IS_RUNTIME_PASS_BY_VALUE:
+        setScalar(_data.is_runtime_pass_by_value,
+                  HIPDNN_TYPE_BOOLEAN,
+                  attributeType,
+                  elementCount,
+                  arrayOfElements,
+                  "TensorDescriptor::setAttribute()");
         break;
     default:
         throw HipdnnException(HIPDNN_STATUS_NOT_SUPPORTED,

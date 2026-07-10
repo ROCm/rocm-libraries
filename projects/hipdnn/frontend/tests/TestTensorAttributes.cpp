@@ -4,6 +4,7 @@
 #include <gtest/gtest.h>
 #include <hipdnn_data_sdk/utilities/StringUtil.hpp>
 #include <hipdnn_frontend/attributes/TensorAttributes.hpp>
+#include <variant>
 
 using namespace hipdnn_frontend;
 using namespace hipdnn_frontend::graph;
@@ -194,4 +195,38 @@ TEST(TestTensorAttributes, ValidateDataType)
         auto result = tensor.validate();
         EXPECT_EQ(result.code, errorCode) << "For " + std::string(to_string(dataType));
     }
+}
+
+TEST(TestTensorAttributes, ValidateSucceedsOnRuntimeWithDefaultTensor)
+{
+    // flag true + value present; set_value seeded dims/strides/data_type.
+    TensorAttributes tensor(1.F);
+    tensor.set_is_pass_by_value(true);
+    ASSERT_TRUE(tensor.get_is_runtime_pass_by_value());
+    EXPECT_EQ(tensor.validate(), Error(ErrorCode::OK, ""));
+}
+
+TEST(TestTensorAttributes, ValidateSucceedsOnRuntimeUserSuppliedTensor)
+{
+    // flag true + value cleared; dims/strides/data_type survive set_value seeding.
+    TensorAttributes tensor(1.F);
+    tensor.set_as_runtime_parameter();
+    ASSERT_TRUE(tensor.get_is_runtime_pass_by_value());
+    EXPECT_TRUE(std::holds_alternative<std::monostate>(tensor.get_value_variant()));
+    EXPECT_EQ(tensor.validate(), Error(ErrorCode::OK, ""));
+}
+
+TEST(TestTensorAttributes, ValidateFailsOnVirtualRuntimePassByValueTensor)
+{
+    // virtual + runtime flag (no stored value) is the flag-exclusion case.
+    TensorAttributes tensor;
+    tensor.set_dim({1});
+    tensor.set_stride({1});
+    tensor.set_data_type(DataType::FLOAT);
+    tensor.set_as_runtime_parameter();
+    tensor.set_is_virtual(true);
+
+    EXPECT_EQ(
+        tensor.validate(),
+        Error(ErrorCode::INVALID_VALUE, "Tensor  cannot be virtual and runtime pass by value"));
 }

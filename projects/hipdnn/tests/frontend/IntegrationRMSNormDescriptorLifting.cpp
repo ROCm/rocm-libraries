@@ -115,7 +115,7 @@ TEST_F(IntegrationRMSNormDescriptorLifting, RMSNormTrainingRoundTripViaCApi)
     EXPECT_EQ(liftedEpsilon->get_dim(), toVec(rms_constants::K_RMSNORM_TENSOR_EPSILON_DIMS));
     EXPECT_EQ(liftedEpsilon->get_stride(), toVec(rms_constants::K_RMSNORM_TENSOR_EPSILON_STRIDES));
     EXPECT_EQ(liftedEpsilon->get_data_type(), DataType::FLOAT);
-    EXPECT_TRUE(liftedEpsilon->get_pass_by_value());
+    EXPECT_TRUE(liftedEpsilon->get_is_pass_by_value());
     ASSERT_TRUE(liftedEpsilon->get_pass_by_value<float>().has_value());
     EXPECT_FLOAT_EQ(liftedEpsilon->get_pass_by_value<float>().value(), 1e-5f);
 
@@ -302,7 +302,7 @@ TEST_F(IntegrationRMSNormDescriptorLifting, RMSNormLiftWithoutFinalization)
     auto liftedEpsilon = tensorMap[rms_constants::K_RMSNORM_TENSOR_EPSILON_UID];
     EXPECT_EQ(liftedEpsilon->get_dim(), toVec(rms_constants::K_RMSNORM_TENSOR_EPSILON_DIMS));
     EXPECT_EQ(liftedEpsilon->get_stride(), toVec(rms_constants::K_RMSNORM_TENSOR_EPSILON_STRIDES));
-    EXPECT_TRUE(liftedEpsilon->get_pass_by_value());
+    EXPECT_TRUE(liftedEpsilon->get_is_pass_by_value());
     ASSERT_TRUE(liftedEpsilon->get_pass_by_value<float>().has_value());
     EXPECT_FLOAT_EQ(liftedEpsilon->get_pass_by_value<float>().value(), 1e-5f);
 }

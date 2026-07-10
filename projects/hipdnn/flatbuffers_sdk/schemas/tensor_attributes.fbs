@@ -59,4 +59,5 @@ table TensorAttributes {
     dims: [long];
     virtual: bool;
     value: TensorValue;
+    is_runtime_pass_by_value: bool = false;
 }

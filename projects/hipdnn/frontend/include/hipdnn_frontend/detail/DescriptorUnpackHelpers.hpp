@@ -474,6 +474,17 @@ template <typename T>
         tensor->set_stride(strides);
     }
 
+    // Restore the runtime pass-by-value flag. Must be set AFTER any set_value()
+    // above, which clears the flag. For a pure user-supplied tensor IS_BY_VALUE
+    // is false (no value read), and only the flag is restored here.
+    bool isRuntime = false;
+    HIPDNN_CHECK_ERROR(getDescriptorAttrScalar(tensorDesc,
+                                               HIPDNN_ATTR_TENSOR_IS_RUNTIME_PASS_BY_VALUE,
+                                               HIPDNN_TYPE_BOOLEAN,
+                                               isRuntime,
+                                               "tensor is_runtime_pass_by_value"));
+    tensor->set_is_pass_by_value(isRuntime);
+
     return {};
 }
 

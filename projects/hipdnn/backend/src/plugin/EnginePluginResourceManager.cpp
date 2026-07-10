@@ -7,6 +7,7 @@
 #include <hipdnn_data_sdk/utilities/EngineNames.hpp>
 #include <hipdnn_data_sdk/utilities/VersionUtils.hpp>
 #include <hipdnn_flatbuffers_sdk/data_objects/engine_details_generated.h>
+#include <hipdnn_flatbuffers_sdk/flatbuffer_utilities/GraphWrapper.hpp>
 #include <limits>
 #include <mutex>
 #include <numeric>
@@ -83,14 +84,47 @@ bool readIsOverrideShapeEnabled(const GraphDescriptor& graphDesc)
     return flag;
 }
 
+/// Returns true if any tensor in the finalized serialized graph is a runtime
+/// pass-by-value scalar. Missing/invalid graph buffer means false.
+bool readIsRuntimePassByValueEnabled(const GraphDescriptor& graphDesc)
+{
+    auto serializedGraphData = graphDesc.getSerializedGraph();
+    if(serializedGraphData.ptr == nullptr || serializedGraphData.size == 0)
+    {
+        return false;
+    }
+    const hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper graphWrapper(
+        serializedGraphData.ptr, serializedGraphData.size);
+    if(!graphWrapper.isValid())
+    {
+        return false;
+    }
+    for(const auto& [uid, tensor] : graphWrapper.getTensorMap())
+    {
+        if(tensor != nullptr && tensor->is_runtime_pass_by_value())
+        {
+            return true;
+        }
+    }
+    return false;
+}
+
 const hipdnn_data_sdk::utilities::Version&
-    computeMinimumPluginApiVersion(bool isOverrideShapeEnabled)
+    computeMinimumPluginApiVersion(bool isOverrideShapeEnabled, bool isRuntimePassByValue)
 {
     static const hipdnn_data_sdk::utilities::Version s_baselineVersion{
         hipdnn_plugin_sdk::K_ENGINE_PLUGIN_API_VERSION_BASELINE};
     static const hipdnn_data_sdk::utilities::Version s_overrideExecuteMinVersion{
         hipdnn_plugin_sdk::K_OVERRIDE_EXECUTE_MIN_API_VERSION};
+    static const hipdnn_data_sdk::utilities::Version s_passByValueMinVersion{
+        hipdnn_plugin_sdk::K_PASS_BY_VALUE_MIN_API_VERSION};
 
+    // Return the maximum applicable floor. Runtime pass-by-value (1.2.0)
+    // dominates the override-execute floor (1.1.0) and the baseline (1.0.0).
+    if(isRuntimePassByValue)
+    {
+        return s_passByValueMinVersion;
+    }
     if(isOverrideShapeEnabled)
     {
         return s_overrideExecuteMinVersion;
@@ -350,7 +384,9 @@ std::vector<int64_t>
     // and graphs that opt in to overridable tensor shapes require the extended
     // override-execute SDK surface. Older explicit API versions are skipped.
     const bool isOverrideShapeEnabled = readIsOverrideShapeEnabled(*graphDesc);
-    const auto& requiredVersion = computeMinimumPluginApiVersion(isOverrideShapeEnabled);
+    const bool isRuntimePBV = readIsRuntimePassByValueEnabled(*graphDesc);
+    const auto& requiredVersion
+        = computeMinimumPluginApiVersion(isOverrideShapeEnabled, isRuntimePBV);
 
     std::vector<int64_t> engineIds;
 
@@ -695,7 +731,7 @@ void EnginePluginResourceManager::executeOpGraph(hipdnnBackendDescriptor_t execu
 
         const auto pluginApiVersion = plugin->parsedApiVersion();
         THROW_IF_FALSE(pluginApiVersion.has_value()
-                           && *pluginApiVersion >= computeMinimumPluginApiVersion(true),
+                           && *pluginApiVersion >= computeMinimumPluginApiVersion(true, false),
                        HIPDNN_STATUS_NOT_SUPPORTED,
                        "Selected plugin API version does not support "
                        "hipdnnEnginePluginExecuteOpGraphWithOverrides.");

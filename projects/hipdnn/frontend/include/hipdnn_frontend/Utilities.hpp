@@ -115,9 +115,13 @@ inline TensorAttributes makeTensorAttributes(const std::string& name,
 }
 
 /**
- * @brief Create TensorAttributes from a single constant value
+ * @brief Create TensorAttributes holding a single compile-time constant value
  *
- * The data type will be set from the type of the value. Useful for tensors that contain single constants, for example an epsilon.
+ * The data type is inferred from the value's type. Useful for tensors that hold
+ * a single baked constant that never changes — for example an epsilon. This
+ * bakes a **compile-time constant** (baseline provider floor 1.0.0); for a
+ * runtime pass-by-value scalar use TensorAttributes(v) / set_value() or
+ * set_as_runtime_parameter().
  *
  * @param name Human-readable name for debugging and serialization
  * @param value Constant value to be inserted into the tensor
@@ -126,7 +130,7 @@ inline TensorAttributes makeTensorAttributes(const std::string& name,
 template <typename T>
 inline TensorAttributes makeTensorAttributes(const std::string& name, const T value)
 {
-    return TensorAttributes().set_name(name).set_value(value);
+    return TensorAttributes().set_name(name).set_compile_time_constant(value);
 }
 
 } // namespace graph

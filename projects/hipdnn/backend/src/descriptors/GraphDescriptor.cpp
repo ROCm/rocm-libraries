@@ -18,6 +18,15 @@
 namespace hipdnn_backend
 {
 
+// Reader-version stamped into serialized graphs. A newer writer bumps this when
+// it emits features an older reader cannot interpret; a reader rejects graphs
+// whose stamped version exceeds the version it supports. Runtime pass-by-value
+// tensors (RFC 0016) require reader version >= 1.
+namespace
+{
+constexpr uint32_t K_GRAPH_READER_VERSION = 1;
+} // namespace
+
 void GraphDescriptor::invalidateCache()
 {
     _graphSerializedBuffer = flatbuffers::DetachedBuffer();
@@ -88,6 +97,19 @@ std::unique_ptr<hipdnn_flatbuffers_sdk::data_objects::GraphT>
         // Build node from operation
         graph->nodes.push_back(op->buildNode());
     }
+
+    // Stamp the reader version: a graph with any runtime pass-by-value tensor
+    // requires reader version 1; otherwise 0 keeps older readers compatible.
+    bool anyRuntimePassByValue = false;
+    for(const auto& tensor : graph->tensors)
+    {
+        if(tensor && tensor->is_runtime_pass_by_value)
+        {
+            anyRuntimePassByValue = true;
+            break;
+        }
+    }
+    graph->min_reader_version = anyRuntimePassByValue ? K_GRAPH_READER_VERSION : 0;
 
     return graph;
 }
@@ -377,6 +399,10 @@ void GraphDescriptor::deserializeGraph(const uint8_t* serializedGraph, size_t gr
     // Parse FlatBuffer and eagerly unpack into _operations
     std::unique_ptr<hipdnn_flatbuffers_sdk::data_objects::GraphT> graph;
     flatbuffer_utilities::convertSerializedGraphToGraph(serializedGraph, graphByteSize, graph);
+
+    THROW_IF_TRUE(graph->min_reader_version > K_GRAPH_READER_VERSION,
+                  HIPDNN_STATUS_NOT_SUPPORTED,
+                  "Serialized graph requires a newer reader version than this build supports.");
 
     // Extract graph-level attributes
     _computeDataType = graph->compute_data_type;

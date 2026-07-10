@@ -230,7 +230,7 @@ TEST_F(IntegrationBatchnormDescriptorLifting, BasicBatchnormRoundTrip)
     EXPECT_EQ(liftedEpsilon->get_dim(), std::vector<int64_t>{1});
     EXPECT_EQ(liftedEpsilon->get_stride(), std::vector<int64_t>{1});
     EXPECT_EQ(liftedEpsilon->get_data_type(), DataType::FLOAT);
-    EXPECT_TRUE(liftedEpsilon->get_pass_by_value());
+    EXPECT_TRUE(liftedEpsilon->get_is_pass_by_value());
     ASSERT_TRUE(liftedEpsilon->get_pass_by_value<float>().has_value());
     EXPECT_FLOAT_EQ(liftedEpsilon->get_pass_by_value<float>().value(), 1e-5f);
 
@@ -242,7 +242,7 @@ TEST_F(IntegrationBatchnormDescriptorLifting, BasicBatchnormRoundTrip)
     EXPECT_EQ(liftedMomentum->get_dim(), std::vector<int64_t>{1});
     EXPECT_EQ(liftedMomentum->get_stride(), std::vector<int64_t>{1});
     EXPECT_EQ(liftedMomentum->get_data_type(), DataType::FLOAT);
-    EXPECT_TRUE(liftedMomentum->get_pass_by_value());
+    EXPECT_TRUE(liftedMomentum->get_is_pass_by_value());
     ASSERT_TRUE(liftedMomentum->get_pass_by_value<float>().has_value());
     EXPECT_FLOAT_EQ(liftedMomentum->get_pass_by_value<float>().value(), 0.1f);
 
@@ -634,7 +634,7 @@ TEST_F(IntegrationBatchnormDescriptorLifting, BatchnormAutoAssignedUidsPreserved
     // Verify epsilon pass-by-value scalar survived the round trip
     auto epsilonTensor = bnNode->attributes.get_epsilon();
     ASSERT_NE(epsilonTensor, nullptr);
-    EXPECT_TRUE(epsilonTensor->get_pass_by_value());
+    EXPECT_TRUE(epsilonTensor->get_is_pass_by_value());
     ASSERT_TRUE(epsilonTensor->get_pass_by_value<float>().has_value());
     EXPECT_FLOAT_EQ(epsilonTensor->get_pass_by_value<float>().value(), 1e-5f);
 }

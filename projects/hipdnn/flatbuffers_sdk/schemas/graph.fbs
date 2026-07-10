@@ -67,6 +67,7 @@ table Graph {
 	preferred_engine_id: long = null;
 	// Graph-level opt-in for execute-time override shapes.
 	is_override_shape_enabled: bool = false;
+	min_reader_version: uint = 0;
 }
 
 root_type Graph;

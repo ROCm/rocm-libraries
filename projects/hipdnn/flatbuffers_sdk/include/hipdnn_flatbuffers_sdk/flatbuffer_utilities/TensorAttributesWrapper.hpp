@@ -26,6 +26,9 @@ public:
     virtual bool isVirtual() const = 0;
     virtual hipdnn_flatbuffers_sdk::data_objects::TensorValue valueType() const = 0;
     virtual const void* value() const = 0;
+    virtual bool isRuntimePassByValue() const = 0;
+    virtual bool isByValue() const = 0;
+    virtual bool hasCompileTimeConstant() const = 0;
 
     template <typename T>
     const T& valueAs() const
@@ -125,6 +128,24 @@ public:
     {
         throwIfNotValid();
         return _shallowTensor->value();
+    }
+
+    bool isRuntimePassByValue() const override
+    {
+        throwIfNotValid();
+        return _shallowTensor->is_runtime_pass_by_value();
+    }
+
+    bool isByValue() const override
+    {
+        return valueType() != hipdnn_flatbuffers_sdk::data_objects::TensorValue::NONE
+               || isRuntimePassByValue();
+    }
+
+    bool hasCompileTimeConstant() const override
+    {
+        return !isRuntimePassByValue()
+               && valueType() != hipdnn_flatbuffers_sdk::data_objects::TensorValue::NONE;
     }
 
 private:
