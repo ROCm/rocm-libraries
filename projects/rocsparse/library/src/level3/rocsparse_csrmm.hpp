@@ -244,5 +244,4 @@ namespace rocsparse
                            const rocsparse::line_nnz_profile* profile,
                            void*                              temp_buffer,
                            bool                               force_conj_A);
-
 }
