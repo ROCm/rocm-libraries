@@ -116,7 +116,8 @@ protected:
         this->registerValidator(outputs.c, this->getTolerance(graphObj, outputs.c));
 
         this->setTestCaseNote(activTestCase.note);
-        this->verifyGraph(graphObj, matmulTestCase.seed);
+        this->synthesis().setGlobalSeed(matmulTestCase.seed);
+        this->verifyGraph(graphObj);
     }
 };
 
