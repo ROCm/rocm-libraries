@@ -17,12 +17,24 @@
 _common_excludes: &common_excludes
   - "*DISABLED*"
 
+# TEMPORARY TIER REMAPPING (revert once CI has proper test-label support).
+#
+# CI cannot yet select tests by label, so it runs whole tiers by name. To land
+# the hip-kernel-provider mlops integration-test port without overloading the
+# pre-commit/PR jobs, the tiers are temporarily repurposed:
+#   - quick:         all Smoke GPU cases (fast pre-commit signal).
+#   - standard:      everything ("*"), i.e. what "full" used to run. The harness
+#                    auto-skips ops HIP_MLOPS_ENGINE can't service (see the
+#                    engine-support note above), so "*" is safe here.
+#   - comprehensive: nothing (empty test_patterns -> category is skipped).
+#   - full:          nothing (empty test_patterns -> category is skipped).
+# Once label-based selection exists, restore comprehensive/full to real
+# coverage and give each tier its intended, distinct pattern set.
 test_categories:
   quick:
-    description: "Fast external integration coverage: Smoke GPU cases plus quick CPU golden-reference bundles"
+    description: "Smoke GPU cases (temporary: all smoke patterns until CI label support lands)"
     test_patterns:
       - "Smoke/*"
-      - "TestCpu*GoldenReference*"
     exclude: *common_excludes
     labels:
       - "quick"
@@ -30,31 +42,31 @@ test_categories:
       - "smoke"
 
   standard:
-    description: "Standard external integration coverage: quick coverage plus standard CPU golden-reference bundles"
+    description: "Full external integration coverage (temporary: runs the former full '*' tier until CI label support lands)"
     test_patterns:
-      - "Smoke/*"
-      - "TestCpu*GoldenReference*"
-      - "TestCpu*GoldenRefStd*"
+      - "*"
     exclude: *common_excludes
     labels:
       - "standard"
       - "pr"
       - "precheckin"
 
+  # Intentionally empty: an empty test_patterns list makes the category
+  # generator skip this tier entirely (runs nothing) until CI label support
+  # lands. See parse_test_categories.py ("no test_patterns defined, skipping").
   comprehensive:
-    description: "Nightly comprehensive external integration coverage"
-    test_patterns:
-      - "*"
+    description: "Disabled for now (temporary: runs nothing until CI label support lands)"
+    test_patterns: []
     exclude: *common_excludes
     labels:
       - "comprehensive"
       - "nightly"
       - "extended"
 
+  # Intentionally empty: see the comprehensive note above.
   full:
-    description: "Complete external integration coverage"
-    test_patterns:
-      - "*"
+    description: "Disabled for now (temporary: runs nothing until CI label support lands)"
+    test_patterns: []
     exclude: *common_excludes
     labels:
       - "full"
