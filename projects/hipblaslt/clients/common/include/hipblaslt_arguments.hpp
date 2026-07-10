@@ -163,6 +163,7 @@ struct Arguments
     int8_t norm_check;
     int8_t allclose_check;
     int8_t unit_check;
+    int8_t ulp_check;
     int8_t timing;
 
     char transA;
@@ -286,6 +287,7 @@ struct Arguments
     OPER(norm_check) SEP             \
     OPER(allclose_check) SEP         \
     OPER(unit_check) SEP             \
+    OPER(ulp_check) SEP              \
     OPER(timing) SEP                 \
     OPER(transA) SEP                 \
     OPER(transB) SEP                 \

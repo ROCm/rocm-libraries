@@ -83,6 +83,66 @@ def _matmul_graph(
     }
 
 
+def _sdpa_graph(
+    b: int = 2,
+    hq: int = 64,
+    hkv: int = 8,
+    sq: int = 2048,
+    skv: int = 2048,
+    d: int = 128,
+    dv=None,
+    causal: bool = False,
+    bottom_right: bool = False,
+    left_bound=None,
+    right_bound=None,
+) -> Dict[str, Any]:
+    return {
+        "tensors": [
+            {
+                "uid": 1,
+                "dims": [b, hq, sq, d],
+                "data_type": "bfloat16",
+                "virtual": False,
+            },
+            {
+                "uid": 2,
+                "dims": [b, hkv, skv, d],
+                "data_type": "bfloat16",
+                "virtual": False,
+            },
+            {
+                "uid": 3,
+                "dims": [b, hkv, skv, dv or d],
+                "data_type": "bfloat16",
+                "virtual": False,
+            },
+            {
+                "uid": 4,
+                "dims": [b, hq, sq, dv or d],
+                "data_type": "bfloat16",
+                "virtual": False,
+            },
+        ],
+        "nodes": [
+            {
+                "name": "sdpa",
+                "type": "SdpaAttributes",
+                "inputs": {"q_tensor_uid": 1, "k_tensor_uid": 2, "v_tensor_uid": 3},
+                "outputs": {"o_tensor_uid": 4},
+                "attributes": {
+                    "causal_mask": causal,
+                    "causal_mask_bottom_right": bottom_right,
+                    "diagonal_alignment": (
+                        "BOTTOM_RIGHT" if bottom_right else "TOP_LEFT"
+                    ),
+                    "left_bound": left_bound,
+                    "right_bound": right_bound,
+                },
+            }
+        ],
+    }
+
+
 def _bnorm_graph() -> Dict[str, Any]:
     return {
         "tensors": [
@@ -454,6 +514,50 @@ class TestComputeFlops:
         expected_conv = 2 * 16 * 16 * 3 * 3 * 16 * 16 * 16
         expected_bn = 4 * 32 * 64 * 28 * 28
         assert flops == expected_conv + expected_bn
+        assert partial is False
+
+    def test_sdpa_noncausal(self):
+        flops, partial = compute_flops(_sdpa_graph())
+        assert flops == 2 * 2 * 64 * (2048 * 2048) * (128 + 128)
+        assert flops == 274877906944
+        assert partial is False
+
+    def test_sdpa_causal_top_left_square(self):
+        flops, partial = compute_flops(_sdpa_graph(causal=True))
+        assert flops == 2 * 2 * 64 * (2048 * 2049 // 2) * (128 + 128)
+        assert partial is False
+
+    def test_sdpa_gqa_uses_query_heads_only(self):
+        flops8, _ = compute_flops(_sdpa_graph(hkv=8))
+        flops4, _ = compute_flops(_sdpa_graph(hkv=4))
+        assert flops8 == flops4
+
+    def test_sdpa_sliding_window_partial(self):
+        flops, partial = compute_flops(_sdpa_graph(left_bound=256))
+        assert flops is None
+        assert partial is True
+
+    def test_sdpa_causal_top_left_nonsquare_clamps(self):
+        # Sq=8 > Skv=4 exercises the min(i+1, Skv) clamp: rows -> 1+2+3+4+4+4+4+4 = 26.
+        flops, partial = compute_flops(_sdpa_graph(causal=True, sq=8, skv=4))
+        assert flops == 2 * 2 * 64 * 26 * (128 + 128)
+        assert flops == 1703936
+        assert partial is False
+
+    def test_sdpa_causal_bottom_right_nonsquare(self):
+        # BOTTOM_RIGHT offset = Skv-Sq = -4 exercises max(i+1+offset, 0): rows -> 0,0,0,0,1,2,3,4 = 10.
+        flops, partial = compute_flops(
+            _sdpa_graph(causal=True, bottom_right=True, sq=8, skv=4)
+        )
+        assert flops == 2 * 2 * 64 * 10 * (128 + 128)
+        assert flops == 655360
+        assert partial is False
+
+    def test_sdpa_asymmetric_head_dims(self):
+        # head_dim_qk (query last dim) and head_dim_vo (value last dim) are summed separately.
+        flops, partial = compute_flops(_sdpa_graph(sq=128, skv=128, d=128, dv=64))
+        assert flops == 2 * 2 * 64 * (128 * 128) * (128 + 64)
+        assert flops == 805306368
         assert partial is False
 
 

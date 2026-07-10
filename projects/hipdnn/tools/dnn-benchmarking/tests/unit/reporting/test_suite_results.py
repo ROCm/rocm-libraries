@@ -126,7 +126,7 @@ class TestProviderEngineResult:
 
     def test_success_serializes_with_timing_and_correctness(self):
         """ProviderEngineResult with status='success' serializes with
-        cpu_build_time_ms, gpu_kernel_stats, e2e_stats, correctness."""
+        cpu_build_time_ms, gpu_kernel_stats, host_stats, correctness."""
         stats = BenchmarkStats(
             mean_ms=1.0, std_ms=0.1, min_ms=0.5, max_ms=1.5, p95_ms=1.4, p99_ms=1.49
         )
@@ -139,14 +139,14 @@ class TestProviderEngineResult:
             status="success",
             cpu_build_time_ms=10.5,
             gpu_kernel_stats=stats,
-            e2e_stats=stats,
+            host_stats=stats,
             correctness=corr,
         )
         d = pe.to_dict()
         assert d["status"] == "success"
         assert d["cpu_build_time_ms"] == 10.5
         assert "gpu_kernel_stats" in d
-        assert "e2e_stats" in d
+        assert "host_stats" in d
         assert "correctness" in d
         assert d["gpu_kernel_stats"]["mean_ms"] == 1.0
 
@@ -167,7 +167,7 @@ class TestProviderEngineResult:
             plugin_path="/plugins/a",
             cpu_build_time_ms=10.5,
             gpu_kernel_stats=stats,
-            e2e_stats=stats,
+            host_stats=stats,
         )
 
         d = pe.to_dict()
@@ -190,7 +190,7 @@ class TestProviderEngineResult:
             engine_id=0,
             status="success",
             role="reference",
-            e2e_stats=stats,
+            host_stats=stats,
             gpu_kernel_stats=stats,
         )
 
@@ -230,7 +230,7 @@ class TestProviderEngineResult:
         assert d["error_message"] == "build failed"
         assert "cpu_build_time_ms" not in d
         assert "gpu_kernel_stats" not in d
-        assert "e2e_stats" not in d
+        assert "host_stats" not in d
 
     def test_skipped_serializes_with_reason(self):
         """ProviderEngineResult with status='skipped' serializes with
@@ -431,7 +431,7 @@ class TestSuiteResult:
             status="success",
             cpu_build_time_ms=5.0,
             gpu_kernel_stats=stats,
-            e2e_stats=stats,
+            host_stats=stats,
             correctness=corr,
         )
         pe2 = ProviderEngineResult(
@@ -502,9 +502,9 @@ class TestSuiteResult:
         first_graph = d["graphs"][0]
         first_result = first_graph["results"][0]
         gpu_stats = first_result["gpu_kernel_stats"]
-        e2e_stats = first_result["e2e_stats"]
+        host_stats = first_result["host_stats"]
 
-        for stats in [gpu_stats, e2e_stats]:
+        for stats in [gpu_stats, host_stats]:
             assert "mean_ms" in stats
             assert "std_ms" in stats
             assert "min_ms" in stats

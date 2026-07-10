@@ -7,6 +7,11 @@ add_library(
     RockeClientHandle.cpp
     PluginPublic.cpp
     engines/RockeClientEngine.cpp
+    dispatcher/AotCatalog.cpp
+    dispatcher/RockeClientDispatcher.cpp
+    dispatcher/SdpaGraphAdapter.cpp
+    dispatcher/SdpaProblem.cpp
+    dispatcher/SelectionConstraints.cpp
 )
 
 target_include_directories(rocke_client_impl PUBLIC ${CMAKE_CURRENT_SOURCE_DIR})

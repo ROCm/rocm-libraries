@@ -91,6 +91,13 @@ endif()
 option(ROCKE_BUILD_PYBIND "Build the rocke_engine Python extension module" OFF)
 option(ROCKE_INSTALL_PYTHON_PACKAGE "Install the rocke Python frontend" ON)
 option(ROCKE_INSTALL_TESTS "Install rocKE smoke test artifacts and CTest metadata" ON)
+# The Python rocKE CI tests (import smoke + golden byte-stability) are gated
+# separately from the C++ smoke tests. Provider mode turns them OFF until their
+# test-artifact packaging is wired up (the rocke package, the smoke/golden
+# scripts, and the golden JSON are not yet in TheRock's hipkernelprovider
+# artifact includes, so staging them there fails at test time). Standalone
+# runs, which package everything locally, keep them ON.
+option(ROCKE_INSTALL_PYTHON_TESTS "Install rocKE Python smoke/golden CI tests" ON)
 option(ROCKE_INSTALL_STANDALONE_CTEST "Install standalone rocKE CTest metadata" ON)
 if(NOT DEFINED ROCKE_INSTALL_PROVIDER_CTEST_SUBDIR)
   set(ROCKE_INSTALL_PROVIDER_CTEST_SUBDIR "" CACHE STRING
@@ -118,9 +125,9 @@ endif()
 # under a "<subdir>_<target>_test" name (e.g.
 # hip_kernel_provider_rocke_ir_serialize_roundtrip_test) and reference them from
 # the provider CTestTestfile via "../". Standalone keeps the plain target name
-# in bin/. (The Python import smoke and the rocke package cannot match that name
-# pattern; provider-mode Python packaging needs a TheRock artifact include and
-# is staged only in standalone mode for now.)
+# in bin/. (The Python import smoke and the rocke package, which cannot match
+# that name pattern, are co-located under bin/<subdir>/ and captured by explicit
+# includes in ml-libs/artifact-hipkernelprovider.toml.)
 set(ROCKE_CXX_TEST_INSTALL_DIR "${CMAKE_INSTALL_BINDIR}")
 set(ROCKE_CXX_TEST_CTEST_REL "../")
 
@@ -143,16 +150,16 @@ endif()
 set(ROCKE_PYTHON_INSTALL_DIR "${_ROCKE_DEFAULT_PYTHON_INSTALL_DIR}"
     CACHE STRING "Relative install destination for rocke and rocke_engine")
 
-# Sources live under Cpp/, in subfolders mirroring the rocke Python package
-# (Cpp/core/{ir,arch,isa,lower_llvm,lower_hip}, Cpp/helpers, Cpp/instances/{common,gfxNNNN},
-# Cpp/support). GLOB_RECURSE picks up every .cpp regardless of depth; the
-# pybind bindings under Cpp/bindings are a separate target and are excluded.
-file(GLOB_RECURSE ROCKE_CORE_SOURCES CONFIGURE_DEPENDS "${CMAKE_CURRENT_SOURCE_DIR}/Cpp/*.cpp")
-list(FILTER ROCKE_CORE_SOURCES EXCLUDE REGEX "/Cpp/bindings/")
+# Sources live under cpp/, in subfolders mirroring the rocke Python package
+# (cpp/core/{ir,arch,isa,lower_llvm,lower_hip}, cpp/helpers, cpp/instances/{common,gfxNNNN},
+# cpp/support). GLOB_RECURSE picks up every .cpp regardless of depth; the
+# pybind bindings under cpp/bindings are a separate target and are excluded.
+file(GLOB_RECURSE ROCKE_CORE_SOURCES CONFIGURE_DEPENDS "${CMAKE_CURRENT_SOURCE_DIR}/cpp/*.cpp")
+list(FILTER ROCKE_CORE_SOURCES EXCLUDE REGEX "/cpp/bindings/")
 
 add_library(rocke_core STATIC ${ROCKE_CORE_SOURCES})
 target_include_directories(rocke_core PUBLIC
-  $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/Cpp/include>
+  $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/cpp/include>
   $<INSTALL_INTERFACE:${CMAKE_INSTALL_INCLUDEDIR}>)
 
 # --- Engine freshness / provenance stamp -------------------------------------
@@ -172,7 +179,7 @@ string(TIMESTAMP ROCKE_BUILD_DATE "%Y%m%d" UTC)
 set(ROCKE_ENGINE_VERSION "1.0.0+${ROCKE_BUILD_DATE}")
 message(STATUS "rocke_core build-id: ${ROCKE_BUILD_ID}  version: ${ROCKE_ENGINE_VERSION}")
 set_source_files_properties(
-  "${CMAKE_CURRENT_SOURCE_DIR}/Cpp/core/rocke_build_id.cpp"
+  "${CMAKE_CURRENT_SOURCE_DIR}/cpp/core/rocke_build_id.cpp"
   PROPERTIES COMPILE_DEFINITIONS
   "ROCKE_BUILD_ID=${ROCKE_BUILD_ID};ROCKE_ENGINE_VERSION=${ROCKE_ENGINE_VERSION}")
 # Required so the .a can be linked into the shared rocke_provider plugin
@@ -188,7 +195,7 @@ if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/tests/CMakeLists.txt")
 endif()
 
 if(ROCKE_BUILD_PYBIND)
-  add_subdirectory(Cpp/bindings)
+  add_subdirectory(cpp/bindings)
 endif()
 
 # --- Installable engine + test artifacts -------------------------------------
@@ -197,7 +204,7 @@ install(TARGETS rocke_core
         ARCHIVE DESTINATION ${CMAKE_INSTALL_LIBDIR}
         LIBRARY DESTINATION ${CMAKE_INSTALL_LIBDIR}
         RUNTIME DESTINATION ${CMAKE_INSTALL_BINDIR})
-install(DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}/Cpp/include/"
+install(DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}/cpp/include/"
         DESTINATION ${CMAKE_INSTALL_INCLUDEDIR})
 install(EXPORT ckcTargets
         FILE ckcTargets.cmake
@@ -205,27 +212,46 @@ install(EXPORT ckcTargets
         DESTINATION ${CMAKE_INSTALL_LIBDIR}/cmake/ckc)
 
 if(ROCKE_INSTALL_PYTHON_PACKAGE)
+  # In provider mode, co-locate the rocke package under the test subdir
+  # (bin/<subdir>/rocke) next to rocke_installed_smoke.py so the Python smoke is
+  # self-contained inside TheRock's test artifact (paired with a matching include
+  # in ml-libs/artifact-hipkernelprovider.toml for bin/<subdir>/rocke/**).
+  # Standalone keeps the lib/pythonX.Y/site-packages layout.
+  if(ROCKE_INSTALL_PROVIDER_CTEST_SUBDIR)
+    set(_ROCKE_PKG_DEST "${ROCKE_TEST_INSTALL_DIR}")
+  else()
+    set(_ROCKE_PKG_DEST "${ROCKE_PYTHON_INSTALL_DIR}")
+  endif()
   # Install the whole package (not just *.py): rocke ships runtime data such as
   # core/arch/data/arch_specs.json that the engine loads at import/build time.
   # A *.py-only filter silently drops it and breaks ArchTarget.from_gfx(). Use
   # PATTERN + REGEX (distinct keywords) to drop only build cruft and keep
   # cmake-lint happy (a second PATTERN would trip its duplicate-keyword check).
-  # The package always installs to site-packages; provider-mode co-location for
-  # the Python smoke was removed because that smoke is no longer staged in the
-  # provider lane (the C++ smoke binaries carry the provider test coverage).
-  install(DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}/Python/rocke"
-          DESTINATION "${ROCKE_PYTHON_INSTALL_DIR}"
+  install(DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}/python/rocke"
+          DESTINATION "${_ROCKE_PKG_DEST}"
           PATTERN "__pycache__" EXCLUDE
           REGEX "\\.pyc$" EXCLUDE)
 endif()
 
 if(ROCKE_INSTALL_TESTS)
-  # The Python import smoke is only wired into the standalone CTest layout; in
-  # provider mode it is deferred until the rocke package is added to TheRock's
-  # test artifact (see the staging gate below).
-  if(NOT ROCKE_INSTALL_PROVIDER_CTEST_SUBDIR)
+  if(ROCKE_INSTALL_PYTHON_TESTS)
+    # The Python import smoke (placeholder for the rocke Python CI test) installs
+    # next to the CTestTestfile in both modes: provider mode -> bin/<subdir>/,
+    # standalone -> bin/. In provider mode it imports the co-located rocke package
+    # installed above; TheRock's test artifact captures both via explicit includes.
     install(PROGRAMS "${CMAKE_CURRENT_SOURCE_DIR}/tools/rocke_installed_smoke.py"
             DESTINATION ${ROCKE_TEST_INSTALL_DIR})
+
+    # Host-only golden IR byte-stability gate. The relocatable runner rebuilds the
+    # representative IR from the co-located rocke package and compares digests to
+    # the committed golden. It needs the parity harness module (imported by name)
+    # and the golden JSON co-located next to it; no GPU and no examples required.
+    install(PROGRAMS "${CMAKE_CURRENT_SOURCE_DIR}/tests/rocke_installed_golden_test.py"
+            DESTINATION ${ROCKE_TEST_INSTALL_DIR})
+    install(FILES "${CMAKE_CURRENT_SOURCE_DIR}/tests/instances/rocke_ir_parity_harness.py"
+            DESTINATION ${ROCKE_TEST_INSTALL_DIR})
+    install(FILES "${CMAKE_CURRENT_SOURCE_DIR}/tests/golden/rocke_representative_ir_sha256.json"
+            DESTINATION ${ROCKE_TEST_INSTALL_DIR}/golden)
   endif()
 
   set(_ROCKE_INSTALLED_CTEST_ENTRIES "")
@@ -238,15 +264,22 @@ if(ROCKE_INSTALL_TESTS)
            "set_tests_properties(${_test_target} PROPERTIES LABELS \"ckc;unit;host;quick\")\n")
   endforeach()
 
-  # The Python import smoke (and the rocke package it imports) cannot match the
-  # provider test-artifact name pattern, so only stage it in standalone mode.
-  # Provider-mode Python packaging needs a TheRock artifact include (handled
-  # separately).
-  if(NOT ROCKE_INSTALL_PROVIDER_CTEST_SUBDIR)
+  if(ROCKE_INSTALL_PYTHON_TESTS)
+    # Stage the Python import smoke in both modes. It sits next to the
+    # CTestTestfile (provider: bin/<subdir>/, standalone: bin/rocke/ -> "../"), so
+    # the same "${ROCKE_TEST_CTEST_REL}" prefix reaches it. The co-located rocke
+    # package is captured by TheRock's test-artifact includes in provider mode.
     string(APPEND _ROCKE_INSTALLED_CTEST_ENTRIES
            "add_test(rocke_python_import_smoke \"${ROCKE_TEST_CTEST_REL}rocke_installed_smoke.py\")\n")
     string(APPEND _ROCKE_INSTALLED_CTEST_ENTRIES
            "set_tests_properties(rocke_python_import_smoke PROPERTIES LABELS \"ckc;python;quick\")\n")
+
+    # Golden IR byte-stability gate (host-only, no GPU). Reached via the same
+    # relative prefix as the smoke; imports the co-located rocke package + harness.
+    string(APPEND _ROCKE_INSTALLED_CTEST_ENTRIES
+           "add_test(rocke_golden_static \"${ROCKE_TEST_CTEST_REL}rocke_installed_golden_test.py\")\n")
+    string(APPEND _ROCKE_INSTALLED_CTEST_ENTRIES
+           "set_tests_properties(rocke_golden_static PROPERTIES LABELS \"ckc;python;golden;host;quick\")\n")
   endif()
 
   if(ROCKE_INSTALL_PROVIDER_CTEST_SUBDIR)

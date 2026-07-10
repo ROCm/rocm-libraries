@@ -49,7 +49,7 @@ from pathlib import Path
 
 HERE = Path(__file__).resolve().parent
 ROCKE = HERE.parents[2]  # rocKE root (differential -> instances -> tests -> rocKE)
-PYROOT = ROCKE / "Python"  # holds rocke
+PYROOT = ROCKE / "python"  # holds rocke
 if str(PYROOT) not in sys.path:
     sys.path.insert(0, str(PYROOT))
 
@@ -504,9 +504,9 @@ def main():
     if not cli.exists():
         sys.exit(
             f"ir_lower_cli not found: {cli}\n"
-            "build it: cmake -S <rocKE> -B /tmp/rocke_irart -DCMAKE_BUILD_TYPE="
+            "build it: cmake -S <rocke/platform> -B /tmp/rocke_irart -DCMAKE_BUILD_TYPE="
             "Release && cmake --build /tmp/rocke_irart --target rocke_core -j && "
-            "c++ -std=c++20 -I <rocKE>/Cpp/include <rocKE>/tests/core/"
+            "c++ -std=c++20 -I <rocke/platform>/cpp/include <rocke/platform>/tests/core/"
             "ir_lower_cli.cpp /tmp/rocke_irart/librocke_core.a -lm "
             "-o /tmp/rocke_irart/ir_lower_cli\n"
             "or pass --cli <path>"

@@ -15,7 +15,6 @@ add_kernels_for_embedding(
     ${CMAKE_CURRENT_SOURCE_DIR}/batchnorm/Configuration.hpp
     ${CMAKE_CURRENT_SOURCE_DIR}/batchnorm/ReductionFunctions.hpp
     ${CMAKE_CURRENT_SOURCE_DIR}/batchnorm/StaticUnroll.hpp
-    ${CMAKE_CURRENT_SOURCE_DIR}/rmsnorm/RMSNormCommon.hpp
     ${CMAKE_CURRENT_SOURCE_DIR}/rmsnorm/RMSNormFwd.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/rmsnorm/RMSNormBwd.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/layernorm/LayernormFwd.cpp

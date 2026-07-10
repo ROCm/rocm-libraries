@@ -68,6 +68,7 @@ project_map = {
         "cmake_options": [
             "-DTHEROCK_ENABLE_HIPKERNELPROVIDER=ON",
             "-DHIP_KERNEL_PROVIDER_ENABLE=ON",
+            "-DTHEROCK_FLAG_HIPKERNELPROVIDER_ENABLE_ROCKE=ON",
         ],
         "projects_to_test": ["hipkernelprovider"],
     },

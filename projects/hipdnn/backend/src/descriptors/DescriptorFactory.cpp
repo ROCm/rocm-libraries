@@ -21,6 +21,7 @@
 #include "HipdnnException.hpp"
 #include "KnobDescriptor.hpp"
 #include "KnobSettingDescriptor.hpp"
+#include "LayernormBackwardOperationDescriptor.hpp"
 #include "LayernormOperationDescriptor.hpp"
 #include "MatmulOperationDescriptor.hpp"
 #include "PointwiseOperationDescriptor.hpp"
@@ -116,6 +117,9 @@ void DescriptorFactory::create(hipdnnBackendDescriptorType_t descriptorType,
         break;
     case HIPDNN_BACKEND_OPERATION_LAYERNORM_DESCRIPTOR_EXT:
         privateDesc = std::make_shared<LayernormOperationDescriptor>();
+        break;
+    case HIPDNN_BACKEND_OPERATION_LAYERNORM_BACKWARD_DESCRIPTOR_EXT:
+        privateDesc = std::make_shared<LayernormBackwardOperationDescriptor>();
         break;
     case HIPDNN_BACKEND_OPERATION_BATCHNORM_DESCRIPTOR_EXT:
         privateDesc = std::make_shared<BatchnormOperationDescriptor>();
