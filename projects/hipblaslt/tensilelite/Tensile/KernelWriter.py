@@ -4945,7 +4945,7 @@ class KernelWriter(metaclass=abc.ABCMeta):
     return hex(0x0FFF) if version >= 3 else hex(0x3FFF)
 
   ##############################################################################
-  # StinkyTofu pipeline helpers (classic kernelBody)
+  # StinkyTofu pipeline helpers
   ##############################################################################
   def _buildRocIsaPassOptions(self, kernel):
     ripo = rocIsaPassOption()
@@ -4961,7 +4961,7 @@ class KernelWriter(metaclass=abc.ABCMeta):
     ripo = self._buildRocIsaPassOptions(kernel)
     return rocIsaPass(moduleKernelBody, ripo)
 
-  def _buildStinkyTofuModuleOptions(self, kernel, stinky_opt_level):
+  def _buildStinkyTofuModuleOptions(self, kernel, stinky_opt_level, option_overrides=None):
     options = {"OptLevel": stinky_opt_level,
                "EnableRemarks": bool(globalParameters.get("StinkyTofuEnableRemarks") or False),
                "DebugLevel": int(globalParameters.get("StinkyTofuDebugLevel") or 0),
@@ -4998,9 +4998,11 @@ class KernelWriter(metaclass=abc.ABCMeta):
                                         startLabel="label_LoopBeginL"))
     options["CloneList"] = cloneList
 
+    if option_overrides:
+      options.update(option_overrides)
     return options
 
-  def _runStinkyTofuPipeline(self, kernel, moduleKernelBody, fs, stinky_opt_level):
+  def _runStinkyTofuPipeline(self, kernel, moduleKernelBody, fs, stinky_opt_level, option_overrides=None):
     if stinky_opt_level is None or not rocisa.isSupportedByStinkyTofu(self.states.version):
       return None
 
@@ -5008,7 +5010,7 @@ class KernelWriter(metaclass=abc.ABCMeta):
 
     moduleKernelBody.body.setParent()
 
-    stinky_module_options = self._buildStinkyTofuModuleOptions(kernel, stinky_opt_level)
+    stinky_module_options = self._buildStinkyTofuModuleOptions(kernel, stinky_opt_level, option_overrides)
     print2(f"StinkyTofu module options: {stinky_module_options}")
 
     t0_start = time.perf_counter()
@@ -5375,24 +5377,23 @@ class KernelWriter(metaclass=abc.ABCMeta):
     moduleKernelBody.addBody(module)
     self.checkResources(kernel, moduleKernelBody) # check resource available or not
 
-
-    # TODO: Check what does this do and enable this if needed
-    # Tensile instruction pass, temporarily disable due to build time.
-    # Kernels with epilog especially with activation is too long (50000~ lines).
-    # Need to refactor global write elements.
-    #ripo = rocIsaPassOption()
-    #ripo.removeDupFunc = bool(kernel["ActivationFuncCall"])
-    #ripo.numWaves = kernel["NumThreads"] // kernel["WavefrontSize"]
-    #if kernel["ProblemType"]["ActivationType"] == "all":
-    #  ripo.removeDupAssign = False
-    #if self.states.archCaps["HasSchedMode"]:
-    #  ripo.insertDelayAlu = True
-    #passResult = rocIsaPass(moduleKernelBody, ripo)
-    #kernel["MathClocksUnrolledLoop"] = passResult.cycles
-
-
     error = self.states.overflowedResources
     print2(f"  found error code {error} with overflowed resources set to {self.states.overflowedResources}")
+
+    if kernel.get("_StinkySubtile") and rocisa.isSupportedByStinkyTofu(self.states.version):
+      passResult = self._runRocIsaPassOnKernelBody(kernel, moduleKernelBody)
+      kernel["MathClocksUnrolledLoop"] = passResult.cycles
+      self.updateOccupancyFromMaxVgpr(kernel, moduleKernelBody, passResult.maxVgpr)
+
+      waitcnt_overrides = {
+        "EnableWaitCntInsertion": True,
+        "EnableESM2": False,
+        "ClusterBarrier": False,
+      }
+      st_asm = self._runStinkyTofuPipeline(
+        kernel, moduleKernelBody, fs, 0, option_overrides=waitcnt_overrides)
+      if st_asm is not None:
+        return (error, st_asm)
 
     return (error, str(moduleKernelBody))
 

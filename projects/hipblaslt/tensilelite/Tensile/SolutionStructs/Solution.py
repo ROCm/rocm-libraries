@@ -615,6 +615,15 @@ class Solution(collections.abc.Mapping):
   ########################################
   # assign tile sizes
   @staticmethod
+  def _assignStinkySubtile(state):
+    """Enable Subtile StinkyTofu."""
+    if not state.get("UseSubtileImpl") or tuple(state["ISA"]) != (12, 5, 0):
+      return
+    import rocisa
+    if rocisa.hasStinkyTofuBackend() and rocisa.isSupportedByStinkyTofu(state["ISA"]):
+      state["_StinkySubtile"] = 1
+
+  @staticmethod
   def assignProblemIndependentDerivedParameters(state, printRejectionReason: bool, isaInfoMap: Dict[str, IsaInfo]):
 
     if "AssignedProblemIndependentDerivedParameters" in state:
@@ -643,6 +652,8 @@ class Solution(collections.abc.Mapping):
     else:
       state["_ScheduleIterAlg"] = state["ScheduleIterAlg"]
       state["_StinkyTofuOptLevel"] = 0
+
+    Solution._assignStinkySubtile(state)
 
     if (not state["ProblemType"]["StridedBatched"]) and (not state["ProblemType"]['Batched']):
       reject(state, printRejectionReason, "General Batched GEMM only support Batched Problem")
