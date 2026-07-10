@@ -4922,7 +4922,7 @@ class TestLibDiscoveryOrder(unittest.TestCase):
     """
 
     def test_version_key_orders_rocm_newest_first(self):
-        from rocke.runtime.hip_module import _version_key
+        from rocke.runtime.runtime_coexistence import _version_key
 
         roots = ["/opt/rocm-7.2/lib", "/opt/rocm-7.10/lib", "/opt/rocm-7.9/lib"]
         ordered = sorted(roots, key=_version_key, reverse=True)
@@ -4934,7 +4934,7 @@ class TestLibDiscoveryOrder(unittest.TestCase):
         import os
         from unittest import mock
 
-        from rocke.runtime.hip_module import _candidate_lib_paths
+        from rocke.runtime.runtime_coexistence import _candidate_lib_paths
 
         with mock.patch.dict(os.environ, {"ROCKE_HIP_LIB": "/custom/libamdhip64.so"}):
             paths = _candidate_lib_paths("amdhip64", "ROCKE_HIP_LIB", ["7"])
@@ -4944,7 +4944,7 @@ class TestLibDiscoveryOrder(unittest.TestCase):
         import sys
         from unittest import mock
 
-        from rocke.runtime.hip_module import _torch_bundled_lib
+        from rocke.runtime.runtime_coexistence import _torch_bundled_lib
 
         # With torch absent from sys.modules, the probe must return None
         # and must NOT import torch for the loader side effect.

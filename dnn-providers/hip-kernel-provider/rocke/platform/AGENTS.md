@@ -125,8 +125,8 @@ with neither torch nor a GPU installed.
 ### ROCm library discovery (libamd_comgr / libamdhip64)
 
 The runtime resolves the ROCm shared libs WITHOUT importing torch
-(`runtime/hip_module._candidate_lib_paths` / `_rocm_root_libdirs`), in priority
-order:
+(`runtime/runtime_coexistence._candidate_lib_paths` / `_rocm_root_libdirs`), in
+priority order:
 
 1. explicit full-path override env var (`ROCKE_COMGR_LIB`, `ROCKE_HIP_LIB`);
 2. torch-bundled `<torch>/lib/lib*.so` — opportunistic fast-path **only if torch

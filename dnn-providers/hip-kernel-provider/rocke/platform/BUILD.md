@@ -74,8 +74,8 @@ Optional sanitizer build for diagnostics (not for shipping): `-DROCKE_SANITIZE=O
 
 In-process compile + launch needs the ROCm shared libs at runtime. The Python
 runtime resolves them WITHOUT importing torch
-(`Python/rocke/runtime/hip_module._candidate_lib_paths` / `_rocm_root_libdirs`),
-in priority order:
+(`Python/rocke/runtime/runtime_coexistence._candidate_lib_paths` /
+`_rocm_root_libdirs`), in priority order:
 
 1. explicit full-path override env var: `ROCKE_COMGR_LIB`, `ROCKE_HIP_LIB`;
 2. torch-bundled `<torch>/lib/lib*.so` — only if torch is already imported (the

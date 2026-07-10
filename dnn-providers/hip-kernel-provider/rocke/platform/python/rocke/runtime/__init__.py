@@ -9,6 +9,12 @@ kernel.
 
 Layered modules (bottom-up):
 
+  - ``runtime_coexistence`` : which ROCm runtime we bind to, and whose
+                      (torch-bundled vs a system ROCm install). Shared
+                      library resolution used by both ``comgr`` and
+                      ``hip_module`` (``_ctypes_bind`` holds the lazy
+                      ctypes function binder they share).
+
   - ``comgr``       : ctypes wrapper over `libamd_comgr.so`. Implements
                       `LLVM IR (text) -> BC -> relocatable ELF -> HSA
                       executable`. Provides `build_hsaco_from_llvm_ir`.
