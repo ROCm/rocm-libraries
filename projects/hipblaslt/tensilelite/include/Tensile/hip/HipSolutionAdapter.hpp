@@ -100,6 +100,11 @@ namespace TensileLite
             // any) is left untouched; this function only appends extras.
             hipError_t loadCodeObjectFileExtraCopies(std::string const& path, int extraCopies);
 
+            // Load extra rotation copies of Kernels.so so each rotation slot
+            // mirrors m_modules (main .co + helper bundle). extraCopies==0 uses
+            // the count already established by loadCodeObjectFileExtraCopies.
+            hipError_t loadHelperKernelExtraCopies(int extraCopies = 0);
+
             // Select which rotation copy the next launchKernel uses.
             // idx 0 = original m_modules (default). idx>0 selects the
             // matching slot in m_extraModuleCopies[idx - 1].

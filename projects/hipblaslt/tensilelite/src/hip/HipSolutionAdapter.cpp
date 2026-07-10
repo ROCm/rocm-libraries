@@ -370,6 +370,37 @@ namespace TensileLite
                 }
             }
 
+            // If helper rotation copies were not loaded, fall back to the
+            // original m_modules so multi-kernel launches still resolve.
+            if(copyIdx > 0)
+            {
+                auto origIt = m_kernels.find(name);
+                if(origIt != m_kernels.end())
+                {
+                    rv = origIt->second;
+                    return hipSuccess;
+                }
+
+                for(auto module : m_modules)
+                {
+                    err = hipModuleGetFunction(&rv, module, name.c_str());
+
+                    if(err == hipSuccess)
+                    {
+                        m_kernels[name] = rv;
+                        return err;
+                    }
+                    else if(err != hipErrorNotFound)
+                    {
+                        return err;
+                    }
+                    else
+                    {
+                        (void)hipGetLastError(); // clear hipErrorNotFound
+                    }
+                }
+            }
+
             return err;
         }
 
@@ -419,6 +450,51 @@ namespace TensileLite
                 m_loadedModuleNames.push_back(
                     concatenate("File ", path, " (rotation copy ", i + 1, ")"));
             }
+            return hipSuccess;
+        }
+
+        hipError_t SolutionAdapter::loadHelperKernelExtraCopies(int extraCopies)
+        {
+            std::string codeObjDir;
+            std::string arch;
+            {
+                std::lock_guard<std::mutex> guard(m_access);
+                if(m_lazyLoadArchitecture.empty())
+                    return hipSuccess;
+                arch       = m_lazyLoadArchitecture;
+                codeObjDir = m_codeObjectDirectory;
+                if(extraCopies <= 0)
+                    extraCopies = (int)m_extraModuleCopies.size();
+                if(extraCopies <= 0)
+                    return hipSuccess;
+                // Each rotation slot should mirror every module in m_modules.
+                if(!m_extraModuleCopies.empty()
+                   && m_extraModuleCopies[0].size() >= m_modules.size())
+                    return hipSuccess;
+            }
+
+            std::string helperKernelName = std::string("Kernels.so-000-") + arch;
+
+            for(auto ver : {"", "-xnack-", "-xnack+"})
+            {
+                std::string fileName = helperKernelName + ver + ".hsaco";
+                {
+                    std::lock_guard<std::mutex> guard(m_access);
+                    if(m_loadedCOFiles.find(removeXnack(fileName)) == m_loadedCOFiles.end())
+                        continue;
+                }
+
+                std::string path = codeObjDir + fileName;
+                hipError_t  err  = loadCodeObjectFileExtraCopies(path, extraCopies);
+                if(err != hipSuccess)
+                    return err;
+
+                if(m_debug)
+                    std::cout << "[icache-rotate] loaded " << extraCopies
+                              << " extra rotation copies of helper " << path << std::endl;
+                return hipSuccess;
+            }
+
             return hipSuccess;
         }
 

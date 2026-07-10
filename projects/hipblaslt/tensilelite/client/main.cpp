@@ -1104,6 +1104,17 @@ int main(int argc, const char* argv[])
         }
     }
 
+    // I-cache rotation (explicit --icache-rotate-copies=N): the main --code-object
+    // rotation copies were loaded above (before lazy-load init), but the helper
+    // bundle (Kernels.so) only becomes available in m_modules after
+    // initializeLazyLoading. Mirror it into the rotation slots now so helper
+    // kernels (PostGSU / betaOnly / reduction / conversion) resolve under rotation.
+    {
+        int icacheRotateCopies = args["icache-rotate-copies"].as<int>();
+        if(icacheRotateCopies > 0)
+            HIP_CHECK_EXC(adapter.loadHelperKernelExtraCopies(icacheRotateCopies));
+    }
+
     auto problems        = problemFactory.problems();
     int  firstProblemIdx = args["problem-start-idx"].as<int>();
     int  numProblems     = args["num-problems"].as<int>();
@@ -1325,6 +1336,12 @@ int main(int argc, const char* argv[])
                             for(auto const& filename : filenames)
                                 HIP_CHECK_EXC(adapter.loadCodeObjectFileExtraCopies(
                                     filename, extras));
+                            // Mirror the helper bundle (Kernels.so) into every
+                            // rotation slot so helper kernels (PostGSU / betaOnly /
+                            // reduction / conversion) resolve under rotation instead
+                            // of only from copy 0. The helper is already loaded into
+                            // m_modules by initializeLazyLoading at this point.
+                            HIP_CHECK_EXC(adapter.loadHelperKernelExtraCopies(extras));
                         }
 #if defined(__linux__)
                         std::cout << "[icache-rotate] auto extras = max("
