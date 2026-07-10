@@ -803,9 +803,27 @@ def main():
                 )
                 (out_dir / f"model_{target}.c").write_text(c_src)
                 (out_dir / f"model_{target}.h").write_text(h_src)
-                print(f"  Emitted C predictor: model_{target}.c / .h ({func})")
+                print(f"  Emitted C predictor (Route A): model_{target}.c / .h ({func})")
             except Exception as exc:  # noqa: BLE001 - codegen is best-effort
-                print(f"  WARNING: C predictor emit failed ({exc}); .lgbm still saved")
+                print(f"  WARNING: Route-A C emit failed ({exc}); .lgbm still saved")
+
+            # Route C: treelite -> tl2cgen generated C (the committed solution).
+            # Emitted alongside Route A as a second, independent lowering; the two
+            # agreeing with the booster is a strong correctness cross-check.
+            # tl2cgen emits a *directory* of C sources, so it goes in a subdir.
+            try:
+                import treelite
+                import tl2cgen
+
+                tl_dir = out_dir / f"model_{target}_treelite"
+                tl_model = treelite.frontend.from_lightgbm(model.booster_)
+                tl2cgen.generate_c_code(
+                    tl_model, str(tl_dir),
+                    params={"parallel_comp": 0},  # single-file; deterministic layout
+                )
+                print(f"  Emitted C predictor (Route C, treelite): {tl_dir.name}/")
+            except Exception as exc:  # noqa: BLE001 - codegen is best-effort
+                print(f"  WARNING: Route-C (treelite) emit failed ({exc}); Route A/.lgbm still saved")
 
         importances = dict(
             zip(

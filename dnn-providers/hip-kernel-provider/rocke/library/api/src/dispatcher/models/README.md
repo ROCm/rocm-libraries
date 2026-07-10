@@ -3,17 +3,27 @@
 Standalone C predictors for the FMHA tie-break, generated from the rocKE
 heuristics pipeline. They let the dispatcher score AOT kernel candidates
 **without linking `liblightgbm.so` / `libgomp`** — the LightGBM booster is
-lowered to nested `if/else` trees (see
-`platform/python/rocke/heuristics/lgbm_to_c.py`).
+lowered to plain C.
+
+The pipeline emits the tflops head **two ways** into every model dir, and both
+are validated to match the booster exactly (0.00e+00) on every train run:
+
+- **Route C — treelite/tl2cgen (the committed solution).** `model_tflops_treelite/`
+  = `header.h` + `main.c`, entry `void predict(union Entry* data, int pred_margin,
+  double* result)`. This is what gets promoted here.
+- **Route A — `lgbm_to_c.py` (dependency-free cross-check).** `model_tflops.c/.h`,
+  entry `double rocke_fmha_score_<dtype>_<arch>_tflops(const double* f)`, nested
+  if/else. Not committed here; kept in the model dir as an independent second
+  lowering — the two agreeing is the correctness signal.
 
 ## Contents
 
 One predictor per `(op, dtype, arch)`, tflops head only (the target the
-dispatcher ranks on):
+dispatcher ranks on). Promoted from the model dir's Route-C output:
 
 ```
-fmha_<dtype>_<arch>_tflops.c   // double rocke_fmha_score_<dtype>_<arch>_tflops(const double* f)
-fmha_<dtype>_<arch>_tflops.h   // extern decl + *_NUM_FEATURES
+fmha_<dtype>_<arch>/header.h   // treelite entry: predict(union Entry*, int, double*)
+fmha_<dtype>_<arch>/main.c
 ```
 
 ## Contract
