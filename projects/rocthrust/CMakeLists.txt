@@ -237,6 +237,10 @@ if(BUILD_TEST OR BUILD_BENCHMARK OR BUILD_HIPSTDPAR_TEST)
   rocm_package_setup_component(clients)
 endif()
 
+if(CODE_COVERAGE)
+  set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -O0 -fprofile-instr-generate -fcoverage-mapping")
+endif()
+
 # Tests
 if(BUILD_TEST AND USE_SYSTEM_LIB)
   find_package(rocprim REQUIRED CONFIG PATHS "/opt/rocm/rocprim")

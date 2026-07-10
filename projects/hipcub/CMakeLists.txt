@@ -202,6 +202,11 @@ endif()
 # hipCUB library
 add_subdirectory(hipcub)
 
+if(BUILD_CODE_COVERAGE)
+  set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -g -O0 -fprofile-instr-generate -fcoverage-mapping" )
+  set(CMAKE_EXE_LINKER_FLAGS "${CMAKE_EXE_LINKER_FLAGS} -fprofile-instr-generate")
+endif()
+
 if(BUILD_TEST OR (BUILD_BENCHMARK AND NOT ONLY_INSTALL))
   rocm_package_setup_component(clients)
 endif()
