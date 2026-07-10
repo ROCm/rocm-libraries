@@ -100,6 +100,82 @@ class SdpaGraphShape:
         )
 
 
+class ShapeUnbuildable(ValueError):
+    """A reduced shape record the current tiled sweep cannot build (carries why),
+    so ingest can skip it with a counted reason rather than crash the sweep."""
+
+
+def shape_from_record(rec: dict) -> "SdpaGraphShape":
+    """Build an SdpaGraphShape from a compact SdpaProblem record (the JSONL rows
+    emitted by the pipeline's graph reducer, core/graph_reduce.py).
+
+    The record carries hipDNN's full field set; the tiled sweep can only build a
+    subset today, so this raises ShapeUnbuildable (with a reason) for records the
+    sweep can't yet handle -- the caller counts and skips them. Mapping:
+      head_size            -> head_size_qk == head_size_v (kernel single head dim)
+      mask_mode "none"     -> sliding_window 0
+      mask_mode "sliding_window" -> UNBUILDABLE: the reducer does not capture the
+                              window magnitude (SdpaGraphAdapter drops bound
+                              values), so we can't reconstruct the launch param.
+      mask_mode "causal*"  -> UNBUILDABLE: the tiled sweep hardcodes mask=0 today.
+    """
+    dtype = str(rec["dtype"])
+    if dtype not in ("fp16", "bf16"):
+        raise ShapeUnbuildable(f"dtype {dtype!r} not built by the tiled sweep")
+    layout = str(rec.get("layout", "BSHD"))
+    if layout != "BSHD":
+        raise ShapeUnbuildable(f"layout {layout!r} not built (BSHD only)")
+    mask = str(rec.get("mask_mode", "none"))
+    if mask == "none":
+        sliding_window = 0
+    elif mask == "sliding_window":
+        raise ShapeUnbuildable("sliding_window magnitude not captured in the record")
+    else:  # causal_top_left / causal_bottom_right
+        raise ShapeUnbuildable(f"mask_mode {mask!r} not built by the tiled sweep")
+    hd = int(rec["head_size"])
+    return SdpaGraphShape(
+        batch=int(rec["batch"]),
+        seqlen_q=int(rec["seqlen_q"]),
+        seqlen_k=int(rec["seqlen_k"]),
+        num_query_heads=int(rec["num_query_heads"]),
+        num_kv_heads=int(rec["num_kv_heads"]),
+        head_size_qk=hd,
+        head_size_v=hd,
+        dtype=dtype,
+        sliding_window=sliding_window,
+        layout=layout,
+    )
+
+
+def load_shapes_file(path) -> List["SdpaGraphShape"]:
+    """Load a JSONL shape corpus (one SdpaProblem record per line) into
+    SdpaGraphShape list. Records the sweep can't build are skipped and reported
+    (count by reason) to stderr; a valid line is never silently dropped."""
+    import json
+    from collections import Counter
+
+    shapes: List[SdpaGraphShape] = []
+    skipped: Counter = Counter()
+    with open(path) as f:
+        for line in f:
+            line = line.strip()
+            if not line:
+                continue
+            rec = json.loads(line)
+            try:
+                shapes.append(shape_from_record(rec))
+            except ShapeUnbuildable as e:
+                skipped[str(e)] += 1
+    if skipped:
+        print(f"[sdpa] shapes-file: loaded {len(shapes)}, skipped "
+              f"{sum(skipped.values())} unbuildable:", file=sys.stderr)
+        for reason, n in skipped.most_common():
+            print(f"[sdpa]     {n:>6}  {reason}", file=sys.stderr)
+    else:
+        print(f"[sdpa] shapes-file: loaded {len(shapes)} shapes", file=sys.stderr)
+    return shapes
+
+
 def _S(batch, seqlen_q, seqlen_k, num_query_heads, num_kv_heads, head_size,
        dtype, sliding_window=0):
     """Terse builder for the common case (head_size_qk == head_size_v, BSHD,
@@ -219,7 +295,13 @@ def _grid_tiled_specs(prob: object, arch: str) -> List[object]:
 def _sdpa_enumerate(arch: str, max_shapes: Optional[int]) -> List[object]:
     from kernels.common.attention_unified import UnifiedAttentionProblem
 
-    problems = _SDPA_PROBLEMS
+    return _enumerate_from(_SDPA_PROBLEMS, arch, max_shapes)
+
+
+def _enumerate_from(problems: Sequence["SdpaGraphShape"], arch: str,
+                    max_shapes: Optional[int]) -> List[object]:
+    from kernels.common.attention_unified import UnifiedAttentionProblem
+
     if max_shapes is not None and max_shapes > 0:
         problems = problems[:max_shapes]
 
@@ -435,11 +517,24 @@ def _sdpa_benchmark(cand: object) -> Dict[str, object]:
 # =====================================================================
 
 
-def build_sdpa_adapter() -> OpAdapter:
-    """Construct the SDPA OpAdapter for use with ``generate()``."""
+def build_sdpa_adapter(shapes: Optional[Sequence["SdpaGraphShape"]] = None) -> OpAdapter:
+    """Construct the SDPA OpAdapter for use with ``generate()``.
+
+    ``shapes`` overrides the built-in ``_SDPA_PROBLEMS`` corpus (e.g. the
+    hipDNN-derived shapes from a --shapes-file). It is closed over so the
+    generic ``enumerate_specs(arch, max_shapes)`` contract is preserved.
+    """
+    if shapes is None:
+        enumerate_specs = _sdpa_enumerate
+    else:
+        shapes = list(shapes)
+
+        def enumerate_specs(arch: str, max_shapes: Optional[int]) -> List[object]:
+            return _enumerate_from(shapes, arch, max_shapes)
+
     return OpAdapter(
         op_type="fmha",
-        enumerate_specs=_sdpa_enumerate,
+        enumerate_specs=enumerate_specs,
         build_kernel=_sdpa_build,
         spec_name=_sdpa_spec_name,
         config_columns=_sdpa_config_columns,
@@ -480,7 +575,23 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
         default=None,
         help="Limit number of SDPA problems (smoke tests).",
     )
+    parser.add_argument(
+        "--shapes-file",
+        type=Path,
+        default=None,
+        help=(
+            "JSONL of compact SdpaProblem records (one per line, from the "
+            "pipeline graph reducer) to sweep INSTEAD of the built-in corpus. "
+            "Records the tiled sweep can't build are skipped + reported."
+        ),
+    )
     args = parser.parse_args(argv)
+
+    shapes = load_shapes_file(args.shapes_file) if args.shapes_file else None
+    if args.shapes_file is not None and not shapes:
+        print("[sdpa] shapes-file yielded 0 buildable shapes; nothing to sweep",
+              file=sys.stderr)
+        return 2
 
     generate(
         op="sdpa",
@@ -488,7 +599,7 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
         cache_dir=args.cache_dir,
         arch=args.arch,
         max_shapes=args.max_shapes,
-        adapter=build_sdpa_adapter(),
+        adapter=build_sdpa_adapter(shapes=shapes),
     )
     return 0
 
