@@ -30,12 +30,15 @@
 # Build output goes to /tmp (repo tree is slow NFS). No git operations.
 
 import argparse
+import concurrent.futures
+import contextlib
 import hashlib
 import json
 import os
 import subprocess
 import sys
 import tempfile
+import threading
 from pathlib import Path
 
 HERE = Path(__file__).resolve().parent
@@ -78,8 +81,12 @@ def collect_ref_shas(results):
 
 MAX_CFG = 128  # hard cap on config enumeration per family
 TIMEOUT = 120  # seconds per emitter invocation
+# One batch process emits every config of a family, so it needs more headroom
+# than a single per-config invocation. A timeout falls back to per-config.
+BATCH_TIMEOUT = 600
 
 _CANON = None
+_CANON_LOCK = threading.Lock()
 
 
 def _canon(text):
@@ -90,11 +97,15 @@ def _canon(text):
     (differing attrs / op order) shows up as STRUCT_DRIFT."""
     global _CANON
     if _CANON is None:
-        if str(PYROOT) not in sys.path:
-            sys.path.insert(0, str(PYROOT))
-        from rocke.core.ir_serialize import canonicalize, parse
+        # Double-checked lock: families canonicalize concurrently, and the import
+        # both mutates sys.path and populates _CANON -- do it exactly once.
+        with _CANON_LOCK:
+            if _CANON is None:
+                if str(PYROOT) not in sys.path:
+                    sys.path.insert(0, str(PYROOT))
+                from rocke.core.ir_serialize import canonicalize, parse
 
-        _CANON = (canonicalize, parse)
+                _CANON = (canonicalize, parse)
     canonicalize, parse = _CANON
     # canonicalize takes a KernelDef -> parse the emitted text first. A parse
     # failure here means the text is not valid/round-trippable ck.dsl.ir/v1.
@@ -156,11 +167,21 @@ def find_families():
     return fams
 
 
+# Bounds concurrent compiles: each link pulls in the whole engine archive, so
+# fan-out is limited by memory, not cores. Set in main(); a no-op by default so
+# the module stays usable serially / when imported.
+_COMPILE_SEM = None
+
+
 def compile_c(name, archive, src_dir=None):
     if src_dir is None:
         src_dir = PARITY
     src = src_dir / f"{name}_emit.c"
-    out = TMP / f"{name}_emit_c"
+    # Disambiguate by source dir: PARITY and LIB_PARITY can hold same-named
+    # families, which would collide on one output path once families compile
+    # concurrently.
+    disc = hashlib.sha1(str(src_dir).encode()).hexdigest()[:8]
+    out = TMP / f"{name}_{disc}_emit_c"
     # The engine archive is C++20; emitters are compiled as C++20 against it.
     cmd = [
         "c++",
@@ -173,7 +194,11 @@ def compile_c(name, archive, src_dir=None):
         "-o",
         str(out),
     ]
-    p = subprocess.run(cmd, capture_output=True, text=True, timeout=TIMEOUT)
+    try:
+        with (_COMPILE_SEM or contextlib.nullcontext()):
+            p = subprocess.run(cmd, capture_output=True, text=True, timeout=TIMEOUT)
+    except subprocess.TimeoutExpired:
+        return None, f"compile timeout after {TIMEOUT}s"
     if p.returncode != 0:
         return None, p.stderr
     return out, ""
@@ -201,13 +226,7 @@ SHIM_DIR = None
 def run_py(name, idx, mode, src_dir=None):
     if src_dir is None:
         src_dir = PARITY
-    env = dict(os.environ)
-    roots = [str(PY_REF_ROOT), str(LIB_ROOT), str(PARITY)]
-    if SHIM_DIR:
-        roots.insert(0, str(SHIM_DIR))
-    env["PYTHONPATH"] = os.pathsep.join(roots) + (
-        os.pathsep + env["PYTHONPATH"] if env.get("PYTHONPATH") else ""
-    )
+    env = _py_env(src_dir)
     args = [sys.executable, str(src_dir / f"{name}_emit.py"), str(idx)]
     if mode != "ll":
         args.append(mode)
@@ -216,6 +235,76 @@ def run_py(name, idx, mode, src_dir=None):
         return p.returncode, p.stdout, p.stderr.decode("utf-8", "replace")
     except subprocess.TimeoutExpired:
         return 124, b"", "TIMEOUT"
+
+
+def _py_env(src_dir):
+    env = dict(os.environ)
+    roots = [str(PY_REF_ROOT), str(LIB_ROOT), str(PARITY)]
+    if SHIM_DIR:
+        roots.insert(0, str(SHIM_DIR))
+    env["PYTHONPATH"] = os.pathsep.join(roots) + (
+        os.pathsep + env["PYTHONPATH"] if env.get("PYTHONPATH") else ""
+    )
+    return env
+
+
+def run_py_batch(name, mode, src_dir=None):
+    """Run the family's Python reference emitter ONCE in batch mode and parse its
+    framed manifest into {idx: (returncode, stdout_bytes)} for every produced
+    config. This replaces one fresh-interpreter spawn per config (each paying the
+    ~90 ms rocke.core import) with a single spawn per family.
+
+    Absence of an idx in the returned dict means end-of-range at that idx (the
+    caller synthesizes the unknown-config sentinel), mirroring the per-config
+    path exactly. Returns None if the manifest is not clean (truncated, bad
+    frame, nonzero rc without a full run, or timeout) so the caller can fall back
+    to the per-config path and stay faithful for pathological emitters.
+    """
+    if src_dir is None:
+        src_dir = PARITY
+    args = [
+        sys.executable,
+        str(src_dir / f"{name}_emit.py"),
+        "--batch",
+        mode,
+        str(MAX_CFG),
+    ]
+    try:
+        p = subprocess.run(
+            args, capture_output=True, timeout=BATCH_TIMEOUT, env=_py_env(src_dir)
+        )
+    except subprocess.TimeoutExpired:
+        return None
+
+    data = p.stdout
+    results = {}
+    saw_end = False
+    i = 0
+    while i < len(data):
+        nl = data.find(b"\n", i)
+        if nl < 0:
+            return None  # truncated header
+        line = data[i:nl]
+        i = nl + 1
+        if line.startswith(b"END "):
+            saw_end = True
+            break
+        parts = line.split()
+        if len(parts) != 4 or parts[0] != b"IDX":
+            return None  # unparseable frame
+        idx, rc, length = int(parts[1]), int(parts[2]), int(parts[3])
+        payload = data[i : i + length]
+        if len(payload) != length:
+            return None  # truncated payload
+        i += length
+        if data[i : i + 1] == b"\n":  # frame separator
+            i += 1
+        results[idx] = (rc, payload)
+    # A clean run terminates in END, or fills the cap. Anything else with a
+    # nonzero exit is a broken batch -> let the caller fall back.
+    if not saw_end and len(results) < MAX_CFG and p.returncode != 0:
+        return None
+    return results
 
 
 def is_end(rc, out, err):
@@ -252,7 +341,7 @@ def classify(cr, co, ce, pr, po, pe):
     return "ASYMMETRIC", (sh(co) if co else None, sh(po) if po else None)
 
 
-def run_family(name, archive, mode, canonical=False, src_dir=None):
+def run_family(name, archive, mode, canonical=False, src_dir=None, isolated=False):
     if src_dir is None:
         src_dir = PARITY
     binpath, cerr = compile_c(name, archive, src_dir=src_dir)
@@ -263,11 +352,23 @@ def run_family(name, archive, mode, canonical=False, src_dir=None):
             "error": cerr.strip().splitlines()[-3:],
             "configs": [],
         }
+    # Fast path: emit the whole Python reference once. `None` (batch disabled or a
+    # broken manifest) falls back to a fresh interpreter per config, byte-for-byte
+    # the original path -- so `--isolated` is also the guard-test reference.
+    py_batch = None if isolated else run_py_batch(name, mode, src_dir=src_dir)
     configs = []
     range_drift = None
     for idx in range(MAX_CFG):
         cr, co, ce = run_c(binpath, idx, mode)
-        pr, po, pe = run_py(name, idx, mode, src_dir=src_dir)
+        if py_batch is not None:
+            if idx in py_batch:
+                pr, po, pe = py_batch[idx][0], py_batch[idx][1], ""
+            else:
+                # Not in the manifest == end-of-range at this idx: synthesize the
+                # unknown-config sentinel the per-config path would have produced.
+                pr, po, pe = 1, b"", "unknown config"
+        else:
+            pr, po, pe = run_py(name, idx, mode, src_dir=src_dir)
         # mode not supported by this emitter -> stop trying this mode
         if mode != "ll" and (mode_unsupported(ce) or mode_unsupported(pe)):
             return {
@@ -369,6 +470,13 @@ def main():
         help="dir prepended to PYTHONPATH for the reference side (stub modules "
         "the target tree lacks, e.g. ir_serialize/verify); ll-mode only",
     )
+    ap.add_argument(
+        "--isolated",
+        action="store_true",
+        help="disable batch mode: spawn a fresh Python interpreter per config "
+        "(the original, slower path; use for from-scratch audits and as the "
+        "byte-identity reference the fast path is checked against)",
+    )
     ap.add_argument("--json", default=str(TMP / "dashboard.json"))
     ap.add_argument(
         "--record-golden",
@@ -404,19 +512,52 @@ def main():
         subs = [s for s in args.only.split(",") if s]
         fams = [(n, d) for n, d in fams if any(s in n for s in subs)]
 
+    # Families are independent, and the heavy work is subprocess/exec (compile,
+    # per-config C runs, one batch reference run) which releases the GIL -- so a
+    # thread pool gives real wall-clock parallelism plus a shared results list
+    # with no IPC. Compiles are separately capped (memory) via _COMPILE_SEM.
+    global _COMPILE_SEM
+    ncores = os.cpu_count() or 1
+    workers = max(1, ncores)
+    _COMPILE_SEM = threading.Semaphore(max(1, min(ncores, 16)))
+
     print(f"mode={args.mode}  families={len(fams)}  archive={archive}")
     print(f"engine build-id: {archive_build_id(archive)}")
-    results = []
-    for name, src_dir in fams:
-        r = run_family(
-            name, archive, args.mode, canonical=args.canonical, src_dir=src_dir
-        )
-        results.append(r)
+    print(f"[diff] running {len(fams)} families across {workers} workers")
+
+    def _work(name, src_dir):
+        try:
+            return run_family(
+                name,
+                archive,
+                args.mode,
+                canonical=args.canonical,
+                src_dir=src_dir,
+                isolated=args.isolated,
+            )
+        except Exception as e:  # noqa: BLE001 - isolate one family from the pool
+            return {
+                "family": name,
+                "status": "FAMILY_ERROR",
+                "error": [repr(e)],
+                "configs": [],
+            }
+
+    # Index-keyed so results stay in find_families() order (deterministic output
+    # and golden collection) regardless of completion order, and duplicate family
+    # names across PARITY/LIB_PARITY don't clobber each other.
+    results = [None] * len(fams)
+    with concurrent.futures.ThreadPoolExecutor(max_workers=workers) as ex:
+        futs = {ex.submit(_work, n, d): i for i, (n, d) in enumerate(fams)}
+        for fut in concurrent.futures.as_completed(futs):
+            results[futs[fut]] = fut.result()
+
+    for r in results:
         tag = r["status"]
         extra = ""
         if tag in ("GREEN", "DRIFT", "CANON_ONLY"):
             extra = f"  configs={r['n']} bad={r['bad']} canon={r.get('canon', 0)}"
-        print(f"  {tag:16s} {name}{extra}")
+        print(f"  {tag:16s} {r['family']}{extra}")
         if tag == "DRIFT":
             for c in r["configs"]:
                 if c["verdict"] in (
@@ -440,10 +581,16 @@ def main():
         print(f"  {k:16s} {by[k]}")
     drift = [r["family"] for r in results if r["status"] == "DRIFT"]
     cfail = [r["family"] for r in results if r["status"] == "COMPILE_FAIL"]
+    ferr = [r["family"] for r in results if r["status"] == "FAMILY_ERROR"]
     if drift:
         print("  DRIFT families:", ", ".join(drift))
     if cfail:
         print("  COMPILE_FAIL families:", ", ".join(cfail))
+    if ferr:
+        print("  FAMILY_ERROR families:", ", ".join(ferr))
+        for r in results:
+            if r["status"] == "FAMILY_ERROR":
+                print(f"    {r['family']}: {r.get('error')}")
     print(f"\ndashboard: {args.json}")
 
     # ---- L5 golden anchor -------------------------------------------------
@@ -518,8 +665,9 @@ def main():
         print("GOLDEN OK")
         return 0
 
-    # exit nonzero if any drift (compile-fail tracked separately, not a parity fail)
-    return 1 if drift else 0
+    # exit nonzero on drift or an infrastructure failure (a family that threw);
+    # compile-fail is surfaced separately by check_byte_identity's stdout grep.
+    return 1 if (drift or ferr) else 0
 
 
 if __name__ == "__main__":
