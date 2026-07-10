@@ -55,6 +55,25 @@ bool host_side_fill_kernel()
     return host_side_fill_kernel_state();
 }
 
+namespace
+{
+    bool& ulp_positive_init_state()
+    {
+        static bool enable = false;
+        return enable;
+    }
+}
+
+void set_ulp_positive_init_state(bool enable)
+{
+    ulp_positive_init_state() = enable;
+}
+
+bool ulp_positive_init()
+{
+    return ulp_positive_init_state();
+}
+
 template <typename T, typename F>
 __global__ void fill_kernel(T* A, size_t size, size_t offset, F f)
 {
@@ -619,6 +638,30 @@ __host__ __device__ hipblaslt_bf6x16 norm_dist(uint32_t base_seed, size_t idx)
 }
 #endif
 
+/*! \brief Return |v| for ULP positive-only init. Packed fp4/fp6 and scale
+ *  (e8/e5m3) types are left unchanged; every other scalar keeps its exact
+ *  value (only the sign bit is flipped via negate when negative). */
+template <typename T>
+__host__ __device__ inline T force_positive_scalar(T v)
+{
+    if constexpr(
+        false
+#if defined(HIPBLASLT_USE_FP4)
+        || std::is_same_v<T, hipblaslt_f4x2>
+#endif
+#if defined(HIPBLASLT_USE_FP6) && defined(HIPBLASLT_USE_BF6)
+        || std::is_same_v<T, hipblaslt_f6x16> || std::is_same_v<T, hipblaslt_bf6x16>
+#endif
+        || std::is_same_v<T, hipblaslt_e8> || std::is_same_v<T, hipblaslt_e5m3>)
+    {
+        return v;
+    }
+    else
+    {
+        return (static_cast<float>(v) < 0.f) ? negate(v) : v;
+    }
+}
+
 template <typename T>
 void hipblaslt_init_device(ABC_dims                 abc,
                            hipblaslt_initialization init,
@@ -632,6 +675,12 @@ void hipblaslt_init_device(ABC_dims                 abc,
                            int                      norm_dist_one_special_type = -1)
 {
     using T_real = get_real_type_t<T>;
+
+    // ULP validation: force hpl / trig_float inputs positive so the reference
+    // dot products do not cancel toward zero (see set_ulp_positive_init_state).
+    const bool positive_only = ulp_positive_init()
+                               && (init == hipblaslt_initialization::hpl
+                                   || init == hipblaslt_initialization::trig_float);
 
     // Helper to construct std::complex types from two real components
     auto make_std_complex = [] __device__ __host__ (T_real r, T_real i) -> T {
@@ -755,13 +804,18 @@ void hipblaslt_init_device(ABC_dims                 abc,
             {
                 stride = std::max(lda * N, stride);
                     fill_batch(
-                        A, M, N, lda, stride, batch_count, [M, N, stride, lda, make_std_complex] __host__ __device__ (size_t idx) -> T {
+                        A, M, N, lda, stride, batch_count, [M, N, stride, lda, make_std_complex, positive_only] __host__ __device__ (size_t idx) -> T {
                             auto b = idx / stride;
                             auto j = (idx - b * stride) / lda;
                             auto i = (idx - b * stride) - j * lda;
                             auto arg = double(i + j * M + b * M * N);
                             auto real_val = sin(random_int<T_real>(arg));
                             auto imag_val = cos(random_int<T_real>(arg + 1000000));
+                            if(positive_only)
+                            {
+                                real_val = fabs(real_val);
+                                imag_val = fabs(imag_val);
+                            }
                             auto complex_val = make_std_complex(real_val, imag_val);
                             return complex_val;
                         });
@@ -769,13 +823,18 @@ void hipblaslt_init_device(ABC_dims                 abc,
             else
             {
                     fill_batch(
-                        A, M, N, lda, stride, batch_count, [M, N, stride, lda, make_std_complex] __host__ __device__ (size_t idx) -> T {
+                        A, M, N, lda, stride, batch_count, [M, N, stride, lda, make_std_complex, positive_only] __host__ __device__ (size_t idx) -> T {
                             auto j = idx / lda;
                             auto b = (idx - j * lda) / stride;
                             auto i = (idx - j * lda) - b * stride;
                             auto arg = double(i + j * M + b * M * N);
                             auto real_val = sin(random_int<T_real>(arg));
                             auto imag_val = cos(random_int<T_real>(arg + 1000000));
+                            if(positive_only)
+                            {
+                                real_val = fabs(real_val);
+                                imag_val = fabs(imag_val);
+                            }
                             auto complex_val = make_std_complex(real_val, imag_val);
                             return complex_val;
                         });
@@ -787,35 +846,45 @@ void hipblaslt_init_device(ABC_dims                 abc,
             {
                 stride = std::max(lda * N, stride);
                     fill_batch(
-                        A, M, N, lda, stride, batch_count, [M, N, stride, abc, lda] __host__ __device__ (size_t idx) -> T {
+                        A, M, N, lda, stride, batch_count, [M, N, stride, abc, lda, positive_only] __host__ __device__ (size_t idx) -> T {
                             auto b = idx / stride;
                             auto j = (idx - b * stride) / lda;
                             auto i = (idx - b * stride) - j * lda;
                             auto arg = double(i + j * M + b * M * N);
-                            return T((abc == ABC_dims::B) ? cos(arg) : sin(arg));
+                            auto val = (abc == ABC_dims::B) ? cos(arg) : sin(arg);
+                            return T(positive_only ? fabs(val) : val);
                         });
             }
             else
             {
                     fill_batch(
-                        A, M, N, lda, stride, batch_count, [M, N, stride, abc, lda] __host__ __device__ (size_t idx) -> T {
+                        A, M, N, lda, stride, batch_count, [M, N, stride, abc, lda, positive_only] __host__ __device__ (size_t idx) -> T {
                             auto j = idx / lda;
                             auto b = (idx - j * lda) / stride;
                             auto i = (idx - j * lda) - b * stride;
                             auto arg = double(i + j * M + b * M * N);
-                            return T((abc == ABC_dims::B) ? cos(arg) : sin(arg));
+                            auto val = (abc == ABC_dims::B) ? cos(arg) : sin(arg);
+                            return T(positive_only ? fabs(val) : val);
                         });
             }
             }
             break;
         case hipblaslt_initialization::hpl:
             if constexpr(is_std_complex<T>::value)
-                fill_batch(A, M, N, lda, stride, batch_count, [make_std_complex] __host__ __device__ (size_t idx) -> T {
-                    return make_std_complex(random_hpl<T_real>(idx), random_hpl<T_real>(idx + 1000000));
+                fill_batch(A, M, N, lda, stride, batch_count, [make_std_complex, positive_only] __host__ __device__ (size_t idx) -> T {
+                    auto real_val = random_hpl<T_real>(idx);
+                    auto imag_val = random_hpl<T_real>(idx + 1000000);
+                    if(positive_only)
+                    {
+                        real_val = fabs(real_val);
+                        imag_val = fabs(imag_val);
+                    }
+                    return make_std_complex(real_val, imag_val);
                 });
             else
-            fill_batch(A, M, N, lda, stride, batch_count, [] __host__ __device__ (size_t idx) -> T {
-                return random_hpl<T>(idx);
+            fill_batch(A, M, N, lda, stride, batch_count, [positive_only] __host__ __device__ (size_t idx) -> T {
+                auto value = random_hpl<T>(idx);
+                return positive_only ? force_positive_scalar<T>(value) : value;
             });
             break;
         case hipblaslt_initialization::uniform_low_precision:

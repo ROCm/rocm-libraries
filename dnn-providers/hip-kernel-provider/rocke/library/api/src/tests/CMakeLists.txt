@@ -19,6 +19,10 @@ add_executable(
     TestRockeClientContext.cpp
     TestRockeClientEngine.cpp
     TestPluginPublic.cpp
+    dispatcher/TestAotCatalog.cpp
+    dispatcher/TestRockeClientDispatcher.cpp
+    dispatcher/TestSdpaGraphAdapter.cpp
+    dispatcher/TestSelectionConstraints.cpp
 )
 
 target_compile_options(rocke_client_tests PRIVATE ${HIPDNN_WARNING_COMPILE_OPTIONS})

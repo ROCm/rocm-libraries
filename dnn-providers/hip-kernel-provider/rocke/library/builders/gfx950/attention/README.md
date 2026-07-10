@@ -51,8 +51,8 @@ CK-3D, which is **not** apples-to-apples. The three tables resolve that:
 ```bash
 cd <composablekernel-checkout>
 export AITER_PATH=<aiter-checkout>
-PYTHONPATH="Python:${AITER_PATH}" python \
-  Python/rocke/examples/gfx950/attention/parity_unified_attention.py \
+PYTHONPATH="python:${AITER_PATH}" python \
+  python/rocke/examples/gfx950/attention/parity_unified_attention.py \
   --attempts 30 --warmup 10 \
   --report /tmp/unified_attention_parity.json
 ```
@@ -765,8 +765,8 @@ variant per shape + bucket; writes a JSON to `--output-json`, default
 
 ```bash
 export AITER_PATH=<path/to/aiter>
-PYTHONPATH="Python:${AITER_PATH}" python \
-  Python/rocke/examples/gfx950/attention/benchmark_prefill2d_live.py \
+PYTHONPATH="python:${AITER_PATH}" python \
+  python/rocke/examples/gfx950/attention/benchmark_prefill2d_live.py \
   --shapes <path/to/unified_attention_shapes.jsonl> --variants prod combo fallback
 ```
 
@@ -777,8 +777,8 @@ CSV; the joined file is emitted to the path given by `--combined-csv`:
 
 ```bash
 export AITER_PATH=<path/to/aiter>
-PYTHONPATH="Python:${AITER_PATH}" python \
-  Python/rocke/examples/gfx950/attention/benchmark_prefill2d_traces.py \
+PYTHONPATH="python:${AITER_PATH}" python \
+  python/rocke/examples/gfx950/attention/benchmark_prefill2d_traces.py \
   --shapes <path/to/unified_attention_shapes.jsonl> \
   --combined-csv prefill2d_bf16_triton_ckdsl_perf.csv
 ```
@@ -788,13 +788,16 @@ PYTHONPATH="Python:${AITER_PATH}" python \
 The CK DSL `unified_attention` kernels themselves live in `rocke.instances`
 (`gfx950/attention_tiled_2d.py`, `gfx950/attention_tiled_3d.py`,
 `gfx950/attention_tiled_2d_fastkv_regp.py`, and the dispatcher
-`common/attention_unified.py`). This folder holds the parity + benchmark
-harnesses and their captured data.
+`common/attention_unified.py`). The spec-builder
+(`builders/common/attention_spec_builder.py`) and its knob reference live in
+[`builders/common/README.md`](../../common/README.md). This folder holds the
+parity + benchmark harnesses and their captured data.
 
 | path | purpose |
 |---|---|
-| `README.md` | this document — parity methodology + prefill-2D optimization history + results |
+| `README.md` | this document — parity methodology + prefill-2D optimization history + results + spec-knob reference |
 | `ALGORITHM.md` | the math + kernel strategy (2D vs 3D split-KV, online softmax, bias/mask order, CDNA mapping) |
+| [`../common/README.md`](../../common/README.md) | spec-builder knob reference — dispatch branches, per-knob documentation for `use_fast_paged_kv_desc`, `use_transposed_half_local_pv`, `use_mfma32_skip_legacy_qreg`, `use_register_pv`, `use_agpr_alloc_zero`, etc. |
 | `parity_unified_attention.py` | the canonical parity + benchmark harness: builds AITER paged-KV inputs, runs Triton and CK DSL in `auto`/`2d`/`3d` lanes on one shared HIP-event timer/stream, compares both to `ref_paged_attn`, emits the three apples-to-apples tables. Scenario sets: `default` (13 = 11 d128/d256 reference + 2 bf16 d64/b32 combo), `creative` (21, exploratory sweep), `fmha` (26, CK Tile testing-matrix subset), `all` (default + creative) |
 | `benchmark_prefill2d_live.py` | the authoritative prefill-2D workbench: runs **live** Triton (forced 2D) vs a sweep of CK DSL 2D kernel variants (`prod`/`combo`/`fallback`/…) on the same stream, checks every variant against the Triton output, reports the best correct variant per shape and per bucket (sw/no-sw, bf16/fp8). Default `--cap-blocks 65536` (production-representative HBM-bound regime) |
 | `benchmark_prefill2d_traces.py` | runs the CK DSL 2D combo policy over traced AITER prefill shapes and joins against a pre-profiled Triton CSV by `shape_signature` (the CSV-join workflow; writes `prefill2d_bf16_triton_ckdsl_perf.csv`) |
