@@ -325,6 +325,7 @@ namespace
         return origami::hardware_t(arch_t::gfx950,
                                    kGfx950AnalyticalCuCount,
                                    163840,
+                                   262144,  // rf_capacity: 65536 regs * 4 bytes
                                    8,
                                    1.0,
                                    1.0,

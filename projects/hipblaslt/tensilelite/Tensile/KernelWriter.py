@@ -3007,10 +3007,20 @@ class KernelWriter(metaclass=abc.ABCMeta):
       # we can't init in shadow of this prefetch
       # since that would initC inside the other summation loops
 
-      if self.states.doShadowInit != 2:
-        module.add(self.initC(kernel))
+      # initC lives in setupNewTile only when shadow-init didn't already emit it.
+      emitInitCHere = self.states.doShadowInit != 2
+      # The skip-branch reads LoopCounterL in assembly, so initC must be emitted AFTER
+      # calculateLoopNumIter
+      deferInitC = emitInitCHere and bool(kernel["InitCIterWmma"])
+
+      def emitInitC(skipVMov):
+        module.add(self.initC(kernel, skipVMov))
         if kernel["ProblemType"]["Gradient"] and kernel["ProblemType"]["UseBias"] and (kernel["ProblemType"]["BiasSrc"] == "A" or kernel["ProblemType"]["BiasSrc"] == "B"):
           module.add(self.initSumUnroll(kernel))
+
+      # Immediate initC (before calculateLoopNumIter): never carries the branch.
+      if emitInitCHere and not deferInitC:
+        emitInitC(skipVMov=False)
 
       # open non-unrolled summation loops
       if not forceNoTileCode:
@@ -3020,6 +3030,9 @@ class KernelWriter(metaclass=abc.ABCMeta):
           if self.states.actualSummationLoops>1:
             module.add(self.openLoop(kernel, tensorParametersA, tensorParametersB, i))
         module.add(self.calculateLoopNumIter(kernel, tensorParametersA, tensorParametersB, self.states.unrollIdx))
+
+      if deferInitC:
+        emitInitC(skipVMov=True)
 
       if not forceNoTileCode and self.states.staggerUCode:
         module.add(self.declareStaggerParms(kernel))
@@ -5277,7 +5290,7 @@ class KernelWriter(metaclass=abc.ABCMeta):
     self.states.skConstVgprs = {}
 
     consts = ["ItersPerTile", "MagicNumberItersPerTile", "MagicShiftItersPerTile", "SKItersPerWG"]
-    if kernel["StreamK"] >= 2:
+    if kernel["StreamK"] == 3:
       consts += ["skGrid", "skTiles"]
 
     baseVgpr = self.states.startVgprSKConsts
@@ -8476,8 +8489,9 @@ class KernelWriter(metaclass=abc.ABCMeta):
       # ----------------------------
       # TODO: alignment hack, figure out a better solution
       vgprIdx = ((vgprIdx+1)//2)*2
-      # Avoid bank conflict between VgprA and VgprC
-      if(self.states.archCaps["VgprBank"]):
+      # Avoid bank conflict between VgprA and VgprC.
+      # Skip for WMMA_V3: VgprA and VgprC are loaded in different cycles.
+      if(self.states.archCaps["VgprBank"] and not self.states.asmCaps["HasWMMA_V3"]):
         if (self.states.c.startVgprValu % 4) != (vgprIdx % 4):
           vgprIdx += 2
       # dot2: alignment hack for wider local read
@@ -8910,7 +8924,7 @@ class KernelWriter(metaclass=abc.ABCMeta):
 
       if kernel["StreamK"] and self.isStreamKConstantsToVgprEnabled(kernel):
         numSKConsts = 5  # ItersPerTile, MagicNumberItersPerTile, MagicShiftItersPerTile, SKItersPerWG, StreamKIdx
-        if kernel["StreamK"] >= 2:
+        if kernel["StreamK"] == 3:
           numSKConsts += 2  # skGrid, skTiles
         self.states.startVgprSKConsts = vgprIdx
         self.states.numVgprSKConsts = numSKConsts
@@ -8967,9 +8981,9 @@ class KernelWriter(metaclass=abc.ABCMeta):
 
       #vgprIdx += self.states.c.numVgprValu
       if kernel["StreamK"] and self.isStreamKConstantsToVgprEnabled(kernel):
-        numSKConsts = 5
-        if kernel["StreamK"] >= 2:
-          numSKConsts += 2
+        numSKConsts = 5  # ItersPerTile, MagicNumberItersPerTile, MagicShiftItersPerTile, SKItersPerWG, StreamKIdx
+        if kernel["StreamK"] == 3:
+          numSKConsts += 2  # skGrid, skTiles
         self.states.startVgprSKConsts = vgprIdx
         self.states.numVgprSKConsts = numSKConsts
         vgprIdx += numSKConsts
@@ -9290,17 +9304,15 @@ class KernelWriter(metaclass=abc.ABCMeta):
       self.defineSgpr("skGrid", 1)
       self.defineSgpr("skTiles", 1)
       self.states.numSgprStreamK += 6
-    elif kernel["StreamK"]:
+    elif kernel["StreamK"] == 3: # SK3 two-tile ABI
       # StreamK args
       self.defineSgpr("ItersPerTile", 1)
       self.defineSgpr("MagicNumberItersPerTile", 1)
       self.defineSgpr("MagicShiftItersPerTile", 1)
       self.defineSgpr("SKItersPerWG", 1)
-      self.states.numSgprStreamK += 4
-      if kernel["StreamK"] >= 2: # Two-tile SK
-        self.defineSgpr("skGrid", 1)
-        self.defineSgpr("skTiles", 1)
-        self.states.numSgprStreamK += 2
+      self.defineSgpr("skGrid", 1)
+      self.defineSgpr("skTiles", 1)
+      self.states.numSgprStreamK += 6
 
     if not kernel["UseSubtileImpl"]:
       if kernel["LocalWriteUseSgprA"]:
