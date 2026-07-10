@@ -419,9 +419,13 @@ jobs:
             exit 0
           fi
 
-          # Base arguments shared by every context.
+          # Base arguments shared by every context. --git-service is required on
+          # the tokenless path: without a token codecovcli cannot infer the git
+          # provider and fails with "Upload service is missing"; it is harmless
+          # when a token is present.
           ARGS=(upload-process
             --disable-search
+            --git-service github
             --file "${COV_FILE}"
             --flag "${FLAG}"
             --name "${UPLOAD_NAME}"
