@@ -79,5 +79,12 @@ void init_device_array(nb::module_& m)
              nb::rv_policy::reference_internal)
         .def("__exit__", [](DeviceArray& self, nb::object, nb::object, nb::object) {
             self.free(); return false;
-        });
+        })
+        .def_static("_alloc", [](size_t nbytes, hipDataType dtype, std::vector<int64_t> shape) {
+            // Allocate device memory without initialising it — used by from_dlpack and
+            // other callers that will fill the buffer themselves.
+            auto da = std::make_unique<DeviceArray>(nbytes, dtype, shape, "");
+            return da.release();
+        }, nb::arg("nbytes"), nb::arg("dtype"), nb::arg("shape"),
+           nb::rv_policy::take_ownership);
 }
