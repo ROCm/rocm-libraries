@@ -166,11 +166,11 @@ def _build_region_hsaco(kernel, *, explicit_arch: Optional[str] = None) -> bytes
     Fusion regions are built to be launched immediately on the local device,
     so this targets the active device's gfx (via
     :func:`rocke.runtime.hip_module.get_device_arch`) instead of defaulting
-    to a fixed architecture. Throws an error when no device/arch can
+    to a fixed architecture. Raises an error when no device/arch can
     be detected (e.g. IR-only/no-GPU contexts). Pass ``explicit_arch`` to override (reproducible builds).
 
     The comgr ISA always matches the resolved arch; the LLVM lowering uses the
-    matching ISA backend when the arch is one rocke models, otherwise it throws an error.
+    matching ISA backend when the arch is one rocke models.
     """
     from ..core.arch import validate_arch
     from ..core.lower_llvm import lower_kernel_to_llvm
