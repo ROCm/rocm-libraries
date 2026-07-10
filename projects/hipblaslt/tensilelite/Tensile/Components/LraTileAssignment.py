@@ -771,17 +771,26 @@ class LraTileAssignmentMFMA(LraTileAssignment):
         dividendForKId   = matrixInstTO * kernel["MatrixInstB"]
         num1DBlocks      = kernel["MatrixInstBM"] if (tile01 == 0) else kernel["MatrixInstBN"]
         num1DWaves       = kernel["MIWaveGroup"][0] if (tile01 == 0) else kernel["MIWaveGroup"][1]
-        if kernel["SourceSwap"]:
-            dividedForBlkId  = matrixInstTO if (tile01 == 0) else (matrixInstTO * kernel["MatrixInstBM"])
-        else:
-            dividedForBlkId  = (matrixInstTO * kernel["MatrixInstBN"]) if (tile01 == 0) else matrixInstTO
-        dividedForWaveId = waveWidth if (tile01 == 0) else (waveWidth * kernel["MIWaveGroup"][0])
         vectorWidth      = kernel["VectorWidth%s"%tc]
         if isDTVAB:
             if tP["tlu"]:
                 # DTV + TLU case, glvw and vw are applied to the same direction. No need to apply both.
                 # non TLU case, glvw and vw are applied to the different direction. We need to apply vw here.
                 vectorWidth = 1
+        # MXS fold-M (MIWaveTile//VW==2): lro=wtid*(VW*4) + ds_bpermute only.
+        # Do not inflate mIndexSpan/dividedForBlkId; MXSA runs after A and would
+        # overwrite lraTileProperties[tile01] used by A/B local-read increment logic.
+        miWaveTileVectors = 0
+        mxsFoldMLra = False
+        if "MXS" in tc:
+            miWaveTileVectors = kernel["MIWaveTile"][tile01] // vectorWidth
+            mxsFoldMLra = miWaveTileVectors == 2
+        mIndexSpan = matrixInstTO
+        if kernel["SourceSwap"]:
+            dividedForBlkId  = matrixInstTO if (tile01 == 0) else (matrixInstTO * kernel["MatrixInstBM"])
+        else:
+            dividedForBlkId = (matrixInstTO * kernel["MatrixInstBN"]) if (tile01 == 0) else matrixInstTO
+        dividedForWaveId = waveWidth if (tile01 == 0) else (waveWidth * kernel["MIWaveGroup"][0])
         maxKId = waveWidth // (matrixInstTO * kernel["MatrixInstB"])
         writer.states.lraTileProperties[tile01] = LraTilePropertiesMFMA(dividendForKId=dividendForKId, \
                                                                         num1DBlocks=num1DBlocks, \
@@ -892,94 +901,103 @@ class LraTileAssignmentMFMA(LraTileAssignment):
                module.add(vectorStaticMultiply(vgpr(sReg), vgpr(sReg), 16, tmpSgprInfo, \
                                          "1. K1 offset: lrK1Offset = k1Idx * mStride(%u)" % (strideK1)))
 
+            elif "MXS" in tc:
+               if mxsFoldMLra:
+                  lroBytes = vectorWidth * 4
+                  module.addComment1("lr0I mxsa fold-M: lro = wtid * %u (codeB)" % lroBytes)
+                  module.add(VLShiftLeftB32(dst=vgpr(tReg), shiftHex=(lroBytes).bit_length() - 1, src=vgpr(kReg),
+                                            comment="lro = wtid * %u" % lroBytes))
+               else:
+                  module.add(vectorStaticRemainder(dummy, tReg, kReg, mIndexSpan, tmpVgprRes, tmpSgprInfo, \
+                                                  "1. M offset: nIdx = wtid %% mIndexSpan(%u)" % mIndexSpan))
             else:
                module.add(vectorStaticRemainder(dummy, tReg, kReg, matrixInstTO, tmpVgprRes, tmpSgprInfo, \
                                              "1. N offset: nIdx = wtid %% MI_N(%u)" % matrixInstTO))
 
-            applyVWCalcEarly = perpStride > 1 and kernel["ProblemType"]["TLU%s"%tc] == 0 and kernel["ProblemType"]["DataType"].numBytes() != 2
-            if applyVWCalcEarly:
-               # Apply vector width calc before we apply permutation to perp dim
-               module.add(vectorStaticMultiply(vgpr(tReg), vgpr(tReg), vectorWidth, tmpSgprInfo, \
-                                               "1. apply VectorWidth: bnOffset = bnOffset * vw(%u)" % vectorWidth))
-               perpPerm(tReg)
+            if not mxsFoldMLra:
+               applyVWCalcEarly = perpStride > 1 and kernel["ProblemType"]["TLU%s"%tc] == 0 and kernel["ProblemType"]["DataType"].numBytes() != 2
+               if applyVWCalcEarly:
+                  # Apply vector width calc before we apply permutation to perp dim
+                  module.add(vectorStaticMultiply(vgpr(tReg), vgpr(tReg), vectorWidth, tmpSgprInfo, \
+                                                  "1. apply VectorWidth: bnOffset = bnOffset * vw(%u)" % vectorWidth))
+                  perpPerm(tReg)
 
-            module.add(vectorStaticMultiply(vgpr(tReg), vgpr(tReg), strideTile, tmpSgprInfo, \
-                "1. N offset: nOffset = nIdx * nStride(%u)" % strideTile))
-            if enableLDSTr:
-                module.add(VAddU32(dst=vgpr(tReg), src0=vgpr(sReg), src1=vgpr(tReg), \
-                           comment="1. offset in wave: lrOffset = bnOffset + lrKOffset"))
-            # block offset
-            if num1DBlocks > 1:
-                module.add(vectorStaticDivide(dummy, kReg, dividedForBlkId, tmpVgprRes, \
-                    "2. block offset: bnIdx = wtid / dividedForBlkId(%u)" % dividedForBlkId))
-                module.add(vectorStaticRemainder(dummy, dummy, dummy, num1DBlocks, tmpVgprRes, tmpSgprInfo, \
-                    "2. block offset: bnIdx = bnIdx %% num1DBlocks(%u)" % num1DBlocks))
-                module.add(vectorStaticMultiplyAdd(vgpr(tReg), vgpr(dummy), strideBlock, vgpr(tReg), tmpSgprInfo, \
-                    "2. block offset: bnOffset = bnIdx * strideBlock(%u); 3. add N and block offset: bnOffset = block and N offset" % strideBlock))
-            else:
-                module.addComment0("Skip. 2. block offset: bnOffset = 0 when num1DBlocks = 1")
+               module.add(vectorStaticMultiply(vgpr(tReg), vgpr(tReg), strideTile, tmpSgprInfo, \
+                   "1. N offset: nOffset = nIdx * nStride(%u)" % strideTile))
+               if enableLDSTr:
+                   module.add(VAddU32(dst=vgpr(tReg), src0=vgpr(sReg), src1=vgpr(tReg), \
+                              comment="1. offset in wave: lrOffset = bnOffset + lrKOffset"))
+               # block offset
+               if num1DBlocks > 1:
+                   module.add(vectorStaticDivide(dummy, kReg, dividedForBlkId, tmpVgprRes, \
+                       "2. block offset: bnIdx = wtid / dividedForBlkId(%u)" % dividedForBlkId))
+                   module.add(vectorStaticRemainder(dummy, dummy, dummy, num1DBlocks, tmpVgprRes, tmpSgprInfo, \
+                       "2. block offset: bnIdx = bnIdx %% num1DBlocks(%u)" % num1DBlocks))
+                   module.add(vectorStaticMultiplyAdd(vgpr(tReg), vgpr(dummy), strideBlock, vgpr(tReg), tmpSgprInfo, \
+                       "2. block offset: bnOffset = bnIdx * strideBlock(%u); 3. add N and block offset: bnOffset = block and N offset" % strideBlock))
+               else:
+                   module.addComment0("Skip. 2. block offset: bnOffset = 0 when num1DBlocks = 1")
 
-            if not applyVWCalcEarly:
-                module.add(vectorStaticMultiply(vgpr(tReg), vgpr(tReg), vectorWidth, tmpSgprInfo, \
-                                                "4. apply VectorWidth: bnOffset = bnOffset * vw(%u)" % vectorWidth))
+               if not applyVWCalcEarly:
+                   module.add(vectorStaticMultiply(vgpr(tReg), vgpr(tReg), vectorWidth, tmpSgprInfo, \
+                                                   "4. apply VectorWidth: bnOffset = bnOffset * vw(%u)" % vectorWidth))
 
-            if perpBlockSize > 0:
-               # Moved here since we need to wait until vectorwidth calculation is applied
-               module.add(vectorStaticDivide(rotVgpr, tReg, perpBlockSize * strideTile, tmpVgprRes, \
-                                             "Test rotating"))
+               if perpBlockSize > 0:
+                  # Moved here since we need to wait until vectorwidth calculation is applied
+                  module.add(vectorStaticDivide(rotVgpr, tReg, perpBlockSize * strideTile, tmpVgprRes, \
+                                                "Test rotating"))
 
-            # unroll offset
-            #if isMfma and (dividendForKId != waveWidth):
-            if not noUnrollOffset:
-                if (dividendForKId != waveWidth) and (not isDTVAB):
-                    if enableLDSTr:
-                        module.add(vectorStaticRemainder(dummy, mReg, kReg, 16, tmpVgprRes, tmpSgprInfo, \
-                                                        "5.1 thread id in wave: mtid = wtid %% 16"))
-                        module.add(vectorStaticDivide(mReg, mReg, 4, tmpVgprRes, \
-                                                     "5.2 thread id in wave: k1Idx = mtid // 4"))
-                if (dividendForKId != waveWidth) or isDTVAB:
-                  # DTVAB case, add this regardless of dividendForKId != waveWidth
-                    module.add(vectorStaticDivide(kReg, kReg, dividendForKId, tmpVgprRes, \
-                        "5. K offset: kIdx = wtid / (MIN(%u) * MIBB(%u))" % (matrixInstTO, kernel["MatrixInstB"])))
+               # unroll offset
+               #if isMfma and (dividendForKId != waveWidth):
+               if not noUnrollOffset:
+                   if (dividendForKId != waveWidth) and (not isDTVAB):
+                       if enableLDSTr:
+                           module.add(vectorStaticRemainder(dummy, mReg, kReg, 16, tmpVgprRes, tmpSgprInfo, \
+                                                           "5.1 thread id in wave: mtid = wtid %% 16"))
+                           module.add(vectorStaticDivide(mReg, mReg, 4, tmpVgprRes, \
+                                                        "5.2 thread id in wave: k1Idx = mtid // 4"))
+                   if (dividendForKId != waveWidth) or isDTVAB:
+                     # DTVAB case, add this regardless of dividendForKId != waveWidth
+                       module.add(vectorStaticDivide(kReg, kReg, dividendForKId, tmpVgprRes, \
+                           "5. K offset: kIdx = wtid / (MIN(%u) * MIBB(%u))" % (matrixInstTO, kernel["MatrixInstB"])))
 
-                if perpBlockSize > 0:
-                      module.add(VAddU32(dst=vgpr(kReg), src0=vgpr(kReg), src1=vgpr(rotVgpr), \
-                                         comment="rotate"))
-                      module.add(VAndB32(dst=vgpr(kReg), src0=(abmatrixinfo.gRDtlSwizzleParaBlockSize - 1), src1=vgpr(kReg), \
-                                         comment="rotate: numThreadsCoalesced: %u"%(abmatrixinfo.gRDtlSwizzleParaBlockSize)))
-                if (dividendForKId != waveWidth) and (not isDTVAB):
+                   if perpBlockSize > 0:
+                         module.add(VAddU32(dst=vgpr(kReg), src0=vgpr(kReg), src1=vgpr(rotVgpr), \
+                                            comment="rotate"))
+                         module.add(VAndB32(dst=vgpr(kReg), src0=(abmatrixinfo.gRDtlSwizzleParaBlockSize - 1), src1=vgpr(kReg), \
+                                            comment="rotate: numThreadsCoalesced: %u"%(abmatrixinfo.gRDtlSwizzleParaBlockSize)))
+                   if (dividendForKId != waveWidth) and (not isDTVAB):
 
-                    if enableLDSTr:
-                        module.add(vectorStaticMultiply(vgpr(kReg), vgpr(kReg), strideK, tmpSgprInfo, \
-                                                 "5. K offset: lrKOffset = kIdx * mStride(%u)" % (strideK)))
+                       if enableLDSTr:
+                           module.add(vectorStaticMultiply(vgpr(kReg), vgpr(kReg), strideK, tmpSgprInfo, \
+                                                    "5. K offset: lrKOffset = kIdx * mStride(%u)" % (strideK)))
 
-                        if perpStride == 1:
-                           module.add(vectorStaticMultiply(vgpr(mReg), vgpr(mReg), strideK1, tmpSgprInfo, \
-                                                           "5.1 K1 offset: lrK1Offset = k1Idx * mStride(%u)" % (strideK1)))
-                           module.add(VAddU32(dst=vgpr(kReg), src0=vgpr(mReg), src1=vgpr(kReg), \
-                                              comment="5.1 offset in wave: lrOffset = bnOffset + lrKOffset"))
-                        else:
-                           module.add(VAddU32(dst=vgpr(kReg), src0=vgpr(mReg), src1=vgpr(kReg), \
-                                              comment="5.1 offset in wave: lrOffset = bnOffset + lrKOffset"))
-                           # Apply permutation to perpendicular dim
-                           if perpStride > 1:
-                              perpPerm(kReg)
-                           module.add(vectorStaticMultiply(vgpr(kReg), vgpr(kReg), strideK1, tmpSgprInfo, \
-                                                           "5.2 K1 offset: lrK1Offset = k1Idx * mStride(%u)" % (strideK1)))
-                        module.add(VAddU32(dst=vgpr(tReg), src0=vgpr(kReg), src1=vgpr(tReg), \
-                                          comment="6. offset in wave: lrOffset = bnOffset + lrKOffset"))
-                    else:
-                        module.add(vectorStaticMultiplyAdd(vgpr(tReg), vgpr(kReg), strideK, vgpr(tReg), tmpSgprInfo, \
-                                                    "5. K offset: lrKOffset = kIdx * mStride(%u); 6. offset in wave: lrOffset = bnOffset + lrKOffset" % (strideK)))
+                           if perpStride == 1:
+                              module.add(vectorStaticMultiply(vgpr(mReg), vgpr(mReg), strideK1, tmpSgprInfo, \
+                                                              "5.1 K1 offset: lrK1Offset = k1Idx * mStride(%u)" % (strideK1)))
+                              module.add(VAddU32(dst=vgpr(kReg), src0=vgpr(mReg), src1=vgpr(kReg), \
+                                                 comment="5.1 offset in wave: lrOffset = bnOffset + lrKOffset"))
+                           else:
+                              module.add(VAddU32(dst=vgpr(kReg), src0=vgpr(mReg), src1=vgpr(kReg), \
+                                                 comment="5.1 offset in wave: lrOffset = bnOffset + lrKOffset"))
+                              if perpStride > 1:
+                                 perpPerm(kReg)
+                              module.add(vectorStaticMultiply(vgpr(kReg), vgpr(kReg), strideK1, tmpSgprInfo, \
+                                                              "5.2 K1 offset: lrK1Offset = k1Idx * mStride(%u)" % (strideK1)))
+                           module.add(VAddU32(dst=vgpr(tReg), src0=vgpr(kReg), src1=vgpr(tReg), \
+                                             comment="6. offset in wave: lrOffset = bnOffset + lrKOffset"))
+                       else:
+                           module.add(vectorStaticMultiplyAdd(vgpr(tReg), vgpr(kReg), strideK, vgpr(tReg), tmpSgprInfo, \
+                                                       "5. K offset: lrKOffset = kIdx * mStride(%u); 6. offset in wave: lrOffset = bnOffset + lrKOffset" % (strideK)))
 
-            # wave offset
-            if num1DWaves > 1:
-                module.add(vectorStaticDivide(dummy, dividendReg, dividedForWaveId, tmpVgprRes, \
-                    "7. wave offset in N dimen: wtid = tid / dividedForWaveId(%u)" % dividedForWaveId))
-                module.add(vectorStaticRemainder(dummy, dummy, dummy, num1DWaves, tmpVgprRes, tmpSgprInfo, \
-                    "7. wave offset in M dimen: wtid0 = wtid / num1DWaves(%u)" % num1DWaves))
-                module.add(vectorStaticMultiplyAdd(vgpr(tReg), vgpr(dummy), strideWave, vgpr(tReg), tmpSgprInfo, \
-                                             "7. wave offset in M dimen: wOffset = wtid0 * W0Stride(%u); 7. final local read offset: flrOffset = lrOffset + WOffset" % strideWave))
+               # wave offset
+               if num1DWaves > 1:
+                   module.add(vectorStaticDivide(dummy, dividendReg, dividedForWaveId, tmpVgprRes, \
+                       "7. wave offset in N dimen: wtid = tid / dividedForWaveId(%u)" % dividedForWaveId))
+                   module.add(vectorStaticRemainder(dummy, dummy, dummy, num1DWaves, tmpVgprRes, tmpSgprInfo, \
+                       "7. wave offset in M dimen: wtid0 = wtid / num1DWaves(%u)" % num1DWaves))
+                   module.add(vectorStaticMultiplyAdd(vgpr(tReg), vgpr(dummy), strideWave, vgpr(tReg), tmpSgprInfo, \
+                                                "7. wave offset in M dimen: wOffset = wtid0 * W0Stride(%u); 7. final local read offset: flrOffset = lrOffset + WOffset" % strideWave))
             if perpBlockSize > 0:
                writer.vgprPool.checkIn(rotVgpr)
 
