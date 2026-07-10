@@ -143,7 +143,8 @@ class TestCkTileGemmQuantBase : public ::testing::Test
     void TearDown() override { static_cast<Derived*>(this)->TearDownQuantTypeSpecific(); }
 
     // Common test execution logic
-    void invoke_quant_gemm(const ck_tile::QuantGemmMultiDHostArgs<DsDataType::size()>& args,
+    template <typename HostArgs>
+    void invoke_quant_gemm(const HostArgs& args,
                            const ck_tile::stream_config& s,
                            bool allow_runtime_splitk_tail = false)
     {
