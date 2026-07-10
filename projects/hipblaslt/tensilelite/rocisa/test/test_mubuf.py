@@ -35,7 +35,7 @@ from rocisa.instruction import (
     BufferLoadB64,
     BufferLoadB128,
     BufferStoreB32,
-    GlobalAtomicIncU32,
+    GlobalAtomicIncU32Saddr,
 )
 
 _ISA = (12, 5, 0)
@@ -300,10 +300,10 @@ def test_rocisa_atomic_null_soffset_adds_offen():
     assert str(inst).strip() == "buffer_atomic_add_f32 v12, v32, s[60:63], null offen offset:0"
 
 
-def test_rocisa_global_atomic_inc_u32():
+def test_rocisa_global_atomic_inc_u32_saddr():
     # gfx1250 StreamK dynamic-queue fetch: returning global atomic, SADDR form
     # (scalar 64-bit base + 32-bit VGPR offset).
-    inst = GlobalAtomicIncU32(
+    inst = GlobalAtomicIncU32Saddr(
         dst=vgpr(1),
         vaddr=vgpr(0),
         data=vgpr(4),
@@ -319,10 +319,10 @@ def test_rocisa_global_atomic_inc_u32():
     ), str(inst).strip()
 
 
-def test_global_atomic_inc_u32_stinkytofu():
+def test_global_atomic_inc_u32_saddr_stinkytofu():
     mod = Module("global_atomic_inc_u32")
     mod.add(
-        GlobalAtomicIncU32(
+        GlobalAtomicIncU32Saddr(
             dst=vgpr(1),
             vaddr=vgpr(0),
             data=vgpr(4),

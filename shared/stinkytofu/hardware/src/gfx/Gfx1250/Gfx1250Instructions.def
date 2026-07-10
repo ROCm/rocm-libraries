@@ -413,8 +413,8 @@ DEF_T(GlobalInvInst, "global_inv", .format = VGLOBAL, .flags = {HasSideEffect}, 
 // dynamic work-queue fetch-and-increment: global is the natural choice for a known-global
 // 64-bit pointer -- it keeps the queue base in SGPRs, and completes on loadcnt only
 // (unlike flat, which also bumps dscnt).
-DEF_T(GlobalAtomicIncU32Inst, "global_atomic_inc_u32", .format = VGLOBAL_ATOMIC,
-    .logical = "GlobalAtomicIncU32")
+DEF_T(GlobalAtomicIncU32SaddrInst, "global_atomic_inc_u32", .format = VGLOBAL_ATOMIC_SADDR,
+    .logical = "GlobalAtomicIncU32Saddr")
 
 // Global data prefetch - used by gfx1250 PrefetchGL2 to prefetch data from global memory
 // to L2 cache; no destination register. Not marked HasSideEffect: it is only a cache hint,

@@ -29,7 +29,7 @@ from rocisa.instruction import GlobalInv, GlobalWb, SAddCU32, SAddU32, SAndB32, 
     SCmpGtU32, SCmpLeU32, SCmpLtU32, SLShiftLeftB32, SLShiftLeftB64, SLShiftRightB32, VLShiftLeftB32, SLoadB32, \
     SMaxI32, SMinU32, SMovB32, SMovB64, SMulI32, SNop, SOrB32, SSleep, SStoreB32, SSubU32, \
     SWaitCnt, SWaitXCnt, VAddF32, VAddF64, VAddPKF16, VAddU32, VSubU32, VLShiftRightB32, VMovB32, \
-    VReadfirstlaneB32, VCmpXEqU32, VCvtBF16toFP32, GlobalAtomicIncU32, BufferLoadB32, BufferStoreB32, \
+    VReadfirstlaneB32, VCmpXEqU32, VCvtBF16toFP32, GlobalAtomicIncU32Saddr, BufferLoadB32, BufferStoreB32, \
     SAtomicInc, DSLoadB32, DSStoreB32, SLongBranch, SLongBranchPositive
 from rocisa.functions import scalarStaticDivideAndRemainder, sMagicDiv2, \
     vectorStaticMultiply, BranchIfNotZero, scalarUInt24DivideAndRemainder, scalarUInt32DivideAndRemainder
@@ -360,7 +360,7 @@ class StreamK(Component):
                                src=EXEC(), comment="save exec mask"))
         module.add(VCmpXEqU32(dst=EXEC(), src0=vgpr("Serial"), src1=0,
                               comment="lane 0 fetches next work item"))
-        module.add(GlobalAtomicIncU32(dst=vgpr(vFetchedIdx),
+        module.add(GlobalAtomicIncU32Saddr(dst=vgpr(vFetchedIdx),
                                       vaddr=vgpr(vZeroOffset),
                                       data=vgpr(vWrapValue),
                                       saddr=sgpr(sAddress, 2),

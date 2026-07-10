@@ -680,8 +680,8 @@ void addModifiersToInstruction(StinkyInstruction* stinkyInst, const rocisa::Inst
             stinkyInst->addModifier<stinkytofu::MUBUFModifiers>(
                 buildMUBUFModifiersForBufferOp(typed->mubuf, typed->vaddr.get(), asmCaps));
         }
-        else if (auto typed = dynamic_cast<const GlobalAtomicIncU32*>(inst)) {
-            // GlobalAtomicIncU32 carries cache scope / temporal hint / offset as rocisa
+        else if (auto typed = dynamic_cast<const GlobalAtomicIncU32Saddr*>(inst)) {
+            // GlobalAtomicIncU32Saddr carries cache scope / temporal hint / offset as rocisa
             // GLOBALModifiers; translate so the emitter prints them (the returning-atomic
             // th:TH_ATOMIC_RETURN is added separately by the emitter). Scoped to the atomic
             // specifically -- the GLOBALStoreInstruction base also covers global_store_*,

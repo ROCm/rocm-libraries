@@ -470,8 +470,8 @@ static LogicalInstruction* createTestInstruction(logical::Opcode opcode) {
             return FlatStoreB128(vgpr(0), vgpr(1), vgpr(2));
         case logical::FlatAtomicCmpswapB32:
             return FlatAtomicCmpswapB32(vgpr(0), vgpr(1), vgpr(2));
-        case logical::GlobalAtomicIncU32:
-            return GlobalAtomicIncU32(vgpr(0), vgpr(1), vgpr(2), sgpr(0, 2));
+        case logical::GlobalAtomicIncU32Saddr:
+            return GlobalAtomicIncU32Saddr(vgpr(0), vgpr(1), vgpr(2), sgpr(0, 2));
         case logical::SAbsI32:
             return SAbsI32(sgpr(0), sgpr(1));
         case logical::SBarrier:
@@ -611,7 +611,7 @@ using OpcodeMnemonicPair = std::pair<logical::Opcode, std::string>;
 
 static const std::vector<OpcodeMnemonicPair> EXPECTED_LOWERING_GFX1250 = {
     {logical::BufferAtomicAddF32, "buffer_atomic_add_f32"},
-    {logical::GlobalAtomicIncU32, "global_atomic_inc_u32"},
+    {logical::GlobalAtomicIncU32Saddr, "global_atomic_inc_u32"},
     {logical::DSLoadB32, "ds_load_b32"},
     {logical::DSLoadB64, "ds_load_b64"},
     {logical::DSStoreB32, "ds_store_b32"},

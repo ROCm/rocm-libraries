@@ -966,8 +966,8 @@ void mem_inst(nb::module_ m_mem)
             return new rocisa::GlobalStoreB32(self);
         });
 
-    nb::class_<rocisa::GlobalAtomicIncU32, rocisa::GLOBALStoreInstruction>(m_mem,
-                                                                          "GlobalAtomicIncU32")
+    nb::class_<rocisa::GlobalAtomicIncU32Saddr, rocisa::GLOBALStoreInstruction>(m_mem,
+                                                                          "GlobalAtomicIncU32Saddr")
         .def(nb::init<const std::shared_ptr<rocisa::RegisterContainer>&,
                       const std::shared_ptr<rocisa::RegisterContainer>&,
                       const std::shared_ptr<rocisa::RegisterContainer>&,
@@ -980,9 +980,9 @@ void mem_inst(nb::module_ m_mem)
              nb::arg("saddr"),
              nb::arg("modifier") = std::nullopt,
              nb::arg("comment") = "")
-        .def("__str__", &rocisa::GlobalAtomicIncU32::toString)
-        .def("__deepcopy__", [](const rocisa::GlobalAtomicIncU32& self, const nb::dict&) {
-            return new rocisa::GlobalAtomicIncU32(self);
+        .def("__str__", &rocisa::GlobalAtomicIncU32Saddr::toString)
+        .def("__deepcopy__", [](const rocisa::GlobalAtomicIncU32Saddr& self, const nb::dict&) {
+            return new rocisa::GlobalAtomicIncU32Saddr(self);
         });
 
     nb::class_<rocisa::GlobalStoreB64, rocisa::GLOBALStoreInstruction>(m_mem, "GlobalStoreB64")

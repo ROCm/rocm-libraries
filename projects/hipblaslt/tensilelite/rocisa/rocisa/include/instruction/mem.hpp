@@ -2285,9 +2285,9 @@ namespace rocisa
         }
     };
 
-    struct GlobalAtomicIncU32 : public GLOBALStoreInstruction
+    struct GlobalAtomicIncU32Saddr : public GLOBALStoreInstruction
     {
-        GlobalAtomicIncU32(const std::shared_ptr<Container>& dst,
+        GlobalAtomicIncU32Saddr(const std::shared_ptr<Container>& dst,
                            const std::shared_ptr<Container>& vaddr,
                            const std::shared_ptr<Container>& data,
                            const std::shared_ptr<Container>& saddr,
@@ -2299,7 +2299,7 @@ namespace rocisa
             setInst("global_atomic_inc_u32");
         }
 
-        GlobalAtomicIncU32(const GlobalAtomicIncU32& other)
+        GlobalAtomicIncU32Saddr(const GlobalAtomicIncU32Saddr& other)
             : GLOBALStoreInstruction(other)
             , dst(other.dst ? other.dst->clone() : nullptr)
         {
@@ -2307,7 +2307,7 @@ namespace rocisa
 
         std::shared_ptr<Item> clone() const override
         {
-            return std::make_shared<GlobalAtomicIncU32>(*this);
+            return std::make_shared<GlobalAtomicIncU32Saddr>(*this);
         }
 
         std::vector<InstructionInput> getDstParams() const override

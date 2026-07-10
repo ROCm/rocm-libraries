@@ -722,7 +722,7 @@ DEF_FORMAT(VGLOBAL,
     .encoding = {96},
 )
 
-// VGLOBAL_ATOMIC - returning global-segment atomic (SADDR form):
+// VGLOBAL_ATOMIC_SADDR - returning global-segment atomic (SADDR form):
 //   global_atomic_* vdst, vaddr, vsrc, saddr
 // vdst is a pure destination (returned old value), vsrc supplies the data, vaddr is
 // the 32-bit per-lane offset, saddr the 64-bit scalar base. Tagged GLOBALAtomic so the
@@ -730,7 +730,7 @@ DEF_FORMAT(VGLOBAL,
 // hazards bucket it as VMEM (EV_VGPR_VMEM_READ) -- not FLAT. NOTE: like all returning
 // atomics, it is NOT tracked by the waitcnt dataflow (returning atomics are untracked) --
 // the consumer's wait is emitted manually by the caller.
-DEF_FORMAT(VGLOBAL_ATOMIC,
+DEF_FORMAT(VGLOBAL_ATOMIC_SADDR,
     .parent = VGLOBAL,
     .flags = {GLOBALAtomic},
     .fields = {

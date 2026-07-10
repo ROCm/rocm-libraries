@@ -2221,8 +2221,8 @@
              false,
              "IF_FLATAtomic"},
 
-                                    {"GlobalAtomicIncU32",
-             "GlobalAtomicIncU32",
+                                    {"GlobalAtomicIncU32Saddr",
+             "GlobalAtomicIncU32Saddr",
              3,
              true,
              "Memory Arithmetic",
