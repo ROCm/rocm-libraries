@@ -124,12 +124,16 @@ class TestProfileDegradation(unittest.TestCase):
         self._orig_disc = harness._counters.discover
         self._orig_run = harness._run_rocprofv3
         self._orig_wall = harness._wall
+        self._orig_read = harness._read_counter_csvs
+        self._orig_passes = harness._count_passes
         harness._wall = lambda cmd, env, timeout: {}  # no subprocess
 
     def tearDown(self):
         harness._counters.discover = self._orig_disc
         harness._run_rocprofv3 = self._orig_run
         harness._wall = self._orig_wall
+        harness._read_counter_csvs = self._orig_read
+        harness._count_passes = self._orig_passes
 
     def test_no_counters_warns_and_wall_only(self):
         harness._counters.discover = lambda arch: {}
@@ -162,6 +166,24 @@ class TestProfileDegradation(unittest.TestCase):
         rec = harness.profile(["x"], "gfx1201", label="lbl", op="o", shape={})
         self.assertEqual(rec["kernel"]["kernel_name"], "lbl")
         self.assertNotIn("dispatch_symbol", rec["kernel"])
+
+    def test_l2_hit_without_miss_skips_ratio_no_keyerror(self):
+        # Only the L2 hit counter populated (miss absent, e.g. a partial arch
+        # capture): l2_hit_rate must be omitted, not raise KeyError.
+        harness._counters.discover = lambda arch: {"l2_hit": "TCC_HIT"}
+        harness._run_rocprofv3 = lambda *a, **k: (True, "")
+        harness._count_passes = lambda outdir: 1
+        harness._read_counter_csvs = lambda outdir: [
+            {
+                "Kernel_Name": "gemm",
+                "Dispatch_Id": "1",
+                "Counter_Name": "TCC_HIT",
+                "Counter_Value": "500",
+            }
+        ]
+        rec = harness.profile(["x"], "gfx950", op="op", shape={"M": 1})
+        self.assertEqual(rec["counters"], {"l2_hit": 500})
+        self.assertNotIn("l2_hit_rate", rec["derived"])
 
 
 if __name__ == "__main__":

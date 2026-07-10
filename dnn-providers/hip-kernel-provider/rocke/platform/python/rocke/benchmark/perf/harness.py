@@ -332,10 +332,10 @@ def profile(
         derived["busy_fraction"] = (
             counters_out.get("busy_cycles", 0) / counters_out["total_clocks"]
         )
-    if (counters_out.get("l2_hit", 0) + counters_out.get("l2_miss", 0)) > 0:
-        derived["l2_hit_rate"] = counters_out["l2_hit"] / (
-            counters_out["l2_hit"] + counters_out["l2_miss"]
-        )
+    hits = counters_out.get("l2_hit")
+    misses = counters_out.get("l2_miss")
+    if hits is not None and misses is not None and (hits + misses) > 0:
+        derived["l2_hit_rate"] = hits / (hits + misses)
     if profiled.get("ms_median") and wall.get("ms_median"):
         derived["profiler_overhead_pct"] = (
             (profiled["ms_median"] - wall["ms_median"]) / wall["ms_median"] * 100.0
