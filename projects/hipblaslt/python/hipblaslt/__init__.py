@@ -5,7 +5,6 @@
 from . import _core
 import numpy as _np
 
-__all__ = ["_core"]
 __version__ = _core.__version__
 
 # Minimal numpy-native dtype map; extended with ml_dtypes in Phase 4.
@@ -16,6 +15,25 @@ _DTYPE_TO_NP = {
     _core.DataType.R_32I: _np.int32,
     _core.DataType.R_8I: _np.int8,
 }
+
+# Reverse map: numpy dtype → DataType (used by gemm() shim in Task 19).
+_NP_TO_DTYPE = {_np.dtype(v): k for k, v in _DTYPE_TO_NP.items()}
+
+
+def from_numpy(arr, dtype):
+    """Validated host→device transfer. Raises ValueError at the boundary."""
+    if not arr.flags["C_CONTIGUOUS"]:
+        raise ValueError("array must be C-contiguous")
+    expected = _DTYPE_TO_NP.get(dtype)
+    if expected is not None and arr.dtype != expected:
+        raise ValueError(
+            f"numpy dtype {arr.dtype} does not match requested {dtype!r} "
+            f"(expected {_np.dtype(expected)})"
+        )
+    return _core.DeviceArray.from_numpy(arr, dtype)
+
+
+__all__ = ["_core", "from_numpy"]
 
 
 def _device_array_to_numpy(self):
