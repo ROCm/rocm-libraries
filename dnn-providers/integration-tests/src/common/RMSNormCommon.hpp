@@ -109,6 +109,9 @@ inline std::vector<RMSNormTestCase>
     return cases;
 }
 
+// Smoke 4D (N, C, H, W) shapes: the generic shared-suite smoke set plus the 4D
+// shapes from hip-kernel-provider's provider-local RMSnormCommon.hpp
+// getRMSnormTestCases().
 inline std::vector<RMSNormTestCase> getRMSNormTestCases()
 {
     const float eps = 1e-5f;
@@ -123,17 +126,31 @@ inline std::vector<RMSNormTestCase> getRMSNormTestCases()
          {1, 128, 1, 1}}, // [batch * sequence_length, hidden_dim, 1, 1], normalize over hidden_dim
         {{32, 3, 1, 14}, {1, 3, 1, 14}}, // degenerate H
         {{32, 3, 14, 1}, {1, 3, 14, 1}}, // degenerate W
-        // ported from hip-kernel-provider's provider-local RMSnormCommon.hpp
-        // (all 12 unique 4D shapes across getRMSnormTestCases/getRMSnormFullTestCases)
+        // from provider-local getRMSnormTestCases()
         {{2, 3, 4, 4}, {1, 3, 4, 4}}, // normalize C,H,W, small
-        {{2, 3, 4, 4}, {1, 1, 4, 4}}, // normalize H,W, small
         {{5, 256, 14, 14}, {1, 256, 14, 14}}, // larger production-like channel count
+        {{2, 3, 4, 4}, {1, 1, 4, 4}}, // normalize H,W, small
+    };
+
+    return expandCases(shapes, eps, seed);
+}
+
+// Full 4D (N, C, H, W) shapes: ported from hip-kernel-provider's provider-local
+// RMSnormCommon.hpp getRMSnormFullTestCases().
+inline std::vector<RMSNormTestCase> getRMSNormFullTestCases()
+{
+    const float eps = 1e-5f;
+    const unsigned seed = hipdnn_test_sdk::utilities::getGlobalTestSeed();
+
+    const std::vector<std::tuple<std::vector<int64_t>, std::vector<int64_t>>> shapes = {
         {{1, 3, 14, 14}, {1, 3, 14, 14}}, // normalize C,H,W, batch=1
         {{1, 3, 14, 14}, {1, 1, 14, 14}}, // normalize H,W, batch=1
         {{1, 3, 14, 14}, {1, 1, 1, 14}}, // normalize W, batch=1
         {{1, 256, 1, 1}, {1, 256, 1, 1}}, // all-spatial-1 with a real channel count
         {{2, 3, 1, 1}, {1, 3, 1, 1}}, // normalize C only, spatial=1
         {{32, 1, 14, 14}, {1, 1, 14, 14}}, // degenerate C (single channel)
+        {{32, 3, 1, 14}, {1, 3, 1, 14}}, // degenerate H
+        {{32, 3, 14, 1}, {1, 3, 14, 1}}, // degenerate W
         {{32, 3, 14, 1}, {1, 1, 14, 1}}, // degenerate W with channel-collapsed scale
     };
 

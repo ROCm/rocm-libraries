@@ -162,6 +162,24 @@ INSTANTIATE_TEST_SUITE_P(
     testing::Combine(testing::Values(TensorLayout::NCHW, TensorLayout::NHWC),
                      testing::ValuesIn(test_rmsnorm_common::getRMSNormTestCases())));
 
+INSTANTIATE_TEST_SUITE_P(
+    Full,
+    IntegrationGpuRMSNormFp32,
+    testing::Combine(testing::Values(TensorLayout::NCHW, TensorLayout::NHWC),
+                     testing::ValuesIn(test_rmsnorm_common::getRMSNormFullTestCases())));
+
+INSTANTIATE_TEST_SUITE_P(
+    Full,
+    IntegrationGpuRMSNormBfp16,
+    testing::Combine(testing::Values(TensorLayout::NCHW, TensorLayout::NHWC),
+                     testing::ValuesIn(test_rmsnorm_common::getRMSNormFullTestCases())));
+
+INSTANTIATE_TEST_SUITE_P(
+    Full,
+    IntegrationGpuRMSNormFp16,
+    testing::Combine(testing::Values(TensorLayout::NCHW, TensorLayout::NHWC),
+                     testing::ValuesIn(test_rmsnorm_common::getRMSNormFullTestCases())));
+
 // 3D layout tests (NCDHW, NDHWC)
 using IntegrationGpuRMSNorm3dFp32 = IntegrationGpuRMSNormFp32;
 using IntegrationGpuRMSNorm3dBfp16 = IntegrationGpuRMSNormBfp16;
