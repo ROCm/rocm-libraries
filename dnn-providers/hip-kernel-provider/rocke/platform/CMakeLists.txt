@@ -257,15 +257,16 @@ if(ROCKE_INSTALL_TESTS)
     # Excludes: C/C++ parity emitters (compiled against rocke_core at build time),
     # the differential harness (needs compiler + source), and run_all.py (dev runner).
     # cmake-lint: disable=E1122
-    install(DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}/tests/"
-            DESTINATION "${ROCKE_TEST_INSTALL_DIR}/tests"
-            PATTERN "__pycache__" EXCLUDE
-            PATTERN "*.pyc" EXCLUDE
-            PATTERN "*.c" EXCLUDE
-            PATTERN "*.cpp" EXCLUDE
-            PATTERN "differential" EXCLUDE
-            PATTERN "run_all.py" EXCLUDE)
-    # cmake-lint: enable=E1122
+    block()
+      install(DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}/tests/"
+              DESTINATION "${ROCKE_TEST_INSTALL_DIR}/tests"
+              PATTERN "__pycache__" EXCLUDE
+              PATTERN "*.pyc" EXCLUDE
+              PATTERN "*.c" EXCLUDE
+              PATTERN "*.cpp" EXCLUDE
+              PATTERN "differential" EXCLUDE
+              PATTERN "run_all.py" EXCLUDE)
+    endblock()
   endif()
 
   set(_ROCKE_INSTALLED_CTEST_ENTRIES "")
