@@ -24,6 +24,7 @@ nanobind_add_module(_core NB_SUPPRESS_WARNINGS
     "${CMAKE_CURRENT_SOURCE_DIR}/src/enums.cpp"
     "${CMAKE_CURRENT_SOURCE_DIR}/src/device_array.cpp"
     "${CMAKE_CURRENT_SOURCE_DIR}/src/descriptors.cpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/src/matmul.cpp"
 )
 target_include_directories(_core PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/src")
 target_link_libraries(_core PRIVATE hip::host roc::hipblaslt)
