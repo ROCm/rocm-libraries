@@ -36,6 +36,7 @@ fb::GraphWrapper buildGraph(flatbuffers::FlatBufferBuilder& builder,
         CreateTensorAttributesDirect(builder, 1, "t", DataType::FLOAT, &strides, &dims));
 
     std::vector<flatbuffers::Offset<Node>> nodes;
+    nodes.reserve(nodeTypes.size());
     for(const auto attr : nodeTypes)
     {
         nodes.push_back(CreateNodeDirect(builder, "n", DataType::FLOAT, attr, 0));
