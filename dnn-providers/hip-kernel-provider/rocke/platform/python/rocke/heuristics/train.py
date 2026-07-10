@@ -788,7 +788,17 @@ def main():
             try:
                 from lgbm_to_c import emit_c_predictor
 
-                func = f"rocke_fmha_score_{args.dtype}_{args.arch}_{target}"
+                # Op-parameterized, unique C symbol per (op, dtype, arch, target)
+                # so predictors for different ops/arches never collide when linked
+                # together. Sanitize to a valid C identifier (op may be
+                # "gemm_universal"; dtype/arch are already identifier-safe).
+                def _cident(s: str) -> str:
+                    return "".join(c if (c.isalnum() or c == "_") else "_" for c in str(s))
+
+                func = (
+                    f"rocke_score_{_cident(operation)}_{_cident(args.dtype)}"
+                    f"_{_cident(args.arch)}_{target}"
+                )
                 note = (
                     f"model: {out_dir.name}\n"
                     f"op={operation} dtype={args.dtype} arch={args.arch} "
@@ -803,7 +813,21 @@ def main():
                 )
                 (out_dir / f"model_{target}.c").write_text(c_src)
                 (out_dir / f"model_{target}.h").write_text(h_src)
-                print(f"  Emitted C predictor (Route A): model_{target}.c / .h ({func})")
+                # Registry sidecar: everything gen_model_registry.py needs to wire
+                # this predictor into rocke_lookup_model(op,arch,dtype) without
+                # parsing C. num_features is the drift-guard key -- the dispatcher
+                # asserts it against the op featurizer's output before scoring.
+                meta = {
+                    "symbol": func,
+                    "op": operation,
+                    "arch": args.arch,
+                    "dtype": args.dtype,
+                    "target": target,
+                    "num_features": len(fe.get_feature_names()),
+                    "model_id": out_dir.name,
+                }
+                (out_dir / f"model_{target}.meta.json").write_text(json.dumps(meta, indent=2))
+                print(f"  Emitted C predictor (Route A): model_{target}.c / .h / .meta.json ({func})")
             except Exception as exc:  # noqa: BLE001 - codegen is best-effort
                 print(f"  WARNING: Route-A C emit failed ({exc}); .lgbm still saved")
 

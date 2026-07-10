@@ -6,6 +6,7 @@
 #include <map>
 #include <string>
 #include <utility>
+#include <vector>
 
 #include <hip/hip_runtime.h>
 
@@ -80,17 +81,42 @@ std::optional<AotInstance> RockeClientDispatcher::select(const SdpaProblem& prob
 
     // Build the runtime attribute view once and reuse it across candidates.
     const std::map<std::string, AttrValue> attributes = problem.attributes();
+
+    // Collect ALL satisfying instances so a trained model can rank them; today,
+    // absent a model + featurizer, the first (stable catalog order) still wins.
+    std::vector<const AotInstance*> matches;
     for(const AotInstance& instance : candidates)
     {
         if(satisfies(instance, problem, attributes))
         {
-            // First match wins (stable catalog order).
-            // TODO(heuristics): tie-break with a trained per-arch FMHA model when
-            // multiple instances match and such a model is available.
-            return instance;
+            matches.push_back(&instance);
         }
     }
-    return std::nullopt;
+    if(matches.empty())
+    {
+        return std::nullopt;
+    }
+
+    // TODO(heuristics): model-scored tie-break. The registry is now generated
+    // (rocke_model_registry.h: rocke_lookup_model(op, arch, dtype) ->
+    // {score, num_features}). To wire it here:
+    //   const RockeModelEntry* model = rocke_lookup_model(
+    //       problem.op.c_str(), problem.arch.c_str(), problem.dtype.c_str());
+    //   if(model && matches.size() > 1) {
+    //       // DRIFT GUARD: refuse to score if the predictor's width disagrees
+    //       // with the op featurizer's output -- fall through to first-match.
+    //       if(model->num_features == fmhaFeatureCount()) {
+    //           return *argmax(matches, [&](const AotInstance* inst) {
+    //               auto f = featurize(problem, *inst); // <-- the remaining piece
+    //               return model->score(f.data());
+    //           });
+    //       }
+    //   }
+    // The blocker is featurize(SdpaProblem, AotInstance) -> feature_spec.json-
+    // ordered vector (the C++ half of the feature contract, part of #8866): the
+    // AotInstance must carry the tiling knobs (tileSize/numWarps) the model ranks
+    // on. Until it lands, first-match preserves Phase-1 behaviour.
+    return *matches.front();
 }
 
 std::optional<AotInstance>
