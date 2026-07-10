@@ -1602,7 +1602,8 @@ class Solution(collections.abc.Mapping):
       # SIA 4 is remapped to _ScheduleIterAlg 0 upstream, so it is covered here too.
       if state["_ScheduleIterAlg"] not in (0, 1, 2, 3):
         reject(state, printRejectionReason, "ScheduleIterAlg not supported with Stream-K")
-      if state["TDMInst"] == 3 and state["PrefetchGlobalRead"] not in (1, 2):
+      if state["TDMInst"] == 3 and state["PrefetchGlobalRead"] not in (1, 2) \
+          and not state["UseSubtileImpl"]:
         reject(state, printRejectionReason,
                "Stream-K + TDMInst=3 requires PrefetchGlobalRead in (1, 2)")
       if not state["BufferStore"]:
