@@ -142,12 +142,12 @@ ConvBiasActivAsm1x1U::GetSolution(const FusionContext& context,
             const auto& kernel = handle.Run(kernels[0]);
             const auto& invoke_ctx =
                 primitive_parameters.CastTo<miopen::fusion::FusionInvokeParams>();
-            const auto& bot_ocl_buf = invoke_ctx.in;
-            const auto& wei_ocl_buf = dynamic_cast<miopen::fusion::ConvolutionOpInvokeParam&>(
-                                          *invoke_ctx.op_args.params[0])
-                                          .weights;
-            const auto& top_ocl_buf  = invoke_ctx.out;
-            const auto& bias_ocl_buf = [&]() -> ConstData_t {
+            const auto& bot_buf = invoke_ctx.in;
+            const auto& wei_buf = dynamic_cast<miopen::fusion::ConvolutionOpInvokeParam&>(
+                                      *invoke_ctx.op_args.params[0])
+                                      .weights;
+            const auto& top_buf  = invoke_ctx.out;
+            const auto& bias_buf = [&]() -> ConstData_t {
                 if(has_bias)
                 {
                     return dynamic_cast<miopen::fusion::BiasOpInvokeParam&>(
@@ -162,7 +162,7 @@ ConvBiasActivAsm1x1U::GetSolution(const FusionContext& context,
 
             if(activ_idx == -1) // skip the activation args
             {
-                kernel(bot_ocl_buf, top_ocl_buf, wei_ocl_buf, bias_ocl_buf);
+                kernel(bot_buf, top_buf, wei_buf, bias_buf);
             }
             else
             {
@@ -177,14 +177,7 @@ ConvBiasActivAsm1x1U::GetSolution(const FusionContext& context,
                     auto alpha   = half(activ_alpha);
                     auto beta    = half(activ_beta);
                     auto gamma   = half(activ_gamma);
-                    kernel(alpha,
-                           beta,
-                           gamma,
-                           unused,
-                           bot_ocl_buf,
-                           top_ocl_buf,
-                           wei_ocl_buf,
-                           bias_ocl_buf);
+                    kernel(alpha, beta, gamma, unused, bot_buf, top_buf, wei_buf, bias_buf);
                 }
                 else
                 {
@@ -192,14 +185,7 @@ ConvBiasActivAsm1x1U::GetSolution(const FusionContext& context,
                     float alpha = activ_alpha;
                     float beta  = activ_beta;
                     float gamma = activ_gamma;
-                    kernel(alpha,
-                           beta,
-                           gamma,
-                           unused,
-                           bot_ocl_buf,
-                           top_ocl_buf,
-                           wei_ocl_buf,
-                           bias_ocl_buf);
+                    kernel(alpha, beta, gamma, unused, bot_buf, top_buf, wei_buf, bias_buf);
                 }
             }
         };

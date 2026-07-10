@@ -5,25 +5,31 @@
 # Aligned with Test Filter Standardization (RFC0010).
 #
 # miopen-provider has two GTest binaries (miopen_plugin_tests and
-# miopen_plugin_integration_tests) that share this YAML. Tier behaviour
-# mirrors the legacy test_miopenprovider.py runner:
-#   - quick: GTEST_FILTER="-Full*" (skip the Full/* INSTANTIATE_TEST_SUITE_P
-#     parameterised expansions used by integration tests; unit tests have no
-#     Full* prefix so they all run)
-#   - comprehensive/full: run everything (including Full*)
+# miopen_plugin_integration_tests) that share this YAML. CI can invoke the
+# generated CTest file without a label filter, so each enabled category becomes
+# a separate binary execution. Because the tiers are cumulative (see below),
+# invoking multiple tiers in one run re-executes the lower-tier tests; select a
+# single tier label to run exactly that tier's coverage.
+# See https://github.com/ROCm/rocm-libraries/issues/8852 for background on the
+# category execution model.
+# Tier behaviour (cumulative — each tier is a superset of the ones below it):
+#   - quick: run non-Full tests only.
+#   - standard: quick coverage (quick tests). No distinct Standard* prefix
+#     exists, so standard runs the same non-Full tests as quick.
+#   - comprehensive: standard + quick coverage. No distinct Comprehensive*
+#     prefix exists, so comprehensive runs the same non-Full tests as standard.
+#   - full: all tests (non-Full + Full* parameterised expansions), excluding
+#     only disabled tests.
 #
 # Unit tests in tests/ use INSTANTIATE_TEST_SUITE_P prefixes "AllCases" and
 # bare TEST/TEST_F; integration tests in integration_tests/ use "Smoke" and
 # "Full" prefixes. There are no Standard*/Comprehensive* prefixes, so the
-# standard tier is the same shape as quick (matches pre-checkin scope).
-
-# YAML anchor for the shared exclusion list. Mirrors the legacy filter in
-# TheRock build_tools/github_actions/test_executable_scripts/test_miopenprovider.py
-# (which only used GTEST_FILTER="-Full*" for quick, and *DISABLED* is the
-# standard GTest convention for skipped tests).
-_common_excludes: &common_excludes
-  - "*DISABLED*"
-
+# standard and comprehensive tiers reuse the quick (non-Full) pattern set and
+# full is the union of every tier.
+#
+# These categories apply to miopen_plugin_tests and miopen_plugin_integration_tests.
+# External hipdnn_integration_tests suites use test_categories_integration.yaml
+# because they have different GTest naming conventions.
 test_categories:
   quick:
     description: "Fast sanity checks (target: < 5 min) - excludes Full* parameterised expansions"
@@ -38,7 +44,7 @@ test_categories:
       - "smoke"
 
   standard:
-    description: "Pre-checkin validation (target: < 45 min) - same shape as quick (no Standard* tier exists)"
+    description: "Pre-checkin validation (cumulative: runs quick coverage) - excludes Full* parameterised expansions"
     test_patterns:
       - "*"
     exclude:
@@ -50,20 +56,23 @@ test_categories:
       - "precheckin"
 
   comprehensive:
-    description: "Nightly comprehensive tests (target: < 7 hours) - includes Full* tier"
+    description: "Nightly comprehensive validation (cumulative: runs standard + quick coverage) - excludes Full* parameterised expansions"
     test_patterns:
       - "*"
-    exclude: *common_excludes
+    exclude:
+      - "*DISABLED*"
+      - "Full*"
     labels:
       - "comprehensive"
       - "nightly"
       - "extended"
 
   full:
-    description: "Complete test suite - all tests including Full*"
+    description: "Complete suite (cumulative: runs all tests, non-Full + Full*) - excludes only disabled tests"
     test_patterns:
       - "*"
-    exclude: *common_excludes
+    exclude:
+      - "*DISABLED*"
     labels:
       - "full"
       - "all"

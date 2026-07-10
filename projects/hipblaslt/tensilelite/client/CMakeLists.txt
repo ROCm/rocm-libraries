@@ -25,7 +25,7 @@ target_link_libraries(tensilelite-client-common
     PUBLIC
         hip::device
         hip::host
-        tensilelite::tensilelite-host
+        roc::tensilelite-host
         rocisa::rocisa-cpp
         OpenMP::OpenMP_CXX
 )
@@ -45,11 +45,6 @@ endif()
 target_include_directories(tensilelite-client-common
     PUBLIC
         $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>
-)
-
-target_compile_definitions(tensilelite-client-common
-    PUBLIC
-        TENSILE_DEFAULT_SERIALIZATION
 )
 
 set_target_properties(tensilelite-client-common

@@ -102,7 +102,8 @@ __device__ void sb2st_larfg(const I xid, I n, T* x, T& tau, S* s_work)
     {
         if(xid == 0)
         {
-            S norm = alpha_r >= 0 ? -std::sqrt(norm2) : std::sqrt(norm2);
+            S sqrt_norm2 = std::sqrt(norm2);
+            S norm = alpha_r >= 0 ? -sqrt_norm2 : sqrt_norm2;
 
             if constexpr(rocblas_is_complex<T>)
             {

@@ -1497,3 +1497,70 @@ class TestPyTorchOpsNewHandlers:
             v.repeat_interleave(4, dim=-3),
         )
         torch.testing.assert_close(tensors[4], expected, rtol=1e-5, atol=1e-5)
+
+
+class TestReplayTensorsScalarCache:
+    """ReplayTensors memoizes host scalar reads; plain dicts do not."""
+
+    def test_replay_tensors_caches_scalar_read(self) -> None:
+        from dnn_benchmarking.execution.pytorch_ops._common import _scalar_value
+
+        scalar = torch.tensor([0.5])
+        tensors = pytorch_ops.ReplayTensors({1: scalar})
+
+        assert _scalar_value(tensors, 1, {}) == 0.5
+        # Mutating the source tensor must not be observed: the cached value is
+        # served without a second .item() read (the property that keeps the
+        # staged benchmark's timed iterations free of device->host syncs).
+        scalar.fill_(9.0)
+        assert _scalar_value(tensors, 1, {}) == 0.5
+
+    def test_plain_dict_resolves_scalar_each_call(self) -> None:
+        from dnn_benchmarking.execution.pytorch_ops._common import _scalar_value
+
+        scalar = torch.tensor([0.5])
+        tensors = {1: scalar}
+
+        assert _scalar_value(tensors, 1, {}) == 0.5
+        scalar.fill_(9.0)
+        # No cache on a plain dict: the read reflects the current tensor value,
+        # preserving the one-shot reference path's behavior.
+        assert _scalar_value(tensors, 1, {}) == 9.0
+
+
+class TestStorePlanned:
+    """The shared store-with-declared-shape helper used by norm/reduction/resample."""
+
+    def test_store_planned_reshapes_to_declared_shape(self) -> None:
+        from dnn_benchmarking.execution.pytorch_ops._common import _store_planned
+
+        tensors: dict = {}
+        value = torch.arange(6, dtype=torch.float32)
+        _store_planned(tensors, 1, value, (2, 3))
+        assert tuple(tensors[1].shape) == (2, 3)
+        torch.testing.assert_close(
+            tensors[1], torch.arange(6, dtype=torch.float32).reshape(2, 3)
+        )
+
+    def test_store_planned_live_tensor_shape_wins(self) -> None:
+        from dnn_benchmarking.execution.pytorch_ops._common import _store_planned
+
+        tensors = {1: torch.zeros((2, 3), dtype=torch.float32)}
+        # Live tensor shape (2, 3) wins over the declared (3, 2).
+        _store_planned(tensors, 1, torch.arange(6, dtype=torch.float32), (3, 2))
+        assert tuple(tensors[1].shape) == (2, 3)
+
+    def test_store_planned_raises_on_numel_mismatch(self) -> None:
+        from dnn_benchmarking.execution.pytorch_ops._common import _store_planned
+
+        with pytest.raises(ValueError, match="Cannot store tensor UID"):
+            _store_planned({}, 7, torch.arange(6, dtype=torch.float32), (2, 2))
+
+    def test_store_planned_no_shape_stores_as_is(self) -> None:
+        from dnn_benchmarking.execution.pytorch_ops._common import _store_planned
+
+        tensors: dict = {}
+        value = torch.arange(6, dtype=torch.float32)
+        _store_planned(tensors, 1, value, None)
+        assert tensors[1] is value
+        assert tuple(tensors[1].shape) == (6,)

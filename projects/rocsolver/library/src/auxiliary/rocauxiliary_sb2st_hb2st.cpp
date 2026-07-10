@@ -125,8 +125,12 @@ ROCSOLVER_EXPORT rocblas_status rocsolver_ssb2st(rocblas_handle handle,
                                                  const rocblas_int ldv,
                                                  float* tau)
 {
+#ifdef ROCSOLVER_ENABLE_EIG_2STAGE
     return rocsolver::rocsolver_sb2st_hb2st_impl<float, rocblas_int>(handle, uplo, n, kd, Aband,
                                                                      ldab, D, E, V, ldv, tau);
+#else
+    return rocblas_status_not_implemented;
+#endif
 }
 
 ROCSOLVER_EXPORT rocblas_status rocsolver_dsb2st(rocblas_handle handle,
@@ -141,8 +145,12 @@ ROCSOLVER_EXPORT rocblas_status rocsolver_dsb2st(rocblas_handle handle,
                                                  const rocblas_int ldv,
                                                  double* tau)
 {
+#ifdef ROCSOLVER_ENABLE_EIG_2STAGE
     return rocsolver::rocsolver_sb2st_hb2st_impl<double, rocblas_int>(handle, uplo, n, kd, Aband,
                                                                       ldab, D, E, V, ldv, tau);
+#else
+    return rocblas_status_not_implemented;
+#endif
 }
 
 ROCSOLVER_EXPORT rocblas_status rocsolver_chb2st(rocblas_handle handle,
@@ -157,8 +165,12 @@ ROCSOLVER_EXPORT rocblas_status rocsolver_chb2st(rocblas_handle handle,
                                                  const rocblas_int ldv,
                                                  rocblas_float_complex* tau)
 {
+#ifdef ROCSOLVER_ENABLE_EIG_2STAGE
     return rocsolver::rocsolver_sb2st_hb2st_impl<rocblas_float_complex, rocblas_int>(
         handle, uplo, n, kd, Aband, ldab, D, E, V, ldv, tau);
+#else
+    return rocblas_status_not_implemented;
+#endif
 }
 
 ROCSOLVER_EXPORT rocblas_status rocsolver_zhb2st(rocblas_handle handle,
@@ -173,8 +185,12 @@ ROCSOLVER_EXPORT rocblas_status rocsolver_zhb2st(rocblas_handle handle,
                                                  const rocblas_int ldv,
                                                  rocblas_double_complex* tau)
 {
+#ifdef ROCSOLVER_ENABLE_EIG_2STAGE
     return rocsolver::rocsolver_sb2st_hb2st_impl<rocblas_double_complex, rocblas_int>(
         handle, uplo, n, kd, Aband, ldab, D, E, V, ldv, tau);
+#else
+    return rocblas_status_not_implemented;
+#endif
 }
 
 ROCSOLVER_EXPORT rocblas_status rocsolver_ssb2st_64(rocblas_handle handle,
@@ -189,7 +205,7 @@ ROCSOLVER_EXPORT rocblas_status rocsolver_ssb2st_64(rocblas_handle handle,
                                                     const int64_t ldv,
                                                     float* tau)
 {
-#ifdef HAVE_ROCBLAS_64
+#if defined(ROCSOLVER_ENABLE_EIG_2STAGE) && defined(HAVE_ROCBLAS_64)
     return rocsolver::rocsolver_sb2st_hb2st_impl<float, int64_t>(handle, uplo, n, kd, Aband, ldab,
                                                                  D, E, V, ldv, tau);
 #else
@@ -209,7 +225,7 @@ ROCSOLVER_EXPORT rocblas_status rocsolver_dsb2st_64(rocblas_handle handle,
                                                     const int64_t ldv,
                                                     double* tau)
 {
-#ifdef HAVE_ROCBLAS_64
+#if defined(ROCSOLVER_ENABLE_EIG_2STAGE) && defined(HAVE_ROCBLAS_64)
     return rocsolver::rocsolver_sb2st_hb2st_impl<double, int64_t>(handle, uplo, n, kd, Aband, ldab,
                                                                   D, E, V, ldv, tau);
 #else
@@ -229,7 +245,7 @@ ROCSOLVER_EXPORT rocblas_status rocsolver_chb2st_64(rocblas_handle handle,
                                                     const int64_t ldv,
                                                     rocblas_float_complex* tau)
 {
-#ifdef HAVE_ROCBLAS_64
+#if defined(ROCSOLVER_ENABLE_EIG_2STAGE) && defined(HAVE_ROCBLAS_64)
     return rocsolver::rocsolver_sb2st_hb2st_impl<rocblas_float_complex, int64_t>(
         handle, uplo, n, kd, Aband, ldab, D, E, V, ldv, tau);
 #else
@@ -249,7 +265,7 @@ ROCSOLVER_EXPORT rocblas_status rocsolver_zhb2st_64(rocblas_handle handle,
                                                     const int64_t ldv,
                                                     rocblas_double_complex* tau)
 {
-#ifdef HAVE_ROCBLAS_64
+#if defined(ROCSOLVER_ENABLE_EIG_2STAGE) && defined(HAVE_ROCBLAS_64)
     return rocsolver::rocsolver_sb2st_hb2st_impl<rocblas_double_complex, int64_t>(
         handle, uplo, n, kd, Aband, ldab, D, E, V, ldv, tau);
 #else

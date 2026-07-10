@@ -1,6 +1,6 @@
 /*! \file */
 /* ************************************************************************
- * Copyright (C) 2024 Advanced Micro Devices, Inc. All rights Reserved.
+ * Copyright (C) 2024-2026 Advanced Micro Devices, Inc. All rights Reserved.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -111,6 +111,12 @@ constexpr double gemvi_gflop_count(I M, I nnz)
 constexpr double bsrmm_gflop_count(int N, int nnzb, int block_dim, int nnz_C, bool beta = false)
 {
     return (2.0 * nnzb * block_dim * block_dim * N + (beta ? nnz_C : 0)) / 1e9;
+}
+
+constexpr double
+    bellmm_gflop_count(int Mb, int N, int ellCols, int block_dim, int nnz_C, bool beta = false)
+{
+    return (2.0 * Mb * ellCols * block_dim * block_dim * N + (beta ? nnz_C : 0)) / 1e9;
 }
 
 template <typename I, typename J>

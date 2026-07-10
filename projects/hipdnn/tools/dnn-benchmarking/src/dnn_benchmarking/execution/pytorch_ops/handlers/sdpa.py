@@ -10,7 +10,7 @@ import torch
 import torch.nn.functional as F
 
 from .._common import *  # noqa: F401,F403
-from .._registry import register_handler
+from .._registry import CompiledOp, register_handler
 
 
 def _sdpa_bool(node: Dict[str, Any], key: str, default: bool = False) -> bool:
@@ -25,14 +25,15 @@ def _sdpa_unsupported_if_present(node: Dict[str, Any], keys: Sequence[str]) -> N
             )
 
 
-def _sdpa_scale(
-    node: Dict[str, Any], tensors: Dict[int, torch.Tensor]
+def _sdpa_resolve_scale(
+    node: Dict[str, Any],
+    tensors: Dict[int, torch.Tensor],
+    scale_uid: Optional[int],
+    attn_scale_value: Any,
 ) -> Optional[float]:
-    scale_uid = _optional_uid(node, "scale_tensor_uid")
     if scale_uid is not None:
         return _scalar_value(tensors, scale_uid, node)
-    value = _node_param(node, "attn_scale_value", None)
-    return None if value is None else float(value)
+    return None if attn_scale_value is None else float(attn_scale_value)
 
 
 def _sdpa_head_repeat(q_heads: int, kv_heads: int, label: str) -> int:
@@ -50,13 +51,9 @@ def _sdpa_head_repeat(q_heads: int, kv_heads: int, label: str) -> int:
     return q_heads // kv_heads
 
 
-def _sdpa_common(
+def _plan_sdpa_common(
     node: Dict[str, Any],
-    tensors: Dict[int, torch.Tensor],
-    q: torch.Tensor,
-    k: torch.Tensor,
-    v: torch.Tensor,
-) -> Tuple[Optional[torch.Tensor], float, bool, Optional[float], int, int]:
+) -> Tuple[Optional[int], float, bool, Optional[int], Any]:
     unsupported = [
         "seq_len_q_tensor_uid",
         "seq_len_kv_tensor_uid",
@@ -104,20 +101,35 @@ def _sdpa_common(
         )
 
     mask_uid = _optional_uid(node, "attn_mask_tensor_uid")
-    attn_mask = _tensor(tensors, mask_uid, node) if mask_uid is not None else None
     is_causal = _sdpa_bool(node, "causal_mask")
-    if attn_mask is not None and is_causal:
+    if mask_uid is not None and is_causal:
         raise ValueError(
             "PyTorch SDPA reference does not support both attn_mask and causal_mask"
         )
 
-    scale = _sdpa_scale(node, tensors)
+    scale_uid = _optional_uid(node, "scale_tensor_uid")
+    attn_scale_value = _node_param(node, "attn_scale_value", None)
+    return mask_uid, dropout_p, is_causal, scale_uid, attn_scale_value
+
+
+def _sdpa_resolve(
+    node: Dict[str, Any],
+    tensors: Dict[int, torch.Tensor],
+    q: torch.Tensor,
+    k: torch.Tensor,
+    v: torch.Tensor,
+    mask_uid: Optional[int],
+    scale_uid: Optional[int],
+    attn_scale_value: Any,
+) -> Tuple[Optional[torch.Tensor], Optional[float], int, int]:
+    attn_mask = _tensor(tensors, mask_uid, node) if mask_uid is not None else None
+    scale = _sdpa_resolve_scale(node, tensors, scale_uid, attn_scale_value)
     if q.ndim < 3 or k.ndim < 3 or v.ndim < 3:
         raise ValueError("SDPA expects q/k/v tensors with head and matrix dimensions")
     q_heads = int(q.shape[-3])
     rep_k = _sdpa_head_repeat(q_heads, int(k.shape[-3]), "K")
     rep_v = _sdpa_head_repeat(q_heads, int(v.shape[-3]), "V")
-    return attn_mask, dropout_p, is_causal, scale, rep_k, rep_v
+    return attn_mask, scale, rep_k, rep_v
 
 
 def _call_sdpa(
@@ -187,12 +199,11 @@ def _sdpa_stats(
 
 
 @register_handler("SdpaAttributes")
-def handle_sdpa(
+def compile_sdpa(
     node: Dict[str, Any],
-    tensors: Dict[int, torch.Tensor],
     graph_json: Dict[str, Any],
-) -> None:
-    """Handle scaled dot-product attention forward."""
+) -> CompiledOp:
+    """Plan scaled dot-product attention forward."""
     _sdpa_unsupported_if_present(
         node,
         [
@@ -207,32 +218,37 @@ def handle_sdpa(
     k_uid = _required_input_uid(node, "k_tensor_uid")
     v_uid = _required_input_uid(node, "v_tensor_uid")
     o_uid = _required_output_uid(node, "o_tensor_uid")
-
-    q = _tensor(tensors, q_uid, node)
-    k = _tensor(tensors, k_uid, node)
-    v = _tensor(tensors, v_uid, node)
-    attn_mask, dropout_p, is_causal, scale, rep_k, rep_v = _sdpa_common(
-        node, tensors, q, k, v
+    mask_uid, dropout_p, is_causal, scale_uid, attn_scale_value = _plan_sdpa_common(
+        node
     )
-    o = _call_sdpa(q, k, v, attn_mask, dropout_p, is_causal, scale, rep_k, rep_v)
-    _store_tensor(tensors, o_uid, o)
-
     stats_uid = _optional_uid(node, "stats_tensor_uid")
-    if stats_uid is not None:
-        _store_tensor(
-            tensors,
-            stats_uid,
-            _sdpa_stats(q, k, attn_mask, is_causal, scale, rep_k),
+
+    def run(tensors: Dict[int, torch.Tensor]) -> None:
+        q = _tensor(tensors, q_uid, node)
+        k = _tensor(tensors, k_uid, node)
+        v = _tensor(tensors, v_uid, node)
+        attn_mask, scale, rep_k, rep_v = _sdpa_resolve(
+            node, tensors, q, k, v, mask_uid, scale_uid, attn_scale_value
         )
+        o = _call_sdpa(q, k, v, attn_mask, dropout_p, is_causal, scale, rep_k, rep_v)
+        _store_tensor(tensors, o_uid, o)
+
+        if stats_uid is not None:
+            _store_tensor(
+                tensors,
+                stats_uid,
+                _sdpa_stats(q, k, attn_mask, is_causal, scale, rep_k),
+            )
+
+    return run
 
 
 @register_handler("SdpaBackwardAttributes")
-def handle_sdpa_backward(
+def compile_sdpa_backward(
     node: Dict[str, Any],
-    tensors: Dict[int, torch.Tensor],
     graph_json: Dict[str, Any],
-) -> None:
-    """Handle scaled dot-product attention backward.
+) -> CompiledOp:
+    """Plan scaled dot-product attention backward.
 
     Mirrors hipDNN's CPU reference (CpuFpReferenceSdpa::backward): the saved
     softmax statistics ``stats`` (forward log-sum-exp) are consumed directly to
@@ -257,68 +273,76 @@ def handle_sdpa_backward(
     dq_uid = _required_output_uid(node, "dq_tensor_uid")
     dk_uid = _required_output_uid(node, "dk_tensor_uid")
     dv_uid = _required_output_uid(node, "dv_tensor_uid")
-
-    q = _tensor(tensors, q_uid, node)
-    k = _tensor(tensors, k_uid, node)
-    v = _tensor(tensors, v_uid, node)
-    o = _tensor(tensors, o_uid, node)
-    do = _tensor(tensors, do_uid, node)
-    stats = _tensor(tensors, stats_uid, node)
-    attn_mask, _dropout_p, is_causal, scale, rep_k, rep_v = _sdpa_common(
-        node, tensors, q, k, v
+    mask_uid, _dropout_p, is_causal, scale_uid, attn_scale_value = _plan_sdpa_common(
+        node
     )
 
-    if q.ndim != 4 or k.ndim != 4 or v.ndim != 4:
-        raise ValueError("SDPA backward expects rank-4 q/k/v tensors [B, H, S, D]")
+    def run(tensors: Dict[int, torch.Tensor]) -> None:
+        q = _tensor(tensors, q_uid, node)
+        k = _tensor(tensors, k_uid, node)
+        v = _tensor(tensors, v_uid, node)
+        o = _tensor(tensors, o_uid, node)
+        do = _tensor(tensors, do_uid, node)
+        stats = _tensor(tensors, stats_uid, node)
+        attn_mask, scale, rep_k, rep_v = _sdpa_resolve(
+            node, tensors, q, k, v, mask_uid, scale_uid, attn_scale_value
+        )
 
-    q_f = q.to(dtype=torch.float32)
-    k_f = k.to(dtype=torch.float32)
-    v_f = v.to(dtype=torch.float32)
-    o_f = o.to(dtype=torch.float32)
-    do_f = do.to(dtype=torch.float32)
-    stats_f = _require_fp32_stat(stats, "SDPA stats (log-sum-exp)")
+        if q.ndim != 4 or k.ndim != 4 or v.ndim != 4:
+            raise ValueError("SDPA backward expects rank-4 q/k/v tensors [B, H, S, D]")
 
-    head_dim = int(q.shape[-1])
-    scale_value = (1.0 / sqrt(float(head_dim))) if scale is None else float(scale)
-    k_heads = int(k.shape[1])
-    v_heads = int(v.shape[1])
-    if rep_k > 1:
-        k_f = k_f.repeat_interleave(rep_k, dim=1)
-    if rep_v > 1:
-        v_f = v_f.repeat_interleave(rep_v, dim=1)
+        q_f = q.to(dtype=torch.float32)
+        k_f = k.to(dtype=torch.float32)
+        v_f = v.to(dtype=torch.float32)
+        o_f = o.to(dtype=torch.float32)
+        do_f = do.to(dtype=torch.float32)
+        stats_f = _require_fp32_stat(stats, "SDPA stats (log-sum-exp)")
 
-    scores = torch.matmul(q_f, k_f.transpose(-2, -1)) * scale_value
-    if attn_mask is not None:
-        scores = scores + attn_mask.to(dtype=torch.float32)
-    if is_causal:
-        causal = torch.ones(
-            scores.shape[-2],
-            scores.shape[-1],
-            dtype=torch.bool,
-            device=scores.device,
-        ).tril()
-        scores = scores.masked_fill(~causal, float("-inf"))
+        head_dim = int(q.shape[-1])
+        scale_value = (1.0 / sqrt(float(head_dim))) if scale is None else float(scale)
+        k_heads = int(k.shape[1])
+        v_heads = int(v.shape[1])
+        if rep_k > 1:
+            k_f = k_f.repeat_interleave(rep_k, dim=1)
+        if rep_v > 1:
+            v_f = v_f.repeat_interleave(rep_v, dim=1)
 
-    probs = torch.exp(scores - stats_f)
-    row_dot = (do_f * o_f).sum(dim=-1, keepdim=True)
-    d_probs = torch.matmul(do_f, v_f.transpose(-2, -1))
-    d_scores = probs * (d_probs - row_dot)
-    d_scores_scaled = d_scores * scale_value
+        scores = torch.matmul(q_f, k_f.transpose(-2, -1)) * scale_value
+        if attn_mask is not None:
+            scores = scores + attn_mask.to(dtype=torch.float32)
+        if is_causal:
+            causal = torch.ones(
+                scores.shape[-2],
+                scores.shape[-1],
+                dtype=torch.bool,
+                device=scores.device,
+            ).tril()
+            scores = scores.masked_fill(~causal, float("-inf"))
 
-    dq = torch.matmul(d_scores_scaled, k_f)
-    dk_full = torch.matmul(d_scores_scaled.transpose(-2, -1), q_f)
-    dv_full = torch.matmul(probs.transpose(-2, -1), do_f)
+        probs = torch.exp(scores - stats_f)
+        row_dot = (do_f * o_f).sum(dim=-1, keepdim=True)
+        d_probs = torch.matmul(do_f, v_f.transpose(-2, -1))
+        d_scores = probs * (d_probs - row_dot)
+        d_scores_scaled = d_scores * scale_value
 
-    batch, seq_kv = dk_full.shape[0], dk_full.shape[2]
-    if rep_k > 1:
-        dk_f = dk_full.view(batch, k_heads, rep_k, seq_kv, head_dim).sum(dim=2)
-    else:
-        dk_f = dk_full
-    if rep_v > 1:
-        dv_f = dv_full.view(batch, v_heads, rep_v, seq_kv, int(v.shape[-1])).sum(dim=2)
-    else:
-        dv_f = dv_full
+        dq = torch.matmul(d_scores_scaled, k_f)
+        dk_full = torch.matmul(d_scores_scaled.transpose(-2, -1), q_f)
+        dv_full = torch.matmul(probs.transpose(-2, -1), do_f)
 
-    _store_tensor(tensors, dq_uid, dq.to(dtype=q.dtype))
-    _store_tensor(tensors, dk_uid, dk_f.to(dtype=k.dtype))
-    _store_tensor(tensors, dv_uid, dv_f.to(dtype=v.dtype))
+        batch, seq_kv = dk_full.shape[0], dk_full.shape[2]
+        if rep_k > 1:
+            dk_f = dk_full.view(batch, k_heads, rep_k, seq_kv, head_dim).sum(dim=2)
+        else:
+            dk_f = dk_full
+        if rep_v > 1:
+            dv_f = dv_full.view(batch, v_heads, rep_v, seq_kv, int(v.shape[-1])).sum(
+                dim=2
+            )
+        else:
+            dv_f = dv_full
+
+        _store_tensor(tensors, dq_uid, dq.to(dtype=q.dtype))
+        _store_tensor(tensors, dk_uid, dk_f.to(dtype=k.dtype))
+        _store_tensor(tensors, dv_uid, dv_f.to(dtype=v.dtype))
+
+    return run

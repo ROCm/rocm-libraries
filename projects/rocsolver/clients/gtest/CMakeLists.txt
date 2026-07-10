@@ -242,6 +242,12 @@ target_compile_definitions(rocsolver-test PRIVATE
   ROCSOLVER_CLIENTS_TEST
 )
 
+# Mirror the library's 2-stage eigensolver feature flag so the tests assert the
+# correct behavior (real run when ON, rocblas_status_not_implemented when OFF).
+if(ROCSOLVER_ENABLE_EIG_2STAGE)
+  target_compile_definitions(rocsolver-test PRIVATE ROCSOLVER_ENABLE_EIG_2STAGE)
+endif()
+
 add_test(
   NAME rocsolver-test
   COMMAND rocsolver-test

@@ -30,7 +30,7 @@ home directory.
 .. note::
 
    *  The System FindDb is *not* modified upon installation of MIOpen.
-   *  There are separate Find databases for the HIP and OpenCL backends.
+   *  There is a separate Find database for the HIP backend.
 
 Populating User FindDb
 =============================================================

@@ -34,18 +34,24 @@ def _vgprIndices(container):
   return range(container.regIdx, container.regIdx + container.regNum)
 
 
-def setMatrixAReuse(module, writer, kernel):
-  """Enable the gfx1250 WMMA matrix-A reuse hint where it is safe.
+def setMatrixReuse(module, writer, kernel, matrix):
+  """Enable the gfx1250 WMMA matrix reuse hint for *matrix* ('a' or 'b').
 
   No-op unless gfx1250 (HasWmmaArbStallBit).  Mutates instructions in place.
   """
+  assert matrix in ('a', 'b'), f"matrix must be 'a' or 'b', got {matrix!r}"
   if not writer.states.archCaps.get("HasWmmaArbStallBit", False):
     return module
 
+  operand = matrix.lower()          # 'a' or 'b'
+  flag    = f"reuse{matrix.upper()}" # 'reuseA' or 'reuseB'
+
   mmas = [inst for inst in module.flatitems() if _isMMA(inst)]
   for prev, cur in zip(mmas, mmas[1:]):
-    if tuple(_vgprIndices(cur.a)) and _vgprIndices(cur.a) == _vgprIndices(prev.a):
-      prev.reuseA = True
+    cur_op  = getattr(cur, operand)
+    prev_op = getattr(prev, operand)
+    if tuple(_vgprIndices(cur_op)) and _vgprIndices(cur_op) == _vgprIndices(prev_op):
+      setattr(prev, flag, True)
   return module
 
 

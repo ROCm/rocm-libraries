@@ -581,7 +581,7 @@ class StreamK(Component):
         tmpOffset = writer.sgprPool.checkOut(2, "skStartOffset")
         module.add(SMulI32(dst=sgpr(tmpOffset), src0=sgpr("StreamKLocalStart"), src1=int(depthU * tP["bpe"]), comment="StreamK tile start offset"))
         strideL = writer.strideRef(tc, kernel["ProblemType"]["IndicesSummation"][0])
-        module.add(writer.s_mul_u64_u32(sgpr(tmpOffset), sgpr(tmpOffset+1), sgpr(tmpOffset), strideL, "StreamK tile start offset"))
+        module.add(writer.s_mul_u64_u32(sgpr(tmpOffset), sgpr(tmpOffset+1), sgpr(tmpOffset), strideL, comment="StreamK tile start offset"))
         # Overflow check removed
         # if kernel["CheckDimOverflow"] >=2:
         #     kStr += self.assert_eq(sgpr(tmpOffset+1),0)
@@ -955,7 +955,7 @@ class StreamK(Component):
                     fixupModule = None
                     module.add(self.fixupStep(writer, kernel, vectorWidths, elements, fixupEdge, tmpVgpr, cvtVgprStruct, sCtaIdx))
 
-                if kernel["StreamK"] >= 2:
+                if kernel["StreamK"] in (3, 4, 5):
                     sSkExtraIters = writer.sgprPool.checkOut(1, "extraIters")
                     sIterCount = writer.sgprPool.checkOut(1, "iterCount")
                     module.add(self.skExtraIters(writer, kernel, sSkExtraIters, sIterCount)) # sIterCount is a temp register
@@ -970,12 +970,6 @@ class StreamK(Component):
                     writer.sgprPool.checkIn(sSkExtraIters)
                     writer.sgprPool.checkIn(sIterCount)
                 module.add(SAddU32(dst=sgpr(sCtaIdx), src0=sgpr(sCtaIdx), src1=1, comment="next partial tile index"))
-                if kernel["StreamK"] == 1:
-                    sIpw = writer.acquireStreamKConstSgpr(kernel, "SKItersPerWG")
-                    if writer.isStreamKConstantsToVgprEnabled(kernel):
-                        module.add(VReadfirstlaneB32(dst=sgpr(sIpw), src=vgpr(writer.states.skConstVgprs["SKItersPerWG"])))
-                    module.add(SAddU32(dst=sgpr(sFixupEnd), src0=sgpr(sFixupEnd), src1=sgpr(sIpw), comment="next partial tile iteration"))
-                    writer.releaseStreamKConstSgpr(sIpw)
                 sIpt = writer.acquireStreamKConstSgpr(kernel, "ItersPerTile")
                 if writer.isStreamKConstantsToVgprEnabled(kernel):
                     module.add(VReadfirstlaneB32(dst=sgpr(sIpt), src=vgpr(writer.states.skConstVgprs["ItersPerTile"])))
@@ -1601,7 +1595,7 @@ class StreamK(Component):
         lastData = -1
         for elementIdx in range(0, len(batchElements)):
             if not ss.sharedColDVgprs:
-                addrCalc: AddrCalculation = ss.elementAddres[elementIdx]
+                addrCalc: AddrCalculation = ss.elementAddr[elementIdx]
                 addrDVgpr = addrCalc.addrDVgpr
                 addrCVgpr = addrCalc.addrCVgpr
                 writer.vgprPool.checkIn(addrDVgpr)
@@ -2276,7 +2270,7 @@ class StreamK(Component):
         lastData = -1
         for elementIdx in range(0, len(batchElements)):
             if not ss.sharedColDVgprs:
-                addrCalc: AddrCalculation = ss.elementAddres[elementIdx]
+                addrCalc: AddrCalculation = ss.elementAddr[elementIdx]
                 addrDVgpr = addrCalc.addrDVgpr
                 addrCVgpr = addrCalc.addrCVgpr
                 writer.vgprPool.checkIn(addrDVgpr)
@@ -2426,298 +2420,6 @@ class StreamKOff(StreamK):
 
     def kernelEnd(self, writer, kernel):
         module = Module("StreamK Off kernelEnd")
-        return module
-
-class StreamKBasic(StreamK):
-    kernel = {"StreamK": 1}
-
-    def preLoop(self, writer, kernel):
-        module = Module("StreamK Basic openLoop")
-        skConstsInVgprs = writer.isStreamKConstantsToVgprEnabled(kernel)
-
-        xccMapping = Component.XCCMapping.find(writer)
-        module.add(xccMapping(writer, kernel))
-
-        # Workaround for gfx12
-        if writer.states.archCaps["WorkGroupIdFromTTM"]:
-            module.add(SMovB32(dst=sgpr("WorkGroup0"), src="ttmp9", comment="workaround"))
-            module.add(SAndB32(dst=sgpr("WorkGroup1"), src0=hex(0xFFFF), src1="ttmp7", comment="workaround"))
-            module.add(SLShiftRightB32(dst=sgpr("WorkGroup2"), shiftHex=hex(0x10), src="ttmp7", comment="workaround"))
-
-        if skConstsInVgprs:
-            module.add(VMovB32(dst=vgpr(self._skv(writer, "StreamKIdx")), src=sgpr("WorkGroup0"),
-                               comment="Save original StreamK index to VGPR"))
-        else:
-            module.add(SMovB32(dst=sgpr("StreamKIdx"), src=sgpr("WorkGroup0"),
-                               comment="Save original StreamK index"))
-        # Basic SK
-        sIdx = writer.acquireStreamKConstSgpr(kernel, "StreamKIdx")
-        sIpw = writer.acquireStreamKConstSgpr(kernel, "SKItersPerWG")
-        if skConstsInVgprs:
-            module.add(VReadfirstlaneB32(dst=sgpr(sIdx), src=vgpr(writer.states.skConstVgprs["StreamKIdx"])))
-            module.add(VReadfirstlaneB32(dst=sgpr(sIpw), src=vgpr(writer.states.skConstVgprs["SKItersPerWG"])))
-        module.add(SMulI32(dst=sgpr("StreamKIter"), src0=sgpr(sIdx), src1=sgpr(sIpw), comment="StreamK starting iteration"))
-        writer.releaseStreamKConstSgpr(sIdx)
-        module.add(SAddU32(dst=sgpr("StreamKIterEnd"), src0=sgpr("StreamKIter"), src1=sgpr(sIpw), comment="StreamK ending iteration"))
-        writer.releaseStreamKConstSgpr(sIpw)
-        with writer.allocTmpSgpr(1, tag="TotalIters") as sTmpRes:
-            sTmp = sTmpRes.idx
-            module.add(self.computeTotalIters(writer, kernel, sTmp))
-            module.add(SMinU32(dst=sgpr("StreamKIterEnd"), src0=sgpr("StreamKIterEnd"), src1=sgpr(sTmp), comment="Cap ending iter at total iters"))
-        module.add(SCmpLtU32(src0=sgpr("StreamKIter"), src1=sgpr("StreamKIterEnd"), comment="Make sure there's work to do"))
-        module.add(writer.longBranchScc0(Label("KernelEnd", ""), posNeg=1))
-
-        return module
-
-    def graWorkGroup(self, writer, kernel, tPA, tPB):
-        module = Module("StreamK Basic graWorkGroup")
-
-        # StreamK workgroup mapping
-        sTmp = writer.sgprPool.checkOutAligned(4, 2, "SKMappingTemp", preventOverflow=not kernel.get("UseSubtileImpl", False))
-
-        module.add(self.skTileIndex(writer, kernel, sTmp, tPA, tPB))
-
-        # Increment StreamK iteration
-        module.add(SMovB32(dst=sgpr("StreamKIter"), src=sgpr(sTmp+2), comment="Increment StreamK Iteration"))
-
-        module.add(self.skIndexToWG(writer, kernel, sTmp))
-
-        writer.sgprPool.checkIn(sTmp)
-
-        return module
-
-    def computeLoadSrd(self, writer, kernel, tP, sTmp):
-        module = Module("StreamK Basic computeLoadSrd")
-        module.add(self.computeLoadSrdCommon(writer, kernel, tP, sTmp))
-        return module
-
-    def computeStoreSrdStart(self, writer, kernel):
-        module = Module("StreamK Basic computeStoreSrdStart")
-        # Parallel reduction currently only available for two-tile kernel
-        # module.add(self.computeStoreSrdStartCommon(writer, kernel))
-        return module
-
-    def graAddresses(self, writer, kernel, tP, vTmp):
-        module = Module("StreamK Basic graAddresses")
-        module.add(self.graAddressesCommon(writer, kernel, tP, vTmp))
-        return module
-
-    def declareStaggerParms(self, writer, kernel):
-        module = Module("StreamK Basic declareStaggerParms")
-        module.add(self.declareStaggerParmsCommon(writer, kernel))
-        return module
-
-    def tailLoopNumIter(self, writer, kernel, loopCounter):
-        module = Module("StreamK Basic tailLoopNumIter")
-        module.add(self.tailLoopNumIterCommon(writer, kernel, loopCounter))
-        return module
-
-    def calculateLoopNumIter(self, writer, kernel, loopCounterName, loopIdx, tmpSgprInfo):
-        module = Module("StreamK Basic calculateLoopNumIter")
-        module.add(self.calculateLoopNumIterCommon(writer, kernel, loopCounterName, loopIdx, tmpSgprInfo))
-        return module
-
-    def storeBranches(self, writer, kernel, skPartialsLabel, vectorWidths, elements, tmpVgpr, cvtVgprStruct):
-        module = Module("StreamK Basic storeBranches")
-        module.add(self.storeBranchesCommon(writer, kernel, skPartialsLabel, vectorWidths, elements, tmpVgpr, cvtVgprStruct))
-        return module
-
-    def writePartials(self, writer, kernel, skPartialsLabel, vectorWidths, elements, tmpVgpr, cvtVgprStruct, endLabel):
-        module = Module("StreamK Basic writePartials")
-        module.add(self.writePartialsCommon(writer, kernel, skPartialsLabel, vectorWidths, elements, tmpVgpr, cvtVgprStruct, endLabel))
-        return module
-
-    def initializeSrdAddressFlagsCheck(self, GeneralBatchedGemmSrdInitiation):
-        module = Module("StreamK Basic initializeSrdAddressFlagsCheck")
-        module.add(SCmpEQU64(src0=sgpr("AddressFlags", 2), src1=hex(0), comment="Check for synchronizer"))
-        module.add(SCBranchSCC0(labelName=GeneralBatchedGemmSrdInitiation.getLabelName(), comment="Parallel Reduction for General Batched GEMM, Srd initialized to workspace"))
-        return module
-
-    def routeToGeneralBatchedOrStridedBatched(self, stridedBatchedGemmLoad, generalBatchedGemmLoad, kernel):
-        module = Module("StreamK Basic routeToGeneralBatchedOrStridedBatched")
-        module.add(self.stridedBatchOrGeneralBatch(stridedBatchedGemmLoad, generalBatchedGemmLoad, kernel))
-        return module
-
-    def kernelEnd(self, writer, kernel):
-        module = Module("StreamK Basic kernelEnd")
-        return module
-
-class StreamKTwoTileOriginal(StreamK):
-    kernel = {"StreamK": 2}
-    emitsParallelReductionSgprAliases = True
-
-    def preLoop(self, writer, kernel):
-        module = Module("StreamK TwoTileOriginal openLoop")
-        skConstsInVgprs = writer.isStreamKConstantsToVgprEnabled(kernel)
-
-        xccMapping = Component.XCCMapping.find(writer)
-        module.add(xccMapping(writer, kernel))
-
-        # Workaround for gfx12
-        if writer.states.archCaps["WorkGroupIdFromTTM"]:
-            module.add(SMovB32(dst=sgpr("WorkGroup0"), src="ttmp9", comment="workaround"))
-            module.add(SAndB32(dst=sgpr("WorkGroup1"), src0=hex(0xFFFF), src1="ttmp7", comment="workaround"))
-            module.add(SLShiftRightB32(dst=sgpr("WorkGroup2"), shiftHex=hex(0x10), src="ttmp7", comment="workaround"))
-
-        if skConstsInVgprs:
-            module.add(VMovB32(dst=vgpr(self._skv(writer, "StreamKIdx")), src=sgpr("WorkGroup0"),
-                               comment="Save original StreamK index to VGPR"))
-        else:
-            module.add(SMovB32(dst=sgpr("StreamKIdx"), src=sgpr("WorkGroup0"),
-                               comment="Save original StreamK index"))
-        # Two-tile SK (SK first)
-        # iter count after all extra iters have been distributed
-        sSkExtraIters = writer.sgprPool.checkOut(1, "extraIters")
-        sIter = writer.sgprPool.checkOut(2, "SKIter")
-        module.add(self.skExtraIters(writer, kernel, sSkExtraIters, sIter)) # sIter used as tmp
-        sIdx = writer.acquireStreamKConstSgpr(kernel, "StreamKIdx")
-        sIpw = writer.acquireStreamKConstSgpr(kernel, "SKItersPerWG")
-        if skConstsInVgprs:
-            module.add(VReadfirstlaneB32(dst=sgpr(sIdx), src=vgpr(writer.states.skConstVgprs["StreamKIdx"])))
-            module.add(VReadfirstlaneB32(dst=sgpr(sIpw), src=vgpr(writer.states.skConstVgprs["SKItersPerWG"])))
-        module.add(SMulI32(dst=sgpr("StreamKIter"), src0=sgpr(sIdx), src1=sgpr(sIpw), comment="StreamK starting iteration (case: after extra iters)"))
-        module.add(SAddU32(dst=sgpr("StreamKIter"), src0=sgpr("StreamKIter"), src1=sgpr(sSkExtraIters), comment="Add extra iters"))
-        module.add(SAddU32(dst=sgpr("StreamKIterEnd"), src0=sgpr("StreamKIter"), src1=sgpr(sIpw), comment="StreamK ending iteration (case: after extra iters)"))
-        # iter count before all extra iters have been distributed
-        module.add(SAddU32(dst=sgpr(sIter+1), src0=sgpr(sIpw), src1=1, comment="Spread out extra iterations"))
-        writer.releaseStreamKConstSgpr(sIpw)
-        module.add(SMulI32(dst=sgpr(sIter), src0=sgpr(sIdx), src1=sgpr(sIter+1), comment="StreamK starting iteration (case: before extra iters)"))
-        module.add(SAddU32(dst=sgpr(sIter+1), src0=sgpr(sIter), src1=sgpr(sIter+1), comment="StreamK ending iteration (case: before extra iters)"))
-        # select correct start/end iteration index
-        module.add(SCmpLtU32(src0=sgpr(sIdx), src1=sgpr(sSkExtraIters), comment="Check if lane gets an extra iteration"))
-        writer.releaseStreamKConstSgpr(sIdx)
-        module.add(SCSelectB32(dst=sgpr("StreamKIter"), src0=sgpr(sIter), src1=sgpr("StreamKIter"), comment="Set start iter"))
-        module.add(SCSelectB32(dst=sgpr("StreamKIterEnd"), src0=sgpr(sIter+1), src1=sgpr("StreamKIterEnd"), comment="Set end iter"))
-        writer.sgprPool.checkIn(sSkExtraIters)
-        writer.sgprPool.checkIn(sIter)
-        # clamp to end of sk iterations
-        sTmp = writer.sgprPool.checkOut(1, "TotalSKIters")
-        sSkt = writer.acquireStreamKConstSgpr(kernel, "skTiles")
-        sIpt = writer.acquireStreamKConstSgpr(kernel, "ItersPerTile")
-        if skConstsInVgprs:
-            module.add(VReadfirstlaneB32(dst=sgpr(sSkt), src=vgpr(writer.states.skConstVgprs["skTiles"])))
-            module.add(VReadfirstlaneB32(dst=sgpr(sIpt), src=vgpr(writer.states.skConstVgprs["ItersPerTile"])))
-        module.add(SMulI32(dst=sgpr(sTmp), src0=sgpr(sSkt), src1=sgpr(sIpt), comment="Total SK iters"))
-        writer.releaseStreamKConstSgpr(sSkt)
-        writer.releaseStreamKConstSgpr(sIpt)
-        module.add(SMinU32(dst=sgpr("StreamKIterEnd"), src0=sgpr("StreamKIterEnd"), src1=sgpr(sTmp), comment="Cap ending iter at total SK iters"))
-        # check if this WG has no work to do
-        module.add(self.computeTotalIters(writer, kernel, sTmp))
-        module.add(SCmpLtU32(src0=sgpr("StreamKIter"), src1=sgpr(sTmp), comment="Make sure there's work to do"))
-        writer.sgprPool.checkIn(sTmp)
-        module.add(writer.longBranchScc0(Label("KernelEnd", ""), posNeg=1))
-
-        return module
-
-    def graWorkGroup(self, writer, kernel, tPA, tPB):
-        module = Module("StreamK TwoTileOriginal graWorkGroup")
-        skConstsInVgprs = writer.isStreamKConstantsToVgprEnabled(kernel)
-
-        # StreamK workgroup mapping
-        sTmp = writer.sgprPool.checkOutAligned(4, 2, "SKMappingTemp", preventOverflow=not kernel.get("UseSubtileImpl", False))
-
-        module.add(self.skTileIndex(writer, kernel, sTmp, tPA, tPB))
-
-        # local end (DP tile)
-        # TODO This line isnt needed?
-        module.add(SSubU32(dst=sgpr(sTmp+3), src0=sgpr(sTmp+2), src1=sgpr(sTmp+1), comment="Local iteration end (DP tile)"))
-        # select correct local end
-        module.add(SCmpLtU32(src0=sgpr("StreamKIter"), src1=sgpr("StreamKIterEnd"), comment="Check if in SK or DP section"))
-        module.add(SCSelectB32(dst=sgpr("StreamKLocalEnd"), src0=sgpr("StreamKLocalEnd"), src1=sgpr(sTmp+3), comment="Apply SK or DP end iteration"))
-
-        # Increment StreamK iteration
-        # If moving from SK to DP, next iteration is first DP
-        # sTmp = offset to first DP tile
-        sSkt = writer.acquireStreamKConstSgpr(kernel, "skTiles")
-        sIpt = writer.acquireStreamKConstSgpr(kernel, "ItersPerTile")
-        if skConstsInVgprs:
-            module.add(VReadfirstlaneB32(dst=sgpr(sSkt), src=vgpr(writer.states.skConstVgprs["skTiles"])))
-            module.add(VReadfirstlaneB32(dst=sgpr(sIpt), src=vgpr(writer.states.skConstVgprs["ItersPerTile"])))
-        module.add(SMulI32(dst=sgpr(sTmp+3), src0=sgpr(sSkt), src1=sgpr(sIpt), comment="Offset to first DP tile"))
-        writer.releaseStreamKConstSgpr(sSkt)
-        sIdx = writer.acquireStreamKConstSgpr(kernel, "StreamKIdx")
-        if skConstsInVgprs:
-            module.add(VReadfirstlaneB32(dst=sgpr(sIdx), src=vgpr(writer.states.skConstVgprs["StreamKIdx"])))
-        module.add(SMulI32(dst=sgpr(sTmp+1), src0=sgpr(sIdx), src1=sgpr(sIpt), comment="WG tile offset"))
-        writer.releaseStreamKConstSgpr(sIdx)
-        writer.releaseStreamKConstSgpr(sIpt)
-        module.add(SAddU32(dst=sgpr(sTmp+3), src0=sgpr(sTmp+3), src1=sgpr(sTmp+1), comment="DP start offset + WG offset"))
-        # If already in DP, add dpShift
-        sGrid = writer.acquireStreamKConstSgpr(kernel, "skGrid")
-        sIpt2 = writer.acquireStreamKConstSgpr(kernel, "ItersPerTile")
-        if skConstsInVgprs:
-            module.add(VReadfirstlaneB32(dst=sgpr(sGrid), src=vgpr(writer.states.skConstVgprs["skGrid"])))
-            module.add(VReadfirstlaneB32(dst=sgpr(sIpt2), src=vgpr(writer.states.skConstVgprs["ItersPerTile"])))
-        module.add(SMulI32(dst=sgpr(sTmp+1), src0=sgpr(sGrid), src1=sgpr(sIpt2), comment="DP iterations shift"))
-        writer.releaseStreamKConstSgpr(sGrid)
-        writer.releaseStreamKConstSgpr(sIpt2)
-        module.add(SAddU32(dst=sgpr(sTmp+1), src0=sgpr(sTmp+1), src1=sgpr("StreamKIter"), comment="Add DP shift"))
-        # Save DP iter in sTmp
-        module.add(SCmpLtU32(src0=sgpr("StreamKIter"), src1=sgpr("StreamKIterEnd"), comment="Check if in SK or DP section"))
-        module.add(SCSelectB32(dst=sgpr(sTmp+3), src0=sgpr(sTmp+3), src1=sgpr(sTmp+1), comment="Select first DP tile, or add DP shift"))
-        # If staying in SK portion, next iteration is sTmp+2
-        module.add(SCmpLtU32(src0=sgpr(sTmp+2), src1=sgpr("StreamKIterEnd"), comment="Check if there are more SK tiles"))
-        module.add(SCSelectB32(dst=sgpr("StreamKIter"), src0=sgpr(sTmp+2), src1=sgpr(sTmp+3), comment="Select next SK or DP tile"))
-
-        module.add(self.skIndexToWG(writer, kernel, sTmp))
-
-        writer.sgprPool.checkIn(sTmp)
-
-        return module
-
-    def computeLoadSrd(self, writer, kernel, tP, sTmp):
-        module = Module("StreamK TwoTileOriginal computeLoadSrd")
-        module.add(self.computeLoadSrdCommon(writer, kernel, tP, sTmp))
-        return module
-
-    def computeStoreSrdStart(self, writer, kernel):
-        module = Module("StreamK TwoTileOriginal computeStoreSrdStart")
-        module.add(self.computeStoreSrdStartCommon(writer, kernel))
-        return module
-
-    def graAddresses(self, writer, kernel, tP, vTmp):
-        module = Module("StreamK TwoTileOriginal graAddresses")
-        module.add(self.graAddressesCommon(writer, kernel, tP, vTmp))
-        return module
-
-    def declareStaggerParms(self, writer, kernel):
-        module = Module("StreamK TwoTileOriginal declareStaggerParms")
-        module.add(self.declareStaggerParmsCommon(writer, kernel))
-        return module
-
-    def tailLoopNumIter(self, writer, kernel, loopCounter):
-        module = Module("StreamK TwoTileOriginal tailLoopNumIter")
-        module.add(self.tailLoopNumIterCommon(writer, kernel, loopCounter))
-        return module
-
-    def calculateLoopNumIter(self, writer, kernel, loopCounterName, loopIdx, tmpSgprInfo):
-        module = Module("StreamK TwoTileOriginal calculateLoopNumIter")
-        module.add(self.calculateLoopNumIterCommon(writer, kernel, loopCounterName, loopIdx, tmpSgprInfo))
-        return module
-
-    def storeBranches(self, writer, kernel, skPartialsLabel, vectorWidths, elements, tmpVgpr, cvtVgprStruct):
-        module = Module("StreamK TwoTileOriginal storeBranches")
-        module.add(self.storeBranchesCommon(writer, kernel, skPartialsLabel, vectorWidths, elements, tmpVgpr, cvtVgprStruct))
-        return module
-
-    def writePartials(self, writer, kernel, skPartialsLabel, vectorWidths, elements, tmpVgpr, cvtVgprStruct, endLabel):
-        module = Module("StreamK TwoTileOriginal writePartials")
-        module.add(self.writePartialsCommon(writer, kernel, skPartialsLabel, vectorWidths, elements, tmpVgpr, cvtVgprStruct, endLabel))
-        return module
-
-    def initializeSrdAddressFlagsCheck(self, GeneralBatchedGemmSrdInitiation):
-        module = Module("StreamK TwoTileOriginal initializeSrdAddressFlagsCheck")
-        module.add(SCmpEQU64(src0=sgpr("AddressFlags", 2), src1=hex(0), comment="Check for synchronizer"))
-        module.add(SCBranchSCC0(labelName=GeneralBatchedGemmSrdInitiation.getLabelName(), comment="Parallel Reduction for General Batched GEMM, Srd initialized to workspace"))
-        return module
-
-    def routeToGeneralBatchedOrStridedBatched(self, stridedBatchedGemmLoad, generalBatchedGemmLoad, kernel):
-        module = Module("StreamK TwoTileOriginal routeToGeneralBatchedOrStridedBatched")
-        module.add(self.stridedBatchOrGeneralBatch(stridedBatchedGemmLoad, generalBatchedGemmLoad, kernel))
-        return module
-
-    def kernelEnd(self, writer, kernel):
-        module = Module("StreamK TwoTileOriginal kernelEnd")
         return module
 
 class StreamKTwoTileDPFirst(StreamK):
@@ -4333,8 +4035,6 @@ class StreamKHybrid(StreamK):
 # feature flags without an instantiated KernelWriter.
 _STREAMK_VARIANT_BY_INT = {
     0: StreamKOff,
-    1: StreamKBasic,
-    2: StreamKTwoTileOriginal,
     3: StreamKTwoTileDPFirst,
     4: StreamKDynamic,
     5: StreamKHybrid,

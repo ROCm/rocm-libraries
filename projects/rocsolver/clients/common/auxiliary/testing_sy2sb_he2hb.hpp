@@ -89,6 +89,15 @@ void testing_sy2sb_he2hb_bad_arg()
     CHECK_HIP_ERROR(dAband.memcheck());
     CHECK_HIP_ERROR(dTau.memcheck());
 
+#ifndef ROCSOLVER_ENABLE_EIG_2STAGE
+    // he2hb is gated behind ROCSOLVER_ENABLE_EIG_2STAGE; when the flag is off the
+    // entry points must report rocblas_status_not_implemented instead of running.
+    EXPECT_ROCBLAS_STATUS(
+        rocsolver_sy2sb_he2hb(handle, n, kd, nb, dA.data(), lda, dAband.data(), ldab, dTau.data()),
+        rocblas_status_not_implemented);
+    return;
+#endif
+
     // check bad arguments
     sy2sb_he2hb_checkBadArgs(handle, n, kd, nb, dA.data(), lda, dAband.data(), ldab, dTau.data());
 }
@@ -309,6 +318,17 @@ void testing_sy2sb_he2hb(Arguments& argus)
     I ldab = 3 * kd - 1;
 
     rocblas_int hot_calls = argus.iters;
+
+#ifndef ROCSOLVER_ENABLE_EIG_2STAGE
+    // he2hb is gated behind ROCSOLVER_ENABLE_EIG_2STAGE; when the flag is off the
+    // entry points must report rocblas_status_not_implemented instead of running.
+    EXPECT_ROCBLAS_STATUS(rocsolver_sy2sb_he2hb(handle, n, kd, nb, // opts
+                                                (T*)nullptr, lda, // A
+                                                (T*)nullptr, ldab, // Aband
+                                                (T*)nullptr), // tau
+                          rocblas_status_not_implemented);
+    return;
+#endif
 
     // check non-supported values
     // N/A

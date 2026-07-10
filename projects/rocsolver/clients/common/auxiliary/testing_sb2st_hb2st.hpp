@@ -151,6 +151,15 @@ void testing_sb2st_hb2st_bad_arg()
     CHECK_HIP_ERROR(dV.memcheck());
     CHECK_HIP_ERROR(dTau.memcheck());
 
+#ifndef ROCSOLVER_ENABLE_EIG_2STAGE
+    // hb2st is gated behind ROCSOLVER_ENABLE_EIG_2STAGE; when the flag is off the
+    // entry points must report rocblas_status_not_implemented instead of running.
+    EXPECT_ROCBLAS_STATUS(rocsolver_sb2st_hb2st(handle, rocblas_fill_lower, n, kd, dAband.data(), ldab,
+                                                dD.data(), dE.data(), dV.data(), ldv, dTau.data()),
+                          rocblas_status_not_implemented);
+    return;
+#endif
+
     // check bad arguments
     sb2st_hb2st_checkBadArgs(handle, n, kd, dAband.data(), ldab, dD.data(), dE.data(), dV.data(),
                              ldv, dTau.data());
@@ -177,7 +186,7 @@ void sb2st_hb2st_getError(const rocblas_handle handle,
                           double* max_err)
 {
     using S = decltype(std::real(T{}));
-    using std::abs, std::imag, std::real, std::max;
+    using std::abs, std::imag, std::real;
 
     I idiag = kd - 1;
 
@@ -199,7 +208,7 @@ void sb2st_hb2st_getError(const rocblas_handle handle,
         // Check that diag is real to working precision.
         for(I j = 0; j < n; ++j)
         {
-            err = max(err, abs(imag(hAbandRes[0][idiag + j * ldab])));
+            err = rocblas_max_nan(err, abs(imag(hAbandRes[0][idiag + j * ldab])));
         }
         *max_err = rocblas_max_nan(err, *max_err);
 
@@ -207,7 +216,7 @@ void sb2st_hb2st_getError(const rocblas_handle handle,
         err = 0;
         for(I j = 0; j < n - 1; ++j)
         {
-            err = max(err, abs(imag(hAbandRes[0][idiag + 1 + j * ldab])));
+            err = rocblas_max_nan(err, abs(imag(hAbandRes[0][idiag + 1 + j * ldab])));
         }
         *max_err = rocblas_max_nan(err, *max_err);
     }
@@ -348,6 +357,18 @@ void testing_sb2st_hb2st(Arguments& argus)
 
     rocblas_fill uplo = char2rocblas_fill(uploC);
     rocblas_int hot_calls = argus.iters;
+
+#ifndef ROCSOLVER_ENABLE_EIG_2STAGE
+    // hb2st is gated behind ROCSOLVER_ENABLE_EIG_2STAGE; when the flag is off the
+    // entry points must report rocblas_status_not_implemented instead of running.
+    EXPECT_ROCBLAS_STATUS(rocsolver_sb2st_hb2st(handle, uplo, n, kd, // opts
+                                                (T*)nullptr, ldab, // Aband
+                                                (S*)nullptr, (S*)nullptr, // D, E
+                                                (T*)nullptr, ldv, // V
+                                                (T*)nullptr), // tau
+                          rocblas_status_not_implemented);
+    return;
+#endif
 
     // determine sizes
     size_t size_Aband = ldab * n;
