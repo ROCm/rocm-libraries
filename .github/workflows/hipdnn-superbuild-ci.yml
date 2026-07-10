@@ -272,6 +272,7 @@ jobs:
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
         with:
           sparse-checkout: |
+            cmake/toolchains
             projects/hipdnn/python
 
       - name: Download Linux patched ROCm SDK artifact
@@ -344,10 +345,10 @@ jobs:
                 -B "$BUILD_DIR" \
                 -GNinja \
                 -DCMAKE_BUILD_TYPE=Release \
+                -DCMAKE_TOOLCHAIN_FILE="$GITHUB_WORKSPACE/cmake/toolchains/rocm-clang.cmake" \
+                -DROCM_PATH="$ROCM_SDK_PATH" \
                 -DCMAKE_PREFIX_PATH="$ROCM_SDK_PATH" \
                 -DCMAKE_PROGRAM_PATH="$ROCM_SDK_PATH/lib/llvm/bin" \
-                -DCMAKE_C_COMPILER="$ROCM_SDK_PATH/lib/llvm/bin/clang" \
-                -DCMAKE_CXX_COMPILER="$ROCM_SDK_PATH/lib/llvm/bin/clang++" \
                 -DFETCHCONTENT_SOURCE_DIR_NANOBIND="$THIRD_PARTY_DEPS_DIR/nanobind-2.12.0" \
                 -DFETCHCONTENT_SOURCE_DIR_TSL_ROBIN_MAP="$THIRD_PARTY_DEPS_DIR/robin-map-1.4.1" \
                 -DPython_EXECUTABLE="$VENV_PATH/bin/python"
@@ -394,6 +395,7 @@ jobs:
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
         with:
           sparse-checkout: |
+            cmake/toolchains
             projects/hipdnn/python
 
       - name: Download Windows patched ROCm SDK artifact
@@ -470,14 +472,16 @@ jobs:
         run: |
           $python = Join-Path $env:VENV_PATH "Scripts\python.exe"
           $rocmSdkPath = $env:ROCM_SDK_PATH -replace '\\', '/'
+          $workspace = $env:GITHUB_WORKSPACE -replace '\\', '/'
+          $toolchainFile = "$workspace/cmake/toolchains/rocm-clang.cmake"
           cmake -S projects/hipdnn/python/frontend_bindings `
                 -B $env:BUILD_DIR `
                 -GNinja `
                 -DCMAKE_BUILD_TYPE=Release `
+                "-DCMAKE_TOOLCHAIN_FILE=$toolchainFile" `
+                "-DROCM_PATH=$rocmSdkPath" `
                 "-DCMAKE_PREFIX_PATH=$rocmSdkPath" `
                 "-DCMAKE_PROGRAM_PATH=$rocmSdkPath/lib/llvm/bin" `
-                "-DCMAKE_C_COMPILER=$rocmSdkPath/lib/llvm/bin/clang.exe" `
-                "-DCMAKE_CXX_COMPILER=$rocmSdkPath/lib/llvm/bin/clang++.exe" `
                 "-DFETCHCONTENT_SOURCE_DIR_NANOBIND=$env:THIRD_PARTY_DEPS_DIR\nanobind-2.12.0" `
                 "-DFETCHCONTENT_SOURCE_DIR_TSL_ROBIN_MAP=$env:THIRD_PARTY_DEPS_DIR\robin-map-1.4.1" `
                 "-DPython_EXECUTABLE=$python"
