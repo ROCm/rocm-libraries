@@ -12,6 +12,7 @@ add_executable(hipdnn_integration_tests_unit_tests
     TestSupportMatrixCollector.cpp
     TestTestConfig.cpp
     TestTestSettings.cpp
+    TestTomlGuards.cpp
     TestGpuReferenceGraphExecutor.cpp
     TestGpuConvolutionFwdSignatureKey.cpp
     TestGpuConvolutionFwdPlan.cpp

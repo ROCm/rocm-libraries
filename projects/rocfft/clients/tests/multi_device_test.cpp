@@ -18,6 +18,11 @@
 // OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
 // THE SOFTWARE.
 
+// RCCL coverage: when built with ROCFFT_RCCL_ENABLE, this multi-device suite
+// drives the RCCL paths (InitRCCLCommunicator, CommRCCLGrouped/AllToAll). CI
+// runs it against both the normal and RCCL builds, so these cases cover the
+// RCCL interface without a separate standalone unit test.
+
 #include "../../shared/accuracy_test.h"
 #include "../../shared/fft_enums.h"
 #include "../../shared/params_gen.h"

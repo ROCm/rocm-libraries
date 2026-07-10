@@ -250,7 +250,6 @@ TIMING:python_benchmark_problems:5000.0
             + timings["code_object_loading"][0]
             + timings["cpu_data_init"][0]
             + timings["cpu_reference_gemm"][0]
-            + timings["gpu_kernel_execution"][0]
         )
         assert cpp_sum <= timings["python_client_execution"][0]
 

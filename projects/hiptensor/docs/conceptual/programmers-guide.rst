@@ -140,6 +140,7 @@ The ``library`` directory contains the following include and source files:
 - ``library/src/reduction/``: Source files for core initialization and management of reduction module.
 - ``library/src/reduction/device``: Source files for composable kernel backend reduction instances.
 - ``library/src/include``: Infrastructure support for backend and logging management.
+- ``library/stub/``: Host-only stub implementation of the public API, built as ``libhiptensor`` when no GPU target is available (see :ref:`installation`). Every entry point returns ``HIPTENSOR_STATUS_NOT_SUPPORTED``. The stub sources are auto-generated from the public header, and a configure-time coverage check keeps them in sync with the API.
 
 ``samples`` directory
 ^^^^^^^^^^^^^^^^^^^^^^^^^^

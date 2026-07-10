@@ -563,7 +563,7 @@
     SpaceFillingAlgo: []
     StaggerU: 32
     StaggerUMapping: 0
-    StaggerUStride: 512.0
+    StaggerUStride: 512
     StorePriorityOpt: false
     StoreRemapVectorWidth: 0
     StoreSwapAddr: false
