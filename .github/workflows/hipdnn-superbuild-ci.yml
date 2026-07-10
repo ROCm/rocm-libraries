@@ -266,7 +266,6 @@ jobs:
       ROCM_SDK_PATH: /tmp/rocm-sdk
       SUPERBUILD_ARTIFACT_DIR: /tmp/hipdnn-rocm-sdk-artifact
       VENV_PATH: /tmp/rocm_wheels
-      THIRD_PARTY_DEPS_DIR: /tmp/rocm-third-party-deps
     steps:
       - name: Checkout repository
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
@@ -306,29 +305,6 @@ jobs:
           pip install build numpy pytest
           echo "$VENV_PATH/bin" >> "$GITHUB_PATH"
 
-      - name: Download third-party sources
-        run: |
-          set -euo pipefail
-          mkdir -p "$THIRD_PARTY_DEPS_DIR"
-          "$VENV_PATH/bin/python" - <<'PY'
-          import os
-          import tarfile
-          import urllib.request
-          from pathlib import Path
-
-          deps_dir = Path(os.environ["THIRD_PARTY_DEPS_DIR"])
-          for archive_name in ("nanobind-2.12.0.tar.gz", "robin-map-1.4.1.tar.gz"):
-              archive = deps_dir / archive_name
-              urllib.request.urlretrieve(
-                  f"https://rocm-third-party-deps.s3.us-east-2.amazonaws.com/{archive_name}",
-                  archive,
-              )
-              with tarfile.open(archive, "r:gz") as tar:
-                  tar.extractall(deps_dir, filter="data")
-          PY
-          test -d "$THIRD_PARTY_DEPS_DIR/nanobind-2.12.0"
-          test -d "$THIRD_PARTY_DEPS_DIR/robin-map-1.4.1"
-
       - name: Configure frontend bindings
         run: |
           cmake -S projects/hipdnn/python/frontend_bindings \
@@ -336,8 +312,6 @@ jobs:
                 -GNinja \
                 -DCMAKE_BUILD_TYPE=Release \
                 -DCMAKE_PREFIX_PATH="$ROCM_SDK_PATH" \
-                -DFETCHCONTENT_SOURCE_DIR_NANOBIND="$THIRD_PARTY_DEPS_DIR/nanobind-2.12.0" \
-                -DFETCHCONTENT_SOURCE_DIR_TSL_ROBIN_MAP="$THIRD_PARTY_DEPS_DIR/robin-map-1.4.1" \
                 -DPython_EXECUTABLE="$VENV_PATH/bin/python"
 
       - name: Build frontend bindings
@@ -373,7 +347,6 @@ jobs:
       ROCM_SDK_PATH: B:\rocm-sdk
       SUPERBUILD_ARTIFACT_DIR: B:\hipdnn-rocm-sdk-artifact
       VENV_PATH: B:\rocm_wheels
-      THIRD_PARTY_DEPS_DIR: B:\rocm-third-party-deps
     steps:
       - name: Configure git longpaths
         run: git config --global core.longpaths true
@@ -420,31 +393,6 @@ jobs:
 
           (Join-Path $env:VENV_PATH "Scripts") | Out-File -FilePath $env:GITHUB_PATH -Append
 
-      - name: Download third-party sources
-        run: |
-          New-Item -ItemType Directory -Force $env:THIRD_PARTY_DEPS_DIR | Out-Null
-          $python = Join-Path $env:VENV_PATH "Scripts\python.exe"
-          $script = @'
-          import os
-          import tarfile
-          import urllib.request
-          from pathlib import Path
-
-          deps_dir = Path(os.environ["THIRD_PARTY_DEPS_DIR"])
-          for archive_name in ("nanobind-2.12.0.tar.gz", "robin-map-1.4.1.tar.gz"):
-              archive = deps_dir / archive_name
-              urllib.request.urlretrieve(
-                  f"https://rocm-third-party-deps.s3.us-east-2.amazonaws.com/{archive_name}",
-                  archive,
-              )
-              with tarfile.open(archive, "r:gz") as tar:
-                  tar.extractall(deps_dir, filter="data")
-          '@
-          $script | & $python
-          if ($LASTEXITCODE -ne 0) { throw "Failed to download third-party sources" }
-          if (-not (Test-Path (Join-Path $env:THIRD_PARTY_DEPS_DIR "nanobind-2.12.0"))) { throw "nanobind source directory not found" }
-          if (-not (Test-Path (Join-Path $env:THIRD_PARTY_DEPS_DIR "robin-map-1.4.1"))) { throw "robin-map source directory not found" }
-
       - name: Configure frontend bindings
         run: |
           $python = Join-Path $env:VENV_PATH "Scripts\python.exe"
@@ -453,8 +401,6 @@ jobs:
                 -GNinja `
                 -DCMAKE_BUILD_TYPE=Release `
                 "-DCMAKE_PREFIX_PATH=$env:ROCM_SDK_PATH" `
-                "-DFETCHCONTENT_SOURCE_DIR_NANOBIND=$env:THIRD_PARTY_DEPS_DIR\nanobind-2.12.0" `
-                "-DFETCHCONTENT_SOURCE_DIR_TSL_ROBIN_MAP=$env:THIRD_PARTY_DEPS_DIR\robin-map-1.4.1" `
                 "-DPython_EXECUTABLE=$python"
 
       - name: Build frontend bindings
