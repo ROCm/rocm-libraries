@@ -73,7 +73,7 @@ inline void rocsolver_bench_inform(rocsolver_inform_type it, size_t arg = 0)
     case inform_invalid_size: fmt::print("Invalid size arguments...\n"); break;
     case inform_invalid_args: fmt::print("Invalid value in arguments...\n"); break;
     case inform_mem_query: fmt::print("{} bytes of device memory are required...\n", arg); break;
-    case inform_not_implemented: fmt::print("Method returned not implemented...\n", arg); break;
+    case inform_not_implemented: fmt::print("Method returned not implemented...\n"); break;
     }
     fmt::print("No performance data to collect.\n");
     fmt::print("No computations to verify.\n");
