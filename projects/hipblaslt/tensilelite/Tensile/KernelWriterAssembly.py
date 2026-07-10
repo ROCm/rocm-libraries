@@ -14772,6 +14772,8 @@ class KernelWriterAssembly(KernelWriter):
       divisor   = kernel["MacroTile0"]
       destBpe   = int(kernel["ProblemType"]["DestDataType"].numBytes()) if self.states.storeAlign8 else 1
       alignSize = 16 // destBpe  # storeAlign8: dwordx4 store width (16B) / destBpe; else: 16
+      if kernel.get("TDMSubtileHybrid"):
+        alignSize = 1
       wgSgpr    = "WorkGroup0"
       nwgSgpr   = "NumWorkGroups0"
       # tmpS0 = SizeI % MT0  (the trailing-row count for the last WG)
