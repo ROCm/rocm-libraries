@@ -440,6 +440,11 @@ class UnifiedAttention2DTiledSpec:
     # workgroups for one KV head walk q-blocks contiguously, improving L2/XCD
     # locality for long-prefill.
     use_q_major_grid: bool = False
+    # Two-phase causal loop: emit an unmasked bulk phase (skip_mask=True) for
+    # tiles fully below the diagonal, then a masked boundary phase. Pays off
+    # only when the kernel is VALU/throughput-bound (the x8 conflict-free-V
+    # path); no-op-guarded to sliding_window==0. AICK-1495.
+    use_causal_mask_phase_split: bool = False
 
     def __post_init__(self):
         # gfx942 (CDNA3) variant: the narrow ``16x16x16`` default path only.
@@ -940,6 +945,7 @@ class UnifiedAttention2DTiledSpec:
             "ksring" if self.use_k_sliced_ring else "",
             "ldsseq" if self.use_k_sliced_ldsseq else "",
             "iglp1" if self.use_iglp_opt else "",
+            "cmps" if self.use_causal_mask_phase_split else "",
             "k1buf" if self.use_k_single_buffer else "",
         )
 
@@ -1279,6 +1285,7 @@ def build_unified_attention_2d_tiled(
     K_SLICED_LDSSEQ = spec.use_k_sliced_ldsseq
     USE_IGLP_OPT = spec.use_iglp_opt
     USE_QK_PV_SCHED_GROUP_BARRIER = spec.use_qk_pv_sched_group_barrier
+    CAUSAL_MASK_PHASE_SPLIT = spec.use_causal_mask_phase_split
     USE_GLOBAL_LOAD_LDS_K = spec.use_global_load_lds_k
     # DIAGNOSTIC ONLY (not signature-gated -- toggle re-JITs via env): read the
     # transposed cfv [HD,T+pad] V via 4 scalar n=1 reads instead of one n=4
@@ -1710,7 +1717,7 @@ def build_unified_attention_2d_tiled(
         # and bf16. (The K=16 bf16 atom is gfx950-only, but cfvst rides the
         # gfx942-legal K=8 32x32x8 path, so bf16 is fine here.)
         and dtype in (F16, BF16)
-        and HD in (64, 128)
+        and HD in (64, 128, 256)
         and (HD % 8 == 0)
         and (T * HD) % THREADS == 0
         and _v_t_fits_eff
@@ -5148,9 +5155,33 @@ def build_unified_attention_2d_tiled(
     # softmax/acc/buffer carry is threaded from one phase into the next via
     # ``scf_for_iter`` results so the second loop resumes exactly where the
     # first left off (same K/V double-buffer slot, same online-softmax state).
-    kvloop = b.scf_for_iter(tile_start, tile_end, kv_step, iter_args, iv_name="kv_tile")
-    with kvloop as (kv_tile_iv, carry):
-        _emit_kv_body(kv_tile_iv, carry, False)
+    _cmps = CAUSAL_MASK_PHASE_SPLIT and (spec.sliding_window == 0) and not GROUPED_KV2
+    if _cmps:
+        # Two-phase causal loop (re-enabled per the case-study note above, now
+        # that the 32x32x8 conflict-free-V path is VALU/throughput-bound rather
+        # than latency-bound): [tile_start, split) is fully below the diagonal
+        # (every key <= the block's MIN causal limit = context_len +
+        # qb_start_pos), so skip_mask=True is a bit-exact no-op there; only
+        # [split, tile_end) needs the per-element causal mask VALU.
+        _min_causal_lim = b.add(context_len, qb_start_pos)
+        _split_raw = b.div(_min_causal_lim, b.const_i32(T))
+        _split = b.select(b.cmp_lt(_split_raw, tile_start), tile_start, _split_raw)
+        _split = b.select(b.cmp_lt(tile_end, _split), tile_end, _split)
+        # Phase-1 iter-args need UNIQUE names: both loops lower into one flat
+        # LLVM function, so shared phi names (m0/l0/...) would collide. The body
+        # consumes the carry *values*, not names, so renaming is safe.
+        _iter_args_u = [(nm + "u", init) for (nm, init) in iter_args]
+        _ph1 = b.scf_for_iter(tile_start, _split, kv_step, _iter_args_u, iv_name="kv_tile_u")
+        with _ph1 as (kv_tile_iv, carry):
+            _emit_kv_body(kv_tile_iv, carry, True)
+        _iter_args2 = [(nm, res) for (nm, _i), res in zip(iter_args, _ph1.results)]
+        kvloop = b.scf_for_iter(_split, tile_end, kv_step, _iter_args2, iv_name="kv_tile")
+        with kvloop as (kv_tile_iv, carry):
+            _emit_kv_body(kv_tile_iv, carry, False)
+    else:
+        kvloop = b.scf_for_iter(tile_start, tile_end, kv_step, iter_args, iv_name="kv_tile")
+        with kvloop as (kv_tile_iv, carry):
+            _emit_kv_body(kv_tile_iv, carry, False)
 
     # ---------------- epilogue ----------------
     # The loop issues a uniform "next K" async load every iteration, including
