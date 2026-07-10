@@ -154,6 +154,20 @@ rocsparse_status rocsparse::compute_line_nnz_profile(rocsparse_handle           
         return rocsparse_status_success;
     }
 
+    // The reduction ends with a synchronizing device->host copy, which is illegal
+    // while the stream is being captured into a HIP graph and would invalidate the
+    // capture. Callers (e.g. hipSPARSE's graph-capture tests) may run the analysis
+    // stage under capture, so guard here rather than relying on the caller: leave
+    // the profile unknown so the selector falls back to the capture-safe default
+    // (row-split). A captured graph therefore stays valid, at the cost of not
+    // upgrading skewed matrices while capturing.
+    hipStreamCaptureStatus capture_status = hipStreamCaptureStatusNone;
+    RETURN_IF_HIP_ERROR(hipStreamIsCapturing(handle->stream, &capture_status));
+    if(capture_status != hipStreamCaptureStatusNone)
+    {
+        return rocsparse_status_success;
+    }
+
     switch(offsets_indextype)
     {
     case rocsparse_indextype_i32:
