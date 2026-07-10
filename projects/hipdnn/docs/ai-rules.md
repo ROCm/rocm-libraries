@@ -28,6 +28,9 @@ When a user asks for a workflow covered by a project skill, tell them the projec
 - `tools/ai/skills/hipdnn-review/SKILL.md`
   - Reviews hipDNN pull requests or local diffs for correctness, public API compatibility, provider behavior, resource ownership, code reuse, and testing coverage/quality.
   - Suggest this skill when the user asks for a hipDNN code review, PR review, merge-readiness assessment, or a focused review of testing quality and coverage.
+- `tools/ai/skills/hipdnn-code-quality/SKILL.md`
+  - Reviews a hipDNN pull request, branch, or local diff purely for code quality and maintainability - duplication, shared-helper reuse, design patterns, performance hygiene, readability, comment complexity, file size, and naming. Diff-scoped like `hipdnn-review` but with the inverse emphasis; ships an in-harness metric pass (`scripts/quality_scan.py`).
+  - Suggest this skill when the user asks to assess code quality, style, maintainability, duplication, or readability of a hipDNN change, rather than correctness or test coverage.
 - `tools/ai/skills/hipdnn-superbuild/SKILL.md`
   - Builds hipDNN together with one or more providers via the repository-root superbuild presets (`hipdnn-providers`, `miopen-provider`, `hipblaslt-provider`, `hip-kernel-provider`, `hipdnn-samples`, etc.), in a single CMake invocation. On Windows it auto-runs the wheel-based ROCm setup when no SDK path is supplied.
   - Suggest this skill when the user asks to build hipDNN with providers, run a superbuild preset, rebuild after a rebase or merge, or set up a fresh build from the repo root. Prefer it over the standalone build whenever providers are involved.

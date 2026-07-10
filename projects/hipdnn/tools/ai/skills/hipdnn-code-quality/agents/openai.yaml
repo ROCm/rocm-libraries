@@ -1,0 +1,4 @@
+interface:
+  display_name: "hipDNN Code Quality"
+  short_description: "Review hipDNN diffs for code quality and maintainability"
+  default_prompt: "Use $hipdnn-code-quality to review a hipDNN pull request, branch, or local diff purely for code quality - duplication, shared-helper reuse, design patterns, performance, readability, comment complexity, file size, and naming."
