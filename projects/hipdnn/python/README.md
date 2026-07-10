@@ -105,8 +105,9 @@ still need ROCm and hipDNN runtime libraries discoverable through ROCm wheels,
 
 ## Testing the Wheel
 
-The `hipDNN Python Wheel CI` workflow validates the wheel end-to-end on Linux
-and Windows. Each job installs ROCm nightly artifacts plus test-only Python
+The `hipDNN Superbuild CI` workflow validates the wheel end-to-end on Linux and
+Windows after the matching superbuild job succeeds. Each wheel job downloads the
+patched ROCm SDK artifact from its superbuild job, installs test-only Python
 dependencies into a venv, downloads pinned third-party sources, configures
 `frontend_bindings` with `CMAKE_PREFIX_PATH` pointing at the expanded SDK and
 `FetchContent` source-dir overrides, builds the nanobind extension, packs the
