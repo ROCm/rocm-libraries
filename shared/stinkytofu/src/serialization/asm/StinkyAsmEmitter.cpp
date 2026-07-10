@@ -503,20 +503,9 @@ static bool isEXECType(RegType t) {
     return t == RegType::EXEC || t == RegType::EXEC_LO || t == RegType::EXEC_HI;
 }
 
-/// A destination register is implicit (not printed) when it was added
-/// solely for dependency tracking.  The instruction's HW flags tell us
-/// which special registers are implicit vs encoded as real operands.
-static bool isImplicitDest(const StinkyRegister& reg, const StinkyInstruction& inst) {
-    if (reg.dataType != StinkyRegister::Type::Register) return false;
-
-    RegType t = reg.reg.type;
-
-    if (t == RegType::SCC) return true;
-
-    if (isEXECType(t) && inst.is(IF_ImplicitWriteEXEC)) return true;
-
-    return false;
-}
+// isImplicitDest() (destination-side) is shared -- see StinkyAsmIR.hpp. It is
+// also consumed by the waitcnt dataflow's isReturningAtomic(), so both agree
+// on exactly the same "does this atomic return a value" answer.
 
 /// A source register is implicit (not printed) when it was added solely
 /// for dependency tracking.
@@ -753,13 +742,12 @@ static bool emitCustomOperands(std::ostream& os, const StinkyInstruction& inst) 
     }
 }
 
-// SMEM atomics signal return via glc, not th:, so they are excluded.
+// SMEM atomics signal return via glc, not th:, so they are excluded (see
+// isReturningAtomic() in StinkyAsmIR.hpp, the single shared source of truth
+// for "does this atomic return a value" used by both this emitter and the
+// waitcnt dataflow's CK_Buffer classification).
 static bool needThAtomicReturn(const StinkyInstruction& inst) {
-    if (!isFLATAtomic(inst) && !isMUBUFAtomic(inst) && !isGLOBALAtomic(inst)) return false;
-    for (const auto& d : inst.getDestRegs()) {
-        if (!isPseudoReg(d) && !isImplicitDest(d, inst)) return true;
-    }
-    return false;
+    return isReturningAtomic(inst);
 }
 
 static void emitTrailingModifiers(std::ostream& os, const StinkyInstruction& inst) {

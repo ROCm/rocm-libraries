@@ -30,6 +30,7 @@
 #include "stinkytofu/ir/asm/StinkyAsmIR.hpp"
 #include "stinkytofu/serialization/asm/IRConverter.hpp"
 #include "stinkytofu/serialization/asm/StinkyAsmPrinter.hpp"
+#include "stinkytofu/transforms/asm/StinkyRemoveWaitCntPass.hpp"
 #include "stinkytofu/transforms/asm/StinkyWaitCntInsertionPass.hpp"
 
 using namespace stinkytofu;
@@ -1586,4 +1587,171 @@ st.func @test_barrier_anchor_missing_tokens() {
     EXPECT_EQ(waitBeforeBarrier->dlcnt, 0);
 
     EXPECT_EQ(countWaitCnt(entryBB), 1);
+}
+
+// ============================================================================
+// Test Suite: Returning atomics (CK_Buffer)
+//
+// A returning MUBUF/FLAT/GLOBAL atomic completes on the same loadcnt counter
+// as an ordinary load (see isReturningAtomic() in StinkyAsmIR.hpp), so a real
+// consumer of the atomic's destination register must get a wait, and
+// StinkyRemoveWaitCntPass must be able to rely on the insertion pass to
+// regenerate any hand-placed wait it strips.
+// ============================================================================
+
+/**
+ * @brief A returning global atomic followed by a real consumer of its
+ * destination register must get a loadcnt (vlcnt) wait, exactly like an
+ * ordinary global load would.
+ */
+TEST_F(WaitCntInsertionTest, ReturningGlobalAtomicBeforeConsumerLoadcnt) {
+    std::string irString = R"(
+st.func @test_global_atomic_loadcnt() {
+^entry:
+  v3 = "st.global_atomic_inc_u32"(v1, v2, s[14:15]) { issueCycles = 1, latencyCycles = 20 }
+  s17 = "st.v_readfirstlane_b32"(v3) { issueCycles = 1, latencyCycles = 1 }
+}
+)";
+
+    StinkyIRConverter converter(getArch());
+    auto* func = parseIR(irString, converter);
+    ASSERT_NE(func, nullptr);
+
+    runInsertionPass(*func);
+
+    BasicBlock& entryBB = *func->begin();
+    auto waitcnts = getAllWaitCnts(entryBB);
+
+    ASSERT_EQ(waitcnts.size(), 1)
+        << "Should have exactly 1 waitcnt guarding the atomic's return value";
+
+    StinkyInstruction* consumer = findNthInst(entryBB, GFX::v_readfirstlane_b32, 0);
+    ASSERT_NE(consumer, nullptr);
+
+    int consumerPos = getInstructionPosition(entryBB, consumer);
+
+    EXPECT_EQ(waitcnts[0].position, consumerPos - 1);
+    EXPECT_EQ(waitcnts[0].waitData->vlcnt, 0)
+        << "Wait for the atomic's return value -> vlcnt=0 (drains the whole CK_Buffer queue, "
+           "since the atomic is the only entry)";
+    EXPECT_EQ(waitcnts[0].waitData->dlcnt, -1);
+    EXPECT_EQ(waitcnts[0].waitData->dscnt, -1);
+    EXPECT_EQ(waitcnts[0].waitData->kmcnt, -1);
+}
+
+/**
+ * @brief A returning global atomic shares the CK_Buffer queue with ordinary
+ * global loads: a load issued after the atomic must still be drained
+ * correctly, i.e. the atomic occupies a real position in the same FIFO.
+ */
+TEST_F(WaitCntInsertionTest, ReturningGlobalAtomicSharesQueueWithLoad) {
+    std::string irString = R"(
+st.func @test_global_atomic_shares_queue() {
+^entry:
+  v3 = "st.global_atomic_inc_u32"(v1, v2, s[14:15]) { issueCycles = 1, latencyCycles = 20 }
+  v5 = "st.flat_load_b32"(v[6:7], s[16:17]) { issueCycles = 1, latencyCycles = 20 }
+  s17 = "st.v_readfirstlane_b32"(v3) { issueCycles = 1, latencyCycles = 1 }
+  v8 = "st.v_add_f32"(v5, v5) { issueCycles = 1, latencyCycles = 1 }
+}
+)";
+
+    StinkyIRConverter converter(getArch());
+    auto* func = parseIR(irString, converter);
+    ASSERT_NE(func, nullptr);
+
+    runInsertionPass(*func);
+
+    BasicBlock& entryBB = *func->begin();
+    auto waitcnts = getAllWaitCnts(entryBB);
+
+    ASSERT_EQ(waitcnts.size(), 2);
+
+    StinkyInstruction* readfirstlane = findNthInst(entryBB, GFX::v_readfirstlane_b32, 0);
+    StinkyInstruction* add = findNthInst(entryBB, GFX::v_add_f32, 0);
+    ASSERT_NE(readfirstlane, nullptr);
+    ASSERT_NE(add, nullptr);
+
+    EXPECT_EQ(waitcnts[0].position, getInstructionPosition(entryBB, readfirstlane) - 1);
+    EXPECT_EQ(waitcnts[0].waitData->vlcnt, 1)
+        << "Wait for atomic (leave the later load) -> vlcnt=1";
+
+    EXPECT_EQ(waitcnts[1].position, getInstructionPosition(entryBB, add) - 1);
+    EXPECT_EQ(waitcnts[1].waitData->vlcnt, 0) << "Wait for remaining load -> vlcnt=0";
+}
+
+/**
+ * @brief A non-returning atomic (no real destination register) must NOT be
+ * treated as a CK_Buffer producer -- there is nothing for a consumer to wait
+ * on, and it must not be tracked in a way that blocks strip+reinsert from
+ * being a no-op for kernels that never use its result.
+ */
+TEST_F(WaitCntInsertionTest, NonReturningGlobalAtomicNotTracked) {
+    std::string irString = R"(
+st.func @test_global_atomic_no_return() {
+^entry:
+  "st.global_atomic_inc_u32"(v1, v2, s[14:15]) { issueCycles = 1, latencyCycles = 20 }
+  v6 = "st.v_add_f32"(v0, v0) { issueCycles = 1, latencyCycles = 1 }
+}
+)";
+
+    StinkyIRConverter converter(getArch());
+    auto* func = parseIR(irString, converter);
+    ASSERT_NE(func, nullptr);
+
+    runInsertionPass(*func);
+
+    BasicBlock& entryBB = *func->begin();
+    EXPECT_EQ(countWaitCnt(entryBB), 0)
+        << "A fire-and-forget atomic with no real destination has no consumer to drain for";
+}
+
+/**
+ * @brief StinkyRemoveWaitCntPass + StinkyWaitCntInsertionPass run as a
+ * strip-then-reinsert pair whenever EnableWaitCntInsertion is on
+ * (Gfx1250Backend.cpp). A returning atomic's wait must survive that round
+ * trip: the strip pass deletes any hand-placed wait guarding the atomic's
+ * result, and the insertion pass must regenerate it from classifyMemOp()
+ * alone, or the consumer would read the atomic's destination register before
+ * the hardware retired it. This test runs the exact same pair, starting from
+ * a hand-placed (now redundant) wait, and asserts the final result still has
+ * the correct wait after the round trip.
+ */
+TEST_F(WaitCntInsertionTest, StripThenReinsertPreservesReturningAtomicWait) {
+    std::string irString = R"(
+st.func @test_strip_then_reinsert() {
+^entry:
+  v3 = "st.global_atomic_inc_u32"(v1, v2, s[14:15]) { issueCycles = 1, latencyCycles = 20 }
+  "st.s_wait_loadcnt"() { issueCycles = 1, latencyCycles = 1, mod.waitcnt = { vlcnt = 0 } }
+  s17 = "st.v_readfirstlane_b32"(v3) { issueCycles = 1, latencyCycles = 1 }
+}
+)";
+
+    StinkyIRConverter converter(getArch());
+    auto* func = parseIR(irString, converter);
+    ASSERT_NE(func, nullptr);
+
+    // Step 1: strip pass, exactly as Gfx1250Backend.cpp runs it before the
+    // insertion pass (createStinkyRemoveWaitCntPass()).
+    {
+        PassContext ctx;
+        AnalysisManager stripAm;
+        registerAllAnalyses(stripAm);
+        auto stripPass = createStinkyRemoveWaitCntPass();
+        stripPass->run(*func, ctx, stripAm);
+    }
+
+    BasicBlock& entryBB = *func->begin();
+    ASSERT_EQ(countWaitCnt(entryBB), 0) << "Strip pass should have removed the hand-placed wait";
+
+    // Step 2: insertion pass regenerates from the (now atomic-aware) dataflow.
+    runInsertionPass(*func);
+
+    auto waitcnts = getAllWaitCnts(entryBB);
+    ASSERT_EQ(waitcnts.size(), 1)
+        << "Insertion pass must regenerate the wait the strip pass removed";
+
+    StinkyInstruction* consumer = findNthInst(entryBB, GFX::v_readfirstlane_b32, 0);
+    ASSERT_NE(consumer, nullptr);
+    EXPECT_EQ(waitcnts[0].position, getInstructionPosition(entryBB, consumer) - 1);
+    EXPECT_EQ(waitcnts[0].waitData->vlcnt, 0);
 }
