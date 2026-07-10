@@ -16,15 +16,13 @@ from rocisa.instruction import (SBarrier, BranchInstruction, SCBranchSCC0,
                                 SCmpEQU32,
                                 MFMAInstruction, MXMFMAInstruction)
 
+# Overlap budget: how many MFMAs should follow the signal before the wait.
+# At least 16, or ~5% of total MFMAs for large tiles.
+_MIN_MFMAS_AFTER_SIGNAL = 16
+_MFMAS_AFTER_SIGNAL_DIVISOR = 20
+
 _isWgBarrier = lambda x: isinstance(x, SBarrier) and "s_barrier_wait -1" in str(x)
-
-
-def _findNextMFMA(items, start):
-    """Index of the first MFMA at/after ``start``, or ``None`` if none follows."""
-    for j in range(start, len(items)):
-        if isinstance(items[j], (MFMAInstruction, MXMFMAInstruction)):
-            return j
-    return None
+_isMFMA = lambda x: isinstance(x, (MFMAInstruction, MXMFMAInstruction))
 
 
 def subtileClusterBarrierSignal(writer, kernel) -> Module:
@@ -54,11 +52,11 @@ def subtileClusterBarrierWait(writer, kernel) -> Module:
 def insertClusterBarrier(module, writer, kernel):
     """Splice the cluster-scope barrier handshake into the post-schedule order.
 
-    No-op unless ``ClusterBarrier`` is enabled. The signal is spliced in right
-    after the mainloop's existing workgroup barrier (reusing that sync instead of
-    emitting a second one); the wait is appended at the end of the section, so the
-    barrier's cross-CU latency overlaps the whole macro tile's WMMAs before the
-    handshake is closed.
+    No-op unless ``ClusterBarrier`` is enabled.  The signal is placed near the
+    end of the MFMA stream — only a small overlap budget of MFMAs separates it
+    from the trailing wait.  The signal must still follow the workgroup barrier
+    (LDS-write visibility); when the computed target falls before the barrier
+    the signal is clamped to the first MFMA after it.
 
     If no workgroup barrier is found in this section, the signal is prepended at
     the start so the handshake is still opened (correctness over reuse).
@@ -75,58 +73,78 @@ def insertClusterBarrier(module, writer, kernel):
     assert writer.states.asmCaps.get("HasClusterBarrier", False), \
         "ClusterBarrier requires the HasClusterBarrier asm capability"
 
-    # Place the wave-0-election branch right after a WMMA to hide branching
-    # latency: keep s_cmp before the next scheduled MFMA and emit the branch
-    # after it.
-
     items = module.flatitems()
+
+    # Pre-scan: locate MFMAs and the workgroup barrier so we can pick a
+    # target MFMA near the end of the stream.
+    mfma_positions = [i for i, inst in enumerate(items) if _isMFMA(inst)]
+    wg_barrier_pos = next(
+        (i for i, inst in enumerate(items) if _isWgBarrier(inst)), None)
+
+    total_mfmas = len(mfma_positions)
+    overlap = max(_MIN_MFMAS_AFTER_SIGNAL, total_mfmas // _MFMAS_AFTER_SIGNAL_DIVISOR)
+
+    # Pick the target MFMA: ``overlap`` positions from the end, clamped to
+    # the first MFMA after the workgroup barrier.
+    targetMfmaIdx = None
+    if total_mfmas > 0 and wg_barrier_pos is not None:
+        target_rank = max(0, total_mfmas - overlap - 1)
+        first_after_barrier = next(
+            (j for j, p in enumerate(mfma_positions) if p > wg_barrier_pos),
+            None)
+        if first_after_barrier is not None:
+            target_rank = max(target_rank, first_after_barrier)
+            targetMfmaIdx = mfma_positions[target_rank]
+
+    # Place the wave-0-election branch right after the target WMMA to hide
+    # branching latency: keep s_cmp before the scheduled MFMA and emit the
+    # branch after it.
+
     result = Module(module.name)
     done = False
-    skip = set()
     for i, inst in enumerate(items):
-        if i in skip:
-            continue
-        result.add(inst)
-        if not done and _isWgBarrier(inst):
+        if not done and targetMfmaIdx is not None and i == targetMfmaIdx:
             done = True
-            mfmaIdx = _findNextMFMA(items, i + 1)
-            if mfmaIdx is None:
-                # No following MFMA to pin the branch to: emit the block intact
-                # (best-effort).
-                for s in signalItems:
-                    result.add(s)
-            else:
-                # Split the signal block at the wave-0 election branch. The
-                # block is authored with exactly one conditional branch; assert
-                # it so a future change that adds another fails loudly here.
-                brIdxs = [k for k, s in enumerate(signalItems)
-                          if isinstance(s, SCBranchSCC0)]
-                assert len(brIdxs) == 1, \
-                    "signal block must contain exactly one wave-0 election branch"
-                brIdx = brIdxs[0]
-                pre, post = signalItems[:brIdx], signalItems[brIdx:]
-                # Everything up to the MFMA (incl. its s_set_vgpr_msb primer)
-                # keeps its order, then s_cmp, the MFMA, and the branch. SCC
-                # survives the MFMA and vgpr-msb is a persistent mode, so the
-                # intervening compare disturbs neither.
-                for k in range(i + 1, mfmaIdx):
-                    result.add(items[k])
-                    skip.add(k)
-                for s in pre:
-                    result.add(s)
-                result.add(items[mfmaIdx])
-                skip.add(mfmaIdx)
-                for s in post:
-                    result.add(s)
-    if not done:  # no workgroup barrier: open the handshake at the start
-        head = Module(module.name)
-        head.add(SBarrier(True, False, False))
-        head.add(SBarrier(True, True, False, "workgroup barrier wait"))
-        for s in signalItems:
-            head.add(s)
-        for inst in result.flatitems():
-            head.add(inst)
-        result = head
+            # Split the signal block at the wave-0 election branch. The
+            # block is authored with exactly one conditional branch; assert
+            # it so a future change that adds another fails loudly here.
+            brIdxs = [k for k, s in enumerate(signalItems)
+                      if isinstance(s, SCBranchSCC0)]
+            assert len(brIdxs) == 1, \
+                "signal block must contain exactly one wave-0 election branch"
+            brIdx = brIdxs[0]
+            pre, post = signalItems[:brIdx], signalItems[brIdx:]
+            # Emit s_cmp (pre), then the target MFMA, then branch+signal
+            # (post).  SCC survives the MFMA, so the branch reads the
+            # correct comparison result.
+            for s in pre:
+                result.add(s)
+            result.add(inst)
+            for s in post:
+                result.add(s)
+        else:
+            result.add(inst)
+    if not done:
+        if wg_barrier_pos is not None:
+            # WG barrier exists but no MFMA follows it: emit the signal
+            # block intact right after the barrier (best-effort).
+            rebuilt = Module(module.name)
+            for i2, inst2 in enumerate(items):
+                rebuilt.add(inst2)
+                if i2 == wg_barrier_pos:
+                    for s in signalItems:
+                        rebuilt.add(s)
+            result = rebuilt
+        else:
+            # No workgroup barrier at all: open the handshake at the start.
+            head = Module(module.name)
+            head.add(SBarrier(True, False, False))
+            head.add(SBarrier(True, True, False, "workgroup barrier wait"))
+            for s in signalItems:
+                head.add(s)
+            for inst in result.flatitems():
+                head.add(inst)
+            result = head
 
     # Second pass: place the wait before the first branch after the signal,
     # so no exit path can skip it.  Falls back to end-of-module if no branch follows.

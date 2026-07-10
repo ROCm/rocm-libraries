@@ -169,6 +169,30 @@ class TestInsertClusterBarrier:
         insertClusterBarrier(mod, _make_writer(), kernel={"ClusterBarrier": True})
         assert str(mod) == before
 
+    def test_signal_placed_near_end_with_many_mfmas(self):
+        """With many MFMAs, signal should be near the end, not right after the WG barrier."""
+        from Tensile.Components.Subtile.ClusterBarrier import insertClusterBarrier, \
+            _MIN_MFMAS_AFTER_SIGNAL, _MFMAS_AFTER_SIGNAL_DIVISOR
+        _init_rocisa_gfx1250()
+        n_mfmas = 40
+        items = [_wg_barrier()] + [_fake_wmma(f"wmma_{i}") for i in range(n_mfmas)]
+        mod = _module(*items)
+        out = insertClusterBarrier(mod, _make_writer(), kernel={"ClusterBarrier": True})
+        lines = [ln for ln in str(out).splitlines() if ln.strip()]
+
+        signal_line = next(i for i, ln in enumerate(lines) if "s_barrier_signal -3" in ln)
+        wait_line = next(i for i, ln in enumerate(lines) if "s_barrier_wait -3" in ln)
+        wmma_lines = [i for i, ln in enumerate(lines) if "v_wmma" in ln]
+
+        # Signal should be near the end, with only a small number of WMMAs after it
+        mfmas_after = sum(1 for w in wmma_lines if w > signal_line)
+        expected_overlap = max(_MIN_MFMAS_AFTER_SIGNAL, n_mfmas // _MFMAS_AFTER_SIGNAL_DIVISOR)
+        assert mfmas_after == expected_overlap, \
+            f"Expected {expected_overlap} MFMAs after signal, got {mfmas_after}"
+        # Wait is still last
+        assert wait_line > signal_line
+        assert wait_line > wmma_lines[-1]
+
 
 if __name__ == "__main__":
     sys.exit(pytest.main([__file__, "-v"]))
