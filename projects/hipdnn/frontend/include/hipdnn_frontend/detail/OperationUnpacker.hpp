@@ -20,6 +20,7 @@
 #include <hipdnn_frontend/node/ConvolutionWgradNode.hpp>
 #include <hipdnn_frontend/node/CustomOpNode.hpp>
 #include <hipdnn_frontend/node/LayerNormNode.hpp>
+#include <hipdnn_frontend/node/LayernormBackwardNode.hpp>
 #include <hipdnn_frontend/node/MatmulNode.hpp>
 #include <hipdnn_frontend/node/Node.hpp>
 #include <hipdnn_frontend/node/PointwiseNode.hpp>
@@ -134,6 +135,10 @@ namespace hipdnn_frontend::detail
         return {
             std::make_shared<graph::ResampleFwdNode>(graph::ResampleFwdAttributes{}, graphAttrs),
             {}};
+    case HIPDNN_OPERATION_TYPE_LAYERNORM_BACKWARD_EXT:
+        return {std::make_shared<graph::LayernormBackwardNode>(graph::LayernormBackwardAttributes{},
+                                                               graphAttrs),
+                {}};
     default:
         return {nullptr,
                 {ErrorCode::HIPDNN_BACKEND_ERROR,

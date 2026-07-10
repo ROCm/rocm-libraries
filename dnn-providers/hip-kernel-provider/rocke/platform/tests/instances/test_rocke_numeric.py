@@ -21,7 +21,7 @@ breach):
                                              gfx942 status)
 
 Requires a ROCm GPU and torch (e.g. a dedicated ~/.venv); skipped otherwise.
-Run:  PYTHONPATH=Python <torch-python> tests/instances/test_rocke_numeric.py
+Run:  PYTHONPATH=python <torch-python> tests/instances/test_rocke_numeric.py
 """
 
 from __future__ import annotations
@@ -34,7 +34,7 @@ import sys
 import tempfile
 import unittest
 
-_PYDIR = pathlib.Path(__file__).resolve().parents[2] / "Python"  # rocke/platform/Python
+_PYDIR = pathlib.Path(__file__).resolve().parents[2] / "python"  # rocke/platform/python
 _LIBDIR = pathlib.Path(__file__).resolve().parents[3] / "library"  # rocke/library
 _SUBPROC_PYTHONPATH = os.pathsep.join([str(_PYDIR), str(_LIBDIR)])
 

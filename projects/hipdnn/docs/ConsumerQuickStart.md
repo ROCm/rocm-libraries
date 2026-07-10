@@ -37,6 +37,9 @@ target_link_libraries(my_app PRIVATE hipdnn_frontend)
 > `find_package(hipdnn_frontend)` transitively brings in `hipdnn_backend`, `hipdnn_data_sdk`, and `hip` — only one `find_package` call is needed. HIP runtime APIs (`hipMalloc`, `hipFree`, etc.) are available through the transitive `hip::host` link dependency.
 
 > [!NOTE]
+> Link `hipdnn_frontend_dynamic` instead of `hipdnn_frontend` when your application should load `libhipdnn_backend` at runtime instead of recording a direct link dependency on it. This target uses the same frontend headers and API; the backend package is still required when configuring and must be available at runtime.
+
+> [!NOTE]
 > If CMake cannot find the packages, set `CMAKE_PREFIX_PATH` to the install location. hipDNN CMake files are installed to `/opt/rocm/lib/cmake` by default, which CMake may already search automatically depending on your system configuration.
 
 ### Source File

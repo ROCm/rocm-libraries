@@ -421,6 +421,36 @@ TEST(TestParseActivation, TanhWithDefaults)
     EXPECT_DOUBLE_EQ(params.beta, 1.0);
 }
 
+TEST(TestParseActivation, TanhFwdWithDefaults)
+{
+    auto builder
+        = createPointwiseAttributes(hipdnn_flatbuffers_sdk::data_objects::PointwiseMode::TANH_FWD);
+    const auto* attrs
+        = flatbuffers::GetRoot<hipdnn_flatbuffers_sdk::data_objects::PointwiseAttributes>(
+            builder.GetBufferPointer());
+
+    auto params = parseActivation(*attrs);
+
+    EXPECT_EQ(params.mode, ActivationMode::TANH);
+    EXPECT_DOUBLE_EQ(params.alpha, 1.0);
+    EXPECT_DOUBLE_EQ(params.beta, 1.0);
+}
+
+TEST(TestParseActivation, AbsWithDefaults)
+{
+    auto builder
+        = createPointwiseAttributes(hipdnn_flatbuffers_sdk::data_objects::PointwiseMode::ABS);
+    const auto* attrs
+        = flatbuffers::GetRoot<hipdnn_flatbuffers_sdk::data_objects::PointwiseAttributes>(
+            builder.GetBufferPointer());
+
+    auto params = parseActivation(*attrs);
+
+    EXPECT_EQ(params.mode, ActivationMode::ABS);
+    EXPECT_DOUBLE_EQ(params.alpha, 0.0);
+    EXPECT_DOUBLE_EQ(params.beta, 0.0);
+}
+
 TEST(TestParseActivation, Passthru)
 {
     auto builder
