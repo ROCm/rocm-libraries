@@ -188,8 +188,8 @@ MiopenConvPlanBuilder::WorkspaceSizeRange
               .attributesAs<hipdnn_flatbuffers_sdk::data_objects::ConvolutionFwdAttributes>();
     const ConvFwdParams params(attr, opGraph.getTensorMap(), deterministicEnabled);
 
-    size_t minWorkspace;
-    size_t maxWorkspace;
+    size_t minWorkspace = 0;
+    size_t maxWorkspace = 0;
     THROW_ON_MIOPEN_FAILURE(
         miopenConvolutionForwardGetWorkSpaceSizeRange(handle.miopenHandle,
                                                       params.w().tensorDescriptor(),
@@ -215,8 +215,8 @@ MiopenConvPlanBuilder::WorkspaceSizeRange
               .attributesAs<hipdnn_flatbuffers_sdk::data_objects::ConvolutionBwdAttributes>();
     const ConvBwdParams params(attr, opGraph.getTensorMap(), deterministicEnabled);
 
-    size_t minWorkspace;
-    size_t maxWorkspace;
+    size_t minWorkspace = 0;
+    size_t maxWorkspace = 0;
     THROW_ON_MIOPEN_FAILURE(
         miopenConvolutionBackwardDataGetWorkSpaceSizeRange(handle.miopenHandle,
                                                            params.dy().tensorDescriptor(),
@@ -242,8 +242,8 @@ MiopenConvPlanBuilder::WorkspaceSizeRange
               .attributesAs<hipdnn_flatbuffers_sdk::data_objects::ConvolutionWrwAttributes>();
     const ConvWrwParams params(attr, opGraph.getTensorMap(), deterministicEnabled);
 
-    size_t minWorkspace;
-    size_t maxWorkspace;
+    size_t minWorkspace = 0;
+    size_t maxWorkspace = 0;
     THROW_ON_MIOPEN_FAILURE(
         miopenConvolutionBackwardWeightsGetWorkSpaceSizeRange(handle.miopenHandle,
                                                               params.dy().tensorDescriptor(),
