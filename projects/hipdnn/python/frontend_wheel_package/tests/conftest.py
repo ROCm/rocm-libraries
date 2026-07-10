@@ -19,9 +19,17 @@ import hipdnn_frontend as hipdnn
 def _gpu_available():
     """Return True when HIP reports at least one visible GPU device."""
     try:
-        return hipdnn.hip_get_device_count() > 0
-    except Exception:
+        device_count = hipdnn.hip_get_device_count()
+    except Exception as exc:
+        warnings.warn(f"HIP device probe failed: {exc!r}", stacklevel=1)
         return False
+    if device_count <= 0:
+        warnings.warn(
+            f"HIP device probe reported {device_count} visible device(s).",
+            stacklevel=1,
+        )
+        return False
+    return True
 
 
 def pytest_configure(config):
