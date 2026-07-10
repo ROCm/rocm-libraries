@@ -7,7 +7,7 @@ Documentation for rocSPARSE is available at
 
 ### Added
 * Added Blocked ELL format support to `rocsparse_dense_to_sparse` routine.
-* Add `rocsparse_bell_set_pointers`.
+* Added `rocsparse_bell_set_pointers`.
 
 ### Resolved issues
 * Fixed `rocsparse_spmm` with Blocked ELL sparse format which was previously not computing the correct result.
