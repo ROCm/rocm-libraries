@@ -124,8 +124,15 @@ inline std::vector<RMSNormTestCase> getRMSNormTestCases()
         {{32, 3, 1, 14}, {1, 3, 1, 14}}, // degenerate H
         {{32, 3, 14, 1}, {1, 3, 14, 1}}, // degenerate W
         // ported from hip-kernel-provider's provider-local RMSnormCommon.hpp
+        // (all 12 unique 4D shapes across getRMSnormTestCases/getRMSnormFullTestCases)
+        {{2, 3, 4, 4}, {1, 3, 4, 4}}, // normalize C,H,W, small
+        {{2, 3, 4, 4}, {1, 1, 4, 4}}, // normalize H,W, small
         {{5, 256, 14, 14}, {1, 256, 14, 14}}, // larger production-like channel count
+        {{1, 3, 14, 14}, {1, 3, 14, 14}}, // normalize C,H,W, batch=1
+        {{1, 3, 14, 14}, {1, 1, 14, 14}}, // normalize H,W, batch=1
+        {{1, 3, 14, 14}, {1, 1, 1, 14}}, // normalize W, batch=1
         {{1, 256, 1, 1}, {1, 256, 1, 1}}, // all-spatial-1 with a real channel count
+        {{2, 3, 1, 1}, {1, 3, 1, 1}}, // normalize C only, spatial=1
         {{32, 1, 14, 14}, {1, 1, 14, 14}}, // degenerate C (single channel)
         {{32, 3, 14, 1}, {1, 1, 14, 1}}, // degenerate W with channel-collapsed scale
     };
