@@ -264,7 +264,7 @@ function(_rocke_client_aot_pack_and_install NAME ARCH)
     # manifest carries every selection/launch field; aot_list.json is a
     # build-time input and is intentionally not installed.
     set(_INSTALL_ROOT
-        "${HIPDNN_RELATIVE_INSTALL_PLUGIN_ENGINE_DIR}/hip_kernel_provider/rocke/${ARCH}")
+        "${HIPDNN_RELATIVE_INSTALL_PLUGIN_ENGINE_DIR}/arch_content/rocke/${ARCH}")
     install(FILES "${_KPACK_FILE}" "${_KPACK_MANIFEST}" DESTINATION "${_INSTALL_ROOT}")
 endfunction()
 

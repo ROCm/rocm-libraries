@@ -44,13 +44,17 @@ std::vector<std::reference_wrapper<const AotInstance>>
 const char* defaultArtifactRoot()
 {
     // Plugin-relative root for the installed rocKE AOT bundles. They install
-    // next to the loaded engine plugin at
-    //   <plugin_dir>/hip_kernel_provider/rocke/<arch>/
+    // under a generic per-arch content container next to the loaded engine
+    // plugin at
+    //   <plugin_dir>/arch_content/rocke/<arch>/
     // holding rocke_client_<arch>.kpack, its rocke_client_<arch>.json sidecar,
     // and rocke's per-arch kernel-selection heuristics. loadDefault() resolves
-    // <plugin_dir> from the loaded plugin and appends the device <arch>. Nothing
-    // reads it yet (Phase-1 catalog is empty); the dispatcher-wiring work does.
-    return "hip_kernel_provider/rocke";
+    // <plugin_dir> from the loaded plugin and appends the device <arch>. The
+    // "arch_content" container is generic (other engines get sibling subdirs,
+    // e.g. arch_content/aiter/, arch_content/asm/) and, unlike a
+    // "hip_kernel_provider/" directory, does not collide with the
+    // hip_kernel_provider(.dll/.so) plugin file in the same engines dir.
+    return "arch_content/rocke";
 }
 
 } // namespace rocke_client::dispatcher

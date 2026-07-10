@@ -33,7 +33,7 @@ public:
     // TODO(kpack): once the kpack packaging + install rules land (this ticket),
     // this must:
     //   1. resolve the loaded plugin's directory and the per-arch bundle root
-    //      <plugin_dir>/hip_kernel_provider/rocke/<arch>/ (see defaultArtifactRoot());
+    //      <plugin_dir>/arch_content/rocke/<arch>/ (see defaultArtifactRoot());
     //   2. read that arch's rocke_client_<arch>.kpack + rocke_client_<arch>.json
     //      bundle manifest (the installed source of truth; aot_list.json is a
     //      build-time input and is not installed);
@@ -64,9 +64,10 @@ private:
 };
 
 // The plugin-relative root under which installed per-arch rocKE AOT bundles live:
-// <plugin_dir>/hip_kernel_provider/rocke/<arch>/. loadDefault() resolves the
-// loaded plugin's directory at runtime and appends the device arch. This is a
-// path constant only; nothing reads from it yet (Phase-1 catalog is empty).
+// <plugin_dir>/arch_content/rocke/<arch>/, where arch_content is a generic
+// per-arch content container (other engines get sibling subdirs). loadDefault()
+// resolves the loaded plugin's directory at runtime and appends the device arch.
+// This is a path constant only; nothing reads from it yet (Phase-1 catalog empty).
 const char* defaultArtifactRoot();
 
 } // namespace rocke_client::dispatcher
