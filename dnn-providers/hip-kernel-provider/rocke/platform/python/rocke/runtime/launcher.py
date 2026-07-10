@@ -96,7 +96,7 @@ from typing import Any, Callable, Dict, Iterator, Mapping, Optional, Sequence, T
 
 from .hip_module import Runtime
 from .packing import pack_args
-from .torch_module import resolve_stream
+from .torch_interop import resolve_stream
 
 __all__ = [
     "DeviceMem",

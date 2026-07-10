@@ -29,10 +29,14 @@ Layered modules (bottom-up):
                       `HIP_LAUNCH_PARAM_BUFFER_POINTER` arg-buffer
                       lifetime race.
 
-  - ``torch_module``: torch-tensor arg packing + `resolve_stream`
-                      (which collapses ``stream=0`` to torch's current
-                      stream so the caching allocator sees our
-                      launches).
+  - ``packing``     : torch-agnostic kernel-arg packing (`pack_args`,
+                      `pack_args_kernelparams`) for the AMDGPU kernarg
+                      ABI. Used by both the numpy and torch paths.
+
+  - ``torch_interop``: torch-tensor launch glue -- `resolve_stream`
+                      (collapses ``stream=0`` to torch's current stream
+                      so the caching allocator sees our launches),
+                      `empty_workspace`, `launch_torch_kernel`.
 
   - ``launcher``    : long-lived launch abstractions (CK Tile / FlyDSL /
                       Triton inspired). The recommended entry point
@@ -91,7 +95,7 @@ from .launcher import (
     wait_stream_and_release,
 )
 from .packing import pack_args
-from .torch_module import (
+from .torch_interop import (
     TorchLaunchSummary,
     empty_workspace,
     launch_torch_kernel,

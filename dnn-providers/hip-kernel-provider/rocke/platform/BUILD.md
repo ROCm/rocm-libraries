@@ -87,7 +87,7 @@ runtime resolves them WITHOUT importing torch
 4. bare `lib<name>.so` on the dynamic linker's search path (last resort).
 
 torch is therefore **optional** — required only for the `torch.fx` fusion
-frontend, torch-tensor launch (`runtime/torch_module.py`), and on-GPU torch-eager
+frontend, torch-tensor launch (`runtime/torch_interop.py`), and on-GPU torch-eager
 numeric checks. Building the engine, lowering, `comgr` compile, numpy launch, and
 the byte-identity gate need no torch. If a torch-less process reports `cannot load
 libamd_comgr.so`, set `ROCM_PATH` (or `ROCKE_COMGR_LIB`) to your ROCm install.

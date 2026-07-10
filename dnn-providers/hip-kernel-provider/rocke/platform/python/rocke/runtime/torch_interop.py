@@ -25,7 +25,7 @@ def _require_torch():
     try:
         import torch
     except Exception as e:  # pragma: no cover - environment dependent
-        raise RuntimeError("rocke.runtime.torch_module requires torch") from e
+        raise RuntimeError("rocke.runtime.torch_interop requires torch") from e
     return torch
 
 

@@ -4778,7 +4778,7 @@ class TestRuntimeLaunchKeepAlive(unittest.TestCase):
 
 
 class TestResolveStream(unittest.TestCase):
-    """``torch_module.resolve_stream`` -- the caching-allocator hinge.
+    """``torch_interop.resolve_stream`` -- the caching-allocator hinge.
 
     Its whole contract is torch-*optional*: pass through a nonzero
     handle, substitute torch's current stream when torch is present, and
@@ -4792,7 +4792,7 @@ class TestResolveStream(unittest.TestCase):
         import sys
         from unittest import mock
 
-        from rocke.runtime.torch_module import resolve_stream
+        from rocke.runtime.torch_interop import resolve_stream
 
         # Poison torch so any import attempt would raise -- proves the
         # nonzero fast-path never reaches for torch at all.
@@ -4803,7 +4803,7 @@ class TestResolveStream(unittest.TestCase):
         import sys
         from unittest import mock
 
-        from rocke.runtime.torch_module import resolve_stream
+        from rocke.runtime.torch_interop import resolve_stream
 
         # sys.modules["torch"] = None makes `import torch` raise
         # ImportError, standing in for a torch-free environment.
@@ -4814,7 +4814,7 @@ class TestResolveStream(unittest.TestCase):
         import sys
         from unittest import mock
 
-        from rocke.runtime.torch_module import resolve_stream
+        from rocke.runtime.torch_interop import resolve_stream
 
         fake = mock.MagicMock()
         fake.cuda.current_device.return_value = 0

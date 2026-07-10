@@ -114,7 +114,7 @@ circular. torch is therefore **optional** and the only hard dep is `numpy`
 
 1. the `torch.fx` fusion frontend (`torch_backend.py`, `helpers/fuse.py`
    graph capture);
-2. torch-tensor launch integration (`runtime/torch_module.py`);
+2. torch-tensor launch integration (`runtime/torch_interop.py`);
 3. on-GPU numeric verification against torch eager.
 
 Everything else runs torch-free: IR build, lower, `comgr` compile, numpy launch,
