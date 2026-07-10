@@ -481,7 +481,7 @@ defaultBenchmarkCommonParameters = [
     {"ScheduleGlobalRead": [1]},
     {"ScheduleLocalWrite": [1]},
     {"ScheduleIterAlg": [3]},
-    {"GlobalReadPerMfma": [1.0]},
+    {"GlobalReadPerMfma": [1]},
     {"LocalWritePerMfma": [-1]},
     {"InterleaveAlpha": [0]},
     {"OptNoLoadLoop": [1]},
