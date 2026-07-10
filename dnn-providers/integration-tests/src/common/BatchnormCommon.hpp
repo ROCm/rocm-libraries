@@ -186,6 +186,7 @@ inline std::vector<BatchnormTestCase> getBnBwdTestCases()
         {{32, 1, 14, 14}, seed},
         {{32, 3, 1, 14}, seed},
         {{32, 3, 14, 1}, seed},
+        {{1, 4, 2, 2}, seed}, // ported from provider-local getBnBwdSmoke2dTestCases()
     };
 }
 
@@ -206,6 +207,7 @@ inline std::vector<BatchnormTestCase> getBnBwd3dTestCases()
     return {
         {{2, 3, 3, 1, 1}, seed},
         {{16, 3, 8, 14, 14}, seed},
+        {{2, 3, 2, 4, 4}, seed}, // ported from provider-local getBnBwdSmoke3dTestCases()
     };
 }
 
