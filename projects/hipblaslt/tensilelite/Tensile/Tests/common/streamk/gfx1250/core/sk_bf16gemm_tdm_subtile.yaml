@@ -7,6 +7,7 @@ GlobalParameters:
   NumElementsToValidate: -1
   BoundsCheck: 0
   KernelTime: False
+  SyncsPerBenchmark: 0
   CpuThreads: 32
   DataInitTypeA: 3
   DataInitTypeB: 3
