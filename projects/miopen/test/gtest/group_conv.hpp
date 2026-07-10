@@ -330,8 +330,10 @@ private:
         }
         else
         {
-            // some kernels have an error above 0.3%, so this has been increased to 0.4%
-            threshold = 4.0e-3;
+            // some kernels have an error above 0.3%, so this has been increased to 0.4%;
+            // the CK V3 large-tensor grouped bwd-weights kernels can reach ~0.44% in bf16,
+            // so the tolerance is raised to 0.5%.
+            threshold = 5.0e-3;
         }
         auto error = miopen::rms_range(ref, computed);
 

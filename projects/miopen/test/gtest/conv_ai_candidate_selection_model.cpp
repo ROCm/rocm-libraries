@@ -32,6 +32,7 @@
 #include <miopen/handle.hpp>
 #include <string>
 #include <map>
+#include <optional>
 #include <vector>
 #include <sstream>
 #include <algorithm>
@@ -440,6 +441,21 @@ int EncodedSlotForSuffix(const CandidateSelectionMetadata& meta, const std::stri
     return -1;
 }
 
+// Return the metadata constant for an output param matched by suffix (e.g. the value a retrain
+// pinned a feature to when it was constant in the training set), or std::nullopt when no output
+// param with that suffix is a declared constant.
+std::optional<std::string> OutputConstantForSuffix(const CandidateSelectionMetadata& meta,
+                                                   const std::string& suffix)
+{
+    for(const auto& param_name : meta.output_params())
+    {
+        if(param_name.size() >= suffix.size() &&
+           param_name.compare(param_name.size() - suffix.size(), suffix.size(), suffix) == 0)
+            return meta.GetOutputConstant(param_name);
+    }
+    return std::nullopt;
+}
+
 // Build a Wavelet candidate. Base form (no NGM, no SplitK) has length 16: kernel_name + packed
 // token + 14 numeric base params. include_num_groups appends NumGroupsToMerge at [16] (length 17).
 std::vector<std::string> MakeWaveletCandidate(bool include_num_groups, const std::string& ngm = "2")
@@ -507,10 +523,26 @@ TEST_P(GPU_CandidateSelection_FP32, WaveletSplitTileLoadMath_Test)
     auto encoded = EncodeKernelParams(kparams, meta, /*use_split_k=*/false);
     ASSERT_EQ(encoded.size(), 1u) << "Wavelet candidate was unexpectedly skipped";
 
-    // TileMathThreadGroupSize is a live numeric feature (TileLoad is constant in metadata).
-    const int math_slot = EncodedSlotForSuffix(meta, "TileMathThreadGroupSize");
-    ASSERT_GE(math_slot, 0) << "TileMathThreadGroupSize not found as a live encoded feature";
-    EXPECT_FLOAT_EQ(encoded[0][math_slot], 256.0f) << "math part of '128l+256m' not decoded to 256";
+    // Validate that the packed "{load}l+{math}m" token decodes its math part to 256. Whether
+    // TileMathThreadGroupSize survives as a live encoded feature depends on the trained model: the
+    // 2D Wrw models keep it live (TileLoad is the constant), whereas the retrained 3D Wrw models
+    // pin *both* TileLoad and TileMath to a constant. Assert against whichever form the shipped
+    // metadata declares so this stays correct across retrains.
+    const std::string math_suffix = "TileMathThreadGroupSize";
+    const int math_slot           = EncodedSlotForSuffix(meta, math_suffix);
+    if(math_slot >= 0)
+    {
+        EXPECT_FLOAT_EQ(encoded[0][math_slot], 256.0f)
+            << "math part of '128l+256m' not decoded to 256";
+    }
+    else
+    {
+        // Dropped as a constant: the value is fixed in metadata, not emitted into the vector.
+        const auto math_const = OutputConstantForSuffix(meta, math_suffix);
+        ASSERT_TRUE(math_const.has_value())
+            << "TileMathThreadGroupSize is neither a live encoded feature nor a metadata constant";
+        EXPECT_EQ(*math_const, "256") << "constant TileMathThreadGroupSize does not match 256";
+    }
 }
 
 TEST_P(GPU_CandidateSelection_FP32, WaveletNumGroupsConditional_Test)
@@ -903,7 +935,7 @@ std::vector<CandidateSelectionParams> GenerateCandidateSelectionParams()
          "ConvHipImplicitGemmGroupWrwXdlops",
          "DeviceGroupedConvBwdWeight_Xdl_CShuffle",
          8},
-        // 3D solvers (raw, non-engineered feature path)
+        // 3D solvers (engineered input + kernel-config path)
         {"gfx942",
          "ConvHipImplicitGemm3DGroupWrwXdlops",
          "DeviceGroupedConvBwdWeight_Xdl_CShuffle",
