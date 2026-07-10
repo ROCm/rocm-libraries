@@ -3,6 +3,11 @@
 Documentation for rocSPARSE is available at
 [https://rocm.docs.amd.com/projects/rocSPARSE/en/latest/](https://rocm.docs.amd.com/projects/rocSPARSE/en/latest/).
 
+(Unreleased) rocSPARSE 5.0.0
+
+### Removed
+* The deprecated `rocsparse_indextype_u16`.
+
 ## rocSPARSE 4.7.0 for ROCm 7.14
 
 ### Added
