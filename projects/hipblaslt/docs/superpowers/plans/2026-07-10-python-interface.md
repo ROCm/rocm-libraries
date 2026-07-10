@@ -6,7 +6,7 @@
 
 **Architecture:** A nanobind C++ extension (`_core`) mirroring the hipBLASLt C flow object-for-object (Handle, MatmulDesc, MatrixLayout, Preference, Algo, heuristic(), matmul()), plus a compiled `DeviceArray` data-plane object (hipMalloc/memcpy + DLPack), plus a thin pure-Python layer (`hipblaslt/__init__.py`) with a convenience `matmul()` shim and a header-enum coverage harness. Built with scikit-build-core, templated on `tensilelite/rocisa`, wired into `invoke build` behind an opt-in flag.
 
-**Tech Stack:** C++20, nanobind 2.6.1, scikit-build-core, HIP (`hip::host`), hipBLASLt (`roc::hipblaslt`), Python ≥3.10, numpy, ml_dtypes, pytest, invoke.
+**Tech Stack:** C++20, nanobind ≥2.0 (verified 2.13.0), scikit-build-core ≥0.10 (verified 1.0.2), HIP (`hip::host`), hipBLASLt (`roc::hipblaslt`), Python ≥3.10 (dev: 3.13.14), numpy ≥1.23 (verified 2.5.1), ml_dtypes ≥0.5.0 (verified 0.5.4 — all narrow types present), pytest, invoke.
 
 ## Global Constraints
 
@@ -22,6 +22,9 @@
 - **The binding must never be a silent source of wrongness** — validation at the Python boundary; hipBLASLt's own converters are the ground-truth encoder for narrow types.
 - **Reuse, don't reinvent:** narrow-type pack/unpack reuses hipBLASLt's converters (`hipblaslt_float8.h` etc.); MX pre-swizzle ports the logic in `tensilelite/client/src/DataInitialization.cpp`.
 - **GPU-gated tests:** correctness tests skip cleanly when no device is present; they are excluded from pure-host CI.
+- **Implementation Python environment:** conda env `pydev313` (Python 3.13.14, numpy 2.5.1). All pip installs MUST use `conda run -n pydev313 python -m pip install ...` — the base conda env's `pip` installs into the wrong site-packages. All test/build commands run via `conda run -n pydev313 ...` or from a shell where `conda activate pydev313` has been run. **Subagents:** if the active Python is not from `pydev313`, run `conda activate pydev313` first or prefix all commands with `conda run -n pydev313`.
+- **End-user distribution via uv:** the `python/pyproject.toml` must be fully compatible with `uv pip install` and `uv build` (PEP 517 / scikit-build-core satisfies this). No conda-specific packaging — uv compatibility is validated in Task 20.
+- **Package environment opinion:** the package itself is environment-agnostic (standard PEP 517 wheel, no env-manager assumption). The contributor README documents the conda `pydev313` path as "what we use" and adds a one-liner showing uv equivalence. Do not bake conda or uv into any build or test automation outside the README.
 - **Dev host is gfx942 / MI300 only.** gfx950 / MI350-specific *device-GEMM* paths must be written full best-effort but cannot be on-device-verified here. Exactly three items are deferred to MI350: (1) OCP fp8 GEMM correctness, (2) MX/microscaling `VEC32_UE8M0` GEMM, (3) mode-1001 pre-swizzle GEMM. Everything else — including host-side `pack_fp8`/`unpack_fp8` for OCP *and* FNUZ, the ml_dtypes cross-check, and FNUZ fp8 GEMM — runs and is verified here.
   - Host fp8 converters compile both OCP and FNUZ because the `HIP_FP8_TYPE_OCP`/`_FNUZ` gating keys off `__HIP_DEVICE_COMPILE__` (`/opt/rocm/include/hip/amd_detail/amd_hip_fp8.h:41-50`), so encoding tests are NOT gfx950-gated.
   - Deferred device tests carry `@pytest.mark.mi350` AND catch `NOT_SUPPORTED`→`pytest.skip`. Run the deferred suite with `pytest -m mi350`; it is inert on gfx942 and active on gfx950.
@@ -101,7 +104,7 @@ def test_hip_available_is_bool():
 
 - [ ] **Step 2: Run test to verify it fails**
 
-Run: `cd python && python -m pytest tests/test_import.py -v`
+Run: `cd python && conda run -n pydev313 python -m pytest tests/test_import.py -v`
 Expected: FAIL — `ModuleNotFoundError: No module named 'hipblaslt'` (package not built yet).
 
 - [ ] **Step 3: Write `python/pyproject.toml`**
@@ -216,7 +219,7 @@ __pycache__/
 
 Run:
 ```bash
-cd python && pip install --no-build-isolation -e . && python -m pytest tests/test_import.py -v
+cd python && conda run -n pydev313 pip install --no-build-isolation -e . && python -m pytest tests/test_import.py -v
 ```
 Expected: PASS (both tests). If `find_package(hipblaslt)` fails, pass `-Dhipblaslt_DIR=<install>/lib/cmake/hipblaslt` via `pip install ... --config-settings=cmake.args=...`; note the working resolution in the commit message.
 
@@ -269,6 +272,9 @@ After the package-install block (after line 678, at the end of the function body
             f"-Dhipblaslt_DIR={hipblaslt_cmake_dir}"
         )
         with c.cd(str(py_dir)):
+            # Uses whichever pip/python is active when invoke build is called.
+            # Run `invoke build --python` from within `conda activate pydev313`
+            # (or equivalent) so this installs into the intended environment.
             c.run(
                 f"pip install --no-build-isolation -e . {config_settings}",
                 env={"ROCM_PATH": rocm_s},
@@ -322,7 +328,7 @@ def test_raise_status_helper():
 
 - [ ] **Step 2: Run test to verify it fails**
 
-Run: `cd python && python -m pytest tests/test_errors.py -v`
+Run: `cd python && conda run -n pydev313 python -m pytest tests/test_errors.py -v`
 Expected: FAIL — `AttributeError: module ... has no attribute 'HipblasLtError'`.
 
 - [ ] **Step 3: Write `python/src/status.hpp`**
@@ -420,7 +426,7 @@ NB_MODULE(_core, m)
 
 - [ ] **Step 5: Rebuild and run the test**
 
-Run: `cd python && pip install --no-build-isolation -e . && python -m pytest tests/test_errors.py -v`
+Run: `cd python && conda run -n pydev313 pip install --no-build-isolation -e . && python -m pytest tests/test_errors.py -v`
 Expected: PASS (both tests).
 
 - [ ] **Step 6: Commit**
@@ -479,7 +485,7 @@ def test_enum_members_roundtrip():
 
 - [ ] **Step 2: Run test to verify it fails**
 
-Run: `cd python && python -m pytest tests/test_enums.py -v`
+Run: `cd python && conda run -n pydev313 python -m pytest tests/test_enums.py -v`
 Expected: FAIL — `AttributeError: ... has no attribute 'DataType'`.
 
 - [ ] **Step 3: Write `python/src/init.hpp`**
@@ -612,7 +618,7 @@ In `python/CMakeLists.txt`, extend the `nanobind_add_module(_core ...)` source l
 
 - [ ] **Step 7: Rebuild and run**
 
-Run: `cd python && pip install --no-build-isolation -e . && python -m pytest tests/test_enums.py -v`
+Run: `cd python && conda run -n pydev313 pip install --no-build-isolation -e . && python -m pytest tests/test_enums.py -v`
 Expected: PASS (all four tests).
 
 - [ ] **Step 8: Commit**
@@ -662,7 +668,7 @@ def test_handle_context_manager():
 
 - [ ] **Step 2: Run test to verify it fails**
 
-Run: `cd python && python -m pytest tests/test_handle.py -v`
+Run: `cd python && conda run -n pydev313 python -m pytest tests/test_handle.py -v`
 Expected: FAIL — `AttributeError: ... has no attribute 'Handle'` (or all-skipped if no GPU; in that case run on a GPU host — these are GPU-gated per the Global Constraints).
 
 - [ ] **Step 3: Write `python/src/descriptors.cpp`**
@@ -727,7 +733,7 @@ In `module.cpp` add `init_descriptors(m);` after `init_enums(m);`. In `CMakeList
 
 - [ ] **Step 5: Rebuild and run (on a GPU host)**
 
-Run: `cd python && pip install --no-build-isolation -e . && python -m pytest tests/test_handle.py -v`
+Run: `cd python && conda run -n pydev313 pip install --no-build-isolation -e . && python -m pytest tests/test_handle.py -v`
 Expected: PASS (both tests) on a GPU host.
 
 - [ ] **Step 6: Commit**
@@ -774,7 +780,7 @@ def test_layout_set_batch_count():
 
 - [ ] **Step 2: Run test to verify it fails**
 
-Run: `cd python && python -m pytest tests/test_layout.py -v`
+Run: `cd python && conda run -n pydev313 python -m pytest tests/test_layout.py -v`
 Expected: FAIL — no attribute `MatrixLayout`.
 
 - [ ] **Step 3: Add the `MatrixLayout` class to `descriptors.cpp`**
@@ -817,7 +823,7 @@ And register it inside `init_descriptors`:
 
 - [ ] **Step 4: Rebuild and run**
 
-Run: `cd python && pip install --no-build-isolation -e . && python -m pytest tests/test_layout.py -v`
+Run: `cd python && conda run -n pydev313 pip install --no-build-isolation -e . && python -m pytest tests/test_layout.py -v`
 Expected: PASS.
 
 - [ ] **Step 5: Commit**
@@ -872,7 +878,7 @@ def test_preference_workspace():
 
 - [ ] **Step 2: Run test to verify it fails**
 
-Run: `cd python && python -m pytest tests/test_desc.py -v`
+Run: `cd python && conda run -n pydev313 python -m pytest tests/test_desc.py -v`
 Expected: FAIL — no attribute `MatmulDesc`.
 
 - [ ] **Step 3: Add `MatmulDesc` and `Preference` to `descriptors.cpp`**
@@ -954,7 +960,7 @@ Register in `init_descriptors`:
 
 - [ ] **Step 4: Rebuild and run**
 
-Run: `cd python && pip install --no-build-isolation -e . && python -m pytest tests/test_desc.py -v`
+Run: `cd python && conda run -n pydev313 pip install --no-build-isolation -e . && python -m pytest tests/test_desc.py -v`
 Expected: PASS (all three).
 
 - [ ] **Step 5: Commit**
@@ -1022,7 +1028,7 @@ def test_copy_from_host_reuse():
 
 - [ ] **Step 2: Run test to verify it fails**
 
-Run: `cd python && python -m pytest tests/test_device_array.py -v`
+Run: `cd python && conda run -n pydev313 python -m pytest tests/test_device_array.py -v`
 Expected: FAIL — no attribute `DeviceArray`.
 
 - [ ] **Step 3: Write `python/src/device_array.hpp`**
@@ -1187,7 +1193,7 @@ _core.DeviceArray.to_numpy = _device_array_to_numpy
 
 - [ ] **Step 7: Rebuild and run**
 
-Run: `cd python && pip install --no-build-isolation -e . && python -m pytest tests/test_device_array.py -v`
+Run: `cd python && conda run -n pydev313 pip install --no-build-isolation -e . && python -m pytest tests/test_device_array.py -v`
 Expected: PASS (both).
 
 - [ ] **Step 8: Commit**
@@ -1240,7 +1246,7 @@ def test_import_from_torch():
 
 - [ ] **Step 2: Run to verify it fails**
 
-Run: `cd python && python -m pytest tests/test_dlpack.py -v`
+Run: `cd python && conda run -n pydev313 python -m pytest tests/test_dlpack.py -v`
 Expected: FAIL — `AttributeError: ... '__dlpack__'` / no `from_dlpack` (or skipped if torch-ROCm absent; then validate on a host with torch-ROCm installed).
 
 - [ ] **Step 3: Implement `__dlpack__` export via nanobind ndarray**
@@ -1279,7 +1285,7 @@ Note: element size and dtype propagation are refined in Phase 4; for Task 9 the 
 
 - [ ] **Step 4: Rebuild and run (host with torch-ROCm)**
 
-Run: `cd python && pip install --no-build-isolation -e . && python -m pytest tests/test_dlpack.py -v`
+Run: `cd python && conda run -n pydev313 pip install --no-build-isolation -e . && python -m pytest tests/test_dlpack.py -v`
 Expected: PASS (both) on a torch-ROCm host.
 
 - [ ] **Step 5: Commit**
@@ -1329,7 +1335,7 @@ def test_non_contiguous_raises():
 
 - [ ] **Step 2: Run to verify it fails**
 
-Run: `cd python && python -m pytest tests/test_validation.py -v`
+Run: `cd python && conda run -n pydev313 python -m pytest tests/test_validation.py -v`
 Expected: FAIL — `AttributeError: module 'hipblaslt' has no attribute 'from_numpy'`.
 
 - [ ] **Step 3: Add validating `from_numpy` to `__init__.py`**
@@ -1355,7 +1361,7 @@ __all__ = ["_core", "from_numpy"]
 
 - [ ] **Step 4: Rebuild not needed (pure Python) — run**
 
-Run: `cd python && python -m pytest tests/test_validation.py -v`
+Run: `cd python && conda run -n pydev313 python -m pytest tests/test_validation.py -v`
 Expected: PASS (both).
 
 - [ ] **Step 5: Commit**
@@ -1389,7 +1395,7 @@ git commit -m "feat(python): add boundary validation to from_numpy"
 
 Create `python/src/descriptors.hpp` containing the class declarations (`Handle`, `MatrixLayout`, `MatmulDesc`, `Preference`) currently in `descriptors.cpp` — move the class bodies here (keeping inline method bodies), leave only `init_descriptors` in the `.cpp`, and `#include "descriptors.hpp"` from the `.cpp`. Wrap classes in `namespace hipblaslt_py`. This is a refactor: run the Phase-1 tests after to confirm no behavior change.
 
-Run after refactor: `cd python && pip install --no-build-isolation -e . && python -m pytest tests/test_handle.py tests/test_layout.py tests/test_desc.py -v`
+Run after refactor: `cd python && conda run -n pydev313 pip install --no-build-isolation -e . && python -m pytest tests/test_handle.py tests/test_layout.py tests/test_desc.py -v`
 Expected: PASS (unchanged).
 
 Commit the refactor:
@@ -1512,7 +1518,7 @@ In `module.cpp` add `init_matmul(m);`. In `CMakeLists.txt` add `"${CMAKE_CURRENT
 
 - [ ] **Step 5: Rebuild and run**
 
-Run: `cd python && pip install --no-build-isolation -e . && python -m pytest tests/test_heuristic.py -v`
+Run: `cd python && conda run -n pydev313 pip install --no-build-isolation -e . && python -m pytest tests/test_heuristic.py -v`
 Expected: PASS.
 
 - [ ] **Step 6: Commit**
@@ -1578,7 +1584,7 @@ Note: the row/column-major handling above is fiddly. The implementer should conf
 
 - [ ] **Step 2: Run to verify it fails**
 
-Run: `cd python && python -m pytest tests/test_matmul.py -v`
+Run: `cd python && conda run -n pydev313 python -m pytest tests/test_matmul.py -v`
 Expected: FAIL — no attribute `matmul`.
 
 - [ ] **Step 3: Add `matmul` to `matmul.cpp`**
@@ -1621,7 +1627,7 @@ Note: `alpha`/`beta` are `float` here because compute type is 32F; when compute 
 
 - [ ] **Step 4: Rebuild and run**
 
-Run: `cd python && pip install --no-build-isolation -e . && python -m pytest tests/test_matmul.py -v`
+Run: `cd python && conda run -n pydev313 pip install --no-build-isolation -e . && python -m pytest tests/test_matmul.py -v`
 Expected: PASS (GPU result matches numpy within tolerance).
 
 - [ ] **Step 5: Commit**
@@ -1683,7 +1689,7 @@ def test_all_algos_agree():
 
 - [ ] **Step 2: Run**
 
-Run: `cd python && python -m pytest tests/test_algo_sweep.py -v`
+Run: `cd python && conda run -n pydev313 python -m pytest tests/test_algo_sweep.py -v`
 Expected: PASS (all algos agree). If a specific algo diverges, that is a genuine finding — record it as an `xfail` with the algo index and a note, per the "known bugs as xfail" strategy.
 
 - [ ] **Step 3: Commit**
@@ -1769,7 +1775,7 @@ def test_ocp_fp8_gemm():
 
 - [ ] **Step 2: Run**
 
-Run: `cd python && python -m pytest tests/test_fp8_gemm.py -v`
+Run: `cd python && conda run -n pydev313 python -m pytest tests/test_fp8_gemm.py -v`
 Expected: `test_fnuz_fp8_gemm` PASS on this host; `test_ocp_fp8_gemm` SKIP (NOT_SUPPORTED on gfx942).
 
 - [ ] **Step 3: Commit**
@@ -1822,7 +1828,7 @@ def test_fp8_e4m3_roundtrip():
 
 - [ ] **Step 2: Run to verify it fails**
 
-Run: `cd python && python -m pytest tests/test_dtypes.py -v`
+Run: `cd python && conda run -n pydev313 python -m pytest tests/test_dtypes.py -v`
 Expected: FAIL — `KeyError`/`AttributeError` (bf16 not in map).
 
 - [ ] **Step 3: Extend the map in `__init__.py`**
@@ -1858,7 +1864,7 @@ _NP_TO_DTYPE = {_np.dtype(v): k for k, v in _DTYPE_TO_NP.items()}
 
 - [ ] **Step 4: Run**
 
-Run: `cd python && pip install --no-build-isolation -e . && python -m pytest tests/test_dtypes.py -v`
+Run: `cd python && conda run -n pydev313 pip install --no-build-isolation -e . && python -m pytest tests/test_dtypes.py -v`
 Expected: PASS (bf16 test always; fp8 test on a GPU host with a recent ml_dtypes).
 
 - [ ] **Step 5: Commit**
@@ -1905,7 +1911,7 @@ def test_pack_unpack_roundtrip_small():
 
 - [ ] **Step 2: Run to verify it fails**
 
-Run: `cd python && python -m pytest tests/test_convert.py -v`
+Run: `cd python && conda run -n pydev313 python -m pytest tests/test_convert.py -v`
 Expected: FAIL — no attribute `pack_fp8`.
 
 - [ ] **Step 3: Write `python/src/convert.hip`**
@@ -1987,7 +1993,7 @@ Ensure `find_package(hip REQUIRED)` is present (it is, from Task 1). Call `init_
 
 - [ ] **Step 5: Build and run**
 
-Run: `cd python && pip install --no-build-isolation -e . && python -m pytest tests/test_convert.py -v`
+Run: `cd python && conda run -n pydev313 pip install --no-build-isolation -e . && python -m pytest tests/test_convert.py -v`
 Expected: PASS. (This test is host-side — encoding runs on CPU via `__host__` converters — so it does not require a GPU.)
 
 - [ ] **Step 6: Commit**
@@ -2040,7 +2046,7 @@ def test_ml_dtypes_matches_hipblaslt(fmt, mld_type):
 
 - [ ] **Step 2: Run**
 
-Run: `cd python && python -m pytest tests/test_encoding_crosscheck.py -v`
+Run: `cd python && conda run -n pydev313 python -m pytest tests/test_encoding_crosscheck.py -v`
 Expected: PASS if the encoders agree. If they diverge on rounding/NaN edges, convert the specific case to `xfail(reason="...")` documenting the divergence and open a note — that is a real finding about encoding differences, exactly what the tool is for.
 
 - [ ] **Step 3: Commit**
@@ -2104,7 +2110,7 @@ def test_swizzle_roundtrip():
 
 - [ ] **Step 2: Run to verify it fails**
 
-Run: `cd python && python -m pytest tests/test_mx.py -v`
+Run: `cd python && conda run -n pydev313 python -m pytest tests/test_mx.py -v`
 Expected: FAIL — `ModuleNotFoundError: No module named 'hipblaslt.mx'`.
 
 - [ ] **Step 3: Write `python/hipblaslt/mx.py`**
@@ -2254,7 +2260,7 @@ Note: the helpers (build/apply/swizzle roundtrip) are fully tested and CI-able o
 
 - [ ] **Step 6: Run**
 
-Run: `cd python && python -m pytest tests/test_mx.py -v`
+Run: `cd python && conda run -n pydev313 python -m pytest tests/test_mx.py -v`
 Expected: PASS for the three helper tests; the GEMM test skips (no MX hardware / placeholder).
 
 - [ ] **Step 7: Commit**
@@ -2318,7 +2324,7 @@ def test_every_header_value_is_bound(bound_name, header_enum):
 
 - [ ] **Step 2: Run to verify it fails**
 
-Run: `cd python && python -m pytest tests/test_api_coverage.py -v`
+Run: `cd python && conda run -n pydev313 python -m pytest tests/test_api_coverage.py -v`
 Expected: FAIL — `ModuleNotFoundError: No module named 'hipblaslt._coverage'`.
 
 - [ ] **Step 3: Write `python/hipblaslt/_coverage.py`**
@@ -2404,7 +2410,7 @@ def hip_available():
 
 - [ ] **Step 5: Run**
 
-Run: `cd python && python -m pytest tests/test_api_coverage.py -v`
+Run: `cd python && conda run -n pydev313 python -m pytest tests/test_api_coverage.py -v`
 Expected: PASS. If it flags a header value not bound, EITHER add the enumerator to `enums.cpp` (Task 4) OR add its value to `ALLOWED_MISSING` with a comment explaining why (e.g. deprecated `_VEC_EXT` static_assert stubs). Do both fixes as this task's follow-through.
 
 - [ ] **Step 6: Commit**
@@ -2448,7 +2454,7 @@ def test_gemm_f32():
 
 - [ ] **Step 2: Run to verify it fails**
 
-Run: `cd python && python -m pytest tests/test_convenience.py -v`
+Run: `cd python && conda run -n pydev313 python -m pytest tests/test_convenience.py -v`
 Expected: FAIL — no attribute `gemm`.
 
 - [ ] **Step 3: Add `gemm` to `__init__.py`**
@@ -2497,7 +2503,7 @@ Note: `ComputeType.COMPUTE_32F` is correct for f32/f16/bf16 inputs; a future ext
 
 - [ ] **Step 4: Run**
 
-Run: `cd python && python -m pytest tests/test_convenience.py -v`
+Run: `cd python && conda run -n pydev313 python -m pytest tests/test_convenience.py -v`
 Expected: PASS.
 
 - [ ] **Step 5: Commit**
@@ -2524,15 +2530,45 @@ Expected: note the workflow files present. If the superbuild owns CI and adding 
 
 - [ ] **Step 2: Write `python/README.md`**
 
-Include: what the package is (low-level dev tool), install (`invoke build --python -ca gfx942` or `pip install --no-build-isolation -e python/`), a minimal `gemm` example, a low-level `heuristic`+`matmul` example, the GPU-gated test note, and the host-only test command:
+Include: what the package is (low-level dev tool), install options (conda dev path + uv alternative + `invoke build --python`), a minimal `gemm` example, a low-level `heuristic`+`matmul` example, the GPU-gated test note, and the host-only test command. The README must show both env paths — conda as the current dev convention and uv as the recommended end-user path:
 
+```markdown
+## Installation
+
+### End users (uv — recommended)
 ```bash
-cd python && python -m pytest tests/ -m "not gpu" -v   # host-only subset
+uv pip install --no-build-isolation ./python/
 ```
 
-(Mark GPU tests with a `gpu` marker via `pytestmark`/`requires_gpu`; register the marker in `pyproject.toml` under `[tool.pytest.ini_options] markers`.)
+### Contributors (conda dev environment — current convention)
+```bash
+conda activate pydev313          # Python 3.13 dev env for this project
+conda run -n pydev313 python -m pip install "scikit-build-core>=0.10" "nanobind>=2.0" pytest
+cd python && conda run -n pydev313 python -m pip install --no-build-isolation -e .
+```
 
-- [ ] **Step 3: Register the `gpu` marker**
+### Via invoke build (builds host + device lib + Python in one step)
+```bash
+invoke build -ca gfx942 --python
+```
+
+Any other PEP 517-compatible environment (plain venv, poetry, pixi) works
+the same way — the package has no env-manager dependency.
+
+## Running tests
+```bash
+# Host-only (no GPU needed):
+cd python && conda run -n pydev313 python -m pytest tests/ -m "not gpu" -v
+
+# All GPU tests (needs a HIP device):
+cd python && conda run -n pydev313 python -m pytest tests/ -m "gpu" -v
+
+# MI350-deferred tests (needs gfx950):
+cd python && conda run -n pydev313 python -m pytest tests/ -m mi350 -v
+```
+```
+
+- [ ] **Step 3: Register the `gpu` and `mi350` markers**
 
 In `python/pyproject.toml`, under `[tool.pytest.ini_options]`, add:
 
@@ -2545,16 +2581,26 @@ markers = [
 
 And ensure GPU tests carry the marker (the `requires_gpu = pytest.mark.skipif(...)` already skips; add `pytestmark = pytest.mark.gpu` where a whole file is GPU-only, so `-m "not gpu"` selects the host subset). The `mi350` marker is already applied to the three deferred device tests (`test_ocp_fp8_gemm`, `test_mx_gemm_matches_reference`, and the mode-1001 test added in Task 21 Step 2); `pytest -m mi350` selects exactly the deferred suite.
 
-- [ ] **Step 4: Run the host-only subset to confirm it passes without a GPU**
+- [ ] **Step 4: Validate uv compatibility**
 
-Run: `cd python && python -m pytest tests/ -m "not gpu" -v`
+Run:
+```bash
+# uv must be able to build a wheel from the pyproject.toml — no conda or venv assumption.
+conda run -n pydev313 pip install uv
+cd python && conda run -n pydev313 uv build --no-build-isolation 2>&1 | tail -5
+```
+Expected: a `.whl` file appears in `dist/`. If it fails, the fix is in `pyproject.toml` or `CMakeLists.txt` — not by adding conda assumptions.
+
+- [ ] **Step 5: Run the host-only subset**
+
+Run: `conda run -n pydev313 python -m pytest tests/ -m "not gpu" -v` from `python/`.
 Expected: PASS (import, errors, enums, convert, crosscheck, coverage, mx-helpers); GPU tests deselected.
 
-- [ ] **Step 5: Commit**
+- [ ] **Step 6: Commit**
 
 ```bash
 git add python/README.md python/pyproject.toml
-git commit -m "docs(python): add README and host-only test marker/CI notes"
+git commit -m "docs(python): README with conda+uv install paths, pytest markers"
 ```
 
 ## Phase 6 — MI350 handoff (Task 21)
@@ -2627,8 +2673,8 @@ def test_mx_gemm_preswizzle_mode1001():
 
 - [ ] **Step 2: Run (skips on this host)**
 
-Run: `cd python && python -m pytest tests/test_mx.py -m mi350 -v`
-Expected: all `mi350` tests SKIP with NOT_SUPPORTED on gfx942. Also run `python -m pytest tests/test_mx.py -m "not mi350" -v` and expect the helper tests to PASS.
+Run: `cd python && conda run -n pydev313 python -m pytest tests/test_mx.py -m mi350 -v`
+Expected: all `mi350` tests SKIP with NOT_SUPPORTED on gfx942. Also run `conda run -n pydev313 python -m pytest tests/test_mx.py -m "not mi350" -v` and expect the helper tests to PASS.
 
 - [ ] **Step 3: Write `docs/superpowers/handoff/2026-07-10-mi350-verification.md`**
 
@@ -2653,11 +2699,21 @@ Read first: `docs/superpowers/specs/2026-07-10-python-interface-design.md`
 ## Step 1: Build and sanity-check
 
 ```bash
+# Activate the dev environment (same conda env used during implementation).
+conda activate pydev313
+
 cd projects/hipblaslt
 invoke build -ca gfx950 --python          # or your usual arch flags + --python
 cd python
 python -c "import hipblaslt; print(hipblaslt._core.hip_available())"   # -> True
 python -m pytest tests/ -m "not mi350" -v  # full non-deferred suite must pass
+```
+
+If `pydev313` is not present on this machine, create it:
+```bash
+conda create -n pydev313 python=3.13 numpy pandas -y
+conda activate pydev313
+python -m pip install "scikit-build-core>=0.10" "nanobind>=2.0" "ml_dtypes>=0.5.0" pytest
 ```
 
 If the non-deferred suite does not pass on MI350, STOP — that is a regression
