@@ -6,7 +6,7 @@ The primitives in `rocke.benchmark.perf` are pure and write nothing. This packag
 convenience layer a developer or an agent drives to actually *keep* results and see
 improve/regress:
 
-  store.py      persist/read records in a USER CACHE dir (~/.cache/rocke.benchmark.perf),
+  store.py      persist/read records in a USER CACHE dir (~/.cache/rocke-perf),
                 never in the repo - only this code is committed, never its data.
   selfcheck.py  compare a current run against a previous one (advisory).
   cli.py        `python -m rocke.benchmark.perf.tool ...` entrypoint.

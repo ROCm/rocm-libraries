@@ -3,12 +3,12 @@
   "run": {
     "run_id": "2026-06-26T18:00:00+00:00_abc1234",
     "git_commit": "abc1234",
-    "branch": "users/juzoka/rocke-bench",
+    "branch": "develop",
     "timestamp": "2026-06-26T18:00:00+00:00",
     "arch": "gfx1201",
     "gpu_name": "AMD Radeon RX 9070 XT",
     "rocm_version": "7.x",
-    "host": "cgy-paras",
+    "host": "gpu-node-01",
     "trigger": "manual"
   },
   "kernel": {
@@ -19,7 +19,7 @@
     "config": {"tile_m": 128, "tile_n": 128, "tile_k": 32, "pipeline": "mem"},
     "grid": [16, 4, 1],
     "block": [256, 1, 1],
-    "dispatch_ref": "ui_output_agent_1_dispatch_0"
+    "dispatch_symbol": "gemm_fp16_rcr_512x512x512_t128x128x32"
   },
   "wall": {
     "ms_median": 0.0472,

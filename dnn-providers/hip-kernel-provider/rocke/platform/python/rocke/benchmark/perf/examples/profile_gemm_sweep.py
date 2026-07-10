@@ -157,7 +157,7 @@ def _parse_shape(text: str) -> tuple:
 def main(argv: Optional[Sequence[str]] = None) -> int:
     p = argparse.ArgumentParser(
         prog="examples.profile_gemm_sweep",
-        description="EXAMPLE: drive rocke.benchmark.perf primitives over rocKE's GEMM sweep.",
+        description="Drive the rocke.benchmark.perf primitives over rocKE's GEMM sweep.",
     )
     p.add_argument("--arch", default="gfx950")
     p.add_argument(
