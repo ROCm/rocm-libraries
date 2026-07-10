@@ -94,7 +94,6 @@ def conv_bucket_key(row: tuple) -> tuple:
     )
 
 
-
 # ── Gemm bucketing ──────────────────────────────────────────────────────────
 
 
@@ -506,7 +505,10 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
     # Resolve --shapes-per-shard into a shard count
     if args.shapes_per_shard is not None and args.shapes_per_shard > 0:
         args.shards = math.ceil(len(sampled) / args.shapes_per_shard)
-        print(f"shapes_per_shard={args.shapes_per_shard} -> {args.shards} shards", file=sys.stderr)
+        print(
+            f"shapes_per_shard={args.shapes_per_shard} -> {args.shards} shards",
+            file=sys.stderr,
+        )
 
     # Shard
     if args.shards > 0:
