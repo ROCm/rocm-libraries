@@ -383,94 +383,6 @@ jobs:
           # Keep the shareable report around well beyond the build inputs.
           retention-days: 90
 
-      - name: Upload coverage to Codecov
-        id: codecov
-        if: ${{ always() }}
-        continue-on-error: true
-        shell: bash
-        env:
-          CODECOV_TOKEN: ${{ secrets.CODECOV_TOKEN }}
-          EVENT_NAME: ${{ github.event_name }}
-          FLAG: ${{ inputs.cmake_target }}
-          UPLOAD_NAME: ${{ inputs.cmake_target }}-${{ inputs.amdgpu_families }}
-          SLUG: ${{ github.repository }}
-          BASE_OWNER: ${{ github.repository_owner }}
-          # PR context (all empty on push / non-PR events). head.* is the real
-          # commit on the (possibly forked) source branch, which is what Codecov
-          # can match - unlike github.sha, which is the ephemeral merge commit.
-          PR_NUMBER: ${{ github.event.pull_request.number }}
-          PR_HEAD_SHA: ${{ github.event.pull_request.head.sha }}
-          PR_HEAD_REF: ${{ github.event.pull_request.head.ref }}
-          PR_HEAD_OWNER: ${{ github.event.pull_request.head.repo.owner.login }}
-          # push / postsubmit context.
-          PUSH_SHA: ${{ github.sha }}
-          PUSH_BRANCH: ${{ github.ref_name }}
-        run: |
-          set -x
-          COV_FILE="coverage-report/coverage.info"
-          # The report job exits early (no upload) when a GPU family produced no
-          # profraw; in that case there is nothing to send to Codecov.
-          if [[ ! -f "${COV_FILE}" ]]; then
-            echo "No ${COV_FILE}; nothing to upload to Codecov."
-            echo "uploaded=false" >> "${GITHUB_OUTPUT}"
-            exit 0
-          fi
-          # The standalone Codecov CLI binary is built against a newer glibc than
-          # the manylinux build container provides (it failed to load libpython
-          # with "GLIBC_2.29 not found"). Install via pip so it runs under the
-          # container's own Python interpreter instead.
-          if ! python3 -m pip install --quiet codecov-cli; then
-            echo "Could not install codecov-cli; skipping upload."
-            echo "uploaded=false" >> "${GITHUB_OUTPUT}"
-            exit 0
-          fi
-
-          # Base arguments shared by every context. --git-service is required on
-          # the tokenless path: without a token codecovcli cannot infer the git
-          # provider and fails with "Upload service is missing"; it is harmless
-          # when a token is present.
-          ARGS=(upload-process
-            --disable-search
-            --git-service github
-            --file "${COV_FILE}"
-            --flag "${FLAG}"
-            --name "${UPLOAD_NAME}"
-            --slug "${SLUG}")
-
-          if [[ "${EVENT_NAME}" == "pull_request" || "${EVENT_NAME}" == "pull_request_target" ]]; then
-            # Attach to the PR head commit (not the merge commit) so Codecov's
-            # GitHub App can resolve it, and pass the PR number explicitly.
-            ARGS+=(--sha "${PR_HEAD_SHA}" --pr "${PR_NUMBER}")
-            # Codecov grants tokenless uploads to fork PRs on public repos only
-            # when the branch is sent as "<owner>:<branch>" (an "unprotected"
-            # branch). codecov-action injects this automatically for forks; the
-            # raw CLI does not, so build it here. Only fork PRs (head owner !=
-            # base owner) get the prefix; same-repo PRs use the plain branch.
-            if [[ -n "${PR_HEAD_OWNER}" && "${PR_HEAD_OWNER}" != "${BASE_OWNER}" ]]; then
-              ARGS+=(--branch "${PR_HEAD_OWNER}:${PR_HEAD_REF}")
-            else
-              ARGS+=(--branch "${PR_HEAD_REF}")
-            fi
-          else
-            ARGS+=(--sha "${PUSH_SHA}" --branch "${PUSH_BRANCH}")
-          fi
-
-          if [[ -n "${CODECOV_TOKEN:-}" ]]; then
-            # Non-fork PRs and postsubmit runs receive the repo secret.
-            ARGS+=(--token "${CODECOV_TOKEN}")
-          else
-            echo "CODECOV_TOKEN is empty (expected for fork PRs, which do not"
-            echo "receive repository secrets); relying on Codecov's tokenless"
-            echo "upload path for fork PRs against a public repo."
-          fi
-
-          if codecovcli --verbose "${ARGS[@]}"; then
-            echo "uploaded=true" >> "${GITHUB_OUTPUT}"
-          else
-            echo "Codecov upload failed (non-fatal)."
-            echo "uploaded=false" >> "${GITHUB_OUTPUT}"
-          fi
-
       - name: Coverage report summary
         if: ${{ always() }}
         shell: bash
@@ -485,10 +397,6 @@ jobs:
               echo '```'
             fi
             echo "- Report artifact: \`${REPORT_ARTIFACT}\` (download from [run artifacts](${RUN_URL}))"
-            if [[ "${{ steps.codecov.outputs.uploaded }}" == "true" ]]; then
-              echo "- Codecov: https://app.codecov.io/gh/${{ github.repository }}/pull/${{ github.event.pull_request.number }} (flag: ${{ inputs.cmake_target }})"
-            else
-              echo "- Codecov: upload did not complete for this run. Fork PRs have no CODECOV_TOKEN and rely on Codecov's tokenless path (which requires the org to allow tokenless uploads for public repos); non-fork PRs and postsubmit use the token. See the 'Upload coverage to Codecov' step log for the exact reason. The report artifact above always has the full data."
-            fi
+            echo "- Codecov: upload is handled by the dedicated Codecov PR (users/jainprad/codecoverage_codecov_tool); this PR only produces the report artifact."
           # tee so the summary is also visible in this step's log, not only the job summary page.
           } | tee -a "${GITHUB_STEP_SUMMARY}"
