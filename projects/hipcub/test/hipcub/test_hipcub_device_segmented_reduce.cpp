@@ -1141,7 +1141,10 @@ TYPED_TEST(HipcubDeviceSegmentedReduceArgMinMaxSpecialTests, ReduceArgMaxInf)
 // Test for large indices
 // ---------------------------------------------------------
 
-TEST(HipcubDeviceSegmentedReduceLargeIndicesTests, LargeIndices)
+class HipcubDeviceSegmentedReduceLargeIndicesTests : public test_controller::ControlledTest<>
+{};
+
+TEST_F(HipcubDeviceSegmentedReduceLargeIndicesTests, LargeIndices)
 {
     int device_id = test_common_utils::obtain_device_from_ctest();
     SCOPED_TRACE(testing::Message() << "with device_id= " << device_id);
