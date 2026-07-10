@@ -6,7 +6,7 @@ Documentation for rocSPARSE is available at
 (Unreleased) rocSPARSE 5.0.0
 
 ### Removed
-* The deprecated `rocsparse_indextype_u16`.
+* The deprecated `rocsparse_indextype_u16` enum.
 
 ## rocSPARSE 4.7.0 for ROCm 7.14
 

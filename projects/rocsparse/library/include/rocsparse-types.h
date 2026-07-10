@@ -557,7 +557,11 @@ typedef enum rocsparse_data_status_
  */
 typedef enum rocsparse_indextype_
 {
-#ifndef ROCSPARSE_WITH_U16_REMOVED
+// The deprecated u16 index type is removed from the public enum when
+// ROCSPARSE_WITH_U16_REMOVED is defined, but it is retained internally
+// (ROCSPARSE_KEEP_INTERNAL_U16) so that the library can still recognize and
+// gracefully reject the value without triggering -Wswitch warnings.
+#if !defined(ROCSPARSE_WITH_U16_REMOVED) || defined(ROCSPARSE_KEEP_INTERNAL_U16)
     rocsparse_indextype_u16
     [[deprecated("rocsparse_indextype_u16 is no longer supported and will be removed in a future "
                  "release. Use "

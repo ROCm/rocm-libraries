@@ -53,6 +53,7 @@ endif()
 # feature flags. Variables referenced via #cmakedefine in the .h.in must
 # be set (or unset) prior to this configure_file() call.
 set(ROCSPARSE_WITH_ILDLT0 ${BUILD_WITH_ILDLT0})
+set(ROCSPARSE_WITH_U16_REMOVED ${BUILD_WITH_U16_REMOVED})
 
 configure_file("${CMAKE_CURRENT_SOURCE_DIR}/include/rocsparse-version.h.in"
                "${PROJECT_BINARY_DIR}/include/rocsparse/rocsparse-version.h"
@@ -88,9 +89,16 @@ endif()
 # Target compile options
 target_compile_options(rocsparse PRIVATE -Wno-unused-command-line-argument -Wall)
 
-# Optionally remove the deprecated rocsparse_indextype_u16 index type
+# Optionally remove the deprecated rocsparse_indextype_u16 index type from the
+# public API. The ROCSPARSE_WITH_U16_REMOVED flag itself is baked into the
+# installed rocsparse-version.h (see configure_file above) so that it propagates
+# to downstream consumers and makes their use of the enumerator a compile error.
+# ROCSPARSE_KEEP_INTERNAL_U16 is defined only for the library's own translation
+# units, keeping the enumerator available so that internal switch statements
+# remain valid (avoiding -Wswitch warnings) while still returning "not
+# implemented" for the deprecated value.
 if(BUILD_WITH_U16_REMOVED)
-    target_compile_definitions(rocsparse PRIVATE ROCSPARSE_WITH_U16_REMOVED)
+    target_compile_definitions(rocsparse PRIVATE ROCSPARSE_KEEP_INTERNAL_U16)
     message(STATUS "Building rocSPARSE with rocsparse_indextype_u16 removed.")
 endif()
 
