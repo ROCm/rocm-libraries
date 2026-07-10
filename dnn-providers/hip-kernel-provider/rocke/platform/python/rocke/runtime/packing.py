@@ -69,7 +69,7 @@ def pack_args(
             else:
                 arg_val = int(v)
         else:
-            raise ValueError(f"unsupported torch arg type {ty!r} for {name}")
+            raise ValueError(f"unsupported kernel arg type {ty!r} for {name}")
         # Insert padding bytes so this arg lands at its natural alignment.
         pad = (-offset) % align
         if pad:
@@ -119,7 +119,7 @@ def pack_args_kernelparams(
         elif ty == "f32":
             out.append(ctypes.c_float(float(v)))
         else:
-            raise ValueError(f"unsupported torch arg type {ty!r} for {name}")
+            raise ValueError(f"unsupported kernel arg type {ty!r} for {name}")
     return out
 
 

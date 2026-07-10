@@ -7,13 +7,17 @@
 in-process pipeline that turns AMDGPU LLVM IR text into a running
 kernel.
 
-Layered modules (bottom-up):
+Layered modules (bottom-up). The first five run torch-free -- the
+hip-only core; ``torch_interop`` and ``launcher`` are the torch-aware
+edge:
 
   - ``runtime_coexistence`` : which ROCm runtime we bind to, and whose
                       (torch-bundled vs a system ROCm install). Shared
                       library resolution used by both ``comgr`` and
-                      ``hip_module`` (``_ctypes_bind`` holds the lazy
-                      ctypes function binder they share).
+                      ``hip_module``.
+
+  - ``_ctypes_bind``: the lazy ctypes function binder (`_LazyFn`) shared
+                      by ``comgr`` and ``hip_module``.
 
   - ``comgr``       : ctypes wrapper over `libamd_comgr.so`. Implements
                       `LLVM IR (text) -> BC -> relocatable ELF -> HSA

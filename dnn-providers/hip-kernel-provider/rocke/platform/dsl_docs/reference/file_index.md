@@ -1,6 +1,6 @@
 # File Index
 
-A by-file map of the `rocke` package. Symbols listed are the primary public exports — see each file for the rest.
+A by-file map of the `rocke` package. Symbols listed are the primary contents (public exports, or the key internal helpers for whole-module-private files) — see each file for the rest.
 
 ## Top Level
 

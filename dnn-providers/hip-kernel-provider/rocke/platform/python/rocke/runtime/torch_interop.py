@@ -1,12 +1,17 @@
 # Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
 # SPDX-License-Identifier: MIT
 
-"""Torch tensor launcher for CK DSL HSACO kernels.
+"""Torch-tensor launch glue, plus the torch-optional stream resolver.
 
-This runtime is for integrations like AITER where tensors already live on the
-GPU. It avoids host staging: kernel arguments are packed from
-`torch.Tensor.data_ptr()` and Python scalar values, then launched through the
-same hipModule path as `run_manifest`.
+For integrations like AITER where tensors already live on the GPU: launch
+through the same hipModule path as `run_manifest`, without host staging.
+This module holds `resolve_stream` (substitute torch's current stream so
+its caching allocator stays coherent -- degrades to the HIP null stream
+when torch is absent, so the numpy/manifest hip-only path calls it too),
+`empty_workspace`, and the `launch_torch_kernel` back-compat shim.
+
+Kernel-argument packing is torch-agnostic and lives in `packing.py`; this
+module builds on it.
 """
 
 from __future__ import annotations
