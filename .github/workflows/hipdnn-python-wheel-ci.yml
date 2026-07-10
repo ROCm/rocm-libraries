@@ -77,7 +77,7 @@ jobs:
           python -m pip install --upgrade pip
           pip install build numpy pytest
           echo "$VENV_PATH/bin" >> "$GITHUB_PATH"
-      - name: Install third-party dependencies
+      - name: Download third-party sources
         run: |
           set -euo pipefail
           mkdir -p "$THIRD_PARTY_DEPS_DIR"
@@ -96,46 +96,6 @@ jobs:
               )
               with tarfile.open(archive, "r:gz") as tar:
                   tar.extractall(deps_dir, filter="data")
-
-          (deps_dir / "nanobind-2.12.0" / "cmake" / "nanobind-config-version.cmake").write_text(
-              """set(PACKAGE_VERSION "2.12.0")
-          if(PACKAGE_FIND_VERSION VERSION_EQUAL PACKAGE_VERSION)
-              set(PACKAGE_VERSION_EXACT TRUE)
-          endif()
-          if(PACKAGE_FIND_VERSION VERSION_LESS_EQUAL PACKAGE_VERSION)
-              set(PACKAGE_VERSION_COMPATIBLE TRUE)
-          endif()
-          """,
-              encoding="utf-8",
-          )
-
-          robin_map_config_dir = deps_dir / "cmake" / "tsl-robin-map"
-          robin_map_config_dir.mkdir(parents=True, exist_ok=True)
-          robin_map_include_dir = (deps_dir / "robin-map-1.4.1" / "include").as_posix()
-          (robin_map_config_dir / "tsl-robin-mapConfig.cmake").write_text(
-              f"""include_guard(GLOBAL)
-          set(tsl-robin-map_FOUND TRUE)
-          set(tsl-robin-map_VERSION "1.4.1")
-          set(tsl-robin-map_INCLUDE_DIRS "{robin_map_include_dir}")
-          if(NOT TARGET tsl::robin_map)
-              add_library(tsl::robin_map INTERFACE IMPORTED)
-              set_target_properties(tsl::robin_map PROPERTIES
-                  INTERFACE_INCLUDE_DIRECTORIES "{robin_map_include_dir}")
-          endif()
-          """,
-              encoding="utf-8",
-          )
-          (robin_map_config_dir / "tsl-robin-mapConfigVersion.cmake").write_text(
-              """set(PACKAGE_VERSION "1.4.1")
-          if(PACKAGE_FIND_VERSION VERSION_EQUAL PACKAGE_VERSION)
-              set(PACKAGE_VERSION_EXACT TRUE)
-          endif()
-          if(PACKAGE_FIND_VERSION VERSION_LESS_EQUAL PACKAGE_VERSION)
-              set(PACKAGE_VERSION_COMPATIBLE TRUE)
-          endif()
-          """,
-              encoding="utf-8",
-          )
           PY
           test -d "$THIRD_PARTY_DEPS_DIR/nanobind-2.12.0"
           test -d "$THIRD_PARTY_DEPS_DIR/robin-map-1.4.1"
@@ -143,12 +103,12 @@ jobs:
       - name: Configure frontend bindings
         run: |
           cmake -S projects/hipdnn/python/frontend_bindings \
-                -Dtsl-robin-map_DIR="$THIRD_PARTY_DEPS_DIR/cmake/tsl-robin-map" \
                 -B "$BUILD_DIR" \
                 -GNinja \
                 -DCMAKE_BUILD_TYPE=Release \
                 -DCMAKE_PREFIX_PATH="$ROCM_SDK_PATH" \
-                -Dnanobind_DIR="$THIRD_PARTY_DEPS_DIR/nanobind-2.12.0/cmake" \
+                -DFETCHCONTENT_SOURCE_DIR_NANOBIND="$THIRD_PARTY_DEPS_DIR/nanobind-2.12.0" \
+                -DFETCHCONTENT_SOURCE_DIR_TSL_ROBIN_MAP="$THIRD_PARTY_DEPS_DIR/robin-map-1.4.1" \
                 -DPython_EXECUTABLE="$VENV_PATH/bin/python"
 
       - name: Build frontend bindings
@@ -235,7 +195,7 @@ jobs:
           & $python -m pip install build numpy pytest
 
           (Join-Path $env:VENV_PATH "Scripts") | Out-File -FilePath $env:GITHUB_PATH -Append
-      - name: Install third-party dependencies
+      - name: Download third-party sources
         run: |
           New-Item -ItemType Directory -Force $env:THIRD_PARTY_DEPS_DIR | Out-Null
           $python = Join-Path $env:VENV_PATH "Scripts\python.exe"
@@ -254,49 +214,9 @@ jobs:
               )
               with tarfile.open(archive, "r:gz") as tar:
                   tar.extractall(deps_dir, filter="data")
-
-          (deps_dir / "nanobind-2.12.0" / "cmake" / "nanobind-config-version.cmake").write_text(
-              """set(PACKAGE_VERSION "2.12.0")
-          if(PACKAGE_FIND_VERSION VERSION_EQUAL PACKAGE_VERSION)
-              set(PACKAGE_VERSION_EXACT TRUE)
-          endif()
-          if(PACKAGE_FIND_VERSION VERSION_LESS_EQUAL PACKAGE_VERSION)
-              set(PACKAGE_VERSION_COMPATIBLE TRUE)
-          endif()
-          """,
-              encoding="utf-8",
-          )
-
-          robin_map_config_dir = deps_dir / "cmake" / "tsl-robin-map"
-          robin_map_config_dir.mkdir(parents=True, exist_ok=True)
-          robin_map_include_dir = (deps_dir / "robin-map-1.4.1" / "include").as_posix()
-          (robin_map_config_dir / "tsl-robin-mapConfig.cmake").write_text(
-              f"""include_guard(GLOBAL)
-          set(tsl-robin-map_FOUND TRUE)
-          set(tsl-robin-map_VERSION "1.4.1")
-          set(tsl-robin-map_INCLUDE_DIRS "{robin_map_include_dir}")
-          if(NOT TARGET tsl::robin_map)
-              add_library(tsl::robin_map INTERFACE IMPORTED)
-              set_target_properties(tsl::robin_map PROPERTIES
-                  INTERFACE_INCLUDE_DIRECTORIES "{robin_map_include_dir}")
-          endif()
-          """,
-              encoding="utf-8",
-          )
-          (robin_map_config_dir / "tsl-robin-mapConfigVersion.cmake").write_text(
-              """set(PACKAGE_VERSION "1.4.1")
-          if(PACKAGE_FIND_VERSION VERSION_EQUAL PACKAGE_VERSION)
-              set(PACKAGE_VERSION_EXACT TRUE)
-          endif()
-          if(PACKAGE_FIND_VERSION VERSION_LESS_EQUAL PACKAGE_VERSION)
-              set(PACKAGE_VERSION_COMPATIBLE TRUE)
-          endif()
-          """,
-              encoding="utf-8",
-          )
           '@
           $script | & $python
-          if ($LASTEXITCODE -ne 0) { throw "Failed to install third-party dependencies" }
+          if ($LASTEXITCODE -ne 0) { throw "Failed to download third-party sources" }
           if (-not (Test-Path (Join-Path $env:THIRD_PARTY_DEPS_DIR "nanobind-2.12.0"))) { throw "nanobind source directory not found" }
           if (-not (Test-Path (Join-Path $env:THIRD_PARTY_DEPS_DIR "robin-map-1.4.1"))) { throw "robin-map source directory not found" }
 
@@ -304,12 +224,12 @@ jobs:
         run: |
           $python = Join-Path $env:VENV_PATH "Scripts\python.exe"
           cmake -S projects/hipdnn/python/frontend_bindings `
-                "-Dtsl-robin-map_DIR=$env:THIRD_PARTY_DEPS_DIR\cmake\tsl-robin-map" `
                 -B $env:BUILD_DIR `
                 -GNinja `
                 -DCMAKE_BUILD_TYPE=Release `
                 "-DCMAKE_PREFIX_PATH=$env:ROCM_SDK_PATH" `
-                "-Dnanobind_DIR=$env:THIRD_PARTY_DEPS_DIR\nanobind-2.12.0\cmake" `
+                "-DFETCHCONTENT_SOURCE_DIR_NANOBIND=$env:THIRD_PARTY_DEPS_DIR\nanobind-2.12.0" `
+                "-DFETCHCONTENT_SOURCE_DIR_TSL_ROBIN_MAP=$env:THIRD_PARTY_DEPS_DIR\robin-map-1.4.1" `
                 "-DPython_EXECUTABLE=$python"
 
       - name: Build frontend bindings

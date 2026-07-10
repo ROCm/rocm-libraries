@@ -3,6 +3,7 @@
 
 cmake_minimum_required(VERSION 3.26)
 project(hipdnn_frontend_bindings LANGUAGES CXX)
+include(FetchContent)
 
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
@@ -13,8 +14,30 @@ set(NB_USE_SUBMODULE_DEPS OFF)
 find_package(Python 3.12
     REQUIRED COMPONENTS Interpreter Development.Module Development.SABIModule)
 
-find_package(tsl-robin-map 1.4.1 CONFIG REQUIRED)
-find_package(nanobind 2.12.0 CONFIG REQUIRED)
+find_package(tsl-robin-map 1.4.1 CONFIG QUIET)
+if(NOT TARGET tsl::robin_map)
+    FetchContent_Declare(
+        tsl_robin_map
+        URL https://rocm-third-party-deps.s3.us-east-2.amazonaws.com/robin-map-1.4.1.tar.gz
+        URL_HASH SHA256=0e3f53a377fdcdc5f9fed7a4c0d4f99e82bbb64175233bd13427fef9a771f4a1
+        DOWNLOAD_EXTRACT_TIMESTAMP TRUE
+    )
+    set(TSL_ROBIN_MAP_ENABLE_INSTALL OFF CACHE BOOL "" FORCE)
+    FetchContent_MakeAvailable(tsl_robin_map)
+endif()
+
+find_package(nanobind 2.12.0 CONFIG QUIET)
+if(NOT COMMAND nanobind_add_module)
+    FetchContent_Declare(
+        nanobind
+        URL https://rocm-third-party-deps.s3.us-east-2.amazonaws.com/nanobind-2.12.0.tar.gz
+        URL_HASH SHA256=01f1f0cd0398743c18f33d07ae36ad410bd7f4a1e90683b508504de897d6e629
+        DOWNLOAD_EXTRACT_TIMESTAMP TRUE
+    )
+    set(NB_TEST OFF CACHE BOOL "" FORCE)
+    set(NB_CREATE_INSTALL_RULES OFF CACHE BOOL "" FORCE)
+    FetchContent_MakeAvailable(nanobind)
+endif()
 
 find_package(hipdnn_frontend CONFIG)
 if(NOT hipdnn_frontend_FOUND)

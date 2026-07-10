@@ -42,8 +42,8 @@ python/
 - ROCm/HIP runtime and libraries
 - Installed hipDNN development artifacts with `hipdnn_frontendConfig.cmake`,
   `hipdnn_backendConfig.cmake`, headers, and the backend shared library
-- A `nanobind` CMake package, or network access during configure so CMake can
-  fetch nanobind
+- `nanobind` and `tsl-robin-map` CMake packages, or network access during
+  configure so CMake can fetch the pinned source archives
 - The `build` Python package when creating a wheel
 - The `numpy` and `pytest` Python packages when running source-tree tests or samples
 
@@ -107,9 +107,10 @@ still need ROCm and hipDNN runtime libraries discoverable through ROCm wheels,
 
 The `hipDNN Python Wheel CI` workflow validates the wheel end-to-end on Linux
 and Windows. Each job installs ROCm nightly artifacts plus test-only Python
-dependencies into a venv, configures `frontend_bindings` with
-`CMAKE_PREFIX_PATH` pointing at the expanded SDK, builds the nanobind extension,
-packs the wheel, installs that wheel into the same venv, and runs:
+dependencies into a venv, downloads pinned third-party sources, configures
+`frontend_bindings` with `CMAKE_PREFIX_PATH` pointing at the expanded SDK and
+`FetchContent` source-dir overrides, builds the nanobind extension, packs the
+wheel, installs that wheel into the same venv, and runs:
 
 ```bash
 python -m pytest -q projects/hipdnn/python/frontend_wheel_package/tests
