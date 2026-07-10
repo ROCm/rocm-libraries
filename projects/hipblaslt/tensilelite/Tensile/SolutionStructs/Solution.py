@@ -5284,12 +5284,13 @@ class Solution(collections.abc.Mapping):
       if not isPowerOf2(state["NumThreads"]):
         reject(state, printRejectionReason, "PrefetchGL2 requires NumThreads to be power of 2")
         return
-      # Check ClusterDim is power of 2 and not [1,1]
-      if state["ClusterDim"] == [1, 1]:
-        reject(state, printRejectionReason, "PrefetchGL2 requires ClusterDim != [1, 1]")
-        return
+      # Check ClusterDim components are power of 2
       if not all(isPowerOf2(x) for x in state["ClusterDim"]):
         reject(state, printRejectionReason, "PrefetchGL2 requires ClusterDim components to be power of 2")
+        return
+      # ClusterDim [1,1] is only supported with subtile impl
+      if state["ClusterDim"] == [1, 1] and not state["UseSubtileImpl"]:
+        reject(state, printRejectionReason, "PrefetchGL2 requires ClusterDim != [1, 1] for non-subtile kernels")
         return
       # Check DepthU is power of 2
       if not isPowerOf2(state["DepthU"]):
