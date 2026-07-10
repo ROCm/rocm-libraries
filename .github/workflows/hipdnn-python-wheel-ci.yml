@@ -92,7 +92,6 @@ jobs:
           from pathlib import Path
 
           deps_dir = Path(os.environ["THIRD_PARTY_DEPS_DIR"])
-          nanobind_source_dir = Path(os.environ["NANOBIND_SOURCE_DIR"])
           robin_map_source_dir = Path(os.environ["ROBIN_MAP_SOURCE_DIR"])
           for url in (os.environ["NANOBIND_ARCHIVE_URL"], os.environ["ROBIN_MAP_ARCHIVE_URL"]):
               archive = deps_dir / url.rsplit("/", 1)[-1]
@@ -100,17 +99,6 @@ jobs:
               with tarfile.open(archive, "r:gz") as tar:
                   tar.extractall(deps_dir, filter="data")
 
-          (nanobind_source_dir / "cmake" / "nanobind-config-version.cmake").write_text(
-              """set(PACKAGE_VERSION "2.12.0")
-          if(PACKAGE_FIND_VERSION VERSION_EQUAL PACKAGE_VERSION)
-              set(PACKAGE_VERSION_EXACT TRUE)
-          endif()
-          if(PACKAGE_FIND_VERSION VERSION_LESS_EQUAL PACKAGE_VERSION)
-              set(PACKAGE_VERSION_COMPATIBLE TRUE)
-          endif()
-          """,
-              encoding="utf-8",
-          )
 
           robin_map_config_dir = deps_dir / "cmake" / "tsl-robin-map"
           robin_map_config_dir.mkdir(parents=True, exist_ok=True)
@@ -124,17 +112,6 @@ jobs:
               add_library(tsl::robin_map INTERFACE IMPORTED)
               set_target_properties(tsl::robin_map PROPERTIES
                   INTERFACE_INCLUDE_DIRECTORIES "{robin_map_include_dir}")
-          endif()
-          """,
-              encoding="utf-8",
-          )
-          (robin_map_config_dir / "tsl-robin-mapConfigVersion.cmake").write_text(
-              """set(PACKAGE_VERSION "1.4.1")
-          if(PACKAGE_FIND_VERSION VERSION_EQUAL PACKAGE_VERSION)
-              set(PACKAGE_VERSION_EXACT TRUE)
-          endif()
-          if(PACKAGE_FIND_VERSION VERSION_LESS_EQUAL PACKAGE_VERSION)
-              set(PACKAGE_VERSION_COMPATIBLE TRUE)
           endif()
           """,
               encoding="utf-8",
@@ -253,7 +230,6 @@ jobs:
           from pathlib import Path
 
           deps_dir = Path(os.environ["THIRD_PARTY_DEPS_DIR"])
-          nanobind_source_dir = Path(os.environ["NANOBIND_SOURCE_DIR"])
           robin_map_source_dir = Path(os.environ["ROBIN_MAP_SOURCE_DIR"])
           for url in (os.environ["NANOBIND_ARCHIVE_URL"], os.environ["ROBIN_MAP_ARCHIVE_URL"]):
               archive = deps_dir / url.rsplit("/", 1)[-1]
@@ -261,17 +237,6 @@ jobs:
               with tarfile.open(archive, "r:gz") as tar:
                   tar.extractall(deps_dir, filter="data")
 
-          (nanobind_source_dir / "cmake" / "nanobind-config-version.cmake").write_text(
-              """set(PACKAGE_VERSION "2.12.0")
-          if(PACKAGE_FIND_VERSION VERSION_EQUAL PACKAGE_VERSION)
-              set(PACKAGE_VERSION_EXACT TRUE)
-          endif()
-          if(PACKAGE_FIND_VERSION VERSION_LESS_EQUAL PACKAGE_VERSION)
-              set(PACKAGE_VERSION_COMPATIBLE TRUE)
-          endif()
-          """,
-              encoding="utf-8",
-          )
 
           robin_map_config_dir = deps_dir / "cmake" / "tsl-robin-map"
           robin_map_config_dir.mkdir(parents=True, exist_ok=True)
@@ -285,17 +250,6 @@ jobs:
               add_library(tsl::robin_map INTERFACE IMPORTED)
               set_target_properties(tsl::robin_map PROPERTIES
                   INTERFACE_INCLUDE_DIRECTORIES "{robin_map_include_dir}")
-          endif()
-          """,
-              encoding="utf-8",
-          )
-          (robin_map_config_dir / "tsl-robin-mapConfigVersion.cmake").write_text(
-              """set(PACKAGE_VERSION "1.4.1")
-          if(PACKAGE_FIND_VERSION VERSION_EQUAL PACKAGE_VERSION)
-              set(PACKAGE_VERSION_EXACT TRUE)
-          endif()
-          if(PACKAGE_FIND_VERSION VERSION_LESS_EQUAL PACKAGE_VERSION)
-              set(PACKAGE_VERSION_COMPATIBLE TRUE)
           endif()
           """,
               encoding="utf-8",

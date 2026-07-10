@@ -8,15 +8,13 @@ set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_POSITION_INDEPENDENT_CODE ON)
 
-set(HIPDNN_NANOBIND_VERSION "2.12.0" CACHE STRING "Version of nanobind to use")
-set(HIPDNN_TSL_ROBIN_MAP_VERSION "1.4.1" CACHE STRING "Version of tsl-robin-map to use")
 set(NB_USE_SUBMODULE_DEPS OFF)
 
 find_package(Python 3.12
     REQUIRED COMPONENTS Interpreter Development.Module Development.SABIModule)
 
-find_package(tsl-robin-map ${HIPDNN_TSL_ROBIN_MAP_VERSION} CONFIG REQUIRED)
-find_package(nanobind ${HIPDNN_NANOBIND_VERSION} CONFIG REQUIRED)
+find_package(tsl-robin-map CONFIG REQUIRED)
+find_package(nanobind CONFIG REQUIRED)
 
 find_package(hipdnn_frontend CONFIG)
 if(NOT hipdnn_frontend_FOUND)
