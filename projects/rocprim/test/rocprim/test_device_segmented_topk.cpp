@@ -228,6 +228,95 @@ ROCPRIM_FORCE_INLINE void compare_pairs_k(InputKeyVector    keys_input,
     ASSERT_NO_FATAL_FAILURE(test_utils::assert_eq(sorted_output, sorted_input, k));
 }
 
+// Builds a randomized set of segment offsets covering [0, size), so that tests actually
+// exercise more than a single segment. Also reports the length of the shortest generated
+// segment, since K must be strictly smaller than every segment's length.
+template<class OffsetType, class Engine>
+void generate_segmented_offsets(size_t                   size,
+                                Engine&                  rng_engine,
+                                std::vector<OffsetType>& offsets,
+                                unsigned int&            segments_count,
+                                OffsetType&              min_segment_length)
+{
+    constexpr OffsetType                         min_segment_length_bound = 1;
+    constexpr OffsetType                         max_segment_length_bound = 1000;
+    common::uniform_int_distribution<OffsetType> segment_length_dis(min_segment_length_bound,
+                                                                     max_segment_length_bound);
+
+    offsets.clear();
+    segments_count = 0;
+    size_t offset  = 0;
+    while(offset < size)
+    {
+        const size_t segment_length = segment_length_dis(rng_engine);
+        offsets.push_back(static_cast<OffsetType>(offset));
+        segments_count++;
+        offset += segment_length;
+    }
+    offsets.push_back(static_cast<OffsetType>(size));
+
+    min_segment_length = static_cast<OffsetType>(size);
+    for(unsigned int i = 0; i < segments_count; ++i)
+    {
+        min_segment_length = std::min<OffsetType>(min_segment_length, offsets[i + 1] - offsets[i]);
+    }
+}
+
+template<bool Descending, class InputVector, class OffsetVector, class OutputVector, class SizeOut>
+void inline compare_k_segmented(InputVector const&  input,
+                                OffsetVector const& offsets,
+                                OutputVector const& output,
+                                SizeOut              k)
+{
+    using key_type                   = typename InputVector::value_type;
+    const std::size_t segments_count = offsets.size() - 1;
+    for(std::size_t segment = 0; segment < segments_count; ++segment)
+    {
+        SCOPED_TRACE(testing::Message() << "with segment = " << segment);
+        std::vector<key_type> segment_input(input.begin() + offsets[segment],
+                                            input.begin() + offsets[segment + 1]);
+        std::vector<key_type> segment_output(output.begin() + segment * k,
+                                             output.begin() + (segment + 1) * k);
+        compare_k<Descending>(segment_input, segment_output, k);
+    }
+}
+
+template<bool Descending,
+         class InputKeyVector,
+         class InputValueVector,
+         class OffsetVector,
+         class OutputKeyVector,
+         class OutputValueVector,
+         class SizeOut>
+void compare_pairs_k_segmented(InputKeyVector const&    keys_input,
+                               InputValueVector const&  values_input,
+                               OffsetVector const&      offsets,
+                               OutputKeyVector const&   keys_output,
+                               OutputValueVector const& values_output,
+                               SizeOut                  k)
+{
+    using key_type                   = typename InputKeyVector::value_type;
+    using value_type                 = typename InputValueVector::value_type;
+    const std::size_t segments_count = offsets.size() - 1;
+    for(std::size_t segment = 0; segment < segments_count; ++segment)
+    {
+        SCOPED_TRACE(testing::Message() << "with segment = " << segment);
+        std::vector<key_type> segment_keys_input(keys_input.begin() + offsets[segment],
+                                                 keys_input.begin() + offsets[segment + 1]);
+        std::vector<value_type> segment_values_input(values_input.begin() + offsets[segment],
+                                                      values_input.begin() + offsets[segment + 1]);
+        std::vector<key_type> segment_keys_output(keys_output.begin() + segment * k,
+                                                  keys_output.begin() + (segment + 1) * k);
+        std::vector<value_type> segment_values_output(values_output.begin() + segment * k,
+                                                       values_output.begin() + (segment + 1) * k);
+        compare_pairs_k<Descending>(segment_keys_input,
+                                    segment_values_input,
+                                    segment_keys_output,
+                                    segment_values_output,
+                                    k);
+    }
+}
+
 // ---------------------------------------------------------
 // Test for ops taking single input value
 // ---------------------------------------------------------
@@ -327,40 +416,39 @@ TYPED_TEST(RocprimDeviceSegmentedTopkTests, SegmentedTopkKey)
 
             SCOPED_TRACE(testing::Message() << "with size = " << size);
 
+            // Generate data
+            engine_type rng_engine(seed_value);
+
+            using offset_type = unsigned int;
+            std::vector<offset_type> offsets;
+            unsigned int             segments_count     = 0;
+            offset_type              min_segment_length = 0;
+            generate_segmented_offsets(size, rng_engine, offsets, segments_count, min_segment_length);
+
             size_out_type k = 0;
 
             if(size > 0)
             {
-                k = test_utils::get_random_value<size_out_type>(0, size - 1, seed_value);
+                k = test_utils::get_random_value<size_out_type>(0,
+                                                                 min_segment_length - 1,
+                                                                 seed_value);
             }
-
-            using offset_type = unsigned int;
-            std::vector<offset_type> offsets;
-            unsigned int             segments_count = 0;
-            size_t                   offset         = 0;
-            while(offset < size)
-            {
-                const size_t segment_length = size;
-                offsets.push_back(offset);
-                segments_count++;
-                offset += segment_length;
-            }
-            offsets.push_back(size);
 
             SCOPED_TRACE(testing::Message()
                          << "with k = " << k << " and segments_count = " << segments_count);
 
             common::device_ptr<offset_type> d_offsets(offsets);
 
-            // Generate data
-            engine_type           rng_engine(seed_value);
             std::vector<key_type> input(size);
             test_utils::generate_key_input(input.begin(), size, rng_engine);
+
+            const size_t output_size = static_cast<size_t>(k) * segments_count;
 
             common::device_ptr<key_type> d_input;
             common::device_ptr<key_type> d_output;
 
-            if(!d_input.resize_with_memory_check(size) || !d_output.resize_with_memory_check(k))
+            if(!d_input.resize_with_memory_check(size)
+               || !d_output.resize_with_memory_check(output_size))
             {
                 std::cout << "Out of memory. Skipping test for size = " << size << std::endl;
                 break;
@@ -435,7 +523,7 @@ TYPED_TEST(RocprimDeviceSegmentedTopkTests, SegmentedTopkKey)
             const auto output = d_output.load();
             if(size > 0)
             {
-                compare_k<descending>(input, output, k);
+                compare_k_segmented<descending>(input, offsets, output, k);
             }
 
             if(use_graphs)
@@ -484,21 +572,34 @@ TYPED_TEST(RocprimDeviceSegmentedTopkTests, SegmentedTopkPairs)
 
             SCOPED_TRACE(testing::Message() << "with size = " << size);
 
+            // Generate data
+            engine_type rng_engine(seed_value);
+
+            using offset_type = unsigned int;
+
+            std::vector<offset_type> offsets;
+            unsigned int             segments_count     = 0;
+            offset_type              min_segment_length = 0;
+            generate_segmented_offsets(size, rng_engine, offsets, segments_count, min_segment_length);
+
             size_out_type k = 0;
 
             if(size > 0)
             {
-                k = test_utils::get_random_value<size_out_type>(0, size - 1, seed_value);
+                k = test_utils::get_random_value<size_out_type>(0,
+                                                                 min_segment_length - 1,
+                                                                 seed_value);
             }
 
-            SCOPED_TRACE(testing::Message() << "with k = " << k);
+            SCOPED_TRACE(testing::Message()
+                         << "with k = " << k << " and segments_count = " << segments_count);
 
-            // Generate data
-            engine_type           rng_engine(seed_value);
             std::vector<key_type> keys_input(size);
             test_utils::generate_key_input(keys_input.begin(), size, rng_engine);
             std::vector<value_type> values_input(size);
             test_utils::iota(values_input.begin(), values_input.end(), 0);
+
+            const size_t output_size = static_cast<size_t>(k) * segments_count;
 
             common::device_ptr<key_type>   d_keys_input;
             common::device_ptr<value_type> d_values_input;
@@ -507,8 +608,8 @@ TYPED_TEST(RocprimDeviceSegmentedTopkTests, SegmentedTopkPairs)
 
             if(!d_keys_input.resize_with_memory_check(size)
                || !d_values_input.resize_with_memory_check(size)
-               || !d_keys_output.resize_with_memory_check(k)
-               || !d_values_output.resize_with_memory_check(k))
+               || !d_keys_output.resize_with_memory_check(output_size)
+               || !d_values_output.resize_with_memory_check(output_size))
             {
                 std::cout << "Out of memory. Skipping test for size = " << size << std::endl;
                 break;
@@ -522,23 +623,7 @@ TYPED_TEST(RocprimDeviceSegmentedTopkTests, SegmentedTopkPairs)
                 = test_utils::wrap_in_indirect_iterator<use_indirect_iterator>(
                     d_values_input.get());
 
-            using offset_type = unsigned int;
-
-            std::vector<offset_type> offsets;
-            unsigned int             segments_count = 0;
-            size_t                   offset         = 0;
-            while(offset < size)
-            {
-                const size_t segment_length = size;
-                offsets.push_back(offset);
-                segments_count++;
-                offset += segment_length;
-            }
-            offsets.push_back(size);
-
             common::device_ptr<offset_type> d_offsets(offsets);
-
-            SCOPED_TRACE(testing::Message() << "with segments = " << segments_count);
 
             // decomposer
             decomposer_t decomposer;
@@ -623,34 +708,50 @@ TYPED_TEST(RocprimDeviceSegmentedTopkTests, SegmentedTopkPairs)
 
             if constexpr(stable)
             {
-                compare_pairs_k<descending>(keys_input,
-                                            values_input,
-                                            keys_output,
-                                            values_output,
-                                            k);
+                compare_pairs_k_segmented<descending>(keys_input,
+                                                       values_input,
+                                                       offsets,
+                                                       keys_output,
+                                                       values_output,
+                                                       k);
             }
             else
             {
-                // Create input pairs
-                std::unordered_multiset<std::pair<key_type, value_type>,
-                                        pair_hash,
-                                        pair_comp<std::pair<key_type, value_type>>>
-                    h_input_map;
-                for(size_t i = 0; i < keys_input.size(); ++i)
+                for(std::size_t segment = 0; segment < segments_count; ++segment)
                 {
-                    h_input_map.insert({keys_input[i], values_input[i]});
-                }
+                    SCOPED_TRACE(testing::Message() << "with segment = " << segment);
 
-                // Varify keys & values are matching each other
-                for(unsigned int i = 0; i < k; ++i)
-                {
-                    auto range = h_input_map.equal_range(
-                        std::pair<key_type, value_type>{keys_output[i], values_output[i]});
-                    ASSERT_NE(range.first, range.second);
-                }
+                    // Create input pairs for this segment
+                    std::unordered_multiset<std::pair<key_type, value_type>,
+                                            pair_hash,
+                                            pair_comp<std::pair<key_type, value_type>>>
+                        h_input_map;
+                    for(size_t i = offsets[segment]; i < offsets[segment + 1]; ++i)
+                    {
+                        h_input_map.insert({keys_input[i], values_input[i]});
+                    }
 
-                // Check keys are correct
-                compare_k<descending>(keys_input, keys_output, k);
+                    // Varify keys & values are matching each other
+                    for(unsigned int i = 0; i < k; ++i)
+                    {
+                        const auto output_index = segment * k + i;
+                        auto       range        = h_input_map.equal_range(
+                            std::pair<key_type, value_type>{keys_output[output_index],
+                                                            values_output[output_index]});
+                        ASSERT_NE(range.first, range.second);
+                    }
+
+                    // Check keys are correct for this segment
+                    std::vector<key_type> segment_keys_input(keys_input.begin()
+                                                                  + offsets[segment],
+                                                              keys_input.begin()
+                                                                  + offsets[segment + 1]);
+                    std::vector<key_type> segment_keys_output(keys_output.begin()
+                                                                   + segment * k,
+                                                               keys_output.begin()
+                                                                   + (segment + 1) * k);
+                    compare_k<descending>(segment_keys_input, segment_keys_output, k);
+                }
             }
         }
     }
