@@ -52,7 +52,7 @@ static int getenv_OMP_NUM_THREADS()
     {
         int ompnumthreads = std::numeric_limits<int>::max();
         auto [ptr, ec]    = std::from_chars(env_char, env_char + strlen(env_char), ompnumthreads);
-        if(ec != std::errc())
+        if(ec == std::errc())
         {
             return std::max<int>(1, ompnumthreads);
         }
