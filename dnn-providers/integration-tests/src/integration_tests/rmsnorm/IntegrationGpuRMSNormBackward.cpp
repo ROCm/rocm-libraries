@@ -23,6 +23,22 @@ namespace
 // bias/isTraining only affect the corresponding forward graph (IntegrationGpuRMSNorm.cpp);
 // rmsnorm_backward() takes no bias input and doesn't branch on training phase, so this
 // suite reuses the same shape/case generator as forward for both.
+struct RMSNormBackwardTensorIds
+{
+    // inv_rms defaults to a DERIVED fill (recompute-from-x), which the synthesis
+    // pipeline hasn't implemented yet (SynthesizeInputs.cpp: "DERIVED fill not yet
+    // implemented" -> every case SKIPs). Give it a stable uid so the constructor
+    // below can override it with a FREE range instead. inv_rms = 1/rms(x) is
+    // always strictly positive, so keep it positive and away from zero
+    // (mirroring BatchnormBwdTensorIds::INV_VARIANCE_UID's narrow, positive
+    // range) — a range straddling/near zero, like the legacy provider-local
+    // harness's blanket [-1, 1] fill, occasionally produces near-zero/negative
+    // draws that fail bf16 tolerance at large reductions (observed at
+    // x:[4096,128,...]: PureBfp16 shape #4 across every layout/bias/phase
+    // combination, with the exact failing draws shifting as the range moved).
+    static constexpr int64_t INV_RMS_UID = 1;
+};
+
 using RMSNormBackwardTestCaseType = std::tuple<TensorLayout, RMSNormTestCase>;
 
 template <typename DyType,
@@ -82,6 +98,7 @@ public:
         }
         auto invRmsAttr = graph::makeTensorAttributes(
             "inv_rms", computeType, invRmsDims, generateStrides(invRmsDims, layout.strideOrder));
+        invRmsAttr.set_uid(RMSNormBackwardTensorIds::INV_RMS_UID);
         auto invRmsTensorAttr = std::make_shared<graph::TensorAttributes>(std::move(invRmsAttr));
 
         graph::RMSNormBackwardAttributes rmsnormBwdAttrs;
@@ -111,6 +128,11 @@ public:
 
         return std::make_pair(std::move(graphObj),
                               GraphOutputs{dxTensorAttr, dscaleTensorAttr, dbiasTensorAttr});
+    }
+
+    RMSNormBackward()
+    {
+        this->synthesis().setRange(RMSNormBackwardTensorIds::INV_RMS_UID, 0.9f, 1.5f);
     }
 
 protected:
@@ -201,3 +223,70 @@ INSTANTIATE_TEST_SUITE_P(
     IntegrationGpuRMSNormBackwardMixedBfp16,
     testing::Combine(testing::Values(TensorLayout::NCHW, TensorLayout::NHWC),
                      testing::ValuesIn(test_rmsnorm_common::getRMSNormTestCases())));
+
+// 3D layout tests (NCDHW, NDHWC)
+using IntegrationGpuRMSNormBackward3dPureFp32 = IntegrationGpuRMSNormBackwardPureFp32;
+using IntegrationGpuRMSNormBackward3dPureFp16 = IntegrationGpuRMSNormBackwardPureFp16;
+using IntegrationGpuRMSNormBackward3dPureBfp16 = IntegrationGpuRMSNormBackwardPureBfp16;
+using IntegrationGpuRMSNormBackward3dMixedFp16 = IntegrationGpuRMSNormBackwardMixedFp16;
+using IntegrationGpuRMSNormBackward3dMixedBfp16 = IntegrationGpuRMSNormBackwardMixedBfp16;
+
+GTEST_ALLOW_UNINSTANTIATED_PARAMETERIZED_TEST(IntegrationGpuRMSNormBackward3dPureFp32);
+TEST_P(IntegrationGpuRMSNormBackward3dPureFp32, Correctness)
+{
+    runGraphTest();
+}
+
+GTEST_ALLOW_UNINSTANTIATED_PARAMETERIZED_TEST(IntegrationGpuRMSNormBackward3dPureFp16);
+TEST_P(IntegrationGpuRMSNormBackward3dPureFp16, Correctness)
+{
+    runGraphTest();
+}
+
+GTEST_ALLOW_UNINSTANTIATED_PARAMETERIZED_TEST(IntegrationGpuRMSNormBackward3dPureBfp16);
+TEST_P(IntegrationGpuRMSNormBackward3dPureBfp16, Correctness)
+{
+    runGraphTest();
+}
+
+GTEST_ALLOW_UNINSTANTIATED_PARAMETERIZED_TEST(IntegrationGpuRMSNormBackward3dMixedFp16);
+TEST_P(IntegrationGpuRMSNormBackward3dMixedFp16, Correctness)
+{
+    runGraphTest();
+}
+
+GTEST_ALLOW_UNINSTANTIATED_PARAMETERIZED_TEST(IntegrationGpuRMSNormBackward3dMixedBfp16);
+TEST_P(IntegrationGpuRMSNormBackward3dMixedBfp16, Correctness)
+{
+    runGraphTest();
+}
+
+INSTANTIATE_TEST_SUITE_P(
+    Smoke,
+    IntegrationGpuRMSNormBackward3dPureFp32,
+    testing::Combine(testing::Values(TensorLayout::NCDHW, TensorLayout::NDHWC),
+                     testing::ValuesIn(test_rmsnorm_common::getRMSNorm5DTestCases())));
+
+INSTANTIATE_TEST_SUITE_P(
+    Smoke,
+    IntegrationGpuRMSNormBackward3dPureFp16,
+    testing::Combine(testing::Values(TensorLayout::NCDHW, TensorLayout::NDHWC),
+                     testing::ValuesIn(test_rmsnorm_common::getRMSNorm5DTestCases())));
+
+INSTANTIATE_TEST_SUITE_P(
+    Smoke,
+    IntegrationGpuRMSNormBackward3dPureBfp16,
+    testing::Combine(testing::Values(TensorLayout::NCDHW, TensorLayout::NDHWC),
+                     testing::ValuesIn(test_rmsnorm_common::getRMSNorm5DTestCases())));
+
+INSTANTIATE_TEST_SUITE_P(
+    Smoke,
+    IntegrationGpuRMSNormBackward3dMixedFp16,
+    testing::Combine(testing::Values(TensorLayout::NCDHW, TensorLayout::NDHWC),
+                     testing::ValuesIn(test_rmsnorm_common::getRMSNorm5DTestCases())));
+
+INSTANTIATE_TEST_SUITE_P(
+    Smoke,
+    IntegrationGpuRMSNormBackward3dMixedBfp16,
+    testing::Combine(testing::Values(TensorLayout::NCDHW, TensorLayout::NDHWC),
+                     testing::ValuesIn(test_rmsnorm_common::getRMSNorm5DTestCases())));
