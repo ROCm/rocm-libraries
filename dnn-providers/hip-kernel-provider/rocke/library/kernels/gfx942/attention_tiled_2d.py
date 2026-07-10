@@ -74,6 +74,12 @@ from rocke.helpers.attention import (
 )
 from rocke.helpers.distribution import make_static_tile_distribution
 from rocke.helpers.layouts import TransposeLdsReader
+from rocke.helpers.mfma_gemm_inner import (
+    decode_mfma_lanes,
+    load_a_row_major_contiguous,
+    load_b_col_strided_scalars,
+    mfma_k_loop,
+)
 from rocke.helpers.transforms import TensorDescriptor, embed, indirect, unmerge
 
 
@@ -1852,10 +1858,13 @@ def build_unified_attention_2d_tiled(
             b.smem_store_vN(V_lds, [b.const_i32(0), dim, tok], value, n)
 
     _cur_kv_tile = [None]
+
     def _v_hbm_elem(tile, tok, dim):
         # AICK-1495: direct-HBM V element V[local tok, dim] for tile (bypass V_lds).
         _lin = b.add(b.mul(tok, b.const_i32(HD)), dim)
-        _vo, _vl = paged_kv_desc.offset(b, tile_idx=tile, linear_half=_lin, kv_head=kv_head_idx)
+        _vo, _vl = paged_kv_desc.offset(
+            b, tile_idx=tile, linear_half=_lin, kv_head=kv_head_idx
+        )
         _ir = b.cmp_lt(b.add(b.mul(tile, b.const_i32(T)), tok), max_seq_prefix_len)
         if _vl is not None:
             _ir = b.land(_ir, _vl)
@@ -1863,9 +1872,16 @@ def build_unified_attention_2d_tiled(
         _el = b.div(_se, b.const_i32(KV_BYTES)) if KV_BYTES != 1 else _se
         _e = b.global_load(value, _el, dtype, align=2)
         return b.select(_ir, _e, b.cast_f32_to(b.const_f32(0.0), dtype))
+
     def _v_t_load(dim: Value, tok: Value, *, n: int) -> Value:
         if V_HBM_DIRECT:
-            return b.vec_pack([_v_hbm_elem(_cur_kv_tile[0], b.add(tok, b.const_i32(_i)), dim) for _i in range(n)], dtype)
+            return b.vec_pack(
+                [
+                    _v_hbm_elem(_cur_kv_tile[0], b.add(tok, b.const_i32(_i)), dim)
+                    for _i in range(n)
+                ],
+                dtype,
+            )
         v_buf0 = b.const_i32(0)
         if V_T_CK_LAYOUT:
             return b.smem_load_vN(V_lds, v_buf0, _v_t_slot(dim, tok), dtype=dtype, n=n)
@@ -3509,7 +3525,9 @@ def build_unified_attention_2d_tiled(
             # AICK-1495: direct-HBM K via buffer_load (HW OOB->0). Causal mask
             # already zeros past-seq keys, so no software bounds-select (saves VALU).
             _lin = b.add(b.mul(k_row, b.const_i32(HD)), k_off)
-            _vo, _ = paged_kv_desc.offset(b, tile_idx=_cur_kv_tile[0], linear_half=_lin, kv_head=kv_head_idx)
+            _vo, _ = paged_kv_desc.offset(
+                b, tile_idx=_cur_kv_tile[0], linear_half=_lin, kv_head=kv_head_idx
+            )
             return b.buffer_load_vN(key_rsrc, _vo, b.const_i32(0), dtype, frag)
         if not K_FP8_MFMA:
             return b.smem_load_vN(K_lds, buf_idx, k_row, k_off, dtype=dtype, n=frag)
@@ -4771,7 +4789,25 @@ def build_unified_attention_2d_tiled(
                                         b.const_i32(k * 8 + kk),
                                         b.mul(lane_half32, b.const_i32(4)),
                                     )
-                                    v1 = (b.vec_pack([_v_hbm_elem(_cur_kv_tile[0], v_row, v_dim32)], dtype) if V_HBM_DIRECT else b.smem_load_vN(V_lds, v_buf, v_row, v_dim32, dtype=dtype, n=1))
+                                    v1 = (
+                                        b.vec_pack(
+                                            [
+                                                _v_hbm_elem(
+                                                    _cur_kv_tile[0], v_row, v_dim32
+                                                )
+                                            ],
+                                            dtype,
+                                        )
+                                        if V_HBM_DIRECT
+                                        else b.smem_load_vN(
+                                            V_lds,
+                                            v_buf,
+                                            v_row,
+                                            v_dim32,
+                                            dtype=dtype,
+                                            n=1,
+                                        )
+                                    )
                                     a_v_elems.append(b.vec_extract(v1, 0))
                                 A_v_t = b.vec_pack(a_v_elems, dtype)
                             b_p_elems = []
@@ -4844,7 +4880,16 @@ def build_unified_attention_2d_tiled(
                                     b.const_i32(k_static),
                                     b.mul(lane_half32, b.const_i32(8)),
                                 )
-                                v1 = (b.vec_pack([_v_hbm_elem(_cur_kv_tile[0], v_row, v_dim32)], dtype) if V_HBM_DIRECT else b.smem_load_vN(V_lds, v_buf, v_row, v_dim32, dtype=dtype, n=1))
+                                v1 = (
+                                    b.vec_pack(
+                                        [_v_hbm_elem(_cur_kv_tile[0], v_row, v_dim32)],
+                                        dtype,
+                                    )
+                                    if V_HBM_DIRECT
+                                    else b.smem_load_vN(
+                                        V_lds, v_buf, v_row, v_dim32, dtype=dtype, n=1
+                                    )
+                                )
                                 a_v_elems.append(b.vec_extract(v1, 0))
                             # Then assemble the P operand. Each kk picks (k0,
                             # k1) and may xor to fetch the cross-half register.
@@ -5202,15 +5247,21 @@ def build_unified_attention_2d_tiled(
         # LLVM function, so shared phi names (m0/l0/...) would collide. The body
         # consumes the carry *values*, not names, so renaming is safe.
         _iter_args_u = [(nm + "u", init) for (nm, init) in iter_args]
-        _ph1 = b.scf_for_iter(tile_start, _split, kv_step, _iter_args_u, iv_name="kv_tile_u")
+        _ph1 = b.scf_for_iter(
+            tile_start, _split, kv_step, _iter_args_u, iv_name="kv_tile_u"
+        )
         with _ph1 as (kv_tile_iv, carry):
             _emit_kv_body(kv_tile_iv, carry, True)
         _iter_args2 = [(nm, res) for (nm, _i), res in zip(iter_args, _ph1.results)]
-        kvloop = b.scf_for_iter(_split, tile_end, kv_step, _iter_args2, iv_name="kv_tile")
+        kvloop = b.scf_for_iter(
+            _split, tile_end, kv_step, _iter_args2, iv_name="kv_tile"
+        )
         with kvloop as (kv_tile_iv, carry):
             _emit_kv_body(kv_tile_iv, carry, False)
     else:
-        kvloop = b.scf_for_iter(tile_start, tile_end, kv_step, iter_args, iv_name="kv_tile")
+        kvloop = b.scf_for_iter(
+            tile_start, tile_end, kv_step, iter_args, iv_name="kv_tile"
+        )
         with kvloop as (kv_tile_iv, carry):
             _emit_kv_body(kv_tile_iv, carry, False)
 
@@ -5463,4 +5514,310 @@ def build_unified_attention_2d_tiled(
         if stripe + 1 < OUT_STRIPES:
             b.sync()
 
+    return b.kernel
+
+
+# ===========================================================================
+# Standard-QK D256 attention (AICK-1495) -- promoted from experiments/.
+# ===========================================================================
+#
+# A second, independent gfx942 2D attention builder for the **D256 bf16 prefill**
+# workload (Qwen3-Next gated_attn), kept in this file to avoid a separate module.
+# It computes ``S = Q @ K^T`` in *natural* orientation on the CDNA3 ``32x32x8``
+# bf16 MFMA atom -- both Q and K load row-major contiguous (no operand transpose),
+# V is the wave-coalesced PV B-operand (no ``V_lds``), and the epilogue is natural
+# (no ``O^T``). Only the softmax-output P reshape round-trips a small ``S_lds``
+# tile. This is architecturally distinct from the transposed-QK family above and
+# is the first competitive D256 path on gfx942: the dispatcher's wide flash gate
+# (``_enable_gfx942_bf16_flash``) excludes head_size=256, and the narrow 16x16x16
+# fallback overflows LDS at T=64, so D256 had no fast production kernel.
+#
+# Best configuration (defaults below), MI300X (gfx942), bf16 + GQA 16/2 + causal,
+# vs torch SDPA flash (AOTriton):
+#     | Sq   | this kernel | AOTriton | ratio |
+#     | 4096 | 115.4 TF/s  | 149.4    | 0.77x |
+#     | 8192 | 124.9 TF/s  | 172.7    | 0.72x |
+#
+# Two structural wins are baked in as spec defaults:
+#   * ``qk_unroll`` -- python-unroll the QK k-loop so the compiler hoists all
+#     ``D/atom.k`` K/Q loads ahead of the dependent MFMA chain, collapsing the
+#     per-step ``s_waitcnt vmcnt(0)`` drains (32 -> 5). ~+28% wall-clock.
+#   * ``softmax_opt`` -- fold ``scale*log2e`` into the S write (drops the
+#     per-element ``*log2e`` in every ``exp2``/rescale) + causal *phase-split*
+#     (mask only the diagonal kv-tile). ~+3-6%, correctness-preserving.
+#
+# Diagnosis (see experiments/d256_standard_qk logbook): latency-bound at 1
+# wave/SIMD -- the 128-register D256 accumulator saturates the gfx942 512-entry
+# combined VGPR+AGPR file. Measured dead-ends kept OUT of the defaults:
+# BLOCK_M=16 + 16x16x16 (reaches 2 waves but ~30% slower -- narrow-tile VALU +
+# 2x MFMA), V-in-LDS, PV unroll/interleave, acc-in-LDS.
+
+_STDQK_LOG2E = 1.4426950408889634
+_STDQK_BLOCK_M = 32
+_STDQK_BLOCK_N = 32
+
+
+@dataclass(frozen=True)
+class StdQKAttentionSpec:
+    """Spec for the gfx942 standard-QK D256 attention kernel.
+
+    ``seqlen_q``/``seqlen_k`` are baked into the head-stride arithmetic, so a
+    built kernel is specialized to one shape (as in the research harness).
+    """
+
+    seqlen_q: int
+    seqlen_k: int
+    num_query_heads: int
+    num_kv_heads: int
+    head_dim: int = 256
+    causal: bool = True
+    # --- best-config knobs (defaults = the measured winner) ---
+    qk_unroll: bool = True
+    softmax_opt: bool = True
+    waves_per_eu: int = 0  # 0 = compiler default (1 wave/SIMD is optimal for D256)
+
+    def __post_init__(self) -> None:
+        if self.head_dim != 256:
+            raise ValueError("std-QK builder is specialized to head_dim=256")
+        if not self.causal:
+            raise ValueError("only the causal path is wired (the target workload)")
+        if self.num_query_heads % self.num_kv_heads != 0:
+            raise ValueError("num_query_heads must be a multiple of num_kv_heads")
+
+    def kernel_name(self) -> str:
+        u = "u" if self.qk_unroll else ""
+        s = "smx" if self.softmax_opt else ""
+        return (
+            f"stdqk_d256_sq{self.seqlen_q}_h{self.num_query_heads}"
+            f"kv{self.num_kv_heads}_bf16_{u}{s}"
+        )
+
+
+def stdqk_attention_grid(spec: "StdQKAttentionSpec"):
+    """Grid = (seqlen_q / BLOCK_M, num_query_heads, 1); block = (64,1,1)."""
+    return (spec.seqlen_q // _STDQK_BLOCK_M, spec.num_query_heads, 1)
+
+
+def build_stdqk_attention(spec: "StdQKAttentionSpec") -> KernelDef:
+    """Emit the gfx942 standard-QK D256 attention ``KernelDef``."""
+    D = spec.head_dim
+    SQ, SK = spec.seqlen_q, spec.seqlen_k
+    GQ = spec.num_query_heads // spec.num_kv_heads
+    at = MfmaAtom.bf16_32x32x8()
+    ND = D // 32
+    CPL = at.c_per_lane
+
+    b = IRBuilder(spec.kernel_name())
+    b.kernel.attrs["max_workgroup_size"] = 64
+    if spec.waves_per_eu:
+        b.kernel.attrs["waves_per_eu"] = spec.waves_per_eu
+
+    Q = b.param("Q", PtrType(BF16, "global"), noalias=True, readonly=True, align=16)
+    K = b.param("K", PtrType(BF16, "global"), noalias=True, readonly=True, align=16)
+    V = b.param("V", PtrType(BF16, "global"), noalias=True, readonly=True, align=16)
+    O = b.param("O", PtrType(F32, "global"), noalias=True, writeonly=True, align=16)
+
+    lane = b.thread_id_x()
+    ld = decode_mfma_lanes(b, at, lane)
+    zb = b.const_i32(0)
+    qblk = b.block_id_x()
+    qbase = b.mul(qblk, b.const_i32(_STDQK_BLOCK_M))
+    head = b.block_id_y()
+    hoq = b.mul(head, b.const_i32(SQ))
+    hok = b.mul(b.div(head, b.const_i32(GQ)), b.const_i32(SK))
+
+    S_lds = b.smem_alloc(F32, [_STDQK_BLOCK_M, _STDQK_BLOCK_N + 1], name_hint="Slds")
+    m_lds = b.smem_alloc(F32, [_STDQK_BLOCK_M], name_hint="mlds")
+    l_lds = b.smem_alloc(F32, [_STDQK_BLOCK_M], name_hint="llds")
+    c_lds = b.smem_alloc(F32, [_STDQK_BLOCK_M], name_hint="clds")
+
+    scale = b.const_f32(1.0 / math.sqrt(D))
+    l2e = b.const_f32(_STDQK_LOG2E)
+    ninf = b.const_f32(-1e30)
+    row = b.mod(lane, b.const_i32(_STDQK_BLOCK_M))
+    qabs = b.add(qbase, row)
+    b.smem_store_vN(m_lds, [row], ninf, 1)
+    b.smem_store_vN(l_lds, [row], b.const_f32(0.0), 1)
+    b.sync()
+
+    iter_args = [(f"acc{n}", b.const_f32(0.0)) for n in range(ND * CPL)]
+    kvloop = b.scf_for_iter(
+        zb, b.add(qblk, b.const_i32(1)), b.const_i32(1), iter_args, iv_name="kv"
+    )
+    with kvloop as (kv, carry):
+        kvb = b.mul(kv, b.const_i32(_STDQK_BLOCK_N))
+
+        def la(bb, kt):
+            return load_a_row_major_contiguous(
+                bb,
+                A=Q,
+                atom=at,
+                lane_decode=ld,
+                m_tile_base=bb.add(qbase, hoq),
+                k_tile_base=bb.mul(kt, bb.const_i32(at.k)),
+                K=D,
+            )
+
+        def lb(bb, kt):
+            return load_a_row_major_contiguous(
+                bb,
+                A=K,
+                atom=at,
+                lane_decode=ld,
+                m_tile_base=bb.add(kvb, hok),
+                k_tile_base=bb.mul(kt, bb.const_i32(at.k)),
+                K=D,
+            )
+
+        if spec.qk_unroll:
+            nqk = D // at.k
+            acc = at.zero_acc(b)
+            av = [la(b, b.const_i32(kt)) for kt in range(nqk)]
+            bv = [lb(b, b.const_i32(kt)) for kt in range(nqk)]
+            for a_i, b_i in zip(av, bv):
+                acc = at.emit(b, a_i, b_i, acc)
+            s_acc = acc
+        else:
+            s_acc = mfma_k_loop(
+                b, K=D, atom=at, load_a=la, load_b=lb, iv_name="ktqk", acc_name="accqk"
+            )
+
+        sfac = (
+            b.const_f32((1.0 / math.sqrt(D)) * _STDQK_LOG2E)
+            if spec.softmax_opt
+            else scale
+        )
+        for i in range(CPL):
+            r, c = at.lane_to_output(b, lane, i)
+            b.smem_store_vN(S_lds, [r, c], b.fmul(b.vec_extract(s_acc, i), sfac), 1)
+        b.sync()
+
+        def _softmax(masked, use_l2e):
+            m_old = b.vec_extract(b.smem_load_vN(m_lds, row, dtype=F32, n=1), 0)
+            l_old = b.vec_extract(b.smem_load_vN(l_lds, row, dtype=F32, n=1), 0)
+            mx = m_old
+            for jj in range(_STDQK_BLOCK_N // 4):
+                v4 = b.smem_load_vN(S_lds, row, b.const_i32(4 * jj), dtype=F32, n=4)
+                for e in range(4):
+                    j = 4 * jj + e
+                    ve = b.vec_extract(v4, e)
+                    v = (
+                        b.select(b.cmp_gt(b.add(kvb, b.const_i32(j)), qabs), ninf, ve)
+                        if masked
+                        else ve
+                    )
+                    mx = b.fmax(v, mx)
+            corr = (
+                b.exp2(b.fmul(b.fsub(m_old, mx), l2e))
+                if use_l2e
+                else b.exp2(b.fsub(m_old, mx))
+            )
+            ssum = b.const_f32(0.0)
+            for jj in range(_STDQK_BLOCK_N // 4):
+                v4 = b.smem_load_vN(S_lds, row, b.const_i32(4 * jj), dtype=F32, n=4)
+                ps = []
+                for e in range(4):
+                    j = 4 * jj + e
+                    ve = b.vec_extract(v4, e)
+                    v = (
+                        b.select(b.cmp_gt(b.add(kvb, b.const_i32(j)), qabs), ninf, ve)
+                        if masked
+                        else ve
+                    )
+                    p = (
+                        b.exp2(b.fmul(b.fsub(v, mx), l2e))
+                        if use_l2e
+                        else b.exp2(b.fsub(v, mx))
+                    )
+                    ps.append(p)
+                    ssum = b.fadd(ssum, p)
+                b.smem_store_vN(
+                    S_lds, [row, b.const_i32(4 * jj)], b.vec_pack(ps, F32), 4
+                )
+            b.smem_store_vN(m_lds, [row], mx, 1)
+            b.smem_store_vN(l_lds, [row], b.fadd(b.fmul(l_old, corr), ssum), 1)
+            b.smem_store_vN(c_lds, [row], corr, 1)
+
+        with b.scf_if(b.cmp_lt(lane, b.const_i32(_STDQK_BLOCK_M))):
+            if spec.softmax_opt:
+                tail = b.add(kvb, b.const_i32(_STDQK_BLOCK_N - 1))
+                with b.scf_if(b.cmp_lt(tail, b.add(qbase, b.const_i32(1)))):
+                    _softmax(masked=False, use_l2e=False)
+                with b.scf_if(b.cmp_gt(tail, qbase)):
+                    _softmax(masked=True, use_l2e=False)
+            else:
+                _softmax(masked=True, use_l2e=True)
+        b.sync()
+
+        new_acc = [None] * (ND * CPL)
+
+        def lpa(bb, kt):
+            qn = bb.add(zb, ld.m_in_atom)
+            kbase = bb.add(
+                bb.mul(kt, bb.const_i32(at.k)),
+                bb.mul(ld.k_blk, bb.const_i32(at.a_per_lane)),
+            )
+            el = [
+                bb.cast_f32_to(
+                    bb.vec_extract(
+                        bb.smem_load_vN(
+                            S_lds, qn, bb.add(kbase, bb.const_i32(j)), dtype=F32, n=1
+                        ),
+                        0,
+                    ),
+                    BF16,
+                )
+                for j in range(at.a_per_lane)
+            ]
+            return bb.vec_pack(el, BF16)
+
+        cr_i = [
+            b.vec_extract(
+                b.smem_load_vN(c_lds, at.lane_to_output(b, lane, i)[0], dtype=F32, n=1),
+                0,
+            )
+            for i in range(CPL)
+        ]
+        for nt in range(ND):
+            nb = b.const_i32(nt * 32)
+
+            def lvb(bb, kt, nb=nb):
+                return load_b_col_strided_scalars(
+                    bb,
+                    B=V,
+                    atom=at,
+                    lane_decode=ld,
+                    n_tile_base=nb,
+                    k_tile_base=bb.add(
+                        bb.add(hok, kvb), bb.mul(kt, bb.const_i32(at.k))
+                    ),
+                    N=D,
+                )
+
+            pv = mfma_k_loop(
+                b,
+                K=_STDQK_BLOCK_N,
+                atom=at,
+                load_a=lpa,
+                load_b=lvb,
+                iv_name=f"ktpv{nt}",
+                acc_name=f"accpv{nt}",
+            )
+            for i in range(CPL):
+                new_acc[nt * CPL + i] = b.fma(
+                    carry[nt * CPL + i], cr_i[i], b.vec_extract(pv, i)
+                )
+        b.scf_yield(*new_acc)
+
+    final = kvloop.results
+    for nt in range(ND):
+        nb = b.const_i32(nt * 32)
+        for i in range(CPL):
+            r, c = at.lane_to_output(b, lane, i)
+            lv = b.vec_extract(b.smem_load_vN(l_lds, r, dtype=F32, n=1), 0)
+            addr = b.add(
+                b.mul(b.add(b.add(hoq, qbase), r), b.const_i32(D)), b.add(nb, c)
+            )
+            b.global_store(O, addr, b.fdiv(final[nt * CPL + i], lv), align=4)
+    b.ret()
     return b.kernel
