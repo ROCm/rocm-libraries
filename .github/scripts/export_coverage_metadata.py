@@ -4,7 +4,7 @@
 This is the build-time half of the coverage flow described in TheRock's coverage
 design docs. It reads ``test_categories_coverage.yaml``, verifies the configured
 coverage objects exist in the build/dist tree, and writes a ``coverage_metadata.json``
-that ``coverage_runner.py`` consumes later to merge profraw files and produce a report.
+that the coverage report job consumes later to merge profraw files and produce a report.
 
 Object/tool names are recorded by file name (basename). The report job locates the
 actual files in whatever layout it has (build dist or staged artifact), so version
