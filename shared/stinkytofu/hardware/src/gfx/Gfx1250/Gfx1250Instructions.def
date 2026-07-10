@@ -550,6 +550,7 @@ DEF_BATCH(.format = SOPC,
 
 // Tensor Operations
 DEF_T(TensorLoadToLdsInst, "tensor_load_to_lds", .format = TENSOR, .logical = "TensorLoadToLds")
+DEF_T(TensorStoreFromLdsInst, "tensor_store_from_lds", .format = TENSOR, .logical = "TensorStoreFromLds")
 
 // Vector ALU — dual VOP2/VOP3 encoding (primary = VOP2, promoted = VOP3)
 DEF_BATCH(.format = VOP2_COMMUTATIVE,

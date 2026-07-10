@@ -41,6 +41,7 @@ from rocisa.functions import vectorStaticDivide, vectorStaticRemainder, vectorUI
 from rocisa.enum import InstType, SelectBit, CacheScope, HighBitSel, TemporalHint, NonVolatile
 from rocisa.macro import MacroVMagicDiv, PseudoRandomGenerator
 from . import CUSTOM_KERNEL_PATH
+from rocisa.instruction import TensorStoreFromLds, SWaitTensorcnt
 from rocisa.instruction import BranchInstruction, BufferLoadB128, BufferLoadB32, \
   BufferLoadB16, BufferLoadU16, BufferLoadB64, BufferLoadB96, BufferLoadD16B16, BufferLoadD16HIB16, BufferLoadD16HIU8, \
   BufferLoadD16U8, BufferStoreB128, BufferStoreB16, BufferStoreB32, BufferStoreB64, \
@@ -13903,8 +13904,178 @@ class KernelWriterAssembly(KernelWriter):
   ##############################################################################
   # Store Remap: Local Read and Global Write
   ##############################################################################
+
+  def _emitTdmHybBaseSetup(self, kernel, tmpS01):
+    # Per-thread M-contiguous LDS scratch base (byte) = (mLocal + nLocal*MT0)*bpe,
+    # mLocal=coord0-wg0*MT0, nLocal=coord1-wg1*MT1 (tile-local, from global coords).
+    module = Module("TdmHybBaseSetup")
+    bpe = self.states.bpeCexternalGSU1
+    MT0 = kernel["MacroTile0"]; MT1 = kernel["MacroTile1"]
+    v = self.vgprPool.checkOut(2, "tdmHybBase")
+    module.add(SMulI32(dst=sgpr(tmpS01), src0=sgpr("WorkGroup0"), src1=MT0, comment="wg0*MT0"))
+    module.add(VSubU32(dst=vgpr(v), src0=vgpr(self.vgprs.coord0), src1=sgpr(tmpS01), comment="mLocal=coord0-wg0*MT0"))
+    module.add(SMulI32(dst=sgpr(tmpS01), src0=sgpr("WorkGroup1"), src1=MT1, comment="wg1*MT1"))
+    module.add(VSubU32(dst=vgpr(v+1), src0=vgpr(self.vgprs.coord1), src1=sgpr(tmpS01), comment="nLocal=coord1-wg1*MT1"))
+    module.add(VMulLOU32(dst=vgpr(v+1), src0=vgpr(v+1), src1=MT0, comment="nLocal*MT0"))
+    module.add(VAddU32(dst=vgpr(v), src0=vgpr(v), src1=vgpr(v+1), comment="mLocal + nLocal*MT0"))
+    module.add(VLShiftLeftB32(dst=vgpr(v), shiftHex=hex(int(log2(bpe))), src=vgpr(v), comment="*bpe"))
+    return module, v
+
+  def _emitSubtileHybridScratchStore(self, kernel, ss, cvtVgprStruct, addrCalc, sumIdx0, prefixOffset, gwvw, baseVgpr):
+    # The regular store pipeline (convertModule + packModule) has ALREADY run
+    # before this hook (see GlobalWriteBatch: convertModule/packModule are added
+    # just above the store dispatch).  So ValuC[sumIdx0-prefixOffset ..] already
+    # holds the FINAL, epilogue-applied, fp32->bf16 CONVERTED + PACKED output
+    # (2 bf16 per dword).  We must NOT re-convert; just ds_store those packed
+    # dwords into the M-contiguous LDS scratch at baseVgpr + (co0+co1*MT0)*bpe.
+    module = Module("SubtileHybridScratchStore")
+    bpe = self.states.bpeCexternalGSU1
+    MT0 = kernel["MacroTile0"]
+    co0 = addrCalc.coordOffset0; co1 = addrCalc.coordOffset1
+    immOff = (co0 + co1*MT0)*bpe
+    baseIdx = sumIdx0 - prefixOffset
+    ndw = (gwvw*bpe + 3)//4  # packed output dwords (bf16: gwvw/2)
+    module.add(dsStore(ndw*4, dstAddr=vgpr(baseVgpr), src=vgpr("ValuC+%d"%baseIdx, ndw),
+                       ds=DSModifiers(offset=immOff),
+                       comment="stage %d packed bf16 (already converted) to M-contiguous scratch"%gwvw,
+                       memToken=MemTokenData([self.states.memTokenLdsBuffer0])))
+    return module
+
+  def _emitTdmSubtileHybridFlush(self, kernel):
+    module = Module("TdmSubtileHybridFlush")
+    module.add(SWaitCnt(dscnt=0, comment="hybrid: wait scratch ds_store"))
+    module.add(SBarrier(comment="hybrid: all waves staged scratch before TDM store"))
+    bpe = self.states.bpeCexternalGSU1
+    log2bpe = int(log2(bpe)); dss = {1:0,2:1,4:2,8:3}[bpe]
+    MT0 = kernel["MacroTile0"]; MT1 = kernel["MacroTile1"]
+    packedD1 = kernel["PackedC1IndicesX"]
+    strideD1 = "StrideD%s" % (self.states.indexChars[packedD1[0]])
+    sizeI = self.sizeRef(kernel["ProblemType"]["Index0"])
+    sizeJ = self.sizeRef(kernel["ProblemType"]["Index1"])
+    with self.allocTmpSgpr(16, alignment=4, tag="tdmHybDesc") as descS:
+      g0 = descS.idx; g1 = g0 + 4
+      for k in range(12): module.add(SMovB32(dst=sgpr(g0+k), src=0, comment="zero D# dword"))
+      module.add(SMovB32(dst=sgpr(g0+0), src=hex(0x1 | (1<<3)), comment="G0 Reserved0|m_is_store"))
+      with self.allocTmpSgpr(2, alignment=2, tag="tdmHybAddr") as aS:
+        o = aS.idx
+        module.add(SMulI32(dst=sgpr(o), src0=sgpr("WorkGroup1"), src1=MT1, comment="col0=wg1*MT1"))
+        module.add(SMulI32(dst=sgpr(o), src0=sgpr(o), src1=sgpr(strideD1), comment="*StrideD"))
+        module.add(SMulI32(dst=sgpr(o+1), src0=sgpr("WorkGroup0"), src1=MT0, comment="row0=wg0*MT0"))
+        module.add(SAddU32(dst=sgpr(o), src0=sgpr(o), src1=sgpr(o+1), comment="tileOriginElem"))
+        if log2bpe: module.add(SLShiftLeftB32(dst=sgpr(o), shiftHex=hex(log2bpe), src=sgpr(o), comment="*bpe"))
+        module.add(SMovB64(dst=sgpr(g0+2,2), src=sgpr("AddressD",2), comment="G0 D base"))
+        module.add(SAddU32(dst=sgpr(g0+2), src0=sgpr(g0+2), src1=sgpr(o), comment="+tileOff lo"))
+        module.add(SAddCU32(dst=sgpr(g0+3), src0=sgpr(g0+3), src1=0, comment="+tileOff hi"))
+      module.add(SOrB32(dst=sgpr(g0+3), src0=sgpr(g0+3), src1=hex(2<<30), comment="G0 type=2"))
+      module.add(SMovB32(dst=sgpr(g1+0), src=hex(dss<<16), comment="G1 data_size"))
+      with self.allocTmpSgpr(3, tag="tdmHybDim") as tS:
+        t = tS.idx; rd0 = tS.idx+1; rd1 = tS.idx+2
+        module.add(SMulI32(dst=sgpr(rd0), src0=sgpr("WorkGroup0"), src1=MT0, comment="rowStart"))
+        module.add(SSubU32(dst=sgpr(rd0), src0=sizeI, src1=sgpr(rd0), comment="tdim0=M-rowStart"))
+        module.add(SMulI32(dst=sgpr(rd1), src0=sgpr("WorkGroup1"), src1=MT1, comment="colStart"))
+        module.add(SSubU32(dst=sgpr(rd1), src0=sizeJ, src1=sgpr(rd1), comment="tdim1=N-colStart"))
+        module.add(SLShiftLeftB32(dst=sgpr(t), shiftHex=hex(16), src=sgpr(rd0))); module.add(SOrB32(dst=sgpr(g1+1), src0=sgpr(g1+1), src1=sgpr(t), comment="tdim0 lo"))
+        module.add(SLShiftRightB32(dst=sgpr(t), shiftHex=hex(16), src=sgpr(rd0))); module.add(SOrB32(dst=sgpr(g1+2), src0=sgpr(g1+2), src1=sgpr(t), comment="tdim0 hi"))
+        module.add(SLShiftLeftB32(dst=sgpr(t), shiftHex=hex(16), src=sgpr(rd1))); module.add(SOrB32(dst=sgpr(g1+2), src0=sgpr(g1+2), src1=sgpr(t), comment="tdim1 lo"))
+        module.add(SLShiftRightB32(dst=sgpr(t), shiftHex=hex(16), src=sgpr(rd1))); module.add(SOrB32(dst=sgpr(g1+3), src0=sgpr(g1+3), src1=sgpr(t), comment="tdim1 hi"))
+      module.add(SOrB32(dst=sgpr(g1+3), src0=sgpr(g1+3), src1=hex((MT0 & 0xFFFF)<<16), comment="tile_dim0=MT0"))
+      module.add(SOrB32(dst=sgpr(g1+4), src0=sgpr(g1+4), src1=hex(MT1 & 0xFFFF), comment="tile_dim1=MT1"))
+      module.add(SMovB32(dst=sgpr(g1+5), src=sgpr(strideD1), comment="sgpr5=StrideD"))
+      inst = TensorStoreFromLds(sgpr(g0,4), sgpr(g1,8), None, None, "TDM hybrid store D NonEdge full tile")
+      inst.setMemToken(MemTokenData([self.states.memTokenLdsBuffer0]))
+      module.add(inst)
+      module.add(SWaitTensorcnt(tensorcnt=0, comment="wait TDM store"))
+    return module
+
   def storeRemapAddStore(self, kernel, tmpVgpr, tmpS01, edge, StoreRemapLastBatch):
     module = Module("storeRemapAddStore")
+
+    # ==== TDMStoreEdge: native-OOB TDM store (reuse storeRemap LDS staging) ====
+    # UNVERIFIED numeric correctness (pending GPU). Bitfields per amd_gfx1250_TDM.h.
+    if kernel.get("TDMStoreEdge") and edge:
+      # Option-2: dedicated CONTIGUOUS LDS buffer + manual row-major producer.
+      # Reuse storeRemap's LDS region: dsLoad the padded tile into VGPRs, then re-ds_store
+      # it back CONTIGUOUS (de-padded, col pitch = MT0) at LDS offset 0; then element-unit
+      # tensor_store_from_lds (LDS base 0, tile_dim0=MT0, NO hw pad, OOB via tensor_dim=M/N).
+      # NUMERIC CORRECTNESS UNVERIFIED (GPU off) - static-assemble only. bpe=GSU1 (matches
+      # storeRemap GSULog2BpeD + destBytes); verify bpe (2 vs 4) first on GPU.
+      bpe = self.states.bpeCexternalGSU1
+      log2bpe = int(log2(bpe))
+      MT0 = kernel["MacroTile0"]; MT1 = kernel["MacroTile1"]
+      ldsPad = max(kernel["StoreRemapVectorWidth"], kernel["MIOutputVectorWidth"])
+      dss = {1:0,2:1,4:2,8:3}[bpe]
+      gwvw = kernel["StoreRemapVectorWidth"]
+      nElements = MT0*kernel["MatrixInstN"]//kernel["MIWaveGroup"][0]//self.states.kernel["WavefrontSize"]
+      nColPerLoad = self.storeRemapNCPL
+      bps = bpe * gwvw
+      rpv = (bpe / self.states.bpr) * gwvw
+      numRegs = int(max(1, rpv))
+      packedD1 = kernel["PackedC1IndicesX"]
+      strideD1 = "StrideD%s" % (self.states.indexChars[packedD1[0]])
+      sizeI = self.sizeRef(kernel["ProblemType"]["Index0"])
+      sizeJ = self.sizeRef(kernel["ProblemType"]["Index1"])
+      storeRegs = self.vgprs.storeRemapAS
+      if kernel["MIWaveGroup"][0] > 1:
+        module.add(SBarrier(comment="TDMStoreEdge: wait all storeRemap LDS write"))
+      srcLR = vgpr(self.vgprs.storeRemapLR)
+      for rIdx, i in enumerate(range(0, nElements, gwvw)):
+        off = self.storeRemapLrOffset * bpe * (i//gwvw)
+        module.add(dsLoad(bps, dst=vgpr(storeRegs[rIdx], rpv), src=srcLR, ds=DSModifiers(offset=off),
+                          comment="TDMStoreEdge: read storeRemap tile -> VGPR",
+                          memToken=MemTokenData([self.states.memTokenLdsBuffer0])))
+      module.add(SWaitCnt(dscnt=0, comment="TDMStoreEdge: reads done"))
+      module.add(SBarrier(comment="TDMStoreEdge: all lanes read before re-lay LDS"))
+      vDed = self.vgprPool.checkOut(1, "tdm dedBuf addr")
+      vTmp = self.vgprPool.checkOut(1, "tdm tmp")
+      module.add(VMulLOU32(dst=vgpr(vTmp), src0=vgpr(self.vgprs.storeRemapOffsetCoord1), src1=ldsPad, comment="coord1*ldsPad"))
+      module.add(VLShiftLeftB32(dst=vgpr(vTmp), shiftHex=hex(log2bpe), src=vgpr(vTmp), comment="*bpe (byte)"))
+      module.add(VSubU32(dst=vgpr(vDed), src0=srcLR, src1=vgpr(vTmp), comment="dedAddr = LR - coord1*ldsPad*bpe (contiguous @ LDS 0)"))
+      for rIdx, i in enumerate(range(0, nElements, gwvw)):
+        off = MT0 * nColPerLoad * bpe * (i//gwvw)
+        module.add(dsStore(bps, dstAddr=vgpr(vDed), src=vgpr(storeRegs[rIdx], numRegs), ds=DSModifiers(offset=off),
+                           comment="TDMStoreEdge: write contiguous (de-padded)",
+                           memToken=MemTokenData([self.states.memTokenLdsBuffer0])))
+      self.vgprPool.checkIn(vTmp); self.vgprPool.checkIn(vDed)
+      module.add(SWaitCnt(dscnt=0, comment="TDMStoreEdge: contiguous writes done"))
+      module.add(SBarrier(comment="TDMStoreEdge: contiguous LDS ready"))
+      with self.allocTmpSgpr(16, alignment=4, tag="tdmDStoreDesc") as descS:
+        g0 = descS.idx; g1 = g0 + 4
+        for k in range(12): module.add(SMovB32(dst=sgpr(g0+k), src=0, comment="zero D# dword"))
+        module.add(SMovB32(dst=sgpr(g0+0), src=hex(0x1 | (1<<3)), comment="G0 Reserved0=1 | m_is_store"))
+        with self.allocTmpSgpr(2, alignment=2, tag="tdmDAddr") as aS:
+          o = aS.idx
+          module.add(SMulI32(dst=sgpr(o), src0=sgpr("WorkGroup1"), src1=MT1, comment="col0=wg1*MT1"))
+          module.add(SMulI32(dst=sgpr(o), src0=sgpr(o), src1=sgpr(strideD1), comment="*StrideD"))
+          module.add(SMulI32(dst=sgpr(o+1), src0=sgpr("WorkGroup0"), src1=MT0, comment="row0=wg0*MT0"))
+          module.add(SAddU32(dst=sgpr(o), src0=sgpr(o), src1=sgpr(o+1), comment="tileOriginElem"))
+          if log2bpe: module.add(SLShiftLeftB32(dst=sgpr(o), shiftHex=hex(log2bpe), src=sgpr(o), comment="*bpe byte"))
+          module.add(SMovB64(dst=sgpr(g0+2,2), src=sgpr("AddressD",2), comment="G0 global=D base (byte)"))
+          module.add(SAddU32(dst=sgpr(g0+2), src0=sgpr(g0+2), src1=sgpr(o), comment="+tileOffset lo"))
+          module.add(SAddCU32(dst=sgpr(g0+3), src0=sgpr(g0+3), src1=0, comment="+tileOffset hi"))
+        module.add(SOrB32(dst=sgpr(g0+3), src0=sgpr(g0+3), src1=hex(2<<30), comment="G0 type=2 (image)"))
+        module.add(SMovB32(dst=sgpr(g1+0), src=hex(dss<<16), comment="G1 data_size; pad_enable=0 (no hw pad)"))
+        with self.allocTmpSgpr(3, tag="tdmDdim") as tS:
+          t = tS.idx; rd0 = tS.idx+1; rd1 = tS.idx+2
+          # aiter tdm_oob convention: tensor_dim = tile-start-RELATIVE remaining extent
+          # (Size - tileStart), NOT absolute M/N; HW clips the partial edge tile.
+          module.add(SMulI32(dst=sgpr(rd0), src0=sgpr("WorkGroup0"), src1=MT0, comment="rowStart=wg0*MT0"))
+          module.add(SSubU32(dst=sgpr(rd0), src0=sizeI, src1=sgpr(rd0), comment="tensor_dim0 = M - rowStart (rel)"))
+          module.add(SMulI32(dst=sgpr(rd1), src0=sgpr("WorkGroup1"), src1=MT1, comment="colStart=wg1*MT1"))
+          module.add(SSubU32(dst=sgpr(rd1), src0=sizeJ, src1=sgpr(rd1), comment="tensor_dim1 = N - colStart (rel)"))
+          module.add(SLShiftLeftB32(dst=sgpr(t), shiftHex=hex(16), src=sgpr(rd0))); module.add(SOrB32(dst=sgpr(g1+1), src0=sgpr(g1+1), src1=sgpr(t), comment="tensor_dim0 lo (elem,rel)"))
+          module.add(SLShiftRightB32(dst=sgpr(t), shiftHex=hex(16), src=sgpr(rd0))); module.add(SOrB32(dst=sgpr(g1+2), src0=sgpr(g1+2), src1=sgpr(t), comment="tensor_dim0 hi"))
+          module.add(SLShiftLeftB32(dst=sgpr(t), shiftHex=hex(16), src=sgpr(rd1))); module.add(SOrB32(dst=sgpr(g1+2), src0=sgpr(g1+2), src1=sgpr(t), comment="tensor_dim1 lo (elem,rel)"))
+          module.add(SLShiftRightB32(dst=sgpr(t), shiftHex=hex(16), src=sgpr(rd1))); module.add(SOrB32(dst=sgpr(g1+3), src0=sgpr(g1+3), src1=sgpr(t), comment="tensor_dim1 hi"))
+        module.add(SOrB32(dst=sgpr(g1+3), src0=sgpr(g1+3), src1=hex((MT0 & 0xFFFF)<<16), comment="tile_dim0=MT0 (contiguous, no pad-fold)"))
+        module.add(SOrB32(dst=sgpr(g1+4), src0=sgpr(g1+4), src1=hex(MT1 & 0xFFFF), comment="tile_dim1=MT1 (elem)"))
+        # aiter tdm_oob: ONLY sgpr5 = tensor_dim0_stride = OUTER(leading/col) stride in elements
+        # = StrideD. Inner(row) stride is implicit 1. sgpr6/7 = 0 (no higher-dim stride for 2D).
+        module.add(SMovB32(dst=sgpr(g1+5), src=sgpr(strideD1), comment="sgpr5 = tensor_dim_stride = outer(col) stride = StrideD (elem)"))
+        tdmStoreInst = TensorStoreFromLds(sgpr(g0,4), sgpr(g1,8), None, None, "TDM store D (edge, dedicated contiguous LDS buffer)")
+        tdmStoreInst.setMemToken(MemTokenData([self.states.memTokenLdsBuffer0]))
+        module.add(tdmStoreInst)
+        module.add(SWaitTensorcnt(tensorcnt=0, comment="wait TDM store"))
+      return module, 1
 
     module.add(SWaitCnt(dscnt=0, comment="wait for LDS write"))
 

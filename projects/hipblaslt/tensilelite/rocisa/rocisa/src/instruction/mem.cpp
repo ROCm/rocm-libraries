@@ -1900,6 +1900,17 @@ void mem_inst(nb::module_ m_mem)
             return new rocisa::TensorLoadToLds(self);
         });
 
+    nb::class_<rocisa::TensorStoreFromLds, rocisa::Instruction>(m_mem, "TensorStoreFromLds")
+        .def(nb::init<const std::shared_ptr<rocisa::RegisterContainer>&,
+                      const std::shared_ptr<rocisa::RegisterContainer>&,
+                      const std::shared_ptr<rocisa::RegisterContainer>&,
+                      const std::shared_ptr<rocisa::RegisterContainer>&,
+                      const std::string&>(),
+             nb::arg("group0"), nb::arg("group1"),
+             nb::arg("group2").none(), nb::arg("group3").none(), nb::arg("comment") = "")
+        .def("__deepcopy__", [](const rocisa::TensorStoreFromLds& self, nb::dict&) {
+            return new rocisa::TensorStoreFromLds(self); });
+
     nb::class_<rocisa::GlobalPrefetchB8, rocisa::Instruction>(m_mem, "GlobalPrefetchB8")
         .def(nb::init<const std::shared_ptr<rocisa::Container>&,
                       const std::shared_ptr<rocisa::Container>&,

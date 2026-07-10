@@ -1079,6 +1079,8 @@ validParameters = { # we need to make sure this matches develop
     # are not split regardless of this flag. When True, two extra SGPRs are allocated to
     # hold the per-iteration LDS and global address increments for the split loads.
     "TDMSplit": [False, True],
+    "TDMStoreEdge": [False, True],
+    "TDMSubtileHybrid": [False, True],
     # In-device layout of the MX scale tensors (MXSA/MXSB).
     # User-facing values:
     #   "NoSwizzle":       no swizzling; plain row/column layout (this is the default

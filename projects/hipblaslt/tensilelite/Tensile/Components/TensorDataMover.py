@@ -295,6 +295,12 @@ class TensorDataMoverLoad(TensorDataMover):
           mod.add(SOrB32(sgpr(f"{group1}+0"), sgpr(f"{group1}+0"), value, f"set padding {ldsPadSize} per block {ldsBlockSizePerPad}"))
         return mod
 
+    def setIsStore(self, group0, isStore: bool=True) -> Module:
+        mod = Module(); mod.addComment("TDM set is_store (D# Group0 dword0 bit3)")
+        if isStore: mod.add(SOrB32(sgpr(f"{group0}+0"), sgpr(f"{group0}+0"), hex(1<<3), "set m_is_store"))
+        else: mod.add(SAndB32(sgpr(f"{group0}+0"), sgpr(f"{group0}+0"), hex(0xFFFFFFF7), "clear m_is_store"))
+        return mod
+
     def setGlobalAddr(self, group0: int | str, sgprGlobalAddr: int | str) -> Module:
         mod = Module()
         mod.addComment("TDM set global addr")

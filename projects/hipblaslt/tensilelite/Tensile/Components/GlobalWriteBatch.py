@@ -352,6 +352,9 @@ class GlobalWriteBatchWriter:
        (self.parentWriter.states.useBias != DataDirection.NONE or \
         self.kernel["ProblemType"].get("UseScaleAlphaVec", 0))
     if not isMultiDU:
+      if drainBiasSav:
+        module.add(SWaitCnt(dscnt=0, comment="drain bias/SAV LDS reads (non-multiDU pre-store race fix)"))
+        module.add(SBarrier(comment="sync waves before subtile paired stores (non-multiDU race fix)"))
       self._emitAdd(module)
     if drainBiasSav:
       module.add(SWaitCnt(dscnt=0, comment="drain bias/SAV LDS reads"))
@@ -1809,7 +1812,18 @@ class GlobalWriteBatchWriter:
         #   ...
         # Pairing key: tt0 % 2 — even tt0 is sba=0, odd tt0 is sba=1.
         storeCodeModule = storeCode if self.kernel["GroupLoadStore"] else module
-        if is16bitSubtile:
+        if self.kernel.get("TDMSubtileHybrid") and isSubtileNonEdge:
+          if self.batchIdx == 0 and elementIdx == 0:
+            _setupMod, self.parentWriter._tdmHybBaseVgpr = self.parentWriter._emitTdmHybBaseSetup(self.kernel, self.tmpS01)
+            storeCodeModule.add(_setupMod)
+          storeCodeModule.add(self.parentWriter._emitSubtileHybridScratchStore(
+              self.kernel, self.ss, self.cvtVgprStruct, addrCalc, self.ss.elementSumIdx[elementIdx],
+              self.parentWriter.states.c.startVgprValu, self.gwvw, self.parentWriter._tdmHybBaseVgpr))
+          self.storesIssued += 1
+          if self.batchIdx == self.numBatches - 1 and elementIdx == len(self.batchElements) - 1:
+            storeCodeModule.add(self.parentWriter._emitTdmSubtileHybridFlush(self.kernel))
+            self.parentWriter.vgprPool.checkIn(self.parentWriter._tdmHybBaseVgpr)
+        elif is16bitSubtile:
           tt0 = element[1]  # d0: thread-tile index along M
           # Epilogue (bias/activation) is applied per-element in iteration order.
           # The paired store must be emitted AFTER both sba=0 and sba=1 elements have

@@ -135,6 +135,7 @@ void setGfx1250RocisaToArchMap(GpuArch& registry) {
         {"FlatLoadB64", "flat_load_b64"},
         {"FlatLoadB128", "flat_load_b128"},
         {"TensorLoadToLds", "tensor_load_to_lds"},
+        {"TensorStoreFromLds", "tensor_store_from_lds"},
         {"BufferStoreB8", "buffer_store_b8"},
         {"BufferStoreD16HIU8", "buffer_store_d16_hi_b8"},
         {"BufferStoreD16HIB16", "buffer_store_d16_hi_b16"},
