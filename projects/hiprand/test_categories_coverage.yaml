@@ -1,0 +1,23 @@
+# Coverage configuration for hipRAND.
+#
+# Per-project coverage metadata consumed by the code-coverage CI flow (see
+# .github/scripts/export_coverage_metadata.py). Kept next to this project's
+# test_categories.yaml, following the repo's test_categories_*.yaml convention.
+#
+# Notes:
+#   * `libraries` are matched by file name (basename); the export/report scripts
+#     locate the actual instrumented files in the build tree, so version suffixes
+#     (e.g. libhiprand.so.1.1) are handled automatically.
+#   * `ignore_filename_regex` is passed to `llvm-cov` as -ignore-filename-regex.
+#   * `llvm_profile_pattern` is the LLVM_PROFILE_FILE pattern; %m keeps one file
+#     per instrumented binary so parallel tests do not clobber each other.
+#   * `test_category` is the ctest label coverage tests run under.
+enabled: true
+coverage_objects:
+  # hipRAND is a thin wrapper; coverage is collected from the wrapper lib.
+  libraries:
+    - libhiprand.so
+  test_binaries: []
+ignore_filename_regex: '.*/test/.*|.*/tests/.*|.*/_deps/.*|.*deps.*'
+llvm_profile_pattern: '%m'
+test_category: quick

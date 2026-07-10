@@ -11,6 +11,9 @@ on:
         type: string
       build_dir:
         type: string
+      coverage_config:
+        description: "Per-project coverage metadata file (test_categories_coverage.yaml)."
+        type: string
       amdgpu_families:
         type: string
       test_runs_on:
@@ -149,7 +152,7 @@ jobs:
           python3 .github/scripts/export_coverage_metadata.py \
             --build-dir TheRock/build-coverage \
             --project "${{ inputs.project_name }}" \
-            --config test_categories_coverage.yaml \
+            --config "${{ inputs.coverage_config }}" \
             --cmake-target "${{ inputs.cmake_target }}" \
             --output "${GITHUB_WORKSPACE}/coverage-objects/coverage_metadata.json"
           cat "${GITHUB_WORKSPACE}/coverage-objects/coverage_metadata.json"
@@ -258,6 +261,7 @@ jobs:
           CMAKE_TARGET: ${{ inputs.cmake_target }}
           PROJECTS_TO_TEST: ${{ inputs.projects_to_test }}
           BUILD_DIR: ${{ inputs.build_dir }}
+          COVERAGE_CONFIG: ${{ inputs.coverage_config }}
           BUILD_THEROCK_REF: ${{ inputs.therock_ref }}
           TEST_THEROCK_REF: ${{ inputs.test_therock_ref }}
           REPO: ${{ github.repository }}
@@ -329,7 +333,7 @@ jobs:
             echo "GPU family:       ${AMDGPU_FAMILIES}"
             echo
             echo "[Coverage config]"
-            echo "  Config:  test_categories_coverage.yaml -> coverage_metadata.json"
+            echo "  Config:  ${COVERAGE_CONFIG} -> coverage_metadata.json"
             echo "  Report:  llvm-profdata merge + llvm-cov (report/show/export), inline in this job"
             echo
             echo "[TheRock - where ${PROJECT_NAME} was packed for coverage]"
