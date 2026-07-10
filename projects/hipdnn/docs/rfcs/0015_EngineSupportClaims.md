@@ -157,40 +157,29 @@ case id (§5.4):
   support.json             # NEW: machine-managed claims, keyed by cases[].id
 ```
 
-The support sidecar is **machine-owned**: it is written wholesale by `--write-support-claims`
-(§9) and is never hand-edited, keeping it cleanly separate from the human-authored `meta.json`
-(and, for a sweep, the machine-owned `support.json` separate from the human-authored
+The support sidecar is **machine-owned**: written wholesale by `--write-support-claims` (§9),
+never hand-edited, and kept separate from the human-authored `meta.json` (and, for a sweep, from
 `sweep.json`). The runner reads it at test time and compares its recorded verdict against a live
-engine support query for the exact graph the bundle contains — the expanded case, for a sweep.
+engine support query for the exact graph — the expanded case, for a sweep.
 
 Claim evaluation is built on RFC 0011's existing machinery:
 
 - **Discovery must exclude the new sidecar for both bundle kinds.** Bundle discovery
   (`discoverBundles` in
-  `dnn-providers/integration-tests/src/harness/bundle/BundleDiscovery.hpp`) recursively scans
-  for graph JSON and registers one test per single-graph `{Name}.json` and one test per
-  template-sweep `cases[].id`, already skipping companion sidecars (`meta.json`) and recognizing
-  sweep roots (`graph.template.json` + `sweep.json`) so they are not loaded as graphs. The
-  support sidecar is a further `*.json` in the bundle directory — `{Name}.support.json` beside a
-  single-graph bundle, or a bare `support.json` beside `sweep.json` — so the graph/sweep filters
-  (`isGraphFile`, `isSweepTemplateFile`) **must be extended to skip it in both cases**; otherwise
-  a spurious bundle registers and tries to load a support file as a graph. A support sidecar
-  annotates bundles that are already discovered; it must never create or remove a test.
-  *Acceptance criteria:* a directory containing `{Name}.json` + `{Name}.support.json` registers
-  exactly one test; a sweep directory containing `graph.template.json` + `sweep.json` +
-  `support.json` registers exactly one test per `cases[].id` and no more; the support sidecar is
-  never loaded as a graph in either case.
-- **The claim key is the on-disk graph**, not a content hash. For a single-graph bundle the key
-  is that bundle (its `{Name}.json` plus the co-located `{Name}.support.json`). For a template
-  sweep the key is the **expanded case**: the `cases[].id` selected from `sweep.json` against the
-  shared `graph.template.json`, plus that case's verdict in the co-located `support.json` — the
-  engine-keyed group that lists the case id (§5.4).
-  RFC 0011 already treats each `cases[].id` as its own logical test with its own graph (discovery
-  keys the case on `sweep.json#caseId`), so a per-case claim needs no new identity mechanism — the
-  case id is the existing handle. Enforcement re-expands *that case* and re-queries the resulting
-  graph. Two byte-identical graphs (two bundles, or two sweep cases) are intentionally two claims.
-  No new naming, pattern, or fingerprint mechanism is introduced — the bundle location plus case
-  id is the key, and the graph it expands to is what gets re-queried.
+  `dnn-providers/integration-tests/src/harness/bundle/BundleDiscovery.hpp`) registers one test per
+  single-graph `{Name}.json` and one per template-sweep `cases[].id`, already skipping companion
+  `meta.json` and treating `graph.template.json` + `sweep.json` as a sweep root, not a graph. The
+  support sidecar — `{Name}.support.json` beside a single-graph bundle, or a bare `support.json`
+  beside `sweep.json` — must join those skip filters (`isGraphFile`, `isSweepTemplateFile`); it
+  annotates already-discovered bundles and must never register, remove, or be loaded as a
+  test/graph. *Acceptance:* a single-graph dir registers one test; a sweep dir exactly one per
+  `cases[].id`; the sidecar is never loaded as a graph.
+- **The claim key is the on-disk graph**, not a content hash. For a single-graph bundle it is
+  that bundle (`{Name}.json` + co-located `{Name}.support.json`); for a template sweep it is the
+  **expanded case** — the `cases[].id` applied to `graph.template.json`, plus that case's verdict
+  in the co-located `support.json` (§5.4). RFC 0011 already treats each `cases[].id` as its own
+  logical test/graph (keyed `sweep.json#caseId`), so no new identity mechanism is needed:
+  enforcement re-expands the case and re-queries it, and two byte-identical graphs are two claims.
 - **The verdict** is produced offline on hardware and committed; enforcement is a pure
   comparison at test time.
 
@@ -302,14 +291,12 @@ full arch/platform matrix per case. The sweep's machine-owned sidecar is a singl
 }
 ```
 
-- **`claims` is keyed by engine** (canonical JSON sorts these keys — §9.2), so the file reads
-  engine by engine. Each engine maps to an **array of claim groups**.
-- **A claim group is `{ cases, support }`.** `cases` is a list of `cases[].id`; `support` is the
-  `arch -> [supported platforms]` map — identical in shape and meaning to a single-graph
-  `{Name}.support.json`'s per-engine map (§5.1–5.2) — and applies to **every** case in the group.
-  Listing a platform claims *supported*; omitting it means *not enforced* (§5.2). Resolution
-  (§5.2) and outcomes (§7) are evaluated **per `(case, engine, arch, platform)`**; a group is a
-  shared-footprint shorthand, never a new semantic.
+- **`claims` is keyed by engine** (canonical JSON sorts these keys — §9.2); each engine maps to an
+  **array of claim groups**. A group is `{ cases, support }`: `cases` lists `cases[].id`s and
+  `support` is the `arch -> [supported platforms]` map — identical in shape and meaning to a
+  single-graph `{Name}.support.json`'s per-engine map (§5.1–5.2) — applied to **every** case in
+  the group. Listing a platform claims *supported*; omitting it means *not enforced*. Resolution
+  (§5.2) and outcomes (§7) are evaluated **per `(case, engine, arch, platform)`**.
 - **The grouping is the compression the sweep buys.** All cases whose support footprint is
   identical share one group — the "common set supported across many ASICs" is one array entry,
   and cases whose footprint differs (the outliers) fall into their own entries. Two cases group
@@ -329,10 +316,10 @@ full arch/platform matrix per case. The sweep's machine-owned sidecar is a singl
 - All other loader rules from §5.3 hold unchanged (exact-string keys, platform arrays of
   `"linux"`/`"windows"` only, rejected unknown `version`).
 
-The claim key remains the exact graph (§4): for a sweep it is the case expanded from
-`graph.template.json` by the named `cases[].id`, and enforcement re-expands and re-queries that
-case, reading its verdict from the group that lists it. A `support.json` entry never creates,
-removes, or renames a sweep case; it only annotates one that `sweep.json` already defines.
+The claim key is still the exact graph (§4) — for a sweep, the case expanded from
+`graph.template.json` by its `cases[].id`, whose verdict is read from the group listing it. A
+`support.json` entry only annotates a case `sweep.json` already defines; it never adds, removes,
+or renames one.
 
 ## 6. Enforcement Levels
 
@@ -594,10 +581,9 @@ Discovers bundles (single-graph and template-sweep cases alike), observes live s
 `(engine, arch, platform)` only — into `{Name}.support.json` for a single-graph bundle, or into
 the sweep `support.json`'s engine array under the group covering that `cases[].id` (§5.4) for a
 sweep case. Every verdict the run does not observe — other engines, arches, platforms, and sweep
-cases — is preserved unchanged (for an untouched engine, byte-for-byte; see §9.2 for how a
-sweep's grouped array is preserved when only some of its cells change). The graph JSON
-(`{Name}.json` / `graph.template.json`), `sweep.json`, `.bin` files, and `meta.json` are never
-modified.
+cases — is left unchanged (§9.2 details how a sweep's grouped array is preserved when only some
+cells change). The graph JSON (`{Name}.json` / `graph.template.json`), `sweep.json`, `.bin`
+files, and `meta.json` are never modified.
 
 Generation requires a **pinned engine**, so it runs in **mode B or C** (§7.3), never mode A: a
 `buildable`/`full` verdict means compiling (and executing) one specific engine's plan, and even
@@ -619,20 +605,16 @@ the actor and cadence differ.
 - **Machine-owned, engineer-driven.** CI never runs this tool — auto-applying it would
   silently rewrite the contract. The engineer runs it on target hardware, reviews the
   `git diff`, and commits.
-- **Surgical, idempotent writes.** For a single-graph `{Name}.support.json` the write updates
-  only the current `(engine, arch, platform)` keys and leaves all sibling keys byte-identical. A
-  sweep's grouped array (§5.4) cannot be updated purely in place — a changed cell may move a case
-  between groups — so the tool instead **flattens, overlays, then re-groups canonically**: it
-  expands the existing `support.json` to per-`(engine, case, arch, platform)` cells, overlays only
-  the cells this run observed (the exercised engine × exercised arch/platform × the run's cases),
-  leaves every unobserved cell as-is, then re-derives the canonical grouped form (§5.4: cases with
-  an identical `support` matrix share a group, `cases` sorted, groups ordered by first case id).
-  Both paths re-emit the whole file as canonical JSON (sorted keys, fixed number formatting,
-  stable newline), so an unchanged run is a **zero diff**. Untouched engines' arrays stay
-  byte-identical; a run that changes one cell reshuffles at most that engine's grouping, and
-  because different engines, arches, and platforms are disjoint cells, per-engine and per-arch
-  regeneration on separate checkouts still merges cleanly. No multi-writer coordination is needed:
-  only one integration-test binary runs at a time, so concurrent writes are not a scenario.
+- **Surgical, idempotent writes.** For a single-graph `{Name}.support.json` the write updates only
+  the current `(engine, arch, platform)` keys, leaving siblings byte-identical. A sweep's grouped
+  array (§5.4) can't be patched in place — a changed cell may move a case between groups — so the
+  tool **flattens, overlays, then re-groups canonically**: it expands `support.json` to
+  per-`(engine, case, arch, platform)` cells, overlays only the cells this run observed, leaves the
+  rest as-is, and re-derives the canonical grouped form (§5.4). Both paths re-emit canonical JSON
+  (sorted keys, fixed number formatting, stable newline), so an unchanged run is a **zero diff**
+  and untouched engines stay byte-identical. Because engines, arches, and platforms are disjoint
+  cells, separate per-engine/per-arch regenerations merge cleanly; only one binary runs at a time,
+  so no multi-writer coordination is needed.
 - **Written at end of the run.** The tool writes each claimed graph's support sidecar directly
   after the test run completes. If a target file cannot be opened for writing (e.g. it is locked), the
   tool reports a clear error naming the file rather than silently dropping the verdict; it does
