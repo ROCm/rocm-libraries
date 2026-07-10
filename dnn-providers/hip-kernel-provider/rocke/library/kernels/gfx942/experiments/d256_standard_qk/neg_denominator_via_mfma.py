@@ -15,7 +15,7 @@ SQ=int(sys.argv[1]) if len(sys.argv)>1 else 512
 SK=SQ; NQB=SQ//32; H=int(sys.argv[2]) if len(sys.argv)>2 else 16; HKV=2; GQ=H//HKV
 def build():
     at=MfmaAtom.bf16_32x32x8(); ND=D//32; CPL=at.c_per_lane
-    b=IRBuilder("stdqk_fma"); b.kernel.attrs["max_workgroup_size"]=64
+    b=IRBuilder("stdqk_denom"); b.kernel.attrs["max_workgroup_size"]=64
     Q=b.param("Q",PtrType(BF16,"global"),noalias=True,readonly=True,align=16)
     K=b.param("K",PtrType(BF16,"global"),noalias=True,readonly=True,align=16)
     V=b.param("V",PtrType(BF16,"global"),noalias=True,readonly=True,align=16)
@@ -45,22 +45,29 @@ def build():
                 v4=b.smem_load_vN(S_lds,row,b.const_i32(4*jj),dtype=F32,n=4)
                 for e in range(4):
                     j=4*jj+e; v=b.select(b.cmp_gt(b.add(kvb,b.const_i32(j)),qabs),ninf,b.vec_extract(v4,e)); mx=b.fmax(v,mx)
-            corr=b.exp2(b.fmul(b.fsub(m_old,mx),l2e)); ssum=b.const_f32(0.0)
+            corr=b.exp2(b.fmul(b.fsub(m_old,mx),l2e))
             for jj in range(8):
                 v4=b.smem_load_vN(S_lds,row,b.const_i32(4*jj),dtype=F32,n=4); ps=[]
                 for e in range(4):
                     j=4*jj+e; v=b.select(b.cmp_gt(b.add(kvb,b.const_i32(j)),qabs),ninf,b.vec_extract(v4,e))
-                    p=b.exp2(b.fmul(b.fsub(v,mx),l2e)); ps.append(p); ssum=b.fadd(ssum,p)
+                    p=b.exp2(b.fmul(b.fsub(v,mx),l2e)); ps.append(p)
                 b.smem_store_vN(S_lds,[row,b.const_i32(4*jj)],b.vec_pack(ps,F32),4)
-            b.smem_store_vN(m_lds,[row],mx,1); b.smem_store_vN(l_lds,[row],b.fadd(b.fmul(l_old,corr),ssum),1); b.smem_store_vN(c_lds,[row],corr,1)
+            b.smem_store_vN(m_lds,[row],mx,1); b.smem_store_vN(c_lds,[row],corr,1)
         b.sync()
+        def lpa(bb,kt):
+            qn=bb.add(zb,ld.m_in_atom); kbase=bb.add(bb.mul(kt,bb.const_i32(at.k)),bb.mul(ld.k_blk,bb.const_i32(at.a_per_lane)))
+            el=[bb.cast_f32_to(bb.vec_extract(bb.smem_load_vN(S_lds,qn,bb.add(kbase,bb.const_i32(j)),dtype=F32,n=1),0),BF16) for j in range(at.a_per_lane)]
+            return bb.vec_pack(el,BF16)
+        # #2 denominator via MFMA: rowsum = P @ ones (offload sum to idle MFMA units)
+        one_bf=b.cast_f32_to(b.const_f32(1.0),BF16)
+        def lones(bb,kt): return bb.vec_pack([one_bf]*at.b_per_lane,BF16)
+        pv_l=mfma_k_loop(b,K=32,atom=at,load_a=lpa,load_b=lones,iv_name="ktl",acc_name="accl")
+        for i in range(CPL):
+            r,c=at.lane_to_output(b,lane,i); lo=b.vec_extract(b.smem_load_vN(l_lds,r,dtype=F32,n=1),0); cr=b.vec_extract(b.smem_load_vN(c_lds,r,dtype=F32,n=1),0)
+            b.smem_store_vN(l_lds,[r],b.fma(lo,cr,b.vec_extract(pv_l,i)),1)
         new_acc=[None]*(ND*CPL)
         for nt in range(ND):
             nbase=b.const_i32(nt*32)
-            def lpa(bb,kt):
-                qn=bb.add(zb,ld.m_in_atom); kbase=bb.add(bb.mul(kt,bb.const_i32(at.k)),bb.mul(ld.k_blk,bb.const_i32(at.a_per_lane)))
-                el=[bb.cast_f32_to(bb.vec_extract(bb.smem_load_vN(S_lds,qn,bb.add(kbase,bb.const_i32(j)),dtype=F32,n=1),0),BF16) for j in range(at.a_per_lane)]
-                return bb.vec_pack(el,BF16)
             def lvb(bb,kt,nbase=nbase): return load_b_col_strided_scalars(bb,B=V,atom=at,lane_decode=ld,n_tile_base=nbase,k_tile_base=bb.add(bb.add(hok,kvb),bb.mul(kt,bb.const_i32(at.k))),N=D)
             pv=mfma_k_loop(b,K=32,atom=at,load_a=lpa,load_b=lvb,iv_name=f"ktpv{nt}",acc_name=f"accpv{nt}")
             for i in range(CPL):
@@ -85,7 +92,7 @@ L({"Q":q,"K":k,"V":v,"O":o},config=cfg); torch.cuda.synchronize()
 ke=k.repeat_interleave(GQ,dim=0); ve=v.repeat_interleave(GQ,dim=0)
 ref=torch.nn.functional.scaled_dot_product_attention(q.float()[None],ke.float()[None],ve.float()[None],is_causal=True)[0]
 err=(o-ref).abs().max().item()
-print(f"GQA-CAUSAL SQ={SQ} H={H} blocks={NQB*H} max_abs_err={err:.4e}  {'CORRECT' if err<0.2 else 'WRONG'}")
+print(f"DENOM-CAUSAL SQ={SQ} H={H} blocks={NQB*H} max_abs_err={err:.4e}  {'CORRECT' if err<0.2 else 'WRONG'}")
 def once(): L({"Q":q,"K":k,"V":v,"O":o},config=cfg)
 ms=time_launches(once,warmup=10,iters=50,stream=hs); synchronize_and_release(hs)
 flop=2.0*(2.0*SQ*SK*D)*0.5*H

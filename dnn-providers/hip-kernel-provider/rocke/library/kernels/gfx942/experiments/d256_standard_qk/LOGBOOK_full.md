@@ -381,3 +381,20 @@ After mapping the walls, found the real lever: **memory-path, not occupancy**.
   at the real workload, but is **~0.53x AOTriton (151-175 TF/s)**. The 2x gap is real and confirmed measured.
 - Saved stdqk_attn_REALWORKLOAD.py. AOTriton's edge = num_stages SW pipeline + persistent grid + tuned Triton
   codegen (per librarian study) — the genuine multi-day levers to close the 2x.
+
+### [2026-07-11 pm-12] optimization plan #3/#1/#2 — measured; KEY: kernel is latency-bound, not VALU-count-bound
+- Executed the 3-step plan with rocprofv3 at each stage (bf16+GQA, SQ=4096, MI300X):
+  | step | change | VALU | MFMA | TF/s(rocprof) | verdict |
+  |------|--------|------|------|---------------|---------|
+  | base | REALWORKLOAD | 1.080e8 | 8.45e6 | 77.6 | — |
+  | #3   | b.fma rescale | 9.89e7 (-8.5%) | 8.45e6 | 79.8 | **WIN +2-3% (KEPT)** |
+  | #1   | BLOCK_N=64 | 9.33e7 (-6%) | 8.52e6 | 61.8 | **LOSS -23%** |
+  | #2   | denominator via P@ones MFMA | 9.75e7 | 8.98e6 (+6%) | 61.9 | **LOSS -20%** |
+- ISA (FMA): add_f32 93->65 (rescale fused). #3 clean TF/s: +2-3% at both 4096 & 8192 (0.55->0.56x AOTriton @8192).
+- **CRITICAL MEASURED FINDING:** #1 REDUCED VALU (-6%) but got 23% SLOWER; #2 also cut the sum-VALU but added an
+  MFMA and got 20% slower. => the kernel is **latency / occupancy / scheduling-bound, NOT VALU-instruction-count
+  bound.** VALU-reduction strategies (BLOCK_N, denominator-offload) DO NOT WORK here.
+- Also: BLOCK_N>BLOCK_M coarsens the causal triangle -> more masked-but-computed waste (secondary reason #1 lost).
+- **REDIRECTION for the next engineer:** stop optimizing VALU count. The real lever is LATENCY HIDING:
+  (a) async K/V prefetch / num_stages SW pipeline, (b) more waves/occupancy (BLOCK_M=64 -> 2 waves, or reduce the
+  128-acc-VGPR pressure), (c) fewer sync stalls (double-buffer S_lds). Only #3 (b.fma) is banked.

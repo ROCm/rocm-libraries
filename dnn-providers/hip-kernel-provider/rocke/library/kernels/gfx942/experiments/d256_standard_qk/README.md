@@ -120,39 +120,56 @@ srun --jobid=$HELD --overlap --container-image=$IMG \
 | `01_poc_single_tile.py` | minimal end-to-end proof: 1 q-tile × 1 kv-tile, D256, f16, non-causal. The clearest place to learn the QK→softmax→P-reshape→PV→epilogue flow. |
 | `02_runtime_loop_scalable.py` | runtime `scf_for` kv-loop (constant kernel size, scales to any Sq; the Python-unrolled version explodes compile at Sq≥2048). acc in LDS. |
 | `03_best_f16_grid_pad_guard.py` | the best **f16** kernel: multi-head grid + `S_lds` pad + softmax guard + register-carried acc (`scf_for_iter`). 73.2 TF/s. |
-| `04_realworkload_bf16_gqa_vs_aotriton.py` | **the main deliverable**: bf16 + GQA 16/2 + causal + built-in AOTriton comparison. Start here. |
+| `04_realworkload_bf16_gqa_vs_aotriton.py` | **the main deliverable**: bf16 + GQA 16/2 + causal + `b.fma` rescale + built-in AOTriton comparison. Start here. |
 | `neg_cross_lane_softmax.py` | negative result: butterfly (`ds_swizzle_xor`) register softmax. Correct but −30%. |
 | `neg_q_in_lds.py` | negative result: Q loaded once to LDS. Correct but −8%. |
+| `neg_block_n_64.py` | negative result: `BLOCK_N=64`. Correct but −23% (VALU↓ yet slower → latency-bound; also `BLOCK_N>BLOCK_M` causal waste). |
+| `neg_denominator_via_mfma.py` | negative result: row-sum via `P@ones` MFMA. Correct but −20% (extra MFMA + l-update LDS > the sum-VALU saved). |
 | `LOGBOOK_full.md` | the complete chronological engineering log (every experiment, exact numbers). |
 
 ---
 
-## Next steps to close the 2× AOTriton gap (in priority order)
+## Post-handoff optimization attempts (MEASURED — read before you optimize)
 
-The gap is **not** occupancy (grid fills the GPU), **not** bank conflicts (padded),
-**not** the transpose (standard-QK removed it). It is **VALU + LDS round-trips +
-scheduling**. Concretely:
+A follow-up pass ran a 3-step plan (`b.fma`, `BLOCK_N=64`, denominator-via-MFMA)
+with rocprofv3 at each step. Result (bf16+GQA, SQ=4096, MI300X):
 
-1. **Register-resident softmax (biggest structural lever).** Keep the QK MFMA
-   output `S` in registers and do the online softmax there; only the P→A reshape
-   should touch LDS. The naive butterfly all-reduce lost (`neg_cross_lane_softmax.py`,
-   −30%) because it does 160 `ds_swizzle`/iter. A smarter version: reduce **only
-   within the 16-lane N-sub-group actually needed** (not a full 32-wide all-reduce),
-   or fold the reduction into fewer, wider ops. Target: eliminate the `S` LDS
-   round-trip (one of the two).
-2. **`num_stages` software pipeline + persistent grid** (AOTriton's other lever).
-   Prefetch tile N+1's K/V (async `buffer_load`/`global_load_lds`) while computing
-   tile N; and/or a persistent work-stealing grid for causal load balance. Note:
-   the kernel is VALU-bound, so this mainly helps if it also frees waves/regs —
-   measure occupancy after.
-3. **Fundamental VALU reduction.** The acc-rescale (128 fmuladd/iter) and 32× exp2
-   are the bulk. exp2 is already the native `v_exp_f32` path. Look for: skipping
-   rescale when `corr==1` (first tile), fusing the mask into fewer ops, cheaper
-   address math in the loaders.
-4. **Dispatcher integration** (deferred per management — do last). Wire the
-   standard-QK path into `library/dispatch/attention.py` + a `_d256_gfx942_stdqk`
-   gate, mirror in the C++ selector, add a byte-identity/parity case. Only after
-   it beats K-stream in production measurement.
+| step | change | VALU | MFMA | verdict |
+|---|---|---|---|---|
+| #3 | `b.fma` on the acc-rescale | 1.08e8 → 9.89e7 (−8.5%) | 8.45e6 | **WIN +2–3% — kept** (rescale was only partly fused; now folded into `04`) |
+| #1 | `BLOCK_N=64` | 9.33e7 (−6%) | 8.52e6 | **LOSS −23%** (`neg_block_n_64.py`) |
+| #2 | denominator = `P@ones` on idle MFMA | 9.75e7 | 8.98e6 (+6%) | **LOSS −20%** (`neg_denominator_via_mfma.py`) |
+
+### ⚠ The load-bearing finding: this kernel is **latency/occupancy-bound, NOT VALU-count-bound**
+#1 *reduced* VALU by 6% and got **23% slower**; #2 cut the sum-VALU and got **20%
+slower**. Cutting VALU instructions does not speed this kernel up. (Also: `BLOCK_N`
+must be **≤ `BLOCK_M`** — with `BLOCK_M=32`, `BLOCK_N=64` coarsens the causal
+triangle → more masked-but-computed waste.) **Do not spend more effort on VALU
+reduction.** The only VALU win that stuck was free (`b.fma`).
+
+## Next steps to close the 2× AOTriton gap (reprioritized by the finding above)
+
+The gap is **latency hiding**, not VALU, not bank conflicts (padded), not occupancy-
+at-the-grid-level (grid fills the GPU), not the transpose (removed). Pursue, in order:
+
+1. **`num_stages` software pipeline (async K/V prefetch).** Issue tile N+1's K/V
+   `global_load`/`buffer_load` while computing tile N, so memory latency is hidden
+   behind compute. This is AOTriton's primary lever and directly targets the
+   measured latency bound. Highest expected payoff.
+2. **Raise per-CU occupancy / waves.** The kernel carries **128 acc VGPRs** (register
+   acc) → likely ~1–2 waves/CU, too few to hide latency across the 3 syncs/iter.
+   Try: `BLOCK_M=64` (2 M-atoms, 128 threads → 2 waves/CTA, *and* `BLOCK_N` can then
+   grow to 64 safely), or trim the acc-VGPR footprint. Measure `SQ_WAVES` / occupancy.
+3. **Fewer sync stalls.** Double-buffer `S_lds` so tile N+1's QK write doesn't wait
+   on tile N's PV read — removes one of the 3 `sync()`/iter.
+4. **Dispatcher integration** (deferred per management — do last). Wire into
+   `library/dispatch/attention.py` + a `_d256_gfx942_stdqk` gate, mirror in the C++
+   selector, add a byte-identity/parity case. Only after it beats K-stream in prod.
+
+**Register-resident softmax** (removing the `S`/`P` LDS round-trips) is now *lower*
+priority: LDS bank conflicts are 0 and the kernel isn't LDS-throughput-bound, so the
+round-trip isn't the wall — and the butterfly version already lost
+(`neg_cross_lane_softmax.py`, −30%). Only revisit if occupancy work stalls.
 
 ---
 
