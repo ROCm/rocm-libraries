@@ -22,6 +22,11 @@
 - **The binding must never be a silent source of wrongness** — validation at the Python boundary; hipBLASLt's own converters are the ground-truth encoder for narrow types.
 - **Reuse, don't reinvent:** narrow-type pack/unpack reuses hipBLASLt's converters (`hipblaslt_float8.h` etc.); MX pre-swizzle ports the logic in `tensilelite/client/src/DataInitialization.cpp`.
 - **GPU-gated tests:** correctness tests skip cleanly when no device is present; they are excluded from pure-host CI.
+- **Dev host is gfx942 / MI300 only.** gfx950 / MI350-specific *device-GEMM* paths must be written full best-effort but cannot be on-device-verified here. Exactly three items are deferred to MI350: (1) OCP fp8 GEMM correctness, (2) MX/microscaling `VEC32_UE8M0` GEMM, (3) mode-1001 pre-swizzle GEMM. Everything else — including host-side `pack_fp8`/`unpack_fp8` for OCP *and* FNUZ, the ml_dtypes cross-check, and FNUZ fp8 GEMM — runs and is verified here.
+  - Host fp8 converters compile both OCP and FNUZ because the `HIP_FP8_TYPE_OCP`/`_FNUZ` gating keys off `__HIP_DEVICE_COMPILE__` (`/opt/rocm/include/hip/amd_detail/amd_hip_fp8.h:41-50`), so encoding tests are NOT gfx950-gated.
+  - Deferred device tests carry `@pytest.mark.mi350` AND catch `NOT_SUPPORTED`→`pytest.skip`. Run the deferred suite with `pytest -m mi350`; it is inert on gfx942 and active on gfx950.
+  - gfx950 code carries inline `# VERIFY-ON-MI350:` comments at the spots most likely wrong until hardware-verified (especially the swizzle permutation vs. `DataInitialization.cpp`).
+  - Task 21 produces the handoff doc a future MI350 Claude follows.
 
 ## Reference: verified API signatures (from `library/include/hipblaslt/hipblaslt.h`)
 
@@ -1362,7 +1367,7 @@ git commit -m "feat(python): add boundary validation to from_numpy"
 
 ---
 
-## Phase 3 — Heuristic enumeration and matmul (Tasks 11–13)
+## Phase 3 — Heuristic enumeration and matmul (Tasks 11–13b)
 
 ### Task 11: `HeuristicResult` + `Algo` and `heuristic()`
 
@@ -1686,6 +1691,92 @@ Expected: PASS (all algos agree). If a specific algo diverges, that is a genuine
 ```bash
 git add python/tests/test_algo_sweep.py
 git commit -m "test(python): sweep all heuristic algos and assert agreement"
+```
+
+### Task 13b: FNUZ fp8 GEMM (runs here) + deferred OCP fp8 GEMM (MI350)
+
+**Files:**
+- Create: `python/tests/test_fp8_gemm.py`
+
+**Interfaces:**
+- Consumes: full compute path (Tasks 11–12), `_core.DataType.R_8F_E4M3_FNUZ` / `R_8F_E4M3`, `ml_dtypes`.
+- Produces: two tests — a **FNUZ** fp8 GEMM correctness test that RUNS and is verified on this gfx942/MI300 host, and a **deferred OCP** fp8 GEMM test marked `@pytest.mark.mi350` that skips here (MI300 GEMM kernels are FNUZ) and activates on MI350. Both compare against an f32 numpy reference of the fp8-rounded inputs.
+
+- [ ] **Step 1: Write the tests**
+
+Create `python/tests/test_fp8_gemm.py`:
+
+```python
+# Copyright Advanced Micro Devices, Inc., or its affiliates.
+# SPDX-License-Identifier: MIT
+import numpy as np
+import pytest
+import hipblaslt
+c = hipblaslt._core
+requires_gpu = pytest.mark.skipif(not c.hip_available(), reason="no HIP device")
+ml_dtypes = pytest.importorskip("ml_dtypes")
+
+
+def _fp8_gemm(a_dtype, mld_type):
+    m = n = k = 64
+    A = np.random.rand(m, k).astype(np.float32)
+    B = np.random.rand(k, n).astype(np.float32)
+    a8 = A.astype(mld_type); b8 = B.astype(mld_type)
+    ref = a8.astype(np.float32) @ b8.astype(np.float32)
+    with c.Handle() as h:
+        desc = c.MatmulDesc(c.ComputeType.COMPUTE_32F, c.DataType.R_32F)
+        dA = c.DeviceArray.from_numpy(np.ascontiguousarray(a8.T), a_dtype)
+        dB = c.DeviceArray.from_numpy(np.ascontiguousarray(b8.T), a_dtype)
+        dC = c.DeviceArray.from_numpy(np.zeros((n, m), np.float32), c.DataType.R_32F)
+        dD = c.DeviceArray.from_numpy(np.zeros((n, m), np.float32), c.DataType.R_32F)
+        la = c.MatrixLayout(a_dtype, m, k, m)
+        lb = c.MatrixLayout(a_dtype, k, n, k)
+        lc = c.MatrixLayout(c.DataType.R_32F, m, n, m)
+        ld = c.MatrixLayout(c.DataType.R_32F, m, n, m)
+        pref = c.Preference(); pref.set_max_workspace(64 * 1024 * 1024)
+        res = c.heuristic(h, desc, la, lb, lc, ld, pref, 16)
+        if not res:
+            raise c.HipblasLtError("HIPBLAS_STATUS_NOT_SUPPORTED (no algo)")
+        ws = c.DeviceArray.from_numpy(np.zeros(max(1, res[0].workspace_size), np.uint8), c.DataType.R_8I)
+        c.matmul(h, desc, 1.0, dA, la, dB, lb, 0.0, dC, lc, dD, ld, res[0].algo, ws)
+        return dD.to_numpy().reshape(n, m).T, ref
+
+
+@requires_gpu
+def test_fnuz_fp8_gemm():
+    # RUNS on gfx942 / MI300 (FNUZ is the MI300 fp8 format).
+    fnuz = getattr(c.DataType, "R_8F_E4M3_FNUZ", None)
+    mld = getattr(ml_dtypes, "float8_e4m3fnuz", None)
+    if fnuz is None or mld is None:
+        pytest.skip("FNUZ fp8 unavailable in this build/ml_dtypes")
+    out, ref = _fp8_gemm(fnuz, mld)
+    np.testing.assert_allclose(out, ref, rtol=0.1, atol=0.1)
+
+
+@pytest.mark.mi350
+@requires_gpu
+def test_ocp_fp8_gemm():
+    # DEFERRED to MI350 (gfx950): OCP E4M3 GEMM. On MI300 this raises
+    # NOT_SUPPORTED and skips. See handoff doc.
+    try:
+        out, ref = _fp8_gemm(c.DataType.R_8F_E4M3, ml_dtypes.float8_e4m3fn)
+        np.testing.assert_allclose(out, ref, rtol=0.1, atol=0.1)
+    except c.HipblasLtError as e:
+        if "NOT_SUPPORTED" in str(e):
+            pytest.skip(f"OCP fp8 GEMM unsupported on this arch: {e}")
+        raise
+```
+
+- [ ] **Step 2: Run**
+
+Run: `cd python && python -m pytest tests/test_fp8_gemm.py -v`
+Expected: `test_fnuz_fp8_gemm` PASS on this host; `test_ocp_fp8_gemm` SKIP (NOT_SUPPORTED on gfx942).
+
+- [ ] **Step 3: Commit**
+
+```bash
+git add python/tests/test_fp8_gemm.py
+git commit -m "test(python): FNUZ fp8 GEMM (verified) + deferred OCP fp8 GEMM"
 ```
 
 ---
@@ -2090,43 +2181,76 @@ Note: the exact swizzle permutation MUST be validated against the C++ implementa
 
 In `python/hipblaslt/__init__.py`, add `from . import mx` and append `"mx"` to `__all__`.
 
-- [ ] **Step 5: Add an arch-gated MX GEMM test**
+- [ ] **Step 5: Add the deferred (MI350) MX GEMM test**
 
-Append to `python/tests/test_mx.py`:
+The MX GEMM device path requires gfx950 / MI350 and cannot be verified on this gfx942 host. Write it **fully** (best-effort, cross-referenced against `test_matmul.py`), mark it `@pytest.mark.mi350`, and make it skip on `NOT_SUPPORTED`. Register the `mi350` marker in Task 20 Step 3. Append to `python/tests/test_mx.py`:
 
 ```python
-def _mx_supported():
-    if not c.hip_available():
-        return False
-    # Probe: try to run a tiny MX GEMM; NOT_SUPPORTED -> skip.
-    return True  # refined by the probe in Task 18's conftest helper
-
-
+@pytest.mark.mi350
 @requires_gpu
-@pytest.mark.skipif(not _mx_supported(), reason="MX not supported on this arch")
 def test_mx_gemm_matches_reference():
+    """DEFERRED to MI350 (gfx950). Full MX GEMM: build canonical UE8M0 scales,
+    set A_SCALE_MODE/B_SCALE_MODE=VEC32_UE8M0 + A/B_SCALE_POINTER, run matmul,
+    compare against the apply_block_scales numpy reference. On gfx942 this raises
+    NOT_SUPPORTED and skips. See docs/superpowers/handoff/2026-07-10-mi350-verification.md.
+    """
     pytest.importorskip("ml_dtypes")
-    # Full MX GEMM: build scales, set A_SCALE_MODE=VEC32_UE8M0, compare vs
-    # apply_block_scales reference. If the arch returns NOT_SUPPORTED, the
-    # HipblasLtError is caught and the test is skipped.
+    import ml_dtypes
     m = n = k = 128
     A = np.random.rand(m, k).astype(np.float32)
     B = np.random.rand(k, n).astype(np.float32)
-    a_scales, a_scaled = mx.build_block_scales(A, block=32)
+    a_scales, a_scaled = mx.build_block_scales(A, block=32)   # canonical (row, col) UE8M0
     b_scales, b_scaled = mx.build_block_scales(B, block=32)
     ref = mx.apply_block_scales(a_scaled, a_scales) @ mx.apply_block_scales(b_scaled, b_scales)
     try:
-        # (device setup elided here — implementer wires DeviceArrays + scale
-        # pointers + A_SCALE_MODE=VEC32_UE8M0 following test_matmul.py, using
-        # canonical scales for VEC32_UE8M0. Assert allclose(out, ref, rtol=0.15).)
-        pytest.skip("MX device GEMM wiring completed by implementer against real MI350")
+        # Element tensors: fp8 e4m3 (OCP) of the block-scaled values.
+        a_fp8 = a_scaled.astype(ml_dtypes.float8_e4m3fn)
+        b_fp8 = b_scaled.astype(ml_dtypes.float8_e4m3fn)
+        with c.Handle() as h:
+            desc = c.MatmulDesc(c.ComputeType.COMPUTE_32F, c.DataType.R_32F)
+            dA = c.DeviceArray.from_numpy(np.ascontiguousarray(a_fp8.T), c.DataType.R_8F_E4M3)
+            dB = c.DeviceArray.from_numpy(np.ascontiguousarray(b_fp8.T), c.DataType.R_8F_E4M3)
+            dsa = c.DeviceArray.from_numpy(np.ascontiguousarray(a_scales.T), c.DataType.R_8I)  # UE8M0 bytes
+            dsb = c.DeviceArray.from_numpy(np.ascontiguousarray(b_scales.T), c.DataType.R_8I)
+            dC = c.DeviceArray.from_numpy(np.zeros((n, m), np.float32), c.DataType.R_32F)
+            dD = c.DeviceArray.from_numpy(np.zeros((n, m), np.float32), c.DataType.R_32F)
+            la = c.MatrixLayout(c.DataType.R_8F_E4M3, m, k, m)
+            lb = c.MatrixLayout(c.DataType.R_8F_E4M3, k, n, k)
+            lc = c.MatrixLayout(c.DataType.R_32F, m, n, m)
+            ld = c.MatrixLayout(c.DataType.R_32F, m, n, m)
+            desc.set_attribute_int(c.MatmulDescAttr.A_SCALE_MODE, int(c.ScaleMode.VEC32_UE8M0))
+            desc.set_attribute_int(c.MatmulDescAttr.B_SCALE_MODE, int(c.ScaleMode.VEC32_UE8M0))
+            desc.set_attribute_ptr(c.MatmulDescAttr.A_SCALE_POINTER, dsa.ptr)
+            desc.set_attribute_ptr(c.MatmulDescAttr.B_SCALE_POINTER, dsb.ptr)
+            pref = c.Preference(); pref.set_max_workspace(64 * 1024 * 1024)
+            res = c.heuristic(h, desc, la, lb, lc, ld, pref, 16)
+            ws = c.DeviceArray.from_numpy(np.zeros(max(1, res[0].workspace_size), np.uint8), c.DataType.R_8I)
+            c.matmul(h, desc, 1.0, dA, la, dB, lb, 0.0, dC, lc, dD, ld, res[0].algo, ws)
+            out = dD.to_numpy().reshape(n, m).T
+            # VERIFY-ON-MI350: tolerance and the exact scale-tensor layout/transpose
+            # for VEC32_UE8M0 are unverified without gfx950; adjust rtol and the
+            # dsa/dsb layout until this matches, then tighten. Cross-ref
+            # DataInitialization.cpp for the canonical scale layout the kernel expects.
+            np.testing.assert_allclose(out, ref, rtol=0.15, atol=0.15)
     except c.HipblasLtError as e:
         if "NOT_SUPPORTED" in str(e):
-            pytest.skip(f"MX unsupported: {e}")
+            pytest.skip(f"MX unsupported on this arch: {e}")
         raise
 ```
 
-Note: the full device wiring for the MX GEMM depends on MI350 hardware. The helpers (build/apply/swizzle) are fully tested and CI-able on any host; the device GEMM is completed and validated by the implementer on real MX hardware, then the `pytest.skip` placeholder is replaced with the assertion. Keep the try/except NOT_SUPPORTED→skip so the test is safe on non-MX arches.
+Also add a `VERIFY-ON-MI350` comment above `swizzle_scales` in `mx.py`:
+
+```python
+def swizzle_scales(scales_canonical, tile=(32, 8, 4)):
+    # VERIFY-ON-MI350: the forward permutation below is derived from
+    # DataInitialization.cpp:1977-2016 but only the roundtrip (swizzle→unswizzle)
+    # is verified on gfx942. Whether the forward layout actually feeds the gfx950
+    # subtile kernel correctly (mode BLK32_UE8M0_32_8_EXT / 1001) is UNVERIFIED
+    # until run on MI350. If a mode-1001 GEMM produces wrong numbers, re-derive here.
+    ...
+```
+
+Note: the helpers (build/apply/swizzle roundtrip) are fully tested and CI-able on gfx942. This device GEMM stays inert here (NOT_SUPPORTED→skip) and is verified on MI350 per the handoff doc.
 
 - [ ] **Step 6: Run**
 
@@ -2413,10 +2537,13 @@ cd python && python -m pytest tests/ -m "not gpu" -v   # host-only subset
 In `python/pyproject.toml`, under `[tool.pytest.ini_options]`, add:
 
 ```toml
-markers = ["gpu: test requires a HIP device"]
+markers = [
+    "gpu: test requires a HIP device",
+    "mi350: test requires gfx950 / MI350 (deferred device path; skips elsewhere)",
+]
 ```
 
-And ensure GPU tests carry the marker (the `requires_gpu = pytest.mark.skipif(...)` already skips; add `pytestmark = pytest.mark.gpu` where a whole file is GPU-only, so `-m "not gpu"` selects the host subset).
+And ensure GPU tests carry the marker (the `requires_gpu = pytest.mark.skipif(...)` already skips; add `pytestmark = pytest.mark.gpu` where a whole file is GPU-only, so `-m "not gpu"` selects the host subset). The `mi350` marker is already applied to the three deferred device tests (`test_ocp_fp8_gemm`, `test_mx_gemm_matches_reference`, and the mode-1001 test added in Task 21 Step 2); `pytest -m mi350` selects exactly the deferred suite.
 
 - [ ] **Step 4: Run the host-only subset to confirm it passes without a GPU**
 
@@ -2428,6 +2555,178 @@ Expected: PASS (import, errors, enums, convert, crosscheck, coverage, mx-helpers
 ```bash
 git add python/README.md python/pyproject.toml
 git commit -m "docs(python): add README and host-only test marker/CI notes"
+```
+
+## Phase 6 — MI350 handoff (Task 21)
+
+### Task 21: Mode-1001 pre-swizzle GEMM test + MI350 handoff doc
+
+**Files:**
+- Modify: `python/tests/test_mx.py` (add the deferred mode-1001 GEMM test)
+- Create: `docs/superpowers/handoff/2026-07-10-mi350-verification.md`
+
+**Interfaces:**
+- Consumes: everything above; `mx.swizzle_scales`, `_core.ScaleMode.BLK32_UE8M0_32_8_EXT`.
+- Produces: the third deferred device test (mode-1001 pre-swizzled scales) and a self-contained handoff document a future Claude follows on MI350 hardware.
+
+- [ ] **Step 1: Add the mode-1001 deferred GEMM test**
+
+Append to `python/tests/test_mx.py`:
+
+```python
+@pytest.mark.mi350
+@requires_gpu
+def test_mx_gemm_preswizzle_mode1001():
+    """DEFERRED to MI350 (gfx950). Same as test_mx_gemm_matches_reference but with
+    A_SCALE_MODE=BLK32_UE8M0_32_8_EXT (1001) and PRE-SWIZZLED scale tensors
+    (mx.swizzle_scales). Reference still uses canonical scales. Skips on gfx942.
+    """
+    pytest.importorskip("ml_dtypes")
+    import ml_dtypes
+    m = n = k = 128
+    A = np.random.rand(m, k).astype(np.float32)
+    B = np.random.rand(k, n).astype(np.float32)
+    a_scales, a_scaled = mx.build_block_scales(A, block=32)
+    b_scales, b_scaled = mx.build_block_scales(B, block=32)
+    ref = mx.apply_block_scales(a_scaled, a_scales) @ mx.apply_block_scales(b_scaled, b_scales)
+    try:
+        a_fp8 = a_scaled.astype(ml_dtypes.float8_e4m3fn)
+        b_fp8 = b_scaled.astype(ml_dtypes.float8_e4m3fn)
+        # VERIFY-ON-MI350: pre-swizzle the canonical scales for mode 1001. The
+        # swizzle permutation (mx.swizzle_scales) is only roundtrip-verified on
+        # gfx942; correctness of the forward layout is confirmed here on MI350.
+        a_sw = mx.swizzle_scales(a_scales, tile=(32, 8, 4))
+        b_sw = mx.swizzle_scales(b_scales, tile=(32, 8, 4))
+        with c.Handle() as h:
+            desc = c.MatmulDesc(c.ComputeType.COMPUTE_32F, c.DataType.R_32F)
+            dA = c.DeviceArray.from_numpy(np.ascontiguousarray(a_fp8.T), c.DataType.R_8F_E4M3)
+            dB = c.DeviceArray.from_numpy(np.ascontiguousarray(b_fp8.T), c.DataType.R_8F_E4M3)
+            dsa = c.DeviceArray.from_numpy(np.ascontiguousarray(a_sw), c.DataType.R_8I)
+            dsb = c.DeviceArray.from_numpy(np.ascontiguousarray(b_sw), c.DataType.R_8I)
+            dC = c.DeviceArray.from_numpy(np.zeros((n, m), np.float32), c.DataType.R_32F)
+            dD = c.DeviceArray.from_numpy(np.zeros((n, m), np.float32), c.DataType.R_32F)
+            la = c.MatrixLayout(c.DataType.R_8F_E4M3, m, k, m)
+            lb = c.MatrixLayout(c.DataType.R_8F_E4M3, k, n, k)
+            lc = c.MatrixLayout(c.DataType.R_32F, m, n, m)
+            ld = c.MatrixLayout(c.DataType.R_32F, m, n, m)
+            desc.set_attribute_int(c.MatmulDescAttr.A_SCALE_MODE, int(c.ScaleMode.BLK32_UE8M0_32_8_EXT))
+            desc.set_attribute_int(c.MatmulDescAttr.B_SCALE_MODE, int(c.ScaleMode.BLK32_UE8M0_32_8_EXT))
+            desc.set_attribute_ptr(c.MatmulDescAttr.A_SCALE_POINTER, dsa.ptr)
+            desc.set_attribute_ptr(c.MatmulDescAttr.B_SCALE_POINTER, dsb.ptr)
+            pref = c.Preference(); pref.set_max_workspace(64 * 1024 * 1024)
+            res = c.heuristic(h, desc, la, lb, lc, ld, pref, 16)
+            ws = c.DeviceArray.from_numpy(np.zeros(max(1, res[0].workspace_size), np.uint8), c.DataType.R_8I)
+            c.matmul(h, desc, 1.0, dA, la, dB, lb, 0.0, dC, lc, dD, ld, res[0].algo, ws)
+            out = dD.to_numpy().reshape(n, m).T
+            np.testing.assert_allclose(out, ref, rtol=0.15, atol=0.15)
+    except c.HipblasLtError as e:
+        if "NOT_SUPPORTED" in str(e):
+            pytest.skip(f"mode-1001 pre-swizzle unsupported on this arch: {e}")
+        raise
+```
+
+- [ ] **Step 2: Run (skips on this host)**
+
+Run: `cd python && python -m pytest tests/test_mx.py -m mi350 -v`
+Expected: all `mi350` tests SKIP with NOT_SUPPORTED on gfx942. Also run `python -m pytest tests/test_mx.py -m "not mi350" -v` and expect the helper tests to PASS.
+
+- [ ] **Step 3: Write `docs/superpowers/handoff/2026-07-10-mi350-verification.md`**
+
+```markdown
+# MI350 (gfx950) Verification Handoff — hipBLASLt Python Interface
+
+**Audience:** a Claude instance (or engineer) that has checked out branch
+`users/talumbau/python-interface` on a **gfx950 / MI350** host, tasked with
+verifying the device paths that could NOT be tested on the gfx942 dev host.
+
+## Context
+
+The `hipblaslt` Python package (under `python/`) was implemented and tested on a
+gfx942 / MI300 host. Everything runs there EXCEPT three device-GEMM correctness
+paths that require gfx950 / MI350. Those were written full best-effort,
+cross-referenced against the C++ sources, and marked `@pytest.mark.mi350`. They
+skip on gfx942 (via `NOT_SUPPORTED` → `pytest.skip`) and must be confirmed here.
+
+Read first: `docs/superpowers/specs/2026-07-10-python-interface-design.md`
+(design) and `docs/superpowers/plans/2026-07-10-python-interface.md` (plan).
+
+## Step 1: Build and sanity-check
+
+```bash
+cd projects/hipblaslt
+invoke build -ca gfx950 --python          # or your usual arch flags + --python
+cd python
+python -c "import hipblaslt; print(hipblaslt._core.hip_available())"   # -> True
+python -m pytest tests/ -m "not mi350" -v  # full non-deferred suite must pass
+```
+
+If the non-deferred suite does not pass on MI350, STOP — that is a regression
+unrelated to the deferred work; investigate before touching the mi350 tests.
+
+## Step 2: Run the deferred suite
+
+```bash
+python -m pytest tests/ -m mi350 -v
+```
+
+The three deferred tests:
+
+| Test | File | What it verifies |
+|------|------|------------------|
+| `test_ocp_fp8_gemm` | `tests/test_fp8_gemm.py` | OCP E4M3 fp8 GEMM correctness vs numpy f32 reference |
+| `test_mx_gemm_matches_reference` | `tests/test_mx.py` | MX GEMM, `A/B_SCALE_MODE=VEC32_UE8M0`, canonical UE8M0 scales |
+| `test_mx_gemm_preswizzle_mode1001` | `tests/test_mx.py` | MX GEMM, `BLK32_UE8M0_32_8_EXT` (1001), PRE-SWIZZLED scales |
+
+Expected on MI350: they no longer skip. Each either PASSES or reveals a real
+issue (see below).
+
+## Step 3: What is most likely wrong (search for `VERIFY-ON-MI350`)
+
+Grep the tree for the flag: `grep -rn "VERIFY-ON-MI350" python/`. The high-risk
+spots, in priority order:
+
+1. **The swizzle permutation** — `python/hipblaslt/mx.py::swizzle_scales`. Only
+   the roundtrip (swizzle→unswizzle) was verified on gfx942; whether the FORWARD
+   layout matches what the gfx950 subtile kernel reads is unverified. Ground
+   truth: `tensilelite/client/src/DataInitialization.cpp` `generateMXInput`
+   (~lines 1977–2016), `preSwizzleTile = {tileMN, tileK, subTileK} = {32, 8, 4}`.
+   If `test_mx_gemm_preswizzle_mode1001` fails but the canonical MX test passes,
+   the permutation is the culprit — re-derive it from the C++ and update
+   `swizzle_scales` (and its inverse). The roundtrip test guards the inverse.
+
+2. **Scale-tensor layout / transpose for `VEC32_UE8M0`** — in
+   `test_mx_gemm_matches_reference` the `dsa`/`dsb` scale tensors are uploaded
+   transposed to match the element tensors; the exact orientation the kernel
+   expects is unverified. If numbers are wrong but structurally close, try the
+   non-transposed scale layout and adjust `MatrixLayout`/stride accordingly.
+
+3. **fp8 element layout for OCP GEMM** — `test_ocp_fp8_gemm` reuses the f32 GEMM
+   transpose convention. Confirm the column-major handling holds for 8-bit
+   elements (leading dimensions are in elements, not bytes).
+
+4. **Tolerances** — the deferred tests use `rtol/atol = 0.1–0.15`. If a test
+   passes only with a much looser tolerance, that itself is a finding: note the
+   achievable tolerance rather than loosening silently.
+
+## Step 4: Record results
+
+For each deferred test, record in the PR / a follow-up commit: PASS, or the
+specific divergence (which elements, what tolerance, suspected cause). If a path
+is genuinely unsupported even on this MI350 build/ROCm version, convert the test
+to `xfail(reason=...)` with the ROCm version, rather than deleting it.
+
+## Ground-truth references
+
+- Scale-mode enum + "Not supported yet" notes: `library/include/hipblaslt/hipblaslt.h` (`hipblasLtMatmulMatrixScale_t`).
+- Swizzle layout: `tensilelite/client/src/DataInitialization.cpp` (`generateMXInput`, ~1977–2016; arch gate at ~964; canonical-reference invariant at ~2056).
+- fp8 element types + host converters: `library/include/hipblaslt/hipblaslt_float8.h`.
+```
+
+- [ ] **Step 4: Commit**
+
+```bash
+git add python/tests/test_mx.py docs/superpowers/handoff/2026-07-10-mi350-verification.md
+git commit -m "test(python): add mode-1001 deferred test + MI350 verification handoff"
 ```
 
 ---
@@ -2446,8 +2745,9 @@ git commit -m "docs(python): add README and host-only test marker/CI notes"
 - fp8 five element types + ml_dtypes host repr + ground-truth converters + cross-check → Tasks 14–16 ✓
 - MX block scaling (build/apply/swizzle, canonical reference, arch-gate) → Task 17 ✓
 - Error handling (status→exception, boundary validation, workspace, owned lifetime) → Tasks 3, 10, 12 ✓
-- Testing (surface coverage, numerical, cross-check, known-bugs xfail, GPU-gated) → Tasks 13, 16, 18, 20 ✓
+- Testing (surface coverage, numerical, cross-check, known-bugs xfail, GPU-gated) → Tasks 13, 13b, 16, 18, 20 ✓
+- gfx942/gfx950 boundary + MI350 handoff (deferred device GEMMs, `mi350` marker, handoff doc) → Tasks 13b, 17, 20, 21 ✓
 
-**Placeholder scan:** The MX device GEMM (Task 17 Step 5) and the DLPack borrow-vs-copy detail (Task 9) are explicitly hardware-dependent and flagged as implementer-completed-on-hardware, not silent TBDs — each has a working, tested fallback (helpers tested on any host; f32 DLPack path tested). Acceptable and called out.
+**Placeholder scan:** The three deferred device GEMMs (OCP fp8 — Task 13b; MX `VEC32_UE8M0` — Task 17; mode-1001 pre-swizzle — Task 21) are written in FULL, not stubbed — each is a complete, runnable test that skips on gfx942 via `NOT_SUPPORTED` and activates on MI350, with `# VERIFY-ON-MI350:` flags at the uncertain spots and a handoff doc (Task 21) explaining what to check. The DLPack borrow-vs-copy detail (Task 9) is hardware-flagged with a tested f32 fallback. No silent TBDs. Note: the earlier "Task 17 Step 5 pytest.skip placeholder" was replaced by the full deferred test in this revision.
 
 **Type consistency:** `_core.matmul`/`_core.heuristic` argument names and order match between Tasks 11, 12, 13, 19. `DataType`/`ComputeType`/`Epilogue`/`ScaleMode`/`MatmulDescAttr` names consistent across enums.cpp (Task 4) and all consumers. `from_numpy` (Python, Task 10) vs `_core.DeviceArray.from_numpy` (C++, Task 8) distinction is intentional and consistently applied. `_DTYPE_TO_NP`/`_NP_TO_DTYPE` defined in Tasks 8/14, consumed in 19. `HeuristicResult.workspace_size`/`.waves_count`/`.algo.index` consistent (Tasks 11, 12, 13, 19).
