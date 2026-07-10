@@ -286,13 +286,13 @@ jobs:
           mapfile -t OBJECTS < <(find "${OBJECTS_DIR}/lib" -type f -name '*.so*' 2>/dev/null | sort)
           mapfile -t PROFRAW_FILES < <(find "${PROFRAW_DIR}" -type f -name '*.profraw' 2>/dev/null | sort)
 
-          # Nothing to report when a build produced no profraw (e.g. a GPU family
-          # whose machines run only host-side tests that never exercise the
-          # instrumented library) or no instrumented object was staged. Treat as a
-          # clean no-op so one family's absence of data does not fail CI.
+          # A coverage job must produce profraw and stage an instrumented object.
+          # If either is missing there is no coverage to report, which means the
+          # run is broken - fail rather than silently producing nothing (review:
+          # reboss).
           if [[ ${#PROFRAW_FILES[@]} -eq 0 || ${#OBJECTS[@]} -eq 0 ]]; then
-            echo "No profraw (${#PROFRAW_FILES[@]}) or instrumented object (${#OBJECTS[@]}); skipping report."
-            exit 0
+            echo "No profraw (${#PROFRAW_FILES[@]}) or instrumented object (${#OBJECTS[@]}); failing."
+            exit 1
           fi
 
           OBJ_ARGS=()
@@ -372,7 +372,9 @@ jobs:
           cat "${LINKS_FILE}"
 
       - name: Upload coverage report
-        if: ${{ always() }}
+        # Only upload when the report generated successfully; an always() here
+        # could publish a partial/empty report after a failure (review: reboss).
+        if: ${{ success() }}
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
           name: ${{ env.REPORT_ARTIFACT }}
