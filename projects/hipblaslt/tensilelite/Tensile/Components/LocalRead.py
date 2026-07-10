@@ -169,6 +169,7 @@ class LocalReadMFMA(LocalRead):
         """
         MXS fold-M: when MIWaveTile//VectorWidth==2, LRA covers the full M span in one
         ds_load and LocalRead skips the vIdx M-step. Return permute layout info, or None.
+        Partner permute uses ds_bpermute abs addr nIdx*4 and nIdx*4+partnerAddrDelta for all VW.
         """
         if "MXS" not in tc:
             return None
@@ -180,19 +181,6 @@ class LocalReadMFMA(LocalRead):
         matrixInstT = kernel["MatrixInstM"] if (tile01 == 0) else kernel["MatrixInstN"]
         bpr = 4
         halfSpan = matrixInstT
-        halfWaveBytes = halfSpan * bpr
-        # VW=2 fold-M (e.g. wt4_vw2.yaml: MIWaveTile=4, VWA=2): partner permute
-        #   ds_bpermute abs addr: nIdx*4 and nIdx*4+64 (sp3_mi400 §9.5.2).
-        #   v2/v3 from v0/v1@relHigh; v0/v1 from v0/v1@relLow.
-        # VW>=4 fold-M (wt8_vw4, wt16_vw8, ...): stock vIdx1 = MIWaveGroupShape*mxUnit bytes;
-        #   ds_bpermute abs addr nIdx*4 and nIdx*4+partnerAddrDelta (partner +16 lanes).
-        # VW=1 fold-M: nIdx relBase + static offsets {0,64}.
-        if vectorWidth == 2:
-            permuteVariant = "wt4_vw2"
-        elif vectorWidth >= 4:
-            permuteVariant = "abs_perm"
-        else:
-            permuteVariant = "nidx"
         mxTc = tc[3]
         mxUnit = kernel["MatrixInstK"] // kernel["ProblemType"]["MXBlock%s" % mxTc]
         miWaveGroupShape = (
@@ -207,71 +195,15 @@ class LocalReadMFMA(LocalRead):
             "halfSpan": halfSpan,
             "halfSpanMask": halfSpan - 1,
             "bpr": bpr,
-            "halfWaveBytes": halfWaveBytes,
-            "baseRelShift": (vectorWidth * bpr).bit_length() - 1,
-            "permuteVariant": permuteVariant,
             "partnerAddrDelta": partnerAddrDelta,
             "stockHiOffset": stockHiOffset,
         }
 
-    @staticmethod
-    def getMxsFoldMPermuteOffset(permIdx, foldInfo):
+    def emitMxsFoldMPermute(self, writer, kernel, tP, module, tc, bufferIdx, iui, valuiIdx, foldInfo):
         """
-        nIdx variant only: relBase=nIdx*(VW*4) + static offset. VW=1: {0,64}; VW=2: {0,4,128,132}.
-        """
-        vectorWidth = foldInfo["vectorWidth"]
-        bpr = foldInfo["bpr"]
-        halfSpan = foldInfo["halfSpan"]
-        lroBytes = vectorWidth * bpr
-        group = permIdx // vectorWidth
-        inGroup = permIdx % vectorWidth
-        return group * halfSpan * lroBytes + inGroup * bpr
-
-    def emitMxsFoldMWt4Vw2Permute(self, writer, kernel, tP, module, tc, bufferIdx, iui, valuiIdx, foldInfo):
-        """
-        MIWaveTile//VW==2 and VW==2 fold-M partner permute (wt4_vw2.yaml).
-        After 1x ds_load_b64 @0 with lro=wtid*8, gather partner lane data to match
-        stock 2x ds_load @0/@128 (codeA). ds_bpermute addr is absolute byte offset:
-        relLow=nIdx*4, relHigh=nIdx*4+64 (sp3_mi400 DS_BPERMUTE_B32).
-        """
-        ldsMemToken, ldsMemTokenIdx = self._getLdsReadMemToken(writer, kernel, tP)
-        halfSpanMask = foldInfo["halfSpanMask"]
-
-        vNIdx = writer.vgprPool.checkOut(1, "mxs foldM nIdx")
-        vRelLow = writer.vgprPool.checkOut(1, "mxs foldM relLow")
-        vRelHigh = writer.vgprPool.checkOut(1, "mxs foldM relHigh")
-
-        srcV0 = vgpr("Valu%s_X%u_I%u+%u" % (tc, bufferIdx, iui, valuiIdx))
-        srcV1 = vgpr("Valu%s_X%u_I%u+%u" % (tc, bufferIdx, iui, valuiIdx + 1))
-
-        module.addComment1("MXS VW=2 fold-M partner permute: addr=nIdx*4, addrHigh=nIdx*4+64 (ds_bpermute abs)")
-        module.add(SWaitCnt(dscnt=0, comment="drain MXS ds_load before cross-lane bpermute"))
-        module.add(VAndB32(dst=vgpr(vNIdx), src0=halfSpanMask, src1=vgpr("Serial"), comment="nIdx = wtid %% %u" % foldInfo["halfSpan"]))
-        module.add(VLShiftLeftB32(dst=vgpr(vRelLow), shiftHex=2, src=vgpr(vNIdx), comment="addr = nIdx * 4"))
-        module.add(VAddU32(dst=vgpr(vRelHigh), src0=vgpr(vRelLow), src1=64, comment="addrHigh = nIdx * 4 + 64"))
-
-        permutePlan = (
-            (2, srcV0, vRelHigh),
-            (3, srcV1, vRelHigh),
-            (0, srcV0, vRelLow),
-            (1, srcV1, vRelLow),
-        )
-        for permIdx, srcVgpr, relVgpr in permutePlan:
-            dstVgpr = vgpr("Valu%s_X%u_I%u+%u" % (tc, bufferIdx, iui, valuiIdx + permIdx))
-            perm = DSBPermuteB32(dst=dstVgpr, src0=vgpr(relVgpr), src1=srcVgpr,
-                                 comment="%s partner permute v%u sync LDS%u" % (tc, permIdx, ldsMemTokenIdx))
-            perm.setMemToken(ldsMemToken)
-            module.add(perm)
-
-        writer.vgprPool.checkIn(vNIdx)
-        writer.vgprPool.checkIn(vRelLow)
-        writer.vgprPool.checkIn(vRelHigh)
-
-    def emitMxsFoldMAbsPermute(self, writer, kernel, tP, module, tc, bufferIdx, iui, valuiIdx, foldInfo):
-        """
-        MIWaveTile//VW==2 and VW>=4 fold-M partner permute (wt8_vw4, wt16_vw8, ...).
-        After fold ds_load(s) with lro=wtid*(VW*4), gather partner lane data to match
-        stock 2x ds_load @0/@stockHiOffset. ds_bpermute abs addr: nIdx*4, nIdx*4+partnerAddrDelta.
+        Re-distribute a folded MXS ds_load into MIWaveTile WMMA scale registers via ds_bpermute.
+        All VectorWidth use the same partner permute: abs addr nIdx*4 (vIdx=0) and
+        nIdx*4+partnerAddrDelta (vIdx=1), with src v[k] for each dword k in [0, VW).
         """
         ldsMemToken, ldsMemTokenIdx = self._getLdsReadMemToken(writer, kernel, tP)
         halfSpanMask = foldInfo["halfSpanMask"]
@@ -314,62 +246,6 @@ class LocalReadMFMA(LocalRead):
         writer.vgprPool.checkIn(vNIdx)
         writer.vgprPool.checkIn(vRelLow)
         writer.vgprPool.checkIn(vRelHigh)
-
-    def emitMxsFoldMPermute(self, writer, kernel, tP, module, tc, bufferIdx, iui, valuiIdx, foldInfo):
-        """
-        Re-distribute a folded MXS ds_load into MIWaveTile WMMA scale registers via ds_bpermute.
-        VW=2 fold-M uses nIdx*4 abs ds_bpermute addr; VW=1 fold-M uses nIdx relBase + static offsets.
-        """
-        if foldInfo.get("permuteVariant") == "wt4_vw2":
-            self.emitMxsFoldMWt4Vw2Permute(writer, kernel, tP, module, tc, bufferIdx, iui, valuiIdx, foldInfo)
-            return
-        if foldInfo.get("permuteVariant") == "abs_perm":
-            self.emitMxsFoldMAbsPermute(writer, kernel, tP, module, tc, bufferIdx, iui, valuiIdx, foldInfo)
-            return
-
-        ldsMemToken, ldsMemTokenIdx = self._getLdsReadMemToken(writer, kernel, tP)
-        numPermutes = foldInfo["numPermutes"]
-        halfSpan = foldInfo["halfSpan"]
-        halfSpanMask = foldInfo["halfSpanMask"]
-        vectorWidth = foldInfo["vectorWidth"]
-        lroBytes = vectorWidth * foldInfo["bpr"]
-        baseRelShift = foldInfo["baseRelShift"]
-
-        vWtid = writer.vgprPool.checkOut(1, "mxs foldM wtid")
-        vNIdx = writer.vgprPool.checkOut(1, "mxs foldM nIdx")
-        vRelBase = writer.vgprPool.checkOut(1, "mxs foldM relBase")
-        vRelOffs = [writer.vgprPool.checkOut(1, "mxs foldM relOff%u" % i) for i in range(max(0, numPermutes - 1))]
-
-        srcVgpr = vgpr("Valu%s_X%u_I%u+%u" % (tc, bufferIdx, iui, valuiIdx))
-
-        module.addComment1("MXS VW=%u fold-M: %u permutes (nIdx=wtid%%%u)" % (
-            vectorWidth, numPermutes, halfSpan))
-        module.add(VAndB32(dst=vgpr(vWtid), src0=kernel["WavefrontSize"] - 1, src1=vgpr("Serial"), comment="wtid"))
-        module.add(VAndB32(dst=vgpr(vNIdx), src0=halfSpanMask, src1=vgpr(vWtid), comment="nIdx = wtid %% %u" % halfSpan))
-        module.add(VLShiftLeftB32(dst=vgpr(vRelBase), shiftHex=baseRelShift, src=vgpr(vNIdx),
-                                  comment="relBase = nIdx * %u" % lroBytes))
-
-        relOffIdx = 0
-        for permIdx in range(numPermutes - 1, -1, -1):
-            relOffset = self.getMxsFoldMPermuteOffset(permIdx, foldInfo)
-            if relOffset == 0:
-                relVgpr = vgpr(vRelBase)
-            else:
-                module.add(VAddU32(dst=vgpr(vRelOffs[relOffIdx]), src0=vgpr(vRelBase), src1=relOffset,
-                                   comment="relBase + %u" % relOffset))
-                relVgpr = vgpr(vRelOffs[relOffIdx])
-                relOffIdx += 1
-            dstVgpr = vgpr("Valu%s_X%u_I%u+%u" % (tc, bufferIdx, iui, valuiIdx + permIdx))
-            perm = DSBPermuteB32(dst=dstVgpr, src0=relVgpr, src1=srcVgpr,
-                                 comment="%s permute v%u sync LDS%u" % (tc, permIdx, ldsMemTokenIdx))
-            perm.setMemToken(ldsMemToken)
-            module.add(perm)
-
-        writer.vgprPool.checkIn(vWtid)
-        writer.vgprPool.checkIn(vNIdx)
-        writer.vgprPool.checkIn(vRelBase)
-        for v in vRelOffs:
-            writer.vgprPool.checkIn(v)
 
     # Vreg Value layout (assuming MIInputPerThread = 8)
     # (1) local read dst
