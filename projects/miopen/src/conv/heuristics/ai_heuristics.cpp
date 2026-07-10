@@ -188,6 +188,31 @@ MIOPEN_INTERNALS_EXPORT std::vector<float> EngineeredConvFeatures(std::size_t N,
         features.push_back(static_cast<float>(safe_log1p(static_cast<double>(D_in))));
     return features;
 }
+
+MIOPEN_INTERNALS_EXPORT std::size_t EngineeredConvFeatureCount(int spatial_dim)
+{
+    // Single source of truth: construct the vector with placeholder dimensions and report its
+    // length, so the count tracks EngineeredConvFeatures automatically if features are added or
+    // removed. The placeholders (all 1) only exercise the fixed-length branch; the values are
+    // discarded. spatial_dim selects the 2D (18) vs 3D (19) length.
+    return EngineeredConvFeatures(/*N=*/1,
+                                  /*C_in=*/1,
+                                  /*C_out=*/1,
+                                  /*H_in=*/1,
+                                  /*W_in=*/1,
+                                  /*H_out=*/1,
+                                  /*W_out=*/1,
+                                  /*K_h=*/1,
+                                  /*K_w=*/1,
+                                  /*groups=*/1,
+                                  /*num_cu=*/1,
+                                  ConvDirection::Forward,
+                                  spatial_dim,
+                                  /*D_in=*/1,
+                                  /*D_out=*/1,
+                                  /*K_d=*/1)
+        .size();
+}
 } // namespace common
 
 #if MIOPEN_ENABLE_AI_IMMED_MODE_FALLBACK

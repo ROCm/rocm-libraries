@@ -426,7 +426,9 @@ size_t MetadataND::GetEngineeredNumInputs() const
         if(!IsTunaNetCategoricalFeature(feature))
             ++count;
     }
-    count += (spatial_dim == 3) ? 19 : 18;
+    // Derived from common::EngineeredConvFeatures (18 for 2D, 19 for 3D) rather than hardcoded,
+    // so this stays in lockstep if that feature block changes.
+    count += common::EngineeredConvFeatureCount(spatial_dim);
     return count;
 }
 

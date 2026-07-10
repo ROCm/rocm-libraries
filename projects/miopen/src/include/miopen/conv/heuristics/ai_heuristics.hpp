@@ -96,6 +96,11 @@ MIOPEN_INTERNALS_EXPORT std::vector<float> EngineeredConvFeatures(std::size_t N,
                                                                   std::size_t D_out = 1,
                                                                   std::size_t K_d   = 1);
 
+// Number of features EngineeredConvFeatures() emits for the given spatial dim (18 for 2D, 19 for
+// 3D). Derived from EngineeredConvFeatures itself so the count cannot drift from the vector it
+// describes; use this instead of hardcoding the size. Defined in ai_heuristics.cpp.
+MIOPEN_INTERNALS_EXPORT std::size_t EngineeredConvFeatureCount(int spatial_dim = 2);
+
 /**
  * @brief Load JSON from file path
  * @param path File system path to JSON file
