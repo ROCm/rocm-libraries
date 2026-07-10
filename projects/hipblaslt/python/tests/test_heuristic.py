@@ -1,6 +1,5 @@
 # Copyright Advanced Micro Devices, Inc., or its affiliates.
 # SPDX-License-Identifier: MIT
-import numpy as np
 import pytest
 import hipblaslt
 c = hipblaslt._core
