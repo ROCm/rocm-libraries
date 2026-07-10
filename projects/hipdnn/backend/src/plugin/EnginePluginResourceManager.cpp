@@ -90,25 +90,29 @@ bool readIsRaggedTensorEnabled(const GraphDescriptor& graphDesc)
     return graphDesc.isRaggedTensorEnabled();
 }
 
-const hipdnn_data_sdk::utilities::Version&
-    computeMinimumPluginApiVersion(bool isOverrideShapeEnabled, bool isRaggedTensorEnabled)
+// The minimum plugin API version required to serve a graph is the maximum of the
+// baseline version and the version required by each enabled feature. Taking a max
+// (rather than an ordered if-chain that returns the first matching feature) keeps
+// the result correct regardless of the relative ordering of the per-feature
+// version constants and composes cleanly when several features are enabled at
+// once.
+hipdnn_data_sdk::utilities::Version computeMinimumPluginApiVersion(bool isOverrideShapeEnabled,
+                                                                   bool isRaggedTensorEnabled)
 {
-    static const hipdnn_data_sdk::utilities::Version s_baselineVersion{
-        hipdnn_plugin_sdk::K_ENGINE_PLUGIN_API_VERSION_BASELINE};
-    static const hipdnn_data_sdk::utilities::Version s_overrideExecuteMinVersion{
-        hipdnn_plugin_sdk::K_OVERRIDE_EXECUTE_MIN_API_VERSION};
-    static const hipdnn_data_sdk::utilities::Version s_raggedTensorMinVersion{
-        hipdnn_plugin_sdk::K_RAGGED_TENSOR_MIN_API_VERSION};
+    using hipdnn_data_sdk::utilities::Version;
 
-    if(isRaggedTensorEnabled)
-    {
-        return s_raggedTensorMinVersion;
-    }
+    Version version{hipdnn_plugin_sdk::K_ENGINE_PLUGIN_API_VERSION_BASELINE};
+
     if(isOverrideShapeEnabled)
     {
-        return s_overrideExecuteMinVersion;
+        version = std::max(version, Version{hipdnn_plugin_sdk::K_OVERRIDE_EXECUTE_MIN_API_VERSION});
     }
-    return s_baselineVersion;
+    if(isRaggedTensorEnabled)
+    {
+        version = std::max(version, Version{hipdnn_plugin_sdk::K_RAGGED_TENSOR_MIN_API_VERSION});
+    }
+
+    return version;
 }
 
 } // namespace
@@ -364,7 +368,7 @@ std::vector<int64_t>
     // override-execute SDK surface. Older explicit API versions are skipped.
     const bool isOverrideShapeEnabled = readIsOverrideShapeEnabled(*graphDesc);
     const bool isRaggedTensorEnabled = readIsRaggedTensorEnabled(*graphDesc);
-    const auto& requiredVersion
+    const auto requiredVersion
         = computeMinimumPluginApiVersion(isOverrideShapeEnabled, isRaggedTensorEnabled);
 
     std::vector<int64_t> engineIds;

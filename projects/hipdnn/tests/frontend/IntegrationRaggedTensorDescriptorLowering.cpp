@@ -1,6 +1,7 @@
 // Copyright © Advanced Micro Devices, Inc., or its affiliates.
 // SPDX-License-Identifier: MIT
 
+#include <algorithm>
 #include <gtest/gtest.h>
 #include <hip/hip_runtime.h>
 #include <memory>
@@ -89,6 +90,17 @@ TEST_F(IntegrationRaggedTensorDescriptorLowering, RaggedOffsetSetsSchemaFlagTrue
     EXPECT_TRUE(graphT.is_ragged_tensor_enabled)
         << "is_ragged_tensor_enabled must be true in the serialized schema when a "
            "tensor carries a ragged offset.";
+
+    // The primary input tensor must carry the ragged-offset link (by UID) in the
+    // serialized schema -- not merely the graph-level enabled flag.
+    const auto in0It = std::find_if(graphT.tensors.begin(),
+                                    graphT.tensors.end(),
+                                    [](const auto& t) { return t->uid == K_PW_TENSOR_IN0_UID; });
+    ASSERT_NE(in0It, graphT.tensors.end()) << "input tensor IN0 missing from serialized graph";
+    ASSERT_TRUE((*in0It)->ragged_offset_tensor_uid.has_value())
+        << "IN0 must carry ragged_offset_tensor_uid in the serialized schema.";
+    EXPECT_EQ((*in0It)->ragged_offset_tensor_uid.value(), K_RAGGED_OFFSET_UID)
+        << "IN0's ragged_offset_tensor_uid must point at the ragged-offset aux tensor.";
 }
 
 // A graph with no ragged offsets must serialize with
@@ -104,4 +116,12 @@ TEST_F(IntegrationRaggedTensorDescriptorLowering, NonRaggedGraphSetsSchemaFlagFa
     EXPECT_FALSE(graphT.is_ragged_tensor_enabled)
         << "is_ragged_tensor_enabled must be false in the serialized schema for a "
            "graph without ragged tensors.";
+
+    // No tensor may carry a ragged-offset link in a non-ragged graph.
+    for(const auto& t : graphT.tensors)
+    {
+        EXPECT_FALSE(t->ragged_offset_tensor_uid.has_value())
+            << "tensor uid " << t->uid
+            << " unexpectedly carries ragged_offset_tensor_uid in a non-ragged graph.";
+    }
 }

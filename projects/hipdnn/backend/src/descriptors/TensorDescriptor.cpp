@@ -122,21 +122,12 @@ void TensorDescriptor::getAttribute(hipdnnBackendAttributeName_t attributeName,
                   "TensorDescriptor::getAttribute()");
         break;
     case HIPDNN_ATTR_TENSOR_RAGGED_OFFSET_DESC:
-        if(!_data.ragged_offset_tensor_uid.has_value())
-        {
-            if(elementCount != nullptr)
-            {
-                *elementCount = 0;
-            }
-            break;
-        }
-        getScalar(_data.ragged_offset_tensor_uid.value(),
-                  HIPDNN_TYPE_INT64,
-                  attributeType,
-                  requestedElementCount,
-                  elementCount,
-                  arrayOfElements,
-                  "TensorDescriptor::getAttribute()");
+        getOptionalScalar<HIPDNN_TYPE_INT64>(_data.ragged_offset_tensor_uid,
+                                             attributeType,
+                                             requestedElementCount,
+                                             elementCount,
+                                             arrayOfElements,
+                                             "TensorDescriptor::getAttribute()");
         break;
     default:
         throw HipdnnException(HIPDNN_STATUS_NOT_SUPPORTED,
@@ -209,17 +200,12 @@ void TensorDescriptor::setAttribute(hipdnnBackendAttributeName_t attributeName,
                   "TensorDescriptor::setAttribute()");
         break;
     case HIPDNN_ATTR_TENSOR_RAGGED_OFFSET_DESC:
-    {
-        int64_t uid = 0;
-        setScalar(uid,
-                  HIPDNN_TYPE_INT64,
-                  attributeType,
-                  elementCount,
-                  arrayOfElements,
-                  "TensorDescriptor::setAttribute()");
-        _data.ragged_offset_tensor_uid = uid;
+        setOptionalScalar<HIPDNN_TYPE_INT64>(_data.ragged_offset_tensor_uid,
+                                             attributeType,
+                                             elementCount,
+                                             arrayOfElements,
+                                             "TensorDescriptor::setAttribute()");
         break;
-    }
     default:
         throw HipdnnException(HIPDNN_STATUS_NOT_SUPPORTED,
                               "TensorDescriptor::setAttribute: attributeName not supported");

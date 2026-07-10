@@ -67,6 +67,7 @@
 
 #include <algorithm>
 #include <array>
+#include <iterator>
 #include <optional>
 #include <sstream>
 #include <unordered_map>
@@ -851,35 +852,27 @@ private:
         // This is intentional -- graphs can have unset graph-level data types
         // as long as individual tensors have their types set.
 
-        // Auto-detect ragged-tensor flag: set if any tensor in any node carries a ragged_offset.
-        _isRaggedTensorEnabled = false;
-        for(const auto& node : _sub_nodes)
-        {
-            for(const auto& t : node->getNodeInputTensorAttributes())
-            {
-                if(t && t->has_ragged_offset())
-                {
-                    _isRaggedTensorEnabled = true;
-                    break;
-                }
-            }
-            if(_isRaggedTensorEnabled)
-            {
-                break;
-            }
-            for(const auto& t : node->getNodeOutputTensorAttributes())
-            {
-                if(t && t->has_ragged_offset())
-                {
-                    _isRaggedTensorEnabled = true;
-                    break;
-                }
-            }
-            if(_isRaggedTensorEnabled)
-            {
-                break;
-            }
-        }
+        // Auto-detect ragged-tensor flag: set if any tensor in any node carries a
+        // ragged_offset. Collect every node's I/O tensors via INode::visit()
+        // (pre-order over the whole subtree, so nested/composite nodes are covered)
+        // and then test them all with a single any_of. The per-node accessors
+        // return owning vectors by value, so their elements are moved into
+        // allTensors rather than copied (no shared_ptr refcount churn).
+        std::vector<std::shared_ptr<TensorAttributes>> allTensors;
+        visit([&](const INode& node) {
+            auto inputs = node.getNodeInputTensorAttributes();
+            auto outputs = node.getNodeOutputTensorAttributes();
+            allTensors.insert(allTensors.end(),
+                              std::make_move_iterator(inputs.begin()),
+                              std::make_move_iterator(inputs.end()));
+            allTensors.insert(allTensors.end(),
+                              std::make_move_iterator(outputs.begin()),
+                              std::make_move_iterator(outputs.end()));
+        });
+        _isRaggedTensorEnabled
+            = std::any_of(allTensors.begin(), allTensors.end(), [](const auto& t) {
+                  return t && t->has_ragged_offset();
+              });
 
         std::unique_ptr<detail::ScopedHipdnnBackendDescriptor> desc;
         if(handle.has_value())

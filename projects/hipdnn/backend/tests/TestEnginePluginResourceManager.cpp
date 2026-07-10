@@ -2722,12 +2722,24 @@ TEST(TestEnginePluginResourceManager, NonRaggedGraphUnaffectedByRaggedVersionCon
 namespace
 {
 
+// Whether the plugin's hasOverrideExecute() capability is expected to be queried,
+// and with what result. It is only queried when the graph enables override-shape
+// and the plugin has already cleared the version gate.
+enum class OverrideExecuteQuery
+{
+    NOT_QUERIED,
+    RETURNS_FALSE,
+    RETURNS_TRUE,
+};
+
 struct RaggedApplicabilityCase
 {
     const char* name;
     bool raggedEnabled;
     std::string_view apiVersion;
     std::vector<int64_t> expectedEngineIds; // empty => plugin excluded
+    bool overrideEnabled = false;
+    OverrideExecuteQuery overrideExecuteQuery = OverrideExecuteQuery::NOT_QUERIED;
 };
 
 } // namespace
@@ -2757,11 +2769,27 @@ TEST_P(TestEnginePluginResourceManagerRaggedApplicabilityMatrix, RoutesOrRejects
         = {reinterpret_cast<const void*>("fake_graph_data"), 15};
     EXPECT_CALL(mockGraphDesc, getSerializedGraph())
         .WillOnce(::testing::Return(fakeSerializedData));
-    // The override-shape flag is read first (via getAttribute); keep it off so
-    // only the ragged-tensor gate decides applicability.
-    programOverrideFlag(mockGraphDesc, /*flag=*/false);
+    // The override-shape flag is read first (via getAttribute). Most cases keep it
+    // off so only the ragged-tensor gate decides applicability; the combined
+    // override+ragged cases turn it on to exercise the version-max composition.
+    programOverrideFlag(mockGraphDesc, testCase.overrideEnabled);
     EXPECT_CALL(mockGraphDesc, isRaggedTensorEnabled())
         .WillRepeatedly(::testing::Return(testCase.raggedEnabled));
+
+    switch(testCase.overrideExecuteQuery)
+    {
+    case OverrideExecuteQuery::NOT_QUERIED:
+        EXPECT_CALL(*plugin, hasOverrideExecute()).Times(0);
+        break;
+    case OverrideExecuteQuery::RETURNS_FALSE:
+        EXPECT_CALL(*plugin, hasOverrideExecute()).WillOnce(::testing::Return(false));
+        break;
+    case OverrideExecuteQuery::RETURNS_TRUE:
+        EXPECT_CALL(*plugin, hasOverrideExecute()).WillOnce(::testing::Return(true));
+        break;
+    default:
+        FAIL();
+    }
 
     if(!testCase.expectedEngineIds.empty())
     {
@@ -2801,5 +2829,24 @@ INSTANTIATE_TEST_SUITE_P(
         RaggedApplicabilityCase{"BaselineIncludedForNonRaggedGraph",
                                 /*raggedEnabled=*/false,
                                 hipdnn_plugin_sdk::K_ENGINE_PLUGIN_API_VERSION_BASELINE,
-                                {100}}),
+                                {100}},
+        // Combined override + ragged: the required version is the MAX of both
+        // features' minimums (ragged, 1.2.0), not whichever an if-chain checks
+        // first. An override-min (1.1.0) plugin is rejected by the version gate
+        // before its override capability is even queried.
+        RaggedApplicabilityCase{"OverrideMinExcludedForOverrideAndRaggedGraph",
+                                /*raggedEnabled=*/true,
+                                hipdnn_plugin_sdk::K_OVERRIDE_EXECUTE_MIN_API_VERSION,
+                                {},
+                                /*overrideEnabled=*/true,
+                                OverrideExecuteQuery::NOT_QUERIED},
+        // A ragged-min (1.2.0) plugin clears the version gate; with override also
+        // enabled its override capability is then queried and, being present,
+        // the plugin is included.
+        RaggedApplicabilityCase{"RaggedMinIncludedForOverrideAndRaggedGraph",
+                                /*raggedEnabled=*/true,
+                                hipdnn_plugin_sdk::K_RAGGED_TENSOR_MIN_API_VERSION,
+                                {100},
+                                /*overrideEnabled=*/true,
+                                OverrideExecuteQuery::RETURNS_TRUE}),
     [](const auto& info) { return std::string(info.param.name); });
