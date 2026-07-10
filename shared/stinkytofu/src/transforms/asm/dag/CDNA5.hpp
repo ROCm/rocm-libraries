@@ -32,6 +32,7 @@
 #include <algorithm>
 #include <cassert>
 #include <climits>
+#include <cmath>
 #include <cstdint>
 #include <map>
 #include <vector>
@@ -550,7 +551,9 @@ DAGNode* CDNA5ReadyQueue::extractForcedBarrier() {
 //  Step 1b — for each barrier, find the latest ds_read whose dest PSEUDO token matches.
 //  Step 2 & 3 — find the last WMMA in [regionStart, that ds_read] whose src VGPRs
 //               overlap the ds_read's dest VGPRs; record its 1-based index (wmmaIdx).
-//  Step 4 — threshold N = lastOverlap + (latency / wmmaIssueConfig.latency) + 1;
+//  Step 4 — threshold N = max(lastOverlap, wmmaWindowsNeeded) + latencyWmmaBudget;
+//            latencyWmmaBudget = (latency / wmmaIssueConfig.latency) + 1.
+//            wmmaWindowsNeeded is derived from matching ds_read count and DS per-WMMA cap.
 //            use dsReadDrainLatency when matchingDsLoadCount > dsReadQueueDepth(), else
 //            targetDSLoadLatency from the latest matching ds_read.
 void CDNA5ReadyQueue::computeBarrierAfterThresholds(IRList::iterator regionStart,
@@ -631,13 +634,26 @@ void CDNA5ReadyQueue::computeBarrierAfterThresholds(IRList::iterator regionStart
         const int latencyForAfterThreshold = matchingDsLoadCount > dsReadQueueDepth()
                                                  ? dsReadDrainLatency()
                                                  : (int)targetDSLoadLatency;
-        int afterThreshold = lastOverlap + (latencyForAfterThreshold / wmmaIssueConfig.latency) + 1;
+        const int latencyWmmaBudget = (latencyForAfterThreshold / wmmaIssueConfig.latency) + 1;
+        int maxDsPerWmmaWindow = dsReadPerWmma();
+        int wmmaWindowsNeeded = (matchingDsLoadCount + maxDsPerWmmaWindow - 1) / maxDsPerWmmaWindow;
+        if (matchingDsLoadCount > dsReadQueueDepth()) {
+            int stallLatency = dsReadDrainLatency();
+            float cyclePerDs = (float)stallLatency / (float)dsReadQueueDepth();
+            float cyclesNeeded = cyclePerDs * (matchingDsLoadCount - dsReadQueueDepth());
+            int wmmaNeeded = (int)std::ceil(cyclesNeeded / (float)wmmaIssueConfig.latency);
+            wmmaWindowsNeeded += wmmaNeeded;
+        }
+        const int overlapOrWindowBase = std::max(lastOverlap, wmmaWindowsNeeded);
+        int afterThreshold = overlapOrWindowBase + latencyWmmaBudget;
         for (StinkyInstruction* barrier : group.barriers)
             barrierWmmaThresholds_[barrier] = afterThreshold;
         overlapChecks.push_back({groupBarrier, group.barriers, afterThreshold, lastOverlap});
         PASS_DEBUG(std::cerr << "[CDNA5 computeBarrierAfterThresholds] barrier=" << groupBarrier
                              << " barrierGroupSize=" << group.barriers.size() << " afterThreshold="
                              << afterThreshold << " matchingDsLoadCount=" << matchingDsLoadCount
+                             << " latencyWmmaBudget=" << latencyWmmaBudget << " wmmaWindowsNeeded="
+                             << wmmaWindowsNeeded << " overlapOrWindowBase=" << overlapOrWindowBase
                              << " lastOverlap=" << lastOverlap << "\n");
     }
 
@@ -832,8 +848,11 @@ std::unordered_map<StinkyInstruction*, int> CDNA5ReadyQueue::computeBarrierBefor
         int maxDsPerWmmaWindow = dsReadPerWmma();
         int wmmaWindowsNeeded = (dsLoadCount + maxDsPerWmmaWindow - 1) / maxDsPerWmmaWindow;
         if (dsLoadCount > dsReadQueueDepth()) {
-            wmmaWindowsNeeded =
-                (dsLoadCount + (maxDsPerWmmaWindow - 1) - 1) / (maxDsPerWmmaWindow - 1);
+            int stallLatency = dsReadDrainLatency();
+            float cyclePerDs = (float)stallLatency / (float)dsReadQueueDepth();
+            float cyclesNeeded = cyclePerDs * (dsLoadCount - dsReadQueueDepth());
+            int wmmaNeeded = (int)std::ceil(cyclesNeeded / (float)wmmaIssueConfig.latency);
+            wmmaWindowsNeeded += wmmaNeeded;
         }
         // WMMA issue count that forces the barrier early enough for all dependent ds_reads.
         // Take the latest of three constraints, then subtract from total WMMAs in the region:

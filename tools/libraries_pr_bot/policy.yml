@@ -117,13 +117,14 @@ pr:
       - .rb
       - .rs
     # A changed file is treated as a unit test if its basename matches one of
-    # these glob patterns (e.g. test_parser.py, parser_test.cpp).
+    # these glob patterns (e.g. test_parser.py, parser_test.cpp, TestParser.cpp).
     test_file_patterns:
       - 'test_*'
       - '*_test.*'
+      - 'Test*'
     # Unit tests are required for source code ANYWHERE in the repository — there
     # are NO folder-based exemptions. A test file may also live in any folder;
-    # it is recognised by its name (test_* / *_test.*), not its location.
+    # it is recognised by its name (test_* / *_test.* / Test*), not its location.
     # Doc/config files are still skipped by EXTENSION (they are simply not in
     # `code_extensions`), not by path.
     exempt_paths: []

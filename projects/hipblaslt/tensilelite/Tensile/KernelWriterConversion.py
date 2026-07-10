@@ -818,15 +818,16 @@ class KernelWriterConversion(KernelWriterBase):
       kStr += "  %s[%d] = (%s)%s[%d];%s" % (resultStr, vIdx, destTypeStr, accumStr, vIdx, self.endLine)
 
     # kStr += "  *(%s *)(arg.D+idxD) = *(%s *)%s;%s" % (storeTypeStr, storeTypeStr, resultStr, self.endLine)
+    kStr += "  %s byteOffsetD = idxD * sizeof(%s);%s" % (self.uint64Str, destTypeStr, self.endLine)
     if not self.state["ProblemType"]["GroupedGemm"]:
       kStr += "  if(batch_mode == 0) {" + self.endLine
-      kStr += "    buffer_store<%s, sizeof(%s), CacheOperation::Kind::Always>(*(%s *)%s, arg.D, idxD * sizeof(%s), 0);%s" % (storeTypeStr, storeTypeStr, storeTypeStr, resultStr, destTypeStr, self.endLine)
+      kStr += "    buffer_store<%s, sizeof(%s), CacheOperation::Kind::Always>(*(%s *)%s, arg.D, byteOffsetD, 0);%s" % (storeTypeStr, storeTypeStr, storeTypeStr, resultStr, self.endLine)
       kStr += "  } else {" + self.endLine
       kStr += "    %s *ptr = *(reinterpret_cast<%s **>(((char *)arg.D) + (8*id2)));" % (destTypeStr, destTypeStr) + self.endLine
-      kStr += "    buffer_store<%s, sizeof(%s), CacheOperation::Kind::Always>(*(%s *)%s, ptr, idxD * sizeof(%s), 0);%s" % (storeTypeStr, storeTypeStr, storeTypeStr, resultStr, destTypeStr, self.endLine)
+      kStr += "    buffer_store<%s, sizeof(%s), CacheOperation::Kind::Always>(*(%s *)%s, ptr, byteOffsetD, 0);%s" % (storeTypeStr, storeTypeStr, storeTypeStr, resultStr, self.endLine)
       kStr += "  }" + self.endLine
     else:
-      kStr += "    buffer_store<%s, sizeof(%s), CacheOperation::Kind::Always>(*(%s *)%s, arg.D, idxD * sizeof(%s), 0);%s" % (storeTypeStr, storeTypeStr, storeTypeStr, resultStr, destTypeStr, self.endLine)      
+      kStr += "    buffer_store<%s, sizeof(%s), CacheOperation::Kind::Always>(*(%s *)%s, arg.D, byteOffsetD, 0);%s" % (storeTypeStr, storeTypeStr, storeTypeStr, resultStr, self.endLine)
     ########################################
     # end
     kStr += "}%s" % self.endLine

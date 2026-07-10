@@ -8,7 +8,7 @@ GlobalParameters:
   MinimumRequiredVersion: 5.0.0
   CMakeBuildType: Release
   EnqueuesPerSync: 1
-  SyncsPerBenchmark: 1
+  SyncsPerBenchmark: 0
   NumElementsToValidate: -1
   BoundsCheck: 0
   KernelTime: True

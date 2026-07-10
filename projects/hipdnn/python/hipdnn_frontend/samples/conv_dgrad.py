@@ -86,6 +86,7 @@ def run_convolution_dgrad():
     print("\nBuilding convolution backward data operation...")
     # Perform convolution backward data (dgrad)
     dx = graph.conv_dgrad(dy, weight, conv_attributes)
+    dx.set_dim([n, c, h, w])
 
     # Mark the output tensor
     if dx:
