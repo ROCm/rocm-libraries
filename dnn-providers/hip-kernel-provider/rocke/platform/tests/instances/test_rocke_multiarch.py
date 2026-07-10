@@ -125,7 +125,7 @@ class TestArchTarget(unittest.TestCase):
         with self.assertRaises(ValueError) as ctx:
             validate_arch("gfx9999")
         self.assertIn("Unknown GPU architecture", str(ctx.exception))
-        self.assertIn("Known architecures include", str(ctx.exception))
+        self.assertIn("Known architectures include", str(ctx.exception))
 
     def test_validate_arch_valid(self):
         """`validate_arch` should not raise for known arches."""
