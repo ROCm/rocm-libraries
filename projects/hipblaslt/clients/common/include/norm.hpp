@@ -808,17 +808,14 @@ inline double bias_check_general(int64_t     M,
     }
 }
 
-// Tolerance for the magnitude-bias check (|alpha - 1|). Calibrated for the gfx942
-// native XF32 path: the in-kernel round-to-nearest keeps the bias within ~3.5e-4
-// (the round-half-up residual is largest at small K), while round-toward-zero
-// truncation gives ~7e-4, so 5e-4 (the tf32 unit roundoff 2^-11) separates them.
-// As with norm_check, an undefined (non-positive) tolerance fails, so enabling
-// bias_check on an uncalibrated compute type/output is caught, not silently skipped.
+// Tolerance for the magnitude-bias check (|alpha - 1|). For small inputs some
+// bias just from random noise is expected, but this guards against significant
+// coherent bias, which we saw when directly using the RTZ XF32 MFMA on gfx942.
 inline bool bias_check(double bias_error, hipDataType outputType, hipblasComputeType_t compute_type)
 {
     double tol = 0.0;
     if(compute_type == HIPBLAS_COMPUTE_32F_FAST_TF32 && outputType == HIP_R_32F)
-        tol = 0.0005;
+        tol = 0.00005;
 
     return tol > 0.0 && bias_error < tol;
 }

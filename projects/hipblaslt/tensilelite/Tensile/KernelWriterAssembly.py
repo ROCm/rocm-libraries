@@ -9346,12 +9346,28 @@ class KernelWriterAssembly(KernelWriter):
       imod.add(SNop(waitState=(s_nop - 1), comment=""))
 
     prevAccIdx = -1
-    # Track which operand registers have already been rounded to tf32 in this
-    # iteration so the in-place XF32 round is emitted exactly once per register
-    # (before its first MFMA use). Deduping is required for correctness here, not
-    # just perf: the round adds a half-ULP in place and lets the MFMA drop the
-    # low bits, so applying it twice would add a full ULP.
-    _xf32RoundedRegs = set()
+    # Native XF32 MFMA truncates each fp32 operand fp32->tf32 (round-toward-zero)
+    # in hardware, which is biased. We correct it by adding a half-ULP of the 13
+    # dropped mantissa bits (v_add 0x1000) to each operand register so the MFMA's
+    # own truncation rounds to nearest (unbiased). See the round emission below.
+    #
+    # To avoid WAR hazard the MFMA needs >=2 wait states between the VALU write
+    # of a VGPR and an MFMA that reads it as a source.
+    #
+    # Round-ahead-by-2: emit each operand's round group ~DELAY (2) MFMA slots
+    # AHEAD of its consuming MFMA, interleaved with the MFMA stream. The round
+    # then (a) lands >=2 ws before its consumer and (b) overlaps the execution
+    # of the two prior MFMAs on the matrix unit.
+    #
+    # _xf32RaSched is the consume-ordered list of per-MFMA round-reg groups, built
+    # by a pre-scan that mirrors the MFMA loop below exactly (same idx/str/dedup),
+    # so schedule[k] holds the registers first consumed by MFMA k. Deduping is
+    # required for correctness (not just perf): the round adds a half-ULP in place,
+    # so rounding a register twice would add a full ULP. The schedule and its
+    # position cursor are (re)built per innerUnroll pass just below, matching the
+    # loop the rounds are emitted into.
+    _xf32RoundAhead = is_mfma and roundF32XdlOperandsToTF32(kernel)
+    _xf32RaDELAY    = 2
     for iui in range(0, innerUnroll):
       if kernel["ProblemType"]["Sparse"] and not kernel["DirectToVgprSparseMetadata"]:
         iuiM_new = (iui//self.states.numReadsIterCoalescedMetadata)*self.states.numReadsIterCoalescedMetadata
@@ -9392,6 +9408,43 @@ class KernelWriterAssembly(KernelWriter):
         idxOuter_stop = kernel["MIWaveTile"][outer] - (1-idxHalfO)* outerBy2
         idxInner_stop = kernel["MIWaveTile"][inner] - (1-idxHalfI)* innerBy2
 
+      # XF32 round-ahead pre-scan walk the idxOuter/idxInner nest exactly as the
+      # MFMA loop below does and record, per MFMA in issue order, the round-reg
+      # group it is the first consumer of. Uses the same generateSrcStrForMFMA
+      # calls and the same dedup so schedule[k] holds precisely the registers
+      # MFMA k must round.
+      _xf32RaSched = []
+      _xf32RaPos   = 0
+      if _xf32RoundAhead:
+        _raSeen = set()
+        for _raOut in range(idxOuter_start, idxOuter_stop):
+          for _raIn in range(idxInner_start, idxInner_stop):
+            _rai0, _rai1 = (_raOut, _raIn) if loopSwap else (_raIn, _raOut)
+            _raIdxA = _rai0 if tPB["tile01Idx"] else _rai1
+            _raIdxB = _rai1 if tPB["tile01Idx"] else _rai0
+            _raAB = self.generateSrcStrForMFMA(kernel, tPA, innerUnroll, vregSetIdx, vgprPerInputA, m, u, iui, _raIdxA, unrollLoopIdx)
+            _raBB = self.generateSrcStrForMFMA(kernel, tPB, innerUnroll, vregSetIdx, vgprPerInputB, m, u, iui, _raIdxB, unrollLoopIdx)
+            _raGrp = []
+            for _raBase, _raN in ((_raAB, vgprPerInputA), (_raBB, vgprPerInputB)):
+              for _raRi in range(_raN):
+                _raStr = _raBase + "+%u" % _raRi
+                if _raStr in _raSeen:
+                  continue
+                _raSeen.add(_raStr)
+                _raGrp.append(_raStr)
+            _xf32RaSched.append(_raGrp)
+        # The first DELAY MFMAs have no earlier slot to overlap into, so emit
+        # their round groups up front and guarantee the >=2 ws for those few
+        # with s_nop. This also covers degenerate tiles (MIWT1x1, tail loop)
+        # with <=DELAY MFMAs total.
+        _raHead = []
+        for _raGi in range(min(_xf32RaDELAY, len(_xf32RaSched))):
+          _raHead += _xf32RaSched[_raGi]
+        for _raStr in _raHead:
+          imod.add(VAddU32(dst=vgpr(_raStr, 1), src0=hex(0x1000), src1=vgpr(_raStr, 1), comment="XF32 round-to-nearest: add half-ULP (iteration head)"))
+        if _raHead:
+          imod.add(SNop(waitState=1, comment="XF32 round: >=2 wait states before the first MFMAs read the rounded operand (gfx942 VALU-write->MFMA-Src hazard)"))
+
       for idxOuter in range(idxOuter_start, idxOuter_stop):
         for idxInner in range(idxInner_start, idxInner_stop):
           idx0 = idxInner
@@ -9409,21 +9462,19 @@ class KernelWriterAssembly(KernelWriter):
           aStr     = vgpr(aStr_base, vgprPerInputA)
           bStr     = vgpr(bStr_base, vgprPerInputB)
 
-          # Native XF32 MFMA truncates fp32->tf32 (round-toward-zero) in hardware,
-          # which is biased. Add a half-ULP of the 13 dropped mantissa bits to
-          # each fp32 operand so the MFMA's own truncation rounds to nearest
-          # (unbiased). No mask needed: the MFMA drops the low 13 bits itself, so
-          # it consumes the biased-added value directly. One VALU op per operand
-          # register, deduped to once per register per iteration.
-          if is_mfma and roundF32XdlOperandsToTF32(kernel):
-            for _baseStr, _nreg in ((aStr_base, vgprPerInputA), (bStr_base, vgprPerInputB)):
-              for _ri in range(_nreg):
-                _rstr = _baseStr + "+%u" % _ri
-                if _rstr in _xf32RoundedRegs:
-                  continue
-                _xf32RoundedRegs.add(_rstr)
+          # XF32 round-ahead-by-2 (see the pre-scan and rationale above): at MFMA
+          # sequence position _xf32RaPos, emit the round group destined to be first
+          # consumed DELAY MFMAs later, so it lands >=2 ws ahead of its consumer
+          # while overlapping the intervening MFMAs' execution. The first DELAY
+          # groups were already emitted at the iteration head; here we only emit
+          # positions [DELAY, len).
+          if _xf32RoundAhead:
+            _emitIdx = _xf32RaPos + _xf32RaDELAY
+            _xf32RaPos += 1
+            if _emitIdx < len(_xf32RaSched):
+              for _rstr in _xf32RaSched[_emitIdx]:
                 _r = vgpr(_rstr, 1)
-                imod.add(VAddU32(dst=_r, src0=hex(0x1000), src1=_r, comment="XF32 round-to-nearest: add half-ULP (MFMA truncates low 13 bits)"))
+                imod.add(VAddU32(dst=_r, src0=hex(0x1000), src1=_r, comment="XF32 RNA: add half-ULP (MFMA truncates low 13 bits)"))
 
           if not tail and tPA["bpe"] == 0.75 and kernel["enableLDSTrA"]:
             if idxInner not in shiftedIndicesA:
