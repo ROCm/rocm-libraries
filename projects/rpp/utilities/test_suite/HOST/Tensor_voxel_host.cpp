@@ -502,8 +502,10 @@ int main(int argc, char* argv[]) {
                         uint dataSize = niftiHeaderTemp[batchCount].dim[1] *
                                         niftiHeaderTemp[batchCount].dim[2] *
                                         niftiHeaderTemp[batchCount].dim[3];
-                        unsigned char* niftiDataU8 = (unsigned char*)malloc(dataSize * sizeof(unsigned char));
-                        unsigned char* outputBufferOpenCV = (unsigned char*)calloc(xyFrameSizeROI, sizeof(unsigned char));
+                        unsigned char* niftiDataU8 =
+                            (unsigned char*)malloc(dataSize * sizeof(unsigned char));
+                        unsigned char* outputBufferOpenCV =
+                            (unsigned char*)calloc(xyFrameSizeROI, sizeof(unsigned char));
 
                         // Convert RpptDataType::F32 strided buffer to default NIFTI_DATATYPE
                         // unstrided buffer
