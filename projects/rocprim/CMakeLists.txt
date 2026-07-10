@@ -274,6 +274,17 @@ if (ROCPRIM_PROJECT_IS_TOP_LEVEL)
   )
 endif()
 
+if(BUILD_CODE_COVERAGE)
+  target_compile_options(rocprim INTERFACE
+    -w
+    -fprofile-instr-generate
+    -fcoverage-mapping
+  )
+  target_link_options(rocprim INTERFACE
+    -fprofile-instr-generate
+  )
+endif()
+
 #
 # ADDITIONAL TARGETS FOR CODE COVERAGE
 #
