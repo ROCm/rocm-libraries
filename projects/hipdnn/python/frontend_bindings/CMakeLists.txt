@@ -18,7 +18,7 @@ find_package(tsl-robin-map 1.4.1 CONFIG QUIET)
 if(NOT TARGET tsl::robin_map)
     FetchContent_Declare(
         tsl_robin_map
-        URL https://rocm-third-party-deps.s3.us-east-2.amazonaws.com/robin-map-1.4.1.tar.gz
+        URL https://github.com/Tessil/robin-map/archive/refs/tags/v1.4.1.tar.gz
         URL_HASH SHA256=0e3f53a377fdcdc5f9fed7a4c0d4f99e82bbb64175233bd13427fef9a771f4a1
         DOWNLOAD_EXTRACT_TIMESTAMP TRUE
     )
@@ -30,7 +30,7 @@ find_package(nanobind 2.12.0 CONFIG QUIET)
 if(NOT COMMAND nanobind_add_module)
     FetchContent_Declare(
         nanobind
-        URL https://rocm-third-party-deps.s3.us-east-2.amazonaws.com/nanobind-2.12.0.tar.gz
+        URL https://github.com/wjakob/nanobind/archive/refs/tags/v2.12.0.tar.gz
         URL_HASH SHA256=01f1f0cd0398743c18f33d07ae36ad410bd7f4a1e90683b508504de897d6e629
         DOWNLOAD_EXTRACT_TIMESTAMP TRUE
     )
