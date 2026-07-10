@@ -412,55 +412,6 @@ protected:
     }
 };
 
-// Frontend -> schema propagation of the ragged-tensor flag (RFC 0014). When a
-// tensor carries a ragged offset, build_operation_graph() must auto-detect this
-// and set HIPDNN_ATTR_OPERATIONGRAPH_IS_RAGGED_TENSOR_ENABLED_EXT to true on the
-// backend graph descriptor.
-TEST_F(TestGraph, BuildPropagatesRaggedTensorFlagTrueToBackend)
-{
-    Graph graph;
-    createBasicBatchnormGraph(graph, /*withRaggedOffset=*/true);
-
-    // Catch-all so the many unrelated setAttribute calls (tensors, ops, other
-    // graph attributes) remain satisfied; the specific expectation below is
-    // matched first (gMock evaluates expectations in reverse order of creation).
-    EXPECT_CALL(*_mockBackend, backendSetAttribute(_, _, _, _, _))
-        .WillRepeatedly(Return(HIPDNN_STATUS_SUCCESS));
-    EXPECT_CALL(*_mockBackend,
-                backendSetAttribute(_,
-                                    HIPDNN_ATTR_OPERATIONGRAPH_IS_RAGGED_TENSOR_ENABLED_EXT,
-                                    HIPDNN_TYPE_BOOLEAN,
-                                    1,
-                                    pointsToScalar(true)))
-        .Times(AtLeast(1))
-        .WillRepeatedly(Return(HIPDNN_STATUS_SUCCESS));
-
-    EXPECT_TRUE(graph.build_operation_graph(_handle).is_good());
-}
-
-// A graph with no ragged tensors must propagate the flag as false, so engine
-// plugins are not spuriously gated on ragged-tensor support.
-TEST_F(TestGraph, BuildPropagatesRaggedTensorFlagFalseForNonRaggedGraph)
-{
-    Graph graph;
-    createBasicBatchnormGraph(graph, /*withRaggedOffset=*/false);
-
-    // Catch-all so unrelated setAttribute calls remain satisfied; the specific
-    // expectation below is matched first (gMock evaluates in reverse order).
-    EXPECT_CALL(*_mockBackend, backendSetAttribute(_, _, _, _, _))
-        .WillRepeatedly(Return(HIPDNN_STATUS_SUCCESS));
-    EXPECT_CALL(*_mockBackend,
-                backendSetAttribute(_,
-                                    HIPDNN_ATTR_OPERATIONGRAPH_IS_RAGGED_TENSOR_ENABLED_EXT,
-                                    HIPDNN_TYPE_BOOLEAN,
-                                    1,
-                                    pointsToScalar(false)))
-        .Times(AtLeast(1))
-        .WillRepeatedly(Return(HIPDNN_STATUS_SUCCESS));
-
-    EXPECT_TRUE(graph.build_operation_graph(_handle).is_good());
-}
-
 TEST_F(TestGraph, ValidateUnsetNodeComputeTypeUnsetGraphComputeType)
 {
     Graph graph;

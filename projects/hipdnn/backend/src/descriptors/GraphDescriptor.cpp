@@ -55,7 +55,6 @@ std::unique_ptr<hipdnn_flatbuffers_sdk::data_objects::GraphT>
     graph->io_data_type = _ioDataType;
     graph->preferred_engine_id = _preferredEngineId;
     graph->is_override_shape_enabled = _isOverrideShapeEnabled;
-    graph->is_ragged_tensor_enabled = _isRaggedTensorEnabled;
     graph->name = _name;
 
     std::unordered_map<int64_t, std::shared_ptr<TensorDescriptor>> seenTensors;
@@ -206,15 +205,6 @@ void GraphDescriptor::getAttribute(hipdnnBackendAttributeName_t attributeName,
                   arrayOfElements,
                   "GraphDescriptor::getAttribute()");
         break;
-    case HIPDNN_ATTR_OPERATIONGRAPH_IS_RAGGED_TENSOR_ENABLED_EXT:
-        getScalar(_isRaggedTensorEnabled,
-                  HIPDNN_TYPE_BOOLEAN,
-                  attributeType,
-                  requestedElementCount,
-                  elementCount,
-                  arrayOfElements,
-                  "GraphDescriptor::getAttribute()");
-        break;
     case HIPDNN_ATTR_OPERATIONGRAPH_NAME_EXT:
         getString(_name,
                   attributeType,
@@ -354,14 +344,6 @@ void GraphDescriptor::setAttribute(hipdnnBackendAttributeName_t attributeName,
                   arrayOfElements,
                   "GraphDescriptor::setAttribute()");
         break;
-    case HIPDNN_ATTR_OPERATIONGRAPH_IS_RAGGED_TENSOR_ENABLED_EXT:
-        setScalar(_isRaggedTensorEnabled,
-                  HIPDNN_TYPE_BOOLEAN,
-                  attributeType,
-                  elementCount,
-                  arrayOfElements,
-                  "GraphDescriptor::setAttribute()");
-        break;
     case HIPDNN_ATTR_OPERATIONGRAPH_NAME_EXT:
         setString(
             _name, attributeType, elementCount, arrayOfElements, "GraphDescriptor::setAttribute()");
@@ -402,7 +384,6 @@ void GraphDescriptor::deserializeGraph(const uint8_t* serializedGraph, size_t gr
     _ioDataType = graph->io_data_type;
     _preferredEngineId = graph->preferred_engine_id;
     _isOverrideShapeEnabled = graph->is_override_shape_enabled;
-    _isRaggedTensorEnabled = graph->is_ragged_tensor_enabled;
     _name = graph->name;
 
     // Populate _operations from the deserialized graph nodes
@@ -518,9 +499,20 @@ bool GraphDescriptor::isOverrideShapeEnabled() const
     return _isOverrideShapeEnabled;
 }
 
-bool GraphDescriptor::isRaggedTensorEnabled() const
+bool GraphDescriptor::hasRaggedTensors() const
 {
-    return _isRaggedTensorEnabled;
+    for(const auto& desc : _operations)
+    {
+        const auto* op = desc->asGraphOperation();
+        for(const auto& tensorDesc : op->getTensorDescriptors())
+        {
+            if(tensorDesc->getData().ragged_offset_tensor_uid.has_value())
+            {
+                return true;
+            }
+        }
+    }
+    return false;
 }
 
 std::string GraphDescriptor::toString() const

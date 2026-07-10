@@ -85,11 +85,6 @@ bool readIsOverrideShapeEnabled(const GraphDescriptor& graphDesc)
     return flag;
 }
 
-bool readIsRaggedTensorEnabled(const GraphDescriptor& graphDesc)
-{
-    return graphDesc.isRaggedTensorEnabled();
-}
-
 // The minimum plugin API version required to serve a graph is the maximum of the
 // baseline version and the version required by each enabled feature. Taking a max
 // (rather than an ordered if-chain that returns the first matching feature) keeps
@@ -367,7 +362,7 @@ std::vector<int64_t>
     // and graphs that opt in to overridable tensor shapes require the extended
     // override-execute SDK surface. Older explicit API versions are skipped.
     const bool isOverrideShapeEnabled = readIsOverrideShapeEnabled(*graphDesc);
-    const bool isRaggedTensorEnabled = readIsRaggedTensorEnabled(*graphDesc);
+    const bool isRaggedTensorEnabled = graphDesc->hasRaggedTensors();
     const auto requiredVersion
         = computeMinimumPluginApiVersion(isOverrideShapeEnabled, isRaggedTensorEnabled);
 

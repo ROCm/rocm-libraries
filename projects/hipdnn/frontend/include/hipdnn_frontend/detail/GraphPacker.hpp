@@ -29,7 +29,6 @@ inline Error assembleGraphDescriptor(const std::vector<ScopedHipdnnBackendDescri
                                      std::optional<hipdnnDataType_t> ioDataType,
                                      const std::optional<int64_t>& preferredEngineId,
                                      bool isOverrideShapeEnabled,
-                                     bool isRaggedTensorEnabled,
                                      const std::string& name,
                                      std::unique_ptr<ScopedHipdnnBackendDescriptor>& outGraphDesc)
 {
@@ -102,13 +101,6 @@ inline Error assembleGraphDescriptor(const std::vector<ScopedHipdnnBackendDescri
                                 isOverrideShapeEnabled,
                                 "is_override_shape_enabled on GraphDescriptor"));
 
-    HIPDNN_CHECK_ERROR(
-        setDescriptorAttrScalar(graphDesc.get(),
-                                HIPDNN_ATTR_OPERATIONGRAPH_IS_RAGGED_TENSOR_ENABLED_EXT,
-                                HIPDNN_TYPE_BOOLEAN,
-                                isRaggedTensorEnabled,
-                                "is_ragged_tensor_enabled on GraphDescriptor"));
-
     // Set graph name if non-empty
     if(!name.empty())
     {
@@ -129,7 +121,6 @@ inline Error assembleGraphDescriptor(const std::vector<ScopedHipdnnBackendDescri
                                      std::optional<hipdnnDataType_t> ioDataType,
                                      const std::optional<int64_t>& preferredEngineId,
                                      bool isOverrideShapeEnabled,
-                                     bool isRaggedTensorEnabled,
                                      const std::string& name,
                                      std::unique_ptr<ScopedHipdnnBackendDescriptor>& outGraphDesc)
 {
@@ -139,7 +130,6 @@ inline Error assembleGraphDescriptor(const std::vector<ScopedHipdnnBackendDescri
                                                ioDataType,
                                                preferredEngineId,
                                                isOverrideShapeEnabled,
-                                               isRaggedTensorEnabled,
                                                name,
                                                outGraphDesc));
 

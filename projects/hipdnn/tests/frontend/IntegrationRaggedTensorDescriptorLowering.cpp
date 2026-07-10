@@ -29,18 +29,16 @@ namespace
 // pointwise tensor UIDs.
 constexpr int64_t K_RAGGED_OFFSET_UID = 1399;
 
-// End-to-end lowering of the ragged-tensor flag (RFC 0014): builds a frontend
-// graph, lowers it through the REAL backend via
+// End-to-end lowering of ragged tensors (RFC 0014): builds a frontend graph,
+// lowers it through the REAL backend via
 // build_operation_graph_via_descriptors(), retrieves the serialized binary
-// graph, and deserializes the flatbuffer schema to assert
-// `is_ragged_tensor_enabled` was actually written into the wire image — not just
-// that the frontend issued the corresponding backend setAttribute call.
+// graph, and deserializes the flatbuffer schema to assert the per-tensor
+// ragged-offset link was actually written into the wire image.
 class IntegrationRaggedTensorDescriptorLowering : public IntegrationTestFixture
 {
 protected:
     // Builds a minimal unary pointwise (RELU) graph. When @p withRaggedOffset is
-    // true, the input tensor is given a ragged-offset aux tensor so the graph
-    // auto-detects as ragged-tensor enabled.
+    // true, the input tensor is given a ragged-offset aux tensor.
     static std::shared_ptr<TestableGraphLowering> makePointwiseGraph(bool withRaggedOffset)
     {
         auto graph = std::make_shared<TestableGraphLowering>();
@@ -77,9 +75,9 @@ protected:
 
 } // namespace
 
-// A graph whose input carries a ragged offset must serialize with
-// is_ragged_tensor_enabled = true in the flatbuffer schema.
-TEST_F(IntegrationRaggedTensorDescriptorLowering, RaggedOffsetSetsSchemaFlagTrue)
+// A graph whose input carries a ragged offset must serialize with the
+// ragged-offset link recorded on that tensor in the flatbuffer schema.
+TEST_F(IntegrationRaggedTensorDescriptorLowering, RaggedOffsetSetsTensorLinkInSchema)
 {
     auto graph = makePointwiseGraph(/*withRaggedOffset=*/true);
 
@@ -87,12 +85,9 @@ TEST_F(IntegrationRaggedTensorDescriptorLowering, RaggedOffsetSetsSchemaFlagTrue
 
     // Sanity: lowering produced a well-formed graph (in0, out0).
     ASSERT_EQ(graphT.tensors.size(), 2u);
-    EXPECT_TRUE(graphT.is_ragged_tensor_enabled)
-        << "is_ragged_tensor_enabled must be true in the serialized schema when a "
-           "tensor carries a ragged offset.";
 
     // The primary input tensor must carry the ragged-offset link (by UID) in the
-    // serialized schema -- not merely the graph-level enabled flag.
+    // serialized schema; this is the sole source of truth for ragged-ness.
     const auto in0It = std::find_if(graphT.tensors.begin(),
                                     graphT.tensors.end(),
                                     [](const auto& t) { return t->uid == K_PW_TENSOR_IN0_UID; });
@@ -103,19 +98,16 @@ TEST_F(IntegrationRaggedTensorDescriptorLowering, RaggedOffsetSetsSchemaFlagTrue
         << "IN0's ragged_offset_tensor_uid must point at the ragged-offset aux tensor.";
 }
 
-// A graph with no ragged offsets must serialize with
-// is_ragged_tensor_enabled = false (the wire default), so engine plugins are not
+// A graph with no ragged offsets must serialize with no ragged-offset link on
+// any tensor, so ragged-ness derives as false and engine plugins are not
 // spuriously gated on ragged-tensor support.
-TEST_F(IntegrationRaggedTensorDescriptorLowering, NonRaggedGraphSetsSchemaFlagFalse)
+TEST_F(IntegrationRaggedTensorDescriptorLowering, NonRaggedGraphHasNoTensorLinkInSchema)
 {
     auto graph = makePointwiseGraph(/*withRaggedOffset=*/false);
 
     auto graphT = lowerAndDeserialize(*graph, _handle);
 
     ASSERT_EQ(graphT.tensors.size(), 2u);
-    EXPECT_FALSE(graphT.is_ragged_tensor_enabled)
-        << "is_ragged_tensor_enabled must be false in the serialized schema for a "
-           "graph without ragged tensors.";
 
     // No tensor may carry a ragged-offset link in a non-ragged graph.
     for(const auto& t : graphT.tensors)

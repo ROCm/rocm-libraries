@@ -67,8 +67,6 @@ table Graph {
 	preferred_engine_id: long = null;
 	// Graph-level opt-in for execute-time override shapes.
 	is_override_shape_enabled: bool = false;
-	// Set when any tensor in the graph carries a ragged_offset; gates ragged-aware plugins.
-	is_ragged_tensor_enabled: bool = false;
 }
 
 root_type Graph;

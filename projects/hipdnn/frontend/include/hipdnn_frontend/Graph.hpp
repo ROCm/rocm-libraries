@@ -487,7 +487,6 @@ private:
     std::optional<int64_t> _preferredEngineId;
 
     bool _isOverrideShapeEnabled = false;
-    bool _isRaggedTensorEnabled = false;
 
     // Get the active plan's engine config descriptor. Throws if no active plan exists.
     // Returns a borrowed pointer; invalidated by any operation that resets _compiledPlans
@@ -852,28 +851,6 @@ private:
         // This is intentional -- graphs can have unset graph-level data types
         // as long as individual tensors have their types set.
 
-        // Auto-detect ragged-tensor flag: set if any tensor in any node carries a
-        // ragged_offset. Collect every node's I/O tensors via INode::visit()
-        // (pre-order over the whole subtree, so nested/composite nodes are covered)
-        // and then test them all with a single any_of. The per-node accessors
-        // return owning vectors by value, so their elements are moved into
-        // allTensors rather than copied (no shared_ptr refcount churn).
-        std::vector<std::shared_ptr<TensorAttributes>> allTensors;
-        visit([&](const INode& node) {
-            auto inputs = node.getNodeInputTensorAttributes();
-            auto outputs = node.getNodeOutputTensorAttributes();
-            allTensors.insert(allTensors.end(),
-                              std::make_move_iterator(inputs.begin()),
-                              std::make_move_iterator(inputs.end()));
-            allTensors.insert(allTensors.end(),
-                              std::make_move_iterator(outputs.begin()),
-                              std::make_move_iterator(outputs.end()));
-        });
-        _isRaggedTensorEnabled
-            = std::any_of(allTensors.begin(), allTensors.end(), [](const auto& t) {
-                  return t && t->has_ragged_offset();
-              });
-
         std::unique_ptr<detail::ScopedHipdnnBackendDescriptor> desc;
         if(handle.has_value())
         {
@@ -885,7 +862,6 @@ private:
                 toHipdnnDataType(graph_attributes.get_io_data_type()),
                 _preferredEngineId,
                 _isOverrideShapeEnabled,
-                _isRaggedTensorEnabled,
                 graph_attributes.get_name(),
                 desc));
             setGraphDesc(std::move(desc), true);
@@ -899,7 +875,6 @@ private:
                 toHipdnnDataType(graph_attributes.get_io_data_type()),
                 _preferredEngineId,
                 _isOverrideShapeEnabled,
-                _isRaggedTensorEnabled,
                 graph_attributes.get_name(),
                 desc));
             setGraphDesc(std::move(desc), false);

@@ -243,9 +243,6 @@ typedef enum
     /** @brief Whether execute-time override shapes are enabled for this graph (bool, extension) */
     HIPDNN_ATTR_OPERATIONGRAPH_IS_OVERRIDE_SHAPE_ENABLED_EXT = 609,
 
-    /** @brief Whether any tensor in the graph carries a ragged-offset; gates ragged-aware plugins (bool, extension) */
-    HIPDNN_ATTR_OPERATIONGRAPH_IS_RAGGED_TENSOR_ENABLED_EXT = 610,
-
     /** @} */
 
     /**

@@ -2602,7 +2602,7 @@ TEST(TestPluginBase, ParsedApiVersionReturnsParsedValueForWellFormedString)
 }
 
 // Ragged tensor version gating: a plugin at the baseline version is excluded
-// when the graph has is_ragged_tensor_enabled set, and a plugin at
+// when the graph reports ragged tensors, and a plugin at
 // K_RAGGED_TENSOR_MIN_API_VERSION is included.
 TEST(TestEnginePluginResourceManager, RaggedTensorGraphExcludesBaselinePlugin)
 {
@@ -2620,21 +2620,13 @@ TEST(TestEnginePluginResourceManager, RaggedTensorGraphExcludesBaselinePlugin)
     EXPECT_CALL(*plugin, destroyHandle(hipdnnEnginePluginHandle_t(0xdeadbeef)));
     EXPECT_CALL(*plugin, getApplicableEngineIds(_, _)).Times(0);
 
-    // Use a real MockGraphDescriptor where isRaggedTensorEnabled returns true via
-    // the base class _isRaggedTensorEnabled member, set through setAttribute.
     MockGraphDescriptor mockGraphDesc;
     const hipdnnPluginConstData_t fakeSerializedData
         = {reinterpret_cast<const void*>("fake_graph_data"), 15};
     EXPECT_CALL(mockGraphDesc, getSerializedGraph())
         .WillOnce(::testing::Return(fakeSerializedData));
     programOverrideFlag(mockGraphDesc, /*flag=*/false);
-    // Inject ragged flag via setAttribute on the real GraphDescriptor base.
-    const bool raggedFlag = true;
-    mockGraphDesc.GraphDescriptor::setAttribute(
-        HIPDNN_ATTR_OPERATIONGRAPH_IS_RAGGED_TENSOR_ENABLED_EXT,
-        HIPDNN_TYPE_BOOLEAN,
-        1,
-        &raggedFlag);
+    EXPECT_CALL(mockGraphDesc, hasRaggedTensors()).WillRepeatedly(::testing::Return(true));
 
     const EnginePluginResourceManager resourceManager(pluginManager);
     auto engineIds = resourceManager.getApplicableEngineIds(&mockGraphDesc);
@@ -2664,12 +2656,7 @@ TEST(TestEnginePluginResourceManager, RaggedTensorGraphIncludesRaggedCapablePlug
     EXPECT_CALL(mockGraphDesc, getSerializedGraph())
         .WillOnce(::testing::Return(fakeSerializedData));
     programOverrideFlag(mockGraphDesc, /*flag=*/false);
-    const bool raggedFlag = true;
-    mockGraphDesc.GraphDescriptor::setAttribute(
-        HIPDNN_ATTR_OPERATIONGRAPH_IS_RAGGED_TENSOR_ENABLED_EXT,
-        HIPDNN_TYPE_BOOLEAN,
-        1,
-        &raggedFlag);
+    EXPECT_CALL(mockGraphDesc, hasRaggedTensors()).WillRepeatedly(::testing::Return(true));
 
     const EnginePluginResourceManager resourceManager(pluginManager);
     auto engineIds = resourceManager.getApplicableEngineIds(&mockGraphDesc);
@@ -2694,7 +2681,8 @@ TEST(TestEnginePluginResourceManager, NonRaggedGraphUnaffectedByRaggedVersionCon
     EXPECT_CALL(*plugin, getApplicableEngineIds(hipdnnEnginePluginHandle_t(0xdeadbeef), _))
         .WillOnce(::testing::Return(std::vector<int64_t>{100}));
 
-    // Non-ragged graph: _isRaggedTensorEnabled defaults to false
+    // Non-ragged graph: hasRaggedTensors() defaults to the real base-class
+    // accessor, which reports false for a descriptor with no ragged tensors.
     MockGraphDescriptor mockGraphDesc;
     const hipdnnPluginConstData_t fakeSerializedData
         = {reinterpret_cast<const void*>("fake_graph_data"), 15};
@@ -2713,11 +2701,11 @@ TEST(TestEnginePluginResourceManager, NonRaggedGraphUnaffectedByRaggedVersionCon
 //
 // Mirrors the override-dispatch matrix (RoutesOrRejectsOverrideDispatch): drives
 // the version-gating logic in getApplicableEngineIds() in isolation by mocking
-// GraphDescriptor::isRaggedTensorEnabled() directly, rather than injecting the
-// flag through the real setAttribute storage (covered by the standalone tests
-// above and by TestGraphDescriptor). A graph reporting ragged tensors requires a
-// plugin advertising at least K_RAGGED_TENSOR_MIN_API_VERSION; otherwise the
-// baseline applies.
+// GraphDescriptor::hasRaggedTensors() directly, rather than building a descriptor
+// containing an actual ragged tensor (covered by the standalone tests above and
+// by TestGraphDescriptor). A graph reporting ragged tensors requires a plugin
+// advertising at least K_RAGGED_TENSOR_MIN_API_VERSION; otherwise the baseline
+// applies.
 // =============================================================================
 namespace
 {
@@ -2773,7 +2761,7 @@ TEST_P(TestEnginePluginResourceManagerRaggedApplicabilityMatrix, RoutesOrRejects
     // off so only the ragged-tensor gate decides applicability; the combined
     // override+ragged cases turn it on to exercise the version-max composition.
     programOverrideFlag(mockGraphDesc, testCase.overrideEnabled);
-    EXPECT_CALL(mockGraphDesc, isRaggedTensorEnabled())
+    EXPECT_CALL(mockGraphDesc, hasRaggedTensors())
         .WillRepeatedly(::testing::Return(testCase.raggedEnabled));
 
     switch(testCase.overrideExecuteQuery)

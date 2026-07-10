@@ -942,63 +942,45 @@ TEST_F(TestGraphDescriptor, LegacyGraphWithoutOverrideShapeFieldRoundTripsToFals
 }
 
 // ============================================================================
-// HIPDNN_ATTR_OPERATIONGRAPH_IS_RAGGED_TENSOR_ENABLED_EXT (RFC 0014)
+// GraphDescriptor::hasRaggedTensors() (RFC 0014)
 // ============================================================================
 
-TEST_F(TestGraphDescriptor, IsRaggedTensorEnabledDefaultsToFalseWhenUnset)
+TEST_F(TestGraphDescriptor, HasRaggedTensorsFalseForNonRaggedGraph)
 {
-    // A freshly-created descriptor that never had IS_RAGGED_TENSOR_ENABLED set
-    // should report false (the wire default for an absent optional bool).
-    const GraphDescriptor descriptor;
-
-    bool value = true;
-    int64_t count = 0;
-    ASSERT_NO_THROW(descriptor.getAttribute(HIPDNN_ATTR_OPERATIONGRAPH_IS_RAGGED_TENSOR_ENABLED_EXT,
-                                            HIPDNN_TYPE_BOOLEAN,
-                                            1,
-                                            &count,
-                                            &value));
-    EXPECT_FALSE(value);
-
-    // The accessor used by the engine plugin applicability filter must agree.
-    EXPECT_FALSE(descriptor.isRaggedTensorEnabled());
-}
-
-TEST_F(TestGraphDescriptor, IsRaggedTensorEnabledSetGetTrueRoundTrip)
-{
-    GraphDescriptor descriptor;
-
-    bool input = true;
-    ASSERT_NO_THROW(descriptor.setAttribute(
-        HIPDNN_ATTR_OPERATIONGRAPH_IS_RAGGED_TENSOR_ENABLED_EXT, HIPDNN_TYPE_BOOLEAN, 1, &input));
-
-    bool output = false;
-    int64_t count = 0;
-    ASSERT_NO_THROW(descriptor.getAttribute(HIPDNN_ATTR_OPERATIONGRAPH_IS_RAGGED_TENSOR_ENABLED_EXT,
-                                            HIPDNN_TYPE_BOOLEAN,
-                                            1,
-                                            &count,
-                                            &output));
-    EXPECT_TRUE(output);
-
-    // setAttribute must also be reflected by the virtual accessor that
-    // getApplicableEngineIds() reads.
-    EXPECT_TRUE(descriptor.isRaggedTensorEnabled());
-}
-
-TEST_F(TestGraphDescriptor, IsRaggedTensorEnabledTrueSurvivesSerializationRoundTrip)
-{
-    // Build a valid graph, set the ragged flag, serialize, deserialize, verify
-    // the flag is preserved as true through the flatbuffer round-trip.
     auto builder = createValidGraph();
+    auto serializedGraph = builder.Release();
+
+    GraphDescriptor descriptor;
+    descriptor.deserializeGraph(serializedGraph.data(), serializedGraph.size());
+
+    EXPECT_FALSE(descriptor.hasRaggedTensors());
+}
+
+TEST_F(TestGraphDescriptor, HasRaggedTensorsFalseForEmptyDescriptor)
+{
+    // No operations => no tensors => not ragged.
+    const GraphDescriptor descriptor;
+    EXPECT_FALSE(descriptor.hasRaggedTensors());
+}
+
+TEST_F(TestGraphDescriptor, HasRaggedTensorsTrueWhenTensorCarriesRaggedOffset)
+{
+    auto builder = test_utilities::createValidGraphWithRaggedTensor();
+    auto serializedGraph = builder.Release();
+
+    GraphDescriptor descriptor;
+    descriptor.deserializeGraph(serializedGraph.data(), serializedGraph.size());
+
+    EXPECT_TRUE(descriptor.hasRaggedTensors());
+}
+
+TEST_F(TestGraphDescriptor, HasRaggedTensorsSurvivesSerializationRoundTrip)
+{
+    auto builder = test_utilities::createValidGraphWithRaggedTensor();
     auto serializedGraph = builder.Release();
 
     GraphDescriptor original;
     original.deserializeGraph(serializedGraph.data(), serializedGraph.size());
-
-    bool input = true;
-    ASSERT_NO_THROW(original.setAttribute(
-        HIPDNN_ATTR_OPERATIONGRAPH_IS_RAGGED_TENSOR_ENABLED_EXT, HIPDNN_TYPE_BOOLEAN, 1, &input));
 
     auto handle = reinterpret_cast<hipdnnHandle_t>(0x12345678);
     ASSERT_NO_THROW(original.setAttribute(HIPDNN_ATTR_OPERATIONGRAPH_HANDLE,
@@ -1012,118 +994,22 @@ TEST_F(TestGraphDescriptor, IsRaggedTensorEnabledTrueSurvivesSerializationRoundT
     GraphDescriptor revived;
     revived.deserializeGraph(static_cast<const uint8_t*>(serialized.ptr), serialized.size);
 
-    bool output = false;
-    int64_t count = 0;
-    ASSERT_NO_THROW(revived.getAttribute(HIPDNN_ATTR_OPERATIONGRAPH_IS_RAGGED_TENSOR_ENABLED_EXT,
-                                         HIPDNN_TYPE_BOOLEAN,
-                                         1,
-                                         &count,
-                                         &output));
-    EXPECT_TRUE(output);
-    EXPECT_TRUE(revived.isRaggedTensorEnabled());
+    EXPECT_TRUE(revived.hasRaggedTensors());
 }
 
-TEST_F(TestGraphDescriptor, LegacyGraphWithoutRaggedTensorFieldRoundTripsToFalse)
+TEST_F(TestGraphDescriptor, HasRaggedTensorsSurvivesJsonRoundTrip)
 {
-    // createValidGraph() does NOT set is_ragged_tensor_enabled — it produces a
-    // wire image equivalent to a legacy graph that predates this field. Verify
-    // deserialize+get reports the wire default (false) without throwing.
-    auto builder = createValidGraph();
-    auto serializedGraph = builder.Release();
-
-    GraphDescriptor descriptor;
-    descriptor.deserializeGraph(serializedGraph.data(), serializedGraph.size());
-
-    bool value = true;
-    int64_t count = 0;
-    ASSERT_NO_THROW(descriptor.getAttribute(HIPDNN_ATTR_OPERATIONGRAPH_IS_RAGGED_TENSOR_ENABLED_EXT,
-                                            HIPDNN_TYPE_BOOLEAN,
-                                            1,
-                                            &count,
-                                            &value));
-    EXPECT_FALSE(value);
-    EXPECT_FALSE(descriptor.isRaggedTensorEnabled());
-}
-
-TEST_F(TestGraphDescriptor, JsonSerializationEmitsRaggedTensorTrue)
-{
-    auto builder = createValidGraph();
-    auto serializedGraph = builder.Release();
-
-    GraphDescriptor descriptor;
-    descriptor.deserializeGraph(serializedGraph.data(), serializedGraph.size());
-
-    bool raggedTensorEnabled = true;
-    ASSERT_NO_THROW(descriptor.setAttribute(HIPDNN_ATTR_OPERATIONGRAPH_IS_RAGGED_TENSOR_ENABLED_EXT,
-                                            HIPDNN_TYPE_BOOLEAN,
-                                            1,
-                                            &raggedTensorEnabled));
-
-    descriptor.buildSerializedGraph();
-    const auto jsonStr = descriptor.getSerializedJsonGraph();
-    const auto parsed = nlohmann::json::parse(jsonStr);
-
-    ASSERT_TRUE(parsed.contains("is_ragged_tensor_enabled"));
-    EXPECT_TRUE(parsed.at("is_ragged_tensor_enabled").get<bool>());
-}
-
-TEST_F(TestGraphDescriptor, JsonRoundTripPreservesRaggedTensorTrue)
-{
-    auto builder = createValidGraph();
+    auto builder = test_utilities::createValidGraphWithRaggedTensor();
     auto serializedGraph = builder.Release();
 
     GraphDescriptor original;
     original.deserializeGraph(serializedGraph.data(), serializedGraph.size());
-
-    bool raggedTensorEnabled = true;
-    ASSERT_NO_THROW(original.setAttribute(HIPDNN_ATTR_OPERATIONGRAPH_IS_RAGGED_TENSOR_ENABLED_EXT,
-                                          HIPDNN_TYPE_BOOLEAN,
-                                          1,
-                                          &raggedTensorEnabled));
-
     original.buildSerializedGraph();
     const auto jsonStr = original.getSerializedJsonGraph();
-
-    GraphDescriptor roundTripped;
-    ASSERT_NO_THROW(
-        GraphDescriptor::createFromJsonGraph(roundTripped, jsonStr.c_str(), jsonStr.size()));
-
-    bool output = false;
-    int64_t count = 0;
-    ASSERT_NO_THROW(
-        roundTripped.getAttribute(HIPDNN_ATTR_OPERATIONGRAPH_IS_RAGGED_TENSOR_ENABLED_EXT,
-                                  HIPDNN_TYPE_BOOLEAN,
-                                  1,
-                                  &count,
-                                  &output));
-    EXPECT_EQ(count, 1);
-    EXPECT_TRUE(output);
-}
-
-TEST_F(TestGraphDescriptor, JsonMissingRaggedTensorFieldDefaultsFalse)
-{
-    auto builder = createValidGraph();
-    auto serializedGraph = builder.Release();
-
-    GraphDescriptor descriptor;
-    descriptor.deserializeGraph(serializedGraph.data(), serializedGraph.size());
-    descriptor.buildSerializedGraph();
-
-    auto parsed = nlohmann::json::parse(descriptor.getSerializedJsonGraph());
-    parsed.erase("is_ragged_tensor_enabled");
-    const auto jsonStr = parsed.dump();
 
     GraphDescriptor fromJson;
     ASSERT_NO_THROW(
         GraphDescriptor::createFromJsonGraph(fromJson, jsonStr.c_str(), jsonStr.size()));
 
-    bool output = true;
-    int64_t count = 0;
-    ASSERT_NO_THROW(fromJson.getAttribute(HIPDNN_ATTR_OPERATIONGRAPH_IS_RAGGED_TENSOR_ENABLED_EXT,
-                                          HIPDNN_TYPE_BOOLEAN,
-                                          1,
-                                          &count,
-                                          &output));
-    EXPECT_EQ(count, 1);
-    EXPECT_FALSE(output);
+    EXPECT_TRUE(fromJson.hasRaggedTensors());
 }
