@@ -13,6 +13,7 @@
 #include <hipdnn_plugin_sdk/PluginLogging.hpp>
 
 #include "RockeClientHandle.hpp"
+#include "dispatcher/HardwareProfile.hpp"
 #include "dispatcher/SdpaGraphAdapter.hpp"
 #include "dispatcher/SelectionConstraints.hpp"
 
@@ -131,6 +132,10 @@ std::optional<AotInstance>
             return std::nullopt;
         }
         problem->arch = arch;
+        // Fill group-C hardware features from the live device (policy: no CU
+        // counts in source). Zero profile on host-only test paths (no GPU) --
+        // selection is unaffected since satisfies() ignores hw.
+        problem->hw = HardwareProfile::fromDevice();
         return select(*problem);
     }
     catch(const std::exception& e)

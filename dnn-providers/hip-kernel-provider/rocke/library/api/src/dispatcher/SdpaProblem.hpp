@@ -8,6 +8,7 @@
 #include <string>
 
 #include "dispatcher/AotInstance.hpp" // AttrValue
+#include "dispatcher/HardwareProfile.hpp"
 
 namespace rocke_client::dispatcher
 {
@@ -44,6 +45,12 @@ struct SdpaProblem
     bool paddingMask = false;
     bool alibiMask = false;
     std::string scalePolicy = "default_1_over_sqrt_d";
+
+    // Per-arch hardware constants for the feature vector's group-C features
+    // (hw_* idx 60-67). Filled from the live device alongside `arch` (see
+    // selectForArch); default-zero when no device is resolvable (host-only unit
+    // tests), which keeps selection deterministic since satisfies() ignores it.
+    HardwareProfile hw;
 
     // The runtime attribute view matched against
     // AotInstance::attributeConstraints. Keys and value kinds mirror the
