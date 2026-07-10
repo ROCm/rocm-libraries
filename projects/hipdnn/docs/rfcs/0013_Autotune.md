@@ -1146,8 +1146,6 @@ graph.add_all_engines();
 //
 //
 //
-//
-//
 int64_t maxWorkspaceSize;
 graph.get_estimated_max_workspace_size(maxWorkspaceSize);
 void* workspace;
@@ -1164,10 +1162,6 @@ graph.autotune(handle,
 printf("Winner: %s (%.4f ms)\n",
     results[0].engineName.c_str(),
     results[0].minTimeMs);
-//
-//
-//
-//
 //
 //
 //
