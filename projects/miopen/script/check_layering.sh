@@ -129,9 +129,74 @@ run_phase1() {
 }
 
 # =============================================================================
-# Phase 2 -- public C API surface. No new include boundary; extended later.
+# Phase 2 -- public C API surface. No new include boundary is punched, so there
+# is no forbidden-include rule here. Instead the Phase-2 assertion is additive:
+# every new public entry point must be (a) declared in the public header and
+# (b) exported from the built library. The header check always runs (works in
+# the pre-commit lint context); the export check runs only when the built lib
+# exists (build lane), so it is a no-op pre-build.
 # =============================================================================
-run_phase2() { :; }
+PHASE2_APIS=(
+  miopenGetTensorLayout
+  miopenGetTensorElementSpace
+  miopenIsTensorPacked
+  miopenGetTensorVectorLength
+  miopenGetTensorDescriptorV2
+  miopenGetConvolutionPaddingMode
+  miopenGetPoolingPaddingMode
+  miopenGetSolverName
+  miopenGetSolverIdByName
+  miopenSetDebugFlag
+  miopenGetDebugFlag
+)
+
+run_phase2() {
+  echo "Phase 2: public C API surface"
+  local header="include/miopen/miopen.h"
+  local api missing=0
+
+  # (a) source-level: each new API is declared in the public header.
+  if [[ -f "$header" ]]; then
+    for api in "${PHASE2_APIS[@]}"; do
+      if ! grep -q "$api" "$header"; then
+        echo "  [FAIL] public API not declared in $header: $api"
+        missing=$((missing + 1))
+      fi
+    done
+    if [[ "$missing" -eq 0 ]]; then
+      echo "  [ok]   all ${#PHASE2_APIS[@]} Phase-2 APIs declared in $header"
+    else
+      FAILURES=$((FAILURES + missing))
+    fi
+  else
+    echo "  [skip] $header not found (nothing to check)"
+  fi
+
+  # (b) build lane: each new API is a defined, default-visibility dynamic symbol
+  #     in libMIOpen.so. Opt-in via MIOPEN_LAYERING_CHECK_EXPORTS=1 (set in the
+  #     build lane, after linking). Left unset in the pre-commit lint lane so a
+  #     stale/partial build/ tree never produces a spurious failure there.
+  local lib="${MIOPEN_LIB_PATH:-build/lib/libMIOpen.so}"
+  if [[ "${MIOPEN_LAYERING_CHECK_EXPORTS:-0}" != "1" ]]; then
+    echo "  [skip] export assertion off (set MIOPEN_LAYERING_CHECK_EXPORTS=1 in the build lane)"
+  elif [[ -f "$lib" ]] && command -v nm >/dev/null 2>&1; then
+    local exported unexported=0
+    exported="$(nm -D --defined-only "$lib" 2>/dev/null)" || exported=""
+    for api in "${PHASE2_APIS[@]}"; do
+      if ! grep -qE "[[:space:]]${api}\$" <<< "$exported"; then
+        echo "  [FAIL] public API not exported from $lib: $api"
+        unexported=$((unexported + 1))
+      fi
+    done
+    if [[ "$unexported" -eq 0 ]]; then
+      echo "  [ok]   all ${#PHASE2_APIS[@]} Phase-2 APIs exported from $lib"
+    else
+      FAILURES=$((FAILURES + unexported))
+    fi
+  else
+    echo "  [skip] $lib not built (export assertion deferred to build lane)"
+  fi
+}
 
 # =============================================================================
 # Phase 3 -- miopen_utils (MIOpen Utilities)

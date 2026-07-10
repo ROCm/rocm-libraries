@@ -215,9 +215,47 @@ Collected from #7252 and #7291 — to be re-validated against current `miopen.h`
 
 ---
 
+## 5a. Building (how to build successfully)
+
+**Build from the rocm-libraries monorepo root, not from `projects/miopen/`.** MIOpen is a
+component of the `rocm-libraries` superbuild; the top-level `CMakePresets.json` wires up the
+correct toolchain and dependency paths (rocBLAS, hipBLASLt, SQLite, etc.). Configuring the
+`projects/miopen/` subtree in isolation produces a `CMakeCache` that hard-codes a bad SQLite
+path (`/opt/rocm/lib/libsqlite3.so`), and the final link of `libMIOpen.so` then fails with:
+
+```
+ninja: error: '/opt/rocm/lib/libsqlite3.so', needed by 'lib/libMIOpen.so.1.0', missing
+```
+
+The **root preset build does not hit this** (it resolves SQLite correctly). Use:
+
+```bash
+# from the rocm-libraries repo root
+cd build                       # the preset's binaryDir is <root>/build
+cmake .. --preset miopen       # configures the miopen component (ROCM_LIBS_ENABLE_COMPONENTS=miopen)
+ninja MIOpen                   # builds + links libMIOpen.so  (~570 targets; incremental after first build)
+```
+
+Then build/run whatever a phase needs from the **same** `<root>/build` dir, e.g.:
+
+```bash
+ninja test_public_api_accessors                       # a specific gtest binary
+./bin/test_public_api_accessors                        # run it directly (host-only tests need no GPU)
+nm -D --defined-only lib/libMIOpen.so | grep miopen # verify exported symbols
+```
+
+Notes:
+- Artifacts land under `<root>/build/` (lib at `build/lib/libMIOpen.so`, test binaries at
+  `build/bin/`), **not** under `projects/miopen/build/`. Point the layering guard's export
+  check there via `MIOPEN_LIB_PATH=<root>/build/lib/libMIOpen.so` when running it manually.
+- If you have an old `projects/miopen/build/` from an isolated configure, ignore it (or delete
+  it) — it is the source of the stale-SQLite link failure and can also carry stale symbols.
+
+---
+
 ## 6. Testing Strategy
 
-- **Build gates per phase:** `MIOpen` library, `MIOpenDriver`, and the test suite must all build after every phase (each phase is "functionally equivalent, no runtime change").
+- **Build gates per phase:** `MIOpen` library, `MIOpenDriver`, and the test suite must all build after every phase (each phase is "functionally equivalent, no runtime change"). Build from the monorepo root with `cmake .. --preset miopen && ninja` (see §5a).
 - **Functional smoke tests** (from #7252 test plan):
   - `./build/bin/MIOpenDriver conv -n 1 -c 1 -H 32 -W 32 -k 1 -y 3 -x 3 -V 1`
   - `./build/bin/MIOpenDriver bnorm -n 1 -c 1 -H 32 -W 32 -V 1`

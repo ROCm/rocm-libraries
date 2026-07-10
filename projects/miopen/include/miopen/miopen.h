@@ -833,6 +833,64 @@ MIOPEN_EXPORT miopenStatus_t miopenGetTensorDescriptor(miopenTensorDescriptor_t 
                                                        int* dimsA,
                                                        int* stridesA);
 
+#ifdef MIOPEN_BETA_API
+/*! @brief Get the details of the tensor descriptor
+ *
+ * Returns the same information as miopenGetTensorDescriptor() but uses size_t
+ * arrays, matching miopenSetTensorDescriptorV2(). This avoids truncation for
+ * tensors whose strides exceed INT_MAX.
+ *
+ * @param tensorDesc Tensor descriptor (input)
+ * @param dataType   MIOpen datatype (output)
+ * @param dimsA      Array containing the size of dimensions (output)
+ * @param stridesA   Array containing the size of stride (output)
+ * @return           miopenStatus_t
+ */
+MIOPEN_EXPORT miopenStatus_t miopenGetTensorDescriptorV2(miopenTensorDescriptor_t tensorDesc,
+                                                         miopenDataType_t* dataType,
+                                                         size_t* dimsA,
+                                                         size_t* stridesA);
+#endif
+
+/*! @brief Get the layout of the tensor descriptor
+ *
+ * @param tensorDesc Tensor descriptor (input)
+ * @param layout     Tensor layout (output)
+ * @return           miopenStatus_t
+ */
+MIOPEN_EXPORT miopenStatus_t miopenGetTensorLayout(miopenTensorDescriptor_t tensorDesc,
+                                                   miopenTensorLayout_t* layout);
+
+/*! @brief Get the element space of the tensor descriptor
+ *
+ * Returns the number of elements spanned by the descriptor, accounting for
+ * strides (i.e. the size of the smallest buffer that can hold the tensor).
+ *
+ * @param tensorDesc   Tensor descriptor (input)
+ * @param elementSpace Element space of the tensor (output)
+ * @return             miopenStatus_t
+ */
+MIOPEN_EXPORT miopenStatus_t miopenGetTensorElementSpace(miopenTensorDescriptor_t tensorDesc,
+                                                         size_t* elementSpace);
+
+/*! @brief Query whether the tensor descriptor is packed
+ *
+ * @param tensorDesc Tensor descriptor (input)
+ * @param isPacked   True if the tensor is packed (output)
+ * @return           miopenStatus_t
+ */
+MIOPEN_EXPORT miopenStatus_t miopenIsTensorPacked(miopenTensorDescriptor_t tensorDesc,
+                                                  bool* isPacked);
+
+/*! @brief Get the vector length of the tensor descriptor
+ *
+ * @param tensorDesc   Tensor descriptor (input)
+ * @param vectorLength Vector length of the tensor (output)
+ * @return             miopenStatus_t
+ */
+MIOPEN_EXPORT miopenStatus_t miopenGetTensorVectorLength(miopenTensorDescriptor_t tensorDesc,
+                                                         size_t* vectorLength);
+
 /*! @brief Destroys the tensor descriptor
  *
  * @param tensorDesc Tensor descriptor (input)
@@ -1071,6 +1129,15 @@ miopenGetConvolutionNdDescriptor(miopenConvolutionDescriptor_t convDesc,
  */
 MIOPEN_EXPORT miopenStatus_t miopenGetConvolutionGroupCount(miopenConvolutionDescriptor_t convDesc,
                                                             int* groupCount);
+
+/*! @brief Get the padding mode from a convolution descriptor
+ *
+ * @param convDesc     Convolution layer descriptor (input)
+ * @param paddingMode  Padding mode of the convolution (output)
+ * @return             miopenStatus_t
+ */
+MIOPEN_EXPORT miopenStatus_t miopenGetConvolutionPaddingMode(miopenConvolutionDescriptor_t convDesc,
+                                                             miopenPaddingMode_t* paddingMode);
 
 /*! @brief Set the number of groups to be used in Group/Depthwise convolution
  *
@@ -2238,6 +2305,15 @@ MIOPEN_EXPORT miopenStatus_t miopenSetPoolingIndexType(miopenPoolingDescriptor_t
  */
 MIOPEN_EXPORT miopenStatus_t miopenGetPoolingIndexType(miopenPoolingDescriptor_t poolDesc,
                                                        miopenIndexType_t* index_type);
+
+/*! @brief Get the padding mode from a pooling descriptor
+ *
+ * @param poolDesc     Pointer to a pooling layer descriptor (input)
+ * @param paddingMode  Padding mode of the pooling (output)
+ * @return             miopenStatus_t
+ */
+MIOPEN_EXPORT miopenStatus_t miopenGetPoolingPaddingMode(miopenPoolingDescriptor_t poolDesc,
+                                                         miopenPaddingMode_t* paddingMode);
 
 /*! @brief Set workspace index mode for pooling layer. The default mode is
  * miopenPoolingWorkSpaceIndexMask.
@@ -8055,6 +8131,74 @@ MIOPEN_EXPORT miopenStatus_t miopenSetTuningPolicy(miopenHandle_t handle,
  */
 MIOPEN_EXPORT miopenStatus_t miopenGetTuningPolicy(miopenHandle_t handle,
                                                    miopenTuningPolicy_t* value);
+
+/** @addtogroup solver
+ *
+ *  @{
+ */
+
+/*! @brief Get the name of a solver from its numeric id
+ *
+ * @param solverId    Numeric solver id (input)
+ * @param nameBuf     Buffer to receive the null-terminated solver name (output)
+ * @param nameBufLen  Size of nameBuf in bytes (input)
+ * @return            miopenStatus_t
+ */
+MIOPEN_EXPORT miopenStatus_t miopenGetSolverName(uint64_t solverId,
+                                                 char* nameBuf,
+                                                 size_t nameBufLen);
+
+/*! @brief Get the numeric id of a solver from its name
+ *
+ * Returns 0 (the invalid solver id) for an unknown name.
+ *
+ * @param solverName  Null-terminated solver name (input)
+ * @param solverId    Numeric solver id (output)
+ * @return            miopenStatus_t
+ */
+MIOPEN_EXPORT miopenStatus_t miopenGetSolverIdByName(const char* solverName, uint64_t* solverId);
+
+/** @} */
+// CLOSEOUT solver DOXYGEN GROUP
+
+#ifdef MIOPEN_BETA_API
+/*! @enum miopenDebugFlag_t
+ * Debug flags that control internal library behavior for testing and debugging.
+ *
+ * @note This surface is BETA and unstable: the set of flags and their numeric
+ * values may change between releases. Do not rely on it in production code.
+ */
+typedef enum
+{
+    miopenDebugLoggingQuiet                = 0, /*!< Suppress all logging output */
+    miopenDebugFindEnforceDisable          = 1, /*!< Disable MIOPEN_FIND_ENFORCE */
+    miopenDebugIsWarmupOngoing             = 2, /*!< Signal that a warmup pass is in progress */
+    miopenDebugAlwaysEnableConvDirectNaive = 3, /*!< Force-enable the naive direct conv solver */
+} miopenDebugFlag_t;
+
+/*! @brief Set the value of an internal debug flag
+ *
+ * @note Each flag is process-global (not per-handle) and is written without
+ * synchronization, so this call is not thread-safe: it affects all handles and
+ * threads and must not race with concurrent library use.
+ *
+ * @param flag   Debug flag to set (input)
+ * @param value  New value for the flag (input)
+ * @return       miopenStatus_t
+ */
+MIOPEN_EXPORT miopenStatus_t miopenSetDebugFlag(miopenDebugFlag_t flag, bool value);
+
+/*! @brief Get the value of an internal debug flag
+ *
+ * @note Reads process-global state; see miopenSetDebugFlag() for the
+ * thread-safety caveat.
+ *
+ * @param flag   Debug flag to query (input)
+ * @param value  Current value of the flag (output)
+ * @return       miopenStatus_t
+ */
+MIOPEN_EXPORT miopenStatus_t miopenGetDebugFlag(miopenDebugFlag_t flag, bool* value);
+#endif
 
 #ifdef __cplusplus
 }

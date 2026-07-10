@@ -145,6 +145,13 @@ extern "C" miopenStatus_t miopenGetPoolingIndexType(miopenPoolingDescriptor_t po
     return miopen::try_([&] { *index_type = miopen::deref(poolDesc).GetIndexType(); });
 }
 
+extern "C" miopenStatus_t miopenGetPoolingPaddingMode(miopenPoolingDescriptor_t poolDesc,
+                                                      miopenPaddingMode_t* paddingMode)
+{
+    MIOPEN_LOG_FUNCTION(poolDesc);
+    return miopen::try_([&] { miopen::deref(paddingMode) = miopen::deref(poolDesc).pmode; });
+}
+
 extern "C" miopenStatus_t
 miopenSetPoolingWorkSpaceIndexMode(miopenPoolingDescriptor_t poolDesc,
                                    miopenPoolingWorkspaceIndexMode_t workspace_index)

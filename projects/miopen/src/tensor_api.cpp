@@ -311,6 +311,57 @@ extern "C" miopenStatus_t miopenGetTensorDescriptor(miopenTensorDescriptor_t ten
     });
 }
 
+#ifdef MIOPEN_BETA_API
+extern "C" miopenStatus_t miopenGetTensorDescriptorV2(miopenTensorDescriptor_t tensorDesc,
+                                                      miopenDataType_t* dataType,
+                                                      size_t* dimsA,
+                                                      size_t* stridesA)
+{
+    MIOPEN_LOG_FUNCTION(tensorDesc);
+    return miopen::try_([&] {
+        if(dataType != nullptr)
+            *dataType = miopen::deref(tensorDesc).GetType();
+        if(dimsA != nullptr)
+            std::copy(miopen::deref(tensorDesc).GetLengths().begin(),
+                      miopen::deref(tensorDesc).GetLengths().end(),
+                      dimsA);
+        if(stridesA != nullptr)
+            std::copy(miopen::deref(tensorDesc).GetStrides().begin(),
+                      miopen::deref(tensorDesc).GetStrides().end(),
+                      stridesA);
+    });
+}
+#endif
+
+extern "C" miopenStatus_t miopenGetTensorLayout(miopenTensorDescriptor_t tensorDesc,
+                                                miopenTensorLayout_t* layout)
+{
+    MIOPEN_LOG_FUNCTION(tensorDesc);
+    return miopen::try_([&] { miopen::deref(layout) = miopen::deref(tensorDesc).GetLayout_t(); });
+}
+
+extern "C" miopenStatus_t miopenGetTensorElementSpace(miopenTensorDescriptor_t tensorDesc,
+                                                      size_t* elementSpace)
+{
+    MIOPEN_LOG_FUNCTION(tensorDesc);
+    return miopen::try_(
+        [&] { miopen::deref(elementSpace) = miopen::deref(tensorDesc).GetElementSpace(); });
+}
+
+extern "C" miopenStatus_t miopenIsTensorPacked(miopenTensorDescriptor_t tensorDesc, bool* isPacked)
+{
+    MIOPEN_LOG_FUNCTION(tensorDesc);
+    return miopen::try_([&] { miopen::deref(isPacked) = miopen::deref(tensorDesc).IsPacked(); });
+}
+
+extern "C" miopenStatus_t miopenGetTensorVectorLength(miopenTensorDescriptor_t tensorDesc,
+                                                      size_t* vectorLength)
+{
+    MIOPEN_LOG_FUNCTION(tensorDesc);
+    return miopen::try_(
+        [&] { miopen::deref(vectorLength) = miopen::deref(tensorDesc).GetVectorLength(); });
+}
+
 extern "C" miopenStatus_t miopenDestroyTensorDescriptor(miopenTensorDescriptor_t tensorDesc)
 {
     MIOPEN_LOG_FUNCTION(tensorDesc);

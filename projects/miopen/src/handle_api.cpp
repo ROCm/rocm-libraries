@@ -25,8 +25,12 @@
  *******************************************************************************/
 #include <cstdio>
 #include <miopen/version.h>
+#include <miopen/conv/solvers.hpp>
 #include <miopen/errors.hpp>
+#include <miopen/execution_context.hpp>
+#include <miopen/find_controls.hpp>
 #include <miopen/handle.hpp>
+#include <miopen/logger.hpp>
 
 extern "C" const char* miopenGetErrorString(miopenStatus_t error)
 {
@@ -120,3 +124,37 @@ extern "C" miopenStatus_t miopenEnableProfiling(miopenHandle_t handle, bool enab
 {
     return miopen::try_([&] { miopen::deref(handle).EnableProfiling(enable); });
 }
+
+#ifdef MIOPEN_BETA_API
+static bool* GetDebugFlagPtr(miopenDebugFlag_t flag)
+{
+    switch(flag)
+    {
+    case miopenDebugLoggingQuiet: return &miopen::debug::LoggingQuiet;
+    case miopenDebugFindEnforceDisable: return &miopen::debug::FindEnforceDisable;
+    case miopenDebugIsWarmupOngoing: return &miopen::debug::IsWarmupOngoing;
+    case miopenDebugAlwaysEnableConvDirectNaive: return &miopen::debug::AlwaysEnableConvDirectNaive;
+    }
+    return nullptr;
+}
+
+extern "C" miopenStatus_t miopenSetDebugFlag(miopenDebugFlag_t flag, bool value)
+{
+    return miopen::try_([&] {
+        bool* ptr = GetDebugFlagPtr(flag);
+        if(ptr == nullptr)
+            MIOPEN_THROW(miopenStatusBadParm, "Invalid debug flag");
+        *ptr = value;
+    });
+}
+
+extern "C" miopenStatus_t miopenGetDebugFlag(miopenDebugFlag_t flag, bool* value)
+{
+    return miopen::try_([&] {
+        bool* ptr = GetDebugFlagPtr(flag);
+        if(ptr == nullptr)
+            MIOPEN_THROW(miopenStatusBadParm, "Invalid debug flag");
+        miopen::deref(value) = *ptr;
+    });
+}
+#endif
