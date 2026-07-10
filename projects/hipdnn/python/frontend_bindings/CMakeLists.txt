@@ -13,8 +13,8 @@ set(NB_USE_SUBMODULE_DEPS OFF)
 find_package(Python 3.12
     REQUIRED COMPONENTS Interpreter Development.Module Development.SABIModule)
 
-find_package(tsl-robin-map CONFIG REQUIRED)
-find_package(nanobind CONFIG REQUIRED)
+find_package(tsl-robin-map 1.4.1 CONFIG REQUIRED)
+find_package(nanobind 2.12.0 CONFIG REQUIRED)
 
 find_package(hipdnn_frontend CONFIG)
 if(NOT hipdnn_frontend_FOUND)

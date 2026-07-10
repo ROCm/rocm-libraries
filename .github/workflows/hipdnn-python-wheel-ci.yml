@@ -97,6 +97,17 @@ jobs:
               with tarfile.open(archive, "r:gz") as tar:
                   tar.extractall(deps_dir, filter="data")
 
+          (deps_dir / "nanobind-2.12.0" / "cmake" / "nanobind-config-version.cmake").write_text(
+              """set(PACKAGE_VERSION "2.12.0")
+          if(PACKAGE_FIND_VERSION VERSION_EQUAL PACKAGE_VERSION)
+              set(PACKAGE_VERSION_EXACT TRUE)
+          endif()
+          if(PACKAGE_FIND_VERSION VERSION_LESS_EQUAL PACKAGE_VERSION)
+              set(PACKAGE_VERSION_COMPATIBLE TRUE)
+          endif()
+          """,
+              encoding="utf-8",
+          )
 
           robin_map_config_dir = deps_dir / "cmake" / "tsl-robin-map"
           robin_map_config_dir.mkdir(parents=True, exist_ok=True)
@@ -110,6 +121,17 @@ jobs:
               add_library(tsl::robin_map INTERFACE IMPORTED)
               set_target_properties(tsl::robin_map PROPERTIES
                   INTERFACE_INCLUDE_DIRECTORIES "{robin_map_include_dir}")
+          endif()
+          """,
+              encoding="utf-8",
+          )
+          (robin_map_config_dir / "tsl-robin-mapConfigVersion.cmake").write_text(
+              """set(PACKAGE_VERSION "1.4.1")
+          if(PACKAGE_FIND_VERSION VERSION_EQUAL PACKAGE_VERSION)
+              set(PACKAGE_VERSION_EXACT TRUE)
+          endif()
+          if(PACKAGE_FIND_VERSION VERSION_LESS_EQUAL PACKAGE_VERSION)
+              set(PACKAGE_VERSION_COMPATIBLE TRUE)
           endif()
           """,
               encoding="utf-8",
@@ -233,6 +255,17 @@ jobs:
               with tarfile.open(archive, "r:gz") as tar:
                   tar.extractall(deps_dir, filter="data")
 
+          (deps_dir / "nanobind-2.12.0" / "cmake" / "nanobind-config-version.cmake").write_text(
+              """set(PACKAGE_VERSION "2.12.0")
+          if(PACKAGE_FIND_VERSION VERSION_EQUAL PACKAGE_VERSION)
+              set(PACKAGE_VERSION_EXACT TRUE)
+          endif()
+          if(PACKAGE_FIND_VERSION VERSION_LESS_EQUAL PACKAGE_VERSION)
+              set(PACKAGE_VERSION_COMPATIBLE TRUE)
+          endif()
+          """,
+              encoding="utf-8",
+          )
 
           robin_map_config_dir = deps_dir / "cmake" / "tsl-robin-map"
           robin_map_config_dir.mkdir(parents=True, exist_ok=True)
@@ -246,6 +279,17 @@ jobs:
               add_library(tsl::robin_map INTERFACE IMPORTED)
               set_target_properties(tsl::robin_map PROPERTIES
                   INTERFACE_INCLUDE_DIRECTORIES "{robin_map_include_dir}")
+          endif()
+          """,
+              encoding="utf-8",
+          )
+          (robin_map_config_dir / "tsl-robin-mapConfigVersion.cmake").write_text(
+              """set(PACKAGE_VERSION "1.4.1")
+          if(PACKAGE_FIND_VERSION VERSION_EQUAL PACKAGE_VERSION)
+              set(PACKAGE_VERSION_EXACT TRUE)
+          endif()
+          if(PACKAGE_FIND_VERSION VERSION_LESS_EQUAL PACKAGE_VERSION)
+              set(PACKAGE_VERSION_COMPATIBLE TRUE)
           endif()
           """,
               encoding="utf-8",
