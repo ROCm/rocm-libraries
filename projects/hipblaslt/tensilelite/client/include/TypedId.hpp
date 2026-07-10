@@ -320,6 +320,8 @@ namespace TensileLite
     using TypedGemm_B6F4_B_S = TypedGemm<BFloat6x32, Float4x2, BFloat16, BFloat16, float, float, BFloat6x32, Float4x2>;
 #endif // defined(TENSILE_USE_FP4) && defined(TENSILE_USE_BF6) && defined(TENSILE_USE_BF16)
 #if defined(TENSILE_USE_FP8_BF8) && defined(TENSILE_USE_FP4)
+    // F4 data (both A and B), F8 dest/C, Float alpha/beta
+    using TypedGemm_F4_F8_S = TypedGemm<Float4x2, Float4x2, Float8, Float8, float, float, Float4x2, Float4x2>;
     // DestDataType: S
     using TypedGemm_F8F4_S_S = TypedGemm<Float8, Float4x2, float, float, float, float, Float8, Float4x2>;
     using TypedGemm_F4F8_S_S = TypedGemm<Float4x2, Float8, float, float, float, float, Float4x2, Float8>;

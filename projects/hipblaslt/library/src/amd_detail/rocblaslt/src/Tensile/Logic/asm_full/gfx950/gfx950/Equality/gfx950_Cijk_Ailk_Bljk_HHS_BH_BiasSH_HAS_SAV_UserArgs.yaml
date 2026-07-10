@@ -101234,7 +101234,7 @@
     SpaceFillingAlgo: []
     StaggerU: 8
     StaggerUMapping: 0
-    StaggerUStride: 256.0
+    StaggerUStride: 256
     StorePriorityOpt: false
     StoreRemapVectorWidth: 0
     StoreSwapAddr: false
@@ -104539,7 +104539,7 @@
     DirectToLds: 0
     DirectToLdsA: false
     DirectToLdsB: false
-    DirectToLdsMetadata: false
+    DirectToLdsMetadata: 0
     DirectToVgprA: false
     DirectToVgprB: false
     DirectToVgprMXSA: false
@@ -104869,7 +104869,7 @@
     DirectToLds: 0
     DirectToLdsA: false
     DirectToLdsB: false
-    DirectToLdsMetadata: false
+    DirectToLdsMetadata: 0
     DirectToVgprA: false
     DirectToVgprB: false
     DirectToVgprMXSA: false
@@ -105199,7 +105199,7 @@
     DirectToLds: 0
     DirectToLdsA: false
     DirectToLdsB: false
-    DirectToLdsMetadata: false
+    DirectToLdsMetadata: 0
     DirectToVgprA: false
     DirectToVgprB: false
     DirectToVgprMXSA: false
@@ -105529,7 +105529,7 @@
     DirectToLds: 0
     DirectToLdsA: false
     DirectToLdsB: false
-    DirectToLdsMetadata: false
+    DirectToLdsMetadata: 0
     DirectToVgprA: false
     DirectToVgprB: false
     DirectToVgprMXSA: false
@@ -105859,7 +105859,7 @@
     DirectToLds: 1
     DirectToLdsA: true
     DirectToLdsB: true
-    DirectToLdsMetadata: false
+    DirectToLdsMetadata: 0
     DirectToVgprA: false
     DirectToVgprB: false
     DirectToVgprMXSA: false
@@ -106189,7 +106189,7 @@
     DirectToLds: 0
     DirectToLdsA: false
     DirectToLdsB: false
-    DirectToLdsMetadata: false
+    DirectToLdsMetadata: 0
     DirectToVgprA: false
     DirectToVgprB: false
     DirectToVgprMXSA: false
@@ -106519,7 +106519,7 @@
     DirectToLds: 0
     DirectToLdsA: false
     DirectToLdsB: false
-    DirectToLdsMetadata: false
+    DirectToLdsMetadata: 0
     DirectToVgprA: false
     DirectToVgprB: false
     DirectToVgprMXSA: false
@@ -106849,7 +106849,7 @@
     DirectToLds: 0
     DirectToLdsA: false
     DirectToLdsB: false
-    DirectToLdsMetadata: false
+    DirectToLdsMetadata: 0
     DirectToVgprA: false
     DirectToVgprB: false
     DirectToVgprMXSA: false

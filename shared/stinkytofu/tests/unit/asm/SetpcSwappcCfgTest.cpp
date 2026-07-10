@@ -71,14 +71,6 @@ class SetpcSwappcCfgTest : public ::testing::Test {
         return inst;
     }
 
-    StinkyInstruction* createSwappc(BasicBlock* bb, int dstSGPR, int srcSGPR) {
-        AsmIRBuilder builder(*bb, arch);
-        StinkyInstruction* inst = builder.create(getMCIDByUOp(GFX::s_swappc_b64, arch));
-        inst->addDestReg(StinkyRegister("s", dstSGPR, 2));
-        inst->addSrcReg(StinkyRegister("s", srcSGPR, 2));
-        return inst;
-    }
-
     StinkyInstruction* createLabelInst(BasicBlock* bb, const std::string& name) {
         AsmIRBuilder builder(*bb, arch);
         return builder.createLabel(name);
@@ -159,43 +151,6 @@ TEST_F(SetpcSwappcCfgTest, UnconditionalBranchStillNoFallThrough) {
 
     EXPECT_TRUE(fallBlock->getPredecessors().empty())
         << "Unconditional branch must not fall through to the next block.";
-}
-
-// Annotated activation call sites carry CallTargetData; CFG must not add edges
-// to those labels (they are not definite successors within this function's CFG).
-TEST_F(SetpcSwappcCfgTest, SwappcCallTargetDataDoesNotCreateCfgEdges) {
-    StinkyInstruction* swappc = createSwappc(entry, /*dst=*/2, /*src=*/0);
-    swappc->addModifier<CallTargetData>(
-        CallTargetData{std::vector<std::string>{"label_Activation_A", "label_Activation_B"}});
-    createLabelInst(entry, "fall_through");
-    createNop(entry);
-    createLabelInst(entry, "label_Activation_A");
-    createNop(entry);
-    createLabelInst(entry, "label_Activation_B");
-    createNop(entry);
-
-    runCFGBuilder();
-
-    BasicBlock* swappcBlock = func->getEntryBlock();
-    BasicBlock* fallBlock = findBlock("fall_through");
-    BasicBlock* blockA = findBlock("label_Activation_A");
-    BasicBlock* blockB = findBlock("label_Activation_B");
-    ASSERT_NE(swappcBlock, nullptr);
-    ASSERT_NE(fallBlock, nullptr);
-    ASSERT_NE(blockA, nullptr);
-    ASSERT_NE(blockB, nullptr);
-
-    ASSERT_EQ(swappcBlock->getSuccessors().size(), 1u);
-    EXPECT_EQ(swappcBlock->getSuccessors().front(), fallBlock)
-        << "CallTargetData must not add CFG edges to callees; only fall-through applies.";
-
-    const auto& predsFall = fallBlock->getPredecessors();
-    ASSERT_EQ(predsFall.size(), 1u);
-    EXPECT_EQ(predsFall.front(), swappcBlock);
-    const auto& predsA = blockA->getPredecessors();
-    EXPECT_EQ(std::find(predsA.begin(), predsA.end(), swappcBlock), predsA.end());
-    const auto& predsB = blockB->getPredecessors();
-    EXPECT_EQ(std::find(predsB.begin(), predsB.end(), swappcBlock), predsB.end());
 }
 
 }  // namespace

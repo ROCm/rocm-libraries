@@ -24,6 +24,7 @@
 #include "harness/ReferenceCapabilityError.hpp"
 #include "harness/SharedHandle.hpp"
 #include "harness/TestConfig.hpp"
+#include "harness/TomlGuards.hpp"
 #include "harness/golden/UnverifiableBundleReport.hpp"
 #include "harness/golden/input_init/SynthesizeInputs.hpp"
 #include "harness/gpu_graph_executor/GpuReferenceGraphExecutor.hpp"
@@ -490,6 +491,14 @@ void IntegrationGraphGoldenReferenceVerificationHarness::compareEach(OutputTenso
     auto wrapper = _bundle->graphWrapper();
     const auto& tensorAttrMap = wrapper.getTensorMap();
 
+    const auto tomlOverride = TestConfig::get().findToleranceOverride(currentTestName());
+    if(tomlOverride)
+    {
+        HIPDNN_PLUGIN_LOG_INFO("Tolerance override applied for " << currentTestName()
+                                                                 << ": atol=" << tomlOverride->atol
+                                                                 << " rtol=" << tomlOverride->rtol);
+    }
+
     for(const int64_t uid : _bundle->outputTensorUids)
     {
         auto& actualTensor = *engineOutputs.at(uid);
@@ -501,6 +510,12 @@ void IntegrationGraphGoldenReferenceVerificationHarness::compareEach(OutputTenso
         float atol = 0.0f;
         float rtol = 0.0f;
         resolveTolerances(wrapper, dataType, atol, rtol);
+
+        if(tomlOverride)
+        {
+            atol = tomlOverride->atol;
+            rtol = tomlOverride->rtol;
+        }
 
         compareOutputTensor(uid, *attrs, dataType, expectedTensor, actualTensor, atol, rtol);
     }
@@ -672,6 +687,10 @@ float IntegrationGraphGoldenReferenceVerificationHarness::toleranceForNodeAttrib
         return tol::pointwise::getTolerance<T>();
     case NA::LayernormAttributes:
         return tol::layernorm::getTolerance<T>();
+    case NA::SdpaAttributes:
+    case NA::SdpaBackwardAttributes:
+        // No backward golden tests yet; share forward tolerance until data exists
+        return tol::sdpa::getToleranceFwd<T>();
     default:
         return 1e-3f;
     }

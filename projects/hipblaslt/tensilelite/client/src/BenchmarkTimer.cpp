@@ -400,9 +400,6 @@ namespace TensileLite
             m_totalGPUTime += totalTime;
             m_numEnqueuesInSolution += startEvents->size();
 
-            // Report GPU execution time for timing instrumentation
-            reportTiming("gpu_kernel_execution", totalTime.count());
-
             if(m_sleepPercent > 0)
             {
                 auto sleepTime = totalTime * (m_sleepPercent / 100.0);

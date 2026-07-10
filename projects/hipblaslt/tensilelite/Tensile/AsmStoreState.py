@@ -1018,8 +1018,9 @@ class StoreState:
                     addrScaleBVecVgpr = None
             else:
                 # allocate new VGPR for each element:
+                # Allow pool growth for per-element D addrs; refineOccupancy still caps total VGPR.
                 addrDVgpr = kw.vgprPool.checkOutAligned(self.cfg.numVgprsPerAddr, \
-                    int(ceil(self.cfg.numVgprsPerAddr)), "writeDBatch-addr for ei=%u"%(elementIdx), preventOverflow=not isOptNLL)
+                    int(ceil(self.cfg.numVgprsPerAddr)), "writeDBatch-addr for ei=%u"%(elementIdx), preventOverflow=False)
                 if kernel["_GlobalAccumulation"] == "MultipleBufferSingleKernel":
                     addrGSUSyncVgprs = kw.vgprPool.checkOutAligned(self.cfg.numVgprsPerAddr, \
                         int(ceil(self.cfg.numVgprsPerAddr)), "writeDBatch-addr for ei=%u"%(elementIdx), preventOverflow=False)
@@ -1073,6 +1074,8 @@ class StoreState:
         self.isReset = False
 
     def checkInTempVgprC(self):
+        if not hasattr(self, 'elementSumIdx'):
+            return # object was not fully initialized
         if self.kernelWriter.states.serializedStore is False:
             return # early exit; currently only serializedStore==True checks out C-tile from register pool
 

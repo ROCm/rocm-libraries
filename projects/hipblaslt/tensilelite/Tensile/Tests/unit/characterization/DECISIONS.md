@@ -344,3 +344,6 @@ characterization assertion can distinguish mutant from original:
 
 No other equivalent mutants are accepted yet; widening rounds append their
 accepted equivalents/pragmas here, each with its one-line reason.
+
+## D16 — BufferLoad/BufferStore promoted to Required Parameters
+**Context** kernel basename hash changes across all archs; assembly verified unchanged/correct; no err or kernel-count changes."

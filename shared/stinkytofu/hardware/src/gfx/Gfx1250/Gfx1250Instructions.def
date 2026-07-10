@@ -359,12 +359,14 @@ DEF_BATCH(.format = WMMA,
 // Scalar ALU — SOP1 (inherit {D0, sdst, sdst, 32}, {S0, ssrc0, ssrc, 32} from SOP1)
 DEF_BATCH(.format = SOP1,
     SAbsI32Inst, "s_abs_i32", .flags = {ImplicitWriteSCC}, .logical = "SAbsI32",
+    SCvtF32U32Inst, "s_cvt_f32_u32", .logical = "SCvtF32U32",
+    SCvtU32F32Inst, "s_cvt_u32_f32", .logical = "SCvtU32F32",
     SFf1I32B32Inst, "s_ff1_i32_b32", .flags = {HasSideEffect}, .logical = "SFf1B32",
     SAndSaveexecB64Inst, "s_and_saveexec_b64", .flags = {Branch, ImplicitReadEXEC, ImplicitWriteEXEC, ImplicitWriteSCC}, .logical = "SAndSaveExecB64",
         .operand_fields = { {D0, .size=64, .type=sreg}, {S0, .size=64} },
     SOrSaveexecB64Inst, "s_or_saveexec_b64", .flags = {HasSideEffect, ImplicitReadEXEC, ImplicitWriteEXEC, ImplicitWriteSCC}, .logical = "SOrSaveExecB64",
         .operand_fields = { {D0, .size=64, .type=sreg}, {S0, .size=64} },
-    SSwappcB64Inst, "s_swappc_b64", .flags = {Call, HasSideEffect}, .logical = "SSwapPCB64",
+    SSwappcB64Inst, "s_swappc_b64", .flags = {Branch, IndirectBranch, HasSideEffect}, .logical = "SSwapPCB64",
         .operand_fields = { {D0, .size=64}, {S0, .size=64, .type=sreg} },
     SAndSaveexecB32Inst, "s_and_saveexec_b32", .flags = {ImplicitReadEXEC, ImplicitWriteEXEC, ImplicitWriteSCC}, .logical = "SAndSaveExecB32",
         .operand_fields = { {D0, .type=sreg} },
@@ -417,6 +419,19 @@ DEF_T(GlobalInvInst, "global_inv", .format = VGLOBAL, .flags = {HasSideEffect}, 
 DEF_T(GlobalPrefetchB8Inst, "global_prefetch_b8", .format = VGLOBAL, .logical = "GlobalPrefetchB8",
     .operand_fields = { {S0, vaddr, vgpr, 64}, {S1, saddr, sreg, 64} })
 
+// Global load with transpose-read (TR) — gfx1250 only.
+// global_load_tr_b64: 64-bit TR load; D0 = 64-bit vgpr dest,
+// S0 = 32-bit vaddr (offset), S1 = 64-bit saddr (base).
+DEF_T(GlobalLoadTrB64Inst, "global_load_tr_b64", .format = VGLOBAL, .logical = "GlobalLoadTR8B64",
+    .cost = {12, 116},
+    .operand_fields = { {D0, vdst, vgpr, 64}, {S0, vaddr, vgpr, 32}, {S1, saddr, sreg, 64} })
+
+// global_load_tr_b128: 128-bit TR load; D0 = 128-bit vgpr dest,
+// S0 = 32-bit vaddr (offset), S1 = 64-bit saddr (base).
+DEF_T(GlobalLoadTrB128Inst, "global_load_tr_b128", .format = VGLOBAL, .logical = "GlobalLoadTR16B128",
+    .cost = {12, 116},
+    .operand_fields = { {D0, vdst, vgpr, 128}, {S0, vaddr, vgpr, 32}, {S1, saddr, sreg, 64} })
+
 // Scalar ALU — SOPK
 DEF_T(SSetregImm32B32Inst, "s_setreg_IMM32_b32", .format = SOPK, .flags = {HasSideEffect}, .logical = "SSetRegIMM32B32",
     .operand_fields = { {D0, simm16, hwreg, 16}, {S0, literal, simm32, 32} })
@@ -427,6 +442,7 @@ DEF_T(SSetregB32Inst, "s_setreg_b32", .format = SOPK, .flags = {HasSideEffect}, 
 DEF_T(SGetregB32Inst, "s_getreg_b32", .format = SOPK, .flags = {HasSideEffect}, .logical = "SGetRegB32",
     .operand_fields = { {D0, sdst, sdst, 32}, {S0, simm16, hwreg, 16} })
 DEF_BATCH(.format = SOP2,
+    SAddF32Inst, "s_add_f32", .logical = "SAddF32",
     SAddI32Inst, "s_add_i32", .flags = {ImplicitWriteSCC}, .logical = "SAddI32",
     SAddU32Inst, "s_add_u32", .flags = {ImplicitWriteSCC}, .logical = "SAddU32",
 
@@ -476,9 +492,12 @@ DEF_BATCH(.format = SOP2,
     SMaxU32Inst, "s_max_u32", .flags = {ImplicitWriteSCC}, .logical = "SMaxU32",
     SMinI32Inst, "s_min_i32", .flags = {ImplicitWriteSCC}, .logical = "SMinI32",
     SMinU32Inst, "s_min_u32", .flags = {ImplicitWriteSCC}, .logical = "SMinU32",
+    SMulF32Inst, "s_mul_f32", .logical = "SMulF32",
     SMulHiI32Inst, "s_mul_hi_i32", .logical = "SMulHII32",
     SMulHiU32Inst, "s_mul_hi_u32", .logical = "SMulHIU32",
     SMulI32Inst, "s_mul_i32", .logical = "SMulI32",
+    SMulU64Inst, "s_mul_u64", .logical = "SMulU64",
+        .operand_fields = { {D0, .size=64}, {S0, .size=64}, {S1, .size=64} },
     SOrB32Inst, "s_or_b32", .flags = {ImplicitWriteSCC}, .logical = "SOrB32",
     SOrB64Inst, "s_or_b64", .flags = {ImplicitWriteSCC}, .logical = "SOrB64",
         .operand_fields = { {D0, .size=64}, {S0, .size=64}, {S1, .size=64} },
@@ -1275,6 +1294,12 @@ DEF_BATCH(.format = VOP1_TRANSCENDENTAL, .flags = {Trans64},
     VSqrtF64Inst, "v_sqrt_f64",
         .operand_fields = { {D0, .size=64}, {S0, .size=64} },
 )
+
+// Pseudo-scalar transcendental ALU ops
+DEF_T(VSRcpF32Inst, "v_s_rcp_f32", .format = VOP3, .logical = "VSRcpF32",
+    .cost = {1, 8},
+    .flags = {Transcendental},
+    .operand_fields = { {D0, vdst, sdst, 32}, {S0, src0, ssrc, 32} })
 
 //==============================================================================
 // REMINDER — Implicit special-register flags for instructions NOT yet defined

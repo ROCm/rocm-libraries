@@ -27,7 +27,6 @@
 #include <sstream>
 
 #include "ModifierSerializer.hpp"
-#include "stinkytofu/bindings/python/Module.hpp"
 #include "stinkytofu/hardware/HwRegHelpers.hpp"
 #include "stinkytofu/support/Casting.hpp"
 
@@ -79,63 +78,39 @@ void AsmPrinter::printRegister(const StinkyRegister& reg) {
 }
 
 void AsmPrinter::print(const StinkyInstruction& inst) {
-    printInstruction(inst, 0);
+    printInstruction(inst);
 }
 
 void AsmPrinter::print(const AsmDirective& directive) {
-    printDirective(directive, 0);
+    printDirective(directive);
 }
 
 void AsmPrinter::print(const Function& function) {
-    printFunction(function, 0);
-}
-
-void AsmPrinter::print(const StinkyAsmModule& module) {
-    os << "st.module @" << module.getName() << " {\n";
-    const auto functions = module.getFunctions();
-    for (size_t i = 0; i < functions.size(); ++i) {
-        if (i > 0) os << "\n";
-        printFunction(*functions[i], options.indent);
+    os << "st.func @" << function.getName() << "() {\n";
+    size_t index = 0;
+    for (const BasicBlock& bb : function) {
+        printBlock(bb, index);
+        ++index;
     }
     os << "}\n";
 }
 
-void AsmPrinter::printFunction(const Function& function, int baseIndent) {
-    os << std::string(static_cast<size_t>(baseIndent), ' ');
-    os << "st.func @" << function.getName() << "() {\n";
-    size_t index = 0;
-    for (const BasicBlock& bb : function) {
-        printBlock(bb, index, baseIndent + options.indent);
-        ++index;
-    }
-    os << std::string(static_cast<size_t>(baseIndent), ' ') << "}\n";
-}
-
 void AsmPrinter::printBlock(const BasicBlock& bb, size_t blockIndex) {
-    printBlock(bb, blockIndex, 0);
-}
-
-void AsmPrinter::printBlock(const BasicBlock& bb, size_t blockIndex, int baseIndent) {
     std::string blockId =
         bb.getLabel().empty() ? ("bb" + std::to_string(blockIndex)) : bb.getLabel();
-    os << std::string(static_cast<size_t>(baseIndent), ' ');
     os << "^" << blockId << ":\n";
-    for (const IRBase& ir : bb) printIR(ir, baseIndent);
-    printSuccessorsLine(bb, baseIndent);
+    for (const IRBase& ir : bb) printIR(ir);
+    printSuccessorsLine(bb);
 }
 
 void AsmPrinter::printIR(const IRBase& ir) {
-    printIR(ir, 0);
-}
-
-void AsmPrinter::printIR(const IRBase& ir, int baseIndent) {
     switch (ir.getType()) {
         case IRBase::IRType::StinkyTofu: {
             if (const StinkyInstruction* inst = dyn_cast<StinkyInstruction>(&ir))
-                printInstruction(*inst, baseIndent);
+                printInstruction(*inst);
             else {
                 // other StinkyTofu: indent and dump
-                os << std::string(static_cast<size_t>(baseIndent + options.indent), ' ');
+                os << std::string(static_cast<size_t>(options.indent), ' ');
                 ir.dump(os);
                 os << "\n";
             }
@@ -143,26 +118,26 @@ void AsmPrinter::printIR(const IRBase& ir, int baseIndent) {
         }
         case IRBase::IRType::StinkyAsmDirective:
             if (const AsmDirective* directive = dyn_cast<AsmDirective>(&ir))
-                printDirective(*directive, baseIndent);
+                printDirective(*directive);
             else {
-                os << std::string(static_cast<size_t>(baseIndent + options.indent), ' ');
+                os << std::string(static_cast<size_t>(options.indent), ' ');
                 ir.dump(os);
                 os << "\n";
             }
             break;
         case IRBase::IRType::LogicalIR:
-            os << std::string(static_cast<size_t>(baseIndent + options.indent), ' ');
+            os << std::string(static_cast<size_t>(options.indent), ' ');
             ir.dump(os);
             os << "\n";
             break;
     }
 }
 
-void AsmPrinter::printInstruction(const StinkyInstruction& inst, int baseIndent) {
+void AsmPrinter::printInstruction(const StinkyInstruction& inst) {
     // labels are block boundaries; do not print LABEL as instruction
     if (inst.getUnifiedOpcode() == GFX::LABEL) return;
 
-    os << std::string(static_cast<size_t>(baseIndent + options.indent), ' ');
+    os << std::string(static_cast<size_t>(options.indent), ' ');
 
     if (!inst.getDestRegs().empty()) {
         for (size_t i = 0; i < inst.getDestRegs().size(); ++i) {
@@ -198,17 +173,17 @@ bool AsmPrinter::printModifierAsDict(const Modifier& mod) {
     return ModifierSerializer::serialize(mod, os);
 }
 
-void AsmPrinter::printDirective(const AsmDirective& directive, int baseIndent) {
-    os << std::string(static_cast<size_t>(baseIndent + options.indent), ' ');
+void AsmPrinter::printDirective(const AsmDirective& directive) {
+    os << std::string(static_cast<size_t>(options.indent), ' ');
     os << "\"st.asm_directive\"(\"" << directive.name << "\"";
     if (!directive.symbol.empty()) os << ", \"" << directive.symbol << "\"";
     os << ")\n";
 }
 
-void AsmPrinter::printSuccessorsLine(const BasicBlock& bb, int baseIndent) {
+void AsmPrinter::printSuccessorsLine(const BasicBlock& bb) {
     const auto& succs = bb.getSuccessors();
     if (succs.empty()) return;
-    os << std::string(static_cast<size_t>(baseIndent + options.indent), ' ');
+    os << std::string(static_cast<size_t>(options.indent), ' ');
     os << "Successors: ";
     for (size_t i = 0; i < succs.size(); ++i) {
         if (i > 0) os << ", ";
