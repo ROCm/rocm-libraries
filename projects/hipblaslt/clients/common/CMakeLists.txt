@@ -43,8 +43,6 @@ add_library(hipblaslt::mxdatagen ALIAS hipblaslt-mxdatagen)
 target_include_directories(hipblaslt-mxdatagen
     PUBLIC
         $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>
-    PRIVATE
-        $<BUILD_INTERFACE:${PROJECT_SOURCE_DIR}/library/src/amd_detail/include>
 )
 
 target_link_libraries(hipblaslt-mxdatagen
