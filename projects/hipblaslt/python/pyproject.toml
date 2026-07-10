@@ -1,0 +1,23 @@
+# Copyright Advanced Micro Devices, Inc., or its affiliates.
+# SPDX-License-Identifier: MIT
+
+[project]
+name = "hipblaslt"
+version = "0.1.0"
+description = "Low-level Python bindings for the hipBLASLt GEMM API"
+requires-python = ">=3.10"
+license = { text = "MIT" }
+dependencies = ["numpy>=1.23", "ml_dtypes>=0.5.0"]
+
+[build-system]
+requires = ["scikit-build-core>=0.10", "nanobind>=2.0"]
+build-backend = "scikit_build_core.build"
+
+[tool.scikit-build]
+cmake.build-type = "Release"
+cmake.args = ["-DCMAKE_POLICY_VERSION_MINIMUM=3.5"]
+wheel.packages = ["hipblaslt"]
+build-dir = "build/{wheel_tag}"
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
