@@ -220,6 +220,7 @@ jobs:
       project_name: ${{ matrix.projects.project_name }}
       cmake_target: ${{ matrix.projects.cmake_target }}
       build_dir: ${{ matrix.projects.build_dir }}
+      coverage_config: ${{ matrix.projects.coverage_config }}
       amdgpu_families: ${{ matrix.target_bundle.amdgpu_family }}
       test_runs_on: ${{ matrix.target_bundle.test_machine }}
       projects_to_test: ${{ matrix.projects.projects_to_test }}

@@ -103,8 +103,16 @@ def export_metadata(
     stage_dir: Path | None = None,
 ):
     config = load_coverage_config(config_path)
-    key = resolve_project_key(config, project)
-    project_config = config["projects"][key]
+    # Two accepted layouts:
+    #   * Per-project file (current): the document is the project's config
+    #     directly, kept next to the project's test_categories.yaml.
+    #   * Combined file (legacy): {projects: {<key>: {...}}}.
+    if isinstance(config, dict) and "projects" in config:
+        key = resolve_project_key(config, project)
+        project_config = config["projects"][key]
+    else:
+        key = project.lower()
+        project_config = config or {}
 
     if not project_config.get("enabled", False):
         logging.info("Coverage disabled for %s; nothing to export.", key)
