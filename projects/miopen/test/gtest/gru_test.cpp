@@ -4,13 +4,13 @@
 #include <gtest/gtest.h>
 #include <miopen/rnn.hpp>
 #include <miopen/miopen.h>
-#include "tensor_holder.hpp"
+#include <miopen_utils/tensor_holder.hpp>
 
 #include "compare_helper.hpp"
 #include "gtest_desc_guard.hpp"
 #include "gtest_handle_guard.hpp"
 #include "../dropout_util.hpp"
-#include "../rnn_util.hpp"
+#include <miopen_utils/rnn_util.hpp>
 #include "../workspace.hpp"
 
 #include <math.h>
@@ -1842,12 +1842,12 @@ struct verify_forward_infer_gru
 
         size_t reserveSpaceSize;
 
-        std::vector<miopen::TensorDescriptor> inputCPPDescs;
+        std::vector<TensorDesc> inputCPPDescs;
         std::vector<miopenTensorDescriptor_t> inputDescs;
         createTensorDescArray(
             inputCPPDescs, inputDescs, batch_seq, inputVecLen, miopen::deref(rnnDesc).dataType);
 
-        std::vector<miopen::TensorDescriptor> outputCPPDescs;
+        std::vector<TensorDesc> outputCPPDescs;
         std::vector<miopenTensorDescriptor_t> outputDescs;
         createTensorDescArray(outputCPPDescs,
                               outputDescs,
@@ -1897,12 +1897,12 @@ struct verify_forward_infer_gru
         size_t out_sz         = 0;
         size_t workspace_size = 0;
 
-        std::vector<miopen::TensorDescriptor> inputCPPDescs;
+        std::vector<TensorDesc> inputCPPDescs;
         std::vector<miopenTensorDescriptor_t> inputDescs;
         createTensorDescArray(
             inputCPPDescs, inputDescs, batch_seq, inputVecLen, miopen::deref(rnnDesc).dataType);
 
-        std::vector<miopen::TensorDescriptor> outputCPPDescs;
+        std::vector<TensorDesc> outputCPPDescs;
         std::vector<miopenTensorDescriptor_t> outputDescs;
         createTensorDescArray(outputCPPDescs,
                               outputDescs,
@@ -2062,12 +2062,12 @@ struct verify_forward_train_gru
         size_t out_sz = 0;
         size_t reserveSpaceSize;
 
-        std::vector<miopen::TensorDescriptor> inputCPPDescs;
+        std::vector<TensorDesc> inputCPPDescs;
         std::vector<miopenTensorDescriptor_t> inputDescs;
         createTensorDescArray(
             inputCPPDescs, inputDescs, batch_seq, inputVecLen, miopen::deref(rnnDesc).dataType);
 
-        std::vector<miopen::TensorDescriptor> outputCPPDescs;
+        std::vector<TensorDesc> outputCPPDescs;
         std::vector<miopenTensorDescriptor_t> outputDescs;
         createTensorDescArray(outputCPPDescs,
                               outputDescs,
@@ -2120,12 +2120,12 @@ struct verify_forward_train_gru
         size_t workspace_size   = 0;
         size_t reserveSpaceSize = 0;
 
-        std::vector<miopen::TensorDescriptor> inputCPPDescs;
+        std::vector<TensorDesc> inputCPPDescs;
         std::vector<miopenTensorDescriptor_t> inputDescs;
         createTensorDescArray(
             inputCPPDescs, inputDescs, batch_seq, inputVecLen, miopen::deref(rnnDesc).dataType);
 
-        std::vector<miopen::TensorDescriptor> outputCPPDescs;
+        std::vector<TensorDesc> outputCPPDescs;
         std::vector<miopenTensorDescriptor_t> outputDescs;
         createTensorDescArray(outputCPPDescs,
                               outputDescs,
@@ -2317,7 +2317,7 @@ struct verify_backward_data_gru
         int bi_stride = bi * hy_h;
         size_t workspace_size;
 
-        std::vector<miopen::TensorDescriptor> inputCPPDescs;
+        std::vector<TensorDesc> inputCPPDescs;
         std::vector<miopenTensorDescriptor_t> inputDescs;
         createTensorDescArray(
             inputCPPDescs, inputDescs, batch_seq, inputVecLen, miopen::deref(rnnDesc).dataType);
@@ -2367,12 +2367,12 @@ struct verify_backward_data_gru
 
         size_t out_sz = 0;
 
-        std::vector<miopen::TensorDescriptor> inputCPPDescs;
+        std::vector<TensorDesc> inputCPPDescs;
         std::vector<miopenTensorDescriptor_t> inputDescs;
         createTensorDescArray(
             inputCPPDescs, inputDescs, batch_seq, inputVecLen, miopen::deref(rnnDesc).dataType);
 
-        std::vector<miopen::TensorDescriptor> outputCPPDescs;
+        std::vector<TensorDesc> outputCPPDescs;
         std::vector<miopenTensorDescriptor_t> outputDescs;
         createTensorDescArray(outputCPPDescs,
                               outputDescs,
@@ -2579,12 +2579,12 @@ struct verify_backward_weights_gru
     {
         auto&& handle = get_handle();
 
-        std::vector<miopen::TensorDescriptor> inputCPPDescs;
+        std::vector<TensorDesc> inputCPPDescs;
         std::vector<miopenTensorDescriptor_t> inputDescs;
         createTensorDescArray(
             inputCPPDescs, inputDescs, batch_seq, inputVecLen, miopen::deref(rnnDesc).dataType);
 
-        std::vector<miopen::TensorDescriptor> outputCPPDescs;
+        std::vector<TensorDesc> outputCPPDescs;
         std::vector<miopenTensorDescriptor_t> outputDescs;
         createTensorDescArray(outputCPPDescs,
                               outputDescs,
@@ -3031,12 +3031,12 @@ public:
         auto wei_sz = wei_bytes / sizeof(T);
         std::vector<T> weights(wei_sz);
 
-        std::vector<miopen::TensorDescriptor> inputCPPDescs;
+        std::vector<TensorDesc> inputCPPDescs;
         std::vector<miopenTensorDescriptor_t> inputDescs;
         createTensorDescArray(
             inputCPPDescs, inputDescs, param.batchSeq, inVecReal, miopen::deref(rnnDesc).dataType);
 
-        std::vector<miopen::TensorDescriptor> outputCPPDescs;
+        std::vector<TensorDesc> outputCPPDescs;
         std::vector<miopenTensorDescriptor_t> outputDescs;
         createTensorDescArray(outputCPPDescs,
                               outputDescs,

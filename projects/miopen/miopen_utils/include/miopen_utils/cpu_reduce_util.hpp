@@ -26,8 +26,7 @@
 #ifndef GUARD_CPU_REDUCE_UTIL_HPP
 #define GUARD_CPU_REDUCE_UTIL_HPP
 
-#include "miopen/reducetensor.hpp"
-#include "tensor_holder.hpp"
+#include <miopen_utils/tensor_holder.hpp>
 #include <cstddef>
 #include <half/half.hpp>
 #include <limits>
@@ -612,38 +611,6 @@ std::tuple<tensor<Tref>, tensor<int>> reduce_cpu_common(const miopenReduceTensor
     }
 
     return {res, res_indices};
-}
-
-template <typename T, typename compType>
-std::tuple<tensor<T>, tensor<int>>
-reduce_cpu_common(const miopen::ReduceTensorDescriptor& reduceDesc,
-                  const tensor<T>& input,
-                  const tensor<T>& output,
-                  float alpha,
-                  float beta,
-                  bool parallel,
-                  bool withIdx)
-{
-    auto inLengths  = input.desc.GetLengths();
-    auto outLengths = output.desc.GetLengths();
-    auto inStrides  = input.desc.GetStrides();
-    auto outStrides = output.desc.GetStrides();
-
-    const auto reduceOp = reduceDesc.reduceTensorOp_;
-    const auto nanOpt   = reduceDesc.reduceTensorNanOpt_;
-
-    return reduce_cpu_common<T, T, compType, std::size_t>(reduceOp,
-                                                          nanOpt,
-                                                          inLengths,
-                                                          outLengths,
-                                                          input.data,
-                                                          inStrides,
-                                                          output.data,
-                                                          outStrides,
-                                                          alpha,
-                                                          beta,
-                                                          parallel,
-                                                          withIdx);
 }
 
 #endif

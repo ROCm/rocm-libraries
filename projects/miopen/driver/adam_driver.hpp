@@ -29,10 +29,10 @@
 #include "InputFlags.hpp"
 #include "driver.hpp"
 #include <common_utils/random.hpp>
-#include "tensor_driver.hpp"
+#include <miopen_utils/tensor_driver.hpp>
 #include "timer.hpp"
 
-#include "../test/verify.hpp"
+#include <miopen_utils/verify.hpp>
 
 #include <common_utils/float_equal.hpp>
 #include <common_utils/ford.hpp>

@@ -24,11 +24,11 @@
  *
  *******************************************************************************/
 
-#include "../driver/tensor_driver.hpp"
+#include <miopen_utils/tensor_driver.hpp>
 #include "get_handle.hpp"
-#include "random.hpp"
-#include "tensor_holder.hpp"
-#include "verify.hpp"
+#include <miopen_utils/random.hpp>
+#include <miopen_utils/tensor_holder.hpp>
+#include <miopen_utils/verify.hpp>
 #include <gtest/gtest.h>
 #include <miopen/getitem.hpp>
 #include <miopen/miopen.h>
@@ -280,12 +280,14 @@ protected:
         ref_dx = tensor<T>{dx_dim};
         std::fill(ref_dx.begin(), ref_dx.end(), static_cast<T>(0));
 
-        std::vector<miopen::TensorDescriptor*> indexDescs;
+        std::vector<const miopen::TensorDescriptor*> indexDescs;
 
         std::transform(indexs.begin(),
                        indexs.end(),
                        std::back_inserter(indexDescs),
-                       [](auto& index) { return &index.desc; });
+                       [](auto& index) -> const miopen::TensorDescriptor* {
+                           return &static_cast<const miopen::TensorDescriptor&>(index.desc);
+                       });
 
         std::vector<size_t> workspace_dims;
         ws_sizeInBytes =
@@ -323,13 +325,15 @@ protected:
                                 slices_flat.data(),
                                 offset);
 
-        std::vector<miopen::TensorDescriptor*> indexDescs;
+        std::vector<const miopen::TensorDescriptor*> indexDescs;
         std::vector<ConstData_t> indexData;
 
         std::transform(indexs.begin(),
                        indexs.end(),
                        std::back_inserter(indexDescs),
-                       [](auto& index) { return &index.desc; });
+                       [](auto& index) -> const miopen::TensorDescriptor* {
+                           return &static_cast<const miopen::TensorDescriptor&>(index.desc);
+                       });
         std::transform(indexs_dev.begin(),
                        indexs_dev.end(),
                        std::back_inserter(indexData),

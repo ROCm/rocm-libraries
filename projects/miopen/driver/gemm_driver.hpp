@@ -34,7 +34,7 @@
 #include <common_utils/random.hpp>
 #include "util_driver.hpp"
 
-#include <../test/verify.hpp>
+#include <miopen_utils/verify.hpp>
 
 #include <miopen/gemm_v2.hpp>
 #include <miopen/miopen.h>

@@ -37,7 +37,7 @@
 #include "../gpu_conv.hpp"
 #include "conv_common.hpp"
 #include "conv_tensor_gen.hpp"
-#include "tensor_holder.hpp"
+#include <miopen_utils/tensor_holder.hpp>
 
 #include "../workspace.hpp"
 

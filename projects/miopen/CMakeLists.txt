@@ -961,6 +961,10 @@ add_subdirectory(addkernels)
 option( MIOPEN_USE_RNE_BFLOAT16 "Sets rounding scheme for bfloat16 type" ON )
 add_subdirectory(common_utils)
 add_subdirectory(src)
+# miopen_utils (MIOpen Utilities, Layer 3, header-only INTERFACE lib) sits above the
+# library: it consumes common_utils + the MIOpen public API and is linked by the driver
+# and tests. Added after src so the MIOpen target exists for consumers to link alongside it.
+add_subdirectory(miopen_utils)
 if(MIOPEN_BUILD_DRIVER)
     add_subdirectory(driver)
 endif()

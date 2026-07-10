@@ -180,21 +180,21 @@ TEST_P(GPU_ConvFwdBiasResAddActiv_FP16, ConvFusedAPI)
     {
         auto status = miopenConvolutionBiasActivationForward(&get_handle(),
                                                              &alpha1,
-                                                             &input.desc,
+                                                             input.desc,
                                                              in_dev.get(),
-                                                             &weights.desc,
+                                                             weights.desc,
                                                              wei_dev.get(),
                                                              &conv_desc,
                                                              algo,
                                                              nullptr, // workspace
                                                              0ull,    // workspace size
                                                              &alpha2,
-                                                             &z.desc,
+                                                             z.desc,
                                                              z_dev.get(),
-                                                             &bias.desc,
+                                                             bias.desc,
                                                              bias_dev.get(),
                                                              activ_desc,
-                                                             &output.desc,
+                                                             output.desc,
                                                              out_dev.get());
 
         EXPECT_EQ(status, miopenStatusSuccess);

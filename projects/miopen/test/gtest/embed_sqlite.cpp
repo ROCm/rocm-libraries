@@ -6,7 +6,7 @@
 
 #include "get_handle.hpp"
 #include "gtest_common.hpp"
-#include "../tensor_holder.hpp"
+#include <miopen_utils/tensor_holder.hpp>
 
 #if MIOPEN_EMBED_DB
 #include <miopen_data.hpp>

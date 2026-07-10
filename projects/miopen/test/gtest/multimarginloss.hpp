@@ -26,8 +26,8 @@
 
 #include "cpu_multimarginloss.hpp"
 #include "get_handle.hpp"
-#include "tensor_holder.hpp"
-#include "verify.hpp"
+#include <miopen_utils/tensor_holder.hpp>
+#include <miopen_utils/verify.hpp>
 #include <gtest/gtest.h>
 #include <miopen/miopen.h>
 #include <miopen/multimarginloss.hpp>

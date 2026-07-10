@@ -29,12 +29,12 @@
 #include "InputFlags.hpp"
 #include "driver.hpp"
 #include "dropout_gpu_emulator.hpp"
-#include "tensor_driver.hpp"
+#include <miopen_utils/tensor_driver.hpp>
 #include "timer.hpp"
 #include "util_driver.hpp"
 #include "util_file.hpp"
 
-#include <../test/verify.hpp>
+#include <miopen_utils/verify.hpp>
 
 #include <miopen/dropout.hpp>
 #include <miopen/miopen.h>

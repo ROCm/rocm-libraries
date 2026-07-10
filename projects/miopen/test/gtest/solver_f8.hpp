@@ -26,15 +26,16 @@
 #pragma once
 
 #include <gtest/gtest.h>
-#include "cpu_conv.hpp"
+#include <miopen_utils/cpu_conv.hpp>
 #include "get_handle.hpp"
 #include "tensor_util.hpp"
-#include <fusionHost.hpp>
+#include <miopen_utils/fusionHost.hpp>
+#include <miopen/handle.hpp>
 #include <miopen/conv/data_invoke_params.hpp>
 #include "conv_common.hpp"
 #include "hip_float8.hpp"
-#include "verify.hpp"
-#include "../random.hpp"
+#include <miopen_utils/verify.hpp>
+#include <miopen_utils/random.hpp>
 
 #include "conv_test_base.hpp"
 #include "f8_cast_util.hpp"

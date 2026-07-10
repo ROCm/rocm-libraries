@@ -24,11 +24,12 @@
  *
  *******************************************************************************/
 #include <gtest/gtest.h>
+#include <miopen/fusion_plan.hpp>
 #include <miopen/fusion/solvers.hpp>
 #include <miopen/fusion/fusion_invoke_params.hpp>
 #include <gtest/gtest_common.hpp>
 
-#include "tensor_holder.hpp"
+#include <miopen_utils/tensor_holder.hpp>
 #include "get_handle.hpp"
 #include "conv_test_base.hpp"
 

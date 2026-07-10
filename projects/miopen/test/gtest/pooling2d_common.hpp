@@ -18,7 +18,7 @@
 #include <vector>
 // network_data.hpp provides get_inputs() function used when TEST_GET_INPUT_TENSOR = 1
 // (currently TEST_GET_INPUT_TENSOR = 0, but include is needed to support both cases)
-#include "../network_data.hpp"
+#include <miopen_utils/network_data.hpp>
 #include "get_handle.hpp"
 #include "gtest_common.hpp"
 #include "pooling_gtest_common.hpp"

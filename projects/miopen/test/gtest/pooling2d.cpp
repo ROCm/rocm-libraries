@@ -4,7 +4,7 @@
 #include <gtest/gtest.h>
 #include <half/half.hpp>
 #include <vector>
-#include "../network_data.hpp"
+#include <miopen_utils/network_data.hpp>
 #include "pooling2d_common.hpp"
 
 // Configuration define matching the original ctest behavior

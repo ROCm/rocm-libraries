@@ -25,7 +25,7 @@
  *******************************************************************************/
 #include "get_handle.hpp"
 #include "test.hpp"
-#include "random.hpp"
+#include <miopen_utils/random.hpp>
 #include "workspace.hpp"
 #include <array>
 #include <iterator>

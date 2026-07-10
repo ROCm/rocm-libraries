@@ -28,7 +28,7 @@
 
 #include <iostream>
 #include <common_utils/ford.hpp>
-#include <miopen/errors.hpp>
+#include <stdexcept>
 
 /*
     A and B rows and cols should be passed as default values (NxM, MxK), independently of
@@ -63,11 +63,12 @@ void gemm_cpu(const Dtype* a_ptr,
        (!a_transpose && b_transpose &&
         ((a_cols != b_cols) || (a_rows != c_rows) || (b_rows != c_cols))))
     {
-        MIOPEN_THROW("MM_CPU_ERROR. Incompatible matrix size:\nA: " + std::to_string(a_rows) + "x" +
-                     std::to_string(a_cols) + " transpose: " + (a_transpose ? "true" : "false") +
-                     "\nB: " + std::to_string(b_rows) + "x" + std::to_string(b_cols) +
-                     " transpose: " + (b_transpose ? "true" : "false") +
-                     "\nC: " + std::to_string(c_rows) + "x" + std::to_string(c_cols) + "\n");
+        throw std::runtime_error(
+            "MM_CPU_ERROR. Incompatible matrix size:\nA: " + std::to_string(a_rows) + "x" +
+            std::to_string(a_cols) + " transpose: " + (a_transpose ? "true" : "false") +
+            "\nB: " + std::to_string(b_rows) + "x" + std::to_string(b_cols) +
+            " transpose: " + (b_transpose ? "true" : "false") + "\nC: " + std::to_string(c_rows) +
+            "x" + std::to_string(c_cols) + "\n");
     }
 
     size_t inner_loop_limit = a_transpose ? a_rows : a_cols;

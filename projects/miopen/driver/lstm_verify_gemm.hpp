@@ -28,7 +28,7 @@
 
 #include "dropout_gpu_emulator.hpp"
 
-#include <../test/rnn_util.hpp>
+#include <miopen_utils/rnn_util.hpp>
 
 #include <algorithm>
 #include <cassert>

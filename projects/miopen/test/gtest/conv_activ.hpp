@@ -29,9 +29,10 @@
 
 #include <gtest/gtest.h>
 #include <miopen/miopen.h>
+#include <miopen/fusion_plan.hpp>
 #include <miopen/solver_id.hpp>
-#include <serialize.hpp>
-#include <fusionHost.hpp>
+#include <miopen_utils/serialize.hpp>
+#include <miopen_utils/fusionHost.hpp>
 
 #include "tensor_util.hpp"
 #include "conv_common.hpp"

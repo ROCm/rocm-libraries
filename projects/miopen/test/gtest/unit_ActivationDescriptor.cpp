@@ -34,11 +34,11 @@
 #include "activ_common.hpp"
 #include "gtest_common.hpp"
 
-#include "../network_data.hpp"
-#include "../random.hpp"
-#include "../tensor_holder.hpp"
+#include <miopen_utils/network_data.hpp>
+#include <miopen_utils/random.hpp>
+#include <miopen_utils/tensor_holder.hpp>
 #include "../tensor_util.hpp"
-#include "../verify.hpp"
+#include <miopen_utils/verify.hpp>
 
 #define UNIT_ACTIVATION_DESCRIPTOR_DEBUG 0
 

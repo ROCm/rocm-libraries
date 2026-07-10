@@ -5,7 +5,7 @@
 #include <tensor_util.hpp>
 
 #include "gtest_common.hpp"
-#include "network_data.hpp"
+#include <miopen_utils/network_data.hpp>
 #include "test_parameter_name_generator.hpp"
 
 namespace {

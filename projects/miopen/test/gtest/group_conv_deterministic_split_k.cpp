@@ -28,9 +28,9 @@
 #include <miopen/conv/data_invoke_params.hpp>
 #include <miopen/conv/solvers.hpp>
 #include <miopen/conv/wrw_invoke_params.hpp>
-#include "../random.hpp"
+#include <miopen_utils/random.hpp>
 #include "get_handle.hpp"
-#include "../driver/tensor_driver.hpp"
+#include <miopen_utils/tensor_driver.hpp>
 #include "conv_common.hpp"
 #include "gtest_common.hpp"
 

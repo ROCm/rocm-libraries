@@ -35,7 +35,7 @@
 
 #include "get_handle.hpp"
 #include "gtest_common.hpp"
-#include "../tensor_holder.hpp"
+#include <miopen_utils/tensor_holder.hpp>
 
 MIOPEN_LIB_ENV_VAR(MIOPEN_NAIVE_DISABLE_IF_ALT)
 
@@ -73,11 +73,11 @@ std::vector<std::string> RunFind(miopenHandle_t handle, size_t max_solutions = 8
     miopenProblem_t problem = nullptr;
     EXPECT_EQ(miopenCreateConvProblem(&problem, &conv, miopenProblemDirectionForward),
               miopenStatusSuccess);
-    EXPECT_EQ(miopenSetProblemTensorDescriptor(problem, miopenTensorConvolutionX, &x.desc),
+    EXPECT_EQ(miopenSetProblemTensorDescriptor(problem, miopenTensorConvolutionX, x.desc),
               miopenStatusSuccess);
-    EXPECT_EQ(miopenSetProblemTensorDescriptor(problem, miopenTensorConvolutionW, &w.desc),
+    EXPECT_EQ(miopenSetProblemTensorDescriptor(problem, miopenTensorConvolutionW, w.desc),
               miopenStatusSuccess);
-    EXPECT_EQ(miopenSetProblemTensorDescriptor(problem, miopenTensorConvolutionY, &y.desc),
+    EXPECT_EQ(miopenSetProblemTensorDescriptor(problem, miopenTensorConvolutionY, y.desc),
               miopenStatusSuccess);
 
     std::vector<miopenSolution_t> solutions(max_solutions);

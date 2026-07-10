@@ -3,7 +3,7 @@
 
 #include <gtest/ai_heuristics.hpp>
 #include <miopen/conv/heuristics/ai_heuristics.hpp>
-#include "../tensor_holder.hpp"
+#include <miopen_utils/tensor_holder.hpp>
 #include "get_handle.hpp"
 
 struct TunaNetTestCase : AIModelTestCase

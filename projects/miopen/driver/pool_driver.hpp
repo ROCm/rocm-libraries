@@ -31,13 +31,14 @@
 #include "mloConvHost.hpp"
 #include "mloPoolingHost.hpp"
 #include <common_utils/random.hpp>
-#include "tensor_driver.hpp"
+#include <miopen_utils/tensor_driver.hpp>
 #include "timer.hpp"
 #include "util_driver.hpp"
 #include "util_file.hpp"
 
 #include <miopen/errors.hpp>
 #include <miopen/miopen.h>
+#include <miopen/tensor_extra.hpp>
 #include <miopen/pooling.hpp>
 #include <miopen/tensor.hpp>
 

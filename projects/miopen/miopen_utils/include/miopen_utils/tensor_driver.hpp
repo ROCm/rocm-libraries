@@ -28,11 +28,11 @@
 
 #define UNPACK_VEC4(v) (v[0]), (v[1]), (v[2]), (v[3])
 
+#include <common_utils/errors.hpp>
+#include <miopen_utils/tensor_desc.hpp>
 #include <algorithm>
 #include <iterator>
 #include <miopen/miopen.h>
-#include <miopen/tensor.hpp>
-#include <miopen/tensor_extra.hpp>
 #include <common_utils/tensor_layout.hpp>
 #include <numeric>
 #include <vector>
@@ -66,7 +66,7 @@ inline miopenTensorLayout_t StringToLayoutType(std::string layout_str)
     }
     else
     {
-        MIOPEN_THROW("We only support NCHWc4, NCHWc8, CHWNc4, CHWNc8, NCHW, NHWC, NDHWC, NCDHW "
+        COMMON_THROW("We only support NCHWc4, NCHWc8, CHWNc4, CHWNc8, NCHW, NHWC, NDHWC, NCDHW "
                      "vectorized tensor layout.");
         return default_layout;
     }
@@ -86,73 +86,19 @@ inline void LengthReorder(std::vector<int>& lens, const std::initializer_list<in
 
 inline std::size_t GetTensorVectorLength(const miopenTensorDescriptor_t& tensor)
 {
-    std::size_t vectorLength;
-
-    int size = 0;
-    miopenGetTensorDescriptorSize(tensor, &size);
-
-    miopenGetNdTensorDescriptorVectorLength(tensor, &vectorLength);
-    return vectorLength;
+    return TensorDesc::GetVectorLength(tensor);
 }
 
 inline std::vector<int> GetTensorLengths(const miopenTensorDescriptor_t& tensor)
 {
-    int n;
-    int c;
-    int h;
-    int w;
-    int d;
-
-    int size = 0;
-    miopenGetTensorDescriptorSize(tensor, &size);
-
-    if(size == 5)
-    {
-        miopenGet5dTensorDescriptorLengths(tensor, &n, &c, &d, &h, &w);
-        return std::vector<int>({n, c, d, h, w});
-    }
-    else if(size == 4)
-    {
-        miopenGet4dTensorDescriptorLengths(tensor, &n, &c, &h, &w);
-        return std::vector<int>({n, c, h, w});
-    }
-
-    std::vector<int> tensor_len;
-    tensor_len.resize(miopen::deref(tensor).GetNumDims());
-    miopenGetTensorDescriptor(tensor, nullptr, tensor_len.data(), nullptr);
-
-    return tensor_len;
+    auto lens = TensorDesc::GetLengths(tensor);
+    return std::vector<int>(lens.begin(), lens.end());
 }
 
 inline std::vector<int> GetTensorStrides(const miopenTensorDescriptor_t& tensor)
 {
-    int nstride;
-    int cstride;
-    int dstride;
-    int hstride;
-    int wstride;
-
-    int size = 0;
-    miopenGetTensorDescriptorSize(tensor, &size);
-
-    if(size == 5)
-    {
-        miopenGet5dTensorDescriptorStrides(
-            tensor, &nstride, &cstride, &dstride, &hstride, &wstride);
-        return std::vector<int>({nstride, cstride, dstride, hstride, wstride});
-    }
-    else if(size == 4)
-    {
-        miopenGet4dTensorDescriptorStrides(tensor, &nstride, &cstride, &hstride, &wstride);
-        return std::vector<int>({nstride, cstride, hstride, wstride});
-    }
-
-    std::vector<int> tensor_strides;
-    tensor_strides.resize(miopen::deref(tensor).GetNumDims());
-
-    miopenGetTensorDescriptor(tensor, nullptr, nullptr, tensor_strides.data());
-
-    return tensor_strides;
+    auto strides = TensorDesc::GetStrides(tensor);
+    return std::vector<int>(strides.begin(), strides.end());
 }
 
 inline int SetTensor4d(miopenTensorDescriptor_t t,
@@ -178,7 +124,7 @@ inline int SetTensorNdVector(miopenTensorDescriptor_t t,
     }
     else
     {
-        MIOPEN_THROW("We only support NCHWc4, NCHWc8, CHWNc4, CHWNc8, NCHW, NHWC, NDHWC, NCDHW "
+        COMMON_THROW("We only support NCHWc4, NCHWc8, CHWNc4, CHWNc8, NCHW, NHWC, NDHWC, NCDHW "
                      "vectorized tensor layout.");
         return -1;
     }
@@ -227,7 +173,7 @@ inline int SetTensorNd(miopenTensorDescriptor_t t,
 
     if(layout.size() != len.size() && layout.find('c') == std::string::npos)
     {
-        MIOPEN_THROW("unmatched layout and dimension size");
+        COMMON_THROW("unmatched layout and dimension size");
     }
 
     if(layout.find('c') != std::string::npos)
@@ -254,7 +200,7 @@ inline int SetTensorNd(miopenTensorDescriptor_t t,
 // The implementation is a copy-paste from miopen::TensorDescriptor.
 inline size_t GetTensorSize(const miopenTensorDescriptor_t& tensor)
 {
-    assert(miopen::deref(tensor).IsPacked() &&
+    assert(TensorDesc::IsPacked(tensor) &&
            "GetTensorSize should not be used on an unpacked tensor.");
     const auto len            = GetTensorLengths(tensor);
     const size_t vectorLength = GetTensorVectorLength(tensor);
@@ -268,7 +214,7 @@ inline size_t GetTensorSize(const miopenTensorDescriptor_t& tensor)
 // GetTensorSize. Unless, of course, there is absolutely zero chance to receive an unpacked tensor.
 inline size_t GetTensorSpace(const miopenTensorDescriptor_t& tensor)
 {
-    return miopen::deref(tensor).GetElementSpace();
+    return TensorDesc::GetElementSpace(tensor);
 }
 
 #endif // GUARD_MIOPEN_TENSOR_DRIVER_HPP

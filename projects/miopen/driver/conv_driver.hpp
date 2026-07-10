@@ -11,7 +11,7 @@
 #include "mloConvHost.hpp"
 #include <common_utils/random.hpp>
 #include "rocrand_wrapper.hpp"
-#include "tensor_driver.hpp"
+#include <miopen_utils/tensor_driver.hpp>
 #include "timer.hpp"
 #include "util_driver.hpp"
 #include "util_file.hpp"
@@ -30,10 +30,10 @@
 #include <miopen/tensor.hpp>
 #include <miopen/kernel_tuning_mode.hpp>
 
-#include <../test/cpu_bias.hpp>
-#include <../test/cpu_conv.hpp>
-#include <../test/tensor_holder.hpp>
-#include <../test/verify.hpp>
+#include <miopen_utils/cpu_bias.hpp>
+#include <miopen_utils/cpu_conv.hpp>
+#include <miopen_utils/tensor_holder.hpp>
+#include <miopen_utils/verify.hpp>
 
 #include <algorithm>
 #include <cstdlib>
@@ -1671,7 +1671,7 @@ int ConvDriver<Tgpu, Tref>::AllocateBuffersAndCopy()
 
             b.AllocOnHost(biasTensor);
             db.AllocOnHost(b_sz);
-            db_host = tensor<Tref>(miopen::deref(biasTensor));
+            db_host = tensor<Tref>(biasTensor);
 
             // Init tensor on host
             bool b_read = false;
@@ -2721,7 +2721,7 @@ int ConvDriver<Tgpu, Tref>::RunForwardGPUReference()
     {
         if(!is_gpualloc)
         {
-            auto out_tmp = tensor<Tgpu>(miopen::deref(outputTensor));
+            auto out_tmp = tensor<Tgpu>(outputTensor);
             out.CopyFromDeviceToHost(GetStream(), out_tmp);
             for(size_t i = 0; i < out_tmp.data.size(); ++i)
             {
@@ -4052,7 +4052,7 @@ int ConvDriver<Tgpu, Tref>::RunBackwardWeightsGPUReference()
     {
         if(!is_gpualloc)
         {
-            auto dwei_tmp = tensor<Tgpu>(miopen::deref(weightTensor));
+            auto dwei_tmp = tensor<Tgpu>(weightTensor);
             dwei.CopyFromDeviceToHost(GetStream(), dwei_tmp);
             for(size_t i = 0; i < dwei_tmp.data.size(); ++i)
             {
@@ -4108,7 +4108,7 @@ int ConvDriver<Tgpu, Tref>::RunBackwardDataGPUReference()
     {
         if(!is_gpualloc)
         {
-            auto din_tmp = tensor<Tgpu>(miopen::deref(inputTensor));
+            auto din_tmp = tensor<Tgpu>(inputTensor);
             din.CopyFromDeviceToHost(GetStream(), din_tmp);
             for(size_t i = 0; i < din_tmp.data.size(); ++i)
             {

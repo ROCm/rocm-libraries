@@ -30,7 +30,7 @@
 #include "driver.hpp"
 #include "mloNeuronHost.hpp"
 #include <common_utils/random.hpp>
-#include "tensor_driver.hpp"
+#include <miopen_utils/tensor_driver.hpp>
 #include "timer.hpp"
 #include "util_driver.hpp"
 

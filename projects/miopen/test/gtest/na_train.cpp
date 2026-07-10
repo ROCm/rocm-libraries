@@ -3,7 +3,9 @@
 
 #include <gtest/gtest.h>
 
-#include "../fusionHost.hpp"
+#include <miopen_utils/fusionHost.hpp>
+#include "get_handle.hpp"
+#include <miopen/batch_norm.hpp>
 #include "compare_helper.hpp"
 #include <common_utils/stringutils.hpp>
 #include <sstream>
@@ -170,9 +172,9 @@ struct verify_fwd_batchnorm_spatial_activ
         auto lclxdesc = x.desc;
         miopenExecuteFusionPlan(&handle,
                                 fusionplan,
-                                &lclxdesc,
+                                lclxdesc,
                                 in_dev.get(),
-                                &lclxdesc,
+                                lclxdesc,
                                 out_dev.get(),
                                 ptr_fusionargs.get());
 
@@ -337,9 +339,9 @@ struct verify_bwd_batchnorm_spatial_activ
         auto lcldydesc = dy.desc;
         miopenExecuteFusionPlan(&handle,
                                 fusionplan,
-                                &lcldydesc,
+                                lcldydesc,
                                 dyin_dev.get(),
-                                &lcldydesc,
+                                lcldydesc,
                                 dxout_dev.get(),
                                 ptr_fusionargs.get());
 
@@ -480,9 +482,9 @@ struct verify_fwd_batchnorm_peract_activ
         auto lclxdesc = x.desc;
         miopenExecuteFusionPlan(&handle,
                                 fusionplan,
-                                &lclxdesc,
+                                lclxdesc,
                                 in_dev.get(),
-                                &lclxdesc,
+                                lclxdesc,
                                 out_dev.get(),
                                 ptr_fusionargs.get());
 
@@ -642,9 +644,9 @@ struct verify_bwd_batchnorm_peract_activ
         auto lcldydesc = dy.desc;
         miopenExecuteFusionPlan(&handle,
                                 fusionplan,
-                                &lcldydesc,
+                                lcldydesc,
                                 dyin_dev.get(),
-                                &lcldydesc,
+                                lcldydesc,
                                 dxout_dev.get(),
                                 ptr_fusionargs.get());
 
@@ -772,11 +774,11 @@ struct na_fusion_test : public testing::TestWithParam<TestCase>
 
         miopenFusionOpDescriptor_t bNormFwdOp = nullptr;
         miopenFusionOpDescriptor_t activFwdOp = nullptr;
-        auto ptr_fwdfusionplan                = GetManagedFusionPlanDesc(&input.desc);
+        auto ptr_fwdfusionplan                = GetManagedFusionPlanDesc(input.desc);
 
         miopenFusionOpDescriptor_t bNormBwdOp = nullptr;
         miopenFusionOpDescriptor_t activBwdOp = nullptr;
-        auto ptr_bwdfusionplan                = GetManagedFusionPlanDesc(&input.desc);
+        auto ptr_bwdfusionplan                = GetManagedFusionPlanDesc(input.desc);
 
         std::size_t ssn, ssc, ssh, ssw;
         if(batchnormMode == 1)

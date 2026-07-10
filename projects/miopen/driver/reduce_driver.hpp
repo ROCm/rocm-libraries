@@ -30,12 +30,12 @@
 #include "driver.hpp"
 #include "miopen_Reduction.hpp"
 #include <common_utils/random.hpp>
-#include "tensor_driver.hpp"
+#include <miopen_utils/tensor_driver.hpp>
 #include "timer.hpp"
 #include "util_driver.hpp"
 #include "util_file.hpp"
 
-#include "../test/verify.hpp"
+#include <miopen_utils/verify.hpp>
 
 #include <miopen/miopen.h>
 #include <memory>

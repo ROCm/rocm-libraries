@@ -34,8 +34,10 @@
 #include <common_utils/stringutils.hpp>
 #include <miopen/tensor.hpp>
 #include <utility>
-#include <fusionHost.hpp>
-#include "verify.hpp"
+#include <miopen_utils/fusionHost.hpp>
+#include "get_handle.hpp"
+#include <miopen/handle.hpp>
+#include <miopen_utils/verify.hpp>
 #include "gtest/gtest.h"
 #include <half/half.hpp>
 

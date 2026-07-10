@@ -26,11 +26,12 @@
 #include <gtest/gtest.h>
 #include <gtest/gtest_common.hpp>
 #include <miopen/miopen.h>
+#include <miopen/fusion_plan.hpp>
 #include <miopen/fusion.hpp>
 #include <miopen/fusion/solvers.hpp>
 #include <miopen/find_solution.hpp>
 
-#include "tensor_holder.hpp"
+#include <miopen_utils/tensor_holder.hpp>
 #include "get_handle.hpp"
 #include "cba.hpp"
 #include "gtest_desc_guard.hpp"
@@ -133,9 +134,9 @@ TEST_P(GPU_FusionSetArg_FP16, TestSetArgApiCall)
 
     EXPECT_EQ(miopenExecuteFusionPlan_v2(&handle,
                                          fusion_plan,
-                                         &(cba_float::input.desc),
+                                         cba_float::input.desc,
                                          cba_float::in_dev.get(),
-                                         &(cba_float::output.desc),
+                                         cba_float::output.desc,
                                          cba_float::out_dev.get(),
                                          fusion_args,
                                          cba_float::wspace.ptr(),
@@ -291,9 +292,9 @@ public:
 
             EXPECT_EQ(miopenExecuteFusionPlan_v2(&handle,
                                                  fusion_plan,
-                                                 &(cba_base::input.desc),
+                                                 cba_base::input.desc,
                                                  cba_base::in_dev.get(),
-                                                 &(cba_base::output.desc),
+                                                 cba_base::output.desc,
                                                  cba_base::out_dev.get(),
                                                  fusion_args,
                                                  cba_base::wspace.ptr(),
@@ -304,9 +305,9 @@ public:
             cba_base::wspace.resize(workspace_size + 10);
             EXPECT_EQ(miopenExecuteFusionPlan_v2(&handle,
                                                  fusion_plan,
-                                                 &(cba_base::input.desc),
+                                                 cba_base::input.desc,
                                                  cba_base::in_dev.get(),
-                                                 &(cba_base::output.desc),
+                                                 cba_base::output.desc,
                                                  cba_base::out_dev.get(),
                                                  fusion_args,
                                                  cba_base::wspace.ptr(),
@@ -320,9 +321,9 @@ public:
             cba_base::wspace.resize(workspace_size - 10);
             EXPECT_EQ(miopenExecuteFusionPlan_v2(&handle,
                                                  fusion_plan,
-                                                 &(cba_base::input.desc),
+                                                 cba_base::input.desc,
                                                  cba_base::in_dev.get(),
-                                                 &(cba_base::output.desc),
+                                                 cba_base::output.desc,
                                                  cba_base::out_dev.get(),
                                                  fusion_args,
                                                  cba_base::wspace.ptr(),

@@ -30,9 +30,9 @@
 #include <miopen/tensor_ops.hpp>
 
 #include "get_handle.hpp"
-#include "tensor_holder.hpp"
+#include <miopen_utils/tensor_holder.hpp>
 #include "tensor_util.hpp"
-#include "verify.hpp"
+#include <miopen_utils/verify.hpp>
 
 namespace {
 using UnaryTensorOpsCase = std::tuple<std::vector<size_t>, int>;

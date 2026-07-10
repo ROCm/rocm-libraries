@@ -26,20 +26,19 @@
 #ifndef GUARD_CPU_CONV_HPP
 #define GUARD_CPU_CONV_HPP
 
-#include "test.hpp"
 #include <array>
 #include <iostream>
 #include <iterator>
 #include <limits>
 #include <memory>
 #include <miopen/miopen.h>
-#include <miopen/tensor.hpp>
+#include <common_utils/errors.hpp>
 #include <utility>
 
-#include "tensor_holder.hpp"
+#include <miopen_utils/tensor_holder.hpp>
 #include <common_utils/stringutils.hpp>
 #include <common_utils/functional.hpp>
-#include <hip_float8.hpp>
+#include <common_utils/float8.hpp>
 
 template <class T, class... Ts>
 static constexpr auto make_array(T x, Ts... xs)
@@ -416,7 +415,7 @@ void cpu_convolution_forward(std::size_t spatial_dim,
         break;
     }
     default: {
-        MIOPEN_THROW("not belong to any case");
+        COMMON_THROW("not belong to any case");
     }
     }
 }
@@ -462,7 +461,7 @@ void cpu_convolution_backward_data(std::size_t spatial_dim,
         break;
     }
     default: {
-        MIOPEN_THROW("not belong to any case");
+        COMMON_THROW("not belong to any case");
     }
     }
 }
@@ -508,7 +507,7 @@ void cpu_convolution_backward_weight(std::size_t spatial_dim,
         break;
     }
     default: {
-        MIOPEN_THROW("not belong to any case");
+        COMMON_THROW("not belong to any case");
     }
     }
 }

@@ -16,7 +16,7 @@ function(add_speedtest_executable TEST_NAME)
     endif()
     separate_arguments(MIOPEN_TEST_FLAGS_ARGS NATIVE_COMMAND ${MIOPEN_TEST_FLAGS})
     # MIOpen_with_plugins ensures CK plugin .so's are built alongside the speedtest
-    target_link_libraries(${TEST_NAME} MIOpen_with_plugins miopen_common_utils)
+    target_link_libraries(${TEST_NAME} MIOpen_with_plugins miopen_common_utils miopen_utils)
     target_include_directories(${TEST_NAME} PRIVATE ../test ../src/kernels)
 endfunction(add_speedtest_executable)
 

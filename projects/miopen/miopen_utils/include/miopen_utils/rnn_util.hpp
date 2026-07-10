@@ -35,10 +35,10 @@
 #include <cstdlib>
 #include <numeric>
 
-#include "gemm.hpp"
-#include "random.hpp"
+#include <miopen_utils/gemm.hpp>
+#include <miopen_utils/random.hpp>
 
-#include <miopen/tensor.hpp>
+#include <miopen_utils/tensor_desc.hpp>
 
 // complexity O(NlogN)
 inline std::vector<int> GetReverseOrderIndex(const std::vector<int>& base_index)
@@ -97,20 +97,18 @@ inline void HiddenTensorReorder(const std::vector<Tgpu>& src_array,
     }
 }
 
-inline void createTensorDescArray(std::vector<miopen::TensorDescriptor>& td,
+inline void createTensorDescArray(std::vector<TensorDesc>& td,
                                   std::vector<miopenTensorDescriptor_t>& ptd,
                                   const std::vector<int> bs,
                                   const int secondDim,
                                   miopenDataType_t dataType)
 {
-
     std::transform(bs.begin(), bs.end(), std::back_inserter(td), [&](int x) {
-        return miopen::TensorDescriptor(
-            dataType, {static_cast<std::size_t>(x), static_cast<std::size_t>(secondDim)});
+        return TensorDesc(
+            dataType, std::vector<size_t>{static_cast<size_t>(x), static_cast<size_t>(secondDim)});
     });
-    std::transform(td.begin(), td.end(), std::back_inserter(ptd), [](miopen::TensorDescriptor& x) {
-        return &x;
-    });
+    std::transform(
+        td.begin(), td.end(), std::back_inserter(ptd), [](TensorDesc& x) { return x.get(); });
 }
 
 inline std::tuple<size_t, size_t>

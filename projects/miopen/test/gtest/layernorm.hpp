@@ -25,10 +25,10 @@
  *******************************************************************************/
 
 #include <../test/get_handle.hpp>
-#include <../test/random.hpp>
-#include <../test/tensor_holder.hpp>
-#include <../test/verify.hpp>
-#include "cpu_layernorm.hpp"
+#include <miopen_utils/random.hpp>
+#include <miopen_utils/tensor_holder.hpp>
+#include <miopen_utils/verify.hpp>
+#include <miopen_utils/cpu_layernorm.hpp>
 #include <gtest/gtest.h>
 #include <miopen/layernorm.hpp>
 #include <miopen/miopen.h>

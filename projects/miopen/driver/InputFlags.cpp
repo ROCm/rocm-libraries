@@ -26,7 +26,7 @@
 
 #include "InputFlags.hpp"
 
-#include "tensor_driver.hpp"
+#include <miopen_utils/tensor_driver.hpp>
 
 #include <miopen/errors.hpp>
 #include <miopen/tensor.hpp>

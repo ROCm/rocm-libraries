@@ -10,8 +10,8 @@
 
 #include <iostream>
 
-#include "verify.hpp"
-#include "../tensor_holder.hpp"
+#include <miopen_utils/verify.hpp>
+#include <miopen_utils/tensor_holder.hpp>
 
 namespace test_helpers {
 template <typename T>

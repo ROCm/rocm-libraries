@@ -28,7 +28,7 @@
 #include <gtest/gtest.h>
 #include <hip_float8.hpp>
 
-#include "../random.hpp"
+#include <miopen_utils/random.hpp>
 
 template <typename T>
 inline T RanGenData()

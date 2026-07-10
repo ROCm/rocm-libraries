@@ -31,14 +31,14 @@
 #include "miopen_ConvBatchNormActivHost.hpp"
 #include "mloNeuronHost.hpp"
 #include <common_utils/random.hpp>
-#include "tensor_driver.hpp"
+#include <miopen_utils/tensor_driver.hpp>
 #include "timer.hpp"
 #include "util_driver.hpp"
 #include "conv_common.hpp"
 
-#include "../test/verify.hpp"
-#include "../test/cpu_conv.hpp"
-#include "../test/cpu_bias.hpp"
+#include <miopen_utils/verify.hpp>
+#include <miopen_utils/cpu_conv.hpp>
+#include <miopen_utils/cpu_bias.hpp>
 
 #include <miopen/env.hpp>
 #include <miopen/errors.hpp>
@@ -1280,9 +1280,9 @@ void CBAInferFusionDriver<Tgpu, Tref>::runCPUConvFwdInference()
     tensor<Tref> wei_local_host;
     tensor<Tref> outhost_local_host;
 
-    in_local_host.desc      = miopen::deref(inputTensor);
-    wei_local_host.desc     = miopen::deref(weightTensor);
-    outhost_local_host.desc = miopen::deref(outputTensor);
+    in_local_host.desc      = TensorDesc(inputTensor);
+    wei_local_host.desc     = TensorDesc(weightTensor);
+    outhost_local_host.desc = TensorDesc(outputTensor);
 
     in_local_host.data  = in_host;
     wei_local_host.data = wei_host;

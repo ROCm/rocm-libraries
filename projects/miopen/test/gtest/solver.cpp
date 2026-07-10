@@ -7,7 +7,7 @@
 #include <miopen/conv/solvers.hpp>
 #include <miopen/temp_file.hpp>
 
-#include "random.hpp"
+#include <miopen_utils/random.hpp>
 #include "../get_handle.hpp"
 
 namespace {

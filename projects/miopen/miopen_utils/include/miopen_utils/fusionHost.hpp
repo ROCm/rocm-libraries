@@ -30,15 +30,12 @@
 #include <limits>
 #include <memory>
 #include <utility>
+#include <common_utils/errors.hpp>
 #include <miopen/miopen.h>
-#include <miopen/convolution.hpp>
-#include <miopen/batch_norm.hpp>
-#include <miopen/activ.hpp>
-#include <miopen/tensor.hpp>
-#include <miopen/fusion_plan.hpp>
-#include "get_handle.hpp"
-#include "tensor_holder.hpp"
-#include "verify.hpp"
+#include <miopen_utils/tensor_desc.hpp>
+#include <common_utils/tuple_utils.hpp>
+#include <miopen_utils/tensor_holder.hpp>
+#include <miopen_utils/verify.hpp>
 
 template <class T>
 void convHostForward(const tensor<T>& input,
@@ -51,25 +48,25 @@ void convHostForward(const tensor<T>& input,
 
     int in_n, in_c, in_h, in_w;
     int in_nstride, in_cstride, in_hstride, in_wstride;
-    std::tie(in_n, in_c, in_h, in_w) = miopen::tien<4>(input.desc.GetLengths());
-    std::tie(in_nstride, in_cstride, in_hstride, in_wstride) =
-        miopen::tien<4>(input.desc.GetStrides());
+    std::tie(in_n, in_c, in_h, in_w)                         = Tien<4>(input.desc.GetLengths());
+    std::tie(in_nstride, in_cstride, in_hstride, in_wstride) = Tien<4>(input.desc.GetStrides());
 
     int wei_n, wei_c, wei_h, wei_w;
     int wei_nstride, wei_cstride, wei_hstride, wei_wstride;
-    std::tie(wei_n, wei_c, wei_h, wei_w) = miopen::tien<4>(weights.desc.GetLengths());
+    std::tie(wei_n, wei_c, wei_h, wei_w) = Tien<4>(weights.desc.GetLengths());
     std::tie(wei_nstride, wei_cstride, wei_hstride, wei_wstride) =
-        miopen::tien<4>(weights.desc.GetStrides());
+        Tien<4>(weights.desc.GetStrides());
 
     int out_n, out_c, out_h, out_w;
     int out_nstride, out_cstride, out_hstride, out_wstride;
-    std::tie(out_n, out_c, out_h, out_w) = miopen::tien<4>(output.desc.GetLengths());
+    std::tie(out_n, out_c, out_h, out_w) = Tien<4>(output.desc.GetLengths());
     std::tie(out_nstride, out_cstride, out_hstride, out_wstride) =
-        miopen::tien<4>(output.desc.GetStrides());
+        Tien<4>(output.desc.GetStrides());
 
     int stride_h, stride_w, pad_h, pad_w, dilation_h, dilation_w;
     miopenConvolutionMode_t mode;
-    miopenPaddingMode_t pmode = miopen::deref(convDesc).paddingMode;
+    miopenPaddingMode_t pmode;
+    miopenGetConvolutionPaddingMode(convDesc, &pmode);
     miopenGetConvolutionDescriptor(
         convDesc, &mode, &pad_h, &pad_w, &stride_h, &stride_w, &dilation_h, &dilation_w);
 
@@ -89,7 +86,7 @@ void convHostForward(const tensor<T>& input,
     }
 
     if(out_h <= 0 || out_w <= 0)
-        MIOPEN_THROW("Invalid Test Case: Check Output Dimension.");
+        COMMON_THROW("Invalid Test Case: Check Output Dimension.");
 
     for(int o = 0; o < out_n; o++)
     { // mini-batch size
@@ -145,7 +142,7 @@ void batchNormSpatialHostInference(const tensor<T>& input,
 {
 
     int n_batches, channels, height, width;
-    std::tie(n_batches, channels, height, width) = miopen::tien<4>(input.desc.GetLengths());
+    std::tie(n_batches, channels, height, width) = Tien<4>(input.desc.GetLengths());
     miopen::par_for(channels, 1, [&](int cidx) { // via channel
         V mean     = estimatedMean(0, cidx, 0, 0);
         V variance = estimatedVariance(0, cidx, 0, 0);
@@ -180,7 +177,7 @@ void batchNormPerActivHostInference(const tensor<T>& input,
                                     bool useInverseVariance = false)
 {
     int n_batches, channels, height, width;
-    std::tie(n_batches, channels, height, width) = miopen::tien<4>(input.desc.GetLengths());
+    std::tie(n_batches, channels, height, width) = Tien<4>(input.desc.GetLengths());
     miopen::par_for(channels, 1, [&](int cidx) { // via channel
         for(int row = 0; row < height; row++)
         { // via rows
@@ -218,7 +215,7 @@ void batchNormSpatialHostFwdTrain(const tensor<T>& input,
 {
 
     int height, width, n_batch, channels;
-    std::tie(n_batch, channels, height, width) = miopen::tien<4>(input.desc.GetLengths());
+    std::tie(n_batch, channels, height, width) = Tien<4>(input.desc.GetLengths());
     const auto nhw                             = double(height * width * n_batch);
 
     miopen::par_for(channels, 1, [&](int cidx) {
@@ -306,14 +303,14 @@ void batchNormSpatialHostBwdTrain(const tensor<XDataType>& x_input,
 {
     double activ_gamma = 0.;
     int height, width, n_batch, channels;
-    std::tie(n_batch, channels, height, width) = miopen::tien<4>(x_input.desc.GetLengths());
+    std::tie(n_batch, channels, height, width) = Tien<4>(x_input.desc.GetLengths());
     auto nhw                                   = double(height * width * n_batch);
     int in_cstride                             = height * width;
 
     if(activ_mode > 0)
     {
         tensor<AccDataType> input_norm =
-            tensor<AccDataType>{x_input.desc.GetLayoutEnum().value(), x_input.desc.GetLengths()};
+            tensor<AccDataType>{x_input.desc.GetLayout(), x_input.desc.GetLengths()};
         miopen::par_for(channels, 1, [&](int cidx) {
             double mean           = 0.0;
             double invVar         = 0.0;
@@ -477,7 +474,7 @@ void batchNormActivSpatialHostBwdTrain(miopenActivationMode_t activMode,
 {
 
     int height, width, n_batch, channels;
-    std::tie(n_batch, channels, height, width) = miopen::tien<4>(x_input.desc.GetLengths());
+    std::tie(n_batch, channels, height, width) = Tien<4>(x_input.desc.GetLengths());
     auto nhw                                   = double(height * width * n_batch);
     int in_cstride                             = height * width;
 
@@ -563,7 +560,7 @@ void batchNormPerActHostFwdTrain(const tensor<T>& input,
 {
 
     int height, width, n_batch, channels;
-    std::tie(n_batch, channels, height, width) = miopen::tien<4>(input.desc.GetLengths());
+    std::tie(n_batch, channels, height, width) = Tien<4>(input.desc.GetLengths());
     const auto n                               = double(n_batch);
 
     miopen::par_for(channels, 1, [&](int cidx) {
@@ -648,7 +645,7 @@ void batchNormPerActHostBwdTrain(const tensor<XDataType>& x_input,
 {
 
     int height, width, n_batch, channels;
-    std::tie(n_batch, channels, height, width) = miopen::tien<4>(x_input.desc.GetLengths());
+    std::tie(n_batch, channels, height, width) = Tien<4>(x_input.desc.GetLengths());
     int in_cstride                             = height * width;
     auto n                                     = double(n_batch);
 
@@ -746,7 +743,7 @@ void batchNormActivPerActHostBwdTrain(miopenActivationMode_t activMode,
 {
 
     int height, width, n_batch, channels;
-    std::tie(n_batch, channels, height, width) = miopen::tien<4>(x_input.desc.GetLengths());
+    std::tie(n_batch, channels, height, width) = Tien<4>(x_input.desc.GetLengths());
     int in_cstride                             = height * width;
     auto n                                     = double(n_batch);
 
@@ -986,9 +983,14 @@ inline void activationHostBwdElement(miopenActivationMode_t activMode,
 }
 
 template <class T>
-tensor<T> get_output_tensor(const miopen::ConvolutionDescriptor& filter,
+tensor<T> get_output_tensor(miopenConvolutionDescriptor_t filter,
                             const tensor<T>& input,
                             const tensor<T>& weights)
 {
-    return tensor<T>{filter.GetForwardOutputTensor(input.desc, weights.desc, miopen_type<T>{})};
+    int ndim = 0;
+    miopenGetConvolutionNdForwardOutputDim(filter, input.desc, weights.desc, &ndim, nullptr);
+    std::vector<int> out_dims(ndim);
+    miopenGetConvolutionNdForwardOutputDim(
+        filter, input.desc, weights.desc, &ndim, out_dims.data());
+    return tensor<T>{std::vector<size_t>(out_dims.begin(), out_dims.end())};
 }

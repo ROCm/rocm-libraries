@@ -26,8 +26,8 @@
 
 #pragma once
 
-#include "tensor_holder.hpp"
-#include "rnn_util.hpp"
+#include <miopen_utils/tensor_holder.hpp>
+#include <miopen_utils/rnn_util.hpp>
 
 #include <miopen/seq_tensor.hpp>
 

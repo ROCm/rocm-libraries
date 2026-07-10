@@ -26,15 +26,15 @@
 #ifndef GUARD_MIOPEN_LAYERNORM_DRIVER_HPP
 #define GUARD_MIOPEN_LAYERNORM_DRIVER_HPP
 
-#include <../test/tensor_holder.hpp>
-#include <../test/verify.hpp>
-#include <../test/cpu_layernorm.hpp>
+#include <miopen_utils/tensor_holder.hpp>
+#include <miopen_utils/verify.hpp>
+#include <miopen_utils/cpu_layernorm.hpp>
 #include "InputFlags.hpp"
 #include "driver.hpp"
 #include "miopen/datatype.hpp"
 #include "miopen/miopen.h"
 #include <common_utils/random.hpp>
-#include "tensor_driver.hpp"
+#include <miopen_utils/tensor_driver.hpp>
 #include "timer.hpp"
 #include <cfloat>
 #include <cstdlib>
@@ -309,22 +309,22 @@ int LayerNormDriver<T>::AllocateBuffersAndCopy()
     db_dev        = std::unique_ptr<GPUMem>(new GPUMem(ctx, db_sz, sizeof(T)));
     workspace_dev = std::unique_ptr<GPUMem>(new GPUMem(ctx, ws_sizeInBytes, sizeof(std::byte)));
 
-    in       = tensor<T>(miopen::deref(inputDesc)).generate(genT0val);
-    weight   = tensor<T>(miopen::deref(weightDesc)).generate(genT0val);
-    bias     = tensor<T>(miopen::deref(biasDesc)).generate(genT0val);
-    out      = tensor<T>(miopen::deref(outputDesc)).generate(genT0val);
-    mean     = tensor<T>(miopen::deref(meanDesc)).generate(genT0val);
-    rstd     = tensor<T>(miopen::deref(rstdDesc)).generate(genT0val);
-    dy       = tensor<T>(miopen::deref(dyDesc)).generate(genT0val);
-    dx       = tensor<T>(miopen::deref(dxDesc)).generate(genT0val);
-    dw       = tensor<T>(miopen::deref(dwDesc)).generate(genT0val);
-    db       = tensor<T>(miopen::deref(dbDesc)).generate(genT0val);
-    outhost  = tensor<T>(miopen::deref(outputDesc)).generate(genT0val);
-    meanhost = tensor<T>(miopen::deref(meanDesc)).generate(genT0val);
-    rstdhost = tensor<T>(miopen::deref(rstdDesc)).generate(genT0val);
-    dxhost   = tensor<T>(miopen::deref(dxDesc)).generate(genT0val);
-    dwhost   = tensor<T>(miopen::deref(dwDesc)).generate(genT0val);
-    dbhost   = tensor<T>(miopen::deref(dbDesc)).generate(genT0val);
+    in       = tensor<T>(inputDesc).generate(genT0val);
+    weight   = tensor<T>(weightDesc).generate(genT0val);
+    bias     = tensor<T>(biasDesc).generate(genT0val);
+    out      = tensor<T>(outputDesc).generate(genT0val);
+    mean     = tensor<T>(meanDesc).generate(genT0val);
+    rstd     = tensor<T>(rstdDesc).generate(genT0val);
+    dy       = tensor<T>(dyDesc).generate(genT0val);
+    dx       = tensor<T>(dxDesc).generate(genT0val);
+    dw       = tensor<T>(dwDesc).generate(genT0val);
+    db       = tensor<T>(dbDesc).generate(genT0val);
+    outhost  = tensor<T>(outputDesc).generate(genT0val);
+    meanhost = tensor<T>(meanDesc).generate(genT0val);
+    rstdhost = tensor<T>(rstdDesc).generate(genT0val);
+    dxhost   = tensor<T>(dxDesc).generate(genT0val);
+    dwhost   = tensor<T>(dwDesc).generate(genT0val);
+    dbhost   = tensor<T>(dbDesc).generate(genT0val);
 
     for(int i = 0; i < in_sz; i++)
     {

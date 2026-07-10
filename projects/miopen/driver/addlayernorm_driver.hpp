@@ -26,12 +26,12 @@
 #ifndef GUARD_MIOPEN_ADDLAYERNORM_DRIVER_HPP
 #define GUARD_MIOPEN_ADDLAYERNORM_DRIVER_HPP
 
-#include <../test/tensor_holder.hpp>
-#include <../test/verify.hpp>
+#include <miopen_utils/tensor_holder.hpp>
+#include <miopen_utils/verify.hpp>
 #include "InputFlags.hpp"
 #include "driver.hpp"
 #include <common_utils/random.hpp>
-#include "tensor_driver.hpp"
+#include <miopen_utils/tensor_driver.hpp>
 #include "timer.hpp"
 #include <algorithm>
 #include <cfloat>

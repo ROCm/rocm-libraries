@@ -31,12 +31,12 @@
 #include "lstm_verify_gemm.hpp"
 #include <common_utils/random.hpp>
 #include "rnn_verify_gemm.hpp"
-#include "tensor_driver.hpp"
+#include <miopen_utils/tensor_driver.hpp>
 #include "timer.hpp"
 #include "util_driver.hpp"
 #include "util_file.hpp"
 
-#include <../test/verify.hpp>
+#include <miopen_utils/verify.hpp>
 
 #include <miopen/errors.hpp>
 #include <miopen/logger.hpp>

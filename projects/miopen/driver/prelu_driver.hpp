@@ -28,10 +28,10 @@
 
 #include "driver.hpp"
 #include "mloPReLUHost.hpp"
-#include "tensor_driver.hpp"
+#include <miopen_utils/tensor_driver.hpp>
 #include "timer.hpp"
 
-#include <../test/verify.hpp>
+#include <miopen_utils/verify.hpp>
 
 #include <miopen/miopen.h>
 

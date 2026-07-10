@@ -45,11 +45,11 @@
 #include "driver.hpp"
 #include "get_handle.hpp"
 #include "gtest_common.hpp"
-#include "random.hpp"
-#include "tensor_holder.hpp"
+#include <miopen_utils/random.hpp>
+#include <miopen_utils/tensor_holder.hpp>
 #include "test.hpp"
 #include "test_parameter_name_generator.hpp"
-#include "verify.hpp"
+#include <miopen_utils/verify.hpp>
 
 // Run CPU emulations in hierarchical reduction mode.
 // #define MIO_HEIRARCH_SEL 0

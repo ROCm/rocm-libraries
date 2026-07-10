@@ -3,7 +3,7 @@
 #ifndef GUARD_CPU_CONV_HPP
 #define GUARD_CPU_CONV_HPP
 
-#include <../test/tensor_holder.hpp>
+#include <miopen_utils/tensor_holder.hpp>
 
 template <class T>
 void cpu_layernorm_forward(tensor<T> input,

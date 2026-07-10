@@ -33,7 +33,7 @@
 
 #include <miopen/miopen.h>
 
-#include "../tensor_holder.hpp"
+#include <miopen_utils/tensor_holder.hpp>
 
 namespace miopen {
 namespace tests {

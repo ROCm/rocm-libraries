@@ -28,7 +28,7 @@
 
 #include "InputFlags.hpp"
 #include "driver.hpp"
-#include "tensor_driver.hpp"
+#include <miopen_utils/tensor_driver.hpp>
 #include "timer.hpp"
 #include <common_utils/random.hpp>
 #include <algorithm>
@@ -40,8 +40,8 @@
 #include <miopen/tensor_view_utils.hpp>
 #include <numeric>
 #include <vector>
-#include <../test/tensor_holder.hpp>
-#include <../test/verify.hpp>
+#include <miopen_utils/tensor_holder.hpp>
+#include <miopen_utils/verify.hpp>
 
 template <typename Tgpu, typename Tcheck>
 int32_t mloGetitemBackwardRunHost(miopenTensorDescriptor_t dyDesc,

@@ -6,12 +6,12 @@
 
 #include "args.hpp"
 #include "get_handle.hpp"
-#include "network_data.hpp"
-#include "serialize.hpp"
+#include <miopen_utils/network_data.hpp>
+#include <miopen_utils/serialize.hpp>
 #include "common_utils/stringutils.hpp"
-#include "tensor_holder.hpp"
+#include <miopen_utils/tensor_holder.hpp>
 #include "test.hpp"
-#include "verify.hpp"
+#include <miopen_utils/verify.hpp>
 
 #include <functional>
 #include <deque>

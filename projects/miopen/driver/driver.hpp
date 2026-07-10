@@ -39,7 +39,7 @@
 #include <miopen/miopen.h>
 #include <common_utils/bfloat16.hpp>
 #include <miopen/handle.hpp>
-#include <../test/tensor_holder.hpp>
+#include <miopen_utils/tensor_holder.hpp>
 #include "util_driver.hpp"
 #include "rocrand_wrapper.hpp"
 using half         = half_float::half;
@@ -234,7 +234,7 @@ public:
 
     void AllocOnHost(miopenTensorDescriptor_t t)
     {
-        host = tensor<Tgpu>(miopen::deref(t));
+        host = tensor<Tgpu>(t);
         if(is_gpualloc) // We do not need host data.
         {
             host.data.clear();
@@ -244,7 +244,7 @@ public:
     template <typename T>
     void AllocOnHost(tensor<T> t)
     {
-        AllocOnHost(&t.desc);
+        AllocOnHost(t.desc);
     }
 
     std::vector<Tgpu>& GetVector()

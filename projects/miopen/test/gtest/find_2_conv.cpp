@@ -61,15 +61,15 @@ void RunFind2ConvTest(const Find2ConvTestCase& test_case)
     EXPECT_EQ(miopenCreateConvProblem(&problem, &filter, test_case.direction), miopenStatusSuccess);
 
     // Add tensor descriptors
-    EXPECT_EQ(miopenSetProblemTensorDescriptor(problem, miopenTensorConvolutionX, &x.desc),
+    EXPECT_EQ(miopenSetProblemTensorDescriptor(problem, miopenTensorConvolutionX, x.desc),
               miopenStatusSuccess);
-    EXPECT_EQ(miopenSetProblemTensorDescriptor(problem, miopenTensorConvolutionW, &w.desc),
+    EXPECT_EQ(miopenSetProblemTensorDescriptor(problem, miopenTensorConvolutionW, w.desc),
               miopenStatusSuccess);
-    EXPECT_EQ(miopenSetProblemTensorDescriptor(problem, miopenTensorConvolutionY, &y.desc),
+    EXPECT_EQ(miopenSetProblemTensorDescriptor(problem, miopenTensorConvolutionY, y.desc),
               miopenStatusSuccess);
 
     // Adding x descriptor again to validate that error is produced
-    EXPECT_EQ(miopenSetProblemTensorDescriptor(problem, miopenTensorConvolutionX, &x.desc),
+    EXPECT_EQ(miopenSetProblemTensorDescriptor(problem, miopenTensorConvolutionX, x.desc),
               miopenStatusBadParm);
 
     // Test FindSolutions
@@ -108,17 +108,17 @@ void RunFind2ConvTest(const Find2ConvTestCase& test_case)
                 {
                 case miopenProblemDirectionForward:
                     EXPECT_EQ(miopenConvolutionForwardGetWorkSpaceSize(
-                                  handle, &x.desc, &w.desc, &filter, &y.desc, &workspace_max_),
+                                  handle, x.desc, w.desc, &filter, y.desc, &workspace_max_),
                               miopenStatusSuccess);
                     return workspace_max_;
                 case miopenProblemDirectionBackward:
                     EXPECT_EQ(miopenConvolutionBackwardDataGetWorkSpaceSize(
-                                  handle, &y.desc, &w.desc, &filter, &x.desc, &workspace_max_),
+                                  handle, y.desc, w.desc, &filter, x.desc, &workspace_max_),
                               miopenStatusSuccess);
                     return workspace_max_;
                 case miopenProblemDirectionBackwardWeights:
                     EXPECT_EQ(miopenConvolutionBackwardWeightsGetWorkSpaceSize(
-                                  handle, &y.desc, &x.desc, &filter, &w.desc, &workspace_max_),
+                                  handle, y.desc, x.desc, &filter, w.desc, &workspace_max_),
                               miopenStatusSuccess);
                     return workspace_max_;
 
@@ -175,7 +175,7 @@ void RunFind2ConvTest(const Find2ConvTestCase& test_case)
     }
 
     // Test running solutions
-    miopenTensorDescriptor_t x_desc = &x.desc, w_desc = &w.desc, y_desc = &y.desc;
+    miopenTensorDescriptor_t x_desc = x.desc, w_desc = w.desc, y_desc = y.desc;
 
     for(const auto& solution : solutions)
     {

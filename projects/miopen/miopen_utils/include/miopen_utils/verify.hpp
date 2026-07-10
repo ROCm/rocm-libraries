@@ -36,8 +36,8 @@
 #include <common_utils/bfloat16.hpp>
 using half         = half_float::half;
 using hip_bfloat16 = bfloat16;
-#include <hip_float8.hpp>
-#include "tensor_holder.hpp"
+#include <common_utils/float8.hpp>
+#include <miopen_utils/tensor_holder.hpp>
 
 namespace miopen {
 

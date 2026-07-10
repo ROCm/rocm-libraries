@@ -54,6 +54,24 @@ WHITELIST=(
   # host float8 type). It references ../../src/kernels/hip_float8.hpp by
   # relative path on purpose (same RTC flat-include constraint as above).
   '^common_utils/include/common_utils/float8\.hpp$'
+  # TensorDesc + tensor_holder each contain a single #include <miopen/tensor.hpp>
+  # guarded by #ifdef MIOPEN_BUILD_TESTING -- the sanctioned, test-only bridge to
+  # the internal type (see MIOpenLayering-Phase3.md section 4.2). Driver and
+  # miopen_utils builds never define that macro, so they stay internal-free.
+  '^miopen_utils/include/miopen_utils/tensor_desc\.hpp$'
+  '^miopen_utils/include/miopen_utils/tensor_holder\.hpp$'
+  # ---- Documented residual driver<->test cross-includes (Phase-4 follow-ups) ----
+  # These could not be removed in Phase 3 without work that belongs to Phase 4
+  # (driver cleanup). Tracked, not silent.
+  #
+  # These tests use driver/driver.hpp for GPUMem. Extracting GPUMem into
+  # miopen_utils requires dropping its internal MIOPEN_LOG_CUSTOM logging (a
+  # behavior-change concession) and belongs with the Phase-4 driver cleanup.
+  '^test/gtest/find_mode_trust_verify\.cpp$'
+  '^test/gtest/kernel_tuning_net\.cpp$'
+  # layout_transpose uses driver/conv_common.hpp (driver conv test helpers with
+  # internal deps). Relocating it is Phase-4 work. (#7291 also left conv_common.)
+  '^test/gtest/layout_transpose\.cpp$'
 )
 
 is_whitelisted() {
@@ -205,7 +223,47 @@ run_phase2() {
 # Wire on in the Phase 3 PR, e.g.:
 #   check_no_forbidden_includes "miopen_utils/include" "miopen/" "miopen_utils" "miopen/miopen.h"
 # =============================================================================
-run_phase3() { :; }
+# Check that no file under $1 #includes a header living under $2 (a sibling
+# layer), i.e. a cross-include. Matches the observed include forms:
+#   "X.hpp"  "../X.hpp"  "../<other>/X.hpp"  <../<other>/X.hpp>
+# where <other> is the sibling directory name. Commented lines are excluded
+# (pattern anchored to line start after optional whitespace).
+check_no_cross_includes() {
+  local dir="$1" other="$2" label="$3"
+  if [[ ! -d "$dir" ]]; then
+    echo "  [skip] $dir does not exist (nothing to check for $label)"
+    return 0
+  fi
+  local pattern="^[[:space:]]*#[[:space:]]*include[[:space:]]*[<\"](\.\./)*${other}/"
+  local hits
+  hits="$(grep -rnE "$pattern" "$dir" 2>/dev/null)" || true
+  local violations=0 line file
+  while IFS= read -r line; do
+    [[ -z "$line" ]] && continue
+    file="${line%%:*}"
+    [[ "$file" == */build/* || "$file" == build/* ]] && continue
+    is_whitelisted "$file" && continue
+    if [[ "$violations" -eq 0 ]]; then
+      echo "  [FAIL] $label:"
+    fi
+    echo "         $line"
+    violations=$((violations + 1))
+  done <<< "$hits"
+  if [[ "$violations" -eq 0 ]]; then
+    echo "  [ok]   $label: none"
+  else
+    FAILURES=$((FAILURES + violations))
+  fi
+}
+
+run_phase3() {
+  echo "Phase 3: miopen_utils (MIOpen Utilities) + driver<->test decoupling"
+  # (a) miopen_utils may include only common_utils/ and miopen/miopen.h.
+  check_no_forbidden_includes "miopen_utils/include" "miopen/" "miopen_utils" "miopen/miopen.h"
+  # (b) zero driver<->test cross-includes, both directions.
+  check_no_cross_includes "driver" "test" "driver/ must not include test/ headers"
+  check_no_cross_includes "test" "driver" "test/ must not include driver/ headers"
+}
 
 # =============================================================================
 # Phase 4 -- driver. Rule (when implemented): driver/ includes of miopen/

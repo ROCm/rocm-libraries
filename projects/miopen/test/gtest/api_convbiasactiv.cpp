@@ -31,8 +31,9 @@
 #include <gtest/gtest.h>
 #include <miopen/miopen.h>
 #include <miopen/solver_id.hpp>
-#include <serialize.hpp>
-#include <fusionHost.hpp>
+#include <miopen_utils/serialize.hpp>
+#include <miopen_utils/fusionHost.hpp>
+#include <miopen/handle.hpp>
 
 #include "tensor_util.hpp"
 #include "get_handle.hpp"
@@ -107,7 +108,7 @@ protected:
                                         cba_config.dilation_y,
                                         cba_config.dialtion_x);
         int n, c, h, w;
-        miopenGetConvolutionForwardOutputDim(conv_desc, &input.desc, &weights.desc, &n, &c, &h, &w);
+        miopenGetConvolutionForwardOutputDim(conv_desc, input.desc, weights.desc, &n, &c, &h, &w);
         output  = tensor<float>{static_cast<size_t>(n),
                                 static_cast<size_t>(c),
                                 static_cast<size_t>(h),
@@ -173,21 +174,21 @@ TEST_P(GPU_ConvBiasActivFwd_FP32, DISABLED_DriveAPI)
     const float alpha = 1.0f;
     const auto status = miopenConvolutionBiasActivationForward(&get_handle(),
                                                                &alpha,
-                                                               &input.desc,
+                                                               input.desc,
                                                                in_dev.get(),
-                                                               &weights.desc,
+                                                               weights.desc,
                                                                wei_dev.get(),
                                                                conv_desc,
                                                                algo,
                                                                nullptr,
                                                                0,
                                                                &alpha,
-                                                               &z.desc,
+                                                               z.desc,
                                                                nullptr,
-                                                               &bias.desc,
+                                                               bias.desc,
                                                                bias_dev.get(),
                                                                activ_desc,
-                                                               &output.desc,
+                                                               output.desc,
                                                                out_dev.get());
     EXPECT_EQ(status, miopenStatusSuccess);
 }

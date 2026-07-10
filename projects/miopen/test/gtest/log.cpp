@@ -35,7 +35,7 @@
 #include <miopen/config.h>
 #include <miopen/fusion_plan.hpp>
 #include <miopen/logger.hpp>
-#include "../random.hpp"
+#include <miopen_utils/random.hpp>
 
 #if MIOPEN_BACKEND_OPENCL
 #define BKEND "OpenCL"
@@ -229,7 +229,7 @@ struct CreateBNormFusionPlan
 
         input              = tensor<T>{input_lens};
         auto derivedBnDesc = miopen::TensorDescriptor{};
-        miopenDeriveBNTensorDescriptor(&derivedBnDesc, &input.desc, bn_mode);
+        miopenDeriveBNTensorDescriptor(&derivedBnDesc, input.desc, bn_mode);
         scale       = tensor<T>{input_lens};
         shift       = tensor<T>{input_lens};
         estMean     = tensor<T>{input_lens};
@@ -257,7 +257,7 @@ struct CreateBNormFusionPlan
     void BNormActivation()
     {
         Init();
-        miopenCreateFusionPlan(&fusePlanDesc, miopenVerticalFusion, &input.desc);
+        miopenCreateFusionPlan(&fusePlanDesc, miopenVerticalFusion, input.desc);
 
         activ_desc = {activ_mode, activ_alpha, activ_beta, activ_gamma};
 

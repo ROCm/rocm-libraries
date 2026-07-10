@@ -2,12 +2,12 @@
 // SPDX-License-Identifier:  MIT
 
 #define MIOPEN_BETA_API 1
-#include "../driver/tensor_driver.hpp"
+#include <miopen_utils/tensor_driver.hpp>
 #include "cpu_cat.hpp"
 #include "get_handle.hpp"
-#include "random.hpp"
-#include "tensor_holder.hpp"
-#include "verify.hpp"
+#include <miopen_utils/random.hpp>
+#include <miopen_utils/tensor_holder.hpp>
+#include <miopen_utils/verify.hpp>
 #include <gtest/gtest.h>
 #include <miopen/cat.hpp>
 #include <miopen/miopen.h>
@@ -116,7 +116,7 @@ protected:
     void RunTest()
     {
         auto&& handle = get_handle();
-        std::vector<miopen::TensorDescriptor*> inputDescs;
+        std::vector<const miopen::TensorDescriptor*> inputDescs;
         std::vector<ConstData_t> inputData;
 
         cpu_cat_forward<T>(inputs, ref_output, dim, false);
@@ -124,7 +124,9 @@ protected:
         std::transform(inputs.begin(),
                        inputs.end(),
                        std::back_inserter(inputDescs),
-                       [](auto& input) { return &input.desc; });
+                       [](auto& input) -> const miopen::TensorDescriptor* {
+                           return &static_cast<const miopen::TensorDescriptor&>(input.desc);
+                       });
         std::transform(inputs_dev.begin(),
                        inputs_dev.end(),
                        std::back_inserter(inputData),

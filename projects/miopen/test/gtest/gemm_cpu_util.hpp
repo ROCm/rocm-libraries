@@ -26,7 +26,7 @@
 #pragma once
 
 #include <miopen/gemm_v2.hpp>
-#include "../rnn_util.hpp"
+#include <miopen_utils/rnn_util.hpp>
 namespace miopen {
 namespace gemm_cpu_util {
 template <typename T>

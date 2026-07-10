@@ -31,7 +31,7 @@
 #include <miopen/temp_file.hpp>
 
 #include "test.hpp"
-#include "random.hpp"
+#include <miopen_utils/random.hpp>
 
 #include <algorithm>
 #include <vector>

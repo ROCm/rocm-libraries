@@ -31,7 +31,7 @@
 #include "../dropout_util.hpp"
 #include "get_handle.hpp"
 
-#include "random.hpp"
+#include <miopen_utils/random.hpp>
 #include <cstdlib>
 #include <iostream>
 #include <algorithm>
@@ -44,7 +44,7 @@
 // Native rnn tensor format
 //
 #include "../seq_tensor_holder.hpp"
-#include "../rnn_util.hpp"
+#include <miopen_utils/rnn_util.hpp>
 #include "../cpu_rnn.hpp"
 ///
 
@@ -241,7 +241,7 @@ struct verify_rnn_api_base
         }
 
         auto& inLens = input.desc.GetLengths();
-        auto& hLens  = xHiddenState.desc.GetLengths();
+        auto hLens   = xHiddenState.desc.GetLengths();
 
         ss << " --batch_size " << inLens[0] << " --seq_len " << inLens[1] << " --in_vec "
            << inLens[2] << " --hid_h " << hLens[2] << " --num_layer " << rnnDesc.nLayers << " -r "

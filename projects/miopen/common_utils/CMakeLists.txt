@@ -32,6 +32,10 @@ endif()
 # resolve them. Gated on the same option that installs MIOpen's C++ headers, so
 # the two move together.
 if(MIOPEN_INSTALL_CXX_HEADERS)
+    # float8.hpp is a forwarding shim into src/kernels/ (not installed), so exclude it
+    # from the installed set — its relative include would not resolve externally, and no
+    # installed MIOpen header includes it (only build-only miopen_utils/driver/test do).
     install(DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}/include/common_utils
-            DESTINATION include)
+            DESTINATION include
+            PATTERN "float8.hpp" EXCLUDE)
 endif()

@@ -24,11 +24,11 @@
  *
  *******************************************************************************/
 
-#include "../driver/tensor_driver.hpp"
+#include <miopen_utils/tensor_driver.hpp>
 #include "get_handle.hpp"
-#include "random.hpp"
-#include "tensor_holder.hpp"
-#include "verify.hpp"
+#include <miopen_utils/random.hpp>
+#include <miopen_utils/tensor_holder.hpp>
+#include <miopen_utils/verify.hpp>
 #include <gtest/gtest.h>
 #include <miopen/t5layernorm.hpp>
 #include <miopen/miopen.h>

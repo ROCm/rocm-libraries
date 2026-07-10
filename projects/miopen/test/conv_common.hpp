@@ -47,16 +47,16 @@
 #include <utility>
 #include "driver.hpp"
 #include "get_handle.hpp"
-#include "tensor_holder.hpp"
-#include "verify.hpp"
+#include <miopen_utils/tensor_holder.hpp>
+#include <miopen_utils/verify.hpp>
 #include <common_utils/stringutils.hpp>
 #include "tensor_util.hpp"
 #include <common_utils/algorithm.hpp>
-#include "cpu_conv.hpp"
+#include <miopen_utils/cpu_conv.hpp>
 #include "gpu_conv.hpp"
-#include "network_data.hpp"
+#include <miopen_utils/network_data.hpp>
 #include "miopen/find_db.hpp"
-#include "random.hpp"
+#include <miopen_utils/random.hpp>
 
 #define TEST_DIRECT_SUPPORTED_CONFIG_ONLY (!MIOPEN_USE_ROCBLAS)
 
@@ -834,7 +834,7 @@ struct verify_forward_conv : conv_base<T, Tout>
                 else if(api == ConvApi::Find_2_0)
                 {
                     const auto f2_problem = MakeConvProblem(
-                        miopenProblemDirectionForward, &in_desc, &wei_desc, &rout.desc);
+                        miopenProblemDirectionForward, &in_desc, &wei_desc, rout.desc);
 
                     const miopenTensorArgument_t arguments[3] = {
                         {miopenTensorConvolutionX, nullptr, in_buf},
@@ -939,7 +939,7 @@ struct verify_forward_conv : conv_base<T, Tout>
                 else if(api == ConvApi::Find_2_0)
                 {
                     const auto f2_problem = MakeConvProblem(
-                        miopenProblemDirectionForward, &input.desc, &weights.desc, &rout.desc);
+                        miopenProblemDirectionForward, input.desc, weights.desc, rout.desc);
 
                     const miopenTensorArgument_t arguments[3] = {
                         {miopenTensorConvolutionX, nullptr, in_dev.get()},
@@ -1298,7 +1298,7 @@ struct verify_backward_conv : conv_base<T>
         }
         case ConvApi::Find_2_0: {
             const auto f2_problem = MakeConvProblem(
-                miopenProblemDirectionBackward, &rinput.desc, &weights.desc, &out.desc);
+                miopenProblemDirectionBackward, rinput.desc, weights.desc, out.desc);
 
             const miopenTensorArgument_t arguments[3] = {
                 {miopenTensorConvolutionX, nullptr, in_dev.get()},
@@ -1557,7 +1557,7 @@ struct verify_backward_weights_conv : conv_base<T>
         }
         case ConvApi::Find_2_0: {
             const auto f2_problem = MakeConvProblem(
-                miopenProblemDirectionBackwardWeights, &input.desc, &rweights.desc, &out.desc);
+                miopenProblemDirectionBackwardWeights, input.desc, rweights.desc, out.desc);
 
             const miopenTensorArgument_t arguments[3] = {
                 {miopenTensorConvolutionX, nullptr, in_dev.get()},

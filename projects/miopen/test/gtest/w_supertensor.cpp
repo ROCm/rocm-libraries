@@ -33,7 +33,7 @@
 #include "gtest_common.hpp"
 #include "gtest_desc_guard.hpp"
 #include "test_parameter_name_generator.hpp"
-#include "verify.hpp"
+#include <miopen_utils/verify.hpp>
 
 namespace {
 

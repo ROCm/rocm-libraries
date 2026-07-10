@@ -31,9 +31,9 @@
 #include <cassert>
 #include <cmath>
 
-#include "../test/cpu_reduce_util.hpp"
+#include <miopen_utils/cpu_reduce_util.hpp>
 
-#include "tensor_driver.hpp"
+#include <miopen_utils/tensor_driver.hpp>
 
 using float16 = half_float::half;
 

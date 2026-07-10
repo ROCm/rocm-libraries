@@ -7,7 +7,7 @@
 #include "../driver.hpp"
 #include "miopen/check_numerics.hpp"
 #include "miopen/handle.hpp"
-#include "../tensor_holder.hpp"
+#include <miopen_utils/tensor_holder.hpp>
 
 #include <miopen/convolution.hpp>
 #include <gtest/gtest.h>

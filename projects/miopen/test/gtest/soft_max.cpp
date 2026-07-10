@@ -3,7 +3,7 @@
 
 #include "get_handle.hpp"
 #include "miopen/miopen.h"
-#include "verify.hpp"
+#include <miopen_utils/verify.hpp>
 #include <gtest/gtest.h>
 #include <miopen/softmax.hpp>
 

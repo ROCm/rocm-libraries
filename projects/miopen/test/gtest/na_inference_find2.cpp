@@ -3,8 +3,10 @@
 
 #include <gtest/gtest.h>
 #include "miopen/miopen.h"
-#include "../fusionHost.hpp"
-#include "../random.hpp"
+#include <miopen_utils/fusionHost.hpp>
+#include "get_handle.hpp"
+#include <miopen/batch_norm.hpp>
+#include <miopen_utils/random.hpp>
 #include "compare_helper.hpp"
 #include <common_utils/stringutils.hpp>
 
@@ -76,9 +78,9 @@ struct verify_inference_batchnorm_activ
                                      miopenBatchNormMode_t pbnmode)
     {
         input           = pinput;
-        inputDesc       = &pinput.desc;
+        inputDesc       = pinput.desc;
         activDesc       = pactivDesc;
-        biasScaleTensor = &pbnscale.desc;
+        biasScaleTensor = pbnscale.desc;
         bnscale         = pbnscale;
         bnbias          = pbnbias;
         estMean         = pestMean;
@@ -325,9 +327,9 @@ struct na_inference_find2_test : public ::testing::TestWithParam<TestCase>
             miopenCreateBatchnormProblem(&problem_, bnmode, true, miopenProblemDirectionInference);
 
             // clang-format off
-            miopenSetProblemTensorDescriptor(problem_, miopenTensorBatchnormX, &input.desc);
-            miopenSetProblemTensorDescriptor(problem_, miopenTensorBatchnormScale, &scale.desc);
-            miopenSetProblemTensorDescriptor(problem_, miopenTensorBatchnormBias, &shift.desc);
+            miopenSetProblemTensorDescriptor(problem_, miopenTensorBatchnormX, input.desc);
+            miopenSetProblemTensorDescriptor(problem_, miopenTensorBatchnormScale, scale.desc);
+            miopenSetProblemTensorDescriptor(problem_, miopenTensorBatchnormBias, shift.desc);
             miopenSetProblemTensorDescriptor(problem_, miopenTensorBatchnormEstimatedMean, &derivedBnDesc);
             miopenSetProblemTensorDescriptor(problem_, miopenTensorBatchnormEstimatedVariance, &derivedBnDesc);
             // clang-format on
@@ -335,8 +337,8 @@ struct na_inference_find2_test : public ::testing::TestWithParam<TestCase>
             AddAndFuse(problem_, [&](auto activation) {
                 miopenCreateActivationProblem(
                     activation, ptr_activdesc.get(), miopenProblemDirectionForward);
-                miopenSetProblemTensorDescriptor(*activation, miopenTensorActivationX, &input.desc);
-                miopenSetProblemTensorDescriptor(*activation, miopenTensorActivationY, &input.desc);
+                miopenSetProblemTensorDescriptor(*activation, miopenTensorActivationX, input.desc);
+                miopenSetProblemTensorDescriptor(*activation, miopenTensorActivationY, input.desc);
             });
 
             return ManagedProblem{problem_, &miopenDestroyProblem};

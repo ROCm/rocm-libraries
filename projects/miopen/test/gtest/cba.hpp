@@ -2,12 +2,14 @@
 // SPDX-License-Identifier: MIT
 #pragma once
 
-#include <fusionHost.hpp>
+#include <miopen_utils/fusionHost.hpp>
+#include <miopen/handle.hpp>
 #include <gtest/gtest.h>
 #include <miopen/miopen.h>
+#include <miopen/fusion_plan.hpp>
 
 #include "conv_common.hpp"
-#include "cpu_bias.hpp"
+#include <miopen_utils/cpu_bias.hpp>
 #include "conv_test_base.hpp"
 #include "conv_tensor_gen.hpp"
 #include "get_handle.hpp"

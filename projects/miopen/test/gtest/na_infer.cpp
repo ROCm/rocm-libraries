@@ -25,6 +25,7 @@
  *******************************************************************************/
 
 #include <miopen/fusion/solvers.hpp>
+#include <miopen/fusion_plan.hpp>
 #include <miopen/fusion/fusion_invoke_params.hpp>
 
 #include "na.hpp"

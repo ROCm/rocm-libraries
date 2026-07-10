@@ -27,7 +27,7 @@
 #include "gtest_common.hpp"
 #include <tensor_util.hpp>
 #include <miopen/reducetensor.hpp>
-#include "cpu_reduce_util.hpp"
+#include <miopen_utils/cpu_reduce_util.hpp>
 #include "workspace.hpp"
 
 // Recently added FP16, BFP16 and I8 reduce custom test cases fail compiler staging tests

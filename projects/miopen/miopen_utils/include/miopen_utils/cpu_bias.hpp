@@ -26,17 +26,16 @@
 #ifndef GUARD_CPU_BIAS_HPP
 #define GUARD_CPU_BIAS_HPP
 
-#include "test.hpp"
 #include <array>
 #include <iostream>
 #include <iterator>
 #include <limits>
 #include <memory>
 #include <miopen/miopen.h>
-#include <miopen/tensor.hpp>
+#include <common_utils/errors.hpp>
 #include <utility>
 
-#include "tensor_holder.hpp"
+#include <miopen_utils/tensor_holder.hpp>
 #include <common_utils/stringutils.hpp>
 #include <common_utils/functional.hpp>
 
@@ -107,7 +106,7 @@ void cpu_bias_forward(tensor<Tout>& out, const tensor<Tbias>& bias)
         break;
     }
     default: {
-        MIOPEN_THROW("not belong to any case");
+        COMMON_THROW("not belong to any case");
     }
     }
 }
@@ -134,7 +133,7 @@ void cpu_bias_backward_data(const tensor<Tout>& out, tensor<Tbias>& bias)
         break;
     }
     default: {
-        MIOPEN_THROW("not belong to any case");
+        COMMON_THROW("not belong to any case");
     }
     }
 }

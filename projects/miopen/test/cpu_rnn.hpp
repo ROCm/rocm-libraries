@@ -29,7 +29,7 @@
 /**********************************************
  * LSTM CPU verification functions
  **********************************************/
-#include "gemm.hpp"
+#include <miopen_utils/gemm.hpp>
 #include "gtest/gtest_desc_guard.hpp"
 
 template <class T>

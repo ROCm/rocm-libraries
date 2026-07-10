@@ -5,13 +5,13 @@
 
 #include "InputFlags.hpp"
 #include "driver.hpp"
-#include "mloSoftmaxHost.hpp"
+#include <miopen_utils/mloSoftmaxHost.hpp>
 #include <common_utils/random.hpp>
-#include "tensor_driver.hpp"
+#include <miopen_utils/tensor_driver.hpp>
 #include "timer.hpp"
 #include "util_driver.hpp"
 
-#include <../test/verify.hpp>
+#include <miopen_utils/verify.hpp>
 
 #include <miopen/miopen.h>
 #include <miopen/tensor.hpp>

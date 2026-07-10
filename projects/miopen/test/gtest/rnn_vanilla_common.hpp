@@ -23,7 +23,7 @@
  * SOFTWARE.
  *
  *******************************************************************************/
-#include "../rnn_util.hpp"
+#include <miopen_utils/rnn_util.hpp>
 #include "get_handle.hpp"
 #include <common_utils/float_equal.hpp>
 #include "../dropout_util.hpp"
@@ -170,12 +170,12 @@ struct verify_forward_infer_rnn
 
         size_t reserveSpaceSize;
 
-        std::vector<miopen::TensorDescriptor> inputCPPDescs;
+        std::vector<TensorDesc> inputCPPDescs;
         std::vector<miopenTensorDescriptor_t> inputDescs;
         createTensorDescArray(
             inputCPPDescs, inputDescs, batch_seq, inputVecLen, miopen::deref(rnnDesc).dataType);
 
-        std::vector<miopen::TensorDescriptor> outputCPPDescs;
+        std::vector<TensorDesc> outputCPPDescs;
         std::vector<miopenTensorDescriptor_t> outputDescs;
         createTensorDescArray(outputCPPDescs,
                               outputDescs,
@@ -250,12 +250,12 @@ struct verify_forward_infer_rnn
         size_t out_sz        = 0;
         size_t workSpaceSize = 0;
 
-        std::vector<miopen::TensorDescriptor> inputCPPDescs;
+        std::vector<TensorDesc> inputCPPDescs;
         std::vector<miopenTensorDescriptor_t> inputDescs;
         createTensorDescArray(
             inputCPPDescs, inputDescs, batch_seq, inputVecLen, miopen::deref(rnnDesc).dataType);
 
-        std::vector<miopen::TensorDescriptor> outputCPPDescs;
+        std::vector<TensorDesc> outputCPPDescs;
         std::vector<miopenTensorDescriptor_t> outputDescs;
         createTensorDescArray(outputCPPDescs,
                               outputDescs,
@@ -439,12 +439,12 @@ struct verify_forward_train_rnn
 
         size_t reserveSpaceSize;
 
-        std::vector<miopen::TensorDescriptor> inputCPPDescs;
+        std::vector<TensorDesc> inputCPPDescs;
         std::vector<miopenTensorDescriptor_t> inputDescs;
         createTensorDescArray(
             inputCPPDescs, inputDescs, batch_seq, inputVecLen, miopen::deref(rnnDesc).dataType);
 
-        std::vector<miopen::TensorDescriptor> outputCPPDescs;
+        std::vector<TensorDesc> outputCPPDescs;
         std::vector<miopenTensorDescriptor_t> outputDescs;
         createTensorDescArray(outputCPPDescs,
                               outputDescs,
@@ -523,12 +523,12 @@ struct verify_forward_train_rnn
         size_t workSpaceSize    = 0;
         size_t reserveSpaceSize = 0;
 
-        std::vector<miopen::TensorDescriptor> inputCPPDescs;
+        std::vector<TensorDesc> inputCPPDescs;
         std::vector<miopenTensorDescriptor_t> inputDescs;
         createTensorDescArray(
             inputCPPDescs, inputDescs, batch_seq, inputVecLen, miopen::deref(rnnDesc).dataType);
 
-        std::vector<miopen::TensorDescriptor> outputCPPDescs;
+        std::vector<TensorDesc> outputCPPDescs;
         std::vector<miopenTensorDescriptor_t> outputDescs;
         createTensorDescArray(outputCPPDescs,
                               outputDescs,
@@ -738,7 +738,7 @@ struct verify_backward_data_rnn
         int bi_stride = bi * hy_h;
         size_t workSpaceSize;
 
-        std::vector<miopen::TensorDescriptor> inputCPPDescs;
+        std::vector<TensorDesc> inputCPPDescs;
         std::vector<miopenTensorDescriptor_t> inputDescs;
         createTensorDescArray(
             inputCPPDescs, inputDescs, batch_seq, inputVecLen, miopen::deref(rnnDesc).dataType);
@@ -810,12 +810,12 @@ struct verify_backward_data_rnn
         size_t out_sz        = 0;
         size_t workSpaceSize = 0;
 
-        std::vector<miopen::TensorDescriptor> inputCPPDescs;
+        std::vector<TensorDesc> inputCPPDescs;
         std::vector<miopenTensorDescriptor_t> inputDescs;
         createTensorDescArray(
             inputCPPDescs, inputDescs, batch_seq, inputVecLen, miopen::deref(rnnDesc).dataType);
 
-        std::vector<miopen::TensorDescriptor> outputCPPDescs;
+        std::vector<TensorDesc> outputCPPDescs;
         std::vector<miopenTensorDescriptor_t> outputDescs;
         createTensorDescArray(outputCPPDescs,
                               outputDescs,
@@ -1062,12 +1062,12 @@ struct verify_backward_weights_rnn
 
         auto&& handle = get_handle();
 
-        std::vector<miopen::TensorDescriptor> inputCPPDescs;
+        std::vector<TensorDesc> inputCPPDescs;
         std::vector<miopenTensorDescriptor_t> inputDescs;
         createTensorDescArray(
             inputCPPDescs, inputDescs, batch_seq, inputVecLen, miopen::deref(rnnDesc).dataType);
 
-        std::vector<miopen::TensorDescriptor> outputCPPDescs;
+        std::vector<TensorDesc> outputCPPDescs;
         std::vector<miopenTensorDescriptor_t> outputDescs;
         createTensorDescArray(outputCPPDescs,
                               outputDescs,
@@ -1344,12 +1344,12 @@ protected:
             }
         }
 
-        std::vector<miopen::TensorDescriptor> inputCPPDescs;
+        std::vector<TensorDesc> inputCPPDescs;
         std::vector<miopenTensorDescriptor_t> inputDescs;
         createTensorDescArray(
             inputCPPDescs, inputDescs, batchSeq, inVecReal, miopen::deref(rnnDesc).dataType);
 
-        std::vector<miopen::TensorDescriptor> outputCPPDescs;
+        std::vector<TensorDesc> outputCPPDescs;
         std::vector<miopenTensorDescriptor_t> outputDescs;
         createTensorDescArray(outputCPPDescs,
                               outputDescs,

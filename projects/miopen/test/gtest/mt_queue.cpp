@@ -28,7 +28,7 @@
 #include <thread>
 #include <chrono>
 
-#include "random.hpp"
+#include <miopen_utils/random.hpp>
 
 static std::atomic<int> num_prod{};
 

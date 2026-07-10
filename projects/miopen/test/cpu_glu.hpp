@@ -26,7 +26,7 @@
 
 #pragma once
 
-#include "tensor_holder.hpp"
+#include <miopen_utils/tensor_holder.hpp>
 
 #include <common_utils/ford.hpp>
 

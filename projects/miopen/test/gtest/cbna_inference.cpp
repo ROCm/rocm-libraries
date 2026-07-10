@@ -13,7 +13,8 @@
 #include <miopen/miopen.h>
 
 #include "../conv_common.hpp"
-#include "../fusionHost.hpp"
+#include <miopen_utils/fusionHost.hpp>
+#include <miopen/batch_norm.hpp>
 #include "conv_test_base.hpp"
 #include "get_handle.hpp"
 #include "gtest_common.hpp"
@@ -88,11 +89,11 @@ struct verify_forward_cbna
                         size_t pworkspace_size)
     {
         input          = pinput;
-        inputDesc      = &pinput.desc;
+        inputDesc      = pinput.desc;
         weights        = pweights;
-        weightsDesc    = &pweights.desc;
+        weightsDesc    = pweights.desc;
         bias           = pbias;
-        biasDesc       = &pbias.desc;
+        biasDesc       = pbias.desc;
         filter         = &pfilter;
         bnscale        = pbnscale;
         bnbias         = pbnbias;
@@ -106,7 +107,7 @@ struct verify_forward_cbna
 
     tensor<T> cpu() const
     {
-        auto rout = get_output_tensor(miopen::deref(filter), input, weights);
+        auto rout = get_output_tensor(filter, input, weights);
         auto bout = rout;
         auto aout = rout;
         std::fill(bout.begin(), bout.end(), 0.);
@@ -130,7 +131,7 @@ struct verify_forward_cbna
     tensor<T> gpu() const
     {
         auto&& handle = get_handle();
-        auto rout     = get_output_tensor(miopen::deref(filter), input, weights);
+        auto rout     = get_output_tensor(filter, input, weights);
         auto in_dev   = handle.Write(input.data);
         auto wei_dev  = handle.Write(weights.data);
         auto b_dev    = handle.Write(bias.data);
@@ -172,7 +173,7 @@ struct verify_forward_cbna
                                    fusionplan,
                                    inputDesc,
                                    in_dev.get(),
-                                   &rout.desc,
+                                   rout.desc,
                                    out_dev.get(),
                                    ptr_fusionargs.get(),
                                    workspace_dev.get(),
@@ -290,18 +291,18 @@ void RunCbnaInferenceTest(const CbnaTestCase& test_case)
     filter.dilations[1] = test_case.pads_strides_dilations[5];
 
     auto&& handle                      = get_handle();
-    auto ptr_fusionplan                = GetManagedFusionPlanDesc(&input.desc);
+    auto ptr_fusionplan                = GetManagedFusionPlanDesc(input.desc);
     miopenFusionOpDescriptor_t convoOp = nullptr;
     miopenFusionOpDescriptor_t biasOp  = nullptr;
     miopenFusionOpDescriptor_t bnOp    = nullptr;
     miopenFusionOpDescriptor_t activOp = nullptr;
 
-    miopenCreateOpConvForward(ptr_fusionplan.get(), &convoOp, &filter, &weights.desc);
+    miopenCreateOpConvForward(ptr_fusionplan.get(), &convoOp, &filter, weights.desc);
 
-    auto output = get_output_tensor(filter, input, weights);
+    auto output = get_output_tensor(&filter, input, weights);
     tensor<T> bias{1, output.desc.GetLengths()[1], 1, 1};
     bias.generate(tensor_elem_gen_integer{max_value});
-    miopenCreateOpBiasForward(ptr_fusionplan.get(), &biasOp, &bias.desc);
+    miopenCreateOpBiasForward(ptr_fusionplan.get(), &biasOp, bias.desc);
 
     miopenBatchNormMode_t bnmode = miopenBNSpatial;
     auto derivedBnDesc           = miopen::TensorDescriptor{};
@@ -315,7 +316,7 @@ void RunCbnaInferenceTest(const CbnaTestCase& test_case)
     tensor<T> estVariance{derivedBnDesc.GetLengths()};
     estVariance.generate(tensor_elem_gen_integer{max_value});
 
-    miopenCreateOpBatchNormInference(ptr_fusionplan.get(), &bnOp, bnmode, &bnscale.desc);
+    miopenCreateOpBatchNormInference(ptr_fusionplan.get(), &bnOp, bnmode, bnscale.desc);
     miopenCreateOpActivationForward(ptr_fusionplan.get(), &activOp, miopenActivationRELU);
 
     // A few basic dimension checks that we expect to be caught.

@@ -26,7 +26,7 @@
 
 #pragma once
 
-#include "tensor_holder.hpp"
+#include <miopen_utils/tensor_holder.hpp>
 #include "tensor_view.hpp"
 
 #include <miopen/tensor_view_utils.hpp>

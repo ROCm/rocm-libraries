@@ -26,13 +26,16 @@
 #pragma once
 
 #include <gtest/gtest.h>
+#include <miopen/fusion_plan.hpp>
 #include <miopen/solver_id.hpp>
-#include <serialize.hpp>
-#include <fusionHost.hpp>
+#include <miopen_utils/serialize.hpp>
+#include <miopen_utils/fusionHost.hpp>
+#include <miopen/batch_norm.hpp>
+#include <miopen/handle.hpp>
 
 #include "tensor_util.hpp"
 #include "get_handle.hpp"
-#include "random.hpp"
+#include <miopen_utils/random.hpp>
 
 struct BNTestCase
 {
