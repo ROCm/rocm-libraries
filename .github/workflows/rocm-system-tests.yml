@@ -34,7 +34,7 @@ on:
 
 jobs:
   platform:
-    name: "system tests"
+    name: "ROCm System Tests"
     runs-on: ${{ inputs.runs_on }}
     timeout-minutes: 210
     container:
@@ -76,9 +76,9 @@ jobs:
           IS_PR_FROM_FORK: ${{ github.event.pull_request.head.repo.fork }}
 
       - name: Checkout rocm-tests
-        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
         with:
-          persist-credentials: false
+          repository: "ROCm/rocm-tests"
 
       - name: Install uv
         uses: astral-sh/setup-uv@bd01e18f51369d5a26f1651c3cb451d3417e3bba # v6.3.1
