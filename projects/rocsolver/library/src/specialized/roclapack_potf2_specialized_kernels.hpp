@@ -53,14 +53,15 @@ ROCSOLVER_BEGIN_NAMESPACE
  * PANEL_SIZE   Size of panel to perform non-blocked decomposition.
  *              PANEL_SIZE == BlockDim.x == BlockDim.y
 **/
-template <int NB, int PANEL_SIZE, typename T, typename I, typename INFO, typename U>
+template <int NB, int PANEL_SIZE, typename T, typename I, typename S, typename INFO, typename U>
 ROCSOLVER_KERNEL void potf2_kernel_small(const bool is_upper,
                                          const I n,
                                          U AA,
                                          const rocblas_stride shiftA,
                                          const I lda,
                                          const rocblas_stride strideA,
-                                         INFO* const info)
+                                         INFO* const info,
+                                         const S eps)
 {
     auto const tid = hipThreadIdx_y * hipBlockDim_x + hipThreadIdx_x;
     auto const inc = hipBlockDim_y * hipBlockDim_x;
@@ -81,6 +82,7 @@ ROCSOLVER_KERNEL void potf2_kernel_small(const bool is_upper,
     T* Ash = reinterpret_cast<T*>(lsmem);
     auto constexpr ldash = NB * PANEL_SIZE;
 
+    S max_akk = 0;
     bool failed = false;
 
     /* -----------------------------------------------------------
@@ -165,7 +167,8 @@ ROCSOLVER_KERNEL void potf2_kernel_small(const bool is_upper,
 
             auto kk = kcol * ldash + kcol;
             auto const akk = std::real(Ash[kk]);
-            bool const isok = (akk > 0) && (std::isfinite(akk));
+            max_akk = std::max(max_akk, akk);
+            bool const isok = (akk > max_akk * eps) && (std::isfinite(akk));
 
             __syncthreads();
 
@@ -354,8 +357,9 @@ rocblas_status potf2_run_small(rocblas_handle handle,
     hipStream_t stream;
     rocblas_get_stream(handle, &stream);
 
+    using S = decltype(std::real(T{}));
+    S eps = get_epsilon<S>();
     const auto nb = (n + BS2 - 1) / BS2;
-
     size_t lmemsize = sizeof(T) * nb * BS2 * BS2;
 
     const hipDeviceProp_t* props = rocblas_internal_get_device_prop(handle);
@@ -367,35 +371,45 @@ rocblas_status potf2_run_small(rocblas_handle handle,
     bool const is_upper = (uplo == rocblas_fill_upper);
     if constexpr(BS2 == 16)
     {
-        auto kernel = std::array{
-            potf2_kernel_small<1, BS2, T, I, INFO, U>,  potf2_kernel_small<2, BS2, T, I, INFO, U>,
-            potf2_kernel_small<3, BS2, T, I, INFO, U>,  potf2_kernel_small<4, BS2, T, I, INFO, U>,
-            potf2_kernel_small<5, BS2, T, I, INFO, U>,  potf2_kernel_small<6, BS2, T, I, INFO, U>,
-            potf2_kernel_small<7, BS2, T, I, INFO, U>,  potf2_kernel_small<8, BS2, T, I, INFO, U>,
-            potf2_kernel_small<9, BS2, T, I, INFO, U>,  potf2_kernel_small<10, BS2, T, I, INFO, U>,
-            potf2_kernel_small<11, BS2, T, I, INFO, U>, potf2_kernel_small<12, BS2, T, I, INFO, U>,
-            potf2_kernel_small<13, BS2, T, I, INFO, U>, potf2_kernel_small<14, BS2, T, I, INFO, U>,
-            potf2_kernel_small<15, BS2, T, I, INFO, U>, potf2_kernel_small<16, BS2, T, I, INFO, U>};
+        auto kernel = std::array{potf2_kernel_small<1, BS2, T, I, S, INFO, U>,
+                                 potf2_kernel_small<2, BS2, T, I, S, INFO, U>,
+                                 potf2_kernel_small<3, BS2, T, I, S, INFO, U>,
+                                 potf2_kernel_small<4, BS2, T, I, S, INFO, U>,
+                                 potf2_kernel_small<5, BS2, T, I, S, INFO, U>,
+                                 potf2_kernel_small<6, BS2, T, I, S, INFO, U>,
+                                 potf2_kernel_small<7, BS2, T, I, S, INFO, U>,
+                                 potf2_kernel_small<8, BS2, T, I, S, INFO, U>,
+                                 potf2_kernel_small<9, BS2, T, I, S, INFO, U>,
+                                 potf2_kernel_small<10, BS2, T, I, S, INFO, U>,
+                                 potf2_kernel_small<11, BS2, T, I, S, INFO, U>,
+                                 potf2_kernel_small<12, BS2, T, I, S, INFO, U>,
+                                 potf2_kernel_small<13, BS2, T, I, S, INFO, U>,
+                                 potf2_kernel_small<14, BS2, T, I, S, INFO, U>,
+                                 potf2_kernel_small<15, BS2, T, I, S, INFO, U>,
+                                 potf2_kernel_small<16, BS2, T, I, S, INFO, U>};
         if(nb < 1 || static_cast<size_t>(nb) > kernel.size())
         {
             return rocblas_status_internal_error;
         }
         ROCSOLVER_LAUNCH_KERNEL(kernel[nb - 1], dim3(1, 1, batch_count), dim3(BS2, BS2, 1),
-                                lmemsize, stream, is_upper, n, A, shiftA, lda, strideA, info);
+                                lmemsize, stream, is_upper, n, A, shiftA, lda, strideA, info, eps);
     }
     else if constexpr(BS2 == 32)
     {
-        auto kernel = std::array{
-            potf2_kernel_small<1, BS2, T, I, INFO, U>, potf2_kernel_small<2, BS2, T, I, INFO, U>,
-            potf2_kernel_small<3, BS2, T, I, INFO, U>, potf2_kernel_small<4, BS2, T, I, INFO, U>,
-            potf2_kernel_small<5, BS2, T, I, INFO, U>, potf2_kernel_small<6, BS2, T, I, INFO, U>,
-            potf2_kernel_small<7, BS2, T, I, INFO, U>, potf2_kernel_small<8, BS2, T, I, INFO, U>};
+        auto kernel = std::array{potf2_kernel_small<1, BS2, T, I, S, INFO, U>,
+                                 potf2_kernel_small<2, BS2, T, I, S, INFO, U>,
+                                 potf2_kernel_small<3, BS2, T, I, S, INFO, U>,
+                                 potf2_kernel_small<4, BS2, T, I, S, INFO, U>,
+                                 potf2_kernel_small<5, BS2, T, I, S, INFO, U>,
+                                 potf2_kernel_small<6, BS2, T, I, S, INFO, U>,
+                                 potf2_kernel_small<7, BS2, T, I, S, INFO, U>,
+                                 potf2_kernel_small<8, BS2, T, I, S, INFO, U>};
         if(nb < 1 || static_cast<size_t>(nb) > kernel.size())
         {
             return rocblas_status_internal_error;
         }
         ROCSOLVER_LAUNCH_KERNEL(kernel[nb - 1], dim3(1, 1, batch_count), dim3(BS2, BS2, 1),
-                                lmemsize, stream, is_upper, n, A, shiftA, lda, strideA, info);
+                                lmemsize, stream, is_upper, n, A, shiftA, lda, strideA, info, eps);
     }
     else
     {
