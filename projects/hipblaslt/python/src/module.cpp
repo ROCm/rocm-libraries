@@ -28,4 +28,5 @@ NB_MODULE(_core, m)
     }, "Debug hook: raise HipblasLtError for a nonzero status code.");
 
     init_enums(m);
+    init_descriptors(m);
 }
