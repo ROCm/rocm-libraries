@@ -232,7 +232,6 @@ class TestGfx1250SubtileCodegen:
             LogicalScheduler, SchedulerConfig, ReadGranularity,
         )
 
-        _init_rocisa_gfx1250()
         kernel = _create_gfx1250_kernel(32, 32)
         writer, tiA, tiB = _create_writer_gfx1250(kernel)
         _setup_sgprs(writer)
