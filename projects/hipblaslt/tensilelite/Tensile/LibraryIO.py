@@ -265,6 +265,10 @@ def writeMsgPack(filename, data):
     compressed = zlib.compress(raw, 9)
     with open(filename + ".zlib", "wb") as f:
         f.write(compressed)
+    try:
+        os.unlink(filename)
+    except FileNotFoundError:
+        pass
 
 def _writeSolutionsHeader(f: IO[str], problemSizes: Optional[ProblemSizes], biasTypeArgs: Optional[BiasTypeArgs], activationArgs: Optional[ActivationArgs]) -> None:
     """Write the YAML header (version, problem sizes, bias/activation args)."""
