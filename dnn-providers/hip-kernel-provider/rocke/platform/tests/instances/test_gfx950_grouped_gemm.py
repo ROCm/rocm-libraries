@@ -16,6 +16,7 @@ Run:  PYTHONPATH=python python3 tests/instances/test_gfx950_grouped_gemm.py
 
 from __future__ import annotations
 
+import os
 import unittest
 
 
@@ -187,6 +188,70 @@ class TestRaggedGemmHarnessGfx950(unittest.TestCase):
         self.assertLessEqual(int(m_valid.max().item()), block_m)
         # Per-expert start offsets are the exclusive prefix sum of sizes.
         self.assertEqual(int(m_starts[0].item()), 0)
+
+
+class TestGfx950GroupedGemmCppByteIdentity(unittest.TestCase):
+    """Dual-engine byte-identity for the grouped/ragged/MoE kernels.
+
+    The C++ engine lowers any Python-built kernel through the family-agnostic
+    serialized-IR seam (``rocke_engine.lower_serialized_ir``), so no hand-written
+    C++ builder is needed: this asserts the C++ engine emits **byte-identical**
+    LLVM IR to the Python engine via ``ROCKE_BACKEND=both`` (the differential
+    oracle, which raises on any mismatch). Skipped when the ``rocke_engine``
+    pybind module is not built/importable (build ``cpp/bindings`` to enable).
+    """
+
+    @classmethod
+    def setUpClass(cls):
+        try:
+            import rocke_engine  # noqa: F401
+        except Exception as e:  # not built / not on sys.path
+            raise unittest.SkipTest(f"rocke_engine C++ binding not importable: {e}")
+
+    def _assert_cpp_matches_python(self, kernel) -> None:
+        import unittest.mock as mock
+
+        from rocke.core.lower_llvm import lower_kernel_to_llvm, _resolve_llvm_flavor
+
+        # backend='both' lowers with both engines and raises BackendMismatch on
+        # any divergence; strict mode turns an engine rejection into an error
+        # rather than a silent Python fallback. Scope the env to this call.
+        with mock.patch.dict(
+            os.environ, {"ROCKE_BACKEND": "both", "ROCKE_CPP_STRICT": "1"}
+        ):
+            lower_kernel_to_llvm(
+                kernel, arch="gfx950", llvm_flavor=_resolve_llvm_flavor()
+            )
+
+    def test_grouped_gemm_cpp_byte_identical(self):
+        from rocke.instances.gfx950.grouped_gemm import (
+            GroupedGemmSpec,
+            build_grouped_gemm,
+        )
+
+        self._assert_cpp_matches_python(
+            build_grouped_gemm(GroupedGemmSpec(M=8192, N=1024, K=512, E=64))[0]
+        )
+
+    def test_ragged_gemm_cpp_byte_identical(self):
+        from rocke.instances.gfx950.ragged_gemm import (
+            RaggedGemmSpec,
+            build_ragged_gemm,
+        )
+
+        self._assert_cpp_matches_python(
+            build_ragged_gemm(RaggedGemmSpec(N=1024, K=512, E=64))[0]
+        )
+
+    def test_ragged_moe_cpp_byte_identical(self):
+        from rocke.instances.gfx950.ragged_moe import (
+            RaggedMoeSpec,
+            build_ragged_moe,
+        )
+
+        self._assert_cpp_matches_python(
+            build_ragged_moe(RaggedMoeSpec(N=1024, K=512, E=64, TOPK=2))[0]
+        )
 
 
 if __name__ == "__main__":
