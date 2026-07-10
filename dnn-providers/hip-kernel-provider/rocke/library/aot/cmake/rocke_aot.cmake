@@ -84,24 +84,33 @@ else()
 endif()
 
 # --- libamd_comgr availability (compile_kernel backend="python") -------------
-# rocke.helpers.compile_kernel ctypes-loads libamd_comgr at build time.
+# rocke.helpers.compile_kernel ctypes-loads libamd_comgr at build time. We locate
+# it through comgr's own CMake package (amd_comgr): TheRock's amd-comgr subproject
+# provides it, and a standalone build finds it under /opt/rocm. The imported target
+# points at comgr in its assembled tree, where comgr's own RUNPATH
+# ($ORIGIN, $ORIGIN/llvm/lib, $ORIGIN/rocm_sysdeps/lib) resolves its entire
+# dependency closure (libLLVM, libclang-cpp, the vendored rocm_sysdeps libs). So
+# once comgr is loaded from that tree nothing about its deps needs forwarding.
 # Resolution order:
 #   1. explicit ROCKE_COMGR_LIB (cache/env) override,
-#   2. find_library(amd_comgr): resolves the system comgr in a standalone build
-#      (/opt/rocm) and the staged comgr in a superbuild where amd-comgr is a
-#      build dependency of this subproject (TheRock ml-libs declares it),
-#   3. otherwise unset, and compile_kernel's own resolver (torch-bundled / rpath)
-#      applies at build time.
-# The resolved path is forwarded into the AOT build env (see the env helper).
+#   2. find_package(amd_comgr) imported target location,
+#   3. otherwise unset, and compile_kernel's own resolver applies at build time.
 set(_ROCKE_COMGR_LIB "")
 if(DEFINED ROCKE_COMGR_LIB AND NOT "${ROCKE_COMGR_LIB}" STREQUAL "")
     set(_ROCKE_COMGR_LIB "${ROCKE_COMGR_LIB}")
 elseif(DEFINED ENV{ROCKE_COMGR_LIB} AND NOT "$ENV{ROCKE_COMGR_LIB}" STREQUAL "")
     set(_ROCKE_COMGR_LIB "$ENV{ROCKE_COMGR_LIB}")
 else()
-    find_library(ROCKE_AMD_COMGR_LIBRARY NAMES amd_comgr)
-    if(ROCKE_AMD_COMGR_LIBRARY)
-        set(_ROCKE_COMGR_LIB "${ROCKE_AMD_COMGR_LIBRARY}")
+    find_package(amd_comgr CONFIG QUIET)
+    if(TARGET amd_comgr)
+        get_target_property(_ROCKE_COMGR_CFGS amd_comgr IMPORTED_CONFIGURATIONS)
+        foreach(_cfg RELEASE ${_ROCKE_COMGR_CFGS})
+            get_target_property(_ROCKE_COMGR_LOC amd_comgr IMPORTED_LOCATION_${_cfg})
+            if(_ROCKE_COMGR_LOC)
+                set(_ROCKE_COMGR_LIB "${_ROCKE_COMGR_LOC}")
+                break()
+            endif()
+        endforeach()
     endif()
 endif()
 if("${_ROCKE_COMGR_LIB}" STREQUAL "")
@@ -113,58 +122,6 @@ elseif(NOT EXISTS "${_ROCKE_COMGR_LIB}")
 else()
     get_filename_component(_ROCKE_COMGR_LIB "${_ROCKE_COMGR_LIB}" ABSOLUTE)
     message(STATUS "rocKE AOT build: libamd_comgr from ${_ROCKE_COMGR_LIB}")
-endif()
-
-# libamd_comgr's dependency closure (libclang-cpp, libLLVM, and the vendored
-# rocm_sysdeps libraries) ships in the amd-llvm toolchain, which the superbuild
-# stages separately from comgr. comgr's own $ORIGIN RUNPATH cannot reach it, so
-# the AOT tool's dlopen(libamd_comgr) needs those directories on its load path
-# (forwarded by the env helper: LD_LIBRARY_PATH on POSIX, ROCKE_COMGR_DEP_DIRS ->
-# os.add_dll_directory on Windows).
-#
-# The toolchain sits next to the compiler, so we derive the directories from it
-# rather than hardcode install paths. Whole directories are forwarded, so there
-# is nothing to resolve per dependency: if comgr ever needs a library outside
-# them the AOT build fails loudly at that point rather than silently. A standalone
-# /opt/rocm build keeps comgr's deps next to comgr, so these extra dirs do not
-# exist and are filtered out.
-set(_ROCKE_COMGR_DEP_LIBDIRS "")
-if(NOT "${_ROCKE_COMGR_LIB}" STREQUAL "" AND CMAKE_CXX_COMPILER)
-    # amd-llvm root via the compiler's resource dir (.../llvm/lib/clang/<ver>),
-    # which is wrapper-agnostic. Shared objects live in lib/ on POSIX and DLLs in
-    # bin/ on Windows; rocm_sysdeps is a sibling of the llvm/ tree.
-    execute_process(
-        COMMAND "${CMAKE_CXX_COMPILER}" --print-resource-dir
-        OUTPUT_VARIABLE _ROCKE_CLANG_RESOURCE_DIR
-        OUTPUT_STRIP_TRAILING_WHITESPACE
-        RESULT_VARIABLE _ROCKE_CLANG_RD_RESULT
-    )
-    if(_ROCKE_CLANG_RD_RESULT EQUAL 0 AND _ROCKE_CLANG_RESOURCE_DIR)
-        # .../llvm/lib/clang/<ver> -> .../llvm/lib -> .../llvm -> .../lib
-        get_filename_component(_ROCKE_LLVM_LIB
-            "${_ROCKE_CLANG_RESOURCE_DIR}/../.." ABSOLUTE)
-        get_filename_component(_ROCKE_LLVM_ROOT "${_ROCKE_LLVM_LIB}" DIRECTORY)
-        get_filename_component(_ROCKE_TC_LIB_ROOT "${_ROCKE_LLVM_ROOT}" DIRECTORY)
-        if(WIN32)
-            set(_ROCKE_TC_SUBDIR "bin")
-        else()
-            set(_ROCKE_TC_SUBDIR "lib")
-        endif()
-        foreach(_dir
-                "${_ROCKE_LLVM_ROOT}/${_ROCKE_TC_SUBDIR}"
-                "${_ROCKE_TC_LIB_ROOT}/rocm_sysdeps/${_ROCKE_TC_SUBDIR}")
-            if(IS_DIRECTORY "${_dir}")
-                list(APPEND _ROCKE_COMGR_DEP_LIBDIRS "${_dir}")
-            endif()
-        endforeach()
-        list(REMOVE_DUPLICATES _ROCKE_COMGR_DEP_LIBDIRS)
-    else()
-        message(STATUS
-            "rocKE AOT build: '${CMAKE_CXX_COMPILER} --print-resource-dir' failed; "
-            "forwarding only comgr's own directory")
-    endif()
-    message(STATUS
-        "rocKE AOT build: libamd_comgr toolchain dep dirs ${_ROCKE_COMGR_DEP_LIBDIRS}")
 endif()
 
 # Reconfigure when common AOT Python helpers or shared JSON Schemas change.
@@ -226,33 +183,11 @@ function(rocke_client_aot_pythonpath_environment OUT_VAR)
         "PYTHONPATH=${_ROCKE_CLIENT_AOT_PYTHONPATH_ESCAPED}"
         "PYTHONDONTWRITEBYTECODE=1"
     )
-    # Forward the explicit libamd_comgr path (compile_kernel honors ROCKE_COMGR_LIB)
-    # and comgr's whole dependency-dir set so the AOT tool's dlopen resolves the
-    # full chain on both platforms. POSIX: fold the dirs into LD_LIBRARY_PATH for
-    # the dynamic loader. Windows: forward them in ROCKE_COMGR_DEP_DIRS, which the
-    # comgr loader feeds to os.add_dll_directory (PATH is not a reliable dependent
-    # DLL search path under Python's secure DLL loading). Only when comgr resolved.
+    # Forward the resolved libamd_comgr path; compile_kernel honors ROCKE_COMGR_LIB.
+    # comgr is loaded from its assembled tree, where comgr's own RUNPATH resolves
+    # its full dependency closure, so no dependency directories are forwarded.
     if(NOT "${_ROCKE_COMGR_LIB}" STREQUAL "")
-        get_filename_component(_ROCKE_COMGR_LIB_DIR "${_ROCKE_COMGR_LIB}" DIRECTORY)
         list(APPEND _ROCKE_CLIENT_AOT_ENV "ROCKE_COMGR_LIB=${_ROCKE_COMGR_LIB}")
-        set(_ROCKE_DEP_DIRS "${_ROCKE_COMGR_LIB_DIR}" ${_ROCKE_COMGR_DEP_LIBDIRS})
-        list(REMOVE_DUPLICATES _ROCKE_DEP_DIRS)
-        if(WIN32)
-            # Escape the ';' list separator so cmake -E env passes a single
-            # ';'-joined string (os.pathsep on Windows).
-            string(REPLACE ";" "\\;" _ROCKE_DEP_DIRS_ENV "${_ROCKE_DEP_DIRS}")
-        else()
-            list(JOIN _ROCKE_DEP_DIRS ":" _ROCKE_DEP_DIRS_ENV)
-        endif()
-        list(APPEND _ROCKE_CLIENT_AOT_ENV "ROCKE_COMGR_DEP_DIRS=${_ROCKE_DEP_DIRS_ENV}")
-        if(NOT WIN32)
-            set(_ROCKE_LDLIB_DIRS ${_ROCKE_DEP_DIRS})
-            if(DEFINED ENV{LD_LIBRARY_PATH} AND NOT "$ENV{LD_LIBRARY_PATH}" STREQUAL "")
-                list(APPEND _ROCKE_LDLIB_DIRS "$ENV{LD_LIBRARY_PATH}")
-            endif()
-            list(JOIN _ROCKE_LDLIB_DIRS ":" _ROCKE_LDLIB_PATH)
-            list(APPEND _ROCKE_CLIENT_AOT_ENV "LD_LIBRARY_PATH=${_ROCKE_LDLIB_PATH}")
-        endif()
     endif()
     set(${OUT_VAR} "${_ROCKE_CLIENT_AOT_ENV}" PARENT_SCOPE)
 endfunction()

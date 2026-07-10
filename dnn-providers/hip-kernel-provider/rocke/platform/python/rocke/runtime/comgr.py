@@ -55,22 +55,6 @@ class ComgrError(RuntimeError):
     pass
 
 
-def _register_dep_dirs() -> None:
-    """Windows: register comgr's forwarded dependency directories
-    (``ROCKE_COMGR_DEP_DIRS``, set by the rocKE AOT build) so its dependent DLLs
-    resolve at load time. No-op off Windows, where the build instead exports
-    ``LD_LIBRARY_PATH`` for the dynamic loader.
-    """
-    if not _IS_WINDOWS:
-        return
-    for d in os.environ.get("ROCKE_COMGR_DEP_DIRS", "").split(os.pathsep):
-        if d and os.path.isdir(d):
-            try:
-                os.add_dll_directory(d)
-            except (OSError, AttributeError):
-                pass
-
-
 def _load_lib() -> ctypes.CDLL:
     # Pair the loader with ``hip_module._load_lib`` so the two halves of
     # the process always share a single HIP/comgr runtime instance. See
@@ -78,7 +62,6 @@ def _load_lib() -> ctypes.CDLL:
     # libamd_comgr is preferred over /opt/rocm when torch is in the
     # process.
     err = None
-    _register_dep_dirs()
     for p in _candidate_lib_paths("amd_comgr", "ROCKE_COMGR_LIB", ["3"]):
         try:
             _add_dll_dir(p)
