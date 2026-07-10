@@ -1,18 +1,13 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-# Temporary bridge for rocjitsu race detection in rocm-libraries CI.
+# This script's calling workflow fetches hipBLASLt/TensileLite artifacts from
+# the current TheRock build, then checks out rocm-systems.
 #
-# The calling workflow fetches hipBLASLt/TensileLite artifacts from the current
-# TheRock build, then checks out rocm-systems. Until rocjitsu is packaged as a
-# complete runnable TheRock artifact, build the rocjitsu CLI locally and run
-# small gfx950 hipBLASLt and TensileLite smokes under the race detector.
+# TODO(newling) Until rocjitsu is packaged as a complete runnable TheRock
+# artifact, we build the rocjitsu CLI locally.
 #
-# Keep this script deliberately narrow. It is not a replacement for the normal
-# hipBLASLt or TensileLite test suites; it is a post-build instrumentation pass
-# that proves the TheRock BLAS artifacts can be launched through rocjitsu and do
-# not emit race reports for one small, deterministic gfx950 GEMM path. The
-# normal package tests still own broad functional coverage.
+# The script runs small gfx950 hipBLASLt and TensileLite GEMMs under the race detector.
 
 ROCM_PATH="${ROCM_PATH:-${PWD}/build}"
 ROCJITSU_SOURCE_DIR="${ROCJITSU_SOURCE_DIR:-${PWD}/rocm-systems/emulation/rocjitsu}"
@@ -27,14 +22,12 @@ RACE_TIMEOUT_SECONDS="${RACE_TIMEOUT_SECONDS:-180}"
 TENSILELITE_TIMEOUT_SECONDS="${TENSILELITE_TIMEOUT_SECONDS:-420}"
 TIMING_FILE="${RACE_REPORT_DIR}/timing.tsv"
 
-# The rocjitsu smoke currently has several expensive pieces: artifact setup in
-# the caller, local rocjitsu configure/build here, and the two instrumented GPU
-# workloads. Keep a durable timing file as well as grouped console output so
-# slow CI runs are diagnosable without re-running the workflow.
+# Record the duration and exit status of each stage in a file that is uploaded
+# with the other race reports. The same information is also printed at exit.
 print_timing_summary() {
   if [[ -f "${TIMING_FILE}" ]]; then
     echo ""
-    echo "=== rocjitsu race smoke timing summary ==="
+    echo "=== rocjitsu race check timing summary ==="
     printf "%-36s %10s %6s\n" "stage" "seconds" "status"
     while IFS=$'\t' read -r label seconds status; do
       printf "%-36s %10s %6s\n" "${label}" "${seconds}" "${status}"
@@ -73,9 +66,10 @@ run_timed() {
   return "${status}"
 }
 
-# Fail before doing any rocjitsu work if the expected TheRock BLAS test
-# artifacts are missing. Most failures here mean the artifact fetch/layout
-# changed, not that the race detector found a race.
+
+# These checks validate the artifact layout before any workload is launched
+# under rocjitsu. A failure here means the expected TheRock BLAS test payload is
+# not available to this job.
 if [[ ! -d "${ROCM_PATH}" ]]; then
   echo "ROCM_PATH does not exist: ${ROCM_PATH}" >&2
   exit 1
@@ -102,9 +96,10 @@ if [[ ! -x "${TENSILELITE_CLIENT}" ]]; then
   exit 1
 fi
 
-# Prefer the architecture-specific config name when present, but accept the
-# older generic CDNA4 config while rocm-systems and TheRock packaging are still
-# converging.
+# Use the gfx950/CDNA4 KMD config from the checked-out rocm-systems tree. The
+# workflow pins the rocm-systems ref; if that ref renames configs, update this
+# list or pass ROCJITSU_CONFIG from the workflow. Keep the selection explicit so
+# future architectures can add their own config candidates here.
 if [[ -z "${ROCJITSU_CONFIG}" ]]; then
   for candidate in \
     "${ROCJITSU_SOURCE_DIR}/configs/gfx950_cdna4_kmd.json" \
@@ -125,9 +120,8 @@ mkdir -p "${RACE_REPORT_DIR}"
 : >"${TIMING_FILE}"
 
 # Everything below must resolve against the fetched ROCm payload, not whatever
-# happens to be installed in the CI image. In particular, lib/rocm_sysdeps/lib
-# is needed by some packaged dependencies, and the TensileLite Python tree comes
-# from the BLAS test artifacts.
+# happens to be installed in the CI image. ROCM_PATH is exported for subprocesses
+# that use it to find the ROCm install root.
 export ROCM_PATH
 export PATH="${ROCM_PATH}/bin:${ROCM_PATH}/lib/llvm/bin:${PATH}"
 export LD_LIBRARY_PATH="${ROCM_PATH}/lib:${ROCM_PATH}/lib/rocm_sysdeps/lib:${ROCM_PATH}/lib/llvm/lib:${LD_LIBRARY_PATH:-}"
@@ -146,9 +140,18 @@ echo "PATH=${PATH}"
 echo "LD_LIBRARY_PATH=${LD_LIBRARY_PATH}"
 echo "PYTHONPATH=${PYTHONPATH}"
 
+
+# TODO(newling): Track migration to a packaged rocjitsu once TheRock provides a
+# complete runnable artifact. Until then, build rocjitsu from the pinned
+# rocm-systems checkout so this job controls the tool version.
 # rocjitsu is still consumed from a source checkout in this workflow. Build only
-# the CLI and optional runtime/shim targets needed to launch the smoke workloads;
+# the CLI and optional runtime/shim targets needed to launch the test workloads;
 # this keeps the job independent of full rocm-systems packaging.
+#
+# The warning suppressions keep the local rocjitsu build from failing on
+# compiler/header warning mismatches. `nested-anon-types` is a Clang warning for
+# anonymous structs/unions nested inside another type; use -Wno-error so those
+# warnings remain visible but do not fail this bridge build.
 cmake_args=(
   -S "${ROCJITSU_SOURCE_DIR}"
   -B "${ROCJITSU_BUILD_DIR}"
@@ -160,12 +163,14 @@ cmake_args=(
   -DCMAKE_CXX_FLAGS="-Wno-error=unknown-warning-option -Wno-error=nested-anon-types"
 )
 
-if command -v amdclang >/dev/null 2>&1 && command -v amdclang++ >/dev/null 2>&1; then
-  cmake_args+=(
-    -DCMAKE_C_COMPILER="$(command -v amdclang)"
-    -DCMAKE_CXX_COMPILER="$(command -v amdclang++)"
-  )
+if ! command -v amdclang >/dev/null 2>&1 || ! command -v amdclang++ >/dev/null 2>&1; then
+  echo "amdclang and amdclang++ must be available from the fetched ROCm payload" >&2
+  exit 1
 fi
+cmake_args+=(
+  -DCMAKE_C_COMPILER="$(command -v amdclang)"
+  -DCMAKE_CXX_COMPILER="$(command -v amdclang++)"
+)
 
 run_timed "configure rocjitsu" cmake "${cmake_args[@]}"
 
@@ -192,8 +197,6 @@ if [[ ! -x "${ROCJITSU_BIN}" ]]; then
   echo "rocjitsu binary not found after build: ${ROCJITSU_BIN}" >&2
   exit 1
 fi
-
-rm -f "${RACE_REPORT_DIR}/race.log"
 
 show_rocjitsu_version() {
   echo "rocjitsu version:"
@@ -222,13 +225,12 @@ run_sanity_check() {
   fi
 }
 
-run_hipblaslt_bench_smoke() {
+run_hipblaslt_bench_check() {
   mkdir -p "${RACE_REPORT_DIR}/hipblaslt-bench"
   echo "running hipblaslt-bench under rocjitsu race detection"
-  # Use zero initialization so this smoke measures the hipBLASLt GEMM dispatch
-  # path rather than spending most of its signal on device-side fill kernels.
-  # The default HPL initialization can generate separate fill kernels that are
-  # useful for compiler/detector investigation, but they obscure this CI gate.
+  # Use zero initialization because the default HPL initialization currently
+  # triggers a separate device-fill kernel race report that needs independent
+  # investigation. This check is scoped to the hipBLASLt GEMM dispatch path.
   timeout "${RACE_TIMEOUT_SECONDS}" \
     env \
       HSA_ENABLE_SDMA=1 \
@@ -249,7 +251,7 @@ run_hipblaslt_bench_smoke() {
     2>&1 | tee "${RACE_REPORT_DIR}/hipblaslt-bench.log"
   local status=$?
   if [[ "${status}" -ne 0 ]]; then
-    echo "hipblaslt-bench smoke command failed with status ${status}" >&2
+    echo "hipblaslt-bench race check command failed with status ${status}" >&2
     return "${status}"
   fi
 
@@ -264,12 +266,13 @@ run_hipblaslt_bench_smoke() {
   fi
 }
 
-write_tensilelite_smoke_yaml() {
+
+write_tensilelite_check_yaml() {
   local yaml="$1"
-  # This reduced TensileLite config is intentionally embedded instead of checked
-  # in as a test-data file. The CI smoke only needs one small f32 assembly GEMM
-  # to exercise the Python driver, generated code object, prebuilt
-  # tensilelite-client, and rocjitsu race detector together.
+  # One reduced config is embedded here to keep this bridge job self-contained.
+  # If the race check grows to multiple configs, move them into a small checked-in
+  # data directory or install them with the TensileLite test artifacts, then have
+  # this script iterate over that list.
   cat >"${yaml}" <<'YAML'
 GlobalParameters:
   NumElementsToValidate: -1
@@ -330,13 +333,13 @@ BenchmarkProblems:
 YAML
 }
 
-run_tensilelite_client_smoke() {
+run_tensilelite_client_check() {
   local test_dir="${RACE_REPORT_DIR}/tensilelite"
   local output_dir="${test_dir}/output"
   local sink_dir="${test_dir}/sinks"
   local yaml="${test_dir}/f32_nt_32x32.yaml"
   mkdir -p "${output_dir}" "${sink_dir}"
-  write_tensilelite_smoke_yaml "${yaml}"
+  write_tensilelite_check_yaml "${yaml}"
 
   local tensile_args=(
     "${yaml}"
@@ -367,12 +370,12 @@ run_tensilelite_client_smoke() {
     2>&1 | tee "${RACE_REPORT_DIR}/tensilelite-client.log"
   local status=$?
   if [[ "${status}" -ne 0 ]]; then
-    echo "tensilelite-client smoke command failed with status ${status}" >&2
+    echo "tensilelite-client race check command failed with status ${status}" >&2
     return "${status}"
   fi
 
   if ! grep -q "PASSED" "${RACE_REPORT_DIR}/tensilelite-client.log"; then
-    echo "tensilelite-client smoke did not report validation success" >&2
+    echo "tensilelite-client race check did not report validation success" >&2
     return 1
   fi
 
@@ -393,34 +396,34 @@ run_timed "rocjitsu sanity check" run_sanity_check
 sanity_status=$?
 set -e
 if [[ "${sanity_status}" -ne 0 ]]; then
-  echo "WARNING: rocjitsu /bin/true sanity check failed; continuing to GPU workload smokes" >&2
+  echo "WARNING: rocjitsu /bin/true sanity check failed; continuing to GPU workload checks" >&2
 fi
 
-smoke_status=0
+check_status=0
 
-# Run both workload smokes even if the first one fails. That gives the uploaded
+# Run both workload checks even if the first one fails. That gives the uploaded
 # race-reports artifact a complete picture for the failing CI attempt instead of
 # forcing a second long run just to learn whether the other workload also broke.
 set +e
-run_timed "hipblaslt-bench race smoke" run_hipblaslt_bench_smoke
+run_timed "hipblaslt-bench race check" run_hipblaslt_bench_check
 hipblaslt_status=$?
-run_timed "tensilelite-client race smoke" run_tensilelite_client_smoke
+run_timed "tensilelite-client race check" run_tensilelite_client_check
 tensilelite_status=$?
 set -e
 
 if [[ "${hipblaslt_status}" -ne 0 ]]; then
-  echo "hipblaslt-bench race smoke failed with status ${hipblaslt_status}" >&2
-  smoke_status=1
+  echo "hipblaslt-bench race check failed with status ${hipblaslt_status}" >&2
+  check_status=1
 fi
 
 if [[ "${tensilelite_status}" -ne 0 ]]; then
-  echo "tensilelite-client race smoke failed with status ${tensilelite_status}" >&2
-  smoke_status=1
+  echo "tensilelite-client race check failed with status ${tensilelite_status}" >&2
+  check_status=1
 fi
 
-if [[ "${smoke_status}" -ne 0 ]]; then
-  echo "one or more rocjitsu race smokes failed" >&2
-  exit "${smoke_status}"
+if [[ "${check_status}" -ne 0 ]]; then
+  echo "one or more rocjitsu race checks failed" >&2
+  exit "${check_status}"
 fi
 
-echo "rocjitsu race smokes completed without race reports"
+echo "rocjitsu race checks completed without race reports"
