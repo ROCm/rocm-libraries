@@ -272,7 +272,7 @@ find_package( GTest QUIET )
 if( GTest_FOUND )
     target_link_libraries( rocfft-test PRIVATE GTest::gtest )
 else()
-  include( ../cmake/build-gtest.cmake )
+  include( ${PROJECT_SOURCE_DIR}/../cmake/build-gtest.cmake )
   add_dependencies( rocfft-test gtest )
   list( APPEND rocfft-test_include_dirs ${GTEST_INCLUDE_DIRS} )
   list( APPEND rocfft-test_link_libs ${GTEST_LIBRARIES} )
@@ -443,7 +443,7 @@ endif()
 if( ROCFFT_MPI_ENABLE )
   # normal and dynamic-loading MPI worker processes
   foreach(worker rocfft_mpi_worker dyna_rocfft_mpi_worker)
-    add_executable( ${worker} rocfft_mpi_worker.cpp ../../shared/test_callbacks.cpp ../../shared/data_gen_device.cpp)
+    add_executable( ${worker} rocfft_mpi_worker.cpp ../../shared/test_callbacks.cpp ../../shared/data_gen_device.cpp ../../shared/array_validator.cpp)
 
     if( BUILD_CLIENTS_TESTS_OPENMP )
       set_target_properties( ${worker} PROPERTIES

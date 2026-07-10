@@ -6,7 +6,6 @@ GlobalParameters:
   CSVExportWinner: true
   CSVMergeSameProblemID: true
   Device: 0
-  MaxFileName: 256
   # PrintTensorD: 0x2
   #DataInitTypeA: 1
   #DataInitTypeB: 8
@@ -25,7 +24,6 @@ GlobalParameters:
   SyncsPerBenchmark: 0
   NumBenchmarks: 1
   # KernelTime: False
-  MinKForGSU: 1
   # PrintCodeCommands: True
   # CpuThreads: 1
   # GenerateSourcesAndExit: True

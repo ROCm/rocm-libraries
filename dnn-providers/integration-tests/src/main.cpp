@@ -22,6 +22,7 @@
 #include "harness/SupportMatrixCollector.hpp"
 #include "harness/TestConfig.hpp"
 #include "harness/golden/BundleRegistration.hpp"
+#include "harness/golden/UnverifiableBundleReport.hpp"
 
 namespace
 {
@@ -96,10 +97,17 @@ int main(int argc, char** argv) noexcept
             .implicit_value(true)
             .help("Enable golden reference bundle test registration. "
                   "Can also be set via HIPDNN_TEST_ALLOW_BUNDLES=1 env var.");
-        parser.add_argument("--golden-data-dir")
+        parser.add_argument("--gd", "--golden-data-dir")
             .help("Path to the integration test bundle data directory. "
                   "Defaults to <exe>/../lib/integration_test_bundles/. "
                   "Can also be set via HIPDNN_TEST_GOLDEN_DATA_DIR env var.");
+        // --verification-mode governs BUNDLE tests (how the engine's output is
+        // verified). It is independent of --reference-executor, which governs the
+        // parameterized tests (which ref executor is exercised as the SUT).
+        parser.add_argument("--vm", "--verification-mode")
+            .help("How bundle engine output is verified: 'auto' (default; golden -> "
+                  "GPU ref -> CPU ref -> skip), 'golden', 'gpu', or 'cpu'. "
+                  "Can also be set via HIPDNN_TEST_VERIFICATION_MODE env var.");
 
         std::vector<std::string> remainingArgs;
         try
@@ -167,6 +175,34 @@ int main(int argc, char** argv) noexcept
         if(parser.is_used("--golden-data-dir"))
         {
             goldenDataDir = parser.get<std::string>("--golden-data-dir");
+            if(!std::filesystem::exists(*goldenDataDir))
+            {
+                std::cerr << "Error: --golden-data-dir path does not exist: " << *goldenDataDir
+                          << "\n";
+                return 1;
+            }
+            if(!std::filesystem::is_directory(*goldenDataDir))
+            {
+                std::cerr << "Error: --golden-data-dir is not a directory: " << *goldenDataDir
+                          << "\n";
+                return 1;
+            }
+        }
+
+        // Parse --verification-mode (case-insensitive); invalid value -> exit 1.
+        std::optional<hipdnn_integration_tests::VerificationMode> verificationMode;
+        if(parser.is_used("--verification-mode"))
+        {
+            try
+            {
+                verificationMode = hipdnn_integration_tests::parseVerificationMode(
+                    parser.get<std::string>("--verification-mode"));
+            }
+            catch(const std::exception& e)
+            {
+                std::cerr << "Error: " << e.what() << '\n';
+                return 1;
+            }
         }
 
         // Parse --test-article argument and load explicit plugin if provided
@@ -204,14 +240,17 @@ int main(int argc, char** argv) noexcept
             hipdnn_integration_tests::SupportMatrixCollector::get().setOutputPath(outputFile);
         }
 
-        hipdnn_integration_tests::TestConfig::initialize(std::move(articlePath),
-                                                         std::move(engineName),
-                                                         failOnUnsupported,
-                                                         skipGraphValidation,
-                                                         std::move(configPath),
-                                                         refExecType,
-                                                         allowBundles,
-                                                         std::move(goldenDataDir));
+        hipdnn_integration_tests::TestConfigOptions opts;
+        opts.articlePath = std::move(articlePath);
+        opts.engineName = std::move(engineName);
+        opts.failOnUnsupported = failOnUnsupported;
+        opts.skipGraphValidation = skipGraphValidation;
+        opts.configPath = std::move(configPath);
+        opts.referenceExecutorType = refExecType;
+        opts.allowBundles = allowBundles;
+        opts.goldenDataDir = std::move(goldenDataDir);
+        opts.verificationMode = verificationMode;
+        hipdnn_integration_tests::TestConfig::initialize(std::move(opts));
 
         // Reconstruct argc/argv for GTest from remaining (unknown) args.
         // argv[0] (program name) must be first — GTest requires it.
@@ -270,6 +309,10 @@ int main(int argc, char** argv) noexcept
         hipdnn_integration_tests::golden::registerBundleTests();
 
         const int result = RUN_ALL_TESTS();
+
+        // Print bundles that ended without a verdict (no oracle / reference bug).
+        // Informational only — these SKIP, so they do not affect `result`.
+        hipdnn_integration_tests::golden::UnverifiableBundleReport::get().print();
 
         // Generate support matrix if requested
         if(hipdnn_integration_tests::SupportMatrixCollector::get().isEnabled())

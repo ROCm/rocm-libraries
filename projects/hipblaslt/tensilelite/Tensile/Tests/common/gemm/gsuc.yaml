@@ -7,7 +7,6 @@ GlobalParameters:
   MinimumRequiredVersion: 5.0.0
   DataInitTypeAlpha: 1
   DataInitTypeBeta: 0
-  NewClient: 2
   CSVExportWinner: true
   CSVMergeSameProblemID: true
   Device: 0

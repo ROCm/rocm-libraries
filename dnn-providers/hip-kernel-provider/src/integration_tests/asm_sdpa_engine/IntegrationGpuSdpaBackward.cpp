@@ -29,13 +29,17 @@ struct SdpaBwdTestCase
     SdpaBwdTestCase(std::vector<int64_t> qDimsIn,
                     std::vector<int64_t> vDimsIn,
                     std::optional<float> attnScaleValueIn = std::nullopt,
-                    bool causalMaskIn = false)
+                    int64_t leftBoundIn = -1,
+                    int64_t rightBoundIn = -1,
+                    bool topLeftAlignmentIn = true)
         : qDims(std::move(qDimsIn))
         , vDims(std::move(vDimsIn))
         , qStrides(generateStrides(qDims))
         , vStrides(generateStrides(vDims))
         , attnScaleValue(attnScaleValueIn)
-        , causalMask(causalMaskIn)
+        , leftBound(leftBoundIn)
+        , rightBound(rightBoundIn)
+        , topLeftAlignment(topLeftAlignmentIn)
     {
         // K tensor is [B, H_kv, S_kv, D_qk]: B and D_qk from Q, H_kv and S_kv from V
         kDims = {qDims[0], vDims[1], vDims[2], qDims[3]};
@@ -50,13 +54,37 @@ struct SdpaBwdTestCase
     std::vector<int64_t> vStrides;
 
     std::optional<float> attnScaleValue;
-    bool causalMask;
+    int64_t leftBound;
+    int64_t rightBound;
+    bool topLeftAlignment;
 };
 
 std::vector<SdpaBwdTestCase> getSdpaBwdTestCases()
 {
-    // Small case for fast CPU reference execution (backward CPU ref is O(B*H*S^2*D))
-    return {SdpaBwdTestCase({1, 1, 256, 128}, {1, 1, 256, 128})};
+    // Small dims for fast CPU reference execution (backward CPU ref is O(B*H*S^2*D))
+    return {
+        // NO_MASK (mask=0)
+        SdpaBwdTestCase({1, 1, 256, 128}, {1, 1, 256, 128}),
+        // TOP_LEFT_CAUSAL (mask=1): rightBound=0, topLeftAlignment=true
+        SdpaBwdTestCase({1, 1, 256, 128}, {1, 1, 256, 128}, std::nullopt, -1, 0, true),
+        // BOTTOM_RIGHT_CAUSAL (mask=2): rightBound=0, topLeftAlignment=false
+        SdpaBwdTestCase({1, 1, 256, 128}, {1, 1, 256, 128}, std::nullopt, -1, 0, false),
+        // SLIDING_WINDOW / SWA (mask=3): top-left alignment
+        SdpaBwdTestCase({1, 1, 256, 128}, {1, 1, 256, 128}, std::nullopt, 64, 64, true),
+        // SLIDING_WINDOW / SWA (mask=3): bottom-right alignment
+        SdpaBwdTestCase({1, 1, 256, 128}, {1, 1, 256, 128}, std::nullopt, 64, 64, false),
+        // Asymmetric Sq != Skv — no mask
+        SdpaBwdTestCase({1, 1, 256, 128}, {1, 1, 512, 128}),
+        // Asymmetric Sq != Skv — top-left causal
+        SdpaBwdTestCase({1, 1, 256, 128}, {1, 1, 512, 128}, std::nullopt, -1, 0, true),
+        // Asymmetric Sq != Skv — bottom-right causal
+        SdpaBwdTestCase({1, 1, 256, 128}, {1, 1, 512, 128}, std::nullopt, -1, 0, false),
+        // ALMIOPEN-2079: Re-enable when GQA support is implemented
+        // // GQA: 4 Q heads, 1 KV head — no mask
+        // SdpaBwdTestCase({1, 4, 256, 128}, {1, 1, 256, 128}),
+        // // GQA: 4 Q heads, 1 KV head — top-left causal
+        // SdpaBwdTestCase({1, 4, 256, 128}, {1, 1, 256, 128}, std::nullopt, -1, 0, true),
+    };
 }
 
 template <typename DataType>
@@ -76,11 +104,16 @@ protected:
         // Step 2: Compute valid O and stats from Q, K, V using CPU forward reference.
         // The backward pass requires O and stats (LSE) that are mathematically consistent
         // with Q, K, V — random values would cause GPU vs CPU divergence.
-        auto& qTensor = bundle.getTensor(_qUid);
-        auto& kTensor = bundle.getTensor(_kUid);
-        auto& vTensor = bundle.getTensor(_vUid);
-        auto& oTensor = bundle.getTensor(_oUid);
-        auto& statsTensor = bundle.getTensor(_statsUid);
+        //
+        // UIDs are resolved here (not in runGraphTest) because graph.build() —
+        // called by verifyGraph() before initializeBundle() — is what assigns
+        // UIDs via assignUnsetTensorUids().  Querying get_uid() before build()
+        // returns the default (0) for all tensors.
+        auto& qTensor = bundle.getTensor(_qAttr->get_uid());
+        auto& kTensor = bundle.getTensor(_kAttr->get_uid());
+        auto& vTensor = bundle.getTensor(_vAttr->get_uid());
+        auto& oTensor = bundle.getTensor(_oAttr->get_uid());
+        auto& statsTensor = bundle.getTensor(_statsAttr->get_uid());
 
         const ShallowTensor<DataType> shallowQ(
             qTensor.rawHostData(), qTensor.dims(), qTensor.strides());
@@ -103,7 +136,9 @@ protected:
             shallowO,
             _attnScaleValue,
             /*attnMask=*/nullptr,
-            _causalMask,
+            _leftBound,
+            _rightBound,
+            _topLeftAlignment,
             &shallowStats);
 
         // Mark O and stats as host-modified so the GPU bundle syncs to device
@@ -171,7 +206,20 @@ protected:
         {
             bwdAttributes.set_attn_scale_value(testCase.attnScaleValue.value());
         }
-        bwdAttributes.set_causal_mask(testCase.causalMask);
+        if(testCase.leftBound >= 0)
+        {
+            bwdAttributes.set_diagonal_band_left_bound(testCase.leftBound);
+        }
+        if(testCase.rightBound >= 0)
+        {
+            bwdAttributes.set_diagonal_band_right_bound(testCase.rightBound);
+        }
+        if(testCase.leftBound >= 0 || testCase.rightBound >= 0)
+        {
+            bwdAttributes.set_diagonal_alignment(testCase.topLeftAlignment
+                                                     ? DiagonalAlignment::TOP_LEFT
+                                                     : DiagonalAlignment::BOTTOM_RIGHT);
+        }
 
         auto [dq, dk, dv] = graph.sdpa_backward(q, k, v, o, dO, stats, std::move(bwdAttributes));
 
@@ -182,14 +230,20 @@ protected:
         auto validationResult = graph.validate();
         EXPECT_TRUE(validationResult.is_good()) << validationResult.get_message();
 
-        // Store UIDs AFTER validate() — validate() assigns UIDs via assignUnsetTensorUids()
-        _qUid = q->get_uid();
-        _kUid = k->get_uid();
-        _vUid = v->get_uid();
-        _oUid = o->get_uid();
-        _statsUid = stats->get_uid();
+        // Store tensor attribute pointers — NOT UIDs.  UIDs are assigned by
+        // graph.build() (via assignUnsetTensorUids()), which runs inside
+        // verifyGraph().  Storing get_uid() here would return 0 for all tensors
+        // because validate() does not assign UIDs.  initializeBundle() resolves
+        // UIDs lazily via _qAttr->get_uid() after build() has run.
+        _qAttr = q;
+        _kAttr = k;
+        _vAttr = v;
+        _oAttr = o;
+        _statsAttr = stats;
         _attnScaleValue = testCase.attnScaleValue;
-        _causalMask = testCase.causalMask;
+        _leftBound = testCase.leftBound;
+        _rightBound = testCase.rightBound;
+        _topLeftAlignment = testCase.topLeftAlignment;
 
         this->registerValidator(dq, tolerance);
         this->registerValidator(dk, tolerance);
@@ -201,13 +255,15 @@ protected:
     float _maxVal = 1.0;
 
 private:
-    int64_t _qUid = -1;
-    int64_t _kUid = -1;
-    int64_t _vUid = -1;
-    int64_t _oUid = -1;
-    int64_t _statsUid = -1;
+    std::shared_ptr<TensorAttributes> _qAttr;
+    std::shared_ptr<TensorAttributes> _kAttr;
+    std::shared_ptr<TensorAttributes> _vAttr;
+    std::shared_ptr<TensorAttributes> _oAttr;
+    std::shared_ptr<TensorAttributes> _statsAttr;
     std::optional<float> _attnScaleValue;
-    bool _causalMask = false;
+    int64_t _leftBound = -1;
+    int64_t _rightBound = -1;
+    bool _topLeftAlignment = true;
 };
 
 using IntegrationGpuSdpaBwdBf16 = SdpaBackward<bfloat16>;

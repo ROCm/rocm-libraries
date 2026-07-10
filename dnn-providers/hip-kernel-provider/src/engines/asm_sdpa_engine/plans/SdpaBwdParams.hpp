@@ -109,9 +109,16 @@ struct SdpaBwdParams
         // Ceil-divide an extent by `ts` to get the corresponding grid-x dimension.
         // Returns 0 if `ts` is unset (KernelTiles default-initialised) so callers
         // can fail loudly at launch time rather than divide-by-zero.
-        constexpr unsigned int gridDim(unsigned int extent) const noexcept
+        // When `isCausal` is true the grid is halved (rounded up) because causal
+        // kernels tile only the triangular region of the attention matrix.
+        constexpr unsigned int gridDim(unsigned int extent, bool isCausal = false) const noexcept
         {
-            return ts == 0U ? 0U : (extent + ts - 1U) / ts;
+            unsigned int gd = ts == 0U ? 0U : (extent + ts - 1U) / ts;
+            if(isCausal)
+            {
+                gd = (gd + 1U) / 2U;
+            }
+            return gd;
         }
     };
     KernelTiles odoTiles{}; // from cfg_fmha_bwd_odo
@@ -120,6 +127,21 @@ struct SdpaBwdParams
 
     // Accumulator type (a32 = 3-kernel path, a16 = 2-kernel path)
     AccumulatorType accumulatorType = AccumulatorType::A32;
+
+    // Mask type ordinal (matches CSV `mask` column and MaskType enum):
+    //   0 = NO_MASK, 1 = TOP_LEFT_CAUSAL, 2 = BOTTOM_RIGHT_CAUSAL, 3 = SLIDING_WINDOW
+    int32_t maskOrdinal = 0;
+
+    // Window attention bounds for SLIDING_WINDOW (mask=3).
+    // Set to -1 (unbounded) for non-window masks.
+    int32_t windowLeft = -1;
+    int32_t windowRight = -1;
+
+    // Diagonal alignment for the mask. True = top-left (skv==sq diagonal),
+    // false = bottom-right (skv==sq+(seqKv-seqQ) diagonal).
+    // Used by computeMaskCoordinates() to compute the offset applied to
+    // mask_x/mask_y for SLIDING_WINDOW kernels.
+    bool topLeftAlignment = true;
 };
 
 } // namespace asm_sdpa_engine

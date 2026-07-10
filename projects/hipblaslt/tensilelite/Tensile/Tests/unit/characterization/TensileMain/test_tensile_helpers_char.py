@@ -86,7 +86,14 @@ def test_arg_updated_global_parameters_pytest_arch_env(monkeypatch):
 # get_gpu_max_frequency_smi
 # ---------------------------------------------------------------------------
 def test_gpu_max_freq_smi_parses(monkeypatch):
-    out = "header\nGPU0 sclk\n700Mhz\n1200Mhz\nsocclk stuff\n"
+    # `amd-smi metric --clock --json`: max GFX (sclk) max_clk across engines.
+    out = (
+        '{"gpu_data": [{"clock": {'
+        '"gfx_0": {"max_clk": {"value": 700}}, '
+        '"gfx_1": {"max_clk": {"value": 1200}}, '
+        '"mem_0": {"max_clk": {"value": 1900}}'
+        '}}]}'
+    )
     monkeypatch.setattr(
         M.subprocess, "run", lambda *a, **k: SimpleNamespace(returncode=0, stdout=out, stderr="")
     )
@@ -98,7 +105,7 @@ def test_gpu_max_freq_smi_error_returncode(monkeypatch, capsys):
         M.subprocess, "run", lambda *a, **k: SimpleNamespace(returncode=1, stdout="", stderr="boom")
     )
     assert M.get_gpu_max_frequency_smi(0) is None
-    assert "Error running rocm-smi" in capsys.readouterr().out
+    assert "Error running amd-smi" in capsys.readouterr().out
 
 
 def test_gpu_max_freq_smi_exception(monkeypatch):

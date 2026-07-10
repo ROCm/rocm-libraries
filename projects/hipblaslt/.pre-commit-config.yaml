@@ -1,0 +1,18 @@
+# Copyright Advanced Micro Devices, Inc., or its affiliates.
+# SPDX-License-Identifier:  MIT
+
+# Pre-commit config scoped to hipblaslt / TensileLite. Install explicitly:
+#   pre-commit install --config projects/hipblaslt/.pre-commit-config.yaml
+# See projects/hipblaslt/tensilelite/README.md for setup.
+
+repos:
+  - repo: local
+    hooks:
+      - id: tensilelite-affected-tests
+        name: TensileLite affected unit + characterization tests
+        entry: projects/hipblaslt/tensilelite/scripts/precommit_affected_tests.py
+        language: script
+        always_run: true
+        pass_filenames: false
+        verbose: true
+        stages: [pre-commit]

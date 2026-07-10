@@ -374,9 +374,7 @@ rocblas_status rocsolver_getri_template(rocblas_handle handle,
         blk = n;
 
     // everything must be executed with scalars on the host
-    rocblas_pointer_mode old_mode;
-    rocblas_get_pointer_mode(handle, &old_mode);
-    rocblas_set_pointer_mode(handle, rocblas_pointer_mode_host);
+    rocblas_pointer_mode_saver saver(handle, rocblas_pointer_mode_host);
 
     T minone = -1;
     T one = 1;
@@ -407,8 +405,6 @@ rocblas_status rocsolver_getri_template(rocblas_handle handle,
     if(pivot)
         ROCSOLVER_LAUNCH_KERNEL(getri_kernel_large2<T>, dim3(batch_count, 1, 1), dim3(1, threads, 1),
                                 0, stream, n, A, shiftA, lda, strideA, ipiv, shiftP, strideP, info);
-
-    rocblas_set_pointer_mode(handle, old_mode);
 
     return rocblas_status_success;
 }

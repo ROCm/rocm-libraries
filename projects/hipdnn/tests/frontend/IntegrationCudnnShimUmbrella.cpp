@@ -1,8 +1,8 @@
 // Copyright © Advanced Micro Devices, Inc., or its affiliates.
 // SPDX-License-Identifier:  MIT
 
-// Integration-style coverage for the cuDNN-compatibility shim (RFC 0012;
-// ALMIOPEN-2034). Unlike the unit-level compile/link check
+// Integration-style coverage for the cuDNN-compatibility shim (RFC 0012).
+// Unlike the unit-level compile/link check
 // (frontend/tests/TestCudnnShimUmbrellaCompiles.cpp), this exercises the shim
 // umbrella inside the *integration* executable — the same translation unit pulls
 // in the real hipDNN frontend, the backend C-API, and a live device handle via

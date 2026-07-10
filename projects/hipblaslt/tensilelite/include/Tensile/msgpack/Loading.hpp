@@ -30,14 +30,17 @@
 #include <string>
 #include <vector>
 
+#include <msgpack.hpp>
+
 #include <Tensile/SolutionLibrary.hpp>
 
-#include <Tensile/Macros.hpp>
-
-TENSILE_HIDDEN_BEGIN
+#include <tensilelitehost/export.h>
 
 namespace TensileLite
 {
+    TENSILELITEHOST_EXPORT bool fileToMsgObject(std::string const&      filename,
+                                                msgpack::object_handle& result);
+
     std::map<int, std::string> MessagePackLoadLibraryMapping(std::string const& filename);
 
     template <typename MyProblem, typename MySolution>
@@ -50,4 +53,3 @@ namespace TensileLite
         MessagePackLoadLibraryData(std::vector<uint8_t> const& data);
 }
 
-TENSILE_HIDDEN_END

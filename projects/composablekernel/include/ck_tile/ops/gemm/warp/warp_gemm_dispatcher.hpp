@@ -4,11 +4,13 @@
 #pragma once
 
 #include "ck_tile/core.hpp"
+#include "ck_tile/ops/gemm/warp/warp_gemm_dispatcher_unification.hpp"
 #include "ck_tile/ops/gemm/warp/warp_gemm.hpp"
 #include "ck_tile/ops/gemm/warp/warp_wmma_gemm.hpp"
 
 namespace ck_tile {
 
+#if !USE_NEW_UNIFIED_FRAMEWORK
 namespace impl {
 namespace warp_gemm_dispatcher {
 
@@ -236,6 +238,17 @@ template<> struct Dispatcher<bf8_t, bf8_t, float, 32, 32,  32, false> { using Ty
 template<> struct Dispatcher<bf8_t, bf8_t, float, 32, 32,  32, false, false, false, EDouble> { using Type = WarpGemmMfma_f32_32x32x32_bf8_bf8<EDouble>; };
 
 template<> struct Dispatcher<fp8_t, fp8_t, float, 16, 16,  64, false, false, false, EDouble> { using Type = WarpGemmMfma_f32_16x16x64_fp8_fp8<EDouble>; };
+template<> struct Dispatcher<bf8_t, bf8_t, float, 16, 16,  64, false, false, false, EDouble> { using Type = WarpGemmMfma_f32_16x16x64_bf8_bf8<EDouble>; };
+#if defined(__gfx950__)
+template<> struct Dispatcher<fp8_t, fp8_t, float, 16, 16,  64, false, false, false, ESingle, EDouble> { using Type = WarpGemmMfma_f32_16x16x64_fp8_fp8<ESingle, EDouble>; };
+template<> struct Dispatcher<fp8_t, fp8_t, float, 16, 16,  64, false, false, false, EDouble, ESingle> { using Type = WarpGemmMfma_f32_16x16x64_fp8_fp8<EDouble, ESingle>; };
+template<> struct Dispatcher<bf8_t, bf8_t, float, 16, 16,  64, false, false, false, ESingle, EDouble> { using Type = WarpGemmMfma_f32_16x16x64_bf8_bf8<ESingle, EDouble>; };
+template<> struct Dispatcher<bf8_t, bf8_t, float, 16, 16,  64, false, false, false, EDouble, ESingle> { using Type = WarpGemmMfma_f32_16x16x64_bf8_bf8<EDouble, ESingle>; };
+template<> struct Dispatcher<fp8_t, fp8_t, float, 32, 32,  32, false, false, false, ESingle, EDouble> { using Type = WarpGemmMfma_f32_32x32x32_fp8_fp8<ESingle, EDouble>; };
+template<> struct Dispatcher<fp8_t, fp8_t, float, 32, 32,  32, false, false, false, EDouble, ESingle> { using Type = WarpGemmMfma_f32_32x32x32_fp8_fp8<EDouble, ESingle>; };
+template<> struct Dispatcher<bf8_t, bf8_t, float, 32, 32,  32, false, false, false, ESingle, EDouble> { using Type = WarpGemmMfma_f32_32x32x32_bf8_bf8<ESingle, EDouble>; };
+template<> struct Dispatcher<bf8_t, bf8_t, float, 32, 32,  32, false, false, false, EDouble, ESingle> { using Type = WarpGemmMfma_f32_32x32x32_bf8_bf8<EDouble, ESingle>; };
+#endif // defined(__gfx950__)
 
 //WMMA cases
 template<bool TransposeC, WGAttrNumAccessEnum AttrNumAccess> struct Dispatcher<fp8_t, fp8_t, float, 16, 16, 16, TransposeC, false, false, AttrNumAccess, AttrNumAccess> : WmmaTag { using Type = WarpGemmWmma_f32_16x16x16_f8_f8<TransposeC, AttrNumAccess>; };
@@ -264,7 +277,7 @@ template<typename A, typename B, bool TransposeC, WGAttrNumAccessEnum AttrNumAcc
 template<typename A, typename B, bool TransposeC, WGAttrNumAccessEnum AttrNumAccessA, WGAttrNumAccessEnum AttrNumAccessB> struct Dispatcher<A, B, float, 16, 16, 128, TransposeC, false, false, AttrNumAccessA, AttrNumAccessB, true> : WmmaTag { using Type = WarpGemmWmma_f32_16x16x128_f8f6f4_scale16<A, B, TransposeC, AttrNumAccessA, AttrNumAccessB>; };
 #else
 template<> struct Dispatcher<fp8_t, fp8_t, float, 16, 16,  64, false> { using Type = WarpGemmMfma_f32_16x16x64_fp8_fp8<>; };
-template<> struct Dispatcher<bf8_t, bf8_t, float, 16, 16,  64, false> { using Type = WarpGemmMfma_f32_16x16x64_bf8_bf8; };
+template<> struct Dispatcher<bf8_t, bf8_t, float, 16, 16,  64, false> { using Type = WarpGemmMfma_f32_16x16x64_bf8_bf8<>; };
 template<> struct Dispatcher<fp8_t, fp8_t, float, 16, 16,  64, true> { using Type = WarpGemmMfma_f32_16x16x64_fp8_fp8_CTransposed; };
 template<> struct Dispatcher<bf8_t, bf8_t, float, 16, 16,  64, true> { using Type = WarpGemmMfma_f32_16x16x64_bf8_bf8_CTransposed; };
 #endif
@@ -335,6 +348,7 @@ struct Dispatcher<AType, BType, AccType, M, N, K, TransposeC, SA, SS,
 // clang-format on
 } // namespace warp_gemm_dispatcher
 } // namespace impl
+#endif // if !USE_NEW_UNIFIED_FRAMEWORK
 
 template <typename AType,
           typename BType,
@@ -348,18 +362,37 @@ template <typename AType,
           WGAttrNumAccessEnum AttrNumAccessA = WGAttrNumAccessEnum::Default,
           WGAttrNumAccessEnum AttrNumAccessB = AttrNumAccessA,
           bool IsScale16                     = false>
-using WarpGemmDispatcher = typename impl::warp_gemm_dispatcher::Dispatcher< //
-    AType,
-    BType,
-    AccType,
-    MPerWave,
-    NPerWave,
-    KPerWave,
-    TransposeC,
-    SwizzleA,
-    UseStructuredSparsity,
-    AttrNumAccessA,
-    AttrNumAccessB,
-    IsScale16>::Type;
+#if USE_NEW_UNIFIED_FRAMEWORK
+// Note that we convert the SwizzleA bool to a SwizzleFactor. This used to be hardcoded in a number
+// of places in the original Dispatcher / WarpGemms, always ending up with SFactor = 2 for the
+// cases where the Dispatcher was used. The rare SFactor = 4 cases never went through the
+// Dispatcher.
+using WarpGemmDispatcher =
+    typename impl::warp_gemm_dispatcher::UnificationDispatcher<AType,
+                                                               BType,
+                                                               AccType,
+                                                               MPerWave,
+                                                               NPerWave,
+                                                               KPerWave,
+                                                               TransposeC,
+                                                               SwizzleA ? 2 : 1,
+                                                               UseStructuredSparsity,
+                                                               AttrNumAccessA,
+                                                               AttrNumAccessB,
+                                                               IsScale16>::Type;
+#else
+using WarpGemmDispatcher = typename impl::warp_gemm_dispatcher::Dispatcher<AType,
+                                                                           BType,
+                                                                           AccType,
+                                                                           MPerWave,
+                                                                           NPerWave,
+                                                                           KPerWave,
+                                                                           TransposeC,
+                                                                           SwizzleA,
+                                                                           UseStructuredSparsity,
+                                                                           AttrNumAccessA,
+                                                                           AttrNumAccessB,
+                                                                           IsScale16>::Type;
+#endif
 
 } // namespace ck_tile

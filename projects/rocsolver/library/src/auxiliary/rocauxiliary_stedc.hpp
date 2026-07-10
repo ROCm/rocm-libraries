@@ -4,7 +4,7 @@
  *     Univ. of Tennessee, Univ. of California Berkeley,
  *     Univ. of Colorado Denver and NAG Ltd..
  *     December 2016
- * Copyright (C) 2021-2025 Advanced Micro Devices, Inc. All rights reserved.
+ * Copyright (C) 2021-2026 Advanced Micro Devices, Inc. All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -1972,9 +1972,7 @@ rocblas_status rocsolver_stedc_template(rocblas_handle handle,
         HIP_CHECK(hipMemsetAsync((void*)tempgemm, 0, size_tempgemm, stream));
 
         // everything must be executed with scalars on the host
-        rocblas_pointer_mode old_mode;
-        rocblas_get_pointer_mode(handle, &old_mode);
-        rocblas_set_pointer_mode(handle, rocblas_pointer_mode_host);
+        rocblas_pointer_mode_saver saver(handle, rocblas_pointer_mode_host);
         S one = 1.0;
         S zero = 0.0;
 
@@ -2191,8 +2189,6 @@ rocblas_status rocsolver_stedc_template(rocblas_handle handle,
         ROCSOLVER_LAUNCH_KERNEL(stedc_sort<T>, dim3(n, batch_count), dim3(STEDC_BDIM), 0, stream, n,
                                 tmpz, n, D + shiftD, strideD, (T*)tempgemm, 0, n, n * n, C, shiftC,
                                 ldc, strideC);
-
-        rocblas_set_pointer_mode(handle, old_mode);
     }
 
     return rocblas_status_success;

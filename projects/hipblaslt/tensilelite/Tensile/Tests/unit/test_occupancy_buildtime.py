@@ -4,7 +4,7 @@
 GPU-free unit tests for OccupancyMeasure.py: occupancy formula and arch-caps table.
 
 Tests compute_occupancy_from_resources() and _arch_caps_for_kernel() used by
-both the codegen-time scan (updateOccupancyFromScan) and the custom-kernel ASM
+both the codegen-time max-VGPR path (updateOccupancyFromMaxVgpr) and the custom-kernel ASM
 parser (compute_occupancy_from_asm_source).
 HIP cross-validation lives in test_occupancy_hip.py.
 """
@@ -57,7 +57,7 @@ class TestComputeOccupancyFromResources:
     def test_case4_mt320x192x64_vgpr_256(self):
         """Case 4 (MT320x192x64): vgpr_count=256, LDS=68864 → occ=2.
 
-        This is the primary motivating case.  With updateOccupancyFromScan
+        This is the primary motivating case.  With updateOccupancyFromMaxVgpr
         the .s file has .amdhsa_next_free_vgpr=256; the formula correctly
         computes occ=2.
         """
@@ -410,7 +410,7 @@ class TestArchCapsAgreementExtended:
         assert max_waves  == exp_max_waves,  f"ISA {isa}: max_waves_per_simd mismatch"
 
 
-# ── Fix #3: updateOccupancyFromScan symbolic-register guard ──────────────────
+# ── updateOccupancyFromMaxVgpr O(1) path ─────────────────────────────────────
 
 class _MockPool:
     def __init__(self, n):
@@ -420,7 +420,7 @@ class _MockPool:
 
 
 class _MockMkb:
-    def __init__(self, body_text):
+    def __init__(self, body_text=""):
         _text = body_text
         class _Body:
             def __str__(self):
@@ -434,8 +434,8 @@ class _MockMkb:
         self.set_gprs_kwargs = kwargs
 
 
-def _make_scan_writer(arch_acc_unified=True, vgpr_size=256, agpr_size=256, sgpr_size=64):
-    """Minimal KernelWriterAssembly stub for updateOccupancyFromScan tests."""
+def _make_max_vgpr_writer(arch_acc_unified=True, vgpr_size=256, agpr_size=256, sgpr_size=64):
+    """Minimal KernelWriterAssembly stub for updateOccupancyFromMaxVgpr tests."""
     kw = object.__new__(_KWA)
     kw.states = SimpleNamespace(
         archCaps={
@@ -453,59 +453,33 @@ def _make_scan_writer(arch_acc_unified=True, vgpr_size=256, agpr_size=256, sgpr_
 
 
 @pytest.mark.skipif(not _KWA_AVAILABLE, reason="KernelWriterAssembly import requires rocisa")
-class TestUpdateOccupancyFromScanSymbolicGuard:
-    """Fix #3: updateOccupancyFromScan must skip when body has symbolic registers.
+class TestUpdateOccupancyFromMaxVgprO1Path:
+    """updateOccupancyFromMaxVgpr uses rocIsaPassResult.maxVgpr (O(1)); no regex fallback."""
 
-    A body containing unresolved vgpr/agpr symbolic tokens (e.g. vgprValuA,
-    agprAccum) would cause the numeric scan to undercount actual register usage
-    and could wrongly raise occupancy.  The guard must return early in that case,
-    leaving the pre-scan CUOccupancy unchanged.
-    """
-
-    def test_symbolic_vgpr_prevents_update(self):
-        """Body with 'vgprValuA' → scan skipped; CUOccupancy unchanged."""
-        kw = _make_scan_writer()
-        body = "v_mfma_f32_16x16x4f32 a[0:3], v0, vgprValuA, a[0:3]\n"
-        mkb = _MockMkb(body)
+    def test_missing_max_vgpr_skips_update(self):
+        """maxVgpr <= 0 from rocIsaPass → skip update; CUOccupancy unchanged."""
+        kw = _make_max_vgpr_writer()
+        mkb = _MockMkb()
         kernel = {"CUOccupancy": 2, "NumThreads": 256, "LdsNumBytes": 0}
-        kw.updateOccupancyFromScan(kernel, mkb)
-        assert not mkb.set_gprs_called, \
-            "setGprs must NOT be called when symbolic vgpr tokens remain"
-        assert kernel["CUOccupancy"] == 2, \
-            "CUOccupancy must be unchanged when symbolic vgpr tokens remain"
-
-    def test_symbolic_agpr_prevents_update(self):
-        """Body with 'agprAccum' → scan skipped; CUOccupancy unchanged."""
-        kw = _make_scan_writer()
-        body = "v_accvgpr_read_b32 v0, agprAccum\n"
-        mkb = _MockMkb(body)
-        kernel = {"CUOccupancy": 2, "NumThreads": 256, "LdsNumBytes": 0}
-        kw.updateOccupancyFromScan(kernel, mkb)
-        assert not mkb.set_gprs_called, \
-            "setGprs must NOT be called when symbolic agpr tokens remain"
-        assert kernel["CUOccupancy"] == 2, \
-            "CUOccupancy must be unchanged when symbolic agpr tokens remain"
-
-    def test_fully_numeric_body_updates_correctly(self):
-        """Body with only numeric v[N] refs: scan proceeds and lowers register count."""
-        kw = _make_scan_writer(vgpr_size=256, agpr_size=256, sgpr_size=64)
-        # Pool: 256 vgprs + 256 agprs = 512 aligned total.
-        # Body only uses v0..v9: scanned_vgprs=10, agpr fallback=256.
-        # scanned_total = ceil(10/8)*8 + 256 = 16 + 256 = 272 < 512 → update fires.
-        body = "v_add_f32 v0, v1, v2\nv_mov_b32 v9, v3\n"
-        mkb = _MockMkb(body)
-        kernel = {"CUOccupancy": 1, "NumThreads": 256, "LdsNumBytes": 0}
-        kw.updateOccupancyFromScan(kernel, mkb)
-        assert mkb.set_gprs_called, \
-            "setGprs must be called for fully-numeric body with reduced VGPR count"
-
-    def test_mixed_numeric_and_symbolic_prevents_update(self):
-        """Body mixing numeric v[N] and symbolic vgprFoo → scan still skipped."""
-        kw = _make_scan_writer()
-        body = "v_add_f32 v0, v1, v2\nv_mov_b32 v9, vgprFoo\n"
-        mkb = _MockMkb(body)
-        kernel = {"CUOccupancy": 2, "NumThreads": 256, "LdsNumBytes": 0}
-        kw.updateOccupancyFromScan(kernel, mkb)
-        assert not mkb.set_gprs_called, \
-            "setGprs must NOT be called when any symbolic token is present"
+        kw.updateOccupancyFromMaxVgpr(kernel, mkb, -1)
+        assert not mkb.set_gprs_called
         assert kernel["CUOccupancy"] == 2
+
+    def test_pool_estimate_skips_update(self):
+        """maxVgpr == pool size → no reduction possible; CUOccupancy unchanged."""
+        kw = _make_max_vgpr_writer(vgpr_size=256, agpr_size=256, sgpr_size=64)
+        mkb = _MockMkb()
+        kernel = {"CUOccupancy": 1, "NumThreads": 256, "LdsNumBytes": 0}
+        kw.updateOccupancyFromMaxVgpr(kernel, mkb, 256)
+        assert not mkb.set_gprs_called
+        assert kernel["CUOccupancy"] == 1
+
+    def test_reduced_vgpr_count_updates(self):
+        """maxVgpr < pool → setGprs called and CUOccupancy corrected."""
+        kw = _make_max_vgpr_writer(vgpr_size=256, agpr_size=256, sgpr_size=64)
+        mkb = _MockMkb()
+        kernel = {"CUOccupancy": 1, "NumThreads": 256, "LdsNumBytes": 0}
+        kw.updateOccupancyFromMaxVgpr(kernel, mkb, 10)
+        assert mkb.set_gprs_called
+        assert mkb.set_gprs_kwargs["totalVgprs"] == 10
+        assert mkb.set_gprs_kwargs["totalAgprs"] == 256

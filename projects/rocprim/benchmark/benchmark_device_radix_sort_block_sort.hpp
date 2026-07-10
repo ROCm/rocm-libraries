@@ -118,10 +118,14 @@ private:
         value_pointer_type d_values_input  = nullptr;
         value_pointer_type d_values_output = nullptr;
 
+        common::device_ptr<value_type> d_values_input_tmp;
+        common::device_ptr<value_type> d_values_output_tmp;
+
         if constexpr(!std::is_same<val, rocprim::empty_type>::value)
         {
-            common::device_ptr<value_type> d_values_input_tmp(values_input);
-            common::device_ptr<value_type> d_values_output_tmp(items);
+            d_values_input_tmp  = common::device_ptr<value_type>(values_input);
+            d_values_output_tmp = common::device_ptr<value_type>(items);
+
             d_values_input  = d_values_input_tmp.get();
             d_values_output = d_values_output_tmp.get();
         }

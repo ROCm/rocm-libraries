@@ -227,7 +227,7 @@ flatbuffers::FlatBufferBuilder createInvalidTypeBatchnormActivGraph(
 }
 } // anonymous namespace
 
-TEST(TestBatchnormValidator, MismatchIOTypes)
+TEST(TestBatchnormValidator, ValidMismatchIOTypes)
 {
     auto builder = createInvalidTypeBatchnormActivGraph(
         hipdnn_flatbuffers_sdk::data_objects::DataType::HALF,
@@ -248,7 +248,34 @@ TEST(TestBatchnormValidator, MismatchIOTypes)
     const auto& activNode = graph.getNode(1);
     const auto& activAttrs = *activNode.attributes_as_PointwiseAttributes();
 
-    // Data type of io tensors should match, expect exception when this isn't the case
+    // Data type of input tensor can be upcasted to higher precision output tensor
+    BatchnormValidator validator(graph.getTensorMap());
+    EXPECT_NO_THROW(validator.checkInferenceActivationTensorConfigSupported(attr, activAttrs));
+}
+
+TEST(TestBatchnormValidator, InvalidIntermediateType)
+{
+    auto builder = createInvalidTypeBatchnormActivGraph(
+        hipdnn_flatbuffers_sdk::data_objects::DataType::FLOAT,
+        hipdnn_flatbuffers_sdk::data_objects::DataType::FLOAT,
+        hipdnn_flatbuffers_sdk::data_objects::DataType::FLOAT,
+        hipdnn_flatbuffers_sdk::data_objects::DataType::FLOAT,
+        hipdnn_flatbuffers_sdk::data_objects::DataType::FLOAT,
+        hipdnn_flatbuffers_sdk::data_objects::DataType::HALF,
+        hipdnn_flatbuffers_sdk::data_objects::DataType::FLOAT,
+        hipdnn_flatbuffers_sdk::data_objects::DataType::FLOAT);
+
+    const hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper graph(
+        builder.GetBufferPointer(), builder.GetSize());
+
+    const auto& node = graph.getNode(0);
+    const auto& attr = *node.attributes_as_BatchnormInferenceAttributes();
+
+    const auto& activNode = graph.getNode(1);
+    const auto& activAttrs = *activNode.attributes_as_PointwiseAttributes();
+
+    // Y tensor is used an as intermediate tensor between batchnorm node and pointwise node.
+    // Only the float type is supported for intermediate types
     BatchnormValidator validator(graph.getTensorMap());
     EXPECT_THROW(validator.checkInferenceActivationTensorConfigSupported(attr, activAttrs),
                  hipdnn_plugin_sdk::HipdnnPluginException);

@@ -3,7 +3,7 @@
 Documentation for rocSPARSE is available at
 [https://rocm.docs.amd.com/projects/rocSPARSE/en/latest/](https://rocm.docs.amd.com/projects/rocSPARSE/en/latest/).
 
-## rocSPARSE changes since ROCm 7.13.0
+## rocSPARSE 4.7.0 for ROCm 7.14
 
 ### Added
 * Added the `rocsparse_spildlt0` routine for incomplete LDL' factorization with zero fill-in (ILDLT(0)) for symmetric (real) or hermitian (complex) sparse matrices in CSR format, with strided batched computations enabled.
