@@ -171,14 +171,20 @@ if(ROCKE_CLIENT_ENABLE_TESTS)
             OUTPUT_NAME "${_rocke_client_parent_prefix}_rocke_client_tests_test")
         set_target_properties(rocke_client_integration_tests PROPERTIES
             OUTPUT_NAME "${_rocke_client_parent_prefix}_rocke_client_integration_tests_test")
+        # Build one string: set_property(APPEND_STRING) joins multiple value
+        # arguments with ";", which corrupts the generated CTestTestfile.
+        set(_ROCKE_CLIENT_CTEST_ENTRIES "\n# rocke-client installed tests\n")
+        string(APPEND _ROCKE_CLIENT_CTEST_ENTRIES
+            "add_test(rocke_client_tests \"../${_rocke_client_parent_prefix}_rocke_client_tests_test\")\n")
+        string(APPEND _ROCKE_CLIENT_CTEST_ENTRIES
+            "set_tests_properties(rocke_client_tests PROPERTIES LABELS \"unit_test;quick\")\n")
+        string(APPEND _ROCKE_CLIENT_CTEST_ENTRIES
+            "add_test(rocke_client_integration_tests \"../${_rocke_client_parent_prefix}_rocke_client_integration_tests_test\")\n")
+        string(APPEND _ROCKE_CLIENT_CTEST_ENTRIES
+            "set_tests_properties(rocke_client_integration_tests PROPERTIES LABELS \"integration_test;quick\")\n")
         set_property(GLOBAL APPEND_STRING PROPERTY
-            "EXTERNAL_TEST_INSTALL_STAGING_${ROCKE_CLIENT_PARENT_PROJECT}"
-            "\n# rocke-client installed tests\n"
-            "add_test(rocke_client_tests \"../${_rocke_client_parent_prefix}_rocke_client_tests_test\")\n"
-            "set_tests_properties(rocke_client_tests PROPERTIES LABELS \"unit_test;quick\")\n"
-            "add_test(rocke_client_integration_tests \"../${_rocke_client_parent_prefix}_rocke_client_integration_tests_test\")\n"
-            "set_tests_properties(rocke_client_integration_tests PROPERTIES LABELS \"integration_test;quick\")\n"
-        )
+            "EXTERNAL_TEST_INSTALL_STAGING_${_rocke_client_parent_prefix}"
+            "${_ROCKE_CLIENT_CTEST_ENTRIES}")
     else()
         # Standalone build: rocke-client is the top-level project, so it owns
         # finalize_test_targets and its own installed CTestTestfile under
