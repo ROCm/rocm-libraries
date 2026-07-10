@@ -10,6 +10,8 @@ This project provides Python bindings for the hipDNN frontend library using the 
 
 ```
 python/
+├── README.md
+├── download_third_party_deps.py             # Downloads pinned CI third-party source archives
 ├── frontend_bindings/
 │   ├── CMakeLists.txt                     # Standalone CMake build for bindings
 │   └── src/
@@ -22,15 +24,14 @@ python/
 │       ├── attributes_bindings.cpp
 │       ├── hip_bindings.cpp
 │       └── types_bindings.cpp
-├── frontend_wheel_package/
-│   ├── src/
-│   │   └── hipdnn_frontend/
-│   │       └── __init__.py                # Runtime package initializer
-│   ├── samples/                           # Source-tree sample scripts
-│   ├── tests/                             # Source-tree tests
-│   ├── pyproject.toml                     # Wheel metadata and pytest config
-│   └── pack_frontend_wheel.py             # Stages and packs the wheel package
-└── README.md
+└── frontend_wheel_package/
+    ├── src/
+    │   └── hipdnn_frontend/
+    │       └── __init__.py                # Runtime package initializer
+    ├── samples/                           # Source-tree sample scripts
+    ├── tests/                             # Source-tree tests
+    ├── pyproject.toml                     # Wheel metadata and pytest config
+    └── pack_frontend_wheel.py             # Stages and packs the wheel package
 ```
 
 ## Prerequisites
@@ -105,12 +106,13 @@ still need ROCm and hipDNN runtime libraries discoverable through ROCm wheels,
 
 ## Testing the Wheel
 
-The `hipDNN Superbuild CI` workflow validates the wheel end-to-end on Linux and
-Windows after the matching superbuild job succeeds. Each wheel job downloads the
-patched ROCm SDK artifact from its superbuild job, downloads and verifies pinned
-third-party sources from `rocm-third-party-deps`, passes those source directories
-to CMake FetchContent, builds the nanobind extension, packs the wheel, installs
-that wheel into the same venv, and runs:
+The `hipDNN Superbuild CI` workflow validates the wheel end-to-end inside the
+matching Linux and Windows superbuild jobs after installing the superbuild
+outputs into the ROCm SDK path. The workflow calls
+`projects/hipdnn/python/download_third_party_deps.py` to download and verify
+pinned third-party source archives from `rocm-third-party-deps`, then passes
+those source directories to CMake FetchContent. It then builds the nanobind
+extension, packs the wheel, installs that wheel into the same venv, and runs:
 
 ```bash
 python -m pytest -q projects/hipdnn/python/frontend_wheel_package/tests

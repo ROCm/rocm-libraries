@@ -29,9 +29,9 @@ jobs:
       run:
         shell: bash
     env:
-      BUILD_DIR: B:\build
-      HIPDNN_ARTIFACT_DIR: B:\hipdnn-artifacts
       VENV_PATH: B:\rocm_wheels
+      PYTHON_BUILD_DIR: B:\hipdnn-python
+      THIRD_PARTY_DEPS_DIR: B:\third-party-deps
       GPU_TARGET: gfx1151
       # Multi-arch nightly device extra (rocm[...,device-<DEVICE_TARGET>]).
       DEVICE_TARGET: gfx1151
@@ -137,29 +137,68 @@ jobs:
         shell: pwsh
         run: cmake --install build --prefix $env:ROCM_SDK_PATH
 
-      - name: Package patched ROCm SDK artifact
+      - name: Install Python build dependencies
         shell: pwsh
         run: |
-          New-Item -ItemType Directory -Force $env:HIPDNN_ARTIFACT_DIR | Out-Null
-          tar -C $env:ROCM_SDK_PATH `
-              --exclude='bin/*-test' --exclude='bin/*-test.exe' `
-              --exclude='bin/test_*' `
-              --exclude='bin/*_tests' --exclude='bin/*_tests.exe' `
-              --exclude='bin/*-bench' --exclude='bin/*-bench.exe' `
-              --exclude='bin/benchmark_*' `
-              --exclude='bin/*_perf' --exclude='bin/*_perf.exe' `
-              --exclude='bin/*_gtest.data' --exclude='bin/*.hip' `
-              --exclude='clients' `
-              -czf (Join-Path $env:HIPDNN_ARTIFACT_DIR 'hipdnn-rocm-sdk-windows.tar.gz') .
-          if ($LASTEXITCODE -ne 0) { throw "Failed to package patched ROCm SDK" }
+          $python = Join-Path $env:VENV_PATH "Scripts\python.exe"
+          & $python -m pip install --upgrade build numpy pytest
+          if ($LASTEXITCODE -ne 0) { throw "Failed to install Python build dependencies" }
 
-      - name: Upload patched ROCm SDK artifact
-        uses: actions/upload-artifact@bbbca2ddaa5d8feaa63e36b76fdaad77386f024f # v7.0.0
-        with:
-          name: hipdnn-rocm-sdk-windows-${{ env.GPU_TARGET }}
-          path: ${{ env.HIPDNN_ARTIFACT_DIR }}\hipdnn-rocm-sdk-windows.tar.gz
-          if-no-files-found: error
-          retention-days: 3
+      - name: Download third-party dependency sources
+        shell: pwsh
+        run: |
+          $python = Join-Path $env:VENV_PATH "Scripts\python.exe"
+          & $python projects/hipdnn/python/download_third_party_deps.py `
+            --deps-dir $env:THIRD_PARTY_DEPS_DIR
+          if ($LASTEXITCODE -ne 0) { throw "Failed to download third-party dependency sources" }
+
+      - name: Configure frontend bindings
+        shell: pwsh
+        run: |
+          $python = Join-Path $env:VENV_PATH "Scripts\python.exe"
+          $rocmSdkPath = $env:ROCM_SDK_PATH -replace '\\', '/'
+          $workspace = $env:GITHUB_WORKSPACE -replace '\\', '/'
+          $toolchainFile = "$workspace/cmake/toolchains/rocm-clang.cmake"
+          cmake -S projects/hipdnn/python/frontend_bindings `
+                -B $env:PYTHON_BUILD_DIR `
+                -GNinja `
+                -DCMAKE_BUILD_TYPE=Release `
+                "-DCMAKE_TOOLCHAIN_FILE=$toolchainFile" `
+                "-DROCM_PATH=$rocmSdkPath" `
+                "-DCMAKE_PREFIX_PATH=$rocmSdkPath" `
+                "-DCMAKE_PROGRAM_PATH=$rocmSdkPath/lib/llvm/bin" `
+                "-DFETCHCONTENT_SOURCE_DIR_NANOBIND=$env:THIRD_PARTY_DEPS_DIR\nanobind-2.12.0" `
+                "-DFETCHCONTENT_SOURCE_DIR_TSL_ROBIN_MAP=$env:THIRD_PARTY_DEPS_DIR\robin-map-1.4.1" `
+                "-DPython_EXECUTABLE=$python"
+
+      - name: Build frontend bindings
+        shell: pwsh
+        run: cmake --build $env:PYTHON_BUILD_DIR --config Release
+
+      - name: Pack frontend wheel
+        shell: pwsh
+        run: |
+          $python = Join-Path $env:VENV_PATH "Scripts\python.exe"
+          & $python projects/hipdnn/python/frontend_wheel_package/pack_frontend_wheel.py `
+            --build-dir $env:PYTHON_BUILD_DIR `
+            --wheel-dir (Join-Path $env:PYTHON_BUILD_DIR "wheel_package")
+
+      - name: Install frontend wheel
+        shell: pwsh
+        run: |
+          $python = Join-Path $env:VENV_PATH "Scripts\python.exe"
+          $wheel = Get-ChildItem (Join-Path $env:PYTHON_BUILD_DIR "wheel_package\hipdnn_frontend-*.whl") | Select-Object -First 1
+          if (-not $wheel) { throw "No hipdnn_frontend wheel found" }
+          & $python -m pip install --force-reinstall $wheel.FullName
+
+      - name: Run frontend wheel tests
+        shell: pwsh
+        run: |
+          $python = Join-Path $env:VENV_PATH "Scripts\python.exe"
+          $env:ROCM_PATH = $env:ROCM_SDK_PATH
+          $env:HIP_PATH = $env:ROCM_SDK_PATH
+          $env:PATH = "$env:ROCM_SDK_PATH/bin;$env:ROCM_SDK_PATH/lib;$env:PATH"
+          & $python -m pytest -q projects/hipdnn/python/frontend_wheel_package/tests
 
   hipdnn-linux-superbuild:
     name: HipDNN Linux Superbuild
@@ -168,7 +207,9 @@ jobs:
       GPU_TARGET: gfx94X-dcgpu
       # Multi-arch nightly device extra (rocm[...,device-<DEVICE_TARGET>]).
       DEVICE_TARGET: gfx942
-      HIPDNN_ARTIFACT_DIR: /tmp/hipdnn-artifacts
+      VENV_PATH: ${{ runner.temp }}/rocm_wheels
+      PYTHON_BUILD_DIR: build/hipdnn-python
+      THIRD_PARTY_DEPS_DIR: ${{ runner.temp }}/third-party-deps
     steps:
       - name: Runner health status
         run: |
@@ -193,8 +234,6 @@ jobs:
             projects/miopen
             test
 
-      - name: Set environment
-        run: echo "VENV_PATH=${{ runner.temp }}/rocm_wheels" >> "$GITHUB_ENV"
 
       - name: Set up Python
         uses: actions/setup-python@a309ff8b426b58ec0e2a45f0f869d46889d02405 # v6.2.0
@@ -251,116 +290,21 @@ jobs:
       - name: Patch ROCm SDK with superbuild outputs
         run: cmake --install build --prefix "$ROCM_SDK_PATH"
 
-      - name: Package patched ROCm SDK artifact
-        run: |
-          set -euo pipefail
-          mkdir -p "$HIPDNN_ARTIFACT_DIR"
-          tar -C "$ROCM_SDK_PATH" \
-              --exclude='bin/*-test' --exclude='bin/*-test.exe' \
-              --exclude='bin/test_*' \
-              --exclude='bin/*_tests' --exclude='bin/*_tests.exe' \
-              --exclude='bin/*-bench' --exclude='bin/*-bench.exe' \
-              --exclude='bin/benchmark_*' \
-              --exclude='bin/*_perf' --exclude='bin/*_perf.exe' \
-              --exclude='bin/*_gtest.data' --exclude='bin/*.hip' \
-              --exclude='clients' \
-              -czf "$HIPDNN_ARTIFACT_DIR/hipdnn-rocm-sdk-linux.tar.gz" .
-
-      - name: Upload patched ROCm SDK artifact
-        uses: actions/upload-artifact@bbbca2ddaa5d8feaa63e36b76fdaad77386f024f # v7.0.0
-        with:
-          name: hipdnn-rocm-sdk-linux-${{ env.GPU_TARGET }}
-          path: ${{ env.HIPDNN_ARTIFACT_DIR }}/hipdnn-rocm-sdk-linux.tar.gz
-          if-no-files-found: error
-          retention-days: 3
-
-  linux-python-wheel:
-    name: Linux Python Wheel
-    needs: hipdnn-linux-superbuild
-    runs-on: azure-linux-scale-rocm
-    env:
-      BUILD_DIR: build/hipdnn-python
-      GPU_TARGET: gfx94X-dcgpu
-      ROCM_SDK_PATH: /tmp/rocm-sdk
-      SUPERBUILD_ARTIFACT_DIR: /tmp/hipdnn-rocm-sdk-artifact
-      VENV_PATH: /tmp/rocm_wheels
-      THIRD_PARTY_DEPS_DIR: /tmp/rocm-third-party-deps
-    steps:
-      - name: Checkout repository
-        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
-        with:
-          sparse-checkout: |
-            cmake/toolchains
-            projects/hipdnn/python
-
-      - name: Download Linux patched ROCm SDK artifact
-        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
-        with:
-          name: hipdnn-rocm-sdk-linux-${{ env.GPU_TARGET }}
-          path: ${{ env.SUPERBUILD_ARTIFACT_DIR }}
-
-      - name: Extract Linux patched ROCm SDK artifact
-        run: |
-          set -euo pipefail
-          mkdir -p "$ROCM_SDK_PATH"
-          tar -C "$ROCM_SDK_PATH" -xzf "$SUPERBUILD_ARTIFACT_DIR/hipdnn-rocm-sdk-linux.tar.gz"
-
-      - name: Set up Python
-        uses: actions/setup-python@a309ff8b426b58ec0e2a45f0f869d46889d02405 # v6.2.0
-        with:
-          python-version: "3.12"
-
-      - name: Install build tools
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y ninja-build
-
       - name: Install Python build dependencies
         run: |
           set -euo pipefail
-          python -m venv "$VENV_PATH"
-          source "$VENV_PATH/bin/activate"
-          python -m pip install --upgrade pip
-          pip install build numpy pytest
-          echo "$VENV_PATH/bin" >> "$GITHUB_PATH"
+          "$VENV_PATH/bin/python" -m pip install --upgrade build numpy pytest
 
       - name: Download third-party dependency sources
         run: |
           set -euo pipefail
-          mkdir -p "$THIRD_PARTY_DEPS_DIR"
-          "$VENV_PATH/bin/python" - <<'PY'
-          import hashlib
-          import os
-          import tarfile
-          import urllib.request
-          from pathlib import Path
-
-          deps_dir = Path(os.environ["THIRD_PARTY_DEPS_DIR"])
-          dependencies = {
-              "nanobind-2.12.0.tar.gz": "01f1f0cd0398743c18f33d07ae36ad410bd7f4a1e90683b508504de897d6e629",
-              "robin-map-1.4.1.tar.gz": "0e3f53a377fdcdc5f9fed7a4c0d4f99e82bbb64175233bd13427fef9a771f4a1",
-          }
-          for archive_name, expected_sha256 in dependencies.items():
-              archive = deps_dir / archive_name
-              urllib.request.urlretrieve(
-                  f"https://rocm-third-party-deps.s3.us-east-2.amazonaws.com/{archive_name}",
-                  archive,
-              )
-              actual_sha256 = hashlib.sha256(archive.read_bytes()).hexdigest()
-              if actual_sha256 != expected_sha256:
-                  raise RuntimeError(
-                      f"{archive_name} SHA256 mismatch: expected {expected_sha256}, got {actual_sha256}"
-                  )
-              with tarfile.open(archive, "r:gz") as tar:
-                  tar.extractall(deps_dir, filter="data")
-          PY
-          test -d "$THIRD_PARTY_DEPS_DIR/nanobind-2.12.0"
-          test -d "$THIRD_PARTY_DEPS_DIR/robin-map-1.4.1"
+          "$VENV_PATH/bin/python" projects/hipdnn/python/download_third_party_deps.py \
+            --deps-dir "$THIRD_PARTY_DEPS_DIR"
 
       - name: Configure frontend bindings
         run: |
           cmake -S projects/hipdnn/python/frontend_bindings \
-                -B "$BUILD_DIR" \
+                -B "$PYTHON_BUILD_DIR" \
                 -GNinja \
                 -DCMAKE_BUILD_TYPE=Release \
                 -DCMAKE_TOOLCHAIN_FILE="$GITHUB_WORKSPACE/cmake/toolchains/rocm-clang.cmake" \
@@ -372,18 +316,18 @@ jobs:
                 -DPython_EXECUTABLE="$VENV_PATH/bin/python"
 
       - name: Build frontend bindings
-        run: cmake --build "$BUILD_DIR"
+        run: cmake --build "$PYTHON_BUILD_DIR"
 
       - name: Pack frontend wheel
         run: |
           "$VENV_PATH/bin/python" projects/hipdnn/python/frontend_wheel_package/pack_frontend_wheel.py \
-            --build-dir "$BUILD_DIR" \
-            --wheel-dir "$BUILD_DIR/wheel_package"
+            --build-dir "$PYTHON_BUILD_DIR" \
+            --wheel-dir "$PYTHON_BUILD_DIR/wheel_package"
 
       - name: Install frontend wheel
         run: |
           set -euo pipefail
-          wheel=$(ls "$BUILD_DIR"/wheel_package/hipdnn_frontend-*.whl)
+          wheel=$(ls "$PYTHON_BUILD_DIR"/wheel_package/hipdnn_frontend-*.whl)
           "$VENV_PATH/bin/python" -m pip install --force-reinstall "$wheel"
 
       - name: Run frontend wheel tests
@@ -391,152 +335,12 @@ jobs:
           LD_LIBRARY_PATH="$ROCM_SDK_PATH/lib:${LD_LIBRARY_PATH:-}" \
             "$VENV_PATH/bin/python" -m pytest -q projects/hipdnn/python/frontend_wheel_package/tests
 
-  windows-python-wheel:
-    name: Windows Python Wheel
-    needs: hipdnn-windows-superbuild
-    runs-on: azure-windows-scale-rocm
-    defaults:
-      run:
-        shell: pwsh
-    env:
-      BUILD_DIR: B:\build\hipdnn-python
-      GPU_TARGET: gfx1151
-      ROCM_SDK_PATH: B:\rocm-sdk
-      SUPERBUILD_ARTIFACT_DIR: B:\hipdnn-rocm-sdk-artifact
-      VENV_PATH: B:\rocm_wheels
-      THIRD_PARTY_DEPS_DIR: B:\rocm-third-party-deps
-    steps:
-      - name: Configure git longpaths
-        run: git config --global core.longpaths true
-
-      - name: Checkout repository
-        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
-        with:
-          sparse-checkout: |
-            cmake/toolchains
-            projects/hipdnn/python
-
-      - name: Download Windows patched ROCm SDK artifact
-        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
-        with:
-          name: hipdnn-rocm-sdk-windows-${{ env.GPU_TARGET }}
-          path: ${{ env.SUPERBUILD_ARTIFACT_DIR }}
-
-      - name: Extract Windows patched ROCm SDK artifact
-        run: |
-          New-Item -ItemType Directory -Force $env:ROCM_SDK_PATH | Out-Null
-          tar -C $env:ROCM_SDK_PATH -xzf (Join-Path $env:SUPERBUILD_ARTIFACT_DIR "hipdnn-rocm-sdk-windows.tar.gz")
-          if ($LASTEXITCODE -ne 0) { throw "Failed to extract patched ROCm SDK" }
-
-      - name: Set up Python
-        uses: actions/setup-python@a309ff8b426b58ec0e2a45f0f869d46889d02405 # v6.2.0
-        with:
-          python-version: "3.12"
-
-      - name: Configure MSVC
-        uses: ilammy/msvc-dev-cmd@0b201ec74fa43914dc39ae48a89fd1d8cb592756 # v1.13
-
-      - name: Install build tools
-        run: |
-          choco source disable -n=chocolatey
-          choco source add -n=internal -s http://10.0.167.96:8081/repository/choco-group/ --priority=1
-          choco install --no-progress -y ninja --version 1.12.1
-
-      - name: Install Python build dependencies
-        run: |
-          python -m venv $env:VENV_PATH
-          $python = Join-Path $env:VENV_PATH "Scripts\python.exe"
-          & $python -m pip install --upgrade pip
-          & $python -m pip install build numpy pytest
-
-          (Join-Path $env:VENV_PATH "Scripts") | Out-File -FilePath $env:GITHUB_PATH -Append
-
-      - name: Download third-party dependency sources
-        run: |
-          New-Item -ItemType Directory -Force $env:THIRD_PARTY_DEPS_DIR | Out-Null
-          $python = Join-Path $env:VENV_PATH "Scripts\python.exe"
-          $script = @'
-          import hashlib
-          import os
-          import tarfile
-          import urllib.request
-          from pathlib import Path
-
-          deps_dir = Path(os.environ["THIRD_PARTY_DEPS_DIR"])
-          dependencies = {
-              "nanobind-2.12.0.tar.gz": "01f1f0cd0398743c18f33d07ae36ad410bd7f4a1e90683b508504de897d6e629",
-              "robin-map-1.4.1.tar.gz": "0e3f53a377fdcdc5f9fed7a4c0d4f99e82bbb64175233bd13427fef9a771f4a1",
-          }
-          for archive_name, expected_sha256 in dependencies.items():
-              archive = deps_dir / archive_name
-              urllib.request.urlretrieve(
-                  f"https://rocm-third-party-deps.s3.us-east-2.amazonaws.com/{archive_name}",
-                  archive,
-              )
-              actual_sha256 = hashlib.sha256(archive.read_bytes()).hexdigest()
-              if actual_sha256 != expected_sha256:
-                  raise RuntimeError(
-                      f"{archive_name} SHA256 mismatch: expected {expected_sha256}, got {actual_sha256}"
-                  )
-              with tarfile.open(archive, "r:gz") as tar:
-                  tar.extractall(deps_dir, filter="data")
-          '@
-          $script | & $python
-          if ($LASTEXITCODE -ne 0) { throw "Failed to download third-party dependency sources" }
-          if (-not (Test-Path (Join-Path $env:THIRD_PARTY_DEPS_DIR "nanobind-2.12.0"))) { throw "nanobind source directory not found" }
-          if (-not (Test-Path (Join-Path $env:THIRD_PARTY_DEPS_DIR "robin-map-1.4.1"))) { throw "robin-map source directory not found" }
-
-      - name: Configure frontend bindings
-        run: |
-          $python = Join-Path $env:VENV_PATH "Scripts\python.exe"
-          $rocmSdkPath = $env:ROCM_SDK_PATH -replace '\\', '/'
-          $workspace = $env:GITHUB_WORKSPACE -replace '\\', '/'
-          $toolchainFile = "$workspace/cmake/toolchains/rocm-clang.cmake"
-          cmake -S projects/hipdnn/python/frontend_bindings `
-                -B $env:BUILD_DIR `
-                -GNinja `
-                -DCMAKE_BUILD_TYPE=Release `
-                "-DCMAKE_TOOLCHAIN_FILE=$toolchainFile" `
-                "-DROCM_PATH=$rocmSdkPath" `
-                "-DCMAKE_PREFIX_PATH=$rocmSdkPath" `
-                "-DCMAKE_PROGRAM_PATH=$rocmSdkPath/lib/llvm/bin" `
-                "-DFETCHCONTENT_SOURCE_DIR_NANOBIND=$env:THIRD_PARTY_DEPS_DIR\nanobind-2.12.0" `
-                "-DFETCHCONTENT_SOURCE_DIR_TSL_ROBIN_MAP=$env:THIRD_PARTY_DEPS_DIR\robin-map-1.4.1" `
-                "-DPython_EXECUTABLE=$python"
-
-      - name: Build frontend bindings
-        run: cmake --build $env:BUILD_DIR --config Release
-
-      - name: Pack frontend wheel
-        run: |
-          $python = Join-Path $env:VENV_PATH "Scripts\python.exe"
-          & $python projects/hipdnn/python/frontend_wheel_package/pack_frontend_wheel.py `
-            --build-dir $env:BUILD_DIR `
-            --wheel-dir (Join-Path $env:BUILD_DIR "wheel_package")
-
-      - name: Install frontend wheel
-        run: |
-          $python = Join-Path $env:VENV_PATH "Scripts\python.exe"
-          $wheel = Get-ChildItem (Join-Path $env:BUILD_DIR "wheel_package\hipdnn_frontend-*.whl") | Select-Object -First 1
-          if (-not $wheel) { throw "No hipdnn_frontend wheel found" }
-          & $python -m pip install --force-reinstall $wheel.FullName
-
-      - name: Run frontend wheel tests
-        run: |
-          $python = Join-Path $env:VENV_PATH "Scripts\python.exe"
-          $env:ROCM_PATH = $env:ROCM_SDK_PATH
-          $env:HIP_PATH = $env:ROCM_SDK_PATH
-          $env:PATH = "$env:ROCM_SDK_PATH/bin;$env:ROCM_SDK_PATH/lib;$env:PATH"
-          & $python -m pytest -q projects/hipdnn/python/frontend_wheel_package/tests
-
   hipdnn_build_summary:
     name: hipDNN Superbuild Summary
     if: always()
     needs:
       - hipdnn-windows-superbuild
       - hipdnn-linux-superbuild
-      - windows-python-wheel
-      - linux-python-wheel
     runs-on: ubuntu-24.04
     steps:
       - name: Report results
