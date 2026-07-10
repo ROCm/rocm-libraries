@@ -24,6 +24,7 @@
 #include <hipdnn_compatibility/cudnn/cudnn.h>
 #include <hipdnn_compatibility/cudnn/cudnn_frontend/graph_helpers.h>
 #include <hipdnn_compatibility/cudnn/cudnn_frontend/graph_properties.h>
+#include <hipdnn_compatibility/cudnn/cudnn_frontend/sdpa_attributes.h>
 #include <hipdnn_compatibility/cudnn/cudnn_frontend_utils.h>
 #include <hipdnn_frontend/Graph.hpp>
 
@@ -93,6 +94,8 @@ public:
         if(!hasOperationGraphState())
         {
             _builtEmpty = true;
+            _executionPlanCreated = false;
+            _executionPlanBuilt = false;
             return {};
         }
 
@@ -292,6 +295,11 @@ public:
         return *this;
     }
 
+    // Setter triage: hints that are safe to drop
+    // (dynamic-shape, kernel-cache) log and continue; requests the shim cannot
+    // honor without changing results (SM targeting, device properties) record an
+    // error that surfaces at the next validate()/build. The asymmetry is
+    // deliberate — do not "normalize" one group to the other.
     Graph& set_dynamic_shape_enabled(bool isEnabled) // NOLINT(readability-identifier-naming)
     {
         static_cast<void>(isEnabled);
@@ -406,11 +414,58 @@ public:
         return {error_code_t::INVALID_VALUE, "Tensor UID was not found"};
     }
 
+#ifdef HIPDNN_ENABLE_SDPA
+    std::array<std::shared_ptr<Tensor_attributes>, 2>
+        sdpa(std::shared_ptr<Tensor_attributes> q, // NOLINT(readability-identifier-naming)
+             std::shared_ptr<Tensor_attributes> k,
+             std::shared_ptr<Tensor_attributes> v,
+             SDPA_attributes attributes)
+    {
+        if(attributes._recordedError.has_value())
+        {
+            recordError(*attributes._recordedError);
+        }
+        auto outputs
+            = _graph.sdpa(std::move(q), std::move(k), std::move(v), std::move(attributes._attrs));
+        _hasNodes = true;
+        return outputs;
+    }
+
+    std::array<std::shared_ptr<Tensor_attributes>, 3>
+        sdpa_backward(std::shared_ptr<Tensor_attributes> q, // NOLINT(readability-identifier-naming)
+                      std::shared_ptr<Tensor_attributes> k,
+                      std::shared_ptr<Tensor_attributes> v,
+                      std::shared_ptr<Tensor_attributes> o,
+                      std::shared_ptr<Tensor_attributes> dO,
+                      std::shared_ptr<Tensor_attributes> stats,
+                      SDPA_backward_attributes attributes)
+    {
+        if(attributes._recordedError.has_value())
+        {
+            recordError(*attributes._recordedError);
+        }
+        auto outputs = _graph.sdpa_backward(std::move(q),
+                                            std::move(k),
+                                            std::move(v),
+                                            std::move(o),
+                                            std::move(dO),
+                                            std::move(stats),
+                                            std::move(attributes._attrs));
+        _hasNodes = true;
+        return outputs;
+    }
+#endif // HIPDNN_ENABLE_SDPA
+
     error_t
         execute(cudnnHandle_t handle,
                 std::unordered_map<std::shared_ptr<Tensor_attributes>, void*>& tensorToPointerMap,
                 void* workspace) const
     {
+        if(auto err = checkRecordedError(); err.is_bad())
+        {
+            return err;
+        }
+
         if(!hasOperationGraphState())
         {
             return noExecutionPlanError();
@@ -422,6 +477,11 @@ public:
                     std::unordered_map<int64_t, void*>& tensorUidToPointerMap,
                     void* workspace) const
     {
+        if(auto err = checkRecordedError(); err.is_bad())
+        {
+            return err;
+        }
+
         if(!hasOperationGraphState())
         {
             return noExecutionPlanError();
@@ -436,6 +496,11 @@ public:
                     const std::vector<std::vector<int64_t>>& overrideShapes,
                     const std::vector<std::vector<int64_t>>& overrideStrides) const
     {
+        if(auto err = checkRecordedError(); err.is_bad())
+        {
+            return err;
+        }
+
         if(!hasOperationGraphState())
         {
             return noExecutionPlanError();
@@ -460,6 +525,11 @@ public:
 
     error_t execute(cudnnHandle_t handle, void** sortedUserPtrs, int nUser, void* workspace) const
     {
+        if(auto err = checkRecordedError(); err.is_bad())
+        {
+            return err;
+        }
+
         static_cast<void>(handle);
         static_cast<void>(sortedUserPtrs);
         static_cast<void>(nUser);
@@ -475,6 +545,11 @@ public:
     error_t
         get_workspace_size(int64_t& workspaceSize) const // NOLINT(readability-identifier-naming)
     {
+        if(auto err = checkRecordedError(); err.is_bad())
+        {
+            return err;
+        }
+
         if(!hasOperationGraphState())
         {
             if(_builtEmpty)
@@ -634,6 +709,7 @@ private:
     std::optional<error_t> _recordedError;
     std::vector<std::shared_ptr<Tensor_attributes>> _ownedTensors;
     bool _hasNativeGraphState = false;
+    bool _hasNodes = false;
     bool _operationGraphBuilt = false;
     bool _executionPlanCreated = false;
     bool _executionPlanBuilt = false;
@@ -641,7 +717,7 @@ private:
 
     bool hasOperationGraphState() const
     {
-        return _hasNativeGraphState;
+        return _hasNativeGraphState || _hasNodes;
     }
 
     error_t recordError(error_t err)
@@ -736,6 +812,7 @@ private:
         _ownedTensors.clear();
         _recordedError.reset();
         _hasNativeGraphState = false;
+        _hasNodes = false;
         _operationGraphBuilt = false;
         _executionPlanCreated = false;
         _executionPlanBuilt = false;

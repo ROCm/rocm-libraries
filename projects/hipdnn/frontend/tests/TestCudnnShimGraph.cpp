@@ -10,6 +10,7 @@
 
 #include <cstdint>
 #include <memory>
+#include <string>
 #include <type_traits>
 #include <unordered_map>
 #include <vector>
@@ -204,6 +205,61 @@ TEST(TestCudnnShimGraph, ExecuteOnEmptyGraphFails)
     std::unordered_map<int64_t, void*> uidMap;
 
     EXPECT_TRUE(graph.execute(nullptr, uidMap, nullptr).is_bad());
+}
+
+TEST(TestCudnnShimGraph, ScalarValuesSerializeRoundTrip)
+{
+    // Exercises appendScalar/readScalar for every ScalarTag; the tag is written
+    // for all tensors but only the None path was covered before.
+    // Void lambda: ASSERT_ cannot live in a value-returning callable. The caller
+    // supplies the equality check so half/bfloat16 can compare bit patterns.
+    auto roundTrip = [](auto value, auto&& check) {
+        using T = decltype(value);
+        fe::graph::Graph graph;
+        graph.tensor(fe::graph::Tensor_attributes{value}.set_uid(42));
+
+        std::vector<uint8_t> data;
+        ASSERT_TRUE(graph.serialize(data).is_good());
+
+        fe::graph::Graph roundTripped;
+        ASSERT_TRUE(roundTripped.deserialize(data).is_good());
+
+        fe::graph::Tensor_attributes queried;
+        ASSERT_TRUE(roundTripped.query_tensor_attributes_of_uid(42, queried).is_good());
+        const auto got = queried.template get_pass_by_value<T>();
+        ASSERT_TRUE(got.has_value());
+        check(got.value());
+    };
+
+    roundTrip(double{3.5}, [](double got) { EXPECT_EQ(got, 3.5); });
+    roundTrip(float{1.25F}, [](float got) { EXPECT_EQ(got, 1.25F); });
+    roundTrip(uint8_t{7}, [](uint8_t got) { EXPECT_EQ(got, uint8_t{7}); });
+    roundTrip(int32_t{-123}, [](int32_t got) { EXPECT_EQ(got, -123); });
+    roundTrip(int64_t{1234567890123LL}, [](int64_t got) { EXPECT_EQ(got, 1234567890123LL); });
+    roundTrip(true, [](bool got) { EXPECT_TRUE(got); });
+    roundTrip(fe::graph::half{1.5F},
+              [](fe::graph::half got) { EXPECT_EQ(got.data, fe::graph::half{1.5F}.data); });
+    roundTrip(fe::graph::nv_bfloat16{2.5F}, [](fe::graph::nv_bfloat16 got) {
+        EXPECT_EQ(got.data, fe::graph::nv_bfloat16{2.5F}.data);
+    });
+}
+
+TEST(TestCudnnShimGraph, PoisonedGraphSurfacesRecordedErrorOnExecuteAndWorkspace)
+{
+    // A setter that records an error must surface it ahead of the generic
+    // "no execution plan" result on execute()/get_workspace_size().
+    fe::graph::Graph graph;
+    graph.set_sm_count(1);
+
+    std::unordered_map<int64_t, void*> uidMap;
+    auto execError = graph.execute(nullptr, uidMap, nullptr);
+    EXPECT_TRUE(execError.is_bad());
+    EXPECT_NE(execError.get_message().find("SM count"), std::string::npos);
+
+    int64_t workspaceSize = -1;
+    auto wsError = graph.get_workspace_size(workspaceSize);
+    EXPECT_TRUE(wsError.is_bad());
+    EXPECT_NE(wsError.get_message().find("SM count"), std::string::npos);
 }
 
 } // namespace
