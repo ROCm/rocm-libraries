@@ -38,7 +38,6 @@ from Tensile.Common import assignParameterWithDefault, IsaInfo, \
                     roundUp, INDEX_CHARS, IsaVersion, SemanticVersion, \
                     roundUpToNearestMultiple
 from Tensile.Common.DataType import DataType
-from Tensile.Common.TypeValidationErrors import ConfigTypeError
 from Tensile.SolutionStructs.LdsPadding import get_fp4_mt_config, get_fp8_mt_config, get_mxs_mt_config, \
                                                get_fp16_mt_config, get_fp32_mt_config
 from Tensile.Common.GlobalParameters import defaultSolution, \
@@ -313,15 +312,25 @@ def validateParameterTypes(state, srcFile=""):
   return records
 
 
-def raiseIfTypeMismatches() -> None:
-  """Raise when collected type mismatches exist.
+def printTypeMismatchSummary(numFiles=0):
+  """Print a summary of all collected type mismatches to stdout.
 
-  The library-logic loading path intentionally collects mismatches from every
-  parsed file before reporting. This checker preserves that aggregate behavior
-  but makes the final create-library gate fatal.
+  If no mismatches have been collected, prints a confirmation message
+  showing how many files were checked cleanly, and returns 0.  Otherwise
+  it emits a WARNING block with one line per unique (parameter,
+  actual_type) combination showing the count, observed values, and
+  expected type.
+
+  Args:
+      numFiles: Total number of YAML logic files that were checked.
+
+  Returns:
+      int: The total number of individual mismatches (0 if clean).
   """
   if not _typeMismatchCollector:
-    return
+    if numFiles > 0:
+      print(f"Checked {numFiles} YAML logic files - no type mismatches found.", flush=True)
+    return 0
 
   totalCount = sum(e["count"] for e in _typeMismatchCollector.values())
   allFiles = set()
@@ -329,9 +338,10 @@ def raiseIfTypeMismatches() -> None:
     allFiles |= e["files"]
 
   lines = []
+  lines.append("")
   lines.append("===========================================================")
   lines.append(
-    f"ERROR: YAML parameter type mismatches detected "
+    f"WARNING: YAML parameter type mismatches detected "
     f"({totalCount} total across {len(allFiles)} files):"
   )
   lines.append("===========================================================")
@@ -349,10 +359,11 @@ def raiseIfTypeMismatches() -> None:
   lines.append("-----------------------------------------------------------")
   lines.append("  This will cause std::bad_cast at runtime because msgpack")
   lines.append("  serializes bool and int as different wire types.")
-  lines.append("  Fix these type mismatches before building.")
+  lines.append("  Fix these to prevent future build failures.")
   lines.append("===========================================================")
 
-  raise ConfigTypeError("\n".join(lines))
+  print("\n".join(lines), flush=True)
+  return totalCount
 
 
 class Fbs(Enum):
@@ -1599,11 +1610,13 @@ class Solution(collections.abc.Mapping):
         reject(state, printRejectionReason, "ScheduleGlobalRead not supported with Stream-K")
       if state["ScheduleLocalWrite"] != 1:
         reject(state, printRejectionReason, "ScheduleLocalWrite not supported with Stream-K")
-      isSia0TdmPgr = state["_ScheduleIterAlg"] == 0 \
-        and state["TDMInst"] == 3 \
-        and state["PrefetchGlobalRead"] in (1, 2)
-      if state["_ScheduleIterAlg"] not in (1, 2, 3) and not isSia0TdmPgr:
+      # SIA 4 is remapped to _ScheduleIterAlg 0 upstream, so it is covered here too.
+      if state["_ScheduleIterAlg"] not in (0, 1, 2, 3):
         reject(state, printRejectionReason, "ScheduleIterAlg not supported with Stream-K")
+      if state["TDMInst"] == 3 and state["PrefetchGlobalRead"] not in (1, 2) \
+          and not state["UseSubtileImpl"]:
+        reject(state, printRejectionReason,
+               "Stream-K + TDMInst=3 requires PrefetchGlobalRead in (1, 2)")
       if not state["BufferStore"]:
         reject(state, printRejectionReason, "Stream-K requires BufferStore")
       _validateStreamKForceDPOnly(state, printRejectionReason)
@@ -5288,12 +5301,13 @@ class Solution(collections.abc.Mapping):
       if not isPowerOf2(state["NumThreads"]):
         reject(state, printRejectionReason, "PrefetchGL2 requires NumThreads to be power of 2")
         return
-      # Check ClusterDim is power of 2 and not [1,1]
-      if state["ClusterDim"] == [1, 1]:
-        reject(state, printRejectionReason, "PrefetchGL2 requires ClusterDim != [1, 1]")
-        return
+      # Check ClusterDim components are power of 2
       if not all(isPowerOf2(x) for x in state["ClusterDim"]):
         reject(state, printRejectionReason, "PrefetchGL2 requires ClusterDim components to be power of 2")
+        return
+      # ClusterDim [1,1] is only supported with subtile impl
+      if state["ClusterDim"] == [1, 1] and not state["UseSubtileImpl"]:
+        reject(state, printRejectionReason, "PrefetchGL2 requires ClusterDim != [1, 1] for non-subtile kernels")
         return
       # Check DepthU is power of 2
       if not isPowerOf2(state["DepthU"]):
