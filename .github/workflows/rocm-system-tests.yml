@@ -75,11 +75,6 @@ jobs:
           VENV_DIR: ${{ github.workspace }}/.venv
           IS_PR_FROM_FORK: ${{ github.event.pull_request.head.repo.fork }}
 
-      - name: Checkout rocm-tests
-        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
-        with:
-          repository: "ROCm/rocm-tests"
-
       - name: Install uv
         uses: astral-sh/setup-uv@bd01e18f51369d5a26f1651c3cb451d3417e3bba # v6.3.1
         env:
@@ -88,7 +83,14 @@ jobs:
           version: "0.7.x"
           enable-cache: true
 
+      - name: Checkout rocm-tests
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          repository: "ROCm/rocm-tests"
+          path: rocm-tests
+
       - name: Install test dependencies
+        working-directory: rocm-tests
         run: |
           sudo apt-get update -qq
           sudo apt-get install -y --no-install-recommends make pciutils
@@ -103,8 +105,8 @@ jobs:
           PYTHON_LIB: ${{ steps.setup-python.outputs.python-path }}
           LD_LIBRARY_PATH: "${{ github.workspace }}/therock_build/lib:${LD_LIBRARY_PATH}"
           TESTS_FILTERS: ${{ inputs.tests_filters }}
+        working-directory: rocm-tests
         run: |
-          ls -R *
           source .venv/bin/activate
           export LD_LIBRARY_PATH="$(dirname ${PYTHON_LIB})/../lib:${GITHUB_WORKSPACE}/therock_build/lib:${LD_LIBRARY_PATH}"
           pytest tests/e2e/compiler/ \
@@ -114,7 +116,7 @@ jobs:
             tests/e2e/rccl/ \
             tests/e2e/rocm_libs/ \
             tests/e2e/rocprim/ \
-            --rock-dir=therock_build \
+            --rock-dir=${{ github.workspace }}/therock_build \
             --html=nightly_report.html --self-contained-html \
             --md-report --md-report-verbose=1 --md-report-color=never \
             --md-report-flavor gfm --md-report-output=md_summary.md --md-report-tee \
@@ -126,6 +128,7 @@ jobs:
         if: always()
         env:
           PLATFORM_NAME: ${{ inputs.name }}
+        working-directory: rocm-tests
         shell: python
         run: |
           import re, json, os
@@ -191,6 +194,7 @@ jobs:
 
       - name: Write per-platform step summary
         if: always()
+        working-directory: rocm-tests
         shell: python
         run: |
           import json, os, pathlib
@@ -252,10 +256,10 @@ jobs:
         with:
           name: nightly-artifacts-${{ inputs.name }}-${{ github.run_id }}
           path: |
-            nightly_report.html
-            md_summary.md
-            output/artifacts/
-            test-counts/
+            rocm-tests/nightly_report.html
+            rocm-tests/md_summary.md
+            rocm-tests/output/artifacts/
+            rocm-tests/test-counts/
           retention-days: 30
           if-no-files-found: ignore
 
@@ -264,7 +268,7 @@ jobs:
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
           name: test-counts-${{ inputs.name }}
-          path: test-counts/counts.json
+          path: rocm-tests/test-counts/counts.json
           retention-days: 1
           if-no-files-found: ignore
 
@@ -273,6 +277,7 @@ jobs:
         env:
           PLATFORM_NAME: ${{ inputs.name }}
           ARTIFACT_URL: ${{ steps.upload.outputs.artifact-url }}
+        working-directory: rocm-tests
         run: |
           url="${ARTIFACT_URL}"
           echo "" >> "$GITHUB_STEP_SUMMARY"
