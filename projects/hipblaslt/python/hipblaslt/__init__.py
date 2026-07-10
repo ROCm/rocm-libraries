@@ -4,17 +4,31 @@
 
 from . import _core
 import numpy as _np
+import ml_dtypes as _mld
 
 __version__ = _core.__version__
 
-# Minimal numpy-native dtype map; extended with ml_dtypes in Phase 4.
+# Numpy-native dtype map; extended with ml_dtypes for bf16 and fp8 types.
 _DTYPE_TO_NP = {
     _core.DataType.R_32F: _np.float32,
     _core.DataType.R_64F: _np.float64,
     _core.DataType.R_16F: _np.float16,
     _core.DataType.R_32I: _np.int32,
     _core.DataType.R_8I: _np.int8,
+    _core.DataType.R_16BF: _mld.bfloat16,
 }
+
+# fp8 types: present only in recent ml_dtypes. Add each if available.
+for _dt_name, _mld_name in [
+    ("R_8F_E4M3", "float8_e4m3fn"),
+    ("R_8F_E5M2", "float8_e5m2"),
+    ("R_8F_E4M3_FNUZ", "float8_e4m3fnuz"),
+    ("R_8F_E5M2_FNUZ", "float8_e5m2fnuz"),
+]:
+    _dt = getattr(_core.DataType, _dt_name, None)
+    _np_t = getattr(_mld, _mld_name, None)
+    if _dt is not None and _np_t is not None:
+        _DTYPE_TO_NP[_dt] = _np_t
 
 # Reverse map: numpy dtype → DataType (used by gemm() shim in Task 19).
 _NP_TO_DTYPE = {_np.dtype(v): k for k, v in _DTYPE_TO_NP.items()}
