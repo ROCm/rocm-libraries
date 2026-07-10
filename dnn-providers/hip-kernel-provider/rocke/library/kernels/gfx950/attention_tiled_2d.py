@@ -342,6 +342,26 @@ class UnifiedAttention2DTiledSpec:
     # K-axis mostly lives in registers. This flag tracks that orientation
     # independently while it is brought up.
     use_transposed_qk_32x32: bool = False
+    # EXPERIMENTAL / measurement-only: apply a vanilla XOR swizzle to the QK
+    # K_lds read column offset (``col ^= (row & 7) << 3``) to spread the
+    # row-aliased banks. This is a *read-only* probe: the async-DMA K write is
+    # contiguous and is NOT swizzled to match, so numeric results are INTENTIONALLY
+    # WRONG when this is on -- its sole purpose is to measure whether
+    # ``SQ_LDS_BANK_CONFLICT`` drops for the swizzled access pattern. Off by
+    # default; never enable in production.
+    use_kq_xor_swizzle: bool = False
+    # EXPERIMENTAL / measurement-only: pad the K_lds row stride by 8 halves
+    # (16 B) to break the row-aliased bank conflict on the QK K read. The read
+    # picks up the padded stride via smem_load_vN; the raw-address async-DMA K
+    # write is NOT pad-aware, so numeric results are INTENTIONALLY WRONG when on
+    # -- purpose is to measure the SQ_LDS_BANK_CONFLICT delta AND confirm the
+    # padded LDS still fits the 2-WG/CU budget (<= 80 KB/WG). The DMA-safe
+    # production form is a slab-granularity pad (pad every 2-row DMA slab).
+    use_kq_lds_pad: bool = False
+    # Pad width in halves for the slab-granularity K_lds pad (must be a multiple
+    # of 8 to keep ds_read/ds_write b128 16-byte alignment). Only used when
+    # ``use_kq_lds_pad`` is set.
+    kq_lds_pad_halves: int = 8
     # Transposed 32x32 softmax has one online-softmax state per query lane,
     # not one per output-dimension accumulator register. Keep a single m/l
     # loop-carried state and broadcast alpha across the 16 output regs.
@@ -1098,6 +1118,23 @@ def build_unified_attention_2d_tiled(
     FP8_NATIVE_QK = False
     REGISTER_PV = spec.use_register_pv
     TRANSPOSED_QK_32X32 = spec.use_transposed_qk_32x32
+    KQ_XOR_SWIZZLE = spec.use_kq_xor_swizzle
+    # Slab-granularity K_lds pad. The async DMA writes one WAVE_BYTES (=1024 B =
+    # SLAB_ROWS*HD*2) contiguous slab per wave per call, so padding BETWEEN slabs
+    # keeps the write contiguous while breaking the row-aliased bank conflict on
+    # the QK read. Correct (write+read consistent) -> numerics preserved.
+    KQ_LDS_PAD = int(spec.kq_lds_pad_halves) if spec.use_kq_lds_pad else 0
+    # SLAB_ROWS = rows filled by one wave's 1024-B (WAVE=64 lanes x 16 B) slab.
+    KQ_SLAB_ROWS = (512 // HD) if KQ_LDS_PAD else 0
+    if KQ_LDS_PAD and (
+        512 % HD != 0
+        or KQ_SLAB_ROWS == 0
+        or T % KQ_SLAB_ROWS != 0
+        or KQ_LDS_PAD % 8 != 0
+    ):
+        # Unsupported geometry for the slab pad -> disable (byte-identical).
+        KQ_LDS_PAD = 0
+        KQ_SLAB_ROWS = 0
     KV_BYTES = 1 if KV_FP8 else 2
     kv_io_dtype = FP8E4M3 if KV_FP8 else dtype
 
@@ -1358,7 +1395,21 @@ def build_unified_attention_2d_tiled(
     # with the ring (>2) and V-double-buffer paths in __post_init__.
     K_SINGLE_BUFFER = bool(spec.use_k_single_buffer)
     K_BUFS = 1 if K_SINGLE_BUFFER else (KV_RING_DEPTH if KV_RING_DEPTH > 2 else 2)
-    K_lds = b.smem_alloc(K_LDS_DTYPE, [K_BUFS, T, HD], name_hint="Klds")
+    if KQ_LDS_PAD and K_BUFS != 1:
+        # Slab pad only wired for the single-buffer K path; disable otherwise.
+        KQ_LDS_PAD = 0
+        KQ_SLAB_ROWS = 0
+    if KQ_LDS_PAD:
+        # Slab-granularity layout: [K_BUFS, T/SLAB_ROWS, SLAB_ROWS*HD + PAD].
+        # Each DMA wave-slab (SLAB_ROWS contiguous rows) lands in one padded
+        # slab; the read remaps (row,col) -> (slab, row%SLAB_ROWS*HD + col).
+        _KQ_NSLAB = T // KQ_SLAB_ROWS
+        _KQ_SLAB_COLS = KQ_SLAB_ROWS * HD + KQ_LDS_PAD
+        K_lds = b.smem_alloc(
+            K_LDS_DTYPE, [K_BUFS, _KQ_NSLAB, _KQ_SLAB_COLS], name_hint="Klds"
+        )
+    else:
+        K_lds = b.smem_alloc(K_LDS_DTYPE, [K_BUFS, T, HD], name_hint="Klds")
     # V double-buffer: 2 slots let V[i+1] prefetch into the alternate slot
     # during iter i (reusing ``cur_buf``), giving V the same 1-deep prefetch
     # K has. Costs only LDS (async DMA bypasses VGPR), occupancy-neutral.
@@ -1863,6 +1914,26 @@ def build_unified_attention_2d_tiled(
         wave_lds_offset_i32 = b.to_sgpr_u32(b.mul(wave_id, b.const_i32(WAVE_BYTES)))
         wave_lds_offset_i64 = b.zext(wave_lds_offset_i32, I64)
 
+    # K-specific slab-padded strides. One wave-slab == WAVE_BYTES contiguous B;
+    # inserting KQ_LDS_PAD*2 bytes between slabs shifts each slab's banks while
+    # leaving the intra-slab write contiguous (DMA-safe). V is untouched.
+    if KQ_LDS_PAD:
+        _KQ_PAD_BYTES = KQ_LDS_PAD * 2
+        WAVE_BYTES_K = WAVE_BYTES + _KQ_PAD_BYTES
+        bytes_per_call_K = NUM_WARPS * WAVE_BYTES_K
+        bytes_per_buf_K = (T // KQ_SLAB_ROWS) * WAVE_BYTES_K
+        if NUM_WARPS == 1:
+            wave_lds_offset_K_i64 = b.const_i64(0)
+        else:
+            wave_lds_offset_K_i64 = b.zext(
+                b.to_sgpr_u32(b.mul(wave_id, b.const_i32(WAVE_BYTES_K))), I64
+            )
+    else:
+        WAVE_BYTES_K = WAVE_BYTES
+        bytes_per_call_K = bytes_per_call
+        bytes_per_buf_K = bytes_per_buf
+        wave_lds_offset_K_i64 = wave_lds_offset_i64
+
     # ---- Paged KV byte descriptor (full transform DAG) ----
     # The paged-KV cache is laid out ``[num_blocks, BS, NUM_KV, HD]`` with
     # *byte* strides. The kernel addresses it via a chain of coordinate
@@ -2023,10 +2094,10 @@ def build_unified_attention_2d_tiled(
         offset (lanes 64..127 have `tid*8 / HD` advanced by T/NUM_WARPS),
         the cooperative load fills the full `[T, HD]` slab correctly.
         """
-        buf_off_i32 = b.mul(buf_idx, b.const_i32(bytes_per_buf))
+        buf_off_i32 = b.mul(buf_idx, b.const_i32(bytes_per_buf_K))
         buf_off_i64 = b.zext(buf_off_i32, I64)
         K_buf_base = b.smem_ptr_add(K_lds_addr, buf_off_i64)
-        K_wave_base = b.smem_ptr_add(K_buf_base, wave_lds_offset_i64)
+        K_wave_base = b.smem_ptr_add(K_buf_base, wave_lds_offset_K_i64)
         if FAST_PAGED_KV_DESC:
             fast_block0, fast_block1 = _fast_paged_kv_blocks(kv_tile_idx)
         for call in range(kv_calls_per_tile):
@@ -2059,7 +2130,7 @@ def build_unified_attention_2d_tiled(
                         linear_half=linear_half,
                         kv_head=kv_head_idx,
                     )
-            k_dst = b.smem_ptr_add(K_wave_base, b.const_i64(call * bytes_per_call))
+            k_dst = b.smem_ptr_add(K_wave_base, b.const_i64(call * bytes_per_call_K))
             # CACHE_STREAM (SLC): one-shot streaming load, never re-read
             # within this kernel. Documented in
             # ``dsl_docs/primitives/intrinsics_and_primitives.md`` as the
@@ -2625,6 +2696,24 @@ def build_unified_attention_2d_tiled(
         Otherwise read bf16 directly. Shared by the 16x16 and 32x32 QK
         paths so both get the fp8 LDS-footprint win.
         """
+        if KQ_XOR_SWIZZLE:
+            # Measurement-only vanilla XOR swizzle: permute the read column by
+            # the low 3 bits of the row so 8 consecutive rows land on distinct
+            # banks (col ^= (row & 7) << 3, i.e. (row%8)*8 halves; stays 8-half
+            # aligned + in [0, HD)). Read-only -> numerically wrong; used solely
+            # to measure the SQ_LDS_BANK_CONFLICT delta.
+            k_off = b.xor(k_off, b.mul(b.mod(k_row, b.const_i32(8)), b.const_i32(8)))
+        if KQ_LDS_PAD and not K_FP8_MFMA:
+            # Slab-granularity padded layout: K_lds is
+            # [K_BUFS, T/SLAB_ROWS, SLAB_ROWS*HD + PAD]. Map the logical
+            # (row, col) to (slab, row_in_slab*HD + col) so the read hits the
+            # same padded slot the DMA wrote (write+read consistent).
+            slab = b.div(k_row, b.const_i32(KQ_SLAB_ROWS))
+            col_in_slab = b.add(
+                b.mul(b.mod(k_row, b.const_i32(KQ_SLAB_ROWS)), b.const_i32(HD)),
+                k_off,
+            )
+            return b.smem_load_vN(K_lds, buf_idx, slab, col_in_slab, dtype=dtype, n=8)
         if not K_FP8_MFMA:
             return b.smem_load_vN(K_lds, buf_idx, k_row, k_off, dtype=dtype, n=8)
         if FP8_NATIVE_QK:

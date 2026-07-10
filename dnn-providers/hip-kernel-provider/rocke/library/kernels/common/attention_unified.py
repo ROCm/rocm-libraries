@@ -2116,6 +2116,13 @@ def _tiled_spec_from_problem(
             softmax_interleave_groups=4,
             use_fast_paged_kv_desc=False,
             use_mfma32_skip_legacy_qreg=False,
+            # Slab-granularity K_lds pad (16 halves): breaks the row-aliased
+            # bank conflict on the QK K read (SQ_LDS_BANK_CONFLICT rate 897->660)
+            # for a measured ~25% latency win at Sq8192. Occupancy-neutral (LDS
+            # 65 KB <= 80 KB budget keeps 2 WG/CU; VGPR unchanged). DMA-safe:
+            # padding is between the 2-row async-DMA slabs, write+read consistent.
+            use_kq_lds_pad=True,
+            kq_lds_pad_halves=16,
         )
     return _resolve_lds_budget(_spec)
 
