@@ -24,7 +24,7 @@ The schedule is built in these passes:
 from __future__ import annotations
 from dataclasses import dataclass, field
 from enum import IntEnum
-from typing import Callable, Dict, List, Optional, Tuple, Union
+from typing import Callable, ClassVar, Dict, List, Optional, Tuple, Union
 from bisect import bisect_left
 import copy
 import io
@@ -84,23 +84,10 @@ class Pass(IntEnum):
     BUILD               = 12
     POPULATE            = 13
 
-
-_PASS_PIPELINE = {
-    Pass.LR:                   ('place_LRs',                        []),
-    Pass.VGPR_TILES:           ('assign_vgpr_tiles',                [Pass.LR]),
-    Pass.GR:                   ('place_GRs',                        [Pass.LR]),
-    Pass.DEPS:                 ('annotate_deps',                    [Pass.GR]),
-    Pass.REMOVE_GR_DEPS:       ('remove_unnecessary_gr_deps',       [Pass.DEPS]),
-    Pass.REMOVE_LR_DEPS:       ('remove_unnecessary_lr_deps',       [Pass.REMOVE_GR_DEPS]),
-    Pass.REMOVE_DEPS:          ('remove_cross_deps',                [Pass.REMOVE_LR_DEPS]),
-    Pass.GR_INC:               ('insert_gr_lr_inc',                 [Pass.REMOVE_DEPS]),
-    Pass.GROUP_LR_GR:          ('group_lr_gr',                      [Pass.GR_INC]),
-    Pass.REMOVE_WAIT_LR_SYNC:  ('remove_unnecessary_wait_lr_sync', [Pass.GROUP_LR_GR]),
-    Pass.REMOVE_WAIT_GR_SYNC:  ('remove_unnecessary_wait_gr_sync', [Pass.REMOVE_WAIT_LR_SYNC]),
-    Pass.EMIT:                 ('emit',                             [Pass.REMOVE_WAIT_GR_SYNC]),
-    Pass.BUILD:                ('build',                            [Pass.EMIT]),
-    Pass.POPULATE:             ('populate_instructions',            []),
-}
+    @classmethod
+    def pipeline(cls) -> Tuple[Pass, ...]:
+        """Ordered pipeline passes (LR through EMIT)."""
+        return tuple(cls(i) for i in range(cls.EMIT + 1))
 
 
 TENSOR_SIDE = {'A': 'A', 'B': 'B', 'SA': 'A', 'SB': 'B'}
@@ -615,14 +602,21 @@ class EmittedModule:
 class LogicalScheduler:
     """Subtile-based logical scheduler.
 
-    Builds the schedule in 6 passes, each producing testable intermediate output.
-    Each pass auto-runs its prerequisites if needed (tracked via self._completed).
+    Pass methods are standalone; call build() to run the full pipeline.
     """
+
+    _PASS_METHODS: ClassVar[Dict[Pass, str]] = {}
+
+    def pipeline_pass(p, _methods=_PASS_METHODS):
+        """Register a pipeline pass method. Use as @pipeline_pass(Pass.LR) on pass methods."""
+        def decorator(fn):
+            _methods[p] = fn.__name__
+            return fn
+        return decorator
 
     def __init__(self, config: SchedulerConfig):
         self.config = config
         self.tensors: List[str] = ['A', 'B'] + (['SA', 'SB'] if config.hasScale else [])
-        self._completed: set = set()   # tracks which passes have run (Pass enum members)
         # Shared mutable state across passes. The same field holds different
         # stage representations over time; see ScheduleTypes for stage meanings.
         self._partitions: Optional[Union[LogicalSchedule, AnnotatedSchedule, AugmentedSchedule]] = None
@@ -636,11 +630,6 @@ class LogicalScheduler:
                                                       'SA': set(), 'SB': set()}
         self._tail_freed_tile_ids: Dict[str, set] = {'A': set(), 'B': set(),
                                                      'SA': set(), 'SB': set()}
-
-    def _ensure_pass(self, *prerequisites: Pass) -> None:
-        for p in prerequisites:
-            if p not in self._completed:
-                getattr(self, _PASS_PIPELINE[p][0])()
 
     # ── Place LRs ─────────────────────────────────────────
 
@@ -656,6 +645,7 @@ class LogicalScheduler:
         return {'A': (cfg._prefixM[piM], cfg._prefixM[piM + 1]),
                 'B': (cfg._prefixN[piN], cfg._prefixN[piN + 1])}
 
+    @pipeline_pass(Pass.LR)
     def place_LRs(self) -> LogicalSchedule:
         """Place MFMAs and LRs based on read granularities.
 
@@ -706,7 +696,6 @@ class LogicalScheduler:
                     loaded_ranges[side] = {cur[side], nxt[side]}
 
         self._partitions = partitions
-        self._completed.add(Pass.LR)
         return partitions
 
     def _create_partition_slots(self, cur: dict) -> List[SubIterKSlot]:
@@ -759,7 +748,6 @@ class LogicalScheduler:
                 slots[slot_k].lrs.append(lr)
 
         self._partitions = [slots]
-        self._completed.add(Pass.LR)
         return self._partitions
 
     def _place_LRs_for_partition(self, cur: tuple, nxt: tuple,
@@ -859,6 +847,7 @@ class LogicalScheduler:
         cfg = self.config
         return bool(cfg.numUnroll) and SchedulerConfig._data_tensors_multi_du(cfg.numUnroll)
 
+    @pipeline_pass(Pass.VGPR_TILES)
     def assign_vgpr_tiles(self):
         """Assign physical vgprTileIds to all placements (A, B, SA, SB)."""
         if self._use_free_list_vgpr_allocation():
@@ -872,7 +861,6 @@ class LogicalScheduler:
         Iterated until convergence (max 8 unroll iterations).  Sets
         self.tile_peaks, self.needs_unrolling, self.unroll_factor.
         """
-        self._ensure_pass(Pass.LR)
 
         cfg = self.config
         numK = cfg.numSubIterK
@@ -1019,11 +1007,9 @@ class LogicalScheduler:
         self.tile_peaks = max_peaks
         self.compact_b_overlay = True
 
-        self._completed.add(Pass.VGPR_TILES)
 
     def _assign_vgpr_tiles_deterministic(self):
         """Deterministic double-buffer allocator with partition-aware positions."""
-        self._ensure_pass(Pass.LR)
 
         cfg = self.config
         numK = cfg.numSubIterK
@@ -1134,7 +1120,6 @@ class LogicalScheduler:
         self.unroll_factor = unroll_factor
         self.needs_unrolling = unroll_factor > 1
 
-        self._completed.add(Pass.VGPR_TILES)
 
     # ── Place GRs ─────────────────────────────────────────
 
@@ -1390,6 +1375,7 @@ class LogicalScheduler:
                         partition=pi,
                         unrollId=uid))
 
+    @pipeline_pass(Pass.GR)
     def place_GRs(self) -> PartitionSchedule:
         """Place Global Reads by iterating MFMAs across partitions.
 
@@ -1402,7 +1388,6 @@ class LogicalScheduler:
          - Overall loads are spread accross all subIterKs of all partitions.
 
         """
-        self._ensure_pass(Pass.LR)
 
         part_ranges = [self._partition_tile_range(pi)
                        for pi in range(self.config.numPartitions)]
@@ -1433,11 +1418,11 @@ class LogicalScheduler:
             else:
                 self._distribute_grs(gr_list, gr_slot_bounds, unrollId=uid)
 
-        self._completed.add(Pass.GR)
         return self._partitions[0]
 
     # ── Annotate dependencies ─────────────────────────────
 
+    @pipeline_pass(Pass.DEPS)
     def annotate_deps(self):
         """Annotate each placement with its raw before-dependencies.
 
@@ -1455,7 +1440,6 @@ class LogicalScheduler:
         - LR depends on GR for same tensor (data must be in LDS)
         - GR depends on collision LR for same tensor (LDS double-buffer)
         """
-        self._ensure_pass(Pass.GR)
         cfg = self.config
         numK = cfg.numSubIterK
 
@@ -1479,7 +1463,6 @@ class LogicalScheduler:
             self._annotate_deps_partition(pi, slots, cfg, lr_by_data,
                                           gr_by_tensor, lr_by_tensor)
 
-        self._completed.add(Pass.DEPS)
 
     def _annotate_deps_partition(self, pi: int, slots: List[SubIterKSlot],
                                  cfg: SchedulerConfig, lr_by_data: list,
@@ -1652,6 +1635,7 @@ class LogicalScheduler:
     def _lr_schedule_order(lr: LRPlacement) -> tuple:
         return (lr.partition, lr.subIterK_slot)
 
+    @pipeline_pass(Pass.REMOVE_GR_DEPS)
     def remove_unnecessary_gr_deps(self):
         """Remove GR deps on LRs that are already guaranteed by an earlier LR's wait.
 
@@ -1664,7 +1648,6 @@ class LogicalScheduler:
         Wraps around: the first LR's dep is compared against the last from the
         previous MT iteration (max dep exec_order shifted by mt_offset -1).
         """
-        self._ensure_pass(Pass.DEPS)
 
         for tensor in self.tensors:
             _dep_exec_order, _gr_schedule_order = self._make_gr_dep_exec_order(tensor)
@@ -1709,10 +1692,10 @@ class LogicalScheduler:
                         guarantee_gr_order = _gr_schedule_order(dep.ref)
                     use_wraparound = False
 
-        self._completed.add(Pass.REMOVE_GR_DEPS)
 
     # ── Remove unnecessary LR deps ────────────────────────
 
+    @pipeline_pass(Pass.REMOVE_LR_DEPS)
     def remove_unnecessary_lr_deps(self):
         """Remove GR→LR collision deps already covered by an earlier sync.
 
@@ -1729,7 +1712,6 @@ class LogicalScheduler:
         Exec order: (mt_offset, partition, subIterK_slot). On wrap-around
         the mt_offset is shifted by -1.
         """
-        self._ensure_pass(Pass.REMOVE_GR_DEPS)
 
         def _dep_exec_order(dep):
             return (dep.mt_offset, dep.ref.partition, dep.ref.subIterK_slot)
@@ -1766,7 +1748,6 @@ class LogicalScheduler:
                 sync_slots.append(((pi, slot.subIterK), last_lr, grs_with_lr))
 
         if not sync_slots:
-            self._completed.add(Pass.REMOVE_LR_DEPS)
             return
 
         sync_slots.sort(key=lambda x: x[0])
@@ -1803,7 +1784,6 @@ class LogicalScheduler:
                 if prev_eo is not None and prev_eo >= cur_eo:
                     gr.deps.clear()
 
-        self._completed.add(Pass.REMOVE_LR_DEPS)
 
     # ── Remove cross-subIterK deps ─────────────────────────
 
@@ -2118,6 +2098,7 @@ class LogicalScheduler:
 
         return counts
 
+    @pipeline_pass(Pass.REMOVE_DEPS)
     def remove_cross_deps(self):
         """Replace cross-subIterK deps with wait preOps.
 
@@ -2127,7 +2108,6 @@ class LogicalScheduler:
           - GR depending on LRs   → single wait_lr_sync
           - LR depending on GRs   → single wait_gr_sync with per-tensor inflight counts
         """
-        self._ensure_pass(Pass.REMOVE_LR_DEPS)
 
         for pi, slots in enumerate(self._partitions):
             for slot in slots:
@@ -2194,12 +2174,12 @@ class LogicalScheduler:
                         for d in same + cross)
                     gr.preOps = [WaitLROp(has_sync=True)] if has_lr_dep else []
 
-        self._completed.add(Pass.REMOVE_DEPS)
 
     def _per_uid_k(self, tensor: str) -> int:
         """Number of subIterK slots per unrollId for a tensor."""
         return self.config.numSubIterK // self.config.numUnroll.get(tensor, 1)
 
+    @pipeline_pass(Pass.GR_INC)
     def insert_gr_lr_inc(self):
         """Insert gr_inc/lr_inc preOps at MacroTile iteration transitions.
 
@@ -2214,7 +2194,6 @@ class LogicalScheduler:
         each GRIncOp (which swaps the GR write buffer) has a matching LRIncOp
         (which swaps the LR read buffer), keeping the ping-pong in sync.
         """
-        self._ensure_pass(Pass.REMOVE_DEPS)
 
         last_lr_mt = {}  # tensor -> mtIteration for LR only
         last_lr_uid = {}  # tensor -> effective uid for LR (derived from k range)
@@ -2294,7 +2273,6 @@ class LogicalScheduler:
                     if first_uid != 0:
                         lr.preOps.insert(0, LRIncOp(tensor=tensor, isUnrollSwap=True, unrollId=first_uid))
 
-        self._completed.add(Pass.GR_INC)
 
     # ── Group LR/GR chains ─────────────────────────────────────
 
@@ -2379,6 +2357,7 @@ class LogicalScheduler:
         result.extend(others)
         return result
 
+    @pipeline_pass(Pass.GROUP_LR_GR)
     def group_lr_gr(self):
         """Group LR and GR placements into chains within each subIterK.
 
@@ -2400,7 +2379,6 @@ class LogicalScheduler:
           original GR dep is removed).  This avoids two nodes sharing the
           same parent.
         """
-        self._ensure_pass(Pass.GR_INC)
 
         order = self._LR_GR_ORDER
 
@@ -2496,8 +2474,8 @@ class LogicalScheduler:
                         slot.mfma.deps = other_deps + [
                             Dep(ref=last_lr, mt_offset=lr_deps[0].mt_offset)]
 
-        self._completed.add(Pass.GROUP_LR_GR)
 
+    @pipeline_pass(Pass.REMOVE_WAIT_LR_SYNC)
     def remove_unnecessary_wait_lr_sync(self):
         """Remove redundant wait_lr_sync from GRs after grouping.
         Given that we always use wait_lr cnt=0, grouping can guarantee future wait_lr_sync.
@@ -2516,7 +2494,6 @@ class LogicalScheduler:
         to just sync — the wait_lr is already guaranteed by the MFMA op in the
         same subIterK.
         """
-        self._ensure_pass(Pass.GROUP_LR_GR)
 
         for pi, slots in enumerate(self._partitions):
             for si, slot in enumerate(slots):
@@ -2566,8 +2543,8 @@ class LogicalScheduler:
                         SyncOp() if (isinstance(op, WaitLROp) and op.has_sync) else op
                         for op in gr.preOps]
 
-        self._completed.add(Pass.REMOVE_WAIT_LR_SYNC)
 
+    @pipeline_pass(Pass.REMOVE_WAIT_GR_SYNC)
     def remove_unnecessary_wait_gr_sync(self):
         """Remove redundant wait_gr_sync on interior partition subIterK=1 slots.
 
@@ -2576,10 +2553,8 @@ class LogicalScheduler:
         ds_reads.  Baseline kernels only retain wait_gr at s1 on the last
         partition (wrap to the next MacroTile iteration).
         """
-        self._ensure_pass(Pass.REMOVE_WAIT_LR_SYNC)
 
         if not self._is_multi_du() or self.config.numPartitions <= 1:
-            self._completed.add(Pass.REMOVE_WAIT_GR_SYNC)
             return
 
         last_pi = self.config.numPartitions - 1
@@ -2592,7 +2567,6 @@ class LogicalScheduler:
                         op for op in lr.preOps
                         if not isinstance(op, WaitGROp)]
 
-        self._completed.add(Pass.REMOVE_WAIT_GR_SYNC)
 
     def _split_deps(self, deps: List[Dep], consumer_pi: int,
                     consumer_slot: int) -> Tuple[List[Dep], List[Dep]]:
@@ -2611,6 +2585,7 @@ class LogicalScheduler:
                 cross.append(dep)
         return same, cross
 
+    @pipeline_pass(Pass.EMIT)
     def emit(self) -> EmittedSchedule:
         """Convert placements into EmittedModule chains per partition per subIterK.
 
@@ -2627,7 +2602,6 @@ class LogicalScheduler:
           - WaitLROp with has_sync expands to two modules: wait_lr then sync
           - Same-subIterK Dep deps become ordering constraints (no new module)
         """
-        self._ensure_pass(Pass.REMOVE_WAIT_GR_SYNC)
 
         all_partitions = []
         for pi, slots in enumerate(self._partitions):
@@ -2740,25 +2714,9 @@ class LogicalScheduler:
             all_partitions.append(partition_emitted)
 
         self._emitted = all_partitions
-        self._completed.add(Pass.EMIT)
         return all_partitions
 
-    _BUILD_STOPS = (
-        ('place_LRs', Pass.LR),
-        ('assign_vgpr_tiles', Pass.VGPR_TILES),
-        ('place_GRs', Pass.GR),
-        ('annotate_deps', Pass.DEPS),
-        ('remove_unnecessary_gr_deps', Pass.REMOVE_GR_DEPS),
-        ('remove_unnecessary_lr_deps', Pass.REMOVE_LR_DEPS),
-        ('remove_cross_deps', Pass.REMOVE_DEPS),
-        ('insert_gr_lr_inc', Pass.GR_INC),
-        ('group_lr_gr', Pass.GROUP_LR_GR),
-        ('remove_unnecessary_wait_lr_sync', Pass.REMOVE_WAIT_LR_SYNC),
-        ('remove_unnecessary_wait_gr_sync', Pass.REMOVE_WAIT_GR_SYNC),
-        ('emit', Pass.EMIT),
-    )
-
-    def build(self, *, stop_after: Optional[str] = None) -> Union[
+    def build(self, *, stop_after: Optional[Pass] = None) -> Union[
             LogicalSchedule, AnnotatedSchedule, AugmentedSchedule, EmittedSchedule]:
         """Execute the full scheduling pipeline sequentially.
 
@@ -2766,13 +2724,14 @@ class LogicalScheduler:
             stop_after: If given, stop after the named pass and return early.
                 Used by tests to run the pipeline up to a specific stage.
         """
-        for name, pass_enum in self._BUILD_STOPS:
-            getattr(self, _PASS_PIPELINE[pass_enum][0])()
-            if stop_after == name:
+        if stop_after is not None and stop_after not in Pass.pipeline():
+            raise ValueError(f"invalid stop_after: {stop_after!r}")
+        for pass_enum in Pass.pipeline():
+            getattr(self, self._PASS_METHODS[pass_enum])()
+            if stop_after == pass_enum:
                 if pass_enum == Pass.EMIT:
                     return self._emitted
                 return self._partitions
-        self._completed.add(Pass.BUILD)
         return self._emitted
 
     # ── Loop variant derivation ────────────────────────────
@@ -2800,7 +2759,7 @@ class LogicalScheduler:
 
         WaitGR inflight counts are zeroed since no new GRs are in flight.
         """
-        self._ensure_pass(Pass.EMIT)
+        assert self._emitted is not None, "call build() first"
 
         if self.config.pgr in (0, 1):
             self._ngll_emitted = [[[]]]
@@ -2829,7 +2788,7 @@ class LogicalScheduler:
         """NLL (No Load Loop): mainloop without GR, LR(n+1), GR_INC, LR_INC,
         WaitGR(n+1)+Sync. Keeps LR(n), MFMAs, WaitGR(n). WaitGR counts are
         zeroed only when no LR(n) remains in the last subIterK slot."""
-        self._ensure_pass(Pass.EMIT)
+        assert self._emitted is not None, "call build() first"
 
         if self.config.pgr == 0:
             self._nll_emitted = [[[]]]
@@ -3134,7 +3093,7 @@ class LogicalScheduler:
         For multi-DU data tensors (numUnroll > 1), each uid only emits GRs
         for the K slots that belong to it (uid u → k in [u*grGran.k, (u+1)*grGran.k)).
         """
-        self._ensure_pass(Pass.LR)
+        assert self._partitions is not None, "call build() or place_LRs() first"
         cfg = self.config
 
         seen = set()
@@ -3181,7 +3140,7 @@ class LogicalScheduler:
         Filters _make_preloop_mt1_grs logic to one uid, skipping tensors
         where uid >= numUnroll[tensor].
         """
-        self._ensure_pass(Pass.LR)
+        assert self._partitions is not None, "call build() or place_LRs() first"
         cfg = self.config
 
         seen = set()
@@ -3454,8 +3413,8 @@ class LogicalScheduler:
                                         SCBranchSCC1, SBranch)
         from rocisa.container import sgpr
 
-        assert Pass.POPULATE in self._completed, \
-            "populate_instructions() must be called before emitMainAndExitLoops()"
+        assert self._emitter is not None, \
+            "populate_instructions() must be called first"
 
         module = Module("MainAndExitLoops")
         uf = self.unroll_factor
@@ -3625,8 +3584,8 @@ class LogicalScheduler:
         closeLoop(emitEndLabelOnly=True) after, mirroring the legacy
         KernelWriter pattern.
         """
-        assert Pass.POPULATE in self._completed, \
-            "populate_instructions() must be called before emitTailLoop()"
+        assert self._emitter is not None, \
+            "populate_instructions() must be called first"
 
         module = Module("TailLoop")
 
@@ -3664,7 +3623,7 @@ class LogicalScheduler:
 
         Must be called after scheduling is complete.
         """
-        self._ensure_pass(Pass.VGPR_TILES)
+        assert hasattr(self, 'tile_peaks'), "call build() first"
 
         cfg = self.config
 
@@ -3697,7 +3656,7 @@ class LogicalScheduler:
           vgprTilesA/B:   List[RegisterTileInfo]
           vgprTilesSA/SB: List[RegisterTileInfo]
         """
-        self._ensure_pass(Pass.VGPR_TILES)
+        assert hasattr(self, 'tile_peaks'), "call build() first"
 
         cfg = self.config
 
@@ -3953,7 +3912,6 @@ class LogicalScheduler:
             self._nll_per_unroll.append(nll_copy)
 
         self._emitter = emitter
-        self._completed.add(Pass.POPULATE)
 
     # ── Print helpers ───────────────────────────────────────
 

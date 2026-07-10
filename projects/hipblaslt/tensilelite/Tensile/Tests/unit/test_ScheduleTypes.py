@@ -9,9 +9,12 @@ erased at runtime, these tests are the runtime safety net that catches "this
 object claims to be stage X but actually isn't."
 """
 
+import pytest
+
 from Tensile.Components.Subtile.LogicalScheduler import (
     Dep,
     LogicalScheduler,
+    Pass,
     ReadGranularity,
     SchedulerConfig,
 )
@@ -53,7 +56,7 @@ def _all_placements(slot):
 def test_logical_schedule_has_no_deps_or_preops():
     """Post-place_GRs (LogicalSchedule): .deps and .preOps are empty everywhere."""
     sched = _make_scheduler()
-    schedule: LogicalSchedule = sched.build(stop_after='place_GRs')
+    schedule: LogicalSchedule = sched.build(stop_after=Pass.GR)
     assert schedule is not None and len(schedule) >= 1
     for slots in schedule:
         for slot in slots:
@@ -67,7 +70,7 @@ def test_logical_schedule_has_no_deps_or_preops():
 def test_annotated_schedule_has_only_same_slot_deps():
     """Post-remove_cross_deps (AnnotatedSchedule): all .deps are same partition + same slot."""
     sched = _make_scheduler()
-    schedule: AnnotatedSchedule = sched.build(stop_after='remove_cross_deps')
+    schedule: AnnotatedSchedule = sched.build(stop_after=Pass.REMOVE_DEPS)
     assert schedule is not None
     for pi, slots in enumerate(schedule):
         for slot in slots:
@@ -92,7 +95,7 @@ def test_augmented_schedule_chains_lr_gr_in_tensor_order():
     """Post-remove_unnecessary_wait_lr_sync (AugmentedSchedule):
     LR/GR within a slot appear in canonical tensor order (A, B, SA, SB)."""
     sched = _make_scheduler()
-    schedule: AugmentedSchedule = sched.build(stop_after='remove_unnecessary_wait_lr_sync')
+    schedule: AugmentedSchedule = sched.build(stop_after=Pass.REMOVE_WAIT_LR_SYNC)
     assert schedule is not None
     order = LogicalScheduler._LR_GR_ORDER
     for slots in schedule:
@@ -113,7 +116,7 @@ def test_emitted_schedule_is_three_level_with_valid_before_links():
     """Post-emit (EmittedSchedule): 3-level list; every .before is None or a
     valid moduleId in the same subIterK list, and never self-referential."""
     sched = _make_scheduler()
-    result: EmittedSchedule = sched.build(stop_after='emit')
+    result: EmittedSchedule = sched.build(stop_after=Pass.EMIT)
     assert isinstance(result, list), "EmittedSchedule must be a list (level 1: partitions)"
     for partition in result:
         assert isinstance(partition, list), \
@@ -131,3 +134,10 @@ def test_emitted_schedule_is_three_level_with_valid_before_links():
                     assert em.before != em.moduleId, (
                         f"EmittedModule {em.moduleId} has self-referential before-link"
                     )
+
+
+def test_build_rejects_pass_build_stop_after():
+    """Pass.BUILD is not a valid stop_after target."""
+    sched = _make_scheduler()
+    with pytest.raises(ValueError, match="invalid stop_after"):
+        sched.build(stop_after=Pass.BUILD)
