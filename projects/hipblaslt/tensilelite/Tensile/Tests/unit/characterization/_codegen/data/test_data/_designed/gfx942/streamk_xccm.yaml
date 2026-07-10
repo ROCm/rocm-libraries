@@ -17,7 +17,7 @@
 #
 # gfx942 supports StreamKXCCMapping ∈ {0, 2, 3, 4, 5, 6, 7, 8}.
 # StreamKXCCMapping=3 is non-power-of-2 (valid values exclude 1).
-# StreamK=[1] with StreamKAtomic=[0] is the minimal sweep.
+# StreamK=[3] with StreamKAtomic=[0] is the minimal sweep.
 GlobalParameters:
   SyncsPerBenchmark: 0
   MinimumRequiredVersion: 5.0.0
@@ -51,7 +51,7 @@ BenchmarkProblems:
       ForkParameters:
         - MatrixInstruction:
           - [16, 16, 4, 1, 1, 4, 4, 2, 2]
-        - StreamK: [1]
+        - StreamK: [3]
         - StreamKAtomic: [0]
         - StreamKXCCMapping: [3]
         - PrefetchGlobalRead: [2]

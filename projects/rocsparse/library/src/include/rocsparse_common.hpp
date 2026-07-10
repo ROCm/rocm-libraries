@@ -773,6 +773,54 @@ namespace rocsparse
                                         atomicAdd((double*)ptr + 1, std::imag(val)));
     }
 
+    template <typename T>
+    __device__ __forceinline__ T atomic_load(const T* ptr, int order, int scope)
+    {
+        return __hip_atomic_load(ptr, order, scope);
+    }
+
+    template <>
+    __device__ __forceinline__ rocsparse_float_complex
+        atomic_load(const rocsparse_float_complex* ptr, int order, int scope)
+    {
+        return rocsparse_float_complex(__hip_atomic_load((const float*)ptr, order, scope),
+                                       __hip_atomic_load((const float*)ptr + 1, order, scope));
+    }
+
+    template <>
+    __device__ __forceinline__ rocsparse_double_complex
+        atomic_load(const rocsparse_double_complex* ptr, int order, int scope)
+    {
+        return rocsparse_double_complex(__hip_atomic_load((const double*)ptr, order, scope),
+                                        __hip_atomic_load((const double*)ptr + 1, order, scope));
+    }
+
+    template <typename T>
+    __device__ __forceinline__ void atomic_store(T* ptr, T val, int order, int scope)
+    {
+        __hip_atomic_store(ptr, val, order, scope);
+    }
+
+    template <>
+    __device__ __forceinline__ void atomic_store(rocsparse_float_complex* ptr,
+                                                 rocsparse_float_complex  val,
+                                                 int                      order,
+                                                 int                      scope)
+    {
+        __hip_atomic_store((float*)ptr, std::real(val), order, scope);
+        __hip_atomic_store((float*)ptr + 1, std::imag(val), order, scope);
+    }
+
+    template <>
+    __device__ __forceinline__ void atomic_store(rocsparse_double_complex* ptr,
+                                                 rocsparse_double_complex  val,
+                                                 int                       order,
+                                                 int                       scope)
+    {
+        __hip_atomic_store((double*)ptr, std::real(val), order, scope);
+        __hip_atomic_store((double*)ptr + 1, std::imag(val), order, scope);
+    }
+
     template <typename T1, typename T2>
     __device__ __forceinline__ T1 atomic_add(T1* base_ptr, int64_t idx, int64_t size, T2 val)
     {

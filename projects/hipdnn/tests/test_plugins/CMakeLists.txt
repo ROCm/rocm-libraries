@@ -98,6 +98,9 @@ add_test_plugin(${HIPDNN_TEST_MALFORMED_VERSION_PLUGIN_TARGET} TestMalformedVers
 # Version-zero fake reports a parseable but too-low API version.
 add_test_plugin(${HIPDNN_TEST_VERSION_ZERO_PLUGIN_TARGET} TestVersionZeroPlugin.cpp)
 
+# test_autotune_plugin supports the autotune workflow with global.benchmarking and test knobs
+add_test_plugin(${TEST_AUTOTUNE_PLUGIN_NAME} TestAutotunePlugin.cpp)
+
 # Create the default plugin in test_plugins/default
 set(test_good_default_plugin_OUTPUT_DIR "${HIPDNN_TEST_PLUGIN_DIR}/default")
 set(test_good_default_plugin_INSTALL_DIR "${HIPDNN_TEST_PLUGIN_INSTALL_DIR}/default")

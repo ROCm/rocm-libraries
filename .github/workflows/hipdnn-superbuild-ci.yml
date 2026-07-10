@@ -31,6 +31,8 @@ jobs:
       BUILD_DIR: B:\build
       VENV_PATH: B:\rocm_wheels
       GPU_TARGET: gfx1151
+      # Multi-arch nightly device extra (rocm[...,device-<DEVICE_TARGET>]).
+      DEVICE_TARGET: gfx1151
     steps:
       - name: Runner health status
         shell: pwsh
@@ -90,8 +92,8 @@ jobs:
           python -m venv $env:VENV_PATH
           & "$env:VENV_PATH\Scripts\Activate.ps1"
 
-          Write-Host "Installing ROCm wheels from nightlies (target: $env:GPU_TARGET)"
-          pip install --index-url "https://rocm.nightlies.amd.com/v2/$env:GPU_TARGET/" "rocm[libraries,devel]"
+          Write-Host "Installing ROCm wheels from multi-arch nightlies (device: $env:DEVICE_TARGET)"
+          pip install --index-url "https://rocm.nightlies.amd.com/whl-multi-arch/" "rocm[libraries,devel,device-$env:DEVICE_TARGET]"
           if ($LASTEXITCODE -ne 0) { throw "Failed to install ROCm wheels" }
 
           Write-Host "Initializing ROCm SDK"
@@ -101,6 +103,12 @@ jobs:
           $RocmSdkPath = "$env:VENV_PATH\Lib\site-packages\_rocm_sdk_devel" -replace '\\', '/'
           Write-Host "ROCM_SDK_PATH=$RocmSdkPath"
           echo "ROCM_SDK_PATH=$RocmSdkPath" >> $env:GITHUB_ENV
+
+      - name: Check ROCm wheel freshness
+        shell: pwsh
+        run: |
+          & "$env:VENV_PATH\Scripts\python.exe" .github/scripts/check_wheel_freshness.py --max-age-days 14
+          if ($LASTEXITCODE -ne 0) { throw "ROCm nightly wheels are stale" }
 
       - name: Configure superbuild
         run: |
@@ -128,6 +136,8 @@ jobs:
     runs-on: azure-linux-scale-rocm
     env:
       GPU_TARGET: gfx94X-dcgpu
+      # Multi-arch nightly device extra (rocm[...,device-<DEVICE_TARGET>]).
+      DEVICE_TARGET: gfx942
     steps:
       - name: Runner health status
         run: |
@@ -175,8 +185,8 @@ jobs:
           python -m venv "$VENV_PATH"
           source "$VENV_PATH/bin/activate"
 
-          echo "Installing ROCm wheels from nightlies (target: $GPU_TARGET)"
-          pip install --index-url "https://rocm.nightlies.amd.com/v2/$GPU_TARGET/" "rocm[libraries,devel]"
+          echo "Installing ROCm wheels from multi-arch nightlies (device: $DEVICE_TARGET)"
+          pip install --index-url "https://rocm.nightlies.amd.com/whl-multi-arch/" "rocm[libraries,devel,device-$DEVICE_TARGET]"
 
           echo "Initializing ROCm SDK"
           rocm-sdk init
@@ -185,6 +195,10 @@ jobs:
           ROCM_SDK_PATH="$SITE_PACKAGES/_rocm_sdk_devel"
           echo "ROCM_SDK_PATH=$ROCM_SDK_PATH"
           echo "ROCM_SDK_PATH=$ROCM_SDK_PATH" >> "$GITHUB_ENV"
+
+      - name: Check ROCm wheel freshness
+        run: |
+          "$VENV_PATH/bin/python" .github/scripts/check_wheel_freshness.py --max-age-days 14
 
       - name: Configure superbuild
         run: |

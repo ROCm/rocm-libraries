@@ -573,7 +573,12 @@ install_torch() {
 }
 
 select_binding_prefix() {
-    if [ "$FORCE_BUILD" -eq 1 ] || [ -n "$ROCM_PREFIX" ]; then
+    # An explicit --rocm-prefix wins. Otherwise the prefix follows the torch
+    # mode (where ROCm comes from), NOT whether --force-build was passed:
+    # force-build only controls *whether* hipDNN is rebuilt, not *where*. In
+    # rocm/existing-rocm mode that is the torch wheel's bundled SDK, so a forced
+    # rebuild works with no system ROCm.
+    if [ -n "$ROCM_PREFIX" ]; then
         resolve_installed_rocm_prefix
         return
     fi
@@ -596,7 +601,11 @@ select_binding_prefix() {
 }
 
 select_provider_toolchain_prefix() {
-    if [ "$FORCE_BUILD" -eq 1 ] || [ -n "$ROCM_PREFIX" ]; then
+    # Same rule as select_binding_prefix: the compiler/devel toolchain follows
+    # the torch mode. For rocm/existing-rocm that is the wheel's devel SDK
+    # (clang + lib/cmake/hip), which a forced rebuild must use too -- the
+    # libraries wheel ships no compiler.
+    if [ -n "$ROCM_PREFIX" ]; then
         resolve_installed_rocm_prefix
         return
     fi
@@ -749,10 +758,12 @@ warn_no_native_engine_plugins() {
     echo "Pass --plugin-path or config plugin_path to use custom provider plugins." >&2
 }
 
-FORCE_BUILD_PREFIX=$(resolve_installed_rocm_prefix)
-
 if [ "$FORCE_BUILD" -eq 1 ] && [ "$AUTO_YES" -eq 0 ]; then
-    read -r -p "This will build and install hipDNN to $FORCE_BUILD_PREFIX. Continue? [Y/n] " confirm
+    # The exact install prefix depends on the torch mode and is only resolved
+    # after torch is installed (rocm/existing-rocm build into the torch wheel's
+    # bundled SDK, not the system ROCm prefix), so it is reported at build time
+    # rather than named here.
+    read -r -p "This will build and install hipDNN and provider plugins from source into the selected ROCm prefix. Continue? [Y/n] " confirm
     case "$confirm" in
         [nN]) echo "Aborted."; exit 0 ;;
     esac

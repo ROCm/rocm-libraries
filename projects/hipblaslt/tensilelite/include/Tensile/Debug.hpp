@@ -29,15 +29,13 @@
 #include <cstdlib>
 #include <set>
 #include <string>
-#include <Tensile/Macros.hpp>
+#include <tensilelitehost/export.h>
 
 #ifdef Tensile_ENABLE_MARKER
 #include <roctracer/roctx.h>
 #endif
 
 #include <Tensile/Singleton.hpp>
-
-TENSILE_HIDDEN_BEGIN
 
 namespace TensileLite
 {
@@ -46,7 +44,7 @@ namespace TensileLite
     /**
      * @brief Common place for defining flags which enable debug behaviour.
      */
-    class Debug : public LazySingleton<Debug>
+    class TENSILELITEHOST_EXPORT Debug : public LazySingleton<Debug>
     {
     public:
         bool printPropertyEvaluation() const;
@@ -175,4 +173,3 @@ namespace TensileLite
     };
 } // namespace TensileLite
 
-TENSILE_HIDDEN_END
