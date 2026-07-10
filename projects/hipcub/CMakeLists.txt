@@ -76,9 +76,6 @@ include(CMakeDependentOption)
 # Build options
 option(BUILD_TEST "Build tests (requires googletest)" OFF)
 option(BUILD_CODE_COVERAGE "Enable code coverage" OFF)
-# CI passes -DHIPCUB_ENABLE_COVERAGE=ON (the standardized coverage flag); it is
-# gated directly at the instrumentation site below (no shared variable toggled).
-option(HIPCUB_ENABLE_COVERAGE "Enable code coverage" OFF)
 option(EXTERNAL_DEPS_FORCE_DOWNLOAD "Download non-ROCm dependencies and do not search for packages" OFF)
 option(DOWNLOAD_CUB "Download CUB and thrust. Do not search for CUB package" OFF)
 option(BUILD_BENCHMARK "Build benchmarks" OFF)
@@ -249,11 +246,6 @@ if(HIPCUB_SWAP_TO_LEGACY_AND_IGNORE_PROJECT_VERSIONING)
   set(CMAKE_CURRENT_SOURCE_DIR ${CMAKE_CURRENT_SOURCE_DIR_OLD})
 else()
   add_subdirectory(hipcub)
-endif()
-
-if(HIPCUB_ENABLE_COVERAGE)
-  set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -g -O0 -fprofile-instr-generate -fcoverage-mapping" )
-  set(CMAKE_EXE_LINKER_FLAGS "${CMAKE_EXE_LINKER_FLAGS} -fprofile-instr-generate")
 endif()
 
 if(BUILD_TEST OR (BUILD_BENCHMARK AND NOT ONLY_INSTALL))

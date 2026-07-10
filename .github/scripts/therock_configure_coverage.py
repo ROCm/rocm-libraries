@@ -47,34 +47,6 @@ COVERAGE_PROJECT_METADATA = {
     ),
 }
 
-# Header-only libraries: coverage comes from the instrumented test binaries
-# (there is no shared library to instrument), which needs a different flow than
-# the .so-based components above. Disabled for now (kept here, not merged into
-# COVERAGE_PROJECT_METADATA, so no coverage jobs are emitted) while the flow is
-# reworked to only handle shared-object components first; re-enable by merging
-# these back into COVERAGE_PROJECT_METADATA once header-only support is ready.
-_DISABLED_HEADER_ONLY_COVERAGE_PROJECT_METADATA = {
-    "rocprim": (
-        "rocPRIM",
-        "math-libs/rocPRIM",
-        "-DTHEROCK_ENABLE_PRIM=ON -DTHEROCK_ENABLE_ALL=OFF",
-        "projects/rocprim/test/test_categories_coverage.yaml",
-    ),
-    "hipcub": (
-        "hipCUB",
-        "math-libs/hipCUB",
-        "-DTHEROCK_ENABLE_PRIM=ON -DTHEROCK_ENABLE_ALL=OFF",
-        "projects/hipcub/test/test_categories_coverage.yaml",
-    ),
-    "rocthrust": (
-        "rocThrust",
-        "math-libs/rocThrust",
-        "-DTHEROCK_ENABLE_PRIM=ON -DTHEROCK_ENABLE_ALL=OFF",
-        "projects/rocthrust/test/test_categories_coverage.yaml",
-    ),
-}
-
-
 def get_build_metadata(project_key: str, base_dir: str = "TheRock/build-coverage"):
     """Get CMake target and build directory for a coverage-enabled project.
 
