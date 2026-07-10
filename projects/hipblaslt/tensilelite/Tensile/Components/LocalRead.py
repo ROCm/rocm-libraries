@@ -1652,6 +1652,7 @@ class LocalReadMFMA(LocalRead):
 
                             addrIdx = paramList[0] // 65536
                             srcAddr=vgpr("LocalReadAddr%s+%u"%(tc, addrIdx))
+                            tdmFullLdsOffset = paramList[0]
                             paramList[0] -= addrIdx * 65536
 
                             if numOffsets == 1:
@@ -1667,7 +1668,14 @@ class LocalReadMFMA(LocalRead):
                                 # indexTranpose case, disable index conversion for local read
                                 destVgpr = self.getVgprForEmu(writer, kernel, tc, bufferIdx, iui, index, lrvwTile, vgprLen=numVgpr, dst=False, localRead=True)
 
-                            self._emitLdsRead(writer, kernel, tP, LocalReadX, dst=destVgpr, src=srcAddr, ds=ds, module=localReadCodeT, comment=comment)
+                            # When numVectorsPerTile==1 the per-wave reads never cross the TDMSplit
+                            # half boundary (only vIdx=0 exists), so the byte-offset half classifier
+                            # would tag every read half0 and leave the half1 tensor_load un-waited.
+                            # Such reads' combined region depends on BOTH half loads -> carry both
+                            # half tokens.
+                            tdmBothHalves = (kernel["TDMSplit"] and not kernel["ProblemType"]["Sparse"]
+                                             and not tP.get("isM", False) and numVectorsPerTile == 1)
+                            self._emitLdsRead(writer, kernel, tP, LocalReadX, dst=destVgpr, src=srcAddr, ds=ds, module=localReadCodeT, ldsByteOffset=tdmFullLdsOffset, bothHalves=tdmBothHalves, comment=comment)
                             # TODO - handle vector-load
                             with writer.allocTmpSgpr(1, tag="LocalReadVALU_tmpSgprInfo2") as tmpSgprInfo:
                                 tmpSgpr = tmpSgprInfo.idx

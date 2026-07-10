@@ -93,7 +93,7 @@ class TestSuiteRunnerIntegration:
     def test_successful_result_has_separated_timing(
         self, hipdnn, conv_graph: Dict[str, Any]
     ) -> None:
-        """Successful results have separate cpu_build, gpu_kernel, and e2e timing."""
+        """Successful results have separate cpu_build, gpu_kernel, and host timing."""
         from dnn_benchmarking.config.benchmark_config import SuiteConfig
         from dnn_benchmarking.execution.suite_runner import run_graph_all_providers
         from dnn_benchmarking.graph.loader import GraphLoader
@@ -118,8 +118,8 @@ class TestSuiteRunnerIntegration:
         for r in successes:
             assert r.cpu_build_time_ms is not None
             assert r.cpu_build_time_ms > 0
-            assert r.e2e_stats is not None
-            assert r.e2e_stats.mean_ms > 0
+            assert r.host_stats is not None
+            assert r.host_stats.mean_ms > 0
             # gpu_kernel_stats may be None if torch GPU timing isn't available
 
     def test_successful_result_has_correctness(
@@ -597,7 +597,7 @@ class TestPyTorchBackendCLIIntegration:
             assert providers == {"pytorch"}
             for row in graph["results"]:
                 assert row["status"] == "success", row
-                assert row["e2e_stats"], row
+                assert row["host_stats"], row
                 # "auto" timing yields HIP events on ROCm and torch.cuda
                 # events on CUDA, so kernel stats exist on both.
                 assert row["gpu_kernel_stats"], row

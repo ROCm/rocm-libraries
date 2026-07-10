@@ -57,6 +57,8 @@
  * - 3200-3299: Reduction operation attributes
  * - 3300-3399: Resample forward operation attributes
  * - 3400-3499: Shared resample descriptor attributes
+ * - 3500-3599: RMSNorm backward operation attributes
+ * - 3600-3699: Layernorm backward operation attributes
  * - 60000-60099: Knob info serialized value extension attributes
  * - 60100-60199: Knob choice serialized value extension attributes
  * - 60200-60299: Operation type extension attributes
@@ -1260,6 +1262,47 @@ typedef enum
 
     /** @brief Compute data type for rmsnorm backward */
     HIPDNN_ATTR_RMSNORM_BACKWARD_COMP_TYPE_EXT = 3507,
+
+    /** @} */
+
+    /**
+     * @name Layernorm Backward Operation Attributes (3600-3699)
+     * Attributes for HIPDNN_BACKEND_OPERATION_LAYERNORM_BACKWARD_DESCRIPTOR_EXT
+     * @{
+     */
+
+    /** @brief Output gradient tensor for backward layernorm */
+    HIPDNN_ATTR_OPERATION_LAYERNORM_BACKWARD_DY_EXT = 3600,
+
+    /** @brief Input tensor for backward layernorm */
+    HIPDNN_ATTR_OPERATION_LAYERNORM_BACKWARD_X_EXT = 3601,
+
+    /** @brief Scale tensor for backward layernorm */
+    HIPDNN_ATTR_OPERATION_LAYERNORM_BACKWARD_SCALE_EXT = 3602,
+
+    /** @brief Mean tensor for backward layernorm */
+    HIPDNN_ATTR_OPERATION_LAYERNORM_BACKWARD_MEAN_EXT = 3603,
+
+    /** @brief Inverse variance tensor for backward layernorm */
+    HIPDNN_ATTR_OPERATION_LAYERNORM_BACKWARD_INV_VARIANCE_EXT = 3604,
+
+    /** @brief Epsilon tensor for backward layernorm */
+    HIPDNN_ATTR_OPERATION_LAYERNORM_BACKWARD_EPSILON_EXT = 3605,
+
+    /** @brief Input gradient tensor for backward layernorm */
+    HIPDNN_ATTR_OPERATION_LAYERNORM_BACKWARD_DX_EXT = 3606,
+
+    /** @brief Scale gradient tensor for backward layernorm */
+    HIPDNN_ATTR_OPERATION_LAYERNORM_BACKWARD_DSCALE_EXT = 3607,
+
+    /** @brief Bias gradient tensor for backward layernorm */
+    HIPDNN_ATTR_OPERATION_LAYERNORM_BACKWARD_DBIAS_EXT = 3608,
+
+    /** @brief Number of normalized dimensions for backward layernorm */
+    HIPDNN_ATTR_LAYERNORM_BACKWARD_NORMALIZED_DIM_COUNT_EXT = 3609,
+
+    /** @brief Compute type for backward layernorm */
+    HIPDNN_ATTR_LAYERNORM_BACKWARD_COMP_TYPE_EXT = 3610,
 
     /** @} */
 

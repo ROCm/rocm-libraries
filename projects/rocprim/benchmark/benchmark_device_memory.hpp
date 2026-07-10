@@ -371,11 +371,13 @@ struct device_memory_benchmark : public primbench::benchmark_interface
             {
                 if constexpr(MemOp == copy)
                 {
-                    // For copy benchmark, perform device-to-device memcpy
-                    HIP_CHECK(hipMemcpy(d_output.get(),
-                                        d_input.get(),
-                                        items * sizeof(T),
-                                        hipMemcpyDeviceToDevice));
+                    // For copy benchmark, perform device-to-device memcpy.
+                    // We deliberately call hipMemcpyAsync() instead of hipMemcpy() here,
+                    // since hipMemcpy() uses the slow default legacy stream (stream 0).
+                    HIP_CHECK(hipMemcpyAsync(d_output.get(),
+                                             d_input.get(),
+                                             items * sizeof(T),
+                                             hipMemcpyDeviceToDevice, stream));
                 }
                 else
                 {

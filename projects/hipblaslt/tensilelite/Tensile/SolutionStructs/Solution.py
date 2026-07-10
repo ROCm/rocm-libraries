@@ -1599,11 +1599,13 @@ class Solution(collections.abc.Mapping):
         reject(state, printRejectionReason, "ScheduleGlobalRead not supported with Stream-K")
       if state["ScheduleLocalWrite"] != 1:
         reject(state, printRejectionReason, "ScheduleLocalWrite not supported with Stream-K")
-      isSia0TdmPgr = state["_ScheduleIterAlg"] == 0 \
-        and state["TDMInst"] == 3 \
-        and state["PrefetchGlobalRead"] in (1, 2)
-      if state["_ScheduleIterAlg"] not in (2, 3) and not isSia0TdmPgr:
+      # SIA 4 is remapped to _ScheduleIterAlg 0 upstream, so it is covered here too.
+      if state["_ScheduleIterAlg"] not in (0, 1, 2, 3):
         reject(state, printRejectionReason, "ScheduleIterAlg not supported with Stream-K")
+      if state["TDMInst"] == 3 and state["PrefetchGlobalRead"] not in (1, 2) \
+          and not state["UseSubtileImpl"]:
+        reject(state, printRejectionReason,
+               "Stream-K + TDMInst=3 requires PrefetchGlobalRead in (1, 2)")
       if not state["BufferStore"]:
         reject(state, printRejectionReason, "Stream-K requires BufferStore")
       _validateStreamKForceDPOnly(state, printRejectionReason)
@@ -1655,10 +1657,10 @@ class Solution(collections.abc.Mapping):
         # computeStoreSrdStart, and StreamKLocalStart/End are constant
         # (0 / ItersPerTile). No DP-only-specific gating is required here;
         # Phase 2 strips the now-redundant snapshot/restore of those constants.
-      if state["DebugPersistentKernelLoopForever"] and state["StreamK"] not in (1, 2, 3):
+      if state["DebugPersistentKernelLoopForever"] and state["StreamK"] != 3:
         # Mode 4 exits via KernelEnd in graWorkGroup, so the flag would no-op.
         reject(state, printRejectionReason,
-               "DebugPersistentKernelLoopForever requires StreamK in {1,2,3} (got %d)"
+               "DebugPersistentKernelLoopForever requires StreamK=3 (got %d)"
                % state["StreamK"])
       if not state["Valid"]:
         print2("in assignDerivedParameters, state['Valid'] = False")
@@ -2689,6 +2691,7 @@ class Solution(collections.abc.Mapping):
     # StinkyTofu expert scheduling mode2 (EnableStinkyTofuESM2) — independent of the rocisa ExpertSchedulingMode rules.
     def evaluateStinkyTofuESM2() -> bool:
       if not isaInfoMap[isa].archCaps["HasSchedMode"]: return False
+      if state["ProblemType"]["Sparse"]: return False
       # stinkytofu does not yet support f64 (double / double-complex) datatypes
       if state["ProblemType"]["MacDataTypeA"].isDouble() or state["ProblemType"]["MacDataTypeA"].isDoubleComplex(): return False
       if state["ProblemType"]["MacDataTypeB"].isDouble() or state["ProblemType"]["MacDataTypeB"].isDoubleComplex(): return False
@@ -4932,6 +4935,11 @@ class Solution(collections.abc.Mapping):
     state["GuaranteeNoPartialMetadata"] = False if state["ProblemType"]["Sparse"] else True
 
     # SourceSwap
+    if state["SourceSwap"] and state["EnableMatrixInstruction"] and (state["MatrixInstM"] != state["MatrixInstN"]):
+      reject(state, printRejectionReason,
+             "SourceSwap not supported for non-square MatrixInst (%dx%d)"
+             % (state["MatrixInstM"], state["MatrixInstN"]))
+      return
     if state["StoreRemapVectorWidth"]:
       if state["SourceSwap"]:
         reject(state, printRejectionReason, "SourceSwap not compatible with StoreRemap")
@@ -4970,12 +4978,13 @@ class Solution(collections.abc.Mapping):
                         and not state["ForceUnrollSubIter"] \
                         and not state["ProblemType"]["DataType"].isComplex() \
                         and not state["ProblemType"]["Sparse"] \
+                        and state["ProblemType"]["NumIndicesSummation"] == 1 \
                         and isaInfoMap[isa].asmCaps.get("HasWMMA_AccImmZero", False)
     if state["InitCIterWmma"] == -1:
       state["InitCIterWmma"] = 1 if autoInitCIterWmma else 0
     elif state["InitCIterWmma"] == 1 and not autoInitCIterWmma:
       reject(state, printRejectionReason,
-             "InitCIterWmma=1 requires EnableMatrixInstruction/HasWMMA_AccImmZero, and not LdsInitCVgprs/ForceUnrollSubIter/Complex/Sparse")
+             "InitCIterWmma=1 requires EnableMatrixInstruction/HasWMMA_AccImmZero, single summation index, and not LdsInitCVgprs/ForceUnrollSubIter/Complex/Sparse")
       return
 
     # force MIArchVgpr when using WMMA
@@ -5275,12 +5284,13 @@ class Solution(collections.abc.Mapping):
       if not isPowerOf2(state["NumThreads"]):
         reject(state, printRejectionReason, "PrefetchGL2 requires NumThreads to be power of 2")
         return
-      # Check ClusterDim is power of 2 and not [1,1]
-      if state["ClusterDim"] == [1, 1]:
-        reject(state, printRejectionReason, "PrefetchGL2 requires ClusterDim != [1, 1]")
-        return
+      # Check ClusterDim components are power of 2
       if not all(isPowerOf2(x) for x in state["ClusterDim"]):
         reject(state, printRejectionReason, "PrefetchGL2 requires ClusterDim components to be power of 2")
+        return
+      # ClusterDim [1,1] is only supported with subtile impl
+      if state["ClusterDim"] == [1, 1] and not state["UseSubtileImpl"]:
+        reject(state, printRejectionReason, "PrefetchGL2 requires ClusterDim != [1, 1] for non-subtile kernels")
         return
       # Check DepthU is power of 2
       if not isPowerOf2(state["DepthU"]):

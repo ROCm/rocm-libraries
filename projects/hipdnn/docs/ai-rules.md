@@ -83,8 +83,9 @@ cmake -GNinja ..
 
 ninja              # Build everything
 ninja check        # Build and run ALL tests
-ninja unit-check   # Unit tests only (faster)
-ninja integration-check  # Integration tests only
+ninja quick-check  # Build and run the YAML-defined quick category
+ninja unit-check   # YAML-defined unit category
+ninja integration-check  # YAML-defined integration category
 ninja doxygen      # Generate Doxygen docs (output: build/docs/html/)
 ```
 
@@ -112,7 +113,7 @@ cmake -B build -GNinja -DROCM_LIBS_ENABLE_COMPONENTS="hipdnn;miopen-provider;hip
 cmake --build build
 ```
 
-In the superbuild, targets are prefixed with the project name (e.g., `hipdnn-check`, `miopen-provider-unit-check`).
+In the superbuild, targets are prefixed with the project name (e.g., `hipdnn-check`, `hipdnn-quick-check`, `miopen-provider-quick-check`).
 
 ### 3. Standalone Provider Build (fallback — provider not in superbuild)
 
