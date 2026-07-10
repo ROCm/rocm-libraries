@@ -328,8 +328,16 @@ if(BUILD_TEST OR BUILD_HIPSTDPAR_TEST)
   # for cache serialization.  We also want to use a static SQLite,
   # and distro static libraries aren't typically built
   # position-independent.
+  # Prefer a system SQLite3, but do not hard-fail (REQUIRED) when it is missing
+  # or reports an unsuitable/unknown version (seen with some sysdeps-provided
+  # SQLite3 configs, e.g. TheRock coverage builds where SQLite3 reports version
+  # "unknown"). Fall back to the bundled download below so configure stays robust
+  # instead of breaking the header-only (PRIM group) coverage build.
   if( SQLITE_USE_SYSTEM_PACKAGE )
-    find_package(SQLite3 3.36 REQUIRED)
+    find_package(SQLite3 3.36 QUIET)
+  endif()
+
+  if( SQLITE_USE_SYSTEM_PACKAGE AND SQLite3_FOUND )
     list(APPEND static_depends PACKAGE SQLite3)
     set(ROCTHRUST_SQLITE_LIB SQLite::SQLite3)
   else()

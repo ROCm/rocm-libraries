@@ -54,6 +54,9 @@ coverage:
       rocSPARSE:
         flags: [rocSPARSE]
         target: 80%
+      rocPRIM:
+        flags: [rocPRIM]
+        target: 80%
       rocThrust:
         flags: [rocThrust]
         target: 80%
