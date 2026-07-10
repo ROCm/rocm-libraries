@@ -58,14 +58,14 @@ constexpr float kFallback = 1e-3f;
 
 // ── Single non-Pointwise op: both policies agree ────────────────────────────
 
-TEST(TestToleranceResolver, SingleConvFwd_MaxAcrossNodes)
+TEST(TestToleranceResolver, SingleConvFwdMaxAcrossNodes)
 {
     flatbuffers::FlatBufferBuilder b;
     auto w = buildGraph(b, {NodeAttributes::ConvolutionFwdAttributes});
     EXPECT_FLOAT_EQ(tol::maxAcrossNodes(w, DataType::FLOAT), kConvFwdFp32);
 }
 
-TEST(TestToleranceResolver, SingleConvFwd_OutputOpTolerance)
+TEST(TestToleranceResolver, SingleConvFwdOutputOpTolerance)
 {
     flatbuffers::FlatBufferBuilder b;
     auto w = buildGraph(b, {NodeAttributes::ConvolutionFwdAttributes});
@@ -75,7 +75,7 @@ TEST(TestToleranceResolver, SingleConvFwd_OutputOpTolerance)
 // ── Discriminating case: BN inference (2e-4) then conv fwd (1e-5) ───────────
 // MAX picks the loose one (2e-4), OUTPUT_OP picks the last non-Pointwise (1e-5).
 
-TEST(TestToleranceResolver, BnInferenceConvFwd_MaxAcrossNodes)
+TEST(TestToleranceResolver, BnInferenceConvFwdMaxAcrossNodes)
 {
     flatbuffers::FlatBufferBuilder b;
     auto w = buildGraph(
@@ -84,7 +84,7 @@ TEST(TestToleranceResolver, BnInferenceConvFwd_MaxAcrossNodes)
     EXPECT_FLOAT_EQ(tol::maxAcrossNodes(w, DataType::FLOAT), kBnInferenceFp32);
 }
 
-TEST(TestToleranceResolver, BnInferenceConvFwd_OutputOpTolerance)
+TEST(TestToleranceResolver, BnInferenceConvFwdOutputOpTolerance)
 {
     flatbuffers::FlatBufferBuilder b;
     auto w = buildGraph(
@@ -95,14 +95,14 @@ TEST(TestToleranceResolver, BnInferenceConvFwd_OutputOpTolerance)
 
 // ── All-Pointwise: OUTPUT_OP falls back to MAX ──────────────────────────────
 
-TEST(TestToleranceResolver, AllPointwise_MaxAcrossNodes)
+TEST(TestToleranceResolver, AllPointwiseMaxAcrossNodes)
 {
     flatbuffers::FlatBufferBuilder b;
     auto w = buildGraph(b, {NodeAttributes::PointwiseAttributes});
     EXPECT_FLOAT_EQ(tol::maxAcrossNodes(w, DataType::FLOAT), kPointwiseFp32);
 }
 
-TEST(TestToleranceResolver, AllPointwise_OutputOpTolerance)
+TEST(TestToleranceResolver, AllPointwiseOutputOpTolerance)
 {
     flatbuffers::FlatBufferBuilder b;
     auto w = buildGraph(b, {NodeAttributes::PointwiseAttributes});
@@ -111,14 +111,14 @@ TEST(TestToleranceResolver, AllPointwise_OutputOpTolerance)
 
 // ── Empty graph: both return 1e-3 floor ─────────────────────────────────────
 
-TEST(TestToleranceResolver, EmptyGraph_MaxAcrossNodes)
+TEST(TestToleranceResolver, EmptyGraphMaxAcrossNodes)
 {
     flatbuffers::FlatBufferBuilder b;
     auto w = buildGraph(b, {});
     EXPECT_FLOAT_EQ(tol::maxAcrossNodes(w, DataType::FLOAT), kFallback);
 }
 
-TEST(TestToleranceResolver, EmptyGraph_OutputOpTolerance)
+TEST(TestToleranceResolver, EmptyGraphOutputOpTolerance)
 {
     flatbuffers::FlatBufferBuilder b;
     auto w = buildGraph(b, {});
@@ -127,14 +127,14 @@ TEST(TestToleranceResolver, EmptyGraph_OutputOpTolerance)
 
 // ── Unknown op: conservative 1e-3 fallback ──────────────────────────────────
 
-TEST(TestToleranceResolver, UnknownOp_MaxAcrossNodes)
+TEST(TestToleranceResolver, UnknownOpMaxAcrossNodes)
 {
     flatbuffers::FlatBufferBuilder b;
     auto w = buildGraph(b, {NodeAttributes::NONE});
     EXPECT_FLOAT_EQ(tol::maxAcrossNodes(w, DataType::FLOAT), kFallback);
 }
 
-TEST(TestToleranceResolver, UnknownOp_OutputOpTolerance)
+TEST(TestToleranceResolver, UnknownOpOutputOpTolerance)
 {
     flatbuffers::FlatBufferBuilder b;
     auto w = buildGraph(b, {NodeAttributes::NONE});
