@@ -4945,6 +4945,133 @@ class KernelWriter(metaclass=abc.ABCMeta):
     return hex(0x0FFF) if version >= 3 else hex(0x3FFF)
 
   ##############################################################################
+  # StinkyTofu pipeline helpers (classic kernelBody)
+  ##############################################################################
+  def _buildRocIsaPassOptions(self, kernel):
+    ripo = rocIsaPassOption()
+    ripo.removeDupFunc = bool(kernel["ActivationFuncCall"])
+    ripo.numWaves = kernel["NumThreads"] // kernel["WavefrontSize"]
+    if kernel["ProblemType"]["ActivationType"] == "all":
+      ripo.removeDupAssign = False
+    if self.states.archCaps["HasSchedMode"]:
+      ripo.insertDelayAlu = True
+    return ripo
+
+  def _runRocIsaPassOnKernelBody(self, kernel, moduleKernelBody):
+    ripo = self._buildRocIsaPassOptions(kernel)
+    return rocIsaPass(moduleKernelBody, ripo)
+
+  def _buildStinkyTofuModuleOptions(self, kernel, stinky_opt_level):
+    options = {"OptLevel": stinky_opt_level,
+               "EnableRemarks": bool(globalParameters.get("StinkyTofuEnableRemarks") or False),
+               "DebugLevel": int(globalParameters.get("StinkyTofuDebugLevel") or 0),
+               "PrintBeforePass": str(globalParameters.get("StinkyTofuPrintBeforePass") or ""),
+               "PrintAfterPass": str(globalParameters.get("StinkyTofuPrintAfterPass") or ""),
+               "DebugPass": str(globalParameters.get("StinkyTofuDebugPass") or ""),
+               "PassOrderSnapshotJson": str(globalParameters.get("StinkyTofuPassOrderSnapshotJson") or ""),
+               "EnableWaitCntInsertion": True if stinky_opt_level != 0 else not globalParameters.get("DisableSTWaitCnt", True),
+               "EnableESM2": kernel["EnableStinkyTofuESM2"],
+               "TileA0": kernel["ThreadTile0"],
+               "TileB0": kernel["ThreadTile1"],
+               "TileM0": kernel["MacroTile0"],
+               "wavefrontSize": kernel["WavefrontSize"],
+               "SubGroup0": kernel["SubGroup0"],
+               "SubGroup1": kernel["SubGroup1"],
+               "WaveGroup0": kernel["MIWaveGroup"][0],
+               "WaveGroup1": kernel["MIWaveGroup"][1],
+               "VectorWidthA": kernel["VectorWidthA"],
+               "VectorWidthB": kernel["VectorWidthB"],
+               "GlobalReadVectorWidthA": kernel["GlobalReadVectorWidthA"],
+               "GlobalReadVectorWidthB": kernel["GlobalReadVectorWidthB"],
+               "DirectToLdsA": bool(kernel["DirectToLdsA"]),
+               "DirectToLdsB": bool(kernel["DirectToLdsB"]),
+               "UseSgprForGRO": kernel["_UseSgprForGRO"],
+               "SwPrefetchScratchSgpr": int(self.sgprs.get("SwPrefetchScratch", -1)),
+               "ClusterBarrier": bool(kernel.get("ClusterBarrier", False)),
+               "PrefetchGlobalRead": int(kernel.get("PrefetchGlobalRead", 1)),
+               "PrefetchLocalRead": int(kernel.get("PrefetchLocalRead", 1)),
+              }
+
+    cloneList = []
+    if kernel.get("InitCIterWmma", 0) == 1:
+      cloneList.append(rocisa.CloneSpec(name="InitCIterWmma",
+                                        startLabel="label_LoopBeginL"))
+    options["CloneList"] = cloneList
+
+    return options
+
+  def _runStinkyTofuPipeline(self, kernel, moduleKernelBody, fs, stinky_opt_level):
+    if stinky_opt_level is None or not rocisa.isSupportedByStinkyTofu(self.states.version):
+      return None
+
+    print2(f"StinkyTofu: Converting kernel to stinkytofu IR for gfx{self.states.version[0]}{self.states.version[1]}{self.states.version[2]}...")
+
+    moduleKernelBody.body.setParent()
+
+    stinky_module_options = self._buildStinkyTofuModuleOptions(kernel, stinky_opt_level)
+    print2(f"StinkyTofu module options: {stinky_module_options}")
+
+    t0_start = time.perf_counter()
+    t1a_start = time.perf_counter()
+    stModule = rocisa.toStinkyTofuModule(moduleKernelBody.body, self.states.version, "kernel_name",
+                                         signature=fs,
+                                         options=stinky_module_options)
+    t1a_end = time.perf_counter()
+    print2(f"StinkyTofu (1a) toStinkyTofuModule: {t1a_end - t1a_start:.4f}s")
+
+    t1b_start = time.perf_counter()
+    stModule.runOptimizationPipeline()
+    t1b_end = time.perf_counter()
+    print2(f"StinkyTofu (1b) pipeline: {t1b_end - t1b_start:.4f}s")
+
+    t2_start = time.perf_counter()
+    st_asm = stModule.emitAssembly()
+    t2_end = time.perf_counter()
+    print2(f"StinkyTofu (2) emitAssembly: {t2_end - t2_start:.4f}s")
+
+    if os.environ.get("ENABLE_DEBUG_STINKYTOFU_ASM") is not None:
+      t3_start = time.perf_counter()
+      import hashlib, fcntl
+      os.makedirs("cmpasm/orig", exist_ok=True)
+      os.makedirs("cmpasm/st", exist_ok=True)
+
+      kernel_name = self.states.kernelName
+      name_hash = hashlib.sha256(kernel_name.encode()).hexdigest()[:8]
+      base_name = f"{name_hash}"
+
+      orig_path = f"cmpasm/orig/{base_name}.s"
+      st_path = f"cmpasm/st/{base_name}.s"
+      suffix = 0
+      while os.path.exists(orig_path) or os.path.exists(st_path):
+        orig_path = f"cmpasm/orig/{base_name}_{suffix}.s"
+        st_path = f"cmpasm/st/{base_name}_{suffix}.s"
+        suffix += 1
+
+      t_str_start = time.perf_counter()
+      orig_asm_str = str(moduleKernelBody)
+      t_str_end = time.perf_counter()
+      print2(f"Rocisa::str(moduleKernelBody): {t_str_end - t_str_start:.4f}s")
+
+      with open(orig_path, "w") as f:
+        f.write(orig_asm_str)
+      with open(st_path, "w") as f:
+        f.write(st_asm)
+
+      manifest = f"cmpasm/manifest.txt"
+      with open(manifest, "a") as f:
+        fcntl.flock(f, fcntl.LOCK_EX)
+        f.write(f"{os.path.basename(orig_path)} -> {kernel_name}\n")
+        fcntl.flock(f, fcntl.LOCK_UN)
+
+      t3_end = time.perf_counter()
+      print2(f"StinkyTofu (3) debug file write: {t3_end - t3_start:.4f}s")
+
+    t0_end = time.perf_counter()
+    print2(f"StinkyTofu (0) total: {t0_end - t0_start:.4f}s")
+    print2(f"Using StinkyTofu Assembly")
+    return st_asm
+
+  ##############################################################################
   # Kernel Body - Subtiled version
   ##############################################################################
   def kernelBodySubtile(self, kernel, tensorParametersA, tensorParametersB):
@@ -6597,19 +6724,7 @@ class KernelWriter(metaclass=abc.ABCMeta):
     moduleKernelBody.addBody(module)
     self.checkResources(kernel, moduleKernelBody) # check resource available or not
 
-    # Tensile instruction pass, temporarily disable due to build time.
-    # Kernels with epilog especially with activation is too long (50000~ lines).
-    # Need to refactor global write elements.
-    ripo = rocIsaPassOption()
-    ripo.removeDupFunc = bool(kernel["ActivationFuncCall"])
-    ripo.numWaves = kernel["NumThreads"] // kernel["WavefrontSize"]
-
-    if kernel["ProblemType"]["ActivationType"] == "all":
-      ripo.removeDupAssign = False
-    if self.states.archCaps["HasSchedMode"]:
-      ripo.insertDelayAlu = True
-
-    passResult = rocIsaPass(moduleKernelBody, ripo)
+    passResult = self._runRocIsaPassOnKernelBody(kernel, moduleKernelBody)
     kernel["MathClocksUnrolledLoop"] = passResult.cycles
 
     # Post-rocIsaPass: use the O(1) max-VGPR count from the register graph the
@@ -6617,139 +6732,13 @@ class KernelWriter(metaclass=abc.ABCMeta):
     # and CUOccupancy.  Replaces the previous O(assembly-size) str()+regex scan.
     self.updateOccupancyFromMaxVgpr(kernel, moduleKernelBody, passResult.maxVgpr)
 
-    # Initialize stModule as None (will be set for supported architectures)
-    stModule = None
-
-    # Run StinkyTofu conversion for supported architectures
-    t0_start = time.perf_counter()
     stinky_opt_level = kernel.get("_StinkyTofuOptLevel")
-    if stinky_opt_level is not None and rocisa.isSupportedByStinkyTofu(self.states.version):
-      print2(f"StinkyTofu: Converting kernel to stinkytofu IR for gfx{self.states.version[0]}{self.states.version[1]}{self.states.version[2]}...")
-
-      moduleKernelBody.body.setParent()
-
-      # Set StinkyTofu module options
-      stinky_module_options = {"OptLevel": stinky_opt_level,
-                               "EnableRemarks": bool(globalParameters.get("StinkyTofuEnableRemarks") or False),
-                               "DebugLevel": int(globalParameters.get("StinkyTofuDebugLevel") or 0),
-                               "PrintBeforePass": str(globalParameters.get("StinkyTofuPrintBeforePass") or ""),
-                               "PrintAfterPass": str(globalParameters.get("StinkyTofuPrintAfterPass") or ""),
-                               "DebugPass": str(globalParameters.get("StinkyTofuDebugPass") or ""),
-                               "PassOrderSnapshotJson": str(globalParameters.get("StinkyTofuPassOrderSnapshotJson") or ""),
-                               "EnableWaitCntInsertion": True if stinky_opt_level != 0 else not globalParameters.get("DisableSTWaitCnt", True),
-                               # True: expert scheduling mode2; False: mode 0. Independent of ScheduleIterAlg/OptLevel.
-                               "EnableESM2": kernel["EnableStinkyTofuESM2"],
-                               "TileA0": kernel["ThreadTile0"],
-                               "TileB0": kernel["ThreadTile1"],
-                               "TileM0": kernel["MacroTile0"],
-                               "wavefrontSize": kernel["WavefrontSize"],
-                               "SubGroup0": kernel["SubGroup0"],
-                               "SubGroup1": kernel["SubGroup1"],
-                               "WaveGroup0": kernel["MIWaveGroup"][0],
-                               "WaveGroup1": kernel["MIWaveGroup"][1],
-                               "VectorWidthA": kernel["VectorWidthA"],
-                               "VectorWidthB": kernel["VectorWidthB"],
-                               "GlobalReadVectorWidthA": kernel["GlobalReadVectorWidthA"],
-                               "GlobalReadVectorWidthB": kernel["GlobalReadVectorWidthB"],
-                               "DirectToLdsA": bool(kernel["DirectToLdsA"]),
-                               "DirectToLdsB": bool(kernel["DirectToLdsB"]),
-                               "UseSgprForGRO": kernel["_UseSgprForGRO"],
-                               # -1 disables SwInstructionPrefetch in Gfx1250Backend; else scratch pool index
-                               "SwPrefetchScratchSgpr": int(self.sgprs.get("SwPrefetchScratch", -1)),
-                               # Cluster-barrier handshake insertion in Gfx1250Backend
-                               # (kernel-scope at every OptLevel when set).
-                               "ClusterBarrier": bool(kernel.get("ClusterBarrier", False)),
-                               # PrefetchGlobalRead (PGR) passed to InsertClusterBarrierPass.
-                               # Gates Rule 3 (`LCL <= PGR` skip) and Rule 4 (`LCL == PGR+1`
-                               # skip in fresh-gate mode; inherits upstream `LCL == PGR` cmp
-                               # in inherited-SCC mode). Rule 1 uses `LCL == 0`, not PGR.
-                               # Defaults to 1 when unset.
-                               "PrefetchGlobalRead": int(kernel.get("PrefetchGlobalRead", 1)),
-                               # PrefetchLocalRead (PLR) passed to InsertClusterBarrierPass.
-                               # When PLR == 0, enables Rule 3 anchor mode (b): if no
-                               # `s_barrier_wait -1` precedes `label_openLoopL:`, synthesize
-                               # a workgroup sync inside the LCL-gated signal block.
-                               # Defaults to 1 (fallback off) when unset.
-                               "PrefetchLocalRead": int(kernel.get("PrefetchLocalRead", 1)),
-                              }
-
-      # Region-clone jobs for StinkyTofu RegionClonePass.
-      cloneList = []
-      if kernel.get("InitCIterWmma", 0) == 1:
-        cloneList.append(rocisa.CloneSpec(name="InitCIterWmma",
-                                          startLabel="label_LoopBeginL"))
-      stinky_module_options["CloneList"] = cloneList
-
-      print2(f"StinkyTofu module options: {stinky_module_options}")
-      # Convert rocisa module to stinkytofu with signature
-      # Returns a KernelBody wrapper that includes signature and instruction module
-      # - runOptimizationPipeline() optimizes the instruction body
-      # - emitAssembly() outputs complete kernel: signature + optimized instructions
-      t1a_start = time.perf_counter()
-      stModule = rocisa.toStinkyTofuModule(moduleKernelBody.body, self.states.version, "kernel_name",
-                                           signature=fs,
-                                           options=stinky_module_options)
-      t1a_end = time.perf_counter()
-      print2(f"StinkyTofu (1a) toStinkyTofuModule: {t1a_end - t1a_start:.4f}s")
-
-      # Run pipeline — builder handles O0 internally (skips optimization,
-      # still runs required passes like InsertVgprMsb)
-      t1b_start = time.perf_counter()
-      stModule.runOptimizationPipeline()
-      t1b_end = time.perf_counter()
-      print2(f"StinkyTofu (1b) pipeline: {t1b_end - t1b_start:.4f}s")
+    st_asm = self._runStinkyTofuPipeline(kernel, moduleKernelBody, fs, stinky_opt_level)
 
     error = self.states.overflowedResources
     print2(f"  found error code {error} with overflowed resources set to {self.states.overflowedResources}")
 
-    # Check if StinkyTofu assembly output should be used
-    if stModule is not None:
-      t2_start = time.perf_counter()
-      st_asm = stModule.emitAssembly()
-      t2_end = time.perf_counter()
-      print2(f"StinkyTofu (2) emitAssembly: {t2_end - t2_start:.4f}s")
-
-      if os.environ.get("ENABLE_DEBUG_STINKYTOFU_ASM") is not None:
-        t3_start = time.perf_counter()
-        import hashlib, fcntl
-        os.makedirs("cmpasm/orig", exist_ok=True)
-        os.makedirs("cmpasm/st", exist_ok=True)
-
-        kernel_name = self.states.kernelName
-        name_hash = hashlib.sha256(kernel_name.encode()).hexdigest()[:8]
-        base_name = f"{name_hash}"
-
-        orig_path = f"cmpasm/orig/{base_name}.s"
-        st_path = f"cmpasm/st/{base_name}.s"
-        suffix = 0
-        while os.path.exists(orig_path) or os.path.exists(st_path):
-          orig_path = f"cmpasm/orig/{base_name}_{suffix}.s"
-          st_path = f"cmpasm/st/{base_name}_{suffix}.s"
-          suffix += 1
-
-        t_str_start = time.perf_counter()
-        orig_asm_str = str(moduleKernelBody)
-        t_str_end = time.perf_counter()
-        print2(f"Rocisa::str(moduleKernelBody): {t_str_end - t_str_start:.4f}s")
-
-        with open(orig_path, "w") as f:
-          f.write(orig_asm_str)
-        with open(st_path, "w") as f:
-          f.write(st_asm)
-
-        manifest = f"cmpasm/manifest.txt"
-        with open(manifest, "a") as f:
-          fcntl.flock(f, fcntl.LOCK_EX)
-          f.write(f"{os.path.basename(orig_path)} -> {kernel_name}\n")
-          fcntl.flock(f, fcntl.LOCK_UN)
-
-        t3_end = time.perf_counter()
-        print2(f"StinkyTofu (3) debug file write: {t3_end - t3_start:.4f}s")
-
-      t0_end = time.perf_counter()
-      print2(f"StinkyTofu (0) total: {t0_end - t0_start:.4f}s")
-
-      print2(f"Using StinkyTofu Assembly")
+    if st_asm is not None:
       return (error, st_asm)
     else:
       print2(f"Using Original Rocisa Assembly")
