@@ -104,6 +104,7 @@ jobs:
           LD_LIBRARY_PATH: "${{ github.workspace }}/therock_build/lib:${LD_LIBRARY_PATH}"
           TESTS_FILTERS: ${{ inputs.tests_filters }}
         run: |
+          ls -R *
           source .venv/bin/activate
           export LD_LIBRARY_PATH="$(dirname ${PYTHON_LIB})/../lib:${GITHUB_WORKSPACE}/therock_build/lib:${LD_LIBRARY_PATH}"
           pytest tests/e2e/compiler/ \
