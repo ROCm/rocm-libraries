@@ -256,6 +256,8 @@ def _grid_tiled_specs(prob: object, arch: str) -> List[object]:
     out: List[object] = []
 
     def _accept(spec) -> None:
+        if spec is None:
+            return
         key = (spec.num_warps, spec.block_m_per_warp, spec.tile_size)
         if key in seen:
             return
@@ -285,9 +287,20 @@ def _grid_tiled_specs(prob: object, arch: str) -> List[object]:
     for nw in _GRID_NUM_WARPS:
         for bm in _GRID_BLOCK_M_PER_WARP:
             for mult in _GRID_TILE_MULT:
-                cand = dataclasses.replace(
-                    default, num_warps=nw, block_m_per_warp=bm, tile_size=bs * mult
-                )
+                # dataclasses.replace runs the spec's __post_init__, which raises
+                # for internally-inconsistent combos our axis grid can produce
+                # (e.g. the default has use_mfma_32x32=True, which requires
+                # block_m_per_warp=32, but we also try bm=16). Skip such points --
+                # they are simply not valid configs, not a reason to abort the
+                # whole sweep. supports_tiled_2d does not cover these cross-flag
+                # rules, so the constructor is the authority.
+                try:
+                    cand = dataclasses.replace(
+                        default, num_warps=nw, block_m_per_warp=bm,
+                        tile_size=bs * mult,
+                    )
+                except (ValueError, TypeError):
+                    continue
                 _accept(cand)
     return out
 
