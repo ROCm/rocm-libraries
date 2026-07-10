@@ -19,7 +19,12 @@ _DTYPE_TO_NP = {
 
 
 def _device_array_to_numpy(self):
-    np_dtype = _DTYPE_TO_NP[self.dtype]
+    np_dtype = _DTYPE_TO_NP.get(self.dtype)
+    if np_dtype is None:
+        raise TypeError(
+            f"to_numpy() does not support dtype {self.dtype!r}; "
+            "use copy_to_host() with a uint8 buffer for narrow types"
+        )
     out = _np.empty(tuple(self.shape), dtype=np_dtype)
     self.copy_to_host(out)
     return out

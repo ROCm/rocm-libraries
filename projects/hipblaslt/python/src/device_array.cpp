@@ -1,6 +1,7 @@
 // Copyright Advanced Micro Devices, Inc., or its affiliates.
 // SPDX-License-Identifier: MIT
 #include "device_array.hpp"
+#include <memory>
 #include <nanobind/nanobind.h>
 #include <nanobind/ndarray.h>
 #include <nanobind/stl/vector.h>
@@ -19,11 +20,16 @@ DeviceArray::DeviceArray(size_t nbytes, hipDataType dtype,
     HIP_CHECK(hipMalloc(&d_, nbytes_));
 }
 
-DeviceArray::~DeviceArray() { free(); }
+DeviceArray::~DeviceArray() { _free_nothrow(); }
+
+void DeviceArray::_free_nothrow() noexcept
+{
+    if(d_) { hipFree(d_); d_ = nullptr; }  // best-effort; must not throw in destructor
+}
 
 void DeviceArray::free()
 {
-    if(d_) { hipFree(d_); d_ = nullptr; }
+    if(d_) { HIP_CHECK(hipFree(d_)); d_ = nullptr; }
 }
 
 void DeviceArray::copy_from_host(const void* src, size_t nbytes)
@@ -49,9 +55,9 @@ void init_device_array(nb::module_& m)
             std::vector<int64_t> shape(arr.shape_ptr(), arr.shape_ptr() + arr.ndim());
             size_t nbytes = arr.nbytes();
             // host_dtype is empty string; to_numpy() in Python reconstructs it via _DTYPE_TO_NP.
-            auto da = new DeviceArray(nbytes, dtype, shape, "");
+            auto da = std::make_unique<DeviceArray>(nbytes, dtype, shape, "");
             da->copy_from_host(arr.data(), nbytes);
-            return da;
+            return da.release();
         }, nb::arg("arr"), nb::arg("dtype"), nb::rv_policy::take_ownership)
         .def("copy_from_host", [](DeviceArray& self, NpArray arr) {
             self.copy_from_host(arr.data(), arr.nbytes());

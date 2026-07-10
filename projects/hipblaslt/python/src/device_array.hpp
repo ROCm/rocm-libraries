@@ -31,6 +31,8 @@ public:
     const std::string& host_dtype() const { return host_dtype_; }
 
 private:
+    void _free_nothrow() noexcept;
+
     void*                d_ = nullptr;
     size_t               nbytes_ = 0;
     hipDataType          dtype_;
