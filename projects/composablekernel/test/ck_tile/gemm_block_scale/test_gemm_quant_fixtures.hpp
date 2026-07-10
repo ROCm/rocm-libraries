@@ -271,7 +271,7 @@ class TestCkTileGemmAQuant : public TestCkTileGemmQuantBase<Tuple, TestCkTileGem
         ck_tile::DeviceMem a_m_k_dev_buf(a_m_k.get_element_space_size() * sizeof(ADataType));
         ck_tile::DeviceMem aq_m_aqk_dev_buf(aq_m_aqk.get_element_space_size() * sizeof(QDataType));
         ck_tile::DeviceMem b_k_n_dev_buf(b_k_n.get_element_space_size() * sizeof(BDataType));
-        ck_tile::DeviceMem c_m_n_dev_buf(M * N * sizeof(CDataType));
+        ck_tile::DeviceMem c_m_n_dev_buf(static_cast<size_t>(M) * N * sizeof(CDataType));
 
         // Copy to device
         if constexpr(std::is_same_v<ADataType, ck_tile::pk_int4_t>)
@@ -513,7 +513,7 @@ class TestCkTileGemmAQuantMem
         ck_tile::DeviceMem a_m_k_dev_buf(a_m_k.get_element_space_size() * sizeof(ADataType));
         ck_tile::DeviceMem aq_m_aqk_dev_buf(aq_m_aqk.get_element_space_size() * sizeof(QDataType));
         ck_tile::DeviceMem b_k_n_dev_buf(b_k_n.get_element_space_size() * sizeof(BDataType));
-        ck_tile::DeviceMem c_m_n_dev_buf(M * N * sizeof(CDataType));
+        ck_tile::DeviceMem c_m_n_dev_buf(static_cast<size_t>(M) * N * sizeof(CDataType));
         // Copy to device
         if constexpr(std::is_same_v<ADataType, ck_tile::pk_int4_t>)
         {
@@ -758,7 +758,7 @@ class TestCkTileGemmBQuant : public TestCkTileGemmQuantBase<Tuple, TestCkTileGem
         ck_tile::DeviceMem b_k_n_dev_buf(b_k_n.get_element_space_size() * sizeof(BDataType));
         ck_tile::DeviceMem bq_bqk_bqn_dev_buf(bq_bqk_bqn.get_element_space_size() *
                                               sizeof(QDataType));
-        ck_tile::DeviceMem c_m_n_dev_buf(M * N * sizeof(CDataType));
+        ck_tile::DeviceMem c_m_n_dev_buf(static_cast<size_t>(M) * N * sizeof(CDataType));
 
         // Zero C buffer - required for split-K atomic_add accumulation
         c_m_n_dev_buf.SetZero();
@@ -1093,7 +1093,7 @@ class TestCkTileGemmABQuant : public TestCkTileGemmQuantBase<Tuple, TestCkTileGe
         ck_tile::DeviceMem b_k_n_dev_buf(b_k_n.get_element_space_size() * sizeof(BDataType));
         ck_tile::DeviceMem bq_bqk_bqn_dev_buf(bq_bqk_bqn.get_element_space_size() *
                                               sizeof(QDataType));
-        ck_tile::DeviceMem c_m_n_dev_buf(M * N * sizeof(CDataType));
+        ck_tile::DeviceMem c_m_n_dev_buf(static_cast<size_t>(M) * N * sizeof(CDataType));
 
         // Copy to device
         if constexpr(std::is_same_v<ADataType, ck_tile::pk_int4_t>)
@@ -1459,7 +1459,7 @@ class TestCkTileGemmRowColQuant
                                               sizeof(QDataType));
         ck_tile::DeviceMem col_scales_dev_buf(col_scales_n.get_element_space_size() *
                                               sizeof(QDataType));
-        ck_tile::DeviceMem c_m_n_dev_buf(M * N * sizeof(CDataType));
+        ck_tile::DeviceMem c_m_n_dev_buf(static_cast<size_t>(M) * N * sizeof(CDataType));
 
         // Copy to device
         a_m_k_dev_buf.ToDevice(a_m_k.data());
@@ -1715,7 +1715,7 @@ class TestCkTileGemmTensorQuant
         ck_tile::DeviceMem b_k_n_dev_buf(b_k_n.get_element_space_size() * sizeof(BDataType));
         ck_tile::DeviceMem scale_a_dev_buf(scale_a.get_element_space_size() * sizeof(QDataType));
         ck_tile::DeviceMem scale_b_dev_buf(scale_b.get_element_space_size() * sizeof(QDataType));
-        ck_tile::DeviceMem c_m_n_dev_buf(M * N * sizeof(CDataType));
+        ck_tile::DeviceMem c_m_n_dev_buf(static_cast<size_t>(M) * N * sizeof(CDataType));
 
         // Copy to device
         a_m_k_dev_buf.ToDevice(a_m_k.data());
