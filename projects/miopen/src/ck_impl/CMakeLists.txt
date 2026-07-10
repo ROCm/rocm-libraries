@@ -31,7 +31,7 @@ set(_CK_SUPPORTED_ARCHS
     gfx908 gfx90a gfx942 gfx950
     gfx1100 gfx1101 gfx1102
     gfx1150 gfx1151 gfx1152 gfx1153
-    gfx1200 gfx1201
+    gfx1200 gfx1201 gfx1250
 )
 
 # Filter GPU_TARGETS to only those with MIOpen CK grouped conv support.
