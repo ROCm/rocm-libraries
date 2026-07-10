@@ -1,8 +1,7 @@
 # Coverage configuration for rocm-libraries projects.
 #
 # Defines which projects have coverage enabled and the metadata used to drive
-# the coverage report (see .github/scripts/export_coverage_metadata.py and
-# .github/scripts/coverage_runner.py).
+# the coverage report (see .github/scripts/export_coverage_metadata.py).
 #
 # Notes:
 #   * `libraries` / `test_binaries` are matched by file name (basename); the
