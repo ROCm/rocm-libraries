@@ -188,3 +188,13 @@ def test_kernel_body_subtile_waitcnt_tail_invokes_st_pipeline():
     assert captured["overrides"]["ClusterBarrier"] is False
     assert kernel["MathClocksUnrolledLoop"] == 42
     kw.updateOccupancyFromMaxVgpr.assert_called_once()
+
+
+def test_stinky_region_module_name_mapping():
+    from Tensile.Components.Subtile.LogicalScheduler import LogicalScheduler
+
+    assert LogicalScheduler._stinkyRegionModuleName("PRELOOP") == "loopBody"
+    assert LogicalScheduler._stinkyRegionModuleName("MAINLOOP_C0") == "loopBody"
+    assert LogicalScheduler._stinkyRegionModuleName("NGLL_C1") == "loopBody"
+    assert LogicalScheduler._stinkyRegionModuleName("NLL_C0") == "noLoadLoopBody"
+    assert LogicalScheduler._stinkyRegionModuleName("TAILLOOP") == "TAILLOOP"

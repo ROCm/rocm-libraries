@@ -3344,9 +3344,26 @@ class LogicalScheduler:
         self._preloop_emitted = [[emitted]]
         return self._preloop_emitted
 
-    def _emitLoop(self, writer, kernel, label, emitted_3d, schedule=True):
+    @staticmethod
+    def _stinkyRegionModuleName(section):
+        """Map subtile loop section ids to classic StinkyTofu region module names.
+
+        Gfx1250 waitcnt auto-detection keys off Module(\"loopBody\") and
+        Module(\"noLoadLoopBody\"). Keep the original section id in comments.
+        """
+        if section.startswith("NLL_C"):
+            return "noLoadLoopBody"
+        if section == "TAILLOOP":
+            return "TAILLOOP"
+        if section == "PRELOOP" or section.startswith(("MAINLOOP_", "NGLL_")):
+            return "loopBody"
+
+        return section
+
+    def _emitLoop(self, writer, kernel, section, emitted_3d, schedule=True):
         """Emit a loop section from a 3D emitted structure.
 
+        section: logical loop id for comments/debug (PRELOOP, MAINLOOP_C0, NLL_C0, ...).
         emitted_3d: [partition][subIterK][EmittedModule]
 
         When schedule=True and a group has MFMAs, calls instructionSchedule
@@ -3369,10 +3386,10 @@ class LogicalScheduler:
                               if isGfx1250
                               else _MIN_MFMA_GAP_DS_READ_TO_WAIT_DEFAULT)
 
-        module = Module(label)
-        module.addComment0(f"{label} start")
+        module = Module(self._stinkyRegionModuleName(section))
+        module.addComment0(f"{section} start")
         use_pap_preloop_skip = (
-            label == "PRELOOP"
+            section == "PRELOOP"
             and kernel.get("UseSubtileImpl")
             and kernel.get("PrefetchAcrossPersistent")
             and kernel.get("StreamK") == 3
@@ -3412,7 +3429,7 @@ class LogicalScheduler:
             module.add(pap_merge_label)
             module.add(SMovB32(dst=sgpr("SkPrefetchPrimed"), src=0,
                                comment="Subtile PAP: clear after first PRELOOP GR merge"))
-        module.addComment0(f"{label} end")
+        module.addComment0(f"{section} end")
         # SCHED_MODE 2: guard the LR offset-swap -> ds_read RAW hazard once, against
         # the final post-schedule order (no-op on other archs).
         module = insertLRSwapRawWaitAlu(module, writer, kernel)
@@ -3422,7 +3439,7 @@ class LogicalScheduler:
         # PGR=0 only: the unprefetched loop puts the ds_read of an LR offset
         # right before the swap that overwrites it.  PGR>=1 prefetch separates
         # them (swap hoisted ahead, dscnt drain between), so no WAR can form.
-        if self.config.pgr == 0 and label.startswith("MAINLOOP"):
+        if self.config.pgr == 0 and section.startswith("MAINLOOP"):
             module = insertLRSwapWarWaitAlu(module, writer, kernel)
         # Cluster barrier: splice both halves against the final post-schedule order.
         # Signal goes right after the mainloop's existing workgroup barrier (reusing
@@ -3487,7 +3504,8 @@ class LogicalScheduler:
         assert Pass.POPULATE in self._completed, \
             "populate_instructions() must be called before emitMainAndExitLoops()"
 
-        module = Module("MainAndExitLoops")
+        module = Module("loopBody")
+        module.addComment0("MainAndExitLoops")
         uf = self.unroll_factor
 
         # gfx1250 requires a loop-back/exit s_cbranch to be alone/first after an
