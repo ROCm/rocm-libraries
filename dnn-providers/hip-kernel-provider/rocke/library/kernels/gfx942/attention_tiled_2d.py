@@ -428,6 +428,8 @@ class UnifiedAttention2DTiledSpec:
     # one-time Q scratch. This is tested independently from sliced K because it
     # can remove a barrier/prologue even when full-tile K buffering remains.
     use_q_direct_global: bool = False
+    use_v_hbm_direct: bool = False
+    use_k_hbm_direct: bool = False
     # Cache policy for async K/V buffer->LDS loads. Gfx942 interprets these aux
     # bits as sc0/nt/swz/sc1, so this stays explicit and benchmarked.
     kv_cache_policy: str = "stream"
@@ -921,6 +923,8 @@ class UnifiedAttention2DTiledSpec:
             "fastkvdesc" if self.use_fast_paged_kv_desc else "",
             "earlyv" if self.use_early_v_schedule else "",
             "qdir" if self.use_q_direct_global else "",
+            "vhbm" if self.use_v_hbm_direct else "",
+            "khbm" if self.use_k_hbm_direct else "",
             "qsgb" if self.use_qk_pv_sched_group_barrier else "",
             f"kvcp{self.kv_cache_policy}" if self.kv_cache_policy != "stream" else "",
             "gldlds" if self.use_global_load_lds_k else "",
@@ -1614,8 +1618,11 @@ def build_unified_attention_2d_tiled(
         (not Q_DIRECT_GLOBAL) and (K_LDS_DTYPE == dtype) and Q_BYTES <= K_TOTAL_BYTES
     )
     Q_USES_DUAL_SLOT = Q_ALIAS_K and BLOCK_M > T
+    K_HBM_DIRECT = spec.use_k_hbm_direct
     if K_SLICED_ACTIVE:
         K_lds = b.smem_alloc(K_LDS_DTYPE, [K_BUFS, T, K_SLICE_HD], name_hint="KldsS")
+    elif K_HBM_DIRECT:
+        K_lds = b.smem_alloc(K_LDS_DTYPE, [K_BUFS, 1, 1], name_hint="KldsStub")
     else:
         K_lds = b.smem_alloc(K_LDS_DTYPE, [K_BUFS, T, HD], name_hint="Klds")
     V_BUFS = 1  # single-buffer V (race-free: see comment above)
@@ -1743,6 +1750,7 @@ def build_unified_attention_2d_tiled(
     # transpose) when the store-path flag drove TRANSPOSED_V; the 2x2 f16
     # transpose needs T and HD both even (HD%8==0 already; T%2 below).
     TRANSPOSED_V_STORE = TRANSPOSED_V and CONFLICT_FREE_V_STORE and (T % 2 == 0)
+    V_HBM_DIRECT = spec.use_v_hbm_direct
     SWIZZLE_VLDS = (
         os.environ.get("HIPDNN_GFX942_SWIZZLE_VLDS", "1") == "1"
         and not FP8_MFMA_PV
@@ -1860,7 +1868,21 @@ def build_unified_attention_2d_tiled(
         else:
             b.smem_store_vN(V_lds, [b.const_i32(0), dim, tok], value, n)
 
+    _cur_kv_tile = [None]
+    def _v_hbm_elem(tile, tok, dim):
+        # AICK-1495: direct-HBM V element V[local tok, dim] for tile (bypass V_lds).
+        _lin = b.add(b.mul(tok, b.const_i32(HD)), dim)
+        _vo, _vl = paged_kv_desc.offset(b, tile_idx=tile, linear_half=_lin, kv_head=kv_head_idx)
+        _ir = b.cmp_lt(b.add(b.mul(tile, b.const_i32(T)), tok), max_seq_prefix_len)
+        if _vl is not None:
+            _ir = b.land(_ir, _vl)
+        _se = b.select(_ir, _vo, b.const_i32(0))
+        _el = b.div(_se, b.const_i32(KV_BYTES)) if KV_BYTES != 1 else _se
+        _e = b.global_load(value, _el, dtype, align=2)
+        return b.select(_ir, _e, b.cast_f32_to(b.const_f32(0.0), dtype))
     def _v_t_load(dim: Value, tok: Value, *, n: int) -> Value:
+        if V_HBM_DIRECT:
+            return b.vec_pack([_v_hbm_elem(_cur_kv_tile[0], b.add(tok, b.const_i32(_i)), dim) for _i in range(n)], dtype)
         v_buf0 = b.const_i32(0)
         if V_T_CK_LAYOUT:
             return b.smem_load_vN(V_lds, v_buf0, _v_t_slot(dim, tok), dtype=dtype, n=n)
@@ -1877,6 +1899,8 @@ def build_unified_attention_2d_tiled(
         recompute -> VGPR-neutral). When the swizzle is off this is exactly the
         natural ``V_lds[v_buf, v_row, v_n_col]`` 3D access.
         """
+        if V_HBM_DIRECT:
+            return b.vec_pack([_v_hbm_elem(_cur_kv_tile[0], v_row, v_n_col)], dtype)
         if not SWIZZLE_VLDS:
             return b.smem_load_vN(V_lds, v_buf, v_row, v_n_col, dtype=dtype, n=1)
         group = b.lshr(v_row, b.const_i32(V_GROUP_SHIFT))
@@ -3441,6 +3465,8 @@ def build_unified_attention_2d_tiled(
         """
         if K_SLICED_ACTIVE:
             return
+        if K_HBM_DIRECT:
+            return  # K streamed HBM->reg per QK-iter
         if K_FP8_MFMA:
             _issue_k_fp8_mfma_async(tile_idx, buf_idx)
         elif KV_FP8:
@@ -3466,6 +3492,8 @@ def build_unified_attention_2d_tiled(
         because ``_issue_v_load_runtime`` ignores ``buf_idx`` and uses
         ``V_lds_addr`` directly. Fix: always pin slot 0 for V.
         """
+        if V_HBM_DIRECT:
+            return  # V streamed HBM->reg on-demand (bare return, like K)
         if PV_FP8_MFMA:
             _issue_v_fp8_mfma_stripe(tile_idx)
         elif KV_FP8:
@@ -3494,6 +3522,12 @@ def build_unified_attention_2d_tiled(
         paths so both get the fp8 LDS-footprint win. (fp8 is rejected on
         gfx942, so the x8-transposed path always takes the plain bf16 read.)
         """
+        if K_HBM_DIRECT and not K_FP8_MFMA:
+            # AICK-1495: direct-HBM K via buffer_load (HW OOB->0). Causal mask
+            # already zeros past-seq keys, so no software bounds-select (saves VALU).
+            _lin = b.add(b.mul(k_row, b.const_i32(HD)), k_off)
+            _vo, _ = paged_kv_desc.offset(b, tile_idx=_cur_kv_tile[0], linear_half=_lin, kv_head=kv_head_idx)
+            return b.buffer_load_vN(key_rsrc, _vo, b.const_i32(0), dtype, frag)
         if not K_FP8_MFMA:
             return b.smem_load_vN(K_lds, buf_idx, k_row, k_off, dtype=dtype, n=frag)
         if FP8_NATIVE_QK:
@@ -3794,6 +3828,7 @@ def build_unified_attention_2d_tiled(
     # False here) so the experiment can be re-tried behind a flag if a future
     # change makes the kernel throughput-bound.
     def _emit_kv_body(kv_tile_iv, carry, skip_mask):
+        _cur_kv_tile[0] = kv_tile_iv
         if USE_IGLP_OPT:
             b.iglp_opt(1)
         m_vals = [carry[2 * r] for r in range(SOFTMAX_STATE_SLOTS)]
@@ -4753,9 +4788,7 @@ def build_unified_attention_2d_tiled(
                                         b.const_i32(k * 8 + kk),
                                         b.mul(lane_half32, b.const_i32(4)),
                                     )
-                                    v1 = b.smem_load_vN(
-                                        V_lds, v_buf, v_row, v_dim32, dtype=dtype, n=1
-                                    )
+                                    v1 = (b.vec_pack([_v_hbm_elem(_cur_kv_tile[0], v_row, v_dim32)], dtype) if V_HBM_DIRECT else b.smem_load_vN(V_lds, v_buf, v_row, v_dim32, dtype=dtype, n=1))
                                     a_v_elems.append(b.vec_extract(v1, 0))
                                 A_v_t = b.vec_pack(a_v_elems, dtype)
                             b_p_elems = []
@@ -4828,9 +4861,7 @@ def build_unified_attention_2d_tiled(
                                     b.const_i32(k_static),
                                     b.mul(lane_half32, b.const_i32(8)),
                                 )
-                                v1 = b.smem_load_vN(
-                                    V_lds, v_buf, v_row, v_dim32, dtype=dtype, n=1
-                                )
+                                v1 = (b.vec_pack([_v_hbm_elem(_cur_kv_tile[0], v_row, v_dim32)], dtype) if V_HBM_DIRECT else b.smem_load_vN(V_lds, v_buf, v_row, v_dim32, dtype=dtype, n=1))
                                 a_v_elems.append(b.vec_extract(v1, 0))
                             # Then assemble the P operand. Each kk picks (k0,
                             # k1) and may xor to fetch the cross-half register.
