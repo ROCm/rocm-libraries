@@ -8,7 +8,6 @@
 #include "ck_tile/core/arch/mma/mfma/mfma_traits.hpp"
 #include "ck_tile/core/arch/mma/mma_data_format.hpp"
 #include "ck_tile/core/arch/mma/mma_op_family.hpp"
-#include "ck_tile/core/arch/mma/scale/scale_traits.hpp"
 #include "ck_tile/core/config.hpp"
 #include "ck_tile/core/numeric/float8.hpp"
 #include "ck_tile/core/numeric/integer.hpp"
@@ -53,8 +52,8 @@ namespace ck_tile::core::arch::mma {
                                             int32_t scale_B)                                                                                                                 \
         {                                                                                                                                                                    \
             using P = WarpGemmParamsParser<Params...>;                                                                                                                       \
-            return {INSTRUCTION(scale::detail::to_mfma_scale_arg<A_TYPE>(aVec),                                                                                              \
-                                scale::detail::to_mfma_scale_arg<B_TYPE>(bVec),                                                                                              \
+            return {INSTRUCTION(to_type<int32x8_t>(aVec),                                                                                                                    \
+                                to_type<int32x8_t>(bVec),                                                                                                                    \
                                 cVec,                                                                                                                                        \
                                 PackedDataTypeToFlag_v<A_TYPE>,                                                                                                              \
                                 PackedDataTypeToFlag_v<B_TYPE>,                                                                                                              \

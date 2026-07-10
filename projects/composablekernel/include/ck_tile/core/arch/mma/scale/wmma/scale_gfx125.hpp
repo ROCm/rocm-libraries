@@ -57,9 +57,9 @@ namespace ck_tile::core::arch::mma {
                 scale::detail::is_legal_combination<A_TYPE, B_TYPE, P::scale_a, P::scale_b>,                                         \
                 "Unsupported ADataType/BDataType/scale_a/scale_b combination");                                                      \
             return {INSTRUCTION(PackedDataTypeToFlag_v<A_TYPE>,                                                                      \
-                                scale::detail::to_wmma_scale_arg<A_TYPE>(aVec),                                                      \
+                                to_type<int32x16_t>(aVec),                                                                           \
                                 PackedDataTypeToFlag_v<B_TYPE>,                                                                      \
-                                scale::detail::to_wmma_scale_arg<B_TYPE>(bVec),                                                      \
+                                to_type<int32x16_t>(bVec),                                                                           \
                                 0,                                                                                                   \
                                 cVec,                                                                                                \
                                 P::op_sel_a,                                                                                         \
@@ -166,13 +166,12 @@ WMMA_SCALE16_IMPL(pk_fp4_t,    pk_fp4_t,    1, 1)
         CK_TILE_DEVICE static CVecType                                                                                                        \
         exec(AVecType const& aVec, BVecType const& bVec, CVecType const& cVec)                                                                \
         {                                                                                                                                     \
-            return {__builtin_amdgcn_wmma_f32_16x16x128_f8f6f4(                                                                               \
-                PackedDataTypeToFlag_v<A_TYPE>,                                                                                               \
-                scale::detail::to_wmma_scale_arg<A_TYPE>(aVec),                                                                               \
-                PackedDataTypeToFlag_v<B_TYPE>,                                                                                               \
-                scale::detail::to_wmma_scale_arg<B_TYPE>(bVec),                                                                               \
-                0,                                                                                                                            \
-                cVec)};                                                                                                                       \
+            return {__builtin_amdgcn_wmma_f32_16x16x128_f8f6f4(PackedDataTypeToFlag_v<A_TYPE>,                                                \
+                                                               to_type<int32x16_t>(aVec),                                                     \
+                                                               PackedDataTypeToFlag_v<B_TYPE>,                                                \
+                                                               to_type<int32x16_t>(bVec),                                                     \
+                                                               0,                                                                             \
+                                                               cVec)};                                                                        \
         }                                                                                                                                     \
     };
 
