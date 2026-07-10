@@ -37,7 +37,7 @@ jobs:
           owner: ${{ github.repository_owner }}
 
       - name: Checkout super‐repo
-        uses: actions/checkout@v6.0.2
+        uses: actions/checkout@v7.0.0
         with:
           token: ${{ steps.gen_token.outputs.token }}
           fetch-depth: 0
@@ -47,7 +47,7 @@ jobs:
           sparse-checkout-cone-mode: true
 
       - name: Set up Python 3.x
-        uses: actions/setup-python@v6
+        uses: actions/setup-python@v6.3.0
         with:
           python-version: "3.x"
 

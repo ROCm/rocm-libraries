@@ -49,7 +49,7 @@ jobs:
       secret_verification_result: ${{ steps.validate-secret.outputs.verification_result }}
     steps:
       - name: Setup Scripts
-        uses: github/gh-aw/actions/setup@58d1bedbb7200f59c2d224151339e38fd8687d05 # v0.76.1
+        uses: github/gh-aw/actions/setup@eed4304d8740f0593f2797276cb8299d228ffd9b # v0.81.6
         with:
           destination: /opt/gh-aw/actions
       - name: Generate agentic run info
@@ -82,7 +82,7 @@ jobs:
         env:
           ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
       - name: Checkout .github and .agents folders
-        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
         with:
           persist-credentials: false
           sparse-checkout: |
@@ -258,11 +258,11 @@ jobs:
       output_types: ${{ steps.collect_output.outputs.output_types }}
     steps:
       - name: Setup Scripts
-        uses: github/gh-aw/actions/setup@58d1bedbb7200f59c2d224151339e38fd8687d05 # v0.76.1
+        uses: github/gh-aw/actions/setup@eed4304d8740f0593f2797276cb8299d228ffd9b # v0.81.6
         with:
           destination: /opt/gh-aw/actions
       - name: Checkout repository
-        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
         with:
           persist-credentials: false
           fetch-depth: 0
@@ -1059,7 +1059,7 @@ jobs:
       total_count: ${{ steps.missing_tool.outputs.total_count }}
     steps:
       - name: Setup Scripts
-        uses: github/gh-aw/actions/setup@58d1bedbb7200f59c2d224151339e38fd8687d05 # v0.76.1
+        uses: github/gh-aw/actions/setup@eed4304d8740f0593f2797276cb8299d228ffd9b # v0.81.6
         with:
           destination: /opt/gh-aw/actions
       - name: Download agent output artifact
@@ -1185,7 +1185,7 @@ jobs:
       process_safe_outputs_temporary_id_map: ${{ steps.process_safe_outputs.outputs.temporary_id_map }}
     steps:
       - name: Setup Scripts
-        uses: github/gh-aw/actions/setup@58d1bedbb7200f59c2d224151339e38fd8687d05 # v0.76.1
+        uses: github/gh-aw/actions/setup@eed4304d8740f0593f2797276cb8299d228ffd9b # v0.81.6
         with:
           destination: /opt/gh-aw/actions
       - name: Download agent output artifact
@@ -1209,7 +1209,7 @@ jobs:
           path: /tmp/gh-aw/
       - name: Checkout repository
         if: ((!cancelled()) && (needs.agent.result != 'skipped')) && (contains(needs.agent.outputs.output_types, 'create_pull_request'))
-        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
         with:
           ref: ${{ github.base_ref || github.event.pull_request.base.ref || github.ref_name || github.event.repository.default_branch }}
           token: ${{ secrets.GH_AW_GITHUB_TOKEN || secrets.GITHUB_TOKEN }}
