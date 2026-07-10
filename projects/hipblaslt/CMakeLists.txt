@@ -290,6 +290,25 @@ configure_file(
     "${CMAKE_CURRENT_BINARY_DIR}/library/include/hipblaslt/hipblaslt-version.h"
 )
 
+# Configure the Windows version resource (PE VERSIONINFO) embedded into
+# libhipblaslt.dll. This mirrors the sibling rocBLAS/hipBLAS libraries so the
+# DLL reports file/product version metadata in its Windows file properties.
+if(WIN32)
+    if(GIT)
+        execute_process(
+            COMMAND "${GIT}" log -1 --format=%H .
+            WORKING_DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}"
+            OUTPUT_VARIABLE hipblaslt_VERSION_COMMIT_ID
+            OUTPUT_STRIP_TRAILING_WHITESPACE
+            ERROR_QUIET)
+    endif()
+    string(TIMESTAMP HIPBLASLT_COPYRIGHT_YEAR "%Y")
+    configure_file(
+        "${CMAKE_CURRENT_SOURCE_DIR}/library/src/version.rc.in"
+        "${CMAKE_CURRENT_BINARY_DIR}/library/version.rc"
+        @ONLY)
+endif()
+
 # `hipblaslt::mxdatagen` lives in clients/common (next to its source), and is
 # only built when at least one consumer needs it. tensilelite/client and
 # tensilelite/tests reach for it on the same condition, so we drive the
@@ -311,6 +330,10 @@ add_subdirectory(tensilelite)
 if(HIPBLASLT_ENABLE_HOST)
     if(HIPBLASLT_BUILD_SHARED_LIBS)
         add_library(hipblaslt SHARED)
+        # Embed Windows version resource (PE VERSIONINFO) into the shared DLL.
+        if(WIN32)
+            target_sources(hipblaslt PRIVATE "${CMAKE_CURRENT_BINARY_DIR}/library/version.rc")
+        endif()
     else()
         add_library(hipblaslt STATIC)
         target_compile_definitions(hipblaslt PRIVATE HIPBLASLT_STATIC_LIB)
