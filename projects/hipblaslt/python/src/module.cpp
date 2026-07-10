@@ -3,6 +3,7 @@
 #include <nanobind/nanobind.h>
 #include <hip/hip_runtime.h>
 #include "status.hpp"
+#include "init.hpp"
 
 namespace nb = nanobind;
 using hipblaslt_py::HipblasLtError;
@@ -25,4 +26,6 @@ NB_MODULE(_core, m)
     m.def("_raise_test_status", [](int code) {
         hipblaslt_py::check_status(static_cast<hipblasStatus_t>(code), "_raise_test_status");
     }, "Debug hook: raise HipblasLtError for a nonzero status code.");
+
+    init_enums(m);
 }
