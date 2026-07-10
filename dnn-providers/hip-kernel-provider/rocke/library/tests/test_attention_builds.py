@@ -1689,9 +1689,14 @@ class TestAttentionHarnessTimers(unittest.TestCase):
         from pathlib import Path
         from unittest import mock
 
-        # Import torch BEFORE patching sys.modules so torch stays in the
+        import pytest
+
+        # The harness's reference implementation imports torch at module scope,
+        # so it cannot be loaded without torch; skip torch-free instead of
+        # erroring. Import torch BEFORE patching sys.modules so it stays in the
         # parent process's module table after ``mock.patch.dict`` exits.
         pytest.importorskip("torch")
+        import torch  # noqa: F401
 
         # The harness moved into the library tree (builders/); resolve it via the
         # package system (editable-installed) rather than a hardcoded path, then

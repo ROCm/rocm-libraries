@@ -9,7 +9,7 @@
 #include <utility>
 #include <vector>
 
-namespace hipdnn_integration_tests::golden
+namespace hipdnn_integration_tests::bundle
 {
 
 // Why a bundle could not be verified. The two severities are printed in separate
@@ -122,4 +122,4 @@ private:
     std::vector<Record> _records;
 };
 
-} // namespace hipdnn_integration_tests::golden
+} // namespace hipdnn_integration_tests::bundle

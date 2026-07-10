@@ -22,9 +22,10 @@
 #include "harness/IReferenceGraphExecutor.hpp"
 #include "harness/TestConfig.hpp"
 #include "harness/TomlGuards.hpp"
-#include "harness/golden/IntegrationTestBundle.hpp"
+#include "harness/bundle/IntegrationTestBundle.hpp"
+#include "harness/input_init/SynthesisConfig.hpp"
 
-namespace hipdnn_integration_tests::golden
+namespace hipdnn_integration_tests::bundle
 {
 
 // Output tensors, keyed by uid. Used both for the engine's computed "actual"
@@ -63,11 +64,11 @@ using OutputTensors
 //             ranges/seeds/derivation from each non-golden subclass override
 //             into the corresponding fill function, using fillComputed/tensorAt
 //             for derived inputs. Delete each override once its fill fn works.
-//   Stage 3 — Both harnesses share one init pipeline via SynthesisTracker.
-class IntegrationGraphGoldenReferenceVerificationHarness : public ::testing::Test
+//   Stage 3 — Both harnesses share one init pipeline via synthesizeInputs().
+class IntegrationBundleVerificationHarness : public ::testing::Test
 {
 public:
-    explicit IntegrationGraphGoldenReferenceVerificationHarness(bool requiresDevice)
+    explicit IntegrationBundleVerificationHarness(bool requiresDevice)
         : _requiresDevice(requiresDevice)
     {
     }
@@ -76,6 +77,16 @@ public:
     {
         _bundle = std::move(bundle);
         _bundlePath = std::move(path);
+
+        if(_bundle != nullptr && _bundle->metadata.seed.has_value())
+        {
+            _synthesisConfig.setGlobalSeed(static_cast<unsigned int>(*_bundle->metadata.seed));
+        }
+
+        if(_bundle != nullptr && _bundle->metadata.inputs.has_value())
+        {
+            _synthesisConfig.loadFromJson(*_bundle->metadata.inputs);
+        }
     }
 
 protected:
@@ -129,12 +140,16 @@ protected:
     // TestConfig singleton, which is only initialized by the real test main.
     virtual void applyMetadataGuards() const;
 
+    SynthesisConfig& synthesis()
+    {
+        return _synthesisConfig;
+    }
+
 private:
     bool _requiresDevice;
     std::filesystem::path _bundlePath;
     std::shared_ptr<IntegrationTestBundle> _bundle;
-
-    static constexpr int64_t K_DEFAULT_SEED = 42;
+    SynthesisConfig _synthesisConfig;
 
     enum class RefStatus
     {
@@ -164,13 +179,13 @@ private:
     //   each remaining leaf input tensor (shape/dtype from TensorAttributes).
     //
     // Phase 2 — fill: iterates each node (internal op) and calls its
-    //   registered fill function via synthesizeNodeInputs(). Each fill
+    //   registered declaration function via declareNodeInputs(). Each
     //   function reads its tensor UIDs from the node's attributes and
     //   declares each one as FREE (random values), STRUCTURED (needs
     //   specific format), or DERIVED (needs another op's output) through
-    //   a shared SynthesisTracker.
+    //   a shared SynthesisConfig.
     //
-    // Phase 3 — verify: calls tracker.finish() which checks that every
+    // Phase 3 — verify: calls synth.synthesize() which checks that every
     //   leaf input was accounted for by some fill function and none were
     //   refused (STRUCTURED/DERIVED). Returns false and SKIPs the test
     //   if any leaf was missed or refused.
@@ -242,7 +257,7 @@ private:
     // UnverifiableBundleReport (printed as a summary after all tests),
     // then GTEST_SKIP()s this test. The reason is a flat human-readable
     // string — per-tensor details are concatenated into it by the caller
-    // (e.g., tracker.finish()), not stored as structured data.
+    // (e.g., synth.synthesize()), not stored as structured data.
     void skipUnverifiable(const std::string& reason);
     void recordRefError(const std::string& reason);
     static std::string refLabel(ReferenceExecutorType type);
@@ -260,25 +275,10 @@ private:
     static std::string dataTypeName(hipdnn_flatbuffers_sdk::data_objects::DataType dataType);
 
     // ── tolerances ──────────────────────────────────────────────────────
-    // Two-level lookup: per-operation default from TestTolerances.hpp,
-    // then TOML per-engine override (if a [[tolerance_overrides]] filter
-    // matches the current gtest name).
-    static void
-        resolveTolerances(const hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper& wrapper,
-                          hipdnn_flatbuffers_sdk::data_objects::DataType dataType,
-                          float& atol,
-                          float& rtol);
-
-    template <typename T>
-    static float
-        toleranceForNodeAttributes(hipdnn_flatbuffers_sdk::data_objects::NodeAttributes attrType);
-
-    static float deriveDefaultTolerance(
-        const hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper& wrapper,
-        hipdnn_flatbuffers_sdk::data_objects::DataType dataType);
-
-    static float toleranceForDataType(hipdnn_flatbuffers_sdk::data_objects::NodeAttributes attrType,
-                                      hipdnn_flatbuffers_sdk::data_objects::DataType dataType);
+    // Default derivation (max-across-nodes, per-op/per-dtype lookup) and the
+    // TOML per-test override are shared with the graph harness via
+    // harness/tolerance/ToleranceResolver.hpp (tolerance::resolveTolerance),
+    // called directly from compareEach.
 };
 
-} // namespace hipdnn_integration_tests::golden
+} // namespace hipdnn_integration_tests::bundle

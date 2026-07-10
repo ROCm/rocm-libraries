@@ -111,8 +111,17 @@ protected:
         GraphTensorBundle gpuBundle;
         GraphTensorBundle refBundle;
         this->generateBundles(graphObj, refBundle, gpuBundle);
-        this->initializeBundle(graphObj, gpuBundle, convTestCase.seed);
-        this->initializeBundle(graphObj, refBundle, convTestCase.seed);
+        this->synthesis().setGlobalSeed(convTestCase.seed);
+        auto gpuInit = this->initializeBundle(graphObj, gpuBundle);
+        if(!gpuInit.filled)
+        {
+            GTEST_SKIP() << "Cannot synthesize GPU inputs: " << gpuInit.reason;
+        }
+        auto refInit = this->initializeBundle(graphObj, refBundle);
+        if(!refInit.filled)
+        {
+            GTEST_SKIP() << "Cannot synthesize ref inputs: " << refInit.reason;
+        }
 
         // Finalize a plan on the original graph, then compute the reference.
         ASSERT_EQ(graphObj.build(getSharedHandle()).code, hipdnn_frontend::ErrorCode::OK);

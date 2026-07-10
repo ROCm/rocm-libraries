@@ -45,6 +45,7 @@
 #endif
 #include "near.hpp"
 #include "norm.hpp"
+#include "ulp.hpp"
 #include "unit.hpp"
 #include "utility.hpp"
 #include <algorithm>
@@ -1115,6 +1116,8 @@ void check(hipStream_t                   stream,
            double&                       hipblaslt_error,
            double&                       hipblaslt_atol,
            double&                       hipblaslt_rtol,
+           double&                       hipblaslt_max_ulp,
+           double&                       hipblaslt_avg_ulp,
            hipDataType                   To,
            hipDataType                   Tbias,
            hipDataType                   Taux,
@@ -1123,6 +1126,10 @@ void check(hipStream_t                   stream,
 {
     // fetch GPU
     CHECK_HIP_ERROR(hipStreamSynchronize(stream));
+
+    // ULP error accumulators (sum/count are used to derive the average below)
+    double ulp_sum_total   = 0.0;
+    size_t ulp_count_total = 0;
 
     for(int gemmIdx = 0; gemmIdx < gemm_count; gemmIdx++)
     {
@@ -1414,7 +1421,45 @@ void check(hipStream_t                   stream,
             }
             //TODO: confirm if allclose_check_assert is neccessary
         }
+
+        if(arg.ulp_check)
+        {
+            if(batchMode != HIPBLASLT_BATCH_MODE_POINTER_ARRAY)
+            {
+                ulp_check_general(M[gemmIdx],
+                                  N[gemmIdx],
+                                  ldd[gemmIdx],
+                                  stride_d[gemmIdx],
+                                  hD_gold[gemmIdx].buf(),
+                                  hD_1[gemmIdx].buf(),
+                                  num_batches[gemmIdx],
+                                  hipblaslt_max_ulp,
+                                  ulp_sum_total,
+                                  ulp_count_total,
+                                  To);
+            }
+            else
+            {
+                for(int batch = 0; batch < num_batches[gemmIdx]; batch++)
+                {
+                    ulp_check_general(M[gemmIdx],
+                                      N[gemmIdx],
+                                      ldd[gemmIdx],
+                                      0,
+                                      hD_gold[batch].buf(),
+                                      hD_1[batch].buf(),
+                                      1,
+                                      hipblaslt_max_ulp,
+                                      ulp_sum_total,
+                                      ulp_count_total,
+                                      To);
+                }
+            }
+        }
     }
+
+    if(arg.ulp_check && ulp_count_total > 0)
+        hipblaslt_avg_ulp = ulp_sum_total / ulp_count_total;
 }
 
 // A function to determine the default bias_type
@@ -2749,6 +2794,11 @@ void testing_matmul_with_bias(const Arguments& arg,
         }
 
         hipblaslt_seedrand();
+
+        // For ULP validation, force hpl / trig_float A/B/C inputs to be
+        // positive-only so the reference dot products do not cancel toward zero
+        // (near-zero outputs inflate the per-element ULP error spuriously).
+        set_ulp_positive_init_state(arg.ulp_check);
 
 #if HIPBLASLT_ENABLE_MXDATAGENERATOR
         hipDeviceProp_t mxProp{};
@@ -5326,9 +5376,11 @@ void testing_matmul_with_bias(const Arguments& arg,
                 }
             }
 
-            double              hipblaslt_error = 0.0;
-            double              hipblaslt_atol  = 1;
-            double              hipblaslt_rtol  = 1;
+            double              hipblaslt_error   = 0.0;
+            double              hipblaslt_atol    = 1;
+            double              hipblaslt_rtol    = 1;
+            double              hipblaslt_max_ulp = 0.0;
+            double              hipblaslt_avg_ulp = 0.0;
             std::vector<double> tol(gemm_count);
             if(arg.unit_check && (hipblaslt_get_arch_major() == 11) && realDataTypeSize(TiA) == 2
                && realDataTypeSize(TiB) == 2)
@@ -5393,6 +5445,8 @@ void testing_matmul_with_bias(const Arguments& arg,
                       hipblaslt_error,
                       hipblaslt_atol,
                       hipblaslt_rtol,
+                      hipblaslt_max_ulp,
+                      hipblaslt_avg_ulp,
                       To,
                       Tbias,
                       Taux,
@@ -5417,6 +5471,8 @@ void testing_matmul_with_bias(const Arguments& arg,
         double      best_norm      = 0.0;
         double      best_atol      = 0.0;
         double      best_rtol      = 0.0;
+        double      best_max_ulp   = 0.0;
+        double      best_avg_ulp   = 0.0;
         int number_cold_calls
             = ((arg.unit_check || arg.norm_check || arg.allclose_check) && arg.cold_iters == 0)
                   ? 1
@@ -5939,9 +5995,11 @@ void testing_matmul_with_bias(const Arguments& arg,
                 }
             }
 
-            double              hipblaslt_error = 0.0;
-            double              hipblaslt_atol  = 1;
-            double              hipblaslt_rtol  = 1;
+            double              hipblaslt_error   = 0.0;
+            double              hipblaslt_atol    = 1;
+            double              hipblaslt_rtol    = 1;
+            double              hipblaslt_max_ulp = 0.0;
+            double              hipblaslt_avg_ulp = 0.0;
             std::vector<double> tol(gemm_count);
             if(arg.unit_check && (hipblaslt_get_arch_major() == 11) && realDataTypeSize(TiA) == 2
                && realDataTypeSize(TiB) == 2)
@@ -6016,6 +6074,8 @@ void testing_matmul_with_bias(const Arguments& arg,
                       hipblaslt_error,
                       hipblaslt_atol,
                       hipblaslt_rtol,
+                      hipblaslt_max_ulp,
+                      hipblaslt_avg_ulp,
                       To,
                       Tbias,
                       Taux,
@@ -6090,6 +6150,8 @@ void testing_matmul_with_bias(const Arguments& arg,
                     hipblaslt_error,
                     hipblaslt_atol,
                     hipblaslt_rtol,
+                    hipblaslt_max_ulp,
+                    hipblaslt_avg_ulp,
                     timing);
             }
             if(best_gpu_time > gpu_time_used)
@@ -6102,6 +6164,8 @@ void testing_matmul_with_bias(const Arguments& arg,
                 best_norm     = hipblaslt_error;
                 best_atol     = hipblaslt_atol;
                 best_rtol     = hipblaslt_rtol;
+                best_max_ulp  = hipblaslt_max_ulp;
+                best_avg_ulp  = hipblaslt_avg_ulp;
                 best_timing   = timing;
             }
         }
@@ -6150,6 +6214,8 @@ void testing_matmul_with_bias(const Arguments& arg,
                 best_norm,
                 best_atol,
                 best_rtol,
+                best_max_ulp,
+                best_avg_ulp,
                 best_timing);
         }
     }
