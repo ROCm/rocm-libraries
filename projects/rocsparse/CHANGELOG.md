@@ -6,7 +6,7 @@ Documentation for rocSPARSE is available at
 ## (Unreleased) rocSPARSE 5.0.0
 
 ### Added
-* Add Blocked ELL format support to `rocsparse_dense_to_sparse` routine.
+* Added Blocked ELL format support to `rocsparse_dense_to_sparse` routine.
 * Add `rocsparse_bell_set_pointers`.
 
 ### Resolved issues
