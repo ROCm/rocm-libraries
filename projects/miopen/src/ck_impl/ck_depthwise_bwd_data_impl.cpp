@@ -1,7 +1,7 @@
 // Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
 // SPDX-License-Identifier: MIT
 
-// Depthwise convolution backward-data (dgrad) for gfx950, FP16.
+// Depthwise convolution backward-data (dgrad) via CK forward depthwise kernel reuse (fp16/bf16).
 //
 // For stride-1, symmetric odd filters (e.g. convnext 7x7 / pad 3), the input
 // gradient is a forward depthwise convolution of the output gradient with the
