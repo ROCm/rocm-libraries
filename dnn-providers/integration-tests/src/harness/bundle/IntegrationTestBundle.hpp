@@ -23,9 +23,9 @@
 #include <hipdnn_test_sdk/utilities/BundleMetadata.hpp>
 #include <hipdnn_test_sdk/utilities/LoadGraphAndTensors.hpp>
 
-#include "harness/golden/BundleDiscovery.hpp"
+#include "harness/bundle/BundleDiscovery.hpp"
 
-namespace hipdnn_integration_tests::golden
+namespace hipdnn_integration_tests::bundle
 {
 
 // Loaded tensors keyed by tensor UID. Inputs carry their data. Outputs carry
@@ -141,6 +141,60 @@ inline std::vector<int64_t> allTensorUids(const nlohmann::json& graphJson)
         if(tensor.contains("uid"))
         {
             uids.push_back(tensor.at("uid").get<int64_t>());
+        }
+    }
+    return uids;
+}
+
+// Replaces test_sdk's getOutputTensorUidsFromGraph(), which assumes every
+// node wraps output UIDs in an "outputs" sub-object. ReductionAttributes,
+// ResampleFwdAttributes, and CustomOpAttributes emit flat keys instead,
+// causing node.at("outputs") to throw for those ops.
+inline std::vector<int64_t> extractOutputUidsFromJson(const nlohmann::json& graphJson)
+{
+    std::vector<int64_t> uids;
+    if(!graphJson.contains("nodes") || !graphJson.at("nodes").is_array())
+    {
+        return uids;
+    }
+
+    for(const auto& node : graphJson.at("nodes"))
+    {
+        // Standard: outputs wrapped in "outputs" sub-object
+        if(node.contains("outputs") && node.at("outputs").is_object())
+        {
+            for(auto& [name, value] : node.at("outputs").items())
+            {
+                if(name.find("_tensor_uid") != std::string::npos && !value.is_null()
+                   && value.is_number_integer())
+                {
+                    uids.push_back(value.get<int64_t>());
+                }
+            }
+            continue;
+        }
+
+        // Flat vector: CustomOp uses "output_tensor_uids" array
+        if(node.contains("output_tensor_uids") && node.at("output_tensor_uids").is_array())
+        {
+            for(const auto& v : node.at("output_tensor_uids"))
+            {
+                if(v.is_number_integer())
+                {
+                    uids.push_back(v.get<int64_t>());
+                }
+            }
+            continue;
+        }
+
+        // Flat scalar fallback: Reduction ("out_tensor_uid"),
+        // ResampleFwd ("y_tensor_uid")
+        for(const auto& key : {"out_tensor_uid", "y_tensor_uid"})
+        {
+            if(node.contains(key) && node.at(key).is_number_integer())
+            {
+                uids.push_back(node.at(key).get<int64_t>());
+            }
         }
     }
     return uids;
@@ -580,7 +634,20 @@ inline LoadResult loadIntegrationTestBundle(const std::filesystem::path& jsonPat
 
     IntegrationTestBundle bundle;
     bundle.graphBuffer = std::move(graphBuffer);
-    bundle.outputTensorUids = hipdnn_test_sdk::utilities::getOutputTensorUidsFromGraph(*graphJson);
+
+    {
+        auto allOutputUids = detail::extractOutputUidsFromJson(*graphJson);
+        const auto wrapper = bundle.graphWrapper();
+        const auto& tensorMap = wrapper.getTensorMap();
+        for(const int64_t uid : allOutputUids)
+        {
+            auto it = tensorMap.find(uid);
+            if(it == tensorMap.end() || !it->second->virtual_())
+            {
+                bundle.outputTensorUids.push_back(uid);
+            }
+        }
+    }
 
     const auto blobPathForUid = [&](int64_t uid) { return detail::tensorBlobPath(jsonPath, uid); };
     const bool goldenOutputsPresent
@@ -654,8 +721,22 @@ inline LoadResult loadIntegrationTestBundle(const DiscoveredBundle& discovered)
 
     IntegrationTestBundle bundle;
     bundle.graphBuffer = std::move(graphBuffer);
-    bundle.outputTensorUids
-        = hipdnn_test_sdk::utilities::getOutputTensorUidsFromGraph(expandedGraph);
+
+    // Mirror the direct-bundle path: extractOutputUidsFromJson handles flat-uid
+    // ops (Reduction/ResampleFwd/CustomOp) that getOutputTensorUidsFromGraph throws on.
+    {
+        auto allOutputUids = detail::extractOutputUidsFromJson(expandedGraph);
+        const auto wrapper = bundle.graphWrapper();
+        const auto& tensorMap = wrapper.getTensorMap();
+        for(const int64_t uid : allOutputUids)
+        {
+            auto it = tensorMap.find(uid);
+            if(it == tensorMap.end() || !it->second->virtual_())
+            {
+                bundle.outputTensorUids.push_back(uid);
+            }
+        }
+    }
 
     // Every sweep case must carry a metadata block. Metadata (arch lock,
     // ROCm/GPU version, seed, VRAM guard) is what validates golden data and
@@ -689,4 +770,4 @@ inline LoadResult loadIntegrationTestBundle(const DiscoveredBundle& discovered)
     return bundle;
 }
 
-} // namespace hipdnn_integration_tests::golden
+} // namespace hipdnn_integration_tests::bundle
