@@ -19,7 +19,7 @@ distribution, reusing the build machinery already proven by `tensilelite/rocisa`
 
 ## Primary users and goals
 
-The bullseye user is a **hipBLASLt developer**, not an end-user ML practitioner.
+The intended user is a **hipBLASLt developer**, not an end-user ML practitioner.
 Concrete workflows:
 
 - **Confirm bugs** — run a GEMM and inspect the actual output values.
@@ -277,29 +277,68 @@ MX (microscaling) is **not a data type — it is a block-scaling scheme**: an MX
 tensor is a narrow element type (fp8 / fp6 / fp4) plus a separate tensor of
 per-block scale factors. hipBLASLt models this through the
 `hipblasLtMatmulMatrixScale_t` enum, set via the `A_SCALE_MODE` / `B_SCALE_MODE`
-descriptor attributes (`hipblaslt.h`). The relevant modes:
+descriptor attributes (`hipblaslt.h`). The enumerator *values* are integers: the
+low contiguous range (0–5) mirrors the upstream cuBLASLt numbering for source
+compatibility, while AMD-specific extensions carry an `_EXT` suffix and live in a
+high range (`1000+`) so future upstream additions cannot collide with them (the
+same convention seen in `HIP_R_8F_E5M3_EXT = 34` and the `_EXT` epilogues). The
+relevant modes:
 
-| Scale mode | Meaning | Header status |
+| Scale mode (value) | Meaning | Header status |
 |---|---|---|
 | `SCALAR_32F` (0) | one f32 scale for the whole tensor (non-MX fp8 default) | supported |
-| `VEC32_UE8M0` (2) | UE8M0 scale per 32-element block — OCP **MXFP** | supported |
+| `VEC32_UE8M0` (2) | UE8M0 scale per 32-element block — OCP **MXFP** (canonical order) | supported |
 | `BLK32_UE8M0_32_8_EXT` (1001) | UE8M0 per-32-block, pre-swizzled for the kernel | supported |
 | `OUTER_VEC_32F` (3) | per-row/col f32 vectors (A: M elems, B: N elems) | supported |
 | `VEC16_UE4M3` (1), `VEC128_32F` (4), `BLK128x128_32F` (5), `VEC16_UE8M0_EXT` (1002), `VEC32_UE4M3_EXT` (1003), `VEC16/32_UE5M3_EXT` (1004/5) | other block sizes / scale encodings | "Not supported yet" |
+
+### What "pre-swizzle" (mode 1001) means
+
+Modes 2 and 1001 consume the *same* UE8M0 scale bytes; they differ only in memory
+order. Mode `VEC32_UE8M0` (2) expects the **canonical** layout — scale byte
+`(i, j)` is the scale for block `(i, j)`, and the kernel does the address
+arithmetic to fetch it. Mode `BLK32_UE8M0_32_8_EXT` (1001) expects those same
+bytes **already permuted into the exact order the kernel's threads read them**, so
+the GPU issues contiguous loads with no in-kernel gather. "Swizzle" is the
+permutation from canonical `(row, col)` order into hardware-access order;
+"pre-swizzle" means the *host* performs it before upload rather than the kernel at
+runtime. It is purely a device-side memory-layout optimization — **it does not
+change the math.**
+
+The permutation is governed by a `preSwizzleTile = {tileMN, tileK, subTileK}`
+parameter (e.g. `{32, 8, 4}`), derived from the chosen kernel's matrix-instruction
+geometry (see `tensilelite/client/src/DataInitialization.cpp`, ~lines 1977–2016):
+`tileMN = 32` (2 SIMDs × 16 lanes per wave for M/N access), `tileK = 256 / tileMN`
+(scale blocks along K per wave), and `subTileK = MiK / mxBlock` (the matrix-
+instruction K depth divided by the MX block size). The canonical 2D scale tensor
+is reordered into `tileMN × tileK` tiles with a further K sub-division of
+`subTileK`, interleaving bytes so consecutive lanes read consecutive bytes. This
+layout is **arch-gated** — it is the gfx950 / MI350 subtile-kernel path; other
+architectures use canonical (non-swizzled) scales (`DataInitialization.cpp:964`).
 
 Design implications:
 
 - **Control plane is already covered by the generic-attribute design.** Selecting
   an MX mode is just `desc.set_attribute(A_SCALE_MODE, VEC32_UE8M0)` — no new
-  binding code, and the coverage harness enumerates these scale-mode values
-  automatically.
+  binding code (the value is an integer that flows straight through), and the
+  coverage harness enumerates these scale-mode values automatically. The binding
+  needs zero changes when AMD adds `1006`, `1007`, ... — the harness picks up the
+  new enumerator from the header.
 - **Data plane needs scale-tensor support** the base `DeviceArray` design did not
   yet call out: a `DeviceArray` must be able to hold a **block-scale tensor**
   (e.g. UE8M0 bytes, one per 32-element block) alongside the element tensor.
   Helpers must (a) build the block-scale tensor from a reference (per-block max →
   UE8M0 exponent), (b) apply the block scales when computing the numpy reference
   so the CPU comparison matches MX math, and (c) own the **pre-swizzle** layout
-  for mode 1001 so the user never hand-arranges it.
+  for mode 1001, deriving `{tileMN, tileK, subTileK}` from the kernel geometry, so
+  the user never hand-arranges it. This should port the existing swizzle logic in
+  `DataInitialization.cpp` (`generateMXInput`) rather than reinvent it, per the
+  "reuse hipBLASLt's own routines" principle.
+- **Reference must use canonical scales.** Because the swizzle changes only the
+  device byte order and not the math, the numpy reference path always computes
+  with canonical `(row, col)` scales; only the device copy is swizzled. The helper
+  therefore keeps both forms. (This mirrors the library's own test harness, where
+  `cpuInput.valid` always holds canonical scales — `DataInitialization.cpp:2056`.)
 - **Coverage must distinguish "enum exists" from "library supports it."** Many
   scale modes are "Not supported yet," and support is additionally
   arch-dependent. The coverage harness enumerates all scale modes but marks the
