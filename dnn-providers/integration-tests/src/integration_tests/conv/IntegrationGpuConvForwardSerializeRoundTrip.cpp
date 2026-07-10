@@ -107,6 +107,17 @@ protected:
         this->setTestCaseLayout(layout.name);
         this->setTestCaseNote(convTestCase.note);
 
+        // Unlike verifyGraph()-based tests, this test builds/serializes the plan
+        // manually below instead of going through verifyGraph(), so it must check
+        // engine support (and pin --test-engine as preferred) itself first -
+        // otherwise an engine that doesn't implement conv (e.g. HIP_MLOPS_ENGINE)
+        // fails the ASSERT_EQ on graphObj.build() below instead of skipping.
+        this->checkEngineSupportOrSkip(graphObj);
+        if(::testing::Test::IsSkipped() || ::testing::Test::HasFatalFailure())
+        {
+            return;
+        }
+
         // GPU and reference bundles share a seed so their inputs match.
         GraphTensorBundle gpuBundle;
         GraphTensorBundle refBundle;

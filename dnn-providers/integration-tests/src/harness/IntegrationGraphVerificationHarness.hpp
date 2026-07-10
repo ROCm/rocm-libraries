@@ -116,12 +116,15 @@ protected:
         return 0.0f;
     }
 
-    void verifyGraph(hipdnn_frontend::graph::Graph& graph, unsigned int seed)
+    // Ranks engines for `graph` and either pins TestConfig's --test-engine as the
+    // preferred engine (leaving the graph ready for create_execution_plans()/
+    // build_plans(), or for Graph::build()) or GTEST_SKIP()s/FAILs the current
+    // test when no suitable engine is available. GTEST_SKIP()/FAIL() only unwind
+    // this function, not the caller's - callers MUST check
+    // ::testing::Test::IsSkipped() (and, if they don't already ASSERT/FAIL
+    // through to a return, HasFatalFailure()) and return immediately afterward.
+    void checkEngineSupportOrSkip(hipdnn_frontend::graph::Graph& graph)
     {
-        hipdnn_test_sdk::utilities::GraphTensorBundle gpuBundle, refBundle;
-
-        // Check engine support and set preferred engine before building execution plans.
-        // build_operation_graph() was already called by buildGraph() in the test subclass.
         std::vector<int64_t> engineIds;
         auto status = graph.get_ranked_engine_ids(engineIds);
 
@@ -170,6 +173,19 @@ protected:
                 }
                 GTEST_SKIP() << "No engine supports this graph";
             }
+        }
+    }
+
+    void verifyGraph(hipdnn_frontend::graph::Graph& graph, unsigned int seed)
+    {
+        hipdnn_test_sdk::utilities::GraphTensorBundle gpuBundle, refBundle;
+
+        // Check engine support and set preferred engine before building execution plans.
+        // build_operation_graph() was already called by buildGraph() in the test subclass.
+        checkEngineSupportOrSkip(graph);
+        if(::testing::Test::IsSkipped() || ::testing::Test::HasFatalFailure())
+        {
+            return;
         }
 
         // --skip-graph-validation: graph is confirmed supported, exit early with PASS
