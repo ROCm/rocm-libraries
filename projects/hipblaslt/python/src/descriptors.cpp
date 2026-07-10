@@ -56,6 +56,60 @@ private:
     hipblasLtMatrixLayout_t l_ = nullptr;
 };
 
+class MatmulDesc
+{
+public:
+    MatmulDesc(hipblasComputeType_t compute, hipDataType scale)
+    {
+        HIPBLASLT_CHECK(hipblasLtMatmulDescCreate(&d_, compute, scale));
+    }
+    ~MatmulDesc() { if(d_) hipblasLtMatmulDescDestroy(d_); }
+    MatmulDesc(const MatmulDesc&) = delete;
+    MatmulDesc& operator=(const MatmulDesc&) = delete;
+
+    void set_attribute_int(hipblasLtMatmulDescAttributes_t attr, int32_t value)
+    {
+        HIPBLASLT_CHECK(hipblasLtMatmulDescSetAttribute(d_, attr, &value, sizeof(value)));
+    }
+    void set_attribute_ptr(hipblasLtMatmulDescAttributes_t attr, std::uintptr_t p)
+    {
+        void* raw = reinterpret_cast<void*>(p);
+        HIPBLASLT_CHECK(hipblasLtMatmulDescSetAttribute(d_, attr, &raw, sizeof(raw)));
+    }
+    int32_t get_attribute_int(hipblasLtMatmulDescAttributes_t attr)
+    {
+        int32_t value = 0;
+        size_t written = 0;
+        HIPBLASLT_CHECK(hipblasLtMatmulDescGetAttribute(d_, attr, &value, sizeof(value), &written));
+        return value;
+    }
+    std::uintptr_t ptr() const { return reinterpret_cast<std::uintptr_t>(d_); }
+    hipblasLtMatmulDesc_t raw() const { return d_; }
+
+private:
+    hipblasLtMatmulDesc_t d_ = nullptr;
+};
+
+class Preference
+{
+public:
+    Preference() { HIPBLASLT_CHECK(hipblasLtMatmulPreferenceCreate(&p_)); }
+    ~Preference() { if(p_) hipblasLtMatmulPreferenceDestroy(p_); }
+    Preference(const Preference&) = delete;
+    Preference& operator=(const Preference&) = delete;
+
+    void set_max_workspace(uint64_t nbytes)
+    {
+        HIPBLASLT_CHECK(hipblasLtMatmulPreferenceSetAttribute(
+            p_, HIPBLASLT_MATMUL_PREF_MAX_WORKSPACE_BYTES, &nbytes, sizeof(nbytes)));
+    }
+    std::uintptr_t ptr() const { return reinterpret_cast<std::uintptr_t>(p_); }
+    hipblasLtMatmulPreference_t raw() const { return p_; }
+
+private:
+    hipblasLtMatmulPreference_t p_ = nullptr;
+};
+
 } // namespace
 
 void init_descriptors(nb::module_& m)
@@ -77,4 +131,17 @@ void init_descriptors(nb::module_& m)
         .def("set_attribute", &MatrixLayout::set_attribute,
              nb::arg("attr"), nb::arg("value"))
         .def_prop_ro("ptr", &MatrixLayout::ptr);
+
+    nb::class_<MatmulDesc>(m, "MatmulDesc")
+        .def(nb::init<hipblasComputeType_t, hipDataType>(),
+             nb::arg("compute_type"), nb::arg("scale_type"))
+        .def("set_attribute_int", &MatmulDesc::set_attribute_int)
+        .def("set_attribute_ptr", &MatmulDesc::set_attribute_ptr)
+        .def("get_attribute_int", &MatmulDesc::get_attribute_int)
+        .def_prop_ro("ptr", &MatmulDesc::ptr);
+
+    nb::class_<Preference>(m, "Preference")
+        .def(nb::init<>())
+        .def("set_max_workspace", &Preference::set_max_workspace)
+        .def_prop_ro("ptr", &Preference::ptr);
 }
