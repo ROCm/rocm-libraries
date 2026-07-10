@@ -224,8 +224,8 @@ jobs:
       - name: Checkout rocm-systems for rocjitsu
         uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8 # v5.0.0
         with:
-          repository: newling/rocm-systems
-          ref: rocjitsu-early-mmap-fix
+          repository: ROCm/rocm-systems
+          ref: develop
           path: rocm-systems
           sparse-checkout: |
             emulation/rocjitsu
