@@ -140,8 +140,8 @@ echo "PYTHONPATH=${PYTHONPATH}"
 
 
 # TODO(newling): Track migration to a packaged rocjitsu once TheRock provides a
-# complete runnable artifact. Until then, build rocjitsu from the pinned
-# rocm-systems checkout so this job controls the tool version.
+# complete runnable artifact. Until then, build rocjitsu from the rocm-systems
+# checkout selected by the workflow so this job controls the tool source.
 # rocjitsu is still consumed from a source checkout in this workflow. Build only
 # the CLI and optional runtime/shim targets needed to launch the test workloads;
 # this keeps the job independent of full rocm-systems packaging.
