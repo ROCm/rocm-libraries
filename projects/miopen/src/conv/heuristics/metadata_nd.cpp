@@ -403,16 +403,6 @@ MetadataND::MetadataND(const std::string& device, const int& dim)
     }
 }
 
-namespace {
-
-bool IsTunaNetCategoricalFeature(const std::string& name)
-{
-    return name == "in_layout" || name == "fil_layout" || name == "out_layout" ||
-           name == "precision" || name == "direction";
-}
-
-} // namespace
-
 MIOPEN_INTERNALS_EXPORT
 size_t MetadataND::GetEngineeredNumInputs() const
 {
@@ -423,7 +413,7 @@ size_t MetadataND::GetEngineeredNumInputs() const
                    GetPrecisionClassCount() + GetDirectionClassCount();
     for(const auto& feature : features)
     {
-        if(!IsTunaNetCategoricalFeature(feature))
+        if(!common::IsTunaNetCategoricalFeature(feature))
             ++count;
     }
     // Derived from common::EngineeredConvFeatures (18 for 2D, 19 for 3D) rather than hardcoded,

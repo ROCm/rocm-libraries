@@ -101,6 +101,11 @@ MIOPEN_INTERNALS_EXPORT std::vector<float> EngineeredConvFeatures(std::size_t N,
 // describes; use this instead of hardcoding the size. Defined in ai_heuristics.cpp.
 MIOPEN_INTERNALS_EXPORT std::size_t EngineeredConvFeatureCount(int spatial_dim = 2);
 
+// True if a TunaNet input feature is categorical (one-hot encoded) rather than numeric. Shared by
+// the immed_mode/2D and ND TunaNet encoders so the categorical/numeric split stays consistent in
+// one place. Defined in ai_heuristics.cpp.
+bool IsTunaNetCategoricalFeature(const std::string& name);
+
 /**
  * @brief Load JSON from file path
  * @param path File system path to JSON file

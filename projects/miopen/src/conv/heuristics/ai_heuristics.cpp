@@ -213,6 +213,12 @@ MIOPEN_INTERNALS_EXPORT std::size_t EngineeredConvFeatureCount(int spatial_dim)
                                   /*K_d=*/1)
         .size();
 }
+
+bool IsTunaNetCategoricalFeature(const std::string& name)
+{
+    return name == "in_layout" || name == "fil_layout" || name == "out_layout" ||
+           name == "precision" || name == "direction";
+}
 } // namespace common
 
 #if MIOPEN_ENABLE_AI_IMMED_MODE_FALLBACK
@@ -975,12 +981,6 @@ std::vector<uint64_t> PredictSolver(const conv::ProblemDescription& problem,
 
 namespace {
 
-bool IsTunaNetCategoricalFeature(const std::string& name)
-{
-    return name == "in_layout" || name == "fil_layout" || name == "out_layout" ||
-           name == "precision" || name == "direction";
-}
-
 float TunaNetRawFeatureValue(const std::string& name,
                              const conv::ProblemDescription& problem,
                              bool isFwd)
@@ -1084,7 +1084,7 @@ ExtractTunaNetNDFeatures(const conv::ProblemDescription& problem,
     // absent from the metadata list and are not appended here.
     for(const auto& feature_name : metadata.GetFeatures())
     {
-        if(IsTunaNetCategoricalFeature(feature_name))
+        if(common::IsTunaNetCategoricalFeature(feature_name))
             continue;
         features.push_back(TunaNetRawFeatureValue(feature_name, problem, isFwd));
     }
