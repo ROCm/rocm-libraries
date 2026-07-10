@@ -90,11 +90,11 @@ from .launcher import (
     time_launches,
     wait_stream_and_release,
 )
+from .packing import pack_args
 from .torch_module import (
     TorchLaunchSummary,
     empty_workspace,
     launch_torch_kernel,
-    pack_args,
     resolve_stream,
 )
 

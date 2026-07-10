@@ -4855,7 +4855,7 @@ class TestPackArgsKernargABI(unittest.TestCase):
     def test_inserts_padding_before_misaligned_pointer(self):
         import struct
 
-        from rocke.runtime.torch_module import pack_args
+        from rocke.runtime.packing import pack_args
 
         packed = pack_args(self._MIXED_SIG, self._MIXED_VALS)
         # 3 ptr (24) + 3 i32 (12) = 36, pad 4 to reach 8-alignment, then
@@ -4866,7 +4866,7 @@ class TestPackArgsKernargABI(unittest.TestCase):
     def test_natural_alignment_for_mixed_scalars(self):
         import struct
 
-        from rocke.runtime.torch_module import pack_args
+        from rocke.runtime.packing import pack_args
 
         sig = [
             {"name": "p", "type": "ptr<f32,global>"},
@@ -4886,7 +4886,7 @@ class TestPackArgsKernargABI(unittest.TestCase):
     def test_kernelparams_agrees_with_pack_args_values(self):
         import ctypes
 
-        from rocke.runtime.torch_module import pack_args_kernelparams
+        from rocke.runtime.packing import pack_args_kernelparams
 
         params = pack_args_kernelparams(self._MIXED_SIG, self._MIXED_VALS)
         # One ctypes scalar per kernel arg, in declaration order, with
@@ -4900,13 +4900,13 @@ class TestPackArgsKernargABI(unittest.TestCase):
         self.assertIsInstance(params[3], ctypes.c_int32)
 
     def test_rejects_missing_arg(self):
-        from rocke.runtime.torch_module import pack_args
+        from rocke.runtime.packing import pack_args
 
         with self.assertRaises(KeyError):
             pack_args([{"name": "x", "type": "i32"}], {})
 
     def test_rejects_unknown_type(self):
-        from rocke.runtime.torch_module import pack_args
+        from rocke.runtime.packing import pack_args
 
         with self.assertRaises(ValueError):
             pack_args([{"name": "x", "type": "f16"}], {"x": 1})
