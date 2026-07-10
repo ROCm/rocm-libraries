@@ -110,12 +110,10 @@ still interprets it.
 
 ## Architecture and package layout
 
-A new self-contained package under `projects/hipblaslt/python/` (proposed name
-`pyhipblaslt`; name is a bikeshed to settle later). It is a nanobind C++
-extension built with scikit-build-core, using `tensilelite/rocisa` as the
-structural template but as its own independent package. Detailed build wiring
-(integration with `invoke build`, CI, wheel strategy) is deferred to the
-implementation plan.
+A new self-contained package under `projects/hipblaslt/python/`. The Python
+import name is **`hipblaslt`**, matching the library it wraps. It is a nanobind
+C++ extension built with scikit-build-core, using `tensilelite/rocisa` as the
+structural template but as its own independent package.
 
 ```
 projects/hipblaslt/python/          (new)
@@ -127,7 +125,7 @@ projects/hipblaslt/python/          (new)
 │   ├── enums.cpp                   bind hipDataType, epilogue, all *_ATTR enums
 │   ├── descriptors.cpp             Handle, MatmulDesc, MatrixLayout, Preference
 │   └── matmul.cpp                  heuristic() + matmul() low-level call
-├── pyhipblaslt/
+├── hipblaslt/
 │   ├── __init__.py                 re-exports compiled _core; thin convenience matmul()
 │   └── _coverage.py                header-enum extraction for the coverage meta-test
 └── tests/
@@ -143,11 +141,23 @@ Three layers, bottom to top:
    "full control" surface.
 2. **`DeviceArray`** (compiled) — explicit host/device memory object, the
    data-plane counterpart to the control-plane in `_core`.
-3. **`pyhipblaslt/__init__.py`** (pure Python) — thin re-exports plus the
+3. **`hipblaslt/__init__.py`** (pure Python) — thin re-exports plus the
    ancillary convenience `matmul(a, b)` shim, built strictly on top of layer 1.
 
 Layers 1 and 2 are the product; layer 3 is a convenience skin that adds no
 capability the lower layers lack, so nothing being debugged is ever hidden.
+
+### Build integration
+
+The Python package is built **opt-in**: it is not part of the default
+`invoke build` and does not affect existing host/device/client builds unless
+explicitly requested. A new flag on `invoke build` (e.g. `--python` /
+`-p`, exact name settled in the implementation plan) enables configuring and
+building the extension. Rationale: the package is a developer tool, not part of
+the shipped library, and keeping it off the default path means it adds zero cost
+or dependency risk to normal builds and CI until someone asks for it. Detailed
+wiring (the flag plumbing through `tasks.py` / cmake, CI jobs, and wheel
+strategy per Python × ROCm combination) is deferred to the implementation plan.
 
 ## Core objects and the low-level control surface
 
@@ -350,10 +360,9 @@ scope for v1.
 
 ## Open questions / deferred to implementation plan
 
-- Final package name (`pyhipblaslt` vs. alternatives).
-- Build integration specifics: wiring into `invoke build`, CI jobs, wheel
-  strategy per Python × ROCm combination. (The user has opinions here to capture
-  in the plan.)
+- Exact name of the opt-in `invoke build` flag (e.g. `--python` / `-p`) and its
+  plumbing through `tasks.py` / cmake; CI jobs; wheel strategy per
+  Python × ROCm combination.
 - Exact `HeuristicResult` field surface and `Algo` identifier representation.
 - Minimum `ml_dtypes` version pin (fp6/fp4/e8m0 are recent additions) and the
   graceful-degradation path when an installed version lacks a narrow type.
