@@ -108,14 +108,15 @@ jobs:
           COMMIT_ID: ${{ github.sha }}
           CURRENT_BRANCH: ${{ github.ref_name }}
           PYTHON_LIB: ${{ steps.setup-python.outputs.python-path }}
-          LD_LIBRARY_PATH: "${{ github.workspace }}/therock_build/lib:${LD_LIBRARY_PATH}"
+          LD_LIBRARY_PATH: "${PWD}/../therock_build/lib:${LD_LIBRARY_PATH}"
           TESTS_FILTERS: ${{ inputs.tests_filters }}
         working-directory: rocm-tests
         run: |
+          ls ..
           pwd
-          ls *
+          ls
           source .venv/bin/activate
-          export LD_LIBRARY_PATH="$(dirname ${PYTHON_LIB})/../lib:${GITHUB_WORKSPACE}/therock_build/lib:${LD_LIBRARY_PATH}"
+          export LD_LIBRARY_PATH="$(dirname ${PYTHON_LIB})/../lib:../therock_build/lib:${LD_LIBRARY_PATH}"
           pytest tests/e2e/compiler/ \
             tests/e2e/hwq_heuristic/ \
             tests/e2e/hip_runtime/ \
@@ -123,7 +124,7 @@ jobs:
             tests/e2e/rccl/ \
             tests/e2e/rocm_libs/ \
             tests/e2e/rocprim/ \
-            --rock-dir=${{ github.workspace }}/therock_build \
+            --rock-dir=../therock_build \
             --html=nightly_report.html --self-contained-html \
             --md-report --md-report-verbose=1 --md-report-color=never \
             --md-report-flavor gfm --md-report-output=md_summary.md --md-report-tee \
