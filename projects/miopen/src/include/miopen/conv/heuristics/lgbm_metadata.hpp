@@ -6,6 +6,7 @@
 
 #include <string>
 #include <unordered_map>
+#include <unordered_set>
 #include <vector>
 
 namespace miopen {
@@ -52,6 +53,11 @@ public:
     // Helper: look up the solver_name categorical code; -1 on miss.
     int SolverCode(const std::string& solver_name) const;
 
+    // True if `solver_name` is one of the always-applicable naive fallback
+    // solvers (rank.naive_fallback_solvers). These are demoted to the tail of
+    // the ranked pick list so they are chosen only when nothing else applies.
+    bool IsNaiveFallback(const std::string& solver_name) const;
+
 private:
     LgbmMetadata();
 
@@ -59,6 +65,7 @@ private:
     std::unordered_map<std::string, std::vector<std::string>> categorical_vocab;
     std::vector<std::string> solvers;
     std::unordered_map<std::string, int> solver_index;
+    std::unordered_set<std::string> naive_fallback;
 };
 
 } // namespace lgbm

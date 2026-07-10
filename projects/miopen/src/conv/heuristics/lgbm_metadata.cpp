@@ -41,6 +41,14 @@ LgbmMetadata::LgbmMetadata()
         for(int i = 0; i < static_cast<int>(solvers.size()); ++i)
             solver_index[solvers[i]] = i;
 
+        // Always-applicable naive fallbacks; demoted to the tail of the ranked
+        // pick list. Optional key (older bundles omit it).
+        if(rank.contains("naive_fallback_solvers"))
+        {
+            for(const auto& name : rank.at("naive_fallback_solvers"))
+                naive_fallback.insert(name.get<std::string>());
+        }
+
         ready = true;
         MIOPEN_LOG_I2("LGBM metadata loaded: " << solvers.size() << " solvers");
     }
@@ -69,6 +77,11 @@ int LgbmMetadata::SolverCode(const std::string& solver_name) const
 {
     const auto it = solver_index.find(solver_name);
     return it != solver_index.end() ? it->second : -1;
+}
+
+bool LgbmMetadata::IsNaiveFallback(const std::string& solver_name) const
+{
+    return naive_fallback.count(solver_name) != 0;
 }
 
 } // namespace lgbm

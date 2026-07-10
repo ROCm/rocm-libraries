@@ -307,31 +307,44 @@ std::vector<uint64_t> PickSolverRanked(const conv::ProblemDescription& problem,
 
     // Score every solver in the vocabulary (lambdarank: higher = predicted
     // faster), then return the solver IDs sorted by score. MIOpen's downstream
-    // walk applies IsApplicable lazily over this ranked list (matching the
-    // TunaNet contract), so there is no candidate masking or applicability check
-    // here.
+    // walk keeps every applicable solver in rank order (best-ranked wins), so
+    // there is no candidate masking or applicability check here.
+    //
+    // The ConvDirectNaiveConv* fallbacks are ALWAYS applicable, and the model
+    // over-ranks them on out-of-distribution shapes -- ranking one #1 would make
+    // the walk pick it over a much faster real kernel. Demote all naive
+    // fallbacks below every non-naive solver (they still keep their relative
+    // score order), so a naive solver is only reached when nothing else applies.
+    // This mirrors develop's ND TunaNet, which ranks naive last.
     const auto& solvers = meta.Solvers();
-    std::vector<std::pair<double, std::size_t>> scored;
+    struct Scored
+    {
+        double score;
+        std::size_t idx;
+        bool is_naive;
+    };
+    std::vector<Scored> scored;
     scored.reserve(solvers.size());
     for(std::size_t i = 0; i < solvers.size(); ++i)
     {
         SetCategorical(row[kIdxSolverName], meta.SolverCode(solvers[i]));
         double s = 0.0;
         lgbm_rank_predict(row.data(), /*pred_margin=*/0, &s);
-        scored.emplace_back(s, i);
+        scored.push_back({s, i, meta.IsNaiveFallback(solvers[i])});
     }
-    std::sort(scored.begin(), scored.end(), [](const auto& a, const auto& b) {
-        return a.first > b.first;
+    std::sort(scored.begin(), scored.end(), [](const Scored& a, const Scored& b) {
+        if(a.is_naive != b.is_naive)
+            return !a.is_naive; // non-naive solvers rank ahead of naive fallbacks
+        return a.score > b.score;
     });
 
     std::vector<uint64_t> ranked;
     ranked.reserve(scored.size());
-    for(const auto& [score, idx] : scored)
+    for(const auto& entry : scored)
     {
-        std::ignore = score;
         // Map the model's solver name to this build's solver Id. Names unknown
         // to this MIOpen version are skipped (model/runtime vocab drift).
-        if(const solver::Id id{solvers[idx].c_str()}; id.IsValid())
+        if(const solver::Id id{solvers[entry.idx].c_str()}; id.IsValid())
             ranked.push_back(id.Value());
     }
     return ranked;
