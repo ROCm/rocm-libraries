@@ -56,6 +56,9 @@ void init_enums(nb::module_& m)
         reg(e, "Epilogue", "RELU_BIAS", HIPBLASLT_EPILOGUE_RELU_BIAS);
         reg(e, "Epilogue", "GELU", HIPBLASLT_EPILOGUE_GELU);
         reg(e, "Epilogue", "GELU_BIAS", HIPBLASLT_EPILOGUE_GELU_BIAS);
+        // TODO: installed SDK 1.2.2 only has SIGMOID_EXT=262144; SIGMOID=1024 exists in dev
+        // header. These are different enum values (not aliases) — reconcile when the target
+        // SDK version is fixed.
         reg(e, "Epilogue", "SIGMOID", HIPBLASLT_EPILOGUE_SIGMOID_EXT);
         // NOTE: the coverage harness (Task 18) enumerates the header to catch any
         // member omitted here; extend this list when that test flags a gap.
