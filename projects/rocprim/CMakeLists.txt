@@ -77,9 +77,6 @@ cmake_dependent_option(BUILD_EXAMPLE "Build examples" OFF "NOT ONLY_INSTALL" OFF
 option(BUILD_NAIVE_BENCHMARK "Build naive benchmarks" OFF)
 cmake_dependent_option(BUILD_DOCS "Build documentation (requires sphinx)" OFF "NOT ONLY_INSTALL" OFF)
 option(BUILD_CODE_COVERAGE "Build with code coverage enabled" OFF)
-# CI passes -DROCPRIM_ENABLE_COVERAGE=ON (the standardized coverage flag); it is
-# gated directly at the instrumentation site below (no shared variable toggled).
-option(ROCPRIM_ENABLE_COVERAGE "Enable code coverage" OFF)
 option(ROCPRIM_INSTALL "Enable installation of rocPRIM (projects embedding rocPRIM may want to turn this OFF)" ON)
 option(ROCPRIM_ENABLE_ASSERTS "Enable asserts in release build)" OFF)
 cmake_dependent_option(ROCPRIM_ENABLE_TOPK "Enable the device level topk and segmented topk algorithms" OFF BUILD_TEST ON)
@@ -274,17 +271,6 @@ if (ROCPRIM_PROJECT_IS_TOP_LEVEL)
     DESCRIPTION "rocPRIM is a header-only library that provides HIP parallel primitives." 
     MAINTAINER "rocPRIM Maintainer <rocprim-maintainer@amd.com>"
     HEADER_ONLY
-  )
-endif()
-
-if(ROCPRIM_ENABLE_COVERAGE)
-  target_compile_options(rocprim INTERFACE
-    -w
-    -fprofile-instr-generate
-    -fcoverage-mapping
-  )
-  target_link_options(rocprim INTERFACE
-    -fprofile-instr-generate
   )
 endif()
 
