@@ -952,17 +952,29 @@ TEST_P(GPU_CandidateSelection_FP32, Engineered3dInputSwap_Test)
     const auto is_categorical = [](const std::string& n) {
         return n == "in_layout" || n == "fil_layout" || n == "out_layout" || n == "precision";
     };
-    std::size_t raw_idx = 0, in_d_idx = engineered.size(), out_d_idx = engineered.size();
+    std::size_t raw_idx   = 0;
+    std::size_t in_d_idx  = 0;
+    std::size_t out_d_idx = 0;
+    bool in_d_found       = false;
+    bool out_d_found      = false;
     for(const auto& name : meta.input_params())
     {
         if(meta.GetInputConstant(name).has_value() || is_categorical(name) || name == "direction")
             continue;
         if(name == "in_d")
-            in_d_idx = header + raw_idx;
+        {
+            in_d_idx   = header + raw_idx;
+            in_d_found = true;
+        }
         else if(name == "out_d")
-            out_d_idx = header + raw_idx;
+        {
+            out_d_idx   = header + raw_idx;
+            out_d_found = true;
+        }
         ++raw_idx;
     }
+    ASSERT_TRUE(in_d_found);
+    ASSERT_TRUE(out_d_found);
     ASSERT_LT(in_d_idx, engineered.size());
     ASSERT_LT(out_d_idx, engineered.size());
     EXPECT_FLOAT_EQ(engineered[in_d_idx], out_d)
