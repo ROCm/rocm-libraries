@@ -7,10 +7,10 @@
 # kernel family. A green run means the dual-backend contract still holds.
 #
 # Cross-platform (Windows + Linux) replacement for the legacy check_byte_identity.sh.
-# All paths are derived relative to this file so the rocKE/ tree stays copy-able.
+# All paths are derived relative to this file so the rocke/platform/ tree stays copy-able.
 #
 # Usage:
-#   python rocKE/tools/check_byte_identity.py [--ir] [--only SUBSTR]
+#   python rocke/platform/tools/check_byte_identity.py [--ir] [--only SUBSTR]
 #       [--build-root DIR] [--ref-pyroot DIR] [--ref-shim DIR]
 
 from __future__ import annotations

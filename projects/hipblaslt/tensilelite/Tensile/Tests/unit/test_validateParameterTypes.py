@@ -71,6 +71,9 @@ class TestGetExpectedTypes:
         fresh = _getExpectedTypes(validParameters)
         assert _expectedParamTypes == fresh
 
+    def test_streamk_valid_modes_exclude_removed_modes(self):
+        assert validParameters["StreamK"] == [0, 3, 4, 5]
+
 
 class TestValidateParameterTypes:
     """Tests for the validateParameterTypes function (pure: returns records, no side effects)."""

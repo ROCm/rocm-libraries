@@ -95,7 +95,7 @@ signal that protects the contract.
 You didn't build it (or built it elsewhere). Build into the default location, or
 pass `--archive`:
 ```bash
-cmake -S Cpp -B /tmp/rocke_verify -DCMAKE_BUILD_TYPE=Release && cmake --build /tmp/rocke_verify -j
+cmake -S cpp -B /tmp/rocke_verify -DCMAKE_BUILD_TYPE=Release && cmake --build /tmp/rocke_verify -j
 # default archive path is $TMPDIR/rocke_verify/librocke_core.a
 ```
 `tools/check_byte_identity.py` does the build + gate together.
@@ -113,8 +113,8 @@ your environment provides (e.g. `sudo -n -E <venv>/bin/python …`), and write
 artifacts somewhere you own (e.g. `/tmp`), not into a root-owned repo path.
 
 ### `No module named 'rocke'` / `Cpp`
-`PYTHONPATH` isn't pointing at `dnn-providers/hip-kernel-provider/rocKE/Python`. Set it
-(`PYTHONPATH=<…>/dnn-providers/hip-kernel-provider/rocKE/Python`) and run from there.
+`PYTHONPATH` isn't pointing at `dnn-providers/hip-kernel-provider/rocke/platform/python`. Set it
+(`PYTHONPATH=<…>/dnn-providers/hip-kernel-provider/rocke/platform/python`) and run from there.
 
 ### A probe can't find `llvm-readelf` / `objdump`
 The ROCm `bin/` directory isn't on `PATH`. Add it.

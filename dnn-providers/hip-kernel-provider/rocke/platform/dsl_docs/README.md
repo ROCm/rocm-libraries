@@ -36,7 +36,7 @@ and the hipDNN provider's Fast / JIT / IR-artifact / C-JIT modes):
 The implementation tree is:
 
 ```text
-Python/rocke/
+python/rocke/
 ├── core/ # SSA IR, IR printer, conservative passes, LLVM/HIP/CK Tile lowering
 ├── runtime/ # libamd_comgr + libamdhip64 ctypes; launcher, workspace, timing
 ├── helpers/ # CK Tile-like authoring helpers and the high-level compile entrypoint
@@ -127,10 +127,10 @@ Hard facts:
 ## Validation Status
 
 The docs in this folder are written against the current code. Run commands
-from the `rocKE/` root with the Python interpreter for your ROCm environment:
+from the `rocke/platform/` root with the Python interpreter for your ROCm environment:
 
 ```bash
-export PYTHONPATH=Python
+export PYTHONPATH=python
 
 PYTHONDONTWRITEBYTECODE=1 python tests/test_rocke.py
 
@@ -148,19 +148,19 @@ These docs are written against the current code. When this file and code disagre
 
 Conventional anchors:
 
-- Package re-exports: `Python/rocke/__init__.py`, `Python/rocke/helpers/__init__.py`.
-- IR + builder: `Python/rocke/core/ir.py`.
-- Production lowering: `Python/rocke/core/lower_llvm.py`.
-- HIP debug lowering: `Python/rocke/core/lower_hip.py`.
-- CK Tile parity emission: `Python/rocke/core/lower_cktile.py`.
-- Conservative passes: `Python/rocke/core/passes.py`.
-- COMGR: `Python/rocke/runtime/comgr.py`.
-- HIP runtime: `Python/rocke/runtime/hip_module.py`.
-- Launcher / workspace / timing: `Python/rocke/runtime/launcher.py`.
-- Torch arg packing: `Python/rocke/runtime/torch_module.py`.
-- High-level compile: `Python/rocke/helpers/compile.py`.
-- Manifest schema: `Python/rocke/helpers/manifest.py`.
+- Package re-exports: `python/rocke/__init__.py`, `python/rocke/helpers/__init__.py`.
+- IR + builder: `python/rocke/core/ir.py`.
+- Production lowering: `python/rocke/core/lower_llvm.py`.
+- HIP debug lowering: `python/rocke/core/lower_hip.py`.
+- CK Tile parity emission: `python/rocke/core/lower_cktile.py`.
+- Conservative passes: `python/rocke/core/passes.py`.
+- COMGR: `python/rocke/runtime/comgr.py`.
+- HIP runtime: `python/rocke/runtime/hip_module.py`.
+- Launcher / workspace / timing: `python/rocke/runtime/launcher.py`.
+- Torch arg packing: `python/rocke/runtime/torch_module.py`.
+- High-level compile: `python/rocke/helpers/compile.py`.
+- Manifest schema: `python/rocke/helpers/manifest.py`.
 - Optimization runbook: `gpu-op-optimization-runbook` Cursor skill.
 - DSL runbook compliance table: `dsl_docs/optimization/runbook_compliance.md`.
-- Coordinate-transform DAG walkthrough: `Python/rocke/TRANSFORM_DAG.md`.
-- Helpers reference: `Python/rocke/helpers/README.md`.
+- Coordinate-transform DAG walkthrough: `python/rocke/TRANSFORM_DAG.md`.
+- Helpers reference: `python/rocke/helpers/README.md`.
