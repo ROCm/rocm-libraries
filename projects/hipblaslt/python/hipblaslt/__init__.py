@@ -38,6 +38,97 @@ _core.DeviceArray.to_numpy = _device_array_to_numpy
 # These are monkey-patched onto the C++ class so the C++ side stays lean.
 # ---------------------------------------------------------------------------
 
+import ctypes as _ctypes
+import ctypes.util as _ctu
+
+
+def _load_libhip():
+    name = _ctu.find_library("amdhip64") or "libamdhip64.so"
+    try:
+        return _ctypes.CDLL(name)
+    except OSError:
+        return None
+
+
+_libhip = _load_libhip()
+
+
+# DLPack ABI structs (v0.8) — defined once at module level so they are not
+# reconstructed on every __dlpack__ call.
+_kDLROCM = 10  # ROCm device type in the DLPack ABI
+_kDLFloat = 2
+
+
+class _DLDevice(_ctypes.Structure):
+    _fields_ = [("device_type", _ctypes.c_int), ("device_id", _ctypes.c_int)]
+
+
+class _DLDataType(_ctypes.Structure):
+    _fields_ = [
+        ("code", _ctypes.c_uint8),
+        ("bits", _ctypes.c_uint8),
+        ("lanes", _ctypes.c_uint16),
+    ]
+
+
+class _DLTensor(_ctypes.Structure):
+    _fields_ = [
+        ("data", _ctypes.c_void_p),
+        ("device", _DLDevice),
+        ("ndim", _ctypes.c_int),
+        ("dtype", _DLDataType),
+        ("shape", _ctypes.POINTER(_ctypes.c_int64)),
+        ("strides", _ctypes.POINTER(_ctypes.c_int64)),
+        ("byte_offset", _ctypes.c_uint64),
+    ]
+
+
+class _DLManagedTensor(_ctypes.Structure):
+    pass
+
+
+# Deleter signature: void (*)(DLManagedTensor*)
+_DeleterType = _ctypes.CFUNCTYPE(None, _ctypes.POINTER(_DLManagedTensor))
+
+_DLManagedTensor._fields_ = [
+    ("dl_tensor", _DLTensor),
+    ("manager_ctx", _ctypes.c_void_p),
+    ("deleter", _DeleterType),
+]
+
+
+def _get_device_id(ptr_int):
+    """Return the device id that owns the HIP pointer *ptr_int*.
+
+    Uses hipPointerGetAttributes so the result reflects the pointer's actual
+    device rather than the calling thread's current device (hipGetDevice).
+    Falls back to hipGetDevice when hipPointerGetAttributes fails.
+    """
+    if _libhip is None:
+        return 0
+
+    class _HipPointerAttr(_ctypes.Structure):
+        _fields_ = [
+            ("memoryType", _ctypes.c_int),
+            ("device", _ctypes.c_int),
+            ("devicePointer", _ctypes.c_void_p),
+            ("hostPointer", _ctypes.c_void_p),
+            ("isManaged", _ctypes.c_int),
+            ("allocationFlags", _ctypes.c_uint),
+        ]
+
+    attr = _HipPointerAttr()
+    ret = _libhip.hipPointerGetAttributes(
+        _ctypes.byref(attr), _ctypes.c_void_p(ptr_int)
+    )
+    if ret == 0:  # hipSuccess
+        return attr.device
+    # Fall back to hipGetDevice
+    dev = _ctypes.c_int(0)
+    _libhip.hipGetDevice(_ctypes.byref(dev))
+    return dev.value
+
+
 def _device_array_dlpack(self, stream=None):
     """Return a DLPack capsule for this DeviceArray.
 
@@ -49,72 +140,27 @@ def _device_array_dlpack(self, stream=None):
     consumer passes a ``stream`` argument we ignore it here — callers that
     require strict ordering must synchronise before calling.
     """
-    import ctypes
-
-    # ----- dlpack ABI structs (v0.8) ----------------------------------------
-    # kDLROCM = 10  (ROCm device type in the DLPack ABI)
-    kDLROCM = 10
-    kDLFloat = 2
-
-    class DLDevice(ctypes.Structure):
-        _fields_ = [("device_type", ctypes.c_int), ("device_id", ctypes.c_int)]
-
-    class DLDataType(ctypes.Structure):
-        _fields_ = [
-            ("code", ctypes.c_uint8),
-            ("bits", ctypes.c_uint8),
-            ("lanes", ctypes.c_uint16),
-        ]
-
-    class DLTensor(ctypes.Structure):
-        _fields_ = [
-            ("data", ctypes.c_void_p),
-            ("device", DLDevice),
-            ("ndim", ctypes.c_int),
-            ("dtype", DLDataType),
-            ("shape", ctypes.POINTER(ctypes.c_int64)),
-            ("strides", ctypes.POINTER(ctypes.c_int64)),
-            ("byte_offset", ctypes.c_uint64),
-        ]
-
-    class DLManagedTensor(ctypes.Structure):
-        pass
-
-    # Deleter signature: void (*)(DLManagedTensor*)
-    _DeleterType = ctypes.CFUNCTYPE(None, ctypes.POINTER(DLManagedTensor))
-
-    DLManagedTensor._fields_ = [
-        ("dl_tensor", DLTensor),
-        ("manager_ctx", ctypes.c_void_p),
-        ("deleter", _DeleterType),
-    ]
-
-    # Resolve the ROCm device id for the pointer.
-    device_id = ctypes.c_int(0)
-    try:
-        hip = ctypes.CDLL("libamdhip64.so.6")
-        hip.hipGetDevice(ctypes.byref(device_id))
-    except OSError:
-        pass  # stay at 0
+    # Resolve the ROCm device id for the pointer (uses hipPointerGetAttributes).
+    device_id = _get_device_id(self.ptr)
 
     # Map hipDataType → DLDataType (best-effort; covers common training types).
     _DTYPE_MAP = {
-        _core.DataType.R_32F: DLDataType(kDLFloat, 32, 1),
-        _core.DataType.R_64F: DLDataType(kDLFloat, 64, 1),
-        _core.DataType.R_16F: DLDataType(kDLFloat, 16, 1),
+        _core.DataType.R_32F: _DLDataType(_kDLFloat, 32, 1),
+        _core.DataType.R_64F: _DLDataType(_kDLFloat, 64, 1),
+        _core.DataType.R_16F: _DLDataType(_kDLFloat, 16, 1),
     }
-    dl_dtype = _DTYPE_MAP.get(self.dtype, DLDataType(kDLFloat, 32, 1))
+    dl_dtype = _DTYPE_MAP.get(self.dtype, _DLDataType(_kDLFloat, 32, 1))
 
     # Build shape array (heap-allocated; lifetime managed by DLManagedTensor).
     ndim = len(self.shape)
-    shape_arr = (ctypes.c_int64 * ndim)(*self.shape)
+    shape_arr = (_ctypes.c_int64 * ndim)(*self.shape)
 
-    managed = DLManagedTensor()
-    managed.dl_tensor.data = ctypes.c_void_p(self.ptr)
-    managed.dl_tensor.device = DLDevice(kDLROCM, device_id.value)
+    managed = _DLManagedTensor()
+    managed.dl_tensor.data = _ctypes.c_void_p(self.ptr)
+    managed.dl_tensor.device = _DLDevice(_kDLROCM, device_id)
     managed.dl_tensor.ndim = ndim
     managed.dl_tensor.dtype = dl_dtype
-    managed.dl_tensor.shape = ctypes.cast(shape_arr, ctypes.POINTER(ctypes.c_int64))
+    managed.dl_tensor.shape = _ctypes.cast(shape_arr, _ctypes.POINTER(_ctypes.c_int64))
     managed.dl_tensor.strides = None  # None → C-contiguous
     managed.dl_tensor.byte_offset = 0
 
@@ -126,24 +172,27 @@ def _device_array_dlpack(self, stream=None):
     managed.deleter = _noop_deleter
 
     # Wrap in a PyCapsule named "dltensor" as the DLPack spec requires.
-    pythonapi = ctypes.pythonapi
+    pythonapi = _ctypes.pythonapi
     PyCapsule_New = pythonapi.PyCapsule_New
-    PyCapsule_New.restype = ctypes.py_object
-    PyCapsule_New.argtypes = [ctypes.c_void_p, ctypes.c_char_p, ctypes.c_void_p]
+    PyCapsule_New.restype = _ctypes.py_object
+    PyCapsule_New.argtypes = [_ctypes.c_void_p, _ctypes.c_char_p, _ctypes.c_void_p]
 
-    # Keep managed and shape_arr alive as long as the capsule exists by
-    # stashing them on the capsule object via a closure held in _noop_deleter.
-    # We cannot attach attributes to a PyCapsule, so we keep a module-level
-    # registry keyed by capsule id.  This is safe because the DLPack consumer
-    # is expected to consume the capsule exactly once (rename to "used_dltensor"
-    # after consumption is the framework's job).
-    managed_p = ctypes.cast(ctypes.addressof(managed), ctypes.c_void_p)
-    capsule = PyCapsule_New(managed_p, b"dltensor", None)
+    managed_p = _ctypes.cast(_ctypes.addressof(managed), _ctypes.c_void_p)
+
+    # Destructor: called by CPython when the capsule is finalized; removes the
+    # pin entry so the ctypes objects can be collected.
+    def _capsule_destructor(cap):
+        _dlpack_pin.pop(id(cap), None)
+
+    cap_destructor = _ctypes.CFUNCTYPE(None, _ctypes.py_object)(_capsule_destructor)
+
+    capsule = PyCapsule_New(managed_p, b"dltensor", cap_destructor)
 
     # Pin the ctypes objects so GC does not collect them before the consumer
     # has a chance to read the capsule.  We attach them to the capsule object
-    # using a side-channel dict keyed by capsule's id().
-    _dlpack_pin[id(capsule)] = (managed, shape_arr, _noop_deleter)
+    # using a side-channel dict keyed by capsule's id().  The capsule destructor
+    # above removes the entry when CPython finalises the capsule.
+    _dlpack_pin[id(capsule)] = (managed, shape_arr, _noop_deleter, cap_destructor)
     return capsule
 
 
@@ -156,37 +205,42 @@ def _device_array_dlpack_device(self):
 
     Returns (10, device_id) where 10 == kDLROCM.
     """
-    import ctypes
-    device_id = ctypes.c_int(0)
-    try:
-        hip = ctypes.CDLL("libamdhip64.so.6")
-        hip.hipGetDevice(ctypes.byref(device_id))
-    except OSError:
-        pass
-    return (10, device_id.value)  # 10 = kDLROCM
+    return (_kDLROCM, _get_device_id(self.ptr))
 
 
 @staticmethod
 def _from_dlpack(obj):
     """Import a device tensor from an external framework.
 
-    Accepts any object that exposes ``__cuda_array_interface__`` (torch-ROCm,
-    cupy-ROCm) and copies the data into a new DeviceArray.  A true zero-copy
-    borrow would require reference-counted ownership across the C++ boundary,
-    which is deferred to a later task; the copy preserves correctness for now.
+    Accepts any object that exposes ``__cuda_array_interface__`` or
+    ``__hip_array_interface__`` (torch-ROCm, cupy-ROCm) and copies the data
+    into a new DeviceArray.  A true zero-copy borrow would require
+    reference-counted ownership across the C++ boundary, which is deferred to
+    a later task; the copy preserves correctness for now.
 
-    Raises ``NotImplementedError`` if neither ``__cuda_array_interface__``
-    nor ``__hip_array_interface__`` is found on ``obj``.
+    Objects that expose only the pure DLPack protocol (``__dlpack__`` /
+    ``__dlpack_device__``) are not yet supported — a ``NotImplementedError``
+    with an explicit message is raised in that case.
+
+    Raises ``NotImplementedError`` if neither array-interface nor DLPack is
+    found on ``obj``.
     """
-    import ctypes
     import numpy as _np
 
     iface = getattr(obj, "__cuda_array_interface__",
                     getattr(obj, "__hip_array_interface__", None))
     if iface is None:
+        # Check for pure DLPack before giving up.
+        if hasattr(obj, "__dlpack__") and hasattr(obj, "__dlpack_device__"):
+            raise NotImplementedError(
+                "from_dlpack: pure DLPack protocol not yet supported; "
+                "pass a tensor with __cuda_array_interface__ or "
+                "__hip_array_interface__"
+            )
         raise NotImplementedError(
-            "from_dlpack: object has no __cuda_array_interface__ or "
-            "__hip_array_interface__.  Pass a torch-ROCm or cupy-ROCm tensor."
+            "from_dlpack: object has no __cuda_array_interface__, "
+            "__hip_array_interface__, or __dlpack__.  "
+            "Pass a torch-ROCm or cupy-ROCm tensor."
         )
 
     ptr = iface["data"][0]          # (pointer, read_only)
@@ -220,21 +274,21 @@ def _from_dlpack(obj):
     nbytes = nelems * itemsize
 
     da = _core.DeviceArray._alloc(nbytes, dtype, [int(s) for s in shape])
-    try:
-        hip = ctypes.CDLL("libamdhip64.so.6")
-        # hipMemcpyKind: hipMemcpyDeviceToDevice = 3
-        rc = hip.hipMemcpy(
-            ctypes.c_void_p(da.ptr),
-            ctypes.c_void_p(ptr),
-            ctypes.c_size_t(nbytes),
-            ctypes.c_int(3),
-        )
-        if rc != 0:
-            da.free()
-            raise RuntimeError(f"hipMemcpy (D2D) failed with code {rc}")
-    except OSError as exc:
+    if _libhip is None:
         da.free()
-        raise RuntimeError("libamdhip64.so.6 not found; cannot copy device memory") from exc
+        raise RuntimeError(
+            "libamdhip64 not found; cannot copy device memory"
+        )
+    # hipMemcpyKind: hipMemcpyDeviceToDevice = 3
+    rc = _libhip.hipMemcpy(
+        _ctypes.c_void_p(da.ptr),
+        _ctypes.c_void_p(ptr),
+        _ctypes.c_size_t(nbytes),
+        _ctypes.c_int(3),
+    )
+    if rc != 0:
+        da.free()
+        raise RuntimeError(f"hipMemcpy (D2D) failed with code {rc}")
     return da
 
 
