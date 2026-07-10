@@ -77,7 +77,17 @@ struct CompileSpec
     std::int64_t numKvHeads = 0;
     std::int64_t headSize = 0;
     std::int64_t blockSizeQ = 0; // kernel tiling; unused for selection
-    std::int64_t blockSizeK = 0; // kernel tiling; unused for selection
+    std::int64_t blockSizeK = 0; // kernel tiling (paged-KV block); unused for selection
+    // Tuning knob the FMHA heuristic model ranks on: the 2D tile width T
+    // (num_warps × tile_size grid). Distinct from blockSizeK (the paged-KV
+    // block); T = mult × blockSizeK in the sweep. Unused for selection
+    // (satisfies() excludes tiling), but REQUIRED for the tie-break featurizer:
+    // it maps to the model's tile_n0 feature. 0 = not carried (older catalogs).
+    std::int64_t tileSize = 0;
+    // Tuning knob: cooperating wavefronts per tile. Measured 17-32% TFLOPS swing
+    // at fixed shape+tile (with winner flips), so the model ranks on it — maps to
+    // the num_warps feature (idx 68). Selection-neutral; 0 = not carried.
+    std::int64_t numWarps = 0;
     std::string maskMode; // e.g. "none"
 };
 

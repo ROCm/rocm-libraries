@@ -104,21 +104,30 @@ class FeatureEngine(ABC):
 
 
 class GemmUniversalFeatureEngine(FeatureEngine):
-    """Feature engine for gemm_universal kernels."""
+    """Feature engine for gemm_universal kernels.
+
+    Chip-configuration values (CU/XCD/shader-engine counts, clock, LDS) are NOT
+    given checked-in defaults (policy: no CU counts in source). They default to 0
+    and are supplied per target by the caller -- from the device-queried ``hw_*``
+    columns the generator stamps into the parquet (see ``train.get_feature_engine``).
+    A 0 chip-config yields obviously-degenerate hw features rather than a
+    plausible-but-wrong hardcoded chip. Only true microarch/cache constants keep
+    real defaults.
+    """
 
     def __init__(
         self,
-        num_cus: int = 256,
-        lds_capacity: int = 65536,
-        max_clock_mhz: int = 2400,
+        num_cus: int = 0,
+        lds_capacity: int = 0,
+        max_clock_mhz: int = 0,
+        shader_engines: int = 0,
+        num_xcd: int = 0,
         simds_per_cu: int = 4,
-        shader_engines: int = 32,
         max_waves_per_cu: int = 32,
         wavefront_size: int = 64,
         l1_cache_kb: int = 32,
         l2_cache_kb: int = 4096,
         l3_cache_kb: int = 262144,
-        num_xcd: int = 8,
     ):
         self._hw = {
             "num_cus": num_cus,
@@ -635,19 +644,22 @@ class FmhaFeatureEngine(FeatureEngine):
     is computed with the same formula the C++ extractor uses.
     """
 
-    NUM_FEATURES = 68
+    NUM_FEATURES = 69
 
     def __init__(
         self,
-        num_cus: int = 304,
+        num_cus: int = 0,
+        shader_engines: int = 0,
+        max_clock_mhz: int = 0,
+        lds_capacity: int = 0,
+        num_xcd: int = 0,
         simds_per_cu: int = 4,
-        shader_engines: int = 32,
-        max_clock_mhz: int = 2400,
         wavefront_size: int = 64,
-        lds_capacity: int = 65536,
-        num_xcd: int = 8,
     ):
-        # Defaults match the C++ ``FmhaHardwareProfile`` defaults exactly.
+        # Chip-config counts (CU/XCD/shader-engine/clock/LDS) carry no checked-in
+        # values (policy: no CU counts in source); they are 0 unless the caller
+        # supplies the target's device-queried hw_* values. The C++ side mirrors
+        # this via HardwareProfile::fromDevice().
         self._hw = {
             "num_cus": num_cus,
             "simds_per_cu": simds_per_cu,
@@ -730,6 +742,11 @@ class FmhaFeatureEngine(FeatureEngine):
             "hw_wavefront_size",  # 65
             "hw_lds_capacity",  # 66
             "hw_num_xcd",  # 67
+            # Appended (68) not inserted, to keep indices 0-67 stable. num_warps
+            # is a real tuning axis (measured 17-32% TFLOPS swing at fixed
+            # shape+tile, with winner flips) with no other feature slot; the
+            # sweep varies it, so the model must see it to rank configs.
+            "num_warps",  # 68
         ]
 
     def get_categorical_features(self) -> list[str]:
@@ -776,6 +793,7 @@ class FmhaFeatureEngine(FeatureEngine):
         tn1 = float(_g(kernel, "tile_n1", "tn1", default=dv))
         tk1 = float(_g(kernel, "tile_k1", "tk1", default=tn0))
         tk0max = float(_g(kernel, "tile_k0max", "tk0max", default=tk0))
+        num_warps = float(_g(kernel, "num_warps", "nw", default=1))
 
         ps = float(_g(kernel, "pad_s", default=0))
         psk = float(_g(kernel, "pad_sk", default=0))
@@ -899,6 +917,7 @@ class FmhaFeatureEngine(FeatureEngine):
                 hw["wavefront_size"],
                 hw["lds_capacity"],
                 hw["num_xcd"],
+                num_warps,  # 68 (appended; keeps 0-67 stable)
             ],
             dtype=np.float64,
         )
@@ -921,11 +940,13 @@ class MoeFeatureEngine(FeatureEngine):
 
     def __init__(
         self,
-        num_cus: int = 256,
-        lds_capacity: int = 65536,
-        max_clock_mhz: int = 2400,
-        num_xcd: int = 8,
+        num_cus: int = 0,
+        lds_capacity: int = 0,
+        max_clock_mhz: int = 0,
+        num_xcd: int = 0,
     ):
+        # No checked-in chip-config defaults (policy: no CU counts in source);
+        # caller supplies device-queried values.
         self._hw = {
             "num_cus": num_cus,
             "lds_capacity": lds_capacity,
@@ -1033,11 +1054,13 @@ class NormFeatureEngine(FeatureEngine):
 
     def __init__(
         self,
-        num_cus: int = 256,
-        lds_capacity: int = 65536,
-        max_clock_mhz: int = 2400,
-        num_xcd: int = 8,
+        num_cus: int = 0,
+        lds_capacity: int = 0,
+        max_clock_mhz: int = 0,
+        num_xcd: int = 0,
     ):
+        # No checked-in chip-config defaults (policy: no CU counts in source);
+        # caller supplies device-queried values.
         self._hw = {
             "num_cus": num_cus,
             "lds_capacity": lds_capacity,

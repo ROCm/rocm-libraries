@@ -187,6 +187,7 @@ def _sdpa_config_columns(cand: object) -> Dict[str, object]:
     prob = cand.problem
     T = int(getattr(spec, "tile_size", None) or (2 * int(prob.block_size)))
     block_q = int(getattr(spec, "block_m_per_warp", 16))
+    num_warps = int(getattr(spec, "num_warps", 1))
     pipeline = 1  # qr_async
     mask = 0
     sink = bool(getattr(spec, "use_sinks", False))
@@ -194,6 +195,7 @@ def _sdpa_config_columns(cand: object) -> Dict[str, object]:
     hd = int(prob.head_size)
     return {
         "pipeline": pipeline,
+        "num_warps": num_warps,
         "tile_m0": block_q,
         "tile_n0": T,
         "tile_k0": hd,
