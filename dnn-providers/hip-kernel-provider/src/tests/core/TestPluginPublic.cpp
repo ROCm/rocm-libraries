@@ -5,6 +5,7 @@
 
 #include "version.h"
 #include <hipdnn_data_sdk/logging/LogLevel.hpp>
+#include <hipdnn_plugin_sdk/EnginePluginApi.h>
 #include <hipdnn_plugin_sdk/PluginApi.h>
 
 TEST(TestPluginPublic, HipdnnPluginSetLogLevelSuccess)
@@ -34,5 +35,20 @@ TEST(TestPluginPublic, HipdnnPluginGetVersionSuccess)
 TEST(TestPluginPublic, HipdnnPluginGetVersionNullPtr)
 {
     auto status = hipdnnPluginGetVersion(nullptr);
+    EXPECT_EQ(status, hipdnnPluginStatus_t::HIPDNN_PLUGIN_STATUS_BAD_PARAM);
+}
+
+TEST(TestPluginPublic, HipdnnPluginGetApiVersionSuccess)
+{
+    const char* version;
+    auto status = hipdnnPluginGetApiVersion(&version);
+
+    ASSERT_EQ(status, hipdnnPluginStatus_t::HIPDNN_PLUGIN_STATUS_SUCCESS);
+    EXPECT_STREQ(version, "1.2.0");
+}
+
+TEST(TestPluginPublic, HipdnnPluginGetApiVersionNullPtr)
+{
+    auto status = hipdnnPluginGetApiVersion(nullptr);
     EXPECT_EQ(status, hipdnnPluginStatus_t::HIPDNN_PLUGIN_STATUS_BAD_PARAM);
 }

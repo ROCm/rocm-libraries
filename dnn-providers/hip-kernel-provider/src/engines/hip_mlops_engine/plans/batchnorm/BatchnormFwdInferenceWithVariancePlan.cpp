@@ -29,10 +29,7 @@ BatchnormFwdInferenceWithVarianceParams::BatchnormFwdInferenceWithVarianceParams
     , _estVariance(tensorMap.at(attributes.variance_tensor_uid()))
     , _activationOut(nullptr)
 {
-    // Extract epsilon value from pass-by-value tensor (cast to double for kernel compatibility)
-    auto epsilonTensorAttr = tensorMap.at(attributes.epsilon_tensor_uid());
-    _epsilonValue = hipdnn_flatbuffers_sdk::utilities::extractDoubleFromTensorValue(
-        epsilonTensorAttr, "Epsilon");
+    _epsilon = makeScalarOperand(tensorMap, attributes.epsilon_tensor_uid(), "Epsilon");
 }
 
 BatchnormFwdInferenceWithVarianceParams::BatchnormFwdInferenceWithVarianceParams(
@@ -51,10 +48,7 @@ BatchnormFwdInferenceWithVarianceParams::BatchnormFwdInferenceWithVarianceParams
     , _optActivation(parseActivation(pointwiseAttributes))
     , _activationOut(tensorMap.at(pointwiseAttributes.out_0_tensor_uid()))
 {
-    // Extract epsilon value from pass-by-value tensor (cast to double for kernel compatibility)
-    auto epsilonTensorAttr = tensorMap.at(inferenceAttributes.epsilon_tensor_uid());
-    _epsilonValue = hipdnn_flatbuffers_sdk::utilities::extractDoubleFromTensorValue(
-        epsilonTensorAttr, "Epsilon");
+    _epsilon = makeScalarOperand(tensorMap, inferenceAttributes.epsilon_tensor_uid(), "Epsilon");
 }
 
 const hipdnn_flatbuffers_sdk::data_objects::TensorAttributes*
@@ -93,9 +87,10 @@ const hipdnn_flatbuffers_sdk::data_objects::TensorAttributes*
     return _estVariance;
 }
 
-double BatchnormFwdInferenceWithVarianceParams::epsilonValue() const
+double BatchnormFwdInferenceWithVarianceParams::epsilonValue(
+    const hipdnnPluginDeviceBuffer_t* deviceBuffers, uint32_t numDeviceBuffers) const
 {
-    return _epsilonValue;
+    return resolveScalarOperand(_epsilon, deviceBuffers, numDeviceBuffers);
 }
 
 const std::optional<ActivationParams>&
@@ -299,7 +294,7 @@ void BatchnormFwdInferenceWithVariancePlan::execute(const Handle& handle,
         = findDeviceBuffer(_inferenceParams.estVariance()->uid(), deviceBuffers, numDeviceBuffers);
 
     // Get epsilon
-    double epsilon = _inferenceParams.epsilonValue();
+    double epsilon = _inferenceParams.epsilonValue(deviceBuffers, numDeviceBuffers);
 
     float activationAlpha = 0.0f;
     float activationBeta = 0.0f;

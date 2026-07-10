@@ -38,7 +38,7 @@ LayernormFwdParams::LayernormFwdParams(
     , _invVariance(attributes.inv_variance_tensor_uid().has_value()
                        ? tensorMap.at(attributes.inv_variance_tensor_uid().value())
                        : nullptr)
-    , _epsilon((tensorMap.at(attributes.epsilon_tensor_uid())))
+    , _epsilon(makeScalarOperand(tensorMap, attributes.epsilon_tensor_uid(), "Epsilon"))
 {
 }
 
@@ -73,9 +73,10 @@ const hipdnn_flatbuffers_sdk::data_objects::TensorAttributes*
     return _invVariance;
 }
 
-const hipdnn_flatbuffers_sdk::data_objects::TensorAttributes* LayernormFwdParams::epsilon() const
+double LayernormFwdParams::epsilonValue(const hipdnnPluginDeviceBuffer_t* deviceBuffers,
+                                        uint32_t numDeviceBuffers) const
 {
-    return _epsilon;
+    return resolveScalarOperand(_epsilon, deviceBuffers, numDeviceBuffers);
 }
 
 LayernormFwdPlan::LayernormFwdPlan(LayernormFwdParams&& params)
@@ -192,10 +193,7 @@ void LayernormFwdPlan::execute(const Handle& handle,
               ? findDeviceBuffer(_params.invVariance()->uid(), deviceBuffers, numDeviceBuffers)
               : hipdnnPluginDeviceBuffer_t{-1, nullptr};
 
-    hipdnn_flatbuffers_sdk::data_objects::TensorAttributesT epsilonTensor;
-    _params.epsilon()->UnPackTo(&epsilonTensor);
-    double epsilon
-        = hipdnn_flatbuffers_sdk::utilities::extractDoubleFromTensorValue(epsilonTensor, "Epsilon");
+    double epsilon = _params.epsilonValue(deviceBuffers, numDeviceBuffers);
 
     // Launch kernel
     _runnableKernel->launch(handle.getStream(),

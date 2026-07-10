@@ -10,6 +10,7 @@
 #include <hipdnn_plugin_sdk/PluginLogging.hpp>
 
 #include <hip/hip_runtime.h>
+#include <hipdnn_data_sdk/types.hpp>
 #include <hipdnn_flatbuffers_sdk/data_objects/pointwise_attributes_generated.h>
 #include <hipdnn_flatbuffers_sdk/data_objects/tensor_attributes_generated.h>
 #include <hipdnn_flatbuffers_sdk/flatbuffer_utilities/FlatbufferTypeHelpers.hpp>
@@ -186,6 +187,37 @@ size_t getSpatialDimCount(const hipdnn_flatbuffers_sdk::data_objects::TensorAttr
 /// as ":xnack+".
 /// @throws hipdnn_plugin_sdk::HipdnnPluginException on HIP failure.
 std::string getDeviceArch(hipStream_t stream);
+
+/// @brief A scalar tensor operand (epsilon/momentum) resolved either at plan-build
+/// (compile-time constant or runtime-with-default) or at execute (pure runtime
+/// user-supplied, i.e. is_runtime_pass_by_value() && value_type() == NONE).
+struct ScalarOperand
+{
+    int64_t uid = 0;
+    hipdnn_flatbuffers_sdk::data_objects::DataType dataType
+        = hipdnn_flatbuffers_sdk::data_objects::DataType::UNSET;
+    bool isRuntimeUserSupplied = false;
+    double bakedDefault = 0.0;
+};
+
+/// @brief Builds a ScalarOperand from the op-graph tensor at plan-build time.
+/// Pure user-supplied tensors (is_runtime_pass_by_value() && value_type()==NONE)
+/// record uid+dtype only, deferring the read to execute. Every other state
+/// (compile-time constant, or runtime-with-default) extracts the baked value now.
+ScalarOperand makeScalarOperand(
+    const std::unordered_map<int64_t,
+                             const hipdnn_flatbuffers_sdk::data_objects::TensorAttributes*>&
+        tensorMap,
+    int64_t uid,
+    const char* paramName);
+
+/// @brief Resolves a ScalarOperand at execute time. Pure user-supplied operands
+/// read the host scalar from the matching device_buffers slot (throws
+/// HIPDNN_PLUGIN_STATUS_INVALID_VALUE if absent); all other operands return the
+/// baked default and ignore any device_buffers slot for that uid.
+double resolveScalarOperand(const ScalarOperand& op,
+                            const hipdnnPluginDeviceBuffer_t* deviceBuffers,
+                            uint32_t numDeviceBuffers);
 
 using hipdnn_flatbuffers_sdk::utilities::extractDoubleFromTensorValue;
 using hipdnn_flatbuffers_sdk::utilities::extractValueFromTensorValue;

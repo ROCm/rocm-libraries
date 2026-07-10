@@ -22,6 +22,7 @@ add_executable(
     IntegrationGpuPointwiseReluForward.cpp
     IntegrationGpuBenchmarkingKnob.cpp
     IntegrationGpuDeterministic.cpp
+    IntegrationGpuBatchnormPassByValueEpsilon.cpp
 )
 
 target_compile_options(miopen_plugin_integration_tests PRIVATE ${MIOPENPROVIDER_WARNING_COMPILE_OPTIONS})

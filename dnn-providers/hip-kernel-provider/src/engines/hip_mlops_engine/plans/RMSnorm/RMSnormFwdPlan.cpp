@@ -35,7 +35,7 @@ RMSnormFwdParams::RMSnormFwdParams(
     , _invRMS(attributes.inv_rms_tensor_uid().has_value()
                   ? tensorMap.at(attributes.inv_rms_tensor_uid().value())
                   : nullptr)
-    , _epsilon(tensorMap.at(attributes.epsilon_tensor_uid()))
+    , _epsilon(makeScalarOperand(tensorMap, attributes.epsilon_tensor_uid(), "Epsilon"))
 
 {
 }
@@ -50,9 +50,10 @@ const hipdnn_flatbuffers_sdk::data_objects::TensorAttributes* RMSnormFwdParams::
     return _scale;
 }
 
-const hipdnn_flatbuffers_sdk::data_objects::TensorAttributes* RMSnormFwdParams::epsilon() const
+double RMSnormFwdParams::epsilonValue(const hipdnnPluginDeviceBuffer_t* deviceBuffers,
+                                      uint32_t numDeviceBuffers) const
 {
-    return _epsilon;
+    return resolveScalarOperand(_epsilon, deviceBuffers, numDeviceBuffers);
 }
 
 const hipdnn_flatbuffers_sdk::data_objects::TensorAttributes* RMSnormFwdParams::bias() const
@@ -184,10 +185,7 @@ void RMSnormFwdPlan::execute(const Handle& handle,
               ? nullptr
               : findDeviceBuffer(_params.invRMS()->uid(), deviceBuffers, numDeviceBuffers).ptr;
 
-    hipdnn_flatbuffers_sdk::data_objects::TensorAttributesT epsilonTensor;
-    _params.epsilon()->UnPackTo(&epsilonTensor);
-    double epsilon
-        = hipdnn_flatbuffers_sdk::utilities::extractDoubleFromTensorValue(epsilonTensor, "Epsilon");
+    double epsilon = _params.epsilonValue(deviceBuffers, numDeviceBuffers);
 
     _runnableKernel->launch(handle.getStream(),
                             xBuffer.ptr,

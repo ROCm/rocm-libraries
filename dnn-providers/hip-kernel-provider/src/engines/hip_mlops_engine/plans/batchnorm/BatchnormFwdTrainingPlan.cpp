@@ -28,10 +28,7 @@ BatchnormFwdTrainingParams::BatchnormFwdTrainingParams(
     , _bias(&(findTensorAttributes(tensorMap, attributes.bias_tensor_uid())))
     , _activationOut(nullptr)
 {
-    // Extract epsilon value from pass-by-value tensor (cast to double for kernel compatibility)
-    auto epsilonTensorAttr = tensorMap.at(attributes.epsilon_tensor_uid());
-    _epsilonValue = hipdnn_flatbuffers_sdk::utilities::extractDoubleFromTensorValue(
-        epsilonTensorAttr, "Epsilon");
+    _epsilon = makeScalarOperand(tensorMap, attributes.epsilon_tensor_uid(), "Epsilon");
 
     // Save mean and inv_variance are optional
     if(attributes.mean_tensor_uid().has_value())
@@ -51,10 +48,8 @@ BatchnormFwdTrainingParams::BatchnormFwdTrainingParams(
        && attributes.next_running_mean_tensor_uid().has_value()
        && attributes.next_running_variance_tensor_uid().has_value())
     {
-        // Extract momentum value from pass-by-value tensor (cast to double for kernel compatibility)
-        auto momentumTensorAttr = tensorMap.at(attributes.momentum_tensor_uid().value());
-        _momentumValue = hipdnn_flatbuffers_sdk::utilities::extractDoubleFromTensorValue(
-            momentumTensorAttr, "Momentum");
+        _momentum
+            = makeScalarOperand(tensorMap, attributes.momentum_tensor_uid().value(), "Momentum");
 
         _prevRunningMean
             = &(findTensorAttributes(tensorMap, attributes.prev_running_mean_tensor_uid().value()));
@@ -111,9 +106,10 @@ const hipdnn_flatbuffers_sdk::data_objects::TensorAttributes*
     return _bias;
 }
 
-double BatchnormFwdTrainingParams::epsilonValue() const
+double BatchnormFwdTrainingParams::epsilonValue(const hipdnnPluginDeviceBuffer_t* deviceBuffers,
+                                                uint32_t numDeviceBuffers) const
 {
-    return _epsilonValue;
+    return resolveScalarOperand(_epsilon, deviceBuffers, numDeviceBuffers);
 }
 
 bool BatchnormFwdTrainingParams::hasSaveMeanVariance() const
@@ -150,9 +146,10 @@ const hipdnn_flatbuffers_sdk::data_objects::TensorAttributes*
     return _prevRunningVariance;
 }
 
-double BatchnormFwdTrainingParams::momentumValue() const
+double BatchnormFwdTrainingParams::momentumValue(const hipdnnPluginDeviceBuffer_t* deviceBuffers,
+                                                 uint32_t numDeviceBuffers) const
 {
-    return _momentumValue.value();
+    return resolveScalarOperand(_momentum.value(), deviceBuffers, numDeviceBuffers);
 }
 
 const hipdnn_flatbuffers_sdk::data_objects::TensorAttributes*
@@ -532,13 +529,13 @@ void BatchnormFwdTrainingPlan::execute(const Handle& handle,
 
     // Get epsilon value from training parameters
     // Note: Type validation already done in constructor
-    double epsilon = _trainingParams.epsilonValue();
+    double epsilon = _trainingParams.epsilonValue(deviceBuffers, numDeviceBuffers);
 
     // Extract momentum from pass-by-value tensor attribute if running stats exist
     double expAvgFactor = 0.0;
     if(_trainingParams.hasRunningStats())
     {
-        expAvgFactor = _trainingParams.momentumValue();
+        expAvgFactor = _trainingParams.momentumValue(deviceBuffers, numDeviceBuffers);
         HIPDNN_PLUGIN_LOG_INFO(
             "BatchnormFwdTrainingPlan: expAvgFactor (momentum) = " << expAvgFactor);
     }

@@ -22,9 +22,8 @@ BatchnormFwdTrainingParams::BatchnormFwdTrainingParams(
     , _scale(miopen_utils::createBatchnormTensor(tensorMap, attributes.scale_tensor_uid()))
     , _bias(miopen_utils::createBatchnormTensor(tensorMap, attributes.bias_tensor_uid()))
 {
-    // Extract epsilon value from pass-by-value tensor (cast to double for MIOpen compatibility)
-    auto epsilonTensorAttr = tensorMap.at(attributes.epsilon_tensor_uid());
-    _epsilonValue = miopen_utils::extractDoubleFromTensorValue(epsilonTensorAttr, "Epsilon");
+    _epsilon
+        = miopen_utils::makeScalarOperand(tensorMap, attributes.epsilon_tensor_uid(), "Epsilon");
 
     // Save mean and inv_variance are optional (controlled by MIO_SAVE_MEAN_VARIANCE)
     auto optMeanUid = attributes.mean_tensor_uid();
@@ -48,9 +47,7 @@ BatchnormFwdTrainingParams::BatchnormFwdTrainingParams(
     if(optPrevRunMeanUid.has_value() && optPrevRunVarUid.has_value() && optMomentumUid.has_value()
        && optNextRunMeanUid.has_value() && optNextRunVarUid.has_value())
     {
-        // Extract momentum value from pass-by-value tensor (cast to double for MIOpen compatibility)
-        auto momentumTensorAttr = tensorMap.at(*optMomentumUid);
-        _momentumValue = miopen_utils::extractDoubleFromTensorValue(momentumTensorAttr, "Momentum");
+        _momentum = miopen_utils::makeScalarOperand(tensorMap, *optMomentumUid, "Momentum");
 
         _prevRunningMean = miopen_utils::createBatchnormTensor(tensorMap, *optPrevRunMeanUid);
         _prevRunningVariance = miopen_utils::createBatchnormTensor(tensorMap, *optPrevRunVarUid);
@@ -75,9 +72,7 @@ BatchnormFwdTrainingParams::BatchnormFwdTrainingParams(
 {
     using namespace miopen_utils;
 
-    // Extract epsilon value from pass-by-value tensor (cast to double for MIOpen compatibility)
-    auto epsilonTensorAttr = tensorMap.at(attributes.epsilon_tensor_uid());
-    _epsilonValue = extractDoubleFromTensorValue(epsilonTensorAttr, "Epsilon");
+    _epsilon = makeScalarOperand(tensorMap, attributes.epsilon_tensor_uid(), "Epsilon");
 
     // Validate that activation input matches batchnorm output
     if(pointwiseAttributes.in_0_tensor_uid() != attributes.y_tensor_uid())
@@ -114,9 +109,7 @@ BatchnormFwdTrainingParams::BatchnormFwdTrainingParams(
     if(optPrevRunMeanUid.has_value() && optPrevRunVarUid.has_value() && optMomentumUid.has_value()
        && optNextRunMeanUid.has_value() && optNextRunVarUid.has_value())
     {
-        // Extract momentum value from pass-by-value tensor (cast to double for MIOpen compatibility)
-        auto momentumTensorAttr = tensorMap.at(*optMomentumUid);
-        _momentumValue = miopen_utils::extractDoubleFromTensorValue(momentumTensorAttr, "Momentum");
+        _momentum = miopen_utils::makeScalarOperand(tensorMap, *optMomentumUid, "Momentum");
 
         _prevRunningMean = miopen_utils::createBatchnormTensor(tensorMap, *optPrevRunMeanUid);
         _prevRunningVariance = miopen_utils::createBatchnormTensor(tensorMap, *optPrevRunVarUid);
@@ -146,9 +139,10 @@ const MiopenTensor& BatchnormFwdTrainingParams::bias() const
     return _bias;
 }
 
-double BatchnormFwdTrainingParams::epsilonValue() const
+double BatchnormFwdTrainingParams::epsilonValue(const hipdnnPluginDeviceBuffer_t* deviceBuffers,
+                                                uint32_t numDeviceBuffers) const
 {
-    return _epsilonValue;
+    return miopen_utils::resolveScalarOperand(_epsilon, deviceBuffers, numDeviceBuffers);
 }
 
 bool BatchnormFwdTrainingParams::hasSaveMeanVariance() const
@@ -202,14 +196,15 @@ const MiopenTensor& BatchnormFwdTrainingParams::prevRunningVariance() const
     return *_prevRunningVariance;
 }
 
-double BatchnormFwdTrainingParams::momentumValue() const
+double BatchnormFwdTrainingParams::momentumValue(const hipdnnPluginDeviceBuffer_t* deviceBuffers,
+                                                 uint32_t numDeviceBuffers) const
 {
-    if(!_momentumValue.has_value())
+    if(!_momentum.has_value())
     {
         throw hipdnn_plugin_sdk::HipdnnPluginException(
             HIPDNN_PLUGIN_STATUS_INTERNAL_ERROR, "momentumValue() called but momentum was not set");
     }
-    return *_momentumValue;
+    return miopen_utils::resolveScalarOperand(*_momentum, deviceBuffers, numDeviceBuffers);
 }
 
 const MiopenTensor& BatchnormFwdTrainingParams::nextRunningMean() const
@@ -270,15 +265,14 @@ void BatchnormFwdTrainingPlan::execute(const HipdnnMiopenHandle& handle,
     float alpha = 1.0f;
     float beta = 0.0f;
 
-    // Extract epsilon from pass-by-value tensor attribute (type-safe, no buffer lookup needed)
-    // Note: Type validation already done in constructor
-    const double epsilon = _trainingParams.epsilonValue();
+    // Resolve epsilon (baked default or runtime-user-supplied host scalar).
+    const double epsilon = _trainingParams.epsilonValue(deviceBuffers, numDeviceBuffers);
 
-    // Extract momentum from pass-by-value tensor attribute if running stats exist
+    // Resolve momentum (baked default or runtime-user-supplied host scalar) if running stats exist
     double expAvgFactor = 0.0;
     if(_trainingParams.hasRunningStats())
     {
-        expAvgFactor = _trainingParams.momentumValue();
+        expAvgFactor = _trainingParams.momentumValue(deviceBuffers, numDeviceBuffers);
         HIPDNN_PLUGIN_LOG_INFO(
             "BatchnormFwdTrainingPlan: expAvgFactor (momentum) = " << expAvgFactor);
     }

@@ -328,7 +328,8 @@ void checkTensorLayoutsAndDimsSupported(
 
     for(const auto& [id, attr] : tensorMap)
     {
-        if(attr->value_type() != hipdnn_flatbuffers_sdk::data_objects::TensorValue::NONE)
+        if(attr->is_runtime_pass_by_value()
+           || attr->value_type() != hipdnn_flatbuffers_sdk::data_objects::TensorValue::NONE)
         {
             continue;
         }

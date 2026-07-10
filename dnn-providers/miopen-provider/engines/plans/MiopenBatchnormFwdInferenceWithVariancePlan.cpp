@@ -25,9 +25,8 @@ BatchnormFwdInferenceWithVarianceParams::BatchnormFwdInferenceWithVarianceParams
     , _estMean(miopen_utils::createBatchnormTensor(tensorMap, attributes.mean_tensor_uid()))
     , _variance(miopen_utils::createBatchnormTensor(tensorMap, attributes.variance_tensor_uid()))
 {
-    // Extract epsilon value from pass-by-value tensor (cast to double for MIOpen compatibility)
-    auto epsilonTensorAttr = tensorMap.at(attributes.epsilon_tensor_uid());
-    _epsilonValue = miopen_utils::extractDoubleFromTensorValue(epsilonTensorAttr, "Epsilon");
+    _epsilon
+        = miopen_utils::makeScalarOperand(tensorMap, attributes.epsilon_tensor_uid(), "Epsilon");
 }
 
 BatchnormFwdInferenceWithVarianceParams::BatchnormFwdInferenceWithVarianceParams(
@@ -49,9 +48,8 @@ BatchnormFwdInferenceWithVarianceParams::BatchnormFwdInferenceWithVarianceParams
     , _activationOut(
           miopen_utils::createBatchnormTensor(tensorMap, pointwiseAttributes.out_0_tensor_uid()))
 {
-    // Extract epsilon value from pass-by-value tensor (cast to double for MIOpen compatibility)
-    auto epsilonTensorAttr = tensorMap.at(inferenceAttributes.epsilon_tensor_uid());
-    _epsilonValue = miopen_utils::extractDoubleFromTensorValue(epsilonTensorAttr, "Epsilon");
+    _epsilon = miopen_utils::makeScalarOperand(
+        tensorMap, inferenceAttributes.epsilon_tensor_uid(), "Epsilon");
 }
 
 const MiopenTensor& BatchnormFwdInferenceWithVarianceParams::x() const
@@ -84,9 +82,10 @@ const MiopenTensor& BatchnormFwdInferenceWithVarianceParams::variance() const
     return _variance;
 }
 
-double BatchnormFwdInferenceWithVarianceParams::epsilonValue() const
+double BatchnormFwdInferenceWithVarianceParams::epsilonValue(
+    const hipdnnPluginDeviceBuffer_t* deviceBuffers, uint32_t numDeviceBuffers) const
 {
-    return _epsilonValue;
+    return miopen_utils::resolveScalarOperand(_epsilon, deviceBuffers, numDeviceBuffers);
 }
 
 const std::optional<MiopenActivationDescriptor>&
@@ -127,7 +126,7 @@ void BatchnormFwdInferenceWithVariancePlan::execute(const HipdnnMiopenHandle& ha
     // Hardcoded values from bn_driver in miopen
     auto alpha = static_cast<float>(1);
     auto beta = static_cast<float>(0);
-    const double epsilon = _inferenceParams.epsilonValue();
+    const double epsilon = _inferenceParams.epsilonValue(deviceBuffers, numDeviceBuffers);
 
     auto xBuffer = miopen_utils::findDeviceBuffer(
         _inferenceParams.x().uid(), deviceBuffers, numDeviceBuffers);
