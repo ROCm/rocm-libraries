@@ -232,16 +232,16 @@ bool profile_grouped_conv_bwd_data_impl(int do_verification,
     const auto op_ptrs = ck::tensor_operation::device::instance::DeviceOperationInstanceFactory<
         DeviceOp>::GetInstances();
 
-    std::array<ck::index_t, NDimSpatial + 3> out_lengths{};
-    std::array<ck::index_t, NDimSpatial + 3> out_strides{};
-    std::array<ck::index_t, NDimSpatial + 3> wei_lengths{};
-    std::array<ck::index_t, NDimSpatial + 3> wei_strides{};
-    std::array<ck::index_t, NDimSpatial + 3> in_lengths{};
-    std::array<ck::index_t, NDimSpatial + 3> in_strides{};
-    std::array<ck::index_t, NDimSpatial> conv_filter_strides{};
-    std::array<ck::index_t, NDimSpatial> conv_filter_dilations{};
-    std::array<ck::index_t, NDimSpatial> input_left_pads{};
-    std::array<ck::index_t, NDimSpatial> input_right_pads{};
+    std::array<ck::long_index_t, NDimSpatial + 3> out_lengths{};
+    std::array<ck::long_index_t, NDimSpatial + 3> out_strides{};
+    std::array<ck::long_index_t, NDimSpatial + 3> wei_lengths{};
+    std::array<ck::long_index_t, NDimSpatial + 3> wei_strides{};
+    std::array<ck::long_index_t, NDimSpatial + 3> in_lengths{};
+    std::array<ck::long_index_t, NDimSpatial + 3> in_strides{};
+    std::array<ck::long_index_t, NDimSpatial> conv_filter_strides{};
+    std::array<ck::long_index_t, NDimSpatial> conv_filter_dilations{};
+    std::array<ck::long_index_t, NDimSpatial> input_left_pads{};
+    std::array<ck::long_index_t, NDimSpatial> input_right_pads{};
 
     auto copy = [](const auto& x, auto& y) { ck::ranges::copy(x, y.begin()); };
 
