@@ -11,6 +11,7 @@
 #include "origami/nn/config.hpp"
 #include "origami/nn/features/gemm_tilewright.hpp"
 #include "origami/nn/filter.hpp"
+#include "origami/nn/nn.hpp"
 #include "origami/origami.hpp"
 
 #if ORIGAMI_ENABLE_NN
@@ -98,6 +99,79 @@ TEST_CASE("NN: gemm_tilewright_v1 feature dimensions", "[nn]") {
   for (float v : inter) {
     REQUIRE(std::isfinite(v));
   }
+}
+
+TEST_CASE("NN: load_models_for_logic loads gfx950 tilewright weights", "[nn][tilewright]") {
+#ifndef ORIGAMI_TEST_TW_WEIGHTS_DIR
+#  define ORIGAMI_TEST_TW_WEIGHTS_DIR ""
+#endif
+#ifndef ORIGAMI_TEST_TW_LOGIC_STEM
+#  define ORIGAMI_TEST_TW_LOGIC_STEM ""
+#endif
+
+  const std::string weights_dir = ORIGAMI_TEST_TW_WEIGHTS_DIR;
+  const std::string logic_stem  = ORIGAMI_TEST_TW_LOGIC_STEM;
+  if (weights_dir.empty() || logic_stem.empty()) {
+    SUCCEED("tilewright weight paths not configured; skipping.");
+    return;
+  }
+
+  const auto models = origami::nn::load_models_for_logic(logic_stem, weights_dir);
+  REQUIRE(models.tilewright >= 0);
+
+  const origami::nn::model_info_t* info = origami::nn::model_info(models.tilewright);
+  REQUIRE(info != nullptr);
+  REQUIRE(info->backend == origami::nn::backend_id_t::tilewright_v1);
+  REQUIRE(info->arch == "gfx950");
+  REQUIRE(info->features.query_dim == 55);
+  REQUIRE(info->features.item_dim == 12);
+  REQUIRE(info->features.interaction_dim == 37);
+  REQUIRE(info->n_cells > 0);
+  REQUIRE(info->n_splits > 0);
+}
+
+TEST_CASE("NN: load_models_for_logic uses bundled gfx950 weights when hint_dir empty",
+          "[nn][tilewright]") {
+  const char* logic_stem =
+      "TensileLibrary_BB_BB_HA_Bias_SAV_UA_Type_BB_HPA_Contraction_l_Alik_Bljk_Cijk_Dijk_ID75a0_gfx950";
+  const auto models = origami::nn::load_models_for_logic(logic_stem, "");
+  REQUIRE(models.tilewright >= 0);
+}
+
+TEST_CASE("NN: rank_configs inference=nn ranks with loaded tilewright model", "[nn][tilewright]") {
+  const char* logic_stem =
+      "TensileLibrary_BB_BB_HA_Bias_SAV_UA_Type_BB_HPA_Contraction_l_Alik_Bljk_Cijk_Dijk_ID75a0_gfx950";
+  const auto models = origami::nn::load_models_for_logic(logic_stem, "");
+  REQUIRE(models.tilewright >= 0);
+
+  const auto hardware = make_hardware(950);
+  auto problem =
+      make_problem(1024, 3072, 2048, origami::transpose_t::T, origami::transpose_t::N);
+  problem.a_dtype = origami::data_type_t::BFloat16;
+  problem.b_dtype = origami::data_type_t::BFloat16;
+  problem.c_dtype = origami::data_type_t::BFloat16;
+  problem.d_dtype = origami::data_type_t::BFloat16;
+  problem.mi_dtype = origami::data_type_t::BFloat16;
+
+  std::vector<origami::config_t> configs = {
+      make_config(128, 128, 128, 32, 32, 32, false, 1, 6, 0, 0),
+      make_config(352, 224, 64, 32, 32, 32, false, 1, 6, 0, 0),
+  };
+
+  origami::rank_options_t options;
+  options.inference      = origami::inference_mode_t::nn;
+  options.nn_backend     = origami::nn_backend_t::tilewright;
+  options.library_models = &models;
+
+  const auto results = origami::rank_configs(problem, hardware, configs, options);
+  REQUIRE_FALSE(results.empty());
+  REQUIRE(std::isfinite(results.front().latency));
+
+  bool any_scored = false;
+  for (const auto& r : results) {
+    if (std::isfinite(r.latency)) any_scored = true;
+  }
+  REQUIRE(any_scored);
 }
 
 TEST_CASE("NN: filter_configs rejects LDS-infeasible kernels", "[nn]") {

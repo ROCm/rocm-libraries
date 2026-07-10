@@ -267,8 +267,7 @@ cmake --install build/
 | `ORIGAMI_ENABLE_PYTHON` | Enable Python bindings | `OFF` |
 | `ORIGAMI_BUILD_TESTING` | Enable Python binding tests | `OFF` |
 | `ORIGAMI_ENABLE_FETCH` | Auto-fetch dependencies with FetchContent | `ON` |
-| `ORIGAMI_ENABLE_NN` | Build NN inference stack (`origami::nn`, ML routing in `rank_configs`) | `ON` |
-| `ORIGAMI_ENABLE_NN_TILEWRIGHT` | Link tilewright backend (requires `shared/tilewright` in the tree) | `ON` |
+| `ORIGAMI_ENABLE_NN` | Build NN inference stack (`origami::nn`, TWREC loader, tilewright ranking in `rank_configs`). | `OFF` |
 
 ## Neural Network (NN) Backend
 
@@ -280,7 +279,7 @@ When `ORIGAMI_ENABLE_NN=OFF`, all NN code is compiled out and `rank_configs` alw
 
 | Backend | `nn_backend_t` | Status | Weights format |
 |---------|----------------|--------|----------------|
-| **tilewright** | `tilewright` | Implemented | TWREC v1 YAML manifest (`.tilewright.yaml`) + int4 sidecar (`.tilewright.wts.yaml`) |
+| **tilewright** | `tilewright` | Implemented (TWREC loader + in-tree inference) | TWREC YAML manifest (`.tilewright.yaml`) + int4 sidecar (`.tilewright.wts.yaml`) |
 | **embedding_similarity** | `embedding_similarity` | API stub only (not yet loadable) | — |
 
 **tilewright** is a split-tree, per-cell two-tower MLP recommender. Models are keyed by Tensile logic-library stem (dtype + transpose) and discovered from `origami_nn_index` colocated with the kernel library.
@@ -297,7 +296,7 @@ If no model exists for a given logic stem, `load_models_for_logic` returns `inva
 
 ### Building with NN On or Off
 
-**NN enabled (default)** — standalone origami with tilewright backend:
+**Default (analytical-only)** — `ORIGAMI_ENABLE_NN` is `OFF` unless explicitly enabled:
 
 ```bash
 cd shared/origami
@@ -305,31 +304,29 @@ cd shared/origami
 cmake -S . -B build/ \
   -DCMAKE_PREFIX_PATH=/opt/rocm \
   -DCMAKE_CXX_COMPILER=/opt/rocm/bin/amdclang++ \
-  -DORIGAMI_ENABLE_NN=ON \
-  -DORIGAMI_ENABLE_NN_TILEWRIGHT=ON \
   -DORIGAMI_BUILD_TESTING=ON
 
 cmake --build build/ --parallel
 ```
 
-`ORIGAMI_ENABLE_NN_TILEWRIGHT=ON` requires `shared/tilewright` as a sibling directory. Origami enables `TILEWRIGHT_ENABLE_YAML` automatically and links `roc::tilewright`.
-
-**NN disabled** — analytical-only build (no tilewright dependency):
+**NN enabled** — opt in to the TWREC loader, tilewright inference, and filter stack:
 
 ```bash
 cmake -S . -B build/ \
   -DCMAKE_PREFIX_PATH=/opt/rocm \
   -DCMAKE_CXX_COMPILER=/opt/rocm/bin/amdclang++ \
-  -DORIGAMI_ENABLE_NN=OFF
+  -DORIGAMI_ENABLE_NN=ON \
+  -DORIGAMI_BUILD_TESTING=ON
 
 cmake --build build/ --parallel
 ```
 
-**hipBLASLt** enables NN + tilewright by default when building origami as a subproject:
+With `ORIGAMI_ENABLE_NN=ON`, YAML weights under `data/nn/tilewright/` ship in-tree; when `hint_dir` is empty, `load_models_for_logic` falls back to the bundled gfx950 directory at build time.
 
-```cmake
-set(ORIGAMI_ENABLE_NN ON)
-set(ORIGAMI_ENABLE_NN_TILEWRIGHT ON)
+**hipBLASLt** uses the same `ORIGAMI_ENABLE_NN` option (default **OFF**). Enable NN when configuring hipBLASLt:
+
+```bash
+cmake -S projects/hipblaslt -B build/ -DORIGAMI_ENABLE_NN=ON
 ```
 
 After a hipBLASLt build, YAML weights are copied next to each arch's Tensile library under `Tensile/library/<arch>/`.
@@ -350,7 +347,7 @@ Weights live under:
 ```
 shared/origami/data/nn/tilewright/<arch>/
   origami_nn_index          # maps logic_stem → backend → manifest
-  *.tilewright.yaml         # TWREC v1 manifest (routing + cell metadata)
+  *.tilewright.yaml         # TWREC manifest (routing + cell metadata)
   *.tilewright.wts.yaml     # int4_b64 weight sidecar
 ```
 
@@ -369,7 +366,7 @@ auto models = origami::nn::load_models_for_logic(logic_stem, library_dir);
 // models.tilewright >= 0 on success; -1 if stem not in index
 ```
 
-For tests, override the manifest path with `ORIGAMI_NN_WEIGHTS` (see [NN Tests](#nn-tests)).
+For tests, override the manifest path with `ORIGAMI_NN_WEIGHTS` when tilewright integration tests are added.
 
 A proposed **sharded** layout (per-cell files under `{dtype}/{layout}/` directories) is
 described in [docs/sharded-weights-design.md](docs/sharded-weights-design.md).
@@ -398,11 +395,9 @@ NN routing is controlled by `rank_options_t` fields and environment variables. E
 
 | Variable | Description |
 |----------|-------------|
-| `ORIGAMI_NN_DIAG` | hipBLASLt: print model-load diagnostics when deserializing `PredictionLibrary` |
+| `ORIGAMI_NN_DIAG` | Print model-load diagnostics when a TWREC manifest is loaded (`arch`, feature dims, cell/split counts) |
 | `ORIGAMI_NN_WEIGHTS` | Tests: override path to a `.tilewright.yaml` manifest |
-| `TILEWRIGHT_DIAG` | tilewright: print arch, feature dims, cell/split counts on load |
-| `TILEWRIGHT_FORCE_CELL` | tilewright: force a cell index (debug routing) |
-| `TILEWRIGHT_PICK_LOG` | tilewright: log top-1 pick per `rank_configs` call |
+| `ORIGAMI_TW_LOG` | Log top-1 tilewright pick per `rank_configs` call (`[TW_PICK]` line on stderr) |
 
 #### hipBLASLt row filter
 
@@ -428,22 +423,22 @@ Use `ORIGAMI_INFERENCE_MODE=nn` to require ML ranking (no silent analytical fall
 
 ### NN Tests
 
-Build with testing enabled and run NN-specific Catch2 tags:
+Build with `ORIGAMI_ENABLE_NN=ON` and testing enabled, then run NN-specific Catch2 tags:
 
 ```bash
-cd shared/origami/build
-./tests/origami-tests "[nn]"
-./tests/origami-tests "[nn][tilewright]"
+cd shared/origami
+
+cmake -S . -B build/ \
+  -DCMAKE_PREFIX_PATH=/opt/rocm \
+  -DCMAKE_CXX_COMPILER=/opt/rocm/bin/amdclang++ \
+  -DORIGAMI_ENABLE_NN=ON \
+  -DORIGAMI_BUILD_TESTING=ON
+
+cmake --build build/ --parallel
+./build/tests/origami-tests "[nn]"
 ```
 
-Tilewright integration tests load weights from `data/nn/tilewright/gfx950/` by default. Override with:
-
-```bash
-export ORIGAMI_NN_WEIGHTS=/path/to/manifest.tilewright.yaml
-ctest -R origami-tests --output-on-failure
-```
-
-When `ORIGAMI_ENABLE_NN=OFF`, `[nn]` filter tests are compiled out. When `ORIGAMI_ENABLE_NN_TILEWRIGHT=OFF`, `[nn][tilewright]` tests are skipped.
+When `ORIGAMI_ENABLE_NN=OFF` (the default), `[nn]` filter tests are compiled out.
 
 ## Origami Tests
 

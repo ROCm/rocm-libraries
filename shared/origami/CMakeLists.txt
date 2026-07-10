@@ -24,8 +24,7 @@ option(ORIGAMI_BUILD_SHARED_LIBS "Build shared libraries." ${ORIGAMI_STANDALONE}
 option(ORIGAMI_ENABLE_PYTHON "Enable Python bindings." OFF)
 option(ORIGAMI_BUILD_TESTING "Build tests." OFF)
 option(ORIGAMI_ENABLE_FETCH "Auto-fetch dependencies with FetchContent" ON)
-option(ORIGAMI_ENABLE_NN "Build NN feature/filter stack (Phase 1+)." ON)
-option(ORIGAMI_ENABLE_NN_TILEWRIGHT "Build tilewright NN backend (requires shared/tilewright)." ON)
+option(ORIGAMI_ENABLE_NN "Build NN inference stack (API, features, and weight layout)." OFF)
 
 find_package(hip REQUIRED)
 
@@ -102,14 +101,8 @@ if(ORIGAMI_ENABLE_NN)
             "${CMAKE_CURRENT_SOURCE_DIR}/include/origami/nn/nn.hpp"
     )
     target_compile_definitions(origami-headers INTERFACE ORIGAMI_ENABLE_NN=1)
-    if(ORIGAMI_ENABLE_NN_TILEWRIGHT AND EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/../tilewright/CMakeLists.txt")
-        target_compile_definitions(origami-headers INTERFACE ORIGAMI_ENABLE_NN_TILEWRIGHT=1)
-    else()
-        target_compile_definitions(origami-headers INTERFACE ORIGAMI_ENABLE_NN_TILEWRIGHT=0)
-    endif()
 else()
     target_compile_definitions(origami-headers INTERFACE ORIGAMI_ENABLE_NN=0)
-    target_compile_definitions(origami-headers INTERFACE ORIGAMI_ENABLE_NN_TILEWRIGHT=0)
 endif()
 
 set_target_properties(origami-headers PROPERTIES VERIFY_INTERFACE_HEADER_SETS ON)
@@ -140,22 +133,36 @@ if(ORIGAMI_ENABLE_NN)
                 "${CMAKE_CURRENT_SOURCE_DIR}/src/nn/types.cpp"
                 "${CMAKE_CURRENT_SOURCE_DIR}/src/nn/model_registry.cpp"
                 "${CMAKE_CURRENT_SOURCE_DIR}/src/nn/dispatch.cpp"
+                "${CMAKE_CURRENT_SOURCE_DIR}/src/nn/twrec/b64_decode.cpp"
+                "${CMAKE_CURRENT_SOURCE_DIR}/src/nn/twrec/load_validate.cpp"
+                "${CMAKE_CURRENT_SOURCE_DIR}/src/nn/twrec/twrec_loader.cpp"
+                "${CMAKE_CURRENT_SOURCE_DIR}/src/nn/twrec/rank.cpp"
     )
-    if(ORIGAMI_ENABLE_NN_TILEWRIGHT AND EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/../tilewright/CMakeLists.txt")
-        if(NOT TARGET roc::tilewright)
-            set(TILEWRIGHT_ENABLE_INSTALL OFF CACHE BOOL "" FORCE)
-            set(TILEWRIGHT_BUILD_TESTING OFF CACHE BOOL "" FORCE)
-            set(TILEWRIGHT_ENABLE_HIPBLASLT_BACKEND OFF CACHE BOOL "" FORCE)
-            set(TILEWRIGHT_ENABLE_YAML ON CACHE BOOL "" FORCE)
-            add_subdirectory("${CMAKE_CURRENT_SOURCE_DIR}/../tilewright"
-                             "${CMAKE_CURRENT_BINARY_DIR}/tilewright"
-                             EXCLUDE_FROM_ALL)
+
+    set(_origami_nn_bundled_weights_dir
+        "${CMAKE_CURRENT_SOURCE_DIR}/data/nn/tilewright/gfx950"
+    )
+    target_compile_definitions(
+        origami
+        PRIVATE ORIGAMI_NN_BUNDLED_WEIGHTS_DIR="${_origami_nn_bundled_weights_dir}"
+    )
+
+    find_package(yaml-cpp 0.8 QUIET CONFIG)
+    if(NOT yaml-cpp_FOUND)
+        if(ORIGAMI_ENABLE_FETCH)
+            include(FetchContent)
+            FetchContent_Declare(
+                yaml-cpp
+                GIT_REPOSITORY https://github.com/jbeder/yaml-cpp.git
+                GIT_TAG 0.8.0
+                GIT_SHALLOW TRUE
+            )
+            FetchContent_MakeAvailable(yaml-cpp)
+        else()
+            message(FATAL_ERROR "yaml-cpp not found (set ORIGAMI_ENABLE_FETCH=ON to auto-fetch)")
         endif()
-        target_link_libraries(origami PRIVATE roc::tilewright)
-        target_compile_definitions(origami PRIVATE ORIGAMI_ENABLE_NN_TILEWRIGHT=1)
-    else()
-        target_compile_definitions(origami PRIVATE ORIGAMI_ENABLE_NN_TILEWRIGHT=0)
     endif()
+    target_link_libraries(origami PRIVATE yaml-cpp::yaml-cpp)
 endif()
 
 target_link_libraries(origami PRIVATE hip::host)

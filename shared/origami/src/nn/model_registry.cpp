@@ -3,21 +3,26 @@
 
 #include "origami/nn/nn.hpp"
 
+#include "origami/nn/detail/model_store.hpp"
 #include "origami/nn/features/gemm_tilewright.hpp"
+#include "origami/nn/twrec/twrec_loader.hpp"
 
-#if defined(ORIGAMI_ENABLE_NN_TILEWRIGHT) && ORIGAMI_ENABLE_NN_TILEWRIGHT
-
-#  include "tilewright/twrec.hpp"
-
-#  include <fstream>
-#  include <mutex>
-#  include <sstream>
-#  include <unordered_map>
+#include <cstdio>
+#include <cstdlib>
+#include <fstream>
+#include <memory>
+#include <mutex>
+#include <sstream>
+#include <string>
+#include <unordered_map>
+#include <vector>
 
 namespace origami::nn {
 namespace {
 
 std::mutex g_mutex;
+std::vector<std::unique_ptr<twrec::detail::LoadedModel>> g_models;
+std::unordered_map<std::string, model_handle_t> g_path_to_handle;
 std::unordered_map<model_handle_t, model_info_t> g_infos;
 model_handle_t g_default_tilewright = invalid_handle;
 model_handle_t g_default_es         = invalid_handle;
@@ -41,43 +46,93 @@ const char* backend_name(backend_id_t backend) {
   return nullptr;
 }
 
-model_info_t make_tilewright_info() {
+std::string resolve_weights_dir(const std::string& hint_dir) {
+  if (!hint_dir.empty()) return hint_dir;
+  if (const char* env = std::getenv("ORIGAMI_NN_WEIGHTS_DIR")) return env;
+#ifdef ORIGAMI_NN_BUNDLED_WEIGHTS_DIR
+  return ORIGAMI_NN_BUNDLED_WEIGHTS_DIR;
+#else
+  return {};
+#endif
+}
+
+model_info_t make_tilewright_info(const twrec::detail::LoadedModel& model) {
   model_info_t info;
   info.backend                     = backend_id_t::tilewright_v1;
-  info.arch                        = "gfx950";
+  info.arch                        = model.arch;
   info.features.catalog_id         = features::gemm_tilewright_v1::catalog_id;
   info.features.feature_names_hash = features::gemm_tilewright_v1::feature_names_hash;
-  info.features.query_dim          = static_cast<std::uint32_t>(features::gemm_tilewright_v1::query_dim);
-  info.features.item_dim           = static_cast<std::uint32_t>(features::gemm_tilewright_v1::item_dim);
-  info.features.interaction_dim    = static_cast<std::uint32_t>(features::gemm_tilewright_v1::interaction_dim);
+  info.features.query_dim          = model.q_dim;
+  info.features.item_dim           = model.i_dim;
+  info.features.interaction_dim    = model.x_dim;
+  info.n_cells                     = static_cast<std::uint32_t>(model.cells.size());
+  info.n_splits                    = static_cast<std::uint32_t>(model.splits.size());
   return info;
 }
 
-void register_handle(model_handle_t handle, backend_id_t backend) {
+void print_load_diag(model_handle_t handle,
+                     const std::string& path,
+                     const twrec::detail::LoadedModel& model) {
+  if (std::getenv("ORIGAMI_NN_DIAG") == nullptr) {
+    return;
+  }
+  std::fprintf(stderr,
+               "[ORIGAMI_NN_DIAG] handle=%d path=%s arch=%s qhash=%s qdim=%u idim=%u xdim=%u "
+               "n_cells=%zu n_splits=%zu\n",
+               handle,
+               path.c_str(),
+               model.arch.c_str(),
+               model.feature_names_hash.c_str(),
+               model.q_dim,
+               model.i_dim,
+               model.x_dim,
+               model.cells.size(),
+               model.splits.size());
+  std::fflush(stderr);
+}
+
+void register_handle(model_handle_t handle, backend_id_t backend, const model_info_t& info) {
   if (handle < 0) return;
   std::lock_guard<std::mutex> lock(g_mutex);
-  g_infos[handle] = (backend == backend_id_t::tilewright_v1) ? make_tilewright_info()
-                                                               : model_info_t{};
+  g_infos[handle] = info;
   g_infos[handle].backend = backend;
 }
 
 model_handle_t load_tilewright_manifest(const std::string& path) {
   if (!is_yaml_manifest(path)) return invalid_handle;
-  const int handle = tilewright::load_model_yaml(path);
-  if (handle < 0) return invalid_handle;
-  register_handle(handle, backend_id_t::tilewright_v1);
+
+  {
+    std::lock_guard<std::mutex> lock(g_mutex);
+    const auto it = g_path_to_handle.find(path);
+    if (it != g_path_to_handle.end()) return it->second;
+  }
+
+  auto model = std::make_unique<twrec::detail::LoadedModel>();
+  if (!twrec::load_twrec_yaml(path, model.get())) return invalid_handle;
+
+  std::lock_guard<std::mutex> lock(g_mutex);
+  const auto it = g_path_to_handle.find(path);
+  if (it != g_path_to_handle.end()) return it->second;
+
+  const model_handle_t handle = static_cast<model_handle_t>(g_models.size());
+  g_models.push_back(std::move(model));
+  g_path_to_handle[path] = handle;
+  const model_info_t info = make_tilewright_info(*g_models[static_cast<std::size_t>(handle)]);
+  g_infos[handle]         = info;
+  print_load_diag(handle, path, *g_models[static_cast<std::size_t>(handle)]);
   return handle;
 }
 
 model_handle_t load_from_origami_nn_index(const std::string& logic_stem,
                                           backend_id_t backend,
                                           const std::string& hint_dir) {
-  if (hint_dir.empty()) return invalid_handle;
+  const std::string dir = resolve_weights_dir(hint_dir);
+  if (dir.empty()) return invalid_handle;
 
   const char* backend_str = backend_name(backend);
   if (backend_str == nullptr) return invalid_handle;
 
-  std::ifstream idx(hint_dir + "/" + kOrigamiNnIndex);
+  std::ifstream idx(dir + "/" + kOrigamiNnIndex);
   if (!idx) return invalid_handle;
 
   std::string line;
@@ -94,7 +149,7 @@ model_handle_t load_from_origami_nn_index(const std::string& logic_stem,
     if (stem != logic_stem || indexed_backend != backend_str) continue;
 
     if (backend == backend_id_t::tilewright_v1) {
-      return load_tilewright_manifest(hint_dir + "/" + weights_file);
+      return load_tilewright_manifest(dir + "/" + weights_file);
     }
     return invalid_handle;
   }
@@ -104,7 +159,12 @@ model_handle_t load_from_origami_nn_index(const std::string& logic_stem,
 
 }  // namespace
 
-model_handle_t load_model(const std::string& path) { return load_tilewright_manifest(path); }
+model_handle_t load_model(const std::string& path) {
+  if (const char* override_path = std::getenv("ORIGAMI_NN_WEIGHTS")) {
+    return load_tilewright_manifest(override_path);
+  }
+  return load_tilewright_manifest(path);
+}
 
 model_handle_t load_model_by_index(const std::string& logic_stem,
                                    backend_id_t backend,
@@ -137,16 +197,19 @@ const model_info_t* model_info(model_handle_t handle) {
 }
 
 void set_default_model(model_handle_t handle) {
-  const model_info_t* info = model_info(handle);
-  if (info == nullptr) return;
-  if (info->backend == backend_id_t::tilewright_v1) {
+  if (handle < 0) return;
+  std::lock_guard<std::mutex> lock(g_mutex);
+  const auto it = g_infos.find(handle);
+  if (it == g_infos.end()) return;
+  if (it->second.backend == backend_id_t::tilewright_v1) {
     g_default_tilewright = handle;
-  } else if (info->backend == backend_id_t::embedding_similarity_v1) {
+  } else if (it->second.backend == backend_id_t::embedding_similarity_v1) {
     g_default_es = handle;
   }
 }
 
 model_handle_t default_model(backend_id_t backend) {
+  std::lock_guard<std::mutex> lock(g_mutex);
   switch (backend) {
     case backend_id_t::tilewright_v1:
       return g_default_tilewright;
@@ -156,30 +219,15 @@ model_handle_t default_model(backend_id_t backend) {
   return invalid_handle;
 }
 
-}  // namespace origami::nn
+namespace detail {
 
-#else
-
-namespace origami::nn {
-
-model_handle_t load_model(const std::string&) { return invalid_handle; }
-
-model_handle_t load_model_by_index(const std::string&, backend_id_t, const std::string&) {
-  return invalid_handle;
+const twrec::detail::LoadedModel* model_payload(model_handle_t handle) {
+  if (handle < 0) return nullptr;
+  std::lock_guard<std::mutex> lock(g_mutex);
+  const auto idx = static_cast<std::size_t>(handle);
+  if (idx >= g_models.size()) return nullptr;
+  return g_models[idx].get();
 }
 
-library_models_t load_models_for_logic(const std::string&, const std::string&) {
-  return {};
-}
-
-void unload_model(model_handle_t) {}
-
-const model_info_t* model_info(model_handle_t) { return nullptr; }
-
-void set_default_model(model_handle_t) {}
-
-model_handle_t default_model(backend_id_t) { return invalid_handle; }
-
+}  // namespace detail
 }  // namespace origami::nn
-
-#endif
