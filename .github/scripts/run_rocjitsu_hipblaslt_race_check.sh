@@ -1,13 +1,14 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-# This script's calling workflow fetches hipBLASLt/TensileLite artifacts from
+# This workflow that calls this script fetches hipBLASLt/TensileLite artifacts from
 # the current TheRock build, then checks out rocm-systems.
 #
 # TODO(newling) Until rocjitsu is packaged as a complete runnable TheRock
-# artifact, we build the rocjitsu CLI locally.
+# artifact, we build the rocjitsu CLI locally. Monitor progress on packaging rocjitsu.
 #
 # The script runs small gfx950 hipBLASLt and TensileLite GEMMs under the race detector.
+# TODO(newling) extend to different architectures and expand GEMM-space tested.
 
 ROCM_PATH="${ROCM_PATH:-${PWD}/build}"
 ROCJITSU_SOURCE_DIR="${ROCJITSU_SOURCE_DIR:-${PWD}/rocm-systems/emulation/rocjitsu}"
@@ -96,10 +97,7 @@ if [[ ! -x "${TENSILELITE_CLIENT}" ]]; then
   exit 1
 fi
 
-# Use the gfx950/CDNA4 KMD config from the checked-out rocm-systems tree. The
-# workflow pins the rocm-systems ref; if that ref renames configs, update this
-# list or pass ROCJITSU_CONFIG from the workflow. Keep the selection explicit so
-# future architectures can add their own config candidates here.
+
 if [[ -z "${ROCJITSU_CONFIG}" ]]; then
   for candidate in \
     "${ROCJITSU_SOURCE_DIR}/configs/gfx950_cdna4_kmd.json" \
