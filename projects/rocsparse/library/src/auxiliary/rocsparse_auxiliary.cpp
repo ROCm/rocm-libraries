@@ -4129,11 +4129,11 @@ try
 
     const int64_t brows = (descr->rows + descr->block_dim - 1) / descr->block_dim;
 
-    ROCSPARSE_CHECKARG(2,
+    ROCSPARSE_CHECKARG(1,
                        bell_col_ind,
                        brows * descr->ell_cols / descr->block_dim > 0 && bell_col_ind == nullptr,
                        rocsparse_status_invalid_pointer);
-    ROCSPARSE_CHECKARG(3,
+    ROCSPARSE_CHECKARG(2,
                        bell_val,
                        brows * descr->ell_cols > 0 && bell_val == nullptr,
                        rocsparse_status_invalid_pointer);

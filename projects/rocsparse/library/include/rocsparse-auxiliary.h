@@ -2632,7 +2632,7 @@ rocsparse_status rocsparse_const_bsr_get(rocsparse_const_spmat_descr descr,
  *  \brief Set the row indices, column indices, and values array in the sparse COO matrix descriptor.
  *
  *  @param[inout]
- *  descr   the pointer to the sparse vector descriptor.
+ *  descr   the pointer to the sparse matrix descriptor.
  *  @param[in]
  *  coo_row_ind row indices of the COO matrix. Must be an array of length \p nnz.
  *  @param[in]
@@ -2653,7 +2653,7 @@ rocsparse_status rocsparse_coo_set_pointers(rocsparse_spmat_descr descr,
  *  \brief Set the <row, column> indices and values array in the sparse COO AoS matrix descriptor.
  *
  *  @param[inout]
- *  descr   the pointer to the sparse vector descriptor.
+ *  descr   the pointer to the sparse matrix descriptor.
  *  @param[in]
  *  coo_ind <row, column> indices of the COO matrix. Must be an array of length \p nnz.
  *  @param[in]
@@ -2670,7 +2670,7 @@ rocsparse_status
  *  \brief Set the row offsets, column indices, and values array in the sparse CSR matrix descriptor.
  *
  *  @param[inout]
- *  descr   the pointer to the sparse vector descriptor.
+ *  descr   the pointer to the sparse matrix descriptor.
  *  @param[in]
  *  csr_row_ptr  row offsets of the CSR matrix. Must be an array of length \p rows+1.
  *  @param[in]
@@ -2691,7 +2691,7 @@ rocsparse_status rocsparse_csr_set_pointers(rocsparse_spmat_descr descr,
  *  \brief Set the column offsets, row indices, and values array in the sparse CSC matrix descriptor.
  *
  *  @param[inout]
- *  descr       the pointer to the sparse vector descriptor.
+ *  descr       the pointer to the sparse matrix descriptor.
  *  @param[in]
  *  csc_col_ptr column offsets of the CSC matrix. Must be an array of length \p cols+1.
  *  @param[in]
@@ -2712,7 +2712,7 @@ rocsparse_status rocsparse_csc_set_pointers(rocsparse_spmat_descr descr,
  *  \brief Set the column indices and values array in the sparse ELL matrix descriptor.
  *
  *  @param[inout]
- *  descr       the pointer to the sparse vector descriptor.
+ *  descr       the pointer to the sparse matrix descriptor.
  *  @param[in]
  *  ell_col_ind column indices of the ELL matrix. Must be an array of length \p rows*ell_width.
  *  @param[in]
@@ -2729,7 +2729,7 @@ rocsparse_status
  *  \brief Set the row offsets, column indices, and values array in the sparse BSR matrix descriptor
  *
  *  @param[inout]
- *  descr   the pointer to the sparse vector descriptor.
+ *  descr   the pointer to the sparse matrix descriptor.
  *  @param[in]
  *  bsr_row_ptr  row offsets of the BSR matrix. Must be an array of length \p rows+1.
  *  @param[in]
@@ -2750,7 +2750,7 @@ rocsparse_status rocsparse_bsr_set_pointers(rocsparse_spmat_descr descr,
  *  \brief Set the column indices and values array in the sparse Blocked ELL matrix descriptor
  *
  *  @param[inout]
- *  descr   the pointer to the sparse vector descriptor.
+ *  descr   the pointer to the sparse matrix descriptor.
  *  @param[in]
  *  bell_col_ind  column indices of the Blocked ELL matrix. Must be an array of length \p mb*ell_cols/ell_block_size.
  *  @param[in]

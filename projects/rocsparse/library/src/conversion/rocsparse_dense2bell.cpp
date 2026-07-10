@@ -160,8 +160,7 @@ rocsparse_status rocsparse::dense2bell_template(rocsparse_handle          handle
 
     // Zero the value array so that padded ELL slots (and structural zeros that the
     // fill kernel skips at the matrix boundary) are well defined.
-    RETURN_IF_HIP_ERROR(
-        rocsparse_hipMemsetAsync(bell_val, 0, sizeof(T) * m * ell_cols, stream));
+    RETURN_IF_HIP_ERROR(rocsparse_hipMemsetAsync(bell_val, 0, sizeof(T) * m * ell_cols, stream));
 
     RETURN_IF_HIPLAUNCHKERNELGGL_ERROR((rocsparse::dense2bell_fill_kernel<256>),
                                        dim3(mb),
