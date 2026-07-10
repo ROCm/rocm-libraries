@@ -119,6 +119,8 @@ def insertClusterBarrier(module, writer, kernel):
                     result.add(s)
     if not done:  # no workgroup barrier: open the handshake at the start
         head = Module(module.name)
+        head.add(SBarrier(True, False, False))
+        head.add(SBarrier(True, True, False, "workgroup barrier wait"))
         for s in signalItems:
             head.add(s)
         for inst in result.flatitems():
