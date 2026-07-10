@@ -403,6 +403,33 @@ MetadataND::MetadataND(const std::string& device, const int& dim)
     }
 }
 
+namespace {
+
+bool IsTunaNetCategoricalFeature(const std::string& name)
+{
+    return name == "in_layout" || name == "fil_layout" || name == "out_layout" ||
+           name == "precision" || name == "direction";
+}
+
+} // namespace
+
+MIOPEN_INTERNALS_EXPORT
+size_t MetadataND::GetEngineeredNumInputs() const
+{
+    if(!is_valid)
+        return 0;
+
+    size_t count = GetInLayoutClassCount() + GetFilLayoutClassCount() + GetOutLayoutClassCount() +
+                   GetPrecisionClassCount() + GetDirectionClassCount();
+    for(const auto& feature : features)
+    {
+        if(!IsTunaNetCategoricalFeature(feature))
+            ++count;
+    }
+    count += (spatial_dim == 3) ? 19 : 18;
+    return count;
+}
+
 // Encoding methods with safe error handling
 MIOPEN_INTERNALS_EXPORT
 size_t MetadataND::EncodeDirection(miopen::conv::Direction dir) const
