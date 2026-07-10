@@ -9,6 +9,7 @@
 #include <hipdnn_flatbuffers_sdk/data_objects/pointwise_attributes_generated.h>
 #include <hipdnn_flatbuffers_sdk/data_objects/tensor_attributes_generated.h>
 #include <hipdnn_plugin_sdk/PluginApiDataTypes.h>
+#include <hipdnn_plugin_sdk/RuntimePassByValue.hpp>
 
 /**
  * @brief Macro that returns and prints info log on passing provided condition.
@@ -59,9 +60,7 @@ struct ActivationParams
 ActivationParams
     parseActivation(const hipdnn_flatbuffers_sdk::data_objects::PointwiseAttributes& attrs);
 
-hipdnnPluginDeviceBuffer_t findDeviceBuffer(int64_t uid,
-                                            const hipdnnPluginDeviceBuffer_t* deviceBuffers,
-                                            uint32_t numDeviceBuffers);
+using hipdnn_plugin_sdk::findDeviceBuffer;
 
 const hipdnn_flatbuffers_sdk::data_objects::TensorAttributes& findTensorAttributes(
     const std::unordered_map<int64_t,
@@ -71,35 +70,8 @@ const hipdnn_flatbuffers_sdk::data_objects::TensorAttributes& findTensorAttribut
 
 bool isChannelLastLayout(const hipdnn_flatbuffers_sdk::data_objects::TensorAttributes* tensor);
 
-/// @brief A scalar tensor operand (epsilon/momentum) resolved either at plan-build
-/// (compile-time constant or runtime-with-default) or at execute (pure runtime
-/// user-supplied, i.e. is_runtime_pass_by_value() && value_type() == NONE).
-struct ScalarOperand
-{
-    int64_t uid = 0;
-    hipdnn_flatbuffers_sdk::data_objects::DataType dataType
-        = hipdnn_flatbuffers_sdk::data_objects::DataType::UNSET;
-    bool isRuntimeUserSupplied = false;
-    double bakedDefault = 0.0;
-};
-
-/// @brief Builds a ScalarOperand from the op-graph tensor at plan-build time.
-/// Pure user-supplied tensors (is_runtime_pass_by_value() && value_type()==NONE)
-/// record uid+dtype only, deferring the read to execute. Every other state
-/// (compile-time constant, or runtime-with-default) extracts the baked value now.
-ScalarOperand makeScalarOperand(
-    const std::unordered_map<int64_t,
-                             const hipdnn_flatbuffers_sdk::data_objects::TensorAttributes*>&
-        tensorMap,
-    int64_t uid,
-    const char* paramName);
-
-/// @brief Resolves a ScalarOperand at execute time. Pure user-supplied operands
-/// read the host scalar from the matching device_buffers slot (throws
-/// HIPDNN_PLUGIN_STATUS_INVALID_VALUE if absent); all other operands return the
-/// baked default and ignore any device_buffers slot for that uid.
-double resolveScalarOperand(const ScalarOperand& op,
-                            const hipdnnPluginDeviceBuffer_t* deviceBuffers,
-                            uint32_t numDeviceBuffers);
+using hipdnn_plugin_sdk::makeScalarOperand;
+using hipdnn_plugin_sdk::resolveScalarOperand;
+using hipdnn_plugin_sdk::ScalarOperand;
 
 } // namespace hip_kernel_provider::core::utils

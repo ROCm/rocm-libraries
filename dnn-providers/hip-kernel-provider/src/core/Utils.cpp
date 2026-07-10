@@ -3,11 +3,7 @@
 
 #include "Utils.hpp"
 
-#include <cstring>
-
-#include <hipdnn_data_sdk/types.hpp>
 #include <hipdnn_data_sdk/utilities/Tensor.hpp>
-#include <hipdnn_flatbuffers_sdk/utilities/FlatbufferUtils.hpp>
 #include <hipdnn_plugin_sdk/PluginException.hpp>
 
 namespace hip_kernel_provider::core::utils
@@ -85,24 +81,6 @@ ActivationParams
     }
 }
 
-hipdnnPluginDeviceBuffer_t findDeviceBuffer(int64_t uid,
-                                            const hipdnnPluginDeviceBuffer_t* deviceBuffers,
-                                            uint32_t numDeviceBuffers)
-{
-    for(uint32_t i = 0; i < numDeviceBuffers; i++)
-    {
-        if(uid == deviceBuffers[i].uid)
-        {
-            return deviceBuffers[i];
-        }
-    }
-
-    throw hipdnn_plugin_sdk::HipdnnPluginException(
-        HIPDNN_PLUGIN_STATUS_INVALID_VALUE,
-        "Device buffer with the uid: " + std::to_string(uid)
-            + " not found in the provided device buffers.");
-}
-
 const hipdnn_flatbuffers_sdk::data_objects::TensorAttributes& findTensorAttributes(
     const std::unordered_map<int64_t,
                              const hipdnn_flatbuffers_sdk::data_objects::TensorAttributes*>&
@@ -171,80 +149,6 @@ bool isChannelLastLayout(const hipdnn_flatbuffers_sdk::data_objects::TensorAttri
         HIPDNN_PLUGIN_STATUS_BAD_PARAM,
         "Tensor must be 4D or 5D for layout detection. Got " + std::to_string(numDims)
             + "D tensor.");
-}
-
-ScalarOperand makeScalarOperand(
-    const std::unordered_map<int64_t,
-                             const hipdnn_flatbuffers_sdk::data_objects::TensorAttributes*>&
-        tensorMap,
-    int64_t uid,
-    const char* paramName)
-{
-    const auto* attr = tensorMap.at(uid);
-    if(attr->is_runtime_pass_by_value()
-       && attr->value_type() == hipdnn_flatbuffers_sdk::data_objects::TensorValue::NONE)
-    {
-        return ScalarOperand{uid, attr->data_type(), true, 0.0};
-    }
-    return ScalarOperand{
-        uid,
-        attr->data_type(),
-        false,
-        hipdnn_flatbuffers_sdk::utilities::extractDoubleFromTensorValue(attr, paramName)};
-}
-
-namespace
-{
-
-template <typename T>
-double readHostScalar(const void* ptr)
-{
-    T value;
-    std::memcpy(&value, ptr, sizeof(T));
-    return static_cast<double>(value);
-}
-
-} // namespace
-
-double resolveScalarOperand(const ScalarOperand& op,
-                            const hipdnnPluginDeviceBuffer_t* deviceBuffers,
-                            uint32_t numDeviceBuffers)
-{
-    if(!op.isRuntimeUserSupplied)
-    {
-        return op.bakedDefault;
-    }
-
-    const hipdnnPluginDeviceBuffer_t buffer
-        = findDeviceBuffer(op.uid, deviceBuffers, numDeviceBuffers);
-    const void* ptr = buffer.ptr;
-
-    using hipdnn_flatbuffers_sdk::data_objects::DataType;
-    switch(op.dataType)
-    {
-    case DataType::DOUBLE:
-        return readHostScalar<double>(ptr);
-    case DataType::FLOAT:
-        return readHostScalar<float>(ptr);
-    case DataType::HALF:
-        return static_cast<double>(
-            static_cast<float>(readHostScalar<hipdnn_data_sdk::types::half>(ptr)));
-    case DataType::BFLOAT16:
-        return static_cast<double>(
-            static_cast<float>(readHostScalar<hipdnn_data_sdk::types::bfloat16>(ptr)));
-    case DataType::INT32:
-        return readHostScalar<int32_t>(ptr);
-    case DataType::INT64:
-        return readHostScalar<int64_t>(ptr);
-    case DataType::BOOLEAN:
-        return readHostScalar<bool>(ptr);
-    case DataType::UNSET:
-        throw hipdnn_plugin_sdk::HipdnnPluginException(HIPDNN_PLUGIN_STATUS_BAD_PARAM,
-                                                       "Scalar operand has UNSET data type");
-    default:
-        throw hipdnn_plugin_sdk::HipdnnPluginException(HIPDNN_PLUGIN_STATUS_BAD_PARAM,
-                                                       "Scalar operand has unsupported data type");
-    }
 }
 
 } // namespace hip_kernel_provider::core::utils

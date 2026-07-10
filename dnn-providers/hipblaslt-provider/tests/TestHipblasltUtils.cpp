@@ -184,29 +184,6 @@ TEST(TestHipblasltUtils, TensorDataTypeToHipblasltDataTypeThrowsOnUnsupported)
 }
 
 // ============================================================================
-// FindDeviceBuffer
-// ============================================================================
-
-TEST(TestHipblasltUtils, FindDeviceBufferReturnsCorrectBuffer)
-{
-    std::vector<hipdnnPluginDeviceBuffer_t> buffers
-        = {{42, reinterpret_cast<void*>(0x1234)}, {99, reinterpret_cast<void*>(0x5678)}};
-
-    auto result = hipblaslt_utils::findDeviceBuffer(99, buffers.data(), 2);
-    EXPECT_EQ(result.uid, 99);
-    EXPECT_EQ(result.ptr, reinterpret_cast<void*>(0x5678));
-}
-
-TEST(TestHipblasltUtils, FindDeviceBufferThrowsIfNotFound)
-{
-    std::vector<hipdnnPluginDeviceBuffer_t> buffers = {{1, reinterpret_cast<void*>(0x1111)}};
-
-    EXPECT_THROW(
-        hipblaslt_utils::findDeviceBuffer(2, buffers.data(), static_cast<uint32_t>(buffers.size())),
-        hipdnn_plugin_sdk::HipdnnPluginException);
-}
-
-// ============================================================================
 // FindTensorAttributes
 // ============================================================================
 
