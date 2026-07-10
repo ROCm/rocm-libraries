@@ -32,6 +32,21 @@ class TheRockMatrixTest(unittest.TestCase):
         project_to_run = therock_matrix.collect_projects_to_run(subtrees)
         self.assertEqual(len(project_to_run), 1)
 
+    def test_collect_projects_to_run_hiptensor(self):
+        subtrees = ["projects/hiptensor"]
+
+        project_to_run = therock_matrix.collect_projects_to_run(subtrees)
+        self.assertEqual(len(project_to_run), 1)
+        hiptensor_entry = project_to_run[0]
+        self.assertIn(
+            "hiptensor",
+            hiptensor_entry["projects_to_test"].split(","),
+        )
+        self.assertIn(
+            "-DTHEROCK_ENABLE_HIPTENSOR=ON",
+            hiptensor_entry["cmake_options"].split(" "),
+        )
+
     def test_collect_projects_to_run_dependency_graph(self):
         subtrees = ["projects/miopen", "projects/hipblaslt"]
 
