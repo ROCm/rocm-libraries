@@ -821,27 +821,112 @@ TEST(CPU_ConvAiEngineeredConvFeatures_NONE, Golden)
     }
 }
 
+// 3D counterpart of CPU_ConvAiEngineeredConvFeatures_NONE.Golden. Pins the full 19-element derived
+// vector (18 shared features + the appended log1p(D_in)) for all three directions, so the 3D
+// depth folding (D into the volume terms) and the direction-dependent GEMM (M, N, K) assignment
+// are both exercised -- not just Forward. Uses C_in != C_out and D_in != D_out != H so a swapped
+// or dropped dimension is caught. Pure CPU math -- no model files or device required.
 TEST(CPU_ConvAiEngineeredConv3dFeatures_NONE, Golden)
 {
-    const auto derived = common::EngineeredConvFeatures(
-        /*N=*/2,
-        /*C_in=*/64,
-        /*C_out=*/128,
-        /*H_in=*/16,
-        /*W_in=*/16,
-        /*H_out=*/14,
-        /*W_out=*/14,
-        /*K_h=*/3,
-        /*K_w=*/3,
-        /*groups=*/1,
-        /*num_cu=*/304,
-        common::ConvDirection::Forward,
-        /*spatial_dim=*/3,
-        /*D_in=*/8,
-        /*D_out=*/6,
-        /*K_d=*/3);
-    ASSERT_EQ(derived.size(), 19u);
-    EXPECT_FLOAT_EQ(derived.back(), std::log1p(8.0f));
+    // N=2, C_in=64, C_out=128, 16x16 -> 14x14, D 8 -> 6, K 3x3x3, g=1, num_cu=304. Only the
+    // GEMM-dimension features (indices 1..6) differ between directions; the rest, including the
+    // trailing log1p(D_in) at index 18, are direction-independent.
+    struct Case
+    {
+        common::ConvDirection dir;
+        std::vector<float> expected;
+    };
+    const std::vector<Case> cases = {
+        {common::ConvDirection::Forward,
+         {20.7629185f,
+          7.76344633f,
+          4.17438745f,
+          8.14815617f,
+          36.75f,
+          0.680555582f,
+          0.0185185187f,
+          20.0697708f,
+          6.89903307f,
+          1.74149656f,
+          0.0131835938f,
+          0.5f,
+          0.015625f,
+          2.83321333f,
+          2.83321333f,
+          4.17438745f,
+          4.85981226f,
+          1.09861231f,
+          2.19722462f}},
+        {common::ConvDirection::BackwardData,
+         {20.7629185f,
+          4.85981226f,
+          7.45529842f,
+          7.76344633f,
+          0.0740740746f,
+          0.0544217676f,
+          0.734693885f,
+          20.0697708f,
+          6.89903307f,
+          1.74149656f,
+          0.0131835938f,
+          0.5f,
+          0.015625f,
+          2.83321333f,
+          2.83321333f,
+          4.17438745f,
+          4.85981226f,
+          1.09861231f,
+          2.19722462f}},
+        {common::ConvDirection::BackwardWeights,
+         {20.7629185f,
+          7.76344633f,
+          7.45529842f,
+          4.85981226f,
+          1.36111116f,
+          18.375f,
+          13.5f,
+          20.0697708f,
+          6.89903307f,
+          1.74149656f,
+          0.0131835938f,
+          0.5f,
+          0.015625f,
+          2.83321333f,
+          2.83321333f,
+          4.17438745f,
+          4.85981226f,
+          1.09861231f,
+          2.19722462f}},
+    };
+
+    for(const auto& c : cases)
+    {
+        const auto derived = common::EngineeredConvFeatures(
+            /*N=*/2,
+            /*C_in=*/64,
+            /*C_out=*/128,
+            /*H_in=*/16,
+            /*W_in=*/16,
+            /*H_out=*/14,
+            /*W_out=*/14,
+            /*K_h=*/3,
+            /*K_w=*/3,
+            /*groups=*/1,
+            /*num_cu=*/304,
+            c.dir,
+            /*spatial_dim=*/3,
+            /*D_in=*/8,
+            /*D_out=*/6,
+            /*K_d=*/3);
+        ASSERT_EQ(derived.size(), 19u);
+        ASSERT_EQ(derived.size(), c.expected.size());
+        // The appended 3D feature must be log1p(D_in), independent of direction.
+        EXPECT_FLOAT_EQ(derived.back(), std::log1p(8.0f));
+        for(std::size_t i = 0; i < c.expected.size(); ++i)
+            EXPECT_FLOAT_EQ(derived[i], c.expected[i])
+                << "3D derived feature mismatch at index " << i << " (direction "
+                << static_cast<int>(c.dir) << ")";
+    }
 }
 
 // Every bundled fdeep model file must be loadable by the deployed frugally-deep. This fails

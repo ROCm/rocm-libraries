@@ -871,6 +871,106 @@ TEST_P(GPU_CandidateSelection_FP32, EngineeredInputHardcoded_Test)
             << "hardcoded engineered feature mismatch at index " << i;
 }
 
+// The engineered input path became N-D in this PR, but EngineeredInput*_Test above are 2D-only and
+// Forward-only -- nothing exercised the 3D path or the Backward in<->out swap. This runs the 3D
+// engineered input path in a non-Forward direction, pinning both new swaps: (a) the in_d<->out_d
+// swap in CandidateSelectionRawFeatureValue (raw passthrough) and (b) the D_in/D_out swap feeding
+// common::EngineeredConvFeatures (derived block). Uses distinct in/out extents so an un-swapped or
+// dropped dimension is visible.
+TEST_P(GPU_CandidateSelection_FP32, Engineered3dInputSwap_Test)
+{
+    const auto& params = GetParam();
+    CandidateSelectionMetadata meta(params.arch, params.solver);
+    const auto spatial_dim = meta.GetInputConstant("spatial_dim");
+    if(!spatial_dim.has_value() || *spatial_dim != "3")
+        GTEST_SKIP() << params.solver << " is not a 3D solver";
+
+    const float in_c = 32.0f, out_c = 128.0f;
+    const float in_d = 10.0f, in_h = 20.0f, in_w = 18.0f;
+    const float out_d = 6.0f, out_h = 16.0f, out_w = 14.0f;
+    const float k_d = 3.0f, k_h = 3.0f, k_w = 3.0f;
+    // direction = 2 (BackwardWeights) matches the 3D Wrw solver; is_fwd == false so the swaps fire.
+    std::map<std::string, float> feats = {
+        {"direction", 2.0f},     {"batchsize", 1.0f},
+        {"group_count", 1.0f},   {"in_channels", in_c},
+        {"out_channels", out_c}, {"in_d", in_d},
+        {"in_h", in_h},          {"in_w", in_w},
+        {"out_d", out_d},        {"out_h", out_h},
+        {"out_w", out_w},        {"fil_d", k_d},
+        {"fil_h", k_h},          {"fil_w", k_w},
+        {"pad_d", 1.0f},         {"pad_h", 1.0f},
+        {"pad_w", 1.0f},         {"conv_stride_d", 1.0f},
+        {"conv_stride_h", 1.0f}, {"conv_stride_w", 1.0f},
+        {"dilation_d", 1.0f},    {"dilation_h", 1.0f},
+        {"dilation_w", 1.0f},    {"in_layout", 1.0f},
+        {"fil_layout", 1.0f},    {"out_layout", 1.0f},
+        {"bias", 0.0f},          {"precision", static_cast<float>(miopenFloat)},
+    };
+
+    std::vector<float> engineered;
+    ASSERT_NO_THROW(engineered = EngineerCandidateSelectionInputFeatures(feats, meta));
+
+    // (a) Derived tail: Backward swaps in<->out, so the forward-convention dims fed to
+    // EngineeredConvFeatures use out_* for the "in" slots (incl. depth) and vice versa. Computed
+    // directly here rather than hardcoded, so it pins the swap without duplicating the feature
+    // math.
+    const auto expected_derived = miopen::ai::common::EngineeredConvFeatures(
+        /*N=*/1,
+        /*C_in=*/static_cast<std::size_t>(out_c),
+        /*C_out=*/static_cast<std::size_t>(in_c),
+        /*H_in=*/static_cast<std::size_t>(out_h),
+        /*W_in=*/static_cast<std::size_t>(out_w),
+        /*H_out=*/static_cast<std::size_t>(in_h),
+        /*W_out=*/static_cast<std::size_t>(in_w),
+        /*K_h=*/static_cast<std::size_t>(k_h),
+        /*K_w=*/static_cast<std::size_t>(k_w),
+        /*groups=*/1,
+        meta.GetNumCu(),
+        miopen::ai::common::ConvDirection::BackwardWeights,
+        /*spatial_dim=*/3,
+        /*D_in=*/static_cast<std::size_t>(out_d),
+        /*D_out=*/static_cast<std::size_t>(in_d),
+        /*K_d=*/static_cast<std::size_t>(k_d));
+    ASSERT_GE(engineered.size(), expected_derived.size());
+    const std::size_t derived_off = engineered.size() - expected_derived.size();
+    for(std::size_t i = 0; i < expected_derived.size(); ++i)
+        EXPECT_FLOAT_EQ(engineered[derived_off + i], expected_derived[i])
+            << "3D Backward derived feature mismatch at index " << i;
+    // Trailing 3D feature is log1p(D_in) after the swap: D_in := out_d.
+    EXPECT_FLOAT_EQ(engineered.back(), std::log1p(out_d));
+
+    // (b) Raw passthrough swap: reconstruct the one-hot header width and raw ordering from the
+    // metadata (mirroring EngineerCandidateSelectionInputFeatures) and assert the in_d slot carries
+    // out_d's value and the out_d slot carries in_d's value.
+    const auto layout_w = [&](const std::string& f) {
+        const auto w = meta.GetInputEncodingClassCount(f);
+        return w == 0 ? std::size_t{2} : w;
+    };
+    const std::size_t header = layout_w("in_layout") + layout_w("fil_layout") +
+                               layout_w("out_layout") +
+                               meta.GetInputEncodingClassCount("precision");
+    const auto is_categorical = [](const std::string& n) {
+        return n == "in_layout" || n == "fil_layout" || n == "out_layout" || n == "precision";
+    };
+    std::size_t raw_idx = 0, in_d_idx = engineered.size(), out_d_idx = engineered.size();
+    for(const auto& name : meta.input_params())
+    {
+        if(meta.GetInputConstant(name).has_value() || is_categorical(name) || name == "direction")
+            continue;
+        if(name == "in_d")
+            in_d_idx = header + raw_idx;
+        else if(name == "out_d")
+            out_d_idx = header + raw_idx;
+        ++raw_idx;
+    }
+    ASSERT_LT(in_d_idx, engineered.size());
+    ASSERT_LT(out_d_idx, engineered.size());
+    EXPECT_FLOAT_EQ(engineered[in_d_idx], out_d)
+        << "in_d slot must carry out_d after Backward swap";
+    EXPECT_FLOAT_EQ(engineered[out_d_idx], in_d)
+        << "out_d slot must carry in_d after Backward swap";
+}
+
 // The conditional-layout descriptor is loaded from metadata: present for the Wavelet kernel,
 // absent for a fully static kernel (which then decodes via the plain kernel_str_mapping path).
 TEST_P(GPU_CandidateSelection_FP32, ConditionalLayoutDescriptorPresence_Test)
