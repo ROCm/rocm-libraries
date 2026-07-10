@@ -2792,10 +2792,10 @@ rocblas_status rocblasCall_trsm(rocblas_handle handle,
     }
     else
     {
-        THROW_IF_ROCBLAS_ERROR(rocblas_internal_trsm_batched_template(handle, side, uplo, transA, diag, m, n, alpha,
-                                                      A, offset_A, lda, stride_A, workArr, offset_B,
-                                                      ldb, stride_B, batch_count, optimal_mem, x_temp,
-                                                      x_temp_arr, invA, invA_arr, supplied_invA, 0));
+        THROW_IF_ROCBLAS_ERROR(rocblas_internal_trsm_batched_template(
+            handle, side, uplo, transA, diag, m, n, alpha, A, offset_A, lda, stride_A, workArr,
+            offset_B, ldb, stride_B, batch_count, optimal_mem, x_temp, x_temp_arr, invA, invA_arr,
+            supplied_invA, 0));
     }
     return rocblas_status_success;
 }
