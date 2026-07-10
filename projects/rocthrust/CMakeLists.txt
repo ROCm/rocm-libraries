@@ -58,9 +58,6 @@ include(CMakeDependentOption)
 option(DISABLE_WERROR "Disable building with Werror" ON)
 option(BUILD_TEST "Build tests" OFF)
 option(CODE_COVERAGE "Enable code coverage" OFF)
-# CI passes -DROCTHRUST_ENABLE_COVERAGE=ON (the standardized coverage flag); it is
-# gated directly at the instrumentation site below (no shared variable toggled).
-option(ROCTHRUST_ENABLE_COVERAGE "Enable code coverage" OFF)
 option(BUILD_HIPSTDPAR_TEST "Build hipstdpar tests" OFF)
 option(BUILD_HIPSTDPAR_TEST_WITH_TBB "Build hipstdpar tests with TBB" OFF)
 option(BUILD_EXAMPLE "Build example" OFF)
@@ -238,10 +235,6 @@ add_subdirectory(thrust)
 
 if(BUILD_TEST OR BUILD_BENCHMARK OR BUILD_HIPSTDPAR_TEST)
   rocm_package_setup_component(clients)
-endif()
-
-if(ROCTHRUST_ENABLE_COVERAGE)
-  set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -O0 -fprofile-instr-generate -fcoverage-mapping")
 endif()
 
 # Tests
