@@ -1,31 +1,21 @@
 # Copyright Advanced Micro Devices, Inc., or its affiliates.
 # SPDX-License-Identifier: MIT
 
-"""Unit tests for tasks._rocisa_install_status (the three-way rocisa detection
-that drives auto-enabling HIPBLASLT_BUNDLE_PYTHON_DEPS in build_client)."""
+"""Unit tests for Tensile.RocisaStatus._rocisa_install_status (the three-way
+rocisa detection that drives auto-enabling HIPBLASLT_BUNDLE_PYTHON_DEPS in
+tasks.build_client)."""
 
-import importlib.util
 from importlib import metadata
-from pathlib import Path
 
 import pytest
 
+# _rocisa_install_status ships inside the Tensile package, so it imports the
+# same way in the source tree and in the installed test artifacts (the Tests
+# conftest puts the tensilelite root on sys.path). Importing it here avoids the
+# `invoke` dependency that loading tasks.py by path used to pull in.
+from Tensile.RocisaStatus import _rocisa_install_status
+
 pytestmark = pytest.mark.unit
-
-# tasks.py lives at the tensilelite root (toxinidir), four levels up from this
-# file: Tensile/Tests/unit/<this file>. Load it by path so the test does not
-# depend on the root being importable via sys.path.
-_TASKS_PY = Path(__file__).parents[3] / "tasks.py"
-
-
-def _load_tasks():
-    spec = importlib.util.spec_from_file_location("tensilelite_tasks_under_test", _TASKS_PY)
-    mod = importlib.util.module_from_spec(spec)
-    spec.loader.exec_module(mod)
-    return mod
-
-
-tasks = _load_tasks()
 
 
 class _FakeDist:
@@ -52,13 +42,13 @@ def _patch_distribution(monkeypatch, result):
 
 def test_absent_when_package_not_found(monkeypatch):
     _patch_distribution(monkeypatch, metadata.PackageNotFoundError("rocisa"))
-    assert tasks._rocisa_install_status() == "absent"
+    assert _rocisa_install_status() == "absent"
 
 
 def test_non_editable_when_no_direct_url(monkeypatch):
     # A normal pip/wheel install has no direct_url.json (read_text returns None).
     _patch_distribution(monkeypatch, _FakeDist(None))
-    assert tasks._rocisa_install_status() == "non-editable"
+    assert _rocisa_install_status() == "non-editable"
 
 
 def test_editable_when_dir_info_editable_true(monkeypatch):
@@ -66,7 +56,7 @@ def test_editable_when_dir_info_editable_true(monkeypatch):
         monkeypatch,
         _FakeDist('{"url": "file:///src/rocisa", "dir_info": {"editable": true}}'),
     )
-    assert tasks._rocisa_install_status() == "editable"
+    assert _rocisa_install_status() == "editable"
 
 
 def test_non_editable_when_dir_info_editable_false(monkeypatch):
@@ -74,15 +64,15 @@ def test_non_editable_when_dir_info_editable_false(monkeypatch):
         monkeypatch,
         _FakeDist('{"url": "file:///src/rocisa", "dir_info": {"editable": false}}'),
     )
-    assert tasks._rocisa_install_status() == "non-editable"
+    assert _rocisa_install_status() == "non-editable"
 
 
 def test_non_editable_when_dir_info_missing(monkeypatch):
     # direct_url.json present (e.g. VCS/archive install) but no dir_info block.
     _patch_distribution(monkeypatch, _FakeDist('{"url": "https://example/rocisa.whl"}'))
-    assert tasks._rocisa_install_status() == "non-editable"
+    assert _rocisa_install_status() == "non-editable"
 
 
 def test_non_editable_on_malformed_direct_url(monkeypatch):
     _patch_distribution(monkeypatch, _FakeDist("not-valid-json"))
-    assert tasks._rocisa_install_status() == "non-editable"
+    assert _rocisa_install_status() == "non-editable"

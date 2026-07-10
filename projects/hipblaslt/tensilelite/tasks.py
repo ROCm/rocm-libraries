@@ -12,6 +12,13 @@ import sys
 
 _TASKS_DIR = pathlib.Path(__file__).parent.resolve()
 
+# Ensure the Tensile package (shipped next to this file) is importable when
+# invoke runs from the tensilelite root, regardless of cwd/sys.path state.
+if str(_TASKS_DIR) not in sys.path:
+    sys.path.insert(0, str(_TASKS_DIR))
+
+from Tensile.RocisaStatus import _rocisa_install_status
+
 
 def _cmake_bool(value):
     return "ON" if value else "OFF"
@@ -178,34 +185,6 @@ def _pip_install_rocisa(c, rocisa_dir=None, stinkytofu_prefix=None):
     )
     env.setdefault("CMAKE_BUILD_PARALLEL_LEVEL", str(os.cpu_count() or 1))
     c.run(f"pip install --no-build-isolation -e {shlex.quote(str(src))}", env=env)
-
-
-def _rocisa_install_status():
-    """Return the install status of rocisa.
-
-    Returns one of:
-        "absent"       – not installed at all
-        "editable"     – installed as editable (pip install -e)
-        "non-editable" – installed normally (pip install, wheel, tox)
-
-    Reads PEP 610 direct_url.json metadata; it does NOT import rocisa, so the
-    import-time staleness check is never triggered here.
-    """
-    import json
-    from importlib import metadata
-
-    try:
-        raw = metadata.distribution("rocisa").read_text("direct_url.json")
-    except metadata.PackageNotFoundError:
-        return "absent"
-    if not raw:
-        return "non-editable"
-    try:
-        if json.loads(raw).get("dir_info", {}).get("editable"):
-            return "editable"
-    except (ValueError, AttributeError):
-        pass
-    return "non-editable"
 
 
 def _maybe_rebuild_rocisa(c, rocisa_dir=None):
