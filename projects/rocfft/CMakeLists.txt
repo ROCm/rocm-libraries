@@ -223,11 +223,6 @@ if( ROCFFT_MPI_ENABLE )
   include_directories(SYSTEM ${MPI_INCLUDE_PATH})
 endif()
 
-# CI passes -DROCFFT_ENABLE_COVERAGE=ON (the standardized coverage flag); it is
-# gated directly at the instrumentation sites (library/src) without toggling the
-# shared BUILD_CODE_COVERAGE variable.
-option(ROCFFT_ENABLE_COVERAGE "Enable code coverage" OFF)
-
 # Optional RCCL backend for single-node multi-GPU communication.
 option(ROCFFT_RCCL_ENABLE "Enable RCCL for optimized single-node multi-GPU communication" OFF)
 
