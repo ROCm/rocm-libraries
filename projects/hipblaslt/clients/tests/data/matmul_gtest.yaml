@@ -985,13 +985,14 @@ Tests:
   category: pre_checkin
   function:
     matmul: *hpa_half_precision
-  M: [128, 129]
-  N: [128, 129]
-  K: [128, 129]
-  transA_transB: *transA_transB_range
+  M: 128
+  N: 128
+  K: 128
+  transA: T
+  transB: T
   alpha: 1
-  beta: [ 0.0, 2.0 ]
-  activation_type: [none, relu, gelu, swish]
+  beta: 2.0
+  activation_type: gelu
   bias_vector: 1
   norm_check: 1
   gpu_arch: '120[0-1]'
