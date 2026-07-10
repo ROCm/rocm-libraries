@@ -852,6 +852,104 @@ def creative_scenarios() -> List[Scenario]:
             block_size=16,
             dtype=torch.bfloat16,
         ),
+        # --- PR #9233: D256 gfx950 bf16 prefill fast-path cohort (Sq bs64) ---
+        # These are the shapes the PR perf table reports (+9.1% @ Sq4096,
+        # +10.1% @ Sq8192 over the 32x32 base). bf16, head_size=256, causal
+        # prefill (query_len == kv_len), batch 64. num_blocks covers 64 seqs *
+        # (Sq / block_size) unique blocks so the paged block-table is dense.
+        Scenario(
+            name="pr9233_d256_bf16_prefill_sq4096_bs64",
+            seq_lens=[(4096, 4096)] * 64,
+            num_query_heads=16,
+            num_kv_heads=16,
+            head_size=256,
+            block_size=16,
+            dtype=torch.bfloat16,
+            num_blocks=64 * (4096 // 16),
+        ),
+        Scenario(
+            name="pr9233_d256_bf16_prefill_sq8192_bs64",
+            seq_lens=[(8192, 8192)] * 64,
+            num_query_heads=16,
+            num_kv_heads=16,
+            head_size=256,
+            block_size=16,
+            dtype=torch.bfloat16,
+            num_blocks=64 * (8192 // 16),
+        ),
+        # bs64 == block_size=64 interpretation, single long sequence (batch 1):
+        # a low-occupancy compute-bound prefill where the exposed softmax v_exp
+        # is the bottleneck the interleave targets.
+        Scenario(
+            name="pr9233_d256_bf16_prefill_sq4096_b1_blk64",
+            seq_lens=[(4096, 4096)],
+            num_query_heads=16,
+            num_kv_heads=16,
+            head_size=256,
+            block_size=64,
+            dtype=torch.bfloat16,
+            num_blocks=4096 // 64,
+        ),
+        Scenario(
+            name="pr9233_d256_bf16_prefill_sq8192_b1_blk64",
+            seq_lens=[(8192, 8192)],
+            num_query_heads=16,
+            num_kv_heads=16,
+            head_size=256,
+            block_size=64,
+            dtype=torch.bfloat16,
+            num_blocks=8192 // 64,
+        ),
+        Scenario(
+            name="pr9233_d256_bf16_prefill_sq8192_b1_h8",
+            seq_lens=[(8192, 8192)],
+            num_query_heads=8,
+            num_kv_heads=8,
+            head_size=256,
+            block_size=64,
+            dtype=torch.bfloat16,
+            num_blocks=8192 // 64,
+        ),
+        Scenario(
+            name="pr9233_d256_bf16_prefill_sq8192_b1_gqa16x2",
+            seq_lens=[(8192, 8192)],
+            num_query_heads=16,
+            num_kv_heads=2,
+            head_size=256,
+            block_size=64,
+            dtype=torch.bfloat16,
+            num_blocks=8192 // 64,
+        ),
+        Scenario(
+            name="pr9233_d256_bf16_prefill_sq8192_b1_h1",
+            seq_lens=[(8192, 8192)],
+            num_query_heads=1,
+            num_kv_heads=1,
+            head_size=256,
+            block_size=64,
+            dtype=torch.bfloat16,
+            num_blocks=8192 // 64,
+        ),
+        Scenario(
+            name="pr9233_d256_bf16_prefill_sq4096_b1_blk16",
+            seq_lens=[(4096, 4096)],
+            num_query_heads=16,
+            num_kv_heads=16,
+            head_size=256,
+            block_size=16,
+            dtype=torch.bfloat16,
+            num_blocks=4096 // 16,
+        ),
+        Scenario(
+            name="pr9233_d256_bf16_prefill_sq8192_b1_blk16",
+            seq_lens=[(8192, 8192)],
+            num_query_heads=16,
+            num_kv_heads=16,
+            head_size=256,
+            block_size=16,
+            dtype=torch.bfloat16,
+            num_blocks=8192 // 16,
+        ),
         Scenario(
             name="creative_d256_prefill",
             seq_lens=[(128, 1024), (256, 2048)],
@@ -1186,8 +1284,87 @@ def _run_rocke(s: Scenario, data, *, path: str, warmup: int, attempts: int):
             _attn_signature,
             _attn_values,
             _select_2d_compile_backend,
+            _d256_gfx950_fast,
+            _tiled_spec_from_problem,
         )
         from rocke.runtime import KernelLauncher, LaunchConfig
+
+        # PR #9233 direct-launch lane: for the D256 gfx950 bf16 prefill cohort,
+        # build and launch the PRODUCTION fast spec directly (GPU-time only, no
+        # run_unified_attention_torch dispatcher overhead). Honors the
+        # PARITY_NO_INTERLEAVE monkeypatch so the same lane measures both the
+        # interleave fast path and the 32x32 base.
+        if _d256_gfx950_fast(problem):
+            spec = _tiled_spec_from_problem(problem)
+            if os.environ.get("PARITY_KQ_SWIZZLE") == "1":
+                from dataclasses import replace as _replace
+
+                spec = _replace(spec, use_kq_xor_swizzle=True)
+                print(
+                    "    [2d-direct] KQ XOR swizzle ON (read-only probe; "
+                    "numerics intentionally wrong)"
+                )
+            if os.environ.get("PARITY_KQ_PAD") == "1":
+                from dataclasses import replace as _replace
+
+                _w = int(os.environ.get("PARITY_KQ_PAD_W", "8"))
+                spec = _replace(spec, use_kq_lds_pad=True, kq_lds_pad_halves=_w)
+                print(
+                    f"    [2d-direct] KQ slab-gran pad ON (pad={_w} halves, "
+                    "correct: numerics preserved)"
+                )
+            kernel = build_unified_attention_2d_tiled(spec)
+            if _select_2d_compile_backend(problem) == "hipcc":
+                from rocke.helpers.compile import compile_kernel_via_hipcc
+
+                artifact = compile_kernel_via_hipcc(kernel)
+            else:
+                artifact = compile_kernel(kernel, capture_ir_text=False)
+            launcher = KernelLauncher(
+                hsaco=artifact.hsaco,
+                kernel_name=artifact.kernel_name,
+                signature=_attn_signature(
+                    dtype_str, include_bt_stride=True, include_qq_bias_stride=True
+                ),
+                cache_key=("d256_fast_direct", spec.kernel_name()),
+            )
+            if os.environ.get("PARITY_PROBE_OCC") == "1":
+                _probe_print_occupancy(artifact.hsaco, spec.num_warps)
+            vals = _attn_values(
+                problem=problem,
+                q=q,
+                k=data["key_cache"],
+                v=data["value_cache"],
+                out=output,
+                cu_seqlens_q=data["cu_q"],
+                seqused_k=data["kv_lens"],
+                softmax_scale=data["scale"],
+                block_table=data["block_tables"],
+                softcap=float(s.softcap),
+                sinks=data["sinks"],
+                bt_stride=int(data["block_tables"].stride(0)),
+                include_bt_stride=True,
+                alibi_slopes=data["alibi_slopes"],
+                qq_bias=qq_bias,
+                qq_bias_stride_0=qq_bias_stride_0,
+                include_qq_bias_stride=True,
+            )
+            block_q = spec.block_q
+            total_num_q_blocks = q.shape[0] // block_q + len(s.seq_lens)
+            cfg = LaunchConfig(
+                grid=(int(s.num_kv_heads), int(total_num_q_blocks), 1),
+                block=(64 * spec.num_warps, 1, 1),
+                stream=hip_stream,
+            )
+            print(f"    [2d-direct] {spec.kernel_name()}")
+
+            def call_once():
+                launcher(vals, config=cfg)
+
+            ms = _time_lane_ms(
+                call_once, warmup=warmup, attempts=attempts, stream=hip_stream
+            )
+            return output, ms
 
         ok, reason = supports_tiled_2d(
             head_size=s.head_size,
@@ -1346,6 +1523,142 @@ def _run_rocke(s: Scenario, data, *, path: str, warmup: int, attempts: int):
     return output, ms
 
 
+def _probe_print_occupancy(hsaco: bytes, num_warps: int) -> None:
+    """Print VGPR/AGPR/SGPR/LDS + coarse waves-per-CU for a compiled kernel.
+
+    Reuses the static occupancy probe (llvm-readelf on the HSACO notes); no
+    kernel launch, so it is safe to call during the build step.
+    """
+    try:
+        import sys as _sys
+
+        from rocke.assets import dsl_docs_dir
+
+        probe_dir = (
+            dsl_docs_dir() / "optimization" / "utilities" / "tools" / "dsl_probes"
+        )
+        if str(probe_dir) not in _sys.path:
+            _sys.path.insert(0, str(probe_dir))
+        from probe_occupancy import (  # type: ignore
+            ARCH_GFX950,
+            estimate_occupancy,
+            parse_hsaco_notes,
+        )
+
+        notes = parse_hsaco_notes(hsaco)
+        occ = estimate_occupancy(notes=notes, waves_per_wg=num_warps, arch=ARCH_GFX950)
+        print(
+            f"    [occupancy] vgpr={notes.get('vgpr_count')} "
+            f"agpr={notes.get('agpr_count')} sgpr={notes.get('sgpr_count')} "
+            f"spill={notes.get('vgpr_spill_count')} "
+            f"lds={notes.get('lds_size')}B  "
+            f"waves/CU={occ['waves_per_cu']} wg/CU={occ['wgs_per_cu']} "
+            f"limit={occ['limited_by']}"
+        )
+    except Exception as e:  # noqa: BLE001
+        print(f"    [occupancy] unavailable: {type(e).__name__}: {e}")
+
+
+def _run_torch_flash(s: Scenario, data, *, warmup: int, attempts: int):
+    """Time torch's flash-attention (F.scaled_dot_product_attention) on the
+    same shape, as the "vs torch-flash" reference in PR #9233.
+
+    Reconstructs the dense per-sequence causal Q/K/V from the paged KV cache
+    (so the numbers match the reference paged attention), then times F.sdpa
+    with the flash backend. Returns (out[total_q, H, D], ms).
+    """
+    import torch
+    import torch.nn.functional as F
+    from torch.nn.attention import sdpa_kernel, SDPBackend
+
+    q = data["query"]
+    key_cache = data["key_cache"]
+    value_cache = data["value_cache"]
+    block_tables = data["block_tables"]
+    query_lens = data["query_lens"]
+    kv_lens_list = data["kv_lens_list"]
+    H = s.num_query_heads
+    Hkv = s.num_kv_heads
+    D = s.head_size
+    scale = data["scale"]
+    dev = q.device
+    nqpkv = H // Hkv
+
+    # Gather dense per-seq tensors once (outside the timed region).
+    seqs = []
+    start = 0
+    for i, (ql, kvl) in enumerate(zip(query_lens, kv_lens_list)):
+        if ql <= 0:
+            continue
+        q_i = q[start : start + ql]  # [ql, H, D]
+        start += ql
+        nblk = (kvl + s.block_size - 1) // s.block_size
+        blk = block_tables[i, :nblk]
+        k_i = key_cache[blk].reshape(-1, Hkv, D)[:kvl]  # [kvl, Hkv, D]
+        v_i = value_cache[blk].reshape(-1, Hkv, D)[:kvl]
+        # [1, H, L, D]
+        qh = q_i.permute(1, 0, 2).unsqueeze(0)
+        kh = k_i.permute(1, 0, 2).unsqueeze(0)
+        vh = v_i.permute(1, 0, 2).unsqueeze(0)
+        if nqpkv > 1:
+            kh = kh.repeat_interleave(nqpkv, dim=1)
+            vh = vh.repeat_interleave(nqpkv, dim=1)
+        seqs.append((qh, kh, vh, ql, kvl))
+
+    # Pick a working flash-first backend once.
+    backend = None
+    for be, name in (
+        (SDPBackend.FLASH_ATTENTION, "flash"),
+        (SDPBackend.EFFICIENT_ATTENTION, "efficient"),
+        (SDPBackend.MATH, "math"),
+    ):
+        try:
+            with sdpa_kernel(be):
+                _ = F.scaled_dot_product_attention(
+                    seqs[0][0][:, :, :64],
+                    seqs[0][1][:, :, :64],
+                    seqs[0][2][:, :, :64],
+                    is_causal=True,
+                    scale=scale,
+                )
+            backend = (be, name)
+            break
+        except Exception:  # noqa: BLE001
+            continue
+    if backend is None:
+        raise NotImplementedError("no working torch sdpa backend")
+    _LAST_TORCH_FLASH["backend"] = backend[1]
+
+    outs = [None] * len(seqs)
+
+    def call_once():
+        with sdpa_kernel(backend[0]):
+            for j, (qh, kh, vh, ql, kvl) in enumerate(seqs):
+                if ql == kvl:
+                    o = F.scaled_dot_product_attention(
+                        qh, kh, vh, is_causal=True, scale=scale
+                    )
+                else:
+                    # query is a suffix of the kv stream (aiter convention)
+                    mask = torch.ones(ql, kvl, device=dev, dtype=torch.bool)
+                    mask = torch.triu(mask, diagonal=kvl - ql + 1).logical_not()
+                    o = F.scaled_dot_product_attention(
+                        qh, kh, vh, attn_mask=mask, scale=scale
+                    )
+                outs[j] = o
+
+    hip_stream = _bench_stream_handle()
+    ms = _time_lane_ms(call_once, warmup=warmup, attempts=attempts, stream=hip_stream)
+
+    # Assemble [total_q, H, D] in scenario order for the correctness compare.
+    flat = [o.squeeze(0).permute(1, 0, 2) for o in outs]  # each [L, H, D]
+    out = torch.cat(flat, dim=0).to(q.dtype)
+    return out, ms
+
+
+_LAST_TORCH_FLASH = {"backend": None}
+
+
 def run_unified(backend: str, s: Scenario, data, warmup: int = 3, attempts: int = 10):
     """Backwards-compatible wrapper: backend in {triton, rocke}; path auto."""
     if backend == "triton":
@@ -1461,6 +1774,12 @@ def main() -> int:
     parser.add_argument("--report", type=Path, default=None)
     parser.add_argument("--skip-ck", action="store_true")
     parser.add_argument(
+        "--torch-flash",
+        action="store_true",
+        help="also time torch F.sdpa (flash) and report the CK-auto vs "
+        "torch-flash ratio (PR #9233 'vs torch-flash' column)",
+    )
+    parser.add_argument(
         "--skip-triton",
         action="store_true",
         help="only run CK DSL lanes; useful when AITER/Triton deps are unavailable",
@@ -1493,6 +1812,36 @@ def main() -> int:
         print("CUDA/HIP device unavailable; exiting", file=sys.stderr)
         return 1
     print("device:", torch.cuda.get_device_name(0))
+
+    # PR #9233 reproduction lever: force the softmax<->MFMA interleave OFF on the
+    # production ("auto") dispatch so the D256 gfx950 fast path degrades to the
+    # "32x32 base" it is measured against. Run the harness twice (with and
+    # without this env) and take the ck-auto latency ratio to recover the
+    # "+N% over 32x32 base" number. Only the interleave codegen flags are
+    # dropped; the gated geometry (num_warps/tile_size/block_m_per_warp) is
+    # unchanged, so grid/launch-meta still agree.
+    if os.environ.get("PARITY_NO_INTERLEAVE") == "1":
+        from dataclasses import replace as _replace
+        import kernels.common.attention_unified as _au
+
+        _orig_tiled_spec = _au._tiled_spec_from_problem
+
+        def _tiled_spec_no_interleave(problem):
+            spec = _orig_tiled_spec(problem)
+            if getattr(spec, "use_softmax_mfma_interleave", False):
+                spec = _replace(
+                    spec,
+                    use_softmax_mfma_interleave=False,
+                    softmax_interleave_mode=0,
+                    softmax_interleave_groups=1,
+                )
+            return spec
+
+        _au._tiled_spec_from_problem = _tiled_spec_no_interleave
+        print(
+            "[parity] PARITY_NO_INTERLEAVE=1: softmax<->MFMA interleave DISABLED "
+            "(auto lane -> 32x32 base)"
+        )
 
     if args.set == "default":
         scenarios = default_scenarios()
@@ -1603,6 +1952,38 @@ def main() -> int:
                         elif err_ck:
                             row["ck_auto_status"] = err_ck
                         _row_print("ck-auto", ck_auto, ref_out, None)
+                        _isolate_benchmark_lane()
+
+                    if args.torch_flash:
+                        tf, err_tf = _safe_run(
+                            lambda: _run_torch_flash(
+                                s,
+                                data,
+                                warmup=args.warmup,
+                                attempts=args.attempts,
+                            )
+                        )
+                        if tf:
+                            tf_out, tf_ms = tf
+                            row["torch_flash_ms"] = tf_ms
+                            row["torch_flash_backend"] = _LAST_TORCH_FLASH["backend"]
+                            tf_diff = compare(ref_out, tf_out)
+                            row["torch_flash_vs_ref"] = tf_diff["max_abs"]
+                            print(
+                                f"  {'torch-flash':14s}: {tf_ms * 1000:9.2f} us  "
+                                f"max_abs={tf_diff['max_abs']:.5f}  "
+                                f"backend={_LAST_TORCH_FLASH['backend']}"
+                            )
+                            if row.get("ck_auto_ms"):
+                                ratio = tf_ms / row["ck_auto_ms"]
+                                row["ck_auto_vs_torch_flash"] = ratio
+                                print(
+                                    f"  {'ck-auto vs torch-flash':22s}: {ratio:.3f}x "
+                                    f"(ck {'faster' if ratio > 1 else 'slower'})"
+                                )
+                        elif err_tf:
+                            row["torch_flash_status"] = err_tf
+                            print(f"  torch-flash FAILED: {err_tf}")
                         _isolate_benchmark_lane()
                     continue
 
