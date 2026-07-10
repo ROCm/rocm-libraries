@@ -74,6 +74,7 @@ from rocke.helpers.attention import (
 )
 from rocke.helpers.distribution import make_static_tile_distribution
 from rocke.helpers.layouts import TransposeLdsReader
+from rocke.helpers.mfma_gemm_inner import decode_mfma_lanes, mfma_k_loop
 from rocke.helpers.transforms import TensorDescriptor, embed, indirect, unmerge
 
 
@@ -964,6 +965,7 @@ def supports_tiled_2d(
     use_k_single_buffer: bool = False,
     use_conflict_free_v_store: bool = False,
     use_k_sliced_ring: bool = False,
+    use_stdqk_paged: bool = False,
 ) -> Tuple[bool, str]:
     # The gfx942 variant runs the narrow 16x16x16 default path. The arch gate
     # admits gfx942 (narrow atom present + non-transpose V pipeline selectable)
@@ -1066,6 +1068,14 @@ def supports_tiled_2d(
                 f"tiled 2D kernel: per-wave tokens {per_wave_tokens} exceeds "
                 f"block_size={block_size}; would need lane-divergent block lookup",
             )
+    # The std-QK paged builder (build_stdqk_attention_paged) is LDS-light: it
+    # stages only the softmax scratch (S_lds[32,33] + m/l/c[32] ~= 4.6 KB) and
+    # reads K/V direct HBM->reg, so the conservative staged-tile LDS model below
+    # (which assumes K double-buffer + V + Q_lds + P_lds) does NOT apply. Its own
+    # builder enforces head_size==256 / tile_size==32; earlier validity checks
+    # (dtype, block_size, tile_size % block_size) have already run.
+    if use_stdqk_paged:
+        return True, "supported"
     # LDS-budget gate (ahead-of-time compilability). The kernel stages its
     # tiles in LDS (the smem_alloc calls in build_unified_attention_2d_tiled);
     # comgr CODEGEN (CODEGEN_BC_TO_RELOCATABLE) rejects a kernel whose static
@@ -5408,4 +5418,405 @@ def build_unified_attention_2d_tiled(
         if stripe + 1 < OUT_STRIPES:
             b.sync()
 
+    return b.kernel
+
+
+# ===========================================================================
+# Standard-QK D256 paged attention (AICK-1495) -- production dispatch path.
+# ===========================================================================
+#
+# Natural-orientation ``S = Q @ K^T`` D256 attention on the CDNA3 32x32x8 bf16
+# MFMA atom, reading SCATTERED paged K/V directly HBM->register via
+# ``paged_kv_desc.offset`` and varlen token-major Q/O via ``q_desc`` -- the
+# production-ABI sibling of the dense research std-QK kernel. It keeps every
+# measured win of the dense kernel (dense-measured 115.4/124.9 TF/s @ Sq4096/8192
+# on MI300X): natural QK (no operand transpose, no ``O^T`` epilogue), no
+# ``V_lds`` (V is the wave-coalesced PV B-operand), python-unrolled QK k-loop
+# (compiler hoists all K/Q loads ahead of the MFMA chain, collapsing the
+# per-step ``s_waitcnt vmcnt(0)`` drains), and softmax ``scale*log2e`` fold +
+# causal phase-split (mask only the diagonal kv-tile). One CTA = 1 wave64 owns a
+# BLOCK_M=32 q-token tile for ONE query head; grid = (num_query_heads,
+# q_blocks, 1). GQA is head->kv_head = head // num_queries_per_kv. Wired for the
+# ``_d256_gfx942_fast`` cohort only (bf16, head_size=256, causal prefill, no
+# fp8/sliding-window/softcap/sinks/alibi/qq_bias); every other shape is
+# byte-identical. The dense-layout perf transfer to scattered paged KV is
+# validated on-silicon (MI300X), not by host compile alone.
+_STDQK_PAGED_LOG2E = 1.4426950408889634
+_STDQK_PAGED_BM = 32
+_STDQK_PAGED_BN = 32
+
+
+def build_stdqk_attention_paged(
+    spec: UnifiedAttention2DTiledSpec,
+    *,
+    arch: str = "gfx942",
+    contiguous_kv: bool = False,
+) -> KernelDef:
+    """Emit the gfx942 natural-QK D256 paged-attention ``KernelDef``."""
+    from ..common.attention_arch import require_tiled_attention_arch
+
+    require_tiled_attention_arch(arch)
+    if spec.dtype != "bf16":
+        raise NotImplementedError("std-QK paged kernel is bf16-only")
+    dtype = spec.dtype_ir
+    HD = spec.head_size
+    if HD != 256:
+        raise NotImplementedError("std-QK paged kernel is head_size=256 only")
+    BM = _STDQK_PAGED_BM
+    BN = spec.tile_size_eff
+    if BN != _STDQK_PAGED_BN:
+        raise NotImplementedError("std-QK paged kernel requires tile_size==32")
+    BS = spec.block_size
+    NBPT = spec.n_blocks_per_tile
+    NUM_KV = spec.num_kv_heads
+    NUM_QH = spec.num_query_heads
+    NQK = spec.num_queries_per_kv
+    at = MfmaAtom.bf16_32x32x8()
+    ND = HD // 32
+    CPL = at.c_per_lane
+    NQKI = HD // at.k  # QK k-iterations
+
+    b = IRBuilder(spec.kernel_name() + "_stdqkp")
+    b.kernel.attrs["max_workgroup_size"] = 64
+    if spec.waves_per_eu is not None:
+        b.kernel.attrs["waves_per_eu"] = spec.waves_per_eu
+
+    # ---- parameters: exact ``_attn_signature`` order (paged ABI) ----
+    output = b.param(
+        "output_ptr", PtrType(dtype, "global"), noalias=True, writeonly=True, align=16
+    )
+    query = b.param(
+        "query_ptr", PtrType(dtype, "global"), noalias=True, readonly=True, align=16
+    )
+    key = b.param(
+        "key_cache_ptr", PtrType(dtype, "global"), noalias=True, readonly=True, align=16
+    )
+    value = b.param(
+        "value_cache_ptr",
+        PtrType(dtype, "global"),
+        noalias=True,
+        readonly=True,
+        align=16,
+    )
+    b.param("sink_ptr", PtrType(dtype, "global"), readonly=True, align=16)
+    block_tables = b.param(
+        "block_tables_ptr", PtrType(I32, "global"), readonly=True, align=4
+    )
+    seq_lens = b.param("seq_lens_ptr", PtrType(I32, "global"), readonly=True, align=4)
+    b.param("alibi_slopes_ptr", PtrType(F32, "global"), readonly=True, align=4)
+    b.param("qq_bias_ptr", PtrType(F32, "global"), readonly=True, align=4)
+    cu_q = b.param(
+        "query_start_len_ptr", PtrType(I32, "global"), readonly=True, align=4
+    )
+    scale_p = b.param("scale", F32)
+    b.param("k_scale", F32)
+    b.param("v_scale", F32)
+    b.param("out_scale", F32)
+    b.param("softcap", F32)
+    num_seqs_p = b.param("num_seqs", I32)
+    bt_stride_p = b.param("block_table_stride", I32)
+    b.param("qq_bias_stride_0", I32)
+
+    # ---- ids ----
+    head = b.to_sgpr_u32(b.block_id_x())  # query head (CTA-uniform)
+    q_block_global_idx = b.block_id_y()
+    lane = b.thread_id_x()
+    ld = decode_mfma_lanes(b, at, lane)
+    kv_head = b.to_sgpr_u32(b.div(head, b.const_i32(NQK)))
+
+    # ---- seq lookup (varlen; BLOCK_Q == BM: one q-head, BM tokens/CTA) ----
+    seq_idx = binary_search_seq_idx(
+        b,
+        cu_q,
+        q_block_global_idx,
+        num_seqs_p,
+        block_q=BM,
+        iterations=spec.binary_search_iters,
+    )
+    cu_q_start = b.to_sgpr_u32(b.global_load_i32(cu_q, seq_idx))
+    cu_q_stop = b.global_load_i32(cu_q, b.add(seq_idx, b.const_i32(1)))
+    cur_batch_q_len = b.sub(cu_q_stop, cu_q_start)
+    q_block_start_idx = b.add(b.div(cu_q_start, b.const_i32(BM)), seq_idx)
+    q_block_local_idx = b.sub(q_block_global_idx, q_block_start_idx)
+    seq_len = b.global_load_i32(seq_lens, seq_idx)
+    context_len = b.sub(seq_len, cur_batch_q_len)
+    qb_start_pos = b.to_sgpr_u32(b.mul(q_block_local_idx, b.const_i32(BM)))
+    with b.scf_if(b.cmp_ge(qb_start_pos, cur_batch_q_len)):
+        b.ret()
+    # Causal reference for row 0 of this q-tile (key seq-pos <= cbase+row).
+    cbase = b.to_sgpr_u32(b.add(context_len, qb_start_pos))
+
+    # ---- paged K/V direct addressing (element units) ----
+    # The gate restricts to bf16 + block_size in {16, 32}; with tile_size==32
+    # that gives KV_BYTES=2 and NBPT = 32 / block_size in {1, 2}. Physical block
+    # ids are hoisted per tile (below) and K/V addressed by arithmetic, avoiding
+    # a per-element block-table lookup. The cohort's per-seq KV cache is small
+    # (< 2 GiB), so element offsets stay in i32.
+    seq_base = b.to_sgpr_u32(b.mul(seq_idx, bt_stride_p))
+    bt_max = b.to_sgpr_u32(b.mul(num_seqs_p, bt_stride_p))
+    _KV_BLK_STRIDE = BS * NUM_KV * HD  # elements per physical block
+    _KV_TOK_STRIDE = NUM_KV * HD  # elements per token within a block
+    kvh_off = b.to_sgpr_u32(b.mul(kv_head, b.const_i32(HD)))  # kv-head elem off (uniform)
+    if contiguous_kv:
+        # CONTIGUOUS-KV fast path (correctness-gated to an identity/sequential
+        # block table): the sequence's blocks are physically contiguous, so read
+        # the base block ONCE (uniform) and address K/V by logical token with
+        # simple strides -- no per-tile block-table read, no per-lane block-id
+        # select. This drops the paged address-state VGPR pressure that spills
+        # the 128-VGPR D256 accumulator. INCORRECT for scattered block tables.
+        _base_block = b.to_sgpr_u32(
+            b.masked_global_load(
+                block_tables, seq_base, b.cmp_lt(seq_base, bt_max),
+                b.const_i32(0), dtype=I32, align=4,
+            )
+        )
+        base_elem = b.mul(_base_block, b.const_i32(_KV_BLK_STRIDE))
+    q_desc = TensorDescriptor.naive(
+        "Q", lengths=[1 << 30, NUM_QH, HD], coord_names=("token", "head", "dim")
+    )
+
+    # ---- LDS (softmax scratch only; ~4.6 KB) ----
+    # Row stride padded to a multiple of 4 F32 (16 bytes) so every P-operand /
+    # softmax read is 16-byte aligned -> the compiler emits ds_read_b128 instead
+    # of scalar ds_read_b32 (measured: the BN+1=132B stride misaligned 3/4 of
+    # rows -> ~4x LDS-read insts -> the paged 2x cycle regression). BN+4 keeps a
+    # non-32 stride so the C-layout write stays bank-conflict-free.
+    S_lds = b.smem_alloc(F32, [BM, BN + 4], name_hint="Slds")
+    m_lds = b.smem_alloc(F32, [BM], name_hint="mlds")
+    l_lds = b.smem_alloc(F32, [BM], name_hint="llds")
+    c_lds = b.smem_alloc(F32, [BM], name_hint="clds")
+
+    l2e = b.const_f32(_STDQK_PAGED_LOG2E)
+    ninf = b.const_f32(-1e30)
+    row = b.mod(lane, b.const_i32(BM))
+    qabs = b.add(cbase, row)
+    b.smem_store_vN(m_lds, [row], ninf, 1)
+    b.smem_store_vN(l_lds, [row], b.const_f32(0.0), 1)
+    b.sync()
+
+    # kv tiles covering keys [0, cbase + BM) -> ceil((cbase + BM) / BN).
+    tile_end = b.div(b.add(cbase, b.const_i32(BM + BN - 1)), b.const_i32(BN))
+    iter_args = [(f"acc{n}", b.const_f32(0.0)) for n in range(ND * CPL)]
+    kvloop = b.scf_for_iter(
+        b.const_i32(0), tile_end, b.const_i32(1), iter_args, iv_name="kv"
+    )
+    with kvloop as (kv, carry):
+        kvb = b.mul(kv, b.const_i32(BN))
+
+        # Per-tile physical-block bases (paged path only). In the contiguous-KV
+        # fast path the base block was hoisted once above the loop; K/V then
+        # address by logical token with no per-tile block read or block-id select.
+        if not contiguous_kv:
+            _lb0 = b.add(seq_base, b.mul(kv, b.const_i32(NBPT)))
+            _pbase0 = b.mul(
+                b.to_sgpr_u32(
+                    b.masked_global_load(
+                        block_tables, _lb0, b.cmp_lt(_lb0, bt_max),
+                        b.const_i32(0), dtype=I32, align=4,
+                    )
+                ),
+                b.const_i32(_KV_BLK_STRIDE),
+            )
+            if NBPT == 2:
+                _lb1 = b.add(_lb0, b.const_i32(1))
+                _pbase1 = b.mul(
+                    b.to_sgpr_u32(
+                        b.masked_global_load(
+                            block_tables, _lb1, b.cmp_lt(_lb1, bt_max),
+                            b.const_i32(0), dtype=I32, align=4,
+                        )
+                    ),
+                    b.const_i32(_KV_BLK_STRIDE),
+                )
+
+        def _kv_elem_base(bb, key_row):
+            # i32 element base for (kv-token, kv_head, dim=0). key_row in [0, BN).
+            # i32 matches the shipped default paged path; the gate excludes
+            # caches > 2 GiB (``_enable_i64_kv_addr``).
+            if contiguous_kv:
+                _lt = bb.add(kvb, key_row)  # logical kv token; contiguous stride
+                return bb.add(
+                    bb.add(base_elem, bb.mul(_lt, bb.const_i32(_KV_TOK_STRIDE))),
+                    kvh_off,
+                )
+            if NBPT == 1:
+                return bb.add(
+                    bb.add(_pbase0, bb.mul(key_row, bb.const_i32(_KV_TOK_STRIDE))),
+                    kvh_off,
+                )
+            _is0 = bb.cmp_lt(key_row, bb.const_i32(BS))
+            _pb = bb.select(_is0, _pbase0, _pbase1)
+            _tok = bb.select(_is0, key_row, bb.sub(key_row, bb.const_i32(BS)))
+            return bb.add(
+                bb.add(_pb, bb.mul(_tok, bb.const_i32(_KV_TOK_STRIDE))), kvh_off
+            )
+
+        def la(bb, kt):
+            # Q[token, head, dim] -- varlen token-major, dim contiguous.
+            q_tok = bb.add(bb.add(cu_q_start, qb_start_pos), ld.m_in_atom)
+            k_base = bb.add(
+                bb.mul(kt, bb.const_i32(at.k)),
+                bb.mul(ld.k_blk, bb.const_i32(at.a_per_lane)),
+            )
+            off, _ = q_desc.offset(bb, token=q_tok, head=head, dim=k_base)
+            return bb.global_load_vN(
+                query, off, dtype, at.a_per_lane, align=at.a_per_lane * 2
+            )
+
+        def lb(bb, kt):
+            # K[phys(m_in_atom), tok, kv_head, dim] -- direct HBM addressing via
+            # the per-tile hoisted physical-block bases; dim contiguous.
+            k_base = bb.add(
+                bb.mul(kt, bb.const_i32(at.k)),
+                bb.mul(ld.k_blk, bb.const_i32(at.a_per_lane)),
+            )
+            base = _kv_elem_base(bb, ld.m_in_atom)
+            return bb.global_load_vN(
+                key, bb.add(base, k_base), dtype, at.a_per_lane, align=at.a_per_lane * 2
+            )
+
+        # QK unroll: hoist all NQKI K/Q loads ahead of the MFMA chain.
+        acc = at.zero_acc(b)
+        av = [la(b, b.const_i32(kt)) for kt in range(NQKI)]
+        bv = [lb(b, b.const_i32(kt)) for kt in range(NQKI)]
+        for a_i, b_i in zip(av, bv):
+            acc = at.emit(b, a_i, b_i, acc)
+        s_acc = acc
+
+        # Fold scale*log2e into the S write (softmax then runs exp2 directly).
+        sfac = b.fmul(scale_p, l2e)
+        for i in range(CPL):
+            r, c = at.lane_to_output(b, lane, i)
+            b.smem_store_vN(S_lds, [r, c], b.fmul(b.vec_extract(s_acc, i), sfac), 1)
+        b.sync()
+
+        def _softmax(masked):
+            m_old = b.vec_extract(b.smem_load_vN(m_lds, row, dtype=F32, n=1), 0)
+            l_old = b.vec_extract(b.smem_load_vN(l_lds, row, dtype=F32, n=1), 0)
+            mx = m_old
+            for jj in range(BN // 4):
+                v4 = b.smem_load_vN(S_lds, row, b.const_i32(4 * jj), dtype=F32, n=4)
+                for e in range(4):
+                    j = 4 * jj + e
+                    ve = b.vec_extract(v4, e)
+                    v = (
+                        b.select(
+                            b.cmp_gt(b.add(kvb, b.const_i32(j)), qabs), ninf, ve
+                        )
+                        if masked
+                        else ve
+                    )
+                    mx = b.fmax(v, mx)
+            corr = b.exp2(b.fsub(m_old, mx))
+            ssum = b.const_f32(0.0)
+            for jj in range(BN // 4):
+                v4 = b.smem_load_vN(S_lds, row, b.const_i32(4 * jj), dtype=F32, n=4)
+                ps = []
+                for e in range(4):
+                    j = 4 * jj + e
+                    ve = b.vec_extract(v4, e)
+                    v = (
+                        b.select(
+                            b.cmp_gt(b.add(kvb, b.const_i32(j)), qabs), ninf, ve
+                        )
+                        if masked
+                        else ve
+                    )
+                    p = b.exp2(b.fsub(v, mx))
+                    ps.append(p)
+                    ssum = b.fadd(ssum, p)
+                b.smem_store_vN(
+                    S_lds, [row, b.const_i32(4 * jj)], b.vec_pack(ps, F32), 4
+                )
+            b.smem_store_vN(m_lds, [row], mx, 1)
+            b.smem_store_vN(l_lds, [row], b.fadd(b.fmul(l_old, corr), ssum), 1)
+            b.smem_store_vN(c_lds, [row], corr, 1)
+
+        # Causal phase-split (the reference kernel's winning config): the diagonal
+        # tile (tail > cbase) is masked; every earlier tile (tail <= cbase, all
+        # keys <= every row's limit) skips the mask VALU. Exactly one branch runs
+        # per (tile, wave).
+        with b.scf_if(b.cmp_lt(lane, b.const_i32(BM))):
+            tail = b.add(kvb, b.const_i32(BN - 1))
+            with b.scf_if(b.cmp_lt(tail, b.add(cbase, b.const_i32(1)))):
+                _softmax(masked=False)
+            with b.scf_if(b.cmp_gt(tail, cbase)):
+                _softmax(masked=True)
+        b.sync()
+
+        new_acc = [None] * (ND * CPL)
+
+        def lpa(bb, kt):
+            qn = bb.add(b.const_i32(0), ld.m_in_atom)
+            kbase = bb.add(
+                bb.mul(kt, bb.const_i32(at.k)),
+                bb.mul(ld.k_blk, bb.const_i32(at.a_per_lane)),
+            )
+            # Single vectorized b128 read of the a_per_lane contiguous P columns
+            # (S_lds[qn, kbase:kbase+a_per_lane]) -- the dense kernel gets this
+            # b128 from the compiler; force it here so paged doesn't degrade to
+            # a_per_lane scalar ds_read_b32 (the measured 2x cycle regression).
+            v4 = bb.smem_load_vN(S_lds, qn, kbase, dtype=F32, n=at.a_per_lane)
+            el = [
+                bb.cast_f32_to(bb.vec_extract(v4, j), BF16)
+                for j in range(at.a_per_lane)
+            ]
+            return bb.vec_pack(el, BF16)
+
+        cr_i = [
+            b.vec_extract(
+                b.smem_load_vN(c_lds, at.lane_to_output(b, lane, i)[0], dtype=F32, n=1),
+                0,
+            )
+            for i in range(CPL)
+        ]
+        for nt in range(ND):
+            nb = b.const_i32(nt * 32)
+
+            def lvb(bb, kt, nb=nb):
+                # V[phys(key), tok, kv_head, n_col] -- direct HBM addressing via
+                # the per-tile hoisted physical-block bases (no per-element
+                # block-table lookup). Scalar B-operand: b_per_lane keys/k-iter.
+                n_col = bb.add(nb, ld.n_in_atom)
+                k_base = bb.add(
+                    bb.mul(kt, bb.const_i32(at.k)),
+                    bb.mul(ld.k_blk, bb.const_i32(at.b_per_lane)),
+                )
+                out = bb.zero_vec(dtype, at.b_per_lane)
+                for j in range(at.b_per_lane):
+                    base = _kv_elem_base(bb, bb.add(k_base, bb.const_i32(j)))
+                    s = bb.global_load(value, bb.add(base, n_col), dtype, align=2)
+                    out = bb.vec_insert(out, s, j)
+                return out
+
+            pv = mfma_k_loop(
+                b,
+                K=BN,
+                atom=at,
+                load_a=lpa,
+                load_b=lvb,
+                iv_name=f"ktpv{nt}",
+                acc_name=f"accpv{nt}",
+            )
+            for i in range(CPL):
+                new_acc[nt * CPL + i] = b.fma(
+                    carry[nt * CPL + i], cr_i[i], b.vec_extract(pv, i)
+                )
+        b.scf_yield(*new_acc)
+
+    final = kvloop.results
+    for nt in range(ND):
+        nb = nt * 32
+        for i in range(CPL):
+            r, c = at.lane_to_output(b, lane, i)
+            lv = b.vec_extract(b.smem_load_vN(l_lds, r, dtype=F32, n=1), 0)
+            op_pos = b.add(qb_start_pos, r)
+            q_tok = b.add(cu_q_start, op_pos)
+            off, _ = q_desc.offset(
+                b, token=q_tok, head=head, dim=b.add(b.const_i32(nb), c)
+            )
+            val = b.cast_f32_to(b.fdiv(final[nt * CPL + i], lv), dtype)
+            with b.scf_if(b.cmp_lt(op_pos, cur_batch_q_len)):
+                b.global_store(output, off, val, align=2)
+    b.ret()
     return b.kernel
