@@ -141,7 +141,16 @@ jobs:
         shell: pwsh
         run: |
           New-Item -ItemType Directory -Force $env:HIPDNN_ARTIFACT_DIR | Out-Null
-          tar -C $env:ROCM_SDK_PATH -czf (Join-Path $env:HIPDNN_ARTIFACT_DIR 'hipdnn-rocm-sdk-windows.tar.gz') .
+          tar -C $env:ROCM_SDK_PATH `
+              --exclude='bin/*-test' --exclude='bin/*-test.exe' `
+              --exclude='bin/test_*' `
+              --exclude='bin/*_tests' --exclude='bin/*_tests.exe' `
+              --exclude='bin/*-bench' --exclude='bin/*-bench.exe' `
+              --exclude='bin/benchmark_*' `
+              --exclude='bin/*_perf' --exclude='bin/*_perf.exe' `
+              --exclude='bin/*_gtest.data' --exclude='bin/*.hip' `
+              --exclude='clients' `
+              -czf (Join-Path $env:HIPDNN_ARTIFACT_DIR 'hipdnn-rocm-sdk-windows.tar.gz') .
           if ($LASTEXITCODE -ne 0) { throw "Failed to package patched ROCm SDK" }
 
       - name: Upload patched ROCm SDK artifact
@@ -246,7 +255,16 @@ jobs:
         run: |
           set -euo pipefail
           mkdir -p "$HIPDNN_ARTIFACT_DIR"
-          tar -C "$ROCM_SDK_PATH" -czf "$HIPDNN_ARTIFACT_DIR/hipdnn-rocm-sdk-linux.tar.gz" .
+          tar -C "$ROCM_SDK_PATH" \
+              --exclude='bin/*-test' --exclude='bin/*-test.exe' \
+              --exclude='bin/test_*' \
+              --exclude='bin/*_tests' --exclude='bin/*_tests.exe' \
+              --exclude='bin/*-bench' --exclude='bin/*-bench.exe' \
+              --exclude='bin/benchmark_*' \
+              --exclude='bin/*_perf' --exclude='bin/*_perf.exe' \
+              --exclude='bin/*_gtest.data' --exclude='bin/*.hip' \
+              --exclude='clients' \
+              -czf "$HIPDNN_ARTIFACT_DIR/hipdnn-rocm-sdk-linux.tar.gz" .
 
       - name: Upload patched ROCm SDK artifact
         uses: actions/upload-artifact@bbbca2ddaa5d8feaa63e36b76fdaad77386f024f # v7.0.0
