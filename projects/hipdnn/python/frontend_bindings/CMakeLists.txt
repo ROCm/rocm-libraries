@@ -4,27 +4,19 @@
 cmake_minimum_required(VERSION 3.26)
 project(hipdnn_frontend_bindings LANGUAGES CXX)
 
-include(FetchContent)
-
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_POSITION_INDEPENDENT_CODE ON)
 
 set(HIPDNN_NANOBIND_VERSION "2.12.0" CACHE STRING "Version of nanobind to use")
+set(HIPDNN_TSL_ROBIN_MAP_VERSION "1.4.1" CACHE STRING "Version of tsl-robin-map to use")
+set(NB_USE_SUBMODULE_DEPS OFF)
 
 find_package(Python 3.12
     REQUIRED COMPONENTS Interpreter Development.Module Development.SABIModule)
 
-find_package(nanobind ${HIPDNN_NANOBIND_VERSION} CONFIG QUIET)
-if(NOT nanobind_FOUND)
-    FetchContent_Declare(
-        nanobind
-        GIT_REPOSITORY https://github.com/wjakob/nanobind.git
-        GIT_TAG v${HIPDNN_NANOBIND_VERSION}
-        DOWNLOAD_EXTRACT_TIMESTAMP TRUE
-    )
-    FetchContent_MakeAvailable(nanobind)
-endif()
+find_package(tsl-robin-map ${HIPDNN_TSL_ROBIN_MAP_VERSION} CONFIG REQUIRED)
+find_package(nanobind ${HIPDNN_NANOBIND_VERSION} CONFIG REQUIRED)
 
 find_package(hipdnn_frontend CONFIG)
 if(NOT hipdnn_frontend_FOUND)
