@@ -135,8 +135,9 @@ int main(int argc, char* argv[])
     REGISTER_GENERATED_KERNELS(registry, gfx_arch);
     std::cout << "Registry: " << registry.size() << " kernel(s)" << std::endl;
 
-    // Load ML model and create heuristic
-    HardwareProfile hw;
+    // Load ML model and create heuristic. Hardware features are derived from the
+    // live device (no chip constants stored in source).
+    HardwareProfile hw = HardwareProfile::fromDevice();
     MLHeuristic ml_heuristic(model_path, &registry, hw, log_transform);
     if(!ml_heuristic.is_loaded())
     {

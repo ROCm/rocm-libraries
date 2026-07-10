@@ -4,6 +4,7 @@
 #include "ck_tile/dispatcher/dispatcher.hpp"
 #include "ck_tile/dispatcher/kernel_key.hpp"
 #include "ck_tile/dispatcher/registry.hpp"
+#include <hip/hip_runtime.h>
 #include <algorithm>
 #include <array>
 #include <cmath>
@@ -78,10 +79,42 @@ inline double dtype_bytes_ml(DataType dt)
 }
 struct HardwareProfile
 {
-    int num_cus = 256, simds_per_cu = 4, shader_engines = 32, max_clock_mhz = 2400,
-        max_waves_per_cu = 32, wavefront_size = 64, lds_capacity = 65536, l1_cache_kb = 32,
-        l2_cache_kb = 4096, l3_cache_kb = 262144, num_xcd = 8;
+    // Chip-configuration counts are NOT given checked-in values (policy: no CU
+    // counts in source). They are 0 until populated from the live device via
+    // fromDevice(); a zero profile yields obviously-degenerate features rather
+    // than a plausible-but-wrong hardcoded chip. The remaining fields are
+    // microarchitectural/memory constants (not chip-config counts), so they keep
+    // sensible defaults and are still refined by fromDevice() when a device is up.
+    int num_cus = 0, shader_engines = 0, num_xcd = 0, max_clock_mhz = 0, lds_capacity = 0;
+    int simds_per_cu = 4, max_waves_per_cu = 32, wavefront_size = 64, l1_cache_kb = 32,
+        l2_cache_kb = 4096, l3_cache_kb = 262144;
     int total_simds() const { return num_cus * simds_per_cu; }
+
+    // Populate from the live device instead of storing chip constants in the
+    // repo. Only ever the source of the CU count at runtime; on query failure
+    // the chip-config fields stay 0 (degenerate, not wrong). shader_engines and
+    // num_xcd are not exposed as clean hipDeviceProp_t scalars, so they are left
+    // 0 here (TODO: hipDeviceGetAttribute / uarch map if a model ever needs them
+    // -- in the last FMHA result all hw_* features had zero importance).
+    static HardwareProfile fromDevice(int device = 0)
+    {
+        HardwareProfile hw;
+        hipDeviceProp_t props{};
+        if(hipGetDeviceProperties(&props, device) != hipSuccess)
+        {
+            return hw; // chip-config fields remain 0
+        }
+        hw.num_cus        = props.multiProcessorCount;
+        hw.max_clock_mhz  = props.clockRate / 1000; // clockRate is in kHz
+        hw.wavefront_size = props.warpSize;
+        hw.lds_capacity   = static_cast<int>(props.sharedMemPerBlock);
+        if(props.warpSize > 0)
+        {
+            hw.max_waves_per_cu = props.maxThreadsPerMultiProcessor / props.warpSize;
+        }
+        hw.l2_cache_kb = props.l2CacheSize / 1024;
+        return hw;
+    }
 };
 
 // CRITICAL: Feature count MUST match feature_spec.json
