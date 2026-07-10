@@ -135,13 +135,17 @@ void init_descriptors(nb::module_& m)
     nb::class_<MatmulDesc>(m, "MatmulDesc")
         .def(nb::init<hipblasComputeType_t, hipDataType>(),
              nb::arg("compute_type"), nb::arg("scale_type"))
-        .def("set_attribute_int", &MatmulDesc::set_attribute_int)
-        .def("set_attribute_ptr", &MatmulDesc::set_attribute_ptr)
-        .def("get_attribute_int", &MatmulDesc::get_attribute_int)
+        .def("set_attribute_int", &MatmulDesc::set_attribute_int,
+             nb::arg("attr"), nb::arg("value"))
+        .def("set_attribute_ptr", &MatmulDesc::set_attribute_ptr,
+             nb::arg("attr"), nb::arg("ptr"))
+        .def("get_attribute_int", &MatmulDesc::get_attribute_int,
+             nb::arg("attr"))
         .def_prop_ro("ptr", &MatmulDesc::ptr);
 
     nb::class_<Preference>(m, "Preference")
         .def(nb::init<>())
-        .def("set_max_workspace", &Preference::set_max_workspace)
+        .def("set_max_workspace", &Preference::set_max_workspace,
+             nb::arg("nbytes"))
         .def_prop_ro("ptr", &Preference::ptr);
 }
