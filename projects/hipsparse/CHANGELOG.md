@@ -4,6 +4,12 @@ Documentation for hipSPARSE is available at
 [https://rocm.docs.amd.com/projects/hipSPARSE/en/latest/](https://rocm.docs.amd.com/projects/hipSPARSE/en/latest/).
 
 
+## (Unreleased) hipSPARSE
+
+### Added
+* Added Blocked ELL format support to the `hipsparseDenseToSparse` routine.
+* Added `hipsparseBlockedEllSetPointers`.
+
 ## hipSPARSE 4.6.0 for ROCm 7.14
 
 ### Added

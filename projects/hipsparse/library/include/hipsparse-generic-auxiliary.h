@@ -672,6 +672,18 @@ hipsparseStatus_t hipsparseCooSetPointers(hipsparseSpMatDescr_t spMatDescr,
 #endif
 
 /*! \ingroup generic_module
+*  \brief Set the pointers of a sparse blocked ELL matrix.
+*  \details
+*  \p hipsparseBlockedEllSetPointers sets the fields of the sparse blocked ELL matrix descriptor.
+*/
+#if(!defined(CUDART_VERSION))
+HIPSPARSE_EXPORT
+hipsparseStatus_t hipsparseBlockedEllSetPointers(hipsparseSpMatDescr_t spMatDescr,
+                                                 void*                 ellColInd,
+                                                 void*                 ellValue);
+#endif
+
+/*! \ingroup generic_module
 *  \brief Get the sizes of a sparse matrix.
 */
 #if(!defined(CUDART_VERSION) || CUDART_VERSION >= 12000)
