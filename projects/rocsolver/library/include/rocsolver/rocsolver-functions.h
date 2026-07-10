@@ -26913,6 +26913,7 @@ ROCSOLVER_EXPORT rocblas_status rocsolver_zsytrf_strided_batched(rocblas_handle 
                                                                  const rocblas_stride strideP,
                                                                  rocblas_int* info,
                                                                  const rocblas_int batch_count);
+
 //! @}
 /*! @{
     \brief The GEBLTTRF_NPVT functions compute the LU factorization of a block tridiagonal matrix without partial pivoting.
@@ -26929,7 +26930,7 @@ ROCSOLVER_EXPORT rocblas_status rocsolver_zsytrf_strided_batched(rocblas_handle 
         \end{array}\right]
     \f]
 
-    with \f$n = \mathrm{nblocks}\f$ diagonal blocks of size ``nb``, can be represented as
+    with \f$n = \f$ ``nblocks`` diagonal blocks of size ``nb``, can be represented as
 
     \f[
         M = \left[\begin{array}{cccc}
@@ -26937,21 +26938,17 @@ ROCSOLVER_EXPORT rocblas_status rocsolver_zsytrf_strided_batched(rocblas_handle 
         A_1 & E_2    &         &    \\
             & \ddots & \ddots  &    \\
             &        & A_{n-1} & E_n
-        \end{array}\right] 
-
-        \left[
-        \begin{array}{cccc}
+        \end{array}\right] \left[\begin{array}{cccc}
         I & F_1    &        &        \\
-          &        & \ddots & \ddots \\
+          & \ddots & \ddots &        \\
           &        & I      & F_{n-1}\\
           &        &        & I
         \end{array}\right] = LU
     \f]
 
-    where the blocks \f$E_i\f$ and \f$F_i\f$ are general blocks of size ``nb``. The \f$k\f$-th
-    diagonal block \f$E_k\f$ stores the LU factorization without pivoting of the corresponding
-    diagonal block and is encoded as \f$E_k=L_k+U_k\f$, where \f$L_k\f$ is strictly lower triangular
-    and \f$U_k\f$ is upper triangular; the factorization is \f$(L_k+I)U_k\f$.
+    where the blocks \f$E_i\f$ and \f$F_i\f$ are general blocks of size ``nb``. This function returns
+    diagonal blocks \f$E_i\f$ in factorized form, i.e. \f$E_i=(L_i+I)U_i\f$ where \f$L_i\f$ is strictly lower triangular
+    and \f$U_i\f$ is upper triangular.
 
     @param[in]
     handle      rocblas_handle.
@@ -26970,7 +26967,7 @@ ROCSOLVER_EXPORT rocblas_status rocsolver_zsytrf_strided_batched(rocblas_handle 
     @param[inout]
     B           pointer to type. Array on the GPU of dimension ldb*nb*nblocks.
                 On entry, contains the blocks B_i, arranged one after the other.
-                On exit, it is overwritten by blocks E_i in factorized form as returned by
+                On exit, it is overwritten by L_i + U_i, where L_i and U_i are the factors of E_i as returned by
                 \ref rocsolver_sgetrf_npvt "GETRF_NPVT".
     @param[in]
     ldb         rocblas_int. ldb >= nb.
@@ -27049,7 +27046,7 @@ ROCSOLVER_EXPORT rocblas_status rocsolver_zgeblttrf_npvt(rocblas_handle handle,
         \end{array}\right]
     \f]
 
-    with \f$n = \mathrm{nblocks}\f$ diagonal blocks of size ``nb``, can be represented as
+    with \f$n = \f$ ``nblocks`` diagonal blocks of size ``nb``, can be represented as
 
     \f[
         M_l = \left[\begin{array}{cccc}
@@ -27057,9 +27054,7 @@ ROCSOLVER_EXPORT rocblas_status rocsolver_zgeblttrf_npvt(rocblas_handle handle,
         A_{l1} & E_{l2} &            &      \\
                & \ddots & \ddots     &      \\
                &        & A_{l(n-1)} & E_{ln}
-        \end{array}\right] 
-
-        \left[\begin{array}{cccc}
+        \end{array}\right] \left[\begin{array}{cccc}
         I & F_{l1}  &          &            \\
           & \ddots  & \ddots   &            \\
           &         & I        & F_{l(n-1)} \\
@@ -27067,12 +27062,9 @@ ROCSOLVER_EXPORT rocblas_status rocsolver_zgeblttrf_npvt(rocblas_handle handle,
         \end{array}\right] = L_l U_l
     \f]
 
-    where the blocks \f$E_{li}\f$ and \f$F_{li}\f$ are general blocks of size ``nb``. The
-    \f$k\f$-th diagonal block \f$E_{lk}\f$ stores the LU factorization without pivoting of the
-    corresponding diagonal block and is encoded as \f$E_{lk}=L_{lk}+U_{lk}\f$, where \f$L_{lk}\f$
-    is strictly lower triangular and \f$U_{lk}\f$ is upper triangular; the factorization is
-    \f$(L_{lk}+I)U_{lk}\f$.
-
+    where the blocks \f$E_{li}\f$ and \f$F_{li}\f$ are general blocks of size ``nb``. This function returns
+    diagonal blocks \f$E_{li}\f$ in factorized form, i.e. \f$E_{li}=(L_{li}+I)U_{li}\f$ where \f$L_{li}\f$ is strictly lower triangular
+    and \f$U_{li}\f$ is upper triangular.
 
     @param[in]
     handle      rocblas_handle.
@@ -27093,7 +27085,7 @@ ROCSOLVER_EXPORT rocblas_status rocsolver_zgeblttrf_npvt(rocblas_handle handle,
     B           array of pointers to type. Each pointer points to an array on the GPU of dimension
                 ldb*nb*nblocks.
                 On entry, contains the blocks B_{li}, arranged one after the other.
-                On exit, it is overwritten by blocks E_{li} in factorized form as returned by
+                On exit, it is overwritten by L_{li} + U_{li}, where L_{li} and U_{li} are the factors of E_{li} as returned by
                 \ref rocsolver_sgetrf_npvt "GETRF_NPVT".
     @param[in]
     ldb         rocblas_int. ldb >= nb.
@@ -27180,7 +27172,7 @@ ROCSOLVER_EXPORT rocblas_status rocsolver_zgeblttrf_npvt_batched(rocblas_handle 
         \end{array}\right]
     \f]
 
-    with \f$n = \mathrm{nblocks}\f$ diagonal blocks of size ``nb``, can be represented as
+    with \f$n = \f$ ``nblocks`` diagonal blocks of size ``nb``, can be represented as
 
     \f[
         M_l = \left[\begin{array}{cccc}
@@ -27188,9 +27180,7 @@ ROCSOLVER_EXPORT rocblas_status rocsolver_zgeblttrf_npvt_batched(rocblas_handle 
         A_{l1} & E_{l2} &            &       \\
                & \ddots & \ddots     &       \\
                &        & A_{l(n-1)} & E_{ln}
-        \end{array}\right] 
- 
-        \left[\begin{array}{cccc}
+        \end{array}\right] \left[\begin{array}{cccc}
         I & F_{l1} &         &             \\
           & \ddots & \ddots  &             \\
           &        & I       & F_{l(n-1)}  \\
@@ -27198,11 +27188,9 @@ ROCSOLVER_EXPORT rocblas_status rocsolver_zgeblttrf_npvt_batched(rocblas_handle 
         \end{array}\right] = L_l U_l
     \f]
 
-    where the blocks \f$E_{li}\f$ and \f$F_{li}\f$ are general blocks of size ``nb``. The
-    \f$k\f$-th diagonal block \f$E_{lk}\f$ stores the LU factorization without pivoting of the
-    corresponding diagonal block and is encoded as \f$E_{lk}=L_{lk}+U_{lk}\f$, where \f$L_{lk}\f$
-    is strictly lower triangular and \f$U_{lk}\f$ is upper triangular; the factorization is
-    \f$(L_{lk}+I)U_{lk}\f$.
+    where the blocks \f$E_{li}\f$ and \f$F_{li}\f$ are general blocks of size ``nb``. This function returns
+    diagonal blocks \f$E_{li}\f$ in factorized form, i.e. \f$E_{li}=(L_{li}+I)U_{li}\f$ where \f$L_{li}\f$ is strictly lower triangular
+    and \f$U_{li}\f$ is upper triangular.
 
     @param[in]
     handle      rocblas_handle.
@@ -27223,11 +27211,11 @@ ROCSOLVER_EXPORT rocblas_status rocsolver_zgeblttrf_npvt_batched(rocblas_handle 
                 Stride from the start of one block A_{li} to the same block in the next batch
                 instance A_{(l+1)i}.
                 There is no restriction for the value of strideA. The normal use case is strideA >=
-                lda*nb*nblocks.
+                lda*nb*(nblocks-1).
     @param[inout]
     B           pointer to type. Array on the GPU (the size depends on the value of strideB).
                 On entry, contains the blocks B_{li}, arranged one after the other.
-                On exit, it is overwritten by blocks E_{li} in factorized form as returned by
+                On exit, it is overwritten by L_{li} + U_{li}, where L_{li} and U_{li} are the factors of E_{li} as returned by
                 \ref rocsolver_sgetrf_npvt "GETRF_NPVT".
     @param[in]
     ldb         rocblas_int. ldb >= nb.
@@ -27247,10 +27235,10 @@ ROCSOLVER_EXPORT rocblas_status rocsolver_zgeblttrf_npvt_batched(rocblas_handle 
                 Specifies the leading dimension of matrix blocks C_{li}.
     @param[in]
     strideC     rocblas_stride.
-                Stride from the start of one block B_{li} to the same block in the next batch
-                instance B_{(l+1)i}.
+                Stride from the start of one block C_{li} to the same block in the next batch
+                instance C_{(l+1)i}.
                 There is no restriction for the value of strideC. The normal use case is strideC >=
-                ldc*nb*nblocks.
+                ldc*nb*(nblocks-1).
     @param[out]
     info        pointer to rocblas_int. Array of batch_count integers on the GPU.
                 If info[l] = 0, successful exit for factorization of l-th batch instance.
@@ -27341,7 +27329,7 @@ ROCSOLVER_EXPORT rocblas_status
         \end{array}\right]
     \f]
 
-    with \f$n = \mathrm{nblocks}\f$ diagonal blocks of size ``nb``, can be represented as
+    with \f$n = \f$ ``nblocks`` diagonal blocks of size ``nb``, can be represented as
 
     \f[
         M_l = \left[\begin{array}{cccc}
@@ -27349,9 +27337,7 @@ ROCSOLVER_EXPORT rocblas_status
         A_{l1} & E_{l2}  &            &     \\
                & \ddots  & \ddots     &     \\
                &         & A_{l(n-1)} & E_{ln}
-        \end{array}\right] 
-
-        \left[\begin{array}{cccc}
+        \end{array}\right] \left[\begin{array}{cccc}
         I & F_{l1}  &        &            \\
           & \ddots  & \ddots &            \\
           &         & I      & F_{l(n-1)} \\
@@ -27359,11 +27345,9 @@ ROCSOLVER_EXPORT rocblas_status
         \end{array}\right] = L_l U_l
     \f]
 
-    where the blocks \f$E_{li}\f$ and \f$F_{li}\f$ are general blocks of size ``nb``. The
-    \f$k\f$-th diagonal block \f$E_{lk}\f$ stores the LU factorization without pivoting of the
-    corresponding diagonal block and is encoded as \f$E_{lk}=L_{lk}+U_{lk}\f$, where \f$L_{lk}\f$
-    is strictly lower triangular and \f$U_{lk}\f$ is upper triangular; the factorization is
-    \f$(L_{lk}+I)U_{lk}\f$.
+    where the blocks \f$E_{li}\f$ and \f$F_{li}\f$ are general blocks of size ``nb``. This function returns
+    diagonal blocks \f$E_{li}\f$ in factorized form, i.e. \f$E_{li}=(L_{li}+I)U_{li}\f$ where \f$L_{li}\f$ is strictly lower triangular
+    and \f$U_{li}\f$ is upper triangular.
 
     @param[in]
     handle      rocblas_handle.
@@ -27379,7 +27363,7 @@ ROCSOLVER_EXPORT rocblas_status
     @param[in]
     inca        rocblas_int. inca > 0.
                 Stride from the start of one row of A_{li} to the next. The normal use cases are
-                inca = 1 (strided batched case) or inca = batch_count (interleaved batched case).
+                inca = 1 (equivalent to the strided batched case) or inca = batch_count (for an interleaved batched case).
     @param[in]
     lda         rocblas_int. lda >= inca * nb.
                 Specifies the leading dimension of blocks A_{li}, that is, the stride from the start
@@ -27389,16 +27373,16 @@ ROCSOLVER_EXPORT rocblas_status
                 Stride from the start of one block A_{li} to the same block in the next batch
                 instance A_{(l+1)i}.
                 There is no restriction for the value of strideA. The normal use cases are strideA >=
-                lda*nb*nblocks (strided batched case) or strideA = 1 (interleaved batched case).
+                lda*nb*(nblocks-1) (equivalent to the strided batched case) or strideA = 1 (for an interleaved batched case).
     @param[inout]
     B           pointer to type. Array on the GPU (the size depends on the value of strideB).
                 On entry, contains the blocks B_{li}, arranged one after the other.
-                On exit, it is overwritten by blocks E_{li} in factorized form as returned by
+                On exit, it is overwritten by L_{li} + U_{li}, where L_{li} and U_{li} are the factors of E_{li} as returned by
                 \ref rocsolver_sgetrf_npvt "GETRF_NPVT".
     @param[in]
     incb        rocblas_int. incb > 0.
                 Stride from the start of one row of B_{li} to the next. The normal use cases are
-                incb = 1 (strided batched case) or incb = batch_count (interleaved batched case).
+                incb = 1 (equivalent to the strided batched case) or incb = batch_count (for an interleaved batched case).
     @param[in]
     ldb         rocblas_int. ldb >= incb * nb.
                 Specifies the leading dimension of blocks B_{li}, that is, the stride from the start
@@ -27408,7 +27392,7 @@ ROCSOLVER_EXPORT rocblas_status
                 Stride from the start of one block B_{li} to the same block in the next batch
                 instance B_{(l+1)i}.
                 There is no restriction for the value of strideB. The normal use cases are strideB >=
-                ldb*nb*nblocks (strided batched case) or strideB = 1 (interleaved batched case).
+                ldb*nb*nblocks (equivalent to the strided batched case) or strideB = 1 (for an interleaved batched case).
     @param[inout]
     C           pointer to type. Array on the GPU (the size depends on the value of strideC).
                 On entry, contains the blocks C_{li}, arranged one after the other.
@@ -27416,17 +27400,17 @@ ROCSOLVER_EXPORT rocblas_status
     @param[in]
     incc        rocblas_int. incc > 0.
                 Stride from the start of one row of C_{li} to the next. The normal use cases are
-                incc = 1 (strided batched case) or incc = batch_count (interleaved batched case).
+                incc = 1 (equivalent to the strided batched case) or incc = batch_count (for an interleaved batched case).
     @param[in]
     ldc         rocblas_int. ldc >= incc * nb.
                 Specifies the leading dimension of blocks C_{li}, that is, the stride from the start
                 of one column of C_{li} to the next.
     @param[in]
     strideC     rocblas_stride.
-                Stride from the start of one block B_{li} to the same block in the next batch
-                instance B_{(l+1)i}.
+                Stride from the start of one block C_{li} to the same block in the next batch
+                instance C_{(l+1)i}.
                 There is no restriction for the value of strideC. The normal use cases are strideC >=
-                ldc*nb*nblocks (strided batched case) or strideC = 1 (interleaved batched case).
+                ldc*nb*(nblocks-1) (equivalent to the strided batched case) or strideC = 1 (for an interleaved batched case).
     @param[out]
     info        pointer to rocblas_int. Array of batch_count integers on the GPU.
                 If info[l] = 0, successful exit for factorization of l-th batch instance.
@@ -27541,7 +27525,7 @@ ROCSOLVER_EXPORT rocblas_status
         \end{array}\right]=R
     \f]
 
-    where matrix M has \f$n = \mathrm{nblocks}\f$ diagonal blocks of size ``nb``, and the right-hand-side
+    where matrix M has \f$n = \f$ ``nblocks`` diagonal blocks of size ``nb``, and the right-hand-side
     blocks \f$R_i\f$ are general blocks of size ``nb``-by-``nrhs``. The blocks of matrix M should be in
     the factorized form, as returned by \ref rocsolver_sgeblttrf_npvt "GEBLTTRF_NPVT".
 
@@ -27664,7 +27648,7 @@ ROCSOLVER_EXPORT rocblas_status rocsolver_zgeblttrs_npvt(rocblas_handle handle,
         \end{array}\right]=R_l
     \f]
 
-    where matrix \f$M_l\f$ has \f$n = \mathrm{nblocks}\f$ diagonal blocks of size ``nb``, and the right-hand-side
+    where matrix \f$M_l\f$ has \f$n = \f$ ``nblocks`` diagonal blocks of size ``nb``, and the right-hand-side
     blocks \f$R_{li}\f$ are general blocks of size ``nb``-by-``nrhs``. The blocks of matrix \f$M_l\f$ should be in
     the factorized form, as returned by \ref rocsolver_sgeblttrf_npvt_batched "GEBLTTRF_NPVT_BATCHED".
 
@@ -27798,7 +27782,7 @@ ROCSOLVER_EXPORT rocblas_status rocsolver_zgeblttrs_npvt_batched(rocblas_handle 
         \end{array}\right]=R_l
     \f]
 
-    where matrix \f$M_l\f$ has \f$n = \mathrm{nblocks}\f$ diagonal blocks of size ``nb``, and the right-hand-side
+    where matrix \f$M_l\f$ has \f$n = \f$ ``nblocks`` diagonal blocks of size ``nb``, and the right-hand-side
     blocks \f$R_{li}\f$ are general blocks of size ``nb``-by-``nrhs``. The blocks of matrix \f$M_l\f$ should be in
     the factorized form, as returned by \ref rocsolver_sgeblttrf_npvt_strided_batched "GEBLTTRF_NPVT_STRIDED_BATCHED".
 
@@ -27824,7 +27808,7 @@ ROCSOLVER_EXPORT rocblas_status rocsolver_zgeblttrs_npvt_batched(rocblas_handle 
                 Stride from the start of one block A_{li} to the same block in the next batch
                 instance A_{(l+1)i}.
                 There is no restriction for the value of strideA. The normal use case is strideA >=
-                lda*nb*nblocks.
+                lda*nb*(nblocks-1).
     @param[in]
     B           pointer to type. Array on the GPU (the size depends on the value of strideB).
                 Contains the blocks B_{li}, as returned by \ref rocsolver_sgeblttrf_npvt_strided_batched "GEBLTTRF_NPVT_STRIDED_BATCHED".
@@ -27848,7 +27832,7 @@ ROCSOLVER_EXPORT rocblas_status rocsolver_zgeblttrs_npvt_batched(rocblas_handle 
                 Stride from the start of one block C_{li} to the same block in the next batch
                 instance C_{(l+1)i}.
                 There is no restriction for the value of strideC. The normal use case is strideC >=
-                ldc*nb*nblocks.
+                ldc*nb*(nblocks-1).
     @param[inout]
     X           pointer to type. Array on the GPU (the size depends on the value of strideX).
                 On entry, X contains the right-hand-side blocks R_{li}. It is overwritten by solution
@@ -27972,7 +27956,7 @@ ROCSOLVER_EXPORT rocblas_status
         \end{array}\right]=R_l
     \f]
 
-    where matrix \f$M_l\f$ has \f$n = \mathrm{nblocks}\f$ diagonal blocks of size ``nb``, and the right-hand-side
+    where matrix \f$M_l\f$ has \f$n = \f$ ``nblocks`` diagonal blocks of size ``nb``, and the right-hand-side
     blocks \f$R_{li}\f$ are general blocks of size ``nb``-by-``nrhs``. The blocks of matrix \f$M_l\f$ should be in
     the factorized form, as returned by \ref rocsolver_sgeblttrf_npvt_interleaved_batched "GEBLTTRF_NPVT_INTERLEAVED_BATCHED".
 
@@ -27993,7 +27977,7 @@ ROCSOLVER_EXPORT rocblas_status
     @param[in]
     inca        rocblas_int. inca > 0.
                 Stride from the start of one row of A_{li} to the next. The normal use cases are
-                inca = 1 (strided batched case) or inca = batch_count (interleaved batched case).
+                inca = 1 (equivalent to the strided batched case) or inca = batch_count (for an interleaved batched case).
     @param[in]
     lda         rocblas_int. lda >= inca * nb.
                 Specifies the leading dimension of blocks A_{li}, that is, the stride from the start
@@ -28003,14 +27987,14 @@ ROCSOLVER_EXPORT rocblas_status
                 Stride from the start of one block A_{li} to the same block in the next batch
                 instance A_{(l+1)i}.
                 There is no restriction for the value of strideA. The normal use cases are strideA >=
-                lda*nb*nblocks (strided batched case) or strideA = 1 (interleaved batched case).
+                lda*nb*(nblocks-1) (equivalent to the strided batched case) or strideA = 1 (for an interleaved batched case).
     @param[in]
     B           pointer to type. Array on the GPU (the size depends on the value of strideB).
                 Contains the blocks B_{li}, as returned by \ref rocsolver_sgeblttrf_npvt_interleaved_batched "GEBLTTRF_NPVT_INTERLEAVED_BATCHED".
     @param[in]
     incb        rocblas_int. incb > 0.
                 Stride from the start of one row of B_{li} to the next. The normal use cases are
-                incb = 1 (strided batched case) or incb = batch_count (interleaved batched case).
+                incb = 1 (equivalent to the strided batched case) or incb = batch_count (for an interleaved batched case).
     @param[in]
     ldb         rocblas_int. ldb >= incb * nb.
                 Specifies the leading dimension of blocks B_{li}, that is, the stride from the start
@@ -28020,14 +28004,14 @@ ROCSOLVER_EXPORT rocblas_status
                 Stride from the start of one block B_{li} to the same block in the next batch
                 instance B_{(l+1)i}.
                 There is no restriction for the value of strideB. The normal use cases are strideB >=
-                ldb*nb*nblocks (strided batched case) or strideB = 1 (interleaved batched case).
+                ldb*nb*nblocks (equivalent to the strided batched case) or strideB = 1 (for an interleaved batched case).
     @param[in]
     C           pointer to type. Array on the GPU (the size depends on the value of strideC).
                 Contains the blocks C_{li}, as returned by \ref rocsolver_sgeblttrf_npvt_interleaved_batched "GEBLTTRF_NPVT_INTERLEAVED_BATCHED".
     @param[in]
     incc        rocblas_int. incc > 0.
                 Stride from the start of one row of C_{li} to the next. The normal use cases are
-                incc = 1 (strided batched case) or incc = batch_count (interleaved batched case).
+                incc = 1 (equivalent to the strided batched case) or incc = batch_count (for an interleaved batched case).
     @param[in]
     ldc         rocblas_int. ldc >= incc * nb.
                 Specifies the leading dimension of blocks C_{li}, that is, the stride from the start
@@ -28037,7 +28021,7 @@ ROCSOLVER_EXPORT rocblas_status
                 Stride from the start of one block C_{li} to the same block in the next batch
                 instance C_{(l+1)i}.
                 There is no restriction for the value of strideC. The normal use cases are strideC >=
-                ldc*nb*nblocks (strided batched case) or strideC = 1 (interleaved batched case).
+                ldc*nb*(nblocks-1) (equivalent to the strided batched case) or strideC = 1 (for an interleaved batched case).
     @param[inout]
     X           pointer to type. Array on the GPU (the size depends on the value of strideX).
                 On entry, X contains the right-hand-side blocks R_{li}. It is overwritten by solution
@@ -28045,7 +28029,7 @@ ROCSOLVER_EXPORT rocblas_status
     @param[in]
     incx        rocblas_int. incx > 0.
                 Stride from the start of one row of X_{li} to the next. The normal use cases are
-                incx = 1 (strided batched case) or incx = batch_count (interleaved batched case).
+                incx = 1 (equivalent to the strided batched case) or incx = batch_count (for an interleaved batched case).
     @param[in]
     ldx         rocblas_int. ldx >= incx * nb.
                 Specifies the leading dimension of blocks X_{li}, that is, the stride from the start
@@ -28055,7 +28039,7 @@ ROCSOLVER_EXPORT rocblas_status
                 Stride from the start of one block X_{li} to the same block in the next batch
                 instance X_{(l+1)i}.
                 There is no restriction for the value of strideX. The normal use cases are strideX >=
-                ldx*nrhs*nblocks (strided batched case) or strideX = 1 (interleaved batched case).
+                ldx*nrhs*nblocks (equivalent to the strided batched case) or strideX = 1 (for an interleaved batched case).
     @param[in]
     batch_count rocblas_int. batch_count >= 0.
                 Number of matrices in the batch.
