@@ -1047,6 +1047,25 @@ class KernelWriterAssembly(KernelWriter):
     if kernel["UseMFMAF32XEmulation"]:
       self.moduleVgprMacroValuB_T.add(RegSet("v", "IdentityMatrix", self.states.startVgprIdentityMatrix, 0))
 
+  def _emitGL2PrefetchAddrRegSets(self, module, kernel, tPA, tPB):
+    """Emit RegSet declarations for GL2 prefetch address vgprs (A, B, and MX scale variants)."""
+    if not kernel["PrefetchGL2"]:
+      return
+    for label, tP, stateObj in [("A", tPA, self.states.a),
+                                ("B", tPB, self.states.b)]:
+      for i in range(tP["gl2nlp"]):
+        for j in range(tP["gl2nlc"]):
+          module.add(RegSet("v", f"vgprGL2PrefetchAddr{label}_{i}_{j}",
+              stateObj.startVgprGL2PrefetchAddr + (i * tP["gl2nlc"] + j) * self.states.rpga))
+    for mxKey, tP, label, stateObj in [("MXBlockA", tPA, "MXSA", self.states.mxsa),
+                                       ("MXBlockB", tPB, "MXSB", self.states.mxsb)]:
+      if kernel["ProblemType"][mxKey]:
+        mx = tP["MX"]
+        for i in range(mx["gl2nlp"]):
+          for j in range(mx["gl2nlc"]):
+            module.add(RegSet("v", f"vgprGL2PrefetchAddr{label}_{i}_{j}",
+                stateObj.startVgprGL2PrefetchAddr + (i * mx["gl2nlc"] + j) * self.states.rpga))
+
   def macroAndSet(self, kernel, tPA, tPB) -> Module:
     module = Module("MacroNSet")
     module.add(MacroVMagicDiv(kernel["MagicDivAlg"]))
@@ -1548,21 +1567,7 @@ class KernelWriterAssembly(KernelWriter):
         module.add(RegSet("v", "vgprAlphaTmp", \
             self.states.startVgprAlphaTmp))
 
-      if kernel["PrefetchGL2"]:
-        for i in range(tPA["gl2nlp"]):
-          for j in range(tPA["gl2nlc"]):
-            module.add(RegSet("v", f"vgprGL2PrefetchAddrA_{i}_{j}", self.states.a.startVgprGL2PrefetchAddr + (i * tPA["gl2nlc"] + j) * self.states.rpga))
-        for i in range(tPB["gl2nlp"]):
-          for j in range(tPB["gl2nlc"]):
-            module.add(RegSet("v", f"vgprGL2PrefetchAddrB_{i}_{j}", self.states.b.startVgprGL2PrefetchAddr + (i * tPB["gl2nlc"] + j) * self.states.rpga)) 
-        if kernel["ProblemType"]["MXBlockA"]:
-          for i in range(tPA["MX"]["gl2nlp"]):
-            for j in range(tPA["MX"]["gl2nlc"]):
-              module.add(RegSet("v", f"vgprGL2PrefetchAddrMXSA_{i}_{j}", self.states.mxsa.startVgprGL2PrefetchAddr + (i * tPA["MX"]["gl2nlc"] + j) * self.states.rpga))
-        if kernel["ProblemType"]["MXBlockB"]:
-          for i in range(tPB["MX"]["gl2nlp"]):
-            for j in range(tPB["MX"]["gl2nlc"]):
-              module.add(RegSet("v", f"vgprGL2PrefetchAddrMXSB_{i}_{j}", self.states.mxsb.startVgprGL2PrefetchAddr + (i * tPB["MX"]["gl2nlc"] + j) * self.states.rpga))
+      self._emitGL2PrefetchAddrRegSets(module, kernel, tPA, tPB)
 
       module.add(RegSet("v", "vgprSerial", self.states.startVgprSerial))
 
@@ -1598,6 +1603,7 @@ class KernelWriterAssembly(KernelWriter):
       module.add(RegSet("v", "vgprSerial", self.states.startVgprSerial))
       #self.vgprPool.remove(self.states.startVgprSerial, 1)
       #module.addComment0("Need %u vgprs for GR A"%(self.states.a.tileInfo.numGRPerSubtile))
+      self._emitGL2PrefetchAddrRegSets(module, kernel, tPA, tPB)
       return
 
     if not kernel["UseSubtileImpl"]:
@@ -6026,7 +6032,7 @@ class KernelWriterAssembly(KernelWriter):
     skipInitCVmovLabel = None
     if initCIterWmma:
       loopIdx = 0
-      EndCounter = kernel["PrefetchGlobalRead"] if not kernel["SuppressNoLoadLoop"] else kernel["PrefetchGlobalRead"]-1
+      EndCounter = self.unrollLoopEntryEndCounter(kernel)  # match openLoop's loop-entry guard
       loopCounter = self.loopCounter(kernel, loopIdx)
       loopChar = self.states.indexChars[ \
           kernel["ProblemType"]["IndicesSummation"][loopIdx]]
@@ -7515,6 +7521,23 @@ class KernelWriterAssembly(KernelWriter):
     return value
 
   ##############################################################################
+  # Unrolled-loop entry threshold
+  ##############################################################################
+  def unrollLoopEntryEndCounter(self, kernel):
+    """Threshold T for the unrolled loop: the main (global-load) unrolled loop
+    body -- and therefore the InitCIterWmma cloned iter0 that zeroes C -- runs
+    iff LoopCounter > T."""
+    pgr = kernel["PrefetchGlobalRead"]
+    if pgr == 1:
+      return 0 if kernel["SuppressNoLoadLoop"] else 1
+    if pgr == 2:
+      return (0 if kernel["HalfPLR"] else 1) if kernel["SuppressNoLoadLoop"] else 2
+    if pgr >= 3:
+      # openLoop early-exits to NoGlobalLoadLoop for LoopCounter <= PGR.
+      return pgr
+    return 0
+
+  ##############################################################################
   # Open Loop
   ##############################################################################
   def openLoop(self, kernel, tPA, tPB, loopIdx, noLabelGen=False, beginLabelOnly=False, nta=0, ntb=0):
@@ -7555,20 +7578,6 @@ class KernelWriterAssembly(KernelWriter):
     # PGL needs a skip-check here if not bufferload
     # If kernel["SuppressNoLoadLoop"] we don't have a special loop for the 'last iter'
     loopCounter = self.loopCounter(kernel, loopIdx)
-    if tailLoop:
-      endCounter = 0
-    elif kernel["PrefetchGlobalRead"] == 1:
-      if kernel["SuppressNoLoadLoop"]:
-        endCounter =  0
-      else:
-        endCounter = 1
-    elif kernel["PrefetchGlobalRead"] >= 2:
-      if kernel["SuppressNoLoadLoop"]:
-        endCounter =  0 if kernel["HalfPLR"] else 1
-      else:
-        endCounter = 2
-    else:
-      endCounter =  0
 
     if tailLoop:
       # begin loop
@@ -7582,8 +7591,8 @@ class KernelWriterAssembly(KernelWriter):
         if kernel["PrefetchGlobalRead"] >= 2 and kernel["AssertSummationElementMultiple"] % (kernel["DepthU"] * 2) != 0 and not kernel["SuppressNoLoadLoop"]:
           module.add(SCmpEQU32(
               src0=loopCounter, \
-              src1=hex(endCounter-1), \
-              comment="LoopCounter%s < EndCounter"%(loopChar) ))
+              src1=hex(1), \
+              comment="LoopCounter%s == 1 (PGR>=2, not Suppress: single-loop -> toPGR1)"%(loopChar) ))
           toPGR1 = Label.getFormatting(self.labels.getName("toPGR1"))
           module.add(SCBranchSCC1(labelName=toPGR1, comment="PGR=2 but only 1 loop, toPGR1"))
         if kernel["PrefetchGlobalRead"] >= 3:
@@ -7598,7 +7607,7 @@ class KernelWriterAssembly(KernelWriter):
           module.add(SCBranchSCC1(labelName=jumpLabel.getLabelName(), \
                     comment="do not enter Loop%s"%loopChar ))
           # early exit 2 (loopCounter==PGR) to first NGLL (need GR Inc)
-          endCounter = kernel["PrefetchGlobalRead"]
+          endCounter = self.unrollLoopEntryEndCounter(kernel)  # == PGR
           module.add(SCmpLeU32(
               src0=loopCounter, \
               src1=hex(endCounter), \
@@ -7608,6 +7617,7 @@ class KernelWriterAssembly(KernelWriter):
           module.add(SCBranchSCC1(labelName=jumpLabel.getLabelName(), \
                     comment="do not enter Loop%s"%loopChar ))
         else:
+          endCounter = self.unrollLoopEntryEndCounter(kernel)
           module.add(SCmpLeU32(
               src0=loopCounter, \
               src1=hex(endCounter), \

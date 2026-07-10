@@ -245,40 +245,17 @@ public:
                              nextRunningVarianceTensorAttr}};
     }
 
-protected:
-    void initializeBundle([[maybe_unused]] const graph::Graph& graph,
-                          GraphTensorBundle& bundle,
-                          unsigned int seed) override
+    BatchnormFwdTrainingActivation()
     {
-        bundle.sentinelFillOutputTensors();
-
-        // X input: default range
-        bundle.tensors.at(BatchnormFwdTrainingActivTensorIds::X_UID)
-            ->fillTensorWithRandomValues(-1.0f, 1.0f, seed);
-
-        // Scale and bias: -2.0 to 2.0 to match MIOpen
-        bundle.tensors.at(BatchnormFwdTrainingActivTensorIds::SCALE_UID)
-            ->fillTensorWithRandomValues(-2.0f, 2.0f, seed + 1);
-        bundle.tensors.at(BatchnormFwdTrainingActivTensorIds::BIAS_UID)
-            ->fillTensorWithRandomValues(-2.0f, 2.0f, seed + 2);
-
-        // Running mean: only initialize PREV (input), leave NEXT (output) with sentinel
-        if(bundle.tensors.find(BatchnormFwdTrainingActivTensorIds::PREV_RUNNING_MEAN_UID)
-           != bundle.tensors.end())
-        {
-            bundle.tensors.at(BatchnormFwdTrainingActivTensorIds::PREV_RUNNING_MEAN_UID)
-                ->fillTensorWithRandomValues(-2.0f, 2.0f, seed + 1000);
-        }
-
-        // Running variance: only initialize PREV (input), leave NEXT (output) with sentinel
-        if(bundle.tensors.find(BatchnormFwdTrainingActivTensorIds::PREV_RUNNING_VARIANCE_UID)
-           != bundle.tensors.end())
-        {
-            bundle.tensors.at(BatchnormFwdTrainingActivTensorIds::PREV_RUNNING_VARIANCE_UID)
-                ->fillTensorWithRandomValues(0.1f, 2.0f, seed + 2000);
-        }
+        this->synthesis()
+            .setRange(BatchnormFwdTrainingActivTensorIds::X_UID, -1.0f, 1.0f)
+            .setRange(BatchnormFwdTrainingActivTensorIds::SCALE_UID, -2.0f, 2.0f)
+            .setRange(BatchnormFwdTrainingActivTensorIds::BIAS_UID, -2.0f, 2.0f)
+            .setRange(BatchnormFwdTrainingActivTensorIds::PREV_RUNNING_MEAN_UID, -2.0f, 2.0f)
+            .setRange(BatchnormFwdTrainingActivTensorIds::PREV_RUNNING_VARIANCE_UID, 0.1f, 2.0f);
     }
 
+protected:
     void runGraphTest() override
     {
         const auto& testCase = this->GetParam();
@@ -306,7 +283,15 @@ protected:
 
         this->setTestCaseLayout(layout.name);
         this->setTestCaseNote(bnTestCase.note);
-        this->verifyGraph(graphObj, bnTestCase.seed);
+        this->synthesis()
+            .setSeed(BatchnormFwdTrainingActivTensorIds::X_UID, bnTestCase.seed)
+            .setSeed(BatchnormFwdTrainingActivTensorIds::SCALE_UID, bnTestCase.seed + 1)
+            .setSeed(BatchnormFwdTrainingActivTensorIds::BIAS_UID, bnTestCase.seed + 2)
+            .setSeed(BatchnormFwdTrainingActivTensorIds::PREV_RUNNING_MEAN_UID,
+                     bnTestCase.seed + 1000)
+            .setSeed(BatchnormFwdTrainingActivTensorIds::PREV_RUNNING_VARIANCE_UID,
+                     bnTestCase.seed + 2000);
+        this->verifyGraph(graphObj);
     }
 };
 

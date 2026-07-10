@@ -14,6 +14,7 @@ add_executable(
     rocke_client_integration_tests
     main.cpp
     TestRockeClientLoad.cpp
+    TestRockeClientApplicability.cpp
 )
 
 target_compile_options(rocke_client_integration_tests PRIVATE ${HIPDNN_WARNING_COMPILE_OPTIONS})
