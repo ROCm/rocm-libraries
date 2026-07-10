@@ -34,10 +34,6 @@ jobs:
       SUPERBUILD_ARTIFACT_DIR: /tmp/hipdnn-rocm-sdk-artifact
       SUPERBUILD_RUN_ID: ${{ github.event_name == 'workflow_run' && github.event.workflow_run.id || inputs.superbuild_run_id }}
       VENV_PATH: /tmp/rocm_wheels
-      NANOBIND_ARCHIVE_URL: https://rocm-third-party-deps.s3.us-east-2.amazonaws.com/nanobind-2.12.0.tar.gz
-      ROBIN_MAP_ARCHIVE_URL: https://rocm-third-party-deps.s3.us-east-2.amazonaws.com/robin-map-1.4.1.tar.gz
-      ROBIN_MAP_SOURCE_DIR: /tmp/rocm-third-party-deps/robin-map-1.4.1
-      NANOBIND_SOURCE_DIR: /tmp/rocm-third-party-deps/nanobind-2.12.0
       THIRD_PARTY_DEPS_DIR: /tmp/rocm-third-party-deps
     steps:
       - name: Checkout repository
@@ -92,17 +88,19 @@ jobs:
           from pathlib import Path
 
           deps_dir = Path(os.environ["THIRD_PARTY_DEPS_DIR"])
-          robin_map_source_dir = Path(os.environ["ROBIN_MAP_SOURCE_DIR"])
-          for url in (os.environ["NANOBIND_ARCHIVE_URL"], os.environ["ROBIN_MAP_ARCHIVE_URL"]):
-              archive = deps_dir / url.rsplit("/", 1)[-1]
-              urllib.request.urlretrieve(url, archive)
+          for archive_name in ("nanobind-2.12.0.tar.gz", "robin-map-1.4.1.tar.gz"):
+              archive = deps_dir / archive_name
+              urllib.request.urlretrieve(
+                  f"https://rocm-third-party-deps.s3.us-east-2.amazonaws.com/{archive_name}",
+                  archive,
+              )
               with tarfile.open(archive, "r:gz") as tar:
                   tar.extractall(deps_dir, filter="data")
 
 
           robin_map_config_dir = deps_dir / "cmake" / "tsl-robin-map"
           robin_map_config_dir.mkdir(parents=True, exist_ok=True)
-          robin_map_include_dir = (robin_map_source_dir / "include").as_posix()
+          robin_map_include_dir = (deps_dir / "robin-map-1.4.1" / "include").as_posix()
           (robin_map_config_dir / "tsl-robin-mapConfig.cmake").write_text(
               f"""include_guard(GLOBAL)
           set(tsl-robin-map_FOUND TRUE)
@@ -117,8 +115,8 @@ jobs:
               encoding="utf-8",
           )
           PY
-          test -d "$NANOBIND_SOURCE_DIR"
-          test -d "$ROBIN_MAP_SOURCE_DIR"
+          test -d "$THIRD_PARTY_DEPS_DIR/nanobind-2.12.0"
+          test -d "$THIRD_PARTY_DEPS_DIR/robin-map-1.4.1"
 
       - name: Configure frontend bindings
         run: |
@@ -165,10 +163,6 @@ jobs:
       SUPERBUILD_ARTIFACT_DIR: B:\hipdnn-rocm-sdk-artifact
       SUPERBUILD_RUN_ID: ${{ github.event_name == 'workflow_run' && github.event.workflow_run.id || inputs.superbuild_run_id }}
       VENV_PATH: B:\rocm_wheels
-      NANOBIND_ARCHIVE_URL: https://rocm-third-party-deps.s3.us-east-2.amazonaws.com/nanobind-2.12.0.tar.gz
-      ROBIN_MAP_ARCHIVE_URL: https://rocm-third-party-deps.s3.us-east-2.amazonaws.com/robin-map-1.4.1.tar.gz
-      ROBIN_MAP_SOURCE_DIR: B:\rocm-third-party-deps\robin-map-1.4.1
-      NANOBIND_SOURCE_DIR: B:\rocm-third-party-deps\nanobind-2.12.0
       THIRD_PARTY_DEPS_DIR: B:\rocm-third-party-deps
     steps:
       - name: Configure git longpaths
@@ -230,17 +224,19 @@ jobs:
           from pathlib import Path
 
           deps_dir = Path(os.environ["THIRD_PARTY_DEPS_DIR"])
-          robin_map_source_dir = Path(os.environ["ROBIN_MAP_SOURCE_DIR"])
-          for url in (os.environ["NANOBIND_ARCHIVE_URL"], os.environ["ROBIN_MAP_ARCHIVE_URL"]):
-              archive = deps_dir / url.rsplit("/", 1)[-1]
-              urllib.request.urlretrieve(url, archive)
+          for archive_name in ("nanobind-2.12.0.tar.gz", "robin-map-1.4.1.tar.gz"):
+              archive = deps_dir / archive_name
+              urllib.request.urlretrieve(
+                  f"https://rocm-third-party-deps.s3.us-east-2.amazonaws.com/{archive_name}",
+                  archive,
+              )
               with tarfile.open(archive, "r:gz") as tar:
                   tar.extractall(deps_dir, filter="data")
 
 
           robin_map_config_dir = deps_dir / "cmake" / "tsl-robin-map"
           robin_map_config_dir.mkdir(parents=True, exist_ok=True)
-          robin_map_include_dir = (robin_map_source_dir / "include").as_posix()
+          robin_map_include_dir = (deps_dir / "robin-map-1.4.1" / "include").as_posix()
           (robin_map_config_dir / "tsl-robin-mapConfig.cmake").write_text(
               f"""include_guard(GLOBAL)
           set(tsl-robin-map_FOUND TRUE)
@@ -257,8 +253,8 @@ jobs:
           '@
           $script | & $python
           if ($LASTEXITCODE -ne 0) { throw "Failed to install third-party dependencies" }
-          if (-not (Test-Path $env:NANOBIND_SOURCE_DIR)) { throw "nanobind source directory not found: $env:NANOBIND_SOURCE_DIR" }
-          if (-not (Test-Path $env:ROBIN_MAP_SOURCE_DIR)) { throw "robin-map source directory not found: $env:ROBIN_MAP_SOURCE_DIR" }
+          if (-not (Test-Path (Join-Path $env:THIRD_PARTY_DEPS_DIR "nanobind-2.12.0"))) { throw "nanobind source directory not found" }
+          if (-not (Test-Path (Join-Path $env:THIRD_PARTY_DEPS_DIR "robin-map-1.4.1"))) { throw "robin-map source directory not found" }
 
       - name: Configure frontend bindings
         run: |
