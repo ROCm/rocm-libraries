@@ -12,6 +12,7 @@
 #include <optional>
 #include <string>
 #include <string_view>
+#include <unordered_map>
 
 #include <hipdnn_data_sdk/logging/Logger.hpp>
 #include <hipdnn_test_sdk/utilities/ArchMatch.hpp>
@@ -44,6 +45,7 @@ struct BundleMetadata
     std::optional<std::string> notes;
     std::optional<int64_t> seed;
     std::optional<int64_t> minimumVramMb;
+    std::optional<std::unordered_map<int64_t, nlohmann::json>> inputs;
 };
 
 // ---------------------------------------------------------------------------
@@ -126,6 +128,25 @@ inline std::optional<BundleMetadata> parseBundleMetadataJson(const nlohmann::jso
     meta.notes = readString("notes");
     meta.seed = readInt64("seed");
     meta.minimumVramMb = readInt64("minimum_vram_mb");
+
+    if(json.contains("inputs") && json["inputs"].is_object())
+    {
+        std::unordered_map<int64_t, nlohmann::json> inputMap;
+        for(const auto& [key, val] : json["inputs"].items())
+        {
+            try
+            {
+                inputMap[std::stoll(key)] = val;
+            }
+            catch(const std::exception&)
+            {
+                HIPDNN_SDK_LOG_WARN("Skipping non-numeric inputs key \""
+                                    << key << "\" in " << (source.empty() ? "metadata" : source));
+                continue;
+            }
+        }
+        meta.inputs = std::move(inputMap);
+    }
 
     return meta;
 }

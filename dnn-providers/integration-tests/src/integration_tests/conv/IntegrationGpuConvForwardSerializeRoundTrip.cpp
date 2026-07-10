@@ -112,7 +112,7 @@ protected:
         // engine support (and pin --test-engine as preferred) itself first -
         // otherwise an engine that doesn't implement conv (e.g. HIP_MLOPS_ENGINE)
         // fails the ASSERT_EQ on graphObj.build() below instead of skipping.
-        this->checkEngineSupportOrSkip(graphObj);
+        this->ensureEngineSupport(graphObj);
         if(::testing::Test::IsSkipped() || ::testing::Test::HasFatalFailure())
         {
             return;
@@ -122,8 +122,17 @@ protected:
         GraphTensorBundle gpuBundle;
         GraphTensorBundle refBundle;
         this->generateBundles(graphObj, refBundle, gpuBundle);
-        this->initializeBundle(graphObj, gpuBundle, convTestCase.seed);
-        this->initializeBundle(graphObj, refBundle, convTestCase.seed);
+        this->synthesis().setGlobalSeed(convTestCase.seed);
+        auto gpuInit = this->initializeBundle(graphObj, gpuBundle);
+        if(!gpuInit.filled)
+        {
+            GTEST_SKIP() << "Cannot synthesize GPU inputs: " << gpuInit.reason;
+        }
+        auto refInit = this->initializeBundle(graphObj, refBundle);
+        if(!refInit.filled)
+        {
+            GTEST_SKIP() << "Cannot synthesize ref inputs: " << refInit.reason;
+        }
 
         // Finalize a plan on the original graph, then compute the reference.
         ASSERT_EQ(graphObj.build(getSharedHandle()).code, hipdnn_frontend::ErrorCode::OK);

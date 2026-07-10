@@ -125,7 +125,8 @@ protected:
         this->registerValidator(outputs.dscale, this->getTolerance(graphObj, outputs.dscale));
         this->registerValidator(outputs.dbias, this->getTolerance(graphObj, outputs.dbias));
 
-        this->verifyGraph(graphObj, rmsnormTestCase.seed);
+        this->synthesis().setGlobalSeed(rmsnormTestCase.seed);
+        this->verifyGraph(graphObj);
     }
 };
 

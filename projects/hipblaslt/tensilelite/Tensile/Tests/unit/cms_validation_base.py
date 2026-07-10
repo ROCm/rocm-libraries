@@ -70,7 +70,7 @@ class CMSValidationTestBase:
         ctx = ValidatorPassContext(
             kernel=kernel,
             mfma_reorder=sched.mfmaReorder or [],
-            swap_global_read_order=kernel.get("SwapGlobalReadOrder", 0),
+            swap_global_read_order=kernel.get("SwapGlobalReadOrder", False),
         )
         for pass_fn in self.validator_passes:
             pass_fn(timeline, ctx)
