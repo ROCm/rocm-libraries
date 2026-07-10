@@ -227,7 +227,10 @@ TYPED_TEST(HipcubDeviceSelectTests, Flagged)
         HIP_CHECK(hipStreamDestroy(stream));
 }
 
-TEST(HipcubDeviceSelectTests, FlagNormalization)
+class HipcubDeviceSelectSingleTests : public test_controller::ControlledTest<>
+{};
+
+TEST_F(HipcubDeviceSelectSingleTests, FlagNormalization)
 {
     int device_id = test_common_utils::obtain_device_from_ctest();
     SCOPED_TRACE(testing::Message() << "with device_id= " << device_id);
@@ -798,7 +801,7 @@ TYPED_TEST(HipcubDeviceSelectTests, Unique)
         HIP_CHECK(hipStreamDestroy(stream));
 }
 
-TEST(HipcubDeviceSelectTests, UniqueDiscardOutputIterator)
+TEST_F(HipcubDeviceSelectSingleTests, UniqueDiscardOutputIterator)
 {
     int device_id = test_common_utils::obtain_device_from_ctest();
     SCOPED_TRACE(testing::Message() << "with device_id= " << device_id);
