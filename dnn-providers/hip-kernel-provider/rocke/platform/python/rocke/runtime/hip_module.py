@@ -267,29 +267,47 @@ class Event:
 
 class Runtime:
     # Per-stream FIFO of ``(refs_tuple, completion_event_or_None)``
-    # entries. Every launch appends exactly one entry; tensor lifetimes
-    # (set up via :meth:`retain_for_stream`) merge into the most-recent
-    # entry so they share the launch's completion event.
+    # entries: a backend-agnostic, stream-scoped **lifetime manager**.
+    # Every async launch appends exactly one entry holding the ctypes
+    # objects that launch enqueued; a caller may merge additional objects
+    # to keep alive into the most-recent entry via
+    # :meth:`retain_for_stream` so they share that launch's completion
+    # event.
+    #
+    # This is NOT torch-specific, and must not migrate into a torch
+    # module: the bucket only ever holds ctypes buffers and HIP
+    # ``Event``s, :meth:`retain_for_stream` takes ``*objects: Any`` and
+    # filters out ints/None, and ``Runtime`` never imports torch. Torch's
+    # caching allocator (below) is the *motivating caller* of the retain
+    # path, not something this runtime knows about.
     #
     # Why this exists
     # ---------------
     # Raw ``hipModuleLaunchKernel`` calls go through ctypes and are
-    # invisible to torch's stream-aware caching allocator. Two failure
-    # modes follow:
+    # invisible to Python's GC (and to torch's stream-aware caching
+    # allocator, when torch owns the tensors). Two lifetimes must outlive
+    # an in-flight kernel:
     #
-    # 1. The HIP_LAUNCH_PARAM_BUFFER_POINTER ("extra") path does not
-    #    promise to copy the packed-args buffer at enqueue time;
-    #    observation on ROCm 6/7 is that the GPU command processor
-    #    reads it later, when it actually starts the kernel. If the
-    #    Python-owned ctypes buffer has been garbage-collected by then,
-    #    the kernel reads stale memory and writes to whatever pointer
-    #    those bytes now decode as.
+    # 1. The ctypes args buffer, on the HIP_LAUNCH_PARAM_BUFFER_POINTER
+    #    ("extra") path. That path does not promise to copy the
+    #    packed-args buffer at enqueue time; observation on ROCm 6/7 is
+    #    that the GPU command processor reads it later, when it actually
+    #    starts the kernel. If the Python-owned buffer has been
+    #    garbage-collected by then, the kernel reads stale memory and
+    #    writes to whatever pointer those bytes now decode as. This
+    #    applies to EVERY async launch -- numpy / manifest callers
+    #    included -- so :meth:`launch` parks the buffer here
+    #    unconditionally (torch-independent).
     #
-    # 2. Output / workspace tensors built with ``torch.empty(...)`` are
-    #    tracked by torch's caching allocator against torch's
-    #    *current* stream. Once the Python reference drops, the
-    #    allocator can recycle that memory while the raw HIP launch is
-    #    still in flight, mutating the kernel's destination buffer.
+    # 2. Any caller-owned object backing a kernel argument, retained via
+    #    :meth:`retain_for_stream`. The motivating case: output /
+    #    workspace tensors built with ``torch.empty(...)`` are tracked by
+    #    torch's caching allocator against torch's *current* stream; once
+    #    the Python reference drops, the allocator can recycle that memory
+    #    while the raw HIP launch is still in flight, mutating the
+    #    kernel's destination buffer. The launcher (the torch-aware layer)
+    #    calls ``retain_for_stream`` for that; the mechanism here stays
+    #    agnostic to what it holds.
     #
     # The mitigation in both cases is the same: tie the Python
     # references' lifetime to a HIP completion event recorded on the
