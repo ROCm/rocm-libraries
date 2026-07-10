@@ -175,6 +175,11 @@ jobs:
   rocjitsu-race-smoke-linux:
     name: rocjitsu race smoke (${{ inputs.amdgpu_families }})
     needs: [therock-build-linux]
+    # This is a narrow post-build instrumentation job for hipBLASLt on gfx950.
+    # Normal package tests cover broad functionality; this job fetches the BLAS
+    # artifacts from the just-finished TheRock build and runs two small workloads
+    # under rocjitsu's race detector. Keep it gated to hipblaslt + gfx950 while
+    # rocjitsu packaging and runner capacity are still evolving.
     if: ${{ inputs.test_runs_on != '' && startsWith(inputs.amdgpu_families, 'gfx950') && contains(format(',{0},', inputs.projects_to_test), ',hipblaslt,') }}
     runs-on: ${{ inputs.test_runs_on }}
     timeout-minutes: 90
@@ -198,6 +203,11 @@ jobs:
       RACE_TIMEOUT_SECONDS: "180"
       TENSILELITE_TIMEOUT_SECONDS: "420"
     steps:
+      # The job needs three inputs in one workspace:
+      #   1. TheRock actions/scripts to fetch the exact artifacts from this run.
+      #   2. This rocm-libraries checkout for the race-smoke driver script.
+      #   3. rocm-systems source for rocjitsu until rocjitsu is packaged as a
+      #      complete runnable artifact.
       - name: Checkout TheRock repository
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
         with:
@@ -220,6 +230,9 @@ jobs:
             shared/machine-readable-isa/isa
           sparse-checkout-cone-mode: true
 
+      # The base image intentionally does not contain a full ROCm install. Keep
+      # the apt dependency set to ordinary host build tools; the ROCm runtime,
+      # clients, and TensileLite Python tree come from TheRock artifacts below.
       - name: Install rocjitsu build dependencies
         run: |
           apt-get update
@@ -231,6 +244,10 @@ jobs:
             libdrm-dev \
             ninja-build
 
+      # Pull the BLAS runtime and test payload from the current TheRock build.
+      # This is what keeps the smoke aligned with the exact hipBLASLt and
+      # TensileLite artifacts produced by the PR, rather than an image-local or
+      # previously installed ROCm tree.
       - name: Run setup test environment workflow
         timeout-minutes: 15
         uses: ./.github/actions/setup_test_environment
@@ -241,6 +258,10 @@ jobs:
           VENV_DIR: ${{ env.VENV_DIR }}
           FETCH_ARTIFACT_ARGS: --blas --tests
 
+      # Fail early with import paths printed if the test artifact is missing
+      # Python dependencies or if PYTHONPATH/LD_LIBRARY_PATH no longer match the
+      # artifact layout. That makes packaging/layout regressions distinct from
+      # real race-detector findings.
       - name: Verify TensileLite Python environment
         run: |
           export PYTHONPATH="${ROCM_PATH}/share/hipblaslt/tensilelite${PYTHONPATH:+:${PYTHONPATH}}"
@@ -262,6 +283,10 @@ jobs:
         timeout-minutes: 75
         run: bash rocm-libraries/.github/scripts/run_rocjitsu_hipblaslt_race_smoke.sh
 
+      # Upload even on failure. The report directory contains the per-workload
+      # stdout logs, rocjitsu sink files, race.log files, generated reduced
+      # TensileLite input/output, and timing.tsv; without this artifact a failed
+      # detector run is usually not actionable from the console log alone.
       - name: Upload race reports
         if: ${{ always() }}
         uses: actions/upload-artifact@de65e23aa2b7e23d713bb51fbfcb6d502f8667d8 # v4.6.2
