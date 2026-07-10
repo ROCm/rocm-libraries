@@ -207,9 +207,7 @@ jobs:
       GPU_TARGET: gfx94X-dcgpu
       # Multi-arch nightly device extra (rocm[...,device-<DEVICE_TARGET>]).
       DEVICE_TARGET: gfx942
-      VENV_PATH: ${{ runner.temp }}/rocm_wheels
       PYTHON_BUILD_DIR: build/hipdnn-python
-      THIRD_PARTY_DEPS_DIR: ${{ runner.temp }}/third-party-deps
     steps:
       - name: Runner health status
         run: |
@@ -234,6 +232,10 @@ jobs:
             projects/miopen
             test
 
+      - name: Set environment
+        run: |
+          echo "VENV_PATH=${{ runner.temp }}/rocm_wheels" >> "$GITHUB_ENV"
+          echo "THIRD_PARTY_DEPS_DIR=${{ runner.temp }}/third-party-deps" >> "$GITHUB_ENV"
 
       - name: Set up Python
         uses: actions/setup-python@a309ff8b426b58ec0e2a45f0f869d46889d02405 # v6.2.0
