@@ -667,29 +667,30 @@ def main():
     print(f"  Unique kernels: {df['kernel_name'].nunique()}")
     print()
 
-    # Extract hardware parameters from data (if available)
+    # Extract hardware parameters from the device-queried hw_* columns the
+    # generator stamps into the parquet. No numeric fallbacks here: chip-config
+    # values (esp. CU count) must never be hardcoded in source (policy). A missing
+    # column simply leaves the engine's field at 0 (degenerate, not wrong).
     hw_cols = [c for c in df.columns if c.startswith("hw_")]
     hw_kwargs = {}
     if hw_cols:
         row0 = df.iloc[0]
-        if "hw_num_cus" in df.columns:
-            hw_kwargs["num_cus"] = int(row0.get("hw_num_cus", 256))
-        if "hw_max_clock_mhz" in df.columns:
-            hw_kwargs["max_clock_mhz"] = int(row0.get("hw_max_clock_mhz", 2400))
-        if "hw_simds_per_cu" in df.columns:
-            hw_kwargs["simds_per_cu"] = int(row0.get("hw_simds_per_cu", 4))
-        if "hw_shader_engines" in df.columns:
-            hw_kwargs["shader_engines"] = int(row0.get("hw_shader_engines", 32))
-        if "hw_max_waves_per_cu" in df.columns:
-            hw_kwargs["max_waves_per_cu"] = int(row0.get("hw_max_waves_per_cu", 32))
-        if "hw_wavefront_size" in df.columns:
-            hw_kwargs["wavefront_size"] = int(row0.get("hw_wavefront_size", 64))
-        if "hw_l1_cache_kb" in df.columns:
-            hw_kwargs["l1_cache_kb"] = int(row0.get("hw_l1_cache_kb", 32))
-        if "hw_l2_cache_kb" in df.columns:
-            hw_kwargs["l2_cache_kb"] = int(row0.get("hw_l2_cache_kb", 4096))
-        if "hw_l3_cache_kb" in df.columns:
-            hw_kwargs["l3_cache_kb"] = int(row0.get("hw_l3_cache_kb", 262144))
+        _hw_map = {
+            "hw_num_cus": "num_cus",
+            "hw_max_clock_mhz": "max_clock_mhz",
+            "hw_simds_per_cu": "simds_per_cu",
+            "hw_shader_engines": "shader_engines",
+            "hw_max_waves_per_cu": "max_waves_per_cu",
+            "hw_wavefront_size": "wavefront_size",
+            "hw_l1_cache_kb": "l1_cache_kb",
+            "hw_l2_cache_kb": "l2_cache_kb",
+            "hw_l3_cache_kb": "l3_cache_kb",
+            "hw_lds_capacity": "lds_capacity",
+            "hw_num_xcd": "num_xcd",
+        }
+        for col, kw in _hw_map.items():
+            if col in df.columns and row0.get(col) is not None:
+                hw_kwargs[kw] = int(row0[col])
 
     # Get operation-specific feature engine
     print(f"Initializing {operation} feature engine...")
@@ -777,6 +778,34 @@ def main():
         model_path = out_dir / f"model_{target}.lgbm"
         model.booster_.save_model(str(model_path))
         print(f"  Saved {model_path} ({train_time:.1f}s)")
+
+        # Also emit a standalone C predictor for the tflops head (the one the C++
+        # dispatcher ranks on) so the runtime needs no liblightgbm/libgomp. Raw
+        # log-space score is monotone -> exact for the argmax tie-break. Emitting
+        # is best-effort: a codegen failure must not fail training (the .lgbm is
+        # still the source of truth for Python eval).
+        if target == "tflops":
+            try:
+                from lgbm_to_c import emit_c_predictor
+
+                func = f"rocke_fmha_score_{args.dtype}_{args.arch}_{target}"
+                note = (
+                    f"model: {out_dir.name}\n"
+                    f"op={operation} dtype={args.dtype} arch={args.arch} "
+                    f"target={target}\n"
+                    f"features={len(fe.get_feature_names())} "
+                    f"(feature_spec.json order)"
+                )
+                c_src, h_src = emit_c_predictor(
+                    model.booster_, func,
+                    num_features=len(fe.get_feature_names()),
+                    source_note=note,
+                )
+                (out_dir / f"model_{target}.c").write_text(c_src)
+                (out_dir / f"model_{target}.h").write_text(h_src)
+                print(f"  Emitted C predictor: model_{target}.c / .h ({func})")
+            except Exception as exc:  # noqa: BLE001 - codegen is best-effort
+                print(f"  WARNING: C predictor emit failed ({exc}); .lgbm still saved")
 
         importances = dict(
             zip(
