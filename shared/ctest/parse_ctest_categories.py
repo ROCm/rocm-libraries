@@ -408,6 +408,11 @@ def main():
         description="Parse test_categories.yaml and generate CMake code "
         "that applies category labels to CTest tests."
     )
+    parser.add_argument(
+        "--print-categories",
+        action="store_true",
+        help="Print category names as a semicolon-separated list and exit.",
+    )
     parser.add_argument("input_yaml", help="Path to test_categories.yaml")
     parser.add_argument(
         "install_test_file",
@@ -449,6 +454,10 @@ def main():
         sys.exit(1)
 
     categories, general_excludes = parse_yaml(input_path)
+
+    if args.print_categories:
+        print(";".join(categories.keys()))
+        return
 
     if install_test_file and explicit_tests:
         # Install-tree path. Emit `set_tests_properties()` lines with the

@@ -20,8 +20,11 @@ from . import pytorch_ops
 from .timing import (
     GpuTimerInterface,
     HipGpuTimer,
+    StalledRegionTimer,
     Timer,
+    _is_staged_hip_available,
     create_gpu_timer,
+    run_staged_iterations,
 )
 
 
@@ -75,6 +78,7 @@ class PyTorchCudaExecutor:
         self._prepared = False
         self._stream: Optional[Any] = None
         self._stream_sync_timer: Optional[HipGpuTimer] = None
+        self._compiled: Optional[pytorch_ops.CompiledGraph] = None
 
     def prepare(self) -> None:
         """Validate graph and prepare for execution.
@@ -90,6 +94,8 @@ class PyTorchCudaExecutor:
                     f"Graph contains unsupported operations: {unsupported}. "
                     f"Supported: {list(pytorch_ops.get_supported_operations())}"
                 )
+
+            self._compiled = pytorch_ops.compile_graph(self._graph_json)
 
             # Pin all PyTorch graph execution to one stream. On ROCm the
             # stream is synchronized through HIP events instead of torch.cuda
@@ -164,12 +170,34 @@ class PyTorchCudaExecutor:
         if not self._prepared:
             raise PyTorchExecutionError("Executor not prepared. Call prepare() first.")
 
-        e2e_timings: List[float] = []
+        # Prefer stalled-queue staging (the same path the hipDNN executor uses)
+        # so the GPU event span is pure device time and the A/B comparison is
+        # symmetric. PyTorch reference ops that read host scalars (epsilon/scale
+        # via .item()) are made async-safe by resolving those scalars once,
+        # before the gated loop, via ReplayTensors. Staging is HIP-only; CUDA
+        # torch and capability mismatches fall back to direct GPU-event timing.
+        staged_timer: Optional[StalledRegionTimer] = None
+        if (
+            self._collect_kernel_timing
+            and self._resolve_timing_backend() is TimingBackendName.HIP
+            and _is_staged_hip_available()
+        ):
+            with torch.cuda.device(self._device):
+                try:
+                    staged_timer = StalledRegionTimer(self._timing_stream())
+                except RuntimeError:
+                    staged_timer = None
+
+        if staged_timer is not None:
+            return self._benchmark_staged(staged_timer, tensors, graph_name)
+
+        host_timings: List[float] = []
         kernel_timings: Optional[List[float]] = None
         gpu_timer: Optional[GpuTimerInterface] = None
         timing_backend_name = ""
-        with torch.cuda.device(self._device):
-            if self._collect_kernel_timing:
+
+        if self._collect_kernel_timing:
+            with torch.cuda.device(self._device):
                 try:
                     gpu_timer = create_gpu_timer(
                         self._resolve_timing_backend(),
@@ -199,7 +227,7 @@ class PyTorchCudaExecutor:
             if kernel_ms is not None:
                 assert kernel_timings is not None
                 kernel_timings.append(kernel_ms)
-            e2e_timings.append(t.elapsed_ms)
+            host_timings.append(t.elapsed_ms)
 
         # Build metadata
         metadata = BenchmarkMetadata(
@@ -213,7 +241,54 @@ class PyTorchCudaExecutor:
         )
 
         return BenchmarkResult(
-            e2e_timings=e2e_timings,
+            host_timings=host_timings,
+            kernel_timings=kernel_timings,
+            metadata=metadata,
+        )
+
+    def _benchmark_staged(
+        self,
+        timer: StalledRegionTimer,
+        tensors: Dict[int, torch.Tensor],
+        graph_name: str,
+    ) -> BenchmarkResult:
+        """Benchmark via the stalled-queue staged timer (pure GPU spans).
+
+        Wraps the inputs in a ``ReplayTensors`` so host scalar reads
+        (epsilon/scale ``.item()``) are resolved once, before the gated loop;
+        each timed iteration is then a pure asynchronous enqueue that cannot
+        block the stalled stream.
+        """
+        replay = pytorch_ops.ReplayTensors(tensors)
+
+        with torch.cuda.device(self._device):
+            # Untimed priming pass: populate the scalar cache (and the caching
+            # allocator) so the first gated iteration submits no device->host
+            # sync. run_staged_iterations then drains the device (barrier)
+            # before measurement.
+            with torch.cuda.stream(self._get_stream()):
+                self._execute_graph(replay)
+
+            def enqueue() -> None:
+                with torch.cuda.stream(self._get_stream()):
+                    self._execute_graph(replay)
+
+            host_timings, kernel_timings = run_staged_iterations(
+                timer, self._config.benchmark_iters, enqueue
+            )
+
+        metadata = BenchmarkMetadata(
+            graph_name=graph_name,
+            graph_path=str(self._config.graph_path),
+            warmup_iters=self._config.warmup_iters,
+            benchmark_iters=self._config.benchmark_iters,
+            engine_id=self._config.engine_id,
+            timing_backend=TimingBackendName.HIP.value,
+            execution_backend=ExecutionBackendName.PYTORCH.value,
+        )
+
+        return BenchmarkResult(
+            host_timings=host_timings,
             kernel_timings=kernel_timings,
             metadata=metadata,
         )
@@ -276,7 +351,8 @@ class PyTorchCudaExecutor:
             PyTorchExecutionError: If execution fails.
         """
         try:
-            pytorch_ops.execute_graph(self._graph_json, tensors)
+            assert self._compiled is not None
+            self._compiled.execute(tensors)
         except UnsupportedGraphError:
             raise
         except Exception as e:

@@ -26,11 +26,9 @@
 
 #pragma once
 
-#include <Tensile/Macros.hpp>
+#include <tensilelitehost/export.h>
 
-#ifdef TENSILE_USE_HIP
 #include <hip/hip_runtime.h>
-#endif
 
 // comment out following macro to disable FP8/BF8 types
 #define TENSILE_USE_FP8_BF8
@@ -38,8 +36,6 @@
 #define HIP_HOST_DEVICE __host__ __device__
 #define HIP_HOST __host__
 #define HIP_DEVICE __device__
-
-TENSILE_HIDDEN_BEGIN
 
 namespace TensileLite
 {
@@ -532,4 +528,3 @@ namespace std
 
 } // namespace std
 
-TENSILE_HIDDEN_END

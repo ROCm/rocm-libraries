@@ -9,7 +9,7 @@ import torch
 import torch.nn.functional as F
 
 from .._common import *  # noqa: F401,F403
-from .._registry import register_handler
+from .._registry import CompiledOp, register_handler
 
 
 def _shape_is_channel_affine(
@@ -58,12 +58,11 @@ def _infer_trailing_normalized_count(
 
 
 def _layernorm_normalized_shape(
-    node: Dict[str, Any],
+    count: int,
     x: torch.Tensor,
     scale: torch.Tensor,
     bias: torch.Tensor,
 ) -> Tuple[int, ...]:
-    count = int(_node_param(node, "normalized_dim_count", 0) or 0)
     if count <= 0:
         count = _infer_trailing_normalized_count(x, scale, bias)
     if count < 1 or count > x.ndim:
@@ -172,122 +171,141 @@ def _rmsnorm_layout(
 
 
 @register_handler("LayernormAttributes")
-def handle_layernorm(
+def compile_layernorm(
     node: Dict[str, Any],
-    tensors: Dict[int, torch.Tensor],
     graph_json: Dict[str, Any],
-) -> None:
-    """Handle layer normalization over trailing normalized dimensions."""
+) -> CompiledOp:
+    """Plan layer normalization over trailing normalized dimensions."""
     x_uid = _required_input_uid(node, "x_tensor_uid")
     scale_uid = _required_input_uid(node, "scale_tensor_uid")
     bias_uid = _required_input_uid(node, "bias_tensor_uid")
     epsilon_uid = _required_input_uid(node, "epsilon_tensor_uid")
     y_uid = _required_output_uid(node, "y_tensor_uid")
 
-    x = _tensor(tensors, x_uid, node)
-    scale = _tensor(tensors, scale_uid, node)
-    bias = _tensor(tensors, bias_uid, node)
-    epsilon = _scalar_value(tensors, epsilon_uid, node)
-
-    normalized_shape = _layernorm_normalized_shape(node, x, scale, bias)
-    weight = _reshape_affine_for_normalized_shape(
-        scale, normalized_shape, x, "Layernorm scale"
-    )
-    bias_value = _reshape_affine_for_normalized_shape(
-        bias, normalized_shape, x, "Layernorm bias"
-    )
-
-    stat_shape = x.shape[: x.ndim - len(normalized_shape)] + (1,) * len(
-        normalized_shape
-    )
-    # Fused layernorm: a single op returning (y, mean, rstd) so the saved
-    # statistics come from the primitive rather than separate hand-rolled
-    # mean/variance reductions.
-    out, mean, rstd = torch.ops.aten.native_layer_norm(
-        x, normalized_shape, weight, bias_value, epsilon
-    )
-    _store_tensor_for_uid(tensors, graph_json, y_uid, out)
+    normalized_dim_count = int(_node_param(node, "normalized_dim_count", 0) or 0)
 
     mean_uid = _optional_uid(node, "mean_tensor_uid")
     inv_uid = _optional_uid(node, "inv_variance_tensor_uid")
-    if mean_uid is not None:
-        _store_tensor_for_uid(
-            tensors, graph_json, int(mean_uid), mean.reshape(stat_shape)
+
+    y_shape = _tensor_shape(graph_json, y_uid)
+    mean_shape = (
+        _tensor_shape(graph_json, int(mean_uid)) if mean_uid is not None else None
+    )
+    inv_shape = _tensor_shape(graph_json, int(inv_uid)) if inv_uid is not None else None
+
+    def run(tensors: Dict[int, torch.Tensor]) -> None:
+        x = _tensor(tensors, x_uid, node)
+        scale = _tensor(tensors, scale_uid, node)
+        bias = _tensor(tensors, bias_uid, node)
+        epsilon = _scalar_value(tensors, epsilon_uid, node)
+
+        normalized_shape = _layernorm_normalized_shape(
+            normalized_dim_count, x, scale, bias
         )
-    if inv_uid is not None:
-        _store_tensor_for_uid(
-            tensors, graph_json, int(inv_uid), rstd.reshape(stat_shape)
+        weight = _reshape_affine_for_normalized_shape(
+            scale, normalized_shape, x, "Layernorm scale"
         )
+        bias_value = _reshape_affine_for_normalized_shape(
+            bias, normalized_shape, x, "Layernorm bias"
+        )
+
+        stat_shape = x.shape[: x.ndim - len(normalized_shape)] + (1,) * len(
+            normalized_shape
+        )
+        # Fused layernorm: a single op returning (y, mean, rstd) so the saved
+        # statistics come from the primitive rather than separate hand-rolled
+        # mean/variance reductions.
+        out, mean, rstd = torch.ops.aten.native_layer_norm(
+            x, normalized_shape, weight, bias_value, epsilon
+        )
+        _store_planned(tensors, y_uid, out, y_shape)
+
+        if mean_uid is not None:
+            _store_planned(tensors, int(mean_uid), mean.reshape(stat_shape), mean_shape)
+        if inv_uid is not None:
+            _store_planned(tensors, int(inv_uid), rstd.reshape(stat_shape), inv_shape)
+
+    return run
 
 
 @register_handler("RMSNormAttributes")
-def handle_rmsnorm(
+def compile_rmsnorm(
     node: Dict[str, Any],
-    tensors: Dict[int, torch.Tensor],
     graph_json: Dict[str, Any],
-) -> None:
-    """Handle RMSNorm forward with trailing or per-channel affine layout."""
+) -> CompiledOp:
+    """Plan RMSNorm forward with trailing or per-channel affine layout."""
     x_uid = _required_input_uid(node, "x_tensor_uid")
     scale_uid = _required_input_uid(node, "scale_tensor_uid")
     epsilon_uid = _required_input_uid(node, "epsilon_tensor_uid")
     y_uid = _required_output_uid(node, "y_tensor_uid")
 
-    x = _tensor(tensors, x_uid, node)
-    scale = _tensor(tensors, scale_uid, node)
-    epsilon = _scalar_value(tensors, epsilon_uid, node)
-    layout, reduce_dims, broadcast_shape, normalized_shape = _rmsnorm_layout(x, scale)
-
     bias_uid = _optional_uid(node, "bias_tensor_uid")
     inv_uid = _optional_uid(node, "inv_rms_tensor_uid")
 
-    use_builtin = (
-        layout == "trailing" and normalized_shape is not None and hasattr(F, "rms_norm")
-    )
-    inv_rms = None
-    if use_builtin:
-        weight = _reshape_affine_for_normalized_shape(
-            scale, normalized_shape, x, "RMSNorm scale"
-        )
-        y = F.rms_norm(x, normalized_shape, weight=weight, eps=epsilon)
-        if bias_uid is not None:
-            bias = _tensor(tensors, int(bias_uid), node)
-            y = y + _reshape_affine_for_broadcast(
-                bias, broadcast_shape, x, "RMSNorm bias"
-            )
-    else:
-        x_float = x.to(dtype=torch.float32)
-        scale_b = _reshape_affine_for_broadcast(
-            scale, broadcast_shape, x, "RMSNorm scale"
-        )
-        inv_rms = torch.rsqrt(
-            x_float.square().mean(dim=reduce_dims, keepdim=True) + epsilon
-        )
-        y_float = x_float * inv_rms * scale_b
-        if bias_uid is not None:
-            bias = _tensor(tensors, int(bias_uid), node)
-            y_float = y_float + _reshape_affine_for_broadcast(
-                bias, broadcast_shape, x, "RMSNorm bias"
-            )
-        y = y_float.to(dtype=x.dtype)
+    y_shape = _tensor_shape(graph_json, y_uid)
+    inv_shape = _tensor_shape(graph_json, int(inv_uid)) if inv_uid is not None else None
 
-    _store_tensor_for_uid(tensors, graph_json, y_uid, y)
+    def run(tensors: Dict[int, torch.Tensor]) -> None:
+        x = _tensor(tensors, x_uid, node)
+        scale = _tensor(tensors, scale_uid, node)
+        epsilon = _scalar_value(tensors, epsilon_uid, node)
+        layout, reduce_dims, broadcast_shape, normalized_shape = _rmsnorm_layout(
+            x, scale
+        )
 
-    if inv_uid is not None:
-        if inv_rms is None:
+        use_builtin = (
+            layout == "trailing"
+            and normalized_shape is not None
+            and hasattr(F, "rms_norm")
+        )
+        inv_rms = None
+        if use_builtin:
+            weight = _reshape_affine_for_normalized_shape(
+                scale, normalized_shape, x, "RMSNorm scale"
+            )
+            y = F.rms_norm(x, normalized_shape, weight=weight, eps=epsilon)
+            if bias_uid is not None:
+                bias = _tensor(tensors, int(bias_uid), node)
+                y = y + _reshape_affine_for_broadcast(
+                    bias, broadcast_shape, x, "RMSNorm bias"
+                )
+        else:
+            x_float = x.to(dtype=torch.float32)
+            scale_b = _reshape_affine_for_broadcast(
+                scale, broadcast_shape, x, "RMSNorm scale"
+            )
             inv_rms = torch.rsqrt(
-                x.to(dtype=torch.float32).square().mean(dim=reduce_dims, keepdim=True)
-                + epsilon
+                x_float.square().mean(dim=reduce_dims, keepdim=True) + epsilon
             )
-        _store_tensor_for_uid(tensors, graph_json, int(inv_uid), inv_rms)
+            y_float = x_float * inv_rms * scale_b
+            if bias_uid is not None:
+                bias = _tensor(tensors, int(bias_uid), node)
+                y_float = y_float + _reshape_affine_for_broadcast(
+                    bias, broadcast_shape, x, "RMSNorm bias"
+                )
+            y = y_float.to(dtype=x.dtype)
+
+        _store_planned(tensors, y_uid, y, y_shape)
+
+        if inv_uid is not None:
+            if inv_rms is None:
+                inv_rms = torch.rsqrt(
+                    x.to(dtype=torch.float32)
+                    .square()
+                    .mean(dim=reduce_dims, keepdim=True)
+                    + epsilon
+                )
+            _store_planned(tensors, int(inv_uid), inv_rms, inv_shape)
+
+    return run
 
 
 @register_handler("RMSNormBackwardAttributes")
-def handle_rmsnorm_backward(
+def compile_rmsnorm_backward(
     node: Dict[str, Any],
-    tensors: Dict[int, torch.Tensor],
     graph_json: Dict[str, Any],
-) -> None:
-    """Handle RMSNorm backward using the saved inverse RMS tensor."""
+) -> CompiledOp:
+    """Plan RMSNorm backward using the saved inverse RMS tensor."""
     dy_uid = _required_input_uid(node, "dy_tensor_uid")
     x_uid = _required_input_uid(node, "x_tensor_uid")
     scale_uid = _required_input_uid(node, "scale_tensor_uid")
@@ -295,36 +313,57 @@ def handle_rmsnorm_backward(
     dx_uid = _required_output_uid(node, "dx_tensor_uid")
     dscale_uid = _required_output_uid(node, "dscale_tensor_uid")
 
-    dy = _tensor(tensors, dy_uid, node).to(dtype=torch.float32)
-    x = _tensor(tensors, x_uid, node)
-    x_float = x.to(dtype=torch.float32)
-    scale = _tensor(tensors, scale_uid, node)
-    inv_rms = _require_fp32_stat(_tensor(tensors, inv_uid, node), "RMSNorm inv_rms").to(
-        device=x.device
-    )
-
-    _layout, reduce_dims, broadcast_shape, _normalized_shape = _rmsnorm_layout(x, scale)
-    scale_b = _reshape_affine_for_broadcast(scale, broadcast_shape, x, "RMSNorm scale")
-    weighted_dy = dy * scale_b
-    if reduce_dims:
-        dot = (weighted_dy * x_float).sum(dim=reduce_dims, keepdim=True)
-        elements = _numel([x.shape[dim] for dim in reduce_dims])
-    else:
-        dot = weighted_dy * x_float
-        elements = 1
-
-    dx = (weighted_dy * inv_rms - x_float * inv_rms.pow(3) * dot / float(elements)).to(
-        dtype=x.dtype
-    )
-    _store_tensor_for_uid(tensors, graph_json, dx_uid, dx)
-
-    dscale = _sum_to_shape(dy * x_float * inv_rms, scale.shape).to(dtype=scale.dtype)
-    _store_tensor_for_uid(tensors, graph_json, dscale_uid, dscale)
-
     dbias_uid = _optional_uid(node, "dbias_tensor_uid")
-    if dbias_uid is not None:
-        dbias_shape = _stored_tensor_shape(tensors, graph_json, int(dbias_uid))
-        if dbias_shape is None:
-            dbias_shape = tuple(int(dim) for dim in scale.shape)
-        dbias = _sum_to_shape(dy, dbias_shape).to(dtype=scale.dtype)
-        _store_tensor_for_uid(tensors, graph_json, int(dbias_uid), dbias)
+
+    dx_shape = _tensor_shape(graph_json, dx_uid)
+    dscale_shape = _tensor_shape(graph_json, dscale_uid)
+    dbias_graph_shape = (
+        _tensor_shape(graph_json, int(dbias_uid)) if dbias_uid is not None else None
+    )
+
+    def run(tensors: Dict[int, torch.Tensor]) -> None:
+        dy = _tensor(tensors, dy_uid, node).to(dtype=torch.float32)
+        x = _tensor(tensors, x_uid, node)
+        x_float = x.to(dtype=torch.float32)
+        scale = _tensor(tensors, scale_uid, node)
+        inv_rms = _require_fp32_stat(
+            _tensor(tensors, inv_uid, node), "RMSNorm inv_rms"
+        ).to(device=x.device)
+
+        _layout, reduce_dims, broadcast_shape, _normalized_shape = _rmsnorm_layout(
+            x, scale
+        )
+        scale_b = _reshape_affine_for_broadcast(
+            scale, broadcast_shape, x, "RMSNorm scale"
+        )
+        weighted_dy = dy * scale_b
+        if reduce_dims:
+            dot = (weighted_dy * x_float).sum(dim=reduce_dims, keepdim=True)
+            elements = _numel([x.shape[dim] for dim in reduce_dims])
+        else:
+            dot = weighted_dy * x_float
+            elements = 1
+
+        dx = (
+            weighted_dy * inv_rms - x_float * inv_rms.pow(3) * dot / float(elements)
+        ).to(dtype=x.dtype)
+        _store_planned(tensors, dx_uid, dx, dx_shape)
+
+        dscale = _sum_to_shape(dy * x_float * inv_rms, scale.shape).to(
+            dtype=scale.dtype
+        )
+        _store_planned(tensors, dscale_uid, dscale, dscale_shape)
+
+        if dbias_uid is not None:
+            _existing = tensors.get(int(dbias_uid))
+            dbias_shape = (
+                tuple(int(d) for d in _existing.shape)
+                if _existing is not None
+                else dbias_graph_shape
+            )
+            if dbias_shape is None:
+                dbias_shape = tuple(int(dim) for dim in scale.shape)
+            dbias = _sum_to_shape(dy, dbias_shape).to(dtype=scale.dtype)
+            _store_planned(tensors, int(dbias_uid), dbias, dbias_graph_shape)
+
+    return run
