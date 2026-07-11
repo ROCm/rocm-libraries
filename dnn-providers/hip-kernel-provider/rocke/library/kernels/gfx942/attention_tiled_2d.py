@@ -5885,7 +5885,7 @@ def build_stdqk_attention_paged(
 
 
 # ===========================================================================
-# 4-warp GQA D256 paged attention (AICK-1495) -- production dispatch path.
+# 4-warp GQA D256 paged attention -- production dispatch path.
 # ===========================================================================
 # BLOCK_M=128 / 4-wave64 CTA natural-QK D256 attention on the CDNA3 32x32x8 bf16
 # MFMA atom. Reads paged K/V direct HBM->register (global_load, element offset;
