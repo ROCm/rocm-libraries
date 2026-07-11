@@ -3,6 +3,7 @@
 """Low-level Python bindings for the hipBLASLt GEMM API."""
 
 from . import _core
+from . import mx
 import numpy as _np
 import ml_dtypes as _mld
 
@@ -47,7 +48,7 @@ def from_numpy(arr, dtype):
     return _core.DeviceArray.from_numpy(arr, dtype)
 
 
-__all__ = ["_core", "from_numpy"]
+__all__ = ["_core", "from_numpy", "mx"]
 
 
 def _device_array_to_numpy(self):
