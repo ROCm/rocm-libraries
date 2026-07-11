@@ -15,7 +15,7 @@ void init_descriptors(nb::module_& m)
         .def_prop_ro("ptr", &Handle::ptr)
         .def("__enter__", [](Handle& self) -> Handle& { return self; },
              nb::rv_policy::reference_internal)
-        .def("__exit__", [](Handle& self, nb::object, nb::object, nb::object) {
+        .def("__exit__", [](Handle& self, nb::args) {
             self.close();
             return false;
         });
