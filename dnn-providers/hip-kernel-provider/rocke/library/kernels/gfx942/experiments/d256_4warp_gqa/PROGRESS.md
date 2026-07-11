@@ -121,3 +121,29 @@ GENERALIZED for qlen!=klen (context_off=klen-qlen, bottom-right causal = flash/v
 Inherits scatter-paging from sq4096 (identical phys_key + sid offset).
 NOTE: uses host-precomputed schedule (SID/LQ arrays); production ABI would derive
 seq via in-kernel binary_search on cu_seqlens (rocKE has binary_search_seq_idx).
+
+## UPDATE 7: productionization port plan (2026-07-11)
+STATUS: ragged DONE+validated. Productionize = multi-day compute-core port (NOT config flip).
+Finding: build_stdqk_attention_paged already supports num_warps=4 + binary_search_seq_idx
++ paged ABI, BUT its 4-warp config is 1.6-2.0x SLOWER (line 266) - it's the std-QK
+SPILLING algo. Our 4-warp GQA (natural-QK + LDS-5stage-swizzle softmax + conflict-free-V)
+is a DIFFERENT algo at parity+. So port our core into the wired production shell.
+
+Precise steps (all Python; branch C++ diff vs develop is EMPTY = Python-only, like gfx950):
+1. New build_gfx942_4warp_gqa(spec,arch) in gfx942/attention_tiled_2d.py emitting
+   _attn_signature (18-arg: output/query/key_cache/value_cache/sink/block_tables/
+   seq_lens/alibi/qq_bias/query_start_len/scale/k_scale/v_scale/out_scale/softcap/
+   num_seqs/block_table_stride[/qq_bias_stride]).
+2. CTA->seq: binary_search_seq_idx on query_start_len_ptr (REPLACES host SID/LQ).
+   grid=(total_q_blocks*H,), total_q_blocks from launch meta = sum(ceil(qlen_i/128)).
+3. Paged K/V: block_tables_ptr[seq*block_table_stride + logical_block]; key_cache
+   [num_blocks,block_size,num_kv_heads,head_dim] (matches our phys_key + bt_stride).
+4. Compute core = validated build_e2e_T3_ragged.py algorithm (per-block Q offset FIX,
+   context_off=seq_len-qlen bottom-right causal, GQA kvh=qhead//GQAG, 4-warp/128-q).
+5. Launch meta _get_2d_launch_meta: grid above, block (256,1,1).
+6. Cache key: _d256_gfx942_fast discriminator already present.
+7. Wire: attention_unified.py:3391 build_stdqk_attention_paged -> build_gfx942_4warp_gqa
+   under _d256_gfx942_fast (gate/selectors/cache/seam ALL already exist).
+8. GPU-validate: run_unified_attention_torch SQ=4096 GQA-16/2 causal paged vs AITER +
+   fp32 ref (reuse builders/gfx942/attention/prefill/parity_unified_attention.py).
+RISK: full-dispatch GPU validation is the gate; est 1-2 days. Not shipped unvalidated.
