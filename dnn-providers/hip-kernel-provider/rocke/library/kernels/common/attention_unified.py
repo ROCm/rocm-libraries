@@ -644,7 +644,7 @@ def _d256_gfx942_fast(problem: "UnifiedAttentionProblem") -> bool:
         and problem.max_seqlen_q > 1
         # tile_size==32 requires block_size in {16, 32} (tile % block == 0). The
         # ticket pins gfx942 D256 to block_size=16 (block_size=64 is too large
-        # for the tiled kernel here, AICK-1495); 64 cleanly falls back.
+        # for the tiled kernel here,); 64 cleanly falls back.
         and problem.block_size in (16, 32)
         # The natural-QK builder uses i32 paged element addressing (like the
         # shipped builder's default). Exclude caches > 2 GiB, which need the

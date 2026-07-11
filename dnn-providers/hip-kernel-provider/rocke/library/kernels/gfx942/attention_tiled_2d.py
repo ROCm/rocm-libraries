@@ -446,7 +446,7 @@ class UnifiedAttention2DTiledSpec:
     # Two-phase causal loop: emit an unmasked bulk phase (skip_mask=True) for
     # tiles fully below the diagonal, then a masked boundary phase. Pays off
     # only when the kernel is VALU/throughput-bound (the x8 conflict-free-V
-    # path); no-op-guarded to sliding_window==0. AICK-1495.
+    # path); no-op-guarded to sliding_window==0.
     use_causal_mask_phase_split: bool = False
 
     def __post_init__(self):
@@ -1870,7 +1870,7 @@ def build_unified_attention_2d_tiled(
 
     _cur_kv_tile = [None]
     def _v_hbm_elem(tile, tok, dim):
-        # AICK-1495: direct-HBM V element V[local tok, dim] for tile (bypass V_lds).
+        # direct-HBM V element V[local tok, dim] for tile (bypass V_lds).
         _lin = b.add(b.mul(tok, b.const_i32(HD)), dim)
         _vo, _vl = paged_kv_desc.offset(b, tile_idx=tile, linear_half=_lin, kv_head=kv_head_idx)
         _ir = b.cmp_lt(b.add(b.mul(tile, b.const_i32(T)), tok), max_seq_prefix_len)
@@ -3523,7 +3523,7 @@ def build_unified_attention_2d_tiled(
         gfx942, so the x8-transposed path always takes the plain bf16 read.)
         """
         if K_HBM_DIRECT and not K_FP8_MFMA:
-            # AICK-1495: direct-HBM K via buffer_load (HW OOB->0). Causal mask
+            # direct-HBM K via buffer_load (HW OOB->0). Causal mask
             # already zeros past-seq keys, so no software bounds-select (saves VALU).
             _lin = b.add(b.mul(k_row, b.const_i32(HD)), k_off)
             _vo, _ = paged_kv_desc.offset(b, tile_idx=_cur_kv_tile[0], linear_half=_lin, kv_head=kv_head_idx)
@@ -5484,7 +5484,7 @@ def build_unified_attention_2d_tiled(
 
 
 # ===========================================================================
-# Standard-QK D256 paged attention (AICK-1495) -- production dispatch path.
+# Standard-QK D256 paged attention -- production dispatch path.
 # ===========================================================================
 #
 # Natural-orientation ``S = Q @ K^T`` D256 attention on the CDNA3 32x32x8 bf16
