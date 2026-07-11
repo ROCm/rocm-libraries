@@ -279,3 +279,12 @@ Perf (standalone global_load kernel, ratio vs AITER same-run): 1.02x@4096, 0.94x
   (comparable to buffer_load 1.05x/0.99x; global_load overhead vanishes when saturated).
 STATUS: gfx942 D256 4-warp GQA kernel PRODUCTION-WIRED + end-to-end GPU-validated.
 Remaining (optional): dispatch-path perf run at ticket shapes; commit-hygiene review.
+
+## UPDATE 15: dispatch-path perf confirmed - PRODUCTIONIZATION DONE (2026-07-11)
+run_unified_attention_torch (production dispatch -> 4wgqa), block_size=16 single-seq:
+  SQ=4096 -> 1583us, SQ=8192 -> 5663us. Matches standalone global_load (1675/5634) ->
+  dispatch overhead negligible; shipped path runs at validated parity+ (1.02x@4096,
+  0.94x@8192 vs AITER same-run). Both AICK-1495 tasks COMPLETE + end-to-end GPU-validated:
+  (1) ragged multi-seq cu_seqlens_q (prefill/decode/chunked, dual-ref);
+  (2) productionization (build_gfx942_4warp_gqa wired into dispatch, full-dispatch ragged
+  parity BS16/32 PASS, perf parity+). Was: shipped std-QK 0.55x AITER -> now 4wgqa ~1.0x.
