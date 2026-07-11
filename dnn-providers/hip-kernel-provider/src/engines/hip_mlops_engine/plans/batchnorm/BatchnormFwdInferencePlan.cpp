@@ -212,14 +212,21 @@ void BatchnormFwdInferencePlan::compile(const IKernelCompiler& kernelCompiler,
 
     // Get activation mode
     auto activationMode = ActivationMode::PASTHRU;
-
+    const hipdnn_flatbuffers_sdk::data_objects::TensorAttributes* outputTensor
+        = _inferenceParams.y();
     if(_inferenceParams.optActivation().has_value() && _inferenceParams.activationOut() != nullptr)
     {
         activationMode = (*_inferenceParams.optActivation()).mode;
+        outputTensor = _inferenceParams.activationOut();
     }
 
     // Prepare compilation options
-    BatchnormKernelCompileOptions options(_inferenceParams.x(), deviceProperties, activationMode);
+    BatchnormKernelCompileOptions options(_inferenceParams.x(),
+                                          outputTensor,
+                                          _inferenceParams.estMean(),
+                                          _inferenceParams.scale(),
+                                          deviceProperties,
+                                          activationMode);
     options.update("HIP_PLUGIN_USE_FPMIX", useFp16Mix);
     options.update("HIP_PLUGIN_USE_BFPMIX", useBfp16Mix);
     options.update("HIP_PLUGIN_BN_GRP0", xlocalsize);

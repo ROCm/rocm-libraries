@@ -5,7 +5,6 @@ GlobalParameters:
   SyncsPerBenchmark: 0
   NumElementsToValidate: -1
   KernelTime: True
-  NewClient: 2
   BoundsCheck: 0
   PrintSolutionRejectionReason: True
   ValidationMaxToPrint: 4      # maximum number of mismatches to print
@@ -28,7 +27,6 @@ GlobalParameters:
   NumWarmups: 0
   EnqueuesPerSync: 1
   # PrintWinnersOnly: True
-  MinKForGSU: 1
   Architecture: gfx1250
 
 BenchmarkProblems:

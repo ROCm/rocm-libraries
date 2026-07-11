@@ -20,7 +20,6 @@
  *
  * ************************************************************************ */
 
-#include "asan_helpers.hpp"
 #include "definitions.hpp"
 #include "device_macros.hpp"
 #include "handle.hpp"
@@ -56,26 +55,22 @@ rocblas_status rocblas_syrkx_syr2k_dispatch(rocblas_handle    handle,
 {
     if(TWOK)
     {
-        return rocblas_syr2k_her2k_dispatch<API_INT,
-                                            TWOK,
-                                            HERK,
-                                            rocblas::conditional_v<rocblas_enable_asan, 16, 32>>(
-            handle,
-            uplo,
-            trans,
-            n,
-            k,
-            alpha,
-            dA,
-            lda,
-            stride_a,
-            dB,
-            ldb,
-            stride_b,
-            dC,
-            ldc,
-            stride_c,
-            batch_count);
+        return rocblas_syr2k_her2k_dispatch<API_INT, TWOK, HERK, 32>(handle,
+                                                                     uplo,
+                                                                     trans,
+                                                                     n,
+                                                                     k,
+                                                                     alpha,
+                                                                     dA,
+                                                                     lda,
+                                                                     stride_a,
+                                                                     dB,
+                                                                     ldb,
+                                                                     stride_b,
+                                                                     dC,
+                                                                     ldc,
+                                                                     stride_c,
+                                                                     batch_count);
     }
     else
     {
@@ -166,7 +161,7 @@ rocblas_status rocblas_internal_syr2k_syrkx_block_recursive_template(rocblas_han
     {
         // for syr2k/her2k we first scale C so we c an use directly for output without work buffer
         static constexpr int syr2k_SCALE_DIM_X = 128;
-        static constexpr int syr2k_SCALE_DIM_Y = rocblas::conditional_v<rocblas_enable_asan, 2, 8>;
+        static constexpr int syr2k_SCALE_DIM_Y = 8;
         rocblas_int          gx                = (n - 1) / (syr2k_SCALE_DIM_X) + 1;
         rocblas_int          gy                = (n - 1) / (syr2k_SCALE_DIM_Y) + 1;
         dim3                 syr2k_scale_grid(gx, gy, batches);
@@ -363,7 +358,7 @@ rocblas_status rocblas_internal_syr2k_her2k_non_recursive_template(rocblas_handl
 
     int batches = handle->getBatchGridDim((int)batch_count);
 
-    static constexpr int syr2k_DIM_XY = rocblas::conditional_v<rocblas_enable_asan, 16, 32>;
+    static constexpr int syr2k_DIM_XY = 32;
     rocblas_int          bx           = (n - 1) / (syr2k_DIM_XY) + 1;
     rocblas_int          by           = (n - 1) / (syr2k_DIM_XY) + 1;
     dim3                 syr2k_grid(bx, by, batches);
@@ -607,7 +602,7 @@ rocblas_status rocblas_internal_syr2k_her2k_template(rocblas_handle    handle,
     int batches = handle->getBatchGridDim((int)batch_count);
 
     static constexpr int syr2k_SCALE_DIM_X = 128;
-    static constexpr int syr2k_SCALE_DIM_Y = rocblas::conditional_v<rocblas_enable_asan, 2, 8>;
+    static constexpr int syr2k_SCALE_DIM_Y = 8;
     rocblas_int          gx                = (n - 1) / (syr2k_SCALE_DIM_X) + 1;
     rocblas_int          gy                = (n - 1) / (syr2k_SCALE_DIM_Y) + 1;
     dim3                 syr2k_scale_grid(gx, gy, batches);

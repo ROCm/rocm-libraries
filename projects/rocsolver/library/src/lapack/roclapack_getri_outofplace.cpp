@@ -1,5 +1,5 @@
 /* **************************************************************************
- * Copyright (C) 2021-2024 Advanced Micro Devices, Inc. All rights reserved.
+ * Copyright (C) 2021-2026 Advanced Micro Devices, Inc. All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -26,6 +26,7 @@
  * *************************************************************************/
 
 #include "roclapack_getri_outofplace.hpp"
+#include "exceptions.hpp"
 
 ROCSOLVER_BEGIN_NAMESPACE
 
@@ -39,6 +40,7 @@ rocblas_status rocsolver_getri_outofplace_impl(rocblas_handle handle,
                                                const rocblas_int ldc,
                                                rocblas_int* info,
                                                const bool pivot)
+try
 {
     const char* name = (pivot ? "getri_outofplace" : "getri_npvt_outofplace");
     ROCSOLVER_ENTER_TOP(name, "-n", n, "--lda", lda, "--ldc", ldc);
@@ -90,6 +92,10 @@ rocblas_status rocsolver_getri_outofplace_impl(rocblas_handle handle,
     return rocsolver_getri_outofplace_template<false, false, T>(
         handle, n, A, shiftA, lda, strideA, ipiv, shiftP, strideP, C, shiftC, ldc, strideC, info,
         batch_count, work1, work2, work3, work4, optim_mem, pivot);
+}
+catch(...)
+{
+    return exception2rocblas_status();
 }
 
 ROCSOLVER_END_NAMESPACE

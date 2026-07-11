@@ -153,9 +153,18 @@ class PackData_FLOAT8(PackData):
             if ti.getAsmCaps().get("HasCvtScalePk8Fp8F32", False):
                 for groupIdx in range(gwvw // 8):
                     srcVgpr = formatting(elementSumIdx + groupIdx * 8, inputPrefix, prefixOffset)
+                    # v_cvt_scalef32_pk8 does not support HW saturation; clamp first.
+                    for vi in range(8):
+                        fv = formatting(elementSumIdx + groupIdx * 8 + vi, inputPrefix, prefixOffset)
+                        module.add(VCmpClassF32(dst=sgpr(tmpS01,laneSGPRC), src0=vgpr(fv), src1=vgpr(vgprFp8NanInf), comment="Nan and +/- inf"))
+                        module.add(VMed3F32(dst=vgpr(vgprFp8Temp), src0=vgpr(fv), src1=vgpr(vgprFp8Min), src2=vgpr(vgprFp8Max)))
+                        module.add(VCndMaskB32(dst=vgpr(fv), src0=vgpr(vgprFp8Temp), src1=vgpr(fv), src2=sgpr(tmpS01,laneSGPRC)))
                     d = destIdx + groupIdx * 2
+                    # Pass scale as float 1.0, not the 0x3f800000 int bits: a float literal is
+                    # recognized as an inline constant, so size accounting does not count it as a
+                    # separate 32-bit literal word (which mismatches the real ELF .text size).
                     module.add(VCvtScalePk8F32toFP8(dst=vgpr(d, 2), src=vgpr(srcVgpr, 8),
-                                                    scale=0x3f800000, comment="convert 8xF32 to 8xFP8"))
+                                                    scale=1.0, comment="convert 8xF32 to 8xFP8"))
                 return module
 
         pos = 0
@@ -225,9 +234,18 @@ class PackData_BF8(PackData):
             if ti.getAsmCaps().get("HasCvtScalePk8Bf8F32", False):
                 for groupIdx in range(gwvw // 8):
                     srcVgpr = formatting(elementSumIdx + groupIdx * 8, inputPrefix, prefixOffset)
+                    # v_cvt_scalef32_pk8 does not support HW saturation; clamp first.
+                    for vi in range(8):
+                        fv = formatting(elementSumIdx + groupIdx * 8 + vi, inputPrefix, prefixOffset)
+                        module.add(VCmpClassF32(dst=sgpr(tmpS01,laneSGPRC), src0=vgpr(fv), src1=vgpr(vgprBF8NanInf), comment="Nan and +/- inf"))
+                        module.add(VMed3F32(dst=vgpr(vgprBF8Temp), src0=vgpr(fv), src1=vgpr(vgprBF8Min), src2=vgpr(vgprBF8Max)))
+                        module.add(VCndMaskB32(dst=vgpr(fv), src0=vgpr(vgprBF8Temp), src1=vgpr(fv), src2=sgpr(tmpS01,laneSGPRC)))
                     d = destIdx + groupIdx * 2
+                    # Pass scale as float 1.0, not the 0x3f800000 int bits: a float literal is
+                    # recognized as an inline constant, so size accounting does not count it as a
+                    # separate 32-bit literal word (which mismatches the real ELF .text size).
                     module.add(VCvtScalePk8F32toBF8(dst=vgpr(d, 2), src=vgpr(srcVgpr, 8),
-                                                    scale=0x3f800000, comment="convert 8xF32 to 8xBF8"))
+                                                    scale=1.0, comment="convert 8xF32 to 8xBF8"))
                 return module
 
         pos = 0
@@ -409,6 +427,12 @@ class PackData_FLOAT8_SR(PackData):
             # Packed path: convert 8 F32 elements to FP8 at once
             for groupIdx in range(gwvw // 8):
                 srcStartVgpr = formatting(elementSumIdx + groupIdx * 8, inputPrefix, prefixOffset)
+                # v_cvt_scalef32_sr_pk8 does not support HW saturation; clamp first.
+                for vi in range(8):
+                    fv = formatting(elementSumIdx + groupIdx * 8 + vi, inputPrefix, prefixOffset)
+                    module.add(VCmpClassF32(dst=sgpr(tmpS01,laneSGPRC), src0=vgpr(fv), src1=vgpr(vgprFp8NanInf), comment="Nan and +/- inf"))
+                    module.add(VMed3F32(dst=vgpr(vgprFp8Temp), src0=vgpr(fv), src1=vgpr(vgprFp8Min), src2=vgpr(vgprFp8Max)))
+                    module.add(VCndMaskB32(dst=vgpr(fv), src0=vgpr(vgprFp8Temp), src1=vgpr(fv), src2=sgpr(tmpS01,laneSGPRC)))
                 addTruncateAndPRNG(srcStartVgpr, skipTruncate=True)
                 d = destIdx + groupIdx * 2  # Each group outputs 2 VGPRs (64-bit aligned)
                 module.add(VCvtScaleSRPkF32toFP8(dst=vgpr(d, 2), src0=vgpr(srcStartVgpr, 8), src1=vgpr(vRand), scale=alphaScale))

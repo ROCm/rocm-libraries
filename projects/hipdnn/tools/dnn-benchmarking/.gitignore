@@ -48,3 +48,7 @@ dmypy.json
 results.json
 *.log
 .planning/
+
+# Crash artifacts (e.g. ROCm/GPU process core dumps)
+core
+core.*

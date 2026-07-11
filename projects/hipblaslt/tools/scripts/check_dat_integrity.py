@@ -2,13 +2,14 @@
 # Copyright Advanced Micro Devices, Inc., or its affiliates.
 # SPDX-License-Identifier: MIT
 
-"""Post-build integrity checks for installed hipBLASLt Tensile .dat files."""
+"""Post-build integrity checks for installed hipBLASLt Tensile .dat/.dat.zlib files."""
 
 from __future__ import annotations
 
 import argparse
 import re
 import sys
+import zlib
 from pathlib import Path
 from typing import List
 
@@ -17,10 +18,16 @@ try:
 except ImportError:
     msgpack = None
 
-_MASTER_RE = re.compile(r"^TensileLibrary_lazy_(?P<arch>[A-Za-z0-9]+)\.dat$")
+_MSGPACK_ERRORS = (msgpack.exceptions.UnpackException,) if msgpack is not None else ()
+
+_MASTER_RE = re.compile(r"^TensileLibrary_lazy_(?P<arch>[A-Za-z0-9]+)\.dat(?:\.zlib)?$")
 _MAPPING_RE = re.compile(
-    r"^TensileLiteLibrary_lazy_(?P<arch>[A-Za-z0-9]+)_Mapping\.dat$"
+    r"^TensileLiteLibrary_lazy_(?P<arch>[A-Za-z0-9]+)_Mapping\.dat(?:\.zlib)?$"
 )
+
+
+class _MappingLoadError(Exception):
+    pass
 
 
 def _archDir(libDir: Path, arch: str) -> Path:
@@ -40,10 +47,40 @@ def _scanArchs(libDir: Path):
     return masters, mappings
 
 
+def _strictDecompress(data: bytes) -> bytes:
+    """Decompress a single zlib stream, rejecting any trailing bytes.
+
+    Mirrors the C++ loader (readCompressedMsgObject), which treats leftover
+    input after the zlib stream as corruption. One-shot zlib.decompress
+    silently ignores such trailing bytes, so the integrity check would
+    otherwise pass files the runtime loader rejects.
+    """
+    decompressor = zlib.decompressobj()
+    raw = decompressor.decompress(data)
+    raw += decompressor.flush()
+    if not decompressor.eof:
+        raise zlib.error("incomplete zlib stream")
+    if decompressor.unused_data:
+        raise zlib.error(
+            f"trailing bytes after zlib stream: {decompressor.unused_data!r}"
+        )
+    return raw
+
+
 def _loadMapping(libDir: Path, arch: str):
-    path = _archDir(libDir, arch) / f"TensileLiteLibrary_lazy_{arch}_Mapping.dat"
-    with open(path, "rb") as f:
-        return msgpack.unpack(f, raw=False, strict_map_key=False)
+    base = _archDir(libDir, arch) / f"TensileLiteLibrary_lazy_{arch}_Mapping.dat"
+    gz_path = Path(str(base) + ".zlib")
+    src = gz_path if gz_path.is_file() else base
+    try:
+        if src == gz_path:
+            raw = _strictDecompress(src.read_bytes())
+            return msgpack.unpackb(raw, raw=False, strict_map_key=False)
+        with open(src, "rb") as f:
+            return msgpack.unpack(f, raw=False, strict_map_key=False)
+    except (OSError, ValueError, zlib.error, *_MSGPACK_ERRORS) as exc:
+        raise _MappingLoadError(
+            f"arch={arch}: failed to read/decode Mapping ({src.name}): {exc}"
+        ) from exc
 
 
 def validate(libDir: Path) -> List[str]:
@@ -67,15 +104,23 @@ def validate(libDir: Path) -> List[str]:
     for a in sorted(mappings - archs):
         violations.append(f"per-arch Mapping without a master: {a}")
 
-    fallback_dat_files = list(libDir.glob("*/*_fallback_*.dat"))
+    fallback_dat_files = list(libDir.glob("*/*_fallback_*.dat")) + list(
+        libDir.glob("*/*_fallback_*.dat.zlib")
+    )
     for arch in sorted(archs):
-        mapping = _loadMapping(libDir, arch)
+        try:
+            mapping = _loadMapping(libDir, arch)
+        except _MappingLoadError as exc:
+            violations.append(str(exc))
+            continue
         archDir = _archDir(libDir, arch)
 
         for idx, kernelName in mapping.items():
-            if not (archDir / f"{kernelName}.dat").is_file():
+            if not (archDir / f"{kernelName}.dat").is_file() and not (
+                archDir / f"{kernelName}.dat.zlib"
+            ).is_file():
                 violations.append(
-                    f"arch={arch}: Mapping[{idx}] -> {kernelName}.dat is not on disk"
+                    f"arch={arch}: Mapping[{idx}] -> {kernelName}.dat(.zlib) is not on disk"
                 )
             if not kernelName.endswith("_" + arch):
                 violations.append(
@@ -84,7 +129,9 @@ def validate(libDir: Path) -> List[str]:
                 )
 
         arch_has_fallback_files = any(
-            f.name.endswith(f"_fallback_{arch}.dat") for f in fallback_dat_files
+            f.name.endswith(f"_fallback_{arch}.dat")
+            or f.name.endswith(f"_fallback_{arch}.dat.zlib")
+            for f in fallback_dat_files
         )
         mapping_has_fallback = any(
             "_fallback_" in n and n.endswith("_" + arch) for n in mapping.values()
@@ -103,7 +150,7 @@ def main(argv=None) -> int:
     parser.add_argument(
         "library_dir",
         type=Path,
-        help="Installed library dir containing <base-arch>/ subdirs of .dat files",
+        help="Installed library dir containing <base-arch>/ subdirs of .dat/.dat.zlib files",
     )
     parser.add_argument("--quiet", "-q", action="store_true")
     args = parser.parse_args(argv)

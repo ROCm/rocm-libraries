@@ -313,7 +313,7 @@ public:
     using Type = float; // "Type" must be a native CPU type!
 };
 
-unsigned CpuActivationGetNumThreads(std::size_t num_jobs)
+std::size_t CpuActivationGetNumThreads(std::size_t num_jobs)
 {
     const unsigned max_num_hw_threads = std::thread::hardware_concurrency();
     return std::min(num_jobs, static_cast<std::size_t>(max_num_hw_threads));
@@ -374,31 +374,18 @@ void CpuActivationPackedMultiThread(std::size_t num_items, Ts&&... xs)
         return;
     }
 
-    const std::size_t max_num_jobs_per_thread  = Ceil(num_jobs, num_threads);
-    const std::size_t max_num_items_per_thread = max_num_items_per_job * max_num_jobs_per_thread;
-    const std::size_t remainder                = num_items % max_num_items_per_thread;
-    const auto num_async_threads               = num_threads - 1;
-
-    auto func_async = [&](unsigned thread_num) {
-        const auto offset = max_num_items_per_thread * thread_num;
-        const auto end    = offset + max_num_items_per_thread;
+    auto func = [&](std::size_t thread_num) {
+        const auto offset = num_items * thread_num / num_threads;
+        const auto end    = num_items * (thread_num + 1) / num_threads;
         DoCpuActivationPacked<direction, A>(offset, end, xs...);
     };
 
-    auto func_remainder = [&]() {
-        const auto offset = max_num_items_per_thread * num_async_threads;
-        const auto end    = offset + remainder;
-        DoCpuActivationPacked<direction, A>(offset, end, xs...);
-    };
+    std::vector<std::future<void>> threads;
+    threads.reserve(num_threads - 1);
+    for(std::size_t i = 0; i < num_threads - 1; ++i)
+        threads.push_back(std::async(std::launch::async, func, i));
 
-    std::vector<decltype(std::async(func_async, 0))> threads;
-    for(unsigned i = 0; i < num_async_threads; i++)
-        threads.push_back(std::async(std::launch::async, func_async, i));
-
-    if(remainder)
-        func_remainder();
-    else
-        func_async(num_async_threads);
+    func(num_threads - 1);
 
     for(auto& thread : threads)
         thread.wait();

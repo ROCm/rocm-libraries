@@ -9,7 +9,7 @@
 #include "float_types.h"
 
 // Since float_types.h has enabled true mixed precision for all
-// direct ocl kernels, this kernel needs to retain its older behavior as it is
+// direct kernels, this kernel needs to retain its older behavior as it is
 // dependent upon tunability which isn't slated for MIOpen 2.0 PR #1725
 #if MIOPEN_USE_FP16 == 1
 #undef FLOAT_ACCUM

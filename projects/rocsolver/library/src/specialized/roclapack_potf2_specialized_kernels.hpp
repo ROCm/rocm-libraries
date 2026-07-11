@@ -358,7 +358,7 @@ rocblas_status potf2_run_small(rocblas_handle handle,
     const hipDeviceProp_t* props = rocblas_internal_get_device_prop(handle);
     if(lmemsize > props->sharedMemPerBlock)
     {
-        return rocblas_status_internal_error;
+        THROW_IF_ROCBLAS_ERROR(rocblas_status_internal_error);
     }
 
     bool const is_upper = (uplo == rocblas_fill_upper);

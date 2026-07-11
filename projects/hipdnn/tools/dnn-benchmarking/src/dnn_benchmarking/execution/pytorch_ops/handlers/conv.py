@@ -3,13 +3,13 @@
 
 """Convolution forward/backward/wgrad reference handlers."""
 
-from typing import Any, Dict, Sequence, Tuple
+from typing import Any, Callable, Dict, Sequence, Tuple
 
 import torch
 import torch.nn.functional as F
 
 from .._common import *  # noqa: F401,F403
-from .._registry import register_handler
+from .._registry import CompiledOp, register_handler
 
 
 def _validate_cross_correlation(node: Dict[str, Any]) -> None:
@@ -20,22 +20,22 @@ def _validate_cross_correlation(node: Dict[str, Any]) -> None:
         )
 
 
-def _conv_padding(node: Dict[str, Any]) -> Tuple[Tuple[int, int], Tuple[int, int]]:
-    pre = _as_tuple(_node_param(node, "pre_padding", [0, 0]), [0, 0])
-    post = _as_tuple(_node_param(node, "post_padding", pre), pre)
-    if len(pre) != 2 or len(post) != 2:
-        raise ValueError("Only 2D convolution padding is supported")
-    return (pre[0], pre[1]), (post[0], post[1])
+def _conv_padding(node: Dict[str, Any]) -> Tuple[Tuple[int, ...], Tuple[int, ...]]:
+    pre = tuple(_as_tuple(_node_param(node, "pre_padding", [0, 0]), [0, 0]))
+    post = tuple(_as_tuple(_node_param(node, "post_padding", pre), pre))
+    if len(pre) != len(post):
+        raise ValueError("Convolution pre/post padding must have equal rank")
+    return pre, post
 
 
 def _conv_stride_dilation(
     node: Dict[str, Any],
-) -> Tuple[Tuple[int, int], Tuple[int, int]]:
-    stride = _as_tuple(_node_param(node, "stride", [1, 1]), [1, 1])
-    dilation = _as_tuple(_node_param(node, "dilation", [1, 1]), [1, 1])
-    if len(stride) != 2 or len(dilation) != 2:
-        raise ValueError("Only 2D convolution stride/dilation is supported")
-    return (stride[0], stride[1]), (dilation[0], dilation[1])
+) -> Tuple[Tuple[int, ...], Tuple[int, ...]]:
+    stride = tuple(_as_tuple(_node_param(node, "stride", [1, 1]), [1, 1]))
+    dilation = tuple(_as_tuple(_node_param(node, "dilation", [1, 1]), [1, 1]))
+    if len(stride) != len(dilation):
+        raise ValueError("Convolution stride/dilation must have equal rank")
+    return stride, dilation
 
 
 def _conv_group_count(input_shape: Sequence[int], weight_shape: Sequence[int]) -> int:
@@ -83,65 +83,78 @@ def _conv_group_count(input_shape: Sequence[int], weight_shape: Sequence[int]) -
 
 
 def _pad_conv_input(
-    x: torch.Tensor, pre: Tuple[int, int], post: Tuple[int, int]
+    x: torch.Tensor, pre: Tuple[int, ...], post: Tuple[int, ...]
 ) -> torch.Tensor:
-    if pre == (0, 0) and post == (0, 0):
+    if all(p == 0 for p in pre) and all(p == 0 for p in post):
         return x
-    return F.pad(x, (pre[1], post[1], pre[0], post[0]))
+    pad = []
+    for i in range(len(pre) - 1, -1, -1):
+        pad.extend((pre[i], post[i]))
+    return F.pad(x, pad)
 
 
-def _conv2d_forward(
-    node: Dict[str, Any], x: torch.Tensor, w: torch.Tensor
-) -> torch.Tensor:
+_CONV_FORWARD_FNS = {1: F.conv1d, 2: F.conv2d, 3: F.conv3d}
+
+
+def _plan_conv_forward(
+    node: Dict[str, Any],
+) -> Callable[[torch.Tensor, torch.Tensor], torch.Tensor]:
+    """Parse a forward-conv node once and return a closure applying it to (x, w)."""
     _validate_cross_correlation(node)
     pre, post = _conv_padding(node)
     stride, dilation = _conv_stride_dilation(node)
-    padded_x = _pad_conv_input(x, pre, post)
-    return F.conv2d(
-        padded_x,
-        w,
-        stride=stride,
-        dilation=dilation,
-        groups=_conv_group_count(x.shape, w.shape),
-    )
+    conv_fn = _CONV_FORWARD_FNS.get(len(stride))
+    if conv_fn is None:
+        raise ValueError(
+            f"Unsupported convolution spatial rank {len(stride)}; "
+            "PyTorch reference supports 1D/2D/3D"
+        )
+    symmetric = pre == post
 
+    def apply(x: torch.Tensor, w: torch.Tensor) -> torch.Tensor:
+        groups = _conv_group_count(x.shape, w.shape)
+        if symmetric:
+            # Symmetric padding folds into the conv, matching the engine's native
+            # descriptor (no separate F.pad kernel in the timed window).
+            return conv_fn(
+                x, w, stride=stride, padding=pre, dilation=dilation, groups=groups
+            )
+        # Asymmetric padding can't be expressed via conv padding; pre-pad explicitly.
+        padded_x = _pad_conv_input(x, pre, post)
+        return conv_fn(padded_x, w, stride=stride, dilation=dilation, groups=groups)
 
-def _conv_padding_is_symmetric(node: Dict[str, Any]) -> bool:
-    pre, post = _conv_padding(node)
-    return pre == post
+    return apply
 
 
 @register_handler("ConvolutionFwdAttributes")
-def handle_conv_fwd(
+def compile_conv_fwd(
     node: Dict[str, Any],
-    tensors: Dict[int, torch.Tensor],
     graph_json: Dict[str, Any],
-) -> None:
-    """Handle ConvolutionFwdAttributes (2D convolution forward pass)."""
+) -> CompiledOp:
+    """Plan ConvolutionFwdAttributes (1D/2D/3D convolution forward pass)."""
     x_uid = _required_input_uid(node, "x_tensor_uid")
     w_uid = _required_input_uid(node, "w_tensor_uid")
     y_uid = _required_output_uid(node, "y_tensor_uid")
+    apply_conv = _plan_conv_forward(node)
 
-    y = _conv2d_forward(
-        node, _tensor(tensors, x_uid, node), _tensor(tensors, w_uid, node)
-    )
-    _store_tensor(tensors, y_uid, y)
+    def run(tensors: Dict[int, torch.Tensor]) -> None:
+        y = apply_conv(_tensor(tensors, x_uid, node), _tensor(tensors, w_uid, node))
+        _store_tensor(tensors, y_uid, y)
+
+    return run
 
 
 @register_handler("ConvolutionBwdAttributes")
-def handle_conv_bwd(
+def compile_conv_bwd(
     node: Dict[str, Any],
-    tensors: Dict[int, torch.Tensor],
     graph_json: Dict[str, Any],
-) -> None:
-    """Handle ConvolutionBwdAttributes (gradient with respect to input)."""
+) -> CompiledOp:
+    """Plan ConvolutionBwdAttributes (gradient with respect to input)."""
     _validate_cross_correlation(node)
     dy_uid = _required_input_uid(node, "dy_tensor_uid")
     w_uid = _required_input_uid(node, "w_tensor_uid")
     dx_uid = _required_output_uid(node, "dx_tensor_uid")
 
-    dy = _tensor(tensors, dy_uid, node)
-    w = _tensor(tensors, w_uid, node)
     input_size = _tensor_shape(graph_json, dx_uid)
     if input_size is None:
         raise ValueError(
@@ -150,42 +163,47 @@ def handle_conv_bwd(
 
     stride, dilation = _conv_stride_dilation(node)
     pre, post = _conv_padding(node)
-    groups = _conv_group_count(input_size, w.shape)
-    if _conv_padding_is_symmetric(node):
-        dx = torch.nn.grad.conv2d_input(
-            input_size,
-            w,
-            dy,
-            stride=stride,
-            padding=pre,
-            dilation=dilation,
-            groups=groups,
-        )
-    else:
-        with torch.enable_grad():
-            x = torch.zeros(
-                input_size, dtype=dy.dtype, device=dy.device, requires_grad=True
+    symmetric = pre == post
+    apply_conv = None if symmetric else _plan_conv_forward(node)
+
+    def run(tensors: Dict[int, torch.Tensor]) -> None:
+        dy = _tensor(tensors, dy_uid, node)
+        w = _tensor(tensors, w_uid, node)
+        groups = _conv_group_count(input_size, w.shape)
+        if symmetric:
+            dx = torch.nn.grad.conv2d_input(
+                input_size,
+                w,
+                dy,
+                stride=stride,
+                padding=pre,
+                dilation=dilation,
+                groups=groups,
             )
-            y = _conv2d_forward(node, x, w.detach())
-            y.backward(dy)
-            dx = x.grad.detach()
-    _store_tensor(tensors, dx_uid, dx)
+        else:
+            with torch.enable_grad():
+                x = torch.zeros(
+                    input_size, dtype=dy.dtype, device=dy.device, requires_grad=True
+                )
+                y = apply_conv(x, w.detach())
+                y.backward(dy)
+                dx = x.grad.detach()
+        _store_tensor(tensors, dx_uid, dx)
+
+    return run
 
 
 @register_handler("ConvolutionWrwAttributes")
-def handle_conv_wrw(
+def compile_conv_wrw(
     node: Dict[str, Any],
-    tensors: Dict[int, torch.Tensor],
     graph_json: Dict[str, Any],
-) -> None:
-    """Handle ConvolutionWrwAttributes (gradient with respect to weights)."""
+) -> CompiledOp:
+    """Plan ConvolutionWrwAttributes (gradient with respect to weights)."""
     _validate_cross_correlation(node)
     x_uid = _required_input_uid(node, "x_tensor_uid")
     dy_uid = _required_input_uid(node, "dy_tensor_uid")
     dw_uid = _required_output_uid(node, "dw_tensor_uid")
 
-    x = _tensor(tensors, x_uid, node)
-    dy = _tensor(tensors, dy_uid, node)
     weight_size = _tensor_shape(graph_json, dw_uid)
     if weight_size is None:
         raise ValueError(
@@ -193,24 +211,32 @@ def handle_conv_wrw(
         )
 
     stride, dilation = _conv_stride_dilation(node)
-    pre, _post = _conv_padding(node)
-    groups = _conv_group_count(x.shape, weight_size)
-    if _conv_padding_is_symmetric(node):
-        dw = torch.nn.grad.conv2d_weight(
-            x,
-            weight_size,
-            dy,
-            stride=stride,
-            padding=pre,
-            dilation=dilation,
-            groups=groups,
-        )
-    else:
-        with torch.enable_grad():
-            w = torch.zeros(
-                weight_size, dtype=x.dtype, device=x.device, requires_grad=True
+    pre, post = _conv_padding(node)
+    symmetric = pre == post
+    apply_conv = None if symmetric else _plan_conv_forward(node)
+
+    def run(tensors: Dict[int, torch.Tensor]) -> None:
+        x = _tensor(tensors, x_uid, node)
+        dy = _tensor(tensors, dy_uid, node)
+        groups = _conv_group_count(x.shape, weight_size)
+        if symmetric:
+            dw = torch.nn.grad.conv2d_weight(
+                x,
+                weight_size,
+                dy,
+                stride=stride,
+                padding=pre,
+                dilation=dilation,
+                groups=groups,
             )
-            y = _conv2d_forward(node, x.detach(), w)
-            y.backward(dy)
-            dw = w.grad.detach()
-    _store_tensor(tensors, dw_uid, dw)
+        else:
+            with torch.enable_grad():
+                w = torch.zeros(
+                    weight_size, dtype=x.dtype, device=x.device, requires_grad=True
+                )
+                y = apply_conv(x.detach(), w)
+                y.backward(dy)
+                dw = w.grad.detach()
+        _store_tensor(tensors, dw_uid, dw)
+
+    return run

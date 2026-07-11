@@ -30,7 +30,9 @@ struct SdpaBwdParams
                   const hipdnn_flatbuffers_sdk::data_objects::TensorAttributes& dkAttributes,
                   const hipdnn_flatbuffers_sdk::data_objects::TensorAttributes& dvAttributes,
                   std::optional<float> attnScaleValue,
-                  bool causalMask,
+                  int64_t leftBound,
+                  int64_t rightBound,
+                  bool topLeftAlignment,
                   const hipdnn_flatbuffers_sdk::data_objects::TensorAttributes* attnMaskAttributes
                   = nullptr)
         : qTensor(unpackTensorAttributes(qAttributes))
@@ -43,7 +45,9 @@ struct SdpaBwdParams
         , dkTensor(unpackTensorAttributes(dkAttributes))
         , dvTensor(unpackTensorAttributes(dvAttributes))
         , attnScaleValue(attnScaleValue)
-        , causalMask(causalMask)
+        , leftBound(leftBound)
+        , rightBound(rightBound)
+        , topLeftAlignment(topLeftAlignment)
         , attnMaskTensor(attnMaskAttributes != nullptr
                              ? std::make_optional(unpackTensorAttributes(*attnMaskAttributes))
                              : std::nullopt)
@@ -60,7 +64,9 @@ struct SdpaBwdParams
     hipdnn_flatbuffers_sdk::data_objects::TensorAttributesT dkTensor;
     hipdnn_flatbuffers_sdk::data_objects::TensorAttributesT dvTensor;
     std::optional<float> attnScaleValue;
-    bool causalMask;
+    int64_t leftBound;
+    int64_t rightBound;
+    bool topLeftAlignment;
     std::optional<hipdnn_flatbuffers_sdk::data_objects::TensorAttributesT> attnMaskTensor;
 };
 
@@ -132,7 +138,9 @@ public:
                                                        _params.attnScaleValue,
                                                        shallowStatsTensor.get(),
                                                        shallowAttnMaskTensor.get(),
-                                                       _params.causalMask);
+                                                       _params.leftBound,
+                                                       _params.rightBound,
+                                                       _params.topLeftAlignment);
     }
 
 private:
@@ -190,12 +198,6 @@ public:
         CHECK_TENSOR_TYPE(tensorMap, nodeAttributes->dk_tensor_uid(), DKDataTypeEnum);
         CHECK_TENSOR_TYPE(tensorMap, nodeAttributes->dv_tensor_uid(), DVDataTypeEnum);
 
-        // Unsupported mask modes
-        if(nodeAttributes->causal_mask_bottom_right())
-        {
-            return false;
-        }
-
         // Unsupported: variable sequence lengths
         if(nodeAttributes->seq_len_q_tensor_uid().has_value()
            || nodeAttributes->seq_len_kv_tensor_uid().has_value())
@@ -238,6 +240,9 @@ public:
                                       ? tensorMap.at(nodeAttributes->attn_mask_tensor_uid().value())
                                       : nullptr;
 
+        auto [leftBound, rightBound, isTopLeft]
+            = extractDiagonalBandParams(*nodeAttributes, "SdpaBwdPlan");
+
         SdpaBwdParams params(*tensorMap.at(nodeAttributes->q_tensor_uid()),
                              *tensorMap.at(nodeAttributes->k_tensor_uid()),
                              *tensorMap.at(nodeAttributes->v_tensor_uid()),
@@ -248,7 +253,9 @@ public:
                              *tensorMap.at(nodeAttributes->dk_tensor_uid()),
                              *tensorMap.at(nodeAttributes->dv_tensor_uid()),
                              attnScaleValue,
-                             nodeAttributes->causal_mask(),
+                             leftBound,
+                             rightBound,
+                             isTopLeft,
                              attnMaskPtr);
 
         return std::make_unique<SdpaBwdPlan<QDataType,

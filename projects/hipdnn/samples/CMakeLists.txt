@@ -66,6 +66,26 @@ macro(add_hipdnn_sample NAME SOURCE)
     list(APPEND HIPDNN_ALL_SAMPLES ${NAME})
 endmacro()
 
+# Dynamic backend-loading sample. Links ONLY hipdnn_frontend_dynamic --
+# deliberately NOT hipdnn_test_sdk, which links the direct hipdnn_frontend and
+# would pull libhipdnn_backend back onto the link line.
+add_executable(hipdnn_sample_dynamic_backend_loading dynamic/DynamicBackendLoading.cpp)
+target_link_libraries(hipdnn_sample_dynamic_backend_loading
+    PRIVATE Threads::Threads hipdnn_frontend_dynamic)
+target_compile_options(hipdnn_sample_dynamic_backend_loading PRIVATE ${HIPDNN_SAMPLE_NO_RTTI_OPTIONS})
+set_target_properties(hipdnn_sample_dynamic_backend_loading PROPERTIES
+    RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/${CMAKE_INSTALL_BINDIR}"
+)
+# The dynamic sample does not link libhipdnn_backend. In build trees, point its
+# runtime search path at the backend target directory. In installed Linux/ELF
+# layouts, keep the search relative from bin/ to lib/.
+set_target_properties(hipdnn_sample_dynamic_backend_loading PROPERTIES
+    INSTALL_RPATH "$ORIGIN/../${CMAKE_INSTALL_LIBDIR}"
+    BUILD_RPATH "$<TARGET_FILE_DIR:hipdnn_backend>"
+)
+clang_tidy_check(hipdnn_sample_dynamic_backend_loading)
+list(APPEND HIPDNN_ALL_SAMPLES hipdnn_sample_dynamic_backend_loading)
+
 add_hipdnn_sample(hipdnn_sample_bn_inference batchnorm/BnInference.cpp)
 add_hipdnn_sample(hipdnn_sample_bn_inference_with_variance batchnorm/BnInferenceWithVariance.cpp)
 add_hipdnn_sample(hipdnn_sample_bn_training batchnorm/BnTraining.cpp)
@@ -89,6 +109,8 @@ endif()
 add_hipdnn_sample(hipdnn_sample_serialization_roundtrip serialization/SerializationRoundTrip.cpp)
 
 add_hipdnn_sample(hipdnn_sample_knobs_usage knobs/KnobsUsage.cpp)
+
+add_hipdnn_sample(hipdnn_sample_autotune autotune/AutotuneSample.cpp)
 
 # Enable testing and add sample tests
 enable_testing()
@@ -156,6 +178,12 @@ add_hipdnn_sample_test(hipdnn_sample_serialization_roundtrip)
 # Note: knobs_usage is informational/educational, not validation
 install(TARGETS hipdnn_sample_knobs_usage RUNTIME DESTINATION ${CMAKE_INSTALL_BINDIR})
 
+# Register dynamic backend-loading sample
+add_hipdnn_sample_test(hipdnn_sample_dynamic_backend_loading)
+
+# Register autotune sample
+add_hipdnn_sample_test(hipdnn_sample_autotune)
+
 # Umbrella target for superbuild dependency tracking
 add_custom_target(hipdnn_samples COMMENT "Building all hipDNN samples" DEPENDS ${HIPDNN_ALL_SAMPLES})
 
@@ -218,6 +246,10 @@ if(ROCM_LIBS_SUPERBUILD)
     # can use find_package() as intended for standalone builds.
     set(EXAMPLE_PLUGIN_HIPDNN_STAGING_DIR "${CMAKE_BINARY_DIR}/hipdnn-staging")
 
+    # Clear the staging prefix at the start of every configure to ensure the most
+    # recent selected dependencies are used.
+    file(REMOVE_RECURSE "${EXAMPLE_PLUGIN_HIPDNN_STAGING_DIR}")
+
     # Custom target to install hipdnn to staging directory for the example plugin project.
     # Only install Runtime and Development components - skip test binaries which may not be built.
     # This only runs when example_engine_plugin is built (due to DEPENDS).
@@ -237,7 +269,24 @@ if(ROCM_LIBS_SUPERBUILD)
         COMMENT "Installing hipDNN to staging directory for example_engine_plugin"
     )
 
+    # Stage the workspace's fetched nlohmann_json only when it was FETCHED.
+    include(FetchContent)
+    FetchContent_GetProperties(nlohmann_json)
+    string(FIND "${nlohmann_json_DIR}" "${CMAKE_BINARY_DIR}" _nlohmann_fetched_in_build_tree)
+    if(nlohmann_json_DIR AND _nlohmann_fetched_in_build_tree EQUAL 0)
+        add_custom_command(
+            TARGET example_plugin_hipdnn-staging-install
+            POST_BUILD
+            COMMAND ${CMAKE_COMMAND}
+                    -DBUILD_DIR=${nlohmann_json_BINARY_DIR}
+                    -DPREFIX=${EXAMPLE_PLUGIN_HIPDNN_STAGING_DIR}
+                    -P ${CMAKE_CURRENT_SOURCE_DIR}/../cmake/scripts/quiet_install.cmake
+            COMMENT "Staging fetched nlohmann_json for example_engine_plugin"
+        )
+    endif()
+
     list(PREPEND _example_plugin_prefix_path "${EXAMPLE_PLUGIN_HIPDNN_STAGING_DIR}/${CMAKE_INSTALL_LIBDIR}/cmake")
+    list(PREPEND _example_plugin_prefix_path "${EXAMPLE_PLUGIN_HIPDNN_STAGING_DIR}")
     list(APPEND _example_plugin_depends example_plugin_hipdnn-staging-install)
 endif()
 
@@ -259,12 +308,13 @@ ExternalProject_Add(example_engine_plugin
         "-Dhip_DIR:PATH=${hip_DIR}"
         "-Dhiprtc_DIR:PATH=${hiprtc_DIR}"
         "-Dflatbuffers_DIR:PATH=${flatbuffers_DIR}"
-        "-Dnlohmann_json_DIR:PATH=${nlohmann_json_DIR}"
         "-DBUILD_ADDRESS_SANITIZER:BOOL=${BUILD_ADDRESS_SANITIZER}"
         "-DTEST_ENVIRONMENT:STRING=${TEST_ENVIRONMENT}"
         "-DEXAMPLEPROVIDER_ENABLE_CLANG_TIDY:BOOL=${EXAMPLEPROVIDER_ENABLE_CLANG_TIDY}"
         ${EXAMPLE_ENGINE_PLUGIN_CLANG_TIDY_CACHE_ARGS}
     CMAKE_ARGS
+        # Clear any cached nlohmann_json_DIR so find_package re-resolves it.
+        "-Unlohmann_json_DIR"
         ${EXAMPLE_ENGINE_PLUGIN_CLANG_TIDY_CMAKE_ARGS}
     DEPENDS ${_example_plugin_depends}
     INSTALL_COMMAND ""

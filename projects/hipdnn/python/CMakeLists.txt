@@ -10,6 +10,18 @@ endif()
 
 set(CMAKE_POSITION_INDEPENDENT_CODE ON)
 
+# Runtime __version__ is the frontend component version (frontend/version.json).
+# SKBUILD wheel builds are standalone (no umbrella CMake defines it), so fall back
+# to a literal kept in sync with frontend/version.json and pyproject.toml.
+if(NOT DEFINED HIPDNN_FRONTEND_VERSION)
+    set(HIPDNN_FRONTEND_VERSION "0.2.0")
+endif()
+configure_file(
+    "${CMAKE_CURRENT_SOURCE_DIR}/hipdnn_frontend/__init__.py.in"
+    "${CMAKE_CURRENT_BINARY_DIR}/hipdnn_frontend/__init__.py"
+    @ONLY
+)
+
 find_package(Python 3.12
     REQUIRED COMPONENTS Interpreter Development.Module Development.SABIModule)
 
@@ -69,8 +81,10 @@ target_link_libraries(
 # Co-locate the extension with libhipdnn_backend so a bare dlopen of the module
 # (e.g. rocm-sdk's testSharedLibrariesLoad) resolves the backend as a sibling:
 # $ORIGIN on Linux, the module's own directory on Windows. The backend installs
-# to lib/ (Linux) / bin/ (Windows); CMake routes the MODULE artifact to the same
-# place (LIBRARY on Linux, RUNTIME on Windows).
+# to lib/ (Linux) / bin/ (Windows). A MODULE library is classified as a LIBRARY
+# artifact on every platform (including Windows), so its install location is
+# governed solely by LIBRARY DESTINATION; route it to bin/ on Windows so it lands
+# next to the backend DLL.
 set_target_properties(
     hipdnn_frontend_python
     PROPERTIES
@@ -79,7 +93,7 @@ set_target_properties(
 
 if(DEFINED SKBUILD)
     install(TARGETS hipdnn_frontend_python DESTINATION hipdnn_frontend)
-    install(FILES "${CMAKE_CURRENT_SOURCE_DIR}/hipdnn_frontend/__init__.py"
+    install(FILES "${CMAKE_CURRENT_BINARY_DIR}/hipdnn_frontend/__init__.py"
             DESTINATION hipdnn_frontend)
 else()
     # The ext stays bare in LIBDIR/BINDIR as a libhipdnn_backend sibling so a
@@ -87,10 +101,13 @@ else()
     # (__init__.py) and its tests live under LIBDIR/python; `import
     # hipdnn_frontend` then loads the ext via its top-level name with LIBDIR on
     # PYTHONPATH.
+    # NOTE: Nanobind on Windows produces a .pyd - It is classified as
+    # a LIBRARY modules instead of a RUNTIME module. dlls are classified as RUNTIME.
+    # So the .pyd was incorrectly landing in the lib directory instead of the bin directory on Windows.
+    # we need this CMake $<IF:$<PLATFORM_ID:Windows>> magic to make it land in the correct directory.
     install(TARGETS hipdnn_frontend_python
-            LIBRARY DESTINATION ${CMAKE_INSTALL_LIBDIR}
-            RUNTIME DESTINATION ${CMAKE_INSTALL_BINDIR})
-    install(FILES "${CMAKE_CURRENT_SOURCE_DIR}/hipdnn_frontend/__init__.py"
+            LIBRARY DESTINATION $<IF:$<PLATFORM_ID:Windows>,${CMAKE_INSTALL_BINDIR},${CMAKE_INSTALL_LIBDIR}>)
+    install(FILES "${CMAKE_CURRENT_BINARY_DIR}/hipdnn_frontend/__init__.py"
             DESTINATION "${CMAKE_INSTALL_LIBDIR}/python/hipdnn_frontend")
     install(DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}/hipdnn_frontend/test/"
             DESTINATION "${CMAKE_INSTALL_LIBDIR}/python/tests"

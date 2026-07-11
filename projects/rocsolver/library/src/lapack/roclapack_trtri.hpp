@@ -250,9 +250,7 @@ void trti2(rocblas_handle handle,
     rocblas_stride stdw = rocblas_stride(n);
 
     // everything must be executed with scalars on the device
-    rocblas_pointer_mode old_mode;
-    rocblas_get_pointer_mode(handle, &old_mode);
-    rocblas_set_pointer_mode(handle, rocblas_pointer_mode_device);
+    rocblas_pointer_mode_saver saver(handle, rocblas_pointer_mode_device);
 
     // inverse of the diagonal (reciprocals)
     rocblas_int blocks = (n - 1) / 32 + 1;
@@ -283,8 +281,6 @@ void trti2(rocblas_handle handle,
                                 shiftA + idx2D(j + 1, j, lda), 1, strideA, batch_count);
         }
     }
-
-    rocblas_set_pointer_mode(handle, old_mode);
 }
 
 template <bool BATCHED, bool STRIDED, typename T, typename U>
@@ -327,9 +323,7 @@ rocblas_status rocsolver_trtri_template(rocblas_handle handle,
         return rocblas_status_success;
 
     // everything must be executed with scalars on the host
-    rocblas_pointer_mode old_mode;
-    rocblas_get_pointer_mode(handle, &old_mode);
-    rocblas_set_pointer_mode(handle, rocblas_pointer_mode_host);
+    rocblas_pointer_mode_saver saver(handle, rocblas_pointer_mode_host);
     T one = 1;
     T minone = -1;
 
@@ -430,7 +424,6 @@ rocblas_status rocsolver_trtri_template(rocblas_handle handle,
                                 info_mask(info));
     }
 
-    rocblas_set_pointer_mode(handle, old_mode);
     return rocblas_status_success;
 }
 

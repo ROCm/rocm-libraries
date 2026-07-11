@@ -9,7 +9,6 @@ GlobalParameters:
   NumElementsToValidate: -1
   DataInitTypeAlpha: 1
   DataInitTypeBeta: 1
-  NewClient: 2
   CSVExportWinner: true
   CSVMergeSameProblemID: true
   Device: 0
