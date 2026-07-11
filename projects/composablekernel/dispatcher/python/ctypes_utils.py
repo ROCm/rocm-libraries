@@ -176,6 +176,18 @@ def get_arch_filter_data() -> Dict[str, Any]:
                 "gfx942": [[1, 4, 1], [2, 2, 1], [4, 1, 1]],
                 "gfx90a": [[1, 4, 1], [2, 2, 1], [4, 1, 1]],
             },
+            # NOTE (N1, latent parity risk): this table keys the accumulator as
+            # ``fp16_fp16_fp16`` and lists only [[16,16,16],[32,32,16]], whereas
+            # the codegen arch_filter (dispatcher/codegen/arch_filter.py) keys
+            # fp16 GEMMs as ``fp16_fp16_fp32`` and additionally permits
+            # [32,32,8], [16,16,32], [4,64,16], [64,4,16]. Because this validator
+            # runs *before* codegen in expand_sweep, it silently NARROWS the
+            # accepted fp16 warp tiles to the intersection ([16,16,16],[32,32,16])
+            # -- a bridge-wide (not multi_abd-specific) parity gap that can drop
+            # otherwise-valid Old-TE tiles. Left as-is here (the broad fix belongs
+            # with the shared bridge validator); tracked so it is not mistaken for
+            # a multi_abd regression. The multi_abd CI/default tiles all live in
+            # the intersection, so they are unaffected.
             "warp_tile_combos": {
                 "gfx942": {"fp16_fp16_fp16": [[16, 16, 16], [32, 32, 16]]},
                 "gfx90a": {"fp16_fp16_fp16": [[16, 16, 16], [32, 32, 16]]},

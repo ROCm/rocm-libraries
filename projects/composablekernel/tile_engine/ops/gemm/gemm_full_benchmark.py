@@ -179,10 +179,19 @@ def _run_batch_on_device(device_id, unit, args, worker_path, base_env):
     prob_idx, prob_dict, batch = unit
     M, N, K = prob_dict["M"], prob_dict["N"], prob_dict["K"]
 
-    items = [
-        {"so_path": str(lib), "problem": prob_dict, "kernel_name": cfg.name}
-        for _, cfg, lib in batch
-    ]
+    def _item(cfg, lib):
+        it = {"so_path": str(lib), "problem": prob_dict, "kernel_name": cfg.name}
+        # N2: carry the multi_abd layout + per-group element-wise ops from the
+        # config object so the worker's numpy reference uses the real ops/layout
+        # instead of parsing (and defaulting) the kernel name.
+        if getattr(cfg, "variant", "standard") == "multi_abd":
+            it["layout4"] = cfg.layout4
+            it["a_elementwise_op"] = cfg.a_elementwise_op
+            it["b_elementwise_op"] = cfg.b_elementwise_op
+            it["cde_elementwise_op"] = cfg.cde_elementwise_op
+        return it
+
+    items = [_item(cfg, lib) for _, cfg, lib in batch]
     payload = json.dumps(
         {"items": items, "verify": args.verify, "verify_tol": args.verify_tol}
     )
@@ -311,6 +320,23 @@ def main():
         choices=SUPPORTED_LAYOUTS,
         help=f"A/B/C layout (supported: {', '.join(SUPPORTED_LAYOUTS)})",
     )
+    # Multi-ABD only: per-group element-wise ops + tensor counts. These override
+    # (are merged into) any multi_abd_config block in the config JSON so a single
+    # non-PassThrough kernel can be driven + verified without editing configs.
+    # Valid ops mirror the Old-TE gemm_multi_abd instance builder.
+    _MABD_OPS = ("PassThrough", "AddScale", "MultiDMultiply", "MultiDAdd")
+    parser.add_argument("--multi-abd-num-a", type=int, default=None,
+                        help="multi_abd: number of A tensors (default: config/2)")
+    parser.add_argument("--multi-abd-num-b", type=int, default=None,
+                        help="multi_abd: number of B tensors (default: config/2)")
+    parser.add_argument("--multi-abd-num-d", type=int, default=None,
+                        help="multi_abd: number of D tensors (default: config/2)")
+    parser.add_argument("--multi-abd-a-op", default=None, choices=_MABD_OPS,
+                        help="multi_abd: A element-wise op (default: config/PassThrough)")
+    parser.add_argument("--multi-abd-b-op", default=None, choices=_MABD_OPS,
+                        help="multi_abd: B element-wise op (default: config/PassThrough)")
+    parser.add_argument("--multi-abd-cde-op", default=None, choices=_MABD_OPS,
+                        help="multi_abd: CDE element-wise op (default: config/PassThrough)")
     parser.add_argument("--problems", default=None, help="JSON file of M,N,K problems")
     parser.add_argument("--csv", type=str, default="gemm_results.csv")
     parser.add_argument("--workers", type=int, default=8, help="Parallel build workers")
@@ -366,6 +392,24 @@ def main():
     if bridge_variant == "multi_abd" and len(sweep_layout) == 3:
         sweep_layout = sweep_layout + sweep_layout[2]
 
+    # Multi-ABD element-wise ops / tensor counts: CLI overrides win over the
+    # config; otherwise expand_sweep falls back to any multi_abd_config block in
+    # the JSON and finally to the Old-TE 2/2/2 all-PassThrough default.
+    mabd_kwargs = {}
+    if bridge_variant == "multi_abd":
+        if args.multi_abd_num_a is not None:
+            mabd_kwargs["num_a_tensors"] = args.multi_abd_num_a
+        if args.multi_abd_num_b is not None:
+            mabd_kwargs["num_b_tensors"] = args.multi_abd_num_b
+        if args.multi_abd_num_d is not None:
+            mabd_kwargs["num_d_tensors"] = args.multi_abd_num_d
+        if args.multi_abd_a_op is not None:
+            mabd_kwargs["a_elementwise_op"] = args.multi_abd_a_op
+        if args.multi_abd_b_op is not None:
+            mabd_kwargs["b_elementwise_op"] = args.multi_abd_b_op
+        if args.multi_abd_cde_op is not None:
+            mabd_kwargs["cde_elementwise_op"] = args.multi_abd_cde_op
+
     all_configs = []
     for cfg_path in config_paths:
         all_configs.extend(
@@ -375,6 +419,8 @@ def main():
                 dtype=args.dtype,
                 layout=sweep_layout,
                 variant=bridge_variant,
+                mabd_cli_overrides=(mabd_kwargs or None),
+                **mabd_kwargs,
             )
         )
 

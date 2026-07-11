@@ -314,6 +314,11 @@ class GemmResult:
     status: int
     tflops: float
     kernel_name: str
+    # Optional numeric-verification metric: global relative error of the kernel
+    # output vs a numpy reference (max|out-ref|/max|ref|). None when the runner
+    # did not compute a reference. Multi-ABD populates this in-runner because it
+    # generates its own A/B/D operands internally (see GpuMultiABDRunner.run).
+    max_rel: Optional[float] = None
 
     @property
     def success(self) -> bool:
@@ -755,6 +760,10 @@ class MultiABDDispatcherLib:
         elem_b: int,
         elem_d: int,
         elem_e: int,
+        stride_as: Optional[List[int]] = None,
+        stride_bs: Optional[List[int]] = None,
+        stride_ds: Optional[List[int]] = None,
+        stride_e: int = 0,
     ) -> Tuple[int, float]:
         def _ptr_array(arrays):
             arr = (ctypes.c_void_p * max(len(arrays), 1))()
@@ -762,21 +771,35 @@ class MultiABDDispatcherLib:
                 arr[i] = a.ctypes.data_as(ctypes.c_void_p)
             return arr
 
+        def _i64_array(vals):
+            # The GemmMultiABDKernel does NOT derive strides from a 0 sentinel
+            # (unlike some CK host helpers); it passes them straight to the
+            # UniversalGemm kernel args. We must therefore supply the explicit
+            # leading strides (see GpuMultiABDRunner.run, which mirrors the
+            # Old-TE profiler's get_default_stride).
+            if not vals:
+                return ctypes.POINTER(ctypes.c_int64)()
+            arr = (ctypes.c_int64 * len(vals))()
+            for i, v in enumerate(vals):
+                arr[i] = int(v)
+            return arr
+
         as_ptrs = _ptr_array(as_arrays)
         bs_ptrs = _ptr_array(bs_arrays)
         ds_ptrs = _ptr_array(ds_arrays)
-        # Strides <= 0 tell the kernel to use its default layout-derived stride.
-        null_i64 = ctypes.POINTER(ctypes.c_int64)()
+        stride_as_arr = _i64_array(stride_as)
+        stride_bs_arr = _i64_array(stride_bs)
+        stride_ds_arr = _i64_array(stride_ds)
         time_ms = ctypes.c_float(0.0)
         status = self._lib.dispatcher_run_multi_abd(
             as_ptrs,
             bs_ptrs,
             ds_ptrs,
             e_array.ctypes.data_as(ctypes.c_void_p),
-            null_i64,
-            null_i64,
-            null_i64,
-            0,
+            stride_as_arr,
+            stride_bs_arr,
+            stride_ds_arr,
+            int(stride_e),
             elem_a,
             elem_b,
             elem_d,
@@ -795,6 +818,72 @@ class MultiABDDispatcherLib:
         self._lib.dispatcher_cleanup()
 
 
+# Multi-ABD per-group element-wise CDE ops, as numpy reductions over
+# (acc, D0, D1, ...). These mirror ck_tile::element_wise (see
+# unary_element_wise_operation.hpp) EXACTLY so the numpy reference matches the
+# device epilogue:
+#   PassThrough    : E = C                       (D tensors ignored)
+#   MultiDAdd      : E = C + D0 + D1 + ...
+#   MultiDMultiply : E = C * D0 * D1 * ...
+#   AddScale       : E = scale * (C + D0 + D1 + ...)   (default scale = 1.0;
+#                    note AddScale folds *all* its arguments including C, so C
+#                    participates in the sum -- see struct AddScale)
+def _cde_reference(op: str, acc: np.ndarray, ds: List[np.ndarray]) -> np.ndarray:
+    """Apply the CDE element-wise op to the fp32 accumulator + D tensors."""
+    acc = acc.astype(np.float32)
+    ds32 = [d.astype(np.float32) for d in ds]
+    if op == "PassThrough":
+        return acc
+    if op == "MultiDAdd":
+        out = acc.copy()
+        for d in ds32:
+            out = out + d
+        return out
+    if op == "MultiDMultiply":
+        out = acc.copy()
+        for d in ds32:
+            out = out * d
+        return out
+    if op == "AddScale":
+        # AddScale starts at 0 and folds every argument (C included).
+        out = acc.copy()
+        for d in ds32:
+            out = out + d
+        return out  # scale defaults to 1.0
+    raise ValueError(f"Unsupported CDE element-wise op for reference: {op}")
+
+
+def _ab_reference(op: str, group: List[np.ndarray]) -> np.ndarray:
+    """Combine a group of A (or B) tensors into a single matrix via the op.
+
+    Mirrors reference_gemm_multiple_abd's A/B pre-pass, which applies the group
+    element-wise op across the tuple of tensors element-by-element:
+      PassThrough    : first tensor only (op(y, x0, x1...) assigns y = x0)
+      MultiDAdd      : sum of all tensors
+      MultiDMultiply : product of all tensors
+      AddScale       : scale * sum of all tensors (scale defaults to 1.0)
+    """
+    g32 = [t.astype(np.float32) for t in group]
+    if op == "PassThrough":
+        return g32[0]
+    if op == "MultiDAdd":
+        out = g32[0].copy()
+        for t in g32[1:]:
+            out = out + t
+        return out
+    if op == "AddScale":
+        out = np.zeros_like(g32[0])
+        for t in g32:
+            out = out + t
+        return out  # scale defaults to 1.0
+    if op == "MultiDMultiply":
+        out = g32[0].copy()
+        for t in g32[1:]:
+            out = out * t
+        return out
+    raise ValueError(f"Unsupported A/B element-wise op for reference: {op}")
+
+
 class GpuMultiABDRunner:
     """High-level multi-ABD runner: construct from a .so, call run(problem).
 
@@ -802,47 +891,121 @@ class GpuMultiABDRunner:
     gemm_multi_abd op). The runner builds the host operand buffers in the
     kernel's element dtype + layout and hands raw pointer arrays to the .so,
     which owns GPU memory. fp16 is the only supported multi-abd dtype.
+
+    Numeric verification (B1): the runner generates all A/B/D operands itself,
+    so it also owns the numpy reference. When ``verify`` is set on ``run`` it
+    computes ``E = CDE( AB(As) @ BB(Bs), {Ds} )`` -- byte-for-byte mirroring
+    ck_tile::reference_gemm_multiple_abd (A/B groups combined element-wise via
+    their ops into one matrix, single GEMM, then the CDE op folds the D tensors)
+    -- and reports max_rel = max|E_gpu - E_ref| / max|E_ref| on the result.
+
+    Layout and per-group element-wise ops / tensor counts are taken from the
+    supplied config object when available (N2); the kernel name is used only as
+    a fallback so the runner never silently guesses a wrong layout.
     """
 
-    def __init__(self, lib_path: Path):
+    def __init__(
+        self,
+        lib_path: Path,
+        layout4: Optional[str] = None,
+        a_elementwise_op: Optional[str] = None,
+        b_elementwise_op: Optional[str] = None,
+        cde_elementwise_op: Optional[str] = None,
+    ):
         self.lib = MultiABDDispatcherLib(lib_path)
         if not self.lib.initialize():
             raise RuntimeError(f"Failed to initialize multi_abd .so: {lib_path}")
         self._kernel_name = self.lib.kernel_name
         self._num_a, self._num_b, self._num_d = self.lib.tensor_counts
 
+        # N2: prefer the layout / ops derived from the config object. Only fall
+        # back to parsing the kernel name (which is deterministic from config)
+        # when the caller did not supply them -- no silent "rcrr" default.
+        self._layout4 = layout4 or self._parse_layout4()
+        a_op, b_op, cde_op = self._parse_ops()
+        self._a_op = a_elementwise_op or a_op
+        self._b_op = b_elementwise_op or b_op
+        self._cde_op = cde_elementwise_op or cde_op
+
     @property
     def kernel_name(self) -> str:
         return self._kernel_name
 
-    def run(self, problem: GemmProblem, seed: int = 0) -> GemmResult:
+    def _parse_layout4(self) -> str:
+        """Fallback: 4-char (A,B,E,D) layout from ``gemm_<dtype>_<layout>_...``."""
+        parts = self._kernel_name.split("_")
+        if len(parts) > 2 and len(parts[2]) == 4 and set(parts[2]) <= {"r", "c"}:
+            return parts[2]
+        raise ValueError(
+            f"Cannot derive multi_abd layout from kernel name {self._kernel_name!r}; "
+            "pass layout4 from the config object instead"
+        )
+
+    def _parse_ops(self) -> Tuple[str, str, str]:
+        """Fallback: parse the three element-wise ops from the kernel name.
+
+        Name suffix is ``..._multiabd_a<NA>_b<NB>_d<ND>_<Aop>_<Bop>_<CDEop>``.
+        """
+        marker = "_multiabd_"
+        idx = self._kernel_name.find(marker)
+        if idx >= 0:
+            tail = self._kernel_name[idx + len(marker) :].split("_")
+            # tail == [aNA, bNB, dND, Aop, Bop, CDEop]
+            if len(tail) >= 6:
+                return tail[3], tail[4], tail[5]
+        return "PassThrough", "PassThrough", "PassThrough"
+
+    def run(
+        self,
+        problem: GemmProblem,
+        seed: int = 0,
+        verify: bool = False,
+        verify_tol: float = 2e-2,
+    ) -> GemmResult:
         M, N, K = problem.M, problem.N, problem.K
         dtype = _dtype_from_kernel_name(self._kernel_name)
-        # Kernel name for multi_abd is gemm_<dtype>_<4char-layout>_...; take the
-        # A/B/D layout chars (E is the C position, index 2).
-        parts = self._kernel_name.split("_")
-        layout4 = parts[2] if len(parts) > 2 else "rcrr"
+        layout4 = self._layout4
         la, lb = layout4[0], layout4[1]
         ld = layout4[3] if len(layout4) >= 4 else "r"
 
         rng = np.random.default_rng(seed)
 
+        # Logical (row-major, M-major) operands used for the numpy reference, and
+        # the physically-laid-out contiguous buffers handed to the .so. The .so
+        # interprets each buffer per the compiled layout, so a column-major
+        # operand is stored transposed but represents the same logical matrix.
         def _mk(rows, cols, layout_char, n_tensors, lo, hi):
-            outs = []
+            logical, physical = [], []
             for _ in range(n_tensors):
                 x = rng.uniform(lo, hi, size=(rows, cols)).astype(np.float32)
-                x_lay = x if layout_char == "r" else x.T
-                if dtype == "fp16":
-                    outs.append(np.ascontiguousarray(x_lay, dtype=np.float16))
-                else:
+                if dtype != "fp16":
                     raise ValueError(f"multi_abd runner supports fp16 only, got {dtype}")
-            return outs
+                x16 = x.astype(np.float16)
+                logical.append(x16)
+                x_lay = x16 if layout_char == "r" else x16.T
+                physical.append(np.ascontiguousarray(x_lay, dtype=np.float16))
+            return logical, physical
 
-        as_arrays = _mk(M, K, la, self._num_a, -5.0, 5.0)
-        bs_arrays = _mk(K, N, lb, self._num_b, -5.0, 5.0)
-        ds_arrays = _mk(M, N, ld, self._num_d, -1.0, 1.0)
+        as_logical, as_arrays = _mk(M, K, la, self._num_a, -5.0, 5.0)
+        bs_logical, bs_arrays = _mk(K, N, lb, self._num_b, -5.0, 5.0)
+        ds_logical, ds_arrays = _mk(M, N, ld, self._num_d, -1.0, 1.0)
         elem = _ELEM_BYTES.get(dtype, 2)
         e_array = np.zeros((M, N), dtype=np.float16)
+
+        # Explicit leading strides -- the GemmMultiABDKernel does NOT derive them
+        # from a zero sentinel (it forwards them straight to the UniversalGemm
+        # kernel args), so a 0 stride collapses the whole output onto row 0.
+        # Mirror the Old-TE profiler's get_default_stride(rows, cols, is_row):
+        # row-major -> #cols, col-major -> #rows.
+        def _lead_stride(rows, cols, layout_char):
+            return cols if layout_char == "r" else rows
+
+        stride_as = [_lead_stride(M, K, la)] * self._num_a
+        stride_bs = [_lead_stride(K, N, lb)] * self._num_b
+        stride_ds = [_lead_stride(M, N, ld)] * self._num_d
+        # E is the C position (index 2) of the 4-char layout.
+        le = layout4[2] if len(layout4) >= 3 else "r"
+        stride_e = _lead_stride(M, N, le)
 
         status, time_ms = self.lib.run(
             as_arrays,
@@ -856,14 +1019,33 @@ class GpuMultiABDRunner:
             elem,
             elem,
             elem,
+            stride_as=stride_as,
+            stride_bs=stride_bs,
+            stride_ds=stride_ds,
+            stride_e=stride_e,
         )
         tflops = (problem.flops / (time_ms * 1e-3)) / 1e12 if time_ms > 0 else 0.0
+
+        max_rel = None
+        if verify and status == 0:
+            # A/B groups are combined element-wise into a single matrix, then a
+            # single GEMM, then the CDE op folds the D tensors -- exactly
+            # reference_gemm_multiple_abd. Compute in fp32.
+            a_m_k = _ab_reference(self._a_op, as_logical)
+            b_k_n = _ab_reference(self._b_op, bs_logical)
+            acc = a_m_k @ b_k_n
+            ref = _cde_reference(self._cde_op, acc, ds_logical).astype(np.float32)
+            got = e_array.astype(np.float32)
+            denom = float(np.max(np.abs(ref))) or 1.0
+            max_rel = float(np.max(np.abs(got - ref)) / denom)
+
         return GemmResult(
             output=e_array,
             time_ms=time_ms,
             status=status,
             tflops=tflops,
             kernel_name=self._kernel_name,
+            max_rel=max_rel,
         )
 
 
@@ -963,6 +1145,11 @@ def _build_compile_jobs(
     static_lib = build_dir / "libck_tile_dispatcher.a"
 
     lib_path = build_dir / "examples" / f"lib{config.name}.so"
+    # Multi-ABD is self-contained (registry-bypass, no static lib) so it can be
+    # built without a prior full CMake configure of the dispatcher; that CMake
+    # step is what normally creates build/examples. Ensure the output directory
+    # exists so the hipcc -o path is always writable (harmless if it already is).
+    lib_path.parent.mkdir(parents=True, exist_ok=True)
     obj_file = lib_path.with_suffix(".o")
 
     compile_cmd = [
@@ -1193,6 +1380,7 @@ def expand_sweep(
     a_elementwise_op: str = "PassThrough",
     b_elementwise_op: str = "PassThrough",
     cde_elementwise_op: str = "PassThrough",
+    mabd_cli_overrides: Optional[Dict[str, Any]] = None,
 ) -> List[GemmKernelConfig]:
     """Expand a Tile Engine GEMM JSON sweep config into GemmKernelConfig list.
 
@@ -1237,6 +1425,56 @@ def expand_sweep(
     # Multi-ABD carries a 4th (D) layout char; default D to C's layout otherwise.
     ld = layout[3] if (variant == "multi_abd" and len(layout) >= 4) else lc
 
+    # Multi-ABD (B2): the tensor counts and per-group element-wise ops are a real
+    # part of the swept configuration -- distinct ops produce distinct kernels
+    # (different epilogue math). Read them from an optional ``multi_abd_config``
+    # block in the TE config JSON (lists of values), falling back to the scalar
+    # kwargs (which default to the Old-TE 2/2/2 all-PassThrough combo). This is
+    # what lets the driver actually generate + verify a non-PassThrough kernel.
+    #
+    # Allowed ops mirror the Old-TE gemm_multi_abd instance builder:
+    #   {PassThrough, AddScale, MultiDMultiply, MultiDAdd}.
+    if variant == "multi_abd":
+        mabd = dict(cfg.get("multi_abd_config", {}) or {})
+        # CLI overrides win over both the config block and the scalar defaults.
+        if mabd_cli_overrides:
+            mabd.update(mabd_cli_overrides)
+
+        def _as_list(v, default):
+            if v is None:
+                return list(default)
+            return list(v) if isinstance(v, (list, tuple)) else [v]
+
+        na_list = _as_list(mabd.get("num_a_tensors"), [num_a_tensors])
+        nb_list = _as_list(mabd.get("num_b_tensors"), [num_b_tensors])
+        nd_list = _as_list(mabd.get("num_d_tensors"), [num_d_tensors])
+        a_ops = _as_list(mabd.get("a_elementwise_op"), [a_elementwise_op])
+        b_ops = _as_list(mabd.get("b_elementwise_op"), [b_elementwise_op])
+        cde_ops = _as_list(mabd.get("cde_elementwise_op"), [cde_elementwise_op])
+        _ALLOWED_MABD_OPS = {"PassThrough", "AddScale", "MultiDMultiply", "MultiDAdd"}
+        for op in (*a_ops, *b_ops, *cde_ops):
+            if op not in _ALLOWED_MABD_OPS:
+                raise ValueError(
+                    f"Invalid multi_abd element-wise op {op!r}; "
+                    f"valid: {sorted(_ALLOWED_MABD_OPS)}"
+                )
+        mabd_combos = list(
+            itertools.product(na_list, nb_list, nd_list, a_ops, b_ops, cde_ops)
+        )
+    else:
+        # Non-multi_abd variants: a single, inert combo carrying the scalar
+        # kwargs (unused by those code paths' names).
+        mabd_combos = [
+            (
+                num_a_tensors,
+                num_b_tensors,
+                num_d_tensors,
+                a_elementwise_op,
+                b_elementwise_op,
+                cde_elementwise_op,
+            )
+        ]
+
     configs: List[GemmKernelConfig] = []
     seen: set = set()
     for (
@@ -1274,6 +1512,7 @@ def expand_sweep(
         pad_ks,
         persistents,
     ):
+      for (m_na, m_nb, m_nd, m_aop, m_bop, m_cdeop) in mabd_combos:
         c = GemmKernelConfig(
             dtype_a=dtype,
             dtype_b=dtype,
@@ -1300,12 +1539,12 @@ def expand_sweep(
             persistent=bool(persist),
             gfx_arch=arch,
             variant=variant,
-            num_a_tensors=num_a_tensors,
-            num_b_tensors=num_b_tensors,
-            num_d_tensors=num_d_tensors,
-            a_elementwise_op=a_elementwise_op,
-            b_elementwise_op=b_elementwise_op,
-            cde_elementwise_op=cde_elementwise_op,
+            num_a_tensors=m_na,
+            num_b_tensors=m_nb,
+            num_d_tensors=m_nd,
+            a_elementwise_op=m_aop,
+            b_elementwise_op=m_bop,
+            cde_elementwise_op=m_cdeop,
             layout_d=_LAYOUT_WORD[ld],
         )
         if c.name in seen:

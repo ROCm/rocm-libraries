@@ -43,13 +43,30 @@ def _is_multi_abd(kernel_name):
     return "_multiabd_" in (kernel_name or "")
 
 
-def _run_one(idx, so_path, prob_dict, kernel_name, verify=False, verify_tol=2e-2):
+def _run_one(
+    idx,
+    so_path,
+    prob_dict,
+    kernel_name,
+    verify=False,
+    verify_tol=2e-2,
+    layout4=None,
+    a_op=None,
+    b_op=None,
+    cde_op=None,
+):
     """Run a single kernel and emit its result as one JSON line.
 
     When ``verify`` is set, the kernel output is checked against an fp32 numpy
-    reference (``A @ B``) using the global relative metric
-    ``max|out - ref| / max|ref|``; the emitted ``verified`` field then reflects
-    correctness, not just liveness (``non_zero``).
+    reference using the global relative metric ``max|out - ref| / max|ref|``;
+    the emitted ``verified`` field then reflects correctness, not just liveness
+    (``non_zero``).
+
+    Standard path: reference is ``A @ B``. Multi-ABD path (B1): the reference is
+    the full ``E = CDE( AB(As) @ BB(Bs), {Ds} )`` computed inside
+    GpuMultiABDRunner (it owns the operands); the runner returns ``max_rel`` on
+    the result. ``layout4`` and the per-group element-wise ops come from the
+    config object (N2) so the runner never guesses the layout from the name.
     """
     try:
         problem = GemmProblem.from_dict(prob_dict)
@@ -58,8 +75,17 @@ def _run_one(idx, so_path, prob_dict, kernel_name, verify=False, verify_tol=2e-2
         # generates its A/B/D operands internally (no shared A,B). Route by name.
         if _is_multi_abd(kernel_name):
             # CRITICAL: load the library ONLY inside this subprocess.
-            runner = GpuMultiABDRunner(lib_path=so_path)
-            result = runner.run(problem)
+            runner = GpuMultiABDRunner(
+                lib_path=so_path,
+                layout4=layout4,
+                a_elementwise_op=a_op,
+                b_elementwise_op=b_op,
+                cde_elementwise_op=cde_op,
+            )
+            # The multi_abd runner computes its own numpy reference (it owns the
+            # operands), so verification flows through the runner, not the A@B
+            # check below.
+            result = runner.run(problem, verify=verify, verify_tol=verify_tol)
             A = B = None
         else:
             # Cache host matrices per shape so batch mode doesn't regenerate huge
@@ -93,12 +119,15 @@ def _run_one(idx, so_path, prob_dict, kernel_name, verify=False, verify_tol=2e-2
                 "non_zero": non_zero,
                 "kernel": kernel_name,
             }
-            # Multi-ABD's reference is a multi-tensor sum with per-group element-
-            # wise ops whose operands the runner generates internally, so the
-            # simple A@B check does not apply; correctness for multi_abd is
-            # covered by the Old-TE profiler's own --verify path. Only run the
-            # numpy reference for the single-A/single-B standard path.
-            if verify and A is not None and B is not None:
+            if verify and _is_multi_abd(kernel_name):
+                # Multi-ABD verifies against its own full multi-tensor reference
+                # (E = CDE(AB(As) @ BB(Bs), {Ds})) computed inside the runner,
+                # exercising the BRIDGE launch path (dispatcher_run_multi_abd ->
+                # SelectedKernel::launch), not just the Old-TE --verify path.
+                if result.max_rel is not None:
+                    out["max_rel"] = result.max_rel
+                    out["verified"] = bool(result.max_rel <= verify_tol)
+            elif verify and A is not None and B is not None:
                 ref = A.astype(np.float32) @ B.astype(np.float32)
                 got = result.output.astype(np.float32)
                 denom = float(np.max(np.abs(ref))) or 1.0
@@ -151,6 +180,10 @@ def main():
                 item.get("kernel_name", "unknown"),
                 verify=verify,
                 verify_tol=verify_tol,
+                layout4=item.get("layout4"),
+                a_op=item.get("a_elementwise_op"),
+                b_op=item.get("b_elementwise_op"),
+                cde_op=item.get("cde_elementwise_op"),
             )
     else:
         _run_one(
@@ -160,6 +193,10 @@ def main():
             d.get("kernel_name", "unknown"),
             verify=verify,
             verify_tol=verify_tol,
+            layout4=d.get("layout4"),
+            a_op=d.get("a_elementwise_op"),
+            b_op=d.get("b_elementwise_op"),
+            cde_op=d.get("cde_elementwise_op"),
         )
 
 
