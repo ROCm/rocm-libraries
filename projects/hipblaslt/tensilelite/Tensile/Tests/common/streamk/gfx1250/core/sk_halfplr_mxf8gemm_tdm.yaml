@@ -1,0 +1,123 @@
+# Copyright Advanced Micro Devices, Inc., or its affiliates.
+# SPDX-License-Identifier: MIT
+#
+# Positive validation for HalfPLR on StreamK (SK3) with ScheduleIterAlg=4
+# (StinkyTofu) on gfx1250, MX-F8 (F8SS, MXBlock32) TN GEMM with TDM.
+#
+# This mirrors the non-StreamK HalfPLR MX-F8 coverage
+# (Tensile/Tests/common/gemm/gfx12/mxf8_gfx1250.yaml and tdm_split_gfx1250.yaml,
+# both HalfPLR + TDMInst=3 + MXF8 Block32) onto StreamK=3, intersected with the
+# StreamK+TDM+HalfPLR constraints: SIA=4 (required for HalfPLR on StreamK),
+# PrefetchAcrossPersistent=0, UseSubtileImpl=0, TDMInst=3, PGR in (1,2), PLR=1,
+# InnerUnroll=1, even MIWaveTile. Covers HalfPLR=1 (A), 2 (B), 3 (both) across
+# tile shapes MT64x64 .. MT256x256 (MIWaveTile 2x2, 4x4, 8x4, 8x8) as used by
+# the non-StreamK MX-F8 HalfPLR matrix.
+TestParameters:
+  marks: [skip-gfx900, skip-gfx906, skip-gfx908, skip-gfx90a, skip-gfx940, skip-gfx941, skip-gfx942, skip-gfx950, skip-gfx1010, skip-gfx1011, skip-gfx1012, skip-gfx1030, skip-gfx1100, skip-gfx1101, skip-gfx1102, skip-gfx1200, skip-gfx1201] # not supported by arch
+GlobalParameters:
+  SyncsPerBenchmark: 0
+  NumElementsToValidate: -1
+  BoundsCheck: 0
+  KernelTime: False
+  CpuThreads: 32
+  DataInitTypeA: 3
+  DataInitTypeB: 3
+  DataInitTypeD: 2
+  DataInitTypeMXSA: 3
+  DataInitTypeMXSB: 3
+  DataInitTypeAlpha: 1
+  DataInitTypeBeta: 1
+  PrintLevel: 2
+  PrintSolutionRejectionReason: True
+  ForceGenerateKernel: True
+
+BenchmarkProblems:
+  #######################################
+  # TN - MXF8SS Block32, StreamK + TDM + HalfPLR
+  #######################################
+  -
+    - # ProblemType, TN
+      OperationType: GEMM
+      DataType: F8
+      DestDataType: s
+      ComputeDataType: s
+      HighPrecisionAccumulate: True
+      TransposeA: True
+      TransposeB: False
+      UseBeta: True
+      Batched: True
+      Activation: True
+      SupportUserArgs: True
+      UseBias: 0
+      MXBlockA: 32
+      MXBlockB: 32
+      DataTypeMXSA: e8  # Block32 scale format, matches mxf8_gfx1250.yaml
+      DataTypeMXSB: e8
+
+    - # BenchmarkProblemSizeGroup - Standard
+      InitialSolutionParameters:
+      BenchmarkCommonParameters:
+        - KernelLanguage: ["Assembly"]
+      ForkParameters:
+        - UseSgprForGRO: [0]
+        - ForceDisableShadowInit: [true]
+        - MatrixInstruction:
+          # MT64x64, MT128x128, MT256x128. The non-StreamK MX-F8 HalfPLR matrix
+          # also exercises MIWaveTile [8,8] (MT256x256), but that tile cannot be
+          # mirrored onto StreamK: the baseline (HalfPLR=0) StreamK kernel at
+          # MT256x256 already overflows the VGPR file (total vgpr 1078 > 1024) and
+          # is rejected, and with HalfPLR it squeezes under the limit but produces
+          # incorrect results on K-tail problem sizes. MT256x128 ([8,4]) is the
+          # largest tile that both fits and validates under StreamK+HalfPLR.
+          - [16, 16, 128, 1,  1,  2, 2,  2, 2]
+          - [16, 16, 128, 1,  1,  4, 4,  2, 2]
+          - [16, 16, 128, 1,  1,  8, 4,  2, 2]
+        - HalfPLR: [1, 2, 3]
+        - InnerUnroll: [1]
+        - DepthU: [256]
+        - ClusterLocalRead: [0]
+        - TransposeLDS: [-1]
+        - LdsPadA: [-1]
+        - LdsPadB: [-1]
+        - LdsBlockSizePerPadA: [-1]
+        - LdsBlockSizePerPadB: [-1]
+        - LdsPadMXSA: [-1]
+        - LdsPadMXSB: [-1]
+        - LdsBlockSizePerPadMXSA: [-1]
+        - LdsBlockSizePerPadMXSB: [-1]
+        - LdsPadMetadata: [0]
+        - LDSTrInst: [False]
+        - TDMInst: [3]
+        - PrefetchGlobalRead: [1, 2]
+        - PrefetchLocalRead: [1]
+        - ScheduleIterAlg: [4]
+        - SourceSwap: [false]
+        - StoreRemapVectorWidth: [0]
+        - GlobalSplitU: [0]
+        - GlobalReadVectorWidthA: [-1]
+        - GlobalReadVectorWidthB: [-1]
+        - ExpandPointerSwap: [false]
+        - VectorWidthA: [-1]
+        - VectorWidthB: [-1]
+        - LocalReadVectorWidth: [-1]
+        - 1LDSBuffer: [0]
+        - DirectToVgprSparseMetadata: [false]
+        - StoreVectorWidth: [-1]
+        - StreamK: [3]
+        - PrefetchAcrossPersistent: [0]
+        - UseSubtileImpl: [False]
+        - StaggerU: [0]
+        - DirectToVgprA: [False]
+        - DirectToVgprB: [False]
+        - WavefrontSize: [32]
+        - WorkGroupMapping: [1]
+      BenchmarkForkParameters:
+      JoinParameters:
+      BenchmarkJoinParameters:
+      BenchmarkFinalParameters:
+        - ProblemSizes:
+          - Exact: [128, 128, 1, 1024]
+          - Exact: [129, 129, 1, 1024]
+          - Exact: [128, 128, 1, 1056]  # K-tail
+        - ActivationArgs:
+          - [Enum: none]

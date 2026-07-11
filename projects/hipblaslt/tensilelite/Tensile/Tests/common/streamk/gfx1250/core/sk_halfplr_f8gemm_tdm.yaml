@@ -1,0 +1,182 @@
+# Copyright Advanced Micro Devices, Inc., or its affiliates.
+# SPDX-License-Identifier: MIT
+#
+# Positive validation for HalfPLR on StreamK (SK3) with ScheduleIterAlg=4
+# (StinkyTofu) on gfx1250, pure F8 (F8/F8/S) GEMM with TDM.
+#
+# This mirrors the non-StreamK HalfPLR pure-F8 coverage
+# (Tensile/Tests/common/gemm/gfx12/f8f8s_cls_gfx1250.yaml, TN, HalfPLR + TDMInst=3
+# + SIA=4, and tdm_multicast_gfx1250.yaml, TN & NT, HalfPLR=2) onto StreamK=3,
+# intersected with the StreamK+TDM+HalfPLR constraints: SIA=4 (required for
+# HalfPLR on StreamK), PrefetchAcrossPersistent=0, UseSubtileImpl=0, TDMInst=3,
+# PGR in (1,2), PLR=1, InnerUnroll=1, even MIWaveTile. Covers HalfPLR=1 (A),
+# 2 (B), 3 (both) in both TN and NT transposes.
+TestParameters:
+  marks: [skip-gfx900, skip-gfx906, skip-gfx908, skip-gfx90a, skip-gfx940, skip-gfx941, skip-gfx942, skip-gfx950, skip-gfx1010, skip-gfx1011, skip-gfx1012, skip-gfx1030, skip-gfx1100, skip-gfx1101, skip-gfx1102, skip-gfx1200, skip-gfx1201] # not supported by arch
+GlobalParameters:
+  SyncsPerBenchmark: 0
+  NumElementsToValidate: -1
+  BoundsCheck: 0
+  KernelTime: False
+  CpuThreads: 32
+  DataInitTypeA: 3
+  DataInitTypeB: 3
+  DataInitTypeD: 2
+  DataInitTypeAlpha: 1
+  DataInitTypeBeta: 1
+  PrintLevel: 2
+  PrintSolutionRejectionReason: True
+  ForceGenerateKernel: True
+
+BenchmarkProblems:
+  #######################################
+  # TN - F8/F8/S, StreamK + TDM + HalfPLR
+  # (mirrors f8f8s_cls_gfx1250 TN + tdm_multicast_gfx1250 TN)
+  #######################################
+  -
+    - # ProblemType, TN
+      OperationType: GEMM
+      DataType: F8
+      DestDataType: F8
+      ComputeDataType: s
+      HighPrecisionAccumulate: True
+      TransposeA: True
+      TransposeB: False
+      UseBeta: True
+      Batched: True
+      Activation: False
+      SupportUserArgs: True
+      UseBias: 0
+
+    - # BenchmarkProblemSizeGroup - Standard
+      InitialSolutionParameters:
+      BenchmarkCommonParameters:
+        - KernelLanguage: ["Assembly"]
+      ForkParameters:
+        - UseSgprForGRO: [0]
+        - ForceDisableShadowInit: [true]
+        - MatrixInstruction:
+          - [16, 16, 128, 1,  1,  2, 2,  2, 2]
+          - [16, 16, 128, 1,  1,  4, 4,  2, 2]
+          - [16, 16, 128, 1,  1,  8, 8,  2, 2]
+        - HalfPLR: [1, 2, 3]
+        - InnerUnroll: [1]
+        - DepthU: [256]
+        - ClusterLocalRead: [0]
+        - TransposeLDS: [-1]
+        - LdsPadA: [-1]
+        - LdsPadB: [-1]
+        - LdsBlockSizePerPadA: [-1]
+        - LdsBlockSizePerPadB: [-1]
+        - LdsPadMetadata: [0]
+        - LDSTrInst: [False]
+        - TDMInst: [3]
+        - PrefetchGlobalRead: [1, 2]
+        - PrefetchLocalRead: [1]
+        - ScheduleIterAlg: [4]
+        - SourceSwap: [false]
+        - StoreRemapVectorWidth: [0]
+        - GlobalSplitU: [0]
+        - GlobalReadVectorWidthA: [-1]
+        - GlobalReadVectorWidthB: [-1]
+        - ExpandPointerSwap: [false]
+        - VectorWidthA: [-1]
+        - VectorWidthB: [-1]
+        - LocalReadVectorWidth: [-1]
+        - 1LDSBuffer: [0]
+        - DirectToVgprSparseMetadata: [false]
+        - StoreVectorWidth: [-1]
+        - StreamK: [3]
+        - PrefetchAcrossPersistent: [0]
+        - UseSubtileImpl: [False]
+        - StaggerU: [0]
+        - DirectToVgprA: [False]
+        - DirectToVgprB: [False]
+        - WavefrontSize: [32]
+        - WorkGroupMapping: [1]
+      BenchmarkForkParameters:
+      JoinParameters:
+      BenchmarkJoinParameters:
+      BenchmarkFinalParameters:
+        - ProblemSizes:
+          - Exact: [128, 128, 1, 1024]
+          - Exact: [129, 129, 1, 1024]
+          - Exact: [128, 128, 1, 1056]  # K-tail
+        - ActivationArgs:
+          - [Enum: none]
+
+  #######################################
+  # NT - F8/F8/S, StreamK + TDM + HalfPLR
+  # (mirrors tdm_multicast_gfx1250 NT, LDSTrInst load path)
+  #######################################
+  -
+    - # ProblemType, NT
+      OperationType: GEMM
+      DataType: F8
+      DestDataType: F8
+      ComputeDataType: s
+      HighPrecisionAccumulate: True
+      TransposeA: False
+      TransposeB: True
+      UseBeta: True
+      Batched: True
+      Activation: False
+      SupportUserArgs: True
+      UseBias: 0
+
+    - # BenchmarkProblemSizeGroup - Standard
+      InitialSolutionParameters:
+      BenchmarkCommonParameters:
+        - KernelLanguage: ["Assembly"]
+      ForkParameters:
+        - UseSgprForGRO: [0]
+        - ForceDisableShadowInit: [true]
+        - MatrixInstruction:
+          - [16, 16, 128, 1,  1,  2, 2,  2, 2]
+          - [16, 16, 128, 1,  1,  4, 4,  2, 2]
+          - [16, 16, 128, 1,  1,  8, 8,  2, 2]  # MT256x256, mirrors tdm_multicast_gfx1250 NT HalfPLR
+        - HalfPLR: [1, 2, 3]
+        - InnerUnroll: [1]
+        - DepthU: [256]
+        - ClusterLocalRead: [0]
+        - TransposeLDS: [-1]
+        - LdsPadA: [-1]
+        - LdsPadB: [-1]
+        - LdsBlockSizePerPadA: [-1]
+        - LdsBlockSizePerPadB: [-1]
+        - LdsPadMetadata: [0]
+        - LDSTrInst: [True]
+        - TDMInst: [3]
+        - PrefetchGlobalRead: [1, 2]
+        - PrefetchLocalRead: [1]
+        - ScheduleIterAlg: [4]
+        - SourceSwap: [false]
+        - StoreRemapVectorWidth: [0]
+        - GlobalSplitU: [0]
+        - GlobalReadVectorWidthA: [-1]
+        - GlobalReadVectorWidthB: [-1]
+        - ExpandPointerSwap: [false]
+        - VectorWidthA: [-1]
+        - VectorWidthB: [-1]
+        - LocalReadVectorWidth: [-1]
+        - 1LDSBuffer: [0]
+        - DirectToVgprSparseMetadata: [false]
+        - StoreVectorWidth: [-1]
+        - StreamK: [3]
+        - PrefetchAcrossPersistent: [0]
+        - UseSubtileImpl: [False]
+        - StaggerU: [0]
+        - DirectToVgprA: [False]
+        - DirectToVgprB: [False]
+        - WavefrontSize: [32]
+        - WorkGroupMapping: [1]
+      BenchmarkForkParameters:
+      JoinParameters:
+      BenchmarkJoinParameters:
+      BenchmarkFinalParameters:
+        - ProblemSizes:
+          - Exact: [128, 128, 1, 1024]
+          - Exact: [129, 129, 1, 1024]
+          - Exact: [128, 128, 1, 1056]  # K-tail
+        - ActivationArgs:
+          - [Enum: none]
