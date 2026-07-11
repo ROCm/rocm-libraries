@@ -32,6 +32,7 @@ def test_swizzle_roundtrip():
 
 
 @pytest.mark.mi350
+@pytest.mark.gpu
 @requires_gpu
 def test_mx_gemm_matches_reference():
     """DEFERRED to MI350 (gfx950). Full MX GEMM: build canonical UE8M0 scales,

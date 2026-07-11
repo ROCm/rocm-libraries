@@ -13,6 +13,7 @@ def test_bf16_in_map():
     assert hipblaslt._DTYPE_TO_NP[c.DataType.R_16BF] is ml_dtypes.bfloat16
 
 
+@pytest.mark.gpu
 @requires_gpu
 def test_fp8_e4m3_roundtrip():
     a = np.arange(8).astype(ml_dtypes.float8_e4m3fn)

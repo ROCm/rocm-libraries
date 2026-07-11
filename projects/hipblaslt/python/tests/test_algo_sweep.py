@@ -5,6 +5,7 @@ import pytest
 import hipblaslt
 c = hipblaslt._core
 requires_gpu = pytest.mark.skipif(not c.hip_available(), reason="no HIP device")
+pytestmark = pytest.mark.gpu
 
 
 @requires_gpu
