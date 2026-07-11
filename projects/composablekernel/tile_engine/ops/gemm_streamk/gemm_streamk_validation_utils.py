@@ -252,15 +252,17 @@ def validate_warp_tile_combination(
     gpu_name: str,
 ) -> Tuple[bool, str]:
     """Validate warp tile combination against GPU-specific supported combinations."""
+    base_gpu_name = gpu_name.split(":")[0] if gpu_name else gpu_name
+
     # Construct the key for looking up supported combinations
     warp_tile_key = f"{a_datatype}_{b_datatype}_{c_datatype}"
     current_combination = [warp_tile_m, warp_tile_n, warp_tile_k]
 
     # Check if we have GPU-specific combinations
-    gpu_warp_tile_combinations = WARP_TILE_SUPPORTED_COMBINATIONS.get(gpu_name, {})
+    gpu_warp_tile_combinations = WARP_TILE_SUPPORTED_COMBINATIONS.get(base_gpu_name, {})
     if not gpu_warp_tile_combinations:
         # If GPU not recognized, try to be permissive but log warning
-        logging.warning(f"No warp tile combinations found for GPU: {gpu_name}")
+        logging.warning(f"No warp tile combinations found for GPU: {base_gpu_name}")
         return True, ""
 
     # Check if we have combinations for this data type combination
@@ -276,7 +278,7 @@ def validate_warp_tile_combination(
     if current_combination not in allowed_combinations:
         error_msg = (
             f"Invalid warp tile combination: {current_combination} not in allowed list. "
-            f"Valid combinations for '{warp_tile_key}' on {gpu_name}: {allowed_combinations}"
+            f"Valid combinations for '{warp_tile_key}' on {base_gpu_name}: {allowed_combinations}"
         )
         return False, error_msg
 

@@ -61,7 +61,7 @@ function(create_individual_gemm_target datatype layout trait tile_config config_
                 --kernel_name "${datatype}_${layout}_${trait}_${tile_config}"
                 --tile_config "${tile_config}"
                 --trait_combo "${trait}"
-		--gpu_targets "${GEMM_GPU_TARGETS_INDIVIDUAL}"
+                --gpu_targets "${GEMM_GPU_TARGETS_INDIVIDUAL}"
         DEPENDS ${GEMM_SOURCE_DIR}/gemm_streamk_instance_builder.py ${config_json}
         COMMENT "Generating ${instance_header}"
     )

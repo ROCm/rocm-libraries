@@ -28,6 +28,7 @@ class GemmKernelBuilder:
         layout,
         config_json=None,
         gpu_target="",
+        validation_gpu_target=None,
         max_instances=None,
         seed=None,
         tier=None,
@@ -38,6 +39,11 @@ class GemmKernelBuilder:
         self.layout = layout
         self.config_json = config_json
         self.gpu_target = gpu_target
+        if validation_gpu_target is None:
+            validation_gpu_target = (
+                gpu_target.split(";")[0].split(":")[0] if gpu_target else ""
+            )
+        self.validation_gpu_target = validation_gpu_target
         self.max_instances = max_instances
         self.seed = seed
         self.tier = tier
@@ -363,7 +369,7 @@ class GemmKernelBuilder:
                 c_datatype,
                 pipeline,
                 self.layout,
-                self.gpu_target
+                self.validation_gpu_target
             )
 
     def _generate_trait_combinations(self):
@@ -985,18 +991,18 @@ def main():
 
     args = parser.parse_args()
 
-    # Configure GPU targets for fallback if provided
-    gpu_target = ""
-    if args.gpu_targets:
-        targets = [t.strip() for t in args.gpu_targets.split(';') if t.strip()]
+    gpu_target = args.gpu_targets or ""
+    validation_gpu_target = ""
+    if gpu_target:
+        targets = [t.strip() for t in gpu_target.split(';') if t.strip()]
         if targets:
-            gpu_target = targets[0].split(":")[0]  # e.g., "gfx90a" from "gfx90a:xnack+"
+            validation_gpu_target = targets[0].split(":")[0]  # e.g., "gfx90a" from "gfx90a:xnack+"
             if len(targets) > 1:
                 logging.warning(
                     f"Multiple GPU targets provided ({targets}), "
-                    f"using first target '{gpu_target}' for validation"
+                    f"using first target '{validation_gpu_target}' for validation"
                 )
-        logging.debug(f"Using GPU target: {gpu_target}")
+        logging.debug(f"Using validation GPU target: {validation_gpu_target}")
 
     builder = GemmKernelBuilder(
         args.working_path,
@@ -1004,6 +1010,7 @@ def main():
         args.layout,
         args.config_json,
         gpu_target=gpu_target,
+        validation_gpu_target=validation_gpu_target,
         max_instances=args.max_instances,
         seed=args.seed,
         tier=args.tier,
