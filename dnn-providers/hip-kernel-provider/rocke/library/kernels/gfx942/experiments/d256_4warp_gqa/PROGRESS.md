@@ -235,3 +235,28 @@ TensorDescriptor.naive (K/V/BT stay buffer_rsrc sized by num_seqs*bt_stride, run
 4. Full-dispatch parity: final_shapes_check.py vs production-generated paged inputs
    (the layout-catching test) + AITER + fp32 ref.
 Est ~1 day mechanical; algorithm/ABI/layout/block_size ALL validated.
+
+## UPDATE 13: Q/O descriptor path VALIDATED - all port components now GPU-verified
+build_e2e_T3_ragged_desc.py: Q load converted buffer_rsrc(byte-offset) ->
+TensorDescriptor.naive("query_ptr",[1<<30,H,HD]) + global_load_vN(Q, elem_offset)
+- the production pattern (attention_tiled_2d.py:5723). GPU-validated dual-ref
+8e-4/7e-5/1e-4 (unchanged). advisory-flagged load-path change (elem vs byte offset)
+confirmed correct. (Output already used global_store w/ element offset = descriptor-equiv.)
+
+=== ALL production-port components GPU-VALIDATED standalone (zero unknowns) ===
+[x] binary_search_seq_idx on cu_seqlens_q (step1)
+[x] _attn_signature 18-arg paged ABI + runtime scale/num_seqs/block_table_stride (step2)
+[x] key_cache layout [num_blocks,block_size,num_kv_heads,head_size] (matches production)
+[x] block_size @16 AND @64 (BPT=4 / BPT=1 addressing)
+[x] context_off=klen-qlen bottom-right causal (== production context_len)
+[x] Q/O TensorDescriptor.naive + global_load_vN element-offset load (step: this update)
+
+=== Step 3 remaining = pure assembly + 1 parity run (NO unknowns left) ===
+1. Assemble build_gfx942_4warp_gqa(spec) in attention_tiled_2d.py from validated body:
+   spec-driven consts (HD/H/HKV/GQAG/BS/BPT/dtype/ITERS) + validated Q/O descriptor +
+   K/V/BT buffer_rsrc(runtime num_seqs*bt_stride) + binary_search + context_off causal.
+2. Launch meta _get_2d_launch_meta: grid=(total_q_blocks*H,), block=(256,1,1).
+3. Swap seam attention_unified.py:3391 -> build_gfx942_4warp_gqa under _d256_gfx942_fast.
+4. Full-dispatch parity: final_shapes_check.py vs PRODUCTION-generated paged inputs
+   (the layout-catching test) + AITER + fp32 ref.
+Reference impl for assembly: build_e2e_T3_ragged_desc.py (every line GPU-validated).
