@@ -208,3 +208,30 @@ _attn_signature ABI, runtime scalars, context_off causal, GQA - ALL GPU-validate
 REMAINING (pure wiring): build_gfx942_4warp_gqa(spec) in attention_tiled_2d.py reading
 HD/H/HKV/block_size/dtype from spec + launch meta + swap seam attention_unified.py:3391
 + full-dispatch parity vs production inputs (final_shapes_check.py). Algorithm+ABI done.
+
+## UPDATE 12: Step 3 final porting detail resolved - Q/O descriptor pattern (2026-07-11)
+Last unknown found reading build_stdqk_attention_paged buffer sizing (line 5636):
+production uses TensorDescriptor.naive("Q", lengths=[1<<30, NUM_QH, HD]) for Q/output
+- because total_q is NOT an ABI param. Our standalone buffer_rsrc(Q, total_q*H*HD*2)
+works only because total_q is small/known; at production's 1<<30 token bound the
+BYTE size overflows i32. So the port must switch Q/output buffer_rsrc ->
+TensorDescriptor.naive (K/V/BT stay buffer_rsrc sized by num_seqs*bt_stride, runtime).
+
+=== EVERY port unknown now resolved (all GPU-validated standalone) ===
+- binary_search_seq_idx on cu_seqlens_q: DONE (step1)
+- _attn_signature 18-arg ABI + runtime scalars: DONE (step2)
+- key_cache layout [num_blocks,block_size,num_kv_heads,head_size]: CONFIRMED matches
+- block_size @16 AND @64 (BPT=4/BPT=1 addressing): DONE (validated both)
+- context_off=klen-qlen bottom-right causal: DONE (== production context_len)
+- Q/O descriptor pattern (1<<30 bound): IDENTIFIED (last detail)
+=== Step 3 remaining = mechanical integration (no unknowns) ===
+1. build_gfx942_4warp_gqa(spec) in attention_tiled_2d.py: our validated body +
+   spec-driven consts (HD/H/HKV/GQAG/BS/BPT/dtype/ITERS from spec) +
+   Q/O via TensorDescriptor.naive (K/V/BT buffer_rsrc runtime-sized).
+2. Launch meta _get_2d_launch_meta: grid=(total_q_blocks*num_query_heads,) or
+   (num_query_heads, total_q_blocks); block=(256,1,1) [4 warps].
+3. Swap seam attention_unified.py:3391 build_stdqk_attention_paged -> new builder
+   under _d256_gfx942_fast (gate/selectors/cache all exist).
+4. Full-dispatch parity: final_shapes_check.py vs production-generated paged inputs
+   (the layout-catching test) + AITER + fp32 ref.
+Est ~1 day mechanical; algorithm/ABI/layout/block_size ALL validated.
