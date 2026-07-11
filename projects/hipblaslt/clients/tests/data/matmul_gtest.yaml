@@ -994,6 +994,7 @@ Tests:
   beta: 2.0
   activation_type: gelu
   bias_vector: 1
+  unit_check: 0
   norm_check: 1
   gpu_arch: '120[0-1]'
 
