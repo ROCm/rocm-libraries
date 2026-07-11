@@ -160,3 +160,17 @@ Remaining: Step2 emit _attn_signature (runtime scalars scale/num_seqs/bt_stride)
 Step3 wire seam attention_unified.py:3391 + full-dispatch GPU validation.
 NOTE: MARKHAM defq queue ~2min/alloc; switching to miopen/AUSTIN pool (kreb skill +
 beegfs /scratch staging since /home not shared) for subsequent runs.
+
+## UPDATE 9: productionization Port Step 2 DONE (2026-07-11)
+build_e2e_T3_ragged_abi.py: emits full production _attn_signature (18-arg paged ABI)
++ RUNTIME scalars: scale (folds log2e in-kernel), num_seqs (-> binary_search),
+block_table_stride (-> per-seq block-table offset sid*bt_stride). Param order/names
+mirror attention_tiled_2d.py:5547-5580 exactly. Validated dual-ref 8e-4/7e-5/1e-4.
+CAVEAT (advisory): validates COMPUTE + ABI-plumbing (runtime scalars flow), NOT
+layout compat - harness builds K/V/block_tables per ASSUMED layout, kernel+ref share
+it. Layout (key_cache [num_blocks,block_size,num_kv_heads,head_dim]; block_table_stride)
+is an offset-arithmetic HYPOTHESIS until Step 3 validates vs PRODUCTION-generated
+paged inputs via run_unified_attention_torch (feed exact dispatch tensors, don't rebuild).
+Step3 remaining: build_gfx942_4warp_gqa(spec) in attention_tiled_2d.py (read HD/H/HKV/
+block_size/dtype from spec, not module consts) + launch meta (grid from problem.total_q)
++ swap seam attention_unified.py:3391 + parity harness (final_shapes_check.py) diff.
