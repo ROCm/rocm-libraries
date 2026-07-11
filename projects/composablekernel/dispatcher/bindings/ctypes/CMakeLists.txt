@@ -155,6 +155,39 @@ else()
 endif()
 
 # =============================================================================
+# Batched GEMM ctypes Library
+# =============================================================================
+#
+# Batched GEMM has a divergent ABI (batch_count + per-batch strides) and the
+# ctypes lib launches the force-included kernel directly (registry bypass), so
+# it links only hip::device -- no dispatcher static archive. The Python bridge
+# (batched_gemm_utils.py) compiles per-kernel .so files itself; this target
+# gives a batched .so from a normal cmake build for parity with dispatcher_gemm_lib.
+
+file(GLOB BATCHED_GEMM_KERNEL_HEADERS "${CMAKE_BINARY_DIR}/generated_kernels/gemm_*_batched.hpp")
+if(BATCHED_GEMM_KERNEL_HEADERS)
+    list(GET BATCHED_GEMM_KERNEL_HEADERS 0 BATCHED_GEMM_KERNEL_HEADER)
+    message(STATUS "Found Batched GEMM kernel for ctypes lib: ${BATCHED_GEMM_KERNEL_HEADER}")
+
+    add_library(dispatcher_batched_gemm_lib SHARED batched_gemm_ctypes_lib.cpp)
+    target_include_directories(dispatcher_batched_gemm_lib PRIVATE
+        ${PROJECT_SOURCE_DIR}/include
+        ${PROJECT_SOURCE_DIR}/dispatcher/include
+    )
+    target_link_libraries(dispatcher_batched_gemm_lib PRIVATE hip::device)
+    target_compile_options(dispatcher_batched_gemm_lib PRIVATE
+        -include ${BATCHED_GEMM_KERNEL_HEADER}
+    )
+    target_compile_definitions(dispatcher_batched_gemm_lib PRIVATE CK_TILE_SINGLE_KERNEL_INCLUDE)
+    set_target_properties(dispatcher_batched_gemm_lib PROPERTIES
+        POSITION_INDEPENDENT_CODE ON
+        CXX_STANDARD 17
+    )
+else()
+    message(STATUS "No Batched GEMM kernel found for ctypes lib - skipping dispatcher_batched_gemm_lib")
+endif()
+
+# =============================================================================
 # GPU Helper Executable
 # =============================================================================
 

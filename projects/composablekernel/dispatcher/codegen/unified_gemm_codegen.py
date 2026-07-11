@@ -202,6 +202,7 @@ class GemmVariant(Enum):
     STANDARD = "standard"
     PRESHUFFLE = "preshuffle"
     MULTI_D = "multi_d"
+    BATCHED = "batched"
 
 
 # TileConfig imported from codegen_common
@@ -283,6 +284,10 @@ class KernelConfig:
         if self.preshuffle:
             parts.append("preshuffle")
 
+        # Batched variant
+        if self.variant == GemmVariant.BATCHED:
+            parts.append("batched")
+
         # Multi-D variant: include elementwise op, num tensors, and D layout
         if self.variant == GemmVariant.MULTI_D:
             parts.append(f"ew_{self.elementwise_op}")
@@ -344,6 +349,8 @@ class KernelNaming:
             name += "_preshuffle"
         elif config.variant == GemmVariant.MULTI_D:
             name += f"_multid_{config.elementwise_op}_d{config.num_d_tensors}"
+        elif config.variant == GemmVariant.BATCHED:
+            name += "_batched"
 
         return name
 
@@ -397,6 +404,11 @@ class CKTileKernelGenerator:
             includes += """
 #include "ck_tile/ops/gemm/pipeline/wp_pipeline_agmem_bgmem_creg_v2.hpp"
 #include "ck_tile/ops/gemm/pipeline/wp_pipeline_agmem_bgmem_creg_base_policy.hpp"
+"""
+
+        if config.variant == GemmVariant.BATCHED:
+            includes += """
+#include "ck_tile/ops/gemm/kernel/batched_gemm_kernel.hpp"
 """
 
         return includes
@@ -562,6 +574,7 @@ using AccDataType = {self.tm.DTYPE_TO_CK_QUALIFIED[acc_dtype]};
 #define GEMM_KEY_PRESHUFFLE {int(config.preshuffle)}
 #define GEMM_KEY_TRANSPOSE_C 0
 #define GEMM_KEY_GROUPED 0
+#define GEMM_KEY_BATCHED {int(config.variant == GemmVariant.BATCHED)}
 #define GEMM_KEY_SPLIT_K 1
 #endif // CK_TILE_SINGLE_KERNEL_INCLUDE
 """
@@ -588,6 +601,8 @@ using AccDataType = {self.tm.DTYPE_TO_CK_QUALIFIED[acc_dtype]};
         """Generate launch function"""
         if config.variant == GemmVariant.MULTI_D:
             return self._launch_function_multi_d(config)
+        if config.variant == GemmVariant.BATCHED:
+            return self._launch_function_batched(config)
         if config.preshuffle:
             return self._launch_function_preshuffle(config)
         return self._launch_function_standard(config)
@@ -637,6 +652,56 @@ using AccDataType = {self.tm.DTYPE_TO_CK_QUALIFIED[acc_dtype]};
         }};
 
         BaseGemmPipeline::TailHandler(Run, has_hot_loop, tail_num);
+        return ave_time;
+    }}"""
+
+    def _launch_function_batched(self, config: KernelConfig) -> str:
+        """Generate launch function for batched GEMM.
+
+        Mirrors the Tile Engine batched_gemm instance
+        (gemm_instance_builder.py, kernel_name_prefix == "batched_gemm"):
+          * takes ``ck_tile::BatchedGemmHostArgs`` (adds batch_count + per-batch
+            strides on top of the single-problem args);
+          * uses the batched-specific ``TileGemmUniversalTraits`` (no persistent/
+            preshuffle/wave-group template tail);
+          * builds ``ck_tile::BatchedGemmKernel`` and sizes the grid with the
+            4-arg ``GridSize(M, N, k_batch, batch_count)``.
+        Unlike the standard path there is no hot-loop TailHandler branch -- the
+        batched kernel launches directly, matching Old-TE.
+        """
+        return f"""
+    static float launch(const ck_tile::BatchedGemmHostArgs& args, const stream_config& stream) {{
+        float ave_time{{0}};
+
+        constexpr auto scheduler = {self.tm.SCHEDULER_TO_CK[config.trait.scheduler]};
+
+        using GemmUniversalTraits = ck_tile::TileGemmUniversalTraits<
+            kPadM, kPadN, kPadK, DoubleSmemBuffer,
+            ALayout, BLayout, CLayout, TransposeC>;
+
+        using UniversalGemmProblem = UniversalGemmPipelineProblem<
+            ADataType, BDataType, AccDataType, TileShape,
+            GemmUniversalTraits,
+            scheduler>;
+
+        using GemmPipeline = {self.tm.PIPELINE_TO_CK[config.trait.pipeline]}<UniversalGemmProblem>;
+        {self._epilogue_code(config)}
+
+        using GemmKernel = ck_tile::BatchedGemmKernel<TilePartitioner, GemmPipeline, GemmEpilogue>;
+
+        auto kargs = GemmKernel::MakeKernelArgs(args);
+
+        if (!GemmKernel::IsSupportedArgument(kargs)) {{
+            throw std::runtime_error("Arguments not supported for batched gemm kernel!");
+        }}
+
+        const dim3 grids = GemmKernel::GridSize(args.M, args.N, args.k_batch, args.batch_count);
+        const dim3 blocks = GemmKernel::BlockSize();
+
+        constexpr int kBlockPerCu = {config.k_block_per_cu};
+        ave_time = launch_kernel(stream,
+            make_kernel<kBlockPerCu>(GemmKernel{{}}, grids, blocks, 0, kargs));
+
         return ave_time;
     }}"""
 
@@ -770,6 +835,15 @@ using AccDataType = {self.tm.DTYPE_TO_CK_QUALIFIED[acc_dtype]};
 
     def _epilogue_code(self, config: KernelConfig) -> str:
         """Generate epilogue code"""
+        if config.variant == GemmVariant.BATCHED:
+            return """
+        using EpilogueProblem = CShuffleEpilogueProblem<
+            ADataType, BDataType, tuple<>, AccDataType, CDataType,
+            tuple<>, CLayout, element_wise::PassThrough,
+            TilePartitioner::MPerBlock, TilePartitioner::NPerBlock,
+            WarpPerBlock_M, WarpPerBlock_N, WarpTileM, WarpTileN, WarpTileK,
+            UniversalGemmProblem::TransposeC>;
+        using GemmEpilogue = CShuffleEpilogue<EpilogueProblem>;"""
         if config.variant == GemmVariant.MULTI_D:
             return """
         using EpilogueProblem = CShuffleEpilogueProblem<
@@ -1110,11 +1184,12 @@ class UnifiedGemmCodegen:
                 ):
                     continue
 
-            if variant == GemmVariant.STANDARD:
+            if variant in (GemmVariant.STANDARD, GemmVariant.BATCHED):
                 # CShuffle-store correctness gate: skip non-pow2 repeat tiles
                 # only for the cshuffle epilogue (see _cshuffle_repeat_ok). The
                 # "default" epilogue is correct with non-pow2 repeats, so it is
-                # NOT gated here.
+                # NOT gated here. Batched GEMM shares the standard tile/trait
+                # sweep -- it only differs in the launch/kernel type.
                 if trait.epilogue == "cshuffle" and not self._cshuffle_repeat_ok(tile):
                     continue
                 configs.append(KernelConfig(tile=tile, trait=trait, variant=variant))
@@ -1525,7 +1600,7 @@ def main():
     parser.add_argument(
         "--variants",
         nargs="+",
-        choices=["standard", "preshuffle", "multi_d"],
+        choices=["standard", "preshuffle", "multi_d", "batched"],
         default=["standard"],
         help="Variants to generate",
     )
