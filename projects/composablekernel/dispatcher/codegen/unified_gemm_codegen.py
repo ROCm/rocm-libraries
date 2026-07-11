@@ -448,6 +448,40 @@ static constexpr index_t NumDTensor = {config.num_d_tensors};
 using GemmMultiDArgs = GemmMultiDHostArgs<NumDTensor>;
 """
 
+    def _multi_d_single_include(self, config: KernelConfig) -> str:
+        """Multi-D symbol exports + KEY macros for the force-included header.
+
+        The multi_d ctypes lib (multi_d_gemm_ctypes_lib.cpp) force-includes ONE
+        generated header and calls SelectedKernel::launch(GemmMultiDArgs, ...)
+        directly, so it needs the Multi-D types (NumDTensor / DsDataType /
+        DsLayout / DLayout / ElementWiseFn / GemmMultiDArgs) and the num-D /
+        elementwise-op signature fields at global scope. These live in the
+        kernel's private namespace by default; re-export them here (guarded by
+        CK_TILE_SINGLE_KERNEL_INCLUDE) so single-include builds can reach them.
+        Standard/preshuffle configs emit nothing extra.
+        """
+        if config.variant != GemmVariant.MULTI_D:
+            return ""
+        ns_name = "ns_" + KernelNaming.generate(
+            config, self.datatype, self.layout
+        ).replace("-", "_")
+        return f"""// Multi-D symbol exports for the single-include ctypes lib.
+using ALayout        = {ns_name}::ALayout;
+using BLayout        = {ns_name}::BLayout;
+using CLayout        = {ns_name}::CLayout;
+using DsDataType     = {ns_name}::DsDataType;
+using DsLayout       = {ns_name}::DsLayout;
+using DLayout        = {ns_name}::DLayout;
+using ElementWiseFn  = {ns_name}::ElementWiseFn;
+static constexpr ck_tile::index_t NumDTensor = {ns_name}::NumDTensor;
+using GemmMultiDArgs = {ns_name}::GemmMultiDArgs;
+// Multi-D signature descriptors (consumed by the ctypes lib / KernelKey).
+#define GEMM_KEY_MULTI_D 1
+#define GEMM_KEY_NUM_D_TENSORS {config.num_d_tensors}
+#define GEMM_KEY_ELEMENTWISE_OP "{config.elementwise_op}"
+#define GEMM_KEY_D_LAYOUT "{config.d_layout}"
+"""
+
     def _selected_kernel_struct(self, config: KernelConfig, kernel_name: str) -> str:
         """Generate SelectedKernel struct with unique name in unique namespace"""
         t = config.tile
@@ -563,7 +597,7 @@ using AccDataType = {self.tm.DTYPE_TO_CK_QUALIFIED[acc_dtype]};
 #define GEMM_KEY_TRANSPOSE_C 0
 #define GEMM_KEY_GROUPED 0
 #define GEMM_KEY_SPLIT_K 1
-#endif // CK_TILE_SINGLE_KERNEL_INCLUDE
+{self._multi_d_single_include(config)}#endif // CK_TILE_SINGLE_KERNEL_INCLUDE
 """
 
     def _tile_types(self, config: KernelConfig, ns_name: str) -> str:

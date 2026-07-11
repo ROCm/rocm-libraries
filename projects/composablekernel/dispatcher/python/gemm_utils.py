@@ -35,7 +35,7 @@ import multiprocessing
 import subprocess
 import tempfile
 from concurrent.futures import ProcessPoolExecutor, as_completed
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
 
@@ -106,6 +106,14 @@ class GemmKernelConfig:
     gfx_arch: str = "gfx942"
     variant: str = "standard"
 
+    # --- Multi-D variant parameters (only meaningful when variant=="multi_d")
+    #   elementwise_op: "MultiDAdd" | "MultiDMultiply" | "PassThrough"
+    #   num_d_tensors : number of fused D operands (>=1)
+    #   d_layout      : row/col of every D tensor (row for the TE multi_d builder)
+    elementwise_op: str = "PassThrough"
+    num_d_tensors: int = 0
+    d_layout: str = "row"
+
     # ------------------------------------------------------------------ #
     # Derived string fragments
     # ------------------------------------------------------------------ #
@@ -117,6 +125,18 @@ class GemmKernelConfig:
             + _LAYOUT_CHAR[self.layout_b]
             + _LAYOUT_CHAR[self.layout_c]
         )
+
+    @property
+    def codegen_layout(self) -> str:
+        """Layout string passed to unified_gemm_codegen.py --layout.
+
+        Multi-D takes a 4-char layout (A,B,C + D); the codegen splits off the
+        4th char as the D-tensor layout. Every other variant uses the 3-char
+        A,B,C layout.
+        """
+        if self.variant == "multi_d":
+            return self.layout + _LAYOUT_CHAR[self.d_layout]
+        return self.layout
 
     @property
     def tile_str(self) -> str:
@@ -140,8 +160,13 @@ class GemmKernelConfig:
         ``dispatcher_get_kernel_name``). This is the single thread tying
         config -> codegen -> runtime together.
         """
+        # Multi-D uses a 4-char layout (A,B,C + D) to match KernelNaming in the
+        # codegen (full_layout = layout + d_layout); every other variant is 3-char.
+        layout_str = self.layout
+        if self.variant == "multi_d":
+            layout_str = self.layout + _LAYOUT_CHAR[self.d_layout]
         name = (
-            f"gemm_{self.dtype_a}_{self.layout}"
+            f"gemm_{self.dtype_a}_{layout_str}"
             f"_{self.pipeline}_{self.epilogue}_{self.scheduler}"
             f"_{_cap(self.pad_m)}_{_cap(self.pad_n)}_{_cap(self.pad_k)}"
             f"_{_cap(self.persistent)}"
@@ -151,6 +176,9 @@ class GemmKernelConfig:
             name += "_preshuffle"
         elif self.variant == "streamk":
             name += "_streamk"
+        elif self.variant == "multi_d":
+            # Mirror KernelNaming.generate: "_multid_{elementwise_op}_d{num_d}".
+            name += f"_multid_{self.elementwise_op}_d{self.num_d_tensors}"
         return name
 
     # ------------------------------------------------------------------ #
@@ -185,6 +213,13 @@ class GemmKernelConfig:
                 "pad_n": [self.pad_n],
                 "pad_k": [self.pad_k],
                 "persistent": [self.persistent],
+            },
+            # Multi-D signature: the codegen expands its multi_d variant over the
+            # (elementwise_op x num_d_tensors) product, so pin both to this
+            # config's single values. Ignored for non-multi_d variants.
+            "multi_d_config": {
+                "elementwise_ops": [self.elementwise_op],
+                "num_d_tensors": [self.num_d_tensors],
             },
         }
 
@@ -294,6 +329,8 @@ class GemmDispatcherLib:
         self._path = Path(so_path)
         self._lib = ctypes.CDLL(str(self._path))
         self._has_indexed = hasattr(self._lib, "dispatcher_get_kernel_name_at")
+        self._has_gemm = hasattr(self._lib, "dispatcher_run_gemm")
+        self._has_multi_d = hasattr(self._lib, "dispatcher_run_multi_d_gemm")
         self._setup_functions()
 
     def _setup_functions(self) -> None:
@@ -316,16 +353,37 @@ class GemmDispatcherLib:
             ]
             lib.dispatcher_get_kernel_name_at.restype = ctypes.c_int
 
-        lib.dispatcher_run_gemm.argtypes = [
-            ctypes.c_void_p,  # A (host)
-            ctypes.c_void_p,  # B (host)
-            ctypes.c_void_p,  # C (host)
-            ctypes.c_int64,  # M
-            ctypes.c_int64,  # N
-            ctypes.c_int64,  # K
-            ctypes.POINTER(ctypes.c_float),  # time_ms
-        ]
-        lib.dispatcher_run_gemm.restype = ctypes.c_int
+        # Regular single-problem GEMM ABI (present in gemm_ctypes_lib.cpp; absent
+        # in the multi_d lib, which exposes dispatcher_run_multi_d_gemm instead).
+        if self._has_gemm:
+            lib.dispatcher_run_gemm.argtypes = [
+                ctypes.c_void_p,  # A (host)
+                ctypes.c_void_p,  # B (host)
+                ctypes.c_void_p,  # C (host)
+                ctypes.c_int64,  # M
+                ctypes.c_int64,  # N
+                ctypes.c_int64,  # K
+                ctypes.POINTER(ctypes.c_float),  # time_ms
+            ]
+            lib.dispatcher_run_gemm.restype = ctypes.c_int
+
+        # Multi-D ABI: extra D-pointer array + count (multi_d_gemm_ctypes_lib.cpp).
+        if self._has_multi_d:
+            lib.dispatcher_run_multi_d_gemm.argtypes = [
+                ctypes.c_void_p,  # A (host)
+                ctypes.c_void_p,  # B (host)
+                ctypes.POINTER(ctypes.c_void_p),  # D_ptrs[] (host)
+                ctypes.c_int,  # num_d
+                ctypes.c_void_p,  # C (host)
+                ctypes.c_int64,  # M
+                ctypes.c_int64,  # N
+                ctypes.c_int64,  # K
+                ctypes.POINTER(ctypes.c_float),  # time_ms
+            ]
+            lib.dispatcher_run_multi_d_gemm.restype = ctypes.c_int
+            if hasattr(lib, "dispatcher_get_num_d_tensors"):
+                lib.dispatcher_get_num_d_tensors.argtypes = []
+                lib.dispatcher_get_num_d_tensors.restype = ctypes.c_int
 
         lib.dispatcher_cleanup.argtypes = []
         lib.dispatcher_cleanup.restype = None
@@ -363,6 +421,53 @@ class GemmDispatcherLib:
         status = self._lib.dispatcher_run_gemm(
             A.ctypes.data_as(ctypes.c_void_p),
             B.ctypes.data_as(ctypes.c_void_p),
+            C.ctypes.data_as(ctypes.c_void_p),
+            M,
+            N,
+            K,
+            ctypes.byref(time_ms),
+        )
+        return status, time_ms.value
+
+    @property
+    def has_multi_d(self) -> bool:
+        return self._has_multi_d
+
+    def num_d_tensors(self) -> int:
+        """Number of D tensors baked into this multi_d .so (0 if not multi_d)."""
+        if self._has_multi_d and hasattr(self._lib, "dispatcher_get_num_d_tensors"):
+            return int(self._lib.dispatcher_get_num_d_tensors())
+        return 0
+
+    def run_multi_d(
+        self,
+        A: np.ndarray,
+        B: np.ndarray,
+        Ds: List[np.ndarray],
+        C: np.ndarray,
+        M: int,
+        N: int,
+        K: int,
+    ) -> Tuple[int, float]:
+        """Run a multi_d GEMM: E = elementwise_op(A@B, D0, D1, ...).
+
+        ``Ds`` is a list of ``num_d_tensors`` host arrays (each MxN, same element
+        type as C). Pointers are collected into a ctypes ``c_void_p`` array; the
+        .so owns all device memory.
+        """
+        if not self._has_multi_d:
+            raise RuntimeError(
+                f"{self._path} does not expose dispatcher_run_multi_d_gemm"
+            )
+        num_d = len(Ds)
+        d_arr_t = ctypes.c_void_p * max(num_d, 1)
+        d_arr = d_arr_t(*[d.ctypes.data_as(ctypes.c_void_p) for d in Ds])
+        time_ms = ctypes.c_float(0.0)
+        status = self._lib.dispatcher_run_multi_d_gemm(
+            A.ctypes.data_as(ctypes.c_void_p),
+            B.ctypes.data_as(ctypes.c_void_p),
+            d_arr,
+            num_d,
             C.ctypes.data_as(ctypes.c_void_p),
             M,
             N,
@@ -620,6 +725,132 @@ class GpuGemmRunner:
 
 
 # ============================================================================
+# Multi-D GEMM problem / result / runner
+# ============================================================================
+
+
+@dataclass
+class MultiDGemmProblem:
+    """A multi_d GEMM problem: E[MxN] = op(A[MxK] @ B[KxN], D0, D1, ...).
+
+    ``num_d`` D tensors, each MxN and stored in the output (C) element dtype.
+    """
+
+    M: int
+    N: int
+    K: int
+    num_d: int = 1
+
+    @property
+    def flops(self) -> float:
+        # 2*M*N*K for the GEMM; the element-wise D fuse is negligible and matches
+        # how Old-TE reports multi_d TFLOPs.
+        return 2.0 * self.M * self.N * self.K
+
+
+@dataclass
+class MultiDGemmResult:
+    output: np.ndarray
+    time_ms: float
+    status: int
+    tflops: float
+    kernel_name: str
+
+    @property
+    def success(self) -> bool:
+        return self.status == 0
+
+
+def _multi_d_layout_from_kernel_name(name: str) -> str:
+    """Extract the 4-char layout (e.g. 'rcrr') from a multi_d kernel name.
+
+    Name format is ``gemm_<dtype>_<layout4>_...``; each char is 'r'/'c' for
+    operands A, B, C, D. Falls back to 'rcrr' if not found.
+    """
+    parts = name.split("_")
+    if len(parts) > 2 and len(parts[2]) == 4 and set(parts[2]) <= {"r", "c"}:
+        return parts[2]
+    return "rcrr"
+
+
+class GpuMultiDGemmRunner:
+    """High-level runner for the multi_d bridge .so.
+
+    Constructed from a .so path; call ``run(A, B, Ds, problem)`` with logical
+    row-major A (MxK), B (KxN) and a list of row-major D tensors (each MxN). The
+    kernel's compiled dtype/layout (from its name) dictates operand memory
+    layout; the C ABI owns all device memory. fp16-only for now (the TE multi_d
+    op supports only fp16).
+    """
+
+    def __init__(self, lib_path: Path):
+        self.lib = GemmDispatcherLib(lib_path)
+        if not self.lib.initialize():
+            raise RuntimeError(f"Failed to initialize multi_d .so: {lib_path}")
+        if not self.lib.has_multi_d:
+            raise RuntimeError(
+                f"{lib_path} is not a multi_d .so (no dispatcher_run_multi_d_gemm)"
+            )
+        names = self.lib.kernel_names
+        self._kernel_name = names[0] if names else "unknown"
+        self._num_d = self.lib.num_d_tensors()
+
+    @property
+    def kernel_name(self) -> str:
+        return self._kernel_name
+
+    @property
+    def num_d_tensors(self) -> int:
+        return self._num_d
+
+    def run(
+        self,
+        A: np.ndarray,
+        B: np.ndarray,
+        Ds: List[np.ndarray],
+        problem: MultiDGemmProblem,
+    ) -> MultiDGemmResult:
+        M, N, K = problem.M, problem.N, problem.K
+        dtype = _dtype_from_kernel_name(self._kernel_name)
+        layout4 = _multi_d_layout_from_kernel_name(self._kernel_name)
+        la, lb, lc, ld = layout4[0], layout4[1], layout4[2], layout4[3]
+
+        if dtype != "fp16":
+            raise ValueError(f"multi_d bridge currently supports fp16 only, got {dtype}")
+        if len(Ds) != self._num_d:
+            raise ValueError(
+                f"kernel expects {self._num_d} D tensors, got {len(Ds)}"
+            )
+
+        # A/B host buffers, transposed for column-major operands (see GpuGemmRunner).
+        A_lay = A if la == "r" else A.T
+        B_lay = B if lb == "r" else B.T
+        A_h = np.ascontiguousarray(A_lay, dtype=np.float16)
+        B_h = np.ascontiguousarray(B_lay, dtype=np.float16)
+
+        # C and D are row-major (last two layout chars are 'r' for the TE
+        # multi_d builder); keep them MxN contiguous.
+        C_shape = (M, N) if lc == "r" else (N, M)
+        C_h = np.zeros(C_shape, dtype=np.float16)
+        D_h = []
+        for d in Ds:
+            d_lay = d if ld == "r" else d.T
+            D_h.append(np.ascontiguousarray(d_lay, dtype=np.float16))
+
+        status, time_ms = self.lib.run_multi_d(A_h, B_h, D_h, C_h, M, N, K)
+
+        C_out = C_h if lc == "r" else C_h.T
+        tflops = (problem.flops / (time_ms * 1e-3)) / 1e12 if time_ms > 0 else 0.0
+        return MultiDGemmResult(
+            output=C_out,
+            time_ms=time_ms,
+            status=status,
+            tflops=tflops,
+            kernel_name=self._kernel_name,
+        )
+
+
+# ============================================================================
 # Build API: codegen + hipcc -> .so paths (no GPU)
 # ============================================================================
 
@@ -697,6 +928,19 @@ def _tile_engine_codegen_flags() -> Tuple[str, ...]:
     return tuple(flags)
 
 
+def _ctypes_source_name(config: GemmKernelConfig) -> str:
+    """Pick the ctypes ABI source for a config's variant.
+
+    The multi_d kernel fuses extra D operands and exposes a
+    GemmMultiDArgs launch signature that the single-problem
+    ``gemm_ctypes_lib.cpp`` cannot express, so multi_d configs compile against
+    the dedicated ``multi_d_gemm_ctypes_lib.cpp``.
+    """
+    if config.variant == "multi_d":
+        return "multi_d_gemm_ctypes_lib.cpp"
+    return "gemm_ctypes_lib.cpp"
+
+
 def _build_compile_jobs(
     config: GemmKernelConfig, header: Path
 ) -> Tuple[Dict[str, Any], Path]:
@@ -705,7 +949,7 @@ def _build_compile_jobs(
     ck_root = root.parent
     build_dir = _cu.get_build_dir()
     output_dir = _cu.get_generated_kernels_dir()
-    ctypes_source = root / "bindings" / "ctypes" / "gemm_ctypes_lib.cpp"
+    ctypes_source = root / "bindings" / "ctypes" / _ctypes_source_name(config)
     static_lib = build_dir / "libck_tile_dispatcher.a"
 
     lib_path = build_dir / "examples" / f"lib{config.name}.so"
@@ -786,13 +1030,13 @@ def setup_multiple_gemm_dispatchers(
     codegen_script = _cu.get_codegen_path()
     output_dir = _cu.get_generated_kernels_dir()
     static_lib = _cu.get_build_dir() / "libck_tile_dispatcher.a"
-    ctypes_source = (
-        _cu.get_dispatcher_root() / "bindings" / "ctypes" / "gemm_ctypes_lib.cpp"
-    )
-    if not static_lib.exists() or not ctypes_source.exists():
+    ctypes_dir = _cu.get_dispatcher_root() / "bindings" / "ctypes"
+    needed_sources = {ctypes_dir / _ctypes_source_name(c) for c in configs}
+    missing = [str(p) for p in needed_sources if not p.exists()]
+    if not static_lib.exists() or missing:
         raise FileNotFoundError(
             "Missing static lib or ctypes source required for compilation:\n"
-            f"  {static_lib}\n  {ctypes_source}\n"
+            f"  {static_lib}\n  " + "\n  ".join(missing) + "\n"
             "Build the dispatcher first (cmake + make)."
         )
 
@@ -807,7 +1051,7 @@ def setup_multiple_gemm_dispatchers(
                 "codegen_script": str(codegen_script),
                 "output_dir": str(output_dir),
                 "dtype": c.dtype_a,
-                "layout": c.layout,
+                "layout": c.codegen_layout,
                 "gpu_target": c.gfx_arch,
                 "tile_config_json": c.to_codegen_json(),
                 "hpp_glob_pattern": f"{c.name}.hpp",
@@ -915,6 +1159,7 @@ def expand_sweep(
     arch: str,
     dtype: str = "fp16",
     layout: str = "rcr",
+    variant: str = "standard",
 ) -> List[GemmKernelConfig]:
     """Expand a Tile Engine GEMM JSON sweep config into GemmKernelConfig list.
 
@@ -924,8 +1169,13 @@ def expand_sweep(
     one GemmKernelConfig. Invalid combinations are dropped via the dispatcher's
     own validator, and duplicates (by .name) are collapsed.
 
-    The signature is controlled by the `dtype` and `layout` arguments (defaults
-    to fp16 / rcr).
+    The signature is controlled by the `dtype`, `layout`, and `variant`
+    arguments (defaults to fp16 / rcr / standard).
+
+    For ``variant="multi_d"`` the ``layout`` may be 4-char (e.g. ``rcrr``); the
+    4th char is the D-tensor layout. Each base config is further expanded over
+    the config's ``multi_d_config`` (elementwise_ops x num_d_tensors), mirroring
+    the codegen's multi_d expansion.
     """
     with open(config_path) as f:
         cfg = json.load(f)
@@ -952,6 +1202,19 @@ def expand_sweep(
     persistents = _expand_values(tr.get("persistent"), [False])
 
     la, lb, lc = layout[0], layout[1], layout[2]
+    # Multi-D: 4th layout char (if present) is the D-tensor layout; default row.
+    d_layout_char = layout[3] if (variant == "multi_d" and len(layout) >= 4) else "r"
+    d_layout_word = _LAYOUT_WORD[d_layout_char]
+
+    # Multi-D expansion combos (elementwise_op, num_d); a single ("PassThrough",0)
+    # entry for non-multi_d variants keeps the loop below variant-agnostic.
+    if variant == "multi_d":
+        mdc = cfg.get("multi_d_config", {})
+        md_ops = _expand_values(mdc.get("elementwise_ops"), ["MultiDAdd"])
+        md_nds = _expand_values(mdc.get("num_d_tensors"), [1])
+        md_combos = list(itertools.product(md_ops, md_nds))
+    else:
+        md_combos = [("PassThrough", 0)]
 
     configs: List[GemmKernelConfig] = []
     seen: set = set()
@@ -990,7 +1253,9 @@ def expand_sweep(
         pad_ks,
         persistents,
     ):
-        c = GemmKernelConfig(
+        # Validate/gate the base (tile,trait) once; the multi_d combos below only
+        # vary the epilogue signature, not the tile math, so the same gates apply.
+        base = GemmKernelConfig(
             dtype_a=dtype,
             dtype_b=dtype,
             dtype_c=_output_dtype(dtype),
@@ -1016,9 +1281,7 @@ def expand_sweep(
             persistent=bool(persist),
             gfx_arch=arch,
         )
-        if c.name in seen:
-            continue
-        val = _cu.validate_kernel_config(c.to_ctypes_config())
+        val = _cu.validate_kernel_config(base.to_ctypes_config())
         if not val.is_valid:
             continue
         # Tile/CShuffle correctness gate (mirrors unified_gemm_codegen's
@@ -1039,7 +1302,19 @@ def expand_sweep(
         if epi == "cshuffle":
             if not _is_power_of_two(tm // m_div) or not _is_power_of_two(tn // n_div):
                 continue
-        seen.add(c.name)
-        configs.append(c)
+
+        # Emit one config per multi_d combo (single no-op combo for other variants).
+        for ew_op, num_d in md_combos:
+            c = replace(
+                base,
+                variant=variant,
+                elementwise_op=ew_op,
+                num_d_tensors=num_d,
+                d_layout=d_layout_word,
+            )
+            if c.name in seen:
+                continue
+            seen.add(c.name)
+            configs.append(c)
 
     return configs
