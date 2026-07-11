@@ -296,3 +296,14 @@ inputs, SAME-RUN timing (the methodology-airtight number, not inferred):
   SQ=8192: OURS 5661.2us vs AITER 6020.7us = 0.94x (OURS 6% FASTER)
 The SHIPPED production path BEATS AITER at both ticket shapes. vs prior shipped std-QK 0.55x.
 AICK-1495 gfx942 D256: DONE - correct (full-dispatch ragged parity BS16/32) + faster-than-AITER.
+
+## UPDATE 17: CORRECTION to UPDATE 16 headline (3x variance repeat)
+UPDATE 16's "beats AITER at both shapes" OVERCLAIMED @8192 (single same-run value near noise).
+3x same-run dispatch-vs-AITER repeat (block_size=16):
+  SQ=4096: OURS/AITER = 0.97 / 0.97 / 0.98  -> consistently ~0.97x (OURS 2-3% faster). BEATS (tight).
+  SQ=8192: OURS/AITER = 0.88 / 0.94 / 1.04  -> median 0.94x, RANGE 0.88-1.04 (one run OURS slower). PARITY (noisy).
+CORRECTED HEADLINE: SQ=4096 beats AITER (~0.97x, consistent); SQ=8192 at PARITY (median 0.94x,
+range 0.88-1.04x, within run-to-run noise). Both vs prior shipped std-QK 0.55x -> big win either way.
+SCOPE CORRECTION: all validation this session ran on gfx942 ONLY. gfx950 was referenced as a
+routing precedent (PR #9233), NOT built or run here. Claim: "GPU-verified correct on gfx942;
+gfx950 not tested this session (separate arch build+validation required)."
