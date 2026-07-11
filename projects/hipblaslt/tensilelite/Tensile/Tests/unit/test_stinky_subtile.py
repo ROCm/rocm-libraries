@@ -96,6 +96,7 @@ def test_build_stinky_options_waitcnt_only_overrides():
         "EnableWaitCntInsertion": True,
         "EnableESM2": False,
         "ClusterBarrier": False,
+        "EnableLoopCarriedTokenDeps": True,
     }
     opts = KernelWriter._buildStinkyTofuModuleOptions(kw, kernel, 0, option_overrides=overrides)
 
@@ -103,6 +104,7 @@ def test_build_stinky_options_waitcnt_only_overrides():
     assert opts["EnableWaitCntInsertion"] is True
     assert opts["EnableESM2"] is False
     assert opts["ClusterBarrier"] is False
+    assert opts["EnableLoopCarriedTokenDeps"] is True
 
 
 def test_build_stinky_options_opt0_default_disables_waitcnt():
@@ -177,6 +179,7 @@ def test_kernel_body_subtile_waitcnt_tail_invokes_st_pipeline():
             "EnableWaitCntInsertion": True,
             "EnableESM2": False,
             "ClusterBarrier": False,
+            "EnableLoopCarriedTokenDeps": True,
         }
         st_asm = kw._runStinkyTofuPipeline(
             kernel, module_kernel_body, fs, 0, option_overrides=waitcnt_overrides)
@@ -186,6 +189,7 @@ def test_kernel_body_subtile_waitcnt_tail_invokes_st_pipeline():
     assert captured["overrides"]["EnableWaitCntInsertion"] is True
     assert captured["overrides"]["EnableESM2"] is False
     assert captured["overrides"]["ClusterBarrier"] is False
+    assert captured["overrides"]["EnableLoopCarriedTokenDeps"] is True
     assert kernel["MathClocksUnrolledLoop"] == 42
     kw.updateOccupancyFromMaxVgpr.assert_called_once()
 
@@ -337,3 +341,64 @@ def test_subtile_lr_lds_buffer_swap_flips_read_token():
     kernel = {}
     localReadLDSBufferSwap("A", writer, kernel)
     assert writer.states.ldsReadTokenIdx == 1
+
+
+def test_mainloop_exposes_top_level_loop_body_module():
+    """loopBody must be a top-level kernel-body module for ST region detection."""
+    from types import SimpleNamespace
+    from unittest.mock import MagicMock, patch
+
+    from rocisa.code import Module
+    from Tensile.Components.Subtile.Kernel import mainLoop
+
+    loop_body = Module("loopBody")
+    tail_loop = Module("TAILLOOP")
+    ti = MagicMock()
+    ti.subtileShape = [1, 1]
+    ti.localMMATileGrid = [4, 4]
+    ti.loadRatioGR = 1.0
+    writer = SimpleNamespace(
+        tPA=MagicMock(), tPB=MagicMock(),
+        states=SimpleNamespace(
+            a=SimpleNamespace(tileInfo=ti),
+            b=SimpleNamespace(tileInfo=ti),
+            mxsa=SimpleNamespace(tileInfo=None),
+            mxsb=SimpleNamespace(tileInfo=None),
+            d=SimpleNamespace(tileInfo=MagicMock()),
+            regCaps={"MaxVgpr": 256},
+            archCaps={},
+        ),
+        vgprPool=MagicMock(size=MagicMock(return_value=256),
+                           available=MagicMock(return_value=0)),
+        allocTmpSgpr=MagicMock(),
+        calculateLoopNumIter=MagicMock(return_value=Module()),
+        computeTailLoopSrdLimit=MagicMock(return_value=Module()),
+        closeLoop=MagicMock(return_value=Module()),
+    )
+    writer.vgprPool.checkOut = MagicMock(return_value=0)
+    writer.vgprPool.checkIn = MagicMock()
+    kernel = {
+        "PrefetchGlobalRead": 0,
+        "NoTailLoop": True,
+        "ProblemType": {},
+        "MatrixInstK": 32,
+        "enableTDMA": False,
+        "enableTDMB": False,
+    }
+
+    scheduler = MagicMock()
+    scheduler.build = MagicMock()
+    scheduler.getNumVgpr = MagicMock(return_value=0)
+    scheduler.allocVgprTiles = MagicMock()
+    scheduler.populate_instructions = MagicMock()
+    scheduler.emitMainAndExitLoops = MagicMock(return_value=loop_body)
+    scheduler.deallocVgprTiles = MagicMock()
+
+    with patch("Tensile.Components.Subtile.Kernel.LogicalScheduler", return_value=scheduler), \
+         patch("Tensile.Components.Subtile.Kernel.MFMASchedulerConfig") as mock_cfg, \
+         patch("Tensile.Components.Subtile.Kernel.MFMASchedulerConfig.get_partition_candidates",
+               return_value=[(1, 1)]):
+        mock_cfg.return_value = MagicMock()
+        parts = mainLoop(writer, kernel)
+
+    assert any(getattr(p, "name", None) == "loopBody" for p in parts)

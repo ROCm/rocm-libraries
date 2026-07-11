@@ -3406,7 +3406,8 @@ class LogicalScheduler:
                     scheduled = instructionSchedule(
                         em_list,
                         multiDU=self._is_multi_du(),
-                        minGapDsReadToWait=minGapDsReadToWait)
+                        minGapDsReadToWait=minGapDsReadToWait,
+                        skipVmcntAdjust=bool(kernel.get("_StinkySubtile")))
                     module.add(scheduled)
                 else:
                     for em in em_list:

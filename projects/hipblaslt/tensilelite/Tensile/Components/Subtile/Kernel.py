@@ -1297,7 +1297,15 @@ def _emitMultiDUTailSrdRewind(writer, kernel, numUnroll, tiA, tiB, scaleTiA, sca
 
 
 def mainLoop(writer, kernel):
-  module = Module()
+  """Build subtile mainloop sections as top-level kernel-body modules.
+
+  Returns a list of Modules so ``Module(\"loopBody\")`` from
+  ``emitMainAndExitLoops`` sits at top level for StinkyTofu
+  ``loopWithPrefetch`` region auto-detection (nested loopBody is invisible
+  to ToStinkyTofuUtils).
+  """
+  setup = Module("subtileMainLoopSetup")
+  tail = Module("subtileMainLoopTail")
   tensorParametersA = writer.tPA
   tensorParametersB = writer.tPB
 
@@ -1380,7 +1388,7 @@ def mainLoop(writer, kernel):
   # missing _subtileUnitScaleVgpr.
   if miK == 128 and (scaleTiA is None or scaleTiB is None):
       unitScaleVgpr = writer.vgprPool.checkOut(1)
-      module.add(VMovB32(dst=vgpr(unitScaleVgpr), src=hex(0x7f7f7f7f),
+      setup.add(VMovB32(dst=vgpr(unitScaleVgpr), src=hex(0x7f7f7f7f),
                          comment="unit scale=1.0 (E8M0) for plain FP8 MFMA"))
       kernel["_subtileUnitScaleVgpr"] = unitScaleVgpr
 
@@ -1394,21 +1402,21 @@ def mainLoop(writer, kernel):
   # gfx1250: enable expert scheduling mode and disable WMMA arb stall
   # before entering the mainloop / any wmma issue.
   if writer.states.archCaps.get("HasWmmaArbStallBit", False):
-    module.add(SNop(waitState=0, comment="nop before SSetReg"))
-    module.add(SSetRegIMM32B32(dst=HWRegContainer(reg="26", value=[0, 2]),
+    setup.add(SNop(waitState=0, comment="nop before SSetReg"))
+    setup.add(SSetRegIMM32B32(dst=HWRegContainer(reg="26", value=[0, 2]),
                                src=2,
                                comment="enable expert scheduling mode"))
-    module.add(SNop(waitState=0, comment="nop after SSetReg"))
+    setup.add(SNop(waitState=0, comment="nop after SSetReg"))
 
-  module.add(scheduler.emitMainAndExitLoops(writer, kernel, tensorParametersA, tensorParametersB))
+  loopBody = scheduler.emitMainAndExitLoops(writer, kernel, tensorParametersA, tensorParametersB)
 
   # gfx1250: disable expert scheduling mode after NLL.
   if writer.states.archCaps.get("HasWmmaArbStallBit", False):
-    module.add(SNop(waitState=0, comment="nop before SSetReg"))
-    module.add(SSetRegIMM32B32(dst=HWRegContainer(reg="26", value=[0, 2]),
+    tail.add(SNop(waitState=0, comment="nop before SSetReg"))
+    tail.add(SSetRegIMM32B32(dst=HWRegContainer(reg="26", value=[0, 2]),
                                src=0,
                                comment="disable expert scheduling mode"))
-    module.add(SNop(waitState=0, comment="nop after SSetReg"))
+    tail.add(SNop(waitState=0, comment="nop after SSetReg"))
 
   # Wrap the tail loop with the runtime K%DU counter setup and skip branch,
   # mirroring the legacy KernelWriter pattern (KernelWriter.py:5237 / 5618).
@@ -1430,15 +1438,15 @@ def mainLoop(writer, kernel):
         # into a tmp SGPR that lives until the rewind is emitted.
         mainIterRes = srdRewindStack.enter_context(writer.allocTmpSgpr(1))
         mainIterSgpr = mainIterRes.idx
-        module.add(SMovB32(dst=sgpr(mainIterSgpr), src=sgpr("OrigLoopCounter"),
+        tail.add(SMovB32(dst=sgpr(mainIterSgpr), src=sgpr("OrigLoopCounter"),
                            comment="snapshot per-WG main macro-iter count (StreamK-safe SRD-rewind gate) before it is zeroed"))
-      module.add(writer.calculateLoopNumIter(
+      tail.add(writer.calculateLoopNumIter(
           kernel, tensorParametersA, tensorParametersB, -1))
       # Tighten Srd{A,B}+2 OOB limit using the K remainder just computed
       # (no-op outside UseSubtileImpl A/B). Needed for bf16 (boundary DTL
       # load) and fp4 (regular tail-loop dwordx4 must see the actual K_rem
       # to avoid pulling stale OOB-zeroed dwords into LDS).
-      module.add(writer.computeTailLoopSrdLimit(
+      tail.add(writer.computeTailLoopSrdLimit(
           kernel, [tensorParametersA, tensorParametersB]))
       # MX scale operands: SrdMXS{A,B}+2 tightened with K_pad=256 (host scale
       # re-scatter granularity from DataInitialization.cpp::rearrangePaddedMXScaleLayout).
@@ -1449,13 +1457,13 @@ def mainLoop(writer, kernel):
       if kernel["ProblemType"].get("MXBlockB", 0) > 0 and "MX" in tensorParametersB:
         mxScaleTPs.append(tensorParametersB["MX"])
       if mxScaleTPs:
-        module.add(writer.computeTailLoopSrdLimit(kernel, mxScaleTPs))
+        tail.add(writer.computeTailLoopSrdLimit(kernel, mxScaleTPs))
       if needTailSrdRewind:
-        module.add(_emitMultiDUTailSrdRewind(
+        tail.add(_emitMultiDUTailSrdRewind(
             writer, kernel, scheduler.config.numUnroll, tiA, tiB, scaleTiA, scaleTiB,
             mainIterSgpr))
-    module.add(scheduler.emitTailLoop(writer, kernel))
-    module.add(writer.closeLoop(
+    tail.add(scheduler.emitTailLoop(writer, kernel))
+    tail.add(writer.closeLoop(
         kernel, tensorParametersA, tensorParametersB,
         -1, None, emitEndLabelOnly=True))
 
@@ -1464,4 +1472,4 @@ def mainLoop(writer, kernel):
   if unitScaleVgpr >= 0:
       writer.vgprPool.checkIn(unitScaleVgpr)
 
-  return module
+  return [setup, loopBody, tail]

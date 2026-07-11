@@ -5237,7 +5237,8 @@ class KernelWriter(metaclass=abc.ABCMeta):
     if self.do["executeToPrefetchEnd"]:
       module.add(self.functionEnd(kernel, addLabel=False))
 
-    module.add(mainLoop(self, kernel))
+    for part in mainLoop(self, kernel):
+      module.add(part)
 
     # Deallocate offset registers
     for tileInfo in [atileInfo, btileInfo, mxsatileInfo, mxsbtileInfo]:
@@ -5389,6 +5390,7 @@ class KernelWriter(metaclass=abc.ABCMeta):
         "EnableWaitCntInsertion": True,
         "EnableESM2": False,
         "ClusterBarrier": False,
+        "EnableLoopCarriedTokenDeps": True,
       }
       st_asm = self._runStinkyTofuPipeline(
         kernel, moduleKernelBody, fs, 0, option_overrides=waitcnt_overrides)
