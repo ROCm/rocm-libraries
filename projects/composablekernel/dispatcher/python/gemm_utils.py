@@ -53,6 +53,18 @@ import ctypes_utils as _cu
 _LAYOUT_CHAR = {"row": "r", "col": "c", "r": "r", "c": "c"}
 _LAYOUT_WORD = {"r": "row", "c": "col"}
 
+# Single source of truth for the preshuffle B-shuffle permutation used by the
+# bridge. The bridge codegen only emits the NON-permuteN preshuffle pipeline
+# (WeightPreshufflePipelineAGmemBGmemCRegV2), whose device-side B packing matches
+# ck_tile::shuffle_b (permute_n=False). Old-TE's default_config.json /
+# default_ci_config.json set permute_n=true, but that is a HOST-marker that
+# selects a distinct (permuteN) TE pipeline the bridge does not generate -- it
+# does NOT map to a separate bridged device kernel. Honoring true here would
+# mis-shuffle B (GPU-verified max_rel ~1.25 vs ~5e-4). So every bridge pin reads
+# this one constant. TODO: to support permute_n=True, emit the permuteN pipeline
+# in unified_gemm_codegen and set this to a swept/config-driven value.
+BRIDGE_PERMUTE_N = False
+
 
 def _cap(flag: bool) -> str:
     """Reproduce Python ``str(bool).capitalize()`` -> 'True' / 'False'."""
@@ -943,16 +955,16 @@ def expand_sweep(
 
     tc = cfg.get("tile_config", {})
     tr = cfg.get("trait_config", {})
-    # Preshuffle B-shuffle permutation knob. IMPORTANT: the bridge codegen emits
-    # the WeightPreshufflePipelineAGmemBGmemCRegV2 pipeline, whose device-side B
-    # packing matches the NON-permuteN host shuffle (ck_tile::shuffle_b) -- GPU-
-    # verified at max_rel ~5e-4, whereas shuffle_b_permuteN gives ~1.25 (wrong).
-    # Old-TE's default_config.json sets permute_n=true, but that selects a
-    # different (permuteN) TE pipeline the bridge does not generate; honoring it
-    # here would mis-shuffle B. So the bridge pins permute_n=False regardless of
-    # the config until the permuteN pipeline is bridged. Supporting it later is a
-    # codegen change (emit the permuteN pipeline) plus flipping this default.
-    permute_n = False
+    # Preshuffle B-shuffle permutation knob -- pinned to the single source of
+    # truth BRIDGE_PERMUTE_N (see its definition for the full rationale). We
+    # deliberately ignore cfg.get("permute_n"): both default_config.json and
+    # default_ci_config.json ship permute_n=true, but that TE host-marker selects
+    # a permuteN pipeline the bridge does not codegen (it is NOT a distinct
+    # bridged device kernel), so honoring it would mis-shuffle B. Do NOT "fix" this
+    # to read the config until the permuteN pipeline is bridged.
+    # TODO: support permute_n=True by emitting the permuteN pipeline in
+    # unified_gemm_codegen and flipping BRIDGE_PERMUTE_N to a config-driven value.
+    permute_n = BRIDGE_PERMUTE_N
 
     tile_ms = _expand_range(tc["tile_m"])
     tile_ns = _expand_range(tc["tile_n"])

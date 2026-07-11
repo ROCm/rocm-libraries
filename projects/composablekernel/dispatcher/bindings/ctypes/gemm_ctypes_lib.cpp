@@ -109,6 +109,42 @@ static ck_tile::HostTensor<T> preshuffle_host_b(const T* b_host, int64_t K, int6
         return ck_tile::shuffle_b<BridgePreshuffleConfig>(b_k_n);
     }
 }
+
+// Cache the shuffled B so the (host) preshuffle + reorder is paid ONCE per
+// distinct (B pointer, K, N), not on every dispatcher_run_gemm call. Old-TE
+// shuffles B a single time per callable; the A/B perf sweep calls run() in a
+// warmup+repeat loop with the same B, so recomputing the shuffle every call
+// would (a) add non-kernel host work between iterations and (b) make the sweep
+// apples-to-oranges. The kernel-timed region (g_dispatcher->run) never contained
+// the shuffle, but hoisting it keeps the per-iteration host path launch-only.
+struct ShuffledBCache
+{
+    const void* b_host = nullptr;
+    int64_t K          = 0;
+    int64_t N          = 0;
+    // Held by shared_ptr so the cache has a trivial (null) default state --
+    // HostTensor has no default constructor, and a dummy one would need a valid
+    // descriptor. Populated lazily on the first (or a changed) B.
+    std::shared_ptr<ck_tile::HostTensor<BDataType>> data;
+};
+static ShuffledBCache g_shuffled_b_cache;
+
+// Return a pointer to the shuffled bytes for this B, reusing the cache when the
+// (pointer, K, N) matches the last call. Not thread-safe (bridge is single-
+// threaded), which matches the rest of this translation unit.
+static const BDataType* get_shuffled_b(const BDataType* b_host, int64_t K, int64_t N)
+{
+    if(!(g_shuffled_b_cache.data && g_shuffled_b_cache.b_host == b_host &&
+         g_shuffled_b_cache.K == K && g_shuffled_b_cache.N == N))
+    {
+        g_shuffled_b_cache.data = std::make_shared<ck_tile::HostTensor<BDataType>>(
+            preshuffle_host_b<BDataType>(b_host, K, N));
+        g_shuffled_b_cache.b_host = b_host;
+        g_shuffled_b_cache.K      = K;
+        g_shuffled_b_cache.N      = N;
+    }
+    return g_shuffled_b_cache.data->data();
+}
 #endif // GEMM_KEY_PRESHUFFLE
 
 // Global dispatcher (initialized once, managed via shared_ptr for safe cleanup)
@@ -412,8 +448,11 @@ int dispatcher_run_gemm(
     // unchanged. B_host stays the logical (unshuffled) B so the Python-side
     // numpy reference (A @ B) remains valid.
     {
-        ck_tile::HostTensor<BDataType> b_shuffled = preshuffle_host_b<BDataType>(B_host, K, N);
-        if(hipMemcpy(B_dev, b_shuffled.data(), K * N * sizeof(BDataType), hipMemcpyHostToDevice) !=
+        // Shuffle is cached across calls (see get_shuffled_b): the host reorder
+        // runs once per distinct B, so only the H2D copy + kernel launch remain
+        // on the repeated benchmark path -- matching Old-TE's one-shuffle model.
+        const BDataType* b_shuffled = get_shuffled_b(B_host, K, N);
+        if(hipMemcpy(B_dev, b_shuffled, K * N * sizeof(BDataType), hipMemcpyHostToDevice) !=
            hipSuccess)
         {
             cleanup_gpu_mem();

@@ -1140,6 +1140,13 @@ class UnifiedGemmCodegen:
                 # (default); the epilogue is swept ([default, cshuffle] in the TE
                 # gemm_preshuffle default_config). permute_n selects the B-shuffle
                 # permutation and is a global config knob (matches Old-TE).
+                # NOTE: for the bridge this value arrives already pinned to False
+                # via gemm_utils.py::BRIDGE_PERMUTE_N (its to_codegen_json forces
+                # it), even though the TE default_config.json / default_ci_config.json
+                # ship permute_n=true -- that TE default is a host-marker for a
+                # distinct permuteN pipeline the bridge does not emit, so it does
+                # not map to a separate bridged device kernel. The get(...) default
+                # here is only the fallback for a raw config with no key.
                 permute_n = bool(self.config.get("permute_n", False))
                 preshuffle_trait = TraitConfig(
                     pipeline="preshufflev2",
