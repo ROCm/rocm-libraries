@@ -62,10 +62,17 @@ from gemm_utils import setup_multiple_gemm_dispatchers, expand_sweep  # noqa: E4
 VARIANT_CONFIGS = {
     "gemm_universal": "configs",
     "gemm_multi_d": "gemm_multi_d/configs",
+    "gemm_multi_abd": "gemm_multi_abd/configs",
     "gemm_preshuffle": "gemm_preshuffle/configs",
     "grouped_gemm": "grouped_gemm/configs",
 }
 DEFAULT_VARIANT = "gemm_universal"
+
+# Bridge variant string (expand_sweep / GemmKernelConfig.variant) per benchmark
+# variant. Anything not listed goes through the regular "standard" path.
+BRIDGE_VARIANT = {
+    "gemm_multi_abd": "multi_abd",
+}
 CI_CONFIG_NAME = "default_ci_config.json"
 EXAMPLE_PROBLEMS_NAME = "example_problems.json"
 
@@ -79,7 +86,9 @@ DEFAULT_PROBLEMS = [
 
 SUPPORTED_DTYPES = ("fp16", "bf16")
 # Row-major C only: ck_tile's universal GEMM rejects column-major C at build.
-SUPPORTED_LAYOUTS = ("rcr", "rrr", "crr", "ccr")
+# The 4-char codes (rcrr, ...) are the multi_abd A,B,E,D layouts; TE gemm_multi_abd
+# only supports rcrr today.
+SUPPORTED_LAYOUTS = ("rcr", "rrr", "crr", "ccr", "rcrr", "rrrr", "crrr", "ccrr")
 
 
 def detect_devices():
@@ -350,10 +359,23 @@ def main():
     print(f"  Variant: {args.variant}")
     print(f"  Configs: {', '.join(config_paths)}")
 
+    bridge_variant = BRIDGE_VARIANT.get(args.variant, "standard")
+    # Multi-ABD needs the 4-char (A,B,E,D) layout; if the user left the 3-char
+    # default in place, extend it (D defaults to the C/E layout).
+    sweep_layout = args.layout
+    if bridge_variant == "multi_abd" and len(sweep_layout) == 3:
+        sweep_layout = sweep_layout + sweep_layout[2]
+
     all_configs = []
     for cfg_path in config_paths:
         all_configs.extend(
-            expand_sweep(cfg_path, args.arch, dtype=args.dtype, layout=args.layout)
+            expand_sweep(
+                cfg_path,
+                args.arch,
+                dtype=args.dtype,
+                layout=sweep_layout,
+                variant=bridge_variant,
+            )
         )
 
     if args.max_kernels > 0:

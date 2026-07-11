@@ -34,8 +34,13 @@ if gemm_pypath:
         if p and p not in sys.path:
             sys.path.insert(0, p)
 
-from gemm_utils import GemmProblem, GpuGemmRunner  # noqa: E402
+from gemm_utils import GemmProblem, GpuGemmRunner, GpuMultiABDRunner  # noqa: E402
 import numpy as np  # noqa: E402
+
+
+def _is_multi_abd(kernel_name):
+    """A multi_abd kernel name carries the ``_multiabd_`` suffix (see codegen)."""
+    return "_multiabd_" in (kernel_name or "")
 
 
 def _run_one(idx, so_path, prob_dict, kernel_name, verify=False, verify_tol=2e-2):
@@ -49,21 +54,30 @@ def _run_one(idx, so_path, prob_dict, kernel_name, verify=False, verify_tol=2e-2
     try:
         problem = GemmProblem.from_dict(prob_dict)
 
-        # Cache host matrices per shape so batch mode doesn't regenerate huge inputs per kernel.
-        cache = getattr(_run_one, "_ab_cache", {})
-        key = (problem.M, problem.N, problem.K)
-        if key not in cache:
-            rng = np.random.RandomState(42)
-            cache[key] = (
-                (rng.randn(problem.M, problem.K) * 0.1).astype(np.float32),
-                (rng.randn(problem.K, problem.N) * 0.1).astype(np.float32),
-            )
-            _run_one._ab_cache = cache
-        A, B = cache[key]
+        # Multi-ABD has a divergent (array-pointer) ABI and its own runner, which
+        # generates its A/B/D operands internally (no shared A,B). Route by name.
+        if _is_multi_abd(kernel_name):
+            # CRITICAL: load the library ONLY inside this subprocess.
+            runner = GpuMultiABDRunner(lib_path=so_path)
+            result = runner.run(problem)
+            A = B = None
+        else:
+            # Cache host matrices per shape so batch mode doesn't regenerate huge
+            # inputs per kernel.
+            cache = getattr(_run_one, "_ab_cache", {})
+            key = (problem.M, problem.N, problem.K)
+            if key not in cache:
+                rng = np.random.RandomState(42)
+                cache[key] = (
+                    (rng.randn(problem.M, problem.K) * 0.1).astype(np.float32),
+                    (rng.randn(problem.K, problem.N) * 0.1).astype(np.float32),
+                )
+                _run_one._ab_cache = cache
+            A, B = cache[key]
 
-        # CRITICAL: load the library ONLY inside this subprocess.
-        runner = GpuGemmRunner(lib_path=so_path)
-        result = runner.run(A, B, problem)
+            # CRITICAL: load the library ONLY inside this subprocess.
+            runner = GpuGemmRunner(lib_path=so_path)
+            result = runner.run(A, B, problem)
 
         if result.success:
             non_zero = (
@@ -79,7 +93,12 @@ def _run_one(idx, so_path, prob_dict, kernel_name, verify=False, verify_tol=2e-2
                 "non_zero": non_zero,
                 "kernel": kernel_name,
             }
-            if verify:
+            # Multi-ABD's reference is a multi-tensor sum with per-group element-
+            # wise ops whose operands the runner generates internally, so the
+            # simple A@B check does not apply; correctness for multi_abd is
+            # covered by the Old-TE profiler's own --verify path. Only run the
+            # numpy reference for the single-A/single-B standard path.
+            if verify and A is not None and B is not None:
                 ref = A.astype(np.float32) @ B.astype(np.float32)
                 got = result.output.astype(np.float32)
                 denom = float(np.max(np.abs(ref))) or 1.0

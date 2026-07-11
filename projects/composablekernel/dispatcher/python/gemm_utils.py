@@ -106,6 +106,19 @@ class GemmKernelConfig:
     gfx_arch: str = "gfx942"
     variant: str = "standard"
 
+    # --- Multi-ABD only ----------------------------------------------------
+    # Arrays of A/B/D tensors and per-group element-wise ops. These are
+    # behavior-affecting and appear in .name (and thus in the codegen kernel
+    # name) so distinct tensor counts / ops never collapse to one kernel.
+    # layout_d is the 4th ('D') char of the multi_abd rcrr layout code.
+    num_a_tensors: int = 2
+    num_b_tensors: int = 2
+    num_d_tensors: int = 2
+    a_elementwise_op: str = "PassThrough"
+    b_elementwise_op: str = "PassThrough"
+    cde_elementwise_op: str = "PassThrough"
+    layout_d: str = "row"
+
     # ------------------------------------------------------------------ #
     # Derived string fragments
     # ------------------------------------------------------------------ #
@@ -117,6 +130,11 @@ class GemmKernelConfig:
             + _LAYOUT_CHAR[self.layout_b]
             + _LAYOUT_CHAR[self.layout_c]
         )
+
+    @property
+    def layout4(self) -> str:
+        """4-char multi_abd layout string (A,B,E,D), e.g. 'rcrr'."""
+        return self.layout + _LAYOUT_CHAR[self.layout_d]
 
     @property
     def tile_str(self) -> str:
@@ -140,8 +158,11 @@ class GemmKernelConfig:
         ``dispatcher_get_kernel_name``). This is the single thread tying
         config -> codegen -> runtime together.
         """
+        # Multi-ABD uses the 4-char layout (A,B,E,D); every other variant the
+        # 3-char (A,B,C). This mirrors KernelNaming.generate in the codegen.
+        layout_str = self.layout4 if self.variant == "multi_abd" else self.layout
         name = (
-            f"gemm_{self.dtype_a}_{self.layout}"
+            f"gemm_{self.dtype_a}_{layout_str}"
             f"_{self.pipeline}_{self.epilogue}_{self.scheduler}"
             f"_{_cap(self.pad_m)}_{_cap(self.pad_n)}_{_cap(self.pad_k)}"
             f"_{_cap(self.persistent)}"
@@ -151,6 +172,15 @@ class GemmKernelConfig:
             name += "_preshuffle"
         elif self.variant == "streamk":
             name += "_streamk"
+        elif self.variant == "multi_abd":
+            # Byte-for-byte match to codegen KernelNaming.generate's multiabd
+            # suffix: tensor counts then the three element-wise ops.
+            name += (
+                f"_multiabd_a{self.num_a_tensors}_b{self.num_b_tensors}"
+                f"_d{self.num_d_tensors}"
+                f"_{self.a_elementwise_op}_{self.b_elementwise_op}"
+                f"_{self.cde_elementwise_op}"
+            )
         return name
 
     # ------------------------------------------------------------------ #
@@ -163,7 +193,7 @@ class GemmKernelConfig:
         triple ``warp_*`` and the MFMA triple ``warp_tile_*``. We translate
         from dispatcher semantics here so the mapping cannot drift.
         """
-        return {
+        cfg = {
             "tile_config": {
                 "tile_m": [self.tile_m],
                 "tile_n": [self.tile_n],
@@ -187,6 +217,19 @@ class GemmKernelConfig:
                 "persistent": [self.persistent],
             },
         }
+        # Multi-ABD codegen reads its tensor counts / element-wise ops from a
+        # dedicated ``multi_abd_config`` block. These are scalars (one kernel per
+        # config), matching the codegen's _get_configs_for_variant reader.
+        if self.variant == "multi_abd":
+            cfg["multi_abd_config"] = {
+                "num_a_tensors": self.num_a_tensors,
+                "num_b_tensors": self.num_b_tensors,
+                "num_d_tensors": self.num_d_tensors,
+                "a_elementwise_op": self.a_elementwise_op,
+                "b_elementwise_op": self.b_elementwise_op,
+                "cde_elementwise_op": self.cde_elementwise_op,
+            }
+        return cfg
 
     def to_dict(self) -> Dict[str, Any]:
         return {
@@ -620,6 +663,211 @@ class GpuGemmRunner:
 
 
 # ============================================================================
+# Multi-ABD ctypes ABI wrapper + runner (divergent, array-pointer ABI)
+# ============================================================================
+
+# Element size (bytes) per CK dtype -- mirrors the codegen's ELEMENT_SIZE_MAP and
+# lets the ctypes shim size its device buffers without knowing the CK type.
+_ELEM_BYTES = {"fp16": 2, "bf16": 2, "fp32": 4, "fp8": 1, "bf8": 1, "int8": 1, "int32": 4}
+
+
+class MultiABDDispatcherLib:
+    """Thin ctypes wrapper around a compiled gemm_multi_abd dispatcher .so.
+
+    Multi-ABD is registry-bypass with a divergent ABI: ``dispatcher_run_multi_abd``
+    takes ARRAYS of host pointers (one per A/B/D tensor) plus per-group element
+    sizes, and the .so owns all GPU memory (hipMalloc/Memcpy/Free) internally.
+    """
+
+    def __init__(self, so_path: Path):
+        self._path = Path(so_path)
+        self._lib = ctypes.CDLL(str(self._path))
+        self._setup_functions()
+
+    def _setup_functions(self) -> None:
+        lib = self._lib
+        lib.dispatcher_initialize.argtypes = []
+        lib.dispatcher_initialize.restype = ctypes.c_int
+        lib.dispatcher_get_kernel_name.argtypes = []
+        lib.dispatcher_get_kernel_name.restype = ctypes.c_char_p
+        for fn in (
+            "dispatcher_get_num_a_tensors",
+            "dispatcher_get_num_b_tensors",
+            "dispatcher_get_num_d_tensors",
+        ):
+            getattr(lib, fn).argtypes = []
+            getattr(lib, fn).restype = ctypes.c_int
+        lib.dispatcher_run_multi_abd.argtypes = [
+            ctypes.POINTER(ctypes.c_void_p),  # as_hosts
+            ctypes.POINTER(ctypes.c_void_p),  # bs_hosts
+            ctypes.POINTER(ctypes.c_void_p),  # ds_hosts
+            ctypes.c_void_p,  # e_host
+            ctypes.POINTER(ctypes.c_int64),  # stride_as
+            ctypes.POINTER(ctypes.c_int64),  # stride_bs
+            ctypes.POINTER(ctypes.c_int64),  # stride_ds
+            ctypes.c_int64,  # stride_e
+            ctypes.c_int,  # elem_a
+            ctypes.c_int,  # elem_b
+            ctypes.c_int,  # elem_d
+            ctypes.c_int,  # elem_e
+            ctypes.c_int,  # num_a
+            ctypes.c_int,  # num_b
+            ctypes.c_int,  # num_d
+            ctypes.c_int64,  # M
+            ctypes.c_int64,  # N
+            ctypes.c_int64,  # K
+            ctypes.POINTER(ctypes.c_float),  # time_ms
+        ]
+        lib.dispatcher_run_multi_abd.restype = ctypes.c_int
+        lib.dispatcher_cleanup.argtypes = []
+        lib.dispatcher_cleanup.restype = None
+
+    @property
+    def path(self) -> Path:
+        return self._path
+
+    def initialize(self) -> bool:
+        return self._lib.dispatcher_initialize() == 0
+
+    @property
+    def kernel_name(self) -> str:
+        raw = self._lib.dispatcher_get_kernel_name()
+        return raw.decode("utf-8") if raw else "unknown"
+
+    @property
+    def tensor_counts(self) -> Tuple[int, int, int]:
+        return (
+            int(self._lib.dispatcher_get_num_a_tensors()),
+            int(self._lib.dispatcher_get_num_b_tensors()),
+            int(self._lib.dispatcher_get_num_d_tensors()),
+        )
+
+    def run(
+        self,
+        as_arrays: List[np.ndarray],
+        bs_arrays: List[np.ndarray],
+        ds_arrays: List[np.ndarray],
+        e_array: np.ndarray,
+        M: int,
+        N: int,
+        K: int,
+        elem_a: int,
+        elem_b: int,
+        elem_d: int,
+        elem_e: int,
+    ) -> Tuple[int, float]:
+        def _ptr_array(arrays):
+            arr = (ctypes.c_void_p * max(len(arrays), 1))()
+            for i, a in enumerate(arrays):
+                arr[i] = a.ctypes.data_as(ctypes.c_void_p)
+            return arr
+
+        as_ptrs = _ptr_array(as_arrays)
+        bs_ptrs = _ptr_array(bs_arrays)
+        ds_ptrs = _ptr_array(ds_arrays)
+        # Strides <= 0 tell the kernel to use its default layout-derived stride.
+        null_i64 = ctypes.POINTER(ctypes.c_int64)()
+        time_ms = ctypes.c_float(0.0)
+        status = self._lib.dispatcher_run_multi_abd(
+            as_ptrs,
+            bs_ptrs,
+            ds_ptrs,
+            e_array.ctypes.data_as(ctypes.c_void_p),
+            null_i64,
+            null_i64,
+            null_i64,
+            0,
+            elem_a,
+            elem_b,
+            elem_d,
+            elem_e,
+            len(as_arrays),
+            len(bs_arrays),
+            len(ds_arrays),
+            M,
+            N,
+            K,
+            ctypes.byref(time_ms),
+        )
+        return status, time_ms.value
+
+    def cleanup(self) -> None:
+        self._lib.dispatcher_cleanup()
+
+
+class GpuMultiABDRunner:
+    """High-level multi-ABD runner: construct from a .so, call run(problem).
+
+    All A/B/D operands share the group dtype/layout (matching the Tile Engine
+    gemm_multi_abd op). The runner builds the host operand buffers in the
+    kernel's element dtype + layout and hands raw pointer arrays to the .so,
+    which owns GPU memory. fp16 is the only supported multi-abd dtype.
+    """
+
+    def __init__(self, lib_path: Path):
+        self.lib = MultiABDDispatcherLib(lib_path)
+        if not self.lib.initialize():
+            raise RuntimeError(f"Failed to initialize multi_abd .so: {lib_path}")
+        self._kernel_name = self.lib.kernel_name
+        self._num_a, self._num_b, self._num_d = self.lib.tensor_counts
+
+    @property
+    def kernel_name(self) -> str:
+        return self._kernel_name
+
+    def run(self, problem: GemmProblem, seed: int = 0) -> GemmResult:
+        M, N, K = problem.M, problem.N, problem.K
+        dtype = _dtype_from_kernel_name(self._kernel_name)
+        # Kernel name for multi_abd is gemm_<dtype>_<4char-layout>_...; take the
+        # A/B/D layout chars (E is the C position, index 2).
+        parts = self._kernel_name.split("_")
+        layout4 = parts[2] if len(parts) > 2 else "rcrr"
+        la, lb = layout4[0], layout4[1]
+        ld = layout4[3] if len(layout4) >= 4 else "r"
+
+        rng = np.random.default_rng(seed)
+
+        def _mk(rows, cols, layout_char, n_tensors, lo, hi):
+            outs = []
+            for _ in range(n_tensors):
+                x = rng.uniform(lo, hi, size=(rows, cols)).astype(np.float32)
+                x_lay = x if layout_char == "r" else x.T
+                if dtype == "fp16":
+                    outs.append(np.ascontiguousarray(x_lay, dtype=np.float16))
+                else:
+                    raise ValueError(f"multi_abd runner supports fp16 only, got {dtype}")
+            return outs
+
+        as_arrays = _mk(M, K, la, self._num_a, -5.0, 5.0)
+        bs_arrays = _mk(K, N, lb, self._num_b, -5.0, 5.0)
+        ds_arrays = _mk(M, N, ld, self._num_d, -1.0, 1.0)
+        elem = _ELEM_BYTES.get(dtype, 2)
+        e_array = np.zeros((M, N), dtype=np.float16)
+
+        status, time_ms = self.lib.run(
+            as_arrays,
+            bs_arrays,
+            ds_arrays,
+            e_array,
+            M,
+            N,
+            K,
+            elem,
+            elem,
+            elem,
+            elem,
+        )
+        tflops = (problem.flops / (time_ms * 1e-3)) / 1e12 if time_ms > 0 else 0.0
+        return GemmResult(
+            output=e_array,
+            time_ms=time_ms,
+            status=status,
+            tflops=tflops,
+            kernel_name=self._kernel_name,
+        )
+
+
+# ============================================================================
 # Build API: codegen + hipcc -> .so paths (no GPU)
 # ============================================================================
 
@@ -705,7 +953,13 @@ def _build_compile_jobs(
     ck_root = root.parent
     build_dir = _cu.get_build_dir()
     output_dir = _cu.get_generated_kernels_dir()
-    ctypes_source = root / "bindings" / "ctypes" / "gemm_ctypes_lib.cpp"
+    # Multi-ABD has a divergent (array-pointer) ABI and is registry-bypass, so it
+    # is compiled against its own ctypes lib (dispatcher_run_multi_abd) instead of
+    # the regular single-pointer gemm_ctypes_lib.cpp.
+    if config.variant == "multi_abd":
+        ctypes_source = root / "bindings" / "ctypes" / "gemm_multi_abd_ctypes_lib.cpp"
+    else:
+        ctypes_source = root / "bindings" / "ctypes" / "gemm_ctypes_lib.cpp"
     static_lib = build_dir / "libck_tile_dispatcher.a"
 
     lib_path = build_dir / "examples" / f"lib{config.name}.so"
@@ -745,10 +999,14 @@ def _build_compile_jobs(
         f"--offload-arch={config.gfx_arch}",
         "--hip-link",
         str(obj_file),
-        str(static_lib),
-        "-o",
-        str(lib_path),
     ]
+    # The regular GEMM ABI goes through the dispatcher registry and must link the
+    # dispatcher static lib. Multi-ABD is registry-bypass (it calls
+    # SelectedKernel::launch directly), so it needs only the force-included
+    # kernel -- no static lib -- keeping its .so self-contained.
+    if config.variant != "multi_abd":
+        link_cmd.append(str(static_lib))
+    link_cmd += ["-o", str(lib_path)]
     job = {"compile_cmd": compile_cmd, "link_cmd": link_cmd, "lib_path": str(lib_path)}
     return job, lib_path
 
@@ -786,13 +1044,24 @@ def setup_multiple_gemm_dispatchers(
     codegen_script = _cu.get_codegen_path()
     output_dir = _cu.get_generated_kernels_dir()
     static_lib = _cu.get_build_dir() / "libck_tile_dispatcher.a"
-    ctypes_source = (
-        _cu.get_dispatcher_root() / "bindings" / "ctypes" / "gemm_ctypes_lib.cpp"
+    ctypes_dir = _cu.get_dispatcher_root() / "bindings" / "ctypes"
+    # Multi-ABD is registry-bypass: it links only the force-included kernel, so it
+    # needs its own ctypes source but NOT the dispatcher static lib. Every other
+    # variant goes through the registry and requires both.
+    variants = {c.variant for c in configs}
+    all_multi_abd = variants == {"multi_abd"}
+    ctypes_source = ctypes_dir / (
+        "gemm_multi_abd_ctypes_lib.cpp" if all_multi_abd else "gemm_ctypes_lib.cpp"
     )
-    if not static_lib.exists() or not ctypes_source.exists():
+    if not ctypes_source.exists():
         raise FileNotFoundError(
-            "Missing static lib or ctypes source required for compilation:\n"
-            f"  {static_lib}\n  {ctypes_source}\n"
+            f"Missing ctypes source required for compilation:\n  {ctypes_source}\n"
+            "Build the dispatcher first (cmake + make)."
+        )
+    if not all_multi_abd and not static_lib.exists():
+        raise FileNotFoundError(
+            "Missing dispatcher static lib required for compilation:\n"
+            f"  {static_lib}\n"
             "Build the dispatcher first (cmake + make)."
         )
 
@@ -807,7 +1076,9 @@ def setup_multiple_gemm_dispatchers(
                 "codegen_script": str(codegen_script),
                 "output_dir": str(output_dir),
                 "dtype": c.dtype_a,
-                "layout": c.layout,
+                # Multi-ABD codegen expects the 4-char (A,B,E,D) layout so it can
+                # split off the D layout; every other variant uses 3-char.
+                "layout": c.layout4 if c.variant == "multi_abd" else c.layout,
                 "gpu_target": c.gfx_arch,
                 "tile_config_json": c.to_codegen_json(),
                 "hpp_glob_pattern": f"{c.name}.hpp",
@@ -915,6 +1186,13 @@ def expand_sweep(
     arch: str,
     dtype: str = "fp16",
     layout: str = "rcr",
+    variant: str = "standard",
+    num_a_tensors: int = 2,
+    num_b_tensors: int = 2,
+    num_d_tensors: int = 2,
+    a_elementwise_op: str = "PassThrough",
+    b_elementwise_op: str = "PassThrough",
+    cde_elementwise_op: str = "PassThrough",
 ) -> List[GemmKernelConfig]:
     """Expand a Tile Engine GEMM JSON sweep config into GemmKernelConfig list.
 
@@ -926,6 +1204,10 @@ def expand_sweep(
 
     The signature is controlled by the `dtype` and `layout` arguments (defaults
     to fp16 / rcr).
+
+    For ``variant='multi_abd'`` the ``layout`` is the 4-char (A,B,E,D) code
+    (e.g. ``rcrr``); the tensor counts and per-group element-wise ops are carried
+    onto every produced config so they participate in the kernel name.
     """
     with open(config_path) as f:
         cfg = json.load(f)
@@ -952,6 +1234,8 @@ def expand_sweep(
     persistents = _expand_values(tr.get("persistent"), [False])
 
     la, lb, lc = layout[0], layout[1], layout[2]
+    # Multi-ABD carries a 4th (D) layout char; default D to C's layout otherwise.
+    ld = layout[3] if (variant == "multi_abd" and len(layout) >= 4) else lc
 
     configs: List[GemmKernelConfig] = []
     seen: set = set()
@@ -1015,6 +1299,14 @@ def expand_sweep(
             pad_k=bool(pk),
             persistent=bool(persist),
             gfx_arch=arch,
+            variant=variant,
+            num_a_tensors=num_a_tensors,
+            num_b_tensors=num_b_tensors,
+            num_d_tensors=num_d_tensors,
+            a_elementwise_op=a_elementwise_op,
+            b_elementwise_op=b_elementwise_op,
+            cde_elementwise_op=cde_elementwise_op,
+            layout_d=_LAYOUT_WORD[ld],
         )
         if c.name in seen:
             continue

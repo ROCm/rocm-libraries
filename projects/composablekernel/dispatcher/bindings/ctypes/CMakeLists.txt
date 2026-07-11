@@ -72,6 +72,38 @@ else()
 endif()
 
 # =============================================================================
+# GEMM Multi-ABD ctypes Library (divergent, array-pointer ABI; registry-bypass)
+# =============================================================================
+#
+# gemm_multi_abd takes ARRAYS of A/B/D tensors, so it has its own C ABI
+# (dispatcher_run_multi_abd) and calls SelectedKernel::launch directly rather
+# than going through the name-keyed dispatcher registry. It is compiled against a
+# force-included generated multi_abd kernel header (name carries the
+# ``_multiabd_`` suffix). The Python bridge normally builds these .so files at
+# runtime via hipcc; this target exists for CMake-driven / CI builds.
+file(GLOB GEMM_MULTI_ABD_KERNEL_HEADERS
+    "${CMAKE_BINARY_DIR}/generated_kernels/gemm_*_multiabd_*.hpp")
+if(GEMM_MULTI_ABD_KERNEL_HEADERS)
+    list(GET GEMM_MULTI_ABD_KERNEL_HEADERS 0 GEMM_MULTI_ABD_KERNEL_HEADER)
+    message(STATUS "Found GEMM Multi-ABD kernel for ctypes lib: ${GEMM_MULTI_ABD_KERNEL_HEADER}")
+
+    add_ctypes_library(dispatcher_gemm_multi_abd_lib
+        gemm_multi_abd_ctypes_lib.cpp
+        KERNEL_HEADER ${GEMM_MULTI_ABD_KERNEL_HEADER}
+    )
+    target_compile_definitions(dispatcher_gemm_multi_abd_lib PRIVATE
+        CK_TILE_SINGLE_KERNEL_INCLUDE)
+else()
+    message(STATUS "No GEMM Multi-ABD kernel found for ctypes lib - building without kernel")
+    add_library(dispatcher_gemm_multi_abd_lib SHARED gemm_multi_abd_ctypes_lib.cpp)
+    target_include_directories(dispatcher_gemm_multi_abd_lib PRIVATE
+        ${PROJECT_SOURCE_DIR}/include
+        ${PROJECT_SOURCE_DIR}/dispatcher/include
+    )
+    target_link_libraries(dispatcher_gemm_multi_abd_lib PRIVATE hip::device)
+endif()
+
+# =============================================================================
 # Convolution ctypes Library (supports forward + bwd_data)
 # =============================================================================
 
