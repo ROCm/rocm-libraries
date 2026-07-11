@@ -35,12 +35,19 @@ for _dt_name, _mld_name in [
 _NP_TO_DTYPE = {_np.dtype(v): k for k, v in _DTYPE_TO_NP.items()}
 
 
+# np.uint8 is also acceptable for R_8I (opaque workspace bytes)
+_ALSO_ACCEPTED = {
+    _core.DataType.R_8I: _np.dtype(_np.uint8),
+}
+
+
 def from_numpy(arr, dtype):
     """Validated host→device transfer. Raises ValueError at the boundary."""
     if not arr.flags["C_CONTIGUOUS"]:
         raise ValueError("array must be C-contiguous")
     expected = _DTYPE_TO_NP.get(dtype)
-    if expected is not None and arr.dtype != expected:
+    also = _ALSO_ACCEPTED.get(dtype)
+    if expected is not None and arr.dtype != _np.dtype(expected) and arr.dtype != (also or _np.dtype(expected)):
         raise ValueError(
             f"numpy dtype {arr.dtype} does not match requested {dtype!r} "
             f"(expected {_np.dtype(expected)})"
@@ -318,6 +325,28 @@ def _from_dlpack(obj):
     ptr = iface["data"][0]          # (pointer, read_only)
     shape = list(iface["shape"])
     typestr = iface.get("typestr", "<f4")
+
+    # Reject non-contiguous tensors before attempting the D2D copy.
+    strides = iface.get("strides")
+    if strides is not None:
+        _TYPESTR_ITEMSIZE_CHECK = {
+            "<f4": 4, ">f4": 4,
+            "<f2": 2, ">f2": 2,
+            "<f8": 8, ">f8": 8,
+            "<i4": 4, ">i4": 4,
+            "|i1": 1, "|u1": 1,
+        }
+        nbytes_per_elem = _TYPESTR_ITEMSIZE_CHECK.get(typestr, 4)
+        expected_strides = []
+        s = nbytes_per_elem
+        for dim in reversed(shape):
+            expected_strides.insert(0, s)
+            s *= dim
+        if tuple(strides) != tuple(expected_strides):
+            raise ValueError(
+                "from_dlpack: non-contiguous tensor not supported; "
+                "call .contiguous() on the source tensor first"
+            )
 
     _TYPESTR_TO_DTYPE = {
         "<f4": _core.DataType.R_32F,

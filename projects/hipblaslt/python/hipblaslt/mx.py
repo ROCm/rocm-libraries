@@ -30,7 +30,8 @@ def build_block_scales(ref_f32, block=32):
     """
     ref = np.asarray(ref_f32, dtype=np.float32)
     rows, cols = ref.shape
-    assert cols % block == 0, "innermost dim must be a multiple of block"
+    if cols % block != 0:
+        raise ValueError(f"innermost dim ({cols}) must be a multiple of block ({block})")
     nblocks = cols // block
     blocks = ref.reshape(rows, nblocks, block)
     # per-block max magnitude -> power-of-two exponent (UE8M0 stores the exponent)
@@ -102,7 +103,10 @@ def swizzle_scales(scales_canonical, tile=(32, 8, 4)):
     """
     tileMN, tileK, subTileK = tile
     rows, cols = scales_canonical.shape
-    assert rows % tileMN == 0 and cols % tileK == 0, "shape must tile evenly"
+    if rows % tileMN != 0 or cols % tileK != 0:
+        raise ValueError(
+            f"shape ({rows}, {cols}) must tile evenly with tileMN={tileMN}, tileK={tileK}"
+        )
     rt, ct = rows // tileMN, cols // tileK
     a = scales_canonical.reshape(rt, tileMN, ct, tileK)
     a = a.transpose(0, 2, 3, 1)  # (rt, ct, tileK, tileMN)

@@ -41,7 +41,11 @@ public:
     MatrixLayout(const MatrixLayout&) = delete;
     MatrixLayout& operator=(const MatrixLayout&) = delete;
 
-    void set_attribute(hipblasLtMatrixLayoutAttribute_t attr, int32_t value)
+    void set_attribute_i32(hipblasLtMatrixLayoutAttribute_t attr, int32_t value)
+    {
+        HIPBLASLT_CHECK(hipblasLtMatrixLayoutSetAttribute(l_, attr, &value, sizeof(value)));
+    }
+    void set_attribute_i64(hipblasLtMatrixLayoutAttribute_t attr, int64_t value)
     {
         HIPBLASLT_CHECK(hipblasLtMatrixLayoutSetAttribute(l_, attr, &value, sizeof(value)));
     }

@@ -18,6 +18,9 @@ namespace nb = nanobind;
 // The hipblaslt_f8/bf8 structs inherit the float constructor from their base
 // classes via `using __hip_fp8_e4m3::__hip_fp8_e4m3;` etc., so hipblaslt_f8(v)
 // where v is float is valid and uses the ground-truth conversion path.
+// For the FNUZ variants, the float constructor is also available via the same
+// `using` directive on __hip_fp8_e4m3_fnuz/__hip_fp8_e5m2_fnuz base classes,
+// so direct float construction is used (no _Float16 cast required).
 static uint8_t encode_one(float v, const std::string& fmt)
 {
     uint8_t b;
@@ -35,13 +38,13 @@ static uint8_t encode_one(float v, const std::string& fmt)
     }
     if(fmt == "e4m3_fnuz")
     {
-        hipblaslt_f8_fnuz x(static_cast<_Float16>(v));
+        hipblaslt_f8_fnuz x(v);
         __builtin_memcpy(&b, &x, 1);
         return b;
     }
     if(fmt == "e5m2_fnuz")
     {
-        hipblaslt_bf8_fnuz x(static_cast<_Float16>(v));
+        hipblaslt_bf8_fnuz x(v);
         __builtin_memcpy(&b, &x, 1);
         return b;
     }

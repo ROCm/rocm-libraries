@@ -23,7 +23,9 @@ void init_descriptors(nb::module_& m)
     nb::class_<MatrixLayout>(m, "MatrixLayout")
         .def(nb::init<hipDataType, uint64_t, uint64_t, int64_t>(),
              nb::arg("dtype"), nb::arg("rows"), nb::arg("cols"), nb::arg("ld"))
-        .def("set_attribute", &MatrixLayout::set_attribute,
+        .def("set_attribute", &MatrixLayout::set_attribute_i32,
+             nb::arg("attr"), nb::arg("value"))
+        .def("set_attribute_i64", &MatrixLayout::set_attribute_i64,
              nb::arg("attr"), nb::arg("value"))
         .def_prop_ro("ptr", &MatrixLayout::ptr);
 
