@@ -288,3 +288,11 @@ run_unified_attention_torch (production dispatch -> 4wgqa), block_size=16 single
   (1) ragged multi-seq cu_seqlens_q (prefill/decode/chunked, dual-ref);
   (2) productionization (build_gfx942_4warp_gqa wired into dispatch, full-dispatch ragged
   parity BS16/32 PASS, perf parity+). Was: shipped std-QK 0.55x AITER -> now 4wgqa ~1.0x.
+
+## UPDATE 16: DIRECT same-run dispatch-vs-AITER (definitive, no inference)
+run_unified_attention_torch(4wgqa, block_size=16) vs AITER unified_attention, IDENTICAL
+inputs, SAME-RUN timing (the methodology-airtight number, not inferred):
+  SQ=4096: OURS 1589.8us vs AITER 1631.8us = 0.97x (OURS 3% FASTER)
+  SQ=8192: OURS 5661.2us vs AITER 6020.7us = 0.94x (OURS 6% FASTER)
+The SHIPPED production path BEATS AITER at both ticket shapes. vs prior shipped std-QK 0.55x.
+AICK-1495 gfx942 D256: DONE - correct (full-dispatch ragged parity BS16/32) + faster-than-AITER.
