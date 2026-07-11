@@ -292,8 +292,8 @@ namespace rocsparse
         else
         {
 #ifndef NDEBUG
-            std::cout << "invalid precision configuration: " << "t_type: "
-                      << rocsparse::enum_utils::to_string(t_type_) << std::endl
+            std::cout << "invalid precision configuration: "
+                      << "t_type: " << rocsparse::enum_utils::to_string(t_type_) << std::endl
                       << ", i_type: " << rocsparse::enum_utils::to_string(i_type_) << std::endl
                       << ", j_type: " << rocsparse::enum_utils::to_string(j_type_) << std::endl
                       << ", a_type: " << rocsparse::enum_utils::to_string(a_type_) << std::endl
@@ -322,8 +322,8 @@ namespace rocsparse
 #endif
 
             std::stringstream sstr;
-            sstr << "invalid precision configuration: " << "t_type: "
-                 << rocsparse::enum_utils::to_string(t_type_)
+            sstr << "invalid precision configuration: "
+                 << "t_type: " << rocsparse::enum_utils::to_string(t_type_)
                  << ", i_type: " << rocsparse::enum_utils::to_string(i_type_)
                  << ", j_type: " << rocsparse::enum_utils::to_string(j_type_)
                  << ", a_type: " << rocsparse::enum_utils::to_string(a_type_)
