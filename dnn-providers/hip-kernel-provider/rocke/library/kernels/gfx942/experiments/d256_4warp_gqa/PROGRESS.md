@@ -307,3 +307,27 @@ range 0.88-1.04x, within run-to-run noise). Both vs prior shipped std-QK 0.55x -
 SCOPE CORRECTION: all validation this session ran on gfx942 ONLY. gfx950 was referenced as a
 routing precedent (PR #9233), NOT built or run here. Claim: "GPU-verified correct on gfx942;
 gfx950 not tested this session (separate arch build+validation required)."
+
+## UPDATE 18: merge-time housekeeping (2026-07-11)
+Source hygiene DONE: scrubbed ALL tracking-ids from the 2 production files
+(attention_tiled_2d.py + attention_unified.py -> 0 refs; commit 329a021301d, clean msg).
+Both files parse OK; 4wgqa still host-compiles from spec + full-dispatch parity holds.
+
+MERGE STRUCTURE (honest): this prototype branch bundles 3 separable units, NONE on develop:
+  (a) gfx950 D256 32x32 + interleave  -> PR #9233 (its own branch/PR)
+  (b) gfx950 slab-pad K_lds           -> PR #9260 (colleague)
+  (c) gfx942 D256: std-QK + wide-flash + 4-warp GQA (this session's productionization)
+_d256_gfx950_fast AND _d256_gfx942_fast are BOTH branch-only (not develop). So a clean
+single-feature 4wgqa PR is NOT "copy the 2 files" (that re-bundles #9233's gfx950 work).
+
+MERGE RECIPE for the gfx942 4wgqa PR (do when opening the real PR):
+  1. Land #9233 (gfx950) first -> its _d256_gfx950_fast + cache-key entry reach develop.
+  2. Rebase the gfx942 work onto that develop; the gfx942 diff then isolates cleanly
+     (gfx942/attention_tiled_2d.py 4wgqa builder + the gfx942 parts of unified.py:
+     _d256_gfx942_fast gate, cache-key predicate line, launch-meta branch, seam).
+  3. DEAD CODE decision: build_stdqk_attention_paged now has 0 call sites (4wgqa replaced
+     it at the seam). Keep as documented reference OR remove (~370 lines) for the PR.
+     Also drop the wide-flash std-QK experiments if not shipping.
+  4. Ship ONLY attention_tiled_2d.py + attention_unified.py; exclude experiments/ + PROGRESS.md.
+  5. Squash to ONE conventional commit, NO tracking-id in the message; put JIRA/ISSUE ID
+     in the PR DESCRIPTION (policy bot requires it there) + a test_*.py in the diff.
