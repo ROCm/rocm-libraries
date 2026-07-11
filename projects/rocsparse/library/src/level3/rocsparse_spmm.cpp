@@ -346,13 +346,15 @@ namespace rocsparse
             {
                 // The SpMM preprocess stage is optional in the generic API, and a
                 // reused descriptor may reach compute with a freshly allocated
-                // buffer that was never analyzed. The auto-selected default can
-                // resolve to nnz-split, which reads its row-limit segmentation out
-                // of temp_buffer, so ensure that segmentation exists by (re)running
-                // the analysis on the auto path here. It is cheap (one segmentation
-                // kernel) and capture-safe: the profile reduction is skipped once
-                // cached or while the stream is capturing, leaving only a launch.
-                if(csrmm_alg == rocsparse_csrmm_alg_default)
+                // buffer that was never analyzed. When a profile is already cached
+                // the auto-selected default can resolve to nnz-split, which reads
+                // its row-limit segmentation out of temp_buffer, so ensure that
+                // segmentation exists by (re)running the analysis on the auto path
+                // here. It is cheap (one segmentation kernel) and capture-safe: the
+                // cached profile makes the profiling reduction a no-op, leaving only
+                // a launch. Gate on a known profile so compute never profiles: with
+                // no cached profile the selector keeps the buffer-free row-split.
+                if(csrmm_alg == rocsparse_csrmm_alg_default && mat_A->line_profile.known)
                 {
                     RETURN_IF_ROCSPARSE_ERROR(rocsparse::csrmm_analysis(handle,
                                                                         trans_A,
@@ -480,8 +482,9 @@ namespace rocsparse
             {
                 // See the CSR branch: the preprocess stage is optional, so ensure
                 // the nnz-split row-limit segmentation is present in temp_buffer on
-                // the auto path before compute reads it. Cheap and capture-safe.
-                if(csrmm_alg == rocsparse_csrmm_alg_default)
+                // the auto path before compute reads it. Gate on a known profile so
+                // compute never profiles. Cheap and capture-safe.
+                if(csrmm_alg == rocsparse_csrmm_alg_default && mat_A->line_profile.known)
                 {
                     RETURN_IF_ROCSPARSE_ERROR(rocsparse::cscmm_analysis(handle,
                                                                         trans_A,
