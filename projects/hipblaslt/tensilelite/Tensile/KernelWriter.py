@@ -4961,6 +4961,20 @@ class KernelWriter(metaclass=abc.ABCMeta):
     ripo = self._buildRocIsaPassOptions(kernel)
     return rocIsaPass(moduleKernelBody, ripo)
 
+  @staticmethod
+  def _subtileStinkyWaitcntOverrides():
+    """Gfx1250 subtile waitcnt-only ST options (Step 5: no overlapping passes).
+
+    Python LogicalScheduler owns cluster barriers, wait-alu, and instruction
+    scheduling (SIA=3). ST runs at OptLevel 0 with waitcnt insertion only.
+    """
+    return {
+      "EnableWaitCntInsertion": True,
+      "EnableESM2": False,
+      "ClusterBarrier": False,
+      "EnableLoopCarriedTokenDeps": True,
+    }
+
   def _buildStinkyTofuModuleOptions(self, kernel, stinky_opt_level, option_overrides=None):
     options = {"OptLevel": stinky_opt_level,
                "EnableRemarks": bool(globalParameters.get("StinkyTofuEnableRemarks") or False),
@@ -5386,12 +5400,7 @@ class KernelWriter(metaclass=abc.ABCMeta):
       kernel["MathClocksUnrolledLoop"] = passResult.cycles
       self.updateOccupancyFromMaxVgpr(kernel, moduleKernelBody, passResult.maxVgpr)
 
-      waitcnt_overrides = {
-        "EnableWaitCntInsertion": True,
-        "EnableESM2": False,
-        "ClusterBarrier": False,
-        "EnableLoopCarriedTokenDeps": True,
-      }
+      waitcnt_overrides = self._subtileStinkyWaitcntOverrides()
       st_asm = self._runStinkyTofuPipeline(
         kernel, moduleKernelBody, fs, 0, option_overrides=waitcnt_overrides)
       if st_asm is not None:

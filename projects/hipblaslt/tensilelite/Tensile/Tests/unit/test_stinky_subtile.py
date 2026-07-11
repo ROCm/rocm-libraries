@@ -92,12 +92,7 @@ def test_build_stinky_options_waitcnt_only_overrides():
         "PrefetchLocalRead": 1,
     }
 
-    overrides = {
-        "EnableWaitCntInsertion": True,
-        "EnableESM2": False,
-        "ClusterBarrier": False,
-        "EnableLoopCarriedTokenDeps": True,
-    }
+    overrides = KernelWriter._subtileStinkyWaitcntOverrides()
     opts = KernelWriter._buildStinkyTofuModuleOptions(kw, kernel, 0, option_overrides=overrides)
 
     assert opts["OptLevel"] == 0
@@ -141,6 +136,7 @@ def test_build_stinky_options_opt0_default_disables_waitcnt():
 
 def test_kernel_body_subtile_waitcnt_tail_invokes_st_pipeline():
     import rocisa
+    from Tensile.KernelWriter import KernelWriter
     if not (rocisa.hasStinkyTofuBackend() and rocisa.isSupportedByStinkyTofu(GFX1250_ISA)):
         pytest.skip("StinkyTofu gfx1250 backend not available")
 
@@ -175,12 +171,7 @@ def test_kernel_body_subtile_waitcnt_tail_invokes_st_pipeline():
         passResult = kw._runRocIsaPassOnKernelBody(kernel, module_kernel_body)
         kernel["MathClocksUnrolledLoop"] = passResult.cycles
         kw.updateOccupancyFromMaxVgpr(kernel, module_kernel_body, passResult.maxVgpr)
-        waitcnt_overrides = {
-            "EnableWaitCntInsertion": True,
-            "EnableESM2": False,
-            "ClusterBarrier": False,
-            "EnableLoopCarriedTokenDeps": True,
-        }
+        waitcnt_overrides = KernelWriter._subtileStinkyWaitcntOverrides()
         st_asm = kw._runStinkyTofuPipeline(
             kernel, module_kernel_body, fs, 0, option_overrides=waitcnt_overrides)
         assert st_asm == "stinky_asm_output"
@@ -466,3 +457,68 @@ def test_mainloop_exposes_top_level_tail_no_load_loop_body_module():
         parts = mainLoop(writer, kernel)
 
     assert any(getattr(p, "name", None) == "noLoadLoopBody" for p in parts)
+
+
+def test_subtile_stinky_waitcnt_overrides_disable_overlapping_passes():
+    """Step 5: waitcnt-only overrides must gate off ST scheduler/ESM2/cluster passes."""
+    from Tensile.KernelWriter import KernelWriter
+
+    overrides = KernelWriter._subtileStinkyWaitcntOverrides()
+    assert overrides["EnableWaitCntInsertion"] is True
+    assert overrides["EnableESM2"] is False
+    assert overrides["ClusterBarrier"] is False
+    assert overrides["EnableLoopCarriedTokenDeps"] is True
+
+
+def test_subtile_waitcnt_asm_no_overlapping_st_passes():
+    """Step 5: generated asm must not duplicate Python cluster_barrier/wait_alu."""
+    import re
+    import subprocess
+    from pathlib import Path
+
+    import rocisa
+    if not (rocisa.hasStinkyTofuBackend() and rocisa.isSupportedByStinkyTofu(GFX1250_ISA)):
+        pytest.skip("StinkyTofu gfx1250 backend not available")
+
+    yaml = Path(TENSILE_ROOT) / "Tensile/Tests/common/gemm/gfx12/subtile_waitcnt_gfx1250.yaml"
+    if not yaml.is_file():
+        pytest.skip(f"missing bring-up yaml: {yaml}")
+
+    out_dir = Path(TENSILE_ROOT) / "tensile-out-step5-test"
+    python = Path(TENSILE_ROOT) / ".venv/bin/python"
+    tensile = Path(TENSILE_ROOT) / "Tensile/bin/Tensile"
+    st_lib = Path(TENSILE_ROOT) / "build_tmp/stinkytofu-install/lib"
+    env = os.environ.copy()
+    if st_lib.is_dir():
+        env["LD_LIBRARY_PATH"] = f"{st_lib}:{env.get('LD_LIBRARY_PATH', '')}"
+
+    subprocess.run(
+        [str(python), str(tensile), str(yaml), str(out_dir),
+         "--build-only", "--rocm-agent-enumerator", "rocm_agent_enumerator"],
+        cwd=TENSILE_ROOT,
+        env=env,
+        check=True,
+        stdout=subprocess.DEVNULL,
+        stderr=subprocess.PIPE,
+        text=True,
+    )
+
+    asm_files = list(out_dir.glob("**/*.s"))
+    assert asm_files, f"no assembly emitted under {out_dir}"
+    asm = asm_files[0].read_text()
+
+    # ClusterBarrier=False in ST overrides; bring-up yaml also has no cluster barrier.
+    assert "cluster_barrier" not in asm
+
+    # ST InsertWaitAluPass is gated by EnableESM2; subtile Python owns s_wait_alu.
+    wait_alu_lines = [line for line in asm.splitlines() if "s_wait_alu" in line]
+    assert wait_alu_lines, "expected gfx1250 subtile Python wait-alu in main loop"
+    for line in wait_alu_lines:
+        assert "LR offset" in line, (
+            f"unexpected s_wait_alu (ST ESM2 would not use Python LR comment): {line.strip()}")
+
+    # Waitcnt-only path ran: ST-inserted staggered dscnt waits present, hand-rolled gone.
+    assert "Wait for LR to complete" not in asm
+    assert "Wait TDM" not in asm
+    assert re.search(r"s_wait_dscnt \d+\s+// <This is \d+-cycle>", asm), (
+        "expected ST staggered s_wait_dscnt insertion")
