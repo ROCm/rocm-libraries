@@ -164,7 +164,11 @@ class Assembler(Component):
         path = Path(srcPath)
         try:
             src = path.read_text()
-        except UnicodeDecodeError:
+        except (UnicodeDecodeError, OSError):
+            # Opportunistic rewrite: a source that can't be read here (missing,
+            # unreadable, not text) is left alone -- the assembler invocation
+            # right after this will raise its own clear error if srcPath is
+            # genuinely bad, rather than a confusing traceback from this helper.
             return
 
         target = f"amdgcn-amd-amdhsa--{targetGfx}"

@@ -87,6 +87,12 @@ def hasCustomKernel(file: Path) -> bool:
     """
     Check if the given logic file contains at least one custom kernel.
 
+    Matches both the legacy flat ``CustomKernelName: <name>`` key and the
+    ``CustomKernel:`` mapping key (holding a ``name``/``args``/``macrotile``/...
+    block) that replaced it -- handleCustomKernel() still accepts either shape,
+    so this pre-filter must recognize both or it silently drops solutions from
+    logic files written in the older style.
+
     Args:
         file: Path to a logic file.
 
@@ -96,7 +102,7 @@ def hasCustomKernel(file: Path) -> bool:
     with open(file, "r") as f:
         for line in f:
             l = line.strip()
-            if l.startswith("name:") and not l.endswith("''"):
+            if l.startswith(("CustomKernelName:", "CustomKernel:")) and not l.endswith("''"):
                 return True
     return False
 
