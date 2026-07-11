@@ -771,8 +771,8 @@ def validateProblemTypeParameterTypes(state, srcFile="", *, raiseOnMismatch: boo
   - ``raiseOnMismatch=True`` (default, input-YAML path): raises a
     :class:`ConfigTypeError` on the first mistyped key encountered.
   - ``raiseOnMismatch=False`` (library-logic path): mismatches are only
-    appended to the module-level ``_typeMismatchCollector`` (printed
-    later via ``printTypeMismatchSummary``). Never raises.
+    appended to the module-level ``_typeMismatchCollector`` (reported
+    later by the aggregate create-library gate). Never raises here.
 
   Args:
       state: The ProblemType state dict (parameter name -> value).
