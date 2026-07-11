@@ -284,6 +284,28 @@ def test_subtile_emit_sync_tags_barrier():
     assert items[0].getMemToken().tokens == [0, 1]
 
 
+def test_subtile_emit_wait_gr_lr_skipped_when_stinky_subtile():
+    from Tensile.Components.Subtile.InstructionEmitter import InstructionEmitter
+    from Tensile.Components.Subtile.LogicalScheduler import WaitGROp, WaitGRCounts
+
+    writer = _writer_with_mem_tokens()
+    emitter = InstructionEmitter.__new__(InstructionEmitter)
+    emitter.writer = writer
+    emitter.tileInfoA = MagicMock(loadRatioGR=1.0)
+    emitter.tileInfoB = MagicMock(loadRatioGR=1.0)
+
+    counts = WaitGRCounts(A=1, B=1, SA=0, SB=0)
+    source = WaitGROp(wait_gr_counts=counts)
+
+    emitter.kernel = {"_StinkySubtile": 1, "enableTDMA": False, "enableTDMB": False}
+    assert emitter.emit_wait_gr(source) == []
+    assert emitter.emit_wait_lr() == []
+
+    emitter.kernel = {"enableTDMA": False, "enableTDMB": False}
+    assert len(emitter.emit_wait_gr(source)) == 1
+    assert len(emitter.emit_wait_lr()) == 1
+
+
 def test_subtile_cluster_barrier_tags_mem_tokens():
     from rocisa.instruction import SBarrier
 

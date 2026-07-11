@@ -151,6 +151,11 @@ class InstructionEmitter:
         # emit_mask_k_init, consumed by every emit_mask_k call in the tail body.
         self._tail_vDiff = None
 
+    @property
+    def _stinky_owns_waitcnt(self):
+        """True when StinkyTofu waitcnt insertion replaces hand-rolled waits."""
+        return bool(self.kernel.get("_StinkySubtile"))
+
     def emit_mfma(self, placement, unroll_iter=0):
         """Emit MFMA instructions from MFMAPlacement."""
         module = Module()
@@ -275,6 +280,9 @@ class InstructionEmitter:
 
     def emit_wait_gr(self, source):
         """Emit SWaitCnt for wait_gr from BaseOp with wait_gr_counts."""
+        if self._stinky_owns_waitcnt:
+            return []
+
         counts = source.wait_gr_counts
         if counts is None:
             return []
@@ -310,6 +318,8 @@ class InstructionEmitter:
         return [swait]
 
     def emit_wait_lr(self):
+        if self._stinky_owns_waitcnt:
+            return []
         return [SWaitCnt(dscnt=0, vlcnt=-1, vscnt=-1,
                          comment="Wait for LR to complete")]
 
