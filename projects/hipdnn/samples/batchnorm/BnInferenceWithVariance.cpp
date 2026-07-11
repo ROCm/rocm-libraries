@@ -39,20 +39,7 @@ bool SampleRunner::operator()(const TensorLayout& layout)
         .set_intermediate_data_type(intermediateType)
         .set_compute_data_type(hipdnn_frontend::DataType::FLOAT);
 
-    if(config.engine_id != -1)
-    {
-        graph->set_preferred_engine_id_ext(config.engine_id);
-    }
-    else if(!config.engine_name.empty())
-    {
-        if(!hipdnn_data_sdk::utilities::isEngineNameRegistered(config.engine_name))
-        {
-            std::cerr << "Warning: Unknown engine name: " << config.engine_name << "\n";
-        }
-
-        graph->set_preferred_engine_id_ext(
-            hipdnn_data_sdk::utilities::engineNameToId(config.engine_name));
-    }
+    setPreferredEngine(graph, config);
 
     auto x = createTensor({n, c, h, w}, inputType, layout);
     auto scale = createTensor({1, c, 1, 1}, intermediateType);
@@ -70,7 +57,7 @@ bool SampleRunner::operator()(const TensorLayout& layout)
         x, mean, variance, scale, bias, epsilonTensor, bnAttributes);
     y->set_output(true);
 
-    HIPDNN_FE_CHECK(graph->build(handle));
+    HIPDNN_FE_CHECK_SKIPPABLE(graph->build(handle));
 
     std::cout << "Graph build successful.\n";
 

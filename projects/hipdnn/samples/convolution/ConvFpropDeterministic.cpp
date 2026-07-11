@@ -55,19 +55,9 @@ bool SampleRunner::operator()(const TensorLayout& layout)
     auto graph = std::make_shared<graph::Graph>();
     graph->set_io_data_type(inputType).set_compute_data_type(hipdnn_frontend::DataType::FLOAT);
 
-    if(config.engine_id != -1)
+    if(config.engine_id != -1 || !config.engine_name.empty())
     {
-        graph->set_preferred_engine_id_ext(config.engine_id);
-    }
-    else if(!config.engine_name.empty())
-    {
-        if(!hipdnn_data_sdk::utilities::isEngineNameRegistered(config.engine_name))
-        {
-            std::cerr << "Warning: Unknown engine name: " << config.engine_name << "\n";
-        }
-
-        graph->set_preferred_engine_id_ext(
-            hipdnn_data_sdk::utilities::engineNameToId(config.engine_name));
+        setPreferredEngine(graph, config);
     }
     else
     {
@@ -88,7 +78,7 @@ bool SampleRunner::operator()(const TensorLayout& layout)
     auto yAttr = graph->conv_fprop(xAttr, wAttr, convAttributes);
     yAttr->set_output(true);
 
-    HIPDNN_FE_CHECK(graph->build(handle));
+    HIPDNN_FE_CHECK_SKIPPABLE(graph->build(handle));
     std::cout << "Graph build successful (using deterministic engine).\n";
 
     utilities::Tensor<InputType> xTensor(xAttr->get_dim(), layout);

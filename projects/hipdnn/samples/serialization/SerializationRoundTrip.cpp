@@ -181,20 +181,7 @@ bool SampleRunner::operator()(const TensorLayout& layout)
         .set_intermediate_data_type(hipdnn_frontend::DataType::FLOAT)
         .set_compute_data_type(hipdnn_frontend::DataType::FLOAT);
 
-    if(config.engine_id != -1)
-    {
-        originalGraph.set_preferred_engine_id_ext(config.engine_id);
-    }
-    else if(!config.engine_name.empty())
-    {
-        if(!hipdnn_data_sdk::utilities::isEngineNameRegistered(config.engine_name))
-        {
-            std::cerr << "Warning: Unknown engine name: " << config.engine_name << "\n";
-        }
-
-        originalGraph.set_preferred_engine_id_ext(
-            hipdnn_data_sdk::utilities::engineNameToId(config.engine_name));
-    }
+    setPreferredEngine(originalGraph, config);
 
     graph::ConvFpropAttributes convAttrs;
     convAttrs.set_name("conv_fprop")
@@ -206,7 +193,7 @@ bool SampleRunner::operator()(const TensorLayout& layout)
     yAttrOrig->set_name("y");
     yAttrOrig->set_output(true);
 
-    HIPDNN_FE_CHECK(originalGraph.build(handle));
+    HIPDNN_FE_CHECK_SKIPPABLE(originalGraph.build(handle));
 
     utilities::Tensor<InputType> yOriginal(yAttrOrig->get_dim(), layout);
     yOriginal.fillWithValue(static_cast<InputType>(0.0f));

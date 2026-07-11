@@ -10,6 +10,7 @@
 #include <hipdnn_frontend.hpp>
 
 #include <algorithm>
+#include <charconv>
 #include <iostream>
 #include <memory>
 #include <numeric>
@@ -60,6 +61,33 @@ using hipdnn_data_sdk::types::half;
         }                                                                                 \
     } while(0)
 
+// Skip-aware variant of HIPDNN_FE_CHECK for use inside bool-returning sample
+// callbacks (e.g. SampleRunner::operator()). On GRAPH_NOT_SUPPORTED the macro
+// prints a clear skip message and `return true;` so the enclosing variant is
+// counted as gracefully skipped (samples/README.md documents this contract).
+// On any other non-good status, behavior matches HIPDNN_FE_CHECK (exit 1).
+//
+// The macro contains `return true;`, so it MUST only be used inside a
+// bool-returning function context. For non-bool contexts (e.g. int main),
+// use HIPDNN_FE_CHECK instead.
+#define HIPDNN_FE_CHECK_SKIPPABLE(statusObj)                                                    \
+    do                                                                                          \
+    {                                                                                           \
+        auto const& status = statusObj;                                                         \
+        if(!status.is_good())                                                                   \
+        {                                                                                       \
+            if(status.get_code() == hipdnn_frontend::ErrorCode::GRAPH_NOT_SUPPORTED)            \
+            {                                                                                   \
+                std::cout << "Skipping: no engine has an applicable solution for this "         \
+                          << "graph on the current device. (" << status.get_message() << ")\n"; \
+                return true;                                                                    \
+            }                                                                                   \
+            std::cerr << "hipDNN Frontend Error: " << status.get_message() << " in file "       \
+                      << __FILE__ << " at line " << __LINE__ << '\n';                           \
+            exit(EXIT_FAILURE);                                                                 \
+        }                                                                                       \
+    } while(0)
+
 // SAMPLE TYPES
 
 enum class SampleType
@@ -77,6 +105,7 @@ inline void printSampleHelp(const std::string& sampleName,
               << "Options:\n"
               << "  --verify-cpu, -vc           Enable CPU reference validation\n"
               << "  --engine-id <int>           Preferred engine ID\n"
+              << "  --engine-name <name>        Preferred engine name\n"
               << "  --dtype <fp32|fp16|bf16>    Data type\n"
               << "  --layout <nchw|nhwc>        Tensor layout\n"
               << "  --dims N,C,H,W              Input dimensions\n"
@@ -115,6 +144,26 @@ struct Config
 
 // PARSING UTILS
 
+// Parses a single integer using std::from_chars, exiting with a clear error message
+// instead of throwing on malformed input (unlike std::stoi/std::stoll).
+template <typename T>
+inline T parseInteger(const std::string& str, const std::string& context)
+{
+    T value{};
+    const char* begin = str.data();
+    const char* end = str.data() + str.size();
+
+    auto [ptr, ec] = std::from_chars(begin, end, value);
+
+    if(ec != std::errc() || ptr != end)
+    {
+        std::cerr << "Invalid integer value for " << context << ": \"" << str << "\"\n";
+        exit(EXIT_FAILURE);
+    }
+
+    return value;
+}
+
 inline std::vector<int64_t> parseList(const std::string& str)
 {
     std::vector<int64_t> result;
@@ -122,7 +171,7 @@ inline std::vector<int64_t> parseList(const std::string& str)
     std::string item;
 
     while(std::getline(ss, item, ','))
-        result.push_back(std::stoll(item));
+        result.push_back(parseInteger<int64_t>(item, "list argument"));
 
     return result;
 }
@@ -157,7 +206,7 @@ inline Config
                 std::cerr << "--engine-id requires a value\n";
                 exit(EXIT_FAILURE);
             }
-            config.engine_id = std::stoi(argv[++i]);
+            config.engine_id = parseInteger<int>(argv[++i], "--engine-id");
         }
         else if(arg == "--engine-name")
         {
@@ -282,13 +331,22 @@ bool run(F&& f)
 {
     bool allPassed = true;
 
-    std::vector<std::string> dtypes = {"fp32", "fp16", "bf16"};
-    std::vector<TensorLayout> layouts = {TensorLayout::NCHW, TensorLayout::NHWC};
+    const std::vector<std::string> dtypes = {"fp32", "fp16", "bf16"};
+    const std::vector<std::pair<std::string, TensorLayout>> layouts
+        = {{"nchw", TensorLayout::NCHW}, {"nhwc", TensorLayout::NHWC}};
 
     for(const auto& dt : dtypes)
     {
-        for(const auto& layout : layouts)
+        // Skip data types not requested via --dtype (empty config.dtype means "run all").
+        if(!f.config.dtype.empty() && f.config.dtype != dt)
+            continue;
+
+        for(const auto& [layoutName, layout] : layouts)
         {
+            // Skip layouts not requested via --layout (empty config.layout means "run all").
+            if(!f.config.layout.empty() && f.config.layout != layoutName)
+                continue;
+
             if(dt == "fp32")
                 allPassed &= f.template operator()<float, float>(layout);
             else if(dt == "fp16")
@@ -299,6 +357,38 @@ bool run(F&& f)
     }
 
     return allPassed;
+}
+
+// ENGINE SELECTION
+
+// Applies the engine preference from `config` (--engine-id or --engine-name) to `graph`.
+// An unrecognized --engine-name almost always indicates a typo, so this exits with an
+// error rather than silently continuing with a default/unintended engine. Centralized
+// here so every sample gets consistent validation instead of duplicating this logic.
+inline void setPreferredEngine(hipdnn_frontend::graph::Graph& graph, const Config& config)
+{
+    if(config.engine_id != -1)
+    {
+        graph.set_preferred_engine_id_ext(config.engine_id);
+    }
+    else if(!config.engine_name.empty())
+    {
+        if(!hipdnn_data_sdk::utilities::isEngineNameRegistered(config.engine_name))
+        {
+            std::cerr << "Error: Unknown engine name: " << config.engine_name << '\n';
+            exit(EXIT_FAILURE);
+        }
+
+        graph.set_preferred_engine_id_ext(
+            hipdnn_data_sdk::utilities::engineNameToId(config.engine_name));
+    }
+}
+
+// Overload for the common case where the graph is held via shared_ptr.
+inline void setPreferredEngine(const std::shared_ptr<hipdnn_frontend::graph::Graph>& graph,
+                               const Config& config)
+{
+    setPreferredEngine(*graph, config);
 }
 
 // TENSOR HELPERS

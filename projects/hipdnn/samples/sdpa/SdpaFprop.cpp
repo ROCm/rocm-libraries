@@ -57,20 +57,7 @@ bool SampleRunner::operator()(const TensorLayout& layout)
         .set_intermediate_data_type(hipdnn_frontend::DataType::FLOAT)
         .set_compute_data_type(hipdnn_frontend::DataType::FLOAT);
 
-    if(config.engine_id != -1)
-    {
-        graph->set_preferred_engine_id_ext(config.engine_id);
-    }
-    else if(!config.engine_name.empty())
-    {
-        if(!hipdnn_data_sdk::utilities::isEngineNameRegistered(config.engine_name))
-        {
-            std::cerr << "Warning: Unknown engine name: " << config.engine_name << "\n";
-        }
-
-        graph->set_preferred_engine_id_ext(
-            hipdnn_data_sdk::utilities::engineNameToId(config.engine_name));
-    }
+    setPreferredEngine(graph, config);
 
     auto qAttr = createTensor({BATCH, NUM_HEADS, SEQ_LEN, HEAD_DIM}, inputType, layout);
     auto kAttr = createTensor({BATCH, NUM_HEADS, SEQ_LEN, HEAD_DIM}, inputType, layout);
