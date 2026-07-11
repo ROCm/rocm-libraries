@@ -518,18 +518,6 @@ class Solution(collections.abc.Mapping):
     for key in defaultSolution:
       assignParameterWithDefault(self._state, key, config, defaultSolution)
 
-    # Validate parameter types against the validParameters registry.
-    # Catches bool-vs-int mismatches (YAML false vs 0) that would cause
-    # std::bad_cast at C++ msgpack deserialization time. The mismatch
-    # records are folded into the module-level warn-only collector here;
-    # the library-logic path snapshots that collector across the joblib
-    # worker boundary for the end-of-run summary. On the input-YAML path
-    # the state was already type-checked strictly upstream
-    # (checkParametersAreValid in BenchmarkStructs, ProblemType's
-    # raise-mode validator), so validateParameterTypes returns [] and
-    # nothing is merged -- no duplicate collector noise.
-    mergeMismatchRecords(validateParameterTypes(self._state, srcFile=srcName))
-
     if 'ISA' not in self._state:
       if 'ISA' in config:
         # The ISA is expected to be defined when calling from TensileCreateLibrary
@@ -557,6 +545,24 @@ class Solution(collections.abc.Mapping):
       self["AssignedProblemIndependentDerivedParameters"] = False
     if "AssignedDerivedParameters" not in self._state:
       self["AssignedDerivedParameters"] = False
+    
+    # Validate parameter types against the validParameters registry.
+    # Catches bool-vs-int mismatches (YAML false vs 0) that would cause
+    # std::bad_cast at C++ msgpack deserialization time. The mismatch
+    # records are folded into the module-level warn-only collector here;
+    # the library-logic path snapshots that collector across the joblib
+    # worker boundary for the end-of-run summary. On the input-YAML path
+    # the state was already type-checked strictly upstream
+    # (checkParametersAreValid in BenchmarkStructs, ProblemType's
+    # raise-mode validator), so validateParameterTypes returns [] and
+    # nothing is merged -- no duplicate collector noise.
+    #
+    # Validate the complete pre-derived state. We still run derivation to preserve
+    # existing Solution construction behavior, but if this state is already bad we
+    # skip post-derived validation to avoid cascading/noisy type mismatch records.
+    pre_records = validateParameterTypes(self._state, srcFile=srcName)
+    mergeMismatchRecords(pre_records)
+    
     Solution.assignDerivedParameters(
       self._state,
       splitGSU,
@@ -566,6 +572,11 @@ class Solution(collections.abc.Mapping):
       assembler.rocm_version
     )
     self._name = config["CustomKernelName"] if "CustomKernelName" in config and config["CustomKernelName"] else None
+
+    # Only merge and report mismatches if there were no pre-existing mismatches
+    # To avoid duplicates and noise from cascading issues.
+    if not pre_records:
+      mergeMismatchRecords(validateParameterTypes(self._state, srcFile=srcName))
 
   # these keys are copied from ProblemType to internal that may be overridden
   InternalKeys = ["UseSgprForGRO","VectorStore"]
@@ -858,6 +869,24 @@ class Solution(collections.abc.Mapping):
         state["UseMFMAF32XEmulation"] = True # MFMA version for gfx950 etc.
 
     state["MfmaInitCVgprs"] = False
+
+    # UseDualFMAC (VOPD v_dual_fmac_f32) applies only to plain f32 source/MAC (non-MFMA) kernels
+    # on archs whose assembler accepts the dual-issue form (gfx11/gfx12). The 2x2 block-diagonal
+    # pairing requires an even x even ThreadTile for full coverage. Auto-disable elsewhere so a
+    # config may enable it broadly without rejecting unrelated solutions.
+    # Exclude xf32: DataType=f32 but F32XdlMathOp selects xf32 rounding; v_dual_fmac_f32 is plain-f32 only.
+    _isXF32 = ("F32XdlMathOp" in state["ProblemType"]
+                and not state["ProblemType"]["F32XdlMathOp"].isSingle()
+                and state["ProblemType"]["DataType"].isSingle())
+    if state.get("UseDualFMAC", False) and (
+        state["KernelLanguage"] != "Assembly"
+        or EnableMatrixInstruction
+        or not state["ProblemType"]["DataType"].isSingle()
+        or _isXF32
+        or (state["ThreadTile0"] % 2) or (state["ThreadTile1"] % 2)
+        or not isaInfoMap[state["ISA"]].asmCaps.get("v_dual_fmac_f32", False)):
+      state["UseDualFMAC"] = False
+
     # Enable UseSubtileImpl on gfx950 and gfx1250; ignore user request on other ISAs.
     isa = tuple(state["ISA"])
     isgfx950 = isa[:2] == (9, 5)
@@ -871,9 +900,9 @@ class Solution(collections.abc.Mapping):
       state["VectorWidthA"] = 1
       state["VectorWidthB"] = 1
       state["SourceSwap"] = False
-      # Force BufferStore=1: UseSubtileImpl optimized storeD path is only implemented
+      # Force BufferStore=True: UseSubtileImpl optimized storeD path is only implemented
       # for buffer stores for now.
-      state["BufferStore"] = 1
+      state["BufferStore"] = True
       # Not currently implemented in subtile implementation
       state["Use64bShadowLimit"] = False
       state["Use64bShadowLimitMX"] = False
@@ -1581,11 +1610,13 @@ class Solution(collections.abc.Mapping):
         reject(state, printRejectionReason, "ScheduleGlobalRead not supported with Stream-K")
       if state["ScheduleLocalWrite"] != 1:
         reject(state, printRejectionReason, "ScheduleLocalWrite not supported with Stream-K")
-      isSia0TdmPgr = state["_ScheduleIterAlg"] == 0 \
-        and state["TDMInst"] == 3 \
-        and state["PrefetchGlobalRead"] in (1, 2)
-      if state["_ScheduleIterAlg"] not in (2, 3) and not isSia0TdmPgr:
+      # SIA 4 is remapped to _ScheduleIterAlg 0 upstream, so it is covered here too.
+      if state["_ScheduleIterAlg"] not in (0, 1, 2, 3):
         reject(state, printRejectionReason, "ScheduleIterAlg not supported with Stream-K")
+      if state["TDMInst"] == 3 and state["PrefetchGlobalRead"] not in (1, 2) \
+          and not state["UseSubtileImpl"]:
+        reject(state, printRejectionReason,
+               "Stream-K + TDMInst=3 requires PrefetchGlobalRead in (1, 2)")
       if not state["BufferStore"]:
         reject(state, printRejectionReason, "Stream-K requires BufferStore")
       _validateStreamKForceDPOnly(state, printRejectionReason)
@@ -1637,10 +1668,10 @@ class Solution(collections.abc.Mapping):
         # computeStoreSrdStart, and StreamKLocalStart/End are constant
         # (0 / ItersPerTile). No DP-only-specific gating is required here;
         # Phase 2 strips the now-redundant snapshot/restore of those constants.
-      if state["DebugPersistentKernelLoopForever"] and state["StreamK"] not in (1, 2, 3):
+      if state["DebugPersistentKernelLoopForever"] and state["StreamK"] != 3:
         # Mode 4 exits via KernelEnd in graWorkGroup, so the flag would no-op.
         reject(state, printRejectionReason,
-               "DebugPersistentKernelLoopForever requires StreamK in {1,2,3} (got %d)"
+               "DebugPersistentKernelLoopForever requires StreamK=3 (got %d)"
                % state["StreamK"])
       if not state["Valid"]:
         print2("in assignDerivedParameters, state['Valid'] = False")
@@ -2671,6 +2702,7 @@ class Solution(collections.abc.Mapping):
     # StinkyTofu expert scheduling mode2 (EnableStinkyTofuESM2) — independent of the rocisa ExpertSchedulingMode rules.
     def evaluateStinkyTofuESM2() -> bool:
       if not isaInfoMap[isa].archCaps["HasSchedMode"]: return False
+      if state["ProblemType"]["Sparse"]: return False
       # stinkytofu does not yet support f64 (double / double-complex) datatypes
       if state["ProblemType"]["MacDataTypeA"].isDouble() or state["ProblemType"]["MacDataTypeA"].isDoubleComplex(): return False
       if state["ProblemType"]["MacDataTypeB"].isDouble() or state["ProblemType"]["MacDataTypeB"].isDoubleComplex(): return False
@@ -2894,9 +2926,15 @@ class Solution(collections.abc.Mapping):
 
       if state["StaggerUStride"] == -1 or state["StaggerUStride"] < (state["DepthU"] * bpeAB):
         # (StaggerUStride) shoud be greater than or equal to (DepthU * bpeAB)
-        state["StaggerUStride"] = state["DepthU"] * bpeAB
-
-      state["_staggerStrideShift"] = (int)(math.ceil(math.log(state["StaggerUStride"] / (state["DepthU"] * bpeAB), 2)))
+        target_stagger_stride = state["DepthU"] * bpeAB
+        # Assert that it is an int or a float with no fractional part
+        is_integer = isinstance(target_stagger_stride, int) \
+                     or (isinstance(target_stagger_stride, float) and target_stagger_stride.is_integer())
+        assert is_integer, "StaggerUStride must be an int or a float with no fractional part"
+        state["StaggerUStride"] = int(target_stagger_stride)
+        state["_staggerStrideShift"] = 0
+      else:
+        state["_staggerStrideShift"] = (int)(math.ceil(math.log(state["StaggerUStride"] / (state["DepthU"] * bpeAB), 2)))
 
       def calcLdsPad(isaInfoMap: Dict[str, IsaInfo]) -> Tuple[int, int, int, int, int]:
         # SubtileImpl: LDS padding is disabled.
@@ -4914,6 +4952,11 @@ class Solution(collections.abc.Mapping):
     state["GuaranteeNoPartialMetadata"] = False if state["ProblemType"]["Sparse"] else True
 
     # SourceSwap
+    if state["SourceSwap"] and state["EnableMatrixInstruction"] and (state["MatrixInstM"] != state["MatrixInstN"]):
+      reject(state, printRejectionReason,
+             "SourceSwap not supported for non-square MatrixInst (%dx%d)"
+             % (state["MatrixInstM"], state["MatrixInstN"]))
+      return
     if state["StoreRemapVectorWidth"]:
       if state["SourceSwap"]:
         reject(state, printRejectionReason, "SourceSwap not compatible with StoreRemap")
@@ -4952,12 +4995,13 @@ class Solution(collections.abc.Mapping):
                         and not state["ForceUnrollSubIter"] \
                         and not state["ProblemType"]["DataType"].isComplex() \
                         and not state["ProblemType"]["Sparse"] \
+                        and state["ProblemType"]["NumIndicesSummation"] == 1 \
                         and isaInfoMap[isa].asmCaps.get("HasWMMA_AccImmZero", False)
     if state["InitCIterWmma"] == -1:
       state["InitCIterWmma"] = 1 if autoInitCIterWmma else 0
     elif state["InitCIterWmma"] == 1 and not autoInitCIterWmma:
       reject(state, printRejectionReason,
-             "InitCIterWmma=1 requires EnableMatrixInstruction/HasWMMA_AccImmZero, and not LdsInitCVgprs/ForceUnrollSubIter/Complex/Sparse")
+             "InitCIterWmma=1 requires EnableMatrixInstruction/HasWMMA_AccImmZero, single summation index, and not LdsInitCVgprs/ForceUnrollSubIter/Complex/Sparse")
       return
 
     # force MIArchVgpr when using WMMA
@@ -5257,12 +5301,13 @@ class Solution(collections.abc.Mapping):
       if not isPowerOf2(state["NumThreads"]):
         reject(state, printRejectionReason, "PrefetchGL2 requires NumThreads to be power of 2")
         return
-      # Check ClusterDim is power of 2 and not [1,1]
-      if state["ClusterDim"] == [1, 1]:
-        reject(state, printRejectionReason, "PrefetchGL2 requires ClusterDim != [1, 1]")
-        return
+      # Check ClusterDim components are power of 2
       if not all(isPowerOf2(x) for x in state["ClusterDim"]):
         reject(state, printRejectionReason, "PrefetchGL2 requires ClusterDim components to be power of 2")
+        return
+      # ClusterDim [1,1] is only supported with subtile impl
+      if state["ClusterDim"] == [1, 1] and not state["UseSubtileImpl"]:
+        reject(state, printRejectionReason, "PrefetchGL2 requires ClusterDim != [1, 1] for non-subtile kernels")
         return
       # Check DepthU is power of 2
       if not isPowerOf2(state["DepthU"]):

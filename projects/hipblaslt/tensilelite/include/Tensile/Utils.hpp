@@ -35,9 +35,7 @@
 #include <type_traits>
 #include <vector>
 
-#include <Tensile/Macros.hpp>
-
-TENSILE_HIDDEN_BEGIN
+#include <tensilelitehost/export.h>
 
 namespace TensileLite
 {
@@ -307,9 +305,9 @@ namespace TensileLite
         }
     };
 
-    std::vector<std::string> generateArgNameList(size_t length, const char* name = "");
+    TENSILELITEHOST_EXPORT std::vector<std::string> generateArgNameList(size_t length, const char* name = "");
 
-    size_t greekToIndex(std::string name);
+    TENSILELITEHOST_EXPORT size_t greekToIndex(std::string name);
     /**
  * @}
  */
@@ -337,4 +335,3 @@ namespace TensileLite
  * @}
  */
 
-TENSILE_HIDDEN_END

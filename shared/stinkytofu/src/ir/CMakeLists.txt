@@ -2,7 +2,7 @@
 # SPDX-License-Identifier: MIT
 
 target_sources(stinkytofu_objs PRIVATE
-    DumpStinkyModulePass.cpp
+    DumpStinkyFunctionPass.cpp
 )
 
 add_subdirectory(logical)

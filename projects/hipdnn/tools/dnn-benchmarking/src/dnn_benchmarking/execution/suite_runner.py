@@ -458,7 +458,9 @@ def _run_timed_pytorch_row(
                     if cpu_time_probe is not None:
                         cpu_time_probe.__exit__(None, None, None)
 
-                result.e2e_stats = BenchmarkStats.from_timings(bench_result.e2e_timings)
+                result.host_stats = BenchmarkStats.from_timings(
+                    bench_result.host_timings
+                )
                 if bench_result.has_kernel_timings:
                     result.gpu_kernel_stats = BenchmarkStats.from_timings(
                         bench_result.kernel_timings
@@ -997,7 +999,7 @@ def run_single_provider_engine(
                 if cpu_time_probe is not None:
                     cpu_time_probe.__exit__(None, None, None)
 
-            result.e2e_stats = BenchmarkStats.from_timings(bench_result.e2e_timings)
+            result.host_stats = BenchmarkStats.from_timings(bench_result.host_timings)
             if bench_result.has_kernel_timings:
                 result.gpu_kernel_stats = BenchmarkStats.from_timings(
                     bench_result.kernel_timings
@@ -1096,7 +1098,7 @@ def run_single_provider_engine(
     except UnsupportedGraphError as e:
         result.cpu_build_time_ms = None
         result.gpu_kernel_stats = None
-        result.e2e_stats = None
+        result.host_stats = None
         result.status = "skipped"
         result.skip_reason = str(e)
         rtol, atol = _fallback_tolerance_for_config(config)
@@ -1109,7 +1111,7 @@ def run_single_provider_engine(
         error_msg = str(e)
         result.cpu_build_time_ms = None
         result.gpu_kernel_stats = None
-        result.e2e_stats = None
+        result.host_stats = None
         result.status = "error"
         result.error_message = error_msg
         rtol, atol = _fallback_tolerance_for_config(config)
@@ -1122,7 +1124,7 @@ def run_single_provider_engine(
         error_msg = str(e)
         result.cpu_build_time_ms = None
         result.gpu_kernel_stats = None
-        result.e2e_stats = None
+        result.host_stats = None
         result.status = "error"
         result.error_message = error_msg
         rtol, atol = _fallback_tolerance_for_config(config)

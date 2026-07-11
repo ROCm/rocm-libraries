@@ -3,6 +3,7 @@
 
 #include "LayernormFwdPlan.hpp"
 #include "compilation/KernelCompileOptions.hpp"
+#include "engines/hip_mlops_engine/plans/PlanUtils.hpp"
 
 #include "compilation/IKernelCompiler.hpp"
 #include "core/Utils.hpp"
@@ -133,11 +134,27 @@ void LayernormFwdPlan::compile(const IKernelCompiler& kernelCompiler,
     const long zlocalsize = 1;
     const long zgridsize = 1;
 
+    // Determine input/output data type configuration
+    const auto inputDataType = _params.x()->data_type();
+    const auto outputDataType = _params.y()->data_type();
+    const auto scaleBiasDataType = _params.scale()->data_type();
+    const auto meanInvVarianceDataType
+        = (_params.mean() == nullptr) ? inputDataType : _params.mean()->data_type();
+    const std::string inputTypeString = getKernelParamTypeString(inputDataType);
+    const std::string outputTypeString = getKernelParamTypeString(outputDataType);
+    const std::string scaleBiasTypeString = getKernelParamTypeString(scaleBiasDataType);
+    const std::string meanInvVarianceTypeString = getKernelParamTypeString(meanInvVarianceDataType);
+
+    // Prepare compilation options
     KernelCompileOptions options(_params.x(), deviceProperties);
     options.add("HIP_PLUGIN_LAYERNORM_OUTER_SIZE", outerSize);
     options.add("HIP_PLUGIN_LAYERNORM_INNER_SIZE", innerSize);
     options.add("HIP_PLUGIN_LAYERNORM_STRIDE", stride);
     options.add("HIP_PLUGIN_LAYERNORM_LOCAL_SIZE", xlocalsize);
+    options.add("HIP_PLUGIN_LAYERNORM_INPUT_TYPE", inputTypeString);
+    options.add("HIP_PLUGIN_LAYERNORM_OUTPUT_TYPE", outputTypeString);
+    options.add("HIP_PLUGIN_LAYERNORM_SCALE_BIAS_TYPE", scaleBiasTypeString);
+    options.add("HIP_PLUGIN_LAYERNORM_MEAN_INV_VARIANCE_TYPE", meanInvVarianceTypeString);
 
     // Compile kernel and configure launch dimensions
     _compiledProgram = kernelCompiler.compile("LayernormFwd.cpp", options);

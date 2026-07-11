@@ -20,6 +20,7 @@
 #include <hipdnn_frontend/node/ConvolutionWgradNode.hpp>
 #include <hipdnn_frontend/node/CustomOpNode.hpp>
 #include <hipdnn_frontend/node/LayerNormNode.hpp>
+#include <hipdnn_frontend/node/LayernormBackwardNode.hpp>
 #include <hipdnn_frontend/node/MatmulNode.hpp>
 #include <hipdnn_frontend/node/Node.hpp>
 #include <hipdnn_frontend/node/PointwiseNode.hpp>
@@ -29,6 +30,7 @@
 #include <hipdnn_frontend/node/SdpaBwdNode.hpp>
 #include <hipdnn_frontend/node/SdpaFwdNode.hpp>
 
+#include "HipdnnOperationType.h"
 #include "fake_backend/MockHipdnnBackend.hpp"
 
 using namespace hipdnn_frontend;
@@ -474,6 +476,16 @@ TEST(TestCreateNodeForType, CreatesReductionNode)
     EXPECT_EQ(err.code, ErrorCode::OK);
     ASSERT_NE(node, nullptr);
     auto typedNode = std::dynamic_pointer_cast<ReductionNode>(node);
+    EXPECT_NE(typedNode, nullptr);
+}
+
+TEST(TestCreateNodeForType, CreatesLayernormBackwardNode)
+{
+    const GraphAttributes graphAttrs;
+    auto [node, err] = createNodeForType(HIPDNN_OPERATION_TYPE_LAYERNORM_BACKWARD_EXT, graphAttrs);
+    EXPECT_EQ(err.code, ErrorCode::OK);
+    ASSERT_NE(node, nullptr);
+    auto typedNode = std::dynamic_pointer_cast<LayernormBackwardNode>(node);
     EXPECT_NE(typedNode, nullptr);
 }
 

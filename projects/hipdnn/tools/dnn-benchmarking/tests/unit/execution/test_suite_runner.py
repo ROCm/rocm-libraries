@@ -110,7 +110,7 @@ def _make_exec_factory(
         if prepare_side_effect is not None:
             m.prepare.side_effect = prepare_side_effect
         bench_result = MagicMock()
-        bench_result.e2e_timings = [1.0]
+        bench_result.host_timings = [1.0]
         bench_result.kernel_timings = [0.5] if has_kernel_timings else None
         bench_result.has_kernel_timings = has_kernel_timings
         m.benchmark.return_value = bench_result
@@ -210,7 +210,7 @@ class TestRunGraphAllProviders:
         assert "build failed" in r.error_message
         assert r.cpu_build_time_ms is None
         assert r.gpu_kernel_stats is None
-        assert r.e2e_stats is None
+        assert r.host_stats is None
 
     @patch("dnn_benchmarking.execution.suite_runner._resolve_engine_name")
     @patch("dnn_benchmarking.execution.suite_runner._get_reference_provider")
@@ -258,7 +258,7 @@ class TestRunGraphAllProviders:
         mock_get_ref,
         mock_resolve_name,
     ):
-        """Success: status='success' with separate cpu_build_time_ms / gpu_kernel_stats / e2e_stats."""
+        """Success: status='success' with separate cpu_build_time_ms / gpu_kernel_stats / host_stats."""
         mock_resolve_name.return_value = "engine_0"
         mock_get_ref.return_value = None
 
@@ -279,7 +279,7 @@ class TestRunGraphAllProviders:
         assert r.status == "success"
         assert r.cpu_build_time_ms == 12.5
         assert isinstance(r.gpu_kernel_stats, BenchmarkStats)
-        assert isinstance(r.e2e_stats, BenchmarkStats)
+        assert isinstance(r.host_stats, BenchmarkStats)
 
     @patch("dnn_benchmarking.execution.suite_runner._resolve_engine_name")
     @patch("dnn_benchmarking.execution.suite_runner._get_reference_provider")
@@ -839,7 +839,7 @@ class TestCorrectnessChecking:
             engine_id=0,
             status="success",
             role="reference",
-            e2e_stats=BenchmarkStats.from_timings([2.0]),
+            host_stats=BenchmarkStats.from_timings([2.0]),
             gpu_kernel_stats=BenchmarkStats.from_timings([1.0]),
         )
         mock_timed_reference.return_value = MagicMock(
@@ -937,7 +937,7 @@ class TestCorrectnessChecking:
         executor = MagicMock()
         executor.init_time_ms = 0.5
         bench_result = MagicMock()
-        bench_result.e2e_timings = [1.0, 2.0]
+        bench_result.host_timings = [1.0, 2.0]
         bench_result.kernel_timings = None
         bench_result.has_kernel_timings = False
         executor.benchmark.return_value = bench_result
@@ -964,7 +964,7 @@ class TestCorrectnessChecking:
         )
 
         mock_pytorch_executor_cls.assert_called_once()
-        assert result.result.e2e_stats is not None
+        assert result.result.host_stats is not None
         assert result.result.gpu_kernel_stats is None
         assert result.result.status == "success"
 
@@ -999,7 +999,7 @@ def test_timed_pytorch_reference_attaches_manual_reference_warnings(
     executor = MagicMock()
     executor.init_time_ms = 1.25
     executor.benchmark.return_value = MagicMock(
-        e2e_timings=[2.0],
+        host_timings=[2.0],
         kernel_timings=[],
         has_kernel_timings=False,
     )
@@ -1371,7 +1371,7 @@ class TestRunGraphPytorchBackend:
             provider="pytorch",
             engine_id=0,
             status="success",
-            e2e_stats=BenchmarkStats.from_timings([2.0]),
+            host_stats=BenchmarkStats.from_timings([2.0]),
         )
         mock_timed_row.return_value = MagicMock(result=row, outputs=None)
 
@@ -1449,7 +1449,7 @@ class TestTimedPytorchRowEngineRole:
         executor = MagicMock()
         executor.init_time_ms = 0.5
         bench_result = MagicMock()
-        bench_result.e2e_timings = [1.0, 2.0]
+        bench_result.host_timings = [1.0, 2.0]
         bench_result.kernel_timings = None
         bench_result.has_kernel_timings = False
         executor.benchmark.return_value = bench_result

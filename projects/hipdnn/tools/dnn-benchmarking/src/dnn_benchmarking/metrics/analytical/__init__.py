@@ -65,6 +65,7 @@ from .normalization import (
     softmax_flops,
 )
 from .reduction import reduction_flops
+from .sdpa import sdpa_fwd_flops
 
 # Dispatch table: node "type" -> handler returning int FLOPs (or None
 # when tensor data is incomplete). Unrecognised types flip the
@@ -93,6 +94,7 @@ _FLOP_HANDLERS = {
     "LayernormAttributes": layernorm_flops,
     "RMSNormAttributes": layernorm_flops,
     "SoftmaxAttributes": softmax_flops,
+    "SdpaAttributes": sdpa_fwd_flops,
     "ReductionAttributes": reduction_flops,
     "RngAttributes": rng_flops,
 }
