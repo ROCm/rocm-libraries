@@ -3351,10 +3351,8 @@ class LogicalScheduler:
         Gfx1250 waitcnt auto-detection keys off Module(\"loopBody\") and
         Module(\"noLoadLoopBody\"). Keep the original section id in comments.
         """
-        if section.startswith("NLL_C"):
+        if section.startswith("NLL_C") or section == "TAILLOOP":
             return "noLoadLoopBody"
-        if section == "TAILLOOP":
-            return "TAILLOOP"
         if section == "PRELOOP" or section.startswith(("MAINLOOP_", "NGLL_")):
             return "loopBody"
 
@@ -3675,22 +3673,28 @@ class LogicalScheduler:
         return module
 
     def emitTailLoop(self, writer, kernel):
-        """Emit the tail loop body only (no counter setup, no skip branch).
+        """Emit the tail loop as top-level ST-visible modules.
 
-        Returns an empty Module when NoTailLoop is set. The caller is
-        responsible for emitting calculateLoopNumIter(-1) before this and
-        closeLoop(emitEndLabelOnly=True) after, mirroring the legacy
-        KernelWriter pattern.
+        Returns [tailSetup, tailLoopBody, tailCleanup].  tailLoopBody is
+        Module(\"noLoadLoopBody\") from _emitLoop so Gfx1250 waitcnt
+        auto-detection covers the tail.  The caller still emits
+        calculateLoopNumIter(-1) before these parts and closeLoop after.
+
+        Returns three empty modules when NoTailLoop is set.
         """
+        from rocisa.code import Module
+
         assert Pass.POPULATE in self._completed, \
             "populate_instructions() must be called before emitTailLoop()"
 
-        module = Module("TailLoop")
+        setup = Module("TailLoopSetup")
+        loop_body = Module(self._stinkyRegionModuleName("TAILLOOP"))
+        cleanup = Module("TailLoopCleanup")
 
         if kernel["NoTailLoop"]:
-            return module
+            return [setup, loop_body, cleanup]
 
-        module.addComment0("TAILLOOP")
+        setup.addComment0("TAILLOOP")
         # Swap to the flat tail vgpr tile layout. Frees the mainloop's
         # per-partition tiles back to the pool and reallocates a flat set
         # sized by _compute_flat_tail_tile_state (already invoked by
@@ -3699,14 +3703,14 @@ class LogicalScheduler:
         # init must run before populate so each MaskKOp in the body can read
         # the mask vgprs (kReg, vDiff, …) that init allocates.
         for inst in self._emitter.emit_mask_k_init():
-            module.add(inst)
+            setup.add(inst)
         self._emitter.populate(self._tailloop_emitted, unroll_iter=0)
-        module.add(self._emitLoop(writer, kernel, "TAILLOOP",
-                                  self._tailloop_emitted,
-                                  schedule=False))
+        loop_body = self._emitLoop(writer, kernel, "TAILLOOP",
+                                   self._tailloop_emitted,
+                                   schedule=False)
         for inst in self._emitter.emit_mask_k_done():
-            module.add(inst)
-        return module
+            cleanup.add(inst)
+        return [setup, loop_body, cleanup]
 
     # ── VGPR tile allocation ──────────────────────────────
 

@@ -201,7 +201,7 @@ def test_stinky_region_module_name_mapping():
     assert LogicalScheduler._stinkyRegionModuleName("MAINLOOP_C0") == "loopBody"
     assert LogicalScheduler._stinkyRegionModuleName("NGLL_C1") == "loopBody"
     assert LogicalScheduler._stinkyRegionModuleName("NLL_C0") == "noLoadLoopBody"
-    assert LogicalScheduler._stinkyRegionModuleName("TAILLOOP") == "TAILLOOP"
+    assert LogicalScheduler._stinkyRegionModuleName("TAILLOOP") == "noLoadLoopBody"
 
 
 def _writer_with_mem_tokens(double_buffer=True):
@@ -402,3 +402,67 @@ def test_mainloop_exposes_top_level_loop_body_module():
         parts = mainLoop(writer, kernel)
 
     assert any(getattr(p, "name", None) == "loopBody" for p in parts)
+
+
+def test_mainloop_exposes_top_level_tail_no_load_loop_body_module():
+    """Tail loop body must be a top-level noLoadLoopBody module for ST waitcnt."""
+    from types import SimpleNamespace
+    from unittest.mock import MagicMock, patch
+
+    from rocisa.code import Module
+    from Tensile.Components.Subtile.Kernel import mainLoop
+
+    loop_body = Module("loopBody")
+    tail_loop_body = Module("noLoadLoopBody")
+    ti = MagicMock()
+    ti.subtileShape = [1, 1]
+    ti.localMMATileGrid = [4, 4]
+    ti.loadRatioGR = 1.0
+    writer = SimpleNamespace(
+        tPA=MagicMock(), tPB=MagicMock(),
+        states=SimpleNamespace(
+            a=SimpleNamespace(tileInfo=ti),
+            b=SimpleNamespace(tileInfo=ti),
+            mxsa=SimpleNamespace(tileInfo=None),
+            mxsb=SimpleNamespace(tileInfo=None),
+            d=SimpleNamespace(tileInfo=MagicMock()),
+            regCaps={"MaxVgpr": 256},
+            archCaps={},
+        ),
+        vgprPool=MagicMock(size=MagicMock(return_value=256),
+                           available=MagicMock(return_value=0)),
+        allocTmpSgpr=MagicMock(),
+        calculateLoopNumIter=MagicMock(return_value=Module()),
+        computeTailLoopSrdLimit=MagicMock(return_value=Module()),
+        closeLoop=MagicMock(return_value=Module()),
+    )
+    writer.vgprPool.checkOut = MagicMock(return_value=0)
+    writer.vgprPool.checkIn = MagicMock()
+    kernel = {
+        "PrefetchGlobalRead": 0,
+        "NoTailLoop": False,
+        "ProblemType": {},
+        "MatrixInstK": 32,
+        "enableTDMA": False,
+        "enableTDMB": False,
+    }
+
+    scheduler = MagicMock()
+    scheduler.build = MagicMock()
+    scheduler.getNumVgpr = MagicMock(return_value=0)
+    scheduler.allocVgprTiles = MagicMock()
+    scheduler.populate_instructions = MagicMock()
+    scheduler.emitMainAndExitLoops = MagicMock(return_value=loop_body)
+    scheduler.emitTailLoop = MagicMock(
+        return_value=[Module("TailLoopSetup"), tail_loop_body, Module("TailLoopCleanup")])
+    scheduler.deallocVgprTiles = MagicMock()
+    scheduler._is_multi_du = MagicMock(return_value=False)
+
+    with patch("Tensile.Components.Subtile.Kernel.LogicalScheduler", return_value=scheduler), \
+         patch("Tensile.Components.Subtile.Kernel.MFMASchedulerConfig") as mock_cfg, \
+         patch("Tensile.Components.Subtile.Kernel.MFMASchedulerConfig.get_partition_candidates",
+               return_value=[(1, 1)]):
+        mock_cfg.return_value = MagicMock()
+        parts = mainLoop(writer, kernel)
+
+    assert any(getattr(p, "name", None) == "noLoadLoopBody" for p in parts)

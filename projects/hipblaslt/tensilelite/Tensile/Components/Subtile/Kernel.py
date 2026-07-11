@@ -1299,10 +1299,9 @@ def _emitMultiDUTailSrdRewind(writer, kernel, numUnroll, tiA, tiB, scaleTiA, sca
 def mainLoop(writer, kernel):
   """Build subtile mainloop sections as top-level kernel-body modules.
 
-  Returns a list of Modules so ``Module(\"loopBody\")`` from
-  ``emitMainAndExitLoops`` sits at top level for StinkyTofu
-  ``loopWithPrefetch`` region auto-detection (nested loopBody is invisible
-  to ToStinkyTofuUtils).
+  Returns a list of Modules so ``Module(\"loopBody\")`` and tail
+  ``Module(\"noLoadLoopBody\")`` sit at top level for StinkyTofu region
+  auto-detection (nested modules are invisible to ToStinkyTofuUtils).
   """
   setup = Module("subtileMainLoopSetup")
   tail = Module("subtileMainLoopTail")
@@ -1462,14 +1461,19 @@ def mainLoop(writer, kernel):
         tail.add(_emitMultiDUTailSrdRewind(
             writer, kernel, scheduler.config.numUnroll, tiA, tiB, scaleTiA, scaleTiB,
             mainIterSgpr))
-    tail.add(scheduler.emitTailLoop(writer, kernel))
-    tail.add(writer.closeLoop(
+        
+    tail_close = Module("subtileMainLoopTailClose")
+    tail_close.add(writer.closeLoop(
         kernel, tensorParametersA, tensorParametersB,
         -1, None, emitEndLabelOnly=True))
+
+    parts = [setup, loopBody, tail] + scheduler.emitTailLoop(writer, kernel) + [tail_close]
+  else:
+    parts = [setup, loopBody, tail]
 
   scheduler.deallocVgprTiles(writer)
 
   if unitScaleVgpr >= 0:
       writer.vgprPool.checkIn(unitScaleVgpr)
 
-  return [setup, loopBody, tail]
+  return parts

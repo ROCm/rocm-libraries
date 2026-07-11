@@ -2909,7 +2909,7 @@ class TestIntegration:
 
             uf = sched.unroll_factor
             asm = str(sched.emitMainAndExitLoops(writer, kernel)) \
-                + str(sched.emitTailLoop(writer, kernel))
+                + "".join(str(m) for m in sched.emitTailLoop(writer, kernel))
 
             assert "LoopBeginL:" in asm
             assert "SkipToNGLL:" in asm
@@ -3013,7 +3013,7 @@ class TestIntegration:
                 dtileInfo=dTileInfo,
                 scaleTileInfoA=scaleTiA, scaleTileInfoB=scaleTiB,
             )
-            asm = str(sched.emitTailLoop(writer, kernel))
+            asm = "".join(str(m) for m in sched.emitTailLoop(writer, kernel))
 
             # mask init (preamble): kReg = (Serial % WS) / dividerFortidInK
             assert "v_and_b32" in asm or "v_lshrrev_b32" in asm, \
@@ -3056,7 +3056,7 @@ class TestIntegration:
                 tensorParametersA=MagicMock(),
                 tensorParametersB=MagicMock(),
             )
-            asm = str(sched.emitTailLoop(writer, kernel)).lower()
+            asm = "".join(str(m) for m in sched.emitTailLoop(writer, kernel)).lower()
 
             # half-mask sgpr load
             assert "0x0000ffff" in asm, \
@@ -3102,7 +3102,7 @@ class TestIntegration:
                 dtileInfo=dTileInfo,
                 scaleTileInfoA=scaleTiA, scaleTileInfoB=scaleTiB,
             )
-            asm = str(sched.emitTailLoop(writer, kernel))
+            asm = "".join(str(m) for m in sched.emitTailLoop(writer, kernel))
             # Data K-mask V_AND chain emits comments like "mask A[i] (K=...)".
             assert "mask A[" in asm or "mask B[" in asm, \
                 "single-DU MX FP4 tail loop must keep develop's data K-mask V_AND chain"
@@ -3138,7 +3138,7 @@ class TestIntegration:
                 dtileInfo=dTileInfo,
                 scaleTileInfoA=scaleTiA, scaleTileInfoB=scaleTiB,
             )
-            asm = str(sched.emitTailLoop(writer, kernel))
+            asm = "".join(str(m) for m in sched.emitTailLoop(writer, kernel))
             assert "mask A[" not in asm, \
                 "multi-DU MX tail loop must not emit data K-mask over A vgprs"
             assert "mask B[" not in asm, \
@@ -3166,7 +3166,7 @@ class TestIntegration:
                 tensorParametersA=MagicMock(),
                 tensorParametersB=MagicMock(),
             )
-            asm = str(sched.emitTailLoop(writer, kernel))
+            asm = "".join(str(m) for m in sched.emitTailLoop(writer, kernel))
             assert "mask A[" in asm or "mask B[" in asm, \
                 "non-scale tail loop must keep data K-mask V_AND chain"
         finally:
