@@ -699,8 +699,30 @@ using AccDataType = {self.tm.DTYPE_TO_CK_QUALIFIED[acc_dtype]};
         const dim3 blocks = GemmKernel::BlockSize();
 
         constexpr int kBlockPerCu = {config.k_block_per_cu};
-        ave_time = launch_kernel(stream,
-            make_kernel<kBlockPerCu>(GemmKernel{{}}, grids, blocks, 0, kargs));
+        if(args.k_batch > 1) {{
+            // Split-K path: the universal GEMM epilogue stores C with
+            // memory_operation_enum::atomic_add when k_batch > 1, so C must be
+            // zero at the start of EVERY kernel invocation. The benchmarking
+            // timing loop re-runs the kernel cold_niters + nrepeat times, so a
+            // single pre-launch memset is not enough -- C accumulates across
+            // iterations. Pass a hipMemset callable as the first callable to
+            // launch_kernel (the documented ck_tile pattern, see
+            // kernel_launch.hpp) so C is re-zeroed before each timed launch.
+            // Only the batch slices actually written (M*N per batch) need
+            // clearing; use the batch stride to cover padded layouts.
+            const std::size_t c_bytes =
+                static_cast<std::size_t>(args.batch_stride_E) *
+                static_cast<std::size_t>(args.batch_count) * sizeof(CDataType);
+            ave_time = launch_kernel(stream,
+                [=](const stream_config&) {{ (void)hipMemset(args.e_ptr, 0, c_bytes); }},
+                make_kernel<kBlockPerCu>(GemmKernel{{}}, grids, blocks, 0, kargs));
+        }} else {{
+            // k_batch == 1 (the Old-TE parity default): byte-identical to the
+            // Tile Engine batched_gemm launch -- single kernel callable, no
+            // memset (the epilogue uses memory_operation_enum::set).
+            ave_time = launch_kernel(stream,
+                make_kernel<kBlockPerCu>(GemmKernel{{}}, grids, blocks, 0, kargs));
+        }}
 
         return ave_time;
     }}"""

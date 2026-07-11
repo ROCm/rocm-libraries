@@ -281,8 +281,17 @@ def validate_kernel_config(config: "KernelConfig") -> ValidationResult:
             suggested_fixes["wave_n"] = warp_combos[0][1]
             suggested_fixes["wave_k"] = warp_combos[0][2]
 
-    # Check warp tile configuration for this arch and dtype
-    dtype_key = f"{dtype}_{dtype}_{dtype}"
+    # Check warp tile configuration for this arch and dtype.
+    # NOTE: the warp-tile tables (arch_specs_generated /
+    # WARP_TILE_SUPPORTED_COMBINATIONS) are keyed by A_B_Acc, e.g.
+    # "fp16_fp16_fp32" -- the third component is the ACCUMULATOR type, not the
+    # input type. Building the key as f"{dtype}_{dtype}_{dtype}"
+    # ("fp16_fp16_fp16") never matched, so the lookup silently fell back to the
+    # stale default [[32,32,16],[16,16,16]] and wrongly rejected legal warp
+    # tiles such as [16,16,32] for every dtype. Use the accumulator type
+    # (dtype_acc) so this matches the generated tables.
+    acc = getattr(config, "dtype_acc", None) or ("int32" if dtype == "int8" else "fp32")
+    dtype_key = f"{dtype}_{dtype}_{acc}"
     warp_tile_combos = (
         arch_data["warp_tile_combos"]
         .get(arch, {})

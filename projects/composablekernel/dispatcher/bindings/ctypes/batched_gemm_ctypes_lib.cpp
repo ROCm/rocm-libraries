@@ -18,10 +18,17 @@
  * Usage from Python:
  *   lib = ctypes.CDLL("libbatched_gemm_....so")
  *   lib.dispatcher_init()
- *   lib.dispatcher_run_batched(A, B, C, M, N, K, batch_count,
+ *   lib.dispatcher_run_batched(A, B, C, M, N, K, batch_count, k_batch,
  *                              stride_A, stride_B, stride_C,
  *                              batch_stride_A, batch_stride_B, batch_stride_C,
+ *                              warmup, repeat, flush_cache, rotating_count,
  *                              &time_ms)
+ *
+ * The ABI threads k_batch (split-K, Old-TE supports it) and the full
+ * benchmarking knobs (warmup/repeat/flush_cache/rotating_count) so this bridge
+ * drives ``SelectedKernel::launch`` with the SAME ``stream_config`` the Tile
+ * Engine batched_gemm profiler uses -- a prerequisite for a fair A/B timing
+ * comparison (the earlier version launched with defaults cold=3/repeat=10).
  */
 
 #include <hip/hip_runtime.h>
@@ -56,11 +63,15 @@ bool g_initialized = false;
 inline std::int64_t
 default_stride(std::int64_t rows, std::int64_t cols, std::int64_t provided, bool row_major)
 {
-    if(provided > 0)
+    // Match ck_tile::get_default_stride / the TE profiler exactly: a provided
+    // value of <= 0 means "packed" and the leading stride is derived from the
+    // shape. (N2: the earlier `> 0` check disagreed with TE's `<= 0` sentinel;
+    // they are equivalent for legal strides but this is the exact form.)
+    if(provided <= 0)
     {
-        return provided;
+        return row_major ? cols : rows;
     }
-    return row_major ? cols : rows;
+    return provided;
 }
 
 // Per-operand layout is emitted by the codegen as single-char strings
@@ -136,12 +147,17 @@ int dispatcher_run_batched(const void* A,
                            std::int64_t N,
                            std::int64_t K,
                            std::int64_t batch_count,
+                           std::int64_t k_batch,
                            std::int64_t stride_A,
                            std::int64_t stride_B,
                            std::int64_t stride_C,
                            std::int64_t batch_stride_A,
                            std::int64_t batch_stride_B,
                            std::int64_t batch_stride_C,
+                           std::int64_t warmup,
+                           std::int64_t repeat,
+                           std::int64_t flush_cache,
+                           std::int64_t rotating_count,
                            float* time_ms)
 {
     if(!g_initialized || !A || !B || !C || M <= 0 || N <= 0 || K <= 0 || batch_count <= 0)
@@ -153,21 +169,31 @@ int dispatcher_run_batched(const void* A,
         return -1;
     }
 
-    // Resolve strides: 0 -> packed default (matches TE profiler /
+    // split-K count: <= 0 falls back to 1 (no split), matching the TE default.
+    const ck_tile::index_t kbatch = static_cast<ck_tile::index_t>(k_batch > 0 ? k_batch : 1);
+
+    // Resolve leading strides: <= 0 -> packed default (matches TE profiler /
     // ck_tile::get_default_stride behaviour), respecting each operand's own
     // row/col-major layout. For rcr this yields stride_A=K, stride_B=K,
     // stride_C=N.
-    const std::int64_t sa  = default_stride(M, K, stride_A, operand_is_row_major(kLayoutA));
-    const std::int64_t sb  = default_stride(K, N, stride_B, operand_is_row_major(kLayoutB));
-    const std::int64_t sc  = default_stride(M, N, stride_C, operand_is_row_major(kLayoutC));
+    const std::int64_t sa = default_stride(M, K, stride_A, operand_is_row_major(kLayoutA));
+    const std::int64_t sb = default_stride(K, N, stride_B, operand_is_row_major(kLayoutB));
+    const std::int64_t sc = default_stride(M, N, stride_C, operand_is_row_major(kLayoutC));
+
+    // Batch strides: <= 0 -> packed default (contiguous per-batch slab). A
+    // caller may pass a LARGER batch stride than the packed size (e.g. padding
+    // between per-batch slabs); the element-count / allocation below is sized
+    // from the resolved batch stride so a non-packed layout is honoured.
     const std::int64_t bsa = batch_stride_A > 0 ? batch_stride_A : M * K;
     const std::int64_t bsb = batch_stride_B > 0 ? batch_stride_B : K * N;
     const std::int64_t bsc = batch_stride_C > 0 ? batch_stride_C : M * N;
 
-    // Total element counts across all batches.
-    const std::int64_t a_elems = batch_stride_A > 0 ? bsa * batch_count : M * K * batch_count;
-    const std::int64_t b_elems = batch_stride_B > 0 ? bsb * batch_count : K * N * batch_count;
-    const std::int64_t c_elems = batch_stride_C > 0 ? bsc * batch_count : M * N * batch_count;
+    // Total element counts across all batches, sized from the RESOLVED batch
+    // stride so that a padded (non-packed) batch stride allocates enough for the
+    // last batch's slab plus its padding.
+    const std::int64_t a_elems = bsa * batch_count;
+    const std::int64_t b_elems = bsb * batch_count;
+    const std::int64_t c_elems = bsc * batch_count;
 
     const ADataType* A_host = static_cast<const ADataType*>(A);
     const BDataType* B_host = static_cast<const BDataType*>(B);
@@ -221,12 +247,13 @@ int dispatcher_run_batched(const void* A,
     float exec_time = -1.0f;
     try
     {
-        // k_batch (split-K) is fixed to 1 for the batched bridge, matching the
-        // Tile Engine batched_gemm default.
+        // k_batch (split-K) is a real capability: Old-TE batched_gemm passes
+        // split_k_ through BatchedGemmHostArgs, so we thread it here too
+        // (default 1 == no split).
         ck_tile::BatchedGemmHostArgs args{A_dev,
                                           B_dev,
                                           C_dev,
-                                          /*k_batch=*/1,
+                                          kbatch,
                                           static_cast<ck_tile::index_t>(M),
                                           static_cast<ck_tile::index_t>(N),
                                           static_cast<ck_tile::index_t>(K),
@@ -238,7 +265,27 @@ int dispatcher_run_batched(const void* A,
                                           static_cast<ck_tile::index_t>(bsc),
                                           static_cast<ck_tile::index_t>(batch_count)};
 
-        const ck_tile::stream_config stream{nullptr, /*time_kernel=*/true};
+        // Build the stream_config to MATCH the Tile Engine batched_gemm profiler
+        // (batched_gemm_profiler.hpp: {nullptr, true, log, n_warmup, n_repeat,
+        // is_gpu_timer, flush_cache, rotating_count}). The struct field order is
+        // {stream_id, time_kernel, log_level, cold_niters, nrepeat,
+        // is_gpu_timer, flush_cache, rotating_count} (stream_config.hpp). The
+        // benchmark defaults are warmup=50 / repeat=100 / flush_cache=true /
+        // rotating_count=1000 / gpu_timer=true; callers thread the exact values
+        // through so both sides are driven identically. A caller passing <= 0
+        // for warmup/repeat falls back to the TE benchmark defaults.
+        const int n_warmup   = warmup > 0 ? static_cast<int>(warmup) : 50;
+        const int n_repeat   = repeat > 0 ? static_cast<int>(repeat) : 100;
+        const bool do_flush  = flush_cache != 0;
+        const int n_rotating = rotating_count > 0 ? static_cast<int>(rotating_count) : 1;
+        const ck_tile::stream_config stream{nullptr,
+                                            /*time_kernel=*/true,
+                                            /*log_level=*/0,
+                                            /*cold_niters=*/n_warmup,
+                                            /*nrepeat=*/n_repeat,
+                                            /*is_gpu_timer=*/true,
+                                            /*flush_cache=*/do_flush,
+                                            /*rotating_count=*/n_rotating};
         exec_time = SelectedKernel::launch(args, stream);
     }
     catch(...)

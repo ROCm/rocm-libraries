@@ -6,9 +6,13 @@ Batched GEMM Tile Engine <-> Dispatcher bridge.
 Batched counterpart of ``gemm_utils.py``. Batched GEMM adds a leading batch
 dimension with per-batch strides, giving it a DIVERGENT ABI from the
 single-problem GEMM library: the ctypes entry point
-``dispatcher_run_batched`` carries ``batch_count`` and the three batch strides
-in addition to M/N/K, and the .so launches the force-included kernel directly
-via ``SelectedKernel::launch(BatchedGemmHostArgs{...}, ...)`` (registry bypass).
+``dispatcher_run_batched`` carries ``batch_count``, ``k_batch`` (split-K), the
+three batch strides, and the benchmarking knobs (warmup/repeat/flush_cache/
+rotating_count) in addition to M/N/K, and the .so launches the force-included
+kernel directly via ``SelectedKernel::launch(BatchedGemmHostArgs{...}, ...)``
+(registry bypass). The benchmarking knobs let the bridge build the SAME
+``stream_config`` the Tile Engine batched_gemm profiler uses, so A/B timing is
+fair; ``k_batch`` mirrors Old-TE's split-K support.
 
 Public surface (mirrors gemm_utils):
 
@@ -165,7 +169,10 @@ class BatchedGemmDispatcherLib:
         ]
         lib.dispatcher_get_kernel_name_at.restype = ctypes.c_int
 
-        # Divergent ABI: batch_count + three batch strides on top of M/N/K.
+        # Divergent ABI: batch_count + k_batch (split-K) + three batch strides
+        # on top of M/N/K, plus the benchmarking knobs (warmup/repeat/
+        # flush_cache/rotating_count) so the .so drives stream_config identically
+        # to the Tile Engine batched_gemm profiler for fair A/B timing.
         lib.dispatcher_run_batched.argtypes = [
             ctypes.c_void_p,  # A (host)
             ctypes.c_void_p,  # B (host)
@@ -174,12 +181,17 @@ class BatchedGemmDispatcherLib:
             ctypes.c_int64,  # N
             ctypes.c_int64,  # K
             ctypes.c_int64,  # batch_count
+            ctypes.c_int64,  # k_batch (split-K; 0/1 -> no split)
             ctypes.c_int64,  # stride_A
             ctypes.c_int64,  # stride_B
             ctypes.c_int64,  # stride_C
             ctypes.c_int64,  # batch_stride_A
             ctypes.c_int64,  # batch_stride_B
             ctypes.c_int64,  # batch_stride_C
+            ctypes.c_int64,  # warmup   (<=0 -> TE default 50)
+            ctypes.c_int64,  # repeat   (<=0 -> TE default 100)
+            ctypes.c_int64,  # flush_cache (0/1)
+            ctypes.c_int64,  # rotating_count (<=0 -> 1)
             ctypes.POINTER(ctypes.c_float),  # time_ms
         ]
         lib.dispatcher_run_batched.restype = ctypes.c_int
@@ -214,12 +226,17 @@ class BatchedGemmDispatcherLib:
         N: int,
         K: int,
         batch_count: int,
+        k_batch: int = 1,
         stride_A: int = 0,
         stride_B: int = 0,
         stride_C: int = 0,
         batch_stride_A: int = 0,
         batch_stride_B: int = 0,
         batch_stride_C: int = 0,
+        warmup: int = 50,
+        repeat: int = 100,
+        flush_cache: bool = True,
+        rotating_count: int = 1000,
     ) -> Tuple[int, float]:
         time_ms = ctypes.c_float(0.0)
         status = self._lib.dispatcher_run_batched(
@@ -230,12 +247,17 @@ class BatchedGemmDispatcherLib:
             N,
             K,
             batch_count,
+            k_batch,
             stride_A,
             stride_B,
             stride_C,
             batch_stride_A,
             batch_stride_B,
             batch_stride_C,
+            warmup,
+            repeat,
+            1 if flush_cache else 0,
+            rotating_count,
             ctypes.byref(time_ms),
         )
         return status, time_ms.value
@@ -272,8 +294,34 @@ class GpuBatchedGemmRunner:
         return self._kernel_name
 
     def run(
-        self, A: np.ndarray, B: np.ndarray, problem: BatchedGemmProblem
+        self,
+        A: np.ndarray,
+        B: np.ndarray,
+        problem: BatchedGemmProblem,
+        k_batch: int = 1,
+        batch_pad_A: int = 0,
+        batch_pad_B: int = 0,
+        batch_pad_C: int = 0,
+        warmup: int = 50,
+        repeat: int = 100,
+        flush_cache: bool = True,
+        rotating_count: int = 1000,
     ) -> BatchedGemmResult:
+        """Run a batched GEMM.
+
+        ``k_batch`` selects split-K (default 1 == no split, matching Old-TE).
+
+        ``batch_pad_{A,B,C}`` add padding elements between consecutive per-batch
+        slabs so the batch stride is NON-packed
+        (batch_stride = packed_slab + pad). When any pad is > 0 the host buffer
+        is over-allocated to slab*batch + pad*(batch) and each logical slab is
+        scattered into its padded slot, exercising the batch_stride path in the
+        .so (B2). With all pads 0 this is the packed case (batch stride 0).
+
+        ``warmup/repeat/flush_cache/rotating_count`` are threaded into the .so's
+        stream_config so timing matches the Tile Engine batched_gemm profiler
+        (B1).
+        """
         batch, M, N, K = problem.batch_count, problem.M, problem.N, problem.K
 
         dtype = _gu._dtype_from_kernel_name(self._kernel_name)
@@ -309,10 +357,72 @@ class GpuBatchedGemmRunner:
                 f"unsupported C dtype {out_dtype!r} (from input dtype {dtype!r}); "
                 "add it to _C_NP so the host buffer matches sizeof(CDataType)"
             )
-        C_h = np.zeros(C_shape, dtype=_C_NP[out_dtype])
 
-        # Packed batched tensors: strides default (0) -> kernel derives them.
-        status, time_ms = self.lib.run(A_h, B_h, C_h, M, N, K, batch)
+        # Packed per-batch slab element counts (row-major flattened).
+        slab_A = M * K
+        slab_B = K * N
+        slab_C = M * N
+
+        if batch_pad_A or batch_pad_B or batch_pad_C:
+            # NON-PACKED (B2): interleave a padding gap between per-batch slabs.
+            # Batch stride = packed slab + pad; host buffer is over-allocated to
+            # batch_stride * batch and each slab is copied into its slot. The .so
+            # sizes its device allocation from the same batch stride.
+            bsa = slab_A + int(batch_pad_A)
+            bsb = slab_B + int(batch_pad_B)
+            bsc = slab_C + int(batch_pad_C)
+
+            A_flat = A_h.reshape(batch, slab_A)
+            B_flat = B_h.reshape(batch, slab_B)
+            A_buf = np.zeros(bsa * batch, dtype=A_h.dtype)
+            B_buf = np.zeros(bsb * batch, dtype=B_h.dtype)
+            for b in range(batch):
+                A_buf[b * bsa : b * bsa + slab_A] = A_flat[b]
+                B_buf[b * bsb : b * bsb + slab_B] = B_flat[b]
+            C_buf = np.zeros(bsc * batch, dtype=_C_NP[out_dtype])
+
+            status, time_ms = self.lib.run(
+                A_buf,
+                B_buf,
+                C_buf,
+                M,
+                N,
+                K,
+                batch,
+                k_batch,
+                0,
+                0,
+                0,
+                bsa,
+                bsb,
+                bsc,
+                warmup,
+                repeat,
+                flush_cache,
+                rotating_count,
+            )
+            # Gather the C slabs back out of their padded slots.
+            C_h = np.empty((batch, slab_C), dtype=_C_NP[out_dtype])
+            for b in range(batch):
+                C_h[b] = C_buf[b * bsc : b * bsc + slab_C]
+            C_h = C_h.reshape(C_shape)
+        else:
+            # PACKED: batch strides default (0) -> kernel/.so derive them.
+            C_h = np.zeros(C_shape, dtype=_C_NP[out_dtype])
+            status, time_ms = self.lib.run(
+                A_h,
+                B_h,
+                C_h,
+                M,
+                N,
+                K,
+                batch,
+                k_batch,
+                warmup=warmup,
+                repeat=repeat,
+                flush_cache=flush_cache,
+                rotating_count=rotating_count,
+            )
 
         if out_dtype == "bf16":
             C_dec = _gu._bf16_u16_to_fp32(C_h)
