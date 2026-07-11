@@ -113,7 +113,11 @@ build_e2e_T3_ragged.py: CTA->seq schedule via host-precomputed SID[gqb]/LQ[gqb]
 (seq + local-qblock per global qblock), per-seq q_start=cu_seqlens_q[sid]+lqb*128,
 qlen/klen per seq, block-table offset sid*NPHYS, causal loop bound min((lqb+1)*2,
 ceil(klen/BN)), variable-length row mask via scf_if store guard.
-Validated 3 ragged seqs (qlen/klen = 300/128/500): max_abs 8.4-9.0e-4 (bf16), all correct.
+GENERALIZED for qlen!=klen (context_off=klen-qlen, bottom-right causal = flash/vLLM/AITER):
+  causal_t=ceil((context_off+qbase+128)/BN), q_g=context_off+in_seq_pos. Validated 3 ragged:
+  seq0 prefill 300/300, seq1 DECODE 1/500, seq2 CHUNKED 100/500 - manual AND independent
+  torch-SDPA(explicit bottom-right mask) BOTH agree: 8.4e-4/7.6e-5/9.4e-5.
+  (SDPA is_causal=True is TOP-LEFT - wrong for qlen!=klen; kernel bottom-right is correct.)
 Inherits scatter-paging from sq4096 (identical phys_key + sid offset).
 NOTE: uses host-precomputed schedule (SID/LQ arrays); production ABI would derive
 seq via in-kernel binary_search on cu_seqlens (rocKE has binary_search_seq_idx).

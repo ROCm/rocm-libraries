@@ -52,8 +52,8 @@ def build():
     def bperm(v):
         partner = b.mul(b.xor(lane, b.const_i32(32)), b.const_i32(4)); return b.bitcast(b.ds_bpermute(partner, b.bitcast(v, I32)), F32)
     iters = [("m", ninf), ("l", zf)] + [(f"a{nt}", at.zero_acc(b)) for nt in range(NDdim)]
-    # causal loop bound: min((lqb+1)*2 tiles, ceil(klen/BN) tiles)
-    causal_t = b.mul(b.add(lqb, b.const_i32(1)), b.const_i32(2*BN//64))
+    context_off = b.sub(klen, qlen)  # prefix already in KV cache; qlen!=klen (chunked prefill / decode)
+    causal_t = b.div(b.add(b.add(context_off, qbase), b.const_i32(128 + BN - 1)), b.const_i32(BN))  # ceil((ctx+qmax+1)/BN)
     klen_t = b.div(b.add(klen, b.const_i32(BN-1)), b.const_i32(BN))
     kvend = b.select(b.cmp_lt(causal_t, klen_t), causal_t, klen_t)
     loop = b.scf_for_iter(b.const_i32(0), kvend, b.const_i32(1), iters, iv_name="kv")
@@ -78,7 +78,7 @@ def build():
             for i in range(CPL):
                 rr, cc = at.lane_to_output(b, lane, i)
                 key_g = b.add(b.add(b.mul(kv, b.const_i32(BN)), b.const_i32(kt*32)), rr)
-                q_g = b.add(qbase, b.add(wq, cc))
+                q_g = b.add(context_off, b.add(qbase, b.add(wq, cc)))  # absolute query pos = context_off + in-seq pos
                 m_causal = b.cmp_gt(key_g, q_g); m_varlen = b.cmp_ge(key_g, klen)
                 Sm[kt][i] = b.select(b.lor(m_causal, m_varlen), ninf, b.vec_extract(S_T[kt], i))
         local = ninf
@@ -115,7 +115,7 @@ def build():
 
 if __name__ == "__main__":
     torch.manual_seed(0)
-    qlens = [300, 128, 500]; klens = [300, 128, 500]   # ragged causal self-attn
+    qlens = [300, 1, 100]; klens = [300, 500, 500]   # ragged: seq0 prefill(q==k), seq1 decode(q=1,k=500), seq2 chunked(q=100,k=500)
     NSEQ = len(qlens); TOTALQ = sum(qlens)
     qblocks = [(q+127)//128 for q in qlens]; TOTALQB = sum(qblocks)
     globals()["NSEQ"] = NSEQ; globals()["TOTALQ"] = TOTALQ; globals()["TOTALQB"] = TOTALQB
@@ -145,14 +145,19 @@ if __name__ == "__main__":
     for i in range(NSEQ):
         q0, q1 = cu_q[i], cu_q[i+1]; ql = qlens[i]; kl = klens[i]; kbase = i*NPHYS*BS
         Qi = Qp[q0:q1].float(); Ki = Klog[kbase:kbase+kl].float(); Vi = Vlog[kbase:kbase+kl].float()
-        qpos = torch.arange(ql, device="cuda"); kpos = torch.arange(kl, device="cuda"); mask = kpos[None,:] > qpos[:,None]
-        err = 0.0
+        qpos = (kl - ql) + torch.arange(ql, device="cuda"); kpos = torch.arange(kl, device="cuda"); mask = kpos[None,:] > qpos[:,None]  # abs q pos = context_off + i
+        err = 0.0; err_sdpa = 0.0
+        import torch.nn.functional as Fnn
         for h in range(H):
             kvh = h//GQAG
             Sm = (Qi[:,h,:]@Ki[:,kvh,:].T)*scale
             r = torch.softmax(Sm.masked_fill(mask, float("-inf")), -1)@Vi[:,kvh,:]
             err = max(err, (Cc[q0:q1,h,:]-r).abs().max().item())
-        print(f"seq{i} qlen={ql} klen={kl} max_abs={err:.2e}", flush=True)
+            # INDEPENDENT: SDPA with EXPLICIT bottom-right causal mask (flash/vLLM/AITER convention; NOT is_causal which is top-left)
+            br = (torch.arange(kl, device="cuda")[None,:] <= ((kl-ql)+torch.arange(ql, device="cuda"))[:,None])
+            rs = Fnn.scaled_dot_product_attention(Qi[:,h,:].unsqueeze(0), Ki[:,kvh,:].unsqueeze(0), Vi[:,kvh,:].unsqueeze(0), attn_mask=br.unsqueeze(0), scale=scale).squeeze(0)
+            err_sdpa = max(err_sdpa, (Cc[q0:q1,h,:]-rs).abs().max().item())
+        print(f"seq{i} qlen={ql} klen={kl} manual={err:.2e} SDPA-indep={err_sdpa:.2e}", flush=True)
     ms = time_launches(run, warmup=10, iters=50, stream=stream)
     print(f"RAGGED {NSEQ} seqs, {TOTALQB} qblocks, time={ms*1e3:.1f}us", flush=True)
     synchronize_and_release(stream)
