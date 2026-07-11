@@ -26,7 +26,7 @@ def build():
     bid=b.block_id_x(); qhead=b.mod(bid,b.const_i32(H)); kvh=b.div(qhead,b.const_i32(GQAG)); qblock=b.div(bid,b.const_i32(H))
     cuqr=b.buffer_rsrc(CUQ,b.const_i32(8)); cuq0=b.vec_extract(b.buffer_load_vN(cuqr,b.const_i32(0),b.const_i32(0),I32,1),0)
     qbase=b.mul(qblock,b.const_i32(128)); qstart=b.add(cuq0,qbase)
-    V_lds=b.smem_alloc(BF16,[64,264],name_hint="Vlds")  # +8 pad: break 128-dword bank collision
+    V_lds=b.smem_alloc(BF16,[64,256],name_hint="Vlds")
     qr=b.buffer_rsrc(Q,b.const_i32(SQ*H*HD*2)); kr=b.buffer_rsrc(Kp,b.const_i32(NPHYS*BS*HKV*HD*2)); vr=b.buffer_rsrc(Vp,b.const_i32(NPHYS*BS*HKV*HD*2))
     btr=b.buffer_rsrc(BT,b.const_i32(NPHYS*4))
     def phys_key(kv,keytile):  # logical key-in-tile -> physical key via block table
@@ -52,7 +52,7 @@ def build():
         pk_kt=[phys_key(kv,b.add(b.const_i32(kt*32),ld.m_in_atom)) for kt in range(NKEYT)]  # paged K phys keys
         for h in range(NK):
             koff=b.add(b.mul(b.const_i32(h),b.const_i32(K)),b.mul(ld.k_blk,b.const_i32(APL)))
-            qi=b.add(b.mul(b.add(wq,ld.n_in_atom),b.const_i32(H)),qhead)
+            qi=b.add(b.mul(b.add(qstart,b.add(wq,ld.n_in_atom)),b.const_i32(H)),qhead)  # FIX: per-block Q offset
             q=b.buffer_load_vN(qr,b.mul(b.add(b.mul(qi,b.const_i32(HD)),koff),b.const_i32(2)),b.const_i32(0),BF16,BPL)
             for kt in range(NKEYT):
                 kf=b.buffer_load_vN(kr,b.mul(b.add(b.mul(b.add(b.mul(pk_kt[kt],b.const_i32(HKV)),kvh),b.const_i32(HD)),koff),b.const_i32(2)),b.const_i32(0),BF16,APL)

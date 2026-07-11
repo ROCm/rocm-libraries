@@ -96,3 +96,14 @@ REAL bottleneck: MFMA-dependency/scheduling-bound (~10 cyc/MFMA; accumulator cha
   serializes). AITER's 7% edge @4096 = LLVM-vs-Triton instruction SCHEDULER, a
   compiler-level diff, not a kernel-structural lever. We are at the rocKE ceiling:
   parity+ with AITER (0.95x @4096, ~1.01x @8192). No cheap kernel lever remains.
+
+## UPDATE 5: CORRECTNESS BUG FIXED - Q-offset per q-block (2026-07-11)
+Found via tight diagnostic: sq4096 kernel loaded Q[0:128] for EVERY q-block
+(qi missing qstart, line 55). Loose 2.85e-3 tolerance MASKED it (softmax over
+2000+ keys averages -> wrong-Q output landed "close"). Confirmed: kernel matched
+ref(Q[0:128]) at 4.5e-5 (exact) but correct ref(Q[qb*128]) only 3.6e-3.
+FIX: qi = (qstart + wq + n_in_atom)*H + qhead (mirror output oi indexing).
+After fix: qblock16/31 = 4.6e-5/3.5e-5 (genuinely correct); ours-vs-AITER
+1.5e-2 -> 1.9e-3 (bug was the main AITER-discrepancy source). PERF UNCHANGED
+(1375us@4096, 4597us@8192) - Q[0:128] vs Q[qb*128] load costs identically.
+So all prior perf numbers STAND; correctness for qblock>0 now actually validated.

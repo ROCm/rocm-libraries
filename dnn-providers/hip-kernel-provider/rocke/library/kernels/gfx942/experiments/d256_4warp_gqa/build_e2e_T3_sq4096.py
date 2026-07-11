@@ -52,7 +52,7 @@ def build():
         pk_kt=[phys_key(kv,b.add(b.const_i32(kt*32),ld.m_in_atom)) for kt in range(NKEYT)]  # paged K phys keys
         for h in range(NK):
             koff=b.add(b.mul(b.const_i32(h),b.const_i32(K)),b.mul(ld.k_blk,b.const_i32(APL)))
-            qi=b.add(b.mul(b.add(wq,ld.n_in_atom),b.const_i32(H)),qhead)
+            qi=b.add(b.mul(b.add(qstart,b.add(wq,ld.n_in_atom)),b.const_i32(H)),qhead)  # FIX: per-block Q offset
             q=b.buffer_load_vN(qr,b.mul(b.add(b.mul(qi,b.const_i32(HD)),koff),b.const_i32(2)),b.const_i32(0),BF16,BPL)
             for kt in range(NKEYT):
                 kf=b.buffer_load_vN(kr,b.mul(b.add(b.mul(b.add(b.mul(pk_kt[kt],b.const_i32(HKV)),kvh),b.const_i32(HD)),koff),b.const_i32(2)),b.const_i32(0),BF16,APL)
