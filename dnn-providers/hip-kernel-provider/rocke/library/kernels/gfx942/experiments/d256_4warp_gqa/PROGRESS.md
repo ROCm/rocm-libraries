@@ -107,3 +107,13 @@ After fix: qblock16/31 = 4.6e-5/3.5e-5 (genuinely correct); ours-vs-AITER
 1.5e-2 -> 1.9e-3 (bug was the main AITER-discrepancy source). PERF UNCHANGED
 (1375us@4096, 4597us@8192) - Q[0:128] vs Q[qb*128] load costs identically.
 So all prior perf numbers STAND; correctness for qblock>0 now actually validated.
+
+## UPDATE 6: ragged multi-seq cu_seqlens_q scheduling DONE (2026-07-11)
+build_e2e_T3_ragged.py: CTA->seq schedule via host-precomputed SID[gqb]/LQ[gqb]
+(seq + local-qblock per global qblock), per-seq q_start=cu_seqlens_q[sid]+lqb*128,
+qlen/klen per seq, block-table offset sid*NPHYS, causal loop bound min((lqb+1)*2,
+ceil(klen/BN)), variable-length row mask via scf_if store guard.
+Validated 3 ragged seqs (qlen/klen = 300/128/500): max_abs 8.4-9.0e-4 (bf16), all correct.
+Inherits scatter-paging from sq4096 (identical phys_key + sid offset).
+NOTE: uses host-precomputed schedule (SID/LQ arrays); production ABI would derive
+seq via in-kernel binary_search on cu_seqlens (rocKE has binary_search_seq_idx).
