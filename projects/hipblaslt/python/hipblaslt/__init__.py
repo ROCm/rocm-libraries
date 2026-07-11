@@ -48,7 +48,46 @@ def from_numpy(arr, dtype):
     return _core.DeviceArray.from_numpy(arr, dtype)
 
 
-__all__ = ["_core", "from_numpy", "mx"]
+def gemm(a, b):
+    """Convenience GEMM: D = a @ b. Thin shim over the low-level API.
+
+    Auto-selects the top heuristic algo. For full control (algo pinning,
+    epilogues, scales) use the _core layer directly.
+
+    Note: COMPUTE_32F is used for f32/f16/bf16 inputs. Integer (i32) and
+    fp8 GEMMs require a different compute type and are not handled here.
+    """
+    if a.ndim != 2 or b.ndim != 2 or a.shape[1] != b.shape[0]:
+        raise ValueError(f"incompatible shapes {a.shape} @ {b.shape}")
+    m, k = a.shape
+    _, n = b.shape
+    dtype = _NP_TO_DTYPE.get(_np.dtype(a.dtype))
+    if dtype is None:
+        raise ValueError(f"unsupported dtype {a.dtype}")
+
+    dA = _core.DeviceArray.from_numpy(_np.ascontiguousarray(a.T), dtype)
+    dB = _core.DeviceArray.from_numpy(_np.ascontiguousarray(b.T), dtype)
+    dC = _core.DeviceArray.from_numpy(_np.zeros((n, m), a.dtype), dtype)
+    dD = _core.DeviceArray.from_numpy(_np.zeros((n, m), a.dtype), dtype)
+    la = _core.MatrixLayout(dtype, m, k, m)
+    lb = _core.MatrixLayout(dtype, k, n, k)
+    lc = _core.MatrixLayout(dtype, m, n, m)
+    ld = _core.MatrixLayout(dtype, m, n, m)
+    with _core.Handle() as h:
+        desc = _core.MatmulDesc(_core.ComputeType.COMPUTE_32F, _core.DataType.R_32F)
+        pref = _core.Preference()
+        pref.set_max_workspace(64 * 1024 * 1024)
+        results = _core.heuristic(h, desc, la, lb, lc, ld, pref, 16)
+        if not results:
+            raise _core.HipblasLtError("no heuristic algorithm for this problem")
+        ws = _core.DeviceArray.from_numpy(
+            _np.zeros(max(1, results[0].workspace_size), _np.uint8), _core.DataType.R_8I
+        )
+        _core.matmul(h, desc, 1.0, dA, la, dB, lb, 0.0, dC, lc, dD, ld, results[0].algo, ws)
+    return dD.to_numpy().reshape(n, m).T
+
+
+__all__ = ["_core", "from_numpy", "gemm", "mx"]
 
 
 def _device_array_to_numpy(self):
