@@ -347,3 +347,53 @@ accepted equivalents/pragmas here, each with its one-line reason.
 
 ## D16 — BufferLoad/BufferStore promoted to Required Parameters
 **Context** kernel basename hash changes across all archs; assembly verified unchanged/correct; no err or kernel-count changes."
+
+## D17 — CustomKernels: re-target at `_readEmbeddedYaml` after Gemm-From-Anywhere removed `getCustomKernelConfigAndAssembly`
+
+**ADR:** [`adr/0002-custom-kernels-embedded-yaml-parsing.md`](adr/0002-custom-kernels-embedded-yaml-parsing.md).
+
+**Context:** `test_custom_kernels_char.py` (added on `develop` by #7989) pinned
+`getCustomKernelConfigAndAssembly`, a raw `---`/`...` line-splitter returning
+`(config_text, assembly_text)`. The Gemm-From-Anywhere branch's rewrite of
+`CustomKernels.py` (proper `.amdgpu_metadata` YAML parsing for the external-
+kernel `custom.config` schema) dropped that function in favor of a private
+`_readEmbeddedYaml` returning a parsed dict — the two branches diverged before
+#7989 merged to `develop`, so this was never reconciled. The stale import
+caused a pytest **collection** error, which (per pytest's default behavior)
+aborted the entire `-m unit` run before any test executed — silently hiding
+every other test in the suite behind this one file, not just this module.
+
+**Decision:** Point the test at the real replacement (`_readEmbeddedYaml`,
+pinning its parsed-dict return) instead of restoring the removed function.
+Also gave `test_get_custom_kernel_config_ok` its own fixture with a minimal
+`amdhsa.kernels` entry (`_VALID_S_WITH_KERNEL_META`), matching the convention
+in `Tests/unit/test_CustomKernelMetadata.py::write_kernel`, since
+`getCustomKernelConfig`'s new no-explicit-`CustomKernel` auto-infer path
+requires one (real kernel `.s` files always have one; only the bare-minimum
+test fixture didn't).
+
+**Why:** Same-purpose replacement (pin how the module reads its embedded
+YAML), not a scope cut; add-only (no production code touched); private-helper
+characterization already has precedent in this same branch
+(`test_CustomKernelMetadata.py` imports `_parse_tensile_yaml`/`_read_asm_file`
+directly).
+
+**Rejected alternatives:**
+- *Restore `getCustomKernelConfigAndAssembly`* — rejected per explicit
+  direction: don't reintroduce what Gemm-From-Anywhere deliberately removed.
+- *Delete the test instead of replacing it* — rejected: loses real coverage of
+  the embedded-YAML parsing path with no offsetting gain.
+
+**Validation:** `test_custom_kernels_char.py` — 11 passed, byte-identical
+`.ambr` across two additional `--snapshot-update`-free re-runs.
+
+**Residual scope (not fixed here):** unblocking collection let the full
+`-m unit` suite actually run for the first time on this branch's diff, and it
+surfaced 12 pre-existing failures unrelated to this file — stale goldens in
+`ValidParameters` (parameter roster: `CustomKernelName` → `CustomKernel`),
+`TensileLogic/HandleCustomKernel` (`hasCustomKernel` no longer matches a bare
+`CustomKernelName:` key — needs a human check for whether this is a real
+detection regression on a live code path or an intentional narrowing), 
+`ToolchainComponent`, `TensileMain`, `TensileCreateLibraryRun`, and
+`PublicInputSurface`. Each needs its own "intended vs. regression" triage
+per the governance in `README.md`; tracked separately from this decision."
