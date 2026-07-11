@@ -224,6 +224,7 @@ class KernelConfig:
 
     # Variant-specific
     preshuffle: bool = False
+    permute_n: bool = False  # B-preshuffle permutation variant (preshuffle only)
     elementwise_op: str = "PassThrough"
     num_d_tensors: int = 0
     d_layout: str = "r"  # Layout for D tensors (r=row, c=col) - same for all D tensors
@@ -282,6 +283,8 @@ class KernelConfig:
         # Preshuffle variant
         if self.preshuffle:
             parts.append("preshuffle")
+            if self.permute_n:
+                parts.append("permuteN")
 
         # Multi-D variant: include elementwise op, num tensors, and D layout
         if self.variant == GemmVariant.MULTI_D:
@@ -342,6 +345,8 @@ class KernelNaming:
         # Add variant suffix
         if config.variant == GemmVariant.PRESHUFFLE:
             name += "_preshuffle"
+            if config.permute_n:
+                name += "_permuteN"
         elif config.variant == GemmVariant.MULTI_D:
             name += f"_multid_{config.elementwise_op}_d{config.num_d_tensors}"
 
@@ -505,6 +510,11 @@ struct {struct_name} {{
     static constexpr bool DoubleSmemBuffer = {str(tr.pipeline == "compv4" or tr.pipeline == "preshufflev2").lower()};
     static constexpr bool UseStructuredSparsity = false;
     static constexpr bool Preshuffle = {str(config.preshuffle).lower()};
+    // PermuteN selects the B-preshuffle permutation used by the host-side
+    // shuffle_b_permuteN (true) vs shuffle_b (false). The preshuffle ctypes lib
+    // reads this off SelectedKernel to shuffle B byte-for-byte like Old-TE
+    // (tile_engine gemm_preshuffle default_config.json sets permute_n=true).
+    static constexpr bool PermuteN = {str(config.permute_n).lower()};
     static constexpr index_t NumWaveGroups = {config.num_wave_groups};
     
     {self._tile_types(config, ns_name)}
@@ -526,6 +536,12 @@ using ADataType = {self.tm.DTYPE_TO_CK_QUALIFIED[self.datatype]};
 using BDataType = {self.tm.DTYPE_TO_CK_QUALIFIED[self.datatype]};
 using CDataType = {self.tm.DTYPE_TO_CK_QUALIFIED[output_dtype]};
 using AccDataType = {self.tm.DTYPE_TO_CK_QUALIFIED[acc_dtype]};
+// Layout aliases in the global namespace so single-kernel consumers (the
+// ctypes lib's fallback key derivation and the preshuffle B-shuffle) can query
+// this kernel's operand layouts by type.
+using ALayout = {ns_name}::ALayout;
+using BLayout = {ns_name}::BLayout;
+using CLayout = {ns_name}::CLayout;
 
 // KernelKey field descriptors for the force-included kernel.
 // The ctypes library builds the registry KernelKey from these so the
@@ -872,7 +888,7 @@ inline KernelInstancePtr make_{kernel_name}(const std::string& gfx_arch = "gfx94
     key.algorithm.scheduler = {self.tm.SCHEDULER_TO_DISPATCHER[config.trait.scheduler]};
     key.algorithm.epilogue = {self.tm.EPILOGUE_TO_DISPATCHER[config.trait.epilogue]};
     key.algorithm.block_size = {config.block_size};
-    key.algorithm.double_buffer = {str(config.trait.pipeline == "compv4").lower()};
+    key.algorithm.double_buffer = {str(config.trait.pipeline in ("compv4", "preshufflev2")).lower()};
     key.algorithm.persistent = {str(config.trait.persistent).lower()};
     key.algorithm.preshuffle = {str(config.preshuffle).lower()};
     key.algorithm.transpose_c = false;
@@ -1120,34 +1136,47 @@ class UnifiedGemmCodegen:
                 configs.append(KernelConfig(tile=tile, trait=trait, variant=variant))
 
             elif variant == GemmVariant.PRESHUFFLE:
-                # Preshuffle needs specific pipeline (preshufflev2) and scheduler (default)
-                # Skip configs that don't use preshuffle-compatible traits
+                # Preshuffle uses a fixed pipeline (preshufflev2) and scheduler
+                # (default); the epilogue is swept ([default, cshuffle] in the TE
+                # gemm_preshuffle default_config). permute_n selects the B-shuffle
+                # permutation and is a global config knob (matches Old-TE).
+                permute_n = bool(self.config.get("permute_n", False))
                 preshuffle_trait = TraitConfig(
                     pipeline="preshufflev2",
-                    epilogue="cshuffle",
+                    epilogue=trait.epilogue,
                     scheduler="default",
                     pad_m=trait.pad_m,
                     pad_n=trait.pad_n,
                     pad_k=trait.pad_k,
                     persistent=trait.persistent,
                 )
-                # Only generate one preshuffle config per tile (not per trait)
-                # since preshuffle has fixed pipeline/scheduler
-                # Preshuffle always uses the cshuffle epilogue, so the
-                # CShuffle-store pow2 repeat gate always applies here.
-                if (
-                    trait.pipeline == "compv3"
-                    and trait.scheduler == "intrawave"
-                    and self._cshuffle_repeat_ok(tile)
-                ):
-                    configs.append(
-                        KernelConfig(
-                            tile=tile,
-                            trait=preshuffle_trait,
-                            variant=variant,
-                            preshuffle=True,
-                        )
+                # Emit one preshuffle config per (tile, epilogue, persistent),
+                # de-duplicating over the swept pipeline/scheduler so a full sweep
+                # does not create N identical preshuffle kernels. When the caller
+                # already pins the pipeline to preshufflev2 (the bridge
+                # single-config path), accept it directly; otherwise collapse the
+                # sweep onto its first pipeline (compv3) + scheduler (intrawave).
+                is_pinned = (
+                    trait.pipeline == "preshufflev2" and trait.scheduler == "default"
+                )
+                is_sweep_anchor = (
+                    trait.pipeline == "compv3" and trait.scheduler == "intrawave"
+                )
+                if not (is_pinned or is_sweep_anchor):
+                    continue
+                # The CShuffle-store pow2 repeat gate applies only to the cshuffle
+                # epilogue (the default epilogue stores directly and is correct).
+                if trait.epilogue == "cshuffle" and not self._cshuffle_repeat_ok(tile):
+                    continue
+                configs.append(
+                    KernelConfig(
+                        tile=tile,
+                        trait=preshuffle_trait,
+                        variant=variant,
+                        preshuffle=True,
+                        permute_n=permute_n,
                     )
+                )
 
             elif variant == GemmVariant.MULTI_D:
                 # CShuffle-store correctness gate: applies only when the

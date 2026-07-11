@@ -69,6 +69,24 @@ DEFAULT_VARIANT = "gemm_universal"
 CI_CONFIG_NAME = "default_ci_config.json"
 EXAMPLE_PROBLEMS_NAME = "example_problems.json"
 
+# Map the driver's --variant (a configs-dir selector) onto the codegen/runtime
+# variant token understood by expand_sweep / unified_gemm_codegen.
+CODEGEN_VARIANT = {
+    "gemm_universal": "standard",
+    "gemm_multi_d": "multi_d",
+    "gemm_preshuffle": "preshuffle",
+    "grouped_gemm": "grouped",
+}
+
+# Some variants only support a subset of dtypes/layouts. The preshuffle op
+# (tile_engine gemm_preshuffle) supports fp16/bf16/fp8/bf8 and rcr ONLY.
+VARIANT_SUPPORTED_DTYPES = {
+    "gemm_preshuffle": ("fp16", "bf16", "fp8", "bf8"),
+}
+VARIANT_SUPPORTED_LAYOUTS = {
+    "gemm_preshuffle": ("rcr",),
+}
+
 # Fallback problem set if a variant ships no example_problems.json.
 DEFAULT_PROBLEMS = [
     {"M": 1024, "N": 1024, "K": 1024},
@@ -77,7 +95,7 @@ DEFAULT_PROBLEMS = [
     {"M": 257, "N": 257, "K": 257},
 ]
 
-SUPPORTED_DTYPES = ("fp16", "bf16")
+SUPPORTED_DTYPES = ("fp16", "bf16", "fp8", "bf8")
 # Row-major C only: ck_tile's universal GEMM rejects column-major C at build.
 SUPPORTED_LAYOUTS = ("rcr", "rrr", "crr", "ccr")
 
@@ -350,10 +368,34 @@ def main():
     print(f"  Variant: {args.variant}")
     print(f"  Configs: {', '.join(config_paths)}")
 
+    codegen_variant = CODEGEN_VARIANT[args.variant]
+
+    # Per-variant dtype/layout guards (e.g. preshuffle is rcr-only, no fp32).
+    ok_dtypes = VARIANT_SUPPORTED_DTYPES.get(args.variant)
+    if ok_dtypes and args.dtype not in ok_dtypes:
+        print(
+            f"  ERROR: variant {args.variant} supports dtypes {ok_dtypes}, "
+            f"got {args.dtype!r}"
+        )
+        return 1
+    ok_layouts = VARIANT_SUPPORTED_LAYOUTS.get(args.variant)
+    if ok_layouts and args.layout not in ok_layouts:
+        print(
+            f"  ERROR: variant {args.variant} supports layouts {ok_layouts}, "
+            f"got {args.layout!r}"
+        )
+        return 1
+
     all_configs = []
     for cfg_path in config_paths:
         all_configs.extend(
-            expand_sweep(cfg_path, args.arch, dtype=args.dtype, layout=args.layout)
+            expand_sweep(
+                cfg_path,
+                args.arch,
+                dtype=args.dtype,
+                layout=args.layout,
+                variant=codegen_variant,
+            )
         )
 
     if args.max_kernels > 0:

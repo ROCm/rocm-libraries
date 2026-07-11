@@ -26,6 +26,15 @@
 #include "ck_tile/dispatcher/registry.hpp"
 #include "ck_tile/dispatcher/backends/generated_tile_backend.hpp"
 
+// Host-side B-preshuffle utilities. For a weight-preshuffled kernel the device
+// expects B already reordered into the pipeline's packed layout; this is the
+// SAME transform Old-TE's gemm_preshuffle profiler applies (shuffle_b /
+// shuffle_b_permuteN in tensor_shuffle_utils.hpp) so the bridge produces
+// byte-for-byte identical B, hence identical results.
+#include "ck_tile/host/host_tensor.hpp"
+#include "ck_tile/host/reference/reference_permute.hpp"
+#include "ck_tile/host/tensor_shuffle_utils.hpp"
+
 // Kernel header included via -include compiler flag
 // Defines: ADataType, BDataType, CDataType, AccDataType, SelectedKernel, KERNEL_NAME
 
@@ -37,6 +46,70 @@
 using namespace ck_tile::dispatcher;
 using namespace ck_tile::dispatcher::backends;
 using Priority = ck_tile::dispatcher::Registry::Priority;
+
+#if defined(GEMM_KEY_PRESHUFFLE) && (GEMM_KEY_PRESHUFFLE != 0)
+// Adapter exposing the force-included kernel's tile geometry under the field
+// names ck_tile::shuffle_b / shuffle_b_permuteN expect. Mirrors Old-TE's
+// gemm_preshuffle_benchmark.hpp::KernelConfig so the permutation is identical.
+struct BridgePreshuffleConfig
+{
+    static constexpr ck_tile::index_t M_Tile = SelectedKernel::TileM;
+    static constexpr ck_tile::index_t N_Tile = SelectedKernel::TileN;
+    static constexpr ck_tile::index_t K_Tile = SelectedKernel::TileK;
+
+    static constexpr ck_tile::index_t M_Warp = SelectedKernel::WarpPerBlock_M;
+    static constexpr ck_tile::index_t N_Warp = SelectedKernel::WarpPerBlock_N;
+    static constexpr ck_tile::index_t K_Warp = SelectedKernel::WarpPerBlock_K;
+
+    static constexpr ck_tile::index_t M_Warp_Tile = SelectedKernel::WarpTileM;
+    static constexpr ck_tile::index_t N_Warp_Tile = SelectedKernel::WarpTileN;
+    static constexpr ck_tile::index_t K_Warp_Tile = SelectedKernel::WarpTileK;
+
+    static constexpr bool permuteN = SelectedKernel::PermuteN;
+};
+
+// Preshuffle host B into the packed layout the device pipeline reads. Returns a
+// contiguous host buffer of the shuffled bytes.
+//
+// The shuffle utils (shuffle_b / shuffle_b_permuteN) take a rank-2 HostTensor
+// with lengths {K, N} whose PHYSICAL buffer is N-outer / K-contiguous -- exactly
+// Old-TE's b_k_n, built as host_tensor_descriptor(K, N, stride, is_row_major=
+// false) for the rcr kernel's column-major BLayout. The bridge runner hands B in
+// this same order for a 'c' B operand (ascontiguousarray(B.T), shape [N, K] row-
+// major == column-major [K, N]), so filling the col-major {K, N} tensor's flat
+// storage directly reproduces Old-TE's b_k_n byte-for-byte, hence an identical
+// permutation and identical results.
+template <typename T>
+static ck_tile::HostTensor<T> preshuffle_host_b(const T* b_host, int64_t K, int64_t N)
+{
+    // Build b_k_n with the SAME descriptor Old-TE uses:
+    //   host_tensor_descriptor(K, N, stride_b, is_row_major(BLayout))
+    // host_tensor_descriptor takes a compile-time bool_constant. BLayout is the
+    // force-included kernel's own B layout alias; for the rcr preshuffle kernel
+    // it is column-major, giving lengths {K, N} with strides {1, K} (N-outer,
+    // K-contiguous) -- the exact physical order shuffle_b / shuffle_b_permuteN
+    // expect and that the runner supplies for a 'c' B operand.
+    constexpr bool kBRowMajor = std::is_same_v<BLayout, ck_tile::tensor_layout::gemm::RowMajor>;
+    const auto stride_b       = ck_tile::get_default_stride(static_cast<ck_tile::index_t>(K),
+                                                      static_cast<ck_tile::index_t>(N),
+                                                      0,
+                                                      ck_tile::bool_constant<kBRowMajor>{});
+    ck_tile::HostTensor<T> b_k_n(
+        ck_tile::host_tensor_descriptor(static_cast<ck_tile::index_t>(K),
+                                        static_cast<ck_tile::index_t>(N),
+                                        stride_b,
+                                        ck_tile::bool_constant<kBRowMajor>{}));
+    std::copy(b_host, b_host + (K * N), b_k_n.begin());
+    if constexpr(BridgePreshuffleConfig::permuteN)
+    {
+        return ck_tile::shuffle_b_permuteN<BridgePreshuffleConfig>(b_k_n);
+    }
+    else
+    {
+        return ck_tile::shuffle_b<BridgePreshuffleConfig>(b_k_n);
+    }
+}
+#endif // GEMM_KEY_PRESHUFFLE
 
 // Global dispatcher (initialized once, managed via shared_ptr for safe cleanup)
 static std::shared_ptr<Dispatcher> g_dispatcher = nullptr;
@@ -332,11 +405,28 @@ int dispatcher_run_gemm(
         cleanup_gpu_mem();
         return -1;
     }
+#if defined(GEMM_KEY_PRESHUFFLE) && (GEMM_KEY_PRESHUFFLE != 0)
+    // Weight-preshuffled kernel: reorder B on the host into the packed layout the
+    // device pipeline reads, exactly as Old-TE does before launch. The shuffle is
+    // a pure permutation (same element count), so the device buffer size is
+    // unchanged. B_host stays the logical (unshuffled) B so the Python-side
+    // numpy reference (A @ B) remains valid.
+    {
+        ck_tile::HostTensor<BDataType> b_shuffled = preshuffle_host_b<BDataType>(B_host, K, N);
+        if(hipMemcpy(B_dev, b_shuffled.data(), K * N * sizeof(BDataType), hipMemcpyHostToDevice) !=
+           hipSuccess)
+        {
+            cleanup_gpu_mem();
+            return -1;
+        }
+    }
+#else
     if(hipMemcpy(B_dev, B_host, K * N * sizeof(BDataType), hipMemcpyHostToDevice) != hipSuccess)
     {
         cleanup_gpu_mem();
         return -1;
     }
+#endif // GEMM_KEY_PRESHUFFLE
     if(hipMemset(C_dev, 0, M * N * sizeof(CDataType)) != hipSuccess)
     {
         cleanup_gpu_mem();

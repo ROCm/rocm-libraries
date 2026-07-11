@@ -154,6 +154,7 @@ def get_arch_filter_data() -> Dict[str, Any]:
             TRAIT_UNSUPPORTED_COMBINATIONS,
             WARP_SUPPORTED_COMBINATIONS,
             WARP_TILE_SUPPORTED_COMBINATIONS,
+            PRESHUFFLE_WARP_TILE_SUPPORTED_COMBINATIONS,
             get_supported_archs,
         )
 
@@ -161,6 +162,12 @@ def get_arch_filter_data() -> Dict[str, Any]:
             "trait_unsupported": TRAIT_UNSUPPORTED_COMBINATIONS,
             "warp_combos": WARP_SUPPORTED_COMBINATIONS,
             "warp_tile_combos": WARP_TILE_SUPPORTED_COMBINATIONS,
+            # Preshuffle uses a distinct (smaller) MFMA warp-tile whitelist -- e.g.
+            # gfx942 fp8 preshuffle allows [16,16,32]/[16,16,64] but NOT the
+            # standard [16,16,16]. Using the standard table would let expand_sweep
+            # emit fp8/bf8 preshuffle configs the codegen then rejects (disjoint
+            # accepted sets), so validation consults this table for preshuffle.
+            "preshuffle_warp_tile_combos": PRESHUFFLE_WARP_TILE_SUPPORTED_COMBINATIONS,
             "supported_archs": get_supported_archs(),
         }
     except ImportError:
@@ -177,8 +184,14 @@ def get_arch_filter_data() -> Dict[str, Any]:
                 "gfx90a": [[1, 4, 1], [2, 2, 1], [4, 1, 1]],
             },
             "warp_tile_combos": {
-                "gfx942": {"fp16_fp16_fp16": [[16, 16, 16], [32, 32, 16]]},
-                "gfx90a": {"fp16_fp16_fp16": [[16, 16, 16], [32, 32, 16]]},
+                "gfx942": {"fp16_fp16_fp32": [[16, 16, 16], [32, 32, 16]]},
+                "gfx90a": {"fp16_fp16_fp32": [[16, 16, 16], [32, 32, 16]]},
+            },
+            "preshuffle_warp_tile_combos": {
+                "gfx942": {
+                    "fp16_fp16_fp32": [[16, 16, 16], [32, 32, 16], [16, 16, 32]],
+                    "fp8_fp8_fp32": [[32, 32, 16], [16, 16, 32], [16, 16, 64]],
+                },
             },
             "supported_archs": ["gfx90a", "gfx942", "gfx950"],
         }
@@ -281,10 +294,24 @@ def validate_kernel_config(config: "KernelConfig") -> ValidationResult:
             suggested_fixes["wave_n"] = warp_combos[0][1]
             suggested_fixes["wave_k"] = warp_combos[0][2]
 
-    # Check warp tile configuration for this arch and dtype
-    dtype_key = f"{dtype}_{dtype}_{dtype}"
+    # Check warp tile configuration for this arch and dtype.
+    # The arch_specs tables key on the ACCUMULATOR dtype (e.g. "fp8_fp8_fp32",
+    # "int8_int8_int32"), not the input dtype repeated -- using
+    # f"{dtype}_{dtype}_{dtype}" silently missed every non-fp16 key and fell
+    # through to the permissive default, admitting warp tiles the codegen rejects.
+    dtype_acc = getattr(config, "dtype_acc", None) or (
+        "int32" if dtype == "int8" else "fp32"
+    )
+    dtype_key = f"{dtype}_{dtype}_{dtype_acc}"
+    # Preshuffle consults its own (smaller) whitelist; other variants use the
+    # standard GEMM warp-tile table.
+    table_key = (
+        "preshuffle_warp_tile_combos"
+        if variant == "preshuffle"
+        else "warp_tile_combos"
+    )
     warp_tile_combos = (
-        arch_data["warp_tile_combos"]
+        arch_data.get(table_key, {})
         .get(arch, {})
         .get(dtype_key, [[32, 32, 16], [16, 16, 16]])
     )

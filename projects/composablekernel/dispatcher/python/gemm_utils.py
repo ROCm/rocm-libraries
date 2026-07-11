@@ -105,6 +105,10 @@ class GemmKernelConfig:
 
     gfx_arch: str = "gfx942"
     variant: str = "standard"
+    # Preshuffle-only: selects the B-preshuffle permutation (shuffle_b_permuteN
+    # vs shuffle_b). Mirrors Old-TE's permute_n config knob; participates in the
+    # kernel name so it must match unified_gemm_codegen.py::key_name.
+    permute_n: bool = False
 
     # ------------------------------------------------------------------ #
     # Derived string fragments
@@ -149,6 +153,8 @@ class GemmKernelConfig:
         )
         if self.variant == "preshuffle":
             name += "_preshuffle"
+            if self.permute_n:
+                name += "_permuteN"
         elif self.variant == "streamk":
             name += "_streamk"
         return name
@@ -186,6 +192,10 @@ class GemmKernelConfig:
                 "pad_k": [self.pad_k],
                 "persistent": [self.persistent],
             },
+            # Top-level knob read by unified_gemm_codegen for the preshuffle
+            # variant (selects shuffle_b_permuteN vs shuffle_b). Harmless for
+            # other variants, which ignore it.
+            "permute_n": self.permute_n,
         }
 
     def to_dict(self) -> Dict[str, Any]:
@@ -915,6 +925,7 @@ def expand_sweep(
     arch: str,
     dtype: str = "fp16",
     layout: str = "rcr",
+    variant: str = "standard",
 ) -> List[GemmKernelConfig]:
     """Expand a Tile Engine GEMM JSON sweep config into GemmKernelConfig list.
 
@@ -932,6 +943,16 @@ def expand_sweep(
 
     tc = cfg.get("tile_config", {})
     tr = cfg.get("trait_config", {})
+    # Preshuffle B-shuffle permutation knob. IMPORTANT: the bridge codegen emits
+    # the WeightPreshufflePipelineAGmemBGmemCRegV2 pipeline, whose device-side B
+    # packing matches the NON-permuteN host shuffle (ck_tile::shuffle_b) -- GPU-
+    # verified at max_rel ~5e-4, whereas shuffle_b_permuteN gives ~1.25 (wrong).
+    # Old-TE's default_config.json sets permute_n=true, but that selects a
+    # different (permuteN) TE pipeline the bridge does not generate; honoring it
+    # here would mis-shuffle B. So the bridge pins permute_n=False regardless of
+    # the config until the permuteN pipeline is bridged. Supporting it later is a
+    # codegen change (emit the permuteN pipeline) plus flipping this default.
+    permute_n = False
 
     tile_ms = _expand_range(tc["tile_m"])
     tile_ns = _expand_range(tc["tile_n"])
@@ -1015,6 +1036,8 @@ def expand_sweep(
             pad_k=bool(pk),
             persistent=bool(persist),
             gfx_arch=arch,
+            variant=variant,
+            permute_n=permute_n,
         )
         if c.name in seen:
             continue
