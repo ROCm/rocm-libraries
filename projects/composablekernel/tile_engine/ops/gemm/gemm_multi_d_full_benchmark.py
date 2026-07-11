@@ -7,8 +7,8 @@ Same 3-phase architecture as ``gemm_full_benchmark.py`` -- Multi-D is a
 single-problem GEMM (one A/B/C, one M/N/K) with the *same* C ABI, so the only
 bridge difference is ``variant="multi_d"`` threaded into ``expand_sweep`` (which
 makes the dispatcher codegen the Multi-D launch and ``gemm_utils`` select
-``multi_d_gemm_ctypes_lib.cpp``). The GPU worker reuses ``GemmProblem`` /
-``GpuMultiDGemmRunner`` unchanged.
+``multi_d_gemm_ctypes_lib.cpp``). The GPU worker uses ``MultiDGemmProblem`` /
+``GpuMultiDGemmRunner`` for the fused-D epilogue.
 
   Phase 1: Compile all kernels (parallel, returns .so paths only -- no GPU)
   Phase 2: Load problems (M, N, K shapes)
@@ -22,10 +22,10 @@ box benchmarks roughly N times faster while keeping per-batch fault isolation.
 
 Examples:
     # Default config (gemm_multi_d/configs/default_config.json), all visible GPUs:
-    python streamk_gemm_full_benchmark.py
+    python gemm_multi_d_full_benchmark.py
 
     # Explicit config on 4 GPUs with correctness checking:
-    python streamk_gemm_full_benchmark.py gemm_multi_d/configs/default_config.json \
+    python gemm_multi_d_full_benchmark.py gemm_multi_d/configs/default_config.json \
         --devices 4 --verify --csv gemm_multi_d_results.csv
 """
 
@@ -65,15 +65,10 @@ DEFAULT_PROBLEMS = [
 # Bridge surface for Multi-D. The dispatcher host path
 # (multi_d_gemm_ctypes_lib.cpp) derives strides from the kernel's layouts and the
 # worker (run_one_gemm_multi_d_kernel.py) reads dtype/layout off the kernel name,
-# so all 4 A/B/C layouts are supported. dtypes cover fp16 + bf16 + fp8 + bf8: the
-# bridge runner encodes fp16 natively, bf16 via bit-truncation, and fp8/bf8 via
-# ml_dtypes in the gfx942 FNUZ formats (e4m3fnuz / e5m2fnuz), which accumulate
-# into fp16. int8 is left out: it is blocked at the ck_tile engine level, not the
-# bridge -- the int8 kernel codegens but fails to COMPILE for every reduction
-# strategy (atomic/linear/tree). warp_gemm_dispatcher has no
-# Dispatcher<int8,int8,float,32,32,16,...> specialization for the streamk CompV3
-# path, so WarpGemm resolves to `int` and the BlockUniversalGemmAsBsCr
-# WarpGemm::kM/kN static_asserts fail; this matches PR #8094 leaving int8 out.
+# so all 4 A/B/C/D layouts are supported. dtype is fp16 only -- this matches
+# Old-TE's Multi-D capability set (fp16 x {rcrr,rrrr,ccrr,crrr}); the bridge
+# runner encodes fp16 natively and accumulates in fp32. Other dtypes (bf16 /
+# fp8 / bf8 / int8) are intentionally out of scope for Multi-D parity.
 SUPPORTED_DTYPES = ("fp16",)
 SUPPORTED_LAYOUTS = ("rcrr", "rrrr", "ccrr", "crrr")
 
@@ -312,8 +307,9 @@ def main():
         "--verify-tol",
         type=float,
         default=2e-2,
-        help="Relative tolerance for --verify (default 2e-2; Multi-D's Atomic "
-        "reduction is noisier than regular GEMM but stays well under this)",
+        help="Relative tolerance for --verify (default 2e-2). MultiDMultiply "
+        "products amplify fp16 rounding vs MultiDAdd, so the reported max_rel is "
+        "larger for Multiply/num_d=2; measured combos stay well under this gate.",
     )
     args = parser.parse_args()
 
