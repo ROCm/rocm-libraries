@@ -34,3 +34,15 @@ paged_mc "98.8 TF/s" was invalidated by exactly this (only seq0 was validated).
 - cu_seqlens_q packed ragged-Q addressing (needs >=2 seqs of different Q length to validate).
 - SQ=4096 single-seq ticket-representative perf number (causal loop bound essential).
 - Productionize: wire 4-warp GQA kernel into the dispatcher (like gfx950 routing).
+
+## UPDATE: SQ=4096 ticket-shape result (2026-07-11)
+build_e2e_T3_sq4096.py: NUM_KV=64 (4096 keys), 32 q-blocks x 16 heads = 512 CTAs,
+causal loop bound (kvend = 2*(qblock+1) tiles -> early blocks cheaper), cu_seqlens_q
+packed Q/O (qstart = cu_q[0] + qblock*128).
+- OURS  SQ=4096: 1367us, correct (vs fp32 ref 4e-3, bf16 accumulation over 4096 keys)
+- AITER SQ=4096: 1305us
+- ratio: OURS = 1.05x AITER time (~0.95x throughput) -- NEAR-PARITY on the ticket shape.
+Arc: shipped CK std-QK 0.55x -> 4-warp SQ=128/512 0.87x -> 4-warp SQ=4096 0.95x AITER.
+
+cu_seqlens_q: packed Q/O wired + single-seq validated; RAGGED (>=2 seqs diff Q len)
+needs the CTA->seq schedule (binary search on cu_q) -- remaining varlen-scheduling work.

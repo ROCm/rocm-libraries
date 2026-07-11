@@ -8,6 +8,7 @@ from rocke.runtime import KernelLauncher, LaunchConfig
 import torch
 at=MfmaAtom.bf16_32x32x8(); APL,BPL,CPL,K=at.a_per_lane,at.b_per_lane,at.c_per_lane,at.k
 HD=256; BN=64; NKEYT=BN//32; NK=HD//K; NDdim=HD//32; NKpv=BN//K; NUM_KV=64  # SQ=4096: 4096 keys
+SQ=4096; NQB=SQ//128
 BS=16; BPT=BN//BS  # paged: block_size=16, 4 blocks per 64-key tile
 NPHYS=NUM_KV*BPT  # physical blocks per seq
 H=16; HKV=2; GQAG=H//HKV  # GQA-16/2
@@ -95,22 +96,41 @@ def build():
 art=compile_kernel(build(),arch="gfx942"); open("/home/AMD/avirgoel/wk/e2eT3gqa.hsaco","wb").write(art.hsaco); print("BUILT",art.kernel_name,flush=True)
 torch.manual_seed(0)
 import os
-Kk=torch.randn(NPHYS,BS,HKV,HD,device="cuda",dtype=torch.bfloat16)*0.3; Vv=torch.randn(NPHYS,BS,HKV,HD,device="cuda",dtype=torch.bfloat16)*0.3
-Q=torch.randn(128,H,HD,device="cuda",dtype=torch.bfloat16)*0.3
+Kk=torch.randn(NPHYS,BS,HKV,HD,device="cuda",dtype=torch.bfloat16)*0.3
+Vv=torch.randn(NPHYS,BS,HKV,HD,device="cuda",dtype=torch.bfloat16)*0.3
+Q=torch.randn(SQ,H,HD,device="cuda",dtype=torch.bfloat16)*0.3
 bt=(torch.randperm(NPHYS) if os.environ.get("SCATTER") else torch.arange(NPHYS)).to(torch.int32).cuda()
-# logical K/V per kv head: [512, HKV, HD]
-Klog=Kk.view(NPHYS,BS,HKV,HD)[bt.long()].reshape(NPHYS*BS,HKV,HD); Vlog=Vv.view(NPHYS,BS,HKV,HD)[bt.long()].reshape(NPHYS*BS,HKV,HD)
-Cc=torch.zeros(128,H,HD,device="cuda",dtype=torch.float32)
-import os
-KLEN=int(os.environ.get("KLEN", NUM_KV*BN))  # varlen KV length (default full)
-klt=torch.tensor([KLEN],dtype=torch.int32,device="cuda")
-L=KernelLauncher(hsaco=art.hsaco,kernel_name=art.kernel_name,signature=SignatureBuilder().ptr("Q","bf16").ptr("K","bf16").ptr("V","bf16").ptr("C","f32").ptr("BT","i32").ptr("KL","i32").build())
-L({"Q":Q,"K":Kk,"V":Vv,"C":Cc,"BT":bt,"KL":klt},config=LaunchConfig(grid=(H,1,1),block=(256,1,1),stream=torch.cuda.current_stream().cuda_stream)); torch.cuda.synchronize()
-qpos=(NUM_KV*BN-128)+torch.arange(128,device="cuda"); kpos=torch.arange(NUM_KV*BN,device="cuda")
-mask=(kpos[None,:]>qpos[:,None])|(kpos[None,:]>=KLEN)
-O=torch.zeros(128,H,HD,device="cuda")
-for h in range(H):
-    kvh=h//GQAG
-    S=(Q[:,h,:].float()@Klog[:,kvh,:].float().T)*(1.0/math.sqrt(HD))
-    S=S.masked_fill(mask,float("-inf")); O[:,h,:]=torch.softmax(S,dim=-1)@Vlog[:,kvh,:].float()
-err=(Cc-O).abs().max().item(); print(f"NUM_KV={NUM_KV} max_abs={err:.4e} {'CORRECT' if err<1e-1 else 'WRONG'}",flush=True)
+Klog=Kk.view(NPHYS,BS,HKV,HD)[bt.long()].reshape(NPHYS*BS,HKV,HD)
+Vlog=Vv.view(NPHYS,BS,HKV,HD)[bt.long()].reshape(NPHYS*BS,HKV,HD)
+Cc=torch.zeros(SQ,H,HD,device="cuda",dtype=torch.float32)
+cuq=torch.tensor([0,SQ],dtype=torch.int32,device="cuda"); klt=torch.tensor([SQ],dtype=torch.int32,device="cuda")
+scale=1.0/math.sqrt(HD); stream=torch.cuda.current_stream().cuda_stream
+L=KernelLauncher(hsaco=art.hsaco,kernel_name=art.kernel_name,signature=SignatureBuilder().ptr("Q","bf16").ptr("K","bf16").ptr("V","bf16").ptr("C","f32").ptr("BT","i32").ptr("KL","i32").ptr("CUQ","i32").build())
+def ours(): L({"Q":Q,"K":Kk,"V":Vv,"C":Cc,"BT":bt,"KL":klt,"CUQ":cuq},config=LaunchConfig(grid=(NQB*H,1,1),block=(256,1,1),stream=stream))
+ours(); torch.cuda.synchronize()
+# validate a few query-blocks (causal, per-block)
+kpos=torch.arange(SQ,device="cuda")
+for qb in [0,16,31]:
+    qpos=qb*128+torch.arange(128,device="cuda"); mask=kpos[None,:]>qpos[:,None]
+    err=0.0
+    for h in range(H):
+        kvh=h//GQAG; Sm=(Q[qb*128:(qb+1)*128,h,:].float()@Klog[:,kvh,:].float().T)*scale
+        r=torch.softmax(Sm.masked_fill(mask,float("-inf")),-1)@Vlog[:,kvh,:].float()
+        err=max(err,(Cc[qb*128:(qb+1)*128,h,:]-r).abs().max().item())
+    print(f"OURS qblock{qb} max_abs={err:.2e}",flush=True)
+from rocke.runtime import time_launches, synchronize_and_release
+ms=time_launches(ours,warmup=10,iters=50,stream=stream)
+flop=2.0*(2.0*SQ*SQ*HD)*0.5*H  # causal ~half
+print(f"OURS SQ={SQ} time={ms*1e3:.1f}us TF/s={flop/ms/1e12:.1f}",flush=True)
+try:
+    from aiter.ops.triton.attention.unified_attention import unified_attention
+    out_ai=torch.empty(SQ,H,HD,device="cuda",dtype=torch.bfloat16)
+    cu_q=torch.tensor([0,SQ],dtype=torch.int32,device="cuda"); kvl=torch.tensor([SQ],dtype=torch.int32,device="cuda")
+    btA=bt.view(1,NPHYS)
+    def ait(): unified_attention(Q,Kk,Vv,out_ai,cu_seqlens_q=cu_q,seqused_k=kvl,max_seqlen_q=SQ,max_seqlen_k=SQ,softmax_scale=scale,causal=True,window_size=(-1,-1),block_table=btA,softcap=0.0,q_descale=None,k_descale=None,v_descale=None)
+    ait(); torch.cuda.synchronize()
+    d=(Cc-out_ai.float()).abs().max().item()
+    msa=time_launches(ait,warmup=10,iters=50,stream=stream)
+    print(f"AITER SQ={SQ} time={msa*1e3:.1f}us TF/s={flop/msa/1e12:.1f}  OURS/AITER={ms/msa:.2f}x (ours-vs-aiter max_abs={d:.2e})",flush=True)
+except Exception as e: print("AITER skipped:",str(e).splitlines()[0][:120],flush=True)
+synchronize_and_release(stream)
