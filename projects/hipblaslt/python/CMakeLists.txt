@@ -19,12 +19,23 @@ list(APPEND CMAKE_PREFIX_PATH /opt/rocm/hip /opt/rocm)
 find_package(hip REQUIRED)
 find_package(hipblaslt REQUIRED)
 
+# Enable HIP language so .hip sources are compiled with hipcc.
+# Must come after find_package(hip) so the HIP CMake toolchain files are on the path.
+enable_language(HIP)
+set(CMAKE_HIP_STANDARD 17)
+set(CMAKE_HIP_STANDARD_REQUIRED ON)
+
+set_source_files_properties(
+    "${CMAKE_CURRENT_SOURCE_DIR}/src/convert.hip"
+    PROPERTIES LANGUAGE HIP)
+
 nanobind_add_module(_core NB_SUPPRESS_WARNINGS
     "${CMAKE_CURRENT_SOURCE_DIR}/src/module.cpp"
     "${CMAKE_CURRENT_SOURCE_DIR}/src/enums.cpp"
     "${CMAKE_CURRENT_SOURCE_DIR}/src/device_array.cpp"
     "${CMAKE_CURRENT_SOURCE_DIR}/src/descriptors.cpp"
     "${CMAKE_CURRENT_SOURCE_DIR}/src/matmul.cpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/src/convert.hip"
 )
 target_include_directories(_core PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/src")
 target_link_libraries(_core PRIVATE hip::host roc::hipblaslt)

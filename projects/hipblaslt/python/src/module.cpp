@@ -31,4 +31,5 @@ NB_MODULE(_core, m)
     init_device_array(m);
     init_descriptors(m);
     init_matmul(m);
+    init_convert(m);
 }
