@@ -327,7 +327,6 @@ namespace
                                    163840,
                                    262144,  // rf_capacity: 65536 regs * 4 bytes
                                    8,
-                                   1,
                                    1.0,
                                    1.0,
                                    1.0,
