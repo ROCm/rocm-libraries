@@ -193,3 +193,18 @@ STEP 3 concrete requirement (now precisely known):
    NOT rebuilt tensors - the only test that catches a layout/block_size mismatch (advisory).
 STATE: Steps 1(binary_search) + 2(_attn_signature+runtime scalars) GPU-validated (compute).
 Step 3 = spec-driven block_size param + dispatch wiring + production-input parity. ~1 day.
+
+## UPDATE 11: block_size gate RESOLVED - validated at BOTH 16 and 64 (2026-07-11)
+build_e2e_T3_ragged_bs64.py: BS=64 (production harness value), BPT=BN//BS=1 (structural:
+per-tile block-table logic collapses to ONE block per 64-key tile - keytile//64=0, kv*1).
+GPU-validated dual-ref: 8e-4/7e-5/1e-4 (SAME as BS=16). So the paged addressing path
+(phys_key, cooperative V load, block-table indexing) is CORRECT at both BPT=4 (BS=16,
+ticket) and BPT=1 (BS=64, harness) - not just a symbol swap, the collapsed path executes
+right on GPU. advisory's structural-change concern addressed.
+Ticket says block_size=16; parity harness uses 64 - kernel handles BOTH, so whichever
+the real deployment ships is covered. Builder should read block_size from spec.
+STEP 3 STATE: layout CONFIRMED compat; block_size validated @16 AND @64; binary_search,
+_attn_signature ABI, runtime scalars, context_off causal, GQA - ALL GPU-validated.
+REMAINING (pure wiring): build_gfx942_4warp_gqa(spec) in attention_tiled_2d.py reading
+HD/H/HKV/block_size/dtype from spec + launch meta + swap seam attention_unified.py:3391
++ full-dispatch parity vs production inputs (final_shapes_check.py). Algorithm+ABI done.
