@@ -740,12 +740,14 @@ def _d256_gfx942_fast(problem: "UnifiedAttentionProblem") -> bool:
     gfx942 has no fast D256 route on the default builder: the wide-flash gate
     (``_enable_gfx942_bf16_flash``) excludes head_size==256 and the narrow
     16x16x16 fallback overflows the 64 KB LDS at a competitive tile. This gate
-    picks a distinct, LDS-light 32x32x8 natural-QK builder instead. It sets the
-    three launch-critical geometry selectors (num_warps=1 / tile_size=32 /
-    block_m_per_warp=32) so the spec, ``_tiled_cache_key`` and
-    ``_get_2d_launch_meta`` all agree; the builder is selected in
-    ``_get_2d_launcher`` and its grid in ``_get_2d_launch_meta``. Narrow +
-    arch/feature-guarded: every other shape is byte-identical.
+    picks a distinct, LDS-light 32x32x8 natural-QK builder instead. The spec +
+    ``_tiled_cache_key`` carry num_warps=1 / tile_size=32 / block_m_per_warp=32
+    purely as the cohort *discriminator* (a distinct HSACO cache slot; every
+    other shape stays byte-identical) -- the builder itself is the 4-wave64 /
+    BLOCK_M=128 ``build_gfx942_4warp_gqa`` (selected in ``_get_2d_launcher``),
+    which ``_get_2d_launch_meta`` deliberately launches with block=(256,1,1) /
+    BLOCK_M=128, NOT the spec's 1-warp/32 geometry. Narrow + arch/feature-
+    guarded: every other shape is byte-identical.
 
     Perf (gfx942, same-run vs AITER ``unified_attention``, D256 bf16 causal
     prefill GQA 16/2 bs=16): OURS/AITER ~= 0.98x @ Sq4096 (parity), ~= 0.94x @
