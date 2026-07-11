@@ -3383,12 +3383,13 @@ def _get_2d_launcher(
         _, build_unified_attention_2d_tiled, _ = _tiled_2d_impl(arch)
         spec = _tiled_spec_from_problem(problem)
         if _d256_gfx942_fast(problem):
-            # Distinct natural-QK paged builder for the D256 gfx942 cohort
+            # Distinct 4-warp GQA paged builder for the D256 gfx942 cohort
             # (keyed separately in `_tiled_cache_key`; grid in
             # `_get_2d_launch_meta`). Same paged ABI as the default builder.
-            from ..gfx942.attention_tiled_2d import build_stdqk_attention_paged
+            # Parity+ with AITER @Sq4096/8192 (vs the 1-warp std-QK's 0.55x).
+            from ..gfx942.attention_tiled_2d import build_gfx942_4warp_gqa
 
-            kernel = build_stdqk_attention_paged(spec, arch=arch)
+            kernel = build_gfx942_4warp_gqa(spec, arch=arch)
         else:
             kernel = build_unified_attention_2d_tiled(spec, arch=arch)
         backend = _select_2d_compile_backend(problem)
@@ -3424,13 +3425,13 @@ def _get_2d_launch_meta(
         return _2D_LAUNCH_META[meta_key]
     arch = _resolve_attention_arch()
     if _d256_gfx942_fast(problem):
-        # Natural-QK paged kernel: 1 wave64/CTA owns BLOCK_M=32 q-tokens for ONE
+        # 4-warp GQA paged kernel: 4 wave64/CTA own BLOCK_M=128 q-tokens for ONE
         # query head. grid = (num_query_heads, q-token-blocks + per-seq padding).
-        # block_q == BLOCK_M == 32, matching the kernel's binary_search_seq_idx.
-        total_num_q_blocks = problem.total_q // 32 + problem.num_seqs
+        # block_q == BLOCK_M == 128, matching the kernel's binary_search_seq_idx.
+        total_num_q_blocks = problem.total_q // 128 + problem.num_seqs
         meta = _Attention2DLaunchMeta(
             grid=(int(problem.num_query_heads), int(total_num_q_blocks), 1),
-            block=(64, 1, 1),
+            block=(256, 1, 1),
         )
         _2D_LAUNCH_META[meta_key] = meta
         return meta

@@ -260,3 +260,22 @@ confirmed correct. (Output already used global_store w/ element offset = descrip
 4. Full-dispatch parity: final_shapes_check.py vs PRODUCTION-generated paged inputs
    (the layout-catching test) + AITER + fp32 ref.
 Reference impl for assembly: build_e2e_T3_ragged_desc.py (every line GPU-validated).
+
+## UPDATE 14: PRODUCTIONIZATION COMPLETE - full-dispatch parity PASS (2026-07-11)
+Wired build_gfx942_4warp_gqa into production dispatch, GPU-validated end-to-end:
+- attention_tiled_2d.py: build_gfx942_4warp_gqa(spec) - spec-driven (HD/H/HKV/GQAG/BS/
+  dtype/binary_search_iters), _attn_signature ABI, Q via TensorDescriptor.naive, K/V/BT
+  via global_load (i32-elem, overflow-safe), bf16 output, 2D grid (block_id_x=head,
+  block_id_y=qblock), BLOCK_M=128/4-warp, padding-block early-return.
+- attention_unified.py:3392 seam: _d256_gfx942_fast -> build_gfx942_4warp_gqa (was
+  build_stdqk_attention_paged). Launch meta: BLOCK_M=128, block=(256,1,1),
+  total_q_blocks=total_q//128+num_seqs, grid=(num_query_heads, total_q_blocks).
+- Gate _d256_gfx942_fast already excludes softcap/sinks/alibi/sliding_window/fp8/>2GB
+  -> no feature gap, no regression vs stdqk (same gate).
+FULL-DISPATCH PARITY (run_unified_attention_torch, production-generated paged inputs):
+  ragged 4-seq (qlens 300/1/100/260, klens 300/500/500/260, incl decode q=1), SCATTERED
+  block table, vs fp32 bottom-right-causal SDPA ref: BS=16 -> 2.57e-3 PASS, BS=32 -> 3.19e-3 PASS.
+Perf (standalone global_load kernel, ratio vs AITER same-run): 1.02x@4096, 0.94x@8192
+  (comparable to buffer_load 1.05x/0.99x; global_load overhead vanishes when saturated).
+STATUS: gfx942 D256 4-warp GQA kernel PRODUCTION-WIRED + end-to-end GPU-validated.
+Remaining (optional): dispatch-path perf run at ticket shapes; commit-hygiene review.
