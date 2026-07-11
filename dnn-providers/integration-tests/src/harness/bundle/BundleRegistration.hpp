@@ -15,10 +15,10 @@
 #include <hipdnn_test_sdk/utilities/TestUtilities.hpp>
 
 #include "harness/TestConfig.hpp"
-#include "harness/golden/BundleDiscovery.hpp"
-#include "harness/golden/IntegrationGraphGoldenReferenceVerificationHarness.hpp"
+#include "harness/bundle/BundleDiscovery.hpp"
+#include "harness/bundle/IntegrationBundleVerificationHarness.hpp"
 
-namespace hipdnn_integration_tests::golden
+namespace hipdnn_integration_tests::bundle
 {
 
 namespace detail
@@ -58,7 +58,7 @@ inline void registerBundles(const std::vector<LoadedBundle>& bundles)
             __FILE__,
             __LINE__,
             [loaded = bundle.bundle, path = bundle.jsonPath]() -> ::testing::Test* {
-                auto* test = new IntegrationGraphGoldenReferenceVerificationHarness(
+                auto* test = new IntegrationBundleVerificationHarness(
                     /*requiresDevice=*/true);
                 test->setBundle(loaded, path);
                 return test;
@@ -163,4 +163,4 @@ inline void registerBundleTests()
     HIPDNN_PLUGIN_LOG_INFO("Registered " << bundles.size() << " golden bundle test(s)");
 }
 
-} // namespace hipdnn_integration_tests::golden
+} // namespace hipdnn_integration_tests::bundle

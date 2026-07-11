@@ -82,7 +82,8 @@ protected:
 
         this->registerValidator(yTensorAttr, tolerance);
 
-        this->verifyGraph(graphObj, testCase.seed);
+        this->synthesis().setGlobalSeed(testCase.seed);
+        this->verifyGraph(graphObj);
     }
 };
 
