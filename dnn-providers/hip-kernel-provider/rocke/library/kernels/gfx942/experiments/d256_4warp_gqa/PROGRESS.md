@@ -46,3 +46,18 @@ Arc: shipped CK std-QK 0.55x -> 4-warp SQ=128/512 0.87x -> 4-warp SQ=4096 0.95x 
 
 cu_seqlens_q: packed Q/O wired + single-seq validated; RAGGED (>=2 seqs diff Q len)
 needs the CTA->seq schedule (binary search on cu_q) -- remaining varlen-scheduling work.
+
+## UPDATE 2: SQ=8192 + bottleneck profiling (2026-07-11)
+Ticket shapes (GQA-16/2 causal paged, vs AITER unified_attention, identical inputs):
+- SQ=4096: OURS 1366us / AITER 1305us = 0.95x AITER (near-parity)
+- SQ=8192: OURS 4600us / AITER 4685us = 1.02x AITER (WE EDGE AHEAD)
+vs shipped CK std-QK 0.55x -> ~2x improvement to parity+.
+
+Bottleneck profiling (rocprofv3, SQ=4096): MFMA & occupancy at PARITY with AITER.
+Gap = VALU (ours 4.45e9 vs AITER 3.32e9, 1.34x) + LDS bank conflicts (6.7x).
+BUT: V_lds row-stride pad [64,256]->[64,264] cut conflicts 2.3x (1.85e9->7.92e8)
+with ZERO perf change (GRBM 1.39e9 unchanged) -> conflicts are HIDDEN behind compute,
+NOT critical-path. amd_rotating_shared swizzle would net ~0 (measure-first, confirmed).
+Real remaining lever = VALU (address-math: 101 v_lshlrev vs AITER's 6; hoist phys_key
+mul/mod/shift, use bfe+add3) -- only matters more at smaller SQ (overhead-bound);
+at SQ=8192 we already beat AITER.
