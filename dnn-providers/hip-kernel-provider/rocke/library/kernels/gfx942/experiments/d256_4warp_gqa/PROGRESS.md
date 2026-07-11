@@ -80,3 +80,19 @@ FIX = strided-paired wide read (ds_read2st64_b64) via rotating-swizzle layout.
   layout (store side measured net -26% in isolation; read-side win now justified).
 Cheap separable slice: 98 v_lshlrev,1 (x2 byte offset) - fold into element-addressed
   ds_read if rocKE emits it (small).
+
+## UPDATE 4: issue-count hypothesis DISPROVEN by proxy - rewrite NO-GO (2026-07-11)
+Throwaway proxy: hacked V read to 1 wide n=4 ds_read (wrong numerics, ~4x fewer reads),
+optimistic upper bound (fully contiguous, NO store penalty). Result:
+  LDS insts 1.097e9 -> 1.73e8 (6.3x FEWER), VALU 4.45e9 -> 3.96e9 (-11%)
+  BUT SQ_BUSY_CYCLES 5.36e9 -> 6.55e9 (+22%), time 1366 -> 1654us (+21% SLOWER).
+=> Cutting LDS 6.3x + VALU 11% made it SLOWER. Vector-issue-bound model was
+   CORRELATION not causation. Strided-paired ds_read2st64 rewrite = NO-GO
+   (optimistic upper bound already fails; store -26% never even matters).
+Three independent measurements now agree LDS/V-read is NOT binding:
+  (1) pad cut conflicts 2.3x -> 0% perf; (2) SQ_WAIT_INST_LDS 0.45x (barely wait);
+  (3) proxy cut LDS 6.3x -> busy ROSE 22%.
+REAL bottleneck: MFMA-dependency/scheduling-bound (~10 cyc/MFMA; accumulator chain
+  serializes). AITER's 7% edge @4096 = LLVM-vs-Triton instruction SCHEDULER, a
+  compiler-level diff, not a kernel-structural lever. We are at the rocKE ceiling:
+  parity+ with AITER (0.95x @4096, ~1.01x @8192). No cheap kernel lever remains.
