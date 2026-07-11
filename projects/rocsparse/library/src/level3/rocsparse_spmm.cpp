@@ -344,6 +344,35 @@ namespace rocsparse
             }
             case rocsparse_spmm_stage_compute:
             {
+                // The SpMM preprocess stage is optional in the generic API, and a
+                // reused descriptor may reach compute with a freshly allocated
+                // buffer that was never analyzed. The auto-selected default can
+                // resolve to nnz-split, which reads its row-limit segmentation out
+                // of temp_buffer, so ensure that segmentation exists by (re)running
+                // the analysis on the auto path here. It is cheap (one segmentation
+                // kernel) and capture-safe: the profile reduction is skipped once
+                // cached or while the stream is capturing, leaving only a launch.
+                if(csrmm_alg == rocsparse_csrmm_alg_default)
+                {
+                    RETURN_IF_ROCSPARSE_ERROR(rocsparse::csrmm_analysis(handle,
+                                                                        trans_A,
+                                                                        csrmm_alg,
+                                                                        m,
+                                                                        n,
+                                                                        k,
+                                                                        mat_A->nnz,
+                                                                        mat_A->descr,
+                                                                        mat_A->data_type,
+                                                                        mat_A->const_val_data,
+                                                                        mat_A->row_type,
+                                                                        mat_A->const_row_data,
+                                                                        mat_A->col_type,
+                                                                        mat_A->const_col_data,
+                                                                        is_batched,
+                                                                        &mat_A->line_profile,
+                                                                        temp_buffer));
+                }
+
                 RETURN_IF_ROCSPARSE_ERROR(rocsparse::csrmm(handle,
                                                            trans_A,
                                                            trans_B,
@@ -449,6 +478,30 @@ namespace rocsparse
             }
             case rocsparse_spmm_stage_compute:
             {
+                // See the CSR branch: the preprocess stage is optional, so ensure
+                // the nnz-split row-limit segmentation is present in temp_buffer on
+                // the auto path before compute reads it. Cheap and capture-safe.
+                if(csrmm_alg == rocsparse_csrmm_alg_default)
+                {
+                    RETURN_IF_ROCSPARSE_ERROR(rocsparse::cscmm_analysis(handle,
+                                                                        trans_A,
+                                                                        csrmm_alg,
+                                                                        m,
+                                                                        n,
+                                                                        k,
+                                                                        mat_A->nnz,
+                                                                        mat_A->descr,
+                                                                        mat_A->data_type,
+                                                                        mat_A->const_val_data,
+                                                                        mat_A->col_type,
+                                                                        mat_A->const_col_data,
+                                                                        mat_A->row_type,
+                                                                        mat_A->const_row_data,
+                                                                        is_batched,
+                                                                        &mat_A->line_profile,
+                                                                        temp_buffer));
+                }
+
                 RETURN_IF_ROCSPARSE_ERROR(rocsparse::cscmm(handle,
                                                            trans_A,
                                                            trans_B,
