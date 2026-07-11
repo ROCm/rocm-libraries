@@ -50,7 +50,9 @@ needs the CTA->seq schedule (binary search on cu_q) -- remaining varlen-scheduli
 ## UPDATE 2: SQ=8192 + bottleneck profiling (2026-07-11)
 Ticket shapes (GQA-16/2 causal paged, vs AITER unified_attention, identical inputs):
 - SQ=4096: OURS 1366us / AITER 1305us = 0.95x AITER (near-parity)
-- SQ=8192: OURS 4600us / AITER 4685us = 1.02x AITER (WE EDGE AHEAD)
+- SQ=8192: OURS median 4594us / AITER median 4647us = ~1.01x (consistently ~1-2% ahead;
+  3 runs OURS 4598/4590/4594, AITER 4683/4635/4648 - ours never overlaps AITER's range,
+  but margin is small: report as 'at parity, edge to us' not a bald 'beats')
 vs shipped CK std-QK 0.55x -> ~2x improvement to parity+.
 
 Bottleneck profiling (rocprofv3, SQ=4096): MFMA & occupancy at PARITY with AITER.
@@ -61,3 +63,20 @@ NOT critical-path. amd_rotating_shared swizzle would net ~0 (measure-first, conf
 Real remaining lever = VALU (address-math: 101 v_lshlrev vs AITER's 6; hoist phys_key
 mul/mod/shift, use bfe+add3) -- only matters more at smaller SQ (overhead-bound);
 at SQ=8192 we already beat AITER.
+
+## UPDATE 3: next bottleneck = scalar strided-key V read (2026-07-11)
+Rich rocprof (SQ=4096) + ISA region split (in-loop = per-KV-tile):
+  in-loop VALU: OURS 1497 vs AITER 1218 (1.23x/iter). MFMA 128=128 (parity).
+  LDS insts: OURS 1.10e9 vs AITER 3.69e8 (2.97x). NOT LDS-wait-bound (0.45x AITER).
+  -> VECTOR-ISSUE-BOUND: VALU(4.45e9)+LDS(1.10e9)=5.55e9 ~= busy 5.36e9.
+ROOT CAUSE (single): the scalar [key,dim] V read. Excess in-loop ops all trace to it:
+  222 v_or (per-read LDS address) + 98 v_lshlrev,1 (bf16 byte offset)
+  + 144 v_perm (pack scalars->MFMA operand) + 256 ds_read_u16 (scalar).
+  AITER reads same strided keys in 1 ds_read2st64_b64 (strided-paired), no addr/pack.
+FIX = strided-paired wide read (ds_read2st64_b64) via rotating-swizzle layout.
+  NEW vs prior neutral V-staging tests: those measured conflicts/latency (neutral;
+  pad disproved conflicts). This is the ISSUE-COUNT axis (the actual binding resource)
+  - never measured before. Potential win is real, but needs the multi-day rotating
+  layout (store side measured net -26% in isolation; read-side win now justified).
+Cheap separable slice: 98 v_lshlrev,1 (x2 byte offset) - fold into element-addressed
+  ds_read if rocKE emits it (small).
