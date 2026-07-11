@@ -747,8 +747,10 @@ def _d256_gfx942_fast(problem: "UnifiedAttentionProblem") -> bool:
     ``_get_2d_launcher`` and its grid in ``_get_2d_launch_meta``. Narrow +
     arch/feature-guarded: every other shape is byte-identical.
 
-    Perf (MI300X, dense-measured on the research kernel): 115.4/124.9 TF/s @
-    Sq4096/8192; the dense->paged transfer is validated on-silicon.
+    Perf (gfx942, same-run vs AITER ``unified_attention``, D256 bf16 causal
+    prefill GQA 16/2 bs=16): OURS/AITER ~= 0.98x @ Sq4096 (parity), ~= 0.94x @
+    Sq8192 (OURS ~6% faster). Measured on MI300A 2026-07-11 (MI300X prototype
+    run: 0.97x / 0.94x); OURS matches the fp32 reference + AITER within bf16 tol.
     """
     return (
         _resolve_attention_arch() == "gfx942"
