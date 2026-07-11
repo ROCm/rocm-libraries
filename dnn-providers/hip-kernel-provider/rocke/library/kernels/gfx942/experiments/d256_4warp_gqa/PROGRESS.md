@@ -147,3 +147,16 @@ Precise steps (all Python; branch C++ diff vs develop is EMPTY = Python-only, li
 8. GPU-validate: run_unified_attention_torch SQ=4096 GQA-16/2 causal paged vs AITER +
    fp32 ref (reuse builders/gfx942/attention/prefill/parity_unified_attention.py).
 RISK: full-dispatch GPU validation is the gate; est 1-2 days. Not shipped unvalidated.
+
+## UPDATE 8: productionization Port Step 1 DONE (2026-07-11)
+build_e2e_T3_ragged_bs.py: replaced host-precomputed SID/LQ with in-kernel
+binary_search_seq_idx(CUQ, gqb, num_seqs, block_q=128) - the SAME helper + pattern
+as production build_stdqk_attention_paged (attention_tiled_2d.py:5590). Derivation
+mirrors production exactly: cu_q_start=CUQ[sid], qlen=CUQ[sid+1]-cu_q_start,
+q_block_start=cu_q_start//128+sid, lqb=gqb-q_block_start, klen=KL[sid],
+context_off=klen-qlen (== production context_len line 5604). Validated dual-ref:
+prefill 300/300, decode 1/500, chunked 100/500 -> 8e-4/7e-5/1e-4 both refs agree.
+Remaining: Step2 emit _attn_signature (runtime scalars scale/num_seqs/bt_stride);
+Step3 wire seam attention_unified.py:3391 + full-dispatch GPU validation.
+NOTE: MARKHAM defq queue ~2min/alloc; switching to miopen/AUSTIN pool (kreb skill +
+beegfs /scratch staging since /home not shared) for subsequent runs.
