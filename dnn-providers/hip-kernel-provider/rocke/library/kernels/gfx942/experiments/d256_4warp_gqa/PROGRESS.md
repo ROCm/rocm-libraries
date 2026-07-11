@@ -174,3 +174,22 @@ paged inputs via run_unified_attention_torch (feed exact dispatch tensors, don't
 Step3 remaining: build_gfx942_4warp_gqa(spec) in attention_tiled_2d.py (read HD/H/HKV/
 block_size/dtype from spec, not module consts) + launch meta (grid from problem.total_q)
 + swap seam attention_unified.py:3391 + parity harness (final_shapes_check.py) diff.
+
+## UPDATE 10: Step 3 layout finding - key_cache layout MATCHES, block_size is the gate
+Production parity harness (builders/gfx942/attention/prefill/parity_unified_attention.py):
+- key_cache.shape = [num_blocks, block_size, num_kv_heads, head_size] (line 165)
+  == our ASSUMED layout EXACTLY. Our offset (pk*HKV+kvh)*HD+koff, block gather
+  key_cache[block_indices].view(-1,HKV,HD) - all compatible. Layout hypothesis CONFIRMED.
+- BUT BLOCK_SIZE=64 (line 63) while our kernel HARDCODES BS=16 (BPT=BN//BS=4). MISMATCH.
+  (advisory was right: Step2 self-validated at BS=16; production uses 64.)
+STEP 3 concrete requirement (now precisely known):
+1. build_gfx942_4warp_gqa(spec) must read block_size, HD, H(num_q_heads), HKV(num_kv_heads),
+   dtype from spec - NOT module consts. BS param affects: keytile//BS, keytile%BS, BPT=BN//BS,
+   cooperative V load, phys_key. (Everything else - binary_search, context_off, ABI, causal,
+   compute core - already validated & spec-agnostic.)
+2. Launch meta: grid from problem (total_q_blocks*num_heads); block (num_warps*64,).
+3. Swap seam attention_unified.py:3391 build_stdqk_attention_paged -> build_gfx942_4warp_gqa.
+4. VALIDATE against production-generated inputs (final_shapes_check.py / run_unified_attention_torch),
+   NOT rebuilt tensors - the only test that catches a layout/block_size mismatch (advisory).
+STATE: Steps 1(binary_search) + 2(_attn_signature+runtime scalars) GPU-validated (compute).
+Step 3 = spec-driven block_size param + dispatch wiring + production-input parity. ~1 day.
