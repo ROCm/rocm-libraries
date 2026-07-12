@@ -419,6 +419,12 @@ def _run_aoTriton_live(shape, data, sliding_window, is_fp8, *, warmup, iters):
         raise NotImplementedError("AOTriton skip: FP8 not supported by flash SDPA")
     if shape.has_alibi:
         raise NotImplementedError("AOTriton skip: alibi not supported by flash SDPA")
+    if sliding_window:
+        raise NotImplementedError(
+            "AOTriton skip: sliding_window not supported by flash SDPA"
+        )
+    if float(shape.softcap):
+        raise NotImplementedError("AOTriton skip: softcap not supported by flash SDPA")
 
     is_causal = True
 
