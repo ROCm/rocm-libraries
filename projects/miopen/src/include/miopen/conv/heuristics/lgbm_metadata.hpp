@@ -58,6 +58,12 @@ public:
     // the ranked pick list so they are chosen only when nothing else applies.
     bool IsNaiveFallback(const std::string& solver_name) const;
 
+    // Group-count threshold (rank.naive_guard_max_groups) below which the naive
+    // demotion applies. At or above it, naive fallbacks keep their raw score
+    // rank because naive is genuinely fastest on high-group convs. Defaults to
+    // 64 when the key is absent.
+    int NaiveGuardMaxGroups() const { return naive_guard_max_groups; }
+
 private:
     LgbmMetadata();
 
@@ -66,6 +72,7 @@ private:
     std::vector<std::string> solvers;
     std::unordered_map<std::string, int> solver_index;
     std::unordered_set<std::string> naive_fallback;
+    int naive_guard_max_groups = 64;
 };
 
 } // namespace lgbm

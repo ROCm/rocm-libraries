@@ -354,7 +354,8 @@
       "ConvDirectNaiveConvBwd",
       "ConvDirectNaiveConvFwd",
       "ConvDirectNaiveConvWrw"
-    ]
+    ],
+    "naive_guard_max_groups": 64
   },
   "per_spec_vocab": {
     "gfx1100": [
@@ -1950,5 +1951,5 @@
   },
   "_note_v18": "v18 gold-only (255lv/800t, 41 feat). Trained on exhaustively-tuned (mode1/enforce4) labels only. oracle gold-val geo 1.0147 top1 94.35%. See results/2026-06-24_v18_tier_AB.md.",
   "_note_candidate": "PRODUCTION TunaNet+Align (promoted 2026-06-29, median data): 600t/255lv, 61 feat (41 base + 13 tn_ GEMM-geometry + 7 al_ tile-alignment). oracle median gold-val geo 1.0133 / top1 92.95%. C++ MUST compute the 20 derived features (rank.derived_features + deploy/README_CPP_DERIVED.md). Supersedes v18 41-feat. Prior shipped state backed up backups/2026-06-29_pre_tnalign/.",
-  "_note_naive_guard": "DEPLOYMENT GUARD (GetSolutionsFallback/PredictSolver lazy walk): the ranked walk MUST skip rank.naive_fallback_solvers (ConvDirectNaiveConv*) and select one ONLY when no non-naive applicable solver exists. These 3 are always-applicable universal fallbacks; without the guard the model ranks one #1 on OOD shapes and the first-applicable walk executes it (~4-20x slowdown; log7-confirmed gfx950/gfx942). Matches develop ND TunaNet (ranks naive last). Offline gold-val: naive pick 51.6%->0.09%, coverage 0.51->1.00, geomean on non-naive-best shapes unchanged (1.0136 oracle vs 1.0132 guarded). NOTE: ConvDepthwiseFwd2D is a real optimized kernel, NOT a fallback -- do NOT demote it."
+  "_note_naive_guard": "DEPLOYMENT GUARD (GetSolutionsFallback/PredictSolver lazy walk), GROUP-AWARE: demote rank.naive_fallback_solvers (ConvDirectNaiveConv*) -- pick one only if no non-naive applicable solver exists -- ONLY when groups < rank.naive_guard_max_groups (default 64). For groups >= threshold, let the raw ranked walk stand (naive competes on merit; it is the true-best solver 17-40% of the time at high group counts). Rationale: an UNCONDITIONAL guard cures the OOD naive-#1 over-selection on low-group shapes (gold-val: naive pick 51.6%->0.09%, geomean on non-naive-best unchanged 1.0136->1.0132) but INTRODUCES a group-conv regression -- geomean on groups>=64 blows up 1.02->1.36 because it forces a slow grouped-XDLOPS solver where naive is correct. Group-aware guard recovers this: groups>=64 geomean 1.36->1.03, low-group stays 1.02. Threshold 64 is a starting default; tune from the OOD group-conv loss set. ConvDepthwiseFwd2D is a REAL kernel, NOT a fallback -- never demote it. NOT a perf-config (lgbm_pcfg/PickConfig) bug."
 }
