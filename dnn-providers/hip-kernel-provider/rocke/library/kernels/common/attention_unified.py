@@ -1175,8 +1175,11 @@ def _enable_single_batch_combo(problem: UnifiedAttentionProblem) -> bool:
         fp16 winners were as accurate as flash).
       * no FP8 K/V (the combo reads bf16 K from LDS; the fp8 cache path uses
         the sync-dequant loader and its own routing).
-      * no ALiBi / QQ bias / softcap / sinks (not wired into the transposed
-        softmax VALU opts; the spec validator rejects them).
+      * no softcap / sinks (not wired into the transposed softmax VALU opts;
+        the spec validator rejects them).
+      * ALiBi / QQ bias are NOT gated here — this cohort is already narrow
+        enough (num_seqs==1, no-SW, no-FP8) that ALiBi/QQ-bias problems won't
+        typically reach it, but the gate itself does not exclude them.
       * no sliding window (the mask-once / mask-limit opts require no-SW).
       * head_size in {64, 128}.
       * max_seqlen_q > 256 (long prefill; decode-class shapes route to the 3D
@@ -1342,9 +1345,12 @@ def _enable_transposed_qk_32x32(problem: UnifiedAttentionProblem) -> bool:
         16x16 path it replaces lost accuracy on long-KV d128 fp16). The
         fp8 K/V cache path still uses the default kernel.
       * no FP8 K/V (transposed path doesn't dequant K/V from fp8 yet)
-      * no ALiBi or QQ bias (transposed mask block doesn't fold them yet)
       * head_size in {64, 128} (hd=256 not benchmarked yet)
       * no softcap / sinks (not wired into transposed softmax yet)
+      * ALiBi / QQ bias are NOT gated here — the multi-batch fallback path
+        admits them. They ARE excluded by ``_enable_combo_2d`` and
+        ``_enable_single_batch_combo``, so those short-circuit branches
+        never reach a problem that has them.
 
     The validated ``_enable_combo_2d`` family is a superset that DOES wire
     sinks (and sliding window) through the transposed softmax, so it
@@ -1368,6 +1374,10 @@ def _enable_transposed_qk_32x32(problem: UnifiedAttentionProblem) -> bool:
         return False
     if problem.use_fp8:
         return False
+    # softcap/sinks: not wired into the transposed softmax. use_alibi and
+    # use_qq_bias are intentionally NOT checked here — the multi-batch branch
+    # allows them; they are excluded upstream by _enable_combo_2d and
+    # _enable_single_batch_combo before reaching this point.
     if problem.softcap > 0 or problem.use_sinks:
         return False
     if problem.head_size not in (64, 128):

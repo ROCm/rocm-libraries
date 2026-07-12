@@ -325,9 +325,9 @@ def _run_aoTriton(
     """Time AOTriton flash SDPA for decode. Returns ms or None on failure.
 
     Reconstructs dense [B, H, S_k, D] KV from the paged cache outside the
-    timed region. Passes the same bias operands (softcap, alibi_slopes,
-    qq_bias) as the DSL run when they are present in data, so that both
-    baselines measure equivalent workloads.
+    timed region. Returns None (skipped) when any bias operand is active
+    (softcap, alibi_slopes, or qq_bias) because
+    scaled_dot_product_attention does not support them.
     """
     import torch
     from torch.nn.attention import SDPBackend, sdpa_kernel
