@@ -15,6 +15,9 @@ add_library(
     # Generated model registry (gen_model_registry.py). Provides
     # rocke_lookup_model(); regenerate + keep listed when predictors are added.
     dispatcher/sdpa_fwd/rocke_model_registry.c
+    # Committed predictors (one per op/arch/dtype). Example: bf16/gfx950 (smoke
+    # model, 12 shapes) demonstrating the layout + registry wiring.
+    dispatcher/sdpa_fwd/gfx950/model_tflops_bf16.c
 )
 
 target_include_directories(rocke_client_impl PUBLIC ${CMAKE_CURRENT_SOURCE_DIR})

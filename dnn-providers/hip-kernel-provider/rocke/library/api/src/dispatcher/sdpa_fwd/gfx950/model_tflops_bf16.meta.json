@@ -1,0 +1,9 @@
+{
+  "symbol": "rocke_score_fmha_bf16_gfx950_tflops",
+  "op": "fmha",
+  "arch": "gfx950",
+  "dtype": "bf16",
+  "target": "tflops",
+  "num_features": 69,
+  "model_id": "fmha_bf16_gfx950_ecf5f74b"
+}

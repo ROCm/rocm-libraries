@@ -3,10 +3,10 @@
 
 #include <string.h>
 
-// No predictors committed yet: empty registry (dispatcher
-// falls back to Phase-1 first-match for every graph).
+extern double rocke_score_fmha_bf16_gfx950_tflops(const double* f);
 
 static const RockeModelEntry kModels[] = {
+    { "fmha", "gfx950", "bf16", rocke_score_fmha_bf16_gfx950_tflops, 69 },
 };
 
 static const int kModelCount = (int)(sizeof(kModels) / sizeof(kModels[0]));
