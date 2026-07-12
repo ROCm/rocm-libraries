@@ -223,6 +223,9 @@ if( ROCFFT_MPI_ENABLE )
   include_directories(SYSTEM ${MPI_INCLUDE_PATH})
 endif()
 
+# Optional RCCL backend for single-node multi-GPU communication.
+option(ROCFFT_RCCL_ENABLE "Enable RCCL for optimized single-node multi-GPU communication" OFF)
+
 # Internal (library-side) unit tests.  enable_testing() must be called
 # here, an ancestor of library/src, for ctest to discover them.
 option( ROCFFT_BUILD_INTERNAL_TESTS "Build internal (library-side) unit tests" OFF )

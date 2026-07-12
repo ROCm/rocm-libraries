@@ -419,6 +419,12 @@ def _run_aoTriton_live(shape, data, sliding_window, is_fp8, *, warmup, iters):
         raise NotImplementedError("AOTriton skip: FP8 not supported by flash SDPA")
     if shape.has_alibi:
         raise NotImplementedError("AOTriton skip: alibi not supported by flash SDPA")
+    if sliding_window:
+        raise NotImplementedError(
+            "AOTriton skip: sliding_window not supported by flash SDPA"
+        )
+    if float(shape.softcap):
+        raise NotImplementedError("AOTriton skip: softcap not supported by flash SDPA")
 
     is_causal = True
 
@@ -643,7 +649,9 @@ def main() -> int:
         rec["best_speedup_vs_triton"] = best[1] if best else 0.0
         best_ms = rec["variants"][best[0]]["ms"] if best else None
         rec["best_speedup_vs_aoTriton"] = (
-            aot_ms / best_ms if (aot_ms and best_ms) else None
+            aot_ms / best_ms
+            if (aot_ms is not None and best_ms is not None and best_ms > 0)
+            else None
         )
         results.append(rec)
         aot_str = f"aot={aot_ms * 1000:.1f}us" if aot_ms else "aot=N/A"

@@ -39,6 +39,8 @@ std::shared_ptr<IBackendDescriptor> NodeFactory::createOperationFromNode(
         return CustomOpOperationDescriptor::fromNode(nodeT, tensorMap);
     case NodeAttributes::LayernormAttributes:
         return LayernormOperationDescriptor::fromNode(nodeT, tensorMap);
+    case NodeAttributes::LayernormBackwardAttributes:
+        return LayernormBackwardOperationDescriptor::fromNode(nodeT, tensorMap);
     case NodeAttributes::MatmulAttributes:
         return MatmulOperationDescriptor::fromNode(nodeT, tensorMap);
     case NodeAttributes::PointwiseAttributes:
