@@ -225,6 +225,9 @@ workgroup_mapping_t predict_workgroup_mapping(const problem_t& problem,
                                               size_t grid_m,
                                               size_t grid_n,
                                               size_t splitting_factor) {
+  if (hardware.arch == hardware_t::architecture_t::gfx1151 && config.workgroup_mapping > 0)
+    return {0, 0, config.workgroup_mapping};
+
   // Extract parameters
   const size_t batch = problem.batch;
 
@@ -321,7 +324,8 @@ workgroup_mapping_t predict_workgroup_mapping(const problem_t& problem,
   size_t best_wgm  = 1;
   double best_cost = std::numeric_limits<double>::max();
   for (uint64_t m = cmask; m; m &= m - 1) {
-    size_t wgm_candidate = static_cast<size_t>(__builtin_ctzll(m));
+    size_t wgm_candidate = 0;
+    for (uint64_t bit = m & (~m + 1); bit > 1; bit >>= 1) ++wgm_candidate;
     size_t slab_tiles    = grid_m * wgm_candidate;
     size_t first_slab    = start / slab_tiles;
     size_t last_slab     = (start + count - 1) / slab_tiles;

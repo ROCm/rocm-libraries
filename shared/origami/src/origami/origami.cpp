@@ -67,6 +67,11 @@ workgroup_mapping_t select_workgroup_mapping(const problem_t& problem,
     return workgroup_mapping_t{0, 0, 0};
   }
 
+  if(hardware.arch == hardware_t::architecture_t::gfx1151 && config.workgroup_mapping > 0)
+  {
+    return workgroup_mapping_t{0, 0, config.workgroup_mapping};
+  }
+
   // Default values
   size_t numCUs             = hardware.N_CU;
   size_t numXCD             = hardware.NUM_XCD;

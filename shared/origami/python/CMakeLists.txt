@@ -5,6 +5,20 @@ cmake_minimum_required(VERSION 3.25.2)
 
 project(origami-python VERSION 0.1.0 LANGUAGES CXX)
 
+if(WIN32 AND NOT TARGET hip::host)
+    if(NOT EXISTS "$ENV{ROCM_CORE}/lib/amdhip64.lib")
+        message(FATAL_ERROR "ROCM_CORE must point to the Windows ROCm core package")
+    endif()
+    if(NOT IS_DIRECTORY "$ENV{ROCM_DEVEL}/include")
+        message(FATAL_ERROR "ROCM_DEVEL must point to the Windows ROCm development package")
+    endif()
+    add_library(hip::host UNKNOWN IMPORTED)
+    set_target_properties(hip::host PROPERTIES
+        IMPORTED_LOCATION "$ENV{ROCM_CORE}/lib/amdhip64.lib"
+        INTERFACE_INCLUDE_DIRECTORIES "$ENV{ROCM_CORE}/include;$ENV{ROCM_DEVEL}/include"
+    )
+endif()
+
 # Find Python
 find_package(Python 3.9 COMPONENTS Interpreter Development.Module REQUIRED)
 
@@ -29,7 +43,9 @@ else()
     set(ORIGAMI_TARGET roc::origami)
 endif()
 
-find_package(hip REQUIRED)
+if(NOT TARGET hip::host)
+    find_package(hip REQUIRED)
+endif()
 
 find_package(nanobind CONFIG QUIET)
 if(NOT nanobind_FOUND)
@@ -58,10 +74,13 @@ nanobind_add_module(_pyorigami "${CMAKE_CURRENT_SOURCE_DIR}/src/origami/bindings
 
 set_target_properties(_pyorigami PROPERTIES OUTPUT_NAME "origami")
 
-# Place the compiled module in the source package directory for development/testing
-set_target_properties(_pyorigami PROPERTIES
-    LIBRARY_OUTPUT_DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}/src/origami"
-)
+# Place standalone development builds in the source package directory. Wheel
+# builds are installed from the build tree and must not write into the source.
+if(NOT SKBUILD)
+    set_target_properties(_pyorigami PROPERTIES
+        LIBRARY_OUTPUT_DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}/src/origami"
+    )
+endif()
 
 # Link against origami library and HIP
 target_link_libraries(_pyorigami PRIVATE ${ORIGAMI_TARGET} hip::host)

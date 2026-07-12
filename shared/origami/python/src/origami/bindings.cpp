@@ -297,6 +297,15 @@ NB_MODULE(origami, m) {
   m.def("select_config_mnk",
         &origami::select_config_mnk,
         "Select best configuration for M,N,K dimensions");
+  m.def(
+      "select_topk_configs",
+      [](const origami::problem_t& problem,
+         const origami::hardware_t& hardware,
+         const std::vector<origami::config_t>& configs,
+         std::size_t topk) {
+        return origami::select_topk_configs(problem, hardware, configs, topk);
+      },
+      "Select topk GEMM configurations");
   m.def("select_topk_configs", &origami::select_topk_configs, "Select topk configurations");
   m.def("compute_perf_gflops", &origami::compute_perf_gflops, "Compute performance in GFLOPS");
 

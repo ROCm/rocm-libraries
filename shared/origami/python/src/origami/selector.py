@@ -341,6 +341,7 @@ class OrigamiMatmulSelector:
             new_config.mt        = mt
             new_config.mi        = mi
             new_config.occupancy = config.kwargs['waves_per_eu']
+            new_config.workgroup_mapping = config.kwargs.get('GROUP_M', 0)
 
             configs_list.append(new_config)
 
@@ -731,4 +732,3 @@ class OrigamiAttentionSelector:
         problem.b_mx_block_size = 0
 
         return problem
-

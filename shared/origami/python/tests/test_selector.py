@@ -16,12 +16,13 @@ from origami.selector import OrigamiMatmulSelector
 class MockConfig:
     """Mock Triton config for testing."""
     
-    def __init__(self, block_m, block_n, block_k, waves_per_eu):
+    def __init__(self, block_m, block_n, block_k, waves_per_eu, group_m=0):
         self.kwargs = {
             'BLOCK_M': block_m,
             'BLOCK_N': block_n,
             'BLOCK_K': block_k,
-            'waves_per_eu': waves_per_eu
+            'waves_per_eu': waves_per_eu,
+            'GROUP_M': group_m,
         }
 
 
@@ -162,6 +163,26 @@ def test_selector_wgm_property(rocm_device):
     )
     
     assert selector.wgm > 0
+
+
+@pytest.mark.integration
+def test_gfx1151_selector_preserves_group_m(rocm_device):
+    if "gfx1151" not in torch.cuda.get_device_properties(rocm_device).gcnArchName:
+        pytest.skip("gfx1151 is required")
+
+    selector = OrigamiMatmulSelector(
+        config_gen=[MockConfig(64, 128, 32, 2, group_m=4)],
+        m=18432,
+        n=2048,
+        k=8192,
+        a_dtype=torch.bfloat16,
+        b_dtype=torch.bfloat16,
+        out_dtype=torch.bfloat16,
+        device=rocm_device,
+    )
+
+    assert selector._result.config.workgroup_mapping == 4
+    assert selector.wgm == 4
 
 
 @pytest.mark.integration
@@ -744,4 +765,3 @@ def test_selector_transpose_mixed_layouts(rocm_device):
     
     assert selector._problem.a_transpose == origami.transpose_t.T
     assert selector._problem.b_transpose == origami.transpose_t.N
-

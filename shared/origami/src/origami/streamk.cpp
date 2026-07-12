@@ -355,7 +355,7 @@ size_t grid_k_split_aware(const problem_t& problem,
     const size_t b_contig_bytes = (problem.b_transpose == transpose_t::N)
                                       ? fragment_iters * config.mt.k * bpe_b
                                       : 0;
-    auto not_aligned_to_cache_line = [](size_t bytes) {
+    auto not_aligned_to_cache_line = [&](size_t bytes) {
       return bytes > 0 && (bytes % CACHE_LINE_BYTES) != 0;
     };
     return not_aligned_to_cache_line(a_contig_bytes) || not_aligned_to_cache_line(b_contig_bytes);
