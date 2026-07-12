@@ -21,10 +21,10 @@
 #pragma once
 
 #include <algorithm>
-#include <limits>
-#include <thread>
 #include <charconv>
 #include <cstdlib>
+#include <limits>
+#include <thread>
 
 #include "environment.h"
 
@@ -43,9 +43,8 @@ static int getenv_OMP_NUM_THREADS()
     if(env_str != "")
     {
         int ompnumthreads = std::numeric_limits<int>::max();
-        auto [ptr, ec]    = std::from_chars(env_str.data(),
-                                            env_str.data() + env_str.size(),
-                                            ompnumthreads);
+        auto [ptr, ec]
+            = std::from_chars(env_str.data(), env_str.data() + env_str.size(), ompnumthreads);
         if(ec == std::errc())
         {
             return std::max<int>(1, ompnumthreads);
