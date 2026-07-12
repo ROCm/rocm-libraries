@@ -883,7 +883,14 @@ std::vector<uint64_t> PredictSolver(const conv::ProblemDescription& problem,
     {
         auto cached_result = GetCachedPrediction(problem, device, is3d);
         if(!cached_result.empty())
+        {
+            // A cache hit short-circuits BEFORE the lgbm block, so this run shows
+            // no lgbm log lines even though lgbm may have produced the cached
+            // entry on an earlier call for this problem+device.
+            MIOPEN_LOG_I2("AI predict: cache hit for " << device << " (" << cached_result.size()
+                                                        << " solvers); lgbm/TunaNet not re-run");
             return cached_result;
+        }
     }
 
 #if MIOPEN_ENABLE_AI_IMMED_MODE_FALLBACK
@@ -902,7 +909,14 @@ std::vector<uint64_t> PredictSolver(const conv::ProblemDescription& problem,
             StorePredictionCache(problem, device, any_sol);
             return ranked;
         }
-        MIOPEN_LOG_I2("lgbm: abstained, falling through to TunaNet");
+        MIOPEN_LOG_I2("lgbm: abstained, falling through to TunaNet for " << device);
+    }
+    else
+    {
+        // Explains a "zero lgbm activity" run: the picker was compiled in but
+        // disabled by env, so selection goes straight to TunaNet/WTI.
+        MIOPEN_LOG_I2("lgbm: disabled via MIOPEN_DEBUG_LGBM_PICK=0; using TunaNet/WTI for "
+                      << device);
     }
 #endif
 

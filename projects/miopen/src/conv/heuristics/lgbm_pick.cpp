@@ -284,15 +284,22 @@ std::vector<uint64_t> PickSolverRanked(const conv::ProblemDescription& problem,
 {
     const auto& meta = LgbmMetadata::Get();
     if(!meta.IsReady())
+    {
+        MIOPEN_LOG_I2("lgbm: abstain (metadata not ready; lgbm_model_meta.json "
+                      "missing or failed to load)");
         return {};
+    }
 
     // GetDeviceName() already returns the normalized gfx_id (no
     // :sramecc+:xnack- suffix). Architecture gating: only run on gfx_ids the
     // model was trained on; otherwise fall through to TunaNet.
-    const std::string gfx_id = handle.GetDeviceName();
-    if(meta.CategoricalCode("gfx_id", gfx_id) < 0)
+    const std::string gfx_id       = handle.GetDeviceName();
+    const int gfx_code             = meta.CategoricalCode("gfx_id", gfx_id);
+    MIOPEN_LOG_I2("lgbm: engaged for gfx_id=\"" << gfx_id << "\" (vocab code " << gfx_code
+                                                << "), groups=" << problem.GetGroupCount());
+    if(gfx_code < 0)
     {
-        MIOPEN_LOG_I2("lgbm: abstain (gfx_id " << gfx_id << " not in model vocab)");
+        MIOPEN_LOG_I2("lgbm: abstain (gfx_id \"" << gfx_id << "\" not in model vocab)");
         return {};
     }
 
@@ -347,13 +354,25 @@ std::vector<uint64_t> PickSolverRanked(const conv::ProblemDescription& problem,
 
     std::vector<uint64_t> ranked;
     ranked.reserve(scored.size());
+    std::size_t dropped = 0;
     for(const auto& entry : scored)
     {
         // Map the model's solver name to this build's solver Id. Names unknown
         // to this MIOpen version are skipped (model/runtime vocab drift).
         if(const solver::Id id{solvers[entry.idx].c_str()}; id.IsValid())
             ranked.push_back(id.Value());
+        else
+            ++dropped;
     }
+    // Distinguish "scored fine but every name is unknown to this build" (empty
+    // result -> caller falls through to TunaNet/WTI, looking like an abstain)
+    // from a healthy ranked list. The demote flag is arch-independent, so a
+    // per-arch difference here points at solver-vocab drift, not the model.
+    MIOPEN_LOG_I2("lgbm: scored " << scored.size() << " solvers, "
+                                  << ranked.size() << " valid in this build, " << dropped
+                                  << " dropped (unknown name), guard_naive=" << guard_naive);
+    if(ranked.empty())
+        MIOPEN_LOG_I2("lgbm: abstain (no scored solver is known to this MIOpen build)");
     return ranked;
 }
 
