@@ -697,7 +697,9 @@ def main() -> int:
         rec["best_speedup_vs_triton"] = best[1] if best else 0.0
         best_ms = rec["variants"][best[0]]["ms"] if best else None
         rec["best_speedup_vs_aoTriton"] = (
-            aot_ms / best_ms if (aot_ms and best_ms) else None
+            aot_ms / best_ms
+            if (aot_ms is not None and best_ms is not None and best_ms > 0)
+            else None
         )
         results.append(rec)
 
