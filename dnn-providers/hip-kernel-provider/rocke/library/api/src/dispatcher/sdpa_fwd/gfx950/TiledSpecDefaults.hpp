@@ -5,7 +5,8 @@
 // AotInstance until arch-specific instance subclasses exist.
 #pragma once
 
-namespace rocke_client::dispatcher::gfx950_defaults {
+namespace rocke_client::dispatcher::gfx950_defaults
+{
 
 inline constexpr bool use_alibi = false;
 inline constexpr bool use_qq_bias = false;
@@ -44,4 +45,4 @@ inline constexpr int softmax_interleave_mode = 1;
 inline constexpr int softmax_interleave_groups = 4;
 inline constexpr bool use_mask_phase_split = false;
 
-}  // namespace rocke_client::dispatcher::gfx950_defaults
+} // namespace rocke_client::dispatcher::gfx950_defaults

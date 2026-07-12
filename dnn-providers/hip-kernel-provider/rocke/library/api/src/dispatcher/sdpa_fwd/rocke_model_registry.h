@@ -11,12 +11,13 @@ extern "C" {
 // for argmax; apply expm1 for a physical value.
 typedef double (*RockeScoreFn)(const double* f);
 
-typedef struct {
-    const char*  op;            // "fmha", "gemm_universal", ...
-    const char*  arch;          // "gfx950", "gfx942", ...
-    const char*  dtype;         // "fp16", "bf16", "fp8", ...
-    RockeScoreFn score;         // the compiled predictor entry point
-    int          num_features;  // MUST equal the op featurizer's output length
+typedef struct
+{
+    const char* op; // "fmha", "gemm_universal", ...
+    const char* arch; // "gfx950", "gfx942", ...
+    const char* dtype; // "fp16", "bf16", "fp8", ...
+    RockeScoreFn score; // the compiled predictor entry point
+    int num_features; // MUST equal the op featurizer's output length
 } RockeModelEntry;
 
 // Look up the predictor for (op, arch, dtype). Returns NULL when none is
@@ -24,9 +25,7 @@ typedef struct {
 // verify entry->num_features == featurizer_output_len before scoring and treat a
 // mismatch as "no model" (fail loud), so a feature-contract drift can never feed
 // a wrong-width vector to a stale predictor.
-const RockeModelEntry* rocke_lookup_model(const char* op,
-                                          const char* arch,
-                                          const char* dtype);
+const RockeModelEntry* rocke_lookup_model(const char* op, const char* arch, const char* dtype);
 
 // Number of registered models (for tests / diagnostics).
 int rocke_model_count(void);
@@ -35,4 +34,4 @@ int rocke_model_count(void);
 }
 #endif
 
-#endif  // ROCKE_MODEL_REGISTRY_H
+#endif // ROCKE_MODEL_REGISTRY_H

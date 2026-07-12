@@ -167,8 +167,11 @@ def load_shapes_file(path) -> List["SdpaGraphShape"]:
             except ShapeUnbuildable as e:
                 skipped[str(e)] += 1
     if skipped:
-        print(f"[sdpa] shapes-file: loaded {len(shapes)}, skipped "
-              f"{sum(skipped.values())} unbuildable:", file=sys.stderr)
+        print(
+            f"[sdpa] shapes-file: loaded {len(shapes)}, skipped "
+            f"{sum(skipped.values())} unbuildable:",
+            file=sys.stderr,
+        )
         for reason, n in skipped.most_common():
             print(f"[sdpa]     {n:>6}  {reason}", file=sys.stderr)
     else:
@@ -176,15 +179,28 @@ def load_shapes_file(path) -> List["SdpaGraphShape"]:
     return shapes
 
 
-def _S(batch, seqlen_q, seqlen_k, num_query_heads, num_kv_heads, head_size,
-       dtype, sliding_window=0):
+def _S(
+    batch,
+    seqlen_q,
+    seqlen_k,
+    num_query_heads,
+    num_kv_heads,
+    head_size,
+    dtype,
+    sliding_window=0,
+):
     """Terse builder for the common case (head_size_qk == head_size_v, BSHD,
     block_size 16). Use SdpaGraphShape(...) directly for the exceptions."""
     return SdpaGraphShape(
-        batch=batch, seqlen_q=seqlen_q, seqlen_k=seqlen_k,
-        num_query_heads=num_query_heads, num_kv_heads=num_kv_heads,
-        head_size_qk=head_size, head_size_v=head_size,
-        dtype=dtype, sliding_window=sliding_window,
+        batch=batch,
+        seqlen_q=seqlen_q,
+        seqlen_k=seqlen_k,
+        num_query_heads=num_query_heads,
+        num_kv_heads=num_kv_heads,
+        head_size_qk=head_size,
+        head_size_v=head_size,
+        dtype=dtype,
+        sliding_window=sliding_window,
     )
 
 
@@ -296,7 +312,9 @@ def _grid_tiled_specs(prob: object, arch: str) -> List[object]:
                 # rules, so the constructor is the authority.
                 try:
                     cand = dataclasses.replace(
-                        default, num_warps=nw, block_m_per_warp=bm,
+                        default,
+                        num_warps=nw,
+                        block_m_per_warp=bm,
                         tile_size=bs * mult,
                     )
                 except (ValueError, TypeError):
@@ -311,8 +329,9 @@ def _sdpa_enumerate(arch: str, max_shapes: Optional[int]) -> List[object]:
     return _enumerate_from(_SDPA_PROBLEMS, arch, max_shapes)
 
 
-def _enumerate_from(problems: Sequence["SdpaGraphShape"], arch: str,
-                    max_shapes: Optional[int]) -> List[object]:
+def _enumerate_from(
+    problems: Sequence["SdpaGraphShape"], arch: str, max_shapes: Optional[int]
+) -> List[object]:
     from kernels.common.attention_unified import UnifiedAttentionProblem
 
     if max_shapes is not None and max_shapes > 0:
@@ -438,20 +457,31 @@ def _ua_shape_for(prob: object):
     )
     win = int(prob.sliding_window)
     return UAShape(
-        source_file="gen_sdpa", line_idx=0, call_idx=0, kind="prefill_2d",
+        source_file="gen_sdpa",
+        line_idx=0,
+        call_idx=0,
+        kind="prefill_2d",
         all_decode=(int(prob.max_seqlen_q) == 1),
-        num_seqs=int(prob.num_seqs), total_q=int(prob.total_q),
+        num_seqs=int(prob.num_seqs),
+        total_q=int(prob.total_q),
         num_query_heads=int(prob.num_query_heads),
-        num_kv_heads=int(prob.num_kv_heads), head_size=int(prob.head_size),
-        block_size=bs, num_blocks=num_blocks,
+        num_kv_heads=int(prob.num_kv_heads),
+        head_size=int(prob.head_size),
+        block_size=bs,
+        num_blocks=num_blocks,
         max_blocks_per_seq=max_blocks_per_seq,
-        max_seqlen_q=int(prob.max_seqlen_q), max_seqlen_k=int(prob.max_seqlen_k),
+        max_seqlen_q=int(prob.max_seqlen_q),
+        max_seqlen_k=int(prob.max_seqlen_k),
         softmax_scale=1.0 / math.sqrt(int(prob.head_size)),
         softcap=float(prob.softcap),
         window_size=((win - 1) if win > 0 else -1, 0),
-        has_sinks=bool(prob.use_sinks), has_alibi=bool(prob.use_alibi),
+        has_sinks=bool(prob.use_sinks),
+        has_alibi=bool(prob.use_alibi),
         has_output_scale=False,
-        q_dtype=dt, k_dtype=dt, v_dtype=dt, out_dtype=dt,
+        q_dtype=dt,
+        k_dtype=dt,
+        v_dtype=dt,
+        out_dtype=dt,
     )
 
 
@@ -488,12 +518,19 @@ def _sdpa_benchmark(cand: object) -> Dict[str, object]:
     def call_once():
         run_unified_attention_torch(
             problem=prob,
-            q=data["query"], k=data["key_cache"], v=data["value_cache"],
-            out=data["output"], cu_seqlens_q=data["cu_seqlens_q"],
-            seqused_k=data["kv_lens"], softmax_scale=data["scale"],
-            block_table=data["block_tables"], softcap=float(prob.softcap),
-            sinks=data["sinks"], alibi_slopes=data["alibi_slopes"],
-            backend="tiled", stream=hip_stream,
+            q=data["query"],
+            k=data["key_cache"],
+            v=data["value_cache"],
+            out=data["output"],
+            cu_seqlens_q=data["cu_seqlens_q"],
+            seqused_k=data["kv_lens"],
+            softmax_scale=data["scale"],
+            block_table=data["block_tables"],
+            softcap=float(prob.softcap),
+            sinks=data["sinks"],
+            alibi_slopes=data["alibi_slopes"],
+            backend="tiled",
+            stream=hip_stream,
             tiled_spec=cand.tiled,  # benchmark THIS grid point's exact config
         )
 
@@ -513,15 +550,20 @@ def _sdpa_benchmark(cand: object) -> Dict[str, object]:
     d = int(prob.head_size)
     tot_q = int(prob.total_q)
     tot_kv = sum(int(x) for x in data["kv_lens_list"])
-    bytes_moved = float(
-        tot_q * int(prob.num_query_heads) * d * 2  # Q read + O write
-        + tot_kv * int(prob.num_kv_heads) * d * 2   # K + V read
-    ) * bpe
+    bytes_moved = (
+        float(
+            tot_q * int(prob.num_query_heads) * d * 2  # Q read + O write
+            + tot_kv * int(prob.num_kv_heads) * d * 2  # K + V read
+        )
+        * bpe
+    )
     bandwidth_gb_s = (bytes_moved / 1e9) / (latency_ms / 1e3) if latency_ms > 0 else 0.0
 
     return {
-        "tflops": tflops, "latency_ms": latency_ms,
-        "bandwidth_gb_s": bandwidth_gb_s, "correct": correct,
+        "tflops": tflops,
+        "latency_ms": latency_ms,
+        "bandwidth_gb_s": bandwidth_gb_s,
+        "correct": correct,
     }
 
 
@@ -530,7 +572,9 @@ def _sdpa_benchmark(cand: object) -> Dict[str, object]:
 # =====================================================================
 
 
-def build_sdpa_adapter(shapes: Optional[Sequence["SdpaGraphShape"]] = None) -> OpAdapter:
+def build_sdpa_adapter(
+    shapes: Optional[Sequence["SdpaGraphShape"]] = None,
+) -> OpAdapter:
     """Construct the SDPA OpAdapter for use with ``generate()``.
 
     ``shapes`` overrides the built-in ``_SDPA_PROBLEMS`` corpus (e.g. the
@@ -602,8 +646,10 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
 
     shapes = load_shapes_file(args.shapes_file) if args.shapes_file else None
     if args.shapes_file is not None and not shapes:
-        print("[sdpa] shapes-file yielded 0 buildable shapes; nothing to sweep",
-              file=sys.stderr)
+        print(
+            "[sdpa] shapes-file yielded 0 buildable shapes; nothing to sweep",
+            file=sys.stderr,
+        )
         return 2
 
     generate(

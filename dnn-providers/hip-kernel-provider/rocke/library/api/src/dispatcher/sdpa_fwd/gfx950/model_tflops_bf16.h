@@ -19,4 +19,4 @@ double rocke_score_fmha_bf16_gfx950_tflops(const double* f);
 }
 #endif
 
-#endif  // ROCKE_SCORE_FMHA_BF16_GFX950_TFLOPS_H
+#endif // ROCKE_SCORE_FMHA_BF16_GFX950_TFLOPS_H

@@ -22,7 +22,9 @@ lgb = pytest.importorskip("lightgbm")
 
 # Make the heuristics package importable (lgbm_to_c lives alongside train.py).
 _HERE = os.path.dirname(os.path.abspath(__file__))
-_HEUR = os.path.normpath(os.path.join(_HERE, "..", "..", "python", "rocke", "heuristics"))
+_HEUR = os.path.normpath(
+    os.path.join(_HERE, "..", "..", "python", "rocke", "heuristics")
+)
 if _HEUR not in sys.path:
     sys.path.insert(0, _HEUR)
 
@@ -37,11 +39,19 @@ def _train_tiny_booster(n_features=8, n_rows=400, seed=0):
     rng = np.random.RandomState(seed)
     X = rng.rand(n_rows, n_features).astype(np.float64)
     # A nonlinear target so the trees actually branch.
-    y = (X[:, 0] * 3.0 + np.sin(X[:, 1] * 6) + (X[:, 2] > 0.5) * 2.0
-         + rng.rand(n_rows) * 0.1)
+    y = (
+        X[:, 0] * 3.0
+        + np.sin(X[:, 1] * 6)
+        + (X[:, 2] > 0.5) * 2.0
+        + rng.rand(n_rows) * 0.1
+    )
     ds = lgb.Dataset(X, label=y)
-    params = {"objective": "regression", "num_leaves": 15, "min_data_in_leaf": 5,
-              "verbose": -1}
+    params = {
+        "objective": "regression",
+        "num_leaves": 15,
+        "min_data_in_leaf": 5,
+        "verbose": -1,
+    }
     booster = lgb.train(params, ds, num_boost_round=40)
     return booster, X
 
@@ -52,8 +62,11 @@ def _compile_and_load(c_src, func_name):
     so_path = os.path.join(tmp, "pred.so")
     with open(c_path, "w") as f:
         f.write(c_src)
-    subprocess.run([_CC, "-O2", "-shared", "-fPIC", "-o", so_path, c_path],
-                   check=True, capture_output=True)
+    subprocess.run(
+        [_CC, "-O2", "-shared", "-fPIC", "-o", so_path, c_path],
+        check=True,
+        capture_output=True,
+    )
     lib = ctypes.CDLL(so_path)
     fn = getattr(lib, func_name)
     fn.restype = ctypes.c_double
@@ -67,7 +80,8 @@ def test_generated_c_matches_booster():
     n_features = X.shape[1]
     func = "rocke_test_score"
     c_src, h_src = lgbm_to_c.emit_c_predictor(
-        booster, func, num_features=n_features, source_note="unit test")
+        booster, func, num_features=n_features, source_note="unit test"
+    )
     assert f"double {func}(" in c_src
     assert f"double {func}(" in h_src
     assert f"{func.upper()}_NUM_FEATURES {n_features}" in c_src
@@ -90,8 +104,11 @@ def test_argmax_ranking_preserved():
     n = X.shape[1]
     fn = _compile_and_load(
         lgbm_to_c.emit_c_predictor(booster, "rocke_test_score", num_features=n)[0],
-        "rocke_test_score")
-    c_scores = np.array([fn((ctypes.c_double * n)(*X[i].tolist())) for i in range(len(X))])
+        "rocke_test_score",
+    )
+    c_scores = np.array(
+        [fn((ctypes.c_double * n)(*X[i].tolist())) for i in range(len(X))]
+    )
     assert int(np.argmax(c_scores)) == int(np.argmax(booster.predict(X)))
 
 
@@ -105,15 +122,19 @@ def test_rejects_non_regression():
 def test_rejects_categorical_split():
     dumped = {
         "objective": "regression",
-        "tree_info": [{
-            "tree_index": 0,
-            "tree_structure": {
-                "split_feature": 0, "decision_type": "==", "threshold": "1",
-                "default_left": True,
-                "left_child": {"leaf_value": 1.0},
-                "right_child": {"leaf_value": 2.0},
-            },
-        }],
+        "tree_info": [
+            {
+                "tree_index": 0,
+                "tree_structure": {
+                    "split_feature": 0,
+                    "decision_type": "==",
+                    "threshold": "1",
+                    "default_left": True,
+                    "left_child": {"leaf_value": 1.0},
+                    "right_child": {"leaf_value": 2.0},
+                },
+            }
+        ],
     }
     with pytest.raises(lgbm_to_c.UnsupportedModelError):
         lgbm_to_c.booster_to_c(dumped, "f", num_features=4)

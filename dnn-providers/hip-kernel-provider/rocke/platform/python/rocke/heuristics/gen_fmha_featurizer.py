@@ -243,12 +243,20 @@ def generate(out_dir: Path) -> list[str]:
 
 def main(argv=None) -> int:
     ap = argparse.ArgumentParser(description=__doc__)
-    ap.add_argument("-o", "--out-dir", type=Path, required=True,
-                    help="dispatcher/sdpa_fwd dir for FmhaFeatures.hpp/FmhaFeaturizer.hpp")
+    ap.add_argument(
+        "-o",
+        "--out-dir",
+        type=Path,
+        required=True,
+        help="dispatcher/sdpa_fwd dir for FmhaFeatures.hpp/FmhaFeaturizer.hpp",
+    )
     args = ap.parse_args(argv)
     names = generate(args.out_dir)
-    print(f"featurizer: {len(names)} features -> {args.out_dir}/"
-          "FmhaFeatures.hpp, FmhaFeaturizer.hpp", file=sys.stderr)
+    print(
+        f"featurizer: {len(names)} features -> {args.out_dir}/"
+        "FmhaFeatures.hpp, FmhaFeaturizer.hpp",
+        file=sys.stderr,
+    )
     return 0
 
 

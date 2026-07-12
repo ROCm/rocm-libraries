@@ -5,7 +5,8 @@
 // AotInstance until arch-specific instance subclasses exist.
 #pragma once
 
-namespace rocke_client::dispatcher::gfx942_defaults {
+namespace rocke_client::dispatcher::gfx942_defaults
+{
 
 inline constexpr bool use_alibi = false;
 inline constexpr bool use_qq_bias = false;
@@ -46,4 +47,4 @@ inline constexpr const char* kv_cache_policy = "stream";
 inline constexpr bool use_global_load_lds_k = false;
 inline constexpr bool use_q_major_grid = false;
 
-}  // namespace rocke_client::dispatcher::gfx942_defaults
+} // namespace rocke_client::dispatcher::gfx942_defaults

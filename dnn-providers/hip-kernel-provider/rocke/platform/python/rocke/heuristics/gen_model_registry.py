@@ -137,8 +137,9 @@ def _emit_source(entries: List[dict]) -> str:
     else:
         # Zero-length arrays are non-standard (trips -Wpedantic -Werror); emit a
         # size-1 zero sentinel and a count of 0 so the lookup loop never reads it.
-        lines.append("static const RockeModelEntry kModels[1] = "
-                     "{ { 0, 0, 0, 0, 0 } };")
+        lines.append(
+            "static const RockeModelEntry kModels[1] = " "{ { 0, 0, 0, 0, 0 } };"
+        )
     lines.append("")
     # Count emitted as a literal (known at generation time): no cast, warning-
     # clean under the strict C++ flags, valid in both C and C++.
@@ -174,18 +175,29 @@ def generate(models_dir: Path, out_dir: Path) -> List[dict]:
 
 def main(argv=None) -> int:
     ap = argparse.ArgumentParser(description=__doc__)
-    ap.add_argument("models_dir", type=Path,
-                    help="dispatcher/models tree to scan for *.meta.json")
-    ap.add_argument("-o", "--out-dir", type=Path, default=None,
-                    help="where to write the registry .c/.h (default: models_dir)")
+    ap.add_argument(
+        "models_dir", type=Path, help="dispatcher/models tree to scan for *.meta.json"
+    )
+    ap.add_argument(
+        "-o",
+        "--out-dir",
+        type=Path,
+        default=None,
+        help="where to write the registry .c/.h (default: models_dir)",
+    )
     args = ap.parse_args(argv)
     out_dir = args.out_dir or args.models_dir
     entries = generate(args.models_dir, out_dir)
-    print(f"registry: {len(entries)} model(s) -> {out_dir}/rocke_model_registry.[ch]",
-          file=sys.stderr)
+    print(
+        f"registry: {len(entries)} model(s) -> {out_dir}/rocke_model_registry.[ch]",
+        file=sys.stderr,
+    )
     for e in entries:
-        print(f"    {e['op']:16} {e['arch']:8} {e['dtype']:5} "
-              f"nfeat={e['num_features']} sym={e['symbol']}", file=sys.stderr)
+        print(
+            f"    {e['op']:16} {e['arch']:8} {e['dtype']:5} "
+            f"nfeat={e['num_features']} sym={e['symbol']}",
+            file=sys.stderr,
+        )
     return 0
 
 

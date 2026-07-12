@@ -5,7 +5,8 @@
 // AotInstance until arch-specific instance subclasses exist.
 #pragma once
 
-namespace rocke_client::dispatcher::gfx1250_defaults {
+namespace rocke_client::dispatcher::gfx1250_defaults
+{
 
 inline constexpr bool use_alibi = false;
 inline constexpr bool use_qq_bias = false;
@@ -17,4 +18,4 @@ inline constexpr const char* tile_size = "";
 inline constexpr int block_m_per_warp = 16;
 inline constexpr bool use_register_p = false;
 
-}  // namespace rocke_client::dispatcher::gfx1250_defaults
+} // namespace rocke_client::dispatcher::gfx1250_defaults

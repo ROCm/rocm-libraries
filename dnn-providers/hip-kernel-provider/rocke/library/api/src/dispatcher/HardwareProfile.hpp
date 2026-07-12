@@ -25,16 +25,19 @@ namespace rocke_client::dispatcher
 struct HardwareProfile
 {
     // Chip-config counts: 0 until device-populated (no literals in source).
-    int num_cus        = 0;
+    int num_cus = 0;
     int shader_engines = 0;
-    int num_xcd        = 0;
-    int max_clock_mhz  = 0;
-    int lds_capacity   = 0;
+    int num_xcd = 0;
+    int max_clock_mhz = 0;
+    int lds_capacity = 0;
     // Microarch constants (not chip-config counts).
-    int simds_per_cu   = 4;
+    int simds_per_cu = 4;
     int wavefront_size = 64;
 
-    int total_simds() const { return num_cus * simds_per_cu; }
+    int total_simds() const
+    {
+        return num_cus * simds_per_cu;
+    }
 
     // Populate from the live device instead of storing chip constants in source.
     // On query failure the chip-config fields stay 0 (degenerate, not wrong).
@@ -50,10 +53,10 @@ struct HardwareProfile
         {
             return hw; // chip-config fields remain 0
         }
-        hw.num_cus        = props.multiProcessorCount;
-        hw.max_clock_mhz  = props.clockRate / 1000; // clockRate is in kHz
+        hw.num_cus = props.multiProcessorCount;
+        hw.max_clock_mhz = props.clockRate / 1000; // clockRate is in kHz
         hw.wavefront_size = props.warpSize;
-        hw.lds_capacity   = static_cast<int>(props.sharedMemPerBlock);
+        hw.lds_capacity = static_cast<int>(props.sharedMemPerBlock);
         return hw;
     }
 };

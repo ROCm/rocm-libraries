@@ -3072,7 +3072,9 @@ def _get_2d_launcher(
     if cache_key not in _ATTN_TILED_CACHE:
         arch = _resolve_attention_arch()
         _, build_unified_attention_2d_tiled, _ = _tiled_2d_impl(arch)
-        spec = tiled_spec if tiled_spec is not None else _tiled_spec_from_problem(problem)
+        spec = (
+            tiled_spec if tiled_spec is not None else _tiled_spec_from_problem(problem)
+        )
         kernel = build_unified_attention_2d_tiled(spec, arch=arch)
         backend = _select_2d_compile_backend(problem)
         if backend == "hipcc":

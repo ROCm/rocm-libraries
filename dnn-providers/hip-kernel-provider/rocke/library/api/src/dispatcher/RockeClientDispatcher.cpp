@@ -66,17 +66,17 @@ FmhaFeatures featurizeFmha(const SdpaProblem& problem, const AotInstance& inst)
 
     FmhaProblemInputs p;
     p.batch = static_cast<double>(problem.batch);
-    p.sq    = static_cast<double>(problem.seqlenQ);
-    p.sk    = static_cast<double>(problem.seqlenK);
-    p.hq    = static_cast<double>(problem.numQueryHeads);
-    p.hk    = static_cast<double>(problem.numKvHeads);
-    p.dq    = static_cast<double>(problem.headSize);
-    p.dv    = static_cast<double>(problem.headSize); // single head dim today
+    p.sq = static_cast<double>(problem.seqlenQ);
+    p.sk = static_cast<double>(problem.seqlenK);
+    p.hq = static_cast<double>(problem.numQueryHeads);
+    p.hk = static_cast<double>(problem.numKvHeads);
+    p.dq = static_cast<double>(problem.headSize);
+    p.dv = static_cast<double>(problem.headSize); // single head dim today
     p.dtype = problem.dtype;
 
     FmhaConfigInputs c;
-    c.tm0       = static_cast<double>(cs.blockSizeQ); // block_m_per_warp
-    c.tn0       = static_cast<double>(cs.tileSize);   // 2D tile width T
+    c.tm0 = static_cast<double>(cs.blockSizeQ); // block_m_per_warp
+    c.tn0 = static_cast<double>(cs.tileSize); // 2D tile width T
     c.num_warps = static_cast<double>(cs.numWarps);
     // tk0/tn1/tk1/tk0max default from head_size/tn0 inside the featurizer (0 ->
     // derived), matching extract()'s defaults. Variant flags (mask/bias/...) are
@@ -84,14 +84,14 @@ FmhaFeatures featurizeFmha(const SdpaProblem& problem, const AotInstance& inst)
     // consistent with the mask=none sweep the models are trained on.
 
     FmhaHwInputs hw;
-    hw.num_cus        = static_cast<double>(problem.hw.num_cus);
-    hw.simds_per_cu   = static_cast<double>(problem.hw.simds_per_cu);
-    hw.total_simds    = static_cast<double>(problem.hw.total_simds());
+    hw.num_cus = static_cast<double>(problem.hw.num_cus);
+    hw.simds_per_cu = static_cast<double>(problem.hw.simds_per_cu);
+    hw.total_simds = static_cast<double>(problem.hw.total_simds());
     hw.shader_engines = static_cast<double>(problem.hw.shader_engines);
-    hw.max_clock_mhz  = static_cast<double>(problem.hw.max_clock_mhz);
+    hw.max_clock_mhz = static_cast<double>(problem.hw.max_clock_mhz);
     hw.wavefront_size = static_cast<double>(problem.hw.wavefront_size);
-    hw.lds_capacity   = static_cast<double>(problem.hw.lds_capacity);
-    hw.num_xcd        = static_cast<double>(problem.hw.num_xcd);
+    hw.lds_capacity = static_cast<double>(problem.hw.lds_capacity);
+    hw.num_xcd = static_cast<double>(problem.hw.num_xcd);
 
     return fmha_featurize(p, c, hw);
 }
@@ -154,8 +154,8 @@ std::optional<AotInstance> RockeClientDispatcher::select(const SdpaProblem& prob
     // none is registered, keep Phase-1 first-match. The featurizer produces the
     // exact feature_spec vector the model trained on (bit-identical to the Python
     // engine -- see test_fmha_featurizer_roundtrip.py).
-    const RockeModelEntry* model =
-        rocke_lookup_model(problem.op.c_str(), problem.arch.c_str(), problem.dtype.c_str());
+    const RockeModelEntry* model
+        = rocke_lookup_model(problem.op.c_str(), problem.arch.c_str(), problem.dtype.c_str());
     if(model == nullptr || model->score == nullptr)
     {
         return *matches.front();

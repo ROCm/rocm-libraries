@@ -71,8 +71,8 @@ inline AotInstance makeInstance(const InstanceParams& params)
     instance.compileSpec.headSize = params.headSize;
     instance.compileSpec.blockSizeQ = 16;
     instance.compileSpec.blockSizeK = 64;
-    instance.compileSpec.tileSize   = 64; // 2D tile width T (tuning; tie-break only)
-    instance.compileSpec.numWarps   = 1;  // wavefronts per tile (tuning; tie-break only)
+    instance.compileSpec.tileSize = 64; // 2D tile width T (tuning; tie-break only)
+    instance.compileSpec.numWarps = 1; // wavefronts per tile (tuning; tie-break only)
     instance.compileSpec.maskMode = "none";
     instance.batch.min = params.batchMin;
     instance.batch.max = params.batchMax;

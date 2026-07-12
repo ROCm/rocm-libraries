@@ -6,24 +6,27 @@
 extern double rocke_score_fmha_bf16_gfx950_tflops(const double* f);
 
 static const RockeModelEntry kModels[] = {
-    { "sdpa_fwd", "gfx950", "bf16", rocke_score_fmha_bf16_gfx950_tflops, 69 },
+    {"sdpa_fwd", "gfx950", "bf16", rocke_score_fmha_bf16_gfx950_tflops, 69},
 };
 
 static const int kModelCount = 1;
 
-int rocke_model_count(void) { return kModelCount; }
-
-const RockeModelEntry* rocke_lookup_model(const char* op,
-                                          const char* arch,
-                                          const char* dtype)
+int rocke_model_count(void)
 {
-    if (!op || !arch || !dtype) return 0;
-    for (int i = 0; i < kModelCount; ++i) {
+    return kModelCount;
+}
+
+const RockeModelEntry* rocke_lookup_model(const char* op, const char* arch, const char* dtype)
+{
+    if(!op || !arch || !dtype)
+        return 0;
+    for(int i = 0; i < kModelCount; ++i)
+    {
         const RockeModelEntry* m = &kModels[i];
-        if (strcmp(m->op, op) == 0 && strcmp(m->arch, arch) == 0
-            && strcmp(m->dtype, dtype) == 0) {
+        if(strcmp(m->op, op) == 0 && strcmp(m->arch, arch) == 0 && strcmp(m->dtype, dtype) == 0)
+        {
             return m;
         }
     }
-    return 0;  // no model for this key -> caller uses Phase-1
+    return 0; // no model for this key -> caller uses Phase-1
 }

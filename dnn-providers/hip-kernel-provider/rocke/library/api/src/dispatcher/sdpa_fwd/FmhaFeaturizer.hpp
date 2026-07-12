@@ -8,41 +8,52 @@
 
 #include "dispatcher/sdpa_fwd/FmhaFeatures.hpp"
 
-namespace rocke_client::dispatcher {
+namespace rocke_client::dispatcher
+{
 
-inline double fmha_dtype_bytes(const std::string& dt) {
-    if (dt == "fp32") return 4.0;
-    if (dt == "fp8" || dt == "bf8") return 1.0;
+inline double fmha_dtype_bytes(const std::string& dt)
+{
+    if(dt == "fp32")
+        return 4.0;
+    if(dt == "fp8" || dt == "bf8")
+        return 1.0;
     return 2.0;
 }
-inline double fmha_dtype_enc(const std::string& dt) {
-    if (dt == "fp16") return 0.0;
-    if (dt == "f16") return 0.0;
-    if (dt == "bf16") return 1.0;
+inline double fmha_dtype_enc(const std::string& dt)
+{
+    if(dt == "fp16")
+        return 0.0;
+    if(dt == "f16")
+        return 0.0;
+    if(dt == "bf16")
+        return 1.0;
     return 0.0;
 }
 
 // Raw problem-shape inputs (from SdpaProblem).
-struct FmhaProblemInputs {
+struct FmhaProblemInputs
+{
     double batch = 0, sq = 0, sk = 0, hq = 0, hk = 0, dq = 0, dv = 0;
     std::string dtype = "fp16";
 };
 // Raw config/knob inputs (from AotInstance + arch defaults).
-struct FmhaConfigInputs {
+struct FmhaConfigInputs
+{
     double pip = 1, tm0 = 16, tn0 = 0, tk0 = 0, tn1 = 0, tk1 = 0, tk0max = 0;
     double num_warps = 1;
     double ps = 0, psk = 0, pd = 0, pdv = 0, mask = 0, bias = 0, lse = 0;
     double dropout = 0, logits = 0, sink = 0, skip = 0, qscale = 0, paged = 1;
 };
 // hw fields (name-matched to FmhaFeatureEngine._hw).
-struct FmhaHwInputs {
+struct FmhaHwInputs
+{
     double num_cus = 0, simds_per_cu = 4, total_simds = 0, shader_engines = 0;
     double max_clock_mhz = 0, wavefront_size = 64, lds_capacity = 0, num_xcd = 0;
 };
 
-inline FmhaFeatures fmha_featurize(const FmhaProblemInputs& p,
-                                   const FmhaConfigInputs& c,
-                                   const FmhaHwInputs& hw) {
+inline FmhaFeatures
+    fmha_featurize(const FmhaProblemInputs& p, const FmhaConfigInputs& c, const FmhaHwInputs& hw)
+{
     const double batch = p.batch, sq = p.sq, sk = p.sk, hq = p.hq;
     const double hk = std::max(p.hk, 1.0);
     const double dq = p.dq;
@@ -55,10 +66,9 @@ inline FmhaFeatures fmha_featurize(const FmhaProblemInputs& p,
     const double gqa = hq / hk;
     const double asp = sq / std::max(sk, 1.0);
     const double ops = 2.0 * batch * hq * sq * sk * (dq + dv);
-    const double mem = (batch * hq * sq * dq
-                        + batch * hk * sk * dq
-                        + batch * hk * sk * dv
-                        + batch * hq * sq * dv) * bpe;
+    const double mem = (batch * hq * sq * dq + batch * hk * sk * dq + batch * hk * sk * dv
+                        + batch * hq * sq * dv)
+                       * bpe;
     const double ai = ops / std::max(mem, 1.0);
     const double decode = (sq <= 1.0) ? 1.0 : 0.0;
 
@@ -79,7 +89,8 @@ inline FmhaFeatures fmha_featurize(const FmhaProblemInputs& p,
     const double tot = batch * hq * ntm * ntk;
 
     auto eff = [](double d, double t) -> double {
-        if (t <= 0.0) return 1.0;
+        if(t <= 0.0)
+            return 1.0;
         double r = std::fmod(d, t);
         return (r > 0.0) ? r / t : 1.0;
     };
@@ -99,38 +110,80 @@ inline FmhaFeatures fmha_featurize(const FmhaProblemInputs& p,
     const double gqa_f = (hq != hk) ? 1.0 : 0.0;
     const double totq = batch * hq * sq * dq;
     const double totkv = batch * hk * sk * (dq + dv);
-    const double fc = lse + dropout + logits + sink + skip + paged
-                      + ((mask > 0.0) ? 1.0 : 0.0)
+    const double fc = lse + dropout + logits + sink + skip + paged + ((mask > 0.0) ? 1.0 : 0.0)
                       + ((bias > 0.0) ? 1.0 : 0.0);
 
     FmhaFeatures f;
-    f.batch = batch; f.seqlen_q = sq; f.seqlen_k = sk;
-    f.nhead_q = hq; f.nhead_k = hk; f.hdim_q = dq; f.hdim_v = dv;
+    f.batch = batch;
+    f.seqlen_q = sq;
+    f.seqlen_k = sk;
+    f.nhead_q = hq;
+    f.nhead_k = hk;
+    f.hdim_q = dq;
+    f.hdim_v = dv;
     f.dtype_enc = dt_enc;
-    f.log2_batch = l2(batch); f.log2_seqlen_q = l2(sq); f.log2_seqlen_k = l2(sk);
-    f.log2_nhead_q = l2(hq); f.log2_nhead_k = l2(hk);
-    f.log2_hdim_q = l2(dq); f.log2_hdim_v = l2(dv);
-    f.gqa_ratio = gqa; f.aspect_sq_sk = asp; f.log2_ops = l2(ops);
-    f.arithmetic_intensity = ai; f.decode_flag = decode;
-    f.pipeline_code = pip; f.tile_m0 = tm0; f.tile_n0 = tn0; f.tile_k0 = tk0;
-    f.tile_n1 = tn1; f.tile_k1 = tk1; f.tile_k0max = tk0max;
-    f.pad_s = ps; f.pad_sk = psk; f.pad_d = pd; f.pad_dv = pdv;
-    f.mask = mask; f.bias = bias; f.lse = lse; f.dropout = dropout;
-    f.logits = logits; f.sink = sink; f.skip = skip; f.qscale = qscale;
+    f.log2_batch = l2(batch);
+    f.log2_seqlen_q = l2(sq);
+    f.log2_seqlen_k = l2(sk);
+    f.log2_nhead_q = l2(hq);
+    f.log2_nhead_k = l2(hk);
+    f.log2_hdim_q = l2(dq);
+    f.log2_hdim_v = l2(dv);
+    f.gqa_ratio = gqa;
+    f.aspect_sq_sk = asp;
+    f.log2_ops = l2(ops);
+    f.arithmetic_intensity = ai;
+    f.decode_flag = decode;
+    f.pipeline_code = pip;
+    f.tile_m0 = tm0;
+    f.tile_n0 = tn0;
+    f.tile_k0 = tk0;
+    f.tile_n1 = tn1;
+    f.tile_k1 = tk1;
+    f.tile_k0max = tk0max;
+    f.pad_s = ps;
+    f.pad_sk = psk;
+    f.pad_d = pd;
+    f.pad_dv = pdv;
+    f.mask = mask;
+    f.bias = bias;
+    f.lse = lse;
+    f.dropout = dropout;
+    f.logits = logits;
+    f.sink = sink;
+    f.skip = skip;
+    f.qscale = qscale;
     f.paged = paged;
-    f.num_tiles_m = ntm; f.num_tiles_k = ntk; f.total_tiles = tot;
-    f.tile_eff_sq = esq; f.tile_eff_sk = esk; f.overall_tile_efficiency = oeff;
-    f.cu_utilization = cu; f.tile_volume = tvol; f.tile_area = tarea;
-    f.lds_usage_estimate = lds; f.lds_usage_ratio = ldsr;
-    f.ratio_d_to_tk0 = rdk0; f.ratio_dv_to_tn1 = rdn1;
-    f.sq_le_tm0 = sq1; f.sk_le_tn0 = sk1; f.d_eq_dv = deq; f.gqa_flag = gqa_f;
-    f.total_q_elems = totq; f.total_kv_elems = totkv; f.feature_count = fc;
-    f.hw_num_cus = hw.num_cus; f.hw_simds_per_cu = hw.simds_per_cu;
-    f.hw_total_simds = hw.total_simds; f.hw_shader_engines = hw.shader_engines;
-    f.hw_max_clock_mhz = hw.max_clock_mhz; f.hw_wavefront_size = hw.wavefront_size;
-    f.hw_lds_capacity = hw.lds_capacity; f.hw_num_xcd = hw.num_xcd;
+    f.num_tiles_m = ntm;
+    f.num_tiles_k = ntk;
+    f.total_tiles = tot;
+    f.tile_eff_sq = esq;
+    f.tile_eff_sk = esk;
+    f.overall_tile_efficiency = oeff;
+    f.cu_utilization = cu;
+    f.tile_volume = tvol;
+    f.tile_area = tarea;
+    f.lds_usage_estimate = lds;
+    f.lds_usage_ratio = ldsr;
+    f.ratio_d_to_tk0 = rdk0;
+    f.ratio_dv_to_tn1 = rdn1;
+    f.sq_le_tm0 = sq1;
+    f.sk_le_tn0 = sk1;
+    f.d_eq_dv = deq;
+    f.gqa_flag = gqa_f;
+    f.total_q_elems = totq;
+    f.total_kv_elems = totkv;
+    f.feature_count = fc;
+    f.hw_num_cus = hw.num_cus;
+    f.hw_simds_per_cu = hw.simds_per_cu;
+    f.hw_total_simds = hw.total_simds;
+    f.hw_shader_engines = hw.shader_engines;
+    f.hw_max_clock_mhz = hw.max_clock_mhz;
+    f.hw_wavefront_size = hw.wavefront_size;
+    f.hw_lds_capacity = hw.lds_capacity;
+    f.hw_num_xcd = hw.num_xcd;
     f.num_warps = num_warps;
     return f;
 }
 
-}  // namespace rocke_client::dispatcher
+} // namespace rocke_client::dispatcher

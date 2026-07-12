@@ -793,7 +793,9 @@ def main():
                 # together. Sanitize to a valid C identifier (op may be
                 # "gemm_universal"; dtype/arch are already identifier-safe).
                 def _cident(s: str) -> str:
-                    return "".join(c if (c.isalnum() or c == "_") else "_" for c in str(s))
+                    return "".join(
+                        c if (c.isalnum() or c == "_") else "_" for c in str(s)
+                    )
 
                 func = (
                     f"rocke_score_{_cident(operation)}_{_cident(args.dtype)}"
@@ -807,7 +809,8 @@ def main():
                     f"(feature_spec.json order)"
                 )
                 c_src, h_src = emit_c_predictor(
-                    model.booster_, func,
+                    model.booster_,
+                    func,
                     num_features=len(fe.get_feature_names()),
                     source_note=note,
                 )
@@ -826,8 +829,12 @@ def main():
                     "num_features": len(fe.get_feature_names()),
                     "model_id": out_dir.name,
                 }
-                (out_dir / f"model_{target}.meta.json").write_text(json.dumps(meta, indent=2))
-                print(f"  Emitted C predictor (Route A): model_{target}.c / .h / .meta.json ({func})")
+                (out_dir / f"model_{target}.meta.json").write_text(
+                    json.dumps(meta, indent=2)
+                )
+                print(
+                    f"  Emitted C predictor (Route A): model_{target}.c / .h / .meta.json ({func})"
+                )
             except Exception as exc:  # noqa: BLE001 - codegen is best-effort
                 print(f"  WARNING: Route-A C emit failed ({exc}); .lgbm still saved")
 
@@ -842,12 +849,15 @@ def main():
                 tl_dir = out_dir / f"model_{target}_treelite"
                 tl_model = treelite.frontend.from_lightgbm(model.booster_)
                 tl2cgen.generate_c_code(
-                    tl_model, str(tl_dir),
+                    tl_model,
+                    str(tl_dir),
                     params={"parallel_comp": 0},  # single-file; deterministic layout
                 )
                 print(f"  Emitted C predictor (Route C, treelite): {tl_dir.name}/")
             except Exception as exc:  # noqa: BLE001 - codegen is best-effort
-                print(f"  WARNING: Route-C (treelite) emit failed ({exc}); Route A/.lgbm still saved")
+                print(
+                    f"  WARNING: Route-C (treelite) emit failed ({exc}); Route A/.lgbm still saved"
+                )
 
         importances = dict(
             zip(

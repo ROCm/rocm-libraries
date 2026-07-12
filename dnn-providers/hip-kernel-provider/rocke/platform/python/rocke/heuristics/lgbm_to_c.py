@@ -132,7 +132,9 @@ def booster_to_c(
     return "\n".join(lines)
 
 
-def booster_to_c_header(func_name: str, *, num_features: int, source_note: str = "") -> str:
+def booster_to_c_header(
+    func_name: str, *, num_features: int, source_note: str = ""
+) -> str:
     """Emit the matching ``.h`` (extern decl + feature-count define)."""
     guard = f"{func_name.upper()}_H"
     lines: list[str] = []
@@ -171,6 +173,10 @@ def emit_c_predictor(
 ) -> tuple[str, str]:
     """Convenience: (c_source, h_source) from a live ``lgb.Booster``."""
     dumped = booster.dump_model()
-    c_src = booster_to_c(dumped, func_name, num_features=num_features, source_note=source_note)
-    h_src = booster_to_c_header(func_name, num_features=num_features, source_note=source_note)
+    c_src = booster_to_c(
+        dumped, func_name, num_features=num_features, source_note=source_note
+    )
+    h_src = booster_to_c_header(
+        func_name, num_features=num_features, source_note=source_note
+    )
     return c_src, h_src

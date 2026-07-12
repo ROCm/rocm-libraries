@@ -595,7 +595,9 @@ def generate(
                     correct = bool(res["correct"])
                 if measured_tflops > 0:
                     n_measured += 1
-            except Exception as e:  # noqa: BLE001 - one bad kernel must not kill the sweep
+            except (
+                Exception
+            ) as e:  # noqa: BLE001 - one bad kernel must not kill the sweep
                 bench_error = f"{type(e).__name__}: {e}"
 
         row: Dict[str, object] = {

@@ -19,7 +19,9 @@ from pathlib import Path
 import pytest
 
 _HERE = os.path.dirname(os.path.abspath(__file__))
-_HEUR = os.path.normpath(os.path.join(_HERE, "..", "..", "python", "rocke", "heuristics"))
+_HEUR = os.path.normpath(
+    os.path.join(_HERE, "..", "..", "python", "rocke", "heuristics")
+)
 if _HEUR not in sys.path:
     sys.path.insert(0, _HEUR)
 
@@ -36,12 +38,28 @@ def _model(dir_: Path, name: str, meta: dict):
 
 def test_discovery_sorted_and_keyed(tmp_path):
     models = tmp_path / "models"
-    _model(models, "b", {"symbol": "rocke_score_gemm_universal_fp8_gfx942_tflops",
-                         "op": "gemm_universal", "arch": "gfx942", "dtype": "fp8",
-                         "num_features": 72})
-    _model(models, "a", {"symbol": "rocke_score_fmha_fp16_gfx950_tflops",
-                         "op": "fmha", "arch": "gfx950", "dtype": "fp16",
-                         "num_features": 69})
+    _model(
+        models,
+        "b",
+        {
+            "symbol": "rocke_score_gemm_universal_fp8_gfx942_tflops",
+            "op": "gemm_universal",
+            "arch": "gfx942",
+            "dtype": "fp8",
+            "num_features": 72,
+        },
+    )
+    _model(
+        models,
+        "a",
+        {
+            "symbol": "rocke_score_fmha_fp16_gfx950_tflops",
+            "op": "fmha",
+            "arch": "gfx950",
+            "dtype": "fp16",
+            "num_features": 69,
+        },
+    )
     entries = gmr.generate(models, tmp_path / "out")
     # op is aliased to the dispatcher's token (fmha -> sdpa_fwd); sorted by
     # (op, arch, dtype): gemm_universal before sdpa_fwd.
@@ -53,9 +71,17 @@ def test_op_aliased_to_dispatcher_token(tmp_path):
     # The pipeline op "fmha" must be emitted as the dispatcher's "sdpa_fwd" so
     # rocke_lookup_model(problem.op="sdpa_fwd", ...) hits (else model never fires).
     models = tmp_path / "models"
-    _model(models, "a", {"symbol": "rocke_score_fmha_bf16_gfx950_tflops",
-                         "op": "fmha", "arch": "gfx950", "dtype": "bf16",
-                         "num_features": 69})
+    _model(
+        models,
+        "a",
+        {
+            "symbol": "rocke_score_fmha_bf16_gfx950_tflops",
+            "op": "fmha",
+            "arch": "gfx950",
+            "dtype": "bf16",
+            "num_features": 69,
+        },
+    )
     gmr.generate(models, tmp_path / "out")
     src = (tmp_path / "out" / "rocke_model_registry.c").read_text()
     assert '"sdpa_fwd", "gfx950", "bf16"' in src
@@ -64,7 +90,9 @@ def test_op_aliased_to_dispatcher_token(tmp_path):
 
 def test_missing_key_raises(tmp_path):
     models = tmp_path / "models"
-    _model(models, "bad", {"op": "fmha", "arch": "gfx950", "dtype": "fp16"})  # no symbol/num_features
+    _model(
+        models, "bad", {"op": "fmha", "arch": "gfx950", "dtype": "fp16"}
+    )  # no symbol/num_features
     with pytest.raises(ValueError):
         gmr.generate(models, tmp_path / "out")
 
@@ -85,17 +113,27 @@ def test_empty_registry_is_valid(tmp_path):
 @requires_cc
 def test_generated_registry_compiles_and_looks_up(tmp_path):
     models = tmp_path / "models"
-    _model(models, "fmha", {"symbol": "rocke_score_fmha_fp16_gfx950_tflops",
-                            "op": "fmha", "arch": "gfx950", "dtype": "fp16",
-                            "num_features": 69})
+    _model(
+        models,
+        "fmha",
+        {
+            "symbol": "rocke_score_fmha_fp16_gfx950_tflops",
+            "op": "fmha",
+            "arch": "gfx950",
+            "dtype": "fp16",
+            "num_features": 69,
+        },
+    )
     out = tmp_path / "out"
     gmr.generate(models, out)
 
     (out / "stub.c").write_text(
         "double rocke_score_fmha_fp16_gfx950_tflops(const double* f)"
-        "{ return f[0] + f[68]; }\n")
+        "{ return f[0] + f[68]; }\n"
+    )
     # Look up with the DISPATCHER op token "sdpa_fwd" (fmha is aliased to it).
-    (out / "t.c").write_text('''
+    (out / "t.c").write_text(
+        """
 #include "rocke_model_registry.h"
 int hit_num_features(void){
     const RockeModelEntry* m = rocke_lookup_model("sdpa_fwd","gfx950","fp16");
@@ -111,12 +149,26 @@ int miss_is_null(void){
             && rocke_lookup_model("sdpa_fwd","gfx942","fp16") == 0) ? 1 : 0;
 }
 int count(void){ return rocke_model_count(); }
-''')
+"""
+    )
     so = out / "reg.so"
     subprocess.run(
-        [_CC, "-I", str(out), "-O2", "-shared", "-fPIC", "-o", str(so),
-         str(out / "t.c"), str(out / "stub.c"), str(out / "rocke_model_registry.c")],
-        check=True, capture_output=True)
+        [
+            _CC,
+            "-I",
+            str(out),
+            "-O2",
+            "-shared",
+            "-fPIC",
+            "-o",
+            str(so),
+            str(out / "t.c"),
+            str(out / "stub.c"),
+            str(out / "rocke_model_registry.c"),
+        ],
+        check=True,
+        capture_output=True,
+    )
     lib = ctypes.CDLL(str(so))
     assert lib.hit_num_features() == 69
     assert lib.miss_is_null() == 1
