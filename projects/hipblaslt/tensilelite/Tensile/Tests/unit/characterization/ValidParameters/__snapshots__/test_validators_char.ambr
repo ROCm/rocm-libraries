@@ -1,0 +1,107 @@
+# serializer version: 1
+# name: test_check_params_dispatch_sfcwgm_invalid_propagates
+  '''
+  Invalid parameter value: SFCWGM = [[0, 999]]
+  GridDim 999 out of range [0,256)
+  '''
+# ---
+# name: test_check_params_dispatch_space_filling_algo_invalid_propagates
+  '''
+  Invalid parameter value: SpaceFillingAlgo = [0, 9]
+  OrderID out of range
+  '''
+# ---
+# name: test_check_params_unknown_name_raises
+  'Invalid parameter name: NotARealParameter'
+# ---
+# name: test_check_params_value_not_in_long_list_raises
+  '''
+  Invalid parameter value: P = 999
+  Valid values for P are [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26, 27, 28, 29, 30, 31] (only first 32 combos printed)
+  Refer to Common.py for more info.
+  '''
+# ---
+# name: test_check_params_value_not_in_short_list_raises
+  '''
+  Invalid parameter value: P = 99
+  Valid values for P are [1, 2, 3].
+  '''
+# ---
+# name: test_space_fill_algo_invalid_raises[int]
+  '''
+  Invalid parameter value: SpaceFillingAlgo = 5
+  Must be a list of values
+  '''
+# ---
+# name: test_space_fill_algo_invalid_raises[order_negative]
+  '''
+  Invalid parameter value: SpaceFillingAlgo = [-1, 0]
+  OrderID out of range
+  '''
+# ---
+# name: test_space_fill_algo_invalid_raises[order_too_big]
+  '''
+  Invalid parameter value: SpaceFillingAlgo = [0, 6]
+  OrderID out of range
+  '''
+# ---
+# name: test_space_fill_algo_invalid_raises[str]
+  '''
+  Invalid parameter value: SpaceFillingAlgo = abc
+  Must be a list of values
+  '''
+# ---
+# name: test_space_fill_algo_invalid_raises[too_long]
+  '''
+  Invalid parameter value: SpaceFillingAlgo = [0, 1, 2, 3]
+  Only 3 level ordering supported
+  '''
+# ---
+# name: test_space_fill_algo_invalid_raises[tuple]
+  '''
+  Invalid parameter value: SpaceFillingAlgo = (0, 1)
+  Must be a list of values
+  '''
+# ---
+# name: test_space_fill_algo_wgm_invalid_raises[dim_negative]
+  '''
+  Invalid parameter value: SFCWGM = [[0, -1]]
+  GridDim -1 out of range [0,256)
+  '''
+# ---
+# name: test_space_fill_algo_wgm_invalid_raises[dim_too_big]
+  '''
+  Invalid parameter value: SFCWGM = [[0, 256]]
+  GridDim 256 out of range [0,256)
+  '''
+# ---
+# name: test_space_fill_algo_wgm_invalid_raises[int]
+  '''
+  Invalid parameter value: SFCWGM = 7
+  Must be a nested list of values
+  '''
+# ---
+# name: test_space_fill_algo_wgm_invalid_raises[short_pair]
+  '''
+  Invalid parameter value: SFCWGM = [[0]]
+  Must be exactly 2 values per level
+  '''
+# ---
+# name: test_space_fill_algo_wgm_invalid_raises[str]
+  '''
+  Invalid parameter value: SFCWGM = xy
+  Must be a nested list of values
+  '''
+# ---
+# name: test_space_fill_algo_wgm_invalid_raises[too_many_levels]
+  '''
+  Invalid parameter value: SFCWGM = [[0, 1], [2, 3], [4, 5]]
+  Only 3 level ordering supported
+  '''
+# ---
+# name: test_space_fill_algo_wgm_invalid_raises[triple_pair]
+  '''
+  Invalid parameter value: SFCWGM = [[0, 1, 2]]
+  Must be exactly 2 values per level
+  '''
+# ---

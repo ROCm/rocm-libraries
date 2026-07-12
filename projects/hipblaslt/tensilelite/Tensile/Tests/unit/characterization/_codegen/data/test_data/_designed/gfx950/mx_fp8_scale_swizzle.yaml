@@ -1,0 +1,93 @@
+################################################################################
+# Copyright (C) 2026 Advanced Micro Devices, Inc. All rights reserved.
+# SPDX-License-Identifier: MIT
+################################################################################
+# P4 DESIGNED MXFP8 scale-swizzle config for gfx950.
+#
+# Targets uncovered arms in Tensile/KernelWriterAssembly.py that require
+# MXBlockA/MXBlockB (MXFP8 microscaling data types) with gfx950-specific
+# HostPreSwizzle scale layout:
+#
+#   ~4207-4298  (computeLoadSrd, isMxSwizzledScaleLayout path): MX scale tensor
+#               SRD-limit math when MXScaleFormat=HostPreSwizzle (gfx950).
+#               swizzleSize0=32, swizzleSize1=256, fixedSrd2 path.
+#   ~4527-4533  (padding/stride compute, isMxSwizzledScale): bytesPerKElement calc
+#               for swizzled MX scale formats.
+#   ~8725-8830  (mfmaIter / shiftK, isgfx950 MX track): separate gfx950 mx
+#               shiftK/tail-loop VCndMaskB32 zeroing for MXBlockA and MXBlockB.
+#   ~9064-9108  (MXBlockA/B tail zero-out, NOT isgfx950 branch): exercises the
+#               NOT-gfx950 MX path in non-tail loops which is complementary
+#               evidence (confirmed gfx950 takes the isgfx950 path instead).
+#   ~12659-12740 (MX scale LDS stride, swizzled): swizzled MX stride/padding
+#               calculation for LDS (HostPreSwizzle path) in local-read emit.
+#
+# gfx950 resolves MXScaleFormat="Auto" to "HostPreSwizzle" (BufferLoad transport)
+# when MXBlockA > 0, which is the gfx950-only subtile-MX pipeline.  UseSubtileImpl=1
+# with StreamK=3 is the required combination for gfx950 subtile kernels.
+#
+# ForkParameters: 2 MatrixInstruction shapes x 2 PrefetchGlobalRead = 4 permutations
+# (all 4 emit err=0 on gfx950 with MXBlockA=32, MXBlockB=32, UseSubtileImpl=1,
+#  StreamK=3).
+
+GlobalParameters:
+  SyncsPerBenchmark: 0
+  SleepPercent: 0
+  NumElementsToValidate: 0
+  NumWarmups: 0
+  NumBenchmarks: 1
+  EnqueuesPerSync: 1
+  DataInitTypeBeta: 0
+  DataInitTypeAlpha: 1
+  Device: 0
+  PrintSolutionRejectionReason: False
+
+BenchmarkProblems:
+  ########################################
+  # MXFP8->S TN — MXBlockA=32, MXBlockB=32, UseSubtileImpl=1, StreamK=3
+  # Exercises gfx950 MX scale HostPreSwizzle SRD-limit, shiftK MX tail,
+  # and MX scale LDS stride arms.
+  ########################################
+  -
+    - # ProblemType
+      OperationType: GEMM
+      DataType: F8
+      DestDataType: s
+      ComputeDataType: s
+      HighPrecisionAccumulate: True
+      MXBlockA: 32
+      MXBlockB: 32
+      TransposeA: True
+      TransposeB: False
+      UseBeta: True
+      Batched: True
+    - # BenchmarkProblemSizeGroup
+      BenchmarkCommonParameters:
+        - KernelLanguage: ["Assembly"]
+      ForkParameters:
+        - MatrixInstruction:
+          - [16, 16, 128, 1, 1, 2, 2, 2, 2]   # 2x2 wave-group, MI16x16x128
+          - [32, 32,  64, 1, 1, 2, 2, 2, 2]   # 2x2 wave-group, MI32x32x64
+        - DepthU: [256, 512]
+        - PrefetchGlobalRead: [1, 2]
+        - PrefetchLocalRead: [1]
+        - ScheduleIterAlg: [3]
+        - ExpandPointerSwap: [True]
+        - TransposeLDS: [1]
+        - LdsPadA: [-1]
+        - LdsPadB: [-1]
+        - LdsBlockSizePerPadA: [-1]
+        - LdsBlockSizePerPadB: [-1]
+        - 1LDSBuffer: [-1]
+        - LocalReadVectorWidth: [16]
+        - GlobalReadVectorWidthA: [16]
+        - GlobalReadVectorWidthB: [16]
+        - StaggerU: [0]
+        - SourceSwap: [True]
+        - StoreVectorWidth: [-1]
+        - StreamK: [3]
+        - GlobalSplitU: [1]
+        - UseSubtileImpl: [True]
+      BenchmarkFinalParameters:
+        - ProblemSizes:
+          - Exact: [128, 128, 1, 256]
+          - Exact: [256, 256, 1, 256]

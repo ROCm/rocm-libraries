@@ -46,7 +46,7 @@ The rocSOLVER repository for ROCm 7.0.2 and earlier is located at `<https://gith
 
     * :doc:`rocSOLVER API summary <./reference/intro>`
     * :doc:`rocSOLVER types <./reference/types>`
-    * :doc:`rocSOLVER precision support <./reference/precision>`
+    * :doc:`rocSOLVER precision support <./reference/data_type_support>`
     * :doc:`rocSOLVER environment variables <./reference/env_variables>`
     * :doc:`LAPACK auxiliary functions <./reference/auxiliary>`
     * :doc:`LAPACK functions <./reference/lapack>`

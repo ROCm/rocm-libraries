@@ -1,0 +1,79 @@
+# serializer version: 1
+# name: test_validate_bf16_1k_branch_gfx90a
+  dict({
+    'returned': True,
+    'valid': 'unset',
+  })
+# ---
+# name: test_validate_dtype_key_fallback_mixed_mac
+  dict({
+    'returned': False,
+    'valid': False,
+  })
+# ---
+# name: test_validate_empty_mi_returns_true
+  dict({
+    'returned': True,
+    'valid': 'unset',
+  })
+# ---
+# name: test_validate_happy_cdna_gfx90a
+  dict({
+    'returned': True,
+    'valid': 'unset',
+  })
+# ---
+# name: test_validate_happy_navi_wmma_gfx1100
+  dict({
+    'returned': True,
+    'valid': 'unset',
+  })
+# ---
+# name: test_validate_happy_sparse_smfma_gfx942
+  dict({
+    'returned': True,
+    'valid': 'unset',
+  })
+# ---
+# name: test_validate_happy_wmma_gfx1200
+  dict({
+    'returned': True,
+    'valid': 'unset',
+  })
+# ---
+# name: test_validate_mi_disabled_returns_false
+  dict({
+    'returned': False,
+    'valid': 'unset',
+  })
+# ---
+# name: test_validate_no_metadata_key
+  dict({
+    'returned': True,
+    'valid': 'unset',
+  })
+# ---
+# name: test_validate_reject_mfma_invalid
+  dict({
+    'returned': False,
+    'valid': False,
+  })
+# ---
+# name: test_validate_reject_smfma_invalid
+  dict({
+    'returned': False,
+    'valid': False,
+  })
+# ---
+# name: test_validate_reject_swmmac_invalid
+  dict({
+    'returned': False,
+    'valid': False,
+  })
+# ---
+# name: test_validate_reject_wmma_invalid
+  dict({
+    'returned': False,
+    'valid': False,
+  })
+# ---

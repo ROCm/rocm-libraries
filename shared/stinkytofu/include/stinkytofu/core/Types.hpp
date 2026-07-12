@@ -23,6 +23,7 @@
 #pragma once
 
 #include <array>
+#include <climits>
 #include <cstdint>
 #include <string>
 #include <vector>
@@ -76,23 +77,13 @@ struct PassFeatureConfig {
         /// Modeled cycles until one tensor_load_to_lds credit frees. Fed from the
         /// cost/cycle model; varies with layout and problem size.
         int globalReadDrainLatency = 0;
-    };
-
-    /// Generic before/after instruction-order snapshot written by PassManager.
-    struct PassOrderSnapshotConfig {
-        /// Output path; if non-empty, PassManager records snapshots into JSON
-        /// for tools/stinkytofu-analysis (schema stinkytofu-dag-schedule-v1).
-        std::string jsonPath;
-        /// Prepended to each region title (e.g. Tensile pipeline group: loopWithPrefetch).
-        std::string titlePrefix;
-        /// `Pass::getName()` strings; after each listed pass, emit one region.
-        /// If empty and jsonPath is set, defaults to StinkyDAGSchedulerPass only.
-        std::vector<std::string> dumpAfterPasses;
+        int dsReadQueueDepth = 0;
+        int dsReadDrainLatency = 0;
+        int dsReadPerWmma = INT_MAX;
     };
 
     LoopConfig loopConfig;
     DagFeatures dagFeatures;
-    PassOrderSnapshotConfig passOrderSnapshot;
 };
 
 /// VGPR MSB encoding mode supported by the toolchain.

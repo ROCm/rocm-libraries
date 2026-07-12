@@ -606,6 +606,34 @@ HIPBLAS_EXPORT hipblasStatus_t hipblasSetAtomicsMode(hipblasHandle_t      handle
 HIPBLAS_EXPORT hipblasStatus_t hipblasGetAtomicsMode(hipblasHandle_t       handle,
                                                      hipblasAtomicsMode_t* atomics_mode);
 
+/*! \brief Set alpha stride for a limited set of batched and strided_batched functions to specify the stride for alpha between successive batch elements.
+    Only applies to hipblasPointerModeDevice and thus device side allocations.
+    It enables interpretation of the alpha pointer for both batched and strided_batched functions as a pointer to a vector of values.
+    Default value is 0 which treats it as a pointer to a single scalar. Support is denoted with specific function documentation.
+    Warning this is a modal like state in the handle. Restore to value 0 if no longer applicable to later function calls.
+    - Supported in rocBLAS backend only.
+*/
+HIPBLAS_EXPORT hipblasStatus_t hipblasSetBatchAlphaStride(hipblasHandle_t handle,
+                                                          hipblasStride   alpha_stride);
+
+/*! \brief Get batch alpha stride from the handle. */
+HIPBLAS_EXPORT hipblasStatus_t hipblasGetBatchAlphaStride(hipblasHandle_t handle,
+                                                          hipblasStride*  alpha_stride);
+
+/*! \brief Set beta stride for a limited set of batched and strided_batched functions to specify the stride for beta between successive batch elements.
+    Only applies to hipblasPointerModeDevice and thus device side allocations.
+    It enables interpretation of the beta pointer for both batched and strided_batched functions as a pointer to a vector of values.
+    Default value is 0 which treats it as a pointer to a single scalar. Support is denoted with specific function documentation.
+    Warning this is a modal like state in the handle. Restore to value 0 if no longer applicable to later function calls.
+    - Supported in rocBLAS backend only.
+*/
+HIPBLAS_EXPORT hipblasStatus_t hipblasSetBatchBetaStride(hipblasHandle_t handle,
+                                                         hipblasStride   beta_stride);
+
+/*! \brief Get batch beta stride from the handle. */
+HIPBLAS_EXPORT hipblasStatus_t hipblasGetBatchBetaStride(hipblasHandle_t handle,
+                                                         hipblasStride*  beta_stride);
+
 /*
  * ===========================================================================
  *    level 1 BLAS

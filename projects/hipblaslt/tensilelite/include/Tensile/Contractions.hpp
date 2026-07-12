@@ -31,9 +31,6 @@
 #include <Tensile/SolutionLibrary.hpp>
 #include <Tensile/Tensile.hpp>
 #include <Tensile/TensorDescriptor.hpp>
-#include <Tensile/Macros.hpp>
-
-TENSILE_HIDDEN_BEGIN
+#include <tensilelitehost/export.h>
 
 
-TENSILE_HIDDEN_END

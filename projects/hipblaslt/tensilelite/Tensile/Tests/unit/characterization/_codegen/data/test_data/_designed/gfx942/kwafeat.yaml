@@ -1,0 +1,105 @@
+################################################################################
+# Copyright (C) 2026 Advanced Micro Devices, Inc. All rights reserved.
+# SPDX-License-Identifier: MIT
+################################################################################
+# P4 designed KWA broad-feature config for gfx942 codegen characterization.
+#
+# Goal: exercise the broad feature-surface of KernelWriterAssembly.py that is
+# missed (miss=3987) when only SIA3 + StaggerU=0 + EPS=0 kernels are emitted.
+#
+# Key emit arms toggled by this sweep:
+#   1. ScheduleIterAlg=2 (SIA2)
+#      - SIA2 component (Components/SIA.py:95-121) schedIntoIteration
+#      - KernelWriter.py:998-1125 SIA2 scheduling block
+#      - forces 1LDSBuffer=1 automatically
+#   2. ScheduleIterAlg=1 (SIA1)
+#      - SIA1 component (Components/SIA.py:123-149) schedIntoIteration
+#      - KernelWriter.py:951-997 SIA1 scheduling block
+#   3. StaggerU=32
+#      - KernelWriterAssembly.py:5893-5966 declareStaggerParms() block
+#      - KernelWriterAssembly.py:5897-5925 loop + mask + mapping sub-blocks
+#      - KernelWriterAssembly.py:6000-6099 staggerU address adjustment
+#   4. ExpandPointerSwap=1 + PGR=2
+#      - KernelWriterAssembly.py:7380, 7627-7674 EPS loop exit labels
+#      - KernelWriterAssembly.py:10903-10905 DT-to-LDS EPS swap
+#      - KernelWriterAssembly.py:12865, 12895 EPS local read swap offsets
+#   5. 1LDSBuffer=1 (set by SIA2 forcibly; also explicit for SIA1)
+#      - KernelWriter.py:979, 1114, 1770 1LDS check arms
+#      - KernelWriterAssembly.py:11305, 11337 needSwap path
+#
+# ForkParameters cartesian product (targeting ≤8 kernels):
+#   ScheduleIterAlg: [1, 2]
+#   StaggerU: [0, 32]
+#   ExpandPointerSwap: [0, 1]
+# => 2 x 2 x 2 = 8 combos (within limit=8)
+#
+# Constraints observed:
+#   - No DirectToVgpr (rejected if SIA < 3)
+#   - No StreamK (SIA1/2 rejected by SK)
+#   - SIA2 forces 1LDSBuffer=1; SIA1 with ScheduleLocalWrite=1 is OK
+#   - EPS requires PGR=2
+#   - MatrixInstruction required for SIA2
+#
+# ProblemType: SGEMM NT (f32 in / f32 out / f32 compute), Batched=True.
+# Using plain SGEMM (not BBS/Bias/Activation) to avoid Bias/Activation
+# codegen branches that interact with SIA paths and could over-constrain
+# the fork.  A f32 MFMA MatrixInstruction shape is used that works on gfx942.
+GlobalParameters:
+  SyncsPerBenchmark: 0
+  MinimumRequiredVersion: 5.0.0
+  NumElementsToValidate: 128
+  DataInitTypeBeta: 0
+  DataInitTypeAlpha: 1
+  Device: 0
+
+BenchmarkProblems:
+  ########################################
+  # SGEMM (f32) NT, Batched
+  # SIA1/2 x StaggerU x EPS sweep for KWA feature breadth
+  ########################################
+  -
+    - # ProblemType: SGEMM NT
+      OperationType: GEMM
+      DataType: s
+      DestDataType: s
+      ComputeDataType: s
+      HighPrecisionAccumulate: False
+      TransposeA: False
+      TransposeB: True
+      UseBeta: True
+      Batched: True
+    - # BenchmarkProblemSizeGroup
+      InitialSolutionParameters:
+      BenchmarkCommonParameters:
+        - KernelLanguage: ["Assembly"]
+      ForkParameters:
+        # f32 MFMA shape valid on gfx942 for SIA2 (MatrixInstruction required by SIA2)
+        - MatrixInstruction:
+          - [16, 16, 4, 1, 1, 4, 4, 2, 2]
+        # SIA1 and SIA2 — primary feature fork
+        - ScheduleIterAlg: [1, 2]
+        # StaggerU=32 activates declareStaggerParms; StaggerU=0 skips it
+        - StaggerU: [0, 32]
+        # EPS=1 enables pointer-swap code branches
+        - ExpandPointerSwap: [False, True]
+        # PGR=2 is required for EPS=1; also exercises PGR2 timing code
+        - PrefetchGlobalRead: [2]
+        - PrefetchLocalRead: [1]
+        - DepthU: [16]
+        - LocalReadVectorWidth: [1]
+        - TransposeLDS: [0]
+        - GlobalSplitU: [1]
+        - SourceSwap: [True]
+        - WorkGroupMapping: [1]
+        - MIArchVgpr: [False]
+        - VectorWidthA: [1]
+        - VectorWidthB: [1]
+        - GlobalReadVectorWidthA: [1]
+        - GlobalReadVectorWidthB: [1]
+        - StoreRemapVectorWidth: [0]
+        - DirectToVgprA: [False]
+        - DirectToVgprB: [False]
+      BenchmarkJoinParameters:
+      BenchmarkFinalParameters:
+        - ProblemSizes:
+          - Exact: [256, 256, 1, 256]

@@ -1,0 +1,19 @@
+# serializer version: 1
+# name: test_choose_multiplier
+  tuple(
+    1437248170,
+    0,
+    2,
+  )
+# ---
+# name: test_data_direction_enum
+  dict({
+    'NONE': tuple(
+      0,
+    ),
+    'READ': tuple(
+      1,
+    ),
+    'WRITE': 2,
+  })
+# ---

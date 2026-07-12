@@ -9,6 +9,7 @@ non-source keys.
 """
 
 import io
+from pathlib import Path
 
 from dnn_benchmarking.reporting import Reporter
 from dnn_benchmarking.reporting.suite_results import ProviderEngineResult
@@ -85,10 +86,13 @@ class TestPmcRendering:
         rendered = out.getvalue()
         assert "PMC db:" in rendered
         assert "/tmp/prof/sample/MIOPEN_ENGINE/pmc_basic/results.db" in rendered
-        # analyze takes the db's parent dir, not the db itself.
-        assert (
-            "rocprof-compute analyze --path " "/tmp/prof/sample/MIOPEN_ENGINE/pmc_basic"
-        ) in rendered
+        # analyze takes the db's parent dir, not the db itself. The
+        # reporter derives it via Path, so it renders with the platform
+        # separator.
+        analyze_dir = str(
+            Path("/tmp/prof/sample/MIOPEN_ENGINE/pmc_basic/results.db").parent
+        )
+        assert f"rocprof-compute analyze --path {analyze_dir}" in rendered
 
 
 class TestTraceRendering:

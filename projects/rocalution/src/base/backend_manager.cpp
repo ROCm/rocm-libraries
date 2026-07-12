@@ -157,14 +157,14 @@ namespace rocalution
 #ifdef _OPENMP
         _get_backend_descriptor()->OpenMP_def_threads = omp_get_max_threads();
         _get_backend_descriptor()->OpenMP_threads     = omp_get_max_threads();
-#if _OPENMP >= 201811
+#if _OPENMP >= 201811 && !defined(_WIN32)
         _get_backend_descriptor()->OpenMP_def_nested = omp_get_max_active_levels();
 #else
         _get_backend_descriptor()->OpenMP_def_nested = omp_get_nested();
 #endif
 
         // the default in rocALUTION is 0
-#if _OPENMP >= 201811
+#if _OPENMP >= 201811 && !defined(_WIN32)
         omp_set_max_active_levels(0);
 #else
         omp_set_nested(0);
@@ -236,7 +236,7 @@ namespace rocalution
 
         assert((_get_backend_descriptor()->OpenMP_def_nested == 0)
                || (_get_backend_descriptor()->OpenMP_def_nested == 1));
-#if _OPENMP >= 201811
+#if _OPENMP >= 201811 && !defined(_WIN32)
         omp_set_max_active_levels(_get_backend_descriptor()->OpenMP_def_nested);
 #else
         omp_set_nested(_get_backend_descriptor()->OpenMP_def_nested);

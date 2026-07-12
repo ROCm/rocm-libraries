@@ -590,14 +590,7 @@ using Params3 = ::testing::Types<
     params3<double, 4, 2, 10, 0, 1000, double, int>,
     params3<int, 3, 2, 123, 100, 5635, int>,
     params3<double, 4, 3, 55, -123, +123, double, unsigned long long, custom_config3>,
-#if USES_ASAN
-    // Workaround: ASAN does not like HIP launch graphs in this specific case.
-    // Disable it for now.
-    params3<int, 4, 3, 2000, 0, 2000, int, int, rocprim::default_config, false>
-#else
-    params3<int, 4, 3, 2000, 0, 2000, int, int, rocprim::default_config, true>
-#endif
->;
+    params3<int, 4, 3, 2000, 0, 2000, int, int, rocprim::default_config, true>>;
 
 TYPED_TEST_SUITE(RocprimDeviceHistogramMultiEven, Params3);
 

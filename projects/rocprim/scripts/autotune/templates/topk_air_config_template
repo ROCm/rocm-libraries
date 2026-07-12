@@ -1,0 +1,25 @@
+{% extends "config_template" %}
+
+{% macro get_header_guard() %}
+ROCPRIM_DEVICE_DETAIL_CONFIG_DEVICE_TOPK_AIR_HPP_
+{%- endmacro %}
+
+{% macro kernel_configuration(measurement) -%}
+topk_air_config_params{ { {{ measurement['cfg']['bs'] }}, {{ measurement['cfg']['ipt'] }} }, {{ measurement['cfg']['radix_bits'] }}, {{ measurement['cfg']['adapt_coeff'] }}, {{ measurement['cfg']['limit'] }} }
+{%- endmacro %}
+
+{% macro config_picker() -%}
+template<class Target, class key_type, class value_type, class size_type> constexpr auto topk_air_config_picker()
+{%- endmacro %}
+
+{% macro enable_if(benchmark_of_target) -%}
+{{ benchmark_of_target.get_enable_if("topk_air_config_params") }}
+{%- endmacro %}
+
+{% macro default_case() -%}
+return topk_air_config_params_base<key_type, value_type, size_type>();
+{%- endmacro %}
+
+{% macro fallback_config(fallback_target) -%}
+    return topk_air_config_picker<comp_target<{{ fallback_target.target.as_str() }}>, key_type, value_type, size_type>();
+{%- endmacro %}

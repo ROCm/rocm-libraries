@@ -152,6 +152,14 @@ class WaitDataflow {
     ///   });
     void setRawNeedsWait(CounterKind c, RawWaitPredicate pred);
 
+    /// Enable or disable loop-carried tensor-token dependencies. Disabled by
+    /// default: CK_Tensor dataflow is frozen after the first solver sweep, so
+    /// tensor state does not propagate through back-edges. Enable this to
+    /// restore the conservative behavior that iterates tensor queues normally.
+    void setLoopCarriedTokenDepsEnabled(bool enabled) {
+        loopCarriedTokenDepsEnabled = enabled;
+    }
+
     /// Materialise the conservative per-consumer wait plan from the
     /// converged dataflow state. Run WaitPlanOptimizer(s) on the result,
     /// then finalizePlan() before emit.
@@ -189,6 +197,7 @@ class WaitDataflow {
 
     bool capHit = false;
     unsigned iterationCap = 0;
+    bool loopCarriedTokenDepsEnabled = false;
 
     /// (block, counter) pairs whose per-pred queue overflowed the hardware
     /// in-flight window (kMaxInFlight) during a solver sweep -- i.e. the

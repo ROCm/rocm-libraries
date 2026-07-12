@@ -39,7 +39,6 @@
 #include <Tensile/TensorOps.hpp>
 #include <Tensile/Utils.hpp>
 
-TENSILE_HIDDEN_BEGIN
 namespace TensileLite
 {
     /**
@@ -47,7 +46,7 @@ namespace TensileLite
  * @{
  */
     // These are parameters that are used in predicate, and also are kernel arguments.
-    class TENSILE_API ContractionProblemParameters
+    class TENSILELITEHOST_EXPORT ContractionProblemParameters
     {
     public:
         void setGSU(int16_t gsu)
@@ -156,6 +155,33 @@ namespace TensileLite
             return m_fallbackStatus;
         }
 
+        // StreamK=5 hybrid-mode toggle. Forwarded by the host into
+        // StreamKSettings::streamKTileSchedulingMode at solve time. Values:
+        //   0 = OFF  (default; SK3 static unless smCountTarget() > 0, then
+        //             the origami hybrid heuristic runs like AUTO),
+        //   1 = ON   (SK4 dynamic per-XCD work-queue),
+        //   2 = AUTO (always delegate to origami::streamk::select_hybrid_mode).
+        // Ignored when the chosen solution is not a StreamK=5 hybrid kernel.
+        void setStreamKTileSchedulingMode(int streamKTileSchedulingMode)
+        {
+            m_streamKTileSchedulingMode = streamKTileSchedulingMode;
+        }
+
+        int streamKTileSchedulingMode() const
+        {
+            return m_streamKTileSchedulingMode;
+        }
+
+        void setSmCountTarget(int smCountTarget)
+        {
+            m_smCountTarget = smCountTarget;
+        }
+
+        int smCountTarget() const
+        {
+            return m_smCountTarget;
+        }
+
     private:
         int16_t          m_gsu            = 0; // default value
         bool             m_gsuc           = false; // default value
@@ -167,13 +193,15 @@ namespace TensileLite
         int              m_factorDim      = 0;
         ActivationType   m_activationType = ActivationType::None;
         bool             m_fallbackStatus = false; // default value
+        int              m_streamKTileSchedulingMode = 0; // SK5 hybrid mode tri-state (OFF default)
+        int              m_smCountTarget = 0;
     };
 
     /**
      * \addtogroup Problem
      * @{
      */
-    class TENSILE_API ContractionProblemGemm;
+    class TENSILELITEHOST_EXPORT ContractionProblemGemm;
 
     struct ConstantDescriptor
     {
@@ -181,7 +209,7 @@ namespace TensileLite
         rocisa::DataType dataType;
     };
 
-    class TENSILE_API ContractionProblem : public Problem
+    class TENSILELITEHOST_EXPORT ContractionProblem : public Problem
     {
     public:
         ContractionProblem(size_t size, size_t workspaceSize = 0);
@@ -298,7 +326,7 @@ namespace TensileLite
      * summations, etc. This is decoupled from any particular pointers, which
      * are provided in ContractionInputs objects.
      */
-    class TENSILE_API ContractionProblemGemm : public ContractionProblem
+    class TENSILELITEHOST_EXPORT ContractionProblemGemm : public ContractionProblem
     {
     public:
         enum TENSOR : int
@@ -1110,14 +1138,14 @@ namespace TensileLite
             return m_maxProblemSize;
         }
 
-        void setMXScaleA(rocisa::DataType mxType, int mxBlock, std::vector<size_t> saStride = {}, bool padScaleTensor = true);
+        void setMXScaleA(rocisa::DataType mxType, int mxBlock, std::vector<size_t> saStride = {}, bool padScaleTensorFreeDim = true);
 
         rocisa::DataType mxTypeA() const
         {
             return m_mxTypeA;
         }
 
-        void setMXScaleB(rocisa::DataType mxType, int mxBlock, std::vector<size_t> sbStride = {}, bool padScaleTensor = true);
+        void setMXScaleB(rocisa::DataType mxType, int mxBlock, std::vector<size_t> sbStride = {}, bool padScaleTensorFreeDim = true);
 
         rocisa::DataType mxTypeB() const
         {
@@ -1497,7 +1525,7 @@ namespace TensileLite
         }
     };
 
-    struct TENSILE_API ContractionInputs : public ProblemInputs
+    struct TENSILELITEHOST_EXPORT ContractionInputs : public ProblemInputs
     {
         ContractionInputs();
         virtual ~ContractionInputs();
@@ -1572,7 +1600,7 @@ namespace TensileLite
         bool                gpu = false;
     };
 
-    struct TENSILE_API ContractionGroupedInputs : public ProblemInputs
+    struct TENSILELITEHOST_EXPORT ContractionGroupedInputs : public ProblemInputs
     {
         std::vector<ContractionInputs> grouped;
         void*                          ws = nullptr;
@@ -1589,25 +1617,24 @@ namespace TensileLite
     {
     };
 
-    TENSILE_API std::ostream& operator<<(std::ostream&                 stream,
+    TENSILELITEHOST_EXPORT std::ostream& operator<<(std::ostream&                 stream,
                                          ContractionProblemGemm const& contraction);
 
-    TENSILE_API std::ostream& operator<<(std::ostream&                            stream,
+    TENSILELITEHOST_EXPORT std::ostream& operator<<(std::ostream&                            stream,
                                          ContractionProblemGemm::FreeIndex const& free);
-    TENSILE_API std::ostream& operator<<(std::ostream&                             stream,
+    TENSILELITEHOST_EXPORT std::ostream& operator<<(std::ostream&                             stream,
                                          ContractionProblemGemm::BatchIndex const& batch);
-    TENSILE_API std::ostream& operator<<(std::ostream&                             stream,
+    TENSILELITEHOST_EXPORT std::ostream& operator<<(std::ostream&                             stream,
                                          ContractionProblemGemm::BoundIndex const& bound);
 
-    TENSILE_API std::istream& operator>>(std::istream&                      stream,
+    TENSILELITEHOST_EXPORT std::istream& operator>>(std::istream&                      stream,
                                          ContractionProblemGemm::FreeIndex& free);
-    TENSILE_API std::istream& operator>>(std::istream&                       stream,
+    TENSILELITEHOST_EXPORT std::istream& operator>>(std::istream&                       stream,
                                          ContractionProblemGemm::BatchIndex& batch);
-    TENSILE_API std::istream& operator>>(std::istream&                       stream,
+    TENSILELITEHOST_EXPORT std::istream& operator>>(std::istream&                       stream,
                                          ContractionProblemGemm::BoundIndex& bound);
 
     /**
      * @}
      */
 } // namespace TensileLite
-TENSILE_HIDDEN_END

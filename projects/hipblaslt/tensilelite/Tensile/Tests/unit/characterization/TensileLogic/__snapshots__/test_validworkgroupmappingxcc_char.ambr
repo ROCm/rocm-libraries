@@ -1,0 +1,104 @@
+# serializer version: 1
+# name: test_cu_count_from_path[first_match_wins-outer_20cu/inner_38cu/x.yaml][first_match_wins]
+  20
+# ---
+# name: test_cu_count_from_path[no_cu_suffix-logic/gfx942/Equality/x.yaml][no_cu_suffix]
+  0
+# ---
+# name: test_cu_count_from_path[not_at_end-logic/gfx942_38cu_extra/Equality/x.yaml][not_at_end]
+  0
+# ---
+# name: test_cu_count_from_path[plain_38cu-logic/gfx942_38cu/Equality/x.yaml][plain_38cu]
+  38
+# ---
+# name: test_cu_count_from_path[uppercase_64CU-logic/gfx942_64CU/Equality/x.yaml][uppercase_64CU]
+  64
+# ---
+# name: test_non_cu_variant_dir_skips
+  dict({
+    'reported_failures': dict({
+    }),
+    'returned': True,
+  })
+# ---
+# name: test_non_dict_solution_hits_exception_branch
+  dict({
+    'reported_failures': dict({
+    }),
+    'returned': False,
+  })
+# ---
+# name: test_report_dedup_counts_across_solutions
+  dict({
+    'reported_failures': dict({
+      'logic/aquavanjaram/gfx942_38cu/Equality/logic.yaml': 3,
+    }),
+    'returns': list([
+      False,
+      False,
+      False,
+    ]),
+  })
+# ---
+# name: test_reset_clears_state
+  dict({
+    'after_reset': dict({
+    }),
+    'before_reset': dict({
+      'logic/aquavanjaram/gfx942_38cu/Equality/logic.yaml': 1,
+    }),
+  })
+# ---
+# name: test_xcc_minus_one_accepts
+  dict({
+    'reported_failures': dict({
+    }),
+    'returned': True,
+  })
+# ---
+# name: test_xcc_missing_defaults_to_minus_one
+  dict({
+    'reported_failures': dict({
+    }),
+    'returned': True,
+  })
+# ---
+# name: test_xcc_negative_other_than_minus_one_rejected
+  dict({
+    'reported_failures': dict({
+      'logic/aquavanjaram/gfx942_38cu/Equality/logic.yaml': 1,
+    }),
+    'returned': False,
+  })
+# ---
+# name: test_xcc_not_power_of_two_rejected
+  dict({
+    'reported_failures': dict({
+      'logic/aquavanjaram/gfx942_38cu/Equality/logic.yaml': 1,
+    }),
+    'returned': False,
+  })
+# ---
+# name: test_xcc_power_of_two_not_dividing_cu_rejected
+  dict({
+    'reported_failures': dict({
+      'logic/aquavanjaram/gfx942_38cu/Equality/logic.yaml': 1,
+    }),
+    'returned': False,
+  })
+# ---
+# name: test_xcc_valid_power_of_two_divisor
+  dict({
+    'reported_failures': dict({
+    }),
+    'returned': True,
+  })
+# ---
+# name: test_xcc_zero_rejected
+  dict({
+    'reported_failures': dict({
+      'logic/aquavanjaram/gfx942_38cu/Equality/logic.yaml': 1,
+    }),
+    'returned': False,
+  })
+# ---

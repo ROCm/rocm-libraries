@@ -3,7 +3,6 @@
 
 """Tests for metrics.host (CPU time probe + host memory snapshot)."""
 
-import resource
 import sys
 import types
 from unittest.mock import patch
@@ -21,18 +20,12 @@ def _reset_warn_state():
     _reset_warns()
 
 
-def _fake_rusage(utime: float, stime: float):
-    """Build a struct_rusage-shaped object matching what getrusage returns."""
-    obj = types.SimpleNamespace()
-    obj.ru_utime = utime
-    obj.ru_stime = stime
-    return obj
-
-
 class TestCpuTimeProbe:
+    """Probe behavior, independent of the underlying CPU-time source."""
+
     def test_delta_in_milliseconds(self):
-        samples = [_fake_rusage(0.0, 0.0), _fake_rusage(0.1, 0.05)]
-        with patch.object(resource, "getrusage", side_effect=samples):
+        samples = [(0.0, 0.0), (0.1, 0.05)]
+        with patch.object(host, "_process_cpu_times", side_effect=samples):
             with host.CpuTimeProbe() as probe:
                 pass
         assert probe.delta is not None
@@ -40,25 +33,36 @@ class TestCpuTimeProbe:
         assert probe.delta.kernel_time_ms == pytest.approx(50.0)
 
     def test_failure_in_start_yields_none_delta(self):
-        with patch.object(resource, "getrusage", side_effect=OSError("denied")):
+        with patch.object(host, "_process_cpu_times", side_effect=[None]):
             with host.CpuTimeProbe() as probe:
                 pass
         assert probe.delta is None
 
     def test_failure_in_end_does_not_raise_and_leaves_delta_none(self):
-        # First call (enter) succeeds; second call (exit) raises.
-        sequence = [_fake_rusage(0.0, 0.0), OSError("end failed")]
-
-        def _side(*_args, **_kwargs):
-            value = sequence.pop(0)
-            if isinstance(value, Exception):
-                raise value
-            return value
-
-        with patch.object(resource, "getrusage", side_effect=_side):
+        # First sample (enter) succeeds; second (exit) is unavailable.
+        with patch.object(host, "_process_cpu_times", side_effect=[(0.0, 0.0), None]):
             with host.CpuTimeProbe() as probe:
                 pass
         assert probe.delta is None
+
+
+class TestProcessCpuTimes:
+    """The cross-platform CPU-time source (os.times)."""
+
+    def test_returns_user_system_floats(self):
+        sample = host._process_cpu_times()
+        assert sample is not None
+        assert len(sample) == 2
+        assert all(isinstance(x, float) for x in sample)
+
+    def test_reads_os_times_user_and_system(self):
+        fake = types.SimpleNamespace(user=1.5, system=0.25)
+        with patch.object(host.os, "times", return_value=fake):
+            assert host._process_cpu_times() == (1.5, 0.25)
+
+    def test_returns_none_when_os_times_unavailable(self):
+        with patch.object(host.os, "times", side_effect=OSError("nope")):
+            assert host._process_cpu_times() is None
 
 
 class TestHostMemorySnapshot:

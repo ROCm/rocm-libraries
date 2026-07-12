@@ -8,9 +8,8 @@ GlobalParameters:
   NumElementsToValidate: 128
   DataInitTypeBeta: 1
   DataInitTypeAlpha: 1
-  NewClient: 2
-  CSVExportWinner: 1
-  CSVMergeSameProblemID: 1
+  CSVExportWinner: true
+  CSVMergeSameProblemID: true
   Device: 0
   MaxWorkspaceSize: 3355443200
   PrintSolutionRejectionReason: True
@@ -47,7 +46,7 @@ BenchmarkProblems:
         - WavefrontSize: [32]
         - LocalReadVectorWidth: [16]
         - ScheduleIterAlg: [3]
-        - ExpandPointerSwap: [0]
+        - ExpandPointerSwap: [false]
         - TransposeLDS: [0,1]
         - LdsBlockSizePerPadA: [-1]
         - LdsBlockSizePerPadB: [-1]
@@ -59,7 +58,7 @@ BenchmarkProblems:
         - GlobalReadVectorWidthB: [4]
         - GlobalSplitU: [1,2]
         - GlobalSplitUAlgorithm: ["MultipleBuffer"]
-        - SourceSwap: [0,1]
+        - SourceSwap: [false, true]
       BenchmarkJoinParameters:
       BenchmarkFinalParameters:
         - ProblemSizes:
@@ -106,7 +105,7 @@ BenchmarkProblems:
         - GlobalReadVectorWidthB: [4]
         - ScheduleIterAlg: [3]
         - InnerUnroll: [1]
-        - ExpandPointerSwap: [1]
+        - ExpandPointerSwap: [true]
         - TransposeLDS: [1]
         - LdsBlockSizePerPadA: [-1]
         - LdsBlockSizePerPadB: [-1]
@@ -114,13 +113,13 @@ BenchmarkProblems:
         - LdsPadB: [-1]
         - WaveSeparateGlobalReadB: [1]
         - 1LDSBuffer: [-1]
-        - GlobalReadPerMfma: [1]
+        - GlobalReadPerMfma: [1.0]
         - LocalWritePerMfma: [-1]
         - StoreVectorWidth: [-1]
-        - SourceSwap: [1]
+        - SourceSwap: [true]
         - NumElementsPerBatchStore: [2]
-        - StorePriorityOpt: [1]
-        - ActivationFuncCall: [0, 1]
+        - StorePriorityOpt: [true]
+        - ActivationFuncCall: [false, true]
         #- GlobalSplitU: [1,5]
         #- GlobalSplitUAlgorithm: ["MultipleBuffer"]
       BenchmarkJoinParameters:

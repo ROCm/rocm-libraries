@@ -258,7 +258,8 @@ __forceinline__ __device__ void softmaxfwd(const T* __restrict__ x,
                 }
 
                 value = value * CVT_FP32_2ACCUM(alpha) +
-                        CVT_FLOAT2ACCUM(y[y_idx]) * CVT_FP32_2ACCUM(beta);
+                        (beta != 0.0f ? CVT_FLOAT2ACCUM(y[y_idx]) * CVT_FP32_2ACCUM(beta)
+                                      : FLOAT_ACCUM{0});
                 y[y_idx] = CVT_ACCUM2FLOAT(value);
             });
         }
@@ -386,7 +387,8 @@ __forceinline__ __device__ void softmaxfwd(const T* __restrict__ x,
                 }
 
                 values[v_idx] = values[v_idx] * CVT_FP32_2ACCUM(alpha) +
-                                CVT_FLOAT2ACCUM(y[y_idx]) * CVT_FP32_2ACCUM(beta);
+                                (beta != 0.0f ? CVT_FLOAT2ACCUM(y[y_idx]) * CVT_FP32_2ACCUM(beta)
+                                              : FLOAT_ACCUM{0});
 
                 y[y_idx] = CVT_ACCUM2FLOAT(values[v_idx]);
             }
@@ -455,7 +457,8 @@ __forceinline__ __device__ void softmaxbwd(const T* __restrict__ y,
                     value = (value - channel_dot) * CVT_FLOAT2ACCUM(y[y_idx]);
                 }
                 value = value * CVT_FP32_2ACCUM(alpha) +
-                        CVT_FLOAT2ACCUM(dx[dx_idx]) * CVT_FP32_2ACCUM(beta);
+                        (beta != 0.0f ? CVT_FLOAT2ACCUM(dx[dx_idx]) * CVT_FP32_2ACCUM(beta)
+                                      : FLOAT_ACCUM{0});
                 dx[dx_idx] = CVT_ACCUM2FLOAT(value);
             });
         }
@@ -523,7 +526,8 @@ __forceinline__ __device__ void softmaxbwd(const T* __restrict__ y,
                 }
 
                 auto value = dy_values[index] * CVT_FP32_2ACCUM(alpha) +
-                             CVT_FLOAT2ACCUM(dx[dx_idx]) * CVT_FP32_2ACCUM(beta);
+                             (beta != 0.0f ? CVT_FLOAT2ACCUM(dx[dx_idx]) * CVT_FP32_2ACCUM(beta)
+                                           : FLOAT_ACCUM{0});
                 dx[dx_idx] = CVT_ACCUM2FLOAT(value);
             }
             ++index;

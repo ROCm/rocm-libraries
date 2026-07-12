@@ -23,7 +23,8 @@ endif()
 add_custom_target(
     check_format
     COMMAND  find . ${CLANG_FORMAT_PRUNE} -regex ".*\\.\\(cpp\\|hpp\\|h.in\\|hpp.in\\|cpp.in\\|cl\\)" -exec ${CLANG_FORMAT_BINARY} --dry-run --Werror --verbose {} +
-    WORKING_DIRECTORY ${CMAKE_SOURCE_DIR}
+    WORKING_DIRECTORY ${PROJECT_SOURCE_DIR}
+    COMMENT "clang-format: Checking C/C++ source formatting"
     VERBATIM
 )
 
@@ -49,14 +50,14 @@ if(PRE_COMMIT_BINARY)
         format
         COMMAND find . ${CLANG_FORMAT_PRUNE} -regex ".*\\.\\(cpp\\|hpp\\|h.in\\|hpp.in\\|cpp.in\\|cl\\)" -exec ${CLANG_FORMAT_BINARY} --verbose -i {} +
         COMMAND sh -c "cd ${REPO_ROOT} && ${PRE_COMMIT_BINARY} run --files $(git ls-files projects/miopen); rc=$?; [ $rc -le 1 ] || exit $rc"
-        WORKING_DIRECTORY ${CMAKE_SOURCE_DIR}
+        WORKING_DIRECTORY ${PROJECT_SOURCE_DIR}
         VERBATIM
     )
 else()
     add_custom_target(
         format
         COMMAND find . ${CLANG_FORMAT_PRUNE} -regex ".*\\.\\(cpp\\|hpp\\|h.in\\|hpp.in\\|cpp.in\\|cl\\)" -exec ${CLANG_FORMAT_BINARY} --verbose -i {} +
-        WORKING_DIRECTORY ${CMAKE_SOURCE_DIR}
+        WORKING_DIRECTORY ${PROJECT_SOURCE_DIR}
         VERBATIM
     )
 endif()

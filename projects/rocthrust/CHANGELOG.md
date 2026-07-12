@@ -3,11 +3,16 @@
 Documentation for rocThrust available at
 [https://rocm.docs.amd.com/projects/rocThrust/en/latest/](https://rocm.docs.amd.com/projects/rocThrust/en/latest/).
 
-## Since last release ROCm 7.13
+## rocThrust 4.5.0 for ROCm 7.14
 
 ### Added
 
 * gfx1250 support
+* For hipstdpar algorithms running on GPUs that support xnack, and __HIPSTDPAR_INTERPOSE_ALLOC__ or __HIPSTDPAR_INTERPOSE_ALLOC_V1__ are not enabled, emit a runtime warning once if xnack is off.
+
+### Upcoming changes
+
+* CCCL 2.8.x compatibility is deprecated. hipCUB and rocThrust will be brought forward to CCCL 3.0.x compatibility in an upcoming version.
 
 ## Since last release ROCm 7.12
 

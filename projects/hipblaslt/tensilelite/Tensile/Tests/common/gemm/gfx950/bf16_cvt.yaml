@@ -8,14 +8,11 @@ GlobalParameters:
   NumElementsToValidate: 128
   DataInitTypeBeta: 1
   DataInitTypeAlpha: 1
-  NewClient: 2
-  CSVExportWinner: 1
-  CSVMergeSameProblemID: 1
+  CSVExportWinner: true
+  CSVMergeSameProblemID: true
   Device: 0
   KeepBuildTmp: True
   PrintSolutionRejectionReason: True
-  MaxLDS: 163840
-  DeviceLDS: 163840
 
 BenchmarkProblems:
   ########################################
@@ -63,7 +60,7 @@ BenchmarkProblems:
         - GlobalSplitU: [1]
         #- PreloadKernArgs: [0, 1]
         #        - GlobalSplitUAlgorithm: ["MultipleBuffer"]
-        - SourceSwap: [1]
+        - SourceSwap: [true]
       BenchmarkJoinParameters:
       BenchmarkFinalParameters:
         - ProblemSizes:

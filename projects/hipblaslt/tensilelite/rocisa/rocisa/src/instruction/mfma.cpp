@@ -138,7 +138,9 @@ void mfma_inst(nb::module_ m_mfma)
                       const std::shared_ptr<rocisa::RegisterContainer>&,
                       const std::optional<InstructionInput>&,
                       bool,
-                      const std::string&>(),
+                      const std::string&,
+                      bool,
+                      bool>(),
              nb::arg("instType"),
              nb::arg("accType"),
              nb::arg("variant"),
@@ -148,11 +150,15 @@ void mfma_inst(nb::module_ m_mfma)
              nb::arg("b"),
              nb::arg("acc2")    = nb::none(),
              nb::arg("neg")     = false,
-             nb::arg("comment") = "")
+             nb::arg("comment") = "",
+             nb::arg("reuseA")  = false,
+             nb::arg("reuseB")  = false)
         .def_rw("a", &rocisa::MFMAInstruction::a)
         .def_rw("b", &rocisa::MFMAInstruction::b)
         .def_rw("acc", &rocisa::MFMAInstruction::acc)
         .def_rw("acc2", &rocisa::MFMAInstruction::acc2)
+        .def_rw("reuseA", &rocisa::MFMAInstruction::reuseA)
+        .def_rw("reuseB", &rocisa::MFMAInstruction::reuseB)
         .def("getParams", &rocisa::MFMAInstruction::getParams)
         .def("getIssueLatency", &rocisa::MFMAInstruction::getIssueLatency)
         .def("__str__", &rocisa::MFMAInstruction::toString)
@@ -168,7 +174,9 @@ void mfma_inst(nb::module_ m_mfma)
                       const std::shared_ptr<rocisa::RegisterContainer>&,
                       const int,
                       bool,
-                      const std::string&>(),
+                      const std::string&,
+                      bool,
+                      bool>(),
              nb::arg("instType"),
              nb::arg("accType"),
              nb::arg("variant"),
@@ -178,11 +186,15 @@ void mfma_inst(nb::module_ m_mfma)
              nb::arg("b"),
              nb::arg("acc2_imm") = 0,
              nb::arg("neg")      = false,
-             nb::arg("comment")  = "")
+             nb::arg("comment")  = "",
+             nb::arg("reuseA")   = false,
+             nb::arg("reuseB")   = false)
         .def_rw("a", &rocisa::MFMAInstruction::a)
         .def_rw("b", &rocisa::MFMAInstruction::b)
         .def_rw("acc", &rocisa::MFMAInstruction::acc)
         .def_rw("acc2_imm", &rocisa::MFMAInstruction::acc2_imm)
+        .def_rw("reuseA", &rocisa::MFMAInstruction::reuseA)
+        .def_rw("reuseB", &rocisa::MFMAInstruction::reuseB)
         .def("getParams", &rocisa::MFMAInstruction::getParams)
         .def("getIssueLatency", &rocisa::MFMAInstruction::getIssueLatency)
         .def("__str__", &rocisa::MFMAInstruction::toString)
@@ -210,7 +222,9 @@ void mfma_inst(nb::module_ m_mfma)
                       rocisa::InstType,
                       rocisa::InstType,
                       int,
-                      const std::string&>(),
+                      const std::string&,
+                      bool,
+                      bool>(),
              nb::kw_only(),
              nb::arg("instType"),
              nb::arg("accType"),
@@ -225,7 +239,9 @@ void mfma_inst(nb::module_ m_mfma)
              nb::arg("mxScaleAType") = rocisa::InstType::INST_F32,
              nb::arg("mxScaleBType") = rocisa::InstType::INST_F32,
              nb::arg("block")        = 0,
-             nb::arg("comment")      = "")
+             nb::arg("comment")      = "",
+             nb::arg("reuseA")       = false,
+             nb::arg("reuseB")       = false)
         .def_rw("a", &rocisa::MXMFMAInstruction::a)
         .def_rw("b", &rocisa::MXMFMAInstruction::b)
         .def_rw("mxsa", &rocisa::MXMFMAInstruction::mxsa)
@@ -233,6 +249,8 @@ void mfma_inst(nb::module_ m_mfma)
         .def_rw("acc", &rocisa::MXMFMAInstruction::acc)
         .def_rw("acc2", &rocisa::MXMFMAInstruction::acc2)
         .def_rw("vop3", &rocisa::MXMFMAInstruction::vop3)
+        .def_rw("reuseA", &rocisa::MXMFMAInstruction::reuseA)
+        .def_rw("reuseB", &rocisa::MXMFMAInstruction::reuseB)
         .def("getParams", &rocisa::MXMFMAInstruction::getParams)
         .def("getIssueLatency", &rocisa::MXMFMAInstruction::getIssueLatency)
         .def("__str__", &rocisa::MXMFMAInstruction::toString)
@@ -252,7 +270,9 @@ void mfma_inst(nb::module_ m_mfma)
                       rocisa::InstType,
                       rocisa::InstType,
                       int,
-                      const std::string&>(),
+                      const std::string&,
+                      bool,
+                      bool>(),
              nb::kw_only(),
              nb::arg("instType"),
              nb::arg("accType"),
@@ -267,7 +287,9 @@ void mfma_inst(nb::module_ m_mfma)
              nb::arg("mxScaleAType") = rocisa::InstType::INST_F32,
              nb::arg("mxScaleBType") = rocisa::InstType::INST_F32,
              nb::arg("block")        = 0,
-             nb::arg("comment")      = "")
+             nb::arg("comment")      = "",
+             nb::arg("reuseA")       = false,
+             nb::arg("reuseB")       = false)
         .def_rw("a", &rocisa::MXMFMAInstruction::a)
         .def_rw("b", &rocisa::MXMFMAInstruction::b)
         .def_rw("mxsa", &rocisa::MXMFMAInstruction::mxsa)
@@ -275,6 +297,8 @@ void mfma_inst(nb::module_ m_mfma)
         .def_rw("acc", &rocisa::MXMFMAInstruction::acc)
         .def_rw("acc2_imm", &rocisa::MXMFMAInstruction::acc2_imm)
         .def_rw("vop3", &rocisa::MXMFMAInstruction::vop3)
+        .def_rw("reuseA", &rocisa::MXMFMAInstruction::reuseA)
+        .def_rw("reuseB", &rocisa::MXMFMAInstruction::reuseB)
         .def("getParams", &rocisa::MXMFMAInstruction::getParams)
         .def("getIssueLatency", &rocisa::MXMFMAInstruction::getIssueLatency)
         .def("__str__", &rocisa::MXMFMAInstruction::toString)

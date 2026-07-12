@@ -27,6 +27,7 @@ include(CMakeDependentOption)
 include(GNUInstallDirs)
 include(add_subdirectory_with_message)
 include(fetch_rocm_cmake)
+include(shared_third_party)
 
 # --- Options and cache variables ---
 option(ROCM_LIBS_SUPERBUILD "Enable superbuild mode" ON)
@@ -52,6 +53,7 @@ set(AVAILABLE_COMPONENTS
     # dnn
     hipdnn
     hipdnn-integration-tests
+    miopen
     miopen-provider
     hipblaslt-provider
     hip-kernel-provider
@@ -70,7 +72,6 @@ set(UNSUPPORTED_COMPONENTS
     hipsolver
     hipsparse
     hipsparselt
-    miopen
     rocblas
     rocfft
     rocsolver
@@ -116,6 +117,26 @@ if(ROCM_LIBS_ENABLE_ROOT_CTEST)
     enable_testing()
     include(CTest)
 endif()
+if(ROCM_LIBS_ENABLE_ROOT_CTEST AND EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/shared/ctest/tests/CMakeLists.txt")
+    add_subdirectory(shared/ctest/tests)
+endif()
+
+
+# --- Shared third-party dependencies ---
+# Declare libraries that more than one subproject would otherwise fetch
+# independently (e.g. nlohmann_json used by both hipdnn and miopen).
+# Must run BEFORE any add_subdirectory() call so that subproject
+# find_package() resolutions are intercepted via OVERRIDE_FIND_PACKAGE.
+set(_rocm_libs_needs_shared_json FALSE)
+foreach(_c hipdnn miopen miopen-provider)
+    if("${_c}" IN_LIST ROCM_LIBS_ENABLE_COMPONENTS)
+        set(_rocm_libs_needs_shared_json TRUE)
+    endif()
+endforeach()
+if(_rocm_libs_needs_shared_json)
+    rocm_libs_declare_shared_deps()
+endif()
+unset(_rocm_libs_needs_shared_json)
 
 # --- Add subdirectories ---
 if("mxdatagenerator" IN_LIST ROCM_LIBS_ENABLE_COMPONENTS)
@@ -195,6 +216,15 @@ if("hipdnn-integration-tests" IN_LIST ROCM_LIBS_ENABLE_COMPONENTS)
     )
 endif()
 
+if("miopen" IN_LIST ROCM_LIBS_ENABLE_COMPONENTS)
+    set(MIOPEN_STANDALONE_BUILD ON CACHE BOOL "")
+    add_subdirectory_with_message(
+        COMPONENT miopen
+        PREFIX_PATH projects
+        EXPECT_TARGET MIOpen
+    )
+endif()
+
 if("miopen-provider" IN_LIST ROCM_LIBS_ENABLE_COMPONENTS)
     add_subdirectory_with_message(
         COMPONENT miopen-provider
@@ -257,10 +287,6 @@ endif()
 
 if("composablekernel" IN_LIST ROCM_LIBS_ENABLE_COMPONENTS)
     message(FATAL_ERROR "composablekernel is not yet supported in the superbuild")
-endif()
-
-if("miopen" IN_LIST ROCM_LIBS_ENABLE_COMPONENTS)
-    message(FATAL_ERROR "miopen is not yet supported in the superbuild")
 endif()
 
 if("hipcub" IN_LIST ROCM_LIBS_ENABLE_COMPONENTS)

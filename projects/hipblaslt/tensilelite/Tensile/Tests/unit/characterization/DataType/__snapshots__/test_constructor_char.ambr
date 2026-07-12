@@ -1,0 +1,358 @@
+# serializer version: 1
+# name: test_init_from_datatype_identity
+  4
+# ---
+# name: test_init_from_enum
+  dict({
+    'BFloat16': 7,
+    'BFloat6': 20,
+    'BFloat8': 16,
+    'BFloat8Float8': 18,
+    'BFloat8Float8_fnuz': 14,
+    'BFloat8_fnuz': 12,
+    'ComplexDouble': 3,
+    'ComplexFloat': 2,
+    'Double': 1,
+    'E5M3': 23,
+    'E8': 22,
+    'Float': 0,
+    'Float4': 21,
+    'Float6': 19,
+    'Float8': 15,
+    'Float8BFloat8': 17,
+    'Float8BFloat8_fnuz': 13,
+    'Float8_fnuz': 11,
+    'Half': 4,
+    'Int32': 6,
+    'Int64': 9,
+    'Int8': 8,
+    'Int8x4': 5,
+    'XFloat32': 10,
+  })
+# ---
+# name: test_init_from_int
+  dict({
+    0: 0,
+    1: 1,
+    2: 2,
+    3: 3,
+    4: 4,
+    5: 5,
+    6: 6,
+    7: 7,
+    8: 8,
+    9: 9,
+    10: 10,
+    11: 11,
+    12: 12,
+    13: 13,
+    14: 14,
+    15: 15,
+    16: 16,
+    17: 17,
+    18: 18,
+    19: 19,
+    20: 20,
+    21: 21,
+    22: 22,
+    23: 23,
+  })
+# ---
+# name: test_init_from_str_by_char
+  dict({
+    '4xi8': 5,
+    'B': 7,
+    'B6': 20,
+    'B8': 16,
+    'B8F8': 18,
+    'B8F8N': 14,
+    'B8N': 12,
+    'C': 2,
+    'D': 1,
+    'E5M3': 23,
+    'E8': 22,
+    'F4': 21,
+    'F6': 19,
+    'F8': 15,
+    'F8B8': 17,
+    'F8B8N': 13,
+    'F8N': 11,
+    'H': 4,
+    'I': 6,
+    'I64': 9,
+    'I8': 8,
+    'S': 0,
+    'X': 10,
+    'Z': 3,
+  })
+# ---
+# name: test_init_from_str_by_name
+  dict({
+    'BFloat16': 7,
+    'BFloat6': 20,
+    'BFloat8': 16,
+    'BFloat8Float8': 18,
+    'BFloat8Float8_fnuz': 14,
+    'BFloat8_fnuz': 12,
+    'ComplexDouble': 3,
+    'ComplexFloat': 2,
+    'Double': 1,
+    'E5M3': 23,
+    'E8': 22,
+    'Float': 0,
+    'Float4': 21,
+    'Float6': 19,
+    'Float8': 15,
+    'Float8BFloat8': 17,
+    'Float8BFloat8_fnuz': 13,
+    'Float8_fnuz': 11,
+    'Half': 4,
+    'Int32': 6,
+    'Int64': 9,
+    'Int8': 8,
+    'Int8x4': 5,
+    'XFloat32': 10,
+  })
+# ---
+# name: test_init_invalid_type_raises[float]
+  "initializing DataType to <class 'float'> 3.5"
+# ---
+# name: test_init_invalid_type_raises[floatint]
+  "initializing DataType to <class 'float'> 2.0"
+# ---
+# name: test_init_invalid_type_raises[list]
+  "initializing DataType to <class 'list'> [0]"
+# ---
+# name: test_init_invalid_type_raises[none]
+  "initializing DataType to <class 'NoneType'> None"
+# ---
+# name: test_init_invalid_type_raises[tuple]
+  "initializing DataType to <class 'tuple'> (1,)"
+# ---
+# name: test_init_unknown_str_key_raises
+  "KeyError('not_a_real_dtype')"
+# ---
+# name: test_to_char
+  dict({
+    'BFloat16': 'B',
+    'BFloat6': 'B6',
+    'BFloat8': 'B8',
+    'BFloat8Float8': 'B8F8',
+    'BFloat8Float8_fnuz': 'B8F8N',
+    'BFloat8_fnuz': 'B8N',
+    'ComplexDouble': 'Z',
+    'ComplexFloat': 'C',
+    'Double': 'D',
+    'E5M3': 'E5M3',
+    'E8': 'E8',
+    'Float': 'S',
+    'Float4': 'F4',
+    'Float6': 'F6',
+    'Float8': 'F8',
+    'Float8BFloat8': 'F8B8',
+    'Float8BFloat8_fnuz': 'F8B8N',
+    'Float8_fnuz': 'F8N',
+    'Half': 'H',
+    'Int32': 'I',
+    'Int64': 'I64',
+    'Int8': 'I8',
+    'Int8x4': '4xi8',
+    'XFloat32': 'X',
+  })
+# ---
+# name: test_to_device_hip
+  dict({
+    'BFloat16': 'tensile_bfloat16',
+    'BFloat6': 'tensile_bFloat6x16',
+    'BFloat8': 'tensile_bfloat8',
+    'BFloat8Float8': 'ERROR',
+    'BFloat8Float8_fnuz': 'ERROR',
+    'BFloat8_fnuz': 'tensile_bfloat8_fnuz',
+    'ComplexDouble': 'TensileComplexDouble',
+    'ComplexFloat': 'TensileComplexFloat',
+    'Double': 'double',
+    'E5M3': 'ERROR',
+    'E8': 'ERROR',
+    'Float': 'float',
+    'Float4': 'tensile_float4x2',
+    'Float6': 'tensile_Float6x16',
+    'Float8': 'tensile_float8',
+    'Float8BFloat8': 'ERROR',
+    'Float8BFloat8_fnuz': 'ERROR',
+    'Float8_fnuz': 'tensile_float8_fnuz',
+    'Half': 'tensile_half',
+    'Int32': 'int32_t',
+    'Int64': 'int64_t',
+    'Int8': 'int8_t',
+    'Int8x4': 'uint32_t',
+    'XFloat32': 'ERROR',
+  })
+# ---
+# name: test_to_enum
+  dict({
+    'BFloat16': 'BFloat16',
+    'BFloat6': 'BFloat6',
+    'BFloat8': 'BFloat8',
+    'BFloat8Float8': 'BFloat8Float8',
+    'BFloat8Float8_fnuz': 'BFloat8Float8_fnuz',
+    'BFloat8_fnuz': 'BFloat8_fnuz',
+    'ComplexDouble': 'ComplexDouble',
+    'ComplexFloat': 'ComplexFloat',
+    'Double': 'Double',
+    'E5M3': 'E5M3',
+    'E8': 'E8',
+    'Float': 'Float',
+    'Float4': 'Float4',
+    'Float6': 'Float6',
+    'Float8': 'Float8',
+    'Float8BFloat8': 'Float8BFloat8',
+    'Float8BFloat8_fnuz': 'Float8BFloat8_fnuz',
+    'Float8_fnuz': 'Float8_fnuz',
+    'Half': 'Half',
+    'Int32': 'Int32',
+    'Int64': 'Int64',
+    'Int8': 'Int8',
+    'Int8x4': 'Int8x4',
+    'XFloat32': 'XFloat32',
+  })
+# ---
+# name: test_to_name
+  dict({
+    'BFloat16': 'BFloat16',
+    'BFloat6': 'BFloat6',
+    'BFloat8': 'BFloat8',
+    'BFloat8Float8': 'BFloat8Float8',
+    'BFloat8Float8_fnuz': 'BFloat8Float8_fnuz',
+    'BFloat8_fnuz': 'BFloat8_fnuz',
+    'ComplexDouble': 'ComplexDouble',
+    'ComplexFloat': 'ComplexFloat',
+    'Double': 'Double',
+    'E5M3': 'E5M3',
+    'E8': 'E8',
+    'Float': 'Float',
+    'Float4': 'Float4',
+    'Float6': 'Float6',
+    'Float8': 'Float8',
+    'Float8BFloat8': 'Float8BFloat8',
+    'Float8BFloat8_fnuz': 'Float8BFloat8_fnuz',
+    'Float8_fnuz': 'Float8_fnuz',
+    'Half': 'Half',
+    'Int32': 'Int32',
+    'Int64': 'Int64',
+    'Int8': 'Int8',
+    'Int8x4': 'Int8x4',
+    'XFloat32': 'XFloat32',
+  })
+# ---
+# name: test_to_name_abbrev
+  dict({
+    'BFloat16': 'bf16',
+    'BFloat6': 'bf6',
+    'BFloat8': 'bf8',
+    'BFloat8Float8': 'bf8_fp8',
+    'BFloat8Float8_fnuz': 'bf8_fp8',
+    'BFloat8_fnuz': 'bf8',
+    'ComplexDouble': 'f64c',
+    'ComplexFloat': 'f32c',
+    'Double': 'f64',
+    'E5M3': 'e5m3',
+    'E8': 'e8',
+    'Float': 'f32',
+    'Float4': 'fp4',
+    'Float6': 'fp6',
+    'Float8': 'fp8',
+    'Float8BFloat8': 'fp8_bf8',
+    'Float8BFloat8_fnuz': 'fp8_bf8',
+    'Float8_fnuz': 'fp8',
+    'Half': 'f16',
+    'Int32': 'i32',
+    'Int64': 'i64',
+    'Int8': 'i8',
+    'Int8x4': 'i8',
+    'XFloat32': 'xf32',
+  })
+# ---
+# name: test_zero_string[vw1]
+  dict({
+    'BFloat16': '(tensile_bfloat16)(0)',
+    'BFloat6': '(tensile_bFloat6x16)(0)',
+    'BFloat8': '(tensile_bfloat8)(0)',
+    'BFloat8Float8': '(ERROR)(0)',
+    'BFloat8Float8_fnuz': '(ERROR)(0)',
+    'BFloat8_fnuz': '(tensile_bfloat8_fnuz)(0)',
+    'ComplexDouble': '(TensileComplexDouble)(0)',
+    'ComplexFloat': '(TensileComplexFloat)(0)',
+    'Double': '(double)(0)',
+    'E5M3': '(ERROR)(0)',
+    'E8': '(ERROR)(0)',
+    'Float': '(float)(0)',
+    'Float4': '(tensile_float4x2)(0)',
+    'Float6': '(tensile_Float6x16)(0)',
+    'Float8': '(tensile_float8)(0)',
+    'Float8BFloat8': '(ERROR)(0)',
+    'Float8BFloat8_fnuz': '(ERROR)(0)',
+    'Float8_fnuz': '(tensile_float8_fnuz)(0)',
+    'Half': '(tensile_half)(0)',
+    'Int32': '(int32_t)(0)',
+    'Int64': '(int64_t)(0)',
+    'Int8': '(int8_t)(0)',
+    'Int8x4': '(uint32_t)(0)',
+    'XFloat32': '(ERROR)(0)',
+  })
+# ---
+# name: test_zero_string[vw2]
+  dict({
+    'BFloat16': '(tensile_bfloat162)(0)',
+    'BFloat6': '(tensile_bFloat6x162)(0)',
+    'BFloat8': '(tensile_bfloat82)(0)',
+    'BFloat8Float8': '(ERROR2)(0)',
+    'BFloat8Float8_fnuz': '(ERROR2)(0)',
+    'BFloat8_fnuz': '(tensile_bfloat8_fnuz2)(0)',
+    'ComplexDouble': '(TensileComplexDouble2)(0)',
+    'ComplexFloat': '(TensileComplexFloat2)(0)',
+    'Double': '(double2)(0)',
+    'E5M3': '(ERROR2)(0)',
+    'E8': '(ERROR2)(0)',
+    'Float': '(float2)(0)',
+    'Float4': '(tensile_float4x22)(0)',
+    'Float6': '(tensile_Float6x162)(0)',
+    'Float8': '(tensile_float82)(0)',
+    'Float8BFloat8': '(ERROR2)(0)',
+    'Float8BFloat8_fnuz': '(ERROR2)(0)',
+    'Float8_fnuz': '(tensile_float8_fnuz2)(0)',
+    'Half': '(tensile_half2)(0)',
+    'Int32': '(int32_t2)(0)',
+    'Int64': '(int64_t2)(0)',
+    'Int8': '(int8_t2)(0)',
+    'Int8x4': '(uint32_t2)(0)',
+    'XFloat32': '(ERROR2)(0)',
+  })
+# ---
+# name: test_zero_string[vw4]
+  dict({
+    'BFloat16': '(tensile_bfloat164)(0)',
+    'BFloat6': '(tensile_bFloat6x164)(0)',
+    'BFloat8': '(tensile_bfloat84)(0)',
+    'BFloat8Float8': '(ERROR4)(0)',
+    'BFloat8Float8_fnuz': '(ERROR4)(0)',
+    'BFloat8_fnuz': '(tensile_bfloat8_fnuz4)(0)',
+    'ComplexDouble': '(TensileComplexDouble4)(0)',
+    'ComplexFloat': '(TensileComplexFloat4)(0)',
+    'Double': '(double4)(0)',
+    'E5M3': '(ERROR4)(0)',
+    'E8': '(ERROR4)(0)',
+    'Float': '(float4)(0)',
+    'Float4': '(tensile_float4x24)(0)',
+    'Float6': '(tensile_Float6x164)(0)',
+    'Float8': '(tensile_float84)(0)',
+    'Float8BFloat8': '(ERROR4)(0)',
+    'Float8BFloat8_fnuz': '(ERROR4)(0)',
+    'Float8_fnuz': '(tensile_float8_fnuz4)(0)',
+    'Half': '(tensile_half4)(0)',
+    'Int32': '(int32_t4)(0)',
+    'Int64': '(int64_t4)(0)',
+    'Int8': '(int8_t4)(0)',
+    'Int8x4': '(uint32_t4)(0)',
+    'XFloat32': '(ERROR4)(0)',
+  })
+# ---

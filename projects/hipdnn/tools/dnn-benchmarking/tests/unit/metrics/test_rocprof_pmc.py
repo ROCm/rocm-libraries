@@ -8,6 +8,7 @@ is mocked, and the rocpd schema is reproduced just well enough that
 the parser exercises its real SQL path against an in-test sqlite db.
 """
 
+import os
 import sqlite3
 from pathlib import Path
 from unittest.mock import MagicMock, patch
@@ -380,6 +381,11 @@ class TestArchNarrowing:
 
 
 class TestSqlitePathEscaping:
+    @pytest.mark.skipif(
+        os.name == "nt",
+        reason="'?', '#', '%' are reserved in Windows filenames; the "
+        "pathological dir cannot be created to exercise the URI-parser path",
+    )
     def test_db_path_with_question_mark_opens_cleanly(self, tmp_path, monkeypatch):
         """sqlite3 URI parsing treats `?` as the start of a query
         string. The earlier `file:<path>?mode=ro` form would break on

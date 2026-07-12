@@ -37,16 +37,37 @@ if not _timing_logger.handlers:
     _timing_logger.setLevel(logging.INFO)
     _timing_logger.propagate = False
 
+# Deferred I/O buffer: list of (category, duration_ms) tuples.
+# All formatting and I/O happens in flush_timing_buffer().
+# Raw timings are stored without overhead adjustment; the analysis script
+# (analyze_timing.py) handles overhead subtraction using the hierarchy and
+# the timing_overhead record emitted by the C++ client.
+_timing_buffer = []
+
 
 @contextmanager
 def timing_context(category_name):
-    """Context manager for timing instrumentation."""
+    """Context manager for timing instrumentation.
+
+    Records raw wall-clock time with no overhead subtraction.  Python-side
+    overhead (context-manager protocol, time.time_ns, dict lookup) is not
+    tracked because there are only ~a dozen calls per run — the overhead
+    is negligible relative to the seconds-scale measurements.  C++ overhead
+    is tracked separately via a calibrated timing_overhead record.
+    """
     if globalParameters.get("TimingInstrumentation", False):
         start = time.time_ns()
         try:
             yield
         finally:
-            elapsed_ms = (time.time_ns() - start) / 1_000_000
-            _timing_logger.info(f"TIMING:{category_name}:{elapsed_ms:.3f}")
+            elapsed_ns = time.time_ns() - start
+            _timing_buffer.append((category_name, elapsed_ns / 1_000_000))
     else:
         yield
+
+
+def flush_timing_buffer():
+    """Write all buffered timing records and reset."""
+    for category, duration_ms in _timing_buffer:
+        _timing_logger.info(f"TIMING:{category}:{duration_ms:.3f}")
+    _timing_buffer.clear()

@@ -26,10 +26,10 @@
 // Meta configuration for rocPRIM
 #include "config.hpp"
 
-BEGIN_ROCPRIM_NAMESPACE
-
 /// \addtogroup utilsmodule_functional
 /// @{
+
+BEGIN_ROCPRIM_NAMESPACE
 
 /// \brief Unused macro.
 /// \deprecated Will be removed in ROCm 9.0
@@ -476,9 +476,9 @@ struct Int2Type
 
 #endif // DOXYGEN_SHOULD_SKIP_THIS
 
+END_ROCPRIM_NAMESPACE
+
 /// @}
 // end of group utilsmodule_functional
-
-END_ROCPRIM_NAMESPACE
 
 #endif // ROCPRIM_FUNCTIONAL_HPP_

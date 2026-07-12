@@ -156,9 +156,7 @@ rocblas_status rocsolver_labrd_template(rocblas_handle handle,
     rocblas_get_stream(handle, &stream);
 
     // everything must be executed with scalars on the device
-    rocblas_pointer_mode old_mode;
-    rocblas_get_pointer_mode(handle, &old_mode);
-    rocblas_set_pointer_mode(handle, rocblas_pointer_mode_device);
+    rocblas_pointer_mode_saver saver(handle, rocblas_pointer_mode_device);
 
     if(m >= n)
     {
@@ -468,7 +466,6 @@ rocblas_status rocsolver_labrd_template(rocblas_handle handle,
         }
     }
 
-    rocblas_set_pointer_mode(handle, old_mode);
     return rocblas_status_success;
 }
 

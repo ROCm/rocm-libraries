@@ -136,7 +136,7 @@ def generate_rankings(
     for m, n, k, batch in TEST_PROBLEM_SIZES:
         problem = create_problem(m, n, k, dtype, batch, transA, transB)
         try:
-            ranked = origami.select_topk_configs(problem, hardware, configs, TOP_K)
+            ranked = origami.select_topk_configs(problem, hardware, configs, TOP_K, origami.model_t.gemm)
             if ranked:
                 key = f"{m}x{n}x{k}x{batch}"
                 rankings[key] = [result_to_config_tuple(r) for r in ranked]

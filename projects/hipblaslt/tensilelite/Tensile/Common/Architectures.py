@@ -241,6 +241,20 @@ def _detectGlobalCurrentISA(detectionTool, deviceId: int):
     """
     Returns returncode if detection failure
     """
+    # Belt-and-suspenders for the GPU-less --cpu-only switch: when CpuOnly is set,
+    # return a spoofed per-arch IsaVersion (derived from gfxToIsa) instead of shelling
+    # out to a device-enumeration tool. The arch comes from the CpuOnlyArch plumbing key.
+    # This backstops any entry path that reaches detection without passing an arch (the
+    # primary path supplies the arch via --gpu-targets and never reaches here). Returning
+    # an IsaVersion makes the isinstance(...) guard in detectGlobalCurrentISA pass so the
+    # "Failed to detect currect ISA" raise never fires GPU-less.
+    # Imported lazily to avoid a circular import (GlobalParameters imports from this module).
+    from .GlobalParameters import globalParameters
+    if globalParameters.get("CpuOnly"):
+        isa = gfxToIsa(globalParameters.get("CpuOnlyArch", "gfx942"))
+        if isa is not None:
+            print(f"# CpuOnly: spoofing GPU {deviceId} ISA as " + isaToGfx(isa))
+            return isa
     process = run([detectionTool], stdout=PIPE)
     archList = []
     for line in process.stdout.decode().split("\n"):

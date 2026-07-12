@@ -1,0 +1,49 @@
+# serializer version: 1
+# name: test_is_known_bug_hit_and_miss
+  dict({
+    'hit_same': True,
+    'hit_str_index': True,
+    'miss_index': False,
+    'miss_path': False,
+  })
+# ---
+# name: test_load_empty_yaml_returns_empty
+  list([
+  ])
+# ---
+# name: test_load_no_skips_key_returns_empty
+  list([
+  ])
+# ---
+# name: test_load_none_returns_empty
+  list([
+  ])
+# ---
+# name: test_load_null_skips_returns_empty
+  list([
+  ])
+# ---
+# name: test_load_roundtrip_multi
+  list([
+    tuple(
+      'baz/qux.yaml',
+      12,
+    ),
+    tuple(
+      'foo/bar.yaml',
+      3,
+    ),
+  ])
+# ---
+# name: test_normalize_logic_relative_path[backslashes_split-a\\b\\c.yaml][backslashes_split]
+  'a\\b\\c.yaml'
+# ---
+# name: test_normalize_logic_relative_path[nested-gfx942/aquavanjaram/Equality/logic.yaml][nested]
+  'gfx942/aquavanjaram/Equality/logic.yaml'
+# ---
+# name: test_normalize_logic_relative_path[posix_kept-a/b/c.yaml][posix_kept]
+  'a/b/c.yaml'
+# ---
+# name: test_normalize_logic_relative_path[single-logic.yaml][single]
+  'logic.yaml'
+# ---

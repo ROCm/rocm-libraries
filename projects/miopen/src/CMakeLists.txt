@@ -34,6 +34,7 @@ endif()
 # This is incremented when the ABI to the library changes
 set( MIOpen_SOVERSION 1.0 )
 
+# Generate source that embeds the given kernel files as initializer data.
 function(add_kernels FILE_NAME VAR_PREFIX VAR_SUFFIX KERNEL_FILES)
     set(INIT_KERNELS_LIST)
     set(INSERT_KERNELS_LIST)
@@ -75,7 +76,7 @@ set( MIOpen_Source
     conv/invokers/gen_x_w_y_pad.cpp
     conv/invokers/impl_gemm.cpp
     conv/invokers/impl_gemm_dynamic.cpp
-    conv/invokers/ocl_wrw_rdc.cpp
+    conv/invokers/wrw_rdc.cpp
     conv/kernel_interface/winograd_kernel_interface.cpp
     conv/problem_description.cpp
     conv/solver_finders.cpp
@@ -331,7 +332,7 @@ if(MIOPEN_ENABLE_SQLITE AND MIOPEN_ENABLE_SQLITE_KERN_CACHE)
     list(APPEND MIOpen_Source kern_db.cpp bz2.cpp)
 endif()
 
-if( MIOPEN_BACKEND MATCHES "OpenCL" OR MIOPEN_BACKEND STREQUAL "HIPOC" OR MIOPEN_BACKEND STREQUAL "HIP" OR MIOPEN_BACKEND STREQUAL "HIPNOGPU")
+if( MIOPEN_BACKEND STREQUAL "HIPOC" OR MIOPEN_BACKEND STREQUAL "HIP" OR MIOPEN_BACKEND STREQUAL "HIPNOGPU")
     include(${PROJECT_SOURCE_DIR}/cmake/CopyExternalHeader.cmake)
     find_path(ROCRAND_INCLUDE_DIR "rocrand/rocrand_xorwow.h")
     if(ROCRAND_INCLUDE_DIR)
@@ -360,7 +361,6 @@ if( MIOPEN_BACKEND MATCHES "OpenCL" OR MIOPEN_BACKEND STREQUAL "HIPOC" OR MIOPEN
     file(GLOB_RECURSE GPU_BATCHED_TRANSPOSE_KERNEL_HIP "kernels/gpu_batched_transpose_kernel/*.cpp")
     file(GLOB_RECURSE GPU_GENERAL_TENSOR_REORDER_KERNEL_HIP_INCLUDE "kernels/gpu_general_tensor_reorder_kernel/*.hpp")
     file(GLOB_RECURSE GPU_GENERAL_TENSOR_REORDER_KERNEL_HIP_SOURCE "kernels/gpu_general_tensor_reorder_kernel/*.cpp")
-
 
     set(MIOPEN_KERNEL_INCLUDES
         ${STATIC_COMPOSABLE_KERNEL_INCLUDE}
@@ -598,7 +598,6 @@ if( MIOPEN_BACKEND MATCHES "OpenCL" OR MIOPEN_BACKEND STREQUAL "HIPOC" OR MIOPEN
         kernels/conv7x7c3h224w224k64u2v2p3q3f1.s
         kernels/xform_out.s
         kernels/gcnAsmBNBwdTrainSpatial.s
-        kernels/MIOpenTensorKernels.cl
         kernels/MIOpenTensorKernelsHip.cpp
         kernels/MIOpenSubTensorOpWithScalarKernel.cpp
         kernels/MIOpenSubTensorOpWithSubTensorKernel.cpp
@@ -704,22 +703,22 @@ if( MIOPEN_BACKEND MATCHES "OpenCL" OR MIOPEN_BACKEND STREQUAL "HIPOC" OR MIOPEN
         lrn.cpp
         mlo_dir_conv.cpp
         multimarginloss.cpp
-        ocl/activ_ocl.cpp
-        ocl/batchnormocl.cpp
-        ocl/convolutionocl.cpp
-        ocl/lrn_ocl.cpp
-        ocl/mloNorm.cpp
-        ocl/rnnocl.cpp
-        ocl/utilocl.cpp
-        ocl/dropoutocl.cpp
-        ocl/gcn_asm_utils.cpp
+        hip/activ_ocl.cpp
+        hip/batchnormocl.cpp
+        hip/convolutionocl.cpp
+        hip/dropoutocl.cpp
+        hip/fusionopbiasbnactivocl.cpp
+        hip/fusionopconvocl.cpp
+        hip/gcn_asm_utils.cpp
         hip/hip_build_utils.cpp
+        hip/lrn_ocl.cpp
+        hip/mloNorm.cpp
+        hip/rnnocl.cpp
+        hip/utilocl.cpp
         hip/batched_transpose_sol.cpp
         hip/general_tensor_reorder_sol.cpp
         pooling.cpp
         t5layernorm.cpp
-        ocl/fusionopconvocl.cpp
-        ocl/fusionopbiasbnactivocl.cpp
         prelu.cpp
         reducecalculation.cpp
         reduceextreme.cpp
@@ -741,15 +740,6 @@ if(MIOPEN_USE_ROCBLAS OR MIOPEN_USE_HIPBLASLT)
     )
 endif()
 
-if( MIOPEN_BACKEND STREQUAL "OpenCL" )
-    list(APPEND MIOpen_Source
-        ocl/handleocl.cpp
-        ocl_kernel.cpp
-        ocl/oclerrors.cpp
-        ocl/clhelper.cpp
-    )
-endif()
-
 if( MIOPEN_BACKEND STREQUAL "HIPOC" OR MIOPEN_BACKEND STREQUAL "HIP")
     list(APPEND MIOpen_Source
         hip/hiperrors.cpp
@@ -768,10 +758,11 @@ if( MIOPEN_BACKEND STREQUAL "HIPNOGPU")
         )
 endif()
 
-if( MIOPEN_BACKEND MATCHES "OpenCL" OR MIOPEN_BACKEND STREQUAL "HIPOC" OR MIOPEN_BACKEND STREQUAL "HIP" OR MIOPEN_BACKEND STREQUAL "HIPNOGPU")
+if( MIOPEN_BACKEND STREQUAL "HIPOC" OR MIOPEN_BACKEND STREQUAL "HIP" OR MIOPEN_BACKEND STREQUAL "HIPNOGPU")
     set(KERNELS_SRC_BATCH_FACTOR 50 CACHE STRING "Amount of kernel source files to inline to a single object file.")
     set(KERNELS_BATCH_ID 0)
 
+    # Batch kernel sources into grouped object files to reduce object count.
     function(inline_kernels_src BATCH_FACTOR KERNELS KERNEL_INCLUDES EXTRA_OPTIONS MESSAGE_SUFFIX)
         set(KERNELS_BATCH)
         set(KERNELS_BATCH_SIZE 0)
@@ -884,6 +875,7 @@ if(zstd_FOUND)
     target_link_libraries(MIOpen PRIVATE $<IF:$<TARGET_EXISTS:zstd::libzstd_shared>,zstd::libzstd_shared,zstd::libzstd_static>)
 endif()
 
+# Link the given libraries into TARGET for both build and interface usage.
 function(target_internal_library TARGET)
     target_link_libraries(${TARGET} PRIVATE ${ARGN})
     target_link_libraries(${TARGET} INTERFACE $<BUILD_INTERFACE:${ARGN}>)
@@ -955,18 +947,11 @@ if(MIOPEN_ENABLE_AI_KERNEL_TUNING OR MIOPEN_ENABLE_AI_IMMED_MODE_FALLBACK)
     endif()
     foreach(MODEL_FILE ${MODEL_FILES})
         get_filename_component(MODEL_FILE_FILENAME "${MODEL_FILE}" NAME)
-        configure_file("${MODEL_FILE}" "${PROJECT_BINARY_DIR}/${DATABASE_INSTALL_DIR}/${MODEL_FILE_FILENAME}" COPYONLY)
+        configure_file("${MODEL_FILE}" "${KERNELS_BINARY_DIR}/${MODEL_FILE_FILENAME}" COPYONLY)
     endforeach()
 endif()
 
-############################################################
-# MIOpen depends on OpenCL
-if(MIOPEN_BACKEND STREQUAL "OpenCL")
-    message(STATUS "MIOpen linking OpenCL: ${OPENCL_INCLUDE_DIRS}" )
-    target_include_directories(MIOpen SYSTEM PUBLIC ${OPENCL_INCLUDE_DIRS} )
-    target_link_libraries( MIOpen PUBLIC ${OPENCL_LIBRARIES} )
-    list(APPEND PACKAGE_DEPENDS PACKAGE OpenCL)
-elseif(MIOPEN_BACKEND STREQUAL "HIPOC" OR MIOPEN_BACKEND STREQUAL "HIP")
+if(MIOPEN_BACKEND STREQUAL "HIPOC" OR MIOPEN_BACKEND STREQUAL "HIP")
     target_link_libraries( MIOpen PRIVATE hip::device )
     target_link_libraries( MIOpen INTERFACE hip::host )
     if(MIOPEN_USE_HIPRTC)
@@ -1081,9 +1066,9 @@ if(NOT MIOPEN_EMBED_DB STREQUAL "")
 # embed find db
     foreach(EMBED_ARCH ${MIOPEN_EMBED_DB})
         message(STATUS "Adding find db for arch: ${EMBED_ARCH}")
-        list(APPEND CODE_OBJECTS "${PROJECT_BINARY_DIR}/${DATABASE_INSTALL_DIR}/${EMBED_ARCH}.${MIOPEN_BACKEND}.fdb.txt")
+        list(APPEND CODE_OBJECTS "${KERNELS_BINARY_DIR}/${EMBED_ARCH}.${MIOPEN_BACKEND}.fdb.txt")
         message(STATUS "Adding perf db for arch: ${EMBED_ARCH}")
-        list(APPEND CODE_OBJECTS "${PROJECT_BINARY_DIR}/${DATABASE_INSTALL_DIR}/${EMBED_ARCH}.db${PERFDB_SUFFIX}")
+        list(APPEND CODE_OBJECTS "${KERNELS_BINARY_DIR}/${EMBED_ARCH}.db${PERFDB_SUFFIX}")
     endforeach()
 # Embed Bin Cache
     if(NOT MIOPEN_BINCACHE_PATH STREQUAL "")

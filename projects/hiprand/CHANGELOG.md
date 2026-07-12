@@ -3,7 +3,7 @@
 Documentation for hipRAND is available at
 [https://rocm.docs.amd.com/projects/hipRAND/en/latest/](https://rocm.docs.amd.com/projects/hipRAND/en/latest/).
 
-## Since last release ROCm 7.13
+## hipRAND 3.4.0 for ROCm 7.14
 
 ### Added
 

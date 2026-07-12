@@ -1,0 +1,92 @@
+################################################################################
+# Copyright (C) 2026 Advanced Micro Devices, Inc. All rights reserved.
+# SPDX-License-Identifier: MIT
+################################################################################
+# P2 DESIGNED seed config for gfx950 (CDNA3.5 / MFMA + F8 + StreamK).
+#
+# A *minimal* BenchmarkProblems sweep chosen from the P1 whole-project line
+# attribution (attribution-gfx950.json). The single dominant attribution entry
+# (gfx950__StreamK_B8F8_yaml, 19547 marginal lines -- one rich config covers
+# ~19k of the 22121-line arch union) drives the F8 + StreamK + CustomSchedule
+# emitter paths; lower entries add small marginal yield and are folded in as
+# extra ForkParameters axes (GlobalSplitU from BBS; a second MatrixInstruction /
+# LocalRead shape from MX) rather than as separate ProblemTypes, to keep the
+# emitted-kernel count small (<= 8).
+#
+# The ForkParameters block is a cartesian product of single-element value lists;
+# each permutation -> exactly one Solution -> exactly one emitted kernel. The
+# axes below multiply to 2 (MatrixInstruction) x 2 (GlobalSplitU) x
+# 2 (UseCustomMainLoopSchedule) = 8 permutations.
+#
+# Idiom mirrors Tests/common/gemm/gfx950/custom_mainloop_scheduling.yaml (a
+# proven, emitting gfx950 StreamK + CustomSchedule config), retargeted to the F8
+# datatype to exercise the dominant attribution entry's F8/B8 paths.
+
+GlobalParameters:
+  SyncsPerBenchmark: 0
+  SleepPercent: 0
+  NumElementsToValidate: 0
+  NumWarmups: 0
+  NumBenchmarks: 1
+  EnqueuesPerSync: 1
+  DataInitTypeBeta: 0
+  DataInitTypeAlpha: 1
+  Device: 0
+  PrintSolutionRejectionReason: True
+
+BenchmarkProblems:
+  ########################################
+  # F8 -> half, TN (TransposeA=1, TransposeB=0), HPA -- StreamK + CustomSchedule
+  ########################################
+  -
+    - # ProblemType
+      OperationType: GEMM
+      DataType: F8
+      DestDataType: h
+      ComputeDataType: s
+      HighPrecisionAccumulate: True
+      TransposeA: True
+      TransposeB: False
+      UseBeta: True
+      Batched: True
+    - # BenchmarkProblemSizeGroup
+      InitialSolutionParameters:
+      BenchmarkCommonParameters:
+        - KernelLanguage: ["Assembly"]
+      ForkParameters:
+        # MX entry (515): MatrixInstruction / LocalRead shapes. Two F8 MI shapes
+        # (16x16 and 32x32) -- the LocalReadVectorWidth axis is pinned, the MI
+        # shape supplies the LocalRead variation.
+        - MatrixInstruction:
+          - [16, 16, 128, 1,  1,  2, 2,  2, 2 ]
+          - [32, 32,  64, 1,  1,  1, 1,  2, 2 ]
+        - DepthU: [128]
+        - PrefetchGlobalRead: [2]
+        - PrefetchLocalRead: [1]
+        - ClusterLocalRead: [1]
+        - ScheduleIterAlg: [3]
+        - ExpandPointerSwap: [True]
+        - TransposeLDS: [1]
+        - LdsPadA: [-1]
+        - LdsPadB: [-1]
+        - LdsBlockSizePerPadA: [-1]
+        - LdsBlockSizePerPadB: [-1]
+        - 1LDSBuffer: [-1]
+        - LocalReadVectorWidth: [16]
+        - GlobalReadVectorWidthA: [16]
+        - GlobalReadVectorWidthB: [16]
+        - StaggerU: [0]
+        - SourceSwap: [True]
+        - StoreVectorWidth: [-1]
+        # StreamK_B8F8 dominant entry (19547): StreamK + CustomSchedule.
+        - StreamK: [3]
+        - GlobalSplitUAlgorithm: ["MultipleBuffer"]
+        # BBS entry (1277): GlobalSplitU.
+        - GlobalSplitU: [1, 2]
+        # StreamK_B8F8 dominant entry: CustomSchedule axis.
+        - UseCustomMainLoopSchedule: [0, 1]
+      BenchmarkJoinParameters:
+      BenchmarkFinalParameters:
+        - ProblemSizes:
+          - Exact: [128, 128, 1, 128]
+          - Exact: [129, 129, 1, 640]

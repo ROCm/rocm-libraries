@@ -29,11 +29,7 @@
 #include "handle.h"
 #include "hipsparselt_ostream.hpp"
 #include "utility.hpp"
-#if BUILD_WITH_TENSILE
 #include "tensile_host.hpp"
-#else
-#include "kernel_launcher.hpp"
-#endif
 #include <cxxabi.h>
 
 inline rocsparselt_status getOriginalSizes(rocsparselt_operation opA,

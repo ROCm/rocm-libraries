@@ -1,5 +1,5 @@
 /* **************************************************************************
- * Copyright (C) 2019-2024 Advanced Micro Devices, Inc. All rights reserved.
+ * Copyright (C) 2019-2026 Advanced Micro Devices, Inc. All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -26,6 +26,7 @@
  * *************************************************************************/
 
 #include "rocauxiliary_labrd.hpp"
+#include "exceptions.hpp"
 
 ROCSOLVER_BEGIN_NAMESPACE
 
@@ -44,6 +45,7 @@ rocblas_status rocsolver_labrd_impl(rocblas_handle handle,
                                     const rocblas_int ldx,
                                     U Y,
                                     const rocblas_int ldy)
+try
 {
     ROCSOLVER_ENTER_TOP("labrd", "-m", m, "-n", n, "-k", k, "--lda", lda, "--ldx", ldx, "--ldy", ldy);
 
@@ -103,6 +105,10 @@ rocblas_status rocsolver_labrd_impl(rocblas_handle handle,
                                        strideE, tauq, strideQ, taup, strideP, X, shiftX, ldx,
                                        strideX, Y, shiftY, ldy, strideY, batch_count, (T*)scalars,
                                        work_workArr, (T*)norms);
+}
+catch(...)
+{
+    return exception2rocblas_status();
 }
 
 ROCSOLVER_END_NAMESPACE

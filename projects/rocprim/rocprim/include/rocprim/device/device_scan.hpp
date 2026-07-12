@@ -40,10 +40,12 @@
 #include "device_transform.hpp"
 #include "rocprim/device/detail/ordered_block_id.hpp"
 
-BEGIN_ROCPRIM_NAMESPACE
-
 /// \addtogroup devicemodule
 /// @{
+
+BEGIN_ROCPRIM_NAMESPACE
+
+#ifndef DOXYGEN_SHOULD_SKIP_THIS // Do not document
 
 namespace detail
 {
@@ -316,6 +318,8 @@ inline auto scan_impl(void*               temporary_storage,
 }
 
 } // namespace detail
+
+#endif // DOXYGEN_SHOULD_SKIP_THIS
 
 /// \brief Parallel inclusive scan primitive for device level.
 ///
@@ -910,9 +914,9 @@ inline hipError_t deterministic_exclusive_scan(void*               temporary_sto
                                             debug_synchronous);
 }
 
+END_ROCPRIM_NAMESPACE
+
 /// @}
 // end of group devicemodule
-
-END_ROCPRIM_NAMESPACE
 
 #endif // ROCPRIM_DEVICE_DEVICE_SCAN_HPP_

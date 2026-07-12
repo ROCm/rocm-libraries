@@ -38,6 +38,8 @@ namespace hipdnn_frontend
 /**
  * @enum ErrorCode
  * @brief Error codes returned by hipDNN Frontend operations
+ *
+ * Portions derived from NVIDIA cuDNN frontend, used under the MIT license.
  */
 enum class ErrorCode
 {
@@ -53,7 +55,19 @@ enum class ErrorCode
      * any engine. Distinct from validation errors -- the graph is well-formed,
      * just not runnable by the available engines.
      */
-    GRAPH_NOT_SUPPORTED ///< No engine accepted this graph (graph well-formed but unrunnable on available engines)
+    GRAPH_NOT_SUPPORTED, ///< No engine accepted this graph (graph well-formed but unrunnable on available engines)
+    SHAPE_DEDUCTION_FAILED, ///< Tensor shape/stride deduction failed
+    INVALID_TENSOR_NAME, ///< A referenced tensor name is invalid
+    INVALID_VARIANT_PACK, ///< The variant pack provided to execute() is invalid
+    GRAPH_EXECUTION_PLAN_CREATION_FAILED, ///< Creating an execution plan for the graph failed
+    GRAPH_EXECUTION_FAILED, ///< Executing the graph failed
+    HEURISTIC_QUERY_FAILED, ///< Querying heuristics for the graph failed
+    UNSUPPORTED_GRAPH_FORMAT, ///< The graph format is unsupported
+    CUDA_API_FAILED, ///< A CUDA runtime API call failed (CUDA-specific; not produced by hipDNN)
+    CUDNN_BACKEND_API_FAILED, ///< A cuDNN backend API call failed (CUDA-specific; not produced by hipDNN)
+    INVALID_CUDA_DEVICE, ///< The CUDA device is invalid (CUDA-specific; not produced by hipDNN)
+    HANDLE_ERROR, ///< A handle-related error occurred
+    NVRTC_COMPILATION_FAILED ///< Runtime kernel compilation via NVRTC failed (CUDA-specific; not produced by hipDNN)
 };
 
 // NOLINTNEXTLINE(readability-identifier-naming)
@@ -71,6 +85,30 @@ inline std::string to_string(ErrorCode code)
         return "ATTRIBUTE_NOT_SET";
     case ErrorCode::GRAPH_NOT_SUPPORTED:
         return "GRAPH_NOT_SUPPORTED";
+    case ErrorCode::SHAPE_DEDUCTION_FAILED:
+        return "SHAPE_DEDUCTION_FAILED";
+    case ErrorCode::INVALID_TENSOR_NAME:
+        return "INVALID_TENSOR_NAME";
+    case ErrorCode::INVALID_VARIANT_PACK:
+        return "INVALID_VARIANT_PACK";
+    case ErrorCode::GRAPH_EXECUTION_PLAN_CREATION_FAILED:
+        return "GRAPH_EXECUTION_PLAN_CREATION_FAILED";
+    case ErrorCode::GRAPH_EXECUTION_FAILED:
+        return "GRAPH_EXECUTION_FAILED";
+    case ErrorCode::HEURISTIC_QUERY_FAILED:
+        return "HEURISTIC_QUERY_FAILED";
+    case ErrorCode::UNSUPPORTED_GRAPH_FORMAT:
+        return "UNSUPPORTED_GRAPH_FORMAT";
+    case ErrorCode::CUDA_API_FAILED:
+        return "CUDA_API_FAILED";
+    case ErrorCode::CUDNN_BACKEND_API_FAILED:
+        return "CUDNN_BACKEND_API_FAILED";
+    case ErrorCode::INVALID_CUDA_DEVICE:
+        return "INVALID_CUDA_DEVICE";
+    case ErrorCode::HANDLE_ERROR:
+        return "HANDLE_ERROR";
+    case ErrorCode::NVRTC_COMPILATION_FAILED:
+        return "NVRTC_COMPILATION_FAILED";
     default:
         return "UNKNOWN_ERROR";
     }

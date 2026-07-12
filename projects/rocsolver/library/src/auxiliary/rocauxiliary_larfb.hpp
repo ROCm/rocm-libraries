@@ -209,9 +209,7 @@ rocblas_status rocsolver_larfb_template(rocblas_handle handle,
     T *Vp, *Fp;
 
     // everything must be executed with scalars on the host
-    rocblas_pointer_mode old_mode;
-    rocblas_get_pointer_mode(handle, &old_mode);
-    rocblas_set_pointer_mode(handle, rocblas_pointer_mode_host);
+    rocblas_pointer_mode_saver saver(handle, rocblas_pointer_mode_host);
 
     // constants to use when calling rocablas functions
     T minone = -1;
@@ -373,7 +371,6 @@ rocblas_status rocsolver_larfb_template(rocblas_handle handle,
     ROCSOLVER_LAUNCH_KERNEL(addmatA1, dim3(blocksx, blocksy, batch_count), dim3(BS2, BS2), 0,
                             stream, ldw, order, A, offsetA1, lda, strideA, tmptr);
 
-    rocblas_set_pointer_mode(handle, old_mode);
     return rocblas_status_success;
 }
 
@@ -485,9 +482,7 @@ rocblas_status rocsolver_larfb_inverse_template(rocblas_handle handle,
     T *Vp, *Fp;
 
     // everything must be executed with scalars on the host
-    rocblas_pointer_mode old_mode;
-    rocblas_get_pointer_mode(handle, &old_mode);
-    rocblas_set_pointer_mode(handle, rocblas_pointer_mode_host);
+    rocblas_pointer_mode_saver saver(handle, rocblas_pointer_mode_host);
 
     // constants to use when calling rocablas functions
     T minone = -1;
@@ -654,7 +649,6 @@ rocblas_status rocsolver_larfb_inverse_template(rocblas_handle handle,
     ROCSOLVER_LAUNCH_KERNEL(addmatA1, dim3(blocksx, blocksy, batch_count), dim3(BS2, BS2), 0,
                             stream, ldw, order, A, offsetA1, lda, strideA, tmptr);
 
-    rocblas_set_pointer_mode(handle, old_mode);
     return rocblas_status_success;
 }
 

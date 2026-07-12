@@ -61,12 +61,14 @@ inline origami::problem_t make_problem(size_t m,
                                        origami::transpose_t a_trans = origami::transpose_t::T,
                                        origami::transpose_t b_trans = origami::transpose_t::N,
                                        size_t batch                 = 1,
-                                       int mx_block_size            = 0) {
+                                       int mx_block_size            = 0,
+                                       size_t q_heads               = 32) {
   origami::problem_t problem;
   problem.size.m          = m;
   problem.size.n          = n;
   problem.size.k          = k;
   problem.batch           = batch;
+  problem.q_heads         = q_heads;
   problem.a_transpose     = a_trans;
   problem.b_transpose     = b_trans;
   problem.a_dtype         = origami::data_type_t::BFloat16;
@@ -111,6 +113,7 @@ inline origami::hardware_t make_hardware(int gpu_arch) {
   // Initialize the constants
   size_t n_cu                                                   = 0;
   size_t lds_capacity                                           = 0;
+  size_t rf_capacity                                            = 0;
   size_t num_xcd                                                = 0;
   double mem1_perf_ratio                                        = 0.0;
   double mem2_perf_ratio                                        = 0.0;
@@ -123,6 +126,7 @@ inline origami::hardware_t make_hardware(int gpu_arch) {
   if (gpu_arch == 942) {
     n_cu                       = 304;
     lds_capacity               = 65536;
+    rf_capacity                = 512 * 1024;  // 512 KB per CU for CDNA2 (gfx942)
     num_xcd                    = 8;
     mem1_perf_ratio            = 1.0;
     mem2_perf_ratio            = 1.0;
@@ -134,6 +138,7 @@ inline origami::hardware_t make_hardware(int gpu_arch) {
   } else if (gpu_arch == 950) {
     n_cu                       = 256;
     lds_capacity               = 163840;
+    rf_capacity                = 512 * 1024;  // 512 KB per CU for CDNA3
     num_xcd                    = 8;
     mem1_perf_ratio            = 1.0;
     mem2_perf_ratio            = 1.0;
@@ -155,6 +160,7 @@ inline origami::hardware_t make_hardware(int gpu_arch) {
   return origami::hardware_t(gpu_arch_enum,
                              n_cu,
                              lds_capacity,
+                             rf_capacity,
                              num_xcd,
                              mem1_perf_ratio,
                              mem2_perf_ratio,

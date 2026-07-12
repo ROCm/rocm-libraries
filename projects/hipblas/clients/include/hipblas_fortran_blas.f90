@@ -184,6 +184,54 @@ function hipblasGetAtomicsModeFortran(handle, atomics_mode) &
         hipblasGetAtomicsMode(handle, atomics_mode)
 end function hipblasGetAtomicsModeFortran
 
+function hipblasSetBatchAlphaStrideFortran(handle, alpha_stride) &
+    bind(c, name='hipblasSetBatchAlphaStrideFortran')
+    use iso_c_binding
+    use hipblas_enums
+    implicit none
+    integer(kind(HIPBLAS_STATUS_SUCCESS)) :: hipblasSetBatchAlphaStrideFortran
+    type(c_ptr), value :: handle
+    integer(c_int64_t), value :: alpha_stride
+            hipblasSetBatchAlphaStrideFortran = &
+        hipblasSetBatchAlphaStride(handle, alpha_stride)
+end function hipblasSetBatchAlphaStrideFortran
+
+function hipblasGetBatchAlphaStrideFortran(handle, alpha_stride) &
+    bind(c, name='hipblasGetBatchAlphaStrideFortran')
+    use iso_c_binding
+    use hipblas_enums
+    implicit none
+    integer(kind(HIPBLAS_STATUS_SUCCESS)) :: hipblasGetBatchAlphaStrideFortran
+    type(c_ptr), value :: handle
+    type(c_ptr), value :: alpha_stride
+            hipblasGetBatchAlphaStrideFortran = &
+        hipblasGetBatchAlphaStride(handle, alpha_stride)
+end function hipblasGetBatchAlphaStrideFortran
+
+function hipblasSetBatchBetaStrideFortran(handle, beta_stride) &
+    bind(c, name='hipblasSetBatchBetaStrideFortran')
+    use iso_c_binding
+    use hipblas_enums
+    implicit none
+    integer(kind(HIPBLAS_STATUS_SUCCESS)) :: hipblasSetBatchBetaStrideFortran
+    type(c_ptr), value :: handle
+    integer(c_int64_t), value :: beta_stride
+            hipblasSetBatchBetaStrideFortran = &
+        hipblasSetBatchBetaStride(handle, beta_stride)
+end function hipblasSetBatchBetaStrideFortran
+
+function hipblasGetBatchBetaStrideFortran(handle, beta_stride) &
+    bind(c, name='hipblasGetBatchBetaStrideFortran')
+    use iso_c_binding
+    use hipblas_enums
+    implicit none
+    integer(kind(HIPBLAS_STATUS_SUCCESS)) :: hipblasGetBatchBetaStrideFortran
+    type(c_ptr), value :: handle
+    type(c_ptr), value :: beta_stride
+            hipblasGetBatchBetaStrideFortran = &
+        hipblasGetBatchBetaStride(handle, beta_stride)
+end function hipblasGetBatchBetaStrideFortran
+
 !--------!
 ! blas 1 !
 !--------!

@@ -2163,6 +2163,22 @@ hipblasGetAtomicsMode
 ----------------------
 .. doxygenfunction:: hipblasGetAtomicsMode
 
+hipblasSetBatchAlphaStride
+---------------------------
+.. doxygenfunction:: hipblasSetBatchAlphaStride
+
+hipblasGetBatchAlphaStride
+---------------------------
+.. doxygenfunction:: hipblasGetBatchAlphaStride
+
+hipblasSetBatchBetaStride
+--------------------------
+.. doxygenfunction:: hipblasSetBatchBetaStride
+
+hipblasGetBatchBetaStride
+--------------------------
+.. doxygenfunction:: hipblasGetBatchBetaStride
+
 hipblasStatusToString
 ----------------------
 .. doxygenfunction:: hipblasStatusToString

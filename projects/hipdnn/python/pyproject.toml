@@ -7,18 +7,20 @@ build-backend = "scikit_build_core.build"
 
 [project]
 name = "hipdnn-frontend"
-version = "0.1.0"
+# Static wheel metadata; keep in sync with frontend/version.json (the frontend
+# component version). SKBUILD wheel builds are standalone (no umbrella CMake) so
+# this is the version of record for the wheel.
+version = "0.2.0"
 description = "Python bindings for the hipDNN frontend library"
 readme = "README.md"
 requires-python = ">=3.12"
-license = {text = "MIT"}
+license = "MIT"
 authors = [
     {name = "Advanced Micro Devices, Inc."},
 ]
 classifiers = [
     "Development Status :: 3 - Alpha",
     "Intended Audience :: Developers",
-    "License :: OSI Approved :: MIT License",
     "Programming Language :: Python :: 3",
     "Programming Language :: Python :: 3.12",
     "Programming Language :: Python :: 3.13",

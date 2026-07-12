@@ -29,6 +29,7 @@
 #include "../device/kernels/common.h"
 #include "function_map_key.h"
 #include <functional>
+#include <map>
 #include <optional>
 #include <sstream>
 #include <unordered_map>
@@ -165,8 +166,8 @@ struct FFTKernel
     }
 };
 
-typedef std::unordered_multimap<FMKey, FMKey, SimpleHash>       FPKeyMap;
-typedef std::unordered_multimap<PPFMKey, PPFMKey, SimpleHashPP> PPFPKeyMap;
+typedef std::unordered_multimap<FMKey, FMKey, SimpleHash> FPKeyMap;
+typedef std::multimap<PPFMKey, PPFMKey>                   PPFPKeyMap;
 
 typedef std::unordered_multimap<FMKey, FFTKernel, SimpleHash>                    FPMap;
 typedef std::unordered_multimap<PPFMKey, std::array<FFTKernel, 2>, SimpleHashPP> PPFPMap;
@@ -217,6 +218,52 @@ class function_pool
         return best;
     }
 
+    // NOTE: This function relies on the batch configurations for a given (length, precision, transform_type,
+    // scheme, gcn_arch_name) prefix being non-overlapping. This is guaranteed by the kernel-generator.py.
+    PPFPKeyMap::const_iterator
+        find_pp_key_in_map(const PPFPKeyMap& fmap, const PPFMKey& key, const size_t& batch) const
+    {
+        // Entries that share key's (lengths, precision, transform_type, scheme, gcn_arch_name)
+        // prefix are stored contiguously and ordered by ascending batch_low, and the kernel
+        // generator guarantees their batch ranges are disjoint. The only entry that can contain
+        // batch is therefore the one with the greatest batch_low <= batch, which we locate with a
+        // single O(log n) binary search before confirming batch falls within its upper bound.
+
+        // Probe for the first entry whose batch_low is strictly greater than batch: same prefix,
+        // with every field after batch_low set to its smallest value so lower_bound() stops on the
+        // first entry of the group whose batch_low exceeds batch.
+        auto probe_key       = key;
+        probe_key.batch_low  = batch >= std::numeric_limits<size_t>::max()
+                                   ? std::numeric_limits<size_t>::max()
+                                   : static_cast<size_t>(batch) + 1;
+        probe_key.batch_high = 0;
+
+        auto it = fmap.lower_bound(probe_key);
+        if(it == fmap.begin())
+            return fmap.end();
+
+        // The candidate is the entry just before the probe position. By construction it has the
+        // greatest batch_low <= batch (when it belongs to this key's prefix group).
+        --it;
+        const auto& mapped_key = it->second;
+
+        // Reject the candidate if it belongs to a different prefix or batch is above its range.
+        if(batch > mapped_key.batch_high
+           || std::tie(mapped_key.lengths,
+                       mapped_key.precision,
+                       mapped_key.transform_type,
+                       mapped_key.scheme,
+                       mapped_key.gcn_arch_name)
+                  != std::tie(key.lengths,
+                              key.precision,
+                              key.transform_type,
+                              key.scheme,
+                              key.gcn_arch_name))
+            return fmap.end();
+
+        return it;
+    }
+
     template <typename TKey, typename TKeyPool>
     const TKey& get_actual_key(const TKey& key, TKeyPool& pool) const
     {
@@ -236,6 +283,28 @@ class function_pool
             key_copy.gcn_arch_name = generic_gcn_arch_name;
 
             auto it = find_key_in_map(pool, key_copy);
+            if(it != pool.end())
+                return it->second;
+            else
+                return key;
+        }
+    }
+
+    // retrieve a key with the correct kernel configs from a generic key
+    const PPFMKey&
+        get_actual_pp_key(const PPFMKey& key, const PPFPKeyMap& pool, const size_t& batch) const
+    {
+        // First attempt an exact match with the given architecture in gcn_arch_name if possible
+        auto it = find_pp_key_in_map(pool, key, batch);
+        if(it != pool.end())
+            return it->second;
+        else
+        {
+            // If a match is not found, try it with the generic arch kernel
+            auto key_copy          = key;
+            key_copy.gcn_arch_name = generic_gcn_arch_name;
+
+            auto it = find_pp_key_in_map(pool, key_copy, batch);
             if(it != pool.end())
                 return it->second;
             else
@@ -297,9 +366,9 @@ public:
         return find_key_in_map(function_map, real_key) != function_map.end();
     }
 
-    bool has_function(const PPFMKey& key) const
+    bool has_function(const PPFMKey& key, const size_t& batch) const
     {
-        auto real_key = get_actual_key(key, def_pp_key_pool);
+        auto real_key = get_actual_pp_key(key, def_pp_key_pool, batch);
         return find_key_in_map(pp_function_map, real_key) != pp_function_map.end();
     }
 
@@ -345,9 +414,9 @@ public:
         return it->second;
     }
 
-    FFTKernel get_kernel(const PPFMKey& key, ComputeScheme scheme) const
+    FFTKernel get_kernel(const PPFMKey& key, const ComputeScheme& scheme, const size_t& batch) const
     {
-        auto real_key = get_actual_key(key, def_pp_key_pool);
+        auto real_key = get_actual_pp_key(key, def_pp_key_pool, batch);
         auto it       = find_key_in_map(pp_function_map, real_key);
         if(it == pp_function_map.end())
             throw std::out_of_range("kernel not found in partial-pass map");

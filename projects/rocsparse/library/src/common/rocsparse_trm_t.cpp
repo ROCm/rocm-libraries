@@ -39,6 +39,10 @@ void rocsparse::trm_t::destroy_csric0_info()
 {
     this->m_csric0_info.reset();
 }
+void rocsparse::trm_t::destroy_csrildlt0_info()
+{
+    this->m_csrildlt0_info.reset();
+}
 void rocsparse::trm_t::destroy_bsrsv_info()
 {
     this->m_bsrsv_info.reset();
@@ -91,6 +95,16 @@ rocsparse_csric0_info rocsparse::trm_t::create_csric0_info()
         this->m_csric0_info = std::shared_ptr<_rocsparse_csric0_info>(new _rocsparse_csric0_info());
     }
     return this->m_csric0_info.get();
+}
+
+rocsparse_csrildlt0_info rocsparse::trm_t::create_csrildlt0_info()
+{
+    if(this->m_csrildlt0_info.get() == nullptr)
+    {
+        this->m_csrildlt0_info
+            = std::shared_ptr<_rocsparse_csrildlt0_info>(new _rocsparse_csrildlt0_info());
+    }
+    return this->m_csrildlt0_info.get();
 }
 
 rocsparse_bsrsv_info rocsparse::trm_t::create_bsrsv_info()
@@ -152,6 +166,12 @@ void rocsparse::trm_t::clear_csric0_info()
     this->destroy_csric0_info();
 }
 
+void rocsparse::trm_t::clear_csrildlt0_info()
+{
+    this->uncouple(this->m_csrildlt0_info.get());
+    this->destroy_csrildlt0_info();
+}
+
 void rocsparse::trm_t::clear_bsrsv_info()
 {
     this->uncouple(this->m_bsrsv_info.get());
@@ -208,6 +228,14 @@ void rocsparse::trm_t::copy(const trm_t& that, hipStream_t stream)
     }
 
     {
+        auto p = that.m_csrildlt0_info.get();
+        if(p != nullptr)
+        {
+            this->create_csrildlt0_info()->copy(p, stream);
+        }
+    }
+
+    {
         auto p = that.m_bsrsv_info.get();
         if(p != nullptr)
         {
@@ -254,6 +282,9 @@ rocsparse::trm_t::~trm_t()
     this->uncouple(m_csric0_info.get());
     m_csric0_info.reset();
 
+    this->uncouple(m_csrildlt0_info.get());
+    m_csrildlt0_info.reset();
+
     this->uncouple(m_bsrsv_info.get());
     m_bsrsv_info.reset();
 
@@ -279,6 +310,7 @@ GET_SHARED_INFO(csrsv);
 GET_SHARED_INFO(csrsm);
 GET_SHARED_INFO(csrilu0);
 GET_SHARED_INFO(csric0);
+GET_SHARED_INFO(csrildlt0);
 GET_SHARED_INFO(bsrsv);
 GET_SHARED_INFO(bsrsm);
 GET_SHARED_INFO(bsrilu0);
@@ -292,6 +324,7 @@ void rocsparse::trm_t::uncouple(rocsparse::trm_data_t* p)
         p->uncouple(this->m_csrsm_info.get());
         p->uncouple(this->m_csrilu0_info.get());
         p->uncouple(this->m_csric0_info.get());
+        p->uncouple(this->m_csrildlt0_info.get());
         p->uncouple(this->m_bsrsv_info.get());
         p->uncouple(this->m_bsrsm_info.get());
         p->uncouple(this->m_bsrilu0_info.get());

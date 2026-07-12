@@ -1,0 +1,21 @@
+outs:
+- path: SmallStats.tensor0.bin
+  md5: 30ab9dcacb268b7148cef8cf4691ea9e
+  size: 524288
+  hash: md5
+- path: SmallStats.tensor1.bin
+  md5: d7f12f9b1b4a3d6696c32a47ea5d8831
+  size: 524288
+  hash: md5
+- path: SmallStats.tensor2.bin
+  md5: 16cfe14039fdc67ef2c162a43db7334b
+  size: 524288
+  hash: md5
+- path: SmallStats.tensor3.bin
+  md5: fca0a5e3bdd33be1fe38bee4c1ac638f
+  size: 524288
+  hash: md5
+- path: SmallStats.tensor4.bin
+  md5: 84149c1ab4407a750335896c30b86579
+  size: 8192
+  hash: md5

@@ -247,24 +247,16 @@ static constexpr unsigned int seeds [] = {};
 
 ## Running benchmarks
 
+rocPRIM uses [primbench](https://github.com/ROCm/rocm-libraries/tree/develop/shared/primbench) for benchmarking; see its [command-line options](https://github.com/ROCm/rocm-libraries/tree/develop/shared/primbench#command-line-options).
+
 ```shell
 # Go to rocPRIM build directory
 cd rocPRIM; cd build
 
-# To run benchmark for warp functions:
-# Further option can be found using --help
-# [] Fields are optional
-./benchmark/benchmark_warp_<function_name> [--size <size>] [--trials <trials>]
-
-# To run benchmark for block functions:
-# Further option can be found using --help
-# [] Fields are optional
-./benchmark/benchmark_block_<function_name> [--size <size>] [--trials <trials>]
-
-# To run benchmark for device functions:
-# Further option can be found using --help
-# [] Fields are optional
-./benchmark/benchmark_device_<function_name> [--size <size>] [--trials <trials>]
+# To run benchmarks for warp, block, or device functions:
+./benchmark/benchmark_warp_<function_name>
+./benchmark/benchmark_block_<function_name>
+./benchmark/benchmark_device_<function_name>
 ```
 
 ### Performance configuration
@@ -292,18 +284,18 @@ backend.
 
 #### Doxygen
 
-The build system uses Doxygen [version 1.9.4](https://github.com/doxygen/doxygen/releases/tag/Release_1_9_4). You can try using a newer version, but that might cause issues.
+The build system uses Doxygen [version 1.9.8](https://github.com/doxygen/doxygen/releases/tag/Release_1_9_8). You can try using a newer version, but that might cause issues.
 
-After you have downloaded Doxygen version 1.9.4:
+After you have downloaded Doxygen version 1.9.8:
 
 ```shell
 # Add doxygen to your PATH
-echo 'export PATH=<doxygen 1.9.4 path>/bin:$PATH' >> ~/.bashrc
+echo 'export PATH=<doxygen 1.9.8 path>/bin:$PATH' >> ~/.bashrc
 
 # Apply the updated .bashrc
 source ~/.bashrc
 
-# Confirm that you are using version 1.9.4
+# Confirm that you are using version 1.9.8
 doxygen --version
 ```
 

@@ -40,7 +40,7 @@ subtrees:
     - file: reference/supported-functions.rst
       title: Supported functions
     - file: reference/data-type-support.rst
-      title: Data type support
+      title: Precision support
     - file: reference/env-variables.rst
       title: Environment variables
     - file: doxygen/html/index

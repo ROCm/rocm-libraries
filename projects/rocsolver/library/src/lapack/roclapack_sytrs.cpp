@@ -26,6 +26,7 @@
  * *************************************************************************/
 
 #include "roclapack_sytrs.hpp"
+#include "exceptions.hpp"
 
 ROCSOLVER_BEGIN_NAMESPACE
 
@@ -39,6 +40,7 @@ rocblas_status rocsolver_sytrs_impl(rocblas_handle handle,
                                     I* ipiv,
                                     T* B,
                                     const I ldb)
+try
 {
     ROCSOLVER_ENTER_TOP("sytrs", "--uplo", uplo, "-n", n, "--nrhs", nrhs, "--lda", lda, "--ldb", ldb);
 
@@ -80,6 +82,10 @@ rocblas_status rocsolver_sytrs_impl(rocblas_handle handle,
     // execution
     return rocsolver_sytrs_template<T>(handle, uplo, n, nrhs, A, shiftA, lda, strideA, ipiv, strideP,
                                        B, shiftB, ldb, strideB, batch_count, work, size_work);
+}
+catch(...)
+{
+    return exception2rocblas_status();
 }
 
 ROCSOLVER_END_NAMESPACE

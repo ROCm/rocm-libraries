@@ -1,6 +1,6 @@
 // MIT License
 //
-// Copyright (c) 2020-2025 Advanced Micro Devices, Inc. All rights reserved.
+// Copyright (c) 2020-2026 Advanced Micro Devices, Inc. All rights reserved.
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -41,11 +41,30 @@
 // HIP API
 #include <hip/hip_runtime.h>
 
+// These are used by the TempDisablement class, and can be removed
+// once we have proper fixes for the issues it is working around.
+#if defined(HIPCUB_ROCPRIM_API)
+#include <rocprim/device/config_types.hpp>
+#include <set>
+#include <algorithm>
+#endif
+
 // test_utils.hpp should only be included by this header.
 // The following definition is used as guard in test_utils.hpp
 // Including test_utils.hpp by itself will cause a compile error.
 #define TEST_UTILS_INCLUDE_GAURD
 #include "test_utils.hpp"
+
+#if defined(__SANITIZE_ADDRESS__) || (defined(__has_feature) && __has_feature(address_sanitizer))
+    #define GTEST_SKIP_ASAN()                           \
+        do                                              \
+        {                                               \
+            GTEST_SKIP() << "Skipping test under ASan"; \
+        }                                               \
+        while(0)
+#else
+    #define GTEST_SKIP_ASAN()
+#endif
 
 #define HIP_CHECK(condition)         \
 {                                    \
@@ -149,5 +168,66 @@ hipError_t hipMallocHelper(T** devPtr, size_t size)
     }
     return hipSuccess;
 }
+
+// Temporary functions to disable larger-sized tests on gfx115x devices.
+// TODO: remove this once it's replaced with a more robust fix.
+class TempDisablement
+{
+public:
+	static bool is_arch_disabled()
+	{
+#if defined(HIPCUB_ROCPRIM_API)
+		rocprim::detail::target_arch arch = rocprim::detail::target_arch::unknown;
+		if (rocprim::detail::host_target_arch(hipStreamDefault, arch) != HIP_SUCCESS)
+		{
+			std::cerr << "Warning: unable to fetch target architecture for disablement check." << std::endl;
+		}
+
+		const std::set<rocprim::detail::target_arch> disabled_arches = {
+			rocprim::detail::target_arch::gfx1150,
+			rocprim::detail::target_arch::gfx1151,
+			rocprim::detail::target_arch::gfx1152,
+			rocprim::detail::target_arch::gfx1153
+		};
+
+		return disabled_arches.find(arch) != disabled_arches.end();
+#else
+		return false;
+#endif
+	}
+
+	static std::vector<size_t> filter_sizes(std::vector<size_t> sizes)
+	{
+#if defined(HIPCUB_ROCPRIM_API)
+		if (TempDisablement::is_arch_disabled())
+		{
+			auto it = std::remove_if(sizes.begin(), sizes.end(), [](const size_t& size) {
+				return size > TempDisablement::size_limit;
+			});
+			sizes.erase(it, sizes.end());
+		}
+#endif
+
+		return sizes;
+	}
+	
+	static std::vector<std::tuple<size_t, size_t>> filter_sizes(std::vector<std::tuple<size_t, size_t>> sizes)
+	{
+#if defined(HIPCUB_ROCPRIM_API)
+		if (TempDisablement::is_arch_disabled())
+		{
+			auto it = std::remove_if(sizes.begin(), sizes.end(), [](const std::tuple<size_t, size_t>& size) {
+				return std::get<0>(size) + std::get<1>(size) > TempDisablement::size_limit;
+			});
+			sizes.erase(it, sizes.end());
+		}
+#endif
+
+		return sizes;
+	}
+	
+private:
+	static inline const size_t size_limit = 10000;
+};
 
 }

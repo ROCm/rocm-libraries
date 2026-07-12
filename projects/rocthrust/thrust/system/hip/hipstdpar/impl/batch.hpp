@@ -58,6 +58,7 @@ template <typename I,
           enable_if_t<::hipstd::is_offloadable_iterator<I>() && ::hipstd::is_offloadable_callable<F>()>* = nullptr>
 inline void for_each(execution::parallel_unsequenced_policy, I f, I l, F fn)
 {
+  ::hipstd::warn_if_no_xnack();
   using fn_t = ::std::decay_t<F>;
 
   if constexpr (::std::is_trivially_destructible_v<fn_t>)
@@ -106,6 +107,7 @@ template <typename I,
           enable_if_t<::hipstd::is_offloadable_iterator<I>() && ::hipstd::is_offloadable_callable<F>()>* = nullptr>
 inline I for_each_n(execution::parallel_unsequenced_policy, I f, N n, F fn)
 {
+  ::hipstd::warn_if_no_xnack();
   using fn_t = ::std::decay_t<F>;
 
   if constexpr (::std::is_trivially_destructible_v<fn_t>)

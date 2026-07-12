@@ -73,6 +73,18 @@ if( ROCFFT_MPI_ENABLE )
   endif()
 endif()
 
+# RCCL: find and link (compile definition added after target creation below).
+if( ROCFFT_RCCL_ENABLE )
+  find_package(rccl)
+  if( rccl_FOUND )
+    message(STATUS "RCCL support enabled for multi-GPU communication")
+    set( ROCFFT_HOST_LINK_LIBS "${ROCFFT_HOST_LINK_LIBS}" "roc::rccl" )
+  else()
+    message(FATAL_ERROR "ROCFFT_RCCL_ENABLE is ON but RCCL was not found. "
+      "Install RCCL or set -DROCFFT_RCCL_ENABLE=OFF.")
+  endif()
+endif()
+
 set( package_targets rocfft )
 target_include_directories( rocfft_rtc_helper
   PRIVATE
@@ -95,6 +107,10 @@ include( GenerateExportHeader )
 find_package (Python3 3.6 COMPONENTS Interpreter REQUIRED)
 
 add_subdirectory( device )
+
+if( ROCFFT_BUILD_INTERNAL_TESTS )
+  add_subdirectory( tests )
+endif()
 
 #
 # embed the generator itself into c++ files
@@ -172,6 +188,7 @@ set( kgen_logic_files
      ${CMAKE_SOURCE_DIR}/library/src/device/generator/stockham_gen.h
      ${CMAKE_SOURCE_DIR}/library/src/device/generator/stockham_gen_2d.h
      ${CMAKE_SOURCE_DIR}/library/src/device/generator/stockham_gen_base.h
+     ${CMAKE_SOURCE_DIR}/library/src/device/generator/stockham_pp_gen.h
      ${CMAKE_SOURCE_DIR}/library/src/device/generator/stockham_gen_cc.h
      ${CMAKE_SOURCE_DIR}/library/src/device/generator/stockham_gen_cr.h
      ${CMAKE_SOURCE_DIR}/library/src/device/generator/stockham_gen_rc.h
@@ -257,6 +274,7 @@ set( rocfft_source
   rtc_exports.cpp
   tuning_kernel_tuner.cpp
   tuning_plan_tuner.cpp
+  rccl_wrapper.cpp
   )
 
 set(static_depends)
@@ -424,6 +442,11 @@ if( ROCFFT_MPI_ENABLE )
   include_directories(SYSTEM ${MPI_INCLUDE_PATH})
 endif()
 
+# RCCL: activate RCCL code paths
+if( ROCFFT_RCCL_ENABLE )
+  target_compile_definitions(rocfft PRIVATE ROCFFT_RCCL_ENABLE)
+endif()
+
 add_library( roc::rocfft ALIAS rocfft )
 
 if( ROCFFT_BUILD_OFFLINE_TUNER )
@@ -550,6 +573,7 @@ if ( ROCFFT_KERNEL_CACHE_ENABLE )
   set( GPU_TARGETS_AOT ${GPU_TARGETS} )
   list( REMOVE_ITEM GPU_TARGETS_AOT gfx803 )
   list( REMOVE_ITEM GPU_TARGETS_AOT gfx900 )
+  list( REMOVE_ITEM GPU_TARGETS_AOT gfx90c )
   list( REMOVE_ITEM GPU_TARGETS_AOT gfx906 )
   list( REMOVE_ITEM GPU_TARGETS_AOT gfx940 )
   list( REMOVE_ITEM GPU_TARGETS_AOT gfx941 )

@@ -1,0 +1,91 @@
+# serializer version: 1
+# name: test_get_real_data_type_a[BFloat8Float8]
+  'BFloat8'
+# ---
+# name: test_get_real_data_type_a[BFloat8Float8_fnuz]
+  'BFloat8_fnuz'
+# ---
+# name: test_get_real_data_type_a[Float8BFloat8]
+  'Float8'
+# ---
+# name: test_get_real_data_type_a[Float8BFloat8_fnuz]
+  'Float8_fnuz'
+# ---
+# name: test_get_real_data_type_a[Float]
+  'Float'
+# ---
+# name: test_get_real_data_type_a[Half]
+  'Half'
+# ---
+# name: test_get_real_data_type_b[BFloat8Float8]
+  'Float8'
+# ---
+# name: test_get_real_data_type_b[BFloat8Float8_fnuz]
+  'Float8_fnuz'
+# ---
+# name: test_get_real_data_type_b[Float8BFloat8]
+  'BFloat8'
+# ---
+# name: test_get_real_data_type_b[Float8BFloat8_fnuz]
+  'BFloat8_fnuz'
+# ---
+# name: test_get_real_data_type_b[Float]
+  'Float'
+# ---
+# name: test_get_real_data_type_b[Half]
+  'Half'
+# ---
+# name: test_mi_input_type_native_xf32
+  'XFloat32'
+# ---
+# name: test_mi_input_type_plain
+  'Half'
+# ---
+# name: test_mi_input_type_xf32_emulation
+  'BFloat16'
+# ---
+# name: test_pvar
+  'DepthU=16'
+# ---
+# name: test_reject_no_reject_flag
+  dict({
+    'result': False,
+    'valid': True,
+  })
+# ---
+# name: test_reject_none_state
+  None
+# ---
+# name: test_reject_print_no_solution_index
+  dict({
+    'result': True,
+    'valid': False,
+  })
+# ---
+# name: test_reject_quiet
+  dict({
+    'result': True,
+    'valid': False,
+  })
+# ---
+# name: test_reject_valid_index_problemtype_name_fallback
+  '!! Warning: Any rejection of a LibraryLogic is not expected, please check.         SolutionIndex: 7 (or SolutionName/ProblemType: PT_placeholder)'
+# ---
+# name: test_reject_valid_solution_index_raises
+  '!! Warning: Any rejection of a LibraryLogic is not expected, please check.         SolutionIndex: 5 (or SolutionName/ProblemType: Sol_gfx942_x)'
+# ---
+# name: test_roundup_ratio[exact]
+  3
+# ---
+# name: test_roundup_ratio[half]
+  4
+# ---
+# name: test_roundup_ratio[one]
+  1
+# ---
+# name: test_roundup_ratio[remainder]
+  4
+# ---
+# name: test_roundup_ratio[zero]
+  0
+# ---

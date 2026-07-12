@@ -130,17 +130,68 @@ find_library(libsnd_LIBS
 find_package(OpenMP COMPONENTS CXX QUIET)
 find_package(OpenCV QUIET)
 
-# find required python3-pip imports
-execute_process(
-    COMMAND ${Python3_EXECUTABLE} -m pip show pandas
-    RESULT_VARIABLE PANDAS_FOUND
-    OUTPUT_QUIET
-    ERROR_QUIET
-)
+# find required python3-pip imports (only if Python3 is found)
+if(Python3_FOUND)
+    execute_process(
+        COMMAND ${Python3_EXECUTABLE} -m pip show pandas
+        RESULT_VARIABLE PANDAS_FOUND
+        OUTPUT_QUIET
+        ERROR_QUIET
+    )
+else()
+    set(PANDAS_FOUND 1)  # Set to not-found value when Python3 is missing
+endif()
 
-# Top-level guards: Python3 and OpenMP are required to register CTests. Pandas is optional (see warning below).
+# Add HOST/HIP subdirectories to build executables (OpenMP required, Python3 optional)
+add_subdirectory(HOST)
+if(rpp_BACKEND_TYPE STREQUAL "HIP")
+    add_subdirectory(HIP)
+endif()
+
+# Minimal sanity CTests
+if(OpenMP_CXX_FOUND)
+    # Create output directory for HOST test
+    file(MAKE_DIRECTORY "${CMAKE_CURRENT_BINARY_DIR}/HOST/output")
+
+    # Minimal sanity test for HOST: brightness f32 test
+    add_test(
+        NAME rpp_sanity_test_brightness_host_f32
+        COMMAND "${CMAKE_CTEST_COMMAND}"
+            --build-and-test "${CMAKE_CURRENT_SOURCE_DIR}/HOST"
+                             "${CMAKE_CURRENT_BINARY_DIR}/HOST"
+            --build-generator "${CMAKE_GENERATOR}"
+            --test-command "Tensor_image_host"
+            "${CMAKE_CURRENT_SOURCE_DIR}/TEST_IMAGES/three_images_mixed_src1"
+            "${CMAKE_CURRENT_SOURCE_DIR}/TEST_IMAGES/three_images_mixed_src1"
+            "${CMAKE_CURRENT_BINARY_DIR}/HOST/output"
+            2 0 0 0 1 0 0 1 0 0 1 0 0 0 0
+            "${CMAKE_CURRENT_SOURCE_DIR}"
+    )
+endif()
+
+if(OpenMP_CXX_FOUND AND rpp_BACKEND_TYPE STREQUAL "HIP")
+    # Create output directory for HIP test
+    file(MAKE_DIRECTORY "${CMAKE_CURRENT_BINARY_DIR}/HIP/output")
+
+    # Minimal sanity test for HIP: brightness f32 test
+    add_test(
+        NAME rpp_sanity_test_brightness_hip_f32
+        COMMAND "${CMAKE_CTEST_COMMAND}"
+            --build-and-test "${CMAKE_CURRENT_SOURCE_DIR}/HIP"
+                             "${CMAKE_CURRENT_BINARY_DIR}/HIP"
+            --build-generator "${CMAKE_GENERATOR}"
+            --test-command "Tensor_image_hip"
+            "${CMAKE_CURRENT_SOURCE_DIR}/TEST_IMAGES/three_images_mixed_src1"
+            "${CMAKE_CURRENT_SOURCE_DIR}/TEST_IMAGES/three_images_mixed_src1"
+            "${CMAKE_CURRENT_BINARY_DIR}/HIP/output"
+            2 0 0 0 1 0 0 1 0 0 1 0 0 0 0
+            "${CMAKE_CURRENT_SOURCE_DIR}"
+    )
+endif()
+
+# Top-level guards: Python3 and OpenMP are required to register Python-based CTests. Pandas is optional (see warning below).
 if(NOT Python3_FOUND)
-    message("-- ${Yellow}Warning: Skipping all RPP-ctest test sets since Python3 is not found!${ColourReset}")
+    message("-- ${Yellow}Warning: Python3 not found — skipping Python-script based CTests; only sanity tests are registered.${ColourReset}")
     return()
 endif()
 if(NOT PANDAS_FOUND EQUAL 0)

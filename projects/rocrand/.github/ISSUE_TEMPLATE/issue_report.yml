@@ -135,7 +135,6 @@ body:
       - ROCK-Kernel-Driver
       - ROCm
       - rocm_bandwidth_test
-      - rocm_smi_lib
       - rocm-cmake
       - ROCm-CompilerSupport
       - rocm-core

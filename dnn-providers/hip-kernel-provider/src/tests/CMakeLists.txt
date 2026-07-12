@@ -24,6 +24,7 @@ add_executable(
     core/TestPluginPublic.cpp
     compilation/TestProgramAndKernel.cpp
     compilation/TestKernelCompileOptions.cpp
+    compilation/TestModuleCache.cpp
 )
 
 # Add the dummy kernel for running the tests
