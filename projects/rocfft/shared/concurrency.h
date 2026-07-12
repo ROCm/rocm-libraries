@@ -21,24 +21,16 @@
 #pragma once
 
 #include <algorithm>
-#include <cerrno>
-#include <cstdlib>
-#include <cstring>
-#include <iostream>
 #include <limits>
 #include <thread>
-
 #include <charconv>
 #include <cstdlib>
+
+#include "environment.h"
 
 #ifndef _WIN32
 #include <sched.h>
 #endif
-
-// work out how many parallel tasks to run, based on available
-// resources.  on Linux, this will look at the cpu affinity mask (if
-// available) which might be restricted in a container.  otherwise,
-// return std::thread::hardware_concurrency().
 
 // We temporarily add a limit on OMP_NUM_THREADS in order to un-block
 // theRock CI, which is using OMP_NUM_THREADS in order to reduce
@@ -47,11 +39,13 @@
 // Also, floor the value at 1.
 static int getenv_OMP_NUM_THREADS()
 {
-    const char* env_char = std::getenv("OMP_NUM_THREADS");
-    if(env_char != nullptr)
+    const auto env_str = rocfft_getenv("OMP_NUM_THREADS");
+    if(env_str != "")
     {
         int ompnumthreads = std::numeric_limits<int>::max();
-        auto [ptr, ec]    = std::from_chars(env_char, env_char + strlen(env_char), ompnumthreads);
+        auto [ptr, ec]    = std::from_chars(env_str.data(),
+                                            env_str.data() + env_str.size(),
+                                            ompnumthreads);
         if(ec == std::errc())
         {
             return std::max<int>(1, ompnumthreads);
@@ -60,6 +54,10 @@ static int getenv_OMP_NUM_THREADS()
     return std::numeric_limits<int>::max();
 }
 
+// Work out how many parallel tasks to run, based on available
+// resources.  On Linux, this will look at the cpu affinity mask (if
+// available) which might be restricted in a container.  Otherwise,
+// return std::thread::hardware_concurrency().
 static unsigned int rocfft_concurrency()
 {
 #ifndef _WIN32
