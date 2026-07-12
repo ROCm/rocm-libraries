@@ -12,6 +12,9 @@ add_library(
     dispatcher/SdpaGraphAdapter.cpp
     dispatcher/SdpaProblem.cpp
     dispatcher/SelectionConstraints.cpp
+    # Generated model registry (gen_model_registry.py). Provides
+    # rocke_lookup_model(); regenerate + keep listed when predictors are added.
+    dispatcher/sdpa_fwd/rocke_model_registry.c
 )
 
 target_include_directories(rocke_client_impl PUBLIC ${CMAKE_CURRENT_SOURCE_DIR})

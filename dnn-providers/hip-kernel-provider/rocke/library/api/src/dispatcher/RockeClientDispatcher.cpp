@@ -12,10 +12,14 @@
 
 #include <hipdnn_plugin_sdk/PluginLogging.hpp>
 
+#include <array>
+
 #include "RockeClientHandle.hpp"
 #include "dispatcher/HardwareProfile.hpp"
 #include "dispatcher/SdpaGraphAdapter.hpp"
 #include "dispatcher/SelectionConstraints.hpp"
+#include "dispatcher/sdpa_fwd/FmhaFeaturizer.hpp"
+#include "dispatcher/sdpa_fwd/rocke_model_registry.h"
 
 namespace rocke_client::dispatcher
 {
@@ -48,6 +52,48 @@ std::string deviceArch(hipStream_t stream)
         arch.resize(colon);
     }
     return arch;
+}
+
+// Build the exact FMHA feature vector for (problem, candidate instance). Problem
+// fields come from SdpaProblem; the config/tiling knobs the model ranks on come
+// from the instance's CompileSpec (blockSizeQ->tile_m0, tileSize->tile_n0,
+// numWarps, headSize->tile_k0 group). Knobs not carried on the base instance
+// keep the featurizer's own defaults today (arch-specific instance subclasses
+// will supply them later; TiledSpecDefaults.hpp holds the per-arch values).
+FmhaFeatures featurizeFmha(const SdpaProblem& problem, const AotInstance& inst)
+{
+    const CompileSpec& cs = inst.compileSpec;
+
+    FmhaProblemInputs p;
+    p.batch = static_cast<double>(problem.batch);
+    p.sq    = static_cast<double>(problem.seqlenQ);
+    p.sk    = static_cast<double>(problem.seqlenK);
+    p.hq    = static_cast<double>(problem.numQueryHeads);
+    p.hk    = static_cast<double>(problem.numKvHeads);
+    p.dq    = static_cast<double>(problem.headSize);
+    p.dv    = static_cast<double>(problem.headSize); // single head dim today
+    p.dtype = problem.dtype;
+
+    FmhaConfigInputs c;
+    c.tm0       = static_cast<double>(cs.blockSizeQ); // block_m_per_warp
+    c.tn0       = static_cast<double>(cs.tileSize);   // 2D tile width T
+    c.num_warps = static_cast<double>(cs.numWarps);
+    // tk0/tn1/tk1/tk0max default from head_size/tn0 inside the featurizer (0 ->
+    // derived), matching extract()'s defaults. Variant flags (mask/bias/...) are
+    // not carried per-instance yet; they keep featurizer defaults (mask=0 etc.),
+    // consistent with the mask=none sweep the models are trained on.
+
+    FmhaHwInputs hw;
+    hw.num_cus        = static_cast<double>(problem.hw.num_cus);
+    hw.simds_per_cu   = static_cast<double>(problem.hw.simds_per_cu);
+    hw.total_simds    = static_cast<double>(problem.hw.total_simds());
+    hw.shader_engines = static_cast<double>(problem.hw.shader_engines);
+    hw.max_clock_mhz  = static_cast<double>(problem.hw.max_clock_mhz);
+    hw.wavefront_size = static_cast<double>(problem.hw.wavefront_size);
+    hw.lds_capacity   = static_cast<double>(problem.hw.lds_capacity);
+    hw.num_xcd        = static_cast<double>(problem.hw.num_xcd);
+
+    return fmha_featurize(p, c, hw);
 }
 
 // Emit a selection-failure warning without ever letting the log path throw: a
@@ -98,26 +144,48 @@ std::optional<AotInstance> RockeClientDispatcher::select(const SdpaProblem& prob
         return std::nullopt;
     }
 
-    // TODO(heuristics): model-scored tie-break. The registry is now generated
-    // (rocke_model_registry.h: rocke_lookup_model(op, arch, dtype) ->
-    // {score, num_features}). To wire it here:
-    //   const RockeModelEntry* model = rocke_lookup_model(
-    //       problem.op.c_str(), problem.arch.c_str(), problem.dtype.c_str());
-    //   if(model && matches.size() > 1) {
-    //       // DRIFT GUARD: refuse to score if the predictor's width disagrees
-    //       // with the op featurizer's output -- fall through to first-match.
-    //       if(model->num_features == fmhaFeatureCount()) {
-    //           return *argmax(matches, [&](const AotInstance* inst) {
-    //               auto f = featurize(problem, *inst); // <-- the remaining piece
-    //               return model->score(f.data());
-    //           });
-    //       }
-    //   }
-    // The blocker is featurize(SdpaProblem, AotInstance) -> feature_spec.json-
-    // ordered vector (the C++ half of the feature contract, part of #8866): the
-    // AotInstance must carry the tiling knobs (tileSize/numWarps) the model ranks
-    // on. Until it lands, first-match preserves Phase-1 behaviour.
-    return *matches.front();
+    // Single satisfying instance: nothing to rank, skip the model entirely.
+    if(matches.size() == 1)
+    {
+        return *matches.front();
+    }
+
+    // Model-scored tie-break. Look up the predictor for (op, arch, dtype); if
+    // none is registered, keep Phase-1 first-match. The featurizer produces the
+    // exact feature_spec vector the model trained on (bit-identical to the Python
+    // engine -- see test_fmha_featurizer_roundtrip.py).
+    const RockeModelEntry* model =
+        rocke_lookup_model(problem.op.c_str(), problem.arch.c_str(), problem.dtype.c_str());
+    if(model == nullptr || model->score == nullptr)
+    {
+        return *matches.front();
+    }
+
+    // DRIFT GUARD: a predictor built against a different feature count than the
+    // featurizer produces must NOT be scored (it would read a wrong-width
+    // vector). Fall back to first-match, loudly-safe rather than silently wrong.
+    if(model->num_features != FmhaFeatures::kNumFeatures)
+    {
+        logSelectionFailure("model num_features != featurizer output; first-match");
+        return *matches.front();
+    }
+
+    // Argmax the model score over the satisfying instances. Ties broken by stable
+    // catalog order (>= keeps the earliest on equal score).
+    const AotInstance* best = matches.front();
+    double bestScore = -1e300;
+    for(const AotInstance* inst : matches)
+    {
+        const FmhaFeatures feats = featurizeFmha(problem, *inst);
+        const std::array<double, FmhaFeatures::kNumFeatures> arr = feats.to_array();
+        const double s = model->score(arr.data());
+        if(s > bestScore)
+        {
+            bestScore = s;
+            best = inst;
+        }
+    }
+    return *best;
 }
 
 std::optional<AotInstance>
