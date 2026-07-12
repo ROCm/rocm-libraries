@@ -43,9 +43,23 @@ def test_discovery_sorted_and_keyed(tmp_path):
                          "op": "fmha", "arch": "gfx950", "dtype": "fp16",
                          "num_features": 69})
     entries = gmr.generate(models, tmp_path / "out")
-    # sorted by (op, arch, dtype): fmha before gemm_universal
-    assert [e["op"] for e in entries] == ["fmha", "gemm_universal"]
-    assert entries[0]["num_features"] == 69 and entries[1]["num_features"] == 72
+    # op is aliased to the dispatcher's token (fmha -> sdpa_fwd); sorted by
+    # (op, arch, dtype): gemm_universal before sdpa_fwd.
+    assert [e["op"] for e in entries] == ["gemm_universal", "sdpa_fwd"]
+    assert entries[0]["num_features"] == 72 and entries[1]["num_features"] == 69
+
+
+def test_op_aliased_to_dispatcher_token(tmp_path):
+    # The pipeline op "fmha" must be emitted as the dispatcher's "sdpa_fwd" so
+    # rocke_lookup_model(problem.op="sdpa_fwd", ...) hits (else model never fires).
+    models = tmp_path / "models"
+    _model(models, "a", {"symbol": "rocke_score_fmha_bf16_gfx950_tflops",
+                         "op": "fmha", "arch": "gfx950", "dtype": "bf16",
+                         "num_features": 69})
+    gmr.generate(models, tmp_path / "out")
+    src = (tmp_path / "out" / "rocke_model_registry.c").read_text()
+    assert '"sdpa_fwd", "gfx950", "bf16"' in src
+    assert '"fmha"' not in src
 
 
 def test_missing_key_raises(tmp_path):
@@ -60,9 +74,12 @@ def test_empty_registry_is_valid(tmp_path):
     models.mkdir()
     entries = gmr.generate(models, tmp_path / "out")
     assert entries == []
-    # source still emits a valid (empty) table + lookup.
+    # Empty registry emits a size-1 sentinel array (zero-length arrays trip
+    # -Wpedantic -Werror) + count 0, and the lookup fn.
     src = (tmp_path / "out" / "rocke_model_registry.c").read_text()
-    assert "kModels[]" in src and "rocke_lookup_model" in src
+    assert "kModels[1]" in src
+    assert "kModelCount = 0;" in src
+    assert "rocke_lookup_model" in src
 
 
 @requires_cc
@@ -77,18 +94,21 @@ def test_generated_registry_compiles_and_looks_up(tmp_path):
     (out / "stub.c").write_text(
         "double rocke_score_fmha_fp16_gfx950_tflops(const double* f)"
         "{ return f[0] + f[68]; }\n")
+    # Look up with the DISPATCHER op token "sdpa_fwd" (fmha is aliased to it).
     (out / "t.c").write_text('''
 #include "rocke_model_registry.h"
 int hit_num_features(void){
-    const RockeModelEntry* m = rocke_lookup_model("fmha","gfx950","fp16");
+    const RockeModelEntry* m = rocke_lookup_model("sdpa_fwd","gfx950","fp16");
     return m ? m->num_features : -1;
 }
 double hit_score(const double* f){
-    const RockeModelEntry* m = rocke_lookup_model("fmha","gfx950","fp16");
+    const RockeModelEntry* m = rocke_lookup_model("sdpa_fwd","gfx950","fp16");
     return m ? m->score(f) : -1.0;
 }
 int miss_is_null(void){
-    return rocke_lookup_model("fmha","gfx942","fp16") == 0 ? 1 : 0;
+    /* the pipeline token "fmha" must NOT resolve; only the dispatcher token does */
+    return (rocke_lookup_model("fmha","gfx950","fp16") == 0
+            && rocke_lookup_model("sdpa_fwd","gfx942","fp16") == 0) ? 1 : 0;
 }
 int count(void){ return rocke_model_count(); }
 ''')

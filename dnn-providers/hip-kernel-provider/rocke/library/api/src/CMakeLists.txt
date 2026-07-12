@@ -20,6 +20,18 @@ add_library(
     dispatcher/sdpa_fwd/gfx950/model_tflops_bf16.c
 )
 
+# The generated registry + predictors are emitted as .c (plain C, valid as C++).
+# Compile them with the CXX toolchain so the project needs no separate C language
+# enabled (the ClangToolChain configures CXX only). rocke_lookup_model keeps C
+# linkage via the extern "C" guard in its header; the predictor symbols are
+# referenced only through the registry's function-pointer table, so consistent
+# CXX compilation of both keeps linkage matched.
+set_source_files_properties(
+    dispatcher/sdpa_fwd/rocke_model_registry.c
+    dispatcher/sdpa_fwd/gfx950/model_tflops_bf16.c
+    PROPERTIES LANGUAGE CXX
+)
+
 target_include_directories(rocke_client_impl PUBLIC ${CMAKE_CURRENT_SOURCE_DIR})
 dnn_provider_generate_version_header(rocke_client rocke_client_impl ${CMAKE_CURRENT_LIST_DIR}/..)
 target_link_libraries(rocke_client_impl PUBLIC hip::host hipdnn_data_sdk hipdnn_flatbuffers_sdk hipdnn_plugin_sdk)

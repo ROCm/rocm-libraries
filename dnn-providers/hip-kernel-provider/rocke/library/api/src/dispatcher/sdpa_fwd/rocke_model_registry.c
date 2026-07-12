@@ -6,10 +6,10 @@
 extern double rocke_score_fmha_bf16_gfx950_tflops(const double* f);
 
 static const RockeModelEntry kModels[] = {
-    { "fmha", "gfx950", "bf16", rocke_score_fmha_bf16_gfx950_tflops, 69 },
+    { "sdpa_fwd", "gfx950", "bf16", rocke_score_fmha_bf16_gfx950_tflops, 69 },
 };
 
-static const int kModelCount = (int)(sizeof(kModels) / sizeof(kModels[0]));
+static const int kModelCount = 1;
 
 int rocke_model_count(void) { return kModelCount; }
 

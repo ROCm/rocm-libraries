@@ -35,12 +35,26 @@ from pathlib import Path
 from typing import List
 
 
+# The pipeline trains with its canonical op token ("fmha"), but the dispatcher
+# queries the registry with the op token it derives from the graph
+# (SdpaProblem.op == "sdpa_fwd"). The registry is the dispatcher-side artifact, so
+# it must speak the dispatcher's vocabulary: alias the pipeline op -> dispatcher
+# op at generation time. Without this, rocke_lookup_model("sdpa_fwd",...) misses
+# an "fmha" entry and the model tie-break silently never fires (first-match).
+_OP_ALIASES = {"fmha": "sdpa_fwd"}
+
+
+def _dispatcher_op(pipeline_op: str) -> str:
+    return _OP_ALIASES.get(pipeline_op, pipeline_op)
+
+
 def _discover(models_dir: Path) -> List[dict]:
     """Find every predictor meta sidecar under models_dir; return sorted entries.
 
     A predictor contributes an entry iff a ``*.meta.json`` sits beside its .c with
-    keys: symbol, op, arch, dtype, num_features. Sorting by (op, arch, dtype)
-    makes the generated table deterministic (stable diffs, reproducible builds).
+    keys: symbol, op, arch, dtype, num_features. The op is aliased to the
+    dispatcher's token (see _OP_ALIASES). Sorting by (op, arch, dtype) makes the
+    generated table deterministic (stable diffs, reproducible builds).
     """
     entries: List[dict] = []
     for meta_path in sorted(models_dir.rglob("*.meta.json")):
@@ -48,6 +62,8 @@ def _discover(models_dir: Path) -> List[dict]:
         for key in ("symbol", "op", "arch", "dtype", "num_features"):
             if key not in meta:
                 raise ValueError(f"{meta_path}: missing required key {key!r}")
+        meta = dict(meta)
+        meta["op"] = _dispatcher_op(str(meta["op"]))  # pipeline op -> dispatcher op
         entries.append(meta)
     entries.sort(key=lambda m: (m["op"], m["arch"], m["dtype"]))
     return entries
@@ -110,16 +126,23 @@ def _emit_source(entries: List[dict]) -> str:
     for e in entries:
         lines.append(f"extern double {e['symbol']}(const double* f);")
     lines.append("")
-    lines.append("static const RockeModelEntry kModels[] = {")
-    for e in entries:
-        lines.append(
-            f'    {{ "{e["op"]}", "{e["arch"]}", "{e["dtype"]}", '
-            f'{e["symbol"]}, {int(e["num_features"])} }},'
-        )
-    lines.append("};")
+    if entries:
+        lines.append("static const RockeModelEntry kModels[] = {")
+        for e in entries:
+            lines.append(
+                f'    {{ "{e["op"]}", "{e["arch"]}", "{e["dtype"]}", '
+                f'{e["symbol"]}, {int(e["num_features"])} }},'
+            )
+        lines.append("};")
+    else:
+        # Zero-length arrays are non-standard (trips -Wpedantic -Werror); emit a
+        # size-1 zero sentinel and a count of 0 so the lookup loop never reads it.
+        lines.append("static const RockeModelEntry kModels[1] = "
+                     "{ { 0, 0, 0, 0, 0 } };")
     lines.append("")
-    lines.append("static const int kModelCount = "
-                 f"(int)(sizeof(kModels) / sizeof(kModels[0]));")
+    # Count emitted as a literal (known at generation time): no cast, warning-
+    # clean under the strict C++ flags, valid in both C and C++.
+    lines.append(f"static const int kModelCount = {len(entries)};")
     lines.append("")
     lines.append("int rocke_model_count(void) { return kModelCount; }")
     lines.append("")
