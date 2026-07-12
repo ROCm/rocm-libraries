@@ -41,7 +41,7 @@
         "speedup": 0.3400862959988502,
         "max_abs": 0.001953125,
         "ok": true,
-        "kernel": "rocke_uattn2d_tiled_d128_b64_h32kv8_bf16_w2_wpe2_regpv"
+        "kernel": "rocke_uattn2d_tiled_d128_b64_h32kv8_bf16_w2_wpe2_mw32_mfma32x8_stqk_s1_mask1_hoist_mlim_kvcpall_k1buf"
       },
       "fallback": {
         "error": "NotImplementedError('supports_tiled_2d: tiled 2D kernel: estimated LDS 115200 B (BLOCK_M=32, T=128, HD=128) exceeds the gfx942 65536 B LDS budget; comgr CODEGEN would fail')"
@@ -67,7 +67,7 @@
         "speedup": 0.2562231909399073,
         "max_abs": 0.0009765625,
         "ok": true,
-        "kernel": "rocke_uattn2d_tiled_d128_b64_h32kv8_bf16_w2_wpe2_regpv"
+        "kernel": "rocke_uattn2d_tiled_d128_b64_h32kv8_bf16_w2_wpe2_mw32_mfma32x8_stqk_s1_mask1_hoist_mlim_kvcpall_k1buf"
       },
       "fallback": {
         "error": "NotImplementedError('supports_tiled_2d: tiled 2D kernel: estimated LDS 115200 B (BLOCK_M=32, T=128, HD=128) exceeds the gfx942 65536 B LDS budget; comgr CODEGEN would fail')"
@@ -93,7 +93,7 @@
         "speedup": 0.22187793348168025,
         "max_abs": 0.001953125,
         "ok": true,
-        "kernel": "rocke_uattn2d_tiled_d128_b64_h32kv8_bf16_w2_wpe2_regpv"
+        "kernel": "rocke_uattn2d_tiled_d128_b64_h32kv8_bf16_w2_wpe2_mw32_mfma32x8_stqk_s1_mask1_hoist_mlim_kvcpall_k1buf"
       },
       "fallback": {
         "error": "NotImplementedError('supports_tiled_2d: tiled 2D kernel: estimated LDS 115200 B (BLOCK_M=32, T=128, HD=128) exceeds the gfx942 65536 B LDS budget; comgr CODEGEN would fail')"
@@ -119,7 +119,7 @@
         "speedup": 0.20377874369508747,
         "max_abs": 0.001953125,
         "ok": true,
-        "kernel": "rocke_uattn2d_tiled_d128_b64_h32kv8_bf16_w2_wpe2_regpv"
+        "kernel": "rocke_uattn2d_tiled_d128_b64_h32kv8_bf16_w2_wpe2_mw32_mfma32x8_stqk_s1_mask1_hoist_mlim_kvcpall_k1buf"
       },
       "fallback": {
         "error": "NotImplementedError('supports_tiled_2d: tiled 2D kernel: estimated LDS 115200 B (BLOCK_M=32, T=128, HD=128) exceeds the gfx942 65536 B LDS budget; comgr CODEGEN would fail')"
@@ -171,7 +171,7 @@
         "speedup": 0.3142604115292197,
         "max_abs": 0.001953125,
         "ok": true,
-        "kernel": "rocke_uattn2d_tiled_d128_b64_h40kv8_bf16_w2_wpe2_regpv"
+        "kernel": "rocke_uattn2d_tiled_d128_b64_h40kv8_bf16_w2_wpe2_mw32_mfma32x8_stqk_s1_mask1_hoist_mlim_kvcpall_k1buf"
       },
       "fallback": {
         "error": "NotImplementedError('supports_tiled_2d: tiled 2D kernel: estimated LDS 115200 B (BLOCK_M=32, T=128, HD=128) exceeds the gfx942 65536 B LDS budget; comgr CODEGEN would fail')"
@@ -197,7 +197,7 @@
         "speedup": 0.24431956031423768,
         "max_abs": 0.001953125,
         "ok": true,
-        "kernel": "rocke_uattn2d_tiled_d128_b64_h40kv8_bf16_w2_wpe2_regpv"
+        "kernel": "rocke_uattn2d_tiled_d128_b64_h40kv8_bf16_w2_wpe2_mw32_mfma32x8_stqk_s1_mask1_hoist_mlim_kvcpall_k1buf"
       },
       "fallback": {
         "error": "NotImplementedError('supports_tiled_2d: tiled 2D kernel: estimated LDS 115200 B (BLOCK_M=32, T=128, HD=128) exceeds the gfx942 65536 B LDS budget; comgr CODEGEN would fail')"
@@ -223,7 +223,7 @@
         "speedup": 0.2083584341562673,
         "max_abs": 0.0009765625,
         "ok": true,
-        "kernel": "rocke_uattn2d_tiled_d128_b64_h40kv8_bf16_w2_wpe2_regpv"
+        "kernel": "rocke_uattn2d_tiled_d128_b64_h40kv8_bf16_w2_wpe2_mw32_mfma32x8_stqk_s1_mask1_hoist_mlim_kvcpall_k1buf"
       },
       "fallback": {
         "error": "NotImplementedError('supports_tiled_2d: tiled 2D kernel: estimated LDS 115200 B (BLOCK_M=32, T=128, HD=128) exceeds the gfx942 65536 B LDS budget; comgr CODEGEN would fail')"
@@ -249,7 +249,7 @@
         "speedup": 0.19305736171509907,
         "max_abs": 0.0009765625,
         "ok": true,
-        "kernel": "rocke_uattn2d_tiled_d128_b64_h40kv8_bf16_w2_wpe2_regpv"
+        "kernel": "rocke_uattn2d_tiled_d128_b64_h40kv8_bf16_w2_wpe2_mw32_mfma32x8_stqk_s1_mask1_hoist_mlim_kvcpall_k1buf"
       },
       "fallback": {
         "error": "NotImplementedError('supports_tiled_2d: tiled 2D kernel: estimated LDS 115200 B (BLOCK_M=32, T=128, HD=128) exceeds the gfx942 65536 B LDS budget; comgr CODEGEN would fail')"
@@ -301,7 +301,7 @@
         "speedup": 0.3250748486543679,
         "max_abs": 0.001953125,
         "ok": true,
-        "kernel": "rocke_uattn2d_tiled_d128_b64_h28kv4_bf16_w2_wpe2_regpv"
+        "kernel": "rocke_uattn2d_tiled_d128_b64_h28kv4_bf16_w2_wpe2_mw32_mfma32x8_stqk_s1_mask1_hoist_mlim_kvcpall_k1buf"
       },
       "fallback": {
         "error": "NotImplementedError('supports_tiled_2d: tiled 2D kernel: estimated LDS 115200 B (BLOCK_M=32, T=128, HD=128) exceeds the gfx942 65536 B LDS budget; comgr CODEGEN would fail')"
@@ -327,7 +327,7 @@
         "speedup": 0.23525490684719325,
         "max_abs": 0.001953125,
         "ok": true,
-        "kernel": "rocke_uattn2d_tiled_d128_b64_h28kv4_bf16_w2_wpe2_regpv"
+        "kernel": "rocke_uattn2d_tiled_d128_b64_h28kv4_bf16_w2_wpe2_mw32_mfma32x8_stqk_s1_mask1_hoist_mlim_kvcpall_k1buf"
       },
       "fallback": {
         "error": "NotImplementedError('supports_tiled_2d: tiled 2D kernel: estimated LDS 115200 B (BLOCK_M=32, T=128, HD=128) exceeds the gfx942 65536 B LDS budget; comgr CODEGEN would fail')"
@@ -353,7 +353,7 @@
         "speedup": 0.19364079885045413,
         "max_abs": 0.0078125,
         "ok": true,
-        "kernel": "rocke_uattn2d_tiled_d128_b64_h28kv4_bf16_w2_wpe2_regpv"
+        "kernel": "rocke_uattn2d_tiled_d128_b64_h28kv4_bf16_w2_wpe2_mw32_mfma32x8_stqk_s1_mask1_hoist_mlim_kvcpall_k1buf"
       },
       "fallback": {
         "error": "NotImplementedError('supports_tiled_2d: tiled 2D kernel: estimated LDS 115200 B (BLOCK_M=32, T=128, HD=128) exceeds the gfx942 65536 B LDS budget; comgr CODEGEN would fail')"
@@ -379,7 +379,7 @@
         "speedup": 0.17821707573228981,
         "max_abs": 0.001953125,
         "ok": true,
-        "kernel": "rocke_uattn2d_tiled_d128_b64_h28kv4_bf16_w2_wpe2_regpv"
+        "kernel": "rocke_uattn2d_tiled_d128_b64_h28kv4_bf16_w2_wpe2_mw32_mfma32x8_stqk_s1_mask1_hoist_mlim_kvcpall_k1buf"
       },
       "fallback": {
         "error": "NotImplementedError('supports_tiled_2d: tiled 2D kernel: estimated LDS 115200 B (BLOCK_M=32, T=128, HD=128) exceeds the gfx942 65536 B LDS budget; comgr CODEGEN would fail')"
@@ -431,7 +431,7 @@
         "speedup": 0.2736068150581023,
         "max_abs": 0.0009765625,
         "ok": true,
-        "kernel": "rocke_uattn2d_tiled_d128_b64_h64kv8_bf16_w2_wpe2_regpv"
+        "kernel": "rocke_uattn2d_tiled_d128_b64_h64kv8_bf16_w2_wpe2_mw32_mfma32x8_stqk_s1_mask1_hoist_mlim_kvcpall_k1buf"
       },
       "fallback": {
         "error": "NotImplementedError('supports_tiled_2d: tiled 2D kernel: estimated LDS 115200 B (BLOCK_M=32, T=128, HD=128) exceeds the gfx942 65536 B LDS budget; comgr CODEGEN would fail')"
@@ -457,7 +457,7 @@
         "speedup": 0.22208713910598707,
         "max_abs": 0.001953125,
         "ok": true,
-        "kernel": "rocke_uattn2d_tiled_d128_b64_h64kv8_bf16_w2_wpe2_regpv"
+        "kernel": "rocke_uattn2d_tiled_d128_b64_h64kv8_bf16_w2_wpe2_mw32_mfma32x8_stqk_s1_mask1_hoist_mlim_kvcpall_k1buf"
       },
       "fallback": {
         "error": "NotImplementedError('supports_tiled_2d: tiled 2D kernel: estimated LDS 115200 B (BLOCK_M=32, T=128, HD=128) exceeds the gfx942 65536 B LDS budget; comgr CODEGEN would fail')"
@@ -483,7 +483,7 @@
         "speedup": 0.20632155445638034,
         "max_abs": 0.001953125,
         "ok": true,
-        "kernel": "rocke_uattn2d_tiled_d128_b64_h64kv8_bf16_w2_wpe2_regpv"
+        "kernel": "rocke_uattn2d_tiled_d128_b64_h64kv8_bf16_w2_wpe2_mw32_mfma32x8_stqk_s1_mask1_hoist_mlim_kvcpall_k1buf"
       },
       "fallback": {
         "error": "NotImplementedError('supports_tiled_2d: tiled 2D kernel: estimated LDS 115200 B (BLOCK_M=32, T=128, HD=128) exceeds the gfx942 65536 B LDS budget; comgr CODEGEN would fail')"
@@ -509,7 +509,7 @@
         "speedup": 0.202189960628262,
         "max_abs": 0.0009765625,
         "ok": true,
-        "kernel": "rocke_uattn2d_tiled_d128_b64_h64kv8_bf16_w2_wpe2_regpv"
+        "kernel": "rocke_uattn2d_tiled_d128_b64_h64kv8_bf16_w2_wpe2_mw32_mfma32x8_stqk_s1_mask1_hoist_mlim_kvcpall_k1buf"
       },
       "fallback": {
         "error": "NotImplementedError('supports_tiled_2d: tiled 2D kernel: estimated LDS 115200 B (BLOCK_M=32, T=128, HD=128) exceeds the gfx942 65536 B LDS budget; comgr CODEGEN would fail')"
@@ -561,7 +561,7 @@
         "speedup": 0.24399714067516343,
         "max_abs": 0.001953125,
         "ok": true,
-        "kernel": "rocke_uattn2d_tiled_d128_b64_h128kv8_bf16_w2_wpe2_regpv"
+        "kernel": "rocke_uattn2d_tiled_d128_b64_h128kv8_bf16_w2_wpe2_mw32_mfma32x8_stqk_s1_mask1_hoist_mlim_kvcpall_k1buf"
       },
       "fallback": {
         "error": "NotImplementedError('supports_tiled_2d: tiled 2D kernel: estimated LDS 115200 B (BLOCK_M=32, T=128, HD=128) exceeds the gfx942 65536 B LDS budget; comgr CODEGEN would fail')"
@@ -587,7 +587,7 @@
         "speedup": 0.20787920539475516,
         "max_abs": 0.00390625,
         "ok": true,
-        "kernel": "rocke_uattn2d_tiled_d128_b64_h128kv8_bf16_w2_wpe2_regpv"
+        "kernel": "rocke_uattn2d_tiled_d128_b64_h128kv8_bf16_w2_wpe2_mw32_mfma32x8_stqk_s1_mask1_hoist_mlim_kvcpall_k1buf"
       },
       "fallback": {
         "error": "NotImplementedError('supports_tiled_2d: tiled 2D kernel: estimated LDS 115200 B (BLOCK_M=32, T=128, HD=128) exceeds the gfx942 65536 B LDS budget; comgr CODEGEN would fail')"
@@ -613,7 +613,7 @@
         "speedup": 0.19575105080913843,
         "max_abs": 0.00390625,
         "ok": true,
-        "kernel": "rocke_uattn2d_tiled_d128_b64_h128kv8_bf16_w2_wpe2_regpv"
+        "kernel": "rocke_uattn2d_tiled_d128_b64_h128kv8_bf16_w2_wpe2_mw32_mfma32x8_stqk_s1_mask1_hoist_mlim_kvcpall_k1buf"
       },
       "fallback": {
         "error": "NotImplementedError('supports_tiled_2d: tiled 2D kernel: estimated LDS 115200 B (BLOCK_M=32, T=128, HD=128) exceeds the gfx942 65536 B LDS budget; comgr CODEGEN would fail')"
@@ -639,7 +639,7 @@
         "speedup": 0.1993680381720169,
         "max_abs": 0.001953125,
         "ok": true,
-        "kernel": "rocke_uattn2d_tiled_d128_b64_h128kv8_bf16_w2_wpe2_regpv"
+        "kernel": "rocke_uattn2d_tiled_d128_b64_h128kv8_bf16_w2_wpe2_mw32_mfma32x8_stqk_s1_mask1_hoist_mlim_kvcpall_k1buf"
       },
       "fallback": {
         "error": "NotImplementedError('supports_tiled_2d: tiled 2D kernel: estimated LDS 115200 B (BLOCK_M=32, T=128, HD=128) exceeds the gfx942 65536 B LDS budget; comgr CODEGEN would fail')"
@@ -691,7 +691,7 @@
         "speedup": 0.2758454336771071,
         "max_abs": 0.001953125,
         "ok": true,
-        "kernel": "rocke_uattn2d_tiled_d128_b64_h64kv4_bf16_w2_wpe2_regpv"
+        "kernel": "rocke_uattn2d_tiled_d128_b64_h64kv4_bf16_w2_wpe2_mw32_mfma32x8_stqk_s1_mask1_hoist_mlim_kvcpall_k1buf"
       },
       "fallback": {
         "error": "NotImplementedError('supports_tiled_2d: tiled 2D kernel: estimated LDS 115200 B (BLOCK_M=32, T=128, HD=128) exceeds the gfx942 65536 B LDS budget; comgr CODEGEN would fail')"
@@ -717,7 +717,7 @@
         "speedup": 0.22042914359901214,
         "max_abs": 0.0009765625,
         "ok": true,
-        "kernel": "rocke_uattn2d_tiled_d128_b64_h64kv4_bf16_w2_wpe2_regpv"
+        "kernel": "rocke_uattn2d_tiled_d128_b64_h64kv4_bf16_w2_wpe2_mw32_mfma32x8_stqk_s1_mask1_hoist_mlim_kvcpall_k1buf"
       },
       "fallback": {
         "error": "NotImplementedError('supports_tiled_2d: tiled 2D kernel: estimated LDS 115200 B (BLOCK_M=32, T=128, HD=128) exceeds the gfx942 65536 B LDS budget; comgr CODEGEN would fail')"
@@ -743,7 +743,7 @@
         "speedup": 0.19848201056035367,
         "max_abs": 0.0078125,
         "ok": true,
-        "kernel": "rocke_uattn2d_tiled_d128_b64_h64kv4_bf16_w2_wpe2_regpv"
+        "kernel": "rocke_uattn2d_tiled_d128_b64_h64kv4_bf16_w2_wpe2_mw32_mfma32x8_stqk_s1_mask1_hoist_mlim_kvcpall_k1buf"
       },
       "fallback": {
         "error": "NotImplementedError('supports_tiled_2d: tiled 2D kernel: estimated LDS 115200 B (BLOCK_M=32, T=128, HD=128) exceeds the gfx942 65536 B LDS budget; comgr CODEGEN would fail')"
@@ -769,7 +769,7 @@
         "speedup": 0.20123190080390996,
         "max_abs": 0.001953125,
         "ok": true,
-        "kernel": "rocke_uattn2d_tiled_d128_b64_h64kv4_bf16_w2_wpe2_regpv"
+        "kernel": "rocke_uattn2d_tiled_d128_b64_h64kv4_bf16_w2_wpe2_mw32_mfma32x8_stqk_s1_mask1_hoist_mlim_kvcpall_k1buf"
       },
       "fallback": {
         "error": "NotImplementedError('supports_tiled_2d: tiled 2D kernel: estimated LDS 115200 B (BLOCK_M=32, T=128, HD=128) exceeds the gfx942 65536 B LDS budget; comgr CODEGEN would fail')"
@@ -821,7 +821,7 @@
         "speedup": 0.27592168084911417,
         "max_abs": 0.0009765625,
         "ok": true,
-        "kernel": "rocke_uattn2d_tiled_d128_b64_h32kv32_bf16_w2_wpe2_regpv"
+        "kernel": "rocke_uattn2d_tiled_d128_b64_h32kv32_bf16_w2_wpe2_mw32_mfma32x8_stqk_s1_mask1_hoist_mlim_kvcpall_k1buf"
       },
       "fallback": {
         "error": "NotImplementedError('supports_tiled_2d: tiled 2D kernel: estimated LDS 115200 B (BLOCK_M=32, T=128, HD=128) exceeds the gfx942 65536 B LDS budget; comgr CODEGEN would fail')"
@@ -847,7 +847,7 @@
         "speedup": 0.21168344217716603,
         "max_abs": 0.0009765625,
         "ok": true,
-        "kernel": "rocke_uattn2d_tiled_d128_b64_h32kv32_bf16_w2_wpe2_regpv"
+        "kernel": "rocke_uattn2d_tiled_d128_b64_h32kv32_bf16_w2_wpe2_mw32_mfma32x8_stqk_s1_mask1_hoist_mlim_kvcpall_k1buf"
       },
       "fallback": {
         "error": "NotImplementedError('supports_tiled_2d: tiled 2D kernel: estimated LDS 115200 B (BLOCK_M=32, T=128, HD=128) exceeds the gfx942 65536 B LDS budget; comgr CODEGEN would fail')"
@@ -873,7 +873,7 @@
         "speedup": 0.1760788617512995,
         "max_abs": 0.0009765625,
         "ok": true,
-        "kernel": "rocke_uattn2d_tiled_d128_b64_h32kv32_bf16_w2_wpe2_regpv"
+        "kernel": "rocke_uattn2d_tiled_d128_b64_h32kv32_bf16_w2_wpe2_mw32_mfma32x8_stqk_s1_mask1_hoist_mlim_kvcpall_k1buf"
       },
       "fallback": {
         "error": "NotImplementedError('supports_tiled_2d: tiled 2D kernel: estimated LDS 115200 B (BLOCK_M=32, T=128, HD=128) exceeds the gfx942 65536 B LDS budget; comgr CODEGEN would fail')"
@@ -899,7 +899,7 @@
         "speedup": 0.15992180174503484,
         "max_abs": 0.001953125,
         "ok": true,
-        "kernel": "rocke_uattn2d_tiled_d128_b64_h32kv32_bf16_w2_wpe2_regpv"
+        "kernel": "rocke_uattn2d_tiled_d128_b64_h32kv32_bf16_w2_wpe2_mw32_mfma32x8_stqk_s1_mask1_hoist_mlim_kvcpall_k1buf"
       },
       "fallback": {
         "error": "NotImplementedError('supports_tiled_2d: tiled 2D kernel: estimated LDS 115200 B (BLOCK_M=32, T=128, HD=128) exceeds the gfx942 65536 B LDS budget; comgr CODEGEN would fail')"
@@ -951,7 +951,7 @@
         "speedup": 0.2777483731292194,
         "max_abs": 0.0009765625,
         "ok": true,
-        "kernel": "rocke_uattn2d_tiled_d128_b64_h40kv40_bf16_w2_wpe2_regpv"
+        "kernel": "rocke_uattn2d_tiled_d128_b64_h40kv40_bf16_w2_wpe2_mw32_mfma32x8_stqk_s1_mask1_hoist_mlim_kvcpall_k1buf"
       },
       "fallback": {
         "error": "NotImplementedError('supports_tiled_2d: tiled 2D kernel: estimated LDS 115200 B (BLOCK_M=32, T=128, HD=128) exceeds the gfx942 65536 B LDS budget; comgr CODEGEN would fail')"
@@ -977,7 +977,7 @@
         "speedup": 0.21108358686082768,
         "max_abs": 0.0009765625,
         "ok": true,
-        "kernel": "rocke_uattn2d_tiled_d128_b64_h40kv40_bf16_w2_wpe2_regpv"
+        "kernel": "rocke_uattn2d_tiled_d128_b64_h40kv40_bf16_w2_wpe2_mw32_mfma32x8_stqk_s1_mask1_hoist_mlim_kvcpall_k1buf"
       },
       "fallback": {
         "error": "NotImplementedError('supports_tiled_2d: tiled 2D kernel: estimated LDS 115200 B (BLOCK_M=32, T=128, HD=128) exceeds the gfx942 65536 B LDS budget; comgr CODEGEN would fail')"
@@ -1003,7 +1003,7 @@
         "speedup": 0.1717561482271819,
         "max_abs": 0.0078125,
         "ok": true,
-        "kernel": "rocke_uattn2d_tiled_d128_b64_h40kv40_bf16_w2_wpe2_regpv"
+        "kernel": "rocke_uattn2d_tiled_d128_b64_h40kv40_bf16_w2_wpe2_mw32_mfma32x8_stqk_s1_mask1_hoist_mlim_kvcpall_k1buf"
       },
       "fallback": {
         "error": "NotImplementedError('supports_tiled_2d: tiled 2D kernel: estimated LDS 115200 B (BLOCK_M=32, T=128, HD=128) exceeds the gfx942 65536 B LDS budget; comgr CODEGEN would fail')"
@@ -1029,7 +1029,7 @@
         "speedup": 0.15851138699261474,
         "max_abs": 0.0009765625,
         "ok": true,
-        "kernel": "rocke_uattn2d_tiled_d128_b64_h40kv40_bf16_w2_wpe2_regpv"
+        "kernel": "rocke_uattn2d_tiled_d128_b64_h40kv40_bf16_w2_wpe2_mw32_mfma32x8_stqk_s1_mask1_hoist_mlim_kvcpall_k1buf"
       },
       "fallback": {
         "error": "NotImplementedError('supports_tiled_2d: tiled 2D kernel: estimated LDS 115200 B (BLOCK_M=32, T=128, HD=128) exceeds the gfx942 65536 B LDS budget; comgr CODEGEN would fail')"
@@ -1055,7 +1055,7 @@
         "speedup": 0.2788836935584935,
         "max_abs": 0.0078125,
         "ok": true,
-        "kernel": "rocke_uattn2d_tiled_d64_b32_h64kv8_bf16_w4_wpe2_mw32_regpv"
+        "kernel": "rocke_uattn2d_tiled_d64_b32_t64_h64kv8_bf16_w4_wpe2_mw32_mfma32x8_stqk_s1_mask1_hoist_mlim_qdir_kvcpall_cfvst_ksring"
       },
       "fallback": {
         "ms": 0.541524543762207,
@@ -1085,7 +1085,7 @@
         "speedup": 0.2611138193225049,
         "max_abs": 0.0078125,
         "ok": true,
-        "kernel": "rocke_uattn2d_tiled_d64_b32_h64kv8_bf16_w4_wpe2_mw32_regpv"
+        "kernel": "rocke_uattn2d_tiled_d64_b32_t64_h64kv8_bf16_w4_wpe2_mw32_mfma32x8_stqk_s1_mask1_hoist_mlim_qdir_kvcpall_cfvst_ksring"
       },
       "fallback": {
         "ms": 1.9937539672851563,
@@ -1115,7 +1115,7 @@
         "speedup": 0.25281003015368586,
         "max_abs": 0.00390625,
         "ok": true,
-        "kernel": "rocke_uattn2d_tiled_d64_b32_h64kv8_bf16_w4_wpe2_mw32_regpv"
+        "kernel": "rocke_uattn2d_tiled_d64_b32_t64_h64kv8_bf16_w4_wpe2_mw32_mfma32x8_stqk_s1_mask1_hoist_mlim_qdir_kvcpall_cfvst_ksring"
       },
       "fallback": {
         "ms": 7.748256225585937,
@@ -1145,7 +1145,7 @@
         "speedup": 0.3255144456470904,
         "max_abs": 0.0078125,
         "ok": true,
-        "kernel": "rocke_uattn2d_tiled_d64_b32_h64kv8_bf16_w4_wpe2_mw32_regpv"
+        "kernel": "rocke_uattn2d_tiled_d64_b32_t64_h64kv8_bf16_w4_wpe2_mw32_mfma32x8_stqk_s1_mask1_hoist_mlim_qdir_kvcpall_cfvst_ksring"
       },
       "fallback": {
         "ms": 0.2970235824584961,
