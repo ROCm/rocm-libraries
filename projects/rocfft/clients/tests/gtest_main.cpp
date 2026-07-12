@@ -376,11 +376,7 @@ int main(int argc, char* argv[])
         ->check(CLI::IsMember(
             {emulation_quick, emulation_smoke, emulation_regression, emulation_extended}))
         ->expected(1)
-        ->excludes("--test_prob",
-                   "--emulation_prob",
-                   "--unittest_prob",
-                   "--callback_prob",
-                   "--R")
+        ->excludes("--test_prob", "--emulation_prob", "--unittest_prob", "--callback_prob", "--R")
         ->each([&](const std::string& emulationtype) {
             // Emulation test suites focus on well-established software paths; we are looking for
             // information about the hardware, which means that we aren't trying to find out a lot
