@@ -326,6 +326,13 @@ def _run_aoTriton(
     from torch.nn.attention import SDPBackend, sdpa_kernel
     from rocke.runtime import synchronize_and_release, time_launches
 
+    if data.get("softcap", 0.0):
+        return None
+    if data.get("alibi_slopes") is not None:
+        return None
+    if data.get("qq_bias") is not None:
+        return None
+
     try:
         nrep = shape.num_query_heads // shape.num_kv_heads
 
