@@ -67,6 +67,11 @@ workgroup_mapping_t select_workgroup_mapping(const problem_t& problem,
     return workgroup_mapping_t{0, 0, 0};
   }
 
+  if(hardware.arch == hardware_t::architecture_t::gfx1151 && config.workgroup_mapping > 0)
+  {
+    return workgroup_mapping_t{0, 0, config.workgroup_mapping};
+  }
+
   // Default values
   // Honor the caller's CU budget (problem.num_cus); 0 means use all CUs.
   size_t numCUs             = resolve_num_cus(problem.num_cus, hardware.N_CU);

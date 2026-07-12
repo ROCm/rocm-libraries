@@ -25,7 +25,23 @@ option(ORIGAMI_ENABLE_PYTHON "Enable Python bindings." OFF)
 option(ORIGAMI_BUILD_TESTING "Build tests." OFF)
 option(ORIGAMI_ENABLE_FETCH "Auto-fetch dependencies with FetchContent" ON)
 
-find_package(hip REQUIRED)
+if(WIN32)
+    if(NOT TARGET hip::host)
+        if(NOT EXISTS "$ENV{ROCM_CORE}/lib/amdhip64.lib")
+            message(FATAL_ERROR "ROCM_CORE must point to the Windows ROCm core package")
+        endif()
+        if(NOT IS_DIRECTORY "$ENV{ROCM_DEVEL}/include")
+            message(FATAL_ERROR "ROCM_DEVEL must point to the Windows ROCm development package")
+        endif()
+        add_library(hip::host UNKNOWN IMPORTED)
+        set_target_properties(hip::host PROPERTIES
+            IMPORTED_LOCATION "$ENV{ROCM_CORE}/lib/amdhip64.lib"
+            INTERFACE_INCLUDE_DIRECTORIES "$ENV{ROCM_CORE}/include;$ENV{ROCM_DEVEL}/include"
+        )
+    endif()
+else()
+    find_package(hip REQUIRED)
+endif()
 
 if(ORIGAMI_BUILD_SHARED_LIBS OR (BUILD_SHARED_LIBS AND ORIGAMI_STANDALONE))
     set(ORIGAMI_LIBRARY_TYPE SHARED)
@@ -60,6 +76,9 @@ add_library(origami-headers INTERFACE)
 add_library(roc::origami-headers ALIAS origami-headers)
 
 target_compile_features(origami-headers INTERFACE cxx_std_17)
+if(WIN32)
+    target_compile_definitions(origami-headers INTERFACE __HIP_PLATFORM_AMD__)
+endif()
 
 target_sources(origami-headers
     INTERFACE
@@ -108,6 +127,9 @@ target_sources(
 )
 
 target_link_libraries(origami PRIVATE hip::host)
+if(WIN32)
+    target_compile_definitions(origami PRIVATE __HIP_PLATFORM_AMD__)
+endif()
 
 if(ORIGAMI_ENABLE_PYTHON)
     add_subdirectory(python)

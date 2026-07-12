@@ -808,32 +808,30 @@ TEST_CASE("GEMM: compute_cvt_overhead unit test", "[gemm]") {
       auto config   = make_config(256, 256, 64, 32, 32, 8, false, 1);
 
       // Test 1: Test with Float data type
-      origami::problem_t problem_Float = {
-          .size            = {4097, 8001, 4096},
-          .batch           = 1,
-          .a_transpose     = origami::transpose_t::N,
-          .b_transpose     = origami::transpose_t::T,
-          .a_dtype         = origami::data_type_t::Float,
-          .b_dtype         = origami::data_type_t::Float,
-          .mi_dtype        = origami::data_type_t::Float,
-          .a_mx_block_size = 0,
-          .b_mx_block_size = 0,
-      };
+      origami::problem_t problem_Float;
+      problem_Float.size            = {4097, 8001, 4096};
+      problem_Float.batch           = 1;
+      problem_Float.a_transpose     = origami::transpose_t::N;
+      problem_Float.b_transpose     = origami::transpose_t::T;
+      problem_Float.a_dtype         = origami::data_type_t::Float;
+      problem_Float.b_dtype         = origami::data_type_t::Float;
+      problem_Float.mi_dtype        = origami::data_type_t::Float;
+      problem_Float.a_mx_block_size = 0;
+      problem_Float.b_mx_block_size = 0;
       auto result_test_with_Float = origami::gemm::compute_cvt_overhead(problem_Float, hardware, config);
       REQUIRE(result_test_with_Float == 0.0);
 
       // Test 2: Test with XFloat32 as mi_dtype and BFloat16 as a_dtype and b_dtype
-      origami::problem_t problem_XFloat32 = {
-          .size            = {8097, 8001, 4096},
-          .batch           = 1,
-          .a_transpose     = origami::transpose_t::N,
-          .b_transpose     = origami::transpose_t::T,
-          .a_dtype         = origami::data_type_t::BFloat16,
-          .b_dtype         = origami::data_type_t::BFloat16,
-          .mi_dtype        = origami::data_type_t::XFloat32,
-          .a_mx_block_size = 0,
-          .b_mx_block_size = 0,
-      };
+      origami::problem_t problem_XFloat32;
+      problem_XFloat32.size            = {8097, 8001, 4096};
+      problem_XFloat32.batch           = 1;
+      problem_XFloat32.a_transpose     = origami::transpose_t::N;
+      problem_XFloat32.b_transpose     = origami::transpose_t::T;
+      problem_XFloat32.a_dtype         = origami::data_type_t::BFloat16;
+      problem_XFloat32.b_dtype         = origami::data_type_t::BFloat16;
+      problem_XFloat32.mi_dtype        = origami::data_type_t::XFloat32;
+      problem_XFloat32.a_mx_block_size = 0;
+      problem_XFloat32.b_mx_block_size = 0;
       auto result_test_with_XFloat32 =
           origami::gemm::compute_cvt_overhead(problem_XFloat32, hardware, config);
       REQUIRE(result_test_with_XFloat32 == 0.0);

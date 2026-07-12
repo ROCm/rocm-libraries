@@ -263,17 +263,16 @@ TEST_CASE("origami: negative_occupancy", "[origami]") {
   for (int gpu_arch : test_architectures) {
     DYNAMIC_SECTION("gfx" << gpu_arch << " - test negative occupancy") {
       auto hardware              = make_hardware(gpu_arch);
-      origami::problem_t problem = {
-          .size            = {32, 800000, 16},
-          .batch           = 1,
-          .a_transpose     = origami::transpose_t::N,
-          .b_transpose     = origami::transpose_t::T,
-          .a_dtype         = origami::data_type_t::XFloat32,  // element_size_A = 32
-          .b_dtype         = origami::data_type_t::XFloat32,
-          .mi_dtype        = origami::data_type_t::XFloat32,
-          .a_mx_block_size = 0,
-          .b_mx_block_size = 0,
-      };
+      origami::problem_t problem;
+      problem.size            = {32, 800000, 16};
+      problem.batch           = 1;
+      problem.a_transpose     = origami::transpose_t::N;
+      problem.b_transpose     = origami::transpose_t::T;
+      problem.a_dtype         = origami::data_type_t::XFloat32;  // element_size_A = 32
+      problem.b_dtype         = origami::data_type_t::XFloat32;
+      problem.mi_dtype        = origami::data_type_t::XFloat32;
+      problem.a_mx_block_size = 0;
+      problem.b_mx_block_size = 0;
       // List 1: config A first, then config B
       std::vector<origami::config_t> config;
 
@@ -581,17 +580,16 @@ TEST_CASE("Origami: select_config_mnk unit test", "[origami]") {
       REQUIRE(result_config.config.mt.m == config[0].mt.m);
 
       // Test 2: Verify default problem settings (transpose, data types)
-      origami::problem_t problem = {
-          .size            = {2024, 4096, 768},
-          .batch           = 1,
-          .a_transpose     = origami::transpose_t::T,
-          .b_transpose     = origami::transpose_t::N,
-          .a_dtype         = origami::data_type_t::Half,  // element_size_A = 16
-          .b_dtype         = origami::data_type_t::Half,
-          .mi_dtype        = origami::data_type_t::Half,
-          .a_mx_block_size = 0,
-          .b_mx_block_size = 0,
-      };
+      origami::problem_t problem;
+      problem.size            = {2024, 4096, 768};
+      problem.batch           = 1;
+      problem.a_transpose     = origami::transpose_t::T;
+      problem.b_transpose     = origami::transpose_t::N;
+      problem.a_dtype         = origami::data_type_t::Half;  // element_size_A = 16
+      problem.b_dtype         = origami::data_type_t::Half;
+      problem.mi_dtype        = origami::data_type_t::Half;
+      problem.a_mx_block_size = 0;
+      problem.b_mx_block_size = 0;
       auto result_select_config_mnk = origami::select_config_mnk(2024, 4096, 768, hardware, config);
       auto result_select_config     = origami::select_config(problem, hardware, config);
       REQUIRE(result_select_config_mnk.config.mt.m == result_select_config.config.mt.m);
