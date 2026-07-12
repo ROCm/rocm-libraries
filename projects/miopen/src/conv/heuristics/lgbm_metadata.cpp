@@ -42,12 +42,16 @@ LgbmMetadata::LgbmMetadata()
             solver_index[solvers[i]] = i;
 
         // Always-applicable naive fallbacks; demoted to the tail of the ranked
-        // pick list. Optional key (older bundles omit it).
+        // pick list (for low-group convs only). Optional key (older bundles
+        // omit it).
         if(rank.contains("naive_fallback_solvers"))
         {
             for(const auto& name : rank.at("naive_fallback_solvers"))
                 naive_fallback.insert(name.get<std::string>());
         }
+        // Group-count threshold for the naive demotion; defaults to 64.
+        if(rank.contains("naive_guard_max_groups"))
+            naive_guard_max_groups = rank.at("naive_guard_max_groups").get<int>();
 
         ready = true;
         MIOPEN_LOG_I2("LGBM metadata loaded: " << solvers.size() << " solvers");

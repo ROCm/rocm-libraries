@@ -312,16 +312,23 @@ std::vector<uint64_t> PickSolverRanked(const conv::ProblemDescription& problem,
     //
     // The ConvDirectNaiveConv* fallbacks are ALWAYS applicable, and the model
     // over-ranks them on out-of-distribution shapes -- ranking one #1 would make
-    // the walk pick it over a much faster real kernel. Demote all naive
-    // fallbacks below every non-naive solver (they still keep their relative
-    // score order), so a naive solver is only reached when nothing else applies.
-    // This mirrors develop's ND TunaNet, which ranks naive last.
+    // the walk pick it over a much faster real kernel. So for LOW-group convs we
+    // demote naive fallbacks below every non-naive solver (relative score order
+    // preserved), making a naive solver reachable only when nothing else does.
+    //
+    // The guard is group-count-aware: at groups >= naive_guard_max_groups naive
+    // is genuinely the fastest solver a large fraction of the time (an
+    // unconditional guard swaps in the slow grouped-XDLOPS solver and regresses
+    // badly), so above the threshold we leave the raw score order and let naive
+    // win on merit.
+    const bool guard_naive =
+        problem.GetGroupCount() < static_cast<unsigned>(meta.NaiveGuardMaxGroups());
     const auto& solvers = meta.Solvers();
     struct Scored
     {
         double score;
         std::size_t idx;
-        bool is_naive;
+        bool demote; // naive fallback that should sink below non-naive solvers
     };
     std::vector<Scored> scored;
     scored.reserve(solvers.size());
@@ -330,11 +337,11 @@ std::vector<uint64_t> PickSolverRanked(const conv::ProblemDescription& problem,
         SetCategorical(row[kIdxSolverName], meta.SolverCode(solvers[i]));
         double s = 0.0;
         lgbm_rank_predict(row.data(), /*pred_margin=*/0, &s);
-        scored.push_back({s, i, meta.IsNaiveFallback(solvers[i])});
+        scored.push_back({s, i, guard_naive && meta.IsNaiveFallback(solvers[i])});
     }
     std::sort(scored.begin(), scored.end(), [](const Scored& a, const Scored& b) {
-        if(a.is_naive != b.is_naive)
-            return !a.is_naive; // non-naive solvers rank ahead of naive fallbacks
+        if(a.demote != b.demote)
+            return !a.demote; // non-demoted solvers rank ahead of demoted naive
         return a.score > b.score;
     });
 
