@@ -162,6 +162,7 @@ class TestGfx950AttentionSmoke(unittest.TestCase):
         for scenario in ("decode_bias_d128_b16", "decode_bias_bf16_d128_b16"):
             with self.subTest(scenario=scenario):
                 out, rows = self._run_scenario(scenario)
+                self.assertTrue(rows, f"{scenario}: empty report")
                 self.assertIn("ck-auto", out, f"{scenario}: DSL path not exercised")
                 self.assertNotIn("FAIL", out, f"{scenario}: correctness failure")
                 for row in rows:
