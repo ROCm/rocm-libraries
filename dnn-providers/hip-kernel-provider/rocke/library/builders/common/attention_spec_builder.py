@@ -14,7 +14,7 @@ callers that already import from that module do not need to change.
 """
 from __future__ import annotations
 
-from dataclasses import fields
+from dataclasses import fields, replace
 
 from kernels.common.attention_unified import (
     UnifiedAttentionProblem,
@@ -59,6 +59,10 @@ from kernels.common.attention_unified import (
     _tiled_2d_impl,
     _tiled_3d_impl,
 )
+# Imported as a module (not a bound symbol) so tests that
+# ``mock.patch.object(attention_unified, "_d256_gfx950_fast", ...)`` still steer
+# the builder's fast-route branch below (a bound import would freeze the ref).
+from kernels.common import attention_unified as _kau
 
 
 def _tiled_spec_from_problem(
@@ -213,7 +217,7 @@ def _tiled_spec_from_problem(
     # no-fp8 preconditions so it can never fire on an incompatible spec.
     if "use_k_single_buffer" in _spec_field_names and _enable_k_single_buffer(problem):
         _gfx950_schedule_fields["use_k_single_buffer"] = True
-    return UnifiedAttention2DTiledSpec(
+    _spec = UnifiedAttention2DTiledSpec(
         head_size=problem.head_size,
         block_size=problem.block_size,
         num_query_heads=problem.num_query_heads,
@@ -276,6 +280,41 @@ def _tiled_spec_from_problem(
         # below -- gfx942's spec class does not declare it.)
         **_gfx950_schedule_fields,
     )
+    if _kau._d256_gfx950_fast(problem):
+        # D256 gfx950 bf16 prefill fast route. Authored here in the builder
+        # (was a post-build override in kernels.common ``_tiled_spec_from_problem``,
+        # so the winning spec is created in the builder, not
+        # baked into the dispatch layer). Geometry (num_warps / tile_size /
+        # block_m_per_warp) already comes from the gated selectors above; this
+        # pins the 32x32 transposed + FA3 softmax<->MFMA-interleave codegen
+        # constellation. The cohort is discriminated in ``_tiled_cache_key`` by
+        # ``_d256_gfx950_fast`` so the key stays faithful to the built kernel.
+        _spec = replace(
+            _spec,
+            use_mfma_32x32=True,
+            use_transposed_qk_32x32=True,
+            use_q_direct_reg=True,
+            use_transposed_half_local_pv=True,
+            use_transposed_scalar_state=True,
+            use_transposed_mask_once=True,
+            use_transposed_mask_limit=True,
+            use_mask_phase_split=True,
+            use_register_pv=False,
+            use_k_single_buffer=True,
+            use_v_double_buffer=False,
+            use_early_v_schedule=False,
+            use_sched_barrier=False,
+            use_softmax_mfma_interleave=True,
+            softmax_interleave_mode=2,
+            softmax_interleave_groups=4,
+            use_fast_paged_kv_desc=False,
+            use_mfma32_skip_legacy_qreg=False,
+            # Slab-granularity K_lds pad (16 halves): breaks the row-aliased
+            # bank conflict on the QK K read for a ~25% Sq8192 latency win.
+            use_kq_lds_pad=True,
+            kq_lds_pad_halves=16,
+        )
+    return _spec
 
 
 def _tiled_3d_spec_from_problem(
