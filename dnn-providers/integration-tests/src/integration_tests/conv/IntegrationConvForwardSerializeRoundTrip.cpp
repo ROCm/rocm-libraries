@@ -204,18 +204,18 @@ protected:
     }
 };
 
-using IntegrationGpuConvFwdSerializeRoundTripFp32 = ConvForwardSerializeRoundTrip<float>;
+using IntegrationConvFwdSerializeRoundTripFp32 = ConvForwardSerializeRoundTrip<float>;
 
 } // namespace
 
-GTEST_ALLOW_UNINSTANTIATED_PARAMETERIZED_TEST(IntegrationGpuConvFwdSerializeRoundTripFp32);
-TEST_P(IntegrationGpuConvFwdSerializeRoundTripFp32, SerializeRoundTripExecutesCorrectly)
+GTEST_ALLOW_UNINSTANTIATED_PARAMETERIZED_TEST(IntegrationConvFwdSerializeRoundTripFp32);
+TEST_P(IntegrationConvFwdSerializeRoundTripFp32, SerializeRoundTripExecutesCorrectly)
 {
     runGraphTest();
 }
 
 INSTANTIATE_TEST_SUITE_P(
     Smoke,
-    IntegrationGpuConvFwdSerializeRoundTripFp32,
+    IntegrationConvFwdSerializeRoundTripFp32,
     testing::Combine(testing::Values(TensorLayout::NCHW, TensorLayout::NHWC),
                      testing::ValuesIn(test_conv_common::getConvTestCases4D())));

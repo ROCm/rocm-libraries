@@ -1,0 +1,355 @@
+#!/usr/bin/env python3
+# Copyright © Advanced Micro Devices, Inc., or its affiliates.
+# SPDX-License-Identifier: MIT
+"""
+Self-test for the migration toolchain on a synthetic fixture.
+
+Creates 3 synthetic graphs: 2 isomorphic (same topology, different knobs)
+and 1 distinct. Verifies:
+  1. skeleton_hash groups the 2 isomorphic graphs together
+  2. place_bundles produces 1 sweep (2 cases) + 1 standalone
+  3. verify_migration round-trip passes for all 3
+  4. import_graph detects an exact duplicate (skip) and a new case (append)
+
+No C++ binary needed — everything is pure Python on synthetic data.
+
+Usage::
+
+    python3 test_migration.py [-v]
+"""
+
+import json
+import shutil
+import subprocess
+import sys
+import tempfile
+from pathlib import Path
+
+SCRIPT_DIR = Path(__file__).parent
+
+
+def _make_graph(node_type, tensor_uids, dims, strides, data_type, io_data_type=None):
+    """Build a minimal synthetic graph dict."""
+    nodes = [
+        {
+            "type": f"{node_type}Attributes",
+            "name": "",
+            "inputs": {f"x_tensor_uid": tensor_uids[0]},
+            "outputs": {f"y_tensor_uid": tensor_uids[-1]},
+        }
+    ]
+    tensors = []
+    for uid in tensor_uids:
+        tensors.append(
+            {
+                "uid": uid,
+                "name": "",
+                "dims": dims,
+                "strides": strides,
+                "data_type": data_type,
+                "virtual": False,
+            }
+        )
+    graph = {
+        "nodes": nodes,
+        "tensors": tensors,
+        "io_data_type": io_data_type or data_type,
+        "compute_data_type": "float",
+        "intermediate_data_type": "float",
+        "name": "",
+    }
+    return graph
+
+
+def _write_captured(capture_dir, suite, case_name, graph, meta=None):
+    """Write a captured case in the Hop A directory structure."""
+    case_dir = capture_dir / suite / case_name
+    case_dir.mkdir(parents=True, exist_ok=True)
+    with open(case_dir / f"{case_name}.json", "w") as f:
+        json.dump(graph, f, indent=2)
+    if meta is None:
+        meta = {"format_version": 1, "seed": 42}
+    with open(case_dir / f"{case_name}.meta.json", "w") as f:
+        json.dump(meta, f, indent=2)
+
+
+def run(args, check=True, cwd=None):
+    """Run a subprocess and return its result."""
+    result = subprocess.run(
+        args,
+        capture_output=True,
+        text=True,
+        cwd=cwd or SCRIPT_DIR,
+    )
+    if check and result.returncode != 0:
+        print(f"  FAIL: {' '.join(str(a) for a in args)}", file=sys.stderr)
+        print(f"  stdout: {result.stdout[:500]}", file=sys.stderr)
+        print(f"  stderr: {result.stderr[:500]}", file=sys.stderr)
+    return result
+
+
+def test_skeleton_grouping():
+    """2 isomorphic graphs get the same skeleton hash; 1 distinct differs."""
+    sys.path.insert(0, str(SCRIPT_DIR))
+    from bundle_utils import skeleton_hash
+
+    g1 = _make_graph("Relu", [0, 1], [2, 3, 4, 5], [60, 20, 5, 1], "float")
+    g2 = _make_graph("Relu", [0, 1], [4, 6, 8, 10], [480, 80, 10, 1], "half")
+    g3 = _make_graph("Conv", [0, 1, 2], [2, 3, 4, 5], [60, 20, 5, 1], "float")
+
+    h1 = skeleton_hash(g1)
+    h2 = skeleton_hash(g2)
+    h3 = skeleton_hash(g3)
+
+    assert h1 == h2, f"isomorphic graphs should match: {h1} vs {h2}"
+    assert h1 != h3, f"distinct graphs should differ: {h1} vs {h3}"
+    print("  PASS: skeleton_grouping")
+
+
+def test_place_and_verify():
+    """End-to-end: capture -> place -> verify."""
+    with tempfile.TemporaryDirectory() as tmp:
+        tmp = Path(tmp)
+        capture_dir = tmp / "captured"
+        bundle_dir = tmp / "bundles"
+
+        g1 = _make_graph("Relu", [0, 1], [2, 3, 4, 5], [60, 20, 5, 1], "float")
+        g2 = _make_graph("Relu", [0, 1], [4, 6, 8, 10], [480, 80, 10, 1], "half")
+        g3 = _make_graph("Conv", [0, 1, 2], [2, 3, 4, 5], [60, 20, 5, 1], "float")
+
+        _write_captured(capture_dir, "Smoke/IntegrationGpuReluFp32", "small_fp32", g1)
+        _write_captured(capture_dir, "Smoke/IntegrationGpuReluFp16", "small_fp16", g2)
+        _write_captured(capture_dir, "Smoke/IntegrationGpuConvFp32", "small_conv", g3)
+
+        # Hop B: place
+        r = run(
+            [
+                sys.executable,
+                str(SCRIPT_DIR / "place_bundles.py"),
+                "--capture-dir",
+                str(capture_dir),
+                "--output-dir",
+                str(bundle_dir),
+            ]
+        )
+        assert r.returncode == 0, f"place_bundles failed: {r.stderr}"
+
+        # Check output structure: should have 1 sweep (2 cases) + 1 standalone
+        sweeps = list(bundle_dir.rglob("sweep.json"))
+        templates = list(bundle_dir.rglob("graph.template.json"))
+        standalones = [
+            p
+            for p in bundle_dir.rglob("*.json")
+            if p.name not in ("sweep.json", "graph.template.json")
+            and not p.name.endswith(".meta.json")
+        ]
+
+        assert len(sweeps) == 1, f"expected 1 sweep, got {len(sweeps)}: {sweeps}"
+        assert len(templates) == 1, f"expected 1 template, got {len(templates)}"
+        assert len(standalones) == 1, f"expected 1 standalone, got {len(standalones)}"
+
+        with open(sweeps[0]) as f:
+            sweep = json.load(f)
+        assert (
+            len(sweep["cases"]) == 2
+        ), f"expected 2 sweep cases, got {len(sweep['cases'])}"
+
+        # Hop C: verify
+        r = run(
+            [
+                sys.executable,
+                str(SCRIPT_DIR / "verify_migration.py"),
+                "--capture-dir",
+                str(capture_dir),
+                "--bundle-dir",
+                str(bundle_dir),
+            ]
+        )
+        assert r.returncode == 0, f"verify_migration failed: {r.stderr}"
+
+        print("  PASS: place_and_verify")
+
+
+def test_import_dedup():
+    """import_graph detects exact dups and appends new cases."""
+    with tempfile.TemporaryDirectory() as tmp:
+        tmp = Path(tmp)
+        bundle_dir = tmp / "bundles"
+        bundle_dir.mkdir()
+
+        g1 = _make_graph("Relu", [0, 1], [2, 3, 4, 5], [60, 20, 5, 1], "float")
+        g2 = _make_graph("Relu", [0, 1], [4, 6, 8, 10], [480, 80, 10, 1], "half")
+        g_dup = _make_graph("Relu", [0, 1], [2, 3, 4, 5], [60, 20, 5, 1], "float")
+
+        # First import
+        graph_path = tmp / "g1.json"
+        with open(graph_path, "w") as f:
+            json.dump(g1, f)
+
+        r = run(
+            [
+                sys.executable,
+                str(SCRIPT_DIR / "import_graph.py"),
+                "--graph",
+                str(graph_path),
+                "--bundle-dir",
+                str(bundle_dir),
+            ]
+        )
+        assert r.returncode == 0, f"first import failed: {r.stderr}"
+
+        # Import exact dup -> should skip
+        dup_path = tmp / "g_dup.json"
+        with open(dup_path, "w") as f:
+            json.dump(g_dup, f)
+
+        r = run(
+            [
+                sys.executable,
+                str(SCRIPT_DIR / "import_graph.py"),
+                "--graph",
+                str(dup_path),
+                "--bundle-dir",
+                str(bundle_dir),
+            ]
+        )
+        assert r.returncode == 0, f"dup import should skip (rc=0): {r.stderr}"
+        assert "DUPLICATE" in r.stderr, "should report DUPLICATE"
+
+        # Import exact dup with --strict -> should fail
+        r = run(
+            [
+                sys.executable,
+                str(SCRIPT_DIR / "import_graph.py"),
+                "--graph",
+                str(dup_path),
+                "--bundle-dir",
+                str(bundle_dir),
+                "--strict",
+            ],
+            check=False,
+        )
+        assert r.returncode == 1, "strict dup should exit 1"
+
+        # Import structural match with new knobs -> should append
+        g2_path = tmp / "g2.json"
+        with open(g2_path, "w") as f:
+            json.dump(g2, f)
+
+        r = run(
+            [
+                sys.executable,
+                str(SCRIPT_DIR / "import_graph.py"),
+                "--graph",
+                str(g2_path),
+                "--bundle-dir",
+                str(bundle_dir),
+            ]
+        )
+        assert r.returncode == 0, f"new-case import failed: {r.stderr}"
+        assert "appended" in r.stderr, "should report appended"
+
+        # Verify the sweep now has 2 cases
+        sweeps = list(bundle_dir.rglob("sweep.json"))
+        assert len(sweeps) == 1
+        with open(sweeps[0]) as f:
+            sweep = json.load(f)
+        assert (
+            len(sweep["cases"]) == 2
+        ), f"expected 2 cases after append, got {len(sweep['cases'])}"
+
+        print("  PASS: import_dedup")
+
+
+def test_round_trip_expansion():
+    """expand(template, values) reproduces the original graph exactly."""
+    sys.path.insert(0, str(SCRIPT_DIR))
+    from bundle_utils import canon, canonical_uid_map, expand, remap_graph
+
+    g = _make_graph("Relu", [0, 1], [2, 3, 4, 5], [60, 20, 5, 1], "float")
+    g_canon = remap_graph(g, canonical_uid_map(g))
+
+    template = {
+        "nodes": [
+            {
+                "type": "ReluAttributes",
+                "name": "",
+                "inputs": {"x_tensor_uid": 0},
+                "outputs": {"y_tensor_uid": 1},
+            }
+        ],
+        "tensors": [
+            {
+                "uid": 0,
+                "name": "",
+                "dims": "${case.dims}",
+                "strides": "${case.strides}",
+                "data_type": "${case.data_type}",
+                "virtual": False,
+            },
+            {
+                "uid": 1,
+                "name": "",
+                "dims": "${case.dims}",
+                "strides": "${case.strides}",
+                "data_type": "${case.data_type}",
+                "virtual": False,
+            },
+        ],
+        "io_data_type": "${case.io_data_type}",
+        "compute_data_type": "float",
+        "intermediate_data_type": "float",
+        "name": "",
+    }
+
+    values = {
+        "io_data_type": "float",
+        "tensors": [
+            {
+                "uid": 0,
+                "dims": [2, 3, 4, 5],
+                "strides": [60, 20, 5, 1],
+                "data_type": "float",
+            },
+            {
+                "uid": 1,
+                "dims": [2, 3, 4, 5],
+                "strides": [60, 20, 5, 1],
+                "data_type": "float",
+            },
+        ],
+    }
+
+    expanded = expand(template, values)
+    assert canon(expanded) == canon(g_canon), "round-trip expansion mismatch"
+    print("  PASS: round_trip_expansion")
+
+
+def main() -> int:
+    verbose = "-v" in sys.argv
+    failures = 0
+
+    tests = [
+        test_skeleton_grouping,
+        test_round_trip_expansion,
+        test_place_and_verify,
+        test_import_dedup,
+    ]
+
+    for t in tests:
+        try:
+            t()
+        except Exception as e:
+            print(f"  FAIL: {t.__name__}: {e}", file=sys.stderr)
+            if verbose:
+                import traceback
+
+                traceback.print_exc()
+            failures += 1
+
+    print(f"\n{len(tests) - failures}/{len(tests)} passed")
+    return 1 if failures else 0
+
+
+if __name__ == "__main__":
+    sys.exit(main())
