@@ -260,6 +260,10 @@ INSTANTIATE_TEST_SUITE_P(TestCkTileSparseAttn,
 
 TEST_P(SpargeSage, DataTypeConfig)
 {
+    // sparge_sage uses ds_read_tr transpose-load + FP8/INT8 MFMA, supported only on gfx950/MI350.
+    if(!ck_tile::is_gfx95_supported())
+        GTEST_SKIP() << "sparge_sage requires gfx950";
+
     auto [mode, qkdtype, qscale, dims]              = GetParam();
     auto [batch, nhead, nhead_k, s, sp, mask, bias] = dims;
     auto result                                     = run<DataTypeConfig>("sparge_sage",
