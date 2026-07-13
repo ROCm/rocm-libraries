@@ -13,9 +13,10 @@ Documentation for rocThrust available at
 
 ### Changed
 
-* Defined `THRUST_COMP_DEPR_IMPL` with `_CCCL_WARNING`.
-* Replaced `hip::std::__identity` to `hip::std::identity`.
 * Replaced bad_alloc, cassert, cfloat, cmath, complex, cstddef, cstdint, cstring, initializer_list, limits, move and type_traits operators to `hip::std` operators.
+* Replaced `hip::std::__identity` to `hip::std::identity`.
+* Replaced ``_LIBCUDACXX_HIDE_FROM_ABI`` with ``_CCCL_API``.
+* Defined `THRUST_COMP_DEPR_IMPL` with `_CCCL_WARNING`.
 
 ### Removed
 

@@ -33,6 +33,7 @@ AttributeMacros: [
                   # thrust
                   '_CCCL_ALIGNAS_TYPE',
                   '_CCCL_ALIGNAS',
+                  '_CCCL_API',
                   '_CCCL_CONSTEXPR_CXX14',
                   '_CCCL_CONSTEXPR_CXX17',
                   '_CCCL_CONSTEXPR_CXX20',
@@ -64,8 +65,6 @@ AttributeMacros: [
                   '_LIBCUDACXX_EXPORTED_FROM_ABI',
                   '_LIBCUDACXX_EXTERN_TEMPLATE_TYPE_VIS',
                   '_LIBCUDACXX_HIDDEN',
-                  '_LIBCUDACXX_HIDE_FROM_ABI_AFTER_V1',
-                  '_LIBCUDACXX_HIDE_FROM_ABI',
                   '_LIBCUDACXX_INLINE_VISIBILITY',
                   '_LIBCUDACXX_INTERNAL_LINKAGE',
                   '_LIBCUDACXX_METHOD_TEMPLATE_IMPLICIT_INSTANTIATION_VIS',

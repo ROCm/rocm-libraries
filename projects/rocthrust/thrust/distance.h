@@ -39,7 +39,7 @@ THRUST_NAMESPACE_BEGIN
 
 template <class InputIter>
 CCCL_DEPRECATED_BECAUSE("Use cuda::std::distance instead")
-[[nodiscard]] _LIBCUDACXX_HIDE_FROM_ABI constexpr typename _THRUST_STD::iterator_traits<InputIter>::difference_type
+[[nodiscard]] _CCCL_API constexpr typename _THRUST_STD::iterator_traits<InputIter>::difference_type
   distance(InputIter first, InputIter last)
 {
   return _THRUST_STD::distance(first, last);

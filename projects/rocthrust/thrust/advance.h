@@ -37,7 +37,7 @@ THRUST_NAMESPACE_BEGIN
 //! deprecated [since 10.1]
 template <typename InputIterator, typename Distance>
 CCCL_DEPRECATED_BECAUSE("Use ::hip::std::advance instead")
-_LIBCUDACXX_HIDE_FROM_ABI constexpr void advance(InputIterator& i, Distance n)
+_CCCL_API constexpr void advance(InputIterator& i, Distance n)
 {
   _THRUST_STD::advance(i, n);
 }
@@ -45,7 +45,7 @@ _LIBCUDACXX_HIDE_FROM_ABI constexpr void advance(InputIterator& i, Distance n)
 //! deprecated [since 10.1]
 template <typename InputIterator>
 CCCL_DEPRECATED_BECAUSE("Use ::hip::std::next instead")
-_LIBCUDACXX_HIDE_FROM_ABI constexpr InputIterator
+_CCCL_API constexpr InputIterator
   next(InputIterator i, typename _THRUST_STD::iterator_traits<InputIterator>::difference_type n = 1)
 {
   return _THRUST_STD::next(i, n);
@@ -54,7 +54,7 @@ _LIBCUDACXX_HIDE_FROM_ABI constexpr InputIterator
 //! deprecated [since 10.1]
 template <typename InputIterator>
 CCCL_DEPRECATED_BECAUSE("Use ::hip::std::prev instead")
-_LIBCUDACXX_HIDE_FROM_ABI constexpr InputIterator
+_CCCL_API constexpr InputIterator
   prev(InputIterator i, typename _THRUST_STD::iterator_traits<InputIterator>::difference_type n = 1)
 {
   return _THRUST_STD::prev(i, n);
