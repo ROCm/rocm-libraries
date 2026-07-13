@@ -87,6 +87,7 @@ __device__ void run_set_taubeta(T* tau, T* norms, T* alpha, S* beta)
     }
     else
     {
+#ifdef ROCSOLVER_ENABLE_LARFG_TAU2
         // Let H = -I, tau = 2. Differs from LAPACK, which has H = I, tau = 0.
         norms[0] = 1;
         tau[0] = 2;
@@ -101,6 +102,17 @@ __device__ void run_set_taubeta(T* tau, T* norms, T* alpha, S* beta)
             beta[0] = -alpha[0];
             alpha[0] = 1;
         }
+#else
+        norms[0] = 1;
+        tau[0] = 0;
+
+        // beta:
+        if(!ignore_beta)
+        {
+            beta[0] = alpha[0];
+            alpha[0] = 1;
+        }
+#endif
     }
 }
 
@@ -144,6 +156,7 @@ __device__ void run_set_taubeta(T* tau, T* norms, T* alpha, S* beta)
     }
     else
     {
+#ifdef ROCSOLVER_ENABLE_LARFG_TAU2
         // Let H = -I, tau = 2. Differs from LAPACK, which has H = I, tau = 0.
         norms[0] = 1;
         tau[0] = 2;
@@ -158,6 +171,17 @@ __device__ void run_set_taubeta(T* tau, T* norms, T* alpha, S* beta)
             beta[0] = -alpha[0].real();
             alpha[0] = 1;
         }
+#else
+        norms[0] = 1;
+        tau[0] = 0;
+
+        // beta:
+        if(!ignore_beta)
+        {
+            beta[0] = alpha[0].real();
+            alpha[0] = 1;
+        }
+#endif
     }
 }
 

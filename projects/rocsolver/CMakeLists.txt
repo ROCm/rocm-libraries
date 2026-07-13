@@ -63,6 +63,10 @@ option(ROCSOLVER_FIND_PACKAGE_LAPACK_CONFIG "Skip module mode search for LAPACK"
 option(ROCSOLVER_USE_INTERNAL_BLAS "Use internal implementation of GEMM and TRSM for debugging." OFF)
 option(ROCSOLVER_USE_REFERENCE_SECULAR_EQUATIONS_SOLVER "Use LAPACK like implementation of secular equations solver" ON)
 
+# Feature flag for larfg to set tau=2 (non-singular T) instead of
+# tau=0 (singular T) when norm(x)=0.
+option(ROCSOLVER_ENABLE_LARFG_TAU2 "Enable larfg setting tau=2 when norm(x)=0" ON)
+
 # Add our CMake helper files to the lookup path
 list(APPEND CMAKE_MODULE_PATH "${CMAKE_CURRENT_SOURCE_DIR}/cmake")
 
