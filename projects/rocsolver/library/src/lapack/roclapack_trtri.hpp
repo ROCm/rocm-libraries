@@ -4,7 +4,7 @@
  *     Univ. of Tennessee, Univ. of California Berkeley,
  *     Univ. of Colorado Denver and NAG Ltd..
  *     December 2016
- * Copyright (C) 2021-2024 Advanced Micro Devices, Inc. All rights reserved.
+ * Copyright (C) 2021-2026 Advanced Micro Devices, Inc. All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -90,7 +90,8 @@ rocblas_int trtri_get_blksize(const rocblas_int dim)
 }
 
 template <bool BATCHED, bool STRIDED, typename T>
-void rocsolver_trtri_getMemorySize(const rocblas_diagonal diag,
+void rocsolver_trtri_getMemorySize(rocblas_handle handle,
+                                   const rocblas_diagonal diag,
                                    const rocblas_int n,
                                    const rocblas_int batch_count,
                                    size_t* size_work1,
@@ -136,7 +137,10 @@ void rocsolver_trtri_getMemorySize(const rocblas_diagonal diag,
     // requirements for TRTI2
     rocblas_int nn = (blk == 1) ? n : blk;
 #ifdef OPTIMAL
-    if(nn <= TRTRI_MAX_COLS)
+    // the optimized small-size kernel is warp-synchronous, so it is only valid for
+    // n <= wavefront size
+    const hipDeviceProp_t* props = rocblas_internal_get_device_prop(handle);
+    if(nn <= std::min(TRTRI_MAX_COLS, props->warpSize))
     {
         // if very small size, no workspace needed
         w1a = 0;
@@ -232,8 +236,9 @@ void trti2(rocblas_handle handle,
            T* alphas)
 {
 #ifdef OPTIMAL
-    // if very small size, use optimized kernel
-    if(n <= TRTRI_MAX_COLS)
+    // if very small size, use optimized kernel (warp-synchronous, so only valid for n <= wavefront)
+    const hipDeviceProp_t* props = rocblas_internal_get_device_prop(handle);
+    if(n <= std::min(TRTRI_MAX_COLS, props->warpSize))
     {
         trti2_run_small<T>(handle, uplo, diag, n, A, shiftA, lda, strideA, batch_count);
         return;
@@ -245,9 +250,7 @@ void trti2(rocblas_handle handle,
     rocblas_stride stdw = rocblas_stride(n);
 
     // everything must be executed with scalars on the device
-    rocblas_pointer_mode old_mode;
-    rocblas_get_pointer_mode(handle, &old_mode);
-    rocblas_set_pointer_mode(handle, rocblas_pointer_mode_device);
+    rocblas_pointer_mode_saver saver(handle, rocblas_pointer_mode_device);
 
     // inverse of the diagonal (reciprocals)
     rocblas_int blocks = (n - 1) / 32 + 1;
@@ -278,8 +281,6 @@ void trti2(rocblas_handle handle,
                                 shiftA + idx2D(j + 1, j, lda), 1, strideA, batch_count);
         }
     }
-
-    rocblas_set_pointer_mode(handle, old_mode);
 }
 
 template <bool BATCHED, bool STRIDED, typename T, typename U>
@@ -322,9 +323,7 @@ rocblas_status rocsolver_trtri_template(rocblas_handle handle,
         return rocblas_status_success;
 
     // everything must be executed with scalars on the host
-    rocblas_pointer_mode old_mode;
-    rocblas_get_pointer_mode(handle, &old_mode);
-    rocblas_set_pointer_mode(handle, rocblas_pointer_mode_host);
+    rocblas_pointer_mode_saver saver(handle, rocblas_pointer_mode_host);
     T one = 1;
     T minone = -1;
 
@@ -425,7 +424,6 @@ rocblas_status rocsolver_trtri_template(rocblas_handle handle,
                                 info_mask(info));
     }
 
-    rocblas_set_pointer_mode(handle, old_mode);
     return rocblas_status_success;
 }
 

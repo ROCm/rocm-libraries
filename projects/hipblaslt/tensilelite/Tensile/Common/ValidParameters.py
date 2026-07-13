@@ -412,6 +412,9 @@ validParameters = { # we need to make sure this matches develop
     "OptNoLoadLoop": [0, 1, 2],
     "BufferLoad": [False, True],
     "BufferStore": [False, True],
+    # CompactLoopStore default (opt-in, off by default). When enabled, the
+    # per-batch global write body is wrapped in a CLS countdown loop and
+    "CompactLoopStore": [False, True],
     # Attempt to load directly from global memory into Vgpr.
     # Assembly only
     "DirectToVgprA": [False, True],
@@ -727,6 +730,10 @@ validParameters = { # we need to make sure this matches develop
     "StoreRemapVectorWidth": [-1, 0, 1, 2, 4, 8],
     # SourceSwap: Optimizes MatrixInstruction store pattern by swapping mfma input order.
     "SourceSwap": [False, True],
+    # UseDualFMAC: emit RDNA3/3.5/4 VOPD v_dual_fmac_f32 pairs in the f32 source/MAC inner
+    # loop (2x FMA issue rate). Source (non-MFMA) f32 kernels on gfx11/gfx12 only; auto-
+    # disabled elsewhere (see SolutionStructs.Solution.assignProblemIndependentDerivedParameters).
+    "UseDualFMAC": [False, True],
     # Following parameters are designed for store scheduling.
     # (store stands for load from C (with beta) and store to C/D)
     #
@@ -770,9 +777,10 @@ validParameters = { # we need to make sure this matches develop
     # Total work units are calculated as (#MTs x #LoopIters) and divided among workgroups.
     # In most cases each workgroup will calculate a partial tile that are accumulated in a fixup step in the same kernel
     # 0 : Standard data-parallel kernel
-    # 1 : Basic StreamK
-    # 2 : Two-Tile StreamK (each WG completes an even number of sk iterations, followed by an even number of dp tiles)
     # 3 : Two-Tile StreamK with DP before SK tiles
+    # 4 : Dynamic StreamK using per-XCD work queues
+    # 5 : Hybrid SK3 + SK4 in one kernel; mode bit 30 of MagicShiftItersPerTile
+    #     selects the active sub-path (see StreamKHybrid in StreamK.py).
     # StreamK kernels can adjust the number of CUs being used.
     # Using fewer sometimes increases overall throughput by allowing other kernels to run in parallel.
     # StreamK grid is controlled by setting these enviornment variables:
@@ -797,7 +805,7 @@ validParameters = { # we need to make sure this matches develop
     #   1 = 1 WG per CU (default), for example. 2 will launch WGs = 2 x CU count.
     # The priority of these environment variables is defined as follows:
     # TENSILE_STREAMK_FIXED_GRID > TENSILE_STREAMK_DYNAMIC_GRID > TENSILE_STREAMK_MAX_CUS > TENSILE_STREAMK_GRID_MULTIPLIER
-    "StreamK": [0, 1, 2, 3, 4],
+    "StreamK": [0, 3, 4, 5],
     # Force StreamK=3 to run all output tiles through the persistent DP path.
     # When enabled, dispatch uses the single-kernel StreamK path, sets skTiles=0
     # to skip the SK region, and keeps the normal StreamK grid selection policy.
@@ -828,7 +836,7 @@ validParameters = { # we need to make sure this matches develop
     "DebugStreamK": [0, 1, 2, 3],
     # Persistent-kernel debug: when True, the persistent loop never exits.
     # Used as a co-tenant load kernel for contended-perf benchmarking.
-    # Termination is via process death. Requires StreamK = 1, 2, or 3.
+    # Termination is via process death. Requires StreamK = 3.
     "DebugPersistentKernelLoopForever": [False, True],
     # Controls desired width (#elements) for loads from global memory -> LDS.
     # and eliminates the pointer unshift logic
@@ -1251,7 +1259,6 @@ def checkParametersAreValid(
     from .TypeValidationErrors import (
         ConfigTypeError,
         formatMismatch,
-        _STRICT_GATE_ENABLED,
     )
 
     (name, values) = param
@@ -1266,8 +1273,7 @@ def checkParametersAreValid(
         )
 
     runTypeCheck = (
-        _STRICT_GATE_ENABLED
-        and name in _expectedParamTypes
+        name in _expectedParamTypes
         and name not in _skipTypeCheck
     )
 
@@ -1319,11 +1325,8 @@ def validateInternalSupportParams(
         return
 
     from .TypeValidationErrors import (
-        ConfigTypeError, formatMismatch, _STRICT_GATE_ENABLED,
+        ConfigTypeError, formatMismatch,
     )
-
-    if not _STRICT_GATE_ENABLED:
-        return
 
     # defaultInternalSupportParams lives in Common/GlobalParameters; import
     # lazily because that module pulls in a lot.

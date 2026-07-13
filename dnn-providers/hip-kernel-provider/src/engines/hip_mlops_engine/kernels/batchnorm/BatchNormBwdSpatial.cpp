@@ -133,11 +133,6 @@ __forceinline__ __host__ __device__ FpPrecVecType
 
 } // namespace
 
-// Note: Calls with !HIP_PLUGIN_BN_USESAVED configurations are not tested with the CI. Apparently there are
-// some precision issues with the original CL version as well; it is not clear if this is an
-// implementation or design problem. During the HIP port we only verified that these kernels run and
-// give valid numerical result, but the precision issues were not addressed.
-
 namespace hip_kernel_provider
 {
 namespace batchnorm
@@ -446,7 +441,7 @@ struct BatchNormBwdSpatialImpl<1, FpType, FpPrecType, FpAccumType>
             {
                 if(lid < rem4)
                 {
-                    unsigned int index = getTensorIndex(lid + less4);
+                    unsigned int index = getTensorIndex((lid << 2) + less4);
                     if(index + read_size - 1 < hip_plugin_bn_config::nchw)
                     {
                         read4 = cast<fp_prec_read_vec_type>(

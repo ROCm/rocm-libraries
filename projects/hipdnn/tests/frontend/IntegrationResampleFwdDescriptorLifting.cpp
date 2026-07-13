@@ -106,6 +106,9 @@ TEST_F(IntegrationResampleFwdDescriptorLifting, BasicResampleFwdRoundTrip)
               toVec(K_RESAMPLE_FWD_TENSOR_Y_STRIDES));
     EXPECT_EQ(tensorMap[K_RESAMPLE_FWD_TENSOR_Y_UID]->get_data_type(), DataType::FLOAT);
 
+    // Verify index tensor
+    ASSERT_EQ(tensorMap.count(K_RESAMPLE_FWD_TENSOR_INDEX_UID), 0u);
+
     // Verify sub-node count and type
     auto& subNodes = liftedGraph->getSubNodes();
     ASSERT_EQ(subNodes.size(), 1u) << "Expected 1 operation node in lifted graph";
@@ -127,6 +130,9 @@ TEST_F(IntegrationResampleFwdDescriptorLifting, BasicResampleFwdRoundTrip)
     EXPECT_EQ(opNode->attributes.get_stride(), toVec(K_RESAMPLE_FWD_STRIDE));
     // Verify window
     EXPECT_EQ(opNode->attributes.get_window(), toVec(K_RESAMPLE_FWD_WINDOW));
+
+    // Verify generate index
+    EXPECT_FALSE(opNode->attributes.get_generate_index().has_value());
 
     // Verify operation name
     EXPECT_EQ(opNode->attributes.get_name(), "test_op");
@@ -260,8 +266,10 @@ TEST_F(IntegrationResampleFwdDescriptorLifting, GenerateIndexPreservedInLiftingR
     attrs.set_window(toVec(K_RESAMPLE_FWD_WINDOW));
     attrs.set_generate_index(true);
 
-    auto y = graph->resample_fwd(x, attrs);
+    auto [y, index] = graph->resample(x, attrs);
     y->set_uid(K_RESAMPLE_FWD_TENSOR_Y_UID).set_output(true).set_name("y");
+    index->set_uid(K_RESAMPLE_FWD_TENSOR_INDEX_UID).set_output(true).set_name("index");
+    index->set_uid(K_RESAMPLE_FWD_TENSOR_INDEX_UID).set_data_type(DataType::INT8);
 
     auto result = graph->validate();
     ASSERT_EQ(result.code, ErrorCode::OK) << result.err_msg;
@@ -284,11 +292,19 @@ TEST_F(IntegrationResampleFwdDescriptorLifting, GenerateIndexPreservedInLiftingR
 
     ASSERT_TRUE(opNode->attributes.get_generate_index().has_value());
     EXPECT_EQ(opNode->attributes.get_generate_index().value(), true);
-}
 
-// TODO: Add IndexTensorPreservedInLiftingRoundTrip test once resample_fwd_with_index
-// API is available on the Graph class. The index tensor parameter from the schema
-// needs coverage in the lifting round-trip.
+    // Verify tensor dims and strides
+    auto tensorMap = liftedGraph->getTensorsByUid();
+    ASSERT_EQ(tensorMap.size(), 3u);
+
+    ASSERT_NE(tensorMap.count(K_RESAMPLE_FWD_TENSOR_INDEX_UID), 0u);
+    EXPECT_EQ(tensorMap[K_RESAMPLE_FWD_TENSOR_INDEX_UID]->get_dim(),
+              toVec(K_RESAMPLE_FWD_TENSOR_INDEX_DIMS));
+    EXPECT_EQ(tensorMap[K_RESAMPLE_FWD_TENSOR_INDEX_UID]->get_stride(),
+              toVec(K_RESAMPLE_FWD_TENSOR_INDEX_STRIDES));
+    EXPECT_EQ(tensorMap[K_RESAMPLE_FWD_TENSOR_INDEX_UID]->get_data_type(), DataType::INT8);
+    EXPECT_EQ(tensorMap[K_RESAMPLE_FWD_TENSOR_INDEX_UID]->get_name(), "index");
+}
 
 // Creates tensors without explicit set_uid(), verifies that auto-assigned UIDs
 // survive the round trip and are all distinct.

@@ -1,0 +1,55 @@
+# hipFFT Test Categories Configuration
+#
+
+test_categories:
+  quick:
+    description: "Smoke - hipfft-test --smoketest (target: ~5 min)"
+    test_patterns:
+      - "*"
+    exclude:
+    extra_args:
+      - "--smoketest"
+    labels:
+      - "quick"
+
+  standard:
+    description: "Pre-checkin - hipfft-test --test_prob 0.02"
+    test_patterns:
+      - "*"
+    exclude:
+      - "*multi_gpu*"
+    extra_args:
+      - "--test_prob"
+      - "0.02"
+    labels:
+    #Same tests run for comprehensive and full categories
+      - "standard"
+      - "comprehensive"
+      - "full"
+
+  # Multi-GPU only subset. These tests are excluded from the single-GPU
+  # categories above (via "*multi_gpu*" excludes) and are instead selected
+  # by a dedicated multi-GPU CI job that runs `ctest -L multigpu_<tier>`.
+  # The labels are namespaced (multigpu_*) so they never overlap with the
+  # single-GPU tier labels, meaning a single-GPU `ctest -L standard` run can
+  # never pick these up, and `ctest -L multigpu_quick` is naturally empty.
+  multigpu_tests:
+    description: "Multi-GPU only - hipfft-test *multi_gpu* (multi-GPU runner)"
+    test_patterns:
+      - "*multi_gpu*"
+    exclude:
+    extra_args:
+      - "--test_prob"
+      - "0.02"
+    labels:
+      - "multigpu_comprehensive"
+      - "multigpu_full"
+
+execution_settings:
+  timeout_multiplier: 1
+  category_timeouts:
+    quick: 600           # 10 min
+    standard: 3600       # 1 hour
+    comprehensive: 14400 # 4 hours
+    full: 43200          # 12 hours
+    multigpu_tests: 3600 # 1 hour

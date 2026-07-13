@@ -20,7 +20,6 @@
  *
  * ************************************************************************ */
 
-#include "asan_helpers.hpp"
 #include "check_numerics_matrix.hpp"
 #include "check_numerics_vector.hpp"
 #include "gemv_device.hpp"
@@ -257,6 +256,7 @@ rocblas_status rocblas_internal_gemv_launcher(rocblas_handle    handle,
         else if(n <= 128 && m >= 2048 * n)
         {
             // skinny tuned block size
+
             static constexpr int GEMVN_DIM_X = 64;
             static constexpr int GEMVN_DIM_Y = 4;
             rocblas_int          blocks      = (m - 1) / (GEMVN_DIM_X * 4) + 1;
@@ -343,10 +343,9 @@ rocblas_status rocblas_internal_gemv_launcher(rocblas_handle    handle,
         strideA, x, shiftx, incx, stridex, y, shifty, incy, stridey, batch_count
 
                 // The following kernel does the `y += A * x` computation
-                static constexpr int thread_x = rocblas_gemv_bx();
-                static constexpr int block_y  = 8;
-                static constexpr int thread_y = rocblas::conditional_v < rocblas_enable_asan, 2,
-                                     is_float ? 8 : 4 > ;
+                static constexpr int thread_x            = rocblas_gemv_bx();
+                static constexpr int block_y             = 8;
+                static constexpr int thread_y            = is_float ? 8 : 4;
                 static constexpr int elements_per_thread = thread_x / (2 * thread_y);
 
                 const int block_x = m / thread_x;
@@ -395,7 +394,7 @@ rocblas_status rocblas_internal_gemv_launcher(rocblas_handle    handle,
                                     && n <= dgemvn_gfx906_upper_threshold))))))
         {
             static constexpr int GEMVN_DIM_X = 32;
-            static constexpr int GEMVN_DIM_Y = rocblas::conditional_v<rocblas_enable_asan, 8, 16>;
+            static constexpr int GEMVN_DIM_Y = 16;
             rocblas_int          blocks      = (m - 1) / (GEMVN_DIM_X * 4) + 1;
             if(std::is_same_v<Tex, rocblas_double_complex>)
                 blocks = (m - 1) / (GEMVN_DIM_X) + 1;
@@ -430,7 +429,7 @@ rocblas_status rocblas_internal_gemv_launcher(rocblas_handle    handle,
         {
             // GEMVN_DIM_Y must be at least 4, 8 * 8 is very slow only 40Gflop/s
             static constexpr int GEMVN_DIM_X = 64;
-            static constexpr int GEMVN_DIM_Y = rocblas::conditional_v<rocblas_enable_asan, 4, 16>;
+            static constexpr int GEMVN_DIM_Y = 16;
             rocblas_int          blocks      = (m - 1) / (GEMVN_DIM_X * 4) + 1;
             if(std::is_same_v<Tex, rocblas_double_complex>)
                 blocks = (m - 1) / (GEMVN_DIM_X) + 1;
@@ -540,7 +539,7 @@ rocblas_status rocblas_internal_gemv_launcher(rocblas_handle    handle,
             if constexpr(is_float)
             {
                 const int TILE_DIM_X = 16;
-                const int TILE_DIM_Y = rocblas::conditional_v<rocblas_enable_asan, 16, 64>;
+                const int TILE_DIM_Y = 64;
                 dim3      gemvt_threads(TILE_DIM_X, TILE_DIM_Y);
                 dim3      gemvt_grid((n - 1) / TILE_DIM_Y + 1, 1, batches);
                 if(handle->pointer_mode == rocblas_pointer_mode_device)
@@ -555,7 +554,7 @@ rocblas_status rocblas_internal_gemv_launcher(rocblas_handle    handle,
             else if constexpr(is_double || is_complex_float)
             {
                 const int TILE_DIM_X = 16;
-                const int TILE_DIM_Y = rocblas::conditional_v<rocblas_enable_asan, 16, 32>;
+                const int TILE_DIM_Y = 32;
                 dim3      gemvt_threads(TILE_DIM_X, TILE_DIM_Y);
                 dim3      gemvt_grid((n - 1) / TILE_DIM_Y + 1, 1, batches);
                 if(handle->pointer_mode == rocblas_pointer_mode_device)
@@ -700,10 +699,9 @@ rocblas_status rocblas_internal_gemv_launcher(rocblas_handle    handle,
                                               batch_count);
                 }
                 // The following kernel does the `y += A * x` computation
-                static constexpr int thread_x = rocblas_gemv_bx();
-                static constexpr int block_y  = is_float ? 8 : 16;
-                static constexpr int thread_y = rocblas::conditional_v < rocblas_enable_asan, 2,
-                                     is_float ? 8 : 4 > ;
+                static constexpr int thread_x            = rocblas_gemv_bx();
+                static constexpr int block_y             = is_float ? 8 : 16;
+                static constexpr int thread_y            = is_float ? 8 : 4;
                 static constexpr int elements_per_thread = thread_x / (2 * thread_y);
 
                 const int block_x = n / thread_x;
@@ -806,7 +804,7 @@ rocblas_status rocblas_internal_gemv_launcher(rocblas_handle    handle,
         else
         {
             //Number of threads per block
-            static constexpr int NB = rocblas::conditional_v<rocblas_enable_asan, 256, 1024>;
+            static constexpr int NB = 1024;
             dim3                 gemvt_grid(n, 1, batches);
             dim3                 gemvt_threads(NB);
 
@@ -912,7 +910,7 @@ rocblas_status rocblas_internal_gemv_launcher(rocblas_handle    handle,
             if constexpr(is_float)
             {
                 const int TILE_DIM_X = 16;
-                const int TILE_DIM_Y = rocblas::conditional_v<rocblas_enable_asan, 16, 64>;
+                const int TILE_DIM_Y = 64;
                 dim3      gemvt_threads(TILE_DIM_X, TILE_DIM_Y);
                 dim3      gemvt_grid((n - 1) / TILE_DIM_Y + 1, 1, batches);
                 if(handle->pointer_mode == rocblas_pointer_mode_device)
@@ -927,7 +925,7 @@ rocblas_status rocblas_internal_gemv_launcher(rocblas_handle    handle,
             else if constexpr(is_double || is_complex_float)
             {
                 const int TILE_DIM_X = 16;
-                const int TILE_DIM_Y = rocblas::conditional_v<rocblas_enable_asan, 16, 32>;
+                const int TILE_DIM_Y = 32;
                 dim3      gemvt_threads(TILE_DIM_X, TILE_DIM_Y);
                 dim3      gemvt_grid((n - 1) / TILE_DIM_Y + 1, 1, batches);
                 if(handle->pointer_mode == rocblas_pointer_mode_device)
@@ -1069,10 +1067,9 @@ rocblas_status rocblas_internal_gemv_launcher(rocblas_handle    handle,
                                               batch_count);
                 }
                 // The following kernel does the `y += A * x` computation
-                static constexpr int thread_x = rocblas_gemv_bx();
-                static constexpr int block_y  = is_float ? 8 : 16;
-                static constexpr int thread_y = rocblas::conditional_v < rocblas_enable_asan, 2,
-                                     is_float ? 8 : 4 > ;
+                static constexpr int thread_x            = rocblas_gemv_bx();
+                static constexpr int block_y             = is_float ? 8 : 16;
+                static constexpr int thread_y            = is_float ? 8 : 4;
                 static constexpr int elements_per_thread = thread_x / (2 * thread_y);
 
                 const int block_x = n / thread_x;
@@ -1136,7 +1133,7 @@ rocblas_status rocblas_internal_gemv_launcher(rocblas_handle    handle,
         else
         {
             //Number of threads per block
-            static constexpr int NB = rocblas::conditional_v<rocblas_enable_asan, 256, 1024>;
+            static constexpr int NB = 1024;
             dim3                 gemvt_grid(n, 1, batches);
             dim3                 gemvt_threads(NB);
             if(handle->pointer_mode == rocblas_pointer_mode_device)

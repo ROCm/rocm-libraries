@@ -1,0 +1,80 @@
+# Copyright © Advanced Micro Devices, Inc., or its affiliates.
+# SPDX-License-Identifier: MIT
+#
+# hipblaslt-provider Test Categories Configuration
+# Aligned with Test Filter Standardization (RFC0010).
+#
+# hipblaslt-provider has two GTest binaries
+# (hipblaslt_plugin_tests and hipblaslt_plugin_integration_tests) that share
+# this YAML. Tier behaviour mirrors the legacy test_hipblasltprovider.py:
+#   - quick: GTEST_FILTER="-Full*" (forward-compatible — there are no
+#     INSTANTIATE_TEST_SUITE_P(Full, ...) entries today, but this matches
+#     the legacy intent so any future Full* parameterisations are skipped
+#     in the quick tier automatically).
+#   - comprehensive/full: run everything (no extra exclusions).
+#
+# Unit tests in tests/ use TEST/TEST_F with class prefixes Test*; integration
+# tests in integration_tests/ use INSTANTIATE_TEST_SUITE_P(IntegrationGpuMatmul*, ...).
+# The legacy test_hipblasltprovider.py has no TEST_TO_IGNORE map, so this
+# YAML carries no exclude_gpu block. Add one (with the OS-suffixed key shape
+# already supported by shared/ctest/parse_test_categories.py via the
+# tf_rocprim / tf_miopen_prov work) if a GPU+OS-specific carve-out becomes
+# necessary later.
+
+# YAML anchor for the shared exclusion list. *DISABLED* is the standard
+# GTest convention for skipped tests.
+_common_excludes: &common_excludes
+  - "*DISABLED*"
+
+test_categories:
+  quick:
+    description: "Fast sanity checks (target: < 5 min) - excludes Full* parameterised expansions"
+    test_patterns:
+      - "*"
+    exclude:
+      - "*DISABLED*"
+      - "Full*"
+    labels:
+      - "quick"
+      - "pre-commit"
+      - "smoke"
+
+  standard:
+    description: "Pre-checkin validation (target: < 45 min) - same shape as quick (no Standard* tier exists)"
+    test_patterns:
+      - "*"
+    exclude:
+      - "*DISABLED*"
+      - "Full*"
+    labels:
+      - "standard"
+      - "pr"
+      - "precheckin"
+
+  comprehensive:
+    description: "Nightly comprehensive tests (target: < 7 hours) - includes Full* tier"
+    test_patterns:
+      - "*"
+    exclude: *common_excludes
+    labels:
+      - "comprehensive"
+      - "nightly"
+      - "extended"
+
+  full:
+    description: "Complete test suite - all tests including Full*"
+    test_patterns:
+      - "*"
+    exclude: *common_excludes
+    labels:
+      - "full"
+      - "all"
+
+execution_settings:
+  default_timeout: 300
+  timeout_multiplier: 1
+  category_timeouts:
+    quick: 300            # 5 minutes
+    standard: 2700        # 45 minutes
+    comprehensive: 25200  # 7 hours
+    full: 28800           # 8 hours

@@ -2,17 +2,16 @@ TestParameters:
   marks: [skip-gfx900, skip-gfx906, skip-gfx908, skip-gfx90a, skip-gfx940, skip-gfx941, skip-gfx942, skip-gfx950, skip-gfx1010, skip-gfx1011, skip-gfx1012, skip-gfx1030, skip-gfx1100, skip-gfx1101, skip-gfx1102, skip-gfx1200, skip-gfx1201]
 
 GlobalParameters:
+  SyncsPerBenchmark: 0
   NumElementsToValidate: -1
   KernelTime: True
-  NewClient: 2
-  BoundsCheck: False
+  BoundsCheck: 0
   ValidationMaxToPrint: 4
   ValidationPrintValids: False
   DataInitTypeA: 3
   DataInitTypeB: 3
   NumWarmups: 1
   EnqueuesPerSync: 1
-  MinKForGSU: 1
   Architecture: gfx1250
   PrintSolutionRejectionReason: True
 
@@ -27,8 +26,8 @@ BenchmarkProblems:
       DestDataType: f8
       ComputeDataType: s
       HighPrecisionAccumulate: True
-      TransposeA: 0
-      TransposeB: 0
+      TransposeA: false
+      TransposeB: false
       UseBeta: True
       SparseA: False
       Activation: False
@@ -54,15 +53,15 @@ BenchmarkProblems:
         - ClusterLocalRead: [1]
         - NumElementsPerBatchStore: [0]
         - DepthU: [64]
-        - VectorWidthA: [8]
-        - VectorWidthB: [2]
+        - VectorWidthA: [1]
+        - VectorWidthB: [1]
         - WaveSeparateGlobalReadA: [0]
         - WaveSeparateGlobalReadB: [0]
         - WorkGroupMapping: [1]
         - WorkGroupMappingXCC: [1]
         - LocalReadVectorWidth: [16]
         - ScheduleIterAlg: [3]
-        - ExpandPointerSwap: [0]
+        - ExpandPointerSwap: [false]
         - TransposeLDS: [1] #
         - LdsBlockSizePerPadA: [-1]
         - LdsBlockSizePerPadB: [-1]
@@ -70,7 +69,7 @@ BenchmarkProblems:
         - LdsPadB: [-1]
         - GlobalSplitU: [1]
         - GlobalSplitUAlgorithm: ["MultipleBuffer"]
-        - SourceSwap: [1]
+        - SourceSwap: [false]
         - ActivationFuncCall: [true]
         - 1LDSBuffer: [1]
         - StaggerU: [32]
@@ -84,6 +83,8 @@ BenchmarkProblems:
       BenchmarkFinalParameters:
         - ProblemSizes:
           - Exact: [ 64, 512, 1, 64]
+          - Exact: [ 64, 512, 1, 96]
+          - Exact: [ 8, 16, 1, 96]
 
   #######################################
   # TN - standard
@@ -95,8 +96,8 @@ BenchmarkProblems:
       DestDataType: f8
       ComputeDataType: s
       HighPrecisionAccumulate: True
-      TransposeA: 1
-      TransposeB: 0
+      TransposeA: true
+      TransposeB: false
       UseBeta: True
       SparseA: False
       Activation: False
@@ -130,7 +131,7 @@ BenchmarkProblems:
         - WorkGroupMappingXCC: [1]
         - LocalReadVectorWidth: [16]
         - ScheduleIterAlg: [3]
-        - ExpandPointerSwap: [0]
+        - ExpandPointerSwap: [false]
         - TransposeLDS: [1] #
         - LdsBlockSizePerPadA: [-1]
         - LdsBlockSizePerPadB: [-1]
@@ -138,7 +139,7 @@ BenchmarkProblems:
         - LdsPadB: [-1]
         - GlobalSplitU: [1]
         - GlobalSplitUAlgorithm: ["MultipleBuffer"]
-        - SourceSwap: [1]
+        - SourceSwap: [true]
         - ActivationFuncCall: [true]
         - 1LDSBuffer: [1]
         - StaggerU: [32]
@@ -163,8 +164,8 @@ BenchmarkProblems:
       DestDataType: f8
       ComputeDataType: s
       HighPrecisionAccumulate: True
-      TransposeA: 0
-      TransposeB: 1
+      TransposeA: false
+      TransposeB: true
       UseBeta: True
       SparseA: False
       Activation: False
@@ -198,7 +199,7 @@ BenchmarkProblems:
         - WorkGroupMappingXCC: [1]
         - LocalReadVectorWidth: [16]
         - ScheduleIterAlg: [3]
-        - ExpandPointerSwap: [0]
+        - ExpandPointerSwap: [false]
         - TransposeLDS: [0]
         - LdsBlockSizePerPadA: [-1]
         - LdsBlockSizePerPadB: [-1]
@@ -206,7 +207,7 @@ BenchmarkProblems:
         - LdsPadB: [-1]
         - GlobalSplitU: [1]
         - GlobalSplitUAlgorithm: ["MultipleBuffer"]
-        - SourceSwap: [0]
+        - SourceSwap: [false]
         - ActivationFuncCall: [true]
         - 1LDSBuffer: [1]
         - StaggerU: [32]
@@ -230,8 +231,8 @@ BenchmarkProblems:
       DestDataType: f8
       ComputeDataType: s
       HighPrecisionAccumulate: True
-      TransposeA: 1
-      TransposeB: 1
+      TransposeA: true
+      TransposeB: true
       UseBeta: True
       SparseA: False
       Activation: False
@@ -265,7 +266,7 @@ BenchmarkProblems:
         - WorkGroupMappingXCC: [1]
         - LocalReadVectorWidth: [16]
         - ScheduleIterAlg: [3]
-        - ExpandPointerSwap: [0]
+        - ExpandPointerSwap: [false]
         - TransposeLDS: [1] #
         - LdsBlockSizePerPadA: [-1]
         - LdsBlockSizePerPadB: [-1]
@@ -273,7 +274,7 @@ BenchmarkProblems:
         - LdsPadB: [-1]
         - GlobalSplitU: [1]
         - GlobalSplitUAlgorithm: ["MultipleBuffer"]
-        - SourceSwap: [1]
+        - SourceSwap: [true]
         - ActivationFuncCall: [true]
         - 1LDSBuffer: [1]
         - StaggerU: [32]

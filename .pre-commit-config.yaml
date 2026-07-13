@@ -47,14 +47,20 @@ exclude: |
     # Generated hipDNN FlatBuffers headers
     projects/hipdnn/flatbuffers_sdk/include/hipdnn_flatbuffers_sdk/data_objects/.*_generated\.h|
     # Reference data (auto-generated)
-    dnn-providers/integration-tests/golden_reference_data/.*|
+    dnn-providers/integration-tests/integration_test_bundles/.*|
     # Generated files (see rocrand/tools/ _generator.cpp files)
     projects/rocrand/library/.*constants\.(cpp|h)|
     projects/rocrand/library/.*precomputed\.(cpp|h)|
     # MIOpen exclusion list
     projects/miopen/.*\.s$|
     projects/miopen/.*\.inc$|
-    projects/miopen/.*\.model$
+    projects/miopen/.*\.model$|
+    # RPP exclusion list
+    projects/rpp/utilities/test_suite/TEST_IMAGES/three_images_yuv/.*|
+    projects/rpp/utilities/test_suite/REFERENCE_OUTPUT/yuv_to_rgb/.*|
+    projects/rpp/utilities/test_suite/REFERENCE_OUTPUT/yuv_to_rgb_cubic_v/.*|
+    projects/rpp/utilities/test_suite/REFERENCE_OUTPUT/yuv_to_rgb-linear_v/.*
+
 
 repos:
   - repo: https://github.com/pre-commit/pre-commit-hooks

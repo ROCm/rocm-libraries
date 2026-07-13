@@ -107,7 +107,7 @@ Copy-paste this into your PR description.
 - [ ] All test layers from the matrix have at least one test (see Testing Requirements)
 - [ ] Lowering + lifting round-trip + tensor sharing + auto-UID + per-scalar tests present
 - [ ] `TestBackendEnumStringUtils.cpp` updated with new enum entries
-- [ ] `ninja unit-check` and `ninja integration-check` pass
+- [ ] `ninja check` passes.
 - [ ] `ninja format` + `ninja check_format` pass
 - [ ] ASAN build (`cmake -DBUILD_ADDRESS_SANITIZER=ON ..` + `ninja check`) clean
 - [ ] No clang-tidy errors, no compiler warnings

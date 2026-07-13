@@ -27,8 +27,6 @@ from Tensile.Common.ValidParameters import validateInternalSupportParams
 from Tensile.Common.TypeValidationErrors import ConfigTypeError
 from Tensile.Common.GlobalParameters import defaultInternalSupportParams
 
-pytestmark = pytest.mark.usefixtures("_force_strict_gate_on")
-
 
 class TestCleanDict:
     def test_empty_dict_passes(self):

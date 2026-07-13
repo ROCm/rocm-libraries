@@ -1,0 +1,130 @@
+{
+    "name": "sample_layernorm_2x3x4",
+    "compute_data_type": "float",
+    "io_data_type": "float",
+    "intermediate_data_type": "float",
+    "tensors": [
+        {
+            "uid": 1,
+            "name": "input_x",
+            "dims": [
+                2,
+                3,
+                4
+            ],
+            "strides": [
+                12,
+                4,
+                1
+            ],
+            "data_type": "float",
+            "virtual": false
+        },
+        {
+            "uid": 2,
+            "name": "scale",
+            "dims": [
+                4
+            ],
+            "strides": [
+                1
+            ],
+            "data_type": "float",
+            "virtual": false
+        },
+        {
+            "uid": 3,
+            "name": "bias",
+            "dims": [
+                4
+            ],
+            "strides": [
+                1
+            ],
+            "data_type": "float",
+            "virtual": false
+        },
+        {
+            "uid": 4,
+            "name": "epsilon",
+            "dims": [
+                1
+            ],
+            "strides": [
+                1
+            ],
+            "data_type": "double",
+            "virtual": false,
+            "value_type": "Float64Value",
+            "value": 1e-05
+        },
+        {
+            "uid": 5,
+            "name": "output_y",
+            "dims": [
+                2,
+                3,
+                4
+            ],
+            "strides": [
+                12,
+                4,
+                1
+            ],
+            "data_type": "float",
+            "virtual": false
+        },
+        {
+            "uid": 6,
+            "name": "saved_mean",
+            "dims": [
+                2,
+                3,
+                1
+            ],
+            "strides": [
+                3,
+                1,
+                1
+            ],
+            "data_type": "float",
+            "virtual": false
+        },
+        {
+            "uid": 7,
+            "name": "saved_inv_variance",
+            "dims": [
+                2,
+                3,
+                1
+            ],
+            "strides": [
+                3,
+                1,
+                1
+            ],
+            "data_type": "float",
+            "virtual": false
+        }
+    ],
+    "nodes": [
+        {
+            "name": "layernorm_node",
+            "type": "LayernormAttributes",
+            "compute_data_type": "float",
+            "inputs": {
+                "x_tensor_uid": 1,
+                "scale_tensor_uid": 2,
+                "bias_tensor_uid": 3,
+                "epsilon_tensor_uid": 4
+            },
+            "outputs": {
+                "y_tensor_uid": 5,
+                "mean_tensor_uid": 6,
+                "inv_variance_tensor_uid": 7
+            },
+            "normalized_dim_count": 1,
+            "forward_phase": 2
+        }
+    ]
+}

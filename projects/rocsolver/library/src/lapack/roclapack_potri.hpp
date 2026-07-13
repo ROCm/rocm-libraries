@@ -39,7 +39,8 @@
 ROCSOLVER_BEGIN_NAMESPACE
 
 template <bool BATCHED, bool STRIDED, typename T>
-void rocsolver_potri_getMemorySize(const rocblas_int n,
+void rocsolver_potri_getMemorySize(rocblas_handle handle,
+                                   const rocblas_int n,
                                    const rocblas_int batch_count,
                                    size_t* size_work1,
                                    size_t* size_work2,
@@ -63,9 +64,9 @@ void rocsolver_potri_getMemorySize(const rocblas_int n,
     }
 
     // requirements for calling TRTRI
-    rocsolver_trtri_getMemorySize<BATCHED, STRIDED, T>(rocblas_diagonal_non_unit, n, batch_count,
-                                                       size_work1, size_work2, size_work3, size_work4,
-                                                       size_tmpcopy, size_workArr, optim_mem);
+    rocsolver_trtri_getMemorySize<BATCHED, STRIDED, T>(
+        handle, rocblas_diagonal_non_unit, n, batch_count, size_work1, size_work2, size_work3,
+        size_work4, size_tmpcopy, size_workArr, optim_mem);
 
     // required space to copy A
     *size_tmpcopy = std::max(*size_tmpcopy, sizeof(T) * n * n * batch_count);
@@ -144,9 +145,7 @@ rocblas_status rocsolver_potri_template(rocblas_handle handle,
                                                   work2, work3, work4, tmpcopy, workArr, optim_mem);
 
     // everything must be executed with scalars on the host
-    rocblas_pointer_mode old_mode;
-    rocblas_get_pointer_mode(handle, &old_mode);
-    rocblas_set_pointer_mode(handle, rocblas_pointer_mode_host);
+    rocblas_pointer_mode_saver saver(handle, rocblas_pointer_mode_host);
 
     // constants in host memory
     const rocblas_int copyblocks = (n - 1) / BS2 + 1;
@@ -168,7 +167,6 @@ rocblas_status rocsolver_potri_template(rocblas_handle handle,
                             0, stream, copymat_from_buffer, n, n, A, shiftA, lda, strideA, tmpcopy,
                             info_mask(info, info_mask::negate), uplo, rocblas_diagonal_non_unit);
 
-    rocblas_set_pointer_mode(handle, old_mode);
     return rocblas_status_success;
 }
 

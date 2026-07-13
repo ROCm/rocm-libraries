@@ -282,6 +282,9 @@ constexpr const char* rocsparse_routine::to_string() const
 #include "testing_gtsv_interleaved_batch.hpp"
 #include "testing_gtsv_no_pivot.hpp"
 #include "testing_gtsv_no_pivot_strided_batch.hpp"
+#ifdef ROCSPARSE_WITH_ILDLT0
+#include "testing_spildlt0.hpp"
+#endif
 
 // Conversion
 #include "testing_bsr2csr.hpp"
@@ -557,6 +560,9 @@ rocsparse_status rocsparse_routine::dispatch_call(const Arguments& arg)
         DEFINE_CASE_IJT_X(csrsv, testing_spsv_csr);
         DEFINE_CASE_IJT_X(spitsv_csr, testing_spitsv_csr);
         DEFINE_CASE_IJT(spic0);
+#ifdef ROCSPARSE_WITH_ILDLT0
+        DEFINE_CASE_IJT(spildlt0);
+#endif
         DEFINE_CASE_IJT(spilu0);
         DEFINE_CASE_IJT(sptrsv);
         DEFINE_CASE_T(csritsv);

@@ -1,6 +1,6 @@
 ################################################################################
 #
-# Copyright (C) 2022-2025 Advanced Micro Devices, Inc. All rights reserved.
+# Copyright (C) 2022-2026 Advanced Micro Devices, Inc. All rights reserved.
 #
 # Permission is hereby granted, free of charge, to any person obtaining a copy
 # of this software and associated documentation files (the "Software"), to deal
@@ -32,7 +32,6 @@ import time
 import itertools
 
 from copy import deepcopy
-from joblib import Parallel, delayed
 from pathlib import Path
 from typing import Dict, List, Optional, TypedDict
 
@@ -47,7 +46,9 @@ from Tensile.SolutionStructs.Validators.MatrixInstruction import matrixInstructi
                                                                  validateMIParameters
 from Tensile.SolutionStructs.Naming import getKeyNoInternalArgs, getSolutionNameMin, getKernelNameMin
 
-from .BenchmarkStructs import BenchmarkProcess, constructForkPermutations
+from .BenchmarkStructs import BenchmarkProcess
+from .backends import BackendFactory
+from .backends.config import parse_backend_config
 from .Contractions import ProblemType as ContractionsProblemType
 from .ClientWriter import runClient, writeClientConfig, writeClientConfigIni, getClientExecutablePath
 from .KernelWriterAssembly import KernelWriterAssembly
@@ -70,6 +71,46 @@ _CACHE_FIELDS = {
     "InternalSupportParams": "internalSupportParams",
     "CustomKernelWildcard": "customKernelWildcard",
 }
+
+# Deterministic synthetic GFlops value emitted per (problem size, solution) cell in the
+# --cpu-only results CSV. Fixed (never random / never timestamped) so the file is
+# byte-identical across runs (T8) and the value is large enough that addFromCSV's winner
+# selection has a well-defined winner. See the synthetic-perf caveat in
+# Tensile/Tests/unit/characterization/_codegen/GPU-MOCK.md.
+_CPU_ONLY_SYNTHETIC_GFLOPS = 1000.0
+
+
+def _writeSyntheticResultsCSV(resultsFileName, problemSizes, gfxName, numSolutions):
+    """Write a deterministic synthetic results CSV in the schema LibraryLogic.addFromCSV
+    consumes, for the GPU-less --cpu-only path.
+
+    The real client writes one CSV row per benchmarked problem size; column 0 is the perf
+    unit header ("GFlops"), the next ``numIndices`` columns are the problem-size indices,
+    and the trailing ``numSolutions`` columns are per-solution GFlops. We mirror exactly
+    that layout (data-stub style of ProblemSizesMock in SolutionStructs/Problem.py): the
+    first data-row column repeats the gfx arch name (matching the captured real-CSV
+    fixtures), the size columns come straight from ``problemSizes.problems[*].sizes``, and
+    every solution cell is the fixed ``_CPU_ONLY_SYNTHETIC_GFLOPS`` so the file is
+    deterministic / byte-identical across runs.
+    """
+    problems = list(problemSizes.problems)
+    numIndices = len(problems[0].sizes) if problems else 0
+    # At least one solution column so addFromCSV's solutionStartIdx is well-defined.
+    numSolutions = max(int(numSolutions), 1)
+
+    header = ["GFlops"]
+    header += ["Size%d" % i for i in range(numIndices)]
+    header += ["Solution_%d" % i for i in range(numSolutions)]
+
+    lines = [",".join(header)]
+    for problem in problems:
+        row = [gfxName]
+        row += [str(int(s)) for s in problem.sizes]
+        row += [repr(_CPU_ONLY_SYNTHETIC_GFLOPS)] * numSolutions
+        lines.append(",".join(row))
+
+    with open(resultsFileName, "w", newline="") as f:
+        f.write("\n".join(lines) + "\n")
 
 # 12 hex chars = 48 bits. Birthday-collision likely around 2^24 (~16M) entries
 # in one caches/ dir; tuning sweeps produce <<1k entries, so collision risk is
@@ -152,15 +193,28 @@ def _resetCacheDir(cacheDir):
 
 
 def _generate_single_solution(perm, problemType, constantParams, assembler, debugConfig, isaInfoMap):
-    """Helper function to generate a single solution from a permutation."""
-    try:
-        solution = {
-            "ProblemType": deepcopy(problemType.state),
-            "ISA": next(iter(isaInfoMap.keys()))
-        }
-        solution.update(constantParams)
-        solution.update(perm)
+    """Helper function to generate a single solution from a permutation.
+    
+    This function handles standard permutations without group_ parameter expansion.
+    For GA individuals that may have group_ parameters, use the GA backend's equivalent.
+    """
+    solution = {
+        "ProblemType": deepcopy(problemType.state),
+        "ISA": next(iter(isaInfoMap.keys()))
+    }
+    solution.update(constantParams)
+    solution.update(perm)
 
+    return _build_and_validate_solution(solution, assembler, debugConfig, isaInfoMap)
+
+
+def _build_and_validate_solution(solution, assembler, debugConfig, isaInfoMap, silent=False):
+    """Build and validate a solution from a parameterized dict.
+    
+    This is the core logic used by both fork and GA solution generation.
+    Returns the Solution object if valid, None otherwise.
+    """
+    try:
         mi = solution["MatrixInstruction"]
         workgroup = solution["WorkGroup"]
         ptype = solution["ProblemType"]
@@ -187,15 +241,16 @@ def _generate_single_solution(perm, problemType, constantParams, assembler, debu
             )
             if solutionObject["Valid"]:
                 return solutionObject
-            elif debugConfig.printSolutionRejectionReason:
+            elif not silent and debugConfig.printSolutionRejectionReason:
                 print1("rejecting solution " + str(solution))
-        elif debugConfig.printSolutionRejectionReason:
+        elif not silent and debugConfig.printSolutionRejectionReason:
             print1("rejecting solution " + str(solution))
     except ConfigTypeError:
         # Re-raise so this is not swallowed by the generic except below.
         raise
     except Exception as e:
-        print(f"Error processing permutation {perm}: {e}")
+        if not silent:
+            print(f"Error processing permutation: {e}")
     return None
 
 def _generateForkedSolutions(problemType, constantParams, forkPermutations, assembler: Assembler,
@@ -446,8 +501,8 @@ def writeBenchmarkFiles(
     with timing_context("python_kernel_bench_postprocess"):
         with timing_context("python_benchpost_naming"):
             for s in solutions:
-                s["SolutionNameMin"] = getSolutionNameMin(solution, debugConfig.splitGSU)
-                s["KernelNameMin"]   = getKernelNameMin(solution, debugConfig.splitGSU)
+                s["SolutionNameMin"] = getSolutionNameMin(s, debugConfig.splitGSU)
+                s["KernelNameMin"]   = getKernelNameMin(s, debugConfig.splitGSU)
 
             # Benchmark builds always target a single base arch; pick its subdir.
             newLibraryDir = ensurePath(libraryDir(sourcePath, cmdLineArchs[0]))
@@ -514,7 +569,7 @@ def writeBenchmarkFiles(
     return codeObjectFiles, libraryFileRel
 
 
-def _benchmarkProblemType(problemTypeConfig, problemSizeGroupConfig, problemSizeGroupIdx,
+def _benchmarkProblemType(backendConfig, problemTypeConfig, problemSizeGroupConfig, problemSizeGroupIdx,
                           outerBenchmarkIdx, configPath, useCache,
                          asmToolchain: AssemblyToolchain, srcToolchain: SourceToolchain, cCompiler: str,
                          buildTmpPath: Path, benchmarkProblemsPath: Path,
@@ -594,167 +649,198 @@ def _benchmarkProblemType(problemTypeConfig, problemSizeGroupConfig, problemSize
         resultsFileName = resultsFileBase + ".csv"
         solutionsFileName = resultsFileBase + ".yaml"
 
+        backend_name = str(backendConfig.get("Name", "tensile")).lower()
+
         # check if a solution cache exists and if it matches our solution parameters
         cacheKey = _computeCacheKey(benchmarkStep)
         cacheDir = os.path.join(stepBaseDir, "caches", cacheKey)
         sourcePath = Path(cacheDir) / "source"
-
-        configPTStr = str(benchmarkProcess.problemType)
-        useSolutionPool = configPTStr in solutionPoolIndex
-
-        if useSolutionPool:
+        
+        with timing_context("python_cache_check"):
             cacheValid = False
-        else:
-            with timing_context("python_cache_check"):
-                cacheValid = False
-                cachedLibraryFile = None
-                if useCache:
-                    cacheEntry = _loadCacheIfMatches(cacheDir, benchmarkStep)
-                    if cacheEntry is None:
-                        # TODO(2026-05-04): Drop legacy fallback after ~2026-08-04 (see _loadLegacyCacheIfMatches).
-                        cacheEntry = _loadLegacyCacheIfMatches(stepBaseDir, benchmarkStep)
-                        if cacheEntry is not None:
-                            cacheDir = stepBaseDir
-                            sourcePath = shortNamePath / "source"
+            cachedLibraryFile = None
+            if useCache:
+                cacheEntry = _loadCacheIfMatches(cacheDir, benchmarkStep)
+                if cacheEntry is None:
+                    # TODO(2026-05-04): Drop legacy fallback after ~2026-08-04 (see _loadLegacyCacheIfMatches).
+                    cacheEntry = _loadLegacyCacheIfMatches(stepBaseDir, benchmarkStep)
                     if cacheEntry is not None:
-                        cacheValid = True
-                        codeObjectFiles = cacheEntry["CodeObjectFiles"]
-                        cachedLibraryFile = cacheEntry["LibraryFile"]
-                    elif os.path.isdir(os.path.join(stepBaseDir, "caches")) \
-                            or os.path.isfile(os.path.join(stepBaseDir, "cache.yaml")):
-                        printWarning("Cache data does not match config: redoing solution generation")
+                        cacheDir = stepBaseDir
+                        sourcePath = shortNamePath / "source"
+                if cacheEntry is not None:
+                    cacheValid = True
+                    codeObjectFiles = cacheEntry["CodeObjectFiles"]
+                    cachedLibraryFile = cacheEntry["LibraryFile"]
+                elif os.path.isdir(os.path.join(stepBaseDir, "caches")) \
+                        or os.path.isfile(os.path.join(stepBaseDir, "cache.yaml")):
+                    printWarning("Cache data does not match config: redoing solution generation")
 
-        if not cacheValid:
-            # New compiles always go to the hash-keyed dir, never overwrite legacy in place.
-            _resetCacheDir(cacheDir)
-            ensurePath(sourcePath)
-            if useSolutionPool:
-                poolEntries = solutionPoolIndex[configPTStr]
-                with timing_context("python_solution_pool_construction"):
-                    solutions = _constructAllPoolSolutions(poolEntries, asmToolchain.assembler, debugConfig, isaInfoMap)
-                print1("# Total {} solutions from {} pool file(s)".format(len(solutions), len(poolEntries)))
-                maxPossibleSolutions = len(solutions)
+        # Pre-compute benchmark runner helper
+        def benchmark_runner(solutions, isCached=False, buildOnly=False):
+            """Compile and benchmark the given solutions.
+            
+            This function is backend-agnostic: receives pre-computed solutions
+            and handles compilation, library creation, and benchmarking.
+            
+            Args:
+                solutions: List of Solution objects to compile and benchmark
+                isCached: If True, indicates that the solutions are cached
+                buildOnly: If True, skip benchmarking and only compile
+                
+            Returns:
+                - resultsFileName: Path to benchmark results CSV
+                - returncode: Benchmark client return code (0=success)
+            """
+            nonlocal benchmarkTestFails, codeObjectFiles, cachedLibraryFile
+            
+            if not isCached:
+                 # New compiles always go to the hash-keyed dir, never overwrite legacy in place.
+                _resetCacheDir(cacheDir)
+                ensurePath(sourcePath)
+                # handle no valid solutions
+                if not solutions:
+                    msg = "Your parameters resulted in 0 valid solutions."
+                    if debugConfig.printSolutionRejectionReason:
+                        msg += "\nExamine reject and backtrace messages above to see why" \
+                                "and where solutions were rejected."
+                    else:
+                        msg += "\nYou should re-run with \"PrintSolutionRejectionReason: True\"" \
+                                "to see why each parameter combination was rejected."
+                    printExit(msg)
+
+                for solution in solutions:
+                    print2("#    ({}:{}) {}".format(0, 0, getSolutionNameMin(solution, debugConfig.splitGSU)))
+                print2(HR)
+
+                # write benchmarkFiles (kernel generation and compilation)
+                prevCount = len(solutions)
+                with timing_context("python_kernel_compilation"):
+                    codeObjectFiles, libraryFileRel = writeBenchmarkFiles(stepBaseDir, solutions, \
+                            benchmarkStep.problemSizes, benchmarkStep.biasTypeArgs, \
+                            benchmarkStep.factorDimArgs, benchmarkStep.activationArgs, \
+                            benchmarkStep.icacheFlushArgs, shortName, [], asmToolchain, srcToolchain, \
+                            sourcePath, debugConfig, deviceId, gfxName, isaInfoMap, probSolMap)
+                # ^ this mutates solutions
+
+                # write cache data
+                with timing_context("python_write_cache"):
+                    cachePath = os.path.join(cacheDir, "cache.yaml")
+                    cacheData = {
+                        "CodeObjectFiles": codeObjectFiles,
+                        "LibraryFile": libraryFileRel,
+                        "ConstantParams": benchmarkStep.constantParams,
+                        "ForkParams": benchmarkStep.forkParams,
+                        "ParamGroups": benchmarkStep.paramGroups,
+                        "CustomKernels": benchmarkStep.customKernels,
+                        "InternalSupportParams": benchmarkStep.internalSupportParams,
+                        "CustomKernelWildcard": benchmarkStep.customKernelWildcard
+                    }
+                    LibraryIO.writeYAML(cachePath, cacheData)
+
+                print1("# Actual Solutions: {} / {} after KernelWriter\n" \
+                        .format(len(solutions), prevCount ))
+
+                # add SolutionIndex and SolutionNameMin into benchmark yaml
+                with timing_context("python_solution_indexing"):
+                    for i in range(0, len(solutions)):
+                        solution = solutions[i]
+                        solution["SolutionIndex"] = i
+                        solution["SolutionNameMin"] = getSolutionNameMin(solution, debugConfig.splitGSU)
+                        solution["KernelNameMin"]   = getKernelNameMin(solution, debugConfig.splitGSU)
             else:
-                # enumerate benchmark permutations and create resulting solution objects
-                with timing_context("python_solution_generation"):
-                    with timing_context("python_solgen_fork_permutations"):
-                        forkPermutations = constructForkPermutations(benchmarkStep.forkParams, \
-                                benchmarkStep.paramGroups) if problemSizeGroupConfig["ForkParameters"] else []
-                        maxPossibleSolutions = len(forkPermutations)
+                solutions = None
+                print1("# Using cached solution data")
 
-                    with timing_context("python_solgen_forked_solutions"):
-                        regSolutions = _generateForkedSolutions(benchmarkProcess.problemType, \
-                                benchmarkStep.constantParams, forkPermutations, asmToolchain.assembler, \
-                                    debugConfig, isaInfoMap)
+                ssProblemType = ProblemType(problemTypeConfig, debugConfig.printIndexAssignmentInfo)
+                conProblemType = ContractionsProblemType.FromOriginalState(ssProblemType)
+                outFile = os.path.join(sourcePath, "ClientParameters.ini")
 
-                    with timing_context("python_solgen_custom_kernels"):
-                        kcSolutions = _generateCustomKernelSolutions(benchmarkProcess.problemType, \
-                                benchmarkStep.customKernels, benchmarkStep.internalSupportParams, \
-                                not benchmarkStep.customKernelWildcard, asmToolchain.assembler, debugConfig, \
-                                    isaInfoMap)
+                cachedLibraryFile = tensileLibraryFile(sourcePath, gfxName, globalParameters["LibraryFormat"])
+                # writeMsgPack produces .dat.zlib; accept both on disk.
+                if not os.path.isfile(cachedLibraryFile) \
+                    and not os.path.isfile(str(cachedLibraryFile) + ".zlib"):
+                    printExit(
+                        f"cache.yaml refers to a library file that no longer "
+                        f"exists on disk: {cachedLibraryFile}. The cache directory may "
+                        f"have been partially deleted; remove the parent caches/ "
+                        f"directory and re-run without --use-cache.")
 
-                    maxPossibleSolutions += len(kcSolutions)
-                    solutions = regSolutions + kcSolutions
+                writeClientConfigIni(True, benchmarkStep.problemSizes, benchmarkStep.biasTypeArgs,
+                                    benchmarkStep.factorDimArgs, benchmarkStep.activationArgs,
+                                    benchmarkStep.icacheFlushArgs, conProblemType,
+                                    sourcePath, codeObjectFiles, resultsFileName,
+                                    outFile, deviceId, gfxName, libraryFile=cachedLibraryFile, 
+                                    probSolMap=probSolMap)
 
-            print1("# Actual Solutions: {} / {} after SolutionStructs\n" \
-                .format(len(solutions), maxPossibleSolutions))
+            # I think the size portion of this yaml could be removed,
+            # but for now it's needed, so we update it even in the cache case
+            with timing_context("python_write_solutions"):
+                LibraryIO.writeSolutions(solutionsFileName, benchmarkStep.problemSizes, benchmarkStep.biasTypeArgs,
+                    benchmarkStep.activationArgs, solutions, isCached)
 
-            # handle no valid solutions
-            if len(solutions) == 0:
-                msg = "Your parameters resulted in 0 valid solutions."
-                if debugConfig.printSolutionRejectionReason:
-                    msg += "\nExamine reject and backtrace messages above to see why" \
-                            "and where solutions were rejected."
-                else:
-                    msg += "\nYou should re-run with \"PrintSolutionRejectionReason: True\"" \
-                            "to see why each parameter combination was rejected."
-                printExit(msg)
+            returncode = 0
+            # run benchmarking client
+            if buildOnly:
+                print1("# Build-only mode: skipping benchmark.")
+            elif not os.path.exists(resultsFileName) or globalParameters["ForceRedoBenchmarkProblems"]:
+                libraryLogicPath = None
+                forBenchmark = True
+                configPaths = [str(sourcePath / "ClientParameters.ini")]
 
-            for solution in solutions:
-                print2("#    ({}:{}) {}".format(0, 0, getSolutionNameMin(solution, debugConfig.splitGSU)))
-            print2(HR)
+                if enableTileSelection:
+                    configPaths.append(str(sourcePath / "ClientParameters_Granularity.ini"))
+                returncode = runClient(libraryLogicPath, forBenchmark, enableTileSelection, srcToolchain.compiler, cCompiler, shortNamePath, configPaths=configPaths)
 
-            # write benchmarkFiles (kernel generation and compilation)
-            prevCount = len(solutions)
-            with timing_context("python_kernel_compilation"):
-                codeObjectFiles, libraryFileRel = writeBenchmarkFiles(stepBaseDir, solutions, \
-                        benchmarkStep.problemSizes, benchmarkStep.biasTypeArgs, \
-                        benchmarkStep.factorDimArgs, benchmarkStep.activationArgs, \
-                        benchmarkStep.icacheFlushArgs, shortName, [], asmToolchain, srcToolchain, \
-                        sourcePath, debugConfig, deviceId, gfxName, isaInfoMap, probSolMap)
-            # ^ this mutates solutions
+                # --cpu-only plumbing: runClient covered the config/run-script writing then
+                # stubbed the device launch (returncode 0). The device never produced a perf
+                # CSV, so synthesize a deterministic one here in the addFromCSV schema. We are
+                # inside the `not os.path.exists(resultsFileName)` branch, so this honors the
+                # existing skip-if-already-benchmarked guard.
+                if globalParameters["CpuOnly"]:
+                    numSolutions = len(solutions) if solutions else 1
+                    _writeSyntheticResultsCSV(resultsFileName, benchmarkStep.problemSizes,
+                                            gfxName, numSolutions)
 
-            # write cache data
-            with timing_context("python_write_cache"):
-                cachePath = os.path.join(cacheDir, "cache.yaml")
-                cacheData = {
-                    "CodeObjectFiles": codeObjectFiles,
-                    "LibraryFile": libraryFileRel,
-                    "ConstantParams": benchmarkStep.constantParams,
-                    "ForkParams": benchmarkStep.forkParams,
-                    "ParamGroups": benchmarkStep.paramGroups,
-                    "CustomKernels": benchmarkStep.customKernels,
-                    "InternalSupportParams": benchmarkStep.internalSupportParams,
-                    "CustomKernelWildcard": benchmarkStep.customKernelWildcard
-                }
-                LibraryIO.writeYAML(cachePath, cacheData)
+                if returncode:
+                    benchmarkTestFails += 1
+                    printWarning("BenchmarkProblems: Benchmark Process exited with code {}" \
+                            .format(returncode))
+            else:
+                print1("# Already benchmarked; skipping.")
 
-            print1("# Actual Solutions: {} / {} after KernelWriter\n" \
-                    .format(len(solutions), prevCount ))
+            return resultsFileName, returncode
 
-            # add SolutionIndex and SolutionNameMin into benchmark yaml
-            with timing_context("python_solution_indexing"):
-                for i in range(0, len(solutions)):
-                    solution = solutions[i]
-                    solution["SolutionIndex"] = i
-                    solution["SolutionNameMin"] = getSolutionNameMin(solution, debugConfig.splitGSU)
-                    solution["KernelNameMin"]   = getKernelNameMin(solution, debugConfig.splitGSU)
-        else:
-            solutions = None
-            print1("# Using cached solution data")
+        backend = BackendFactory.create(backend_name)
 
-            ssProblemType = ProblemType(problemTypeConfig, debugConfig.printIndexAssignmentInfo)
-            conProblemType = ContractionsProblemType.FromOriginalState(ssProblemType)
-            outFile = os.path.join(sourcePath, "ClientParameters.ini")
+        try:
+            cfg_name = Path(globalParameters["ConfigPath"][0]).stem
+        except (KeyError, IndexError):
+            cfg_name = "config" 
 
-            cachedLibraryFile = tensileLibraryFile(sourcePath, gfxName, globalParameters["LibraryFormat"])
-            if not os.path.isfile(cachedLibraryFile):
-                printExit(
-                    f"cache.yaml refers to a library file that no longer "
-                    f"exists on disk: {cachedLibraryFile}. The cache directory may "
-                    f"have been partially deleted; remove the parent caches/ "
-                    f"directory and re-run without --use-cache.")
+        benchmark_config = {
+            "benchmarkStep": benchmarkStep,
+            "forkParametersEnabled": problemSizeGroupConfig["ForkParameters"],
+            "problemType": benchmarkProcess.problemType,
+            "assembler": asmToolchain.assembler,
+            "debugConfig": debugConfig,
+            "isaInfoMap": isaInfoMap,
+            "cacheValid": cacheValid,
+            "rootPath": Path(benchmarkProblemsPath).parent,
+            "sourcePath": sourcePath,
+            "benchmarkStepIdx": benchmarkStepIdx,
+            "totalBenchmarkSteps": totalBenchmarkSteps,
+            "configName": cfg_name,
+            # Additional config for TensileBackend (cache + solution pool)
+            "solutionPoolIndex": solutionPoolIndex,
+        }
 
-            writeClientConfigIni(True, benchmarkStep.problemSizes, benchmarkStep.biasTypeArgs,
-                                 benchmarkStep.factorDimArgs, benchmarkStep.activationArgs,
-                                 benchmarkStep.icacheFlushArgs, conProblemType,
-                                 sourcePath, codeObjectFiles, resultsFileName,
-                                 outFile, deviceId, gfxName, libraryFile=cachedLibraryFile,
-                                 probSolMap=probSolMap)
-
-        # I think the size portion of this yaml could be removed,
-        # but for now it's needed, so we update it even in the cache case
-        with timing_context("python_write_solutions"):
-            LibraryIO.writeSolutions(solutionsFileName, benchmarkStep.problemSizes, benchmarkStep.biasTypeArgs,
-                benchmarkStep.activationArgs, solutions, cacheValid)
-
-        # run benchmarking client
-        if buildOnly:
-            print1("# Build-only mode: skipping benchmark.")
-        elif not os.path.exists(resultsFileName) or globalParameters["ForceRedoBenchmarkProblems"]:
-            libraryLogicPath = None
-            forBenchmark = True
-            configPaths = [str(sourcePath / "ClientParameters.ini")]
-            if enableTileSelection:
-                configPaths.append(str(sourcePath / "ClientParameters_Granularity.ini"))
-            returncode = runClient(libraryLogicPath, forBenchmark, enableTileSelection, srcToolchain.compiler, cCompiler, shortNamePath, configPaths=configPaths)
-
-            if returncode:
-                benchmarkTestFails += 1
-                printWarning("BenchmarkProblems: Benchmark Process exited with code {}" \
-                        .format(returncode))
-        else:
-            print1("# Already benchmarked; skipping.")
+        backend.run(
+            backendConfig.get("Config", {}),
+            benchmark_config,
+            benchmark_runner,
+            cacheValid=cacheValid,
+            buildOnly=buildOnly,
+        )
 
         # End Iteration
         currentTime = time.time()
@@ -766,6 +852,7 @@ def _benchmarkProblemType(problemTypeConfig, problemSizeGroupConfig, problemSize
 
 
 def main(
+    backend,
     config,
     useCache,
     asmToolchain: AssemblyToolchain,
@@ -784,6 +871,7 @@ def main(
     """Entry point for the "BenchmarkProblems" section of a Tensile config yaml
 
     Args:
+        backend: Backend configuration from config["Backend"] (defaults to {})
         buildOnly: If True, generate and build kernels but skip benchmarking.
         solutionPoolFiles: If non-empty, load solutions from matching pool files
             instead of generating from ForkParameters.
@@ -792,9 +880,18 @@ def main(
         print(f'No config specified in {globalParameters["ConfigPath"]}, built client only')
         return
 
+    # Parse and validate backend config using shared contract
+    backend = parse_backend_config(backend if backend else None)
+
+    # Load solution pool index if provided and supported by the backend
     solutionPoolIndex = None
     if solutionPoolFiles:
-        solutionPoolIndex = _loadSolutionPool(solutionPoolFiles)
+        backend_name = str(backend.get("Name", "tensile")).lower()
+        if BackendFactory.create(backend_name).supports_solution_pool():
+            solutionPoolIndex = _loadSolutionPool(solutionPoolFiles)
+        else:
+            printWarning(f"Backend '{backend_name}' does not support solution pools; ignoring provided pool files.")
+            solutionPoolFiles = None
 
     benchmarkDataPath = ensurePath(outputPath / BENCHMARK_DATA_DIR)
 
@@ -834,24 +931,25 @@ def main(
                 benchmarkProblemsPath = ensurePath(outputPath / BENCHMARK_PROBLEMS_DIR)
                 (resultsFileBaseFinal, benchmarkErrors) = \
                         _benchmarkProblemType(
-                            problemTypeConfig,
-                            sizeGroupConfig,
-                            idx,
-                            outerIdx,
-                            configPath,
-                            useCache,
-                            asmToolchain,
-                            srcToolchain,
-                            cCompiler,
-                            buildTmpPath,
-                            benchmarkProblemsPath,
-                            debugConfig,
-                            deviceId,
-                            gfxName,
-                            isaInfoMap,
-                            probSolMap,
-                            buildOnly,
-                            solutionPoolIndex,
+                            backendConfig=backend,
+                            problemTypeConfig=problemTypeConfig,
+                            problemSizeGroupConfig=sizeGroupConfig,
+                            problemSizeGroupIdx=idx,
+                            outerBenchmarkIdx=outerIdx,
+                            configPath=configPath,
+                            useCache=useCache,
+                            asmToolchain=asmToolchain,
+                            srcToolchain=srcToolchain,
+                            cCompiler=cCompiler,
+                            buildTmpPath=buildTmpPath,
+                            benchmarkProblemsPath=benchmarkProblemsPath,
+                            debugConfig=debugConfig,
+                            deviceId=deviceId,
+                            gfxName=gfxName,
+                            isaInfoMap=isaInfoMap,
+                            probSolMap=probSolMap,
+                            buildOnly=buildOnly,
+                            solutionPoolIndex=solutionPoolIndex,
                         )
                 totalTestFails += benchmarkErrors
 

@@ -41,6 +41,11 @@ list(APPEND CMAKE_MODULE_PATH
      ${ROCM_PATH}/hip/cmake
      ${ROCM_PATH}/cmake)
 
+# Root of the rocm-libraries monorepo (for shared infrastructure like CTest categories)
+if(NOT DEFINED ROCM_LIBRARIES_ROOT)
+  set(ROCM_LIBRARIES_ROOT "${CMAKE_CURRENT_SOURCE_DIR}/../..")
+endif()
+
 # Set a default build type if none was specified
 if(NOT CMAKE_BUILD_TYPE AND NOT CMAKE_CONFIGURATION_TYPES)
   message(STATUS "Setting build type to 'Release' as none was specified.")
@@ -102,7 +107,10 @@ else()
     gfx1100
     gfx1101
     gfx1102
+    gfx1150
     gfx1151
+    gfx1152
+    gfx1153
     gfx1200
     gfx1201
   )
@@ -159,6 +167,7 @@ if(BUILD_CLIENTS_SAMPLES OR BUILD_CLIENTS_BENCHMARKS OR BUILD_CLIENTS_TESTS)
   set( BUILD_CLIENTS ON )
   rocm_package_setup_component(clients)
   if(BUILD_CLIENTS_TESTS)
+    enable_testing()
     rocm_package_setup_client_component(tests)
   endif()
   if(BUILD_CLIENTS_BENCHMARKS)
@@ -191,7 +200,11 @@ set(CPACK_RESOURCE_FILE_LICENSE "${CMAKE_CURRENT_SOURCE_DIR}/LICENSE.md")
 if(WIN32)
   set(CPACK_SOURCE_GENERATOR "ZIP")
   set(CPACK_GENERATOR "ZIP")
-  set(CMAKE_INSTALL_PREFIX "C:/hipSDK" CACHE PATH "Install path" FORCE)
+  # Only force the default Windows SDK install path when the caller did not set
+  # one explicitly.
+  if(CMAKE_INSTALL_PREFIX_INITIALIZED_TO_DEFAULT)
+    set(CMAKE_INSTALL_PREFIX "C:/hipSDK" CACHE PATH "Install path" FORCE)
+  endif()
   set(INSTALL_PREFIX "C:/hipSDK")
   set(CPACK_SET_DESTDIR OFF)
   set(CPACK_PACKAGE_INSTALL_DIRECTORY "C:/hipSDK")
@@ -237,6 +250,7 @@ if(BUILD_CODE_COVERAGE)
     COMMAND echo Coverage GTEST_FILTER=\${GTEST_FILTER}
     COMMAND ./clients/staging/rocalution-test --gtest_filter=\"\${GTEST_FILTER}\"
     WORKING_DIRECTORY ${CMAKE_BINARY_DIR}
+    COMMENT "Running rocalution coverage analysis"
     )
 
   add_dependencies(coverage_analysis rocalution)
@@ -248,6 +262,7 @@ if(BUILD_CODE_COVERAGE)
   add_custom_target(coverage_output
     DEPENDS coverage_analysis
     COMMAND mkdir -p lcoverage
+    COMMENT "Preparing coverage output directory"
     )
 
   #
@@ -257,9 +272,10 @@ if(BUILD_CODE_COVERAGE)
     COMMAND lcov --directory . --base-directory . --capture -o lcoverage/raw_main_coverage.info
     COMMAND lcov --remove lcoverage/raw_main_coverage.info "'${CMAKE_SOURCE_DIR}/src/utils/*'" "'${CMAKE_SOURCE_DIR}/src/base/host/host_io.*'" "'${CMAKE_SOURCE_DIR}/clients/*'" "'${CMAKE_SOURCE_DIR}/build/*'" "'/opt/*'" "'/usr/*'" -o lcoverage/main_coverage.info
     COMMAND genhtml lcoverage/main_coverage.info --output-directory lcoverage
+    COMMENT "Generating HTML coverage report"
     )
 
-  add_custom_target(coverage DEPENDS coverage_output)
+  add_custom_target(coverage DEPENDS coverage_output COMMENT "Building coverage report")
 
   #
   # Coverage cleanup
@@ -267,5 +283,6 @@ if(BUILD_CODE_COVERAGE)
   add_custom_target(coverage_cleanup
     COMMAND find ${CMAKE_BINARY_DIR} -name *.gcda -delete
     WORKING_DIRECTORY ${CMAKE_BINARY_DIR}
+    COMMENT "Cleaning up coverage data files"
     )
 endif()

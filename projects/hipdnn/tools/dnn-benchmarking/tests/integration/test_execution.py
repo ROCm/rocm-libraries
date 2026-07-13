@@ -141,11 +141,11 @@ class TestExecution:
             # Benchmark
             result = executor.benchmark(handle, variant_pack)
 
-            # Should have 5 E2E timing values
-            assert len(result.e2e_timings) == 5
+            # Should have 5 host timing values
+            assert len(result.host_timings) == 5
 
-            # All E2E timings should be positive
-            for t in result.e2e_timings:
+            # All host timings should be positive
+            for t in result.host_timings:
                 assert t > 0
 
             # Should also have kernel timings (if HIP backend available)
@@ -200,7 +200,7 @@ class TestExecution:
             executor.warmup(handle, variant_pack)
             result = executor.benchmark(handle, variant_pack)
 
-            assert len(result.e2e_timings) == 5
+            assert len(result.host_timings) == 5
 
             # Get output (C matrix: [256, 1024])
             output_data = buffer_manager.get_output_data(3)
@@ -247,7 +247,7 @@ class TestExecution:
             executor.warmup(handle, variant_pack)
             result = executor.benchmark(handle, variant_pack)
 
-            assert len(result.e2e_timings) == 5
+            assert len(result.host_timings) == 5
 
             # Get output (same shape as input: [64, 128, 56, 56])
             output_data = buffer_manager.get_output_data(2)
@@ -293,7 +293,7 @@ class TestExecution:
             executor.warmup(handle, variant_pack)
             result = executor.benchmark(handle, variant_pack)
 
-            assert len(result.e2e_timings) == 5
+            assert len(result.host_timings) == 5
 
             # Get output (z: [128, 256, 14, 14])
             output_data = buffer_manager.get_output_data(3)
@@ -339,7 +339,7 @@ class TestExecution:
             executor.warmup(handle, variant_pack)
             result = executor.benchmark(handle, variant_pack)
 
-            assert len(result.e2e_timings) == 5
+            assert len(result.host_timings) == 5
 
             # Get output (y: [32, 64, 28, 28])
             output_data = buffer_manager.get_output_data(6)
@@ -602,7 +602,7 @@ class TestPyTorchReferenceValidation:
         assert len(reference_rows) == 1
         assert reference_rows[0].provider == "pytorch"
         assert reference_rows[0].status == "success"
-        assert reference_rows[0].e2e_stats is not None
+        assert reference_rows[0].host_stats is not None
         assert reference_rows[0].gpu_kernel_stats is not None
         assert engine_rows
         assert any(row.status == "success" for row in engine_rows)
@@ -736,3 +736,60 @@ class TestPyTorchReferenceValidation:
             assert (
                 result.passed
             ), f"hipDNN Add output does not match PyTorch: {result.message}"
+
+
+@pytest.mark.gpu
+class TestHardEngineSelectBindings:
+    """Real-backend coverage for the hard-select / read-back Graph bindings.
+
+    Drives a live Graph through create_execution_plan_ext() -> build_plans() ->
+    get_execution_plan_engine_id(), exercising the actual nanobind surface and
+    the C++ getter (which the executor unit tests stub out).
+    """
+
+    @pytest.fixture
+    def hipdnn(self, plugin_paths: List[str]):
+        """Get hipdnn_frontend module or skip if not available."""
+        return _setup_hipdnn(plugin_paths)
+
+    def _built_graph(self, graph_json_str: str, handle):
+        """Return a Graph with the operation graph built (no execution plan yet).
+
+        Reuses Executor's graph construction (which normalises the JSON) and
+        hands back the raw hipdnn_frontend.Graph so the test can drive the
+        execution-plan bindings directly.
+        """
+        config = BenchmarkConfig(
+            graph_path=Path("/test/graph.json"), warmup_iters=0, benchmark_iters=1
+        )
+        executor = Executor(graph_json_str, config)
+        executor._build_through_operation_graph(handle)
+        return executor._graph
+
+    def test_hard_select_and_read_back_matches(
+        self, hipdnn, sample_conv_fwd_json: Dict[str, Any]
+    ) -> None:
+        """Hard-selecting a ranked engine builds, and the read-back reports it."""
+        handle = hipdnn.Handle()
+        graph_json_str = json.dumps(sample_conv_fwd_json)
+
+        discovery_graph = self._built_graph(graph_json_str, handle)
+        ranked = [int(e) for e in discovery_graph.get_ranked_engine_ids()]
+        assert ranked, "expected at least one ranked engine for the graph"
+        engine = ranked[0]
+
+        graph = self._built_graph(graph_json_str, handle)
+        result = graph.create_execution_plan_ext(engine)
+        assert not result.is_bad(), result.get_message()
+        assert not graph.build_plans().is_bad()
+        # The getter returns the engine that actually backs the built plan.
+        assert graph.get_execution_plan_engine_id() == engine
+
+    def test_hard_select_inapplicable_engine_is_bad(
+        self, hipdnn, sample_conv_fwd_json: Dict[str, Any]
+    ) -> None:
+        """Hard-selecting an engine id the backend cannot honor returns is_bad()."""
+        handle = hipdnn.Handle()
+        graph = self._built_graph(json.dumps(sample_conv_fwd_json), handle)
+        result = graph.create_execution_plan_ext(123456789)
+        assert result.is_bad()

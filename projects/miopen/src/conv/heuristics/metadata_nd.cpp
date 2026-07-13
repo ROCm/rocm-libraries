@@ -112,6 +112,23 @@ std::optional<size_t> MetadataND::LoadNumInputs(const std::string& arch)
     }
 }
 
+std::optional<size_t> MetadataND::LoadNumCu(const std::string& arch)
+{
+    auto json_opt = LoadJSONSafe(arch);
+    if(!json_opt)
+        return std::nullopt;
+
+    try
+    {
+        return json_opt->at("gpu").at("num_cu").get<size_t>();
+    }
+    catch(const std::exception& e)
+    {
+        MIOPEN_LOG_I2("Failed to load gpu.num_cu for " << arch << ": " << e.what());
+        return std::nullopt;
+    }
+}
+
 std::optional<size_t> MetadataND::LoadNumOutputs(const std::string& arch)
 {
     auto json_opt = LoadJSONSafe(arch);
@@ -367,6 +384,14 @@ MetadataND::MetadataND(const std::string& device, const int& dim)
     in_layout_encodings    = std::move(*in_layout_encodings_opt);
     fil_layout_encodings   = std::move(*fil_layout_encodings_opt);
     out_layout_encodings   = std::move(*out_layout_encodings_opt);
+    // num_cu is only consumed by the engineered 2D feature path. Absence leaves it 0, which zeroes
+    // the hardware-aware derived features (a degraded 2D prediction), so warn rather than fail.
+    if(auto num_cu_opt = LoadNumCu(model_prefix))
+        num_cu_3d = *num_cu_opt;
+    else
+        MIOPEN_LOG_W("TunaNet ND metadata for "
+                     << model_prefix
+                     << " has no gpu.num_cu; engineered 2D features will use num_cu=0");
     // Mark as valid after successful loading
     is_valid = true;
 
@@ -407,25 +432,17 @@ size_t MetadataND::EncodePrecision(miopenDataType_t data_type) const
     if(!is_valid)
         return 0;
 
-    try
+    const char* key = common::DataTypeToEncodingKey(data_type);
+    if(key != nullptr)
     {
-        if(data_type == miopenBFloat16)
-            return precision_encodings_3d.at("BF16");
-        else if(data_type == miopenHalf)
-            return precision_encodings_3d.at("FP16");
-        else if(data_type == miopenFloat)
-            return precision_encodings_3d.at("FP32");
-        else
-        {
-            MIOPEN_LOG_W("Unsupported data type in ND metadata, returning 0");
-            return 0;
-        }
+        const auto it = precision_encodings_3d.find(key);
+        if(it != precision_encodings_3d.end())
+            return it->second;
     }
-    catch(...)
-    {
-        MIOPEN_LOG_W("Precision encoding failed in ND metadata, returning 0");
-        return 0;
-    }
+    // Unsupported datatype, or a precision this model wasn't trained on: throw so the caller falls
+    // back to the non-AI heuristic. Returning an out-of-range index here would feed an all-zero
+    // precision one-hot into the model -- a silently degraded prediction, which we want to avoid.
+    MIOPEN_THROW("Precision not supported by this TunaNet ND model");
 }
 
 MIOPEN_INTERNALS_EXPORT

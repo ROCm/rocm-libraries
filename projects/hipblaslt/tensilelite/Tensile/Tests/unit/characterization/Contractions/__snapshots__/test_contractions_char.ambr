@@ -1,0 +1,91 @@
+# serializer version: 1
+# name: test_index_classes
+  dict({
+    'batch': dict({
+      'a': 0,
+      'b': 1,
+      'c': 0,
+      'd': 0,
+    }),
+    'bound': dict({
+      'a': 2,
+      'aMirror': True,
+      'b': 2,
+      'bMirror': False,
+    }),
+    'free': dict({
+      'c': 0,
+      'd': 0,
+      'i': 0,
+      'isA': True,
+    }),
+  })
+# ---
+# name: test_problem_predicate_compound
+  dict({
+    'count': 10,
+    'tags': list([
+      'BufferLoadOffsetLimitCheck',
+      'BufferLoadOffsetLimitCheck_Beta',
+      'BufferStoreOffsetLimitCheck',
+      'ClusterDimCheck',
+      'GlobalSplitUCheckMinK',
+      'KernelLanguageCompatible',
+      'LeadingFree0SizesGreaterOrEqual',
+      'LeadingFree1SizesGreaterOrEqual',
+      'WorkgroupMappingXCCCheck',
+      'WorkgroupNumberCheck',
+    ]),
+  })
+# ---
+# name: test_problem_type_index_names
+  tuple(
+    'lik',
+    'jlk',
+    'ijk',
+    'ijk',
+    'l',
+  )
+# ---
+# name: test_problem_type_operation_identifier
+  'Contraction_l_Alik_Bjlk_Cijk_Dijk'
+# ---
+# name: test_problem_type_placeholder_str
+  dict({
+    'full': 'Contraction_l_Alik_Bjlk_Cijk_Dijk_StridedBatched1_Type_HS_HPA',
+    'plain': '',
+  })
+# ---
+# name: test_problem_type_predicates
+  dict({
+    'count': 26,
+    'tags': list([
+      'Activation',
+      'ActivationComputeType',
+      'ActivationEnumWhiteList',
+      'ActivationNoGuard',
+      'AmaxDCheck',
+      'BiasDataTypeWhiteList',
+      'BiasSrcWhiteList',
+      'DataTypeE',
+      'F32XdlMathOp',
+      'GroupedGemm',
+      'HighPrecisionAccumulate',
+      'MXBlockA',
+      'MXBlockB',
+      'OperationIdentifierEqual',
+      'Sparse',
+      'StridedBatched',
+      'SupportDeviceUserArguments',
+      'SwizzleTensorA',
+      'SwizzleTensorB',
+      'TypesEqual',
+      'UseBias',
+      'UseE',
+      'UseGradient',
+      'UseScaleAB',
+      'UseScaleAlphaVec',
+      'UseScaleCD',
+    ]),
+  })
+# ---

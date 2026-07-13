@@ -9,7 +9,7 @@ import torch
 import origami
 
 """
-Origami: Analytical GEMM Solution Selection
+Origami: Analytical GEMM and Attention Solution Selection
 
 Python bindings for the Origami C++ library.
 """
@@ -154,7 +154,8 @@ class OrigamiMatmulSelector:
         # Run Origami solution selection
         self._result = origami.select_config(self._problem,
                                              self._hardware,
-                                             self._configs)
+                                             self._configs,
+                                             origami.model_t.gemm)
 
         if streamk:
             self._grid = origami.select_grid_size(self._problem,
@@ -451,4 +452,283 @@ class OrigamiMatmulSelector:
                 )
 
         return transpose_t
+
+
+class OrigamiAttentionSelector:
+    """
+    Analytical Flash Attention configuration selector for GPUs.
+
+    This class uses the Origami analytical model to select optimal Flash Attention kernel
+    configurations based on problem dimensions (sequence lengths, head dimensions), data types,
+    and hardware characteristics. It provides a high-level interface for integrating with
+    PyTorch-based attention implementations.
+
+    The selector analyzes a set of candidate configurations and predicts their performance
+    using analytical models of compute, memory, and synchronization costs specific to
+    Flash Attention workloads. It returns the configuration with the lowest predicted latency.
+
+    Attributes:
+        dtype_to_str (dict): Mapping from PyTorch dtypes to Origami dtype strings.
+    """
+    # Reuse the same dtype mapping as OrigamiMatmulSelector
+    dtype_to_str = OrigamiMatmulSelector.dtype_to_str
+
+    def __init__(
+        self,
+        config_gen: Iterable,
+        q_seq_len: int,
+        kv_seq_len: int,
+        head_dim: int,
+        q_heads: int,
+        kv_heads: int,
+        dtype: torch.dtype,
+        device: torch.device,
+        batch: int = 1,
+    ):
+        """
+        Initialize the Origami attention configuration selector.
+
+        Args:
+            config_gen: Iterable of Triton-style config objects with kwargs containing
+                       'BLOCK_M', 'BLOCK_N', 'BLOCK_K', and 'waves_per_eu'.
+            q_seq_len: Query sequence length (M dimension).
+            kv_seq_len: Key/Value sequence length (N dimension).
+            head_dim: Head dimension (K dimension).
+            q_heads: Number of query heads.
+            kv_heads: Number of key/value heads (for GQA/MQA).
+            dtype: PyTorch dtype for Q, K, V matrices.
+            device: PyTorch CUDA device (must be ROCm-capable).
+            batch: Batch size (default: 1).
+
+        Raises:
+            RuntimeError: If no ROCm-capable device is detected.
+            ValueError: If the hardware architecture is unsupported or data types are incompatible.
+        """
+        # Save problem dimensions
+        self._q_seq_len = q_seq_len
+        self._kv_seq_len = kv_seq_len
+        self._head_dim = head_dim
+        self._q_heads = q_heads
+        self._kv_heads = kv_heads
+        self._batch = batch
+
+        # Save tensor dtype as string
+        self._dtype_str = OrigamiAttentionSelector.dtype_to_str.get(dtype, dtype)
+
+        # Get dtype bitsize
+        try:
+            self._dtype_bitsize = torch.finfo(dtype).bits
+        except TypeError:
+            self._dtype_bitsize = torch.iinfo(dtype).bits
+
+        # MI dtype is the input dtype
+        self.mi_dtype = self._dtype_str
+
+        # Get hardware info from Origami
+        self._hardware = origami.get_hardware_for_device(device.index)
+        self._N_CU = self._hardware.N_CU
+
+        # Create Origami problem_t based on problem metadata
+        self._problem = self._make_problem()
+
+        # Create list of Origami config_t objects based on generator
+        self._configs = self._generate_configs(config_gen)
+
+        # Run Origami solution selection using attention model
+        self._result = origami.select_config(self._problem,
+                                             self._hardware,
+                                             self._configs,
+                                             origami.model_t.attention)
+
+        # For attention, typically use k_split_aware grid selection
+        self._grid = origami.select_grid_size(self._problem,
+                                              self._hardware,
+                                              self._result.config,
+                                              origami.grid_selection_t.k_split_aware,
+                                              self._hardware.N_CU)
+
+        self._workgroup_mapping = (
+            origami.select_workgroup_mapping(self._problem,
+                                             self._hardware,
+                                             self._result.config,
+                                             self._grid)
+        )
+
+    @property
+    def macrotile_m(self):
+        """
+        M dimension of the selected macrotile (block size for query sequence).
+
+        Returns:
+            int: Number of query tokens processed per workgroup.
+        """
+        return self._result.config.mt.m
+
+    @property
+    def macrotile_n(self):
+        """
+        N dimension of the selected macrotile (block size for key/value sequence).
+
+        Returns:
+            int: Number of key/value tokens processed per workgroup.
+        """
+        return self._result.config.mt.n
+
+    @property
+    def macrotile_k(self):
+        """
+        K dimension of the selected macrotile (head dimension block size).
+
+        Returns:
+            int: Number of elements in the head dimension processed per iteration.
+        """
+        return self._result.config.mt.k
+
+    @property
+    def wgm(self):
+        """
+        Workgroup mapping parameter for tiling in the query-kv plane.
+
+        This controls how output tiles are grouped together for better cache locality.
+
+        Returns:
+            int: Workgroup mapping size.
+        """
+        return self._workgroup_mapping.wgm
+
+    @property
+    def wgmxcc(self):
+        """
+        Workgroup mapping size across XCCs (chiplets).
+
+        For multi-chiplet GPUs (e.g., MI300 series), this controls how work is
+        distributed across the different chiplets.
+
+        Returns:
+            int: Number of workgroups mapped per XCC.
+        """
+        return self._workgroup_mapping.wgmxcc
+
+    @property
+    def wgmxccchunk(self):
+        """
+        Workgroup mapping chunk size for XCC distribution.
+
+        Controls the granularity of work distribution across chiplets.
+
+        Returns:
+            int: Chunk size for XCC workgroup mapping.
+        """
+        return self._workgroup_mapping.wgmxccchunk
+
+    @property
+    def number_of_cus(self):
+        """
+        Number of compute units (CUs) available on the target GPU.
+
+        Returns:
+            int: Total number of compute units on the device.
+        """
+        return self._hardware.N_CU
+
+    @property
+    def occupancy(self):
+        """
+        Number of wavefronts resident per SIMD unit (occupancy).
+
+        Higher occupancy can hide memory latency but reduces register availability.
+
+        Returns:
+            int: Number of concurrent wavefronts per EU (1-64, typically 1-2 for performance).
+        """
+        return self._result.config.occupancy
+
+    @property
+    def grid_size(self):
+        """
+        Grid size (number of workgroups) to launch for the kernel.
+
+        For Flash Attention, this is analytically determined based on the number
+        of query blocks, kv blocks, batch size, and number of query heads.
+
+        Returns:
+            int: Number of workgroups to launch.
+        """
+        return self._grid
+
+    def _generate_configs(self, config_gen) -> [origami.config_t]:
+        """
+        Convert Triton-style configs to Origami config_t objects.
+
+        Takes an iterable of Triton autotuner configs and converts them to
+        Origami's internal config_t representation, inferring matrix instruction
+        dimensions based on hardware and data types.
+
+        Args:
+            config_gen: Iterable of config objects with kwargs containing
+                       'BLOCK_M', 'BLOCK_N', 'BLOCK_K', and 'waves_per_eu'.
+
+        Returns:
+            list[origami.config_t]: List of Origami configuration objects.
+        """
+        configs_list = []
+
+        # Get recommended matrix instruction dimensions
+        mi = self._hardware.get_recommended_matrix_instruction(self._problem.mi_dtype)
+
+        for config in config_gen:
+            # Create special dim3_t object for BLK_* sizes (macrotile dimensions)
+            mt = origami.dim3_t(config.kwargs['BLOCK_M'],
+                                config.kwargs['BLOCK_N'],
+                                config.kwargs['BLOCK_K'])
+
+            # Create and set new config_t values
+            new_config           = origami.config_t()
+            new_config.mt        = mt
+            new_config.mi        = mi
+            new_config.occupancy = config.kwargs['waves_per_eu']
+
+            configs_list.append(new_config)
+
+        return configs_list
+
+    def _make_problem(self) -> origami.problem_t:
+        """
+        Create an Origami problem_t object from the Flash Attention problem specification.
+
+        Converts PyTorch-style attention parameters (sequence lengths, head dimensions)
+        into Origami's internal problem representation for Flash Attention.
+
+        For Flash Attention:
+        - M dimension = query sequence length
+        - N dimension = key/value sequence length
+        - K dimension = head dimension
+
+        Returns:
+            origami.problem_t: Problem specification for Origami analytical model.
+        """
+        # Create special dim3_t object for problem sizes
+        # M = query sequence length, N = kv sequence length, K = head dimension
+        size = origami.dim3_t(self._q_seq_len, self._kv_seq_len, self._head_dim)
+
+        # Convert torch dtype to Origami dtype
+        origami_dtype = origami.string_to_datatype(self._dtype_str)
+
+        # Create and set new problem_t values
+        problem = origami.problem_t()
+        problem.size            = size
+        problem.batch           = self._batch
+        problem.q_heads         = self._q_heads
+        # For Flash Attention, we use standard non-transposed layout
+        problem.a_transpose     = origami.transpose_t.N
+        problem.b_transpose     = origami.transpose_t.N
+        problem.a_dtype         = origami_dtype
+        problem.b_dtype         = origami_dtype
+        problem.c_dtype         = origami_dtype
+        problem.d_dtype         = origami_dtype
+        problem.mi_dtype        = origami_dtype
+        problem.a_mx_block_size = 0
+        problem.b_mx_block_size = 0
+
+        return problem
 

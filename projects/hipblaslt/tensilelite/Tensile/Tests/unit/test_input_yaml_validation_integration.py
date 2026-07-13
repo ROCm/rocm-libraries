@@ -43,8 +43,6 @@ from Tensile.Common.GlobalParameters import (
 from Tensile.Common.TypeValidationErrors import ConfigTypeError
 from Tensile import LibraryIO
 
-pytestmark = pytest.mark.usefixtures("_force_strict_gate_on")
-
 CONFIG_ROOT = Path(__file__).resolve().parent.parent / "common"
 
 

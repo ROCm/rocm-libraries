@@ -1,14 +1,15 @@
 # StinkyWaitCntInsertionPass — SSA Def-Use + Dataflow Wait Count Insertion
 
-`StinkyWaitCntInsertionPass` inserts `s_wait_dscnt`, `s_wait_loadcnt`, and `s_wait_tensorcnt` so that asynchronous memory operations complete before their results are consumed. The pass reads dependencies from an SSA def-use chain over memory-token pseudo-registers and computes wait placement via a forward dataflow solver (`WaitDataflow`), followed by optional plan optimizers and a finalize replay step.
+`StinkyWaitCntInsertionPass` inserts `s_wait_dscnt`, `s_wait_loadcnt`, `s_wait_kmcnt`, and `s_wait_tensorcnt` so that asynchronous memory operations complete before their results are consumed. The pass reads dependencies from an SSA def-use chain over memory-token pseudo-registers and computes wait placement via a forward dataflow solver (`WaitDataflow`), followed by optional plan optimizers and a finalize replay step.
 
 ### Key characteristics
 
 - **SSA def-use dependencies** via `buildUseDefChain(includePseudo=true)` — memtoken pseudo-registers become first-class edges, so `inst->getSources()` lists the memops a consumer depends on (including through PHIs at CFG joins)
-- **Three counter types**: DS (`dlcnt`), buffer/load (`vlcnt`), tensor (`tlcnt`), tracked as `CounterKind` in `WaitDataflow`
+- **Four counter types**: DS (`dlcnt`), buffer/load (`vlcnt`), scalar memory (`kmcnt`), tensor (`tlcnt`), tracked as `CounterKind` in `WaitDataflow`
 - **Per-predecessor queues** — each counter keeps separate in-flight FIFOs tagged by CFG predecessor edge, so join consumers see each path's depth instead of a collapsed union queue
+- **Tensor loop policy** — by default, the `CK_Tensor` slice of dataflow state is frozen after the first solver sweep so tensor tokens do not propagate around loop back-edges; a conservative option restores normal tensor fixed-point iteration
 - **Anti-dependency scans** for hazards the SSA RAW chain does not capture (WAR-on-LDS, barrier ordering, untagged conservative fallbacks)
-- **Analyze → Optimize → Finalize** — conservative dataflow solve, then `ShallowPredPromotion`, then `finalizePlan()` to align the plan with post-optimizer FIFO simulation
+- **Analyze → Optimize → Finalize** — dataflow solve, then `ShallowPredPromotion`, then `finalizePlan()` to align the plan with post-optimizer FIFO simulation
 - **Selective IR mutation**: `buildUseDefChain` and `WaitDataflow::solve()` run over every basic block so skipped preds still contribute in-flight state; `PassContext::shouldProcessBasicBlock` gates `emitWaits` and `removePHIs` only
 
 ---
@@ -21,6 +22,7 @@ Asynchronous memory ops (LDS `ds_*`, global/buffer loads and stores, `tensor_loa
 |---------------|--------|------------------|----------------|
 | `CK_DS` | `ds_read` / `ds_write` / `ds_atomic` | `s_wait_dscnt N` | `SWaitCntData.dlcnt` |
 | `CK_Buffer` | global/buffer load + store | `s_wait_loadcnt N` | `SWaitCntData.vlcnt` |
+| `CK_KM` | scalar memory loads (`s_load_*`) | `s_wait_kmcnt N` | `SWaitCntData.kmcnt` |
 | `CK_Tensor` | `tensor_load_to_lds` | `s_wait_tensorcnt N` | `SWaitTensorCntData.tlcnt` |
 
 `s_wait_*cnt N` blocks until **at most `N`** ops of that kind remain outstanding (it keeps the `N` most-recently-issued in flight and drains everything older).
@@ -68,6 +70,7 @@ The orchestration in `StinkyWaitCntInsertionPass::run()`:
 buildUseDefChain(func, domInfo, /*clearExisting=*/true, /*includePseudo=*/true);
 
 WaitDataflow df(func, domInfo, rpo);
+df.setLoopCarriedTokenDepsEnabled(options.enableLoopCarriedTokenDeps);
 
 const auto numWaves = passCtx.getGemmTileConfig().NumWaves;
 df.setRawNeedsWait(CK_Tensor, [numWaves](const StinkyInstruction& i) {
@@ -97,13 +100,13 @@ removePHIs(passCtx, rpo);
                         v
             +-----------------------+
             |  buildUseDefChain()   |   Memtoken pseudo-regs as
-            |  (includePseudo=true)|   SSA edges + PHI placement
+            |  (includePseudo=true) |   SSA edges + PHI placement
             +-----------+-----------+
                         |
                         v
             +-----------------------+
             |  setRawNeedsWait()    |   Per-counter drain policy
-            |  (tensor / NumWaves)|   (optional overrides)
+            |  + tensor-loop option |   (optional overrides)
             +-----------+-----------+
                         |
                         v
@@ -124,7 +127,7 @@ removePHIs(passCtx, rpo);
                         v
             +-----------------------+
             |  finalizePlan()       |   Replay with final plan + tail
-            |                       |   drains (all counters)
+            |                       |   drains (+ tensor freeze)
             +-----------+-----------+
                         |
                         v
@@ -145,10 +148,10 @@ removePHIs(passCtx, rpo);
 
 `WaitDataflow::transferBlock` does two jobs in one walk:
 
-1. **Plan** — decide `(anchor → WaitCountSpec)` using conservative required waits.
+1. **Plan** — decide `(anchor → WaitCountSpec)` using required waits from the current dataflow state.
 2. **Simulate** — `trimQueues()` so later instructions (and successor blocks via the fixed point) see a FIFO that matches the **planned** drain.
 
-`WaitPlanOptimizer`s run **after** convergence and may change what will actually be emitted. For example, at a join the conservative solver may emit `tlcnt = 0` (min across paths), but `ShallowPredPromotion` may relax that to `tlcnt = 2` and add a tail drain on the shallow predecessor. The solver's queue simulation used `0` (full trim); the final plan uses `2` (partial trim).
+`WaitPlanOptimizer`s run **after** convergence and may change what will actually be emitted. For example, at a join the baseline solver may emit `tlcnt = 0` (min across paths), but `ShallowPredPromotion` may relax that to `tlcnt = 2` and add a tail drain on the shallow predecessor. The solver's queue simulation used `0` (full trim); the final plan uses `2` (partial trim).
 
 When an earlier anchor's simulated drain is **stronger** than the final emitted drain, every later anchor in the same block — on **any** counter — can be wrong:
 
@@ -169,7 +172,24 @@ df.setRawNeedsWait(CK_Tensor, [numWaves](const StinkyInstruction& i) {
 
 When `NumWaves == 1`, `rawNeedsWait` is true at **every** instruction, so tensor RAW deps drain at each consumer (not only at barriers). In multi-wave kernels, tensor counter drains are limited to barriers — cross-wave LDS visibility is handled by the barrier itself.
 
-DS and buffer counters use the default `rawNeedsWait` (drain at every consumer). Callers may override any counter via `WaitDataflow::setRawNeedsWait()` before `solve()`.
+Loop-carried tensor-token dependencies are controlled separately:
+
+```cpp
+df.setLoopCarriedTokenDepsEnabled(options.enableLoopCarriedTokenDeps);
+```
+
+By default this option is **disabled**. In that mode, `WaitDataflow` computes `CK_Tensor` normally during solver sweep 0, then freezes only the tensor slice of `DataflowState` on later sweeps. This prevents tensor token state from propagating around loop back-edges and avoids loop-header waits such as an unnecessary first `s_wait_tensorcnt 0`.
+
+When `enableLoopCarriedTokenDeps` is **enabled**, `CK_Tensor` participates in the normal fixed-point iteration just like the other counters. This is the conservative mode and can reintroduce loop-header tensor waits when a back-edge carries tensor token state.
+
+Entry points for the conservative mode:
+
+- `WaitDataflow::setLoopCarriedTokenDepsEnabled(true)`
+- `WaitCntInsertionOptions::enableLoopCarriedTokenDeps = true`
+- `ModuleOptions::EnableLoopCarriedTokenDeps = true`
+- `stinkytofu-opt`: `--StinkyWaitCntInsertionPass=enableLoopCarriedTokenDeps`
+
+DS, buffer, and KM counters use the default `rawNeedsWait` (drain at every consumer). Callers may override any counter via `WaitDataflow::setRawNeedsWait()` before `solve()`.
 
 ### Selective processing
 
@@ -215,7 +235,7 @@ Per-pred queues are kept separate at block exit (not collapsed) so successors pr
 
 ### DataflowResult
 
-Converged per-block `entryState` and `exitState`. Optimizers read `exitState[pred]` for per-path queue depths; `finalizePlan` reads `entryState`.
+Converged per-block `entryState` and `exitState`. Optimizers read `exitState[pred]` for per-path queue depths; `finalizePlan` reads `entryState`. In default mode, the `CK_Tensor` slice of these states is the frozen post-sweep-0 tensor snapshot, while the other counters are fully converged.
 
 ### WaitCountSpec / WaitInsertionPlan
 
@@ -259,10 +279,13 @@ Intuition: after emitting `s_wait N`, at most `N` old ops remain; each new op is
 
 1. Seed every block with empty state (lattice bottom).
 2. Each iteration: for each block, `mergeFromPredecessors` builds entry state, then `transferBlock` walks instructions and mutates state.
-3. Convergence = full RPO sweep with no exit-state change.
-4. On convergence, report any counter that exceeded `kMaxInFlight` as a non-fatal diagnostic.
+3. In default mode, after sweep 0, restore the `CK_Tensor` slice of each block's entry/exit state from the frozen sweep-0 snapshot. DS, buffer, and KM continue normal fixed-point iteration.
+4. Convergence = full RPO sweep with no exit-state change.
+5. On convergence, report any counter that exceeded `kMaxInFlight` as a non-fatal diagnostic.
 
 **Iteration cap**: `min(256, max(kMaxInFlight + 8, 2 * n))` where `n = |rpo|`. On cap hit, `materializePlan()` forces wait 0 at every emitting anchor and logs a warning.
+
+If `enableLoopCarriedTokenDeps` is true, the tensor freeze step is skipped and `CK_Tensor` iterates to the same fixed point as the other counters.
 
 ### mergeFromPredecessors
 
@@ -294,7 +317,7 @@ Per-pred queues are **not** collapsed at block exit.
 RAW dependencies come from `inst->getSources()` after `buildUseDefChain(includePseudo=true)`:
 
 - Concrete memop sources: `classifyMemOp(*src)` maps to a counter; `countFrom(src) - 1` from each per-pred queue contributes via `tightenRequired` (min across hits).
-- PHI sources: `phiCurrentQueueWait` recurses through PHI inputs and scans **live** per-pred queues (not frozen summaries alone), so intervening in-block ops are counted.
+- PHI sources: `phiCurrentQueueWait` recurses through PHI inputs and scans **live** per-pred queues (not stored PHI summaries alone), so intervening in-block ops are counted.
 
 ```
 v_wmma uses v[0:3]
@@ -354,7 +377,7 @@ These widen waits, never narrow them.
 
 After `materializePlan()`, `WaitPlanOptimizer::rewrite` may relax the plan. `ShallowPredPromotion` is the only shipped optimizer.
 
-**Problem**: at a CFG join, the conservative solver emits a single anchor wait sized for the shallowest constrained path (`min` across paths), over-draining deeper paths.
+**Problem**: at a CFG join, the baseline solver emits a single anchor wait sized for the shallowest constrained path (`min` across paths), over-draining deeper paths.
 
 **Solution**: for each anchor wait at a join (≥2 predecessors), per constrained counter:
 
@@ -375,23 +398,27 @@ After `materializePlan()`, `WaitPlanOptimizer::rewrite` may relax the plan. `Sha
 
 ## finalizePlan
 
-After optimizers, `WaitDataflow::finalizePlan()` replays blocks where the conservative solver's queue simulation may disagree with the final plan.
+After optimizers, `WaitDataflow::finalizePlan()` replays blocks where the solver's queue simulation may disagree with the final plan.
 
 ### When a block is replayed
 
 `blockNeedsFinalize` returns true when the block has any entry in `plan.anchorWaits` **or** ≥2 wait-anchor candidates (any instruction where `rawNeedsWait` is true for any counter).
 
-### Per-block replay algorithm (all counters)
+### Per-block replay algorithm
 
 For each replayed block in RPO order:
 
 1. **`adjustedEntry`** — start from converged `entryState[bb]`. For each predecessor with a `TailDrain` in the plan, virtually trim only that pred's per-pred queues by the tail-drain wait values. Tail drains execute on the predecessor **before** control enters the successor; converged `entryState` does not include them.
-2. **Program-order walk** — for each non-PHI instruction:
+2. **Tensor freeze restore** — in default mode and after replay sweep 0, restore only the `CK_Tensor` slice of the block entry from the frozen replay entry snapshot.
+3. **Program-order walk** — for each non-PHI instruction:
    - `computed = computeRequiredWaits(inst, state, rawNeedsWait)`
    - `applySpec = mergePlanAndComputed(plan, inst, computed, emitState)`
-   - Trim queues with applied wait values (never with pre-optimizer conservative values)
+   - Trim queues with applied wait values (never with pre-optimizer solver values)
    - Update `plan.anchorWaits[inst]` — add, update, or erase redundant fields
    - Append producers to counter queues after the wait decision
+4. **Tensor exit restore** — in default mode and after replay sweep 0, restore only the `CK_Tensor` slice of the block exit from the frozen replay exit snapshot before convergence comparison.
+
+When `enableLoopCarriedTokenDeps` is true, both tensor restore steps are skipped and all counters are replayed to a fixed point.
 
 ### mergePlanAndComputed
 
@@ -402,7 +429,7 @@ For each replayed block in RPO order:
 | unset | set | yes | **Add** computed wait to plan |
 | unset | set | no | No wait |
 
-Planned values win when redundancy allows — optimizers may intentionally relax below the conservative recompute.
+Planned values win when redundancy allows — optimizers may intentionally relax below the replay recompute.
 
 ### Effects
 
@@ -436,7 +463,7 @@ A diamond CFG with two barriers on disjoint tokens exercises per-path promotion 
 | `^p_shallow` | `[t11]` | `tlcnt = 0` |
 | `^p_deep` | `[t11, t12, t12]` | `tlcnt = 2` (drain `t11`, keep the two `t12`) |
 
-The conservative solver takes `min(0, 2) = 0` — sound but over-drains the deep path.
+The baseline solver takes `min(0, 2) = 0` — sound but over-drains the deep path.
 
 `ShallowPredPromotion`:
 
@@ -462,7 +489,7 @@ After barrier `[11]` with `tlcnt = 2`, the deep path still has `[t12, t12]` in f
 
 **With optimizers disabled:**
 
-The conservative solver emits a single `s_wait_tensorcnt 0` before barrier `[11]`, fully draining every path. `finalizePlan` replays the block, sees barrier `[12]` has no in-flight deps, and does not add a second wait:
+The baseline solver emits a single `s_wait_tensorcnt 0` before barrier `[11]`, fully draining every path. `finalizePlan` replays the block, sees barrier `[12]` has no in-flight deps, and does not add a second wait:
 
 ```asm
 ^merge:
@@ -477,7 +504,7 @@ Approaches that were considered and rejected for this case:
 |----------|---------|
 | Selective trim on `wait 0` when a later anchor exists | Correct with optimizer on, wrong when optimizer is off (redundant second wait) |
 | Run optimizers inside the fixed-point loop | Couples promotion to incomplete snapshots; hard to terminate |
-| Always use `max` instead of `min` at joins in the solver | Breaks the conservative plan that promotion is designed to relax |
+| Always use `max` instead of `min` at joins in the solver | Breaks the baseline plan that promotion is designed to relax |
 
 ---
 

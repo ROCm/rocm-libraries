@@ -57,8 +57,9 @@ def record_num_calls(f):
 
     return wrapper
 
-def kernel_header(name: str, gfx_arch: str):
-    return f'''.amdgcn_target "amdgcn-amd-amdhsa--{gfx_arch}"
+def kernel_header(name: str, gfx_arch: str, xnack: bool = False):
+    target_id = f'{gfx_arch}:xnack+' if xnack else gfx_arch
+    return f'''.amdgcn_target "amdgcn-amd-amdhsa--{target_id}"
 .text
 .global {name}
 .p2align 8
@@ -719,6 +720,7 @@ if __name__ == '__main__':
     ap.add_argument('--debug-build', action='store_true', dest='debug_build', help='Build with debug information')
     ap.set_defaults(debug_build=False)
     ap.add_argument('--arch', type=str, default='gfx90a', help='Target architecture for assembler, e.g. gfx908. Default is gfx90a')
+    ap.add_argument('--xnack', action='store_true', help='Append :xnack+ to the .amdgcn_target code-object id (arch logic still uses the base arch)')
     args = ap.parse_args()
     output_path: str = args.output
     m: int = args.m
@@ -726,6 +728,7 @@ if __name__ == '__main__':
     toolchain_path: str = validateToolchain(args.toolchain)
     debug_build: bool = args.debug_build
     arch: str = args.arch
+    xnack: bool = args.xnack
     isa = gfxToIsa(arch)
 
     if any([not i for i in (arch, toolchain_path, isa)]):
@@ -745,7 +748,7 @@ if __name__ == '__main__':
     func_name = softmax.func_name
     meta = KernelMeta(func_name, softmax.vgpr_pool.size(), softmax.sgpr_pool.size(), 0, softmax.lds_usage_byte, waveFrontSize, 256, 8, args)
     meta.update_args_offsets()
-    k_str = '\n'.join([kernel_header(func_name, arch),
+    k_str = '\n'.join([kernel_header(func_name, arch, xnack),
                        str(kernel_body),
                        kernel_rodata(func_name, isa),
                        meta_str((meta,))])

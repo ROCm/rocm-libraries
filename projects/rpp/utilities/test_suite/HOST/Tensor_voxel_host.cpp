@@ -234,7 +234,7 @@ int main(int argc, char* argv[]) {
 
         for (int perfRunCount = 0; perfRunCount < numRuns; perfRunCount++) {
             RppStatus errorCodeCapture = RPP_SUCCESS;
-            double startWallTime, endWallTime;
+            double startWallTime = 0.0, endWallTime;
             switch (testCase) {
                 case FUSED_MULTIPLY_ADD_SCALAR: {
                     testCaseName = "fused_multiply_add_scalar";
@@ -502,8 +502,10 @@ int main(int argc, char* argv[]) {
                         uint dataSize = niftiHeaderTemp[batchCount].dim[1] *
                                         niftiHeaderTemp[batchCount].dim[2] *
                                         niftiHeaderTemp[batchCount].dim[3];
-                        uchar* niftiDataU8 = (uchar*)malloc(dataSize * sizeof(uchar));
-                        uchar* outputBufferOpenCV = (uchar*)calloc(xyFrameSizeROI, sizeof(uchar));
+                        unsigned char* niftiDataU8 =
+                            (unsigned char*)malloc(dataSize * sizeof(unsigned char));
+                        unsigned char* outputBufferOpenCV =
+                            (unsigned char*)calloc(xyFrameSizeROI, sizeof(unsigned char));
 
                         // Convert RpptDataType::F32 strided buffer to default NIFTI_DATATYPE
                         // unstrided buffer
@@ -524,9 +526,9 @@ int main(int argc, char* argv[]) {
                         Rpp32f multiplier = 255.0f / (max - min);
                         for (int i = 0; i < dataSize; i++)
                             niftiDataU8[i] =
-                                (uchar)((niftiDataArray[batchCount][i] - min) * multiplier);
+                                (unsigned char)((niftiDataArray[batchCount][i] - min) * multiplier);
 
-                        uchar* niftiDataU8Temp = niftiDataU8;
+                        unsigned char* niftiDataU8Temp = niftiDataU8;
                         for (int zPlane = roiGenericSrcPtr[batchCount].xyzwhdROI.xyz.z;
                              zPlane < roiGenericSrcPtr[batchCount].xyzwhdROI.xyz.z +
                                           roiGenericSrcPtr[batchCount].xyzwhdROI.roiDepth;

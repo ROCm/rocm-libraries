@@ -29,8 +29,6 @@ from Tensile.Common.ValidParameters import (
 )
 from Tensile.Common.TypeValidationErrors import ConfigTypeError
 
-pytestmark = pytest.mark.usefixtures("_force_strict_gate_on")
-
 
 class TestBoolIntTrap:
     """Bool vs int must be distinguished both directions (§5)."""

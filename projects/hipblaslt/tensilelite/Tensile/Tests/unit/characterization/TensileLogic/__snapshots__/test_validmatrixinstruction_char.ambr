@@ -1,0 +1,13 @@
+# serializer version: 1
+# name: test_accept_consistent_solution
+  dict({
+    'returned': True,
+    'valid': True,
+  })
+# ---
+# name: test_reject_invalid_mfma
+  dict({
+    'returned': False,
+    'valid': False,
+  })
+# ---

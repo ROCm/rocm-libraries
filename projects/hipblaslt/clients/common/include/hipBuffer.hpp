@@ -201,7 +201,9 @@ inline hipError_t synchronize(HipHostBuffer&         hBuf,
                               bool                   needSwizzle = false,
                               hipStream_t            stream      = nullptr)
 {
-    if(row > lda)
+    // lda is only used by the swizzled row-by-row copy below; the plain copy path
+    // ignores it, so only the swizzle path can have an out-of-range leading dimension.
+    if(needSwizzle && row > lda)
         hipblaslt_cerr << "invalid values of lda in synchronize()" << std::endl;
     hipError_t hip_err;
 

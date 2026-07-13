@@ -32,8 +32,6 @@ from Tensile.Common.GlobalParameters import (
 )
 from Tensile.Common.TypeValidationErrors import ConfigTypeError
 
-pytestmark = pytest.mark.usefixtures("_force_strict_gate_on")
-
 
 # A minimal isaInfoMap stand-in. assignGlobalParameters uses it to set
 # validParameters["ISA"] and (optionally) print capability tables; a

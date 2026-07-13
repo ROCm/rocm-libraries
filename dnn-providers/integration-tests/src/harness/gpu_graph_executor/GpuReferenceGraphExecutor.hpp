@@ -8,6 +8,7 @@
 
 #include "detail/GpuPlanBuilderRegistry.hpp"
 #include "harness/IReferenceGraphExecutor.hpp"
+#include "harness/ReferenceCapabilityError.hpp"
 
 namespace hipdnn_integration_tests::gpu_graph_executor
 {
@@ -16,6 +17,23 @@ class GpuReferenceGraphExecutor : public IReferenceGraphExecutor
 {
 public:
     GpuReferenceGraphExecutor() = default;
+
+    bool isApplicable(void* graphBuffer, size_t size) override
+    {
+        auto graphWrap
+            = hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper::fromSerializedBlob(
+                graphBuffer, size);
+
+        for(uint32_t i = 0; i < graphWrap.nodeCount(); i++)
+        {
+            auto& node = graphWrap.getNode(i);
+            if(!isNodeApplicable(node, graphWrap.getTensorMap()))
+            {
+                return false;
+            }
+        }
+        return true;
+    }
 
     void execute(void* graphBuffer,
                  size_t size,
@@ -72,6 +90,24 @@ private:
         return updatedVariantPack;
     }
 
+    bool isNodeApplicable(
+        const hipdnn_flatbuffers_sdk::data_objects::Node& node,
+        const std::unordered_map<int64_t,
+                                 const hipdnn_flatbuffers_sdk::data_objects::TensorAttributes*>&
+            tensorMap)
+    {
+        try
+        {
+            auto key = buildSignatureKey(node, tensorMap);
+            const auto& builder = _planRegistry.getPlanBuilder(key);
+            return builder.isApplicable(node, tensorMap);
+        }
+        catch(...)
+        {
+            return false;
+        }
+    }
+
     std::unique_ptr<detail::IGpuGraphNodePlanExecutor>
         buildPlanForNode(const hipdnn_flatbuffers_sdk::flatbuffer_utilities::IGraph& graph,
                          const hipdnn_flatbuffers_sdk::data_objects::Node& node)
@@ -83,8 +119,8 @@ private:
         {
             const std::string nodeName
                 = node.name() == nullptr ? " unknown" : " " + node.name()->str();
-            throw std::runtime_error("GPU plan builder is not applicable for the given node:"
-                                     + nodeName);
+            throw ReferenceCapabilityError("GPU plan builder is not applicable for the given node:"
+                                           + nodeName);
         }
 
         return planBuilder.buildNodePlan(graph, node);
@@ -123,15 +159,17 @@ private:
         case NodeAttrs::BlockScaleQuantizeAttributes:
         {
             const std::string nodeName = node.name() == nullptr ? "unknown" : node.name()->str();
-            throw std::runtime_error("GPU plan not yet implemented for node '" + nodeName
-                                     + "'. Register a GPU plan for this operation type.");
+            throw ReferenceCapabilityError("GPU plan not yet implemented for node '" + nodeName
+                                           + "'. Register a GPU plan for this operation type.");
         }
 
         case NodeAttrs::CustomOpAttributes:
-            throw std::runtime_error("GPU reference executor does not support custom operations");
+            throw ReferenceCapabilityError(
+                "GPU reference executor does not support custom operations");
 
         default:
-            throw std::runtime_error("Unsupported node type for GPU signature key generation");
+            throw ReferenceCapabilityError(
+                "Unsupported node type for GPU signature key generation");
         }
     }
 

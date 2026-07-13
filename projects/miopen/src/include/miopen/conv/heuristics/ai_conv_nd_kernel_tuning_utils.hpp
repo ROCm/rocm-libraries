@@ -289,8 +289,13 @@ RunParameterPredictionModel(
         MIOPEN_LOG_I("AI prediction returned invalid kernel index, falling back");
         return {false, result};
     }
-    catch(const miopen::Exception& ex)
+    catch(const std::exception& ex)
     {
+        // Catch std::exception, not just miopen::Exception: a model fdeep cannot load/run
+        // (e.g. one exported in an incompatible format) throws a non-miopen exception, and at
+        // runtime that must degrade to the non-AI heuristic rather than fail the convolution.
+        // (Broken bundled models are caught loudly by the dedicated model-load gtest, so this
+        // graceful fallback does not hide them in CI.)
         MIOPEN_LOG_I2("[Warning] AI model failed: " << ex.what());
         return {false, miopen::ai::tuning::candidate_selection::CandidateSelectionResult{}};
     }

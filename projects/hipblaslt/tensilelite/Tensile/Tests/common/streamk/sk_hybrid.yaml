@@ -1,0 +1,104 @@
+TestParameters:
+  marks: [skip-gfx900, skip-gfx906, skip-gfx908, skip-gfx90a, skip-gfx1010, skip-gfx1011, skip-gfx1012, skip-gfx1030, skip-gfx1100, skip-gfx1101, skip-gfx1102, skip-gfx1200, skip-gfx1201, skip-gfx1250] # SK5 requires MFMA + gfx94x/950
+
+GlobalParameters:
+  SyncsPerBenchmark: 0
+  NumElementsToValidate: -1
+  BoundsCheck: 0
+  KernelTime: False
+  DataInitTypeAlpha: 1
+  DataInitTypeBeta: 1
+  DataInitTypeA: 12
+  DataInitTypeB: 13
+  DataInitTypeC: 12
+  MaxWorkspaceSize: 134217728
+  NumWarmups: 0
+  EnqueuesPerSync: 1
+  SleepPercent: 50
+  # Exercise the two deterministic SK5 hybrid-mode paths in one run:
+  #   0 -> static work assignment (OFF, default)
+  #   1 -> dynamic per-XCD work-queue path (ON)
+  # Each base problem is replayed once per value, so reference vs kernel
+  # validation runs for both paths and confirms numerical equivalence.
+  # AUTO (=2) is also a valid value for this parameter but is not used
+  # in sweep YAMLs because the per-launch sub-path it picks depends on
+  # the runtime heuristic, which weakens per-path coverage guarantees.
+  # AUTO end-to-end coverage lives in the origami unit tests (heuristic
+  # logic) and the hipBLASLt client gtests (end-to-end dispatch); it is
+  # also reachable here ad-hoc via `--streamk-hybrid-mode 2`.
+  StreamKHybridMode: [0, 1]
+
+# Shared SK5-hybrid fork entries (single-value) plus common benchmark params.
+.SkHybridCommonFork: &sk_hybrid_common_fork
+  - KernelLanguage: ["Assembly"]
+  - PrefetchLocalRead: [1]
+  - 1LDSBuffer: [1]
+  - ExpandPointerSwap: [False]
+  - GlobalSplitU: [0]
+  - MIArchVgpr: [False]
+  - PrefetchGlobalRead: [2]
+  - ScheduleIterAlg: [3]
+  - SourceSwap: [True]
+  - StoreRemapVectorWidth: [0]
+  - StreamK: [5]
+  - TransposeLDS: [0]
+  - WorkGroupMapping: [1]
+
+.SkHybridBpsg: &sk_hybrid_bpsg
+  InitialSolutionParameters:
+  BenchmarkCommonParameters: *sk_hybrid_common_fork
+  BenchmarkForkParameters:
+  JoinParameters:
+  BenchmarkJoinParameters:
+  BenchmarkFinalParameters:
+    - ProblemSizes:
+      - Exact: [512, 512, 1, 512]
+      - Exact: [4103, 4103, 1, 1031]
+
+BenchmarkProblems:
+
+  - # SGEMM NT - StreamK=5 hybrid (both SK3 and SK4 paths in one kernel)
+    - # ProblemType
+      OperationType: GEMM
+      DataType: s
+      TransposeA: False
+      TransposeB: True
+      UseBeta: True
+      Batched: True
+
+    - # SK5 hybrid - small MI matrix to keep kernel-object size bounded
+      <<: *sk_hybrid_bpsg
+      ForkParameters:
+        - DepthU: [16]
+        - GlobalReadVectorWidthA: [1]
+        - GlobalReadVectorWidthB: [1]
+        - LocalReadVectorWidth: [1]
+        - MatrixInstruction:
+          - [32, 32, 2, 1, 1, 2,2, 2,2]
+          - [16, 16, 4, 1, 1, 2,2, 2,2]
+        - PrefetchLocalRead: [1]
+        - VectorWidthA: [1]
+        - VectorWidthB: [1]
+
+  - # HGEMM NT - StreamK=5 hybrid
+    - # ProblemType
+      OperationType: GEMM
+      DataType: b
+      DestDataType: b
+      ComputeDataType: s
+      HighPrecisionAccumulate: True
+      TransposeA: True
+      TransposeB: False
+      UseBeta: True
+      Batched: True
+
+    - # SK5 hybrid - small MI matrix
+      <<: *sk_hybrid_bpsg
+      ForkParameters:
+        - DepthU: [64]
+        - GlobalReadVectorWidthA: [8]
+        - GlobalReadVectorWidthB: [8]
+        - MatrixInstruction:
+          - [32, 32, 8, 1, 1, 2,2, 2,2]
+          - [16, 16, 16, 1, 1, 2,2, 2,2]
+        - PrefetchLocalRead: [1]

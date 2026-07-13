@@ -77,8 +77,8 @@ namespace
                 testing_aux_matmul_pref_get_attr(arg);
             else if(!strcmp(arg.function, "aux_matmul_sm_count_target"))
                 testing_aux_matmul_sm_count_target(arg);
-            else if(!strcmp(arg.function, "aux_matmul_dyn_persistent_tile_ext"))
-                testing_aux_matmul_dyn_persistent_tile_ext(arg);
+            else if(!strcmp(arg.function, "aux_matmul_streamk_tile_scheduling_ext"))
+                testing_aux_matmul_streamk_tile_scheduling_ext(arg);
             else if(!strcmp(arg.function, "aux_matmul_pref_sm_count_target"))
                 testing_aux_matmul_pref_sm_count_target(arg);
             else if(!strcmp(arg.function, "aux_matmul_alg_init_bad_arg"))
@@ -118,8 +118,10 @@ namespace
                 testing_aux_tensile_host_func(arg);
             else if(!strcmp(arg.function, "aux_tuple_helper_equal_func"))
                 testing_aux_tuple_helper_equal_func(arg);
+#ifdef HIPBLASLT_USE_ROCROLLER
             else if(!strcmp(arg.function, "aux_rocblaslt_rocroller_host_func"))
                 testing_aux_rocblaslt_rocroller_host_func(arg);
+#endif
             else if(!strcmp(arg.function, "aux_check_numerics_func"))
                 testing_aux_check_numerics_func(arg);
 #endif
@@ -170,7 +172,7 @@ namespace
                    || !strcmp(arg.function, "aux_matmul_pref_get_attr_bad_arg")
                    || !strcmp(arg.function, "aux_matmul_pref_get_attr")
                    || !strcmp(arg.function, "aux_matmul_sm_count_target")
-                   || !strcmp(arg.function, "aux_matmul_dyn_persistent_tile_ext")
+                   || !strcmp(arg.function, "aux_matmul_streamk_tile_scheduling_ext")
                    || !strcmp(arg.function, "aux_matmul_pref_sm_count_target")
 #ifdef CODE_COVERAGE
                    || !strcmp(arg.function, "aux_auxiliary_func")
@@ -181,7 +183,9 @@ namespace
                    || !strcmp(arg.function, "aux_hipblaslt_func")
                    || !strcmp(arg.function, "aux_tensile_host_func")
                    || !strcmp(arg.function, "aux_tuple_helper_equal_func")
+#ifdef HIPBLASLT_USE_ROCROLLER
                    || !strcmp(arg.function, "aux_rocblaslt_rocroller_host_func")
+#endif
                    || !strcmp(arg.function, "aux_check_numerics_func")
 #endif
                    || !strcmp(arg.function, "aux_check_numerics_gemm")

@@ -1,0 +1,90 @@
+# serializer version: 1
+# name: test_debug_config_defaults
+  dict({
+    'debugKernel': False,
+    'enableAsserts': False,
+    'enableDebugA': False,
+    'enableDebugB': False,
+    'enableDebugC': False,
+    'expectedValueC': 16.0,
+    'forceCExpectedValue': False,
+    'forceGenerateKernel': False,
+    'printIndexAssignmentInfo': False,
+    'printSolutionRejectionReason': False,
+    'splitGSU': False,
+  })
+# ---
+# name: test_isa_info_dataclass
+  dict({
+    'archCaps': dict({
+      'HasWave32': False,
+    }),
+    'asmBugs': dict({
+      'b': False,
+    }),
+    'asmCaps': dict({
+      'HasMFMA': True,
+    }),
+    'regCaps': dict({
+      'r': 1,
+    }),
+  })
+# ---
+# name: test_make_debug_config_empty
+  dict({
+    'debugKernel': False,
+    'enableAsserts': False,
+    'enableDebugA': False,
+    'enableDebugB': False,
+    'enableDebugC': False,
+    'expectedValueC': 16.0,
+    'forceCExpectedValue': False,
+    'forceGenerateKernel': False,
+    'printIndexAssignmentInfo': False,
+    'printSolutionRejectionReason': False,
+    'splitGSU': False,
+  })
+# ---
+# name: test_make_debug_config_full
+  dict({
+    'debugKernel': True,
+    'enableAsserts': True,
+    'enableDebugA': True,
+    'enableDebugB': True,
+    'enableDebugC': True,
+    'expectedValueC': 32.0,
+    'forceCExpectedValue': True,
+    'forceGenerateKernel': True,
+    'printIndexAssignmentInfo': True,
+    'printSolutionRejectionReason': True,
+    'splitGSU': True,
+  })
+# ---
+# name: test_make_debug_config_unknown_key_ignored
+  dict({
+    'debugKernel': False,
+    'enableAsserts': False,
+    'enableDebugA': False,
+    'enableDebugB': False,
+    'enableDebugC': False,
+    'expectedValueC': 16.0,
+    'forceCExpectedValue': False,
+    'forceGenerateKernel': False,
+    'printIndexAssignmentInfo': False,
+    'printSolutionRejectionReason': False,
+    'splitGSU': False,
+  })
+# ---
+# name: test_semantic_version
+  dict({
+    'is_isaversion_alias': True,
+    'major': 9,
+    'minor': 4,
+    'patch': 2,
+    'tuple': tuple(
+      9,
+      4,
+      2,
+    ),
+  })
+# ---

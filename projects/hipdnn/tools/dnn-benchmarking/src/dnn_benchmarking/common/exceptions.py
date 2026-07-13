@@ -17,7 +17,13 @@ class ExecutionError(Exception):
 
 
 class UnsupportedGraphError(ExecutionError):
-    """Raised when a graph/engine combination is unsupported rather than broken."""
+    """Raised when a graph/engine combination is unsupported rather than broken.
+
+    Distinct from a generic failure: callers (e.g. the suite runner) catch this
+    to *skip* a graph the provider/engine cannot handle, while letting genuine
+    errors surface. The PyTorch reference normalizes every unsupported condition
+    to this type.
+    """
 
     pass
 

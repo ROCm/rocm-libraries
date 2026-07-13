@@ -29,24 +29,16 @@ location guarantees identical message shape across validators and lets
 tests (and the worker-process re-raise in ``BenchmarkProblems.py``)
 catch the exception by type.
 
-The module is deliberately small: an exception class, one formatter, an
-optional line-number recovery helper that re-parses the file only on
-the error path, and a staged-landing kill switch. No dispatcher,
-no registry — each validator owns its own section.
+The module is deliberately small: an exception class, one formatter, and
+an optional line-number recovery helper that re-parses the file only on
+the error path. No dispatcher, no registry — each validator owns its own
+section.
 
-Strict will be the only behaviour (mismatches raise ``ConfigTypeError``)
-once ``_STRICT_GATE_ENABLED`` is removed in commit 2; until then the gate
-ships off by default and every validator early-returns to warn-only.
+Mismatches always raise ``ConfigTypeError``.
 """
 
 import os
 from typing import Iterable, Optional, Type
-
-
-# Staged-landing kill switch: when False, every input-yaml validator
-# returns immediately without raising. The next commit flips this to
-# True and then removes the boolean entirely so no traces remain.
-_STRICT_GATE_ENABLED = False
 
 
 class ConfigTypeError(Exception):

@@ -851,7 +851,7 @@ class EstimateAsmCyclesPassImpl : public Pass {
                 activeWmmaStartCycle = cycles;
                 activeWmmaCoExecAdvance = 0;
                 activeWmmaValuSlots = wmmaCoExec->valuCoExecSlots;
-            } else if (isBranch(*inst)) {
+            } else if (isBranch(*inst) || isCall(*inst)) {
                 cycles = std::max(cycles + jumpOverhead, hwMFMA + 4);
                 // End of loop (LabelData set when branch comes from rocisa; IR-from-string may omit
                 // it)

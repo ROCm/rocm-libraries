@@ -374,6 +374,7 @@ namespace TensileLite
                 ("activation-no-guard",          po::value<bool>()->default_value(false), "Use activation guard to deall with nan outputs.")
                 ("activation-additional-args",vector_default_empty<std::string>(), "Activation additional floating-point number arguments.")
                 ("activation-enum-args",      po::value<std::vector<ActivationType>>()->default_value(std::vector<ActivationType>(1, ActivationType::None), "[]"), "Activation enum argument.")
+                ("streamk-hybrid-mode",       po::value<std::vector<int>>()->default_value(std::vector<int>(1, 0), "[0]"), "StreamK=5 hybrid-mode toggle values. Each element runs the problem once with setParams().setStreamKTileSchedulingMode(value); accepts {0=OFF (static), 1=ON (dynamic per-XCD work-queue), 2=AUTO (heuristic)}. Use [0, 1] in sweep YAMLs to deterministically exercise both SK5 sub-paths in one run. Use [2] (or `--streamk-hybrid-mode 2` to override a YAML default of [0]) to run the AUTO heuristic end-to-end on a real problem.")
                 ("use-bias",                  po::value<int>()->default_value(0), "Use bias.")
                 ("bias-source",               po::value<int>()->default_value(3), "Bias source.")
                 ("use-scaleAB",               po::value<std::string>()->default_value(""), "Use scaleAB.")
@@ -630,6 +631,7 @@ namespace TensileLite
                 }
             }
             DUMP_VEC("activation-enum-args", ActivationType);
+            DUMP_VEC("streamk-hybrid-mode", int);
             DUMP_OPT("use-bias", int);
             DUMP_OPT("bias-source", int);
             DUMP_OPT("use-scaleAB", std::string);
@@ -1031,6 +1033,9 @@ int main(int argc, const char* argv[])
     srand(seed);
 
     ClientProblemFactory problemFactory(args);
+
+    initTimingBuffer();
+    calibrateTimingOverhead();
 
     std::shared_ptr<Hardware> hardware;
     hipStream_t              stream;
@@ -1469,23 +1474,26 @@ int main(int argc, const char* argv[])
                                             TimingEvents startEvents(enq, eventCount);
                                             TimingEvents stopEvents(enq, eventCount);
 
-                                            listeners.preEnqueues(stream);
-
-                                            for(int j = 0; j < enq; j++)
                                             {
-                                                size_t kIdx = ((i * enq) + j) % kernels.size();
-                                                rotateAndSelect();
-                                                HIP_CHECK_EXC(adapter.launchKernels(
-                                                    kernels[kIdx], stream, nullptr, nullptr));
+                                                ScopedTimer kernelTimer("gpu_kernel_execution");
+                                                listeners.preEnqueues(stream);
 
-                                                if(icacheFlush)
+                                                for(int j = 0; j < enq; j++)
                                                 {
-                                                    hipLaunchKernelGGL(
-                                                        flush_icache, flushGridSize, 64, 0, stream);
-                                                }
-                                            }
+                                                    size_t kIdx = ((i * enq) + j) % kernels.size();
+                                                    rotateAndSelect();
+                                                    HIP_CHECK_EXC(adapter.launchKernels(
+                                                        kernels[kIdx], stream, nullptr, nullptr));
 
-                                            listeners.postEnqueues(startEvents, stopEvents, stream);
+                                                    if(icacheFlush)
+                                                    {
+                                                        hipLaunchKernelGGL(
+                                                            flush_icache, flushGridSize, 64, 0, stream);
+                                                    }
+                                                }
+
+                                                listeners.postEnqueues(startEvents, stopEvents, stream);
+                                            }
                                             listeners.validateEnqueues(inputs, startEvents, stopEvents);
                                         }
 
@@ -1534,8 +1542,17 @@ int main(int argc, const char* argv[])
         listeners.finalizeReport();
     }
 
-    // Flush all buffered timing records to stderr
-    flushTimingBuffer();
+    // Flush all buffered timing records to stderr.
+    // Timed with raw chrono instead of ScopedTimer because ScopedTimer pushes
+    // its record into the buffer on destruction — after flushTimingBuffer()
+    // has already drained and cleared it, so the record would be lost.
+    {
+        auto flushStart = TimingClock::now();
+        flushTimingBuffer();
+        auto flushMs = std::chrono::duration<double, std::milli>(
+            TimingClock::now() - flushStart).count();
+        std::clog << "TIMING:flush_timing_buffer:" << flushMs << "\n";
+    }
 
     // error range in shell is [0-255]
     return std::min(listeners.error(), 255);

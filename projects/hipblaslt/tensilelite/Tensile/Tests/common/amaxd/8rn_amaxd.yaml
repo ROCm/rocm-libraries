@@ -6,7 +6,7 @@ GlobalParameters:
   NumElementsToValidate: -1
   MinimumRequiredVersion: 5.0.0
   Device: 0
-  CSVExportWinner: 1
+  CSVExportWinner: true
   MaxWorkspaceSize: 13421772800
   SleepPercent: 50
   DataInitTypeBias: 3
@@ -67,7 +67,7 @@ BenchmarkProblems:
         - LocalReadVectorWidth: [8]
         - ScheduleIterAlg: [3]
         - InnerUnroll: [1]
-        - ExpandPointerSwap: [1]
+        - ExpandPointerSwap: [true]
         - TransposeLDS: [1]
         - LdsBlockSizePerPadA: [0]
         - LdsBlockSizePerPadB: [0]
@@ -76,12 +76,12 @@ BenchmarkProblems:
         - WaveSeparateGlobalReadB: [1]
         - 1LDSBuffer: [-1]
         - GlobalSplitU: [1]
-        - GlobalReadPerMfma: [1]
+        - GlobalReadPerMfma: [1.0]
         - LocalWritePerMfma: [-1]
         - StoreVectorWidth: [-1]
-        - SourceSwap: [1]
+        - SourceSwap: [true]
         - NumElementsPerBatchStore: [0]
-        - StorePriorityOpt: [0]
+        - StorePriorityOpt: [false]
       BenchmarkJoinParameters:
       BenchmarkFinalParameters:
         - ProblemSizes:
@@ -137,7 +137,7 @@ BenchmarkProblems:
         - GlobalReadVectorWidthB: [-1,1]
         - ScheduleIterAlg: [3]
         - InnerUnroll: [1]
-        - ExpandPointerSwap: [1]
+        - ExpandPointerSwap: [true]
         - TransposeLDS: [0]
         - LdsBlockSizePerPadA: [0]
         - LdsBlockSizePerPadB: [0]
@@ -146,12 +146,12 @@ BenchmarkProblems:
         - WaveSeparateGlobalReadB: [1]
         - 1LDSBuffer: [-1]
         - GlobalSplitU: [1]
-        - GlobalReadPerMfma: [1]
+        - GlobalReadPerMfma: [1.0]
         - LocalWritePerMfma: [-1]
         - StoreVectorWidth: [-1]
-        - SourceSwap: [1]
+        - SourceSwap: [true]
         - NumElementsPerBatchStore: [0]
-        - StorePriorityOpt: [0]
+        - StorePriorityOpt: [false]
       BenchmarkJoinParameters:
       BenchmarkFinalParameters:
         - ProblemSizes:
@@ -208,7 +208,7 @@ BenchmarkProblems:
         - LocalReadVectorWidth: [8]
         - ScheduleIterAlg: [3]
         - InnerUnroll: [1]
-        - ExpandPointerSwap: [1]
+        - ExpandPointerSwap: [true]
         - TransposeLDS: [1]
         - LdsBlockSizePerPadA: [0]
         - LdsBlockSizePerPadB: [0]
@@ -217,12 +217,12 @@ BenchmarkProblems:
         - WaveSeparateGlobalReadB: [1]
         - 1LDSBuffer: [-1]
         - GlobalSplitU: [1]
-        - GlobalReadPerMfma: [1]
+        - GlobalReadPerMfma: [1.0]
         - LocalWritePerMfma: [-1]
         - StoreVectorWidth: [-1]
-        - SourceSwap: [1]
+        - SourceSwap: [true]
         - NumElementsPerBatchStore: [0]
-        - StorePriorityOpt: [0]
+        - StorePriorityOpt: [false]
       BenchmarkJoinParameters:
       BenchmarkFinalParameters:
         - ProblemSizes:
@@ -279,7 +279,7 @@ BenchmarkProblems:
         - LocalReadVectorWidth: [8]
         - ScheduleIterAlg: [3]
         - InnerUnroll: [1]
-        - ExpandPointerSwap: [1]
+        - ExpandPointerSwap: [true]
         - TransposeLDS: [1]
         - LdsBlockSizePerPadA: [0]
         - LdsBlockSizePerPadB: [0]
@@ -288,12 +288,12 @@ BenchmarkProblems:
         - WaveSeparateGlobalReadB: [1]
         - 1LDSBuffer: [-1]
         - GlobalSplitU: [1]
-        - GlobalReadPerMfma: [1]
+        - GlobalReadPerMfma: [1.0]
         - LocalWritePerMfma: [-1]
         - StoreVectorWidth: [-1]
-        - SourceSwap: [1]
+        - SourceSwap: [true]
         - NumElementsPerBatchStore: [0]
-        - StorePriorityOpt: [0]
+        - StorePriorityOpt: [false]
       BenchmarkJoinParameters:
       BenchmarkFinalParameters:
         - ProblemSizes:

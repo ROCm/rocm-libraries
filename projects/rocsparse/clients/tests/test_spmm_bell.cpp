@@ -1,5 +1,5 @@
 /* ************************************************************************
- * Copyright (C) 2021-2025 Advanced Micro Devices, Inc. All rights Reserved.
+ * Copyright (C) 2021-2026 Advanced Micro Devices, Inc. All rights Reserved.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -31,17 +31,16 @@ TEST_ROUTINE_WITH_CONFIG(spmm_bell,
                          arg.M,
                          arg.N,
                          arg.K,
+                         arg.block_dim,
                          arg.alpha,
                          arg.alphai,
                          arg.beta,
                          arg.betai,
-                         arg.block_dim,
                          arg.transA,
                          arg.transB,
-                         arg.baseA,
                          arg.orderB,
                          arg.orderC,
-                         arg.direction,
+                         arg.baseA,
                          arg.spmm_alg,
                          arg.matrix,
                          arg.graph_test);

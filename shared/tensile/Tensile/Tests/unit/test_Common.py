@@ -41,6 +41,13 @@ def test_gfxArch():
 
     assert Common.gfxArch('blah gfx900 stuff') == (9,0,0)
 
+def test_isGfx12():
+    assert Common.isGfx12((12, 0, 0))
+    assert Common.isGfx12((12, 0, 1))
+    assert Common.isGfx12((12, 5, 0))
+    assert not Common.isGfx12((11, 0, 0))
+    assert not Common.isGfx12((13, 0, 0))
+
 def test_paths():
     workingPathName = os.path.join("working", "path")
     Common.globalParameters["WorkingPath"] = workingPathName

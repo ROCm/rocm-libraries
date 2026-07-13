@@ -4,14 +4,13 @@ version = "0.1.0"
 description = "Convert MIOpen driver shape files to hipDNN JSON graph files"
 readme = "README.md"
 requires-python = ">=3.9"
-license = {text = "MIT"}
+license = "MIT"
 authors = [
     {name = "Advanced Micro Devices, Inc."},
 ]
 classifiers = [
     "Development Status :: 4 - Beta",
     "Intended Audience :: Developers",
-    "License :: OSI Approved :: MIT License",
     "Programming Language :: Python :: 3",
     "Programming Language :: Python :: 3.9",
     "Programming Language :: Python :: 3.10",

@@ -762,3 +762,530 @@ TEST_F(AsmEmitterTest, MUBUFTemporalHintModifier) {
         "buffer_load_b128 v[0:3], v8, s[0:3], s0 offen offset:0 scope:SCOPE_CU th:TH_LOAD_RT\n";
     EXPECT_EQ(assembly, expected);
 }
+
+// ============================================================================
+// DS Modifier Tests
+// ============================================================================
+
+TEST_F(AsmEmitterTest, DSModifierSingleOffset) {
+    StinkyInstruction* inst = createInstruction("ds_load_b128");
+    ASSERT_NE(inst, nullptr);
+    inst->addDestReg(StinkyRegister("v", 0, 4));
+    inst->addSrcReg(StinkyRegister("v", 40, 1));
+    inst->addModifier(DSModifiers(/*na=*/1, /*offset=*/128));
+
+    AsmEmitterOptions options;
+    options.emitComments = false;
+    options.emitCycleInfo = false;
+    options.indent = 0;
+    options.emitBlankLines = false;
+
+    StinkyAsmEmitter emitter(options);
+    std::string assembly = emitter.emit(*inst);
+
+    EXPECT_EQ(assembly, "ds_load_b128 v[0:3], v40 offset:128\n");
+}
+
+TEST_F(AsmEmitterTest, DSModifierDualOffset) {
+    StinkyInstruction* inst = createInstruction("ds_load_b128");
+    ASSERT_NE(inst, nullptr);
+    inst->addDestReg(StinkyRegister("v", 0, 4));
+    inst->addSrcReg(StinkyRegister("v", 40, 1));
+    // na=2 triggers offset0/offset1 emission
+    inst->addModifier(DSModifiers(/*na=*/2, /*offset=*/0, /*offset0=*/4, /*offset1=*/8));
+
+    AsmEmitterOptions options;
+    options.emitComments = false;
+    options.emitCycleInfo = false;
+    options.indent = 0;
+    options.emitBlankLines = false;
+
+    StinkyAsmEmitter emitter(options);
+    std::string assembly = emitter.emit(*inst);
+
+    EXPECT_EQ(assembly, "ds_load_b128 v[0:3], v40 offset0:4 offset1:8\n");
+}
+
+TEST_F(AsmEmitterTest, DSModifierGds) {
+    StinkyInstruction* inst = createInstruction("ds_load_b128");
+    ASSERT_NE(inst, nullptr);
+    inst->addDestReg(StinkyRegister("v", 0, 4));
+    inst->addSrcReg(StinkyRegister("v", 40, 1));
+    inst->addModifier(DSModifiers(/*na=*/1, /*offset=*/0, /*offset0=*/0, /*offset1=*/0, /*gds=*/true));
+
+    AsmEmitterOptions options;
+    options.emitComments = false;
+    options.emitCycleInfo = false;
+    options.indent = 0;
+    options.emitBlankLines = false;
+
+    StinkyAsmEmitter emitter(options);
+    std::string assembly = emitter.emit(*inst);
+
+    EXPECT_NE(assembly.find("gds"), std::string::npos);
+}
+
+// ============================================================================
+// SDWA Modifier Tests
+// ============================================================================
+
+TEST_F(AsmEmitterTest, SDWAModifierDstSel) {
+    StinkyInstruction* inst = createInstruction("v_mov_b32");
+    ASSERT_NE(inst, nullptr);
+    inst->addDestReg(StinkyRegister("v", 0, 1));
+    inst->addSrcReg(StinkyRegister("v", 1, 1));
+
+    SDWAModifiers sdwa(SDWAModifiers::SelectBit::BYTE_0, SDWAModifiers::UnusedBit::UNUSED_PAD,
+                       SDWAModifiers::SelectBit::BYTE_1, SDWAModifiers::SelectBit::SEL_NONE);
+    inst->addModifier(sdwa);
+
+    AsmEmitterOptions options;
+    options.emitComments = false;
+    options.emitCycleInfo = false;
+    options.indent = 0;
+    options.emitBlankLines = false;
+
+    StinkyAsmEmitter emitter(options);
+    std::string assembly = emitter.emit(*inst);
+
+    EXPECT_NE(assembly.find("dst_sel:BYTE_0"), std::string::npos);
+    EXPECT_NE(assembly.find("dst_unused:UNUSED_PAD"), std::string::npos);
+    EXPECT_NE(assembly.find("src0_sel:BYTE_1"), std::string::npos);
+}
+
+// ============================================================================
+// DPP Modifier Tests
+// ============================================================================
+
+TEST_F(AsmEmitterTest, DPPModifierRowShr) {
+    StinkyInstruction* inst = createInstruction("v_add_f32");
+    ASSERT_NE(inst, nullptr);
+    inst->addDestReg(StinkyRegister("v", 0, 1));
+    inst->addSrcReg(StinkyRegister("v", 1, 1));
+    inst->addSrcReg(StinkyRegister("v", 2, 1));
+
+    DPPModifiers dpp(dppRowShr(3));
+    inst->addModifier(dpp);
+
+    AsmEmitterOptions options;
+    options.emitComments = false;
+    options.emitCycleInfo = false;
+    options.indent = 0;
+    options.emitBlankLines = false;
+
+    StinkyAsmEmitter emitter(options);
+    std::string assembly = emitter.emit(*inst);
+
+    EXPECT_NE(assembly.find("row_shr:3"), std::string::npos);
+}
+
+TEST_F(AsmEmitterTest, DPPModifierRowMaskAndBankMask) {
+    StinkyInstruction* inst = createInstruction("v_add_f32");
+    ASSERT_NE(inst, nullptr);
+    inst->addDestReg(StinkyRegister("v", 0, 1));
+    inst->addSrcReg(StinkyRegister("v", 1, 1));
+    inst->addSrcReg(StinkyRegister("v", 2, 1));
+
+    // rowMask != 0xF and bankMask != 0xF trigger emission
+    DPPModifiers dpp(dppRowShl(1), /*rowMask=*/0xA, /*bankMask=*/0x5);
+    inst->addModifier(dpp);
+
+    AsmEmitterOptions options;
+    options.emitComments = false;
+    options.emitCycleInfo = false;
+    options.indent = 0;
+    options.emitBlankLines = false;
+
+    StinkyAsmEmitter emitter(options);
+    std::string assembly = emitter.emit(*inst);
+
+    EXPECT_NE(assembly.find("row_mask:0xa"), std::string::npos);
+    EXPECT_NE(assembly.find("bank_mask:0x5"), std::string::npos);
+}
+
+TEST_F(AsmEmitterTest, DPPModifierBoundCtrlAndFi) {
+    StinkyInstruction* inst = createInstruction("v_add_f32");
+    ASSERT_NE(inst, nullptr);
+    inst->addDestReg(StinkyRegister("v", 0, 1));
+    inst->addSrcReg(StinkyRegister("v", 1, 1));
+    inst->addSrcReg(StinkyRegister("v", 2, 1));
+
+    DPPModifiers dpp(dppRowShr(1), /*rowMask=*/0xF, /*bankMask=*/0xF, /*boundCtrl=*/1, /*fi=*/true);
+    inst->addModifier(dpp);
+
+    AsmEmitterOptions options;
+    options.emitComments = false;
+    options.emitCycleInfo = false;
+    options.indent = 0;
+    options.emitBlankLines = false;
+
+    StinkyAsmEmitter emitter(options);
+    std::string assembly = emitter.emit(*inst);
+
+    EXPECT_NE(assembly.find("bound_ctrl:1"), std::string::npos);
+    EXPECT_NE(assembly.find("fi:1"), std::string::npos);
+}
+
+TEST_F(AsmEmitterTest, DPPModifierDPP8) {
+    StinkyInstruction* inst = createInstruction("v_add_f32");
+    ASSERT_NE(inst, nullptr);
+    inst->addDestReg(StinkyRegister("v", 0, 1));
+    inst->addSrcReg(StinkyRegister("v", 1, 1));
+    inst->addSrcReg(StinkyRegister("v", 2, 1));
+
+    DPPModifiers dpp;
+    dpp.isDPP8 = true;
+    dpp.dpp8 = {0, 1, 2, 3, 4, 5, 6, 7};
+    inst->addModifier(dpp);
+
+    AsmEmitterOptions options;
+    options.emitComments = false;
+    options.emitCycleInfo = false;
+    options.indent = 0;
+    options.emitBlankLines = false;
+
+    StinkyAsmEmitter emitter(options);
+    std::string assembly = emitter.emit(*inst);
+
+    EXPECT_NE(assembly.find("dpp8:[0,1,2,3,4,5,6,7]"), std::string::npos);
+}
+
+// ============================================================================
+// MatrixFmt Modifier Tests
+// ============================================================================
+
+TEST_F(AsmEmitterTest, MatrixFmtModifier) {
+    StinkyInstruction* inst = createInstruction("v_wmma_scale_f32_16x16x128_f8f6f4");
+    ASSERT_NE(inst, nullptr);
+    inst->addDestReg(StinkyRegister("v", 0, 8));
+    inst->addSrcReg(StinkyRegister("v", 8, 8));
+    inst->addSrcReg(StinkyRegister("v", 16, 8));
+    inst->addSrcReg(StinkyRegister("v", 0, 8));
+
+    MatrixFmtModifiers fmtMod;
+    fmtMod.fmtA = MatrixFmt::FP8;
+    fmtMod.fmtB = MatrixFmt::BF8;
+    inst->addModifier(fmtMod);
+
+    AsmEmitterOptions options;
+    options.emitComments = false;
+    options.emitCycleInfo = false;
+    options.indent = 0;
+    options.emitBlankLines = false;
+
+    StinkyAsmEmitter emitter(options);
+    std::string assembly = emitter.emit(*inst);
+
+    EXPECT_NE(assembly.find("matrix_a_fmt:MATRIX_FMT_FP8"), std::string::npos);
+    EXPECT_NE(assembly.find("matrix_b_fmt:MATRIX_FMT_BF8"), std::string::npos);
+}
+
+TEST_F(AsmEmitterTest, MatrixScaleFmtModifier) {
+    StinkyInstruction* inst = createInstruction("v_wmma_scale_f32_16x16x128_f8f6f4");
+    ASSERT_NE(inst, nullptr);
+    inst->addDestReg(StinkyRegister("v", 0, 8));
+    inst->addSrcReg(StinkyRegister("v", 8, 8));
+    inst->addSrcReg(StinkyRegister("v", 16, 8));
+    inst->addSrcReg(StinkyRegister("v", 0, 8));
+
+    MatrixFmtModifiers fmtMod;
+    fmtMod.scaleFmtA = MatrixScaleFmt::E8;
+    fmtMod.scaleFmtB = MatrixScaleFmt::E4M3;
+    inst->addModifier(fmtMod);
+
+    AsmEmitterOptions options;
+    options.emitComments = false;
+    options.emitCycleInfo = false;
+    options.indent = 0;
+    options.emitBlankLines = false;
+
+    StinkyAsmEmitter emitter(options);
+    std::string assembly = emitter.emit(*inst);
+
+    // Scale formats are emitted as raw integers
+    EXPECT_NE(assembly.find("matrix_a_scale_fmt:0"), std::string::npos);
+    EXPECT_NE(assembly.find("matrix_b_scale_fmt:2"), std::string::npos);
+}
+
+// ============================================================================
+// s_delay_alu Emission Tests
+// ============================================================================
+
+TEST_F(AsmEmitterTest, DelayAluSingleDep) {
+    StinkyInstruction* inst = createInstruction("s_delay_alu");
+    ASSERT_NE(inst, nullptr);
+    inst->addModifier(SDelayAluData(SDelayAluData::InstType::VALU, /*distance=*/1));
+
+    AsmEmitterOptions options;
+    options.emitComments = false;
+    options.emitCycleInfo = false;
+    options.indent = 0;
+    options.emitBlankLines = false;
+
+    StinkyAsmEmitter emitter(options);
+    std::string assembly = emitter.emit(*inst);
+
+    EXPECT_NE(assembly.find("s_delay_alu"), std::string::npos);
+    EXPECT_NE(assembly.find("VALU"), std::string::npos);
+}
+
+TEST_F(AsmEmitterTest, DelayAluDualDep) {
+    StinkyInstruction* inst = createInstruction("s_delay_alu");
+    ASSERT_NE(inst, nullptr);
+    inst->addModifier(SDelayAluData(SDelayAluData::InstType::VALU, /*id0Dist=*/1,
+                                    /*skip=*/1,
+                                    SDelayAluData::InstType::SALU, /*id1Dist=*/2));
+
+    AsmEmitterOptions options;
+    options.emitComments = false;
+    options.emitCycleInfo = false;
+    options.indent = 0;
+    options.emitBlankLines = false;
+
+    StinkyAsmEmitter emitter(options);
+    std::string assembly = emitter.emit(*inst);
+
+    EXPECT_NE(assembly.find("s_delay_alu"), std::string::npos);
+    EXPECT_NE(assembly.find("VALU"), std::string::npos);
+    EXPECT_NE(assembly.find("SALU"), std::string::npos);
+}
+
+// ============================================================================
+// s_waitcnt with SWaitCntData Emission Tests
+// ============================================================================
+
+TEST_F(AsmEmitterTest, WaitCntBothZeroEmitsLiteral0) {
+    StinkyInstruction* inst = createInstruction("s_waitcnt");
+    ASSERT_NE(inst, nullptr);
+    // vlcnt=0, dscnt=0 → lgkmcnt=0, vmcnt=0 → emits " 0"
+    inst->addModifier(SWaitCntData(/*vlcnt=*/0, /*vscnt=*/-1, /*dlcnt=*/-1, /*dscnt=*/0));
+
+    AsmEmitterOptions options;
+    options.emitComments = false;
+    options.emitCycleInfo = false;
+    options.indent = 0;
+    options.emitBlankLines = false;
+
+    StinkyAsmEmitter emitter(options);
+    std::string assembly = emitter.emit(*inst);
+
+    EXPECT_EQ(assembly, "s_waitcnt 0\n");
+}
+
+TEST_F(AsmEmitterTest, WaitCntLgkmcntOnly) {
+    StinkyInstruction* inst = createInstruction("s_waitcnt");
+    ASSERT_NE(inst, nullptr);
+    // dscnt=2 → lgkmcnt=2, vmcnt=-1
+    inst->addModifier(SWaitCntData(/*vlcnt=*/-1, /*vscnt=*/-1, /*dlcnt=*/-1, /*dscnt=*/2));
+
+    AsmEmitterOptions options;
+    options.emitComments = false;
+    options.emitCycleInfo = false;
+    options.indent = 0;
+    options.emitBlankLines = false;
+
+    StinkyAsmEmitter emitter(options);
+    std::string assembly = emitter.emit(*inst);
+
+    EXPECT_EQ(assembly, "s_waitcnt lgkmcnt(2)\n");
+}
+
+TEST_F(AsmEmitterTest, WaitCntVmcntOnly) {
+    StinkyInstruction* inst = createInstruction("s_waitcnt");
+    ASSERT_NE(inst, nullptr);
+    // vlcnt=4 → lgkmcnt=-1, vmcnt=4
+    inst->addModifier(SWaitCntData(/*vlcnt=*/4));
+
+    AsmEmitterOptions options;
+    options.emitComments = false;
+    options.emitCycleInfo = false;
+    options.indent = 0;
+    options.emitBlankLines = false;
+
+    StinkyAsmEmitter emitter(options);
+    std::string assembly = emitter.emit(*inst);
+
+    EXPECT_EQ(assembly, "s_waitcnt vmcnt(4)\n");
+}
+
+TEST_F(AsmEmitterTest, WaitCntBothCounts) {
+    StinkyInstruction* inst = createInstruction("s_waitcnt");
+    ASSERT_NE(inst, nullptr);
+    // dscnt=1 → lgkmcnt=1, vlcnt=3 → vmcnt=3
+    inst->addModifier(SWaitCntData(/*vlcnt=*/3, /*vscnt=*/-1, /*dlcnt=*/-1, /*dscnt=*/1));
+
+    AsmEmitterOptions options;
+    options.emitComments = false;
+    options.emitCycleInfo = false;
+    options.indent = 0;
+    options.emitBlankLines = false;
+
+    StinkyAsmEmitter emitter(options);
+    std::string assembly = emitter.emit(*inst);
+
+    EXPECT_NE(assembly.find("lgkmcnt(1)"), std::string::npos);
+    EXPECT_NE(assembly.find("vmcnt(3)"), std::string::npos);
+}
+
+// ============================================================================
+// GLOBAL Modifier Tests
+// ============================================================================
+
+TEST_F(AsmEmitterTest, GLOBALModifierOffset) {
+    // global_prefetch_b8 is the gfx1250 VGLOBAL instruction that carries GLOBALModifiers
+    StinkyInstruction* inst = createInstruction("global_prefetch_b8");
+    ASSERT_NE(inst, nullptr);
+    inst->addSrcReg(StinkyRegister("v", 2, 2));  // vaddr
+    inst->addSrcReg(StinkyRegister("s", 0, 2));  // saddr
+    inst->addModifier(GLOBALModifiers(/*offset=*/256));
+
+    AsmEmitterOptions options;
+    options.emitComments = false;
+    options.emitCycleInfo = false;
+    options.indent = 0;
+    options.emitBlankLines = false;
+
+    StinkyAsmEmitter emitter(options);
+    std::string assembly = emitter.emit(*inst);
+
+    EXPECT_NE(assembly.find("offset:256"), std::string::npos);
+}
+
+TEST_F(AsmEmitterTest, GLOBALModifierScopeAndTh) {
+    StinkyInstruction* inst = createInstruction("global_prefetch_b8");
+    ASSERT_NE(inst, nullptr);
+    inst->addSrcReg(StinkyRegister("v", 2, 2));
+    inst->addSrcReg(StinkyRegister("s", 0, 2));
+    inst->addModifier(GLOBALModifiers(/*offset=*/0, TemporalHint::TH_NT, MUBUFScope::SCOPE_SE));
+
+    AsmEmitterOptions options;
+    options.emitComments = false;
+    options.emitCycleInfo = false;
+    options.indent = 0;
+    options.emitBlankLines = false;
+
+    StinkyAsmEmitter emitter(options);
+    std::string assembly = emitter.emit(*inst);
+
+    EXPECT_NE(assembly.find("scope:SCOPE_SE"), std::string::npos);
+}
+
+// ============================================================================
+// VOP3P Modifier Tests
+// ============================================================================
+
+TEST_F(AsmEmitterTest, VOP3PModifierOpSel) {
+    StinkyInstruction* inst = createInstruction("v_wmma_f32_16x16x16_f16");
+    if (!inst) GTEST_SKIP() << "v_wmma_f32_16x16x16_f16 not available on this arch";
+
+    // Operands must be present so emitOperands() runs and emits the VOP3P modifier
+    inst->addDestReg(StinkyRegister("v", 0, 8));
+    inst->addSrcReg(StinkyRegister("v", 8, 8));
+    inst->addSrcReg(StinkyRegister("v", 16, 8));
+    inst->addSrcReg(StinkyRegister("v", 0, 8));
+    inst->addModifier(VOP3PModifiers({0, 1}, {1, 0}, {}));
+
+    AsmEmitterOptions options;
+    options.emitComments = false;
+    options.emitCycleInfo = false;
+    options.indent = 0;
+    options.emitBlankLines = false;
+
+    StinkyAsmEmitter emitter(options);
+    std::string assembly = emitter.emit(*inst);
+
+    EXPECT_NE(assembly.find("op_sel:"), std::string::npos);
+    EXPECT_NE(assembly.find("op_sel_hi:"), std::string::npos);
+}
+
+// ============================================================================
+// Multiple Basic Blocks and Blank Lines
+// ============================================================================
+
+TEST_F(AsmEmitterTest, MultipleBasicBlocks) {
+    BasicBlock* bb2 = func.createBasicBlock("exit");
+
+    irBuilder->createLabel("entry");
+    StinkyInstruction* inst1 = createInstruction("v_mov_b32");
+    ASSERT_NE(inst1, nullptr);
+    inst1->addDestReg(StinkyRegister("v", 0, 1));
+    inst1->addSrcReg(StinkyRegister("v", 1, 1));
+
+    AsmIRBuilder builder2(*bb2, arch);
+    builder2.createLabel("exit");
+    builder2.create(getMCIDByUOp(GFX::s_nop, arch));
+
+    AsmEmitterOptions options;
+    options.emitComments = false;
+    options.emitCycleInfo = false;
+    options.emitBlankLines = false;
+
+    StinkyAsmEmitter emitter(options);
+    std::string assembly = emitter.emit(func);
+
+    EXPECT_NE(assembly.find("entry:"), std::string::npos);
+    EXPECT_NE(assembly.find("exit:"), std::string::npos);
+    EXPECT_NE(assembly.find("v_mov_b32"), std::string::npos);
+    EXPECT_NE(assembly.find("s_nop"), std::string::npos);
+}
+
+TEST_F(AsmEmitterTest, CommentAlignColumn) {
+    StinkyInstruction* inst = createInstruction("ds_load_b128");
+    ASSERT_NE(inst, nullptr);
+    inst->addDestReg(StinkyRegister("v", 0, 4));
+    inst->addSrcReg(StinkyRegister("v", 40, 1));
+    inst->issueCycles = 4;
+    inst->latencyCycles = 52;
+
+    AsmEmitterOptions options;
+    options.emitCycleInfo = true;
+    options.commentAlignColumn = 60;
+
+    StinkyAsmEmitter emitter(options);
+    std::string assembly = emitter.emit(*inst);
+
+    // Comment should appear after alignment padding
+    auto commentPos = assembly.find("//");
+    EXPECT_NE(commentPos, std::string::npos);
+    EXPECT_GE(commentPos, 40u);
+}
+
+// ============================================================================
+// Special Register Emission Tests
+// ============================================================================
+
+TEST_F(AsmEmitterTest, EmitExecRegister) {
+    StinkyInstruction* inst = createInstruction("s_mov_b64");
+    ASSERT_NE(inst, nullptr);
+    inst->addDestReg(StinkyRegister(RegType::EXEC, 0, 1));
+    inst->addSrcReg(StinkyRegister("s", 0, 2));
+
+    AsmEmitterOptions options;
+    options.emitComments = false;
+    options.emitCycleInfo = false;
+    options.indent = 0;
+    options.emitBlankLines = false;
+
+    StinkyAsmEmitter emitter(options);
+    std::string assembly = emitter.emit(*inst);
+
+    EXPECT_NE(assembly.find("exec"), std::string::npos);
+}
+
+TEST_F(AsmEmitterTest, EmitVccRegister) {
+    StinkyInstruction* inst = createInstruction("s_mov_b32");
+    ASSERT_NE(inst, nullptr);
+    inst->addDestReg(StinkyRegister(RegType::VCC_LO, 0, 1));
+    inst->addSrcReg(StinkyRegister("s", 0, 1));
+
+    AsmEmitterOptions options;
+    options.emitComments = false;
+    options.emitCycleInfo = false;
+    options.indent = 0;
+    options.emitBlankLines = false;
+
+    StinkyAsmEmitter emitter(options);
+    std::string assembly = emitter.emit(*inst);
+
+    EXPECT_NE(assembly.find("vcc"), std::string::npos);
+}

@@ -88,6 +88,16 @@ inline unsigned long long get_total_system_memory(bool is_apu)
 // needed on APU systems where CPU and GPU share a single memory pool, making it
 // easy to exhaust memory with large test inputs.
 //
+// MemCheck is generally intended to be used in tests that loop over increasing test sizes,
+// where it's OK to bail out and still report test success if the test can't be run
+// for large test sizes.
+//
+// A reasonable rule-of-thumb is that if a test can allocate more than about ~100MB of
+// total host+device memory, it may be a good candidate for MemCheck.  We don't need
+// to MemCheck tests that don't allocate much memory because they are unlikely to fail
+// allocating memory and the additional checks just increases complexity and maintenance
+// unnecessarily.
+//
 // The alloc() functions are called before the actual memory allocation so the
 // code can gracefully handle an out-of-memory situation.
 //
@@ -118,10 +128,9 @@ public:
     // padding_factor is a value in [0, 1] that indicates how much of a buffer we should leave
     // below the available memory.
     // i.e. when a prospective allocation >= free_memory * (1 - padding_factor), assume OOM.
-    MemCheck(const hipStream_t stream = 0, const float padding_factor = 0.1f)
-        : padding_factor(padding_factor)
+    MemCheck(const float padding_factor = 0.1f) : padding_factor(padding_factor)
     {
-        char* env = common::__get_env("ROCPRIM_MEMCHECK_LOGGING");
+        char* env       = common::__get_env("ROCPRIM_MEMCHECK_LOGGING");
         logging_enabled = (env != nullptr) && (strcmp(env, "1") == 0);
         common::clean_env(env);
     }

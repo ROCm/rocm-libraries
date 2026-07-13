@@ -19,20 +19,18 @@
 # IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNE-
 # CTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
 ################################################################################
-"""LibraryLogic generateLogic() pre-check tests (Step 6).
+"""LibraryLogic generateLogic() pre-check tests.
 
 The pre-check pass lives at the top of generateLogic() before the
 benchmark-data scan, so we can exercise it by invoking generateLogic
 with an invalid config and a non-existent benchmarkDataPath -- the
-strict gate fires (or doesn't) before the path is consulted.
+strict gate fires before the path is consulted.
 """
 
 import pytest
 
 from Tensile.LibraryLogic import generateLogic
 from Tensile.Common.TypeValidationErrors import ConfigTypeError
-
-pytestmark = pytest.mark.usefixtures("_force_strict_gate_on")
 
 
 def _call(config, tmp_path):

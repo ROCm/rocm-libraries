@@ -25,8 +25,11 @@
 #include <cassert>
 #include <cstdint>
 #include <string>
+#include <utility>
+#include <vector>
 
 #include "stinkytofu/analysis/AnalysisRegistration.hpp"
+#include "stinkytofu/core/Function.hpp"
 #include "stinkytofu/hardware/ArchHelper.hpp"
 #include "stinkytofu/ir/asm/StinkyAsmIR.hpp"
 #include "stinkytofu/ir/asm/VgprMsbEncoding.hpp"
@@ -77,8 +80,9 @@ void collectVgprMsbSlots(const StinkyInstruction* inst, int msbSrc[3], int& msbD
 std::pair<int, bool> computeRequiredMsb(const StinkyInstruction* inst) {
     if (inst->is(InstFlag::IF_SALU) || inst->is(InstFlag::IF_SMemLoad) ||
         inst->is(InstFlag::IF_SMemStore) || inst->is(InstFlag::IF_SMemAtomic) ||
-        inst->is(InstFlag::IF_Branch) || inst->is(InstFlag::IF_Barrier) ||
-        inst->is(InstFlag::IF_WaitCnt) || inst->is(InstFlag::IF_HasSideEffect)) {
+        inst->is(InstFlag::IF_Branch) || inst->is(InstFlag::IF_Call) ||
+        inst->is(InstFlag::IF_Barrier) || inst->is(InstFlag::IF_WaitCnt) ||
+        inst->is(InstFlag::IF_HasSideEffect)) {
         return {VgprMsbState::NOT_REQUIRED, false};
     }
 
@@ -147,6 +151,9 @@ class InsertVgprMsbPassImpl : public Pass {
    public:
     static char ID;
 
+    explicit InsertVgprMsbPassImpl(std::vector<Function*> functions)
+        : functions(std::move(functions)) {}
+
     const char* getName() const override {
         return "Insert VGPR MSB";
     }
@@ -162,6 +169,22 @@ class InsertVgprMsbPassImpl : public Pass {
         VgprMsbMode msbMode = passCtx.getAsmCapsConfig().vgprMsbMode;
         if (msbMode == VgprMsbMode::None) return preserveCFGAnalyses();
 
+        // Whole-kernel: the VGPR MSB hardware register is reset conservatively at
+        // each label, so every function (entry + callable functions) must
+        // materialize its own s_set_vgpr_msb for its high-VGPR operands. Falls
+        // back to the single pipeline Function when no function list is given.
+        if (!functions.empty()) {
+            for (Function* f : functions) {
+                if (f) runOnFunction(*f, archId, msbMode);
+            }
+        } else {
+            runOnFunction(func, archId, msbMode);
+        }
+        return preserveCFGAnalyses();
+    }
+
+   private:
+    static void runOnFunction(Function& func, GfxArchID archId, VgprMsbMode msbMode) {
         for (auto bbIt = func.begin(); bbIt != func.end(); ++bbIt) {
             BasicBlock& bb = *bbIt;
             AsmIRBuilder irBuilder(bb, archId);
@@ -178,22 +201,33 @@ class InsertVgprMsbPassImpl : public Pass {
 
                 if (isPseudoInst(inst)) continue;
 
+                // A call (e.g. s_swappc_b64) transfers to a callee that may leave
+                // the VGPR MSB hardware register in an unknown state. Reset the
+                // tracked value so the next VGPR op re-establishes MSB — matching
+                // the single-function pipeline, which re-established MSB after the
+                // call because the call ended a basic block.
+                if (isCall(*inst)) {
+                    currentMsb = VgprMsbState::NOT_REQUIRED;
+                    continue;
+                }
+
                 auto [requiredMsb, hasVgpr] = computeRequiredMsb(inst);
                 emitVgprMsbIfNeeded(requiredMsb, hasVgpr, currentMsb, irBuilder, archId, inst,
                                     msbMode);
                 encodeVgprOperands(inst);
             }
         }
-        return preserveCFGAnalyses();
     }
+
+    std::vector<Function*> functions;
 };
 
 char InsertVgprMsbPassImpl::ID = 0;
 
 }  // anonymous namespace
 
-std::unique_ptr<Pass> createInsertVgprMsbPass() {
-    return std::make_unique<InsertVgprMsbPassImpl>();
+std::unique_ptr<Pass> createInsertVgprMsbPass(std::vector<Function*> functions) {
+    return std::make_unique<InsertVgprMsbPassImpl>(std::move(functions));
 }
 
 }  // namespace stinkytofu

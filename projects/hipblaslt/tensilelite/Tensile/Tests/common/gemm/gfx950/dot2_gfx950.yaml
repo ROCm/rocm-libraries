@@ -5,8 +5,8 @@ GlobalParameters:
   SyncsPerBenchmark: 0
   NumElementsToValidate: -1
   Device: 0
-  CSVExportWinner: 1
-  CSVMergeSameProblemID: 1
+  CSVExportWinner: true
+  CSVMergeSameProblemID: true
   SleepPercent: 50
 BenchmarkProblems:
   ########################################
@@ -40,7 +40,7 @@ BenchmarkProblems:
           - [8, 8, 8]
           - [2, 2, 32]
           - [2, 2, 64]
-        - WaveSplitK: [1]
+        - WaveSplitK: [true]
         - InnerUnroll: [1,2,4]
         - AssertFree0ElementMultiple: [1]
         - AssertFree1ElementMultiple: [1]
@@ -105,7 +105,7 @@ BenchmarkProblems:
           - [8, 8, 8]
           - [2, 2, 32]
           - [2, 2, 64]
-        - WaveSplitK: [1]
+        - WaveSplitK: [true]
         - InnerUnroll: [1,2,4]
         - AssertFree0ElementMultiple: [1]
         - AssertFree1ElementMultiple: [1]
