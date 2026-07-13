@@ -742,10 +742,13 @@ TEST(Sk3Sk5OffPartition512Test, NativeSk3MatchesSk5OffHostPack)
 // ===========================================================================
 // StreamKDynamicQueueXcdGateTest -- MI300A (NUM_XCD=6) reject-and-continue.
 //
-// The SK4 / SK5-dynamic work-stealing kernels use a fixed, power-of-two per-XCD
-// queue count (8) and mask queue/tile indices with (Q-1). That fast masking is
-// only valid when the device exposes a power-of-two number of XCDs. MI300A and
-// MI300X both report gfx942, but MI300A has 6 XCDs (not a power of two).
+// The SK4 / SK5-dynamic work-stealing kernels bake in a fixed, power-of-two
+// per-XCD queue count (origami's per-arch XCD count: 8 for gfx942/gfx950) and
+// mask queue/tile indices with (Q-1). That fast masking is only valid when the
+// device's runtime XCD count equals the baked count AND is a power of two.
+// MI300A and MI300X both report gfx942 (baked count 8), but MI300A has 6 XCDs
+// (not a power of two). A power-of-two-but-mismatched partition (e.g. a 4-XCD
+// slice of an 8-XCD gfx942) is likewise rejected because runtime NUM_XCD != 8.
 //
 // Rather than SILENTLY degrading such a solution to tree reduction, the host
 // now EXCLUDES the dynamic-queue / work-stealing solution from selection and
@@ -755,23 +758,45 @@ TEST(Sk3Sk5OffPartition512Test, NativeSk3MatchesSk5OffHostPack)
 // softwarePredicate() (SolutionLibrary.hpp) so returning false drops the
 // solution from findBestSolution/findAllSolutions. It builds on the file-local
 // numeric predicate streamKDynamicQueueUnsupported(hardware): dynamic_cast to
-// hip::HipAMDGPU, read analyticalHardware->NUM_XCD, return true when NUM_XCD is
-// 0 (defensive) or not a power of two, false otherwise (incl. unknown/no
-// analytical hardware -> historic behavior preserved).
+// hip::HipAMDGPU, derive the baked per-XCD queue count from the origami arch
+// (streamKBakedQueueCount / get_default_num_xcds), read analyticalHardware->
+// NUM_XCD, and return true (reject) when NUM_XCD is 0 (defensive), not a power
+// of two, the baked count is unknown, or NUM_XCD != baked; false otherwise
+// (incl. unknown/no analytical hardware -> historic behavior preserved).
 //
 // Both production predicates live in anonymous namespaces / a .cpp translation
 // unit and cannot be linked from here, so -- following the same convention as
 // computeStreamKHostPack above (which mirrors solve()'s internal reduction
 // decision for host-only testing) -- this test mirrors them and drives them
 // through a real hip::HipAMDGPU mock. It validates (a) the Hardware& ->
-// HipAMDGPU -> analyticalHardware -> NUM_XCD accessor chain, (b) the power-of-
-// two classification (6 -> reject, 8 -> allow, unknown -> allow), and (c) the
-// selection-predicate composition (dynamic-queue on 6 XCD -> excluded; other
-// StreamK modes / non-power-of-two-agnostic solutions -> selectable). It is NOT
-// executed on real MI300A silicon.
+// HipAMDGPU -> analyticalHardware -> {arch, NUM_XCD} accessor chain, (b) the
+// power-of-two AND equals-baked classification (6 -> reject, 4 -> reject
+// (pow2 but != baked 8), 8 -> allow, unknown -> allow), and (c) the
+// selection-predicate composition (dynamic-queue on a mismatched XCD count ->
+// excluded; other StreamK modes / queue-count-agnostic solutions ->
+// selectable). It is NOT executed on real MI300A silicon.
 // ===========================================================================
 namespace
 {
+    // Mirror of the anonymous-namespace helper in ContractionSolution.cpp
+    // (streamKBakedQueueCount): the baked per-XCD queue count comes from
+    // origami's per-arch XCD count. Kept in lockstep with the production code.
+    inline size_t streamKBakedQueueCountRef(Hardware const& hardware)
+    {
+        auto const* hipAMDGPU = dynamic_cast<hip::HipAMDGPU const*>(&hardware);
+        if(hipAMDGPU == nullptr || hipAMDGPU->analyticalHardware == nullptr)
+            return 0;
+        try
+        {
+            return origami::hardware_t::get_default_num_xcds(
+                hipAMDGPU->analyticalHardware->arch);
+        }
+        catch(std::exception const&)
+        {
+            return 0;
+        }
+    }
+
     // Byte-for-byte mirror of the anonymous-namespace numeric predicate in
     // ContractionSolution.cpp (streamKDynamicQueueUnsupported). Kept in lockstep
     // with the production code; if that predicate changes, update this too.
@@ -780,8 +805,10 @@ namespace
         auto const* hipAMDGPU = dynamic_cast<hip::HipAMDGPU const*>(&hardware);
         if(hipAMDGPU == nullptr || hipAMDGPU->analyticalHardware == nullptr)
             return false;
+        size_t baked  = streamKBakedQueueCountRef(hardware);
         size_t numXCD = hipAMDGPU->analyticalHardware->NUM_XCD;
-        return numXCD == 0 || (numXCD & (numXCD - 1)) != 0;
+        return numXCD == 0 || (numXCD & (numXCD - 1)) != 0 || baked == 0
+               || numXCD != baked;
     }
 
     // Mirror of ContractionSolution::streamKDynamicQueueSupported(). Returns
@@ -847,6 +874,19 @@ TEST(StreamKDynamicQueueXcdGateTest, AllowsMi300xEightXcd)
     Hardware const& hw    = mi300x;
     EXPECT_FALSE(streamKDynamicQueueUnsupportedRef(hw))
         << "MI300X (NUM_XCD=8, power of two) must keep the dynamic-queue path";
+}
+
+TEST(StreamKDynamicQueueXcdGateTest, RejectsGfx942FourXcdPowerOfTwoButMismatched)
+{
+    // A 4-XCD partition (e.g. a CPX-style slice) of an 8-XCD gfx942: 4 IS a
+    // power of two, but the kernel bakes Q=8, so runtime NUM_XCD (4) != baked
+    // (8) and the fixed Q=8 masking would mis-map queues. Must be rejected.
+    hip::HipAMDGPU  gfx942Cpx = makeGfx942DeviceWithXcd(4);
+    Hardware const& hw        = gfx942Cpx;
+    EXPECT_EQ(streamKBakedQueueCountRef(hw), 8u)
+        << "gfx942 must bake origami's per-arch XCD count (8)";
+    EXPECT_TRUE(streamKDynamicQueueUnsupportedRef(hw))
+        << "gfx942 with NUM_XCD=4 (power of two but != baked 8) must be rejected";
 }
 
 TEST(StreamKDynamicQueueXcdGateTest, AllowsGfx950EightXcd)

@@ -1665,13 +1665,16 @@ class Solution(collections.abc.Mapping):
       if state["StreamKWorkStealing"]:
         # NOTE: these are codegen-time rejections only; there is no hardware
         # context here (MI300A and MI300X both compile as gfx942). The kernel
-        # hardcodes a power-of-two queue count (8), so the check that the device
-        # actually exposes a power-of-two XCD count -- and the explicit
-        # rejection of the dynamic-queue / work-stealing path on non-power-of-two
-        # devices like MI300A's 6 XCDs (a non-work-stealing solution serves the
-        # GEMM instead, and the user is warned) -- lives host-side in
-        # ContractionSolution.cpp (streamKDynamicQueueSupported /
-        # streamKDynamicQueueUnsupported, wired into softwarePredicate).
+        # bakes in a power-of-two per-XCD queue count (8, mirroring origami's
+        # per-arch XCD count), so the check that the device actually matches it
+        # -- the host now requires the device's RUNTIME NUM_XCD to EQUAL the
+        # baked per-XCD queue count (derived from origami), not merely be a power
+        # of two, and excludes the dynamic-queue / work-stealing path otherwise
+        # (e.g. MI300A's 6 XCDs, or a power-of-two-but-mismatched partition); a
+        # non-work-stealing solution serves the GEMM instead and the user is
+        # warned -- lives host-side in ContractionSolution.cpp
+        # (streamKDynamicQueueSupported / streamKDynamicQueueUnsupported /
+        # streamKBakedQueueCount, wired into softwarePredicate).
         # Work stealing only exists in the dynamic-queue fetch (auto-mode
         # SK4 and the SK4 sub-path of SK5).
         if state["StreamK"] not in (4, 5):

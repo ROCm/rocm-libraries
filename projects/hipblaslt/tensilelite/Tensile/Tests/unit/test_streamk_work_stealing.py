@@ -24,6 +24,7 @@ New emission contract (single-hop next-neighbor + sticky-home + static auto-rese
 import ast
 import inspect
 import textwrap
+import types
 
 import pytest
 
@@ -83,8 +84,11 @@ class _FakeSgprPool:
 
 
 class _FakeWriter:
-    def __init__(self):
+    def __init__(self, numXCD: int = 8):
         self.sgprPool = _FakeSgprPool()
+        # gfx942/gfx950 mirror origami get_default_num_xcds == 8; the helpers
+        # read the per-arch queue count from writer.states.archCaps["NumXCD"].
+        self.states = types.SimpleNamespace(archCaps={"NumXCD": numXCD})
 
 
 def _mk_label(base: str) -> Label:
@@ -411,18 +415,26 @@ class TestNoExplicitReset:
 
 # ===========================================================================
 # 5. Per-architecture queue-count lookup (C1): fast masking requires a
-#    power-of-two queue count; the count is keyed off kernel["ISA"].
+#    power-of-two queue count; the count is read from the per-arch capability
+#    writer.states.archCaps["NumXCD"] (the codegen mirror of origami
+#    get_default_num_xcds).
 # ===========================================================================
 class TestQueueConstants:
     @pytest.mark.parametrize("isa", [(9, 4, 0), (9, 5, 0)])
     def test_supported_arches_use_eight_power_of_two_queues(self, isa):
         sk = _stream_k_instance(4)
-        numQueues, mask, log2Queues, cacheLineLog2 = sk._wsQueueConstants({"ISA": isa})
-        assert numQueues == 8
-        assert numQueues & (numQueues - 1) == 0, "queue count must be power of two"
-        assert mask == numQueues - 1 == 0x7
-        assert (1 << log2Queues) == numQueues
-        assert (1 << cacheLineLog2) == 256
+        # gfx942/gfx950 mirror origami get_default_num_xcds == 8, so the
+        # constants tuple is exactly (numQueues=8, mask=7, log2=3, cacheLog2=8).
+        writer = _FakeWriter(numXCD=8)
+        assert sk._wsQueueConstants(writer, {"ISA": isa}) == (8, 7, 3, 8)
+
+    def test_non_power_of_two_queue_count_asserts(self):
+        # The shift/AND fast masking is only valid for a power-of-two queue
+        # count; a non-power-of-two NumXCD cap must trip the guard assert.
+        sk = _stream_k_instance(4)
+        writer = _FakeWriter(numXCD=6)
+        with pytest.raises(AssertionError):
+            sk._wsQueueConstants(writer, {"ISA": (9, 9, 0)})
 
 
 # ===========================================================================
