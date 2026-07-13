@@ -7,10 +7,12 @@ set -euo pipefail
 # TODO(newling) Until rocjitsu is packaged as a complete runnable TheRock
 # artifact, we build the rocjitsu CLI locally. Monitor progress on packaging rocjitsu.
 #
-# The script runs small gfx950 hipBLASLt and TensileLite GEMMs under the race detector.
-# TODO(newling) extend to different architectures and expand GEMM-space tested.
+# The script runs small hipBLASLt and TensileLite GEMMs under the race detector.
+# TODO(newling) expand the GEMM-space tested.
 
 ROCM_PATH="${ROCM_PATH:-${PWD}/build}"
+AMDGPU_FAMILIES="${AMDGPU_FAMILIES:-}"
+ROCJITSU_GPU_TARGET="${ROCJITSU_GPU_TARGET:-}"
 ROCJITSU_SOURCE_DIR="${ROCJITSU_SOURCE_DIR:-${PWD}/rocm-systems/emulation/rocjitsu}"
 ROCJITSU_BUILD_DIR="${ROCJITSU_BUILD_DIR:-${PWD}/rocjitsu-build}"
 ROCJITSU_CONFIG="${ROCJITSU_CONFIG:-}"
@@ -19,9 +21,76 @@ HIPBLASLT_BENCH="${HIPBLASLT_BENCH:-${ROCM_PATH}/bin/hipblaslt-bench}"
 TENSILELITE_ROOT="${TENSILELITE_ROOT:-${ROCM_PATH}/share/hipblaslt/tensilelite}"
 TENSILE_DRIVER="${TENSILE_DRIVER:-${TENSILELITE_ROOT}/Tensile/bin/Tensile}"
 TENSILELITE_CLIENT="${TENSILELITE_CLIENT:-${ROCM_PATH}/libexec/hipblaslt/tensilelite/tensilelite-client}"
+TENSILELITE_GPU_TARGET="${TENSILELITE_GPU_TARGET:-}"
 RACE_TIMEOUT_SECONDS="${RACE_TIMEOUT_SECONDS:-180}"
 TENSILELITE_TIMEOUT_SECONDS="${TENSILELITE_TIMEOUT_SECONDS:-420}"
 TIMING_FILE="${RACE_REPORT_DIR}/timing.tsv"
+
+derive_rocjitsu_gpu_target() {
+  if [[ -n "${ROCJITSU_GPU_TARGET}" ]]; then
+    return
+  fi
+
+  case "${AMDGPU_FAMILIES}" in
+    gfx94*)
+      ROCJITSU_GPU_TARGET="gfx942"
+      ;;
+    gfx950*)
+      ROCJITSU_GPU_TARGET="gfx950"
+      ;;
+    gfx1151)
+      ROCJITSU_GPU_TARGET="gfx1151"
+      ;;
+    *)
+      echo "Unsupported rocjitsu race-check artifact group: ${AMDGPU_FAMILIES}" >&2
+      echo "Supported groups are gfx94*, gfx950*, and gfx1151." >&2
+      exit 1
+      ;;
+  esac
+}
+
+select_rocjitsu_config() {
+  if [[ -n "${ROCJITSU_CONFIG}" ]]; then
+    return
+  fi
+
+  local candidates=()
+  case "${ROCJITSU_GPU_TARGET}" in
+    gfx942)
+      candidates=(
+        "${ROCJITSU_SOURCE_DIR}/configs/gfx942_cdna3_kmd.json"
+        "${ROCJITSU_SOURCE_DIR}/configs/amdgpu_cdna3_kmd.json"
+        "${ROCJITSU_SOURCE_DIR}/configs/gfx942_cdna3.json"
+        "${ROCJITSU_SOURCE_DIR}/configs/amdgpu_cdna3.json"
+      )
+      ;;
+    gfx950)
+      candidates=(
+        "${ROCJITSU_SOURCE_DIR}/configs/gfx950_cdna4_kmd.json"
+        "${ROCJITSU_SOURCE_DIR}/configs/amdgpu_cdna4_kmd.json"
+        "${ROCJITSU_SOURCE_DIR}/configs/gfx950_cdna4.json"
+        "${ROCJITSU_SOURCE_DIR}/configs/amdgpu_cdna4.json"
+      )
+      ;;
+    gfx1151)
+      candidates=(
+        "${ROCJITSU_SOURCE_DIR}/configs/gfx1151.json"
+      )
+      ;;
+    *)
+      echo "Unsupported rocjitsu target: ${ROCJITSU_GPU_TARGET}" >&2
+      exit 1
+      ;;
+  esac
+
+  local candidate
+  for candidate in "${candidates[@]}"; do
+    if [[ -f "${candidate}" ]]; then
+      ROCJITSU_CONFIG="${candidate}"
+      return
+    fi
+  done
+}
 
 # Record the duration and exit status of each stage in a file that is uploaded
 # with the other race reports. The same information is also printed at exit.
@@ -98,20 +167,16 @@ if [[ ! -x "${TENSILELITE_CLIENT}" ]]; then
 fi
 
 
-if [[ -z "${ROCJITSU_CONFIG}" ]]; then
-  for candidate in \
-    "${ROCJITSU_SOURCE_DIR}/configs/gfx950_cdna4_kmd.json" \
-    "${ROCJITSU_SOURCE_DIR}/configs/amdgpu_cdna4_kmd.json"; do
-    if [[ -f "${candidate}" ]]; then
-      ROCJITSU_CONFIG="${candidate}"
-      break
-    fi
-  done
-fi
+derive_rocjitsu_gpu_target
+select_rocjitsu_config
 
 if [[ -z "${ROCJITSU_CONFIG}" || ! -f "${ROCJITSU_CONFIG}" ]]; then
-  echo "rocjitsu gfx950 config not found under ${ROCJITSU_SOURCE_DIR}/configs" >&2
+  echo "rocjitsu ${ROCJITSU_GPU_TARGET} config not found under ${ROCJITSU_SOURCE_DIR}/configs" >&2
   exit 1
+fi
+
+if [[ -z "${TENSILELITE_GPU_TARGET}" ]]; then
+  TENSILELITE_GPU_TARGET="${ROCJITSU_GPU_TARGET}"
 fi
 
 mkdir -p "${RACE_REPORT_DIR}"
@@ -126,6 +191,8 @@ export LD_LIBRARY_PATH="${ROCM_PATH}/lib:${ROCM_PATH}/lib/rocm_sysdeps/lib:${ROC
 export PYTHONPATH="${TENSILELITE_ROOT}${PYTHONPATH:+:${PYTHONPATH}}"
 
 echo "ROCM_PATH=${ROCM_PATH}"
+echo "AMDGPU_FAMILIES=${AMDGPU_FAMILIES}"
+echo "ROCJITSU_GPU_TARGET=${ROCJITSU_GPU_TARGET}"
 echo "ROCJITSU_SOURCE_DIR=${ROCJITSU_SOURCE_DIR}"
 echo "ROCJITSU_BUILD_DIR=${ROCJITSU_BUILD_DIR}"
 echo "ROCJITSU_CONFIG=${ROCJITSU_CONFIG}"
@@ -133,6 +200,7 @@ echo "HIPBLASLT_BENCH=${HIPBLASLT_BENCH}"
 echo "TENSILELITE_ROOT=${TENSILELITE_ROOT}"
 echo "TENSILE_DRIVER=${TENSILE_DRIVER}"
 echo "TENSILELITE_CLIENT=${TENSILELITE_CLIENT}"
+echo "TENSILELITE_GPU_TARGET=${TENSILELITE_GPU_TARGET}"
 echo "RACE_REPORT_DIR=${RACE_REPORT_DIR}"
 echo "PATH=${PATH}"
 echo "LD_LIBRARY_PATH=${LD_LIBRARY_PATH}"
@@ -343,7 +411,7 @@ run_tensilelite_client_check() {
     "${yaml}"
     "${output_dir}"
     --prebuilt-client "${TENSILELITE_CLIENT}"
-    --gpu-targets gfx950
+    --gpu-targets "${TENSILELITE_GPU_TARGET}"
     --library-format msgpack
   )
   if [[ -x "${ROCM_PATH}/bin/amdclang++" ]]; then

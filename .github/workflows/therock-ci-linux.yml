@@ -161,7 +161,7 @@ jobs:
     name: Test (${{ inputs.amdgpu_families }})
     needs: [therock-build-linux]
     # TODO(TheRock#3288): Re-enable gfx950-dcgpu runners once we get more capacity
-    if: ${{ inputs.amdgpu_families != 'gfx950-dcgpu' }}
+    if: ${{ inputs.test_runs_on != '' && inputs.amdgpu_families != 'gfx950-dcgpu' }}
     uses: ./.github/workflows/therock-test-packages.yml
     with:
       therock_ref: ${{ inputs.therock_ref }}
@@ -175,13 +175,15 @@ jobs:
   rocjitsu-race-check-linux:
     name: rocjitsu race check (${{ inputs.amdgpu_families }})
     needs: [therock-build-linux]
-    # This is a narrow post-build instrumentation job for hipBLASLt on gfx950.
+    # This is a narrow post-build instrumentation job for hipBLASLt.
     # Normal package tests cover broad functionality; this job fetches the BLAS
     # artifacts from the just-finished TheRock build and runs two small workloads
-    # under rocjitsu's race detector. Keep it gated to hipblaslt + gfx950 while
+    # under rocjitsu's race detector. The workloads run entirely under CPU-side
+    # emulation; use the CPU build runner instead of consuming GPU test capacity.
+    # Keep it gated to hipblaslt + known rocjitsu race-check targets while
     # rocjitsu packaging and runner capacity are still evolving.
-    if: ${{ inputs.test_runs_on != '' && startsWith(inputs.amdgpu_families, 'gfx950') && contains(format(',{0},', inputs.projects_to_test), ',hipblaslt,') }}
-    runs-on: ${{ inputs.test_runs_on }}
+    if: ${{ inputs.build_runs_on != '' && (startsWith(inputs.amdgpu_families, 'gfx94') || startsWith(inputs.amdgpu_families, 'gfx950') || inputs.amdgpu_families == 'gfx1151') && contains(format(',{0},', inputs.projects_to_test), ',hipblaslt,') }}
+    runs-on: ${{ inputs.build_runs_on }}
     timeout-minutes: 90
     container:
       image: ghcr.io/rocm/no_rocm_image_ubuntu24_04@sha256:4150afe4759d14822f0e3f8930e1124f26e11f68b5c7b91ec9a02b20b1ebbb98
@@ -197,6 +199,7 @@ jobs:
       ARTIFACT_RUN_ID: ${{ github.run_id }}
       OUTPUT_ARTIFACTS_DIR: ./build
       ROCM_PATH: ${{ github.workspace }}/build
+      AMDGPU_FAMILIES: ${{ inputs.amdgpu_families }}
       ROCJITSU_SOURCE_DIR: ${{ github.workspace }}/rocm-systems/emulation/rocjitsu
       ROCJITSU_BUILD_DIR: ${{ github.workspace }}/rocjitsu-build
       RACE_REPORT_DIR: ${{ github.workspace }}/race-reports
