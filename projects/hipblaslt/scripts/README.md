@@ -33,7 +33,21 @@ python scripts/run_tensile_logic_check.py library/src/amd_detail/rocblaslt/src/T
 
 ### Known-bugs list (ROCM-7144 / validation exceptions)
 
-If `tensilelite/Tensile/TensileLogic/known_bugs.yaml` exists, this script passes **`--known-bugs`** to TensileLogic automatically so specific `(logic file path, SolutionIndex)` pairs are skipped (same as the CMake pre-build gate). Paths in that YAML are relative to the library logic root (`library/`), with optional `#` comments and an optional `ticket:` field for Jira keys. Override or disable this list by passing your own `--known-bugs` path on the command line.
+If `tensilelite/Tensile/TensileLogic/known_bugs.yaml` exists, this script passes **`--known-bugs`** to TensileLogic automatically so specific `(logic file path, solution_name)` pairs are skipped (same as the CMake pre-build gate). `solution_name` is the solution's `SolutionNameMin`, a content-derived name that stays stable when the library is re-tuned (the positional `SolutionIndex` does not, so it is no longer used as the key). Paths in that YAML are relative to the library logic root (`library/`), with optional `#` comments and an optional `ticket:` field for Jira keys. Override or disable this list by passing your own `--known-bugs` path on the command line.
+
+Documented known bugs are still re-validated on every run instead of being blindly skipped. If a listed solution **now passes** validation (the underlying bug was fixed), the run prints a `Stale known-bugs` warning naming the entry to remove. Pass **`--strict-known-bugs`** to make the run exit non-zero on any stale entry; use that in CI or in the PR that lands the fix, so the fixing PR also removes the listing. If a listed kernel was removed or renamed, its name no longer matches; use `migrate_known_bugs.py` (below) to find those.
+
+## migrate_known_bugs.py
+
+Resolves and verifies `known_bugs.yaml` against the on-disk library logic. It parses the logic YAMLs with PyYAML directly (no build/rocisa needed).
+
+```bash
+python scripts/migrate_known_bugs.py            # verify: report OK/STALE, exit 1 if any stale
+python scripts/migrate_known_bugs.py --stdout    # print the resolved name-based YAML
+python scripts/migrate_known_bugs.py --write      # rewrite known_bugs.yaml in place (name-based)
+```
+
+Use `--write` for the one-time upgrade of a legacy `solution_index`-keyed file to `solution_name` (it resolves each index against the library and refuses to write if any entry is stale). Use the default verify mode to catch entries whose kernel was removed or renamed. Override the inputs with `--known-bugs FILE` and `--logic-path DIR` (defaults: the repo `known_bugs.yaml` and `library/`).
 
 ### Exit code
 

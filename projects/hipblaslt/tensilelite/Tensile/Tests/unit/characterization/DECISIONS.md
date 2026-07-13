@@ -347,3 +347,21 @@ accepted equivalents/pragmas here, each with its one-line reason.
 
 ## D16 — BufferLoad/BufferStore promoted to Required Parameters
 **Context** kernel basename hash changes across all archs; assembly verified unchanged/correct; no err or kernel-count changes."
+
+## D17 — KnownBugs keyed on solution_name (intended behavior change)
+
+**ADR:** [`adr/0002-knownbugs-key-on-solution-name.md`](adr/0002-knownbugs-key-on-solution-name.md).
+
+**Decision:** `TensileLogic.KnownBugs` now keys documented `--check-all` skips on
+`(path, solution_name)` (the solution's stable `SolutionNameMin`) instead of the
+positional `(path, solution_index)`; `solution_index` support is dropped. The
+`test_knownbugs_char.py` goldens for `test_is_known_bug_hit_and_miss` and
+`test_load_roundtrip_multi` were re-recorded to match. This is an intended
+behavior change (not a pinned bug): positional indices shift on re-tuning and
+forced manual edits to `known_bugs.yaml`, whereas the content-derived name is
+stable and self-invalidating. Motivating context: ROCM-7144.
+
+**Note:** the two golden nodes were hand-edited to match syrupy's amber format
+and must be confirmed byte-identical via `--snapshot-update` in a build
+environment; the `-m unit` lane needs the compiled rocisa module, which is not
+available where this change was authored.
