@@ -212,10 +212,10 @@ def _MXSB(mt):            return TensorSpec("MXSB", True, mt, 1)
 
 
 # gl2-prefetch is emitted whenever PrefetchGL2 is set (KernelWriter guards
-# gl2PrefetchCalcAddr on kernel["PrefetchGL2"] only, not ClusterDim), but the
-# cooperative fan-out only kicks in for a real cluster, so every config runs a
-# ClusterDim != [1,1] grid to exercise it. ClusterDim = [cx, cy]: A/MXSA
-# cooperate along cy and span cx macro-tiles; B/MXSB are the mirror. Shapes
+# gl2PrefetchCalcAddr on kernel["PrefetchGL2"] only, not ClusterDim). The
+# cooperative fan-out only kicks in for a real cluster, so most configs run with
+# ClusterDim != [1,1] to exercise it (one [1,1] case covers the degenerate path).
+# ClusterDim = [cx, cy]: A/MXSA cooperate along cy and span cx macro-tiles; B/MXSB are the mirror. Shapes
 # include power-of-2 and non-POT MacroTile / cluster extents
 # (scalarStaticRemainder, ceil(gl2nl), ncc divide).
 CONFIGS = [
