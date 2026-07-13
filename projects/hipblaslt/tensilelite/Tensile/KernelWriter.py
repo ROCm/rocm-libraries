@@ -1092,12 +1092,8 @@ class KernelWriter(metaclass=abc.ABCMeta):
           packAIdx += instPerPackA if i//(kernel["MIWaveTileA"]+kernel["MIWaveTileA"]*kernel["MIWaveTileB"]*(i//(kernel["MIWaveTileA"]*kernel["MIWaveTileB"]))) == 0 else 0
           packBIdx += instPerPackB if i % kernel["MIWaveTileA"] == 0 else 0
           # blockWidth < 1, means 0.5 or 0.25 (BF,H,Int8)
-          if self.states.archCaps["HasEccHalf"] or not self.states.asmCaps["HasWMMA_V1"]:
-            packAIdx = packAIdx if tPA["bpe"] < 4 and not kernel["UnrollMajorLDSA"] else 0
-            packBIdx = packBIdx if tPB["bpe"] < 4 and not kernel["UnrollMajorLDSB"] else 0
-          else:
-            packAIdx = packAIdx if tPA["localReadInstruction"].blockWidth == 0.25 else 0
-            packBIdx = packAIdx if tPB["localReadInstruction"].blockWidth == 0.25 else 0
+          packAIdx = packAIdx if self.localReadNeedsPack(kernel, tPA) else 0
+          packBIdx = packBIdx if self.localReadNeedsPack(kernel, tPB) else 0
 
           numPack = (packAIdx + packBIdx)
           iterCode.addComment0("pack scheduling: packAIdx:%u, packBIdx:%u" %(packAIdx,packBIdx))
@@ -2077,13 +2073,13 @@ class KernelWriter(metaclass=abc.ABCMeta):
             packMIdx += _instPerPackM
           # blockWidth < 1, means 0.5 or 0.25 (BF,H,Int8)
           if self.states.archCaps["HasEccHalf"] or not self.states.asmCaps["HasWMMA_V1"]:
-            packAIdx = packAIdx if tPA["bpe"] < 4 and (not kernel["UnrollMajorLDSA"] or kernel["ConvertAfterDS"]) else 0
-            packBIdx = packBIdx if tPB["bpe"] < 4 and (not kernel["UnrollMajorLDSB"] or kernel["ConvertAfterDS"]) else 0
+            packAIdx = packAIdx if self.localReadNeedsPack(kernel, tPA) else 0
+            packBIdx = packBIdx if self.localReadNeedsPack(kernel, tPB) else 0
             packMXSAIdx = packMXSAIdx if ("MX" in tPA) and (not kernel["UnrollMajorLDSMXSA"]) else 0
             packMXSBIdx = packMXSBIdx if ("MX" in tPB) and (not kernel["UnrollMajorLDSMXSB"]) else 0
           else:
-            packAIdx = packAIdx if tPA["localReadInstruction"].blockWidth == 0.25 else 0
-            packBIdx = packBIdx if tPB["localReadInstruction"].blockWidth == 0.25 else 0
+            packAIdx = packAIdx if self.localReadNeedsPack(kernel, tPA) else 0
+            packBIdx = packBIdx if self.localReadNeedsPack(kernel, tPB) else 0
             packMXSAIdx = 0
             packMXSBIdx = 0
           numPack = (packAIdx + packBIdx + packMXSAIdx + packMXSBIdx)
@@ -6755,6 +6751,36 @@ class KernelWriter(metaclass=abc.ABCMeta):
       print2(f"Using Original Rocisa Assembly")
       return (error, str(moduleKernelBody))
 
+  def localReadNeedsPack(self, kernel, tP):
+    """Return whether LocalReadMFMA will emit A/B pack code."""
+    tc = tP["tensorChar"]
+    if tc not in ("A", "B"):
+      return False
+    subDwordRead = tP["bpeDS"] < 4 and not kernel["UnrollMajorLDS%s" % tc]
+    if not kernel["EnableMatrixInstruction"]:
+      return subDwordRead
+    usesWmmaV1PackRule = self.states.asmCaps["HasWMMA_V1"] and not self.states.archCaps["HasEccHalf"]
+    needPack = tP["localReadInstruction"].blockWidth == 0.25 if usesWmmaV1PackRule else subDwordRead
+    needPack |= kernel["ConvertAfterDS"] and tP["bpe"] != tP["bpeDS"]
+    needPack |= kernel["UseF32XEmulation"]
+    return needPack
+
+  def localReadNeedsValuPack(self, kernel, tP):
+    """Return whether A/B local reads need the extra ValuPack register region."""
+    tc = tP["tensorChar"]
+    if tc not in ("A", "B"):
+      return False
+    valuPackEligible = tP["bpe"] < 4 and not kernel["UnrollMajorLDS%s" % tc] and not kernel["enableLDSTr%s" % tc]
+    if not valuPackEligible:
+      return False
+    if not kernel["EnableMatrixInstruction"]:
+      return True
+    if kernel["DirectToVgpr%s" % tc]:
+      packDTV = self.states.packDTVA if tc == "A" else self.states.packDTVB
+      convDTV = self.states.convDTVA if tc == "A" else self.states.convDTVB
+      return packDTV or convDTV
+    return self.localReadNeedsPack(kernel, tP)
+
   ##############################################################################
   # Init Kernel
   ##############################################################################
@@ -8519,7 +8545,7 @@ class KernelWriter(metaclass=abc.ABCMeta):
       vgprIdx += self.states.a.numVgprValu
 
       numVgprValuPackA = 0
-      if tensorParametersA["bpe"] < 4 and not kernel["UnrollMajorLDSA"] and not kernel["enableLDSTrA"]:
+      if self.localReadNeedsValuPack(kernel, tensorParametersA):
         self.states.a.startVgprValuPack = vgprIdx
         if self.states.lrvwTileA > 1:
           numVgprValuPackA = ceil(kernel["VectorWidthA"] * tensorParametersA["bpe"] / self.states.bpr) * kernel["MIWaveTileA"] // kernel["VectorWidthA"] * kernel["InnerUnroll"] * self.states.numVgprBuffer * kernel["MIInputPerThreadA"]
@@ -8559,7 +8585,7 @@ class KernelWriter(metaclass=abc.ABCMeta):
       self.states.b.startVgprValu = vgprIdx
       vgprIdx += self.states.b.numVgprValu
       numVgprValuPackB = 0
-      if tensorParametersB["bpe"] < 4 and not kernel["UnrollMajorLDSB"] and not kernel["enableLDSTrB"]:
+      if self.localReadNeedsValuPack(kernel, tensorParametersB):
         self.states.b.startVgprValuPack = vgprIdx
         if self.states.lrvwTileB > 1:
           numVgprValuPackB = ceil(kernel["VectorWidthB"] * tensorParametersB["bpe"] / self.states.bpr) * kernel["MIWaveTileB"] // kernel["VectorWidthB"] * kernel["InnerUnroll"] * self.states.numVgprBuffer * kernel["MIInputPerThreadB"]
