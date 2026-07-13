@@ -3,6 +3,7 @@ TestParameters:
 
 GlobalParameters:
   SyncsPerBenchmark: 0
+  Architecture: gfx1250
   NumElementsToValidate: -1
   BoundsCheck: 0
   KernelTime: False
