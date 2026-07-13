@@ -366,7 +366,7 @@ DEF_BATCH(.format = SOP1,
         .operand_fields = { {D0, .size=64, .type=sreg}, {S0, .size=64} },
     SOrSaveexecB64Inst, "s_or_saveexec_b64", .flags = {HasSideEffect, ImplicitReadEXEC, ImplicitWriteEXEC, ImplicitWriteSCC}, .logical = "SOrSaveExecB64",
         .operand_fields = { {D0, .size=64, .type=sreg}, {S0, .size=64} },
-    SSwappcB64Inst, "s_swappc_b64", .flags = {Branch, IndirectBranch, HasSideEffect}, .logical = "SSwapPCB64",
+    SSwappcB64Inst, "s_swappc_b64", .flags = {Call, HasSideEffect}, .logical = "SSwapPCB64",
         .operand_fields = { {D0, .size=64}, {S0, .size=64, .type=sreg} },
     SAndSaveexecB32Inst, "s_and_saveexec_b32", .flags = {ImplicitReadEXEC, ImplicitWriteEXEC, ImplicitWriteSCC}, .logical = "SAndSaveExecB32",
         .operand_fields = { {D0, .type=sreg} },
@@ -410,6 +410,13 @@ DEF_T(SClauseInst, "s_clause", .format = SOPP, .flags = {HasSideEffect}, .logica
 // CacheScopeModifiers so the emitter prints " scope:SCOPE_DEV".
 DEF_T(GlobalWbInst, "global_wb", .format = VGLOBAL, .flags = {HasSideEffect}, .logical = "GlobalWb")
 DEF_T(GlobalInvInst, "global_inv", .format = VGLOBAL, .flags = {HasSideEffect}, .logical = "GlobalInv")
+
+// Returning global-segment atomic increment (SADDR form). Used by the gfx1250 StreamK
+// dynamic work-queue fetch-and-increment: global is the natural choice for a known-global
+// 64-bit pointer -- it keeps the queue base in SGPRs, and completes on loadcnt only
+// (unlike flat, which also bumps dscnt).
+DEF_T(GlobalAtomicIncU32SaddrInst, "global_atomic_inc_u32", .format = VGLOBAL_ATOMIC_SADDR,
+    .logical = "GlobalAtomicIncU32Saddr")
 
 // Global data prefetch - used by gfx1250 PrefetchGL2 to prefetch data from global memory
 // to L2 cache; no destination register. Not marked HasSideEffect: it is only a cache hint,

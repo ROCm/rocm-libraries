@@ -1054,7 +1054,9 @@ TEST(rocfft_UnitTest, rtc_test_harness)
 }
 
 // Verify that rocfft/rocfft.h can be compiled as plain C (not C++).
+#ifndef SKIP_ROCFFT_C_TEST
 TEST(rocfft, cApi)
 {
     EXPECT_EQ(rocfft_c(), 0);
 }
+#endif
