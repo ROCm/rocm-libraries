@@ -264,6 +264,27 @@ def default_scenarios() -> List[Scenario]:
             block_size=16,
             dtype=torch.float16,
         ),
+        # D256 gfx950 bf16 prefill fast path (Qwen3-Next-80B-A3B cohort,
+        # GQA 16/2). Exercises the _d256_gfx950_fast route (32x32 transposed
+        # + FA3-style softmax<->MFMA interleave) at the two measured points.
+        Scenario(
+            name="prefill_d256_gqa8_b16_sq4096",
+            seq_lens=[(4096, 4096)],
+            num_query_heads=16,
+            num_kv_heads=2,
+            head_size=256,
+            block_size=16,
+            dtype=torch.bfloat16,
+        ),
+        Scenario(
+            name="prefill_d256_gqa8_b16_sq8192",
+            seq_lens=[(8192, 8192)],
+            num_query_heads=16,
+            num_kv_heads=2,
+            head_size=256,
+            block_size=16,
+            dtype=torch.bfloat16,
+        ),
         Scenario(
             name="prefill_d128_b16",
             seq_lens=[(64, 64), (128, 256), (32, 256)],
