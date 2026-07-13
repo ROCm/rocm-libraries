@@ -85,7 +85,7 @@ from .CustomKernels import isCustomKernelConfig
 from .Common import roundUp, log2, ceilDivide, choose_multiplier, wmmaV3InputVgprLayout, clusterEnabled
 from .OccupancyMeasure import compute_occupancy_from_asm_source, _arch_caps_for_kernel
 from rocisa.instruction import ECvtF16toF32, ECvtF32toF16, ECvtPkFP8toF32
-from Tensile.Common import print2, printExit, printWarning, INDEX_CHARS, DebugConfig, DataDirection, isSubtileMultiDU
+from Tensile.Common import print2, printExit, printWarning, INDEX_CHARS, DebugConfig, DataDirection, isSubtileMultiDU, plsinDebugEnv
 from Tensile.Components.NonTemporal import decodeNonTemporal, forceCoherentNonTemporal
 from Tensile.Common.DataType import DataType
 from Tensile.Common.RegisterPool import RegisterPool, allocTmpGpr, allocTmpGprList
@@ -14581,12 +14581,12 @@ class KernelWriterAssembly(KernelWriter):
       # _weaveStoreInitIntoLoop) so it overlaps matrix compute instead of running as an
       # exposed serial block before the store. Only for <=256x256 tiles (spill/large
       # tiles already peak at the arch-VGPR ceiling and keep everything serial), and
-      # opt-out via TENSILE_NLL_HOIST_STOREINIT=0. The pure-SALU address math never
-      # touches vmcnt/lgkmcnt/vscnt/dscnt, so relocating it between MFMAs (which never
-      # touch SCC) is register- and counter-safe; _splitHoistableStoreInit fences off
-      # any branch/label/memory content.
+      # opt-out via TENSILE_NLL_HOIST_STOREINIT=0 (test-only). The pure-SALU address
+      # math never touches vmcnt/lgkmcnt/vscnt/dscnt, so relocating it between MFMAs
+      # (which never touch SCC) is register- and counter-safe; _splitHoistableStoreInit
+      # fences off any branch/label/memory content.
       _largeTile = (kernel["MacroTile0"] > 256) or (kernel["MacroTile1"] > 256)
-      _hoistStoreInit = (os.environ.get("TENSILE_NLL_HOIST_STOREINIT", "1") != "0") \
+      _hoistStoreInit = (plsinDebugEnv("TENSILE_NLL_HOIST_STOREINIT", "1") != "0") \
                         and not _largeTile
       _hoistUnits = None
       if _hoistStoreInit:

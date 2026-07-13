@@ -41,6 +41,7 @@ from .ScheduleTypes import (
 )
 
 from ...Common.GlobalParameters import globalParameters
+from ...Common import plsinDebugEnv
 
 # ds_load_b128 reads 4 contiguous VGPRs.
 DS_B128_VGPRS = 4
@@ -3565,8 +3566,8 @@ class LogicalScheduler:
         # Default ON for PLSIN kernels: postLoopStoreInNll is already the
         # fp4-input + UseSubtileImpl (+ gfx950/MI/<=256x256/...) gate (Solution.py),
         # so the init-hoist NGLL dual-arm is enabled automatically here. Opt out
-        # (byte-identical stock NGLL) with TENSILE_NGLL_INIT_HOIST=0.
-        if os.environ.get("TENSILE_NGLL_INIT_HOIST", "1") == "0":
+        # (byte-identical stock NGLL) with TENSILE_NGLL_INIT_HOIST=0 (test-only).
+        if plsinDebugEnv("TENSILE_NGLL_INIT_HOIST", "1") == "0":
             return plain
 
         module = Module(f"{label}_MaybeFused")
@@ -3597,8 +3598,8 @@ class LogicalScheduler:
         # Coord-hoist weaving is ON by default for eligible (<=256x256) PLSIN tiles
         # (spill tiles are already excluded upstream, so largeTile never trips for an
         # eligible kernel -- kept as a defensive guard). Opt out with
-        # TENSILE_NGLL_HOIST_COORDS=0.
-        if os.environ.get("TENSILE_NGLL_HOIST_COORDS", "1") != "0" and not largeTile:
+        # TENSILE_NGLL_HOIST_COORDS=0 (test-only).
+        if plsinDebugEnv("TENSILE_NGLL_HOIST_COORDS", "1") != "0" and not largeTile:
             from rocisa.instruction import MFMAInstruction, MXMFMAInstruction
             # Generate the coord instructions (also checks out the persistent coord
             # VGPRs via the writer register pool — that side effect must happen here).
@@ -3619,7 +3620,7 @@ class LogicalScheduler:
             # interleaving is register-safe). perGap is kept small so a gap's total
             # fillers (existing ds_read + these) stay under the MFMA compute latency
             # and never delay the next MFMA issue (i.e. never slow the NGLL loop).
-            perGap = int(os.environ.get("TENSILE_NGLL_HOIST_PER_GAP", "2"))
+            perGap = int(plsinDebugEnv("TENSILE_NGLL_HOIST_PER_GAP", "2"))
             woven = Module(f"{label}_INIT_hoistwoven")
             _it = iter(coordInsts)
             _exhausted = False
@@ -3683,7 +3684,7 @@ class LogicalScheduler:
         # LA = how many store-pairs ahead a pair's terminal MFMAs are issued (the
         # MFMA->accvgpr_read latency window). The first LA pairs keep their MFMAs in
         # the loop (natural large distance); pairs >= LA are woven.
-        weaveLA = int(os.environ.get("TENSILE_WEAVE_LA", "4"))
+        weaveLA = int(plsinDebugEnv("TENSILE_WEAVE_LA", "4"))  # test-only override
         fusedEmitted = copy.deepcopy(emitted_3d)
         # Macro tiles larger than 256x256 peak at 256 arch VGPRs in the loop, so the
         # fused store's temporaries (valuC window, coord0/1, and the element batch)
@@ -3871,8 +3872,9 @@ class LogicalScheduler:
         # VALU/SALU stalls ~0c. Front-loading (legacy perGap) dropped every unit into
         # the early gaps that ALSO overlap the loop's ds_reads -- redundant hiding --
         # leaving the terminal run fully exposed. Spreading fills the terminal gaps too.
-        # Opt back to the packed behavior by setting TENSILE_NLL_HOIST_STOREINIT_PER_GAP.
-        perGapEnv = os.environ.get("TENSILE_NLL_HOIST_STOREINIT_PER_GAP", None)
+        # Opt back to the packed behavior by setting TENSILE_NLL_HOIST_STOREINIT_PER_GAP
+        # (test-only).
+        perGapEnv = plsinDebugEnv("TENSILE_NLL_HOIST_STOREINIT_PER_GAP", None)
         totalMfma = sum(1 for i in flat
                         if isinstance(i, (MFMAInstruction, MXMFMAInstruction)))
         uidx = 0
