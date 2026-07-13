@@ -186,9 +186,11 @@ def _validateSubtileMIWaveEven(state, printRejectionReason):
   # MIWaveTile[0], MIWaveTile[1], MIWaveGroup[0], MIWaveGroup[1] is odd) produces
   # a numerical mismatch we have not yet root-caused. A single even factor makes
   # the product even, so common cases such as MIWaveGroup=[2, 2] are unaffected
-  # and need no rejection. Only the subtile (UseSubtileImpl) path is affected.
-  # Remove this once the underlying mismatch is understood and fixed.
+  # and need no rejection. Only the subtile (UseSubtileImpl) path on gfx950 is
+  # affected. Remove this once the underlying mismatch is understood and fixed.
   if not state["UseSubtileImpl"]:
+    return True
+  if tuple(state["ISA"]) != (9, 5, 0):
     return True
   miwtMiwgProduct = (state["MIWaveTile"][0] * state["MIWaveTile"][1]
                      * state["MIWaveGroup"][0] * state["MIWaveGroup"][1])

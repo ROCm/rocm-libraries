@@ -32,17 +32,23 @@ import pytest
 from Tensile.SolutionStructs.Solution import _validateSubtileMIWaveEven
 
 
-def _state(useSubtile, miWaveTile, miWaveGroup):
+GFX950 = (9, 5, 0)
+GFX942 = (9, 4, 2)
+GFX1250 = (12, 5, 0)
+
+
+def _state(useSubtile, miWaveTile, miWaveGroup, isa=GFX950):
     return {
         "UseSubtileImpl": useSubtile,
         "MIWaveTile": miWaveTile,
         "MIWaveGroup": miWaveGroup,
+        "ISA": isa,
         "Valid": True,
     }
 
 
 def test_subtile_odd_product_is_rejected():
-    # Every factor odd -> odd product -> rejected.
+    # Every factor odd -> odd product -> rejected on gfx950.
     state = _state(True, [1, 1], [1, 1])
 
     valid = _validateSubtileMIWaveEven(state, False)
@@ -93,6 +99,17 @@ def test_subtile_multi_wave_group_is_accepted(mi_wave_group):
 def test_non_subtile_odd_product_is_not_rejected():
     # Rejection only applies to the subtile (UseSubtileImpl) path.
     state = _state(False, [1, 1], [1, 1])
+
+    valid = _validateSubtileMIWaveEven(state, False)
+
+    assert valid is True
+    assert state["Valid"] is True
+
+
+@pytest.mark.parametrize("isa", [GFX942, GFX1250])
+def test_subtile_odd_product_is_not_rejected_on_non_gfx950(isa):
+    # The temporary rejection is scoped to gfx950 only.
+    state = _state(True, [1, 1], [1, 1], isa=isa)
 
     valid = _validateSubtileMIWaveEven(state, False)
 
