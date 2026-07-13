@@ -3454,9 +3454,13 @@ TEST(auxiliary_pre_checkin, BellSetPointers)
     void* new_col_indices = reinterpret_cast<void*>(0x4000);
     void* new_values      = reinterpret_cast<void*>(0x5000);
 
-    ASSERT_EQ(rocsparse_bell_set_pointers(descr, new_col_indices, new_values),
+    rocsparse_handle handle;
+    ASSERT_EQ(rocsparse_create_handle(&handle), rocsparse_status_success);
+
+    ASSERT_EQ(rocsparse_bell_set_pointers(handle, descr, new_col_indices, new_values),
               rocsparse_status_success);
 
+    ASSERT_EQ(rocsparse_destroy_handle(handle), rocsparse_status_success);
     ASSERT_EQ(rocsparse_destroy_spmat_descr(descr), rocsparse_status_success);
 }
 
