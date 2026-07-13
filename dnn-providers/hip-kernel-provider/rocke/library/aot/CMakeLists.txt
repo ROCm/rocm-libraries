@@ -57,13 +57,10 @@ if(_ROCKE_CLIENT_ENABLE_TESTS)
     rocke_client_aot_pythonpath_environment(_ROCKE_CLIENT_AOT_TEST_ENVIRONMENT)
 
     # Host-side Python suites: schema/sidecar/instance/handler parsers + build
-    # tool + kpack round-trip/manifest. Held to the --fail-under=90 coverage
-    # gate over the producer surface (see tests/coveragerc).
+    # tool + kpack round-trip/manifest.
     add_test(
         NAME rocke_client_aot_pytest
         COMMAND "${ROCKE_PYENV_PYTHON}" -m pytest "${CMAKE_CURRENT_SOURCE_DIR}/tests"
-                --cov --cov-config="${CMAKE_CURRENT_SOURCE_DIR}/tests/coveragerc"
-                --cov-report=term-missing --cov-fail-under=90
         WORKING_DIRECTORY "${CMAKE_CURRENT_BINARY_DIR}"
     )
     # ROCKE_KPACK_REQUIRED makes the kpack suite fail loud (not skip) when

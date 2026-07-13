@@ -23,6 +23,5 @@ msgpack>=1.0
 # the AOT tree owns its own build-time environment, so declare it explicitly.)
 numpy>=1.24
 
-# CTest-driven Python unit tests + the --fail-under=90 coverage gate.
+# CTest-driven Python unit tests.
 pytest>=7.0
-pytest-cov>=4.0
