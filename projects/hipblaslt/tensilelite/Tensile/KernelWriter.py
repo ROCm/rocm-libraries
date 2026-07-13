@@ -3007,10 +3007,20 @@ class KernelWriter(metaclass=abc.ABCMeta):
       # we can't init in shadow of this prefetch
       # since that would initC inside the other summation loops
 
-      if self.states.doShadowInit != 2:
-        module.add(self.initC(kernel))
+      # initC lives in setupNewTile only when shadow-init didn't already emit it.
+      emitInitCHere = self.states.doShadowInit != 2
+      # The skip-branch reads LoopCounterL in assembly, so initC must be emitted AFTER
+      # calculateLoopNumIter
+      deferInitC = emitInitCHere and bool(kernel["InitCIterWmma"])
+
+      def emitInitC(skipVMov):
+        module.add(self.initC(kernel, skipVMov))
         if kernel["ProblemType"]["Gradient"] and kernel["ProblemType"]["UseBias"] and (kernel["ProblemType"]["BiasSrc"] == "A" or kernel["ProblemType"]["BiasSrc"] == "B"):
           module.add(self.initSumUnroll(kernel))
+
+      # Immediate initC (before calculateLoopNumIter): never carries the branch.
+      if emitInitCHere and not deferInitC:
+        emitInitC(skipVMov=False)
 
       # open non-unrolled summation loops
       if not forceNoTileCode:
@@ -3020,6 +3030,9 @@ class KernelWriter(metaclass=abc.ABCMeta):
           if self.states.actualSummationLoops>1:
             module.add(self.openLoop(kernel, tensorParametersA, tensorParametersB, i))
         module.add(self.calculateLoopNumIter(kernel, tensorParametersA, tensorParametersB, self.states.unrollIdx))
+
+      if deferInitC:
+        emitInitC(skipVMov=True)
 
       if not forceNoTileCode and self.states.staggerUCode:
         module.add(self.declareStaggerParms(kernel))
@@ -3574,10 +3587,25 @@ class KernelWriter(metaclass=abc.ABCMeta):
             self.codes.globalReadMetadata = StructuredModule() # empty
 
         else:
-          self.codes.localWriteA = Module()
-          self.codes.localWriteB = Module()
-          self.codes.localWriteMXSA = Module()
-          self.codes.localWriteMXSB = Module()
+          # For ForceUnrollSubIter+SIA=0+PGR, the NLL (isLastLoop=True) still needs to
+          # write the last GR's G2L data to LDS (in localWriteEndIter subiter), because
+          # the main loop's last GR fires in subiter 3 and the NLL's subiter 2 must LW it.
+          if (not kernel["NoLdsWriteCode"]) and kernel["ForceUnrollSubIter"] and kernel["_ScheduleIterAlg"] == 0 and kernel["PrefetchGlobalRead"]:
+            self.codes.localWriteA = self.localWriteDo(kernel, tensorParametersA)
+            if "MX" in tensorParametersA:
+              self.codes.localWriteMXSA = self.localWriteDo(kernel, tensorParametersA["MX"])
+            else:
+              self.codes.localWriteMXSA = Module()
+            if "MX" in tensorParametersB:
+              self.codes.localWriteMXSB = self.localWriteDo(kernel, tensorParametersB["MX"])
+            else:
+              self.codes.localWriteMXSB = Module()
+            self.codes.localWriteB = self.localWriteDo(kernel, tensorParametersB)
+          else:
+            self.codes.localWriteA = Module()
+            self.codes.localWriteB = Module()
+            self.codes.localWriteMXSA = Module()
+            self.codes.localWriteMXSB = Module()
           self.codes.globalReadMetadata = StructuredModule() # empty
 
         callMakeSchedule = not isNGLL or kernel["ExpandPointerSwap"] or UnrollLoopSwapGlobalReadOrder or isDTVAB or \
@@ -8974,6 +9002,21 @@ class KernelWriter(metaclass=abc.ABCMeta):
         self.states.startVgprSKConsts = vgprIdx
         self.states.numVgprSKConsts = numSKConsts
         vgprIdx += numSKConsts
+
+      # GL2 prefetch: init tp fields and allocate address VGPRs
+      if kernel["PrefetchGL2"]:
+        self.gl2PrefetchInit(kernel, tensorParametersA, tensorParametersB)
+        vgprIdx = int((vgprIdx + 1) / 2) * 2
+        self.states.a.startVgprGL2PrefetchAddr = vgprIdx
+        vgprIdx += tensorParametersA["gl2nl"] * self.states.rpga
+        self.states.b.startVgprGL2PrefetchAddr = vgprIdx
+        vgprIdx += tensorParametersB["gl2nl"] * self.states.rpga
+        if kernel["ProblemType"]["MXBlockA"]:
+          self.states.mxsa.startVgprGL2PrefetchAddr = vgprIdx
+          vgprIdx += tensorParametersA["MX"]["gl2nl"] * self.states.rpga
+        if kernel["ProblemType"]["MXBlockB"]:
+          self.states.mxsb.startVgprGL2PrefetchAddr = vgprIdx
+          vgprIdx += tensorParametersB["MX"]["gl2nl"] * self.states.rpga
 
       self.states.totalVgprs = vgprIdx
 

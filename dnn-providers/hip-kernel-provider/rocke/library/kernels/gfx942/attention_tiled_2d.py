@@ -1141,13 +1141,20 @@ def supports_tiled_2d(
                     f"the {arch} {_LDS_CAPACITY_BYTES} B LDS budget",
                 )
             return True, "supported"
-        _out_stripe = 32 if head_size <= 64 else head_size
-        _lds = (
-            2 * _t_eff * head_size * _BPE  # K_lds (double-buffered)
-            + _t_eff * head_size * _BPE  # V_lds
-            + _block_m * (_t_eff + 8) * _BPE  # P_lds
-            + (0 if _block_m <= 2 * _t_eff else _block_m * head_size * _BPE)  # Q_lds
-            + _block_m * _out_stripe * _BPE  # Acc_lds
+        # Default-path footprint via the shared model (single source of truth,
+        # also used by the gfx950 register-PV resolver). Conservative here:
+        # Q_lds/P_lds are staged (the register-PV path drops them).
+        from ..common.attention_unified import _tiled_2d_lds_bytes
+
+        _lds = _tiled_2d_lds_bytes(
+            tile_size=_t_eff,
+            head_size=head_size,
+            block_m=_block_m,
+            kv_elem_bytes=_BPE,
+            k_slots=2,
+            v_slots=1,
+            include_q_lds=True,
+            include_p_lds=True,
         )
         if _lds > _LDS_CAPACITY_BYTES:
             return (
