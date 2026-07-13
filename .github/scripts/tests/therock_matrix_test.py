@@ -3,6 +3,7 @@ from pathlib import Path
 import os
 import sys
 import unittest
+from unittest import mock
 
 sys.path.insert(0, os.fspath(Path(__file__).parent.parent))
 import therock_matrix
@@ -32,20 +33,34 @@ class TheRockMatrixTest(unittest.TestCase):
         project_to_run = therock_matrix.collect_projects_to_run(subtrees)
         self.assertEqual(len(project_to_run), 1)
 
-    def test_collect_projects_to_run_hiptensor(self):
-        subtrees = ["projects/hiptensor"]
-
-        project_to_run = therock_matrix.collect_projects_to_run(subtrees)
+    def test_collect_projects_to_run_hiptensor_linux(self):
+        # On Linux CK links rocRAND + roctracer/rocprofiler-sdk, so hipTensor
+        # must enable RAND and ROCPROFV3 in addition to CK itself.
+        with mock.patch.dict(os.environ, {"PLATFORM": "linux"}):
+            project_to_run = therock_matrix.collect_projects_to_run(
+                ["projects/hiptensor"]
+            )
         self.assertEqual(len(project_to_run), 1)
-        hiptensor_entry = project_to_run[0]
-        self.assertIn(
-            "hiptensor",
-            hiptensor_entry["projects_to_test"].split(","),
-        )
-        self.assertIn(
-            "-DTHEROCK_ENABLE_HIPTENSOR=ON",
-            hiptensor_entry["cmake_options"].split(" "),
-        )
+        options = project_to_run[0]["cmake_options"].split(" ")
+        self.assertIn("hiptensor", project_to_run[0]["projects_to_test"].split(","))
+        self.assertIn("-DTHEROCK_ENABLE_HIPTENSOR=ON", options)
+        self.assertIn("-DTHEROCK_ENABLE_COMPOSABLE_KERNEL=ON", options)
+        self.assertIn("-DTHEROCK_ENABLE_RAND=ON", options)
+        self.assertIn("-DTHEROCK_ENABLE_ROCPROFV3=ON", options)
+
+    def test_collect_projects_to_run_hiptensor_windows(self):
+        # The profiler (ROCPROFV3) is not built on Windows, so it must NOT be
+        # passed there; RAND is still required by CK.
+        with mock.patch.dict(os.environ, {"PLATFORM": "windows"}):
+            project_to_run = therock_matrix.collect_projects_to_run(
+                ["projects/hiptensor"]
+            )
+        self.assertEqual(len(project_to_run), 1)
+        options = project_to_run[0]["cmake_options"].split(" ")
+        self.assertIn("-DTHEROCK_ENABLE_HIPTENSOR=ON", options)
+        self.assertIn("-DTHEROCK_ENABLE_COMPOSABLE_KERNEL=ON", options)
+        self.assertIn("-DTHEROCK_ENABLE_RAND=ON", options)
+        self.assertNotIn("-DTHEROCK_ENABLE_ROCPROFV3=ON", options)
 
     def test_collect_projects_to_run_dependency_graph(self):
         subtrees = ["projects/miopen", "projects/hipblaslt"]

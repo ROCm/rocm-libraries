@@ -68,7 +68,11 @@ project_map = {
         "cmake_options": [
             "-DTHEROCK_ENABLE_HIPTENSOR=ON",
             "-DTHEROCK_ENABLE_COMPOSABLE_KERNEL=ON",
+            "-DTHEROCK_ENABLE_RAND=ON",
         ],
+        "additional_flags": {
+            "linux": ["-DTHEROCK_ENABLE_ROCPROFV3=ON"],
+        },
         "projects_to_test": ["hiptensor"],
     },
     "hip-kernel-provider": {
