@@ -175,6 +175,11 @@ std::vector<RequestedPass> parsePassNames(int argc, char** argv, int startIdx) {
             if (arg == "--print-output" || arg == "--emit-asm" || arg == "--remarks" ||
                 arg == "--verify-each" || arg == "--preserve-symbolic-regs" ||
                 arg == "--preserve-comments" || arg.starts_with("--ds-read-order=") ||
+                arg.starts_with("--ds-read-queue-depth=") ||
+                arg.starts_with("--ds-read-drain-latency=") ||
+                arg.starts_with("--ds-read-per-wmma=") ||
+                arg.starts_with("--global-read-queue-depth=") ||
+                arg.starts_with("--global-read-drain-latency=") ||
                 arg.starts_with("--vgpr-msb-mode=") || arg == "--from-label" ||
                 arg == "--to-label" || isKernelConfigArg(arg))
                 continue;
@@ -475,6 +480,16 @@ int main(int argc, char** argv) {
             else if (val == "AscendingCache")
                 passFeatureConfig.dagFeatures.dsReadOrder =
                     stinkytofu::PassFeatureConfig::DsReadOrder::AscendingCache;
+        } else if (a.starts_with("--ds-read-queue-depth=")) {
+            passFeatureConfig.dagFeatures.dsReadQueueDepth = std::stoi(a.substr(22));
+        } else if (a.starts_with("--ds-read-drain-latency=")) {
+            passFeatureConfig.dagFeatures.dsReadDrainLatency = std::stoi(a.substr(24));
+        } else if (a.starts_with("--ds-read-per-wmma=")) {
+            passFeatureConfig.dagFeatures.dsReadPerWmma = std::stoi(a.substr(19));
+        } else if (a.starts_with("--global-read-queue-depth=")) {
+            passFeatureConfig.dagFeatures.globalReadQueueDepth = std::stoi(a.substr(26));
+        } else if (a.starts_with("--global-read-drain-latency=")) {
+            passFeatureConfig.dagFeatures.globalReadDrainLatency = std::stoi(a.substr(28));
         }
     }
 

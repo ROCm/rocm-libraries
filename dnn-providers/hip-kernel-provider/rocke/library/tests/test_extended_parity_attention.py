@@ -73,6 +73,7 @@ class TestAttentionParityLibrary(unittest.TestCase):
         gfx950-only atom; the harness reports those as SKIP (not FAIL)
         and keeps running. Gate: rc == 0 and no ``FAIL`` line anywhere.
         """
+
         if not _CDNA:
             self.skipTest(f"CDNA MFMA attention kernels; running on {ARCH} (RDNA)")
         rc, out = self._run(
