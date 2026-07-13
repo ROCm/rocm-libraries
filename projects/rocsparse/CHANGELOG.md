@@ -6,7 +6,7 @@ Documentation for rocSPARSE is available at
 ## (Unreleased) rocSPARSE 5.0.0
 
 ### Added
-* Add Blocked ELL format support to the `rocsparse_dense_to_sparse` routine, including the new `rocsparse_bell_set_pointers` function to set the Blocked ELL array pointers.
+* Added Blocked ELL format support to the `rocsparse_dense_to_sparse` routine, including the new `rocsparse_bell_set_pointers` function to set the Blocked ELL array pointers.
 
 ### Resolved issues
 * Fixed `rocsparse_spmm` with Blocked ELL sparse format which was previously not computing the correct result.
