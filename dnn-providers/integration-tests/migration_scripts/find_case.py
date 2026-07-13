@@ -153,6 +153,7 @@ def _load_all_cases(bundle_dir):
                     "layout": layout,
                     "inputs": input_roles,
                     "seed": meta.get("seed"),
+                    "origin": meta.get("ported_from", ""),
                     "suite": f"{tier}_{op}_{topo}",
                     "gtest": f"{tier}_{op}_{topo}/{case.get('id', '')}",
                     "_raw_inputs": inputs,
@@ -224,6 +225,8 @@ def _matches(case, args):
         return False
     if args.id and args.id not in case["id"]:
         return False
+    if args.origin and args.origin.lower() not in case["origin"].lower():
+        return False
     for rf in args.input or []:
         role, lo, hi = _parse_input_filter(rf)
         spec = case["inputs"].get(role)
@@ -274,6 +277,8 @@ def _print_detail(case):
     print(f"  Dtype: {case['dtype'] or '-'}")
     print(f"  Layout: {case['layout'] or '-'}")
     print(f"  Seed: {case['seed']}")
+    if case["origin"]:
+        print(f"  Origin: {case['origin']}")
     if case["inputs"]:
         print(f"  Inputs:")
         for role, spec in sorted(case["inputs"].items()):
@@ -298,6 +303,7 @@ def main() -> int:
         help="filter by input role, e.g. --input epsilon  or  --input epsilon:-1,1",
     )
     ap.add_argument("--id", help="filter by case id (substring match)")
+    ap.add_argument("--origin", help="filter by ported_from C++ suite name (substring)")
     ap.add_argument(
         "--detail", action="store_true", help="show full detail for each match"
     )
@@ -306,10 +312,21 @@ def main() -> int:
     all_cases = _load_all_cases(args.bundle_dir)
 
     if not any(
-        [args.op, args.dtype, args.layout, args.shape, args.tier, args.input, args.id]
+        [
+            args.op,
+            args.dtype,
+            args.layout,
+            args.shape,
+            args.tier,
+            args.input,
+            args.id,
+            args.origin,
+        ]
     ):
         print(f"  {len(all_cases)} total cases in {args.bundle_dir}")
-        print(f"  Use --op, --dtype, --layout, --shape, --input, --id to filter.")
+        print(
+            f"  Use --op, --dtype, --layout, --shape, --input, --id, --origin to filter."
+        )
         return 0
 
     matches = [c for c in all_cases if _matches(c, args)]
