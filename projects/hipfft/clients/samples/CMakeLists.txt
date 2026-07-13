@@ -20,15 +20,20 @@
 # THE SOFTWARE.
 # #############################################################################
 
-CMAKE_MINIMUM_REQUIRED( VERSION 3.16 )
+CMAKE_MINIMUM_REQUIRED( VERSION 3.21 )
 
-project( hipfft-clients-samples-rocfft LANGUAGES CXX )
+project( hipfft-clients-samples-rocfft LANGUAGES CXX HIP )
 
 # We use C++20 features, this will add compile option: -std=c++20
 set( CMAKE_CXX_STANDARD 20 )
 
 if( NOT TARGET hipfft )
+  find_package( hip REQUIRED CONFIG PATHS /opt/rocm/lib/cmake/hip/ )
   find_package( hipfft REQUIRED CONFIG PATHS )
+  if( NOT BUILD_WITH_LIB STREQUAL "ROCM" )
+    find_package(CUDAToolkit REQUIRED)
+    set(CMAKE_HIP_ARCHITECTURES native )
+  endif()
 endif( )
 
 set( sample_list
@@ -44,7 +49,8 @@ set( sample_list
   hipfft_setworkarea
   )
 
-# callback sample has its own HIP code, so it needs to be built with hipcc or clang++
+# callback sample has its own HIP code, so it needs to be built with
+# hipcc or clang++
 if( CMAKE_CXX_COMPILER MATCHES ".*/hipcc$" OR CMAKE_CXX_COMPILER_ID STREQUAL "Clang" )
   # on cuFFT backend, use of callbacks requires linking against the
   # static cuFFT library
@@ -63,8 +69,6 @@ foreach( sample ${sample_list} )
 
   set_target_properties( ${sample} PROPERTIES CXX_STANDARD 20 CXX_STANDARD_REQUIRED ON )
 
-  target_link_libraries( ${sample} PRIVATE hip::hipfft )
-
   target_compile_options( ${sample} PRIVATE ${WARNING_FLAGS} )
   
   if( NOT CMAKE_CXX_COMPILER MATCHES ".*/hipcc$" )
@@ -73,31 +77,37 @@ foreach( sample ${sample_list} )
     else()
       find_package( HIP REQUIRED )
     endif()
-    if( NOT BUILD_WITH_LIB STREQUAL "CUDA" )
-      target_link_libraries( ${sample} PRIVATE hip::host hip::device )
-    else()
+    target_link_libraries( ${sample} PRIVATE hip::host hip::hipfft )
+    if( BUILD_WITH_LIB STREQUAL "CUDA" )
       target_compile_definitions( ${sample} PRIVATE __HIP_PLATFORM_NVIDIA__)
       target_include_directories( ${sample} PRIVATE ${HIP_INCLUDE_DIRS})
     endif()
   endif()
-
+  
   if ( BUILD_WITH_LIB STREQUAL "CUDA" )
     if( CMAKE_CXX_COMPILER MATCHES ".*nvc\\+\\+$" )
       target_compile_options( ${sample} PRIVATE -cuda -Xptxas=-w)
       target_link_options( ${sample} PRIVATE -cuda)
-    else()
-      target_compile_options( ${sample} PRIVATE -arch sm_100 -gencode=arch=compute_100,code=sm_100 -Xptxas=-w)
     endif()
-    target_link_libraries( ${sample} PRIVATE ${CUDA_LIBRARIES} )
+    target_link_libraries( ${sample} PRIVATE hip::host hip::hipfft CUDA::cudart)
   endif()
-
-  target_include_directories( ${sample}
-    PRIVATE
-    $<BUILD_INTERFACE:${hip_INCLUDE_DIRS}>
-    $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/../include>
-    $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/../../library/include>
-    ${HIP_ROOT_DIR}
+  
+  if( TARGET hipfft )
+    target_include_directories( ${sample}
+      PRIVATE
+      $<BUILD_INTERFACE:${hip_INCLUDE_DIRS}>
+      $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/../include>
+      $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/../../library/include>
+      ${HIP_ROOT_DIR}
     )
+  else()
+    target_include_directories( ${sample}
+      PRIVATE
+      $<BUILD_INTERFACE:${hip_INCLUDE_DIRS}>
+      ${CUDAToolkit_INCLUDE_DIRS}
+      ${HIP_ROOT_DIR}
+    )
+  endif()
   
   set_target_properties( ${sample} PROPERTIES CXX_EXTENSIONS NO )
   

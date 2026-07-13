@@ -141,8 +141,9 @@ foreach( lib ${HIPFFT_LIBRARY_TARGETS} )
     if( WIN32 )
       target_link_libraries( ${lib} PRIVATE hip::device )
     endif()
-    target_link_libraries( ${lib} PUBLIC hip::host )
   endif()
+
+  target_link_libraries( ${lib} PUBLIC hip::host )
 
   target_compile_options( ${lib} PRIVATE ${WARNING_FLAGS} )
 
