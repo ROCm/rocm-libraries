@@ -19,6 +19,7 @@ Documentation for rocSPARSE is available at
 
 ### Added
 * Added CSC format support to `rocsparse_spsv` and `rocsparse_sptrsv`.
+* Added CSC format support to `rocsparse_spsm` and `rocsparse_sptrsm`.
 
 ## rocSPARSE 4.7.0 for ROCm 7.14
 
