@@ -20,9 +20,6 @@
 // OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 // SOFTWARE.
 
-// CUB's implementation of single_pass_scan_operators has maybe uninitialized parameters,
-// disable the warning because all warnings are threated as errors:
-
 #include "benchmark_utils.hpp"
 
 #include <hipcub/device/device_for.hpp>
