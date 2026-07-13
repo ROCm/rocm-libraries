@@ -229,51 +229,28 @@ struct WaveWiseMmaPipeline : public MmaPipelineBase<WaveWiseMmaPipeline<ADataTyp
     template <typename... Params, typename ATensor, typename BTensor, typename CTensor>
     CK_TILE_DEVICE static void execImpl(ATensor& a, BTensor& b, CTensor& c)
     {
-        // Thread_buffer types allow us to select the ext_vectors for individual MmaOp calls.
-        using AThreadBufType = thread_buffer<typename MmaOp::AVecType, FragsM * FragsK>;
-        using BThreadBufType = thread_buffer<typename MmaOp::BVecType, FragsN * FragsK>;
-        using CThreadBufType = thread_buffer<typename MmaOp::CVecType, FragsM * FragsN>;
+        using ACombinedVec = ext_vector_t<ADataType, ATensor::get_thread_buffer_size()>;
+        using BCombinedVec = ext_vector_t<BDataType, BTensor::get_thread_buffer_size()>;
+        using CCombinedVec = ext_vector_t<CDataType, CTensor::get_thread_buffer_size()>;
+        using AThreadBufType = thread_buffer<typename MmaOp::AVecType, FragsK>;
+        using BThreadBufType = thread_buffer<typename MmaOp::BVecType, FragsK>;
 
-        auto& a_buf = reinterpret_cast<const AThreadBufType&>(a);
-        auto& b_buf = reinterpret_cast<const BThreadBufType&>(b);
-        auto& c_buf = reinterpret_cast<CThreadBufType&>(c);
+        constexpr auto I0 = number<0>{};
 
-        if constexpr(AccumPolicy == MmaAccumPolicy::ROW_MAJOR)
+        const auto a_vec = a.get_thread_buffer().template get_as<ACombinedVec>()[I0];
+        const auto b_vec = b.get_thread_buffer().template get_as<BCombinedVec>()[I0];
+        auto c_vec       = c.get_thread_buffer().template get_as<CCombinedVec>()[I0];
+
+        const auto& a_buf = reinterpret_cast<const AThreadBufType&>(a_vec);
+        const auto& b_buf = reinterpret_cast<const BThreadBufType&>(b_vec);
+        auto& c_frag       = reinterpret_cast<typename MmaOp::CVecType&>(c_vec);
+
+        for(uint32_t bk = 0u; bk < FragsK; ++bk)
         {
-            for(uint32_t bm = 0u; bm < FragsM; ++bm)
-            {
-                for(uint32_t bn = 0u; bn < FragsN; ++bn)
-                {
-                    for(uint32_t bk = 0u; bk < FragsK; ++bk)
-                    {
-                        c_buf.at(bm * FragsN + bn) =
-                            MmaOp::template exec<Params...>(a_buf.at(bm * FragsK + bk),
-                                                            b_buf.at(bn * FragsK + bk),
-                                                            c_buf.at(bm * FragsN + bn));
-                    }
-                }
-            }
+            c_frag = MmaOp::template exec<Params...>(a_buf.at(bk), b_buf.at(bk), c_frag);
         }
-        else if constexpr(AccumPolicy == MmaAccumPolicy::COL_MAJOR)
-        {
-            for(uint32_t bn = 0u; bn < FragsN; ++bn)
-            {
-                for(uint32_t bm = 0u; bm < FragsM; ++bm)
-                {
-                    for(uint32_t bk = 0u; bk < FragsK; ++bk)
-                    {
-                        c_buf.at(bm * FragsN + bn) =
-                            MmaOp::template exec<Params...>(a_buf.at(bm * FragsK + bk),
-                                                            b_buf.at(bn * FragsK + bk),
-                                                            c_buf.at(bm * FragsN + bn));
-                    }
-                }
-            }
-        }
-        else
-        {
-            static_assert(false, "Invalid accumulation policy");
-        }
+
+        c.get_thread_buffer().template set_as<CCombinedVec>(I0, c_vec);
     }
 };
 
