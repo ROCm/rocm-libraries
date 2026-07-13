@@ -760,7 +760,7 @@ def avoidRegressions(originalDir, incrementalDir, outputPath, forceMerge, noEff=
         incAccessor = createAccessor(incData)
 
         # Check if this architecture should use dict-based processing
-        useDictBased = isDictBasedArchitecture(oriData) or isDictBasedArchitecture(incData)
+        useDictBased = oriAccessor.isDict and incAccessor.isDict
 
         # Terminate when the destination folder doesn't match Incremental logic yaml
         compareDestFolderToYaml(originalDir, incFile, incAccessor)
@@ -770,9 +770,12 @@ def avoidRegressions(originalDir, incrementalDir, outputPath, forceMerge, noEff=
 
         if useDictBased:
             # Dict-based architecture: additional dict-specific processing
-            origDefaultValues = deepcopy(oriAccessor.getDefaultSolution())
-            incDefaultValues = deepcopy(incAccessor.getDefaultSolution())
-            syncDefaultParams(oriData, origDefaultValues, incDefaultValues)
+            if oriAccessor.hasDefaultSolution() and incAccessor.hasDefaultSolution():
+                syncDefaultParams(
+                    oriData,
+                    deepcopy(oriAccessor.getDefaultSolution()),
+                    deepcopy(incAccessor.getDefaultSolution()),
+                )
 
         sanitizeSolutions(oriAccessor)
         sanitizeSolutions(incAccessor)
@@ -794,7 +797,7 @@ def avoidRegressions(originalDir, incrementalDir, outputPath, forceMerge, noEff=
         if useDictBased:
             # Dict-based architecture: dict-specific post-processing
             mergedData["MinimumRequiredVersion"] = f"{__version__}"
-            mergedData["DefaultSolution"] = incAccessor.getDefaultSolution()
+            mergedData["DefaultSolution"] = deepcopy(incAccessor.getDefaultSolution())
 
             msg(stats[0], "size(s) and", stats[1], "solution(s) added,", stats[2], "solution(s) removed.",
                 len(mergedAccessor.getExactLogic()), "sizes and", len(mergedAccessor.getSolutions()), "solutions")
