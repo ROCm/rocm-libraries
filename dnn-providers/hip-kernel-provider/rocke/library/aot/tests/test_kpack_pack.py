@@ -210,7 +210,7 @@ def test_manifest_validates_and_carries_sidecar_fields_unchanged(tmp_path):
     manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
 
     validate_json_schema(manifest, schema, schema_path=schema_path)
-    assert manifest["schema"] == "hipdnn.rocke.bundle/v1"
+    assert manifest["schema"] == "rocke.aot.bundle/v1"
     assert manifest["producer"] == "rocKE"
     assert manifest["engine_build_id"] == "test-build-id"
     assert manifest["llvm_flavor"] == "llvm22"
@@ -337,7 +337,7 @@ def test_main_cli_success_and_error_paths(tmp_path, capsys):
 def test_manifest_missing_field_fails_schema_validation(tmp_path):
     schema, schema_path = _bundle_schema()
     bad = {
-        "schema": "hipdnn.rocke.bundle/v1",
+        "schema": "rocke.aot.bundle/v1",
         "producer": "rocKE",
         "engine_build_id": "id",
         "llvm_flavor": "llvm20",

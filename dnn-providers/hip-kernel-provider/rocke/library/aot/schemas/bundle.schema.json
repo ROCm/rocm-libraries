@@ -1,6 +1,6 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "$id": "hipdnn.rocke.bundle/v1",
+  "$id": "rocke.aot.bundle/v1",
   "title": "hipDNN rocKE per-arch AOT bundle manifest",
   "description": "Per-architecture sidecar manifest aggregating the rocke.aot.sidecar/v1 sidecars packed into one .kpack. The kpack C runtime is byte-oriented, so this manifest is the selection/launch index; selection, launch, and args_signature are carried through unchanged from the per-instance sidecars.",
   "type": "object",
@@ -16,7 +16,7 @@
   ],
   "properties": {
     "schema": {
-      "const": "hipdnn.rocke.bundle/v1"
+      "const": "rocke.aot.bundle/v1"
     },
     "producer": {
       "const": "rocKE"

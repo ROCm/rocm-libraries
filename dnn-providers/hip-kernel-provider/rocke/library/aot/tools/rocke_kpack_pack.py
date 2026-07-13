@@ -11,7 +11,7 @@ Runs after ``rocke_aot_build.py`` has produced the loose per-instance HSACO and
 2. Verifies every HSACO's SHA256 matches its sidecar ``artifact.hsaco_sha256``.
 3. Packs each HSACO into one ``rocke_client_<arch>.kpack`` under a deterministic
    ``toc_key`` (``rocke/<op>/<family>/<name>``; Plan 3's loader recomputes it).
-4. Emits a ``hipdnn.rocke.bundle/v1`` manifest aggregating the sidecars (single
+4. Emits a ``rocke.aot.bundle/v1`` manifest aggregating the sidecars (single
    source of truth: ``selection``/``launch``/``args_signature`` are carried
    through unchanged) and validates it against ``bundle.schema.json``.
 
@@ -34,7 +34,7 @@ from typing import Any, Sequence
 from rocke_client_aot.instance_schema import AOT_LIST_FILENAME
 from rocke_client_aot.json_schema import load_json_schema, validate_json_schema
 
-BUNDLE_SCHEMA = "hipdnn.rocke.bundle/v1"
+BUNDLE_SCHEMA = "rocke.aot.bundle/v1"
 PRODUCER = "rocKE"
 GROUP_NAME = "rocke_client"
 _DEFAULT_LLVM_FLAVOR = "llvm20"
