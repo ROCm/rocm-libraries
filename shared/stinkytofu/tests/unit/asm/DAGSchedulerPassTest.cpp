@@ -95,6 +95,22 @@ class DAGSchedulerPassTest : public ::testing::Test {
         pass->run(*func, ctx, am);
     }
 
+    // Run with the ds_read in-flight credit-pool throttle enabled. perWmma is held
+    // generously high by default so the separate per-WMMA-window ds cap never binds,
+    // isolating queueDepth/drainLatency as the only active constraint (mirrors how
+    // runPassWithGlobalReadThrottle isolates globalReadQueueDepth/globalReadDrainLatency).
+    void runPassWithDsReadThrottle(int queueDepth, int drainLatency, int perWmma = 100) {
+        PassContext ctx;
+        ctx.setGemmTileConfig(config);
+        PassFeatureConfig pfc;
+        pfc.loopConfig.unrollGemm = true;
+        pfc.dagFeatures.dsReadQueueDepth = queueDepth;
+        pfc.dagFeatures.dsReadDrainLatency = drainLatency;
+        pfc.dagFeatures.dsReadPerWmma = perWmma;
+        ctx.setPassFeatureConfig(pfc);
+        pass->run(*func, ctx, am);
+    }
+
     // Linearized mnemonic order of a block (skips PHIs and non-Stinky IR).
     static std::vector<std::string> mnemonicSequence(const BasicBlock& block) {
         std::vector<std::string> seq;
@@ -113,6 +129,21 @@ class DAGSchedulerPassTest : public ::testing::Test {
         int run = 0, best = 0;
         for (const std::string& m : seq) {
             if (m == "tensor_load_to_lds") {
+                run++;
+                best = std::max(best, run);
+            } else {
+                run = 0;
+            }
+        }
+        return best;
+    }
+
+    // Largest run of consecutive ds_load_b128 in a mnemonic sequence
+    // (gfx1250's actual mnemonic for this op; see Gfx1250Instructions.def).
+    static int maxConsecutiveDsReads(const std::vector<std::string>& seq) {
+        int run = 0, best = 0;
+        for (const std::string& m : seq) {
+            if (m == "ds_load_b128") {
                 run++;
                 best = std::max(best, run);
             } else {
@@ -468,4 +499,77 @@ TEST_F(DAGSchedulerPassTest, GlobalReadThrottle_Disabled_PreservesAll) {
     int beforeCount = countStinkyInstructions(*body);
     runPassWithGlobalReadThrottle(/*depth=*/0, /*drainLatency=*/0);
     EXPECT_EQ(countStinkyInstructions(*body), beforeCount);
+}
+
+// ---------------------------------------------------------------------------
+// dsReadQueueDepth / dsReadDrainLatency / dsReadPerWmma: same in-flight
+// credit-pool mechanism as globalReadQueueDepth/globalReadDrainLatency, but
+// gating ds_read_b128 instead of tensor_load_to_lds. Unlike global-read
+// throttling, the ds_read gate additionally requires a WMMA to have been
+// picked at least once (it seeds maxDsPerWmmaWindow_), so each test below
+// includes one WMMA read (with dest/src registers disjoint from the ds_reads,
+// so its DS-latency gate is trivially satisfied and it issues first).
+// ---------------------------------------------------------------------------
+
+// Depth 2: exactly 2 ds_reads issue back-to-back, then VALU must interleave.
+TEST_F(DAGSchedulerPassTest, DsReadThrottle_Depth2_RespectsQueueDepth) {
+    BasicBlock* body = bb;
+    body->addSuccessor(body);
+    createWmmaF32_16x16x16_bf16_in(body, /*destStart=*/200, /*src0Start=*/204);
+    for (int i = 0; i < 4; i++)
+        createMovableDsLoad(/*destReg=*/i * 4, /*addrReg=*/300 + i * 4, /*ldsToken=*/i + 1);
+    for (int i = 0; i < 30; i++) createVAddInBlock(body, arch, 40 + i, 80 + i, 100 + i);
+
+    runPassWithDsReadThrottle(/*queueDepth=*/2, /*drainLatency=*/8);
+
+    std::vector<std::string> seq = mnemonicSequence(*body);
+    EXPECT_EQ(maxConsecutiveDsReads(seq), 2)
+        << "depth=2: at most 2 ds_reads in flight before an interleave is forced";
+}
+
+// Depth 1: degenerate cap — every ds_read must be separated by other work.
+TEST_F(DAGSchedulerPassTest, DsReadThrottle_Depth1_SeparatesEveryLoad) {
+    BasicBlock* body = bb;
+    body->addSuccessor(body);
+    createWmmaF32_16x16x16_bf16_in(body, /*destStart=*/200, /*src0Start=*/204);
+    for (int i = 0; i < 4; i++)
+        createMovableDsLoad(/*destReg=*/i * 4, /*addrReg=*/300 + i * 4, /*ldsToken=*/i + 1);
+    for (int i = 0; i < 30; i++) createVAddInBlock(body, arch, 40 + i, 80 + i, 100 + i);
+
+    runPassWithDsReadThrottle(/*queueDepth=*/1, /*drainLatency=*/8);
+
+    std::vector<std::string> seq = mnemonicSequence(*body);
+    EXPECT_EQ(maxConsecutiveDsReads(seq), 1) << "depth=1: no two ds_reads may be adjacent";
+}
+
+// dsReadPerWmma isolated: hold the credit pool generously large so it never
+// binds, leaving the per-WMMA-window cap (only one WMMA present) as the sole
+// active constraint.
+TEST_F(DAGSchedulerPassTest, DsReadThrottle_PerWmmaCap_RespectsCap) {
+    BasicBlock* body = bb;
+    body->addSuccessor(body);
+    createWmmaF32_16x16x16_bf16_in(body, /*destStart=*/200, /*src0Start=*/204);
+    for (int i = 0; i < 4; i++)
+        createMovableDsLoad(/*destReg=*/i * 4, /*addrReg=*/300 + i * 4, /*ldsToken=*/i + 1);
+    for (int i = 0; i < 30; i++) createVAddInBlock(body, arch, 40 + i, 80 + i, 100 + i);
+
+    runPassWithDsReadThrottle(/*queueDepth=*/100, /*drainLatency=*/8, /*perWmma=*/2);
+
+    std::vector<std::string> seq = mnemonicSequence(*body);
+    EXPECT_EQ(maxConsecutiveDsReads(seq), 2)
+        << "dsReadPerWmma=2: at most 2 ds_reads per WMMA window with only one WMMA present";
+}
+
+// All instructions are preserved regardless of throttle (count invariant).
+TEST_F(DAGSchedulerPassTest, DsReadThrottle_PreservesInstructionCount) {
+    BasicBlock* body = bb;
+    body->addSuccessor(body);
+    createWmmaF32_16x16x16_bf16_in(body, /*destStart=*/200, /*src0Start=*/204);
+    for (int i = 0; i < 4; i++)
+        createMovableDsLoad(/*destReg=*/i * 4, /*addrReg=*/300 + i * 4, /*ldsToken=*/i + 1);
+    for (int i = 0; i < 30; i++) createVAddInBlock(body, arch, 40 + i, 80 + i, 100 + i);
+
+    int beforeCount = countStinkyInstructions(*body);
+    runPassWithDsReadThrottle(/*queueDepth=*/2, /*drainLatency=*/8);
+    EXPECT_EQ(countStinkyInstructions(*body), beforeCount) << "throttle must not drop instructions";
 }
