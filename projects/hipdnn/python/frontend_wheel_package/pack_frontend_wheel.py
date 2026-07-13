@@ -116,6 +116,14 @@ def preferred_extension_dirs(build_dir: Path) -> tuple[Path, ...]:
     )
 
 
+def raise_multiple_native_extensions(matches: list[Path]) -> None:
+    formatted = "\n".join(f"  - {path}" for path in matches)
+    raise SystemExit(
+        "Multiple native extensions found; pass --extension to select one:\n"
+        f"{formatted}"
+    )
+
+
 def find_native_extension(build_dir: Path) -> Path:
     for directory in preferred_extension_dirs(build_dir):
         if not directory.is_dir():
@@ -123,6 +131,8 @@ def find_native_extension(build_dir: Path) -> Path:
         matches = sorted(
             path for path in directory.iterdir() if is_native_extension(path)
         )
+        if len(matches) > 1:
+            raise_multiple_native_extensions(matches)
         if matches:
             return matches[0]
 
@@ -136,11 +146,7 @@ def find_native_extension(build_dir: Path) -> Path:
             "CMake project first."
         )
     if len(matches) > 1:
-        formatted = "\n".join(f"  - {path}" for path in matches)
-        raise SystemExit(
-            "Multiple native extensions found; pass --extension to select one:\n"
-            f"{formatted}"
-        )
+        raise_multiple_native_extensions(matches)
     return matches[0]
 
 
