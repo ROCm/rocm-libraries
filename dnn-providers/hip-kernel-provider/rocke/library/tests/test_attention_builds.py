@@ -1439,6 +1439,78 @@ class TestExtendedAttentionBuilds(unittest.TestCase):
         # 3 atomic accumulators (dQ, dK, dV) per K-step per head dim.
         self.assertGreaterEqual(ll.count("atomicrmw fadd ptr addrspace(1)"), 3)
 
+    def test_hstu_bwd_split_kernels_lower(self):
+        from kernels import HstuBwdSpec, build_hstu_attention_bwd
+
+        for which in ("dv", "dk", "dq"):
+            spec = HstuBwdSpec(
+                num_heads=8,
+                head_dim=32,
+                hidden_dim=32,
+                batch=8,
+                max_seq_len=16,
+                dtype="f16",
+                which=which,
+            )
+            ll = lower_kernel_to_llvm(build_hstu_attention_bwd(spec))
+            self.assertIn("@llvm.exp2.f32", ll)
+            self.assertIn("store half", ll)
+
+    def test_hstu_bwd_mfma_bodies_lower(self):
+        from kernels import (
+            HstuBwdSpec,
+            build_hstu_attention_bwd,
+            hstu_attention_bwd_grid,
+        )
+
+        for which in ("dv", "dk", "dq"):
+            spec = HstuBwdSpec(
+                num_heads=8,
+                head_dim=32,
+                hidden_dim=32,
+                batch=8,
+                max_seq_len=32,
+                dtype="f16",
+                which=which,
+                use_mfma_body=True,
+            )
+            ll = lower_kernel_to_llvm(build_hstu_attention_bwd(spec))
+            self.assertIn("llvm.amdgcn.mfma.f32.16x16x16f16", ll)
+            self.assertIn("@llvm.exp2.f32", ll)
+            self.assertEqual(hstu_attention_bwd_grid(spec), (4, 8, 8))
+
+    def test_hstu_bwd_tiled_bodies_lower(self):
+        from kernels import (
+            HstuBwdSpec,
+            build_hstu_attention_bwd,
+            hstu_attention_bwd_block_size,
+            hstu_attention_bwd_grid,
+        )
+
+        for which in ("dv", "dk", "dq"):
+            spec = HstuBwdSpec(
+                num_heads=4,
+                head_dim=128,
+                hidden_dim=128,
+                batch=8,
+                max_seq_len=512,
+                dtype="bf16",
+                which=which,
+                use_mfma_body=True,
+                block_m=64,
+                block_n=32,
+                num_waves=4,
+            )
+            self.assertTrue(spec.tiled)
+            ll = lower_kernel_to_llvm(build_hstu_attention_bwd(spec))
+            # Real MFMA GEMMs, exp2-based SiLU, and no scalar dot products.
+            self.assertIn("llvm.amdgcn.mfma.f32.16x16x16bf16", ll)
+            self.assertIn("@llvm.exp2.f32", ll)
+            self.assertNotIn("llvm.fmuladd.f32", ll)
+            # Multi-wave CTA (num_waves*64) and own-tile grid.
+            self.assertEqual(hstu_attention_bwd_block_size(spec), 256)
+            self.assertEqual(hstu_attention_bwd_grid(spec), (8, 4, 8))
+
     def test_fmha_fwd_fp8_emits_cvt_fp8_intrinsic(self):
         from kernels import FmhaFwdFp8Spec, build_fmha_fwd_fp8
 

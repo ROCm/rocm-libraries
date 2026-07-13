@@ -118,6 +118,14 @@ from .common.fmha_bwd import (  # noqa: F401
     fmha_bwd_signature,
     is_valid_spec as is_valid_fmha_bwd_spec,
 )
+from .common.hstu_attention_bwd import (  # noqa: F401
+    HstuBwdSpec,
+    build_hstu_attention_bwd,
+    hstu_attention_bwd_block_size,
+    hstu_attention_bwd_grid,
+    hstu_attention_bwd_signature,
+    is_valid_spec as is_valid_hstu_attention_bwd_spec,
+)
 from .common.fmha_fwd_fp8 import (  # noqa: F401
     FmhaFwdFp8Spec,
     build_fmha_fwd_fp8,
