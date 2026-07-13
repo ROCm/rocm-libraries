@@ -36,6 +36,7 @@ struct WarpGemmAsymKernel
 
     __device__ void operator()(void* A, void* B, void* C) const
     {
+        static constexpr bool UsePackedNumAccess = (NAA != NAB);
         using WarpGemm = WarpGemmDispatcher<AType,
                                             BType,
                                             float,
@@ -46,7 +47,9 @@ struct WarpGemmAsymKernel
                                             /*SwizzleA=*/false,
                                             /*USS=*/false,
                                             NAA,
-                                            NAB>;
+                                            NAB,
+                                            /*IsScale16=*/false,
+                                            UsePackedNumAccess>;
 
         const auto a_view =
             make_naive_tensor_view<address_space_enum::global>(static_cast<AType*>(A),
