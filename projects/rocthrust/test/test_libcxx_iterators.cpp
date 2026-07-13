@@ -100,6 +100,33 @@ TEST(LibcxxIteratorTests, TestLibcxxStridedIterator)
   }
 }
 
+struct is_equal_index
+{
+  THRUST_HOST_DEVICE constexpr void
+  operator()([[maybe_unused]] const int index, [[maybe_unused]] const int expected) const noexcept
+  {
+    _CCCL_VERIFY(index == expected, "should have right value");
+  }
+};
+
+TEST(LibcxxIteratorTests, TestLibcxxTabulateOutputIterator)
+{
+  { // device system
+    thrust::device_vector<int> vec{5, 6, 7, 8, 9};
+    thrust::copy(vec.begin(), vec.end(), _THRUST_LIBCXX::make_tabulate_output_iterator(is_equal_index{}, 5));
+  }
+
+  { // host system
+    thrust::host_vector<int> vec{5, 6, 7, 8, 9};
+    thrust::copy(vec.begin(), vec.end(), _THRUST_LIBCXX::make_tabulate_output_iterator(is_equal_index{}, 5));
+  }
+
+  { // plain std::vector
+    std::vector<int> vec{5, 6, 7, 8, 9};
+    thrust::copy(vec.begin(), vec.end(), _THRUST_LIBCXX::make_tabulate_output_iterator(is_equal_index{}, 5));
+  }
+}
+
 struct plus_one
 {
   [[nodiscard]] THRUST_HOST_DEVICE constexpr int operator()(const int val) const noexcept
