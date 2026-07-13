@@ -1331,17 +1331,17 @@ struct amdgcn_mma<fp8_t, fp8_t, fp32_t, 32u, 32u, 16u, CompilerTarget, MmaOpFami
     }
 };
 
-// Custom version fp8xfp8 16x16x16 (complete dummy) for gfx908 and gfx90a with WMMA layout params.
+// Custom version bf8xfp8 16x16x16 (complete dummy) with WMMA layout params for *any* gfx9 target.
 template <typename CompilerTarget>
 // clang-format off
 //               |A B C DataTypes     |MNK           |
-struct amdgcn_mma<fp8_t, fp8_t, fp32_t, 16u, 16u, 16u, CompilerTarget, MmaOpFamily::DENSE, enable_if_target_id_t<CompilerTarget, amdgcn_target_id::GFX908, amdgcn_target_id::GFX90A>>
+struct amdgcn_mma<fp8_t, fp8_t, fp32_t, 16u, 16u, 16u, CompilerTarget, MmaOpFamily::DENSE, enable_if_target_family_gfx9_t<CompilerTarget>>
 //                                                   |WS  |AParams |BPar |CPar |
 : amdgcn_mma_base<fp8_t, fp8_t, fp32_t, 16u, 16u, 16u, 32u, 8, 1, 1, 1, 1, 8, 1, MfmaOp, MmaOpFamily::DENSE>
 // clang-format on
 {
     static constexpr const char* instruction_name =
-        "__builtin_amdgcn_wmma_f32_16x16x16_fp8_fp8_w32_gfx12_gfx908_gfx90a_dummy";
+        "__builtin_amdgcn_wmma_f32_16x16x16_fp8_fp8_w32_gfx12-like_gfx9_dummy";
 };
 
 // Custom version of fp8xbf8 16x16x32 using dummy exec for gfx908 and gfx90a.
@@ -1397,17 +1397,17 @@ struct amdgcn_mma<fp8_t, bf8_t, fp32_t, 32u, 32u, 16u, CompilerTarget, MmaOpFami
     }
 };
 
-// Custom version fp8xbf8 16x16x16 (complete dummy) for gfx908 and gfx90a with WMMA layout params.
+// Custom version bf8xfp8 16x16x16 (complete dummy) with WMMA layout params for *any* gfx9 target.
 template <typename CompilerTarget>
 // clang-format off
 //               |A B C DataTypes     |MNK           |
-struct amdgcn_mma<fp8_t, bf8_t, fp32_t, 16u, 16u, 16u, CompilerTarget, MmaOpFamily::DENSE, enable_if_target_id_t<CompilerTarget, amdgcn_target_id::GFX908, amdgcn_target_id::GFX90A>>
+struct amdgcn_mma<fp8_t, bf8_t, fp32_t, 16u, 16u, 16u, CompilerTarget, MmaOpFamily::DENSE, enable_if_target_family_gfx9_t<CompilerTarget>>
 //                                                   |WS  |AParams |BPar |CPar |
 : amdgcn_mma_base<fp8_t, bf8_t, fp32_t, 16u, 16u, 16u, 32u, 8, 1, 1, 1, 1, 8, 1, MfmaOp, MmaOpFamily::DENSE>
 // clang-format on
 {
     static constexpr const char* instruction_name =
-        "__builtin_amdgcn_wmma_f32_16x16x16_fp8_bf8_w32_gfx12_gfx908_gfx90a_dummy";
+        "__builtin_amdgcn_wmma_f32_16x16x16_fp8_bf8_w32_gfx12-like_gfx9_dummy";
 };
 
 // Custom version of bf8xfp8 16x16x32 using dummy exec for gfx908 and gfx90a.
@@ -1463,17 +1463,17 @@ struct amdgcn_mma<bf8_t, fp8_t, fp32_t, 32u, 32u, 16u, CompilerTarget, MmaOpFami
     }
 };
 
-// Custom version bf8xfp8 16x16x16 (complete dummy) for gfx908 and gfx90a with WMMA layout params.
+// Custom version bf8xfp8 16x16x16 (complete dummy) with WMMA layout params for *any* gfx9 target.
 template <typename CompilerTarget>
 // clang-format off
 //               |A B C DataTypes     |MNK           |
-struct amdgcn_mma<bf8_t, fp8_t, fp32_t, 16u, 16u, 16u, CompilerTarget, MmaOpFamily::DENSE, enable_if_target_id_t<CompilerTarget, amdgcn_target_id::GFX908, amdgcn_target_id::GFX90A>>
+struct amdgcn_mma<bf8_t, fp8_t, fp32_t, 16u, 16u, 16u, CompilerTarget, MmaOpFamily::DENSE, enable_if_target_family_gfx9_t<CompilerTarget>>
 //                                                   |WS  |AParams |BPar |CPar |
 : amdgcn_mma_base<bf8_t, fp8_t, fp32_t, 16u, 16u, 16u, 32u, 8, 1, 1, 1, 1, 8, 1, MfmaOp, MmaOpFamily::DENSE>
 // clang-format on
 {
     static constexpr const char* instruction_name =
-        "__builtin_amdgcn_wmma_f32_16x16x16_bf8_fp8_w32_gfx12_gfx908_gfx90a_dummy";
+        "__builtin_amdgcn_wmma_f32_16x16x16_bf8_fp8_w32_gfx12-like_gfx9_dummy";
 };
 
 // Custom version of bf8xbf8 16x16x32 using dummy exec for gfx908 and gfx90a.
@@ -1529,17 +1529,17 @@ struct amdgcn_mma<bf8_t, bf8_t, fp32_t, 32u, 32u, 16u, CompilerTarget, MmaOpFami
     }
 };
 
-// Custom version bf8xbf8 16x16x16 (complete dummy) for gfx908 and gfx90a with WMMA layout params.
+// Custom version bf8xfp8 16x16x16 (complete dummy) with WMMA layout params for *any* gfx9 target.
 template <typename CompilerTarget>
 // clang-format off
 //               |A B C DataTypes     |MNK           |
-struct amdgcn_mma<bf8_t, bf8_t, fp32_t, 16u, 16u, 16u, CompilerTarget, MmaOpFamily::DENSE, enable_if_target_id_t<CompilerTarget, amdgcn_target_id::GFX908, amdgcn_target_id::GFX90A>>
+struct amdgcn_mma<bf8_t, bf8_t, fp32_t, 16u, 16u, 16u, CompilerTarget, MmaOpFamily::DENSE, enable_if_target_family_gfx9_t<CompilerTarget>>
 //                                                   |WS  |AParams |BPar |CPar |
 : amdgcn_mma_base<bf8_t, bf8_t, fp32_t, 16u, 16u, 16u, 32u, 8, 1, 1, 1, 1, 8, 1, MfmaOp, MmaOpFamily::DENSE>
 // clang-format on
 {
     static constexpr const char* instruction_name =
-        "__builtin_amdgcn_wmma_f32_16x16x16_bf8_bf8_w32_gfx12_gfx908_gfx90a_dummy";
+        "__builtin_amdgcn_wmma_f32_16x16x16_bf8_bf8_w32_gfx12-like_gfx9_dummy";
 };
 
 template <typename CompilerTarget>
