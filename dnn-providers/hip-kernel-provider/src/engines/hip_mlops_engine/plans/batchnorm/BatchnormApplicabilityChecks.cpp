@@ -251,8 +251,13 @@ void BatchnormValidator::checkTensorShapesSupported(const std::vector<int64_t>& 
         {
             throw hipdnn_plugin_sdk::HipdnnPluginException(
                 HIPDNN_PLUGIN_STATUS_BAD_PARAM,
-                "Scale and bias tensors for batchnorm must have a shape that is broadcastable to "
-                "the IO tensor shape with matching channel dimension.");
+                "BatchNorm affine tensor shape "
+                    + hipdnn_data_sdk::utilities::vecToString(
+                        std::vector<int64_t>(tensorAttr.dims()->begin(), tensorAttr.dims()->end()))
+                    + " is incompatible with the IO tensor shape "
+                    + hipdnn_data_sdk::utilities::vecToString(ioDims)
+                    + ". The affine tensor shape must be broadcastable to the IO tensor shape with "
+                      "matching channel dimension.");
         }
     }
 
