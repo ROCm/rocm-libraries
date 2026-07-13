@@ -33,7 +33,7 @@ import math
 import sys
 import traceback
 from pathlib import Path
-from typing import Any
+from typing import Any, Optional
 
 from rocke.assets import shape_utils_dir
 
@@ -201,7 +201,7 @@ def _variant_flags(name: str, *, sliding_window: int, dtype: str, is_fp8: bool) 
 
 
 class CkVariantBench:
-    def __init__(self, *, compile_backend: str = "llvm", num_sms: int = 256):
+    def __init__(self, *, compile_backend: Optional[str] = None, num_sms: int = 256):
         self.compile_backend = compile_backend
         self.num_sms = num_sms
         self._launchers: dict[tuple, Any] = {}
@@ -433,6 +433,15 @@ def main() -> int:
     # cap=8192 vs 1.11x at cap=65536.
     ap.add_argument("--cap-blocks", type=int, default=65536)
     ap.add_argument("--num-sms", type=int, default=256)
+    ap.add_argument(
+        "--compile-backend",
+        choices=("auto", "llvm", "hipcc"),
+        default="auto",
+        help="Compile backend for the prod lane. 'auto' (default) matches "
+        "production dispatch (_select_2d_compile_backend); 'llvm'/'hipcc' force "
+        "a backend for A/B. Forcing 'llvm' mismeasures cohorts whose production "
+        "backend is hipcc (e.g. D256 large prefill) by ~3x.",
+    )
     ap.add_argument("--tol", type=float, default=5e-2)
     ap.add_argument("--shape-utils-path", type=Path, default=DEFAULT_SHAPE_UTILS)
     ap.add_argument(
@@ -463,7 +472,8 @@ def main() -> int:
     print(f"device: {torch.cuda.get_device_name(0)}")
     print(f"shapes: {len(shapes)}  variants: {args.variants}")
 
-    bench = CkVariantBench(num_sms=args.num_sms)
+    _cb = None if args.compile_backend == "auto" else args.compile_backend
+    bench = CkVariantBench(num_sms=args.num_sms, compile_backend=_cb)
     results = []
     for i, shape in enumerate(shapes, 1):
         sw = shape.window_size[0] + 1 if shape.window_size[0] >= 0 else 0
