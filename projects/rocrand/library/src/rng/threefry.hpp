@@ -162,6 +162,9 @@ struct generate_threefry
         // Save multiple values as one vec_type
         vec_type* vec_data = reinterpret_cast<vec_type*>(data + misalignment);
         size_t    index    = thread_id;
+#ifdef __HIP_DEVICE_COMPILE__
+        __syncthreads();
+#endif
         while(index < vec_n)
         {
             const auto                                            v = engine.next_leap(stride);

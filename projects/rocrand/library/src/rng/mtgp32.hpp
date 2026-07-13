@@ -290,6 +290,9 @@ struct generate_mtgp
         const size_t vec_n_up        = remainder_value == 0 ? vec_n_down : (vec_n_down + BlockSize);
 
         vec_type* vec_data = reinterpret_cast<vec_type*>(data + misalignment);
+#ifdef __HIP_DEVICE_COMPILE__
+        __syncthreads();
+#endif
         // Generate and store all aligned vector multiples
         while(index < vec_n_down)
         {

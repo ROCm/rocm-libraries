@@ -205,7 +205,9 @@ struct generate_sobol_host
         Engine             engine        = create_engine<Scrambled, Engine>(vectors_ptr,
                                                          scramble_constant,
                                                          offset + engine_offset);
-
+#ifdef __HIP_DEVICE_COMPILE__
+        __syncthreads();
+#endif
         while(index < n)
         {
             data[index] = distribution(engine.current());
@@ -239,6 +241,9 @@ struct generate_sobol_host
         }
 
         vec_type* vec_data = reinterpret_cast<vec_type*>(data + misalignment);
+#ifdef __HIP_DEVICE_COMPILE__
+        __syncthreads();
+#endif
         while(index < vec_n)
         {
             Engine engine_copy = engine;
