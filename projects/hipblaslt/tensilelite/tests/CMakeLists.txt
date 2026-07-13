@@ -102,8 +102,9 @@ function(add_cpu_gemm_test TEST_NAME)
 endfunction()
 
 # Default test sizes. Non-tile-aligned to stress remainder handling.
-# f32 and f16/bf16 use different sizes to increase coverage diversity.
+# f32, f64, and f16/bf16 use different sizes to increase coverage diversity.
 set(F32_SIZES -M 133 -N 147 -K 165)
+set(F64_SIZES -M 137 -N 149 -K 163)
 set(F16_SIZES -M 131 -N 141 -K 151)
 set(ADDITIONAL_SIZES -M 102 -N 103 -K 105)
 
@@ -313,24 +314,24 @@ foreach(PATH fast slow)
     foreach(TRANS NN TN NT TT)
         get_trans_flags(${TRANS} TFLAGS)
         add_cpu_gemm_test(${PATH}_f64_${TRANS}
-            ARGS ${F32_SIZES} ${TFLAGS} --type f64 --validate ${PATH_FLAGS}
+            ARGS ${F64_SIZES} ${TFLAGS} --type f64 --validate ${PATH_FLAGS}
         )
     endforeach()
     add_cpu_gemm_test(${PATH}_f64_Beta
-        ARGS ${F32_SIZES} --type f64 --beta 1.0 --validate ${PATH_FLAGS}
+        ARGS ${F64_SIZES} --type f64 --beta 1.0 --validate ${PATH_FLAGS}
     )
     add_cpu_gemm_test(${PATH}_f64_Bias
-        ARGS ${F32_SIZES} --type f64 --validate --bias ${PATH_FLAGS}
+        ARGS ${F64_SIZES} --type f64 --validate --bias ${PATH_FLAGS}
     )
     add_cpu_gemm_test(${PATH}_f64_AllFeatures
-        ARGS ${F32_SIZES} --type f64 --validate --bias --activation relu --scaleAlphaVec ${PATH_FLAGS}
+        ARGS ${F64_SIZES} --type f64 --validate --bias --activation relu --scaleAlphaVec ${PATH_FLAGS}
     )
     add_cpu_gemm_test(${PATH}_f64_TN_AllFeatures
-        ARGS ${F32_SIZES} --transA --type f64 --validate --bias --activation relu --scaleAlphaVec ${PATH_FLAGS}
+        ARGS ${F64_SIZES} --transA --type f64 --validate --bias --activation relu --scaleAlphaVec ${PATH_FLAGS}
     )
     foreach(MODE Scalar Vector)
         add_cpu_gemm_test(${PATH}_f64_ScaleAB_${MODE}
-            ARGS ${F32_SIZES} --type f64 --validate --useScaleAB ${MODE} ${PATH_FLAGS}
+            ARGS ${F64_SIZES} --type f64 --validate --useScaleAB ${MODE} ${PATH_FLAGS}
         )
     endforeach()
 endforeach()
