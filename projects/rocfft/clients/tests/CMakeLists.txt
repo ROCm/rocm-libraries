@@ -1,5 +1,5 @@
 # #############################################################################
-# Copyright (C) 2016 - 2025 Advanced Micro Devices, Inc. All rights reserved.
+# Copyright (C) 2016 - 2026 Advanced Micro Devices, Inc. All rights reserved.
 #
 # Permission is hereby granted, free of charge, to any person obtaining a copy
 # of this software and associated documentation files (the "Software"), to deal
@@ -115,7 +115,6 @@ else()
 endif()
 
 add_executable( rocfft-test ${rocfft-test_source} ${rocfft-test_includes} )
-add_executable( rtc_helper_crash rtc_helper_crash.cpp )
 
 if( NOT ROCFFT_ENABLE_C_API_COMPILE_TEST )
   target_compile_definitions( rocfft-test PRIVATE SKIP_ROCFFT_C_TEST )
@@ -415,13 +414,6 @@ set_target_properties(rocfft-test
                       PROPERTIES 
                       RUNTIME_OUTPUT_DIRECTORY 
                       ${TESTS_OUT_DIR})
-set_target_properties(rtc_helper_crash
-                      PROPERTIES 
-                      RUNTIME_OUTPUT_DIRECTORY 
-                      ${TESTS_OUT_DIR})
-
-
-rocm_install(TARGETS rocfft-test rtc_helper_crash COMPONENT tests)
 
 #Ctest based Test Filter Standardization using test_categories.yaml
 
