@@ -1230,14 +1230,10 @@ namespace Tensile
         template <>
         inline Float8 DataInitialization::getValue<Float8, InitMode::BadOutput>()
         {
-            // OCP E4M3 (gfx950) has no infinity, so casting +inf yields NaN and
-            // isBadOutput<Float8> would never recognise the sentinel. Use NaN as the
-            // guard band on OCP; keep Inf on FNUZ (gfx942) so it stays unchanged.
-            // (get_hip_f8_bias_mode() is true for FNUZ/optimal, false for OCP/IEEE.)
-            if(!get_hip_f8_bias_mode())
-                return getValue<Float8, InitMode::NaN>();
-            else
-                return getValue<Float8, InitMode::Inf>();
+            // OCP E4M3 (gfx950) has no infinity; use NaN as the guard band. On FNUZ
+            // (gfx942) NaN and Inf share the same bit pattern (0x80), so this is
+            // byte-for-byte unchanged there. isBadOutput<Float8> matches with isnan.
+            return getValue<Float8, InitMode::NaN>();
         }
 
         // BFloat8
@@ -1536,13 +1532,9 @@ namespace Tensile
         template <>
         inline bool DataInitialization::isBadOutput<Float8>(Float8 value)
         {
-            // Match the sentinel chosen in getValue<Float8, BadOutput>: OCP E4M3
-            // has no infinity so the guard band is NaN (check isnan); FNUZ (gfx942)
-            // keeps the Inf sentinel (check isinf) and is therefore unchanged.
-            if(!get_hip_f8_bias_mode())
-                return std::isnan(value);
-            else
-                return std::isinf(value);
+            // Matches the NaN guard band from getValue<Float8, BadOutput>. On FNUZ
+            // (gfx942) NaN and Inf are the same bit pattern, so this is unchanged there.
+            return std::isnan(value);
         }
 
         template <>
