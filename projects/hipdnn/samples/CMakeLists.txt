@@ -108,13 +108,6 @@ endif()
 
 add_hipdnn_sample(hipdnn_sample_serialization_roundtrip serialization/SerializationRoundTrip.cpp)
 
-if(HIPDNN_ENABLE_CUDNN_COMPATIBILITY)
-    add_hipdnn_sample(
-        hipdnn_sample_cudnn_shim_single_tensor_round_trip
-        cudnn_shim/SingleTensorRoundTrip.cpp
-    )
-endif()
-
 if(HIPDNN_ENABLE_CUDNN_COMPATIBILITY AND HIPDNN_ENABLE_SDPA)
     add_hipdnn_sample(
         hipdnn_sample_cudnn_shim_sdpa_round_trip
@@ -187,10 +180,6 @@ add_hipdnn_sample_test(hipdnn_sample_fused_bn_inference_variance_activ)
 
 # Register serialization samples as tests
 add_hipdnn_sample_test(hipdnn_sample_serialization_roundtrip)
-
-if(HIPDNN_ENABLE_CUDNN_COMPATIBILITY)
-    add_hipdnn_sample_test(hipdnn_sample_cudnn_shim_single_tensor_round_trip)
-endif()
 
 if(HIPDNN_ENABLE_CUDNN_COMPATIBILITY AND HIPDNN_ENABLE_SDPA)
     add_hipdnn_sample_test(hipdnn_sample_cudnn_shim_sdpa_round_trip)

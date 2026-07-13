@@ -8,6 +8,8 @@
 
 #include <gtest/gtest.h>
 
+#include "CudnnShimTestSupport.hpp"
+
 #include <cstdint>
 #include <memory>
 #include <string>
@@ -27,6 +29,7 @@ static_assert(std::is_same_v<cudnn_frontend::graph::Tensor_attributes,
 namespace
 {
 namespace fe = hipdnn_frontend::compatibility::cudnn_frontend;
+using hipdnn_shim_test::makeTensor;
 
 TEST(TestCudnnShimGraph, DefaultConstructsAndValidatesEmptyGraph)
 {
@@ -49,46 +52,6 @@ TEST(TestCudnnShimGraph, InvalidOwnedTensorFailsValidate)
     auto error = graph.validate();
     EXPECT_TRUE(error.is_bad());
     EXPECT_EQ(error.get_code(), fe::error_code_t::INVALID_VALUE);
-}
-
-TEST(TestCudnnShimGraph, EmptyGraphSerializesAndDeserializes)
-{
-    fe::graph::Graph graph;
-    std::vector<uint8_t> data;
-
-    ASSERT_TRUE(graph.serialize(data).is_good());
-    EXPECT_FALSE(data.empty());
-
-    fe::graph::Graph roundTripped;
-    EXPECT_TRUE(roundTripped.deserialize(data).is_good());
-    EXPECT_TRUE(roundTripped.validate().is_good());
-    EXPECT_EQ(roundTripped.get_execution_plan_count(), 0);
-}
-
-TEST(TestCudnnShimGraph, SingleTensorSerializesAndDeserializes)
-{
-    fe::graph::Graph graph;
-    graph.tensor(fe::graph::Tensor_attributes{}
-                     .set_dim({1})
-                     .set_stride({1})
-                     .set_data_type(fe::DataType_t::FLOAT)
-                     .set_uid(1)
-                     .set_output(true));
-
-    std::vector<uint8_t> data;
-    ASSERT_TRUE(graph.serialize(data).is_good());
-
-    fe::graph::Graph roundTripped;
-    ASSERT_TRUE(roundTripped.deserialize(data).is_good());
-    EXPECT_TRUE(roundTripped.validate().is_good());
-
-    fe::graph::Tensor_attributes queried;
-    ASSERT_TRUE(roundTripped.query_tensor_attributes_of_uid(1, queried).is_good());
-    EXPECT_EQ(queried.get_uid(), 1);
-    EXPECT_EQ(queried.get_dim(), std::vector<int64_t>{1});
-    EXPECT_EQ(queried.get_stride(), std::vector<int64_t>{1});
-    EXPECT_EQ(queried.get_data_type(), fe::DataType_t::FLOAT);
-    EXPECT_FALSE(queried.get_is_virtual());
 }
 
 TEST(TestCudnnShimGraph, RecordedSetterErrorSurfacesOnValidate)
@@ -167,10 +130,12 @@ TEST(TestCudnnShimGraph, RequiredGraphSurfaceCompiles)
     EXPECT_EQ(workspaceSize, 0);
     EXPECT_EQ(graph.get_workspace_size(), 0);
 
+    // Serializing an operation-graph-less graph is unsupported now that the
+    // custom empty-graph blob format is gone; the calls must still compile.
     std::vector<uint8_t> data;
-    EXPECT_TRUE(graph.serialize(data).is_good());
-    EXPECT_TRUE(graph.deserialize(data).is_good());
-    EXPECT_TRUE(graph.deserialize(nullptr, data).is_good());
+    EXPECT_TRUE(graph.serialize(data).is_bad());
+    EXPECT_TRUE(graph.deserialize(data).is_bad());
+    EXPECT_TRUE(graph.deserialize(nullptr, data).is_bad());
 
     std::unordered_map<std::shared_ptr<fe::graph::Tensor_attributes>, void*> tensorMap;
     std::unordered_map<int64_t, void*> uidMap;
@@ -207,43 +172,6 @@ TEST(TestCudnnShimGraph, ExecuteOnEmptyGraphFails)
     EXPECT_TRUE(graph.execute(nullptr, uidMap, nullptr).is_bad());
 }
 
-TEST(TestCudnnShimGraph, ScalarValuesSerializeRoundTrip)
-{
-    // Exercises appendScalar/readScalar for every ScalarTag; the tag is written
-    // for all tensors but only the None path was covered before.
-    // Void lambda: ASSERT_ cannot live in a value-returning callable. The caller
-    // supplies the equality check so half/bfloat16 can compare bit patterns.
-    auto roundTrip = [](auto value, auto&& check) {
-        using T = decltype(value);
-        fe::graph::Graph graph;
-        graph.tensor(fe::graph::Tensor_attributes{value}.set_uid(42));
-
-        std::vector<uint8_t> data;
-        ASSERT_TRUE(graph.serialize(data).is_good());
-
-        fe::graph::Graph roundTripped;
-        ASSERT_TRUE(roundTripped.deserialize(data).is_good());
-
-        fe::graph::Tensor_attributes queried;
-        ASSERT_TRUE(roundTripped.query_tensor_attributes_of_uid(42, queried).is_good());
-        const auto got = queried.template get_pass_by_value<T>();
-        ASSERT_TRUE(got.has_value());
-        check(got.value());
-    };
-
-    roundTrip(double{3.5}, [](double got) { EXPECT_EQ(got, 3.5); });
-    roundTrip(float{1.25F}, [](float got) { EXPECT_EQ(got, 1.25F); });
-    roundTrip(uint8_t{7}, [](uint8_t got) { EXPECT_EQ(got, uint8_t{7}); });
-    roundTrip(int32_t{-123}, [](int32_t got) { EXPECT_EQ(got, -123); });
-    roundTrip(int64_t{1234567890123LL}, [](int64_t got) { EXPECT_EQ(got, 1234567890123LL); });
-    roundTrip(true, [](bool got) { EXPECT_TRUE(got); });
-    roundTrip(fe::graph::half{1.5F},
-              [](fe::graph::half got) { EXPECT_EQ(got.data, fe::graph::half{1.5F}.data); });
-    roundTrip(fe::graph::nv_bfloat16{2.5F}, [](fe::graph::nv_bfloat16 got) {
-        EXPECT_EQ(got.data, fe::graph::nv_bfloat16{2.5F}.data);
-    });
-}
-
 TEST(TestCudnnShimGraph, PoisonedGraphSurfacesRecordedErrorOnExecuteAndWorkspace)
 {
     // A setter that records an error must surface it ahead of the generic
@@ -261,5 +189,123 @@ TEST(TestCudnnShimGraph, PoisonedGraphSurfacesRecordedErrorOnExecuteAndWorkspace
     EXPECT_TRUE(wsError.is_bad());
     EXPECT_NE(wsError.get_message().find("SM count"), std::string::npos);
 }
+
+// Serialize contract: the custom empty-graph blob format is gone. An
+// operation-graph-less graph must refuse to serialize, with the exact message,
+// on the const overload...
+TEST(TestCudnnShimGraph, SerializeEmptyGraphConstIsUnsupported)
+{
+    const fe::graph::Graph graph;
+    std::vector<uint8_t> data;
+
+    auto error = graph.serialize(data);
+    ASSERT_TRUE(error.is_bad());
+    EXPECT_EQ(error.get_message(),
+              "Serializing a graph without a compiled operation graph is unsupported");
+    EXPECT_TRUE(data.empty());
+}
+
+// ...and on the non-const overload, which runs validate() first but still lands
+// on the same unsupported result for an empty graph.
+TEST(TestCudnnShimGraph, SerializeEmptyGraphNonConstIsUnsupported)
+{
+    fe::graph::Graph graph;
+    std::vector<uint8_t> data;
+
+    auto error = graph.serialize(data);
+    ASSERT_TRUE(error.is_bad());
+    EXPECT_EQ(error.get_message(),
+              "Serializing a graph without a compiled operation graph is unsupported");
+}
+
+// deserialize() of arbitrary bytes forwards to hipDNN; with no backend installed
+// it fails, but crucially NOT via the shim's serialize-unsupported path — proving
+// the old shim blob branch is gone and the call reaches the native graph.
+TEST(TestCudnnShimGraph, DeserializeArbitraryBytesForwardsToNative)
+{
+    fe::graph::Graph graph;
+    const std::vector<uint8_t> bytes{0x01, 0x02, 0x03, 0x04};
+
+    auto error = graph.deserialize(bytes);
+    ASSERT_TRUE(error.is_bad());
+    EXPECT_EQ(error.get_message().find("without a compiled operation graph"), std::string::npos);
+}
+
+// State machine (M4 fix): a fresh empty graph has no execution plan, so the
+// error_t& workspace query ERRORS before any build — it must NOT silently report
+// 0. After the empty-path build_operation_graph(), the query succeeds with ws==0.
+TEST(TestCudnnShimGraph, WorkspaceQueryErrorsBeforeBuildThenZeroAfter)
+{
+    fe::graph::Graph graph;
+
+    EXPECT_EQ(graph.get_execution_plan_count(), 0);
+
+    int64_t workspaceSize = -1;
+    auto preBuild = graph.get_workspace_size(workspaceSize);
+    ASSERT_TRUE(preBuild.is_bad());
+    EXPECT_NE(preBuild.get_message().find("no compiled execution plan"), std::string::npos);
+    EXPECT_EQ(workspaceSize, -1); // untouched on the error path
+
+    ASSERT_TRUE(graph.build_operation_graph(nullptr).is_good());
+
+    workspaceSize = -1;
+    auto postBuild = graph.get_workspace_size(workspaceSize);
+    EXPECT_TRUE(postBuild.is_good());
+    EXPECT_EQ(workspaceSize, 0);
+}
+
+// build_plan_at_index message split: on an empty/no-op-graph graph the guard is
+// "no compiled execution plan" (noExecutionPlanError), NOT "index is invalid" —
+// even for a non-zero index. The Native-graph "index is invalid" counterpart is
+// covered in TestCudnnShimGraphSDPA.
+TEST(TestCudnnShimGraph, BuildPlanAtIndexOnEmptyGraphReportsNoPlan)
+{
+    fe::graph::Graph graph;
+
+    auto zero = graph.build_plan_at_index(0);
+    ASSERT_TRUE(zero.is_bad());
+    EXPECT_NE(zero.get_message().find("no compiled execution plan"), std::string::npos);
+
+    auto nonZero = graph.build_plan_at_index(5);
+    ASSERT_TRUE(nonZero.is_bad());
+    EXPECT_NE(nonZero.get_message().find("no compiled execution plan"), std::string::npos);
+    EXPECT_EQ(nonZero.get_message().find("index is invalid"), std::string::npos);
+}
+
+// Deferred SM/device errors surface at validate() (extends the execute/workspace
+// coverage): set_sm_count and set_device_properties each poison the graph and the
+// SM/device message must appear from validate().
+TEST(TestCudnnShimGraph, ValidateSurfacesRecordedSmCountError)
+{
+    fe::graph::Graph graph;
+    graph.set_sm_count(1);
+
+    auto error = graph.validate();
+    ASSERT_TRUE(error.is_bad());
+    EXPECT_EQ(error.get_code(), fe::error_code_t::INVALID_VALUE);
+    EXPECT_NE(error.get_message().find("SM count"), std::string::npos);
+}
+
+TEST(TestCudnnShimGraph, ValidateSurfacesRecordedDevicePropertiesError)
+{
+    fe::graph::Graph graph;
+    graph.set_device_properties(nullptr);
+
+    auto error = graph.validate();
+    ASSERT_TRUE(error.is_bad());
+    EXPECT_EQ(error.get_code(), fe::error_code_t::INVALID_VALUE);
+    EXPECT_NE(error.get_message().find("Device properties"), std::string::npos);
+}
+
+// Gaps intentionally not tested host-only (documented, not faked):
+//  - mma_core_mode default (HALF when unset): the shim moves the attribute into
+//    the native graph where the packer consumes it; there is no host-observable
+//    getter and the mock fixture does not decode finalized SDPA descriptor
+//    attributes, so a test here would assert nothing.
+//  - native-deserialize plan-count (handle -> count 1, null handle -> count 0):
+//    reaching the is_good() branch needs a real native serialized blob plus the
+//    full backendGetAttribute graph-reconstruction mock; that path (and its
+//    resulting plan state) is exercised in TestGraph.cpp and is not cheaply
+//    reachable through the shim surface without duplicating that machinery.
 
 } // namespace

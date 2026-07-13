@@ -11,47 +11,21 @@
 
 #include <gtest/gtest.h>
 
+#include "CudnnShimTestSupport.hpp"
+#include "fake_backend/MockBackendFixture.hpp"
 #include "fake_backend/MockHipdnnBackend.hpp"
 
-#include <array>
 #include <cstdint>
 #include <memory>
 #include <string>
-#include <unordered_map>
 #include <vector>
 
 namespace
 {
 namespace fe = hipdnn_frontend::compatibility::cudnn_frontend;
+using hipdnn_shim_test::addForwardInputs;
+using hipdnn_shim_test::makeTensor;
 using ::testing::_;
-using ::testing::Return;
-
-std::shared_ptr<fe::graph::Tensor_attributes> makeTensor(fe::graph::Graph& graph,
-                                                         const std::vector<int64_t>& dim,
-                                                         const std::vector<int64_t>& stride,
-                                                         int64_t uid)
-{
-    return graph.tensor(fe::graph::Tensor_attributes{}
-                            .set_dim(dim)
-                            .set_stride(stride)
-                            .set_data_type(fe::DataType_t::FLOAT)
-                            .set_uid(uid));
-}
-
-// Fills q/k/v (BHSD) with the canonical shapes used by the native SDPA node
-// tests: batch 2, 8 heads, S_q 16, S_kv 32, head-dim 64.
-void addForwardInputs(fe::graph::Graph& graph,
-                      std::shared_ptr<fe::graph::Tensor_attributes>& q,
-                      std::shared_ptr<fe::graph::Tensor_attributes>& k,
-                      std::shared_ptr<fe::graph::Tensor_attributes>& v)
-{
-    graph.set_io_data_type(fe::DataType_t::FLOAT)
-        .set_compute_data_type(fe::DataType_t::FLOAT)
-        .set_intermediate_data_type(fe::DataType_t::FLOAT);
-    q = makeTensor(graph, {2, 8, 16, 64}, {8192, 1024, 64, 1}, 1);
-    k = makeTensor(graph, {2, 8, 32, 64}, {16384, 2048, 64, 1}, 2);
-    v = makeTensor(graph, {2, 8, 32, 64}, {16384, 2048, 64, 1}, 3);
-}
 
 TEST(TestCudnnShimGraphSDPA, ForwardConstructReturnsOutputNoStatsByDefault)
 {
@@ -194,40 +168,7 @@ TEST(TestCudnnShimGraphSDPA, BackwardDeterministicFalseIsIgnored)
 // path (reaches the backend). create_execution_plans/build_plans/execute and
 // native serialize are 1:1 forwards to hipdnn_frontend::graph::Graph, exhaustively
 // covered by TestGraph.cpp; not duplicated here.
-class TestCudnnShimGraphSDPABackend : public ::testing::Test
-{
-protected:
-    std::shared_ptr<::testing::NiceMock<Mock_hipdnn_backend>> _mockBackend;
-    cudnnHandle_t _handle = nullptr;
-    std::array<char, 256> _fakeDescs{};
-    size_t _nextFakeDescIdx = 0;
-
-    void SetUp() override
-    {
-        _mockBackend = std::make_shared<::testing::NiceMock<Mock_hipdnn_backend>>();
-        hipdnn_frontend::detail::IHipdnnBackend::setInstance(_mockBackend);
-        _handle = reinterpret_cast<cudnnHandle_t>(0x12345678);
-
-        _nextFakeDescIdx = 0;
-        ON_CALL(*_mockBackend, backendCreateDescriptor(_, _))
-            .WillByDefault([this](hipdnnBackendDescriptorType_t, hipdnnBackendDescriptor_t* desc) {
-                *desc = reinterpret_cast<hipdnnBackendDescriptor_t>(
-                    &_fakeDescs[_nextFakeDescIdx++ % _fakeDescs.size()]);
-                return HIPDNN_STATUS_SUCCESS;
-            });
-        ON_CALL(*_mockBackend, backendSetAttribute(_, _, _, _, _))
-            .WillByDefault(Return(HIPDNN_STATUS_SUCCESS));
-        ON_CALL(*_mockBackend, backendFinalize(_)).WillByDefault(Return(HIPDNN_STATUS_SUCCESS));
-        ON_CALL(*_mockBackend, backendDestroyDescriptor(_))
-            .WillByDefault(Return(HIPDNN_STATUS_SUCCESS));
-    }
-
-    void TearDown() override
-    {
-        hipdnn_frontend::detail::IHipdnnBackend::resetInstance();
-        _mockBackend.reset();
-    }
-};
+using TestCudnnShimGraphSDPABackend = hipdnn_shim_test::ShimMockBackendFixture;
 
 TEST_F(TestCudnnShimGraphSDPABackend, BuildOperationGraphReachesBackend)
 {
@@ -240,6 +181,103 @@ TEST_F(TestCudnnShimGraphSDPABackend, BuildOperationGraphReachesBackend)
 
     ASSERT_TRUE(graph.validate().is_good());
     EXPECT_TRUE(graph.build_operation_graph(_handle).is_good());
+}
+
+// ErrorRecorder first-error-wins: two unsupported backward setters are chained;
+// the FIRST recorded message is what surfaces at validate(). Asserting the
+// message (not just is_bad) is what distinguishes first-wins from last-wins.
+TEST(TestCudnnShimGraphSDPA, DeferredErrorFirstWinsScoreModBeforeSeqLen)
+{
+    fe::graph::Graph graph;
+    std::shared_ptr<fe::graph::Tensor_attributes> q, k, v;
+    addForwardInputs(graph, q, k, v);
+    auto o = makeTensor(graph, {2, 8, 16, 64}, {8192, 1024, 64, 1}, 4);
+    auto dO = makeTensor(graph, {2, 8, 16, 64}, {8192, 1024, 64, 1}, 5);
+    auto stats = makeTensor(graph, {2, 8, 16, 1}, {128, 16, 1, 1}, 6);
+
+    fe::graph::SDPA_backward_attributes attrs;
+    attrs
+        .set_score_mod([](std::shared_ptr<fe::graph::Graph>,
+                          std::shared_ptr<fe::graph::Tensor_attributes> t) { return t; })
+        .set_max_total_seq_len_q(128);
+    graph.sdpa_backward(q, k, v, o, dO, stats, attrs);
+
+    auto error = graph.validate();
+    ASSERT_TRUE(error.is_bad());
+    EXPECT_NE(error.get_message().find("score modifier"), std::string::npos);
+    EXPECT_EQ(error.get_message().find("max_total_seq_len_q"), std::string::npos);
+}
+
+// Same two setters in the opposite order: now the seq-len message wins, proving
+// the latch keys on call order rather than on which setter is "more severe".
+TEST(TestCudnnShimGraphSDPA, DeferredErrorFirstWinsSeqLenBeforeScoreMod)
+{
+    fe::graph::Graph graph;
+    std::shared_ptr<fe::graph::Tensor_attributes> q, k, v;
+    addForwardInputs(graph, q, k, v);
+    auto o = makeTensor(graph, {2, 8, 16, 64}, {8192, 1024, 64, 1}, 4);
+    auto dO = makeTensor(graph, {2, 8, 16, 64}, {8192, 1024, 64, 1}, 5);
+    auto stats = makeTensor(graph, {2, 8, 16, 1}, {128, 16, 1, 1}, 6);
+
+    fe::graph::SDPA_backward_attributes attrs;
+    attrs.set_max_total_seq_len_q(128).set_score_mod(
+        [](std::shared_ptr<fe::graph::Graph>, std::shared_ptr<fe::graph::Tensor_attributes> t) {
+            return t;
+        });
+    graph.sdpa_backward(q, k, v, o, dO, stats, attrs);
+
+    auto error = graph.validate();
+    ASSERT_TRUE(error.is_bad());
+    EXPECT_NE(error.get_message().find("max_total_seq_len_q"), std::string::npos);
+    EXPECT_EQ(error.get_message().find("score modifier"), std::string::npos);
+}
+
+// set_causal_mask(true) forwards a bare bool to hipDNN (the cuDNN compound
+// alignment/right-bound side effects are intentionally NOT replicated). A causal
+// graph must still validate — the mask is a first-class hipDNN attribute.
+TEST(TestCudnnShimGraphSDPA, CausalMaskGraphStillValidates)
+{
+    fe::graph::Graph graph;
+    std::shared_ptr<fe::graph::Tensor_attributes> q, k, v;
+    addForwardInputs(graph, q, k, v);
+
+    auto [o, stats] = graph.sdpa(q, k, v, fe::graph::SDPA_attributes{}.set_causal_mask(true));
+    ASSERT_NE(o, nullptr);
+    EXPECT_TRUE(graph.validate().is_good());
+}
+
+// State machine, Mode::Native branch of build_plan_at_index: a graph that HAS an
+// operation graph (an sdpa node makes it Native) rejects a non-zero index with
+// the "index is invalid" message — distinct from the no-op-graph message covered
+// host-only in TestCudnnShimGraph. The index!=0 guard runs before any backend
+// call, so this is reachable without a device.
+TEST(TestCudnnShimGraphSDPA, BuildPlanAtInvalidIndexOnNativeGraphReportsInvalidIndex)
+{
+    fe::graph::Graph graph;
+    std::shared_ptr<fe::graph::Tensor_attributes> q, k, v;
+    addForwardInputs(graph, q, k, v);
+    graph.sdpa(q, k, v, fe::graph::SDPA_attributes{}.set_name("Sdpa"));
+
+    auto error = graph.build_plan_at_index(5);
+    ASSERT_TRUE(error.is_bad());
+    EXPECT_NE(error.get_message().find("index is invalid"), std::string::npos);
+    EXPECT_EQ(error.get_message().find("no compiled execution plan"), std::string::npos);
+}
+
+// A native (sdpa) graph reports get_execution_plan_count() == 0 until plans are
+// created; merely having an operation graph does not manufacture a plan count.
+// Reaching count 1 needs create_execution_plans against a real heuristics backend
+// (exercised through the mock-backed lowering in TestGraph.cpp); asserting it here
+// would duplicate that layer, so the count==1 transition is intentionally left to
+// the backend-level suite.
+TEST(TestCudnnShimGraphSDPA, NativeGraphPlanCountZeroBeforePlansCreated)
+{
+    fe::graph::Graph graph;
+    std::shared_ptr<fe::graph::Tensor_attributes> q, k, v;
+    addForwardInputs(graph, q, k, v);
+    graph.sdpa(q, k, v, fe::graph::SDPA_attributes{}.set_name("Sdpa"));
+
+    EXPECT_EQ(graph.get_execution_plan_count(), 0);
 }
 
 } // namespace

@@ -16,37 +16,16 @@
  * re-exposing the cuDNN spelling (a residual composition wrapper).
  *
  * DIVERGENCE INVENTORY — every wrapper setter that is not a straight 1:1 forward
- * carries an in-code `SHIM-DIVERGENCE(<category>)` tag; grep for it to get the
- * full list. Categories: RENAME (same behavior, different name), SEMANTIC
- * (behavior remap), SPLIT (one cuDNN call → several hipDNN calls), MISSING (no
- * hipDNN equivalent; shim records an error or warns). Each is a candidate for
- * changing hipDNN's own frontend so the wrapper can collapse back to an alias —
- * that upstream change is deliberately NOT made here, only flagged.
+ * carries an in-code `SHIM-DIVERGENCE(<category>)` tag, which is the single
+ * source of truth; grep for it to get the full list. Categories: RENAME (same
+ * behavior, different name), SEMANTIC (behavior remap), SPLIT (one cuDNN call →
+ * several hipDNN calls), MISSING (no hipDNN equivalent; shim records an error or
+ * warns). Each is a candidate for changing hipDNN's own frontend so the wrapper
+ * can collapse back to an alias — that upstream change is deliberately NOT made
+ * here, only flagged.
  *
- * SDPA_attributes divergences:
- *   RENAME   set_attn_scale(float)          -> set_attn_scale_value(float)
- *   RENAME   set_logit_max                  -> set_max
- *   RENAME   set_score_sum_exp              -> set_sum_exp
- *   RENAME   set_paged_attention_k_table    -> set_page_table_k
- *   RENAME   set_paged_attention_v_table    -> set_page_table_v
- *   RENAME   set_sliding_window_length(int) -> set_diagonal_band_left_bound
- *   RENAME   _set_mma_core_mode             -> set_mma_core_mode
- *   SEMANTIC set_is_inference(bool)         -> set_generate_stats(!value) [deprecated]
- *   SPLIT    set_dropout(mask, scale)       -> set_dropout_mask + set_dropout_scale
- *   MISSING  set_score_mod                  -> (no hipDNN equivalent) record error
- *   MISSING  set_unfuse_fma                 -> (perf hint) warn + ignore
- *
- * SDPA_backward_attributes divergences:
- *   RENAME   set_attn_scale(float)          -> set_attn_scale_value(float)
- *   RENAME   set_sliding_window_length(int) -> set_diagonal_band_left_bound
- *   SPLIT    set_dropout(mask, scale, inv)  -> set_dropout_mask + _scale + _scale_inv
- *   MISSING  set_score_mod / _bprop         -> record error
- *   MISSING  set_max_total_seq_len_q/kv     -> record error
- *   MISSING  set_deterministic_algorithm    -> record error when true
- *   MISSING  set_rng_dump                   -> record error
- *   MISSING  set_sink_token / set_dsink_token -> record error
- *
- * @note Internal-to-shim; pulled in by the umbrella under HIPDNN_ENABLE_SDPA.
+ * @note Internal-to-shim; included unconditionally by `detail/graph_wrapper.h`,
+ * but the body compiles only under HIPDNN_ENABLE_SDPA.
  */
 
 #pragma once
@@ -60,6 +39,7 @@
 #include <hipdnn_compatibility/cudnn/cudnn_frontend/graph_helpers.h>
 #include <hipdnn_compatibility/cudnn/cudnn_frontend/graph_properties.h>
 #include <hipdnn_compatibility/cudnn/cudnn_frontend_utils.h>
+#include <hipdnn_compatibility/cudnn/detail/error_recorder.h>
 
 #ifdef HIPDNN_ENABLE_SDPA
 
@@ -78,7 +58,7 @@ class Graph; // completed in detail/graph_wrapper.h; friended for underlying-att
 using AttentionScoreModifier_t = std::function<std::shared_ptr<Tensor_attributes>(
     std::shared_ptr<Graph>, std::shared_ptr<Tensor_attributes>)>;
 
-class SDPA_attributes
+class SDPA_attributes : public ErrorRecorder<SDPA_attributes>
 {
 public:
     SDPA_attributes& set_name(const std::string& value)
@@ -180,6 +160,13 @@ public:
         return *this;
     }
 
+    // SHIM-DIVERGENCE(SEMANTIC): cuDNN's set_causal_mask(true) also forces
+    // diagonal_alignment=TOP_LEFT and diagonal_band_right_bound=0 as side effects;
+    // set_causal_mask_bottom_right(true) forces BOTTOM_RIGHT + right_bound=0. The
+    // shim forwards the bare bool to hipDNN, which emits causal_mask as its own
+    // first-class backend attribute (SdpaFwdPacker) and owns the mask translation
+    // internally, so the alignment/right-bound side effects are intentionally not
+    // replicated here — doing so would double-specify masking to the backend.
     SDPA_attributes& set_causal_mask(bool value)
     {
         _attrs.set_causal_mask(value);
@@ -303,7 +290,8 @@ public:
     SDPA_attributes& set_score_mod(AttentionScoreModifier_t value)
     {
         static_cast<void>(value);
-        return record("SDPA score modifier is unsupported by this shim");
+        return recordError(error_code_t::INVALID_VALUE,
+                           "SDPA score modifier is unsupported by this shim");
     }
 
     // SHIM-DIVERGENCE(MISSING): cuDNN FMA-unfuse perf hint; hipDNN has no such
@@ -318,20 +306,10 @@ public:
 private:
     friend class Graph;
 
-    SDPA_attributes& record(const char* message)
-    {
-        if(!_recordedError.has_value())
-        {
-            _recordedError = error_t{error_code_t::INVALID_VALUE, message};
-        }
-        return *this;
-    }
-
     hipdnn_frontend::graph::SdpaAttributes _attrs;
-    std::optional<error_t> _recordedError;
 };
 
-class SDPA_backward_attributes
+class SDPA_backward_attributes : public ErrorRecorder<SDPA_backward_attributes>
 {
 public:
     SDPA_backward_attributes& set_name(const std::string& value)
@@ -384,6 +362,9 @@ public:
         return *this;
     }
 
+    // SHIM-DIVERGENCE(SEMANTIC): see the forward set_causal_mask note — cuDNN's
+    // compound alignment/right-bound side effects are owned by hipDNN's backend
+    // translation and intentionally not replicated in the shim.
     SDPA_backward_attributes& set_causal_mask(bool value)
     {
         _attrs.set_causal_mask(value);
@@ -460,13 +441,17 @@ public:
     SDPA_backward_attributes& set_score_mod(AttentionScoreModifier_t value)
     {
         static_cast<void>(value);
-        return record("SDPA score modifier is unsupported by this shim");
+        return recordError(error_code_t::INVALID_VALUE,
+                           "SDPA score modifier is unsupported by this shim");
     }
 
+    // SHIM-DIVERGENCE(MISSING): score-modifier backprop — no hipDNN equivalent;
+    // record an error so use fails loudly.
     SDPA_backward_attributes& set_score_mod_bprop(AttentionScoreModifier_t value)
     {
         static_cast<void>(value);
-        return record("SDPA score-modifier backprop is unsupported by this shim");
+        return recordError(error_code_t::INVALID_VALUE,
+                           "SDPA score-modifier backprop is unsupported by this shim");
     }
 
     // SHIM-DIVERGENCE(MISSING): nested-tensor max-total-seq-len hints have no
@@ -474,13 +459,17 @@ public:
     SDPA_backward_attributes& set_max_total_seq_len_q(int64_t value)
     {
         static_cast<void>(value);
-        return record("SDPA max_total_seq_len_q is unsupported by this shim");
+        return recordError(error_code_t::INVALID_VALUE,
+                           "SDPA max_total_seq_len_q is unsupported by this shim");
     }
 
+    // SHIM-DIVERGENCE(MISSING): nested-tensor max-total-seq-len_kv hint has no
+    // hipDNN equivalent yet.
     SDPA_backward_attributes& set_max_total_seq_len_kv(int64_t value)
     {
         static_cast<void>(value);
-        return record("SDPA max_total_seq_len_kv is unsupported by this shim");
+        return recordError(error_code_t::INVALID_VALUE,
+                           "SDPA max_total_seq_len_kv is unsupported by this shim");
     }
 
     // SHIM-DIVERGENCE(MISSING): determinism is correctness-critical — the shim
@@ -490,7 +479,8 @@ public:
     {
         if(value)
         {
-            return record("Deterministic SDPA backward is unsupported by this shim");
+            return recordError(error_code_t::INVALID_VALUE,
+                               "Deterministic SDPA backward is unsupported by this shim");
         }
         return *this;
     }
@@ -500,7 +490,8 @@ public:
     SDPA_backward_attributes& set_rng_dump(std::shared_ptr<Tensor_attributes> value)
     {
         static_cast<void>(value);
-        return record("SDPA backward RNG dump is unsupported by this shim");
+        return recordError(error_code_t::INVALID_VALUE,
+                           "SDPA backward RNG dump is unsupported by this shim");
     }
 
     // SHIM-DIVERGENCE(MISSING): attention-sink tokens (fwd input + bwd gradient)
@@ -508,29 +499,23 @@ public:
     SDPA_backward_attributes& set_sink_token(std::shared_ptr<Tensor_attributes> value)
     {
         static_cast<void>(value);
-        return record("SDPA backward sink token is unsupported by this shim");
+        return recordError(error_code_t::INVALID_VALUE,
+                           "SDPA backward sink token is unsupported by this shim");
     }
 
+    // SHIM-DIVERGENCE(MISSING): attention-sink-token gradient has no hipDNN
+    // backward equivalent.
     SDPA_backward_attributes& set_dsink_token(std::shared_ptr<Tensor_attributes> value)
     {
         static_cast<void>(value);
-        return record("SDPA backward sink-token gradient is unsupported by this shim");
+        return recordError(error_code_t::INVALID_VALUE,
+                           "SDPA backward sink-token gradient is unsupported by this shim");
     }
 
 private:
     friend class Graph;
 
-    SDPA_backward_attributes& record(const char* message)
-    {
-        if(!_recordedError.has_value())
-        {
-            _recordedError = error_t{error_code_t::INVALID_VALUE, message};
-        }
-        return *this;
-    }
-
     hipdnn_frontend::graph::SdpaBackwardAttributes _attrs;
-    std::optional<error_t> _recordedError;
 };
 
 // NOLINTEND(readability-identifier-naming)

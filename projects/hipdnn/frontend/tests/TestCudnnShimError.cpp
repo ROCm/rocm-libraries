@@ -15,7 +15,7 @@
 namespace cfe = hipdnn_frontend::compatibility::cudnn_frontend;
 
 // The error types must be the *same* types as hipDNN's, not parallel
-// re-declarations (RFC 0012 §4.6 — alias, do not wrap).
+// re-declarations (alias, do not wrap).
 static_assert(std::is_same_v<cfe::error_t, hipdnn_frontend::error_t>,
               "cudnn_frontend::error_t must alias hipdnn_frontend::error_t");
 static_assert(std::is_same_v<cfe::error_object, hipdnn_frontend::error_object>,
