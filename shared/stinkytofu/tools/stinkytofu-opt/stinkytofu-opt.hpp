@@ -125,8 +125,17 @@ const std::vector<PassInfo> availablePasses = {
     {"InsertClusterBarrierPass",
      [](const auto&) {
          auto geti = [](const char* k, int d) {
+#ifdef _WIN32
+             char* v = nullptr;
+             size_t len = 0;
+             _dupenv_s(&v, &len, k);
+             int result = v != nullptr ? std::atoi(v) : d;
+             free(v);
+             return result;
+#else
              const char* v = std::getenv(k);
              return v != nullptr ? std::atoi(v) : d;
+#endif
          };
          return createInsertClusterBarrierPass(
              /*isKernelScope=*/true, geti("PrefetchGlobalRead", 1), geti("PrefetchLocalRead", 1));
