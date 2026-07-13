@@ -99,10 +99,7 @@ python3 migration_scripts/place_bundles.py \
 
 Groups captured graphs by **structure** (node types + wiring + tensor
 set). Graphs sharing the same topology collapse into one template+sweep.
-Each sweep also gets a generated `CASES.md` — a human-readable table of
-every case (id, shape, dtype, layout, per-tensor input ranges/seeds). The
-case `id` is a short filter handle; `CASES.md` is where the full per-case
-truth lives, since the id cannot carry every tensor's shape and range.
+Use `find_case.py` to query cases by any parameter (see below).
 
 #### Step 4: Verify (Hop C) — reconcile everything
 
@@ -128,11 +125,38 @@ python3 migration_scripts/import_graph.py \
 Dedup-aware placement. Default: skip exact duplicates. `--strict` exits
 non-zero on dup (CI mode). `--force` appends regardless.
 
-## Filtering and Running Bundles
+## Searching and Running Bundles
+
+### find_case.py — query cases by any parameter
+
+`find_case.py` reads `sweep.json` directly (single source of truth).
+No separate manifest to maintain.
+
+```bash
+# List all batchnorm cases
+python3 migration_scripts/find_case.py --op Batchnorm
+
+# Find fp16 nhwc cases
+python3 migration_scripts/find_case.py --dtype fp16 --layout nhwc
+
+# Find cases where epsilon range is [-1,1]
+python3 migration_scripts/find_case.py --range epsilon:[-1,1]
+
+# Find by shape
+python3 migration_scripts/find_case.py --shape 1x16x3x3
+
+# Combine filters
+python3 migration_scripts/find_case.py --op Batchnorm --dtype bfp16 --range scale:[-2,2]
+
+# Full detail for a case (includes the exact --gtest_filter command)
+python3 migration_scripts/find_case.py --id f446b9 --detail
+```
+
+### gtest_filter examples
 
 Bundle suites register under gtest as `{tier}_{Op}_{Topology}` (e.g.
 `quick_Batchnorm_Default`). Each case within a suite is named by its
-case id. Use `--gtest_filter` to target exactly what you need:
+case id:
 
 ```bash
 # Run all quick-tier bundles
@@ -143,9 +167,6 @@ case id. Use `--gtest_filter` to target exactly what you need:
 
 # Run all bfp16 nhwc cases across all ops
 --gtest_filter='*bfp16_nhwc*'
-
-# Run all 1x3x14 shapes
---gtest_filter='*1_3_14_*'
 
 # Run one exact case (by hash suffix)
 --gtest_filter='*f446b9*'
@@ -163,29 +184,47 @@ ranges or seeds, a 6-char content hash is appended to disambiguate:
 1_3_14_bfp16_ncl_def456   ← same prefix, different input ranges
 ```
 
-To see what a hashed case actually contains, open the `CASES.md` file
-next to the sweep — it maps every id to its shape, dtype, layout, and
-per-tensor input ranges with role names:
-
-```
-| id | shape | dtype | layout | inputs |
-| `1_3_14_bfp16_ncl_abc123` | 1x3x14 | bfp16 | ncl | epsilon[-1,1] seed=1 | scale[-2,2] seed=2 |
-| `1_3_14_bfp16_ncl_def456` | 1x3x14 | bfp16 | ncl | epsilon[-0.5,0.5] seed=1 | scale[-1,1] seed=2 |
-```
+Use `find_case.py --id abc123 --detail` to see what a hashed case contains.
 
 ### Adding new test cases
 
-New tests should be added directly as bundle cases — no C++ needed:
+New tests should be added directly as bundle cases — no C++ needed.
+
+**Using import_graph.py (recommended):**
 
 ```bash
-# From a JSON graph file (dedup-aware)
 python3 migration_scripts/import_graph.py \
     --graph new_conv.json \
     --bundle-dir integration_test_bundles/
-
-# Or edit sweep.json directly: add a new entry to the "cases" array
-# with its own "id", "values", and "metadata" block.
 ```
+
+What happens:
+
+1. The script computes the graph's skeleton hash and finds matching
+   topologies in the bundle tree.
+2. **Duplicate?** If an identical case already exists (same graph +
+   seed + inputs), it reports `DUPLICATE` and skips. No manual check
+   needed.
+3. **New case for existing topology?** Appends to that sweep. The case
+   id is auto-generated: `{shape}_{dtype}_{layout}_{attrs}[_{hash6}]`.
+4. **New topology?** Creates a new template+sweep directory.
+5. The auto-generated id is printed to stderr so you see what the test
+   will be called in gtest output:
+
+```
+  appended case '1_16_3_3_bfp16_nhwc_dil1x1_prepad1x1_postpad1x1' to
+    integration_test_bundles/quick/ConvolutionFwd/Default/sweep.json
+```
+
+That case id is the gtest name — it appears in CI logs, `--gtest_filter`,
+and `find_case.py` queries. You never need to invent or assign it.
+
+**Manually editing sweep.json:**
+
+Add a new entry to the `"cases"` array with `"values"` and `"metadata"`.
+Set `"id"` to a descriptive name following the pattern
+`{shape}_{dtype}_{layout}[_{attrs}]`, or run `import_graph.py` to have
+it assigned automatically.
 
 The migration pipeline (`run_capture_pipeline.sh`) is a one-time
 conversion tool. Going forward, the bundle tree is the source of truth.
@@ -233,6 +272,7 @@ python3 migration_scripts/diff_coverage.py \
 | `place_bundles.py` | Convert captured bundles into template+sweep format (Hop B) |
 | `verify_migration.py` | Reconcile census ↔ capture ↔ sweep, byte-diff graphs + metadata (Hop C) |
 | `import_graph.py` | Import a single graph with duplicate detection |
+| `find_case.py` | Query cases by op, dtype, layout, shape, input range, or id |
 | `diff_coverage.py` | Differential coverage: assert `pass_set_bundle ⊇ pass_set_cpp` (Hop D) |
 | `run_capture_pipeline.sh` | Orchestrate all hops + verification layers |
 | `test_migration.py` | Self-test on synthetic fixture (no binary needed) |
@@ -272,8 +312,7 @@ is too high-dimensional to encode in a readable gtest name. So the id is a
   differ *only* in an input range (e.g. a bias filled from `[-0.5, 0.5]` vs
   `[-1, 1]`) — and is stable across additions/reordering, unlike an `_N` counter.
 
-The full per-case truth the id cannot carry lives in the generated `CASES.md`
-next to each sweep.
+Use `find_case.py` to query the full per-case truth the id cannot carry.
 
 ### Verify gate
 

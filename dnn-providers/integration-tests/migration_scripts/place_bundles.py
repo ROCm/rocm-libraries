@@ -53,7 +53,6 @@ from bundle_utils import (
     node_attr_items,
     raw_node_attrs,
     remap_graph,
-    render_cases_md,
     sanitize,
     skeleton_hash,
     tensors_by_uid,
@@ -308,8 +307,6 @@ def write_sweep(
         with open(out_dir / "sweep.json", "w") as f:
             json.dump(sweep, f, indent=2)
             f.write("\n")
-        with open(out_dir / "CASES.md", "w") as f:
-            f.write(render_cases_md(bucket.topology_name, sweep_cases, template))
     return out_dir
 
 
