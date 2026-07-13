@@ -86,7 +86,7 @@ NB_MODULE(_stinkytofu, m) {
         .def("getPluginDataStr", &StinkyAsmModule::getPluginDataStr, nb::arg("key"),
              nb::arg("defaultVal") = "", "Get a string plugin data value")
         .def("numFunctions", &StinkyAsmModule::numFunctions,
-             "Number of Functions (entry + callees) in this module")
+             "Number of Functions (entry + callable functions) in this module")
         .def(
             "getFunctionNames",
             [](StinkyAsmModule& self) {
@@ -96,7 +96,7 @@ NB_MODULE(_stinkytofu, m) {
                 }
                 return names;
             },
-            "List every Function name in this module (entry first, then callees)")
+            "List every Function name in this module (entry first, then callable functions)")
         .def(
             "hasFunction",
             [](StinkyAsmModule& self, const std::string& name) {
