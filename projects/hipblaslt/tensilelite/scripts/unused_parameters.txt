@@ -3,8 +3,8 @@ PARAMETERS NOT USED IN ANY YAML FILE
 ========================================================================================================================
 
 Total Trackable Parameters: 164
-Parameters NOT Used: 35
-Percentage: 21%
+Parameters NOT Used: 20
+Percentage: 12%
 
 ========================================================================================================================
 GLOBAL PARAMETERS (12 unused)
@@ -83,49 +83,13 @@ Parameter: TimingInstrumentation
   Status: ✗ NOT USED in any YAML file
 
 ========================================================================================================================
-SOLUTION PARAMETERS (23 unused)
+SOLUTION PARAMETERS (8 unused)
 ========================================================================================================================
-
-Parameter: CompactLoopStore
-  Category: solution
-  Default: None
-  Valid Values: [False, True]
-  Status: ✗ NOT USED in any YAML file
 
 Parameter: DebugPersistentKernelLoopForever
   Category: solution
   Default: None
   Valid Values: [False, True]
-  Status: ✗ NOT USED in any YAML file
-
-Parameter: DirectToLdsMetadata
-  Category: solution
-  Default: None
-  Valid Values: [0, 1]
-  Status: ✗ NOT USED in any YAML file
-
-Parameter: HalfPLR
-  Category: solution
-  Default: None
-  Valid Values: [0, 1, 2, 3]
-  Status: ✗ NOT USED in any YAML file
-
-Parameter: MXLoadInst
-  Category: solution
-  Default: None
-  Valid Values: ['Auto', 'TDM', 'BufferLoad', 'GlobalLoad']
-  Status: ✗ NOT USED in any YAML file
-
-Parameter: NonVolatile
-  Category: solution
-  Default: None
-  Valid Values: [-1, 0, 1]
-  Status: ✗ NOT USED in any YAML file
-
-Parameter: NonVolatileA
-  Category: solution
-  Default: None
-  Valid Values: [0, 1]
   Status: ✗ NOT USED in any YAML file
 
 Parameter: NonVolatileB
@@ -135,12 +99,6 @@ Parameter: NonVolatileB
   Status: ✗ NOT USED in any YAML file
 
 Parameter: NonVolatileC
-  Category: solution
-  Default: None
-  Valid Values: [0, 1]
-  Status: ✗ NOT USED in any YAML file
-
-Parameter: NonVolatileD
   Category: solution
   Default: None
   Valid Values: [0, 1]
@@ -170,55 +128,7 @@ Parameter: NonVolatileMetadata
   Valid Values: [0, 1]
   Status: ✗ NOT USED in any YAML file
 
-Parameter: NonVolatileWS
-  Category: solution
-  Default: None
-  Valid Values: [0, 1]
-  Status: ✗ NOT USED in any YAML file
-
-Parameter: PrefetchAcrossPersistent
-  Category: solution
-  Default: None
-  Valid Values: [0, 1]
-  Status: ✗ NOT USED in any YAML file
-
-Parameter: PrefetchGL2
-  Category: solution
-  Default: None
-  Valid Values: [0, 1, 2]
-  Status: ✗ NOT USED in any YAML file
-
-Parameter: StreamKForceDPOnly
-  Category: solution
-  Default: None
-  Valid Values: [0, 1]
-  Status: ✗ NOT USED in any YAML file
-
 Parameter: SwInstructionPrefetch
-  Category: solution
-  Default: None
-  Valid Values: [False, True]
-  Status: ✗ NOT USED in any YAML file
-
-Parameter: TDMIterateMode
-  Category: solution
-  Default: None
-  Valid Values: [-1, 0, 1, 2, 3]
-  Status: ✗ NOT USED in any YAML file
-
-Parameter: Use64bShadowLimitMX
-  Category: solution
-  Default: None
-  Valid Values: [True, False]
-  Status: ✗ NOT USED in any YAML file
-
-Parameter: UseDualFMAC
-  Category: solution
-  Default: None
-  Valid Values: [False, True]
-  Status: ✗ NOT USED in any YAML file
-
-Parameter: UseSubtileImpl
   Category: solution
   Default: None
   Valid Values: [False, True]
