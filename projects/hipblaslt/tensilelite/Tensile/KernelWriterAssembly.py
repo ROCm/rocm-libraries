@@ -87,6 +87,7 @@ from .OccupancyMeasure import compute_occupancy_from_asm_source, _arch_caps_for_
 from rocisa.instruction import ECvtF16toF32, ECvtF32toF16, ECvtPkFP8toF32
 from Tensile.Common import print2, printExit, printWarning, INDEX_CHARS, DebugConfig, DataDirection, isSubtileMultiDU
 from Tensile.Components.NonTemporal import decodeNonTemporal, forceCoherentNonTemporal
+from Tensile.Components.Subtile.Kernel import mapAcctoArchRegsFromTileInfo
 from Tensile.Common.DataType import DataType
 from Tensile.Common.RegisterPool import RegisterPool, allocTmpGpr, allocTmpGprList
 from .Components.WorkGroupMappingAlgos import DefaultWGM, wgmXCC, SpaceFillingCurveWalk
@@ -8327,25 +8328,18 @@ class KernelWriterAssembly(KernelWriter):
       #instCycles = kernel["MatrixInstM"] // 2 # 32x32 is 64 cycles, 16x16 is 32 cycles, 4x4 is 8 cycles
       #module.add(SNop(waitState=instCycles))
       module.addComment1("Mapping of Acc register -> C Vgpr register")
-      # For subtile kernels with mixed agpr/vgpr accumulators the spilled
-      # D-tile values live in arch vgprs allocated from the pool (not at
-      # ValuC+N). Determine their base vgpr so mapAcctoArchRegs can address
-      # them correctly.
-      spilledVgprBase = None
       if kernel.get("UseSubtileImpl"):
-        # For subtile kernels, D-tile accumulators that overflow the accvgpr
-        # pool are placed in arch vgprs allocated from the vgpr pool.
-        # mapAcctoArchRegs needs to know the base address of those vgprs so it
-        # can emit correct moves instead of referencing "ValuC+N" (which points
-        # to the wrong location in the subtile allocation scheme).
-        for vtile in self.states.d.tileInfo.vgprTiles:
-          if vtile.regList.is_vgpr:
-            spilledVgprBase = vtile.regList.indices[0]
-            break
-      self.codes.accVgprRead = mapAcctoArchRegs(kernel, self.states.maxLimitAgprs, write=False, spilledVgprBase=spilledVgprBase)
+        self.codes.accVgprRead = mapAcctoArchRegsFromTileInfo(
+            kernel, self.states.d.tileInfo, write=False)
+      else:
+        self.codes.accVgprRead = mapAcctoArchRegs(kernel, self.states.maxLimitAgprs, write=False)
       if (kernel["StreamK"] > 0 and kernel["StreamKAtomic"] == 0) or \
          ((kernel["GlobalSplitU"] == -1 or kernel["GlobalSplitU"] > 0) and (kernel["GlobalSplitUAlgorithm"] == "MultipleBufferSingleKernel" or kernel["AdaptiveGemmGSUA"] == 1)):
-        self.codes.accVgprWrite = mapAcctoArchRegs(kernel, self.states.maxLimitAgprs, write=True, spilledVgprBase=spilledVgprBase)  # same spilledVgprBase
+        if kernel.get("UseSubtileImpl"):
+          self.codes.accVgprWrite = mapAcctoArchRegsFromTileInfo(
+              kernel, self.states.d.tileInfo, write=True)
+        else:
+          self.codes.accVgprWrite = mapAcctoArchRegs(kernel, self.states.maxLimitAgprs, write=True)
       if kernel["MIArchVgpr"]:
         module.addComment1("Multiply MI out register with Alpha -> C Vgpr register")
         self.codes.mulAlphaMultipleBuffer = moveMIoutToArch(kernel, self.states.startVgprAlphaTmp)

@@ -41,6 +41,12 @@ from rocisa.instruction import BufferAtomicAddF32, BufferAtomicCmpswapB32, \
 from rocisa.functions import vectorStaticMultiply
 
 from ..Common import DataDirection, SemanticVersion, isSubtileMultiDU
+from .Subtile.GlobalWriteBatchUtils import (
+  _can_bypass_valu_c,
+  _extract_direct_vgpr_from_acc_read,
+  _has_any_vgpr_backed_accumulator,
+  _is_legal_valuC_offset,
+)
 from ..Common.DataType import DataType
 from ..Component import GlobalWriteComponents
 from ..Component import Component
@@ -56,16 +62,22 @@ from math import ceil, log2
 
 
 def _scmpGtU32(writer, src, imm, comment=""):
-    """ISA-aware scalar compare: s_cmpk_gt_u32 when available, else s_cmp_gt_u32 via temp SGPR."""
+    """ISA-aware scalar compare: s_cmpk_gt_u32 when available, else s_cmp_gt_u32 via temp SGPR.
+
+    The temp SGPR is checked out and immediately returned (live for one instruction),
+    so it is safe to suppress the overflow assert here — the slot is reclaimed before
+    any subsequent allocation sees it.
+    """
     if writer.states.asmCaps["HasSCMPK"]:
         return SCmpKGtU32(src=src, simm16=imm, comment=comment)
     else:
         module = Module("scmpGtU32")
-        tmpSgpr = writer.sgprPool.checkOut(1, preventOverflow=False)
+        tmpSgpr = writer.sgprPool.checkOut(1, "ScmpGtU32Tmp", preventOverflow=False)
         module.add(SMovB32(dst=sgpr(tmpSgpr), src=imm))
         module.add(SCmpGtU32(src0=src, src1=sgpr(tmpSgpr), comment=comment))
         writer.sgprPool.checkIn(tmpSgpr)
         return module
+
 
 class GlobalWriteBatchComponent(GlobalWriteComponents):
   kernel = {"ProblemType": {"OperationType": "GEMM" }}
@@ -128,6 +140,28 @@ class GlobalWriteBatchWriter:
     self.storesIssued = 0
     self.factorDim = factorDim
     self.amdClangVersion = amdClangVersion
+    valuCOverflows = parentWriter.states.c.startVgprValu + parentWriter.states.c.numVgprValu > parentWriter.states.regCaps["MaxVgpr"]
+    # Use the actual D-tile allocation to detect VGPR-first accumulators: the kernel
+    # may be an FP4-subtile candidate but have all D-tile registers fall to AGPR when
+    # the VGPR budget was exhausted.
+    dTileInfo = getattr(getattr(parentWriter.states, 'd', None), 'tileInfo', None)
+    useDirectVgprAcc = _has_any_vgpr_backed_accumulator(dTileInfo)
+    bypassValuC = _can_bypass_valu_c(kernel, edge, atomic, parentWriter.states.useBias, beta=beta)
+    # Build the source map when VGPR-first accumulators are present (so _storeSumIdx
+    # can dispatch stores directly to the physical register) OR when the full bypass
+    # is active for an overflowing ValuC layout (spare-offset redirect).
+    # valuCSkipMoves gates whether the acc→ValuC v_mov is actually omitted: this is
+    # only safe when bypassValuC=True, i.e. every epilogue path resolves ValuC through
+    # _valuCVgpr/_storeSumIdx and never reads the raw "ValuC+N" staging register.
+    self.valuCSourceMap = {} if useDirectVgprAcc or (valuCOverflows and bypassValuC) else None
+    # Omit the acc→ValuC v_mov only when (a) the config allows bypass and (b) a source
+    # map exists to redirect epilogue reads to the physical VGPR. Tying the two together
+    # guarantees valuCSkipMoves can never be True while valuCSourceMap is None, which
+    # would otherwise crash the spare-offset / direct-read bookkeeping in the AccVgpr
+    # read loop (writes to valuCSourceMap / valuCSpareOffsets).
+    self.valuCSkipMoves = bypassValuC and self.valuCSourceMap is not None
+    self.valuCSpareOffsets = [] if self.valuCSkipMoves else None
+    self.valuCDirectReadBypassed = False
 
     # Stateful tracking for N-group OOB guard deduplication (_emitSubtileOobGuard).
     # The outer loop iterates N-outer / M-inner, so all M elements within a fixed N
@@ -156,6 +190,28 @@ class GlobalWriteBatchWriter:
       (not self.kernel["WorkGroupReduction"]) and \
       self.kernel["ProblemType"]["BiasSrc"] == "D":
       self.storeBiasD = 1
+
+  def _ensureValuCSourceMap(self):
+    if self.valuCSourceMap is not None:
+      return
+    self.valuCSourceMap = {}
+
+  def _directVgprFromAccReadInst(self, accReadInst):
+    """Return physical VGPR index from a VGPR-backed acc move, or None for AGPRs."""
+    if self.valuCSourceMap is None:
+      return None
+    return _extract_direct_vgpr_from_acc_read(accReadInst)
+
+  def _isLegalValuCOffset(self, valuCOffset, width=1):
+    return _is_legal_valuC_offset(
+      self.parentWriter.states.c.startVgprValu,
+      self.parentWriter.states.regCaps["MaxVgpr"],
+      valuCOffset, width)
+
+  def _checkoutValuCSpareOffset(self):
+    if self.valuCSpareOffsets:
+      return self.valuCSpareOffsets.pop(0)
+    return None
 
   @property
   def needsAccumToDestConversion(self) -> bool:
@@ -231,6 +287,146 @@ class GlobalWriteBatchWriter:
   @property
   def tmpS23(self):
     return self.tmpS01 + self.laneSGPRC
+
+  def _directValuCVgpr(self, valuCOffset, width=1):
+    self._ensureValuCSourceMap()
+    if not self.valuCSourceMap:
+      return None
+    regs = [self.valuCSourceMap.get(valuCOffset + i) for i in range(width)]
+    if any(reg is None for reg in regs):
+      return None
+    base = regs[0]
+    if any(reg != base + i for i, reg in enumerate(regs)):
+      return None
+    if width > 1 and base % width != 0:
+      return None
+    return base
+
+  def _assertResolvedUnderBypass(self, valuCOffset, width):
+    # When the acc→ValuC staging copies are skipped (full bypass), the literal
+    # "ValuC+N" slots are never written. If an epilogue access cannot resolve to
+    # the physical accumulator (offset unmapped, or a width>1 group that is
+    # non-contiguous / misaligned in the source map), the only fallback is the
+    # stale staging register, which would silently corrupt the result. Fail
+    # loudly here instead so the bad allocation surfaces at codegen time rather
+    # than as a wrong-numerics regression. No-op on the legacy path (valuCSkipMoves
+    # False), where the staging is populated and the ValuC+ fallback is valid.
+    # Use an explicit raise (not assert) so the guard survives `python -O`, which
+    # strips asserts -- otherwise this would silently fall through to the stale
+    # "ValuC+" staging slot and corrupt the result.
+    if self.valuCSkipMoves:
+      raise RuntimeError(
+          "VGPR-first bypass active but ValuC offset %s (width %d) is unmapped or "
+          "non-contiguous in valuCSourceMap; cannot fall back to the stale "
+          "\"ValuC+\" staging slot" % (valuCOffset, width))
+
+  def _valuCVgpr(self, valuCOffset, width=1):
+    direct = self._directValuCVgpr(valuCOffset, width)
+    if direct is not None:
+      return vgpr(direct, width)
+    self._assertResolvedUnderBypass(valuCOffset, width)
+    return vgpr("ValuC+%u" % valuCOffset, width)
+
+  def _isDirectPackable(self, valuCOffset, width=2):
+    """Return True when a width>1 packed ValuC access can be emitted as a single
+    instruction.
+
+    With no bypass active (valuCSkipMoves False) the contiguous "ValuC+N"
+    staging slots are always valid, so packing is allowed. Under the VGPR-first
+    bypass the packed operand must resolve to a contiguous, width-aligned
+    physical VGPR group (_directValuCVgpr) - VGPR-first accumulators are not
+    guaranteed to be laid out as aligned pairs, and a pair that straddles a
+    VGPR-backed / AGPR-staging boundary is non-contiguous. When this returns
+    False the caller must fall back to width-1 ops (each resolved individually
+    through _valuCVgpr) instead of a packed instruction.
+    """
+    if not self.valuCSkipMoves:
+      return True
+    return self._directValuCVgpr(valuCOffset, width) is not None
+
+  def _valuCVgprFromSumIdx(self, sumIdx, width=1):
+    return self._valuCVgpr(sumIdx - self.parentWriter.states.c.startVgprValu, width)
+
+  def _directValuCDTileGroup(self, sumIdx, prefixOffset, width=4):
+    """Return physical VGPRs for one D tile if the whole group is direct and contiguous."""
+    if not self.valuCSourceMap:
+      return None
+    valuCOffset = sumIdx - prefixOffset
+    regs = [self.valuCSourceMap.get(valuCOffset + i) for i in range(width)]
+    if any(reg is None for reg in regs):
+      return None
+    base = regs[0]
+    if any(reg != base + i for i, reg in enumerate(regs)):
+      return None
+    return [vgpr(reg) for reg in regs]
+
+  def _storeSumIdx(self, sumIdx, width=1):
+    direct = self._directValuCVgpr(sumIdx - self.parentWriter.states.c.startVgprValu, width)
+    if direct is not None:
+      return direct
+    self._assertResolvedUnderBypass(sumIdx - self.parentWriter.states.c.startVgprValu, width)
+    return sumIdx
+
+  def _packSourceAddr(self, sumIdx):
+    """Source addressing for pack/convert accumulator reads.
+
+    Under the VGPR-first source map the accumulators live at remapped physical
+    VGPRs, not the literal "ValuC+N" staging slots, so resolve to the physical
+    register and drop the prefix (matching how _storeSumIdx feeds the store).
+    Otherwise keep the ValuC+ staging addressing unchanged. Returns a tuple of
+    (idx, inputPrefix, prefixOffset) consumable by packdata/convertData.
+    """
+    direct = self._directValuCVgpr(sumIdx - self.parentWriter.states.c.startVgprValu, 1)
+    if direct is not None:
+      return direct, "", 0
+    self._assertResolvedUnderBypass(sumIdx - self.parentWriter.states.c.startVgprValu, 1)
+    return sumIdx, "ValuC+", self.parentWriter.states.c.startVgprValu
+
+  def _copyActivationData(self, computeDataType, elementSumIdx, gwvw, vgprStart, direction=0):
+    module = Module("Copy Activation Data")
+    vi = 0
+    while vi < gwvw:
+      sumIdxV = elementSumIdx + vi
+      if computeDataType.isHalf() or computeDataType.isBFloat16():
+        if (sumIdxV % 2 != 0):
+          vi += 1
+          continue
+        vgprIdx = elementSumIdx + vi // 2
+        width = 2 if (vi + 1 < gwvw) and ((vgprStart + (vi // 2)) % 2 == 0) and (vgprIdx % 2 == 0) else 1
+        # VGPR-first bypass: drop to scalar moves when the ValuC pair is not a
+        # contiguous aligned physical group (otherwise VMovB64 would address a
+        # non-contiguous pair / trip _assertResolvedUnderBypass).
+        if width == 2 and not self._isDirectPackable(vgprIdx - self.parentWriter.states.c.startVgprValu, 2):
+          width = 1
+        actReg = vgpr(vgprStart + (vi // 2), width)
+        valuCReg = self._valuCVgpr(vgprIdx - self.parentWriter.states.c.startVgprValu, width)
+        module.add((VMovB64 if width == 2 else VMovB32)(
+            dst=valuCReg if direction == 1 else actReg,
+            src=actReg if direction == 1 else valuCReg))
+        vi += width
+      elif computeDataType.isSingle() or computeDataType.isInt32():
+        vgprIdx = sumIdxV
+        width = 2 if (vi + 1 < gwvw) and ((vgprStart + vi) % 2 == 0) and (vgprIdx % 2 == 0) else 1
+        # VGPR-first bypass: drop to scalar moves when the ValuC pair is not a
+        # contiguous aligned physical group.
+        if width == 2 and not self._isDirectPackable(vgprIdx - self.parentWriter.states.c.startVgprValu, 2):
+          width = 1
+        actReg = vgpr(vgprStart + vi, width)
+        valuCReg = self._valuCVgpr(vgprIdx - self.parentWriter.states.c.startVgprValu, width)
+        module.add((VMovB64 if width == 2 else VMovB32)(
+            dst=valuCReg if direction == 1 else actReg,
+            src=actReg if direction == 1 else valuCReg))
+        vi += width
+      elif computeDataType.isDouble():
+        vgprIdx = elementSumIdx + vi * 2
+        actReg = vgpr(vgprStart + vi * 2, 2)
+        valuCReg = self._valuCVgpr(vgprIdx - self.parentWriter.states.c.startVgprValu, 2)
+        module.add(VMovB64(dst=valuCReg if direction == 1 else actReg,
+                           src=actReg if direction == 1 else valuCReg))
+        vi += 1
+      else:
+        assert 0
+    return module
 
   @property
   def debugConfig(self):
@@ -1085,7 +1281,53 @@ class GlobalWriteBatchWriter:
         for vi in range(self.gwvw):
           # loop over registers within one scalar
           for rIdx in range(0, regsPerScalar):
-            module.add(replaceHolder(self.codeAccVgprRead.popFirstItem(), self.ss.elementSumIdx[elementIdx]*regsPerScalar + regsPerScalar*vi + rIdx - self.parentWriter.states.c.startVgprValu))
+            valuCOffset = self.ss.elementSumIdx[elementIdx]*regsPerScalar + regsPerScalar*vi + rIdx - self.parentWriter.states.c.startVgprValu
+            accReadInst = self.codeAccVgprRead.popFirstItem()
+            directVgpr = self._directVgprFromAccReadInst(accReadInst)
+            if directVgpr is None:
+              # AGPR-backed accumulator: use spare-offset redirect only when
+              # the full bypass is active (valuCSkipMoves=True) so that the
+              # epilogue can reach the redirected register via _valuCVgpr.
+              spareOffset = None
+              if self.valuCSkipMoves and self.valuCSourceMap is not None \
+                  and not self._isLegalValuCOffset(valuCOffset):
+                spareOffset = self._checkoutValuCSpareOffset()
+              if spareOffset is None:
+                module.add(replaceHolder(accReadInst, valuCOffset))
+                # The acc->ValuC move was emitted into the staging slot at a legal
+                # offset, so that staging register IS populated. Under the bypass
+                # the epilogue resolves ValuC reads exclusively through
+                # _directValuCVgpr / _storeSumIdx, which only inspect
+                # valuCSourceMap. Record the staging register (the same physical
+                # VGPR that vgpr("ValuC+N") expands to) so these AGPR-backed
+                # offsets resolve instead of tripping _assertResolvedUnderBypass.
+                if self.valuCSkipMoves and self.valuCSourceMap is not None:
+                  self.valuCSourceMap[valuCOffset] = self.parentWriter.states.c.startVgprValu + valuCOffset
+              else:
+                spareOffset, spareDirectVgpr = spareOffset
+                self.valuCSourceMap[spareOffset] = spareDirectVgpr
+                module.add(replaceHolder(accReadInst, spareOffset))
+                self.valuCSourceMap[valuCOffset] = self.parentWriter.states.c.startVgprValu + spareOffset
+            else:
+              # VGPR-backed accumulator.
+              if self.valuCSkipMoves:
+                # Full bypass: omit the v_mov, record the physical VGPR, and
+                # bank any legal staging slot as a spare for overflow AGPR reads.
+                self.valuCSourceMap[valuCOffset] = directVgpr
+                self.valuCDirectReadBypassed = True
+                if self._isLegalValuCOffset(valuCOffset) \
+                    and self.parentWriter.states.c.startVgprValu + valuCOffset != directVgpr:
+                  self.valuCSpareOffsets.append((valuCOffset, directVgpr))
+              else:
+                # Partial mode (bypassValuC=False): emit the v_mov so that the
+                # staging register is populated for epilogue paths that still
+                # read raw "ValuC+N" (e.g. bias read, UseScaleCD).  Also record
+                # the physical VGPR so _storeSumIdx can use it for stores.
+                module.add(replaceHolder(accReadInst, valuCOffset))
+                self.valuCSourceMap[valuCOffset] = directVgpr
+
+      if self.valuCDirectReadBypassed:
+        module.add(SNop(waitState=15, comment="delay direct accumulator VGPR reads before epilogue"))
 
       if self.kernel["MIArchVgpr"] and self.kernel["LocalSplitU"] > 1:
         self.parentWriter.states.c.startVgprValu = tmpStartVgprValuC
@@ -1276,13 +1518,17 @@ class GlobalWriteBatchWriter:
         # covers sgemm, gemm_ex(HHS/HSS/BBS/BSS (HPA=T)), int8 (int8x4?)
         if self.kernel["ProblemType"]["ComputeDataType"].isInt32() or \
             self.kernel["ProblemType"]["ComputeDataType"].isSingle(): # covers sgemm/gemm_ex(HHS/HSS/BBS/BSS)
+            # Route through _valuCVgpr so the VGPR-first bypass (skipped acc→ValuC
+            # copies) reads/writes the remapped physical accumulator instead of the
+            # stale "ValuC+N" staging slot. Identical to vgpr("ValuC+N") on the
+            # legacy contiguous-ValuC path (source map inactive).
             if self.debugConfig["ForceExpectedValue"]:
-              module.add(VMovB32(vgpr("ValuC+%u"%newSumIdxV), self.debugConfig["ValueCExpectedValue"], "force expected value" ))
+              module.add(VMovB32(self._valuCVgpr(newSumIdxV), self.debugConfig["ValueCExpectedValue"], "force expected value" ))
             if self.parentWriter.db["ForceVSerial"]:
-              module.add(VMovB32(vgpr("ValuC+%u"%newSumIdxV), vgpr("Serial"), "force expected value to serial" ))
+              module.add(VMovB32(self._valuCVgpr(newSumIdxV), vgpr("Serial"), "force expected value to serial" ))
             if self.parentWriter.db["CheckValueC"]:
               module.add(SMovB32(sgpr(self.tmpS01), self.debugConfig["ValueCExpectedValue"], "Move expected value"))
-              module.add(self.parentWriter.getCmpAssert(self.parentWriter.asmAssert.eq, vgpr("ValuC+%u"%newSumIdxV), sgpr(self.tmpS01)))
+              module.add(self.parentWriter.getCmpAssert(self.parentWriter.asmAssert.eq, self._valuCVgpr(newSumIdxV), sgpr(self.tmpS01)))
 
     ########################################
     # wait for batched load
@@ -1457,8 +1703,12 @@ class GlobalWriteBatchWriter:
               (self.kernel["ProblemType"]["DataType"].isInt8() and self.kernel["ProblemType"]["DestDataType"].isHalf()) or \
               (self.kernel["ProblemType"]["DataType"].isInt8() and self.kernel["ProblemType"]["DestDataType"].isBFloat16())) and \
             self.kernel["ProblemType"]["ComputeDataType"].isSingle():
-            module.add(convertData(self.gwvw, self.ss.elementSumIdx[elementIdx], cvtType=CvtType.CVT_I32_to_F32, \
-                                        inputPrefix="ValuC+", prefixOffset=self.parentWriter.states.c.startVgprValu))
+            cvtMod = Module("ConvertDataBypass")
+            for vi in range(self.gwvw):
+              sumIdxV = self.ss.elementSumIdx[elementIdx] + vi
+              vgprIdx = sumIdxV - self.parentWriter.states.c.startVgprValu
+              cvtMod.add(VCvtI32toF32(dst=self._valuCVgpr(vgprIdx), src=self._valuCVgpr(vgprIdx), comment=" convert to fp32"))
+            module.add(cvtMod)
 
         if self.kernel["ProblemType"]["ComputeDataType"].isSingle():
           maskConst = 1.0
@@ -1485,22 +1735,27 @@ class GlobalWriteBatchWriter:
             vgprIdx = sumIdxV - self.parentWriter.states.c.startVgprValu
             # Generate single f32 code if edge is detected.
             if ((vi + 1) == self.gwvw) and ((self.gwvw % 2) == 1):
-              vecModule.add(VMulF32(dst=vgpr("ValuC+%d"%vgprIdx), src0=vgpr(inputScaleVecVgpr), src1=vgpr("ValuC+%d"%vgprIdx), comment="*= %sVMul"%addressStr ))
+              vecModule.add(VMulF32(dst=self._valuCVgpr(vgprIdx), src0=vgpr(inputScaleVecVgpr), src1=self._valuCVgpr(vgprIdx), comment="*= %sVMul"%addressStr ))
             # Original packed route
             elif vi%2 == 1:
               assert (self.gwvw % 2 == 0)
+            elif self._isDirectPackable(vgprIdx, 2):
+              vecModule.add(VMulPKF32(dst=self._valuCVgpr(vgprIdx, 2), src0=vgpr(inputScaleVecVgpr, 2), src1=self._valuCVgpr(vgprIdx, 2), comment="*= %sVMulPK(%d)(%d)"%(addressStr, dataScaleVec,vi)))
             else:
-              vecModule.add(VMulPKF32(dst=vgpr("ValuC+%d"%vgprIdx, 2), src0=vgpr(inputScaleVecVgpr, 2), src1=vgpr("ValuC+%d"%vgprIdx, 2), comment="*= %sVMulPK(%d)(%d)"%(addressStr, dataScaleVec,vi)))
+              # VGPR-first bypass: pair is non-contiguous/misaligned physically,
+              # so fall back to two scalar multiplies.
+              vecModule.add(VMulF32(dst=self._valuCVgpr(vgprIdx), src0=vgpr(inputScaleVecVgpr), src1=self._valuCVgpr(vgprIdx), comment="*= %sVMul(%d)(%d) lo"%(addressStr, dataScaleVec,vi)))
+              vecModule.add(VMulF32(dst=self._valuCVgpr(vgprIdx+1), src0=vgpr(inputScaleVecVgpr+1), src1=self._valuCVgpr(vgprIdx+1), comment="*= %sVMul(%d)(%d) hi"%(addressStr, dataScaleVec,vi)))
           elif self.kernel["ProblemType"]["ComputeDataType"].isInt32():
             vgprIdx = sumIdxV - self.parentWriter.states.c.startVgprValu
             # Generate single i32 code if edge is detected.
             if ((vi + 1) == self.gwvw) and ((self.gwvw % 2) == 1):
-              vecModule.add(VMulLOU32(dst=vgpr("ValuC+%d"%vgprIdx), src0=vgpr(inputScaleVecVgpr), src1=vgpr("ValuC+%d"%vgprIdx), comment="*= %sVMul"%addressStr ))
+              vecModule.add(VMulLOU32(dst=self._valuCVgpr(vgprIdx), src0=vgpr(inputScaleVecVgpr), src1=self._valuCVgpr(vgprIdx), comment="*= %sVMul"%addressStr ))
             elif vi%2 == 1:
               assert (self.gwvw % 2 == 0)
             else:
-              vecModule.add(VMulLOU32(dst=vgpr("ValuC+%d"%vgprIdx), src0=vgpr(inputScaleVecVgpr), src1=vgpr("ValuC+%d"%vgprIdx), comment="*= %sVMulPK(%d)(%d)"%(addressStr, dataScaleAlphaVec,vi)))
-              vecModule.add(VMulLOU32(dst=vgpr("ValuC+%d"%(vgprIdx+1)), src0=vgpr(inputScaleVecVgpr+1), src1=vgpr("ValuC+%d"%(vgprIdx+1)), comment="*= %sVMulPK(%d)(%d)"%(addressStr, dataScaleAlphaVec,vi)))
+              vecModule.add(VMulLOU32(dst=self._valuCVgpr(vgprIdx), src0=vgpr(inputScaleVecVgpr), src1=self._valuCVgpr(vgprIdx), comment="*= %sVMulPK(%d)(%d)"%(addressStr, dataScaleAlphaVec,vi)))
+              vecModule.add(VMulLOU32(dst=self._valuCVgpr(vgprIdx+1), src0=vgpr(inputScaleVecVgpr+1), src1=self._valuCVgpr(vgprIdx+1), comment="*= %sVMulPK(%d)(%d)"%(addressStr, dataScaleAlphaVec,vi)))
           else:
             raise RuntimeError("Unsupported %s compute data type %s."%(addressStr, str(self.kernel["ProblemType"]["ComputeDataType"])))
 
@@ -1546,18 +1801,34 @@ class GlobalWriteBatchWriter:
           sumIdxV   = self.ss.elementSumIdx[elementIdx] + vi
           if self.kernel["ProblemType"]["ComputeDataType"].isSingle():
             vgprIdx = sumIdxV - self.parentWriter.states.c.startVgprValu
-            vgprDst = (self.activationSetPCStruct.vgprActCopy + vi) if mergeActFuncCall else "ValuC+%d"%vgprIdx
             # Generate single f32 code if edge is detected.
             if ((vi + 1) == self.gwvw) and ((self.gwvw % 2) == 1):
-              module.add(VAddF32(dst=vgpr(vgprDst), src0=vgpr(inputVgpr), src1=vgpr("ValuC+%d"%vgprIdx), \
+              # VGPR-first bypass: the accumulator may physically live at a VGPR
+              # other than ValuC+vgprIdx, so resolve through the source map (the
+              # same remap alpha/ScaleAlphaVec/store use). Falls back to
+              # ValuC+vgprIdx when no bypass is active.
+              accVgpr = self._valuCVgpr(vgprIdx, 1)
+              vgprDst = vgpr(self.activationSetPCStruct.vgprActCopy + vi) if mergeActFuncCall else accVgpr
+              module.add(VAddF32(dst=vgprDst, src0=vgpr(inputVgpr), src1=accVgpr, \
                                  comment="C += bias"))
 
             # Original packed route
             elif vi%2 == 1:
               assert (self.gwvw % 2 == 0)
+            elif self._isDirectPackable(vgprIdx, 2):
+              accVgpr = self._valuCVgpr(vgprIdx, 2)
+              vgprDst = vgpr(self.activationSetPCStruct.vgprActCopy + vi, 2) if mergeActFuncCall else accVgpr
+              module.add(VAddPKF32(dst=vgprDst, src0=vgpr(inputVgpr, 2), \
+                                   src1=accVgpr, comment="C += bias"))
             else:
-              module.add(VAddPKF32(dst=vgpr(vgprDst, 2), src0=vgpr(inputVgpr, 2), \
-                                   src1=vgpr("ValuC+%d"%vgprIdx, 2), comment="C += bias"))
+              # VGPR-first bypass: the ValuC pair is not a contiguous aligned
+              # physical group, so emit two scalar adds (each ValuC half resolved
+              # individually). The merge-activation copy dst stays contiguous.
+              for h in range(2):
+                accVgpr = self._valuCVgpr(vgprIdx + h, 1)
+                vgprDst = vgpr(self.activationSetPCStruct.vgprActCopy + vi + h) if mergeActFuncCall else accVgpr
+                module.add(VAddF32(dst=vgprDst, src0=vgpr(inputVgpr + h), src1=accVgpr,
+                                   comment="C += bias (%s)"%("lo" if h == 0 else "hi")))
           else:
             raise RuntimeError("Unsupported bias compute data type %s."%str(self.kernel["ProblemType"]["ComputeDataType"]))
 
@@ -1649,11 +1920,17 @@ class GlobalWriteBatchWriter:
           isActivationInsertAfter = True
         activationModule = Module("ActivationFuncCall")
         if (not mergeActFuncCall) and (not isActivationInsertAfter):
-          activationModule.appendModule (copyData(activationCDataType, gradientInput, self.gwvw, \
+          activationModule.appendModule (self._copyActivationData(activationCDataType, gradientInput, self.gwvw, \
             self.activationSetPCStruct.vgprActCopy))
-        activationModule.add(SSwapPCB64(dst=sgpr(self.activationSetPCStruct.sgprOffsetBack, 2), \
-          src=sgpr(self.activationSetPCStruct.sgprOffsetActivation, 2)))
-        activationModule.appendModule (copyData(activationCDataType, gradientInput, self.gwvw, \
+        swappc = SSwapPCB64(dst=sgpr(self.activationSetPCStruct.sgprOffsetBack, 2), \
+          src=sgpr(self.activationSetPCStruct.sgprOffsetActivation, 2))
+        calleeLabelsByGwvw = getattr(self.activationSetPCStruct, "calleeLabelsByGwvw", None)
+        if calleeLabelsByGwvw:
+          calleeFuncs = list(calleeLabelsByGwvw.get(self.gwvw, ()))
+          if calleeFuncs:
+            swappc.calleeFuncs = calleeFuncs
+        activationModule.add(swappc)
+        activationModule.appendModule (self._copyActivationData(activationCDataType, gradientInput, self.gwvw, \
           self.activationSetPCStruct.vgprActCopy, 1))
       elif self.parentWriter.insertActivationAfterPacked(self.kernel, self.activationTypeStr) and (self.kernel["ProblemType"]["UseScaleAlphaVec"] == False):
         isActivationInsertAfter = True
@@ -1665,15 +1942,31 @@ class GlobalWriteBatchWriter:
           if (self.activationTypeStr == 'abs') or (self.activationTypeStr == 'relu'):
             SaturateTypeInt8 = SaturateCastType.DO_NOTHING
             satInt8 = True
-        # getActivationActivationComputeType emits on the "ValuC+N" relative
-        # register namespace when enableValuC is set, so make its input index
-        # relative to startVgprValu. The offset is scoped to this consumer only;
-        # the absolute-vgpr consumers above are left untouched.
-        actComputeInput = gradientInput
+        # VGPR-first source map: alpha/ScaleAlphaVec/bias write the remapped
+        # physical accumulator (via _valuCVgpr) and the store reads it back (via
+        # _storeSumIdx/_packSourceAddr). The activation must operate on that same
+        # physical register so it sees the scaled/biased value; otherwise it reads
+        # the stale "ValuC+N" staging slot (filled with the pre-scale accumulator),
+        # discarding alpha/ScaleAlphaVec/bias. Resolve the element's gwvw
+        # accumulators through the source map and address them directly (no ValuC+
+        # prefix). Falls back to the existing ValuC+N path when the map is inactive
+        # or the block is not contiguous (identical assembly on the legacy path).
+        actSumIdxIn  = gradientInput
+        actSumIdxOut = gradientInput
+        actEnableValuC = enableValuC
         if enableValuC:
-          actComputeInput = gradientInput - self.parentWriter.states.c.startVgprValu
+          actDirect = self._directValuCVgpr(gradientInput - self.parentWriter.states.c.startVgprValu, self.gwvw)
+          if actDirect is not None:
+            actSumIdxIn  = actDirect
+            actSumIdxOut = actDirect
+            actEnableValuC = False
+          else:
+            # getActivationActivationComputeType uses a ValuC-relative namespace;
+            # make the input index relative to startVgprValu on the fallback path.
+            actSumIdxIn  = gradientInput - self.parentWriter.states.c.startVgprValu
+            actSumIdxOut = gradientInput - self.parentWriter.states.c.startVgprValu
         activationModule = self.parentWriter.getActivationActivationComputeType(self.kernel, self.activation, \
-          self.activationTypeStr, self.gwvw, actComputeInput, actComputeInput, self.tmpVgpr, self.tmpSgpr, satInt8, enableValuC)
+          self.activationTypeStr, self.gwvw, actSumIdxIn, actSumIdxOut, self.tmpVgpr, self.tmpSgpr, satInt8, actEnableValuC)
       # Add C *= GradientAct
       if self.kernel["ProblemType"]["ActivationType"] != 'none' and self.kernel["ProblemType"]["Gradient"] and ((self.kernel["GlobalSplitU"] == 1 or self.kernel["GlobalSplitU"] == -1) or self.kernel["StreamK"] > 0):
         if isActivationInsertAfter:
@@ -1723,44 +2016,56 @@ class GlobalWriteBatchWriter:
       packModule = Module("Empty pack module")
       convertModule = Module("Empty convert module")
       if self.needsAccumToDestConversion:
+        # VGPR-first accumulators live at remapped physical VGPRs, so the pack/
+        # convert source (and the in-place pack destination) must follow the same
+        # source map the store path uses via _storeSumIdx. Without this, the edge
+        # (gwvw==1) and other packdata paths read/write the stale "ValuC+N"
+        # staging slots while the store consumes the physical register, producing
+        # an unconverted (and cross-element-clobbering) result. No-op when the
+        # source map is inactive.
+        packSrcIdx, packSrcPrefix, packSrcOffset = self._packSourceAddr(self.ss.elementSumIdx[elementIdx])
         if self.kernel["ActivationFuncCall"] and activationCDataType == self.kernel["ProblemType"]["DestDataType"]:
           destIdx = self.activationSetPCStruct.vgprActCopy
         else:
-          destIdx = self.ss.elementSumIdx[elementIdx]
+          destIdx = self._storeSumIdx(self.ss.elementSumIdx[elementIdx])
         packTmpS01 = self._epilogScratchSgpr(self.laneSGPRC)
         if self.kernel["ProblemType"]["DestDataType"].isHalf():
           # For UseSubtileImpl non-edge: paired dwordx4 path handles packing in _emit16bitSubtilePairedStore.
           if not is16bitSubtile:
-            packModule = self.packdata(self.gwvw, destIdx, self.ss.elementSumIdx[elementIdx], inputPrefix="ValuC+", prefixOffset=self.parentWriter.states.c.startVgprValu)
+            packModule = self.packdata(self.gwvw, destIdx, packSrcIdx, inputPrefix=packSrcPrefix, prefixOffset=packSrcOffset)
         elif self.kernel["ProblemType"]["DestDataType"].isBFloat16():
           # For UseSubtileImpl non-edge: paired dwordx4 path handles packing in _emit16bitSubtilePairedStore.
           if not is16bitSubtile:
-            packModule = self.packdata(self.gwvw, destIdx, self.ss.elementSumIdx[elementIdx], bf16CVTVgprStruct=self.cvtVgprStruct,
-                                       tmpS01=packTmpS01, laneSGPRC=self.laneSGPRC, inputPrefix="ValuC+", prefixOffset=self.parentWriter.states.c.startVgprValu)
+            packModule = self.packdata(self.gwvw, destIdx, packSrcIdx, bf16CVTVgprStruct=self.cvtVgprStruct,
+                                       tmpS01=packTmpS01, laneSGPRC=self.laneSGPRC, inputPrefix=packSrcPrefix, prefixOffset=packSrcOffset)
         elif self.kernel["ProblemType"]["DestDataType"].isAnyFloat8():
           if self.kernel["ProblemType"]["StochasticRounding"]:
-            packModule = self.packdata(self.gwvw, destIdx, self.ss.elementSumIdx[elementIdx], fp8CVTVgprStruct=self.cvtVgprStruct, \
-                                       tmpS01=packTmpS01, laneSGPRC=self.laneSGPRC, vgprTmp=vgprRND, inputPrefix="ValuC+", prefixOffset=self.parentWriter.states.c.startVgprValu, alphaScale=1.0)
+            # StochasticRounding selects PackData_FLOAT8_SR (see PackData.py), which
+            # takes the extra vgprTmp seed register and alphaScale; resolve the
+            # source through the VGPR-first source map like the non-SR path below.
+            packModule = self.packdata(self.gwvw, destIdx, packSrcIdx, fp8CVTVgprStruct=self.cvtVgprStruct, \
+                                       tmpS01=packTmpS01, laneSGPRC=self.laneSGPRC, vgprTmp=vgprRND, \
+                                       inputPrefix=packSrcPrefix, prefixOffset=packSrcOffset, alphaScale=1.0)
           else:
-            packModule = self.packdata(self.gwvw, destIdx, self.ss.elementSumIdx[elementIdx], fp8CVTVgprStruct=self.cvtVgprStruct, \
-                                       tmpS01=packTmpS01, laneSGPRC=self.laneSGPRC, inputPrefix="ValuC+", prefixOffset=self.parentWriter.states.c.startVgprValu)
+            packModule = self.packdata(self.gwvw, destIdx, packSrcIdx, fp8CVTVgprStruct=self.cvtVgprStruct, \
+                                       tmpS01=packTmpS01, laneSGPRC=self.laneSGPRC, inputPrefix=packSrcPrefix, prefixOffset=packSrcOffset)
         elif self.kernel["ProblemType"]["DestDataType"].isAnyBFloat8():
           # TODO: BF8 stochastic rounding is not yet supported here.
           #       VCvtSRF32toBF8 instruction exists but stochasticRoundingCvt() only emits VCvtSRF32toFP8.
           #       To support BF8 SR: add SR branch here, generalize stochasticRoundingCvt() to accept bf8CVTVgprStruct,
           #       and select VCvtSRF32toBF8 based on DestDataType.
-          packModule = self.packdata(self.gwvw, destIdx, self.ss.elementSumIdx[elementIdx], bf8CVTVgprStruct=self.cvtVgprStruct, \
-                                     tmpS01=packTmpS01, laneSGPRC=self.laneSGPRC, inputPrefix="ValuC+", prefixOffset=self.parentWriter.states.c.startVgprValu)
+          packModule = self.packdata(self.gwvw, destIdx, packSrcIdx, bf8CVTVgprStruct=self.cvtVgprStruct, \
+                                     tmpS01=packTmpS01, laneSGPRC=self.laneSGPRC, inputPrefix=packSrcPrefix, prefixOffset=packSrcOffset)
         elif self.kernel["ProblemType"]["DestDataType"].isInt32():
           if self.kernel["ProblemType"]["ComputeDataType"].isSingle() and ((self.parentWriter.states.useBias == DataDirection.READ) or self.kernel["ActivationFuncCall"] or self.applyAlpha or self.beta):
-            convertModule = convertData(self.gwvw, self.ss.elementSumIdx[elementIdx], cvtType=CvtType.CVT_F32_to_I32, \
-                                        inputPrefix="ValuC+", prefixOffset=self.parentWriter.states.c.startVgprValu)
+            convertModule = convertData(self.gwvw, packSrcIdx, cvtType=CvtType.CVT_F32_to_I32, \
+                                        inputPrefix=packSrcPrefix, prefixOffset=packSrcOffset)
         elif self.kernel["ProblemType"]["DestDataType"].isInt8():
           if self.kernel["ProblemType"]["ComputeDataType"].isSingle() and ((self.parentWriter.states.useBias == DataDirection.READ) or self.kernel["ActivationFuncCall"] or self.applyAlpha or self.beta):
-            convertModule = convertData(self.gwvw, self.ss.elementSumIdx[elementIdx], cvtType=CvtType.CVT_F32_to_I32, roundType=RoundType.ROUND_TO_NEAREST_EVEN, \
-                                        inputPrefix="ValuC+", prefixOffset=self.parentWriter.states.c.startVgprValu)
-          packModule = self.packdata(self.gwvw, destIdx, self.ss.elementSumIdx[elementIdx], self.cvtVgprStruct, self.tmpS01,
-                                     SaturateTypeInt8=SaturateTypeInt8, inputPrefix="ValuC+", prefixOffset=self.parentWriter.states.c.startVgprValu)
+            convertModule = convertData(self.gwvw, packSrcIdx, cvtType=CvtType.CVT_F32_to_I32, roundType=RoundType.ROUND_TO_NEAREST_EVEN, \
+                                        inputPrefix=packSrcPrefix, prefixOffset=packSrcOffset)
+          packModule = self.packdata(self.gwvw, destIdx, packSrcIdx, self.cvtVgprStruct, self.tmpS01,
+                                     SaturateTypeInt8=SaturateTypeInt8, inputPrefix=packSrcPrefix, prefixOffset=packSrcOffset)
         self._epilogScratchFree(packTmpS01)
 
       if self.parentWriter.states.asmCaps["HasWMMA_V1"] and self.kernel["EnableMatrixInstruction"] and self.kernel["ProblemType"]["DestDataType"].isHalf() and (not self.kernel["ProblemType"]["HighPrecisionAccumulate"]):
@@ -1914,7 +2219,7 @@ class GlobalWriteBatchWriter:
                                      mGuardOffset=1, rowScaleShift=2)
             storeCodeModule.add(self.getEdgeMovInstType()(EXEC(), sgpr(self.tmpS01, self.laneSGPRC), "apply exec mask"))
           # _emitOverrideRows reused from the top of this store loop (see _lookaheadRowInc).
-          tmpStoreCode = self.parentWriter.addStore(self.kernel, self.ss, 'D', addrCalc, sumIdx, self.tmpS01, self.edge, elementIdx, self.batchIdx,
+          tmpStoreCode = self.parentWriter.addStore(self.kernel, self.ss, 'D', addrCalc, self._storeSumIdx(sumIdx), self.tmpS01, self.edge, elementIdx, self.batchIdx,
                                                    overrideAfterPrimerRows=_emitOverrideRows, comment="store D")
           storeCodeModule.add(tmpStoreCode)
           if self.parentWriter.states.storeAlign8 and isSubtileNonEdge:
@@ -2326,20 +2631,28 @@ class GlobalWriteBatchWriter:
     VCvtPkF32to16 = VCvtPkF32toFP16 if isFp16 else VCvtPkF32toBF16
     module.addComment1(f"{typeStr} paired dwordx4 store tt0={tt0} (sba=0+sba=1): pack 8 f32 accvgprs -> 4 {typeStr} dwords")
 
-    # Pack sba=0 subtile: ValuC+sumIdx0+{0,1} → vPack+0; ValuC+sumIdx0+{2,3} → vPack+1
-    # Pack sba=1 subtile: ValuC+sumIdx1+{0,1} → vPack+2; ValuC+sumIdx1+{2,3} → vPack+3
+    # Pack each 4-register D tile as a group.  VGPR-backed FP4 subtile
+    # accumulators are allocated as consecutive groups, so this can read them
+    # directly and avoid redundant acc->ValuC moves.  AGPR-backed or non-direct
+    # groups fall back to the existing ValuC staging registers.
+    directGroup0 = self._directValuCDTileGroup(sumIdx0, prefixOffset)
+    directGroup1 = self._directValuCDTileGroup(sumIdx1, prefixOffset)
+
     def vc(sumIdx, vi):
       idx = sumIdx + vi - prefixOffset
-      return vgpr("ValuC+" + str(idx))
+      return self._valuCVgpr(idx)
+
+    def dreg(directGroup, sumIdx, vi):
+      return directGroup[vi] if directGroup is not None else vc(sumIdx, vi)
 
     def packF32pair(dst, src0, src1, comment):
       """Pack two f32 VGPRs into one dword of two 16bit values."""
       module.add(VCvtPkF32to16(dst=vgpr(dst), src0=src0, src1=src1, comment=f"{comment} -> {typeStr}"))
 
-    packF32pair(vPack+0, vc(sumIdx0, 0), vc(sumIdx0, 1), f"sba=0 tt0={tt0}[0:1]")
-    packF32pair(vPack+1, vc(sumIdx0, 2), vc(sumIdx0, 3), f"sba=0 tt0={tt0}[2:3]")
-    packF32pair(vPack+2, vc(sumIdx1, 0), vc(sumIdx1, 1), f"sba=1 tt0={tt0}[0:1]")
-    packF32pair(vPack+3, vc(sumIdx1, 2), vc(sumIdx1, 3), f"sba=1 tt0={tt0}[2:3]")
+    packF32pair(vPack+0, dreg(directGroup0, sumIdx0, 0), dreg(directGroup0, sumIdx0, 1), f"sba=0 tt0={tt0}[0:1]")
+    packF32pair(vPack+1, dreg(directGroup0, sumIdx0, 2), dreg(directGroup0, sumIdx0, 3), f"sba=0 tt0={tt0}[2:3]")
+    packF32pair(vPack+2, dreg(directGroup1, sumIdx1, 0), dreg(directGroup1, sumIdx1, 1), f"sba=1 tt0={tt0}[0:1]")
+    packF32pair(vPack+3, dreg(directGroup1, sumIdx1, 2), dreg(directGroup1, sumIdx1, 3), f"sba=1 tt0={tt0}[2:3]")
 
     # Compute adjusted D address into vgprAddrScratch while ds_bpermute results are in-flight.
     # addrDVgpr holds the M-byte offset in bpeCexternal units; scale to bpeCexternalGSU1
@@ -2454,9 +2767,13 @@ class GlobalWriteBatchWriter:
     bpe     = self.parentWriter.states.bpeCexternalGSU1  # always 2 for 16bit dest
     globalOffset = addrCalc.globalOffset * bpe // bpeCurr
 
+    directGroup = self._directValuCDTileGroup(sumIdx0, prefixOffset)
+
     def vc(vi):
+      if directGroup is not None:
+        return directGroup[vi]
       idx = sumIdx0 + vi - prefixOffset
-      return vgpr("ValuC+" + str(idx))
+      return self._valuCVgpr(idx)
 
     # Derive the D-stride sgpr name (e.g. "StrideDJ") the same way incrementToNextRow does.
     packedC1  = self.kernel["PackedC1IndicesX"]
@@ -2898,16 +3215,22 @@ class GlobalWriteBatchWriter:
           # Use pk if possible
           if usePK or gwvw > 1:
             if newSumIdx % 2 == 0:
-              module.add(VMulPKF32(dst=vgpr("ValuC+%u"%newSumIdx, 2), src0=sgpr("Alpha",2), src1=vgpr("ValuC+%u"%newSumIdx,2), vop3=VOP3PModifiers(op_sel_hi=[0,1,1]), comment="*= alpha (pk)"))
+              if self._isDirectPackable(newSumIdx, 2):
+                module.add(VMulPKF32(dst=self._valuCVgpr(newSumIdx, 2), src0=sgpr("Alpha",2), src1=self._valuCVgpr(newSumIdx,2), vop3=VOP3PModifiers(op_sel_hi=[0,1,1]), comment="*= alpha (pk)"))
+              else:
+                # VGPR-first bypass: the pair is not a contiguous aligned physical
+                # group, so emit two scalar multiplies instead of one packed op.
+                module.add(VMulF32(dst=self._valuCVgpr(newSumIdx), src0=sgpr("Alpha"), src1=self._valuCVgpr(newSumIdx), comment="*= alpha (pk lo)"))
+                module.add(VMulF32(dst=self._valuCVgpr(newSumIdx+1), src0=sgpr("Alpha"), src1=self._valuCVgpr(newSumIdx+1), comment="*= alpha (pk hi)"))
           else:
-            module.add(VMulF32(dst=vgpr("ValuC+%u"%newSumIdx), src0=sgpr("Alpha"), src1=vgpr("ValuC+%u"%newSumIdx), comment="*= alpha" ))
+            module.add(VMulF32(dst=self._valuCVgpr(newSumIdx), src0=sgpr("Alpha"), src1=self._valuCVgpr(newSumIdx), comment="*= alpha" ))
           if self.parentWriter.db["ForceExpectedValue"]:
-            module.add(VMovB32(dst=vgpr("ValuC+%u"%newSumIdx), src=self.parentWriter.db["ValueCExpectedValue"], comment="force expected value" ))
+            module.add(VMovB32(dst=self._valuCVgpr(newSumIdx), src=self.parentWriter.db["ValueCExpectedValue"], comment="force expected value" ))
           if self.parentWriter.db["ForceVSerial"]:
-            module.add(VMovB32(dst=vgpr("ValuC+%u"%newSumIdx), src=vgpr("Serial"), comment="force expected value to serial" ))
+            module.add(VMovB32(dst=self._valuCVgpr(newSumIdx), src=vgpr("Serial"), comment="force expected value to serial" ))
           if self.parentWriter.db["CheckValueC"]:
             module.add(SMovB32(dst=sgpr(tmpS01), src=self.parentWriter.db["ValueCExpectedValue"], comment="Move expected value"))
-            module.add(self.parentWriter.getCmpAssert(self.parentWriter.asmAssert.eq, vgpr("ValuC+%u"%newSumIdx), sgpr(tmpS01)))
+            module.add(self.parentWriter.getCmpAssert(self.parentWriter.asmAssert.eq, self._valuCVgpr(newSumIdx), sgpr(tmpS01)))
 
         # dgemm
         elif kernel["ProblemType"]["ComputeDataType"].isDouble():
@@ -2997,8 +3320,8 @@ class GlobalWriteBatchWriter:
           # src2 = sumIdxV = f32 = opsel 00
           dataCExternal = ss.elementData[elementIdx] + vi//2
           hi16 = (vi + gwvw*vc0) % 2
-          module.add(self.parentWriter.states.mixinst(dst=vgpr("ValuC+%u"%newSumIdxV), src0=sgpr("Beta"), \
-              src1=vgpr(dataCExternal), src2=vgpr("ValuC+%u"%newSumIdxV), \
+          module.add(self.parentWriter.states.mixinst(dst=self._valuCVgpr(newSumIdxV), src0=sgpr("Beta"), \
+              src1=vgpr(dataCExternal), src2=self._valuCVgpr(newSumIdxV), \
               vop3=VOP3PModifiers(op_sel=[0,hi16,0], op_sel_hi=[0,1,0]),
               comment="//C*=beta"))
 
@@ -3011,11 +3334,11 @@ class GlobalWriteBatchWriter:
           dataCExternal = ss.elementData[elementIdx] + vi//2
           module.add(VCvtBF16toFP32(dst=vgpr(tmpVgpr), src=vgpr(dataCExternal), vgprMask=vgpr(cvtVgprStruct.vgprBf16Mask), vi=(vi)))
           newSumIdxV = sumIdxV - self.parentWriter.states.c.startVgprValu
-          module.add(VMacF32(dst=vgpr("ValuC+%u"%newSumIdxV), src0=vgpr(tmpVgpr), src1=sgpr("Beta"), \
+          module.add(VMacF32(dst=self._valuCVgpr(newSumIdxV), src0=vgpr(tmpVgpr), src1=sgpr("Beta"), \
               comment="finalSum = sum*alpha + C*beta"))
       elif kernel["ProblemType"]["DestDataType"].isSingle():
         newSumIdxV = sumIdxV - self.parentWriter.states.c.startVgprValu
-        module.add(VMacF32(dst=vgpr("ValuC+%u"%newSumIdxV), src0=vgpr(dataV+0), src1=sgpr("Beta"), \
+        module.add(VMacF32(dst=self._valuCVgpr(newSumIdxV), src0=vgpr(dataV+0), src1=sgpr("Beta"), \
             comment="finalSum = sum*alpha + C*beta"))
 
       elif kernel["ProblemType"]["DestDataType"].isInt8():

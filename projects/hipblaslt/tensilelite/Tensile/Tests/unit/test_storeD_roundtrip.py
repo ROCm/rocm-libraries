@@ -32,8 +32,7 @@ from Tensile.Common.Types import DebugConfig
 from Tensile.KernelWriter import CodeModules, StateValues, StateVgprs
 from Tensile.KernelWriterAssembly import KernelWriterAssembly
 from Tensile.KernelWriter import KernelWriter
-from Tensile.KernelWriterModules import mapAcctoArchRegs
-from Tensile.Components.Subtile.Kernel import TileInfo, CD_F32
+from Tensile.Components.Subtile.Kernel import TileInfo, CD_F32, mapAcctoArchRegsFromTileInfo
 
 from gpu_test_helpers import (
     TileConfig,
@@ -382,18 +381,37 @@ def _build_kwa(kernel, writer, use_bf16=False):
 
 
 def _allocate_d_tile(kernel, writer):
-    """Allocate D-tile accvgprs via TileInfo.
+    """Allocate D-tile registers via TileInfo.
 
-    Returns (tileInfoD, agpr_base) where agpr_base is the first accvgpr index.
+    Returns (tileInfoD, d_reg_indices) where d_reg_indices are the flattened
+    register indices in logical accumulator order.
     """
     tileInfoD = TileInfo(CD_F32, 'D', writer, kernel)
     tileInfoD.allocVgprTileRegisters_legacy(writer, kernel)
-    # Collect all allocated agpr indices (in order)
-    agpr_indices = []
+    # Collect all allocated register indices (in order)
+    d_reg_indices = []
     for vtile in tileInfoD.vgprTiles:
         for reg in vtile:
-            agpr_indices.append(reg)
-    return tileInfoD, agpr_indices
+            d_reg_indices.append(reg)
+    return tileInfoD, d_reg_indices
+
+
+def _d_tile_reg_entries(tileInfoD):
+    """Return D tile entries as (is_vgpr, reg_index) in logical accumulator order."""
+    entries = []
+    for vtile in tileInfoD.vgprTiles:
+        is_vgpr = vtile.regList.is_vgpr
+        for reg in vtile:
+            entries.append((is_vgpr, reg))
+    return entries
+
+
+def _emit_d_reg_write(entry, src_vgpr):
+    """Emit a write to a D accumulator register, whether it lives in VGPR or AGPR."""
+    is_vgpr, reg = entry
+    if is_vgpr:
+        return f"  v_mov_b32 v{reg}, v{src_vgpr}\n"
+    return f"  v_accvgpr_write_b32 a{reg}, v{src_vgpr}\n"
 
 
 def _sgpr_offset(writer_sgprs, name):
@@ -1123,7 +1141,7 @@ def _run_storeD(cfg, tmp_path, size_i, size_j, mi_wave_group=None,
     writer, _, _, _ = create_writer(cfg, mi_wave_group=mi_wave_group)
 
     sgprs = _build_sgprs_for_test(writer)
-    tileInfoD, agpr_indices = _allocate_d_tile(kernel, writer)
+    tileInfoD, d_reg_indices = _allocate_d_tile(kernel, writer)
 
     kw = _build_kwa(kernel, writer, use_bf16=use_bf16)
     kw.states.d.tileInfo = tileInfoD
@@ -1136,7 +1154,7 @@ def _run_storeD(cfg, tmp_path, size_i, size_j, mi_wave_group=None,
 
     tmp_v = writer.vgprPool.checkOut(1, "tmp_init", preventOverflow=False)
 
-    kw.codes.accVgprRead = mapAcctoArchRegs(kernel, kw.states.maxLimitAgprs, write=False)
+    kw.codes.accVgprRead = mapAcctoArchRegsFromTileInfo(kernel, tileInfoD, write=False)
     store_indices_mod = kw.notLocalSplitUGlobalWriteIndices(kernel)
     kw.states.c.startVgprValu = 0
     store_write_mod, _ = kw.notLocalSplitUGlobalWrite(kernel, tPA=None, tPB=None)
@@ -1150,9 +1168,9 @@ def _run_storeD(cfg, tmp_path, size_i, size_j, mi_wave_group=None,
     stride_d = round_mt0
 
     if init_mode == "wave_id":
-        prologue = _build_prologue(sgprs, len(agpr_indices), cfg.mt_a, cfg.mt_b,
+        prologue = _build_prologue(sgprs, len(d_reg_indices), cfg.mt_a, cfg.mt_b,
                                    stride_d=stride_d, use_input_buf=False)
-        init_mod = _build_accvgpr_init_wave_id_asm(agpr_indices, tmp_v)
+        init_mod = _build_accvgpr_init_wave_id_asm(tileInfoD, tmp_v)
         args = [
             ("output",   8, "global_buffer", "u8"),
             ("size_i",   4, "by_value",      "u32"),
@@ -1164,9 +1182,9 @@ def _run_storeD(cfg, tmp_path, size_i, size_j, mi_wave_group=None,
     elif init_mode == "random":
         vaddr = writer.vgprPool.checkOut(1, "vaddr", preventOverflow=False)
         vtmp2 = writer.vgprPool.checkOut(1, "vtmp2", preventOverflow=False)
-        prologue = _build_prologue(sgprs, len(agpr_indices), cfg.mt_a, cfg.mt_b,
+        prologue = _build_prologue(sgprs, len(d_reg_indices), cfg.mt_a, cfg.mt_b,
                                    stride_d=stride_d, use_input_buf=True)
-        init_mod = _build_accvgpr_init_matrix_asm(agpr_indices, kernel, tileInfoD, sgprs,
+        init_mod = _build_accvgpr_init_matrix_asm(d_reg_indices, kernel, tileInfoD, sgprs,
                                                   tmp_v, vaddr, vtmp2)
         args = [
             ("input",    8, "global_buffer", "u8"),
@@ -1182,9 +1200,9 @@ def _run_storeD(cfg, tmp_path, size_i, size_j, mi_wave_group=None,
     else:
         vaddr = writer.vgprPool.checkOut(1, "vaddr", preventOverflow=False)
         vtmp2 = writer.vgprPool.checkOut(1, "vtmp2", preventOverflow=False)
-        prologue = _build_prologue(sgprs, len(agpr_indices), cfg.mt_a, cfg.mt_b,
+        prologue = _build_prologue(sgprs, len(d_reg_indices), cfg.mt_a, cfg.mt_b,
                                    stride_d=stride_d, use_input_buf=True)
-        init_mod = _build_accvgpr_init_matrix_asm(agpr_indices, kernel, tileInfoD, sgprs,
+        init_mod = _build_accvgpr_init_matrix_asm(d_reg_indices, kernel, tileInfoD, sgprs,
                                                   tmp_v, vaddr, vtmp2)
         args = [
             ("input",    8, "global_buffer", "u8"),
@@ -1384,8 +1402,8 @@ def _verify_bf16_positions(out, round_mt0, round_mt1, kernel, check_ncol=True, c
         )
 
 
-def _build_accvgpr_init_matrix_asm(agpr_indices, kernel, tileInfoD, sgprs, tmp_v, vaddr, vtmp2):
-    """Init accvgprs from a column-major MT_a×MT_b host matrix using the MFMA output layout.
+def _build_accvgpr_init_matrix_asm(d_reg_indices, kernel, tileInfoD, sgprs, tmp_v, vaddr, vtmp2):
+    """Init D accumulator registers from a column-major MT_a×MT_b host matrix.
 
     Buffer layout: column-major float32, flat[col * MT_a + row] = D_ref[row][col].
     Each thread computes its (row, col) for each accvgpr using the full macrotile layout:
@@ -1470,7 +1488,8 @@ def _build_accvgpr_init_matrix_asm(agpr_indices, kernel, tileInfoD, sgprs, tmp_v
     # Phase 2: walk vtiles in allocation order: sId1-outer, sId0-inner
     # (getLocalMMATileLinearId: i = sId1 * localMMATileGrid[0] + sId0)
     prev_static = 0
-    num_vtiles = len(agpr_indices) // regs_per_subtile
+    d_reg_entries = _d_tile_reg_entries(tileInfoD)
+    num_vtiles = len(d_reg_indices) // regs_per_subtile
     for vtile_idx in range(num_vtiles):
         sId0 = vtile_idx % local_sg0
         sId1 = vtile_idx // local_sg0
@@ -1486,18 +1505,18 @@ def _build_accvgpr_init_matrix_asm(agpr_indices, kernel, tileInfoD, sgprs, tmp_v
         prev_static = static_off
         base = vtile_idx * regs_per_subtile
         for k in range(regs_per_subtile):
-            agpr = agpr_indices[base + k]
+            d_reg_entry = d_reg_entries[base + k]
             # reg k within the subtile is at row_byte_dyn + k*4 (via imm offset)
             m.add(TextBlock(
                 f"  buffer_load_dword v{tmp_v}, v{vaddr}, s[{srd_in}:{srd_in+3}], 0 offen offset:{k*4}\n"
                 f"  s_waitcnt vmcnt(0)\n"
-                f"  v_accvgpr_write_b32 a{agpr}, v{tmp_v}\n"
+                f"{_emit_d_reg_write(d_reg_entry, tmp_v)}"
             ))
     return m
 
 
-def _build_accvgpr_init_wave_id_asm(agpr_indices, tmp_v):
-    """Init all accvgprs to float(wave_id).
+def _build_accvgpr_init_wave_id_asm(tileInfoD, tmp_v):
+    """Init all D accumulator registers to float(wave_id).
 
     Every thread in the same wave writes the same value — useful for visually
     verifying which MMA tiles belong to which wave.
@@ -1508,8 +1527,8 @@ def _build_accvgpr_init_wave_id_asm(agpr_indices, tmp_v):
         f"  v_lshrrev_b32 v{tmp_v}, {log2_ws}, v0  // wave_id = tid >> {log2_ws}\n"
         f"  v_cvt_f32_u32 v{tmp_v}, v{tmp_v}        // float(wave_id)\n"
     ))
-    for agpr in agpr_indices:
-        m.add(TextBlock(f"  v_accvgpr_write_b32 a{agpr}, v{tmp_v}\n"))
+    for d_reg_entry in _d_tile_reg_entries(tileInfoD):
+        m.add(TextBlock(_emit_d_reg_write(d_reg_entry, tmp_v)))
     return m
 
 
@@ -1740,12 +1759,12 @@ def _build_beta_prologue(sgprs, mt0, mt1, size_i, size_j, mi_wave_tile, c_stride
     return m
 
 
-def _build_accvgpr_zero_asm(agpr_indices, tmp_v):
-    """Zero-initialize all accvgprs (simulates a GEMM result of 0)."""
+def _build_accvgpr_zero_asm(tileInfoD, tmp_v):
+    """Zero-initialize all D accumulator registers (simulates a GEMM result of 0)."""
     m = Module("accvgpr_zero")
     m.add(TextBlock(f"  v_mov_b32 v{tmp_v}, 0           // zero\n"))
-    for agpr in agpr_indices:
-        m.add(TextBlock(f"  v_accvgpr_write_b32 a{agpr}, v{tmp_v}\n"))
+    for d_reg_entry in _d_tile_reg_entries(tileInfoD):
+        m.add(TextBlock(_emit_d_reg_write(d_reg_entry, tmp_v)))
     return m
 
 
@@ -1777,7 +1796,7 @@ def _run_storeD_beta(cfg, tmp_path, size_i, size_j, mi_wave_group=None, dump_asm
     writer, _, _, _ = create_writer(cfg, mi_wave_group=mi_wave_group)
     sgprs = _build_sgprs_for_beta_test(writer)
 
-    tileInfoD, agpr_indices = _allocate_d_tile(kernel, writer)
+    tileInfoD, d_reg_indices = _allocate_d_tile(kernel, writer)
     kw = _build_kwa(kernel, writer)
     kw.states.d.tileInfo = tileInfoD
 
@@ -1790,7 +1809,7 @@ def _run_storeD_beta(cfg, tmp_path, size_i, size_j, mi_wave_group=None, dump_asm
 
     tmp_v = writer.vgprPool.checkOut(1, "tmp_v", preventOverflow=False)
 
-    kw.codes.accVgprRead = mapAcctoArchRegs(kernel, kw.states.maxLimitAgprs, write=False)
+    kw.codes.accVgprRead = mapAcctoArchRegsFromTileInfo(kernel, tileInfoD, write=False)
     store_indices_mod = kw.notLocalSplitUGlobalWriteIndices(kernel)
     kw.states.c.startVgprValu = 0
     store_write_mod, _ = kw.notLocalSplitUGlobalWrite(kernel, tPA=None, tPB=None)
@@ -1814,7 +1833,7 @@ def _run_storeD_beta(cfg, tmp_path, size_i, size_j, mi_wave_group=None, dump_asm
 
     prologue = _build_beta_prologue(sgprs, round_mt0, round_mt1, size_i, size_j,
                                     mi_wave_tile=kernel["MIWaveTile"])
-    init_mod = _build_accvgpr_zero_asm(agpr_indices, tmp_v)
+    init_mod = _build_accvgpr_zero_asm(tileInfoD, tmp_v)
 
     store_write_asm = str(store_write_mod)
     parts = [
@@ -2029,7 +2048,7 @@ def _run_storeD_sav_bias(cfg, tmp_path, size_i, size_j, mi_wave_group=None,
     vaddr = writer.vgprPool.checkOut(1, "vaddr", preventOverflow=False)
     vtmp2 = writer.vgprPool.checkOut(1, "vtmp2", preventOverflow=False)
 
-    kw.codes.accVgprRead = mapAcctoArchRegs(kernel, kw.states.maxLimitAgprs, write=False)
+    kw.codes.accVgprRead = mapAcctoArchRegsFromTileInfo(kernel, tileInfoD, write=False)
     store_indices_mod = kw.notLocalSplitUGlobalWriteIndices(kernel)
     kw.states.c.startVgprValu = 0
     store_write_mod, _ = kw.notLocalSplitUGlobalWrite(kernel, tPA=None, tPB=None)
@@ -2274,7 +2293,7 @@ def _run_storeD_cload_pagefault(cfg, tmp_path, size_i, size_j, mi_wave_group=Non
     writer, _, _, _ = create_writer(cfg, mi_wave_group=mi_wave_group)
     sgprs = _build_sgprs_for_beta_test(writer)
 
-    tileInfoD, agpr_indices = _allocate_d_tile(kernel, writer)
+    tileInfoD, d_reg_indices = _allocate_d_tile(kernel, writer)
     kw = _build_kwa(kernel, writer)
     kw.states.d.tileInfo = tileInfoD
 
@@ -2286,7 +2305,7 @@ def _run_storeD_cload_pagefault(cfg, tmp_path, size_i, size_j, mi_wave_group=Non
 
     tmp_v = writer.vgprPool.checkOut(1, "tmp_v", preventOverflow=False)
 
-    kw.codes.accVgprRead = mapAcctoArchRegs(kernel, kw.states.maxLimitAgprs, write=False)
+    kw.codes.accVgprRead = mapAcctoArchRegsFromTileInfo(kernel, tileInfoD, write=False)
     store_indices_mod = kw.notLocalSplitUGlobalWriteIndices(kernel)
     kw.states.c.startVgprValu = 0
     store_write_mod, _ = kw.notLocalSplitUGlobalWrite(kernel, tPA=None, tPB=None)
@@ -2299,7 +2318,7 @@ def _run_storeD_cload_pagefault(cfg, tmp_path, size_i, size_j, mi_wave_group=Non
     prologue = _build_beta_prologue(sgprs, round_mt0, round_mt1, size_i, size_j,
                                     mi_wave_tile=kernel["MIWaveTile"],
                                     c_stride=size_i)
-    init_mod = _build_accvgpr_zero_asm(agpr_indices, tmp_v)
+    init_mod = _build_accvgpr_zero_asm(tileInfoD, tmp_v)
 
     store_write_asm = str(store_write_mod)
     parts = [

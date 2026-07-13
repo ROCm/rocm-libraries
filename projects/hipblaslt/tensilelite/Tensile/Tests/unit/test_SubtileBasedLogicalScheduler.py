@@ -17,6 +17,7 @@ Organized by pass:
 import pytest
 from Tensile.Components.Subtile.Kernel import (
     TileInfo, AB_B8, AB_B16, AB_B16_W32, AB_B4, MXSA_B4, MXSB_B4, CD_F32, CD_F32_W32,
+    initVgprTilesToZero,
 )
 from Tensile.Components.Subtile.LogicalScheduler import (
     GRPlacementStrategy,
@@ -66,15 +67,29 @@ def _mock_dtype(num_bytes=2):
     # Treat the default 2-byte mock as BF16 (only consumer is the Subtile tail
     # mask path, which dispatches on isBFloat16); 0.5-byte (fp4) returns False.
     mock.isBFloat16.return_value = (num_bytes == 2)
+    # 0.5-byte mocks model FP4; needed by the accumulator VGPR-first gating.
+    mock.isFloat4.return_value = (num_bytes == 0.5)
     # 8-bit float (MXFP8) is exactly the 1-byte mock; fp4 (0.5) and bf16 (2)
     # are not. Without this, MagicMock's auto-attribute makes is8bitFloat()
     # truthy for every dtype and the data-K-mask 8-bit-float skip misfires.
     mock.is8bitFloat.return_value = (num_bytes == 1)
+    # Type predicates consumed by the ValuC-bypass gate (_can_bypass_valu_c via
+    # estimateVgprAccumulatorSplit). Without explicit values MagicMock auto-attrs
+    # make every predicate truthy, which would wrongly classify FP4/BF16 mocks as
+    # complex/double/half and disable the bypass. The 4-byte mock models the f32
+    # compute type (isSingle True); the rest are False for all modelled types.
+    mock.isComplex.return_value = False
+    mock.isDouble.return_value = False
+    mock.isSingle.return_value = (num_bytes == 4)
+    mock.isHalf.return_value = False
+    mock.isInt8.return_value = False
+    mock.isInt32.return_value = False
     return mock
 
 
 def create_kernel(MT0=256, MT1=256, fp4=False, depthU=None,
-                  miWaveGroup=None, sourceSwap=False, arch="gfx950"):
+                  miWaveGroup=None, sourceSwap=False, arch="gfx950",
+                  useBeta=False, useBias=False):
     mxblock = 32 if fp4 else 0
     bpe = 0.5 if fp4 else 2
     matrixInstK = 128 if fp4 else 32
@@ -93,10 +108,21 @@ def create_kernel(MT0=256, MT1=256, fp4=False, depthU=None,
     if fp4:
         problemType["MXBlockA"] = mxblock
         problemType["MXBlockB"] = mxblock
+    # Optional epilogue inputs. These feed the per-element store working-set
+    # (perElem) in the large-tile VGPR-first branch of allocVgprTileRegisters_legacy.
+    # Default off so existing callers are unaffected; opt in only where the test
+    # needs to model the shipped beta+bias store path.
+    if useBeta:
+        problemType["UseBeta"] = True
+    if useBias:
+        problemType["UseBias"] = True
     kernel = {
         "DepthU": depthU,
         "_DepthUA": depthU,
         "_DepthUB": depthU,
+        # LocalSplitU=1 (no split-reduction): required by the ValuC-bypass gate
+        # (_can_bypass_valu_c) now consulted from estimateVgprAccumulatorSplit.
+        "LocalSplitU": 1,
         "MacroTileA": MT0,
         "MacroTileB": MT1,
         "MacroTile0": MT0,
@@ -108,6 +134,9 @@ def create_kernel(MT0=256, MT1=256, fp4=False, depthU=None,
         "MIInputPerThreadA": matrixInstK // 4,
         "MIInputPerThreadB": matrixInstK // 4,
         "MIWaveGroup": list(miWaveGroup),
+        # MIWaveTile[i] = MT_i / (MatrixInst * MIWaveGroup[i]); MatrixInstM=N=16.
+        # Required by the large-tile VGPR-first branch (Components/Subtile/Kernel.py).
+        "MIWaveTile": [MT0 // (16 * miWaveGroup[0]), MT1 // (16 * miWaveGroup[1])],
         "WavefrontSize": waveSize,
         "SourceSwap": sourceSwap,
         "MIArchVgpr": is_gfx1250,
@@ -291,7 +320,7 @@ def make_example_granularities_1():
     )
 
 
-def make_writer_and_tileinfos(kernel, fp4=False):
+def make_writer_and_tileinfos(kernel, fp4=False, max_vgpr=256, physical_max_vgpr=512):
     """Create writer with register pools and TileInfos for integration tests."""
     from types import SimpleNamespace
     from rocisa import rocIsa
@@ -321,7 +350,7 @@ def make_writer_and_tileinfos(kernel, fp4=False):
     writer.sgprPool = RegisterPool(0, RegisterType.Sgpr, False)
     writer.sgprs = {}
     writer.states = SimpleNamespace(
-        regCaps={"MaxSgpr": 106, "MaxVgpr": 256, "PhysicalMaxVgpr": 512},
+        regCaps={"MaxSgpr": 106, "MaxVgpr": max_vgpr, "PhysicalMaxVgpr": physical_max_vgpr},
         archCaps={"LDSBankCount": 64, "LDSBankWidth": 4,
                   "HasWmmaArbStallBit": is_gfx1250},
         asmCaps={"HasMFMA": not is_gfx1250,
@@ -350,6 +379,14 @@ def make_writer_and_tileinfos(kernel, fp4=False):
         _label_counters[base] = n + 1
         return f"{base}_{n}"
     writer.labels = SimpleNamespace(getNameInc=_getNameInc)
+    # ValuC staging size the epilogue store checks out (KernelWriter.py:7185):
+    # ThreadTile0*ThreadTile1*ComputeData.numRegisters() == per-thread accumulator
+    # count. Set before the D-tile allocation so the epilogue ceiling in
+    # allocVgprTileRegisters_legacy uses the real value instead of the None fallback.
+    _miwt = kernel["MIWaveTile"]
+    _numVgprValuC = _miwt[0] * _miwt[1] * (
+        kernel["MatrixInstM"] * kernel["MatrixInstN"] // kernel["WavefrontSize"])
+    writer.states.c = SimpleNamespace(numVgprValu=_numVgprValuC)
     dTileInfo = makeTileInfo('D', kernel)
     dTileInfo.allocVgprTileRegisters_legacy(writer, kernel)
     writer.states.d = SimpleNamespace(tileInfo=dTileInfo)
@@ -2828,6 +2865,122 @@ class TestGetNumVgpr:
         assert vgpr_1x2 >= vgpr_1x4
 
 
+@pytest.mark.parametrize("mt0,mt1,wave_group", [
+    # MT256x288 (T=288, MIWaveTile [4,18]) is a large FP4 config (T = MT0*MT1/256
+    # > 256) whose conservative epilogue reserve (miwt0=4) still leaves room below
+    # the VGPR ceiling, so the VGPR-first policy keeps a VGPR portion (low indices)
+    # and spills the remainder to AGPR -- a genuine partial split. (MT320x256, with
+    # miwt0=10, reserves too much and safely falls back to AGPR-first instead; that
+    # is covered by test_large_fp4_falls_back_to_agpr_first_when_unsafe.)
+    (256, 288, [4, 1]),
+])
+def test_large_fp4_accumulators_spill_to_agpr_with_vgpr_headroom(mt0, mt1, wave_group):
+    # Model the shipped FP4 subtile store path (UseBeta + UseBias) so the epilogue
+    # ceiling reflects real register pressure.
+    kernel = create_kernel(mt0, mt1, fp4=True, miWaveGroup=wave_group,
+                           useBeta=True, useBias=True)
+    # preferVgpr requires UseSubtileImpl+StreamK (epiCeil subtraction is only
+    # valid on that path); enable them so the VGPR-first policy is exercised.
+    kernel["UseSubtileImpl"] = True
+    kernel["StreamK"] = 3
+    writer, _, _, _, _, dTileInfo = make_writer_and_tileinfos(kernel, fp4=True)
+
+    vgpr_tiles = [tile for tile in dTileInfo.vgprTiles if tile.regList.is_vgpr]
+    agpr_tiles = [tile for tile in dTileInfo.vgprTiles if not tile.regList.is_vgpr]
+    vgpr_regs = [reg for tile in vgpr_tiles for reg in tile]
+
+    # VGPR-first split was taken (NOT the develop AGPR-first fallback): under the
+    # fallback the first accumulator tiles land in AGPR, so checking the first
+    # tile distinguishes the feature from the baseline behavior.
+    assert dTileInfo.vgprTiles[0].regList.is_vgpr, \
+        "expected VGPR-first split, got the AGPR-first fallback"
+    # Genuine partial split: some accumulators kept in VGPR, the rest in AGPR.
+    assert vgpr_tiles, "expected some accumulators kept in VGPR"
+    assert agpr_tiles, "expected the remainder spilled to AGPR"
+
+    maxVgpr = writer.states.regCaps["MaxVgpr"]
+    # Safety: no VGPR-backed accumulator may reference v[MaxVgpr+].
+    assert max(vgpr_regs) < maxVgpr, \
+        f"VGPR accumulator references v{max(vgpr_regs)} (>= {maxVgpr})"
+
+    # No-overflow invariant (the real consequence, not a restatement of the cap):
+    # emulate the epilogue staging the store checks out ABOVE the accumulators and
+    # confirm one column-aligned beta+bias store batch still fits below MaxVgpr.
+    # perElem mirrors the large-tile branch in Components/Subtile/Kernel.py.
+    numDword = len(list(dTileInfo.vgprTiles[0]))   # per-accumulator register count
+    perElem = (2 * numDword + 2)                    # ValuC + C/D data + D address
+    perElem += 2 + numDword                         # UseBeta (addr pair + data)
+    perElem += 2 + numDword                         # UseBias (addr pair + data)
+    oneStoreBatch = kernel["MIWaveTile"][0] * perElem
+    stageStart = writer.vgprPool.checkOutAligned(
+        oneStoreBatch, 4, tag="test_epilogue_stage")
+    assert stageStart + oneStoreBatch <= maxVgpr, (
+        f"epilogue store batch [{stageStart}..{stageStart + oneStoreBatch}) "
+        f"overflows the VGPR file (MaxVgpr={maxVgpr}) for MT{mt0}x{mt1}")
+
+
+@pytest.mark.parametrize("mt0,mt1,wave_group", [
+    # With precise per-element accounting the epilogue reserve is just one
+    # miwt0-aligned store column (perElem mirrors AsmStoreState.numVgprsPerElement),
+    # so the shippable FP4 tiles (<= MT320x256) now safely keep a VGPR-first
+    # partial split rather than declining. Only oversized tiles -- where even one
+    # precise beta+bias store column plus the mandatory AGPR-overflow VGPR floor
+    # leaves no room below v256 -- still force the safety-net decline to the
+    # develop AGPR-first placement. These exercise that the feature never produces
+    # an unsafe VGPR-first split.
+    (448, 256, [2, 2]),
+    (384, 320, [2, 2]),
+])
+def test_large_fp4_falls_back_to_agpr_first_when_unsafe(mt0, mt1, wave_group):
+    kernel = create_kernel(mt0, mt1, fp4=True, miWaveGroup=wave_group,
+                           useBeta=True, useBias=True)
+    writer, _, _, _, _, dTileInfo = make_writer_and_tileinfos(kernel, fp4=True)
+
+    # Fallback signature: accumulators are placed AGPR-first, so the first tile
+    # is in AGPR (the opposite of the VGPR-first split above).
+    assert not dTileInfo.vgprTiles[0].regList.is_vgpr, \
+        "expected AGPR-first fallback, but the first accumulator landed in VGPR"
+
+    # Any forced-overflow VGPR accumulators (when AGPR alone cannot hold the tile)
+    # must still stay inside the VGPR file.
+    maxVgpr = writer.states.regCaps["MaxVgpr"]
+    vgpr_regs = [reg for t in dTileInfo.vgprTiles if t.regList.is_vgpr for reg in t]
+    if vgpr_regs:
+        assert max(vgpr_regs) < maxVgpr, \
+            f"forced-overflow accumulator references v{max(vgpr_regs)} (>= {maxVgpr})"
+
+
+def test_large_fp4_accumulators_use_all_vgpr_before_agpr_boundary():
+    # MT128x128 (T = 64 accumulator regs) fits entirely below the conservative
+    # epilogue ceiling (maxVgpr - numVgprValu - margin), so every accumulator
+    # stays in the VGPR file and nothing spills to AGPR.
+    kernel = create_kernel(128, 128, fp4=True)
+    kernel["UseSubtileImpl"] = True
+    kernel["StreamK"] = 3
+    writer, _, _, _, _, dTileInfo = make_writer_and_tileinfos(kernel, fp4=True)
+
+    vgpr_tiles = [tile for tile in dTileInfo.vgprTiles if tile.regList.is_vgpr]
+    agpr_tiles = [tile for tile in dTileInfo.vgprTiles if not tile.regList.is_vgpr]
+
+    assert vgpr_tiles
+    assert not agpr_tiles
+    assert writer.vgprPool.size() <= writer.states.regCaps["MaxVgpr"]
+
+
+def test_mixed_fp4_d_init_zeros_vgpr_and_agpr_accumulators():
+    # MT320x256 (wave group [2,2]) lands in the partial VGPR/AGPR split regime under
+    # the precise epilogue reserve (one miwt0-aligned store column): the low-index
+    # accumulators stay in VGPR and the remainder spills to AGPR, so the zero-init
+    # must touch both VGPR-backed (v[...]) and AGPR-backed (acc[...]) accumulators.
+    kernel = create_kernel(320, 256, fp4=True, miWaveGroup=[2, 2])
+    writer, _, _, _, _, dTileInfo = make_writer_and_tileinfos(kernel, fp4=True)
+
+    asm = str(initVgprTilesToZero(writer, kernel, dTileInfo))
+
+    assert "v_mfma_i32_32x32x16_i8 v[" in asm
+    assert "v_mfma_i32_32x32x16_i8 acc[" in asm
+
+
 # ══════════════════════════════════════════════════════════════
 # Integration tests
 # ══════════════════════════════════════════════════════════════
@@ -3961,3 +4114,192 @@ class TestBuildTailloopPGR0:
 
         finally:
             sched.deallocVgprTiles(writer)
+
+
+class TestPreferVgprGuard:
+    """Verify the VGPR/AGPR accumulator split policy for FP4 CDTile kernels.
+
+    preferVgpr is enabled for FP4-on-both-operands CDTile kernels. The number
+    of accumulators kept in VGPR is bounded by vgprAccLimit (the smaller of a
+    main-loop and a post-loop/epilogue ceiling); the remainder spills to AGPR.
+
+    Invariants verified here:
+      * When the whole D-tile cannot fit below the VGPR ceiling, the allocation
+        is a *partial* split: some accumulators in VGPR, the rest in AGPR.
+      * No VGPR-backed accumulator may reference v[256+] (hardware limit).
+      * When the pre-allocated pool already exceeds the VGPR ceiling, every
+        accumulator falls back to AGPR.
+    """
+
+    def _make_writer(self, pre_alloc_vgprs, max_vgpr=256, physical_max_vgpr=512):
+        """Return a minimal writer stub with vgprPool pre-filled to simulate
+        prior A/B tile allocations."""
+        from types import SimpleNamespace
+        from rocisa import rocIsa
+        from rocisa.register import RegisterPool
+        from rocisa.enum import RegisterType
+
+        ri = rocIsa.getInstance()
+        import shutil
+        asmpath = shutil.which('amdclang++') or '/usr/bin/amdclang++'
+        ri.init((9, 5, 0), asmpath)
+        ri.setKernel((9, 5, 0), 64)
+
+        writer = SimpleNamespace()
+        writer.vgprPool = RegisterPool(0, RegisterType.Vgpr, False)
+        writer.agprPool = RegisterPool(0, RegisterType.Accvgpr, False)
+        writer.states = SimpleNamespace(
+            regCaps={"MaxVgpr": max_vgpr, "PhysicalMaxVgpr": physical_max_vgpr},
+        )
+        if pre_alloc_vgprs > 0:
+            writer.vgprPool.checkOut(pre_alloc_vgprs)
+        return writer
+
+    def _alloc_cdtile(self, writer, mt0, mt1, wave_group=None):
+        """Allocate CDTile registers for a given FP4 macro-tile size."""
+        from types import SimpleNamespace
+        if wave_group is None:
+            wave_group = [2, 2]
+        kernel = create_kernel(mt0, mt1, fp4=True, miWaveGroup=wave_group)
+        # preferVgpr requires UseSubtileImpl+StreamK (the epiCeil subtract is only
+        # correct on that path); mirror the production setting so the tests exercise
+        # the VGPR-first allocation policy rather than the AGPR-first fallback.
+        kernel["UseSubtileImpl"] = True
+        kernel["StreamK"] = 3
+        # Real ValuC staging size so the epilogue ceiling uses it, not the fallback.
+        miwt = kernel["MIWaveTile"]
+        writer.states.c = SimpleNamespace(numVgprValu=miwt[0] * miwt[1] * (
+            kernel["MatrixInstM"] * kernel["MatrixInstN"] // kernel["WavefrontSize"]))
+        dTileInfo = makeTileInfo('D', kernel)
+        dTileInfo.allocVgprTileRegisters_legacy(writer, kernel)
+        return dTileInfo
+
+    @pytest.mark.parametrize("pre_alloc,mt0,mt1", [
+        # MT256x192: 48 tiles × 4 DWORDs = 192 total accumulator registers.
+        # The whole D-tile cannot fit below the conservative epilogue ceiling
+        # (maxVgpr - numVgprValu - margin), but the ceiling still leaves room for
+        # some accumulators, so the allocation splits: some in VGPR, rest in AGPR.
+        # (MT256x256, T=256, no longer splits: the ValuC staging window fills the
+        # VGPR file, forcing the safe pure-AGPR fallback.)
+        (4, 256, 192),
+        (1, 256, 192),
+    ])
+    def test_overflow_uses_partial_split(self, pre_alloc, mt0, mt1):
+        """When the whole D-tile cannot fit below the VGPR ceiling, the
+        accumulators are split across VGPR and AGPR, and no VGPR-backed
+        accumulator references v[256+]."""
+        writer = self._make_writer(pre_alloc)
+        dTileInfo = self._alloc_cdtile(writer, mt0, mt1)
+        assert len(dTileInfo.vgprTiles) > 0
+        vgpr_tiles = [t for t in dTileInfo.vgprTiles if t.regList.is_vgpr]
+        agpr_tiles = [t for t in dTileInfo.vgprTiles if not t.regList.is_vgpr]
+        assert vgpr_tiles, "Expected a partial split to place some accs in VGPR"
+        assert agpr_tiles, "Expected a partial split to spill some accs to AGPR"
+        # Safety invariant: VGPR-backed accumulators must stay inside the file.
+        max_vgpr_idx = max(idx for t in vgpr_tiles for idx in list(t))
+        assert max_vgpr_idx < 256, (
+            f"VGPR-backed accumulator references v{max_vgpr_idx} (>= 256) "
+            f"(pre_alloc={pre_alloc}, MT{mt0}x{mt1})"
+        )
+
+    @pytest.mark.parametrize("pre_alloc,mt0,mt1", [
+        # MT128x128: 16 tiles × 4 DWORDs = 64 total. P=193 leaves the pool
+        # already above the VGPR ceiling, so every accumulator must use AGPR.
+        (193, 128, 128),
+    ])
+    def test_pool_exhausted_forces_all_agpr(self, pre_alloc, mt0, mt1):
+        """When the pre-allocated pool already exceeds the VGPR ceiling, every
+        CDTile accumulator must be allocated in AGPR."""
+        writer = self._make_writer(pre_alloc)
+        dTileInfo = self._alloc_cdtile(writer, mt0, mt1)
+        assert len(dTileInfo.vgprTiles) > 0
+        vgpr_tiles = [t for t in dTileInfo.vgprTiles if t.regList.is_vgpr]
+        assert vgpr_tiles == [], (
+            f"Expected all CDTile tiles in AGPR when pool is exhausted "
+            f"(pre_alloc={pre_alloc}, MT{mt0}x{mt1}), "
+            f"but {len(vgpr_tiles)} tile(s) landed in VGPR"
+        )
+
+    @pytest.mark.parametrize("pre_alloc,mt0,mt1", [
+        # MT128x128: T=64 fits entirely below the conservative epilogue ceiling,
+        # so preferVgpr stays True and the first tile lands in VGPR.
+        (0, 128, 128),
+        (4, 128, 128),
+    ])
+    def test_fits_enables_vgpr(self, pre_alloc, mt0, mt1):
+        """When the whole D-tile fits below the conservative epilogue ceiling,
+        preferVgpr must be True and at least the first CDTile tile must be in
+        VGPR."""
+        writer = self._make_writer(pre_alloc)
+        dTileInfo = self._alloc_cdtile(writer, mt0, mt1)
+        assert len(dTileInfo.vgprTiles) > 0
+        first_is_vgpr = dTileInfo.vgprTiles[0].regList.is_vgpr
+        assert first_is_vgpr, (
+            f"Expected first CDTile tile in VGPR when pool fits "
+            f"(pre_alloc={pre_alloc}, MT{mt0}x{mt1})"
+        )
+
+    def _alloc_cdtile_streamk(self, writer, mt0, mt1, streamK, wave_group=None):
+        """Allocate CDTile registers for an FP4 macro-tile with StreamK enabled."""
+        from types import SimpleNamespace
+        if wave_group is None:
+            wave_group = [2, 2]
+        kernel = create_kernel(mt0, mt1, fp4=True, miWaveGroup=wave_group)
+        kernel["StreamK"] = streamK
+        kernel["UseSubtileImpl"] = True
+        miwt = kernel["MIWaveTile"]
+        writer.states.c = SimpleNamespace(numVgprValu=miwt[0] * miwt[1] * (
+            kernel["MatrixInstM"] * kernel["MatrixInstN"] // kernel["WavefrontSize"]))
+        dTileInfo = makeTileInfo('D', kernel)
+        dTileInfo.allocVgprTileRegisters_legacy(writer, kernel)
+        return dTileInfo
+
+    @pytest.mark.parametrize("pre_alloc,mt0,mt1", [
+        # MT256x192 partial-splits for a non-StreamK kernel (see
+        # test_overflow_uses_partial_split). With StreamK enabled the workspace
+        # store (partialsWriteBatch) and D-store (GlobalWriteBatch) both activate
+        # valueCSourceMap when any VGPR-backed tile exists, so a partial
+        # VGPR/AGPR split is safe. StreamK therefore applies the same
+        # epiCeil-capped split as non-StreamK kernels instead of falling back to
+        # all-AGPR.
+        (4, 256, 192),
+        (1, 256, 192),
+    ])
+    def test_streamk_large_tile_uses_partial_split(self, pre_alloc, mt0, mt1):
+        """StreamK large tiles use the same epiCeil-capped partial VGPR/AGPR split
+        as non-StreamK kernels -- no AGPR-first fallback."""
+        writer = self._make_writer(pre_alloc)
+        dTileInfo = self._alloc_cdtile_streamk(writer, mt0, mt1, streamK=3)
+        assert len(dTileInfo.vgprTiles) > 0
+        vgpr_tiles = [t for t in dTileInfo.vgprTiles if t.regList.is_vgpr]
+        agpr_tiles = [t for t in dTileInfo.vgprTiles if not t.regList.is_vgpr]
+        assert vgpr_tiles, (
+            f"StreamK MT{mt0}x{mt1} should partial-split (some tiles in VGPR), "
+            f"but all tiles landed in AGPR (pre_alloc={pre_alloc})"
+        )
+        assert agpr_tiles, (
+            f"StreamK MT{mt0}x{mt1} should partial-split (some tiles in AGPR), "
+            f"but all tiles landed in VGPR (pre_alloc={pre_alloc})"
+        )
+        # Safety: every VGPR-backed accumulator must stay inside the register file.
+        max_vgpr_idx = max(idx for t in vgpr_tiles for idx in list(t))
+        assert max_vgpr_idx < 256, (
+            f"VGPR-backed accumulator references v{max_vgpr_idx} (>= 256) "
+            f"(pre_alloc={pre_alloc}, MT{mt0}x{mt1}, StreamK=3)"
+        )
+
+    @pytest.mark.parametrize("pre_alloc,mt0,mt1", [
+        # MT128x128 (T=64) fits the whole tile in VGPR under the ceiling, so even a
+        # StreamK kernel keeps VGPR-first (the whole tile is VGPR-resident, which
+        # the workspace store requires).
+        (0, 128, 128),
+        (4, 128, 128),
+    ])
+    def test_streamk_small_tile_stays_vgpr_first(self, pre_alloc, mt0, mt1):
+        """StreamK keeps VGPR-first when the whole tile fits in VGPR."""
+        writer = self._make_writer(pre_alloc)
+        dTileInfo = self._alloc_cdtile_streamk(writer, mt0, mt1, streamK=3)
+        assert len(dTileInfo.vgprTiles) > 0
+        assert dTileInfo.vgprTiles[0].regList.is_vgpr, (
+            f"StreamK MT{mt0}x{mt1} should stay VGPR-first when the whole tile fits"
+        )

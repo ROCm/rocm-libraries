@@ -12,7 +12,7 @@ SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
 TENSILE_ROOT = os.path.abspath(os.path.join(SCRIPT_DIR, "..", "..", ".."))
 sys.path.insert(0, TENSILE_ROOT)
 from Tensile.Common.DataType import DataType
-from Tensile.Components.Subtile.Kernel import emitMfmaInstruction
+from Tensile.Components.Subtile.Kernel import emitMfmaInstruction, mapAcctoArchRegsFromAccRegMap
 from gpu_test_helpers import init_rocisa  # initializes rocisa target=gfx950
 
 
@@ -278,6 +278,48 @@ def test_F8_uses_accvgpr_alias_when_D_in_agpr_pool(writer):
     assert (
         "acc[64:67]" in asm and "acc[32:35]" in asm
     ), f"expected agpr alias on D and C:\n{asm}"
+
+
+def test_F4_uses_vgpr_alias_when_D_in_vgpr_pool(writer):
+    """When a subtile accumulator is VGPR-backed, MFMA should consume VGPRs directly."""
+    kernel = _mkKernel("F4", "F4", miK=128, sourceSwap=False, miArchVgpr=False)
+    tA = _mkTile(0, 4, writer.vgprPool)
+    tB = _mkTile(16, 4, writer.vgprPool)
+    tC = _mkTile(32, 4, writer.vgprPool)
+    tD = _mkTile(64, 4, writer.vgprPool)
+    asm = str(emitMfmaInstruction(writer, kernel, tA, tB, tC, tD))
+
+    assert "v[64:67]" in asm and "v[32:35]" in asm
+    assert "acc[64:67]" not in asm and "acc[32:35]" not in asm
+
+
+def test_subtile_acc_map_reads_vgpr_first_accumulators():
+    """Subtile FP4 may place low logical accumulator indices in VGPRs."""
+    kernel = _mkKernel("F4", "F4", miK=128, sourceSwap=False, miArchVgpr=False)
+    kernel.update({
+        "MatrixInstM": 16,
+        "MatrixInstN": 16,
+        "MatrixInstBM": 1,
+        "MatrixInstBN": 1,
+        "WavefrontSize": 64,
+        "VectorWidthA": 1,
+        "VectorWidthB": 1,
+        "MIWaveTile": [1, 1],
+        "MIRegPerOut": 1,
+    })
+    kernel["ProblemType"]["DataType"] = DataType("Float")
+
+    accRegMap = {
+        0: (True, 120),
+        1: (True, 121),
+        2: (False, 0),
+        3: (False, 1),
+    }
+    asm = str(mapAcctoArchRegsFromAccRegMap(kernel, accRegMap, write=False))
+
+    assert "v_readfirstlane_b32" not in asm
+    assert "v_mov_b32 v" in asm and "v120" in asm and "v121" in asm
+    assert "v_accvgpr_read_b32" in asm and "acc0" in asm and "acc1" in asm
 
 
 # ============================================================================

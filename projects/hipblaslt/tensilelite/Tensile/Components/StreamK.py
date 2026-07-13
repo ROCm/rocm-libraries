@@ -35,6 +35,11 @@ from rocisa.functions import scalarStaticDivideAndRemainder, sMagicDiv2, \
     vectorStaticMultiply, BranchIfNotZero, scalarUInt24DivideAndRemainder, scalarUInt32DivideAndRemainder
 
 from .Subtile.SubtileLREmit import localReadResetOffsetsSubtile
+from .Subtile.GlobalWriteBatchUtils import (
+    _extract_direct_vgpr_from_acc_read,
+    _has_any_vgpr_backed_accumulator,
+    _is_legal_valuC_offset,
+)
 
 from ..Common import print2, ceilDivide, log2
 from ..Component import Component
@@ -280,6 +285,72 @@ class StreamK(Component):
 
     def __call__(self):
         assert(0)
+
+    @staticmethod
+    def _directVgprFromAccReadInst(accReadInst):
+        """Delegate to the shared helper in GlobalWriteBatchUtils."""
+        return _extract_direct_vgpr_from_acc_read(accReadInst)
+
+    @staticmethod
+    def _isLegalValuCOffset(writer, valuCOffset, width=1):
+        """Delegate to the shared helper in GlobalWriteBatchUtils."""
+        return _is_legal_valuC_offset(
+            writer.states.c.startVgprValu,
+            writer.states.regCaps["MaxVgpr"],
+            valuCOffset, width)
+
+    @staticmethod
+    def _vgprFirstWorkspaceBatchCap(writer, kernel, ss, numElementsPerBatch):
+        """Clamp the workspace (partials / fixup) batch for VGPR-first MXF4 subtile.
+
+        Under the VGPR-first accumulator policy (MXF4 + UseSubtileImpl + StreamK)
+        the D-tile accumulators live in the VGPR file, but any tile that spilled to
+        AGPR must still be staged into a ValuC slot that AsmStoreState.
+        setupStoreElementsForBatch checks out ABOVE the live VGPR pool via
+        vgprPool.checkOutAligned (see AsmStoreState line ~838). The slot is checked
+        back in at the end of each batch, so the staging high-water mark scales with
+        the batch size. A whole-tile workspace batch therefore pushes that checkout
+        past MaxVgpr (v255 on gfx950) and the kernel fails to assemble
+        (register index out of range on the v_accvgpr_read / buffer_store).
+
+        Bound the batch to the free headroom below the VGPR ceiling so the staging
+        cannot cross MaxVgpr even in the worst case (no reusable freed holes, the
+        checkout starting at the current pool watermark). This is intentionally
+        scoped to the VGPR-first case only: AGPR-first kernels stage through the
+        compact per-batch AGPR window and keep their larger (faster) batch.
+
+        Returns numElementsPerBatch unchanged when the D-tile accumulators were not
+        actually placed in VGPR (the authoritative signal is the recorded register
+        allocation in d.tileInfo, not just the kernel data types).
+        """
+        dTileInfo = getattr(getattr(writer.states, 'd', None), 'tileInfo', None)
+        if not _has_any_vgpr_backed_accumulator(dTileInfo):
+            return numElementsPerBatch
+        if not ss.numVgprsPerElement:
+            return numElementsPerBatch
+        maxVgpr = writer.states.regCaps["MaxVgpr"]
+        # Worst-case staging start is the current pool watermark (size()); the batch
+        # must fit below MaxVgpr: size() + nElem * numVgprsPerElement <= MaxVgpr.
+        headroomElems = max(0, maxVgpr - writer.vgprPool.size()) // ss.numVgprsPerElement
+        miwt0 = max(1, int(kernel["MIWaveTile"][0])) if kernel.get("EnableMatrixInstruction") else 1
+        if miwt0 > 1:
+            # Keep MIWaveTile[0]-column alignment, matching the cap above.
+            headroomElems = (headroomElems // miwt0) * miwt0
+        # Floor at one miwt0 column so the store loop always makes forward progress.
+        # This backstop is safe for two independent reasons, so it cannot push the
+        # staging checkout past MaxVgpr in practice:
+        #   1. The VGPR-first accumulator ceiling (Subtile/Kernel.py
+        #      estimateVgprAccumulatorSplit: epiCeil reserves valuCStage +
+        #      EPILOGUE_STORE_TEMP_VGPRS, with valuCStage >= one miwt0 column)
+        #      guarantees the pool watermark here leaves room for >= one column,
+        #      i.e. headroomElems >= miwt0 — so the max() normally just returns
+        #      headroomElems.
+        #   2. The deferred-partials path runs after the main-loop A/B/scale working
+        #      set is freed, so RegisterPool.checkOutAligned reuses those freed holes
+        #      BELOW the watermark before extending the pool; the size()-based bound
+        #      above is therefore conservative (the real checkout start can be lower).
+        safeElems = max(miwt0, headroomElems)
+        return min(numElementsPerBatch, safeElems)
 
     @staticmethod
     def _depthUForTc(kernel, tc):
@@ -1209,6 +1280,10 @@ class StreamK(Component):
             elif miwt0 > 1 and numElementsPerBatch >= miwt0:
                 numElementsPerBatch = (numElementsPerBatch // miwt0) * miwt0
 
+        # VGPR-first only: bound the workspace batch so the AGPR-spill staging
+        # (checked out above the VGPR-backed accumulators) cannot cross MaxVgpr.
+        numElementsPerBatch = self._vgprFirstWorkspaceBatchCap(writer, kernel, ss, numElementsPerBatch)
+
         # assert(writer.states.numVgprValuC % gwvw == 0) # sanity check
 
         numElementsPerBatch = numElementsPerBatch if not kernel["NumElementsPerBatchStore"] else min(kernel["NumElementsPerBatchStore"],numElementsPerBatch)
@@ -1464,6 +1539,17 @@ class StreamK(Component):
         # AccVgpr read
         # if kernel.enabledSetPrioSplitLDS:
         #     kStr += inst("s_setprio", "0", "")
+        valuCOverflows = False
+        partialsSkipCopies = False
+        if kernel.get("UseSubtileImpl") and batchElements:
+            regsPerScalar = writer.states.bpeCinternal // writer.states.bpr
+            maxValuCOffset = max(ss.elementSumIdx[elementIdx] * regsPerScalar + regsPerScalar * (gwvw - 1) + regsPerScalar - 1
+                                 for elementIdx in range(0, len(batchElements)))
+            valuCOverflows = not self._isLegalValuCOffset(writer, maxValuCOffset)
+            dTileInfo = getattr(getattr(writer.states, 'd', None), 'tileInfo', None)
+            partialsSkipCopies = _has_any_vgpr_backed_accumulator(dTileInfo)
+        valuCSourceMap = {} if (valuCOverflows or partialsSkipCopies) else None
+        valuCSpareOffsets = []
         if codeAccVgprRead is not None and kernel["LocalSplitU"] == 1:
             # CompactLoopStore makes accVgprRead use v_movrelsd_2_b32 (src VGPR
             # index offset by M0) so the same body can cover the full thread
@@ -1484,8 +1570,46 @@ class StreamK(Component):
                 for vi in range(0, gwvw):
                     # loop over registers within one scalar
                     for rIdx in range(0, regsPerScalar):
+                        # Index-base convention (intentionally differs from
+                        # GlobalWriteBatch / fixupBatch, which subtract startVgprValu):
+                        # the subtile deferred-partials path stages into a
+                        # WORKSPACE-relative ValuC window whose ss.elementSumIdx is
+                        # already 0-based, so no startVgprValu subtraction is applied
+                        # (startVgprValuOffset=0). _isLegalValuCOffset / the spare
+                        # redirect add startVgprValu back when forming the physical
+                        # index, and the overflow precheck (maxValuCOffset above) uses
+                        # this same 0-based formula, so the convention is internally
+                        # consistent. The legacy (non-subtile) path keeps the
+                        # valu-relative base for backward compatibility.
                         startVgprValuOffset = 0 if kernel.get("UseSubtileImpl") else writer.states.c.startVgprValu
-                        module.add(replaceHolder(codeAccVgprRead.popFirstItem(), ss.elementSumIdx[elementIdx]*regsPerScalar + regsPerScalar*vi + rIdx - startVgprValuOffset))
+                        valuCOffset = ss.elementSumIdx[elementIdx]*regsPerScalar + regsPerScalar*vi + rIdx - startVgprValuOffset
+                        accReadInst = codeAccVgprRead.popFirstItem()
+                        directVgpr = self._directVgprFromAccReadInst(accReadInst) if valuCSourceMap is not None else None
+                        if directVgpr is None:
+                            spareOffset = None
+                            if valuCSourceMap is not None and not self._isLegalValuCOffset(writer, valuCOffset) and valuCSpareOffsets:
+                                spareOffset = valuCSpareOffsets.pop(0)
+                            if spareOffset is None:
+                                module.add(replaceHolder(accReadInst, valuCOffset))
+                            else:
+                                spareOffset, spareDirectVgpr = spareOffset
+                                valuCSourceMap[spareOffset] = spareDirectVgpr
+                                module.add(replaceHolder(accReadInst, spareOffset))
+                                valuCSourceMap[valuCOffset] = writer.states.c.startVgprValu + spareOffset
+                        else:
+                            if self._isLegalValuCOffset(writer, valuCOffset):
+                                if partialsSkipCopies:
+                                    # VGPR-first bypass: skip the acc→ValuC copy entirely;
+                                    # the store will use the accumulator VGPR directly via
+                                    # valuCSourceMap, regardless of whether the physical reg
+                                    # happens to equal the ValuC slot index.
+                                    valuCSourceMap[valuCOffset] = directVgpr
+                                else:
+                                    module.add(replaceHolder(accReadInst, valuCOffset))
+                                    if valuCSourceMap is not None and writer.states.c.startVgprValu + valuCOffset != directVgpr:
+                                        valuCSpareOffsets.append((valuCOffset, directVgpr))
+                            else:
+                                valuCSourceMap[valuCOffset] = directVgpr
                         # if kernel["StoreCInUnroll"] and not edge:
                         #     tempStr = tempStr.replace("__placeholder__",str(elementIdx*gwvw*regsPerScalar + regsPerScalar*vi + rIdx))
                         #     accVgprRead.addCode(tempStr.replace("ValuC","L2GC"))
@@ -1505,7 +1629,14 @@ class StreamK(Component):
                 # TODO KUPO!!!!!!!!!!!!!!!!
                 # newSumIdxV = sumIdxV - writer.states.c.startVgprValu
                 # covers sgemm, gemm_ex(HHS/HSS/BBS/BSS (HPA=T)), int8 (int8x4?)
-                if kernel["ProblemType"]["ComputeDataType"].isInt32() or kernel["ProblemType"]["ComputeDataType"].isSingle():
+                # Under the VGPR-first bypass (partialsSkipCopies) the acc→ValuC
+                # staging copies are skipped, so the "ValuC+N" slots referenced
+                # below are stale — the accumulator lives in the physical VGPR
+                # tracked by valuCSourceMap. These force/check paths are debug-only
+                # (writer.db flags, off by default), so disable them rather than
+                # emit assertions/overwrites against the unpopulated staging slots.
+                if (kernel["ProblemType"]["ComputeDataType"].isInt32() or kernel["ProblemType"]["ComputeDataType"].isSingle()) \
+                        and not partialsSkipCopies:
                     if writer.db["ForceExpectedValue"]:
                         module.add(VMovB32(dst=vgpr("ValuC+%u"%sumIdxV), src=writer.db["ValueCExpectedValue"], comment="force expected value"))
                         # module.add(VMovB32(dst=vgpr("ValuC+%u"%newSumIdxV), src=self.debugConfig["ValueCExpectedValue"], comment="force expected value" ))
@@ -1557,11 +1688,23 @@ class StreamK(Component):
             # WS store reads from the correct accumulator VGPRs.  For the regular path
             # (non-subtile), startVgprValu is already accounted for by the vgprValuC
             # assembler macro, so no offset is needed (matches rebase behaviour).
+            storeWidth = kernel["StoreVectorWidth"]
             if kernel.get("UseSubtileImpl"):
-                sumIdx = ss.elementSumIdx[elementIdx] + writer.states.c.startVgprValu
+                if valuCSourceMap is not None:
+                    # Remap the base element and verify all storeWidth elements are
+                    # contiguous in the map before using the physical VGPR base.
+                    baseLogical = ss.elementSumIdx[elementIdx]
+                    physBase = valuCSourceMap.get(baseLogical)
+                    if physBase is not None and all(
+                            valuCSourceMap.get(baseLogical + w, physBase + w) == physBase + w
+                            for w in range(storeWidth)):
+                        sumIdx = physBase
+                    else:
+                        sumIdx = baseLogical + writer.states.c.startVgprValu
+                else:
+                    sumIdx = ss.elementSumIdx[elementIdx] + writer.states.c.startVgprValu
             else:
                 sumIdx = ss.elementSumIdx[elementIdx]
-            storeWidth = kernel["StoreVectorWidth"]
             # storeWidth = 2
             if batchIdx == 0 and elementIdx == 0:
                 tmpSgprRes = ContinuousRegister(idx=tmpS01, size=1)
@@ -1768,6 +1911,10 @@ class StreamK(Component):
             else:
                 numElementsPerBatch = len(elements[edgeI]) # max, do 'em all
 
+            # VGPR-first only: bound the fixup batch so the AGPR-spill staging
+            # (checked out above the VGPR-backed accumulators) cannot cross MaxVgpr.
+            numElementsPerBatch = self._vgprFirstWorkspaceBatchCap(writer, kernel, ss, numElementsPerBatch)
+
             # assert(self.numVgprValuC % gwvw == 0) # sanity check
 
             numElementsPerBatch = numElementsPerBatch if not kernel["NumElementsPerBatchStore"] else min(kernel["NumElementsPerBatchStore"],numElementsPerBatch)
@@ -1886,6 +2033,26 @@ class StreamK(Component):
         # ss.setupStoreElementsForBatch(kernel, gwvw, batchElements, batchElementSgprs, preventOverflow=preventOverflow, isWorkspace=True)
         ss.setupStoreElementsForBatch(kernel, gwvw, batchElements, batchElementSgprs, False, 0, True, elementStartIdx)
 
+        # VGPR-first bypass: when accumulators are already in VGPRs, skip the acc→ValuC
+        # copies and reduce directly into the physical VGPR.  The write-back (ValuC→acc) is
+        # similarly skipped because the result is already in the physical VGPR.
+        dTileInfo = getattr(getattr(writer.states, 'd', None), 'tileInfo', None)
+        fixupSkipCopies = _has_any_vgpr_backed_accumulator(dTileInfo)
+        # Maps ValuC relative offset → physical VGPR number for VGPR-first elements.
+        fixupValuCSourceMap: dict = {}
+
+        def _fixupEffOffset(relOffset: int, width: int = 1):
+            """Return vgpr() referencing the physical VGPR (bypass) or ValuC staging."""
+            if fixupValuCSourceMap:
+                physVgpr = fixupValuCSourceMap.get(relOffset)
+                if physVgpr is not None:
+                    # physVgpr is an absolute VGPR index; reference it directly rather
+                    # than reconstructing a "ValuC+N" symbolic offset (which only
+                    # resolves correctly when vgprValuC==startVgprValu and physVgpr>=
+                    # startVgprValu, and breaks otherwise). Matches GWB._valuCVgpr.
+                    return vgpr(physVgpr, width)
+            return vgpr("ValuC+%u" % relOffset, width)
+
         loadsIssued = 0
         storesIssued = 0
         tmpS01 = tmpSgpr # scratch sgprs
@@ -1977,12 +2144,15 @@ class StreamK(Component):
                 for vi in range(0, gwvw):
                     # loop over registers within one scalar
                     for rIdx in range(0, regsPerScalar):
-                        module.add(replaceHolder(codeAccVgprRead.popFirstItem(), ss.elementSumIdx[elementIdx]*regsPerScalar + regsPerScalar*vi + rIdx - writer.states.c.startVgprValu))
-                        # tempStr = str(codeAccVgprRead.popFirstItem())
-                        # kStr += tempStr.replace("__placeholder__", str(ss.elementSumIdx[elementIdx]*regsPerScalar + regsPerScalar*vi + rIdx))
-                        # if kernel["StoreCInUnroll"] and not edge:
-                        #     tempStr = tempStr.replace("__placeholder__",str(elementIdx*gwvw*regsPerScalar + regsPerScalar*vi + rIdx))
-                        #     accVgprRead.addCode(tempStr.replace("ValuC","L2GC"))
+                        valuCOffset = ss.elementSumIdx[elementIdx]*regsPerScalar + regsPerScalar*vi + rIdx - writer.states.c.startVgprValu
+                        accReadInst = codeAccVgprRead.popFirstItem()
+                        if fixupSkipCopies:
+                            physVgpr = _extract_direct_vgpr_from_acc_read(accReadInst)
+                            if physVgpr is not None:
+                                # VGPR-first: record the mapping and skip the v_mov staging copy.
+                                fixupValuCSourceMap[valuCOffset] = physVgpr
+                                continue
+                        module.add(replaceHolder(accReadInst, valuCOffset))
 
             if not kernel["MIArchVgpr"]:
                 module.add(SNop(1, "2 wait states required before reading vgpr"))
@@ -1996,7 +2166,12 @@ class StreamK(Component):
             for vi in range(0, gwvw):
                 sumIdxV = ss.elementSumIdx[elementIdx] + vi
                 # covers sgemm, gemm_ex(HHS/HSS/BBS/BSS (HPA=T)), int8 (int8x4?)
-                if kernel["ProblemType"]["ComputeDataType"].isInt32() or kernel["ProblemType"]["ComputeDataType"].isSingle():
+                # Skip under the VGPR-first bypass (fixupSkipCopies): the acc→ValuC
+                # staging is not populated, so the "ValuC+N" slots are stale (the
+                # reduction operates on the physical accumulator VGPR via
+                # _fixupEffOffset). These are debug-only (writer.db) paths.
+                if (kernel["ProblemType"]["ComputeDataType"].isInt32() or kernel["ProblemType"]["ComputeDataType"].isSingle()) \
+                        and not fixupSkipCopies:
                     if writer.db["ForceExpectedValue"]:
                         module.add(VMovB32(dst=vgpr("ValuC+%u"%sumIdxV), src=writer.db["ValueCExpectedValue"], comment="force expected value"))
                     if writer.db["ForceVSerial"]:
@@ -2100,7 +2275,8 @@ class StreamK(Component):
                                 module.add(VLShiftRightB32(dst=vgpr(dataV), shiftHex=16, src=vgpr(dataV), \
                                     comment="shift 16bit to get next half of packed ValueC"))
                             # dataV+0 = new c = old c*beta + rC
-                            module.add(VAddPKF16(dst=vgpr("ValuC+%u"%(sumIdxV)), src0=vgpr(dataV), src1=vgpr("ValuC+%u"%(sumIdxV)), \
+                            newSumIdxV = sumIdxV - writer.states.c.startVgprValu
+                            module.add(VAddPKF16(dst=_fixupEffOffset(newSumIdxV), src0=vgpr(dataV), src1=_fixupEffOffset(newSumIdxV), \
                                 comment="sum*alpha + C*beta"))
                         elif sumIdxV%2==0 or (not ss.cfg.halfDataRegPerVI and gwvw==1):
                             newSumIdxV = sumIdxV // 2 - writer.states.c.startVgprValu
@@ -2108,7 +2284,7 @@ class StreamK(Component):
                             # kStr += inst("v_pk_mul_f16", vgpr(dataV), sgpr("Beta"), vgpr(dataV+0), \
                             #         "%s = C*beta ei=%u vi=%u"%(vgpr(dataV),elementIdx, vi))
                             # dataV+0 = new c = old c*beta + rC
-                            module.add(VAddPKF16(dst=vgpr("ValuC+%u"%(newSumIdxV)), src0=vgpr(dataV), src1=vgpr("ValuC+%u"%(newSumIdxV)), \
+                            module.add(VAddPKF16(dst=_fixupEffOffset(newSumIdxV), src0=vgpr(dataV), src1=_fixupEffOffset(newSumIdxV), \
                                 comment="sum*alpha + C*beta"))
                         else:
                             pass # add will have been done previously
@@ -2126,8 +2302,8 @@ class StreamK(Component):
                         #     src1=vgpr(dataCExternal), src2=vgpr("ValuC+%u"%newSumIdxV), \
                         #     vop3=VOP3PModifiers(op_sel=[0,hi16,0], op_sel_hi=[0,1,0]),
                         #     comment="//C*=beta"))
-                        module.add(writer.states.mixinst(dst=vgpr("ValuC+%u"%newSumIdxV), src0=1, \
-                            src1=vgpr(dataCExternal), src2=vgpr("ValuC+%u"%newSumIdxV), \
+                        module.add(writer.states.mixinst(dst=_fixupEffOffset(newSumIdxV), src0=1, \
+                            src1=vgpr(dataCExternal), src2=_fixupEffOffset(newSumIdxV), \
                             vop3=VOP3PModifiers(op_sel=[0,hi16,0], op_sel_hi=[0,1,0]),
                             comment="//C*=beta"))
                         # kStr += inst(self.mixinst, vgpr("ValuC+%u"%sumIdxV), 1, \
@@ -2148,38 +2324,38 @@ class StreamK(Component):
                         #     kStr += inst("v_lshlrev_b32", vgpr(tmpVgpr), "16", vgpr(dataCExternal), "convert bf16 to fp32" )
                         module.add(VCvtBF16toFP32(dst=vgpr(tmpVgpr), src=vgpr(dataCExternal), vgprMask=vgpr(cvtVgprStruct.vgprBf16Mask), vi=(vi)))
                         newSumIdxV = sumIdxV - writer.states.c.startVgprValu
-                        module.add(VAddF32(dst=vgpr("ValuC+%u"%sumIdxV), src0=vgpr("ValuC+%u"%sumIdxV), src1=vgpr(tmpVgpr), comment="accum partials"))
+                        module.add(VAddF32(dst=_fixupEffOffset(newSumIdxV), src0=_fixupEffOffset(newSumIdxV), src1=vgpr(tmpVgpr), comment="accum partials"))
 
                 elif kernel["ProblemType"]["ComputeDataType"].isSingle():
                     if kernel["ProblemType"]["DataType"].isInt8():
                         newSumIdxV = sumIdxV - writer.states.c.startVgprValu
-                        module.add(VAddU32(dst=vgpr("ValuC+%u"%newSumIdxV), src0=vgpr(dataV+0), src1=vgpr("ValuC+%u"%newSumIdxV), comment="accum partials"))
+                        module.add(VAddU32(dst=_fixupEffOffset(newSumIdxV), src0=vgpr(dataV+0), src1=_fixupEffOffset(newSumIdxV), comment="accum partials"))
                     else:
                         newSumIdxV = sumIdxV - writer.states.c.startVgprValu
-                        module.add(VAddF32(dst=vgpr("ValuC+%u"%newSumIdxV), src0=vgpr("ValuC+%u"%newSumIdxV), src1=vgpr(dataV+0), comment="accum partials"))
+                        module.add(VAddF32(dst=_fixupEffOffset(newSumIdxV), src0=_fixupEffOffset(newSumIdxV), src1=vgpr(dataV+0), comment="accum partials"))
 
                 elif kernel["ProblemType"]["ComputeDataType"].isInt32():
                     newSumIdxV = sumIdxV - writer.states.c.startVgprValu
                     # assume we will need to replace v_mac_f32 with v_add_u32 and s_mul_lo_i32
                     # v_mad_i32_i24
-                    module.add(VAddU32(dst=vgpr("ValuC+%u"%newSumIdxV), src0=vgpr(dataV+0), src1=vgpr("ValuC+%u"%newSumIdxV), comment="accum partials"))
+                    module.add(VAddU32(dst=_fixupEffOffset(newSumIdxV), src0=vgpr(dataV+0), src1=_fixupEffOffset(newSumIdxV), comment="accum partials"))
 
                 elif kernel["ProblemType"]["ComputeDataType"].isDouble():
                     newSumIdxV = sumIdxV * 2 - writer.states.c.startVgprValu
                     # dataV+0 = new c = old c*beta
-                    module.add(VAddF64(dst=vgpr("ValuC+%u"%(newSumIdxV),2), src0=vgpr("ValuC+%u"%(newSumIdxV),2), src1=vgpr(dataV+0,2), comment="accum partials"))
+                    module.add(VAddF64(dst=_fixupEffOffset(newSumIdxV, 2), src0=_fixupEffOffset(newSumIdxV, 2), src1=vgpr(dataV+0,2), comment="accum partials"))
 
                 # single precision complex
                 elif kernel["ProblemType"]["ComputeDataType"].isSingleComplex():
                     newSumIdxV = sumIdxV * 2 - writer.states.c.startVgprValu
-                    module.add(VAddF32(dst=vgpr("ValuC+%u"%(newSumIdxV)), src0=vgpr("ValuC+%u"%(newSumIdxV)), src1=vgpr(dataV+0), comment="accum partials real"))
-                    module.add(VAddF32(dst=vgpr("ValuC+%u"%(newSumIdxV+1)), src0=vgpr("ValuC+%u"%(newSumIdxV+1)), src1=vgpr(dataV+1), comment="accum partials imag"))
+                    module.add(VAddF32(dst=_fixupEffOffset(newSumIdxV), src0=_fixupEffOffset(newSumIdxV), src1=vgpr(dataV+0), comment="accum partials real"))
+                    module.add(VAddF32(dst=_fixupEffOffset(newSumIdxV+1), src0=_fixupEffOffset(newSumIdxV+1), src1=vgpr(dataV+1), comment="accum partials imag"))
 
                 # double precision complex
                 elif kernel["ProblemType"]["ComputeDataType"].isDoubleComplex():
                     newSumIdxV = sumIdxV * 4 - writer.states.c.startVgprValu
-                    module.add(VAddF64(dst=vgpr("ValuC+%u"%(newSumIdxV+0),2), src0=vgpr("ValuC+%u"%(newSumIdxV+0),2), src1=vgpr(dataV+0,2), comment="accum partials real"))
-                    module.add(VAddF64(dst=vgpr("ValuC+%u"%(newSumIdxV+2),2), src0=vgpr("ValuC+%u"%(newSumIdxV+2),2), src1=vgpr(dataV+2,2), comment="accum partials imag"))
+                    module.add(VAddF64(dst=_fixupEffOffset(newSumIdxV+0, 2), src0=_fixupEffOffset(newSumIdxV+0, 2), src1=vgpr(dataV+0,2), comment="accum partials real"))
+                    module.add(VAddF64(dst=_fixupEffOffset(newSumIdxV+2, 2), src0=_fixupEffOffset(newSumIdxV+2, 2), src1=vgpr(dataV+2,2), comment="accum partials imag"))
 
         ########################################
         # AccVgpr write
@@ -2193,12 +2369,13 @@ class StreamK(Component):
                 for vi in range(0, gwvw):
                     # loop over registers within one scalar
                     for rIdx in range(0, regsPerScalar):
-                        module.add(replaceHolder(codeAccVgprWrite.popFirstItem(), ss.elementSumIdx[elementIdx]*regsPerScalar + regsPerScalar*vi + rIdx - writer.states.c.startVgprValu))
-                        # tempStr = str(codeAccVgprWrite.popFirstItem())
-                        # kStr += tempStr.replace("__placeholder__", str(ss.elementSumIdx[elementIdx]*regsPerScalar + regsPerScalar*vi + rIdx))
-                        # if kernel["StoreCInUnroll"] and not edge:
-                        #     tempStr = tempStr.replace("__placeholder__",str(elementIdx*gwvw*regsPerScalar + regsPerScalar*vi + rIdx))
-                        #     accVgprRead.addCode(tempStr.replace("ValuC","L2GC"))
+                        valuCOffset = ss.elementSumIdx[elementIdx]*regsPerScalar + regsPerScalar*vi + rIdx - writer.states.c.startVgprValu
+                        accWriteInst = codeAccVgprWrite.popFirstItem()
+                        if fixupValuCSourceMap.get(valuCOffset) is not None:
+                            # VGPR-first bypass: the reduction was done in-place in the physical
+                            # VGPR; no write-back to the physical accumulator register is needed.
+                            continue
+                        module.add(replaceHolder(accWriteInst, valuCOffset))
 
             if not kernel["MIArchVgpr"]:
                 module.add(SNop(1, "2 wait states required before reading vgpr"))
