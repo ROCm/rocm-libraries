@@ -95,23 +95,13 @@ namespace TensileLite
         }
 #endif
 
-        // Helper to store data from an AccumT buffer into various destination types.
-        template <typename AccumT, typename DstType>
-        DstType castForStore(AccumT value)
-        {
-            if constexpr(std::is_arithmetic_v<DstType>)
-                return static_cast<DstType>(value);
-            else
-                return static_cast<DstType>(static_cast<float>(value));
-        }
-
         template <typename AccumT, typename DstType>
         void storeFrom(void* dst, const std::vector<AccumT>& buffer, size_t N)
         {
             DstType* dPtr = static_cast<DstType*>(dst);
             for(size_t i = 0; i < N; ++i)
             {
-                dPtr[i] = castForStore<AccumT, DstType>(buffer[i]);
+                dPtr[i] = static_cast<DstType>(buffer[i]);
             }
         }
 
