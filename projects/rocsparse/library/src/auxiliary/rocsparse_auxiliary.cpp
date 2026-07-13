@@ -2587,8 +2587,10 @@ try
     ROCSPARSE_CHECKARG_SIZE(5, ell_cols);
     ROCSPARSE_CHECKARG(5, ell_cols, (ell_cols > cols), rocsparse_status_invalid_size);
 
-    ROCSPARSE_CHECKARG_ARRAY(6, ell_cols * ell_block_dim, ell_col_ind);
-    ROCSPARSE_CHECKARG_ARRAY(7, ell_cols * ell_block_dim, ell_val);
+    const int64_t brows = (rows + ell_block_dim - 1) / ell_block_dim;
+
+    ROCSPARSE_CHECKARG_ARRAY(6, brows * ell_cols / ell_block_dim, ell_col_ind);
+    ROCSPARSE_CHECKARG_ARRAY(7, rows * ell_cols, ell_val);
 
     ROCSPARSE_CHECKARG_ENUM(8, idx_type);
     ROCSPARSE_CHECKARG_ENUM(9, idx_base);
@@ -2660,8 +2662,10 @@ try
     ROCSPARSE_CHECKARG_SIZE(5, ell_cols);
     ROCSPARSE_CHECKARG(5, ell_cols, ell_cols > cols, rocsparse_status_invalid_size);
 
-    ROCSPARSE_CHECKARG_ARRAY(6, rows * ell_cols * ell_block_dim, ell_col_ind);
-    ROCSPARSE_CHECKARG_ARRAY(7, rows * ell_cols * ell_block_dim, ell_val);
+    const int64_t brows = (rows + ell_block_dim - 1) / ell_block_dim;
+
+    ROCSPARSE_CHECKARG_ARRAY(6, brows * ell_cols / ell_block_dim, ell_col_ind);
+    ROCSPARSE_CHECKARG_ARRAY(7, rows * ell_cols, ell_val);
 
     ROCSPARSE_CHECKARG_ENUM(8, idx_type);
     ROCSPARSE_CHECKARG_ENUM(9, idx_base);

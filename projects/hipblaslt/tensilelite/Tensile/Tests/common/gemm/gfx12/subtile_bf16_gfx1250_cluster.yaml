@@ -2,6 +2,7 @@ TestParameters:
   marks: [skip-gfx900, skip-gfx906, skip-gfx908, skip-gfx90a, skip-gfx940, skip-gfx941, skip-gfx942, skip-gfx950, skip-gfx1010, skip-gfx1011, skip-gfx1012, skip-gfx1030, skip-gfx1100, skip-gfx1101, skip-gfx1102, skip-gfx1200, skip-gfx1201]
 
 GlobalParameters:
+  SyncsPerBenchmark: 0
   NumElementsToValidate: -1
   PrintLevel: 3
   Device: 0
@@ -28,8 +29,8 @@ BenchmarkProblems:
       DestDataType: b
       ComputeDataType: s
       HighPrecisionAccumulate: True
-      TransposeA: 1
-      TransposeB: 0
+      TransposeA: true
+      TransposeB: false
       UseBeta: True
       Batched: True
 
@@ -42,8 +43,9 @@ BenchmarkProblems:
         - DepthU: [64, 128]
         - WavefrontSize: [32]
         - PrefetchGlobalRead: [0, 2]
+        - PrefetchGL2: [0, 1, 2]
         - ScheduleIterAlg: [3]
-        - UseSubtileImpl: [1]
+        - UseSubtileImpl: [true]
         - StreamK: [0]
         - TDMInst: [3]
         - StaggerU: [0]
@@ -55,8 +57,8 @@ BenchmarkProblems:
         - GlobalReadVectorWidthB: [-1]
         - GlobalSplitU: [1]
         - PreloadKernArgs: [False]
-        # Clustered launch enables the cluster-scope barrier automatically
-        # (subtile derives ClusterBarrier from ClusterDim + TDM; no multicast).
+        # Clustered launch (ClusterDim != [1,1]) automatically enables both the
+        # cluster-scope barrier and TDM multicast for subtile; both are derived.
         - ClusterDim: [[2, 2]]
       BenchmarkForkParameters:
       JoinParameters:
@@ -78,8 +80,8 @@ BenchmarkProblems:
       DestDataType: b
       ComputeDataType: s
       HighPrecisionAccumulate: True
-      TransposeA: 1
-      TransposeB: 0
+      TransposeA: true
+      TransposeB: false
       UseBeta: True
       Batched: True
 
@@ -92,8 +94,9 @@ BenchmarkProblems:
         - DepthU: [64, 128]
         - WavefrontSize: [32]
         - PrefetchGlobalRead: [0, 2]
+        - PrefetchGL2: [0, 1, 2]
         - ScheduleIterAlg: [3]
-        - UseSubtileImpl: [1]
+        - UseSubtileImpl: [true]
         - StreamK: [0]
         - TDMInst: [3]
         - StaggerU: [0]
@@ -123,8 +126,8 @@ BenchmarkProblems:
       DestDataType: b
       ComputeDataType: s
       HighPrecisionAccumulate: True
-      TransposeA: 1
-      TransposeB: 0
+      TransposeA: true
+      TransposeB: false
       UseBeta: True
       Batched: True
 
@@ -137,8 +140,9 @@ BenchmarkProblems:
         - DepthU: [64, 128]
         - WavefrontSize: [32]
         - PrefetchGlobalRead: [0, 2]
+        - PrefetchGL2: [0, 1, 2]
         - ScheduleIterAlg: [3]
-        - UseSubtileImpl: [1]
+        - UseSubtileImpl: [true]
         - StreamK: [0]
         - TDMInst: [3]
         - StaggerU: [0]

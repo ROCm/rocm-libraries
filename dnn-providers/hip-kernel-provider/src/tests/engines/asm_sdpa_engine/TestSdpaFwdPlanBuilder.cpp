@@ -4,6 +4,7 @@
 #include <gtest/gtest.h>
 
 #include <hipdnn_data_sdk/utilities/ShapeUtilities.hpp>
+#include <hipdnn_flatbuffers_sdk/flatbuffer_utilities/EngineConfigWrapper.hpp>
 #include <hipdnn_flatbuffers_sdk/flatbuffer_utilities/GraphWrapper.hpp>
 #include <hipdnn_test_sdk/utilities/FlatbufferGraphTestUtils.hpp>
 #include <hipdnn_test_sdk/utilities/TestUtilities.hpp>
@@ -11,6 +12,7 @@
 #include "ConfigHelpers.hpp"
 #include "GraphTest.hpp"
 #include "asm_fmha_v3_fwd_configs.hpp"
+#include "core/Context.hpp"
 #include "core/Handle.hpp"
 #include "core/Settings.hpp"
 #include "engines/asm_sdpa_engine/plans/SdpaFwdPlanBuilder.hpp"
@@ -294,7 +296,7 @@ plan_utils::MaskType classifyMask(const flatbuffers::FlatBufferBuilder& builder)
     return plan_utils::getMaskType(attrs);
 }
 
-TEST_F(TestSdpaFwdPlanBuilder, IsApplicable_RejectsCausalMaskAndBottomRightSetTogether)
+TEST_F(TestSdpaFwdPlanBuilder, IsApplicableRejectsCausalMaskAndBottomRightSetTogether)
 {
     using namespace hipdnn_flatbuffers_sdk::data_objects;
 
@@ -309,7 +311,7 @@ TEST_F(TestSdpaFwdPlanBuilder, IsApplicable_RejectsCausalMaskAndBottomRightSetTo
     EXPECT_THROW(classifyMask(builder), hipdnn_plugin_sdk::HipdnnPluginException);
 }
 
-TEST_F(TestSdpaFwdPlanBuilder, IsApplicable_PrefersCausalMaskOverWindowBounds)
+TEST_F(TestSdpaFwdPlanBuilder, IsApplicablePrefersCausalMaskOverWindowBounds)
 {
     using namespace hipdnn_flatbuffers_sdk::data_objects;
 
@@ -327,7 +329,7 @@ TEST_F(TestSdpaFwdPlanBuilder, IsApplicable_PrefersCausalMaskOverWindowBounds)
     EXPECT_EQ(maskType, plan_utils::MaskType::TOP_LEFT_CAUSAL);
 }
 
-TEST_F(TestSdpaFwdPlanBuilder, IsApplicable_PrefersBottomRightCausalOverTopLeftBounds)
+TEST_F(TestSdpaFwdPlanBuilder, IsApplicablePrefersBottomRightCausalOverTopLeftBounds)
 {
     using namespace hipdnn_flatbuffers_sdk::data_objects;
 
@@ -346,7 +348,7 @@ TEST_F(TestSdpaFwdPlanBuilder, IsApplicable_PrefersBottomRightCausalOverTopLeftB
     EXPECT_EQ(maskType, plan_utils::MaskType::BOTTOM_RIGHT_CAUSAL);
 }
 
-TEST_F(TestSdpaFwdPlanBuilder, IsApplicable_AcceptsConsistentCausalMaskAndBounds)
+TEST_F(TestSdpaFwdPlanBuilder, IsApplicableAcceptsConsistentCausalMaskAndBounds)
 {
     using namespace hipdnn_flatbuffers_sdk::data_objects;
 
@@ -364,13 +366,13 @@ TEST_F(TestSdpaFwdPlanBuilder, IsApplicable_AcceptsConsistentCausalMaskAndBounds
     EXPECT_EQ(maskType, plan_utils::MaskType::TOP_LEFT_CAUSAL);
 }
 
-TEST_F(TestSdpaFwdPlanBuilder, IsApplicable_PrefersBottomRightCausalOverWindowBounds)
+TEST_F(TestSdpaFwdPlanBuilder, IsApplicablePrefersBottomRightCausalOverWindowBounds)
 {
     using namespace hipdnn_flatbuffers_sdk::data_objects;
 
     // causal_mask_bottom_right=true takes precedence over the bounds trio, even
     // though a symmetric sliding window (left=64, right=64) would derive
-    // WINDOW_GENERIC: result is bottom-right causal.
+    // SLIDING_WINDOW: result is bottom-right causal.
     auto builder = createSdpaFwdGraphWithMask(
         /*causalMask=*/false,
         /*causalMaskBottomRight=*/true,
@@ -387,7 +389,7 @@ TEST_F(TestSdpaFwdPlanBuilder, IsApplicable_PrefersBottomRightCausalOverWindowBo
 // as unbounded (-1), so a partially specified trio still derives the mask it
 // describes.
 
-TEST_F(TestSdpaFwdPlanBuilder, MaskBoundsTrio_RightZeroLeftUnsetDerivesTopLeftCausal)
+TEST_F(TestSdpaFwdPlanBuilder, MaskBoundsTrioRightZeroLeftUnsetDerivesTopLeftCausal)
 {
     using namespace hipdnn_flatbuffers_sdk::data_objects;
 
@@ -405,7 +407,7 @@ TEST_F(TestSdpaFwdPlanBuilder, MaskBoundsTrio_RightZeroLeftUnsetDerivesTopLeftCa
     EXPECT_EQ(maskType, plan_utils::MaskType::TOP_LEFT_CAUSAL);
 }
 
-TEST_F(TestSdpaFwdPlanBuilder, MaskBoundsTrio_RightZeroBottomRightDerivesBottomRightCausal)
+TEST_F(TestSdpaFwdPlanBuilder, MaskBoundsTrioRightZeroBottomRightDerivesBottomRightCausal)
 {
     using namespace hipdnn_flatbuffers_sdk::data_objects;
 
@@ -422,7 +424,7 @@ TEST_F(TestSdpaFwdPlanBuilder, MaskBoundsTrio_RightZeroBottomRightDerivesBottomR
     EXPECT_EQ(maskType, plan_utils::MaskType::BOTTOM_RIGHT_CAUSAL);
 }
 
-TEST_F(TestSdpaFwdPlanBuilder, MaskBoundsTrio_ExplicitCausalBoundsDeriveTopLeftCausal)
+TEST_F(TestSdpaFwdPlanBuilder, MaskBoundsTrioExplicitCausalBoundsDeriveTopLeftCausal)
 {
     using namespace hipdnn_flatbuffers_sdk::data_objects;
 
@@ -439,7 +441,7 @@ TEST_F(TestSdpaFwdPlanBuilder, MaskBoundsTrio_ExplicitCausalBoundsDeriveTopLeftC
     EXPECT_EQ(maskType, plan_utils::MaskType::TOP_LEFT_CAUSAL);
 }
 
-TEST_F(TestSdpaFwdPlanBuilder, MaskBoundsTrio_BothUnsetDerivesNoMask)
+TEST_F(TestSdpaFwdPlanBuilder, MaskBoundsTrioBothUnsetDerivesNoMask)
 {
     using namespace hipdnn_flatbuffers_sdk::data_objects;
 
@@ -450,12 +452,12 @@ TEST_F(TestSdpaFwdPlanBuilder, MaskBoundsTrio_BothUnsetDerivesNoMask)
         flatbuffers::nullopt,
         DiagonalAlignment::TOP_LEFT);
 
-    plan_utils::MaskType maskType = plan_utils::MaskType::WINDOW_GENERIC;
+    plan_utils::MaskType maskType = plan_utils::MaskType::SLIDING_WINDOW;
     EXPECT_NO_THROW(maskType = classifyMask(builder));
     EXPECT_EQ(maskType, plan_utils::MaskType::NO_MASK);
 }
 
-TEST_F(TestSdpaFwdPlanBuilder, MaskBoundsTrio_BothUnboundedDerivesNoMask)
+TEST_F(TestSdpaFwdPlanBuilder, MaskBoundsTrioBothUnboundedDerivesNoMask)
 {
     using namespace hipdnn_flatbuffers_sdk::data_objects;
 
@@ -466,12 +468,12 @@ TEST_F(TestSdpaFwdPlanBuilder, MaskBoundsTrio_BothUnboundedDerivesNoMask)
         flatbuffers::Optional<int64_t>(-1),
         DiagonalAlignment::TOP_LEFT);
 
-    plan_utils::MaskType maskType = plan_utils::MaskType::WINDOW_GENERIC;
+    plan_utils::MaskType maskType = plan_utils::MaskType::SLIDING_WINDOW;
     EXPECT_NO_THROW(maskType = classifyMask(builder));
     EXPECT_EQ(maskType, plan_utils::MaskType::NO_MASK);
 }
 
-TEST_F(TestSdpaFwdPlanBuilder, MaskBoundsTrio_SymmetricWindowDerivesWindowGeneric)
+TEST_F(TestSdpaFwdPlanBuilder, MaskBoundsTrioSymmetricWindowDerivesSlidingWindow)
 {
     using namespace hipdnn_flatbuffers_sdk::data_objects;
 
@@ -484,10 +486,10 @@ TEST_F(TestSdpaFwdPlanBuilder, MaskBoundsTrio_SymmetricWindowDerivesWindowGeneri
 
     plan_utils::MaskType maskType = plan_utils::MaskType::NO_MASK;
     EXPECT_NO_THROW(maskType = classifyMask(builder));
-    EXPECT_EQ(maskType, plan_utils::MaskType::WINDOW_GENERIC);
+    EXPECT_EQ(maskType, plan_utils::MaskType::SLIDING_WINDOW);
 }
 
-TEST_F(TestSdpaFwdPlanBuilder, MaskBoundsTrio_LeftOnlyDerivesWindowGeneric)
+TEST_F(TestSdpaFwdPlanBuilder, MaskBoundsTrioLeftOnlyDerivesSlidingWindow)
 {
     using namespace hipdnn_flatbuffers_sdk::data_objects;
 
@@ -501,7 +503,118 @@ TEST_F(TestSdpaFwdPlanBuilder, MaskBoundsTrio_LeftOnlyDerivesWindowGeneric)
 
     plan_utils::MaskType maskType = plan_utils::MaskType::NO_MASK;
     EXPECT_NO_THROW(maskType = classifyMask(builder));
-    EXPECT_EQ(maskType, plan_utils::MaskType::WINDOW_GENERIC);
+    EXPECT_EQ(maskType, plan_utils::MaskType::SLIDING_WINDOW);
+}
+
+// =============================================================================
+// Byte-stride overflow guard
+// =============================================================================
+
+// Helper: create a forward SDPA graph with explicit strides for all tensors.
+auto createSdpaFwdGraphWithStrides(const std::vector<int64_t>& dims,
+                                   const std::vector<int64_t>& qStrides,
+                                   const std::vector<int64_t>& kStrides,
+                                   const std::vector<int64_t>& vStrides,
+                                   const std::vector<int64_t>& oStrides)
+{
+    const std::vector<int64_t> kDims = {dims[0], dims[1], dims[2], dims[3]};
+    const std::vector<int64_t> oDims = {dims[0], dims[1], dims[2], dims[3]};
+
+    return hipdnn_test_sdk::utilities::createValidSdpaFwdGraph(
+        dims,
+        qStrides,
+        kDims,
+        kStrides,
+        dims,
+        vStrides,
+        oDims,
+        oStrides,
+        hipdnn_flatbuffers_sdk::data_objects::DataType::BFLOAT16);
+}
+
+TEST_F(TestSdpaFwdPlanBuilder, IsApplicable_RejectsOversizedByteStrides)
+{
+    SKIP_IF_NO_DEVICES();
+
+    const std::string deviceString
+        = hip_kernel_provider_common::getDeviceString(_handle.getStream());
+    if(deviceString != "gfx942" && deviceString != "gfx950")
+    {
+        GTEST_SKIP();
+    }
+
+    // A batch stride just above UINT32_MAX / 2 will overflow when scaled to
+    // bytes (stride * sizeof(bf16)).  The engine must decline via isApplicable.
+    constexpr int64_t K_OVERFLOW_STRIDE = static_cast<int64_t>(UINT32_MAX) / 2 + 1;
+    const std::vector<int64_t> dims = {4, 8, 256, 128};
+    const std::vector<int64_t> overflowStrides = {K_OVERFLOW_STRIDE, 256 * 128, 128, 1};
+    const std::vector<int64_t> normalStrides = hipdnn_data_sdk::utilities::generateStrides(dims);
+
+    // Q has overflow stride
+    auto builderQ = createSdpaFwdGraphWithStrides(
+        dims, overflowStrides, normalStrides, normalStrides, normalStrides);
+    hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper gwQ(builderQ.GetBufferPointer(),
+                                                                   builderQ.GetSize());
+    EXPECT_FALSE(_planBuilder.isApplicable(_handle, gwQ));
+
+    // K has overflow stride
+    auto builderK = createSdpaFwdGraphWithStrides(
+        dims, normalStrides, overflowStrides, normalStrides, normalStrides);
+    hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper gwK(builderK.GetBufferPointer(),
+                                                                   builderK.GetSize());
+    EXPECT_FALSE(_planBuilder.isApplicable(_handle, gwK));
+
+    // Normal strides pass
+    auto builderOk = createSdpaFwdGraphWithStrides(
+        dims, normalStrides, normalStrides, normalStrides, normalStrides);
+    hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper gwOk(builderOk.GetBufferPointer(),
+                                                                    builderOk.GetSize());
+    EXPECT_TRUE(_planBuilder.isApplicable(_handle, gwOk));
+}
+
+// =============================================================================
+// buildPlan failure paths
+// =============================================================================
+
+TEST_F(TestSdpaFwdPlanBuilder, BuildPlan_ThrowsOnEmptyKernelKey)
+{
+    SKIP_IF_NO_DEVICES();
+
+    const std::string deviceString
+        = hip_kernel_provider_common::getDeviceString(_handle.getStream());
+    if(deviceString != "gfx942" && deviceString != "gfx950")
+    {
+        GTEST_SKIP();
+    }
+
+    // Use an unsupported head dimension so the kernel registry lookup returns
+    // an empty key.  isApplicable would reject this, but buildPlan must also
+    // throw rather than crashing via cfg_fmha_fwd.at("").
+    auto builder = createSdpaFwdGraph({4, 8, 256, 100});
+    hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper gw(builder.GetBufferPointer(),
+                                                                  builder.GetSize());
+
+    // Forward ignores engineConfig — a null-buffer wrapper suffices.
+    hipdnn_flatbuffers_sdk::flatbuffer_utilities::EngineConfigWrapper dummyCfg(nullptr, 0);
+    Context context;
+    EXPECT_THROW(_planBuilder.buildPlan(_handle, gw, dummyCfg, context),
+                 hipdnn_plugin_sdk::HipdnnPluginException);
+}
+
+// =============================================================================
+// initializeExecutionSettings
+// =============================================================================
+
+TEST_F(TestSdpaFwdPlanBuilder, InitializeExecutionSettings_IsNoOp)
+{
+    auto builder = createSdpaFwdGraph();
+    hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper gw(builder.GetBufferPointer(),
+                                                                  builder.GetSize());
+
+    hipdnn_flatbuffers_sdk::flatbuffer_utilities::EngineConfigWrapper dummyCfg(nullptr, 0);
+    Settings settings;
+    // Must not throw or log an error — forward has no knobs.
+    EXPECT_NO_THROW(_planBuilder.initializeExecutionSettings(_handle, gw, dummyCfg, settings));
 }
 
 } // namespace

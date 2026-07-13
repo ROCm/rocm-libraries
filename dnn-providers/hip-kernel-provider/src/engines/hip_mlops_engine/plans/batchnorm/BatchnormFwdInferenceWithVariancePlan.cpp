@@ -222,10 +222,12 @@ void BatchnormFwdInferenceWithVariancePlan::compile(const IKernelCompiler& kerne
 
     // Get activation mode
     auto activationMode = ActivationMode::PASTHRU;
-
+    const hipdnn_flatbuffers_sdk::data_objects::TensorAttributes* outputTensor
+        = _inferenceParams.y();
     if(_inferenceParams.optActivation().has_value() && _inferenceParams.activationOut() != nullptr)
     {
         activationMode = (*_inferenceParams.optActivation()).mode;
+        outputTensor = _inferenceParams.activationOut();
     }
 
     // Determine data type configuration
@@ -240,7 +242,12 @@ void BatchnormFwdInferenceWithVariancePlan::compile(const IKernelCompiler& kerne
            && scaleDataType == hipdnn_flatbuffers_sdk::data_objects::DataType::FLOAT);
 
     // Prepare compilation options
-    BatchnormKernelCompileOptions options(_inferenceParams.x(), deviceProperties, activationMode);
+    BatchnormKernelCompileOptions options(_inferenceParams.x(),
+                                          outputTensor,
+                                          _inferenceParams.estMean(),
+                                          _inferenceParams.scale(),
+                                          deviceProperties,
+                                          activationMode);
     options.update("HIP_PLUGIN_BN_GRP0", xlocalsize);
     options.update("HIP_PLUGIN_BN_GRP1", ylocalsize);
     options.update("HIP_PLUGIN_BN_GRP2", zlocalsize);
