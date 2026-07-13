@@ -44,3 +44,4 @@ Tests:
   function: dense_to_sparse_csr_bad_arg
   indextype: *i32_i64
   precision: *single_double_precisions_complex_real
+  
