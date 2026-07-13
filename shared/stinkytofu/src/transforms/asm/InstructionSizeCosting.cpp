@@ -310,6 +310,10 @@ int getLiteralExtraBytesImpl(const StinkyInstruction& inst,
         inst.is(InstFlag::IF_FLATAtomic)) {
         return 0;
     }
+    if (inst.is(InstFlag::IF_GLOBALLoad) || inst.is(InstFlag::IF_GLOBALStore) ||
+        inst.is(InstFlag::IF_GLOBALAtomic)) {
+        return 0;
+    }
     if (const HwInstDesc* desc = inst.getHwInstDesc();
         desc && desc->microcode == MicrocodeFormat::MC_VIMAGE) {
         return 0;

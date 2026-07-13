@@ -5,6 +5,10 @@ rocBLAS documentation is available at
 
 ## rocBLAS 5.6.0
 
+### Changed
+
+* Deprecated the `ROCBLAS_USE_HIPBLASLT_BATCHED` environment variable. It should no longer be required and is planned for removal in a future release.
+
 ## rocBLAS 5.5.0 for ROCm 7.14
 
 ### Added
