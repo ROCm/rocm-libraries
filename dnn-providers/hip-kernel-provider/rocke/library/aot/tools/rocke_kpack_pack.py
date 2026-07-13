@@ -216,6 +216,9 @@ def pack_arch(
         group_name=GROUP_NAME,
         gfx_arch_family=arch,
         gfx_arches=[arch],
+        # Level 3 matches existing kpack usage: faster compression at the cost of a
+        # larger archive. Revisit later if we need to save more space and can
+        # afford slower builds.
         compressor=ZstdCompressor(compression_level=3),
     )
 
