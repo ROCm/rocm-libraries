@@ -34,12 +34,12 @@ GetTestCases(const std::string& mode, const std::string& shape, int forw_flag)
     return {{base, base + " --deterministic 1", base + " --deterministic 2"}};
 }
 
-miopen::ProcessEnvironmentMap MakeEnv(const std::string& tmp_dir)
+miopen::ProcessEnvironmentMap MakeEnv(const miopen::fs::path& tmp_dir)
 {
     miopen::ProcessEnvironmentMap envs;
     envs["MIOPEN_FIND_MODE"]    = "2"; // immediate mode - uses AI heuristics
     envs["MIOPEN_LOG_LEVEL"]    = "5"; // Info level to capture messages
-    envs["MIOPEN_USER_DB_PATH"] = tmp_dir;
+    envs["MIOPEN_USER_DB_PATH"] = tmp_dir.string();
     return envs;
 }
 
@@ -53,10 +53,10 @@ static void CheckShouldRun()
 }
 
 // Return a per-test tmp path to avoid collisions when tests run in parallel.
-static std::string TmpDir(const std::string& suffix)
+static miopen::fs::path TmpDir(const std::string& suffix)
 {
     const auto* info = testing::UnitTest::GetInstance()->current_test_info();
-    return std::string{"/tmp/miopen_det_"} + info->name() + "_" + suffix;
+    return miopen::fs::temp_directory_path() / (std::string{"miopen_det_"} + info->name() + "_" + suffix);
 }
 
 } // namespace miopen_conv_deterministic
@@ -146,8 +146,8 @@ TEST_P(GPU_MIOpenDriverConvDeterministicTest_FP32, BitExactAcrossRuns)
     // RAII guard: clean up even when an ASSERT_ aborts the test body.
     struct Cleanup
     {
-        const std::string& d1;
-        const std::string& d2;
+        const miopen::fs::path& d1;
+        const miopen::fs::path& d2;
         ~Cleanup()
         {
             miopen::fs::remove_all(d1);
@@ -155,11 +155,11 @@ TEST_P(GPU_MIOpenDriverConvDeterministicTest_FP32, BitExactAcrossRuns)
         }
     } cleanup{run1_dir, run2_dir};
 
-    auto make_env = [](const std::string& tmp) {
+    auto make_env = [](const miopen::fs::path& tmp) {
         miopen::ProcessEnvironmentMap envs;
         envs["MIOPEN_DEBUG_FIND_ONLY_SOLVER"] = "ConvHipImplicitGemm3DGroupWrwXdlops";
         envs["MIOPEN_LOG_LEVEL"]              = "5";
-        envs["MIOPEN_USER_DB_PATH"]           = tmp;
+        envs["MIOPEN_USER_DB_PATH"]           = tmp.string();
         return envs;
     };
 
@@ -168,8 +168,8 @@ TEST_P(GPU_MIOpenDriverConvDeterministicTest_FP32, BitExactAcrossRuns)
     const std::string det_args = GetParam().valid_args + " -o 1";
 
     {
-        auto envs = make_env(run1_dir + "/db");
-        miopen::fs::create_directories(run1_dir + "/db");
+        auto envs = make_env(run1_dir / "db");
+        miopen::fs::create_directories(run1_dir / "db");
         miopen::Process p{MIOpenDriverExePath().string()};
         std::stringstream ss;
         int rc = 0;
@@ -178,8 +178,8 @@ TEST_P(GPU_MIOpenDriverConvDeterministicTest_FP32, BitExactAcrossRuns)
         ASSERT_EQ(rc, 0) << "First driver run failed:\n" << ss.str();
     }
     {
-        auto envs = make_env(run2_dir + "/db");
-        miopen::fs::create_directories(run2_dir + "/db");
+        auto envs = make_env(run2_dir / "db");
+        miopen::fs::create_directories(run2_dir / "db");
         miopen::Process p{MIOpenDriverExePath().string()};
         std::stringstream ss;
         int rc = 0;
@@ -195,7 +195,7 @@ TEST_P(GPU_MIOpenDriverConvDeterministicTest_FP32, BitExactAcrossRuns)
         if(p1.extension() != ".bin")
             continue;
 
-        const auto p2 = miopen::fs::path{run2_dir} / p1.filename();
+        const auto p2 = run2_dir / p1.filename();
         ASSERT_TRUE(miopen::fs::exists(p2))
             << "Output file missing from second run: " << p2.string();
 
