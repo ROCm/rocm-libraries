@@ -547,6 +547,11 @@ class FmhaFwdTileSize:
     F_wk1: int  # gemm1 warp size along k
     F_occupancy: int  # occupancy, -1 will let pipeline decide the occupancy, other value will overwrite occupancy
     F_constraint: CppConstraint = field(default_factory=lambda: CppConstraint())
+    # Extra device-side preprocessor guard AND-ed into this tile's arch gate.
+    # Restricts the tile to the arch(es) where it is valid, excluding any whose
+    # async load width makes it degenerate (e.g. bn0=32 yields NumIssues=0 on
+    # gfx950 where async K-load is dwordx4).
+    F_arch_require: str = None
 
     @property
     def name(self) -> str:
@@ -569,6 +574,17 @@ class FmhaFwdKernel:
     mask_impl: str
     F_page_size: int = 1  # page block size
     F_use_global_load: bool = False  # use global_load_lds_* for >2GB KV cache
+
+    @property
+    def arch_check(self) -> str:
+        # Base device-side gate: gload variants need CDNA3+; others are arch-agnostic.
+        base = CDNA3_PLUS_ARCH.preprocessor_check if self.F_use_global_load else "true"
+        require = self.F_tile.F_arch_require
+        if require is None:
+            return base
+        if base == "true":
+            return require
+        return f"({base}) && ({require})"
 
     @property
     def template(self) -> str:
@@ -619,9 +635,7 @@ class FmhaFwdKernel:
             F_page_size=self.F_page_size,
             F_sink=BOOL_MAP[self.F_pipeline.F_sink],
             F_kv_load_mode=KV_LOAD_MODE_ENUM_MAP[self.F_use_global_load],
-            F_arch_check=CDNA3_PLUS_ARCH.preprocessor_check
-            if self.F_use_global_load
-            else "true",
+            F_arch_check=self.arch_check,
         )
 
     @property
@@ -677,7 +691,17 @@ class KernelComponentFactory:
         if dtype in ["fp16", "bf16"]:
             return {
                 128 : [FmhaFwdTileSize(128, 128, 32, 128, 32,  128,  4, 1, 1,  4, 1, 1,  32, 32, 16,  32, 32, 16,  -1)],
-                256 : [FmhaFwdTileSize(128, 128, 32, 256, 32,  256,  4, 1, 1,  4, 1, 1,  32, 32, 16,  32, 32, 16,  -1)],
+                256 : [
+                    # MI308X (gfx942, num_cus<128) bf16 d256 tile from #8492.
+                    # Allow-listed to gfx942 only: bn0=32 requires an async K-load
+                    # narrow enough that NumIssues = 32/(LaneGroups*NumWarps) > 0.
+                    # On archs with a wider async K-load (e.g. gfx950 dwordx4) this
+                    # yields NumIssues = 32/128 = 0 and an empty LDS descriptor
+                    # (space_filling_curve static_assert). Opt new archs in only
+                    # after confirming the tile does not degenerate there.
+                    FmhaFwdTileSize(128,  32, 16, 256, 16,  256,  4, 1, 1,  4, 1, 1,  32, 32, 16,  32, 32, 16, 2, CppConstraint("num_cus < 128"), F_arch_require="defined(__gfx942__)"),
+                    FmhaFwdTileSize(128, 128, 32, 256, 32,  256,  4, 1, 1,  4, 1, 1,  32, 32, 16,  32, 32, 16,  -1),
+                ],
             }  # fmt: skip
         elif dtype in ["fp8bf16"]:
             return {
