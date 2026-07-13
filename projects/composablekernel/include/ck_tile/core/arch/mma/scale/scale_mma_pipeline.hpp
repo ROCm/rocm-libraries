@@ -82,8 +82,6 @@ struct ScaleMmaPipeline : public MmaPipelineBase<ScaleMmaPipeline<ADataType_, BD
     using MmaOp                      = MmaOp_; // Expose the selected MmaOp
     static constexpr bool CTranspose = CTranspose_;
 
-    static_assert(!UsePackedNumAccess,
-                  "Packed NumAccess layout is not supported for the scale pipeline.");
     static_assert(!MmaOpTraits<MmaOp>::IsSupported ||
                   std::is_same_v<typename MmaOp::ADataType, ADataType_>);
     static_assert(!MmaOpTraits<MmaOp>::IsSupported ||
@@ -202,7 +200,9 @@ struct ScaleMmaPipeline : public MmaPipelineBase<ScaleMmaPipeline<ADataType_, BD
                                                SwizzleFactor_support,
                                                FragsK,
                                                AttrNumAccessAV_support,
-                                               AttrNumAccessBV_support>;
+                                               AttrNumAccessBV_support,
+                                               false,
+                                               UsePackedNumAccess>;
     using AWarpDstrEncoding = typename EncCalc::AWarpDstrEncoding;
     using BWarpDstrEncoding = typename EncCalc::BWarpDstrEncoding;
     using CWarpDstrEncoding = typename EncCalc::CWarpDstrEncoding;
