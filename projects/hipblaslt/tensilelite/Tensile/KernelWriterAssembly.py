@@ -13509,6 +13509,81 @@ class KernelWriterAssembly(KernelWriter):
                                              labelSuffix=labelSuffix, noMultipleBuffer=noMultipleBuffer))
     return module
 
+  def _splitHoistableStoreInit(self, flat):
+    """Step 4 store-init hoist: partition a flat store-init instruction list into
+    (units, remainder) for weaving into the FUSED NLL's MFMA gaps.
+
+    `units` (each ('alu', inst) or ('block', [insts])) is the leading, memory- and
+    counter-free portion that is safe to relocate into the loop:
+      * pure-ALU / RegSet instructions are individually scatterable ('alu') so each
+        slots into an MFMA's issue shadow;
+      * a self-contained branch/label/compare region (no memory op inside) is kept
+        contiguous ('block') and dropped into a single gap, so a taken branch can
+        never jump across an interleaved loop MFMA (which would skip real compute);
+      * on the FIRST memory/counter instruction (load/store/buffer/ds/atomic/
+        waitcnt/barrier) -- or one found inside an otherwise-hoistable branch region,
+        or a branch region that never closes -- hoisting STOPS: that instruction and
+        everything after it stay in `remainder` (emitted serially in the store,
+        before the store body's use of SrdD). This guarantees no memory/counter op
+        is ever injected into the LDS-synchronized loop, so the loop's lgkmcnt/vmcnt
+        based local-read/global-read waits keep their exact semantics.
+
+    Order is preserved: hoisted units run (in the loop) before `remainder` (in the
+    store), matching their original program order, so SrdD data dependencies
+    (allocPostLoopSrd base -> computeStoreSrdStart offsets) stay valid.
+    """
+    def _nm(i):
+      return type(i).__name__.lower()
+    def _isMem(i):
+      nm = _nm(i)
+      return nm.startswith('ds') or any(s in nm for s in
+             ('waitcnt', 'barrier', 'load', 'store', 'buffer', 'atomic'))
+    def _isBrace(i):
+      nm = _nm(i)
+      return isinstance(i, (Label, BranchInstruction)) or ('cmp' in nm) \
+             or ('cselect' in nm) or ('branch' in nm)
+    units = []
+    i = 0
+    n = len(flat)
+    while i < n:
+      inst = flat[i]
+      if _isMem(inst):
+        break
+      if not _isBrace(inst):
+        units.append(('alu', inst))
+        i += 1
+        continue
+      # Open a contiguous branch/label/compare region; keep it atomic while any
+      # forward branch target is still unresolved (self-contained diamond).
+      blockStart = i
+      block = []
+      pending = set()
+      aborted = False
+      while i < n:
+        inst = flat[i]
+        if _isMem(inst):
+          aborted = True
+          break
+        block.append(inst)
+        i += 1
+        if isinstance(inst, BranchInstruction):
+          ln = getattr(inst, 'labelName', None)
+          pending.add(ln if ln is not None else id(inst))
+        elif isinstance(inst, Label):
+          pending.discard(inst.getLabelName())
+        if not pending:
+          nxt = flat[i] if i < n else None
+          if (nxt is None) or _isMem(nxt) or (not _isBrace(nxt)):
+            break
+      if aborted or pending:
+        # Memory inside the region, or a branch that never resolves: do not hoist
+        # this region or anything after it.
+        i = blockStart
+        break
+      units.append(('block', block))
+    remainder = flat[i:]
+    return units, remainder
+
   def buildSubtileFusedDrainProbe(self, kernel):
     """Step 4c measurement probe: reserve the paired-store's arch-VGPR footprint at
     the FUSED NLL drain to measure whether it spills past the VGPR ceiling.
@@ -13856,18 +13931,22 @@ class KernelWriterAssembly(KernelWriter):
     module = Module("SubtileFusedStore")
     module.addComment0("PostLoopStoreInNll 4d-3a: beta0/NonEdge D store inside FUSED NLL")
 
-    # --- drain outstanding NLL summation memory traffic (normally guaranteed by
-    # endSummation before the post-loop store). The paired dwordx4 store's
-    # ds_bpermute lane-reorder is tracked by dscnt, and its Phase2 s_waitcnt is
-    # computed RELATIVE to the pending counter assuming a post-loop context where
-    # nothing else is outstanding. At the terminal NLL point the last MFMA
-    # subiterations' local reads (dscnt) and DirectToLds global loads (vlcnt) are
-    # still in flight, so the relative wait is off-by-N and the pairing permute
-    # reads stale data -> scattered wrong values in the paired (upper-16) columns.
-    # s_nop cannot fix this (it only burns cycles, never waits on async counters);
-    # a full dscnt/vlcnt/vscnt=0 drain (mirrors endSummation L8075) does. ---
-    module.add(SWaitCnt(dscnt=0, vlcnt=0, vscnt=0,
-                        comment="PostLoopStoreInNll: drain NLL DS/global traffic before fused store"))
+    # --- NOTE (latency-hiding reorder): the full dscnt/vlcnt/vscnt=0 drain that the
+    # paired store needs (see the long note at the deferred-drain site below) is NOT
+    # emitted here at the top of the fused store any more. Everything between here and
+    # the store emission is data-INDEPENDENT of the in-flight NLL DS/global traffic:
+    #   * loadFusedEpilogueStoreSgprs  -> scalar s_load from KernArgAddress (KMCNT,
+    #     a different counter than the drain's dscnt/vlcnt/vscnt), reading persistent
+    #     kernargs, into SGPRs lent from drain-era holes (already latched by the
+    #     in-flight loads that issued them, so overwriting them now is safe);
+    #   * buildSubtileStoreInitModule (SrdD) + the transient epilogue SRD defines ->
+    #     pure SALU/VALU address math on persistent kernargs + the workgroup tile
+    #     mapping (no DS/global memory ops).
+    # By deferring the drain to just before the store (below), these instructions run
+    # WHILE the NLL's last-subiteration local reads / DirectToLds loads are still in
+    # flight, hiding the kernarg-load + SRD-math latency behind that traffic instead of
+    # exposing it as a serial block. The store's ds_bpermute pairing still gets its
+    # full drain because the SWaitCnt is emitted immediately before it. ---
 
     # --- save the post-loop-store state we are about to establish early ---
     savedSerialized    = self.states.serializedStore
@@ -14045,15 +14124,42 @@ class KernelWriterAssembly(KernelWriter):
       module.add(_epMod)
 
     fusedDefinedSrdD = "SrdD" not in self.sgprs
+    self.states.subtileHoistedStoreInit = None
     if fusedDefinedSrdD:
-      module.add(RegSet("s", "sgprSrdD", self.defineSgprIdx("SrdD", 4, 4)))
       # Unique suffix per emission: the NLL (and thus this fused store) is emitted more
       # than once at codegen time (e.g. odd/even PLR variants), and each copy re-emits
       # the D SRD-init labels, so a fixed suffix would collide across NLL variants.
       self._fusedStoreEmitCount = getattr(self, "_fusedStoreEmitCount", 0) + 1
       fusedSuffix = "Fused%d" % self._fusedStoreEmitCount
-      module.add(self.buildSubtileStoreInitModule(kernel, skipUndefine=True, channels=["D"],
-                                                  labelSuffix=fusedSuffix, noMultipleBuffer=True))
+      # Build the SrdD RegSet + address-math init into a scratch module. The SGPR
+      # allocation order is unchanged (loadFusedEpilogueStoreSgprs above already grabbed
+      # its contiguous block before this defineSgprIdx), so only the PHYSICAL placement
+      # of the resulting instructions can change -- register indices are already fixed.
+      srdInitMod = Module("SubtileStoreInitHoistable")
+      srdInitMod.add(RegSet("s", "sgprSrdD", self.defineSgprIdx("SrdD", 4, 4)))
+      srdInitMod.add(self.buildSubtileStoreInitModule(kernel, skipUndefine=True, channels=["D"],
+                                                      labelSuffix=fusedSuffix, noMultipleBuffer=True))
+      # Step 4 store-init hoist: relocate the branch/memory-free leading run of the
+      # SrdD address-math into the FUSED NLL's MFMA gaps (see LogicalScheduler
+      # _weaveStoreInitIntoLoop) so it overlaps matrix compute instead of running as an
+      # exposed serial block before the store. Only for <=256x256 tiles (spill/large
+      # tiles already peak at the arch-VGPR ceiling and keep everything serial), and
+      # opt-out via TENSILE_NLL_HOIST_STOREINIT=0. The pure-SALU address math never
+      # touches vmcnt/lgkmcnt/vscnt/dscnt, so relocating it between MFMAs (which never
+      # touch SCC) is register- and counter-safe; _splitHoistableStoreInit fences off
+      # any branch/label/memory content.
+      _largeTile = (kernel["MacroTile0"] > 256) or (kernel["MacroTile1"] > 256)
+      _hoistStoreInit = (os.environ.get("TENSILE_NLL_HOIST_STOREINIT", "1") != "0") \
+                        and not _largeTile
+      _hoistUnits = None
+      if _hoistStoreInit:
+        _hoistUnits, _remainder = self._splitHoistableStoreInit(list(srdInitMod.flatitems()))
+      if _hoistUnits:
+        self.states.subtileHoistedStoreInit = _hoistUnits
+        for _it in _remainder:
+          module.add(_it)
+      else:
+        module.add(srdInitMod)
 
     # --- transient epilogue store SRDs (Bias / ScaleAlphaVec / vector-ScaleA/B) ---
     # These SRD *symbols* are RegSet only in endSummation (defineVariableSgprs),
@@ -14080,8 +14186,45 @@ class KernelWriterAssembly(KernelWriter):
     if self.states.useBias != DataDirection.NONE:
       _fusedDefineEpilogueSrd("SrdBias")
 
+    # --- deferred drain of outstanding NLL summation memory traffic (normally
+    # guaranteed by endSummation before the post-loop store). The paired dwordx4
+    # store's ds_bpermute lane-reorder is tracked by dscnt, and its Phase2 s_waitcnt
+    # is computed RELATIVE to the pending counter assuming a post-loop context where
+    # nothing else is outstanding. At the terminal NLL point the last MFMA
+    # subiterations' local reads (dscnt) and DirectToLds global loads (vlcnt) are
+    # still in flight, so the relative wait is off-by-N and the pairing permute reads
+    # stale data -> scattered wrong values in the paired (upper-16) columns. s_nop
+    # cannot fix this (it only burns cycles, never waits on async counters); a full
+    # dscnt/vlcnt/vscnt=0 drain (mirrors endSummation L8075) does. This drain is
+    # placed HERE (not at the top of the fused store) so the data-independent epilogue
+    # prep above (kernarg loads + SrdD/epilogue-SRD address math) overlaps the
+    # in-flight NLL traffic -- see the reorder note at the top of this function. ---
+    module.add(SWaitCnt(dscnt=0, vlcnt=0, vscnt=0,
+                        comment="PostLoopStoreInNll: drain NLL DS/global traffic before fused store"))
+
     # --- write indices (coord0/1, coutRowPtrD) + restricted beta0/NonEdge store ---
-    module.add(self.notLocalSplitUGlobalWriteIndices(kernel))
+    # Stage 2 init-hoist: if the owner's PostLoopInitInNGLL arm already computed the
+    # write indices (TENSILE_NGLL_HOIST_COORDS), reuse those VGPRs instead of
+    # recomputing here — the coord VALU then overlapped the NLL terminal MFMAs
+    # (latency hidden). Restore self.vgprs.* from the stash so the store body and
+    # cleanupGlobalWrite (below) operate on / check in the hoisted registers exactly
+    # once, completing the checkout(NGLL)/checkin(store) pairing. Clear the flag so
+    # each NGLL_Cui/NLL_Cui pair is matched and the PLAIN post-loop store (which runs
+    # after all NLL copies) recomputes its own indices normally.
+    _hoistedIdx = getattr(self.states, "subtileHoistedWriteIndices", None)
+    if _hoistedIdx:
+      module.addComment0("PostLoopStoreInNll init-hoist: reuse coord0/1/coutRowPtrD from PostLoopInitInNGLL")
+      self.vgprs.coord0         = _hoistedIdx["coord0"]
+      self.vgprs.coord1         = _hoistedIdx["coord1"]
+      self.vgprs.cinRowPtr      = _hoistedIdx["cinRowPtr"]
+      self.vgprs.coutRowPtrD    = _hoistedIdx["coutRowPtrD"]
+      self.vgprs.coord0InMT     = _hoistedIdx["coord0InMT"]
+      self.vgprs.coord1InMT     = _hoistedIdx["coord1InMT"]
+      self.vgprs.coutRowPtrE    = _hoistedIdx["coutRowPtrE"]
+      self.vgprs.coutRowPtrBias = _hoistedIdx["coutRowPtrBias"]
+      self.states.subtileHoistedWriteIndices = None
+    else:
+      module.add(self.notLocalSplitUGlobalWriteIndices(kernel))
     (fullVws, elements, fullVws_1, elements_1) = self.notLocalFullTileElements(kernel)
     # 4d-3b weave: route accvgpr reads PER PAIR (into each pair's Phase1) instead of
     # the up-front batch block, so terminal MFMAs can later be interleaved between
@@ -15298,6 +15441,33 @@ class KernelWriterAssembly(KernelWriter):
       else:
         module.add(SCBranchSCC0(labelName=targetLabel.getLabelName(),
                                 comment="has tail -> not fused"))
+    # Degenerate short-K guard: the fused NLL store consumes the coord / write-index
+    # state produced by a genuine no-load-loop drain of the PGR-prefetched iterations.
+    # When numIter (= SizesSum / DepthU; the no-tail case was just verified above) is
+    # fewer than PrefetchGlobalRead, the NGLL/NLL pipeline has no real iteration to
+    # drain: the hoisted write-index coords (coord0/1/coutRowPtrD) are never validly
+    # computed, so the paired-store byte offset is garbage and the branch-free full-tile
+    # D store faults (observed as an illegal memory access at K == DepthU, e.g. the
+    # K=256 / MT256x256x256 repro). Require numIter >= PGR; otherwise fall through to
+    # the PLAIN NLL + the normal post-loop store (which recomputes coords correctly).
+    # Emitting it here (the single source of truth) keeps the NGLL hoist arm, the NLL
+    # front guard, and the post-loop dedup consistent.
+    pgr = kernel["PrefetchGlobalRead"]
+    if pgr >= 2:
+      module.addComment1("Fused-store guard: enough K-iters for NLL drain (numIter=SizesSum/DepthU >= PGR=%u) else -> %s" % (pgr, targetLabel.getLabelName()))
+      with self.allocTmpSgpr(1, tag="fusedStoreGuard_numIter") as tmpSgprInfo:
+        module.add(SLShiftRightB32(dst=sgpr(tmpSgprInfo.idx),
+                                   src=sgpr("SizesSum+%u" % self.states.unrollIdx),
+                                   shiftHex=hex(log2(depthU)),
+                                   comment="numIter = SizesSum / DepthU (no tail here)"))
+        module.add(SCmpGeU32(src0=sgpr(tmpSgprInfo.idx), src1=pgr,
+                             comment="fused guard: numIter >= PGR (real NLL drain)?"))
+        if longBranch:
+          module.add(self.longBranchScc0(targetLabel, posNeg=1,
+                                         comment="too few K-iters -> not fused (long)"))
+        else:
+          module.add(SCBranchSCC0(labelName=targetLabel.getLabelName(),
+                                  comment="too few K-iters -> not fused"))
     # beta==0 (checkIsBetaZero emits nothing when UseBeta is False -> stays eligible).
     # A long branch needs 3 scratch SGPRs, so widen the temp alloc in that mode.
     with self.allocTmpSgpr(3 if longBranch else 1, tag="fusedStoreGuard_beta") as tmpSgprInfo:
@@ -16524,7 +16694,21 @@ class KernelWriterAssembly(KernelWriter):
         # Defer activation blocks to end of kernel when other blocks are deferred
         # (called via s_setpc/s_swappc, position-independent).
         if kernel.get("UseSubtileImpl"):
-          self.states.deferredActivationModules = activationModules
+          # globalWriteElements can run twice for a subtile kernel with
+          # PostLoopStoreInNll: once from buildSubtileFusedStore (inside the
+          # main loop) and once from the plain post-loop store. Each call's
+          # activation labels get a distinct name from self.labels.getNameInc
+          # (first call plain, second call "_1" suffixed), and both calls'
+          # generated code (already emitted into their respective modules by
+          # this point) branch into their own label set. Overwriting here
+          # would drop the first call's label definitions while its branch
+          # code still references them -> undefined symbol at link time.
+          # Accumulate instead so every referenced label gets defined.
+          existingDeferredActivation = getattr(self.states, "deferredActivationModules", None)
+          if existingDeferredActivation is not None:
+            existingDeferredActivation.appendModule(activationModules)
+          else:
+            self.states.deferredActivationModules = activationModules
         else:
           module.appendModule(activationModules)
         self.sgprPool.checkIn(activationSetPCStruct.sgprOffsetActivation)

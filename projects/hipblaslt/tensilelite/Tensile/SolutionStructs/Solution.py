@@ -4286,8 +4286,40 @@ class Solution(collections.abc.Mapping):
       # dead input tiles to the store pool). Non-spill large tiles (e.g. MT320x128)
       # and all <=256x256 tiles are unaffected. Fall back to the normal (non-fused)
       # post-loop store for spill tiles.
-      miwt = state["MIWaveTile"]
-      spillFree = (miwt[0] * miwt[1] <= 64)
+      # MIWaveTile is only present for EnableMatrixInstruction solutions; this
+      # gate runs for every solution (PLSIN defaults on), so non-MI kernels would
+      # KeyError here. Guard the lookup -- a missing/short MIWaveTile just
+      # disqualifies PLSIN (non-MI kernels are already excluded via
+      # EnableMatrixInstruction below).
+      miwt = state.get("MIWaveTile")
+      spillFree = bool(miwt) and len(miwt) == 2 and (miwt[0] * miwt[1] <= 64)
+      # Store-footprint fit: even inside the product<=64 spill-free set, a LARGE
+      # ASYMMETRIC MIWaveTile overflows the arch-VGPR budget. The fused store checks
+      # out its ValuC accumulator window (and store element batch) on top of the
+      # still-live main-loop LR tiles at occupancy 1; when BOTH dims are non-trivial
+      # (min >= 4, so a large accumulator window) AND one dim is large (max >= 14, so
+      # a large main-loop LR-tile footprint that lending the dead input tiles cannot
+      # fully recover) the combined high-water pushes past the 256-VGPR ceiling and
+      # the store emits an out-of-range v>=256 (assembler "register index is out of
+      # range"). Validated on the shipped gfx950 fp4 (16x16x128 MI) MXA32/MXB32
+      # subtile logic: only MIWaveTile [4,14]/[14,4] fail; thinner-but-tall tiles
+      # ([2,14]/[2,16]), square tiles ([8,8]) and smaller asymmetric tiles
+      # ([4,12]/[12,4]) all fit. Fall back to the plain post-loop store for the
+      # overflow shapes (auto-disable, always correct).
+      storeFitsVgpr = not (bool(miwt) and len(miwt) == 2 and
+                           min(miwt[0], miwt[1]) >= 4 and max(miwt[0], miwt[1]) >= 14)
+      # StreamK non-atomic partial-tile fixup (_emitNonatomicAdd) previously
+      # allocated its 16bit-paired-store lane mask via a fresh
+      # checkOutAligned(2,2, preventOverflow=True). That hard-failed on skewed /
+      # non-256x256 tiles because PLSIN's fused store raises the whole-kernel SGPR
+      # high-water to the occupancy-1 ceiling (the partial path shares the same
+      # compile-time register file even though it is runtime-exclusive with the
+      # fused store), leaving no free 2-aligned pair. That mask now reuses the
+      # batch-owned scratch pair (self.tmpS01) instead of a pool checkout (see
+      # GlobalWriteBatch._emitNonatomicAdd), so the overflow can no longer occur and
+      # PLSIN is safe on non-256x256 StreamK non-atomic tiles. (The separate arch-
+      # VGPR spillFree guard below still fences off the truly-large spill tiles.)
+      streamKFixupSafe = True
       # Bias / ScaleAlphaVec / vector-ScaleAB epilogues are now supported under the
       # weave: their store SRDs (SrdBias, SrdScaleAlphaVec, SrdScaleA/B) and the
       # backing Address* kernargs are defined+loaded up front by
@@ -4305,7 +4337,9 @@ class Solution(collections.abc.Mapping):
          (not pairedStoreAvailable) or \
          (not streamKAtomicFree) or \
          (not barrierFreeStore) or \
-         (not spillFree):
+         (not spillFree) or \
+         (not storeFitsVgpr) or \
+         (not streamKFixupSafe):
         state["PostLoopStoreInNll"] = False
 
     # Determine if we can load directly-to-Vgpr

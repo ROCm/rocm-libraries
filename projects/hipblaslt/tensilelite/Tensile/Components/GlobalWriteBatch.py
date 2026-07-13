@@ -1172,7 +1172,13 @@ class GlobalWriteBatchWriter:
                                                    self.beta, self.edge, sumIdxGSUSYNC, addrCalc))
 
     # rC *= alpha
-    if not self.kernel["InterleaveAlpha"] and self.applyAlpha and not self.parentWriter.alphaBeforeLoadC:
+    # Weave (PostLoopStoreInNll): when _weaveReadBeforeEpilogue is set the per-pair
+    # accvgpr_read is sunk into the store loop (_epilog) and populates ValuC AFTER
+    # this point. Applying alpha here would multiply stale ValuC and then be clobbered
+    # by the sunk read (dropping all alpha scaling, incl. folded scaleA*scaleB). Defer
+    # it: _epilog applies alpha per-element right after the read (see _weaveReadForEpilogue).
+    if not self.kernel["InterleaveAlpha"] and self.applyAlpha and not self.parentWriter.alphaBeforeLoadC \
+       and not getattr(self, "_weaveReadBeforeEpilogue", False):
       module.addComment1("rC *= alpha batchElements=%s"%self.batchElements)
       if self.codeMulAlpha is None:
         elementIdx = 0
@@ -1369,11 +1375,24 @@ class GlobalWriteBatchWriter:
       module.add(VPermlane16SwapB32(dst=vgpr(vTmp), src=vgpr(vTmp), comment="lane XOR 16 swap"))
       # Exec mask: lanes where both XOR swaps changed the value (i.e., the 'first' half of each pair)
       # selects lanes 0-15 and 32-47 within the wave.
-      stmp = self.parentWriter.sgprPool.checkOutAligned(2,2, tag="_emitNonatomicAdd_stmp")
+      #
+      # Reuse the batch's own scratch SGPR pair (self.tmpS01) instead of a fresh
+      # checkOutAligned(2,2). The fresh aligned pair used preventOverflow=True and
+      # HARD-FAILED (no valid solution) when the ambient SGPR pool was at the
+      # occupancy-1 ceiling -- notably under PostLoopStoreInNll, whose fused store
+      # raises the whole-kernel SGPR high-water so no free 2-aligned pair remains
+      # here on skewed (non-256x256) tiles. This is a compile-time pool artifact:
+      # the partial-fixup path is emitted into the same kernel as the (runtime-
+      # exclusive) fused store and shares its register file. self.tmpS01 is the
+      # batch-owned lane-mask scratch: it is a laneSGPRC(=2)-wide, 2-aligned pair on
+      # wave64 (this subtile path is wave64-only + non-edge, see isSubtileNonEdge),
+      # and it is dead here (only written per-element later in the store loop), so
+      # borrowing it for this one-shot constant mask adds zero pool pressure and
+      # cannot overflow regardless of PLSIN's ambient footprint.
+      stmp = self.tmpS01
       module.add(SMovB32(dst=sgpr(stmp), src="0x0000ffff", comment="select lanes 0-15, 32-47"))
       module.add(SMovB32(dst=sgpr(stmp+1), src="0xffff0000"))
       module.add(VCndMaskB32(dst=vgpr(vTmp), src0=vgpr(vTmp), src1=vgpr(vPermAddr), src2=sgpr(stmp,2), comment="restore original lane_id for selected lanes"))
-      self.parentWriter.sgprPool.checkIn(stmp)
       module.add(VLShiftLeftB32(dst=vgpr(vPermAddr), shiftHex=2, src=vgpr(vTmp), comment="partner_lane * 4 = ds_permute byte addr"))
       # Pre-compute lane_group*8 once; reused as the row-byte address correction in every
       # paired dwordx4 store (addrDVgpr encodes lane_group*8 but we need lane_group*16).
@@ -1538,6 +1557,14 @@ class GlobalWriteBatchWriter:
       # here; the store site skips its pop when _weaveReadBeforeEpilogue is set.
       if getattr(self, "_weaveReadBeforeEpilogue", False) and is16bitSubtile:
         self._weaveReadForEpilogue(module, elementIdx)
+        # The batch-level "rC *= alpha" block was skipped for this weave path (it would
+        # run before this read populates ValuC). Apply alpha here, per-element, on the
+        # freshly-read raw accumulator and BEFORE the rest of the epilogue (scaleVec/
+        # bias/beta) -- matching the non-weave order (read -> alpha -> epilogue).
+        if not self.kernel["InterleaveAlpha"] and self.applyAlpha \
+           and not self.parentWriter.alphaBeforeLoadC and self.codeMulAlpha is None:
+          module.addComment1("rC *= alpha (weave per-element) elementIdx=%d" % elementIdx)
+          module.add(self._applyAlpha(self.kernel, self.gwvw, self.ss.elementSumIdx, elementIdx, self.tmpS01))
 
       scaleAVecModule = Module("ScaleAVecModule")
       scaleBVecModule = Module("ScaleBVecModule")
