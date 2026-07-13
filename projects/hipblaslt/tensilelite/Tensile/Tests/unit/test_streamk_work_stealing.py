@@ -1,6 +1,6 @@
 # Copyright © Advanced Micro Devices, Inc., or its affiliates.
 # SPDX-License-Identifier: MIT
-"""Unit tests for the single-hop StreamK work-stealing codegen.
+"""Unit tests for the single-hop next-neighbor StreamK work-stealing codegen.
 
 These tests assert that the new work-stealing assembly is emitted by the
 helper methods on the ``StreamK`` base class, and -- crucially -- that those
@@ -9,6 +9,16 @@ toggle. Following the StreamK=5 hybrid tests, they import rocisa instructions
 and inspect emitted modules rather than matching source text; the toggle gating
 and the Solution-level validation are verified by executing the *real* source
 (via the AST) so the assertions track the actual code, not a copy of it.
+
+New emission contract (single-hop next-neighbor + sticky-home + static auto-reset):
+  * The steal always fires on an empty home fetch -- there is NO remainder /
+    structural-extra guard (no ``s_cmp_ge_u32`` neighbor guard, no
+    ``remainder == 0`` skip).
+  * The steal & home atomic bounds are the predecessor-inclusive self-reset
+    value, NOT the old 0xFFFFFFFF "disable auto-reset" sentinel.
+  * A per-WG sticky-empty SGPR gates the home fetch.
+  * There is NO ``streamKWorkStealingKernelEndReset`` / completion counter /
+    reset barrier anymore.
 """
 
 import ast
@@ -26,12 +36,11 @@ from rocisa.instruction import (
     SAndB32,
     SAtomicInc,
     SBarrier,
-    SCBranchSCC0,
     SCBranchSCC1,
     SCmpGeU32,
     SCmpLtU32,
     SMovB32,
-    SStoreB32,
+    SSubU32,
 )
 
 from Tensile.Common.ValidParameters import validParameters
@@ -48,8 +57,8 @@ from Tensile.SolutionStructs.Utilities import reject
 # ---------------------------------------------------------------------------
 # Fakes: just enough of a "writer" for the standalone helper methods.
 #
-# The three helpers only touch ``writer.sgprPool`` (checkOut / checkOutAligned
-# / checkIn) and emit rocisa instructions via free functions (sgpr/vgpr), so a
+# The helpers only touch ``writer.sgprPool`` (checkOut / checkOutAligned /
+# checkIn) and emit rocisa instructions via free functions (sgpr/vgpr), so a
 # tiny pool that hands out monotonically increasing register indices is all
 # that is required -- no KernelWriter, no GPU.
 # ---------------------------------------------------------------------------
@@ -80,6 +89,11 @@ class _FakeWriter:
 
 def _mk_label(base: str) -> Label:
     return Label(base, "")
+
+
+# gfx942/gfx950 both map to 8 queues in the per-arch lookup; the helpers key
+# their fast-mask constants off ``kernel["ISA"]``.
+_WS_KERNEL = {"ISA": (9, 4, 0)}
 
 
 def _stream_k_instance(streamk: int) -> StreamK:
@@ -154,6 +168,10 @@ def _all_ws_calls(func) -> set:
     return calls
 
 
+def _source_of(func) -> str:
+    return inspect.getsource(func)
+
+
 def _extract_ws_validation():
     """Compile the *real* ``if state["StreamKWorkStealing"]:`` block out of
     ``Solution.assignDerivedParameters`` into a standalone callable so the
@@ -205,58 +223,84 @@ class TestValidParameters:
 
 
 # ===========================================================================
-# 2. The three new StreamK helper methods exist and are callable.
+# 2. The work-stealing helper methods: the new steal/bound helpers exist and
+#    the removed single-hop-reset helpers are gone.
 # ===========================================================================
 class TestHelperMethodsExist:
     @pytest.mark.parametrize(
         "name",
         [
-            "streamKWorkStealingHomeNoReset",
+            "streamKWorkStealingHomeBound",
             "streamKWorkStealingSteal",
-            "streamKWorkStealingKernelEndReset",
         ],
     )
     def test_method_is_defined_on_base(self, name):
         assert callable(getattr(StreamK, name))
 
+    @pytest.mark.parametrize(
+        "name",
+        [
+            "streamKWorkStealingHomeNoReset",
+            "streamKWorkStealingKernelEndReset",
+        ],
+    )
+    def test_removed_methods_are_gone(self, name):
+        assert not hasattr(StreamK, name), (
+            "explicit-reset / no-reset helpers must be removed"
+        )
+
+    def test_completion_counter_constant_is_gone(self):
+        assert not hasattr(StreamK, "_WS_COMPLETION_COUNTER_OFFSET"), (
+            "the 0x80 completion-counter offset must be removed"
+        )
+
 
 # ===========================================================================
-# 3a. Presence: the helpers actually emit the work-stealing assembly.
+# 3a. Home auto-reset bound: the predecessor's workgroup count is folded into
+#     the atomic_inc bound (NOT disabled with 0xFFFFFFFF).
 # ===========================================================================
-class TestHomeNoResetEmission:
-    """Disabling the home auto-reset must mask TotalItems with 0x7 and, when a
-    remainder exists, move 0xFFFFFFFF into the auto-reset bound register."""
-
+class TestHomeBoundEmission:
     def _emit(self):
         sk = _stream_k_instance(4)
         writer = _FakeWriter()
-        module = Module("home-no-reset")
+        module = Module("home-bound")
         sBound = writer.sgprPool.checkOut(1, "bound")
-        sk.streamKWorkStealingHomeNoReset(writer, module, {}, sBound, _mk_label)
+        sQueueIdx = writer.sgprPool.checkOut(1, "queueIdx")
+        sk.streamKWorkStealingHomeBound(
+            writer, module, _WS_KERNEL, sBound, sQueueIdx, "skGrid"
+        )
         return _flat(module)
 
-    def test_masks_total_items_with_queue_mask(self):
+    def test_computes_predecessor_index(self):
         items = self._emit()
-        masks = [
-            i for i in items
-            if isinstance(i, SAndB32) and _imm_in(i, 0x7)
-        ]
-        assert masks, "expected an s_and_b32 with the 0x7 queue mask"
+        # p = (q - 1) & 0x7
+        assert any(isinstance(i, SSubU32) and _imm_in(i, 1) for i in items), (
+            "expected q-1 to reach the predecessor queue"
+        )
+        assert any(isinstance(i, SAndB32) and _imm_in(i, 0x7) for i in items), (
+            "expected (q-1) & 0x7 wrap for the predecessor index"
+        )
 
-    def test_disables_auto_reset_with_all_ones(self):
+    def test_adds_predecessor_workgroups_to_bound(self):
         items = self._emit()
-        movs = [
-            i for i in items
-            if isinstance(i, SMovB32) and _imm_in(i, 0xFFFFFFFF)
-        ]
-        assert movs, "expected 0xFFFFFFFF mov to disable the home auto-reset"
+        # The predecessor structural share plus the final fold-in add.
+        assert sum(isinstance(i, SAddU32) for i in items) >= 2, (
+            "expected the W_(q-1) structural add and the bound fold-in"
+        )
+
+    def test_does_not_disable_auto_reset(self):
+        items = self._emit()
+        assert not any(
+            isinstance(i, SMovB32) and _imm_in(i, 0xFFFFFFFF) for i in items
+        ), "the home bound must be a finite predecessor-inclusive value"
 
 
+# ===========================================================================
+# 3b. Next-neighbor steal: one unconditional (past home-empty) NEXT-neighbor steal with
+#     the static predecessor-inclusive auto-reset bound. No remainder/extra
+#     guards.
+# ===========================================================================
 class TestStealEmission:
-    """One single-hop NEXT steal: walk to (queueIdx+1) & 0x7, guard against the
-    neighbor having no structural extra, then a single auto-reset-disabled
-    atomic increment against the stolen queue."""
-
     def _emit(self):
         sk = _stream_k_instance(4)
         writer = _FakeWriter()
@@ -264,7 +308,7 @@ class TestStealEmission:
         sQueueIdx = writer.sgprPool.checkOut(1, "queueIdx")
         sWorkItemIdx = writer.sgprPool.checkOut(1, "workItemIdx")
         sk.streamKWorkStealingSteal(
-            writer, module, {}, sQueueIdx, sWorkItemIdx, _mk_label
+            writer, module, _WS_KERNEL, sQueueIdx, sWorkItemIdx, "skGrid", _mk_label
         )
         return _flat(module)
 
@@ -274,29 +318,34 @@ class TestStealEmission:
         assert any(
             isinstance(i, SAddU32) and _imm_in(i, 1) for i in items
         ), "expected +1 advance to the next queue"
-        # ... wrapped within the 8-queue ring via & 0x7.
+        # ... wrapped within the 8 queues (single-hop next-neighbor) via & 0x7.
         assert any(
             isinstance(i, SAndB32) and _imm_in(i, 0x7) for i in items
         ), "expected (queueIdx+1) & 0x7 wrap"
 
-    def test_skips_when_neighbor_has_no_extra(self):
+    def test_no_neighbor_extra_guard(self):
+        # The next-neighbor steal always fires on an empty home fetch: the old
+        # ">= remainder / neighbor-has-no-structural-extra" guard is removed.
         items = self._emit()
-        assert any(isinstance(i, SCmpGeU32) for i in items), (
-            "expected a >= remainder guard so a neighbor without a structural "
-            "extra is not robbed"
+        assert not any(isinstance(i, SCmpGeU32) for i in items), (
+            "the next-neighbor steal must NOT guard on a neighbor structural extra"
         )
 
     def test_exactly_one_atomic_increment(self):
         items = self._emit()
         atomics = [i for i in items if isinstance(i, SAtomicInc)]
-        assert len(atomics) == 1, "single-hop steal must emit exactly one atomic"
+        assert len(atomics) == 1, "the steal must emit exactly one atomic"
 
-    def test_atomic_uses_auto_reset_disabled_bound(self):
+    def test_atomic_bound_is_predecessor_inclusive_not_all_ones(self):
         items = self._emit()
+        # The static bound tiles_s + W_s + W_q - 1 ends in a -1 (SSubU32 imm 1)
+        # and must never load the 0xFFFFFFFF disable-auto-reset sentinel.
+        assert not any(
+            isinstance(i, SMovB32) and _imm_in(i, 0xFFFFFFFF) for i in items
+        ), "the stolen atomic must use a finite self-reset bound, not 0xFFFFFFFF"
         assert any(
-            isinstance(i, SMovB32) and _imm_in(i, 0xFFFFFFFF)
-            for i in items
-        ), "the stolen atomic must run with auto-reset disabled (0xFFFFFFFF)"
+            isinstance(i, SSubU32) and _imm_in(i, 1) for i in items
+        ), "expected the '- 1' that forms the atomic_inc auto-reset bound"
 
     def test_guards_on_valid_home_fetch(self):
         # A valid home fetch (index < TotalItems) must short-circuit the steal.
@@ -304,42 +353,80 @@ class TestStealEmission:
         assert any(isinstance(i, SCmpLtU32) for i in items)
         assert any(isinstance(i, SCBranchSCC1) for i in items)
 
-
-class TestKernelEndResetEmission:
-    """The last WG zeroes the 8 per-queue counters plus the completion counter,
-    behind a barrier + wave-0 completion count."""
-
-    def _emit(self):
-        sk = _stream_k_instance(4)
-        writer = _FakeWriter()
-        module = sk.streamKWorkStealingKernelEndReset(writer, {}, "skGrid", _mk_label)
-        return _flat(module)
-
-    def test_starts_with_barrier(self):
+    def test_no_reset_barrier(self):
         items = self._emit()
-        assert any(isinstance(i, SBarrier) for i in items)
-
-    def test_resets_eight_queues_plus_completion_counter(self):
-        items = self._emit()
-        stores = [i for i in items if isinstance(i, SStoreB32)]
-        assert len(stores) == StreamK._WS_NUM_QUEUES + 1 == 9, (
-            "expected 8 per-queue counter resets + 1 completion counter reset"
+        assert not any(isinstance(i, SBarrier) for i in items), (
+            "the steal helper must not emit a reset barrier"
         )
-
-    def test_completion_count_uses_atomic_inc(self):
-        items = self._emit()
-        assert any(isinstance(i, SAtomicInc) for i in items), (
-            "wave 0 counts completed WGs via an atomic increment"
-        )
-
-    def test_only_last_wg_resets(self):
-        # SCBranchSCC0 guards (a) wave-0-only and (b) last-WG-only.
-        items = self._emit()
-        assert sum(isinstance(i, SCBranchSCC0) for i in items) >= 2
 
 
 # ===========================================================================
-# 3b. Absence-by-toggle: the helpers are only reached behind the
+# 3c. Sticky-home: the home fetch is gated by a persistent StreamKStickyEmpty
+#     SGPR, and the flag is latched on an empty home fetch. Verified against
+#     the real graWorkGroup source.
+# ===========================================================================
+class TestStickyHomeGate:
+    @pytest.mark.parametrize(
+        "func", [StreamKDynamic.graWorkGroup, StreamKHybrid.graWorkGroup]
+    )
+    def test_home_fetch_is_gated_by_sticky_flag(self, func):
+        src = _source_of(func)
+        assert "StreamKStickyEmpty" in src, (
+            "the home fetch must be gated by the persistent sticky-empty SGPR"
+        )
+        # A steal-only skip label proves the home s_atomic_inc is bypassed once
+        # the WG has gone sticky.
+        assert "SK_StealOnly" in src, (
+            "sticky WGs must skip the home fetch and steal only"
+        )
+
+    @pytest.mark.parametrize(
+        "func", [StreamKDynamic.graWorkGroup, StreamKHybrid.graWorkGroup]
+    )
+    def test_steal_passes_grid_sgpr(self, func):
+        # The steal now needs the mode-appropriate grid SGPR for its bound.
+        src = _source_of(func)
+        grid = "SKGrid" if func is StreamKHybrid.graWorkGroup else "skGrid"
+        assert "streamKWorkStealingSteal" in src
+        assert grid in src
+
+
+# ===========================================================================
+# 3d. No explicit reset survives anywhere in kernelEnd, and the 0x80
+#     completion counter / reset barrier are gone.
+# ===========================================================================
+class TestNoExplicitReset:
+    @pytest.mark.parametrize("func", [StreamKDynamic.kernelEnd, StreamKHybrid.kernelEnd])
+    def test_kernelend_has_no_ws_calls(self, func):
+        assert _all_ws_calls(func) == set(), (
+            "kernelEnd must not emit any work-stealing reset"
+        )
+
+    @pytest.mark.parametrize("func", [StreamKDynamic.kernelEnd, StreamKHybrid.kernelEnd])
+    def test_kernelend_has_no_completion_counter(self, func):
+        src = _source_of(func)
+        assert "0x80" not in src
+        assert "completion" not in src.lower() or "no explicit" in src.lower()
+
+
+# ===========================================================================
+# 5. Per-architecture queue-count lookup (C1): fast masking requires a
+#    power-of-two queue count; the count is keyed off kernel["ISA"].
+# ===========================================================================
+class TestQueueConstants:
+    @pytest.mark.parametrize("isa", [(9, 4, 0), (9, 5, 0)])
+    def test_supported_arches_use_eight_power_of_two_queues(self, isa):
+        sk = _stream_k_instance(4)
+        numQueues, mask, log2Queues, cacheLineLog2 = sk._wsQueueConstants({"ISA": isa})
+        assert numQueues == 8
+        assert numQueues & (numQueues - 1) == 0, "queue count must be power of two"
+        assert mask == numQueues - 1 == 0x7
+        assert (1 << log2Queues) == numQueues
+        assert (1 << cacheLineLog2) == 256
+
+
+# ===========================================================================
+# 3e. Absence-by-toggle: the helpers are only reached behind the
 #     ``kernel["StreamKWorkStealing"]`` gate at every callsite. Verified
 #     against the real source so "off" provably emits nothing extra.
 # ===========================================================================
@@ -347,26 +434,14 @@ class TestCallsitesAreToggleGated:
     def test_sk4_grawg_steal_calls_are_all_gated(self):
         guarded = _ws_guarded_calls(StreamKDynamic.graWorkGroup)
         allcalls = _all_ws_calls(StreamKDynamic.graWorkGroup)
-        assert {"streamKWorkStealingHomeNoReset", "streamKWorkStealingSteal"} <= guarded
+        assert {"streamKWorkStealingHomeBound", "streamKWorkStealingSteal"} <= guarded
         # Nothing slips through ungated.
-        assert allcalls == guarded
-
-    def test_sk4_kernelend_reset_is_gated(self):
-        guarded = _ws_guarded_calls(StreamKDynamic.kernelEnd)
-        allcalls = _all_ws_calls(StreamKDynamic.kernelEnd)
-        assert "streamKWorkStealingKernelEndReset" in guarded
         assert allcalls == guarded
 
     def test_sk5_grawg_steal_calls_are_all_gated(self):
         guarded = _ws_guarded_calls(StreamKHybrid.graWorkGroup)
         allcalls = _all_ws_calls(StreamKHybrid.graWorkGroup)
-        assert {"streamKWorkStealingHomeNoReset", "streamKWorkStealingSteal"} <= guarded
-        assert allcalls == guarded
-
-    def test_sk5_kernelend_reset_is_gated(self):
-        guarded = _ws_guarded_calls(StreamKHybrid.kernelEnd)
-        allcalls = _all_ws_calls(StreamKHybrid.kernelEnd)
-        assert "streamKWorkStealingKernelEndReset" in guarded
+        assert {"streamKWorkStealingHomeBound", "streamKWorkStealingSteal"} <= guarded
         assert allcalls == guarded
 
 
@@ -378,11 +453,12 @@ class TestSolutionValidation:
     def setup_method(self):
         self.validate = _extract_ws_validation()
 
-    def _run(self, *, streamk, atomic, work_stealing=1):
+    def _run(self, *, streamk, atomic, work_stealing=1, debug_streamk=0):
         state = {
             "StreamKWorkStealing": work_stealing,
             "StreamK": streamk,
             "StreamKAtomic": atomic,
+            "DebugStreamK": debug_streamk,
         }
         self.validate(state, False, reject)
         return state
@@ -402,8 +478,15 @@ class TestSolutionValidation:
         state = self._run(streamk=streamk, atomic=1)
         assert state["Valid"] is False
 
+    @pytest.mark.parametrize("debug", [1, 2, 3])
+    def test_rejected_with_debug_streamk(self, debug):
+        # Proof condition #1: DebugStreamK overrides could break the W_q>=1
+        # (skGrid>=numQueues) precondition the per-queue auto-reset relies on.
+        state = self._run(streamk=4, atomic=0, debug_streamk=debug)
+        assert state["Valid"] is False
+
     def test_off_toggle_is_inert_even_for_bad_combo(self):
         # With the toggle off the guard must not fire, even for a combination
         # that would otherwise be rejected.
-        state = self._run(streamk=3, atomic=1, work_stealing=0)
+        state = self._run(streamk=3, atomic=1, work_stealing=0, debug_streamk=3)
         assert "Valid" not in state

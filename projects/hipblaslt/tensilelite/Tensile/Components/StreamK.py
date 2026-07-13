@@ -332,29 +332,28 @@ class StreamK(Component):
     # Single-hop next-neighbor work stealing (codegen-time, off by default)
     #
     # Topology: the dynamic-queue fetch (auto-mode SK4 / SK5-dynamic) uses 8
-    # hardcoded queues. queueIdx = StreamKIdx & 0x7; per-queue counters live one
-    # per cache line at AddressFlags + (queueIdx << 8); the global tile index is
-    # (perQueueRaw << 3) + queueIdx; remainder tiles = TotalItems & 0x7.
+    # hardcoded queues in a wraparound next-neighbor order. queueIdx = StreamKIdx
+    # & 0x7; per-queue counters live one per cache line at AddressFlags +
+    # (queueIdx << 8); the global tile index is (perQueueRaw << 3) + queueIdx.
+    #
+    # Every queue q steals from its immediate next neighbor s = (q+1) & 0x7 once
+    # its own home queue drains (there is no remainder/structural-extra guard: an
+    # empty home fetch always attempts one steal from that single next neighbor).
+    # A per-WG STICKY-HOME flag (StreamKStickyEmpty) makes each WG touch its home
+    # counter for its valid dispenses plus EXACTLY ONE empty fetch, then only
+    # steal thereafter. Because the extra atomics against a queue are now a static
+    # function of the next-neighbor topology (each queue is stolen from by exactly
+    # one predecessor p = (q-1) & 0x7), every counter self-resets to 0 via a per-queue auto-reset
+    # bound that folds in the predecessor's workgroup count. No explicit
+    # end-of-kernel reset is needed: the Synchronizer, host-zeroed once at handle
+    # creation, is left zeroed for the next (back-to-back) launch by the bounds
+    # alone.
     #
     # AddressFlags buffer layout (per problem), for reference:
     #   [0x000 .. 0x800)  8 queue counters, one per 256B cache line
     #                     (only the first word of each line is used).
     #   [0x800 .. )       partials/fixup ready flags (one word per partial tile,
     #                     see storeBranches: offset = (partialIdx << 2) + 256*8).
-    #
-    # The work-stealing completion counter is placed at offset 0x80. This is
-    # collision-free: it is NOT a queue-counter offset (those are multiples of
-    # 256) and it sits below the flags region that starts at 256*8 = 0x800, so
-    # it reuses already-reserved, host-zeroed padding inside queue 0's cache-line
-    # slot. Picking 0x80 (rather than the prior art's numXCDs*256 = 0x800, which
-    # would collide with the first partials flag) needs no host workspace growth:
-    # ContractionSolution.cpp already reserves the full 256*8 queue region and
-    # the Synchronizer buffer is zeroed once at handle creation.
-    _WS_NUM_QUEUES = 8
-    _WS_QUEUE_MASK = 0x7
-    _WS_QUEUE_LOG2 = 3   # log2(8)
-    _WS_COMPLETION_COUNTER_OFFSET = 0x80
-
     # Per-architecture work-stealing / dynamic-queue count.
     #
     # The dynamic-queue fetch partitions work across one queue per XCD and maps
@@ -393,110 +392,122 @@ class StreamK(Component):
         )
         return numQueues, numQueues - 1, log2(numQueues), self._WS_CACHE_LINE_LOG2
 
-    def streamKWorkStealingHomeNoReset(self, writer, mod, kernel, sBound, mkLabel):
-        """Disable the home queue's atomic auto-reset when a neighbor could steal.
+    def _wsStructuralCount(self, mod, mask, log2Queues, sDst, sTotal, sQueue, sTmp, comment):
+        """Emit sDst = (sTotal >> log2Queues) + [sQueue < (sTotal & mask)].
 
-        When remainder (TotalItems & 0x7) != 0 a neighbor may steal this queue's
-        structural extra tile, which would throw off the auto-reset count, so the
-        home counter must run unbounded (kernelEnd resets it instead). Overrides
-        the precomputed auto-reset bound in sBound with 0xFFFFFFFF in that case;
-        remainder == 0 keeps the normal bound. Caller must gate on
-        kernel["StreamKWorkStealing"].
+        Reuses the shift/and(mask)/cmp/cselect idiom already used for
+        tilesInQueue / workgroupsInQueue in graWorkGroup so the per-queue
+        structural share (tiles or workgroups) can be recomputed for an
+        arbitrary queue index. ``sTmp`` is a caller-owned scratch SGPR.
         """
-        skKeepBound = mkLabel("SK_FetchHomeQueue")
-        sRemainder = writer.sgprPool.checkOut(1, "wsRemainder")
-        mod.add(SAndB32(dst=sgpr(sRemainder), src0=sgpr("TotalItems"), src1=self._WS_QUEUE_MASK, comment="Remainder tiles"))
-        mod.add(SCmpEQU32(src0=sgpr(sRemainder), src1=0, comment="Stealing only helps when remainder != 0"))
-        mod.add(SCBranchSCC1(labelName=skKeepBound.getLabelName(), comment="No remainder; keep auto-reset bound"))
-        mod.add(SMovB32(dst=sgpr(sBound), src=hex(0xFFFFFFFF), comment="Disable home auto-reset (neighbor may steal)"))
-        mod.add(skKeepBound)
-        writer.sgprPool.checkIn(sRemainder)
+        mod.add(SLShiftRightB32(dst=sgpr(sDst), src=sgpr(sTotal), shiftHex=log2Queues, comment=comment))
+        mod.add(SAndB32(dst=sgpr(sTmp), src0=sgpr(sTotal), src1=mask, comment="Remainder"))
+        mod.add(SCmpLtU32(src0=sgpr(sQueue), src1=sgpr(sTmp), comment="Queue gets a structural extra?"))
+        mod.add(SCSelectB32(dst=sgpr(sTmp), src0=1, src1=0))
+        mod.add(SAddU32(dst=sgpr(sDst), src0=sgpr(sDst), src1=sgpr(sTmp)))
 
-    def streamKWorkStealingSteal(self, writer, mod, kernel, sQueueIdx, sWorkItemIdx, mkLabel):
-        """Single-hop NEXT-neighbor steal on the 8-queue topology.
+    def streamKWorkStealingHomeBound(self, writer, mod, kernel, sBound, sQueueIdx, sGrid):
+        """Fold the predecessor's workgroup count into the home auto-reset bound.
 
-        On entry sQueueIdx holds the home queue index and sWorkItemIdx holds the
-        home global tile index; both must be live. If the home fetch came up
-        empty (index >= TotalItems) and the next queue (queueIdx+1)&0x7 owns a
-        structural extra tile that the home queue does not, make exactly ONE
-        atomic (auto-reset disabled) against that neighbor and recompute the
-        global index. A lost race leaves sWorkItemIdx >= TotalItems so the
-        existing downstream valid-index check turns this WG into a no-op.
-        sQueueIdx is clobbered. Caller must gate on kernel["StreamKWorkStealing"].
+        The non-stealing dynamic path relies on the atomic_inc auto-reset bound
+        ``tiles_q + W_q - 1`` so that after exactly ``tiles_q + W_q`` fetches (all
+        tiles dispensed + one empty per WG) the counter wraps back to 0. Under
+        single-hop next-neighbor stealing every queue q is also stolen from by EXACTLY ONE
+        predecessor p = (q-1) & (numQueues-1): once each of p's W_p workgroups
+        goes sticky-empty it makes one atomic against q per persistent iteration,
+        contributing W_p additional increments to q's counter. The self-resetting
+        bound therefore becomes ``tiles_q + W_q + W_p - 1``. This adds the W_p
+        term (W_p = (skGrid >> log2) + [p < (skGrid & mask)]) to the already
+        computed ``tiles_q + W_q - 1`` in ``sBound``. Caller must gate on
+        kernel["StreamKWorkStealing"] and pass the mode-appropriate grid SGPR
+        name (``"skGrid"`` for SK4, ``"SKGrid"`` for SK5-dynamic). ``sQueueIdx``
+        is preserved.
+
+        Precondition (see Solution validation): the fold is exact only when
+        W_q >= 1 whenever tiles_q >= 1, i.e. the grid assigns at least one
+        workgroup per queue (skGrid >= numQueues); the Solution layer rejects
+        debug overrides that could violate this.
         """
+        _, mask, log2Queues, _ = self._wsQueueConstants(kernel)
+        sPred = writer.sgprPool.checkOut(1, "wsPredQueue")
+        sWp = writer.sgprPool.checkOut(1, "wsPredWorkgroups")
+        sTmp = writer.sgprPool.checkOut(1, "wsPredTmp")
+        # p = (q - 1) & mask  (wraps 0 -> numQueues-1 for unsigned subtract)
+        mod.add(SSubU32(dst=sgpr(sPred), src0=sgpr(sQueueIdx), src1=1, comment="Predecessor queue (q-1)"))
+        mod.add(SAndB32(dst=sgpr(sPred), src0=sgpr(sPred), src1=mask, comment="Wrap predecessor index"))
+        # W_p = (skGrid >> log2) + [p < (skGrid & mask)]
+        self._wsStructuralCount(mod, mask, log2Queues, sWp, sGrid, sPred, sTmp,
+                                comment="Predecessor workgroups W_(q-1)")
+        mod.add(SAddU32(dst=sgpr(sBound), src0=sgpr(sBound), src1=sgpr(sWp),
+                        comment="Home auto-reset bound += predecessor workgroups (next-neighbor steal)"))
+        writer.sgprPool.checkIn(sTmp)
+        writer.sgprPool.checkIn(sWp)
+        writer.sgprPool.checkIn(sPred)
+
+    def streamKWorkStealingSteal(self, writer, mod, kernel, sQueueIdx, sWorkItemIdx, sGrid, mkLabel):
+        """Single-hop next-neighbor steal on the per-XCD queue topology.
+
+        On entry sQueueIdx holds the home queue index q and sWorkItemIdx holds
+        the home fetch result; both must be live. If the home fetch was valid
+        (index < TotalItems) this is a no-op. Otherwise the WG ALWAYS steals one
+        tile from its immediate next neighbor s = (q+1) & (numQueues-1): a single
+        s_atomic_inc against the neighbor's counter, then the global tile index
+        is recomputed from s. There is NO remainder / structural-extra guard --
+        an empty home always attempts exactly one steal. A lost race leaves
+        sWorkItemIdx >= TotalItems so the downstream valid-index check turns this
+        WG into a no-op. sQueueIdx is clobbered (advanced to s). Caller must gate
+        on kernel["StreamKWorkStealing"] and pass the mode-appropriate grid SGPR
+        name (``"skGrid"`` for SK4, ``"SKGrid"`` for SK5-dynamic).
+
+        The steal atomic runs with a STATIC auto-reset bound
+        ``tiles_s + W_s + W_q - 1`` (rather than a disabled 0xFFFFFFFF bound):
+        s is stolen from by exactly its predecessor q, so this is the same
+        predecessor-inclusive self-reset used on the home path, evaluated for the
+        stolen queue. This lets the neighbor counter wrap back to 0 on its own,
+        removing the need for an explicit end-of-kernel reset.
+        """
+        _, mask, log2Queues, cacheLineLog2 = self._wsQueueConstants(kernel)
         skFetchDone = mkLabel("SK_FetchDone")
         mod.add(SCmpLtU32(src0=sgpr(sWorkItemIdx), src1=sgpr("TotalItems"), comment="Home fetch valid?"))
         mod.add(SCBranchSCC1(labelName=skFetchDone.getLabelName(), comment="Valid work fetched; no steal"))
 
-        sRemainder = writer.sgprPool.checkOut(1, "wsRemainder")
-        mod.add(SAndB32(dst=sgpr(sRemainder), src0=sgpr("TotalItems"), src1=self._WS_QUEUE_MASK, comment="Remainder tiles"))
-        mod.add(SCmpEQU32(src0=sgpr(sRemainder), src1=0, comment="Stealing only helps when remainder != 0"))
-        mod.add(SCBranchSCC1(labelName=skFetchDone.getLabelName(), comment="No remainder; skip steal"))
-        mod.add(SCmpLtU32(src0=sgpr(sQueueIdx), src1=sgpr(sRemainder), comment="Home already owns a structural extra?"))
-        mod.add(SCBranchSCC1(labelName=skFetchDone.getLabelName(), comment="Home has extra; no fair steal"))
+        # Build the steal auto-reset bound tiles_s + W_s + W_q - 1 into
+        # sWorkItemIdx (dead here). W_q is the stealer's own workgroup count and
+        # must be computed while sQueueIdx still holds q, before advancing to s.
+        sTmp = writer.sgprPool.checkOut(1, "wsStealTmp")
+        sWq = writer.sgprPool.checkOut(1, "wsStealerWorkgroups")
+        self._wsStructuralCount(mod, mask, log2Queues, sWq, sGrid, sQueueIdx, sTmp,
+                                comment="Stealer workgroups W_q")
 
-        # Walk to the immediate next queue (wrap within the 8-queue ring).
+        # Walk to the immediate next queue (wrap within the per-XCD queues, single-hop next-neighbor).
         mod.add(SAddU32(dst=sgpr(sQueueIdx), src0=sgpr(sQueueIdx), src1=1, comment="Next queue"))
-        mod.add(SAndB32(dst=sgpr(sQueueIdx), src0=sgpr(sQueueIdx), src1=self._WS_QUEUE_MASK, comment="Wrap queue index"))
-        mod.add(SCmpGeU32(src0=sgpr(sQueueIdx), src1=sgpr(sRemainder), comment="Neighbor has no structural extra?"))
-        mod.add(SCBranchSCC1(labelName=skFetchDone.getLabelName(), comment="Neighbor has no extra; skip steal"))
+        mod.add(SAndB32(dst=sgpr(sQueueIdx), src0=sgpr(sQueueIdx), src1=mask, comment="Wrap queue index"))
 
-        # One atomic on the neighbor's counter, auto-reset disabled.
+        # tiles_s into sWorkItemIdx, then += W_s and += W_q, then -1.
+        self._wsStructuralCount(mod, mask, log2Queues, sWorkItemIdx, "TotalItems", sQueueIdx, sTmp,
+                                comment="Stolen-queue tiles tiles_s")
+        sWs = writer.sgprPool.checkOut(1, "wsStolenWorkgroups")
+        self._wsStructuralCount(mod, mask, log2Queues, sWs, sGrid, sQueueIdx, sTmp,
+                                comment="Stolen-queue workgroups W_s")
+        mod.add(SAddU32(dst=sgpr(sWorkItemIdx), src0=sgpr(sWorkItemIdx), src1=sgpr(sWs), comment="tiles_s + W_s"))
+        writer.sgprPool.checkIn(sWs)
+        mod.add(SAddU32(dst=sgpr(sWorkItemIdx), src0=sgpr(sWorkItemIdx), src1=sgpr(sWq), comment="+ W_q (stealer)"))
+        mod.add(SSubU32(dst=sgpr(sWorkItemIdx), src0=sgpr(sWorkItemIdx), src1=1, comment="Steal auto-reset bound"))
+        writer.sgprPool.checkIn(sWq)
+        writer.sgprPool.checkIn(sTmp)
+
+        # One atomic on the neighbor's counter with the static self-reset bound.
         sAddress = writer.sgprPool.checkOutAligned(2, 2, "wsStealAddress")
-        mod.add(SLShiftLeftB32(dst=sgpr(sAddress), src=sgpr(sQueueIdx), shiftHex=log2(256), comment="Stride queues to cache lines (stolen queue)"))
+        mod.add(SLShiftLeftB32(dst=sgpr(sAddress), src=sgpr(sQueueIdx), shiftHex=cacheLineLog2, comment="Stride queues to cache lines (stolen queue)"))
         mod.add(SAddU32(dst=sgpr(sAddress+0), src0=sgpr(sAddress+0), src1=sgpr("AddressFlags+0")))
         mod.add(SAddCU32(dst=sgpr(sAddress+1), src0=0, src1=sgpr("AddressFlags+1")))
-        mod.add(SMovB32(dst=sgpr(sWorkItemIdx), src=hex(0xFFFFFFFF), comment="Disable atomic auto-reset"))
         mod.add(SAtomicInc(dst=sgpr(sWorkItemIdx), base=sgpr(sAddress, 2), soffset=0, smem=SMEMModifiers(glc=True), comment="Fetch stolen work item index"))
         mod.add(SWaitCnt(kmcnt=0, comment="Wait for scalar memory op"))
         writer.sgprPool.checkIn(sAddress)
         # Recompute global tile index from the neighbor's queue.
-        mod.add(SLShiftLeftB32(dst=sgpr(sWorkItemIdx), src=sgpr(sWorkItemIdx), shiftHex=self._WS_QUEUE_LOG2))
+        mod.add(SLShiftLeftB32(dst=sgpr(sWorkItemIdx), src=sgpr(sWorkItemIdx), shiftHex=log2Queues))
         mod.add(SAddU32(dst=sgpr(sWorkItemIdx), src0=sgpr(sWorkItemIdx), src1=sgpr(sQueueIdx)))
         mod.add(skFetchDone)
-        writer.sgprPool.checkIn(sRemainder)
-
-    def streamKWorkStealingKernelEndReset(self, writer, kernel, sGridName, mkLabel):
-        """Last WG to finish zeroes the 8 queue counters + the completion counter.
-
-        Required only when work stealing disabled the home auto-reset: the
-        Synchronizer buffer is zeroed by the host just once (at handle creation),
-        so the kernel must restore the counters to 0 itself for the next launch.
-        Wave 0 atomically counts completed WGs against the completion counter at
-        offset 0x80 (auto-reset disabled); the WG that observes the full grid
-        count (sGridName) performs the resets. Caller must gate on
-        kernel["StreamKWorkStealing"]. sGridName is "skGrid" (SK4) or "SKGrid"
-        (SK5-dynamic).
-        """
-        module = Module("StreamK work-stealing kernelEnd reset")
-        completionOffset = self._WS_COMPLETION_COUNTER_OFFSET
-        skExit = mkLabel("SK_WSResetExit")
-
-        module.add(SBarrier(comment="Wait for all waves before completion count"))
-        sWave = writer.sgprPool.checkOut(1, "wsWave")
-        module.add(VReadfirstlaneB32(dst=sgpr(sWave), src=vgpr("Serial"), comment="Wave 0 handles completion"))
-        module.add(SCmpEQU32(src0=sgpr(sWave), src1=0, comment="Check for wave 0"))
-        module.add(SCBranchSCC0(labelName=skExit.getLabelName(), comment="Only wave 0 counts completed WGs"))
-        writer.sgprPool.checkIn(sWave)
-
-        sCompleted = writer.sgprPool.checkOut(1, "wsCompletedWGs")
-        module.add(SMovB32(dst=sgpr(sCompleted), src=hex(0xFFFFFFFF), comment="Disable completion counter auto-reset"))
-        module.add(SAtomicInc(dst=sgpr(sCompleted), base=sgpr("AddressFlags", 2), soffset=completionOffset, smem=SMEMModifiers(glc=True), comment="Count completed workgroups"))
-        module.add(SWaitCnt(kmcnt=0, comment="Wait for scalar memory op"))
-        module.add(SAddU32(dst=sgpr(sCompleted), src0=sgpr(sCompleted), src1=1, comment="Completed WGs including this WG"))
-        module.add(SCmpEQU32(src0=sgpr(sCompleted), src1=sgpr(sGridName), comment="All workgroups completed?"))
-        module.add(SCBranchSCC0(labelName=skExit.getLabelName(), comment="Not the last WG; skip reset"))
-
-        module.add(SMovB32(dst=sgpr(sCompleted), src=0, comment="Zero value for synchronizer resets"))
-        # Per-queue counters are one-per-cache-line (256B apart) so they cannot
-        # be coalesced into a wide store; keep separate b32 stores.
-        for queueIdx in range(self._WS_NUM_QUEUES):
-            module.add(SStoreB32(src=sgpr(sCompleted), base=sgpr("AddressFlags", 2), soffset=queueIdx * 256, smem=SMEMModifiers(glc=True), comment="Reset queue counter"))
-        module.add(SStoreB32(src=sgpr(sCompleted), base=sgpr("AddressFlags", 2), soffset=completionOffset, smem=SMEMModifiers(glc=True), comment="Reset completion counter"))
-        module.add(SWaitCnt(kmcnt=0, comment="Wait for synchronizer reset"))
-        module.add(skExit)
-        writer.sgprPool.checkIn(sCompleted)
-        return module
 
     @abc.abstractmethod
     def preLoop(self, writer, kernel):
@@ -3028,6 +3039,9 @@ class StreamKDynamic(StreamK):
             module.add(SLShiftRightB32(dst=sgpr("WorkGroup2"), shiftHex=hex(0x10), src="ttmp7", comment="workaround"))
 
         module.add(SMovB32(dst=sgpr("StreamKIdx"), src=sgpr("WorkGroup0"), comment="Save original StreamK index"))
+        # Work stealing: this WG has not yet seen its home queue empty.
+        if kernel["StreamKWorkStealing"]:
+            module.add(SMovB32(dst=sgpr("StreamKStickyEmpty"), src=0, comment="WS: home not yet empty"))
         # Two-tile SK (DP first)
         # Do DP tiles before SK
         skInitDone = Label("SK_InitDone", "")
@@ -3064,23 +3078,27 @@ class StreamKDynamic(StreamK):
         module.add(SCBranchSCC0(labelName=skSkipWorkItem.getLabelName(), comment="Skip work item"))
         writer.sgprPool.checkIn(sWave)
 
+        # Per-arch dynamic-queue fast-mask constants (log2(numQueues) for the
+        # StreamKIdx/queue divisions, log2(256) for the cache-line stride).
+        _, _, wsLog2Queues, wsCacheLineLog2 = self._wsQueueConstants(kernel)
+
         # Default queue index
         sQueueIdx = writer.sgprPool.checkOut(1, "QueueIdx")
-        module.add(SLShiftRightB32(dst=sgpr(sQueueIdx), src=sgpr("StreamKIdx"), shiftHex=log2(8)))
-        module.add(SLShiftLeftB32(dst=sgpr(sQueueIdx), src=sgpr(sQueueIdx), shiftHex=log2(8)))
+        module.add(SLShiftRightB32(dst=sgpr(sQueueIdx), src=sgpr("StreamKIdx"), shiftHex=wsLog2Queues))
+        module.add(SLShiftLeftB32(dst=sgpr(sQueueIdx), src=sgpr(sQueueIdx), shiftHex=wsLog2Queues))
         module.add(SSubU32(dst=sgpr(sQueueIdx), src0=sgpr("StreamKIdx"), src1=sgpr(sQueueIdx), comment="Default queue index"))
 
         # Queue address
         sAddress = writer.sgprPool.checkOutAligned(2, 2, "Address")
-        module.add(SLShiftLeftB32(dst=sgpr(sAddress), src=sgpr(sQueueIdx), shiftHex=log2(256), comment="Stride queues to different cache lines"))
+        module.add(SLShiftLeftB32(dst=sgpr(sAddress), src=sgpr(sQueueIdx), shiftHex=wsCacheLineLog2, comment="Stride queues to different cache lines"))
         module.add(SAddU32(dst=sgpr(sAddress+0), src0=sgpr(sAddress+0), src1=sgpr("AddressFlags+0")))
         module.add(SAddCU32(dst=sgpr(sAddress+1), src0=0, src1=sgpr("AddressFlags+1")))
 
         # Tiles in queue
         sTilesInQueue = writer.sgprPool.checkOut(1, "tilesInQueue")
-        module.add(SLShiftRightB32(dst=sgpr(sTilesInQueue), src=sgpr("TotalItems"), shiftHex=log2(8)))
+        module.add(SLShiftRightB32(dst=sgpr(sTilesInQueue), src=sgpr("TotalItems"), shiftHex=wsLog2Queues))
         sRemainder = writer.sgprPool.checkOut(1, "remainder tiles")
-        module.add(SLShiftLeftB32(dst=sgpr(sRemainder), src=sgpr(sTilesInQueue), shiftHex=log2(8)))
+        module.add(SLShiftLeftB32(dst=sgpr(sRemainder), src=sgpr(sTilesInQueue), shiftHex=wsLog2Queues))
         module.add(SSubU32(dst=sgpr(sRemainder), src0=sgpr("TotalItems"), src1=sgpr(sRemainder), comment="Remainder tiles"))
         module.add(SCmpLtU32(src0=sgpr(sQueueIdx), src1=sgpr(sRemainder), comment="Check if queue gets an extra tile"))
         module.add(SCSelectB32(dst=sgpr(sRemainder), src0=1, src1=0))
@@ -3089,9 +3107,9 @@ class StreamKDynamic(StreamK):
 
         # Workgroups in queue
         sWorkgroupsInQueue = writer.sgprPool.checkOut(1, "workgroupsInQueue")
-        module.add(SLShiftRightB32(dst=sgpr(sWorkgroupsInQueue), src=sgpr("skGrid"), shiftHex=log2(8)))
+        module.add(SLShiftRightB32(dst=sgpr(sWorkgroupsInQueue), src=sgpr("skGrid"), shiftHex=wsLog2Queues))
         sRemainder = writer.sgprPool.checkOut(1, "remainder workgroups")
-        module.add(SLShiftLeftB32(dst=sgpr(sRemainder), src=sgpr(sWorkgroupsInQueue), shiftHex=log2(8)))
+        module.add(SLShiftLeftB32(dst=sgpr(sRemainder), src=sgpr(sWorkgroupsInQueue), shiftHex=wsLog2Queues))
         module.add(SSubU32(dst=sgpr(sRemainder), src0=sgpr("skGrid"), src1=sgpr(sRemainder), comment="Remainder workgroups"))
         module.add(SCmpLtU32(src0=sgpr(sQueueIdx), src1=sgpr(sRemainder), comment="Check if queue gets an extra tile"))
         module.add(SCSelectB32(dst=sgpr(sRemainder), src0=1, src1=0))
@@ -3105,9 +3123,19 @@ class StreamKDynamic(StreamK):
         writer.sgprPool.checkIn(sTilesInQueue)
         writer.sgprPool.checkIn(sWorkgroupsInQueue)
 
-        # Work stealing: a stolen home queue must not auto-reset its counter.
+        # Work stealing: fold the predecessor's workgroup count into the home
+        # auto-reset bound so the counter still self-resets under next-neighbor stealing.
         if kernel["StreamKWorkStealing"]:
-            self.streamKWorkStealingHomeNoReset(writer, module, kernel, sWorkItemIdx, lambda base: Label(base, ""))
+            self.streamKWorkStealingHomeBound(writer, module, kernel, sWorkItemIdx, sQueueIdx, "skGrid")
+
+        # Work stealing: once this WG has seen its home queue empty (sticky), it
+        # never touches the home counter again -- skip the home fetch and force
+        # the steal path with an invalid sentinel index (>= TotalItems).
+        if kernel["StreamKWorkStealing"]:
+            skStealOnly = Label(writer.labels.getNameInc("SK_StealOnly"), "")
+            skHomeFetched = Label(writer.labels.getNameInc("SK_HomeFetched"), "")
+            module.add(SCmpEQU32(src0=sgpr("StreamKStickyEmpty"), src1=0, comment="Home not yet empty?"))
+            module.add(SCBranchSCC0(labelName=skStealOnly.getLabelName(), comment="Sticky: skip home fetch, steal only"))
 
         # Fetch next work item
         module.add(SAtomicInc(dst=sgpr(sWorkItemIdx), base=sgpr(sAddress, 2), soffset=0, smem=SMEMModifiers(glc=True), comment="Fetch next work item index"))
@@ -3116,13 +3144,20 @@ class StreamKDynamic(StreamK):
         writer.sgprPool.checkIn(sAddress)
 
         # Convert to global work item index
-        module.add(SLShiftLeftB32(dst=sgpr(sWorkItemIdx), src=sgpr(sWorkItemIdx), shiftHex=log2(8)))
+        module.add(SLShiftLeftB32(dst=sgpr(sWorkItemIdx), src=sgpr(sWorkItemIdx), shiftHex=wsLog2Queues))
         module.add(SAddU32(dst=sgpr(sWorkItemIdx), src0=sgpr(sWorkItemIdx), src1=sgpr(sQueueIdx)))
 
-        # Work stealing: if the home queue was empty, attempt one steal from the
-        # next neighbor before sharing the index with the rest of the waves.
+        # Work stealing: latch the sticky-empty flag on the first empty home
+        # fetch, then fall through to the steal (or, when already sticky, jump
+        # straight to the steal with the sentinel index).
         if kernel["StreamKWorkStealing"]:
-            self.streamKWorkStealingSteal(writer, module, kernel, sQueueIdx, sWorkItemIdx, lambda base: Label(base, ""))
+            module.add(SCmpGeU32(src0=sgpr(sWorkItemIdx), src1=sgpr("TotalItems"), comment="Home fetch empty?"))
+            module.add(SCSelectB32(dst=sgpr("StreamKStickyEmpty"), src0=1, src1=0, comment="Latch sticky-empty on empty home"))
+            module.add(SBranch(labelName=skHomeFetched.getLabelName(), comment="Home fetched; try one steal"))
+            module.add(skStealOnly)
+            module.add(SMovB32(dst=sgpr(sWorkItemIdx), src=sgpr("TotalItems"), comment="Sentinel index (>= TotalItems) forces steal"))
+            module.add(skHomeFetched)
+            self.streamKWorkStealingSteal(writer, module, kernel, sQueueIdx, sWorkItemIdx, "skGrid", lambda base: Label(writer.labels.getNameInc(base), ""))
         writer.sgprPool.checkIn(sQueueIdx)
 
         # Share work item index with all waves
@@ -3401,16 +3436,13 @@ class StreamKDynamic(StreamK):
     def kernelEnd(self, writer, kernel):
         module = Module("StreamK Dynamic kernelEnd")
 
-        # We don't need to track completed kernels if we know total tiles and grid size
-        # Reset is baked into the atomic_inc at the top of the loop
-        # TODO will need to reset the rest of the synchronizer if tiles were split
-        # Remaining reset can be done if workitem = grid + total - 1
-
-        # Work stealing disables the home auto-reset, so the last WG must restore
-        # the queue + completion counters for the next launch (the Synchronizer
-        # is zeroed by the host only once).
-        if kernel["StreamKWorkStealing"]:
-            module.add(self.streamKWorkStealingKernelEndReset(writer, kernel, "skGrid", lambda base: Label(base, "")))
+        # We don't need to track completed kernels if we know total tiles and grid size.
+        # The reset is baked into the atomic_inc auto-reset bound at the top of the
+        # loop: under single-hop next-neighbor work stealing the per-queue bound folds in the
+        # predecessor's workgroup count (see streamKWorkStealingHomeBound /
+        # streamKWorkStealingSteal), so every counter wraps back to 0 on its own and
+        # leaves the (host-zeroed-once) Synchronizer clean for the next launch. No
+        # explicit end-of-kernel reset is required.
 
         return module
 
@@ -3513,6 +3545,10 @@ class StreamKHybrid(StreamK):
         # so save directly to the StreamKIdx SGPR (no VGPR-cache path).
         module.add(SMovB32(dst=sgpr("StreamKIdx"), src=sgpr("WorkGroup0"),
                            comment="SK5: save original StreamK index"))
+        # Work stealing: this WG has not yet seen its home queue empty.
+        if kernel["StreamKWorkStealing"]:
+            module.add(SMovB32(dst=sgpr("StreamKStickyEmpty"), src=0,
+                               comment="WS: home not yet empty"))
 
         # ----- Extract the mode bit once for the whole kernel -----
         module.add(self._emitModeExtraction(writer, kernel))
@@ -3702,19 +3738,23 @@ class StreamKHybrid(StreamK):
                                     comment="Skip work item"))
             writer.sgprPool.checkIn(sWave)
 
+            # Per-arch dynamic-queue fast-mask constants (log2(numQueues) for
+            # the StreamKIdx/queue divisions, log2(256) for cache-line stride).
+            _, _, wsLog2Queues, wsCacheLineLog2 = self._wsQueueConstants(kernel)
+
             # Default queue index
             sQueueIdx = writer.sgprPool.checkOut(1, "QueueIdx")
             mod.add(SLShiftRightB32(dst=sgpr(sQueueIdx), src=sgpr("StreamKIdx"),
-                                       shiftHex=log2(8)))
+                                       shiftHex=wsLog2Queues))
             mod.add(SLShiftLeftB32(dst=sgpr(sQueueIdx), src=sgpr(sQueueIdx),
-                                      shiftHex=log2(8)))
+                                      shiftHex=wsLog2Queues))
             mod.add(SSubU32(dst=sgpr(sQueueIdx), src0=sgpr("StreamKIdx"),
                                src1=sgpr(sQueueIdx), comment="Default queue index"))
 
             # Queue address
             sAddress = writer.sgprPool.checkOutAligned(2, 2, "Address")
             mod.add(SLShiftLeftB32(dst=sgpr(sAddress), src=sgpr(sQueueIdx),
-                                      shiftHex=log2(256),
+                                      shiftHex=wsCacheLineLog2,
                                       comment="Stride queues to different cache lines"))
             mod.add(SAddU32(dst=sgpr(sAddress+0), src0=sgpr(sAddress+0),
                                src1=sgpr("AddressFlags+0")))
@@ -3723,10 +3763,10 @@ class StreamKHybrid(StreamK):
             # Tiles in queue
             sTilesInQueue = writer.sgprPool.checkOut(1, "tilesInQueue")
             mod.add(SLShiftRightB32(dst=sgpr(sTilesInQueue), src=sgpr("TotalItems"),
-                                       shiftHex=log2(8)))
+                                       shiftHex=wsLog2Queues))
             sRemainder = writer.sgprPool.checkOut(1, "remainder tiles")
             mod.add(SLShiftLeftB32(dst=sgpr(sRemainder), src=sgpr(sTilesInQueue),
-                                      shiftHex=log2(8)))
+                                      shiftHex=wsLog2Queues))
             mod.add(SSubU32(dst=sgpr(sRemainder), src0=sgpr("TotalItems"),
                                src1=sgpr(sRemainder), comment="Remainder tiles"))
             mod.add(SCmpLtU32(src0=sgpr(sQueueIdx), src1=sgpr(sRemainder),
@@ -3740,10 +3780,10 @@ class StreamKHybrid(StreamK):
             sWorkgroupsInQueue = writer.sgprPool.checkOut(1, "workgroupsInQueue")
             # SK5: SKGrid is the SK4-dedicated grid SGPR (uppercase).
             mod.add(SLShiftRightB32(dst=sgpr(sWorkgroupsInQueue), src=sgpr("SKGrid"),
-                                       shiftHex=log2(8)))
+                                       shiftHex=wsLog2Queues))
             sRemainder = writer.sgprPool.checkOut(1, "remainder workgroups")
             mod.add(SLShiftLeftB32(dst=sgpr(sRemainder), src=sgpr(sWorkgroupsInQueue),
-                                      shiftHex=log2(8)))
+                                      shiftHex=wsLog2Queues))
             mod.add(SSubU32(dst=sgpr(sRemainder), src0=sgpr("SKGrid"),
                                src1=sgpr(sRemainder), comment="Remainder workgroups"))
             mod.add(SCmpLtU32(src0=sgpr(sQueueIdx), src1=sgpr(sRemainder),
@@ -3761,10 +3801,23 @@ class StreamKHybrid(StreamK):
             writer.sgprPool.checkIn(sTilesInQueue)
             writer.sgprPool.checkIn(sWorkgroupsInQueue)
 
-            # Work stealing: a stolen home queue must not auto-reset its counter.
+            # Work stealing: fold the predecessor's workgroup count into the
+            # home auto-reset bound so the counter still self-resets under
+            # next-neighbor stealing.
             if kernel["StreamKWorkStealing"]:
-                self.streamKWorkStealingHomeNoReset(writer, mod, kernel, sWorkItemIdx,
-                                                    lambda base: Label(writer.labels.getNameInc(base), ""))
+                self.streamKWorkStealingHomeBound(writer, mod, kernel, sWorkItemIdx,
+                                                  sQueueIdx, "SKGrid")
+
+            # Work stealing: once this WG has seen its home queue empty (sticky),
+            # never touch the home counter again -- skip the home fetch and force
+            # the steal path with an invalid sentinel index (>= TotalItems).
+            if kernel["StreamKWorkStealing"]:
+                skStealOnly = Label(writer.labels.getNameInc("SK_StealOnly"), "")
+                skHomeFetched = Label(writer.labels.getNameInc("SK_HomeFetched"), "")
+                mod.add(SCmpEQU32(src0=sgpr("StreamKStickyEmpty"), src1=0,
+                                  comment="Home not yet empty?"))
+                mod.add(SCBranchSCC0(labelName=skStealOnly.getLabelName(),
+                                     comment="Sticky: skip home fetch, steal only"))
 
             mod.add(SAtomicInc(dst=sgpr(sWorkItemIdx), base=sgpr(sAddress, 2),
                                   soffset=0, smem=SMEMModifiers(glc=True),
@@ -3774,14 +3827,26 @@ class StreamKHybrid(StreamK):
 
             # Convert to global work item index
             mod.add(SLShiftLeftB32(dst=sgpr(sWorkItemIdx), src=sgpr(sWorkItemIdx),
-                                      shiftHex=log2(8)))
+                                      shiftHex=wsLog2Queues))
             mod.add(SAddU32(dst=sgpr(sWorkItemIdx), src0=sgpr(sWorkItemIdx),
                                src1=sgpr(sQueueIdx)))
 
-            # Work stealing: if the home queue was empty, attempt one steal from
-            # the next neighbor before sharing the index with the rest of the waves.
+            # Work stealing: latch the sticky-empty flag on the first empty home
+            # fetch, then fall through to one steal (or, when already sticky,
+            # jump straight to the steal with the sentinel index).
             if kernel["StreamKWorkStealing"]:
+                mod.add(SCmpGeU32(src0=sgpr(sWorkItemIdx), src1=sgpr("TotalItems"),
+                                  comment="Home fetch empty?"))
+                mod.add(SCSelectB32(dst=sgpr("StreamKStickyEmpty"), src0=1, src1=0,
+                                    comment="Latch sticky-empty on empty home"))
+                mod.add(SBranch(labelName=skHomeFetched.getLabelName(),
+                                comment="Home fetched; try one steal"))
+                mod.add(skStealOnly)
+                mod.add(SMovB32(dst=sgpr(sWorkItemIdx), src=sgpr("TotalItems"),
+                                comment="Sentinel index (>= TotalItems) forces steal"))
+                mod.add(skHomeFetched)
                 self.streamKWorkStealingSteal(writer, mod, kernel, sQueueIdx, sWorkItemIdx,
+                                              "SKGrid",
                                               lambda base: Label(writer.labels.getNameInc(base), ""))
             writer.sgprPool.checkIn(sQueueIdx)
 
@@ -4224,19 +4289,10 @@ class StreamKHybrid(StreamK):
     def kernelEnd(self, writer, kernel):
         module = Module("StreamK Hybrid kernelEnd")
 
-        # Work stealing only exists on the dynamic (SK4) sub-path; the static
-        # (SK3) sub-path has no per-XCD queue counters to reset. Gate the reset
-        # on the runtime mode bit so it is harmless when SK5 runs in static mode.
-        if kernel["StreamKWorkStealing"]:
-            def emitDynamicReset(mod):
-                mod.add(self.streamKWorkStealingKernelEndReset(
-                    writer, kernel, "SKGrid",
-                    lambda base: Label(writer.labels.getNameInc(base), "")))
-
-            def emitStaticReset(mod):
-                pass
-
-            self._emitSk3Sk4Branch(writer, module, "WSReset", emitDynamicReset, emitStaticReset)
+        # Single-hop next-neighbor work stealing self-resets every per-queue counter via the
+        # predecessor-inclusive atomic_inc auto-reset bound at the top of the loop
+        # (see streamKWorkStealingHomeBound / streamKWorkStealingSteal), so no
+        # explicit end-of-kernel reset is required on either SK5 sub-path.
 
         return module
 

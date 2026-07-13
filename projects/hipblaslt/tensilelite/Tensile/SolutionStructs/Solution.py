@@ -1684,6 +1684,23 @@ class Solution(collections.abc.Mapping):
         if state["StreamKAtomic"]:
           reject(state, printRejectionReason,
                  "StreamKWorkStealing is not supported with StreamKAtomic")
+        # Auto-reset precondition (proof condition #1): the per-queue atomic_inc
+        # auto-reset bound is now predecessor-inclusive (home bound =
+        # tiles_q + W_q + W_(q-1) - 1, steal bound = tiles_s + W_s + W_q - 1).
+        # It self-resets each launch ONLY while every queue that owns tiles also
+        # owns at least one workgroup, i.e. W_q >= 1 whenever tiles_q >= 1
+        # (equivalently skGrid >= numQueues, guaranteed by the CU-count-derived
+        # grid at runtime). DebugStreamK overrides the standard partials+fixup
+        # dispatch (1=no fixup, 2=no partials, 3=both) and can leave a queue
+        # owning tiles that are never dispensed by a home workgroup -- two
+        # consecutive zero-home queues owning tiles -- which breaks the wrap and
+        # would leave the Synchronizer non-zero for the next launch. Reject the
+        # combination so the invariant cannot be violated by a debug override.
+        if state["DebugStreamK"]:
+          reject(state, printRejectionReason,
+                 "StreamKWorkStealing requires DebugStreamK=0 (the per-queue "
+                 "auto-reset relies on W_q>=1 whenever tiles_q>=1); got %d"
+                 % state["DebugStreamK"])
       if not state["Valid"]:
         print2("in assignDerivedParameters, state['Valid'] = False")
         return

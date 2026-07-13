@@ -14,8 +14,16 @@ GlobalParameters:
   DataInitTypeB: 13
   DataInitTypeC: 12
   MaxWorkspaceSize: 134217728
-  NumWarmups: 0
-  EnqueuesPerSync: 1
+  # Repeated back-to-back enqueues per sync reuse the SAME (host-zeroed-once)
+  # Synchronizer workspace without re-zeroing between launches. This is exactly
+  # what the per-queue static auto-reset must guarantee: every counter wraps
+  # back to 0 on its own so the next launch starts clean (there is no explicit
+  # end-of-kernel reset anymore).
+  NumWarmups: 2
+  EnqueuesPerSync: 4
+  # SleepPercent injects a variable per-WG delay so tiles drain unevenly across
+  # queues, forcing the single-hop next-neighbor steal + sticky-home path to fire under
+  # contention rather than in lockstep.
   SleepPercent: 50
 
 # Shared SK4-dynamic fork entries (single-value) plus common benchmark params.
@@ -45,14 +53,20 @@ GlobalParameters:
   JoinParameters:
   BenchmarkJoinParameters:
   BenchmarkFinalParameters:
-    # Multiple sizes / repeated launches exercise the kernelEnd counter-reset
-    # path across launches that reuse the same (host-zeroed-once) Synchronizer.
-    #   512x512  -> 16 (MT128) / 64 (MT64) tiles  : aligned (remainder 0)
-    #   640x640  -> 25 (MT128) / 100 (MT64) tiles : unaligned (remainder != 0, steal fires)
+    # Multiple sizes + repeated back-to-back launches exercise the per-queue
+    # static auto-reset across launches that reuse the same (host-zeroed-once)
+    # Synchronizer -- there is no longer an explicit kernelEnd reset.
+    #   512x512  -> 16 (MT128) / 64 (MT64) tiles  : aligned (remainder 0);
+    #               with the next-neighbor steal this still exercises the neighbor steal
+    #               + auto-reset (the old remainder==0 skip is gone).
+    #   640x640  -> 25 (MT128) / 100 (MT64) tiles : unaligned (steal fires)
+    #   896x896  -> 49 (MT128) / 196 (MT64) tiles : unaligned, larger grid ->
+    #               contention size (uneven drain crossed with SleepPercent)
     #   384x384x3-> 27 (MT128) / 108 (MT64) tiles : unaligned + batched (steal fires)
     - ProblemSizes:
       - Exact: [512, 512, 1, 512]
       - Exact: [640, 640, 1, 512]
+      - Exact: [896, 896, 1, 512]
       - Exact: [384, 384, 3, 256]
 
 BenchmarkProblems:
