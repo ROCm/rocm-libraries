@@ -266,8 +266,12 @@ inline void sort_keys_empty_data()
             offsets[0] = 0;
             offsets[1] = 0;
 
-            key_type* d_keys;
-            HIP_CHECK(test_common_utils::hipMallocHelper(&d_keys, size * sizeof(key_type)));
+            key_type* d_keys = nullptr;
+            // hipMallocManaged will not allocate buffers of size 0.
+            // If HMM is enabled and size is 0, leave d_keys set to nullptr.
+            if (!(size == 0 && test_common_utils::use_hmm()))
+                HIP_CHECK(test_common_utils::hipMallocHelper(&d_keys, size * sizeof(key_type)));
+
             HIP_CHECK(hipMemcpy(d_keys,
                                 keys_input.data(),
                                 size * sizeof(key_type),
@@ -337,8 +341,9 @@ inline void sort_keys_empty_data()
                                 hipMemcpyDeviceToHost));
 
             HIP_CHECK(hipFree(d_temporary_storage));
-            HIP_CHECK(hipFree(d_keys));
             HIP_CHECK(hipFree(d_offsets));
+            if (d_keys)
+                HIP_CHECK(hipFree(d_keys));
 
             // Output should not have changed
             ASSERT_NO_FATAL_FAILURE(test_utils::assert_eq(keys_output, keys_input));
