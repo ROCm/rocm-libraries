@@ -42,6 +42,27 @@ tox -e coverage-unit
 
 Runs only Python unit tests.
 
+### Pre-commit hook (affected tests)
+
+An opt-in git pre-commit hook runs the unit + characterization tests affected by
+your staged TensileLite changes and blocks the commit on real failures (it falls
+back to the full unit + characterization suite when it cannot narrow the set). It
+runs `uv run pytest`, which builds rocisa (a HIP native extension), so install and
+commit from inside a ROCm dev container (HIP at `/opt/rocm`, a Python with dev
+headers). Mount the repo at the same absolute path inside the container as on the
+host — git worktrees use an absolute gitdir pointer, so a different mount breaks
+git.
+
+```
+cd rocm-libraries/projects/hipblaslt/tensilelite
+uv sync                          # provisions deps, rocisa, and the pre-commit app
+uv run invoke precommit-install  # writes the git hook (once per clone)
+```
+
+`git commit` from inside the container then runs the affected tests. Bypass once
+with `git commit --no-verify`. On a snapshot mismatch the hook prints a
+`--snapshot-update` command scoped to the failing file(s).
+
 ### Build client with invoke and Run a Test (Default Path)
 
 This workflow uses `invoke` to build the C++ client into the default `build_tmp` directory.

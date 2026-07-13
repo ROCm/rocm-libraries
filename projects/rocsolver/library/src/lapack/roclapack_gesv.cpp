@@ -1,5 +1,5 @@
 /* **************************************************************************
- * Copyright (C) 2019-2024 Advanced Micro Devices, Inc. All rights reserved.
+ * Copyright (C) 2019-2026 Advanced Micro Devices, Inc. All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -26,6 +26,7 @@
  * *************************************************************************/
 
 #include "roclapack_gesv.hpp"
+#include "exceptions.hpp"
 
 ROCSOLVER_BEGIN_NAMESPACE
 
@@ -39,6 +40,7 @@ rocblas_status rocsolver_gesv_impl(rocblas_handle handle,
                                    T* B,
                                    const rocblas_int ldb,
                                    rocblas_int* info)
+try
 {
     ROCSOLVER_ENTER_TOP("gesv", "-n", n, "--nrhs", nrhs, "--lda", lda, "--ldb", ldb);
 
@@ -105,6 +107,10 @@ rocblas_status rocsolver_gesv_impl(rocblas_handle handle,
         handle, n, nrhs, A, shiftA, lda, strideA, ipiv, strideP, B, shiftB, ldb, strideB, info,
         batch_count, (T*)scalars, (T*)work, work1, work2, work3, work4, (T*)pivotval,
         (rocblas_int*)pivotidx, (rocblas_int*)iipiv, (rocblas_int*)iinfo, optim_mem);
+}
+catch(...)
+{
+    return exception2rocblas_status();
 }
 
 ROCSOLVER_END_NAMESPACE

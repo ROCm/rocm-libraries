@@ -386,7 +386,12 @@ void BatchnormFwdTrainingPlan::compile(const IKernelCompiler& kernelCompiler,
     }
 
     // Prepare compilation options
-    BatchnormKernelCompileOptions options(_trainingParams.x(), deviceProperties, activationMode);
+    BatchnormKernelCompileOptions options(_trainingParams.x(),
+                                          _trainingParams.y(),
+                                          _trainingParams.mean(),
+                                          _trainingParams.scale(),
+                                          deviceProperties,
+                                          activationMode);
     options.update("HIP_PLUGIN_USE_FPMIX", useFp16Mix);
     options.update("HIP_PLUGIN_USE_BFPMIX", useBfp16Mix);
     // Not using FP16 and BFP16 paths due to affine data type requirements
@@ -407,7 +412,6 @@ void BatchnormFwdTrainingPlan::compile(const IKernelCompiler& kernelCompiler,
     options.update("HIP_PLUGIN_BN_GRP0", xlocalsize);
     options.update("HIP_PLUGIN_BN_GRP1", ylocalsize);
     options.update("HIP_PLUGIN_BN_GRP2", zlocalsize);
-    options.update("HIP_PLUGIN_BN_VECTORIZE", vectorsize > 1);
     options.update("HIP_PLUGIN_BN_VEC_SIZE", vectorsize);
     options.update("HIP_PLUGIN_BN_STASH_METHOD", stashMethod);
 

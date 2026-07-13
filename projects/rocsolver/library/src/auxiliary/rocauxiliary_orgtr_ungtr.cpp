@@ -1,5 +1,5 @@
 /* **************************************************************************
- * Copyright (C) 2019-2024 Advanced Micro Devices, Inc. All rights reserved.
+ * Copyright (C) 2019-2026 Advanced Micro Devices, Inc. All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -26,6 +26,7 @@
  * *************************************************************************/
 
 #include "rocauxiliary_orgtr_ungtr.hpp"
+#include "exceptions.hpp"
 
 ROCSOLVER_BEGIN_NAMESPACE
 
@@ -36,6 +37,7 @@ rocblas_status rocsolver_orgtr_ungtr_impl(rocblas_handle handle,
                                           T* A,
                                           const rocblas_int lda,
                                           T* ipiv)
+try
 {
     const char* name = (!rocblas_is_complex<T> ? "orgtr" : "ungtr");
     ROCSOLVER_ENTER_TOP(name, "--uplo", uplo, "-n", n, "--lda", lda);
@@ -93,6 +95,10 @@ rocblas_status rocsolver_orgtr_ungtr_impl(rocblas_handle handle,
     return rocsolver_orgtr_ungtr_template<false, false, T>(
         handle, uplo, n, A, shiftA, lda, strideA, ipiv, strideP, batch_count, (T*)scalars, (T*)work,
         (T*)Abyx_tmptr, (T*)trfact, (T**)workArr);
+}
+catch(...)
+{
+    return exception2rocblas_status();
 }
 
 ROCSOLVER_END_NAMESPACE

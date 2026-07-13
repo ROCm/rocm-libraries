@@ -1,5 +1,5 @@
 /* **************************************************************************
- * Copyright (C) 2024 Advanced Micro Devices, Inc. All rights reserved.
+ * Copyright (C) 2024-2026 Advanced Micro Devices, Inc. All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -26,6 +26,7 @@
  * *************************************************************************/
 
 #include "rocauxiliary_stedcj.hpp"
+#include "exceptions.hpp"
 
 ROCSOLVER_BEGIN_NAMESPACE
 
@@ -45,6 +46,7 @@ rocblas_status rocsolver_stedcj_impl(rocblas_handle handle,
                                      T* C,
                                      const rocblas_int ldc,
                                      rocblas_int* info)
+try
 {
     ROCSOLVER_ENTER_TOP("stedcj", "--evect", evect, "-n", n, "--ldc", ldc);
 
@@ -103,6 +105,10 @@ rocblas_status rocsolver_stedcj_impl(rocblas_handle handle,
     return rocsolver_stedcj_template<false, false, T>(
         handle, evect, n, D, strideD, E, strideE, C, shiftC, ldc, strideC, info, batch_count,
         work_stack, (S*)tempvect, (S*)tempgemm, (S*)tmpz, (rocblas_int*)splits_map, (S**)workArr);
+}
+catch(...)
+{
+    return exception2rocblas_status();
 }
 
 ROCSOLVER_END_NAMESPACE

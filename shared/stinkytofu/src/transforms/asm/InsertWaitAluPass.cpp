@@ -187,8 +187,7 @@ std::optional<WaitEventType> classifyEvent(const StinkyInstruction& inst) {
     if (isFLATLoad(inst) || isFLATStore(inst) || isFLATAtomic(inst)) return EV_VGPR_FLAT_READ;
     // VMEM family. Stinkytofu does not yet flag scratch / image / sample / BVH
     // instructions; on archs that emit them they belong in this same bucket.
-    if (isMUBUFLoad(inst) || isMUBUFStore(inst) || isMUBUFAtomic(inst) || isGLOBALLoad(inst) ||
-        isGLOBALStore(inst))
+    if (isMUBUFLoad(inst) || isMUBUFStore(inst) || isMUBUFAtomic(inst) || isGLOBALOrAtomic(inst))
         return EV_VGPR_VMEM_READ;
     return std::nullopt;
 }
@@ -597,6 +596,16 @@ class InsertWaitAluPassImpl : public Pass {
                              << "; vm_vsrc LB=" << sb.getScoreLB(CT_VM_VSRC)
                              << " UB=" << sb.getScoreUB(CT_VM_VSRC) << "]\n");
 
+        // Once an s_swappc is seen, the rest of THIS block runs in mode0 (the
+        // SCHED_MODE=0 setreg sits before the call and is not re-enabled in-block),
+        // where the hardware auto-stalls on every hazard. So any s_wait_alu that
+        // would be emitted after a call in the same block is redundant — we skip
+        // emitting it. This is a purely local, per-BB decision (no cross-block
+        // propagation): the scoreboard is still tracked normally, and a block
+        // re-entered via a loop back-edge starts fresh (mode2), so its own leading
+        // waits are still emitted.
+        bool inMode0 = false;
+
         for (auto it = bb.begin(); it != bb.end();) {
             auto* inst = dyn_cast<StinkyInstruction>(it.getNodePtr());
             if (!inst) {
@@ -645,6 +654,7 @@ class InsertWaitAluPassImpl : public Pass {
                                         "HW handles hazards)\n");
                 sb.applyWaitcnt(CT_VA_VDST, 0);
                 sb.applyWaitcnt(CT_VM_VSRC, 0);
+                inMode0 = true;  // rest of this block is mode0 — HW handles hazards
                 ++it;
                 continue;
             }
@@ -657,7 +667,7 @@ class InsertWaitAluPassImpl : public Pass {
                            << " vm_vsrc="
                            << (isNoWait(wait, CT_VM_VSRC) ? -1 : int(wait.get(CT_VM_VSRC)))
                            << "\n");
-                if (emit) {
+                if (emit && !inMode0) {
                     // If the immediately-preceding instruction is a hold_cnt-only
                     // s_wait_alu survivor, fold its hold_cnt into our new wait
                     // so the constraint isn't lost and we don't emit two

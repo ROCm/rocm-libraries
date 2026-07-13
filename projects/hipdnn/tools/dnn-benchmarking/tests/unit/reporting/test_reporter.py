@@ -145,7 +145,7 @@ class TestReporterEngineTable:
                         p95_ms=1.1,
                         p99_ms=1.2,
                     ),
-                    e2e_stats=BenchmarkStats(
+                    host_stats=BenchmarkStats(
                         mean_ms=2.0,
                         median_ms=1.8,
                         std_ms=0.2,
@@ -163,8 +163,8 @@ class TestReporterEngineTable:
         result = output.getvalue()
         assert "kernel_mean_ms" in result
         assert "kernel_median_ms" in result
-        assert "e2e_mean_ms" in result
-        assert "e2e_median_ms" in result
+        assert "host_mean_ms" in result
+        assert "host_median_ms" in result
         assert "delta_pct" not in result
 
     def test_print_graph_result_table_with_plugin_path_column(self) -> None:
@@ -188,7 +188,7 @@ class TestReporterEngineTable:
                         p95_ms=1.1,
                         p99_ms=1.2,
                     ),
-                    e2e_stats=BenchmarkStats(
+                    host_stats=BenchmarkStats(
                         mean_ms=2.0,
                         median_ms=1.8,
                         std_ms=0.2,

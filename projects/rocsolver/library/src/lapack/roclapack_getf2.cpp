@@ -1,5 +1,5 @@
 /* **************************************************************************
- * Copyright (C) 2019-2024 Advanced Micro Devices, Inc. All rights reserved.
+ * Copyright (C) 2019-2026 Advanced Micro Devices, Inc. All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -26,6 +26,7 @@
  * *************************************************************************/
 
 #include "roclapack_getf2.hpp"
+#include "exceptions.hpp"
 
 ROCSOLVER_BEGIN_NAMESPACE
 
@@ -38,6 +39,7 @@ rocblas_status rocsolver_getf2_impl(rocblas_handle handle,
                                     I* ipiv,
                                     I* info,
                                     const bool pivot)
+try
 {
     const char* name = (pivot ? "getf2" : "getf2_npvt");
     ROCSOLVER_ENTER_TOP(name, "-m", m, "-n", n, "--lda", lda);
@@ -92,6 +94,10 @@ rocblas_status rocsolver_getf2_impl(rocblas_handle handle,
     return rocsolver_getf2_template<false, T>(handle, m, n, A, shiftA, inca, lda, strideA, ipiv,
                                               shiftP, strideP, info, batch_count, (T*)scalars,
                                               (T*)pivotval, (I*)pivotidx, pivot);
+}
+catch(...)
+{
+    return exception2rocblas_status();
 }
 
 ROCSOLVER_END_NAMESPACE

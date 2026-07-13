@@ -3,6 +3,8 @@
 
 """Tests for error and failure paths across the graph/handle/buffer APIs."""
 
+from pathlib import Path
+
 import numpy as np
 import pytest
 
@@ -10,6 +12,41 @@ import hipdnn_frontend as hipdnn
 
 from .helpers import build_all_plans, create_float_graph
 from .test_conv_fprop import build_conv_fprop_graph
+
+
+def _hipdnn_project_root() -> Path:
+    return Path(__file__).resolve().parents[3]
+
+
+def _error_code_names_from_header() -> list[str]:
+    error_header = _hipdnn_project_root() / "frontend/include/hipdnn_frontend/Error.hpp"
+    in_error_code_enum = False
+    names: list[str] = []
+
+    for line in error_header.read_text(encoding="utf-8").splitlines():
+        if not in_error_code_enum:
+            in_error_code_enum = "enum class ErrorCode" in line
+            continue
+
+        entry = line.split("//", maxsplit=1)[0].strip()
+        if entry == "};":
+            break
+        if not entry or entry in {"{", "}"} or entry.startswith(("/", "*")):
+            continue
+
+        names.append(entry.split(",", maxsplit=1)[0].split(maxsplit=1)[0])
+
+    return names
+
+
+class TestErrorCodeBindings:
+    """ErrorCode binding parity with the C++ frontend enum."""
+
+    def test_error_codes_match_frontend_header(self):
+        """Every C++ ErrorCode is exposed to Python and usable by Error."""
+        for name in _error_code_names_from_header():
+            code = getattr(hipdnn.ErrorCode, name)
+            assert hipdnn.Error(code, "sentinel").get_code() == code
 
 
 class TestValidationErrors:

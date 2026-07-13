@@ -103,18 +103,28 @@ class ConfigureCITest(unittest.TestCase):
         self.assertIn("rocprim", str(project_to_run))
         self.assertEqual(test_type, "standard")
 
-    def test_is_path_workflow_file_related_to_ci(self):
+    def test_check_for_workflow_file_related_to_ci(self):
         workflow_path = ".github/workflows/therocktest.yml"
         self.assertTrue(
-            therock_configure_ci.is_path_workflow_file_related_to_ci(workflow_path)
+            therock_configure_ci.check_for_workflow_file_related_to_ci([workflow_path])
         )
         script_path = ".github/scripts/therocktest.py"
         self.assertTrue(
-            therock_configure_ci.is_path_workflow_file_related_to_ci(script_path)
+            therock_configure_ci.check_for_workflow_file_related_to_ci([script_path])
+        )
+        ci_env_path = ".github/actions/ci-env/action.yml"
+        self.assertTrue(
+            therock_configure_ci.check_for_workflow_file_related_to_ci([ci_env_path])
         )
         bad_path = ".github/workflows/test.yml"
         self.assertFalse(
-            therock_configure_ci.is_path_workflow_file_related_to_ci(bad_path)
+            therock_configure_ci.check_for_workflow_file_related_to_ci([bad_path])
+        )
+        bad_action_path = ".github/actions/setup-rocm-linux/action.yml"
+        self.assertFalse(
+            therock_configure_ci.check_for_workflow_file_related_to_ci(
+                [bad_action_path]
+            )
         )
 
     def test_is_path_skippable(self):
@@ -349,9 +359,7 @@ class ConfigureCITest(unittest.TestCase):
         # Test labels only apply to pull requests, not nightly runs
         mock_get_modified.return_value = []
 
-        pr_labels_json = (
-            '{"labels": [{"name": "test:rocblas"}, {"name": "test_type:comprehensive"}]}'
-        )
+        pr_labels_json = '{"labels": [{"name": "test:rocblas"}, {"name": "test_type:comprehensive"}]}'
         projects, test_type = therock_configure_ci.retrieve_projects(
             {"is_nightly": True, "base_ref": "HEAD^", "pr_labels": pr_labels_json}
         )

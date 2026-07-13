@@ -159,6 +159,7 @@ if( HIPFFT_MPI_ENABLE )
     hipfft_mpi_worker.cpp
     ../../shared/test_callbacks.cpp
     ../../shared/data_gen_device.cpp
+    ../../shared/array_validator.cpp
     ${callback_embed_cpp}
     )
   list( APPEND TEST_TARGETS hipfft_mpi_worker )

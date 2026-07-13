@@ -121,16 +121,17 @@ class BenchmarkMetadata:
 class BenchmarkResult:
     """Raw benchmark timing results.
 
-    Holds both E2E (wall-clock) and optional kernel (GPU event) timings,
-    with metadata for cross-device comparison.
+    Holds host (submission) timings and optional kernel (GPU event) timings,
+    with metadata for cross-device comparison. End-to-end time, when needed,
+    is host + kernel.
 
     Attributes:
-        e2e_timings: List of end-to-end execution times in milliseconds.
+        host_timings: List of host-side submission times in milliseconds.
         kernel_timings: Optional list of GPU kernel times in milliseconds.
         metadata: Optional metadata for result identification and comparison.
     """
 
-    e2e_timings: List[float]
+    host_timings: List[float]
     kernel_timings: Optional[List[float]] = None
     metadata: Optional[BenchmarkMetadata] = None
 
@@ -153,7 +154,7 @@ class BenchmarkResult:
             Dictionary representation of the result.
         """
         result: Dict[str, Any] = {
-            "e2e_timings": self.e2e_timings,
+            "host_timings": self.host_timings,
             "kernel_timings": self.kernel_timings,
         }
         if self.metadata:
@@ -197,7 +198,7 @@ class BenchmarkResult:
                 metadata_dict["timing_backend"] = legacy_gpu_backend
             metadata = BenchmarkMetadata(**metadata_dict)
         return cls(
-            e2e_timings=data["e2e_timings"],
+            host_timings=data["host_timings"],
             kernel_timings=data.get("kernel_timings"),
             metadata=metadata,
         )
@@ -218,14 +219,14 @@ class BenchmarkResult:
 
 @dataclass
 class CombinedBenchmarkStats:
-    """Combined statistics for E2E and kernel timing.
+    """Combined statistics for host and kernel timing.
 
     Attributes:
-        e2e_stats: Statistics from wall-clock timing.
+        host_stats: Statistics from host-side submission timing.
         kernel_stats: Optional statistics from GPU kernel timing.
     """
 
-    e2e_stats: BenchmarkStats
+    host_stats: BenchmarkStats
     kernel_stats: Optional[BenchmarkStats] = None
 
     @classmethod
@@ -233,15 +234,15 @@ class CombinedBenchmarkStats:
         """Create combined stats from a BenchmarkResult.
 
         Args:
-            result: BenchmarkResult with E2E and optional kernel timings.
+            result: BenchmarkResult with host and optional kernel timings.
 
         Returns:
             CombinedBenchmarkStats with calculated statistics.
         """
-        e2e = BenchmarkStats.from_timings(result.e2e_timings)
+        host = BenchmarkStats.from_timings(result.host_timings)
         kernel = (
             BenchmarkStats.from_timings(result.kernel_timings)
             if result.has_kernel_timings
             else None
         )
-        return cls(e2e_stats=e2e, kernel_stats=kernel)
+        return cls(host_stats=host, kernel_stats=kernel)

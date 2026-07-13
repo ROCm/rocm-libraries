@@ -28,7 +28,7 @@
 
 #include "stinkytofu/analysis/asm/AsmVerifierPass.hpp"
 #include "stinkytofu/core/PassManager.hpp"
-#include "stinkytofu/ir/DumpStinkyFunctionPass.hpp"
+#include "stinkytofu/ir/DumpStinkyModulePass.hpp"
 #include "stinkytofu/pipeline/ScopeAdaptor.hpp"
 #include "stinkytofu/support/DebugPrintInstrumentation.hpp"
 #include "stinkytofu/transforms/asm/BuildDefUseChain.hpp"
@@ -44,7 +44,9 @@
 #include "stinkytofu/transforms/asm/PeepholeOptimizationPass.hpp"
 #include "stinkytofu/transforms/asm/RaiseVgprMsbPass.hpp"
 #include "stinkytofu/transforms/asm/RedundantMovEliminationPass.hpp"
+#include "stinkytofu/transforms/asm/RegionClonePass.hpp"
 #include "stinkytofu/transforms/asm/RemoveDelayAluPass.hpp"
+#include "stinkytofu/transforms/asm/RemoveInstructionPass.hpp"
 #include "stinkytofu/transforms/asm/RemoveWaitAluPass.hpp"
 #include "stinkytofu/transforms/asm/SetMatrixReusePass.hpp"
 #include "stinkytofu/transforms/asm/StinkyBuildImplicitDependencyPass.hpp"
@@ -98,14 +100,21 @@ const std::vector<PassInfo> availablePasses = {
          return createBuildUseDefChainPass(clearExisting, includePseudo);
      }},
     {"CFGBuilderPass", [](const auto&) { return createCFGBuilderPass(); }},
-    {"DumpStinkyFunctionPass",
-     [](const auto&) { return createDumpStinkyFunctionPass({.stirPath = "dump_function.stir"}); }},
+    {"DumpStinkyModulePass",
+     [](const auto&) { return createDumpStinkyModulePass({.stirPath = "dump_module.stir"}); }},
     {"PeepholeOptimizationPass", [](const auto&) { return createPeepholeOptimizationPass(); }},
     {"DeadCodeEliminationPass", [](const auto&) { return createDeadCodeEliminationPass(); }},
     {"RedundantMovEliminationPass",
      [](const auto&) { return createRedundantMovEliminationPass(); }},
     {"StinkyIRVerifierPass", [](const auto&) { return createStinkyIRVerifierPass(); }},
     {"RemoveDelayAluPass", [](const auto&) { return createRemoveDelayAluPass(); }},
+    // RemoveInstructionPass accepts one or more mnemonics:
+    //   --RemoveInstructionPass=s_wait_alu,tensor_load_to_lds,s_nop
+    {"RemoveInstructionPass",
+     [](const std::vector<std::string>& args) {
+         if (args.empty()) return std::unique_ptr<Pass>{};
+         return createRemoveInstructionPass(args);
+     }},
     {"InsertDelayAluPass", [](const auto&) { return createInsertDelayAluPass(); }},
     {"LoopRegionRemarkPass", [](const auto&) { return createLoopRegionRemarkPass(); }},
     {"MemTokenConsistencyCheckPass",
@@ -113,17 +122,26 @@ const std::vector<PassInfo> availablePasses = {
     {"RaiseVgprMsbPass", [](const auto&) { return createRaiseVgprMsbPass(); }},
     {"InsertVgprMsbPass", [](const auto&) { return createInsertVgprMsbPass(); }},
     {"LongBranchLoweringPass", [](const auto&) { return createLongBranchLoweringPass(); }},
+    // InsertClusterBarrierPass accepts:
+    //   --InsertClusterBarrierPass=PrefetchGlobalRead=<n>,PrefetchLocalRead=<n>
     {"InsertClusterBarrierPass",
-     [](const auto&) {
-         auto geti = [](const char* k, int d) {
-             const char* v = std::getenv(k);
-             return v != nullptr ? std::atoi(v) : d;
+     [](const std::vector<std::string>& args) {
+         auto getArgInt = [&args](const char* k, int d) {
+             std::string prefix = std::string(k) + "=";
+             for (const auto& a : args)
+                 if (a.starts_with(prefix)) return std::atoi(a.substr(prefix.size()).c_str());
+             return d;
          };
-         return createInsertClusterBarrierPass(
-             /*isKernelScope=*/true, geti("PrefetchGlobalRead", 1), geti("PrefetchLocalRead", 1));
+         return createInsertClusterBarrierPass(/*isKernelScope=*/true,
+                                               getArgInt("PrefetchGlobalRead", 1),
+                                               getArgInt("PrefetchLocalRead", 1));
      }},
     {"RemoveWaitAluPass", [](const auto&) { return createRemoveWaitAluPass(); }},
     {"InsertWaitAluPass", [](const auto&) { return createInsertWaitAluPass(); }},
+    {"RegionClonePass",
+     [](const auto&) {
+         return createRegionClonePass({CloneSpec{"InitCIterWmma", "label_LoopBeginL"}});
+     }},
 };
 
 /**

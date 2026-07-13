@@ -3,7 +3,21 @@
 Documentation for rocFFT is available at
 [https://rocm.docs.amd.com/projects/rocFFT/en/latest/](https://rocm.docs.amd.com/projects/rocFFT/en/latest/).
 
-## Since last release (ROCm 7.13)
+## Since last release (ROCm 7.14)
+
+### Added
+
+* Added optional RCCL (ROCm Collective Communications Library) backend for single-node multi-GPU communication, enabled via `-DROCFFT_RCCL_ENABLE=ON`.
+
+### Changed
+
+* Relaxed the usage requirements for `rocfft_setup` and `rocfft_cleanup`.
+
+### Resolved issues
+
+* Addressed internal issues causing multi-device plans to fall back to the least-performant code path for certain 3D real transforms (e.g., multi-device single-precision real out-of-place 3D of size 320x320x320 using slab decomposition).
+
+## rocFFT 1.0.38 for ROCm 7.14
 
 ### Added
 

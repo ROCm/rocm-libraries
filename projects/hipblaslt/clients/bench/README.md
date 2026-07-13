@@ -43,6 +43,18 @@ cd hipBLASLt; cd build/release
 --verify |-v               Validate GPU results with CPU?
 --iters |-i <value>        Iterations to run inside timing loop                                                 (Default value is: 10)
 --cold_iters |-j <value>   Cold Iterations to run before entering the timing loop                               (Default value is: 2)
+--adaptive                       Enable adaptive timing; not compatible with --iters / --cold_iters
+--adaptive_warmup_time <value>   Warm up (ms) until this much wall-time has elapsed; requires --adaptive
+--adaptive_sample_time <value>   Wall-time (ms) of each timed sample = back-to-back batch size (>= measure_time gives one batch); requires --adaptive
+--adaptive_measure_time <value>  Minimum total measurement time (ms); requires --adaptive
+--adaptive_max_measure_time <value> Measurement ceiling (ms, 0 = unbounded); requires --adaptive
+--adaptive_min_iters <value>     Floor on total timed iterations; requires --adaptive
+--adaptive_max_iters <value>     Ceiling on total timed iterations (0 = unbounded); requires --adaptive
+--adaptive_noise_threshold <value> Convergence target: past the floor, keep running until the mean's relative standard error drops below this fraction (converged), or the robust spread plateaus (stable), or the ceiling is hit (noisy); 0 disables both (run to the ceiling); requires --adaptive
+--adaptive_stability_threshold <value> Noise-plateau fallback: stop with status=stable once the recent rel_iqr readings vary by less than this fraction; 0 disables the fallback (a non-converging run then goes to the ceiling, status=noisy); requires --adaptive
+--adaptive_stability_window <value> Number of recent rel_iqr readings the stability fallback tests for a plateau (>= 2); requires --adaptive
+--adaptive_stability_interval <value> Record one rel_iqr reading for the stability fallback every N samples (>= 1); requires --adaptive
+(adaptive defaults are shown by --help / -h)
 --algo_method <value>      Use different algorithm search API. Options: heuristic, all, index.                  (Default value is: heuristic)
 --solution_index <value>   Used with --algo_method 2.  Specify solution index to use in benchmark.              (Default value is: -1)
 --requested_solution <value> Requested solution num. Set to -1 to get all solutions. Only valid when algo_method is set to heuristic.  (Default value is: 1)
@@ -103,4 +115,63 @@ Show the efficiency and other performance related args with environment variable
 HIPBLASLT_BENCH_PERF=1 ./clients/hipblaslt-bench -m 4096 -n 4864 -k 32896 --transA N --transB N --a_type bf16_r --b_type bf16_r --c_type bf16_r --d_type bf16_r --compute_type f32_r --iters 416 --cold_iters 416 --use_gpu_timer
 [0]:transA,transB,grouped_gemm,batch_count,m,n,k,alpha,lda,stride_a,beta,ldb,stride_b,ldc,stride_c,ldd,stride_d,a_type,b_type,c_type,d_type,compute_type,scaleA,scaleB,scaleC,scaleD,amaxD,swizzle_a,swizzle_b,activation_type,bias_vector,bias_type,aux_type,rotating_buffer,flush,use_gpu_timer,num_cu,tiles_per_cu,tile0_gran,tile1_gran,cu_gran,wave_gran,total_gran,mem_read_bytes,mem_write_bytes,lowest_avg_freq,lowest_median_freq,avg_MCLK,median_MCLK,efficiency,hipblaslt-Gflops,hipblaslt-GB/s,us
     N,N,0,1,4096,4864,32896,1,4096,134742016,0,32896,160006144,4096,19922944,4096,19922944,bf16_r,bf16_r,bf16_r,bf16_r,f32_r,0,0,0,0,0,0,0,none,0,bf16_r,bf16_r,0,0,1,256,0,0.984615,1,-nan,1,-nan,13312511180,119537664,1119,1205,2000,2000,92.3889,1.08405e+06,484.741,1209.14
+```
+
+## Adaptive timing
+
+By default the benchmark runs `--cold_iters` warmups followed by a single timed
+loop of `--iters` enqueues and reports the mean. Pass **`--adaptive`** to instead
+take a distribution-based measurement that is robust to noise and lets fast
+kernels accumulate more iterations automatically — without precomputing iteration
+counts per problem. The fixed-count default is unchanged, so existing commands
+behave exactly as before.
+
+A *sample* is a batch of back-to-back iterations run with no synchronization
+between them, timed only at its start and end (so the sample's per-iteration time
+is that span divided by the batch size). The batch is sized from a quick warmup so
+each sample spans roughly `--adaptive_sample_time` ms.
+
+The run lasts **at least** the floor — `--adaptive_min_iters` and
+`--adaptive_measure_time` — and **at most** the ceiling —
+`--adaptive_max_measure_time` and `--adaptive_max_iters`. Past the floor, it stops on
+the first of: the mean's relative standard error (stddev / mean / sqrt(n)) falling
+below `--adaptive_noise_threshold` (**converged**, `status=converged`); or, when that
+target cannot be met, the robust spread (IQR / median) flattening out so more samples
+will not change the result (**stable**, `status=stable`) — a fallback for heavy-tailed
+or unlocked-clock kernels; otherwise the ceiling (`status=noisy`). The stable fallback
+is tuned by `--adaptive_stability_window` / `--adaptive_stability_interval` and can be
+turned off with `--adaptive_stability_threshold 0` (a non-converging run then runs to
+the ceiling and reports `noisy`). With `--adaptive_noise_threshold 0` both the
+convergence check and the fallback are disabled, so the run goes to the ceiling and
+`status` is `-`. A ceiling is required — at least one of
+`--adaptive_max_measure_time` / `--adaptive_max_iters` must be > 0 (it is by default),
+otherwise the run is rejected — so a non-converging run is always bounded. (To run a
+fixed budget, set the floor and ceiling equal, e.g. `--adaptive_measure_time 200
+--adaptive_max_measure_time 200`.)
+
+The reported `us`/`Gflops` are the **median**; extra columns expose the distribution:
+`batch`, `samples`, `hot_iters`, `mean_us`, `min_us`, `cv` (stddev/mean), `rel_iqr`
+(interquartile range / median — a drift-robust dispersion measure), and `status`
+(`converged` / `stable` / `noisy` / `-`). Convergence requires at least 10 samples so
+the stddev is trustworthy.
+
+`--adaptive` is the gate; the `--adaptive_*` options tune it and **require**
+`--adaptive` (passing one without it is an error). Run `--help` for their current
+default values.
+
+Under `--adaptive`, warmup and per-sample batch size are determined adaptively, so
+`--iters` and `--cold_iters` have no effect and **passing either with `--adaptive`
+is an error** (use `--adaptive_warmup_time` for warmup and `--adaptive_sample_time`
+to influence the batch). Without `--adaptive`, timing is the fixed-count
+`--cold_iters` / `--iters` path and no distribution columns are printed.
+
+Note on the statistic: the **median** is reported as the headline because it is
+robust to the occasional slow sample (OS/power jitter, clock dips) that inflates the
+mean on an unlocked GPU. The **mean** is kept as a column for comparison and matches
+the fixed-count number exactly (where median, mean and min coincide).
+
+```
+./clients/hipblaslt-bench -m 4096 -n 4096 -k 4096 --transA N --transB T \
+  --a_type bf16_r --b_type bf16_r --c_type bf16_r --d_type bf16_r --compute_type f32_r \
+  --rotating 512 --adaptive
 ```

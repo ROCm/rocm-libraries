@@ -3,6 +3,8 @@
 
 add_executable(hipdnn_integration_tests_unit_tests
     main.cpp
+    ../src/harness/bundle/IntegrationBundleVerificationHarness.cpp
+    ../src/harness/input_init/SynthesizeInputs.cpp
     TestArchMatch.cpp
     TestBundleMetadata.cpp
     TestGraphDescription.cpp
@@ -11,13 +13,19 @@ add_executable(hipdnn_integration_tests_unit_tests
     TestSupportMatrixCollector.cpp
     TestTestConfig.cpp
     TestTestSettings.cpp
+    TestTomlGuards.cpp
     TestGpuReferenceGraphExecutor.cpp
     TestGpuConvolutionFwdSignatureKey.cpp
     TestGpuConvolutionFwdPlan.cpp
     TestReferenceGraphExecutorFactory.cpp
     TestBundleDiscovery.cpp
     TestVerificationPaths.cpp
-    TestGoldenVerificationHarness.cpp
+    TestBundleVerificationHarness.cpp
+    TestSynthesisConfig.cpp
+    TestSynthesizeInputs.cpp
+    TestToleranceResolver.cpp
+    TestVerificationModePaths.cpp
+    TestErrorPaths.cpp
 )
 
 target_include_directories(hipdnn_integration_tests_unit_tests

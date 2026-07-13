@@ -117,6 +117,10 @@ if(ROCM_LIBS_ENABLE_ROOT_CTEST)
     enable_testing()
     include(CTest)
 endif()
+if(ROCM_LIBS_ENABLE_ROOT_CTEST AND EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/shared/ctest/tests/CMakeLists.txt")
+    add_subdirectory(shared/ctest/tests)
+endif()
+
 
 # --- Shared third-party dependencies ---
 # Declare libraries that more than one subproject would otherwise fetch

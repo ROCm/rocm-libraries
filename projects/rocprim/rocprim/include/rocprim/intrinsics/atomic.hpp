@@ -375,8 +375,13 @@ namespace detail
     ROCPRIM_DEVICE ROCPRIM_INLINE void atomic_fence_release_vmem_order_only()
     {
         __builtin_amdgcn_fence(__ATOMIC_RELEASE, "workgroup");
+#if ROCPRIM_TARGET_RDNA4
+        // RDNA4 (gfx12) splits waitcnt: wait for all store counts to complete
+        asm volatile("s_wait_storecnt 0x0" : : : "memory");
+#else
         // Wait until all vmem operations complete (s_waitcnt vmcnt(0))
         __builtin_amdgcn_s_waitcnt(/*vmcnt*/ 0 | (/*exp_cnt*/ 0x7 << 4) | (/*lgkmcnt*/ 0xf << 8));
+#endif
     }
 
     /// \brief Make sure visible operations are complete
@@ -390,7 +395,12 @@ namespace detail
     /// developers that know what they are doing.
     ROCPRIM_DEVICE ROCPRIM_INLINE void atomic_fence_acquire_order_only()
     {
+#if ROCPRIM_TARGET_RDNA4
+        // RDNA4 (gfx12) splits waitcnt: wait for all load counts to complete
+        asm volatile("s_wait_loadcnt 0x0" : : : "memory");
+#else
         __builtin_amdgcn_s_waitcnt(/*vmcnt*/ 0 | (/*exp_cnt*/ 0x7 << 4) | (/*lgkmcnt*/ 0xf << 8));
+#endif
         __builtin_amdgcn_fence(__ATOMIC_ACQUIRE, "workgroup");
     }
 }

@@ -2807,10 +2807,12 @@ namespace
                 // otherwise the directory may have been created by ExtOp/Transform installs
                 // without a corresponding Tensile library (multi-arch non-TheRock builds).
                 {
-                    auto processor_path  = path / processor;
-                    auto mapping_msgpack = processor_path / ("TensileLibrary_lazy_" + processor + ".dat");
-                    auto mapping_yaml    = processor_path / ("TensileLibrary_lazy_" + processor + ".yaml");
-                    if(std::filesystem::exists(mapping_msgpack) || std::filesystem::exists(mapping_yaml))
+                    auto processor_path     = path / processor;
+                    auto mapping_msgpack    = processor_path / ("TensileLibrary_lazy_" + processor + ".dat");
+                    auto mapping_msgpack_gz = processor_path / ("TensileLibrary_lazy_" + processor + ".dat.zlib");
+                    auto mapping_yaml       = processor_path / ("TensileLibrary_lazy_" + processor + ".yaml");
+                    if(std::filesystem::exists(mapping_msgpack) || std::filesystem::exists(mapping_msgpack_gz)
+                       || std::filesystem::exists(mapping_yaml))
                         path = std::move(processor_path);
                 }
 
@@ -2853,7 +2855,11 @@ namespace
             // library, and other threads trying to initialize library wait for it to
             // complete.
             static int once = [&] {
-                // Determine library path
+                // Determine library path. This is always the logical name with
+                // a single ".dat"/".yaml" extension, never ".dat.zlib": the
+                // loader resolves a compressed variant by appending ".zlib", and
+                // downstream filename parsing (initLibraryMapping, placeholder
+                // suffix derivation) assumes a single extension.
                 std::filesystem::path tensileLibPath;
                 if(lazyLoad)
                 {
@@ -2881,10 +2887,11 @@ namespace
                             = path / (std::string("TensileLibrary_") + processor + ".dat");
                     }
                 }
-                if(!std::filesystem::exists(tensileLibPath))
+                if(!std::filesystem::exists(tensileLibPath)
+                   && !std::filesystem::exists(tensileLibPath.string() + ".zlib"))
                 {
-                    std::cerr << "\nrocblaslt error: Cannot read " << tensileLibPath << ": "
-                              << strerror(errno) << std::endl;
+                    std::cerr << "\nrocblaslt error: Cannot read " << tensileLibPath
+                              << " (or .zlib variant): " << strerror(errno) << std::endl;
                     // rocblaslt_abort();
                 }
 
@@ -3220,6 +3227,12 @@ bool useRocRoller(rocblaslt_handle handle, const RocblasltContractionProblem& pr
            && prob.scaleBType
                   == RocblasltContractionProblem::ScalingFormat::Block_32_UE8M0_32_8_EXT);
     if(isFp4A && isFp4B && isShuffledScale)
+        return false;
+
+    // Do not use rocRoller for FP8 E4M3 A + FP8 E4M3 B with pre-swizzled (shuffled) scale layout
+    bool isFp8A = (prob.a_type == static_cast<hipDataType>(HIP_R_8F_E4M3));
+    bool isFp8B = (prob.b_type == static_cast<hipDataType>(HIP_R_8F_E4M3));
+    if(isFp8A && isFp8B && isShuffledScale)
         return false;
 
     return handle->useRocRoller == 1

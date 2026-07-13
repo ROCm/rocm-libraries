@@ -21,7 +21,7 @@
 ################################################################################
 
 from .AsmAddressCalculation import AddrCalculation
-from .Common import DataDirection
+from .Common import DataDirection, isSubtileMultiDU
 from .Common.DataType import DataType
 
 from math import ceil, trunc, modf
@@ -253,7 +253,13 @@ class StoreState:
             else:
                 self.sharedColEVgprs = None
             if kernel["ProblemType"]["UseScaleAlphaVec"] and isSingleKernel:
-                if self.referenceVgprDim[self.factorDim] and self.referenceVgprDim[self.factorDim][0] == "ScaleAlpha":
+                # Only allocate a separate ScaleAlphaVec column-address vgpr for
+                # multi-DU kernels. Non-multi-DU reuses the Bias column address
+                # (localReferenceVgpr) for the SAV LDS read, so a dedicated SAV
+                # address would only force a redundant per-read recompute in
+                # emitLdChange.
+                if (kernel.get("UseSubtileImpl") and self.useBias == DataDirection.READ and isSubtileMultiDU(kernel)) or \
+                   (self.referenceVgprDim[self.factorDim] and self.referenceVgprDim[self.factorDim][0] == "ScaleAlpha"):
                     self.sharedColScaleAlphaVecVgprs = kernelWriter.vgprPool.checkOut(self.numAddrVgpr, "sharedColScaleAlphaVecVgprs for packed elements")
                 else:
                     self.sharedColScaleAlphaVecVgprs = None
@@ -296,7 +302,10 @@ class StoreState:
             else:
                 self.sharedColEVgprs = None
             if kernel["ProblemType"]["UseScaleAlphaVec"] and isSingleKernel:
-                if self.referenceVgprDim[self.factorDim] and self.referenceVgprDim[self.factorDim][0] == "ScaleAlpha":
+                # Only allocate a separate ScaleAlphaVec column-address vgpr for
+                # multi-DU kernels (see note above).
+                if (kernel.get("UseSubtileImpl") and self.useBias == DataDirection.READ and isSubtileMultiDU(kernel)) or \
+                   (self.referenceVgprDim[self.factorDim] and self.referenceVgprDim[self.factorDim][0] == "ScaleAlpha"):
                     self.sharedColScaleAlphaVecVgprs = kernelWriter.vgprPool.checkOut(1, "sharedColScaleAlphaVecVgprs for packed elements")
                 else:
                     self.sharedColScaleAlphaVecVgprs = None
@@ -1009,8 +1018,9 @@ class StoreState:
                     addrScaleBVecVgpr = None
             else:
                 # allocate new VGPR for each element:
+                # Allow pool growth for per-element D addrs; refineOccupancy still caps total VGPR.
                 addrDVgpr = kw.vgprPool.checkOutAligned(self.cfg.numVgprsPerAddr, \
-                    int(ceil(self.cfg.numVgprsPerAddr)), "writeDBatch-addr for ei=%u"%(elementIdx), preventOverflow=not isOptNLL)
+                    int(ceil(self.cfg.numVgprsPerAddr)), "writeDBatch-addr for ei=%u"%(elementIdx), preventOverflow=False)
                 if kernel["_GlobalAccumulation"] == "MultipleBufferSingleKernel":
                     addrGSUSyncVgprs = kw.vgprPool.checkOutAligned(self.cfg.numVgprsPerAddr, \
                         int(ceil(self.cfg.numVgprsPerAddr)), "writeDBatch-addr for ei=%u"%(elementIdx), preventOverflow=False)
@@ -1064,6 +1074,8 @@ class StoreState:
         self.isReset = False
 
     def checkInTempVgprC(self):
+        if not hasattr(self, 'elementSumIdx'):
+            return # object was not fully initialized
         if self.kernelWriter.states.serializedStore is False:
             return # early exit; currently only serializedStore==True checks out C-tile from register pool
 
