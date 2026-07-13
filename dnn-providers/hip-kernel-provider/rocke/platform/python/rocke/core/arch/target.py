@@ -946,11 +946,31 @@ def _op_id_c_dtype() -> Dict[str, str]:
     accumulator dtype from the SSOT without holding an :class:`ArchTarget`.
     Op_ids that are frag-registered but not yet in the JSON catalog are absent
     (callers should treat a miss as the default f32 accumulator).
+
+    The **first** catalog hit for an op_id wins, matching the C implementation
+    (``rocke_arch_mma_op_id_c_dtype`` in ``query.cpp``, which returns the first
+    registry hit). If a later arch lists the same op_id with a *different*
+    accumulator dtype we raise instead of silently overwriting: that would be
+    SSOT drift (the invariant above is broken) and must be fixed in the catalog,
+    not masked. Raising here also keeps the Python and C engines deterministic
+    and byte-identical rather than diverging on catalog ordering.
     """
     out: Dict[str, str] = {}
     for row in _load_specs().values():
         for o in row["mma"]:
-            out[o["op_id"]] = normalize_dtype(o["c"])
+            op_id = o["op_id"]
+            c = normalize_dtype(o["c"])
+            prev = out.get(op_id)
+            if prev is None:
+                out[op_id] = c  # first hit wins
+            elif prev != c:
+                raise ValueError(
+                    f"arch SSOT drift in {_DATA_FILE.name}: op_id {op_id!r} has "
+                    f"inconsistent accumulator dtype across arches "
+                    f"({prev!r} vs {c!r}). An op_id names a specific atom, so its "
+                    f"accumulator dtype must be invariant across the arches that "
+                    f"list it; fix the catalog so every row agrees."
+                )
     return out
 
 

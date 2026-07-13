@@ -826,6 +826,18 @@ static const rocke_layout_map_t lm_wmma_gfx12_c
  * Only atoms this engine can emit are listed: the Python SSOT also registers the
  * gfx1250 WMMA atoms, but the C99 arch registry has no gfx1250 target, so those
  * op_ids are intentionally absent here (the (0,0,0,64) fallback / unknown path).
+ *
+ * `ati` = arch-target internal (see arch_target_internal.h): the naming prefix
+ * reserved for storage private to this arch-target port, kept out of the public
+ * rocke_ / rocke_arch_ namespace. This table is file-local static (only
+ * rocke_arch_mma_c_frag_len below reads it), so it is not extern'd in the
+ * internal header like the cross-bucket rocke_ati_ symbols are.
+ *
+ * NOTE (drift): this is still a hand-maintained mirror of the Python
+ * _MMA_FRAGMENT_INFO c_frag_len column, not generated from it. Codegen from the
+ * Python SSOT is a viable follow-up; until then the tests assert this table and
+ * _MMA_FRAGMENT_INFO agree (test_arch_mma_ssot.py) so the two copies cannot
+ * silently drift.
  */
 typedef struct rocke_ati_mma_frag_row
 {
