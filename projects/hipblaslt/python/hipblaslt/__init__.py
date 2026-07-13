@@ -41,10 +41,27 @@ _ALSO_ACCEPTED = {
 }
 
 
+def _to_wire_array(arr):
+    """Return a C-contiguous array with a standard numpy scalar dtype.
+
+    nanobind's ndarray binding only accepts numpy-native scalar types.
+    ml_dtypes types (bfloat16, fp8, …) are view-cast to a uint dtype of
+    the same width so the raw bytes pass through unchanged.
+    """
+    if not arr.flags["C_CONTIGUOUS"]:
+        arr = _np.ascontiguousarray(arr)
+    if arr.dtype.type.__module__ == "numpy":
+        return arr  # already a standard numpy dtype
+    itemsize = arr.dtype.itemsize
+    wire = {1: _np.uint8, 2: _np.uint16, 4: _np.uint32}.get(itemsize, _np.uint8)
+    return arr.view(wire)
+
+
 def from_numpy(arr, dtype):
     """Validated host→device transfer. Raises ValueError at the boundary."""
-    if not arr.flags["C_CONTIGUOUS"]:
+    if not _np.asarray(arr).flags["C_CONTIGUOUS"] and not arr.flags["C_CONTIGUOUS"]:
         raise ValueError("array must be C-contiguous")
+    arr = _np.ascontiguousarray(arr)
     expected = _DTYPE_TO_NP.get(dtype)
     also = _ALSO_ACCEPTED.get(dtype)
     if expected is not None and arr.dtype != _np.dtype(expected) and arr.dtype != (also or _np.dtype(expected)):
@@ -52,7 +69,7 @@ def from_numpy(arr, dtype):
             f"numpy dtype {arr.dtype} does not match requested {dtype!r} "
             f"(expected {_np.dtype(expected)})"
         )
-    return _core.DeviceArray.from_numpy(arr, dtype)
+    return _core.DeviceArray.from_numpy(_to_wire_array(arr), dtype)
 
 
 def gemm(a, b):
@@ -104,9 +121,16 @@ def _device_array_to_numpy(self):
             f"to_numpy() does not support dtype {self.dtype!r}; "
             "use copy_to_host() with a uint8 buffer for narrow types"
         )
-    out = _np.empty(tuple(self.shape), dtype=np_dtype)
-    self.copy_to_host(out)
-    return out
+    # nanobind only accepts standard numpy scalar types in copy_to_host.
+    # For ml_dtypes types (bfloat16, fp8, …) we copy into a uint8 buffer
+    # of the same byte width, then view-cast to the correct dtype.
+    itemsize = _np.dtype(np_dtype).itemsize
+    wire_dtype = {1: _np.uint8, 2: _np.uint16, 4: _np.uint32}.get(itemsize, _np.uint8)
+    out_wire = _np.empty(tuple(self.shape), dtype=wire_dtype)
+    self.copy_to_host(out_wire)
+    if wire_dtype == np_dtype:
+        return out_wire
+    return out_wire.view(np_dtype)
 
 
 _core.DeviceArray.to_numpy = _device_array_to_numpy
