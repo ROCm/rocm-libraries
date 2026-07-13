@@ -132,11 +132,15 @@ jobs:
       - name: Prepare coverage profile directory
         if: ${{ inputs.coverage }}
         run: |
-          # Use $GITHUB_WORKSPACE (container path) so the dir matches what
-          # upload-artifact reads. Instrumented binaries emit one profraw file
-          # per process/binary here (%p/%m); non-instrumented binaries ignore it.
+          # Use $GITHUB_WORKSPACE (container path) so the dir matches what the
+          # report step reads. Instrumented binaries emit one profraw file per
+          # process/binary here (%p/%m); non-instrumented binaries ignore it.
           mkdir -p "${GITHUB_WORKSPACE}/coverage-profraw"
           echo "LLVM_PROFILE_FILE=${GITHUB_WORKSPACE}/coverage-profraw/${TEST_COMPONENT}-shard${{ matrix.shard }}-%p-%m.profraw" >> "${GITHUB_ENV}"
+          # The coverage build's coverage-objects artifact is keyed by the
+          # uppercase project name (e.g. HIPRAND); the component job name is its
+          # lowercase form. Used below to fetch this component's objects/tools.
+          echo "COVERAGE_PROJECT_NAME=$(echo "${TEST_COMPONENT}" | tr '[:lower:]' '[:upper:]')" >> "${GITHUB_ENV}"
 
       - name: Test
         timeout-minutes: ${{ fromJSON(inputs.component).timeout_minutes }}
@@ -159,17 +163,100 @@ jobs:
           python ./build_tools/memory_monitor.py --phase "Test ${{ fromJSON(inputs.component).job_name }}" -- \
             bash -c '${{ fromJSON(inputs.component).test_script }}' 2>&1 | tee ./test_logs/test_output.log
 
-      - name: Upload coverage profraw
-        # Gate on success (not always()) so a failed test run does not publish
-        # partial profraw that would feed a misleading report (review: reboss).
+      # Coverage report is generated on THIS test runner (tests + report on one
+      # node): download the instrumented objects and version-matched llvm tools
+      # staged by the coverage build, then merge the profraw the Test step just
+      # produced and emit the report here. Gated on inputs.coverage, which (with
+      # no status function) also implies success() - so a failed test run does
+      # not download objects or publish a partial/misleading report (review:
+      # reboss). Requires the component to run as a single shard.
+      - name: Download coverage objects and llvm tools
         if: ${{ inputs.coverage }}
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
+        with:
+          name: coverage-objects-${{ env.COVERAGE_PROJECT_NAME }}-${{ inputs.amdgpu_families }}
+          path: coverage-objects
+
+      - name: Merge profraw and generate coverage report
+        if: ${{ inputs.coverage }}
+        shell: bash
+        env:
+          AMDGPU_FAMILIES: ${{ inputs.amdgpu_families }}
+        run: |
+          set -euo pipefail
+          OBJECTS_DIR="${GITHUB_WORKSPACE}/coverage-objects"
+          PROFRAW_DIR="${GITHUB_WORKSPACE}/coverage-profraw"
+          REPORT_DIR="${GITHUB_WORKSPACE}/coverage-report"
+          mkdir -p "${REPORT_DIR}"
+          METADATA="${OBJECTS_DIR}/coverage_metadata.json"
+          # Project key (lowercase) drives the report filenames; read it from the
+          # metadata the build exported (fall back to the component job name).
+          PROJECT="$(python3 -c "import json;print(json.load(open('${METADATA}'))['project'])" 2>/dev/null || echo "${TEST_COMPONENT}")"
+
+          # Version-matched llvm tools were staged next to their runtime libs by
+          # the coverage build; run them from there via LD_LIBRARY_PATH.
+          LLVM_BIN="${OBJECTS_DIR}/bin"
+          export LD_LIBRARY_PATH="${LLVM_BIN}:${LD_LIBRARY_PATH:-}"
+          chmod +x "${LLVM_BIN}/llvm-profdata" "${LLVM_BIN}/llvm-cov" "${LLVM_BIN}/llvm-cxxfilt" 2>/dev/null || true
+
+          # Instrumented shared libraries for llvm-cov -object, plus the profraw
+          # the Test step just produced on this same node.
+          mapfile -t OBJECTS < <(find "${OBJECTS_DIR}/lib" -type f -name '*.so*' 2>/dev/null | sort)
+          mapfile -t PROFRAW_FILES < <(find "${PROFRAW_DIR}" -type f -name '*.profraw' 2>/dev/null | sort)
+
+          # No coverage data to report (e.g. a GPU family whose test machines lack
+          # a matching GPU run only host-side tests) or no instrumented object was
+          # staged. Warn and skip (exit 0) rather than failing the coverage job.
+          if [[ ${#PROFRAW_FILES[@]} -eq 0 || ${#OBJECTS[@]} -eq 0 ]]; then
+            echo "::warning::No profraw (${#PROFRAW_FILES[@]}) or instrumented object (${#OBJECTS[@]}) for ${COVERAGE_PROJECT_NAME:-$TEST_COMPONENT} ${AMDGPU_FAMILIES}; skipping coverage report."
+            exit 0
+          fi
+
+          OBJ_ARGS=()
+          for o in "${OBJECTS[@]}"; do OBJ_ARGS+=(-object "${o}"); done
+
+          IGNORE_RE="$(python3 -c "import json; print(json.load(open('${METADATA}')).get('ignore_filename_regex',''))" 2>/dev/null || echo "")"
+          IGNORE_ARGS=()
+          if [[ -n "${IGNORE_RE}" ]]; then IGNORE_ARGS=("-ignore-filename-regex=${IGNORE_RE}"); fi
+
+          # The coverage build embeds source paths under its workspace root, but on
+          # the test runner rocm-libraries is checked out under ./rocm-libraries;
+          # remap so llvm-cov show can find the sources for HTML annotation.
+          PATHEQ="-path-equivalence=${GITHUB_WORKSPACE},${GITHUB_WORKSPACE}/rocm-libraries"
+
+          # Merge the per-binary profraw into one profile, then emit text, HTML and
+          # LCOV reports directly with the version-matched llvm tools.
+          PROFDATA="${REPORT_DIR}/${PROJECT}.profdata"
+          "${LLVM_BIN}/llvm-profdata" merge -sparse -o "${PROFDATA}" "${PROFRAW_FILES[@]}"
+          "${LLVM_BIN}/llvm-cov" report "${OBJ_ARGS[@]}" -instr-profile="${PROFDATA}" ${IGNORE_ARGS[@]+"${IGNORE_ARGS[@]}"} \
+            | tee "${REPORT_DIR}/code_cov_${PROJECT}.report"
+          "${LLVM_BIN}/llvm-cov" show "${OBJ_ARGS[@]}" -instr-profile="${PROFDATA}" ${IGNORE_ARGS[@]+"${IGNORE_ARGS[@]}"} \
+            "${PATHEQ}" -Xdemangler="${LLVM_BIN}/llvm-cxxfilt" --format=html --output-dir="${REPORT_DIR}" || true
+          "${LLVM_BIN}/llvm-cov" export "${OBJ_ARGS[@]}" -instr-profile="${PROFDATA}" ${IGNORE_ARGS[@]+"${IGNORE_ARGS[@]}"} \
+            --format=lcov > "${REPORT_DIR}/coverage.info"
+
+          # Make lcov paths repo-relative so Codecov can map them to the source tree.
+          sed -i "s|${GITHUB_WORKSPACE}/||g" "${REPORT_DIR}/coverage.info"
+
+          # Emit a short summary to the job summary and the step log.
+          {
+            echo "### ${COVERAGE_PROJECT_NAME:-$TEST_COMPONENT} coverage (${AMDGPU_FAMILIES})"
+            echo ""
+            echo '```'
+            tail -n 3 "${REPORT_DIR}/code_cov_${PROJECT}.report"
+            echo '```'
+          } | tee -a "${GITHUB_STEP_SUMMARY}"
+
+      - name: Upload coverage report
+        # Only upload when the report generated successfully; an always() here
+        # could publish a partial/empty report after a failure (review: reboss).
+        if: ${{ inputs.coverage && success() }}
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
-          name: coverage-profraw-${{ inputs.amdgpu_families }}-${{ fromJSON(inputs.component).job_name }}-shard${{ matrix.shard }}
-          # Relative path resolves against the container workspace, matching the prepare step.
-          path: coverage-profraw/*.profraw
+          name: coverage-report-${{ env.COVERAGE_PROJECT_NAME }}-${{ inputs.amdgpu_families }}-shard${{ matrix.shard }}
+          path: coverage-report
           if-no-files-found: warn
-          retention-days: 7
+          retention-days: 90
 
       - name: Notify Teams Channel on Failure
         if: ${{ failure() && !github.event.pull_request.head.repo.fork }}
