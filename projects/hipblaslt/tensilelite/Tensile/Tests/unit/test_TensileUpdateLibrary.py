@@ -59,10 +59,8 @@ class TestUpdateLogic:
     def create_mock_solution(self, isa=(9, 0, 6)):
         """Helper to create mock solution"""
         mock_solution = Mock()
-        mock_solution_problem_type = self.create_mock_problem_type()
 
         mock_solution.getAttributes.return_value = {
-            "ProblemType": mock_solution_problem_type,
             "ISA": isa,
             "KernelLanguage": "Assembly",
             "SolutionIndex": 0,
