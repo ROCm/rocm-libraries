@@ -305,7 +305,7 @@ class TestValidateGlobalReadsNotTooEarly(CMSValidationTestBase):
         GRB loads A -> must start after LRA0.
         """
         assert self.num_vmfma == 8
-        self.kernel["SwapGlobalReadOrder"] = True
+        self.kernel["SwapGlobalReadOrder"] = 1
         optSchedule = {
             "SYNC": [[1, 2, 5, 6]],
             "GRA": [[6, 7]],
@@ -328,7 +328,7 @@ class TestValidateGlobalReadsNotTooEarly(CMSValidationTestBase):
         GRA load at 3 is before LRB0 is guaranteed done (done at 5).
         """
         assert self.num_vmfma == 8
-        self.kernel["SwapGlobalReadOrder"] = True
+        self.kernel["SwapGlobalReadOrder"] = 1
         optSchedule = {
             "SYNC": [[1, 2, 5, 6]],
             "GRA": [[3, 3]],
@@ -801,7 +801,7 @@ class TestValidateGlobalReadsNotTooEarlyDtlPlusLdsBuf(CMSValidationTestBase):
         Both are guaranteed within ML-1. Should pass.
         """
         assert self.num_vmfma == 8
-        self.kernel["SwapGlobalReadOrder"] = True
+        self.kernel["SwapGlobalReadOrder"] = 1
         optSchedule = {
             "SYNC": [[1,2, 5, 6]],
             "GRA": [[6, 7]],
@@ -825,7 +825,7 @@ class TestValidateGlobalReadsNotTooEarlyDtlPlusLdsBuf(CMSValidationTestBase):
         GRA at (loop=1, vmfma=2) < (loop=1, vmfma=3) -> too early.
         """
         assert self.num_vmfma == 8
-        self.kernel["SwapGlobalReadOrder"] = True
+        self.kernel["SwapGlobalReadOrder"] = 1
         optSchedule = {
             "LRA0": [[0]],
             "LRB0": [[5]],

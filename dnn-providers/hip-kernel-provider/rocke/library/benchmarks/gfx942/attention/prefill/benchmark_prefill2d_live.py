@@ -427,6 +427,119 @@ def _run_triton_live(shape, data, sliding_window, is_fp8, *, warmup, iters):
     return out, ms
 
 
+def _run_aoTriton_live(shape, data, sliding_window, is_fp8, *, warmup, iters):
+    """Time AOTriton flash SDPA as a secondary baseline.
+
+    Reconstructs dense [B, H, S, D] KV from the paged cache before timing
+    (reconstruction excluded from the timed region). Skips FP8 and shapes
+    where flash is ineligible (non-square causal, alibi). Returns
+    (out_tensor, ms) or raises on skip/failure.
+    """
+    import torch
+    from torch.nn.attention import SDPBackend, sdpa_kernel
+    from rocke.runtime import synchronize_and_release, time_launches
+
+    if is_fp8:
+        raise NotImplementedError("AOTriton skip: FP8 not supported by flash SDPA")
+    if shape.has_alibi:
+        raise NotImplementedError("AOTriton skip: alibi not supported by flash SDPA")
+    if sliding_window:
+        raise NotImplementedError(
+            "AOTriton skip: sliding_window not supported by flash SDPA"
+        )
+    if float(shape.softcap):
+        raise NotImplementedError("AOTriton skip: softcap not supported by flash SDPA")
+
+    # Decode-path detection: prefill shapes always have seqlen_q > 1, so
+    # is_causal=True is correct for all shapes handled here.
+    is_causal = True
+
+    # Reconstruct dense KV from paged cache (outside timed region).
+    kv_lens_list = data["kv_lens"].tolist()
+    num_seqs = shape.num_seqs
+    num_kv_heads = shape.num_kv_heads
+    head_size = shape.head_size
+    nrep = shape.num_query_heads // num_kv_heads
+
+    ks, vs = [], []
+    for bi in range(num_seqs):
+        klen = kv_lens_list[bi]
+        bt = data["block_tables"][bi]
+        ks.append(data["key_cache"][bt].reshape(-1, num_kv_heads, head_size)[:klen])
+        vs.append(data["value_cache"][bt].reshape(-1, num_kv_heads, head_size)[:klen])
+
+    max_klen = max(t.shape[0] for t in ks)
+    dtype = data["query"].dtype
+    device = data["query"].device
+
+    # Pad sequences to the same length for batched SDPA.
+    kh = torch.zeros(
+        num_seqs, num_kv_heads, max_klen, head_size, dtype=dtype, device=device
+    )
+    vh = torch.zeros(
+        num_seqs, num_kv_heads, max_klen, head_size, dtype=dtype, device=device
+    )
+    for bi in range(num_seqs):
+        klen = ks[bi].shape[0]
+        kh[bi, :, :klen, :] = ks[bi].transpose(0, 1)
+        vh[bi, :, :klen, :] = vs[bi].transpose(0, 1)
+    kh = kh.repeat_interleave(nrep, dim=1).contiguous()
+    vh = vh.repeat_interleave(nrep, dim=1).contiguous()
+
+    # Query: [total_q, num_query_heads, head_size] -> [B, H, S, D]
+    # For prefill, total_q may be ragged; build a padded view.
+    query_lens = data["cu_seqlens_q"][1:] - data["cu_seqlens_q"][:-1]
+    max_qlen = int(query_lens.max().item())
+    num_query_heads = shape.num_query_heads
+    qh = torch.zeros(
+        num_seqs, num_query_heads, max_qlen, head_size, dtype=dtype, device=device
+    )
+    for bi in range(num_seqs):
+        qlen = int(query_lens[bi].item())
+        q_start = int(data["cu_seqlens_q"][bi].item())
+        qh[bi, :, :qlen, :] = data["query"][q_start : q_start + qlen].transpose(0, 1)
+
+    scale = data["scale"]
+
+    # Probe flash eligibility once before timing.
+    try:
+        with sdpa_kernel([SDPBackend.FLASH_ATTENTION]):
+            _ = torch.nn.functional.scaled_dot_product_attention(
+                qh, kh, vh, is_causal=is_causal, scale=scale
+            )
+        torch.cuda.synchronize()
+    except RuntimeError as e:
+        raise NotImplementedError(f"AOTriton skip: flash ineligible — {e}") from e
+
+    hip_stream = _bench_stream_handle()
+
+    def call_once():
+        with sdpa_kernel([SDPBackend.FLASH_ATTENTION]):
+            torch.nn.functional.scaled_dot_product_attention(
+                qh, kh, vh, is_causal=is_causal, scale=scale
+            )
+
+    ms = time_launches(call_once, warmup=warmup, iters=iters, stream=hip_stream)
+    synchronize_and_release(hip_stream)
+
+    # Produce an output tensor in the same layout as Triton/CK for comparison.
+    with sdpa_kernel([SDPBackend.FLASH_ATTENTION]):
+        out_padded = torch.nn.functional.scaled_dot_product_attention(
+            qh, kh, vh, is_causal=is_causal, scale=scale
+        )
+    torch.cuda.synchronize()
+    # Unpack [B, H, S_q, D] -> [total_q, H, D]
+    out = torch.zeros(
+        shape.total_q, num_query_heads, head_size, dtype=dtype, device=device
+    )
+    for bi in range(num_seqs):
+        qlen = int(query_lens[bi].item())
+        q_start = int(data["cu_seqlens_q"][bi].item())
+        out[q_start : q_start + qlen] = out_padded[bi, :, :qlen, :].transpose(0, 1)
+
+    return out, ms
+
+
 def _compare(a, b) -> float:
     a = a.float()
     b = b.float()
@@ -518,6 +631,17 @@ def main() -> int:
             traceback.print_exc()
             continue
 
+        # AOTriton flash baseline (best-effort; skipped for FP8 / ineligible shapes).
+        aot_ms = None
+        try:
+            _, aot_ms = _run_aoTriton_live(
+                shape, data, sw, is_fp8, warmup=args.warmup, iters=args.iterations
+            )
+        except NotImplementedError as exc:
+            print(f"{tag}  AOTRITON SKIP: {exc}")
+        except Exception as exc:  # noqa: BLE001
+            print(f"{tag}  AOTRITON FAIL: {exc!r}")
+
         dtype_str = "bf16" if shape.q_dtype == "torch.bfloat16" else "fp16"
         rec = {
             "signature": shape.signature,
@@ -528,6 +652,7 @@ def main() -> int:
             "total_q": shape.total_q,
             "max_seqlen_k": shape.max_seqlen_k,
             "triton_ms": tri_ms,
+            "aoTriton_ms": aot_ms,
             "variants": {},
         }
         best = None
@@ -569,7 +694,13 @@ def main() -> int:
             except Exception as exc:  # noqa: BLE001
                 rec["variants"][v] = {"error": repr(exc)}
         rec["best_variant"] = best[0] if best else None
-        rec["best_speedup"] = best[1] if best else 0.0
+        rec["best_speedup_vs_triton"] = best[1] if best else 0.0
+        best_ms = rec["variants"][best[0]]["ms"] if best else None
+        rec["best_speedup_vs_aoTriton"] = (
+            aot_ms / best_ms
+            if (aot_ms is not None and best_ms is not None and best_ms > 0)
+            else None
+        )
         results.append(rec)
 
         def _fmt_variant(v):
@@ -579,9 +710,15 @@ def main() -> int:
                 return f"{v}={info['speedup']:.2f}x{ok_mark}"
             return f"{v}=ERR"
 
+        aot_str = f"aot={aot_ms * 1000:.1f}us" if aot_ms else "aot=N/A"
         vs = "  ".join(_fmt_variant(v) for v in args.variants)
+        aot_spd_str = (
+            f" aot_spd={rec['best_speedup_vs_aoTriton']:.2f}x"
+            if rec["best_speedup_vs_aoTriton"] is not None
+            else ""
+        )
         print(
-            f"{tag} sw={sw} tri={tri_ms * 1000:.1f}us | {vs} | best={rec['best_variant']}={rec['best_speedup']:.2f}x"
+            f"{tag} sw={sw} tri={tri_ms * 1000:.1f}us {aot_str} | {vs} | best={rec['best_variant']}={rec['best_speedup_vs_triton']:.2f}x(tri){aot_spd_str}"
         )
 
     args.output_json.write_text(json.dumps(results, indent=2, default=str))
@@ -595,13 +732,24 @@ def main() -> int:
     buckets: dict[tuple, list] = {}
     for r in results:
         buckets.setdefault(bucket(r), []).append(r)
-    print("\n=== geomean best CK DSL speedup over Triton (2d-forced) ===")
+    print("\n=== geomean best CK DSL speedup vs Triton and AOTriton ===")
     for b in sorted(buckets):
         rs = buckets[b]
-        best = [r["best_speedup"] for r in rs if r["best_speedup"] > 0]
         dtype_label, sw_label = b
+        tri_spds = [
+            r["best_speedup_vs_triton"] for r in rs if r["best_speedup_vs_triton"] > 0
+        ]
+        aot_spds = [
+            r["best_speedup_vs_aoTriton"]
+            for r in rs
+            if r.get("best_speedup_vs_aoTriton")
+        ]
+        tri_part = f"vs_tri={_gm(tri_spds):.3f}x  wins={sum(1 for x in tri_spds if x > 1)}/{len(tri_spds)}"
+        aot_part = (
+            f"  vs_aot={_gm(aot_spds):.3f}x (n={len(aot_spds)})" if aot_spds else ""
+        )
         print(
-            f"  {dtype_label:4s}  {sw_label:4s}  n={len(rs):3d}  best-variant geomean={_gm(best):.3f}x  wins={sum(1 for x in best if x > 1)}/{len(best)}"
+            f"  {dtype_label:4s}  {sw_label:4s}  n={len(rs):3d}  {tri_part}{aot_part}"
         )
     print("\n=== per-variant geomean (correct shapes only) ===")
     for v in args.variants:

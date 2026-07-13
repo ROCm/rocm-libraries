@@ -6,11 +6,13 @@ Documentation for rocSPARSE is available at
 ## (Unreleased) rocSPARSE 5.0.0
 
 ### Added
-* Add Blocked ELL format support to `rocsparse_dense_to_sparse` routine.
-* Add `rocsparse_bell_set_pointers`.
+* Add Blocked ELL format support to the `rocsparse_dense_to_sparse` routine, including the new `rocsparse_bell_set_pointers` function to set the Blocked ELL array pointers.
 
 ### Resolved issues
 * Fixed `rocsparse_spmm` with Blocked ELL sparse format which was previously not computing the correct result.
+
+### Removed
+* The deprecated `rocsparse_indextype_u16` enum.
 
 ## rocSPARSE 4.7.0 for ROCm 7.14
 
@@ -19,6 +21,9 @@ Documentation for rocSPARSE is available at
 
 ### Upcoming changes
 * Deprecated the `rocsparse_indextype_u16` index type. It is  no longer supported and will be removed in a future release. Users should use `rocsparse_indextype_i32` or `rocsparse_indextype_i64` going forward.
+
+### Known issues
+* The HIP graph capture/launch path for the factorization routines `bsric0`, `bsrilu0`, `csric0` and `csrilu0` can fail with `hipErrorOutOfMemory` at `hipGraphLaunch` on memory-constrained GPUs such as the gfx110X family. The corresponding `graph_test` cases are marked `known_bug` and excluded from the standard test suites until the fix lands.
 
 ## rocSPARSE 4.6.0 for ROCm 7.13.0
 

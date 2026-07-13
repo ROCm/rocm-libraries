@@ -43,6 +43,8 @@ debugpy==1.8.12
     # via ipykernel
 decorator==5.1.1
     # via ipython
+defusedxml==0.7.1
+    # via sphinxcontrib-datatemplates
 deprecated==1.2.14
     # via pygithub
 docutils==0.21.2
@@ -176,6 +178,7 @@ pyyaml==6.0.1
     #   myst-parser
     #   rocm-docs-core
     #   sphinx-external-toc
+    #   sphinxcontrib-datatemplates
 pyzmq==26.2.1
     # via
     #   ipykernel
@@ -200,7 +203,7 @@ smmap==5.0.1
     # via gitdb
 snowballstemmer==2.2.0
     # via sphinx
-soupsieve==2.5
+soupsieve==2.8.4
     # via beautifulsoup4
 sphinx==7.3.7
     # via
@@ -214,6 +217,8 @@ sphinx==7.3.7
     #   sphinx-design
     #   sphinx-external-toc
     #   sphinx-notfound-page
+    #   sphinxcontrib-datatemplates
+    #   sphinxcontrib-runcmd
 sphinx-book-theme==1.1.4
     # via rocm-docs-core
 sphinx-copybutton==0.5.2

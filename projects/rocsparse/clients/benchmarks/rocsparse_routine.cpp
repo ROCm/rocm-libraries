@@ -97,10 +97,6 @@ rocsparse_status rocsparse_routine::dispatch_indextype(const char cindextype, co
     const bool                mixed     = (cindextype == 'm');
     switch(indextype)
     {
-    case rocsparse_indextype_u16:
-    {
-        break;
-    }
     case rocsparse_indextype_i32:
     {
         return dispatch_call<FNAME, T, int32_t>(arg);

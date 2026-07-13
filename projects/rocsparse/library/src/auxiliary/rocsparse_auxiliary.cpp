@@ -4119,8 +4119,10 @@ catch(...)
 /********************************************************************************
  * \brief rocsparse_bell_set_pointers sets the sparse Blocked ELL matrix data pointers.
  *******************************************************************************/
-rocsparse_status
-    rocsparse_bell_set_pointers(rocsparse_spmat_descr descr, void* bell_col_ind, void* bell_val)
+rocsparse_status rocsparse_bell_set_pointers(rocsparse_handle      handle,
+                                             rocsparse_spmat_descr descr,
+                                             void*                 bell_col_ind,
+                                             void*                 bell_val)
 try
 {
     ROCSPARSE_ROUTINE_TRACE;

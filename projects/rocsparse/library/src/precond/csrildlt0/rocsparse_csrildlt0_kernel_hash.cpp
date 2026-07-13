@@ -463,7 +463,7 @@ namespace rocsparse
             return rocsparse::csrildlt0_kernel_hash_launch<BLOCKSIZE, WF_SIZE, HASH, T, I, int32_t>;
         case rocsparse_indextype_i64:
             return rocsparse::csrildlt0_kernel_hash_launch<BLOCKSIZE, WF_SIZE, HASH, T, I, int64_t>;
-        case rocsparse_indextype_u16:
+        case deprecated_rocsparse_indextype_u16:
             THROW_WITH_MESSAGE_IF_ROCSPARSE_ERROR(rocsparse_status_invalid_value,
                                                   "rocsparse_indextype_u16 not supported");
         }
@@ -481,7 +481,7 @@ namespace rocsparse
         case rocsparse_indextype_i64:
             return rocsparse::transform_j_type<BLOCKSIZE, WF_SIZE, HASH, T, int64_t>(
                 std::forward<P>(p)...);
-        case rocsparse_indextype_u16:
+        case deprecated_rocsparse_indextype_u16:
             THROW_WITH_MESSAGE_IF_ROCSPARSE_ERROR(rocsparse_status_invalid_value,
                                                   "rocsparse_indextype_u16 not supported");
         }
