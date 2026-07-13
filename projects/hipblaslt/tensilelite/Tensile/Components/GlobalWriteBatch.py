@@ -1184,7 +1184,7 @@ class GlobalWriteBatchWriter:
     # MFMAs to hide the ds_bpermute latency. In weave mode the reads are popped PER PAIR
     # (into each pair's Phase1) at the paired-store site instead, in the same element
     # order so the AGPR->ValuC routing is byte-identical.
-    _weaveMode = (getattr(self.parentWriter.states, "subtileFusedWeave", False)
+    _weaveMode = (self.parentWriter.states.subtileFusedWeave
                   and self.codeAccVgprRead is not None
                   and self.kernel["LocalSplitU"] == 1)
     # Store-site dispatch runs in _emitNonatomicAdd (separate method); expose the
@@ -2761,13 +2761,13 @@ class GlobalWriteBatchWriter:
   def _weaveLookahead(self):
     """How many store-pairs ahead a pair's terminal MFMAs are pre-issued (the
     MFMA->accvgpr_read latency window; set alongside the extraction keepInLoop)."""
-    return getattr(self.parentWriter.states, "subtileWeaveLookahead", 4)
+    return self.parentWriter.states.subtileWeaveLookahead
 
   def _weaveMfmaGroups(self):
     """Return the terminal-MFMA groups dict (pair -> [insts]) or None (no weave)."""
     if not self._weaveMode:
       return None
-    return getattr(self.parentWriter.states, "subtileWeaveMfmaGroups", None)
+    return self.parentWriter.states.subtileWeaveMfmaGroups
 
   def _weaveEmitGroup(self, module, pair):
     """Emit the terminal MFMAs for store-pair `pair` once (idempotent)."""
