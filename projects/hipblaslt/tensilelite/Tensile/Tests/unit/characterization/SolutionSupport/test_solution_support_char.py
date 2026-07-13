@@ -30,10 +30,12 @@ cap-coupled ``Solution`` class (L444+) is out of this slice.
 """
 
 import importlib
+from typing import Any, Callable, ContextManager
 
 import pytest
 
 from Tensile.Activation import ActivationType
+from Tensile.Common.TypeValidationErrors import ConfigTypeError
 
 # NOTE: SolutionStructs/__init__.py re-exports the `Solution` *class*, which
 # shadows the submodule attribute, so `import Tensile.SolutionStructs.Solution
@@ -41,6 +43,8 @@ from Tensile.Activation import ActivationType
 S = importlib.import_module("Tensile.SolutionStructs.Solution")
 
 pytestmark = pytest.mark.unit
+
+IsolatedCollector = Callable[[], ContextManager[dict]]
 
 
 def _render_collector(collector):
@@ -155,30 +159,41 @@ def test_validate_skips_unknown_and_skiplist(isolated_collector, snapshot):
 
 
 # ===========================================================================
-# printTypeMismatchSummary
+# raiseIfTypeMismatches
 # ===========================================================================
 
-def test_print_summary_empty_returns_zero(isolated_collector, capsys, snapshot):
+def test_raise_if_type_mismatches_empty_noops(
+    isolated_collector: IsolatedCollector,
+    capsys: pytest.CaptureFixture,
+    snapshot: Any,
+) -> None:
     with isolated_collector():
-        rv = S.printTypeMismatchSummary(numFiles=0)
+        S.raiseIfTypeMismatches()
         out = capsys.readouterr().out
-        assert {"return": rv, "stdout": out} == snapshot
+        assert {"stdout": out} == snapshot
 
 
-def test_print_summary_empty_with_files(isolated_collector, capsys, snapshot):
+def test_raise_if_type_mismatches_empty_stays_silent(
+    isolated_collector: IsolatedCollector,
+    capsys: pytest.CaptureFixture,
+    snapshot: Any,
+) -> None:
     with isolated_collector():
-        rv = S.printTypeMismatchSummary(numFiles=7)
+        S.raiseIfTypeMismatches()
         out = capsys.readouterr().out
-        assert {"return": rv, "stdout": out} == snapshot
+        assert {"stdout": out} == snapshot
 
 
-def test_print_summary_populated(isolated_collector, capsys, snapshot):
+def test_raise_if_type_mismatches_populated_raises(
+    isolated_collector: IsolatedCollector,
+    snapshot: Any,
+) -> None:
     with isolated_collector() as collector:
         collector[("UseBeta", "int", "bool")] = {"count": 3, "values": {"0", "1"}, "files": {"a.yaml", "b.yaml"}}
         collector[("DepthU", "float", "int")] = {"count": 1, "values": {"8.0"}, "files": {"a.yaml"}}
-        rv = S.printTypeMismatchSummary(numFiles=2)
-        out = capsys.readouterr().out
-        assert {"return": rv, "stdout": out} == snapshot
+        with pytest.raises(ConfigTypeError) as exc:
+            S.raiseIfTypeMismatches()
+        assert str(exc.value) == snapshot
 
 
 # ===========================================================================
