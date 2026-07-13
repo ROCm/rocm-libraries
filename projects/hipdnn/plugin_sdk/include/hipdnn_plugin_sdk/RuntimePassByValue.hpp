@@ -112,11 +112,9 @@ inline double resolveScalarOperand(const ScalarOperand& op,
     case DataType::FLOAT:
         return detail::readHostScalar<float>(ptr);
     case DataType::HALF:
-        return static_cast<double>(
-            static_cast<float>(detail::readHostScalar<hipdnn_data_sdk::types::half>(ptr)));
+        return detail::readHostScalar<hipdnn_data_sdk::types::half>(ptr);
     case DataType::BFLOAT16:
-        return static_cast<double>(
-            static_cast<float>(detail::readHostScalar<hipdnn_data_sdk::types::bfloat16>(ptr)));
+        return detail::readHostScalar<hipdnn_data_sdk::types::bfloat16>(ptr);
     case DataType::INT32:
         return detail::readHostScalar<int32_t>(ptr);
     case DataType::INT64:

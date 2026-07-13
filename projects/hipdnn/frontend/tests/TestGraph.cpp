@@ -96,19 +96,6 @@ public:
         _compiledPlans.push_back(std::move(plan));
     }
 
-    /// Inject a compiled plan whose execution-plan descriptor is valid (non-null),
-    /// so execute paths pass the valid-plan guard and reach later logic (e.g. the
-    /// pass-by-value variant-pack filter). Relies on the mock backend returning a
-    /// non-null fake descriptor from backendCreateDescriptor.
-    void injectValidCompiledPlan()
-    {
-        CompiledPlan plan;
-        plan.engineId = 0;
-        plan.executionPlanDesc = std::make_unique<detail::ScopedHipdnnBackendDescriptor>(
-            HIPDNN_BACKEND_EXECUTION_PLAN_DESCRIPTOR);
-        _compiledPlans.push_back(std::move(plan));
-    }
-
     /// Inject a dummy entry into _planSpecs (simulates add_engine_*() having run).
     void injectDummyPlanSpec()
     {
@@ -8266,83 +8253,6 @@ TEST_F(TestGraph, ExecutePlanAtIndexUncompiledPlan)
     auto result = graph.execute_plan_at_index(_handle, variantPack, nullptr, 0);
     EXPECT_EQ(result.code, ErrorCode::INVALID_VALUE);
 }
-
-// RFC-0016 execute-time filter is wired into execute_plan_at_index (not only the
-// primary execute()): a pure runtime pass-by-value scalar whose uid is absent
-// from the variant pack must be rejected with INVALID_VALUE before dispatch.
-TEST_F(TestGraph, ExecutePlanAtIndexRejectsMissingRuntimeScalar)
-{
-    hipdnn_frontend::GraphTestUtils graph;
-    graph.set_name("PbvExecutePlanAtIndex")
-        .set_compute_data_type(DataType::FLOAT)
-        .set_intermediate_data_type(DataType::FLOAT)
-        .set_io_data_type(DataType::FLOAT);
-
-    auto in0 = std::make_shared<TensorAttributes>();
-    in0->set_uid(1)
-        .set_name("X")
-        .set_dim({1, 1, 2, 2})
-        .set_stride({4, 4, 2, 1})
-        .set_data_type(DataType::FLOAT);
-
-    // Pure runtime user-supplied scalar (flag set, no baked value): must be
-    // supplied at execute.
-    auto scalar = std::make_shared<TensorAttributes>();
-    scalar->set_uid(7).set_name("scalar").set_data_type(DataType::FLOAT).set_as_runtime_parameter();
-
-    PointwiseAttributes attrs;
-    attrs.set_name("MulByScalar");
-    attrs.set_mode(PointwiseMode::MUL);
-    graph.pointwise(in0, scalar, attrs);
-
-    graph.injectValidCompiledPlan();
-
-    // Variant pack omits uid 7 -> the pass-by-value filter must reject.
-    const std::unordered_map<int64_t, void*> variantPack = {{1, reinterpret_cast<void*>(0x1)}};
-    const auto result = graph.execute_plan_at_index(_handle, variantPack, nullptr, 0);
-    EXPECT_EQ(result.code, ErrorCode::INVALID_VALUE);
-    EXPECT_NE(result.err_msg.find("host-supplied scalar"), std::string::npos) << result.err_msg;
-}
-
-#ifdef HIPDNN_ENABLE_SDPA
-// Same filter is wired into the shape-override execute overload.
-TEST_F(TestGraph, OverrideExecuteRejectsMissingRuntimeScalar)
-{
-    hipdnn_frontend::GraphTestUtils graph;
-    graph.set_name("PbvOverrideExecute")
-        .set_compute_data_type(DataType::FLOAT)
-        .set_intermediate_data_type(DataType::FLOAT)
-        .set_io_data_type(DataType::FLOAT);
-
-    auto in0 = std::make_shared<TensorAttributes>();
-    in0->set_uid(1)
-        .set_name("X")
-        .set_dim({1, 1, 2, 2})
-        .set_stride({4, 4, 2, 1})
-        .set_data_type(DataType::FLOAT);
-
-    auto scalar = std::make_shared<TensorAttributes>();
-    scalar->set_uid(7).set_name("scalar").set_data_type(DataType::FLOAT).set_as_runtime_parameter();
-
-    PointwiseAttributes attrs;
-    attrs.set_name("MulByScalar");
-    attrs.set_mode(PointwiseMode::MUL);
-    graph.pointwise(in0, scalar, attrs);
-
-    graph.set_override_shape_enabled(true);
-    graph.injectValidCompiledPlan();
-
-    // Non-empty overrides take the override path (empty falls through to execute()).
-    const std::unordered_map<int64_t, void*> variantPack = {{1, reinterpret_cast<void*>(0x1)}};
-    const std::vector<int64_t> overrideUids = {1};
-    const std::vector<std::vector<int64_t>> overrideShapes = {{1, 1, 2, 2}};
-    const std::vector<std::vector<int64_t>> overrideStrides = {{4, 4, 2, 1}};
-    const auto result = graph.execute(
-        _handle, variantPack, nullptr, overrideUids, overrideShapes, overrideStrides);
-    EXPECT_EQ(result.code, ErrorCode::INVALID_VALUE);
-    EXPECT_NE(result.err_msg.find("host-supplied scalar"), std::string::npos) << result.err_msg;
-}
-#endif // HIPDNN_ENABLE_SDPA
 
 TEST_F(TestGraph, GetAutotuneWorkspaceSizeReturnsZeroWhenEmpty)
 {

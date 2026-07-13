@@ -290,36 +290,4 @@ inline Error ensureAndSetTensorArrayRef(
     return {};
 }
 
-// Validates the variant pack against pass-by-value tensor state at execute time.
-// The only hard requirement is that a PURE runtime pass-by-value tensor (flag
-// set, no baked value/default) MUST have a host-supplied scalar in the variant
-// pack. Tensors that already carry a value (compile-time constant OR
-// runtime-with-default) may harmlessly appear in the variant pack — callers
-// routinely build the pack from every tensor UID, and the backend ignores the
-// pointer for by-value tensors (the baked value/default wins). Ordinary tensors
-// are not this helper's concern.
-inline Error validatePassByValueVariantPack(
-    const std::unordered_set<std::shared_ptr<graph::TensorAttributes>>& tensors,
-    const std::unordered_map<int64_t, void*>& variantPack)
-{
-    for(const auto& tensor : tensors)
-    {
-        if(!tensor)
-        {
-            continue;
-        }
-        const bool hasValue = !std::holds_alternative<std::monostate>(tensor->get_value_variant());
-        const bool isRuntime = tensor->get_is_runtime_pass_by_value();
-        if(isRuntime && !hasValue)
-        {
-            const int64_t uid = tensor->get_uid();
-            HIPDNN_RETURN_IF_TRUE(variantPack.count(uid) == 0,
-                                  ErrorCode::INVALID_VALUE,
-                                  "Runtime pass-by-value tensor uid " + std::to_string(uid)
-                                      + " requires a host-supplied scalar in the variant pack");
-        }
-    }
-    return {};
-}
-
 } // namespace hipdnn_frontend::detail

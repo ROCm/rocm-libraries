@@ -3940,15 +3940,6 @@ public:
                         + " has no valid execution plan descriptor."};
         }
 
-        // On the fresh-build path (subtree present), validate the variant pack against
-        // pass-by-value tensor state. Plan-only objects have no subtree to inspect.
-        if(!_sub_nodes.empty())
-        {
-            std::unordered_set<std::shared_ptr<TensorAttributes>> allTensors;
-            gatherHipdnnTensorsSubtree(allTensors);
-            HIPDNN_CHECK_ERROR(detail::validatePassByValueVariantPack(allTensors, variantPack));
-        }
-
         auto variantPackDesc = std::make_unique<detail::ScopedHipdnnBackendDescriptor>(
             HIPDNN_BACKEND_VARIANT_PACK_DESCRIPTOR);
         if(!variantPackDesc || !variantPackDesc->valid())
@@ -4334,15 +4325,6 @@ public:
                     "from_compiled_plan_binary() first."};
         }
 
-        // On the fresh-build path (subtree present), validate the variant pack against
-        // pass-by-value tensor state. Plan-only objects have no subtree to inspect.
-        if(!_sub_nodes.empty())
-        {
-            std::unordered_set<std::shared_ptr<TensorAttributes>> allTensors;
-            gatherHipdnnTensorsSubtree(allTensors);
-            HIPDNN_CHECK_ERROR(detail::validatePassByValueVariantPack(allTensors, variantPack));
-        }
-
         auto variantPackDesc = std::make_unique<detail::ScopedHipdnnBackendDescriptor>(
             HIPDNN_BACKEND_VARIANT_PACK_DESCRIPTOR);
         if(!variantPackDesc || !variantPackDesc->valid())
@@ -4451,15 +4433,6 @@ public:
                         "Override UID " + std::to_string(uid)
                             + " is not present in the variant pack."};
             }
-        }
-
-        // On the fresh-build path (subtree present), validate the variant pack against
-        // pass-by-value tensor state. Plan-only objects have no subtree to inspect.
-        if(!_sub_nodes.empty())
-        {
-            std::unordered_set<std::shared_ptr<TensorAttributes>> allTensors;
-            gatherHipdnnTensorsSubtree(allTensors);
-            HIPDNN_CHECK_ERROR(detail::validatePassByValueVariantPack(allTensors, variantPack));
         }
 
         HIPDNN_FE_LOG_INFO("Executing graph " << graph_attributes.get_name() << " with "

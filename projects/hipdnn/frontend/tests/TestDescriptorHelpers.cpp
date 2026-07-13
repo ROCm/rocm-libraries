@@ -4,6 +4,7 @@
 #include <gmock/gmock.h>
 #include <gtest/gtest.h>
 
+#include <algorithm>
 #include <array>
 #include <cstring>
 #include <hipdnn_data_sdk/types.hpp>
@@ -34,6 +35,51 @@ constexpr int64_t K_MISSING_TENSOR_UID = 999;
 
 constexpr std::array<int64_t, 4> K_DEFAULT_TENSOR_DIMS = {1, 3, 4, 4};
 constexpr std::array<int64_t, 4> K_DEFAULT_TENSOR_STRIDES = {48, 16, 4, 1};
+
+// Distinctive per-type scalar values for the pass-by-value typed suite; each is
+// unique so a mis-serialized byte pattern is caught.
+template <typename T>
+T passByValueTestScalar();
+template <>
+float passByValueTestScalar<float>()
+{
+    return 1.5F;
+}
+template <>
+double passByValueTestScalar<double>()
+{
+    return 2.718281828;
+}
+template <>
+hipdnn_data_sdk::types::half passByValueTestScalar<hipdnn_data_sdk::types::half>()
+{
+    return hipdnn_data_sdk::types::half(1.5F);
+}
+template <>
+hipdnn_data_sdk::types::bfloat16 passByValueTestScalar<hipdnn_data_sdk::types::bfloat16>()
+{
+    return hipdnn_data_sdk::types::bfloat16(1.5F);
+}
+template <>
+uint8_t passByValueTestScalar<uint8_t>()
+{
+    return 200;
+}
+template <>
+int32_t passByValueTestScalar<int32_t>()
+{
+    return -42;
+}
+template <>
+int64_t passByValueTestScalar<int64_t>()
+{
+    return 456789012345LL;
+}
+template <>
+bool passByValueTestScalar<bool>()
+{
+    return true;
+}
 
 } // namespace
 
@@ -491,160 +537,48 @@ TEST_F(TestDescriptorHelpers, EnsureTensorDescFailsOnFinalize)
     EXPECT_TRUE(tensorDescs.empty());
 }
 
-TEST_F(TestDescriptorHelpers, EnsureTensorDescSetsPassByValue)
+// Pass-by-value scalar round-trips through createOrFindTensorDesc for every
+// supported ValueVariant type. Verifies the six standard tensor attributes and
+// the runtime pass-by-value flag (via expectTensorSetAttributes) plus the
+// VALUE_EXT wire encoding (HIPDNN_TYPE_CHAR, sizeof(T) count, raw bytes).
+// set_value() resets dims/strides to {1}, so scalar dimensions are expected.
+template <typename T>
+class TestDescriptorHelpersPassByValue : public TestDescriptorHelpers
 {
-    constexpr float K_TENSOR_VALUE = 1.5f;
+};
 
-    expectCreateAndDestroyDescriptor();
-    // set_value() resets dims and strides to {1}, so expect scalar dimensions
-    expectTensorSetAttributes(K_DEFAULT_TENSOR_UID, "tensor_42", {1}, {1}, /*isRuntime*/ true);
+using PassByValueScalarTypes = ::testing::Types<float,
+                                                double,
+                                                hipdnn_data_sdk::types::half,
+                                                hipdnn_data_sdk::types::bfloat16,
+                                                uint8_t,
+                                                int32_t,
+                                                int64_t,
+                                                bool>;
+// Empty third argument required for C++17 compatibility with TYPED_TEST_SUITE macro
+TYPED_TEST_SUITE(TestDescriptorHelpersPassByValue, PassByValueScalarTypes, );
 
-    // Expect the value attribute to be set as raw bytes via HIPDNN_TYPE_CHAR
-    EXPECT_CALL(*_mockBackend,
+TYPED_TEST(TestDescriptorHelpersPassByValue, EnsureTensorDescSetsPassByValue)
+{
+    const TypeParam tensorValue = passByValueTestScalar<TypeParam>();
+
+    this->expectCreateAndDestroyDescriptor();
+    this->expectTensorSetAttributes(
+        K_DEFAULT_TENSOR_UID, "tensor_42", {1}, {1}, /*isRuntime*/ true);
+
+    EXPECT_CALL(*this->_mockBackend,
                 backendSetAttribute(_,
                                     HIPDNN_ATTR_TENSOR_VALUE_EXT,
                                     HIPDNN_TYPE_CHAR,
-                                    static_cast<int64_t>(sizeof(float)),
-                                    pointsToScalar<float>(K_TENSOR_VALUE)))
+                                    static_cast<int64_t>(sizeof(TypeParam)),
+                                    pointsToScalar<TypeParam>(tensorValue)))
         .WillOnce(Return(HIPDNN_STATUS_SUCCESS));
 
-    EXPECT_CALL(*_mockBackend, backendFinalize(_)).WillOnce(Return(HIPDNN_STATUS_SUCCESS));
+    EXPECT_CALL(*this->_mockBackend, backendFinalize(_)).WillOnce(Return(HIPDNN_STATUS_SUCCESS));
 
     std::unordered_map<int64_t, ScopedHipdnnBackendDescriptor> tensorDescs;
-    auto tensor = makeTensor(K_DEFAULT_TENSOR_UID);
-    tensor->set_value(K_TENSOR_VALUE);
-
-    auto err = createOrFindTensorDesc(tensorDescs, tensor);
-    EXPECT_TRUE(err.is_good()) << err.err_msg;
-    EXPECT_EQ(tensorDescs.size(), 1u);
-}
-
-TEST_F(TestDescriptorHelpers, EnsureTensorDescSetsPassByValueDouble)
-{
-    constexpr double K_TENSOR_VALUE = 2.718281828;
-
-    expectCreateAndDestroyDescriptor();
-    expectTensorSetAttributes(K_DEFAULT_TENSOR_UID, "tensor_42", {1}, {1}, /*isRuntime*/ true);
-
-    EXPECT_CALL(*_mockBackend,
-                backendSetAttribute(_,
-                                    HIPDNN_ATTR_TENSOR_VALUE_EXT,
-                                    HIPDNN_TYPE_CHAR,
-                                    static_cast<int64_t>(sizeof(double)),
-                                    pointsToScalar<double>(K_TENSOR_VALUE)))
-        .WillOnce(Return(HIPDNN_STATUS_SUCCESS));
-
-    EXPECT_CALL(*_mockBackend, backendFinalize(_)).WillOnce(Return(HIPDNN_STATUS_SUCCESS));
-
-    std::unordered_map<int64_t, ScopedHipdnnBackendDescriptor> tensorDescs;
-    auto tensor = makeTensor(K_DEFAULT_TENSOR_UID);
-    tensor->set_value(K_TENSOR_VALUE);
-
-    auto err = createOrFindTensorDesc(tensorDescs, tensor);
-    EXPECT_TRUE(err.is_good()) << err.err_msg;
-    EXPECT_EQ(tensorDescs.size(), 1u);
-}
-
-TEST_F(TestDescriptorHelpers, EnsureTensorDescSetsPassByValueHalf)
-{
-    using hipdnn_data_sdk::types::half;
-    auto tensorValue = half(1.5f);
-
-    expectCreateAndDestroyDescriptor();
-    expectTensorSetAttributes(K_DEFAULT_TENSOR_UID, "tensor_42", {1}, {1}, /*isRuntime*/ true);
-
-    EXPECT_CALL(*_mockBackend,
-                backendSetAttribute(_,
-                                    HIPDNN_ATTR_TENSOR_VALUE_EXT,
-                                    HIPDNN_TYPE_CHAR,
-                                    static_cast<int64_t>(sizeof(half)),
-                                    pointsToScalar<half>(tensorValue)))
-        .WillOnce(Return(HIPDNN_STATUS_SUCCESS));
-
-    EXPECT_CALL(*_mockBackend, backendFinalize(_)).WillOnce(Return(HIPDNN_STATUS_SUCCESS));
-
-    std::unordered_map<int64_t, ScopedHipdnnBackendDescriptor> tensorDescs;
-    auto tensor = makeTensor(K_DEFAULT_TENSOR_UID);
+    auto tensor = this->makeTensor(K_DEFAULT_TENSOR_UID);
     tensor->set_value(tensorValue);
-
-    auto err = createOrFindTensorDesc(tensorDescs, tensor);
-    EXPECT_TRUE(err.is_good()) << err.err_msg;
-    EXPECT_EQ(tensorDescs.size(), 1u);
-}
-
-TEST_F(TestDescriptorHelpers, EnsureTensorDescSetsPassByValueBfloat16)
-{
-    using hipdnn_data_sdk::types::bfloat16;
-    auto tensorValue = bfloat16(1.5f);
-
-    expectCreateAndDestroyDescriptor();
-    expectTensorSetAttributes(K_DEFAULT_TENSOR_UID, "tensor_42", {1}, {1}, /*isRuntime*/ true);
-
-    EXPECT_CALL(*_mockBackend,
-                backendSetAttribute(_,
-                                    HIPDNN_ATTR_TENSOR_VALUE_EXT,
-                                    HIPDNN_TYPE_CHAR,
-                                    static_cast<int64_t>(sizeof(bfloat16)),
-                                    pointsToScalar<bfloat16>(tensorValue)))
-        .WillOnce(Return(HIPDNN_STATUS_SUCCESS));
-
-    EXPECT_CALL(*_mockBackend, backendFinalize(_)).WillOnce(Return(HIPDNN_STATUS_SUCCESS));
-
-    std::unordered_map<int64_t, ScopedHipdnnBackendDescriptor> tensorDescs;
-    auto tensor = makeTensor(K_DEFAULT_TENSOR_UID);
-    tensor->set_value(tensorValue);
-
-    auto err = createOrFindTensorDesc(tensorDescs, tensor);
-    EXPECT_TRUE(err.is_good()) << err.err_msg;
-    EXPECT_EQ(tensorDescs.size(), 1u);
-}
-
-TEST_F(TestDescriptorHelpers, EnsureTensorDescSetsPassByValueUint8)
-{
-    constexpr uint8_t K_TENSOR_VALUE = 200;
-
-    expectCreateAndDestroyDescriptor();
-    expectTensorSetAttributes(K_DEFAULT_TENSOR_UID, "tensor_42", {1}, {1}, /*isRuntime*/ true);
-
-    EXPECT_CALL(*_mockBackend,
-                backendSetAttribute(_,
-                                    HIPDNN_ATTR_TENSOR_VALUE_EXT,
-                                    HIPDNN_TYPE_CHAR,
-                                    static_cast<int64_t>(sizeof(uint8_t)),
-                                    pointsToScalar<uint8_t>(K_TENSOR_VALUE)))
-        .WillOnce(Return(HIPDNN_STATUS_SUCCESS));
-
-    EXPECT_CALL(*_mockBackend, backendFinalize(_)).WillOnce(Return(HIPDNN_STATUS_SUCCESS));
-
-    std::unordered_map<int64_t, ScopedHipdnnBackendDescriptor> tensorDescs;
-    auto tensor = makeTensor(K_DEFAULT_TENSOR_UID);
-    tensor->set_value(K_TENSOR_VALUE);
-
-    auto err = createOrFindTensorDesc(tensorDescs, tensor);
-    EXPECT_TRUE(err.is_good()) << err.err_msg;
-    EXPECT_EQ(tensorDescs.size(), 1u);
-}
-
-TEST_F(TestDescriptorHelpers, EnsureTensorDescSetsPassByValueInt32)
-{
-    constexpr int32_t K_TENSOR_VALUE = -42;
-
-    expectCreateAndDestroyDescriptor();
-    expectTensorSetAttributes(K_DEFAULT_TENSOR_UID, "tensor_42", {1}, {1}, /*isRuntime*/ true);
-
-    EXPECT_CALL(*_mockBackend,
-                backendSetAttribute(_,
-                                    HIPDNN_ATTR_TENSOR_VALUE_EXT,
-                                    HIPDNN_TYPE_CHAR,
-                                    static_cast<int64_t>(sizeof(int32_t)),
-                                    pointsToScalar<int32_t>(K_TENSOR_VALUE)))
-        .WillOnce(Return(HIPDNN_STATUS_SUCCESS));
-
-    EXPECT_CALL(*_mockBackend, backendFinalize(_)).WillOnce(Return(HIPDNN_STATUS_SUCCESS));
-
-    std::unordered_map<int64_t, ScopedHipdnnBackendDescriptor> tensorDescs;
-    auto tensor = makeTensor(K_DEFAULT_TENSOR_UID);
-    tensor->set_value(K_TENSOR_VALUE);
 
     auto err = createOrFindTensorDesc(tensorDescs, tensor);
     EXPECT_TRUE(err.is_good()) << err.err_msg;
@@ -821,6 +755,8 @@ public:
         case HIPDNN_TYPE_DATA_TYPE:
             return sizeof(hipdnnDataType_t);
         default:
+            ADD_FAILURE() << "StoringBackend::unitSize: unhandled attribute type "
+                          << static_cast<int>(type);
             return 0;
         }
     }
@@ -862,7 +798,7 @@ public:
         ON_CALL(mock, backendGetAttribute(_, _, _, _, _, _))
             .WillByDefault(Invoke([this](hipdnnBackendDescriptor_t desc,
                                          hipdnnBackendAttributeName_t name,
-                                         hipdnnBackendAttributeType_t /*type*/,
+                                         hipdnnBackendAttributeType_t type,
                                          int64_t requested,
                                          int64_t* outCount,
                                          void* arr) {
@@ -905,7 +841,11 @@ public:
                 }
                 if(arr != nullptr && requested > 0 && !attrIt->second.bytes.empty())
                 {
-                    std::memcpy(arr, attrIt->second.bytes.data(), attrIt->second.bytes.size());
+                    // Clamp to the caller's requested capacity so an oversized stored
+                    // attribute cannot overflow the caller's buffer.
+                    const size_t capacity = static_cast<size_t>(requested) * unitSize(type);
+                    const size_t copyBytes = std::min(attrIt->second.bytes.size(), capacity);
+                    std::memcpy(arr, attrIt->second.bytes.data(), copyBytes);
                 }
                 return HIPDNN_STATUS_SUCCESS;
             }));
