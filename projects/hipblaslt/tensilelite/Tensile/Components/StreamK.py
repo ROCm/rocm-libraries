@@ -355,6 +355,44 @@ class StreamK(Component):
     _WS_QUEUE_LOG2 = 3   # log2(8)
     _WS_COMPLETION_COUNTER_OFFSET = 0x80
 
+    # Per-architecture work-stealing / dynamic-queue count.
+    #
+    # The dynamic-queue fetch partitions work across one queue per XCD and maps
+    # StreamKIdx -> queueIdx (StreamKIdx & (numQueues-1)) and queueIdx -> cache
+    # line (queueIdx << log2(256)) with shift/AND fast masking. That masking is
+    # only valid when the queue count is a power of two, so the count is keyed
+    # by architecture here instead of hardcoding a literal 8.
+    #
+    # NOTE: MI300A and MI300X BOTH report gfx942; only the physical XCD count
+    # differs (MI300A=6, MI300X=8). Codegen cannot tell them apart, so gfx942 is
+    # generated for 8 queues and the host runtime (ContractionSolution.cpp)
+    # rejects the dynamic-queue / work-stealing path when the device does not
+    # expose the assumed power-of-two queue count (e.g. MI300A's 6 XCDs).
+    _WS_NUM_QUEUES_BY_ISA = {
+        (9, 4): 8,  # gfx942 (MI300X)
+        (9, 5): 8,  # gfx950
+    }
+    _WS_DEFAULT_NUM_QUEUES = 8
+    _WS_CACHE_LINE_LOG2 = 8  # log2(256): per-queue counters are one per 256B line
+
+    def _wsQueueConstants(self, kernel):
+        """Return (numQueues, mask, log2Queues, cacheLineLog2) for this arch.
+
+        Centralizes the dynamic-queue / work-stealing fast-mask constants so the
+        formerly hardcoded "8" lives in exactly one place. ``numQueues`` is
+        looked up per architecture from ``kernel["ISA"]`` and must be a power of
+        two for the shift/AND masking to be valid; the host guards the same
+        assumption at runtime (rejecting non-power-of-two XCD counts like
+        MI300A's 6).
+        """
+        isa = tuple(kernel["ISA"][:2])
+        numQueues = self._WS_NUM_QUEUES_BY_ISA.get(isa, self._WS_DEFAULT_NUM_QUEUES)
+        assert numQueues > 0 and (numQueues & (numQueues - 1)) == 0, (
+            "StreamK dynamic-queue fast masking requires a power-of-two queue "
+            "count (got %d for ISA %s)" % (numQueues, isa)
+        )
+        return numQueues, numQueues - 1, log2(numQueues), self._WS_CACHE_LINE_LOG2
+
     def streamKWorkStealingHomeNoReset(self, writer, mod, kernel, sBound, mkLabel):
         """Disable the home queue's atomic auto-reset when a neighbor could steal.
 
