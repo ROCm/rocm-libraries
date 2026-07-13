@@ -171,6 +171,16 @@ option(BUILD_SHARED_LIBS "Build shared libraries" ON)
 option(STINKYTOFU_INSTALL_RPATH_USE_LINK_PATH
     "Use link-dependency dirs as the installed libstinkytofu RPATH" OFF)
 
+# Unit tests default ON for standalone StinkyTofu builds and OFF when vendored as
+# a sub-project. This must be defined before stinkytofu_static is conditionally
+# created for shared-library test builds.
+if(CMAKE_SOURCE_DIR STREQUAL CMAKE_CURRENT_SOURCE_DIR)
+    set(_stinkytofu_build_tests_default ON)
+else()
+    set(_stinkytofu_build_tests_default OFF)
+endif()
+option(STINKYTOFU_BUILD_TESTS "Build StinkyTofu unit tests" ${_stinkytofu_build_tests_default})
+
 # dladdr() used in IntrinsicRegistry.cpp requires -ldl
 # Threads required for std::call_once (separate libpthread on glibc < 2.34)
 find_package(Threads REQUIRED)
@@ -285,13 +295,6 @@ endif()
 ##===----------------------------------------------------------------------===##
 # Unit tests
 ##===----------------------------------------------------------------------===##
-# Option to build unit tests
-if(CMAKE_SOURCE_DIR STREQUAL CMAKE_CURRENT_SOURCE_DIR)
-    set(_stinkytofu_build_tests_default ON)
-else()
-    set(_stinkytofu_build_tests_default OFF)
-endif()
-option(STINKYTOFU_BUILD_TESTS "Build StinkyTofu unit tests" ${_stinkytofu_build_tests_default})
 if(STINKYTOFU_BUILD_TESTS)
     enable_testing()
     add_subdirectory(tests)
