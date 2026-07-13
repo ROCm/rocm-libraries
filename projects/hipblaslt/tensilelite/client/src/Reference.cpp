@@ -35,6 +35,7 @@
 #include <cstddef>
 #include <iostream>
 #include <omp.h>
+#include <type_traits>
 
 #define MAX_OMP_THREADS 64
 #if defined(_MSC_VER)
@@ -96,12 +97,21 @@ namespace TensileLite
 
         // Helper to store data from an AccumT buffer into various destination types.
         template <typename AccumT, typename DstType>
+        DstType castForStore(AccumT value)
+        {
+            if constexpr(std::is_arithmetic_v<DstType>)
+                return static_cast<DstType>(value);
+            else
+                return static_cast<DstType>(static_cast<float>(value));
+        }
+
+        template <typename AccumT, typename DstType>
         void storeFrom(void* dst, const std::vector<AccumT>& buffer, size_t N)
         {
             DstType* dPtr = static_cast<DstType*>(dst);
             for(size_t i = 0; i < N; ++i)
             {
-                dPtr[i] = static_cast<DstType>(static_cast<float>(buffer[i]));
+                dPtr[i] = castForStore<AccumT, DstType>(buffer[i]);
             }
         }
 
@@ -144,11 +154,20 @@ namespace TensileLite
         inline void quantizeThroughComputeInputType(std::vector<AccumT>& buf,
                                                     rocisa::DataType     computeInputType)
         {
+            auto castThroughArithmetic = [](AccumT v, auto narrowTag) {
+                using NarrowT = decltype(narrowTag);
+                return static_cast<AccumT>(static_cast<NarrowT>(v));
+            };
             auto roundThrough = [&](auto narrowTag) {
                 using NarrowT = decltype(narrowTag);
                 for(auto& v : buf)
-                    v = static_cast<AccumT>(
-                        static_cast<float>(static_cast<NarrowT>(static_cast<float>(v))));
+                {
+                    if constexpr(std::is_arithmetic_v<NarrowT>)
+                        v = castThroughArithmetic(v, narrowTag);
+                    else
+                        v = static_cast<AccumT>(
+                            static_cast<float>(static_cast<NarrowT>(static_cast<float>(v))));
+                }
             };
             switch(computeInputType)
             {
