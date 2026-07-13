@@ -1234,8 +1234,8 @@ hipsparseStatus_t hipsparseBlockedEllSetPointers(hipsparseSpMatDescr_t spMatDesc
                                                  void*                 ellColInd,
                                                  void*                 ellValue)
 {
-    return hipsparse::rocSPARSEStatusToHIPStatus(
-        rocsparse_bell_set_pointers(to_rocsparse_spmat_descr(spMatDescr), ellColInd, ellValue));
+    return hipsparse::rocSPARSEStatusToHIPStatus(rocsparse_bell_set_pointers(
+        nullptr, to_rocsparse_spmat_descr(spMatDescr), ellColInd, ellValue));
 }
 
 hipsparseStatus_t hipsparseSpMatGetSize(hipsparseConstSpMatDescr_t spMatDescr,
