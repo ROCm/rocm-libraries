@@ -49,9 +49,7 @@ Read `CMakePresets.json` from the repository root if exact preset contents matte
    - If no such instructions exist, use `BUILD_DIR=<repo-root>/build`.
    - Keep full configure/build output in a log file and show only a short tail on failure.
 
-3. Locate this skill's helper directory:
-   - Installed skill layout: `<skill-directory>/scripts`
-   - Source checkout fallback: `<repo-root>/projects/hipdnn/tools/ai/skills/hipdnn-superbuild/scripts`
+3. Locate this skill's helper directory. Skills are host-level, not tied to a repo checkout — **default to the scripts bundled with the skill you were invoked from** (`<skill-directory>/scripts`), even when you are working inside a repo or worktree. Do NOT run the `<repo-root>/projects/hipdnn/tools/ai/skills/hipdnn-superbuild/scripts` copy just because a checkout is present: that copy can be a stale stub (on `develop`) or an unmerged in-progress version (on a feature branch). Use the source-checkout copy only when you are actively developing this skill itself and intend to exercise your in-progress edits, or when the invoked skill has no bundled `scripts/` directory.
 
 4. Resolve ROCm and Clang paths (Windows also provisions the ROCm SDK wheels when missing):
    ```bash

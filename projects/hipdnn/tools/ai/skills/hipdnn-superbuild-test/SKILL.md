@@ -31,7 +31,7 @@ Infer options from the user request:
 2. Resolve paths:
    - Build directory: honor active workspace instructions first; otherwise use `<repo-root>/build`.
    - Binary directory: `<build-dir>/bin`.
-   - Helper scripts: installed skill `<skill-directory>/scripts`, or source fallback `<repo-root>/projects/hipdnn/tools/ai/skills/hipdnn-superbuild-test/scripts`.
+   - Helper scripts: skills are host-level, not tied to a repo checkout — **default to the scripts bundled with the skill you were invoked from** (`<skill-directory>/scripts`), even when working inside a repo or worktree. Do NOT run the `<repo-root>/projects/hipdnn/tools/ai/skills/hipdnn-superbuild-test/scripts` copy just because a checkout is present: it can be a stale stub (on `develop`) or an unmerged in-progress version (on a feature branch). Use the source-checkout copy only when actively developing this skill itself to exercise your in-progress edits, or when the invoked skill has no bundled `scripts/` directory.
 
 3. Verify the superbuild exists:
    ```bash
