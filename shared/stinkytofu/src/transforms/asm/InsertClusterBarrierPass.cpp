@@ -80,13 +80,13 @@ constexpr const char* kTailLoopMarker = "Tail Loop";
 ///   - When true (GATED scheme, DEFAULT): every per-iteration / priming cluster signal
 ///     is wrapped in a LoopCounterL drain gate so it is suppressed on exactly
 ///     the drain iterations whose paired counterpart is also skipped:
-///       * Rule 4: ASYMMETRIC gates on the wait+signal handshake -- the WAIT
-///         is skipped at `LCL <= pgrValue + pubPointIndex` and the SIGNAL one
-///         stage earlier at `LCL <= pgrValue+1` (uniform for every pub point),
-///         both lowered by the hoisted `lclPreDecrement` so the gate keys off
-///         the same absolute iteration. `pubPointIndex` (0 .. pgrValue-1) counts
-///         Rule-4 publication points in kernel order so PGR>1 kernels skip the
-///         2nd+ wait one stage later at drain (e.g. PGR=2: waits at 2,3 not 2,2).
+///       * Rule 4: ASYMMETRIC gates on the wait+signal handshake -- the first
+///         publication point since the preceding `s_sub LCL` skips its WAIT at
+///         `LCL <= pgrValue` and every later pub in the same LCL window skips
+///         both halves at `LCL <= pgrValue+1`; the SIGNAL half is always one
+///         stage earlier at `LCL <= pgrValue+1`. Both thresholds are lowered by
+///         the per-anchor hoisted `lclPreDecrement` (e.g. PGR=1 with three TDM
+///         pubs: 1,2,2,2,2,2; PGR=2 first pub 2,3 and later pubs 3,3).
 ///         When `pgrValue == 0`
 ///         the wait-side threshold would never skip while the signal-side gate
 ///         still would (hang); Rules 2/3 are suppressed and Rule 4 emits a bare
@@ -342,14 +342,15 @@ bool isLoopCounterLSelfDecrement(const StinkyInstruction& inst, int* outImm) {
 /// the containing basic block's entry and \p anchor (exclusive), scanning
 /// backward and stopping at the BB boundary.
 ///
-/// Rule 4's asymmetric drain-gate thresholds (`pgrValue + pubPointIndex` for
-/// the WAIT, `pgrValue+1` for the SIGNAL) are calibrated against the loop
-/// counter value at basic-block entry. Different `ScheduleIterAlg` settings may
-/// hoist the per-iteration `s_sub LCL, LCL, 1` ABOVE the workgroup-wait anchor,
-/// so the gate then reads an already-decremented LCL. To keep the gate firing
-/// on the identical absolute iteration regardless of where the decrement landed,
-/// the drain gate subtracts this sum from both thresholds (WAIT: pgr +
-/// pubPointIndex - lclPreDecrement; SIGNAL: pgr+1 - lclPreDecrement). Decrements
+/// Rule 4's asymmetric drain-gate thresholds (`pgrValue` for the first pub's
+/// WAIT, `pgrValue+1` for later pubs' WAIT and every SIGNAL) are calibrated
+/// against the loop counter value at basic-block entry. Different
+/// `ScheduleIterAlg` settings may hoist the per-iteration `s_sub LCL, LCL, 1`
+/// ABOVE the workgroup-wait anchor, so the gate then reads an already-decremented
+/// LCL. To keep the gate firing on the identical absolute iteration regardless
+/// of where the decrement landed, the drain gate subtracts this sum from both
+/// thresholds (WAIT: nominal - lclPreDecrement; SIGNAL: pgr+1 - lclPreDecrement).
+/// Decrements
 /// that remain BELOW the anchor (the default schedule) are not seen by the
 /// backward scan, so the sum is 0 and the thresholds are left untouched. (Not
 /// consulted when the drain gate is disabled, i.e. `kClusterBarrierDrainGateEnabled
@@ -361,6 +362,46 @@ int sumLoopCounterLDecrementsBeforeInBB(StinkyInstruction* anchor) {
     auto it = BasicBlock::iterator(anchor);
     while (it != parent->begin()) {
         --it;
+        auto* inst = dyn_cast<StinkyInstruction>(it.getNodePtr());
+        if (inst == nullptr) continue;
+        if (isPseudoInst(inst)) continue;
+        int imm = 0;
+        if (isLoopCounterLSelfDecrement(*inst, &imm)) total += imm;
+    }
+    return total;
+}
+
+/// True when any `s_sub LCL` sits strictly between \p fromExclusive and
+/// \p toInclusive in the same basic block (forward scan).
+bool hasLoopCounterLDecrementBetweenInBB(StinkyInstruction* fromExclusive,
+                                         StinkyInstruction* toInclusive) {
+    BasicBlock* parent = toInclusive->getParent();
+    if (parent == nullptr || fromExclusive == nullptr || fromExclusive->getParent() != parent) {
+        return false;
+    }
+    auto it = std::next(BasicBlock::iterator(fromExclusive));
+    const auto endIt = BasicBlock::iterator(toInclusive);
+    for (; it != endIt; ++it) {
+        auto* inst = dyn_cast<StinkyInstruction>(it.getNodePtr());
+        if (inst == nullptr) continue;
+        if (isPseudoInst(inst)) continue;
+        if (isLoopCounterLSelfDecrement(*inst, /*outImm=*/nullptr)) return true;
+    }
+    return false;
+}
+
+/// Sum `s_sub LCL` immediates strictly between \p fromExclusive and
+/// \p toInclusive in the same basic block (forward scan).
+int sumLoopCounterLDecrementsBetweenInBB(StinkyInstruction* fromExclusive,
+                                         StinkyInstruction* toInclusive) {
+    BasicBlock* parent = toInclusive->getParent();
+    if (parent == nullptr || fromExclusive == nullptr || fromExclusive->getParent() != parent) {
+        return 0;
+    }
+    int total = 0;
+    auto it = std::next(BasicBlock::iterator(fromExclusive));
+    const auto endIt = BasicBlock::iterator(toInclusive);
+    for (; it != endIt; ++it) {
         auto* inst = dyn_cast<StinkyInstruction>(it.getNodePtr());
         if (inst == nullptr) continue;
         if (isPseudoInst(inst)) continue;
@@ -607,7 +648,8 @@ void insertWorkgroupBarrierSyncBefore(IRBase* anchor, AsmIRBuilder& irBuilder, G
 ///             already exists in the IR.
 ///   - Rule 4 signal half: `s_cmp_le_i32` / imm=pgr+1 (minus any LCL
 ///             pre-decrement) when the drain gate is enabled. The paired WAIT
-///             is gated at imm=pgr+pubPointIndex via
+///             is gated at imm=pgr for the first pub since `s_sub LCL`, or
+///             imm=pgr+1 for later pubs in the same LCL window, via
 ///             `insertLoopCounterLGatedClusterBarrierWaitBefore`. When the
 ///             drain gate is disabled, Rule 4 emits the ungated shape via
 ///             `insertClusterBarrierSignalOnlyBefore` /
@@ -736,10 +778,11 @@ std::string makeRule4DrainGateCmpComment(const char* barrierHalf, int pgrNominal
 ///   1. The wait+signal handshake (wait first, then the WaveIdx-gated signal):
 ///        - drain-gated (`kClusterBarrierDrainGateEnabled == true`), `pgrValue >= 1`:
 ///          each half is wrapped in its own asymmetric LoopCounterL skip -- the WAIT
-///          (before \p waitAnchor) is skipped at
-///          `LCL <= pgrValue + pubPointIndex - lclPreDecrement` and the SIGNAL
-///          (before \p signalAnchor) one stage earlier at
-///          `LCL <= pgrValue+1 - lclPreDecrement` (same for every pub point).
+///          first pub's WAIT (before \p waitAnchor) is skipped at
+///          `LCL <= pgrValue - lclPreDecrement`; later pubs in the same LCL
+///          window skip their WAIT at `LCL <= pgrValue+1 - lclPreDecrement`.
+///          The SIGNAL (before \p signalAnchor) is skipped one stage earlier at
+///          `LCL <= pgrValue+1 - lclPreDecrement` for every pub point.
 ///          The paired `tensor_load_to_lds`
 ///          is disabled (TDM enable dword = 0) on those last PGR iterations, so
 ///          the handshake is unnecessary there; the one-stage offset keeps
@@ -773,7 +816,7 @@ std::string makeRule4DrainGateCmpComment(const char* barrierHalf, int pgrNominal
 /// compare, already folded into its operands).
 void insertClusterBarrierHandshakeBefore(IRBase* signalAnchor, IRBase* waitAnchor,
                                          AsmIRBuilder& irBuilder, GfxArchID archId, int pgrValue,
-                                         int pubPointIndex, StinkyInstruction* liveSccCmp,
+                                         bool isFirstPubSinceDec, StinkyInstruction* liveSccCmp,
                                          int lclPreDecrement, uint64_t waitGen,
                                          uint64_t signalGen) {
     if (kClusterBarrierDrainGateEnabled) {
@@ -790,17 +833,18 @@ void insertClusterBarrierHandshakeBefore(IRBase* signalAnchor, IRBase* waitAncho
                 makeRule4DrainGateCmpComment("signal", pgrValue + 1, lclPreDecrement),
                 "skip cluster signal (drain)", signalGen);
         } else {
-            // WAIT: nominal drain threshold `LCL <= pgrValue + pubPointIndex`.
-            // Later prefetch publication points (pubPointIndex > 0) skip their
-            // wait one stage later so PGR>1 drain leaves exactly one in-loop wait
-            // at LCL == pgr+1. When the schedule hoisted `s_sub LCL` above the
-            // anchor, `lclPreDecrement` lowers the compare immediate.
-            // Planted before `waitAnchor` (immediately above the workgroup signal).
-            const int waitThreshold = pgrValue + pubPointIndex - lclPreDecrement;
+            // WAIT: first pub since the preceding `s_sub LCL` skips at
+            // `LCL <= pgrValue`; every later pub in the same LCL window skips
+            // both halves at `LCL <= pgrValue+1`. When the schedule hoisted
+            // `s_sub LCL` above the anchor, `lclPreDecrement` lowers the
+            // compare immediate. Planted before `waitAnchor` (immediately above
+            // the workgroup signal).
+            const int waitNominal = isFirstPubSinceDec ? pgrValue : (pgrValue + 1);
+            const int waitThreshold = waitNominal - lclPreDecrement;
             const int signalThreshold = pgrValue + 1 - lclPreDecrement;
             insertLoopCounterLGatedClusterBarrierWaitBefore(
                 waitAnchor, irBuilder, archId, GFX::s_cmp_le_i32, waitThreshold,
-                makeRule4DrainGateCmpComment("wait", pgrValue + pubPointIndex, lclPreDecrement),
+                makeRule4DrainGateCmpComment("wait", waitNominal, lclPreDecrement),
                 "skip cluster wait (drain)", waitGen);
             // SIGNAL: nominal threshold one stage earlier at `LCL <= pgrValue+1`,
             // with the same `lclPreDecrement` compensation on the immediate.
@@ -1217,7 +1261,6 @@ class InsertClusterBarrierPassImpl : public Pass {
         // generation -- the offset ping-pong. Function-scoped so every kernel
         // numbers from 0. See the skip-label prefix comments near the top.
         uint64_t clusterGen = 0;
-        int rule4PubPointCounter = 0;
         int64_t lastSignalGen = -1;
         auto nextSignalGen = [&]() {
             const uint64_t gen = clusterGen++;
@@ -1251,18 +1294,18 @@ class InsertClusterBarrierPassImpl : public Pass {
             // Tuple: (trigger workgroup wait, anchor iterator next to it,
             //         live upstream LCL cmp at trigger or nullptr, cumulative
             //         LCL pre-decrement before the trigger, paired workgroup
-            //         `s_barrier_signal -1` above the trigger or nullptr). The
-            //         3rd/4th/5th elements are captured at scan time -- i.e.
-            //         against the pre-mutation IR -- so a later `pending`
-            //         entry's emission cannot influence an earlier one's SCC
-            //         analysis, decrement count, or wait-anchor resolution.
-            //         The 5th (workgroup signal) is where the wait-before-signal
-            //         schemes plant the cluster `wait -3`; nullptr falls back to
-            //         the post-`wait -1` anchor.
+            //         `s_barrier_signal -1` above the trigger or nullptr,
+            //         first pub in the current LCL window). The 3rd/4th/5th/6th
+            //         elements are captured at scan time -- i.e. against the
+            //         pre-mutation IR -- so a later `pending` entry's emission
+            //         cannot influence an earlier one's SCC analysis, decrement
+            //         count, wait-anchor resolution, or window index.
             std::vector<std::tuple<StinkyInstruction*, BasicBlock::iterator, StinkyInstruction*,
-                                   int, StinkyInstruction*>>
+                                   int, StinkyInstruction*, bool>>
                 pending;
             std::unordered_set<StinkyInstruction*> seenTriggers;
+            StinkyInstruction* lastPendingTrigger = nullptr;
+            int pubsInLclWindow = 0;
 
             // Rule 4 owns only the main-loop region. Any tensor load at or
             // after the `/* Tail Loop */` marker belongs exclusively to Rule 5
@@ -1296,17 +1339,23 @@ class InsertClusterBarrierPassImpl : public Pass {
                 // is analyzed independently from any sibling sites that
                 // will be mutated later in the same BB sweep.
                 StinkyInstruction* liveSccCmp = findLiveSccCmpUpstream(trigger);
-                // Count any `s_sub LCL, LCL, imm` the schedule hoisted above
-                // the anchor; subtract from the nominal pgr / pgr+1 thresholds
-                // (e.g. pgr 1 with one hoisted decrement -> effective 0).
-                // Unused when the drain gate is disabled.
-                const int lclPreDecrement = sumLoopCounterLDecrementsBeforeInBB(trigger);
-                // Locate the workgroup `s_barrier_signal -1` paired with (above)
-                // the anchor wait -- the wait-before-signal schemes plant the
-                // cluster `wait -3` immediately before it. nullptr => fall back.
+                // Count only `s_sub LCL` between the previous Rule-4 trigger and
+                // this one so multi-section loops do not inherit earlier sections'
+                // decrements into later sections' drain gates.
+                const int lclPreDecrement =
+                    (lastPendingTrigger != nullptr)
+                        ? sumLoopCounterLDecrementsBetweenInBB(lastPendingTrigger, trigger)
+                        : sumLoopCounterLDecrementsBeforeInBB(trigger);
                 StinkyInstruction* wgSignal = findPrecedingWorkgroupBarrierSignalInBB(trigger);
+                if (lastPendingTrigger != nullptr &&
+                    hasLoopCounterLDecrementBetweenInBB(lastPendingTrigger, trigger)) {
+                    pubsInLclWindow = 0;
+                }
+                const bool isFirstPubSinceDec = (pubsInLclWindow == 0);
+                ++pubsInLclWindow;
+                lastPendingTrigger = trigger;
                 pending.emplace_back(trigger, std::next(BasicBlock::iterator(trigger)), liveSccCmp,
-                                     lclPreDecrement, wgSignal);
+                                     lclPreDecrement, wgSignal, isFirstPubSinceDec);
             }
 
             // Rule 1: signal-only handshake immediately AFTER each
@@ -1459,7 +1508,7 @@ class InsertClusterBarrierPassImpl : public Pass {
             }
             if (rule3Scan.existingWait != nullptr) {
                 bool conflictsWithRule4 = false;
-                for (const auto& [trigger, _next, _live, _dec, _sig] : pending) {
+                for (const auto& [trigger, _next, _live, _dec, _sig, _first] : pending) {
                     if (trigger == rule3Scan.existingWait) {
                         conflictsWithRule4 = true;
                         break;
@@ -1572,18 +1621,15 @@ class InsertClusterBarrierPassImpl : public Pass {
             // Rule 4 -- per-iteration cluster handshake around each workgroup
             // wait. The wait drains the previous generation; the signal opens
             // the next one (offset ping-pong).
-            for (const auto& [trigger, nextIt, liveSccCmp, lclPreDecrement, wgSignal] : pending) {
+            for (const auto& [trigger, nextIt, liveSccCmp, lclPreDecrement, wgSignal,
+                              isFirstPubSinceDec] : pending) {
                 IRBase* signalAnchor = (nextIt != bb.end()) ? nextIt.getNodePtr() : nullptr;
-                // Plant the cluster wait immediately above the paired workgroup
-                // signal; fall back to the post-`wait -1` anchor when none.
                 IRBase* waitAnchor =
                     (wgSignal != nullptr) ? static_cast<IRBase*>(wgSignal) : signalAnchor;
                 const uint64_t waitGen = drainWaitGen();
                 const uint64_t signalGen = nextSignalGen();
-                const int pubPointIndex = (pgrValue_ > 0) ? (rule4PubPointCounter % pgrValue_) : 0;
-                ++rule4PubPointCounter;
                 insertClusterBarrierHandshakeBefore(signalAnchor, waitAnchor, irBuilder, archId,
-                                                    pgrValue_, pubPointIndex, liveSccCmp,
+                                                    pgrValue_, isFirstPubSinceDec, liveSccCmp,
                                                     lclPreDecrement, waitGen, signalGen);
                 (void)trigger;  // queued for ordering only; insertion uses the anchors
             }
@@ -1591,7 +1637,7 @@ class InsertClusterBarrierPassImpl : public Pass {
             if (rule5Want5aWait && !rule5aEmitted && rule5Scan.tailWait != nullptr &&
                 rule5Scan.tailWait->getParent() == &bb) {
                 bool conflictsWithRule4 = false;
-                for (const auto& [trigger, _next, _live, _dec, _sig] : pending) {
+                for (const auto& [trigger, _next, _live, _dec, _sig, _first] : pending) {
                     if (trigger == rule5Scan.tailWait) {
                         conflictsWithRule4 = true;
                         break;

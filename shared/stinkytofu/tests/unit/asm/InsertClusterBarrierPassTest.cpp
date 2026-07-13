@@ -163,6 +163,31 @@ class InsertClusterBarrierPassTest : public ::testing::Test {
         return inst;
     }
 
+    StinkyInstruction* createLoopCounterLDecrement(int imm = 1) {
+        AsmIRBuilder builder(*bb, arch);
+        StinkyInstruction* inst = builder.create(getMCIDByUOp(GFX::s_sub_u32, arch));
+        StinkyRegister lcl(RegType::S, /*regIdx=*/0u, /*regNum=*/1u);
+        lcl.setSymbolicName(kLoopCounterLSymbol);
+        inst->addSrcReg(lcl);
+        inst->addSrcReg(lcl);
+        inst->addSrcReg(StinkyRegister(imm));
+        return inst;
+    }
+
+    std::vector<int> collectRule4DrainGateImms() const {
+        std::vector<int> drainGateImms;
+        for (const IRBase& ir : *bb) {
+            if (ir.getType() != IRBase::IRType::StinkyTofu) continue;
+            const auto* inst = cast<StinkyInstruction>(&ir);
+            if (inst->getUnifiedOpcode() != GFX::s_cmp_le_i32) continue;
+            const auto& srcs = inst->getSrcRegs();
+            if (srcs.empty() || srcs[0].getSymbolicName() != kLoopCounterLSymbol) continue;
+            if (srcs.size() < 2 || srcs[1].dataType != StinkyRegister::Type::LiteralInt) continue;
+            drainGateImms.push_back(static_cast<int>(srcs[1].getLiteralInt()));
+        }
+        return drainGateImms;
+    }
+
     /// Run the pass on `func` (whole-kernel IR, as in Gfx1250Backend).
     void runPass(int pgrValue = 1) {
         PassContext ctx;
@@ -587,22 +612,64 @@ TEST_F(InsertClusterBarrierPassTest, Rule4_Pgr2_StaggeredWaitDrainGates) {
 
     runPass(/*pgrValue=*/2);
 
-    std::vector<int> drainGateImms;
-    for (const IRBase& ir : *bb) {
-        if (ir.getType() != IRBase::IRType::StinkyTofu) continue;
-        const auto* inst = cast<StinkyInstruction>(&ir);
-        if (inst->getUnifiedOpcode() != GFX::s_cmp_le_i32) continue;
-        const auto& srcs = inst->getSrcRegs();
-        if (srcs.empty() || srcs[0].getSymbolicName() != kLoopCounterLSymbol) continue;
-        if (srcs.size() < 2 || srcs[1].dataType != StinkyRegister::Type::LiteralInt) continue;
-        drainGateImms.push_back(static_cast<int>(srcs[1].getLiteralInt()));
-    }
+    const std::vector<int> drainGateImms = collectRule4DrainGateImms();
 
     ASSERT_EQ(drainGateImms.size(), 4u);
     EXPECT_EQ(drainGateImms[0], 2) << "pub0 wait gate";
     EXPECT_EQ(drainGateImms[1], 3) << "pub0 signal gate";
     EXPECT_EQ(drainGateImms[2], 3) << "pub1 wait gate";
     EXPECT_EQ(drainGateImms[3], 3) << "pub1 signal gate";
+}
+
+// PGR=2 Rule 4: three publication points before `s_sub LCL` -- only the first
+// pub keeps wait threshold 2; pubs 2 and 3 both use 3,3.
+TEST_F(InsertClusterBarrierPassTest, Rule4_Pgr2_ThreePubsSameWindow) {
+    createBarrierWait(kWorkgroupBarrierId);
+    createTensorLoadInBlock(bb, arch, /*s0=*/0, /*s1=*/4);
+    createBranch("label_next");
+    createBarrierWait(kWorkgroupBarrierId);
+    createTensorLoadInBlock(bb, arch, /*s0=*/8, /*s1=*/12);
+    createBranch("label_next2");
+    createBarrierWait(kWorkgroupBarrierId);
+    createTensorLoadInBlock(bb, arch, /*s0=*/16, /*s1=*/20);
+
+    runPass(/*pgrValue=*/2);
+
+    const std::vector<int> drainGateImms = collectRule4DrainGateImms();
+
+    ASSERT_EQ(drainGateImms.size(), 6u);
+    EXPECT_EQ(drainGateImms[0], 2) << "pub0 wait gate";
+    EXPECT_EQ(drainGateImms[1], 3) << "pub0 signal gate";
+    EXPECT_EQ(drainGateImms[2], 3) << "pub1 wait gate";
+    EXPECT_EQ(drainGateImms[3], 3) << "pub1 signal gate";
+    EXPECT_EQ(drainGateImms[4], 3) << "pub2 wait gate";
+    EXPECT_EQ(drainGateImms[5], 3) << "pub2 signal gate";
+}
+
+// PGR=1 Rule 4: three publication points with `s_sub LCL` after the window
+// (TDM unroll) -- first pub uses 1,2; later pubs use 2,2.
+TEST_F(InsertClusterBarrierPassTest, Rule4_Pgr1_ThreePubsWithDecAfterWindow) {
+    createBarrierWait(kWorkgroupBarrierId);
+    createTensorLoadInBlock(bb, arch, /*s0=*/0, /*s1=*/4);
+    createBranch("label_next");
+    createBarrierWait(kWorkgroupBarrierId);
+    createTensorLoadInBlock(bb, arch, /*s0=*/8, /*s1=*/12);
+    createBranch("label_next2");
+    createBarrierWait(kWorkgroupBarrierId);
+    createTensorLoadInBlock(bb, arch, /*s0=*/16, /*s1=*/20);
+    createLoopCounterLDecrement(/*imm=*/1);
+
+    runPass(/*pgrValue=*/1);
+
+    const std::vector<int> drainGateImms = collectRule4DrainGateImms();
+
+    ASSERT_EQ(drainGateImms.size(), 6u);
+    EXPECT_EQ(drainGateImms[0], 1) << "pub0 wait gate";
+    EXPECT_EQ(drainGateImms[1], 2) << "pub0 signal gate";
+    EXPECT_EQ(drainGateImms[2], 2) << "pub1 wait gate";
+    EXPECT_EQ(drainGateImms[3], 2) << "pub1 signal gate";
+    EXPECT_EQ(drainGateImms[4], 2) << "pub2 wait gate";
+    EXPECT_EQ(drainGateImms[5], 2) << "pub2 signal gate";
 }
 
 // Rule 4 SCC restore (mode d): when a live `s_cmp_eq s[sgprLoopCounterL]` is the
