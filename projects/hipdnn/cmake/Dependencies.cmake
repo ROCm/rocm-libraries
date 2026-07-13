@@ -205,6 +205,7 @@ function(_fetch_flatbuffers VERSION HASH)
         flatbuffers
         GIT_REPOSITORY https://github.com/google/flatbuffers.git
         GIT_TAG ${GIT_TAG}
+        GIT_SHALLOW TRUE
         DOWNLOAD_EXTRACT_TIMESTAMP
         TRUE
     )
