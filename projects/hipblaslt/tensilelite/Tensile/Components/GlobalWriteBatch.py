@@ -1035,14 +1035,19 @@ class GlobalWriteBatchWriter:
             # (see _emitHoistedGateLoadPhase).
             pass
           elif not _multiDtypeGate:
-            # no-opt single-dtype: unconditional load.
-            # Null gate -> SRD num_records==0 -> buffer_load returns 0;
+            # no-opt single-dtype: per-element skip (borrows D's per-element addr, so
+            # the gate load can't be hoisted -> one branch per element).
             _glTgt = loadInputCode if self.kernel["GroupLoadStore"] else module
+            _glSkipL = Label(self.parentWriter.labels.getNameInc("GateLoadSkip_%u"%elementIdx), "")
+            _glTgt.add(self.parentWriter.getSCMPKInstruction(
+                "EQU32", "SrdGate+2", 0, comment="gate disabled? (SrdGate num_records==0)"))
+            _glTgt.add(SCBranchSCC1(_glSkipL.getLabelName(), "skip gate load if disabled (null gate)"))
             gateLoadMod = self.parentWriter.readInput(
                 self.kernel, self.ss, 'Gate',
                 _prologLoadDtype,
                 addrCalc, vc0, dataGate, self.gwvw, addrGateVgpr, self.tmpS01)
             _glTgt.add(gateLoadMod)
+            _glTgt.add(_glSkipL)
           else:
             # no-opt (edge) multi-dtype: per-dtype dispatcher per element (gate
             # borrows D's per-element addr, so it must stay interleaved here).
@@ -1648,621 +1653,666 @@ class GlobalWriteBatchWriter:
     vlcntTotalIssued = self.loadsBetaIssued + self.loadsEIssued + self.loadsGateIssued
     dscntTotalIssued = self.localLoadsBiasIssued + self.loadsScaleAVecIssued + self.loadsScaleBVecIssued + self.loadsScaleAlphaVecIssued
     waitCnter = [vlcntTotalIssued, dscntTotalIssued]
-    for elementIdx in range(0, len(self.batchElements)):
-      element = self.batchElements[elementIdx]
-      addrCalc: AddrCalculation = self.ss.elementAddr[elementIdx]
-      addr = addrCalc.addrDVgpr
-      dataE = self.ss.elementDataE[elementIdx]
-      dataGate = self.ss.elementDataGate[elementIdx] if self.parentWriter.states.useGateResidual else 0
-      dataBias = self.ss.elementDataBias[elementIdx]
-      dataScaleAVec = self.ss.elementDataScaleAVec[elementIdx]
-      dataScaleBVec = self.ss.elementDataScaleBVec[elementIdx]
-      dataScaleAlphaVec = self.ss.elementDataScaleAlphaVec[elementIdx]
-      mask = self.ss.elementMask[elementIdx]
-      vc0 = element[3]
+    # === gate store split: generate the store loop twice (gate / no-gate) under
+    # ONE outer branch; preserves full per-element interleaving. Non-edge simple path only.
+    self._gateStoreSplitActive = bool((not self.edge) and self.parentWriter.states.useGateResidual
+        and (self.kernel["GlobalSplitU"] == 1 or self.kernel["GlobalSplitU"] == -1)
+        and (not self.kernel["GroupLoadStore"]) and (not self.kernel["StoreRemapVectorWidth"])
+        and (not self.atomic) and (not self.kernel.get("UseSubtileImpl")))
+    _gateStoreSplitPasses = [True, False] if self._gateStoreSplitActive else [None]
+    _gateStoreSplitBlocks = []
+    _gateStoreSplitStores0 = self.storesIssued
+    _gateStoreSplitWait0 = list(waitCnter)
+    for _gateStoreSplitEmitGate in _gateStoreSplitPasses:
+      self._gateStoreSplitEmitGate = _gateStoreSplitEmitGate
+      if self._gateStoreSplitActive:
+        self.storesIssued = _gateStoreSplitStores0
+        waitCnter[0] = _gateStoreSplitWait0[0]
+        waitCnter[1] = _gateStoreSplitWait0[1]
+        _gateStoreSplitBlk = Module("gateBlock")
+        _gateStoreSplitBlocks.append(_gateStoreSplitBlk)
+        _gateStoreSplitSavedModule = module
+        module = _gateStoreSplitBlk
+      for elementIdx in range(0, len(self.batchElements)):
+        element = self.batchElements[elementIdx]
+        addrCalc: AddrCalculation = self.ss.elementAddr[elementIdx]
+        addr = addrCalc.addrDVgpr
+        dataE = self.ss.elementDataE[elementIdx]
+        dataGate = self.ss.elementDataGate[elementIdx] if self.parentWriter.states.useGateResidual else 0
+        dataBias = self.ss.elementDataBias[elementIdx]
+        dataScaleAVec = self.ss.elementDataScaleAVec[elementIdx]
+        dataScaleBVec = self.ss.elementDataScaleBVec[elementIdx]
+        dataScaleAlphaVec = self.ss.elementDataScaleAlphaVec[elementIdx]
+        mask = self.ss.elementMask[elementIdx]
+        vc0 = element[3]
 
-      # When skipRearrangement is True:
-      # - Data is at WMMA output (v[0:N]), not at elementSumIdx (v[144:N])
-      # - Store should read from WMMA output directly
-      # Note: Beta paths need the rearrangement because they load C and compute rC = alpha*rC + beta*C
-      #
-      # skipRearrangement requires elementSumIdx to be contiguous so that
-      # (elementSumIdx[i] - elementSumIdx[0]) == i.  When checkOutAligned
-      # returns non-contiguous blocks (gaps in the pool), the relative offset
-      # no longer matches the sequential MFMA output layout, causing stores
-      # to read from wrong VGPRs.
-      esIdx = self.ss.elementSumIdx
-      contiguous = all(esIdx[i] - esIdx[0] == i for i in range(len(esIdx)))
-      if self.skipRearrangement and contiguous:
-        sumIdx = esIdx[elementIdx] - esIdx[0]
-      else:
-        sumIdx = self.ss.elementSumIdx[elementIdx]
+        # When skipRearrangement is True:
+        # - Data is at WMMA output (v[0:N]), not at elementSumIdx (v[144:N])
+        # - Store should read from WMMA output directly
+        # Note: Beta paths need the rearrangement because they load C and compute rC = alpha*rC + beta*C
+        #
+        # skipRearrangement requires elementSumIdx to be contiguous so that
+        # (elementSumIdx[i] - elementSumIdx[0]) == i.  When checkOutAligned
+        # returns non-contiguous blocks (gaps in the pool), the relative offset
+        # no longer matches the sequential MFMA output layout, causing stores
+        # to read from wrong VGPRs.
+        esIdx = self.ss.elementSumIdx
+        contiguous = all(esIdx[i] - esIdx[0] == i for i in range(len(esIdx)))
+        if self.skipRearrangement and contiguous:
+          sumIdx = esIdx[elementIdx] - esIdx[0]
+        else:
+          sumIdx = self.ss.elementSumIdx[elementIdx]
 
-      # CompactLoopStore look-ahead override for this store loop (see
-      # _lookaheadRowInc). Separate for-loop pass from the _prolog one, so it is
-      # recomputed here.
-      _emitOverrideRows = self._lookaheadRowInc(elementIdx)
+        # CompactLoopStore look-ahead override for this store loop (see
+        # _lookaheadRowInc). Separate for-loop pass from the _prolog one, so it is
+        # recomputed here.
+        _emitOverrideRows = self._lookaheadRowInc(elementIdx)
 
-      # print(str(element)+" rowInc="+str(addrCalc.rowInc))
-      # Already write wave column block into LDS
-      # Now read lds data back to registers and write to global memroy
-      if self.kernel["_GlobalAccumulation"] != "MultipleBufferSingleKernel":
-        if self.ss.optSrdIncForRow and (addrCalc.rowInc or (self.kernel["CompactLoopStore"] and elementIdx == 0 and self.batchIdx == 0)) and self.kernel["StoreRemapVectorWidth"] > 0:
-          module.addComment1("StoreRemap: shift coord1 address")
-          if self.kernel["ProblemType"]["UseE"] and (self.kernel["GlobalSplitU"] == 1 or self.kernel["GlobalSplitU"] == -1):
-            # TODO Check if works with StreamK
-            printExit("Use E does not support StoreRemapVectorWidth if GSU == 1.")
-            # module.add(addrCalc.incrementToNextRow(self.kernel, "E", self.ss, self.tmpS01, isCompute=True))
-          module.add(addrCalc.incrementToNextRow(self.kernel, "D", self.ss, self.tmpS01, forceinitrow0=1, overrideAfterPrimerRows=_emitOverrideRows))
-          module.add(VMovB32(vgpr(self.tmpVgpr), addrCalc.rowInc, comment="set shift rows"))
-          module.add(VAddU32(vgpr(self.parentWriter.vgprs.storeRemapCoord1), vgpr(self.parentWriter.vgprs.storeRemapCoord1), vgpr(self.tmpVgpr), "shift storeRemap coord1"))
+        # print(str(element)+" rowInc="+str(addrCalc.rowInc))
+        # Already write wave column block into LDS
+        # Now read lds data back to registers and write to global memroy
+        if self.kernel["_GlobalAccumulation"] != "MultipleBufferSingleKernel":
+          if self.ss.optSrdIncForRow and (addrCalc.rowInc or (self.kernel["CompactLoopStore"] and elementIdx == 0 and self.batchIdx == 0)) and self.kernel["StoreRemapVectorWidth"] > 0:
+            module.addComment1("StoreRemap: shift coord1 address")
+            if self.kernel["ProblemType"]["UseE"] and (self.kernel["GlobalSplitU"] == 1 or self.kernel["GlobalSplitU"] == -1):
+              # TODO Check if works with StreamK
+              printExit("Use E does not support StoreRemapVectorWidth if GSU == 1.")
+              # module.add(addrCalc.incrementToNextRow(self.kernel, "E", self.ss, self.tmpS01, isCompute=True))
+            module.add(addrCalc.incrementToNextRow(self.kernel, "D", self.ss, self.tmpS01, forceinitrow0=1, overrideAfterPrimerRows=_emitOverrideRows))
+            module.add(VMovB32(vgpr(self.tmpVgpr), addrCalc.rowInc, comment="set shift rows"))
+            module.add(VAddU32(vgpr(self.parentWriter.vgprs.storeRemapCoord1), vgpr(self.parentWriter.vgprs.storeRemapCoord1), vgpr(self.tmpVgpr), "shift storeRemap coord1"))
 
-      # When stores are interleaved (GLS=0) with subtile NonEdge guards, the
-      # M-guard branch for the last store in N-group K targets the N-group end
-      # label.  That label must be placed BEFORE the beta*C fmacs for N-group K+1,
-      # otherwise the M-guard branch skips the fmacs and the next N-group stores zeros.
-      if isSubtileNonEdge and not self.kernel["GroupLoadStore"]:
-        blockIdxN = element[0]
-        if blockIdxN != self._subtilePrevBlockIdxN and self._subtileNGroupSkipLabel is not None:
-          module.add(self._subtileNGroupSkipLabel)
-          self._subtileNGroupSkipLabel = None
-          if self._subtilePendingSrdDInc is not None:
-            module.add(self._subtilePendingSrdDInc)
-            self._subtilePendingSrdDInc = None
+        # When stores are interleaved (GLS=0) with subtile NonEdge guards, the
+        # M-guard branch for the last store in N-group K targets the N-group end
+        # label.  That label must be placed BEFORE the beta*C fmacs for N-group K+1,
+        # otherwise the M-guard branch skips the fmacs and the next N-group stores zeros.
+        if isSubtileNonEdge and not self.kernel["GroupLoadStore"]:
+          blockIdxN = element[0]
+          if blockIdxN != self._subtilePrevBlockIdxN and self._subtileNGroupSkipLabel is not None:
+            module.add(self._subtileNGroupSkipLabel)
+            self._subtileNGroupSkipLabel = None
+            if self._subtilePendingSrdDInc is not None:
+              module.add(self._subtilePendingSrdDInc)
+              self._subtilePendingSrdDInc = None
 
-      # apply in-bounds exec mask
-      if self.edge and not self.kernel["BufferStore"]:
-        module.add(self.getEdgeMovInstType()(EXEC(), sgpr(mask, self.laneSGPRC), "sgprs -> exec"))
+        # apply in-bounds exec mask
+        if self.edge and not self.kernel["BufferStore"]:
+          module.add(self.getEdgeMovInstType()(EXEC(), sgpr(mask, self.laneSGPRC), "sgprs -> exec"))
 
-      if interleaveStoreVmcnt:
-        waitcntInst = self.globalStoreWait(elementIdx, waitCnter, vlcntTotalIssued, dscntTotalIssued, True)
-        if waitcntInst:
-          module.addSpaceLine()
-          module.add(waitcntInst)
+        if interleaveStoreVmcnt:
+          waitcntInst = self.globalStoreWait(elementIdx, waitCnter, vlcntTotalIssued, dscntTotalIssued, True)
+          if waitcntInst:
+            module.addSpaceLine()
+            module.add(waitcntInst)
 
-      def applyScaleVec(vecModule, addressStr, dataScaleVec, factorDim, isGlobal=True):
-        if not self.beta and not self.applyAlpha: # case for beta-0 and alpha == 1,(OptNLL)
+        def applyScaleVec(vecModule, addressStr, dataScaleVec, factorDim, isGlobal=True):
+          if not self.beta and not self.applyAlpha: # case for beta-0 and alpha == 1,(OptNLL)
+            if (self.kernel["ProblemType"]["DestDataType"].isInt8() or self.kernel["ProblemType"]["DestDataType"].isInt32() or \
+                (self.kernel["ProblemType"]["DataType"].isInt8() and self.kernel["ProblemType"]["DestDataType"].isHalf()) or \
+                (self.kernel["ProblemType"]["DataType"].isInt8() and self.kernel["ProblemType"]["DestDataType"].isBFloat16())) and \
+              self.kernel["ProblemType"]["ComputeDataType"].isSingle():
+              module.add(convertData(self.gwvw, self.ss.elementSumIdx[elementIdx], cvtType=CvtType.CVT_I32_to_F32, \
+                                          inputPrefix="ValuC+", prefixOffset=self.parentWriter.states.c.startVgprValu))
+
+          if self.kernel["ProblemType"]["ComputeDataType"].isSingle():
+            maskConst = 1.0
+          elif self.kernel["ProblemType"]["ComputeDataType"].isInt32():
+            maskConst = 1
+
+          gwvw = 1 if factorDim else self.gwvw
+          if isGlobal:
+            vecModule.add(VCmpGtU32(dst=sgpr("Address%s"%addressStr, self.parentWriter.states.laneSGPRCount), src0=sgpr("Srd%s+2"%addressStr), src1=0, comment=" == 0 ?"))
+            for vi2 in range(0, gwvw):
+              vecModule.add(VCndMaskB32(
+                dst=vgpr(dataScaleVec + vi2), \
+                src1=vgpr(dataScaleVec + vi2), \
+                src0=maskConst, \
+                src2=sgpr("Address%s"%addressStr, self.parentWriter.states.laneSGPRCount), \
+                comment="1. mul 1 if 0"))
+          if factorDim and self.gwvw > 1:
+            vecModule.add(VMovB32(dst=vgpr(dataScaleVec+1), src=vgpr(dataScaleVec), comment="copy data%s to data%s+1"%(addressStr, addressStr)))
+
+          for vi in range(0, self.gwvw):
+            inputScaleVecVgpr = dataScaleVec + (0 if factorDim else vi)
+            sumIdxV   = self.ss.elementSumIdx[elementIdx] + vi
+            if self.kernel["ProblemType"]["ComputeDataType"].isSingle():
+              vgprIdx = sumIdxV - self.parentWriter.states.c.startVgprValu
+              # Generate single f32 code if edge is detected.
+              if ((vi + 1) == self.gwvw) and ((self.gwvw % 2) == 1):
+                vecModule.add(VMulF32(dst=vgpr("ValuC+%d"%vgprIdx), src0=vgpr(inputScaleVecVgpr), src1=vgpr("ValuC+%d"%vgprIdx), comment="*= %sVMul"%addressStr ))
+              # Original packed route
+              elif vi%2 == 1:
+                assert (self.gwvw % 2 == 0)
+              else:
+                vecModule.add(VMulPKF32(dst=vgpr("ValuC+%d"%vgprIdx, 2), src0=vgpr(inputScaleVecVgpr, 2), src1=vgpr("ValuC+%d"%vgprIdx, 2), comment="*= %sVMulPK(%d)(%d)"%(addressStr, dataScaleVec,vi)))
+            elif self.kernel["ProblemType"]["ComputeDataType"].isInt32():
+              vgprIdx = sumIdxV - self.parentWriter.states.c.startVgprValu
+              # Generate single i32 code if edge is detected.
+              if ((vi + 1) == self.gwvw) and ((self.gwvw % 2) == 1):
+                vecModule.add(VMulLOU32(dst=vgpr("ValuC+%d"%vgprIdx), src0=vgpr(inputScaleVecVgpr), src1=vgpr("ValuC+%d"%vgprIdx), comment="*= %sVMul"%addressStr ))
+              elif vi%2 == 1:
+                assert (self.gwvw % 2 == 0)
+              else:
+                vecModule.add(VMulLOU32(dst=vgpr("ValuC+%d"%vgprIdx), src0=vgpr(inputScaleVecVgpr), src1=vgpr("ValuC+%d"%vgprIdx), comment="*= %sVMulPK(%d)(%d)"%(addressStr, dataScaleAlphaVec,vi)))
+                vecModule.add(VMulLOU32(dst=vgpr("ValuC+%d"%(vgprIdx+1)), src0=vgpr(inputScaleVecVgpr+1), src1=vgpr("ValuC+%d"%(vgprIdx+1)), comment="*= %sVMulPK(%d)(%d)"%(addressStr, dataScaleAlphaVec,vi)))
+            else:
+              raise RuntimeError("Unsupported %s compute data type %s."%(addressStr, str(self.kernel["ProblemType"]["ComputeDataType"])))
+
+        isSingleKernel = ((self.kernel["GlobalSplitU"] == 1 or self.kernel["GlobalSplitU"] == -1) or self.kernel["_GlobalAccumulation"] == "MultipleBufferSingleKernel") or self.kernel["StreamK"] > 0
+
+        scaleAVecModule = Module("ScaleAVecModule")
+        scaleBVecModule = Module("ScaleBVecModule")
+        if (self.kernel["ProblemType"]["UseScaleAB"] == "Vector") and isSingleKernel:
+          applyScaleVec(scaleAVecModule, "ScaleA", dataScaleAVec, 0, isGlobal=False)
+          applyScaleVec(scaleBVecModule, "ScaleB", dataScaleBVec, 1, isGlobal=False)
+        module.add(scaleAVecModule)
+        module.add(scaleBVecModule)
+
+        scaleAlphaVecModule = Module("scaleAlphaVecModule")
+        if self.kernel["ProblemType"]["UseScaleAlphaVec"] and isSingleKernel:
+          applyScaleVec(scaleAlphaVecModule, "ScaleAlphaVec", dataScaleAlphaVec, self.factorDim, isGlobal=False)
+        module.add(scaleAlphaVecModule)
+
+        if self.beta:
+          module.add(self._addSumAlphaWithCBeta(self.kernel, self.ss, self.gwvw, elementIdx, vc0, self.tmpVgpr, self.cvtVgprStruct))
+        elif ((self.parentWriter.states.useBias == DataDirection.READ) or self.kernel["ActivationFuncCall"]) and not self.applyAlpha \
+          and not ( self.kernel["ProblemType"]["UseScaleAlphaVec"] and isSingleKernel): # case of alpha=1 and beta=0
           if (self.kernel["ProblemType"]["DestDataType"].isInt8() or self.kernel["ProblemType"]["DestDataType"].isInt32() or \
               (self.kernel["ProblemType"]["DataType"].isInt8() and self.kernel["ProblemType"]["DestDataType"].isHalf()) or \
               (self.kernel["ProblemType"]["DataType"].isInt8() and self.kernel["ProblemType"]["DestDataType"].isBFloat16())) and \
-            self.kernel["ProblemType"]["ComputeDataType"].isSingle():
+             self.kernel["ProblemType"]["ComputeDataType"].isSingle():
             module.add(convertData(self.gwvw, self.ss.elementSumIdx[elementIdx], cvtType=CvtType.CVT_I32_to_F32, \
                                         inputPrefix="ValuC+", prefixOffset=self.parentWriter.states.c.startVgprValu))
 
-        if self.kernel["ProblemType"]["ComputeDataType"].isSingle():
-          maskConst = 1.0
-        elif self.kernel["ProblemType"]["ComputeDataType"].isInt32():
-          maskConst = 1
+        # Add bias
+        mergeActFuncCall = False
+        if self.parentWriter.states.useBias == DataDirection.READ:
+          if activationCDataType == self.kernel["ProblemType"]["ComputeDataType"] and self.kernel["ActivationFuncCall"]:
+            mergeActFuncCall = True
+          if (self.kernel["ProblemType"]["Gradient"] and self.kernel["ProblemType"]["ActivationType"] != 'none' and self.kernel["ProblemType"]["UseE"]) and ((self.kernel["GlobalSplitU"] == 1 or self.kernel["GlobalSplitU"] == -1) or self.kernel["StreamK"] > 0):
+            mergeActFuncCall = False
 
-        gwvw = 1 if factorDim else self.gwvw
-        if isGlobal:
-          vecModule.add(VCmpGtU32(dst=sgpr("Address%s"%addressStr, self.parentWriter.states.laneSGPRCount), src0=sgpr("Srd%s+2"%addressStr), src1=0, comment=" == 0 ?"))
-          for vi2 in range(0, gwvw):
-            vecModule.add(VCndMaskB32(
-              dst=vgpr(dataScaleVec + vi2), \
-              src1=vgpr(dataScaleVec + vi2), \
-              src0=maskConst, \
-              src2=sgpr("Address%s"%addressStr, self.parentWriter.states.laneSGPRCount), \
-              comment="1. mul 1 if 0"))
-        if factorDim and self.gwvw > 1:
-          vecModule.add(VMovB32(dst=vgpr(dataScaleVec+1), src=vgpr(dataScaleVec), comment="copy data%s to data%s+1"%(addressStr, addressStr)))
+          if self.factorDim and self.gwvw > 1:
+            module.add(VMovB32(dst=vgpr(dataBias+1), src=vgpr(dataBias), comment="copy dataBias to dataBIas+1"))
 
-        for vi in range(0, self.gwvw):
-          inputScaleVecVgpr = dataScaleVec + (0 if factorDim else vi)
-          sumIdxV   = self.ss.elementSumIdx[elementIdx] + vi
-          if self.kernel["ProblemType"]["ComputeDataType"].isSingle():
-            vgprIdx = sumIdxV - self.parentWriter.states.c.startVgprValu
-            # Generate single f32 code if edge is detected.
-            if ((vi + 1) == self.gwvw) and ((self.gwvw % 2) == 1):
-              vecModule.add(VMulF32(dst=vgpr("ValuC+%d"%vgprIdx), src0=vgpr(inputScaleVecVgpr), src1=vgpr("ValuC+%d"%vgprIdx), comment="*= %sVMul"%addressStr ))
-            # Original packed route
-            elif vi%2 == 1:
-              assert (self.gwvw % 2 == 0)
-            else:
-              vecModule.add(VMulPKF32(dst=vgpr("ValuC+%d"%vgprIdx, 2), src0=vgpr(inputScaleVecVgpr, 2), src1=vgpr("ValuC+%d"%vgprIdx, 2), comment="*= %sVMulPK(%d)(%d)"%(addressStr, dataScaleVec,vi)))
-          elif self.kernel["ProblemType"]["ComputeDataType"].isInt32():
-            vgprIdx = sumIdxV - self.parentWriter.states.c.startVgprValu
-            # Generate single i32 code if edge is detected.
-            if ((vi + 1) == self.gwvw) and ((self.gwvw % 2) == 1):
-              vecModule.add(VMulLOU32(dst=vgpr("ValuC+%d"%vgprIdx), src0=vgpr(inputScaleVecVgpr), src1=vgpr("ValuC+%d"%vgprIdx), comment="*= %sVMul"%addressStr ))
-            elif vi%2 == 1:
-              assert (self.gwvw % 2 == 0)
-            else:
-              vecModule.add(VMulLOU32(dst=vgpr("ValuC+%d"%vgprIdx), src0=vgpr(inputScaleVecVgpr), src1=vgpr("ValuC+%d"%vgprIdx), comment="*= %sVMulPK(%d)(%d)"%(addressStr, dataScaleAlphaVec,vi)))
-              vecModule.add(VMulLOU32(dst=vgpr("ValuC+%d"%(vgprIdx+1)), src0=vgpr(inputScaleVecVgpr+1), src1=vgpr("ValuC+%d"%(vgprIdx+1)), comment="*= %sVMulPK(%d)(%d)"%(addressStr, dataScaleAlphaVec,vi)))
-          else:
-            raise RuntimeError("Unsupported %s compute data type %s."%(addressStr, str(self.kernel["ProblemType"]["ComputeDataType"])))
-
-      isSingleKernel = ((self.kernel["GlobalSplitU"] == 1 or self.kernel["GlobalSplitU"] == -1) or self.kernel["_GlobalAccumulation"] == "MultipleBufferSingleKernel") or self.kernel["StreamK"] > 0
-
-      scaleAVecModule = Module("ScaleAVecModule")
-      scaleBVecModule = Module("ScaleBVecModule")
-      if (self.kernel["ProblemType"]["UseScaleAB"] == "Vector") and isSingleKernel:
-        applyScaleVec(scaleAVecModule, "ScaleA", dataScaleAVec, 0, isGlobal=False)
-        applyScaleVec(scaleBVecModule, "ScaleB", dataScaleBVec, 1, isGlobal=False)
-      module.add(scaleAVecModule)
-      module.add(scaleBVecModule)
-
-      scaleAlphaVecModule = Module("scaleAlphaVecModule")
-      if self.kernel["ProblemType"]["UseScaleAlphaVec"] and isSingleKernel:
-        applyScaleVec(scaleAlphaVecModule, "ScaleAlphaVec", dataScaleAlphaVec, self.factorDim, isGlobal=False)
-      module.add(scaleAlphaVecModule)
-
-      if self.beta:
-        module.add(self._addSumAlphaWithCBeta(self.kernel, self.ss, self.gwvw, elementIdx, vc0, self.tmpVgpr, self.cvtVgprStruct))
-      elif ((self.parentWriter.states.useBias == DataDirection.READ) or self.kernel["ActivationFuncCall"]) and not self.applyAlpha \
-        and not ( self.kernel["ProblemType"]["UseScaleAlphaVec"] and isSingleKernel): # case of alpha=1 and beta=0
-        if (self.kernel["ProblemType"]["DestDataType"].isInt8() or self.kernel["ProblemType"]["DestDataType"].isInt32() or \
-            (self.kernel["ProblemType"]["DataType"].isInt8() and self.kernel["ProblemType"]["DestDataType"].isHalf()) or \
-            (self.kernel["ProblemType"]["DataType"].isInt8() and self.kernel["ProblemType"]["DestDataType"].isBFloat16())) and \
-           self.kernel["ProblemType"]["ComputeDataType"].isSingle():
-          module.add(convertData(self.gwvw, self.ss.elementSumIdx[elementIdx], cvtType=CvtType.CVT_I32_to_F32, \
-                                      inputPrefix="ValuC+", prefixOffset=self.parentWriter.states.c.startVgprValu))
-
-      # Add bias
-      mergeActFuncCall = False
-      if self.parentWriter.states.useBias == DataDirection.READ:
-        if activationCDataType == self.kernel["ProblemType"]["ComputeDataType"] and self.kernel["ActivationFuncCall"]:
-          mergeActFuncCall = True
-        if (self.kernel["ProblemType"]["Gradient"] and self.kernel["ProblemType"]["ActivationType"] != 'none' and self.kernel["ProblemType"]["UseE"]) and ((self.kernel["GlobalSplitU"] == 1 or self.kernel["GlobalSplitU"] == -1) or self.kernel["StreamK"] > 0):
-          mergeActFuncCall = False
-
-        if self.factorDim and self.gwvw > 1:
-          module.add(VMovB32(dst=vgpr(dataBias+1), src=vgpr(dataBias), comment="copy dataBias to dataBIas+1"))
-
-        for vi in range(0, self.gwvw):
-          inputVgpr = dataBias + + (0 if self.factorDim else vi)
-          sumIdxV   = self.ss.elementSumIdx[elementIdx] + vi
-          if self.kernel["ProblemType"]["ComputeDataType"].isSingle():
-            vgprIdx = sumIdxV - self.parentWriter.states.c.startVgprValu
-            vgprDst = (self.activationSetPCStruct.vgprActCopy + vi) if mergeActFuncCall else "ValuC+%d"%vgprIdx
-            # Generate single f32 code if edge is detected.
-            if ((vi + 1) == self.gwvw) and ((self.gwvw % 2) == 1):
-              module.add(VAddF32(dst=vgpr(vgprDst), src0=vgpr(inputVgpr), src1=vgpr("ValuC+%d"%vgprIdx), \
-                                 comment="C += bias"))
-
-            # Original packed route
-            elif vi%2 == 1:
-              assert (self.gwvw % 2 == 0)
-            else:
-              module.add(VAddPKF32(dst=vgpr(vgprDst, 2), src0=vgpr(inputVgpr, 2), \
-                                   src1=vgpr("ValuC+%d"%vgprIdx, 2), comment="C += bias"))
-          else:
-            raise RuntimeError("Unsupported bias compute data type %s."%str(self.kernel["ProblemType"]["ComputeDataType"]))
-
-      # Gate Residual: acc = gate*acc + gate. Built here but DEFERRED — added after
-      # activation+scaleD (see module.add(gateModule) below), on the f32 ValuC.
-      gateModule = Module("Empty GateResidual")
-      if self.parentWriter.states.useGateResidual and \
-         (self.kernel["GlobalSplitU"] == 1 or self.kernel["GlobalSplitU"] == -1 or self.kernel["_GlobalAccumulation"] == "MultipleBufferSingleKernel"):
-        # TODO: I8 input (int32 compute) — needs int32 acc -> cvt f32 -> FMA ->
-        # saturate-cast. Not supported yet; reject below.
-        if not self.kernel["ProblemType"]["ComputeDataType"].isSingle():
-          raise RuntimeError(
-              "GateResidual currently requires ComputeDataType=f32 (HPA); got %s" %
-              str(self.kernel["ProblemType"]["ComputeDataType"]))
-
-        gateList = list(self.kernel["ProblemType"].get("GateResidualDataTypeList", []))
-        if not gateList:
-          # Default fallback: use DestDataType as the gate dtype.
-          gateList = [self.kernel["ProblemType"]["DestDataType"]]
-
-        def _emit_gate_fma():
-          """Identity (branchless null): ValuC = (gate+s)*ValuC + gate.
-          GateNullOne (s) = 1.0 if gate null else 0.0 -> null:(0+1)*acc+0=acc; real:gate*acc+gate."""
-          fmaMod = Module("GateFMA")
           for vi in range(0, self.gwvw):
-            sumIdxV = self.ss.elementSumIdx[elementIdx] + vi
-            vgprIdx = sumIdxV - self.parentWriter.states.c.startVgprValu
-            fmaMod.add(VAddF32(dst=vgpr(self.tmpVgpr), src0=vgpr(dataGate + vi),
-              src1=sgpr("GateNullOne"), comment="gate + s (vi=%d)"%vi))
-            fmaMod.add(VFmaF32(
-              dst=vgpr("ValuC+%d"%vgprIdx),
-              src0=vgpr(self.tmpVgpr),
-              src1=vgpr("ValuC+%d"%vgprIdx),
-              src2=vgpr(dataGate + vi),
-              comment="GateResidual identity: acc = (gate+s)*acc + gate (vi=%d)"%vi))
-          return fmaMod
+            inputVgpr = dataBias + + (0 if self.factorDim else vi)
+            sumIdxV   = self.ss.elementSumIdx[elementIdx] + vi
+            if self.kernel["ProblemType"]["ComputeDataType"].isSingle():
+              vgprIdx = sumIdxV - self.parentWriter.states.c.startVgprValu
+              vgprDst = (self.activationSetPCStruct.vgprActCopy + vi) if mergeActFuncCall else "ValuC+%d"%vgprIdx
+              # Generate single f32 code if edge is detected.
+              if ((vi + 1) == self.gwvw) and ((self.gwvw % 2) == 1):
+                module.add(VAddF32(dst=vgpr(vgprDst), src0=vgpr(inputVgpr), src1=vgpr("ValuC+%d"%vgprIdx), \
+                                   comment="C += bias"))
 
-        if len(gateList) == 1:
-          gateModule.add(self._emitGateCvt(dataGate, gateList[0]))
-          gateModule.add(_emit_gate_fma())
-        else:
-          gateModule.add(_emit_gate_fma())
-
-      if (self.kernel["ProblemType"]["UseE"] and not self.kernel["ProblemType"]["Gradient"]) and ((self.kernel["GlobalSplitU"] == 1 or self.kernel["GlobalSplitU"] == -1) or self.kernel["StreamK"] > 0):
-        vgprIdx   = self.ss.elementSumIdx[elementIdx] - self.parentWriter.states.c.startVgprValu
-        vgprDst   = self.activationSetPCStruct.vgprActCopy if mergeActFuncCall else vgprIdx
-        prefixStr = "" if mergeActFuncCall else "ValuC+"
-        prefixOffset = 0 if mergeActFuncCall else self.parentWriter.states.c.startVgprValu
-        # Packdata if needed
-        tmpVgpr = self.tmpVgpr
-        if mergeActFuncCall:
-          tmpVgpr += self.gwvw * self.kernel["ProblemType"]["ComputeDataType"].numRegisters()
-        if self.kernel["ProblemType"]["ComputeDataType"].isSingle():
-          if self.kernel["ProblemType"]["DataTypeE"].isHalf():
-            packdata = PackData_F16()
-            module.add(packdata(self.gwvw, tmpVgpr, vgprDst, tmpVgpr=tmpVgpr, inputPrefix=prefixStr, prefixOffset=prefixOffset))
-            vgprDst = tmpVgpr
-          elif self.kernel["ProblemType"]["DataTypeE"].isBFloat16():
-            packdata = PackData_BF16()
-            module.add(packdata(self.gwvw, tmpVgpr, vgprDst, self.cvtVgprStruct, self.tmpS01, self.laneSGPRC,
-                                tmpVgpr=tmpVgpr, inputPrefix=prefixStr, prefixOffset=prefixOffset))
-            vgprDst = tmpVgpr
-          elif self.kernel["ProblemType"]["DataTypeE"].isSingle():
-            if not mergeActFuncCall:
-              vgprDst = "ValuC+%d" % vgprDst
-          elif self.kernel["ProblemType"]["DataTypeE"].isFloat8():
-            packdata = PackData_FLOAT8()
-            module.add(packdata(self.gwvw, tmpVgpr, vgprDst, self.cvtVgprStruct, self.tmpS01, self.laneSGPRC,
-                                inputPrefix=prefixStr, prefixOffset=prefixOffset))
-            vgprDst = tmpVgpr
-          elif self.kernel["ProblemType"]["DataTypeE"].isFloat8_fnuz():
-            packdata = PackData_FLOAT8_fnuz()
-            module.add(packdata(self.gwvw, tmpVgpr, vgprDst, self.cvtVgprStruct, self.tmpS01, self.laneSGPRC,
-                                inputPrefix=prefixStr, prefixOffset=prefixOffset))
-            vgprDst = tmpVgpr
-          else:
-            printExit("Unsupport type for E output. (%s)"%self.kernel["ProblemType"]["DataTypeE"].toEnum())
-        else:
-          printExit("Unsupport compute type for E output. (%s)"%self.kernel["ProblemType"]["ComputeDataType"].toEnum())
-
-        module.add(self.parentWriter.addStore(self.kernel, self.ss, 'E', addrCalc, vgprDst, self.tmpS01, self.edge, comment="store E"))
-
-      SaturateTypeInt8 = SaturateCastType.NORMAL
-
-      gradientCvtModule = Module("gradientCvtModule")
-      if (self.kernel["ProblemType"]["UseE"] and self.kernel["ProblemType"]["Gradient"]) and ((self.kernel["GlobalSplitU"] == 1 or self.kernel["GlobalSplitU"] == -1) or self.kernel["StreamK"] > 0):
-        loadOffset = int((self.kernel["ProblemType"]["ComputeDataType"].numRegisters() - self.kernel["ProblemType"]["DataTypeE"].numRegisters()) * self.ss.cfg.gwvw)
-        if activationCDataType != self.kernel["ProblemType"]["DataTypeE"]:
-          if activationCDataType.isSingle() and self.kernel["ProblemType"]["DataTypeE"].isHalf():
-            for vi in range(0, self.gwvw):
-              dataEV  = dataE + vi
-              dataEV2 = dataE + vi // 2
-              selectbit = HighBitSel.LOW if (self.gwvw != 1 and vi % 2 == 0) or (self.gwvw == 1 and elementIdx % 2 == 0) else HighBitSel.HIGH
-              gradientCvtModule.add(ECvtF16toF32(dst=vgpr(dataEV), src=vgpr(dataEV2+loadOffset), sel=selectbit, comment="gwvw %d, elementIdx %d"%(self.gwvw, elementIdx)))
-          elif activationCDataType.isSingle() and self.kernel["ProblemType"]["DataTypeE"].isBFloat16():
-            for vi in range(0, self.gwvw):
-              dataEV  = dataE + vi
-              dataEV2 = dataE + vi // 2
-              # Consider bf16 without packing (gwvw==1)
-              # TODO: check correctness for gfx950
-              selectWord = 0 if (self.gwvw != 1 and vi % 2 == 0) or (self.gwvw == 1) else 1
-              module.add(VCvtBF16toFP32(dst=vgpr(dataEV), src=vgpr(dataEV2+loadOffset), vgprMask=vgpr(self.cvtVgprStruct.vgprBf16Mask), vi=(selectWord), comment="gwvw %d, elementIdx %d"%(self.gwvw, elementIdx)))
-          else:
-            printExit("[Gradient input] Unsupported conversion.")
-
-      # Activation
-      activationModule = None
-      isActivationInsertAfter = False
-      if self.kernel["ProblemType"]["Gradient"] and ((self.kernel["GlobalSplitU"] == 1 or self.kernel["GlobalSplitU"] == -1) or self.kernel["StreamK"] > 0):
-        gradientInput = dataE
-        enableValuC   = False
-      else:
-        gradientInput = self.ss.elementSumIdx[elementIdx]
-        enableValuC   = True
-        if self.kernel["LocalSplitU"] > 1:
-          # When LSU > 1, the VGPRs are from LSU output.
-          # the elementSumIdx has indicated the VGPRs from LSU.
-          # Don't use the ValuC prefix here.
-          enableValuC = False
-        # gradientInput is an absolute vgpr index (= elementSumIdx). The
-        # ActivationFuncCall/copyData and getActivationDestDataType consumers below
-        # address it directly as an absolute vgpr, so keep it absolute here. Only
-        # getActivationActivationComputeType() uses the "ValuC+N" relative namespace
-        # (when enableValuC is set); that startVgprValu offset is applied at its
-        # call site below.
-      if self.kernel["ActivationFuncCall"]:
-        if (activationCDataType == self.kernel["ProblemType"]["DestDataType"]) and \
-          (activationCDataType != self.kernel["ProblemType"]["ComputeDataType"]) and ((self.kernel["ProblemType"]["UseScaleCD"] == False) or (self.kernel["ProblemType"]["UseScaleAlphaVec"] == False)):
-          isActivationInsertAfter = True
-        activationModule = Module("ActivationFuncCall")
-        if (not mergeActFuncCall) and (not isActivationInsertAfter):
-          activationModule.appendModule (copyData(activationCDataType, gradientInput, self.gwvw, \
-            self.activationSetPCStruct.vgprActCopy))
-        activationModule.add(SSwapPCB64(dst=sgpr(self.activationSetPCStruct.sgprOffsetBack, 2), \
-          src=sgpr(self.activationSetPCStruct.sgprOffsetActivation, 2)))
-        activationModule.appendModule (copyData(activationCDataType, gradientInput, self.gwvw, \
-          self.activationSetPCStruct.vgprActCopy, 1))
-      elif self.parentWriter.insertActivationAfterPacked(self.kernel, self.activationTypeStr) and (self.kernel["ProblemType"]["UseScaleAlphaVec"] == False):
-        isActivationInsertAfter = True
-        activationModule = self.parentWriter.getActivationDestDataType(self.kernel, self.activation, \
-          self.activationTypeStr, self.gwvw, gradientInput , gradientInput, self.tmpVgpr, self.tmpSgpr)
-      else:
-        satInt8 = False
-        if self.kernel["ProblemType"]["DestDataType"].isInt8():
-          if (self.activationTypeStr == 'abs') or (self.activationTypeStr == 'relu'):
-            SaturateTypeInt8 = SaturateCastType.DO_NOTHING
-            satInt8 = True
-        # getActivationActivationComputeType emits on the "ValuC+N" relative
-        # register namespace when enableValuC is set, so make its input index
-        # relative to startVgprValu. The offset is scoped to this consumer only;
-        # the absolute-vgpr consumers above are left untouched.
-        actComputeInput = gradientInput
-        if enableValuC:
-          actComputeInput = gradientInput - self.parentWriter.states.c.startVgprValu
-        activationModule = self.parentWriter.getActivationActivationComputeType(self.kernel, self.activation, \
-          self.activationTypeStr, self.gwvw, actComputeInput, actComputeInput, self.tmpVgpr, self.tmpSgpr, satInt8, enableValuC)
-      # Add C *= GradientAct
-      if self.kernel["ProblemType"]["ActivationType"] != 'none' and self.kernel["ProblemType"]["Gradient"] and ((self.kernel["GlobalSplitU"] == 1 or self.kernel["GlobalSplitU"] == -1) or self.kernel["StreamK"] > 0):
-        if isActivationInsertAfter:
-          assert 0, "Gradient does not support isActivationInsertAfter."
-        for vi in range(0, self.gwvw):
-          sumIdxV = self.ss.elementSumIdx[elementIdx] + vi
-          dataEV  = dataE + vi
-          if self.kernel["ProblemType"]["ComputeDataType"].isSingle():
-            vgprIdx = sumIdxV - self.parentWriter.states.c.startVgprValu
-            # Generate single f32 code if edge is detected.
-            if ((vi + 1) == self.gwvw) and ((self.gwvw % 2) == 1):
-              activationModule.add(VMulF32(dst=vgpr("ValuC+%d"%vgprIdx), src0=vgpr("ValuC+%d"%vgprIdx), src1=vgpr(dataEV), comment="C *= GradAct"))
-            # Original packed route
-            elif vi%2 == 1:
-              assert (self.gwvw % 2 == 0)
-            else:
-              activationModule.add(VMulPKF32(dst=vgpr("ValuC+%d"%vgprIdx, 2), src0=vgpr("ValuC+%d"%vgprIdx, 2), src1=vgpr(dataEV, 2), comment="C *= GradAct"))
-          else:
-            assert 0, "Unsupported gradient type"
-
-      scaleDModule = Module("Empty scaleDModule")
-      if self.kernel["ProblemType"]["UseScaleCD"] and ((self.kernel["GlobalSplitU"] == 1 or self.kernel["GlobalSplitU"] == -1) or self.kernel["StreamK"] > 0):
-        for vi in range(0, self.gwvw):
-          sumIdxV = self.ss.elementSumIdx[elementIdx] + vi
-          if self.kernel["ProblemType"]["ComputeDataType"].isSingle():
-            vgprIdx = sumIdxV - self.parentWriter.states.c.startVgprValu
-            # Generate single f32 code if edge is detected.
-            if ((vi + 1) == self.gwvw) and ((self.gwvw % 2) == 1):
-              if self.kernel["ProblemType"]["OutputAmaxD"]:
-                if self.edge:
-                  activationModule.add(VCmpEQU32(dst=VCC(), src0="BufferOOB", src1=(vgpr(addrCalc.addrDVgpr)), comment =""))
-                  activationModule.add(VCndMaskB32(dst=vgpr("AmaxOutB"), src0=vgpr("ValuC+%d"%vgprIdx), src1=0, src2=VCC(), comment="Check If OOB, put zero if OOB"))
-                  activationModule.add(VMaxF32(dst=vgpr("AmaxOut"), src0=vgpr("AmaxOut"), src1=vgpr("AmaxOutB", isAbs=True), comment="absmax"))
-                else:
-                  activationModule.add(VMaxF32(dst=vgpr("AmaxOut"), src0=vgpr("AmaxOut"), src1=vgpr("ValuC+%d"%vgprIdx, isAbs=True), comment="absmax"))
-              activationModule.add(VMulF32(dst=vgpr("ValuC+%d"%vgprIdx), src0=vgpr("ValuC+%d"%vgprIdx), src1=sgpr("ScaleD"), comment="result *= ScaleD"))
-            # Original packed route
-            elif vi%2 == 1:
-              assert (self.gwvw % 2 == 0)
-            else:
-              activationModule.add(VMulPKF32(dst=vgpr("ValuC+%d"%vgprIdx, 2), src0=vgpr("ValuC+%d"%vgprIdx, 2), src1=sgpr("ScaleD", 2), vop3=VOP3PModifiers(op_sel_hi=[1,0,1]), comment="result *= ScaleD"))
-          else:
-            assert 0, "Unsupported scaleD type"
-
-
-      # pack stores, beta and non-beta reach here:
-      packModule = Module("Empty pack module")
-      convertModule = Module("Empty convert module")
-      if self.needsAccumToDestConversion:
-        if self.kernel["ActivationFuncCall"] and activationCDataType == self.kernel["ProblemType"]["DestDataType"]:
-          destIdx = self.activationSetPCStruct.vgprActCopy
-        else:
-          destIdx = self.ss.elementSumIdx[elementIdx]
-        packTmpS01 = self._epilogScratchSgpr(self.laneSGPRC)
-        if self.kernel["ProblemType"]["DestDataType"].isHalf():
-          # For UseSubtileImpl non-edge: paired dwordx4 path handles packing in _emit16bitSubtilePairedStore.
-          if not is16bitSubtile:
-            packModule = self.packdata(self.gwvw, destIdx, self.ss.elementSumIdx[elementIdx], inputPrefix="ValuC+", prefixOffset=self.parentWriter.states.c.startVgprValu)
-        elif self.kernel["ProblemType"]["DestDataType"].isBFloat16():
-          # For UseSubtileImpl non-edge: paired dwordx4 path handles packing in _emit16bitSubtilePairedStore.
-          if not is16bitSubtile:
-            packModule = self.packdata(self.gwvw, destIdx, self.ss.elementSumIdx[elementIdx], bf16CVTVgprStruct=self.cvtVgprStruct,
-                                       tmpS01=packTmpS01, laneSGPRC=self.laneSGPRC, inputPrefix="ValuC+", prefixOffset=self.parentWriter.states.c.startVgprValu)
-        elif self.kernel["ProblemType"]["DestDataType"].isAnyFloat8():
-          if self.kernel["ProblemType"]["StochasticRounding"]:
-            packModule = self.packdata(self.gwvw, destIdx, self.ss.elementSumIdx[elementIdx], fp8CVTVgprStruct=self.cvtVgprStruct, \
-                                       tmpS01=packTmpS01, laneSGPRC=self.laneSGPRC, vgprTmp=vgprRND, inputPrefix="ValuC+", prefixOffset=self.parentWriter.states.c.startVgprValu, alphaScale=1.0)
-          else:
-            packModule = self.packdata(self.gwvw, destIdx, self.ss.elementSumIdx[elementIdx], fp8CVTVgprStruct=self.cvtVgprStruct, \
-                                       tmpS01=packTmpS01, laneSGPRC=self.laneSGPRC, inputPrefix="ValuC+", prefixOffset=self.parentWriter.states.c.startVgprValu)
-        elif self.kernel["ProblemType"]["DestDataType"].isAnyBFloat8():
-          # TODO: BF8 stochastic rounding is not yet supported here.
-          #       VCvtSRF32toBF8 instruction exists but stochasticRoundingCvt() only emits VCvtSRF32toFP8.
-          #       To support BF8 SR: add SR branch here, generalize stochasticRoundingCvt() to accept bf8CVTVgprStruct,
-          #       and select VCvtSRF32toBF8 based on DestDataType.
-          packModule = self.packdata(self.gwvw, destIdx, self.ss.elementSumIdx[elementIdx], bf8CVTVgprStruct=self.cvtVgprStruct, \
-                                     tmpS01=packTmpS01, laneSGPRC=self.laneSGPRC, inputPrefix="ValuC+", prefixOffset=self.parentWriter.states.c.startVgprValu)
-        elif self.kernel["ProblemType"]["DestDataType"].isInt32():
-          if self.kernel["ProblemType"]["ComputeDataType"].isSingle() and ((self.parentWriter.states.useBias == DataDirection.READ) or self.kernel["ActivationFuncCall"] or self.applyAlpha or self.beta):
-            convertModule = convertData(self.gwvw, self.ss.elementSumIdx[elementIdx], cvtType=CvtType.CVT_F32_to_I32, \
-                                        inputPrefix="ValuC+", prefixOffset=self.parentWriter.states.c.startVgprValu)
-        elif self.kernel["ProblemType"]["DestDataType"].isInt8():
-          if self.kernel["ProblemType"]["ComputeDataType"].isSingle() and ((self.parentWriter.states.useBias == DataDirection.READ) or self.kernel["ActivationFuncCall"] or self.applyAlpha or self.beta):
-            convertModule = convertData(self.gwvw, self.ss.elementSumIdx[elementIdx], cvtType=CvtType.CVT_F32_to_I32, roundType=RoundType.ROUND_TO_NEAREST_EVEN, \
-                                        inputPrefix="ValuC+", prefixOffset=self.parentWriter.states.c.startVgprValu)
-          packModule = self.packdata(self.gwvw, destIdx, self.ss.elementSumIdx[elementIdx], self.cvtVgprStruct, self.tmpS01,
-                                     SaturateTypeInt8=SaturateTypeInt8, inputPrefix="ValuC+", prefixOffset=self.parentWriter.states.c.startVgprValu)
-        self._epilogScratchFree(packTmpS01)
-
-      if self.parentWriter.states.asmCaps["HasWMMA_V1"] and self.kernel["EnableMatrixInstruction"] and self.kernel["ProblemType"]["DestDataType"].isHalf() and (not self.kernel["ProblemType"]["HighPrecisionAccumulate"]):
-        for vi in range(0, self.gwvw):
-          sumIdxV = self.ss.elementSumIdx[elementIdx] + vi
-          if vi%2 == 1:
-            formatVgpr = formatting(sumIdxV, "ValuC+", self.parentWriter.states.c.startVgprValu)
-            d = self.ss.elementSumIdx[elementIdx] + vi//2
-            dVgpr = formatting(d, "ValuC+", self.parentWriter.states.c.startVgprValu)
-            packModule.add(VPackF16toB32(dst=vgpr(dVgpr), src0=vgpr(formatting(sumIdxV-1, "ValuC+", self.parentWriter.states.c.startVgprValu)), src1=vgpr(formatVgpr), \
-                          comment="Pack with neighbor"))
-
-      if self.kernel["ExpertSchedulingMode"] > 0:
-        packModule.add(SWaitAlu(va_vdst=0, comment="wait for writes to complete"))
-
-      biasReductionModule = Module("biasReductionModule")
-      if self.storeBiasD == 1:
-        vgprIdx = self.ss.elementSumIdx[elementIdx] - self.parentWriter.states.c.startVgprValu
-        biasReductionModule.add(self.parentWriter.addStore(self.kernel, self.ss, 'Bias', addrCalc, "ValuC+%d"%vgprIdx, self.tmpS01, self.edge, comment="store Bias"))
-
-      if isActivationInsertAfter:
-        if self.parentWriter.states.useGateResidual and \
-           (self.kernel["GlobalSplitU"] == 1 or self.kernel["GlobalSplitU"] == -1):
-          raise RuntimeError(
-              "GateResidual is not supported with isActivationInsertAfter "
-              "(activation applied after pack on dest-dtype value).")
-        module.add(convertModule)
-        module.add(packModule)
-        module.add(gradientCvtModule)
-        module.add(activationModule)
-      else:
-        module.add(gradientCvtModule)
-        module.add(activationModule)
-        module.add(scaleDModule)
-        module.add(biasReductionModule)
-        module.add(gateModule)
-        module.add(convertModule)
-        module.add(packModule)
-
-      if not self.kernel["StoreRemapVectorWidth"]:
-        # 16bit UseSubtileImpl non-edge: emit paired dwordx4 stores combining sba=0
-        # with sba=1 subtile data into one buffer_store_dwordx4.  Works for both
-        # bf16 and fp16 HPA output types.
-        #
-        # UseSubtileImpl splits MIWaveTile[0] into two subtile groups:
-        #   sba=0 owns even tt0 values (0, 2, 4, ...)
-        #   sba=1 owns odd  tt0 values (1, 3, 5, ...)
-        # The element list interleaves them as consecutive (even, odd) tt0 pairs:
-        #   element 0: tt0=0 (sba=0)
-        #   element 1: tt0=1 (sba=1)   <- pair with element 0
-        #   element 2: tt0=2 (sba=0)   (if MIWaveTile[0]>2)
-        #   ...
-        # Pairing key: tt0 % 2 — even tt0 is sba=0, odd tt0 is sba=1.
-        storeCodeModule = storeCode if self.kernel["GroupLoadStore"] else module
-        if is16bitSubtile:
-          tt0 = element[1]  # d0: thread-tile index along M
-          # Epilogue (bias/activation) is applied per-element in iteration order.
-          # The paired store must be emitted AFTER both sba=0 and sba=1 elements have
-          # had their epilogue applied, so we defer it to the sba=1 (odd tt0) iteration.
-          if tt0 % 2 == 1:
-            # sba=1 element (odd tt0): both sba=0 and sba=1 epilogues are done — emit paired store.
-            # Find the sba=0 partner: the immediately preceding element with tt0-1.
-            partnerElementIdx = elementIdx - 1
-            partnerExists = (partnerElementIdx >= 0 and
-                             self.batchElements[partnerElementIdx][1] == tt0 - 1)
-            if partnerExists:
-              # Paired dwordx4 store for (sba=0 at tt0-1, sba=1 at tt0).
-              partnerAddrCalc: AddrCalculation = self.ss.elementAddr[partnerElementIdx]
-              sumIdx0 = self.ss.elementSumIdx[partnerElementIdx]
-              sumIdx1 = self.ss.elementSumIdx[elementIdx]
-              prefixOffset = self.parentWriter.states.c.startVgprValu
-              blockIdxN = element[0]
-              # Guard with tt0-1 (lower block): skip if even the lower M-block is OOB.
-              # This also handles N-group transitions.
-              blockIdxM = tt0 - 1
-              skipLabel = self._emitSubtileOobGuard(storeCodeModule, blockIdxM, blockIdxN,
-                                                    labelPrefix="subtile_skip_store")
-              # Additional check: paired store needs BOTH blocks valid (MGuard > tt0).
-              # When only the lower block is valid, fall through to a scalar fallback.
-              guardMSgpr = self.parentWriter.states.subtileM32ValidBlocksSgpr
-              if guardMSgpr is not None:
-                afterPairedLabel = Label(self.parentWriter.labels.getNameInc("subtile_after_paired"),
-                                        f"after paired/fallback store tt0={tt0}")
-                fallbackLabelName = self.parentWriter.labels.getNameInc("subtile_scalar_fallback")
-                fallbackLabel = Label(fallbackLabelName,
-                                      f"scalar fallback for d0={tt0-1} when d0={tt0} is OOB")
-                storeCodeModule.add(_scmpGtU32(self.parentWriter, sgpr("SubtileMGuard"), tt0,
-                                               comment=f"paired store: both M-blocks valid? (MGuard > {tt0})"))
-                storeCodeModule.add(SCBranchSCC0(labelName=fallbackLabel.getLabelName(),
-                                                 comment=f"only d0={tt0-1} valid -> scalar fallback"))
-                tmpStoreCode = self._emit16bitSubtilePairedStore(partnerAddrCalc, sumIdx0, sumIdx1, prefixOffset, tt0 - 1, blockIdxM=blockIdxM, blockIdxN=blockIdxN)
-                storeCodeModule.add(tmpStoreCode)
-                storeCodeModule.add(SBranch(labelName=afterPairedLabel.getLabelName(),
-                                            comment="skip scalar fallback"))
-                storeCodeModule.add(fallbackLabel)
-                tmpFallbackCode = self._emit16bitSubtileScalarStore(partnerAddrCalc, sumIdx0, prefixOffset, tt0 - 1, blockIdxM=blockIdxM, blockIdxN=blockIdxN)
-                storeCodeModule.add(tmpFallbackCode)
-                storeCodeModule.add(afterPairedLabel)
+              # Original packed route
+              elif vi%2 == 1:
+                assert (self.gwvw % 2 == 0)
               else:
-                tmpStoreCode = self._emit16bitSubtilePairedStore(partnerAddrCalc, sumIdx0, sumIdx1, prefixOffset, tt0 - 1, blockIdxM=blockIdxM, blockIdxN=blockIdxN)
-                storeCodeModule.add(tmpStoreCode)
-              if skipLabel is not None:
-                storeCodeModule.add(skipLabel)
-              self.storesIssued += 1
+                module.add(VAddPKF32(dst=vgpr(vgprDst, 2), src0=vgpr(inputVgpr, 2), \
+                                     src1=vgpr("ValuC+%d"%vgprIdx, 2), comment="C += bias"))
             else:
-              # sba=1 orphan (no sba=0 partner in this batch — split by batch boundary).
-              blockIdxM = tt0
-              blockIdxN = element[0]
-              orphanSkipLabel = self._emitSubtileOobGuard(storeCodeModule, blockIdxM, blockIdxN,
-                                                          labelPrefix="subtile_skip_orphan")
-              sumIdx0 = self.ss.elementSumIdx[elementIdx]
-              prefixOffset = self.parentWriter.states.c.startVgprValu
-              tmpStoreCode = self._emit16bitSubtileScalarStore(addrCalc, sumIdx0, prefixOffset, tt0, blockIdxM=blockIdxM, blockIdxN=blockIdxN)
-              storeCodeModule.add(tmpStoreCode)
-              if orphanSkipLabel is not None:
-                storeCodeModule.add(orphanSkipLabel)
-              self.storesIssued += 1
+              raise RuntimeError("Unsupported bias compute data type %s."%str(self.kernel["ProblemType"]["ComputeDataType"]))
+
+        # Gate Residual: acc = gate*acc + gate. Built here but DEFERRED — added after
+        # activation+scaleD (see module.add(gateModule) below), on the f32 ValuC.
+        gateModule = Module("Empty GateResidual")
+        if self.parentWriter.states.useGateResidual and \
+           (self.kernel["GlobalSplitU"] == 1 or self.kernel["GlobalSplitU"] == -1 or self.kernel["_GlobalAccumulation"] == "MultipleBufferSingleKernel"):
+          # TODO: I8 input (int32 compute) — needs int32 acc -> cvt f32 -> FMA ->
+          # saturate-cast. Not supported yet; reject below.
+          if not self.kernel["ProblemType"]["ComputeDataType"].isSingle():
+            raise RuntimeError(
+                "GateResidual currently requires ComputeDataType=f32 (HPA); got %s" %
+                str(self.kernel["ProblemType"]["ComputeDataType"]))
+
+          gateList = list(self.kernel["ProblemType"].get("GateResidualDataTypeList", []))
+          if not gateList:
+            # Default fallback: use DestDataType as the gate dtype.
+            gateList = [self.kernel["ProblemType"]["DestDataType"]]
+
+          def _emit_gate_fma():
+            """ValuC = gate*ValuC + gate."""
+            fmaMod = Module("GateFMA")
+            for vi in range(0, self.gwvw):
+              sumIdxV = self.ss.elementSumIdx[elementIdx] + vi
+              vgprIdx = sumIdxV - self.parentWriter.states.c.startVgprValu
+              fmaMod.add(VFmaF32(
+                dst=vgpr("ValuC+%d"%vgprIdx),
+                src0=vgpr(dataGate + vi),
+                src1=vgpr("ValuC+%d"%vgprIdx),
+                src2=vgpr(dataGate + vi),
+                comment="GateResidual: acc = gate*acc + gate (vi=%d)"%vi))
+            return fmaMod
+
+          # Gate store split (_gateStoreSplitEmitGate True/False/None):
+          #   None  -> inactive/edge: per-element skip-guard (branch per element)
+          #   True  -> store-split gate block: emit FMA, no per-element guard (outer branch gates)
+          #   False -> store-split no-gate block: emit nothing (D = acc)
+          _gateStoreSplitEG = getattr(self, "_gateStoreSplitEmitGate", None)
+          if _gateStoreSplitEG is False:
+            pass  # no-gate pass: skip gate FMA entirely
           else:
-            # sba=0 element (even tt0): defer SRD row increment until after N-group label.
-            if self.ss.optSrdIncForRow and addrCalc.rowInc:
-              self._subtilePendingSrdDInc = addrCalc.incrementToNextRow(self.kernel, "D", self.ss, self.tmpS01)
-            partnerElementIdx = elementIdx + 1
-            partnerExists = (partnerElementIdx < len(self.batchElements) and
-                             self.batchElements[partnerElementIdx][1] == tt0 + 1)
-            if not partnerExists:
-              # Orphan element (no sba=1 partner in this batch): scalar 16bit store now.
-              # Guard against OOB wave groups (same as paired store path).
-              blockIdxM = tt0
-              blockIdxN = element[0]
-              # Early exit: skip this orphan scalar store if the wave group is outside the valid M/N tile bounds.
-              orphanSkipLabel = self._emitSubtileOobGuard(storeCodeModule, blockIdxM, blockIdxN,
-                                                          labelPrefix="subtile_skip_orphan")
-              sumIdx0 = self.ss.elementSumIdx[elementIdx]
-              prefixOffset = self.parentWriter.states.c.startVgprValu
-              tmpStoreCode = self._emit16bitSubtileScalarStore(addrCalc, sumIdx0, prefixOffset, tt0, blockIdxM=blockIdxM, blockIdxN=blockIdxN)
-              storeCodeModule.add(tmpStoreCode)
-              if orphanSkipLabel is not None:
-                storeCodeModule.add(orphanSkipLabel)
-              self.storesIssued += 1
-        elif self.kernel["_GlobalAccumulation"] == "MultipleBufferSingleKernel":#GSUGSU
-          tmpStoreCode = self.parentWriter.addStore(self.kernel, self.ss, 'TD', addrCalc, sumIdx, self.tmpS01, self.edge, comment="store TD not StoreRemapVectorWidth")
-          storeCodeModule.add(tmpStoreCode)
-          self.storesIssued += 1
-        else:
-          # Regular store path. If UseSubtileImpl NonEdge, guard against OOB wave groups.
-          skipLabel = None
-          if isSubtileNonEdge:
-            tt0 = element[1]
-            blockIdxM = tt0  # each tt0 maps to one mBlockSize-row block
-            blockIdxN = element[0]
-            # Early exit: skip this store if the wave group is outside the valid M/N tile bounds.
-            skipLabel = self._emitSubtileOobGuard(storeCodeModule, blockIdxM, blockIdxN,
-                                                  labelPrefix="subtile_skip_store")
-          # Apply exec mask for partial M/N blocks (regular fp32 store path)
-          if self.parentWriter.states.storeAlign8 and isSubtileNonEdge:
-            self._emitAlign8ExecMask(storeCodeModule, self.tmpS01, self.tmpS23, blockIdxM, blockIdxN,
-                                     mGuardOffset=1, rowScaleShift=2)
-            storeCodeModule.add(self.getEdgeMovInstType()(EXEC(), sgpr(self.tmpS01, self.laneSGPRC), "apply exec mask"))
-          # _emitOverrideRows reused from the top of this store loop (see _lookaheadRowInc).
-          tmpStoreCode = self.parentWriter.addStore(self.kernel, self.ss, 'D', addrCalc, sumIdx, self.tmpS01, self.edge, elementIdx, self.batchIdx,
-                                                   overrideAfterPrimerRows=_emitOverrideRows, comment="store D")
-          storeCodeModule.add(tmpStoreCode)
-          if self.parentWriter.states.storeAlign8 and isSubtileNonEdge:
-            storeCodeModule.add(self.getEdgeMovInstType()(EXEC(), -1, "restore exec"))
-          if skipLabel is not None:
-            storeCodeModule.add(skipLabel)
-          self.storesIssued += 1
+            _gateSkipLabel = None
+            if _gateStoreSplitEG is None:
+              _gateSkipLabel = Label(self.parentWriter.labels.getNameInc("GateSkip_%u"%elementIdx), "")
+              gateModule.add(self.parentWriter.getSCMPKInstruction(
+                  "EQU32", "SrdGate+2", 0, comment="gate disabled? (SrdGate num_records==0)"))
+              gateModule.add(SCBranchSCC1(_gateSkipLabel.getLabelName(), "skip gate if disabled (null gate)"))
+            if len(gateList) == 1:
+              gateModule.add(self._emitGateCvt(dataGate, gateList[0]))
+              gateModule.add(_emit_gate_fma())
+            else:
+              gateModule.add(_emit_gate_fma())
+            if _gateSkipLabel is not None:
+              gateModule.add(_gateSkipLabel)
 
         if (self.kernel["ProblemType"]["UseE"] and not self.kernel["ProblemType"]["Gradient"]) and ((self.kernel["GlobalSplitU"] == 1 or self.kernel["GlobalSplitU"] == -1) or self.kernel["StreamK"] > 0):
-          self.storesIssued += 1
-        if self.storeBiasD == 1:
-          self.storesIssued += 1
+          vgprIdx   = self.ss.elementSumIdx[elementIdx] - self.parentWriter.states.c.startVgprValu
+          vgprDst   = self.activationSetPCStruct.vgprActCopy if mergeActFuncCall else vgprIdx
+          prefixStr = "" if mergeActFuncCall else "ValuC+"
+          prefixOffset = 0 if mergeActFuncCall else self.parentWriter.states.c.startVgprValu
+          # Packdata if needed
+          tmpVgpr = self.tmpVgpr
+          if mergeActFuncCall:
+            tmpVgpr += self.gwvw * self.kernel["ProblemType"]["ComputeDataType"].numRegisters()
+          if self.kernel["ProblemType"]["ComputeDataType"].isSingle():
+            if self.kernel["ProblemType"]["DataTypeE"].isHalf():
+              packdata = PackData_F16()
+              module.add(packdata(self.gwvw, tmpVgpr, vgprDst, tmpVgpr=tmpVgpr, inputPrefix=prefixStr, prefixOffset=prefixOffset))
+              vgprDst = tmpVgpr
+            elif self.kernel["ProblemType"]["DataTypeE"].isBFloat16():
+              packdata = PackData_BF16()
+              module.add(packdata(self.gwvw, tmpVgpr, vgprDst, self.cvtVgprStruct, self.tmpS01, self.laneSGPRC,
+                                  tmpVgpr=tmpVgpr, inputPrefix=prefixStr, prefixOffset=prefixOffset))
+              vgprDst = tmpVgpr
+            elif self.kernel["ProblemType"]["DataTypeE"].isSingle():
+              if not mergeActFuncCall:
+                vgprDst = "ValuC+%d" % vgprDst
+            elif self.kernel["ProblemType"]["DataTypeE"].isFloat8():
+              packdata = PackData_FLOAT8()
+              module.add(packdata(self.gwvw, tmpVgpr, vgprDst, self.cvtVgprStruct, self.tmpS01, self.laneSGPRC,
+                                  inputPrefix=prefixStr, prefixOffset=prefixOffset))
+              vgprDst = tmpVgpr
+            elif self.kernel["ProblemType"]["DataTypeE"].isFloat8_fnuz():
+              packdata = PackData_FLOAT8_fnuz()
+              module.add(packdata(self.gwvw, tmpVgpr, vgprDst, self.cvtVgprStruct, self.tmpS01, self.laneSGPRC,
+                                  inputPrefix=prefixStr, prefixOffset=prefixOffset))
+              vgprDst = tmpVgpr
+            else:
+              printExit("Unsupport type for E output. (%s)"%self.kernel["ProblemType"]["DataTypeE"].toEnum())
+          else:
+            printExit("Unsupport compute type for E output. (%s)"%self.kernel["ProblemType"]["ComputeDataType"].toEnum())
 
-      else:
-        if not self.kernel["_GlobalAccumulation"] == "MultipleBufferSingleKernel":#GSUGSU
-          rpe = self.parentWriter.states.bpeCinternal // self.parentWriter.states.bpr
-          module.add(self.parentWriter.storeRemapAddLocalWrite(self.kernel, self.ss, addrCalc, sumIdx*rpe))
-          # Column Block Shape has been written to LDS
-          # Now read back and write out to global memory
+          module.add(self.parentWriter.addStore(self.kernel, self.ss, 'E', addrCalc, vgprDst, self.tmpS01, self.edge, comment="store E"))
+
+        SaturateTypeInt8 = SaturateCastType.NORMAL
+
+        gradientCvtModule = Module("gradientCvtModule")
+        if (self.kernel["ProblemType"]["UseE"] and self.kernel["ProblemType"]["Gradient"]) and ((self.kernel["GlobalSplitU"] == 1 or self.kernel["GlobalSplitU"] == -1) or self.kernel["StreamK"] > 0):
+          loadOffset = int((self.kernel["ProblemType"]["ComputeDataType"].numRegisters() - self.kernel["ProblemType"]["DataTypeE"].numRegisters()) * self.ss.cfg.gwvw)
+          if activationCDataType != self.kernel["ProblemType"]["DataTypeE"]:
+            if activationCDataType.isSingle() and self.kernel["ProblemType"]["DataTypeE"].isHalf():
+              for vi in range(0, self.gwvw):
+                dataEV  = dataE + vi
+                dataEV2 = dataE + vi // 2
+                selectbit = HighBitSel.LOW if (self.gwvw != 1 and vi % 2 == 0) or (self.gwvw == 1 and elementIdx % 2 == 0) else HighBitSel.HIGH
+                gradientCvtModule.add(ECvtF16toF32(dst=vgpr(dataEV), src=vgpr(dataEV2+loadOffset), sel=selectbit, comment="gwvw %d, elementIdx %d"%(self.gwvw, elementIdx)))
+            elif activationCDataType.isSingle() and self.kernel["ProblemType"]["DataTypeE"].isBFloat16():
+              for vi in range(0, self.gwvw):
+                dataEV  = dataE + vi
+                dataEV2 = dataE + vi // 2
+                # Consider bf16 without packing (gwvw==1)
+                # TODO: check correctness for gfx950
+                selectWord = 0 if (self.gwvw != 1 and vi % 2 == 0) or (self.gwvw == 1) else 1
+                module.add(VCvtBF16toFP32(dst=vgpr(dataEV), src=vgpr(dataEV2+loadOffset), vgprMask=vgpr(self.cvtVgprStruct.vgprBf16Mask), vi=(selectWord), comment="gwvw %d, elementIdx %d"%(self.gwvw, elementIdx)))
+            else:
+              printExit("[Gradient input] Unsupported conversion.")
+
+        # Activation
+        activationModule = None
+        isActivationInsertAfter = False
+        if self.kernel["ProblemType"]["Gradient"] and ((self.kernel["GlobalSplitU"] == 1 or self.kernel["GlobalSplitU"] == -1) or self.kernel["StreamK"] > 0):
+          gradientInput = dataE
+          enableValuC   = False
         else:
-          tmpStoreCode = self.parentWriter.addStore(self.kernel, self.ss, 'TD', addrCalc, sumIdx, self.tmpS01, self.edge, comment="store TD StoreRemapVectorWidth")
+          gradientInput = self.ss.elementSumIdx[elementIdx]
+          enableValuC   = True
+          if self.kernel["LocalSplitU"] > 1:
+            # When LSU > 1, the VGPRs are from LSU output.
+            # the elementSumIdx has indicated the VGPRs from LSU.
+            # Don't use the ValuC prefix here.
+            enableValuC = False
+          # gradientInput is an absolute vgpr index (= elementSumIdx). The
+          # ActivationFuncCall/copyData and getActivationDestDataType consumers below
+          # address it directly as an absolute vgpr, so keep it absolute here. Only
+          # getActivationActivationComputeType() uses the "ValuC+N" relative namespace
+          # (when enableValuC is set); that startVgprValu offset is applied at its
+          # call site below.
+        if self.kernel["ActivationFuncCall"]:
+          if (activationCDataType == self.kernel["ProblemType"]["DestDataType"]) and \
+            (activationCDataType != self.kernel["ProblemType"]["ComputeDataType"]) and ((self.kernel["ProblemType"]["UseScaleCD"] == False) or (self.kernel["ProblemType"]["UseScaleAlphaVec"] == False)):
+            isActivationInsertAfter = True
+          activationModule = Module("ActivationFuncCall")
+          if (not mergeActFuncCall) and (not isActivationInsertAfter):
+            activationModule.appendModule (copyData(activationCDataType, gradientInput, self.gwvw, \
+              self.activationSetPCStruct.vgprActCopy))
+          activationModule.add(SSwapPCB64(dst=sgpr(self.activationSetPCStruct.sgprOffsetBack, 2), \
+            src=sgpr(self.activationSetPCStruct.sgprOffsetActivation, 2)))
+          activationModule.appendModule (copyData(activationCDataType, gradientInput, self.gwvw, \
+            self.activationSetPCStruct.vgprActCopy, 1))
+        elif self.parentWriter.insertActivationAfterPacked(self.kernel, self.activationTypeStr) and (self.kernel["ProblemType"]["UseScaleAlphaVec"] == False):
+          isActivationInsertAfter = True
+          activationModule = self.parentWriter.getActivationDestDataType(self.kernel, self.activation, \
+            self.activationTypeStr, self.gwvw, gradientInput , gradientInput, self.tmpVgpr, self.tmpSgpr)
+        else:
+          satInt8 = False
+          if self.kernel["ProblemType"]["DestDataType"].isInt8():
+            if (self.activationTypeStr == 'abs') or (self.activationTypeStr == 'relu'):
+              SaturateTypeInt8 = SaturateCastType.DO_NOTHING
+              satInt8 = True
+          # getActivationActivationComputeType emits on the "ValuC+N" relative
+          # register namespace when enableValuC is set, so make its input index
+          # relative to startVgprValu. The offset is scoped to this consumer only;
+          # the absolute-vgpr consumers above are left untouched.
+          actComputeInput = gradientInput
+          if enableValuC:
+            actComputeInput = gradientInput - self.parentWriter.states.c.startVgprValu
+          activationModule = self.parentWriter.getActivationActivationComputeType(self.kernel, self.activation, \
+            self.activationTypeStr, self.gwvw, actComputeInput, actComputeInput, self.tmpVgpr, self.tmpSgpr, satInt8, enableValuC)
+        # Add C *= GradientAct
+        if self.kernel["ProblemType"]["ActivationType"] != 'none' and self.kernel["ProblemType"]["Gradient"] and ((self.kernel["GlobalSplitU"] == 1 or self.kernel["GlobalSplitU"] == -1) or self.kernel["StreamK"] > 0):
+          if isActivationInsertAfter:
+            assert 0, "Gradient does not support isActivationInsertAfter."
+          for vi in range(0, self.gwvw):
+            sumIdxV = self.ss.elementSumIdx[elementIdx] + vi
+            dataEV  = dataE + vi
+            if self.kernel["ProblemType"]["ComputeDataType"].isSingle():
+              vgprIdx = sumIdxV - self.parentWriter.states.c.startVgprValu
+              # Generate single f32 code if edge is detected.
+              if ((vi + 1) == self.gwvw) and ((self.gwvw % 2) == 1):
+                activationModule.add(VMulF32(dst=vgpr("ValuC+%d"%vgprIdx), src0=vgpr("ValuC+%d"%vgprIdx), src1=vgpr(dataEV), comment="C *= GradAct"))
+              # Original packed route
+              elif vi%2 == 1:
+                assert (self.gwvw % 2 == 0)
+              else:
+                activationModule.add(VMulPKF32(dst=vgpr("ValuC+%d"%vgprIdx, 2), src0=vgpr("ValuC+%d"%vgprIdx, 2), src1=vgpr(dataEV, 2), comment="C *= GradAct"))
+            else:
+              assert 0, "Unsupported gradient type"
 
-          if self.kernel["GroupLoadStore"]:
-            storeCode.add(tmpStoreCode)
+        scaleDModule = Module("Empty scaleDModule")
+        if self.kernel["ProblemType"]["UseScaleCD"] and ((self.kernel["GlobalSplitU"] == 1 or self.kernel["GlobalSplitU"] == -1) or self.kernel["StreamK"] > 0):
+          for vi in range(0, self.gwvw):
+            sumIdxV = self.ss.elementSumIdx[elementIdx] + vi
+            if self.kernel["ProblemType"]["ComputeDataType"].isSingle():
+              vgprIdx = sumIdxV - self.parentWriter.states.c.startVgprValu
+              # Generate single f32 code if edge is detected.
+              if ((vi + 1) == self.gwvw) and ((self.gwvw % 2) == 1):
+                if self.kernel["ProblemType"]["OutputAmaxD"]:
+                  if self.edge:
+                    activationModule.add(VCmpEQU32(dst=VCC(), src0="BufferOOB", src1=(vgpr(addrCalc.addrDVgpr)), comment =""))
+                    activationModule.add(VCndMaskB32(dst=vgpr("AmaxOutB"), src0=vgpr("ValuC+%d"%vgprIdx), src1=0, src2=VCC(), comment="Check If OOB, put zero if OOB"))
+                    activationModule.add(VMaxF32(dst=vgpr("AmaxOut"), src0=vgpr("AmaxOut"), src1=vgpr("AmaxOutB", isAbs=True), comment="absmax"))
+                  else:
+                    activationModule.add(VMaxF32(dst=vgpr("AmaxOut"), src0=vgpr("AmaxOut"), src1=vgpr("ValuC+%d"%vgprIdx, isAbs=True), comment="absmax"))
+                activationModule.add(VMulF32(dst=vgpr("ValuC+%d"%vgprIdx), src0=vgpr("ValuC+%d"%vgprIdx), src1=sgpr("ScaleD"), comment="result *= ScaleD"))
+              # Original packed route
+              elif vi%2 == 1:
+                assert (self.gwvw % 2 == 0)
+              else:
+                activationModule.add(VMulPKF32(dst=vgpr("ValuC+%d"%vgprIdx, 2), src0=vgpr("ValuC+%d"%vgprIdx, 2), src1=sgpr("ScaleD", 2), vop3=VOP3PModifiers(op_sel_hi=[1,0,1]), comment="result *= ScaleD"))
+            else:
+              assert 0, "Unsupported scaleD type"
 
-          module.add(tmpStoreCode)
 
-          self.storesIssued += 1
+        # pack stores, beta and non-beta reach here:
+        packModule = Module("Empty pack module")
+        convertModule = Module("Empty convert module")
+        if self.needsAccumToDestConversion:
+          if self.kernel["ActivationFuncCall"] and activationCDataType == self.kernel["ProblemType"]["DestDataType"]:
+            destIdx = self.activationSetPCStruct.vgprActCopy
+          else:
+            destIdx = self.ss.elementSumIdx[elementIdx]
+          packTmpS01 = self._epilogScratchSgpr(self.laneSGPRC)
+          if self.kernel["ProblemType"]["DestDataType"].isHalf():
+            # For UseSubtileImpl non-edge: paired dwordx4 path handles packing in _emit16bitSubtilePairedStore.
+            if not is16bitSubtile:
+              packModule = self.packdata(self.gwvw, destIdx, self.ss.elementSumIdx[elementIdx], inputPrefix="ValuC+", prefixOffset=self.parentWriter.states.c.startVgprValu)
+          elif self.kernel["ProblemType"]["DestDataType"].isBFloat16():
+            # For UseSubtileImpl non-edge: paired dwordx4 path handles packing in _emit16bitSubtilePairedStore.
+            if not is16bitSubtile:
+              packModule = self.packdata(self.gwvw, destIdx, self.ss.elementSumIdx[elementIdx], bf16CVTVgprStruct=self.cvtVgprStruct,
+                                         tmpS01=packTmpS01, laneSGPRC=self.laneSGPRC, inputPrefix="ValuC+", prefixOffset=self.parentWriter.states.c.startVgprValu)
+          elif self.kernel["ProblemType"]["DestDataType"].isAnyFloat8():
+            if self.kernel["ProblemType"]["StochasticRounding"]:
+              packModule = self.packdata(self.gwvw, destIdx, self.ss.elementSumIdx[elementIdx], fp8CVTVgprStruct=self.cvtVgprStruct, \
+                                         tmpS01=packTmpS01, laneSGPRC=self.laneSGPRC, vgprTmp=vgprRND, inputPrefix="ValuC+", prefixOffset=self.parentWriter.states.c.startVgprValu, alphaScale=1.0)
+            else:
+              packModule = self.packdata(self.gwvw, destIdx, self.ss.elementSumIdx[elementIdx], fp8CVTVgprStruct=self.cvtVgprStruct, \
+                                         tmpS01=packTmpS01, laneSGPRC=self.laneSGPRC, inputPrefix="ValuC+", prefixOffset=self.parentWriter.states.c.startVgprValu)
+          elif self.kernel["ProblemType"]["DestDataType"].isAnyBFloat8():
+            # TODO: BF8 stochastic rounding is not yet supported here.
+            #       VCvtSRF32toBF8 instruction exists but stochasticRoundingCvt() only emits VCvtSRF32toFP8.
+            #       To support BF8 SR: add SR branch here, generalize stochasticRoundingCvt() to accept bf8CVTVgprStruct,
+            #       and select VCvtSRF32toBF8 based on DestDataType.
+            packModule = self.packdata(self.gwvw, destIdx, self.ss.elementSumIdx[elementIdx], bf8CVTVgprStruct=self.cvtVgprStruct, \
+                                       tmpS01=packTmpS01, laneSGPRC=self.laneSGPRC, inputPrefix="ValuC+", prefixOffset=self.parentWriter.states.c.startVgprValu)
+          elif self.kernel["ProblemType"]["DestDataType"].isInt32():
+            if self.kernel["ProblemType"]["ComputeDataType"].isSingle() and ((self.parentWriter.states.useBias == DataDirection.READ) or self.kernel["ActivationFuncCall"] or self.applyAlpha or self.beta):
+              convertModule = convertData(self.gwvw, self.ss.elementSumIdx[elementIdx], cvtType=CvtType.CVT_F32_to_I32, \
+                                          inputPrefix="ValuC+", prefixOffset=self.parentWriter.states.c.startVgprValu)
+          elif self.kernel["ProblemType"]["DestDataType"].isInt8():
+            if self.kernel["ProblemType"]["ComputeDataType"].isSingle() and ((self.parentWriter.states.useBias == DataDirection.READ) or self.kernel["ActivationFuncCall"] or self.applyAlpha or self.beta):
+              convertModule = convertData(self.gwvw, self.ss.elementSumIdx[elementIdx], cvtType=CvtType.CVT_F32_to_I32, roundType=RoundType.ROUND_TO_NEAREST_EVEN, \
+                                          inputPrefix="ValuC+", prefixOffset=self.parentWriter.states.c.startVgprValu)
+            packModule = self.packdata(self.gwvw, destIdx, self.ss.elementSumIdx[elementIdx], self.cvtVgprStruct, self.tmpS01,
+                                       SaturateTypeInt8=SaturateTypeInt8, inputPrefix="ValuC+", prefixOffset=self.parentWriter.states.c.startVgprValu)
+          self._epilogScratchFree(packTmpS01)
+
+        if self.parentWriter.states.asmCaps["HasWMMA_V1"] and self.kernel["EnableMatrixInstruction"] and self.kernel["ProblemType"]["DestDataType"].isHalf() and (not self.kernel["ProblemType"]["HighPrecisionAccumulate"]):
+          for vi in range(0, self.gwvw):
+            sumIdxV = self.ss.elementSumIdx[elementIdx] + vi
+            if vi%2 == 1:
+              formatVgpr = formatting(sumIdxV, "ValuC+", self.parentWriter.states.c.startVgprValu)
+              d = self.ss.elementSumIdx[elementIdx] + vi//2
+              dVgpr = formatting(d, "ValuC+", self.parentWriter.states.c.startVgprValu)
+              packModule.add(VPackF16toB32(dst=vgpr(dVgpr), src0=vgpr(formatting(sumIdxV-1, "ValuC+", self.parentWriter.states.c.startVgprValu)), src1=vgpr(formatVgpr), \
+                            comment="Pack with neighbor"))
+
+        if self.kernel["ExpertSchedulingMode"] > 0:
+          packModule.add(SWaitAlu(va_vdst=0, comment="wait for writes to complete"))
+
+        biasReductionModule = Module("biasReductionModule")
+        if self.storeBiasD == 1:
+          vgprIdx = self.ss.elementSumIdx[elementIdx] - self.parentWriter.states.c.startVgprValu
+          biasReductionModule.add(self.parentWriter.addStore(self.kernel, self.ss, 'Bias', addrCalc, "ValuC+%d"%vgprIdx, self.tmpS01, self.edge, comment="store Bias"))
+
+        if isActivationInsertAfter:
+          if self.parentWriter.states.useGateResidual and \
+             (self.kernel["GlobalSplitU"] == 1 or self.kernel["GlobalSplitU"] == -1):
+            raise RuntimeError(
+                "GateResidual is not supported with isActivationInsertAfter "
+                "(activation applied after pack on dest-dtype value).")
+          module.add(convertModule)
+          module.add(packModule)
+          module.add(gradientCvtModule)
+          module.add(activationModule)
+        else:
+          module.add(gradientCvtModule)
+          module.add(activationModule)
+          module.add(scaleDModule)
+          module.add(biasReductionModule)
+          module.add(gateModule)
+          module.add(convertModule)
+          module.add(packModule)
+
+        if not self.kernel["StoreRemapVectorWidth"]:
+          # 16bit UseSubtileImpl non-edge: emit paired dwordx4 stores combining sba=0
+          # with sba=1 subtile data into one buffer_store_dwordx4.  Works for both
+          # bf16 and fp16 HPA output types.
+          #
+          # UseSubtileImpl splits MIWaveTile[0] into two subtile groups:
+          #   sba=0 owns even tt0 values (0, 2, 4, ...)
+          #   sba=1 owns odd  tt0 values (1, 3, 5, ...)
+          # The element list interleaves them as consecutive (even, odd) tt0 pairs:
+          #   element 0: tt0=0 (sba=0)
+          #   element 1: tt0=1 (sba=1)   <- pair with element 0
+          #   element 2: tt0=2 (sba=0)   (if MIWaveTile[0]>2)
+          #   ...
+          # Pairing key: tt0 % 2 — even tt0 is sba=0, odd tt0 is sba=1.
+          storeCodeModule = storeCode if self.kernel["GroupLoadStore"] else module
+          if is16bitSubtile:
+            tt0 = element[1]  # d0: thread-tile index along M
+            # Epilogue (bias/activation) is applied per-element in iteration order.
+            # The paired store must be emitted AFTER both sba=0 and sba=1 elements have
+            # had their epilogue applied, so we defer it to the sba=1 (odd tt0) iteration.
+            if tt0 % 2 == 1:
+              # sba=1 element (odd tt0): both sba=0 and sba=1 epilogues are done — emit paired store.
+              # Find the sba=0 partner: the immediately preceding element with tt0-1.
+              partnerElementIdx = elementIdx - 1
+              partnerExists = (partnerElementIdx >= 0 and
+                               self.batchElements[partnerElementIdx][1] == tt0 - 1)
+              if partnerExists:
+                # Paired dwordx4 store for (sba=0 at tt0-1, sba=1 at tt0).
+                partnerAddrCalc: AddrCalculation = self.ss.elementAddr[partnerElementIdx]
+                sumIdx0 = self.ss.elementSumIdx[partnerElementIdx]
+                sumIdx1 = self.ss.elementSumIdx[elementIdx]
+                prefixOffset = self.parentWriter.states.c.startVgprValu
+                blockIdxN = element[0]
+                # Guard with tt0-1 (lower block): skip if even the lower M-block is OOB.
+                # This also handles N-group transitions.
+                blockIdxM = tt0 - 1
+                skipLabel = self._emitSubtileOobGuard(storeCodeModule, blockIdxM, blockIdxN,
+                                                      labelPrefix="subtile_skip_store")
+                # Additional check: paired store needs BOTH blocks valid (MGuard > tt0).
+                # When only the lower block is valid, fall through to a scalar fallback.
+                guardMSgpr = self.parentWriter.states.subtileM32ValidBlocksSgpr
+                if guardMSgpr is not None:
+                  afterPairedLabel = Label(self.parentWriter.labels.getNameInc("subtile_after_paired"),
+                                          f"after paired/fallback store tt0={tt0}")
+                  fallbackLabelName = self.parentWriter.labels.getNameInc("subtile_scalar_fallback")
+                  fallbackLabel = Label(fallbackLabelName,
+                                        f"scalar fallback for d0={tt0-1} when d0={tt0} is OOB")
+                  storeCodeModule.add(_scmpGtU32(self.parentWriter, sgpr("SubtileMGuard"), tt0,
+                                                 comment=f"paired store: both M-blocks valid? (MGuard > {tt0})"))
+                  storeCodeModule.add(SCBranchSCC0(labelName=fallbackLabel.getLabelName(),
+                                                   comment=f"only d0={tt0-1} valid -> scalar fallback"))
+                  tmpStoreCode = self._emit16bitSubtilePairedStore(partnerAddrCalc, sumIdx0, sumIdx1, prefixOffset, tt0 - 1, blockIdxM=blockIdxM, blockIdxN=blockIdxN)
+                  storeCodeModule.add(tmpStoreCode)
+                  storeCodeModule.add(SBranch(labelName=afterPairedLabel.getLabelName(),
+                                              comment="skip scalar fallback"))
+                  storeCodeModule.add(fallbackLabel)
+                  tmpFallbackCode = self._emit16bitSubtileScalarStore(partnerAddrCalc, sumIdx0, prefixOffset, tt0 - 1, blockIdxM=blockIdxM, blockIdxN=blockIdxN)
+                  storeCodeModule.add(tmpFallbackCode)
+                  storeCodeModule.add(afterPairedLabel)
+                else:
+                  tmpStoreCode = self._emit16bitSubtilePairedStore(partnerAddrCalc, sumIdx0, sumIdx1, prefixOffset, tt0 - 1, blockIdxM=blockIdxM, blockIdxN=blockIdxN)
+                  storeCodeModule.add(tmpStoreCode)
+                if skipLabel is not None:
+                  storeCodeModule.add(skipLabel)
+                self.storesIssued += 1
+              else:
+                # sba=1 orphan (no sba=0 partner in this batch — split by batch boundary).
+                blockIdxM = tt0
+                blockIdxN = element[0]
+                orphanSkipLabel = self._emitSubtileOobGuard(storeCodeModule, blockIdxM, blockIdxN,
+                                                            labelPrefix="subtile_skip_orphan")
+                sumIdx0 = self.ss.elementSumIdx[elementIdx]
+                prefixOffset = self.parentWriter.states.c.startVgprValu
+                tmpStoreCode = self._emit16bitSubtileScalarStore(addrCalc, sumIdx0, prefixOffset, tt0, blockIdxM=blockIdxM, blockIdxN=blockIdxN)
+                storeCodeModule.add(tmpStoreCode)
+                if orphanSkipLabel is not None:
+                  storeCodeModule.add(orphanSkipLabel)
+                self.storesIssued += 1
+            else:
+              # sba=0 element (even tt0): defer SRD row increment until after N-group label.
+              if self.ss.optSrdIncForRow and addrCalc.rowInc:
+                self._subtilePendingSrdDInc = addrCalc.incrementToNextRow(self.kernel, "D", self.ss, self.tmpS01)
+              partnerElementIdx = elementIdx + 1
+              partnerExists = (partnerElementIdx < len(self.batchElements) and
+                               self.batchElements[partnerElementIdx][1] == tt0 + 1)
+              if not partnerExists:
+                # Orphan element (no sba=1 partner in this batch): scalar 16bit store now.
+                # Guard against OOB wave groups (same as paired store path).
+                blockIdxM = tt0
+                blockIdxN = element[0]
+                # Early exit: skip this orphan scalar store if the wave group is outside the valid M/N tile bounds.
+                orphanSkipLabel = self._emitSubtileOobGuard(storeCodeModule, blockIdxM, blockIdxN,
+                                                            labelPrefix="subtile_skip_orphan")
+                sumIdx0 = self.ss.elementSumIdx[elementIdx]
+                prefixOffset = self.parentWriter.states.c.startVgprValu
+                tmpStoreCode = self._emit16bitSubtileScalarStore(addrCalc, sumIdx0, prefixOffset, tt0, blockIdxM=blockIdxM, blockIdxN=blockIdxN)
+                storeCodeModule.add(tmpStoreCode)
+                if orphanSkipLabel is not None:
+                  storeCodeModule.add(orphanSkipLabel)
+                self.storesIssued += 1
+          elif self.kernel["_GlobalAccumulation"] == "MultipleBufferSingleKernel":#GSUGSU
+            tmpStoreCode = self.parentWriter.addStore(self.kernel, self.ss, 'TD', addrCalc, sumIdx, self.tmpS01, self.edge, comment="store TD not StoreRemapVectorWidth")
+            storeCodeModule.add(tmpStoreCode)
+            self.storesIssued += 1
+          else:
+            # Regular store path. If UseSubtileImpl NonEdge, guard against OOB wave groups.
+            skipLabel = None
+            if isSubtileNonEdge:
+              tt0 = element[1]
+              blockIdxM = tt0  # each tt0 maps to one mBlockSize-row block
+              blockIdxN = element[0]
+              # Early exit: skip this store if the wave group is outside the valid M/N tile bounds.
+              skipLabel = self._emitSubtileOobGuard(storeCodeModule, blockIdxM, blockIdxN,
+                                                    labelPrefix="subtile_skip_store")
+            # Apply exec mask for partial M/N blocks (regular fp32 store path)
+            if self.parentWriter.states.storeAlign8 and isSubtileNonEdge:
+              self._emitAlign8ExecMask(storeCodeModule, self.tmpS01, self.tmpS23, blockIdxM, blockIdxN,
+                                       mGuardOffset=1, rowScaleShift=2)
+              storeCodeModule.add(self.getEdgeMovInstType()(EXEC(), sgpr(self.tmpS01, self.laneSGPRC), "apply exec mask"))
+            # _emitOverrideRows reused from the top of this store loop (see _lookaheadRowInc).
+            tmpStoreCode = self.parentWriter.addStore(self.kernel, self.ss, 'D', addrCalc, sumIdx, self.tmpS01, self.edge, elementIdx, self.batchIdx,
+                                                     overrideAfterPrimerRows=_emitOverrideRows, comment="store D")
+            storeCodeModule.add(tmpStoreCode)
+            if self.parentWriter.states.storeAlign8 and isSubtileNonEdge:
+              storeCodeModule.add(self.getEdgeMovInstType()(EXEC(), -1, "restore exec"))
+            if skipLabel is not None:
+              storeCodeModule.add(skipLabel)
+            self.storesIssued += 1
+
           if (self.kernel["ProblemType"]["UseE"] and not self.kernel["ProblemType"]["Gradient"]) and ((self.kernel["GlobalSplitU"] == 1 or self.kernel["GlobalSplitU"] == -1) or self.kernel["StreamK"] > 0):
             self.storesIssued += 1
           if self.storeBiasD == 1:
             self.storesIssued += 1
 
+        else:
+          if not self.kernel["_GlobalAccumulation"] == "MultipleBufferSingleKernel":#GSUGSU
+            rpe = self.parentWriter.states.bpeCinternal // self.parentWriter.states.bpr
+            module.add(self.parentWriter.storeRemapAddLocalWrite(self.kernel, self.ss, addrCalc, sumIdx*rpe))
+            # Column Block Shape has been written to LDS
+            # Now read back and write out to global memory
+          else:
+            tmpStoreCode = self.parentWriter.addStore(self.kernel, self.ss, 'TD', addrCalc, sumIdx, self.tmpS01, self.edge, comment="store TD StoreRemapVectorWidth")
+
+            if self.kernel["GroupLoadStore"]:
+              storeCode.add(tmpStoreCode)
+
+            module.add(tmpStoreCode)
+
+            self.storesIssued += 1
+            if (self.kernel["ProblemType"]["UseE"] and not self.kernel["ProblemType"]["Gradient"]) and ((self.kernel["GlobalSplitU"] == 1 or self.kernel["GlobalSplitU"] == -1) or self.kernel["StreamK"] > 0):
+              self.storesIssued += 1
+            if self.storeBiasD == 1:
+              self.storesIssued += 1
+
+      if self._gateStoreSplitActive:
+        module = _gateStoreSplitSavedModule
+    if self._gateStoreSplitActive:
+      _gateStoreSplitSkipL = Label(self.parentWriter.labels.getNameInc("GateStoreAll_skip"), "")
+      _gateStoreSplitEndL = Label(self.parentWriter.labels.getNameInc("GateStoreAll_end"), "")
+      module.add(self.parentWriter.getSCMPKInstruction("EQU32", "SrdGate+2", 0, comment="gate disabled? (SrdGate num_records==0)"))
+      module.add(SCBranchSCC1(_gateStoreSplitSkipL.getLabelName(), "null gate -> no-gate store block"))
+      module.add(_gateStoreSplitBlocks[0])
+      module.add(SBranch(labelName=_gateStoreSplitEndL.getLabelName(), comment="end gate store block"))
+      module.add(_gateStoreSplitSkipL)
+      module.add(_gateStoreSplitBlocks[1])
+      module.add(_gateStoreSplitEndL)
     # Close the last N-group OOB skip label (if any) opened by _emitSubtileOobGuard.
     self._finalizeSubtileOobGuards(storeCode if self.kernel["GroupLoadStore"] else module)
     if self.kernel["ProblemType"]["StochasticRounding"]:
