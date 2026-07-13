@@ -67,6 +67,8 @@ class StinkyWaitCntInsertionPass : public StinkyInstPass {
    public:
     static char ID;
 
+    explicit StinkyWaitCntInsertionPass(WaitCntInsertionOptions options) : options(options) {}
+
     const char* getName() const override {
         return "StinkyWaitCntInsertionPass";
     }
@@ -87,6 +89,7 @@ class StinkyWaitCntInsertionPass : public StinkyInstPass {
         // its in-flight state to successors. PassContext gating only applies
         // to IR mutation below.
         WaitDataflow df(func, domInfo, rpo);
+        df.setLoopCarriedTokenDepsEnabled(options.enableLoopCarriedTokenDeps);
 
         // Tensor counter drains only at barriers or when there is a single wave.
         const auto numWaves = passCtx.getGemmTileConfig().NumWaves;
@@ -109,6 +112,8 @@ class StinkyWaitCntInsertionPass : public StinkyInstPass {
     }
 
    private:
+    WaitCntInsertionOptions options;
+
     void emitWaits(Function& func, PassContext& passCtx, GfxArchID arch,
                    const WaitInsertionPlan& plan) {
         // Anchor waits: walk blocks/instructions in program order so the
@@ -192,7 +197,7 @@ char StinkyWaitCntInsertionPass::ID = 0;
 }  // namespace
 
 namespace stinkytofu {
-std::unique_ptr<Pass> createStinkyWaitCntInsertionPass() {
-    return std::make_unique<StinkyWaitCntInsertionPass>();
+std::unique_ptr<Pass> createStinkyWaitCntInsertionPass(WaitCntInsertionOptions options) {
+    return std::make_unique<StinkyWaitCntInsertionPass>(options);
 }
 }  // namespace stinkytofu

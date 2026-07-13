@@ -1,0 +1,72 @@
+################################################################################
+# Copyright (C) 2026 Advanced Micro Devices, Inc. All rights reserved.
+# SPDX-License-Identifier: MIT
+################################################################################
+# P4 DESIGNED subtile LR FP8 config for gfx950.
+#
+# Targets uncovered ranges in Tensile/Components/Subtile/SubtileLREmit.py:
+#   490-535  (_lraTileAssignment_fp8_legacy) — FP8 block-swap swizzle path,
+#             activated when tileInfoA.bpe == 1 (DataType: F8, UseSubtileImpl=1)
+#   613-655  (emitSubtileDsRead, localReadDoSubtile) — called from preLoop when
+#             PrefetchLocalRead >= 1 with UseSubtileImpl=1
+#
+# Approach: F8->S (pure FP8 A+B) TN with UseSubtileImpl=1 + DirectToLds=1
+# + PrefetchLocalRead=1.  The FP8 bpe=1 condition (line 543 in source) routes
+# to _lraTileAssignment_fp8_legacy (490-535), and PLR=1 activates the
+# localReadDoSubtile preLoop emission (613-655).
+#
+# ForkParameters: 2 MatrixInstruction shapes x 2 StreamK = 4 permutations.
+# MI shapes:
+#   [16, 16, 128, 1, 1, 2, 2, 2, 2]  -- 2x2 WG (symmetric)
+#   [16, 16, 128, 1, 1, 4, 4, 2, 2]  -- 2x2 WG (larger MIWT)
+# StreamK={0,3}: non-persistent and persistent SK code paths.
+
+GlobalParameters:
+  SyncsPerBenchmark: 0
+  SleepPercent: 0
+  NumElementsToValidate: 0
+  NumWarmups: 0
+  NumBenchmarks: 1
+  EnqueuesPerSync: 1
+  DataInitTypeBeta: 0
+  DataInitTypeAlpha: 1
+  Device: 0
+  PrintSolutionRejectionReason: True
+
+BenchmarkProblems:
+  ########################################
+  # F8->S TN — UseSubtileImpl=1 / DirectToLds=1 / PLR=1
+  # Exercises SubtileLREmit FP8 path (490-535) and localReadDoSubtile (613-655).
+  ########################################
+  -
+    - # ProblemType
+      OperationType: GEMM
+      DataType: F8
+      DestDataType: s
+      ComputeDataType: s
+      HighPrecisionAccumulate: True
+      TransposeA: True
+      TransposeB: False
+      UseBeta: True
+      Batched: True
+    - # BenchmarkProblemSizeGroup
+      InitialSolutionParameters:
+      BenchmarkCommonParameters:
+        - KernelLanguage: ["Assembly"]
+      ForkParameters:
+        - MatrixInstruction:
+          - [16, 16, 128, 1,  1,  2, 2,  2, 2]   # 2x2 WG symmetric
+          - [16, 16, 128, 1,  1,  4, 4,  2, 2]   # 2x2 WG larger MIWT
+        - DepthU: [256]
+        - PrefetchGlobalRead: [1]
+        - PrefetchLocalRead: [1]
+        - ScheduleIterAlg: [3]
+        - DirectToLds: [1]
+        - StaggerU: [0]
+        - StreamK: [3]
+        - UseSubtileImpl: [True]
+      BenchmarkJoinParameters:
+      BenchmarkFinalParameters:
+        - ProblemSizes:
+          - Exact: [128, 128, 1, 256]
+          - Exact: [256, 256, 1, 256]

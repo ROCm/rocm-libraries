@@ -68,6 +68,7 @@ target_sources(origami-headers
         "${CMAKE_CURRENT_SOURCE_DIR}/include"
         "${PROJECT_BINARY_DIR}/include"
     FILES
+        "${CMAKE_CURRENT_SOURCE_DIR}/include/origami/attention.hpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/include/origami/gemm.hpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/include/origami/hardware.hpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/include/origami/heuristics.hpp"
@@ -90,9 +91,12 @@ set_target_properties(origami-headers PROPERTIES VERIFY_INTERFACE_HEADER_SETS ON
 
 target_link_libraries(origami PUBLIC roc::origami-headers)
 
+add_dependencies(origami origami-headers_verify_interface_header_sets)
+
 target_sources(
     origami
-    PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/src/origami/gemm.cpp"
+    PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/src/origami/attention.cpp"
+            "${CMAKE_CURRENT_SOURCE_DIR}/src/origami/gemm.cpp"
             "${CMAKE_CURRENT_SOURCE_DIR}/src/origami/hardware.cpp"
             "${CMAKE_CURRENT_SOURCE_DIR}/src/origami/heuristics.cpp"
             "${CMAKE_CURRENT_SOURCE_DIR}/src/origami/logger.cpp"

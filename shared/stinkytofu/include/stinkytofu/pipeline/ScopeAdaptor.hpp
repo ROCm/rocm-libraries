@@ -33,9 +33,8 @@
 #include "stinkytofu/core/PassManager.hpp"
 #include "stinkytofu/ir/asm/StinkyAsmDirectives.hpp"
 #include "stinkytofu/ir/asm/StinkyAsmIR.hpp"
-#include "stinkytofu/support/DAGScheduleJsonWriter.hpp"
 #include "stinkytofu/support/DebugPrintInstrumentation.hpp"
-#include "stinkytofu/support/PassOrderSnapshotJson.hpp"
+#include "stinkytofu/support/StandardInstrumentations.hpp"
 
 namespace stinkytofu {
 // -----------------------------------------------------------------------
@@ -130,45 +129,18 @@ inline void configureDebugOutput(PassManager& pm, const StinkyAsmModule::ModuleO
     }
 }
 
-// -----------------------------------------------------------------------
-// Pass-order snapshot utility
-// -----------------------------------------------------------------------
-
-/// Create a shared DAGScheduleJsonCollector and populate
-/// passFeatureCfg.passOrderSnapshot from ModuleOptions.
-///
-/// Returns nullptr when PassOrderSnapshotJson is empty (feature disabled).
-///
-/// DebugPass (comma-separated pass names) serves as the allow-list for
-/// instruction-order snapshots.  When DebugPass is empty and jsonPath is
-/// set, only StinkyDAGSchedulerPass is recorded by default.
-inline std::shared_ptr<DAGScheduleJsonCollector> createPassOrderSnapshotCollector(
-    PassFeatureConfig& passFeatureCfg, const StinkyAsmModule::ModuleOptions& opts,
-    const std::string& moduleName) {
-    if (opts.PassOrderSnapshotJson.empty()) return nullptr;
-
-    passFeatureCfg.passOrderSnapshot.jsonPath = opts.PassOrderSnapshotJson;
-
-    if (!opts.DebugPass.empty()) {
-        std::istringstream stream(opts.DebugPass);
-        std::string name;
-        while (std::getline(stream, name, ',')) {
-            auto s = name.find_first_not_of(' ');
-            auto e = name.find_last_not_of(' ');
-            if (s != std::string::npos)
-                passFeatureCfg.passOrderSnapshot.dumpAfterPasses.push_back(
-                    name.substr(s, e - s + 1));
-        }
+/// Single entry point for the standard pipeline observers (LLVM
+/// StandardInstrumentations style): debug IR printing plus, when
+/// ModuleOptions.VerifyEach is set, per-pass StinkyTofu ASM IR verification.
+/// Drivers (backend, opt) should call this instead of wiring each observer
+/// individually.
+inline void configureStandardInstrumentations(
+    PassManager& pm, const StinkyAsmModule::ModuleOptions& opts, const std::string& label,
+    const std::shared_ptr<DebugOutputStreams>& debugStreams) {
+    configureDebugOutput(pm, opts, label, debugStreams);
+    if (opts.VerifyEach) {
+        pm.addInstrumentation(std::make_shared<VerifyInstrumentation>());
     }
-
-    return std::make_shared<DAGScheduleJsonCollector>(opts.PassOrderSnapshotJson, moduleName);
-}
-
-/// Add PassOrderSnapshotInstrumentation to \p pm when \p collector is non-null.
-inline void configurePassOrderSnapshot(PassManager& pm,
-                                       const std::shared_ptr<DAGScheduleJsonCollector>& collector) {
-    if (collector)
-        pm.addInstrumentation(std::make_shared<PassOrderSnapshotInstrumentation>(collector));
 }
 
 // -----------------------------------------------------------------------

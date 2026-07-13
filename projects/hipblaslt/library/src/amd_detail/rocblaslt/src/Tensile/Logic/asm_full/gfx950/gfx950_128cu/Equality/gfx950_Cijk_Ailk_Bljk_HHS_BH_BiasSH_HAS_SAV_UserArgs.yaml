@@ -2,7 +2,7 @@
 - gfx950
 - {Architecture: gfx950, CUCount: 128}
 - [Device 75a0]
-- Activation: 1
+- Activation: true
   ActivationComputeDataType: 0
   ActivationNoGuard: false
   ActivationType: hipblaslt_all

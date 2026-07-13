@@ -1,0 +1,10 @@
+# serializer version: 1
+# name: test_valid_workgroup_accepted[wg_16_16_1-wg0][wg_16_16_1]
+  True
+# ---
+# name: test_valid_workgroup_accepted[wg_16_16_2-wg1][wg_16_16_2]
+  True
+# ---
+# name: test_valid_workgroup_accepted[wg_1_32_1-wg2][wg_1_32_1]
+  True
+# ---

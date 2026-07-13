@@ -78,6 +78,8 @@ namespace rocisa
         std::optional<InstructionInput>    acc2;
         int                                acc2_imm=0;
         bool                               neg;
+        bool                               reuseA = false;
+        bool                               reuseB = false;
 
         MFMAInstruction(InstType                                  instType,
                         InstType                                  accType,
@@ -88,7 +90,9 @@ namespace rocisa
                         const std::shared_ptr<RegisterContainer>& b,
                         const std::optional<InstructionInput>&    acc2    = std::nullopt,
                         bool                                      neg     = false,
-                        const std::string&                        comment = "")
+                        const std::string&                        comment = "",
+                        bool                                      reuseA  = false,
+                        bool                                      reuseB  = false)
             : Instruction(instType, comment)
             , accType(accType)
             , variant(variant)
@@ -99,6 +103,8 @@ namespace rocisa
             , acc2(acc2.has_value() ? acc2.value() : InstructionInput(acc))
             , acc2_imm(0)
             , neg(neg)
+            , reuseA(reuseA)
+            , reuseB(reuseB)
         {
         }
 
@@ -111,7 +117,9 @@ namespace rocisa
                         const std::shared_ptr<RegisterContainer>& b,
                         int                                       acc2_imm,
                         bool                                      neg     = false,
-                        const std::string&                        comment = "")
+                        const std::string&                        comment = "",
+                        bool                                      reuseA  = false,
+                        bool                                      reuseB  = false)
             : Instruction(instType, comment)
             , accType(accType)
             , variant(variant)
@@ -122,6 +130,8 @@ namespace rocisa
             , acc2(std::nullopt)
             , acc2_imm(acc2_imm)
             , neg(neg)
+            , reuseA(reuseA)
+            , reuseB(reuseB)
         {
         }
 
@@ -135,6 +145,8 @@ namespace rocisa
             , b(other.b ? other.b->clone2() : nullptr)
             , acc2(other.acc2.has_value() ? copyInstructionInput(other.acc2.value()) : std::optional<InstructionInput>(std::nullopt))
             , neg(other.neg)
+            , reuseA(other.reuseA)
+            , reuseB(other.reuseB)
         {
         }
 
@@ -496,9 +508,15 @@ namespace rocisa
                     scaleStr = ", 0, 0";
                 }
             }
+            // Matrix-reuse hints: cache the A/B source from the previous identical WMMA.
+            std::string reuseStr = "";
+            if(reuseA)
+                reuseStr += " matrix_a_reuse";
+            if(reuseB)
+                reuseStr += " matrix_b_reuse";
             return acc->toString() + ", " + a->toString() + ", " + b->toString() + ", "
                    + (!acc2.has_value() ? std::to_string(acc2_imm) : InstructionInputToString(acc2.value()))
-                   + scaleStr + negStr + inputPermuteStr;
+                   + scaleStr + negStr + inputPermuteStr + reuseStr;
         }
 
         std::string toString() const override
@@ -534,6 +552,9 @@ namespace rocisa
         std::shared_ptr<RegisterContainer> mxsb;
         std::optional<VOP3PModifiers>      vop3;
         int                                block;
+        // gfx1250 WMMA matrix-reuse hints (see MFMAInstruction).
+        bool                               reuseA = false;
+        bool                               reuseB = false;
 
         MXMFMAInstruction(InstType                                  instType,
                           InstType                                  accType,
@@ -548,7 +569,9 @@ namespace rocisa
                           InstType                                  mxScaleAType = InstType::INST_F32,
                           InstType                                  mxScaleBType = InstType::INST_F32,
                           int                                       block        = 0,
-                          const std::string&                        comment      = "")
+                          const std::string&                        comment      = "",
+                          bool                                      reuseA       = false,
+                          bool                                      reuseB       = false)
             : Instruction(instType, comment)
             , accType(accType)
             , mxScaleAType(mxScaleAType)
@@ -563,6 +586,8 @@ namespace rocisa
             , mxsb(mxsb)
             , vop3(vop3)
             , block(block)
+            , reuseA(reuseA)
+            , reuseB(reuseB)
         {
         }
 
@@ -579,7 +604,9 @@ namespace rocisa
                           InstType                                  mxScaleAType = InstType::INST_F32,
                           InstType                                  mxScaleBType = InstType::INST_F32,
                           int                                       block        = 0,
-                          const std::string&                        comment      = "")
+                          const std::string&                        comment      = "",
+                          bool                                      reuseA       = false,
+                          bool                                      reuseB       = false)
             : Instruction(instType, comment)
             , accType(accType)
             , mxScaleAType(mxScaleAType)
@@ -594,6 +621,8 @@ namespace rocisa
             , mxsb(mxsb)
             , vop3(vop3)
             , block(block)
+            , reuseA(reuseA)
+            , reuseB(reuseB)
         {
         }
 
@@ -611,6 +640,8 @@ namespace rocisa
             , mxsb(other.mxsb ? other.mxsb->clone2() : nullptr)
             , vop3(other.vop3)
             , block(other.block)
+            , reuseA(other.reuseA)
+            , reuseB(other.reuseB)
         {
         }
 
@@ -875,6 +906,12 @@ namespace rocisa
 
         std::string getArgStr() const
         {
+            // Matrix-reuse hints (gfx1250): trailing assembler keyword modifiers.
+            std::string reuseStr = "";
+            if(reuseA)
+                reuseStr += " matrix_a_reuse";
+            if(reuseB)
+                reuseStr += " matrix_b_reuse";
             if(getAsmCaps()["HasMFMA"])
             {
                 std::string mxsaStr = mxsa ? mxsa->toString() : "";
@@ -888,13 +925,14 @@ namespace rocisa
                     result += vop3->toString();
                 }
                 result += mfmaInputPermuteStr();
+                result += reuseStr;
                 return result;
             }
             else
             {
                 return acc->toString() + ", " + a->toString() + ", " + b->toString() + ", "
                        + (acc2==nullptr ? std::to_string(acc2_imm) : acc2->toString()) + ", "
-                       + mxsa->toString() + ", " + mxsb->toString() + wmmaInputPermuteStr();
+                       + mxsa->toString() + ", " + mxsb->toString() + wmmaInputPermuteStr() + reuseStr;
             }
         }
 

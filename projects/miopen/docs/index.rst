@@ -59,7 +59,7 @@ The MIOpen public repository is located at
     * :doc:`API library <reference/index>`
 
       * :doc:`Modules <./doxygen/html/modules>`
-      * :doc:`Datatypes <./reference/datatypes>`
+      * :doc:`Precision support <./reference/data_type_support>`
       * :doc:`Environment variables <./reference/env_variables>`
 
 For information on contributing to the MIOpen code base, see

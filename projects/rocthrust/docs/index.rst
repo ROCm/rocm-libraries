@@ -1,5 +1,5 @@
 .. meta::
-  :description: rocThrust API data type support
+  :description: rocThrust API precision support
   :keywords: rocThrust, ROCm, API, reference, data type, support
 
 .. _index:
@@ -34,6 +34,7 @@ The rocThrust project is located in https://github.com/ROCm/rocm-libraries/tree/
 
   .. grid-item-card:: Reference
 
+    * :ref:`rocthrust-data-type-support`
     * :ref:`bitwise-repro`
     * :ref:`atomic-path`
     * :ref:`rocThrust API reference <api-reference>`

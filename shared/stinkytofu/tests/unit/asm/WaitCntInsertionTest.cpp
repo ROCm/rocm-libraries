@@ -52,12 +52,12 @@ class WaitCntInsertionTest : public ::testing::Test {
         return func;
     }
 
-    void runInsertionPass(Function& func) {
+    void runInsertionPass(Function& func, WaitCntInsertionOptions options = {}) {
         PassContext passCtx;
         passCtx.setGemmTileConfig(gemmConfig);
         AnalysisManager am;
         registerAllAnalyses(am);
-        auto pass = stinkytofu::createStinkyWaitCntInsertionPass();
+        auto pass = stinkytofu::createStinkyWaitCntInsertionPass(options);
         pass->run(func, passCtx, am);
     }
 
@@ -866,6 +866,87 @@ st.func @test_two_block_chain2() {
     ASSERT_NE(waitBeforeFmac2, nullptr)
         << "MUST insert waitcnt before second v_add (v3 still outstanding)";
     EXPECT_EQ(waitBeforeFmac2->dlcnt, 0) << "Should wait for remaining loads (v3) -> dlcnt=0";
+}
+
+/**
+ * @brief Loop-carried LDS token deps do not force a header tensor wait.
+ *
+ * CFG:
+ *   entry -> loop_header -> loop_body -> loop_tail -> loop_header
+ *
+ * The tensor load in loop_header defines LDS token 0. When loop_tail flows
+ * back to loop_header, that token dependency is loop-carried and should not
+ * make the header barrier wait on its own earlier-iteration tensor load.
+ */
+TEST_F(WaitCntInsertionTest, LoopCarriedMemTokenPredDoesNotForceHeaderTensorWait) {
+    std::string irString = R"(
+st.func @test_loop_carried_memtoken_header() {
+^entry:
+  Successors: ^loop_header
+^loop_header:
+  LDS0 = "st.s_barrier_signal"(-1, LDS0) { issueCycles = 1, latencyCycles = 2, mod.memtoken = { tokens = [0] } }
+  LDS0 = "st.s_barrier_wait"(-1, LDS0) { issueCycles = 1, latencyCycles = 1, mod.memtoken = { tokens = [0] } }
+  LDS0 = "st.tensor_load_to_lds"(s[0:3], s[4:11]) { issueCycles = 1, latencyCycles = 1, mod.memtoken = { tokens = [0] } }
+  Successors: ^loop_body
+^loop_body:
+  Successors: ^loop_tail
+^loop_tail:
+  Successors: ^loop_header
+}
+)";
+
+    StinkyIRConverter converter(getArch());
+    auto* func = parseIR(irString, converter);
+    ASSERT_NE(func, nullptr);
+
+    BasicBlock& loopHeader = *std::next(func->begin());
+
+    runInsertionPass(*func);
+
+    StinkyInstruction* barrierSignal = findNthInst(loopHeader, GFX::s_barrier_signal, 0);
+    ASSERT_NE(barrierSignal, nullptr);
+
+    EXPECT_EQ(findTensorWaitCntBefore(loopHeader, barrierSignal), nullptr)
+        << "Frozen CK_Tensor state should not force "
+           "s_wait_tensorcnt before the loop header barrier";
+    EXPECT_EQ(countTensorWaitCnt(loopHeader), 0);
+}
+
+TEST_F(WaitCntInsertionTest, LoopCarriedMemTokenPredCanForceHeaderTensorWaitWhenEnabled) {
+    std::string irString = R"(
+st.func @test_loop_carried_memtoken_header_enabled() {
+^entry:
+  Successors: ^loop_header
+^loop_header:
+  LDS0 = "st.s_barrier_signal"(-1, LDS0) { issueCycles = 1, latencyCycles = 2, mod.memtoken = { tokens = [0] } }
+  LDS0 = "st.s_barrier_wait"(-1, LDS0) { issueCycles = 1, latencyCycles = 1, mod.memtoken = { tokens = [0] } }
+  LDS0 = "st.tensor_load_to_lds"(s[0:3], s[4:11]) { issueCycles = 1, latencyCycles = 1, mod.memtoken = { tokens = [0] } }
+  Successors: ^loop_body
+^loop_body:
+  Successors: ^loop_tail
+^loop_tail:
+  Successors: ^loop_header
+}
+)";
+
+    StinkyIRConverter converter(getArch());
+    auto* func = parseIR(irString, converter);
+    ASSERT_NE(func, nullptr);
+
+    BasicBlock& loopHeader = *std::next(func->begin());
+
+    WaitCntInsertionOptions options;
+    options.enableLoopCarriedTokenDeps = true;
+    runInsertionPass(*func, options);
+
+    StinkyInstruction* barrierSignal = findNthInst(loopHeader, GFX::s_barrier_signal, 0);
+    ASSERT_NE(barrierSignal, nullptr);
+
+    SWaitTensorCntData* tensorWait = findTensorWaitCntBefore(loopHeader, barrierSignal);
+    ASSERT_NE(tensorWait, nullptr)
+        << "Conservative mode should iterate CK_Tensor through loop-carried token state";
+    EXPECT_EQ(tensorWait->tlcnt, 0);
+    EXPECT_EQ(countTensorWaitCnt(loopHeader), 1);
 }
 
 /**

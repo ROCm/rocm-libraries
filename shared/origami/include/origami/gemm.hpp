@@ -12,6 +12,7 @@
 #include "origami/origami_export.h"
 
 namespace origami {
+namespace gemm {
 
 /**
  * @brief Per-operand cache hit rates for L1, L2, and MALL.
@@ -501,4 +502,5 @@ ORIGAMI_EXPORT double compute_total_latency(const problem_t& problem,
                              const config_t& config,
                              size_t max_cus);
 
+}  // namespace gemm
 }  // namespace origami

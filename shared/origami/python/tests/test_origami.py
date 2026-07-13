@@ -28,7 +28,7 @@ def test_select_config_basic(hardware):
     problem.a_mx_block_size = 0
     problem.b_mx_block_size = 0
 
-    result = origami.select_config(problem, hardware, configs)
+    result = origami.select_config(problem, hardware, configs, origami.model_t.gemm)
     assert result.latency > 0
     assert result.config is not None
     assert result.config.mt.m > 0
@@ -53,7 +53,7 @@ def test_rank_configs(hardware):
     problem.c_dtype = problem.d_dtype
     problem.mi_dtype = problem.a_dtype
 
-    ranked_configs = origami.rank_configs(problem, hardware, configs)
+    ranked_configs = origami.rank_configs(problem, hardware, configs, origami.model_t.gemm)
     assert len(ranked_configs) > 0
     assert len(ranked_configs) <= len(configs)
 
@@ -91,7 +91,7 @@ def test_select_topk_configs(hardware):
     problem.mi_dtype = problem.a_dtype
 
     topk = 5
-    top_configs = origami.select_topk_configs(problem, hardware, configs, topk)
+    top_configs = origami.select_topk_configs(problem, hardware, configs, topk, origami.model_t.gemm)
     assert len(top_configs) <= topk
     assert len(top_configs) > 0
 
@@ -132,7 +132,7 @@ def test_select_config_with_csv(tmp_path, hardware):
             problem.c_dtype = problem.d_dtype
             problem.mi_dtype = problem.a_dtype
 
-            best_config = origami.select_config(problem, hardware, configs)
+            best_config = origami.select_config(problem, hardware, configs, origami.model_t.gemm)
             assert best_config.latency > 0
             assert best_config.config is not None
 
@@ -159,7 +159,7 @@ def test_compute_perf_gflops(hardware):
     problem.c_dtype = problem.d_dtype
     problem.mi_dtype = problem.a_dtype
 
-    result = origami.select_config(problem, hardware, configs)
+    result = origami.select_config(problem, hardware, configs, origami.model_t.gemm)
     gflops = origami.compute_perf_gflops(hardware, problem, result.latency)
     assert gflops > 0
 
@@ -296,15 +296,16 @@ def test_gfx950_bfloat16_recommended_matrix_instruction():
     # Create hardware object for gfx950
     hardware = origami.hardware_t(
         origami.architecture_t.gfx950,
-        304,    # N_CU
-        65536,  # lds_capacity
-        12,     # NUM_XCD
-        1.0,    # mem1_perf_ratio
-        1.0,    # mem2_perf_ratio
-        1.0,    # mem3_perf_ratio
-        25165824,  # L2_capacity
-        2.1,    # compute_clock_ghz
-        4,      # parallel_mi_cu
+        304,         # N_CU
+        65536,       # lds_capacity
+        512 * 1024,  # rf_capacity
+        12,          # NUM_XCD
+        1.0,         # mem1_perf_ratio
+        1.0,         # mem2_perf_ratio
+        1.0,         # mem3_perf_ratio
+        25165824,    # L2_capacity
+        2.1,         # compute_clock_ghz
+        4,           # parallel_mi_cu
         (1.0, 1.0, 1.0)  # mem_bw_per_wg_coefficients
     )
     
@@ -374,18 +375,19 @@ def test_simulation_mode_returns_valid_latency():
     # Create hardware for gfx942
     hardware = origami.hardware_t(
         origami.architecture_t.gfx942,
-        304,    # N_CU
-        65536,  # lds_capacity
-        8,      # NUM_XCD
-        1.0,    # mem1_perf_ratio
-        1.0,    # mem2_perf_ratio
-        1.0,    # mem3_perf_ratio
-        4000000,  # L2_capacity
-        1.5,    # compute_clock_ghz
-        1,      # parallel_mi_cu
+        304,         # N_CU
+        65536,       # lds_capacity
+        512 * 1024,  # rf_capacity
+        8,           # NUM_XCD
+        1.0,         # mem1_perf_ratio
+        1.0,         # mem2_perf_ratio
+        1.0,         # mem3_perf_ratio
+        4000000,     # L2_capacity
+        1.5,         # compute_clock_ghz
+        1,           # parallel_mi_cu
         (0.0, 0.015, 0.0)  # mem_bw_per_wg_coefficients
     )
-    
+
     # Create problem
     problem = origami.problem_t()
     problem.size = origami.dim3_t(2048, 2048, 2048)
@@ -429,15 +431,16 @@ def test_simulation_mode_via_compute_total_latency():
     # Create hardware for gfx942
     hardware = origami.hardware_t(
         origami.architecture_t.gfx942,
-        304,    # N_CU
-        65536,  # lds_capacity
-        8,      # NUM_XCD
-        1.0,    # mem1_perf_ratio
-        1.0,    # mem2_perf_ratio
-        1.0,    # mem3_perf_ratio
-        4000000,  # L2_capacity
-        1.5,    # compute_clock_ghz
-        1,      # parallel_mi_cu
+        304,         # N_CU
+        65536,       # lds_capacity
+        512 * 1024,  # rf_capacity
+        8,           # NUM_XCD
+        1.0,         # mem1_perf_ratio
+        1.0,         # mem2_perf_ratio
+        1.0,         # mem3_perf_ratio
+        4000000,     # L2_capacity
+        1.5,         # compute_clock_ghz
+        1,           # parallel_mi_cu
         (0.0, 0.015, 0.0)  # mem_bw_per_wg_coefficients
     )
     
@@ -506,7 +509,7 @@ def test_simulation_mode_various_problem_sizes(m, n, k):
     # Create hardware for gfx942
     hardware = origami.hardware_t(
         origami.architecture_t.gfx942,
-        304, 65536, 8, 1.0, 1.0, 1.0, 4000000, 1.5, 1, (0.0, 0.015, 0.0)
+        304, 65536, 512 * 1024, 8, 1.0, 1.0, 1.0, 4000000, 1.5, 1, (0.0, 0.015, 0.0)
     )
     
     problem = origami.problem_t()

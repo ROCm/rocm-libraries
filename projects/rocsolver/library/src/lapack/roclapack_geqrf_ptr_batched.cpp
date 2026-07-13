@@ -1,5 +1,5 @@
 /* **************************************************************************
- * Copyright (C) 2019-2025 Advanced Micro Devices, Inc. All rights reserved.
+ * Copyright (C) 2019-2026 Advanced Micro Devices, Inc. All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -25,6 +25,7 @@
  * SUCH DAMAGE.
  * *************************************************************************/
 
+#include "exceptions.hpp"
 #include "roclapack_geqrf.hpp"
 
 ROCSOLVER_BEGIN_NAMESPACE
@@ -55,6 +56,7 @@ rocblas_status rocsolver_geqrf_ptr_batched_impl(rocblas_handle handle,
                                                 const rocblas_int lda,
                                                 U tau,
                                                 const rocblas_int batch_count)
+try
 {
     ROCSOLVER_ENTER_TOP("geqrf_ptr_batched", "-m", m, "-n", n, "--lda", lda, "--batch_count",
                         batch_count);
@@ -136,6 +138,10 @@ rocblas_status rocsolver_geqrf_ptr_batched_impl(rocblas_handle handle,
     }
 
     return status;
+}
+catch(...)
+{
+    return exception2rocblas_status();
 }
 
 ROCSOLVER_END_NAMESPACE

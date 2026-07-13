@@ -1,0 +1,88 @@
+################################################################################
+# Copyright (C) 2026 Advanced Micro Devices, Inc. All rights reserved.
+# SPDX-License-Identifier: MIT
+################################################################################
+# P4 designed config for gfx1250 TensorDataMover characterization.
+#
+# Target: Tensile/Components/TensorDataMover.py (miss=158 before this test).
+#
+# The TensorDataMoverLoad class has two global-address calculation methods:
+#   - calculateStartAddr         : called when MIWaveGroup prod == 1 (non-wave-sep)
+#   - calculateStartAddrWaveSeparated : called when prod > 1
+#
+# The existing gfx1250 emit suite (test_emit_gfx1250_char.py) only exercises
+# the wave-separated path (F4_MX.yaml has MIWaveGroup=[2,2]).  Lines 29-116
+# (calculateStartAddr body) are completely unexecuted.
+#
+# This config uses DataType=F4 (MX-F4, MXBlock=32) + TDMInst=3 to enable the
+# TDM code path, and fixes MatrixInstruction to [16,16,128,1,1,1,1,1,1] so
+# MIWaveGroup=[1,1] (prod==1), forcing the non-wave-separated calculateStartAddr.
+# Additional MX parameters hit the MXS branches inside setTensorDim*/setTensorStride*.
+# GlobalSplitU=1 is kept (gsuOffset is still computed at lines 93-101).
+#
+# Fork: 2 MatrixInstruction shapes with MIWaveGroup=[1,1] → 2 kernels.
+GlobalParameters:
+  SyncsPerBenchmark: 0
+  MinimumRequiredVersion: 5.0.0
+  NumElementsToValidate: 0
+  DataInitTypeBeta: 0
+  DataInitTypeAlpha: 1
+  Device: 0
+
+BenchmarkProblems:
+  ########################################
+  # F4/F4 -> BF16 TN MX-GEMM with TDMInst=3 and MIWaveGroup=[1,1]
+  # DataType F4 → MXBlockA=MXBlockB=32 → MXS arms in setTensorDim*
+  # MatrixInstruction [16,16,128,1,1,1,1,1,1] → MIWaveGroup=[1,1] → calculateStartAddr
+  ########################################
+  -
+    - # ProblemType
+      OperationType: GEMM
+      DataType: F4
+      DestDataType: b
+      ComputeDataType: s
+      HighPrecisionAccumulate: True
+      TransposeA: True
+      TransposeB: False
+      UseBeta: True
+      UseBias: 0
+      Batched: True
+      Activation: False
+      SupportUserArgs: True
+
+    - # BenchmarkProblemSizeGroup
+      InitialSolutionParameters:
+      BenchmarkCommonParameters:
+        - KernelLanguage: ["Assembly"]
+      ForkParameters:
+        - MatrixInstruction:
+          - [16, 16, 128, 1, 1, 1, 1, 1, 1]
+          - [16, 16, 128, 1, 1, 2, 2, 1, 1]
+        - TDMInst: [3]
+        - DepthU: [128]
+        - LocalReadVectorWidth: [-1]
+        - ScheduleIterAlg: [3]
+        - PrefetchGlobalRead: [2]
+        - PrefetchLocalRead: [1]
+        - GlobalReadVectorWidthA: [-1]
+        - GlobalReadVectorWidthB: [-1]
+        - VectorWidthA: [1]
+        - VectorWidthB: [1]
+        - TransposeLDS: [-1]
+        - LdsPadA: [-1]
+        - LdsPadB: [-1]
+        - LdsBlockSizePerPadA: [-1]
+        - LdsBlockSizePerPadB: [-1]
+        - WaveSeparateGlobalReadA: [0]
+        - WaveSeparateGlobalReadB: [0]
+        - 1LDSBuffer: [0]
+        - GlobalReadPerMfma: [1.0]
+        - LocalWritePerMfma: [-1]
+        - StoreVectorWidth: [-1]
+        - SourceSwap: [True]
+        - WavefrontSize: [32]
+        - GlobalSplitU: [1]
+      BenchmarkJoinParameters:
+      BenchmarkFinalParameters:
+        - ProblemSizes:
+          - Exact: [64, 64, 1, 128]

@@ -40,6 +40,8 @@ subtrees:
 
 - caption: API reference
   entries:
+  - file: reference/data-type-support.rst
+    title: Precision support
   - file: reference/reference.rst
     title: API reference
     subtrees:

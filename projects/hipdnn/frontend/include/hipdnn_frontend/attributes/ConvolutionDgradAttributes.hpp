@@ -33,6 +33,8 @@ namespace hipdnn_frontend::graph
  * auto dx = graph.conv_dgrad(dy, w, ConvDgradAttributes()
  *              .set_padding({1, 1})
  *              .set_stride({1, 1}));
+ * // Required before validation/build; strides may be omitted and inferred.
+ * dx->set_dim({N, C, H, W});
  * @endcode
  *
  * @see Graph::conv_dgrad(), ConvFpropAttributes, ConvWgradAttributes
@@ -231,6 +233,24 @@ public:
     ConvolutionMode get_convolution_mode() const
     {
         return math_mode;
+    }
+
+    /**
+     * @brief Custom CRTP hook for matching convolution attributes logically.
+     */
+    bool logicallyEqualsImpl(const ConvDgradAttributes& other) const
+    {
+        return (this->pre_padding == other.pre_padding)
+               && (this->post_padding == other.post_padding) && (this->stride == other.stride)
+               && (this->dilation == other.dilation) && (this->math_mode == other.math_mode);
+    }
+
+    /**
+     * @brief Custom CRTP hook for matching operational configurations strictly.
+     */
+    bool strictEqualsImpl(const ConvDgradAttributes& other) const
+    {
+        return logicallyEqualsImpl(other);
     }
 };
 

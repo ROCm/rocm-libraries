@@ -1,38 +1,90 @@
 .. meta::
-   :description: hipSPARSELt API library data type support
+   :description: hipSPARSELt API library precision support
    :keywords: hipSPARSELt, ROCm, API library, API reference, data type, support
 
-.. _data-type-support:
+.. _hipsparselt-data-type-support:
 
 ******************************************
-Data type support
+hipSPARSELt precision support
 ******************************************
 
 This topic lists the data type support for the hipSPARSELt library on AMD and
-NVIDIA GPUs. The icons representing different levels of support are explained in
-the following table.
+NVIDIA GPUs.
+
+This page lists the data types supported by the library itself and does not
+indicate hardware support. A type listed here is only usable if the GPU
+architecture also supports it; otherwise it is unsupported. For data type support
+across the other ROCm libraries and by GPU architecture, see the
+:doc:`Data types and precision support page <rocm:reference/precision-support>`.
+
+.. _hipsparselt-input-output-type-support:
+
+Supported data types overview
+=============================
+
+The following table summarizes the input and output data types supported by
+hipSPARSELt on AMD GPUs. For backend-specific (AMD and NVIDIA) input/output,
+accumulator, and compute-type details, see the sections that follow.
 
 .. list-table::
     :header-rows: 1
 
     *
-      -  Icon
+      - Icon
       - Definition
+    *
+      - ✅
+      - Fully supported as both an input and output type.
+    *
+      - ⚠️
+      - Partially supported as an input or output type.
+
+Data types not listed in the table below are not supported.
+
+.. datatemplate:yaml:: /data/reference/precision-support.yaml
+
+    .. list-table::
+        :header-rows: 1
+        :widths: 70, 30
+
+        *
+            - Data type
+            - Support
+    {% for data_type in data.data_types %}
+        *
+            - {{ data_type.type }}
+            - {{ data_type.support }}
+    {% endfor %}
+
+Input/output types by backend
+==============================
+
+The following sections list the backend-specific (AMD and NVIDIA) input/output,
+accumulator, and compute-type support. The icons representing different levels of
+support are explained in the following table.
+
+.. list-table::
+    :header-rows: 1
+
+    *
+      - Icon
+      - Definition
+
+    *
+      - NA
+      - Not applicable
 
     *
       - ❌
       - Not supported
 
     *
+      - ⚠️
+      - Partial support
+
+    *
       - ✅
       - Full support
-
-
-For more information about data type support for the other ROCm libraries, see
-:doc:`Data types and precision support page <rocm:reference/precision-support>`.
-
-Supported input and output types
-================================
 
 List of supported input and output types:
 
@@ -53,22 +105,22 @@ List of supported input and output types:
   *
     - float8
     - HIP_R_8F_E4M3
-    - ✅
+    - ⚠️
     - ✅
   *
     - bfloat8
     - HIP_R_8F_E5M2
-    - ✅
+    - ⚠️
     - ✅
   *
     - float8_fnuz
     - HIP_R_8F_E4M3_FNUZ
-    - ✅
+    - ⚠️
     - ❌
   *
     - bfloat8_fnuz
     - HIP_R_8F_E5M2_FNUZ
-    - ✅
+    - ⚠️
     - ❌
   *
     - int16
@@ -88,8 +140,8 @@ List of supported input and output types:
   *
     - int32
     - HIP_R_32I
-    - ✅
-    - ✅
+    - ⚠️
+    - ⚠️
   *
     - tensorfloat32
     - Not supported
@@ -98,7 +150,7 @@ List of supported input and output types:
   *
     - float32
     - HIP_R_32F
-    - ✅
+    - ⚠️
     - ✅
   *
     - float64
@@ -106,8 +158,8 @@ List of supported input and output types:
     - ❌
     - ❌
 
-Supported accumulator types
-===========================
+Accumulator types by backend
+============================
 
 List of supported accumulator types:
 
@@ -171,8 +223,8 @@ List of supported accumulator types:
     - ❌
     - ❌
 
-Supported compute types
-================================
+Compute types by backend
+========================
 
 List of supported compute types for specific input and output types:
 

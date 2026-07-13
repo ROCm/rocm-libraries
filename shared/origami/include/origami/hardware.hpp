@@ -54,6 +54,7 @@ class ORIGAMI_EXPORT hardware_t {
     gfx90a,
     gfx942,
     gfx950,
+    gfx1200,
     gfx1201,
     gfx1100,
     gfx1150,
@@ -74,6 +75,7 @@ class ORIGAMI_EXPORT hardware_t {
     if (str == "gfx90a") return architecture_t::gfx90a;
     if (str == "gfx942") return architecture_t::gfx942;
     if (str == "gfx950") return architecture_t::gfx950;
+    if (str == "gfx1200") return architecture_t::gfx1200;
     if (str == "gfx1201") return architecture_t::gfx1201;
     if (str == "gfx1100") return architecture_t::gfx1100;
     if (str == "gfx1150") return architecture_t::gfx1150;
@@ -95,6 +97,7 @@ class ORIGAMI_EXPORT hardware_t {
       case architecture_t::gfx90a: return "gfx90a";
       case architecture_t::gfx942: return "gfx942";
       case architecture_t::gfx950: return "gfx950";
+      case architecture_t::gfx1200: return "gfx1200";
       case architecture_t::gfx1201: return "gfx1201";
       case architecture_t::gfx1100: return "gfx1100";
       case architecture_t::gfx1150: return "gfx1150";
@@ -162,6 +165,8 @@ class ORIGAMI_EXPORT hardware_t {
                 4,
                 std::make_tuple(-0.000013, 0.007070, 0.027355),
                 1.5};
+      case architecture_t::gfx1200:
+        return {3.28, 1.21875121875121875122 * 1.45, 0.280, 2, std::make_tuple(0, 0.31, 0), 1.5};
       case architecture_t::gfx1201:
         return {5.74, 1.21875121875121875122 * 2.41, 0.464, 2, std::make_tuple(0, 0.17, 0), 1.5};
       case architecture_t::gfx1100:
@@ -380,6 +385,33 @@ class ORIGAMI_EXPORT hardware_t {
              {matrix_instruction(1, 1, 64, data_type_t::Half), 16}, // V_DOT2_F32_F16
              {matrix_instruction(1, 1, 64, data_type_t::BFloat16), 16}, // V_DOT2_F32_BF16
          }},
+        {architecture_t::gfx1200,
+         {
+             // F16
+             {matrix_instruction(16, 16, 16, data_type_t::Half), 16}, // v_wmma_f16_16x16x16_f16/v_wmma_f32_16x16x16_f16
+
+             // BF16
+             {matrix_instruction(16, 16, 16, data_type_t::BFloat16), 16}, // v_wmma_bf16_16x16x16_bf16/v_wmma_f32_16x16x16_bf16
+
+             // F8
+             {matrix_instruction(16, 16, 16, data_type_t::Float8), 8}, // v_wmma_f32_16x16x16_fp8_fp8
+
+             // F8B8
+             {matrix_instruction(16, 16, 16, data_type_t::Float8BFloat8), 8}, // v_wmma_f32_16x16x16_fp8_bf8
+
+             // B8F8
+             {matrix_instruction(16, 16, 16, data_type_t::BFloat8Float8), 8}, // v_wmma_f32_16x16x16_bf8_fp8
+
+             // B8
+             {matrix_instruction(16, 16, 16, data_type_t::BFloat8), 8}, // v_wmma_f32_16x16x16_bf8_bf8
+
+             // I8
+             {matrix_instruction(16, 16, 16, data_type_t::Int8), 8}, // v_wmma_i32_16x16x16_iu8
+
+             // I4
+             {matrix_instruction(16, 16, 16, data_type_t::Int4), 8}, // v_wmma_i32_16x16x16_iu4
+             {matrix_instruction(16, 16, 32, data_type_t::Int4), 8}, // v_wmma_i32_16x16x32_iu4
+         }},
         {architecture_t::gfx1201,
          {
              // F16
@@ -548,6 +580,7 @@ class ORIGAMI_EXPORT hardware_t {
   architecture_t arch;  ///< GPU architecture type
   size_t N_CU;          ///< Number of Compute Units
   size_t lds_capacity;  ///< Capacity of Local Data Share (LDS) in bytes
+  size_t rf_capacity;   ///< Capacity of Register File (RF) in bytes
   double mem1_perf_ratio;
   double mem2_perf_ratio;
   double mem3_perf_ratio;
@@ -565,6 +598,7 @@ class ORIGAMI_EXPORT hardware_t {
    * @param arch GPU architecture type
    * @param N_CU Number of compute units
    * @param lds_capacity LDS capacity in bytes
+   * @param rf_capacity RF capacity in bytes
    * @param NUM_XCD Number of XCDs
    * @param mem1_perf_ratio Memory level 1 performance ratio
    * @param mem2_perf_ratio Memory level 2 performance ratio
@@ -577,6 +611,7 @@ class ORIGAMI_EXPORT hardware_t {
   hardware_t(architecture_t arch,
              size_t N_CU,
              size_t lds_capacity,
+             size_t rf_capacity,
              size_t NUM_XCD,
              double mem1_perf_ratio,
              double mem2_perf_ratio,
@@ -595,6 +630,7 @@ class ORIGAMI_EXPORT hardware_t {
    * @param arch GPU architecture type
    * @param N_CU Number of compute units
    * @param lds_capacity LDS capacity in bytes
+   * @param rf_capacity RF capacity in bytes
    * @param constants Architecture-specific constants
    * @param num_xcds Number of XCDs — provided separately from constants so that
    *                 it can come from a runtime query or a known-architecture table
@@ -605,6 +641,7 @@ class ORIGAMI_EXPORT hardware_t {
   hardware_t(architecture_t arch,
              size_t N_CU,
              size_t lds_capacity,
+             size_t rf_capacity,
              const architecture_constants& constants,
              size_t num_xcds,
              size_t L2_capacity,
@@ -691,6 +728,7 @@ class ORIGAMI_EXPORT hardware_t {
    * @param arch Architecture enum value
    * @param N_CU Number of compute units
    * @param lds_capacity LDS capacity in bytes
+   * @param rf_capacity LDS capacity in bytes
    * @param L2_capacity L2 cache capacity in bytes
    * @param compute_clock_khz Compute clock in KHz
    * @return hardware_t Configured hardware instance
@@ -699,6 +737,7 @@ class ORIGAMI_EXPORT hardware_t {
   static hardware_t get_hardware_for_arch(architecture_t arch,
                                           size_t N_CU,
                                           size_t lds_capacity,
+                                          size_t rf_capacity,
                                           size_t L2_capacity,
                                           int compute_clock_khz);
 

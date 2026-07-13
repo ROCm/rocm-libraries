@@ -53,9 +53,9 @@ Deep learning operations can be computed by many algorithms, each with different
 
 ## 3. Requirements
 
-1. **Two tuning modes**: Auto-tune (simple wall-time) and Exhaustive-tune (internal priming via temporary plans + wall-time)
-2. **Config file output**: Write ranked winners to engine override JSON files, enabling reuse via `HIPDNN_HEUR_CONFIG_PATH`
-3. **Benchmarking strategies**: Single-shot, fixed-average, run-until-stable
+1. **Two tuning modes**: Standard-tune (simple wall-time) and Exhaustive-tune (internal priming via temporary plans + wall-time)
+2. **Config file output**: Write ranked winner to engine override JSON files, enabling reuse via `HIPDNN_HEUR_CONFIG_PATH`
+3. **Benchmarking strategies**: fixed-average, run-until-stable
 4. **Separated phases**: Inspect/filter engines between discovery and plan spec collection
 5. **Knob variant autotuning**: Benchmark the same engine with different knob configurations
 6. **cuDNN API parity**: Match cuDNN's autotuning support, then extend
@@ -67,7 +67,7 @@ Deep learning operations can be computed by many algorithms, each with different
 
 | Term | Meaning |
 |------|---------|
-| **Auto-tune mode** | Benchmark engines using standard execution (no special flags). |
+| **Standard-tune mode** | Benchmark engines using standard execution (no special flags). |
 | **Exhaustive-tune mode** | Benchmark with engine-internal cache priming (plan-spec path only; see § 6.3). `autotune()` builds temporary priming plans using each plan spec's knob settings plus `global.benchmarking=1`, executes them once to prime engine caches, discards them, then compiles the real plans before timed runs. |
 | **Benchmarking knob** | The `global.benchmarking` knob: a per-engine flag that tells the engine to initialize its internal cache state (e.g., MIOpen's `find` phase). Not all engines support this. On the plan-spec path, it is managed exclusively by `autotune()` in EXHAUSTIVE mode; `add_engine_*()` strips it with a warning log (see § 6.2.4). On the compiled-plan path, users set it directly via `create_execution_plan_ext()` knob settings. |
 | **Graph signature** | Deterministic hash of operation graph structure, tensor shapes, data types, and compute configuration. |
@@ -88,9 +88,10 @@ Deep learning operations can be computed by many algorithms, each with different
 │  │ Autotuning      │    │ Config File Writer                      │  │
 │  │ Runtime         │───▶│ (EngineOverrideConfig JSON format)      │  │
 │  │                 │    │                                         │  │
-│  │ • AUTO mode     │    │ • Write ranked winners                  │  │
-│  │ • EXHAUSTIVE    │    │ • Append to existing file               │  │
-│  │   mode          │    │ • Replace matching (op, tensors)        │  │
+│  │ • STANDARD mode │    │ • Write ranked winner                   │  │
+│  │ • EXHAUSTIVE    │    │ • Append to existing v2 file            │  │
+│  │   mode          │    │ • Replace matching (op, criteria,       │  │
+│  │                 │    │   tensors-by-id)                        │  │
 │  │ • Strategies    │    │ • Autotune metadata                     │  │
 │  │                 │    └─────────────────────────────────────────┘  │
 │  └─────────────────┘                                                 │
@@ -119,12 +120,11 @@ Deep learning operations can be computed by many algorithms, each with different
 
 ```cpp
 enum class TuneMode {
-    AUTO,        // Simple wall-time comparison (no engine-internal cache priming)
+    STANDARD,    // Simple wall-time comparison (no engine-internal cache priming)
     EXHAUSTIVE   // Build temporary priming plans internally, prime engine caches, then wall-time comparison
 };
 
 enum class AutotuneStrategy {
-    SINGLE_SHOT,       // 1 timed run, take the result
     FIXED_AVERAGE,     // Average of N runs
     RUN_UNTIL_STABLE   // Run until timing variance stabilizes, up to a cap (default)
 };
@@ -133,7 +133,7 @@ enum class AutotuneStrategy {
 using AutotuneRankingFn = std::function<void(std::vector<AutotuneResult>&)>;
 
 struct AutotuneConfig {
-    TuneMode mode = TuneMode::AUTO;
+    TuneMode mode = TuneMode::STANDARD;
     AutotuneStrategy strategy = AutotuneStrategy::RUN_UNTIL_STABLE;
 
     // Warmup
@@ -156,10 +156,12 @@ struct AutotuneConfig {
     // Custom ranking (nullptr = rank by minTimeMs)
     AutotuneRankingFn rankingFn = nullptr;
 
-    // EXHAUSTIVE mode: when false (default), abort on priming failure.
-    // When true: benchmark without priming; ranExhaustive=false, errorMessage notes reason.
-    // No effect in AUTO mode.
-    bool continueOnPrimingFailure = false;
+    // EXHAUSTIVE mode priming-failure policy.
+    //   ABORT_ON_PRIMING_FAILURE (default): abort autotune() and return an error on priming failure.
+    //   BENCHMARK_UNPRIMED: continue to benchmark the engine without priming; ranExhaustive=false,
+    //                       exhaustiveNotRunReason notes reason.
+    // No effect in STANDARD mode.
+    PrimingFailurePolicy primingFailurePolicy = PrimingFailurePolicy::ABORT_ON_PRIMING_FAILURE;
 
 };
 
@@ -170,25 +172,42 @@ struct AutotuneStorageConfig {
 };
 
 struct AutotuneResult {
-    int rank;                               // 0-based (0 = fastest); -1 for failed engines
-    int64_t engineId;
-    std::vector<KnobSetting> knobSettings;  // Informational, records knobs explicitly set on the engine.
+    // Identity
+    int64_t engineId = -1;
     std::string engineName;
-    float minTimeMs;                        // Used for ranking
-    float avgTimeMs;
-    float stddevMs;                         // 0.0 for SINGLE_SHOT
-    int iterationsRun;                      // Actual iterations executed
-    bool converged;                         // true for SINGLE_SHOT/FIXED_AVERAGE; false only for
-                                            // RUN_UNTIL_STABLE when maxIterations reached.
-    int64_t workspaceSize;
-    bool succeeded;
+    std::vector<KnobSetting> knobSettings;  // Informational, records knobs explicitly set on the engine.
+
+    // Timing
+    float minTimeMs = 0.0f;                 // Minimum time across iterations (used for default ranking)
+    float avgTimeMs = 0.0f;
+    float stddevMs = 0.0f;                  // Uses population stddev (divide by N).
+    int iterationsRun = 0;                  // Actual iterations executed
+    bool converged = false;                 // true for FIXED_AVERAGE when all iterations completed
+                                            // successfully. false on benchmark failure (any strategy) or
+                                            // for RUN_UNTIL_STABLE when maxIterations was reached without
+                                            // convergence. Only meaningful for RUN_UNTIL_STABLE; for
+                                            // FIXED_AVERAGE, the value is true on success, false on failure.
+
+    // Status
+    int rank = -1;                          // 0-based (0 = fastest); -1 for failed engines
+    bool succeeded = false;
     std::string errorMessage;
-    TuneMode modeUsed;
-    bool ranExhaustive;                     // true if primed via temporary benchmarking plan;
-                                            // false for AUTO mode or unsupported engines.
+    int64_t workspaceSize = 0;
+    int64_t estimatedWorkspaceSize = 0;     // Pre-compile workspace estimate from engine config.
+    int compiledPlanIndex = -1;             // Index into the compiled plans vector; used for
+                                            // winner selection after benchmarking.
+    TuneMode modeUsed = TuneMode::STANDARD;
+    bool supportsExhaustive = false;        // true if the engine exposes the benchmarking knob and
+                                            // therefore supports exhaustive priming, independent of
+                                            // whether priming actually ran.
+    bool ranExhaustive = false;             // true if primed via temporary benchmarking plan;
+                                            // false for STANDARD mode or unsupported engines.
+    std::string exhaustiveNotRunReason;     // Why exhaustive priming did not run (ranExhaustive=false)
+                                            // under EXHAUSTIVE mode: priming failed, or was skipped
+                                            // because its workspace exceeded the budget. Empty
+                                            // otherwise. Independent of errorMessage.
     AutotuneStrategy strategyUsed = AutotuneStrategy::RUN_UNTIL_STABLE;
                                             // Strategy used (for config file metadata)
-    std::string deviceName;                 // e.g., "gfx942" (for config file metadata)
 };
 ```
 
@@ -206,25 +225,25 @@ The autotuning preparation pipeline has four stages:
 
 4. **Execution plans**: Compiled, executable kernel plans. Compiled by `build_plans()` (existing non-autotune path) or by `autotune()` (which compiles plan specs, then benchmarks them).
 
-The key design difference from cuDNN: users can inspect engine configs, create variants, and collect plan specs *before* paying the cost of kernel compilation. Compilation is deferred until `autotune()` (see also § A.3 point 3).
+The key design difference from cuDNN: users can inspect engine configs, create variants, and collect plan specs *before* paying for kernel compilation. Compilation is deferred until `autotune()` (see also § A.3 point 3).
 
 #### 6.2.2 Types
 
 ```cpp
 // Read-only snapshot of an engine. Provided for inspection and filtering only. Do not
-//modify fields directly. Use add_engine_*() to create plan specs from selected configs.
+// modify fields directly. Use add_engine_*() to create plan specs from selected configs.
 struct EngineConfigInfo {
-    int64_t engineId;                  // Used by add_engine_configs() to create the plan spec
+    int64_t engineId = -1;             // Used by add_engine_configs() to create the plan spec
     std::string engineName;            // Informational, for filtering and logging
     std::vector<Knob> knobs;           // Informational, shows the engine's available knobs.
                                        // Ignored by add_engine_*() functions. Use add_engine_variants()
                                        // or add_engine() to set custom knobs on engines for autotune().
-    bool supportsExhaustive;           // Informational. For filtering exhaustive-capable engines
-    int64_t estimatedWorkspaceSize;    // Informational, pre-compile workspace estimate, for filtering.
+    bool supportsExhaustive = false;   // Informational. For filtering exhaustive-capable engines
+    int64_t estimatedWorkspaceSize = 0;// Informational, pre-compile workspace estimate, for filtering.
 };
 
 struct EngineVariant {
-    int64_t engineId;
+    int64_t engineId = -1;
     std::map<KnobType_t, KnobValueVariant> knobSettings;
 };
 // Note: EngineVariant::knobSettings uses std::map (user-friendly input);
@@ -236,7 +255,7 @@ struct KnobSweepAxis {
 };
 
 struct EngineSweepSpec {
-    int64_t engineId;
+    int64_t engineId = -1;
     std::vector<KnobSweepAxis> axes;            // Knobs to sweep (Cartesian product)
     std::map<KnobType_t, KnobValueVariant> fixedSettings;  // Knobs held constant for each combination of axes
 };
@@ -263,6 +282,7 @@ Error add_engine_configs(const std::vector<EngineConfigInfo>& configs);
 
 // Add plan specs by engine ID list with default knob settings.
 // Convenience overload: loops calling add_engine(id) for each entry.
+// Fail-fast: stops on the first error from add_engine() and returns that error.
 Error add_engines(const std::vector<int64_t>& engineIds);
 
 // Add a single plan spec, optionally with explicit knob settings.
@@ -296,11 +316,12 @@ Error add_all_engines(const std::vector<HeuristicMode>& modes = {HeuristicMode::
 // Pre-compile estimate from engine config metadata; actual post-compile workspace
 // may differ (compilation can change requirements). Not guaranteed >= actual.
 // Call after add_engine_*(), before allocating workspace for autotune/execute.
+// Returns an error if no plan specs have been added.
 Error get_estimated_max_workspace_size(int64_t& maxSize) const;
 ```
 
 **Workspace sizing**:
-1. **Plan-spec path**: `get_estimated_max_workspace_size()` returns a pre-compile estimate. Allocate this size and pass it to the general `autotune()` overload. All plan specs are compiled regardless of their estimated workspace size — `autotune()` does not pre-filter by estimate. After compilation, plans whose actual workspace exceeds the provided `workspaceSize` are skipped (not executed). Users who want to avoid compiling engines with large workspace estimates should filter `EngineConfigInfo` entries before calling `add_engine_configs()` (see example below).
+1. **Plan-spec path**: `get_estimated_max_workspace_size()` returns a pre-compile estimate. Allocate this size and pass it to the general `autotune()` overload. All plan specs are compiled regardless of their estimated workspace size; `autotune()` does not pre-filter by estimate. After compilation, plans whose actual workspace exceeds the provided `workspaceSize` are skipped (not executed). To avoid compiling engines with large workspace estimates, filter `EngineConfigInfo` entries before calling `add_engine_configs()` (see example below).
 2. **Compiled-plan path**: Use `get_autotune_workspace_size()` for the accurate post-compile maximum.
 3. After autotuning, `execute()` only needs the winner's `workspaceSize`, which may be smaller.
 
@@ -317,7 +338,7 @@ This avoids compiling engines whose _estimated_ workspace exceeds the budget.
 
 #### 6.2.4 Plan Spec Collection Semantics
 
-**Additive with deduplication**: All `add_engine_*()` calls append to the same internal plan spec list, deduplicated by `(engineId, knobSettings)`. Identical entries are silently skipped; the same engine with *different* knob settings produces distinct entries (variant autotuning). This deduplication key does not carry through to the config file match key, which uses `(operation, tensors)` only (see § 6.5).
+**Additive with deduplication**: All `add_engine_*()` calls append to the same internal plan spec list, deduplicated by `(engineId, knobSettings)`. Identical entries are silently skipped; the same engine with *different* knob settings produces distinct entries (variant autotuning). This deduplication key does not carry through to the config file match key, which is `(operation, criteria, tensors-matched-by-named-id-ignoring-order)` (see § 6.5).
 
 **Zero specs added**: Empty input returns an error. Batch calls (`add_engine_variants()`, `add_engine_sweep()`) that skip all entries due to validation return success with a warning log per skipped entry.
 
@@ -338,6 +359,8 @@ graph->add_engine_variants(miopen_variants);
 
 **Hardware support filtering**: `get_engine_configs()` only returns engines applicable to the current graph and hardware. Engines added via `add_engine()` or `add_engine_variants()` with IDs not from `get_engine_configs()` may fail compilation inside `autotune()`; batch operations skip them with a warning log.
 
+**Precondition**: All `add_engine_*()` functions require `build_operation_graph()` to have been called first; they return an error otherwise.
+
 **Engine ID validation** (checked at add time):
 - `add_engine()`: Hard error for invalid engine IDs.
 - `add_engine_configs()`: Does NOT validate engine IDs at add time; trusts that configs came from `get_engine_configs()`. Invalid IDs fail later during compilation inside `autotune()`.
@@ -351,9 +374,11 @@ All `add_engine_*()` functions validate then store (see § 6.2.4). No compilatio
 
 **`add_engine_configs(configs)`**: For each `EngineConfigInfo`, stores a plan spec using the engine's default knob settings.
 
-**`add_engine_variants(variants)`**: For each `EngineVariant`, stores a plan spec using the specified `engineId` and `knobSettings`.
+**`add_engine(engineId, knobSettings)`**: Validates the engine ID and knob settings, queries the backend for the engine's estimated workspace size, then stores a plan spec.
 
-**`add_engine_sweep(specs)`**: For each `EngineSweepSpec`, computes the Cartesian product of all `axes` values, merges each combination with `fixedSettings`, then stores each as `add_engine_variants` does. Returns an error if the product exceeds 10,000 plan specs per call; a warning is logged above 1,000.
+**`add_engine_variants(variants)`**: For each `EngineVariant`, validates and stores a plan spec using the specified `engineId` and `knobSettings`. Fails fast on the first invalid knob configuration (returns error), but variants already validated and added are retained (partial application, not atomic).
+
+**`add_engine_sweep(specs)`**: For each `EngineSweepSpec`, strips the `global.benchmarking` knob from sweep axes (it has no effect on plan compilation), computes the Cartesian product of the remaining axes, merges each combination with `fixedSettings`, then stores each as `add_engine_variants` does. A sweep axis with an empty `values` list is also dropped with a warning (the knob takes its engine default); it does not eliminate the engine's other combinations. If all axes are stripped, one plan spec with only `fixedSettings` is produced. Returns an error if any single `EngineSweepSpec` produces more than 10,000 plan specs; a warning is logged above 1,000 per spec.
 
 **Cartesian product example:**
 
@@ -399,19 +424,26 @@ Each row is a separate plan spec. All share the fixed `REDUCTION_MODE=1`, while 
 #### 6.2.7 Filtering
 
 ```cpp
-// Remove plan specs or compiled plans whose workspace exceeds the given limit.
+// Store a workspace threshold. Plans whose workspace exceeds this limit are excluded
+// during build_plans() and autotune(). Last-write-wins: a subsequent call replaces
+// the previous threshold. Has no effect on plans that have already been compiled
+// and evaluated.
 Graph& deselect_workspace_greater_than(int64_t workspace);
 
-// Remove plan specs or compiled plans whose engine name matches any entry in engine_names.
+// Store engine names for exclusion. Plans matching these engines are excluded during
+// build_plans() and autotune(). Accumulates across calls (set union with previous calls).
 Graph& deselect_engines(const std::vector<std::string>& engine_names);
 
-// Remove plan specs or compiled plans whose engine ID matches any entry in engine_ids.
+// Store engine IDs for exclusion. Plans matching these engines are excluded during
+// build_plans() and autotune(). Accumulates across calls (set union with previous calls).
 Graph& deselect_engines(const std::vector<int64_t>& engine_ids);
 ```
 
-All filtering methods return `Graph&` for method chaining. They operate on whichever collection is populated: `_planSpecs` (plan-spec path) or `_compiledPlans` (compiled-plan path).
+All filtering methods return `Graph&` for method chaining. They store criteria on the graph without modifying plan specs or compiled plans. The stored criteria are evaluated during `build_plans()` (compiled-plan path) or during `autotune()` when it compiles plan specs (plan-spec path). On the compiled-plan path, call `deselect_*()` before `build_plans()` for the criteria to take effect. Matching plans are excluded from compilation (engine name/ID) or from execution (workspace threshold). The workspace threshold is checked after compilation, since workspace size is only known post-compile.
 
-> **Index invalidation**: `deselect_*` methods remove entries from the underlying collection, causing indices to shift. Any previously cached indices (e.g., from `get_execution_plan_count()` or `execute_plan_at_index()`) are invalidated after each call. Re-query `get_execution_plan_count()` after deselection. This differs from cuDNN, which marks plans as "barred" without removing them (see also § A.3 point 5).
+> **Stable indices (compiled-plan path)**: on the compiled-plan path, `deselect_*` methods do not remove entries from the underlying compiled-plan collection. `get_execution_plan_count()` returns the total number of plans including excluded ones. Indices remain valid after deselect calls. Attempting to execute an excluded plan (via `execute()` or `execute_plan_at_index()`) returns `INVALID_VALUE`. This matches cuDNN's behavior, where plans are marked as "barred" without removal (see also § A.3 point 5). The plan-spec path has no equivalent stable-index contract (specs are compiled on demand).
+>
+> Independently of retention, an excluded candidate is still **reported** on both paths in the `autotune()` `results` vector as a failed (`succeeded = false`) entry naming the exclusion reason. See § 6.3.1 for the full per-candidate result-coverage contract.
 
 ### 6.3 Autotuning API on Graph
 
@@ -438,7 +470,7 @@ Error autotune(hipdnnHandle_t handle,
                const AutotuneStorageConfig& storageConfig = {},
                std::vector<AutotuneResult>* results = nullptr);
 ```
-Works with both paths. `workspaceSize` is the caller's allocated workspace buffer size. All plan specs are compiled regardless of estimated workspace size. Workspace sizes of compiled plans are typically the same or smaller than estimated, but can be larger. Plans whose actual (post-compile) workspace exceeds `workspaceSize` are skipped with a warning log if the pre-compile estimate indicated the plan would fit. Skipped plans are captured in `AutotuneResult` with both the estimated and actual workspace sizes. To avoid compiling engines with large estimated workspace sizes, pre-filter `EngineConfigInfo` before `add_engine_configs()` (see § 6.2.3).
+Works with both paths. `workspaceSize` must be >= 0 (negative values return `INVALID_VALUE`). All plan specs are compiled regardless of estimated workspace size. Workspace sizes of compiled plans are typically the same or smaller than estimated, but can be larger. Plans whose actual (post-compile) workspace exceeds `workspaceSize` are skipped with a warning log if the pre-compile estimate indicated the plan would fit. Skipped plans (like every other non-benchmarked candidate) are captured in `AutotuneResult` (with both the estimated and actual workspace sizes); see § 6.3.1 for the full per-candidate result-coverage contract. To avoid compiling engines with large estimated workspace sizes, pre-filter `EngineConfigInfo` before `add_engine_configs()` (see § 6.2.3).
 
 **cuDNN-compatible overloads; forwarding overloads matching cuDNN's signature:**
 ```cpp
@@ -454,15 +486,32 @@ Error autotune(hipdnnHandle_t handle,
                void* workspace,
                void* user_impl = nullptr);
 ```
-Forward to the compiled-plan overloads with defaults (AUTO, RUN_UNTIL_STABLE, no file output, no results). Compiled-plan path only.
+Forward to the compiled-plan overloads with defaults (STANDARD, RUN_UNTIL_STABLE, no file output, no results). Compiled-plan path only.
 
 All overload groups benchmark execution plans and select the best. Subsequent `execute()` calls use the winning plan. Pass a non-null `results` pointer to get ranked results; omit or pass `nullptr` to discard them. If `storageConfig.filePath` is non-empty, results are also written to the config file.
 
+#### 6.3.1 Result coverage (every candidate produces exactly one result)
+
+When a non-null `results` pointer is supplied, `autotune()` reports **exactly one `AutotuneResult` per candidate**: every plan spec (plan-spec path) and every compiled plan (compiled-plan path) appears in `results` with the disposition that applied to it. A candidate is never silently dropped. Each non-benchmarked candidate carries `succeeded = false`, `rank = -1`, `compiledPlanIndex = -1`, and an `errorMessage` naming the reason; benchmarked candidates carry their timing and `succeeded`/`rank`. The dispositions are:
+
+| Disposition | `succeeded` | `errorMessage` contains | `workspaceSize` |
+|---|---|---|---|
+| Benchmarked (winner or ranked) | `true` | (empty) | compiled workspace |
+| Excluded by `deselect_engines()` / `deselect_workspace_greater_than()` (barred) | `false` | "Plan barred" | compiled if known, else `-1` |
+| Excluded by `config.engineIdFilter` | `false` | "engineIdFilter" | compiled if known, else `-1` |
+| Compiled workspace exceeds the call's `workspaceSize` ceiling (skipped) | `false` | "exceeds limit" | compiled workspace |
+| Failed to compile (plan-spec path) | `false` | "failed compile" | `-1` (never compiled) |
+| Failed to finalize | `false` | "failed finalize" | `-1` / compiled as applicable |
+
+`estimatedWorkspaceSize` carries the pre-compile estimate where one exists (plan-spec path) and `workspaceSize` carries the compiled workspace; a `workspaceSize` of `-1` is the "not applicable / never compiled" sentinel for candidates excluded before compilation.
+
+**`workspaceSize == -1` sentinel**: for a candidate excluded or failed before its plan was compiled (engine-deselect, engineIdFilter on the plan-spec path, compile failure), no compiled workspace exists, so `workspaceSize` is `-1`; `estimatedWorkspaceSize` still carries the pre-compile estimate when available.
+
 **Two data paths**: `autotune()` accepts candidates from either of two mutually exclusive paths (see § 6.2.1) and auto-detects which to use:
 
-1. **Plan-spec path** (`add_engine_*()` → `autotune()`): `autotune()` compiles stored plan specs, then benchmarks. Both AUTO and EXHAUSTIVE modes available. In EXHAUSTIVE mode, priming plans are built and executed first (see § 6.4).
+1. **Plan-spec path** (`add_engine_*()` → `autotune()`): `autotune()` compiles stored plan specs, then benchmarks. Both STANDARD and EXHAUSTIVE modes available. In EXHAUSTIVE mode, priming plans are built and executed first (see § 6.4).
 
-2. **Compiled-plan path** (`create_execution_plans()` → `build_plans(ALL)` → `autotune()`): `autotune()` benchmarks pre-compiled plans directly. AUTO mode only (EXHAUSTIVE returns an error; use `create_execution_plan_ext()` knob settings for `global.benchmarking` instead for compiled plans path).
+2. **Compiled-plan path** (`create_execution_plans()` → `build_plans(ALL)` → `autotune()`): `autotune()` benchmarks pre-compiled plans directly. STANDARD mode only (EXHAUSTIVE returns an error; use `create_execution_plan_ext()` knob settings for `global.benchmarking` instead for compiled plans path).
 
 If both or neither path's artifacts are present, `autotune()` returns an error. The two paths are mutually exclusive per Graph instance (see § 6.2.3).
 
@@ -472,16 +521,18 @@ If both or neither path's artifacts are present, `autotune()` returns an error. 
 
 *Upfront checks (validated before benchmarking begins):*
 - Invalid handle
+- `variantPack` is empty
 - `variantPack` fails tensor UID validation (`INVALID_VALUE`): all non-virtual tensor UIDs required by the graph must be present. Missing UIDs are reported in the error message.
 - Workspace pointer null but plans require workspace
 - No autotuning candidates (no plan specs and no compiled plans)
+- No candidates remain after filtering: `engineIdFilter` and/or `deselect_*` criteria exclude every candidate. (Returns `INVALID_VALUE`; `*results` is still populated with one failed entry per excluded candidate and the error message is the composition summary; see § 6.3.1.) The summary lists only the exclusion categories that can be non-zero at the exit point.
 - EXHAUSTIVE mode requested on compiled-plan path
 - `RUN_UNTIL_STABLE` parameter validation fails (see `AutotuneConfig` constraints in § 6.1)
 
 *Runtime errors (discovered during benchmarking):*
 - All plans fail compilation or benchmarking (every result `succeeded = false`)
 - HIP memory operations fail
-- EXHAUSTIVE mode: priming failure when `continueOnPrimingFailure` is `false` (default)
+- EXHAUSTIVE mode: priming failure when `primingFailurePolicy` is `ABORT_ON_PRIMING_FAILURE` (default)
 
 Failed entries (`succeeded = false`) are always placed after successful entries, with `rank = -1`.
 
@@ -501,53 +552,71 @@ Failed entries (`succeeded = false`) are always placed after successful entries,
 
 ### 6.4 Benchmarking Flows
 
-**AUTO mode**:
+**STANDARD mode**:
 ```
 1. Plan-spec path: compile all plan specs into execution plans
    Compiled-plan path: use pre-compiled plans as-is
 2. For each compiled plan:
-     a. device synchronize (ensure GPU is idle before this plan's benchmarking)
-     b. warmup iterations (discard timing)
-     c. device synchronize
-     d. [strategy-specific timed iteration loop]
-     e. compute avgTimeMs and track minTimeMs
+     a. warmup iterations (discard timing)
+     b. device synchronize (ensure GPU is idle before this plan's timed runs)
+     c. [strategy-specific timed iteration loop]
+     d. compute avgTimeMs and track minTimeMs
 sort by minTimeMs ascending (or user rankingFn)
 ```
 
 **EXHAUSTIVE mode** (plan-spec path only):
 ```
 1. For each plan spec where the engine's supportsExhaustive is true:
-     * build a temporary priming plan using the plan spec's knob settings plus global.benchmarking = 1
-     * execute the priming plan once
+     * build and finalize a temporary priming plan using the plan spec's knob settings
+       plus global.benchmarking = 1
+     * filter by the compiled plan's workspace size (but still benchmark filtered plans);
+       this is a skip, not a priming failure, so primingFailurePolicy does not apply
+       but a log is generated if a filtered plan's estimated size would have fit.
+     * otherwise, execute the priming plan once
      * discard the priming plan
-     * On priming failure:
-       - If continueOnPrimingFailure is false (default): abort, return error
-       - If continueOnPrimingFailure is true: mark engine as unprimed, continue
+     * On priming failure (build/finalize/execute error, distinct from a workspace skip):
+       - If primingFailurePolicy is ABORT_ON_PRIMING_FAILURE (default): abort, return error
+       - If primingFailurePolicy is BENCHMARK_UNPRIMED: mark engine as unprimed, continue
 2. Compile all plan specs into execution plans (engines are now primed)
 3. For each compiled plan:
-     a. device synchronize (ensure GPU is idle before this plan's benchmarking)
-     b. warmup iterations (discard timing)
-     c. device synchronize
-     d. [strategy-specific timed iteration loop]
-     e. compute avgTimeMs and track minTimeMs
+     a. warmup iterations (discard timing)
+     b. device synchronize (ensure GPU is idle before this plan's timed runs)
+     c. [strategy-specific timed iteration loop]
+     d. compute avgTimeMs and track minTimeMs
 sort by minTimeMs ascending (or user rankingFn)
 ```
 
 > **Stream**: `autotune()` uses the stream set on the handle via `hipdnnSetStream()`.
 
-> **Synchronization**: `hipDeviceSynchronize()` is called before and after warmup (before timed runs), preventing cross-plan interference. `hipEventSynchronize(stop)` is used between timed iterations. `hipStreamSynchronize()` is not used during autotuning.
+> **Synchronization**: Device synchronization is performed after warmup (before timed runs), preventing cross-plan interference. Event synchronization is used between timed iterations. Stream synchronization is not used during autotuning.
+>
+> **Backend abstraction**: Because hipDNN is a header-only library, it does not call HIP runtime functions directly. Device synchronization is performed through backend profiling descriptors (`HIPDNN_BACKEND_PROFILING_CONTROL_EXT` with `HIPDNN_ATTR_PROFILING_DEVICE_SYNC_EXT`). Event-based timing similarly uses backend profiling descriptors rather than direct HIP event APIs.
 
 Engines where `supportsExhaustive` is false skip priming and are compiled and benchmarked normally.
 
-When `continueOnPrimingFailure` is `true` and priming fails, the engine is still benchmarked (unprimed). Its `AutotuneResult::ranExhaustive` is `false`, and `errorMessage` notes the priming failure even though `succeeded` may be `true`.
+When `primingFailurePolicy` is `BENCHMARK_UNPRIMED` and priming fails, the engine is still benchmarked (unprimed). Its `AutotuneResult::ranExhaustive` is `false`, and `exhaustiveNotRunReason` notes the priming failure even though `succeeded` may be `true`. `errorMessage` describes only benchmark failures (i.e. stays empty when benchmark succeeds with `BENCHMARK_UNPRIMED` after a priming failure).
+
+When priming is skipped because the priming plan's compiled workspace does not fit the provided workspace, the engine is always benchmarked unprimed regardless of `primingFailurePolicy` (a workspace skip is not a priming failure). Its `AutotuneResult::ranExhaustive` is `false` and `exhaustiveNotRunReason` records the skip. A warning is logged only when the pre-compile plan-spec estimate indicated the plan would fit but the larger compiled workspace did not; when the estimate also did not fit, the skip is expected and no warning is logged. This mirrors the post-compile workspace skip behavior in the main benchmarking flow. The plan is then subject to the normal post-compile workspace check. That check may skip it from benchmarking entirely if its compiled workspace still exceeds the provided size.
 
 **Strategy implementations**:
 
-- **SINGLE_SHOT**: One `hipEventRecord` pair around one execution. Fast, rough ranking.
-- **FIXED_AVERAGE**: Per-iteration event timing for N executions. Reports min, avg, and stddev across all N timings.
+- **FIXED_AVERAGE**: Per-iteration event timing for N executions. Reports min, avg, and population stddev (divide by N) across all N timings.
 - **RUN_UNTIL_STABLE**: Per-iteration event timing. Checks if the coefficient of variation of the last `windowSize` timings is below `stabilityThreshold`. Stops when stable or `maxIterations` reached.
 
 **Warmup failure**: Plans that fail during warmup are marked `succeeded = false`; the autotuner proceeds to the next plan.
+
+**Progress logging**: All autotune log messages use a consistent lowercase `"autotune:"` prefix for grep-friendly filtering.
+
+Log messages cover the following categories:
+- **Session start**: Run configuration summary (candidate count, mode, strategy)
+- **Compilation**: Summary of compiled vs. skipped/failed plans (plan-spec path)
+- **Priming**: Summary of priming results (EXHAUSTIVE mode)
+- **Per-engine benchmarking**: Start notification and result for each engine (timing, iterations, convergence status)
+- **Per-iteration timing**: Elapsed time per timed iteration, with CoV progress for RUN_UNTIL_STABLE
+- **Failures**: Benchmark failures (WARN level) with engine name and error message
+- **Ranking and winner**: Final succeeded/failed counts and winner selection
+
+> **Standard deviation formula**: `stddevMs` uses population standard deviation (divide by N) across the timed iterations.
 
 ### 6.5 Config File Output
 
@@ -555,17 +624,15 @@ Reuses the `EngineOverrideConfig` JSON format with autotuning metadata added:
 
 ```json
 {
+  "version": 2,
   "engine_overrides": [
     {
       "op": "conv_fprop",
       "engine_name": "MIOPEN_ENGINE_DETERMINISTIC",
+      "criteria": { "pointwise_mode": 1 },
       "tensors": [
-        { "dim": [16, 64, 56, 56], "stride": [200704, 3136, 56, 1] },
-        { "dim": [64, 64, 3, 3], "stride": [576, 9, 3, 1] }
-      ],
-      "knobs": [
-        { "knob_id": "global.workspace_size_limit", "type": "int", "value": 16777216 },
-        { "knob_id": "global.search_mode", "type": "int", "value": 2 }
+        { "tensor_id": "X", "dim": [16, 64, 56, 56], "stride": [200704, 3136, 56, 1] },
+        { "tensor_id": "W", "dim": [64, 64, 3, 3], "stride": [576, 9, 3, 1] }
       ],
       "autotune_metadata": {
         "rank": 0,
@@ -578,16 +645,19 @@ Reuses the `EngineOverrideConfig` JSON format with autotuning metadata added:
         "strategy": "run_until_stable",
         "iterations_run": 37,
         "converged": true,
-        "device": "gfx942",
-        "timestamp": "2026-04-21T10:30:00Z"
+        "timestamp": "2026-04-21T10:30:00Z",
+        "knobs": [
+          { "knob_id": "global.workspace_size_limit", "type": "int", "value": 16777216 },
+          { "knob_id": "global.search_mode", "type": "int", "value": 2 }
+        ]
       }
     },
     {
       "op": "matmul",
       "engine_name": "ROCBLAS_ENGINE_DEFAULT",
       "tensors": [
-        { "dim": [128, 512], "stride": [512, 1] },
-        { "dim": [512, 256], "stride": [256, 1] }
+        { "tensor_id": "A", "dim": [128, 512], "stride": [512, 1] },
+        { "tensor_id": "B", "dim": [512, 256], "stride": [256, 1] }
       ],
       "autotune_metadata": {
         "rank": 0,
@@ -595,11 +665,10 @@ Reuses the `EngineOverrideConfig` JSON format with autotuning metadata added:
         "avg_time_ms": 0.0241,
         "stddev_ms": 0.0009,
         "workspace_size": 0,
-        "mode": "auto",
+        "mode": "standard",
         "ran_exhaustive": false,
         "strategy": "fixed_average",
         "iterations_run": 10,
-        "device": "gfx942",
         "timestamp": "2026-04-21T10:32:00Z"
       }
     }
@@ -607,36 +676,60 @@ Reuses the `EngineOverrideConfig` JSON format with autotuning metadata added:
 }
 ```
 
+**Top-level `version`**: The file carries a top-level `version` field. The current value is `2` (`NAMED_TENSOR_IDS`). Format evolution: v1 was the legacy positional-tensor format (no `version` key, tensors matched by position); v2 adds named tensor IDs and entry-level criteria. The reader tolerates a missing `version` (treated as v1, positional matching); the writer always emits v2.
+
+**Entry-level `criteria`**: Each entry may carry a `criteria` object discriminating graphs that share the same operation and tensors but differ in a behavioral attribute (e.g. `norm_fwd_phase`, `reduction_mode`, `pointwise_mode`). Each criterion value is an integer-encoded enum discriminant. `criteria` is part of the match key (see **Write behavior** below).
+
+**Per-tensor `tensor_id`**: In v2 each tensor carries a `tensor_id`; tensors are matched by named ID ignoring order rather than by position. v2 writes require named tensor IDs: when a graph's core operation produces no resolvable tensor IDs, the config write is skipped with a warning and `autotune()` still returns success (the tuning run itself succeeded; only persistence is skipped). Every currently-supported core op produces named tensor IDs, so this skip is unreachable for documented graphs.
+
 **Metadata fields** (`autotune_metadata`; informational only, ignored by `matchOperation()`):
 - `rank`: 0-based ranking (0 = fastest)
 - `min_time_ms`: minimum observed time (used for ranking)
 - `avg_time_ms`: average time across timed iterations
-- `stddev_ms`: standard deviation (0.0 for SINGLE_SHOT)
+- `stddev_ms`: population standard deviation, divide by N
 - `workspace_size`: workspace bytes required
-- `mode`: `"auto"` or `"exhaustive"`
+- `mode`: `"standard"` or `"exhaustive"`
+- `supports_exhaustive`: `true` if the engine exposes the benchmarking knob, `false` otherwise
 - `ran_exhaustive`: `true` if primed via temporary benchmarking plan, `false` otherwise
-- `strategy`: `"single_shot"`, `"fixed_average"`, or `"run_until_stable"`
+- `exhaustive_not_run_reason`: why priming did not run when `ran_exhaustive` is `false` under EXHAUSTIVE mode; empty otherwise
+- `strategy`: `"fixed_average"` or `"run_until_stable"`
 - `iterations_run`: actual timed iterations executed
 - `converged`: present only for `"run_until_stable"`; `true` if variance stabilized, `false` if `maxIterations` reached
-- `device`: device name (e.g., `"gfx942"`)
 - `timestamp`: ISO 8601 timestamp
+- `knobs`: array of knob settings active during the winning run (informational; omitted for default-knob entries; not part of the match key)
 
-**Knob settings in config file entries**: Each entry may include a `knobs` array recording the knob settings active during the winning autotune run. These are informational metadata, not applied on load, not part of the match key. The user is responsible for configuring knobs to match the autotuned configuration if needed (via `add_engine()` with knob settings, or `create_execution_plan_ext()`). Default-knob entries omit the `knobs` key entirely. The `type` field (`"int"`, `"double"`, or `"string"`) enables correct deserialization since JSON does not distinguish `int64_t` from `double`.
+**Knob settings in config file entries**: Each entry's `autotune_metadata` may include a `knobs` array recording the knob settings active during the winning autotune run. These are informational metadata, not applied on load, not part of the match key. The user is responsible for configuring knobs to match the autotuned configuration if needed (via `add_engine()` with knob settings, or `create_execution_plan_ext()`). Default-knob entries omit the `knobs` key entirely. The `type` field (`"int"`, `"double"`, or `"string"`) enables correct deserialization since JSON does not distinguish `int64_t` from `double`.
 
 The config file is a lightweight engine *selection* hint; plan serialization is the mechanism for full *restoration* of the winning plan with all configuration (knobs, workspace, compilation state).
 
-**Write behavior**: `AutotuneFileWriter` writes the rank-0 winner (fastest successful result) for the graph's core operation. If the file already contains an entry for the same `(operation, tensor shape)`, it is **unconditionally replaced** — there is no comparison against the previous entry's timing. At most one entry exists per `(operation, tensor shape)` combination.
+**Write behavior**: `AutotuneFileWriter` writes the rank-0 winner (fastest successful result) for the graph's core operation. The match key is `(operation, criteria, tensors-matched-by-named-id-ignoring-order)`. If the file already contains an entry with the same match key, it is **unconditionally replaced**; there is no comparison against the previous entry's timing. At most one entry exists per match key. Two graphs that differ only by a criterion (e.g. pointwise mode) are distinct entries and coexist.
 
-`AutotuneStorageConfig::deleteAllExistingFileContent` (default `false`) controls whether unrelated entries are preserved. When `false`, only the matching entry is replaced; other entries for different operations or tensor shapes are kept. When `true`, all existing content is deleted before writing.
+`AutotuneStorageConfig::deleteAllExistingFileContent` (default `false`) controls whether unrelated entries are preserved. When `false` (append mode), only the entry with a matching `(operation, criteria, tensors-by-id)` key is replaced; entries differing in operation, criteria, or tensor IDs are kept. When `true`, all existing content is deleted before writing.
+
+**Append requires a v2 file**: Append mode (`deleteAllExistingFileContent=false`) requires the existing file to be an autotune v2 file (carrying `version: 2`). Appending to a legacy/v1 or non-autotune `HIPDNN_HEUR_CONFIG_PATH` file is unsupported: the writer returns `INVALID_VALUE` and writes nothing, to avoid mixing v1 positional entries with v2 named-id entries in one file. This is an intentional reader/writer asymmetry: the reader still tolerates legacy/missing-version files, but the writer only appends to v2 files.
+
+**Corrupt file recovery**: If the existing config file contains invalid JSON, behavior depends on `deleteAllExistingFileContent`. When `true`, the file is replaced. When `false` (append mode), the corrupt file is preserved by being moved aside to a `<filePath>.corrupt-<Unix epoch seconds>` sibling (so its accumulated entries remain recoverable, and repeated corrupt-recoveries do not overwrite each other), an error is logged, and a fresh file is
+written with the new result. If the corrupt file cannot be moved aside, a warning is
+logged and the corrupt file is overwritten with the new result (the freshly computed
+results take priority over preserving unreadable data).
 
 **Concurrent access**: Config file append is not safe for concurrent writers. For concurrent scenarios, use separate output files per process and merge afterward.
 
 
-**Core operation mapping**: For multi-operation graphs, the config file entry is keyed by the core operation:
+**Core operation mapping**: For multi-operation graphs, the config file entry is keyed by the core operation, selected by descending priority:
 
-1. Convolution, GEMM, SDPA (highest priority)
-2. Normalization
-3. Pointwise (lowest priority)
+`CONVOLUTION (70) > SDPA (60) > MATMUL/GEMM (50) > BATCHNORM (40) > NORM (30) > REDUCTION (20) = RESAMPLE (20) > POINTWISE (10)`
+
+Each priority class resolves to a fine-grained `op` string based on the node's direction/variant:
+
+- CONVOLUTION (70) -> `conv_fprop`, `conv_dgrad`, `conv_wgrad`
+- SDPA (60) -> `sdpa_fwd`, `sdpa_bwd`
+- MATMUL/GEMM (50) -> `matmul`
+- BATCHNORM (40) -> `batchnorm_training`, `batchnorm_inference`, `batchnorm_inference_variance_ext`, `batchnorm_backward`
+- NORM (30) -> `layernorm`, `rmsnorm`, `rmsnorm_backward`
+- REDUCTION (20) -> `reduction`
+- RESAMPLE (20) -> `resample_fwd`
+- POINTWISE (10) -> `pointwise`
 
 ## 7. Porting Guide: cuDNN → hipDNN
 
@@ -647,25 +740,27 @@ For API mapping, key differences, and complete porting examples, see Appendix A.
 ## 8. Complete Example
 
 ```cpp
-#include <hipdnn_frontend.h>
+#include <hipdnn_frontend.hpp>
 
 int main() {
     hipdnnHandle_t handle;
     hipdnnCreate(&handle);
 
-    auto graph = std::make_shared<hipdnn_frontend::Graph>();
+    auto graph = std::make_shared<hipdnn_frontend::graph::Graph>();
     // ... configure graph ...
-    graph->validate();
-    graph->build_operation_graph(handle);
+    HIPDNN_FE_CHECK(graph->validate());
+    HIPDNN_FE_CHECK(graph->build_operation_graph(handle));
 
     // Discover engines
     std::vector<hipdnn_frontend::EngineConfigInfo> configs;
-    graph->get_engine_configs(configs);
+    HIPDNN_FE_CHECK(graph->get_engine_configs(configs));
 
     // Optional user-side pre-filtering: avoid compiling engines with large workspace estimates.
     // Without this, autotune() compiles all plan specs and skips execution of those whose
     // actual post-compile workspace exceeds the provided workspaceSize.
-    std::erase_if(configs, [](const auto& c) { return c.estimatedWorkspaceSize > (256 << 20); });
+    configs.erase(std::remove_if(configs.begin(), configs.end(),
+        [](const auto& c) { return c.estimatedWorkspaceSize > (256 << 20); }),
+        configs.end());
 
     // Step 1: Add default-knob plan specs per engine config (up to N specs).
     graph->add_engine_configs(configs);
@@ -699,7 +794,7 @@ int main() {
         {.mode = hipdnn_frontend::TuneMode::EXHAUSTIVE,
          .strategy = hipdnn_frontend::AutotuneStrategy::RUN_UNTIL_STABLE,
          .maxIterations = 50,
-         .stabilityThreshold = 0.03f,
+         .stabilityThreshold = 0.03f},
         {.filePath = "autotune_results.json"},
         &results);
 
@@ -719,8 +814,8 @@ int main() {
 | Risk | Mitigation |
 |------|------------|
 | **Cartesian product growth** | Error at 10,000 plan specs per `add_engine_sweep()` call, warning at 1,000. Validate-then-store rejects invalid knobs early. |
-| **Config file format changes** | Backward-compatible: `matchOperation()` ignores unknown fields. |
-| **Config file conflicts on append** | Same (op, tensors) entries are replaced, preventing stale entries. |
+| **Config file format changes** | Reader is backward-compatible: `matchOperation()` ignores unknown fields and tolerates a missing `version`. The writer appends only to v2 files (returns `INVALID_VALUE` for legacy/non-autotune files). |
+| **Config file conflicts on append** | Entries with the same `(operation, criteria, tensors-by-id)` key are replaced, preventing stale entries. |
 
 ---
 
@@ -755,11 +850,11 @@ Write unit tests alongside each stage of implementation. Key areas:
   - Knob serialization for each value type (int, double, string)
   - Override entry construction: metadata fields match § 6.5 schema (conditional presence of `converged`; `ran_exhaustive` always present); edge case for tensors with empty strides
   - Write modes: new file, append, replace matching, delete all
-  - Round-trip test (write -> load -> `matchOperation()` -> verify knob values)
+  - Round-trip test (write -> load -> `matchOperation()` -> verify knob values nested under `autotune_metadata`)
   - Recovery from corrupt JSON
 - **Config reader extensions**: `EngineOverrideConfig` knob parsing:
-  - Each knob type, type aliases, wildcards with knobs
-  - Missing/empty knobs fields (backward compatibility with pre-autotune config files)
+  - Each knob type, type aliases, wildcards with knobs nested under `autotune_metadata`
+  - Missing/empty `autotune_metadata.knobs` fields (the reader tolerates pre-autotune / legacy config files; the writer refuses to append to them, returning `INVALID_VALUE`)
 - **Graph API guards** (§ 6.2.3, § 6.3):
   - Mutual exclusion: `add_engine_*()` after `create_execution_plans()` (and vice versa) returns error
   - Precondition: `add_engine_*()` returns error before `build_operation_graph()`
@@ -873,7 +968,7 @@ graph.validate();
 graph.build_operation_graph(handle);
 graph.create_execution_plans({HeuristicMode::FALLBACK});
 graph.check_support();
-graph.build_plans(BuildPlanPolicy_t::ALL);
+graph.build_plans(BuildPlanPolicy::ALL);
 
 int64_t ws;
 ws = graph.get_autotune_workspace_size();
@@ -960,11 +1055,13 @@ graph.build_operation_graph(handle);
 
 std::vector<EngineConfigInfo> configs;
 graph.get_engine_configs(configs);
-std::erase_if(configs, [](const auto& c) {
-    return c.estimatedWorkspaceSize > (256 << 20)
-        || c.engineName == "engine_1"
-        || c.engineName == "engine_2";
-});
+configs.erase(std::remove_if(configs.begin(), configs.end(),
+    [](const auto& c) {
+        return c.estimatedWorkspaceSize > (256 << 20)
+            || c.engineName == "engine_1"
+            || c.engineName == "engine_2";
+    }),
+    configs.end());
 graph.add_engine_configs(configs);
 
 int64_t ws;
@@ -1218,8 +1315,8 @@ Status tags: **existing** = already in hipDNN, unchanged; **RFC** = new, propose
 | `graph.build_operation_graph(handle)` | `graph.build_operation_graph(handle)` | **existing** | Identical |
 | `graph.create_execution_plans({HeurMode_t::A})` | `graph.get_engine_configs(configs)` (plan-spec) or `graph.create_execution_plans({HeuristicMode::FALLBACK})` (compiled-plan) | **RFC** / **existing** | Plan-spec: exposes engine list for inspection. Compiled-plan: as in cuDNN |
 | `graph.check_support()` | _(inside `autotune()`)_ (plan-spec) or `graph.check_support()` (compiled-plan) | **RFC** / **existing** | Plan-spec: unsupported engines filtered at compilation. Compiled-plan: as in cuDNN |
-| `graph.build_plans(BuildPlanPolicy_t::ALL)` | `graph.add_engine_configs(configs)` (plan-spec) or `graph.build_plans(BuildPlanPolicy_t::ALL)` (compiled-plan) | **RFC** / **existing** | Plan-spec: stores without compiling (`add_all_engines()` as shortcut). Compiled-plan: compiles all, `autotune()` benchmarks directly |
-| `graph.deselect_workspace_greater_than(n)` | `graph.deselect_workspace_greater_than(n)` | **RFC** | Filters by workspace size. Get-filter-add recommended on plan-spec path |
+| `graph.build_plans(BuildPlanPolicy_t::ALL)` | `graph.add_engine_configs(configs)` (plan-spec) or `graph.build_plans(BuildPlanPolicy::ALL)` (compiled-plan) | **RFC** / **existing** | Plan-spec: stores without compiling (`add_all_engines()` as shortcut). Compiled-plan: compiles all, `autotune()` benchmarks directly |
+| `graph.deselect_workspace_greater_than(n)` | `graph.deselect_workspace_greater_than(n)` | **RFC** | Stores workspace threshold, evaluated during `build_plans()`/`autotune()`. Get-filter-add recommended on plan-spec path |
 | `graph.deselect_engines(barred)` | `graph.deselect_engines(barred)` | **RFC** | Filters by engine name or ID |
 | `graph.get_autotune_workspace_size()` | `graph.get_estimated_max_workspace_size(maxSize)` (plan-spec) or `graph.get_autotune_workspace_size()` (compiled-plan) | **RFC** / **RFC** | Plan-spec: pre-compile estimate (not guaranteed accurate). Compiled-plan: queries pre-compiled plans |
 | `graph.autotune(handle, variant_pack, workspace)` | `graph.autotune(handle, variant_pack, workspace, ...)` | **RFC** | Three tiers (see § 6.3) |
@@ -1276,7 +1373,7 @@ graph.build_plans(BuildPlanPolicy_t::ALL);
 // hipDNN - compiled-plan path (cuDNN drop-in):
 graph.create_execution_plans({HeuristicMode::FALLBACK});
 graph.check_support();
-graph.build_plans(BuildPlanPolicy_t::ALL);
+graph.build_plans(BuildPlanPolicy::ALL);
 
 // hipDNN - plan-spec path, simple (1 call, no inspection):
 graph.add_all_engines();
@@ -1291,6 +1388,8 @@ graph.add_engine_configs(configs);
 **4. Benchmarking parameters are configurable**
 
 cuDNN hardcodes a convergence-based algorithm. hipDNN's defaults match cuDNN's behavior but exposes all parameters via `AutotuneConfig` (see § 6.1):
+
+> **Note:** hipDNN uses coefficient-of-variation over a sliding window for convergence, which differs from cuDNN's min-time-ratio convergence. Default parameters are tuned for comparable behavior.
 
 ```cpp
 // cuDNN - hardcoded convergence-based parameters:
@@ -1317,7 +1416,7 @@ hipDNN provides both approaches:
 - **Get-filter-add** (plan-spec path, recommended): `get_engine_configs()` -> filter -> `add_engine_configs()`. See "With Engine Filtering" in § A.1.
 - **Dedicated methods** (see § 6.2.7): `deselect_workspace_greater_than()` and `deselect_engines()` for cuDNN API parity, required on the compiled-plan path.
 
-> **Caveat (compiled-plan path)**: hipDNN's `deselect_*` methods remove entries, causing indices to shift (cuDNN marks them as barred without removing). Re-query `get_execution_plan_count()` after deselection.
+> hipDNN's `deselect_*` methods store criteria that are evaluated during `build_plans()` and `autotune()`, matching cuDNN's deferred evaluation pattern. Plans are excluded without removal: `get_execution_plan_count()` returns the total including excluded plans, and indices remain stable. Attempting to execute an excluded plan returns `INVALID_VALUE`.
 
 **6. hipDNN extended autotune features**
 
@@ -1325,7 +1424,7 @@ hipDNN provides both approaches:
 |----------------|------------------|
 | `AutotuneResult` vector with per-engine timing data | None (cuDNN autotune is opaque) |
 | `TuneMode::EXHAUSTIVE` (benchmarking knob priming; plan-spec path only) | None (cuDNN has no equivalent knob) |
-| `AutotuneStrategy` (SINGLE_SHOT, FIXED_AVERAGE, RUN_UNTIL_STABLE) | Hardcoded convergence strategy |
+| `AutotuneStrategy` (FIXED_AVERAGE, RUN_UNTIL_STABLE) | Hardcoded convergence strategy |
 | `AutotuneConfig` (warmup, iterations, priming failure control) | Hardcoded defaults |
 | Config file output (`AutotuneStorageConfig`) | None |
 | Knob variant autotuning (`EngineVariant`, `EngineSweepSpec`, `add_engine_*()`) | Limited `create_execution_plan(id, knob_map)` |
@@ -1340,7 +1439,7 @@ All examples assume this setup boilerplate:
 hipdnnHandle_t handle;
 hipdnnCreate(&handle);
 
-auto graph = std::make_shared<hipdnn_frontend::Graph>();
+auto graph = std::make_shared<hipdnn_frontend::graph::Graph>();
 // ... configure graph operations, tensors, etc. ...
 graph->validate();
 graph->build_operation_graph(handle);
@@ -1348,7 +1447,7 @@ graph->build_operation_graph(handle);
 
 ### Core Autotuning
 
-**1. Quick autotune (AUTO or EXHAUSTIVE).** Use `EXHAUSTIVE` to prime engine-internal caches before timing (more accurate for lazy-compilation engines).
+**1. Quick autotune (STANDARD or EXHAUSTIVE).** Use `EXHAUSTIVE` to prime engine-internal caches before timing (more accurate for lazy-compilation engines).
 
 ```cpp
 graph->add_all_engines();
@@ -1357,7 +1456,7 @@ graph->get_estimated_max_workspace_size(maxWorkspaceSize);
 void* workspace = allocate(maxWorkspaceSize);
 
 graph->autotune(handle, variantPack, workspace, maxWorkspaceSize,
-    {.mode = TuneMode::AUTO});       // or TuneMode::EXHAUSTIVE
+    {.mode = TuneMode::STANDARD});       // or TuneMode::EXHAUSTIVE
 graph->execute(handle, variantPack, workspace);
 ```
 
@@ -1391,7 +1490,7 @@ graph->autotune(handle, variantPack, workspace, maxWorkspaceSize,
 // Workspace-constrained: compile all, skip execution of plans whose actual workspace exceeds 64 MB
 int64_t wsLimit = 64 << 20;
 graph->autotune(handle, variantPack, workspace, wsLimit,
-    {.mode = TuneMode::AUTO});
+    {.mode = TuneMode::STANDARD});
 
 // Autotune specific engines only
 graph->autotune(handle, variantPack, workspace, maxWorkspaceSize,
@@ -1410,7 +1509,7 @@ hipStream_t myStream;
 hipStreamCreate(&myStream);
 hipdnnSetStream(handle, myStream);
 
-graph->autotune(handle, variantPack, workspace, maxWorkspaceSize, {.mode = TuneMode::AUTO});
+graph->autotune(handle, variantPack, workspace, maxWorkspaceSize, {.mode = TuneMode::STANDARD});
 ```
 
 ### Engine Discovery and Filtering
@@ -1476,15 +1575,7 @@ graph->execute(handle, variantPack, workspace);
 
 ### Benchmarking Strategies
 
-**9. Single-shot benchmarking.** One timed iteration per plan; fast, rough ranking.
-
-```cpp
-graph->autotune(handle, variantPack, workspace, maxWorkspaceSize,
-    {.mode = TuneMode::AUTO,
-     .strategy = AutotuneStrategy::SINGLE_SHOT});
-```
-
-**10. Convergence-based benchmarking.** Run until timing stabilizes.
+**9. Convergence-based benchmarking.** Run until timing stabilizes.
 
 ```cpp
 graph->autotune(handle, variantPack, workspace, maxWorkspaceSize,
@@ -1497,7 +1588,7 @@ graph->autotune(handle, variantPack, workspace, maxWorkspaceSize,
 
 ### Knob Variant Autotuning
 
-**11. Benchmark an engine with different knob settings.**
+**10. Benchmark an engine with different knob settings.**
 
 ```cpp
 std::vector<EngineConfigInfo> configs;
@@ -1531,7 +1622,7 @@ for (const auto& r : results)
            r.rank, r.engineName.c_str(), r.minTimeMs);
 ```
 
-**12. Automated knob sweep.** Framework generates the Cartesian product from specified axes.
+**11. Automated knob sweep.** Framework generates the Cartesian product from specified axes.
 
 ```cpp
 std::vector<EngineConfigInfo> configs;
@@ -1557,7 +1648,7 @@ graph->autotune(handle, variantPack, workspace, maxWorkspaceSize,
 
 ### Custom Ranking
 
-**13. Custom ranking.** Rank by workspace size (smallest first), breaking ties by speed.
+**12. Custom ranking.** Rank by workspace size (smallest first), breaking ties by speed.
 
 ```cpp
 graph->autotune(handle, variantPack, workspace, maxWorkspaceSize,
@@ -1573,7 +1664,7 @@ graph->autotune(handle, variantPack, workspace, maxWorkspaceSize,
 
 ### Config File Output and Reuse
 
-**14. Save results to config file.** Reusable via `HIPDNN_HEUR_CONFIG_PATH`.
+**13. Save results to config file.** Reusable via `HIPDNN_HEUR_CONFIG_PATH`.
 
 ```cpp
 graph->autotune(handle, variantPack, workspace, maxWorkspaceSize,
@@ -1581,7 +1672,7 @@ graph->autotune(handle, variantPack, workspace, maxWorkspaceSize,
     {.filePath = "autotune_results.json"});
 ```
 
-**15. Overwrite config file.**
+**14. Overwrite config file.**
 
 ```cpp
 graph->autotune(handle, variantPack, workspace, maxWorkspaceSize,
@@ -1590,7 +1681,7 @@ graph->autotune(handle, variantPack, workspace, maxWorkspaceSize,
      .deleteAllExistingFileContent = true});
 ```
 
-**16. Reuse autotuned results.**
+**15. Reuse autotuned results.**
 
 ```bash
 # First run: autotune and save
@@ -1601,7 +1692,7 @@ export HIPDNN_HEUR_CONFIG_PATH=autotune_results.json
 ./my_app  # SelectionHeuristic::Config policy picks the saved winner
 ```
 
-**17. Build a library of autotuned configurations.** Accumulate results across runs into one config file.
+**16. Build a library of autotuned configurations.** Accumulate results across runs into one config file.
 
 ```bash
 # Run 1: autotune convolution graphs

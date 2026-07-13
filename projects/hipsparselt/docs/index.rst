@@ -45,7 +45,7 @@ The hipSPARSELt public repository is located at `<https://github.com/ROCm/rocm-l
   .. grid-item-card:: API Reference
 
     * :doc:`Supported functions <./reference/supported-functions>`
-    * :doc:`Data type support <./reference/data-type-support>`
+    * :doc:`Precision support <./reference/data-type-support>`
     * :doc:`Environment variables <./reference/env-variables>`
     * :doc:`API library <../doxygen/html/index>`
 

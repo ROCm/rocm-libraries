@@ -1,1 +1,26 @@
 .tox/
+
+# mutmut mutation-testing artifacts (copy dir + cache)
+mutants/
+.mutmut-cache
+mutmut-stats.json
+
+# coverage.py data files (incl. multiprocessing per-pid shards from mutmut stats)
+.coverage
+.coverage.*
+
+# characterization: generated analysis docs / coverage dumps (the tests are the deliverable, not these)
+Tensile/Tests/unit/characterization/**/target.md
+Tensile/Tests/unit/characterization/**/recommendations.md
+Tensile/Tests/unit/characterization/**/resistance.md
+Tensile/Tests/unit/characterization/**/survey.md
+Tensile/Tests/unit/characterization/**/coverage-before.txt
+Tensile/Tests/unit/characterization/**/coverage-after.txt
+Tensile/Tests/unit/characterization/**/walkthrough.html
+Tensile/Tests/unit/characterization/**/walkthrough.pdf
+
+# test / coverage run outputs
+coverage.xml
+unit_tests.xml
+common_tests.xml
+MatchTable.yaml

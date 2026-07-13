@@ -195,6 +195,14 @@ def parseArguments(input: Optional[List[str]] = None) -> Dict[str, Any]:
         default=False,
         help="Disable assembly comments in generated assembly code"
     )
+    argParser.add_argument(
+        "--emit-mainloop-trace-marker",
+        dest="EmitMainloopTraceMarker",
+        action="store_true",
+        default=False,
+        help="Emit s_ttracedata mainloop iteration markers for SQTT/trace decoders "
+        "(subtile kernels only; adds 2 instructions per iteration)"
+    )
 
     args = argParser.parse_args()
 
@@ -205,6 +213,7 @@ def parseArguments(input: Optional[List[str]] = None) -> Dict[str, Any]:
     arguments["LazyLibraryLoading"] = args.LazyLibraryLoading
     arguments["EnableMarker"] = args.EnableMarker
     arguments["DisableAsmComments"] = args.DisableAsmComments
+    arguments["EmitMainloopTraceMarker"] = args.EmitMainloopTraceMarker
     if args.CmakeCxxCompiler:
         os.environ["CMAKE_CXX_COMPILER"] = args.CmakeCxxCompiler
     arguments["LogicFormat"] = args.LogicFormat

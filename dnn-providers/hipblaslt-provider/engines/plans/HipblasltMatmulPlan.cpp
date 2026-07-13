@@ -296,10 +296,16 @@ MatmulPlan::MatmulPlan(const HipdnnEnginePluginHandle& handle, MatmulParams&& pa
     // So for better performance we set 128 MB here since
     // it is enough to get the most performant solution from hipblaslt.
     auto maxWorkspaceSize = static_cast<size_t>(128 * 1024 * 1024); // 128MB
-    hipblasLtMatmulPreference_t pref;
-    THROW_ON_HIPBLASLT_FAILURE(hipblasLtMatmulPreferenceCreate(&pref));
+    hipblasLtMatmulPreference_t prefHandle;
+    THROW_ON_HIPBLASLT_FAILURE(hipblasLtMatmulPreferenceCreate(&prefHandle));
+    // Own the preference via RAII.
+    hipdnn_data_sdk::utilities::ScopedResource<hipblasLtMatmulPreference_t> const pref(
+        prefHandle, [](hipblasLtMatmulPreference_t p) {
+            LOG_ON_HIPBLASLT_FAILURE(hipblasLtMatmulPreferenceDestroy(p));
+        });
+
     THROW_ON_HIPBLASLT_FAILURE(
-        hipblasLtMatmulPreferenceSetAttribute(pref,
+        hipblasLtMatmulPreferenceSetAttribute(pref.get(),
                                               HIPBLASLT_MATMUL_PREF_MAX_WORKSPACE_BYTES,
                                               &maxWorkspaceSize,
                                               sizeof(maxWorkspaceSize)));
@@ -314,7 +320,7 @@ MatmulPlan::MatmulPlan(const HipdnnEnginePluginHandle& handle, MatmulParams&& pa
                                                                _params.a().matrixLayout(),
                                                                _params.c().matrixLayout(),
                                                                _params.c().matrixLayout(),
-                                                               pref,
+                                                               pref.get(),
                                                                REQUEST_SOLUTIONS,
                                                                heuristicResult.data(),
                                                                &returnedAlgoCount));
@@ -325,8 +331,6 @@ MatmulPlan::MatmulPlan(const HipdnnEnginePluginHandle& handle, MatmulParams&& pa
 
     _heuristicResult = heuristicResult[0];
     _workspaceSize = _heuristicResult.workspaceSize;
-
-    THROW_ON_HIPBLASLT_FAILURE(hipblasLtMatmulPreferenceDestroy(pref));
 }
 
 size_t MatmulPlan::getWorkspaceSize([[maybe_unused]] const HipdnnEnginePluginHandle& handle) const

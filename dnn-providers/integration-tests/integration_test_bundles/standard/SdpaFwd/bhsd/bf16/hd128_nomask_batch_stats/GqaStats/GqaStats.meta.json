@@ -1,0 +1,30 @@
+{
+    "generator": "generate_sdpa_fwd_golden.py",
+    "generator_sha256": "8b4f68d801785e22c616a1b24506cee24461a8270ea17dc3a0a0c8277a113d98",
+    "generated_at": "2026-06-16T01:29:33Z",
+    "reference_source": "PyTorch 2.12.0+rocm7.2",
+    "reference_backend": "pytorch_math_backend",
+    "rocm_version": "7.2",
+    "generator_version": "1.0.1",
+    "generation_precision": "like-for-like: BF16 inputs, FP32 intermediates",
+    "direction": "forward",
+    "seed": 42,
+    "input_range": [
+        -1.0,
+        1.0
+    ],
+    "deterministic": true,
+    "config": {
+        "batch": 1,
+        "num_heads_q": 8,
+        "num_heads_kv": 2,
+        "seq_q": 256,
+        "seq_kv": 256,
+        "head_dim_qk": 128,
+        "head_dim_v": 128,
+        "dtype": "bf16",
+        "causal": false,
+        "scale": 0.08838834764831843,
+        "gqa_ratio": 4
+    }
+}

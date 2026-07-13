@@ -221,6 +221,13 @@ For questions about contributing community samples:
 - **Limitations**: M must be a multiple of MACRO_TILE_X (64), N must be a multiple of MACRO_TILE_Y (64), K must be a multiple of ROCWMMA_K (16); row_major only; not production-optimized
 - **Author**: Odin.Yang
 
+### LoRA Adapter Fusion
+- **File**: `simple_lora_adapter_fusion.cpp`
+- **Description**: Fused base GEMM + low-rank LoRA delta implementing `Y = X * W + alpha * (X * A_lora) * B_lora` in a single kernel. Reuses X tiles for both the base projection and LoRA-down GEMM (X-tile reuse), keeps all intermediates (W_acc, S, P) in registers or LDS (zero global temporaries), and applies the scale-add epilogue via in-register FMA. The S intermediate is staged through LDS to bridge accumulator fragments into matrix_a fragments for the inner S * B_lora GEMM.
+- **Requirements**: ROCm 6.0+; validated on RDNA4 gfx1201 (RX 9070); float16 I/O, float32 compute; LoRA rank R fixed at 16 (ROCWMMA_K)
+- **Limitations**: M must be a multiple of MACRO_TILE_X (64), N must be a multiple of MACRO_TILE_Y (64), K must be a multiple of ROCWMMA_K (16); LoRA rank R is fixed at 16; row_major only; source may contain gfx9/gfx11/gfx12 parameter-selection paths, but only gfx1201 is documented as validated and other architectures should be considered experimental/untested; not production-optimized
+- **Author**: Odin.Yang
+
 
 <!-- Template for documenting samples:
 ### Sample Name

@@ -247,6 +247,42 @@ TEST(TestKnobSetting, GetValueWrongType)
     EXPECT_EQ(stringValue, nullptr);
 }
 
+TEST(TestKnobSetting, EqualityRequiresSameIdAndValue)
+{
+    const KnobSetting lhs("tile_size", int64_t{128});
+    const KnobSetting rhs("tile_size", int64_t{128});
+
+    EXPECT_EQ(lhs, rhs);
+    EXPECT_FALSE(lhs != rhs);
+}
+
+TEST(TestKnobSetting, InequalityDetectsDifferentId)
+{
+    const KnobSetting lhs("tile_size", int64_t{128});
+    const KnobSetting rhs("split_k", int64_t{128});
+
+    EXPECT_NE(lhs, rhs);
+    EXPECT_TRUE(lhs != rhs);
+}
+
+TEST(TestKnobSetting, InequalityDetectsDifferentValue)
+{
+    const KnobSetting lhs("tile_size", int64_t{128});
+    const KnobSetting rhs("tile_size", int64_t{256});
+
+    EXPECT_NE(lhs, rhs);
+    EXPECT_TRUE(lhs != rhs);
+}
+
+TEST(TestKnobSetting, InequalityDetectsDifferentValueType)
+{
+    const KnobSetting lhs("scale", int64_t{1});
+    const KnobSetting rhs("scale", 1.0);
+
+    EXPECT_NE(lhs, rhs);
+    EXPECT_TRUE(lhs != rhs);
+}
+
 // ============================================================================
 // Constraint Tests
 // ============================================================================

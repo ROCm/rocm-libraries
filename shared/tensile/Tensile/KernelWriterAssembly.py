@@ -23,7 +23,7 @@
 ################################################################################
 
 from . import Code
-from .Common import gfxName, globalParameters, getCOVFromParam, tPrint, printExit, printWarning, roundUp
+from .Common import gfxName, globalParameters, getCOVFromParam, isGfx12, tPrint, printExit, printWarning, roundUp
 from .Component import Component
 from .KernelWriter import KernelWriter
 from .SolutionStructs import isPackedIndex
@@ -188,7 +188,6 @@ class KernelWriterAssembly(KernelWriter):
     self.maxOccupancy = 10
 
     self.endLine = "\n"
-    self.syncStr = "s_barrier"
     self.commentPrefix = "/*"
     self.commentSuffix = "*/"
     self.commentHR = "*"*40
@@ -234,6 +233,33 @@ class KernelWriterAssembly(KernelWriter):
   def rpgo(self):
     """ (1) registers per global 32-bit offset (some intructions only support 32-bit offset) """
     return 1
+
+  def isGfx12(self):
+    return isGfx12(self.version)
+
+  @property
+  def syncStr(self):
+    return "_s_barrier" if hasattr(self, "version") and self.isGfx12() else "s_barrier"
+
+  def hasWorkGroup2(self):
+    return hasattr(self, "sgprs") and "WorkGroup2" in self.sgprs
+
+  def gfx12AtomicCmpswapMemoryModifier(self, memoryBit):
+    """Add the gfx12 atomic return modifier while preserving trailing modifiers."""
+    if not self.isGfx12():
+      raise RuntimeError("gfx12AtomicCmpswapMemoryModifier is only valid for gfx12")
+    modifiers = memoryBit.split()
+    returnModifier = "th:TH_ATOMIC_RT_RETURN"
+
+    if not modifiers:
+      return returnModifier
+
+    if modifiers[0] in ("glc", "sc0"):
+      modifiers[0] = returnModifier
+    elif not modifiers[0].startswith("th:"):
+      modifiers.insert(0, returnModifier)
+
+    return " ".join(modifiers)
 
   def getCompileArgs(self, sourceFileName, objectFileName, *moreArgs, isa=None, wavefrontSize=None):
     if isa is None:
@@ -2549,6 +2575,16 @@ class KernelWriterAssembly(KernelWriter):
     return kStr
 
 
+  def defineBarrierMacros(self):
+    if not self.isGfx12():
+      return ""
+    kStr = ".macro _s_barrier" + self.endLine
+    kStr += "    s_barrier_signal -1" + self.endLine
+    kStr += "    s_barrier_wait -1" + self.endLine
+    kStr += ".endm" + self.endLine
+    return kStr
+
+
   def defineFeatureMacros(self):
     """
       Defines cross-architecture compatibility macros.
@@ -2561,6 +2597,7 @@ class KernelWriterAssembly(KernelWriter):
     kStr += self.defineDSMacros()
     kStr += self.defineBufferMemoryMacros()
     kStr += self.defineGlobalMemoryMacros()
+    kStr += self.defineBarrierMacros()
 
     return kStr
 
@@ -3386,6 +3423,30 @@ class KernelWriterAssembly(KernelWriter):
       kStr += "\n"
     kStr += f"{self.kernelName}_preloaded: // Kernel start when preloading\n"
 
+    # gfx12 (RDNA4) workgroup-ID workaround.
+    # On gfx12, the HW does not populate the per-wave WG ID SGPRs (e.g. s2/s3/s4)
+    # the way gfx9/10/11 does even when .amdhsa_system_sgpr_workgroup_id_{x,y,z}
+    # are requested; instead, the WG IDs are passed in the trap-temporary
+    # ("architected SGPR") registers ttmp7 and ttmp9 with the following layout
+    # (matches what amdclang++ -mcpu=gfx1201 emits for blockIdx.{x,y,z}):
+    #     WG.X  =  ttmp9
+    #     WG.Y  =  ttmp7[15:0]
+    #     WG.Z  =  ttmp7[31:16]
+    # Without this rehydration the SGPRs aliased to sgprWorkGroup{0,1,2} contain
+    # stale wave-launch garbage, which silently corrupts every downstream tile /
+    # SRD / shadow-limit computation and produces an out-of-bounds buffer access
+    # that page-faults. Copy the ttmp values into sgprWorkGroup{0,1,2} before
+    # anything reads them. This is a no-op on gfx9/10/11 paths.
+    if self.isGfx12():
+      kStr += self.comment("gfx12: hydrate WorkGroup IDs from architected ttmp registers")
+      kStr += inst("s_mov_b32", sgpr("WorkGroup0"), "ttmp9",
+                   "WorkGroup0 = ttmp9")
+      kStr += inst("s_and_b32", sgpr("WorkGroup1"), "ttmp7", "0xFFFF",
+                   "WorkGroup1 = ttmp7[15:0]")
+      # WorkGroup2 is only allocated for unpacked batch dimensions.
+      if self.hasWorkGroup2():
+        kStr += inst("s_lshr_b32", sgpr("WorkGroup2"), "ttmp7", "16",
+                     "WorkGroup2 = ttmp7[31:16]")
 
     if kernel["StorePriorityOpt"]:
       kStr += inst("s_setprio 3", "optimization store")
@@ -7210,7 +7271,7 @@ class KernelWriterAssembly(KernelWriter):
       kStr += self.sgprPool.initTmps(self.initSgprValue)
 
     if self.db["ConservativeWaitCnt"] & 0x10:
-      kStr += "s_barrier // debug" + self.endLine
+      kStr += self.syncStr + " // debug" + self.endLine
       kStr += "s_waitcnt lgkmcnt(0) & vmcnt(0)" + self.endLine
       if self.archCaps["SeparateVscnt"]:
         kStr += "s_waitcnt_vscnt null, 0" + self.endLine
@@ -7724,7 +7785,7 @@ class KernelWriterAssembly(KernelWriter):
           if macIdx == kernel["PerformanceWaitLocation"]:
             imod.addCode(Code.WaitCnt(self.version, kernel["PerformanceWaitCount"],"extra wait for performance"))
           if macIdx == kernel["PerformanceSyncLocation"]:
-            imod.addInst("s_barrier ","extra barrier for performance")
+            imod.addInst(self.syncStr + " ","extra barrier for performance")
           macIdx += 1
 
     # double precision
@@ -8725,11 +8786,11 @@ class KernelWriterAssembly(KernelWriter):
       self.vgprPool.checkIn(mirrorOffsetTemp)
 
     if self.db["ConservativeWaitCnt"] & 0x1:
-        kStr += "s_barrier // debug\n"
+        kStr += self.syncStr + " // debug\n"
         kStr += "s_waitcnt lgkmcnt(0) & vmcnt(0)\n"
         if self.archCaps["SeparateVscnt"]:
           kStr += "s_waitcnt_vscnt null, 0\n"
-        kStr += "s_barrier // debug\n"
+        kStr += self.syncStr + " // debug\n"
         #kStr += self.assert_lt(vgpr("Serial"), 64) # examine second wavefront
 
     if problemType["ZeroPad%s"%tc]:
@@ -8837,7 +8898,7 @@ class KernelWriterAssembly(KernelWriter):
           else:
             waitStr = "0"
           DtldsModule.addText("s_waitcnt vmcnt(%s)"%waitStr + self.endLine)
-        DtldsModule.addText("s_barrier" + self.endLine)
+        DtldsModule.addText(self.syncStr + self.endLine)
 
     return imod
 
@@ -9061,11 +9122,11 @@ class KernelWriterAssembly(KernelWriter):
                         comment="G -> Reg %u_%u_%u_%u"%(para, sPara, perp, sPerp )))
 
     if self.db["ConservativeWaitCnt"] & 0x1:
-        imod.footer.addInst( "s_barrier", "debug")
+        imod.footer.addInst( self.syncStr, "debug")
         imod.footer.addInst( "s_waitcnt", "lgkmcnt(0) & vmcnt(0)", "conservative wait")
         if self.archCaps["SeparateVscnt"]:
           imod.footer.addInst( "s_waitcnt_vscnt", "null", "0", "stores")
-        imod.footer.addInst( "s_barrier", "debug")
+        imod.footer.addInst( self.syncStr, "debug")
         #kStr += self.assert_lt(vgpr("Serial"), 64) # examine second wavefront
 
     # TODO - can remove one of these m0 restores if A and B both TLU
@@ -9462,13 +9523,13 @@ class KernelWriterAssembly(KernelWriter):
 
     # barrier, but can be skipped for the first PK Loop
     barrierComment = "for the second or later PKLoop, need to ensure the prev DS_READ for SR or MFMA are finished before LW\n"
-    BranchMod.addInst("\ns_barrier",  "", barrierComment)
+    BranchMod.addInst("\n" + self.syncStr,  "", barrierComment)
 
     if kernel["StoreCInUnroll"]:
       BranchMod.addInst("s_cmp_eq_u32", sgpr("PreLoopLWVmcntCase"), hex(5), "Case 5: PK Loop for StoreCInUnroll?")
       BranchMod.addInst("s_cbranch_scc1", optNLL_SCIUl_Label, "jump to Case 5")
     BranchMod.addInst("s_cmp_eq_u32", sgpr("PreLoopLWVmcntCase"), hex(1), "Case 1: First PK Loop?")
-    BranchMod.addInst("s_cbranch_scc1", basic_gl_Label, "jump to Case 1, can skip the s_barrier")
+    BranchMod.addInst("s_cbranch_scc1", basic_gl_Label, "jump to Case 1, can skip the %s" % self.syncStr)
 
     # not generate Case 2 if StoreCInUnroll with StoreVectorWidth==1 (Case 2 will be same as Case 3)
     if not (kernel["StoreCInUnroll"] and kernel["StoreVectorWidth"]==1):
@@ -9807,7 +9868,7 @@ class KernelWriterAssembly(KernelWriter):
       localWriteCode.addInst( "s_waitcnt lgkmcnt(0) & vmcnt(0)", "")
       if self.archCaps["SeparateVscnt"]:
         localWriteCode.addInst( "s_waitcnt_vscnt", "null", "0", "")
-      localWriteCode.addInst("s_barrier", "dump LDS" )
+      localWriteCode.addInst(self.syncStr, "dump LDS" )
       localWriteCode.addText(self.assert_ne(sgpr("WorkGroup0"),1))
       #localWriteCode.addText(self.bomb())
 
@@ -12047,13 +12108,14 @@ class KernelWriterAssembly(KernelWriter):
       tmpSgprRef = self.getTmpSgpr(1)
       tmpSgpr = tmpSgprRef.idx()
     if kernel["ProblemType"]["UseBeta"]:
+      cmpEqZero = "s_cmp_eq_u32" if self.isGfx12() else "s_cmpk_eq_u32"
       if self.bpeCinternal <= self.bpr: # 1 register to check for Beta==0
-        kStr += inst("s_cmpk_eq_u32", sgpr("Beta"), hex(0), "Beta == 0")
+        kStr += inst(cmpEqZero, sgpr("Beta"), hex(0), "Beta == 0")
       else: # multiple registers to check for Beta==0
         kStr += inst("s_mov_b32", sgpr(tmpSgpr), sgpr("Beta+0"), "tmp = Beta[0]")
         for i in range(1, self.bpeCinternal//self.bpr):
           kStr += inst("s_or_b32", sgpr(tmpSgpr), sgpr("Beta+%u"%i), sgpr(tmpSgpr), "tmp |= Beta[%u] " % i)
-        kStr += inst("s_cmpk_eq_u32", sgpr(tmpSgpr), hex(0), "Beta == 0")
+        kStr += inst(cmpEqZero, sgpr(tmpSgpr), hex(0), "Beta == 0")
       kStr += inst("s_cbranch_scc0 %s" % betaLabel, \
           "Branch if Beta is not zero")
       kStr += "\n"
@@ -12099,9 +12161,11 @@ class KernelWriterAssembly(KernelWriter):
     kStr += inst("s_cselect_b32", sgpr(tmpS0), sgpr(tmpS0), 0, "set rMT0")
     # s01 now = myMT0 = wg0 < nwg0-1 ? MT0 : rMT0
 
+    cmpGtZero = "s_cmp_gt_u32" if self.isGfx12() else "s_cmpk_gt_u32"
+
     # if rMT0 > 0 goto label_B?_E1
     if self.do["EdgeWrite"]:
-      kStr += inst("s_cmpk_gt_u32", sgpr(tmpS0), hex(0), "rMT0 > 0")
+      kStr += inst(cmpGtZero, sgpr(tmpS0), hex(0), "rMT0 > 0")
       if self.db["ForceEdgeStores"]:
         kStr += inst("s_cmp_eq_u32", sgpr(tmpS0), sgpr(tmpS0), "ForceEdgeStores!")
       kStr += inst("s_cbranch_scc1 %s" % isEdgeTarget, "jump if edges required")
@@ -12122,7 +12186,7 @@ class KernelWriterAssembly(KernelWriter):
 
     # if rMT1 > 0 goto label_B?_E1
     if self.do["EdgeWrite"]:
-      kStr += inst("s_cmpk_gt_u32", sgpr(tmpS0), hex(0), "rMT1 > 0")
+      kStr += inst(cmpGtZero, sgpr(tmpS0), hex(0), "rMT1 > 0")
       kStr += inst("s_cbranch_scc1 %s" % isEdgeTarget, "jump if edges required")
 
     return kStr
@@ -12140,7 +12204,7 @@ class KernelWriterAssembly(KernelWriter):
 
     if kernel["StoreSyncOpt"]:
       kStr += "s_sleep %d // optimization: sync and wait\n" %(kernel["StoreSyncOpt"]-1)
-      kStr += "s_barrier\n"
+      kStr += self.syncStr + "\n"
 
     # comment tt1, tt0, vc1, vc0
     # tt = thread tile, vc=vector component
@@ -12184,11 +12248,11 @@ class KernelWriterAssembly(KernelWriter):
     # for the top-left corner this thread will write.  These are not changed
     # across all the store loop iters.
     if self.db["ConservativeWaitCnt"] & 0x10:
-      kStr += "s_barrier // debug\n"
+      kStr += self.syncStr + " // debug\n"
       kStr += inst("s_waitcnt", "vmcnt(0)", "ConservativeWaitCnt" )
       if self.archCaps["SeparateVscnt"]:
         kStr += inst("s_waitcnt_vscnt", "null", "0", "writes")
-      kStr += "s_barrier // debug\n"
+      kStr += self.syncStr + " // debug\n"
     if not edge and self.db["ForceEdgeStores"]>=2:
       kStr += self.bomb() # should not get here
     if edge and self.db["AssertNoEdge"]:
@@ -12541,11 +12605,11 @@ class KernelWriterAssembly(KernelWriter):
       kStr += inst("s_mov_b{}".format(wavelen), self.exec, -1, "full mask -> exec" )
 
     if self.db["ConservativeWaitCnt"] & 0x40:
-      kStr += "s_barrier // debug\n"
+      kStr += self.syncStr + " // debug\n"
       kStr += inst("s_waitcnt", "vmcnt(0)", "ConservativeWaitCnt" )
       if self.archCaps["SeparateVscnt"]:
         kStr += inst("s_waitcnt_vscnt", "null", "0", "writes")
-      kStr += "s_barrier // debug\n"
+      kStr += self.syncStr + " // debug\n"
     ########################################
     # End Not Atomic
     ########################################
@@ -13078,7 +13142,7 @@ class KernelWriterAssembly(KernelWriter):
 
     # Set flag
     kStr += inst("s_waitcnt", "vmcnt(0)", "wait for data store")
-    kStr += inst("s_barrier", "store all data before setting flag")
+    kStr += inst(self.syncStr, "store all data before setting flag")
     kStr += inst("s_lshl_b32", sgpr(tmpSgpr), sgpr("StreamKIdx"), log2(4), "flag offset based on CTA index")
     kStr += inst("s_mov_b32", sgpr(tmpSgpr+2), 1, "flag data")
     kStr += inst("s_store_dword", sgpr(tmpSgpr+2), sgpr("AddressFlags", 2), sgpr(tmpSgpr), "glc", "set flag")
@@ -13112,7 +13176,7 @@ class KernelWriterAssembly(KernelWriter):
 
     if kernel["StoreSyncOpt"]:
       kStr += "s_sleep %d // optimization: sync and wait\n" %(kernel["StoreSyncOpt"]-1)
-      kStr += "s_barrier\n"
+      kStr += self.syncStr + "\n"
 
     # comment tt1, tt0, vc1, vc0
     # tt = thread tile, vc=vector component
@@ -13142,11 +13206,11 @@ class KernelWriterAssembly(KernelWriter):
     # for the top-left corner this thread will write.  These are not changed
     # across all the store loop iters.
     if self.db["ConservativeWaitCnt"] & 0x10:
-      kStr += "s_barrier // debug\n"
+      kStr += self.syncStr + " // debug\n"
       kStr += inst("s_waitcnt", "vmcnt(0)", "ConservativeWaitCnt" )
       if self.archCaps["SeparateVscnt"]:
         kStr += inst("s_waitcnt_vscnt", "null", "0", "writes")
-      kStr += "s_barrier // debug\n"
+      kStr += self.syncStr + " // debug\n"
     if not edge and self.db["ForceEdgeStores"]>=2:
       kStr += self.bomb() # should not get here
     if edge and self.db["AssertNoEdge"]:
@@ -13775,6 +13839,10 @@ class KernelWriterAssembly(KernelWriter):
           rv.addCode(inst("s_mov_b32", soffset, offset, "large offset"))
         else:
           assert 0, "offset too large and soffset set"
+      elif self.isGfx12() and (soffset == 0 or soffset == "0"):
+        # gfx12 buffer instructions reject literal 0 in the soffset operand.
+        soffset = sgpr(self.getTmpSgpr(1).idx())
+        rv.addCode(inst("s_mov_b32", soffset, 0, "gfx12 buffer soffset must be SGPR"))
       if extraFields != "":
         tailFields += ", %s"% extraFields
       globalReadInst = None
@@ -13806,7 +13874,6 @@ class KernelWriterAssembly(KernelWriter):
         if extraFields != "":
           tailFields1 += ", %s"% extraFields
 
-        rv = Code.Module("emulated _buffer_load_b256")
         rv.addCode(Code.GlobalReadInst("_buffer_load_b128", vgpr(destVgpr, rpv/2), addr0, \
                   addr1, soffset, tailFields, comment))
         rv.addCode(Code.GlobalReadInst("_buffer_load_b128", vgpr(int(destVgpr + rpv/2), rpv/2), addr0, \
@@ -13873,6 +13940,11 @@ class KernelWriterAssembly(KernelWriter):
       if soffset != None:
         assert offset < 4096, "sgpr offset provided with large const offset"
         tmpSgpr = soffset
+
+      if self.isGfx12() and (tmpSgpr == 0 or tmpSgpr == "0"):
+        # gfx12 buffer instructions reject literal 0 in the soffset operand.
+        tmpSgpr = sgpr(self.getTmpSgpr(1).idx())
+        kStr += inst("s_mov_b32", tmpSgpr, 0, "gfx12 buffer soffset must be SGPR")
 
       if bps == 1 :
         #TODO: need to use _buffer_store_b8 macro.. but conflict with buffer_store_byte_d16 in chosen_store
@@ -14067,16 +14139,26 @@ class KernelWriterAssembly(KernelWriter):
       # use cmpswap_b64 for DGEMM or cmpswap_b32 for DGEMM in CAS loop
       bits = 32 * atomicOpW
       if kernel["BufferStore"]:
+        atomicMemoryBit = memoryBit
+        atomicOffset = "0 offen offset:%u" % (addrCalc.globalOffset + offset)
+        if self.isGfx12():
+          # gfx12 buffer atomics reject literal 0 in the soffset operand.
+          tmpSgpr = sgpr(self.getTmpSgpr(1).idx())
+          kStr += inst("s_mov_b32", tmpSgpr, 0, "gfx12 buffer atomic soffset must be SGPR")
+          atomicOffset = "%s offen offset:%u" % (tmpSgpr, addrCalc.globalOffset + offset)
+          atomicMemoryBit = self.gfx12AtomicCmpswapMemoryModifier(memoryBit)
         kStr += "_buffer_atomic_cmpswap_b%u %s, %s, %s %s %s   // %s%s" % \
             (bits, \
             vgpr(addDst,atomicOpW*2), \
             vgpr(addrCalc.addrDVgpr,1), \
             sgpr("SrdD", 4),  \
-            "0 offen offset:%u" % (addrCalc.globalOffset + offset), \
-            memoryBit,
+            atomicOffset, \
+            atomicMemoryBit,
             "attempt write", self.endLine )
       else:
         # not BufferStore case
+        if self.isGfx12():
+          memoryBit = self.gfx12AtomicCmpswapMemoryModifier(memoryBit)
         kStr += "_global_atomic_cmpswap_b%u %s, %s, %s, %s, %s, %s    // %s%s" % \
             (bits, vgpr(addDst,atomicOpW), vgpr(addrCalc.addrDVgpr,2), \
             vgpr(addDst,atomicOpW*2), "off", "offset:%u"%offset, memoryBit, "attempt write", self.endLine )
@@ -14235,7 +14317,7 @@ class KernelWriterAssembly(KernelWriter):
 
     if kernel["StoreSyncOpt"]:
       kStr += "s_sleep %d // optimization: sync and wait\n" %(kernel["StoreSyncOpt"]-1)
-      kStr += "s_barrier\n"
+      kStr += self.syncStr + "\n"
 
     if atomic:
       # all kinds of code relies on this assumption:
@@ -14288,11 +14370,11 @@ class KernelWriterAssembly(KernelWriter):
     # for the top-left corner this thread will write.  These are not changed
     # across all the store loop iters.
     if self.db["ConservativeWaitCnt"] & 0x10:
-      kStr += "s_barrier // debug\n"
+      kStr += self.syncStr + " // debug\n"
       kStr += inst("s_waitcnt", "vmcnt(0)", "ConservativeWaitCnt" )
       if self.archCaps["SeparateVscnt"]:
         kStr += inst("s_waitcnt_vscnt", "null", "0", "writes")
-      kStr += "s_barrier // debug\n"
+      kStr += self.syncStr + " // debug\n"
     if not edge and self.db["ForceEdgeStores"]>=2:
       kStr += self.bomb() # should not get here
     if edge and self.db["AssertNoEdge"]:
@@ -14436,7 +14518,7 @@ class KernelWriterAssembly(KernelWriter):
 
     if beta and kernel["StoreSyncOpt"]:
       kStr += "s_sleep %d // optimization: sync and wait\n" %(kernel["StoreSyncOpt"]-1)
-      kStr += "s_barrier\n"
+      kStr += self.syncStr + "\n"
 
     ########################################
     # AccVgpr read
@@ -15211,11 +15293,11 @@ class KernelWriterAssembly(KernelWriter):
         kStr += inst("s_mov_b{}".format(wavelen), self.exec, -1, "full mask -> exec" )
 
       if self.db["ConservativeWaitCnt"] & 0x40:
-        kStr += "s_barrier // debug\n"
+        kStr += self.syncStr + " // debug\n"
         kStr += inst("s_waitcnt", "vmcnt(0)", "ConservativeWaitCnt" )
         if self.archCaps["SeparateVscnt"]:
           kStr += inst("s_waitcnt_vscnt", "null", "0", "writes")
-        kStr += "s_barrier // debug\n"
+        kStr += self.syncStr + " // debug\n"
 
     # return registers to pool:
     lastData = -1
@@ -16297,7 +16379,7 @@ class KernelWriterAssembly(KernelWriter):
         # StorSyncOpt
         if kernel["StoreSyncOpt"]:
           kStrPL += "s_sleep %d // optimization: sync and wait\n" %(kernel["StoreSyncOpt"]-1)
-          kStrPL += "s_barrier\n"
+          kStrPL += self.syncStr + "\n"
         # add all finalAddrInc code after the last StoreC (in the same item)
         for item in (postProcessList + finalAddrIncList):
           kStrPL += item
@@ -16435,7 +16517,7 @@ class KernelWriterAssembly(KernelWriter):
         imod.addInst("s_waitcnt", "lgkmcnt(0) & vmcnt(0)", "debug %s"%comment )
         if self.archCaps["SeparateVscnt"]:
           imod.addInst("s_waitcnt_vscnt", "null", "0", "writes")
-        imod.addInst("s_barrier", "debug" )
+        imod.addInst(self.syncStr, "debug" )
         return imod
 
     maxLgkmcnt = globalParameters["AsmCaps"][self.version]["MaxLgkmcnt"]
@@ -16640,7 +16722,7 @@ class KernelWriterAssembly(KernelWriter):
       kStr += inst("s_waitcnt", "lgkmcnt(0) & vmcnt(0)", "" )
       if self.archCaps["SeparateVscnt"]:
         kStr += inst("s_waitcnt_vscnt", "null", "0", "writes")
-      kStr += inst("s_barrier", "dump LDS" )
+      kStr += inst(self.syncStr, "dump LDS" )
       tmp = self.vgprPool.checkOut(1)
       tmpAddr = self.vgprPool.checkOut(1)
       kStr += inst("v_lshlrev_b32", \
@@ -16668,7 +16750,7 @@ class KernelWriterAssembly(KernelWriter):
     kStr += inst("s_waitcnt", "lgkmcnt(0) & vmcnt(0)", "" )
     if self.archCaps["SeparateVscnt"]:
       kStr += inst("s_waitcnt_vscnt", "null", "0", "writes")
-    kStr += inst("s_barrier", "init LDS" )
+    kStr += inst(self.syncStr, "init LDS" )
     tmp = self.vgprPool.checkOut(1)
     tmpAddr = self.vgprPool.checkOut(1)
     kStr += inst("v_mov_b32", vgpr(tmp), hex(value), "Init value")
@@ -16687,7 +16769,7 @@ class KernelWriterAssembly(KernelWriter):
     kStr += inst("s_waitcnt", "lgkmcnt(0) & vmcnt(0)", "wait for LDS init to complete" )
     if self.archCaps["SeparateVscnt"]:
       kStr += inst("s_waitcnt_vscnt", "null", "0", "writes")
-    kStr += inst("s_barrier", "init LDS exit" )
+    kStr += inst(self.syncStr, "init LDS exit" )
     self.vgprPool.checkIn(tmp)
     self.vgprPool.checkIn(tmpAddr)
     return kStr

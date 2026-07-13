@@ -38,6 +38,7 @@
 #include "stinkytofu/transforms/asm/AccumulateInstructionSizePass.hpp"
 #include "stinkytofu/transforms/asm/CFGBuilderPass.hpp"
 #include "stinkytofu/transforms/asm/EstimateAsmCyclesPass.hpp"
+#include "stinkytofu/transforms/asm/FlattenCalleesPass.hpp"
 #include "stinkytofu/transforms/asm/InsertClusterBarrierPass.hpp"
 #include "stinkytofu/transforms/asm/InsertDelayAluPass.hpp"
 #include "stinkytofu/transforms/asm/InsertVgprMsbPass.hpp"
@@ -46,7 +47,9 @@
 #include "stinkytofu/transforms/asm/LoopRegionRemarkPass.hpp"
 #include "stinkytofu/transforms/asm/MemTokenConsistencyCheckPass.hpp"
 #include "stinkytofu/transforms/asm/RederiveExpertScopePass.hpp"
+#include "stinkytofu/transforms/asm/RegionClonePass.hpp"
 #include "stinkytofu/transforms/asm/RemoveDelayAluPass.hpp"
+#include "stinkytofu/transforms/asm/RemoveInstructionPass.hpp"
 #include "stinkytofu/transforms/asm/RemoveWaitAluPass.hpp"
 #include "stinkytofu/transforms/asm/SetMatrixReusePass.hpp"
 #include "stinkytofu/transforms/asm/StinkyBuildImplicitDependencyPass.hpp"
@@ -96,14 +99,15 @@ bool buildGfx1250Pipeline(PassManager& pm, StinkyAsmModule& module, const PassBu
     registerAllAnalyses(pm.getAnalysisManager());
 
     auto debugStreams = createDebugOutputStreams(moduleOptions);
-    configureDebugOutput(pm, moduleOptions, "kernel-OuterPM", debugStreams);
+    configureStandardInstrumentations(pm, moduleOptions, "kernel-OuterPM", debugStreams);
 
     const bool runScheduler = optLevel != OptLevel::O0;
     if (runScheduler || moduleOptions.EnableESM2) {
-        // strip delay_alu before scheduling
-        pm.addPass(createRemoveDelayAluPass());
-        // strip s_wait_alu before scheduling
-        pm.addPass(createRemoveWaitAluPass());
+        // strip delay_alu before scheduling (whole-kernel: entry + callable functions,
+        // so stale delay_alu does not survive into the emitted stream)
+        pm.addPass(createRemoveDelayAluPass(module.getFunctions()));
+        // strip s_wait_alu before scheduling (whole-kernel)
+        pm.addPass(createRemoveWaitAluPass(module.getFunctions()));
     }
     PB.applyExtensionPoint(PipelineExtensionPoint::BeforeRegionPasses, pm, module);
 
@@ -112,30 +116,34 @@ bool buildGfx1250Pipeline(PassManager& pm, StinkyAsmModule& module, const PassBu
     // share one region adaptor. Either gate is enough to enter this block.
     if (runScheduler || moduleOptions.EnableWaitCntInsertion) {
         PassFeatureConfig passFeatureConfig;
-        std::shared_ptr<DAGScheduleJsonCollector> snapshotCollector;
         if (runScheduler) {
             passFeatureConfig.loopConfig.unrollGemm = true;
             passFeatureConfig.dagFeatures.distributeGlobalRead = true;
-            passFeatureConfig.passOrderSnapshot.jsonPath = moduleOptions.PassOrderSnapshotJson;
-            snapshotCollector = createPassOrderSnapshotCollector(passFeatureConfig, moduleOptions,
-                                                                 module.getName());
-            passFeatureConfig.passOrderSnapshot.titlePrefix = "loopWithPrefetch+noLoadLoopBody";
+            passFeatureConfig.dagFeatures.dsReadQueueDepth = moduleOptions.DsReadQueueDepth;
+            passFeatureConfig.dagFeatures.dsReadDrainLatency = moduleOptions.DsReadDrainLatency;
+            passFeatureConfig.dagFeatures.globalReadQueueDepth = moduleOptions.GlobalReadQueueDepth;
+            passFeatureConfig.dagFeatures.globalReadDrainLatency =
+                moduleOptions.GlobalReadDrainLatency;
+            if (moduleOptions.DsReadPerWmma >= 0)
+                passFeatureConfig.dagFeatures.dsReadPerWmma = moduleOptions.DsReadPerWmma;
+            if (moduleOptions.DsReadOrder >= 0)
+                passFeatureConfig.dagFeatures.dsReadOrder =
+                    static_cast<PassFeatureConfig::DsReadOrder>(moduleOptions.DsReadOrder);
         }
 
         PassManager innerPM;
         registerAllAnalyses(innerPM.getAnalysisManager());
         innerPM.setPassFeatureConfig(passFeatureConfig);
-        if (snapshotCollector) {
-            configurePassOrderSnapshot(innerPM, snapshotCollector);
-        }
-        configureDebugOutput(innerPM, moduleOptions, "loopWithPrefetch+noLoadLoopBody",
-                             debugStreams);
+        configureStandardInstrumentations(innerPM, moduleOptions, "loopWithPrefetch+noLoadLoopBody",
+                                          debugStreams);
         PB.applyExtensionPoint(PipelineExtensionPoint::InnerRegionBegin, innerPM, module);
         addGfx1250RegionPasses(innerPM, module, optLevel, moduleOptions.EnableWaitCntInsertion,
                                runScheduler);
         PB.applyExtensionPoint(PipelineExtensionPoint::InnerRegionEnd, innerPM, module);
         if (moduleOptions.EnableWaitCntInsertion) {
-            innerPM.addPass(createStinkyWaitCntInsertionPass());
+            WaitCntInsertionOptions waitCntOptions;
+            waitCntOptions.enableLoopCarriedTokenDeps = moduleOptions.EnableLoopCarriedTokenDeps;
+            innerPM.addPass(createStinkyWaitCntInsertionPass(waitCntOptions));
         }
         pm.addPass(createKernelToRegionsPassAdaptor(module, {"loopWithPrefetch", "noLoadLoopBody"},
                                                     std::move(innerPM)));
@@ -154,8 +162,6 @@ bool buildGfx1250Pipeline(PassManager& pm, StinkyAsmModule& module, const PassBu
                                                   /*plrValue=*/moduleOptions.PrefetchLocalRead));
     }
 
-    pm.addPass(createInsertVgprMsbPass());
-
     if (moduleOptions.EnableESM2) {
         // expertScheduleMode2 region (label_ASM_Start..noLoadLoopBody): wait-alu + mode2
         // lifecycle. Must precede the kernel-wide CFGBuilder — ScopeAdaptor needs the flat
@@ -165,7 +171,8 @@ bool buildGfx1250Pipeline(PassManager& pm, StinkyAsmModule& module, const PassBu
                                                      "label_ASM_Start", "noLoadLoopBody"));
             PassManager innerPM;
             registerAllAnalyses(innerPM.getAnalysisManager());
-            configureDebugOutput(innerPM, moduleOptions, "expertScheduleMode2", debugStreams);
+            configureStandardInstrumentations(innerPM, moduleOptions, "expertScheduleMode2",
+                                              debugStreams);
             innerPM.addPass(createLongBranchLoweringPass());
             innerPM.addPass(createCFGBuilderPass());
             innerPM.addPass(createInsertWaitAluPass());
@@ -173,6 +180,16 @@ bool buildGfx1250Pipeline(PassManager& pm, StinkyAsmModule& module, const PassBu
                 createKernelToRegionPassAdaptor(module, "expertScheduleMode2", std::move(innerPM)));
         }
     }
+
+    // Build the CFG after the flat region splice-backs so RegionClonePass can match its
+    // start BB by label. InsertVgprMsb runs after RegionClonePass so the cloned BB gets
+    // its MSB computed for its actual operands (chain-head src C is zeroed, so it must not
+    // inherit the loop's src C MSB).
+    pm.addPass(createCFGBuilderPass());
+    pm.addPass(createRegionClonePass(moduleOptions.CloneList));
+    // Pass the whole-kernel function list so MSB is materialized for the entry function and
+    // every callable function (each function owns its VGPR MSB hardware state).
+    pm.addPass(createInsertVgprMsbPass(module.getFunctions()));
 
     pm.addPass(createCFGBuilderPass());
     pm.addPass(createMemTokenConsistencyCheckPass());
@@ -183,13 +200,30 @@ bool buildGfx1250Pipeline(PassManager& pm, StinkyAsmModule& module, const PassBu
     }
     pm.addPass(createEstimateAsmCyclesPass());
     // Whole-kernel reuse on final instruction order (O0 and O1+; after scheduler + VGPR MSB).
-    pm.addPass(createSetMatrixReusePass());
+    // Pass the whole-kernel function list so the pass walks the entry plus callable functions,
+    // each in isolation (reuse never chains across a call site or a function boundary).
+    pm.addPass(createSetMatrixReusePass(module.getFunctions()));
+
+    // Re-merge callable functions into the entry at their ASM placement markers so
+    // SwPrefetchInsertionPass sees a single linear stream / legacy emission
+    // order. After the multi-function passes above; no-op with no callable functions.
+    //
+    // WARNING: temporary workaround; see FlattenCalleesPass. Remove once
+    // SwPrefetchInsertionPass handles multiple functions directly.
+    pm.addPass(createFlattenCalleesPass(module.getFunctions()));
     if (moduleOptions.EnableSwPrefetchInsertion) {
         pm.addPass(createSwPrefetchInsertionPass(module));
     }
     // When StinkyTofuCostOutputDir is set, dump pass debug (per-instruction + summary) to
     // <outputDir>/<kernel>/accumulate_instruction_size_pass_debug.txt (same layout as Backend).
     pm.addPass(createAccumulateInstructionSizePass(module));
+
+    // Pass the whole-kernel function list so removal applies kernel-wide
+    // (entry + callable functions).
+    if (auto pass =
+            createRemoveInstructionPass(moduleOptions.RemoveInstructions, module.getFunctions())) {
+        pm.addPass(std::move(pass));
+    }
 
     return true;
 }
