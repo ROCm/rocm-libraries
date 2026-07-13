@@ -1075,7 +1075,8 @@ struct WmmaPoolData : public TypedModifier<WmmaPoolData> {
     explicit WmmaPoolData(uint32_t idx) : TypedModifier<WmmaPoolData>(), poolIndex(idx) {}
 };
 
-/// Non-owning. See docs/developer/exec-mask-grouping.md.
+/// Holds raw (non-owning) pointers to the original instructions grouped into an
+/// ExecMaskGroup pseudo-instruction by collapseExecMaskedRegions().
 struct ExecGroupData : public TypedModifier<ExecGroupData> {
     static constexpr Modifier::Type Type = Modifier::Type::EXEC_GROUP;
 

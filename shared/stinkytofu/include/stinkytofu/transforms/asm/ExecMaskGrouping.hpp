@@ -30,8 +30,9 @@ namespace stinkytofu {
 class BasicBlock;
 class AsmIRBuilder;
 
-// See docs/developer/exec-mask-grouping.md for the rationale and scope notes.
-
+/// Collapse each narrow-exec-write..full-mask-reset span into a single opaque
+/// ExecMaskGroup pseudo-instruction so the DAG scheduler cannot reorder into or
+/// out of the span. Call expandExecMaskedGroups() after scheduling to restore.
 STINKYTOFU_EXPORT void collapseExecMaskedRegions(BasicBlock& bb, AsmIRBuilder& builder,
                                                  uint32_t wavefrontSize);
 
