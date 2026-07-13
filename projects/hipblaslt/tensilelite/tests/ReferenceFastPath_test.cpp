@@ -80,3 +80,34 @@ TEST(ReferenceFastPath, PreservesDoublePrecisionForF64)
     ASSERT_NE(static_cast<double>(static_cast<float>(expected)), expected);
     EXPECT_EQ(d[0], expected);
 }
+
+TEST(ReferenceFastPath, AppliesXFloat32OperandMathOpToBothOperands)
+{
+    const size_t M = 1;
+    const size_t N = 1;
+    const size_t K = 2;
+
+    auto problem = makePackedProblem(rocisa::DataType::Float,
+                                     rocisa::DataType::Float,
+                                     rocisa::DataType::Float,
+                                     M,
+                                     N,
+                                     K);
+    problem.setF32XdlMathOp(rocisa::DataType::XFloat32);
+    ASSERT_TRUE(isFastPathEligible(problem));
+
+    std::vector<float> a = {1.234567f, -2.345678f};
+    std::vector<float> b = {3.456789f, 4.567891f};
+    std::vector<float> c = {0.0f};
+    std::vector<float> d = {0.0f};
+
+    ContractionInputs inputs(a.data(), b.data(), c.data(), d.data(), 1.0f, 0.0f);
+    SolveGemmCPU(problem, inputs, /*elementsToValidate=*/-1, /*tryFastPath=*/true);
+
+    auto xf32 = [](float v) { return static_cast<float>(XFloat32(v)); };
+    const float expected = xf32(a[0]) * xf32(b[0]) + xf32(a[1]) * xf32(b[1]);
+    const float fullF32  = a[0] * b[0] + a[1] * b[1];
+
+    ASSERT_NE(expected, fullF32);
+    EXPECT_EQ(d[0], expected);
+}

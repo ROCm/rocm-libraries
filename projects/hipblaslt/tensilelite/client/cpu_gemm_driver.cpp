@@ -149,10 +149,10 @@ namespace
     // factorDim only affects scaleAlphaVec: 0 = row-dim (length M), 1 = col-dim (length N).
     //
     // Template parameters:
-    //   AccumT       — accumulation type (float or double)
-    //   MathOpAccumT — math-operation precision type. When different from AccumT,
-    //                  each A/B element is cast through MathOpAccumT before multiply
-    //                  (e.g. XFloat32 truncates mantissa to 10 bits).
+    //   AccumT         — accumulation type (float or double)
+    //   OperandMathOpT — per-operand math type used immediately before multiply.
+    //                    XFloat32, for example, truncates float operands to a
+    //                    10-bit mantissa.
     //
     // When both MX operand descriptors are populated, the K-reduction is
     // block-structured: accumulate min(mxA.block, mxB.block) products, then
@@ -237,7 +237,7 @@ namespace
     }
 #endif
 
-    template <typename AccumT = float, typename MathOpAccumT = AccumT>
+    template <typename AccumT = float, typename OperandMathOpT = AccumT>
     void columnMajorGemm(const AccumT*  a,
                          const AccumT*  b,
                          const AccumT*  c,
@@ -316,8 +316,9 @@ namespace
                             AccumT bVal = b[l * strideBK + j * strideBN];
                             if(quantizeA) aVal = static_cast<AccumT>(quantizeA(static_cast<float>(aVal)));
                             if(quantizeB) bVal = static_cast<AccumT>(quantizeB(static_cast<float>(bVal)));
-                            blockSum += AccumT(MathOpAccumT(aVal))
-                                      * AccumT(MathOpAccumT(bVal));
+                            blockSum
+                                += static_cast<AccumT>(static_cast<OperandMathOpT>(aVal))
+                                   * static_cast<AccumT>(static_cast<OperandMathOpT>(bVal));
                         }
 
                         size_t blkA = lBase / static_cast<size_t>(mxA.block);
@@ -343,7 +344,8 @@ namespace
                         AccumT bVal = b[l * strideBK + j * strideBN];
                         if(quantizeA) aVal = static_cast<AccumT>(quantizeA(static_cast<float>(aVal)));
                         if(quantizeB) bVal = static_cast<AccumT>(quantizeB(static_cast<float>(bVal)));
-                        sum += AccumT(MathOpAccumT(aVal)) * AccumT(MathOpAccumT(bVal));
+                        sum += static_cast<AccumT>(static_cast<OperandMathOpT>(aVal))
+                               * static_cast<AccumT>(static_cast<OperandMathOpT>(bVal));
                     }
                 }
 
@@ -847,7 +849,7 @@ int runGemm(size_t         m,
 #endif
 
         // Run the golden reference per-batch.
-        // When isTF32, use XFloat32 as MathOpAccumT so the golden ref
+        // When isTF32, use XFloat32 as OperandMathOpT so the golden ref
         // truncates each A/B element to 10-bit mantissa before multiply.
         auto runGoldenRef = [&](auto mathOpTag) {
             using MathOpT = decltype(mathOpTag);

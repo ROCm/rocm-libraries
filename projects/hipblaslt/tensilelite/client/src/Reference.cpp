@@ -1377,7 +1377,7 @@ namespace TensileLite
         template <size_t BLOCK_M,
                   size_t BLOCK_N,
                   size_t BLOCK_K,
-                  typename MathOpAccumT,
+                  typename OperandMathOpT,
                   typename AccumT>
         TENSILELITE_CPU_REF_FORCE_INLINE void innerFastPathReduction(const AccumT* A,
                                                                      const AccumT* B,
@@ -1394,8 +1394,9 @@ namespace TensileLite
                         auto  c_index = m_i * BLOCK_N + n_i;
                         AccumT valB   = B[b_index];
                         AccumT valA   = A[a_index];
-                        C[c_index] += AccumT(MathOpAccumT(valA))
-                                    * AccumT(MathOpAccumT(valB));
+                        C[c_index]
+                            += static_cast<AccumT>(static_cast<OperandMathOpT>(valA))
+                               * static_cast<AccumT>(static_cast<OperandMathOpT>(valB));
                     }
                 }
             }
@@ -1452,10 +1453,10 @@ namespace TensileLite
         // This function assumes the problem is eligible for the fast path — callers
         // must check isFastPathEligible() first.
         // AccumT: accumulation precision (float or double).
-        // MathOpAccumT: when set to XFloat32, each A/B operand is truncated
-        // to 10-bit mantissa before multiply (simulating TF32 hardware behavior).
-        // Default matches AccumT (no-op cast with identical codegen).
-        template <typename AccumT = float, typename MathOpAccumT = AccumT>
+        // OperandMathOpT: per-operand math type used immediately before multiply.
+        // XFloat32, for example, truncates float operands to a 10-bit mantissa.
+        // Default matches AccumT, making the operand cast a no-op.
+        template <typename AccumT = float, typename OperandMathOpT = AccumT>
         void solveCPUFast(ContractionProblemGemm const& problem,
                           ContractionInputs const&      inputs)
         {
@@ -1658,7 +1659,7 @@ namespace TensileLite
                                                                     strideKB);
 
                                 std::array<AccumT, BLOCK_M * BLOCK_N> tilePartial = {0};
-                                innerFastPathReduction<BLOCK_M, BLOCK_N, BLOCK_K, MathOpAccumT>(
+                                innerFastPathReduction<BLOCK_M, BLOCK_N, BLOCK_K, OperandMathOpT>(
                                     aReg.data(), bReg.data(), tilePartial.data());
 
                                 size_t mxsaI
@@ -1705,7 +1706,7 @@ namespace TensileLite
                                                                     sizeK,
                                                                     strideNB,
                                                                     strideKB);
-                                innerFastPathReduction<BLOCK_M, BLOCK_N, BLOCK_K, MathOpAccumT>(
+                                innerFastPathReduction<BLOCK_M, BLOCK_N, BLOCK_K, OperandMathOpT>(
                                     aReg.data(), bReg.data(), cReg.data());
                             }
                         }
