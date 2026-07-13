@@ -135,12 +135,12 @@ TEST(TestTensorValueAttributes, GraphTensorRuntimeParamMode)
     expectFloatState(*tensor, true, PI_FLOAT, std::nullopt, false, true);
 }
 
-TEST(TestTensorValueAttributes, SetIsPassByValueAfterSetValueKeepsValue)
+TEST(TestTensorValueAttributes, SetIsPassByValueFlipsCompileTimeConstantToRuntimeWithDefault)
 {
     TensorAttributes tensor;
-    tensor.set_value(PI_FLOAT);
-    tensor.set_is_pass_by_value(true);
-    // set_is_pass_by_value flips only the flag: value survives as a default.
+    tensor.set_compile_time_constant(PI_FLOAT); // flag false, value present
+    tensor.set_is_pass_by_value(true); // flip only the flag; value must survive
+    // Compile-time constant becomes runtime-with-default: value retained as a default.
     expectFloatState(tensor, true, PI_FLOAT, std::nullopt, false, true);
 }
 
@@ -148,7 +148,7 @@ TEST(TestTensorValueAttributes, SetIsPassByValueAfterSetValueKeepsValue)
 
 TEST(TestTensorValueAttributes, SetAsRuntimeParameterClearsValue)
 {
-    TensorAttributes tensor(PI_FLOAT); // start as compile-time constant
+    TensorAttributes tensor(PI_FLOAT); // start as runtime-with-default (plain ctor sets the flag)
     tensor.set_as_runtime_parameter();
     expectFloatState(tensor, true, std::nullopt, std::nullopt, false, true);
 }
@@ -226,6 +226,9 @@ TEST(TestTensorValueAttributes, RuntimeWithDefaultRoundTripsAllTypes)
 {
     expectRuntimeRoundTrip<float>(PI_FLOAT);
     expectRuntimeRoundTrip<double>(2.718281828459045);
+    // half/bfloat16 use an exactly-representable value so the round-trip is bit-exact.
+    expectRuntimeRoundTrip<half>(half(1.5F));
+    expectRuntimeRoundTrip<bfloat16>(bfloat16(1.5F));
     expectRuntimeRoundTrip<uint8_t>(200);
     expectRuntimeRoundTrip<int32_t>(-12345);
     expectRuntimeRoundTrip<int64_t>(456789012345LL);
