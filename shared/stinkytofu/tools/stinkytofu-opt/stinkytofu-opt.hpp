@@ -28,7 +28,7 @@
 
 #include "stinkytofu/analysis/asm/AsmVerifierPass.hpp"
 #include "stinkytofu/core/PassManager.hpp"
-#include "stinkytofu/ir/DumpStinkyFunctionPass.hpp"
+#include "stinkytofu/ir/DumpStinkyModulePass.hpp"
 #include "stinkytofu/pipeline/ScopeAdaptor.hpp"
 #include "stinkytofu/support/DebugPrintInstrumentation.hpp"
 #include "stinkytofu/transforms/asm/BuildDefUseChain.hpp"
@@ -100,8 +100,8 @@ const std::vector<PassInfo> availablePasses = {
          return createBuildUseDefChainPass(clearExisting, includePseudo);
      }},
     {"CFGBuilderPass", [](const auto&) { return createCFGBuilderPass(); }},
-    {"DumpStinkyFunctionPass",
-     [](const auto&) { return createDumpStinkyFunctionPass({.stirPath = "dump_function.stir"}); }},
+    {"DumpStinkyModulePass",
+     [](const auto&) { return createDumpStinkyModulePass({.stirPath = "dump_module.stir"}); }},
     {"PeepholeOptimizationPass", [](const auto&) { return createPeepholeOptimizationPass(); }},
     {"DeadCodeEliminationPass", [](const auto&) { return createDeadCodeEliminationPass(); }},
     {"RedundantMovEliminationPass",
@@ -125,8 +125,17 @@ const std::vector<PassInfo> availablePasses = {
     {"InsertClusterBarrierPass",
      [](const auto&) {
          auto geti = [](const char* k, int d) {
+#ifdef _WIN32
+             char* v = nullptr;
+             size_t len = 0;
+             _dupenv_s(&v, &len, k);
+             int result = v != nullptr ? std::atoi(v) : d;
+             free(v);
+             return result;
+#else
              const char* v = std::getenv(k);
              return v != nullptr ? std::atoi(v) : d;
+#endif
          };
          return createInsertClusterBarrierPass(
              /*isKernelScope=*/true, geti("PrefetchGlobalRead", 1), geti("PrefetchLocalRead", 1));

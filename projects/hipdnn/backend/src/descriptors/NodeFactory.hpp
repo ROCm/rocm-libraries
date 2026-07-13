@@ -14,6 +14,7 @@
 #include "ConvolutionWrwOperationDescriptor.hpp"
 #include "CustomOpOperationDescriptor.hpp"
 #include "IGraphOperation.hpp"
+#include "LayernormBackwardOperationDescriptor.hpp"
 #include "LayernormOperationDescriptor.hpp"
 #include "MatmulOperationDescriptor.hpp"
 #include "PointwiseOperationDescriptor.hpp"

@@ -11,6 +11,9 @@ Documentation for rocSPARSE is available at
 ### Upcoming changes
 * Deprecated the `rocsparse_indextype_u16` index type. It is  no longer supported and will be removed in a future release. Users should use `rocsparse_indextype_i32` or `rocsparse_indextype_i64` going forward.
 
+### Known issues
+* The HIP graph capture/launch path for the factorization routines `bsric0`, `bsrilu0`, `csric0` and `csrilu0` can fail with `hipErrorOutOfMemory` at `hipGraphLaunch` on memory-constrained GPUs such as the gfx110X family. The corresponding `graph_test` cases are marked `known_bug` and excluded from the standard test suites until the fix lands.
+
 ## rocSPARSE 4.6.0 for ROCm 7.13.0
 
 ### Added

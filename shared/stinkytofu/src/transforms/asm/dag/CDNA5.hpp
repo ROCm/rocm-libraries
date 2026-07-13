@@ -47,11 +47,12 @@ using namespace stinkytofu;
 
 enum NonWmmaKind { kGlobalRead = 0, kLocalRead, kOther, kValu };
 
-// CDNA5 (Gfx1250) DS-read scheduling defaults. Used when dagFeatures still hold the
+// CDNA5 (Gfx1250) scheduling defaults. Used when dagFeatures still hold the
 // PassFeatureConfig sentinel values (0 / INT_MAX). Explicit non-sentinel config wins.
 constexpr int kCdna5DsReadQueueDepth = 16;
 constexpr int kCdna5DsReadDrainLatency = 72;
 constexpr int kCdna5DsReadPerWmma = 3;
+constexpr int kCdna5GlobalReadPerWmma = 1;
 
 // -------------------------------------------------------------------------
 // Prefix / loop analysis (free functions; no CDNA5ReadyQueue state)
@@ -110,7 +111,7 @@ static bool latchBBTailIsWmma(BasicBlock& latchBB) {
     for (auto it = latchBB.rbegin(); it != latchBB.rend(); ++it) {
         auto* instPtr = dyn_cast<StinkyInstruction>(it.getNodePtr());
         if (!instPtr) continue;
-        if (isLabel(*instPtr) || isBranch(*instPtr)) continue;
+        if (isLabel(*instPtr) || isBranch(*instPtr) || isCall(*instPtr)) continue;
         return isMatrixInstruction(*instPtr);
     }
     return false;
@@ -212,7 +213,7 @@ class CDNA5ReadyQueue : public ReadyQueue {
 
     // Throttle tensor issues vs other work.
     int globalReadCounter = 0;
-    int globalReadPerWMMA = 1;
+    int globalReadPerWMMA = kCdna5GlobalReadPerWmma;
 
     InFlightQueue globalReadInflight_;
     int crossBBGlobalReadCount_ = 0;

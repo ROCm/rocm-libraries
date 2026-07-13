@@ -144,9 +144,8 @@ if(CMAKE_BUILD_TYPE MATCHES Debug)
     set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -O0 -g")
 else()
     # -O3 -- Optimize output file
-    # TBD:Verify Requirement -Ofast - Optimize for speed disregarding exact standards compliance
     # -DNDEBUG -- turn off asserts
-    set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -O3 -Ofast -DNDEBUG")
+    set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -O3 -DNDEBUG")
 endif()
 
 # Enable -Wall warnings for both release and debug builds
@@ -327,6 +326,8 @@ if(NOT DEFINED SIMD_ENABLE)
 endif()
 
 add_library(${PROJECT_NAME} SHARED api/rpp.h $<TARGET_OBJECTS:modules>)
+# Enable fast-math to replace Ofast
+target_compile_options(${PROJECT_NAME} PRIVATE -ffast-math)
 if("${SIMD_ENABLE}" STREQUAL "1")
     target_compile_definitions(${PROJECT_NAME} PUBLIC ENABLE_SIMD_INTRINSICS=1)
     message("-- ${Green}${PROJECT_NAME} set to build with ENABLE_SIMD_INTRINSICS${ColourReset}")

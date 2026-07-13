@@ -2855,7 +2855,11 @@ namespace
             // library, and other threads trying to initialize library wait for it to
             // complete.
             static int once = [&] {
-                // Determine library path
+                // Determine library path. This is always the logical name with
+                // a single ".dat"/".yaml" extension, never ".dat.zlib": the
+                // loader resolves a compressed variant by appending ".zlib", and
+                // downstream filename parsing (initLibraryMapping, placeholder
+                // suffix derivation) assumes a single extension.
                 std::filesystem::path tensileLibPath;
                 if(lazyLoad)
                 {
