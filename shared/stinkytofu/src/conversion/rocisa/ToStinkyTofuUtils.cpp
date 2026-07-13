@@ -1503,6 +1503,12 @@ void init_stinkytofu(nb::module_ m) {  // NOLINT(misc-use-internal-linkage)
             StinkyAsmModule::ModuleOptions moduleOptions{};
             // Sentinel: <0 means use legacy default scratch SGPR in SwPrefetchInsertionPass (102).
             moduleOptions.SwPrefetchScratchSgpr = -1;
+            // Sentinel: <0 means use CDNA5's built-in dsReadPerWmma/dsReadOrder defaults, since 0
+            // is itself a valid (if extreme) value for the former and a valid enumerator for the
+            // latter (ProgramOrder), so 0 can't double as "not provided" the way it does for the
+            // other DAG-scheduler knobs below.
+            moduleOptions.DsReadPerWmma = -1;
+            moduleOptions.DsReadOrder = -1;
             if (nb::isinstance<nb::dict>(options_obj)) {
                 nb::dict options = nb::cast<nb::dict>(options_obj);
 
