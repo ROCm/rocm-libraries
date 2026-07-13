@@ -26,6 +26,7 @@
  * *************************************************************************/
 
 #include "rocauxiliary_ormtr_unmtr_hb2st.hpp"
+#include "exceptions.hpp"
 
 ROCSOLVER_BEGIN_NAMESPACE
 
@@ -72,6 +73,7 @@ rocblas_status rocsolver_ormtr_unmtr_hb2st_impl(rocblas_handle handle,
                                                 T* tau,
                                                 T* C,
                                                 const I ldc)
+try
 {
     const char* name = (!rocblas_is_complex<T> ? "ormtr_sb2st" : "unmtr_hb2st");
     ROCSOLVER_ENTER_TOP(name, "--side", side, "--trans", trans, "-m", m, "-n", n, "--kd", kd,
@@ -129,6 +131,10 @@ rocblas_status rocsolver_ormtr_unmtr_hb2st_impl(rocblas_handle handle,
     return rocsolver_ormtr_unmtr_hb2st_template<false, false, T, T*, I>(
         handle, side, trans, m, n, kd, V, shiftV, ldv, strideV, tau, strideTau, C, shiftC, ldc,
         strideC, batch_count, max_parallel, scalars, Tr, W, Z, work, workArr);
+}
+catch(...)
+{
+    return exception2rocblas_status();
 }
 
 ROCSOLVER_END_NAMESPACE
