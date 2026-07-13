@@ -76,7 +76,7 @@ set( MIOpen_Source
     conv/invokers/gen_x_w_y_pad.cpp
     conv/invokers/impl_gemm.cpp
     conv/invokers/impl_gemm_dynamic.cpp
-    conv/invokers/ocl_wrw_rdc.cpp
+    conv/invokers/wrw_rdc.cpp
     conv/kernel_interface/winograd_kernel_interface.cpp
     conv/problem_description.cpp
     conv/solver_finders.cpp
@@ -332,7 +332,7 @@ if(MIOPEN_ENABLE_SQLITE AND MIOPEN_ENABLE_SQLITE_KERN_CACHE)
     list(APPEND MIOpen_Source kern_db.cpp bz2.cpp)
 endif()
 
-if( MIOPEN_BACKEND MATCHES "OpenCL" OR MIOPEN_BACKEND STREQUAL "HIPOC" OR MIOPEN_BACKEND STREQUAL "HIP" OR MIOPEN_BACKEND STREQUAL "HIPNOGPU")
+if( MIOPEN_BACKEND STREQUAL "HIPOC" OR MIOPEN_BACKEND STREQUAL "HIP" OR MIOPEN_BACKEND STREQUAL "HIPNOGPU")
     include(${PROJECT_SOURCE_DIR}/cmake/CopyExternalHeader.cmake)
     find_path(ROCRAND_INCLUDE_DIR "rocrand/rocrand_xorwow.h")
     if(ROCRAND_INCLUDE_DIR)
@@ -601,7 +601,6 @@ if( MIOPEN_BACKEND MATCHES "OpenCL" OR MIOPEN_BACKEND STREQUAL "HIPOC" OR MIOPEN
         kernels/conv7x7c3h224w224k64u2v2p3q3f1.s
         kernels/xform_out.s
         kernels/gcnAsmBNBwdTrainSpatial.s
-        kernels/MIOpenTensorKernels.cl
         kernels/MIOpenTensorKernelsHip.cpp
         kernels/MIOpenSubTensorOpWithScalarKernel.cpp
         kernels/MIOpenSubTensorOpWithSubTensorKernel.cpp
@@ -709,22 +708,22 @@ if( MIOPEN_BACKEND MATCHES "OpenCL" OR MIOPEN_BACKEND STREQUAL "HIPOC" OR MIOPEN
         lrn.cpp
         mlo_dir_conv.cpp
         multimarginloss.cpp
-        ocl/activ_ocl.cpp
-        ocl/batchnormocl.cpp
-        ocl/convolutionocl.cpp
-        ocl/lrn_ocl.cpp
-        ocl/mloNorm.cpp
-        ocl/rnnocl.cpp
-        ocl/utilocl.cpp
-        ocl/dropoutocl.cpp
-        ocl/gcn_asm_utils.cpp
+        hip/activ_ocl.cpp
+        hip/batchnormocl.cpp
+        hip/convolutionocl.cpp
+        hip/dropoutocl.cpp
+        hip/fusionopbiasbnactivocl.cpp
+        hip/fusionopconvocl.cpp
+        hip/gcn_asm_utils.cpp
         hip/hip_build_utils.cpp
+        hip/lrn_ocl.cpp
+        hip/mloNorm.cpp
+        hip/rnnocl.cpp
+        hip/utilocl.cpp
         hip/batched_transpose_sol.cpp
         hip/general_tensor_reorder_sol.cpp
         pooling.cpp
         t5layernorm.cpp
-        ocl/fusionopconvocl.cpp
-        ocl/fusionopbiasbnactivocl.cpp
         prelu.cpp
         reducecalculation.cpp
         reduceextreme.cpp
@@ -746,15 +745,6 @@ if(MIOPEN_USE_ROCBLAS OR MIOPEN_USE_HIPBLASLT)
     )
 endif()
 
-if( MIOPEN_BACKEND STREQUAL "OpenCL" )
-    list(APPEND MIOpen_Source
-        ocl/handleocl.cpp
-        ocl_kernel.cpp
-        ocl/oclerrors.cpp
-        ocl/clhelper.cpp
-    )
-endif()
-
 if( MIOPEN_BACKEND STREQUAL "HIPOC" OR MIOPEN_BACKEND STREQUAL "HIP")
     list(APPEND MIOpen_Source
         hip/hiperrors.cpp
@@ -773,7 +763,7 @@ if( MIOPEN_BACKEND STREQUAL "HIPNOGPU")
         )
 endif()
 
-if( MIOPEN_BACKEND MATCHES "OpenCL" OR MIOPEN_BACKEND STREQUAL "HIPOC" OR MIOPEN_BACKEND STREQUAL "HIP" OR MIOPEN_BACKEND STREQUAL "HIPNOGPU")
+if( MIOPEN_BACKEND STREQUAL "HIPOC" OR MIOPEN_BACKEND STREQUAL "HIP" OR MIOPEN_BACKEND STREQUAL "HIPNOGPU")
     set(KERNELS_SRC_BATCH_FACTOR 50 CACHE STRING "Amount of kernel source files to inline to a single object file.")
     set(KERNELS_BATCH_ID 0)
 
@@ -966,14 +956,7 @@ if(MIOPEN_ENABLE_AI_KERNEL_TUNING OR MIOPEN_ENABLE_AI_IMMED_MODE_FALLBACK)
     endforeach()
 endif()
 
-############################################################
-# MIOpen depends on OpenCL
-if(MIOPEN_BACKEND STREQUAL "OpenCL")
-    message(STATUS "MIOpen linking OpenCL: ${OPENCL_INCLUDE_DIRS}" )
-    target_include_directories(MIOpen SYSTEM PUBLIC ${OPENCL_INCLUDE_DIRS} )
-    target_link_libraries( MIOpen PUBLIC ${OPENCL_LIBRARIES} )
-    list(APPEND PACKAGE_DEPENDS PACKAGE OpenCL)
-elseif(MIOPEN_BACKEND STREQUAL "HIPOC" OR MIOPEN_BACKEND STREQUAL "HIP")
+if(MIOPEN_BACKEND STREQUAL "HIPOC" OR MIOPEN_BACKEND STREQUAL "HIP")
     target_link_libraries( MIOpen PRIVATE hip::device )
     target_link_libraries( MIOpen INTERFACE hip::host )
     if(MIOPEN_USE_HIPRTC)

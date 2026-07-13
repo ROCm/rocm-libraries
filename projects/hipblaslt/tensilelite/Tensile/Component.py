@@ -218,13 +218,31 @@ class LocalRead(Component):
     """
     Local read block.
     """
-    def _getLdsReadMemToken(self, writer, kernel, tP):
+    def _getLdsReadMemToken(self, writer, kernel, tP, ldsByteOffset=None, bothHalves=False):
         from rocisa.container import MemTokenData
-        tok = writer.states.ldsReadTokenIdx
+        useSplit = (kernel["TDMSplit"] and not kernel["ProblemType"]["Sparse"]
+                    and ldsByteOffset is not None and not tP.get("isM", False))
+        if useSplit:
+            parity = writer.states.ldsReadTokenIdx
+            if bothHalves:
+                # Tile whose per-wave reads do not statically separate the two TDMSplit halves
+                # (numVectorsPerTile==1, e.g. B with MIWaveTile[N] == VectorWidth): a single read's
+                # combined region is fed by BOTH half tensor_loads, but the byte-offset classifier
+                # below can never reach the half1 boundary so it would tag everything half0 and the
+                # half1 load would go un-waited. Carry BOTH half tokens so StinkyTofu waits on the
+                # youngest of the two (fine-grained min(count-1), not a full drain).
+                toks = [writer.states.memTokenLdsSplit[parity][0],
+                        writer.states.memTokenLdsSplit[parity][1]]
+                return MemTokenData(toks), toks[0]
+            inBuf  = ldsByteOffset - tP["localReadSwapByteOffset"]
+            half   = 1 if inBuf >= writer.tdmSplitLdsBoundary(kernel, tP) else 0
+            tok    = writer.states.memTokenLdsSplit[parity][half]
+        else:
+            tok = writer.states.ldsReadTokenIdx
         return MemTokenData([tok]), tok
 
-    def _emitLdsRead(self, writer, kernel, tP, LocalReadX, dst, src, ds, module, comment=""):
-        ldsMemToken, ldsMemTokenIdx = self._getLdsReadMemToken(writer, kernel, tP)
+    def _emitLdsRead(self, writer, kernel, tP, LocalReadX, dst, src, ds, module, ldsByteOffset=None, bothHalves=False, comment=""):
+        ldsMemToken, ldsMemTokenIdx = self._getLdsReadMemToken(writer, kernel, tP, ldsByteOffset, bothHalves)
         fullComment = "%s sync LDS%u" % (comment, ldsMemTokenIdx) if comment else "sync LDS%u" % ldsMemTokenIdx
         inst = LocalReadX(dst=dst, src=src, ds=ds, comment=fullComment)
         inst.setMemToken(ldsMemToken)

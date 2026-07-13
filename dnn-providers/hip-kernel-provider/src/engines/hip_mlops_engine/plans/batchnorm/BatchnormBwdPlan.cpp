@@ -263,7 +263,12 @@ void BatchnormBwdPlan::compile(const IKernelCompiler& kernelCompiler,
         activationMode = (*_params.optActivation()).mode;
     }
 
-    BatchnormKernelCompileOptions options(_params.x(), deviceProperties, activationMode);
+    BatchnormKernelCompileOptions options(_params.x(),
+                                          _params.dx(),
+                                          _params.savedMean(),
+                                          _params.scale(),
+                                          deviceProperties,
+                                          activationMode);
     options.update("HIP_PLUGIN_USE_FPMIX", dims.useFp16Mix);
     options.update("HIP_PLUGIN_USE_BFPMIX", dims.useBfp16Mix);
     // Not using FP16 and BFP16 paths due to affine data type requirements

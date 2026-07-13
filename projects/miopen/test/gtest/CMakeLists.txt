@@ -2,6 +2,31 @@ find_package(GTest REQUIRED)
 
 include(GoogleTest)
 
+# Detect a TheRock build: TheRock injects THEROCK_SUBPROJECT_TARGET into every sub-project
+# configure (via CMAKE_PROJECT_TOP_LEVEL_INCLUDES). Dapper must be completely inert there.
+if(DEFINED THEROCK_SUBPROJECT_TARGET)
+  set(MIOPEN_BUILD_IN_THEROCK ON)
+else()
+  set(MIOPEN_BUILD_IN_THEROCK OFF)
+endif()
+
+if(MIOPEN_BUILD_IN_THEROCK)
+  # dapper_init() normally force-sets MIOPEN_TEST_SINGLE_GTEST / MIOPEN_TEST_DISCRETE. With
+  # Dapper skipped, restore the pre-Dapper default so the single aggregated gtest is built
+  # when discrete binaries are not (old `if(MIOPEN_TEST_DISCRETE) ... else() ... endif()`).
+  if(NOT DEFINED MIOPEN_TEST_SINGLE_GTEST)
+    if(MIOPEN_TEST_DISCRETE)
+      set(MIOPEN_TEST_SINGLE_GTEST OFF)
+    else()
+      set(MIOPEN_TEST_SINGLE_GTEST ON)
+    endif()
+  endif()
+else()
+  find_package(Python 3 REQUIRED COMPONENTS Interpreter)
+  include(${CMAKE_CURRENT_LIST_DIR}/dapper.cmake)
+  dapper_init()
+endif()
+
 if(MIOPEN_USE_HIPBLASLT)
   find_package(hipblaslt REQUIRED PATHS /opt/rocm $ENV{HIP_PATH})
 endif()
@@ -18,15 +43,10 @@ set(SOURCES
     unit_conv_solver.cpp
     )
 
-
 # We use a special entry point for HIP backend testing so we can detect and flag any HIP errors that tests don't
 # clean up themselves
 if(MIOPEN_BACKEND_HIP)
   list(APPEND SOURCES main_hip.cpp)
-endif()
-
-if(MIOPEN_BACKEND_OPENCL)
-  list(APPEND SKIP_TESTS dumpTensorTest.cpp)
 endif()
 
 # Add files to SKIP_TESTS when ASAN packaging is enabled.  These are temporary until a fix is found for
@@ -96,8 +116,9 @@ endfunction()
 
 # Build a gtest executable and register its (optionally sharded) ctest entries.
 function(add_gtest TEST_NAME TEST_CPP)
+  list(JOIN TEST_CPP "  " TESTS_LIST)
   # cmake-lint: disable=R0912,R0915
-  message("Adding Test: " ${TEST_NAME} " : " ${TEST_CPP})
+  message("Adding Test: " ${TEST_NAME} " : " ${TESTS_LIST})
   add_executable(${TEST_NAME} ${TEST_CPP})
   if(WIN32)
     target_compile_definitions(${TEST_NAME} PRIVATE NOMINMAX)
@@ -130,8 +151,8 @@ function(add_gtest TEST_NAME TEST_CPP)
   if(NOT MIOPEN_EMBED_DB STREQUAL "")
       target_link_libraries(${TEST_NAME} $<BUILD_INTERFACE:miopen_data>)
   endif()
-
-  if(MIOPEN_TEST_DISCRETE)
+# Individual binary test are not added if single gtest is being created.
+  if(NOT MIOPEN_TEST_SINGLE_GTEST)
     string(CONCAT TEST_ENVIRONMENT_VARIABLES
     "ENVIRONMENT;MIOPEN_USER_DB_PATH=${CMAKE_CURRENT_BINARY_DIR};"
     "ENVIRONMENT;MIOPEN_INVOKED_FROM_CTEST=1;")
@@ -177,12 +198,14 @@ function(add_gtest TEST_NAME TEST_CPP)
     # Note: Due to the following cmake issue with gtest_discover_tests https://gitlab.kitware.com/cmake/cmake/-/issues/17812 you cannot pass PROPERTIES as a list.
     #       To work around this limitation, we are passing the environment variables in the format ENVIRONMENT;value1=${value1};ENVIRONMENT;value2=${value2}.
     # bn tests are run sequentially since running tests in parallel was causing large tensor case fail with insufficient memory error.
-    if("${TEST_NAME}" STREQUAL "test_bn_bwd_serial_run" OR "${TEST_NAME}" STREQUAL "test_bn_fwd_train_serial_run" OR "${TEST_NAME}" STREQUAL "test_bn_infer_serial_run")
+    if("${TEST_NAME}" STREQUAL "test_bn_bwd_serial_run" OR "${TEST_NAME}" STREQUAL "test_bn_fwd_train_serial_run" OR "${TEST_NAME}" STREQUAL "test_bn_infer_serial_run" OR "${TEST_NAME}" STREQUAL "test_hip_graph_exist")
       gtest_discover_tests(${TEST_NAME} DISCOVERY_TIMEOUT 300 DISCOVERY_MODE PRE_TEST WORKING_DIRECTORY ${KERNELS_BINARY_DIR} PROPERTIES RUN_SERIAL TRUE ${TEST_ENVIRONMENT_VARIABLES} TEST_FILTER "${MIOPEN_GTEST_FILTER}")
     else()
       gtest_discover_tests(${TEST_NAME} DISCOVERY_TIMEOUT 300 DISCOVERY_MODE PRE_TEST WORKING_DIRECTORY ${KERNELS_BINARY_DIR} PROPERTIES ${TEST_ENVIRONMENT_VARIABLES} TEST_FILTER "${MIOPEN_GTEST_FILTER}")
     endif()
-  else()
+  endif()
+
+  if(MIOPEN_TEST_SINGLE_GTEST AND TEST_NAME STREQUAL "miopen_gtest")
     set(MIOPEN_GTEST_PREFIX)
     set(MIOPEN_GTEST_FILTER_NEGATIVE)
 
@@ -221,25 +244,69 @@ function(add_gtest TEST_NAME TEST_CPP)
     # Excluded from MIOpen CI: the FP32 case OOMs when shards run concurrently on a single GPU.
     add_gtest_negative_filter("*UnitTestConvSolver*LargeStride*")
 
+    # HipGraphExist OOMs (LLVM JIT) when shards share one GPU; filtered here, re-added below as RUN_SERIAL.
+    add_gtest_negative_filter("*HipGraphExist*")
+
     # when building the single gtest, add them in a sharded manner
     # loop over GTEST_PARALLEL_LEVEL
     set(MIOPEN_GTEST_FILTER "${MIOPEN_GTEST_PREFIX}*${MIOPEN_GTEST_SUFFIX}*:${MIOPEN_GTEST_PREFIX}*NONE*${MIOPEN_GTEST_FILTER_NEGATIVE}")
+    message(STATUS "Base MIOPEN_GTEST_FILTER : ${MIOPEN_GTEST_FILTER}")
 
-    message(STATUS "MIOPEN_GTEST_FILTER ${MIOPEN_GTEST_FILTER}")
+    # when building the single gtest, add them in a sharded manner
+    # loop over GTEST_PARALLEL_LEVEL
+    if(NOT DEFINED GTEST_PARALLEL_LEVEL)
+        set(GTEST_PARALLEL_LEVEL 4)
+    endif()
+
+    set(MIOPEN_GTEST_SHARDS "")
+
+    if(NOT MIOPEN_BUILD_IN_THEROCK)
+      file(REMOVE "${SHARDS_FILE}")
+      file(TOUCH "${SHARDS_FILE}")
+      dapper_dev_filters()
+    endif()
 
     # cmake-lint: disable=E1120
     foreach(i RANGE 1 ${GTEST_PARALLEL_LEVEL})
       math(EXPR SHARD_INDEX "${i} - 1")
-      add_test(NAME ${TEST_NAME}_shard${i}
+      set(MIOPEN_GTEST_SHARD ${TEST_NAME}_shard${i})
+      set(MIOPEN_GTEST_SHARD_XML ${PROJECT_BINARY_DIR}/test_results/${MIOPEN_GTEST_SHARD}.xml)
+      set(MIOPEN_GTEST_SHARD_JSON ${MIOPEN_GTEST_SHARD}.json)
+      add_test(NAME ${MIOPEN_GTEST_SHARD}
         COMMAND ${TEST_NAME}
           --gtest_filter=${MIOPEN_GTEST_FILTER}
-          --gtest_output=xml:${PROJECT_BINARY_DIR}/test_results/${TEST_NAME}_shard${i}.xml
+          --gtest_output=xml:${MIOPEN_GTEST_SHARD_XML}
         WORKING_DIRECTORY "${KERNELS_BINARY_DIR}"
       )
-      set_tests_properties(${TEST_NAME}_shard${i} PROPERTIES
+      if(NOT MIOPEN_BUILD_IN_THEROCK)
+        file(APPEND ${SHARDS_FILE} "${MIOPEN_GTEST_SHARD_XML}\n")
+      endif()
+      list(APPEND MIOPEN_GTEST_SHARDS ${MIOPEN_GTEST_SHARD})
+
+      set_tests_properties(${MIOPEN_GTEST_SHARD} PROPERTIES
         ENVIRONMENT "MIOPEN_USER_DB_PATH=${CMAKE_CURRENT_BINARY_DIR};MIOPEN_INVOKED_FROM_CTEST=1;GTEST_TOTAL_SHARDS=${GTEST_PARALLEL_LEVEL};GTEST_SHARD_INDEX=${SHARD_INDEX}"
       )
     endforeach()
+
+    # HipGraphExist was filtered out of the shards above (LLVM JIT OOM under concurrent GPU memory
+    # pressure). Register it as a single RUN_SERIAL entry so ctest runs it alone, never alongside
+    # another test on the GPU. Skipped when there is no GPU, since these are *GPU* tests.
+    if(NOT MIOPEN_NO_GPU)
+      add_test(NAME ${TEST_NAME}_hip_graph_serial
+        COMMAND ${TEST_NAME}
+          --gtest_filter=*HipGraphExist*
+          --gtest_output=xml:${PROJECT_BINARY_DIR}/test_results/${TEST_NAME}_shard_hip_graph_serial.xml
+        WORKING_DIRECTORY "${KERNELS_BINARY_DIR}"
+      )
+      set_tests_properties(${TEST_NAME}_hip_graph_serial PROPERTIES
+        RUN_SERIAL TRUE
+        ENVIRONMENT "MIOPEN_USER_DB_PATH=${CMAKE_CURRENT_BINARY_DIR};MIOPEN_INVOKED_FROM_CTEST=1"
+      )
+    endif()
+
+    if(NOT MIOPEN_BUILD_IN_THEROCK)
+      dapper_add_sharded_test()
+    endif()
 
   endif()
   target_link_libraries(${TEST_NAME} BZip2::BZip2)
@@ -265,7 +332,7 @@ endforeach()
 # Common static library speeds up test assembly.
 # Otherwise, all files in ${SOURCES} are rebuilt for each test.
 add_library(miopen_gtest_common STATIC ${SOURCES})
-target_include_directories(miopen_gtest_common PRIVATE ../ ../../src/kernels)
+target_include_directories(miopen_gtest_common PRIVATE ../ ../.. ../../src/kernels)
 target_link_libraries(miopen_gtest_common PRIVATE GTest::gtest GTest::gmock MIOpen)
 if(WIN32)
   # Refer to https://en.cppreference.com/w/cpp/language/types for details.
@@ -274,11 +341,12 @@ endif()
 
 if( MIOPEN_TEST_DISCRETE )
   foreach(TEST ${TESTS})
+
     get_filename_component(BASE_NAME ${TEST} NAME_WE)
     add_gtest(test_${BASE_NAME} ${BASE_NAME}.cpp)
   endforeach()
-
-else()
+endif()
+if(MIOPEN_TEST_SINGLE_GTEST)
   foreach(TEST ${TESTS})
     get_filename_component(BASE_NAME ${TEST} NAME)
     list(APPEND TESTS_CPP ${BASE_NAME})
@@ -291,6 +359,7 @@ else()
         # The include directories also dont propagate correctly when using the non aliased targets.
         # Manually including them fixes this problem for inline builds.
         target_include_directories(miopen_gtest SYSTEM PRIVATE
+            ../
             ${MIOPEN_CK_INCLUDE_DIR}
             ${MIOPEN_CK_BUILD_INCLUDE_DIR}
             ${MIOPEN_CK_LIBRARY_INCLUDE_DIR})
@@ -337,14 +406,24 @@ file(WRITE "${INSTALL_TEST_FILE}"
 ]=]
 )
 
-#Enable the test categories in test_categories.yaml
-include(${ROCM_LIBRARIES_ROOT}/shared/ctest/TestCategories.cmake)
+# Enable the test categories in test_categories.yaml with 'standard' default
+# TODO: probably not needed (just create them all)
+if (NOT MIOPEN_TEST_CATEGORY)
+  set(MIOPEN_TEST_CATEGORY standard)
+endif()
+set(MIOPEN_TEST_CATEGORIES_CMAKE ${ROCM_LIBRARIES_ROOT}/shared/ctest/TestCategories.cmake)
+include(${MIOPEN_TEST_CATEGORIES_CMAKE})
+message(STATUS "YAML-based test categorization:")
+list(APPEND CMAKE_MESSAGE_INDENT "  ")
 if (EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/test_categories.yaml")
         message(STATUS "YAML-based test categorization")
+        message(STATUS "apply_test_category_labels(miopen_gtest ${CMAKE_CURRENT_SOURCE_DIR}/test_categories.yaml ${PROJECT_BINARY_DIR}/${DATABASE_INSTALL_DIR} ${INSTALL_TEST_FILE})")
         apply_test_category_labels(miopen_gtest "${CMAKE_CURRENT_SOURCE_DIR}/test_categories.yaml" "${KERNELS_BINARY_DIR}" "${INSTALL_TEST_FILE}")
 else()
-        message(STATUS "No test categorization (YAML missing)")
+        message(STATUS "No test categorization (${MIOPEN_TEST_CATEGORIES_CMAKE} missing)")
 endif()
+
+list(POP_BACK CMAKE_MESSAGE_INDENT)
 
 # Install CTestTestfile.cmake to bin/MIOpen/ subdirectory for TheRock distribution
 if( NOT ENABLE_ASAN_PACKAGING )

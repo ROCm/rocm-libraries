@@ -27,13 +27,18 @@ stream. ``TorchGpuTimer`` records events on the provided torch stream
 import time
 from abc import ABC, abstractmethod
 from types import TracebackType
-from typing import Any, List, Optional, Type
+from typing import Any, Callable, List, Optional, Tuple, Type
 
 from ..common import torch_support
 from ..config.benchmark_config import TimingBackendName
 
 
 _HIP_EVENT_API = ("HipEvent", "hip_get_device_count")
+_STAGED_HIP_API = (
+    "HipStallGate",
+    "hip_device_synchronize",
+    "hip_can_use_stream_wait_value",
+)
 
 # Lazily imported hipdnn_frontend module. Resolved on first HIP-timer use so
 # the tool stays importable on hosts without hipDNN (e.g. CUDA machines
@@ -84,6 +89,22 @@ def _is_hip_available() -> bool:
         _require_hip_runtime()
         return True
     except Exception:
+        return False
+
+
+def _is_staged_hip_available() -> bool:
+    """Return True when the stalled-queue staging bindings are usable.
+
+    Requires HIP timing, the HipStallGate/hip_device_synchronize bindings, and
+    a device that supports hipStreamWaitValue32. Swallows lookup/runtime errors
+    so non-HIP hosts degrade to the non-staged loop.
+    """
+    try:
+        module = _require_hip_runtime()
+        if any(not hasattr(module, name) for name in _STAGED_HIP_API):
+            return False
+        return bool(module.hip_can_use_stream_wait_value())
+    except (RuntimeError, AttributeError):
         return False
 
 
@@ -313,6 +334,103 @@ def create_gpu_timer(
 
 # Backward compatibility alias.
 GpuTimer = HipGpuTimer
+
+
+class StalledRegionTimer:
+    """Stage a measured region behind a stalled queue.
+
+    Per iteration the sequence is: arm stall, start event, CPU-start,
+    <enqueue work>, CPU-stop, stop event, release. ``measure`` returns
+    ``(host_submit_ms, kernel_ms)`` with no host work inside the GPU span,
+    so the start->stop event span is gap-free device time and the CPU
+    bracket is pure host submission cost.
+
+    Call ``barrier()`` once before the measured loop; per iteration the
+    prior iteration's ``stop.synchronize()`` already leaves the device idle,
+    so no per-iteration device sync is needed.
+    """
+
+    def __init__(self, stream: int = 0) -> None:
+        """Initialize the staged timer's gate and HIP events.
+
+        Args:
+            stream: HIP stream pointer encoded as an integer. ``0`` is the
+                default stream.
+
+        Raises:
+            RuntimeError: If HIP bindings, a HIP device, or stream-wait-value
+                support are unavailable.
+        """
+        self._hipdnn = _require_hip_runtime()
+        self._stream = int(stream)
+        self._gate = self._hipdnn.HipStallGate()
+        self._start = self._hipdnn.HipEvent()
+        self._stop = self._hipdnn.HipEvent()
+
+    def barrier(self) -> None:
+        """Drain the device once before the first measured iteration.
+
+        Warmup already syncs the stream; this guards the ``warmup_iters == 0``
+        path and any stray prior enqueue so the first ``arm()`` stalls a clean
+        stream.
+        """
+        self._hipdnn.hip_device_synchronize()
+
+    def measure(self, enqueue: Callable[[], None]) -> Tuple[float, float]:
+        """Measure one staged iteration.
+
+        Args:
+            enqueue: Work-submission thunk; for PyTorch it must run inside the
+                caller's ``torch.cuda.stream(...)`` context so torch enqueues
+                land on the same HIP stream the gate/events use.
+
+        Returns:
+            ``(host_submit_ms, kernel_ms)``: host submission cost and the
+            gap-free GPU event span.
+        """
+        self._gate.arm(self._stream)
+        try:
+            self._start.record(self._stream)
+            t0 = time.perf_counter()
+            enqueue()
+            t1 = time.perf_counter()
+            self._stop.record(self._stream)
+        except BaseException:
+            # Anything after arm() raised (e.g. an ExecutionError from the
+            # work submission). Release the gate so the armed stream-wait is
+            # satisfied, then drain the device so no pending wait still
+            # references the signal memory when the gate is torn down, then
+            # propagate. The stop event was not recorded, so do not
+            # synchronize it.
+            self._gate.release()
+            try:
+                self._hipdnn.hip_device_synchronize()
+            except Exception:
+                pass
+            raise
+        self._gate.release()
+        self._stop.synchronize()
+        return (t1 - t0) * 1000.0, float(self._start.elapsed_time(self._stop))
+
+
+def run_staged_iterations(
+    timer: StalledRegionTimer,
+    iterations: int,
+    enqueue: Callable[[], None],
+) -> Tuple[List[float], List[float]]:
+    """Drain the device once, then run ``iterations`` staged measurements.
+
+    Returns parallel ``(host_timings, kernel_timings)`` lists in milliseconds:
+    per-iteration host submission cost and gap-free GPU event spans.
+    """
+    timer.barrier()
+    host_timings: List[float] = []
+    kernel_timings: List[float] = []
+    for _ in range(iterations):
+        host_ms, kernel_ms = timer.measure(enqueue)
+        host_timings.append(host_ms)
+        kernel_timings.append(kernel_ms)
+    return host_timings, kernel_timings
 
 
 class Timer:

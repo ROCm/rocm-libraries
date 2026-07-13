@@ -34,9 +34,7 @@
 #include <Tensile/Tensile.hpp>
 #include <Tensile/Task.hpp>
 
-#include <Tensile/Macros.hpp>
-
-TENSILE_HIDDEN_BEGIN
+#include <tensilelitehost/export.h>
 
 namespace TensileLite
 {
@@ -127,7 +125,7 @@ namespace TensileLite
  *
  */
     template <typename MyProblem, typename MySolution = typename MyProblem::Solution>
-    struct TENSILE_API SolutionLibrary
+    struct TENSILELITEHOST_EXPORT SolutionLibrary
     {
         virtual ~SolutionLibrary() = default;
 
@@ -223,4 +221,3 @@ namespace TensileLite
 
 } // namespace TensileLite
 
-TENSILE_HIDDEN_END
