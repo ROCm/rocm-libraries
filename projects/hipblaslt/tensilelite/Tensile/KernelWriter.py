@@ -9400,6 +9400,12 @@ class KernelWriter(metaclass=abc.ABCMeta):
       if kernel.get("PrefetchAcrossPersistent"):
         requiredUnalignedSgprVar.append("SkPrefetchPrimed")
         self.states.numSgprStreamK += 1
+        # SK4 PAP pops the next tile's work item once, in the prior persistent
+        # iteration's NLL window, and stashes the global work-item index here so
+        # the persistent back-edge's graWorkGroup reuses it instead of popping
+        # again (a second atomic pop would double-consume a queue slot).
+        requiredUnalignedSgprVar.append("SkNextWorkItem")
+        self.states.numSgprStreamK += 1
       if kernel["StreamKAtomic"] == 0:
         requiredAligned4SgprVar.append("SrdWS")
     elif kernel["StreamK"] == 5:
@@ -10375,7 +10381,7 @@ class KernelWriter(metaclass=abc.ABCMeta):
   ##############################################################################
   def isPrefetchAcrossPersistentEnabled(self, kernel):
     """Return True when PAP is enabled for this kernel."""
-    return (kernel["StreamK"] == 3
+    return (kernel["StreamK"] in (3, 4)
             and kernel.get("PrefetchAcrossPersistent", 0)
             and not kernel.get("SuppressNoLoadLoop", False)
             and kernel["PrefetchGlobalRead"] >= 1

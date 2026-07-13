@@ -2940,12 +2940,19 @@ class StreamKDynamic(StreamK):
 
         return module
 
-    def graWorkGroup(self, writer, kernel, tPA, tPB):
-        module = Module("StreamK Dynamic graWorkGroup")
+    def _fetchWorkItemAndBroadcast(self, writer, kernel):
+        """Pop the next work item from this WG's per-XCD queue and broadcast it.
 
-        skFullTile = Label("SK_FullTile", "")
-        skPartialTile = Label("SK_PartialTile", "")
-        skDone = Label("SK_Done", "")
+        Wave 0 performs the stateful atomic-increment pop from the dynamic
+        work-queue and shares the resulting *global* work-item index with all
+        waves via LDS. Returns ``(module, sWorkItemIdx)``; the caller owns
+        ``sWorkItemIdx`` and must check it back in.
+
+        This is the exact fetch sequence that used to live inline at the top of
+        ``graWorkGroup``; it is factored out unchanged so PAP can reuse it (pop
+        once per tile) while keeping non-PAP SK4 codegen byte-identical.
+        """
+        module = Module("StreamK Dynamic fetchWorkItemAndBroadcast")
 
         # Local address for sharing work id
         vLocalAddress = writer.vgprPool.checkOut(1, "LocalAddress")
@@ -3038,6 +3045,38 @@ class StreamKDynamic(StreamK):
         writer.vgprPool.checkIn(vLocalAddress)
         writer.vgprPool.checkIn(vWaveWorkItemIdx)
 
+        return module, sWorkItemIdx
+
+    def graWorkGroup(self, writer, kernel, tPA, tPB):
+        module = Module("StreamK Dynamic graWorkGroup")
+
+        skFullTile = Label("SK_FullTile", "")
+        skPartialTile = Label("SK_PartialTile", "")
+        skDone = Label("SK_Done", "")
+
+        # PrefetchAcrossPersistent (PAP): the dynamic work-queue pop is stateful
+        # (an atomic increment that consumes a queue slot / termination token),
+        # so it must happen exactly once per tile. When PAP is enabled, the
+        # prior persistent iteration's NLL already popped this iteration's work
+        # item (SkPrefetchPrimed != 0) and stashed it in SkNextWorkItem; reuse
+        # it here instead of popping again (which would double-consume). On the
+        # first iteration (and whenever not primed) we pop normally.
+        papEnabled = writer.isPrefetchAcrossPersistentEnabled(kernel)
+        if papEnabled:
+            skPapFetchDone = Label(writer.labels.getNameInc("SK_PAP_FetchDone"), "")
+            skPapUsePrimed = Label(writer.labels.getNameInc("SK_PAP_UsePrimedWorkItem"), "")
+            module.add(SCmpEQU32(src0=sgpr("SkPrefetchPrimed"), src1=0, comment="PAP: was next work item already popped?"))
+            module.add(SCBranchSCC0(labelName=skPapUsePrimed.getLabelName(), comment="primed: reuse stashed work item"))
+            moduleFetch, sWorkItemIdx = self._fetchWorkItemAndBroadcast(writer, kernel)
+            module.add(moduleFetch)
+            module.add(SBranch(labelName=skPapFetchDone.getLabelName(), comment="popped this iteration's work item"))
+            module.add(skPapUsePrimed)
+            module.add(SMovB32(dst=sgpr(sWorkItemIdx), src=sgpr("SkNextWorkItem"), comment="PAP: reuse work item popped by prior NLL"))
+            module.add(skPapFetchDone)
+        else:
+            moduleFetch, sWorkItemIdx = self._fetchWorkItemAndBroadcast(writer, kernel)
+            module.add(moduleFetch)
+
         # Check if work item index is valid
         module.add(SCmpLtU32(src0=sgpr(sWorkItemIdx), src1=sgpr("TotalItems"), comment="Check if work item index is valid"))
         # If work item index is not valid, skip to end of kernel
@@ -3122,6 +3161,115 @@ class StreamKDynamic(StreamK):
 
         # writer.sgprPool.checkIn(sTmp)
 
+        return module
+
+    def _computeNextTileIdentity(self, writer, kernel, sWorkItemIdx, tPA, tPB):
+        """Derive tile identity for a *given* (already-popped) work-item index.
+
+        Mirrors the full/partial iteration-range split and the tile-index ->
+        WorkGroup0/1/2 mapping performed inside ``graWorkGroup``, but sourced
+        from an explicit ``sWorkItemIdx`` and without the validity branch (the
+        caller guarantees a valid index) or the alpha/start-tile short-circuit
+        (PAP only needs next-tile addresses, not the main-loop skip logic).
+
+        Populates StreamKTileIdx / StreamKPartialIdx / StreamKLocalStart /
+        StreamKLocalEnd and WorkGroup0/1/2, matching what the persistent
+        back-edge's ``graWorkGroup`` will recompute for the same work item, so
+        the PAP-prefetched loads line up with the next iteration's tile.
+        """
+        module = Module("StreamK Dynamic computeNextTileIdentity")
+
+        skFullTile = Label(writer.labels.getNameInc("SK_PAP_FullTile"), "")
+        skPartialTile = Label(writer.labels.getNameInc("SK_PAP_PartialTile"), "")
+        skDone = Label(writer.labels.getNameInc("SK_PAP_Done"), "")
+
+        # Full-tile work-item count spans all batches (as TotalItems does).
+        sFullTile = writer.sgprPool.checkOut(1, "papFullTile")
+        module.add(self.computeTotalTiles(writer, kernel, sFullTile))
+        module.add(SSubU32(dst=sgpr(sFullTile), src0=sgpr(sFullTile), src1=sgpr("skTiles"), comment="Get number of full-tile work items (across all batches)"))
+        module.add(SCmpLtU32(src0=sgpr(sWorkItemIdx), src1=sgpr(sFullTile), comment="Check if work item is a full tile"))
+        module.add(SCBranchSCC0(labelName=skPartialTile.getLabelName(), comment="Work item is a partial tile"))
+
+        # Full tile
+        module.add(skFullTile)
+        module.add(SMovB32(dst=sgpr("StreamKTileIdx"), src=sgpr(sWorkItemIdx), comment="StreamKTileIdx = nextWorkItemIdx"))
+        module.add(SMovB32(dst=sgpr("StreamKLocalStart"), src=0, comment="StreamKLocalStart = 0"))
+        module.add(SMovB32(dst=sgpr("StreamKLocalEnd"), src=sgpr("ItersPerTile"), comment="StreamKLocalEnd = ItersPerTile"))
+        module.add(SBranch(labelName=skDone.getLabelName(), comment="Done"))
+
+        # Partial tile
+        module.add(skPartialTile)
+        module.add(SSubU32(dst=sgpr("StreamKTileIdx"), src0=sgpr(sWorkItemIdx), src1=sgpr(sFullTile), comment="Tile index of partial work item"))
+        tmpVgpr = writer.vgprPool.checkOut(2, "div")
+        tmpVgprRes = ContinuousRegister(idx=tmpVgpr, size=2)
+        module.add(scalarUInt32DivideAndRemainder(qReg="StreamKTileIdx", dReg="StreamKTileIdx", divReg="SKSplit", rReg="StreamKPartialIdx", tmpVgprRes=tmpVgprRes, wavewidth=kernel["WavefrontSize"], doRemainder=True))
+        tmpVgprRes = None
+        writer.vgprPool.checkIn(tmpVgpr)
+        module.add(SAddU32(dst=sgpr("StreamKTileIdx"), src0=sgpr("StreamKTileIdx"), src1=sgpr(sFullTile), comment="Offset to first partial tile"))
+        module.add(SMulI32(dst=sgpr("StreamKLocalStart"), src0=sgpr("StreamKPartialIdx"), src1=sgpr("SKItersPerWI"), comment="StreamKLocalStart = PartialIdx * SKItersPerWI"))
+        module.add(SAddU32(dst=sgpr("StreamKLocalEnd"), src0=sgpr("StreamKLocalStart"), src1=sgpr("SKItersPerWI"), comment="StreamKLocalEnd = StreamKLocalStart + SKItersPerWI"))
+        module.add(SMinU32(dst=sgpr("StreamKLocalEnd"), src0=sgpr("StreamKLocalEnd"), src1=sgpr("ItersPerTile"), comment="Cap ending iter at ItersPerTile"))
+
+        module.add(skDone)
+        writer.sgprPool.checkIn(sFullTile)
+
+        # Map StreamK tile index to wg0/1/2
+        module.addComment0("PAP: map next StreamK tile index to wg0/1/2")
+        tmpVgpr = writer.vgprPool.checkOut(2, "div")
+        tmpVgprRes = ContinuousRegister(idx=tmpVgpr, size=2)
+        sRemainder = writer.sgprPool.checkOut(1, "StreamKTileIdxRemainder")
+        sTilesPerBatch = writer.sgprPool.checkOut(1, "TilesPerBatch")
+        module.add(SMulI32(dst=sgpr(sTilesPerBatch), src0=sgpr("NumWorkGroups0"), src1=sgpr("NumWorkGroups1"), comment="tiles per batch = nWG0 * nWG1"))
+        module.add(scalarUInt32DivideAndRemainder(qReg="WorkGroup2", dReg="StreamKTileIdx", divReg=sTilesPerBatch, rReg=sRemainder, tmpVgprRes=tmpVgprRes, wavewidth=kernel["WavefrontSize"], doRemainder=True, comment="TileID // nWG0*nWG1"))
+        module.add(scalarUInt32DivideAndRemainder(qReg="WorkGroup1", dReg=sRemainder, divReg="NumWorkGroups0", rReg="WorkGroup0", tmpVgprRes=tmpVgprRes, wavewidth=kernel["WavefrontSize"], doRemainder=True, comment="TileID // nWG0"))
+        tmpVgprRes = None
+        writer.vgprPool.checkIn(tmpVgpr)
+        writer.sgprPool.checkIn(sRemainder)
+        writer.sgprPool.checkIn(sTilesPerBatch)
+
+        return module
+
+    def papHasNextPersistentIteration(self, writer, kernel, skipLabel):
+        """SK4 PAP back-edge predicate: pop the next work item once, up front.
+
+        Unlike static StreamK (which can predict the next iteration from
+        StreamKIter/StreamKIterEnd), SK4's next tile comes from a stateful
+        work-queue pop and cannot be predicted without consuming a slot. We
+        therefore pop it here (inside the NLL PAP window), stash it in
+        SkNextWorkItem for the persistent back-edge's graWorkGroup to reuse,
+        and mark SkPrefetchPrimed so that back-edge never pops again (even on
+        the draining iteration -- avoiding a double-consume of a termination
+        token). When the pop drains the queue (index >= TotalItems) we skip the
+        rest of PAP; the back-edge graWorkGroup then exits via KernelEnd.
+        """
+        module = Module("StreamK Dynamic papHasNextPersistentIteration")
+        moduleFetch, sWorkItemIdx = self._fetchWorkItemAndBroadcast(writer, kernel)
+        module.add(moduleFetch)
+        module.add(SMovB32(dst=sgpr("SkNextWorkItem"), src=sgpr(sWorkItemIdx), comment="PAP: stash popped work item for persistent back-edge"))
+        # Mark primed BEFORE the drain check so the back-edge reuses the stashed
+        # work item (never re-pops) even when this pop drained the queue.
+        module.add(SMovB32(dst=sgpr("SkPrefetchPrimed"), src=1, comment="PAP: next work item already popped"))
+        writer.sgprPool.checkIn(sWorkItemIdx)
+        module.add(SCmpGeU32(src0=sgpr("SkNextWorkItem"), src1=sgpr("TotalItems"), comment="PAP: queue drained (no next tile)?"))
+        module.add(SCBranchSCC1(labelName=skipLabel.getLabelName(), comment="drained: skip next-tile prefetch"))
+        return module
+
+    def prefetchAcrossPersistentSetupNextTile(self, writer, kernel, tPA, tPB, skipLroReset=False):
+        """SK4 next-tile setup for PAP.
+
+        The work item was already popped and validated by
+        ``papHasNextPersistentIteration`` (stashed in SkNextWorkItem); here we
+        only derive its tile identity + WorkGroup* so the next-tile first-PGR
+        loads can be issued. No queue interaction and no LDS broadcast happen
+        here. ``skipLroReset`` is accepted for signature parity with the base
+        implementation; SK4 tile identity is index-derived and does not touch
+        local-read offsets.
+        """
+        module = Module("StreamK Dynamic prefetchAcrossPersistentSetupNextTile")
+        sWorkItemIdx = writer.sgprPool.checkOut(1, "papNextWorkItemIdx")
+        module.add(SMovB32(dst=sgpr(sWorkItemIdx), src=sgpr("SkNextWorkItem"), comment="PAP: next tile work item (already popped)"))
+        module.add(self._computeNextTileIdentity(writer, kernel, sWorkItemIdx, tPA, tPB))
+        writer.sgprPool.checkIn(sWorkItemIdx)
         return module
 
     def computeLoadSrd(self, writer, kernel, tc, sTmp):

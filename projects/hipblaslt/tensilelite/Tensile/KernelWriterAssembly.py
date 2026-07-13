@@ -17929,6 +17929,14 @@ class KernelWriterAssembly(KernelWriter):
       names.append("StreamKLocalEnd")
     if len(kernel["SpaceFillingAlgo"]):
       names.append("StreamKTileID")
+    # SK4 (StreamKDynamic) derives the next-tile identity from a work-queue pop
+    # and, unlike static StreamK, overwrites StreamKTileIdx/StreamKPartialIdx
+    # while doing so. The current tile's fixup/store phase reads those (see
+    # StreamK.py skFixupStep / globalWriteBatch), so they must be checkpointed
+    # and restored around the borrowed next-tile identity.
+    if kernel["StreamK"] == 4:
+      names.append("StreamKTileIdx")
+      names.append("StreamKPartialIdx")
     return names
 
   @contextmanager
