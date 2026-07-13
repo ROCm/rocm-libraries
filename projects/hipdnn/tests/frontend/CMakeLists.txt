@@ -47,6 +47,9 @@ add_executable(
     IntegrationLayerNormDescriptorLifting.cpp
     IntegrationLayerNormDescriptorLowering.cpp
     IntegrationLayernormForward.cpp
+    IntegrationLayernormBackward.cpp
+    IntegrationLayernormBackwardDescriptorLowering.cpp
+    IntegrationLayernormBackwardDescriptorLifting.cpp
     IntegrationMalformedVersionPlugin.cpp
     IntegrationMatmul.cpp
     IntegrationMatmulDescriptorLifting.cpp

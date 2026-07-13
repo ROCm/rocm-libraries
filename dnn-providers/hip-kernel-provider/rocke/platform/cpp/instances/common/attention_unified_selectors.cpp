@@ -19,6 +19,7 @@
 #include <stdlib.h>
 #include <string.h>
 
+#include "rocke/arch_target.h" /* rocke_arch_target_from_gfx, lds_capacity_bytes */
 #include "rocke/helper_helper_rocke.instances.common.attention_unified_selectors.h"
 #include "rocke/helper_rocke.helpers.transforms.h"
 #include "rocke/ir.h"
@@ -751,6 +752,156 @@ bool rocke_unified_attn_enable_v_double_buffer(const rocke_unified_attn_problem_
 bool rocke_unified_attn_enable_early_v_schedule(const rocke_unified_attn_problem_t* p)
 {
     return enable_early_v_schedule(p);
+}
+
+/* --------------------------------------------------- LDS-budget resolver */
+/* Python: _out_stripe_cols / _tiled_2d_lds_bytes / _kv_lds_elem_bytes /
+ * _lds_bytes_regpv / _ldsfix_single_k / _ldsfix_tile64 / _resolve_lds_budget
+ * (rocke/instances/common/attention_unified.py). Mirrors the selection-layer
+ * LDS-budget shrink so a gfx950 register-PV D256 spec that would overflow the
+ * 160 KB cap is deterministically reduced (single-buffer K, then T=64) instead
+ * of failing comgr CODEGEN. Byte-faithful with the Python arithmetic; the
+ * provider spec-assembly path calls the resolver right after it builds a spec
+ * from the selectors above. */
+
+/* Acc is always 16-bit: the fp8 lever changes only the K/V *cache* width, never
+ * the output accumulator (mirrors Python _ACC_LDS_ELEM_BYTES). */
+#define ROCKE_ATTN_ACC_LDS_ELEM_BYTES 2
+
+static int attn_out_stripe_cols(int head_size)
+{
+    return (head_size <= 64) ? 32 : head_size;
+}
+
+int rocke_unified_attn_tiled_2d_lds_bytes(int tile_size,
+                                          int head_size,
+                                          int block_m,
+                                          int kv_elem_bytes,
+                                          int k_slots,
+                                          int v_slots,
+                                          bool include_q_lds,
+                                          bool include_p_lds,
+                                          int v_pad)
+{
+    int k_bytes = k_slots * tile_size * head_size * kv_elem_bytes;
+    int v_bytes = v_slots * (tile_size + v_pad) * head_size * kv_elem_bytes;
+    int p_bytes = include_p_lds ? block_m * (tile_size + 8) * kv_elem_bytes : 0;
+    /* Q aliases the K slab when it fits under the double-buffer window. */
+    int q_bytes
+        = (include_q_lds && block_m > 2 * tile_size) ? block_m * head_size * kv_elem_bytes : 0;
+    int acc_bytes = block_m * attn_out_stripe_cols(head_size) * ROCKE_ATTN_ACC_LDS_ELEM_BYTES;
+    return k_bytes + v_bytes + p_bytes + q_bytes + acc_bytes;
+}
+
+/* Byte width of one K/V element as stored in LDS: 1 for the fp8 cache, else 2 (bf16/fp16). */
+static int attn_kv_lds_elem_bytes(const rocke_attention_tiled_2d_spec_t* s)
+{
+    const char* kv = s->kv_storage_dtype;
+    if(kv != NULL
+       && (strcmp(kv, "fp8e4m3") == 0 || strcmp(kv, "bf8e5m2") == 0 || strcmp(kv, "fp8") == 0
+           || strcmp(kv, "bf8") == 0 || strcmp(kv, "e4m3") == 0 || strcmp(kv, "e5m2") == 0))
+        return 1;
+    return 2; /* bf16 / fp16 K/V in LDS */
+}
+
+static int attn_spec_tile_size_eff(const rocke_attention_tiled_2d_spec_t* s)
+{
+    return s->has_tile_size ? s->tile_size : s->block_size;
+}
+
+/* Python: _lds_bytes_regpv -- exact register-PV footprint (K/V tiles + Acc;
+ * Q/P^T/O register-resident). */
+static int attn_lds_bytes_regpv(const rocke_attention_tiled_2d_spec_t* s)
+{
+    int block_m = s->num_warps * s->block_m_per_warp;
+    return rocke_unified_attn_tiled_2d_lds_bytes(attn_spec_tile_size_eff(s),
+                                                 s->head_size,
+                                                 block_m,
+                                                 attn_kv_lds_elem_bytes(s),
+                                                 s->use_k_single_buffer ? 1 : 2,
+                                                 s->use_v_double_buffer ? 2 : 1,
+                                                 /*include_q_lds=*/false,
+                                                 /*include_p_lds=*/false,
+                                                 /*v_pad=*/0);
+}
+
+bool rocke_unified_attn_resolve_lds_budget(rocke_attention_tiled_2d_spec_t* spec,
+                                           char* reason,
+                                           size_t reason_cap)
+{
+    const char* arch = rocke_unified_attn_resolve_arch();
+    /* Arch-agnostic: key off the register-PV path + the target arch's LDS cap
+     * read dynamically from the arch-target API (no hard-coded arch or capacity).
+     * Validated on gfx950 (CDNA4); a strict no-op on other arches because their
+     * over-budget 2D specs are filtered upstream by the (more conservative)
+     * supports_tiled_2d gate, so any spec reaching the resolver already fits. */
+    if(!spec->use_register_pv)
+        return true;
+    const rocke_arch_target_t* t = rocke_arch_target_from_gfx(arch);
+    if(t == NULL)
+        return true; /* arch has no declared LDS cap -> nothing to resolve against */
+    int cap = t->lds_capacity_bytes;
+    if(attn_lds_bytes_regpv(spec) <= cap)
+        return true;
+
+    /* Cheapest-first ladder: single-buffer K, then T=64, then both. Each lever
+     * mirrors the Python precondition guards (single-K needs the lone K slot to
+     * hold Q: block_m <= tile_size; T=64 only shrinks a larger tile). The
+     * dataclass __post_init__ validate() is the builder's backstop at build
+     * time; these preconditions are what actually gate the levers here. */
+    int block_m = spec->num_warps * spec->block_m_per_warp;
+    int t_eff = attn_spec_tile_size_eff(spec);
+    bool single_k_ok = !spec->use_k_single_buffer && block_m <= t_eff;
+
+    /* Lever 1: single-buffer K. */
+    if(single_k_ok)
+    {
+        rocke_attention_tiled_2d_spec_t c = *spec;
+        c.use_k_single_buffer = true;
+        if(attn_lds_bytes_regpv(&c) <= cap)
+        {
+            *spec = c;
+            return true;
+        }
+    }
+    /* Lever 2: shrink the KV tile to T=64. */
+    if(t_eff > 64)
+    {
+        rocke_attention_tiled_2d_spec_t c = *spec;
+        c.tile_size = 64;
+        c.has_tile_size = true;
+        if(attn_lds_bytes_regpv(&c) <= cap)
+        {
+            *spec = c;
+            return true;
+        }
+    }
+    /* Lever 3: single-K + T=64 (only when single-K's precondition held). */
+    if(single_k_ok && t_eff > 64)
+    {
+        rocke_attention_tiled_2d_spec_t c = *spec;
+        c.use_k_single_buffer = true;
+        c.tile_size = 64;
+        c.has_tile_size = true;
+        if(attn_lds_bytes_regpv(&c) <= cap)
+        {
+            *spec = c;
+            return true;
+        }
+    }
+
+    if(reason != NULL && reason_cap > 0)
+        snprintf(reason,
+                 reason_cap,
+                 "LDS budget: 2D register-PV D%d block_size=%d T=%d needs %d B > cap %d B "
+                 "on %s; no validated reduction (single-K, T=64) fits",
+                 spec->head_size,
+                 spec->block_size,
+                 t_eff,
+                 attn_lds_bytes_regpv(spec),
+                 cap,
+                 arch);
+    return false;
 }
 
 /* ----------------------------------------------------------- magic div */

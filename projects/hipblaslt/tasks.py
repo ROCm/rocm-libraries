@@ -101,7 +101,7 @@ def _setup_msvc_env():
         return
     result = subprocess.run(
         f'"{vcvarsall}" amd64 && set',
-        capture_output=True, text=True, encoding="mbcs", shell=True,
+        capture_output=True, text=True, encoding="mbcs", errors="replace", shell=True,
     )
     original_lib = os.environ.get("LIB", "")
     for line in result.stdout.splitlines():
