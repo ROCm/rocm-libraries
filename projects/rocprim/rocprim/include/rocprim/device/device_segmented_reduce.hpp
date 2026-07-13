@@ -150,7 +150,7 @@ struct transform_idx_to_offset_op
     unsigned int segment_length;
 
     ROCPRIM_DEVICE ROCPRIM_INLINE
-    OffsetT      operator()(size_t i) const
+    OffsetT      operator()(OffsetT i) const
     {
         if(i < segments)
         {
@@ -197,11 +197,11 @@ private:
     {
         ArgsPre&       args_pre;
         ArgsPost&      args_post;
-        size_t         segments;
+        SizeT          segments;
         OffsetIterator begin_offsets;
         OffsetIterator end_offsets;
 
-        template<std::size_t... Ip, std::size_t... Iq>
+        template<SizeT... Ip, SizeT... Iq>
         hipError_t operator()(std::index_sequence<Ip...>, std::index_sequence<Iq...>) const
         {
             return segmented_reduce_impl_t<OffsetIterator>{}(std::get<Ip>(args_pre)...,
@@ -214,7 +214,7 @@ private:
 
 public:
     template<class ArgsPre, class ArgsPost>
-    static inline hipError_t invoke(const size_t&       segments,
+    static inline hipError_t invoke(const SizeT&        segments,
                                     const unsigned int& segment_length,
                                     ArgsPre&&           args_pre,
                                     ArgsPost&&          args_post)
@@ -224,7 +224,7 @@ public:
         auto run_segmented_reduce = [&](auto transform_op) -> hipError_t
         {
             auto offsets
-                = ::rocprim::make_transform_iterator(::rocprim::make_counting_iterator<size_t>(0),
+                = ::rocprim::make_transform_iterator(::rocprim::make_counting_iterator<SizeT>(0),
                                                      transform_op);
             using OffsetIterator            = decltype(offsets);
             constexpr unsigned int PreSize  = std::tuple_size<std::decay_t<ArgsPre>>::value;
