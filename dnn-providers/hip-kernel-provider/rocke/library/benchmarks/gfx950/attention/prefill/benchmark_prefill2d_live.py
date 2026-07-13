@@ -236,7 +236,10 @@ class CkVariantBench:
             build_unified_attention_2d_tiled,
             supports_tiled_2d,
         )
-        from kernels.common.attention_unified import _attn_signature
+        from kernels.common.attention_unified import (
+            _attn_signature,
+            _select_2d_compile_backend,
+        )
         from rocke.runtime import KernelLauncher
 
         dtype = "bf16" if shape.q_dtype == "torch.bfloat16" else "fp16"
@@ -297,7 +300,13 @@ class CkVariantBench:
         key = (shape.signature, variant, spec.kernel_name(), self.compile_backend)
         if key not in self._launchers:
             kernel = build_unified_attention_2d_tiled(spec)
-            artifact = compile_kernel(kernel, capture_ir_text=False)
+            backend = self.compile_backend or _select_2d_compile_backend(problem)
+            if backend == "hipcc":
+                from rocke.helpers.compile import compile_kernel_via_hipcc
+
+                artifact = compile_kernel_via_hipcc(kernel)
+            else:
+                artifact = compile_kernel(kernel, capture_ir_text=False)
             self._launchers[key] = (
                 KernelLauncher(
                     hsaco=artifact.hsaco,
@@ -437,10 +446,11 @@ def main() -> int:
         "--compile-backend",
         choices=("auto", "llvm", "hipcc"),
         default="auto",
-        help="Compile backend for the prod lane. 'auto' (default) matches "
-        "production dispatch (_select_2d_compile_backend); 'llvm'/'hipcc' force "
-        "a backend for A/B. Forcing 'llvm' mismeasures cohorts whose production "
-        "backend is hipcc (e.g. D256 large prefill) by ~3x.",
+        help="Compile backend for all CK DSL lanes (prod + build() variants). "
+        "'auto' (default) matches production dispatch "
+        "(_select_2d_compile_backend); 'llvm'/'hipcc' force a backend for A/B. "
+        "Forcing 'llvm' mismeasures cohorts whose production backend is hipcc "
+        "(e.g. D256 large prefill) by ~3x.",
     )
     ap.add_argument("--tol", type=float, default=5e-2)
     ap.add_argument("--shape-utils-path", type=Path, default=DEFAULT_SHAPE_UTILS)

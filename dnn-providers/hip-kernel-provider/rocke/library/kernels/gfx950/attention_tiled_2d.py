@@ -350,13 +350,13 @@ class UnifiedAttention2DTiledSpec:
     # ``SQ_LDS_BANK_CONFLICT`` drops for the swizzled access pattern. Off by
     # default; never enable in production.
     use_kq_xor_swizzle: bool = False
-    # EXPERIMENTAL / measurement-only: pad the K_lds row stride by 8 halves
-    # (16 B) to break the row-aliased bank conflict on the QK K read. The read
-    # picks up the padded stride via smem_load_vN; the raw-address async-DMA K
-    # write is NOT pad-aware, so numeric results are INTENTIONALLY WRONG when on
-    # -- purpose is to measure the SQ_LDS_BANK_CONFLICT delta AND confirm the
-    # padded LDS still fits the 2-WG/CU budget (<= 80 KB/WG). The DMA-safe
-    # production form is a slab-granularity pad (pad every 2-row DMA slab).
+    # Slab-granularity K_lds pad: pad the K_lds allocation once per 2-row
+    # async-DMA slab (pad width ``kq_lds_pad_halves``) to break the row-aliased
+    # bank conflict on the QK K read (drops ``SQ_LDS_BANK_CONFLICT``). DMA-safe
+    # and numerics-preserving -- the async-DMA K write and the ``smem_load_vN``
+    # read use the same padded addressing. The padded LDS stays within the
+    # 2-WG/CU budget (<= 80 KB/WG). Enabled by the D256 gfx950 fast route
+    # (``kq_lds_pad_halves=16``) for a ~25% Sq8192 latency win.
     use_kq_lds_pad: bool = False
     # Pad width in halves for the slab-granularity K_lds pad (must be a multiple
     # of 8 to keep ds_read/ds_write b128 16-byte alignment). Only used when
