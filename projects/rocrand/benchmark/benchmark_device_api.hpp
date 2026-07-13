@@ -133,8 +133,8 @@ struct config
             // If a block size is requested, use that.
             int  occupancy = 0;
             auto error     = gpu_occupancy_max_active_blocks_per_mp(&occupancy,
-                                                                    (const void*)kernel,
-                                                                    req_block_size);
+                                                                (const void*)kernel,
+                                                                req_block_size);
 
             result.block_size = req_block_size;
             result.occupancy  = (error == 0) ? occupancy : 1;
@@ -153,8 +153,8 @@ struct config
 
                 int  occupancy = 0;
                 auto error     = gpu_occupancy_max_active_blocks_per_mp(&occupancy,
-                                                                        (const void*)kernel,
-                                                                        block_size);
+                                                                    (const void*)kernel,
+                                                                    block_size);
                 if(error != 0)
                 {
                     continue;
