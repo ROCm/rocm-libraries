@@ -212,6 +212,12 @@ foreach(PATH fast slow)
     endforeach()
 endforeach()
 
+add_test(
+    NAME "CPUGemm.validation_InjectedFailure_Rejected"
+    COMMAND cpu-gemm-driver -M 8 -N 8 -K 8 --type f32 --validate --tryFastPath --injectValidationFailure
+)
+set_tests_properties("CPUGemm.validation_InjectedFailure_Rejected" PROPERTIES WILL_FAIL TRUE)
+
 #################################################
 #        FP8 tests (fast & slow)                #
 #################################################

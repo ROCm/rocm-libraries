@@ -394,6 +394,7 @@ int runGemm(size_t         m,
             float          alpha,
             float          beta,
             bool           validate,
+            bool           injectValidationFailure,
             bool           tryFastPath,
             bool           useBias,
             ActivationType activation,
@@ -778,6 +779,16 @@ int runGemm(size_t         m,
     std::chrono::duration<double, std::milli> duration = end - start;
     std::cout << "Execution Time: " << duration.count() << " ms" << std::endl;
 
+    if(injectValidationFailure)
+    {
+        if(d.empty())
+        {
+            std::cerr << "Error: cannot inject validation failure into empty D" << std::endl;
+            return 1;
+        }
+        d[0] += static_cast<AccumulateT>(16.0);
+    }
+
     if(validate)
     {
         std::cout << "Validating..." << std::endl;
@@ -966,6 +977,7 @@ int main(int argc, char* argv[])
         "computeInputA", po::value<std::string>()->default_value(""), "Override A compute-input type for MAC (defaults to --typeA). Set smaller than storage to mimic kernels that quantize A.")(
         "computeInputB", po::value<std::string>()->default_value(""), "Override B compute-input type for MAC (defaults to --typeB). Set smaller than storage to mimic kernels that quantize B.")(
         "validate", po::value<bool>()->default_value(true), "Run validation against ref")(
+        "injectValidationFailure", po::value<bool>()->default_value(false), "Perturb D before validation (negative-test hook)")(
         "tryFastPath", po::value<bool>()->default_value(false), "Use optimized path")(
         "bias", po::value<bool>()->default_value(false), "Enable bias vector")(
         "activation", po::value<std::string>()->default_value("none"), "Activation (none, relu)")(
@@ -1038,19 +1050,20 @@ int main(int argc, char* argv[])
         std::cerr << "Unknown computeInputB: " << computeInputBStr << std::endl;
         return 1;
     }
-    bool        validate         = vm["validate"].as<bool>();
-    bool        tryFastPath      = vm["tryFastPath"].as<bool>();
-    bool        useBias          = vm["bias"].as<bool>();
-    std::string activationStr    = vm["activation"].as<std::string>();
-    bool        useScaleAlphaVec = vm["scaleAlphaVec"].as<bool>();
-    int         factorDim        = vm["factorDim"].as<int>();
-    std::string useScaleAB       = vm["useScaleAB"].as<std::string>();
-    int         mxBlockA         = vm["mxBlockA"].as<int>();
-    int         mxBlockB         = vm["mxBlockB"].as<int>();
-    size_t      batchCount       = vm["batchCount"].as<size_t>();
-    const bool  typeAIsTF32      = (typeAStr == "tf32");
-    const bool  typeBIsTF32      = (typeBStr == "tf32");
-    const bool  isTF32           = typeAIsTF32 && typeBIsTF32;
+    bool        validate                 = vm["validate"].as<bool>();
+    bool        injectValidationFailure  = vm["injectValidationFailure"].as<bool>();
+    bool        tryFastPath              = vm["tryFastPath"].as<bool>();
+    bool        useBias                  = vm["bias"].as<bool>();
+    std::string activationStr            = vm["activation"].as<std::string>();
+    bool        useScaleAlphaVec         = vm["scaleAlphaVec"].as<bool>();
+    int         factorDim                = vm["factorDim"].as<int>();
+    std::string useScaleAB               = vm["useScaleAB"].as<std::string>();
+    int         mxBlockA                 = vm["mxBlockA"].as<int>();
+    int         mxBlockB                 = vm["mxBlockB"].as<int>();
+    size_t      batchCount               = vm["batchCount"].as<size_t>();
+    const bool  typeAIsTF32              = (typeAStr == "tf32");
+    const bool  typeBIsTF32              = (typeBStr == "tf32");
+    const bool  isTF32                   = typeAIsTF32 && typeBIsTF32;
 
     if(typeAIsTF32 != typeBIsTF32)
     {
@@ -1063,6 +1076,12 @@ int main(int argc, char* argv[])
     if(mxBlockA < 0 || mxBlockB < 0)
     {
         std::cerr << "Error: mxBlockA/mxBlockB must be non-negative" << std::endl;
+        return 1;
+    }
+
+    if(injectValidationFailure && !validate)
+    {
+        std::cerr << "Error: --injectValidationFailure requires --validate" << std::endl;
         return 1;
     }
     // One-sided MX is rejected (see review #1). When either per-side flag is
@@ -1149,7 +1168,8 @@ int main(int argc, char* argv[])
                 using AccT = std::conditional_t<
                     std::is_same_v<AT, double> && std::is_same_v<BT, double>, double, float>;
                 return runGemm<AT, BT, AccT>(
-                    m, n, k, transA, transB, alpha, beta, validate, tryFastPath,
+                    m, n, k, transA, transB, alpha, beta,
+                    validate, injectValidationFailure, tryFastPath,
                     useBias, activation, useScaleAlphaVec, useScaleAB, factorDim,
                     computeInputA, computeInputB, mxBlockA, mxBlockB, batchCount, isTF32);
             }
