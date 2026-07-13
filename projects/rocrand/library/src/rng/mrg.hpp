@@ -80,9 +80,9 @@ struct generate_mrg
                          dim3 /*block_dim*/,
                          Engine*            engines,
                          const unsigned int start_engine_id,
-                         T*                 data,
-                         const size_t       n,
-                         Distribution       distribution)
+                         T* __restrict__ data,
+                         const size_t n,
+                         Distribution distribution)
     {
         static_assert(is_single_tile_config<ConfigProvider, T, Arch>(IsDynamic),
                       "This kernel should only be used with single tile configs");

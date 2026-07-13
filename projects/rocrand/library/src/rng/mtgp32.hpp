@@ -244,9 +244,9 @@ struct generate_mtgp
                          dim3 grid_dim,
                          dim3 /*block_dim*/,
                          mtgp32_device_engine* engines,
-                         T*                    data,
-                         const size_t          n,
-                         Distribution          distribution)
+                         T* __restrict__ data,
+                         const size_t n,
+                         Distribution distribution)
     {
         static_assert(is_single_tile_config<ConfigProvider, T, Arch>(IsDynamic),
                       "This kernel should only be used with single tile configs");

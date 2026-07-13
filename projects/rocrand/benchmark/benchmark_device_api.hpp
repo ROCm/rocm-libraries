@@ -335,7 +335,10 @@ struct unrolled
 
 template<typename EngineState, typename T, typename Generator>
 __global__ __launch_bounds__(get_max_block_size<EngineState>())
-void generate_kernel(EngineState* states, T* data, const size_t size, Generator generator)
+void generate_kernel(EngineState* states,
+                     T* __restrict__ data,
+                     const size_t size,
+                     Generator    generator)
 {
     const auto         f        = unrolled<Generator, T, EngineState>(generator);
     const unsigned int state_id = (blockIdx.x * blockDim.x) + threadIdx.x;
@@ -390,7 +393,10 @@ struct runner
 
 template<typename T, typename Generator>
 __global__ __launch_bounds__(RAND_DEFAULT_MAX_BLOCK_SIZE)
-void generate_kernel(rand_state_mtgp32_t* states, T* data, const size_t size, Generator generator)
+void generate_kernel(rand_state_mtgp32_t* states,
+                     T* __restrict__ data,
+                     const size_t size,
+                     Generator    generator)
 {
     const auto f = unrolled<Generator, T, rand_state_mtgp32_t>(generator);
     static_assert(f.n == 1, "mtgp32 does not support vectorized generation!");
@@ -577,7 +583,10 @@ void init_scrambled_sobol_kernel(EngineState* states,
 // generate_kernel for the normal and scrambled sobol generators
 template<typename EngineState, typename T, typename Generator>
 __global__ __launch_bounds__(RAND_DEFAULT_MAX_BLOCK_SIZE)
-void generate_sobol_kernel(EngineState* states, T* data, const size_t size, Generator generator)
+void generate_sobol_kernel(EngineState* states,
+                           T* __restrict__ data,
+                           const size_t size,
+                           Generator    generator)
 {
     const auto f = unrolled<Generator, T, EngineState>(generator);
     static_assert(f.n == 1, "sobol does not support vectorized generation!");
