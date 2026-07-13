@@ -70,6 +70,50 @@ test_categories:
       - "full"
       - "all"
 
+  # Curated gfx1250 common-GEMM subset (~20 min test, ~30 min with setup), ported
+  # from the legacy test_tensilelite.py FFM_QUICK_INCLUDE list. These are the only
+  # tests that build/run kernels through the client, so they require the
+  # TensileLite-specific conftest options passed via `pytest_args` below. This
+  # category is gfx1250-only (GPU emulation) and must run on a gfx1250 runner.
+  ffm-quick:
+    description: "Curated gfx1250 common GEMM subset (FFM quick)"
+    test_paths:
+      - "Tensile/Tests/common"
+    pytest_markers:
+      - "gfx1250 or gfx12"
+    # Extra pytest CLI options appended verbatim for this category only.
+    # `{ROCM_PATH}` is substituted with the install prefix at runtime (same as the
+    # execution_settings.environment block). The `--prebuilt-client`,
+    # `--global-parameters` and `--tensile-options` flags are custom options
+    # registered in tensilelite's conftest.py (Tensile/Tests/conftest.py). `-k`
+    # narrows collection to the curated file subset.
+    pytest_args:
+      - "--prebuilt-client={ROCM_PATH}/libexec/hipblaslt/tensilelite/tensilelite-client"
+      - "--global-parameters=LibraryFormat='msgpack'"
+      - "--tensile-options=--cxx-compiler,{ROCM_PATH}/bin/amdclang++,--gpu-targets,gfx1250"
+      - "-k"
+      - "fp16_use_e_gfx1250.yaml or b8b8s_gfx1250.yaml or f8f8s_gfx1250.yaml or
+         f6b6ss_gfx1250.yaml or i8ii_gfx1250.yaml or b6f4ss_gfx1250.yaml or
+         gfx12/f4_gfx1250.yaml or f32_gfx1250.yaml or bf6_tdm_gfx1250.yaml or
+         f4f6ss_tdm_gfx1250.yaml or mxf6_tdm_gfx1250.yaml or largeLds_gfx1250.yaml or
+         1024_vgpr_gfx1250.yaml or f8f8s_sr_gfx1250.yaml or f8b6ss_gfx1250.yaml or
+         xfp32_gfx1250.yaml or f6b8ss_gfx1250.yaml or f8b8ss_gfx1250.yaml or
+         gfx12/f8f4ss_gfx1250.yaml or gfx12/f6_tdm_gfx1250.yaml or spmm_b8f8_sb.yaml or
+         spmm_f8hs_sb.yaml or spmm_i8bs_sb.yaml or spmm_tdm_f16_transposes.yaml or
+         spmm_b8.yaml or spmm_f8bs.yaml or spmm_bf16.yaml or spmm_f16_sb.yaml or
+         spmm_b8hs_sb.yaml or spmm_b8f8.yaml or spmm_tdm_all.yaml or
+         sk_f8gemm_quick.yaml or gfx1250/sk_hgemm_quick.yaml or hhs_dgelu_gfx1250.yaml or
+         bbs_dgelu_gfx1250.yaml or bbs_bgrada_gfx1250.yaml or hhs_bgrada_gfx1250.yaml or
+         bbs_bgradb_gfx1250.yaml or hhs_bgradb_gfx1250.yaml or bbs_bgradd_gfx1250.yaml or
+         hhs_bgradd_gfx1250.yaml or bf16_activation.yaml or gfx1250/f16_activation.yaml or
+         spmm_f8b8_sb.yaml or spmm_b8_sb.yaml or gfx1250/spmm_i8_sb.yaml or
+         spmm_b8bs_sb.yaml or spmm_f8_sb.yaml or spmm_i8hs.yaml or spmm_f8b8.yaml or
+         gfx12/f6_gfx1250.yaml or fp8_gfx1250.yaml or spmm_fp16_ml1.yaml or
+         f4b8ss_gfx1250.yaml or spmm_f8bs_sb.yaml or f64_gfx1250.yaml or
+         nt_th_nv_gfx1250.yaml"
+    labels:
+      - "ffm-quick"
+
 execution_settings:
   # TensileLite GPU unit tests assemble/run kernels and the legacy runner ran
   # them serially; pytest-xdist worker isolation (HIP_VISIBLE_DEVICES) is set up
@@ -80,3 +124,4 @@ execution_settings:
     standard: 2700        # 45 minutes
     comprehensive: 25200  # 7 hours
     full: 28800           # 8 hours
+    ffm-quick: 2400       # 40 minutes (~20 min tests + build/setup headroom)
