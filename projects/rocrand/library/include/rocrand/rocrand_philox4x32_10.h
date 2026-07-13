@@ -65,9 +65,10 @@ OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 #define ROCRAND_PHILOX_W32_1 0xBB67AE85U
 
 #if defined(__HIP_DEVICE_COMPILE__) && defined(__AMDGCN__)
-    #define ROCRAND_BUILTIN_ADDC(a, b, carry_in, carry_out) __builtin_addc(a, b, carry_in, carry_out);
+    #define ROCRAND_BUILTIN_ADDC(a, b, carry_in, carry_out) \
+        __builtin_addc(a, b, carry_in, carry_out);
 #else
-    #define ROCRAND_BUILTIN_ADDC(a, b, carry_in, carry_out)                         \
+    #define ROCRAND_BUILTIN_ADDC(a, b, carry_in, carry_out)                     \
         (                                                                       \
             [&]()                                                               \
             {                                                                   \
@@ -295,10 +296,10 @@ protected:
         };
         counter_scalars& s     = *reinterpret_cast<counter_scalars*>(&counter);
         unsigned int     carry = 0;
-        s.x                   = ROCRAND_BUILTIN_ADDC(s.x, 1, 0, &carry);
-        s.y                   = ROCRAND_BUILTIN_ADDC(s.y, 0, carry, &carry);
-        s.z                   = ROCRAND_BUILTIN_ADDC(s.z, 0, carry, &carry);
-        s.w                   = ROCRAND_BUILTIN_ADDC(s.w, 0, carry, &carry);
+        s.x                    = ROCRAND_BUILTIN_ADDC(s.x, 1, 0, &carry);
+        s.y                    = ROCRAND_BUILTIN_ADDC(s.y, 0, carry, &carry);
+        s.z                    = ROCRAND_BUILTIN_ADDC(s.z, 0, carry, &carry);
+        s.w                    = ROCRAND_BUILTIN_ADDC(s.w, 0, carry, &carry);
         return counter;
     }
 
