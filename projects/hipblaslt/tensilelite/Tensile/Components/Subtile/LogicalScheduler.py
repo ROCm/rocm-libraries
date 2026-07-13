@@ -32,7 +32,8 @@ import math
 import os
 
 from rocisa.code import Module
-from rocisa.instruction import SAddCU32, SSubBU32, SCSelectB32, SCSelectB64
+from rocisa.instruction import SAddCU32, SSubBU32, SCSelectB32, SCSelectB64, \
+    MFMAInstruction, MXMFMAInstruction
 
 from ...Common.GlobalParameters import globalParameters
 from ...Common import plsinDebugEnv
@@ -3504,21 +3505,11 @@ class LogicalScheduler:
             # and never delay the next MFMA issue (i.e. never slow the NGLL loop).
             perGap = int(plsinDebugEnv("TENSILE_NGLL_HOIST_PER_GAP", "2"))
             woven = Module(f"{label}_INIT_hoistwoven")
-            _it = iter(coordInsts)
-            _exhausted = False
-            for inst in ngllInit.flatitems():
-                woven.add(inst)
-                if not _exhausted and isinstance(inst, (MFMAInstruction, MXMFMAInstruction)):
-                    _dropped = 0
-                    for _c in _it:
-                        woven.add(_c)
-                        _dropped += 1
-                        if _dropped >= perGap:
-                            break
-                    else:
-                        _exhausted = True
-            for _c in _it:  # any remainder (fewer MFMA gaps than coord instrs)
-                woven.add(_c)
+            def _emitCoord(_i, _woven):
+                _woven.add(coordInsts[_i])
+                return _i + 1
+            self._weaveFillersIntoMfmaGaps(list(ngllInit.flatitems()), len(coordInsts),
+                                           _emitCoord, woven, perGap=perGap)
             module.add(woven)
         else:
             module.add(ngllInit)
@@ -3706,6 +3697,42 @@ class LogicalScheduler:
             em.instructions = [i for i in insts if pairOf[id(i)] < keepInLoop]
         return groups
 
+    def _weaveFillersIntoMfmaGaps(self, flat, numFillers, emitFiller, woven,
+                                  perGap=None, stride=None):
+        """Shared MFMA-gap weaver for the PLSIN hoist passes (B3): the single place
+        that decides WHERE hoisted fillers land relative to the loop's MFMAs. Both the
+        NGLL coord-hoist and the NLL store-init hoist route through here so a placement
+        policy change (e.g. C1 terminal-gap targeting) is made once.
+
+        Walk `flat`, copying each item into `woven`; after each MFMA, drop fillers per
+        the policy. `emitFiller(idx, woven) -> nextIdx` emits ONE filler unit (a single
+        instruction, or a multi-instruction block / SCC carry-chain) into `woven` and
+        returns the next filler index; `numFillers` is the total unit count. Exactly one
+        policy is given:
+          perGap=k : packed  -- up to k fillers immediately after each MFMA
+          stride=s : spread  -- one filler after every s-th MFMA
+        Leftover fillers (fewer MFMA gaps than fillers) are appended in order. Returns
+        the next filler index consumed."""
+        idx = 0
+        credit = 0
+        for inst in flat:
+            woven.add(inst)
+            if idx >= numFillers or not isinstance(inst, (MFMAInstruction, MXMFMAInstruction)):
+                continue
+            if perGap is not None:
+                for _ in range(perGap):
+                    if idx >= numFillers:
+                        break
+                    idx = emitFiller(idx, woven)
+            else:
+                credit += 1
+                if credit >= stride:
+                    credit = 0
+                    idx = emitFiller(idx, woven)
+        while idx < numFillers:  # fewer MFMA gaps than fillers: append the remainder
+            idx = emitFiller(idx, woven)
+        return idx
+
     def _weaveStoreInitIntoLoop(self, loopModule, units, label):
         """Step 4 store-init hoist: scatter the fused store's branch/memory-free SrdD
         address-math prep into the FUSED NLL's MFMA gaps (mirrors the NGLL coord-hoist).
@@ -3738,7 +3765,7 @@ class LogicalScheduler:
             # and never appears in the pure-SALU store-init units, so it is excluded.
             return isinstance(inst, (SAddCU32, SSubBU32, SCSelectB32, SCSelectB64))
 
-        def _emitUnit(uidx):
+        def _emitUnit(uidx, woven):
             """Emit units[uidx] (a 'block' drops contiguously; an 'alu' drops one, then
             greedily pulls any immediately-following SCC-consumer alu units so an
             add/addc carry chain is never split across MFMA gaps). Returns next uidx."""
@@ -3763,36 +3790,17 @@ class LogicalScheduler:
         # the early gaps that ALSO overlap the loop's ds_reads -- redundant hiding --
         # leaving the terminal run fully exposed. Spreading fills the terminal gaps too.
         # Opt back to the packed behavior by setting TENSILE_NLL_HOIST_STOREINIT_PER_GAP
-        # (test-only).
+        # (test-only). Placement itself is delegated to the shared _weaveFillersIntoMfmaGaps.
         perGapEnv = plsinDebugEnv("TENSILE_NLL_HOIST_STOREINIT_PER_GAP", None)
         totalMfma = sum(1 for i in flat
                         if isinstance(i, (MFMAInstruction, MXMFMAInstruction)))
-        uidx = 0
         if perGapEnv is not None:
-            perGap = int(perGapEnv)
-            for inst in flat:
-                woven.add(inst)
-                if uidx >= nU or not isinstance(inst, (MFMAInstruction, MXMFMAInstruction)):
-                    continue
-                for _ in range(perGap):
-                    if uidx >= nU:
-                        break
-                    uidx = _emitUnit(uidx)
+            self._weaveFillersIntoMfmaGaps(flat, nU, _emitUnit, woven, perGap=int(perGapEnv))
         else:
             # Drop one unit after roughly every `stride`-th MFMA so the units span the
             # whole loop, including the exposed back-to-back tail.
             stride = max(1, totalMfma // nU) if totalMfma else 1
-            credit = 0
-            for inst in flat:
-                woven.add(inst)
-                if uidx >= nU or not isinstance(inst, (MFMAInstruction, MXMFMAInstruction)):
-                    continue
-                credit += 1
-                if credit >= stride:
-                    credit = 0
-                    uidx = _emitUnit(uidx)
-        while uidx < nU:  # fewer MFMA gaps than units: append the remainder in order
-            uidx = _emitUnit(uidx)
+            self._weaveFillersIntoMfmaGaps(flat, nU, _emitUnit, woven, stride=stride)
         return woven
 
     def _emitFusedFrontGuard(self, writer, kernel, label, plainLabel):
