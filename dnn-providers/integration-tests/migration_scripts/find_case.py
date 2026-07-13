@@ -131,7 +131,8 @@ def _load_all_cases(bundle_dir):
             rep = _rep_tensor(tensors)
             dims = rep.get("dims", [])
             strides = rep.get("strides", [])
-            dt = values.get("io_data_type") or rep.get("data_type", "")
+            raw_dt = (values.get("io_data_type") or rep.get("data_type", "")).lower()
+            dt = _DTYPE_DISPLAY.get(raw_dt, raw_dt)
             layout = _infer_layout(dims, strides) or ""
             meta = case.get("metadata", {})
             inputs = meta.get("inputs", {})
@@ -148,7 +149,7 @@ def _load_all_cases(bundle_dir):
                     "op": op,
                     "topology": topo,
                     "shape": dims,
-                    "dtype": dt.lower(),
+                    "dtype": dt,
                     "layout": layout,
                     "inputs": input_roles,
                     "seed": meta.get("seed"),
@@ -194,11 +195,25 @@ def _parse_input_filter(s):
     sys.exit(1)
 
 
+_DTYPE_DISPLAY = {
+    "bfloat16": "bfp16",
+    "half": "fp16",
+    "float": "fp32",
+    "double": "fp64",
+}
+
+_DTYPE_ALIASES = {v: v for v in _DTYPE_DISPLAY.values()}
+_DTYPE_ALIASES.update({k: v for k, v in _DTYPE_DISPLAY.items()})
+_DTYPE_ALIASES["bf16"] = "bfp16"
+
+
 def _matches(case, args):
     if args.op and args.op.lower() not in case["op"].lower():
         return False
-    if args.dtype and args.dtype.lower() != case["dtype"]:
-        return False
+    if args.dtype:
+        needle = _DTYPE_ALIASES.get(args.dtype.lower(), args.dtype.lower())
+        if needle != case["dtype"]:
+            return False
     if args.layout and args.layout.lower() != case["layout"]:
         return False
     if args.shape:
