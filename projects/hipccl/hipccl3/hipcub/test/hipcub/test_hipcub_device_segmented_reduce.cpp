@@ -753,10 +753,10 @@ void test_minmax(typename TestFixture::params::input_type init)
     SCOPED_TRACE(testing::Message() << "with device_id= " << device_id);
     HIP_CHECK(hipSetDevice(device_id));
 
-    using input_type     = typename TestFixture::params::input_type;
-    using output_type    = typename TestFixture::params::output_type;
-    using result_type    = output_type;
-    using offset_type    = unsigned int;
+    using input_type  = typename TestFixture::params::input_type;
+    using output_type = typename TestFixture::params::output_type;
+    using result_type = output_type;
+    using offset_type = unsigned int;
 
     ReduceOpType reduce_op;
 
@@ -1476,9 +1476,9 @@ inline void segmented_reduce_large_num_segments_test()
     using segment_index_type = size_t;
     using segments_index_to_offset_op_t
         = test_utils::segments_index_to_offset_op<offset_type, segment_index_type>;
-    using iota_iterator_t     = test_utils::counting_iterator<offset_type>;
-    constexpr size_t uint_max = ::std::numeric_limits<unsigned int>::max();
+    using iota_iterator_t = test_utils::counting_iterator<offset_type>;
 
+    constexpr size_t       num_launch         = 2;
     constexpr unsigned int min_segment_length = 1;
     constexpr unsigned int max_segment_length = 10000;
 
@@ -1492,7 +1492,15 @@ inline void segmented_reduce_large_num_segments_test()
         HIP_CHECK(hipStreamCreateWithFlags(&stream, hipStreamNonBlocking));
     }
 
-    constexpr offset_type base_size = uint_max + offset_type{1 << 22};
+#if defined(__HIP_PLATFORM_AMD__)
+    const rocprim::detail::target current_target(stream);
+    using Selector                = rocprim::detail::segmented_reduce_config_selector<output_type>;
+    using Config                  = rocprim::default_config;
+    const auto         params     = rocprim::detail::get_config<Selector>(Config{}, current_target);
+    const unsigned int block_size = params.kernel_config.block_size;
+#elif defined(__HIP_PLATFORM_NVIDIA__)
+    const unsigned int block_size = 256;
+#endif
 
     for(size_t seed_index = 0; seed_index < random_seeds_count + seed_size; seed_index++)
     {
@@ -1506,13 +1514,14 @@ inline void segmented_reduce_large_num_segments_test()
         const unsigned int                          segment_length = segment_length_dis(gen);
         SCOPED_TRACE(testing::Message() << "with segment_length = " << segment_length);
 
-        const segment_index_type full_segments_count
-            = test_utils::ceiling_div(base_size, segment_length);
-        const segment_index_type empty_segments_count = uint_max - full_segments_count + 1;
-        const segment_index_type segments_count       = empty_segments_count + full_segments_count;
+        const segment_index_type segments_count
+            = ::std::numeric_limits<unsigned int>::max() / block_size * num_launch;
+        constexpr segment_index_type full_segments_count  = 5U;
+        const segment_index_type     empty_segments_count = segments_count - full_segments_count;
 
-        offset_type size = segments_count * segment_length;
+        offset_type size = full_segments_count * segment_length;
         SCOPED_TRACE(testing::Message() << "with segments_count = " << segments_count);
+        SCOPED_TRACE(testing::Message() << "with size = " << size);
 
         // Device inputs
         const InputIterator values_input{0};
@@ -1588,14 +1597,24 @@ inline void segmented_reduce_large_num_segments_test()
         const auto gauss_sum
             = [&](offset_type n) { return (n % 2 == 0) ? (n / 2) * (n - 1) : n * ((n - 1) / 2); };
 
-        for(segment_index_type s = empty_segments_count; s < segments_count; ++s)
+        for(segment_index_type s = 0; s < segments_count; ++s)
         {
-            const offset_type offset = segment_length * s;
-            const offset_type end    = offset + segment_length;
-            const output_type aggregate_expected
-                = reduce_op(init, gauss_sum(end) - gauss_sum(offset));
-            ASSERT_NO_FATAL_FAILURE(
-                test_utils::assert_eq(aggregates_output[s], aggregate_expected));
+            if(s < empty_segments_count)
+            {
+                SCOPED_TRACE(testing::Message() << "with empty segment index = " << s);
+                ASSERT_NO_FATAL_FAILURE(
+                    test_utils::assert_eq(aggregates_output[s], output_type{0}));
+            }
+            else
+            {
+                const offset_type offset = segment_length * (s - empty_segments_count);
+                const offset_type end    = offset + segment_length;
+                const output_type aggregate_expected
+                    = reduce_op(init, gauss_sum(end) - gauss_sum(offset));
+                SCOPED_TRACE(testing::Message() << "with segment index = " << s);
+                ASSERT_NO_FATAL_FAILURE(
+                    test_utils::assert_eq(aggregates_output[s], aggregate_expected));
+            }
         }
 
         if constexpr(use_graphs)
