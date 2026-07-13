@@ -46,7 +46,7 @@ def _compile_and_run(req: GemmRequest, shape: tuple[int, int, int]) -> str:
     )
     write_artifact(artifact, work_dir, manifest)
     env = dict(os.environ)
-    py_root = str(Path(__file__).resolve().parents[4] / "Python")
+    py_root = str(Path(__file__).resolve().parents[4] / "python")
     env["PYTHONPATH"] = py_root + os.pathsep + env.get("PYTHONPATH", "")
     proc = subprocess.run(
         [

@@ -46,23 +46,51 @@ test_categories:
     labels:
       - "quick"
 
+  # The full-suite tiers match every registered test EXCEPT the dedicated
+  # ffm entries. Those are selected via ffm-quick / ffm-full; the negative
+  # lookahead keeps the tier labels off them when the parser scans the
+  # main install fragment.
   standard:
     description: "hipTensor standard tests - full suite"
     test_patterns:
-      - ".*"
+      - "(?!.* ffm$).*"
     labels:
       - "standard"
 
   comprehensive:
     description: "hipTensor comprehensive tests - full suite"
     test_patterns:
-      - ".*"
+      - "(?!.* ffm$).*"
     labels:
       - "comprehensive"
 
   full:
     description: "hipTensor full test suite"
     test_patterns:
-      - ".*"
+      - "(?!.* ffm$).*"
     labels:
       - "full"
+
+  # FFM filters. These match the dedicated ffm install-tree entries emitted
+  # by test/CMakeLists.txt.
+  ffm-quick:
+    description: "hipTensor FFM quick set"
+    test_patterns:
+      - "^.* smoke ffm$"
+    labels:
+      - "ffm-quick"
+      - "ffm-full"
+
+  ffm-full:
+    description: "hipTensor FFM full set"
+    test_patterns:
+      - "^.* smoke ffm$"
+    labels:
+      - "ffm-quick"
+      - "ffm-full"
+
+execution_settings:
+  category_timeouts:
+    # 2 hour (7200s) FFM simulator budget
+    ffm-quick: 7200
+    ffm-full: 7200

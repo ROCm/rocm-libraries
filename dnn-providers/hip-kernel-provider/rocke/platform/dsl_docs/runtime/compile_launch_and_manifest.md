@@ -408,16 +408,16 @@ ms = launch_kernel(
 ### Manifest execute
 
 ```bash
-PYTHONPATH=Python python -m rocke.run_manifest out.hsaco manifest.json --verify
+PYTHONPATH=python python -m rocke.run_manifest out.hsaco manifest.json --verify
 ```
 
 ### Sweep + benchmark
 
 ```bash
 OUT_DIR="${OUT_DIR:-$(mktemp -d)}"
-PYTHONPATH=Python python example/ck_tile/dsl/07_gemm_universal_sweep/gen.py \
+PYTHONPATH=python python example/ck_tile/dsl/07_gemm_universal_sweep/gen.py \
     --output-dir "$OUT_DIR" --subset compute --parallel 16
-PYTHONPATH=Python python -m rocke.sweep_bench "$OUT_DIR"/sweep_manifest.json \
+PYTHONPATH=python python -m rocke.sweep_bench "$OUT_DIR"/sweep_manifest.json \
     --attempts 3 --csv "$OUT_DIR"/results.csv
 ```
 

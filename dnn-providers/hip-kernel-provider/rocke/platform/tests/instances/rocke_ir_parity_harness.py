@@ -206,6 +206,97 @@ def build_fused_moe(phase, tokens, experts, topk, hidden, intermediate, dtype="f
     return _build
 
 
+def build_attention_2d(
+    name,
+    arch,
+    *,
+    head_size,
+    block_size,
+    num_query_heads,
+    num_kv_heads,
+    dtype,
+    sliding_window=0,
+    has_softcap=False,
+    use_alibi=False,
+    **kw,
+):
+    def _build():
+        from kernels.common.attention_unified import _tiled_2d_impl
+
+        SpecCls, _build_fn, _ = _tiled_2d_impl(arch)
+        spec = SpecCls(
+            head_size=head_size,
+            block_size=block_size,
+            num_query_heads=num_query_heads,
+            num_kv_heads=num_kv_heads,
+            dtype=dtype,
+            use_sinks=False,
+            sliding_window=sliding_window,
+            has_softcap=has_softcap,
+            use_alibi=use_alibi,
+            **kw,
+        )
+        return _build_fn(spec, arch=arch)
+
+    return _build
+
+
+def build_attention_3d(
+    name,
+    arch,
+    *,
+    head_size,
+    block_size,
+    num_query_heads,
+    num_kv_heads,
+    dtype,
+    num_segments,
+    sliding_window=0,
+    has_softcap=False,
+):
+    def _build():
+        from kernels import (
+            UnifiedAttention3DTiledSpec,
+            build_unified_attention_3d_tiled,
+        )
+
+        spec = UnifiedAttention3DTiledSpec(
+            head_size=head_size,
+            block_size=block_size,
+            num_query_heads=num_query_heads,
+            num_kv_heads=num_kv_heads,
+            dtype=dtype,
+            use_sinks=False,
+            sliding_window=sliding_window,
+            has_softcap=has_softcap,
+            num_segments=num_segments,
+        )
+        return build_unified_attention_3d_tiled(spec)
+
+    return _build
+
+
+def build_attention_reduce(
+    name, arch, *, head_size, num_query_heads, num_kv_heads, dtype, num_segments
+):
+    def _build():
+        from kernels import (
+            UnifiedAttentionReduceTiledSpec,
+            build_unified_attention_reduce_tiled,
+        )
+
+        spec = UnifiedAttentionReduceTiledSpec(
+            head_size=head_size,
+            num_query_heads=num_query_heads,
+            num_kv_heads=num_kv_heads,
+            dtype=dtype,
+            num_segments=num_segments,
+        )
+        return build_unified_attention_reduce_tiled(spec)
+
+    return _build
+
+
 def build_deep(kind, arch, **kw):
     def _build():
         if kind == "common":
@@ -446,7 +537,7 @@ def cases():
     # gfx1250 is wave32/WMMA like gfx1201, but its fp16 atom is K=32 (16x16x32),
     # so warp_tile_k and tile_k are 32 rather than 16. NOTE: these lower through
     # the Python engine only -- the C++ engine has no gfx1250 ISA backend yet
-    # (rocke_ll_backend_for rejects gfx1250; see Cpp/core/lower_llvm/mma.cpp), so
+    # (rocke_ll_backend_for rejects gfx1250; see cpp/core/lower_llvm/mma.cpp), so
     # they are not part of the C-vs-Python byte-identity gate until that lands.
     add(
         "gemm",
@@ -810,6 +901,211 @@ def cases():
             pool_tile_h=4,
             pool_tile_w=4,
             native_int=True,
+        ),
+    )
+
+    # Attention: 2D tiled (gfx950 wide-K), 3D tiled + reduce (gfx950),
+    # and 2D tiled narrow (gfx942 MFMA-16x16x16 path).
+    add(
+        "attention",
+        "attention/gfx950/2d_fp16_d128_b64",
+        "gfx950",
+        build_attention_2d(
+            "irhash_attn_950_2d_fp16",
+            "gfx950",
+            head_size=128,
+            block_size=64,
+            num_query_heads=4,
+            num_kv_heads=2,
+            dtype="fp16",
+        ),
+    )
+    add(
+        "attention",
+        "attention/gfx950/2d_bf16_d128_b64",
+        "gfx950",
+        build_attention_2d(
+            "irhash_attn_950_2d_bf16",
+            "gfx950",
+            head_size=128,
+            block_size=64,
+            num_query_heads=4,
+            num_kv_heads=2,
+            dtype="bf16",
+        ),
+    )
+    add(
+        "attention",
+        "attention/gfx950/2d_fp16_d128_b64_softcap",
+        "gfx950",
+        build_attention_2d(
+            "irhash_attn_950_2d_fp16_sc",
+            "gfx950",
+            head_size=128,
+            block_size=64,
+            num_query_heads=4,
+            num_kv_heads=2,
+            dtype="fp16",
+            has_softcap=True,
+        ),
+    )
+    add(
+        "attention",
+        "attention/gfx950/2d_fp16_d128_b64_alibi",
+        "gfx950",
+        build_attention_2d(
+            "irhash_attn_950_2d_fp16_alibi",
+            "gfx950",
+            head_size=128,
+            block_size=64,
+            num_query_heads=4,
+            num_kv_heads=2,
+            dtype="fp16",
+            use_alibi=True,
+        ),
+    )
+    add(
+        "attention",
+        "attention/gfx950/3d_fp16_d128_b64",
+        "gfx950",
+        build_attention_3d(
+            "irhash_attn_950_3d_fp16",
+            "gfx950",
+            head_size=128,
+            block_size=64,
+            num_query_heads=4,
+            num_kv_heads=2,
+            dtype="fp16",
+            num_segments=4,
+        ),
+    )
+    add(
+        "attention",
+        "attention/gfx950/3d_bf16_d128_b64",
+        "gfx950",
+        build_attention_3d(
+            "irhash_attn_950_3d_bf16",
+            "gfx950",
+            head_size=128,
+            block_size=64,
+            num_query_heads=4,
+            num_kv_heads=2,
+            dtype="bf16",
+            num_segments=4,
+        ),
+    )
+    add(
+        "attention",
+        "attention/gfx950/reduce_fp16_d128",
+        "gfx950",
+        build_attention_reduce(
+            "irhash_attn_950_reduce_fp16",
+            "gfx950",
+            head_size=128,
+            num_query_heads=4,
+            num_kv_heads=2,
+            dtype="fp16",
+            num_segments=4,
+        ),
+    )
+    add(
+        "attention",
+        "attention/gfx950/reduce_bf16_d128",
+        "gfx950",
+        build_attention_reduce(
+            "irhash_attn_950_reduce_bf16",
+            "gfx950",
+            head_size=128,
+            num_query_heads=4,
+            num_kv_heads=2,
+            dtype="bf16",
+            num_segments=4,
+        ),
+    )
+    add(
+        "attention",
+        "attention/gfx942/2d_fp16_d128_b64",
+        "gfx942",
+        build_attention_2d(
+            "irhash_attn_942_2d_fp16",
+            "gfx942",
+            head_size=128,
+            block_size=64,
+            num_query_heads=4,
+            num_kv_heads=2,
+            dtype="fp16",
+        ),
+    )
+    add(
+        "attention",
+        "attention/gfx942/2d_bf16_d128_b64",
+        "gfx942",
+        build_attention_2d(
+            "irhash_attn_942_2d_bf16",
+            "gfx942",
+            head_size=128,
+            block_size=64,
+            num_query_heads=4,
+            num_kv_heads=2,
+            dtype="bf16",
+        ),
+    )
+    add(
+        "attention",
+        "attention/gfx942/3d_fp16_d128_b64",
+        "gfx942",
+        build_attention_3d(
+            "irhash_attn_942_3d_fp16",
+            "gfx942",
+            head_size=128,
+            block_size=64,
+            num_query_heads=4,
+            num_kv_heads=2,
+            dtype="fp16",
+            num_segments=4,
+        ),
+    )
+    add(
+        "attention",
+        "attention/gfx942/3d_bf16_d128_b64",
+        "gfx942",
+        build_attention_3d(
+            "irhash_attn_942_3d_bf16",
+            "gfx942",
+            head_size=128,
+            block_size=64,
+            num_query_heads=4,
+            num_kv_heads=2,
+            dtype="bf16",
+            num_segments=4,
+        ),
+    )
+    add(
+        "attention",
+        "attention/gfx942/reduce_fp16_d128",
+        "gfx942",
+        build_attention_reduce(
+            "irhash_attn_942_reduce_fp16",
+            "gfx942",
+            head_size=128,
+            num_query_heads=4,
+            num_kv_heads=2,
+            dtype="fp16",
+            num_segments=4,
+        ),
+    )
+    add(
+        "attention",
+        "attention/gfx942/reduce_bf16_d128",
+        "gfx942",
+        build_attention_reduce(
+            "irhash_attn_942_reduce_bf16",
+            "gfx942",
+            head_size=128,
+            num_query_heads=4,
+            num_kv_heads=2,
+            dtype="bf16",
+            num_segments=4,
         ),
     )
     return out

@@ -716,9 +716,6 @@ int RNNSeqDriver<Tgpu, Tref>::SetRNNDescriptorFromCmdLineArgs()
         size_t states_size = statesSizeInBytes / sizeof(rocrand_state_xorwow);
 
         DEFINE_CONTEXT(ctx);
-#if MIOPEN_BACKEND_OPENCL
-        clGetCommandQueueInfo(q, CL_QUEUE_CONTEXT, sizeof(cl_context), &ctx, nullptr);
-#endif
 
         dropout_states_dev =
             std::unique_ptr<GPUMem>(new GPUMem(ctx, states_size, sizeof(rocrand_state_xorwow)));
@@ -858,7 +855,7 @@ int RNNSeqDriver<Tgpu, Tref>::AllocateBuffersAndCopy()
         return miopenStatusNotInitialized;
     }
 
-    const uint32_t ctx = 0; // opencl legacy
+    const uint32_t ctx = 0;
 
     in_dev           = std::unique_ptr<GPUMem>(new GPUMem(ctx, in_gpu_sz, sizeof(Tgpu)));
     hx_dev           = std::unique_ptr<GPUMem>(new GPUMem(ctx, hid_sz, sizeof(Tgpu)));

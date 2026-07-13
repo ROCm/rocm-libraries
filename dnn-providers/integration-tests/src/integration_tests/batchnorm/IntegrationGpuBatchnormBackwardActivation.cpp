@@ -181,27 +181,18 @@ public:
         return {std::move(graphObj), GraphOutputs{dxOut, dscaleOut, dbiasOut}};
     }
 
-protected:
-    void initializeBundle([[maybe_unused]] const graph::Graph& graph,
-                          GraphTensorBundle& bundle,
-                          unsigned int seed) override
+    BatchnormBackwardActivation()
     {
-        bundle.sentinelFillOutputTensors();
-
-        bundle.tensors.at(BatchnormActivationTensorIds::X_UID)
-            ->fillTensorWithRandomValues(-1.0f, 1.0f, seed);
-        bundle.tensors.at(BatchnormActivationTensorIds::DY_UID)
-            ->fillTensorWithRandomValues(-1.0f, 1.0f, seed);
-        bundle.tensors.at(BatchnormActivationTensorIds::SCALE_UID)
-            ->fillTensorWithRandomValues(-0.1f, 0.1f, seed);
-        bundle.tensors.at(BatchnormActivationTensorIds::BIAS_UID)
-            ->fillTensorWithRandomValues(-0.1f, 0.1f, seed);
-        bundle.tensors.at(BatchnormActivationTensorIds::MEAN_UID)
-            ->fillTensorWithRandomValues(-0.1f, 0.1f, seed);
-        bundle.tensors.at(BatchnormActivationTensorIds::INV_VARIANCE_UID)
-            ->fillTensorWithRandomValues(1.9f, 2.0f, seed);
+        this->synthesis()
+            .setRange(BatchnormActivationTensorIds::X_UID, -1.0f, 1.0f)
+            .setRange(BatchnormActivationTensorIds::DY_UID, -1.0f, 1.0f)
+            .setRange(BatchnormActivationTensorIds::SCALE_UID, -0.1f, 0.1f)
+            .setRange(BatchnormActivationTensorIds::BIAS_UID, -0.1f, 0.1f)
+            .setRange(BatchnormActivationTensorIds::MEAN_UID, -0.1f, 0.1f)
+            .setRange(BatchnormActivationTensorIds::INV_VARIANCE_UID, 1.9f, 2.0f);
     }
 
+protected:
     void runGraphTest() override
     {
         const auto& testCase = this->GetParam();
@@ -216,7 +207,8 @@ protected:
 
         this->setTestCaseLayout(layout.name);
         this->setTestCaseNote(bnTestCase.note);
-        this->verifyGraph(graphObj, bnTestCase.seed);
+        this->synthesis().setGlobalSeed(bnTestCase.seed);
+        this->verifyGraph(graphObj);
     }
 };
 

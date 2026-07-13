@@ -9,7 +9,7 @@ library). It shares the committed gfx950 perf baseline, located via the
 sanctioned ``rocke.assets`` accessor.
 
 Run on a gfx950 ROCm runner:
-  HIP_VISIBLE_DEVICES=0 PYTHONPATH=rocke/platform/Python:rocke/library \
+  HIP_VISIBLE_DEVICES=0 PYTHONPATH=rocke/platform/python:rocke/library \
     python rocke/library/tests/test_gfx950_smoke_attention.py
 """
 
@@ -26,7 +26,7 @@ from pathlib import Path
 from rocke.assets import platform_root
 
 _LIBROOT = Path(__file__).resolve().parents[1]  # tests -> rocke/library
-_PY_ROOT = platform_root() / "Python"
+_PY_ROOT = platform_root() / "python"
 _DEFAULT_BASELINE = (
     platform_root() / "tests" / "golden" / "rocke_gfx950_smoke_perf.json"
 )

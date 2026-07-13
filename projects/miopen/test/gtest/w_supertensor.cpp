@@ -487,13 +487,16 @@ struct verify_w_tensor_set
     }
 };
 
-inline auto GenCases()
+inline auto GenCasesFull()
 {
 #if defined(__SANITIZE_ADDRESS__) || (defined(__has_feature) && __has_feature(address_sanitizer))
     // When Address Sanitizer is enabled, the process exceeds the allowable limit for virtual
     // memory areas.  Another way around this is to set vm.max_map_count to something large in
     // the environment (eg. vm.max_map_count=1048576).  However it was determined that while
     // ASan is enabled, losing a small amount of edge case test coverage was acceptable.
+    //
+    // The Smoke and Standard tiers use small fixed subsets that stay within ASan's
+    // virtual-memory-area limit; this ASan reduction only applies to the Full tier.
     return testing::Combine(
         MakeNamedParameterValues<int>("batch_size", 2, 4),
         MakeNamedParameterValues<int>("num_layer", 2, 4),
@@ -520,9 +523,54 @@ inline auto GenCases()
 #endif
 }
 
-inline auto GetCases()
+inline auto GetCasesFull()
 {
-    static const auto cases = GenCases();
+    static const auto cases = GenCasesFull();
+    return cases;
+}
+
+// Smoke (pre-commit) and Standard (per-CI) subsets. The full cross product
+// stays in GenCasesFull (used by the Full instantiation), so no coverage is lost.
+// These are intentionally small fixed sets (the cases are cheap CPU checks).
+inline auto GenCasesSmoke()
+{
+    return testing::Combine(
+        MakeNamedParameterValues<int>("batch_size", 2),
+        MakeNamedParameterValues<int>("num_layer", 4),
+        MakeNamedParameterValues<int>("in_size", 8),
+        MakeNamedParameterValues<int>("wei_hh", 8),
+        MakeNamedParameterValues<miopenRNNMode_t>("mode", miopenRNNRELU, miopenLSTM, miopenGRU),
+        MakeNamedParameterValues<miopenRNNBiasMode_t>(
+            "biasMode", miopenRNNwithBias, miopenRNNNoBias),
+        MakeNamedParameterValues<miopenRNNDirectionMode_t>(
+            "directionMode", miopenRNNunidirection, miopenRNNbidirection),
+        MakeNamedParameterValues<miopenRNNInputMode_t>("inMode", miopenRNNlinear));
+}
+
+inline auto GenCasesStandard()
+{
+    return testing::Combine(
+        MakeNamedParameterValues<int>("batch_size", 2, 8),
+        MakeNamedParameterValues<int>("num_layer", 4, 16),
+        MakeNamedParameterValues<int>("in_size", 8),
+        MakeNamedParameterValues<int>("wei_hh", 8),
+        MakeNamedParameterValues<miopenRNNMode_t>("mode", miopenRNNRELU, miopenLSTM, miopenGRU),
+        MakeNamedParameterValues<miopenRNNBiasMode_t>(
+            "biasMode", miopenRNNwithBias, miopenRNNNoBias),
+        MakeNamedParameterValues<miopenRNNDirectionMode_t>(
+            "directionMode", miopenRNNunidirection, miopenRNNbidirection),
+        MakeNamedParameterValues<miopenRNNInputMode_t>("inMode", miopenRNNskip, miopenRNNlinear));
+}
+
+inline auto GetCasesSmoke()
+{
+    static const auto cases = GenCasesSmoke();
+    return cases;
+}
+
+inline auto GetCasesStandard()
+{
+    static const auto cases = GenCasesStandard();
     return cases;
 }
 
@@ -716,4 +764,8 @@ using CPU_WSuperTensor_NONE = WSuperTensorTest;
 
 TEST_P(CPU_WSuperTensor_NONE, WSuperTensorTest) { this->Run(); }
 
-INSTANTIATE_TEST_SUITE_P(Smoke, CPU_WSuperTensor_NONE, GetCases(), TestNameGenerator{});
+// Tiered: Smoke (pre-commit) and Standard (per-CI) run subsets; Full
+// (comprehensive/nightly) runs the complete cross product so no coverage is lost.
+INSTANTIATE_TEST_SUITE_P(Smoke, CPU_WSuperTensor_NONE, GetCasesSmoke(), TestNameGenerator{});
+INSTANTIATE_TEST_SUITE_P(Standard, CPU_WSuperTensor_NONE, GetCasesStandard(), TestNameGenerator{});
+INSTANTIATE_TEST_SUITE_P(Full, CPU_WSuperTensor_NONE, GetCasesFull(), TestNameGenerator{});

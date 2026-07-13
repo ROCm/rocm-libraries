@@ -21,10 +21,10 @@ function(rocke_compute_build_id out_var root_dir)
   # top-level CMakeLists already re-globs sources with CONFIGURE_DEPENDS, so a
   # newly added file triggers a reconfigure and thus a recompute.
   file(GLOB_RECURSE _rocke_src
-       "${root_dir}/Cpp/*.cpp")
+       "${root_dir}/cpp/*.cpp")
   file(GLOB_RECURSE _rocke_hdr
-       "${root_dir}/Cpp/include/*.h"
-       "${root_dir}/Cpp/include/*.hpp")
+       "${root_dir}/cpp/include/*.h"
+       "${root_dir}/cpp/include/*.hpp")
   set(_rocke_all ${_rocke_src} ${_rocke_hdr})
 
   set(_rocke_lines "")

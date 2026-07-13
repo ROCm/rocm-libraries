@@ -1706,6 +1706,8 @@ inline flatbuffers::FlatBufferBuilder
     createValidLayernormFpropGraph(const std::vector<int64_t>& strides = {588, 196, 14, 1},
                                    const std::vector<int64_t>& dims = {1, 3, 14, 14},
                                    hipdnn_flatbuffers_sdk::data_objects::DataType inputDataType
+                                   = hipdnn_flatbuffers_sdk::data_objects::DataType::FLOAT,
+                                   hipdnn_flatbuffers_sdk::data_objects::DataType computeDataType
                                    = hipdnn_flatbuffers_sdk::data_objects::DataType::FLOAT)
 {
     flatbuffers::FlatBufferBuilder builder;
@@ -1759,7 +1761,7 @@ inline flatbuffers::FlatBufferBuilder
     auto node = hipdnn_flatbuffers_sdk::data_objects::CreateNodeDirect(
         builder,
         "layernorm",
-        hipdnn_flatbuffers_sdk::data_objects::DataType::FLOAT,
+        computeDataType,
         hipdnn_flatbuffers_sdk::data_objects::NodeAttributes::LayernormAttributes,
         layernormAttributes.Union());
     nodes.push_back(node);
@@ -1973,7 +1975,8 @@ inline flatbuffers::FlatBufferBuilder
         derivedDims, hipdnn_data_sdk::utilities::extractStrideOrder(strides));
 
     // inv_rms stat shape is [N, 1, 1, 1, ...] when scale is [1, C, H, W ..]
-    const std::vector<int64_t> statDims = {dims[0], 1, 1, 1};
+    std::vector<int64_t> statDims(dims.size(), 1);
+    statDims[0] = dims[0];
     const std::vector<int64_t> statStrides = hipdnn_data_sdk::utilities::generateStrides(
         statDims, hipdnn_data_sdk::utilities::extractStrideOrder(strides));
 

@@ -80,6 +80,7 @@ Op3dTensorGeneric::GetSolution([[maybe_unused]] const ExecutionContext& context,
     std::tie(cstrides[0], cstrides[1], cstrides[2]) = miopen::tien<3>(cTensorDesc.GetStrides());
 
     miopenDataType_t data_type = bTensorDesc.GetType();
+    bool fit_into_int          = aTensorDesc.AllDimsFitIntoInt();
 
     size_t local_threads = 32;
     size_t max_num_wg    = 4096;
@@ -93,7 +94,7 @@ Op3dTensorGeneric::GetSolution([[maybe_unused]] const ExecutionContext& context,
 
     KernelBuildParameters build_params = KernelBuildParameters{};
 
-    GetCommonParams(build_params, problem, false);
+    GetCommonParams(build_params, problem, true);
 
     build_params.Define("USE_3D_TENSOR_GENERIC");
 
@@ -108,17 +109,19 @@ Op3dTensorGeneric::GetSolution([[maybe_unused]] const ExecutionContext& context,
     kernel.l_wk.insert(end(kernel.l_wk), begin(vld), end(vld));
     kernel.g_wk.insert(end(kernel.g_wk), begin(vgd), end(vgd));
 
-    result.invoker_factory =
-        [data_type, blens, clens, astrides, bstrides, cstrides](const std::vector<Kernel> kernels) {
-            return [=](const Handle& handle_, const AnyInvokeParams& raw_params) {
-                decltype(auto) kernel_ = handle_.Run(kernels.front());
-                decltype(auto) params  = raw_params.CastTo<miopen::tensorOp::InvokeParams>();
+    result.invoker_factory = [data_type, fit_into_int, blens, clens, astrides, bstrides, cstrides](
+                                 const std::vector<Kernel> kernels) {
+        return [=](const Handle& handle_, const AnyInvokeParams& raw_params) {
+            decltype(auto) kernel_ = handle_.Run(kernels.front());
+            decltype(auto) params  = raw_params.CastTo<miopen::tensorOp::InvokeParams>();
 
-                visit_float(data_type, [&](auto as_float) {
-                    auto miopen_alpha0 = as_float(*(static_cast<const float*>(params.alpha0)));
-                    auto miopen_alpha1 = as_float(*(static_cast<const float*>(params.alpha1)));
-                    auto miopen_beta   = as_float(*(static_cast<const float*>(params.beta)));
+            visit_float(data_type, [&](auto as_float) {
+                auto miopen_alpha0 = as_float(*(static_cast<const float*>(params.alpha0)));
+                auto miopen_alpha1 = as_float(*(static_cast<const float*>(params.alpha1)));
+                auto miopen_beta   = as_float(*(static_cast<const float*>(params.beta)));
 
+                if(fit_into_int)
+                {
                     kernel_(params.ATensor,
                             params.BTensor,
                             params.CTensor,
@@ -143,9 +146,37 @@ Op3dTensorGeneric::GetSolution([[maybe_unused]] const ExecutionContext& context,
                             miopen_beta,
                             static_cast<uint32_t>(clens[0]),
                             !float_equal(miopen_beta, 0.0));
-                });
-            };
+                }
+                else
+                {
+                    kernel_(params.ATensor,
+                            params.BTensor,
+                            params.CTensor,
+                            static_cast<uint64_t>(params.Aoffset),
+                            static_cast<uint64_t>(params.Boffset),
+                            static_cast<uint64_t>(params.Coffset),
+                            static_cast<uint64_t>(blens[1] == 1 ? clens[1] : blens[1]), // b_c,
+                            static_cast<uint64_t>(blens[2] == 1 ? clens[2] : blens[2]), // b_h,
+                            static_cast<uint64_t>(clens[1]),                            // c_c,
+                            static_cast<uint64_t>(clens[2]),                            // c_h,
+                            static_cast<uint64_t>(astrides[0]),                     // a_nstride,
+                            static_cast<uint64_t>(astrides[1]),                     // a_cstride,
+                            static_cast<uint64_t>(astrides[2]),                     // a_hstride,
+                            static_cast<uint64_t>(blens[0] == 1 ? 0 : bstrides[0]), // b_nstride,
+                            static_cast<uint64_t>(blens[1] == 1 ? 0 : bstrides[1]), // b_cstride,
+                            static_cast<uint64_t>(blens[2] == 1 ? 0 : bstrides[2]), // b_hstride,
+                            static_cast<uint64_t>(cstrides[0]),                     // c_nstride,
+                            static_cast<uint64_t>(cstrides[1]),                     // c_cstride,
+                            static_cast<uint64_t>(cstrides[2]),                     // c_hstride,
+                            miopen_alpha0,
+                            miopen_alpha1,
+                            miopen_beta,
+                            static_cast<uint64_t>(clens[0]),
+                            !float_equal(miopen_beta, 0.0));
+                }
+            });
         };
+    };
     result.construction_params.push_back(kernel);
 
     return result;
