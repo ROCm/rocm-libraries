@@ -37,16 +37,44 @@
 namespace stinkytofu {
 namespace {
 
-bool isExecWrite(const StinkyInstruction& inst, const StinkyRegister& execReg) {
-    for (const StinkyRegister& d : inst.getDestRegs())
-        if (isSameRegister(d, execReg)) return true;
+// EXEC (64-bit) aliases EXEC_LO and EXEC_HI; EXEC_LO and EXEC_HI do not alias
+// each other. In wave32 (execReg = EXEC_LO), EXEC_HI writes are irrelevant and
+// correctly return false here; EXEC writes (e.g. s_mov_b64 exec, X) return true
+// because EXEC covers EXEC_LO.
+bool overlapsExec(const StinkyRegister& reg, const StinkyRegister& execReg) {
+    if (reg.dataType != StinkyRegister::Type::Register) return false;
+    RegType t = reg.reg.type;
+    RegType et = execReg.reg.type;
+    if (t == et) return true;
+    if (t == RegType::EXEC || et == RegType::EXEC)
+        return t == RegType::EXEC_LO || t == RegType::EXEC_HI || et == RegType::EXEC_LO ||
+               et == RegType::EXEC_HI;
     return false;
 }
 
-bool isFullMaskReset(const StinkyInstruction& inst) {
+bool writesExecReg(const StinkyInstruction& inst, const StinkyRegister& execReg) {
+    for (const StinkyRegister& d : inst.getDestRegs())
+        if (overlapsExec(d, execReg)) return true;
+    return false;
+}
+
+// A full-mask reset: any exec write whose sole source is the literal -1.
+// The single-source constraint is the line we draw — it covers every sane reset
+// idiom (s_mov_b32 exec_lo, -1; s_mov_b64 exec, -1) without needing to evaluate
+// multi-operand expressions whose result might also be -1.
+bool isFullMaskReset(const StinkyInstruction& inst, const StinkyRegister& execReg) {
+    if (!writesExecReg(inst, execReg)) return false;
     if (inst.getSrcRegs().size() != 1) return false;
     const StinkyRegister& src = inst.getSrcRegs()[0];
     return src.dataType == StinkyRegister::Type::LiteralInt && src.getLiteralInt() == -1;
+}
+
+// A narrow write: any exec write that isn't a detected full-mask reset.
+// Opcode-agnostic by design — unlike LLVM where codegen is tightly controlled,
+// StinkyTofu IR is written by hand, so we match the semantic intent (exec != -1)
+// rather than an opcode allowlist that would need constant maintenance.
+bool isExecNarrowWrite(const StinkyInstruction& inst, const StinkyRegister& execReg) {
+    return writesExecReg(inst, execReg) && !isFullMaskReset(inst, execReg);
 }
 
 }  // namespace
@@ -56,7 +84,7 @@ void collapseExecMaskedRegions(BasicBlock& bb, AsmIRBuilder& builder, uint32_t w
 
     for (auto it = bb.begin(); it != bb.end();) {
         auto* beginInst = dyn_cast<StinkyInstruction>(it.getNodePtr());
-        if (!beginInst || !isExecWrite(*beginInst, execReg) || isFullMaskReset(*beginInst)) {
+        if (!beginInst || !isExecNarrowWrite(*beginInst, execReg)) {
             ++it;
             continue;
         }
@@ -65,9 +93,14 @@ void collapseExecMaskedRegions(BasicBlock& bb, AsmIRBuilder& builder, uint32_t w
         auto spanEnd = std::next(it);
         for (; spanEnd != bb.end(); ++spanEnd) {
             auto* cur = dyn_cast<StinkyInstruction>(spanEnd.getNodePtr());
-            if (!cur || !isExecWrite(*cur, execReg)) continue;
-            depth += isFullMaskReset(*cur) ? -1 : 1;
-            if (depth == 0) break;
+            if (!cur) continue;
+            if (isFullMaskReset(*cur, execReg)) {
+                if (--depth == 0) break;
+            } else if (isExecNarrowWrite(*cur, execReg)) {
+                ++depth;
+            }
+            // Other exec writes (s_or, s_and, saveexec, ...) are ignored as span
+            // boundaries and fall naturally into the current span's children.
         }
         if (spanEnd == bb.end()) {
             PASS_DEBUG(std::cerr << "[collapseExecMaskedRegions] unmatched exec narrow write, "

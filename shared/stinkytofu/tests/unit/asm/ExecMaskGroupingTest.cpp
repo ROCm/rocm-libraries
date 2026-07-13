@@ -187,3 +187,46 @@ TEST_F(ExecMaskGroupingTest, CollapseExecMaskedRegions_MultipleSiblingSpans) {
     EXPECT_EQ(insts[2]->getUnifiedOpcode(), GFX::EXEC_GROUP);
     EXPECT_NE(insts[0], insts[2]);
 }
+
+// s_mov_b64 exec, -1 must be recognized as a full-mask reset even in wave32.
+TEST_F(ExecMaskGroupingTest, CollapseExecMaskedRegions_B64ResetClosesWave32Span) {
+    StinkyInstruction* narrow = createExecNarrow(10);
+    StinkyInstruction* guarded = createVAddInBlock(bb, arch, 0, 1, 2);
+
+    AsmIRBuilder builder(*bb, arch);
+    StinkyInstruction* b64reset = builder.create(getMCIDByUOp(GFX::s_mov_b64, arch));
+    b64reset->addDestReg(StinkyRegister(RegType::EXEC, 0, 2));
+    b64reset->addSrcReg(StinkyRegister(-1));
+
+    collapseExecMaskedRegions(*bb, builder, /*wavefrontSize=*/32);
+
+    ASSERT_EQ(countStinkyInstructions(*bb), 1);
+    StinkyInstruction* group = collectInstructions(*bb)[0];
+    EXPECT_EQ(group->getUnifiedOpcode(), GFX::EXEC_GROUP);
+    auto* groupData = group->getModifier<ExecGroupData>();
+    ASSERT_NE(groupData, nullptr);
+    EXPECT_EQ(groupData->children, (std::vector<StinkyInstruction*>{narrow, guarded, b64reset}));
+}
+
+// Any exec write that isn't a literal-(-1) reset opens a span, including non-mov
+// instructions like s_or_b32.
+TEST_F(ExecMaskGroupingTest, CollapseExecMaskedRegions_NonMovExecWriteOpensSpan) {
+    AsmIRBuilder builder(*bb, arch);
+
+    StinkyInstruction* orNarrow = builder.create(getMCIDByUOp(GFX::s_or_b32, arch));
+    orNarrow->addDestReg(StinkyRegister::getEXECRegister(32));
+    orNarrow->addSrcReg(StinkyRegister::getEXECRegister(32));
+    orNarrow->addSrcReg(StinkyRegister("s", 5, 1));
+
+    StinkyInstruction* guarded = createVAddInBlock(bb, arch, 0, 1, 2);
+    StinkyInstruction* reset = createExecReset();
+
+    collapseExecMaskedRegions(*bb, builder, /*wavefrontSize=*/32);
+
+    ASSERT_EQ(countStinkyInstructions(*bb), 1);
+    StinkyInstruction* group = collectInstructions(*bb)[0];
+    EXPECT_EQ(group->getUnifiedOpcode(), GFX::EXEC_GROUP);
+    auto* groupData = group->getModifier<ExecGroupData>();
+    ASSERT_NE(groupData, nullptr);
+    EXPECT_EQ(groupData->children, (std::vector<StinkyInstruction*>{orNarrow, guarded, reset}));
+}
