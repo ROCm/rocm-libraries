@@ -72,6 +72,35 @@ else()
 endif()
 
 # =============================================================================
+# Batched-Contraction ctypes Library
+# =============================================================================
+
+# Find a generated batched-contraction kernel header for the library
+file(GLOB BC_KERNEL_HEADERS "${CMAKE_BINARY_DIR}/generated_kernels/batched_contraction_*.hpp")
+if(BC_KERNEL_HEADERS)
+    list(GET BC_KERNEL_HEADERS 0 BC_KERNEL_HEADER)
+    message(STATUS "Found batched-contraction kernel for ctypes lib: ${BC_KERNEL_HEADER}")
+
+    add_ctypes_library(dispatcher_batched_contraction_lib
+        batched_contraction_ctypes_lib.cpp
+        KERNEL_HEADER ${BC_KERNEL_HEADER}
+    )
+    # The generated header only exports SelectedKernel/KERNEL_NAME/CONTRACTION_KEY_*
+    # under this define, so the force-include path requires it.
+    target_compile_definitions(dispatcher_batched_contraction_lib PRIVATE
+        CK_TILE_SINGLE_KERNEL_INCLUDE
+    )
+else()
+    message(STATUS "No batched-contraction kernel found for ctypes lib - building without kernel")
+    add_library(dispatcher_batched_contraction_lib SHARED batched_contraction_ctypes_lib.cpp)
+    target_include_directories(dispatcher_batched_contraction_lib PRIVATE
+        ${PROJECT_SOURCE_DIR}/include
+        ${PROJECT_SOURCE_DIR}/dispatcher/include
+    )
+    target_link_libraries(dispatcher_batched_contraction_lib PRIVATE hip::device)
+endif()
+
+# =============================================================================
 # Convolution ctypes Library (supports forward + bwd_data)
 # =============================================================================
 
