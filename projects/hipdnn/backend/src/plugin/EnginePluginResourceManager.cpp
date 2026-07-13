@@ -8,6 +8,7 @@
 #include <hipdnn_data_sdk/utilities/VersionUtils.hpp>
 #include <hipdnn_flatbuffers_sdk/data_objects/engine_details_generated.h>
 #include <hipdnn_flatbuffers_sdk/flatbuffer_utilities/GraphWrapper.hpp>
+#include <hipdnn_flatbuffers_sdk/utilities/FlatbufferUtils.hpp>
 #include <limits>
 #include <mutex>
 #include <numeric>
@@ -99,14 +100,8 @@ bool readIsRuntimePassByValueEnabled(const GraphDescriptor& graphDesc)
     {
         return false;
     }
-    for(const auto& [uid, tensor] : graphWrapper.getTensorMap())
-    {
-        if(tensor != nullptr && tensor->is_runtime_pass_by_value())
-        {
-            return true;
-        }
-    }
-    return false;
+    return hipdnn_flatbuffers_sdk::utilities::anyTensorIsRuntimePassByValue(
+        graphWrapper.getTensorMap(), [](const auto& entry) { return entry.second; });
 }
 
 const hipdnn_data_sdk::utilities::Version&

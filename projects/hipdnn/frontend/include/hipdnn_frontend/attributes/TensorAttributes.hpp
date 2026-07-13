@@ -84,6 +84,9 @@ public:
     using ValueVariant = std::
         variant<std::monostate, double, float, half, bfloat16, uint8_t, int32_t, int64_t, bool>;
 
+    /// cuDNN-parity alias for the pass-by-value scalar variant type.
+    using pass_by_values_t = ValueVariant; // NOLINT(readability-identifier-naming)
+
     /// @brief Default constructor
     TensorAttributes() = default;
 
@@ -92,10 +95,9 @@ public:
      * @tparam T Scalar type (float, double, half, hip_bfloat16, uint8_t, int32_t, int64_t, bool)
      * @param scalar The scalar value to store as the baked default
      *
-     * Matches cuDNN's plain scalar constructor: the tensor is runtime
-     * pass-by-value with a baked default (runtime flag set), flooring the
-     * provider at 1.2.0. Use ScalarType::COMPILE_TIME_CONST or
-     * set_compile_time_constant() for a baseline-1.0.0 baked constant.
+     * Runtime-with-default (cuDNN plain-scalar parity); floors the provider at
+     * 1.2.0. See RFC 0016 §4.3. Use set_compile_time_constant() for a
+     * baseline-1.0.0 baked constant.
      */
     template <typename T>
     TensorAttributes(const T& scalar)
@@ -129,61 +131,64 @@ public:
     }
 
     /**
-     * @brief Get the runtime pass-by-value scalar of a specific type
+     * @brief Get the runtime pass-by-value scalar (cuDNN parity).
+     * @return The value variant iff runtime-with-default (runtime flag set and a
+     *         value present); std::nullopt otherwise. Inspect the active type with
+     *         std::holds_alternative / std::get on the returned variant.
+     */
+    std::optional<pass_by_values_t>
+        get_pass_by_value() const // NOLINT(readability-identifier-naming)
+    {
+        return _isRuntimePassByValue && !std::holds_alternative<std::monostate>(_value)
+                   ? std::optional<pass_by_values_t>{_value}
+                   : std::nullopt;
+    }
+
+    /**
+     * @brief Typed convenience wrapper over get_pass_by_value().
      * @tparam T The expected scalar type
-     * @return The scalar value if this is runtime-with-default and matches T, std::nullopt otherwise
+     * @return The value iff runtime-with-default and the stored scalar is a T;
+     *         std::nullopt otherwise (absent, or present but a different type).
      */
     template <typename T>
     std::optional<T> get_pass_by_value() const // NOLINT(readability-identifier-naming)
     {
-        if(_isRuntimePassByValue)
+        const std::optional<pass_by_values_t> value = get_pass_by_value();
+        if(value && std::holds_alternative<T>(*value))
         {
-            if(auto p = std::get_if<T>(&_value))
-            {
-                return *p;
-            }
+            return std::get<T>(*value);
         }
         return std::nullopt;
     }
 
     /**
-     * @brief Get the runtime pass-by-value scalar as a type-erased variant
-     * @return The value variant only for runtime-with-default, empty otherwise
+     * @brief Get the compile-time constant scalar (cuDNN parity).
+     * @return The value variant iff compile-time constant (runtime flag clear and
+     *         a value present); std::nullopt otherwise.
      */
-    ValueVariant get_pass_by_value() const // NOLINT(readability-identifier-naming)
+    std::optional<pass_by_values_t>
+        get_compile_time_constant() const // NOLINT(readability-identifier-naming)
     {
-        return _isRuntimePassByValue && !std::holds_alternative<std::monostate>(_value)
-                   ? _value
-                   : ValueVariant{};
+        return !_isRuntimePassByValue && !std::holds_alternative<std::monostate>(_value)
+                   ? std::optional<pass_by_values_t>{_value}
+                   : std::nullopt;
     }
 
     /**
-     * @brief Get the compile-time constant scalar of a specific type
+     * @brief Typed convenience wrapper over get_compile_time_constant().
      * @tparam T The expected scalar type
-     * @return The scalar value if this is a compile-time constant and matches T, std::nullopt otherwise
+     * @return The value iff a compile-time constant whose stored scalar is a T;
+     *         std::nullopt otherwise (absent, or present but a different type).
      */
     template <typename T>
     std::optional<T> get_compile_time_constant() const // NOLINT(readability-identifier-naming)
     {
-        if(!_isRuntimePassByValue)
+        const std::optional<pass_by_values_t> value = get_compile_time_constant();
+        if(value && std::holds_alternative<T>(*value))
         {
-            if(auto p = std::get_if<T>(&_value))
-            {
-                return *p;
-            }
+            return std::get<T>(*value);
         }
         return std::nullopt;
-    }
-
-    /**
-     * @brief Get the compile-time constant scalar as a type-erased variant
-     * @return The value variant only for a compile-time constant, empty otherwise
-     */
-    ValueVariant get_compile_time_constant() const // NOLINT(readability-identifier-naming)
-    {
-        return !_isRuntimePassByValue && !std::holds_alternative<std::monostate>(_value)
-                   ? _value
-                   : ValueVariant{};
     }
 
     /**
@@ -252,16 +257,27 @@ public:
     }
 
     /**
-     * @brief Set a compile-time constant scalar in this tensor
-     * @tparam T Scalar type
-     * @param v The scalar value
+     * @brief Set a compile-time constant scalar in this tensor (cuDNN parity).
+     * @param v The scalar value, as a pass_by_values_t variant
      * @return Reference to this for method chaining
+     *
+     * Delegates to the typed set_value (via std::visit) so the per-scalar data
+     * type is derived from the active alternative, then clears the runtime flag
+     * to mark the value as a baseline-1.0.0 baked constant. A std::monostate
+     * (empty) variant is a no-op guarded here.
      */
-    template <typename T>
-    TensorAttributes& set_compile_time_constant(T v) // NOLINT(readability-identifier-naming)
+    // NOLINTNEXTLINE(readability-identifier-naming)
+    TensorAttributes& set_compile_time_constant(const pass_by_values_t& v)
     {
-        set_value(v);
-        _isRuntimePassByValue = false;
+        std::visit(
+            [this](const auto& scalar) {
+                if constexpr(!std::is_same_v<std::decay_t<decltype(scalar)>, std::monostate>)
+                {
+                    set_value(scalar);
+                    _isRuntimePassByValue = false;
+                }
+            },
+            v);
         return *this;
     }
 

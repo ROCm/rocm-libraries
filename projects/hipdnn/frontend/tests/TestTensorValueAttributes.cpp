@@ -18,9 +18,10 @@ namespace
 constexpr float PI_FLOAT = 3.14159265358979323846F;
 
 // Assert the full RFC-0016 §4.2 getter matrix for a float-valued tensor.
-// The two non-template variant getters must mirror the templated optionals:
-// a value is visible through get_pass_by_value() iff it is visible through
-// get_pass_by_value<T>(), and likewise for the compile-time-constant getter.
+// The primary variant getters (std::optional<pass_by_values_t>) must mirror the
+// typed convenience wrappers: a value is visible through get_pass_by_value() iff
+// it is visible through get_pass_by_value<T>(), and likewise for the
+// compile-time-constant getter.
 void expectFloatState(const TensorAttributes& tensor,
                       const bool isPassByValue,
                       const std::optional<float> passByValue,
@@ -46,11 +47,12 @@ void expectFloatState(const TensorAttributes& tensor,
         EXPECT_FLOAT_EQ(ctc.value(), compileTimeConstant.value());
     }
 
-    const TensorAttributes::ValueVariant pbvVar = tensor.get_pass_by_value();
-    EXPECT_EQ(std::holds_alternative<std::monostate>(pbvVar), !passByValue.has_value());
+    const std::optional<TensorAttributes::pass_by_values_t> pbvVar = tensor.get_pass_by_value();
+    EXPECT_EQ(pbvVar.has_value(), passByValue.has_value());
 
-    const TensorAttributes::ValueVariant ctcVar = tensor.get_compile_time_constant();
-    EXPECT_EQ(std::holds_alternative<std::monostate>(ctcVar), !compileTimeConstant.has_value());
+    const std::optional<TensorAttributes::pass_by_values_t> ctcVar
+        = tensor.get_compile_time_constant();
+    EXPECT_EQ(ctcVar.has_value(), compileTimeConstant.has_value());
 }
 
 // Round-trip a runtime-with-default scalar of an arbitrary supported type.

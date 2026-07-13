@@ -175,4 +175,34 @@ inline double extractDoubleFromTensorValue(const data_objects::TensorAttributes*
     return extractValueFromTensorValue<double>(tensorAttr, paramName);
 }
 
+/// @brief Reads the runtime pass-by-value flag off a serialized tensor table.
+inline bool isTensorRuntimePassByValue(const data_objects::TensorAttributes* tensor)
+{
+    return tensor != nullptr && tensor->is_runtime_pass_by_value();
+}
+
+/// @brief Reads the runtime pass-by-value flag off a mutable tensor object.
+inline bool isTensorRuntimePassByValue(const data_objects::TensorAttributesT* tensor)
+{
+    return tensor != nullptr && tensor->is_runtime_pass_by_value;
+}
+
+/// @brief True if any tensor obtained by applying `project` to an element of
+/// `range` is a runtime pass-by-value scalar. `project` maps an element to a
+/// tensor pointer accepted by isTensorRuntimePassByValue, so the same flag
+/// semantics are shared across the mutable-object graph (GraphDescriptor) and
+/// the serialized-table graph (EnginePluginResourceManager).
+template <typename Range, typename Project>
+bool anyTensorIsRuntimePassByValue(const Range& range, Project project)
+{
+    for(const auto& element : range)
+    {
+        if(isTensorRuntimePassByValue(project(element)))
+        {
+            return true;
+        }
+    }
+    return false;
+}
+
 }

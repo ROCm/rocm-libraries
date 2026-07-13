@@ -126,6 +126,29 @@ TEST(TestTensorAttributesWrapper, RuntimeUserSuppliedIsByValueNoConstant)
     EXPECT_FALSE(wrapper.hasCompileTimeConstant());
 }
 
+// Seam contract (RFC 0016 §4.1): the wrapper's isByValue() umbrella
+// (value present || runtime flag) intentionally DIVERGES from the backend C-API
+// HIPDNN_ATTR_TENSOR_IS_BY_VALUE (1307), which derives value-presence only
+// (value_type() != NONE). For a pure runtime user-supplied tensor the two must
+// disagree: wrapper isByValue()==true, C-API basis (value-presence)==false.
+// The C-API getter side is covered by
+// IntegrationTensorDescriptorApi.FlagTrueWithoutValueIsIndependent; this pins
+// the wrapper side against the same tensor shape so an "alignment" refactor that
+// collapsed the two would break here.
+TEST(TestTensorAttributesWrapper, PureRuntimeIsByValueDivergesFromCApiValuePresence)
+{
+    const flatbuffers::FlatBufferBuilder builder = buildTensorAttributes(false, true);
+    const auto* shallow = flatbuffers::GetRoot<TensorAttributes>(builder.GetBufferPointer());
+    const TensorAttributesWrapper wrapper(shallow);
+
+    // Wrapper umbrella: this IS a by-value tensor.
+    EXPECT_TRUE(wrapper.isByValue());
+    // C-API 1307 basis: value-presence only -> false (no baked value).
+    EXPECT_EQ(wrapper.valueType(), TensorValue::NONE);
+    // The runtime bit (C-API 1308 basis) is what is actually stored.
+    EXPECT_TRUE(wrapper.isRuntimePassByValue());
+}
+
 // Quadrant 4: flag=true, value present -> runtime with default.
 TEST(TestTensorAttributesWrapper, RuntimeWithDefaultIsByValueNoConstant)
 {

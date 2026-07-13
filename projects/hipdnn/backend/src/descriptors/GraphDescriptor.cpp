@@ -10,6 +10,7 @@
 #include "HipdnnException.hpp"
 #include "NodeFactory.hpp"
 
+#include <hipdnn_flatbuffers_sdk/utilities/FlatbufferUtils.hpp>
 #include <hipdnn_flatbuffers_sdk/utilities/json/Graph.hpp>
 #include <logging/GraphLogger.hpp>
 #include <nlohmann/json.hpp>
@@ -100,15 +101,9 @@ std::unique_ptr<hipdnn_flatbuffers_sdk::data_objects::GraphT>
 
     // Stamp the reader version: a graph with any runtime pass-by-value tensor
     // requires reader version 1; otherwise 0 keeps older readers compatible.
-    bool anyRuntimePassByValue = false;
-    for(const auto& tensor : graph->tensors)
-    {
-        if(tensor && tensor->is_runtime_pass_by_value)
-        {
-            anyRuntimePassByValue = true;
-            break;
-        }
-    }
+    const bool anyRuntimePassByValue
+        = hipdnn_flatbuffers_sdk::utilities::anyTensorIsRuntimePassByValue(
+            graph->tensors, [](const auto& tensor) { return tensor.get(); });
     graph->min_reader_version = anyRuntimePassByValue ? K_GRAPH_READER_VERSION : 0;
 
     return graph;

@@ -675,11 +675,8 @@ TEST_F(IntegrationTensorDescriptorApi, RuntimePassByValueFlagRoundTrips)
     ASSERT_NO_FATAL_FAILURE(setScalarTensorAttributes(desc, HIPDNN_DATA_FLOAT));
 
     bool flag = true;
-    ASSERT_EQ(hipdnnBackendSetAttribute(desc,
-                                        HIPDNN_ATTR_TENSOR_IS_RUNTIME_PASS_BY_VALUE,
-                                        HIPDNN_TYPE_BOOLEAN,
-                                        1,
-                                        &flag),
+    ASSERT_EQ(hipdnnBackendSetAttribute(
+                  desc, HIPDNN_ATTR_TENSOR_IS_RUNTIME_PASS_BY_VALUE, HIPDNN_TYPE_BOOLEAN, 1, &flag),
               HIPDNN_STATUS_SUCCESS);
 
     ASSERT_EQ(hipdnnBackendFinalize(desc), HIPDNN_STATUS_SUCCESS);
@@ -851,11 +848,8 @@ TEST_F(IntegrationTensorDescriptorApi, FlagTrueWithoutValueIsIndependent)
     ASSERT_NO_FATAL_FAILURE(setScalarTensorAttributes(desc, HIPDNN_DATA_FLOAT));
 
     bool flag = true;
-    ASSERT_EQ(hipdnnBackendSetAttribute(desc,
-                                        HIPDNN_ATTR_TENSOR_IS_RUNTIME_PASS_BY_VALUE,
-                                        HIPDNN_TYPE_BOOLEAN,
-                                        1,
-                                        &flag),
+    ASSERT_EQ(hipdnnBackendSetAttribute(
+                  desc, HIPDNN_ATTR_TENSOR_IS_RUNTIME_PASS_BY_VALUE, HIPDNN_TYPE_BOOLEAN, 1, &flag),
               HIPDNN_STATUS_SUCCESS);
 
     ASSERT_EQ(hipdnnBackendFinalize(desc), HIPDNN_STATUS_SUCCESS);

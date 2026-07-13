@@ -24,6 +24,7 @@ add_executable(hipdnn_plugin_sdk_tests
     TestKnobSettingFactory.cpp
     TestSdkLogging.cpp
     TestVersion.cpp
+    TestPluginDeviceBuffers.cpp
     TestRuntimePassByValue.cpp
 )
 

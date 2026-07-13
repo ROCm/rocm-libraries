@@ -32,29 +32,11 @@
 #include <hipdnn_flatbuffers_sdk/data_objects/tensor_attributes_generated.h>
 #include <hipdnn_flatbuffers_sdk/utilities/FlatbufferUtils.hpp>
 #include <hipdnn_plugin_sdk/PluginApiDataTypes.h>
+#include <hipdnn_plugin_sdk/PluginDeviceBuffers.hpp>
 #include <hipdnn_plugin_sdk/PluginException.hpp>
 
 namespace hipdnn_plugin_sdk
 {
-
-/// @brief Linear-scans `deviceBuffers` for the entry matching `uid`.
-/// @throws HipdnnPluginException(HIPDNN_PLUGIN_STATUS_INVALID_VALUE) if absent.
-inline hipdnnPluginDeviceBuffer_t findDeviceBuffer(int64_t uid,
-                                                   const hipdnnPluginDeviceBuffer_t* deviceBuffers,
-                                                   uint32_t numDeviceBuffers)
-{
-    for(uint32_t i = 0; i < numDeviceBuffers; i++)
-    {
-        if(uid == deviceBuffers[i].uid)
-        {
-            return deviceBuffers[i];
-        }
-    }
-
-    throw HipdnnPluginException(HIPDNN_PLUGIN_STATUS_INVALID_VALUE,
-                                "Device buffer with the uid: " + std::to_string(uid)
-                                    + " not found in the provided device buffers.");
-}
 
 /// @brief A scalar tensor operand (epsilon/momentum) resolved either at plan-build
 /// (compile-time constant or runtime-with-default) or at execute (pure runtime

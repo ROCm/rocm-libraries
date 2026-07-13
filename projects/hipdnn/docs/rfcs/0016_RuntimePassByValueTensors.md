@@ -242,20 +242,31 @@ hipDNN keeps it in the tensor flatbuffer instead.
 **Backend attributes.** `HIPDNN_ATTR_TENSOR_VALUE_EXT` (1306) is kept as-is;
 `HIPDNN_ATTR_TENSOR_CONSTANT_VALUE` is added as an alias for it (same integer
 `1306`, no wire change) to ease porting cuDNN code that queries the constant
-value by that name. `HIPDNN_ATTR_TENSOR_IS_BY_VALUE` (1307) is **kept** with
-its original "any by-value" meaning (`value present || runtime flag`), now
-read-only and **derived**. A new
-integer `HIPDNN_ATTR_TENSOR_IS_RUNTIME_PASS_BY_VALUE` (1308), is true only for
-the runtime pass-by-value states. Only the runtime bit is stored; the by-value umbrella
-(1307) and the has-constant query stay derived at the wrapper (below).
+`HIPDNN_ATTR_TENSOR_IS_BY_VALUE` (1307) is **kept** but is now
+read-only and **derived** as **value-presence** (`value.type != NONE`) — i.e.
+"does this tensor carry a baked scalar readable via `VALUE_EXT`." This is the
+back-compatible C-API meaning: a caller querying 1307 to decide whether to read
+`VALUE_EXT` still gets the right answer, and a pure runtime user-supplied tensor
+(flag set, no value) reads `false`. A new
+integer `HIPDNN_ATTR_TENSOR_IS_RUNTIME_PASS_BY_VALUE` (1308) is true only for
+the runtime pass-by-value states. Only the runtime bit is stored; 1307 and the
+has-constant query are derived. The "any by-value" umbrella
+(`value present || runtime flag`, true for every by-value state) is **not** 1307;
+it lives only at the wrapper's `isByValue()` query (below), which a direct
+backend-API caller does not see. The two therefore differ by design for a pure
+runtime user-supplied tensor: C-API 1307 is `false` (no baked value), wrapper
+`isByValue()` is `true` (it is a by-value tensor).
 
 **Deserialize invariant.** The value is read from the union whenever it is
 present (`value.type != NONE`), and the flag is read
 independently. This is what makes a legacy baked scalar (value present, flag
-absent → `false`) deserialize correctly as a compile-time constant. It
-changes the current descriptor unpack gate in
-[`DescriptorUnpackHelpers.hpp`](https://github.com/ROCm/rocm-libraries/blob/ce7ea204012bd0e0013485b919f86b7f071c6aa2/projects/hipdnn/frontend/include/hipdnn_frontend/detail/DescriptorUnpackHelpers.hpp),
-which keys the value-read on `IS_BY_VALUE == true`, to a value-presence gate.
+absent → `false`) deserialize correctly as a compile-time constant. The
+descriptor unpack gate in
+[`DescriptorUnpackHelpers.hpp`](https://github.com/ROCm/rocm-libraries/blob/ce7ea204012bd0e0013485b919f86b7f071c6aa2/projects/hipdnn/frontend/include/hipdnn_frontend/detail/DescriptorUnpackHelpers.hpp)
+keys the value-read on `IS_BY_VALUE == true`; because 1307 now derives
+value-presence, that is exactly a value-presence gate — a pure runtime
+user-supplied tensor (1307 `false`) skips the `VALUE_EXT` read, and a tensor
+carrying a value reads it.
 
 Providers read the flag through a `isRuntimePassByValue()` accessor added
 to the op-graph tensor wrapper
@@ -328,8 +339,11 @@ enum class ScalarType { RUNTIME_PARAM, COMPILE_TIME_CONST };
 - `set_value<T>(v)` → **runtime-with-default** (value stored as a default,
   runtime flag true) — matches cuDNN's plain scalar path; floor `1.2.0`.
   (cuDNN has no `set_value`.)
-- `set_compile_time_constant(pass_by_values_t v)` → compile-time constant
+- `set_compile_time_constant(const pass_by_values_t& v)` → compile-time
+  constant; matches cuDNN's signature
   ([`graph_properties.h:384-392`](https://github.com/NVIDIA/cudnn-frontend/blob/c4ec01a28a26aa57021862de809cc257619f7516/include/cudnn_frontend/graph_properties.h#L384-L392)).
+  hipDNN derives the per-scalar data type by `std::visit`-ing the active
+  alternative onto the typed `set_value` (a `std::monostate` variant is a no-op).
 - `set_as_runtime_parameter()` → runtime user-supplied: sets the runtime
   flag true and **clears** any prior value (a deliberate divergence from
   cuDNN, whose `set_as_runtime_parameter` leaves `pass_by_value` set,
@@ -341,24 +355,31 @@ enum class ScalarType { RUNTIME_PARAM, COMPILE_TIME_CONST };
 
 **Getters** (derived from the runtime flag + value presence).
 
-- `get_pass_by_value()` returns the **value**, not `bool`, present iff
-  `runtime flag && value present` (the runtime-with-default state), empty
-  otherwise ([`graph_properties.h:357-360`](https://github.com/NVIDIA/cudnn-frontend/blob/c4ec01a28a26aa57021862de809cc257619f7516/include/cudnn_frontend/graph_properties.h#L357-L360)).
-  Two forms: the typed `get_pass_by_value<T>()` returns `std::optional<T>`
-  (like cuDNN's `std::optional<pass_by_values_t>`); the whole-variant
-  `get_value_variant()` returns `const ValueVariant&` with `std::monostate`
-  as empty. hipDNN uses monostate where cuDNN wraps in `std::optional`
-  ([§5.1](#51-cudnn-api-surface-parity)) — the variant already encodes empty,
-  so it is not double-wrapped.
-- `get_compile_time_constant()` returns the value (`std::optional<T>`) iff
-  `!runtime flag && value present` (the compile-time constant), empty
-  otherwise ([`graph_properties.h:379-382`](https://github.com/NVIDIA/cudnn-frontend/blob/c4ec01a28a26aa57021862de809cc257619f7516/include/cudnn_frontend/graph_properties.h#L379-L382)).
+- `get_pass_by_value()` returns `std::optional<pass_by_values_t>` (the value
+  variant, not `bool`), present iff `runtime flag && value present` (the
+  runtime-with-default state), `std::nullopt` otherwise — byte-for-byte cuDNN
+  ([`graph_properties.h:357-360`](https://github.com/NVIDIA/cudnn-frontend/blob/c4ec01a28a26aa57021862de809cc257619f7516/include/cudnn_frontend/graph_properties.h#L357-L360)).
+  hipDNN adds a typed convenience wrapper `get_pass_by_value<T>()` →
+  `std::optional<T>` (delegates to the primary form; `std::nullopt` when absent
+  OR the stored scalar is not a `T`). hipDNN also exposes the ungated raw read
+  `get_value_variant()` → `const ValueVariant&` (`std::monostate` = empty),
+  which ignores the runtime flag; it is a hipDNN-only accessor with no cuDNN
+  equivalent.
+- `get_compile_time_constant()` returns `std::optional<pass_by_values_t>` iff
+  `!runtime flag && value present` (the compile-time constant), `std::nullopt`
+  otherwise ([`graph_properties.h:379-382`](https://github.com/NVIDIA/cudnn-frontend/blob/c4ec01a28a26aa57021862de809cc257619f7516/include/cudnn_frontend/graph_properties.h#L379-L382));
+  hipDNN adds the same typed convenience wrapper `get_compile_time_constant<T>()`
+  → `std::optional<T>`.
 - `get_is_pass_by_value()` is the derived umbrella predicate =
   `runtime flag || value present` (true for all three by-value states)
   ([`graph_properties.h:362-365`](https://github.com/NVIDIA/cudnn-frontend/blob/c4ec01a28a26aa57021862de809cc257619f7516/include/cudnn_frontend/graph_properties.h#L362-L365)).
 - `get_has_compile_time_constant()` is the derived bool = `!runtime flag &&
   value present`; mirrors cuDNN
   ([`graph_properties.h:374-377`](https://github.com/NVIDIA/cudnn-frontend/blob/c4ec01a28a26aa57021862de809cc257619f7516/include/cudnn_frontend/graph_properties.h#L374-L377)).
+- `get_is_runtime_pass_by_value()` is a hipDNN-only raw accessor returning the
+  stored runtime flag verbatim (no value-presence derivation). It has no cuDNN
+  equivalent and distinguishes the two runtime states from the compile-time
+  constant regardless of whether a default value is baked.
 
 **Breaking changes** (from the current hipDNN API, all source-level): (a)
 `get_pass_by_value()` returns the value instead of `bool`; (b) its former
@@ -983,20 +1004,24 @@ reject coverage.
 
 ### Step 2: Backend descriptor and enums
 
-`HIPDNN_ATTR_TENSOR_IS_BY_VALUE` (1307) is **kept** with its original
-"any by-value" meaning, now read-only-**derived** (`value present ||
-is_runtime_pass_by_value`) so existing readers are unaffected. Add a new
+`HIPDNN_ATTR_TENSOR_IS_BY_VALUE` (1307) is **kept** but is now
+read-only-**derived** as **value-presence** (`value.type != NONE`) — the
+back-compatible C-API "has a baked `VALUE_EXT`" meaning — so existing readers
+that key `VALUE_EXT` reads on it are unaffected. Add a new
 **settable** attribute `HIPDNN_ATTR_TENSOR_IS_RUNTIME_PASS_BY_VALUE` (1308)
 carrying the `is_runtime_pass_by_value` flag (true for the runtime states),
 and update the `BackendEnumStringUtils` string. Keep
 `HIPDNN_ATTR_TENSOR_VALUE_EXT` (1306) as-is (value union) and add
-`HIPDNN_ATTR_TENSOR_CONSTANT_VALUE` as an alias for it (same integer). The
-by-value umbrella (1307) and the has-constant query stay **derived**, not
-separately stored; only the runtime bit (1308) is stored. Change the
+`HIPDNN_ATTR_TENSOR_CONSTANT_VALUE` as an alias for it (same integer). 1307 and
+the has-constant query stay **derived**, not
+separately stored; only the runtime bit (1308) is stored. The "any by-value"
+umbrella (`value present || runtime flag`) is not 1307 — it is the wrapper-only
+`isByValue()` query. The
 descriptor unpack value-read gate
 ([`DescriptorUnpackHelpers.hpp`](https://github.com/ROCm/rocm-libraries/blob/ce7ea204012bd0e0013485b919f86b7f071c6aa2/projects/hipdnn/frontend/include/hipdnn_frontend/detail/DescriptorUnpackHelpers.hpp))
-from `IS_BY_VALUE`-gated to **value-presence-gated** (read the value
-whenever the union is present), and read the runtime flag independently.
+keys the value-read on 1307, which — now that 1307 derives value-presence — is a
+**value-presence gate** (read the value whenever the union is present); the
+runtime flag is read independently.
 Wire both through the existing `TensorDescriptor` get/set-attribute and
 pack/unpack paths. Add the `isRuntimePassByValue()` accessor to
 `ITensorAttributesWrapper`, plus the derived `isByValue()` and
@@ -1211,10 +1236,14 @@ Test conventions follow [RFC 0006](0006_PluginAgnosticIntegrationTests.md). The 
   or baked correctly and independently.
 
 - **Backend attribute derivation.** After a descriptor round-trip,
-  `HIPDNN_ATTR_TENSOR_IS_BY_VALUE` (1307) reads `true` for all three by-value
-  states (the derived umbrella), while `HIPDNN_ATTR_TENSOR_IS_RUNTIME_PASS_BY_VALUE`
-  (1308) reads `true` only for the two runtime states — confirming the
-  umbrella stays derived and only the runtime bit is stored
+  `HIPDNN_ATTR_TENSOR_IS_BY_VALUE` (1307) reads `true` for the two
+  value-carrying states (compile-time constant, runtime-with-default) and
+  `false` for the pure runtime user-supplied state — it derives value-presence
+  (`value.type != NONE`), not the umbrella. `HIPDNN_ATTR_TENSOR_IS_RUNTIME_PASS_BY_VALUE`
+  (1308) reads `true` only for the two runtime states. Confirms 1307 stays
+  derived-as-value-presence and only the runtime bit is stored; the by-value
+  umbrella is a wrapper-only query (`isByValue()`), which for a pure runtime
+  user-supplied tensor reads `true` while C-API 1307 reads `false`
   ([§4.1](#41-tensor-schema-addition)).
 
 - **Post-build setter warning.** Calling a value/mode setter after

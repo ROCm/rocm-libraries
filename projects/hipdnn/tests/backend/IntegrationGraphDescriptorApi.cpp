@@ -3,6 +3,8 @@
 
 #include "BackendTestHelpers.hpp"
 #include "hipdnn_backend.h"
+#include <array>
+#include <cstdint>
 #include <gtest/gtest.h>
 #include <hipdnn_flatbuffers_sdk/data_objects/convolution_common_generated.h>
 #include <hipdnn_flatbuffers_sdk/data_objects/data_types_generated.h>
@@ -11,8 +13,6 @@
 #include <hipdnn_test_sdk/utilities/FlatbufferGraphTestUtils.hpp>
 #include <hipdnn_test_sdk/utilities/TestUtilities.hpp>
 #include <test_plugins/TestPluginConstants.hpp>
-#include <array>
-#include <cstdint>
 #include <vector>
 
 using namespace backend_test;
@@ -408,9 +408,9 @@ flatbuffers::DetachedBuffer serializeReductionGraphWithReaderVersion(uint32_t re
 // the reduction input tensor.
 uint32_t buildAndReadStampedReaderVersion(bool runtimePassByValue)
 {
-    const std::vector<int64_t> inDims     = {4, 8};
-    const std::vector<int64_t> inStrides  = {8, 1};
-    const std::vector<int64_t> outDims    = {1, 8};
+    const std::vector<int64_t> inDims = {4, 8};
+    const std::vector<int64_t> inStrides = {8, 1};
+    const std::vector<int64_t> outDims = {1, 8};
     const std::vector<int64_t> outStrides = {8, 1};
 
     std::vector<hipdnnBackendDescriptor_t> owned;
@@ -434,17 +434,14 @@ uint32_t buildAndReadStampedReaderVersion(bool runtimePassByValue)
     if(runtimePassByValue)
     {
         bool flag = true;
-        EXPECT_EQ(hipdnnBackendSetAttribute(xDesc,
-                                            HIPDNN_ATTR_TENSOR_IS_RUNTIME_PASS_BY_VALUE,
-                                            HIPDNN_TYPE_BOOLEAN,
-                                            1,
-                                            &flag),
-                  HIPDNN_STATUS_SUCCESS);
+        EXPECT_EQ(
+            hipdnnBackendSetAttribute(
+                xDesc, HIPDNN_ATTR_TENSOR_IS_RUNTIME_PASS_BY_VALUE, HIPDNN_TYPE_BOOLEAN, 1, &flag),
+            HIPDNN_STATUS_SUCCESS);
     }
     EXPECT_EQ(hipdnnBackendFinalize(xDesc), HIPDNN_STATUS_SUCCESS);
 
-    hipdnnBackendDescriptor_t yDesc
-        = createAndFinalizeTensorDesc(2, "output", outDims, outStrides);
+    hipdnnBackendDescriptor_t yDesc = createAndFinalizeTensorDesc(2, "output", outDims, outStrides);
     owned.push_back(yDesc);
 
     hipdnnBackendDescriptor_t opDesc = nullptr;
@@ -464,8 +461,11 @@ uint32_t buildAndReadStampedReaderVersion(bool runtimePassByValue)
                                         static_cast<const void*>(&yDesc)),
               HIPDNN_STATUS_SUCCESS);
     const hipdnnReduceTensorOp_t reduceOp = HIPDNN_REDUCE_TENSOR_ADD;
-    EXPECT_EQ(hipdnnBackendSetAttribute(
-                  opDesc, HIPDNN_ATTR_REDUCTION_OPERATOR, HIPDNN_TYPE_REDUCTION_OPERATOR_TYPE, 1, &reduceOp),
+    EXPECT_EQ(hipdnnBackendSetAttribute(opDesc,
+                                        HIPDNN_ATTR_REDUCTION_OPERATOR,
+                                        HIPDNN_TYPE_REDUCTION_OPERATOR_TYPE,
+                                        1,
+                                        &reduceOp),
               HIPDNN_STATUS_SUCCESS);
     const hipdnnDataType_t compType = HIPDNN_DATA_FLOAT;
     EXPECT_EQ(hipdnnBackendSetAttribute(
