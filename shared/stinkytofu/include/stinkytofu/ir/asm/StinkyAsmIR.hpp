@@ -296,6 +296,29 @@ class STINKYTOFU_EXPORT AsmIRBuilder : public IRBuilder {
         return create(&fenceMCID);
     }
 
+    /// Creates a pseudo marker for the ASM placement of a function body.
+    /// It records where the named function should appear in the final linear ASM stream.
+    /// e.g.
+    ///   st.func @entry() {
+    ///     ^label_ASM_End:
+    ///       FUNCTION_ASM_PLACEMENT_MARKER "label_Activation_Relu_VW1"
+    ///   }
+    ///
+    ///   st.func @label_Activation_Relu_VW1() {
+    ///     ...
+    ///   }
+    ///
+    ///   This means that the function body will be placed at the ^label_ASM_End position in the
+    ///   final linear ASM stream.
+    StinkyInstruction* createFunctionAsmPlacementMarker(const std::string& functionName) {
+        static const HwInstDesc functionAsmPlacementMarkerMCID{
+            GFX::FUNCTION_ASM_PLACEMENT_MARKER, GFX::FUNCTION_ASM_PLACEMENT_MARKER,       0, 0, 0,
+            "FUNCTION_ASM_PLACEMENT_MARKER",    makeFlagSet({InstFlag::IF_HasSideEffect})};
+        StinkyInstruction* inst = create(&functionAsmPlacementMarkerMCID);
+        inst->addModifier<LabelData>(LabelData{functionName});
+        return inst;
+    }
+
     /// Creates and inserts a PHI instruction at the beginning of the block.
     /// The PHI defines one DWORD register and has one placeholder srcReg per
     /// predecessor. sources and users are NOT initialized — the caller
@@ -361,6 +384,18 @@ inline bool isGLOBALStore(const StinkyInstruction& inst) {
     return inst.is(InstFlag::IF_GLOBALStore);
 }
 
+inline bool isGLOBALAtomic(const StinkyInstruction& inst) {
+    return inst.is(InstFlag::IF_GLOBALAtomic);
+}
+
+inline bool isGLOBAL(const StinkyInstruction& inst) {
+    return isGLOBALLoad(inst) || isGLOBALStore(inst);
+}
+
+inline bool isGLOBALOrAtomic(const StinkyInstruction& inst) {
+    return isGLOBAL(inst) || isGLOBALAtomic(inst);
+}
+
 inline bool isSMemLoad(const StinkyInstruction& inst) {
     return inst.is(InstFlag::IF_SMemLoad);
 }
@@ -383,11 +418,18 @@ inline bool isFence(const StinkyInstruction& inst) {
     return inst.getUnifiedOpcode() == GFX::FENCE;
 }
 
-/// Check if instruction is a pseudo instruction (LABEL, PHI, or FENCE) that should be
-/// skipped for def-use chain processing of "real" instructions.
+/// Check if instruction is a function ASM placement marker.
+inline bool isFunctionAsmPlacementMarker(const StinkyInstruction& inst) {
+    return inst.getUnifiedOpcode() == GFX::FUNCTION_ASM_PLACEMENT_MARKER;
+}
+
+/// Check if instruction is a pseudo instruction (LABEL, PHI, FENCE, or
+/// FUNCTION_ASM_PLACEMENT_MARKER) that should be skipped for def-use chain
+/// processing of "real" instructions.
 inline bool isPseudoInst(const StinkyInstruction* inst) {
     return inst->getUnifiedOpcode() == GFX::LABEL || inst->getUnifiedOpcode() == GFX::PHI ||
-           inst->getUnifiedOpcode() == GFX::FENCE;
+           inst->getUnifiedOpcode() == GFX::FENCE ||
+           inst->getUnifiedOpcode() == GFX::FUNCTION_ASM_PLACEMENT_MARKER;
 }
 
 inline bool isGlobalMemLoad(const StinkyInstruction& inst) {
@@ -395,7 +437,8 @@ inline bool isGlobalMemLoad(const StinkyInstruction& inst) {
 }
 
 inline bool isGlobalMemAtomic(const StinkyInstruction& inst) {
-    return inst.is(InstFlag::IF_SMemAtomic) || isMUBUFAtomic(inst) || isFLATAtomic(inst);
+    return inst.is(InstFlag::IF_SMemAtomic) || isMUBUFAtomic(inst) || isFLATAtomic(inst) ||
+           isGLOBALAtomic(inst);
 }
 
 inline bool isGlobalMemStore(const StinkyInstruction& inst) {
@@ -453,13 +496,37 @@ inline bool isUnconditionalBranch(const StinkyInstruction& inst) {
     return isBranch(inst) && !isConditionalBranch(inst);
 }
 
+/// True when the instruction ends the current Function: kernel exit (`s_endpgm`)
+/// or a register-target `s_setpc_b64` return. Annotated `s_setpc_b64` is a
+/// branch to a known label, not a function return.
+inline bool isEndOfFunction(const StinkyInstruction& inst) {
+    if (inst.getUnifiedOpcode() == GFX::s_endpgm) return true;
+    return inst.getUnifiedOpcode() == GFX::s_setpc_b64 && inst.getModifier<LabelData>() == nullptr;
+}
+
 inline bool isIndirectBranch(const StinkyInstruction& inst) {
     return inst.is(InstFlag::IF_IndirectBranch);
 }
 
-// Structural call predicate. Only s_swappc_b64 is a call mnemonic in the tree.
+/// True for call-like control transfers (IF_Call, e.g. s_swappc_b64), not branches.
 inline bool isCall(const StinkyInstruction& inst) {
-    return inst.getUnifiedOpcode() == GFX::s_swappc_b64;
+    return inst.is(InstFlag::IF_Call);
+}
+
+/// Any intra-function control effect that is not ordinary dataflow: branches or calls.
+inline bool isControlTransfer(const StinkyInstruction& inst) {
+    return isBranch(inst) || isCall(inst);
+}
+
+/// Possible callee entry labels for a call site (`s_swappc_b64` with optional
+/// `CallTargetData` from the rocisa producer). Empty when unknown or omitted.
+/// This is for call-graph / scheduling analysis only; it is not a CFG successor list.
+inline std::vector<std::string> getCallTargets(const StinkyInstruction& inst) {
+    if (!isCall(inst)) return {};
+    if (const auto* meta = inst.getModifier<CallTargetData>()) {
+        return meta->callees;
+    }
+    return {};
 }
 
 // Label names of basic-block targets for \p given branch instruction.
@@ -471,6 +538,7 @@ inline bool isCall(const StinkyInstruction& inst) {
 //   - Not a branch → {}
 //   - LabelData{label} → {label} (rocisa converter or LongBranchLoweringPass)
 //   - IF_IndirectBranch without LabelData → {}
+//   - Calls (`IF_Call`, e.g. `s_swappc_b64`) are not branches; use getCallTargets().
 //   - First src is LiteralString → {that string} (raw .s s_branch / s_cbranch_*)
 //   - Otherwise → {}
 inline std::vector<std::string> getBranchTargets(const StinkyInstruction& inst) {
@@ -556,6 +624,8 @@ inline bool mustPreserveInstruction(const StinkyInstruction& inst) {
     // Control flow
     if (isBranch(inst)) return true;
 
+    if (isCall(inst)) return true;
+
     // Barriers and synchronization
     if (isBarrier(inst)) return true;
 
@@ -582,7 +652,8 @@ inline bool hasLdsPseudoRegs(const StinkyInstruction& inst) {
 /// scheduler has no dependency edges to prove reordering is safe.
 inline bool hasSideEffect(const StinkyInstruction& inst) {
     if (!inst.getHwInstDesc()) return false;
-    if (isGlobalMemStore(inst) || isBranch(inst) || isWaitCnt(inst) || isHasSideEffect(inst))
+    if (isGlobalMemStore(inst) || isBranch(inst) || isCall(inst) || isWaitCnt(inst) ||
+        isHasSideEffect(inst))
         return true;
     if ((isBarrier(inst) || isTensorLoad(inst) || isDSRead(inst) || isDSWrite(inst)) &&
         !hasLdsPseudoRegs(inst))

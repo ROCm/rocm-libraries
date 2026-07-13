@@ -718,7 +718,7 @@ class Timeline:
                 return instruction.name == "LRA0" or instruction.name == "LRB0"
             return True
         elif isinstance(instruction, Pack):
-            if kernel.get("UsePLRPack", False):
+            if kernel.get("UsePLRPack", 0):
                 # Packs1/3s correspond to the LR1/3s of this iteration.
                 if loop == NO_LOCAL_LOAD_LOOP:
                     return instruction.name == "PackA0" or instruction.name == "PackB0"
@@ -1158,7 +1158,7 @@ def _set_pack_needed_by(packs: list[Pack], pack_name: str, i_loop: int, mfma_reo
     is_tf32_emulation = kernel.get("UseF32XEmulation", False)
     is_4x4mfma_tf32 = kernel.get("UseMFMAF32XEmulation", False)
     is_pack_B = pack_name.startswith("PackB")
-    use_plr_pack = kernel.get("UsePLRPack", False)
+    use_plr_pack = kernel.get("UsePLRPack", 0)
     n_tiles_a = kernel["MIWaveTileA"]
     n_tiles_b = kernel["MIWaveTileB"]
     
@@ -1750,7 +1750,7 @@ def hook_up_packs(timeline: Timeline, kernel: 'Solution', mfma_reorder: list[int
         for _, mfma in timeline.get_instructions_combined("MFMA")
     }
 
-    use_plr_pack = kernel.get("UsePLRPack", False)
+    use_plr_pack = kernel.get("UsePLRPack", 0)
     for i_loop, loop in enumerate(timeline.loops):
         # 1. Gather all Packs in the current loop.
         packs_by_name: dict[str, list[Pack]] = {}
@@ -2481,7 +2481,7 @@ def isValid(scheduleInfo: 'ScheduleInfo', context: dict) -> tuple[bool, str]:
         ctx = ValidatorPassContext(
             kernel=kernel,
             mfma_reorder=scheduleInfo.mfmaReorder or [],
-            swap_global_read_order=kernel.get("SwapGlobalReadOrder", False),
+            swap_global_read_order=kernel.get("SwapGlobalReadOrder", 0),
         )
 
         timeline = create_unified_timeline(scheduleInfo, kernel, code_path)
