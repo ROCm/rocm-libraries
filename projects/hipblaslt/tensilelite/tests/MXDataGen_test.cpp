@@ -485,3 +485,23 @@ TEST(MXScaleLayoutArch, MapsArchNameToScaleLayout)
     EXPECT_EQ(mxScaleLayoutForArchName("gfx942"), MXScaleLayout::None);
     EXPECT_EQ(mxScaleLayoutForArchName("gfx90a"), MXScaleLayout::None);
 }
+
+TEST(MXScaleRestride, ExpandsKFastRowsInPlace)
+{
+    // Canonical K-fast layout: 2 free rows x 4 K-blocks, padded to 8 K-blocks per row.
+    std::vector<uint8_t> scale(16, 0);
+    for(size_t i = 0; i < 8; ++i)
+        scale[i] = static_cast<uint8_t>(i + 1);
+
+    restrideMXScaleBufferKFast(scale.data(), /*compactFreeDim=*/2, /*compactKBlocks=*/4,
+                                 /*paddedKBlocks=*/8, /*elemBytes=*/1);
+
+    EXPECT_EQ(scale[0], 1);
+    EXPECT_EQ(scale[3], 4);
+    EXPECT_EQ(scale[4], 0);
+    EXPECT_EQ(scale[7], 0);
+    EXPECT_EQ(scale[8], 5);
+    EXPECT_EQ(scale[11], 8);
+    EXPECT_EQ(scale[12], 0);
+    EXPECT_EQ(scale[15], 0);
+}

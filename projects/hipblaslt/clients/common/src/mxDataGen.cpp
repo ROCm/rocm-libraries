@@ -594,6 +594,51 @@ std::vector<float> generateMXInput(hipDataType            dataType,
     }
 }
 
+void restrideMXScaleBufferKFast(uint8_t* buffer,
+                                size_t   compactFreeDim,
+                                size_t   compactKBlocks,
+                                size_t   paddedKBlocks,
+                                size_t   elemBytes)
+{
+    if(compactKBlocks == paddedKBlocks || compactFreeDim == 0)
+        return;
+    size_t const compactRow = compactKBlocks * elemBytes;
+    size_t const paddedRow  = paddedKBlocks * elemBytes;
+    size_t const padTail    = paddedRow - compactRow;
+    for(size_t f = compactFreeDim; f-- > 1;)
+    {
+        std::memmove(buffer + f * paddedRow, buffer + f * compactRow, compactRow);
+        std::memset(buffer + f * paddedRow + compactRow, 0x00, padTail);
+    }
+    std::memset(buffer + compactRow, 0x00, padTail);
+}
+
+void applyMXScaleLayoutInPlace(uint8_t*      scale,
+                               size_t        scaleElemCount,
+                               MXScaleLayout scaleLayout,
+                               size_t        slowDim,
+                               size_t        fastDim,
+                               size_t        mxBlock)
+{
+    if(scaleLayout == MXScaleLayout::None || scaleElemCount == 0)
+        return;
+
+    std::vector<uint8_t> scaleBytes(scale, scale + scaleElemCount);
+    switch(scaleLayout)
+    {
+    case MXScaleLayout::GFX950:
+        scaleBytes = DGen::preSwizzleScalesGFX950(scaleBytes, {slowDim, fastDim});
+        break;
+    case MXScaleLayout::GFX1250:
+        if(mxBlock > 0)
+            scaleBytes = DGen::preSwizzleScalesGFX1250(scaleBytes, slowDim, fastDim, mxBlock);
+        break;
+    case MXScaleLayout::None:
+        break;
+    }
+    std::memcpy(scale, scaleBytes.data(), scaleBytes.size() * sizeof(uint8_t));
+}
+
 MXScaleLayout mxScaleLayoutForArchName(std::string_view archName)
 {
     if(archName.find("gfx950") != std::string_view::npos)

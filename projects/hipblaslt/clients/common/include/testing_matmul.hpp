@@ -1970,6 +1970,16 @@ void testing_matmul_with_bias(const Arguments& arg,
     bool do_swizzle_a = arg.swizzle_a && isSwizzleSupported(TiA);
     bool do_swizzle_b = arg.swizzle_b && isSwizzleSupported(TiB);
     bool mx_use_rocroller = MXUseRocroller();
+#if HIPBLASLT_ENABLE_MXDATAGENERATOR
+    bool mx_needs_pad_free_dim = false;
+    if(isBlockScaling(arg.scaleA) || isBlockScaling(arg.scaleB))
+    {
+        hipDeviceProp_t mxSizeProp{};
+        CHECK_HIP_ERROR(hipGetDeviceProperties(&mxSizeProp, 0));
+        mx_needs_pad_free_dim
+            = std::string_view(mxSizeProp.gcnArchName).find("gfx950") != std::string_view::npos;
+    }
+#endif
 
     // Need to split into two for loop to calculate the rotating buffer
     int64_t totalRotatingSizeNeeded = 0;
@@ -2111,7 +2121,25 @@ void testing_matmul_with_bias(const Arguments& arg,
                 size_scaleAVec[i] = M[i];
             else if(isBlockScaling(arg.scaleA))
             {
-                if(!mx_use_rocroller)
+                if(arg.scaleA == hipblaslt_scaling_format::Block_32_UE8M0_32_8_EXT || mx_use_rocroller)
+                {
+                    size_scaleAVec[i] = scaleBufferSize(A_row[i], A_col[i], arg.scaleA);
+                }
+#if HIPBLASLT_ENABLE_MXDATAGENERATOR
+                else if(mx_needs_pad_free_dim)
+                {
+                    size_t MXBlock_A   = blockSize(arg.scaleA);
+                    size_t scaleA_r    = A_row[i] / ((transA == HIPBLAS_OP_T) ? MXBlock_A : 1);
+                    size_t scaleA_c    = A_col[i] / ((transA == HIPBLAS_OP_T) ? 1 : MXBlock_A);
+                    bool   kAlongRowsA = (transA == HIPBLAS_OP_T);
+                    size_t kDim        = kAlongRowsA ? scaleA_r : scaleA_c;
+                    size_t mnDim       = kAlongRowsA ? scaleA_c : scaleA_r;
+                    size_t paddedKBlocks = (kDim + 7) / 8 * 8;
+                    size_t paddedFreeDim = (mnDim + 31) / 32 * 32;
+                    size_scaleAVec[i]    = paddedFreeDim * paddedKBlocks;
+                }
+#endif
+                else
                 {
                     // Account for padding in the swizzled MX layout
                     size_t MXBlock_A   = blockSize(arg.scaleA);
@@ -2125,10 +2153,6 @@ void testing_matmul_with_bias(const Arguments& arg,
                     size_t paddedDim   = (padDim + dimk - 1) / dimk * dimk;
                     size_scaleAVec[i]  = kAlongRowsA ? (mnDim * paddedDim) : (kDim * paddedDim);
                 }
-                else
-                {
-                    size_scaleAVec[i] = scaleBufferSize(A_row[i], A_col[i], arg.scaleA);
-                }
             }
             else
                 size_scaleAVec[i] = 0;
@@ -2138,7 +2162,25 @@ void testing_matmul_with_bias(const Arguments& arg,
                 size_scaleBVec[i] = N[i];
             else if(isBlockScaling(arg.scaleB))
             {
-                if(!mx_use_rocroller)
+                if(arg.scaleB == hipblaslt_scaling_format::Block_32_UE8M0_32_8_EXT || mx_use_rocroller)
+                {
+                    size_scaleBVec[i] = scaleBufferSize(B_row[i], B_col[i], arg.scaleB);
+                }
+#if HIPBLASLT_ENABLE_MXDATAGENERATOR
+                else if(mx_needs_pad_free_dim)
+                {
+                    size_t MXBlock_B   = blockSize(arg.scaleB);
+                    size_t scaleB_r    = B_row[i] / ((transB == HIPBLAS_OP_T) ? 1 : MXBlock_B);
+                    size_t scaleB_c    = B_col[i] / ((transB == HIPBLAS_OP_T) ? MXBlock_B : 1);
+                    bool   kAlongRowsB = (transB == HIPBLAS_OP_N);
+                    size_t kDim        = kAlongRowsB ? scaleB_r : scaleB_c;
+                    size_t mnDim       = kAlongRowsB ? scaleB_c : scaleB_r;
+                    size_t paddedKBlocks = (kDim + 7) / 8 * 8;
+                    size_t paddedFreeDim = (mnDim + 31) / 32 * 32;
+                    size_scaleBVec[i]    = paddedFreeDim * paddedKBlocks;
+                }
+#endif
+                else
                 {
                     // Account for padding in the swizzled MX layout
                     size_t MXBlock_B   = blockSize(arg.scaleB);
@@ -2151,10 +2193,6 @@ void testing_matmul_with_bias(const Arguments& arg,
                     size_t padDim      = kAlongRowsB ? kDim : mnDim;
                     size_t paddedDim   = (padDim + dimk - 1) / dimk * dimk;
                     size_scaleBVec[i]  = kAlongRowsB ? (mnDim * paddedDim) : (kDim * paddedDim);
-                }
-                else
-                {
-                    size_scaleBVec[i] = scaleBufferSize(B_row[i], B_col[i], arg.scaleB);
                 }
             }
             else
@@ -2807,6 +2845,8 @@ void testing_matmul_with_bias(const Arguments& arg,
         auto mxScaleLayoutForFormat = [&](hipblaslt_scaling_format const& fmt) -> MXScaleLayout {
             if(fmt == hipblaslt_scaling_format::Block_32_UE8M0_32_8_EXT)
                 return MXScaleLayout::GFX950;
+            if(fmt == hipblaslt_scaling_format::Block_32_UE8M0)
+                return MXScaleLayout::GFX1250;
             return mxScaleLayoutForArchName(mxProp.gcnArchName);
         };
 #endif
@@ -2844,6 +2884,14 @@ void testing_matmul_with_bias(const Arguments& arg,
 #endif
             }
             MXScaleLayout const scaleLayoutA = mxScaleLayoutForFormat(arg.scaleA);
+            bool const          kFastA       = (transA == HIPBLAS_OP_T);
+            bool const          needsGfx950RestrideA
+                = mx_needs_pad_free_dim && kFastA
+                  && arg.scaleA != hipblaslt_scaling_format::Block_32_UE8M0_32_8_EXT;
+            MXScaleLayout const genLayoutA
+                = (needsGfx950RestrideA && scaleLayoutA != MXScaleLayout::None)
+                      ? MXScaleLayout::None
+                      : scaleLayoutA;
             size_t dataBatchBytesA  = (num_batches[i] > 1) ? elementsToBytes(stride_a[i], TiA) : 0;
             size_t scaleBatchBytesA = (num_batches[i] > 1) ? size_scaleAVec[i] : 0;
             std::vector<float> refAAll;
@@ -2864,10 +2912,29 @@ void testing_matmul_with_bias(const Arguments& arg,
                                       blockSize(arg.scaleA),
                                       1,
                                       /*isMatrixA=*/true,
-                                      scaleLayoutA,
+                                      genLayoutA,
                                       hipblaslt_initialization2string(arg.initialization),
                                       /*min_val=*/-1.0f,
                                       /*max_val=*/1.0f);
+                if(needsGfx950RestrideA)
+                {
+                    size_t const MXBlock_A      = blockSize(arg.scaleA);
+                    size_t const scaleA_r       = A_row[i] / MXBlock_A;
+                    size_t const compactFree    = static_cast<size_t>(A_col[i]);
+                    size_t const compactKBlocks = scaleA_r;
+                    size_t const paddedKBlocks  = (compactKBlocks + 7) / 8 * 8;
+                    restrideMXScaleBufferKFast(
+                        scalePtrA, compactFree, compactKBlocks, paddedKBlocks, 1);
+                    if(scaleLayoutA != MXScaleLayout::None)
+                    {
+                        applyMXScaleLayoutInPlace(scalePtrA,
+                                                  compactFree * paddedKBlocks,
+                                                  scaleLayoutA,
+                                                  compactFree,
+                                                  paddedKBlocks,
+                                                  MXBlock_A);
+                    }
+                }
                 refAAll.insert(refAAll.end(), batchRef.begin(), batchRef.end());
             }
             refA.emplace_back(std::move(refAAll));
@@ -2952,6 +3019,14 @@ void testing_matmul_with_bias(const Arguments& arg,
 #endif
             }
             MXScaleLayout const scaleLayoutB = mxScaleLayoutForFormat(arg.scaleB);
+            bool const          kFastB       = (transB == HIPBLAS_OP_N);
+            bool const          needsGfx950RestrideB
+                = mx_needs_pad_free_dim && kFastB
+                  && arg.scaleB != hipblaslt_scaling_format::Block_32_UE8M0_32_8_EXT;
+            MXScaleLayout const genLayoutB
+                = (needsGfx950RestrideB && scaleLayoutB != MXScaleLayout::None)
+                      ? MXScaleLayout::None
+                      : scaleLayoutB;
             size_t             dataBatchBytesB    = (num_batches[i] > 1)
                                                         ? elementsToBytes(stride_b[i], TiB)
                                                         : 0;
@@ -2974,10 +3049,29 @@ void testing_matmul_with_bias(const Arguments& arg,
                                       1,
                                       blockSize(arg.scaleB),
                                       /*isMatrixA=*/false,
-                                      scaleLayoutB,
+                                      genLayoutB,
                                       hipblaslt_initialization2string(arg.initialization),
                                       /*min_val=*/-1.0f,
                                       /*max_val=*/1.0f);
+                if(needsGfx950RestrideB)
+                {
+                    size_t const MXBlock_B      = blockSize(arg.scaleB);
+                    size_t const scaleB_r       = B_row[i] / MXBlock_B;
+                    size_t const compactFree    = static_cast<size_t>(B_col[i]);
+                    size_t const compactKBlocks = scaleB_r;
+                    size_t const paddedKBlocks  = (compactKBlocks + 7) / 8 * 8;
+                    restrideMXScaleBufferKFast(
+                        scalePtrB, compactFree, compactKBlocks, paddedKBlocks, 1);
+                    if(scaleLayoutB != MXScaleLayout::None)
+                    {
+                        applyMXScaleLayoutInPlace(scalePtrB,
+                                                  compactFree * paddedKBlocks,
+                                                  scaleLayoutB,
+                                                  compactFree,
+                                                  paddedKBlocks,
+                                                  MXBlock_B);
+                    }
+                }
                 refBAll.insert(refBAll.end(), batchRef.begin(), batchRef.end());
             }
             refB.emplace_back(std::move(refBAll));
