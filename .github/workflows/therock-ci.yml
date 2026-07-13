@@ -164,7 +164,7 @@ jobs:
       # The rocjitsu race check runs under CPU-only emulation. For gfx1151,
       # avoid scheduling normal package tests on a gfx1151 GPU runner while we
       # are using that target to validate the race-check sidecar.
-      test_runs_on: ${{ matrix.target_bundle.amdgpu_family == 'gfx1151' && '' || matrix.target_bundle.test_machine }}
+      test_runs_on: ${{ matrix.target_bundle.amdgpu_family != 'gfx1151' && matrix.target_bundle.test_machine || '' }}
       build_runs_on: ${{ needs.setup.outputs.linux_build_runs_on }}
 
   therock-ci-windows:
