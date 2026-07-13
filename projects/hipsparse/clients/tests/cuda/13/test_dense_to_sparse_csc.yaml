@@ -34,7 +34,7 @@ Tests:
   precision: *single_double_precisions_complex_real
   M: [23, 45, 78, 100]
   N: [10, 55, 70, 99]
-  orderA: [HIPSPARSE_ORDER_ROW]
+  orderA: [HIPSPARSE_ORDER_COL]
   baseA: [HIPSPARSE_INDEX_BASE_ZERO, HIPSPARSE_INDEX_BASE_ONE]
   sparse2dense_alg: [HIPSPARSE_SPARSETODENSE_ALG_DEFAULT]
 
