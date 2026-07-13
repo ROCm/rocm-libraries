@@ -19,7 +19,7 @@
    - 4.6 [Provider contract](#46-provider-contract)
    - 4.7 [Feature detection and version filtering](#47-feature-detection-and-version-filtering)
    - 4.8 [Frontend validation](#48-frontend-validation)
-   - 4.9 [Execute-time variant-pack filter](#49-execute-time-variant-pack-filter)
+   - 4.9 [Execute-time variant-pack forwarding](#49-execute-time-variant-pack-forwarding)
    - 4.10 [Serialized-graph reader-version guard](#410-serialized-graph-reader-version-guard)
 5. [Key Design Decisions](#5-key-design-decisions)
    - 5.1 [cuDNN API-surface parity](#51-cudnn-api-surface-parity)
@@ -163,7 +163,7 @@ The design must:
    value is not stored on the graph at all; a value-carrying scalar (runtime
    default or compile-time constant) is baked in the tensor flatbuffer, yet
    the user-supplied path is variant-pack-delivered
-   ([§4.9](#49-execute-time-variant-pack-filter)). The graph descriptor stays
+   ([§4.9](#49-execute-time-variant-pack-forwarding)). The graph descriptor stays
    read-only after build.
 
 ---
@@ -288,7 +288,7 @@ orthogonal encoding ([§5.6](#56-no-is_compile_time_constant-flag)):
 | State | Creation (frontend) | runtime flag | `value` | `get_is_pass_by_value()` | `get_pass_by_value()` | `get_compile_time_constant()` | Delivery | Provider floor |
 |---|---|---|---|---|---|---|---|---|
 | **Runtime, user-supplied** | `set_as_runtime_parameter()`; or `set_is_pass_by_value(true)` with no value | true | ∅ | true | ∅ | ∅ | user supplies host ptr in variant pack | `1.2.0` |
-| **Runtime with default** (future override) | `TensorAttributes(v)` (plain ctor); `set_value(v)`; `TensorAttributes(v, ScalarType::RUNTIME_PARAM)` | true | v | true | v | ∅ | baked default in `VALUE_EXT`; override inert today ([§4.9](#49-execute-time-variant-pack-filter)) | `1.2.0` |
+| **Runtime with default** (future override) | `TensorAttributes(v)` (plain ctor); `set_value(v)`; `TensorAttributes(v, ScalarType::RUNTIME_PARAM)` | true | v | true | v | ∅ | baked default in `VALUE_EXT`; override inert today ([§4.9](#49-execute-time-variant-pack-forwarding)) | `1.2.0` |
 | **Compile-time constant** | `set_compile_time_constant(v)`; `TensorAttributes(v, ScalarType::COMPILE_TIME_CONST)` | false | v | true | ∅ | v | baked in op-graph flatbuffer, read via existing path | baseline `1.0.0` |
 
 (∅ = empty / `std::monostate`.)
@@ -298,7 +298,7 @@ backend/provider contract treats it as override-capable — a variant-pack
 value, if present, overrides the baked default ([§4.6](#46-provider-contract)).
 The frontend does not yet exercise that: a variant-pack override for a scalar
 carrying a value is forwarded to the provider but **inert**
-([§4.9](#49-execute-time-variant-pack-filter)) — the provider reads the baked
+([§4.9](#49-execute-time-variant-pack-forwarding)) — the provider reads the baked
 value from the flatbuffer and ignores the `device_buffers` slot for a
 value-carrying tensor, so only the baked default is used. It is thus reachable
 only by a direct backend-API caller today; the frontend may expose the
@@ -452,7 +452,7 @@ variantPack[scale->get_uid()] = &scaleValue;   // host pointer
 A compile-time constant or runtime-with-default carries a baked value and
 need **not** be placed in the variant pack; supplying one for such a UID is
 inert — the provider ignores it and uses the baked value
-([§4.9](#49-execute-time-variant-pack-filter)).
+([§4.9](#49-execute-time-variant-pack-forwarding)).
 
 ### 4.6 Provider contract
 
@@ -481,7 +481,7 @@ would silently ignore a user's runtime value.
 value read as its default. The frontend and backend diverge here: through
 `Graph::execute()` the in-tree providers read the baked default and ignore any
 `device_buffers` slot for such a UID today
-([§4.9](#49-execute-time-variant-pack-filter)), so a variant-pack override for
+([§4.9](#49-execute-time-variant-pack-forwarding)), so a variant-pack override for
 it is inert — while the backend/provider contract above already honors an
 override if a provider chooses to read the slot (e.g. from a direct
 backend-API caller).
@@ -665,7 +665,7 @@ pre-RFC bool `get_pass_by_value()` ("a value has been set"). Since that name
 is repurposed to return the value, the check moves to the derived umbrella
 `get_is_pass_by_value()`, accepting any variant of pass-by-value tensors.
 
-### 4.9 Execute-time variant-pack filter
+### 4.9 Execute-time variant-pack forwarding
 
 A user-supplied scalar's value reaches the provider as a host pointer
 in the variant pack at `Graph::execute()` ([§4.5](#45-execute-time-transport)).
@@ -872,7 +872,7 @@ persist/version/reject obligations of
 [§4.7](#47-feature-detection-and-version-filtering).
 
 **Rationale**: on the deserialized path the op graph is gone
-(`deserializeBackendPlan`, [§4.9](#49-execute-time-variant-pack-filter)), so
+(`deserializeBackendPlan`, [§4.9](#49-execute-time-variant-pack-forwarding)), so
 the only place host-scalar identity can survive is the provider's own
 payload, which it already owns and versions — skew safety reduces to that
 existing payload-versioning contract. This is exactly RFC 0009's
@@ -968,7 +968,7 @@ engine goes to read a runtime pass-by-value scalar whose UID the caller omitted
 from the variant pack, `findDeviceBuffer` throws
 `HIPDNN_PLUGIN_STATUS_INVALID_VALUE` (surfaced as `INVALID_VALUE`) before any
 unset slot is dereferenced — the same treatment as any other missing
-input/output tensor ([§4.9](#49-execute-time-variant-pack-filter)). The
+input/output tensor ([§4.9](#49-execute-time-variant-pack-forwarding)). The
 frontend performs no separate presence-check for this (nor for any other
 required tensor on the execute path), and cannot validate the numeric value at
 build (it does not yet exist); it only checks at build that the tensor is
@@ -1066,9 +1066,9 @@ serialized op graph and returns `true` iff any tensor has
 graph-level attribute is read; the per-tensor flag is the source of truth).
 Extend `computeMinimumPluginApiVersion(bool isOverride, bool isRuntimePassByValue)`
 to take the second flag and return the maximum required version (the
-applicability-time filter). Add the execute-time filter: reject (error) a
-variant-pack entry for a UID with a baked value; forward only pure
-user-supplied UIDs.
+applicability-time filter). No execute-time filter is added: `Graph::execute()`
+forwards the variant pack unchanged and the provider's `findDeviceBuffer` is the
+backstop for a missing pure user-supplied scalar (see Step 5).
 
 ### Step 4: Frontend API and validation
 
@@ -1109,7 +1109,7 @@ the per-tensor flag ([§4.4](#44-feature-signal-derived)).
 ### Step 5: Execute-time variant-pack forwarding
 
 `Graph::execute()` forwards the caller's variant pack to the backend unchanged
-([§4.9](#49-execute-time-variant-pack-filter)): no frontend filter and no
+([§4.9](#49-execute-time-variant-pack-forwarding)): no frontend filter and no
 frontend presence-validation. A variant-pack entry for a UID whose tensor
 carries a baked value is inert — the provider reads the schema value for the
 value-carrying states and ignores the slot. A missing pure user-supplied
@@ -1128,7 +1128,7 @@ today only generates device pointers or skips scalars as constants. Update
 the CPU and GPU reference implementations to read a pass-by-value scalar
 (host value for a runtime tensor, baked value for a constant) so expected
 results match. Add fake plugins (one at `1.2.0` consuming the host scalar,
-one below it) and the 2-bit state / version-floor / filter-and-reject /
+one below it) and the 2-bit state / version-floor / override-inert /
 end-to-end matrix ([§9](#9-testing-plan)).
 
 ### Step 7: Provider adoption
@@ -1202,7 +1202,7 @@ Test conventions follow [RFC 0006](0006_PluginAgnosticIntegrationTests.md). The 
 - **Override inert for defaulted UID.** Supplying a variant-pack value for a
   defaulted (value-carrying) UID is inert — assert that, with or without such a
   variant-pack entry, the baked default reaches the provider unchanged
-  ([§4.9](#49-execute-time-variant-pack-filter)).
+  ([§4.9](#49-execute-time-variant-pack-forwarding)).
 
 - **User-supplied delivery.** A user-supplied host scalar placed in the
   variant pack reaches the provider's `device_buffers` slot and **equals**
@@ -1293,7 +1293,7 @@ Test conventions follow [RFC 0006](0006_PluginAgnosticIntegrationTests.md). The 
 - **`RUNTIME_PARAM`**: the `ScalarType` alternative producing the
   runtime-with-default state — a value-carrying runtime scalar whose
   stored value is a **default** that a variant-pack entry may override
-  ([§4.9](#49-execute-time-variant-pack-filter)).
+  ([§4.9](#49-execute-time-variant-pack-forwarding)).
 - **`COMPILE_TIME_CONST`**: the `ScalarType` alternative producing the
   compile-time constant — a value baked into the op-graph flatbuffer,
   never overridable.
@@ -1307,7 +1307,7 @@ Test conventions follow [RFC 0006](0006_PluginAgnosticIntegrationTests.md). The 
   `graph.tensor(v, ScalarType::RUNTIME_PARAM)`; the value is baked in
   `HIPDNN_ATTR_TENSOR_VALUE_EXT` as a default, overridable via the variant
   pack in a future release (override inert today,
-  [§4.9](#49-execute-time-variant-pack-filter)). Requires plugin floor
+  [§4.9](#49-execute-time-variant-pack-forwarding)). Requires plugin floor
   `1.2.0` (its flag is set).
 - **Compile-time constant** (`is_runtime_pass_by_value == false`,
   value present): created by `set_compile_time_constant(v)`,
