@@ -2,7 +2,7 @@
   "version": 1,
   "cases": [
     {
-      "id": "1_3_1_bfp16_ncl",
+      "id": "2_3_1_bfp16_ncl",
       "values": {
         "io_data_type": "bfloat16",
         "tensors": [
@@ -211,7 +211,7 @@
       }
     },
     {
-      "id": "1_16_1_bfp16_ncl",
+      "id": "1_16_14_bfp16_ncl",
       "values": {
         "io_data_type": "bfloat16",
         "tensors": [
@@ -420,7 +420,7 @@
       }
     },
     {
-      "id": "1_3_1_bfp16_ncl_2",
+      "id": "2_3_1_bfp16_nlc",
       "values": {
         "io_data_type": "bfloat16",
         "tensors": [
@@ -629,7 +629,7 @@
       }
     },
     {
-      "id": "1_16_1_bfp16_ncl_2",
+      "id": "1_16_14_bfp16_nlc",
       "values": {
         "io_data_type": "bfloat16",
         "tensors": [
@@ -838,7 +838,7 @@
       }
     },
     {
-      "id": "1_3_1_fp16_ncl",
+      "id": "2_3_1_fp16_ncl",
       "values": {
         "io_data_type": "half",
         "tensors": [
@@ -1047,7 +1047,7 @@
       }
     },
     {
-      "id": "1_16_1_fp16_ncl",
+      "id": "1_16_14_fp16_ncl",
       "values": {
         "io_data_type": "half",
         "tensors": [
@@ -1256,7 +1256,7 @@
       }
     },
     {
-      "id": "1_3_1_fp16_ncl_2",
+      "id": "2_3_1_fp16_nlc",
       "values": {
         "io_data_type": "half",
         "tensors": [
@@ -1465,7 +1465,7 @@
       }
     },
     {
-      "id": "1_16_1_fp16_ncl_2",
+      "id": "1_16_14_fp16_nlc",
       "values": {
         "io_data_type": "half",
         "tensors": [
@@ -1674,7 +1674,7 @@
       }
     },
     {
-      "id": "1_3_1_fp32_ncl",
+      "id": "2_3_1_fp32_ncl",
       "values": {
         "io_data_type": "float",
         "tensors": [
@@ -1883,7 +1883,7 @@
       }
     },
     {
-      "id": "1_16_1_fp32_ncl",
+      "id": "1_16_14_fp32_ncl",
       "values": {
         "io_data_type": "float",
         "tensors": [
@@ -2092,7 +2092,7 @@
       }
     },
     {
-      "id": "1_3_1_fp32_ncl_2",
+      "id": "2_3_1_fp32_nlc",
       "values": {
         "io_data_type": "float",
         "tensors": [
@@ -2301,7 +2301,7 @@
       }
     },
     {
-      "id": "1_16_1_fp32_ncl_2",
+      "id": "1_16_14_fp32_nlc",
       "values": {
         "io_data_type": "float",
         "tensors": [
@@ -2510,7 +2510,7 @@
       }
     },
     {
-      "id": "1_3_1_1_bfp16_nchw",
+      "id": "2_3_1_1_bfp16_nchw",
       "values": {
         "io_data_type": "bfloat16",
         "tensors": [
@@ -2739,7 +2739,7 @@
       }
     },
     {
-      "id": "1_3_1_1_bfp16_nchw_2",
+      "id": "32_3_1_14_bfp16_nchw",
       "values": {
         "io_data_type": "bfloat16",
         "tensors": [
@@ -2968,7 +2968,7 @@
       }
     },
     {
-      "id": "1_3_1_1_bfp16_nchw_3",
+      "id": "2_3_1_1_bfp16_nhwc",
       "values": {
         "io_data_type": "bfloat16",
         "tensors": [
@@ -3197,7 +3197,7 @@
       }
     },
     {
-      "id": "1_3_1_1_bfp16_nchw_4",
+      "id": "32_3_1_14_bfp16_nhwc",
       "values": {
         "io_data_type": "bfloat16",
         "tensors": [
@@ -3426,7 +3426,7 @@
       }
     },
     {
-      "id": "1_3_1_1_fp16_nchw",
+      "id": "2_3_1_1_fp16_nchw",
       "values": {
         "io_data_type": "half",
         "tensors": [
@@ -3655,7 +3655,7 @@
       }
     },
     {
-      "id": "1_3_1_1_fp16_nchw_2",
+      "id": "32_3_1_14_fp16_nchw",
       "values": {
         "io_data_type": "half",
         "tensors": [
@@ -3884,7 +3884,7 @@
       }
     },
     {
-      "id": "1_3_1_1_fp16_nchw_3",
+      "id": "2_3_1_1_fp16_nhwc",
       "values": {
         "io_data_type": "half",
         "tensors": [
@@ -4113,7 +4113,7 @@
       }
     },
     {
-      "id": "1_3_1_1_fp16_nchw_4",
+      "id": "32_3_1_14_fp16_nhwc",
       "values": {
         "io_data_type": "half",
         "tensors": [
@@ -4342,7 +4342,7 @@
       }
     },
     {
-      "id": "1_3_1_1_fp32_nchw",
+      "id": "2_3_1_1_fp32_nchw",
       "values": {
         "io_data_type": "float",
         "tensors": [
@@ -4571,7 +4571,7 @@
       }
     },
     {
-      "id": "1_3_1_1_fp32_nchw_2",
+      "id": "32_3_1_14_fp32_nchw",
       "values": {
         "io_data_type": "float",
         "tensors": [
@@ -4800,7 +4800,7 @@
       }
     },
     {
-      "id": "1_3_1_1_fp32_nchw_3",
+      "id": "2_3_1_1_fp32_nhwc",
       "values": {
         "io_data_type": "float",
         "tensors": [
@@ -5029,7 +5029,7 @@
       }
     },
     {
-      "id": "1_3_1_1_fp32_nchw_4",
+      "id": "32_3_1_14_fp32_nhwc",
       "values": {
         "io_data_type": "float",
         "tensors": [
@@ -5258,7 +5258,7 @@
       }
     },
     {
-      "id": "1_3_1_1_1_bfp16_ncdhw",
+      "id": "2_3_3_1_1_bfp16_ncdhw",
       "values": {
         "io_data_type": "bfloat16",
         "tensors": [
@@ -5507,7 +5507,7 @@
       }
     },
     {
-      "id": "1_3_1_1_1_bfp16_ncdhw_2",
+      "id": "2_3_2_4_4_bfp16_ncdhw",
       "values": {
         "io_data_type": "bfloat16",
         "tensors": [
@@ -5756,7 +5756,7 @@
       }
     },
     {
-      "id": "1_3_1_1_1_bfp16_ncdhw_3",
+      "id": "2_3_3_1_1_bfp16_ndhwc",
       "values": {
         "io_data_type": "bfloat16",
         "tensors": [
@@ -6005,7 +6005,7 @@
       }
     },
     {
-      "id": "1_3_1_1_1_bfp16_ncdhw_4",
+      "id": "2_3_2_4_4_bfp16_ndhwc",
       "values": {
         "io_data_type": "bfloat16",
         "tensors": [
@@ -6254,7 +6254,7 @@
       }
     },
     {
-      "id": "1_3_1_1_1_fp16_ncdhw",
+      "id": "2_3_3_1_1_fp16_ncdhw",
       "values": {
         "io_data_type": "half",
         "tensors": [
@@ -6503,7 +6503,7 @@
       }
     },
     {
-      "id": "1_3_1_1_1_fp16_ncdhw_2",
+      "id": "2_3_2_4_4_fp16_ncdhw",
       "values": {
         "io_data_type": "half",
         "tensors": [
@@ -6752,7 +6752,7 @@
       }
     },
     {
-      "id": "1_3_1_1_1_fp16_ncdhw_3",
+      "id": "2_3_3_1_1_fp16_ndhwc",
       "values": {
         "io_data_type": "half",
         "tensors": [
@@ -7001,7 +7001,7 @@
       }
     },
     {
-      "id": "1_3_1_1_1_fp16_ncdhw_4",
+      "id": "2_3_2_4_4_fp16_ndhwc",
       "values": {
         "io_data_type": "half",
         "tensors": [
@@ -7250,7 +7250,7 @@
       }
     },
     {
-      "id": "1_3_1_1_1_fp32_ncdhw",
+      "id": "2_3_3_1_1_fp32_ncdhw",
       "values": {
         "io_data_type": "float",
         "tensors": [
@@ -7499,7 +7499,7 @@
       }
     },
     {
-      "id": "1_3_1_1_1_fp32_ncdhw_2",
+      "id": "2_3_2_4_4_fp32_ncdhw",
       "values": {
         "io_data_type": "float",
         "tensors": [
@@ -7748,7 +7748,7 @@
       }
     },
     {
-      "id": "1_3_1_1_1_fp32_ncdhw_3",
+      "id": "2_3_3_1_1_fp32_ndhwc",
       "values": {
         "io_data_type": "float",
         "tensors": [
@@ -7997,7 +7997,7 @@
       }
     },
     {
-      "id": "1_3_1_1_1_fp32_ncdhw_4",
+      "id": "2_3_2_4_4_fp32_ndhwc",
       "values": {
         "io_data_type": "float",
         "tensors": [

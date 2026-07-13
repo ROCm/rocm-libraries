@@ -2,7 +2,7 @@
   "version": 1,
   "cases": [
     {
-      "id": "1_32_1_bfp16_ncl",
+      "id": "8_32_2048_bfp16_ncl",
       "values": {
         "io_data_type": "bfloat16",
         "tensors": [
@@ -103,7 +103,7 @@
       }
     },
     {
-      "id": "1_128_1_bfp16_ncl",
+      "id": "16_128_512_bfp16_ncl",
       "values": {
         "io_data_type": "bfloat16",
         "tensors": [
@@ -204,7 +204,7 @@
       }
     },
     {
-      "id": "1_32_1_bfp16_ncl_2",
+      "id": "8_32_2048_bfp16_nlc",
       "values": {
         "io_data_type": "bfloat16",
         "tensors": [
@@ -305,7 +305,7 @@
       }
     },
     {
-      "id": "1_128_1_bfp16_ncl_2",
+      "id": "16_128_512_bfp16_nlc",
       "values": {
         "io_data_type": "bfloat16",
         "tensors": [
@@ -406,7 +406,7 @@
       }
     },
     {
-      "id": "1_32_1_fp16_ncl",
+      "id": "8_32_2048_fp16_ncl",
       "values": {
         "io_data_type": "half",
         "tensors": [
@@ -507,7 +507,7 @@
       }
     },
     {
-      "id": "1_128_1_fp16_ncl",
+      "id": "16_128_512_fp16_ncl",
       "values": {
         "io_data_type": "half",
         "tensors": [
@@ -608,7 +608,7 @@
       }
     },
     {
-      "id": "1_32_1_fp16_ncl_2",
+      "id": "8_32_2048_fp16_nlc",
       "values": {
         "io_data_type": "half",
         "tensors": [
@@ -709,7 +709,7 @@
       }
     },
     {
-      "id": "1_128_1_fp16_ncl_2",
+      "id": "16_128_512_fp16_nlc",
       "values": {
         "io_data_type": "half",
         "tensors": [
@@ -810,7 +810,7 @@
       }
     },
     {
-      "id": "1_32_1_fp32_ncl",
+      "id": "8_32_2048_fp32_ncl",
       "values": {
         "io_data_type": "float",
         "tensors": [
@@ -911,7 +911,7 @@
       }
     },
     {
-      "id": "1_128_1_fp32_ncl",
+      "id": "16_128_512_fp32_ncl",
       "values": {
         "io_data_type": "float",
         "tensors": [
@@ -1012,7 +1012,7 @@
       }
     },
     {
-      "id": "1_32_1_fp32_ncl_2",
+      "id": "8_32_2048_fp32_nlc",
       "values": {
         "io_data_type": "float",
         "tensors": [
@@ -1113,7 +1113,7 @@
       }
     },
     {
-      "id": "1_128_1_fp32_ncl_2",
+      "id": "16_128_512_fp32_nlc",
       "values": {
         "io_data_type": "float",
         "tensors": [
@@ -1214,7 +1214,7 @@
       }
     },
     {
-      "id": "1_16_1_1_bfp16_nchw",
+      "id": "1_16_112_112_bfp16_nchw",
       "values": {
         "io_data_type": "bfloat16",
         "tensors": [
@@ -1327,7 +1327,7 @@
       }
     },
     {
-      "id": "1_256_1_1_bfp16_nchw",
+      "id": "5_256_14_14_bfp16_nchw",
       "values": {
         "io_data_type": "bfloat16",
         "tensors": [
@@ -1440,7 +1440,7 @@
       }
     },
     {
-      "id": "1_16_1_1_bfp16_nchw_2",
+      "id": "1_16_112_112_bfp16_nhwc",
       "values": {
         "io_data_type": "bfloat16",
         "tensors": [
@@ -1553,7 +1553,7 @@
       }
     },
     {
-      "id": "1_256_1_1_bfp16_nchw_2",
+      "id": "5_256_14_14_bfp16_nhwc",
       "values": {
         "io_data_type": "bfloat16",
         "tensors": [
@@ -1666,7 +1666,7 @@
       }
     },
     {
-      "id": "1_16_1_1_fp16_nchw",
+      "id": "1_16_112_112_fp16_nchw",
       "values": {
         "io_data_type": "half",
         "tensors": [
@@ -1779,7 +1779,7 @@
       }
     },
     {
-      "id": "1_256_1_1_fp16_nchw",
+      "id": "5_256_14_14_fp16_nchw",
       "values": {
         "io_data_type": "half",
         "tensors": [
@@ -1892,7 +1892,7 @@
       }
     },
     {
-      "id": "1_16_1_1_fp16_nchw_2",
+      "id": "1_16_112_112_fp16_nhwc",
       "values": {
         "io_data_type": "half",
         "tensors": [
@@ -2005,7 +2005,7 @@
       }
     },
     {
-      "id": "1_256_1_1_fp16_nchw_2",
+      "id": "5_256_14_14_fp16_nhwc",
       "values": {
         "io_data_type": "half",
         "tensors": [
@@ -2118,7 +2118,7 @@
       }
     },
     {
-      "id": "1_16_1_1_fp32_nchw",
+      "id": "1_16_112_112_fp32_nchw",
       "values": {
         "io_data_type": "float",
         "tensors": [
@@ -2231,7 +2231,7 @@
       }
     },
     {
-      "id": "1_256_1_1_fp32_nchw",
+      "id": "5_256_14_14_fp32_nchw",
       "values": {
         "io_data_type": "float",
         "tensors": [
@@ -2344,7 +2344,7 @@
       }
     },
     {
-      "id": "1_16_1_1_fp32_nchw_2",
+      "id": "1_16_112_112_fp32_nhwc",
       "values": {
         "io_data_type": "float",
         "tensors": [
@@ -2457,7 +2457,7 @@
       }
     },
     {
-      "id": "1_256_1_1_fp32_nchw_2",
+      "id": "5_256_14_14_fp32_nhwc",
       "values": {
         "io_data_type": "float",
         "tensors": [
@@ -2570,7 +2570,7 @@
       }
     },
     {
-      "id": "1_16_1_1_1_bfp16_ncdhw",
+      "id": "1_16_8_112_112_bfp16_ncdhw",
       "values": {
         "io_data_type": "bfloat16",
         "tensors": [
@@ -2695,7 +2695,7 @@
       }
     },
     {
-      "id": "1_256_1_1_1_bfp16_ncdhw",
+      "id": "5_256_4_14_14_bfp16_ncdhw",
       "values": {
         "io_data_type": "bfloat16",
         "tensors": [
@@ -2820,7 +2820,7 @@
       }
     },
     {
-      "id": "1_16_1_1_1_bfp16_ncdhw_2",
+      "id": "1_16_8_112_112_bfp16_ndhwc",
       "values": {
         "io_data_type": "bfloat16",
         "tensors": [
@@ -2945,7 +2945,7 @@
       }
     },
     {
-      "id": "1_256_1_1_1_bfp16_ncdhw_2",
+      "id": "5_256_4_14_14_bfp16_ndhwc",
       "values": {
         "io_data_type": "bfloat16",
         "tensors": [
@@ -3070,7 +3070,7 @@
       }
     },
     {
-      "id": "1_16_1_1_1_fp16_ncdhw",
+      "id": "1_16_8_112_112_fp16_ncdhw",
       "values": {
         "io_data_type": "half",
         "tensors": [
@@ -3195,7 +3195,7 @@
       }
     },
     {
-      "id": "1_256_1_1_1_fp16_ncdhw",
+      "id": "5_256_4_14_14_fp16_ncdhw",
       "values": {
         "io_data_type": "half",
         "tensors": [
@@ -3320,7 +3320,7 @@
       }
     },
     {
-      "id": "1_16_1_1_1_fp16_ncdhw_2",
+      "id": "1_16_8_112_112_fp16_ndhwc",
       "values": {
         "io_data_type": "half",
         "tensors": [
@@ -3445,7 +3445,7 @@
       }
     },
     {
-      "id": "1_256_1_1_1_fp16_ncdhw_2",
+      "id": "5_256_4_14_14_fp16_ndhwc",
       "values": {
         "io_data_type": "half",
         "tensors": [
@@ -3570,7 +3570,7 @@
       }
     },
     {
-      "id": "1_16_1_1_1_fp32_ncdhw",
+      "id": "1_16_8_112_112_fp32_ncdhw",
       "values": {
         "io_data_type": "float",
         "tensors": [
@@ -3695,7 +3695,7 @@
       }
     },
     {
-      "id": "1_256_1_1_1_fp32_ncdhw",
+      "id": "5_256_4_14_14_fp32_ncdhw",
       "values": {
         "io_data_type": "float",
         "tensors": [
@@ -3820,7 +3820,7 @@
       }
     },
     {
-      "id": "1_16_1_1_1_fp32_ncdhw_2",
+      "id": "1_16_8_112_112_fp32_ndhwc",
       "values": {
         "io_data_type": "float",
         "tensors": [
@@ -3945,7 +3945,7 @@
       }
     },
     {
-      "id": "1_256_1_1_1_fp32_ncdhw_2",
+      "id": "5_256_4_14_14_fp32_ndhwc",
       "values": {
         "io_data_type": "float",
         "tensors": [

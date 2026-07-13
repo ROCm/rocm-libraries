@@ -29,8 +29,16 @@ template + sweep (one template per topology, one sweep with all cases)
     |
     |  Hop C: verify_migration.py (reconcile counts + byte-diff graphs/metadata)
     v
-VERIFIED — lossless migration proven
+VERIFIED at byte level — the migrated graph is identical to the captured one
+    |
+    |  Hop D: diff_coverage.py (run both suites, compare pass sets)
+    v
+VERIFIED at behavior level — every C++ PASS has a bundle that also PASSes
 ```
+
+**Hop C proves the bytes survived; Hop D proves the behavior survived.** A
+graph can round-trip perfectly on disk yet fail to run — Hop D is what makes
+"turn off the C++ tests, lose nothing" a checked fact rather than a hope.
 
 ## How to Run
 
@@ -48,8 +56,8 @@ cmake --build build --target integration_tests
 migration_scripts/run_capture_pipeline.sh build/bin/integration_tests
 ```
 
-This runs all four verification layers in sequence. Pass `--skip-layer4`
-to skip the differential coverage check (which requires a GPU).
+This runs Hops A–D plus the supporting checks in sequence. Pass
+`--skip-hopd` to skip the differential coverage check (which requires a GPU).
 
 ### Manual: Step by step
 
@@ -91,6 +99,10 @@ python3 migration_scripts/place_bundles.py \
 
 Groups captured graphs by **structure** (node types + wiring + tensor
 set). Graphs sharing the same topology collapse into one template+sweep.
+Each sweep also gets a generated `CASES.md` — a human-readable table of
+every case (id, shape, dtype, layout, per-tensor input ranges/seeds). The
+case `id` is a short filter handle; `CASES.md` is where the full per-case
+truth lives, since the id cannot carry every tensor's shape and range.
 
 #### Step 4: Verify (Hop C) — reconcile everything
 
@@ -116,18 +128,18 @@ python3 migration_scripts/import_graph.py \
 Dedup-aware placement. Default: skip exact duplicates. `--strict` exits
 non-zero on dup (CI mode). `--force` appends regardless.
 
-## Verification Layers
+## Verification
 
-Four layers, escalating in strength:
+Two hops prove the migration; two supporting checks guard the tooling:
 
-| Layer | What | Needs GPU? |
+| Check | What | Needs GPU? |
 |---|---|---|
-| **1 — Hop C** | Census + capture + sweep count reconciliation, per-case byte-diff of graph + seed + inputs | No |
-| **2 — Smoke** | Real C++ binary loads every placed bundle via the production template expander | Depends on test |
-| **3 — Idempotency** | Re-run pipeline; `git diff --exit-code` must be clean | No |
-| **4 — Diff coverage** | `pass_set_bundle ⊇ pass_set_cpp` — no C++ PASS becomes a bundle SKIP | **Yes** |
+| **Hop C — byte round-trip** | Census ↔ capture ↔ sweep count reconciliation, per-case byte-diff of graph + seed + inputs | No |
+| Supporting — loader smoke | Real C++ binary loads every placed bundle via the production template expander | Depends on test |
+| Supporting — idempotency | Re-run pipeline; `git diff --exit-code` must be clean | No |
+| **Hop D — diff coverage** | `pass_set_bundle ⊇ pass_set_cpp` — no C++ PASS becomes a bundle SKIP | **Yes** |
 
-Layer 4 is the acceptance proof: when it's green, turning off C++
+Hop D is the acceptance proof: when it's green, turning off C++
 integration tests provably loses no coverage for graph+GPU-plugin tests.
 
 ```bash
@@ -159,7 +171,7 @@ python3 migration_scripts/diff_coverage.py \
 | `place_bundles.py` | Convert captured bundles into template+sweep format (Hop B) |
 | `verify_migration.py` | Reconcile census ↔ capture ↔ sweep, byte-diff graphs + metadata (Hop C) |
 | `import_graph.py` | Import a single graph with duplicate detection |
-| `diff_coverage.py` | Differential coverage: assert `pass_set_bundle ⊇ pass_set_cpp` (Layer 4) |
+| `diff_coverage.py` | Differential coverage: assert `pass_set_bundle ⊇ pass_set_cpp` (Hop D) |
 | `run_capture_pipeline.sh` | Orchestrate all hops + verification layers |
 | `test_migration.py` | Self-test on synthetic fixture (no binary needed) |
 
@@ -177,6 +189,29 @@ Instead of maintaining a per-op allowlist:
 - **Structural** (fixed in template): `node.type`, `*_tensor_uid`,
   `tensor.uid`, `tensor.virtual`
 - **Knob** (templatized if varies): dims, strides, dtypes, node attrs
+
+### Case ids — handle, not description
+
+A sweep case can differ along many axes: tensor dims, strides, dtype, node
+attributes (padding/stride/dilation), and per-tensor input ranges/seeds. That
+is too high-dimensional to encode in a readable gtest name. So the id is a
+**handle**, following the content-addressable pattern (`docker`, `git`, `nix`):
+
+```
+{shape}_{dtype}_{layout}_{≤3 salient attrs}[_{hash6}]
+```
+
+- The readable tokens (shape, dtype, layout, top attrs) are the **filter
+  surface** (RFC 0011 §4.1) — they only encode axes that actually vary in the
+  sweep, so ids stay short.
+- The `hash6` suffix is a short content hash over the case's **full identity**
+  (`values` + `metadata.inputs` + `seed`), appended only when the readable base
+  is not already unique. It guarantees uniqueness — including for two cases that
+  differ *only* in an input range (e.g. a bias filled from `[-0.5, 0.5]` vs
+  `[-1, 1]`) — and is stable across additions/reordering, unlike an `_N` counter.
+
+The full per-case truth the id cannot carry lives in the generated `CASES.md`
+next to each sweep.
 
 ### Verify gate
 

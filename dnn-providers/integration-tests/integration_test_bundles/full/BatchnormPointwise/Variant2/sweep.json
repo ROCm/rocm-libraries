@@ -2,7 +2,7 @@
   "version": 1,
   "cases": [
     {
-      "id": "1_3_1_bfp16_ncl_0_0",
+      "id": "1_3_14_bfp16_ncl_rlo0_norslope_norhi",
       "values": {
         "io_data_type": "bfloat16",
         "tensors": [
@@ -230,7 +230,7 @@
       }
     },
     {
-      "id": "1_3_1_bfp16_ncl_6_0",
+      "id": "1_3_14_bfp16_ncl_norlo_norslope_rhi6",
       "values": {
         "io_data_type": "bfloat16",
         "tensors": [
@@ -458,7 +458,7 @@
       }
     },
     {
-      "id": "1_64_1_bfp16_ncl_0_10000000149011612_0_5",
+      "id": "2_64_128_bfp16_ncl_rlo0p1_norslope_rhi0p5",
       "values": {
         "io_data_type": "bfloat16",
         "tensors": [
@@ -686,7 +686,7 @@
       }
     },
     {
-      "id": "1_64_1_bfp16_ncl",
+      "id": "2_64_128_bfp16_ncl_norlo_rslope0p01_norhi",
       "values": {
         "io_data_type": "bfloat16",
         "tensors": [
@@ -914,7 +914,7 @@
       }
     },
     {
-      "id": "1_3_1_bfp16_ncl_0_10000000149011612_0_5",
+      "id": "1_3_14_bfp16_ncl_rlo0p1_norslope_rhi0p5",
       "values": {
         "io_data_type": "bfloat16",
         "tensors": [
@@ -1142,7 +1142,7 @@
       }
     },
     {
-      "id": "1_3_1_bfp16_ncl_0_0_2",
+      "id": "1_3_14_bfp16_nlc_rlo0_norslope_norhi",
       "values": {
         "io_data_type": "bfloat16",
         "tensors": [
@@ -1370,7 +1370,7 @@
       }
     },
     {
-      "id": "1_3_1_bfp16_ncl_6_0_2",
+      "id": "1_3_14_bfp16_nlc_norlo_norslope_rhi6",
       "values": {
         "io_data_type": "bfloat16",
         "tensors": [
@@ -1598,7 +1598,7 @@
       }
     },
     {
-      "id": "1_3_1_bfp16_ncl_0_10000000149011612_0_5_2",
+      "id": "1_3_14_bfp16_nlc_rlo0p1_norslope_rhi0p5",
       "values": {
         "io_data_type": "bfloat16",
         "tensors": [
@@ -1826,7 +1826,7 @@
       }
     },
     {
-      "id": "1_3_1_bfp16_ncl",
+      "id": "1_3_14_bfp16_nlc_norlo_rslope0p01_norhi",
       "values": {
         "io_data_type": "bfloat16",
         "tensors": [
@@ -2054,7 +2054,7 @@
       }
     },
     {
-      "id": "1_8_1_bfp16_ncl_0_0",
+      "id": "4_8_56_bfp16_nlc_rlo0_norslope_norhi",
       "values": {
         "io_data_type": "bfloat16",
         "tensors": [
@@ -2282,7 +2282,7 @@
       }
     },
     {
-      "id": "1_8_1_bfp16_ncl_6_0",
+      "id": "4_8_56_bfp16_nlc_norlo_norslope_rhi6",
       "values": {
         "io_data_type": "bfloat16",
         "tensors": [
@@ -2510,7 +2510,7 @@
       }
     },
     {
-      "id": "1_3_1_bfp16_ncl_2",
+      "id": "1_3_14_bfp16_ncl_norlo_rslope0p01_norhi",
       "values": {
         "io_data_type": "bfloat16",
         "tensors": [
@@ -2738,7 +2738,7 @@
       }
     },
     {
-      "id": "1_8_1_bfp16_ncl_0_10000000149011612_0_5",
+      "id": "4_8_56_bfp16_nlc_rlo0p1_norslope_rhi0p5",
       "values": {
         "io_data_type": "bfloat16",
         "tensors": [
@@ -2966,7 +2966,7 @@
       }
     },
     {
-      "id": "1_8_1_bfp16_ncl",
+      "id": "4_8_56_bfp16_nlc_norlo_rslope0p01_norhi",
       "values": {
         "io_data_type": "bfloat16",
         "tensors": [
@@ -3194,7 +3194,7 @@
       }
     },
     {
-      "id": "1_64_1_bfp16_ncl_0_0",
+      "id": "2_64_128_bfp16_nlc_rlo0_norslope_norhi",
       "values": {
         "io_data_type": "bfloat16",
         "tensors": [
@@ -3422,7 +3422,7 @@
       }
     },
     {
-      "id": "1_64_1_bfp16_ncl_6_0",
+      "id": "2_64_128_bfp16_nlc_norlo_norslope_rhi6",
       "values": {
         "io_data_type": "bfloat16",
         "tensors": [
@@ -3650,7 +3650,7 @@
       }
     },
     {
-      "id": "1_64_1_bfp16_ncl_0_10000000149011612_0_5_2",
+      "id": "2_64_128_bfp16_nlc_rlo0p1_norslope_rhi0p5",
       "values": {
         "io_data_type": "bfloat16",
         "tensors": [
@@ -3878,7 +3878,7 @@
       }
     },
     {
-      "id": "1_64_1_bfp16_ncl_2",
+      "id": "2_64_128_bfp16_nlc_norlo_rslope0p01_norhi",
       "values": {
         "io_data_type": "bfloat16",
         "tensors": [
@@ -4106,7 +4106,7 @@
       }
     },
     {
-      "id": "1_8_1_bfp16_ncl_0_0_2",
+      "id": "4_8_56_bfp16_ncl_rlo0_norslope_norhi",
       "values": {
         "io_data_type": "bfloat16",
         "tensors": [
@@ -4334,7 +4334,7 @@
       }
     },
     {
-      "id": "1_8_1_bfp16_ncl_6_0_2",
+      "id": "4_8_56_bfp16_ncl_norlo_norslope_rhi6",
       "values": {
         "io_data_type": "bfloat16",
         "tensors": [
@@ -4562,7 +4562,7 @@
       }
     },
     {
-      "id": "1_8_1_bfp16_ncl_0_10000000149011612_0_5_2",
+      "id": "4_8_56_bfp16_ncl_rlo0p1_norslope_rhi0p5",
       "values": {
         "io_data_type": "bfloat16",
         "tensors": [
@@ -4790,7 +4790,7 @@
       }
     },
     {
-      "id": "1_8_1_bfp16_ncl_2",
+      "id": "4_8_56_bfp16_ncl_norlo_rslope0p01_norhi",
       "values": {
         "io_data_type": "bfloat16",
         "tensors": [
@@ -5018,7 +5018,7 @@
       }
     },
     {
-      "id": "1_64_1_bfp16_ncl_0_0_2",
+      "id": "2_64_128_bfp16_ncl_rlo0_norslope_norhi",
       "values": {
         "io_data_type": "bfloat16",
         "tensors": [
@@ -5246,7 +5246,7 @@
       }
     },
     {
-      "id": "1_64_1_bfp16_ncl_6_0_2",
+      "id": "2_64_128_bfp16_ncl_norlo_norslope_rhi6",
       "values": {
         "io_data_type": "bfloat16",
         "tensors": [
@@ -5474,7 +5474,7 @@
       }
     },
     {
-      "id": "1_3_1_fp16_ncl_0_0",
+      "id": "1_3_14_fp16_ncl_rlo0_norslope_norhi",
       "values": {
         "io_data_type": "half",
         "tensors": [
@@ -5702,7 +5702,7 @@
       }
     },
     {
-      "id": "1_3_1_fp16_ncl_6_0",
+      "id": "1_3_14_fp16_ncl_norlo_norslope_rhi6",
       "values": {
         "io_data_type": "half",
         "tensors": [
@@ -5930,7 +5930,7 @@
       }
     },
     {
-      "id": "1_64_1_fp16_ncl_0_10000000149011612_0_5",
+      "id": "2_64_128_fp16_ncl_rlo0p1_norslope_rhi0p5",
       "values": {
         "io_data_type": "half",
         "tensors": [
@@ -6158,7 +6158,7 @@
       }
     },
     {
-      "id": "1_64_1_fp16_ncl",
+      "id": "2_64_128_fp16_ncl_norlo_rslope0p01_norhi",
       "values": {
         "io_data_type": "half",
         "tensors": [
@@ -6386,7 +6386,7 @@
       }
     },
     {
-      "id": "1_3_1_fp16_ncl_0_10000000149011612_0_5",
+      "id": "1_3_14_fp16_ncl_rlo0p1_norslope_rhi0p5",
       "values": {
         "io_data_type": "half",
         "tensors": [
@@ -6614,7 +6614,7 @@
       }
     },
     {
-      "id": "1_3_1_fp16_ncl_0_0_2",
+      "id": "1_3_14_fp16_nlc_rlo0_norslope_norhi",
       "values": {
         "io_data_type": "half",
         "tensors": [
@@ -6842,7 +6842,7 @@
       }
     },
     {
-      "id": "1_3_1_fp16_ncl_6_0_2",
+      "id": "1_3_14_fp16_nlc_norlo_norslope_rhi6",
       "values": {
         "io_data_type": "half",
         "tensors": [
@@ -7070,7 +7070,7 @@
       }
     },
     {
-      "id": "1_3_1_fp16_ncl_0_10000000149011612_0_5_2",
+      "id": "1_3_14_fp16_nlc_rlo0p1_norslope_rhi0p5",
       "values": {
         "io_data_type": "half",
         "tensors": [
@@ -7298,7 +7298,7 @@
       }
     },
     {
-      "id": "1_3_1_fp16_ncl",
+      "id": "1_3_14_fp16_nlc_norlo_rslope0p01_norhi",
       "values": {
         "io_data_type": "half",
         "tensors": [
@@ -7526,7 +7526,7 @@
       }
     },
     {
-      "id": "1_8_1_fp16_ncl_0_0",
+      "id": "4_8_56_fp16_nlc_rlo0_norslope_norhi",
       "values": {
         "io_data_type": "half",
         "tensors": [
@@ -7754,7 +7754,7 @@
       }
     },
     {
-      "id": "1_8_1_fp16_ncl_6_0",
+      "id": "4_8_56_fp16_nlc_norlo_norslope_rhi6",
       "values": {
         "io_data_type": "half",
         "tensors": [
@@ -7982,7 +7982,7 @@
       }
     },
     {
-      "id": "1_3_1_fp16_ncl_2",
+      "id": "1_3_14_fp16_ncl_norlo_rslope0p01_norhi",
       "values": {
         "io_data_type": "half",
         "tensors": [
@@ -8210,7 +8210,7 @@
       }
     },
     {
-      "id": "1_8_1_fp16_ncl_0_10000000149011612_0_5",
+      "id": "4_8_56_fp16_nlc_rlo0p1_norslope_rhi0p5",
       "values": {
         "io_data_type": "half",
         "tensors": [
@@ -8438,7 +8438,7 @@
       }
     },
     {
-      "id": "1_8_1_fp16_ncl",
+      "id": "4_8_56_fp16_nlc_norlo_rslope0p01_norhi",
       "values": {
         "io_data_type": "half",
         "tensors": [
@@ -8666,7 +8666,7 @@
       }
     },
     {
-      "id": "1_64_1_fp16_ncl_0_0",
+      "id": "2_64_128_fp16_nlc_rlo0_norslope_norhi",
       "values": {
         "io_data_type": "half",
         "tensors": [
@@ -8894,7 +8894,7 @@
       }
     },
     {
-      "id": "1_64_1_fp16_ncl_6_0",
+      "id": "2_64_128_fp16_nlc_norlo_norslope_rhi6",
       "values": {
         "io_data_type": "half",
         "tensors": [
@@ -9122,7 +9122,7 @@
       }
     },
     {
-      "id": "1_64_1_fp16_ncl_0_10000000149011612_0_5_2",
+      "id": "2_64_128_fp16_nlc_rlo0p1_norslope_rhi0p5",
       "values": {
         "io_data_type": "half",
         "tensors": [
@@ -9350,7 +9350,7 @@
       }
     },
     {
-      "id": "1_64_1_fp16_ncl_2",
+      "id": "2_64_128_fp16_nlc_norlo_rslope0p01_norhi",
       "values": {
         "io_data_type": "half",
         "tensors": [
@@ -9578,7 +9578,7 @@
       }
     },
     {
-      "id": "1_8_1_fp16_ncl_0_0_2",
+      "id": "4_8_56_fp16_ncl_rlo0_norslope_norhi",
       "values": {
         "io_data_type": "half",
         "tensors": [
@@ -9806,7 +9806,7 @@
       }
     },
     {
-      "id": "1_8_1_fp16_ncl_6_0_2",
+      "id": "4_8_56_fp16_ncl_norlo_norslope_rhi6",
       "values": {
         "io_data_type": "half",
         "tensors": [
@@ -10034,7 +10034,7 @@
       }
     },
     {
-      "id": "1_8_1_fp16_ncl_0_10000000149011612_0_5_2",
+      "id": "4_8_56_fp16_ncl_rlo0p1_norslope_rhi0p5",
       "values": {
         "io_data_type": "half",
         "tensors": [
@@ -10262,7 +10262,7 @@
       }
     },
     {
-      "id": "1_8_1_fp16_ncl_2",
+      "id": "4_8_56_fp16_ncl_norlo_rslope0p01_norhi",
       "values": {
         "io_data_type": "half",
         "tensors": [
@@ -10490,7 +10490,7 @@
       }
     },
     {
-      "id": "1_64_1_fp16_ncl_0_0_2",
+      "id": "2_64_128_fp16_ncl_rlo0_norslope_norhi",
       "values": {
         "io_data_type": "half",
         "tensors": [
@@ -10718,7 +10718,7 @@
       }
     },
     {
-      "id": "1_64_1_fp16_ncl_6_0_2",
+      "id": "2_64_128_fp16_ncl_norlo_norslope_rhi6",
       "values": {
         "io_data_type": "half",
         "tensors": [
@@ -10946,7 +10946,7 @@
       }
     },
     {
-      "id": "1_3_1_fp32_ncl_0_0",
+      "id": "1_3_14_fp32_ncl_rlo0_norslope_norhi",
       "values": {
         "io_data_type": "float",
         "tensors": [
@@ -11174,7 +11174,7 @@
       }
     },
     {
-      "id": "1_3_1_fp32_ncl_6_0",
+      "id": "1_3_14_fp32_ncl_norlo_norslope_rhi6",
       "values": {
         "io_data_type": "float",
         "tensors": [
@@ -11402,7 +11402,7 @@
       }
     },
     {
-      "id": "1_64_1_fp32_ncl_0_10000000149011612_0_5",
+      "id": "2_64_128_fp32_ncl_rlo0p1_norslope_rhi0p5",
       "values": {
         "io_data_type": "float",
         "tensors": [
@@ -11630,7 +11630,7 @@
       }
     },
     {
-      "id": "1_64_1_fp32_ncl",
+      "id": "2_64_128_fp32_ncl_norlo_rslope0p01_norhi",
       "values": {
         "io_data_type": "float",
         "tensors": [
@@ -11858,7 +11858,7 @@
       }
     },
     {
-      "id": "1_3_1_fp32_ncl_0_10000000149011612_0_5",
+      "id": "1_3_14_fp32_ncl_rlo0p1_norslope_rhi0p5",
       "values": {
         "io_data_type": "float",
         "tensors": [
@@ -12086,7 +12086,7 @@
       }
     },
     {
-      "id": "1_3_1_fp32_ncl_0_0_2",
+      "id": "1_3_14_fp32_nlc_rlo0_norslope_norhi",
       "values": {
         "io_data_type": "float",
         "tensors": [
@@ -12314,7 +12314,7 @@
       }
     },
     {
-      "id": "1_3_1_fp32_ncl_6_0_2",
+      "id": "1_3_14_fp32_nlc_norlo_norslope_rhi6",
       "values": {
         "io_data_type": "float",
         "tensors": [
@@ -12542,7 +12542,7 @@
       }
     },
     {
-      "id": "1_3_1_fp32_ncl_0_10000000149011612_0_5_2",
+      "id": "1_3_14_fp32_nlc_rlo0p1_norslope_rhi0p5",
       "values": {
         "io_data_type": "float",
         "tensors": [
@@ -12770,7 +12770,7 @@
       }
     },
     {
-      "id": "1_3_1_fp32_ncl",
+      "id": "1_3_14_fp32_nlc_norlo_rslope0p01_norhi",
       "values": {
         "io_data_type": "float",
         "tensors": [
@@ -12998,7 +12998,7 @@
       }
     },
     {
-      "id": "1_8_1_fp32_ncl_0_0",
+      "id": "4_8_56_fp32_nlc_rlo0_norslope_norhi",
       "values": {
         "io_data_type": "float",
         "tensors": [
@@ -13226,7 +13226,7 @@
       }
     },
     {
-      "id": "1_8_1_fp32_ncl_6_0",
+      "id": "4_8_56_fp32_nlc_norlo_norslope_rhi6",
       "values": {
         "io_data_type": "float",
         "tensors": [
@@ -13454,7 +13454,7 @@
       }
     },
     {
-      "id": "1_3_1_fp32_ncl_2",
+      "id": "1_3_14_fp32_ncl_norlo_rslope0p01_norhi",
       "values": {
         "io_data_type": "float",
         "tensors": [
@@ -13682,7 +13682,7 @@
       }
     },
     {
-      "id": "1_8_1_fp32_ncl_0_10000000149011612_0_5",
+      "id": "4_8_56_fp32_nlc_rlo0p1_norslope_rhi0p5",
       "values": {
         "io_data_type": "float",
         "tensors": [
@@ -13910,7 +13910,7 @@
       }
     },
     {
-      "id": "1_8_1_fp32_ncl",
+      "id": "4_8_56_fp32_nlc_norlo_rslope0p01_norhi",
       "values": {
         "io_data_type": "float",
         "tensors": [
@@ -14138,7 +14138,7 @@
       }
     },
     {
-      "id": "1_64_1_fp32_ncl_0_0",
+      "id": "2_64_128_fp32_nlc_rlo0_norslope_norhi",
       "values": {
         "io_data_type": "float",
         "tensors": [
@@ -14366,7 +14366,7 @@
       }
     },
     {
-      "id": "1_64_1_fp32_ncl_6_0",
+      "id": "2_64_128_fp32_nlc_norlo_norslope_rhi6",
       "values": {
         "io_data_type": "float",
         "tensors": [
@@ -14594,7 +14594,7 @@
       }
     },
     {
-      "id": "1_64_1_fp32_ncl_0_10000000149011612_0_5_2",
+      "id": "2_64_128_fp32_nlc_rlo0p1_norslope_rhi0p5",
       "values": {
         "io_data_type": "float",
         "tensors": [
@@ -14822,7 +14822,7 @@
       }
     },
     {
-      "id": "1_64_1_fp32_ncl_2",
+      "id": "2_64_128_fp32_nlc_norlo_rslope0p01_norhi",
       "values": {
         "io_data_type": "float",
         "tensors": [
@@ -15050,7 +15050,7 @@
       }
     },
     {
-      "id": "1_8_1_fp32_ncl_0_0_2",
+      "id": "4_8_56_fp32_ncl_rlo0_norslope_norhi",
       "values": {
         "io_data_type": "float",
         "tensors": [
@@ -15278,7 +15278,7 @@
       }
     },
     {
-      "id": "1_8_1_fp32_ncl_6_0_2",
+      "id": "4_8_56_fp32_ncl_norlo_norslope_rhi6",
       "values": {
         "io_data_type": "float",
         "tensors": [
@@ -15506,7 +15506,7 @@
       }
     },
     {
-      "id": "1_8_1_fp32_ncl_0_10000000149011612_0_5_2",
+      "id": "4_8_56_fp32_ncl_rlo0p1_norslope_rhi0p5",
       "values": {
         "io_data_type": "float",
         "tensors": [
@@ -15734,7 +15734,7 @@
       }
     },
     {
-      "id": "1_8_1_fp32_ncl_2",
+      "id": "4_8_56_fp32_ncl_norlo_rslope0p01_norhi",
       "values": {
         "io_data_type": "float",
         "tensors": [
@@ -15962,7 +15962,7 @@
       }
     },
     {
-      "id": "1_64_1_fp32_ncl_0_0_2",
+      "id": "2_64_128_fp32_ncl_rlo0_norslope_norhi",
       "values": {
         "io_data_type": "float",
         "tensors": [
@@ -16190,7 +16190,7 @@
       }
     },
     {
-      "id": "1_64_1_fp32_ncl_6_0_2",
+      "id": "2_64_128_fp32_ncl_norlo_norslope_rhi6",
       "values": {
         "io_data_type": "float",
         "tensors": [
@@ -16418,7 +16418,7 @@
       }
     },
     {
-      "id": "1_3_1_1_bfp16_nchw_0_0",
+      "id": "1_3_14_14_bfp16_nchw_rlo0_norslope_norhi",
       "values": {
         "io_data_type": "bfloat16",
         "tensors": [
@@ -16668,7 +16668,7 @@
       }
     },
     {
-      "id": "1_3_1_1_bfp16_nchw_6_0",
+      "id": "1_3_14_14_bfp16_nchw_norlo_norslope_rhi6",
       "values": {
         "io_data_type": "bfloat16",
         "tensors": [
@@ -16918,7 +16918,7 @@
       }
     },
     {
-      "id": "1_16_1_1_bfp16_nchw_0_10000000149011612_0_5",
+      "id": "8_16_28_28_bfp16_nchw_rlo0p1_norslope_rhi0p5",
       "values": {
         "io_data_type": "bfloat16",
         "tensors": [
@@ -17168,7 +17168,7 @@
       }
     },
     {
-      "id": "1_16_1_1_bfp16_nchw",
+      "id": "8_16_28_28_bfp16_nchw_norlo_rslope0p01_norhi",
       "values": {
         "io_data_type": "bfloat16",
         "tensors": [
@@ -17418,7 +17418,7 @@
       }
     },
     {
-      "id": "1_64_1_1_bfp16_nchw_0_0",
+      "id": "4_64_7_7_bfp16_nchw_rlo0_norslope_norhi",
       "values": {
         "io_data_type": "bfloat16",
         "tensors": [
@@ -17668,7 +17668,7 @@
       }
     },
     {
-      "id": "1_64_1_1_bfp16_nchw_6_0",
+      "id": "4_64_7_7_bfp16_nchw_norlo_norslope_rhi6",
       "values": {
         "io_data_type": "bfloat16",
         "tensors": [
@@ -17918,7 +17918,7 @@
       }
     },
     {
-      "id": "1_64_1_1_bfp16_nchw_0_10000000149011612_0_5",
+      "id": "4_64_7_7_bfp16_nchw_rlo0p1_norslope_rhi0p5",
       "values": {
         "io_data_type": "bfloat16",
         "tensors": [
@@ -18168,7 +18168,7 @@
       }
     },
     {
-      "id": "1_64_1_1_bfp16_nchw",
+      "id": "4_64_7_7_bfp16_nchw_norlo_rslope0p01_norhi",
       "values": {
         "io_data_type": "bfloat16",
         "tensors": [
@@ -18418,7 +18418,7 @@
       }
     },
     {
-      "id": "1_3_1_1_bfp16_nchw_0_10000000149011612_0_5",
+      "id": "1_3_14_14_bfp16_nchw_rlo0p1_norslope_rhi0p5",
       "values": {
         "io_data_type": "bfloat16",
         "tensors": [
@@ -18668,7 +18668,7 @@
       }
     },
     {
-      "id": "1_3_1_1_bfp16_nchw",
+      "id": "1_3_14_14_bfp16_nchw_norlo_rslope0p01_norhi",
       "values": {
         "io_data_type": "bfloat16",
         "tensors": [
@@ -18918,7 +18918,7 @@
       }
     },
     {
-      "id": "1_3_1_1_bfp16_nchw_0_0_2",
+      "id": "1_3_14_14_bfp16_nhwc_rlo0_norslope_norhi",
       "values": {
         "io_data_type": "bfloat16",
         "tensors": [
@@ -19168,7 +19168,7 @@
       }
     },
     {
-      "id": "1_3_1_1_bfp16_nchw_6_0_2",
+      "id": "1_3_14_14_bfp16_nhwc_norlo_norslope_rhi6",
       "values": {
         "io_data_type": "bfloat16",
         "tensors": [
@@ -19418,7 +19418,7 @@
       }
     },
     {
-      "id": "1_3_1_1_bfp16_nchw_0_10000000149011612_0_5_2",
+      "id": "1_3_14_14_bfp16_nhwc_rlo0p1_norslope_rhi0p5",
       "values": {
         "io_data_type": "bfloat16",
         "tensors": [
@@ -19668,7 +19668,7 @@
       }
     },
     {
-      "id": "1_3_1_1_bfp16_nchw_2",
+      "id": "1_3_14_14_bfp16_nhwc_norlo_rslope0p01_norhi",
       "values": {
         "io_data_type": "bfloat16",
         "tensors": [
@@ -19918,7 +19918,7 @@
       }
     },
     {
-      "id": "1_3_1_1_bfp16_nchw_0_0_3",
+      "id": "2_3_1_1_bfp16_nhwc_rlo0_norslope_norhi",
       "values": {
         "io_data_type": "bfloat16",
         "tensors": [
@@ -20168,7 +20168,7 @@
       }
     },
     {
-      "id": "1_3_1_1_bfp16_nchw_6_0_3",
+      "id": "2_3_1_1_bfp16_nhwc_norlo_norslope_rhi6",
       "values": {
         "io_data_type": "bfloat16",
         "tensors": [
@@ -20418,7 +20418,7 @@
       }
     },
     {
-      "id": "1_3_1_1_bfp16_nchw_0_10000000149011612_0_5_3",
+      "id": "2_3_1_1_bfp16_nhwc_rlo0p1_norslope_rhi0p5",
       "values": {
         "io_data_type": "bfloat16",
         "tensors": [
@@ -20668,7 +20668,7 @@
       }
     },
     {
-      "id": "1_3_1_1_bfp16_nchw_3",
+      "id": "2_3_1_1_bfp16_nhwc_norlo_rslope0p01_norhi",
       "values": {
         "io_data_type": "bfloat16",
         "tensors": [
@@ -20918,7 +20918,7 @@
       }
     },
     {
-      "id": "1_3_1_1_bfp16_nchw_0_0_4",
+      "id": "2_3_1_1_bfp16_nchw_rlo0_norslope_norhi",
       "values": {
         "io_data_type": "bfloat16",
         "tensors": [
@@ -21168,7 +21168,7 @@
       }
     },
     {
-      "id": "1_16_1_1_bfp16_nchw_0_0",
+      "id": "8_16_28_28_bfp16_nhwc_rlo0_norslope_norhi",
       "values": {
         "io_data_type": "bfloat16",
         "tensors": [
@@ -21418,7 +21418,7 @@
       }
     },
     {
-      "id": "1_16_1_1_bfp16_nchw_6_0",
+      "id": "8_16_28_28_bfp16_nhwc_norlo_norslope_rhi6",
       "values": {
         "io_data_type": "bfloat16",
         "tensors": [
@@ -21668,7 +21668,7 @@
       }
     },
     {
-      "id": "1_16_1_1_bfp16_nchw_0_10000000149011612_0_5_2",
+      "id": "8_16_28_28_bfp16_nhwc_rlo0p1_norslope_rhi0p5",
       "values": {
         "io_data_type": "bfloat16",
         "tensors": [
@@ -21918,7 +21918,7 @@
       }
     },
     {
-      "id": "1_16_1_1_bfp16_nchw_2",
+      "id": "8_16_28_28_bfp16_nhwc_norlo_rslope0p01_norhi",
       "values": {
         "io_data_type": "bfloat16",
         "tensors": [
@@ -22168,7 +22168,7 @@
       }
     },
     {
-      "id": "1_64_1_1_bfp16_nchw_0_0_2",
+      "id": "4_64_7_7_bfp16_nhwc_rlo0_norslope_norhi",
       "values": {
         "io_data_type": "bfloat16",
         "tensors": [
@@ -22418,7 +22418,7 @@
       }
     },
     {
-      "id": "1_64_1_1_bfp16_nchw_6_0_2",
+      "id": "4_64_7_7_bfp16_nhwc_norlo_norslope_rhi6",
       "values": {
         "io_data_type": "bfloat16",
         "tensors": [
@@ -22668,7 +22668,7 @@
       }
     },
     {
-      "id": "1_64_1_1_bfp16_nchw_0_10000000149011612_0_5_2",
+      "id": "4_64_7_7_bfp16_nhwc_rlo0p1_norslope_rhi0p5",
       "values": {
         "io_data_type": "bfloat16",
         "tensors": [
@@ -22918,7 +22918,7 @@
       }
     },
     {
-      "id": "1_64_1_1_bfp16_nchw_2",
+      "id": "4_64_7_7_bfp16_nhwc_norlo_rslope0p01_norhi",
       "values": {
         "io_data_type": "bfloat16",
         "tensors": [
@@ -23168,7 +23168,7 @@
       }
     },
     {
-      "id": "1_3_1_1_bfp16_nchw_6_0_4",
+      "id": "2_3_1_1_bfp16_nchw_norlo_norslope_rhi6",
       "values": {
         "io_data_type": "bfloat16",
         "tensors": [
@@ -23418,7 +23418,7 @@
       }
     },
     {
-      "id": "1_3_1_1_bfp16_nchw_0_10000000149011612_0_5_4",
+      "id": "2_3_1_1_bfp16_nchw_rlo0p1_norslope_rhi0p5",
       "values": {
         "io_data_type": "bfloat16",
         "tensors": [
@@ -23668,7 +23668,7 @@
       }
     },
     {
-      "id": "1_3_1_1_bfp16_nchw_4",
+      "id": "2_3_1_1_bfp16_nchw_norlo_rslope0p01_norhi",
       "values": {
         "io_data_type": "bfloat16",
         "tensors": [
@@ -23918,7 +23918,7 @@
       }
     },
     {
-      "id": "1_16_1_1_bfp16_nchw_0_0_2",
+      "id": "8_16_28_28_bfp16_nchw_rlo0_norslope_norhi",
       "values": {
         "io_data_type": "bfloat16",
         "tensors": [
@@ -24168,7 +24168,7 @@
       }
     },
     {
-      "id": "1_16_1_1_bfp16_nchw_6_0_2",
+      "id": "8_16_28_28_bfp16_nchw_norlo_norslope_rhi6",
       "values": {
         "io_data_type": "bfloat16",
         "tensors": [
@@ -24418,7 +24418,7 @@
       }
     },
     {
-      "id": "1_3_1_1_fp16_nchw_0_0",
+      "id": "1_3_14_14_fp16_nchw_rlo0_norslope_norhi",
       "values": {
         "io_data_type": "half",
         "tensors": [
@@ -24668,7 +24668,7 @@
       }
     },
     {
-      "id": "1_3_1_1_fp16_nchw_6_0",
+      "id": "1_3_14_14_fp16_nchw_norlo_norslope_rhi6",
       "values": {
         "io_data_type": "half",
         "tensors": [
@@ -24918,7 +24918,7 @@
       }
     },
     {
-      "id": "1_16_1_1_fp16_nchw_0_10000000149011612_0_5",
+      "id": "8_16_28_28_fp16_nchw_rlo0p1_norslope_rhi0p5",
       "values": {
         "io_data_type": "half",
         "tensors": [
@@ -25168,7 +25168,7 @@
       }
     },
     {
-      "id": "1_16_1_1_fp16_nchw",
+      "id": "8_16_28_28_fp16_nchw_norlo_rslope0p01_norhi",
       "values": {
         "io_data_type": "half",
         "tensors": [
@@ -25418,7 +25418,7 @@
       }
     },
     {
-      "id": "1_64_1_1_fp16_nchw_0_0",
+      "id": "4_64_7_7_fp16_nchw_rlo0_norslope_norhi",
       "values": {
         "io_data_type": "half",
         "tensors": [
@@ -25668,7 +25668,7 @@
       }
     },
     {
-      "id": "1_64_1_1_fp16_nchw_6_0",
+      "id": "4_64_7_7_fp16_nchw_norlo_norslope_rhi6",
       "values": {
         "io_data_type": "half",
         "tensors": [
@@ -25918,7 +25918,7 @@
       }
     },
     {
-      "id": "1_64_1_1_fp16_nchw_0_10000000149011612_0_5",
+      "id": "4_64_7_7_fp16_nchw_rlo0p1_norslope_rhi0p5",
       "values": {
         "io_data_type": "half",
         "tensors": [
@@ -26168,7 +26168,7 @@
       }
     },
     {
-      "id": "1_64_1_1_fp16_nchw",
+      "id": "4_64_7_7_fp16_nchw_norlo_rslope0p01_norhi",
       "values": {
         "io_data_type": "half",
         "tensors": [
@@ -26418,7 +26418,7 @@
       }
     },
     {
-      "id": "1_3_1_1_fp16_nchw_0_10000000149011612_0_5",
+      "id": "1_3_14_14_fp16_nchw_rlo0p1_norslope_rhi0p5",
       "values": {
         "io_data_type": "half",
         "tensors": [
@@ -26668,7 +26668,7 @@
       }
     },
     {
-      "id": "1_3_1_1_fp16_nchw",
+      "id": "1_3_14_14_fp16_nchw_norlo_rslope0p01_norhi",
       "values": {
         "io_data_type": "half",
         "tensors": [
@@ -26918,7 +26918,7 @@
       }
     },
     {
-      "id": "1_3_1_1_fp16_nchw_0_0_2",
+      "id": "1_3_14_14_fp16_nhwc_rlo0_norslope_norhi",
       "values": {
         "io_data_type": "half",
         "tensors": [
@@ -27168,7 +27168,7 @@
       }
     },
     {
-      "id": "1_3_1_1_fp16_nchw_6_0_2",
+      "id": "1_3_14_14_fp16_nhwc_norlo_norslope_rhi6",
       "values": {
         "io_data_type": "half",
         "tensors": [
@@ -27418,7 +27418,7 @@
       }
     },
     {
-      "id": "1_3_1_1_fp16_nchw_0_10000000149011612_0_5_2",
+      "id": "1_3_14_14_fp16_nhwc_rlo0p1_norslope_rhi0p5",
       "values": {
         "io_data_type": "half",
         "tensors": [
@@ -27668,7 +27668,7 @@
       }
     },
     {
-      "id": "1_3_1_1_fp16_nchw_2",
+      "id": "1_3_14_14_fp16_nhwc_norlo_rslope0p01_norhi",
       "values": {
         "io_data_type": "half",
         "tensors": [
@@ -27918,7 +27918,7 @@
       }
     },
     {
-      "id": "1_3_1_1_fp16_nchw_0_0_3",
+      "id": "2_3_1_1_fp16_nhwc_rlo0_norslope_norhi",
       "values": {
         "io_data_type": "half",
         "tensors": [
@@ -28168,7 +28168,7 @@
       }
     },
     {
-      "id": "1_3_1_1_fp16_nchw_6_0_3",
+      "id": "2_3_1_1_fp16_nhwc_norlo_norslope_rhi6",
       "values": {
         "io_data_type": "half",
         "tensors": [
@@ -28418,7 +28418,7 @@
       }
     },
     {
-      "id": "1_3_1_1_fp16_nchw_0_10000000149011612_0_5_3",
+      "id": "2_3_1_1_fp16_nhwc_rlo0p1_norslope_rhi0p5",
       "values": {
         "io_data_type": "half",
         "tensors": [
@@ -28668,7 +28668,7 @@
       }
     },
     {
-      "id": "1_3_1_1_fp16_nchw_3",
+      "id": "2_3_1_1_fp16_nhwc_norlo_rslope0p01_norhi",
       "values": {
         "io_data_type": "half",
         "tensors": [
@@ -28918,7 +28918,7 @@
       }
     },
     {
-      "id": "1_3_1_1_fp16_nchw_0_0_4",
+      "id": "2_3_1_1_fp16_nchw_rlo0_norslope_norhi",
       "values": {
         "io_data_type": "half",
         "tensors": [
@@ -29168,7 +29168,7 @@
       }
     },
     {
-      "id": "1_16_1_1_fp16_nchw_0_0",
+      "id": "8_16_28_28_fp16_nhwc_rlo0_norslope_norhi",
       "values": {
         "io_data_type": "half",
         "tensors": [
@@ -29418,7 +29418,7 @@
       }
     },
     {
-      "id": "1_16_1_1_fp16_nchw_6_0",
+      "id": "8_16_28_28_fp16_nhwc_norlo_norslope_rhi6",
       "values": {
         "io_data_type": "half",
         "tensors": [
@@ -29668,7 +29668,7 @@
       }
     },
     {
-      "id": "1_16_1_1_fp16_nchw_0_10000000149011612_0_5_2",
+      "id": "8_16_28_28_fp16_nhwc_rlo0p1_norslope_rhi0p5",
       "values": {
         "io_data_type": "half",
         "tensors": [
@@ -29918,7 +29918,7 @@
       }
     },
     {
-      "id": "1_16_1_1_fp16_nchw_2",
+      "id": "8_16_28_28_fp16_nhwc_norlo_rslope0p01_norhi",
       "values": {
         "io_data_type": "half",
         "tensors": [
@@ -30168,7 +30168,7 @@
       }
     },
     {
-      "id": "1_64_1_1_fp16_nchw_0_0_2",
+      "id": "4_64_7_7_fp16_nhwc_rlo0_norslope_norhi",
       "values": {
         "io_data_type": "half",
         "tensors": [
@@ -30418,7 +30418,7 @@
       }
     },
     {
-      "id": "1_64_1_1_fp16_nchw_6_0_2",
+      "id": "4_64_7_7_fp16_nhwc_norlo_norslope_rhi6",
       "values": {
         "io_data_type": "half",
         "tensors": [
@@ -30668,7 +30668,7 @@
       }
     },
     {
-      "id": "1_64_1_1_fp16_nchw_0_10000000149011612_0_5_2",
+      "id": "4_64_7_7_fp16_nhwc_rlo0p1_norslope_rhi0p5",
       "values": {
         "io_data_type": "half",
         "tensors": [
@@ -30918,7 +30918,7 @@
       }
     },
     {
-      "id": "1_64_1_1_fp16_nchw_2",
+      "id": "4_64_7_7_fp16_nhwc_norlo_rslope0p01_norhi",
       "values": {
         "io_data_type": "half",
         "tensors": [
@@ -31168,7 +31168,7 @@
       }
     },
     {
-      "id": "1_3_1_1_fp16_nchw_6_0_4",
+      "id": "2_3_1_1_fp16_nchw_norlo_norslope_rhi6",
       "values": {
         "io_data_type": "half",
         "tensors": [
@@ -31418,7 +31418,7 @@
       }
     },
     {
-      "id": "1_3_1_1_fp16_nchw_0_10000000149011612_0_5_4",
+      "id": "2_3_1_1_fp16_nchw_rlo0p1_norslope_rhi0p5",
       "values": {
         "io_data_type": "half",
         "tensors": [
@@ -31668,7 +31668,7 @@
       }
     },
     {
-      "id": "1_3_1_1_fp16_nchw_4",
+      "id": "2_3_1_1_fp16_nchw_norlo_rslope0p01_norhi",
       "values": {
         "io_data_type": "half",
         "tensors": [
@@ -31918,7 +31918,7 @@
       }
     },
     {
-      "id": "1_16_1_1_fp16_nchw_0_0_2",
+      "id": "8_16_28_28_fp16_nchw_rlo0_norslope_norhi",
       "values": {
         "io_data_type": "half",
         "tensors": [
@@ -32168,7 +32168,7 @@
       }
     },
     {
-      "id": "1_16_1_1_fp16_nchw_6_0_2",
+      "id": "8_16_28_28_fp16_nchw_norlo_norslope_rhi6",
       "values": {
         "io_data_type": "half",
         "tensors": [
@@ -32418,7 +32418,7 @@
       }
     },
     {
-      "id": "1_3_1_1_fp32_nchw_0_0",
+      "id": "1_3_14_14_fp32_nchw_rlo0_norslope_norhi",
       "values": {
         "io_data_type": "float",
         "tensors": [
@@ -32668,7 +32668,7 @@
       }
     },
     {
-      "id": "1_3_1_1_fp32_nchw_6_0",
+      "id": "1_3_14_14_fp32_nchw_norlo_norslope_rhi6",
       "values": {
         "io_data_type": "float",
         "tensors": [
@@ -32918,7 +32918,7 @@
       }
     },
     {
-      "id": "1_16_1_1_fp32_nchw_0_10000000149011612_0_5",
+      "id": "8_16_28_28_fp32_nchw_rlo0p1_norslope_rhi0p5",
       "values": {
         "io_data_type": "float",
         "tensors": [
@@ -33168,7 +33168,7 @@
       }
     },
     {
-      "id": "1_16_1_1_fp32_nchw",
+      "id": "8_16_28_28_fp32_nchw_norlo_rslope0p01_norhi",
       "values": {
         "io_data_type": "float",
         "tensors": [
@@ -33418,7 +33418,7 @@
       }
     },
     {
-      "id": "1_64_1_1_fp32_nchw_0_0",
+      "id": "4_64_7_7_fp32_nchw_rlo0_norslope_norhi",
       "values": {
         "io_data_type": "float",
         "tensors": [
@@ -33668,7 +33668,7 @@
       }
     },
     {
-      "id": "1_64_1_1_fp32_nchw_6_0",
+      "id": "4_64_7_7_fp32_nchw_norlo_norslope_rhi6",
       "values": {
         "io_data_type": "float",
         "tensors": [
@@ -33918,7 +33918,7 @@
       }
     },
     {
-      "id": "1_64_1_1_fp32_nchw_0_10000000149011612_0_5",
+      "id": "4_64_7_7_fp32_nchw_rlo0p1_norslope_rhi0p5",
       "values": {
         "io_data_type": "float",
         "tensors": [
@@ -34168,7 +34168,7 @@
       }
     },
     {
-      "id": "1_64_1_1_fp32_nchw",
+      "id": "4_64_7_7_fp32_nchw_norlo_rslope0p01_norhi",
       "values": {
         "io_data_type": "float",
         "tensors": [
@@ -34418,7 +34418,7 @@
       }
     },
     {
-      "id": "1_3_1_1_fp32_nchw_0_10000000149011612_0_5",
+      "id": "1_3_14_14_fp32_nchw_rlo0p1_norslope_rhi0p5",
       "values": {
         "io_data_type": "float",
         "tensors": [
@@ -34668,7 +34668,7 @@
       }
     },
     {
-      "id": "1_3_1_1_fp32_nchw",
+      "id": "1_3_14_14_fp32_nchw_norlo_rslope0p01_norhi",
       "values": {
         "io_data_type": "float",
         "tensors": [
@@ -34918,7 +34918,7 @@
       }
     },
     {
-      "id": "1_3_1_1_fp32_nchw_0_0_2",
+      "id": "1_3_14_14_fp32_nhwc_rlo0_norslope_norhi",
       "values": {
         "io_data_type": "float",
         "tensors": [
@@ -35168,7 +35168,7 @@
       }
     },
     {
-      "id": "1_3_1_1_fp32_nchw_6_0_2",
+      "id": "1_3_14_14_fp32_nhwc_norlo_norslope_rhi6",
       "values": {
         "io_data_type": "float",
         "tensors": [
@@ -35418,7 +35418,7 @@
       }
     },
     {
-      "id": "1_3_1_1_fp32_nchw_0_10000000149011612_0_5_2",
+      "id": "1_3_14_14_fp32_nhwc_rlo0p1_norslope_rhi0p5",
       "values": {
         "io_data_type": "float",
         "tensors": [
@@ -35668,7 +35668,7 @@
       }
     },
     {
-      "id": "1_3_1_1_fp32_nchw_2",
+      "id": "1_3_14_14_fp32_nhwc_norlo_rslope0p01_norhi",
       "values": {
         "io_data_type": "float",
         "tensors": [
@@ -35918,7 +35918,7 @@
       }
     },
     {
-      "id": "1_3_1_1_fp32_nchw_0_0_3",
+      "id": "2_3_1_1_fp32_nhwc_rlo0_norslope_norhi",
       "values": {
         "io_data_type": "float",
         "tensors": [
@@ -36168,7 +36168,7 @@
       }
     },
     {
-      "id": "1_3_1_1_fp32_nchw_6_0_3",
+      "id": "2_3_1_1_fp32_nhwc_norlo_norslope_rhi6",
       "values": {
         "io_data_type": "float",
         "tensors": [
@@ -36418,7 +36418,7 @@
       }
     },
     {
-      "id": "1_3_1_1_fp32_nchw_0_10000000149011612_0_5_3",
+      "id": "2_3_1_1_fp32_nhwc_rlo0p1_norslope_rhi0p5",
       "values": {
         "io_data_type": "float",
         "tensors": [
@@ -36668,7 +36668,7 @@
       }
     },
     {
-      "id": "1_3_1_1_fp32_nchw_3",
+      "id": "2_3_1_1_fp32_nhwc_norlo_rslope0p01_norhi",
       "values": {
         "io_data_type": "float",
         "tensors": [
@@ -36918,7 +36918,7 @@
       }
     },
     {
-      "id": "1_3_1_1_fp32_nchw_0_0_4",
+      "id": "2_3_1_1_fp32_nchw_rlo0_norslope_norhi",
       "values": {
         "io_data_type": "float",
         "tensors": [
@@ -37168,7 +37168,7 @@
       }
     },
     {
-      "id": "1_16_1_1_fp32_nchw_0_0",
+      "id": "8_16_28_28_fp32_nhwc_rlo0_norslope_norhi",
       "values": {
         "io_data_type": "float",
         "tensors": [
@@ -37418,7 +37418,7 @@
       }
     },
     {
-      "id": "1_16_1_1_fp32_nchw_6_0",
+      "id": "8_16_28_28_fp32_nhwc_norlo_norslope_rhi6",
       "values": {
         "io_data_type": "float",
         "tensors": [
@@ -37668,7 +37668,7 @@
       }
     },
     {
-      "id": "1_16_1_1_fp32_nchw_0_10000000149011612_0_5_2",
+      "id": "8_16_28_28_fp32_nhwc_rlo0p1_norslope_rhi0p5",
       "values": {
         "io_data_type": "float",
         "tensors": [
@@ -37918,7 +37918,7 @@
       }
     },
     {
-      "id": "1_16_1_1_fp32_nchw_2",
+      "id": "8_16_28_28_fp32_nhwc_norlo_rslope0p01_norhi",
       "values": {
         "io_data_type": "float",
         "tensors": [
@@ -38168,7 +38168,7 @@
       }
     },
     {
-      "id": "1_64_1_1_fp32_nchw_0_0_2",
+      "id": "4_64_7_7_fp32_nhwc_rlo0_norslope_norhi",
       "values": {
         "io_data_type": "float",
         "tensors": [
@@ -38418,7 +38418,7 @@
       }
     },
     {
-      "id": "1_64_1_1_fp32_nchw_6_0_2",
+      "id": "4_64_7_7_fp32_nhwc_norlo_norslope_rhi6",
       "values": {
         "io_data_type": "float",
         "tensors": [
@@ -38668,7 +38668,7 @@
       }
     },
     {
-      "id": "1_64_1_1_fp32_nchw_0_10000000149011612_0_5_2",
+      "id": "4_64_7_7_fp32_nhwc_rlo0p1_norslope_rhi0p5",
       "values": {
         "io_data_type": "float",
         "tensors": [
@@ -38918,7 +38918,7 @@
       }
     },
     {
-      "id": "1_64_1_1_fp32_nchw_2",
+      "id": "4_64_7_7_fp32_nhwc_norlo_rslope0p01_norhi",
       "values": {
         "io_data_type": "float",
         "tensors": [
@@ -39168,7 +39168,7 @@
       }
     },
     {
-      "id": "1_3_1_1_fp32_nchw_6_0_4",
+      "id": "2_3_1_1_fp32_nchw_norlo_norslope_rhi6",
       "values": {
         "io_data_type": "float",
         "tensors": [
@@ -39418,7 +39418,7 @@
       }
     },
     {
-      "id": "1_3_1_1_fp32_nchw_0_10000000149011612_0_5_4",
+      "id": "2_3_1_1_fp32_nchw_rlo0p1_norslope_rhi0p5",
       "values": {
         "io_data_type": "float",
         "tensors": [
@@ -39668,7 +39668,7 @@
       }
     },
     {
-      "id": "1_3_1_1_fp32_nchw_4",
+      "id": "2_3_1_1_fp32_nchw_norlo_rslope0p01_norhi",
       "values": {
         "io_data_type": "float",
         "tensors": [
@@ -39918,7 +39918,7 @@
       }
     },
     {
-      "id": "1_16_1_1_fp32_nchw_0_0_2",
+      "id": "8_16_28_28_fp32_nchw_rlo0_norslope_norhi",
       "values": {
         "io_data_type": "float",
         "tensors": [
@@ -40168,7 +40168,7 @@
       }
     },
     {
-      "id": "1_16_1_1_fp32_nchw_6_0_2",
+      "id": "8_16_28_28_fp32_nchw_norlo_norslope_rhi6",
       "values": {
         "io_data_type": "float",
         "tensors": [
@@ -40418,7 +40418,7 @@
       }
     },
     {
-      "id": "1_3_1_1_1_bfp16_ncdhw_0_0",
+      "id": "2_3_3_1_1_bfp16_ncdhw_rlo0_norslope_norhi",
       "values": {
         "io_data_type": "bfloat16",
         "tensors": [
@@ -40690,7 +40690,7 @@
       }
     },
     {
-      "id": "1_3_1_1_1_bfp16_ncdhw_6_0",
+      "id": "2_3_3_1_1_bfp16_ncdhw_norlo_norslope_rhi6",
       "values": {
         "io_data_type": "bfloat16",
         "tensors": [
@@ -40962,7 +40962,7 @@
       }
     },
     {
-      "id": "1_3_1_1_1_bfp16_ncdhw_0_10000000149011612_0_5",
+      "id": "16_3_8_14_14_bfp16_ncdhw_rlo0p1_norslope_rhi0p5",
       "values": {
         "io_data_type": "bfloat16",
         "tensors": [
@@ -41234,7 +41234,7 @@
       }
     },
     {
-      "id": "1_3_1_1_1_bfp16_ncdhw",
+      "id": "16_3_8_14_14_bfp16_ncdhw_norlo_rslope0p01_norhi",
       "values": {
         "io_data_type": "bfloat16",
         "tensors": [
@@ -41506,7 +41506,7 @@
       }
     },
     {
-      "id": "1_3_1_1_1_bfp16_ncdhw_0_10000000149011612_0_5_2",
+      "id": "2_3_3_1_1_bfp16_ncdhw_rlo0p1_norslope_rhi0p5",
       "values": {
         "io_data_type": "bfloat16",
         "tensors": [
@@ -41778,7 +41778,7 @@
       }
     },
     {
-      "id": "1_3_1_1_1_bfp16_ncdhw_0_0_2",
+      "id": "2_3_3_1_1_bfp16_ndhwc_rlo0_norslope_norhi",
       "values": {
         "io_data_type": "bfloat16",
         "tensors": [
@@ -42050,7 +42050,7 @@
       }
     },
     {
-      "id": "1_3_1_1_1_bfp16_ncdhw_6_0_2",
+      "id": "2_3_3_1_1_bfp16_ndhwc_norlo_norslope_rhi6",
       "values": {
         "io_data_type": "bfloat16",
         "tensors": [
@@ -42322,7 +42322,7 @@
       }
     },
     {
-      "id": "1_3_1_1_1_bfp16_ncdhw_0_10000000149011612_0_5_3",
+      "id": "2_3_3_1_1_bfp16_ndhwc_rlo0p1_norslope_rhi0p5",
       "values": {
         "io_data_type": "bfloat16",
         "tensors": [
@@ -42594,7 +42594,7 @@
       }
     },
     {
-      "id": "1_3_1_1_1_bfp16_ncdhw_2",
+      "id": "2_3_3_1_1_bfp16_ndhwc_norlo_rslope0p01_norhi",
       "values": {
         "io_data_type": "bfloat16",
         "tensors": [
@@ -42866,7 +42866,7 @@
       }
     },
     {
-      "id": "1_3_1_1_1_bfp16_ncdhw_0_0_3",
+      "id": "2_3_2_4_4_bfp16_ndhwc_rlo0_norslope_norhi",
       "values": {
         "io_data_type": "bfloat16",
         "tensors": [
@@ -43138,7 +43138,7 @@
       }
     },
     {
-      "id": "1_3_1_1_1_bfp16_ncdhw_6_0_3",
+      "id": "2_3_2_4_4_bfp16_ndhwc_norlo_norslope_rhi6",
       "values": {
         "io_data_type": "bfloat16",
         "tensors": [
@@ -43410,7 +43410,7 @@
       }
     },
     {
-      "id": "1_3_1_1_1_bfp16_ncdhw_3",
+      "id": "2_3_3_1_1_bfp16_ncdhw_norlo_rslope0p01_norhi",
       "values": {
         "io_data_type": "bfloat16",
         "tensors": [
@@ -43682,7 +43682,7 @@
       }
     },
     {
-      "id": "1_3_1_1_1_bfp16_ncdhw_0_10000000149011612_0_5_4",
+      "id": "2_3_2_4_4_bfp16_ndhwc_rlo0p1_norslope_rhi0p5",
       "values": {
         "io_data_type": "bfloat16",
         "tensors": [
@@ -43954,7 +43954,7 @@
       }
     },
     {
-      "id": "1_3_1_1_1_bfp16_ncdhw_4",
+      "id": "2_3_2_4_4_bfp16_ndhwc_norlo_rslope0p01_norhi",
       "values": {
         "io_data_type": "bfloat16",
         "tensors": [
@@ -44226,7 +44226,7 @@
       }
     },
     {
-      "id": "1_3_1_1_1_bfp16_ncdhw_0_0_4",
+      "id": "16_3_8_14_14_bfp16_ndhwc_rlo0_norslope_norhi",
       "values": {
         "io_data_type": "bfloat16",
         "tensors": [
@@ -44498,7 +44498,7 @@
       }
     },
     {
-      "id": "1_3_1_1_1_bfp16_ncdhw_6_0_4",
+      "id": "16_3_8_14_14_bfp16_ndhwc_norlo_norslope_rhi6",
       "values": {
         "io_data_type": "bfloat16",
         "tensors": [
@@ -44770,7 +44770,7 @@
       }
     },
     {
-      "id": "1_3_1_1_1_bfp16_ncdhw_0_10000000149011612_0_5_5",
+      "id": "16_3_8_14_14_bfp16_ndhwc_rlo0p1_norslope_rhi0p5",
       "values": {
         "io_data_type": "bfloat16",
         "tensors": [
@@ -45042,7 +45042,7 @@
       }
     },
     {
-      "id": "1_3_1_1_1_bfp16_ncdhw_5",
+      "id": "16_3_8_14_14_bfp16_ndhwc_norlo_rslope0p01_norhi",
       "values": {
         "io_data_type": "bfloat16",
         "tensors": [
@@ -45314,7 +45314,7 @@
       }
     },
     {
-      "id": "1_3_1_1_1_bfp16_ncdhw_0_0_5",
+      "id": "2_3_2_4_4_bfp16_ncdhw_rlo0_norslope_norhi",
       "values": {
         "io_data_type": "bfloat16",
         "tensors": [
@@ -45586,7 +45586,7 @@
       }
     },
     {
-      "id": "1_3_1_1_1_bfp16_ncdhw_6_0_5",
+      "id": "2_3_2_4_4_bfp16_ncdhw_norlo_norslope_rhi6",
       "values": {
         "io_data_type": "bfloat16",
         "tensors": [
@@ -45858,7 +45858,7 @@
       }
     },
     {
-      "id": "1_3_1_1_1_bfp16_ncdhw_0_10000000149011612_0_5_6",
+      "id": "2_3_2_4_4_bfp16_ncdhw_rlo0p1_norslope_rhi0p5",
       "values": {
         "io_data_type": "bfloat16",
         "tensors": [
@@ -46130,7 +46130,7 @@
       }
     },
     {
-      "id": "1_3_1_1_1_bfp16_ncdhw_6",
+      "id": "2_3_2_4_4_bfp16_ncdhw_norlo_rslope0p01_norhi",
       "values": {
         "io_data_type": "bfloat16",
         "tensors": [
@@ -46402,7 +46402,7 @@
       }
     },
     {
-      "id": "1_3_1_1_1_bfp16_ncdhw_0_0_6",
+      "id": "16_3_8_14_14_bfp16_ncdhw_rlo0_norslope_norhi",
       "values": {
         "io_data_type": "bfloat16",
         "tensors": [
@@ -46674,7 +46674,7 @@
       }
     },
     {
-      "id": "1_3_1_1_1_bfp16_ncdhw_6_0_6",
+      "id": "16_3_8_14_14_bfp16_ncdhw_norlo_norslope_rhi6",
       "values": {
         "io_data_type": "bfloat16",
         "tensors": [
@@ -46946,7 +46946,7 @@
       }
     },
     {
-      "id": "1_3_1_1_1_fp16_ncdhw_0_0",
+      "id": "2_3_3_1_1_fp16_ncdhw_rlo0_norslope_norhi",
       "values": {
         "io_data_type": "half",
         "tensors": [
@@ -47218,7 +47218,7 @@
       }
     },
     {
-      "id": "1_3_1_1_1_fp16_ncdhw_6_0",
+      "id": "2_3_3_1_1_fp16_ncdhw_norlo_norslope_rhi6",
       "values": {
         "io_data_type": "half",
         "tensors": [
@@ -47490,7 +47490,7 @@
       }
     },
     {
-      "id": "1_3_1_1_1_fp16_ncdhw_0_10000000149011612_0_5",
+      "id": "16_3_8_14_14_fp16_ncdhw_rlo0p1_norslope_rhi0p5",
       "values": {
         "io_data_type": "half",
         "tensors": [
@@ -47762,7 +47762,7 @@
       }
     },
     {
-      "id": "1_3_1_1_1_fp16_ncdhw",
+      "id": "16_3_8_14_14_fp16_ncdhw_norlo_rslope0p01_norhi",
       "values": {
         "io_data_type": "half",
         "tensors": [
@@ -48034,7 +48034,7 @@
       }
     },
     {
-      "id": "1_3_1_1_1_fp16_ncdhw_0_10000000149011612_0_5_2",
+      "id": "2_3_3_1_1_fp16_ncdhw_rlo0p1_norslope_rhi0p5",
       "values": {
         "io_data_type": "half",
         "tensors": [
@@ -48306,7 +48306,7 @@
       }
     },
     {
-      "id": "1_3_1_1_1_fp16_ncdhw_0_0_2",
+      "id": "2_3_3_1_1_fp16_ndhwc_rlo0_norslope_norhi",
       "values": {
         "io_data_type": "half",
         "tensors": [
@@ -48578,7 +48578,7 @@
       }
     },
     {
-      "id": "1_3_1_1_1_fp16_ncdhw_6_0_2",
+      "id": "2_3_3_1_1_fp16_ndhwc_norlo_norslope_rhi6",
       "values": {
         "io_data_type": "half",
         "tensors": [
@@ -48850,7 +48850,7 @@
       }
     },
     {
-      "id": "1_3_1_1_1_fp16_ncdhw_0_10000000149011612_0_5_3",
+      "id": "2_3_3_1_1_fp16_ndhwc_rlo0p1_norslope_rhi0p5",
       "values": {
         "io_data_type": "half",
         "tensors": [
@@ -49122,7 +49122,7 @@
       }
     },
     {
-      "id": "1_3_1_1_1_fp16_ncdhw_2",
+      "id": "2_3_3_1_1_fp16_ndhwc_norlo_rslope0p01_norhi",
       "values": {
         "io_data_type": "half",
         "tensors": [
@@ -49394,7 +49394,7 @@
       }
     },
     {
-      "id": "1_3_1_1_1_fp16_ncdhw_0_0_3",
+      "id": "2_3_2_4_4_fp16_ndhwc_rlo0_norslope_norhi",
       "values": {
         "io_data_type": "half",
         "tensors": [
@@ -49666,7 +49666,7 @@
       }
     },
     {
-      "id": "1_3_1_1_1_fp16_ncdhw_6_0_3",
+      "id": "2_3_2_4_4_fp16_ndhwc_norlo_norslope_rhi6",
       "values": {
         "io_data_type": "half",
         "tensors": [
@@ -49938,7 +49938,7 @@
       }
     },
     {
-      "id": "1_3_1_1_1_fp16_ncdhw_3",
+      "id": "2_3_3_1_1_fp16_ncdhw_norlo_rslope0p01_norhi",
       "values": {
         "io_data_type": "half",
         "tensors": [
@@ -50210,7 +50210,7 @@
       }
     },
     {
-      "id": "1_3_1_1_1_fp16_ncdhw_0_10000000149011612_0_5_4",
+      "id": "2_3_2_4_4_fp16_ndhwc_rlo0p1_norslope_rhi0p5",
       "values": {
         "io_data_type": "half",
         "tensors": [
@@ -50482,7 +50482,7 @@
       }
     },
     {
-      "id": "1_3_1_1_1_fp16_ncdhw_4",
+      "id": "2_3_2_4_4_fp16_ndhwc_norlo_rslope0p01_norhi",
       "values": {
         "io_data_type": "half",
         "tensors": [
@@ -50754,7 +50754,7 @@
       }
     },
     {
-      "id": "1_3_1_1_1_fp16_ncdhw_0_0_4",
+      "id": "16_3_8_14_14_fp16_ndhwc_rlo0_norslope_norhi",
       "values": {
         "io_data_type": "half",
         "tensors": [
@@ -51026,7 +51026,7 @@
       }
     },
     {
-      "id": "1_3_1_1_1_fp16_ncdhw_6_0_4",
+      "id": "16_3_8_14_14_fp16_ndhwc_norlo_norslope_rhi6",
       "values": {
         "io_data_type": "half",
         "tensors": [
@@ -51298,7 +51298,7 @@
       }
     },
     {
-      "id": "1_3_1_1_1_fp16_ncdhw_0_10000000149011612_0_5_5",
+      "id": "16_3_8_14_14_fp16_ndhwc_rlo0p1_norslope_rhi0p5",
       "values": {
         "io_data_type": "half",
         "tensors": [
@@ -51570,7 +51570,7 @@
       }
     },
     {
-      "id": "1_3_1_1_1_fp16_ncdhw_5",
+      "id": "16_3_8_14_14_fp16_ndhwc_norlo_rslope0p01_norhi",
       "values": {
         "io_data_type": "half",
         "tensors": [
@@ -51842,7 +51842,7 @@
       }
     },
     {
-      "id": "1_3_1_1_1_fp16_ncdhw_0_0_5",
+      "id": "2_3_2_4_4_fp16_ncdhw_rlo0_norslope_norhi",
       "values": {
         "io_data_type": "half",
         "tensors": [
@@ -52114,7 +52114,7 @@
       }
     },
     {
-      "id": "1_3_1_1_1_fp16_ncdhw_6_0_5",
+      "id": "2_3_2_4_4_fp16_ncdhw_norlo_norslope_rhi6",
       "values": {
         "io_data_type": "half",
         "tensors": [
@@ -52386,7 +52386,7 @@
       }
     },
     {
-      "id": "1_3_1_1_1_fp16_ncdhw_0_10000000149011612_0_5_6",
+      "id": "2_3_2_4_4_fp16_ncdhw_rlo0p1_norslope_rhi0p5",
       "values": {
         "io_data_type": "half",
         "tensors": [
@@ -52658,7 +52658,7 @@
       }
     },
     {
-      "id": "1_3_1_1_1_fp16_ncdhw_6",
+      "id": "2_3_2_4_4_fp16_ncdhw_norlo_rslope0p01_norhi",
       "values": {
         "io_data_type": "half",
         "tensors": [
@@ -52930,7 +52930,7 @@
       }
     },
     {
-      "id": "1_3_1_1_1_fp16_ncdhw_0_0_6",
+      "id": "16_3_8_14_14_fp16_ncdhw_rlo0_norslope_norhi",
       "values": {
         "io_data_type": "half",
         "tensors": [
@@ -53202,7 +53202,7 @@
       }
     },
     {
-      "id": "1_3_1_1_1_fp16_ncdhw_6_0_6",
+      "id": "16_3_8_14_14_fp16_ncdhw_norlo_norslope_rhi6",
       "values": {
         "io_data_type": "half",
         "tensors": [
@@ -53474,7 +53474,7 @@
       }
     },
     {
-      "id": "1_3_1_1_1_fp32_ncdhw_0_0",
+      "id": "2_3_3_1_1_fp32_ncdhw_rlo0_norslope_norhi",
       "values": {
         "io_data_type": "float",
         "tensors": [
@@ -53746,7 +53746,7 @@
       }
     },
     {
-      "id": "1_3_1_1_1_fp32_ncdhw_6_0",
+      "id": "2_3_3_1_1_fp32_ncdhw_norlo_norslope_rhi6",
       "values": {
         "io_data_type": "float",
         "tensors": [
@@ -54018,7 +54018,7 @@
       }
     },
     {
-      "id": "1_3_1_1_1_fp32_ncdhw_0_10000000149011612_0_5",
+      "id": "16_3_8_14_14_fp32_ncdhw_rlo0p1_norslope_rhi0p5",
       "values": {
         "io_data_type": "float",
         "tensors": [
@@ -54290,7 +54290,7 @@
       }
     },
     {
-      "id": "1_3_1_1_1_fp32_ncdhw",
+      "id": "16_3_8_14_14_fp32_ncdhw_norlo_rslope0p01_norhi",
       "values": {
         "io_data_type": "float",
         "tensors": [
@@ -54562,7 +54562,7 @@
       }
     },
     {
-      "id": "1_3_1_1_1_fp32_ncdhw_0_10000000149011612_0_5_2",
+      "id": "2_3_3_1_1_fp32_ncdhw_rlo0p1_norslope_rhi0p5",
       "values": {
         "io_data_type": "float",
         "tensors": [
@@ -54834,7 +54834,7 @@
       }
     },
     {
-      "id": "1_3_1_1_1_fp32_ncdhw_0_0_2",
+      "id": "2_3_3_1_1_fp32_ndhwc_rlo0_norslope_norhi",
       "values": {
         "io_data_type": "float",
         "tensors": [
@@ -55106,7 +55106,7 @@
       }
     },
     {
-      "id": "1_3_1_1_1_fp32_ncdhw_6_0_2",
+      "id": "2_3_3_1_1_fp32_ndhwc_norlo_norslope_rhi6",
       "values": {
         "io_data_type": "float",
         "tensors": [
@@ -55378,7 +55378,7 @@
       }
     },
     {
-      "id": "1_3_1_1_1_fp32_ncdhw_0_10000000149011612_0_5_3",
+      "id": "2_3_3_1_1_fp32_ndhwc_rlo0p1_norslope_rhi0p5",
       "values": {
         "io_data_type": "float",
         "tensors": [
@@ -55650,7 +55650,7 @@
       }
     },
     {
-      "id": "1_3_1_1_1_fp32_ncdhw_2",
+      "id": "2_3_3_1_1_fp32_ndhwc_norlo_rslope0p01_norhi",
       "values": {
         "io_data_type": "float",
         "tensors": [
@@ -55922,7 +55922,7 @@
       }
     },
     {
-      "id": "1_3_1_1_1_fp32_ncdhw_0_0_3",
+      "id": "2_3_2_4_4_fp32_ndhwc_rlo0_norslope_norhi",
       "values": {
         "io_data_type": "float",
         "tensors": [
@@ -56194,7 +56194,7 @@
       }
     },
     {
-      "id": "1_3_1_1_1_fp32_ncdhw_6_0_3",
+      "id": "2_3_2_4_4_fp32_ndhwc_norlo_norslope_rhi6",
       "values": {
         "io_data_type": "float",
         "tensors": [
@@ -56466,7 +56466,7 @@
       }
     },
     {
-      "id": "1_3_1_1_1_fp32_ncdhw_3",
+      "id": "2_3_3_1_1_fp32_ncdhw_norlo_rslope0p01_norhi",
       "values": {
         "io_data_type": "float",
         "tensors": [
@@ -56738,7 +56738,7 @@
       }
     },
     {
-      "id": "1_3_1_1_1_fp32_ncdhw_0_10000000149011612_0_5_4",
+      "id": "2_3_2_4_4_fp32_ndhwc_rlo0p1_norslope_rhi0p5",
       "values": {
         "io_data_type": "float",
         "tensors": [
@@ -57010,7 +57010,7 @@
       }
     },
     {
-      "id": "1_3_1_1_1_fp32_ncdhw_4",
+      "id": "2_3_2_4_4_fp32_ndhwc_norlo_rslope0p01_norhi",
       "values": {
         "io_data_type": "float",
         "tensors": [
@@ -57282,7 +57282,7 @@
       }
     },
     {
-      "id": "1_3_1_1_1_fp32_ncdhw_0_0_4",
+      "id": "16_3_8_14_14_fp32_ndhwc_rlo0_norslope_norhi",
       "values": {
         "io_data_type": "float",
         "tensors": [
@@ -57554,7 +57554,7 @@
       }
     },
     {
-      "id": "1_3_1_1_1_fp32_ncdhw_6_0_4",
+      "id": "16_3_8_14_14_fp32_ndhwc_norlo_norslope_rhi6",
       "values": {
         "io_data_type": "float",
         "tensors": [
@@ -57826,7 +57826,7 @@
       }
     },
     {
-      "id": "1_3_1_1_1_fp32_ncdhw_0_10000000149011612_0_5_5",
+      "id": "16_3_8_14_14_fp32_ndhwc_rlo0p1_norslope_rhi0p5",
       "values": {
         "io_data_type": "float",
         "tensors": [
@@ -58098,7 +58098,7 @@
       }
     },
     {
-      "id": "1_3_1_1_1_fp32_ncdhw_5",
+      "id": "16_3_8_14_14_fp32_ndhwc_norlo_rslope0p01_norhi",
       "values": {
         "io_data_type": "float",
         "tensors": [
@@ -58370,7 +58370,7 @@
       }
     },
     {
-      "id": "1_3_1_1_1_fp32_ncdhw_0_0_5",
+      "id": "2_3_2_4_4_fp32_ncdhw_rlo0_norslope_norhi",
       "values": {
         "io_data_type": "float",
         "tensors": [
@@ -58642,7 +58642,7 @@
       }
     },
     {
-      "id": "1_3_1_1_1_fp32_ncdhw_6_0_5",
+      "id": "2_3_2_4_4_fp32_ncdhw_norlo_norslope_rhi6",
       "values": {
         "io_data_type": "float",
         "tensors": [
@@ -58914,7 +58914,7 @@
       }
     },
     {
-      "id": "1_3_1_1_1_fp32_ncdhw_0_10000000149011612_0_5_6",
+      "id": "2_3_2_4_4_fp32_ncdhw_rlo0p1_norslope_rhi0p5",
       "values": {
         "io_data_type": "float",
         "tensors": [
@@ -59186,7 +59186,7 @@
       }
     },
     {
-      "id": "1_3_1_1_1_fp32_ncdhw_6",
+      "id": "2_3_2_4_4_fp32_ncdhw_norlo_rslope0p01_norhi",
       "values": {
         "io_data_type": "float",
         "tensors": [
@@ -59458,7 +59458,7 @@
       }
     },
     {
-      "id": "1_3_1_1_1_fp32_ncdhw_0_0_6",
+      "id": "16_3_8_14_14_fp32_ncdhw_rlo0_norslope_norhi",
       "values": {
         "io_data_type": "float",
         "tensors": [
@@ -59730,7 +59730,7 @@
       }
     },
     {
-      "id": "1_3_1_1_1_fp32_ncdhw_6_0_6",
+      "id": "16_3_8_14_14_fp32_ncdhw_norlo_norslope_rhi6",
       "values": {
         "io_data_type": "float",
         "tensors": [

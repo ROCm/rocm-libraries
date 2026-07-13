@@ -117,33 +117,39 @@ def main() -> int:
 
     ported_map = _build_ported_from_map(args.bundle_dir) if args.bundle_dir else {}
 
-    # Try to match C++ pass set against bundle pass set.
-    # Matching strategies (in priority):
-    #   1. Direct name match (suite.case exists in both)
-    #   2. ported_from reverse lookup (C++ name -> bundle case via metadata)
+    # The join key mismatch to bridge: gtest reports parametrized cases as
+    # "Suite.Correctness/0" (slash), but ported_from stores the *sanitized*
+    # case name "...Correctness_0" (underscore, as it appears on disk). Normalize
+    # both sides — strip the "c++ integration suite: " prefix and unify slashes
+    # to underscores — so the reverse lookup actually connects.
+    def _norm(name: str) -> str:
+        n = name.split("c++ integration suite:")[-1].strip()
+        return n.replace("/", "_")
+
+    # normalized C++ name -> bundle case id (from ported_from metadata)
+    ported_by_norm = {_norm(key): cid for key, cid in ported_map.items()}
+
+    # bundle case id -> did it PASS? A case id appears as the gtest case name of
+    # a bundle suite, so scan the bundle results once and index by trailing id.
+    bundle_pass_ids = set()
+    for full, status in bundle_results.items():
+        if status == "PASS":
+            bundle_pass_ids.add(full.split(".")[-1])
+
     regressions = []
     matched = 0
 
     for cpp_test in sorted(cpp_pass):
+        # 1. Direct name match (rare — only if a bundle kept the C++ name).
         if cpp_test in bundle_pass:
             matched += 1
             continue
 
-        ported_key = None
-        for key in ported_map:
-            if key.endswith(cpp_test):
-                ported_key = key
-                break
-
-        if ported_key:
-            bundle_case_id = ported_map[ported_key]
-            bundle_hit = any(
-                bundle_case_id in k and bundle_results.get(k) == "PASS"
-                for k in bundle_results
-            )
-            if bundle_hit:
-                matched += 1
-                continue
+        # 2. ported_from reverse lookup, via normalized names.
+        bundle_case_id = ported_by_norm.get(_norm(cpp_test))
+        if bundle_case_id and bundle_case_id in bundle_pass_ids:
+            matched += 1
+            continue
 
         bundle_status = bundle_results.get(cpp_test, "ABSENT")
         regressions.append((cpp_test, bundle_status))

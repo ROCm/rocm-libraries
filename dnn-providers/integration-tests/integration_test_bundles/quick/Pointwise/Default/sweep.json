@@ -4,8 +4,8 @@
     {
       "id": "2_4_8_8_fp16_nchw",
       "values": {
-        "io_data_type": "half",
         "intermediate_data_type": "half",
+        "io_data_type": "half",
         "tensors": [
           {
             "uid": 0,
@@ -54,8 +54,8 @@
     {
       "id": "1_16_4_4_fp16_nchw",
       "values": {
-        "io_data_type": "half",
         "intermediate_data_type": "half",
+        "io_data_type": "half",
         "tensors": [
           {
             "uid": 0,
@@ -104,8 +104,8 @@
     {
       "id": "4_8_16_16_fp16_nchw",
       "values": {
-        "io_data_type": "half",
         "intermediate_data_type": "half",
+        "io_data_type": "half",
         "tensors": [
           {
             "uid": 0,
@@ -154,8 +154,8 @@
     {
       "id": "2_4_8_8_fp32_nchw",
       "values": {
-        "io_data_type": "float",
         "intermediate_data_type": "float",
+        "io_data_type": "float",
         "tensors": [
           {
             "uid": 0,
@@ -204,8 +204,8 @@
     {
       "id": "1_16_4_4_fp32_nchw",
       "values": {
-        "io_data_type": "float",
         "intermediate_data_type": "float",
+        "io_data_type": "float",
         "tensors": [
           {
             "uid": 0,
@@ -254,8 +254,8 @@
     {
       "id": "4_8_16_16_fp32_nchw",
       "values": {
-        "io_data_type": "float",
         "intermediate_data_type": "float",
+        "io_data_type": "float",
         "tensors": [
           {
             "uid": 0,

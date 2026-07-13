@@ -2,7 +2,7 @@
   "version": 1,
   "cases": [
     {
-      "id": "bfp16",
+      "id": "2_16_8_8_bfp16_nchw_501bad",
       "values": {
         "io_data_type": "bfloat16",
         "tensors": [
@@ -93,7 +93,7 @@
       }
     },
     {
-      "id": "bfp16_2",
+      "id": "2_1_1_1_bfp16_nchw_c156a3",
       "values": {
         "io_data_type": "bfloat16",
         "tensors": [
@@ -184,7 +184,7 @@
       }
     },
     {
-      "id": "bfp16_3",
+      "id": "4096_128_1_1_bfp16_nchw",
       "values": {
         "io_data_type": "bfloat16",
         "tensors": [
@@ -275,7 +275,7 @@
       }
     },
     {
-      "id": "bfp16_4",
+      "id": "2_16_8_8_bfp16_nchw_8105c2",
       "values": {
         "io_data_type": "bfloat16",
         "tensors": [
@@ -366,7 +366,7 @@
       }
     },
     {
-      "id": "bfp16_5",
+      "id": "32_3_1_14_bfp16_nchw",
       "values": {
         "io_data_type": "bfloat16",
         "tensors": [
@@ -457,7 +457,7 @@
       }
     },
     {
-      "id": "bfp16_6",
+      "id": "32_3_14_1_bfp16_nchw",
       "values": {
         "io_data_type": "bfloat16",
         "tensors": [
@@ -548,7 +548,7 @@
       }
     },
     {
-      "id": "bfp16_7",
+      "id": "2_16_8_8_bfp16_nhwc_fde9af",
       "values": {
         "io_data_type": "bfloat16",
         "tensors": [
@@ -639,7 +639,7 @@
       }
     },
     {
-      "id": "bfp16_8",
+      "id": "2_16_8_8_bfp16_nhwc_44bdc5",
       "values": {
         "io_data_type": "bfloat16",
         "tensors": [
@@ -730,7 +730,7 @@
       }
     },
     {
-      "id": "bfp16_9",
+      "id": "2_16_8_8_bfp16_nhwc_e41bce",
       "values": {
         "io_data_type": "bfloat16",
         "tensors": [
@@ -821,7 +821,7 @@
       }
     },
     {
-      "id": "bfp16_10",
+      "id": "2_1_1_1_bfp16_nchw_c156a3_2",
       "values": {
         "io_data_type": "bfloat16",
         "tensors": [
@@ -912,7 +912,7 @@
       }
     },
     {
-      "id": "bfp16_11",
+      "id": "4096_128_1_1_bfp16_nhwc",
       "values": {
         "io_data_type": "bfloat16",
         "tensors": [
@@ -1003,7 +1003,7 @@
       }
     },
     {
-      "id": "bfp16_12",
+      "id": "32_3_1_14_bfp16_nhwc",
       "values": {
         "io_data_type": "bfloat16",
         "tensors": [
@@ -1094,7 +1094,7 @@
       }
     },
     {
-      "id": "bfp16_13",
+      "id": "32_3_14_1_bfp16_nhwc",
       "values": {
         "io_data_type": "bfloat16",
         "tensors": [
@@ -1185,7 +1185,7 @@
       }
     },
     {
-      "id": "bfp16_14",
+      "id": "2_16_8_8_bfp16_nchw_2818ce",
       "values": {
         "io_data_type": "bfloat16",
         "tensors": [
@@ -1276,7 +1276,7 @@
       }
     },
     {
-      "id": "fp16",
+      "id": "2_16_8_8_fp16_nchw_900b85",
       "values": {
         "io_data_type": "half",
         "tensors": [
@@ -1367,7 +1367,7 @@
       }
     },
     {
-      "id": "fp16_2",
+      "id": "2_1_1_1_fp16_nchw_cb3ef2",
       "values": {
         "io_data_type": "half",
         "tensors": [
@@ -1458,7 +1458,7 @@
       }
     },
     {
-      "id": "fp16_3",
+      "id": "4096_128_1_1_fp16_nchw",
       "values": {
         "io_data_type": "half",
         "tensors": [
@@ -1549,7 +1549,7 @@
       }
     },
     {
-      "id": "fp16_4",
+      "id": "2_16_8_8_fp16_nchw_4701bb",
       "values": {
         "io_data_type": "half",
         "tensors": [
@@ -1640,7 +1640,7 @@
       }
     },
     {
-      "id": "fp16_5",
+      "id": "32_3_1_14_fp16_nchw",
       "values": {
         "io_data_type": "half",
         "tensors": [
@@ -1731,7 +1731,7 @@
       }
     },
     {
-      "id": "fp16_6",
+      "id": "32_3_14_1_fp16_nchw",
       "values": {
         "io_data_type": "half",
         "tensors": [
@@ -1822,7 +1822,7 @@
       }
     },
     {
-      "id": "fp16_7",
+      "id": "2_16_8_8_fp16_nhwc_a2ce67",
       "values": {
         "io_data_type": "half",
         "tensors": [
@@ -1913,7 +1913,7 @@
       }
     },
     {
-      "id": "fp16_8",
+      "id": "2_16_8_8_fp16_nhwc_52a09c",
       "values": {
         "io_data_type": "half",
         "tensors": [
@@ -2004,7 +2004,7 @@
       }
     },
     {
-      "id": "fp16_9",
+      "id": "2_16_8_8_fp16_nhwc_f6bd35",
       "values": {
         "io_data_type": "half",
         "tensors": [
@@ -2095,7 +2095,7 @@
       }
     },
     {
-      "id": "fp16_10",
+      "id": "2_1_1_1_fp16_nchw_cb3ef2_2",
       "values": {
         "io_data_type": "half",
         "tensors": [
@@ -2186,7 +2186,7 @@
       }
     },
     {
-      "id": "fp16_11",
+      "id": "4096_128_1_1_fp16_nhwc",
       "values": {
         "io_data_type": "half",
         "tensors": [
@@ -2277,7 +2277,7 @@
       }
     },
     {
-      "id": "fp16_12",
+      "id": "32_3_1_14_fp16_nhwc",
       "values": {
         "io_data_type": "half",
         "tensors": [
@@ -2368,7 +2368,7 @@
       }
     },
     {
-      "id": "fp16_13",
+      "id": "32_3_14_1_fp16_nhwc",
       "values": {
         "io_data_type": "half",
         "tensors": [
@@ -2459,7 +2459,7 @@
       }
     },
     {
-      "id": "fp16_14",
+      "id": "2_16_8_8_fp16_nchw_f63345",
       "values": {
         "io_data_type": "half",
         "tensors": [
@@ -2550,7 +2550,7 @@
       }
     },
     {
-      "id": "fp32",
+      "id": "2_16_8_8_fp32_nchw_319656",
       "values": {
         "io_data_type": "float",
         "tensors": [
@@ -2641,7 +2641,7 @@
       }
     },
     {
-      "id": "fp32_2",
+      "id": "2_1_1_1_fp32_nchw_5ac2ca",
       "values": {
         "io_data_type": "float",
         "tensors": [
@@ -2732,7 +2732,7 @@
       }
     },
     {
-      "id": "fp32_3",
+      "id": "4096_128_1_1_fp32_nchw",
       "values": {
         "io_data_type": "float",
         "tensors": [
@@ -2823,7 +2823,7 @@
       }
     },
     {
-      "id": "fp32_4",
+      "id": "2_16_8_8_fp32_nchw_71625e",
       "values": {
         "io_data_type": "float",
         "tensors": [
@@ -2914,7 +2914,7 @@
       }
     },
     {
-      "id": "fp32_5",
+      "id": "32_3_1_14_fp32_nchw",
       "values": {
         "io_data_type": "float",
         "tensors": [
@@ -3005,7 +3005,7 @@
       }
     },
     {
-      "id": "fp32_6",
+      "id": "32_3_14_1_fp32_nchw",
       "values": {
         "io_data_type": "float",
         "tensors": [
@@ -3096,7 +3096,7 @@
       }
     },
     {
-      "id": "fp32_7",
+      "id": "2_16_8_8_fp32_nhwc_392f4a",
       "values": {
         "io_data_type": "float",
         "tensors": [
@@ -3187,7 +3187,7 @@
       }
     },
     {
-      "id": "fp32_8",
+      "id": "2_16_8_8_fp32_nhwc_617254",
       "values": {
         "io_data_type": "float",
         "tensors": [
@@ -3278,7 +3278,7 @@
       }
     },
     {
-      "id": "fp32_9",
+      "id": "2_16_8_8_fp32_nhwc_a5187a",
       "values": {
         "io_data_type": "float",
         "tensors": [
@@ -3369,7 +3369,7 @@
       }
     },
     {
-      "id": "fp32_10",
+      "id": "2_1_1_1_fp32_nchw_5ac2ca_2",
       "values": {
         "io_data_type": "float",
         "tensors": [
@@ -3460,7 +3460,7 @@
       }
     },
     {
-      "id": "fp32_11",
+      "id": "4096_128_1_1_fp32_nhwc",
       "values": {
         "io_data_type": "float",
         "tensors": [
@@ -3551,7 +3551,7 @@
       }
     },
     {
-      "id": "fp32_12",
+      "id": "32_3_1_14_fp32_nhwc",
       "values": {
         "io_data_type": "float",
         "tensors": [
@@ -3642,7 +3642,7 @@
       }
     },
     {
-      "id": "fp32_13",
+      "id": "32_3_14_1_fp32_nhwc",
       "values": {
         "io_data_type": "float",
         "tensors": [
@@ -3733,7 +3733,7 @@
       }
     },
     {
-      "id": "fp32_14",
+      "id": "2_16_8_8_fp32_nchw_b4aaed",
       "values": {
         "io_data_type": "float",
         "tensors": [

@@ -325,6 +325,68 @@ def test_round_trip_expansion():
     print("  PASS: round_trip_expansion")
 
 
+def test_case_ids():
+    """Case ids are stable, bounded, and unique even for input-range-only diffs."""
+    sys.path.insert(0, str(SCRIPT_DIR))
+    from bundle_utils import assign_case_ids
+
+    def case(dims, strides, dtype, inputs=None, attrs=None):
+        v = {
+            "io_data_type": dtype,
+            "tensors": [
+                {"uid": 0, "dims": dims, "strides": strides, "data_type": dtype}
+            ],
+        }
+        if attrs:
+            v["attributes"] = attrs
+        return {"values": v, "metadata": {"seed": 1, "inputs": inputs or {}}}
+
+    # 1. Stability: same input list, run twice -> identical ids, order-independent.
+    a = [
+        case([2, 3, 4, 5], [60, 20, 5, 1], "float"),
+        case([8, 3, 4, 5], [60, 20, 5, 1], "half"),
+    ]
+    b = [dict(c) for c in reversed(a)]  # reversed order
+    assign_case_ids(a)
+    assign_case_ids(b)
+    ids_a = {id(x): x["id"] for x in a}
+    # reversed list must yield the same id per identical case content
+    assert a[0]["id"] != a[1]["id"], "distinct cases must get distinct ids"
+    # re-run on a fresh copy -> identical
+    a2 = [
+        case([2, 3, 4, 5], [60, 20, 5, 1], "float"),
+        case([8, 3, 4, 5], [60, 20, 5, 1], "half"),
+    ]
+    assign_case_ids(a2)
+    assert [c["id"] for c in a] == [c["id"] for c in a2], "ids must be deterministic"
+
+    # 2. Input-range-only difference: identical graph, different bias range.
+    #    Must NOT collide — this is the case the readable tokens cannot express.
+    r1 = case([2, 3, 4, 5], [60, 20, 5, 1], "float", inputs={"1": {"lo": -1, "hi": 1}})
+    r2 = case([2, 3, 4, 5], [60, 20, 5, 1], "float", inputs={"1": {"lo": -2, "hi": 2}})
+    pair = [r1, r2]
+    assign_case_ids(pair)
+    assert pair[0]["id"] != pair[1]["id"], (
+        "cases differing only in input range must get distinct ids "
+        f"(got {pair[0]['id']!r} twice)"
+    )
+
+    # 3. Uniqueness across a larger mixed sweep.
+    many = [
+        case(
+            [1, 16, 3, 3], [144, 9, 3, 1], "half", attrs={"parameters__stride": [s, s]}
+        )
+        for s in (1, 2)
+    ] + [r1, r2]
+    assign_case_ids(many)
+    assert len({c["id"] for c in many}) == len(many), "all ids must be unique"
+
+    # 4. Bounded length: no id may be an unusable gtest name.
+    assert all(len(c["id"]) <= 120 for c in many), "ids must stay bounded"
+
+    print("  PASS: case_ids")
+
+
 def main() -> int:
     verbose = "-v" in sys.argv
     failures = 0
@@ -332,6 +394,7 @@ def main() -> int:
     tests = [
         test_skeleton_grouping,
         test_round_trip_expansion,
+        test_case_ids,
         test_place_and_verify,
         test_import_dedup,
     ]
