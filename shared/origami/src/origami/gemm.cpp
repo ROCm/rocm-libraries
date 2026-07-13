@@ -23,6 +23,7 @@
 #include "origami/streamk.hpp"
 
 namespace origami {
+namespace gemm {
 
 // Forward declaration for internal Formocast latency computation
 static double compute_formocast_latency(const problem_t& problem,
@@ -59,7 +60,7 @@ context_t::context_t(const problem_t& problem, const hardware_t& hardware, const
 
   // Launch parameters
   auto [reduction, wgs, cus, timesteps, split] =
-      compute_launch_parameters(problem, hardware, config, config.grid_selection, N_CU);
+      compute_launch_parameters(problem, hardware, config, config.grid_selection, 0);
   reduction_strategy = reduction;
   num_wgs            = wgs;
   num_timesteps      = timesteps;
@@ -96,9 +97,15 @@ context_t::context_t(const problem_t& problem, const hardware_t& hardware, const
     const auto a_bits = datatype_to_bits(problem.a_dtype);
     const auto b_bits = datatype_to_bits(problem.b_dtype);
 
-    OLOG_DEBUG("======== Origami Debug Info ========");
-    OLOG_DEBUG("ProblemSize (MxNxBxK): " << int(M) << "x" << int(N) << "x" << int(batch) << "x"
-                                         << int(K));
+    OLOG_DEBUG("======== Origami Debug Info ========"); // This signature indicates the start of the debug information.
+    OLOG_DEBUG("M: " << int(M));
+    OLOG_DEBUG("N: " << int(N));
+    OLOG_DEBUG("Batch: " << int(batch));
+    OLOG_DEBUG("K: " << int(K));
+    OLOG_DEBUG("InputDataTypeA: " << datatype_to_string(problem.a_dtype));
+    OLOG_DEBUG("InputDataTypeB: " << datatype_to_string(problem.b_dtype));
+    OLOG_DEBUG("OutputDataType: " << datatype_to_string(problem.d_dtype));
+    OLOG_DEBUG("ComputeType: " << datatype_to_string(problem.mi_dtype));
     OLOG_DEBUG("MacroTile: " << int(MT_M) << "x" << int(MT_N) << "x" << int(MT_K));
     OLOG_DEBUG("MatrixInstruction: " << int(MI_M) << "x" << int(MI_N) << "x" << int(MI_K));
     OLOG_DEBUG("ElementSizeA (bits): " << int(a_bits));
@@ -1705,12 +1712,14 @@ double compute_tile_latency(const problem_t& problem,
 
   // 4) Single-tile main-loop latency (pipelined: compute overlaps memory)
   double L_cvt = 0;
-  if ((problem.mi_dtype == data_type_t::XFloat32) &&
-      (hardware.arch == hardware_t::architecture_t::gfx950)) {
-    L_cvt = compute_cvt_overhead(problem, hardware, config);
-  } else if ((a_bits == 32) && (b_bits == 32) && (problem.mi_dtype == data_type_t::BFloat16) &&
-             (hardware.arch == hardware_t::architecture_t::gfx950)) {
-    L_cvt = compute_cvt_overhead_x1(problem, hardware, config);
+  // TODO: gfx90a also lacks native TF32 and should get CVT overhead,
+  // but enabling it changes rankings — address in a separate PR.
+  if (!hardware.has_native_TF32() && hardware.arch != hardware_t::architecture_t::gfx90a) {
+    if (problem.mi_dtype == data_type_t::XFloat32) {
+      L_cvt = compute_cvt_overhead(problem, hardware, config);
+    } else if ((a_bits == 32) && (b_bits == 32) && (problem.mi_dtype == data_type_t::BFloat16)) {
+      L_cvt = compute_cvt_overhead_x1(problem, hardware, config);
+    }
   }
   double L_tile_single =
       std::max(L_compute * heuristic.weight_compute, L_mem * heuristic.weight_memory);
@@ -1838,6 +1847,13 @@ double compute_total_latency(const problem_t& problem,
                              size_t max_cus) {
   assert(config.is_valid());
 
+  // Heuristic-driven kernel rejection (e.g. subtile kernels with small K).
+  // When a matching heuristic marks the config as rejected, report the maximum
+  // latency so rank_configs() drops the kernel from selection entirely.
+  if (get_heuristic_params(problem, hardware, config).reject) {
+    return std::numeric_limits<double>::max();
+  }
+
   // Use Formocast simulation model if prediction_mode is set to simulation
   if (config.prediction_mode == prediction_modes_t::simulation) {
     return compute_formocast_latency(problem, hardware, config);
@@ -1913,7 +1929,7 @@ double compute_total_latency(const problem_t& problem,
   if (context.debug) {
     OLOG_DEBUG("L_parallel_reduce: " << L_parallel_reduce);
     OLOG_DEBUG("total_latency: " << total_latency);
-    OLOG_DEBUG("=================================");
+    OLOG_DEBUG("================================="); // This signature indicates the end of the debug information.
   }
 
   return total_latency;
@@ -2000,4 +2016,5 @@ static double compute_formocast_latency(const problem_t& problem,
   return perf.microSeconds;
 }
 
+}  // namespace gemm
 }  // namespace origami

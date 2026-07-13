@@ -229,7 +229,7 @@
     PackedC1IndicesX: [1]
     PrefetchGlobalRead: 2
     PrefetchLocalRead: 0
-    PreloadKernArgs: false
+    PreloadKernArgs: true
     ProblemType:
       Activation: true
       ActivationComputeDataType: 6
@@ -315,7 +315,7 @@
     SourceSwap: false
     StaggerU: 0
     StaggerUMapping: 0
-    StaggerUStride: 64.0
+    StaggerUStride: 64
     StorePriorityOpt: false
     StoreRemapVectorWidth: 0
     StoreSyncOpt: 0

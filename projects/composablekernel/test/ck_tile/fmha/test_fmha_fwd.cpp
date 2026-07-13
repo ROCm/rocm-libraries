@@ -49,6 +49,10 @@ struct TestConfigs
     static constexpr bool def_is_v_rowmajor = true;
     static constexpr auto init_method       = "uf";
     static int adjust_seqlen(int seqlen) { return seqlen; }
+    static int adjust_hdim(int hdim)
+    {
+        return hdim < 0 ? hdim : ck_tile::integer_least_multiple(hdim, 8);
+    }
 };
 
 template <>
@@ -67,6 +71,10 @@ struct TestConfigs<FmhaFwdFp8Bf16>
     // When there are no fp8 instances with padding, pad seqlen to avoid skipping most of the tests:
     // return ck_tile::integer_least_multiple(seqlen, 128);
     static int adjust_seqlen(int seqlen) { return seqlen; }
+    static int adjust_hdim(int hdim)
+    {
+        return hdim < 0 ? hdim : ck_tile::integer_least_multiple(hdim, 16);
+    }
 };
 
 template <>
@@ -82,6 +90,10 @@ struct TestConfigs<FmhaFwdMxFp8>
     static constexpr bool def_is_v_rowmajor  = false;
     static constexpr auto init_method        = "3";
     static int adjust_seqlen(int seqlen) { return seqlen; }
+    static int adjust_hdim(int hdim)
+    {
+        return hdim < 0 ? hdim : ck_tile::integer_least_multiple(hdim, 16);
+    }
 };
 
 template <>
@@ -99,6 +111,10 @@ struct TestConfigs<FmhaFwdMxFp4>
     static int adjust_seqlen(int seqlen)
     {
         return seqlen < 0 ? seqlen : ck_tile::integer_least_multiple(seqlen, 2);
+    }
+    static int adjust_hdim(int hdim)
+    {
+        return hdim < 0 ? hdim : ck_tile::integer_least_multiple(hdim, 32);
     }
 };
 
@@ -123,6 +139,7 @@ struct TestConfigs<FmhaFwdFp32>
     static constexpr bool def_is_v_rowmajor  = true;
     static constexpr auto init_method        = "uf";
     static int adjust_seqlen(int seqlen) { return seqlen; }
+    static int adjust_hdim(int hdim) { return hdim; }
 };
 
 static auto HDimValues           = ValuesIn(TestConfigs<DataTypeConfig>::HDimValues);
@@ -135,6 +152,7 @@ constexpr bool def_lse           = TestConfigs<DataTypeConfig>::def_lse;
 constexpr bool def_is_v_rowmajor = TestConfigs<DataTypeConfig>::def_is_v_rowmajor;
 constexpr auto init_method       = TestConfigs<DataTypeConfig>::init_method;
 int adjust_seqlen(int seqlen) { return TestConfigs<DataTypeConfig>::adjust_seqlen(seqlen); }
+int adjust_hdim(int hdim) { return TestConfigs<DataTypeConfig>::adjust_hdim(hdim); }
 
 // Random seed used for initializing input tensors. 0 for non-deterministic seed
 CK_TILE_DECLARE_ENV_VAR(CK_TILE_TEST_SEED, uint64_t, 123456)
@@ -163,7 +181,7 @@ const ck_tile::stream_config stream_config{
 
 #define COMMON_ARGS                                                                              \
     init_method, static_cast<uint32_t>(ck_tile::EnvValue(CK_TILE_ENV(CK_TILE_TEST_SEED))), 1, 0, \
-        stream_config
+        1, stream_config
 
 auto EnableTestIf(bool condition)
 {
@@ -253,6 +271,70 @@ TEST_P(AllLong, DataTypeConfig)
     CHECK_RESULT(result);
 }
 
+class General
+    : public TestWithParam<std::tuple<std::tuple<int, int>,
+                                      bool,
+                                      bool,
+                                      mode_enum,
+                                      std::tuple<int, int, int, int, int, int, std::string>>>
+{
+};
+
+INSTANTIATE_TEST_SUITE_P(TestCkTileFmhaFwd,
+                         General,
+                         Combine(HDimValues,
+                                 Bool(),
+                                 IsVRowmajorValues,
+                                 ModeValues,
+                                 Values(std::tuple{2, 2, 1, 55, 256, -1, "0"},
+                                        std::tuple{1, 3, -1, 100, 51, -1, "0"},
+                                        std::tuple{2, 1, -1, 99, 256, -1, "1"},
+                                        std::tuple{1, 2, 1, 1024, 256, -1, "2"},
+                                        std::tuple{2, 1, -1, 3, 99, -1, "2"},
+                                        std::tuple{1, 2, 1, 33, 0, -1, "2"},
+                                        std::tuple{1, 2, 1, 1, 10, 32, "2"})));
+
+TEST_P(General, DataTypeConfig)
+{
+    auto [hdims, perm, is_v_rowmajor, mode, dims_mask]                      = GetParam();
+    auto [hdim_q, hdim_v]                                                   = hdims;
+    auto [batch, nhead, nhead_k, seqlen_q, seqlen_k, seqlen_kpad, mask_str] = dims_mask;
+
+    auto result = fmha_fwd_run<DataTypeConfig>(mode,
+                                               batch,
+                                               nhead,
+                                               nhead_k,
+                                               {adjust_seqlen(seqlen_q)},
+                                               {adjust_seqlen(seqlen_k)},
+                                               hdim_q,
+                                               hdim_v,
+                                               0,             // seqlen_knew
+                                               {-1},          // seqlen_qpads
+                                               {seqlen_kpad}, // seqlen_kpads
+                                               {},            // q_eff_lens_per_batch
+                                               {},            // kv_eff_lens_per_batch
+                                               0,             // rotary_dim
+                                               perm,          // i_perm
+                                               perm,          // o_perm
+                                               0,             // scale_s
+                                               0,             // logits_soft_cap
+                                               is_v_rowmajor, // is_v_rowmajor
+                                               def_lse,       // lse
+                                               0,             // page_block_size
+                                               false,         // use_cache_batch_idx
+                                               "n",           // bias_str
+                                               0.0f,          // p_drop
+                                               0,             // drop_seed
+                                               0,             // drop_offset
+                                               false,         // drop_prefs
+                                               mask_str,      // mask_str
+                                               qscale_str,
+                                               true, // is_rotary_interleaved
+                                               1,    // num_splits
+                                               COMMON_ARGS);
+    CHECK_RESULT(result);
+}
+
 // ---------------------------------------------------------------
 // Negative tests: padding not supported with appendkv/splitkv/pagedkv
 // ---------------------------------------------------------------
@@ -297,6 +379,7 @@ TEST(TestCkTileFmhaFwd, AppendKvWithBatchEffLensShouldFail)
         static_cast<uint32_t>(ck_tile::EnvValue(CK_TILE_ENV(CK_TILE_TEST_SEED))),
         0,
         1, // init_sink
+        0, // pack_gqa
         stream_config);
     ASSERT_EQ(result, fwd_result::invalid_args);
 }
@@ -342,6 +425,7 @@ TEST(TestCkTileFmhaFwd, SplitKvWithGroupPaddingShouldFail)
         static_cast<uint32_t>(ck_tile::EnvValue(CK_TILE_ENV(CK_TILE_TEST_SEED))),
         0,
         1, // init_sink
+        0, // pack_gqa
         stream_config);
     ASSERT_EQ(result, fwd_result::invalid_args);
 }
@@ -386,6 +470,7 @@ TEST(TestCkTileFmhaFwd, PagedKvWithGroupPaddingShouldFail)
         static_cast<uint32_t>(ck_tile::EnvValue(CK_TILE_ENV(CK_TILE_TEST_SEED))),
         0,
         1, // init_sink
+        0, // pack_gqa
         stream_config);
     ASSERT_EQ(result, fwd_result::invalid_args);
 }
@@ -427,8 +512,8 @@ TEST_P(HDimPadding, DataTypeConfig)
                                                nhead_k,
                                                {adjust_seqlen(seqlen_q)},
                                                {adjust_seqlen(seqlen_k)},
-                                               hdim_q,
-                                               hdim_v,
+                                               adjust_hdim(hdim_q),
+                                               adjust_hdim(hdim_v),
                                                0,             // seqlen_knew
                                                {-1},          // seqlen_qpads
                                                {seqlen_kpad}, // seqlen_kpads
@@ -605,7 +690,7 @@ TEST_P(Dropout, DataTypeConfig)
     if constexpr(std::is_same_v<DataTypeConfig, FmhaFwdFp16>)
     {
         if(hdim_q > 128 && mode == mode_enum::batch)
-            GTEST_SKIP() << "Skipped: fp16 dropout d256 batch — compiler bug (ROCm >= 7.12)";
+            GTEST_SKIP() << "Skipped: fp16 dropout d256 batch - compiler bug (ROCm >= 7.12)";
     }
 #endif
 
@@ -735,6 +820,7 @@ INSTANTIATE_TEST_SUITE_P(TestCkTileFmhaFwd,
                                  Values(3, 4),
                                  Values(std::tuple{4, 3, 1, 200, 1024, "0"},
                                         std::tuple{2, 2, -1, 512, 2000, "0"},
+                                        std::tuple{2, 8, 2, 1, 1024, "0"},
                                         std::tuple{3, 2, -1, 230, 899, "t:128,128"})));
 
 TEST_P(SplitKV, DataTypeConfig)

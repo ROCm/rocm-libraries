@@ -116,23 +116,17 @@ public:
         return {std::move(graphObj), GraphOutputs{yTensorAttr}};
     }
 
-protected:
-    void initializeBundle([[maybe_unused]] const graph::Graph& graph,
-                          GraphTensorBundle& bundle,
-                          unsigned int seed) override
+    BatchnormForwardInferenceWithVariance()
     {
-        bundle.tensors.at(BnInfVarTensorIds::X_UID)->fillTensorWithRandomValues(-1.0f, 1.0f, seed);
-        bundle.tensors.at(BnInfVarTensorIds::MEAN_UID)
-            ->fillTensorWithRandomValues(-1.0f, 1.0f, seed);
-        // Variance must be non-negative; use positive range
-        bundle.tensors.at(BnInfVarTensorIds::VARIANCE_UID)
-            ->fillTensorWithRandomValues(0.1f, 1.0f, seed);
-        bundle.tensors.at(BnInfVarTensorIds::SCALE_UID)
-            ->fillTensorWithRandomValues(-1.0f, 1.0f, seed);
-        bundle.tensors.at(BnInfVarTensorIds::BIAS_UID)
-            ->fillTensorWithRandomValues(-1.0f, 1.0f, seed);
+        this->synthesis()
+            .setRange(BnInfVarTensorIds::X_UID, -1.0f, 1.0f)
+            .setRange(BnInfVarTensorIds::MEAN_UID, -1.0f, 1.0f)
+            .setRange(BnInfVarTensorIds::VARIANCE_UID, 0.1f, 1.0f)
+            .setRange(BnInfVarTensorIds::SCALE_UID, -1.0f, 1.0f)
+            .setRange(BnInfVarTensorIds::BIAS_UID, -1.0f, 1.0f);
     }
 
+protected:
     void runGraphTest() override
     {
         const auto& testCase = this->GetParam();
@@ -142,7 +136,10 @@ protected:
 
         this->registerValidator(outputs.y, this->getTolerance(graphObj, outputs.y));
 
-        this->verifyGraph(graphObj, bnTestCase.seed);
+        this->setTestCaseLayout(layout.name);
+        this->setTestCaseNote(bnTestCase.note);
+        this->synthesis().setGlobalSeed(bnTestCase.seed);
+        this->verifyGraph(graphObj);
     }
 };
 

@@ -3,12 +3,29 @@
 
 add_executable(hipdnn_integration_tests_unit_tests
     main.cpp
+    ../src/harness/bundle/IntegrationBundleVerificationHarness.cpp
+    ../src/harness/input_init/SynthesizeInputs.cpp
+    TestArchMatch.cpp
+    TestBundleMetadata.cpp
+    TestGraphDescription.cpp
+    TestNodeTypeToString.cpp
     TestPlatformUtils.cpp
+    TestSupportMatrixCollector.cpp
     TestTestConfig.cpp
     TestTestSettings.cpp
+    TestTomlGuards.cpp
     TestGpuReferenceGraphExecutor.cpp
     TestGpuConvolutionFwdSignatureKey.cpp
     TestGpuConvolutionFwdPlan.cpp
+    TestReferenceGraphExecutorFactory.cpp
+    TestBundleDiscovery.cpp
+    TestVerificationPaths.cpp
+    TestBundleVerificationHarness.cpp
+    TestSynthesisConfig.cpp
+    TestSynthesizeInputs.cpp
+    TestToleranceResolver.cpp
+    TestVerificationModePaths.cpp
+    TestErrorPaths.cpp
 )
 
 target_include_directories(hipdnn_integration_tests_unit_tests
@@ -61,4 +78,4 @@ target_compile_options(hipdnn_gpu_ref_tests
 
 clang_tidy_check(hipdnn_gpu_ref_tests)
 
-add_unit_test_target(hipdnn_gpu_ref_tests ${CMAKE_CURRENT_BINARY_DIR})
+add_tiered_test_target(hipdnn_gpu_ref_tests ${CMAKE_CURRENT_BINARY_DIR})

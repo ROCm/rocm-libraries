@@ -126,28 +126,22 @@ public:
         return {std::move(graphObj), GraphOutputs{dxTensorAttr, dscaleTensorAttr, dbiasTensorAttr}};
     }
 
-protected:
-    void initializeBundle([[maybe_unused]] const graph::Graph& graph,
-                          GraphTensorBundle& bundle,
-                          unsigned int seed) override
+    BatchnormBackward()
     {
-        bundle.tensors.at(BatchnormBwdTensorIds::X_UID)
-            ->fillTensorWithRandomValues(-1.0f, 1.0f, seed);
-        bundle.tensors.at(BatchnormBwdTensorIds::DY_UID)
-            ->fillTensorWithRandomValues(-0.1f, 0.1f, seed);
-        bundle.tensors.at(BatchnormBwdTensorIds::SCALE_UID)
-            ->fillTensorWithRandomValues(-0.1f, 0.1f, seed);
+        this->synthesis()
+            .setRange(BatchnormBwdTensorIds::X_UID, -1.0f, 1.0f)
+            .setRange(BatchnormBwdTensorIds::DY_UID, -0.1f, 0.1f)
+            .setRange(BatchnormBwdTensorIds::SCALE_UID, -0.1f, 0.1f);
 
-        if(!CalcStats)
+        if constexpr(!CalcStats)
         {
-            bundle.tensors.at(BatchnormBwdTensorIds::MEAN_UID)
-                ->fillTensorWithRandomValues(-0.1f, 0.1f, seed);
-
-            bundle.tensors.at(BatchnormBwdTensorIds::INV_VARIANCE_UID)
-                ->fillTensorWithRandomValues(1.9f, 2.0f, seed);
+            this->synthesis()
+                .setRange(BatchnormBwdTensorIds::MEAN_UID, -0.1f, 0.1f)
+                .setRange(BatchnormBwdTensorIds::INV_VARIANCE_UID, 1.9f, 2.0f);
         }
     }
 
+protected:
     void runGraphTest() override
     {
         const auto& testCase = this->GetParam();
@@ -160,7 +154,10 @@ protected:
         this->registerValidator(outputs.dscale, this->getTolerance(graphObj, outputs.dscale));
         this->registerValidator(outputs.dbias, this->getTolerance(graphObj, outputs.dbias));
 
-        this->verifyGraph(graphObj, bnTestCase.seed);
+        this->setTestCaseLayout(layout.name);
+        this->setTestCaseNote(bnTestCase.note);
+        this->synthesis().setGlobalSeed(bnTestCase.seed);
+        this->verifyGraph(graphObj);
     }
 };
 

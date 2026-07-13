@@ -4,7 +4,7 @@
 cmake_minimum_required(VERSION 3.25.2)
 add_compile_definitions(__HIP_PLATFORM_AMD__)
 
-set(CMAKE_TOOLCHAIN_FILE "${CMAKE_CURRENT_SOURCE_DIR}/cmake/ClangToolChain.cmake"
+set(CMAKE_TOOLCHAIN_FILE "${CMAKE_CURRENT_SOURCE_DIR}/../cmake/ClangToolChain.cmake"
     CACHE STRING "Toolchain file"
 )
 set(CMAKE_POSITION_INDEPENDENT_CODE ON)
@@ -13,6 +13,35 @@ include(${CMAKE_CURRENT_LIST_DIR}/../cmake/VersionUtils.cmake)
 dnn_provider_setup_version(hipblaslt_provider ${CMAKE_CURRENT_LIST_DIR})
 
 project(hipblaslt-provider VERSION ${HIPBLASLT_PROVIDER_VERSION} LANGUAGES CXX)
+
+# ----------------------------------------------------------------------------
+# TheRock Feature Flags
+#
+# See: https://github.com/ROCm/TheRock/blob/main/docs/development/flags.md
+#
+# These flags are injected during the project() call above via
+# CMAKE_PROJECT_TOP_LEVEL_INCLUDES (TheRock's build system), which only
+# populates the cache during that call. They must therefore be declared AFTER
+# project(): declared before, option() captures the pre-injection default
+# (typically OFF) and the injected value is silently ignored, leaving the
+# feature compiled out despite the flag being set.
+# ----------------------------------------------------------------------------
+option(HIPDNN_HIPBLASLT_PROVIDER_ENABLE_MX_GEMM
+    "Enable MX (microscaling) data-type support for GEMM" OFF
+)
+if(HIPDNN_HIPBLASLT_PROVIDER_ENABLE_MX_GEMM)
+    message(STATUS "hipblaslt-provider: MX GEMM support enabled")
+    add_compile_definitions(HIPDNN_HIPBLASLT_PROVIDER_ENABLE_MX_GEMM)
+else()
+    message(STATUS "hipblaslt-provider: MX GEMM support disabled")
+endif()
+
+# Root of the rocm-libraries monorepo (for shared infrastructure like CTest categories).
+# Used by the YAML-based test categorization wiring further down. Guarded with an EXISTS
+# check at the point of use so standalone / sparse checkouts that lack shared/ctest still build.
+if(NOT DEFINED ROCM_LIBRARIES_ROOT)
+    set(ROCM_LIBRARIES_ROOT "${CMAKE_CURRENT_SOURCE_DIR}/../..")
+endif()
 
 if(NOT WIN32)
     # Only set if not already specified by user
@@ -34,12 +63,20 @@ set(CMAKE_ARCHIVE_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/lib)
 set(CMAKE_LIBRARY_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/lib)
 set(CMAKE_RUNTIME_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/bin)
 
-list(APPEND CMAKE_MODULE_PATH ${CMAKE_CURRENT_SOURCE_DIR}/cmake ${ROCM_PATH}/lib/cmake/hip
-     ${HIP_DIR}/cmake
+list(APPEND CMAKE_MODULE_PATH ${CMAKE_CURRENT_SOURCE_DIR}/cmake
+     ${CMAKE_CURRENT_SOURCE_DIR}/../cmake ${ROCM_PATH}/lib/cmake/hip ${HIP_DIR}/cmake
 )
 
 option(HIPDNN_SKIP_TESTS "Skip building tests" OFF)
-option(ENABLE_CLANG_FORMAT "Enable clang-format targets" ON)
+option(ENABLE_CLANG_FORMAT "Enable Clang-Format checks" ON)
+if(NOT ENABLE_CLANG_FORMAT)
+    message(WARNING "Clang-Format checks are disabled. CI requires passing clang-format checks.")
+endif()
+if(WIN32)
+    option(ENABLE_CLANG_TIDY "Enable Clang-Tidy checks" OFF)
+else()
+    option(ENABLE_CLANG_TIDY "Enable Clang-Tidy checks" ON)
+endif()
 
 list(
     PREPEND
@@ -63,6 +100,7 @@ list(
     -Wunreachable-code # Warn about unreachable code
     -Wno-error=unused-command-line-argument # Disable error for unused command line arguments
     -Wswitch-default # Warn if a switch statement does not have a default case
+    -Wno-ignored-attributes # disable warning about unused declspec(dllexport)
 )
 
 # NOTE: Workaround until llvm & hip cmake modules fixes symlink logic in their config files;
@@ -84,13 +122,31 @@ if(NOT TARGET hipdnn_plugin_sdk)
     find_package(hipdnn_plugin_sdk CONFIG REQUIRED)
 endif()
 
+include(ClangTidy)
+
+# Sanitizer support (Address Sanitizer, etc.)
+include(Sanitizers)
+
 # Setup testing dependencies, tests & clang format
 include(Dependencies)
 if (NOT HIPDNN_SKIP_TESTS)
+    fetch_gtest_dependency()
+    set(SKIP_TEST_NAME_VALIDATION ON)
     include(Tests)
 endif()
-if (ENABLE_CLANG_FORMAT)
-    include(ClangCheck)
+# TODO: Remove this clang-format probe once TheRock's ml-libs/CMakeLists.txt passes
+# -DENABLE_CLANG_FORMAT=OFF for hipblasltprovider (as it already does for miopenprovider).
+# The common ClangCheck.cmake calls findAndCheckClangFormat() which FATAL_ERRORs when
+# clang-format is missing. TheRock's build container does not provide clang-format, so we
+# probe for it here and skip the include if absent. Other providers (miopen, hip-kernel,
+# integration-tests) rely on TheRock passing -DENABLE_CLANG_FORMAT=OFF instead.
+if(ENABLE_CLANG_FORMAT)
+    find_program(_HIPBLASLT_CLANG_FORMAT_PROBE NAMES clang-format-18 clang-format)
+    if(_HIPBLASLT_CLANG_FORMAT_PROBE)
+        include(ClangCheck)
+    else()
+        message(WARNING "ENABLE_CLANG_FORMAT=ON but clang-format not found; skipping format targets")
+    endif()
 endif()
 
 if(WIN32)
@@ -117,23 +173,31 @@ add_library(
     HipblasltContainer.cpp
     HipblasltPlugin.cpp
     HipblasltUtils.cpp
-    # Matmul-related files
     engines/plans/HipblasltMatmulPlan.cpp
     engines/plans/HipblasltMatmulPlanBuilder.cpp
+    $<$<BOOL:${HIPDNN_HIPBLASLT_PROVIDER_ENABLE_MX_GEMM}>:engines/plans/HipblasltMxMatmulPlan.cpp>
+    $<$<BOOL:${HIPDNN_HIPBLASLT_PROVIDER_ENABLE_MX_GEMM}>:engines/plans/HipblasltMxMatmulPlanBuilder.cpp>
     HipblasltMatmulDesc.cpp
     HipblasltMatrixLayout.cpp
+    HipblasltMatrixTransformDesc.cpp
 )
 target_include_directories(hipblaslt_plugin_private PUBLIC ${CMAKE_CURRENT_SOURCE_DIR})
 dnn_provider_generate_version_header(hipblaslt_provider hipblaslt_plugin_private ${CMAKE_CURRENT_LIST_DIR})
 target_link_libraries(hipblaslt_plugin_private PUBLIC roc::hipblaslt hipdnn_data_sdk hipdnn_flatbuffers_sdk hipdnn_plugin_sdk hip::host)
 
 target_compile_options(hipblaslt_plugin_private PRIVATE ${HIPDNN_WARNING_COMPILE_OPTIONS})
+clang_tidy_check(hipblaslt_plugin_private)
 
 add_library(hipblaslt_plugin SHARED HipblasltPluginPublic.cpp)
 target_link_libraries(hipblaslt_plugin PRIVATE hipblaslt_plugin_private)
-target_link_libraries(
-    hipblaslt_plugin PRIVATE "-Xlinker --exclude-libs=ALL"
-) # Hide symbols from linked static libs
+clang_tidy_check(hipblaslt_plugin)
+
+if(NOT WIN32)
+    target_link_libraries(
+        hipblaslt_plugin PRIVATE "-Xlinker --exclude-libs=ALL"
+    ) # Hide symbols from linked static libs
+endif()
+
 target_compile_options(hipblaslt_plugin PRIVATE ${HIPDNN_WARNING_COMPILE_OPTIONS})
 set_target_properties(
     hipblaslt_plugin
@@ -155,9 +219,59 @@ if(NOT HIPDNN_SKIP_TESTS)
     # Finalize test targets with prefix to avoid collisions in superbuild mode
     finalize_test_targets("${PROJECT_NAME}")
 
-    # For standalone builds we need to install the ctest files
+    # Optional: YAML-driven CTest test categorization for TheRock CI's test_runner.py.
+    # Skipped when shared/ctest is not present (e.g. standalone hipblaslt-provider or sparse
+    # checkout that doesn't include rocm-libraries/shared/), in which case we fall back to
+    # the project's own install_provider_ctest_files() below.
+    set(HIPBLASLTPROVIDER_CTEST_INSTALL_FILE "")
+    if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/test_categories.yaml"
+       AND EXISTS "${ROCM_LIBRARIES_ROOT}/shared/ctest/TestCategories.cmake")
+        include("${ROCM_LIBRARIES_ROOT}/shared/ctest/TestCategories.cmake")
+        #enable_testing() is already invoked at module scope by Tests.cmake, so not needed here.
+        message(STATUS "hipblaslt-provider: YAML-based test categorization")
+        file(MAKE_DIRECTORY "${PROJECT_BINARY_DIR}/staging")
+        # Install-time CTestTestfile uses relative paths so `ctest` can run from the
+        # installed location (bin/hipblaslt_plugin/) and reach ../hipblaslt_plugin_tests etc.
+        set(HIPBLASLTPROVIDER_CTEST_INSTALL_FILE "${CMAKE_CURRENT_BINARY_DIR}/install_CTestTestfile.cmake")
+        file(WRITE "${HIPBLASLTPROVIDER_CTEST_INSTALL_FILE}"
+[=[
+# This is a test file generated by hipblaslt-provider for install time.
+# Tests are defined with relative paths to work in the installed location.
+]=]
+        )
+        # The YAML applies to both test binaries; each call appends its category suites
+        # (e.g. hipblaslt_plugin_tests_quick_suite, hipblaslt_plugin_integration_tests_quick_suite)
+        # to the same install-time CTestTestfile.cmake.
+        apply_test_category_labels(
+            hipblaslt_plugin_tests
+            "${CMAKE_CURRENT_SOURCE_DIR}/test_categories.yaml"
+            "${PROJECT_BINARY_DIR}/staging"
+            "${HIPBLASLTPROVIDER_CTEST_INSTALL_FILE}"
+        )
+        apply_test_category_labels(
+            hipblaslt_plugin_integration_tests
+            "${CMAKE_CURRENT_SOURCE_DIR}/test_categories.yaml"
+            "${PROJECT_BINARY_DIR}/staging"
+            "${HIPBLASLTPROVIDER_CTEST_INSTALL_FILE}"
+        )
+    else()
+        message(STATUS "hipblaslt-provider: shared/ctest or test_categories.yaml not found, skipping YAML-based CTest categories")
+    endif()
+
+    # For standalone builds we need to install the ctest files.
+    # When YAML-based categorization is active, install the generated install_CTestTestfile.cmake
+    # to bin/hipblaslt_plugin/ so TheRock CI's test_runner.py can drive `ctest -L quick`
+    # (etc.) from the artifact's install tree. Otherwise, fall back to the project's
+    # own install_provider_ctest_files() which emits an unlabeled CTestTestfile.cmake.
     if(NOT ROCM_LIBS_SUPERBUILD)
-        install_hipblaslt_plugin_ctest_files()
+        if(HIPBLASLTPROVIDER_CTEST_INSTALL_FILE)
+            install(FILES "${HIPBLASLTPROVIDER_CTEST_INSTALL_FILE}"
+                    DESTINATION "${CMAKE_INSTALL_BINDIR}/hipblaslt_plugin"
+                    RENAME "CTestTestfile.cmake"
+            )
+        else()
+            install_provider_ctest_files("hipblaslt_plugin")
+        endif()
     endif()
 endif()
 

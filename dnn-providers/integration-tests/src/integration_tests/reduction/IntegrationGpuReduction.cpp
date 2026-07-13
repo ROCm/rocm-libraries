@@ -83,7 +83,10 @@ protected:
 
         this->registerValidator(outputs.y, this->getTolerance(graphObj, outputs.y));
 
-        this->verifyGraph(graphObj, reductionTestCase.seed);
+        this->setTestCaseLayout(layout.name);
+        this->setTestCaseNote(reductionTestCase.note);
+        this->synthesis().setGlobalSeed(reductionTestCase.seed);
+        this->verifyGraph(graphObj);
     }
 };
 

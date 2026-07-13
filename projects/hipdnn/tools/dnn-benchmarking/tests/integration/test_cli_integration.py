@@ -65,7 +65,12 @@ class TestCLIIntegration:
         assert "no graph files found" in combined or "error" in combined
 
     @pytest.mark.gpu
-    def test_cli_full_run(self, sample_graph_path: Path, plugin_path_cli_args) -> None:
+    def test_cli_full_run(
+        self,
+        sample_graph_path: Path,
+        plugin_paths,
+        plugin_path_cli_args,
+    ) -> None:
         """Test full CLI run with sample graph (requires GPU)."""
         if not sample_graph_path.exists():
             pytest.skip(f"Sample graph not found: {sample_graph_path}")
@@ -82,6 +87,9 @@ class TestCLIIntegration:
         try:
             import hipdnn_frontend
 
+            hipdnn_frontend.set_engine_plugin_paths(
+                plugin_paths, hipdnn_frontend.PluginLoadingMode.ABSOLUTE
+            )
             hipdnn_frontend.Handle()
         except Exception as e:
             pytest.skip(f"hipdnn_frontend not available or no GPU: {e}")
@@ -143,7 +151,11 @@ class TestCLIIntegration:
         ],
     )
     def test_cli_all_sample_graphs(
-        self, graph_name: str, expected_name: str, plugin_path_cli_args
+        self,
+        graph_name: str,
+        expected_name: str,
+        plugin_paths,
+        plugin_path_cli_args,
     ) -> None:
         """Test CLI execution with all sample graph types."""
         sample_path = Path(__file__).parent.parent.parent / "graphs" / graph_name
@@ -163,6 +175,9 @@ class TestCLIIntegration:
         try:
             import hipdnn_frontend
 
+            hipdnn_frontend.set_engine_plugin_paths(
+                plugin_paths, hipdnn_frontend.PluginLoadingMode.ABSOLUTE
+            )
             hipdnn_frontend.Handle()
         except Exception as e:
             pytest.skip(f"hipdnn_frontend not available or no GPU: {e}")
@@ -205,7 +220,7 @@ class TestCLIParser:
 
         args = create_parser().parse_args(["--graph", "/test/graph.json"])
 
-        assert args.graph == "/test/graph.json"
+        assert args.graph == ["/test/graph.json"]
         assert args.warmup == 10
         assert args.iters == 100
         # --engine defaults to None (= run all discovered engines)
@@ -228,7 +243,7 @@ class TestCLIParser:
             ]
         )
 
-        assert args.graph == "/test/graph.json"
+        assert args.graph == ["/test/graph.json"]
         assert args.warmup == 20
         assert args.iters == 200
         assert args.engine == [2]
@@ -241,7 +256,7 @@ class TestCLIParser:
             ["-g", "/test/graph.json", "-w", "5", "-i", "50", "-e", "3"]
         )
 
-        assert args.graph == "/test/graph.json"
+        assert args.graph == ["/test/graph.json"]
         assert args.warmup == 5
         assert args.iters == 50
         assert args.engine == [3]

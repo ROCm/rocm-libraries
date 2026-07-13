@@ -22,7 +22,9 @@ add_executable(
     types/TestFp6E2M3.cpp
     types/TestFp6E3M2.cpp
     types/TestFp8E4M3.cpp
+    types/TestFp8E4M3Fnuz.cpp
     types/TestFp8E5M2.cpp
+    types/TestFp8E5M2Fnuz.cpp
     types/TestFp8E8M0.cpp
     types/TestHalf.cpp
     types/TestPortableTypes.cpp
@@ -59,4 +61,4 @@ target_link_libraries(
 )
 
 clang_tidy_check(hipdnn_data_sdk_tests)
-add_unit_test_target(hipdnn_data_sdk_tests ${CMAKE_CURRENT_BINARY_DIR})
+add_hipdnn_test(hipdnn_data_sdk_tests ${CMAKE_CURRENT_BINARY_DIR})

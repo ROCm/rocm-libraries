@@ -1,5 +1,5 @@
 /* ************************************************************************
- * Copyright (C) 2025 Advanced Micro Devices, Inc.
+ * Copyright (C) 2025-2026 Advanced Micro Devices, Inc.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -63,7 +63,7 @@ namespace rocisa
         None = Count
     };
 
-    inline int dataTypeToBytes(DataType type)
+    inline float dataTypeToBytes(DataType type)
     {
         switch(type)
         {
@@ -105,6 +105,12 @@ namespace rocisa
             return 1;
         case DataType::BFloat8Float8:
             return 1;
+        case DataType::Float6:
+            return 0.75;
+        case DataType::BFloat6:
+            return 0.75;
+        case DataType::Float4:
+            return 0.5;
         default:
             return -1; // Invalid type
         }
@@ -275,6 +281,38 @@ namespace rocisa
         SCOPE_SYS  = 4,
     };
 
+    // Temporal Hint encoding for gfx1250 memory ops.
+    // Values match the ISA TH[2:0] field. LOAD and STORE share the same field
+    // values but use different assembled names for TH3 and TH7.
+    enum class TemporalHint : int
+    {
+        TH_NONE     = -1, // no th modifier
+        TH_RT       = 0, // regular temporal (default for both near and far caches)
+        TH_NT       = 1, // non-temporal (re-use not expected, both caches)
+        TH_HT       = 2, // high-priority temporal
+        TH_LU       = 3, // load-only: last-use (NT and discard dirty if hit)
+        TH_WB       = 3, // store-only: same encoding as LU, assembled as WB
+        TH_NT_RT    = 4, // non-temporal near, regular far
+        TH_RT_NT    = 5, // regular near, non-temporal far
+        TH_NT_HT    = 6, // non-temporal near, high-priority far
+        TH_RESERVED = 7, // load-only: reserved TH7 encoding, kept explicit for diagnostics/tests
+        TH_NT_WB    = 7, // store-only: NT near, WB far
+    };
+
+    inline bool hasTemporalHint(TemporalHint th)
+    {
+        return th != TemporalHint::TH_NONE;
+    }
+
+    // Non-Volatile memory access modifier for gfx1250.
+    // NV_NONE emits no modifier and preserves the default volatile behavior.
+    // NV emits the ISA ``nv`` modifier when the assembler supports it.
+    enum class NonVolatile : int
+    {
+        NV_NONE = 0,
+        NV      = 1,
+    };
+
     enum class HighBitSel : int
     {
         NONE = -1,
@@ -312,7 +350,10 @@ namespace rocisa
         CVT_F64_to_U32          = 26,
         CVT_FP8_to_F16          = 27,
         CVT_PK_FP8_to_F16       = 28,
-        CVT_PK_F32_to_F16       = 29
+        CVT_PK_F32_to_F16       = 29,
+        CVT_SCALEF32_PK8_FP8_F32 = 30,
+        CVT_SCALEF32_PK8_BF8_F32 = 31,
+        CVT_SCALEF32_SR_PK8_FP8_F32 = 32
     };
 
     enum class RoundType : int
@@ -378,6 +419,42 @@ namespace rocisa
             return "SCOPE_DEV";
         case CacheScope::SCOPE_SYS:
             return "SCOPE_SYS";
+        default:
+            return "";
+        }
+    }
+
+    // Emits the optional "nv" mnemonic for Non-Volatile memory accesses.
+    // NV_NONE returns an empty string so callers can skip the modifier.
+    inline std::string toString(NonVolatile nv)
+    {
+        return nv == NonVolatile::NV ? "nv" : "";
+    }
+
+    // Emits the "TH_LOAD_*" / "TH_STORE_*" mnemonic for the given temporal hint.
+    // Caller picks the prefix via isStore because LOAD and STORE share TH[2:0]
+    // encodings but differ in the assembled name for TH3 and TH7.
+    inline std::string toString(TemporalHint th, bool isStore)
+    {
+        const std::string prefix = isStore ? "TH_STORE_" : "TH_LOAD_";
+        switch(th)
+        {
+        case TemporalHint::TH_RT:
+            return prefix + "RT";
+        case TemporalHint::TH_NT:
+            return prefix + "NT";
+        case TemporalHint::TH_HT:
+            return prefix + "HT";
+        case TemporalHint::TH_LU:
+            return isStore ? prefix + "WB" : prefix + "LU";
+        case TemporalHint::TH_NT_RT:
+            return prefix + "NT_RT";
+        case TemporalHint::TH_RT_NT:
+            return prefix + "RT_NT";
+        case TemporalHint::TH_NT_HT:
+            return prefix + "NT_HT";
+        case TemporalHint::TH_RESERVED:
+            return isStore ? prefix + "NT_WB" : prefix + "RESERVED";
         default:
             return "";
         }

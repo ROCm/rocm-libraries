@@ -36,7 +36,6 @@
 # Platform-specific compiler configuration
 if(WIN32)
     set(DEFAULT_ROCM_COMPILER_EXTENSION ".exe")
-    set(CMAKE_RC_COMPILER "CMAKE_RC_COMPILER-NOTREQUIRED")
     # No suitable default on windows, use this as a possible example.
     set(DEFAULT_ROCM_CMAKE_PATH "c:/dist/therock")
 else()
@@ -49,15 +48,15 @@ set(DEFAULT_ROCM_LLVM_BIN_SUFFIX "/lib/llvm/bin")
 
 message(
     VERBOSE
-    "hipDNN-ClangToolChain start: CXX=${CMAKE_CXX_COMPILER} TOOLCHAIN_COMPLETED=${_ROCM_CLANG_TOOLCHAIN_FIRST_RUN_COMPLETED} ROCM_PATH=${ROCM_PATH} ROCM_CMAKE_PATH=${ROCM_CMAKE_PATH} ROCM_CMAKE_LLVM_BIN_PATH=${ROCM_CMAKE_LLVM_BIN_PATH}"
+    "ClangToolChain start: CXX=${CMAKE_CXX_COMPILER} TOOLCHAIN_COMPLETED=${_ROCM_CLANG_TOOLCHAIN_FIRST_RUN_COMPLETED} ROCM_PATH=${ROCM_PATH} ROCM_CMAKE_PATH=${ROCM_CMAKE_PATH} ROCM_CMAKE_LLVM_BIN_PATH=${ROCM_CMAKE_LLVM_BIN_PATH}"
 )
 
 if(NOT _ROCM_CLANG_TOOLCHAIN_FIRST_RUN_COMPLETED)
     if(DEFINED ROCM_PATH)
         message(STATUS "ROCM_PATH provided: ${ROCM_PATH}")
-    elseif(DEFINED ROCM_CMAKE_HIPCOFING_PATH)
+    elseif(DEFINED ROCM_CMAKE_HIPCONFIG_PATH)
         set(TRY_TO_FIND_ROCM_PATH_USING_HIPCONFIG "TRUE")
-        message(STATUS "ROCM_CMAKE_HIPCOFING_PATH provided: ${ROCM_CMAKE_HIPCOFING_PATH}")
+        message(STATUS "ROCM_CMAKE_HIPCONFIG_PATH provided: ${ROCM_CMAKE_HIPCONFIG_PATH}")
     elseif(DEFINED ROCM_CMAKE_PATH)
         message(STATUS "ROCM_CMAKE_PATH provided: ${ROCM_CMAKE_PATH}")
     elseif(DEFINED ENV{ROCM_CMAKE_PATH})
@@ -88,7 +87,7 @@ endif()
 if(NOT DEFINED ROCM_PATH AND NOT DEFINED ROCM_CMAKE_PATH AND TRY_TO_FIND_ROCM_PATH_USING_HIPCONFIG)
 
     find_program(
-        HIPCONFIG_EXECUTABLE hipconfig PATHS ${ROCM_CMAKE_HIPCOFING_PATH} ${ROCM_CMAKE_PATH}
+        HIPCONFIG_EXECUTABLE hipconfig PATHS ${ROCM_CMAKE_HIPCONFIG_PATH} ${ROCM_CMAKE_PATH}
                                              ${DEFAULT_ROCM_CMAKE_PATH} PATH_SUFFIXES "/bin"
     )
     if(HIPCONFIG_EXECUTABLE)
@@ -221,6 +220,20 @@ if(DEFINED ROCM_PATH AND NOT DEFINED ROCM_CMAKE_PATH)
     endif()
 endif()
 
+# hipDNN embeds a Windows VERSIONINFO resource (backend.rc) that needs a resource compiler.
+# Prefer llvm-rc from the ROCm LLVM toolchain (next to clang++), then any rc on PATH. If none is
+# found, mark RC as not-required so configuration still succeeds; the backend guards its .rc source
+# on a real compiler and warns when version metadata will be omitted.
+if(WIN32 AND NOT CMAKE_RC_COMPILER)
+    get_filename_component(_hipdnn_llvm_bin "${CMAKE_CXX_COMPILER}" DIRECTORY)
+    find_program(_HIPDNN_RC_COMPILER NAMES llvm-rc rc HINTS "${_hipdnn_llvm_bin}")
+    if(_HIPDNN_RC_COMPILER)
+        set(CMAKE_RC_COMPILER "${_HIPDNN_RC_COMPILER}")
+    else()
+        set(CMAKE_RC_COMPILER "CMAKE_RC_COMPILER-NOTREQUIRED")
+    endif()
+endif()
+
 if(NOT _ROCM_CLANG_TOOLCHAIN_FIRST_RUN_COMPLETED)
     # Validate that a compatible generator is being used
     if(CMAKE_GENERATOR)
@@ -237,7 +250,7 @@ endif()
 
 message(
     VERBOSE
-    "hipDNN-ClangToolChain stop : CXX=${CMAKE_CXX_COMPILER} TOOLCHAIN_COMPLETED=${_ROCM_CLANG_TOOLCHAIN_FIRST_RUN_COMPLETED} ROCM_PATH=${ROCM_PATH} ROCM_CMAKE_PATH=${ROCM_CMAKE_PATH} ROCM_CMAKE_LLVM_BIN_PATH=${ROCM_CMAKE_LLVM_BIN_PATH}"
+    "ClangToolChain stop : CXX=${CMAKE_CXX_COMPILER} TOOLCHAIN_COMPLETED=${_ROCM_CLANG_TOOLCHAIN_FIRST_RUN_COMPLETED} ROCM_PATH=${ROCM_PATH} ROCM_CMAKE_PATH=${ROCM_CMAKE_PATH} ROCM_CMAKE_LLVM_BIN_PATH=${ROCM_CMAKE_LLVM_BIN_PATH}"
 )
 
 if(NOT _ROCM_CLANG_TOOLCHAIN_FIRST_RUN_COMPLETED)

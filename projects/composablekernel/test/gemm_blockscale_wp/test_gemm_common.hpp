@@ -5,6 +5,9 @@
 #include "ck/ck.hpp"
 #include "profiler/profile_gemm_blockscale_wp_impl.hpp"
 
+static ck::index_t param_mask     = 0xffff;
+static ck::index_t instance_index = -1;
+
 namespace ck {
 namespace test {
 
@@ -34,7 +37,13 @@ class TestGemmBlockscaleWPCommon : public ::testing::Test
     static constexpr index_t ScaleBlockN = 128;
     static constexpr index_t ScaleBlockK = 128;
 
-    void Run(const int M, const int N, const int K, int n_warmup = 1, int n_iter = 10)
+    void Run(const int M,
+             const int N,
+             const int K,
+             int n_warmup          = 1,
+             int n_iter            = 10,
+             int determinism_check = 1,
+             bool do_verification  = verify_)
     {
         bool all_success = true;
 
@@ -56,7 +65,7 @@ class TestGemmBlockscaleWPCommon : public ::testing::Test
                                                                         ScaleBlockK,
                                                                         ALayout,
                                                                         BLayout,
-                                                                        CLayout>(verify_,
+                                                                        CLayout>(do_verification,
                                                                                  init_method_,
                                                                                  log_,
                                                                                  bench_,
@@ -67,7 +76,10 @@ class TestGemmBlockscaleWPCommon : public ::testing::Test
                                                                                  StrideB,
                                                                                  StrideC,
                                                                                  n_warmup,
-                                                                                 n_iter);
+                                                                                 n_iter,
+                                                                                 0,
+                                                                                 determinism_check,
+                                                                                 instance_index);
 
         EXPECT_TRUE(all_success);
     }
@@ -75,3 +87,19 @@ class TestGemmBlockscaleWPCommon : public ::testing::Test
 
 } // namespace test
 } // namespace ck
+int main(int argc, char** argv)
+{
+    testing::InitGoogleTest(&argc, argv);
+    if(argc == 1) {}
+    else if(argc == 3)
+    {
+        param_mask     = strtol(argv[1], nullptr, 0);
+        instance_index = atoi(argv[2]);
+    }
+    else
+    {
+        std::cout << "Usage of " << argv[0] << std::endl;
+        std::cout << "Arg1,2: param_mask instance_index(-1 means all)" << std::endl;
+    }
+    return RUN_ALL_TESTS();
+}

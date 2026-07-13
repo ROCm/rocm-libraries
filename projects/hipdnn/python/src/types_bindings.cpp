@@ -1,6 +1,8 @@
 // Copyright © Advanced Micro Devices, Inc., or its affiliates.
 // SPDX-License-Identifier:  MIT
 
+#include "bindings.hpp"
+
 #include <HipdnnBackendPluginLoadingMode.h>
 #include <hipdnn_frontend/Error.hpp>
 #include <hipdnn_frontend/Types.hpp>
@@ -10,7 +12,7 @@
 namespace nb = nanobind;
 using namespace hipdnn_frontend;
 
-void types_bindings(nb::module_& m)
+void typesBindings(nb::module_& m)
 {
     // Bind DataType enum
     nb::enum_<DataType>(m, "DataType")
@@ -29,7 +31,10 @@ void types_bindings(nb::module_& m)
         .value("INT4", DataType::INT4)
         .value("FP6_E2M3", DataType::FP6_E2M3)
         .value("FP6_E3M2", DataType::FP6_E3M2)
-        .value("INT64", DataType::INT64);
+        .value("INT64", DataType::INT64)
+        .value("BOOLEAN", DataType::BOOLEAN)
+        .value("FP8_E4M3_FNUZ", DataType::FP8_E4M3_FNUZ)
+        .value("FP8_E5M2_FNUZ", DataType::FP8_E5M2_FNUZ);
 
     // Bind ConvolutionMode enum
     nb::enum_<ConvolutionMode>(m, "ConvolutionMode")
@@ -91,12 +96,40 @@ void types_bindings(nb::module_& m)
     // Bind HeuristicMode enum
     nb::enum_<HeuristicMode>(m, "HeuristicMode").value("FALLBACK", HeuristicMode::FALLBACK);
 
+    // Bind BehaviorNote enum
+    nb::enum_<BehaviorNote>(m, "BehaviorNote")
+        .value("RUNTIME_COMPILATION", BehaviorNote::RUNTIME_COMPILATION)
+        .value("REQUIRES_LAYOUT_TRANSFORM", BehaviorNote::REQUIRES_LAYOUT_TRANSFORM)
+        .value("SUPPORTS_GRAPH_CAPTURE", BehaviorNote::SUPPORTS_GRAPH_CAPTURE)
+        .value("EXTERNAL_LIBRARY_DEPENDENCY", BehaviorNote::EXTERNAL_LIBRARY_DEPENDENCY)
+        .value("SUPPORTS_EXECUTION_PLAN_SERIALIZATION",
+               BehaviorNote::SUPPORTS_EXECUTION_PLAN_SERIALIZATION);
+
+    // Bind BuildPlanPolicy enum
+    nb::enum_<BuildPlanPolicy>(m, "BuildPlanPolicy")
+        .value("HEURISTICS_CHOICE", BuildPlanPolicy::HEURISTICS_CHOICE)
+        .value("ALL", BuildPlanPolicy::ALL);
+
     // Bind ErrorCode enum
     nb::enum_<ErrorCode>(m, "ErrorCode")
         .value("OK", ErrorCode::OK)
         .value("INVALID_VALUE", ErrorCode::INVALID_VALUE)
         .value("HIPDNN_BACKEND_ERROR", ErrorCode::HIPDNN_BACKEND_ERROR)
-        .value("ATTRIBUTE_NOT_SET", ErrorCode::ATTRIBUTE_NOT_SET);
+        .value("ATTRIBUTE_NOT_SET", ErrorCode::ATTRIBUTE_NOT_SET)
+        .value("GRAPH_NOT_SUPPORTED", ErrorCode::GRAPH_NOT_SUPPORTED)
+        .value("SHAPE_DEDUCTION_FAILED", ErrorCode::SHAPE_DEDUCTION_FAILED)
+        .value("INVALID_TENSOR_NAME", ErrorCode::INVALID_TENSOR_NAME)
+        .value("INVALID_VARIANT_PACK", ErrorCode::INVALID_VARIANT_PACK)
+        .value("GRAPH_EXECUTION_PLAN_CREATION_FAILED",
+               ErrorCode::GRAPH_EXECUTION_PLAN_CREATION_FAILED)
+        .value("GRAPH_EXECUTION_FAILED", ErrorCode::GRAPH_EXECUTION_FAILED)
+        .value("HEURISTIC_QUERY_FAILED", ErrorCode::HEURISTIC_QUERY_FAILED)
+        .value("UNSUPPORTED_GRAPH_FORMAT", ErrorCode::UNSUPPORTED_GRAPH_FORMAT)
+        .value("CUDA_API_FAILED", ErrorCode::CUDA_API_FAILED)
+        .value("CUDNN_BACKEND_API_FAILED", ErrorCode::CUDNN_BACKEND_API_FAILED)
+        .value("INVALID_CUDA_DEVICE", ErrorCode::INVALID_CUDA_DEVICE)
+        .value("HANDLE_ERROR", ErrorCode::HANDLE_ERROR)
+        .value("NVRTC_COMPILATION_FAILED", ErrorCode::NVRTC_COMPILATION_FAILED);
 
     // Bind Error struct
     nb::class_<Error>(m, "Error")

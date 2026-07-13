@@ -5,7 +5,7 @@ cmake_minimum_required(VERSION 3.25.2)
 
 option(CMAKE_EXPORT_COMPILE_COMMANDS "Generate compile commands json file." ON)
 
-project(hipsparselt VERSION 0.2.8 LANGUAGES CXX)
+project(hipsparselt VERSION 0.2.9 LANGUAGES CXX)
 
 # ROCm libraries root (for shared/ctest and other shared resources)
 # Only set default when not already defined (e.g. by superproject / rocm-libraries).
@@ -157,8 +157,8 @@ if(HIPSPARSELT_ENABLE_HIP)
     set(HIPBLASLT_ENABLE_CLIENT OFF CACHE BOOL "" FORCE)
     # Builds tensilelite's device libraries (.co/.dat)
     set(HIPBLASLT_ENABLE_DEVICE ${HIPSPARSELT_ENABLE_DEVICE} CACHE BOOL "" FORCE)
-    # Builds tensilelite::tensilelite-host target
     set(TENSILELITE_ENABLE_HOST ON CACHE BOOL "" FORCE)
+    set(TENSILELITE_BUILD_SHARED_LIBS OFF CACHE BOOL "" FORCE)
     set(HIPBLASLT_ENABLE_ASAN ${HIPSPARSELT_ENABLE_ASAN} CACHE BOOL "" FORCE)
     set(HIPBLASLT_DEVICE_LIBRARY_PATH "${CMAKE_BINARY_DIR}/Tensile" CACHE PATH "" FORCE)
     # hipSPARSELt does not use ExtOp or MatrixTransform artifacts
@@ -183,10 +183,7 @@ if(HIPSPARSELT_ENABLE_HIP)
         )
     endif()
 
-    set(ORIGAMI_ENABLE_INSTALL OFF)
     add_subdirectory("${HIPBLASLT_PATH}" hipblaslt)
-    # Hide TensileLite symbols to prevent interposition with hipblaslt's copy
-    target_compile_definitions(tensilelite-host PRIVATE TENSILE_STATIC_ONLY)
     endblock()
 endif()
 

@@ -1,0 +1,99 @@
+################################################################################
+# Copyright (C) 2026 Advanced Micro Devices, Inc. All rights reserved.
+# SPDX-License-Identifier: MIT
+################################################################################
+# P4-widen ShiftVectorComponents characterization seed #2 for gfx942.
+#
+# Target: Tensile/Components/ShiftVectorComponents.py
+# Primary ranges: 47-200 (ShiftVectorComponentsVALU.__call__)
+# Secondary target: 438-439 (PartialThread large-mb branch, target>64 path)
+# Dead-code proof target: 552-784 (ShiftVectorComponentsMFMAAllThread)
+#   -- NOT reachable: glvwAlimit == AllThread threshold by construction;
+#      glvw is capped to exactly the threshold, never exceeding it.
+#
+# Strategy 1 (VALU, lines 47-200):
+#   Sweep VectorWidthA=[1,2,4] on the VALU path (EnableMatrixInstruction=False
+#   via WorkGroup+ThreadTile). AssertFree0ElementMultiple=1 forces partial
+#   edge, activating ShiftVectorComponentsVALU for all kernels.
+#   VW=1 skips line 122 (log2 shift for glvw<VW). VW=2 hits it.
+#   VW=4 exercises the per-element loops at 178-179 with wider strides.
+#
+# Strategy 2 (MFMA PartialThread large-mb, lines 438-439):
+#   Use MI(16,16,16,4,BM=2,WaveTileM=32,...) with AssertFree0ElementMultiple=1
+#   so edge shift runs. With WaveTileM=32, miOuterTTCoal=32, matrixInstBCoal=2,
+#   miWaveGroupCoal=2, the loop target reaches max ~ 2*2*32 = 128 > 64, which
+#   exercises the large-mb branch (lines 438-439: SMovB32 path).
+#
+# Permutations (limit=8):
+#   - 3 VALU kernels: VWA in [1,2,4]
+#   - 1 MFMA PartialThread large-waveTile kernel for lines 438-439
+#
+GlobalParameters:
+  SyncsPerBenchmark: 0
+  MinimumRequiredVersion: 5.0.0
+  NumElementsToValidate: 128
+  DataInitTypeBeta: 0
+  DataInitTypeAlpha: 1
+  Device: 0
+
+BenchmarkProblems:
+  ########################################
+  # VALU path sweep: VectorWidthA=4, GlobalReadVectorWidthA=4
+  # EnableMatrixInstruction=False via WorkGroup+ThreadTile (no MatrixInstruction)
+  #
+  # Key requirement for ShiftVectorComponentsVALU to execute:
+  #   1. GuaranteeNoPartialA = (AssertFree0ElementMultiple % GRVWA == 0) -> False
+  #      With AssertFree=1 and GRVWA=4: 1%4=1 != 0 -> GuaranteeNoPartialA=False
+  #   2. VALU path requires GRVWA == VWA (or GRVWA == 1) per Solution.py:5029
+  #      So must set GRVWA = VWA explicitly.
+  #   3. EdgeType=ShiftPtr and rtv=True -> shiftVectorComponents() is called
+  #
+  # VWA=4 x GRVWA=4: glvw=4, vectorWidth=4. Lines 47-200 all execute.
+  #   r iterates in {1,2,3} (range(1, glvw=4)), giving 3 iterations through
+  #   lines 138-188 including all per-s loops at lines 161-179.
+  # Two ThreadTile shapes: [4,4] (tto=4) and [4,8] (tto=8) vary the outer
+  #   tt loop over ThreadTile1 in lines 160-180, exercising different offset
+  #   arithmetic in the dst/src register index calculations at lines 164-172.
+  # ThreadTile=[8,4] varies ThreadTile0 (the register-index stride).
+  #
+  # Note: line 121-122 (glvw < vectorWidth branch) is dead for all VALU kernels
+  # because GRVWA must equal VWA — mismatches are rejected at Solution.py:5029-5032.
+  # This branch can only be reached if an MFMA kernel uses glvw < VW, which
+  # routes through ShiftVectorComponentsMFMA not VALU.
+  #
+  # Permutations: 3 ThreadTile shapes x 1 VWA/GRVWA = 3 kernels (under limit=8).
+  ########################################
+  -
+    - # ProblemType
+      OperationType: GEMM
+      DataType: s
+      ComputeDataType: s
+      TransposeA: False
+      TransposeB: True
+      UseBeta: True
+      Batched: True
+    - # BenchmarkProblemSizeGroup
+      InitialSolutionParameters:
+      BenchmarkCommonParameters:
+        - KernelLanguage: ["Assembly"]
+      ForkParameters:
+        - WorkGroup:
+          - [16, 16, 1]
+        - ThreadTile:
+          - [4, 4]
+          - [4, 8]
+          - [8, 4]
+        - VectorWidthA: [4]
+        - VectorWidthB: [4]
+        - GlobalReadVectorWidthA: [4]
+        - GlobalReadVectorWidthB: [4]
+        - PrefetchGlobalRead: [1]
+        - PrefetchLocalRead: [1]
+        - DepthU: [16]
+        - ScheduleIterAlg: [1]
+        - GlobalSplitU: [1]
+        - AssertFree0ElementMultiple: [1]
+      BenchmarkJoinParameters:
+      BenchmarkFinalParameters:
+        - ProblemSizes:
+          - Exact: [255, 255, 1, 255]

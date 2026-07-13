@@ -123,6 +123,7 @@ SUPPORTED_BUILD_CU_COUNTS = {
 }
 
 SUPPORTED_CHIP_ID_FALLBACKS = {
+    "id=75b0": ["id=75a0"],
     "id=75a2": ["id=75a0"],
     "id=75b2": ["id=75a0"],
     "id=75a3": ["id=75a0"],
@@ -240,6 +241,20 @@ def _detectGlobalCurrentISA(detectionTool, deviceId: int):
     """
     Returns returncode if detection failure
     """
+    # Belt-and-suspenders for the GPU-less --cpu-only switch: when CpuOnly is set,
+    # return a spoofed per-arch IsaVersion (derived from gfxToIsa) instead of shelling
+    # out to a device-enumeration tool. The arch comes from the CpuOnlyArch plumbing key.
+    # This backstops any entry path that reaches detection without passing an arch (the
+    # primary path supplies the arch via --gpu-targets and never reaches here). Returning
+    # an IsaVersion makes the isinstance(...) guard in detectGlobalCurrentISA pass so the
+    # "Failed to detect currect ISA" raise never fires GPU-less.
+    # Imported lazily to avoid a circular import (GlobalParameters imports from this module).
+    from .GlobalParameters import globalParameters
+    if globalParameters.get("CpuOnly"):
+        isa = gfxToIsa(globalParameters.get("CpuOnlyArch", "gfx942"))
+        if isa is not None:
+            print(f"# CpuOnly: spoofing GPU {deviceId} ISA as " + isaToGfx(isa))
+            return isa
     process = run([detectionTool], stdout=PIPE)
     archList = []
     for line in process.stdout.decode().split("\n"):
@@ -285,7 +300,7 @@ class LogicFileError(Exception):
         super().__init__(self.message)
 
 
-def _extractArchInfo(file: Union[str, Path]) -> ArchInfo:
+def _extractArchInfo(file: Union[str, Path], validateDeviceIds: bool = True) -> ArchInfo:
     """
     Extracts architecture predicate information from a given logic file.
 
@@ -297,6 +312,8 @@ def _extractArchInfo(file: Union[str, Path]) -> ArchInfo:
 
     Args:
         file: Path to a logic file.
+        validateDeviceIds: Whether to validate Device IDs against the supported
+            chip-ID tables while parsing.
     Returns:
         ArchInfo: An object containing the extracted architecture predicates.
     Raises:
@@ -304,7 +321,7 @@ def _extractArchInfo(file: Union[str, Path]) -> ArchInfo:
     """
 
     def l0(line: str):
-        if not re.match(r"- \{MinimumRequiredVersion", line):
+        if not re.match(r"- (?:\{MinimumRequiredVersion|MinimumRequiredVersion:)", line):
             raise LogicFileError(
                 f"Expected minimum required version:\n  line: {line}  file: {file}"
             )
@@ -328,7 +345,10 @@ def _extractArchInfo(file: Union[str, Path]) -> ArchInfo:
     def l3(line: str):
         if re.match(r"- \[Device", line):
             devIds = re.findall(r"Device (\w+)", line)
-            return set(f"id={id}" for id in devIds)
+            # Normalize to lowercase so downstream consumers (predicate
+            # tables, fallback maps, chip-ID directory matchers) all agree
+            # on the canonical form.
+            return set(f"id={id.lower()}" for id in devIds)
         else:
             raise LogicFileError(f"No device IDs found: line: {line}")
 
@@ -338,11 +358,12 @@ def _extractArchInfo(file: Union[str, Path]) -> ArchInfo:
         gfx, cu = l2(f.readline())
         deviceIds = l3(f.readline())
 
-    try:
-        for id in deviceIds:
-            _verifyPredicate(id, gfx)
-    except ValueError as e:
-        raise LogicFileError(f"Invalid device ID found while parsing {file}: {e}")
+    if validateDeviceIds:
+        try:
+            for id in deviceIds:
+                _verifyPredicate(id, gfx)
+        except ValueError as e:
+            raise LogicFileError(f"Invalid device ID found while parsing {file}: {e}")
 
     return ArchInfo(Name=name, Gfx=gfx, DeviceIds=deviceIds, CUCount=cu)
 

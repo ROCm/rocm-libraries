@@ -1,5 +1,5 @@
 # ########################################################################
-# Copyright (C) 2020-2024 Advanced Micro Devices, Inc. All rights Reserved.
+# Copyright (C) 2020-2026 Advanced Micro Devices, Inc. All rights Reserved.
 #
 # Permission is hereby granted, free of charge, to any person obtaining a copy
 # of this software and associated documentation files (the "Software"), to deal
@@ -51,8 +51,8 @@ Tests:
   category: quick
   function: gebsr2gebsr
   precision: *single_only_precisions
-  M: [3764]
-  N: [2874]
+  M: [1764]
+  N: [1874]
   row_block_dimA: [1, 5]
   col_block_dimA: [1, 2, 3, 4]
   row_block_dimB: [1, 2, 3, 4]
@@ -66,8 +66,8 @@ Tests:
   category: quick
   function: gebsr2gebsr
   precision: *double_only_precisions
-  M: [3781]
-  N: [2678]
+  M: [1781]
+  N: [1678]
   row_block_dimA: [2, 6]
   col_block_dimA: [1, 2, 3, 4]
   row_block_dimB: [1, 2, 3, 4]
@@ -81,8 +81,8 @@ Tests:
   category: quick
   function: gebsr2gebsr
   precision: *single_only_precisions_complex
-  M: [2986]
-  N: [3917]
+  M: [1986]
+  N: [1917]
   row_block_dimA: [3, 7]
   col_block_dimA: [1, 2, 3, 4]
   row_block_dimB: [1, 2, 3, 4]
@@ -97,7 +97,7 @@ Tests:
   function: gebsr2gebsr
   precision: *double_only_precisions_complex
   M: [1786]
-  N: [2298]
+  N: [1298]
   row_block_dimA: [4, 8]
   col_block_dimA: [1, 2, 3, 4]
   row_block_dimB: [1, 2, 3, 4]

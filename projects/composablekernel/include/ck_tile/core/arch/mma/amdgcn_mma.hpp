@@ -4,15 +4,23 @@
 #pragma once
 
 #include "ck_tile/core/arch/arch.hpp"
-#include "ck_tile/core/arch/mma/wmma/wmma_traits.hpp"
 #include "ck_tile/core/arch/mma/mfma/mfma_traits.hpp"
 #include "ck_tile/core/arch/mma/mma_op_family.hpp"
+#include "ck_tile/core/arch/mma/wmma/wmma_traits.hpp"
 #include "ck_tile/core/config.hpp"
+#include "ck_tile/core/numeric/ext_vector_base.hpp"
+#include "ck_tile/core/numeric/integer.hpp"
+#include "ck_tile/core/numeric/numeric.hpp"
 #include "ck_tile/core/numeric/vector_type.hpp"
 #include "ck_tile/core/utility/ignore.hpp"
+#include "ck_tile/core/utility/type_traits.hpp"
+#include "ck_tile/ops/common/utils.hpp"
 
-#pragma clang diagnostic push
-#pragma clang diagnostic ignored "-Wlifetime-safety-intra-tu-suggestions"
+#include <stdio.h>
+#include <type_traits>
+#if CK_TILE_CONCEPTS && CK_TILE_CONCEPTS_HEADER
+#include <concepts>
+#endif
 
 namespace ck_tile::core::arch::mma {
 
@@ -114,6 +122,27 @@ namespace ck_tile::core::arch::mma {
  * register mappings since we can not perform arbitrary M permutations without messing up the A
  * layout. This does not count a potential increased M dimension size from block hiding. In this
  * case, we have M = kCMBlock * M2 * M1 * M0 instead.
+ *
+ * ------------------------------------------
+ * Packed data types
+ * ------------------------------------------
+ * For packed datatypes (pk_fp4_t, pk_int4_t, pk_fp6x16_t, pk_bf6x16_t), each datatype element
+ * represents multiple logical / mathematical elements of the original A / B matrix. The layout
+ * parameters and tile distribution encodings always describe logical / mathematical matrix elements
+ * (completely ignoring the packed datatype abstraction). The packedness of the datatype *ONLY*
+ * requires consideration when indexing into the A / B fragment vectors (registers).
+ *
+ * ------------------------------------------
+ *  Compression (sparse intrinsics)
+ * ------------------------------------------
+ * For sparse intrisics we have 4:2 compression of the A matrix, meaning 2 elements of the
+ * compressed A matrix represent 4 elements of the original (uncompressed) A matrix
+ * (kCompressionRatio = 2). The layout parameters always describe uncompressed A matrix elements.
+ * The A fragment vectors (registers) and tile distribution encodings by default describe compressed
+ * elements. The tile distribution encoding calculator does have an option to describe the A matrix
+ * mapping in terms of uncompressed elements, which is used for WarpGemm / MmaPipeline level tile
+ * distribution encodings, since the MmaPipeline expects to ingest uncompressed A matrices, and the
+ * compression is handled internally.
  */
 
 /**
@@ -140,13 +169,17 @@ template <typename ADataType_,
           MmaOpFamily OpFamily_>
 struct amdgcn_mma_base
 {
+    static constexpr const char* instruction_name = "Unknown";
+
     using OpType                          = OpType_;
     static constexpr MmaOpFamily OpFamily = OpFamily_;
 
     // Data types
-    using ADataType = ADataType_;
-    using BDataType = BDataType_;
-    using CDataType = CDataType_;
+    using ADataType                      = ADataType_;
+    using BDataType                      = BDataType_;
+    using CDataType                      = CDataType_;
+    static constexpr index_t APackedSize = numeric_traits<ADataType>::PackedSize;
+    static constexpr index_t BPackedSize = numeric_traits<BDataType>::PackedSize;
 
     // Fragment (MmaTile) sizes, check description above.
     static constexpr index_t kM = FragM; // M = M2 * M1 * M0 (* kCMBlocks when block-hiding)
@@ -167,18 +200,19 @@ struct amdgcn_mma_base
 
     // Layout checks
     static_assert(kK % kABKPerLane == 0);
-    static_assert(kABKPerLane % kAKNumAccess == 0);
-    static_assert(kABKPerLane % kBKNumAccess == 0);
+    static_assert(kABKPerLane % (kAKNumAccess * kCompressionRatio * APackedSize) == 0);
+    static_assert(kABKPerLane % (kBKNumAccess * BPackedSize) == 0);
     static_assert(kCMPerLane % kCMNumAccess == 0);
 
     // Register types (derived)
     static constexpr index_t WaveSize = WaveSize_;
-    static_assert((kM * kK * kARepeat) % (WaveSize * kCompressionRatio) == 0);
-    static_assert((kN * kK * kBRepeat) % WaveSize == 0);
+    static_assert((kM * kK * kARepeat) % (WaveSize * kCompressionRatio * APackedSize) == 0);
+    static_assert((kN * kK * kBRepeat) % (WaveSize * BPackedSize) == 0);
     static_assert((kM * kN) % WaveSize == 0);
 
-    using AVecType = ext_vector_t<ADataType, kM * kK * kARepeat / WaveSize / kCompressionRatio>;
-    using BVecType = ext_vector_t<BDataType, kN * kK * kBRepeat / WaveSize>;
+    using AVecType =
+        ext_vector_t<ADataType, kM * kK * kARepeat / WaveSize / kCompressionRatio / APackedSize>;
+    using BVecType = ext_vector_t<BDataType, kN * kK * kBRepeat / WaveSize / BPackedSize>;
     using CVecType = ext_vector_t<CDataType, kM * kN / WaveSize>;
 
     // Block-hiding / repeat related traits (derived)
@@ -199,30 +233,22 @@ struct amdgcn_mma_base
  * @struct Unsupported
  * @brief  Meta-tag to indicate unsupported amdgcn_mma instance.
  */
-struct Unsupported;
+struct Unsupported
+{
+};
+
+CK_TILE_HOST_DEVICE constexpr const char* to_string(Unsupported) { return "Unsupported"; }
 
 #if CK_TILE_CONCEPTS && CK_TILE_CONCEPTS_HEADER
-
-#include <concepts>
-/**
- * @concept HasExecSignature
- * @brief  Helper concept for exec signature check.
- */
-template <typename MmaOp, typename... ExecArgs>
-concept HasExecSignature = requires {
-    {
-        MmaOp::exec(typename MmaOp::AVecType{},
-                    typename MmaOp::BVecType{},
-                    typename MmaOp::CVecType{},
-                    std::declval<ExecArgs>()...)
-    } -> std::convertible_to<typename MmaOp::CVecType>;
-};
 
 /**
  * @concept MmaOpI
  * @brief  Expresses the meta-data interface required for each MmaOp policy.
  */
 // TODO: Make sure this actually matches amdgcn_mma.
+// NOTE: It is no longer possible to perform a check on the exec() function, since it is now
+// templated over the variadic WarpGemmParams template pack for intrinsic flags. It seems like
+// concepts do not work for templated device functions.
 template <typename MmaOp>
 concept MmaOpI = requires(MmaOp op) {
     // Requires an op context
@@ -245,7 +271,7 @@ concept MmaOpI = requires(MmaOp op) {
     { MmaOp::kCMPerLane } -> std::convertible_to<unsigned int>;
     { MmaOp::kCMNumAccess } -> std::convertible_to<unsigned int>;
     { MmaOp::kCompressionRatio } -> std::convertible_to<unsigned int>;
-} && (HasExecSignature<MmaOp> || HasExecSignature<MmaOp, int> || HasExecSignature<MmaOp, int, int>);
+};
 
 #endif // CK_TILE_CONCEPTS && CK_TILE_CONCEPTS_HEADER
 
@@ -263,7 +289,6 @@ concept MmaOpI = requires(MmaOp op) {
  *  @tparam FragM M-dimension of mma intrinsic (MmaTile)
  *  @tparam FragN N-dimension of mma intrinsic (MmaTile)
  *  @tparam FragK K-dimension of mma intrinsic (MmaTile)
- *  @tparam CtrlFlags Control flags for mma operation
  *  @tparam CompilerTarget The current compiler target
  *  @tparam OpFamily_ The type of operation (dense, sparse, scale, etc.)
  *  @tparam Enabler SFINAE enabler
@@ -274,7 +299,6 @@ template <typename ADataType,
           uint32_t FragM,
           uint32_t FragN,
           uint32_t FragK,
-          typename CtrlFlags,
           typename CompilerTarget,
           MmaOpFamily OpFamily_,
           typename Enabler = void>
@@ -284,7 +308,8 @@ struct amdgcn_mma : amdgcn_mma_base<fp32_t, fp32_t, fp32_t, 1u, 1u, 1u, 1u, 1, 1
 // clang-format on
 {
     // This is a default pass-through implementation that doesn't do anything practical.
-    CK_TILE_DEVICE static auto
+    template <typename... Params>
+    CK_TILE_DEVICE static CVecType
     exec(AVecType const& regsA, BVecType const& regsB, CVecType const& regsC)
     {
         // Prints once across all thread blocks and threads.
@@ -299,12 +324,56 @@ struct amdgcn_mma : amdgcn_mma_base<fp32_t, fp32_t, fp32_t, 1u, 1u, 1u, 1u, 1, 1
     }
 };
 
+template <typename ADataType,
+          typename BDataType,
+          typename CDataType,
+          uint32_t FragM,
+          uint32_t FragN,
+          uint32_t FragK,
+          typename CompilerTarget,
+          MmaOpFamily OpFamily_,
+          typename Enabler = void>
+CK_TILE_HOST_DEVICE void print(amdgcn_mma<ADataType,
+                                          BDataType,
+                                          CDataType,
+                                          FragM,
+                                          FragN,
+                                          FragK,
+                                          CompilerTarget,
+                                          OpFamily_,
+                                          Enabler> const& mmaObj)
+{
+    using ObjType = remove_cvref_t<decltype(mmaObj)>;
+
+    printf("DataTypes      A / B / C                : %s / %s / %s\n",
+           DataTypeTraits<ADataType>::name,
+           DataTypeTraits<BDataType>::name,
+           DataTypeTraits<CDataType>::name);
+    printf("Shape          M / N / K                : %d / %d / %d\n",
+           mmaObj.kM,
+           mmaObj.kN,
+           mmaObj.kK);
+    printf("               WaveSize                 : %d\n", mmaObj.WaveSize);
+    printf("AccessPattern  kABKPerLane              : %d\n", mmaObj.kABKPerLane);
+    printf("               kAKNumAccess             : %d\n", mmaObj.kAKNumAccess);
+    printf("               kARepeat                 : %d\n", mmaObj.kARepeat);
+    printf("               kBKNumAccess             : %d\n", mmaObj.kBKNumAccess);
+    printf("               kBRepeat                 : %d\n", mmaObj.kBRepeat);
+    printf("               kCMPerLane               : %d\n", mmaObj.kCMPerLane);
+    printf("               kCMNumAccess             : %d\n", mmaObj.kCMNumAccess);
+    printf("Op             Type / Family            : %s / %s\n",
+           to_string(typename ObjType::OpType{}),
+           to_string(mmaObj.OpFamily));
+    printf("ExtVectorSize  A / B / C                : %d / %d / %d\n",
+           vector_traits<typename ObjType::AVecType>::vector_size,
+           vector_traits<typename ObjType::BVecType>::vector_size,
+           vector_traits<typename ObjType::CVecType>::vector_size);
+    printf("OtherDerived   kCompressionRatio        : %d\n", mmaObj.kCompressionRatio);
+    printf("               kCMBlocks                : %d\n", mmaObj.kCMBlocks);
+    printf("               kCNBlocks                : %d\n", mmaObj.kCNBlocks);
+    printf("               CBlockDimInVecDim        : %d\n", mmaObj.CBlockDimInVecDim);
+    printf("Instruction    name                     : %s\n", ObjType::instruction_name);
+    print(CompilerTarget{});
+}
+
 } // namespace ck_tile::core::arch::mma
-#pragma clang diagnostic pop
-
-// Include the implementations
-#include "wmma/wmma.hpp" // should be included before the below headers
-
-#include "mfma/mfma.hpp"
-#include "scale/scale.hpp"
-#include "sparse/sparse.hpp"

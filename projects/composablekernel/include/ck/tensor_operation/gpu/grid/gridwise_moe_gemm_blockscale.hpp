@@ -15,9 +15,10 @@
 #include "ck/tensor_operation/gpu/grid/gridwise_gemm_xdl_cshuffle_common.hpp"
 #define DEBUG_LOG 0
 
+#if __clang_major__ >= 23
 #pragma clang diagnostic push
 #pragma clang diagnostic ignored "-Wlifetime-safety-intra-tu-suggestions"
-
+#endif
 namespace ck {
 
 // Currently we do not have a elegant way to put single lds buffer & double lds buffer pipe in same
@@ -291,6 +292,12 @@ struct GridwiseMoeGemmBlockScale
     static constexpr index_t KPack =
         math::max(math::lcm(AK1Number, BK1Number), mfma_selector::selected_mfma.k_per_blk);
     static constexpr index_t KGroup = []() {
+#if defined(__gfx125__)
+        // A memory instruction can only read 16 bytes at a time. If K1PerXdlops *
+        // sizeof(ComputeDataType) > 16, memory read will not conitnues in a wave in B preshuffle
+        // mode. So, we need split K into mutiple groups.
+        return mfma_selector::GetK1PerXdlops() * sizeof(ComputeTypeA) > 16 ? 2 : 1;
+#else
         if constexpr(is_same_v<remove_cvref_t<BDataType>, f8_t>)
             // On gfx950, we have a mfma that required 32 f8 elements as input,
             // splited into 2 groups of 16 f8 elements.
@@ -300,6 +307,7 @@ struct GridwiseMoeGemmBlockScale
             return mfma_selector::selected_mfma.k_per_blk == 32 ? 2 : 1;
         else
             return 1;
+#endif
     }();
     static constexpr index_t KLane =
         mfma_selector::GetKPerXdlops() / mfma_selector::GetK1PerXdlops();
@@ -1132,6 +1140,9 @@ struct GridwiseMoeGemmBlockScale
                                BElementwiseOperation b_element_op,
                                CElementwiseOperation c_element_op)
     {
+        static_assert(ActivationOperation != Activation::swiglu_oai_and_mul,
+                      "gridwise_moe_gemm_blockscale does not support swiglu_oai_and_mul; use the "
+                      "non-blockscale gridwise_moe_gemm.");
 #if defined(__gfx942__) || defined(__gfx950__)
         constexpr auto b_coherence_flag = NonTemporalLoadB
                                               ? AmdBufferCoherenceEnum::WAVE_NT1
@@ -1686,6 +1697,9 @@ struct GridwiseMoeGemmBlockScale
                                     BElementwiseOperation b_element_op,
                                     CElementwiseOperation c_element_op)
     {
+        static_assert(ActivationOperation != Activation::swiglu_oai_and_mul,
+                      "gridwise_moe_gemm_blockscale does not support swiglu_oai_and_mul; use the "
+                      "non-blockscale gridwise_moe_gemm.");
 #if defined(__gfx942__) || defined(__gfx950__)
         constexpr auto b_coherence_flag = NonTemporalLoadB
                                               ? AmdBufferCoherenceEnum::WAVE_NT1
@@ -2216,4 +2230,6 @@ struct GridwiseMoeGemmBlockScale
 };
 
 } // namespace ck
+#if __clang_major__ >= 23
 #pragma clang diagnostic pop
+#endif

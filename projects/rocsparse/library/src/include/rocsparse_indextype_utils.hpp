@@ -1,6 +1,6 @@
 /*! \file */
 /* ************************************************************************
- * Copyright (C) 2025 Advanced Micro Devices, Inc. All rights Reserved.
+ * Copyright (C) 2025-2026 Advanced Micro Devices, Inc. All rights Reserved.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -26,13 +26,15 @@
 
 #include "rocsparse-types.h"
 
+#define deprecated_rocsparse_indextype_u16 static_cast<rocsparse_indextype>(1)
+
 namespace rocsparse
 {
     template <rocsparse_indextype v>
     struct indextype_traits;
 
     template <>
-    struct indextype_traits<rocsparse_indextype_u16>
+    struct indextype_traits<deprecated_rocsparse_indextype_u16>
     {
         using type_t = uint16_t;
     };

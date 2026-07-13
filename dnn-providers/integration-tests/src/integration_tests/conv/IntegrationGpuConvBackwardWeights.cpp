@@ -60,8 +60,7 @@ public:
         auto dwAttr = graphObj.conv_wgrad(dyTensorAttr, xTensorAttr, convAttrs);
         dwAttr->set_output(true);
 
-        // Set these explicitly since grouped convs cannot infer tensor shape.
-        // Infer behavior will assume groups == 1, but some cases have groups > 1.
+        // Set this explicitly since wgrad output shapes are not inferred.
         dwAttr->set_dim(testCase.wDims);
         dwAttr->set_stride(generateStrides(testCase.wDims, layout.strideOrder));
 
@@ -84,6 +83,9 @@ public:
 protected:
     void runGraphTest() override
     {
+        // rocBLAS/Tensile heap-buffer-overflow on gfx90a; CK ASAN stall on gfx942
+        SKIP_IF_ASAN();
+
         const auto& testCase = this->GetParam();
         const auto& [layout, convTestCase] = testCase;
 
@@ -91,7 +93,10 @@ protected:
 
         this->registerValidator(outputs.dw, this->getTolerance(graphObj, outputs.dw));
 
-        this->verifyGraph(graphObj, convTestCase.seed);
+        this->setTestCaseLayout(layout.name);
+        this->setTestCaseNote(convTestCase.note);
+        this->synthesis().setGlobalSeed(convTestCase.seed);
+        this->verifyGraph(graphObj);
     }
 };
 
@@ -110,14 +115,17 @@ template <typename DataType>
 class ConvBackwardWeightsLargeValues : public ConvBackwardWeights<DataType>
 {
 protected:
-    void initializeBundle(const hipdnn_frontend::graph::Graph& /*graph*/,
-                          hipdnn_test_sdk::utilities::GraphTensorBundle& bundle,
-                          unsigned int seed) override
+    SynthesisResult initializeBundle(const hipdnn_frontend::graph::Graph& graph,
+                                     hipdnn_test_sdk::utilities::GraphTensorBundle& bundle) override
     {
-        for(auto& tensorPair : bundle.tensors)
+        for(auto& [uid, tensor] : bundle.tensors)
         {
-            bundle.randomizeTensor(tensorPair.first, -10.0f, 10.0f, seed);
+            if(!bundle.isOutput(uid))
+            {
+                this->synthesis().setRange(uid, -10.0f, 10.0f);
+            }
         }
+        return ConvBackwardWeights<DataType>::initializeBundle(graph, bundle);
     }
 };
 // Large input value range [-10, 10] stress-tests numerical precision in wgrad

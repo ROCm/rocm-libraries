@@ -36,6 +36,7 @@
 #include <hip/hip_runtime.h>
 
 #include "origami/types.hpp"
+#include "origami/origami_export.h"
 
 namespace origami {
 
@@ -43,7 +44,7 @@ namespace origami {
  * @brief Represents hardware characteristics and capabilities of GPU architectures.
  *
  */
-class hardware_t {
+class ORIGAMI_EXPORT hardware_t {
  public:
   /**
    * @brief Enumeration of supported GPU architectures.
@@ -53,6 +54,7 @@ class hardware_t {
     gfx90a,
     gfx942,
     gfx950,
+    gfx1200,
     gfx1201,
     gfx1100,
     gfx1150,
@@ -73,6 +75,7 @@ class hardware_t {
     if (str == "gfx90a") return architecture_t::gfx90a;
     if (str == "gfx942") return architecture_t::gfx942;
     if (str == "gfx950") return architecture_t::gfx950;
+    if (str == "gfx1200") return architecture_t::gfx1200;
     if (str == "gfx1201") return architecture_t::gfx1201;
     if (str == "gfx1100") return architecture_t::gfx1100;
     if (str == "gfx1150") return architecture_t::gfx1150;
@@ -94,9 +97,14 @@ class hardware_t {
       case architecture_t::gfx90a: return "gfx90a";
       case architecture_t::gfx942: return "gfx942";
       case architecture_t::gfx950: return "gfx950";
+      case architecture_t::gfx1200: return "gfx1200";
       case architecture_t::gfx1201: return "gfx1201";
       case architecture_t::gfx1100: return "gfx1100";
+      case architecture_t::gfx1150: return "gfx1150";
       case architecture_t::gfx1151: return "gfx1151";
+      case architecture_t::gfx1152: return "gfx1152";
+      case architecture_t::gfx1153: return "gfx1153";
+      case architecture_t::gfx1250: return "gfx1250";
       default: return "unknown";
     }
   }
@@ -157,6 +165,8 @@ class hardware_t {
                 4,
                 std::make_tuple(-0.000013, 0.007070, 0.027355),
                 1.5};
+      case architecture_t::gfx1200:
+        return {3.28, 1.21875121875121875122 * 1.45, 0.280, 2, std::make_tuple(0, 0.31, 0), 1.5};
       case architecture_t::gfx1201:
         return {5.74, 1.21875121875121875122 * 2.41, 0.464, 2, std::make_tuple(0, 0.17, 0), 1.5};
       case architecture_t::gfx1100:
@@ -173,9 +183,13 @@ class hardware_t {
       case architecture_t::gfx1153:
         // AMD Radeon 820M iGPU
         return {0.240, NO_MALL_AVAILABLE, 0.066, 2, std::make_tuple(0, 0.19, 0), 1.5};
-      case architecture_t::gfx1250:
-        // TODO: Update this, but for now using gfx950 values
-        return {17, 1.21875121875121875122 * 7, 6, 4, std::make_tuple(0, 0.008, 0), 1.5};
+      case architecture_t::gfx1250: {
+        // TODO: Update with real gfx1250 constants when available
+        auto c                       = get_arch_constants(architecture_t::gfx950);
+        c.mem2_perf_ratio            = NO_MALL_AVAILABLE;
+        c.mem_bw_per_wg_coefficients = std::make_tuple(0, 0.016, 0);
+        return c;
+      }
       default: return {0, 0, 0, 0, std::make_tuple(0, 0, 0), 0};
     }
   }
@@ -371,6 +385,33 @@ class hardware_t {
              {matrix_instruction(1, 1, 64, data_type_t::Half), 16}, // V_DOT2_F32_F16
              {matrix_instruction(1, 1, 64, data_type_t::BFloat16), 16}, // V_DOT2_F32_BF16
          }},
+        {architecture_t::gfx1200,
+         {
+             // F16
+             {matrix_instruction(16, 16, 16, data_type_t::Half), 16}, // v_wmma_f16_16x16x16_f16/v_wmma_f32_16x16x16_f16
+
+             // BF16
+             {matrix_instruction(16, 16, 16, data_type_t::BFloat16), 16}, // v_wmma_bf16_16x16x16_bf16/v_wmma_f32_16x16x16_bf16
+
+             // F8
+             {matrix_instruction(16, 16, 16, data_type_t::Float8), 8}, // v_wmma_f32_16x16x16_fp8_fp8
+
+             // F8B8
+             {matrix_instruction(16, 16, 16, data_type_t::Float8BFloat8), 8}, // v_wmma_f32_16x16x16_fp8_bf8
+
+             // B8F8
+             {matrix_instruction(16, 16, 16, data_type_t::BFloat8Float8), 8}, // v_wmma_f32_16x16x16_bf8_fp8
+
+             // B8
+             {matrix_instruction(16, 16, 16, data_type_t::BFloat8), 8}, // v_wmma_f32_16x16x16_bf8_bf8
+
+             // I8
+             {matrix_instruction(16, 16, 16, data_type_t::Int8), 8}, // v_wmma_i32_16x16x16_iu8
+
+             // I4
+             {matrix_instruction(16, 16, 16, data_type_t::Int4), 8}, // v_wmma_i32_16x16x16_iu4
+             {matrix_instruction(16, 16, 32, data_type_t::Int4), 8}, // v_wmma_i32_16x16x32_iu4
+         }},
         {architecture_t::gfx1201,
          {
              // F16
@@ -453,12 +494,93 @@ class hardware_t {
              // I4
              {matrix_instruction(16, 16, 16, data_type_t::Int4), 16},  // v_wmma_i32_16x16x16_iu4
          }},
-      };
+        {architecture_t::gfx1250,
+         {
+             // F64
+             // DGEMM: V_WMMA_F64_16x16x4_F64, 16x4 F64 x 4x16 F64 = 16x16 F64
+             {matrix_instruction(16, 16, 4, data_type_t::Double), 16},
+
+             // F32
+             // SGEMM: V_WMMA_F32_16X16X4_F32, 16x4 F32 x 4x16 F32 = 16x16 F32
+             {matrix_instruction(16, 16, 4, data_type_t::Float), 16},
+
+             // F16
+             // HHS: V_WMMA_F16_16X16X32_F16, 16x32 F16 x 32x16 F16 = 16x16 F16
+             // HSS: V_WMMA_F32_16X16X32_F16, 16x32 F16 x 32x16 F16 = 16x16 F32
+             {matrix_instruction(16, 16, 32, data_type_t::Half), 8},
+
+             // BF16
+             // BBS:   V_WMMA_BF16_16X16X32_BF16,    16x32 BF16 x 32x16 BF16 = 16x16 BF16
+             // BSS:   V_WMMA_F32_16X16X32_BF16,     16x32 BF16 x 32x16 BF16 = 16x16 F32
+             // BBSB?: V_WMMA_BF16F32_16X16X32_BF16, 16x32 BF16 x 32x16 BF16 + 16x16 C F32 = 16x16 D BF16
+             {matrix_instruction(16, 16, 32, data_type_t::BFloat16), 8},
+
+             // F8
+             // F8SS: V_WMMA_F32_16X16X64_FP8_FP8,  16x64  FP8 x 64x16  FP8 = 16x16 F32
+             //       V_WMMA_F32_16X16X128_FP8_FP8, 16x128 FP8 x 128x16 FP8 = 16x16 F32
+             // F8HS: V_WMMA_F16_16X16X64_FP8_FP8,  16x64  FP8 x 64x16  FP8 = 16x16 F16
+             //       V_WMMA_F16_16X16X128_FP8_FP8  16x128 FP8 x 128x16 FP8 = 16x16 F16
+             {matrix_instruction(16, 16, 64, data_type_t::Float8), 4},
+             {matrix_instruction(16, 16, 128, data_type_t::Float8), 8},
+
+             // BF8
+             // B8SS: V_WMMA_F32_16X16X64_BF8_BF8,  16x64  BF8 x 64x16  BF8 = 16x16 F32
+             //       V_WMMA_F32_16X16X128_BF8_BF8, 16x128 BF8 x 128x16 BF8 = 16x16 F32
+             // B8HS: V_WMMA_F16_16X16X64_BF8_BF8,  16x64  BF8 x 64x16  BF8 = 16x16 F16
+             //       V_WMMA_F16_16X16X128_BF8_BF8, 16x128 BF8 x 128x16 BF8 = 16x16 F16
+             {matrix_instruction(16, 16, 64, data_type_t::BFloat8), 4},
+             {matrix_instruction(16, 16, 128, data_type_t::BFloat8), 8},
+
+             // F8B8
+             // F8B8SS: V_WMMA_F32_16X16X64_FP8_BF8,  16x64  FP8 x 64x16  BF8 = 16x16 F32
+             //         V_WMMA_F32_16X16X128_FP8_BF8, 16x128 FP8 x 128x16 BF8 = 16x16 F32
+             // F8B8HS: V_WMMA_F16_16X16X64_FP8_BF8,  16x64  FP8 x 64x16  BF8 = 16x16 F16
+             //         V_WMMA_F16_16X16X128_FP8_BF8  16x128 FP8 x 128x16 BF8 = 16x16 F16
+             {matrix_instruction(16, 16, 64, data_type_t::Float8BFloat8), 4},
+             {matrix_instruction(16, 16, 128, data_type_t::Float8BFloat8), 8},
+
+             // B8F8
+             // B8F8SS: V_WMMA_F32_16X16X64_BF8_FP8, 16x64 BF8 x 64x16 FP8 = 16x16 F32
+             //         V_WMMA_F32_16X16X128_BF8_FP8, 16x128 BF8 x 128x16 FP8 = 16x16 F32
+             // B8F8HS: V_WMMA_F16_16X16X64_BF8_FP8, 16x64 BF8 x 64x16 FP8 = 16x16 F16
+             //         V_WMMA_F16_16X16X128_BF8_FP8, 16x128 BF8 x 128x16 FP8 = 16x16 F16
+             {matrix_instruction(16, 16, 64, data_type_t::BFloat8Float8), 4},
+             {matrix_instruction(16, 16, 128, data_type_t::BFloat8Float8), 8},
+
+             // MXF8  TODO this is same as above?
+             // V_WMMA_F32_16x16x128_F8F6F4,  16x128 FP4/6/8 x 128x16 FP4/6/8 = 16x16 F32
+             // {matrix_instruction(16, 16, 128, data_type_t::Float8), 8},
+
+             // F6
+             // V_WMMA_F32_16x16x128_F8F6F4,  16x128 FP4/6/8 x 128x16 FP4/6/8 = 16x16 F32
+             {matrix_instruction(16, 16, 128, data_type_t::Float6), 8},
+
+             // F4
+             // V_WMMA_F32_16x16x128_F8F6F4,  16x128 FP4/6/8 x 128x16 FP4/6/8 = 16x16 F32
+             // V_WMMA_F32_32x16x128_F4
+             {matrix_instruction(16, 16, 128, data_type_t::Float4), 4},
+             {matrix_instruction(32, 16, 128, data_type_t::Float4), 8},
+
+             // I8
+             // V_WMMA_I32_16X16X64_IU8, 16x64 IU8 x 64x16 IU8 = 16x16 I32
+             {matrix_instruction(16, 16, 64, data_type_t::Int8), 8},
+
+             // XF32
+             // x3 emulation: 3 x V_WMMA_BF16_16X16X32_BF16
+             {matrix_instruction(16, 16, 32, data_type_t::XFloat32), 8 * 3},
+
+             // TODO:
+             // ComplexFloat
+             // ComplexDouble
+             // BF6
+             // DOT2
+         }}};
   // clang-format on
 
   architecture_t arch;  ///< GPU architecture type
   size_t N_CU;          ///< Number of Compute Units
   size_t lds_capacity;  ///< Capacity of Local Data Share (LDS) in bytes
+  size_t rf_capacity;   ///< Capacity of Register File (RF) in bytes
   double mem1_perf_ratio;
   double mem2_perf_ratio;
   double mem3_perf_ratio;
@@ -476,6 +598,7 @@ class hardware_t {
    * @param arch GPU architecture type
    * @param N_CU Number of compute units
    * @param lds_capacity LDS capacity in bytes
+   * @param rf_capacity RF capacity in bytes
    * @param NUM_XCD Number of XCDs
    * @param mem1_perf_ratio Memory level 1 performance ratio
    * @param mem2_perf_ratio Memory level 2 performance ratio
@@ -488,6 +611,7 @@ class hardware_t {
   hardware_t(architecture_t arch,
              size_t N_CU,
              size_t lds_capacity,
+             size_t rf_capacity,
              size_t NUM_XCD,
              double mem1_perf_ratio,
              double mem2_perf_ratio,
@@ -506,6 +630,7 @@ class hardware_t {
    * @param arch GPU architecture type
    * @param N_CU Number of compute units
    * @param lds_capacity LDS capacity in bytes
+   * @param rf_capacity RF capacity in bytes
    * @param constants Architecture-specific constants
    * @param num_xcds Number of XCDs — provided separately from constants so that
    *                 it can come from a runtime query or a known-architecture table
@@ -516,6 +641,7 @@ class hardware_t {
   hardware_t(architecture_t arch,
              size_t N_CU,
              size_t lds_capacity,
+             size_t rf_capacity,
              const architecture_constants& constants,
              size_t num_xcds,
              size_t L2_capacity,
@@ -602,6 +728,7 @@ class hardware_t {
    * @param arch Architecture enum value
    * @param N_CU Number of compute units
    * @param lds_capacity LDS capacity in bytes
+   * @param rf_capacity LDS capacity in bytes
    * @param L2_capacity L2 cache capacity in bytes
    * @param compute_clock_khz Compute clock in KHz
    * @return hardware_t Configured hardware instance
@@ -610,6 +737,7 @@ class hardware_t {
   static hardware_t get_hardware_for_arch(architecture_t arch,
                                           size_t N_CU,
                                           size_t lds_capacity,
+                                          size_t rf_capacity,
                                           size_t L2_capacity,
                                           int compute_clock_khz);
 
@@ -687,6 +815,15 @@ class hardware_t {
    * @return true if the architecture has MALL, false otherwise
    */
   bool has_MALL() const;
+
+  /**
+   * @brief Check if hardware supports native TF32 matrix instructions.
+   *
+   * If TF32/XFloat32 is not natively supported, then emulation is required which has some overhead.
+   *
+   * @return true if the architecture has TF32 matrix instructions
+   */
+  bool has_native_TF32() const;
 
  private:
   /**

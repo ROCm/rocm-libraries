@@ -1,6 +1,6 @@
 /*! \file */
 /* ************************************************************************
- * Copyright (C) 2018-2025 Advanced Micro Devices, Inc. All rights Reserved.
+ * Copyright (C) 2018-2026 Advanced Micro Devices, Inc. All rights Reserved.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -38,10 +38,15 @@ namespace rocsparse
                                      I* __restrict__ csr_diag_ind,
                                      int* __restrict__ done_array,
                                      I* __restrict__ max_nnz,
-                                     J* __restrict__ zero_pivot,
+                                     J*                   zero_pivot,
                                      rocsparse_index_base idx_base,
                                      rocsparse_diag_type  diag_type)
     {
+        static_assert(WF_SIZE > 0 && (WF_SIZE & (WF_SIZE - 1)) == 0,
+                      "WF_SIZE must be a power of two.");
+        static_assert(BLOCKSIZE > 0, "BLOCKSIZE must be positive.");
+        static_assert(BLOCKSIZE % WF_SIZE == 0, "BLOCKSIZE must be a multiple of WF_SIZE.");
+
         int lid = hipThreadIdx_x & (WF_SIZE - 1);
         int wid = hipThreadIdx_x / WF_SIZE;
 
@@ -161,10 +166,15 @@ namespace rocsparse
                                      I* __restrict__ csr_diag_ind,
                                      int* __restrict__ done_array,
                                      I* __restrict__ max_nnz,
-                                     J* __restrict__ zero_pivot,
+                                     J*                   zero_pivot,
                                      rocsparse_index_base idx_base,
                                      rocsparse_diag_type  diag_type)
     {
+        static_assert(WF_SIZE > 0 && (WF_SIZE & (WF_SIZE - 1)) == 0,
+                      "WF_SIZE must be a power of two.");
+        static_assert(BLOCKSIZE > 0, "BLOCKSIZE must be positive.");
+        static_assert(BLOCKSIZE % WF_SIZE == 0, "BLOCKSIZE must be a multiple of WF_SIZE.");
+
         int lid = hipThreadIdx_x & (WF_SIZE - 1);
         int wid = hipThreadIdx_x / WF_SIZE;
 
@@ -284,16 +294,21 @@ namespace rocsparse
                                            int64_t csr_val_inc,
                                            const T* __restrict__ x,
                                            int64_t x_inc,
-                                           T* __restrict__ y,
+                                           T*      y,
                                            int64_t y_inc,
                                            int* __restrict__ done_array,
                                            const J* __restrict__ map,
-                                           int offset,
-                                           J* __restrict__ zero_pivot,
+                                           int                  offset,
+                                           J*                   zero_pivot,
                                            rocsparse_index_base idx_base,
                                            rocsparse_fill_mode  fill_mode,
                                            rocsparse_diag_type  diag_type)
     {
+        static_assert(WF_SIZE > 0 && (WF_SIZE & (WF_SIZE - 1)) == 0,
+                      "WF_SIZE must be a power of two.");
+        static_assert(BLOCKSIZE > 0, "BLOCKSIZE must be positive.");
+        static_assert(BLOCKSIZE % WF_SIZE == 0, "BLOCKSIZE must be a multiple of WF_SIZE.");
+
         const uint32_t lid = hipThreadIdx_x & (WF_SIZE - 1);
         int            wid = hipThreadIdx_x / WF_SIZE;
 

@@ -73,15 +73,15 @@ class TensorAttributes
 {
 public:
     /// Variant type for storing pass-by-value scalar values
-    using ValueVariant
-        = std::variant<std::monostate, double, float, half, bfloat16, uint8_t, int32_t, int64_t>;
+    using ValueVariant = std::
+        variant<std::monostate, double, float, half, bfloat16, uint8_t, int32_t, int64_t, bool>;
 
     /// @brief Default constructor
     TensorAttributes() = default;
 
     /**
      * @brief Construct a pass-by-value tensor from a scalar
-     * @tparam T Scalar type (float, double, half, hip_bfloat16, uint8_t, int32_t, int64_t)
+     * @tparam T Scalar type (float, double, half, hip_bfloat16, uint8_t, int32_t, int64_t, bool)
      * @param scalar The scalar value to store in the tensor
      */
     template <typename T>
@@ -116,7 +116,7 @@ public:
 
     /**
      * @brief Set a pass-by-value scalar in this tensor
-     * @tparam T Scalar type (float, double, half, hip_bfloat16, uint8_t, int32_t, int64_t)
+     * @tparam T Scalar type (float, double, half, hip_bfloat16, uint8_t, int32_t, int64_t, bool)
      * @param v The scalar value
      * @return Reference to this for method chaining
      */
@@ -130,7 +130,8 @@ public:
                                          std::is_same<T, bfloat16>,
                                          std::is_same<T, uint8_t>,
                                          std::is_same<T, int32_t>,
-                                         std::is_same<T, int64_t>>,
+                                         std::is_same<T, int64_t>,
+                                         std::is_same<T, bool>>,
                       "Unsupported type for Tensor_attributes::set_value");
         _value = v;
         _dataType = getDataTypeEnumFromType<T>();
@@ -394,6 +395,65 @@ public:
                                "Tensor " + _name + " must have only positive dimensions");
 
         return {ErrorCode::OK, ""};
+    }
+
+    /// @brief Checks if two tensors are logically identical in terms of shape,
+    /// layout, data type, value, and structural role in the graph.
+    /// @note This intentionally ignores the human-readable string name.
+    bool logicallyEquals(const TensorAttributes& other) const
+    {
+        if(this->_dataType != other._dataType)
+        {
+            return false;
+        }
+        if(this->_dim != other._dim)
+        {
+            return false;
+        }
+        if(this->_stride != other._stride)
+        {
+            return false;
+        }
+        if(this->_isVirtual != other._isVirtual)
+        {
+            return false;
+        }
+        // Compare pass-by-value scalar variants
+        if(this->_value != other._value)
+        {
+            return false;
+        }
+
+        return true;
+    }
+
+    /// @brief Absolute equality check including non-functional metadata like names.
+    bool operator==(const TensorAttributes& other) const
+    {
+
+        if(!logicallyEquals(other))
+        {
+            return false;
+        }
+        if(this->_name != other._name)
+        {
+            return false;
+        }
+        if(this->_uidSet != other._uidSet)
+        {
+            return false;
+        }
+        if(this->_uidSet && (this->_uid != other._uid))
+        {
+            return false;
+        }
+
+        return true;
+    }
+
+    bool operator!=(const TensorAttributes& other) const
+    {
+        return !(*this == other);
     }
 
 private:

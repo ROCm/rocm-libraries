@@ -2,7 +2,7 @@
  *
  * MIT License
  *
- * Copyright (C) 2022-2023 Advanced Micro Devices, Inc. All rights reserved.
+ * Copyright (C) 2022-2026 Advanced Micro Devices, Inc. All rights reserved.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -34,9 +34,7 @@
 #include <Tensile/Tensile.hpp>
 #include <Tensile/Task.hpp>
 
-#include <Tensile/Macros.hpp>
-
-TENSILE_HIDDEN_BEGIN
+#include <tensilelitehost/export.h>
 
 namespace TensileLite
 {
@@ -65,7 +63,9 @@ namespace TensileLite
            && solutions.problemType.cType == problem.c().dataType()
            && solutions.problemType.dType == problem.d().dataType()
            && solutions.problemType.computeType == problem.computeType()
-           && solutions.problemType.groupedGemm == problem.groupedGemm())
+           && solutions.problemType.groupedGemm == problem.groupedGemm()
+           && solutions.problemType.mxBlockA == problem.mxBlockA()
+           && solutions.problemType.mxBlockB == problem.mxBlockB())
             return true;
         return false;
     }
@@ -125,7 +125,7 @@ namespace TensileLite
  *
  */
     template <typename MyProblem, typename MySolution = typename MyProblem::Solution>
-    struct TENSILE_API SolutionLibrary
+    struct TENSILELITEHOST_EXPORT SolutionLibrary
     {
         virtual ~SolutionLibrary() = default;
 
@@ -221,4 +221,3 @@ namespace TensileLite
 
 } // namespace TensileLite
 
-TENSILE_HIDDEN_END

@@ -79,6 +79,9 @@ public:
 protected:
     void runGraphTest() override
     {
+        // rocBLAS/Tensile heap-buffer-overflow on gfx90a; CK ASAN stall on gfx942
+        SKIP_IF_ASAN();
+
         const auto& testCase = this->GetParam();
         const auto& [layout, convTestCase] = testCase;
 
@@ -86,7 +89,10 @@ protected:
 
         this->registerValidator(outputs.y, this->getTolerance(graphObj, outputs.y));
 
-        this->verifyGraph(graphObj, convTestCase.seed);
+        this->setTestCaseLayout(layout.name);
+        this->setTestCaseNote(convTestCase.note);
+        this->synthesis().setGlobalSeed(convTestCase.seed);
+        this->verifyGraph(graphObj);
     }
 };
 

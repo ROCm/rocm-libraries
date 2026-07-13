@@ -47,7 +47,7 @@ inline void execute_cpu_fft(const fft_params&            cpu_fft_params,
     // input will be modified.  So we need to modify the copy instead.
     std::vector<hostbuf>  cpu_input_copy(cpu_input.size());
     std::vector<hostbuf>* input_ptr = &cpu_input;
-    if(cpu_fft_params.run_callbacks
+    if(cpu_fft_params.run_callbacks != fft_callback_type_none
        || cpu_fft_params.transform_type == fft_transform_type_real_inverse)
     {
         for(size_t i = 0; i < cpu_input.size(); ++i)
@@ -75,14 +75,24 @@ inline void execute_cpu_fft(const fft_params&            cpu_fft_params,
 
 struct reference_fft_data_t
 {
-    reference_fft_data_t(const fft_params& cpu_fft_params)
+    reference_fft_data_t(const fft_params& cpu_fft_params, hostbuf* input_data = nullptr)
     {
         if(cpu_fft_params.placement != fft_placement_notinplace || !cpu_fft_params.valid())
+        {
             throw std::invalid_argument("Reference FFT results require valid parameters, "
                                         "configured for out-of-place calculations");
+        }
+        if(input_data
+           && (cpu_fft_params.isize.size() != 1
+               || input_data->size()
+                      < cpu_fft_params.isize[0]
+                            * var_size<size_t>(cpu_fft_params.precision, cpu_fft_params.itype)))
+        {
+            throw std::invalid_argument("Invalid input data given to referent FFT results");
+        }
         // If current cached results are valid reference results for the given
         // parameters, just use them.
-        if(cached_data.input_is_set.valid() && cached_data.output_is_set.valid()
+        if(!input_data && cached_data.input_is_set.valid() && cached_data.output_is_set.valid()
            && cached_data.can_be_used_for(cpu_fft_params, false /* = strict_precision_check*/))
         {
             this->swap(cached_data);
@@ -103,7 +113,15 @@ struct reference_fft_data_t
         params = cpu_fft_params;
         // input buffer can have minimal size but output must be large enough for
         // precision used at compute time (requirement from fftw_run)
-        cpu_input = allocate_host_buffer(params.precision, params.itype, params.isize);
+        if(input_data)
+        {
+            cpu_input.resize(1);
+            std::swap(cpu_input[0], *input_data);
+            // input is ready
+            input_is_set = std::async(std::launch::async, []() {});
+        }
+        else
+            cpu_input = allocate_host_buffer(params.precision, params.itype, params.isize);
         // Output buffer and fftw plan are needed iff `fftw_compare` is `true`.
         if(fftw_compare)
         {
@@ -230,17 +248,7 @@ struct reference_fft_data_t
                                                   hipMemcpyDeviceToHost);
                 if(hip_status != hipSuccess)
                 {
-                    ++n_hip_failures;
-                    std::stringstream ss;
-                    ss << "hipMemcpy failure with error " << hip_status;
-                    if(skip_runtime_fails)
-                    {
-                        throw ROCFFT_SKIP{ss.str()};
-                    }
-                    else
-                    {
-                        throw ROCFFT_FAIL{ss.str()};
-                    }
+                    throw hip_runtime_error("hipMemcpy failure", hip_status);
                 }
             }
         }
@@ -256,17 +264,7 @@ struct reference_fft_data_t
                                                   hipMemcpyDeviceToHost);
                 if(hip_status != hipSuccess)
                 {
-                    ++n_hip_failures;
-                    std::stringstream ss;
-                    ss << "hipMemcpy failure with error " << hip_status;
-                    if(skip_runtime_fails)
-                    {
-                        throw ROCFFT_SKIP{ss.str()};
-                    }
-                    else
-                    {
-                        throw ROCFFT_FAIL{ss.str()};
-                    }
+                    throw hip_runtime_error("hipMemcpy failure", hip_status);
                 }
             }
 
@@ -350,17 +348,7 @@ struct reference_fft_data_t
 
             if(hip_status != hipSuccess)
             {
-                ++n_hip_failures;
-                std::stringstream ss;
-                ss << "hipMemcpy failure with error " << hip_status;
-                if(skip_runtime_fails)
-                {
-                    throw ROCFFT_SKIP{ss.str()};
-                }
-                else
-                {
-                    throw ROCFFT_FAIL{ss.str()};
-                }
+                throw hip_runtime_error("hipMemcpy failure", hip_status);
             }
         }
     }
