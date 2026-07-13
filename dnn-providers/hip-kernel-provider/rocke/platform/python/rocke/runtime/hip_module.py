@@ -3,7 +3,7 @@
 
 """Minimal ctypes wrapper over `libamdhip64.so` for the hipModule API.
 
-This is the runtime twin of `_comgr.py`: it takes the HSACO bytes that
+This is the runtime twin of `comgr.py`: it takes the HSACO bytes that
 comgr produced from our LLVM IR and runs the kernel via
 `hipModuleLoadData` + `hipModuleLaunchKernel`. No host compilation,
 no `<hip/hip_runtime.h>` parsing — the same code-object path AMDGPU
@@ -20,14 +20,11 @@ We expose only what the GEMM kernel needs:
 from __future__ import annotations
 
 import ctypes
-import glob
-import os
-import sys
 from dataclasses import dataclass
-from typing import Any, Callable, Dict, List, Optional, Tuple
+from typing import Any, Dict, List, Optional, Tuple
 
-
-_IS_WINDOWS = sys.platform == "win32"
+from ._ctypes_bind import _LazyFn
+from .runtime_coexistence import _IS_WINDOWS, _add_dll_dir, _candidate_lib_paths
 
 
 HIP_LAUNCH_PARAM_BUFFER_POINTER = ctypes.c_void_p(1)
@@ -52,128 +49,6 @@ class _HipFunctionHandle(ctypes.Structure):
 
 class _HipEventHandle(ctypes.Structure):
     _fields_ = [("p", ctypes.c_void_p)]
-
-
-def _torch_bundled_lib(stem: str) -> Optional[str]:
-    """Return path to ``<torch>/lib/lib<stem>.so`` if torch is in this process.
-
-    Newer PyTorch+ROCm wheels (e.g. torch>=2.12 / ROCm 7.2) ship their
-    own ``libamdhip64.so`` and ``libamd_comgr.so`` inside the wheel's
-    ``torch/lib/`` directory. When torch is imported, those bundled
-    libraries get loaded into the process and own torch's HIP context.
-    A second copy of HIP loaded by rocke from ``/opt/rocm/lib`` is a
-    *different* runtime instance with disjoint state — modules loaded
-    via one are invisible to ``hipModuleGetFunction`` from the other,
-    surfacing as ``hipError(500) named symbol not found`` even when the
-    HSACO is well-formed and the symbol is present in its ELF.
-
-    To keep both halves of the process talking to the same HIP/comgr
-    runtime, prefer torch's bundled lib when torch is already imported.
-    Avoids importing torch as a side effect: only honors a torch that
-    is *already* in :data:`sys.modules`.
-    """
-    torch_mod = sys.modules.get("torch")
-    if torch_mod is None:
-        return None
-    torch_file = getattr(torch_mod, "__file__", None)
-    if not torch_file:
-        return None
-    libdir = os.path.join(os.path.dirname(torch_file), "lib")
-    if _IS_WINDOWS:
-        # ROCm-for-Windows torch wheels (TheRock / AMD nightlies) bundle
-        # ``amdhip64.dll`` and a version-stamped ``amd_comgr*.dll`` (no
-        # ``lib`` prefix). Prefer an exact match, else glob the versioned
-        # comgr name.
-        direct = os.path.join(libdir, f"{stem}.dll")
-        if os.path.exists(direct):
-            return direct
-        matches = sorted(glob.glob(os.path.join(libdir, f"{stem}*.dll")))
-        return matches[0] if matches else None
-    candidate = os.path.join(libdir, f"lib{stem}.so")
-    return candidate if os.path.exists(candidate) else None
-
-
-def _rocm_sdk_dll(stem: str) -> Optional[str]:
-    """Locate a ROCm runtime DLL shipped by the ``rocm-sdk-core`` wheel.
-
-    ROCm-for-Windows torch nightlies (AMD's gfx1151 index / TheRock) put
-    the HIP runtime and comgr in ``_rocm_sdk_core/bin`` with a version
-    suffix (e.g. ``amdhip64_7.dll``, ``amd_comgr0702.dll``) rather than in
-    ``torch/lib``. Returns the first match for ``<stem>*.dll`` or None.
-    """
-    if not _IS_WINDOWS:
-        return None
-    try:
-        import importlib.util
-
-        spec = importlib.util.find_spec("_rocm_sdk_core")
-    except Exception:
-        return None
-    if spec is None or not spec.submodule_search_locations:
-        return None
-    for loc in spec.submodule_search_locations:
-        bindir = os.path.join(loc, "bin")
-        direct = os.path.join(bindir, f"{stem}.dll")
-        if os.path.exists(direct):
-            return direct
-        matches = sorted(glob.glob(os.path.join(bindir, f"{stem}*.dll")))
-        if matches:
-            return matches[0]
-    return None
-
-
-def _candidate_lib_paths(stem: str, env_var: str, sonames: List[str]) -> List[str]:
-    """Resolution order for the HIP runtime / COMGR shared libraries.
-
-    Order:
-      1. ``$ROCKE_HIP_LIB`` (explicit override, full path).
-      2. ``<torch>/lib/lib<stem>.so`` if torch is already imported.
-      3. ``/opt/rocm/lib/lib<stem>.so`` and the requested SONAME variants.
-      4. Bare ``lib<stem>.so`` for the dynamic linker's search path.
-    """
-    paths: List[str] = []
-    override = os.environ.get(env_var)
-    if override:
-        paths.append(override)
-    bundled = _torch_bundled_lib(stem)
-    if bundled is not None:
-        paths.append(bundled)
-    sdk = _rocm_sdk_dll(stem)
-    if sdk is not None:
-        paths.append(sdk)
-    if _IS_WINDOWS:
-        # ROCm-for-Windows / HIP SDK install: ``%HIP_PATH%\bin`` then the
-        # bare DLL name (resolved via the default DLL search path). The
-        # comgr DLL carries a version suffix, so glob it.
-        for root_env in ("HIP_PATH", "ROCM_PATH"):
-            root = os.environ.get(root_env)
-            if not root:
-                continue
-            bindir = os.path.join(root, "bin")
-            paths.append(os.path.join(bindir, f"{stem}.dll"))
-            paths.extend(sorted(glob.glob(os.path.join(bindir, f"{stem}*.dll"))))
-        paths.append(f"{stem}.dll")
-        return paths
-    paths.append(f"/opt/rocm/lib/lib{stem}.so")
-    for soname in sonames:
-        paths.append(f"/opt/rocm/lib/lib{stem}.so.{soname}")
-    paths.append(f"lib{stem}.so")
-    return paths
-
-
-def _add_dll_dir(path: str) -> None:
-    """On Windows, register a resolved DLL's own directory so its
-    dependent DLLs (bundled alongside it in ``torch/lib`` or the HIP SDK
-    ``bin``) are found by the loader. No-op off Windows or for bare names.
-    """
-    if not _IS_WINDOWS:
-        return
-    d = os.path.dirname(path)
-    if d and os.path.isdir(d):
-        try:
-            os.add_dll_directory(d)
-        except (OSError, AttributeError):
-            pass
 
 
 def _load_lib() -> ctypes.CDLL:
@@ -201,47 +76,6 @@ def _resolve_hip() -> ctypes.CDLL:
     if _hip is None:
         _hip = _load_lib()
     return _hip
-
-
-class _LazyFn:
-    """Lazy ctypes function wrapper.
-
-    Defers ``getattr`` on the underlying CDLL until the first call so
-    that rocke and torch can be imported in any order without ending
-    up with two HIP runtimes (see ``_torch_bundled_lib``). Resolved on
-    first use; subsequent calls dispatch directly through the cached
-    function pointer.
-
-    ``lib_resolver`` returns the shared ``ctypes.CDLL`` for this lib
-    family (HIP runtime / comgr / ...). It is invoked exactly once per
-    function on first call.
-    """
-
-    __slots__ = ("_name", "_argtypes", "_restype", "_lib_resolver", "_fn")
-
-    def __init__(
-        self,
-        name: str,
-        argtypes: List[Any],
-        restype: Any,
-        lib_resolver: "Callable[[], ctypes.CDLL]",
-    ) -> None:
-        self._name = name
-        self._argtypes = argtypes
-        self._restype = restype
-        self._lib_resolver = lib_resolver
-        self._fn: Optional[Any] = None
-
-    def _resolve(self) -> Any:
-        fn = getattr(self._lib_resolver(), self._name)
-        fn.argtypes = self._argtypes
-        fn.restype = self._restype
-        self._fn = fn
-        return fn
-
-    def __call__(self, *args: Any) -> Any:
-        fn = self._fn or self._resolve()
-        return fn(*args)
 
 
 def _b(name: str, *argtypes, restype=ctypes.c_int) -> _LazyFn:
@@ -433,29 +267,47 @@ class Event:
 
 class Runtime:
     # Per-stream FIFO of ``(refs_tuple, completion_event_or_None)``
-    # entries. Every launch appends exactly one entry; tensor lifetimes
-    # (set up via :meth:`retain_for_stream`) merge into the most-recent
-    # entry so they share the launch's completion event.
+    # entries: a backend-agnostic, stream-scoped **lifetime manager**.
+    # Every async launch appends exactly one entry holding the ctypes
+    # objects that launch enqueued; a caller may merge additional objects
+    # to keep alive into the most-recent entry via
+    # :meth:`retain_for_stream` so they share that launch's completion
+    # event.
+    #
+    # This is NOT torch-specific, and must not migrate into a torch
+    # module: the bucket only ever holds ctypes buffers and HIP
+    # ``Event``s, :meth:`retain_for_stream` takes ``*objects: Any`` and
+    # filters out ints/None, and ``Runtime`` never imports torch. Torch's
+    # caching allocator (below) is the *motivating caller* of the retain
+    # path, not something this runtime knows about.
     #
     # Why this exists
     # ---------------
     # Raw ``hipModuleLaunchKernel`` calls go through ctypes and are
-    # invisible to torch's stream-aware caching allocator. Two failure
-    # modes follow:
+    # invisible to Python's GC (and to torch's stream-aware caching
+    # allocator, when torch owns the tensors). Two lifetimes must outlive
+    # an in-flight kernel:
     #
-    # 1. The HIP_LAUNCH_PARAM_BUFFER_POINTER ("extra") path does not
-    #    promise to copy the packed-args buffer at enqueue time;
-    #    observation on ROCm 6/7 is that the GPU command processor
-    #    reads it later, when it actually starts the kernel. If the
-    #    Python-owned ctypes buffer has been garbage-collected by then,
-    #    the kernel reads stale memory and writes to whatever pointer
-    #    those bytes now decode as.
+    # 1. The ctypes args buffer, on the HIP_LAUNCH_PARAM_BUFFER_POINTER
+    #    ("extra") path. That path does not promise to copy the
+    #    packed-args buffer at enqueue time; observation on ROCm 6/7 is
+    #    that the GPU command processor reads it later, when it actually
+    #    starts the kernel. If the Python-owned buffer has been
+    #    garbage-collected by then, the kernel reads stale memory and
+    #    writes to whatever pointer those bytes now decode as. This
+    #    applies to EVERY async launch -- numpy / manifest callers
+    #    included -- so :meth:`launch` parks the buffer here
+    #    unconditionally (torch-independent).
     #
-    # 2. Output / workspace tensors built with ``torch.empty(...)`` are
-    #    tracked by torch's caching allocator against torch's
-    #    *current* stream. Once the Python reference drops, the
-    #    allocator can recycle that memory while the raw HIP launch is
-    #    still in flight, mutating the kernel's destination buffer.
+    # 2. Any caller-owned object backing a kernel argument, retained via
+    #    :meth:`retain_for_stream`. The motivating case: output /
+    #    workspace tensors built with ``torch.empty(...)`` are tracked by
+    #    torch's caching allocator against torch's *current* stream; once
+    #    the Python reference drops, the allocator can recycle that memory
+    #    while the raw HIP launch is still in flight, mutating the
+    #    kernel's destination buffer. The launcher (the torch-aware layer)
+    #    calls ``retain_for_stream`` for that; the mechanism here stays
+    #    agnostic to what it holds.
     #
     # The mitigation in both cases is the same: tie the Python
     # references' lifetime to a HIP completion event recorded on the

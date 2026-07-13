@@ -341,6 +341,87 @@ add_subdirectory(02_elementwise)
 add_subdirectory(03_reduction)
 add_subdirectory(python)
 
+# FFM test entries.
+#
+# These are appended to the main install-tree fragment (bin/hiptensor/CTestTestfile.cmake).
+#
+# Each row is encoded as "binary|yaml-or-NONE|SMOKE-or-NONE":
+#   binary - the test executable under bin/; the test name is "<binary> smoke ffm"
+#            (each smoke binary appears exactly once in the set)
+#   yaml   - path of the emulation/smoke config to pass via -y, relative to
+#            bin/hiptensor/ffm/configs/, or NONE for bare runs
+#   params - SMOKE to append --hot_runs 1 --cold_runs 0, or NONE
+set(_HT_FFM_ENTRIES
+  "bilinear_contraction_test_m1n1k1|01_contraction/smoke/bilinear_test_params_rank1.yaml|SMOKE"
+  "bilinear_contraction_test_m2n2k2|01_contraction/smoke/bilinear_test_params_rank2.yaml|SMOKE"
+  "bilinear_contraction_test_m3n3k3|01_contraction/smoke/bilinear_test_params_rank3.yaml|SMOKE"
+  "bilinear_contraction_test_m4n4k4|01_contraction/smoke/bilinear_test_params_rank4.yaml|SMOKE"
+  "bilinear_contraction_test_m5n5k5|01_contraction/smoke/bilinear_test_params_rank5.yaml|SMOKE"
+  "bilinear_contraction_test_m6n6k6|01_contraction/smoke/bilinear_test_params_rank6.yaml|SMOKE"
+  "complex_bilinear_contraction_test_m1n1k1|01_contraction/smoke/complex_bilinear_test_params_rank1.yaml|SMOKE"
+  "complex_bilinear_contraction_test_m2n2k2|01_contraction/smoke/complex_bilinear_test_params_rank2.yaml|SMOKE"
+  "complex_bilinear_contraction_test_m3n3k3|01_contraction/smoke/complex_bilinear_test_params_rank3.yaml|SMOKE"
+  "complex_bilinear_contraction_test_m4n4k4|01_contraction/smoke/complex_bilinear_test_params_rank4.yaml|SMOKE"
+  "complex_bilinear_contraction_test_m5n5k5|01_contraction/smoke/complex_bilinear_test_params_rank5.yaml|SMOKE"
+  "complex_bilinear_contraction_test_m6n6k6|01_contraction/smoke/complex_bilinear_test_params_rank6.yaml|SMOKE"
+  "scale_contraction_test_m1n1k1|01_contraction/smoke/scale_test_params_rank1.yaml|SMOKE"
+  "scale_contraction_test_m2n2k2|01_contraction/smoke/scale_test_params_rank2.yaml|SMOKE"
+  "scale_contraction_test_m3n3k3|01_contraction/smoke/scale_test_params_rank3.yaml|SMOKE"
+  "scale_contraction_test_m4n4k4|01_contraction/smoke/scale_test_params_rank4.yaml|SMOKE"
+  "scale_contraction_test_m5n5k5|01_contraction/smoke/scale_test_params_rank5.yaml|SMOKE"
+  "scale_contraction_test_m6n6k6|01_contraction/smoke/scale_test_params_rank6.yaml|SMOKE"
+  "complex_scale_contraction_test_m1n1k1|01_contraction/smoke/complex_scale_test_params_rank1.yaml|SMOKE"
+  "complex_scale_contraction_test_m2n2k2|01_contraction/smoke/complex_scale_test_params_rank2.yaml|SMOKE"
+  "complex_scale_contraction_test_m3n3k3|01_contraction/smoke/complex_scale_test_params_rank3.yaml|SMOKE"
+  "complex_scale_contraction_test_m4n4k4|01_contraction/smoke/complex_scale_test_params_rank4.yaml|SMOKE"
+  "complex_scale_contraction_test_m5n5k5|01_contraction/smoke/complex_scale_test_params_rank5.yaml|SMOKE"
+  "complex_scale_contraction_test_m6n6k6|01_contraction/smoke/complex_scale_test_params_rank6.yaml|SMOKE"
+  "trinary_bilinear_contraction_test|NONE|SMOKE"
+  "trinary_scale_contraction_test|NONE|SMOKE"
+  "bilinear_contraction_with_unary_ops_test|NONE|SMOKE"
+  "scale_contraction_with_unary_ops_test|NONE|SMOKE"
+  "rank2_elementwise_permute_test|02_elementwise/smoke/permutation/rank2_test_params.yaml|SMOKE"
+  "rank3_elementwise_permute_test|02_elementwise/smoke/permutation/rank3_test_params.yaml|SMOKE"
+  "rank4_elementwise_permute_test|02_elementwise/smoke/permutation/rank4_test_params.yaml|SMOKE"
+  "rank5_elementwise_permute_test|02_elementwise/smoke/permutation/rank5_test_params.yaml|SMOKE"
+  "rank6_elementwise_permute_test|02_elementwise/smoke/permutation/rank6_test_params.yaml|SMOKE"
+  "rank2_elementwise_binary_op_test|02_elementwise/smoke/binary_op/rank2_binary_op_test_params.yaml|SMOKE"
+  "rank3_elementwise_binary_op_test|02_elementwise/smoke/binary_op/rank3_binary_op_test_params.yaml|SMOKE"
+  "rank4_elementwise_binary_op_test|02_elementwise/smoke/binary_op/rank4_binary_op_test_params.yaml|SMOKE"
+  "rank5_elementwise_binary_op_test|02_elementwise/smoke/binary_op/rank5_binary_op_test_params.yaml|SMOKE"
+  "rank6_elementwise_binary_op_test|02_elementwise/smoke/binary_op/rank6_binary_op_test_params.yaml|SMOKE"
+  "rank2_elementwise_trinary_op_test|02_elementwise/smoke/trinary_op/rank2_trinary_op_test_params.yaml|SMOKE"
+  "rank3_elementwise_trinary_op_test|02_elementwise/smoke/trinary_op/rank3_trinary_op_test_params.yaml|SMOKE"
+  "rank4_elementwise_trinary_op_test|02_elementwise/smoke/trinary_op/rank4_trinary_op_test_params.yaml|SMOKE"
+  "rank5_elementwise_trinary_op_test|02_elementwise/smoke/trinary_op/rank5_trinary_op_test_params.yaml|SMOKE"
+  "rank6_elementwise_trinary_op_test|02_elementwise/smoke/trinary_op/rank6_trinary_op_test_params.yaml|SMOKE"
+  "rank1_reduction_test|03_reduction/smoke/rank1_test_params.yaml|SMOKE"
+  "rank2_reduction_test|03_reduction/smoke/rank2_test_params.yaml|SMOKE"
+  "rank3_reduction_test|03_reduction/smoke/rank3_test_params.yaml|SMOKE"
+  "rank4_reduction_test|03_reduction/smoke/rank4_test_params.yaml|SMOKE"
+  "rank5_reduction_test|03_reduction/smoke/rank5_test_params.yaml|SMOKE"
+  "rank6_reduction_test|03_reduction/smoke/rank6_test_params.yaml|SMOKE"
+)
+
+foreach(_ffm_entry IN LISTS _HT_FFM_ENTRIES)
+    string(REPLACE "|" ";" _ffm_fields "${_ffm_entry}")
+    list(GET _ffm_fields 0 _ffm_bin)
+    list(GET _ffm_fields 1 _ffm_yaml)
+    list(GET _ffm_fields 2 _ffm_params)
+
+    set(_ffm_cmd "\"./bin/${_ffm_bin}\"")
+    if(NOT _ffm_yaml STREQUAL "NONE")
+        string(APPEND _ffm_cmd " -y ./bin/${PROJECT_NAME}/ffm/configs/${_ffm_yaml}")
+    endif()
+    if(_ffm_params STREQUAL "SMOKE")
+        string(APPEND _ffm_cmd " --hot_runs 1 --cold_runs 0")
+    endif()
+
+    set(_ffm_name "${_ffm_bin} smoke ffm")
+    file(APPEND "${INSTALL_TEST_FILE}" "add_test(\"${_ffm_name}\" ${_ffm_cmd})\n")
+    file(APPEND "${INSTALL_TEST_FILE}" "set_tests_properties(\"${_ffm_name}\" PROPERTIES WORKING_DIRECTORY \"../..\" SKIP_REGULAR_EXPRESSION \"HIPTENSOR_STATUS_ARCH_MISMATCH;unsupported host device\")\n")
+endforeach()
+
 # Bake YAML-driven category labels into each install-tree
 # CTestTestfile.cmake fragment so `ctest --test-dir
 # <prefix>/bin/hiptensor[/{smoke,regression}] -L <tier>` works against
@@ -405,6 +486,16 @@ rocm_install(
     RENAME "CTestTestfile.cmake"
 )
 
+# Install the emulation/smoke config subtrees so the FFM entries' `-y`
+# paths resolve at ctest runtime.
+foreach(_ffm_component 01_contraction 02_elementwise 03_reduction)
+    rocm_install(
+        DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}/${_ffm_component}/configs/emulation/smoke"
+        DESTINATION "${CMAKE_INSTALL_BINDIR}/${PROJECT_NAME}/ffm/configs/${_ffm_component}"
+        COMPONENT tests
+    )
+endforeach()
+
 rocm_install(DIRECTORY ${CMAKE_SOURCE_DIR}/scripts/performance/
     DESTINATION "${CMAKE_INSTALL_BINDIR}/${PROJECT_NAME}/bench/scripts"
     COMPONENT tests
@@ -418,17 +509,9 @@ rocm_install(DIRECTORY ${CMAKE_SOURCE_DIR}/scripts/performance/
         WORLD_READ WORLD_EXECUTE
 )
 
-rocm_install(DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}/01_contraction/configs/bench/
-    DESTINATION "${CMAKE_INSTALL_BINDIR}/${PROJECT_NAME}/bench/configs/01_contraction"
-    COMPONENT tests
-)
-
-rocm_install(DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}/02_elementwise/configs/bench/
-    DESTINATION "${CMAKE_INSTALL_BINDIR}/${PROJECT_NAME}/bench/configs/02_elementwise"
-    COMPONENT tests
-)
-
-rocm_install(DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}/03_reduction/configs/bench/
-    DESTINATION "${CMAKE_INSTALL_BINDIR}/${PROJECT_NAME}/bench/configs/03_reduction"
-    COMPONENT tests
-)
+foreach(_bench_component 01_contraction 02_elementwise 03_reduction)
+    rocm_install(DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}/${_bench_component}/configs/bench/
+        DESTINATION "${CMAKE_INSTALL_BINDIR}/${PROJECT_NAME}/bench/configs/${_bench_component}"
+        COMPONENT tests
+    )
+endforeach()

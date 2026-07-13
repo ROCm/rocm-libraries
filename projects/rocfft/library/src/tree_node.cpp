@@ -399,72 +399,114 @@ void TreeNode::CollapseContiguousDims()
     for(auto& child : childNodes)
         child->CollapseContiguousDims();
 
-    const auto collapsibleDims = CollapsibleDims();
-    if(collapsibleDims.empty())
+    auto collapsible_axes = CollapsibleDims();
+    if(collapsible_axes.empty())
         return;
+    // add batch dimension (implicitly understood herein as length.size())
+    collapsible_axes.push_back(length.size());
 
-    // utility function to collect the dims to collapse
-    auto collectCollapse = [&collapsibleDims](const size_t               dist,
-                                              size_t&                    newBatch,
-                                              const std::vector<size_t>& length,
-                                              const std::vector<size_t>& stride) {
-        std::vector<size_t> dimsToCollapse;
-        // start with batch dim and go backwards through collapsible dims
-        // so we can collapse them without invalidating remaining indexes
-        auto curStride = dist;
-        for(auto i = collapsibleDims.rbegin(); i != collapsibleDims.rend(); ++i)
-        {
-            if(stride[*i] == 0)
-                break;
-            if(curStride % stride[*i] != 0)
-                break;
-            if(curStride / stride[*i] != length[*i])
-                break;
-            dimsToCollapse.push_back(*i);
-            newBatch *= length[*i];
-            curStride = stride[*i];
-        }
-        return dimsToCollapse;
-    };
+    // TODO: replace members TreeNode::length, TreeNode::outputLength, TreeNode::inStride,
+    // TreeNode::outStride, etc. by data_layout_t instances and introduce a (static)
+    //    data_layout_t::compress_batch_axes_consistently_in(data_layout_t& layout_0,
+    //                                                       data_layout_t& layout_1
+    //                                                       [, ...]);
+    // which handle compression of batch axes consistently across two (or more) data layouts.
 
-    // utility function to actually do the collapsing -
-    // dimsToCollapse must be in reverse order so we erase dims from
-    // highest to lowest
-    auto doCollapse = [](size_t&                    dist,
-                         const std::vector<size_t>& dimsToCollapse,
-                         std::vector<size_t>&       lengthToCollapse,
-                         std::vector<size_t>&       strideToCollapse) {
-        for(auto i : dimsToCollapse)
-        {
-            dist /= lengthToCollapse[i];
-            lengthToCollapse.erase(lengthToCollapse.begin() + i);
-            strideToCollapse.erase(strideToCollapse.begin() + i);
-        }
-    };
-
-    size_t              newInputBatch = batch;
-    std::vector<size_t> inputDimsToCollapse
-        = collectCollapse(iDist, newInputBatch, length, inStride);
-    auto                outputLengthTemp = GetOutputLength();
-    size_t              newOutputBatch   = batch;
-    std::vector<size_t> outputDimsToCollapse
-        = collectCollapse(oDist, newOutputBatch, outputLengthTemp, outStride);
-    if(inputDimsToCollapse != outputDimsToCollapse || newInputBatch != newOutputBatch)
-        return;
-
-    if(!inputDimsToCollapse.empty())
+    // Go over all couples of entries in collapsible_axes and collapse axis of smaller index
+    // into axis of larger index (so that batch dimension is never removed), iff collapsing
+    // is valid for both the input and output node's data layouts for the considered couple
+    // of axes
+    auto outputLengthTemp = GetOutputLength();
+    auto first_axis_it    = collapsible_axes.begin();
+    while(first_axis_it != collapsible_axes.end())
     {
-        std::stringstream msg;
-        msg << "collapsed contiguous high length(s)";
-        for(auto i = inputDimsToCollapse.rbegin(); i != inputDimsToCollapse.rend(); ++i)
-            msg << " " << length[*i];
-        msg << " into batch";
-        comments.push_back(msg.str());
-    }
+        auto second_axis_it = collapsible_axes.begin();
+        bool collapsed_some = false;
+        while(!collapsed_some && second_axis_it != collapsible_axes.end())
+        {
+            if(second_axis_it == first_axis_it)
+            {
+                second_axis_it++;
+                continue;
+            }
+            // batch (along with iDist and oDist) cannot be erased ever, so the logic below
+            // always compresses collapsible couples of axes by removing the axis of lower
+            // dimension index (i.e., not "batch", "iDist", "oDist", etc.) by design, even
+            // if "natural" compression would be the other way around...
+            const auto keep_idx = std::max(*first_axis_it, *second_axis_it);
+            const auto del_idx  = std::min(*first_axis_it, *second_axis_it);
+            // note: del_idx < length.size() by construction
 
-    doCollapse(iDist, inputDimsToCollapse, length, inStride);
-    doCollapse(oDist, outputDimsToCollapse, outputLengthTemp, outStride);
-    batch = newInputBatch;
+            auto& keep_ilength      = keep_idx < length.size() ? length[keep_idx] : batch;
+            auto& keep_istride      = keep_idx < length.size() ? inStride[keep_idx] : iDist;
+            auto& keep_olength      = keep_idx < length.size() ? outputLengthTemp[keep_idx] : batch;
+            auto& keep_ostride      = keep_idx < length.size() ? outStride[keep_idx] : oDist;
+            const auto& del_ilength = del_idx < length.size() ? length[del_idx] : batch;
+            const auto& del_istride = del_idx < length.size() ? inStride[del_idx] : iDist;
+            const auto& del_olength = del_idx < length.size() ? outputLengthTemp[del_idx] : batch;
+            const auto& del_ostride = del_idx < length.size() ? outStride[del_idx] : oDist;
+            const bool  keep_is_multiple_of_del
+                = (keep_ilength == 1 || keep_istride == del_istride * del_ilength)
+                  && (keep_olength == 1 || keep_ostride == del_ostride * del_olength);
+            const bool del_is_multiple_of_keep
+                = (del_ilength == 1 || del_istride == keep_istride * keep_ilength)
+                  && (del_olength == 1 || del_ostride == keep_ostride * keep_olength);
+            if(!keep_is_multiple_of_del && !del_is_multiple_of_keep)
+            {
+                second_axis_it++;
+                continue;
+            }
+            if(keep_idx == length.size() && del_ilength != del_olength)
+            {
+                // batch size to keep (unique variable) but multipliers differ...
+                // no can/should do compression
+                second_axis_it++;
+                continue;
+            }
+
+            // add to comment list:
+            std::stringstream msg;
+            msg << "collapsing contiguous high length " << del_ilength << " into "
+                << (keep_idx == length.size() ? "batch " : "other high length ") << keep_ilength;
+            // do the collapse
+            if(keep_is_multiple_of_del)
+            {
+                keep_istride = del_istride;
+                keep_ostride = del_ostride;
+            }
+            keep_ilength *= del_ilength;
+            if(keep_idx < length.size())
+                keep_olength *= del_olength;
+            // effectively erase the axis of index del_idx
+            length.erase(length.begin() + del_idx);
+            inStride.erase(inStride.begin() + del_idx);
+            outputLengthTemp.erase(outputLengthTemp.begin() + del_idx);
+            outStride.erase(outStride.begin() + del_idx);
+            if(del_idx == *first_axis_it)
+                collapsible_axes.erase(first_axis_it);
+            else
+                collapsible_axes.erase(second_axis_it);
+            for(auto& axis_idx : collapsible_axes)
+            {
+                if(axis_idx > del_idx)
+                    axis_idx--;
+            }
+            msg << ". Resulting lengths and batch are: ";
+            for(const auto& len : length)
+                msg << len << ", ";
+            msg << batch;
+            comments.push_back(msg.str());
+            collapsed_some = true;
+        }
+        if(collapsed_some)
+        {
+            // some compression of axes did happen, which may enable
+            // new compressions... restart from scratch
+            first_axis_it = collapsible_axes.begin();
+        }
+        else
+            first_axis_it++;
+    }
 
     if(!outputLength.empty())
         outputLength = outputLengthTemp;

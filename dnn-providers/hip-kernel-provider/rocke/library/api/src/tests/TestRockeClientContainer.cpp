@@ -5,6 +5,8 @@
 
 #include "RockeClientContainer.hpp"
 
+#include <array>
+
 #include <hipdnn_data_sdk/utilities/EngineNames.hpp>
 
 TEST(TestRockeClientContainer, CopyEngineIdsReportsTotalWithoutCopy)
@@ -20,11 +22,11 @@ TEST(TestRockeClientContainer, CopyEngineIdsReportsTotalWithoutCopy)
 
 TEST(TestRockeClientContainer, CopyEngineIdsCopiesRockeClientEngineId)
 {
-    int64_t engineIds[1] = {0};
+    std::array<int64_t, 1> engineIds = {0};
     uint32_t numEngines = 0;
 
     const auto totalEngines
-        = rocke_client::RockeClientContainer::copyEngineIds(engineIds, 1, numEngines);
+        = rocke_client::RockeClientContainer::copyEngineIds(engineIds.data(), 1, numEngines);
 
     EXPECT_EQ(totalEngines, 1u);
     EXPECT_EQ(numEngines, 1u);
