@@ -40,7 +40,7 @@ void launchKernel(hipFunction_t function, int64_t outerSize, void* argsPtr, size
                                                   static_cast<unsigned int>(outerSize),
                                                   1,
                                                   1,
-                                                  GpuFpReferenceRMSNorm::blockSize,
+                                                  GpuFpReferenceRMSNorm::BLOCK_SIZE,
                                                   1,
                                                   1,
                                                   0,
@@ -58,6 +58,7 @@ void launchKernel(hipFunction_t function, int64_t outerSize, void* argsPtr, size
 
 void GpuFpReferenceRMSNorm::launchFprop(const void* inputPtr,
                                         const std::vector<int64_t>& inputDims,
+                                        const std::vector<int64_t>& inputStrides,
                                         const void* scalePtr,
                                         const std::vector<int64_t>& scaleDims,
                                         void* outputPtr,
@@ -70,7 +71,7 @@ void GpuFpReferenceRMSNorm::launchFprop(const void* inputPtr,
     const auto& kernel = compiler.getOrCompile("GpuRefRMSNormFwd.cpp", defines, "RMSNormFwdRef");
 
     const auto& normalizeDim = getNormalizeDim(inputDims, scaleDims);
-    const auto& stride = getStride(inputDims, normalizeDim);
+    const auto& stride = getStride(inputDims, inputStrides, normalizeDim);
     const auto& outerSize = getOuterSize(inputDims, normalizeDim, stride);
     const auto& innerSize = getInnerSize(inputDims, normalizeDim);
 
