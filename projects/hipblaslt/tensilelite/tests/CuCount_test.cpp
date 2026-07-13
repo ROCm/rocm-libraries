@@ -532,6 +532,10 @@ TEST_P(StreamK5AutoOrigamiTest, ResolvesViaOrigamiAndHostPack)
     StreamK5AnalyticalEnv env;
     auto                  problem = makeGemmProblem(param.m, param.n, 64);
     problem.setParams().setStreamKTileSchedulingMode(2);
+    // A non-zero smCountTarget signals a cotenant sharing the device, which is
+    // required for the tiles-per-cu heuristic to engage (see the cotenant gate
+    // in origami::streamk::select_hybrid_mode).
+    problem.setParams().setSmCountTarget(128);
 
     EXPECT_EQ(env.solution.streamK5EffectiveDynamic(problem, env.device), param.expectDynamic)
         << "StreamK=5 AUTO " << param.suffix;
@@ -546,8 +550,8 @@ INSTANTIATE_TEST_SUITE_P(
     StreamK5HybridModeTest,
     StreamK5AutoOrigamiTest,
     ::testing::Values(
-        StreamK5AutoOrigamiParam{2560, 2560, false, "LowTilesPerCu"},
-        StreamK5AutoOrigamiParam{4096, 4096, true, "HighTilesPerCu"}),
+        StreamK5AutoOrigamiParam{2560, 2560, false, "BelowMinTilesGate"},
+        StreamK5AutoOrigamiParam{4096, 4096, true, "AboveMinTilesGate"}),
     [](::testing::TestParamInfo<StreamK5AutoOrigamiParam> const& info) {
         return info.param.suffix;
     });

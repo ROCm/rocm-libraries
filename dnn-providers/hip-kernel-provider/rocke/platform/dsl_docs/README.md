@@ -157,7 +157,7 @@ Conventional anchors:
 - COMGR: `python/rocke/runtime/comgr.py`.
 - HIP runtime: `python/rocke/runtime/hip_module.py`.
 - Launcher / workspace / timing: `python/rocke/runtime/launcher.py`.
-- Torch arg packing: `python/rocke/runtime/torch_module.py`.
+- Kernel arg packing: `python/rocke/runtime/packing.py`.
 - High-level compile: `python/rocke/helpers/compile.py`.
 - Manifest schema: `python/rocke/helpers/manifest.py`.
 - Optimization runbook: `gpu-op-optimization-runbook` Cursor skill.
