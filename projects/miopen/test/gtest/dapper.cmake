@@ -51,14 +51,14 @@ macro(dapper_init)
     # ctest test after the shard tests have written their XML output.
     add_custom_target(dapper_prebuild)
     add_dependencies(dapper_prebuild dapper_fixtures dapper_mapping)
-    add_dependencies(check dapper_prebuild)
+    add_dependencies(miopen-check dapper_prebuild)
 
     add_custom_target(
         diff_check
         COMMENT "Running filtered gtests..."
         COMMAND ${Python_EXECUTABLE} "${MIOPEN_GTEST_RUNNER}" "${MIOPEN_DAPPER_OUT_DIR}/bin/miopen_gtest" "${TESTS_JSON}"
         WORKING_DIRECTORY ${MIOPEN_DAPPER_OUT_DIR}
-        DEPENDS miopen_gtest tests
+        DEPENDS miopen_gtest miopen-tests
         VERBATIM
     )
 endmacro()
@@ -160,7 +160,7 @@ macro(dapper_add_sharded_test)
     add_custom_target(dapper_diff
         COMMAND ${Python_EXECUTABLE} ${MIOPEN_DAPPER_DIFF} "${TESTS_JSON}" "${MIOPEN_CATEGORY}" "${MIOPEN_GTEST_FILTER}"
         WORKING_DIRECTORY ${MIOPEN_DAPPER_OUT_DIR}
-        DEPENDS check test_immed_conv3d test_tensor_vec test_conv3d_find2
+        DEPENDS miopen-check test_immed_conv3d test_tensor_vec test_conv3d_find2
         VERBATIM
     )
 
