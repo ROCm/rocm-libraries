@@ -3,12 +3,10 @@
 # *quick* without *strided* is a proxy for smoke set until we use the smoke yaml.
 test_categories:
   quick:
-    description: "Smoke - not the same as rocblas_smoke.yaml TODO (timeout: 30 min)"
+    description: "Smoke - rocblas_smoke.yaml with optional gtest filter refinements (timeout: 30 min)"
+    test_yaml: rocblas_smoke.yaml
     test_patterns:
-      - "*quick*"
     exclude:
-      - "*strided*"
-      - "*known_bug*"
     labels:
       - "quick"
       - "smoke"
