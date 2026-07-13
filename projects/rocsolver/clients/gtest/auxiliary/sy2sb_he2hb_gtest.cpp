@@ -34,41 +34,44 @@ using ::testing::ValuesIn;
 using namespace std;
 
 template <typename I>
-using sy2sb_he2hb_tuple = std::tuple<vector<I>, vector<I>, printable_char>;
+using sy2sb_he2hb_tuple = std::tuple<vector<I>, vector<I>>;
 
-// each matrix_size_range is a {n, lda}
+// each matrix_size_range is a {n, lda, uplo}
+// if uplo = 0 then lower
+// if uplo = 1 then upper
+// if uplo = 2 then full
 
 // each blk_range is a {kd, nb}
-
-// each uplo_range is {uplo}
 
 // case when n = 0, kd = 0, uplo = L will also execute the bad arguments test
 // (null handle, null pointers and invalid values)
 
-const vector<printable_char> uplo_range = {'L', 'U', 'F'};
-
 // for checkin_lapack tests
 const vector<vector<int>> size_range = {
     // quick return
-    {0, 1},
+    {0, 1, 0},
     // invalid
-    {-1, 1},
-    {20, 5},
+    {-1, 1, 0},
+    {20, 5, 0},
     // normal (valid) samples
-    {10, 10},
-    {10, 15},
-    {20, 20}};
+    {10, 10, 0},
+    {10, 15, 0},
+    {20, 20, 0}, // lower
+    {20, 20, 1}, // upper
+    {20, 20, 2}}; // full
 
 const vector<vector<int64_t>> size_range_64 = {
     // quick return
-    {0, 1},
+    {0, 1, 0},
     // invalid
-    {-1, 1},
-    {20, 5},
+    {-1, 1, 0},
+    {20, 5, 0},
     // normal (valid) samples
-    {10, 10},
-    {10, 15},
-    {20, 20}};
+    {10, 10, 0},
+    {10, 15, 0},
+    {20, 20, 0}, // lower
+    {20, 20, 1}, // upper
+    {20, 20, 2}}; // full
 
 const vector<vector<int>> blk_range = {
     // invalid
@@ -97,10 +100,11 @@ const vector<vector<int64_t>> blk_range_64 = {
     {3, 9}};
 
 // for daily_lapack tests
-const vector<vector<int>> large_size_range = {{256, 256}, {640, 640}, {1024, 1024}, {2048, 2048}};
+const vector<vector<int>> large_size_range
+    = {{256, 256, 0}, {640, 640, 0}, {640, 640, 1}, {640, 640, 2}, {1024, 1024, 0}, {2048, 2048, 0}};
 
 const vector<vector<int64_t>> large_size_range_64
-    = {{256, 256}, {640, 640}, {1024, 1024}, {2048, 2048}};
+    = {{256, 256, 0}, {640, 640, 0}, {640, 640, 1}, {640, 640, 2}, {1024, 1024, 0}, {2048, 2048, 0}};
 
 const vector<vector<int>> large_blk_range = {{16, 32}, {16, 64}, {32, 64}, {32, 128}};
 
@@ -111,15 +115,20 @@ Arguments sy2sb_he2hb_setup_arguments(sy2sb_he2hb_tuple<I> tup)
 {
     vector<I> size = std::get<0>(tup);
     vector<I> blk = std::get<1>(tup);
-    char uplo = std::get<2>(tup);
 
     Arguments arg;
 
-    arg.set<char>("uplo", uplo);
     arg.set<I>("n", size[0]);
     arg.set<I>("lda", size[1]);
     arg.set<I>("kd", blk[0]);
     arg.set<I>("nb", blk[1]);
+
+    if(size[2] == 0)
+        arg.set<char>("uplo", 'L');
+    else if(size[2] == 1)
+        arg.set<char>("uplo", 'U');
+    else if(size[2] == 2)
+        arg.set<char>("uplo", 'F');
 
     arg.timing = 0;
 
@@ -200,21 +209,18 @@ TEST_P(SY2SB_HE2HB_64, __double_complex)
 INSTANTIATE_TEST_SUITE_P(daily_lapack,
                          SY2SB_HE2HB,
                          Combine(ValuesIn(large_size_range),
-                                 ValuesIn(large_blk_range),
-                                 ValuesIn(uplo_range)));
+                                 ValuesIn(large_blk_range)));
 
 INSTANTIATE_TEST_SUITE_P(checkin_lapack,
                          SY2SB_HE2HB,
-                         Combine(ValuesIn(size_range), ValuesIn(blk_range), ValuesIn(uplo_range)));
+                         Combine(ValuesIn(size_range), ValuesIn(blk_range)));
 
 INSTANTIATE_TEST_SUITE_P(daily_lapack,
                          SY2SB_HE2HB_64,
                          Combine(ValuesIn(large_size_range_64),
-                                 ValuesIn(large_blk_range_64),
-                                 ValuesIn(uplo_range)));
+                                 ValuesIn(large_blk_range_64)));
 
 INSTANTIATE_TEST_SUITE_P(checkin_lapack,
                          SY2SB_HE2HB_64,
                          Combine(ValuesIn(size_range_64),
-                                 ValuesIn(blk_range_64),
-                                 ValuesIn(uplo_range)));
+                                 ValuesIn(blk_range_64)));
