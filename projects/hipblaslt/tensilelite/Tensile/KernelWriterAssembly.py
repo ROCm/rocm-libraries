@@ -95,6 +95,42 @@ from Tensile.KernelWriter import KernelWriter, ABMatrixInfo
 from Tensile.SolutionStructs.Naming import getKernelFileBase
 from Tensile.Toolchain.Component import Assembler
 
+import rocisa.instruction as _rocisaInstr
+from rocisa.instruction import ReadWriteInstruction as _RWInstruction, \
+  SBarrierSignalIsFirst as _SBarrierSignalIsFirst, TensorLoadToLds as _TensorLoadToLds, \
+  VCmpInstruction as _VCmpInstruction, VCmpXInstruction as _VCmpXInstruction
+
+# PostLoopStoreInNll store-init weave (B1): type-based instruction classifiers,
+# replacing the fragile type(i).__name__.lower() substring matching in
+# _splitHoistableStoreInit. Using rocisa base classes / concrete types means a
+# codegen class rename fails LOUDLY here (ImportError / AttributeError at import)
+# instead of silently downgrading the weave to a monolithic store.
+#
+# Memory / counter fence: every real memory access shares the ReadWriteInstruction
+# base (load/store/buffer/ds/atomic), plus lgkmcnt/vmcnt waits (SWaitCnt), barriers,
+# and tensor-load-to-LDS. Hoisting STOPS at the first of these so no memory/counter
+# op is ever relocated into the LDS-synchronized NLL loop (byte-equivalent to the
+# old startswith('ds')/'waitcnt'/'barrier'/'load'/'store'/'buffer'/'atomic' scan for
+# every instruction that can actually appear in the store-init stream).
+_PLSIN_STOREINIT_MEM_INSTS = (
+  _RWInstruction, SWaitCnt, SBarrier, _SBarrierSignalIsFirst, _TensorLoadToLds,
+)
+# Scalar compares (s_cmp_*, s_bitcmp_*) have no shared rocisa base, so enumerate the
+# concrete classes by name; getattr() raises loudly if any is renamed/removed.
+_PLSIN_SCALAR_CMP_INSTS = tuple(getattr(_rocisaInstr, _n) for _n in (
+  "SCmpEQI32", "SCmpEQU32", "SCmpEQU64", "SCmpGeI32", "SCmpGeU32", "SCmpGtI32",
+  "SCmpGtU32", "SCmpKEQU32", "SCmpKGeU32", "SCmpKGtU32", "SCmpKLGU32", "SCmpLeI32",
+  "SCmpLeU32", "SCmpLgI32", "SCmpLgU32", "SCmpLgU64", "SCmpLtI32", "SCmpLtU32",
+  "SBitcmp1B32",
+))
+# Control-flow / SCC "brace": labels, branches, compares (scalar + vector) and
+# scalar cond-select. A contiguous run of these is dropped as one atomic 'block'
+# so a taken branch never jumps across an interleaved loop MFMA.
+_PLSIN_STOREINIT_BRACE_INSTS = (
+  Label, BranchInstruction, _VCmpInstruction, _VCmpXInstruction,
+  SCSelectB32, SCSelectB64,
+) + _PLSIN_SCALAR_CMP_INSTS
+
 def _cacheHintTensor(tc):
   return "D" if tc == "TD" else tc
 
@@ -13977,16 +14013,10 @@ class KernelWriterAssembly(KernelWriter):
     store), matching their original program order, so SrdD data dependencies
     (allocPostLoopSrd base -> computeStoreSrdStart offsets) stay valid.
     """
-    def _nm(i):
-      return type(i).__name__.lower()
     def _isMem(i):
-      nm = _nm(i)
-      return nm.startswith('ds') or any(s in nm for s in
-             ('waitcnt', 'barrier', 'load', 'store', 'buffer', 'atomic'))
+      return isinstance(i, _PLSIN_STOREINIT_MEM_INSTS)
     def _isBrace(i):
-      nm = _nm(i)
-      return isinstance(i, (Label, BranchInstruction)) or ('cmp' in nm) \
-             or ('cselect' in nm) or ('branch' in nm)
+      return isinstance(i, _PLSIN_STOREINIT_BRACE_INSTS)
     units = []
     i = 0
     n = len(flat)

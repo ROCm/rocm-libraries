@@ -39,6 +39,7 @@ from .ScheduleTypes import (
     LogicalSchedule,
     PartitionSchedule,
 )
+from rocisa.instruction import SAddCU32, SSubBU32, SCSelectB32, SCSelectB64
 
 from ...Common.GlobalParameters import globalParameters
 from ...Common import plsinDebugEnv
@@ -3788,8 +3789,6 @@ class LogicalScheduler:
         expected 2-MFMA-per-pair contiguous form, so correctness never depends on the
         weave.
         """
-        import re
-        accRe = re.compile(r'acc\[(\d+)\s*:')
         mfmaEms = []   # (EmittedModule, [all its mfma insts])
         allInsts = []
         for partition in emitted_3d:
@@ -3805,10 +3804,16 @@ class LogicalScheduler:
         pairOf = {}
         groupsAll = {}
         for inst in allInsts:
-            m = accRe.search(str(inst))
-            if not m:
-                return None  # unexpected: an MFMA without an acc dst -> bail safely (loop unchanged)
-            p = int(m.group(1)) // 8
+            # MFMA C[a,b] writes acc[4a+32b:+3]; store-pair p = accBase // 8. Read the
+            # base straight off the instruction's acc RegisterContainer instead of
+            # regex-scanning str(inst). Byte-equivalent to the old `acc\[(\d+):` scan:
+            # only a materialized MFMA acc (numeric regIdx, no symbolic RegName) yields
+            # a base; anything else -> bail to the monolithic store (loop unchanged),
+            # so correctness never depends on the weave.
+            acc = getattr(inst, 'acc', None)
+            if acc is None or acc.regName is not None:
+                return None
+            p = acc.regIdx // 8
             pairOf[id(inst)] = p
             groupsAll.setdefault(p, []).append(inst)
         # Expect exactly 2 MFMAs per pair (sba=0 tile + sba=1 tile).
@@ -3845,8 +3850,12 @@ class LogicalScheduler:
             return woven
 
         def _readsScc(inst):
-            nm = type(inst).__name__.lower()
-            return ('addc' in nm) or ('subb' in nm) or ('cselect' in nm)
+            # SCC-consuming scalar carry / cond-select ops (s_addc/s_subb/s_cselect):
+            # a gap must not end right before one so an add/addc carry chain is never
+            # split across MFMA gaps. Type-based instead of a class-name substring so a
+            # rename fails loudly. VALU carry (VAddCOU32/VAddCCOU32) reads VCC, not SCC,
+            # and never appears in the pure-SALU store-init units, so it is excluded.
+            return isinstance(inst, (SAddCU32, SSubBU32, SCSelectB32, SCSelectB64))
 
         def _emitUnit(uidx):
             """Emit units[uidx] (a 'block' drops contiguously; an 'alu' drops one, then
