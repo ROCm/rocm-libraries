@@ -132,13 +132,8 @@ jobs:
       - name: Prepare coverage profile directory
         if: ${{ inputs.coverage }}
         run: |
-          # Use $GITHUB_WORKSPACE (container path) so the dir matches what the
-          # report step reads. Instrumented binaries emit one profraw file per
-          # process/binary here (%p/%m); non-instrumented binaries ignore it.
           mkdir -p "${GITHUB_WORKSPACE}/coverage-profraw"
           echo "LLVM_PROFILE_FILE=${GITHUB_WORKSPACE}/coverage-profraw/${TEST_COMPONENT}-shard${{ matrix.shard }}-%p-%m.profraw" >> "${GITHUB_ENV}"
-          # Uppercase project name (e.g. HIPRAND) used to name the coverage-report
-          # artifact, matching the convention used elsewhere in the coverage flow.
           echo "COVERAGE_PROJECT_NAME=$(echo "${TEST_COMPONENT}" | tr '[:lower:]' '[:upper:]')" >> "${GITHUB_ENV}"
 
       - name: Test
@@ -162,13 +157,6 @@ jobs:
           python ./build_tools/memory_monitor.py --phase "Test ${{ fromJSON(inputs.component).job_name }}" -- \
             bash -c '${{ fromJSON(inputs.component).test_script }}' 2>&1 | tee ./test_logs/test_output.log
 
-      # Coverage report is generated on THIS test runner (tests + report on one
-      # node). The coverage-instrumented build is already installed under ./build,
-      # so the report is produced directly from it - no separate coverage-objects
-      # artifact. Gated on inputs.coverage, which (with no status function) also
-      # implies success() - so a failed test run does not publish a partial/
-      # misleading report (review: reboss). Requires the component to run as a
-      # single shard.
       - name: Merge profraw and generate coverage report
         if: ${{ inputs.coverage }}
         shell: bash
@@ -182,28 +170,18 @@ jobs:
           mkdir -p "${REPORT_DIR}"
           PROJECT="${TEST_COMPONENT}"
 
-          # The coverage build exports version-matched llvm tools into its dist
-          # (lib/llvm/bin), which the test node installed under ./build; run them
-          # from there. If they are absent from the fetched artifacts, warn and
-          # skip rather than fail (the fetch may need amd-llvm bin tools added -
-          # see reboss's FETCH_ARTIFACT_ARGS review thread).
           LLVM_BIN="${BUILD}/lib/llvm/bin"
           export LD_LIBRARY_PATH="${BUILD}/lib/llvm/lib:${BUILD}/lib:${LD_LIBRARY_PATH:-}"
           for t in llvm-profdata llvm-cov llvm-cxxfilt; do
             if [[ ! -x "${LLVM_BIN}/${t}" ]]; then
-              echo "::warning::${t} not found in fetched build (${LLVM_BIN}); skipping coverage report for ${COVERAGE_PROJECT_NAME:-$PROJECT} ${AMDGPU_FAMILIES}. The component fetch likely needs the amd-llvm bin tools (FETCH_ARTIFACT_ARGS)."
+              echo "::warning::${t} not found in fetched build (${LLVM_BIN}); skipping coverage report for ${COVERAGE_PROJECT_NAME:-$PROJECT} ${AMDGPU_FAMILIES}."
               exit 0
             fi
           done
 
-          # Instrumented shared library (from the fetched build) for llvm-cov
-          # -object, plus the profraw the Test step just produced on this node.
           mapfile -t OBJECTS < <(find "${BUILD}/lib" -maxdepth 1 -type f -name "lib${PROJECT}.so*" 2>/dev/null | sort)
           mapfile -t PROFRAW_FILES < <(find "${PROFRAW_DIR}" -type f -name '*.profraw' 2>/dev/null | sort)
 
-          # No coverage data (e.g. a GPU family whose test machines lack a matching
-          # GPU run only host-side tests) or no instrumented object found. Warn and
-          # skip (exit 0) rather than failing the coverage job.
           if [[ ${#PROFRAW_FILES[@]} -eq 0 || ${#OBJECTS[@]} -eq 0 ]]; then
             echo "::warning::No profraw (${#PROFRAW_FILES[@]}) or instrumented object (${#OBJECTS[@]}) for ${COVERAGE_PROJECT_NAME:-$PROJECT} ${AMDGPU_FAMILIES}; skipping coverage report."
             exit 0
@@ -212,9 +190,6 @@ jobs:
           OBJ_ARGS=()
           for o in "${OBJECTS[@]}"; do OBJ_ARGS+=(-object "${o}"); done
 
-          # ignore-filename-regex comes from this project's coverage config in the
-          # repo checkout (no metadata artifact needed). The value is a single
-          # line ("ignore_filename_regex: '<regex>'"); strip the key and quotes.
           IGNORE_RE=""
           CFG="$(find "${GITHUB_WORKSPACE}/rocm-libraries/projects/${PROJECT}" -name test_categories_coverage.yaml 2>/dev/null | head -1)"
           if [[ -n "${CFG}" ]]; then
@@ -228,13 +203,8 @@ jobs:
           IGNORE_ARGS=()
           if [[ -n "${IGNORE_RE}" ]]; then IGNORE_ARGS=("-ignore-filename-regex=${IGNORE_RE}"); fi
 
-          # The build embeds source paths under its workspace root; on the test
-          # runner rocm-libraries is checked out under ./rocm-libraries, so remap
-          # for llvm-cov show (HTML source annotation).
           PATHEQ="-path-equivalence=${GITHUB_WORKSPACE},${GITHUB_WORKSPACE}/rocm-libraries"
 
-          # Merge the per-binary profraw into one profile, then emit text, HTML and
-          # LCOV reports directly with the version-matched llvm tools.
           PROFDATA="${REPORT_DIR}/${PROJECT}.profdata"
           "${LLVM_BIN}/llvm-profdata" merge -sparse -o "${PROFDATA}" "${PROFRAW_FILES[@]}"
           "${LLVM_BIN}/llvm-cov" report "${OBJ_ARGS[@]}" -instr-profile="${PROFDATA}" ${IGNORE_ARGS[@]+"${IGNORE_ARGS[@]}"} \
@@ -244,10 +214,8 @@ jobs:
           "${LLVM_BIN}/llvm-cov" export "${OBJ_ARGS[@]}" -instr-profile="${PROFDATA}" ${IGNORE_ARGS[@]+"${IGNORE_ARGS[@]}"} \
             --format=lcov > "${REPORT_DIR}/coverage.info"
 
-          # Make lcov paths repo-relative so Codecov can map them to the source tree.
           sed -i "s|${GITHUB_WORKSPACE}/||g" "${REPORT_DIR}/coverage.info"
 
-          # Emit a short summary to the job summary and the step log.
           {
             echo "### ${COVERAGE_PROJECT_NAME:-$PROJECT} coverage (${AMDGPU_FAMILIES})"
             echo ""
@@ -257,8 +225,6 @@ jobs:
           } | tee -a "${GITHUB_STEP_SUMMARY}"
 
       - name: Upload coverage report
-        # Only upload when the report generated successfully; an always() here
-        # could publish a partial/empty report after a failure (review: reboss).
         if: ${{ inputs.coverage && success() }}
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:

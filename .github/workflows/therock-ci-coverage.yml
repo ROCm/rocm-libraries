@@ -22,16 +22,9 @@ on:
         type: string
       test_type:
         type: string
-      # TheRock revision for the BUILD stage. Pinned to a commit that exports
-      # llvm-cov / llvm-profdata in the dist (a feature branch not yet on main).
       therock_ref:
         type: string
         default: 6afcd5ac5298e9a5cdb3d2c45ae7605739ad2b94
-      # TheRock revision for the TEST stage. Uses a current commit (which has
-      # build_tools/github_actions/cleanup_processes.sh) so the shared test flow
-      # does not fail in its post-job cleanup. The build ref above lacks that
-      # script, and current TheRock lacks the llvm export, so the two stages use
-      # different refs until the export work lands on main.
       test_therock_ref:
         type: string
         default: 2d417fa49bc4e657bcbcf0ae549238784175f0fe
@@ -147,11 +140,6 @@ jobs:
             --build-dir TheRock/build-coverage \
             --upload
 
-  # Run the standard package test flow against the coverage-instrumented build.
-  # The coverage report is generated on the same test runner: the coverage steps
-  # in therock-test-component.yml use the instrumented build already installed
-  # under ./build, merge the profraw produced locally, and emit/upload the
-  # report. No separate report job is needed (tests + report run on one node).
   therock-coverage-test:
     name: Test Coverage (${{ inputs.project_name }} | ${{ inputs.amdgpu_families }})
     needs: [therock-coverage-build]
