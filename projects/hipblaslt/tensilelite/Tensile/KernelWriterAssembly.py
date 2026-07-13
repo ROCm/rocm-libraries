@@ -613,8 +613,16 @@ class KernelWriterAssembly(KernelWriter):
       try:
         self.setSgprToInUseState(s)
         protected.append(s)
-      except RuntimeError:
-        pass
+      except RuntimeError as e:
+        # Expected ONLY when a parked var's registers are currently borrowed
+        # (e.g. StreamK reuses SrdWS as a main-loop temp): they were never
+        # re-added to the pool's checkout tracking, so removeFromCheckOut reports
+        # "...never checked out" and this var is simply skipped. Any OTHER
+        # RuntimeError is a genuine SGPR-pool bug and must NOT be masked -- this
+        # runs for every kernel/arch, so a blanket `except: pass` would hide
+        # real pool corruption codebase-wide.
+        if "never checked out" not in str(e):
+          raise
     ret = RegSet("s", "sgpr"+name, self.defineSgprIdx(name, numSgprs, align))
     for s in protected:
       self.setSgprToFreeState(s)
