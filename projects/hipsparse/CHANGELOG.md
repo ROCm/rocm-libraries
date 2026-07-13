@@ -8,7 +8,6 @@ Documentation for hipSPARSE is available at
 
 ### Added
 * Added Blocked ELL format support to the `hipsparseDenseToSparse` routine, along with the new `hipsparseBlockedEllSetPointers` function.
-* Added `hipsparseBlockedEllSetPointers`.
 
 ## hipSPARSE 4.6.0 for ROCm 7.14
 
