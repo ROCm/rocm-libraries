@@ -111,9 +111,13 @@ execution_settings:
   # them serially; pytest-xdist worker isolation (HIP_VISIBLE_DEVICES) is set up
   # in conftest.py, so this can be raised once parallel GPU runs are validated.
   parallel_workers: 1
+  # Per-test timeout in seconds (passed to pytest-timeout as --timeout); a single
+  # test exceeding this is killed. This is NOT a total job budget — the overall
+  # job wall-clock limit is set by timeout_minutes in TheRock's
+  # fetch_test_configurations.py.
   category_timeouts:
     quick: 300            # 5 minutes
     standard: 2700        # 45 minutes
     comprehensive: 25200  # 7 hours
     full: 28800           # 8 hours
-    ffm-quick: 2400       # 40 minutes (gfx1250 common GEMM tests + build/setup)
+    ffm-quick: 300        # 5 minutes
