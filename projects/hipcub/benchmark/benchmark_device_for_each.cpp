@@ -65,12 +65,12 @@ class for_each_benchmark : public primbench::benchmark_interface
             hipMemcpy(d_input, values_input.data(), items * sizeof(T), hipMemcpyHostToDevice));
 
         unsigned int* d_count;
-        HIP_CHECK(hipMalloc(&d_count, sizeof(T)));
-        HIP_CHECK(hipMemset(d_count, 0, sizeof(T)));
+        HIP_CHECK(hipMalloc(&d_count, sizeof(*d_count)));
+        HIP_CHECK(hipMemset(d_count, 0, sizeof(*d_count)));
         op_t<T> device_op{d_count};
 
         state.set_items(items);
-        state.add_writes<T>(items);
+        state.add_reads<T>(items);
 
         state.run(
             [&] {
