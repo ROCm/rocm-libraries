@@ -308,7 +308,7 @@ using _THRUST_STD::not_fn;
 template <class _Fn>
 THRUST_DEPRECATED_BECAUSE("Use hip::std::not_fn instead")
 [[nodiscard]]
-_LIBCUDACXX_HIDE_FROM_ABI constexpr auto not_fn(_Fn&& __f)
+_CCCL_API constexpr auto not_fn(_Fn&& __f)
 {
   return _THRUST_STD::not_fn(_THRUST_STD::forward<_Fn>(__f));
 }
