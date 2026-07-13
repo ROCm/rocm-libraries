@@ -36,7 +36,7 @@ Environment:
 Examples:
   ck-shell                           # Open interactive shell
   ck-shell my_container              # Open shell in specific container
-  ck-shell -c "rocm-smi"             # Execute single command
+  ck-shell -c "amd-smi monitor"      # Execute single command
   ck-shell -c "cd build && ls bin"   # Execute command in build directory
 
 EOF

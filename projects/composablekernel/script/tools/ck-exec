@@ -36,14 +36,14 @@ Environment:
   CK_CONTAINER_NAME - Override default container name
 
 Examples:
-  ck-exec rocm-smi                      # Run rocm-smi
+  ck-exec amd-smi monitor              # Run amd-smi
   ck-exec rocminfo                      # Run rocminfo
   ck-exec ls -la build/bin              # List build binaries
   ck-exec -w /workspace/build ninja -t commands # Run ninja commands
   ck-exec --interactive python3         # Interactive Python session
 
 Common Commands:
-  ck-exec rocm-smi                      # Check GPU status
+  ck-exec amd-smi monitor              # Check GPU status
   ck-exec rocminfo \| grep gfx           # Check GPU architecture
   ck-exec hipcc --version               # Check HIP compiler version
   ck-exec cmake --version               # Check CMake version

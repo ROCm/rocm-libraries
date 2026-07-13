@@ -100,4 +100,4 @@ docker exec "${CONTAINER_NAME}" bash -c "echo 'Working directory:' && pwd"
 # Show GPU info
 echo ""
 echo "GPU Information:"
-docker exec "${CONTAINER_NAME}" bash -c "rocm-smi --showproductname 2>/dev/null | head -5 || echo 'No GPU detected'"
+docker exec "${CONTAINER_NAME}" bash -c "amd-smi static --asic 2>/dev/null | grep -i market_name | head -5 || rocm-smi --showproductname 2>/dev/null | head -5 || echo 'No GPU detected'"

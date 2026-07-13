@@ -108,7 +108,7 @@ Phase 3 fans the `(kernel × problem)` work out across **every visible GPU** in
 parallel. One worker thread per device pulls batches from a shared queue and
 spawns a disposable subprocess pinned with `HIP_VISIBLE_DEVICES`, so an N-GPU box
 benchmarks roughly N× faster while keeping per-batch fault isolation. Devices are
-auto-detected (`HIP_VISIBLE_DEVICES`, then `rocm-smi`/`amd-smi`); override with
+auto-detected (`HIP_VISIBLE_DEVICES`, then `amd-smi`/`rocm-smi`); override with
 `--devices`. This supersedes the serial-GPU design inherited from grouped_conv.
 
 ### Supported surface

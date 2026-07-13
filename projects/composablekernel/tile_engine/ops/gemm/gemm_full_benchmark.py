@@ -91,20 +91,23 @@ def detect_devices():
         ids = [d.strip() for d in env.split(",") if d.strip() != ""]
         if ids:
             return ids
-    try:
-        out = subprocess.check_output(
-            ["rocm-smi", "--showid"], stderr=subprocess.DEVNULL, text=True
-        )
-        ids = sorted(set(re.findall(r"GPU\[(\d+)\]", out)), key=int)
-        if ids:
-            return ids
-    except Exception:
-        pass
+    # Prefer amd-smi (rocm-smi is deprecated as of ROCm 7.0); fall back to
+    # rocm-smi on older systems. amd-smi prints "GPU: 0" whereas rocm-smi
+    # prints "GPU[0]", so the two branches parse different formats.
     try:
         out = subprocess.check_output(
             ["amd-smi", "list"], stderr=subprocess.DEVNULL, text=True
         )
         ids = re.findall(r"^GPU:\s*(\d+)", out, re.MULTILINE)
+        if ids:
+            return sorted(set(ids), key=int)
+    except Exception:
+        pass
+    try:
+        out = subprocess.check_output(
+            ["rocm-smi", "--showid"], stderr=subprocess.DEVNULL, text=True
+        )
+        ids = sorted(set(re.findall(r"GPU\[(\d+)\]", out)), key=int)
         if ids:
             return ids
     except Exception:

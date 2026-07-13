@@ -114,8 +114,23 @@ done
 
 # Setup GPU array if GPUs are requested
 if [ $NUM_GPUS -gt 0 ]; then
-    # Auto-detect available GPUs
-    AVAILABLE_GPUS_COUNT=$(rocm-smi --showid 2>/dev/null | grep -oP 'GPU\[\K[0-9]+' | wc -l)
+    # Auto-detect available GPUs. Prefer amd-smi (rocm-smi is deprecated as of
+    # ROCm 7.0); fall back to rocm-smi on older systems. amd-smi prints
+    # "GPU: 0" rather than rocm-smi's "GPU[0]", so parse its JSON/CSV instead
+    # of porting the old bracket regex.
+    if command -v amd-smi &>/dev/null; then
+        if command -v jq &>/dev/null; then
+            AVAILABLE_GPUS_COUNT=$(amd-smi list --json 2>/dev/null | jq 'length')
+        else
+            AVAILABLE_GPUS_COUNT=$(amd-smi list --csv 2>/dev/null | tail -n +2 | grep -c .)
+        fi
+    elif command -v rocm-smi &>/dev/null; then
+        AVAILABLE_GPUS_COUNT=$(rocm-smi --showid 2>/dev/null | grep -oP 'GPU\[\K[0-9]+' | sort -u | wc -l)
+    else
+        AVAILABLE_GPUS_COUNT=0
+    fi
+    # Guard against empty/non-numeric result from any of the branches above.
+    [[ "$AVAILABLE_GPUS_COUNT" =~ ^[0-9]+$ ]] || AVAILABLE_GPUS_COUNT=0
     if [ "$AVAILABLE_GPUS_COUNT" -gt 0 ]; then
         MAX_AVAILABLE=$AVAILABLE_GPUS_COUNT
     else
@@ -174,9 +189,13 @@ if [ ! -f "$OUTPUT_DIR/model_configs_2d.csv" ] || [ ! -f "$OUTPUT_DIR/model_conf
 fi
 
 
+# Resolve an SMI tool: prefer amd-smi (rocm-smi is deprecated as of ROCm 7.0),
+# fall back to rocm-smi on older systems.
+SMI_CMD=$(command -v amd-smi || command -v rocm-smi || true)
+
 # Check if running on GPU
-if ! command -v rocm-smi &> /dev/null; then
-    echo "ERROR: ROCm not detected. Cannot generate MIOpen commands without GPU."
+if [ -z "$SMI_CMD" ]; then
+    echo "ERROR: ROCm not detected (no amd-smi or rocm-smi). Cannot generate MIOpen commands without GPU."
     echo "This script requires an AMD GPU with ROCm installed."
     echo "Creating empty CSV files as placeholder..."
     echo "# 2D Convolution Test Cases (No GPU available)" > conv_test_set_2d_dataset.csv
@@ -184,17 +203,27 @@ if ! command -v rocm-smi &> /dev/null; then
     exit 1
 fi
 
-# Check if GPU is actually accessible
-if ! rocm-smi &> /dev/null; then
-    echo "ERROR: rocm-smi failed. GPU may not be accessible."
+# Check if GPU is actually accessible. amd-smi uses the "list" subcommand;
+# rocm-smi works with no arguments.
+if [[ "$SMI_CMD" == *amd-smi ]]; then
+    SMI_PROBE=("$SMI_CMD" list)
+else
+    SMI_PROBE=("$SMI_CMD")
+fi
+if ! "${SMI_PROBE[@]}" &> /dev/null; then
+    echo "ERROR: $SMI_CMD failed. GPU may not be accessible."
     echo "Creating empty CSV files as placeholder..."
     echo "# 2D Convolution Test Cases (GPU not accessible)" > conv_test_set_2d_dataset.csv
     echo "# 3D Convolution Test Cases (GPU not accessible)" > conv_test_set_3d_dataset.csv
     exit 1
 fi
 
-echo "GPU detected. ROCm version:"
-rocm-smi --showdriverversion || true
+echo "GPU detected. Driver version:"
+if [[ "$SMI_CMD" == *amd-smi ]]; then
+    "$SMI_CMD" static --driver || true
+else
+    "$SMI_CMD" --showdriverversion || true
+fi
 
 
 echo ""

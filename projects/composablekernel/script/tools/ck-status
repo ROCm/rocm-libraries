@@ -115,7 +115,7 @@ Mounts: {{range .Mounts}}
     echo ""
     echo "GPU Information:"
     echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
-    docker exec "${CONTAINER_NAME}" bash -c "rocm-smi --showproductname 2>/dev/null | head -10 || echo 'No GPU detected'"
+    docker exec "${CONTAINER_NAME}" bash -c "amd-smi static --asic 2>/dev/null | grep -i market_name | head -10 || rocm-smi --showproductname 2>/dev/null | head -10 || echo 'No GPU detected'"
 
     if [ "$verbose" = true ]; then
         echo ""
