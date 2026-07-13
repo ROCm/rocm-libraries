@@ -2090,46 +2090,6 @@ def _tiled_spec_from_problem(
     )
 
     _spec = _impl(problem)
-    # D256 gfx950 bf16 prefill fast route. The default builder routes
-    # head_size==256 to the 16x16 register_pv body (~0.24x torch.compile). The
-    # 32x32 transposed constellation is LEGAL for D256 (use_mfma_32x32 needs only
-    # head_size%16==0) and ~4.5-5.9x faster; the FA3-style softmax<->MFMA
-    # interleave (mode2 g4) adds a further +9-10% by hiding the exposed v_exp
-    # behind the QK/PV MFMA at the kernel's low (4 waves/CU) occupancy. Geometry
-    # (num_warps / tile_size / block_m_per_warp) is set by the gated selectors
-    # above so the cache key + launch meta agree; here we set the codegen flags.
-    # The cohort is uniquely keyed by head_size==256, so the (unkeyed) interleave
-    # + codegen overrides cannot collide with any other shape. _resolve_lds_budget
-    # no-ops here (register_pv=False, fits the 160 KB cap at 64 KB).
-    if _d256_gfx950_fast(problem):
-        _spec = replace(
-            _spec,
-            use_mfma_32x32=True,
-            use_transposed_qk_32x32=True,
-            use_q_direct_reg=True,
-            use_transposed_half_local_pv=True,
-            use_transposed_scalar_state=True,
-            use_transposed_mask_once=True,
-            use_transposed_mask_limit=True,
-            use_mask_phase_split=True,
-            use_register_pv=False,
-            use_k_single_buffer=True,
-            use_v_double_buffer=False,
-            use_early_v_schedule=False,
-            use_sched_barrier=False,
-            use_softmax_mfma_interleave=True,
-            softmax_interleave_mode=2,
-            softmax_interleave_groups=4,
-            use_fast_paged_kv_desc=False,
-            use_mfma32_skip_legacy_qreg=False,
-            # Slab-granularity K_lds pad (16 halves): breaks the row-aliased
-            # bank conflict on the QK K read (SQ_LDS_BANK_CONFLICT rate 897->660)
-            # for a measured ~25% latency win at Sq8192. Occupancy-neutral (LDS
-            # 65 KB <= 80 KB budget keeps 2 WG/CU; VGPR unchanged). DMA-safe:
-            # padding is between the 2-row async-DMA slabs, write+read consistent.
-            use_kq_lds_pad=True,
-            kq_lds_pad_halves=16,
-        )
     return _resolve_lds_budget(_spec)
 
 
