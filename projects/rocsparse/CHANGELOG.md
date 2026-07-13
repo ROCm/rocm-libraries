@@ -14,6 +14,9 @@ Documentation for rocSPARSE is available at
 ### Removed
 * The deprecated `rocsparse_indextype_u16` enum.
 
+### Added
+* Added CSC format support to `rocsparse_spsv` and `rocsparse_sptrsv`.
+
 ## rocSPARSE 4.7.0 for ROCm 7.14
 
 ### Added
