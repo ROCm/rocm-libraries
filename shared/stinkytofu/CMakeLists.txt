@@ -347,6 +347,15 @@ install(FILES
 )
 
 # --------------------------------------------------------------------------- #
+# Documentation (Doxygen + Sphinx, published to Read the Docs)
+# --------------------------------------------------------------------------- #
+if(ROCmCMakeBuildTools_FOUND)
+    add_subdirectory(docs)
+else()
+    message(STATUS "ROCmCMakeBuildTools not found — skipping docs target.")
+endif()
+
+# --------------------------------------------------------------------------- #
 # clang-tidy
 # --------------------------------------------------------------------------- #
 option(ENABLE_CLANG_TIDY "Enable clang-tidy targets" OFF)
