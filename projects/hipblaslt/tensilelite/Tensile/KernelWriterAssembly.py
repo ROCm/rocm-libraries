@@ -17965,17 +17965,19 @@ class KernelWriterAssembly(KernelWriter):
     if not self.isPrefetchAcrossPersistentEnabled(kernel):
       return module
 
+    skComponent = Component.StreamK.find(self)
     skipLabel = Label(self.labels.getNameInc("SK_SkipNllPAP"), "")
     # Parallel reduction (no synchronizer): WGs do not advance across tiles
     module.add(SCmpEQU64(src0=sgpr("AddressFlags", 2), src1=hex(0), comment="Parallel reduction: skip PAP"))
     module.add(SCBranchSCC1(labelName=skipLabel.getLabelName(), comment=""))
-    module.add(SCmpGeU32(src0=sgpr("StreamKIter"), src1=sgpr("StreamKIterEnd"), comment="No next persistent iteration"))
-    module.add(SCBranchSCC1(labelName=skipLabel.getLabelName(), comment=""))
+    # Variant-specific "is there a next persistent iteration?" predicate. SK3
+    # (and the SK3/static path of SK5) compares StreamKIter/StreamKIterEnd; SK4
+    # (StreamKDynamic) overrides against its dynamic work-queue state.
+    module.add(skComponent.papHasNextPersistentIteration(self, kernel, skipLabel))
 
     if not skipBarrier:
       module.add(SBarrier(comment="PAP: sync before next-tile prefetch"))
 
-    skComponent = Component.StreamK.find(self)
     with self.allocPapTileIdentitySgprs(kernel) as prevTile:
       module.add(self.papCheckpointCurrentTileIdentity(kernel, prevTile))
       module.add(skComponent.prefetchAcrossPersistentSetupNextTile(self, kernel, tensorParametersA, tensorParametersB, skipLroReset=True))

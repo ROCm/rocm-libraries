@@ -9397,6 +9397,9 @@ class KernelWriter(metaclass=abc.ABCMeta):
         "StreamKLocalStart",
         "StreamKLocalEnd",
       ]
+      if kernel.get("PrefetchAcrossPersistent"):
+        requiredUnalignedSgprVar.append("SkPrefetchPrimed")
+        self.states.numSgprStreamK += 1
       if kernel["StreamKAtomic"] == 0:
         requiredAligned4SgprVar.append("SrdWS")
     elif kernel["StreamK"] == 5:

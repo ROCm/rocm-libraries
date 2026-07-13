@@ -26,7 +26,7 @@ from rocisa.container import vgpr, sgpr, mgpr, SMEMModifiers, MUBUFModifiers, GL
     VOP3PModifiers, ContinuousRegister, DSModifiers
 from rocisa.instruction import GlobalInv, GlobalWb, SAddCU32, SAddU32, SAndB32, SBarrier, \
     SBranch, SCBranchSCC0, SCBranchSCC1, SCMovB32, SCSelectB32, SCmpEQU32, SCmpEQU64, \
-    SCmpGtU32, SCmpLeU32, SCmpLtU32, SLShiftLeftB32, SLShiftLeftB64, SLShiftRightB32, VLShiftLeftB32, SLoadB32, \
+    SCmpGeU32, SCmpGtU32, SCmpLeU32, SCmpLtU32, SLShiftLeftB32, SLShiftLeftB64, SLShiftRightB32, VLShiftLeftB32, SLoadB32, \
     SMaxI32, SMinU32, SMovB32, SMovB64, SMulI32, SNop, SOrB32, SSleep, SStoreB32, SSubU32, \
     SWaitCnt, SWaitXCnt, VAddF32, VAddF64, VAddPKF16, VAddU32, VSubU32, VLShiftRightB32, VMovB32, \
     VReadfirstlaneB32, VCmpXEqU32, VCvtBF16toFP32, GlobalAtomicIncU32Saddr, BufferLoadB32, BufferStoreB32, \
@@ -414,6 +414,27 @@ class StreamK(Component):
             module.add(SpaceFillingCurveWalk(writer, kernel, "WGM"))
         else:
             module.add(DefaultWGM(writer, kernel, "WGM"))
+        return module
+
+    def papHasNextPersistentIteration(self, writer, kernel, skipLabel):
+        """Emit the PAP "skip if there is no next persistent iteration" predicate.
+
+        This is the variant-specific back-edge test that decides whether the
+        PAP next-tile prefetch may run at all. The default (static StreamK:
+        StreamK==3 TwoTileDPFirst, and the SK3/static path of StreamK==5) tests
+        the deterministically-advanced ``StreamKIter`` against ``StreamKIterEnd``
+        — identical to the historical inline compare in
+        ``prefetchAcrossPersistent`` — so the persistent loop's own back-edge
+        (``PersistentLoop.closePersistentLoop``) and the PAP skip agree on when
+        the current tile is the last one.
+
+        Variants whose next tile comes from a stateful source (e.g. StreamK==4
+        StreamKDynamic's per-XCD work-queue pop) override this because they
+        cannot cheaply predict the next iteration without consuming queue state.
+        """
+        module = Module("papHasNextPersistentIteration")
+        module.add(SCmpGeU32(src0=sgpr("StreamKIter"), src1=sgpr("StreamKIterEnd"), comment="No next persistent iteration"))
+        module.add(SCBranchSCC1(labelName=skipLabel.getLabelName(), comment=""))
         return module
 
     def computeTotalTiles(self, writer, kernel, dstSgpr):

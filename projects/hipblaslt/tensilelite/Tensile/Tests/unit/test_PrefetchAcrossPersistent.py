@@ -336,6 +336,9 @@ class _ClassicPapWrapperWriter:
 
 
 class _StubStreamK:
+    def papHasNextPersistentIteration(self, writer, kernel, skipLabel):
+        return _module_with_comment("papHasNextPersistentIteration", "unit: has next persistent iteration")
+
     def prefetchAcrossPersistentSetupNextTile(self, writer, kernel, tpa, tpb, skipLroReset=False):
         return _module_with_comment("prefetchAcrossPersistentSetupNextTile", "unit: setup next tile")
 
@@ -918,3 +921,21 @@ def test_streamk_pap_next_tile_setup_applies_wgm_remap(
     assert tile_index < index_to_wg
     assert index_to_wg < wgm_remap
     assert writer.states.WGMTransformLevels == expected_transform_levels
+
+
+def test_streamk3_pap_has_next_persistent_iteration_uses_streamkiter_compare():
+    # The PAP "is there a next persistent iteration?" predicate is now a
+    # StreamK-component seam. The static StreamK variants (SK3 TwoTileDPFirst,
+    # and the SK3/static path of SK5) keep the historical
+    # StreamKIter >= StreamKIterEnd compare + skip branch, byte-for-byte, so
+    # relaxing the seam for SK4 (StreamKDynamic) does not perturb SK3 codegen.
+    from rocisa.code import Label
+
+    skip_label = Label("SK_SkipNllPAP_unit", "")
+    module = StreamKTwoTileDPFirst().papHasNextPersistentIteration(
+        writer=None, kernel={}, skipLabel=skip_label
+    )
+    rendered = str(module)
+    assert "s_cmp_ge_u32 s[sgprStreamKIter], s[sgprStreamKIterEnd]" in rendered
+    assert "No next persistent iteration" in rendered
+    assert "s_cbranch_scc1 label_SK_SkipNllPAP_unit" in rendered
