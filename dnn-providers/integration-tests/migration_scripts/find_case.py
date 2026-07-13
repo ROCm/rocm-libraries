@@ -14,14 +14,17 @@ Examples::
     # Find fp16 nhwc cases
     python3 find_case.py --dtype fp16 --layout nhwc
 
-    # Find cases where epsilon range is [-1,1]
-    python3 find_case.py --range epsilon:[-1,1]
+    # Find cases that have an epsilon input (any range)
+    python3 find_case.py --input epsilon
+
+    # Find cases where epsilon is in [-1,1]
+    python3 find_case.py --input epsilon:-1,1
 
     # Find by shape
     python3 find_case.py --shape 1x16x3x3
 
     # Combine filters
-    python3 find_case.py --op Batchnorm --dtype bfp16 --range scale:[-2,2]
+    python3 find_case.py --op Batchnorm --dtype bfp16 --input scale:-2,2
 
     # Show full detail for a specific case (by id or substring)
     python3 find_case.py --id f446b9
@@ -174,18 +177,21 @@ def _rep_tensor(tensors):
     return best
 
 
-def _parse_range_filter(s):
-    m = re.match(r"^(\w+):\[([^,]+),([^\]]+)\]$", s)
-    if not m:
-        print(
-            f"  Invalid range filter: {s!r}  (expected role:[lo,hi])", file=sys.stderr
+def _parse_input_filter(s):
+    m = re.match(r"^(\w+):\[?([^,\[\]]+),([^,\[\]]+)\]?$", s)
+    if m:
+        return (
+            m.group(1),
+            float(m.group(2).replace("p", ".")),
+            float(m.group(3).replace("p", ".")),
         )
-        sys.exit(1)
-    return (
-        m.group(1),
-        float(m.group(2).replace("p", ".")),
-        float(m.group(3).replace("p", ".")),
+    if re.match(r"^\w+$", s):
+        return (s, None, None)
+    print(
+        f"  Invalid input filter: {s!r}  (expected: role  or  role:lo,hi)",
+        file=sys.stderr,
     )
+    sys.exit(1)
 
 
 def _matches(case, args):
@@ -203,12 +209,12 @@ def _matches(case, args):
         return False
     if args.id and args.id not in case["id"]:
         return False
-    if args.range:
-        for rf in args.range:
-            role, lo, hi = _parse_range_filter(rf)
-            spec = case["inputs"].get(role)
-            if not spec or not isinstance(spec, dict):
-                return False
+    for rf in args.input or []:
+        role, lo, hi = _parse_input_filter(rf)
+        spec = case["inputs"].get(role)
+        if not spec:
+            return False
+        if lo is not None and isinstance(spec, dict):
             if abs(spec.get("lo", 0) - lo) > 1e-9 or abs(spec.get("hi", 0) - hi) > 1e-9:
                 return False
     return True
@@ -272,7 +278,9 @@ def main() -> int:
     ap.add_argument("--shape", help="filter by shape (e.g. 1x16x3x3)")
     ap.add_argument("--tier", help="filter by tier (quick, full, standard)")
     ap.add_argument(
-        "--range", action="append", help="filter by input range, e.g. epsilon:[-1,1]"
+        "--input",
+        action="append",
+        help="filter by input role, e.g. --input epsilon  or  --input epsilon:-1,1",
     )
     ap.add_argument("--id", help="filter by case id (substring match)")
     ap.add_argument(
@@ -283,10 +291,10 @@ def main() -> int:
     all_cases = _load_all_cases(args.bundle_dir)
 
     if not any(
-        [args.op, args.dtype, args.layout, args.shape, args.tier, args.range, args.id]
+        [args.op, args.dtype, args.layout, args.shape, args.tier, args.input, args.id]
     ):
         print(f"  {len(all_cases)} total cases in {args.bundle_dir}")
-        print(f"  Use --op, --dtype, --layout, --shape, --range, --id to filter.")
+        print(f"  Use --op, --dtype, --layout, --shape, --input, --id to filter.")
         return 0
 
     matches = [c for c in all_cases if _matches(c, args)]

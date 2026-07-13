@@ -139,14 +139,17 @@ python3 migration_scripts/find_case.py --op Batchnorm
 # Find fp16 nhwc cases
 python3 migration_scripts/find_case.py --dtype fp16 --layout nhwc
 
-# Find cases where epsilon range is [-1,1]
-python3 migration_scripts/find_case.py --range epsilon:[-1,1]
+# Find cases that have an epsilon input (any range)
+python3 migration_scripts/find_case.py --input epsilon
+
+# Find cases where epsilon is in [-1,1]
+python3 migration_scripts/find_case.py --input epsilon:-1,1
 
 # Find by shape
 python3 migration_scripts/find_case.py --shape 1x16x3x3
 
 # Combine filters
-python3 migration_scripts/find_case.py --op Batchnorm --dtype bfp16 --range scale:[-2,2]
+python3 migration_scripts/find_case.py --op Batchnorm --dtype bfp16 --input scale:-2,2
 
 # Full detail for a case (includes the exact --gtest_filter command)
 python3 migration_scripts/find_case.py --id f446b9 --detail
