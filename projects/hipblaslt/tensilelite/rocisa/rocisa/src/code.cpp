@@ -156,6 +156,8 @@ void init_code(nb::module_ m)
 
     nb::class_<rocisa::Module, rocisa::Item>(m_code, "Module")
         .def(nb::init<const std::string&>(), nb::arg("name") = "")
+        .def_rw("isCallable", &rocisa::Module::isCallable)
+        .def_rw("callableName", &rocisa::Module::callableName)
         .def("setParent", &rocisa::Module::setParent)
         .def("setNoOpt", &rocisa::Module::setNoOpt)
         .def("isNoOpt", &rocisa::Module::isNoOpt)

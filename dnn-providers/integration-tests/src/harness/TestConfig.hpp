@@ -124,6 +124,7 @@ struct TestConfigOptions
     bool allowBundles = false;
     std::optional<std::filesystem::path> goldenDataDir;
     std::optional<VerificationMode> verificationMode;
+    std::optional<std::filesystem::path> captureDir;
 };
 
 // Singleton class for storing CLI-based test configuration.
@@ -203,6 +204,7 @@ public:
 
         instance._goldenDataDir = resolveGoldenDataDir(std::move(opts.goldenDataDir));
         instance._verificationMode = resolveVerificationMode(opts.verificationMode);
+        instance._captureDir = std::move(opts.captureDir);
 
         // Detect device 0's gfx arch and VRAM once at startup. Used by
         // [[test_skips]] and golden-ref metadata guards (arch/VRAM checks).
@@ -375,6 +377,23 @@ public:
         return _verificationMode.value_or(VerificationMode::AUTO);
     }
 
+    bool hasCaptureDir() const
+    {
+        throwIfNotInitialized();
+        return _captureDir.has_value();
+    }
+
+    const std::filesystem::path& getCaptureDir() const
+    {
+        throwIfNotInitialized();
+        if(!_captureDir.has_value())
+        {
+            throw std::runtime_error(
+                "getCaptureDir() called but --capture-bundles was not provided");
+        }
+        return _captureDir.value();
+    }
+
 private:
     TestConfig() = default;
 
@@ -392,6 +411,7 @@ private:
     std::optional<ReferenceExecutorType> _referenceExecutorType;
     std::optional<std::filesystem::path> _goldenDataDir;
     std::optional<VerificationMode> _verificationMode;
+    std::optional<std::filesystem::path> _captureDir;
     std::string _currentArch;
     std::size_t _currentDeviceVramMb = 0;
     std::string _currentPlatform;
