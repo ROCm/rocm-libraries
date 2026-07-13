@@ -385,53 +385,30 @@ class StreamK(Component):
     # ------------------------------------------------------------------
     # Single-hop next-neighbor work stealing (codegen-time, off by default)
     #
-    # Topology: the dynamic-queue fetch (auto-mode SK4 / SK5-dynamic) uses 8
-    # hardcoded queues in a wraparound next-neighbor order. queueIdx = StreamKIdx
-    # & 0x7; per-queue counters live one per cache line at AddressFlags +
-    # (queueIdx << 8); the global tile index is (perQueueRaw << 3) + queueIdx.
+    # Queues are one per XCD: numQueues = writer.states.archCaps["NumXCD"], a
+    # power of two so the mapping can use shift/AND fast masking:
+    #   queueIdx     = StreamKIdx & (numQueues - 1)
+    #   counter addr = AddressFlags + (queueIdx << _WS_CACHE_LINE_LOG2)
+    #   global index = (perQueueRaw << log2(numQueues)) + queueIdx
     #
-    # Every queue q steals from its immediate next neighbor s = (q+1) & 0x7 once
-    # its own home queue drains (there is no remainder/structural-extra guard: an
-    # empty home fetch always attempts one steal from that single next neighbor).
-    # A per-WG STICKY-HOME flag (StreamKStickyEmpty) makes each WG touch its home
-    # counter for its valid dispenses plus EXACTLY ONE empty fetch, then only
-    # steal thereafter. Because the extra atomics against a queue are now a static
-    # function of the next-neighbor topology (each queue is stolen from by exactly
-    # one predecessor p = (q-1) & 0x7), every counter self-resets to 0 via a per-queue auto-reset
-    # bound that folds in the predecessor's workgroup count. No explicit
-    # end-of-kernel reset is needed: the Synchronizer, host-zeroed once at handle
-    # creation, is left zeroed for the next (back-to-back) launch by the bounds
-    # alone.
+    # A queue whose home fetch comes up empty makes a single-hop next-neighbor
+    # steal from s = (q + 1) & (numQueues - 1). Each queue is stolen from by
+    # exactly one predecessor p = (q - 1) & (numQueues - 1), so its atomic_inc
+    # auto-reset bound is a static predecessor-inclusive value that self-zeroes
+    # the counter each launch -- no explicit end-of-kernel reset is needed.
     #
-    # AddressFlags buffer layout (per problem), for reference:
-    #   [0x000 .. 0x800)  8 queue counters, one per 256B cache line
-    #                     (only the first word of each line is used).
-    #   [0x800 .. )       partials/fixup ready flags (one word per partial tile,
-    #                     see storeBranches: offset = (partialIdx << 2) + 256*8).
-    # Per-architecture work-stealing / dynamic-queue count.
+    # AddressFlags buffer layout (per problem):
+    #   [0, numQueues*256)     per-queue counters, one per 256B cache line
+    #   [numQueues*256, ...)   partials/fixup ready flags (one word per tile,
+    #                          offset = (partialIdx << 2) + numQueues*256).
     #
-    # The dynamic-queue fetch partitions work across one queue per XCD and maps
-    # StreamKIdx -> queueIdx (StreamKIdx & (numQueues-1)) and queueIdx -> cache
-    # line (queueIdx << log2(256)) with shift/AND fast masking. That masking is
-    # only valid when the queue count is a power of two, so the count comes from
-    # the per-arch capability instead of hardcoding a literal 8.
-    #
-    # The count is read at codegen time from ``writer.states.archCaps["NumXCD"]``
-    # (see rocisa initArchCaps), which MIRRORS origami's per-arch XCD count
-    # (origami::hardware_t::get_default_num_xcds): one queue per XCD. Codegen
-    # cannot import origami (C++), so the cap is the single codegen-side mirror
-    # of that value; the host (ContractionSolution.cpp streamKBakedQueueCount)
-    # reads the SAME origami value, keeping the two in lockstep. The host guard
-    # additionally enforces that the device's RUNTIME NUM_XCD equals this baked
-    # per-XCD queue count (and is a power of two) before allowing the
-    # dynamic-queue path.
-    #
-    # NOTE: MI300A and MI300X BOTH report gfx942; only the physical XCD count
-    # differs (MI300A=6, MI300X=8). Codegen cannot tell them apart, so gfx942 is
-    # generated for 8 queues (origami's gfx942 default) and the host runtime
-    # rejects the dynamic-queue / work-stealing path when the device's runtime
-    # NUM_XCD does not equal that baked count (e.g. MI300A's 6 XCDs).
-    _WS_CACHE_LINE_LOG2 = 8  # log2(256): per-queue counters are one per 256B line
+    # numQueues is read at codegen time from writer.states.archCaps["NumXCD"]
+    # (the codegen mirror of origami get_default_num_xcds). The host
+    # (ContractionSolution.cpp) reads the same origami value and additionally
+    # rejects the dynamic-queue path when the device's runtime NUM_XCD differs
+    # from this baked count (e.g. MI300A's 6 XCDs vs the gfx942-baked 8).
+    _WS_CACHE_LINE_BYTES = 256  # per-queue counter stride: one cache line
+    _WS_CACHE_LINE_LOG2 = log2(_WS_CACHE_LINE_BYTES)  # log2 from ..Common -> int 8
 
     def _wsQueueConstants(self, writer, kernel):
         """Return (numQueues, mask, log2Queues, cacheLineLog2) for this arch.
@@ -467,24 +444,19 @@ class StreamK(Component):
     def streamKWorkStealingHomeBound(self, writer, mod, kernel, sBound, sQueueIdx, sGrid):
         """Fold the predecessor's workgroup count into the home auto-reset bound.
 
-        The non-stealing dynamic path relies on the atomic_inc auto-reset bound
-        ``tiles_q + W_q - 1`` so that after exactly ``tiles_q + W_q`` fetches (all
-        tiles dispensed + one empty per WG) the counter wraps back to 0. Under
-        single-hop next-neighbor stealing every queue q is also stolen from by EXACTLY ONE
-        predecessor p = (q-1) & (numQueues-1): once each of p's W_p workgroups
-        goes sticky-empty it makes one atomic against q per persistent iteration,
-        contributing W_p additional increments to q's counter. The self-resetting
-        bound therefore becomes ``tiles_q + W_q + W_p - 1``. This adds the W_p
-        term (W_p = (skGrid >> log2) + [p < (skGrid & mask)]) to the already
-        computed ``tiles_q + W_q - 1`` in ``sBound``. Caller must gate on
-        kernel["StreamKWorkStealing"] and pass the mode-appropriate grid SGPR
-        name (``"skGrid"`` for SK4, ``"SKGrid"`` for SK5-dynamic). ``sQueueIdx``
-        is preserved.
+        The non-stealing bound ``tiles_q + W_q - 1`` wraps queue q's counter back
+        to 0 after ``tiles_q + W_q`` fetches (all tiles + one empty per WG). With
+        stealing q also absorbs W_p increments from its single predecessor
+        p = (q-1) & (numQueues-1), so the bound becomes ``tiles_q + W_q + W_p - 1``.
+        This adds the W_p term (W_p = (skGrid >> log2) + [p < (skGrid & mask)]) to
+        the ``tiles_q + W_q - 1`` already in ``sBound``. Caller must gate on
+        kernel["StreamKWorkStealing"] and pass the mode-appropriate grid SGPR name
+        (``"skGrid"`` for SK4, ``"SKGrid"`` for SK5-dynamic). ``sQueueIdx`` is
+        preserved.
 
-        Precondition (see Solution validation): the fold is exact only when
-        W_q >= 1 whenever tiles_q >= 1, i.e. the grid assigns at least one
-        workgroup per queue (skGrid >= numQueues); the Solution layer rejects
-        debug overrides that could violate this.
+        Precondition (see Solution validation): exact only when W_q >= 1 whenever
+        tiles_q >= 1, i.e. skGrid >= numQueues; the Solution layer rejects debug
+        overrides that could violate this.
         """
         _, mask, log2Queues, _ = self._wsQueueConstants(writer, kernel)
         sPred = writer.sgprPool.checkOut(1, "wsPredQueue")
@@ -505,24 +477,18 @@ class StreamK(Component):
     def streamKWorkStealingSteal(self, writer, mod, kernel, sQueueIdx, sWorkItemIdx, sGrid, mkLabel):
         """Single-hop next-neighbor steal on the per-XCD queue topology.
 
-        On entry sQueueIdx holds the home queue index q and sWorkItemIdx holds
-        the home fetch result; both must be live. If the home fetch was valid
-        (index < TotalItems) this is a no-op. Otherwise the WG ALWAYS steals one
-        tile from its immediate next neighbor s = (q+1) & (numQueues-1): a single
-        s_atomic_inc against the neighbor's counter, then the global tile index
-        is recomputed from s. There is NO remainder / structural-extra guard --
-        an empty home always attempts exactly one steal. A lost race leaves
-        sWorkItemIdx >= TotalItems so the downstream valid-index check turns this
-        WG into a no-op. sQueueIdx is clobbered (advanced to s). Caller must gate
-        on kernel["StreamKWorkStealing"] and pass the mode-appropriate grid SGPR
-        name (``"skGrid"`` for SK4, ``"SKGrid"`` for SK5-dynamic).
+        Register contract: on entry sQueueIdx holds the home queue index q and
+        sWorkItemIdx holds the home fetch result; both must be live. If the home
+        fetch was valid (index < TotalItems) this is a no-op. Otherwise the WG
+        steals one tile from its next neighbor s = (q+1) & (numQueues-1) via a
+        single s_atomic_inc, then recomputes the global tile index from s. A lost
+        race leaves sWorkItemIdx >= TotalItems so the downstream valid-index check
+        turns this WG into a no-op. sQueueIdx is clobbered (advanced to s). Caller
+        must gate on kernel["StreamKWorkStealing"] and pass the mode-appropriate
+        grid SGPR name (``"skGrid"`` for SK4, ``"SKGrid"`` for SK5-dynamic).
 
-        The steal atomic runs with a STATIC auto-reset bound
-        ``tiles_s + W_s + W_q - 1`` (rather than a disabled 0xFFFFFFFF bound):
-        s is stolen from by exactly its predecessor q, so this is the same
-        predecessor-inclusive self-reset used on the home path, evaluated for the
-        stolen queue. This lets the neighbor counter wrap back to 0 on its own,
-        removing the need for an explicit end-of-kernel reset.
+        The steal atomic uses the same predecessor-inclusive static bound as the
+        home path, evaluated for the stolen queue: ``tiles_s + W_s + W_q - 1``.
         """
         _, mask, log2Queues, cacheLineLog2 = self._wsQueueConstants(writer, kernel)
         skFetchDone = mkLabel("SK_FetchDone")

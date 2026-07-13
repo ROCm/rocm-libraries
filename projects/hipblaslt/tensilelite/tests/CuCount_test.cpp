@@ -742,39 +742,17 @@ TEST(Sk3Sk5OffPartition512Test, NativeSk3MatchesSk5OffHostPack)
 // ===========================================================================
 // StreamKDynamicQueueXcdGateTest -- MI300A (NUM_XCD=6) reject-and-continue.
 //
-// The SK4 / SK5-dynamic work-stealing kernels bake in a fixed, power-of-two
-// per-XCD queue count (origami's per-arch XCD count: 8 for gfx942/gfx950) and
-// mask queue/tile indices with (Q-1). That fast masking is only valid when the
-// device's runtime XCD count equals the baked count AND is a power of two.
-// MI300A and MI300X both report gfx942 (baked count 8), but MI300A has 6 XCDs
-// (not a power of two). A power-of-two-but-mismatched partition (e.g. a 4-XCD
-// slice of an 8-XCD gfx942) is likewise rejected because runtime NUM_XCD != 8.
-//
-// Rather than SILENTLY degrading such a solution to tree reduction, the host
-// now EXCLUDES the dynamic-queue / work-stealing solution from selection and
-// warns the user once, so a different (SK3-static / non-StreamK) solution
-// serves the GEMM. This is enforced by ContractionSolution::
-// streamKDynamicQueueSupported(problem, hardware), which is wired into
-// softwarePredicate() (SolutionLibrary.hpp) so returning false drops the
-// solution from findBestSolution/findAllSolutions. It builds on the file-local
-// numeric predicate streamKDynamicQueueUnsupported(hardware): dynamic_cast to
-// hip::HipAMDGPU, derive the baked per-XCD queue count from the origami arch
-// (streamKBakedQueueCount / get_default_num_xcds), read analyticalHardware->
-// NUM_XCD, and return true (reject) when NUM_XCD is 0 (defensive), not a power
-// of two, the baked count is unknown, or NUM_XCD != baked; false otherwise
-// (incl. unknown/no analytical hardware -> historic behavior preserved).
-//
-// Both production predicates live in anonymous namespaces / a .cpp translation
-// unit and cannot be linked from here, so -- following the same convention as
-// computeStreamKHostPack above (which mirrors solve()'s internal reduction
-// decision for host-only testing) -- this test mirrors them and drives them
-// through a real hip::HipAMDGPU mock. It validates (a) the Hardware& ->
-// HipAMDGPU -> analyticalHardware -> {arch, NUM_XCD} accessor chain, (b) the
-// power-of-two AND equals-baked classification (6 -> reject, 4 -> reject
-// (pow2 but != baked 8), 8 -> allow, unknown -> allow), and (c) the
-// selection-predicate composition (dynamic-queue on a mismatched XCD count ->
-// excluded; other StreamK modes / queue-count-agnostic solutions ->
-// selectable). It is NOT executed on real MI300A silicon.
+// SK4 / SK5-dynamic work-stealing kernels bake a fixed power-of-two per-XCD
+// queue count (8 for gfx942/gfx950) and mask indices with (Q-1), so they are
+// valid only when the device's runtime NUM_XCD equals that baked count. MI300A
+// reports gfx942 (baked 8) but has 6 XCDs; a mismatched partition (e.g. a 4-XCD
+// slice of an 8-XCD gfx942) is likewise rejected. The host excludes such a
+// solution from selection (streamKDynamicQueueSupported wired into
+// softwarePredicate) and warns once instead of silently degrading. The
+// production predicates live in a .cpp anonymous namespace, so -- like
+// computeStreamKHostPack above -- this test mirrors them over a hip::HipAMDGPU
+// mock (6 -> reject, 4 -> reject, 8 -> allow, unknown -> allow). Not run on
+// real MI300A silicon.
 // ===========================================================================
 namespace
 {

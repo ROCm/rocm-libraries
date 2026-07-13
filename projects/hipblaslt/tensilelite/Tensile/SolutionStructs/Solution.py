@@ -1663,31 +1663,23 @@ class Solution(collections.abc.Mapping):
                "DebugPersistentKernelLoopForever requires StreamK=3 (got %d)"
                % state["StreamK"])
       if state["StreamKWorkStealing"]:
-        # NOTE: these are codegen-time rejections only; there is no hardware
-        # context here (MI300A and MI300X both compile as gfx942). The kernel
-        # bakes in a power-of-two per-XCD queue count (8, mirroring origami's
-        # per-arch XCD count), so the check that the device actually matches it
-        # -- the host now requires the device's RUNTIME NUM_XCD to EQUAL the
-        # baked per-XCD queue count (derived from origami), not merely be a power
-        # of two, and excludes the dynamic-queue / work-stealing path otherwise
-        # (e.g. MI300A's 6 XCDs, or a power-of-two-but-mismatched partition); a
-        # non-work-stealing solution serves the GEMM instead and the user is
-        # warned -- lives host-side in ContractionSolution.cpp
-        # (streamKDynamicQueueSupported / streamKDynamicQueueUnsupported /
-        # streamKBakedQueueCount, wired into softwarePredicate).
-        # Work stealing only exists in the dynamic-queue fetch (auto-mode
-        # SK4 and the SK4 sub-path of SK5).
+        # Codegen-time rejections only; there is no hardware context here
+        # (MI300A/MI300X both compile as gfx942). The kernel bakes a power-of-two
+        # per-XCD queue count from origami; the host (ContractionSolution.cpp)
+        # enforces the device's runtime NUM_XCD against that baked count and
+        # otherwise serves a non-work-stealing solution. Work stealing only exists
+        # in the dynamic-queue fetch (auto-mode SK4 and the SK4 sub-path of SK5).
         if state["StreamK"] not in (4, 5):
           reject(state, printRejectionReason,
                  "StreamKWorkStealing requires StreamK in {4,5} (got %d)"
                  % state["StreamK"])
-        # Stealing was designed/validated against the non-atomic
-        # partials+fixup path. Atomic SK4/SK5 is already rejected above; keep
-        # this explicit guard so the combination can never slip through.
+        # Stealing is only defined for the non-atomic partials+fixup path.
+        # Atomic SK4/SK5 is already rejected above; keep this explicit guard so
+        # the combination can never slip through.
         if state["StreamKAtomic"]:
           reject(state, printRejectionReason,
                  "StreamKWorkStealing is not supported with StreamKAtomic")
-        # Auto-reset precondition (proof condition #1): the per-queue atomic_inc
+        # Auto-reset precondition: the per-queue atomic_inc
         # auto-reset bound is now predecessor-inclusive (home bound =
         # tiles_q + W_q + W_(q-1) - 1, steal bound = tiles_s + W_s + W_q - 1).
         # It self-resets each launch ONLY while every queue that owns tiles also

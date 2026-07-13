@@ -60,20 +60,12 @@ namespace TensileLite
     namespace
     {
         // The dynamic-queue StreamK kernels (SK4 and the SK4 sub-path of SK5)
-        // bake in a fixed, power-of-two per-XCD queue count for fast index
-        // masking (StreamKIdx & (Q-1), queueIdx << log2(256)). That baked count
-        // is the per-arch XCD count: codegen keys it off the ISA (see StreamK.py
-        // _WS_NUM_QUEUES_BY_ISA, which MIRRORS origami get_default_num_xcds) and
-        // emits Q = 8 for gfx942/gfx950. The host reads the SAME origami value
-        // here -- via the device's origami architecture -- so the per-XCD
-        // work-queue region reserved in the Synchronizer workspace and the
-        // runtime acceptance guard stay in lockstep with codegen instead of
-        // duplicating a hardcoded literal 8.
-        //
-        // Returns the baked per-XCD queue count for the device's architecture,
-        // or 0 when the architecture cannot be determined (no analytical
-        // hardware, or an architecture origami has no default XCD count for),
-        // which the guard below treats as unsupported.
+        // bake a fixed power-of-two per-XCD queue count for fast index masking.
+        // Codegen derives it from the arch's XCD count (StreamK.py
+        // _wsQueueConstants / archCaps["NumXCD"], mirroring origami
+        // get_default_num_xcds); the host reads the SAME origami value here so
+        // codegen and the runtime guard stay in lockstep. Returns 0 when the
+        // architecture cannot be determined (guard treats that as unsupported).
         inline size_t streamKBakedQueueCount(Hardware const& hardware)
         {
             auto const* hipAMDGPU = dynamic_cast<hip::HipAMDGPU const*>(&hardware);
@@ -95,20 +87,12 @@ namespace TensileLite
         }
 
         // The dynamic-queue fetch / work stealing is only correct when the
-        // device's runtime XCD count matches the baked per-XCD queue count AND
-        // is a power of two (the kernel masks with (Q-1)). MI300A and MI300X
-        // BOTH report gfx942 -- codegen bakes Q = 8 -- but MI300A has 6 XCDs
-        // (not a power of two), so the fast-mask assumption breaks there.
-        //
-        // Returns true (UNSUPPORTED / reject) when the runtime NUM_XCD is 0
-        // (defensive), is NOT a power of two, the baked count is unknown, or the
-        // runtime NUM_XCD does not equal the baked count. The last condition
-        // additionally closes the partition/CPX gap where NUM_XCD is a power of
-        // two but != baked (e.g. a 4-XCD partition of an 8-XCD gfx942), which
-        // would still mis-map the fixed Q=8 queue masking. Returns false when
-        // there is no analytical hardware so historic behavior is preserved
-        // (unknown XCD -> allow). The classification is intentionally isolated
-        // here so it stays trivially unit-testable (see CuCount_test.cpp).
+        // device's runtime NUM_XCD is a power of two AND equals the baked
+        // per-XCD queue count. Returns true (UNSUPPORTED) when NUM_XCD is 0, not
+        // a power of two, the baked count is unknown, or NUM_XCD != baked (e.g.
+        // MI300A's 6 XCDs, or a 4-XCD partition of an 8-XCD gfx942). Returns
+        // false when there is no analytical hardware (unknown XCD -> allow). Kept
+        // isolated here so it stays trivially unit-testable (see CuCount_test.cpp).
         inline bool streamKDynamicQueueUnsupported(Hardware const& hardware)
         {
             auto const* hipAMDGPU = dynamic_cast<hip::HipAMDGPU const*>(&hardware);

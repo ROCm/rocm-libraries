@@ -2,23 +2,23 @@
 # SPDX-License-Identifier: MIT
 """Unit tests for the single-hop next-neighbor StreamK work-stealing codegen.
 
-These tests assert that the new work-stealing assembly is emitted by the
-helper methods on the ``StreamK`` base class, and -- crucially -- that those
-helpers are only ever reached behind the codegen-time ``StreamKWorkStealing``
-toggle. Following the StreamK=5 hybrid tests, they import rocisa instructions
-and inspect emitted modules rather than matching source text; the toggle gating
+These tests assert that the work-stealing assembly is emitted by the helper
+methods on the ``StreamK`` base class, and -- crucially -- that those helpers
+are only ever reached behind the codegen-time ``StreamKWorkStealing`` toggle.
+Following the StreamK=5 hybrid tests, they import rocisa instructions and
+inspect emitted modules rather than matching source text; the toggle gating
 and the Solution-level validation are verified by executing the *real* source
 (via the AST) so the assertions track the actual code, not a copy of it.
 
-New emission contract (single-hop next-neighbor + sticky-home + static auto-reset):
-  * The steal always fires on an empty home fetch -- there is NO remainder /
+Emission contract (single-hop next-neighbor + sticky-home + static auto-reset):
+  * The steal always fires on an empty home fetch -- there is no remainder /
     structural-extra guard (no ``s_cmp_ge_u32`` neighbor guard, no
     ``remainder == 0`` skip).
   * The steal & home atomic bounds are the predecessor-inclusive self-reset
-    value, NOT the old 0xFFFFFFFF "disable auto-reset" sentinel.
+    value.
   * A per-WG sticky-empty SGPR gates the home fetch.
-  * There is NO ``streamKWorkStealingKernelEndReset`` / completion counter /
-    reset barrier anymore.
+  * There is no ``streamKWorkStealingKernelEndReset`` / completion counter /
+    reset barrier.
 """
 
 import ast
