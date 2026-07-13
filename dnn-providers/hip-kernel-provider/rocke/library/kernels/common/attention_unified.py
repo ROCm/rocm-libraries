@@ -963,7 +963,7 @@ def _select_2d_num_warps(problem: UnifiedAttentionProblem) -> int:
     if _d256_gfx950_fast(problem):
         return 2
     if _d256_gfx942_fast(problem):
-        return 1  # 1 wave64/CTA = 64 lanes for the 32x32x8 natural-QK kernel
+        return 1  # cache-key discriminator only; the 4-warp kernel launches block=(256,1,1) / BLOCK_M=128 via _get_2d_launch_meta
     if _resolve_attention_arch() == "gfx1250":
         # A gfx1250 workgroup is one wave32 in the v1 WMMA tiled path.
         return 1
@@ -2353,7 +2353,7 @@ def _select_2d_block_m_per_warp(problem: UnifiedAttentionProblem) -> int:
     if _d256_gfx950_fast(problem):
         return 32
     if _d256_gfx942_fast(problem):
-        return 32  # BLOCK_M = 1 * 32 = 32 rows (one q-token tile per CTA)
+        return 32  # cache-key discriminator only; the dedicated 4-warp kernel uses BLOCK_M=128
     if _resolve_attention_arch() == "gfx1250":
         return 16
     # mw=32 (BLOCK_M = 32 * num_warps) only pays off when a path actually

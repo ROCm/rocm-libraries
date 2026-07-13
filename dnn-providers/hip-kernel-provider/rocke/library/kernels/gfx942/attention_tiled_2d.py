@@ -74,7 +74,7 @@ from rocke.helpers.attention import (
 )
 from rocke.helpers.distribution import make_static_tile_distribution
 from rocke.helpers.layouts import TransposeLdsReader
-from rocke.helpers.mfma_gemm_inner import decode_mfma_lanes, mfma_k_loop
+from rocke.helpers.mfma_gemm_inner import decode_mfma_lanes
 from rocke.helpers.transforms import TensorDescriptor, embed, indirect, unmerge
 
 
@@ -1078,14 +1078,19 @@ def supports_tiled_2d(
                 f"tiled 2D kernel: per-wave tokens {per_wave_tokens} exceeds "
                 f"block_size={block_size}; would need lane-divergent block lookup",
             )
-    # The D256 gfx942 fast path (build_gfx942_4warp_gqa) reads paged K/V direct
-    # HBM->reg and stages only its own softmax-reduction LDS (5-stage swizzle),
-    # so the conservative staged-tile LDS model below (which assumes K
-    # double-buffer + V + Q_lds + P_lds) does NOT apply. The builder self-enforces
-    # head_size==256 / tile_size==32; earlier validity checks (dtype, block_size,
-    # tile_size % block_size) have already run.
+    # The D256 gfx942 fast path (build_gfx942_4warp_gqa) reads paged K direct
+    # HBM->reg, stages V through V_lds, and uses only its own softmax-reduction
+    # LDS (5-stage swizzle) -- so the conservative staged-tile LDS model below
+    # (K double-buffer + V + Q_lds + P_lds) does NOT apply. Validate the fast
+    # path's hard requirements explicitly instead of trusting the flag; earlier
+    # checks already covered dtype family, block_size, and tile_size % block_size.
     if use_d256_gfx942_fast:
-        return True, "supported"
+        if head_size == 256 and dtype == "bf16":
+            return True, "supported"
+        return (
+            False,
+            "tiled 2D kernel: d256 gfx942 fast path requires bf16 head_size=256",
+        )
     # LDS-budget gate (ahead-of-time compilability). The kernel stages its
     # tiles in LDS (the smem_alloc calls in build_unified_attention_2d_tiled);
     # comgr CODEGEN (CODEGEN_BC_TO_RELOCATABLE) rejects a kernel whose static
@@ -5532,8 +5537,10 @@ def build_unified_attention_2d_tiled(
 # 4-warp GQA D256 paged attention -- production dispatch path.
 # ===========================================================================
 # BLOCK_M=128 / 4-wave64 CTA natural-QK D256 attention on the CDNA3 32x32x8 bf16
-# MFMA atom. Reads paged K/V direct HBM->register (global_load, element offset;
-# i32-overflow-safe for large caches), varlen token-major Q via q_desc
+# MFMA atom. Reads paged K direct HBM->register (global_load, element offset);
+# stages V through V_lds (conflict-free store). i32 paged element addressing
+# (the ``_d256_gfx942_fast`` gate excludes > 2 GiB caches that need i64). Varlen
+# token-major Q via q_desc
 # (TensorDescriptor.naive) + in-kernel binary_search_seq_idx on cu_seqlens_q,
 # bottom-right causal (context_off = seq_len - q_len; chunked-prefill/decode),
 # GQA head->kv_head = head // num_queries_per_kv, softmax scale*log2e fold, LDS
