@@ -1,7 +1,7 @@
 ---
 name: hipdnn-superbuild-test
-description: Run tests against an existing hipDNN superbuild. Supports per-component selection (hipdnn, miopen-provider, hipblaslt-provider, hip-kernel-provider, integration-tests), unit/integration scope, and gtest filtering. Handles Windows DLL PATH automatically.
-argument-hint: "[component: hipdnn|miopen|hipblaslt|hip-kernel|integration-tests|all] [scope: unit|integration|all] [ROCM_PATH=<path>] [--filter=<gtest_pattern>] [--verbose] [--keep-going]"
+description: Run tests against an existing hipDNN superbuild. Supports per-component selection (hipdnn, miopen-provider, hipblaslt-provider, hip-kernel-provider, integration-tests), unit/integration/external-integration scope, and gtest filtering. Reproduces the cross-provider external-integration-check suite that most CI failures come from. Handles Windows DLL PATH automatically.
+argument-hint: "[component: hipdnn|miopen|hipblaslt|hip-kernel|integration-tests|all] [scope: unit|integration|external-integration|all] [ROCM_PATH=<path>] [--filter=<gtest_pattern>] [--verbose] [--keep-going]"
 allowed-tools: Bash, Read, Grep, Glob
 ---
 
@@ -14,7 +14,7 @@ Use this skill when the user asks to test an existing hipDNN superbuild. It does
 Infer options from the user request:
 
 - **Component**: `hipdnn`, `miopen`, `hipblaslt`, `hip-kernel`, `integration-tests`, or `all`; default `all`
-- **Scope**: `unit`, `integration`, or `all`; default `unit`
+- **Scope**: `unit`, `integration`, `external-integration`, or `all`; default `unit`. `external-integration` covers the cross-provider `hipdnn_integration_tests` suite (the `<provider>-external-integration-check` targets) that most CI failures come from
 - **Filter**: optional gtest filter; when present, run test binaries directly
 - **Verbose**: use verbose test targets when requested
 - **Keep going**: continue after failures only when requested
@@ -49,7 +49,7 @@ Infer options from the user request:
    ```bash
    python3 <scripts>/discover_test_targets.py --build-dir <build-dir> --component <component> --scope <scope>
    ```
-   The helper prints `<component>:<target>` lines. It also handles the hip-kernel-provider path-qualified target naming.
+   The helper prints `<component>:<target>` lines. It also handles the hip-kernel-provider path-qualified target naming. With `--scope external-integration` (or `all`) it also emits a `<component>:command:<cmdline>` line — the resolved cross-provider `hipdnn_integration_tests` invocation (with `--test-article`/`--test-engine`/`--test-config`) read from the generated `CTestTestfile.cmake`, with any baked-in `--gtest_filter` stripped so you can supply your own.
    If the helper reports that Ninja target discovery failed, treat that as an invalid or stale build directory and stop with the helper's diagnostic. If discovery succeeds but no targets match, report that the requested component or scope is not present in the existing superbuild.
 
 6. Run tests through `cmake_run.py` when no gtest filter is requested:
@@ -60,21 +60,33 @@ Infer options from the user request:
 
 7. Run direct binaries when a gtest filter is requested:
    ```bash
-   python3 <scripts>/cmake_run.py --build-dir <build-dir> --binary <binary-path> --gtest-filter "<filter>" [--rocm-path <path>] [--rocm-bin <path>] > <log> 2>&1
+   python3 <scripts>/cmake_run.py --build-dir <build-dir> --binary <binary-path> --gtest-filter "<filter>" [--extra-arg=<flag> ...] [-- <passthrough args>] [--rocm-path <path>] [--rocm-bin <path>] > <log> 2>&1
    ```
-   Use the component-to-binary mapping below to choose binaries.
+   Use the component-to-binary mapping below to choose binaries. `cmake_run.py` accepts arbitrary passthrough flags for the binary: simple values via repeatable `--extra-arg` (use `--extra-arg=--flag` for flag-like values), or an entire flag list after a literal `--`. Passing multiple tokens inside `--binary` is rejected with a clear error.
 
-8. For every command, keep full output in a log and show only a short tail on failure. Track pass/fail per component. Stop at the first failure unless keep-going was requested.
+8. Reproduce the cross-provider external-integration suite (`--scope external-integration`):
+   - To run the whole suite exactly as CI does, build the custom target:
+     ```bash
+     python3 <scripts>/cmake_run.py --build-dir <build-dir> --target <provider>-external-integration-check [--rocm-path <path>] [--rocm-bin <path>] > <log> 2>&1
+     ```
+   - To run with a custom gtest filter, take the `<component>:command:<cmdline>` line from step 5, run the first token as `--binary` and the rest after `--`, adding your own `--gtest-filter`:
+     ```bash
+     python3 <scripts>/cmake_run.py --build-dir <build-dir> --binary <hipdnn_integration_tests> -- <--test-article ... --test-engine ... --test-config ...> --gtest_filter=<filter> > <log> 2>&1
+     ```
+
+9. For every command, keep full output in a log and show only a short tail on failure. Track pass/fail per component. Stop at the first failure unless keep-going was requested.
 
 ## Direct Binary Mapping
 
-| Component | Unit Binaries | Integration Binaries |
-|-----------|---------------|----------------------|
-| `hipdnn` | `hipdnn_backend_tests`, `hipdnn_frontend_tests`, `hipdnn_data_sdk_tests`, `hipdnn_flatbuffers_sdk_tests`, `hipdnn_plugin_sdk_tests`, `hipdnn_test_sdk_tests` | `hipdnn_public_backend_tests`, `hipdnn_public_frontend_tests`, `hipdnn_backend_logging_shutdown_tests` |
-| `miopen` | `miopen_plugin_tests` | `miopen_plugin_integration_tests` |
-| `hipblaslt` | `hipblaslt_plugin_tests` | `hipblaslt_plugin_integration_tests` |
-| `hip-kernel` | `hip_kernel_provider_tests` | `hip_kernel_provider_integration_tests` |
-| `integration-tests` | `hipdnn_integration_tests_unit_tests` | `hipdnn_integration_tests`, `hipdnn_gpu_ref_tests` |
+| Component | Unit Binaries | Integration Binaries | External Integration (cross-provider) |
+|-----------|---------------|----------------------|----------------------------------------|
+| `hipdnn` | `hipdnn_backend_tests`, `hipdnn_frontend_tests`, `hipdnn_data_sdk_tests`, `hipdnn_flatbuffers_sdk_tests`, `hipdnn_plugin_sdk_tests`, `hipdnn_test_sdk_tests` | `hipdnn_public_backend_tests`, `hipdnn_public_frontend_tests`, `hipdnn_backend_logging_shutdown_tests` | — |
+| `miopen` | `miopen_plugin_tests` | `miopen_plugin_integration_tests` | `miopen-provider-external-integration-check` (`hipdnn_integration_tests` + `miopen_plugin`, engine `MIOPEN_ENGINE`) |
+| `hipblaslt` | `hipblaslt_plugin_tests` | `hipblaslt_plugin_integration_tests` | `hipblaslt-provider-external-integration-check` (`hipdnn_integration_tests` + `hipblaslt_plugin`, engine `HIPBLASLT_ENGINE`) |
+| `hip-kernel` | `hip_kernel_provider_tests` | `hip_kernel_provider_integration_tests` | `hip-kernel-provider-external-integration-check` when present |
+| `integration-tests` | `hipdnn_integration_tests_unit_tests` | `hipdnn_integration_tests`, `hipdnn_gpu_ref_tests` | — |
+
+The exact article/engine/config for the external suite is resolved at build time; get the ready-to-run command from `discover_test_targets.py --scope external-integration` (the `command:` line) rather than hardcoding paths.
 
 ## Report
 
@@ -94,3 +106,4 @@ If a requested component has no matching target, say that it was not present in 
 - `scripts/cmake_run.py`, `scripts/discover_test_targets.py`, and `scripts/windows_rocm_setup.py` are bundled in this skill so linked and copied installs work independently.
 - Windows DLL loading is handled by `cmake_run.py`, which sets PATH in Python's subprocess environment before launching CMake or test binaries.
 - Integration tests require an AMD GPU. Unit scope is the default for CPU-only validation.
+- Prefer running test binaries through `cmake_run.py` (it wires PATH/ROCM_PATH for the loader); pass extra binary flags via `--extra-arg`/`-- <args>` rather than folding them into `--binary`.

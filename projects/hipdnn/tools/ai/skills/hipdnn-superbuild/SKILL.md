@@ -15,10 +15,11 @@ Infer options from the user request:
 
 - **Preset**: default `hipdnn-providers`
 - **Clean rebuild**: remove the build directory before configuring only when the user asks for a clean build and the active host policy permits deletion
-- **ROCm path**: optional `ROCM_PATH=<path>` override; Linux defaults to `/opt/rocm`
-- **Clang path**: optional Windows `CLANG_PATH=<path>` override; default `D:/develop/dist/clang/bin`
+- **ROCm path**: optional `ROCM_PATH=<path>` override; Linux defaults to `/opt/rocm`. On Windows, when omitted it is derived from the wheel venv (`<venv>/Lib/site-packages/_rocm_sdk_devel`, venv default `D:/develop/latest_wheels`)
+- **Clang path**: optional Windows `CLANG_PATH=<path>` override; default `D:/develop/dist/clang/bin`. Clang is a prerequisite and is not provisioned; install it via `scripts/windows/windows_build_setup.ps1` if missing
 - **GPU targets**: optional `GPU_TARGETS=<arch>` override; Windows wheel setup defaults to `gfx1151`
-- **Wheel SHA**: optional Windows `SHA=<commit>` to pin the wheel setup
+- **Wheel SHA**: optional Windows `SHA=<commit>` to install pinned S3 staging wheels instead of nightlies
+- **Provision mode**: Windows `--provision auto|always|never`; default `auto` provisions (creates the venv and pip-installs the ROCm SDK wheels) only when the SDK is missing, `always` forces a fresh wheel pull, `never` validates existing paths only
 - **Jobs**: optional explicit parallelism only when the user requests it and active workspace instructions permit it; otherwise let Ninja auto-detect
 
 ## Presets
@@ -52,11 +53,11 @@ Read `CMakePresets.json` from the repository root if exact preset contents matte
    - Installed skill layout: `<skill-directory>/scripts`
    - Source checkout fallback: `<repo-root>/projects/hipdnn/tools/ai/skills/hipdnn-superbuild/scripts`
 
-4. Resolve ROCm and Clang paths:
+4. Resolve ROCm and Clang paths (Windows also provisions the ROCm SDK wheels when missing):
    ```bash
-   python3 <scripts>/windows_rocm_setup.py --repo-root <repo-root> [--rocm-path <path>] [--clang-path <path>] [--gpu-targets <arch>] [--sha <commit>]
+   python3 <scripts>/windows_rocm_setup.py --repo-root <repo-root> [--venv-path <path>] [--rocm-path <path>] [--clang-path <path>] [--gpu-targets <arch>] [--sha <commit>] [--provision auto|always|never]
    ```
-   On Linux this echoes only provided overrides. On Windows it detects or provisions the wheel-based ROCm install and prints `KEY=VALUE` lines for subsequent commands.
+   On Linux this echoes only provided overrides. On Windows it validates the wheel-based ROCm install and, when the SDK is absent (or `--provision always`), creates the venv and pip-installs the ROCm SDK wheels before printing `KEY=VALUE` lines on stdout. Progress goes to stderr, so stdout carries only the `ROCM_PATH=`/`CLANG_PATH=`/`GPU_TARGETS=` lines. Clang is a prerequisite and is not provisioned; a missing clang is reported as an error.
 
 5. If a clean rebuild was requested, remove the selected build directory using the active host's normal approval/safety flow.
 
@@ -86,6 +87,6 @@ Summarize:
 
 ## Notes
 
-- `scripts/windows_rocm_setup.py` is bundled in this skill so linked and copied installs work independently.
+- `scripts/windows_rocm_setup.py` is bundled in this skill so linked and copied installs work independently. Its Windows wheel-provisioning logic is a Python port of `projects/hipdnn/scripts/windows/wheel_build_setup.ps1`; that PowerShell script is left in place for interactive users and `tools/dnn-benchmarking/setup.ps1`. Keep the two in sync.
 - Missing provider dependencies such as MIOpen or hipBLASLt still need to be installed or available through the selected ROCm environment.
 - Product test execution is intentionally out of scope for this skill.

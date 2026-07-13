@@ -70,16 +70,46 @@ def main():
         default=[],
         help="Windows: additional bin directory to prepend. Repeatable.",
     )
+    p.add_argument(
+        "--extra-arg",
+        action="append",
+        default=[],
+        help="--binary mode: extra argument passed through to the binary. "
+        "Repeatable. For flag-like values use --extra-arg=--flag (with '='); "
+        "for a whole flag+value run put them after a literal `--` instead.",
+    )
+    p.add_argument(
+        "passthrough",
+        nargs=argparse.REMAINDER,
+        help="Arguments after `--` are passed through to the binary (--binary mode).",
+    )
     args = p.parse_args()
 
     if args.gtest_filter and not args.binary:
         p.error("--gtest-filter requires --binary")
+
+    # argparse.REMAINDER captures the leading `--` separator; drop it.
+    passthrough = (
+        args.passthrough[1:] if args.passthrough[:1] == ["--"] else args.passthrough
+    )
+    if (args.extra_arg or passthrough) and not args.binary:
+        p.error("--extra-arg / `-- <args>` require --binary")
+
+    if args.binary:
+        binary = Path(args.binary)
+        if not binary.is_file():
+            p.error(
+                f"--binary must be a single existing executable path, got {args.binary!r}. "
+                "Pass flags via --extra-arg or after `--`, not inside --binary."
+            )
 
     env = build_env(args)
     if args.binary:
         cmd = [args.binary]
         if args.gtest_filter:
             cmd.append(f"--gtest_filter={args.gtest_filter}")
+        cmd.extend(args.extra_arg)
+        cmd.extend(passthrough)
     else:
         cmd = ["cmake", "--build", args.build_dir, "--target", args.target]
         if args.jobs:
