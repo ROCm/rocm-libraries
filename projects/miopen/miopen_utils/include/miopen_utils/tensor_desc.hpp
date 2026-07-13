@@ -48,7 +48,7 @@ class TensorDesc
 
     void destroy() noexcept
     {
-        if(handle_)
+        if(handle_ != nullptr)
         {
             miopenDestroyTensorDescriptor(handle_);
             handle_ = nullptr;
@@ -61,7 +61,7 @@ class TensorDesc
     {
         lengths_.clear();
         strides_.clear();
-        if(!handle_)
+        if(handle_ == nullptr)
             return;
         int ndim = 0;
         miopenGetTensorDescriptorSize(handle_, &ndim);
@@ -74,7 +74,7 @@ class TensorDesc
 
     void copy_from(miopenTensorDescriptor_t src)
     {
-        if(!src)
+        if(src == nullptr)
             return;
 
         int ndim = 0;
@@ -284,7 +284,7 @@ public:
         case miopenInt8: return 1;
         case miopenInt32: return 4;
         case miopenInt64: return 8;
-        case miopenFloat8_fnuz: return 1;
+        case miopenFloat8_fnuz:
         case miopenBFloat8_fnuz: return 1;
         }
         return 0; // unreachable for known types; silences -Wreturn-type
@@ -412,7 +412,7 @@ public:
         dims[3] = dims[4];
         dims.pop_back();
 
-        return TensorDesc(dt, layout4d, dims);
+        return {dt, layout4d, dims};
     }
 
     // ---------------------------------------------------------------
