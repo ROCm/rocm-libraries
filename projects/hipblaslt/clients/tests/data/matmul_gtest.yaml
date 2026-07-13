@@ -981,6 +981,23 @@ Tests:
   bias_type: [default, f32_r]
   unit_check: 1
 
+- name: matmul_bias_fp16_gfx120x_tt
+  category: pre_checkin
+  function:
+    matmul: *hpa_half_precision
+  M: 128
+  N: 128
+  K: 128
+  transA: T
+  transB: T
+  alpha: 1
+  beta: 2.0
+  activation_type: gelu
+  bias_vector: 1
+  unit_check: 0
+  norm_check: 1
+  gpu_arch: '120[0-1]'
+
 - name: matmul_fallback_compute_fp16
   category: pre_checkin
   function:

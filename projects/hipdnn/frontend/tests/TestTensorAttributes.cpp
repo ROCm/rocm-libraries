@@ -230,3 +230,42 @@ TEST(TestTensorAttributes, ValidateFailsOnVirtualRuntimePassByValueTensor)
         tensor.validate(),
         Error(ErrorCode::INVALID_VALUE, "Tensor  cannot be virtual and runtime pass by value"));
 }
+
+TEST(TestTensorAttributes, TensorLogicalAndStrictEquality)
+{
+    TensorAttributes tensorA;
+    tensorA.set_dim({1, 64, 28, 28});
+    tensorA.set_stride({50176, 784, 28, 1});
+    tensorA.set_data_type(DataType::HALF);
+    tensorA.set_uid(1);
+    tensorA.set_name("Tensor_A");
+
+    TensorAttributes tensorB;
+    tensorB.set_dim({1, 64, 28, 28});
+    tensorB.set_stride({50176, 784, 28, 1});
+    tensorB.set_data_type(DataType::HALF);
+    tensorB.set_uid(2);
+    tensorB.set_name("Tensor_B");
+
+    EXPECT_TRUE(tensorA.logicallyEquals(tensorB));
+    EXPECT_TRUE(tensorB.logicallyEquals(tensorA));
+
+    EXPECT_FALSE(tensorA == tensorB);
+    EXPECT_TRUE(tensorA != tensorB);
+
+    tensorB.set_name("Tensor_A");
+    tensorB.set_uid(1);
+    EXPECT_TRUE(tensorA == tensorB);
+    EXPECT_FALSE(tensorA != tensorB);
+
+    tensorB.set_is_virtual(true);
+    EXPECT_FALSE(tensorA.logicallyEquals(tensorB));
+    EXPECT_FALSE(tensorA == tensorB);
+
+    const TensorAttributes scalarA(2.5f);
+    const TensorAttributes scalarB(2.5f);
+    const TensorAttributes scalarC(3.5f);
+
+    EXPECT_TRUE(scalarA.logicallyEquals(scalarB));
+    EXPECT_FALSE(scalarA.logicallyEquals(scalarC));
+}
