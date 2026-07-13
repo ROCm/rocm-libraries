@@ -2,14 +2,16 @@
 # SPDX-License-Identifier: MIT
 
 # TensileLite Test Categories Configuration
-# Aligned with Test Filter Standardization (RFC0010) for pytest-based components.
 #
-# Unlike gtest/ctest components (which use ctest labels via shared/ctest), the
-# TensileLite tests are Python/pytest. TheRock's pytest_runner.py consumes this
-# file directly: it collects tests from `test_paths`, filters by the pytest
-# marker expression built from `pytest_markers` / `exclude_markers`, applies
-# GPU-arch `skip-gfxXXXX` markers (registered in pytest.ini), shards the result,
-# and runs pytest from the installed share/hipblaslt/tensilelite/ tree.
+# NOTE: TensileLite is a *pytest*-based component. Unlike gtest/ctest components
+# (which use ctest labels via shared/ctest), these tests are Python/pytest, so
+# this file is consumed by TheRock's pytest_runner.py rather than CMake/ctest.
+# Aligned with Test Filter Standardization (RFC0010).
+#
+# For the selected category, pytest_runner.py runs pytest on `test_paths`,
+# filtered by the marker expression built from `pytest_markers` /
+# `exclude_markers` plus GPU-arch `skip-gfxXXXX` markers (registered in
+# pytest.ini), from the installed share/hipblaslt/tensilelite/ tree.
 #
 # Category mapping is derived from the legacy
 # TheRock/build_tools/github_actions/test_executable_scripts/test_tensilelite.py,
