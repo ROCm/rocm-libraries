@@ -1,0 +1,235 @@
+========================================================================================================================
+PARAMETERS WITH ONLY ONE VALUE USED ACROSS ALL YAML FILES
+========================================================================================================================
+
+Total Multi-Value Trackable Parameters: 160
+Parameters with Only ONE Value Used: 27
+Percentage: 16%
+
+NOTE: These parameters have multiple valid values but only one is actually
+      tested across all YAML files, indicating minimal test coverage.
+
+========================================================================================================================
+PROBLEM PARAMETERS (12 with single value)
+========================================================================================================================
+
+Parameter: ActivationNoGuard
+  Category: problem
+  Default: False
+  Valid Values: [False, True]
+  Tested Value: False
+  Coverage: ⚠️ 1/2 (50%)
+  Untested Values: [True]
+
+Parameter: AllowNoFreeDims
+  Category: problem
+  Default: False
+  Valid Values: [False, True]
+  Tested Value: False
+  Coverage: ⚠️ 1/2 (50%)
+  Untested Values: [True]
+
+Parameter: ComplexConjugateA
+  Category: problem
+  Default: False
+  Valid Values: [False, True]
+  Tested Value: False
+  Coverage: ⚠️ 1/2 (50%)
+  Untested Values: [True]
+
+Parameter: ComplexConjugateB
+  Category: problem
+  Default: False
+  Valid Values: [False, True]
+  Tested Value: False
+  Coverage: ⚠️ 1/2 (50%)
+  Untested Values: [True]
+
+Parameter: SilentHighPrecisionAccumulate
+  Category: problem
+  Default: False
+  Valid Values: [False, True]
+  Tested Value: False
+  Coverage: ⚠️ 1/2 (50%)
+  Untested Values: [True]
+
+Parameter: StochasticRounding
+  Category: problem
+  Default: False
+  Valid Values: [False, True]
+  Tested Value: False
+  Coverage: ⚠️ 1/2 (50%)
+  Untested Values: [True]
+
+Parameter: StridedBatched
+  Category: problem
+  Default: True
+  Valid Values: [False, True]
+  Tested Value: True
+  Coverage: ⚠️ 1/2 (50%)
+  Untested Values: [False]
+
+Parameter: SwizzleTensorB
+  Category: problem
+  Default: False
+  Valid Values: [False, True]
+  Tested Value: False
+  Coverage: ⚠️ 1/2 (50%)
+  Untested Values: [True]
+
+Parameter: TileAwareSelection
+  Category: problem
+  Default: False
+  Valid Values: [False, True]
+  Tested Value: False
+  Coverage: ⚠️ 1/2 (50%)
+  Untested Values: [True]
+
+Parameter: UseBeta
+  Category: problem
+  Default: True
+  Valid Values: [False, True]
+  Tested Value: True
+  Coverage: ⚠️ 1/2 (50%)
+  Untested Values: [False]
+
+Parameter: UseInitialStridesAB
+  Category: problem
+  Default: False
+  Valid Values: [False, True]
+  Tested Value: False
+  Coverage: ⚠️ 1/2 (50%)
+  Untested Values: [True]
+
+Parameter: UseInitialStridesCD
+  Category: problem
+  Default: False
+  Valid Values: [False, True]
+  Tested Value: False
+  Coverage: ⚠️ 1/2 (50%)
+  Untested Values: [True]
+
+========================================================================================================================
+SOLUTION PARAMETERS (15 with single value)
+========================================================================================================================
+
+Parameter: DebugStreamK
+  Category: solution
+  Default: None
+  Valid Values: [0, 1, 2, 3]
+  Tested Value: 0
+  Coverage: ⚠️ 2/4 (50%)
+  Untested Values: [1, 2, 3]
+
+Parameter: GlobalReadPerMfma
+  Category: solution
+  Default: None
+  Valid Values: [0.01, 0.02, 0.03]... (3199 total values)
+  Tested Value: 1.0
+  Coverage: ⚠️ 2/3199 (0%)
+  Untested Values: [0.01, 0.02, 0.03]... (3198 values not tested)
+
+Parameter: InnerUnroll
+  Category: solution
+  Default: None
+  Valid Values: [1, 2, 4, 8, 16, 32, 64]
+  Tested Value: 1
+  Coverage: ⚠️ 2/7 (28%)
+  Untested Values: [2, 4, 8, 16, 32, 64]
+
+Parameter: LdsBlockSizePerPadMXSA
+  Category: solution
+  Default: None
+  Valid Values: [-1, 0, 64, 128, 256, 512, 1024, 2048]
+  Tested Value: 0
+  Coverage: ⚠️ 2/8 (25%)
+  Untested Values: [-1, 64, 128, 256, 512, 1024, 2048]
+
+Parameter: LdsBlockSizePerPadMXSB
+  Category: solution
+  Default: None
+  Valid Values: [-1, 0, 64, 128, 256, 512, 1024, 2048]
+  Tested Value: 0
+  Coverage: ⚠️ 2/8 (25%)
+  Untested Values: [-1, 64, 128, 256, 512, 1024, 2048]
+
+Parameter: LdsBlockSizePerPadMetadata
+  Category: solution
+  Default: None
+  Valid Values: [-1, 0, 64, 128, 256, 512, 1024, 2048]
+  Tested Value: 0
+  Coverage: ⚠️ 2/8 (25%)
+  Untested Values: [-1, 64, 128, 256, 512, 1024, 2048]
+
+Parameter: LdsPadMXSA
+  Category: solution
+  Default: None
+  Valid Values: [-1, 0, 1, 2, 3, 4, 8, 16, 32, 48, 64]
+  Tested Value: 0
+  Coverage: ⚠️ 2/11 (18%)
+  Untested Values: [-1, 1, 2, 3, 4, 8, 16, 32, 48, 64]
+
+Parameter: LdsPadMXSB
+  Category: solution
+  Default: None
+  Valid Values: [-1, 0, 1, 2, 3, 4, 8, 16, 32, 48, 64]
+  Tested Value: 0
+  Coverage: ⚠️ 2/11 (18%)
+  Untested Values: [-1, 1, 2, 3, 4, 8, 16, 32, 48, 64]
+
+Parameter: LdsPadMetadata
+  Category: solution
+  Default: None
+  Valid Values: [-1, 0, 1, 2, 3, 4, 8]
+  Tested Value: 0
+  Coverage: ⚠️ 2/7 (28%)
+  Untested Values: [-1, 1, 2, 3, 4, 8]
+
+Parameter: LocalWritePerMfma
+  Category: solution
+  Default: None
+  Valid Values: [0.01, 0.02, 0.03]... (3200 total values)
+  Tested Value: -1
+  Coverage: ⚠️ 2/3200 (0%)
+  Untested Values: [0.01, 0.02, 0.03]... (3199 values not tested)
+
+Parameter: MagicDivAlg
+  Category: solution
+  Default: None
+  Valid Values: [0, 1, 2]
+  Tested Value: 2
+  Coverage: ⚠️ 2/3 (66%)
+  Untested Values: [0, 1]
+
+Parameter: MbskPrefetchMethod
+  Category: solution
+  Default: None
+  Valid Values: [-1, 0, 1]
+  Tested Value: 0
+  Coverage: ⚠️ 2/3 (66%)
+  Untested Values: [-1, 1]
+
+Parameter: Sparse
+  Category: solution
+  Default: None
+  Valid Values: [0, 1, 2]
+  Tested Value: 0
+  Coverage: ⚠️ 2/3 (66%)
+  Untested Values: [1, 2]
+
+Parameter: UseInstOffsetForGRO
+  Category: solution
+  Default: None
+  Valid Values: [-1, 0, 1]
+  Tested Value: 0
+  Coverage: ⚠️ 2/3 (66%)
+  Untested Values: [-1, 1]
+
+Parameter: VectorStore
+  Category: solution
+  Default: None
+  Valid Values: [-1, 0, 1]
+  Tested Value: -1
+  Coverage: ⚠️ 2/3 (66%)
+  Untested Values: [0, 1]
+
