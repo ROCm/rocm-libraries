@@ -13576,6 +13576,7 @@ class KernelWriterAssembly(KernelWriter):
     store), matching their original program order, so SrdD data dependencies
     (allocPostLoopSrd base -> computeStoreSrdStart offsets) stay valid.
     """
+    from .Components.Subtile.LogicalScheduler import WEAVE_UNIT_ALU, WEAVE_UNIT_BLOCK
     def _isMem(i):
       return isinstance(i, _PLSIN_STOREINIT_MEM_INSTS)
     def _isBrace(i):
@@ -13588,7 +13589,7 @@ class KernelWriterAssembly(KernelWriter):
       if _isMem(inst):
         break
       if not _isBrace(inst):
-        units.append(('alu', inst))
+        units.append((WEAVE_UNIT_ALU, inst))
         i += 1
         continue
       # Open a contiguous branch/label/compare region; keep it atomic while any
@@ -13618,7 +13619,7 @@ class KernelWriterAssembly(KernelWriter):
         # this region or anything after it.
         i = blockStart
         break
-      units.append(('block', block))
+      units.append((WEAVE_UNIT_BLOCK, block))
     remainder = flat[i:]
     return units, remainder
 
@@ -14061,7 +14062,7 @@ class KernelWriterAssembly(KernelWriter):
           for _idx in _vt.regList.indices:
             _protected.add(_idx)
     lentVgprs = []
-    for _base, _size in (getattr(self.states, "subtileFusedLendVgprs", None) or []):
+    for _base, _size in (self.states.subtileFusedLendVgprs or []):
       if any((_base + _k) in _protected for _k in range(_size)):
         continue
       try:
@@ -14091,10 +14092,10 @@ class KernelWriterAssembly(KernelWriter):
     # mainLoop). Allocate them NLL-locally from the drain-era pool and undefine
     # after the store so the post-loop PLAIN arm's own defines stay independent. ---
     savedStoreAlign8   = getattr(self.states, "storeAlign8", False)
-    savedM32Sgpr       = getattr(self.states, "subtileM32ValidBlocksSgpr", None)
-    savedN16Sgpr       = getattr(self.states, "subtileN16ValidBlocksSgpr", None)
-    savedTotalMOffSgpr = getattr(self.states, "subtileTotalMOffsetSgpr", None)
-    savedMBlockSize    = getattr(self.states, "subtileMBlockSize", 0)
+    savedM32Sgpr       = self.states.subtileM32ValidBlocksSgpr
+    savedN16Sgpr       = self.states.subtileN16ValidBlocksSgpr
+    savedTotalMOffSgpr = self.states.subtileTotalMOffsetSgpr
+    savedMBlockSize    = self.states.subtileMBlockSize
     self.states.storeAlign8 = True
     # Use defineSgpr (not defineSgprIdx) so the checkout skips vars currently
     # parked in freeSgprVarPool. On StreamK the workspace SRD (SrdWS) is parked
@@ -14249,7 +14250,7 @@ class KernelWriterAssembly(KernelWriter):
     # once, completing the checkout(NGLL)/checkin(store) pairing. Clear the flag so
     # each NGLL_Cui/NLL_Cui pair is matched and the PLAIN post-loop store (which runs
     # after all NLL copies) recomputes its own indices normally.
-    _hoistedIdx = getattr(self.states, "subtileHoistedWriteIndices", None)
+    _hoistedIdx = self.states.subtileHoistedWriteIndices
     if _hoistedIdx:
       module.addComment0("PostLoopStoreInNll init-hoist: reuse coord0/1/coutRowPtrD from PostLoopInitInNGLL")
       self.vgprs.coord0         = _hoistedIdx["coord0"]
@@ -14267,11 +14268,11 @@ class KernelWriterAssembly(KernelWriter):
     # 4d-3b weave: route accvgpr reads PER PAIR (into each pair's Phase1) instead of
     # the up-front batch block, so terminal MFMAs can later be interleaved between
     # Phase1/Phase2 to hide the ds_bpermute latency (see GlobalWriteBatch weave path).
-    savedWeave = getattr(self.states, "subtileFusedWeave", False)
+    savedWeave = self.states.subtileFusedWeave
     self.states.subtileFusedWeave = True
     # StreamK: this store is a full-tile owner (front guard guaranteed), so suppress
     # the SK workspace store-branches / partials / fixup — write D directly.
-    savedFusedFullTile = getattr(self.states, "subtileFusedFullTileStore", False)
+    savedFusedFullTile = self.states.subtileFusedFullTileStore
     self.states.subtileFusedFullTileStore = True
     # applyAlpha=True: apply the effective alpha (= user Alpha, with scaleA*scaleB
     # folded in for scalar UseScaleAB) to the accumulators before the paired D store.
@@ -16333,7 +16334,7 @@ class KernelWriterAssembly(KernelWriter):
       #   kernargs, so undefining them in the fused pass leaves them UNDEF for those
       #   downstream consumers ("expected absolute expression"). The fused caller
       #   reclaims its own transient Srd* SGPRs (see buildSubtileFusedStore cleanup).
-      _fusedFullTile = getattr(self.states, "subtileFusedFullTileStore", False)
+      _fusedFullTile = self.states.subtileFusedFullTileStore
       if (not _fusedFullTile) and gsuLimit > 1 and gsuLimitIdx == 0:
         if kernel["ProblemType"]["UseScaleAB"]:
           if not self.states.preloadScaleA:
@@ -16602,7 +16603,7 @@ class KernelWriterAssembly(KernelWriter):
       # partials, no fixup/reduction. Suppress the SK store-branches + writePartials
       # (their deferred Fixup/Partials blocks are emitted only by the post-loop store,
       # so referencing them from the NLL would leave undefined symbols).
-      fusedFullTileStore = getattr(self.states, "subtileFusedFullTileStore", False)
+      fusedFullTileStore = self.states.subtileFusedFullTileStore
       if not fusedFullTileStore:
         module.add(skComponent.storeBranches(self, kernel, skPartialsLabel, vectorWidths_1, elements_1, tmpVgpr.idx, cvtVgprStruct))
 
@@ -17105,7 +17106,7 @@ class KernelWriterAssembly(KernelWriter):
         # the activation type that happens to be emitted first). Re-arm a fresh deep
         # copy of the pristine master groups and reset the emitted set / pair counter
         # for each activation type so every duplicated store weaves its own MFMAs.
-        _weaveMaster = getattr(self.states, "subtileWeaveMfmaGroupsMaster", None)
+        _weaveMaster = self.states.subtileWeaveMfmaGroupsMaster
         if _weaveMaster is not None:
           self.states.subtileWeaveMfmaGroups = deepcopy(_weaveMaster)
           self.states.subtileWeaveEmitted = set()

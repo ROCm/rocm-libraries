@@ -380,6 +380,24 @@ class StateValues:
   postLoopStoreInNll: bool               = False
   postLoopStoreInjected: bool            = False
   postLoopSrdDHoisted: bool              = False
+  # PostLoopStoreInNll (PLSIN) store/init-weave state (B2). Declared here so the
+  # fused-store weave communicates through typed StateValues fields instead of
+  # dynamically-attached, stringly-typed getattr-with-default attributes. All
+  # default to the "not weaving" value, so a non-PLSIN kernel is unaffected.
+  subtileFusedWeave: bool                = False   # inside the fused-NLL weave store
+  subtileFusedFullTileStore: bool        = False   # fused store is the full-tile (no-edge) arm
+  subtileWeaveLookahead: int             = 4       # store-pairs ahead a pair's MFMAs are issued
+  subtileWeavePairCounter: int           = 0       # next store-pair index being emitted
+  subtileMBlockSize: int                 = 0       # OOB-guard M block size (MatrixInstM)
+  subtileWeaveMfmaGroups: Optional[dict] = None    # {pair: [terminal mfma insts]} being woven
+  subtileWeaveMfmaGroupsMaster: Optional[dict] = None  # pristine master re-copied per store type
+  subtileWeaveEmitted: Optional[set]     = None    # store-pairs whose MFMAs are already emitted
+  subtileHoistedStoreInit: Optional[list] = None   # split store-init units hoisted into the loop
+  subtileHoistedWriteIndices: Optional[dict] = None  # coord VGPRs hoisted from NGLL
+  subtileFusedLendVgprs: Optional[list]  = None    # [(base,size)] VGPRs lent to the fused store
+  subtileM32ValidBlocksSgpr: Optional[int] = None  # SubtileMGuard SGPR
+  subtileN16ValidBlocksSgpr: Optional[int] = None  # SubtileNGuard SGPR
+  # (subtileTotalMOffsetSgpr is declared with the other KWA SGPR fields above)
   staggerUCode: bool                     = 0
   scheduleGROverBarrier: bool            = False
   numLDSBlk: int                         = 0

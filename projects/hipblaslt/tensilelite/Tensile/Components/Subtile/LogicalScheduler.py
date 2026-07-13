@@ -40,6 +40,18 @@ from ...Common import plsinDebugEnv
 # ds_load_b128 reads 4 contiguous VGPRs.
 DS_B128_VGPRS = 4
 
+# PostLoopStoreInNll store-init weave unit kinds (B2): the split-unit contract
+# between the producer KernelWriterAssembly._splitHoistableStoreInit and the
+# consumer _weaveStoreInitIntoLoop (below). Each hoistable unit is a 2-tuple:
+#   (WEAVE_UNIT_ALU,   inst)      one scatterable pure-ALU / RegSet instruction,
+#                                 dropped one-per-MFMA-gap (SCC carry chains kept
+#                                 together via _readsScc)
+#   (WEAVE_UNIT_BLOCK, [insts])   a self-contained branch/label/compare region,
+#                                 dropped CONTIGUOUSLY into one gap so a taken
+#                                 branch never jumps across an interleaved loop MFMA
+WEAVE_UNIT_ALU = 'alu'
+WEAVE_UNIT_BLOCK = 'block'
+
 def _checkout_tile(pool, numRegs, tag):
     """Check out one VGPR tile as a single contiguous, min(numRegs, 4)-aligned block (b128-aligned when numRegs >= 4)."""
     from Tensile.Components.Subtile.Kernel import RegisterTileInfo
@@ -3585,8 +3597,8 @@ class LogicalScheduler:
         else:
             weaveGroups = self._extractTerminalMfmaGroups(fusedEmitted, keepInLoop=weaveLA)
             writer.states.subtileFusedLendVgprs = []
-        savedGroups = getattr(writer.states, "subtileWeaveMfmaGroups", None)
-        savedMaster = getattr(writer.states, "subtileWeaveMfmaGroupsMaster", None)
+        savedGroups = writer.states.subtileWeaveMfmaGroups
+        savedMaster = writer.states.subtileWeaveMfmaGroupsMaster
         # weaveGroups is the pristine master: its terminal-MFMA instruction objects
         # are NEVER added to a module directly. The fused store body is duplicated
         # once per activation type (ActivationType=all), and each duplicate must
@@ -3612,7 +3624,7 @@ class LogicalScheduler:
         # setup overlaps matrix compute. The remainder (branch/memory-bearing tail) was
         # already emitted inside storeModule at its original position, before the store
         # body's use of SrdD, so data dependencies stay intact.
-        hoistUnits = getattr(writer.states, "subtileHoistedStoreInit", None)
+        hoistUnits = writer.states.subtileHoistedStoreInit
         if hoistUnits:
             fusedLoopModule = self._weaveStoreInitIntoLoop(fusedLoopModule, hoistUnits,
                                                            f"{label}_FUSED")
@@ -3731,13 +3743,13 @@ class LogicalScheduler:
             greedily pulls any immediately-following SCC-consumer alu units so an
             add/addc carry chain is never split across MFMA gaps). Returns next uidx."""
             kind, payload = units[uidx]
-            if kind == 'block':
+            if kind == WEAVE_UNIT_BLOCK:
                 for bi in payload:
                     woven.add(bi)
                 return uidx + 1
             woven.add(payload)
             uidx += 1
-            while uidx < nU and units[uidx][0] == 'alu' and _readsScc(units[uidx][1]):
+            while uidx < nU and units[uidx][0] == WEAVE_UNIT_ALU and _readsScc(units[uidx][1]):
                 woven.add(units[uidx][1])
                 uidx += 1
             return uidx
