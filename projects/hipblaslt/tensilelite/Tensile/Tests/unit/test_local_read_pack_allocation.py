@@ -123,6 +123,72 @@ def test_direct_to_vgpr_allocates_valu_pack_only_for_pack_or_conversion():
     assert writer.localReadNeedsValuPack(kernel, tensor)
 
 
+@pytest.mark.parametrize("tensor_char", ["A", "B"])
+def test_vectorized_wmma_v1_half_selects_d16_local_read(tensor_char):
+    writer = _writer()
+    instructions = {
+        "LocalRead": [
+            MemoryInstruction(DSLoadB32, 1, 1, 1, 1),
+            MemoryInstruction(DSLoadU16, 1, 1, 1, 0.5),
+        ]
+    }
+    writer.memoryInstructions = instructions
+    tensor = _tensor(tensor_char, instructions["LocalRead"][0])
+
+    writer.initLocalReadMemoryInstruction(instructions, _kernel(), tensor, 4)
+
+    assert tensor["localReadInstruction"].blockWidth == 0.5
+    assert tensor["localReadInstruction"].inst is DSLoadU16
+
+
+@pytest.mark.parametrize(
+    "kernel_overrides, writer_overrides",
+    [
+        ({"ConvertAfterDS": True}, {}),
+        ({"EnableMatrixInstruction": False}, {}),
+        ({}, {"has_wmma_v1": False}),
+    ],
+)
+def test_non_vectorized_wmma_v1_half_keeps_regular_local_read(
+    kernel_overrides, writer_overrides
+):
+    writer = _writer(**writer_overrides)
+    instructions = {
+        "LocalRead": [
+            MemoryInstruction(DSLoadB32, 1, 1, 1, 1),
+            MemoryInstruction(DSLoadU16, 1, 1, 1, 0.5),
+        ]
+    }
+    writer.memoryInstructions = instructions
+    tensor = _tensor("B", instructions["LocalRead"][0])
+
+    writer.initLocalReadMemoryInstruction(
+        instructions,
+        _kernel(**kernel_overrides),
+        tensor,
+        4,
+    )
+
+    assert tensor["localReadInstruction"].blockWidth == 1
+    assert tensor["localReadInstruction"].inst is DSLoadB32
+
+
+def test_scalar_half_selects_d16_from_requested_width():
+    writer = _writer(lrvw_tile=1)
+    instructions = {
+        "LocalRead": [
+            MemoryInstruction(DSLoadB32, 1, 1, 1, 1),
+            MemoryInstruction(DSLoadU16, 1, 1, 1, 0.5),
+        ]
+    }
+    writer.memoryInstructions = instructions
+    tensor = _tensor("B", instructions["LocalRead"][0])
+
+    writer.initLocalReadMemoryInstruction(instructions, _kernel(), tensor, 4)
+
+    assert tensor["localReadInstruction"].inst is DSLoadU16
+
+
 @pytest.mark.parametrize(
     "instruction, bpe, lrvw_tile, expected",
     [

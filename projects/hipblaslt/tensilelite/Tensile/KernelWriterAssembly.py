@@ -379,7 +379,7 @@ class KernelWriterAssembly(KernelWriter):
   # Find Memory Instruction For Width and Stride
   ##############################################################################
   def findMemoryInstructionForWidthStride(self, width, strides, combine, \
-      instructions):
+      instructions, maxBlockWidth=None):
     for i in range(0, len(instructions)):
       instruction = instructions[i]
       numAddresses = instruction.numAddresses
@@ -389,7 +389,10 @@ class KernelWriterAssembly(KernelWriter):
       valid = True
       if width < blockWidth:
         valid = False
-      
+
+      if maxBlockWidth is not None and blockWidth > maxBlockWidth:
+        valid = False
+
       if ((width / blockWidth) != floor(width / blockWidth)):
         valid = False
 
@@ -419,7 +422,8 @@ class KernelWriterAssembly(KernelWriter):
       write2, # Para, Perp, None
       para2, # NumLoadsPara >= 2
       perp2, # NumLoadsPerp >= 2
-      strides ):
+      strides,
+      maxBlockWidth=None):
 
     #instructions = self.memoryArchitecture[operation]
     instructions = self.memoryInstructions[operation]
@@ -427,11 +431,11 @@ class KernelWriterAssembly(KernelWriter):
     if (write2 == "Coalesced" and para2) \
         or (write2 == "Perpendicular" and perp2):
       instructionIdx = self.findMemoryInstructionForWidthStride( \
-          width, strides, True, instructions)
+          width, strides, True, instructions, maxBlockWidth)
     # don't or can't combine
     else:
       instructionIdx = self.findMemoryInstructionForWidthStride( \
-          width, strides, False, instructions)
+          width, strides, False, instructions, maxBlockWidth)
 
     if instructionIdx < len(instructions): # found
       return instructionIdx
@@ -546,10 +550,20 @@ class KernelWriterAssembly(KernelWriter):
       loadNumReturnVgrp = min(int(localReadWidth*kernel["MIInputPerThread"]), maxTrLoadNumReturnedVgpr) if tChar != "Metadata" else 2
       localReadInstructionIdx = self.selectTransposedDSReadInstuctionIdx(loadNumReturnVgrp, tP["bpeDS"])
     else:
+      localReadElementWidth = tP["bpeDS"] / bpr
+      maxLocalReadBlockWidth = None
+      if (tChar in ("A", "B")
+          and kernel["EnableMatrixInstruction"]
+          and self.states.asmCaps["HasWMMA_V1"]
+          and not kernel["ConvertAfterDS"]
+          and tP["bpeDS"] == 2
+          and localReadWidth > localReadElementWidth):
+        # WMMA_V1 vector elements use separate K-strided LDS addresses.
+        maxLocalReadBlockWidth = localReadElementWidth
       localReadInstructionIdx = self.selectMemoryInstruction("LocalRead", localReadWidth, \
                                  False, \
                                  localRead2Coalesced, localRead2Perpendicular,
-                                 [localReadStrideCoalesced] )
+                                 [localReadStrideCoalesced], maxLocalReadBlockWidth)
     tP["localRead2Coalesced"]      = localRead2Coalesced
     tP["localRead2Perpendicular"]  = localRead2Perpendicular
     tP["localReadStrideCoalesced"] = localReadStrideCoalesced
