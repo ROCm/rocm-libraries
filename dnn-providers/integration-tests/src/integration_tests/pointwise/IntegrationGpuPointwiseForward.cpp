@@ -91,9 +91,14 @@ protected:
         runGraphTest(1e-5f);
     }
 
-    // NOTE: tolerance is fixed here rather than resolved via this->getTolerance(), pending
-    // a harness change to support graphs whose only/root node is a PointwiseNode (see PR
-    // discussion). Should be revisited once that's resolved.
+    // Tolerance is a fixed per-dtype constant rather than resolved via
+    // this->getTolerance(). That helper determines tolerance by walking the graph
+    // for a "root op" other than PointwiseNode (so that, e.g., a Conv+ReLU fused
+    // graph is toleranced based on Conv, not the fused activation). These tests
+    // build graphs whose only node is the PointwiseNode itself, so no such root op
+    // exists and getTolerance() would fail to resolve a tolerance. Once the harness
+    // supports a standalone PointwiseNode as its own root, this should switch to
+    // this->getTolerance(graphObj, outputs.y) like the other suites.
     void runGraphTest(float tolerance)
     {
         const auto& testCase = this->GetParam();
