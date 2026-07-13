@@ -128,6 +128,68 @@ python3 migration_scripts/import_graph.py \
 Dedup-aware placement. Default: skip exact duplicates. `--strict` exits
 non-zero on dup (CI mode). `--force` appends regardless.
 
+## Filtering and Running Bundles
+
+Bundle suites register under gtest as `{tier}_{Op}_{Topology}` (e.g.
+`quick_Batchnorm_Default`). Each case within a suite is named by its
+case id. Use `--gtest_filter` to target exactly what you need:
+
+```bash
+# Run all quick-tier bundles
+--gtest_filter='quick_*'
+
+# Run all batchnorm cases (any tier)
+--gtest_filter='*Batchnorm*'
+
+# Run all bfp16 nhwc cases across all ops
+--gtest_filter='*bfp16_nhwc*'
+
+# Run all 1x3x14 shapes
+--gtest_filter='*1_3_14_*'
+
+# Run one exact case (by hash suffix)
+--gtest_filter='*f446b9*'
+
+# Combine: quick batchnorm, only fp32
+--gtest_filter='quick_Batchnorm_*/*fp32*'
+```
+
+When two cases share the same shape/dtype/layout but differ in input
+ranges or seeds, a 6-char content hash is appended to disambiguate:
+
+```
+1_3_14_bfp16_ncl          ← unique readable prefix, no hash needed
+1_3_14_bfp16_ncl_abc123   ← same prefix, different input ranges
+1_3_14_bfp16_ncl_def456   ← same prefix, different input ranges
+```
+
+To see what a hashed case actually contains, open the `CASES.md` file
+next to the sweep — it maps every id to its shape, dtype, layout, and
+per-tensor input ranges with role names:
+
+```
+| id | shape | dtype | layout | inputs |
+| `1_3_14_bfp16_ncl_abc123` | 1x3x14 | bfp16 | ncl | epsilon[-1,1] seed=1 | scale[-2,2] seed=2 |
+| `1_3_14_bfp16_ncl_def456` | 1x3x14 | bfp16 | ncl | epsilon[-0.5,0.5] seed=1 | scale[-1,1] seed=2 |
+```
+
+### Adding new test cases
+
+New tests should be added directly as bundle cases — no C++ needed:
+
+```bash
+# From a JSON graph file (dedup-aware)
+python3 migration_scripts/import_graph.py \
+    --graph new_conv.json \
+    --bundle-dir integration_test_bundles/
+
+# Or edit sweep.json directly: add a new entry to the "cases" array
+# with its own "id", "values", and "metadata" block.
+```
+
+The migration pipeline (`run_capture_pipeline.sh`) is a one-time
+conversion tool. Going forward, the bundle tree is the source of truth.
+
 ## Verification
 
 Two hops prove the migration; two supporting checks guard the tooling:

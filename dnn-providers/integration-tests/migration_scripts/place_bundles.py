@@ -309,7 +309,7 @@ def write_sweep(
             json.dump(sweep, f, indent=2)
             f.write("\n")
         with open(out_dir / "CASES.md", "w") as f:
-            f.write(render_cases_md(bucket.topology_name, sweep_cases))
+            f.write(render_cases_md(bucket.topology_name, sweep_cases, template))
     return out_dir
 
 
