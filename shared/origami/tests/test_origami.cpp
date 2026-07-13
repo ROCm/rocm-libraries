@@ -1000,31 +1000,52 @@ TEST_CASE("Origami: select_workgroup_mapping unit test", "[Origami]") {
       REQUIRE(out_wgm.wgmxccchunk == default_wgmxccchunk);
       REQUIRE(out_wgm.wgmxcc == default_wgmxcc);
       if (gpu_arch == 942)
-        REQUIRE(out_wgm.wgm == 4);
+        REQUIRE(out_wgm.wgm == 8);
       else if (gpu_arch == 950)
-        REQUIRE(out_wgm.wgm == 4);
+        REQUIRE(out_wgm.wgm == 8);
+      else if (gpu_arch == 1250)
+        REQUIRE(out_wgm.wgm == 8);
 
-      // Test 8: K-split StreamK (skGrid > tiles) must NOT use the chunk transform.
-      // Splitting a tile across multiple workgroups requires the StreamK fixup, whose
-      // spin-wait handoff assumes a tile's co-op workgroups stay in consecutive physical
-      // order. The chunk remap reorders them and can deadlock, so chunking must be off.
+      // Test 8: K-coherent split-K mapping is selected when split-K workgroups
+      // cover cache-line-aligned K chunks and the split factor is useful across XCDs.
       {
-        auto skGrid_split = 2 * numMT_M * numMT_N;  // split_factor = 2 (skGrid > tiles)
+        auto split_config = config;
+        split_config.mt.k = 64;  // bf16: 64 * 2 bytes == one 128B cache line
+        auto skGrid_split = 2 * numMT_M * numMT_N;
 
-        // Non-temporal case that produces a non-zero chunk for a data-parallel grid
-        // (see Test 1) must report chunk == 0 once the grid is K-split.
-        config.cache_hints_a = 4;
-        config.cache_hints_b = 3;
-        auto out_wgm_split_nt =
-            origami::select_workgroup_mapping(problem, hardware, config, skGrid_split);
-        REQUIRE(out_wgm_split_nt.wgmxccchunk == 0);
-        config.cache_hints_a = 0;
-        config.cache_hints_b = 0;
+        auto out_wgm_splitk =
+            origami::select_workgroup_mapping(problem, hardware, split_config, skGrid_split);
+        REQUIRE(out_wgm_splitk.wgmxccsplitk == 2);
+        REQUIRE(out_wgm_splitk.wgmxccchunk == skGrid_split / hardware.NUM_XCD);
+        REQUIRE(out_wgm_splitk.wgmxcc == hardware.NUM_XCD);
+      }
 
-        // Main path (no cache hints) must also report chunk == 0 when K-split.
-        auto out_wgm_split =
-            origami::select_workgroup_mapping(problem, hardware, config, skGrid_split);
-        REQUIRE(out_wgm_split.wgmxccchunk == 0);
+      // Non-multiple skGrid is allowed: the first K*MN workgroups are remapped and
+      // tail workgroups are identity-mapped by codegen.
+      {
+        auto split_config = config;
+        split_config.mt.k = 64;
+        auto skGrid_with_tail = 3 * numMT_M * numMT_N + 1;
+
+        auto out_wgm_splitk_tail =
+            origami::select_workgroup_mapping(problem, hardware, split_config, skGrid_with_tail);
+        REQUIRE(out_wgm_splitk_tail.wgmxccsplitk == 3);
+        REQUIRE(out_wgm_splitk_tail.wgmxccchunk == skGrid_with_tail / hardware.NUM_XCD);
+        REQUIRE(out_wgm_splitk_tail.wgmxcc == hardware.NUM_XCD);
+      }
+
+      // If the split factor is already XCD-aligned, hardware round-robin dispatch
+      // distributes k-splits evenly and K-coherent remapping should stay disabled.
+      {
+        auto split_config = config;
+        split_config.mt.k = 64;
+        auto skGrid_xcd_aligned = hardware.NUM_XCD * numMT_M * numMT_N;
+
+        auto out_wgm_splitk_xcd_aligned =
+            origami::select_workgroup_mapping(problem, hardware, split_config, skGrid_xcd_aligned);
+        REQUIRE(out_wgm_splitk_xcd_aligned.wgmxccsplitk == 0);
+        REQUIRE(out_wgm_splitk_xcd_aligned.wgmxccchunk == 0);
+        REQUIRE(out_wgm_splitk_xcd_aligned.wgmxcc == 0);
       }
     }
   }

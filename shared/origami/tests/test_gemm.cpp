@@ -1102,7 +1102,7 @@ TEST_CASE("GEMM: count_unique_tiles unit test", "[gemm]") {
   SECTION("grid_b=64, grid_k=1, wgmxcc=1 — round-robin strided across batches") {
     // Grid: 2×2×1×64, wgm=1, wgmxcc=1 (no wgmxcc)
     // stride=8, mnk=4, each strided tile lands in a different batch
-    auto u = origami::count_unique_tiles({1, 2, 2, 64}, {0, 0, 1, 1}, N_CU, num_xcd, 0, 0);
+    auto u = origami::gemm::count_unique_tiles({1, 2, 2, 64}, {0, 0, 1, 1}, N_CU, num_xcd, 0, 0);
     CHECK(u.k == 1);
     CHECK(u.m == 1);
     CHECK(u.n == 1);
@@ -1112,7 +1112,7 @@ TEST_CASE("GEMM: count_unique_tiles unit test", "[gemm]") {
   SECTION("grid_b=64, grid_k=1, wgmxcc=8 — contiguous block spans all mn per batch") {
     // Grid: 2×2×1×64, wgm=1, wgmxcc=8
     // Each XCD gets 32 contiguous tiles -> 4 mn × 8 batches
-    auto u = origami::count_unique_tiles({1, 2, 2, 64}, {0, 0, 8, 1}, N_CU, num_xcd, 0, 0);
+    auto u = origami::gemm::count_unique_tiles({1, 2, 2, 64}, {0, 0, 8, 1}, N_CU, num_xcd, 0, 0);
     CHECK(u.k == 1);
     CHECK(u.m == 2);
     CHECK(u.n == 2);
@@ -1122,7 +1122,7 @@ TEST_CASE("GEMM: count_unique_tiles unit test", "[gemm]") {
   SECTION("grid_k=64, grid_b=1, wgmxcc=1 — round-robin strided across k-splits") {
     // Grid: 2×2×64×1, wgm=1, wgmxcc=1
     // stride=8 cycles through k: unique_k = 64/gcd(8,64) = 8
-    auto u = origami::count_unique_tiles({64, 2, 2, 1}, {0, 0, 1, 1}, N_CU, num_xcd, 0, 0);
+    auto u = origami::gemm::count_unique_tiles({64, 2, 2, 1}, {0, 0, 1, 1}, N_CU, num_xcd, 0, 0);
     CHECK(u.k == 8);
     CHECK(u.m == 2);
     CHECK(u.n == 2);
@@ -1132,7 +1132,7 @@ TEST_CASE("GEMM: count_unique_tiles unit test", "[gemm]") {
   SECTION("grid_k=64, grid_b=1, wgmxcc=8 — contiguous block within one mn tile") {
     // Grid: 2×2×64×1, wgm=1, wgmxcc=8
     // Each XCD gets 32 contiguous tiles -> 32 k-splits in mn_id=0
-    auto u = origami::count_unique_tiles({64, 2, 2, 1}, {0, 0, 8, 1}, N_CU, num_xcd, 0, 0);
+    auto u = origami::gemm::count_unique_tiles({64, 2, 2, 1}, {0, 0, 8, 1}, N_CU, num_xcd, 0, 0);
     CHECK(u.k == 32);
     CHECK(u.m == 1);
     CHECK(u.n == 1);
@@ -1142,7 +1142,7 @@ TEST_CASE("GEMM: count_unique_tiles unit test", "[gemm]") {
   SECTION("16×16 grid, wgmxcc=8, wgm=4 — contiguous block in first WGM slab") {
     // Grid: 16×16×1×1, wgm=4, wgmxcc=8
     // 32 contiguous tiles → 8 m-rows × 4 n-columns (one slab)
-    auto u = origami::count_unique_tiles({1, 16, 16, 1}, {0, 0, 8, 4}, N_CU, num_xcd, 0, 0);
+    auto u = origami::gemm::count_unique_tiles({1, 16, 16, 1}, {0, 0, 8, 4}, N_CU, num_xcd, 0, 0);
     CHECK(u.k == 1);
     CHECK(u.m == 8);
     CHECK(u.n == 4);
@@ -1152,7 +1152,7 @@ TEST_CASE("GEMM: count_unique_tiles unit test", "[gemm]") {
   SECTION("8×8 grid with k=4, wgmxcc=8, wgm=2 — mixed k and mn") {
     // Grid: 8×8×4×1, wgm=2, wgmxcc=8
     // 32 contiguous tiles → 4 k-splits × 4 m-rows × 2 n-columns
-    auto u = origami::count_unique_tiles({4, 8, 8, 1}, {0, 0, 8, 2}, N_CU, num_xcd, 0, 0);
+    auto u = origami::gemm::count_unique_tiles({4, 8, 8, 1}, {0, 0, 8, 2}, N_CU, num_xcd, 0, 0);
     CHECK(u.k == 4);
     CHECK(u.m == 4);
     CHECK(u.n == 2);
@@ -1162,7 +1162,7 @@ TEST_CASE("GEMM: count_unique_tiles unit test", "[gemm]") {
   SECTION("All XCDs report the same unique counts") {
     // With wgmxcc=8, all XCDs should see the same tile structure
     for (size_t xcd = 0; xcd < num_xcd; ++xcd) {
-      auto u = origami::count_unique_tiles({1, 16, 16, 1}, {0, 0, 8, 4}, N_CU, num_xcd, xcd, 0);
+      auto u = origami::gemm::count_unique_tiles({1, 16, 16, 1}, {0, 0, 8, 4}, N_CU, num_xcd, xcd, 0);
       CHECK(u.k == 1);
       CHECK(u.m == 8);
       CHECK(u.n == 4);
@@ -1171,16 +1171,16 @@ TEST_CASE("GEMM: count_unique_tiles unit test", "[gemm]") {
   }
 
   SECTION("Zero/degenerate inputs return zeros") {
-    CHECK(origami::count_unique_tiles({1, 4, 4, 1}, {0, 0, 8, 4}, 0, 8, 0, 0).m == 0);
-    CHECK(origami::count_unique_tiles({1, 4, 4, 1}, {0, 0, 8, 4}, 256, 0, 0, 0).m == 0);
-    CHECK(origami::count_unique_tiles({1, 0, 4, 1}, {0, 0, 8, 4}, 256, 8, 0, 0).m == 0);
-    CHECK(origami::count_unique_tiles({0, 4, 4, 1}, {0, 0, 8, 4}, 256, 8, 0, 0).k == 0);
+    CHECK(origami::gemm::count_unique_tiles({1, 4, 4, 1}, {0, 0, 8, 4}, 0, 8, 0, 0).m == 0);
+    CHECK(origami::gemm::count_unique_tiles({1, 4, 4, 1}, {0, 0, 8, 4}, 256, 0, 0, 0).m == 0);
+    CHECK(origami::gemm::count_unique_tiles({1, 0, 4, 1}, {0, 0, 8, 4}, 256, 8, 0, 0).m == 0);
+    CHECK(origami::gemm::count_unique_tiles({0, 4, 4, 1}, {0, 0, 8, 4}, 256, 8, 0, 0).k == 0);
   }
 
   SECTION("Timestep beyond available tiles returns zeros") {
     // 16 tiles total, 256 CUs -> 1 timestep. Timestep 1 should be empty.
     origami::dim4_t grid{1, 4, 4, 1};
-    auto u = origami::count_unique_tiles(grid, {0, 0, 1, 4}, N_CU, num_xcd, 0, 1);
+    auto u = origami::gemm::count_unique_tiles(grid, {0, 0, 1, 4}, N_CU, num_xcd, 0, 1);
     CHECK(u.m == 0);
     CHECK(u.n == 0);
     CHECK(u.k == 0);
@@ -1189,13 +1189,13 @@ TEST_CASE("GEMM: count_unique_tiles unit test", "[gemm]") {
 
   SECTION("Single tile grid — all XCDs see at most 1 tile") {
     origami::dim4_t grid{1, 1, 1, 1};
-    auto u0 = origami::count_unique_tiles(grid, {0, 0, 1, 1}, N_CU, num_xcd, 0, 0);
+    auto u0 = origami::gemm::count_unique_tiles(grid, {0, 0, 1, 1}, N_CU, num_xcd, 0, 0);
     CHECK(u0.m == 1);
     CHECK(u0.n == 1);
     CHECK(u0.k == 1);
     CHECK(u0.b == 1);
     // XCD 1 should get nothing (only 1 tile, XCD 0 gets it)
-    auto u1 = origami::count_unique_tiles(grid, {0, 0, 1, 1}, N_CU, num_xcd, 1, 0);
+    auto u1 = origami::gemm::count_unique_tiles(grid, {0, 0, 1, 1}, N_CU, num_xcd, 1, 0);
     CHECK(u1.m == 0);
   }
 
@@ -1203,7 +1203,7 @@ TEST_CASE("GEMM: count_unique_tiles unit test", "[gemm]") {
     // 32x32 grid = 1024 tiles, 256 CUs, 8 XCDs -> 32 tiles/XCD.
     // stride=8 across 1024 MN tiles -> each XCD sees many M and N values.
     origami::dim4_t grid{1, 32, 32, 1};
-    auto u = origami::count_unique_tiles(grid, {0, 0, 1, 4}, N_CU, num_xcd, 0, 0);
+    auto u = origami::gemm::count_unique_tiles(grid, {0, 0, 1, 4}, N_CU, num_xcd, 0, 0);
     CHECK(u.k == 1);
     CHECK(u.m >= 1);
     CHECK(u.m <= 32);
@@ -1216,7 +1216,7 @@ TEST_CASE("GEMM: count_unique_tiles unit test", "[gemm]") {
     // grid.k=8, stride=8 -> gcd=8, unique_k = 8/8 = 1.
     // Each XCD sees a single K-split but many MN tiles.
     origami::dim4_t grid{8, 4, 4, 1};
-    auto u = origami::count_unique_tiles(grid, {0, 0, 1, 4}, N_CU, num_xcd, 0, 0);
+    auto u = origami::gemm::count_unique_tiles(grid, {0, 0, 1, 4}, N_CU, num_xcd, 0, 0);
     CHECK(u.k == 1);
     CHECK(u.m >= 1);
     CHECK(u.n >= 1);
@@ -1225,15 +1225,15 @@ TEST_CASE("GEMM: count_unique_tiles unit test", "[gemm]") {
   SECTION("Round-robin: stride coprime with grid.k") {
     // grid.k=3, stride=8 -> gcd(8,3)=1, unique_k = 3/1 = 3 (all K-splits).
     origami::dim4_t grid{3, 4, 4, 1};
-    auto u = origami::count_unique_tiles(grid, {0, 0, 1, 4}, N_CU, num_xcd, 0, 0);
+    auto u = origami::gemm::count_unique_tiles(grid, {0, 0, 1, 4}, N_CU, num_xcd, 0, 0);
     CHECK(u.k == 3);
   }
 
   SECTION("WGMXCC: last XCD gets correct tiles") {
     // 256 tiles, 8 XCDs -> 32 per XCD. Last XCD starts at 7*32=224.
     origami::dim4_t grid{1, 16, 16, 1};
-    auto u_first = origami::count_unique_tiles(grid, {0, 0, 8, 4}, N_CU, num_xcd, 0, 0);
-    auto u_last  = origami::count_unique_tiles(grid, {0, 0, 8, 4}, N_CU, num_xcd, 7, 0);
+    auto u_first = origami::gemm::count_unique_tiles(grid, {0, 0, 8, 4}, N_CU, num_xcd, 0, 0);
+    auto u_last  = origami::gemm::count_unique_tiles(grid, {0, 0, 8, 4}, N_CU, num_xcd, 7, 0);
     // Both should get same structure with symmetric grid
     CHECK(u_first.k == u_last.k);
     CHECK(u_first.b == u_last.b);
@@ -1258,7 +1258,7 @@ TEST_CASE("GEMM: count_unique_tiles unit test", "[gemm]") {
     for (auto& g : grids) {
       for (auto& w : wgms) {
         for (size_t xcd = 0; xcd < num_xcd; ++xcd) {
-          auto u = origami::count_unique_tiles(g, w, N_CU, num_xcd, xcd, 0);
+          auto u = origami::gemm::count_unique_tiles(g, w, N_CU, num_xcd, xcd, 0);
           CHECK(u.m <= g.m);
           CHECK(u.n <= g.n);
           CHECK(u.k <= g.k);
