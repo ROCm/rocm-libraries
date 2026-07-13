@@ -2940,7 +2940,7 @@ class StreamKDynamic(StreamK):
 
         return module
 
-    def _fetchWorkItemAndBroadcast(self, writer, kernel):
+    def _fetchWorkItemAndBroadcast(self, writer, kernel, preventOverflow=True, uniqueLabels=False):
         """Pop the next work item from this WG's per-XCD queue and broadcast it.
 
         Wave 0 performs the stateful atomic-increment pop from the dynamic
@@ -2951,6 +2951,15 @@ class StreamKDynamic(StreamK):
         This is the exact fetch sequence that used to live inline at the top of
         ``graWorkGroup``; it is factored out unchanged so PAP can reuse it (pop
         once per tile) while keeping non-PAP SK4 codegen byte-identical.
+
+        ``preventOverflow`` is forwarded to the scratch SGPR check-outs. The
+        default (True) matches the historical graWorkGroup behavior, where the
+        pool has free headroom so allocation never overflows (byte-identical).
+        When PAP calls this inside the OptNLL window the pool is near its
+        high-water mark, so callers pass preventOverflow=False to let the pool
+        grow gracefully (and signal occupancy pressure) instead of hitting the
+        preventOverflow guard. The flag does not change the register indices of
+        allocations that already fit, so non-PAP output is unaffected.
         """
         module = Module("StreamK Dynamic fetchWorkItemAndBroadcast")
 
@@ -2959,16 +2968,19 @@ class StreamKDynamic(StreamK):
         # TODO reorganize to reduce waits
         module.add(VMovB32(dst=vgpr(vLocalAddress), src=vgpr("Serial"), comment="Move local address to vgpr"))
         module.add(VLShiftLeftB32(dst=vgpr(vLocalAddress), src=vgpr(vLocalAddress), shiftHex=log2(4), comment="Scale by BPE"))
-        sFirstLane = writer.sgprPool.checkOut(1, "FirstLane")
+        sFirstLane = writer.sgprPool.checkOut(1, "FirstLane", preventOverflow=preventOverflow)
         module.add(SNop(waitState=4, comment="4 wait required between VALU op and readfirstlane using the value"))
         module.add(VReadfirstlaneB32(dst=sgpr(sFirstLane), src=vgpr(vLocalAddress), comment="Read first lane of local address"))
         module.add(SNop(waitState=2, comment="2 wait required between readfirstlane and VALU op using the value"))
         module.add(VSubU32(dst=vgpr(vLocalAddress), src0=vgpr(vLocalAddress), src1=sgpr(sFirstLane)))
         writer.sgprPool.checkIn(sFirstLane)
 
-        # Only first wave reads next work item index
-        skSkipWorkItem = Label("SK_SkipWorkItem", "")
-        sWave = writer.sgprPool.checkOut(1, "Wave")
+        # Only first wave reads next work item index. When PAP hoists this pop
+        # into the NLL window the same helper is also emitted in graWorkGroup, so
+        # PAP callers request a unique label to avoid a duplicate-symbol clash;
+        # the graWorkGroup (non-PAP) path keeps the historical name.
+        skSkipWorkItem = Label(writer.labels.getNameInc("SK_PAP_SkipWorkItem") if uniqueLabels else "SK_SkipWorkItem", "")
+        sWave = writer.sgprPool.checkOut(1, "Wave", preventOverflow=preventOverflow)
         # module.add(SNop(waitState=4, comment="4 wait required between VALU op and readfirstlane using the value"))
         module.add(VReadfirstlaneB32(dst=sgpr(sWave), src=vgpr("Serial"), comment="Wave 0 updates flags"))
         # module.add(SNop(waitState=2, comment="2 wait required between VALU op and readfirstlane using the value"))
@@ -2977,21 +2989,21 @@ class StreamKDynamic(StreamK):
         writer.sgprPool.checkIn(sWave)
 
         # Default queue index
-        sQueueIdx = writer.sgprPool.checkOut(1, "QueueIdx")
+        sQueueIdx = writer.sgprPool.checkOut(1, "QueueIdx", preventOverflow=preventOverflow)
         module.add(SLShiftRightB32(dst=sgpr(sQueueIdx), src=sgpr("StreamKIdx"), shiftHex=log2(8)))
         module.add(SLShiftLeftB32(dst=sgpr(sQueueIdx), src=sgpr(sQueueIdx), shiftHex=log2(8)))
         module.add(SSubU32(dst=sgpr(sQueueIdx), src0=sgpr("StreamKIdx"), src1=sgpr(sQueueIdx), comment="Default queue index"))
 
         # Queue address
-        sAddress = writer.sgprPool.checkOutAligned(2, 2, "Address")
+        sAddress = writer.sgprPool.checkOutAligned(2, 2, "Address", preventOverflow=preventOverflow)
         module.add(SLShiftLeftB32(dst=sgpr(sAddress), src=sgpr(sQueueIdx), shiftHex=log2(256), comment="Stride queues to different cache lines"))
         module.add(SAddU32(dst=sgpr(sAddress+0), src0=sgpr(sAddress+0), src1=sgpr("AddressFlags+0")))
         module.add(SAddCU32(dst=sgpr(sAddress+1), src0=0, src1=sgpr("AddressFlags+1")))
 
         # Tiles in queue
-        sTilesInQueue = writer.sgprPool.checkOut(1, "tilesInQueue")
+        sTilesInQueue = writer.sgprPool.checkOut(1, "tilesInQueue", preventOverflow=preventOverflow)
         module.add(SLShiftRightB32(dst=sgpr(sTilesInQueue), src=sgpr("TotalItems"), shiftHex=log2(8)))
-        sRemainder = writer.sgprPool.checkOut(1, "remainder tiles")
+        sRemainder = writer.sgprPool.checkOut(1, "remainder tiles", preventOverflow=preventOverflow)
         module.add(SLShiftLeftB32(dst=sgpr(sRemainder), src=sgpr(sTilesInQueue), shiftHex=log2(8)))
         module.add(SSubU32(dst=sgpr(sRemainder), src0=sgpr("TotalItems"), src1=sgpr(sRemainder), comment="Remainder tiles"))
         module.add(SCmpLtU32(src0=sgpr(sQueueIdx), src1=sgpr(sRemainder), comment="Check if queue gets an extra tile"))
@@ -3000,9 +3012,9 @@ class StreamKDynamic(StreamK):
         writer.sgprPool.checkIn(sRemainder)
 
         # Workgroups in queue
-        sWorkgroupsInQueue = writer.sgprPool.checkOut(1, "workgroupsInQueue")
+        sWorkgroupsInQueue = writer.sgprPool.checkOut(1, "workgroupsInQueue", preventOverflow=preventOverflow)
         module.add(SLShiftRightB32(dst=sgpr(sWorkgroupsInQueue), src=sgpr("skGrid"), shiftHex=log2(8)))
-        sRemainder = writer.sgprPool.checkOut(1, "remainder workgroups")
+        sRemainder = writer.sgprPool.checkOut(1, "remainder workgroups", preventOverflow=preventOverflow)
         module.add(SLShiftLeftB32(dst=sgpr(sRemainder), src=sgpr(sWorkgroupsInQueue), shiftHex=log2(8)))
         module.add(SSubU32(dst=sgpr(sRemainder), src0=sgpr("skGrid"), src1=sgpr(sRemainder), comment="Remainder workgroups"))
         module.add(SCmpLtU32(src0=sgpr(sQueueIdx), src1=sgpr(sRemainder), comment="Check if queue gets an extra tile"))
@@ -3011,7 +3023,7 @@ class StreamKDynamic(StreamK):
         writer.sgprPool.checkIn(sRemainder)
 
         # Fetch next work item index
-        sWorkItemIdx = writer.sgprPool.checkOut(1, "nextWorkItemIdx")
+        sWorkItemIdx = writer.sgprPool.checkOut(1, "nextWorkItemIdx", preventOverflow=preventOverflow)
         module.add(SAddU32(dst=sgpr(sWorkItemIdx), src0=sgpr(sTilesInQueue), src1=sgpr(sWorkgroupsInQueue), comment="Queue reset"))
         module.add(SSubU32(dst=sgpr(sWorkItemIdx), src0=sgpr(sWorkItemIdx), src1=1))
         writer.sgprPool.checkIn(sTilesInQueue)
@@ -3243,7 +3255,10 @@ class StreamKDynamic(StreamK):
         rest of PAP; the back-edge graWorkGroup then exits via KernelEnd.
         """
         module = Module("StreamK Dynamic papHasNextPersistentIteration")
-        moduleFetch, sWorkItemIdx = self._fetchWorkItemAndBroadcast(writer, kernel)
+        # The OptNLL PAP window runs near the SGPR high-water mark, so let the
+        # pop's scratch check-outs grow the pool (preventOverflow=False) instead
+        # of tripping the preventOverflow guard.
+        moduleFetch, sWorkItemIdx = self._fetchWorkItemAndBroadcast(writer, kernel, preventOverflow=False, uniqueLabels=True)
         module.add(moduleFetch)
         module.add(SMovB32(dst=sgpr("SkNextWorkItem"), src=sgpr(sWorkItemIdx), comment="PAP: stash popped work item for persistent back-edge"))
         # Mark primed BEFORE the drain check so the back-edge reuses the stashed
