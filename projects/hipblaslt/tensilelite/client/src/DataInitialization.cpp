@@ -2273,8 +2273,8 @@ namespace TensileLite
                           << " for MX generation; scale init is ignored. "
                           << "Supported decoupling: random-like data init (Random, "
                           "RandomNarrow, RandomNegPosLimited, UniformLowPrecision) with "
-                          "constant scale init (Zero, One, Two, NegOne, Max, DenormMin, "
-                          "DenormMax, NaN, Inf). This warning is shown once per process."
+                          "constant scale init (Zero, One, Two, Max, NaN, Inf, BadInput, "
+                          "BadOutput). This warning is shown once per process."
                           << std::endl;
                   };
 
