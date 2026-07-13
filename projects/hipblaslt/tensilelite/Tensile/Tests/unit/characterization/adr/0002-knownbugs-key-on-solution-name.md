@@ -22,9 +22,8 @@ entry, and `is_known_bug(known, rel, solution_name)` matches on the name. The
 ## Decision
 Key known-bugs skips on `(path, solution_name)` only. Drop `solution_index`
 support entirely (no backward-compatible dual key). Re-record only the two
-affected golden nodes; the migration of the on-disk `known_bugs.yaml` from
-indices to names is done by `scripts/migrate_known_bugs.py` resolving each index
-against the library logic.
+affected golden nodes; the on-disk `known_bugs.yaml` entries were migrated from
+indices to names as a one-time change in this PR.
 
 ## Consequences
 Documented skips survive index churn without manual edits, and a genuinely
