@@ -684,11 +684,21 @@ def test_solution_validation_rejects_pap_streamk_dynamic_with_tdm(capsys):
     assert "TDM + PrefetchAcrossPersistent requires StreamK == 3" in capsys.readouterr().out
 
 
-def test_solution_validation_rejects_pap_streamk_hybrid(capsys):
-    # SK5 (hybrid) PAP is intentionally deferred to a later stage; the relaxed
-    # gate still rejects StreamK==5 for PrefetchAcrossPersistent.
-    assert _pap_solution(StreamK=5, TDMInst=0)["Valid"] is False
-    assert "PrefetchAcrossPersistent is currently supported only with StreamK in [3, 4]" in capsys.readouterr().out
+def test_solution_validation_accepts_pap_streamk_hybrid():
+    # Phase 2: PAP is now allowed for StreamK==5 (StreamKHybrid) in addition to
+    # StreamK==3 and StreamK==4. The validation gate accepts StreamK in
+    # (3, 4, 5). A single PAP-enabled SK5 kernel is correct for BOTH runtime
+    # sub-paths (static SK3-like and dynamic SK4-like) via StreamKHybridMode
+    # dispatch. TDM is disabled here (TDMInst=0): the TDM+PAP twin gate is
+    # intentionally kept SK3-only, so SK5 PAP is supported for the non-TDM path.
+    assert _pap_solution(StreamK=5, TDMInst=0)["Valid"] is True
+
+
+def test_solution_validation_rejects_pap_streamk_hybrid_with_tdm(capsys):
+    # The TDM + PAP twin gate is deliberately NOT relaxed for SK5: TDM+PAP
+    # remains StreamK==3 only (hybrid TDM+PAP deferred).
+    assert _pap_solution(StreamK=5, TDMInst=3)["Valid"] is False
+    assert "TDM + PrefetchAcrossPersistent requires StreamK == 3" in capsys.readouterr().out
 
 
 @pytest.mark.parametrize(
