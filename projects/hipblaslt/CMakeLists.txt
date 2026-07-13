@@ -293,7 +293,12 @@ configure_file(
 # Configure the Windows version resource (PE VERSIONINFO) embedded into
 # libhipblaslt.dll. This mirrors the sibling rocBLAS/hipBLAS libraries so the
 # DLL reports file/product version metadata in its Windows file properties.
-if(WIN32)
+# A resource compiler is required to compile version.rc; the ROCm toolchain
+# detects one (llvm-rc/rc) or sets CMAKE_RC_COMPILER to a NOTREQUIRED/NOTFOUND
+# sentinel when none is available. When no real compiler is present, warn and
+# skip the resource rather than fail configuration, so the DLL still builds
+# (without version metadata) on machines lacking a resource compiler.
+if(WIN32 AND CMAKE_RC_COMPILER AND NOT CMAKE_RC_COMPILER MATCHES "NOTREQUIRED|NOTFOUND")
     if(GIT)
         execute_process(
             COMMAND "${GIT}" log -1 --format=%H .
@@ -307,6 +312,13 @@ if(WIN32)
         "${CMAKE_CURRENT_SOURCE_DIR}/library/src/version.rc.in"
         "${CMAKE_CURRENT_BINARY_DIR}/library/version.rc"
         @ONLY)
+    set(_hipblaslt_have_version_rc TRUE)
+elseif(WIN32)
+    message(WARNING
+        "hipBLASLt: no Windows resource compiler (llvm-rc/rc) detected; "
+        "libhipblaslt.dll will be built WITHOUT VERSIONINFO metadata. Install the "
+        "Windows SDK or make llvm-rc available (e.g. on PATH or in the ROCm "
+        "llvm/bin directory) to embed version info.")
 endif()
 
 # `hipblaslt::mxdatagen` lives in clients/common (next to its source), and is
@@ -330,8 +342,9 @@ add_subdirectory(tensilelite)
 if(HIPBLASLT_ENABLE_HOST)
     if(HIPBLASLT_BUILD_SHARED_LIBS)
         add_library(hipblaslt SHARED)
-        # Embed Windows version resource (PE VERSIONINFO) into the shared DLL.
-        if(WIN32)
+        # Embed Windows version resource (PE VERSIONINFO) into the shared DLL,
+        # only when a resource compiler was found (see version.rc guard above).
+        if(_hipblaslt_have_version_rc)
             target_sources(hipblaslt PRIVATE "${CMAKE_CURRENT_BINARY_DIR}/library/version.rc")
         endif()
     else()
