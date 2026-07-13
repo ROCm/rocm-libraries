@@ -700,8 +700,8 @@ void testLargeNumSegments()
     using segment_index_type = size_t;
     using segments_index_to_offset_op_t
         = test_utils::segments_index_to_offset_op<offset_type, segment_index_type>;
-    constexpr size_t uint_max = ::std::numeric_limits<unsigned int>::max();
 
+    constexpr size_t       num_launch         = 2;
     constexpr unsigned int min_segment_length = 1;
     constexpr unsigned int max_segment_length = 10000;
 
@@ -716,7 +716,10 @@ void testLargeNumSegments()
         HIP_CHECK(hipStreamCreateWithFlags(&stream, hipStreamNonBlocking));
     }
 
-    constexpr offset_type base_size = uint_max + offset_type{1 << 22};
+    const rocprim::detail::target current_target(stream);
+    using Selector                = rocprim::detail::segmented_reduce_config_selector<output_type>;
+    const auto         params     = rocprim::detail::get_config<Selector>(Config{}, current_target);
+    const unsigned int block_size = params.kernel_config.block_size;
 
     for(size_t seed_index = 0; seed_index < number_of_runs; seed_index++)
     {
@@ -730,16 +733,13 @@ void testLargeNumSegments()
         const unsigned int                             segment_length = segment_length_dis(gen);
         SCOPED_TRACE(testing::Message() << "with segment_length = " << segment_length);
 
-        const segment_index_type full_segments_count
-            = ::rocprim::detail::ceiling_div(base_size, segment_length);
-        const segment_index_type empty_segments_count
-            = use_fixed_size ? 0 : uint_max - full_segments_count + 1;
-        const segment_index_type segments_count = empty_segments_count + full_segments_count;
-
-        offset_type size = segments_count * segment_length;
+        const segment_index_type segments_count
+            = ::std::numeric_limits<unsigned int>::max() / block_size * num_launch;
+        constexpr segment_index_type full_segments_count  = 5U;
+        const segment_index_type     empty_segments_count = segments_count - full_segments_count;
+        offset_type                  size                 = full_segments_count * segment_length;
         SCOPED_TRACE(testing::Message() << "with segments_count = " << segments_count);
-        SCOPED_TRACE(testing::Message() << "with full_segments_count = " << full_segments_count);
-        SCOPED_TRACE(testing::Message() << "with empty_segments_count = " << empty_segments_count);
+        SCOPED_TRACE(testing::Message() << "with size = " << size);
 
         // Device inputs
         const InputIterator values_input{0};
@@ -820,7 +820,7 @@ void testLargeNumSegments()
         {
             if(s < empty_segments_count)
             {
-                SCOPED_TRACE(testing::Message() << "with segment index = " << s);
+                SCOPED_TRACE(testing::Message() << "with empty segment index = " << s);
                 ASSERT_NO_FATAL_FAILURE(
                     test_utils::assert_eq(aggregates_output[s], output_type{0}));
             }
