@@ -650,7 +650,7 @@ hipsparseStatus_t hipsparseCsrSetPointers(hipsparseSpMatDescr_t spMatDescr,
 *  \details
 *  \p hipsparseCscSetPointers sets the fields of the sparse CSC matrix descriptor.
 */
-#if(!defined(CUDART_VERSION))
+#if(!defined(CUDART_VERSION) || CUDART_VERSION >= 11030)
 HIPSPARSE_EXPORT
 hipsparseStatus_t hipsparseCscSetPointers(hipsparseSpMatDescr_t spMatDescr,
                                           void*                 cscColOffsets,
@@ -663,7 +663,7 @@ hipsparseStatus_t hipsparseCscSetPointers(hipsparseSpMatDescr_t spMatDescr,
 *  \details
 *  \p hipsparseCooSetPointers sets the fields of the sparse COO matrix descriptor.
 */
-#if(!defined(CUDART_VERSION))
+#if(!defined(CUDART_VERSION) || CUDART_VERSION >= 11040)
 HIPSPARSE_EXPORT
 hipsparseStatus_t hipsparseCooSetPointers(hipsparseSpMatDescr_t spMatDescr,
                                           void*                 cooRowInd,
