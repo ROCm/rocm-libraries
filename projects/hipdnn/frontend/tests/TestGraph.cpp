@@ -6,6 +6,7 @@
 #include <hipdnn_frontend/attributes/BatchnormInferenceAttributes.hpp>
 #include <hipdnn_frontend/attributes/ConvolutionDgradAttributes.hpp>
 #include <hipdnn_frontend/attributes/ConvolutionFpropAttributes.hpp>
+#include <hipdnn_frontend/attributes/ConvolutionWgradAttributes.hpp>
 #include <hipdnn_frontend/attributes/CustomOpAttributes.hpp>
 #include <hipdnn_frontend/attributes/LayernormAttributes.hpp>
 #include <hipdnn_frontend/attributes/PointwiseAttributes.hpp>
@@ -1637,12 +1638,97 @@ TEST_F(TestGraph, ConvolutionDgradNodeCreation)
     attributes.set_dilation({1, 1});
 
     auto dx = graph.conv_dgrad(dy, w, attributes);
+    dx->set_dim({1, 3, 32, 32});
 
     EXPECT_EQ(dx->get_name(), "ConvolutionDgradNode::DX");
     EXPECT_TRUE(dx->get_is_virtual());
 
     auto validationResult = graph.validate();
     EXPECT_TRUE(validationResult.is_good()) << validationResult.get_message();
+}
+
+TEST_F(TestGraph, ConvolutionDgradValidationFailsWithMissingDxDim)
+{
+    Graph graph;
+    graph.set_io_data_type(DataType::FLOAT)
+        .set_compute_data_type(DataType::FLOAT)
+        .set_intermediate_data_type(DataType::FLOAT);
+
+    auto dy = std::make_shared<TensorAttributes>();
+    dy->set_dim({1, 64, 32, 32}).set_stride({65536, 1024, 32, 1}).set_data_type(DataType::FLOAT);
+
+    auto w = std::make_shared<TensorAttributes>();
+    w->set_dim({64, 3, 3, 3}).set_stride({27, 9, 3, 1}).set_data_type(DataType::FLOAT);
+
+    ConvDgradAttributes attributes;
+    attributes.set_name("ConvolutionDgradNode");
+    attributes.set_pre_padding({1, 1});
+    attributes.set_post_padding({1, 1});
+    attributes.set_stride({1, 1});
+    attributes.set_dilation({1, 1});
+
+    graph.conv_dgrad(dy, w, attributes);
+
+    auto validationResult = graph.validate();
+    EXPECT_FALSE(validationResult.is_good());
+    EXPECT_EQ(validationResult.code, ErrorCode::ATTRIBUTE_NOT_SET);
+}
+
+TEST_F(TestGraph, ConvolutionWgradNodeCreation)
+{
+    Graph graph;
+    graph.set_io_data_type(DataType::FLOAT)
+        .set_compute_data_type(DataType::FLOAT)
+        .set_intermediate_data_type(DataType::FLOAT);
+
+    auto x = std::make_shared<TensorAttributes>();
+    x->set_dim({1, 3, 32, 32}).set_stride({3072, 1024, 32, 1}).set_data_type(DataType::FLOAT);
+
+    auto dy = std::make_shared<TensorAttributes>();
+    dy->set_dim({1, 64, 32, 32}).set_stride({65536, 1024, 32, 1}).set_data_type(DataType::FLOAT);
+
+    ConvWgradAttributes attributes;
+    attributes.set_name("ConvolutionWgradNode");
+    attributes.set_pre_padding({1, 1});
+    attributes.set_post_padding({1, 1});
+    attributes.set_stride({1, 1});
+    attributes.set_dilation({1, 1});
+
+    auto dw = graph.conv_wgrad(dy, x, attributes);
+    dw->set_dim({64, 3, 3, 3});
+
+    EXPECT_EQ(dw->get_name(), "ConvolutionWgradNode::DW");
+    EXPECT_TRUE(dw->get_is_virtual());
+
+    auto validationResult = graph.validate();
+    EXPECT_TRUE(validationResult.is_good()) << validationResult.get_message();
+}
+
+TEST_F(TestGraph, ConvolutionWgradValidationFailsWithMissingDwDim)
+{
+    Graph graph;
+    graph.set_io_data_type(DataType::FLOAT)
+        .set_compute_data_type(DataType::FLOAT)
+        .set_intermediate_data_type(DataType::FLOAT);
+
+    auto x = std::make_shared<TensorAttributes>();
+    x->set_dim({1, 3, 32, 32}).set_stride({3072, 1024, 32, 1}).set_data_type(DataType::FLOAT);
+
+    auto dy = std::make_shared<TensorAttributes>();
+    dy->set_dim({1, 64, 32, 32}).set_stride({65536, 1024, 32, 1}).set_data_type(DataType::FLOAT);
+
+    ConvWgradAttributes attributes;
+    attributes.set_name("ConvolutionWgradNode");
+    attributes.set_pre_padding({1, 1});
+    attributes.set_post_padding({1, 1});
+    attributes.set_stride({1, 1});
+    attributes.set_dilation({1, 1});
+
+    graph.conv_wgrad(dy, x, attributes);
+
+    auto validationResult = graph.validate();
+    EXPECT_FALSE(validationResult.is_good());
+    EXPECT_EQ(validationResult.code, ErrorCode::ATTRIBUTE_NOT_SET);
 }
 
 TEST_F(TestGraph, MatmulNodeCreation)

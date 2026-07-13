@@ -37,12 +37,6 @@
 #include <miopen/logger.hpp>
 #include "../random.hpp"
 
-#if MIOPEN_BACKEND_OPENCL
-#define BKEND "OpenCL"
-#elif MIOPEN_BACKEND_HIP
-#define BKEND "HIP"
-#endif
-
 #ifdef _WIN32
 #define MDEXE "MIOpenDriver.exe"
 #else
@@ -50,18 +44,18 @@
 #endif
 
 const std::string logConv =
-    "MIOpen(" BKEND "): Command [LogCmdConvolution] " MDEXE " conv -n 128 -c 3 -H 32 -W 32 -k "
+    "MIOpen: Command [LogCmdConvolution] " MDEXE " conv -n 128 -c 3 -H 32 -W 32 -k "
     "64 -y 3 -x 3 -p 1 -q 1 -u 1 -v 1 -l 1 -j 1 -m conv -g 1 -F 1 -t 1";
 const std::string logFindConv =
-    "MIOpen(" BKEND "): Command [LogCmdFindConvolution] " MDEXE " conv -n 128 -c 3 -H 32 -W 32 "
+    "MIOpen: Command [LogCmdFindConvolution] " MDEXE " conv -n 128 -c 3 -H 32 -W 32 "
     "-k 64 -y 3 -x 3 -p 1 -q 1 -u 1 -v 1 -l 1 -j 1 -m conv -g 1 -F 1 -t 1";
 
 const std::string logFusionConvBiasActiv =
-    "MIOpen(" BKEND "): Command [LogCmdFusion] " MDEXE " CBAInfer -J 4 -n 128 -c 3 -H 32 "
+    "MIOpen: Command [LogCmdFusion] " MDEXE " CBAInfer -J 4 -n 128 -c 3 -H 32 "
     "-W 32 -k 64 -y 3 -x 3 -p 1 -q 1 -u 1 -v 1 -l 1 -j 1";
 
-const std::string logBnormActiv = "MIOpen(" BKEND "): Command [LogCmdFusion] " MDEXE
-                                  " CBAInfer -J 2 -n 64 -c 64 -H 56 -W 56 -m 1";
+const std::string logBnormActiv =
+    "MIOpen: Command [LogCmdFusion] " MDEXE " CBAInfer -J 2 -n 64 -c 64 -H 56 -W 56 -m 1";
 
 // Captures the std::cerr buffer and store it to a string.
 struct CerrRedirect
@@ -92,26 +86,13 @@ struct Tensor
 {
     miopenTensorDescriptor_t desc{};
     size_t data_size;
-#if MIOPEN_BACKEND_OPENCL
-    cl_mem data;
-#elif MIOPEN_BACKEND_HIP
     void* data;
-#endif
 
     Tensor(int n, int c, int h, int w)
     {
         EXPECT_EQ(miopenCreateTensorDescriptor(&desc), 0);
         EXPECT_EQ(miopenSet4dTensorDescriptor(desc, miopenFloat, n, c, h, w), 0);
         data_size = n * c * h * w * sizeof(float);
-#if MIOPEN_BACKEND_OPENCL
-        cl_command_queue q{};
-        miopenHandle_t handle{};
-        miopenCreate(&handle);
-        miopenGetStream(handle, &q);
-        cl_context ctx;
-        clGetCommandQueueInfo(q, CL_QUEUE_CONTEXT, sizeof(cl_context), &ctx, nullptr);
-        data = clCreateBuffer(ctx, CL_MEM_READ_WRITE, data_size, nullptr, nullptr);
-#elif MIOPEN_BACKEND_HIP
         // ASSERT_* cannot be used in constructors (generates illegal
         // return-void). Use hard abort on allocation failure instead.
         auto err = hipMalloc(&data, data_size);
@@ -124,17 +105,12 @@ struct Tensor
                     __LINE__);
             abort();
         }
-#endif
     }
 
     ~Tensor()
     {
         miopenDestroyTensorDescriptor(desc);
-#if MIOPEN_BACKEND_OPENCL
-        clReleaseMemObject(data);
-#elif MIOPEN_BACKEND_HIP
         (void)hipFree(data);
-#endif
     }
 };
 

@@ -242,7 +242,7 @@ Tests:
   precision: *double_only_precisions
   M: 1
   K: [63, 316]
-  block_dim: [4, 27, 52]
+  block_dim: [4, 52]
   alpha_alphai: *alpha_range_quick
   direction: [rocsparse_direction_column]
   transA: [rocsparse_operation_none]

@@ -138,7 +138,7 @@ if(BUILD_TESTING OR HIPBLASLT_BUILD_TESTING)
         # This ensures we test the real library code, not stubs
         target_link_libraries(hipblaslt-test PRIVATE
             $<TARGET_OBJECTS:hipblaslt>
-            tensilelite::tensilelite-host
+            roc::tensilelite-host
             ${CMAKE_DL_LIBS}
         )
         # Add roctracer if HIPBLASLT_ENABLE_MARKER is enabled

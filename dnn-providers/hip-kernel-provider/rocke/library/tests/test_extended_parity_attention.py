@@ -11,7 +11,7 @@ kernel parity checks (those kernels import from ``kernels`` — library layer).
 
 PYTHONPATH is derived from this file's location so the test is portable:
 - ``library/`` (exposes ``builders.*``, ``kernels.*``, ``dispatch.*``)
-- ``platform/Python`` (exposes ``rocke.*``)
+- ``platform/python`` (exposes ``rocke.*``)
 """
 
 from __future__ import annotations
@@ -23,7 +23,7 @@ import sys
 import unittest
 
 _LIBDIR = pathlib.Path(__file__).resolve().parents[1]  # rocke/library
-_PYDIR = pathlib.Path(__file__).resolve().parents[2] / "platform" / "Python"
+_PYDIR = pathlib.Path(__file__).resolve().parents[2] / "platform" / "python"
 _SUBPROC_PYTHONPATH = os.pathsep.join([str(_PYDIR), str(_LIBDIR)])
 
 
@@ -61,6 +61,7 @@ class TestAttentionParityLibrary(unittest.TestCase):
             text=True,
             timeout=timeout,
         )
+
         return r.returncode, (r.stdout + r.stderr)
 
     def test_extended_parity_attention(self):
@@ -72,6 +73,7 @@ class TestAttentionParityLibrary(unittest.TestCase):
         gfx950-only atom; the harness reports those as SKIP (not FAIL)
         and keeps running. Gate: rc == 0 and no ``FAIL`` line anywhere.
         """
+
         if not _CDNA:
             self.skipTest(f"CDNA MFMA attention kernels; running on {ARCH} (RDNA)")
         rc, out = self._run(

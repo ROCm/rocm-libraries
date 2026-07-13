@@ -32,7 +32,7 @@
 # NOTE: launching a kernel needs GPU access. If plain python cannot see the
 # GPU, run under passwordless sudo with -E so PYTHONPATH survives, e.g.
 #     sudo -n -E "$(command -v python)" \
-#         <rocKE>/tests/instances/differential/numeric.py
+#         <rocke/platform>/tests/instances/differential/numeric.py
 # (build/compile via comgr does NOT need the GPU; only the launch does.)
 #
 # Build artifacts / dashboards go to /tmp.  No git operations.
@@ -51,7 +51,7 @@ from typing import Any, Dict, List, Optional, Tuple
 
 HERE = Path(__file__).resolve().parent
 ROCKE = HERE.parents[2]  # rocKE root (differential -> instances -> tests -> rocKE)
-PYROOT = ROCKE / "Python"  # holds rocke
+PYROOT = ROCKE / "python"  # holds rocke
 if str(PYROOT) not in sys.path:
     sys.path.insert(0, str(PYROOT))
 

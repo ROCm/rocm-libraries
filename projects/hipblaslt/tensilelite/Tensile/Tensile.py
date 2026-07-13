@@ -53,6 +53,7 @@ from Tensile.Utilities.Decorators.Profile import profile
 from Tensile import BenchmarkProblems
 from Tensile import ClientWriter
 from Tensile import LibraryIO
+from Tensile.backends.config import parse_backend_config
 from Tensile import LibraryLogic
 
 TENSILE_SCRIPT_DIR = Path(os.path.dirname(os.path.abspath(__file__)))
@@ -107,9 +108,10 @@ def executeStepsInConfig(
     # Benchmark Problems
     ##############################################################################
     gfxName = isaToGfx(next(iter(isaInfoMap)))
-    if "BenchmarkProblems" in config:
+    if "BenchmarkProblems" in config:       
         with timing_context("python_benchmark_problems"):
             BenchmarkProblems.main(
+                config.get("Backend", {}),
                 config["BenchmarkProblems"],
                 config["UseCache"],
                 asmToolchain,
@@ -604,9 +606,15 @@ def Tensile(userArgs):
             }]
         }
         config["BenchmarkProblems"] = [[base["ProblemType"], solParams]]
-
+    
     config["UseCache"] = useCache
     globalParameters["ConfigPath"] = configPaths
+
+    # Backend selection precedence:
+    # 1) YAML Backend (with strict validation)
+    # 2) tensile (default)
+    yaml_backend = config.get("Backend", None)
+    config["Backend"] = parse_backend_config(yaml_backend)
 
     asm_debug = config["GlobalParameters"].get("AsmDebug", False)
     device_id = config["GlobalParameters"].get("Device", int(args.device))

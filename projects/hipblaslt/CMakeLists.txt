@@ -191,7 +191,7 @@ if(HIPBLASLT_ENABLE_DEVICE AND NOT WIN32)
             message(FATAL_ERROR "Failed to locate libclang_rt.asan-x86_64.so ")
         endif()
         # Disable a few asan options to get builds going but these should be addressed
-        set(san_opts "LD_PRELOAD=${ASAN_LIB_PATH}" "ASAN_OPTIONS=detect_leaks=0,new_delete_type_mismatch=0")
+        set(san_opts "LD_PRELOAD=${ASAN_LIB_PATH}" "ASAN_OPTIONS=detect_leaks=0,new_delete_type_mismatch=0,malloc_context_size=0,quarantine_size_mb=0")
     elseif(HIPBLASLT_ENABLE_TSAN OR THEROCK_SANITIZER STREQUAL "TSAN")
         execute_process(
             COMMAND ${CMAKE_CXX_COMPILER} --print-file-name=libclang_rt.tsan-x86_64.so

@@ -36,11 +36,11 @@ namespace rocsparse
                                            const I* __restrict__ csr_row_ptr,
                                            const J* __restrict__ csr_col_ind,
                                            const T* __restrict__ csr_val,
-                                           T* __restrict__ B,
+                                           T*      B,
                                            int64_t ldb,
                                            int* __restrict__ done_array,
                                            const J* __restrict__ map,
-                                           J* __restrict__ zero_pivot,
+                                           J*                   zero_pivot,
                                            rocsparse_index_base idx_base,
                                            rocsparse_fill_mode  fill_mode,
                                            rocsparse_diag_type  diag_type)
