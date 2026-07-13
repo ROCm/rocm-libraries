@@ -474,8 +474,27 @@ test_categories:
       # BFP16 GPU variants of this solver exist; there is no FP32 GPU variant.
       - "Smoke/GPU_UnitTestConvSolverConvDepthwiseFwd3D_FP16*"
       - "Smoke/GPU_UnitTestConvSolverConvDepthwiseFwd3D_BFP16*"
-      # OOM-killing on small shared-RAM runners (e.g. gfx1151). 
+      # OOM-killing on small shared-RAM runners (e.g. gfx1151).
       - "CPU_PerfDb_NONE.*"
+      # Long-running Smoke suites excluded to keep ffm-quick under ~30s.
+      # Observed timings from on a real GPU (gfx942):
+      - "Smoke/GPU_BNBWDSmall2D_FP32*"         # ~7.6 s (28 tests)
+      - "Smoke/GPU_Reduce_FP32*"               # ~5.7 s
+      - "Smoke/GPU_Reduce_FP16*"               # ~5.2 s
+      - "Smoke/GPU_ConvBiasActivInfer_FP32*"   # ~4.7 s
+      - "Smoke/GPU_ConvBiasActivInfer_FP16*"   # ~3.9 s
+      - "Smoke/GPU_UnitTestActivationDescriptor_FP32*"  # ~3.9 s
+      - "Smoke/GPU_UnitTestActivationDescriptor_FP16*"  # ~3.5 s
+      - "Smoke/GPU_RNNVanilla_FP32*"           # ~3.5 s
+      - "Smoke/GPU_RNNVanilla_FP16*"           # ~3.2 s
+      - "Smoke/GPU_Softmax_BetaZeroNaN_FP32*"  # ~3.0 s
+      - "Smoke/GPU_GRU_Base_FP32*"             # ~2.9 s
+      - "Smoke/GPU_GRU_Base_FP16*"             # ~2.8 s
+      - "Smoke/GPU_Lrn_FP32*"                  # ~2.4 s
+      - "Smoke/GPU_Lrn_FP16*"                  # ~2.4 s
+      - "Smoke/GPU_Dropout_FP32*"              # ~2.1 s
+      - "Smoke/GPU_Dropout_FP16*"              # ~1.7 s
+      - "Smoke/GPU_reference_kernel_fwd_3d_NCDHW_BFP16_BFP16*"  # ~4.0 s (FP32/FP16 variants are fast)
 
     exclude_windows: [] # Placeholder to show per-platform exclude support
     exclude_linux: [] # Placeholder to show per-platform exclude support
