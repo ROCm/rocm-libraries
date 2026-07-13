@@ -251,6 +251,9 @@ class CDNA5ReadyQueue : public ReadyQueue {
     uint16_t activeCoIssueWindow_ = 0;
     int coIssueCyclePos_ = 0;
     int activeWmmaLatency_ = 0;
+    // WMMA that opened the current latency window (valid while coIssueCyclePos_ <
+    // activeWmmaLatency_). Used to detect ds_load dest / WMMA src VGPR overlap hazards.
+    DAGNode* activeWmmaNode_ = nullptr;
 
     // --- Per-WMMA-window DS cap (dagFeatures.dsReadPerWmma) ---
     int maxDsPerWmmaWindow_ = 0;
@@ -295,6 +298,7 @@ class CDNA5ReadyQueue : public ReadyQueue {
     std::pair<DAGNode*, int> findMostReadyWMMA();
     DAGNode* pickOneFromWMMA(DAGNode* pick = nullptr);
     bool findSmallestPickableNonWmma(DAGNode* pickedDS, DAGNode** outNode, int* kindOut) const;
+    bool dsLoadOverlapsActiveWmmaSrc(DAGNode* pickedDS) const;
     bool findOldestFallbackNonWmma(DAGNode* pickedDS, DAGNode** outNode, int* kindOut) const;
     DAGNode* extractForcedBarrier();
     std::unordered_map<StinkyInstruction*, BarrierAfterOutput> computeBarrierAfterThresholds(
@@ -450,6 +454,7 @@ DAGNode* CDNA5ReadyQueue::pickOneFromWMMA(DAGNode* pick) {
     activeCoIssueWindow_ = node->inst->hwInstDesc->coIssueWindow;
     coIssueCyclePos_ = 0;
     activeWmmaLatency_ = node->inst->latencyCycles;
+    activeWmmaNode_ = node;
     // Advance by WMMA issue cycles after opening a new timeline window.
     // This keeps coIssueCyclePos_ aligned with elapsed cycles right after WMMA issue.
     advanceTime(node->inst->issueCycles);
@@ -465,6 +470,29 @@ DAGNode* CDNA5ReadyQueue::pickOneFromWMMA(DAGNode* pick) {
     return node;
 }
 
+// True if issuing \p pickedDS now would risk a VALU <- VGPR <- VMEM hazard: while the
+// WMMA that opened the current latency window is still in flight, the ds_load's dest VGPRs
+// overlap that WMMA's src VGPRs, so the load could clobber a source the WMMA is still reading.
+bool CDNA5ReadyQueue::dsLoadOverlapsActiveWmmaSrc(DAGNode* pickedDS) const {
+    if (pickedDS == nullptr || activeWmmaNode_ == nullptr) return false;
+    // Only relevant while the WMMA latency window is still active.
+    if (coIssueCyclePos_ >= activeWmmaLatency_) return false;
+
+    for (const StinkyRegister& dstReg : pickedDS->inst->getDestRegs()) {
+        if (!dstReg.isRegister() || isPseudoReg(dstReg)) continue;
+        const uint32_t dstLo = dstReg.reg.idx;
+        const uint32_t dstHi = dstReg.reg.idx + dstReg.reg.num;  // exclusive
+        for (const StinkyRegister& srcReg : activeWmmaNode_->inst->getSrcRegs()) {
+            if (!srcReg.isRegister() || isPseudoReg(srcReg)) continue;
+            if (srcReg.reg.type != dstReg.reg.type) continue;  // compare same register class
+            const uint32_t srcLo = srcReg.reg.idx;
+            const uint32_t srcHi = srcReg.reg.idx + srcReg.reg.num;  // exclusive
+            if (dstLo < srcHi && srcLo < dstHi) return true;
+        }
+    }
+    return false;
+}
+
 // Pick minimum DAG id among ready non-WMMA nodes.
 // Queues: globalReadQueue (throttled), localReadQueue, valuQueue (co-issue gated), otherQueue.
 // kind: 0=global, 1=local, 2=other, 3=valu.
@@ -475,8 +503,8 @@ bool CDNA5ReadyQueue::findSmallestPickableNonWmma(DAGNode* pickedDS, DAGNode** o
     DAGNode* best = nullptr;
     int kind = -1;
 
-    bool dsWindowOk =
-        pickedDS && dsInsertedSinceLastWmma_ < maxDsPerWmmaWindow_ && !dsReadQueueFull();
+    bool dsWindowOk = pickedDS && dsInsertedSinceLastWmma_ < maxDsPerWmmaWindow_ &&
+                      !dsReadQueueFull() && !dsLoadOverlapsActiveWmmaSrc(pickedDS);
 
     if (!globalReadQueue.empty() && !globalReadQueueFull() &&
         (globalReadCounter < globalReadPerWMMA || otherQueue.empty())) {
@@ -1151,6 +1179,7 @@ void CDNA5ReadyQueue::onInit(IRList::iterator regionStart, IRList::iterator regi
     activeCoIssueWindow_ = 0;
     coIssueCyclePos_ = 0;
     activeWmmaLatency_ = 0;
+    activeWmmaNode_ = nullptr;
     globalReadInflight_ = InFlightQueue(globalReadQueueDepth());
     dsReadInflight_ = InFlightQueue(dsReadQueueDepth());
 
