@@ -594,7 +594,7 @@ pipeline {
             steps{
                 script {
                     loadCk()
-                    ck.runSparseAttnStages(["gfx90a", "gfx942", "gfx950", "gfx1201"], params.BUILD_COMPILER)
+                    ck.runSparseAttnStages(["gfx90a", "gfx942", "gfx950"], params.BUILD_COMPILER)
                 }
             }
         }

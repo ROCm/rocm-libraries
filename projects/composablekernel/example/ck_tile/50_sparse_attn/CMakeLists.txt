@@ -6,9 +6,11 @@ set(GPU_TARGETS ${SUPPORTED_GPU_TARGETS})
 
 message(STATUS "Sparse Attention: SUPPORTED_GPU_TARGETS=${SUPPORTED_GPU_TARGETS}, INST_TARGETS=${INST_TARGETS}")
 
-list(FILTER INST_TARGETS INCLUDE REGEX "gfx9|gfx12")
+# Sparse attention kernels use the async LDS buffer-load path (buffer_load_dword ... lds),
+# which is a gfx9-only instruction. Restrict instances to gfx9 targets.
+list(FILTER INST_TARGETS INCLUDE REGEX "gfx9")
 if(NOT INST_TARGETS)
-  message(WARNING "Skipping Tile Engine Sparse Attention: No supported GPU targets found")
+  message(WARNING "Skipping Tile Engine Sparse Attention: No supported gfx9 GPU targets found")
   return()
 endif()
 
