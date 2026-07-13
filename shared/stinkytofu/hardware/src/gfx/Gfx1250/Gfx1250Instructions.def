@@ -411,6 +411,13 @@ DEF_T(SClauseInst, "s_clause", .format = SOPP, .flags = {HasSideEffect}, .logica
 DEF_T(GlobalWbInst, "global_wb", .format = VGLOBAL, .flags = {HasSideEffect}, .logical = "GlobalWb")
 DEF_T(GlobalInvInst, "global_inv", .format = VGLOBAL, .flags = {HasSideEffect}, .logical = "GlobalInv")
 
+// Returning global-segment atomic increment (SADDR form). Used by the gfx1250 StreamK
+// dynamic work-queue fetch-and-increment: global is the natural choice for a known-global
+// 64-bit pointer -- it keeps the queue base in SGPRs, and completes on loadcnt only
+// (unlike flat, which also bumps dscnt).
+DEF_T(GlobalAtomicIncU32SaddrInst, "global_atomic_inc_u32", .format = VGLOBAL_ATOMIC_SADDR,
+    .logical = "GlobalAtomicIncU32Saddr")
+
 // Global data prefetch - used by gfx1250 PrefetchGL2 to prefetch data from global memory
 // to L2 cache; no destination register. Not marked HasSideEffect: it is only a cache hint,
 // so reordering it affects performance but not correctness.

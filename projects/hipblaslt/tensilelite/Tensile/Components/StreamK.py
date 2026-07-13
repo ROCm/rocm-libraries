@@ -22,15 +22,15 @@
 
 from rocisa.enum import CacheScope
 from rocisa.code import Module, Label
-from rocisa.container import vgpr, sgpr, mgpr, SMEMModifiers, MUBUFModifiers, replaceHolder, EXEC,\
+from rocisa.container import vgpr, sgpr, mgpr, SMEMModifiers, MUBUFModifiers, GLOBALModifiers, replaceHolder, EXEC,\
     VOP3PModifiers, ContinuousRegister, DSModifiers
 from rocisa.instruction import GlobalInv, GlobalWb, SAddCU32, SAddU32, SAndB32, SBarrier, \
     SBranch, SCBranchSCC0, SCBranchSCC1, SCMovB32, SCSelectB32, SCmpEQU32, SCmpEQU64, \
     SCmpGtU32, SCmpLeU32, SCmpLtU32, SLShiftLeftB32, SLShiftLeftB64, SLShiftRightB32, VLShiftLeftB32, SLoadB32, \
     SMaxI32, SMinU32, SMovB32, SMovB64, SMulI32, SNop, SOrB32, SSleep, SStoreB32, SSubU32, \
     SWaitCnt, SWaitXCnt, VAddF32, VAddF64, VAddPKF16, VAddU32, VSubU32, VLShiftRightB32, VMovB32, \
-    VReadfirstlaneB32, VCvtBF16toFP32, BufferLoadB32, BufferStoreB32, SAtomicInc, DSLoadB32, DSStoreB32, \
-    SLongBranch, SLongBranchPositive
+    VReadfirstlaneB32, VCmpXEqU32, VCvtBF16toFP32, GlobalAtomicIncU32Saddr, BufferLoadB32, BufferStoreB32, \
+    SAtomicInc, DSLoadB32, DSStoreB32, SLongBranch, SLongBranchPositive
 from rocisa.functions import scalarStaticDivideAndRemainder, sMagicDiv2, \
     vectorStaticMultiply, BranchIfNotZero, scalarUInt24DivideAndRemainder, scalarUInt32DivideAndRemainder
 
@@ -323,6 +323,60 @@ class StreamK(Component):
           module.add(SLShiftRightB32(sgpr(srdIdx+2), 7, sgpr(srdIdx+2)))
 
       return module
+
+    def _fetchNextWorkItem(self, writer, kernel, sWorkItemIdx, sAddress) -> Module:
+        """Atomic fetch-and-increment for the dynamic work-queue counter.
+
+        Targets with scalar memory atomics use ``s_atomic_inc`` directly; targets
+        without them (e.g. gfx12/gfx1250, where ``HasSAtomic`` is false) issue a
+        returning vector atomic from lane 0 instead.
+        """
+        module = Module("fetchNextWorkItem")
+
+        if writer.states.asmCaps["HasSAtomic"]:
+            module.add(SAtomicInc(dst=sgpr(sWorkItemIdx), base=sgpr(sAddress, 2), soffset=0,
+                                  smem=SMEMModifiers(glc=True), comment="Fetch next work item index"))
+            module.add(SWaitCnt(kmcnt=0, comment="Wait for scalar memory op"))
+            return module
+
+        # No scalar memory atomic: issue the wrapping fetch-and-increment as a returning
+        # vector atomic from lane 0 only. Use ``global_atomic_inc_u32`` in SADDR form
+        # (scalar 64-bit base + per-lane 32-bit offset).
+        memOrder = Component.StreamKMemoryOrdering.find(writer)
+        vZeroOffset = writer.vgprPool.checkOut(1, "AtomicZeroOffset")
+        vWrapValue  = writer.vgprPool.checkOut(1, "AtomicWrapValue")
+        vFetchedIdx = writer.vgprPool.checkOut(1, "AtomicFetchedIdx")
+        sSavedExec  = writer.sgprPool.checkOutAligned(writer.states.laneSGPRCount,
+                                                      writer.states.laneSGPRCount,
+                                                      "SavedExec")
+        execMovInst = SMovB32 if kernel["WavefrontSize"] == 32 else SMovB64
+
+        module.add(VMovB32(dst=vgpr(vWrapValue), src=sgpr(sWorkItemIdx),
+                           comment="Queue wrap threshold (atomic_inc src)"))
+        module.add(VMovB32(dst=vgpr(vZeroOffset), src=0,
+                           comment="Zero per-lane offset; queue base stays in saddr"))
+        module.add(memOrder.preVolatileVmem(writer, comment="drain xnacks before dynamic queue atomic"))
+        module.add(execMovInst(dst=sgpr(sSavedExec, writer.states.laneSGPRCount),
+                               src=EXEC(), comment="save exec mask"))
+        module.add(VCmpXEqU32(dst=EXEC(), src0=vgpr("Serial"), src1=0,
+                              comment="lane 0 fetches next work item"))
+        module.add(GlobalAtomicIncU32Saddr(dst=vgpr(vFetchedIdx),
+                                      vaddr=vgpr(vZeroOffset),
+                                      data=vgpr(vWrapValue),
+                                      saddr=sgpr(sAddress, 2),
+                                      modifier=GLOBALModifiers(scope=CacheScope.SCOPE_DEV),
+                                      comment="Fetch next work item index"))
+        module.add(SWaitCnt(vlcnt=0, comment="Wait for VMEM atomic return (loadcnt; global needs no dscnt)"))
+        module.add(VReadfirstlaneB32(dst=sgpr(sWorkItemIdx), src=vgpr(vFetchedIdx),
+                                     comment="Read fetched work item index"))
+        module.add(execMovInst(dst=EXEC(),
+                               src=sgpr(sSavedExec, writer.states.laneSGPRCount),
+                               comment="restore exec mask"))
+        writer.sgprPool.checkIn(sSavedExec)
+        writer.vgprPool.checkIn(vFetchedIdx)
+        writer.vgprPool.checkIn(vWrapValue)
+        writer.vgprPool.checkIn(vZeroOffset)
+        return module
 
     def _skv(self, writer, name):
         """Return the VGPR index holding a StreamK constant."""
@@ -2936,9 +2990,7 @@ class StreamKDynamic(StreamK):
         writer.sgprPool.checkIn(sWorkgroupsInQueue)
 
         # Fetch next work item
-        module.add(SAtomicInc(dst=sgpr(sWorkItemIdx), base=sgpr(sAddress, 2), soffset=0, smem=SMEMModifiers(glc=True), comment="Fetch next work item index"))
-        # module.add(SMovB32(dst=sgpr(sWorkItemIdx), src=sgpr("WorkGroup0")))
-        module.add(SWaitCnt(kmcnt=0, comment="Wait for scalar memory op"))
+        module.add(self._fetchNextWorkItem(writer, kernel, sWorkItemIdx, sAddress))
         writer.sgprPool.checkIn(sAddress)
 
         # Convert to global work item index
@@ -3576,10 +3628,7 @@ class StreamKHybrid(StreamK):
             writer.sgprPool.checkIn(sTilesInQueue)
             writer.sgprPool.checkIn(sWorkgroupsInQueue)
 
-            mod.add(SAtomicInc(dst=sgpr(sWorkItemIdx), base=sgpr(sAddress, 2),
-                                  soffset=0, smem=SMEMModifiers(glc=True),
-                                  comment="Fetch next work item index"))
-            mod.add(SWaitCnt(kmcnt=0, comment="Wait for scalar memory op"))
+            mod.add(self._fetchNextWorkItem(writer, kernel, sWorkItemIdx, sAddress))
             writer.sgprPool.checkIn(sAddress)
 
             # Convert to global work item index
