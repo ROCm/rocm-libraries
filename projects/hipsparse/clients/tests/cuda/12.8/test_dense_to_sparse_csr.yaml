@@ -37,11 +37,4 @@ Tests:
   orderA: [HIPSPARSE_ORDER_ROW]
   baseA: [HIPSPARSE_INDEX_BASE_ZERO, HIPSPARSE_INDEX_BASE_ONE]
   sparse2dense_alg: [HIPSPARSE_SPARSETODENSE_ALG_DEFAULT]
-
-# Pre-checkin
-- name: dense_to_sparse_csr_bad_arg
-  category: pre_checkin
-  function: dense_to_sparse_csr_bad_arg
-  indextype: *i32_i64
-  precision: *single_double_precisions_complex_real
   

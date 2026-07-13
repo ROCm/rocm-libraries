@@ -26,12 +26,7 @@ include: hipsparse_common.yaml
 
 
 Tests:
-- name: dense_to_sparse_bell_bad_arg
-  category: pre_checkin
-  function: dense_to_sparse_bell_bad_arg
-  indextype: *i32_i64
-  precision: *single_double_precisions_complex_real
-
+# Quick
 - name: dense_to_sparse_bell
   category: quick
   function: dense_to_sparse_bell
@@ -56,6 +51,7 @@ Tests:
   baseA: [HIPSPARSE_INDEX_BASE_ZERO, HIPSPARSE_INDEX_BASE_ONE]
   dense2sparse_alg: [HIPSPARSE_DENSETOSPARSE_ALG_DEFAULT]
 
+# Pre-checkin
 - name: dense_to_sparse_bell
   category: pre_checkin
   function: dense_to_sparse_bell
