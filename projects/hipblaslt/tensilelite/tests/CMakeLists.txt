@@ -371,6 +371,18 @@ foreach(PATH fast slow)
     endforeach()
 endforeach()
 
+add_test(
+    NAME "CPUGemm.tf32_MixedA_Rejected"
+    COMMAND cpu-gemm-driver -M 16 -N 16 -K 16 --typeA tf32 --typeB f32 --validate
+)
+set_tests_properties("CPUGemm.tf32_MixedA_Rejected" PROPERTIES WILL_FAIL TRUE)
+
+add_test(
+    NAME "CPUGemm.tf32_MixedB_Rejected"
+    COMMAND cpu-gemm-driver -M 16 -N 16 -K 16 --typeA f32 --typeB tf32 --validate
+)
+set_tests_properties("CPUGemm.tf32_MixedB_Rejected" PROPERTIES WILL_FAIL TRUE)
+
 #################################################
 #        FP4 / MX Scale tests (fast & slow)     #
 #################################################

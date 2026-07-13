@@ -1042,6 +1042,17 @@ int main(int argc, char* argv[])
     int         mxBlockA         = vm["mxBlockA"].as<int>();
     int         mxBlockB         = vm["mxBlockB"].as<int>();
     size_t      batchCount       = vm["batchCount"].as<size_t>();
+    const bool  typeAIsTF32      = (typeAStr == "tf32");
+    const bool  typeBIsTF32      = (typeBStr == "tf32");
+    const bool  isTF32           = typeAIsTF32 && typeBIsTF32;
+
+    if(typeAIsTF32 != typeBIsTF32)
+    {
+        std::cerr << "Error: tf32 is an F32 math-op mode and must be used for both "
+                  << "inputs or neither (typeA=" << typeAStr << ", typeB=" << typeBStr
+                  << ")" << std::endl;
+        return 1;
+    }
 
     if(mxBlockA < 0 || mxBlockB < 0)
     {
@@ -1098,7 +1109,7 @@ int main(int argc, char* argv[])
               << " TypeA=" << typeAStr << " TypeB=" << typeBStr
               << " ComputeInA=" << computeInputAStr << " ComputeInB=" << computeInputBStr
               << " FastPath=" << tryFastPath;
-    if(typeAStr == "tf32" || typeBStr == "tf32")
+    if(isTF32)
         std::cout << " MathOp=XFloat32";
     std::cout << std::endl;
 
@@ -1106,7 +1117,6 @@ int main(int argc, char* argv[])
     // runGemm<A,B>(...). Asymmetric A/B is required to repro mixed-precision
     // bugs in the fast-path validator (e.g. F8N x Half).
     // tf32 = float storage + XFloat32 math-op. Dispatched as float with isTF32 flag.
-    bool isTF32 = (typeAStr == "tf32" || typeBStr == "tf32");
     auto resolveAccumStorage = [](std::string& s) {
         if(s == "tf32") s = "f32";
     };
