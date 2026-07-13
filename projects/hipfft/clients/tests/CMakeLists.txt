@@ -74,8 +74,12 @@ set( hipfft-test_source
 
 add_executable( hipfft-test ${hipfft-test_source} ${hipfft-test_includes} )
 
-find_package( hiprtc REQUIRED CONFIG HINTS ${ROCM_PATH} )
-target_link_libraries( hipfft-test PRIVATE hiprtc::hiprtc )
+if( BUILD_WITH_LIB STREQUAL "CUDA")
+  target_link_libraries( hipfft-test PRIVATE CUDA::nvrtc )
+else()
+  find_package( hiprtc REQUIRED CONFIG HINTS ${ROCM_PATH} )
+  target_link_libraries( hipfft-test PRIVATE hiprtc::hiprtc )
+endif()
 
 set( TEST_TARGETS hipfft-test )
 
@@ -167,7 +171,11 @@ if( HIPFFT_MPI_ENABLE )
     PRIVATE
     ${MPI_C_INCLUDE_PATH}
   )
-  target_link_libraries( hipfft_mpi_worker PRIVATE hiprtc::hiprtc )
+  if( BUILD_WITH_LIB STREQUAL "CUDA")
+    target_link_libraries( hipfft_mpi_worker PRIVATE CUDA::nvrtc )
+  else()
+    target_link_libraries( hipfft_mpi_worker PRIVATE hiprtc::hiprtc )
+  endif()
   add_compile_definitions( HIPFFT_MPI_ENABLE )
 endif()
 
