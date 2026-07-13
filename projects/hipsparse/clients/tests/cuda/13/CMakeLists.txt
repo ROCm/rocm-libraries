@@ -8,6 +8,7 @@ set(HIPSPARSE_TEST_SOURCES
     test_const_dnvec_descr.cpp
     test_const_spmat_descr.cpp
     test_const_spvec_descr.cpp
+    test_dense_to_sparse_bell.cpp
     test_dense_to_sparse_coo.cpp
     test_dense_to_sparse_csc.cpp
     test_dense_to_sparse_csr.cpp
@@ -52,6 +53,7 @@ set(HIPSPARSE_TEST_YAML_INCLUDE cuda/13/hipsparse_test.yaml)
 set(HIPSPARSE_TEST_YAMLS
     # Generic
     cuda/13/test_axpby.yaml
+    cuda/13/test_dense_to_sparse_bell.yaml
     cuda/13/test_dense_to_sparse_coo.yaml
     cuda/13/test_dense_to_sparse_csc.yaml
     cuda/13/test_dense_to_sparse_csr.yaml
