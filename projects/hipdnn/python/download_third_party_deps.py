@@ -45,7 +45,9 @@ def parse_args() -> argparse.Namespace:
     return parser.parse_args()
 
 
-def download_and_extract_dependency(*, deps_dir: Path, base_url: str, dependency: Dependency) -> Path:
+def download_and_extract_dependency(
+    *, deps_dir: Path, base_url: str, dependency: Dependency
+) -> Path:
     deps_dir.mkdir(parents=True, exist_ok=True)
 
     archive_path = deps_dir / dependency.archive_name

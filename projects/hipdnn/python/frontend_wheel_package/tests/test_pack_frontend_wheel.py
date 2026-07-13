@@ -25,6 +25,8 @@ def test_find_native_extension_rejects_multiple_preferred_matches(tmp_path):
         pack_frontend_wheel.find_native_extension(tmp_path)
 
     message = str(exc_info.value)
-    assert "Multiple native extensions found; pass --extension to select one:" in message
+    assert (
+        "Multiple native extensions found; pass --extension to select one:" in message
+    )
     assert str(first) in message
     assert str(second) in message
