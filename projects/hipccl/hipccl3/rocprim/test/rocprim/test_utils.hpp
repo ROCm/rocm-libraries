@@ -758,7 +758,7 @@ struct segments_index_to_offset_op
         }
         else if(i < segments_count)
         {
-            return segment_length * static_cast<offset_type>(i - empty_segments_count);
+            return segment_length * static_cast<segment_index_type>(i - empty_segments_count);
         }
         else
         {
