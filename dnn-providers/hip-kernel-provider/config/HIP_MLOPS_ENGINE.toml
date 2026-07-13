@@ -37,3 +37,11 @@ filters = [
     "Smoke/IntegrationGpuRMSNormBackward3dPureBfp16.Correctness/*",
 ]
 reason = "RMSNormBackward Pure-Bfp16 is flaky at large reduction shapes — root cause under investigation"
+
+# Layernorm forward batch-256/512 volumetric shapes (Full5dLargeBatch prefix). Each case runs
+# ~17-29 s and the set roughly doubles the 5D layernorm full-tier runtime without exercising a
+# code path the batch-32 Full shapes don't already cover. Skipped for now to keep the tier fast;
+# drop this entry once per-test tier filtering is fully wired.
+[[test_skips]]
+filters = ["Full5dLargeBatch/*Layernorm*"]
+reason = "Layernorm large-batch shapes are too slow for the current full tier; re-enable once tier filtering is fully set up"

@@ -256,3 +256,105 @@ INSTANTIATE_TEST_SUITE_P(Smoke5d,
                          IntegrationGpuLayernormPureBfp16,
                          testing::Combine(testing::Values(TensorLayout::NCDHW, TensorLayout::NDHWC),
                                           testing::ValuesIn(getLayernormFwd5DTestCases())));
+
+INSTANTIATE_TEST_SUITE_P(Full4d,
+                         IntegrationGpuLayernormPureFp32,
+                         testing::Combine(testing::Values(TensorLayout::NCHW, TensorLayout::NHWC),
+                                          testing::ValuesIn(getLayernormFwd4DFullTestCases())));
+INSTANTIATE_TEST_SUITE_P(Full5d,
+                         IntegrationGpuLayernormPureFp32,
+                         testing::Combine(testing::Values(TensorLayout::NCDHW, TensorLayout::NDHWC),
+                                          testing::ValuesIn(getLayernormFwd5DFullTestCases())));
+
+INSTANTIATE_TEST_SUITE_P(Full4d,
+                         IntegrationGpuLayernormMixedFp16,
+                         testing::Combine(testing::Values(TensorLayout::NCHW, TensorLayout::NHWC),
+                                          testing::ValuesIn(getLayernormFwd4DFullTestCases())));
+INSTANTIATE_TEST_SUITE_P(Full5d,
+                         IntegrationGpuLayernormMixedFp16,
+                         testing::Combine(testing::Values(TensorLayout::NCDHW, TensorLayout::NDHWC),
+                                          testing::ValuesIn(getLayernormFwd5DFullTestCases())));
+
+INSTANTIATE_TEST_SUITE_P(Full4d,
+                         IntegrationGpuLayernormMixedBfp16,
+                         testing::Combine(testing::Values(TensorLayout::NCHW, TensorLayout::NHWC),
+                                          testing::ValuesIn(getLayernormFwd4DFullTestCases())));
+INSTANTIATE_TEST_SUITE_P(Full5d,
+                         IntegrationGpuLayernormMixedBfp16,
+                         testing::Combine(testing::Values(TensorLayout::NCDHW, TensorLayout::NDHWC),
+                                          testing::ValuesIn(getLayernormFwd5DFullTestCases())));
+
+INSTANTIATE_TEST_SUITE_P(Full4d,
+                         IntegrationGpuLayernormUpcastFp16,
+                         testing::Combine(testing::Values(TensorLayout::NCHW, TensorLayout::NHWC),
+                                          testing::ValuesIn(getLayernormFwd4DFullTestCases())));
+INSTANTIATE_TEST_SUITE_P(Full5d,
+                         IntegrationGpuLayernormUpcastFp16,
+                         testing::Combine(testing::Values(TensorLayout::NCDHW, TensorLayout::NDHWC),
+                                          testing::ValuesIn(getLayernormFwd5DFullTestCases())));
+
+INSTANTIATE_TEST_SUITE_P(Full4d,
+                         IntegrationGpuLayernormUpcastBfp16,
+                         testing::Combine(testing::Values(TensorLayout::NCHW, TensorLayout::NHWC),
+                                          testing::ValuesIn(getLayernormFwd4DFullTestCases())));
+INSTANTIATE_TEST_SUITE_P(Full5d,
+                         IntegrationGpuLayernormUpcastBfp16,
+                         testing::Combine(testing::Values(TensorLayout::NCDHW, TensorLayout::NDHWC),
+                                          testing::ValuesIn(getLayernormFwd5DFullTestCases())));
+
+INSTANTIATE_TEST_SUITE_P(Full4d,
+                         IntegrationGpuLayernormPureFp16,
+                         testing::Combine(testing::Values(TensorLayout::NCHW, TensorLayout::NHWC),
+                                          testing::ValuesIn(getLayernormFwd4DFullTestCases())));
+INSTANTIATE_TEST_SUITE_P(Full5d,
+                         IntegrationGpuLayernormPureFp16,
+                         testing::Combine(testing::Values(TensorLayout::NCDHW, TensorLayout::NDHWC),
+                                          testing::ValuesIn(getLayernormFwd5DFullTestCases())));
+
+INSTANTIATE_TEST_SUITE_P(Full4d,
+                         IntegrationGpuLayernormPureBfp16,
+                         testing::Combine(testing::Values(TensorLayout::NCHW, TensorLayout::NHWC),
+                                          testing::ValuesIn(getLayernormFwd4DFullTestCases())));
+INSTANTIATE_TEST_SUITE_P(Full5d,
+                         IntegrationGpuLayernormPureBfp16,
+                         testing::Combine(testing::Values(TensorLayout::NCDHW, TensorLayout::NDHWC),
+                                          testing::ValuesIn(getLayernormFwd5DFullTestCases())));
+
+// Heavy batch-256/512 volumetric shapes. Registered under a dedicated Full5dLargeBatch prefix
+// (still a Full* prefix, so excluded from quick/standard/comprehensive) and skipped via each
+// engine's test-config TOML until per-test tier filtering is fully wired.
+INSTANTIATE_TEST_SUITE_P(
+    Full5dLargeBatch,
+    IntegrationGpuLayernormPureFp32,
+    testing::Combine(testing::Values(TensorLayout::NCDHW, TensorLayout::NDHWC),
+                     testing::ValuesIn(getLayernormFwd5DLargeBatchTestCases())));
+INSTANTIATE_TEST_SUITE_P(
+    Full5dLargeBatch,
+    IntegrationGpuLayernormMixedFp16,
+    testing::Combine(testing::Values(TensorLayout::NCDHW, TensorLayout::NDHWC),
+                     testing::ValuesIn(getLayernormFwd5DLargeBatchTestCases())));
+INSTANTIATE_TEST_SUITE_P(
+    Full5dLargeBatch,
+    IntegrationGpuLayernormMixedBfp16,
+    testing::Combine(testing::Values(TensorLayout::NCDHW, TensorLayout::NDHWC),
+                     testing::ValuesIn(getLayernormFwd5DLargeBatchTestCases())));
+INSTANTIATE_TEST_SUITE_P(
+    Full5dLargeBatch,
+    IntegrationGpuLayernormUpcastFp16,
+    testing::Combine(testing::Values(TensorLayout::NCDHW, TensorLayout::NDHWC),
+                     testing::ValuesIn(getLayernormFwd5DLargeBatchTestCases())));
+INSTANTIATE_TEST_SUITE_P(
+    Full5dLargeBatch,
+    IntegrationGpuLayernormUpcastBfp16,
+    testing::Combine(testing::Values(TensorLayout::NCDHW, TensorLayout::NDHWC),
+                     testing::ValuesIn(getLayernormFwd5DLargeBatchTestCases())));
+INSTANTIATE_TEST_SUITE_P(
+    Full5dLargeBatch,
+    IntegrationGpuLayernormPureFp16,
+    testing::Combine(testing::Values(TensorLayout::NCDHW, TensorLayout::NDHWC),
+                     testing::ValuesIn(getLayernormFwd5DLargeBatchTestCases())));
+INSTANTIATE_TEST_SUITE_P(
+    Full5dLargeBatch,
+    IntegrationGpuLayernormPureBfp16,
+    testing::Combine(testing::Values(TensorLayout::NCDHW, TensorLayout::NDHWC),
+                     testing::ValuesIn(getLayernormFwd5DLargeBatchTestCases())));
