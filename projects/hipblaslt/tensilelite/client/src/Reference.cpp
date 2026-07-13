@@ -144,20 +144,10 @@ namespace TensileLite
         inline void quantizeThroughComputeInputType(std::vector<AccumT>& buf,
                                                     rocisa::DataType     computeInputType)
         {
-            auto castThroughArithmetic = [](AccumT v, auto narrowTag) {
-                using NarrowT = decltype(narrowTag);
-                return static_cast<AccumT>(static_cast<NarrowT>(v));
-            };
             auto roundThrough = [&](auto narrowTag) {
                 using NarrowT = decltype(narrowTag);
                 for(auto& v : buf)
-                {
-                    if constexpr(std::is_arithmetic_v<NarrowT>)
-                        v = castThroughArithmetic(v, narrowTag);
-                    else
-                        v = static_cast<AccumT>(
-                            static_cast<float>(static_cast<NarrowT>(static_cast<float>(v))));
-                }
+                    v = static_cast<AccumT>(static_cast<NarrowT>(v));
             };
             switch(computeInputType)
             {
