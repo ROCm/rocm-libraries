@@ -757,6 +757,24 @@ class ORIGAMI_EXPORT hardware_t {
   static size_t get_default_num_xcds(architecture_t arch);
 
   /**
+   * @brief Get the default L2 cache-line size (in bytes) for an architecture.
+   *
+   * Single source of truth for the hardware L2 cache-line size, consolidating
+   * the scattered 128-byte literals used across origami (streamk.cpp
+   * CACHE_LINE_BYTES, origami.cpp L2_CACHE_LINE_BYTES,
+   * heuristics.hpp EPILOGUE_CACHE_LINE_BYTES, formocast.cpp L2CacheLineSize).
+   * CDNA3 (gfx942) and CDNA4 (gfx950) both use a 128-byte L2 line (confirmed by
+   * AMD whitepapers); 128 is a safe default for the other supported
+   * architectures. Consumers that place one datum per cache line (e.g. the
+   * StreamK per-XCD atomic counters) use this so each occupies its own line and
+   * avoids false sharing.
+   *
+   * @param arch Architecture enum value
+   * @return L2 cache-line size in bytes
+   */
+  static size_t get_default_cache_line_bytes(architecture_t arch);
+
+  /**
    * @brief Check if the hardware described by properties is supported.
    *
    * Determines whether the GPU architecture represented by the device

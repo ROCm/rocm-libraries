@@ -631,8 +631,9 @@ TEST(StreamK5WorkspaceRegressionTest, QueryAndLaunchAgreeForDynamicMode)
     size_t ws = env.solution.requiredWorkspaceSize(problem, env.device);
     EXPECT_GT(ws, 0u) << "Dynamic mode with partial tiles must request workspace";
 
-    // The workspace must be at least partialTileSize; the +2048 queue
-    // region is included by both query and launch so they agree.
+    // The workspace must be at least partialTileSize; the per-XCD work-queue
+    // region (cacheLineBytes * numXCD = 128 * 8 = 1024 B on gfx942/gfx950) is
+    // included by both query and launch so they agree.
     EXPECT_GE(ws, env.solution.partialTileSize(grid))
         << "Workspace must cover at least partialTileSize(grid)";
 }
@@ -657,7 +658,7 @@ TEST(StreamK5WorkspaceRegressionTest, StaticModeOmitsQueueRegion)
     size_t ws = env.solution.requiredWorkspaceSize(problem, env.device);
 
     // Static (SK3) path does not use the work-queue, so workspace
-    // should be exactly partialTileSize — no +2048.
+    // should be exactly partialTileSize — no per-XCD work-queue region.
     EXPECT_EQ(ws, env.solution.partialTileSize(grid))
         << "OFF workspace must equal partialTileSize(staticGrid)";
 }

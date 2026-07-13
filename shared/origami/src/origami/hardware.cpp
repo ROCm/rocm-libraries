@@ -197,6 +197,17 @@ size_t hardware_t::get_default_num_xcds(architecture_t arch) {
   }
 }
 
+size_t hardware_t::get_default_cache_line_bytes(architecture_t arch) {
+  // L2 cache-line size in bytes. Consolidates the 128-byte literals that were
+  // duplicated across origami. gfx942 (CDNA3) and gfx950 (CDNA4) use a 128-byte
+  // L2 line (AMD whitepapers); 128 is a safe default for the rest.
+  switch (arch) {
+    case architecture_t::gfx942: return 128;
+    case architecture_t::gfx950: return 128;
+    default:                     return 128;
+  }
+}
+
 void hardware_t::print() const {
   std::cout << "================== Hardware Configuration ==================\n";
   std::cout << "Number of CUs (N_CU)      : " << N_CU << "\n";

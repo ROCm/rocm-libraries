@@ -86,6 +86,24 @@ namespace TensileLite
             }
         }
 
+        // Per-XCD counter stride (bytes) for the dynamic-queue work-queue
+        // region. Set equal to the hardware L2 cache-line size so each per-XCD
+        // atomic counter occupies its own line (no false sharing). Sourced from
+        // origami (hardware_t::get_default_cache_line_bytes) -- the SAME value
+        // the codegen mirrors via rocisa archCaps["CacheLineBytes"]
+        // (StreamK.py _wsQueueConstants). Host (origami) and codegen (archCaps)
+        // strides are two mirrors of the one origami cache-line size, so the
+        // workspace the host reserves matches the layout the kernel addresses.
+        // Returns 0 when the architecture cannot be determined.
+        inline size_t streamKPerQueueStrideBytes(Hardware const& hardware)
+        {
+            auto const* hipAMDGPU = dynamic_cast<hip::HipAMDGPU const*>(&hardware);
+            if(hipAMDGPU == nullptr || hipAMDGPU->analyticalHardware == nullptr)
+                return 0;
+            return origami::hardware_t::get_default_cache_line_bytes(
+                hipAMDGPU->analyticalHardware->arch);
+        }
+
         // The dynamic-queue fetch / work stealing is only correct when the
         // device's runtime NUM_XCD is a power of two AND equals the baked
         // per-XCD queue count. Returns true (UNSUPPORTED) when NUM_XCD is 0, not
@@ -3263,12 +3281,16 @@ namespace TensileLite
             {
                 size_t idealWorkspace = partialTileSize(sk.grid);
                 // SK4 and SK5-dynamic need the per-XCD work-queue region; SK5-static
-                // sizes like standalone SK3. The region is sized to the kernel's
-                // baked per-XCD queue count (origami's per-arch XCD count); the
-                // acceptance guard requires runtime NUM_XCD == baked, so this
-                // equals 256 * NUM_XCD for every device that reaches here.
+                // sizes like standalone SK3. The region is sized as (per-queue
+                // stride) * (baked per-XCD queue count), both sourced from origami:
+                // the stride is the L2 cache-line size (get_default_cache_line_bytes,
+                // 128 B for gfx942/gfx950) so each counter owns its line (no false
+                // sharing), and the queue count is the per-arch XCD count. The
+                // acceptance guard requires runtime NUM_XCD == baked, so this equals
+                // cacheLineBytes * NUM_XCD for every device that reaches here.
                 if(dynamicQueuePath)
-                    idealWorkspace += 256 * streamKBakedQueueCount(hardware);
+                    idealWorkspace
+                        += streamKPerQueueStrideBytes(hardware) * streamKBakedQueueCount(hardware);
                 // If given workspace is less than ideal, we can fall back to DP mode
                 // Performance will likely be lower, but the kernel can run if workspace is unavailable.
                 // (The non-power-of-two XCD case is handled earlier by explicit
@@ -3699,14 +3721,18 @@ namespace TensileLite
                 {
                     size_t idealWorkspace = partialTileSize(skGrid);
                     // Reserve the per-XCD work-queue region for the dynamic-queue
-                    // path. Sized to the kernel's baked per-XCD queue count
-                    // (origami's per-arch XCD count, e.g. 8 for gfx942/gfx950);
-                    // this may slightly over-report on a device that falls back
-                    // to tree reduction (e.g. MI300A), which is safe (never
-                    // under-sized).
+                    // path. Sized as (per-queue stride) * (baked per-XCD queue
+                    // count), both from origami: the stride is the L2 cache-line
+                    // size (get_default_cache_line_bytes, 128 B for gfx942/gfx950)
+                    // so each counter owns its line (no false sharing), and the
+                    // queue count is the per-arch XCD count (e.g. 8 for
+                    // gfx942/gfx950). This may slightly over-report on a device
+                    // that falls back to tree reduction (e.g. MI300A), which is
+                    // safe (never under-sized).
                     if(sizeMapping.streamK == 4
                        || (sizeMapping.streamK == 5 && effectiveDynamic))
-                        idealWorkspace += 256 * streamKBakedQueueCount(hardware);
+                        idealWorkspace
+                            += streamKPerQueueStrideBytes(hardware) * streamKBakedQueueCount(hardware);
                     // If given workspace is less than ideal, we can fall back to DP mode
                     // Performance will likely be lower, but the kernel can run if workspace is unavailable
                     if(idealWorkspace <= problem.workspaceSize())

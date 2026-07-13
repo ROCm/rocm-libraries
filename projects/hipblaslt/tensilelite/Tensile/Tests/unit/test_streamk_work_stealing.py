@@ -84,11 +84,14 @@ class _FakeSgprPool:
 
 
 class _FakeWriter:
-    def __init__(self, numXCD: int = 8):
+    def __init__(self, numXCD: int = 8, cacheLineBytes: int = 128):
         self.sgprPool = _FakeSgprPool()
-        # gfx942/gfx950 mirror origami get_default_num_xcds == 8; the helpers
-        # read the per-arch queue count from writer.states.archCaps["NumXCD"].
-        self.states = types.SimpleNamespace(archCaps={"NumXCD": numXCD})
+        # gfx942/gfx950 mirror origami get_default_num_xcds == 8 and origami
+        # get_default_cache_line_bytes == 128; the helpers read the per-arch
+        # queue count from writer.states.archCaps["NumXCD"] and the per-queue
+        # counter stride from writer.states.archCaps["CacheLineBytes"].
+        self.states = types.SimpleNamespace(
+            archCaps={"NumXCD": numXCD, "CacheLineBytes": cacheLineBytes})
 
 
 def _mk_label(base: str) -> Label:
@@ -423,10 +426,11 @@ class TestQueueConstants:
     @pytest.mark.parametrize("isa", [(9, 4, 0), (9, 5, 0)])
     def test_supported_arches_use_eight_power_of_two_queues(self, isa):
         sk = _stream_k_instance(4)
-        # gfx942/gfx950 mirror origami get_default_num_xcds == 8, so the
-        # constants tuple is exactly (numQueues=8, mask=7, log2=3, cacheLog2=8).
-        writer = _FakeWriter(numXCD=8)
-        assert sk._wsQueueConstants(writer, {"ISA": isa}) == (8, 7, 3, 8)
+        # gfx942/gfx950 mirror origami get_default_num_xcds == 8 and
+        # get_default_cache_line_bytes == 128, so the constants tuple is exactly
+        # (numQueues=8, mask=7, log2=3, cacheLineLog2=log2(128)=7).
+        writer = _FakeWriter(numXCD=8, cacheLineBytes=128)
+        assert sk._wsQueueConstants(writer, {"ISA": isa}) == (8, 7, 3, 7)
 
     def test_non_power_of_two_queue_count_asserts(self):
         # The shift/AND fast masking is only valid for a power-of-two queue

@@ -388,7 +388,7 @@ class StreamK(Component):
     # Queues are one per XCD: numQueues = writer.states.archCaps["NumXCD"], a
     # power of two so the mapping can use shift/AND fast masking:
     #   queueIdx     = StreamKIdx & (numQueues - 1)
-    #   counter addr = AddressFlags + (queueIdx << _WS_CACHE_LINE_LOG2)
+    #   counter addr = AddressFlags + (queueIdx << cacheLineLog2)
     #   global index = (perQueueRaw << log2(numQueues)) + queueIdx
     #
     # A queue whose home fetch comes up empty makes a single-hop next-neighbor
@@ -397,35 +397,62 @@ class StreamK(Component):
     # auto-reset bound is a static predecessor-inclusive value that self-zeroes
     # the counter each launch -- no explicit end-of-kernel reset is needed.
     #
+    # The per-queue counter stride is the hardware L2 cache-line size (read from
+    # writer.states.archCaps["CacheLineBytes"], the codegen mirror of origami
+    # hardware_t::get_default_cache_line_bytes; 128B for gfx942/gfx950). Stride
+    # == cache-line size, so each per-XCD atomic counter occupies its own line
+    # -> no false sharing.
+    #
     # AddressFlags buffer layout (per problem):
-    #   [0, numQueues*256)     per-queue counters, one per 256B cache line
-    #   [numQueues*256, ...)   partials/fixup ready flags (one word per tile,
-    #                          offset = (partialIdx << 2) + numQueues*256).
+    #   [0, numQueues*stride)     per-queue counters, one per cache line
+    #   [numQueues*stride, ...)   partials/fixup ready flags (one word per tile,
+    #                             offset = (partialIdx << 2) + numQueues*stride).
     #
     # numQueues is read at codegen time from writer.states.archCaps["NumXCD"]
     # (the codegen mirror of origami get_default_num_xcds). The host
     # (ContractionSolution.cpp) reads the same origami value and additionally
     # rejects the dynamic-queue path when the device's runtime NUM_XCD differs
     # from this baked count (e.g. MI300A's 6 XCDs vs the gfx942-baked 8).
-    _WS_CACHE_LINE_BYTES = 256  # per-queue counter stride: one cache line
-    _WS_CACHE_LINE_LOG2 = log2(_WS_CACHE_LINE_BYTES)  # log2 from ..Common -> int 8
 
     def _wsQueueConstants(self, writer, kernel):
         """Return (numQueues, mask, log2Queues, cacheLineLog2) for this arch.
 
         Centralizes the dynamic-queue / work-stealing fast-mask constants so the
-        queue count lives in exactly one place. ``numQueues`` is read from the
-        per-arch capability ``writer.states.archCaps["NumXCD"]`` (the codegen
-        mirror of origami get_default_num_xcds) and must be a power of two for
-        the shift/AND masking to be valid; the host guards the same assumption
-        at runtime, rejecting devices whose runtime NUM_XCD is not a power of two
-        or does not equal this baked count (e.g. MI300A's 6 XCDs).
+        queue count and per-queue counter stride each live in exactly one place.
+        ``numQueues`` is read from ``writer.states.archCaps["NumXCD"]`` (the
+        codegen mirror of origami get_default_num_xcds) and must be a power of
+        two for the shift/AND masking to be valid; the host guards the same
+        assumption at runtime, rejecting devices whose runtime NUM_XCD is not a
+        power of two or does not equal this baked count (e.g. MI300A's 6 XCDs).
+
+        ``cacheLineLog2`` is log2 of the per-queue counter stride, which equals
+        the hardware L2 cache-line size ``writer.states.archCaps["CacheLineBytes"]``
+        (the codegen mirror of origami get_default_cache_line_bytes; 128B for
+        gfx942/gfx950). Stride == cache-line size so each per-XCD counter sits on
+        its own line (no false sharing); it must be a power of two for the
+        queue-address shift to be valid.
         """
         numQueues = writer.states.archCaps["NumXCD"]
         assert numQueues > 0 and (numQueues & (numQueues - 1)) == 0, (
             "StreamK dynamic-queue fast masking requires a power-of-two queue count "
             "(got %d for ISA %s)" % (numQueues, tuple(kernel["ISA"][:2])))
-        return numQueues, numQueues - 1, log2(numQueues), self._WS_CACHE_LINE_LOG2
+        strideBytes = writer.states.archCaps["CacheLineBytes"]
+        assert strideBytes > 0 and (strideBytes & (strideBytes - 1)) == 0, (
+            "StreamK per-queue counter stride must be a power-of-two cache-line "
+            "size (got %d for ISA %s)" % (strideBytes, tuple(kernel["ISA"][:2])))
+        return numQueues, numQueues - 1, log2(numQueues), log2(strideBytes)
+
+    def _wsFlagsBaseOffset(self, writer, kernel):
+        """Byte offset where the partials/fixup ready flags begin.
+
+        The per-queue counter region occupies ``numQueues`` cache lines
+        (``numQueues * strideBytes`` bytes, with stride == the cache-line size),
+        so the flags region starts right after it. Both terms come from
+        ``_wsQueueConstants`` (numQueues and log2(stride)); for gfx942/gfx950
+        this is 8 * 128 = 1024.
+        """
+        numQueues, _, _, cacheLineLog2 = self._wsQueueConstants(writer, kernel)
+        return numQueues << cacheLineLog2
 
     def _wsStructuralCount(self, mod, mask, log2Queues, sDst, sTotal, sQueue, sTmp, comment):
         """Emit sDst = (sTotal >> log2Queues) + [sQueue < (sTotal & mask)].
@@ -1505,7 +1532,7 @@ class StreamK(Component):
                 # TODO modularize this section into abstract function
                 module.add(self.calculatePartialIdx(tmpSgpr))
                 module.add(SLShiftLeftB32(dst=sgpr(tmpSgpr), src=sgpr(tmpSgpr), shiftHex=log2(4), comment="flag offset based on partial index"))
-                module.add(SAddU32(dst=sgpr(tmpSgpr), src0=sgpr(tmpSgpr), src1=(256*8), comment="Offset flags to come after the work queues"))
+                module.add(SAddU32(dst=sgpr(tmpSgpr), src0=sgpr(tmpSgpr), src1=self._wsFlagsBaseOffset(writer, kernel), comment="Offset flags to come after the work queues"))
             elif kernel["StreamK"] == 5:
                 # SK5 hybrid: dispatch on StreamKHybridMode bit
                 # (0 = static SK3 -> use StreamKIdx, 1 = dynamic SK4 -> use calculatePartialIdx).
@@ -1519,7 +1546,7 @@ class StreamK(Component):
                 module.add(self.calculatePartialIdx(tmpSgpr))
                 module.add(SLShiftLeftB32(dst=sgpr(tmpSgpr), src=sgpr(tmpSgpr), shiftHex=log2(4),
                                           comment="SK5/SK4: flag offset based on partial index"))
-                module.add(SAddU32(dst=sgpr(tmpSgpr), src0=sgpr(tmpSgpr), src1=(256*8),
+                module.add(SAddU32(dst=sgpr(tmpSgpr), src0=sgpr(tmpSgpr), src1=self._wsFlagsBaseOffset(writer, kernel),
                                    comment="SK5/SK4: offset flags to come after the work queues"))
                 module.add(SBranch(labelName=sk5FlagDone.getLabelName(),
                                    comment="SK5: skip static flag offset"))
@@ -3103,7 +3130,8 @@ class StreamKDynamic(StreamK):
         writer.sgprPool.checkIn(sWave)
 
         # Per-arch dynamic-queue fast-mask constants (log2(numQueues) for the
-        # StreamKIdx/queue divisions, log2(256) for the cache-line stride).
+        # StreamKIdx/queue divisions, log2(cache-line size) for the per-queue
+        # counter stride == one cache line, no false sharing).
         _, _, wsLog2Queues, wsCacheLineLog2 = self._wsQueueConstants(writer, kernel)
 
         # Default queue index
@@ -3374,7 +3402,7 @@ class StreamKDynamic(StreamK):
 
             # Check flag
             module.add(SLShiftLeftB32(dst=sgpr(tmpSgpr), src=sgpr(sPartialIdx), shiftHex=log2(4), comment="flag offset based on partial index"))
-            module.add(SAddU32(dst=sgpr(tmpSgpr), src0=sgpr(tmpSgpr), src1=(256*8), comment="Offset flags to come after the work queues"))
+            module.add(SAddU32(dst=sgpr(tmpSgpr), src0=sgpr(tmpSgpr), src1=self._wsFlagsBaseOffset(writer, kernel), comment="Offset flags to come after the work queues"))
             module.add(SLoadB32(dst=sgpr(tmpSgpr+2), base=sgpr("AddressFlags", 2), soffset=sgpr(tmpSgpr), smem=SMEMModifiers(glc=True, dlc=True, scope=CacheScope.SCOPE_DEV), comment="get flag"))
 
             module.add(SWaitCnt(kmcnt=0, comment="wait for flag load"))
@@ -3761,7 +3789,8 @@ class StreamKHybrid(StreamK):
             writer.sgprPool.checkIn(sWave)
 
             # Per-arch dynamic-queue fast-mask constants (log2(numQueues) for
-            # the StreamKIdx/queue divisions, log2(256) for cache-line stride).
+            # the StreamKIdx/queue divisions, log2(cache-line size) for the
+            # per-queue counter stride == one cache line, no false sharing).
             _, _, wsLog2Queues, wsCacheLineLog2 = self._wsQueueConstants(writer, kernel)
 
             # Default queue index
@@ -4198,7 +4227,7 @@ class StreamKHybrid(StreamK):
                 mod.add(SLShiftLeftB32(dst=sgpr(tmpSgpr), src=sgpr(sPartialIdx),
                                        shiftHex=log2(4),
                                        comment="flag offset based on partial index"))
-                mod.add(SAddU32(dst=sgpr(tmpSgpr), src0=sgpr(tmpSgpr), src1=(256*8),
+                mod.add(SAddU32(dst=sgpr(tmpSgpr), src0=sgpr(tmpSgpr), src1=self._wsFlagsBaseOffset(writer, kernel),
                                 comment="Offset flags to come after the work queues"))
                 mod.add(SLoadB32(dst=sgpr(tmpSgpr+2), base=sgpr("AddressFlags", 2),
                                  soffset=sgpr(tmpSgpr),
