@@ -42,6 +42,7 @@
 
 #if _THRUST_HAS_DEVICE_SYSTEM_STD
 #  include _THRUST_LIBCXX_INCLUDE(__iterator/discard_iterator.h)
+#  include _THRUST_LIBCXX_INCLUDE(__iterator/tabulate_output_iterator.h)
 #endif
 
 #include _THRUST_STD_INCLUDE(type_traits)
@@ -93,6 +94,13 @@ struct tuple_binary_predicate
 
   mutable Predicate pred;
 };
+
+// We need to mark proxy iterators as such
+template <>
+inline constexpr bool is_proxy_reference_v<_THRUST_LIBCXX::discard_iterator::__discard_proxy> = true;
+
+template <class Fn, class Index>
+inline constexpr bool is_proxy_reference_v<_THRUST_LIBCXX::__tabulate_proxy<Fn, Index>> = true;
 
 template <typename T>
 inline constexpr bool is_non_const_reference_v =
