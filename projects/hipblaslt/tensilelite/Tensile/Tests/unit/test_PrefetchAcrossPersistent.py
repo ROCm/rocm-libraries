@@ -668,6 +668,29 @@ def test_solution_validation_accepts_minimal_pap_tdm_contract():
     assert _pap_solution()["Valid"] is True
 
 
+def test_solution_validation_accepts_pap_streamk_dynamic():
+    # Phase 1: PAP is now allowed for StreamK==4 (StreamKDynamic) in addition to
+    # StreamK==3. The validation gate was relaxed to accept StreamK in (3, 4);
+    # every other PAP axis restriction is StreamK-agnostic and still applies.
+    # TDM is disabled here (TDMInst=0): the TDM+PAP twin gate is intentionally
+    # kept SK3-only, so SK4 PAP is supported for the non-TDM path only.
+    assert _pap_solution(StreamK=4, TDMInst=0)["Valid"] is True
+
+
+def test_solution_validation_rejects_pap_streamk_dynamic_with_tdm(capsys):
+    # The TDM + PAP twin gate is deliberately NOT relaxed for SK4: TDM+PAP
+    # remains StreamK==3 only.
+    assert _pap_solution(StreamK=4, TDMInst=3)["Valid"] is False
+    assert "TDM + PrefetchAcrossPersistent requires StreamK == 3" in capsys.readouterr().out
+
+
+def test_solution_validation_rejects_pap_streamk_hybrid(capsys):
+    # SK5 (hybrid) PAP is intentionally deferred to a later stage; the relaxed
+    # gate still rejects StreamK==5 for PrefetchAcrossPersistent.
+    assert _pap_solution(StreamK=5, TDMInst=0)["Valid"] is False
+    assert "PrefetchAcrossPersistent is currently supported only with StreamK in [3, 4]" in capsys.readouterr().out
+
+
 @pytest.mark.parametrize(
     "overrides, reason",
     [
