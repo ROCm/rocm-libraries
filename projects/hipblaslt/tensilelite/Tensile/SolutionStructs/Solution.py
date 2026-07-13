@@ -180,6 +180,28 @@ def _disableUnsupportedRuntimeStaggerU(state):
     _disableRuntimeStaggerU(state)
 
 
+def _validateSubtileMIWaveEven(state, printRejectionReason):
+  # TODO: TEMPORARY FIX. Reject UseSubtileImpl solutions whose combined
+  # MIWaveTile * MIWaveGroup product is odd. An odd product (i.e. every one of
+  # MIWaveTile[0], MIWaveTile[1], MIWaveGroup[0], MIWaveGroup[1] is odd) produces
+  # a numerical mismatch we have not yet root-caused. A single even factor makes
+  # the product even, so common cases such as MIWaveGroup=[2, 2] are unaffected
+  # and need no rejection. Only the subtile (UseSubtileImpl) path is affected.
+  # Remove this once the underlying mismatch is understood and fixed.
+  if not state["UseSubtileImpl"]:
+    return True
+  miwtMiwgProduct = (state["MIWaveTile"][0] * state["MIWaveTile"][1]
+                     * state["MIWaveGroup"][0] * state["MIWaveGroup"][1])
+  if miwtMiwgProduct % 2 != 0:
+    reject(state, printRejectionReason,
+           "UseSubtileImpl=1 requires MIWaveTile * MIWaveGroup to be even, "
+           "got MIWaveTile=[%d, %d], MIWaveGroup=[%d, %d]"
+           % (state["MIWaveTile"][0], state["MIWaveTile"][1],
+              state["MIWaveGroup"][0], state["MIWaveGroup"][1]))
+    return False
+  return True
+
+
 def _validateStreamKForceDPOnly(state, printRejectionReason):
   if state["StreamKForceDPOnly"]:
     if state["StreamK"] != 3:
@@ -1781,6 +1803,8 @@ class Solution(collections.abc.Mapping):
                  "UseSubtileImpl=1 with MX datatype requires even MIWaveTile, got [%d, %d]"
                  % (state["MIWaveTile"][0], state["MIWaveTile"][1]))
           return
+      if not _validateSubtileMIWaveEven(state, printRejectionReason):
+        return
       if isaInfoMap[isa].asmCaps["HasMFMA"]:
         if not state["ProblemType"]["HighPrecisionAccumulate"] \
            and state["ProblemType"]["DataType"].numRegisters() < 1 \
