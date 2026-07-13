@@ -59,6 +59,7 @@ from kernels.common.attention_unified import (
     _tiled_2d_impl,
     _tiled_3d_impl,
 )
+
 # Imported as a module (not a bound symbol) so tests that
 # ``mock.patch.object(attention_unified, "_d256_gfx950_fast", ...)`` still steer
 # the builder's fast-route branch below (a bound import would freeze the ref).
