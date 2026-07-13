@@ -1336,7 +1336,7 @@ def getCapabilitiesCache(rocmVersion: NamedTuple) -> dict:
                   'HasSMulHi': True,
                   'HasWMMA': False,
                   'KernargPreloading': False,
-                  'MaxLgkmcnt': 63,
+                  'MaxLgkmcnt': 15,
                   'MaxVmcnt': 63,
                   'SupportedISA': True,
                   'SupportedSource': True,
