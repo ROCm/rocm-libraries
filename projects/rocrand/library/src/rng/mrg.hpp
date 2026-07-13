@@ -110,6 +110,9 @@ struct generate_mrg
 
         vec_type* vec_data = reinterpret_cast<vec_type*>(data + misalignment);
         size_t    index    = id;
+#ifdef __HIP_DEVICE_COMPILE__
+        __syncthreads();
+#endif
         while(index < vec_n)
         {
             for(unsigned int i = 0; i < input_width; i++)

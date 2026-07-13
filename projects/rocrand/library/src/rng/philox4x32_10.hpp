@@ -174,6 +174,9 @@ struct generate_philox
         // Save multiple values as one vec_type
         vec_type* vec_data = reinterpret_cast<vec_type*>(data + misalignment);
         size_t    index    = thread_id;
+#ifdef __HIP_DEVICE_COMPILE__
+        __syncthreads();
+#endif
         while(index < vec_n)
         {
             const uint4        v     = engine.next4_leap(stride);

@@ -108,7 +108,9 @@ __host__ __device__ __forceinline__
         T            output[output_width];
 
         size_t index = thread_id;
-
+#ifdef __HIP_DEVICE_COMPILE__
+        __syncthreads();
+#endif
 #if defined(__gfx942__) || defined(__gfx908__)
         // On gfx942 and gfx908, the compiler generates faster code with unrolled loops.
         // The loop is unrolled selectivly with unroll factors of 2 and 4 based on the
