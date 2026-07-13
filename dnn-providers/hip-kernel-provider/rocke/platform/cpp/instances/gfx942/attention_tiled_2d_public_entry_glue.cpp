@@ -38,6 +38,7 @@
 #include "rocke/instance_gfx942_attention_tiled_2d.h"
 #include "rocke/instance_gfx942_attention_tiled_2d_internal.h"
 
+#include "rocke/helper_helper_rocke.instances.common.attention_unified_selectors.h" /* rocke_unified_attn_tiled_2d_lds_bytes */
 #include "rocke/helper_rocke.helpers.spec.h" /* rocke_kernel_name_join */
 
 #include "rocke/error_boundary.hpp" /* ckc::guard_builder boundary shim */
@@ -373,13 +374,18 @@ bool rocke_gfx942_attention_tiled_2d_supports(
             }
         }
         {
-            int _out_stripe = (args->head_size <= 64) ? 32 : args->head_size;
-            int _lds
-                = 2 * _t_eff * args->head_size * _BPE /* K_lds (double) */
-                  + _t_eff * args->head_size * _BPE /* V_lds          */
-                  + _block_m * (_t_eff + 8) * _BPE /* P_lds          */
-                  + ((_block_m <= 2 * _t_eff) ? 0 : _block_m * args->head_size * _BPE) /* Q_lds */
-                  + _block_m * _out_stripe * _BPE; /* Acc_lds     */
+            /* Default-path footprint via the shared model (single source of
+             * truth, also used by the gfx950 register-PV resolver). Conservative
+             * here: Q_lds/P_lds staged (the register-PV path drops them). */
+            int _lds = rocke_unified_attn_tiled_2d_lds_bytes(_t_eff,
+                                                             args->head_size,
+                                                             _block_m,
+                                                             _BPE,
+                                                             /*k_slots=*/2,
+                                                             /*v_slots=*/1,
+                                                             /*include_q_lds=*/true,
+                                                             /*include_p_lds=*/true,
+                                                             /*v_pad=*/0);
             if(_lds > _LDS_CAPACITY_BYTES)
             {
                 snprintf(buf,

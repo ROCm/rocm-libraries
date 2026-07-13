@@ -115,7 +115,21 @@ void typesBindings(nb::module_& m)
         .value("OK", ErrorCode::OK)
         .value("INVALID_VALUE", ErrorCode::INVALID_VALUE)
         .value("HIPDNN_BACKEND_ERROR", ErrorCode::HIPDNN_BACKEND_ERROR)
-        .value("ATTRIBUTE_NOT_SET", ErrorCode::ATTRIBUTE_NOT_SET);
+        .value("ATTRIBUTE_NOT_SET", ErrorCode::ATTRIBUTE_NOT_SET)
+        .value("GRAPH_NOT_SUPPORTED", ErrorCode::GRAPH_NOT_SUPPORTED)
+        .value("SHAPE_DEDUCTION_FAILED", ErrorCode::SHAPE_DEDUCTION_FAILED)
+        .value("INVALID_TENSOR_NAME", ErrorCode::INVALID_TENSOR_NAME)
+        .value("INVALID_VARIANT_PACK", ErrorCode::INVALID_VARIANT_PACK)
+        .value("GRAPH_EXECUTION_PLAN_CREATION_FAILED",
+               ErrorCode::GRAPH_EXECUTION_PLAN_CREATION_FAILED)
+        .value("GRAPH_EXECUTION_FAILED", ErrorCode::GRAPH_EXECUTION_FAILED)
+        .value("HEURISTIC_QUERY_FAILED", ErrorCode::HEURISTIC_QUERY_FAILED)
+        .value("UNSUPPORTED_GRAPH_FORMAT", ErrorCode::UNSUPPORTED_GRAPH_FORMAT)
+        .value("CUDA_API_FAILED", ErrorCode::CUDA_API_FAILED)
+        .value("CUDNN_BACKEND_API_FAILED", ErrorCode::CUDNN_BACKEND_API_FAILED)
+        .value("INVALID_CUDA_DEVICE", ErrorCode::INVALID_CUDA_DEVICE)
+        .value("HANDLE_ERROR", ErrorCode::HANDLE_ERROR)
+        .value("NVRTC_COMPILATION_FAILED", ErrorCode::NVRTC_COMPILATION_FAILED);
 
     // Bind Error struct
     nb::class_<Error>(m, "Error")
