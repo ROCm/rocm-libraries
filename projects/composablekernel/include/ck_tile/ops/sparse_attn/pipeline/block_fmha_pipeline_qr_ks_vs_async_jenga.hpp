@@ -228,9 +228,11 @@ struct BlockFmhaPipelineQRKSVSAsyncJenga
 
         __builtin_amdgcn_sched_barrier(0);
         const auto q_origin = q_dram_window.get_window_origin();
-        const auto [seqlen_k_start, seqlen_k_end] =
+        const auto seqlen_k_range =
             mask.GetTileRangeAlongX(q_origin.at(number<0>{}), number<kM0>{}, number<kN0>{});
-        const auto num_total_loop = integer_divide_ceil(seqlen_k_end - seqlen_k_start, kN0);
+        const index_t seqlen_k_start = seqlen_k_range.at(number<0>{});
+        const index_t seqlen_k_end   = seqlen_k_range.at(number<1>{});
+        const auto num_total_loop    = integer_divide_ceil(seqlen_k_end - seqlen_k_start, kN0);
 
         if constexpr(FmhaMask::IsMasking || kPadSeqLenK)
         {

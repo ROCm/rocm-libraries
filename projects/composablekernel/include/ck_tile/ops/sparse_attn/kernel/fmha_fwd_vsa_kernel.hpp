@@ -388,7 +388,11 @@ struct FmhaFwdVSAKernel
         // VSA reads the int LUT directly from DRAM (no LDS staging, unlike jenga onehot).
         __shared__ char smem_ptr[GetSmemSize()];
 
-        const auto [i_tile_m, i_tile_n, i_nhead, i_batch] = GetTileIndex(kargs);
+        const auto tile_index  = GetTileIndex(kargs);
+        const index_t i_tile_m = tile_index.at(number<0>{});
+        const index_t i_tile_n = tile_index.at(number<1>{});
+        const index_t i_nhead  = tile_index.at(number<2>{});
+        const index_t i_batch  = tile_index.at(number<3>{});
 
         const index_t i_m0 = __builtin_amdgcn_readfirstlane(i_tile_m * FmhaPipeline::kM0);
         const index_t i_n1 = __builtin_amdgcn_readfirstlane(i_tile_n * FmhaPipeline::kN1);
