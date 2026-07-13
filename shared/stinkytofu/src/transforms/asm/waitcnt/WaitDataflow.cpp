@@ -96,6 +96,15 @@ bool isTensorAnchor(const StinkyInstruction& inst) {
     return isBarrier(inst) || isDSRead(inst) || isDSWrite(inst) || isDSAtomic(inst);
 }
 
+bool hasUntaggedTensorAnchor(BasicBlock& bb) {
+    for (IRBase& ir : bb) {
+        auto* inst = dyn_cast<StinkyInstruction>(&ir);
+        if (inst == nullptr) continue;
+        if (isTensorAnchor(*inst) && inst->getModifier<MemTokenData>() == nullptr) return true;
+    }
+    return false;
+}
+
 bool isLdsWriterAnchor(const StinkyInstruction& inst) {
     return isTensorLoad(inst) || isDSWrite(inst);
 }
@@ -421,7 +430,13 @@ DataflowState adjustedEntry(BasicBlock& bb, const WaitInsertionPlan& plan,
     return state;
 }
 
-void restoreTensorState(DataflowState& state, const DataflowState& frozen) {
+void restoreTensorState(DataflowState& state, const DataflowState& frozen,
+                        bool keepLiveTensorState) {
+    // Untagged tensor anchors are fences: if this block has one, live tensor
+    // queues from back-edges must reach it instead of being replaced by the
+    // sweep-0 frozen snapshot.
+    if (keepLiveTensorState) return;
+
     state.queues[CK_Tensor] = frozen.queues[CK_Tensor];
     for (auto& kv : state.phiSummaries) {
         auto it = frozen.phiSummaries.find(kv.first);
@@ -745,14 +760,15 @@ bool WaitDataflow::solve() {
         // every block's transfer and re-detects any sustained overflow).
         overflowSites.clear();
         for (BasicBlock* bb : rpo) {
+            const bool keepLiveTensorState = hasUntaggedTensorAnchor(*bb);
             DataflowState entry = mergeFromPredecessors(*bb);
             if (!loopCarriedTokenDepsEnabled && iter > 0) {
-                restoreTensorState(entry, result.entryState[bb]);
+                restoreTensorState(entry, result.entryState[bb], keepLiveTensorState);
             }
             DataflowState working = entry;
             transferBlock(*bb, working);
             if (!loopCarriedTokenDepsEnabled && iter > 0) {
-                restoreTensorState(working, result.exitState[bb]);
+                restoreTensorState(working, result.exitState[bb], keepLiveTensorState);
             }
 
             PASS_DEBUG({
@@ -822,6 +838,7 @@ void WaitDataflow::finalizePlan(WaitInsertionPlan& plan) const {
         newAnchors.clear();
 
         for (BasicBlock* bb : rpo) {
+            const bool keepLiveTensorState = hasUntaggedTensorAnchor(*bb);
             // Entry = merge of recomputed predecessor exits (back-edges
             // start at bottom and tighten over iterations), then apply the
             // optimizer's predecessor tail drains.
@@ -829,7 +846,8 @@ void WaitDataflow::finalizePlan(WaitInsertionPlan& plan) const {
             state = adjustedEntry(*bb, optimizerPlan, state);
             if (!loopCarriedTokenDepsEnabled && iter > 0) {
                 auto eit = finalEntry.find(bb);
-                if (eit != finalEntry.end()) restoreTensorState(state, eit->second);
+                if (eit != finalEntry.end())
+                    restoreTensorState(state, eit->second, keepLiveTensorState);
             }
             finalEntry[bb] = state;
             CounterEmitState emit[CK_Count];
@@ -863,7 +881,7 @@ void WaitDataflow::finalizePlan(WaitInsertionPlan& plan) const {
 
             auto it = finalExit.find(bb);
             if (!loopCarriedTokenDepsEnabled && iter > 0 && it != finalExit.end()) {
-                restoreTensorState(state, it->second);
+                restoreTensorState(state, it->second, keepLiveTensorState);
             }
             if (it == finalExit.end() || !(it->second == state)) {
                 finalExit[bb] = std::move(state);
