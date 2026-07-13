@@ -36,51 +36,86 @@ if(NOT DEFINED ROCKE_AOT_LLVM_FLAVOR OR ROCKE_AOT_LLVM_FLAVOR STREQUAL "")
 endif()
 
 # --- rocm_kpack source availability -----------------------------------------
-# The packer imports rocm_kpack from source (never pip). Resolve the source dir
-# from ROCKE_KPACK_PYTHON_DIR (TheRock passes it; overridable standalone) or the
-# ambient PYTHONPATH, and gate loud at configure time -- never silently skip.
+# The packer imports rocm_kpack from source (never pip -- it is not an installable
+# package). Three resolution paths, in order:
+#   1. -DROCKE_KPACK_PYTHON_DIR=<rocm-systems>/shared/kpack/python: an explicit
+#      source dir. TheRock/CI pass this as a configure arg pointing at their
+#      pinned rocm-systems checkout.
+#   2. Otherwise: a sparse partial clone of rocm-systems (only shared/kpack/python,
+#      ~4 MB) into the build tree.
+#   3. If that git path fails (older git, no partial-clone/sparse support): fall
+#      back to FetchContent's shallow clone (whole tree, ~1 GB, but more robust).
+# The resolved dir is filesystem-checked below and gates loud -- never silently
+# skipped.
+set(ROCKE_KPACK_GIT_REPOSITORY "https://github.com/ROCm/rocm-systems.git"
+    CACHE STRING "rocm-systems repository fetched for the rocm_kpack source dep")
+set(ROCKE_KPACK_GIT_TAG "develop"
+    CACHE STRING "rocm-systems git ref fetched for the rocm_kpack source dep")
+
 if(DEFINED ROCKE_KPACK_PYTHON_DIR AND NOT "${ROCKE_KPACK_PYTHON_DIR}" STREQUAL "")
-    set(_ROCKE_KPACK_PYTHON_DIR "${ROCKE_KPACK_PYTHON_DIR}")
-elseif(DEFINED ENV{ROCKE_KPACK_PYTHON_DIR} AND NOT "$ENV{ROCKE_KPACK_PYTHON_DIR}" STREQUAL "")
-    set(_ROCKE_KPACK_PYTHON_DIR "$ENV{ROCKE_KPACK_PYTHON_DIR}")
+    get_filename_component(_ROCKE_KPACK_PYTHON_DIR "${ROCKE_KPACK_PYTHON_DIR}" ABSOLUTE)
+    message(STATUS "rocKE AOT kpack packer: rocm_kpack from -DROCKE_KPACK_PYTHON_DIR ${_ROCKE_KPACK_PYTHON_DIR}")
 else()
-    set(_ROCKE_KPACK_PYTHON_DIR "")
+    # No explicit dir: consume rocm_kpack from a source checkout of rocm-systems.
+    # Try a sparse partial clone first -- it pulls only shared/kpack/python (blobs
+    # deferred via --filter=blob:none, tree limited via cone sparse-checkout), so a
+    # few MB rather than the whole monorepo. The checkout lives in the build tree;
+    # the EXISTS guard makes reconfigures a no-op.
+    set(_ROCKE_KPACK_SRC "${CMAKE_CURRENT_BINARY_DIR}/rocm_systems_kpack")
+    set(_ROCKE_KPACK_PYTHON_DIR "${_ROCKE_KPACK_SRC}/shared/kpack/python")
+    if(NOT EXISTS "${_ROCKE_KPACK_PYTHON_DIR}/rocm_kpack/kpack.py")
+        find_package(Git REQUIRED)
+        message(STATUS
+            "rocKE AOT kpack packer: sparse-cloning rocm-systems "
+            "(${ROCKE_KPACK_GIT_REPOSITORY}@${ROCKE_KPACK_GIT_TAG})")
+        file(REMOVE_RECURSE "${_ROCKE_KPACK_SRC}")
+        execute_process(
+            COMMAND "${GIT_EXECUTABLE}" clone --depth 1 --filter=blob:none --sparse
+                    --branch "${ROCKE_KPACK_GIT_TAG}"
+                    "${ROCKE_KPACK_GIT_REPOSITORY}" "${_ROCKE_KPACK_SRC}"
+            RESULT_VARIABLE _ROCKE_KPACK_CLONE_RC
+        )
+        if(_ROCKE_KPACK_CLONE_RC EQUAL 0)
+            execute_process(
+                COMMAND "${GIT_EXECUTABLE}" -C "${_ROCKE_KPACK_SRC}"
+                        sparse-checkout set shared/kpack/python
+                RESULT_VARIABLE _ROCKE_KPACK_SPARSE_RC
+            )
+        endif()
+    endif()
+    if(EXISTS "${_ROCKE_KPACK_PYTHON_DIR}/rocm_kpack/kpack.py")
+        message(STATUS "rocKE AOT kpack packer: rocm_kpack from sparse checkout ${_ROCKE_KPACK_PYTHON_DIR}")
+    else()
+        # Sparse path unavailable: drop any partial tree and fall back to
+        # FetchContent's shallow clone. SOURCE_SUBDIR names a directory with no
+        # CMakeLists.txt so FetchContent populates without configuring rocm-systems
+        # as a CMake subproject; GIT_SUBMODULES "" skips the heavy submodule trees.
+        message(STATUS "rocKE AOT kpack packer: sparse clone unavailable; falling back to FetchContent shallow clone")
+        file(REMOVE_RECURSE "${_ROCKE_KPACK_SRC}")
+        include(FetchContent)
+        FetchContent_Declare(
+            rocke_rocm_systems
+            GIT_REPOSITORY "${ROCKE_KPACK_GIT_REPOSITORY}"
+            GIT_TAG        "${ROCKE_KPACK_GIT_TAG}"
+            GIT_SHALLOW    TRUE
+            GIT_SUBMODULES ""
+            GIT_PROGRESS   TRUE
+            SOURCE_SUBDIR  shared/kpack/python
+        )
+        FetchContent_MakeAvailable(rocke_rocm_systems)
+        set(_ROCKE_KPACK_PYTHON_DIR "${rocke_rocm_systems_SOURCE_DIR}/shared/kpack/python")
+        message(STATUS
+            "rocKE AOT kpack packer: rocm_kpack from fetched rocm-systems "
+            "${_ROCKE_KPACK_PYTHON_DIR}")
+    endif()
 endif()
 
-if(NOT "${_ROCKE_KPACK_PYTHON_DIR}" STREQUAL "")
-    get_filename_component(_ROCKE_KPACK_PYTHON_DIR "${_ROCKE_KPACK_PYTHON_DIR}" ABSOLUTE)
-    if(NOT EXISTS "${_ROCKE_KPACK_PYTHON_DIR}/rocm_kpack/kpack.py")
-        message(FATAL_ERROR
-            "ROCKE_KPACK_PYTHON_DIR does not contain rocm_kpack/kpack.py: "
-            "${_ROCKE_KPACK_PYTHON_DIR}"
-        )
-    endif()
-    message(STATUS "rocKE AOT kpack packer: rocm_kpack from ${_ROCKE_KPACK_PYTHON_DIR}")
-else()
-    # No explicit dir: rocm_kpack must be importable from the ambient environment
-    # (local dev). find_spec locates a top-level package without executing it.
-    #
-    # This checks the system Python3, whereas the packer runs under the not-yet-
-    # built ROCKE_PYENV_PYTHON. That is an adequate proxy only because the pyenv
-    # is a --system-site-packages venv of this same base interpreter and
-    # rocm_kpack is never pip-installed into it, so ambient importability is
-    # shared. If that assumption changes, prefer the explicit
-    # ROCKE_KPACK_PYTHON_DIR path above, which filesystem-checks rocm_kpack.
-    find_package(Python3 COMPONENTS Interpreter REQUIRED)
-    execute_process(
-        COMMAND "${Python3_EXECUTABLE}" -c
-                "import importlib.util,sys; sys.exit(0 if importlib.util.find_spec('rocm_kpack') else 1)"
-        RESULT_VARIABLE _ROCKE_KPACK_IMPORT_RESULT
-        OUTPUT_QUIET ERROR_QUIET
+if(NOT EXISTS "${_ROCKE_KPACK_PYTHON_DIR}/rocm_kpack/kpack.py")
+    message(FATAL_ERROR
+        "rocm_kpack source not found: ${_ROCKE_KPACK_PYTHON_DIR}/rocm_kpack/kpack.py "
+        "is missing. Set -DROCKE_KPACK_PYTHON_DIR=<rocm-systems>/shared/kpack/python "
+        "or check ROCKE_KPACK_GIT_TAG (${ROCKE_KPACK_GIT_TAG})."
     )
-    if(NOT _ROCKE_KPACK_IMPORT_RESULT EQUAL 0)
-        message(FATAL_ERROR
-            "rocm_kpack is not importable and ROCKE_KPACK_PYTHON_DIR is unset. "
-            "Set -DROCKE_KPACK_PYTHON_DIR=<rocm-systems>/shared/kpack/python (or put "
-            "rocm_kpack on PYTHONPATH). The kpack packer requires it."
-        )
-    endif()
-    message(STATUS "rocKE AOT kpack packer: rocm_kpack found on the ambient environment")
 endif()
 
 # --- libamd_comgr availability (compile_kernel backend="python") -------------
