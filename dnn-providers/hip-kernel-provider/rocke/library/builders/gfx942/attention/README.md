@@ -51,11 +51,11 @@ directory (so `python/` is the package root):
 ```bash
 # 1) The definitive correctness + perf check over every shape, via the
 #    production dispatcher, timed eager + graph vs PyTorch flash SDPA:
-PYTHONPATH=Python python Python/rocke/examples/gfx942/attention/final_shapes_check.py
+PYTHONPATH=python python python/rocke/examples/gfx942/attention/final_shapes_check.py
 
 # 2) The explicit parity + latency harness (builds the spec by hand; default
 #    runs the whole shapes.json set):
-PYTHONPATH=Python python Python/rocke/examples/gfx942/attention/parity_unified_attention.py
+PYTHONPATH=python python python/rocke/examples/gfx942/attention/parity_unified_attention.py
 ```
 
 ### `final_shapes_check.py` flags (all verified against `argparse`)
@@ -95,8 +95,8 @@ correctness failure.
 
 ```bash
 # Force the L4 (WG=64) flash geometry instead of the default wide4, on one shape:
-HIPDNN_GFX942_FLASH_WIDE=0 PYTHONPATH=Python python \
-    Python/rocke/examples/gfx942/attention/parity_unified_attention.py \
+HIPDNN_GFX942_FLASH_WIDE=0 PYTHONPATH=python python \
+    python/rocke/examples/gfx942/attention/parity_unified_attention.py \
     --scenario fp16_h32kv8_b1_s2048x2048_d128
 ```
 

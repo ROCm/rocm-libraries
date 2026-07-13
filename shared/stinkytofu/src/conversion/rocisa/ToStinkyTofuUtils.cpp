@@ -192,6 +192,11 @@ stinkytofu::SMEMModifiers convertSMEMModifiers(const rocisa::SMEMModifiers& rocM
                                      rocMod.offset, hasSCOPEModifier);
 }
 
+stinkytofu::GLOBALModifiers convertGLOBALModifiers(const rocisa::GLOBALModifiers& rocMod) {
+    return stinkytofu::GLOBALModifiers(rocMod.offset, convertTemporalHint(rocMod.th),
+                                       convertMUBUFScope(rocMod.scope));
+}
+
 stinkytofu::SDelayAluData convertSDelayAluData(const rocisa::SDelayAlu* delayAluInst) {
     // Convert DelayALUType to SDelayAluData::InstType
     auto convertType = [](rocisa::DelayALUType type) -> SDelayAluData::InstType {
@@ -496,7 +501,7 @@ static MatrixFmtModifiers extractMatrixFormats(std::string_view instString) {
         size_t pos = instString.find(prefix);
         if (pos == std::string_view::npos) return {};
         size_t valStart = pos + std::string_view(prefix).size();
-        size_t valEnd = instString.find(' ', valStart);
+        size_t valEnd = instString.find_first_of(" \t\n\r", valStart);
         if (valEnd == std::string_view::npos) valEnd = instString.size();
         return instString.substr(valStart, valEnd - valStart);
     };
@@ -660,6 +665,7 @@ void addModifiersToInstruction(StinkyInstruction* stinkyInst, const rocisa::Inst
             [&](const auto& mod) { return convertFLATModifiers(mod, asmCaps); })
         else TRY_ADD_MOD(FLATStoreInstruction, flat, stinkytofu::FLATModifiers,
             [&](const auto& mod) { return convertFLATModifiers(mod, asmCaps); })
+        else TRY_ADD_MOD(GLOBALLoadInstruction, modifier, stinkytofu::GLOBALModifiers, convertGLOBALModifiers)
         else if (auto typed = dynamic_cast<const MUBUFReadInstruction*>(inst)) {
             stinkyInst->addModifier<stinkytofu::MUBUFModifiers>(
                 buildMUBUFModifiersForBufferOp(typed->mubuf, typed->vaddr.get(), asmCaps));

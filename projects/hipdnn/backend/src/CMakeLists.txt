@@ -37,6 +37,7 @@ add_library(
     descriptors/KnobDescriptor.cpp
     descriptors/KnobSettingDescriptor.cpp
     descriptors/LayernormOperationDescriptor.cpp
+    descriptors/LayernormBackwardOperationDescriptor.cpp
     descriptors/MatmulOperationDescriptor.cpp
     descriptors/PointwiseOperationDescriptor.cpp
     descriptors/ProfilingControlDescriptor.cpp

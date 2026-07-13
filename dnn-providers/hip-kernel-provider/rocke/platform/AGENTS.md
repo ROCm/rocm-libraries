@@ -17,14 +17,14 @@ Spec dataclass -> build_*() -> KernelDef -> lower -> .ll -> comgr -> HSACO -> la
 ## Layout (layers mirror across languages)
 
 ```
-rocKE/
-  Python/rocke/        # authoring frontend (import rocke)
+rocke/platform/
+  python/rocke/        # authoring frontend (import rocke)
     core/               # IR, passes, lower_llvm/lower_hip, arch, isa, backend, serialize
     helpers/            # tensor views, atoms, epilogues, schedules, manifest, ...
     instances/<arch>/   # spec-driven kernels (common, gfx942, gfx950, gfx1151, gfx1201, gfx1250)
     runtime/            # comgr, hip_module, launcher (Python-only)
     dispatch/ analysis/ benchmark/ heuristics/ examples/   # Python-only
-  Cpp/                  # C++20 engine (mirrors the Python layers)
+  cpp/                  # C++20 engine (mirrors the Python layers)
     include/rocke/        # public extern "C" ABI (flat) - the provider/bindings contract
     core/ helpers/ instances/ support/
     bindings/           # rocke_engine pybind module -> links librocke_core.a
@@ -35,7 +35,7 @@ rocKE/
 
 ## The #1 invariant: byte-identity
 
-The Python engine (`core/lower_llvm.py`) and the C++ engine (`Cpp/`) MUST emit the
+The Python engine (`core/lower_llvm.py`) and the C++ engine (`cpp/`) MUST emit the
 **same LLVM-IR bytes** for every kernel family. Any op/instance/atom/fusion/arch
 change must be made in **both** engines in the same change. Prove it:
 
@@ -50,10 +50,10 @@ A change is done only when the gate is GREEN for every family at both flavors.
 
 ```bash
 # PYTHONPATH for the Python package
-export PYTHONPATH=<rocKE>/Python                 # then: import rocke
+export PYTHONPATH=<rocke/platform>/python                 # then: import rocke
 
 # build the C++ engine + the C++ unit-test binaries (so ctest has something to run)
-cmake -S <rocKE> -B /tmp/rocke -DCMAKE_BUILD_TYPE=Release
+cmake -S <rocke/platform> -B /tmp/rocke -DCMAKE_BUILD_TYPE=Release
 cmake --build /tmp/rocke -j
 
 # relative-path guard + byte-identity gate + pytest; also runs ctest only when
@@ -84,7 +84,7 @@ review:
   or import test rather than relying on an existing differently named test.
 - Keep the Test plan checklist current and mention any deferred lane explicitly.
 
-Requirements: use a virtualenv outside the `rocKE/` tree for GPU/numeric lanes
+Requirements: use a virtualenv outside the `rocke/platform/` tree for GPU/numeric lanes
 so torch, numpy, and pytest resolve from the same interpreter without the
 relative-path guard scanning local venv metadata. For now, use `~/rocKE-venv`:
 
@@ -106,6 +106,39 @@ PY
 same virtualenv if it is missing. Do **not** use the default PyPI CPU torch for
 GPU/numeric lanes. On-GPU lanes also need a HIP-visible device + ROCm `comgr`.
 
+### torch is OPTIONAL
+
+rocke is consumed downstream by PyTorch, so a hard dependency on torch would be
+circular. torch is therefore **optional** and the only hard dep is `numpy`
+(`pyproject.toml` / `requirements.txt`). torch is needed only for three lanes:
+
+1. the `torch.fx` fusion frontend (`torch_backend.py`, `helpers/fuse.py`
+   graph capture);
+2. torch-tensor launch integration (`runtime/torch_module.py`);
+3. on-GPU numeric verification against torch eager.
+
+Everything else runs torch-free: IR build, lower, `comgr` compile, numpy launch,
+the byte-identity gate, and the CPU test suite (torch-only tests `importorskip`;
+GPU tests skip via a torch-free `/dev/kfd` probe). `tests/run_all.py` is GREEN
+with neither torch nor a GPU installed.
+
+### ROCm library discovery (libamd_comgr / libamdhip64)
+
+The runtime resolves the ROCm shared libs WITHOUT importing torch
+(`runtime/hip_module._candidate_lib_paths` / `_rocm_root_libdirs`), in priority
+order:
+
+1. explicit full-path override env var (`ROCKE_COMGR_LIB`, `ROCKE_HIP_LIB`);
+2. torch-bundled `<torch>/lib/lib*.so` — opportunistic fast-path **only if torch
+   is already imported** (never imports torch to get it);
+3. a real ROCm install discovered without torch: `$ROCM_PATH` / `$ROCM_HOME` →
+   `<root>/lib`, then globbed `/opt/rocm*/core-*/lib` and `/opt/rocm*/lib`,
+   newest version first;
+4. bare `lib<name>.so` on the dynamic linker's search path (last resort).
+
+If you hit `cannot load libamd_comgr.so` in a torch-less process, set
+`ROCM_PATH` (or `ROCKE_COMGR_LIB`) to point at your ROCm install.
+
 ## Hardware requirements for numeric tests
 
 Most rocKE tests are CPU-only lowering, serialization, byte-identity, or static
@@ -117,13 +150,13 @@ virtualenv described above.
 Run local numeric coverage only when that hardware is actually present:
 
 ```bash
-PYTHONPATH=<rocKE>/Python ~/rocke-venv/bin/python \
+PYTHONPATH=<rocke/platform>/python ~/rocke-venv/bin/python \
   tests/instances/test_rocke_numeric.py
 ```
 
 If the current machine has no suitable local GPU, do **not** fake the lane or use
 CPU torch. Use the remote GPU path instead: see
-`Python/rocke/benchmark/remote_test/README.md`. In short, configure a site-local
+`python/rocke/benchmark/remote_test/README.md`. In short, configure a site-local
 SSH/Slurm target outside the repo (for example via `~/.rocke_env`), then run:
 
 ```bash
@@ -140,19 +173,24 @@ GPU node.
 
 - **Byte-identity**: mirror every emission change in both engines; re-run the gate.
   If you intend to change emitted output, re-bless the golden in the same change.
-- **Relative paths only**: no file under `rocKE/` may hardcode an absolute repo
-  path or a path escaping `rocKE/`. `tests/run_all.py` enforces this with a grep
+- **Relative paths only**: no file under `rocke/platform/` may hardcode an absolute repo
+  path or a path escaping `rocke/platform/`. `tests/run_all.py` enforces this with a grep
   guard; keep anchors derived from `__file__` / `CMAKE_CURRENT_SOURCE_DIR`.
 - **Never `ruff check --fix` emitter code** (`core`, `helpers`, `instances`): the
   IR builder is side-effecting (`b.const_i32(8)` emits an op even if its handle is
   unused), so F841 autofix silently changes kernels. Lint with `ruff check` (no
   `--fix`).
 - **Cross-platform**: do not add bash/Linux-specific helper scripts. Scripts
-  under `rocKE/` are Python, not `.sh`; use `tempfile`, `os.cpu_count()`,
+  under `rocke/platform/` are Python, not `.sh`; use `tempfile`, `os.cpu_count()`,
   `pathlib`, `shutil.which` - no `/tmp`, `nproc`, `sudo`, or shell-only flows.
 - **Default arch is `gfx950`** (the byte-identity baseline). Do not change the
   codegen default; for on-GPU runs, prefer the local device via
   `rocke.runtime.hip_module.get_device_arch()` and fall back to `gfx950`.
+- **torch is optional, never import it from a library to gain a side effect.**
+  numpy is the only hard dep. torch is needed only for the fusion frontend,
+  torch-tensor launch, and on-GPU torch-eager numeric checks; gate it behind
+  `importorskip` in tests and lazy/guarded imports in code. The ROCm-lib
+  resolver must keep discovering `comgr`/HIP without importing torch.
 
 ## dsl_docs
 
@@ -215,3 +253,5 @@ dual-engine vs Python-only split.
 | `ROCKE_BACKEND` | `cpp` (default) \| `python` \| `both` (differential assert) |
 | `ROCKE_CPP_STRICT` | `1` = raise instead of silently falling back to Python when `rocke_engine` isn't built |
 | `ROCKE_LLVM_FLAVOR` | `llvm20` \| `llvm22` (must match the ROCm `comgr` in use) |
+| `ROCM_PATH` / `ROCM_HOME` | ROCm install root; `<root>/lib` is searched for `comgr`/HIP before the globbed `/opt/rocm*` trees |
+| `ROCKE_COMGR_LIB` / `ROCKE_HIP_LIB` | explicit full path to `libamd_comgr` / `libamdhip64`; wins over all discovery |
