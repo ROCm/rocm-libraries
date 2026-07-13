@@ -97,6 +97,8 @@ class philox4x32_10_engine
 public:
     struct philox4x32_10_state
     {
+        // Unions are used here to force the compiler to map the variables
+        // strictly to VGPRs instead of spilling them to local scratch memory.
         union
         {
             uint4 counter;
@@ -124,6 +126,11 @@ public:
         unsigned int substate;
 
 #ifndef ROCRAND_DETAIL_BM_NOT_IN_STATE
+        // The Box–Muller transform requires two inputs to convert uniformly
+        // distributed real values [0; 1] to normally distributed real values
+        // (with mean = 0, and stddev = 1). Often user wants only one
+        // normally distributed number, to save performance and random
+        // numbers the 2nd value is saved for future requests.
         float  boxmuller_float;
         double boxmuller_double;
 #endif
