@@ -26,6 +26,7 @@
  * *************************************************************************/
 
 #include "rocauxiliary_sy2sb_he2hb.hpp"
+#include "exceptions.hpp"
 
 ROCSOLVER_BEGIN_NAMESPACE
 
@@ -58,6 +59,7 @@ rocblas_status rocsolver_sy2sb_he2hb_impl(rocblas_handle handle,
                                           T* Aband,
                                           const I ldab,
                                           T* tau)
+try
 {
     ROCSOLVER_ENTER_TOP("sy2sb_he2hb", "-n", n, "-kd", kd, "-nb", nb, "--lda", lda, "--ldab", ldab);
 
@@ -120,6 +122,10 @@ rocblas_status rocsolver_sy2sb_he2hb_impl(rocblas_handle handle,
                                                               tau, strideTau, // tau
                                                               batch_count, scalars, D, V, W, X, Z,
                                                               work, workArr);
+}
+catch(...)
+{
+    return exception2rocblas_status();
 }
 
 ROCSOLVER_END_NAMESPACE
