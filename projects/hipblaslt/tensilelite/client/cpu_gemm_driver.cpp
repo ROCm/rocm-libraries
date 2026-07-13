@@ -905,7 +905,13 @@ int runGemm(size_t         m,
 
         // Compare results — reduced-precision types need wider tolerance.
         // TF32 loses 13 of 23 mantissa bits; errors accumulate over K.
-        double tolerance = isFP4 ? 0.5 : (isTF32 ? 1.0 : 0.05);
+        double tolerance = [&]() {
+            if(isFP4)
+                return 0.5;
+            if(isTF32)
+                return 1.0;
+            return 0.05;
+        }();
 
         bool   allClose = true;
         double maxDiff  = 0.0;
