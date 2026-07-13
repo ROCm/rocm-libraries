@@ -81,6 +81,14 @@ namespace TensileLite
 {
     namespace Client
     {
+        // Single-process multi-GPU fused GEMM.A2A entry point (Task 10).
+        // Defined in FusedA2AClient.cpp. Dispatched from main() when
+        // --fused-a2a is set; returns a process exit code.
+        int runFusedA2A(po::variables_map const&                                       args,
+                        std::shared_ptr<MasterSolutionLibrary<ContractionProblemGemm>> library,
+                        std::shared_ptr<Hardware>                                      hardware,
+                        ClientProblemFactory&                                          problemFactory);
+
         __global__ void flush_icache()
         {
             asm __volatile__("s_icache_inv \n\t"
@@ -284,6 +292,13 @@ namespace TensileLite
                 ("dump-tensors",             po::value<bool>()->default_value(false), "Binary dump tensors instead of printing.")
 
                 ("device-idx",               po::value<int>()->default_value(0), "Device index")
+                ("fused-a2a",                po::value<bool>()->default_value(false), "Run the single-process multi-GPU fused GEMM.A2A setup+launch entry point instead of the single-GPU benchmark loop (Task 10 smoke).")
+                ("fused-a2a-world",          po::value<int>()->default_value(4), "World size (number of GPUs) for --fused-a2a.")
+                ("fused-a2a-drain",          po::value<int>()->default_value(1), "Runtime DRAIN flag passed to the fused kernel (1=on).")
+                ("fused-a2a-iters",          po::value<int>()->default_value(100), "Number of repeat iterations for --fused-a2a (race detection + latency sampling). Each iteration re-zeroes counter/flag/recv and re-validates.")
+                ("fused-a2a-warmup",         po::value<int>()->default_value(10), "Number of leading --fused-a2a iterations excluded from the p50/p90 latency percentiles (they still run and count toward the race check).")
+                ("fused-a2a-validate",       po::value<int>()->default_value(1), "1 = compute the host golden GEMM and numerically validate recv(L2)+out(L1) every iteration (default); 0 = SKIP the golden + numeric compares (used on shapes whose CPU golden is too slow, e.g. the full production shape). With 0, race detection degrades to 'iteration exited cleanly' (no HIP error / no DRAIN hang), not byte-verified.")
+                ("fused-a2a-an",             po::value<int>()->default_value(1024), "A2A column count for --fused-a2a: the first AN output columns PUSH all-to-all; [AN,N) stay local. Must satisfy AN%W==0, (AN/W)%256==0, AN%256==0, AN<=N. Pass the value matching the shape being run (e.g. 2048 for the medium shape, 10240 for the full shape).")
                 ("use-default-stream",       po::value<bool>()->default_value(false), "Use default Hip stream to run kernels.")
                 ("platform-idx",             po::value<int>()->default_value(0), "OpenCL Platform Index")
 
@@ -1116,6 +1131,16 @@ int main(int argc, const char* argv[])
             std::string str = "Lazy loading failed. (" + std::to_string(int(result)) + ").";
             std::runtime_error(str.c_str());
         }
+    }
+
+    // Fused GEMM.A2A single-process multi-GPU entry point (Task 10). This is a
+    // self-contained setup+launch path that does NOT use the single-GPU
+    // benchmark loop below; dispatch here and return immediately.
+    if(args["fused-a2a"].as<bool>())
+    {
+        int rc = runFusedA2A(args, library, hardware, problemFactory);
+        flushTimingBuffer();
+        return rc;
     }
 
     auto problems        = problemFactory.problems();

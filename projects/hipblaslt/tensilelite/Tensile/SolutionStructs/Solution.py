@@ -993,7 +993,11 @@ class Solution(collections.abc.Mapping):
     if state["UseSubtileImpl"]:
       state["VectorWidthA"] = 1
       state["VectorWidthB"] = 1
-      state["SourceSwap"] = False
+      # FusedGemmA2A needs SourceSwap=True so the subtile store's 4 accumulators lie
+      # along N, aligning with the row-major out/recv contiguous axis for wide stores.
+      # Non-fused subtile keeps the historical SourceSwap=False (regular store path).
+      if not state["FusedGemmA2A"]:
+        state["SourceSwap"] = False
       # Force BufferStore=True: UseSubtileImpl optimized storeD path is only implemented
       # for buffer stores for now.
       state["BufferStore"] = True
@@ -1716,8 +1720,13 @@ class Solution(collections.abc.Mapping):
         return
       # Divisibility over the runtime world size W is checked client-side;
       # at compile time we only guarantee the M tile is aligned.
-      if state["MacroTile0"] != 256 or state["MacroTile1"] != 256:
-        reject(state, printRejectionReason, "FusedGemmA2A stage-1 assumes MT256x256 (champion config)")
+      # The A2A codegen is MacroTile-agnostic (recv layout / rank election read
+      # MacroTile1, FusedAN, n_shard at runtime and shift by log2(MacroTile1)),
+      # so any power-of-two MT is admissible as long as MacroTile1 divides n_shard
+      # (guaranteed client-side since n_shard is a multiple of 256).
+      mt0, mt1 = state["MacroTile0"], state["MacroTile1"]
+      if mt0 not in (128, 256) or mt1 not in (128, 256):
+        reject(state, printRejectionReason, "FusedGemmA2A supports MacroTile0/1 in {128, 256}")
         return
 
     if state["GlobalSplitU"] == 0 and state["AdaptiveGemmGSUA"] == 1:

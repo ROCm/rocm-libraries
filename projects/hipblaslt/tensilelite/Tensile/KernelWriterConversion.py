@@ -236,9 +236,23 @@ class KernelWriterConversion(KernelWriterBase):
     # defined initial strides
     firstStride = 0
     if problemType["UseInitialStridesCD"]:
-      # no strides #defined
+      # UseInitialStridesCD: the index-0 (M) stride of D/C/E is NOT a compile-time
+      # constant 1 -- it is a runtime kernarg (strideD0/strideC0/strideE0, which
+      # the argument struct already declares because firstStrideCD=0 above). Emit
+      # #define aliases that route the index-0 GLOBAL_* macro token to the arg
+      # field so the beta-clear / GSU-conversion reads/writes D and C with the
+      # caller-supplied row-major stride instead of assuming M is contiguous.
+      # The internal workspace W is always contiguous (strideW0 == 1), so it keeps
+      # the hard-coded 1 like the non-UISD path. (Previously this branch asserted;
+      # scheme D / ROCM-27524 needs the conversion helper to honor initial strides.)
       lastStrideC = 0
-      assert 0  # need to fix beta-clear routine to pass initial stride parms
+      kStr += "/* UseInitialStridesCD: index-0 stride from kernarg */%s" % self.endLine
+      idx0 = self.indexChars[0]
+      if self.state["ProblemType"]["UseE"]:
+        kStr += "#define strideE" + idx0 + " arg.strideE" + idx0 + self.endLine
+      kStr += "#define strideD" + idx0 + " arg.strideD" + idx0 + self.endLine
+      kStr += "#define strideW" + idx0 + " 1" + self.endLine
+      kStr += "#define strideC" + idx0 + " arg.strideC" + idx0 + self.endLine
     else:
       # #define initial stride
       kStr += "/* hard-coded initial strides */%s" % self.endLine
@@ -896,6 +910,17 @@ class KernelWriterConversion(KernelWriterBase):
     kStr += "}%s" % self.endLine
     kStr += "#undef NUM_GSU" + self.endLine
     kStr += "#undef NUM_ELEMENT_LOAD" + self.endLine
+    # Undo the index-0 stride #defines. Under UseInitialStridesCD the index-0
+    # aliases were emitted above (lastStrideC==0 there, so the loops below skip
+    # index 0); undef them explicitly so a following conversion kernel in the
+    # same file starts clean.
+    if problemType["UseInitialStridesCD"]:
+      idx0 = self.indexChars[0]
+      if self.state["ProblemType"]["UseE"]:
+        kStr += "#undef strideE" + idx0 + self.endLine
+      kStr += "#undef strideD" + idx0 + self.endLine
+      kStr += "#undef strideW" + idx0 + self.endLine
+      kStr += "#undef strideC" + idx0 + self.endLine
     for i in range(firstStride, lastStrideC):
       kStr += "#undef strideD" + self.indexChars[i] + self.endLine
     for i in range(firstStride, lastStrideC):

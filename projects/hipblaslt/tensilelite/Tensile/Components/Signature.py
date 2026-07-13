@@ -64,6 +64,10 @@ def fusedA2AKernArgLayout():
       FusedW         : 4B (u32)  world size
       FusedNShard    : 4B (u32)
       FusedDrain     : 4B (u32)  runtime drain flag (NOT a compile-time gate)
+      FusedAN        : 4B (u32)  A2A column count (first AN cols PUSH, rest local)
+
+    FusedAN is appended at the END of the scalar list (after FusedDrain) so the
+    offsets of every preceding arg are unchanged from earlier tasks.
     """
     layout = {}
     off = 0
@@ -75,13 +79,13 @@ def fusedA2AKernArgLayout():
         off += 8
     layout["counter_ptr"] = off
     off += 8
-    for name in ("FusedMyRank", "FusedTarget", "FusedW", "FusedNShard", "FusedDrain"):
+    for name in ("FusedMyRank", "FusedTarget", "FusedW", "FusedNShard", "FusedDrain", "FusedAN"):
         layout[name] = off
         off += 4
     return layout
 
 # Total bytes of the fused-A2A kernarg segment.
-FUSED_A2A_SEGMENT_BYTES = (2 * FUSED_A2A_MAX_RANKS + 1) * 8 + 5 * 4
+FUSED_A2A_SEGMENT_BYTES = (2 * FUSED_A2A_MAX_RANKS + 1) * 8 + 6 * 4
 
 def _currentKernArgOffset(signature) -> int:
     """Byte offset the NEXT addArg() would receive (== accumulated kernarg size).
@@ -442,9 +446,18 @@ class SignatureDefault(Signature):
             signature.addArg("FusedW",      SVK.SIG_VALUE, "u32")
             signature.addArg("FusedNShard", SVK.SIG_VALUE, "u32")
             signature.addArg("FusedDrain",  SVK.SIG_VALUE, "u32")
-            # Publish the segment base for the epilogue (Task 6-9). Absolute
-            # offset of arg X = fusedA2AKernArgBase + fusedA2AKernArgLayout()[X].
-            writer.states.fusedA2AKernArgBase = fusedBase
+            signature.addArg("FusedAN",     SVK.SIG_VALUE, "u32")
+            # Publish the segment base for the epilogue (Task 6-9). The epilogue
+            # dereferences fused args against sgprKernArgAddress, which the
+            # prologue has already advanced past the common-args header by
+            # commonArgsSize (Bypass_ArgType3_to_ArgType0 "Shift common args" in
+            # KernelWriterAssembly.py; argType 0/3 single-GEMM path, the only
+            # path fused stage-1 takes). Normal GEMM arg loads reset to that
+            # shifted base; the fused loads use metadata offsets that INCLUDE the
+            # header, so subtract commonArgsSize once here to rebase them onto the
+            # same shifted address. Absolute offset of arg X (relative to the
+            # shifted base) = fusedA2AKernArgBase + fusedA2AKernArgLayout()[X].
+            writer.states.fusedA2AKernArgBase = fusedBase - userArgumentsInfo.commonArgsSize
 
         activationType = ActivationType("all")
         for name in activationType.getAdditionalArgStringList():
