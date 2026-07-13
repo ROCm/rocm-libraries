@@ -154,10 +154,79 @@ public:
         return {};
     }
 
+    /**
+     * @brief High-level structural comparison of operations using CRTP.
+     * Compares core attributes common to all nodes, then delegates specific
+     * property evaluation to the derived node subclass.
+     */
+    // NOLINTNEXTLINE(readability-identifier-naming)
+    bool logicallyEquals(const Attributes<DerivedT>& other) const
+    {
+        // Core mathematical metadata configuration must match across all nodes
+        if(this->compute_data_type != other.compute_data_type)
+        {
+            return false;
+        }
+
+        // Core Map logical validation handled here natively
+        if(!compareMapsLogical(self().inputs, other.self().inputs)
+           || !compareMapsLogical(self().outputs, other.self().outputs))
+        {
+            return false;
+        }
+
+        // Delegate ONLY custom extended properties to the derived hook
+        return self().logicallyEqualsImpl(other.self());
+    }
+
+    /**
+     * @brief Global strict equality operator inside Attributes.hpp base class.
+     * Handles layout validation for ALL derived classes dynamically without redundancy.
+     */
+    friend bool operator==(const Attributes<DerivedT>& lhs, const Attributes<DerivedT>& rhs)
+    {
+        // Cast down to the actual concrete type
+        const auto& derivedLhs = static_cast<const DerivedT&>(lhs);
+        const auto& derivedRhs = static_cast<const DerivedT&>(rhs);
+
+        // Check basic non-tensor base properties
+        if(lhs.compute_data_type != rhs.compute_data_type || lhs.name != rhs.name)
+        {
+            return false;
+        }
+
+        const Attributes<DerivedT>& baseLhsView = derivedLhs;
+        const Attributes<DerivedT>& baseRhsView = derivedRhs;
+
+        if(!compareMapsStrict(baseLhsView.self().inputs, baseRhsView.self().inputs)
+           || !compareMapsStrict(baseLhsView.self().outputs, baseRhsView.self().outputs))
+        {
+            return false;
+        }
+
+        // Delegate strict check of extended fields to derived hook
+        return derivedLhs.strictEqualsImpl(derivedRhs);
+    }
+
+    friend bool operator!=(const Attributes<DerivedT>& lhs, const Attributes<DerivedT>& rhs)
+    {
+        return !(lhs == rhs);
+    }
+
 private:
     Attributes() = default;
 
 protected:
+    // Default fallback hooks for derived classes that do NOT have extra fields
+    bool logicallyEqualsImpl([[maybe_unused]] const DerivedT& other) const
+    {
+        return false;
+    }
+    bool strictEqualsImpl([[maybe_unused]] const DerivedT& other) const
+    {
+        return false;
+    }
+
     /**
      * @brief Get an input tensor by name
      * @tparam InputNameT The input name enum or type
@@ -246,6 +315,90 @@ protected:
     {
         self().outputs[outputName] = std::move(value);
         return self();
+    }
+
+private:
+    /**
+     * @brief Performs a logical/semantic equality check between two maps of attribute pointers.
+     * * Iterates over keys and evaluates whether their underlying values are functionally
+     * equivalent by routing the evaluation down to their custom `logicallyEquals` implementation.
+     * This bypasses rigid layout parameters (like memory strides) in favor of graph state matching.
+     * * @tparam MapT The map collection type (e.g., std::unordered_map or std::map).
+     * @param m1 The primary map instance to compare.
+     * @param m2 The secondary map instance to compare against.
+     * @return true If both maps represent the same functional mathematical state.
+     * @return false If structural layouts or logical evaluations mismatch.
+     */
+    // NOLINTNEXTLINE(readability-identifier-naming)
+    template <typename MapT>
+    static bool compareMapsLogical(const MapT& m1, const MapT& m2)
+    {
+        if(m1.size() != m2.size())
+        {
+            return false;
+        }
+        // NOLINTNEXTLINE(readability-identifier-naming)
+        for(const auto& [key, t1] : m1)
+        {
+            auto it = m2.find(key);
+            if(it == m2.end())
+            {
+                return false;
+            }
+            // Both are unassigned or null; equivalent semantic state
+            if(!t1 && !it->second)
+            {
+                continue;
+            }
+            // Mismatched pointer presence, or structural logical validation fails
+            if(!t1 || !it->second || !t1->logicallyEquals(*it->second))
+            {
+                return false;
+            }
+        }
+
+        return true;
+    }
+
+    /**
+     * @brief Performs a strict equality check between two maps of descriptor pointers.
+     * * Compares sizes, keys, and dereferenced values. Two maps are strictly equal if they
+     * contain the identical set of keys and their corresponding non-null pointers point
+     * to objects that satisfy the binary `operator==` check.
+     * * @tparam MapT The map collection type (e.g., std::unordered_map or std::map).
+     * @param m1 The primary map instance to compare.
+     * @param m2 The secondary map instance to compare against.
+     * @return true If both maps have identical structures and strict value matching.
+     * @return false If sizes, keys, nullability states, or raw evaluations mismatch.
+     */
+    template <typename MapT>
+    static bool compareMapsStrict(const MapT& m1, const MapT& m2)
+    {
+        if(m1.size() != m2.size())
+        {
+            return false;
+        }
+
+        for(const auto& [key, t1] : m1)
+        {
+            auto it = m2.find(key);
+            if(it == m2.end())
+            {
+                return false;
+            }
+            // Both are null pointers; they match logically and strictly
+            if(!t1 && !it->second)
+            {
+                continue;
+            }
+            // One is null while the other isn't, or underlying values differ strictly
+            if(!t1 || !it->second || !(*t1 == *it->second))
+            {
+                return false;
+            }
+        }
+
+        return true;
     }
 };
 

@@ -31,10 +31,13 @@
 #include <cassert>
 #include <cctype>
 #include <cstdint>
+#include <functional>
 #include <iostream>
 #include <optional>
 #include <string>
 #include <string_view>
+#include <typeinfo>
+#include <unordered_map>
 #include <vector>
 
 #include "AllHwMappings.hpp"
@@ -54,6 +57,7 @@
 #include "stinkytofu/ir/asm/StinkySignature.hpp"
 #include "stinkytofu/pipeline/BackendRegistry.hpp"
 #include "stinkytofu/serialization/asm/StinkyAsmEmitter.hpp"
+#include "stinkytofu/support/ErrorHandling.hpp"
 #include "stinkytofu/transforms/asm/LegalizationUtils.hpp"
 
 namespace nb = nanobind;
@@ -67,6 +71,15 @@ StinkyRegister toStinkyRegister(const InstructionInput& input, bool hasVgprMsb, 
 
 std::string itemToString(const rocisa::Item* item) {
     return item->toString();
+}
+
+static std::string formatModulePath(const std::vector<const std::string*>& moduleNames) {
+    std::string out;
+    for (size_t i = 0; i < moduleNames.size(); ++i) {
+        if (i) out += '/';
+        out += moduleNames[i] ? *moduleNames[i] : std::string("<null>");
+    }
+    return out;
 }
 
 // Forward decls (definitions appear below; convertFLATModifiers references them).
@@ -192,6 +205,11 @@ stinkytofu::SMEMModifiers convertSMEMModifiers(const rocisa::SMEMModifiers& rocM
                                      rocMod.offset, hasSCOPEModifier);
 }
 
+stinkytofu::GLOBALModifiers convertGLOBALModifiers(const rocisa::GLOBALModifiers& rocMod) {
+    return stinkytofu::GLOBALModifiers(rocMod.offset, convertTemporalHint(rocMod.th),
+                                       convertMUBUFScope(rocMod.scope));
+}
+
 stinkytofu::SDelayAluData convertSDelayAluData(const rocisa::SDelayAlu* delayAluInst) {
     // Convert DelayALUType to SDelayAluData::InstType
     auto convertType = [](rocisa::DelayALUType type) -> SDelayAluData::InstType {
@@ -286,6 +304,14 @@ Legalized legalizeInstruction(StinkyInstruction* inst, rocisa::Instruction* roci
     // Attach implicit special registers (SCC/VCC/`EXEC) declared by HW flags
     // (Flags.def) to the instruction.
     legalizeImplicitSpecialRegisters(inst, getWaveFrontSize(archId));
+
+    if (auto* swappc = dynamic_cast<rocisa::SSwapPCB64*>(rocisaInst)) {
+        assert(isCall(*inst) && "SSwapPCB64 must lower to an IF_Call instruction");
+        if (!swappc->calleeFuncs.empty()) {
+            inst->addModifier<CallTargetData>(CallTargetData{swappc->calleeFuncs});
+        }
+        return {nullptr, nullptr};
+    }
 
     if (isBranch(*inst)) {
         // Handle branch instructions
@@ -496,7 +522,7 @@ static MatrixFmtModifiers extractMatrixFormats(std::string_view instString) {
         size_t pos = instString.find(prefix);
         if (pos == std::string_view::npos) return {};
         size_t valStart = pos + std::string_view(prefix).size();
-        size_t valEnd = instString.find(' ', valStart);
+        size_t valEnd = instString.find_first_of(" \t\n\r", valStart);
         if (valEnd == std::string_view::npos) valEnd = instString.size();
         return instString.substr(valStart, valEnd - valStart);
     };
@@ -660,6 +686,7 @@ void addModifiersToInstruction(StinkyInstruction* stinkyInst, const rocisa::Inst
             [&](const auto& mod) { return convertFLATModifiers(mod, asmCaps); })
         else TRY_ADD_MOD(FLATStoreInstruction, flat, stinkytofu::FLATModifiers,
             [&](const auto& mod) { return convertFLATModifiers(mod, asmCaps); })
+        else TRY_ADD_MOD(GLOBALLoadInstruction, modifier, stinkytofu::GLOBALModifiers, convertGLOBALModifiers)
         else if (auto typed = dynamic_cast<const MUBUFReadInstruction*>(inst)) {
             stinkyInst->addModifier<stinkytofu::MUBUFModifiers>(
                 buildMUBUFModifiersForBufferOp(typed->mubuf, typed->vaddr.get(), asmCaps));
@@ -896,6 +923,11 @@ std::shared_ptr<stinkytofu::SignatureBase> toStinkySignature(const rocisa::Signa
  */
 using ItemVisitor =
     std::function<void(rocisa::Item*, const std::vector<const std::string*>& moduleNames)>;
+enum class ModuleSubtreeAction { Recurse, SkipSubtree };
+using ModuleEnter = std::function<ModuleSubtreeAction(
+    const rocisa::Module&, const std::vector<const std::string*>& moduleNames)>;
+using ModuleLeave =
+    std::function<void(const rocisa::Module&, const std::vector<const std::string*>& moduleNames)>;
 
 /**
  * @brief traversal rocisa::Module with DFS path and process each item
@@ -904,12 +936,20 @@ using ItemVisitor =
  * @param visitor The visitor to process each item
  */
 void traverseModule(const rocisa::Module& module,
-                    const std::vector<const std::string*>& parentModuleNames, ItemVisitor visitor) {
+                    const std::vector<const std::string*>& parentModuleNames, ItemVisitor visitor,
+                    ModuleEnter onEnter = nullptr, ModuleLeave onLeave = nullptr) {
     std::vector<const std::string*> moduleNames(parentModuleNames);
     moduleNames.push_back(&module.name);
     for (auto& item : module.itemList) {
         if (const auto subModule = dynamic_cast<const rocisa::Module*>(item.get())) {
-            traverseModule(*subModule, moduleNames, visitor);
+            ModuleSubtreeAction action = ModuleSubtreeAction::Recurse;
+            if (onEnter) {
+                action = onEnter(*subModule, moduleNames);
+            }
+            if (action != ModuleSubtreeAction::SkipSubtree) {
+                traverseModule(*subModule, moduleNames, visitor, onEnter, onLeave);
+                if (onLeave) onLeave(*subModule, moduleNames);
+            }
         } else {
             visitor(item.get(), moduleNames);
         }
@@ -941,6 +981,13 @@ static std::shared_ptr<StinkyAsmModule> toStinkyTofuModule(
 
     // Create IRBuilder for lower-level instruction creation
     AsmIRBuilder irBuilder(*currentBB, archId);
+
+    std::vector<BasicBlock*> bbStack;
+    bbStack.push_back(currentBB);
+
+    // Callable names are Function symbols. rocisa duplicate activation canonicalization must run
+    // before conversion, so any duplicate callable name reaching this point is a producer bug.
+    std::unordered_map<std::string, std::string> callableDefPathByName;
 
     // Process each item
     std::map<std::string, int> asmCaps = rocisa::rocIsa::getInstance().getAsmCaps();
@@ -1084,6 +1131,52 @@ static std::shared_ptr<StinkyAsmModule> toStinkyTofuModule(
         }
     };
 
+    ModuleEnter onModuleEnter =
+        [&](const rocisa::Module& subMod,
+            const std::vector<const std::string*>& names) -> ModuleSubtreeAction {
+        if (!subMod.isCallable) {
+            return ModuleSubtreeAction::Recurse;
+        }
+
+        const std::string fnName = subMod.callableName.empty() ? subMod.name : subMod.callableName;
+        const std::string path = formatModulePath(names);
+        const std::string defPath =
+            path.empty() ? subMod.name : path + std::string("/") + subMod.name;
+
+        const auto it = callableDefPathByName.find(fnName);
+        if (it != callableDefPathByName.end()) {
+            report_fatal_error("Duplicate isCallable rocisa Module for '" + fnName +
+                               "'. First definition at '" + it->second +
+                               "', conflicting definition at '" + defPath +
+                               "'. Duplicate activation functions should be canonicalized by "
+                               "rocisa removeDuplicatedFunction before StinkyTofu conversion.");
+        }
+        callableDefPathByName.emplace(fnName, defPath);
+
+        // Mark where this callable function body belongs in the final linear ASM
+        // stream. FlattenCalleesPass consumes the marker for SwPrefetch's legacy
+        // single-stream view. Function name is stored in LabelData.
+        irBuilder.setInsertionPoint(*currentBB);
+        irBuilder.createFunctionAsmPlacementMarker(fnName);
+
+        Function& callable = stinkyAsmModule.createFunction(fnName, /*isCallable=*/true);
+        BasicBlock* callableEntry = callable.getEntryBlock();
+        assert(callableEntry && "createFunction must provide an entry block");
+        bbStack.push_back(callableEntry);
+        currentBB = callableEntry;
+        irBuilder.setInsertionPoint(*currentBB);
+        return ModuleSubtreeAction::Recurse;
+    };
+
+    ModuleLeave onModuleLeave = [&](const rocisa::Module& subMod,
+                                    const std::vector<const std::string*>& /*names*/) {
+        if (!subMod.isCallable) return;
+        assert(bbStack.size() > 1 && "onModuleLeave underflow (callable Function not pushed)");
+        bbStack.pop_back();
+        currentBB = bbStack.back();
+        irBuilder.setInsertionPoint(*currentBB);
+    };
+
     // Check whether a rocisa Instruction is a global/buffer/flat load or tensor load.
     // Excludes SMemLoadInstruction (s_load) which also inherits from GlobalReadInstruction.
     auto isPrefetchLoadInst = [](const rocisa::Instruction* inst) -> bool {
@@ -1196,7 +1289,11 @@ static std::shared_ptr<StinkyAsmModule> toStinkyTofuModule(
         base.push_back(&module.name);
 
         if (const auto* subMod = dynamic_cast<const rocisa::Module*>(item.get())) {
-            traverseModule(*subMod, base, processItem);
+            const ModuleSubtreeAction enterAct = onModuleEnter(*subMod, base);
+            if (enterAct != ModuleSubtreeAction::SkipSubtree) {
+                traverseModule(*subMod, base, processItem, onModuleEnter, onModuleLeave);
+                onModuleLeave(*subMod, base);
+            }
         } else {
             processItem(item.get(), base);
         }
@@ -1299,6 +1396,22 @@ void init_stinkytofu(nb::module_ m) {  // NOLINT(misc-use-internal-linkage)
             return module_->getOutputDir();
         }
 
+        size_t numFunctions() const {
+            return module_->numFunctions();
+        }
+
+        std::vector<std::string> getFunctionNames() const {
+            std::vector<std::string> names;
+            for (const auto* function : module_->getFunctions()) {
+                if (function) names.push_back(function->getName());
+            }
+            return names;
+        }
+
+        bool hasFunction(const std::string& name) const {
+            return module_->getFunction(name) != nullptr;
+        }
+
         // Override emitAssembly to include signature
         std::string emitAssembly() const {
             std::string result;
@@ -1359,6 +1472,12 @@ void init_stinkytofu(nb::module_ m) {  // NOLINT(misc-use-internal-linkage)
              "Set output dir for cost file: comparison_output/<yaml_name>; file at "
              "<dir>/<kernel_name>/aggregated_instruction_cost.txt")
         .def("getOutputDir", &StinkyAsmModuleWithSignature::getOutputDir)
+        .def("numFunctions", &StinkyAsmModuleWithSignature::numFunctions,
+             "Number of Functions in the lowered module (entry + callable functions)")
+        .def("getFunctionNames", &StinkyAsmModuleWithSignature::getFunctionNames,
+             "List every Function name in this module (entry first, then callable functions)")
+        .def("hasFunction", &StinkyAsmModuleWithSignature::hasFunction, nb::arg("name"),
+             "Return true when the lowered module contains a Function with the given name")
         .def("getModule", &StinkyAsmModuleWithSignature::getModule)
         .def("setPluginDataI64", &StinkyAsmModuleWithSignature::setPluginDataI64, nb::arg("key"),
              nb::arg("value"), "Set an integer plugin data value accessible by plugin passes")
@@ -1384,6 +1503,12 @@ void init_stinkytofu(nb::module_ m) {  // NOLINT(misc-use-internal-linkage)
             StinkyAsmModule::ModuleOptions moduleOptions{};
             // Sentinel: <0 means use legacy default scratch SGPR in SwPrefetchInsertionPass (102).
             moduleOptions.SwPrefetchScratchSgpr = -1;
+            // Sentinel: <0 means use CDNA5's built-in dsReadPerWmma/dsReadOrder defaults, since 0
+            // is itself a valid (if extreme) value for the former and a valid enumerator for the
+            // latter (ProgramOrder), so 0 can't double as "not provided" the way it does for the
+            // other DAG-scheduler knobs below.
+            moduleOptions.DsReadPerWmma = -1;
+            moduleOptions.DsReadOrder = -1;
             if (nb::isinstance<nb::dict>(options_obj)) {
                 nb::dict options = nb::cast<nb::dict>(options_obj);
 

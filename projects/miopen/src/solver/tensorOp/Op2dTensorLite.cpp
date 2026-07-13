@@ -63,7 +63,7 @@ bool Op2dTensorLite::IsApplicable([[maybe_unused]] const ExecutionContext& conte
         size_t total_work = std::max(clens[2] / RD_BLCK, size_t(1));
         size_t grp_sz     = (total_work + local_threads - 1) / local_threads;
 
-        // opencl kernels are no longer supported, fallback to generic case
+        // fallback to generic case
         bool lite_applicable = grp_sz <= size_t(max_num_wg);
 
         bool is_lite = clens[0] == 1 && blens[0] == 1 && alens[0] == 1 &&

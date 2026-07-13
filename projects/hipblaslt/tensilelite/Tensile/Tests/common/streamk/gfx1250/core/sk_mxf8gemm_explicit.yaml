@@ -74,7 +74,7 @@ BenchmarkProblems:
         - LDSTrInst: [False]
         - PrefetchGlobalRead: [1]
         - PrefetchLocalRead: [1]
-        - ScheduleIterAlg: [3]
+        - ScheduleIterAlg: [3, 4]
         - SourceSwap: [false]
         - StoreRemapVectorWidth: [0]
         - GlobalSplitU: [0]

@@ -5,19 +5,18 @@
 
 #include <cstdint>
 #include <memory>
-#include <random>
 #include <set>
 #include <vector>
 
 #include <hipdnn_data_sdk/utilities/Tensor.hpp>
 #include <hipdnn_flatbuffers_sdk/data_objects/graph_generated.h>
 
-#include "harness/golden/input_init/SynthesizeInputs.hpp"
+#include "harness/input_init/SynthesizeInputs.hpp"
 
 // NOLINTBEGIN(readability-identifier-naming)
 
 using namespace hipdnn_flatbuffers_sdk::data_objects;
-using namespace hipdnn_integration_tests::golden;
+using namespace hipdnn_integration_tests;
 
 namespace
 {
@@ -353,19 +352,24 @@ SynthesisResult runSynthesis(const GraphResult& gr, const std::set<int64_t>& out
 {
     const auto leafUids = gr.leafInputUids(outputUids);
     auto inputs = makeTensors(leafUids);
-    std::mt19937 rng(42);
+    SynthesisConfig config;
 
-    SynthesisTracker tracker(leafUids, inputs);
-    for(uint32_t i = 0; i < gr.graph->nodes()->size(); ++i)
+    synthesizeInputs(*gr.graph, inputs, leafUids, config);
+
+    auto missing = config.unfilled(leafUids);
+    if(!missing.empty())
     {
-        const SynthesisResult nodeResult
-            = synthesizeNodeInputs(*gr.graph->nodes()->Get(i), tracker, rng);
-        if(!nodeResult.filled)
+        std::string msg = "cannot synthesize:";
+        for(const int64_t uid : missing)
         {
-            return nodeResult;
+            const auto init = config.fill(uid);
+            const char* kind = init.kind == FillSpec::Kind::STRUCTURED ? "structured" : "derived";
+            msg += " uid=" + std::to_string(uid) + " (" + kind + ")";
         }
+        return SynthesisResult::unsupported(msg);
     }
-    return tracker.finish("test");
+
+    return SynthesisResult::ok();
 }
 
 } // namespace
@@ -410,7 +414,7 @@ TEST(TestSynthesizeInputs, SdpaFwdWithStructuredInputRefuses)
     const auto result = runSynthesis(gr, {4});
 
     EXPECT_FALSE(result.filled);
-    EXPECT_NE(result.reason.find("seq_len_q"), std::string::npos);
+    EXPECT_NE(result.reason.find("uid=5"), std::string::npos);
     EXPECT_NE(result.reason.find("structured"), std::string::npos);
 }
 
