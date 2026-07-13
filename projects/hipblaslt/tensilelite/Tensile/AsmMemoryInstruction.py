@@ -51,6 +51,12 @@ class MemoryInstruction:
         self.totalWidth = self.blockWidth * self.numBlocks
         self.issueLatency = self.inst.issueLatency()
 
+    def numElementsPerBlock(self, bytesPerRegister: int, bytesPerElement: float) -> int:
+        """Return the number of whole elements transferred by each instruction block."""
+        bitsPerBlock = int(self.blockWidth * bytesPerRegister * 8)
+        bitsPerElement = int(bytesPerElement * 8)
+        return bitsPerBlock // bitsPerElement
+
     def getInst(self, highBits=0):
         if highBits:
             if self.inst is DSLoadU8:

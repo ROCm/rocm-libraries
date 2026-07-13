@@ -6781,6 +6781,21 @@ class KernelWriter(metaclass=abc.ABCMeta):
       return packDTV or convDTV
     return self.localReadNeedsPack(kernel, tP)
 
+  def adjustLocalReadInstructionCount(self, kernel, tP, instructionCount):
+    """Account for the number of operand elements returned by each local read."""
+    tc = tP["tensorChar"]
+    if tc == "A":
+      lrvwTile = self.states.lrvwTileA
+    elif tc == "B":
+      lrvwTile = self.states.lrvwTileB
+    else:
+      return instructionCount
+    if lrvwTile > 1:
+      instruction = tP["localReadInstruction"]
+      elementsPerInstruction = max(1, instruction.numElementsPerBlock(self.states.bpr, tP["bpeDS"]))
+      instructionCount //= min(kernel["VectorWidth%s" % tc], elementsPerInstruction)
+    return instructionCount
+
   ##############################################################################
   # Init Kernel
   ##############################################################################
@@ -9595,8 +9610,7 @@ class KernelWriter(metaclass=abc.ABCMeta):
           self.states.numReadsPerUnrollA //= kernel["numSubTiles"]
           factorSubIterA = 1
       numA = kernel["InnerUnroll"]*(kernel["MIWaveTile"][0] * self.states.numReadsPerUnrollA) // tensorParametersA["localReadInstruction"].numOffsets
-      if self.states.lrvwTileA > 1:
-        numA = numA // kernel["VectorWidthA"]
+      numA = self.adjustLocalReadInstructionCount(kernel, tensorParametersA, numA)
       if kernel["ForceUnrollSubIter"]:
         numA = numA // factorSubIterA
       if kernel["ProblemType"]["MXBlockA"]:
@@ -9632,8 +9646,7 @@ class KernelWriter(metaclass=abc.ABCMeta):
           self.states.numReadsPerUnrollB //= kernel["numSubTiles"]
           factorSubIterB = 1
       numB = kernel["InnerUnroll"]*(kernel["MIWaveTile"][1] * self.states.numReadsPerUnrollB) // tensorParametersB["localReadInstruction"].numOffsets
-      if self.states.lrvwTileB > 1:
-        numB = numB // kernel["VectorWidthB"]
+      numB = self.adjustLocalReadInstructionCount(kernel, tensorParametersB, numB)
       if kernel["ForceUnrollSubIter"]:
         numB = numB // factorSubIterB
       if kernel["ProblemType"]["MXBlockB"]:
