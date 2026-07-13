@@ -14,6 +14,60 @@ if any(_Path(__file__).parent.glob("_rocisa.abi3.*")) and sys.version_info < (3,
     )
 del _Path
 
+
+def _candidate_dll_dirs(dep_dlls, environ, ext_dir):
+    """Ordered, de-duplicated directories to search for _rocisa's dependent DLLs.
+
+    In resolution order: the directories of the build-supplied dependency DLLs
+    (origami, HIP runtime, comgr, stinkytofu — scattered across per-subproject
+    dirs in a source/integrated build), then the installed ROCm SDK bin
+    (HIP_PATH/ROCM_PATH), then the extension's own directory. Pure and
+    host-agnostic (no filesystem or os.add_dll_directory side effects) so it can
+    be unit-tested off Windows. Extracted from _register_win_dll_dirs.
+    """
+    import os
+
+    dirs = [os.path.dirname(p) for p in dep_dlls if p]
+    for var in ("HIP_PATH", "ROCM_PATH"):
+        root = environ.get(var)
+        if root:
+            dirs.append(os.path.join(root, "bin"))
+    dirs.append(ext_dir)
+    ordered = []
+    seen = set()
+    for d in dirs:
+        if d and d not in seen:
+            seen.add(d)
+            ordered.append(d)
+    return ordered
+
+
+def _register_win_dll_dirs() -> None:
+    """Register _candidate_dll_dirs via os.add_dll_directory on Windows.
+
+    Since Python 3.8 the loader resolves an extension module's dependent DLLs
+    only from the system directories, the directory containing the .pyd, and
+    directories added via os.add_dll_directory() -- PATH is ignored. Mirrors the
+    runtime resolver in dnn-providers/hip-kernel-provider.
+    """
+    import os
+
+    try:
+        # Source/integrated build: CMake emits the resolved dependency DLL paths.
+        from ._dll_dirs import DEP_DLLS
+    except ImportError:
+        DEP_DLLS = []  # Installed package: resolve via ROCm SDK / merged bin.
+    for d in _candidate_dll_dirs(DEP_DLLS, os.environ, os.path.dirname(__file__)):
+        if os.path.isdir(d):
+            try:
+                os.add_dll_directory(d)
+            except OSError:
+                pass
+
+
+if sys.platform == "win32":
+    _register_win_dll_dirs()
+
 from ._rocisa import *
 from . import _rocisa
 
