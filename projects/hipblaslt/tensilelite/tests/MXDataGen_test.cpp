@@ -505,3 +505,13 @@ TEST(MXScaleRestride, ExpandsKFastRowsInPlace)
     EXPECT_EQ(scale[12], 0);
     EXPECT_EQ(scale[15], 0);
 }
+
+TEST(MXScaleLayoutFormat, MapsScalingFormatToLayout)
+{
+    using SF = hipblaslt_scaling_format;
+    EXPECT_EQ(mxScaleLayoutForFormat(SF::Block_32_UE8M0_32_8_EXT, "gfx950"),
+              MXScaleLayout::GFX950);
+    EXPECT_EQ(mxScaleLayoutForFormat(SF::Block_32_UE8M0, "gfx950"), MXScaleLayout::None);
+    EXPECT_EQ(mxScaleLayoutForFormat(SF::Block_32_UE8M0, "gfx1250"), MXScaleLayout::GFX1250);
+    EXPECT_EQ(mxScaleLayoutForFormat(SF::Block_32_UE4M3, "gfx942"), MXScaleLayout::None);
+}

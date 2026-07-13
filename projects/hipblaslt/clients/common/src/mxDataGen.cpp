@@ -647,3 +647,13 @@ MXScaleLayout mxScaleLayoutForArchName(std::string_view archName)
         return MXScaleLayout::GFX1250;
     return MXScaleLayout::None;
 }
+
+MXScaleLayout mxScaleLayoutForFormat(hipblaslt_scaling_format scalingFormat,
+                                     std::string_view       archName)
+{
+    if(scalingFormat == hipblaslt_scaling_format::Block_32_UE8M0_32_8_EXT)
+        return MXScaleLayout::GFX950;
+    if(mxScaleLayoutForArchName(archName) == MXScaleLayout::GFX1250)
+        return MXScaleLayout::GFX1250;
+    return MXScaleLayout::None;
+}

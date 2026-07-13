@@ -2842,13 +2842,7 @@ void testing_matmul_with_bias(const Arguments& arg,
         hipDeviceProp_t mxProp{};
         if(isBlockScaling(arg.scaleA) || isBlockScaling(arg.scaleB))
             CHECK_HIP_ERROR(hipGetDeviceProperties(&mxProp, 0));
-        auto mxScaleLayoutForFormat = [&](hipblaslt_scaling_format const& fmt) -> MXScaleLayout {
-            if(fmt == hipblaslt_scaling_format::Block_32_UE8M0_32_8_EXT)
-                return MXScaleLayout::GFX950;
-            if(fmt == hipblaslt_scaling_format::Block_32_UE8M0)
-                return MXScaleLayout::GFX1250;
-            return mxScaleLayoutForArchName(mxProp.gcnArchName);
-        };
+
 #endif
 
         size_t scaleA_row = ((transA == HIPBLAS_OP_T) ? blockSize(arg.scaleA) : 1);
@@ -2883,7 +2877,8 @@ void testing_matmul_with_bias(const Arguments& arg,
                 return;
 #endif
             }
-            MXScaleLayout const scaleLayoutA = mxScaleLayoutForFormat(arg.scaleA);
+            MXScaleLayout const scaleLayoutA
+                = mxScaleLayoutForFormat(arg.scaleA, mxProp.gcnArchName);
             bool const          kFastA       = (transA == HIPBLAS_OP_T);
             bool const          needsGfx950RestrideA
                 = mx_needs_pad_free_dim && kFastA
@@ -3018,7 +3013,8 @@ void testing_matmul_with_bias(const Arguments& arg,
                 return;
 #endif
             }
-            MXScaleLayout const scaleLayoutB = mxScaleLayoutForFormat(arg.scaleB);
+            MXScaleLayout const scaleLayoutB
+                = mxScaleLayoutForFormat(arg.scaleB, mxProp.gcnArchName);
             bool const          kFastB       = (transB == HIPBLAS_OP_N);
             bool const          needsGfx950RestrideB
                 = mx_needs_pad_free_dim && kFastB

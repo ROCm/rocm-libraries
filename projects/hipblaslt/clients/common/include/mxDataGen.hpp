@@ -15,6 +15,12 @@ enum class MXScaleLayout
 
 MXScaleLayout mxScaleLayoutForArchName(std::string_view archName);
 
+// Maps a block-scaling format and device arch to the client scale swizzle layout.
+// Only Block_32_UE8M0_32_8_EXT uses GFX950 swizzle; gfx1250 uses GFX1250 for other
+// block formats; everything else stays natural-packed (None).
+MXScaleLayout mxScaleLayoutForFormat(hipblaslt_scaling_format scalingFormat,
+                                     std::string_view       archName);
+
 #if HIPBLASLT_ENABLE_MXDATAGENERATOR
 
 #include <hip/hip_bfloat16.h>
