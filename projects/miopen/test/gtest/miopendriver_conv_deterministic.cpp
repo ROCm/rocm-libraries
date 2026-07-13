@@ -56,7 +56,8 @@ static void CheckShouldRun()
 static miopen::fs::path TmpDir(const std::string& suffix)
 {
     const auto* info = testing::UnitTest::GetInstance()->current_test_info();
-    return miopen::fs::temp_directory_path() / (std::string{"miopen_det_"} + info->name() + "_" + suffix);
+    return miopen::fs::temp_directory_path() /
+           (std::string{"miopen_det_"} + info->name() + "_" + suffix);
 }
 
 } // namespace miopen_conv_deterministic
@@ -82,7 +83,8 @@ TEST_P(GPU_MIOpenDriverConvDeterministicTest_FP32, NoDeterministicLog)
     miopen::Process p{MIOpenDriverExePath().string()};
     std::stringstream ss;
     int rc = 0;
-    EXPECT_NO_THROW(rc = p(GetParam().base_args, "", &ss, miopen_conv_deterministic::MakeEnv(tmp_dir)));
+    EXPECT_NO_THROW(
+        rc = p(GetParam().base_args, "", &ss, miopen_conv_deterministic::MakeEnv(tmp_dir)));
     EXPECT_EQ(rc, 0);
     EXPECT_THAT(ss.str(),
                 Not(testing::HasSubstr("Restricting convolution to deterministic kernels.")));
@@ -103,7 +105,8 @@ TEST_P(GPU_MIOpenDriverConvDeterministicTest_FP32, RunsSuccessfullyAndLogsOverri
     miopen::Process p{MIOpenDriverExePath().string()};
     std::stringstream ss;
     int rc = 0;
-    EXPECT_NO_THROW(rc = p(GetParam().valid_args, "", &ss, miopen_conv_deterministic::MakeEnv(tmp_dir)));
+    EXPECT_NO_THROW(
+        rc = p(GetParam().valid_args, "", &ss, miopen_conv_deterministic::MakeEnv(tmp_dir)));
     EXPECT_EQ(rc, 0);
     EXPECT_THAT(ss.str(), testing::HasSubstr("Restricting convolution to deterministic kernels."));
 
@@ -122,7 +125,8 @@ TEST_P(GPU_MIOpenDriverConvDeterministicTest_FP32, ExitsOnInvalidValue)
     int result = 0;
     miopen::Process p{MIOpenDriverExePath().string()};
     std::stringstream ss;
-    EXPECT_NO_THROW(result = p(GetParam().invalid_args, "", &ss, miopen_conv_deterministic::MakeEnv(tmp_dir)));
+    EXPECT_NO_THROW(
+        result = p(GetParam().invalid_args, "", &ss, miopen_conv_deterministic::MakeEnv(tmp_dir)));
     EXPECT_NE(result, 0) << "Should exit with a non-zero code on invalid deterministic value";
     EXPECT_THAT(ss.str(), testing::HasSubstr("Invalid deterministic value"));
 
@@ -220,4 +224,6 @@ TEST_P(GPU_MIOpenDriverConvDeterministicTest_FP32, BitExactAcrossRuns)
 INSTANTIATE_TEST_SUITE_P(
     Smoke,
     GPU_MIOpenDriverConvDeterministicTest_FP32,
-    testing::ValuesIn(miopen_conv_deterministic::GetTestCases(miopendriver::basearg::conv::Float, miopen_conv_deterministic::shape_3d, 4)));
+    testing::ValuesIn(miopen_conv_deterministic::GetTestCases(miopendriver::basearg::conv::Float,
+                                                              miopen_conv_deterministic::shape_3d,
+                                                              4)));
