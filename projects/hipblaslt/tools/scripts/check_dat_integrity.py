@@ -18,10 +18,16 @@ try:
 except ImportError:
     msgpack = None
 
+_MSGPACK_ERRORS = (msgpack.exceptions.UnpackException,) if msgpack is not None else ()
+
 _MASTER_RE = re.compile(r"^TensileLibrary_lazy_(?P<arch>[A-Za-z0-9]+)\.dat(?:\.zlib)?$")
 _MAPPING_RE = re.compile(
     r"^TensileLiteLibrary_lazy_(?P<arch>[A-Za-z0-9]+)_Mapping\.dat(?:\.zlib)?$"
 )
+
+
+class _MappingLoadError(Exception):
+    pass
 
 
 def _archDir(libDir: Path, arch: str) -> Path:
@@ -41,14 +47,40 @@ def _scanArchs(libDir: Path):
     return masters, mappings
 
 
+def _strictDecompress(data: bytes) -> bytes:
+    """Decompress a single zlib stream, rejecting any trailing bytes.
+
+    Mirrors the C++ loader (readCompressedMsgObject), which treats leftover
+    input after the zlib stream as corruption. One-shot zlib.decompress
+    silently ignores such trailing bytes, so the integrity check would
+    otherwise pass files the runtime loader rejects.
+    """
+    decompressor = zlib.decompressobj()
+    raw = decompressor.decompress(data)
+    raw += decompressor.flush()
+    if not decompressor.eof:
+        raise zlib.error("incomplete zlib stream")
+    if decompressor.unused_data:
+        raise zlib.error(
+            f"trailing bytes after zlib stream: {decompressor.unused_data!r}"
+        )
+    return raw
+
+
 def _loadMapping(libDir: Path, arch: str):
     base = _archDir(libDir, arch) / f"TensileLiteLibrary_lazy_{arch}_Mapping.dat"
     gz_path = Path(str(base) + ".zlib")
-    if gz_path.is_file():
-        raw = zlib.decompress(gz_path.read_bytes())
-        return msgpack.unpackb(raw, raw=False, strict_map_key=False)
-    with open(base, "rb") as f:
-        return msgpack.unpack(f, raw=False, strict_map_key=False)
+    src = gz_path if gz_path.is_file() else base
+    try:
+        if src == gz_path:
+            raw = _strictDecompress(src.read_bytes())
+            return msgpack.unpackb(raw, raw=False, strict_map_key=False)
+        with open(src, "rb") as f:
+            return msgpack.unpack(f, raw=False, strict_map_key=False)
+    except (OSError, ValueError, zlib.error, *_MSGPACK_ERRORS) as exc:
+        raise _MappingLoadError(
+            f"arch={arch}: failed to read/decode Mapping ({src.name}): {exc}"
+        ) from exc
 
 
 def validate(libDir: Path) -> List[str]:
@@ -76,7 +108,11 @@ def validate(libDir: Path) -> List[str]:
         libDir.glob("*/*_fallback_*.dat.zlib")
     )
     for arch in sorted(archs):
-        mapping = _loadMapping(libDir, arch)
+        try:
+            mapping = _loadMapping(libDir, arch)
+        except _MappingLoadError as exc:
+            violations.append(str(exc))
+            continue
         archDir = _archDir(libDir, arch)
 
         for idx, kernelName in mapping.items():
