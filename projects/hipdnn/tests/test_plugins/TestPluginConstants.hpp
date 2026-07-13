@@ -123,6 +123,14 @@ inline const std::string& testOverrideImplementingPluginPath()
     return s_path;
 }
 
+// Runtime pass-by-value fake reports K_PASS_BY_VALUE_MIN_API_VERSION ("1.2.0").
+inline const std::string& testPassByValuePluginPath()
+{
+    static const std::string s_path
+        = getTestCustomFilepathForPlugin(TEST_PASS_BY_VALUE_PLUGIN_NAME);
+    return s_path;
+}
+
 inline const std::string& testOverrideOmittingPluginPath()
 {
     static const std::string s_path

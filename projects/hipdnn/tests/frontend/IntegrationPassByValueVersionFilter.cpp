@@ -7,12 +7,15 @@
 // Contract under test: a graph carrying a runtime pass-by-value scalar raises
 // the required engine-plugin API floor to K_PASS_BY_VALUE_MIN_API_VERSION
 // ("1.2.0"). With only pre-1.2.0 fake plugins available, every engine is
-// filtered out, so no execution plan can be created. The *same* graph built
-// with an ordinary compile-time-constant scalar keeps the baseline 1.0.0 floor
-// and is still served by the pre-1.2.0 plugin.
+// filtered out, so no execution plan can be created; a plugin reporting "1.2.0"
+// clears the floor and serves the same graph; and with both loaded the filter
+// admits exactly the 1.2.0 engine. The same graph built with an ordinary
+// compile-time-constant scalar keeps the baseline 1.0.0 floor and is served by
+// every plugin.
 //
 // GPU-less environments skip through the common test utility.
 
+#include <algorithm>
 #include <array>
 #include <cstdint>
 #include <memory>
@@ -50,15 +53,20 @@ protected:
         ASSERT_EQ(hipInit(0), hipSuccess);
         int deviceId = 0;
         ASSERT_EQ(hipGetDevice(&deviceId), hipSuccess);
+    }
 
-        // Load only the pre-1.2.0 default fake plugin (reports API "1.0.0").
-        // It generically serves the RMSNorm graph, so any "no applicable
-        // engine" outcome is attributable to the version floor, not to op
-        // support.
-        const std::array<const char*, 1> paths
-            = {hipdnn_tests::plugin_constants::testGoodPluginPath().c_str()};
+    // Loads the given absolute plugin paths and creates the handle. Each test
+    // picks the plugin set that isolates the behavior it exercises.
+    void loadPlugins(const std::vector<std::string>& paths)
+    {
+        std::vector<const char*> cPaths;
+        cPaths.reserve(paths.size());
+        for(const auto& p : paths)
+        {
+            cPaths.push_back(p.c_str());
+        }
         ASSERT_EQ(hipdnnSetEnginePluginPaths_ext(
-                      paths.size(), paths.data(), HIPDNN_PLUGIN_LOADING_ABSOLUTE),
+                      cPaths.size(), cPaths.data(), HIPDNN_PLUGIN_LOADING_ABSOLUTE),
                   HIPDNN_STATUS_SUCCESS);
         ASSERT_EQ(hipdnnCreate(&_handle), HIPDNN_STATUS_SUCCESS);
     }
@@ -131,6 +139,8 @@ protected:
 // dispatching to an engine that cannot honor the host-supplied scalar.
 TEST_F(IntegrationPassByValueVersionFilter, RuntimeScalarYieldsNoApplicableEngine)
 {
+    loadPlugins({hipdnn_tests::plugin_constants::testGoodPluginPath()});
+
     auto [graph, epsilon] = buildRMSNormGraph(EpsilonKind::RUNTIME_PASS_BY_VALUE);
 
     // Guard: confirm we actually built the runtime pass-by-value state, else
@@ -162,6 +172,8 @@ TEST_F(IntegrationPassByValueVersionFilter, RuntimeScalarYieldsNoApplicableEngin
 // unrelated failure to serve RMSNorm.
 TEST_F(IntegrationPassByValueVersionFilter, CompileTimeScalarIsServedByLegacyPlugin)
 {
+    loadPlugins({hipdnn_tests::plugin_constants::testGoodPluginPath()});
+
     auto [graph, epsilon] = buildRMSNormGraph(EpsilonKind::COMPILE_TIME_CONSTANT);
 
     // Guard: this must NOT be a runtime pass-by-value tensor.
@@ -182,4 +194,84 @@ TEST_F(IntegrationPassByValueVersionFilter, CompileTimeScalarIsServedByLegacyPlu
 
     result = graph->create_execution_plans();
     EXPECT_EQ(result.code, ErrorCode::OK) << result.err_msg;
+}
+
+// Admit direction: a plugin reporting K_PASS_BY_VALUE_MIN_API_VERSION ("1.2.0")
+// clears the runtime pass-by-value floor, so the SAME runtime-pbv graph that the
+// legacy plugin is filtered out for is served here. Closes the admit half of
+// the version filter hermetically (fake plugin, no GPU dispatch).
+TEST_F(IntegrationPassByValueVersionFilter, RuntimeScalarServedByPassByValuePlugin)
+{
+    loadPlugins({hipdnn_tests::plugin_constants::testPassByValuePluginPath()});
+
+    auto [graph, epsilon] = buildRMSNormGraph(EpsilonKind::RUNTIME_PASS_BY_VALUE);
+    ASSERT_TRUE(epsilon->get_is_runtime_pass_by_value());
+
+    auto result = graph->validate();
+    ASSERT_EQ(result.code, ErrorCode::OK) << result.err_msg;
+
+    result = graph->build_operation_graph(_handle);
+    ASSERT_EQ(result.code, ErrorCode::OK) << result.err_msg;
+
+    std::vector<int64_t> rankedEngineIds;
+    result = graph->get_ranked_engine_ids(rankedEngineIds);
+    ASSERT_EQ(result.code, ErrorCode::OK) << result.err_msg;
+    EXPECT_FALSE(rankedEngineIds.empty())
+        << "A 1.2.0 plugin must serve a runtime pass-by-value graph";
+
+    result = graph->create_execution_plans();
+    EXPECT_EQ(result.code, ErrorCode::OK) << result.err_msg;
+}
+
+// Differential isolation: with BOTH a pre-1.2.0 (legacy) and a 1.2.0 plugin
+// loaded, the version filter admits exactly the 1.2.0 engine for a runtime-pbv
+// graph and drops the legacy engine — while the same-shape compile-time-constant
+// graph keeps BOTH. Proves the filter keys on the runtime flag, not op support.
+TEST_F(IntegrationPassByValueVersionFilter, RuntimeScalarFiltersToCompatiblePluginOnly)
+{
+    loadPlugins({hipdnn_tests::plugin_constants::testGoodPluginPath(),
+                 hipdnn_tests::plugin_constants::testPassByValuePluginPath()});
+
+    const int64_t legacyEngineId = hipdnn_tests::plugin_constants::engineId<GoodPlugin>();
+    const int64_t passByValueEngineId
+        = hipdnn_tests::plugin_constants::engineId<PassByValuePlugin>();
+
+    // Runtime pass-by-value: only the 1.2.0 engine survives the floor.
+    {
+        auto [graph, epsilon] = buildRMSNormGraph(EpsilonKind::RUNTIME_PASS_BY_VALUE);
+        ASSERT_TRUE(epsilon->get_is_runtime_pass_by_value());
+
+        ASSERT_EQ(graph->validate().code, ErrorCode::OK);
+        ASSERT_EQ(graph->build_operation_graph(_handle).code, ErrorCode::OK);
+
+        std::vector<int64_t> rankedEngineIds;
+        auto result = graph->get_ranked_engine_ids(rankedEngineIds);
+        ASSERT_EQ(result.code, ErrorCode::OK) << result.err_msg;
+        EXPECT_NE(std::find(rankedEngineIds.begin(), rankedEngineIds.end(), passByValueEngineId),
+                  rankedEngineIds.end())
+            << "1.2.0 engine must be present for a runtime pass-by-value graph";
+        EXPECT_EQ(std::find(rankedEngineIds.begin(), rankedEngineIds.end(), legacyEngineId),
+                  rankedEngineIds.end())
+            << "legacy (<1.2.0) engine must be filtered out for a runtime pass-by-value graph";
+        EXPECT_EQ(graph->create_execution_plans().code, ErrorCode::OK);
+    }
+
+    // Compile-time constant: baseline floor, so BOTH engines remain.
+    {
+        auto [graph, epsilon] = buildRMSNormGraph(EpsilonKind::COMPILE_TIME_CONSTANT);
+        ASSERT_FALSE(epsilon->get_is_runtime_pass_by_value());
+
+        ASSERT_EQ(graph->validate().code, ErrorCode::OK);
+        ASSERT_EQ(graph->build_operation_graph(_handle).code, ErrorCode::OK);
+
+        std::vector<int64_t> rankedEngineIds;
+        auto result = graph->get_ranked_engine_ids(rankedEngineIds);
+        ASSERT_EQ(result.code, ErrorCode::OK) << result.err_msg;
+        EXPECT_NE(std::find(rankedEngineIds.begin(), rankedEngineIds.end(), passByValueEngineId),
+                  rankedEngineIds.end())
+            << "1.2.0 engine must serve a compile-time-constant graph";
+        EXPECT_NE(std::find(rankedEngineIds.begin(), rankedEngineIds.end(), legacyEngineId),
+                  rankedEngineIds.end())
+            << "legacy engine must also serve a compile-time-constant graph (baseline floor)";
+    }
 }
