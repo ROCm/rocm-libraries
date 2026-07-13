@@ -93,12 +93,12 @@ struct generate_threefry
 {
     template<host::target_arch Arch = host::target_arch::unknown>
     __host__ __device__ __forceinline__
-    static void generate(dim3         block_idx,
-                         dim3         thread_idx,
-                         dim3         grid_dim,
-                         dim3         block_dim,
-                         Engine       engine,
-                         T*           data,
+    static void generate(dim3   block_idx,
+                         dim3   thread_idx,
+                         dim3   grid_dim,
+                         dim3   block_dim,
+                         Engine engine,
+                         T* __restrict__ data,
                          const size_t n,
                          Distribution distribution)
     {

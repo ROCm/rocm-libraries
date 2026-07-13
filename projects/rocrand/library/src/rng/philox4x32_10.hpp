@@ -116,9 +116,9 @@ struct generate_philox
                          dim3                        grid_dim,
                          dim3                        block_dim,
                          philox4x32_10_device_engine engine,
-                         T*                          data,
-                         const size_t                n,
-                         Distribution                distribution)
+                         T* __restrict__ data,
+                         const size_t n,
+                         Distribution distribution)
     {
         constexpr unsigned int input_width  = Distribution::input_width;
         constexpr unsigned int output_width = Distribution::output_width;
