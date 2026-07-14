@@ -1347,10 +1347,10 @@ def _enable_transposed_qk_32x32(problem: UnifiedAttentionProblem) -> bool:
       * no FP8 K/V (transposed path doesn't dequant K/V from fp8 yet)
       * head_size in {64, 128} (hd=256 not benchmarked yet)
       * no softcap / sinks (not wired into transposed softmax yet)
-      * ALiBi / QQ bias are NOT gated here — the multi-batch fallback path
-        admits them. They ARE excluded by ``_enable_combo_2d`` and
-        ``_enable_single_batch_combo``, so those short-circuit branches
-        never reach a problem that has them.
+      * ALiBi / QQ bias ARE admitted: ``_enable_combo_2d`` and
+        ``_enable_single_batch_combo`` short-circuit to True for biased
+        problems, routing them onto the transposed path (whose softmax body
+        applies bias per-score). Only softcap/sinks stay excluded below.
 
     The validated ``_enable_combo_2d`` family is a superset that DOES wire
     sinks (and sliding window) through the transposed softmax, so it
