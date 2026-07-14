@@ -217,7 +217,7 @@ void testing_dense_to_sparse_bell(const Arguments& arg)
     device_vector<T> d_bell_val(m * ell_cols_tmp);
 
     CHECK_ROCSPARSE_ERROR(
-        rocsparse_bell_set_pointers(handle, mat_sparse, d_bell_col_ind, d_bell_val));
+        rocsparse_bell_set_pointers(mat_sparse, d_bell_col_ind, d_bell_val));
 
     if(arg.unit_check)
     {
