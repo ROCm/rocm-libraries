@@ -1042,9 +1042,13 @@ struct MatrixFmtModifiers : public TypedModifier<MatrixFmtModifiers> {
     bool isMXMFMA() const {
         return scaleFmtA != MatrixScaleFmt::NONE;
     }
-    // True when no format info is set (instance carries nothing useful).
+    // Must check all fields, to avoid a false "empty":
+    // e.g. v_wmma_scale_f32_32x16x128_f4 carries no fmtA/fmtB but is not really
+    // empty — it still sets scaleFmtA/scaleFmtB. Checking fmtA/fmtB alone would
+    // drop its matrix_*_scale_fmt.
     bool empty() const {
-        return fmtA == MatrixFmt::NONE && fmtB == MatrixFmt::NONE;
+        return fmtA == MatrixFmt::NONE && fmtB == MatrixFmt::NONE
+               && scaleFmtA == MatrixScaleFmt::NONE && scaleFmtB == MatrixScaleFmt::NONE;
     }
 };
 
