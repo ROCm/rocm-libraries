@@ -133,7 +133,6 @@ jobs:
           SHARD_INDEX: ${{ matrix.shard }}
           TOTAL_SHARDS: ${{ fromJSON(inputs.component).total_shards }}
           TEST_TYPE: ${{ fromJSON(inputs.component).test_type }}
-          LLVM_PROFILE_FILE: ${{ inputs.coverage_enabled && format('{0}/coverage-profraw/{1}-shard{2}-%p-%m.profraw', github.workspace, fromJSON(inputs.component).job_name, matrix.shard) || '' }}
         run: |
           # Create logs directory
           mkdir -p ./test_logs
