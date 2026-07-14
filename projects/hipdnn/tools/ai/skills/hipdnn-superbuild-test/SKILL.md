@@ -43,7 +43,7 @@ Infer options from the user request:
    ```bash
    python3 <scripts>/windows_rocm_setup.py --repo-root <repo-root> [--rocm-path <path>]
    ```
-   Parse `ROCM_PATH=...` from stdout and set `ROCM_BIN=<rocm-path>/bin`. Skip this step on Linux unless the user supplied an override.
+   Parse `ROCM_PATH=...` from stdout and set `ROCM_BIN=<rocm-path>/bin`. Skip this step on Linux unless the user supplied an override. On Windows, always pass the resolved `ROCM_BIN` to `cmake_run.py` (steps 6-8) via `--rocm-bin`: it is required both for the runtime PATH and for staging the wheel's `amd_comgr.dll` app-local (see Notes).
 
 5. Discover CMake test targets:
    ```bash
@@ -103,7 +103,8 @@ If a requested component has no matching target, say that it was not present in 
 
 ## Notes
 
-- `scripts/cmake_run.py`, `scripts/discover_test_targets.py`, and `scripts/windows_rocm_setup.py` are bundled in this skill so linked and copied installs work independently.
+- `scripts/cmake_run.py`, `scripts/discover_test_targets.py`, `scripts/windows_rocm_setup.py`, and `scripts/comgr_stage.py` are bundled in this skill so linked and copied installs work independently.
 - Windows DLL loading is handled by `cmake_run.py`, which sets PATH in Python's subprocess environment before launching CMake or test binaries.
+- Windows GCN-assembly (Winograd) kernels: before launching, `cmake_run.py` stages the wheel's `amd_comgr.dll` into `<build-dir>/bin` (via `comgr_stage.py`) so MIOpen's runtime JIT does not load the driver's stale `System32` comgr, which fails with `[BuildAsm] comgr status = ERROR` / `unknown emulation: no-xnack`. This needs `--rocm-bin` to be passed. The copy is skipped when the staged comgr already matches the wheel's PE version, so it adds no cost on repeat runs. Disable with `--no-stage-comgr` if ever needed. To confirm which comgr loaded, run a test with `MIOPEN_LOG_LEVEL=7 MIOPEN_ENABLE_LOGGING=1` and grep for `COMgr v.` (`v2.5.0` = stale System32, `v3.0.0` = wheel).
 - Integration tests require an AMD GPU. Unit scope is the default for CPU-only validation.
 - Prefer running test binaries through `cmake_run.py` (it wires PATH/ROCM_PATH for the loader); pass extra binary flags via `--extra-arg`/`-- <args>` rather than folding them into `--binary`.

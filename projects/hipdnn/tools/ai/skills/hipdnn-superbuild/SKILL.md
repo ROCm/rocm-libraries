@@ -73,6 +73,12 @@ Read `CMakePresets.json` from the repository root if exact preset contents matte
 
 8. If the build fails with a stale CMake cache error such as `does not match the source`, clean the selected build directory once, reconfigure with the same `-B <build-dir>` command, and retry once. Do not loop.
 
+9. On Windows, stage the wheel's `amd_comgr.dll` app-local into `<build-dir>/bin` after a successful build:
+   ```bash
+   python3 <scripts>/comgr_stage.py --rocm-bin <rocm-bin> --build-dir <build-dir> --verbose
+   ```
+   The AMD driver leaves an old `amd_comgr.dll` in `C:\Windows\System32` that outranks the wheel's copy on PATH, so MIOpen otherwise loads stale comgr and fails to JIT-build GCN-assembly (Winograd) kernels at runtime. The Win32 loader checks the executable's own directory before System32, so an app-local copy in `<build-dir>/bin` wins; PATH manipulation alone cannot. The helper compares the wheel comgr's PE version against any already-staged copy and **skips the copy when the versions match** (content-hash fallback when version metadata is absent), so it is cheap to re-run. This step is a no-op on Linux. The test runner (`cmake_run.py`) stages comgr on its own as well, so this build step is belt-and-suspenders that makes the app-local copy present immediately after build.
+
 ## Report
 
 Summarize:
@@ -85,6 +91,7 @@ Summarize:
 
 ## Notes
 
-- `scripts/windows_rocm_setup.py` is bundled in this skill so linked and copied installs work independently. Its Windows wheel-provisioning logic is a Python port of `projects/hipdnn/scripts/windows/wheel_build_setup.ps1`; that PowerShell script is left in place for interactive users and `tools/dnn-benchmarking/setup.ps1`. Keep the two in sync.
+- `scripts/windows_rocm_setup.py` and `scripts/comgr_stage.py` are bundled in this skill so linked and copied installs work independently. `windows_rocm_setup.py`'s Windows wheel-provisioning logic is a Python port of `projects/hipdnn/scripts/windows/wheel_build_setup.ps1`; that PowerShell script is left in place for interactive users and `tools/dnn-benchmarking/setup.ps1`. Keep the two in sync.
+- `comgr_stage.py` only does work on Windows; it stages the wheel's `amd_comgr.dll` app-local and emits a diagnostic when `C:\Windows\System32\amd_comgr.dll` is present (it shadows PATH and is why the app-local copy is needed).
 - Missing provider dependencies such as MIOpen or hipBLASLt still need to be installed or available through the selected ROCm environment.
 - Product test execution is intentionally out of scope for this skill.
