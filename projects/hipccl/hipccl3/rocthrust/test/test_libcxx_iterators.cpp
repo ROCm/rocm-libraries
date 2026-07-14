@@ -135,6 +135,36 @@ struct plus_one
   }
 };
 
+TEST(LibcxxIteratorTests, TestLibcxxTransformOutputIterator)
+{
+  { // device system
+    thrust::device_vector<int> vec{-1, -1, -1, -1, -1};
+    thrust::copy(_THRUST_LIBCXX::counting_iterator{0},
+                 _THRUST_LIBCXX::counting_iterator{5},
+                 _THRUST_LIBCXX::make_transform_output_iterator(vec.begin(), plus_one{}));
+    thrust::device_vector<int> expected{1, 2, 3, 4, 5};
+    ASSERT_TRUE(thrust::equal(vec.begin(), vec.end(), expected.begin()));
+  }
+
+  { // host system
+    thrust::host_vector<int> vec{-1, -1, -1, -1, -1};
+    thrust::copy(_THRUST_LIBCXX::counting_iterator{0},
+                 _THRUST_LIBCXX::counting_iterator{5},
+                 _THRUST_LIBCXX::make_transform_output_iterator(vec.begin(), plus_one{}));
+    thrust::host_vector<int> expected{1, 2, 3, 4, 5};
+    ASSERT_TRUE(thrust::equal(vec.begin(), vec.end(), expected.begin()));
+  }
+
+  { // plain std::vector
+    std::vector<int> vec{-1, -1, -1, -1, -1};
+    thrust::copy(_THRUST_LIBCXX::counting_iterator{0},
+                 _THRUST_LIBCXX::counting_iterator{5},
+                 _THRUST_LIBCXX::make_transform_output_iterator(vec.begin(), plus_one{}));
+    std::vector<int> expected{1, 2, 3, 4, 5};
+    ASSERT_TRUE(thrust::equal(vec.begin(), vec.end(), expected.begin()));
+  }
+}
+
 TEST(LibcxxIteratorTests, TestLibcxxTransformIterator)
 {
   auto discard = _THRUST_LIBCXX::discard_iterator{};
