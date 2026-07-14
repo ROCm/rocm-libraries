@@ -1182,11 +1182,103 @@ ROCSOLVER_KERNEL void __launch_bounds__(STEDC_BDIM)
     }
 }
 
+// ---------------------------------------------------------------------------
+// DPP helpers -- AMDGCN GFX8+ only (register-to-register, no crossbar)
+// ---------------------------------------------------------------------------
+
+// WARNING: the compiler is not honoring __GFXxx__ macros in debug builds; the
+// following should fall back into a generic, safe, implementation if no
+// architecture is detected.
+#if defined(__HIP_DEVICE_COMPILE__) && defined(__AMDGCN__)                                 \
+    && (defined(__GFX8__) || defined(__GFX9__) || defined(__GFX10__) || defined(__GFX11__) \
+        || defined(__GFX12__))
+
+template <int dpp_ctrl, int row_mask, int bank_mask, bool bound_ctrl, typename T>
+__device__ inline T move_dpp_T(T v)
+{
+    static_assert(sizeof(T) % 4 == 0, "move_dpp_T: T must be a multiple of 4 bytes");
+    constexpr int words = sizeof(T) / 4;
+    T out;
+    const int* src = reinterpret_cast<const int*>(&v);
+    int* dst = reinterpret_cast<int*>(&out);
+#pragma unroll
+    for(int w = 0; w < words; ++w)
+        dst[w] = __builtin_amdgcn_mov_dpp(src[w], dpp_ctrl, row_mask, bank_mask, bound_ctrl);
+    return out;
+}
+
+template <int swizzle_mask, typename T>
+__device__ inline T ds_swizzle_T(T v)
+{
+    static_assert(sizeof(T) % 4 == 0, "ds_swizzle_T: T must be a multiple of 4 bytes");
+    constexpr int words = sizeof(T) / 4;
+    T out;
+    const int* src = reinterpret_cast<const int*>(&v);
+    int* dst = reinterpret_cast<int*>(&out);
+#pragma unroll
+    for(int w = 0; w < words; ++w)
+        dst[w] = __builtin_amdgcn_ds_swizzle(src[w], swizzle_mask);
+    return out;
+}
+
+template <typename T>
+__device__ inline T shfl_bcast_T(T v, int src_lane)
+{
+    static_assert(sizeof(T) % 4 == 0, "shfl_bcast_T: T must be a multiple of 4 bytes");
+    constexpr int words = sizeof(T) / 4;
+    T out;
+    const int* src = reinterpret_cast<const int*>(&v);
+    int* dst = reinterpret_cast<int*>(&out);
+#pragma unroll
+    for(int w = 0; w < words; ++w)
+        dst[w] = __shfl(src[w], src_lane);
+    return out;
+}
+
+#endif // AMDGCN GFX8+
+
 template <std::int32_t BDIM = 0, typename S>
 __device__ inline void reduce_wave_sum(S& val)
 {
-    /* assert(BDIM <= warpSize); */
+// WARNING: the compiler is not honoring __GFXxx__ macros in debug builds; the
+// following should fall back into a generic, safe, implementation if no
+// architecture is detected.
+#if defined(__HIP_DEVICE_COMPILE__) && defined(__AMDGCN__)                                 \
+    && (defined(__GFX8__) || defined(__GFX9__) || defined(__GFX10__) || defined(__GFX11__) \
+        || defined(__GFX12__))
+    // Require positive identification of the target so that debug builds (where __GFXxx__
+    // macros are absent) safely fall through to the shuffle fallback below.
+#if defined(__GFX10__) || defined(__GFX11__) || defined(__GFX12__)
+    // RDNA: wavefront=32, row_bcast DPP not available on GFX11.
+    constexpr bool is_cdna = false;
+    constexpr bool bndCtrl = false;
+#else
+    // CDNA (GFX8/GFX9): wavefront=64, row_bcast available.
+    constexpr bool is_cdna = true;
+    constexpr bool bndCtrl = true;
+#endif
 
+    // Steps 1-4: cover the first 16 lanes (present on all supported wavefront sizes).
+    val += move_dpp_T<0xb1, 0xf, 0xf, bndCtrl>(val); // quad_perm:[1,0,3,2]  shift 1
+    val += move_dpp_T<0x4e, 0xf, 0xf, bndCtrl>(val); // quad_perm:[2,3,0,1]  shift 2
+    val += move_dpp_T<0x124, 0xf, 0xf, bndCtrl>(val); // row_ror:4            shift 4
+    val += move_dpp_T<0x128, 0xf, 0xf, bndCtrl>(val); // row_ror:8            shift 8
+
+    // Step 5: broadcast lane-15 result into lanes 16-31.
+    if constexpr(is_cdna)
+        val += move_dpp_T<0x142, 0xf, 0xf, bndCtrl>(val); // row_bcast:15 (CDNA)
+    else
+        val += ds_swizzle_T<0x1e0>(val); // GFX11 equivalent via ds_swizzle
+
+    // Step 6: broadcast lane-31 result into lanes 32-63 (CDNA wavefront=64 only).
+    if constexpr(is_cdna)
+        val += move_dpp_T<0x143, 0xf, 0xf, bndCtrl>(val); // row_bcast:31
+
+    // Result is in the last lane; broadcast to all lanes.
+    val = shfl_bcast_T(val, warpSize - 1);
+
+#else
+    // Shuffle fallback.
 #pragma unroll
     for(rocblas_int r = warpSize / 2; r >= 1; r /= 2)
     {
@@ -1194,6 +1286,7 @@ __device__ inline void reduce_wave_sum(S& val)
     }
 
     val = __shfl(val, 0);
+#endif
 }
 
 template <std::int32_t BDIM = STEDC_SOLVE_BDIM, typename S>
@@ -1245,19 +1338,65 @@ __device__ inline void reduce_block_sum(S& val)
 template <std::int32_t BDIM = 0, typename S>
 __device__ inline void reduce_wave_sum(S& val1, S& val2, S& val3)
 {
-    /* assert(BDIM <= warpSize); */
+// WARNING: the compiler is not honoring __GFXxx__ macros in debug builds; the
+// following should fall back into a generic, safe, implementation if no
+// architecture is detected.
+#if defined(__HIP_DEVICE_COMPILE__) && defined(__AMDGCN__)                                 \
+    && (defined(__GFX8__) || defined(__GFX9__) || defined(__GFX10__) || defined(__GFX11__) \
+        || defined(__GFX12__))
+#if defined(__GFX10__) || defined(__GFX11__) || defined(__GFX12__)
+    constexpr bool is_cdna = false;
+    constexpr bool bndCtrl = false;
+#else
+    constexpr bool is_cdna = true;
+    constexpr bool bndCtrl = true;
+#endif
 
-#pragma unroll
-    for(rocblas_int r = warpSize / 2; r >= 1; r /= 2)
+    // All three chains advance in lock-step using distinct registers, giving the
+    // instruction scheduler visibility of three independent DPP chains simultaneously
+    // and allowing it to fill DPP read-after-write latency slots across chains.
+    val1 += move_dpp_T<0xb1, 0xf, 0xf, bndCtrl>(val1); // quad_perm:[1,0,3,2]
+    val2 += move_dpp_T<0xb1, 0xf, 0xf, bndCtrl>(val2);
+    val3 += move_dpp_T<0xb1, 0xf, 0xf, bndCtrl>(val3);
+
+    val1 += move_dpp_T<0x4e, 0xf, 0xf, bndCtrl>(val1); // quad_perm:[2,3,0,1]
+    val2 += move_dpp_T<0x4e, 0xf, 0xf, bndCtrl>(val2);
+    val3 += move_dpp_T<0x4e, 0xf, 0xf, bndCtrl>(val3);
+
+    val1 += move_dpp_T<0x124, 0xf, 0xf, bndCtrl>(val1); // row_ror:4
+    val2 += move_dpp_T<0x124, 0xf, 0xf, bndCtrl>(val2);
+    val3 += move_dpp_T<0x124, 0xf, 0xf, bndCtrl>(val3);
+
+    val1 += move_dpp_T<0x128, 0xf, 0xf, bndCtrl>(val1); // row_ror:8
+    val2 += move_dpp_T<0x128, 0xf, 0xf, bndCtrl>(val2);
+    val3 += move_dpp_T<0x128, 0xf, 0xf, bndCtrl>(val3);
+
+    if constexpr(is_cdna)
     {
-        val1 += __shfl_down(val1, r);
-        val2 += __shfl_down(val2, r);
-        val3 += __shfl_down(val3, r);
+        val1 += move_dpp_T<0x142, 0xf, 0xf, bndCtrl>(val1); // row_bcast:15
+        val2 += move_dpp_T<0x142, 0xf, 0xf, bndCtrl>(val2);
+        val3 += move_dpp_T<0x142, 0xf, 0xf, bndCtrl>(val3);
+
+        val1 += move_dpp_T<0x143, 0xf, 0xf, bndCtrl>(val1); // row_bcast:31
+        val2 += move_dpp_T<0x143, 0xf, 0xf, bndCtrl>(val2);
+        val3 += move_dpp_T<0x143, 0xf, 0xf, bndCtrl>(val3);
+    }
+    else
+    {
+        val1 += ds_swizzle_T<0x1e0>(val1);
+        val2 += ds_swizzle_T<0x1e0>(val2);
+        val3 += ds_swizzle_T<0x1e0>(val3);
     }
 
-    val1 = __shfl(val1, 0);
-    val2 = __shfl(val2, 0);
-    val3 = __shfl(val3, 0);
+    val1 = shfl_bcast_T(val1, warpSize - 1);
+    val2 = shfl_bcast_T(val2, warpSize - 1);
+    val3 = shfl_bcast_T(val3, warpSize - 1);
+
+#else
+    reduce_wave_sum(val1);
+    reduce_wave_sum(val2);
+    reduce_wave_sum(val3);
+#endif
 }
 
 template <std::int32_t BDIM = STEDC_SOLVE_BDIM, typename S>
@@ -1408,7 +1547,7 @@ __device__ I laed4_alt(I n,
             S dj = (DELTA(j) - di) - midpt;
             psi = psi + Z(j) * Z(j) / ((DELTA(j) - di) - midpt);
         }
-        __syncthreads();
+        /* __syncthreads(); */
         reduce_block_sum(psi);
 
         c = rhoinv + psi;
@@ -1479,7 +1618,7 @@ __device__ I laed4_alt(I n,
             dpsi = dpsi + temp * temp;
             erretm = erretm + psi;
         }
-        __syncthreads();
+        /* __syncthreads(); */
         reduce_block_sum(psi, dpsi, erretm);
         erretm = lam_abs(erretm);
         //
@@ -1573,7 +1712,7 @@ __device__ I laed4_alt(I n,
             dpsi = dpsi + temp * temp;
             erretm = erretm + psi;
         }
-        __syncthreads();
+        /* __syncthreads(); */
         reduce_block_sum(psi, dpsi, erretm);
         erretm = lam_abs(erretm);
         //
@@ -1662,7 +1801,7 @@ __device__ I laed4_alt(I n,
                 dpsi = dpsi + temp * temp;
                 erretm = erretm + psi;
             }
-            __syncthreads();
+            /* __syncthreads(); */
             reduce_block_sum(psi, dpsi, erretm);
             erretm = lam_abs(erretm);
             //
@@ -1699,7 +1838,7 @@ __device__ I laed4_alt(I n,
             S dj = (DELTA(j) - di) - midpt;
             psi = psi + Z(j) * Z(j) / dj;
         }
-        __syncthreads();
+        /* __syncthreads(); */
         reduce_block_sum(psi);
 
         phi = S(0.);
@@ -1708,7 +1847,7 @@ __device__ I laed4_alt(I n,
             S dj = (DELTA(j) - di) - midpt;
             phi = phi + Z(j) * Z(j) / dj;
         }
-        __syncthreads();
+        /* __syncthreads(); */
         reduce_block_sum(phi);
 
         c = rhoinv + psi + phi;
@@ -1795,7 +1934,7 @@ __device__ I laed4_alt(I n,
             dpsi = dpsi + temp * temp;
             erretm = erretm + psi;
         }
-        __syncthreads();
+        /* __syncthreads(); */
         reduce_block_sum(psi, dpsi, erretm);
         erretm = lam_abs(erretm);
         //
@@ -1811,7 +1950,7 @@ __device__ I laed4_alt(I n,
             dphi = dphi + temp * temp;
             erretm2 = erretm2 + phi;
         }
-        __syncthreads();
+        /* __syncthreads(); */
         reduce_block_sum(phi, dphi, erretm2);
         erretm += erretm2;
         w = rhoinv + phi + psi;
@@ -1982,7 +2121,7 @@ __device__ I laed4_alt(I n,
             dpsi = dpsi + temp * temp;
             erretm = erretm + psi;
         }
-        __syncthreads();
+        /* __syncthreads(); */
         reduce_block_sum(psi, dpsi, erretm);
         erretm = lam_abs(erretm);
         //
@@ -1998,7 +2137,7 @@ __device__ I laed4_alt(I n,
             dphi = dphi + temp * temp;
             erretm2 = erretm2 + phi;
         }
-        __syncthreads();
+        /* __syncthreads(); */
         reduce_block_sum(phi, dphi, erretm2);
         erretm += erretm2;
         temp = Z(ii) / DELTA(ii);
@@ -2197,7 +2336,7 @@ __device__ I laed4_alt(I n,
                 dpsi = dpsi + temp * temp;
                 erretm = erretm + psi;
             }
-            __syncthreads();
+            /* __syncthreads(); */
             reduce_block_sum(psi, dpsi, erretm);
             erretm = lam_abs(erretm);
             //
@@ -2213,7 +2352,7 @@ __device__ I laed4_alt(I n,
                 dphi = dphi + temp * temp;
                 erretm2 = erretm2 + phi;
             }
-            __syncthreads();
+            /* __syncthreads(); */
             reduce_block_sum(phi, dphi, erretm2);
             erretm += erretm2;
             temp = Z(ii) / DELTA(ii);
