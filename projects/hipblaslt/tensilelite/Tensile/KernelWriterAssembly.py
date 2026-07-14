@@ -650,14 +650,20 @@ class KernelWriterAssembly(KernelWriter):
         self.setSgprToInUseState(s)
         protected.append(s)
       except RuntimeError as e:
-        # Expected ONLY when a parked var's registers are currently borrowed
-        # (e.g. StreamK reuses SrdWS as a main-loop temp): they were never
-        # re-added to the pool's checkout tracking, so removeFromCheckOut reports
-        # "...never checked out" and this var is simply skipped. Any OTHER
-        # RuntimeError is a genuine SGPR-pool bug and must NOT be masked -- this
-        # runs for every kernel/arch, so a blanket `except: pass` would hide
-        # real pool corruption codebase-wide.
-        if "never checked out" not in str(e):
+        # Expected ONLY for a parked var whose registers cannot be flipped back
+        # to in-use here. rocisa's removeFromCheckOut reports one of two things
+        # for that situation (see rocisa/include/register.hpp):
+        #   * "...is not in Available state" -- the var is still tracked as a
+        #     temp checkout but its registers are currently borrowed as a
+        #     main-loop temp (e.g. StreamK reuses SrdWS during the main loop);
+        #   * "...never checked out"         -- the var is not currently checked
+        #     out at all.
+        # In both cases the checkout below cannot grab those registers anyway, so
+        # the var is simply skipped. Any OTHER RuntimeError is a genuine SGPR-pool
+        # bug and must NOT be masked -- this runs for every kernel/arch, so a
+        # blanket `except: pass` would hide real pool corruption codebase-wide.
+        msg = str(e)
+        if "is not in Available state" not in msg and "never checked out" not in msg:
           raise
     ret = RegSet("s", "sgpr"+name, self.defineSgprIdx(name, numSgprs, align))
     for s in protected:
