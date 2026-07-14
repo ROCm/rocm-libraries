@@ -68,7 +68,7 @@ endif( )
 
 
 # FOR OPTIONAL CODE COVERAGE
-if(BUILD_CODE_COVERAGE)
+if(ROCBLAS_ENABLE_COVERAGE)
   #set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -fprofile-instr-generate -fcoverage-mapping")
   #add_compile_options(-fprofile-instr-generate -fcoverage-mapping)
   #add_compile_options(-fprofile-arcs -ftest-coverage)
