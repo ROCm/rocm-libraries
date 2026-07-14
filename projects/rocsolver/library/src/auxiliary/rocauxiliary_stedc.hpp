@@ -1237,8 +1237,8 @@ __device__ inline T shfl_bcast_T(T v, int src_lane)
 
 #endif // AMDGCN GFX8+
 
-template <std::int32_t BDIM = 0, typename S>
-__device__ inline void reduce_wave_sum(S& val)
+template <typename S>
+__device__ __forceinline__ void reduce_wave_sum(S& val)
 {
 // WARNING: the compiler is not honoring __GFXxx__ macros in debug builds; the
 // following should fall back into a generic, safe, implementation if no
@@ -1289,54 +1289,8 @@ __device__ inline void reduce_wave_sum(S& val)
 #endif
 }
 
-template <std::int32_t BDIM = STEDC_SOLVE_BDIM, typename S>
-__device__ inline void reduce_block_sum(S& val)
-{
-    /* assert(BDIM == hipBlockDim_x); */
-
-    if(hipBlockDim_x > warpSize)
-    {
-        __shared__ S lds[BDIM];
-        rocblas_int tid = threadIdx.x;
-
-        lds[tid] = val;
-        __syncthreads();
-
-        for(rocblas_int r = hipBlockDim_x / 2; r >= warpSize; r /= 2)
-        {
-            if(tid < r)
-            {
-                lds[tid] += lds[tid + r];
-            }
-            __syncthreads();
-        }
-
-        val = lds[tid];
-        __syncthreads();
-
-#pragma unroll
-        for(rocblas_int r = warpSize / 2; r >= 1; r /= 2)
-        {
-            val += __shfl_down(val, r);
-        }
-
-        if(threadIdx.x == 0)
-        {
-            lds[0] = val;
-        }
-        __syncthreads();
-
-        val = lds[0];
-        __syncthreads();
-    }
-    else
-    {
-        reduce_wave_sum(val);
-    }
-}
-
-template <std::int32_t BDIM = 0, typename S>
-__device__ inline void reduce_wave_sum(S& val1, S& val2, S& val3)
+template <typename S>
+__device__ __forceinline__ void reduce_wave_sum(S& val1, S& val2, S& val3)
 {
 // WARNING: the compiler is not honoring __GFXxx__ macros in debug builds; the
 // following should fall back into a generic, safe, implementation if no
@@ -1399,67 +1353,7 @@ __device__ inline void reduce_wave_sum(S& val1, S& val2, S& val3)
 #endif
 }
 
-template <std::int32_t BDIM = STEDC_SOLVE_BDIM, typename S>
-__device__ inline void reduce_block_sum(S& val1, S& val2, S& val3)
-{
-    /* assert(BDIM == hipBlockDim_x); */
-
-    if(hipBlockDim_x > warpSize)
-    {
-        __shared__ S lds1[BDIM];
-        __shared__ S lds2[BDIM];
-        __shared__ S lds3[BDIM];
-        rocblas_int tid = threadIdx.x;
-
-        lds1[tid] = val1;
-        lds2[tid] = val2;
-        lds3[tid] = val3;
-        __syncthreads();
-
-        for(rocblas_int r = hipBlockDim_x / 2; r >= warpSize; r /= 2)
-        {
-            if(tid < r)
-            {
-                lds1[tid] += lds1[tid + r];
-                lds2[tid] += lds2[tid + r];
-                lds3[tid] += lds3[tid + r];
-            }
-            __syncthreads();
-        }
-
-        val1 = lds1[tid];
-        val2 = lds2[tid];
-        val3 = lds3[tid];
-        __syncthreads();
-
-#pragma unroll
-        for(rocblas_int r = warpSize / 2; r >= 1; r /= 2)
-        {
-            val1 += __shfl_down(val1, r);
-            val2 += __shfl_down(val2, r);
-            val3 += __shfl_down(val3, r);
-        }
-
-        if(threadIdx.x == 0)
-        {
-            lds1[0] = val1;
-            lds2[0] = val2;
-            lds3[0] = val3;
-        }
-        __syncthreads();
-
-        val1 = lds1[0];
-        val2 = lds2[0];
-        val3 = lds3[0];
-        __syncthreads();
-    }
-    else
-    {
-        reduce_wave_sum(val1, val2, val3);
-    }
-}
-
-template <typename S, typename I, I BDIM, bool OVERRIDE_3RD_ORDER_SCHEME = false>
+template <typename S, typename I, bool OVERRIDE_3RD_ORDER_SCHEME = false>
 __device__ I laed4_alt(I n,
                        I i,
                        S* delta,
@@ -1470,8 +1364,6 @@ __device__ I laed4_alt(I n,
                        S ssfmin = std::numeric_limits<S>::min(),
                        I MAXIT = 50)
 {
-    /* assert(BDIM == hipBlockDim_x); */
-
     i = i + 1;
     auto lam_abs = [](auto x) -> auto
     {
@@ -1547,8 +1439,7 @@ __device__ I laed4_alt(I n,
             S dj = (DELTA(j) - di) - midpt;
             psi = psi + Z(j) * Z(j) / ((DELTA(j) - di) - midpt);
         }
-        /* __syncthreads(); */
-        reduce_block_sum(psi);
+        reduce_wave_sum(psi);
 
         c = rhoinv + psi;
         w = c + Z(ii) * Z(ii) / ((DELTA(ii) - di) - midpt) + Z(n) * Z(n) / ((dn - di) - midpt);
@@ -1618,8 +1509,7 @@ __device__ I laed4_alt(I n,
             dpsi = dpsi + temp * temp;
             erretm = erretm + psi;
         }
-        /* __syncthreads(); */
-        reduce_block_sum(psi, dpsi, erretm);
+        reduce_wave_sum(psi, dpsi, erretm);
         erretm = lam_abs(erretm);
         //
         //        Evaluate phi and the derivative dphi
@@ -1712,8 +1602,7 @@ __device__ I laed4_alt(I n,
             dpsi = dpsi + temp * temp;
             erretm = erretm + psi;
         }
-        /* __syncthreads(); */
-        reduce_block_sum(psi, dpsi, erretm);
+        reduce_wave_sum(psi, dpsi, erretm);
         erretm = lam_abs(erretm);
         //
         //        Evaluate phi and the derivative dphi
@@ -1801,8 +1690,7 @@ __device__ I laed4_alt(I n,
                 dpsi = dpsi + temp * temp;
                 erretm = erretm + psi;
             }
-            /* __syncthreads(); */
-            reduce_block_sum(psi, dpsi, erretm);
+            reduce_wave_sum(psi, dpsi, erretm);
             erretm = lam_abs(erretm);
             //
             //           Evaluate phi and the derivative dphi
@@ -1838,8 +1726,7 @@ __device__ I laed4_alt(I n,
             S dj = (DELTA(j) - di) - midpt;
             psi = psi + Z(j) * Z(j) / dj;
         }
-        /* __syncthreads(); */
-        reduce_block_sum(psi);
+        reduce_wave_sum(psi);
 
         phi = S(0.);
         for(int j = n - hipThreadIdx_x; j >= i + 2; j -= hipBlockDim_x)
@@ -1847,8 +1734,7 @@ __device__ I laed4_alt(I n,
             S dj = (DELTA(j) - di) - midpt;
             phi = phi + Z(j) * Z(j) / dj;
         }
-        /* __syncthreads(); */
-        reduce_block_sum(phi);
+        reduce_wave_sum(phi);
 
         c = rhoinv + psi + phi;
         w = c + Z(i) * Z(i) / (-midpt) + Z(ip1) * Z(ip1) / ((dip1 - di) - midpt);
@@ -1934,8 +1820,7 @@ __device__ I laed4_alt(I n,
             dpsi = dpsi + temp * temp;
             erretm = erretm + psi;
         }
-        /* __syncthreads(); */
-        reduce_block_sum(psi, dpsi, erretm);
+        reduce_wave_sum(psi, dpsi, erretm);
         erretm = lam_abs(erretm);
         //
         //        Evaluate phi and the derivative dphi
@@ -1950,8 +1835,7 @@ __device__ I laed4_alt(I n,
             dphi = dphi + temp * temp;
             erretm2 = erretm2 + phi;
         }
-        /* __syncthreads(); */
-        reduce_block_sum(phi, dphi, erretm2);
+        reduce_wave_sum(phi, dphi, erretm2);
         erretm += erretm2;
         w = rhoinv + phi + psi;
         //
@@ -2121,8 +2005,7 @@ __device__ I laed4_alt(I n,
             dpsi = dpsi + temp * temp;
             erretm = erretm + psi;
         }
-        /* __syncthreads(); */
-        reduce_block_sum(psi, dpsi, erretm);
+        reduce_wave_sum(psi, dpsi, erretm);
         erretm = lam_abs(erretm);
         //
         //        Evaluate phi and the derivative dphi
@@ -2137,8 +2020,7 @@ __device__ I laed4_alt(I n,
             dphi = dphi + temp * temp;
             erretm2 = erretm2 + phi;
         }
-        /* __syncthreads(); */
-        reduce_block_sum(phi, dphi, erretm2);
+        reduce_wave_sum(phi, dphi, erretm2);
         erretm += erretm2;
         temp = Z(ii) / DELTA(ii);
         dw = dpsi + dphi + temp * temp;
@@ -2336,8 +2218,7 @@ __device__ I laed4_alt(I n,
                 dpsi = dpsi + temp * temp;
                 erretm = erretm + psi;
             }
-            /* __syncthreads(); */
-            reduce_block_sum(psi, dpsi, erretm);
+            reduce_wave_sum(psi, dpsi, erretm);
             erretm = lam_abs(erretm);
             //
             //           Evaluate phi and the derivative dphi
@@ -2352,8 +2233,7 @@ __device__ I laed4_alt(I n,
                 dphi = dphi + temp * temp;
                 erretm2 = erretm2 + phi;
             }
-            /* __syncthreads(); */
-            reduce_block_sum(phi, dphi, erretm2);
+            reduce_wave_sum(phi, dphi, erretm2);
             erretm += erretm2;
             temp = Z(ii) / DELTA(ii);
             dw = dpsi + dphi + temp * temp;
@@ -2387,10 +2267,10 @@ __device__ I laed4_alt(I n,
 /** STEDC_MERGEVALUES_KERNEL solves the secular equation for every pair of sub-blocks
     that need to be merged.
         - Call this kernel with batch_count groups in y, and as many groups in x as needed
-          to cover n (i.e. n_groups_x * groups_size_x >= n). Workgroups' sizes and BDIM must match,
-          here their size is STEDC_SOLVE_BDIM (= wave size) **/
+          to cover n (i.e. n_groups_x * groups_size_x >= n). Workgroup size is STEDC_SOLVE_BDIM
+          (= warp size). **/
 
-template <rocblas_int BDIM /* = STEDC_SOLVE_BDIM */, typename S>
+template <typename S>
 ROCSOLVER_KERNEL void __launch_bounds__(STEDC_SOLVE_BDIM)
     stedc_mergeValues_Solve_kernel(const rocblas_int k,
                                    const rocblas_int n,
@@ -2451,7 +2331,7 @@ ROCSOLVER_KERNEL void __launch_bounds__(STEDC_SOLVE_BDIM)
                 evs[i] = (p < 0) ? -dlam : dlam;
             }
 #else
-            linfo = laed4_alt<S, rocblas_int, BDIM>(dd, cc, etmpd + i * n, z + p1, std::abs(p), dlam);
+            linfo = laed4_alt<S, rocblas_int>(dd, cc, etmpd + i * n, z + p1, std::abs(p), dlam);
             if(threadIdx.x == 0)
             {
                 evs[i] = (p < 0) ? -dlam : dlam;
@@ -3397,18 +3277,18 @@ rocblas_status rocsolver_stedc_template(rocblas_handle handle,
             if((props != nullptr) && (props->warpSize == 64))
             {
                 constexpr rocblas_int WarpSize = 64;
-                ROCSOLVER_LAUNCH_KERNEL((stedc_mergeValues_Solve_kernel<WarpSize, S>),
-                                        dim3(n, batch_count), dim3(WarpSize), 0, stream, k, n,
-                                        D + shiftD, strideD, E + shiftE, strideE, tmpz, tempgemm,
-                                        splits, eps, ssfmin, ssfmax);
+                ROCSOLVER_LAUNCH_KERNEL((stedc_mergeValues_Solve_kernel<S>), dim3(n, batch_count),
+                                        dim3(WarpSize), 0, stream, k, n, D + shiftD, strideD,
+                                        E + shiftE, strideE, tmpz, tempgemm, splits, eps, ssfmin,
+                                        ssfmax);
             }
             else
             {
                 constexpr rocblas_int WarpSize = 32;
-                ROCSOLVER_LAUNCH_KERNEL((stedc_mergeValues_Solve_kernel<WarpSize, S>),
-                                        dim3(n, batch_count), dim3(WarpSize), 0, stream, k, n,
-                                        D + shiftD, strideD, E + shiftE, strideE, tmpz, tempgemm,
-                                        splits, eps, ssfmin, ssfmax);
+                ROCSOLVER_LAUNCH_KERNEL((stedc_mergeValues_Solve_kernel<S>), dim3(n, batch_count),
+                                        dim3(WarpSize), 0, stream, k, n, D + shiftD, strideD,
+                                        E + shiftE, strideE, tmpz, tempgemm, splits, eps, ssfmin,
+                                        ssfmax);
             }
 #endif
 
