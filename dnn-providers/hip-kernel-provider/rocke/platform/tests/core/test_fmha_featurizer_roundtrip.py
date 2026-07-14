@@ -1,6 +1,6 @@
 """Python<->C++ FMHA featurizer round-trip test (the bridge guarantee).
 
-The dispatcher's C++ featurizer MUST produce the exact same 69-feature vector as
+The dispatcher's C++ featurizer MUST produce the exact same NUM_FMHA_FEATURES-feature vector as
 the Python FmhaFeatureEngine.extract() the model trained on -- a silent mismatch
 degrades kernel selection with no error. This test generates the C++ featurizer
 (gen_fmha_featurizer), compiles it, and asserts BIT-IDENTICAL output vs. Python
@@ -28,6 +28,10 @@ if _HEUR not in sys.path:
 
 import gen_fmha_featurizer as gen  # noqa: E402
 from feature_engine import FmhaFeatureEngine  # noqa: E402
+
+# FMHA feature vector length (FmhaFeatureEngine.NUM_FEATURES).
+# Centralize this to avoid scattering the literal across test assertions.
+NUM_FMHA_FEATURES = 69
 
 _CXX = shutil.which("g++") or shutil.which("c++") or shutil.which("clang++")
 requires_cxx = pytest.mark.skipif(_CXX is None, reason="no C++ compiler")
@@ -141,11 +145,73 @@ _FIXTURES = [
         ),
         dict(pipeline=1, tile_m0=16, tile_n0=32, num_warps=1, paged=1),
     ),
+    # Non-zero pads (indices 27-30): pad_s, pad_sk, pad_d, pad_dv
+    (
+        dict(
+            batch=2,
+            seqlen_q=127,  # not multiple of tile
+            seqlen_k=511,
+            nhead_q=16,
+            nhead_k=16,
+            hdim_q=63,  # not power of 2
+            hdim_v=65,
+            dtype="fp16",
+        ),
+        dict(
+            pipeline=1,
+            tile_m0=16,
+            tile_n0=64,
+            num_warps=1,
+            paged=0,
+            pad_s=1,
+            pad_sk=2,
+            pad_d=3,
+            pad_dv=4,
+        ),
+    ),
+    # Non-zero dropout, logits, skip, qscale (indices 34, 35, 37, 38)
+    (
+        dict(
+            batch=4,
+            seqlen_q=256,
+            seqlen_k=256,
+            nhead_q=8,
+            nhead_k=8,
+            hdim_q=128,
+            hdim_v=128,
+            dtype="bf16",
+        ),
+        dict(
+            pipeline=1,
+            tile_m0=32,
+            tile_n0=64,
+            num_warps=2,
+            paged=1,
+            dropout=0.1,
+            logits=1.0,
+            skip=1,
+            qscale=0.5,
+        ),
+    ),
+    # sk <= tn0 case (index 54: sk_le_tn0 should be 1)
+    (
+        dict(
+            batch=1,
+            seqlen_q=1024,
+            seqlen_k=32,  # sk < tn0
+            nhead_q=8,
+            nhead_k=8,
+            hdim_q=64,
+            hdim_v=64,
+            dtype="fp16",
+        ),
+        dict(pipeline=1, tile_m0=16, tile_n0=64, num_warps=1, paged=1),
+    ),
 ]
 
 
 def _build_lib(tmp):
-    """Generate + compile a tiny C++ shim exposing featurize -> double[69]."""
+    """Generate + compile a tiny C++ shim exposing featurize -> double[NUM_FMHA_FEATURES]."""
     disp = os.path.join(tmp, "dispatcher", "sdpa_fwd")
     gen.generate(__import__("pathlib").Path(disp))
     shim = os.path.join(tmp, "shim.cpp")
@@ -204,10 +270,10 @@ def test_roundtrip_bit_identical(prob, cfg, tmp_path):
     # Python side
     eng = FmhaFeatureEngine(**_HW)
     py = eng.extract(prob, cfg)
-    assert py.shape[0] == 69
+    assert py.shape[0] == NUM_FMHA_FEATURES
 
     # C++ side
-    out = (ctypes.c_double * 69)()
+    out = (ctypes.c_double * NUM_FMHA_FEATURES)()
     lib.featurize_c(
         float(prob["batch"]),
         float(prob["seqlen_q"]),
@@ -236,11 +302,11 @@ def test_roundtrip_bit_identical(prob, cfg, tmp_path):
         float(_HW["num_xcd"]),
         out,
     )
-    cpp = np.array([out[i] for i in range(69)], dtype=np.float64)
+    cpp = np.array([out[i] for i in range(NUM_FMHA_FEATURES)], dtype=np.float64)
 
     # Bit-identical (same formulas, same op order) -- any diff is a real bug.
     names = eng.get_feature_names()
-    for i in range(69):
+    for i in range(NUM_FMHA_FEATURES):
         assert py[i] == cpp[i], f"feature[{i}] {names[i]}: py={py[i]!r} cpp={cpp[i]!r}"
 
 
@@ -253,3 +319,46 @@ def test_generator_struct_matches_names(tmp_path):
     # every feature name appears as a field, in order
     idx = [struct.index(f"double {n} ") for n in names]
     assert idx == sorted(idx), "struct field order diverges from get_feature_names"
+
+
+def test_committed_headers_match_generated():
+    """Committed FmhaFeaturizer.hpp must match gen_fmha_featurizer.py output.
+
+    Guards against drift: if someone updates the generator but forgets to
+    regenerate + commit the headers, this test fails. The review comment noted
+    that tests compare against temp files but don't check committed files.
+    """
+    struct_src, featurize_src = gen.emit_fmha_featurizer()
+
+    # Find the committed header (relative to this test file).
+    committed_path = os.path.normpath(
+        os.path.join(
+            _HERE,
+            "..",
+            "..",
+            "..",
+            "library",
+            "api",
+            "src",
+            "dispatcher",
+            "sdpa_fwd",
+            "FmhaFeaturizer.hpp",
+        )
+    )
+    if not os.path.exists(committed_path):
+        pytest.skip(f"committed FmhaFeaturizer.hpp not found at {committed_path}")
+
+    with open(committed_path) as f:
+        committed_content = f.read()
+
+    # The committed file has both struct + featurize concatenated.
+    generated_content = struct_src + "\n" + featurize_src
+
+    # Normalize whitespace differences (trailing spaces, final newline).
+    def normalize(text):
+        return "\n".join(line.rstrip() for line in text.splitlines()).strip()
+
+    assert normalize(committed_content) == normalize(generated_content), (
+        "Committed FmhaFeaturizer.hpp does NOT match gen_fmha_featurizer.py output. "
+        "Re-run the generator and commit the updated header."
+    )

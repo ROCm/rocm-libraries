@@ -55,8 +55,14 @@ def _discover(models_dir: Path) -> List[dict]:
     keys: symbol, op, arch, dtype, num_features. The op is aliased to the
     dispatcher's token (see _OP_ALIASES). Sorting by (op, arch, dtype) makes the
     generated table deterministic (stable diffs, reproducible builds).
+
+    Raises ValueError on duplicate (op, arch, dtype) or duplicate symbol (C linkage
+    identity collision).
     """
     entries: List[dict] = []
+    seen_keys: set[tuple[str, str, str]] = set()
+    seen_symbols: set[str] = set()
+
     for meta_path in sorted(models_dir.rglob("*.meta.json")):
         meta = json.loads(meta_path.read_text())
         for key in ("symbol", "op", "arch", "dtype", "num_features"):
@@ -64,7 +70,27 @@ def _discover(models_dir: Path) -> List[dict]:
                 raise ValueError(f"{meta_path}: missing required key {key!r}")
         meta = dict(meta)
         meta["op"] = _dispatcher_op(str(meta["op"]))  # pipeline op -> dispatcher op
+
+        # Check for duplicate (op, arch, dtype) key -- silently overriding is wrong.
+        key_tuple = (meta["op"], meta["arch"], meta["dtype"])
+        if key_tuple in seen_keys:
+            raise ValueError(
+                f"{meta_path}: duplicate (op, arch, dtype) = {key_tuple!r}; "
+                "each predictor must have a unique (op, arch, dtype) key"
+            )
+        seen_keys.add(key_tuple)
+
+        # Check for duplicate symbol -- C linkage requires unique identifiers.
+        symbol = meta["symbol"]
+        if symbol in seen_symbols:
+            raise ValueError(
+                f"{meta_path}: duplicate symbol {symbol!r}; each predictor must "
+                "have a unique C linkage identity"
+            )
+        seen_symbols.add(symbol)
+
         entries.append(meta)
+
     entries.sort(key=lambda m: (m["op"], m["arch"], m["dtype"]))
     return entries
 

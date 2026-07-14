@@ -633,9 +633,9 @@ def _fmha_dtype_bytes(dt: str) -> float:
 class FmhaFeatureEngine(FeatureEngine):
     """Feature engine for fused multi-head attention (SDPA) kernels.
 
-    Produces EXACTLY the 68-feature layout the C++
-    ``ml_extract_fmha_features`` (``ml_heuristic.hpp``,
-    ``ROCKE_FMHA_NUM_FEATURES == 68``) emits, field-for-field, so a model
+    Produces EXACTLY the 69-feature layout the C++
+    ``fmha_featurize`` (``FmhaFeaturizer.hpp``,
+    ``FmhaFeatures::kNumFeatures == 69``) emits, field-for-field, so a model
     trained on this engine's parquet predicts identically whether scored
     from Python (search / evaluate) or from the C++ dispatcher at runtime.
 

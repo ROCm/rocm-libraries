@@ -26,10 +26,16 @@ add_library(
 # linkage via the extern "C" guard in its header; the predictor symbols are
 # referenced only through the registry's function-pointer table, so consistent
 # CXX compilation of both keeps linkage matched.
+#
+# SKIP_LINTING: these are GENERATED files (lgbm_to_c.py, gen_model_registry.py,
+# gen_fmha_featurizer.py); linting them is pointless and causes noise on regen.
 set_source_files_properties(
     dispatcher/sdpa_fwd/rocke_model_registry.c
     dispatcher/sdpa_fwd/gfx950/model_tflops_bf16.c
-    PROPERTIES LANGUAGE CXX
+    dispatcher/sdpa_fwd/FmhaFeaturizer.hpp
+    PROPERTIES
+        LANGUAGE CXX
+        SKIP_LINTING ON
 )
 
 target_include_directories(rocke_client_impl PUBLIC ${CMAKE_CURRENT_SOURCE_DIR})
@@ -72,6 +78,34 @@ set_target_properties(
 
 set_target_properties(rocke_client PROPERTIES
     THEROCK_INSTALL_RPATH_ORIGIN "lib/hipdnn_plugins/engines")
+
+# Custom target: regenerate FmhaFeaturizer.hpp from gen_fmha_featurizer.py.
+# Usage: cmake --build . --target rocke_regenerate_fmha_featurizer
+# The generator lives in platform/python/rocke/heuristics; invoke it via python3 -m.
+add_custom_target(
+    rocke_regenerate_fmha_featurizer
+    COMMAND ${CMAKE_COMMAND} -E echo "Regenerating FmhaFeaturizer.hpp..."
+    COMMAND python3 -m rocke.heuristics.gen_fmha_featurizer
+            --out ${CMAKE_CURRENT_SOURCE_DIR}/dispatcher/sdpa_fwd/FmhaFeaturizer.hpp
+    WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}/../../../platform/python
+    COMMENT "Regenerate dispatcher/sdpa_fwd/FmhaFeaturizer.hpp from gen_fmha_featurizer.py"
+    VERBATIM
+)
+
+# Custom target: regenerate rocke_model_registry.c from gen_model_registry.py.
+# Usage: cmake --build . --target rocke_regenerate_model_registry
+# Scans dispatcher/sdpa_fwd/*/*.meta.json and emits the registry + extern decls.
+add_custom_target(
+    rocke_regenerate_model_registry
+    COMMAND ${CMAKE_COMMAND} -E echo "Regenerating rocke_model_registry.c/.h..."
+    COMMAND python3 -m rocke.heuristics.gen_model_registry
+            --models-dir ${CMAKE_CURRENT_SOURCE_DIR}/dispatcher/sdpa_fwd
+            --out-c ${CMAKE_CURRENT_SOURCE_DIR}/dispatcher/sdpa_fwd/rocke_model_registry.c
+            --out-h ${CMAKE_CURRENT_SOURCE_DIR}/dispatcher/sdpa_fwd/rocke_model_registry.h
+    WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}/../../../platform/python
+    COMMENT "Regenerate rocke_model_registry.{c,h} from committed predictors"
+    VERBATIM
+)
 
 if(ROCKE_CLIENT_ENABLE_TESTS)
     add_subdirectory(tests)

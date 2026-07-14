@@ -69,6 +69,67 @@ from ..runtime.comgr import build_hsaco_from_llvm_ir
 
 
 # ---------------------------------------------------------------------
+# Hardware profiles
+# ---------------------------------------------------------------------
+
+# Hardware profiles for arch hardware feature columns (used by train.py)
+HW_PROFILES = {
+    "gfx950": {
+        "hw_num_cus": 256,
+        "hw_simds_per_cu": 4,
+        "hw_shader_engines": 32,
+        "hw_max_clock_mhz": 2400,
+        "hw_max_waves_per_cu": 32,
+        "hw_wavefront_size": 64,
+        "hw_lds_capacity": 65536,
+        "hw_l1_cache_kb": 32,
+        "hw_l2_cache_kb": 4096,
+        "hw_l3_cache_kb": 262144,
+        "hw_num_xcd": 8,
+    },
+    "gfx942": {
+        "hw_num_cus": 228,
+        "hw_simds_per_cu": 4,
+        "hw_shader_engines": 28,
+        "hw_max_clock_mhz": 2100,
+        "hw_max_waves_per_cu": 32,
+        "hw_wavefront_size": 64,
+        "hw_lds_capacity": 65536,
+        "hw_l1_cache_kb": 32,
+        "hw_l2_cache_kb": 4096,
+        "hw_l3_cache_kb": 262144,
+        "hw_num_xcd": 8,
+    },
+    "gfx90a": {
+        "hw_num_cus": 110,
+        "hw_simds_per_cu": 4,
+        "hw_shader_engines": 8,
+        "hw_max_clock_mhz": 1700,
+        "hw_max_waves_per_cu": 32,
+        "hw_wavefront_size": 64,
+        "hw_lds_capacity": 65536,
+        "hw_l1_cache_kb": 16,
+        "hw_l2_cache_kb": 8192,
+        "hw_l3_cache_kb": 131072,
+        "hw_num_xcd": 1,
+    },
+    "gfx1100": {
+        "hw_num_cus": 48,
+        "hw_simds_per_cu": 2,
+        "hw_shader_engines": 6,
+        "hw_max_clock_mhz": 2500,
+        "hw_max_waves_per_cu": 16,
+        "hw_wavefront_size": 32,
+        "hw_lds_capacity": 65536,
+        "hw_l1_cache_kb": 32,
+        "hw_l2_cache_kb": 4096,
+        "hw_l3_cache_kb": 0,
+        "hw_num_xcd": 1,
+    },
+}
+
+
+# ---------------------------------------------------------------------
 # Generic per-op build record
 # ---------------------------------------------------------------------
 
@@ -621,6 +682,10 @@ def generate(
             "bench_error": bench_error,
             "run_id": 0,
         }
+        # Add hardware feature columns (train.py reads these from data rows).
+        # Defaults to empty dict if arch not in HW_PROFILES (exotic/test arch).
+        hw_profile = HW_PROFILES.get(arch, {})
+        row.update(hw_profile)
         row.update(rec.problem)
         row.update(rec.config)
         rows.append(row)

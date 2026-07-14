@@ -75,9 +75,19 @@ FmhaFeatures featurizeFmha(const SdpaProblem& problem, const AotInstance& inst)
     p.dtype = problem.dtype;
 
     FmhaConfigInputs c;
-    c.tm0 = static_cast<double>(cs.blockSizeQ); // block_m_per_warp
+    // Derive block_m_per_warp from blockSizeQ and numWarps. In the sweep,
+    // BLOCK_M (blockSizeQ) = num_warps × block_m_per_warp, so:
+    //   block_m_per_warp = blockSizeQ / numWarps (when numWarps > 0)
+    // When numWarps is 0 or unset (older catalogs), fall back to blockSizeQ
+    // (best approximation; matches sweep when num_warps=1).
+    const double num_warps = static_cast<double>(cs.numWarps);
+    const double block_m_per_warp = (cs.numWarps > 0)
+        ? static_cast<double>(cs.blockSizeQ) / num_warps
+        : static_cast<double>(cs.blockSizeQ);
+
+    c.tm0 = block_m_per_warp;
     c.tn0 = static_cast<double>(cs.tileSize); // 2D tile width T
-    c.num_warps = static_cast<double>(cs.numWarps);
+    c.num_warps = num_warps;
     // tk0/tn1/tk1/tk0max default from head_size/tn0 inside the featurizer (0 ->
     // derived), matching extract()'s defaults. Variant flags (mask/bias/...) are
     // not carried per-instance yet; they keep featurizer defaults (mask=0 etc.),
@@ -226,7 +236,24 @@ std::optional<AotInstance>
     // nothing escapes this noexcept function (selectForArch is itself noexcept).
     try
     {
-        return selectForArch(deviceArch(handle.getStream()), graph);
+        // Get the device from the stream (same device deviceArch uses).
+        // This ensures HardwareProfile::fromDevice queries the stream's device,
+        // not the current default device (which may differ in multi-GPU setups).
+        int device = 0;
+        hipStream_t stream = handle.getStream();
+        if(hipStreamGetDevice(stream, &device) != hipSuccess)
+        {
+            device = 0; // fallback to device 0 if stream query fails
+        }
+
+        std::optional<SdpaProblem> problem = translate(graph);
+        if(!problem.has_value())
+        {
+            return std::nullopt;
+        }
+        problem->arch = deviceArch(stream);
+        problem->hw = HardwareProfile::fromDevice(device);
+        return select(*problem);
     }
     catch(...)
     {

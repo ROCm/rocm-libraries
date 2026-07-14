@@ -138,3 +138,117 @@ def test_rejects_categorical_split():
     }
     with pytest.raises(lgbm_to_c.UnsupportedModelError):
         lgbm_to_c.booster_to_c(dumped, "f", num_features=4)
+
+
+def test_rejects_missing_type_none():
+    """missing_type="None" requires different codegen (NaN->0 coercion)."""
+    dumped = {
+        "objective": "regression",
+        "tree_info": [
+            {
+                "tree_index": 0,
+                "tree_structure": {
+                    "split_feature": 0,
+                    "decision_type": "<=",
+                    "threshold": 0.5,
+                    "default_left": True,
+                    "missing_type": "None",  # unsupported
+                    "left_child": {"leaf_value": 1.0},
+                    "right_child": {"leaf_value": 2.0},
+                },
+            }
+        ],
+    }
+    with pytest.raises(lgbm_to_c.UnsupportedModelError, match="missing_type"):
+        lgbm_to_c.booster_to_c(dumped, "f", num_features=4)
+
+
+def test_rejects_missing_type_zero():
+    """missing_type="Zero" treats exact 0.0 as missing (different semantics)."""
+    dumped = {
+        "objective": "regression",
+        "tree_info": [
+            {
+                "tree_index": 0,
+                "tree_structure": {
+                    "split_feature": 0,
+                    "decision_type": "<=",
+                    "threshold": 0.5,
+                    "default_left": False,
+                    "missing_type": "Zero",  # unsupported
+                    "left_child": {"leaf_value": 1.0},
+                    "right_child": {"leaf_value": 2.0},
+                },
+            }
+        ],
+    }
+    with pytest.raises(lgbm_to_c.UnsupportedModelError, match="missing_type"):
+        lgbm_to_c.booster_to_c(dumped, "f", num_features=4)
+
+
+@requires_cc
+def test_nan_handling_default_left_true():
+    """NaN inputs must follow default_left=True path (go left)."""
+    dumped = {
+        "objective": "regression",
+        "tree_info": [
+            {
+                "tree_index": 0,
+                "tree_structure": {
+                    "split_feature": 0,
+                    "decision_type": "<=",
+                    "threshold": 0.5,
+                    "default_left": True,
+                    "missing_type": "NaN",
+                    "left_child": {"leaf_value": 10.0},
+                    "right_child": {"leaf_value": 20.0},
+                },
+            }
+        ],
+    }
+    c_src, _ = lgbm_to_c.booster_to_c(dumped, "test_nan_left", num_features=1)
+    fn = _compile_and_load(c_src, "test_nan_left")
+
+    # NaN should go left (10.0)
+    nan_input = (ctypes.c_double * 1)(float("nan"))
+    assert fn(nan_input) == 10.0
+
+    # Finite values follow normal comparison
+    left_input = (ctypes.c_double * 1)(0.3)
+    assert fn(left_input) == 10.0
+    right_input = (ctypes.c_double * 1)(0.7)
+    assert fn(right_input) == 20.0
+
+
+@requires_cc
+def test_nan_handling_default_left_false():
+    """NaN inputs must follow default_left=False path (go right)."""
+    dumped = {
+        "objective": "regression",
+        "tree_info": [
+            {
+                "tree_index": 0,
+                "tree_structure": {
+                    "split_feature": 1,
+                    "decision_type": "<=",
+                    "threshold": 0.5,
+                    "default_left": False,
+                    "missing_type": "NaN",
+                    "left_child": {"leaf_value": 10.0},
+                    "right_child": {"leaf_value": 20.0},
+                },
+            }
+        ],
+    }
+    c_src, _ = lgbm_to_c.booster_to_c(dumped, "test_nan_right", num_features=2)
+    fn = _compile_and_load(c_src, "test_nan_right")
+
+    # NaN should go right (20.0)
+    nan_input = (ctypes.c_double * 2)(0.0, float("nan"))
+    assert fn(nan_input) == 20.0
+
+    # Finite values follow normal comparison
+    left_input = (ctypes.c_double * 2)(0.0, 0.3)
+    assert fn(left_input) == 10.0
+    right_input = (ctypes.c_double * 2)(0.0, 0.7)
+    assert fn(right_input) == 20.0

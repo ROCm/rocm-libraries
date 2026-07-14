@@ -338,11 +338,28 @@ def _enumerate_from(
         problems = problems[:max_shapes]
 
     specs: List[object] = []
+    skipped_shapes: List[tuple] = []
     for shape in problems:
-        prob = shape.to_problem(UnifiedAttentionProblem)
-        # One candidate per valid grid point (multiple configs per problem).
-        for tiled in _grid_tiled_specs(prob, arch):
-            specs.append(_SdpaCandidate(problem=prob, tiled=tiled))
+        try:
+            prob = shape.to_problem(UnifiedAttentionProblem)
+            # One candidate per valid grid point (multiple configs per problem).
+            # _grid_tiled_specs internally calls _default_tiled_spec, which can raise
+            # when the spec exceeds arch LDS cap and can't be shrunk (RuntimeError
+            # from _resolve_lds_budget). Skip such shapes rather than abort.
+            for tiled in _grid_tiled_specs(prob, arch):
+                specs.append(_SdpaCandidate(problem=prob, tiled=tiled))
+        except (RuntimeError, ValueError, TypeError) as e:
+            # Shape unbuildable or over-budget; skip and report at the end.
+            skipped_shapes.append((shape, str(e)))
+            continue
+
+    if skipped_shapes:
+        print(f"Skipped {len(skipped_shapes)} unbuildable shapes:")
+        for shape, reason in skipped_shapes[:10]:  # Limit output
+            print(f"  {shape}: {reason}")
+        if len(skipped_shapes) > 10:
+            print(f"  ... and {len(skipped_shapes) - 10} more")
+
     return specs
 
 

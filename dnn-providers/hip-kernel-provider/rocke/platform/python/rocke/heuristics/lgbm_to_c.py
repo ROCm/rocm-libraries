@@ -17,10 +17,14 @@ Contract / caveats:
   existing C++ ``MLHeuristic`` ``log_t_`` handling).
 - Features are read from a ``const double* f`` in ``feature_spec.json`` order;
   the caller's featurizer must fill ``f`` in that same order (idx 0..N-1).
-- Missing values follow LightGBM's ``default_left``: a NaN goes left when
-  default_left is true. We emit ``!(f[i] > thr)`` so NaN (where both ``>`` and
-  ``<=`` are false) takes the same branch LightGBM's default_left=true uses.
-  When default_left is false we emit ``(f[i] <= thr)`` so NaN goes right.
+- Missing values follow LightGBM's ``default_left`` for ``missing_type="NaN"``
+  nodes only. We emit ``!(f[i] > thr)`` when default_left=true so NaN goes left,
+  and ``(f[i] <= thr)`` when default_left=false so NaN goes right. Nodes with
+  ``missing_type="None"`` or ``missing_type="Zero"`` are rejected (raise
+  UnsupportedModelError) because they require different semantics: "None" coerces
+  NaN→0.0 and compares normally (ignoring default_left), and "Zero" treats exact
+  0.0 as missing. The emitted C must agree with Booster.predict, so unsupported
+  missing_type raises rather than emit a silent parity bug.
 """
 
 from __future__ import annotations
@@ -48,6 +52,18 @@ def _emit_node(node: dict[str, Any], out: list[str], indent: str) -> None:
     fidx = int(node["split_feature"])
     thr = float(node["threshold"])
     default_left = bool(node.get("default_left", False))
+    missing_type = node.get("missing_type", "NaN")
+
+    # Only missing_type="NaN" is supported. "None" and "Zero" have different
+    # semantics that would require additional codegen:
+    #   - "None": coerces NaN→0.0, then compares normally (ignores default_left)
+    #   - "Zero": treats exact 0.0 as missing, follows default_left
+    # Our current models don't use these, so fail loudly rather than emit wrong C.
+    if missing_type != "NaN":
+        raise UnsupportedModelError(
+            f"missing_type {missing_type!r} not supported (only 'NaN'); node at "
+            f"feature {fidx} threshold {thr:.17g} requires different codegen"
+        )
 
     # LightGBM: a sample goes LEFT when (f <= threshold). Missing (NaN) goes to
     # default_left's side. NaN comparisons are all false, so:

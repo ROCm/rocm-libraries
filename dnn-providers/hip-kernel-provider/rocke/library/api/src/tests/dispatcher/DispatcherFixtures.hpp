@@ -54,6 +54,10 @@ struct InstanceParams
     std::int64_t numKvHeads = 4;
     std::int64_t batchMin = 1;
     std::int64_t batchMax = 64;
+    // Tuning parameters (for model-scorer tests)
+    std::int64_t blockSizeQ = 16;
+    std::int64_t tileSize = 64;
+    std::int64_t numWarps = 1;
 };
 
 inline AotInstance makeInstance(const InstanceParams& params)
@@ -69,10 +73,10 @@ inline AotInstance makeInstance(const InstanceParams& params)
     instance.compileSpec.numQueryHeads = params.numQueryHeads;
     instance.compileSpec.numKvHeads = params.numKvHeads;
     instance.compileSpec.headSize = params.headSize;
-    instance.compileSpec.blockSizeQ = 16;
+    instance.compileSpec.blockSizeQ = params.blockSizeQ;
     instance.compileSpec.blockSizeK = 64;
-    instance.compileSpec.tileSize = 64; // 2D tile width T (tuning; tie-break only)
-    instance.compileSpec.numWarps = 1; // wavefronts per tile (tuning; tie-break only)
+    instance.compileSpec.tileSize = params.tileSize; // 2D tile width T (tuning; tie-break only)
+    instance.compileSpec.numWarps = params.numWarps; // wavefronts per tile (tuning; tie-break only)
     instance.compileSpec.maskMode = "none";
     instance.batch.min = params.batchMin;
     instance.batch.max = params.batchMax;
