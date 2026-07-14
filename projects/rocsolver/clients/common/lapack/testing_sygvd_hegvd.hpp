@@ -354,22 +354,20 @@ void sygvd_hegvd_getError(const rocblas_handle handle,
 
     for(rocblas_int b = 0; b < bc; ++b)
     {
-        if(evect == rocblas_evect_none)
+        // compare eigenvalues with LAPACK
+        // error is ||hD - hDRes|| / ||hD||
+        // using frobenius norm
+        if(hInfoRes[b][0] == 0)
         {
-            // only eigenvalues needed; can compare with LAPACK
-
-            // error is ||hD - hDRes|| / ||hD||
-            // using frobenius norm
-            if(hInfoRes[b][0] == 0)
-            {
-                err = norm_error('F', 1, n, 1, hD[b], hDRes[b]);
-                *max_err = err > *max_err ? err : *max_err;
-            }
+            err = norm_error('F', 1, n, 1, hD[b], hDRes[b]);
+            *max_err = rocblas_max_nan(err, *max_err);
         }
-        else
+
+        if(evect == rocblas_evect_original)
         {
             // both eigenvalues and eigenvectors needed; need to implicitly test
-            // eigenvectors due to non-uniqueness of eigenvectors under scaling
+            // eigenvectors due to non-uniqueness of eigenvectors under scaling.
+            // todo: calculate B-orthogonality of evectors?
             if(hInfoRes[b][0] == 0)
             {
                 T alpha = 1;
@@ -413,7 +411,7 @@ void sygvd_hegvd_getError(const rocblas_handle handle,
                 // error is ||hA - hARes|| / ||hA||
                 // using frobenius norm
                 err = norm_error('F', n, n, lda, hA[b], hARes[b]);
-                *max_err = err > *max_err ? err : *max_err;
+                *max_err = rocblas_max_nan(err, *max_err);
             }
         }
     }
