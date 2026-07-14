@@ -132,13 +132,15 @@ def _runChecks(
                 # Re-validate documented known bugs so a landed fix is detected
                 # rather than silently skipped forever. A still-failing known bug
                 # is expected, so suppress the validators' own error output; only
-                # a now-passing solution is worth surfacing.
+                # a now-passing solution is worth surfacing. XCC gets report=False
+                # so this expected re-failure does not bump its per-file dedup
+                # counter and swallow a later *real* XCC failure's message.
                 with contextlib.redirect_stdout(io.StringIO()):
                     now_valid = all(
                         [
                             _validateMatrixInstruction(s, isaInfoMap, rel),
                             _validateWorkGroup(s, rel),
-                            _validateWorkGroupMappingXCC(s, rel),
+                            _validateWorkGroupMappingXCC(s, rel, report=False),
                         ]
                     )
                 keep += 1

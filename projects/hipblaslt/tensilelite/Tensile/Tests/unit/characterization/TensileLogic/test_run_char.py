@@ -93,7 +93,8 @@ def passing_validators(monkeypatch):
     monkeypatch.setattr(Run, "handleCustomKernel", lambda s, iim: (s, False))
     monkeypatch.setattr(Run, "_validateMatrixInstruction", lambda s, iim, rel: True)
     monkeypatch.setattr(Run, "_validateWorkGroup", lambda s, rel: True)
-    monkeypatch.setattr(Run, "_validateWorkGroupMappingXCC", lambda s, rel: True)
+    monkeypatch.setattr(Run, "_validateWorkGroupMappingXCC",
+                        lambda s, rel, report=True: True)
     monkeypatch.setattr(Run, "hasCustomKernel", lambda f: False)
 
 
