@@ -335,11 +335,19 @@ run_hipblaslt_bench_check() {
 
 write_tensilelite_check_yaml() {
   local yaml="$1"
+  local direct_to_vgpr_a=True
+  if [[ "${TENSILELITE_GPU_TARGET}" == "gfx1151" ]]; then
+    # gfx1151 rejects this TLUA + f32 + MIInputPerThread > 1 combination when
+    # DirectToVgprA is enabled. Keep the rest of the reduced problem identical
+    # so the target still exercises the standalone TensileLite client path.
+    direct_to_vgpr_a=False
+  fi
+
   # One reduced config is embedded here to keep this bridge job self-contained.
   # If the race check grows to multiple configs, move them into a small checked-in
   # data directory or install them with the TensileLite test artifacts, then have
   # this script iterate over that list.
-  cat >"${yaml}" <<'YAML'
+  cat >"${yaml}" <<YAML
 GlobalParameters:
   NumElementsToValidate: -1
   DataInitTypeBeta: 0
@@ -389,7 +397,7 @@ BenchmarkProblems:
         - SourceSwap: [True]
         - NumElementsPerBatchStore: [16]
         - ClusterLocalRead: [1]
-        - DirectToVgprA: [True]
+        - DirectToVgprA: [${direct_to_vgpr_a}]
         - DirectToVgprB: [False]
         - WorkGroup: [[32, 4, 4]]
       BenchmarkJoinParameters:
