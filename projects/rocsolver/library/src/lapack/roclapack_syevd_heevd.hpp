@@ -48,6 +48,7 @@
 ROCSOLVER_BEGIN_NAMESPACE
 
 /** Helper to calculate workspace sizes **/
+// Using original QR routines.
 template <bool BATCHED, typename T, typename S>
 void rocsolver_syevd_heevd_getMemorySize(rocblas_handle handle,
                                          const rocblas_evect evect,
@@ -148,11 +149,12 @@ void rocsolver_syevd_heevd_getMemorySize(rocblas_handle handle,
         *size_Aband = sizeof(T) * ldab * n * batch_count;
 
         // he2hb internal workspace
-        size_t s_he2hb, s_D, s_V, s_W, s_X, s_Z, s_work, s_workArr;
+        size_t size_scalars2, size_D, size_V, size_W, size_X, size_Z, size_work, size_workArr;
         rocsolver_sy2sb_he2hb_getMemorySize<BATCHED, T, rocblas_int>(
-            uplo, n, kd, nb, batch_count, &s_he2hb, &s_D, &s_V, &s_W, &s_X, &s_Z, &s_work, &s_workArr);
+            uplo, n, kd, nb, batch_count, &size_scalars2, &size_D, &size_V, &size_W, &size_X, &size_Z, &size_work, &size_workArr);
+        *size_scalars = std::max(*size_scalars, size_scalars2);
         *size_he2hb_work
-            = s_he2hb + s_D + s_V + s_W + s_X + s_Z + s_work + s_workArr;
+            = size_D + size_V + size_W + size_X + size_Z + size_work + size_workArr;
 
         // V and tau for hb2st and unmtr_hb2st
         const rocblas_int nt = ceildiv(n - 1, kd);
@@ -161,26 +163,26 @@ void rocsolver_syevd_heevd_getMemorySize(rocblas_handle handle,
         *size_V_hb2st = sizeof(T) * ldv * nv * batch_count;
         *size_tau_hb2st = sizeof(T) * nv * batch_count;
 
-        // workspace for unmtr_hb2st: Tr, W, Z, work, workArr
-        // (scalars reuse the existing scalars buffer)
-        rocblas_int max_parallel_2stage = 1;
-        size_t s_Tr, s_W2, s_Z2, s_work2, s_workArr2, s_scalars2;
-        rocsolver_ormtr_unmtr_hb2st_getMemorySize<BATCHED, T, rocblas_int>(
-            rocblas_side_left, rocblas_operation_none, n, n, kd, batch_count, &max_parallel_2stage,
-            &s_scalars2, &s_Tr, &s_W2, &s_Z2, &s_work2, &s_workArr2);
-        *size_he2hb_work = std::max(
-            *size_he2hb_work, s_Tr + s_W2 + s_Z2 + s_work2 + s_workArr2 + s_scalars2);
-
-        // workspace for ormqr (he2hb back-transform), k = n - kd
-        // (scalars reuse the existing scalars buffer)
         if(evect == rocblas_evect_original)
         {
-            size_t s_AbyxORwork, s_diagORtmptr, s_trfact, s_workArr3, s_scalars3;
-            rocsolver_ormqr_unmqr_getMemorySize<BATCHED, T>(
-                rocblas_side_left, n, n, std::max(n - kd, 0), batch_count, &s_scalars3,
-                &s_AbyxORwork, &s_diagORtmptr, &s_trfact, &s_workArr3);
+            // workspace for unmtr_hb2st: Tr, W, Z, work, workArr
+            rocblas_int max_parallel_2stage = 1;
+            size_t size_Tr, size_W2, size_Z2, size_work2, size_workArr2;
+            rocsolver_ormtr_unmtr_hb2st_getMemorySize<BATCHED, T, rocblas_int>(
+                rocblas_side_left, rocblas_operation_none, n, n, kd, batch_count, &max_parallel_2stage,
+                &size_scalars2, &size_Tr, &size_W2, &size_Z2, &size_work2, &size_workArr2);
+            *size_scalars = std::max(*size_scalars, size_scalars2);
             *size_he2hb_work = std::max(
-                *size_he2hb_work, s_AbyxORwork + s_diagORtmptr + s_trfact + s_workArr3 + s_scalars3);
+                *size_he2hb_work, size_Tr + size_W2 + size_Z2 + size_work2 + size_workArr2);
+
+            // workspace for ormqr (he2hb back-transform), k = n - kd
+            size_t size_AbyxORwork, size_diagORtmptr, size_trfact, size_workArr3;
+            rocsolver_ormqr_unmqr_getMemorySize<BATCHED, T>(
+                rocblas_side_left, n, n, std::max(n - kd, 0), batch_count, &size_scalars2,
+                &size_AbyxORwork, &size_diagORtmptr, &size_trfact, &size_workArr3);
+            *size_scalars = std::max(*size_scalars, size_scalars2);
+            *size_he2hb_work = std::max(
+                *size_he2hb_work, size_AbyxORwork + size_diagORtmptr + size_trfact + size_workArr3);
         }
     }
 }
@@ -220,6 +222,7 @@ rocblas_status rocsolver_syevd_heevd_argCheck(rocblas_handle handle,
     return rocblas_status_continue;
 }
 
+// Using optimized QR routines.
 template <bool BATCHED, bool STRIDED, typename T, typename S>
 void rocsolver_syevd_heevd_getMemorySize(rocblas_handle handle,
                                          const rocblas_evect evect,
@@ -323,11 +326,12 @@ void rocsolver_syevd_heevd_getMemorySize(rocblas_handle handle,
         *size_Aband = sizeof(T) * ldab * n * batch_count;
 
         // he2hb internal workspace
-        size_t s_he2hb, s_D, s_V, s_W, s_X, s_Z, s_work, s_workArr;
+        size_t size_scalars2, size_D, size_V, size_W, size_X, size_Z, size_work, size_workArr;
         rocsolver_sy2sb_he2hb_getMemorySize<BATCHED, T, rocblas_int>(
-            uplo, n, kd, nb, batch_count, &s_he2hb, &s_D, &s_V, &s_W, &s_X, &s_Z, &s_work, &s_workArr);
+            uplo, n, kd, nb, batch_count, &size_scalars2, &size_D, &size_V, &size_W, &size_X, &size_Z, &size_work, &size_workArr);
+        *size_scalars = std::max(*size_scalars, size_scalars2);
         *size_he2hb_work
-            = s_he2hb + s_D + s_V + s_W + s_X + s_Z + s_work + s_workArr;
+            = size_D + size_V + size_W + size_X + size_Z + size_work + size_workArr;
 
         // V and tau for hb2st and unmtr_hb2st:
         // nt = ceildiv(n - 1, kd); nv = kd * nt * (nt + 1) / 2
@@ -337,29 +341,31 @@ void rocsolver_syevd_heevd_getMemorySize(rocblas_handle handle,
         *size_V_hb2st = sizeof(T) * ldv * nv * batch_count;
         *size_tau_hb2st = sizeof(T) * nv * batch_count;
 
-        // workspace for unmtr_hb2st: scalars, Tr, W, Z, work, workArr
-        rocblas_int max_parallel_2stage = 1;
-        size_t s_Tr, s_W2, s_Z2, s_work2, s_workArr2, s_scalars2;
-        rocsolver_ormtr_unmtr_hb2st_getMemorySize<BATCHED, T, rocblas_int>(
-            rocblas_side_left, rocblas_operation_none, n, n, kd, batch_count, &max_parallel_2stage,
-            &s_scalars2, &s_Tr, &s_W2, &s_Z2, &s_work2, &s_workArr2);
-        *size_he2hb_work = std::max(
-            *size_he2hb_work, s_Tr + s_W2 + s_Z2 + s_work2 + s_workArr2 + s_scalars2);
-
-        // workspace for ormqr (he2hb back-transform), k = n - kd
-        // (scalars reuse the existing scalars buffer)
         if(evect == rocblas_evect_original)
         {
-            size_t s_AbyxORwork, s_diagORtmptr, s_trfact, s_workArr3, s_scalars3;
-            rocsolver_ormqr_unmqr_getMemorySize<BATCHED, T>(
-                rocblas_side_left, n, n, std::max(n - kd, 0), batch_count, &s_scalars3,
-                &s_AbyxORwork, &s_diagORtmptr, &s_trfact, &s_workArr3);
+            // workspace for unmtr_hb2st: Tr, W, Z, work, workArr
+            rocblas_int max_parallel_2stage = 1;
+            size_t size_Tr, size_W2, size_Z2, size_work2, size_workArr2;
+            rocsolver_ormtr_unmtr_hb2st_getMemorySize<BATCHED, T, rocblas_int>(
+                rocblas_side_left, rocblas_operation_none, n, n, kd, batch_count, &max_parallel_2stage,
+                &size_scalars2, &size_Tr, &size_W2, &size_Z2, &size_work2, &size_workArr2);
+            *size_scalars = std::max(*size_scalars, size_scalars2);
             *size_he2hb_work = std::max(
-                *size_he2hb_work, s_AbyxORwork + s_diagORtmptr + s_trfact + s_workArr3 + s_scalars3);
+                *size_he2hb_work, size_Tr + size_W2 + size_Z2 + size_work2 + size_workArr2);
+
+            // workspace for ormqr (he2hb back-transform), k = n - kd
+            size_t size_AbyxORwork, size_diagORtmptr, size_trfact, size_workArr3;
+            rocsolver_ormqr_unmqr_getMemorySize<BATCHED, T>(
+                rocblas_side_left, n, n, std::max(n - kd, 0), batch_count, &size_scalars2,
+                &size_AbyxORwork, &size_diagORtmptr, &size_trfact, &size_workArr3);
+            *size_scalars = std::max(*size_scalars, size_scalars2);
+            *size_he2hb_work = std::max(
+                *size_he2hb_work, size_AbyxORwork + size_diagORtmptr + size_trfact + size_workArr3);
         }
     }
 }
 
+// Using original QR routines.
 template <bool BATCHED, bool STRIDED, typename T, typename S, typename W>
 rocblas_status rocsolver_syevd_heevd_template(rocblas_handle handle,
                                               const rocblas_evect evect,
@@ -398,10 +404,11 @@ rocblas_status rocsolver_syevd_heevd_template(rocblas_handle handle,
 
     hipStream_t stream;
     rocblas_get_stream(handle, &stream);
+
+    // size for constants in rocblas calls
+    size_t size_scalars;
     {
         // memory workspace sizes:
-        // size for constants in rocblas calls
-        size_t size_scalars;
         // size of reusable workspaces
         size_t size_work1;
         size_t size_work2;
@@ -472,31 +479,26 @@ rocblas_status rocsolver_syevd_heevd_template(rocblas_handle handle,
         const rocblas_stride strideTau_hb2st = 0;
 
         // Partition he2hb_work into sub-workspaces
-        size_t s_he2hb_scalars, s_D, s_V, s_W, s_X, s_Z, s_work, s_workArr_he2hb;
+        size_t size_D, size_V, size_W, size_X, size_Z, size_work, size_workArr_he2hb;
         rocsolver_sy2sb_he2hb_getMemorySize<BATCHED, T, rocblas_int>(
-            uplo, n, kd, nb, batch_count, &s_he2hb_scalars, &s_D, &s_V, &s_W, &s_X, &s_Z, &s_work,
-            &s_workArr_he2hb);
-        T* he2hb_scalars = he2hb_work;
-        T* he2hb_D = he2hb_scalars + s_he2hb_scalars / sizeof(T);
-        T* he2hb_V = he2hb_D + s_D / sizeof(T);
-        T* he2hb_W = he2hb_V + s_V / sizeof(T);
-        T* he2hb_X = he2hb_W + s_W / sizeof(T);
-        T* he2hb_Z = he2hb_X + s_X / sizeof(T);
-        T* he2hb_work2 = he2hb_Z + s_Z / sizeof(T);
-        T** he2hb_workArr = (T**)(he2hb_work2 + s_work / sizeof(T));
+            uplo, n, kd, nb, batch_count, &size_scalars, &size_D, &size_V, &size_W, &size_X, &size_Z, &size_work,
+            &size_workArr_he2hb);
+        T* he2hb_D = he2hb_work;
+        T* he2hb_V = he2hb_D + size_D / sizeof(T);
+        T* he2hb_W = he2hb_V + size_V / sizeof(T);
+        T* he2hb_X = he2hb_W + size_W / sizeof(T);
+        T* he2hb_Z = he2hb_X + size_X / sizeof(T);
+        T* he2hb_work2 = he2hb_Z + size_Z / sizeof(T);
+        T** he2hb_workArr = (T**)(he2hb_work2 + size_work / sizeof(T));
 
-        // Initialize scalars for he2hb if needed
-        if(s_he2hb_scalars > 0)
-            init_scalars(handle, he2hb_scalars);
-
-        // Stage 1a: reduce dense Hermitian to band form (he2hb)
+        // Stage 1: reduce dense Hermitian to band form (he2hb)
         // tau (size n) stores the he2hb Householder scalars; A stores the Householder vectors
         ROCBLAS_CHECK(rocsolver_sy2sb_he2hb_template<BATCHED, STRIDED, T, rocblas_int>(
             handle, uplo, n, kd, nb, A, shiftA, lda, strideA, Aband, ldab, strideAband, tau, n,
-            batch_count, he2hb_scalars, he2hb_D, he2hb_V, he2hb_W, he2hb_X, he2hb_Z, he2hb_work2,
+            batch_count, scalars, he2hb_D, he2hb_V, he2hb_W, he2hb_X, he2hb_Z, he2hb_work2,
             he2hb_workArr));
 
-        // Stage 1b: reduce band to tridiagonal form (hb2st)
+        // Stage 2: reduce band to tridiagonal form (hb2st)
         // V_hb2st and tau_hb2st store the hb2st Householder data
         ROCBLAS_CHECK(rocsolver_sb2st_hb2st_template<BATCHED, STRIDED, T, rocblas_int>(
             handle, rocblas_fill_lower, n, kd, Aband, 0, ldab, strideAband, D, strideD, E, strideE,
@@ -525,43 +527,37 @@ rocblas_status rocsolver_syevd_heevd_template(rocblas_handle handle,
             {
                 // Partition he2hb_work for unmtr_hb2st sub-workspaces
                 rocblas_int max_parallel_2stage = 1;
-                size_t s_Tr, s_W2, s_Z2, s_work2_unmtr, s_workArr2, s_scalars2;
+                size_t size_Tr, size_W2, size_Z2, size_work2_unmtr, size_workArr2;
                 rocsolver_ormtr_unmtr_hb2st_getMemorySize<BATCHED, T, rocblas_int>(
                     rocblas_side_left, rocblas_operation_none, n, n, kd, batch_count,
-                    &max_parallel_2stage, &s_scalars2, &s_Tr, &s_W2, &s_Z2, &s_work2_unmtr,
-                    &s_workArr2);
-                T* unmtr_scalars = he2hb_work;
-                T* unmtr_Tr = unmtr_scalars + s_scalars2 / sizeof(T);
-                T* unmtr_W = unmtr_Tr + s_Tr / sizeof(T);
-                T* unmtr_Z = unmtr_W + s_W2 / sizeof(T);
-                T* unmtr_work = unmtr_Z + s_Z2 / sizeof(T);
-                T** unmtr_workArr = (T**)(unmtr_work + s_work2_unmtr / sizeof(T));
-                if(s_scalars2 > 0)
-                    init_scalars(handle, unmtr_scalars);
+                    &max_parallel_2stage, &size_scalars, &size_Tr, &size_W2, &size_Z2, &size_work2_unmtr,
+                    &size_workArr2);
+                T* unmtr_Tr = he2hb_work;
+                T* unmtr_W = unmtr_Tr + size_Tr / sizeof(T);
+                T* unmtr_Z = unmtr_W + size_W2 / sizeof(T);
+                T* unmtr_work = unmtr_Z + size_Z2 / sizeof(T);
+                T** unmtr_workArr = (T**)(unmtr_work + size_work2_unmtr / sizeof(T));
 
-                // Back-transform stage 1b: apply Q_hb2st to eigenvector matrix (unmtr_hb2st)
+                // Back-transform stage 2: apply Q_hb2st to eigenvector matrix (unmtr_hb2st)
                 // C = Q_hb2st * tmptau_W (tmptau_W holds the eigenvectors from stedc)
                 ROCBLAS_CHECK(rocsolver_ormtr_unmtr_hb2st_template<BATCHED, STRIDED, T, T*>(
                     handle, rocblas_side_left, rocblas_operation_none, n, n, kd, V_hb2st, 0,
                     ldv_hb2st, strideV_hb2st, tau_hb2st, strideTau_hb2st, tmptau_W, 0, ldw,
-                    strideW, batch_count, max_parallel_2stage, unmtr_scalars, unmtr_Tr, unmtr_W,
+                    strideW, batch_count, max_parallel_2stage, scalars, unmtr_Tr, unmtr_W,
                     unmtr_Z, unmtr_work, unmtr_workArr));
 
-                // Back-transform stage 1a: apply Q_he2hb to eigenvector matrix (ormqr)
+                // Back-transform stage 1: apply Q_he2hb to eigenvector matrix (ormqr)
                 // Q_he2hb is stored in lower part of A (below diagonal kd) and in tau
                 // Partition he2hb_work for ormqr sub-workspaces
                 const rocblas_int k_he2hb = std::max(n - kd, 0);
-                size_t s_AbyxORwork, s_diagORtmptr, s_trfact, s_workArr3, s_scalars3;
+                size_t size_AbyxORwork, size_diagORtmptr, size_trfact, size_workArr3;
                 rocsolver_ormqr_unmqr_getMemorySize<BATCHED, T>(
-                    rocblas_side_left, n, n, k_he2hb, batch_count, &s_scalars3, &s_AbyxORwork,
-                    &s_diagORtmptr, &s_trfact, &s_workArr3);
-                T* ormqr_scalars = he2hb_work;
-                T* ormqr_AbyxORwork = ormqr_scalars + s_scalars3 / sizeof(T);
-                T* ormqr_diagORtmptr = ormqr_AbyxORwork + s_AbyxORwork / sizeof(T);
-                T* ormqr_trfact = ormqr_diagORtmptr + s_diagORtmptr / sizeof(T);
-                T** ormqr_workArr = (T**)(ormqr_trfact + s_trfact / sizeof(T));
-                if(s_scalars3 > 0)
-                    init_scalars(handle, ormqr_scalars);
+                    rocblas_side_left, n, n, k_he2hb, batch_count, &size_scalars, &size_AbyxORwork,
+                    &size_diagORtmptr, &size_trfact, &size_workArr3);
+                T* ormqr_AbyxORwork = he2hb_work;
+                T* ormqr_diagORtmptr = ormqr_AbyxORwork + size_AbyxORwork / sizeof(T);
+                T* ormqr_trfact = ormqr_diagORtmptr + size_diagORtmptr / sizeof(T);
+                T** ormqr_workArr = (T**)(ormqr_trfact + size_trfact / sizeof(T));
 
                 // Apply Q_he2hb from left: tmptau_W := Q_he2hb * tmptau_W
                 // Householder vectors V are stored in A below diagonal kd
@@ -573,7 +569,7 @@ rocblas_status rocsolver_syevd_heevd_template(rocblas_handle handle,
                     ROCBLAS_CHECK(rocsolver_ormqr_unmqr_template<BATCHED, STRIDED, T>(
                         handle, rocblas_side_left, rocblas_operation_none, n, n, k_he2hb, A,
                         shiftA, lda, strideA, tau, n, tmptau_W, 0, ldw, strideW, batch_count,
-                        ormqr_scalars, ormqr_AbyxORwork, ormqr_diagORtmptr, ormqr_trfact,
+                        scalars, ormqr_AbyxORwork, ormqr_diagORtmptr, ormqr_trfact,
                         ormqr_workArr));
                 }
 
@@ -630,6 +626,7 @@ rocblas_status rocsolver_syevd_heevd_template(rocblas_handle handle,
     return rocblas_status_success;
 }
 
+// Using optimized QR routines.
 template <bool BATCHED, bool STRIDED, typename T, typename S, typename W>
 rocblas_status rocsolver_syevd_heevd_template(rocblas_handle handle,
                                               const rocblas_evect evect,
@@ -670,10 +667,11 @@ rocblas_status rocsolver_syevd_heevd_template(rocblas_handle handle,
 
     hipStream_t stream;
     rocblas_get_stream(handle, &stream);
+
+    // size for constants in rocblas calls
+    size_t size_scalars;
     {
         // memory workspace sizes:
-        // size for constants in rocblas calls
-        size_t size_scalars;
         // size of reusable workspaces
         size_t size_work1;
         size_t size_work2;
@@ -747,31 +745,26 @@ rocblas_status rocsolver_syevd_heevd_template(rocblas_handle handle,
         const rocblas_stride strideTau_hb2st = nv;
 
         // Partition he2hb_work into sub-workspaces
-        size_t s_he2hb_scalars, s_D, s_V, s_W, s_X, s_Z, s_work, s_workArr_he2hb;
+        size_t size_D, size_V, size_W, size_X, size_Z, size_work, size_workArr_he2hb;
         rocsolver_sy2sb_he2hb_getMemorySize<BATCHED, T, rocblas_int>(
-            uplo, n, kd, nb, batch_count, &s_he2hb_scalars, &s_D, &s_V, &s_W, &s_X, &s_Z, &s_work,
-            &s_workArr_he2hb);
-        T* he2hb_scalars = he2hb_work;
-        T* he2hb_D = he2hb_scalars + s_he2hb_scalars / sizeof(T);
-        T* he2hb_V = he2hb_D + s_D / sizeof(T);
-        T* he2hb_W = he2hb_V + s_V / sizeof(T);
-        T* he2hb_X = he2hb_W + s_W / sizeof(T);
-        T* he2hb_Z = he2hb_X + s_X / sizeof(T);
-        T* he2hb_work2 = he2hb_Z + s_Z / sizeof(T);
-        T** he2hb_workArr = (T**)(he2hb_work2 + s_work / sizeof(T));
+            uplo, n, kd, nb, batch_count, &size_scalars, &size_D, &size_V, &size_W, &size_X, &size_Z, &size_work,
+            &size_workArr_he2hb);
+        T* he2hb_D = he2hb_work;
+        T* he2hb_V = he2hb_D + size_D / sizeof(T);
+        T* he2hb_W = he2hb_V + size_V / sizeof(T);
+        T* he2hb_X = he2hb_W + size_W / sizeof(T);
+        T* he2hb_Z = he2hb_X + size_X / sizeof(T);
+        T* he2hb_work2 = he2hb_Z + size_Z / sizeof(T);
+        T** he2hb_workArr = (T**)(he2hb_work2 + size_work / sizeof(T));
 
-        // Initialize scalars for he2hb if needed
-        if(s_he2hb_scalars > 0)
-            init_scalars(handle, he2hb_scalars);
-
-        // Stage 1a: reduce dense Hermitian to band form (he2hb)
+        // Stage 1: reduce dense Hermitian to band form (he2hb)
         // tau (size n) stores the he2hb Householder scalars; A stores the Householder vectors
         ROCBLAS_CHECK(rocsolver_sy2sb_he2hb_template<BATCHED, STRIDED, T, rocblas_int>(
             handle, uplo, n, kd, nb, A, shiftA, lda, strideA, Aband, ldab, strideAband, tau, n,
-            batch_count, he2hb_scalars, he2hb_D, he2hb_V, he2hb_W, he2hb_X, he2hb_Z, he2hb_work2,
+            batch_count, scalars, he2hb_D, he2hb_V, he2hb_W, he2hb_X, he2hb_Z, he2hb_work2,
             he2hb_workArr));
 
-        // Stage 1b: reduce band to tridiagonal form (hb2st)
+        // Stage 2: reduce band to tridiagonal form (hb2st)
         // V_hb2st and tau_hb2st store the hb2st Householder data
         ROCBLAS_CHECK(rocsolver_sb2st_hb2st_template<BATCHED, STRIDED, T, rocblas_int>(
             handle, rocblas_fill_lower, n, kd, Aband, 0, ldab, strideAband, D, strideD, E, strideE,
@@ -800,43 +793,37 @@ rocblas_status rocsolver_syevd_heevd_template(rocblas_handle handle,
             {
                 // Partition he2hb_work for unmtr_hb2st sub-workspaces
                 rocblas_int max_parallel_2stage = 1;
-                size_t s_Tr, s_W2, s_Z2, s_work2_unmtr, s_workArr2, s_scalars2;
+                size_t size_Tr, size_W2, size_Z2, size_work2_unmtr, size_workArr2;
                 rocsolver_ormtr_unmtr_hb2st_getMemorySize<BATCHED, T, rocblas_int>(
                     rocblas_side_left, rocblas_operation_none, n, n, kd, batch_count,
-                    &max_parallel_2stage, &s_scalars2, &s_Tr, &s_W2, &s_Z2, &s_work2_unmtr,
-                    &s_workArr2);
-                T* unmtr_scalars = he2hb_work;
-                T* unmtr_Tr = unmtr_scalars + s_scalars2 / sizeof(T);
-                T* unmtr_W = unmtr_Tr + s_Tr / sizeof(T);
-                T* unmtr_Z = unmtr_W + s_W2 / sizeof(T);
-                T* unmtr_work = unmtr_Z + s_Z2 / sizeof(T);
-                T** unmtr_workArr = (T**)(unmtr_work + s_work2_unmtr / sizeof(T));
-                if(s_scalars2 > 0)
-                    init_scalars(handle, unmtr_scalars);
+                    &max_parallel_2stage, &size_scalars, &size_Tr, &size_W2, &size_Z2, &size_work2_unmtr,
+                    &size_workArr2);
+                T* unmtr_Tr = he2hb_work;
+                T* unmtr_W = unmtr_Tr + size_Tr / sizeof(T);
+                T* unmtr_Z = unmtr_W + size_W2 / sizeof(T);
+                T* unmtr_work = unmtr_Z + size_Z2 / sizeof(T);
+                T** unmtr_workArr = (T**)(unmtr_work + size_work2_unmtr / sizeof(T));
 
-                // Back-transform stage 1b: apply Q_hb2st to eigenvector matrix (unmtr_hb2st)
+                // Back-transform stage 2: apply Q_hb2st to eigenvector matrix (unmtr_hb2st)
                 // C = Q_hb2st * tmptau_W (tmptau_W holds the eigenvectors from stedc)
                 ROCBLAS_CHECK(rocsolver_ormtr_unmtr_hb2st_template<BATCHED, STRIDED, T, T*>(
                     handle, rocblas_side_left, rocblas_operation_none, n, n, kd, V_hb2st, 0,
                     ldv_hb2st, strideV_hb2st, tau_hb2st, strideTau_hb2st, tmptau_W, 0, ldw,
-                    strideW, batch_count, max_parallel_2stage, unmtr_scalars, unmtr_Tr, unmtr_W,
+                    strideW, batch_count, max_parallel_2stage, scalars, unmtr_Tr, unmtr_W,
                     unmtr_Z, unmtr_work, unmtr_workArr));
 
-                // Back-transform stage 1a: apply Q_he2hb to eigenvector matrix (ormqr)
+                // Back-transform stage 1: apply Q_he2hb to eigenvector matrix (ormqr)
                 // Q_he2hb is stored in lower part of A (below diagonal kd) and in tau
                 // Partition he2hb_work for ormqr sub-workspaces
                 const rocblas_int k_he2hb = std::max(n - kd, 0);
-                size_t s_AbyxORwork, s_diagORtmptr, s_trfact, s_workArr3, s_scalars3;
+                size_t size_AbyxORwork, size_diagORtmptr, size_trfact, size_workArr3;
                 rocsolver_ormqr_unmqr_getMemorySize<BATCHED, T>(
-                    rocblas_side_left, n, n, k_he2hb, batch_count, &s_scalars3, &s_AbyxORwork,
-                    &s_diagORtmptr, &s_trfact, &s_workArr3);
-                T* ormqr_scalars = he2hb_work;
-                T* ormqr_AbyxORwork = ormqr_scalars + s_scalars3 / sizeof(T);
-                T* ormqr_diagORtmptr = ormqr_AbyxORwork + s_AbyxORwork / sizeof(T);
-                T* ormqr_trfact = ormqr_diagORtmptr + s_diagORtmptr / sizeof(T);
-                T** ormqr_workArr = (T**)(ormqr_trfact + s_trfact / sizeof(T));
-                if(s_scalars3 > 0)
-                    init_scalars(handle, ormqr_scalars);
+                    rocblas_side_left, n, n, k_he2hb, batch_count, &size_scalars, &size_AbyxORwork,
+                    &size_diagORtmptr, &size_trfact, &size_workArr3);
+                T* ormqr_AbyxORwork = he2hb_work;
+                T* ormqr_diagORtmptr = ormqr_AbyxORwork + size_AbyxORwork / sizeof(T);
+                T* ormqr_trfact = ormqr_diagORtmptr + size_diagORtmptr / sizeof(T);
+                T** ormqr_workArr = (T**)(ormqr_trfact + size_trfact / sizeof(T));
 
                 // Apply Q_he2hb from left: tmptau_W := Q_he2hb * tmptau_W
                 // Householder vectors V are stored in A below diagonal kd
@@ -848,7 +835,7 @@ rocblas_status rocsolver_syevd_heevd_template(rocblas_handle handle,
                     ROCBLAS_CHECK(rocsolver_ormqr_unmqr_template<BATCHED, STRIDED, T>(
                         handle, rocblas_side_left, rocblas_operation_none, n, n, k_he2hb, A,
                         shiftA, lda, strideA, tau, n, tmptau_W, 0, ldw, strideW, batch_count,
-                        ormqr_scalars, ormqr_AbyxORwork, ormqr_diagORtmptr, ormqr_trfact,
+                        scalars, ormqr_AbyxORwork, ormqr_diagORtmptr, ormqr_trfact,
                         ormqr_workArr));
                 }
 
