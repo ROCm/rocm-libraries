@@ -374,6 +374,17 @@ struct iterator_traversal<_THRUST_LIBCXX::counting_iterator<Start>>
   using type = random_access_traversal_tag;
 };
 
+template <class Iter, class Offset>
+struct iterator_system<_THRUST_LIBCXX::permutation_iterator<Iter, Offset>>
+{
+  using type = detail::minimum_system_t<iterator_system_t<Iter>, iterator_system_t<Offset>>;
+};
+template <class Iter, class Offset>
+struct iterator_traversal<_THRUST_LIBCXX::permutation_iterator<Iter, Offset>>
+{
+  using type = random_access_traversal_tag;
+};
+
 template <class Iter, class Stride>
 struct iterator_system<_THRUST_LIBCXX::strided_iterator<Iter, Stride>> : iterator_system<Iter>
 {};
