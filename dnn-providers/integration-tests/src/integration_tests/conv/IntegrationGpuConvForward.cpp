@@ -91,7 +91,8 @@ protected:
 
         this->setTestCaseLayout(layout.name);
         this->setTestCaseNote(convTestCase.note);
-        this->verifyGraph(graphObj, convTestCase.seed);
+        this->synthesis().setGlobalSeed(convTestCase.seed);
+        this->verifyGraph(graphObj);
     }
 };
 
