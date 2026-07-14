@@ -724,9 +724,9 @@ void rocsolver_steqr_getMemorySize(const rocblas_evect evect,
         return;
     }
 
-    // size of stack (for lasrt)
+    // size of stack (for lasrt); indexed as I* in sterf_kernel
     if(evect == rocblas_evect_none)
-        *size_work_stack = sizeof(rocblas_int) * (2 * 32) * batch_count;
+        *size_work_stack = sizeof(I) * (2 * 32) * batch_count;
     else
         *size_work_stack = sizeof(S) * (2 * n) * batch_count;
 }

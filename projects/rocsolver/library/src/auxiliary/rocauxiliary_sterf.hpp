@@ -334,8 +334,8 @@ void rocsolver_sterf_getMemorySize(const I n, const I batch_count, size_t* size_
         return;
     }
 
-    // size of stack (for lasrt)
-    *size_stack = sizeof(rocblas_int) * (2 * 32) * batch_count;
+    // size of stack (for lasrt); indexed as I* in sterf_kernel
+    *size_stack = sizeof(I) * (2 * 32) * batch_count;
 }
 
 template <typename T, typename I>

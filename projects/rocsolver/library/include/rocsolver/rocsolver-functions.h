@@ -19774,6 +19774,7 @@ ROCSOLVER_EXPORT rocblas_status rocsolver_zheevd_strided_batched_64(rocblas_hand
                                                                     const rocblas_stride strideE,
                                                                     int64_t* info,
                                                                     const int64_t batch_count);
+//! @}
 
 /*! @{
     \brief The SYEVDJ functions compute the eigenvalues and optionally the eigenvectors of a real symmetric
