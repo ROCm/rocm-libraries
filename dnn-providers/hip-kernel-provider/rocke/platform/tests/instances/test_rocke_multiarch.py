@@ -511,6 +511,19 @@ class TestDeviceArchAndFusionTargeting(unittest.TestCase):
         v = get_device_arch()  # None off-GPU, "gfxNNN" on a device — never raises
         self.assertTrue(v is None or (isinstance(v, str) and v.startswith("gfx")))
 
+    def test_get_device_name_importable(self):
+        from rocke.runtime.hip_module import get_device_name
+
+        v = get_device_name()  # None off-GPU, marketing string on a device — never raises
+        self.assertTrue(v is None or (isinstance(v, str) and len(v) > 0))
+
+    def test_get_device_count_importable(self):
+        from rocke.runtime.hip_module import get_device_count
+
+        v = get_device_count()  # 0 off-GPU, device count on a device — never raises
+        self.assertIsInstance(v, int)
+        self.assertGreaterEqual(v, 0)
+
     def test_fusion_gemm_atoms_are_catalog_legal_per_arch(self):
         # The GemmEpilogueLowerer must pick warp-tile K from the target's MMA
         # catalog so it never emits a gfx950-only atom (e.g. 32x32x16 f16) on
