@@ -98,6 +98,14 @@ void LayernormFwdPlan::compile(const IKernelCompiler& kernelCompiler,
     const auto strideOrder = hipdnn_data_sdk::utilities::extractStrideOrder(
         std::vector<int64_t>(xStrides->begin(), xStrides->end()));
 
+    // Ensure that the input tensor is either 4D or 5D
+    if(xDims->size() != 4 && xDims->size() != 5)
+    {
+        throw hipdnn_plugin_sdk::HipdnnPluginException(HIPDNN_PLUGIN_STATUS_BAD_PARAM,
+                                                       "Unsupported tensor dimension: "
+                                                           + std::to_string(xDims->size()));
+    }
+
     const size_t normalizedDim
         = layernorm::guessNormalizedDim(_params.x(), _params.scale(), _params.mean());
     long outerSize = 1;
