@@ -245,6 +245,43 @@ TEST(TestRockeClientDispatcher, ZeroNumWarpsUsesBlockSizeQDirectly)
     EXPECT_EQ(winner->name, "legacy_catalog");
 }
 
+// Stream device query tests: verify Rocke's error handling when HIP calls fail.
+// We test Rocke's integration with HIP, not HIP itself, so using real HIP
+// APIs to trigger failure conditions is acceptable.
+
+TEST(TestRockeClientDispatcher, SelectInstanceReturnsNulloptOnNullStream)
+{
+    SKIP_IF_NO_DEVICES();
+
+    // Create handle with NULL stream (hipStreamGetDevice should fail)
+    RockeClientHandle handle;
+    handle.setStream(nullptr);
+
+    const RockeClientDispatcher dispatcher = twoInstanceDispatcher();
+    const auto fixture = buildSdpaGraph(SdpaGraphConfig{});
+
+    // selectInstance should return nullopt when hipStreamGetDevice fails
+    EXPECT_FALSE(dispatcher.selectInstance(handle, fixture.graphWrapper()).has_value());
+}
+
+TEST(TestRockeClientDispatcher, SelectInstanceReturnsNulloptOnDestroyedStream)
+{
+    SKIP_IF_NO_DEVICES();
+
+    hipStream_t stream;
+    ASSERT_EQ(hipStreamCreate(&stream), hipSuccess);
+    ASSERT_EQ(hipStreamDestroy(&stream), hipSuccess);
+
+    RockeClientHandle handle;
+    handle.setStream(stream); // Destroyed stream
+
+    const RockeClientDispatcher dispatcher = twoInstanceDispatcher();
+    const auto fixture = buildSdpaGraph(SdpaGraphConfig{});
+
+    // selectInstance should return nullopt on hipStreamGetDevice failure
+    EXPECT_FALSE(dispatcher.selectInstance(handle, fixture.graphWrapper()).has_value());
+}
+
 
 } // namespace
 } // namespace rocke_client::dispatcher
