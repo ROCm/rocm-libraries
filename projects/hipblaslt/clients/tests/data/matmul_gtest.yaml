@@ -3272,7 +3272,7 @@ Tests:
   bias_vector: 1
   scaleAlpha_vector: 1
   activation_type: [none, relu, gelu, sigmoid, swish]
-  initialization: trig_float
+  initialization: uniform_01
   unit_check: 0
   norm_check: 1
   requested_solution_num: 1
