@@ -66,47 +66,8 @@ METRIC_COLUMNS: Set[str] = {
 
 
 # Hardware profiles for different architectures
-HW_PROFILES = {
-    "gfx950": {  # MI300 series
-        "hw_num_cus": 256,
-        "hw_simds_per_cu": 4,
-        "hw_shader_engines": 32,
-        "hw_max_clock_mhz": 2400,
-        "hw_max_waves_per_cu": 32,
-        "hw_wavefront_size": 64,
-        "hw_lds_capacity": 65536,
-        "hw_l1_cache_kb": 32,
-        "hw_l2_cache_kb": 4096,
-        "hw_l3_cache_kb": 262144,
-        "hw_num_xcd": 8,
-    },
-    "gfx942": {  # MI300A
-        "hw_num_cus": 228,
-        "hw_simds_per_cu": 4,
-        "hw_shader_engines": 28,
-        "hw_max_clock_mhz": 2100,
-        "hw_max_waves_per_cu": 32,
-        "hw_wavefront_size": 64,
-        "hw_lds_capacity": 65536,
-        "hw_l1_cache_kb": 32,
-        "hw_l2_cache_kb": 4096,
-        "hw_l3_cache_kb": 262144,
-        "hw_num_xcd": 8,
-    },
-    "gfx90a": {  # MI250X
-        "hw_num_cus": 110,
-        "hw_simds_per_cu": 4,
-        "hw_shader_engines": 8,
-        "hw_max_clock_mhz": 1700,
-        "hw_max_waves_per_cu": 32,
-        "hw_wavefront_size": 64,
-        "hw_lds_capacity": 65536,
-        "hw_l1_cache_kb": 16,
-        "hw_l2_cache_kb": 8192,
-        "hw_l3_cache_kb": 131072,
-        "hw_num_xcd": 1,
-    },
-}
+# Import authoritative HW_PROFILES from gen_sweep_data (single source of truth)
+from .gen_sweep_data import HW_PROFILES
 
 
 def parse_kernel_name_generic(

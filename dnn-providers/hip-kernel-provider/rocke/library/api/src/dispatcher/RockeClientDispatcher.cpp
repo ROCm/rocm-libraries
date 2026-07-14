@@ -213,7 +213,7 @@ std::optional<AotInstance>
         // Fill group-C hardware features from the live device (policy: no CU
         // counts in source). Zero profile on host-only test paths (no GPU) --
         // selection is unaffected since satisfies() ignores hw.
-        problem->hw = HardwareProfile::fromDevice();
+        problem->hw = HardwareProfile::fromDeviceWithSupplement(0, arch);
         return select(*problem);
     }
     catch(const std::exception& e)
@@ -252,7 +252,7 @@ std::optional<AotInstance>
             return std::nullopt;
         }
         problem->arch = deviceArch(stream);
-        problem->hw = HardwareProfile::fromDevice(device);
+        problem->hw = HardwareProfile::fromDeviceWithSupplement(device, problem->arch);
         return select(*problem);
     }
     catch(...)

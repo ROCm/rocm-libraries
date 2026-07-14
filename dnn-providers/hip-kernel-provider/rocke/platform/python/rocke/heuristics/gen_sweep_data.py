@@ -73,6 +73,22 @@ from ..runtime.comgr import build_hsaco_from_llvm_ir
 # ---------------------------------------------------------------------
 
 # Hardware profiles for arch hardware feature columns (used by train.py)
+#
+# SINGLE SOURCE OF TRUTH for hardware specifications.
+# This dict is:
+#   1. Used directly by Python sweep/training (gen_sweep_data, train.py)
+#   2. Read by gen_hw_profiles.py to generate C++ HardwareProfileSupplements.hpp
+#
+# When adding a new architecture or updating specs:
+#   1. Add/modify the entry in HW_PROFILES below
+#   2. Regenerate C++ supplement: cmake --build . --target rocke_regenerate_hw_profiles
+#   3. Commit both gen_sweep_data.py AND HardwareProfileSupplements.hpp
+#
+# Fields:
+#   - hw_num_cus, hw_max_clock_mhz, hw_wavefront_size, hw_lds_capacity:
+#     Also queried from HIP at runtime (for validation/fallback)
+#   - hw_shader_engines, hw_num_xcd, hw_simds_per_cu, hw_max_waves_per_cu,
+#     hw_l1/l2/l3_cache_kb: Only available via generated supplement (HIP can't query)
 HW_PROFILES = {
     "gfx950": {
         "hw_num_cus": 256,

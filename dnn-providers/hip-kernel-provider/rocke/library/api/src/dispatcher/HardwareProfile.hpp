@@ -4,8 +4,11 @@
 #pragma once
 
 #include <cstdint>
+#include <string>
 
 #include <hip/hip_runtime.h>
+
+#include "dispatcher/HardwareProfileSupplements.hpp"
 
 namespace rocke_client::dispatcher
 {
@@ -33,6 +36,11 @@ struct HardwareProfile
     // Microarch constants (not chip-config counts).
     int simds_per_cu = 4;
     int wavefront_size = 64;
+    // Cache sizes (not queryable from HIP, supplemented from generated data)
+    int max_waves_per_cu = 0;
+    int l1_cache_kb = 0;
+    int l2_cache_kb = 0;
+    int l3_cache_kb = 0;
 
     int total_simds() const
     {
@@ -57,6 +65,39 @@ struct HardwareProfile
         hw.max_clock_mhz = props.clockRate / 1000; // clockRate is in kHz
         hw.wavefront_size = props.warpSize;
         hw.lds_capacity = static_cast<int>(props.sharedMemPerBlock);
+        return hw;
+    }
+
+    // Hybrid approach: query HIP for authoritative values, supplement with
+    // generated data for fields HIP doesn't expose. This is the preferred
+    // method for featurization as it provides complete hardware profiles.
+    static HardwareProfile fromDeviceWithSupplement(int device, const std::string& arch)
+    {
+        HardwareProfile hw;
+
+        // Query HIP for authoritative values
+        hipDeviceProp_t props{};
+        if(hipGetDeviceProperties(&props, device) == hipSuccess)
+        {
+            hw.num_cus = props.multiProcessorCount;
+            hw.max_clock_mhz = props.clockRate / 1000;
+            hw.wavefront_size = props.warpSize;
+            hw.lds_capacity = static_cast<int>(props.sharedMemPerBlock);
+        }
+
+        // Supplement with fields HIP doesn't provide (from generated data)
+        const auto* supplement = getSupplement(arch);
+        if(supplement)
+        {
+            hw.shader_engines = supplement->shader_engines;
+            hw.num_xcd = supplement->num_xcd;
+            hw.simds_per_cu = supplement->simds_per_cu;
+            hw.max_waves_per_cu = supplement->max_waves_per_cu;
+            hw.l1_cache_kb = supplement->l1_cache_kb;
+            hw.l2_cache_kb = supplement->l2_cache_kb;
+            hw.l3_cache_kb = supplement->l3_cache_kb;
+        }
+
         return hw;
     }
 };

@@ -28,11 +28,12 @@ add_library(
 # CXX compilation of both keeps linkage matched.
 #
 # SKIP_LINTING: these are GENERATED files (lgbm_to_c.py, gen_model_registry.py,
-# gen_fmha_featurizer.py); linting them is pointless and causes noise on regen.
+# gen_fmha_featurizer.py, gen_hw_profiles.py); linting them is pointless and causes noise on regen.
 set_source_files_properties(
     dispatcher/sdpa_fwd/rocke_model_registry.c
     dispatcher/sdpa_fwd/gfx950/model_tflops_bf16.c
     dispatcher/sdpa_fwd/FmhaFeaturizer.hpp
+    dispatcher/HardwareProfileSupplements.hpp
     PROPERTIES
         LANGUAGE CXX
         SKIP_LINTING ON
@@ -104,6 +105,19 @@ add_custom_target(
             --out-h ${CMAKE_CURRENT_SOURCE_DIR}/dispatcher/sdpa_fwd/rocke_model_registry.h
     WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}/../../../platform/python
     COMMENT "Regenerate rocke_model_registry.{c,h} from committed predictors"
+    VERBATIM
+)
+
+# Custom target: regenerate HardwareProfileSupplements.hpp from gen_hw_profiles.py.
+# Usage: cmake --build . --target rocke_regenerate_hw_profiles
+# Reads HW_PROFILES from gen_sweep_data.py and generates C++ supplement data.
+add_custom_target(
+    rocke_regenerate_hw_profiles
+    COMMAND ${CMAKE_COMMAND} -E echo "Regenerating HardwareProfileSupplements.hpp..."
+    COMMAND python3 -m rocke.heuristics.gen_hw_profiles
+            --out-dir ${CMAKE_CURRENT_SOURCE_DIR}/dispatcher
+    WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}/../../../platform/python
+    COMMENT "Regenerate HardwareProfileSupplements.hpp from Python HW_PROFILES"
     VERBATIM
 )
 
