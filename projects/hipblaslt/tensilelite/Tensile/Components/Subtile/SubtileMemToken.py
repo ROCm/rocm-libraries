@@ -9,12 +9,19 @@ from rocisa.container import MemTokenData
 from rocisa.instruction import Instruction, SBarrier
 
 
+def _stinkySubtileEnabled(kernel) -> bool:
+    return bool(kernel and kernel.get("_StinkySubtile"))
+
+
 def initSubtileMemTokens(writer, kernel) -> None:
     """Ensure writer.states carries LDS mem-token indices for subtile emit.
 
     Mirrors KernelWriter mem-token setup (``memTokenLdsBuffer*`` / ``lds*TokenIdx``).
     No-op when tokens are already initialized (e.g. full KernelWriter codegen).
     """
+    if not _stinkySubtileEnabled(kernel):
+        return
+
     states = writer.states
     if hasattr(states, "ldsDirectToLDSTokenIdx"):
         return
@@ -41,48 +48,75 @@ def _flipLdsBufferToken(writer, attr: str) -> None:
     setattr(states, attr, b1 if cur == b0 else b0)
 
 
-def flipGrWriteTokens(writer) -> None:
+def flipGrWriteTokens(writer, kernel) -> None:
     """Flip DTL write / local-write token indices after an LW buffer swap."""
+    if not _stinkySubtileEnabled(kernel):
+        return
+    initSubtileMemTokens(writer, kernel)
     _flipLdsBufferToken(writer, "ldsDirectToLDSTokenIdx")
     _flipLdsBufferToken(writer, "ldsWriteTokenIdx")
 
 
-def flipLrReadToken(writer) -> None:
+def flipLrReadToken(writer, kernel) -> None:
     """Flip LR read token index after an LR buffer swap."""
+    if not _stinkySubtileEnabled(kernel):
+        return
+    initSubtileMemTokens(writer, kernel)
     _flipLdsBufferToken(writer, "ldsReadTokenIdx")
 
 
-def flipTensorLoadToken(writer) -> None:
+def flipTensorLoadToken(writer, kernel) -> None:
     """Flip TDM tensor-load token index after a TDM LDS buffer swap."""
+    if not _stinkySubtileEnabled(kernel):
+        return
+    initSubtileMemTokens(writer, kernel)
     _flipLdsBufferToken(writer, "ldsTensorTokenIdx")
 
 
 def barrierTokens(writer, kernel) -> list[int]:
     """Tokens carried by workgroup / cluster barriers in the mainloop."""
+    if not _stinkySubtileEnabled(kernel):
+        return []
+    initSubtileMemTokens(writer, kernel)
     tokens = [writer.states.memTokenLdsBuffer0]
     if not kernel.get("1LDSBuffer", False):
         tokens.append(writer.states.memTokenLdsBuffer1)
     return sorted(set(tokens))
 
 
-def tagDtlLoad(inst: Instruction, writer) -> None:
+def tagDtlLoad(inst: Instruction, writer, kernel) -> None:
+    if not _stinkySubtileEnabled(kernel):
+        return
+    initSubtileMemTokens(writer, kernel)
     inst.setMemToken(MemTokenData([writer.states.ldsDirectToLDSTokenIdx]))
 
 
-def tagTensorLoad(inst: Instruction, writer) -> None:
+def tagTensorLoad(inst: Instruction, writer, kernel) -> None:
+    if not _stinkySubtileEnabled(kernel):
+        return
+    initSubtileMemTokens(writer, kernel)
     inst.setMemToken(MemTokenData([writer.states.ldsTensorTokenIdx]))
 
 
-def tagDsRead(inst: Instruction, writer) -> None:
+def tagDsRead(inst: Instruction, writer, kernel) -> None:
+    if not _stinkySubtileEnabled(kernel):
+        return
+    initSubtileMemTokens(writer, kernel)
     inst.setMemToken(MemTokenData([writer.states.ldsReadTokenIdx]))
 
 
 def tagBarrier(inst: Instruction, writer, kernel) -> None:
+    if not _stinkySubtileEnabled(kernel):
+        return
     if isinstance(inst, SBarrier):
-        inst.setMemToken(MemTokenData(barrierTokens(writer, kernel)))
+        tokens = barrierTokens(writer, kernel)
+        if tokens:
+            inst.setMemToken(MemTokenData(tokens))
 
 
 def tagModuleBarriers(module, writer, kernel) -> None:
+    if not _stinkySubtileEnabled(kernel):
+        return
     for item in module.flatitems():
         if isinstance(item, SBarrier):
             tagBarrier(item, writer, kernel)

@@ -239,7 +239,7 @@ class InstructionEmitter:
                     swizzled = self.writer.states.subtileLdsSwizzle
                     module.add(emitSingleDsRead(
                         ti, tileId, subtileK, subIterK_within, dstTile,
-                        swizzled=swizzled, writer=self.writer))
+                        swizzled=swizzled, writer=self.writer, kernel=self.kernel))
         elif tensor in ('SA', 'SB'):
             tc = 'MXSA' if tensor == 'SA' else 'MXSB'
             ti = self.tileInfoMap[tensor]
@@ -257,7 +257,7 @@ class InstructionEmitter:
                     src=vgpr(ti.sharedVgprLROffset[0]),
                     ds=DSModifiers(offset=dsOffset),
                     comment=f"scale{tc}[group{scaleGroupIdx},K={placement.tiles.subIterK_start}]: load 4B from LDS")
-                tagDsRead(inst, self.writer)
+                tagDsRead(inst, self.writer, self.kernel)
                 module.add(inst)
         return list(module.flatitems())
 

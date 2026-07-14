@@ -891,7 +891,7 @@ def emitSingleBufferLoad(tileInfo, kernel, sId0, sId1, writer=None):
       inst = TensorLoadToLds(sgpr(group0, 4), sgpr(group1, 8), None, None,
                              comment="TDM: global->LDS for %s" % tc)
       if writer is not None:
-        tagTensorLoad(inst, writer)
+        tagTensorLoad(inst, writer, kernel)
       module.add(inst)
     return module
 
@@ -925,7 +925,7 @@ def emitSingleBufferLoad(tileInfo, kernel, sId0, sId1, writer=None):
     voff = tileInfo.sharedVgprGROffset[i] if useSgpr or len(regList) == 0 else regList.indices[i]
     inst = BufferLoadB128(dst=None, vaddr=vgpr(voff), saddr=sgpr("Srd%s"%tc, 4), soffset=soffset, mubuf=mubuf, comment="grBaseId = %u, i= %u"%(grBaseId , i))
     if writer is not None:
-      tagDtlLoad(inst, writer)
+      tagDtlLoad(inst, writer, kernel)
     module.add(inst)
 
   return module
@@ -999,15 +999,15 @@ def globalReadLDSBufferSwap(tc, writer, kernel):
       module.add(SXorB32(dst=sgpr(ldsAddrSgpr), src0=sgpr(ldsAddrSgpr), src1=sgpr(swapSgpr), comment=""))
       group0 = "tdm%sGroup0" % tc
       module.add(SMovB32(dst=sgpr("%s+1" % group0), src=sgpr(ldsAddrSgpr), comment="sync descriptor LDS addr"))
-      flipTensorLoadToken(writer)
+      flipTensorLoadToken(writer, kernel)
       return module
     module = ti_.emitGRLDSBufferSwap(writer, kernel)
-    flipGrWriteTokens(writer)
+    flipGrWriteTokens(writer, kernel)
     return module
   else:
     ti_ = writer.states.mxsa.tileInfo if tc == 'MXSA' else writer.states.mxsb.tileInfo
     module = emitScaleGRLDSSwap(ti_, writer, kernel)
-    flipGrWriteTokens(writer)
+    flipGrWriteTokens(writer, kernel)
     return module
 
 

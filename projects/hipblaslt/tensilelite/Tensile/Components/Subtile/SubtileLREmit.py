@@ -642,7 +642,7 @@ def localReadResetOffsetsSubtile(writer, kernel):
   return module
 
 
-def emitSingleDsRead(tileInfo, sId0, sId1, subIterK, dstTile, swizzled=True, writer=None):
+def emitSingleDsRead(tileInfo, sId0, sId1, subIterK, dstTile, swizzled=True, writer=None, kernel=None):
   """Emit DSLoadB128 instruction(s) for one MMA tile within a subtile.
 
   For wave32 tiles with 8 VGPRs, emits two DSLoadB128 instructions
@@ -693,7 +693,7 @@ def emitSingleDsRead(tileInfo, sId0, sId1, subIterK, dstTile, swizzled=True, wri
         ds=DSModifiers(offset=offset),
         comment="Subtile%s[%u, %u] subIterK=%u read=%u" % (tileInfo.tc, sId0, sId1, subIterK, readIdx))
     if writer is not None:
-      tagDsRead(inst, writer)
+      tagDsRead(inst, writer, kernel)
     module.add(inst)
   return module
 
@@ -780,5 +780,5 @@ def localReadLDSBufferSwap(tc, writer, kernel):
   else:
     ti_ = writer.states.mxsa.tileInfo if tc == 'MXSA' else writer.states.mxsb.tileInfo
     module = emitScaleLRLDSSwap(ti_, writer, kernel)
-  flipLrReadToken(writer)
+  flipLrReadToken(writer, kernel)
   return module

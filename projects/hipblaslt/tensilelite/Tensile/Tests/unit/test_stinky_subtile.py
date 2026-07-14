@@ -217,12 +217,13 @@ def test_subtile_mem_token_flip_helpers():
     )
 
     writer = _writer_with_mem_tokens()
-    flipGrWriteTokens(writer)
+    kernel = {"_StinkySubtile": 1, "1LDSBuffer": False}
+    flipGrWriteTokens(writer, kernel)
     assert writer.states.ldsDirectToLDSTokenIdx == 1
     assert writer.states.ldsWriteTokenIdx == 1
-    flipLrReadToken(writer)
+    flipLrReadToken(writer, kernel)
     assert writer.states.ldsReadTokenIdx == 1
-    flipTensorLoadToken(writer)
+    flipTensorLoadToken(writer, kernel)
     assert writer.states.ldsTensorTokenIdx == 1
 
 
@@ -230,10 +231,10 @@ def test_subtile_mem_token_barrier_tokens():
     from Tensile.Components.Subtile.SubtileMemToken import barrierTokens
 
     writer = _writer_with_mem_tokens(double_buffer=True)
-    assert barrierTokens(writer, {"1LDSBuffer": False}) == [0, 1]
+    assert barrierTokens(writer, {"_StinkySubtile": 1, "1LDSBuffer": False}) == [0, 1]
 
     writer = _writer_with_mem_tokens(double_buffer=False)
-    assert barrierTokens(writer, {"1LDSBuffer": True}) == [0]
+    assert barrierTokens(writer, {"_StinkySubtile": 1, "1LDSBuffer": True}) == [0]
 
 
 def test_subtile_mem_token_tag_instructions():
@@ -248,18 +249,18 @@ def test_subtile_mem_token_tag_instructions():
     )
 
     writer = _writer_with_mem_tokens()
-    kernel = {"1LDSBuffer": False}
+    kernel = {"_StinkySubtile": 1, "1LDSBuffer": False}
 
     dtl = BufferLoadB128(dst=None, vaddr=vgpr(0), saddr=sgpr(0, 4), soffset=0)
-    tagDtlLoad(dtl, writer)
+    tagDtlLoad(dtl, writer, kernel)
     assert dtl.getMemToken().tokens == [0]
 
     tdm = TensorLoadToLds(sgpr(0, 4), sgpr(4, 8), None, None)
-    tagTensorLoad(tdm, writer)
+    tagTensorLoad(tdm, writer, kernel)
     assert tdm.getMemToken().tokens == [0]
 
     ds = DSLoadB128(dst=vgpr(0, 4), src=vgpr(1))
-    tagDsRead(ds, writer)
+    tagDsRead(ds, writer, kernel)
     assert ds.getMemToken().tokens == [0]
 
     barrier = SBarrier()
@@ -273,7 +274,7 @@ def test_subtile_emit_sync_tags_barrier():
     from Tensile.Components.Subtile.InstructionEmitter import InstructionEmitter
 
     writer = _writer_with_mem_tokens()
-    kernel = {"1LDSBuffer": False}
+    kernel = {"_StinkySubtile": 1, "1LDSBuffer": False}
     emitter = InstructionEmitter.__new__(InstructionEmitter)
     emitter.writer = writer
     emitter.kernel = kernel
@@ -317,7 +318,7 @@ def test_subtile_cluster_barrier_tags_mem_tokens():
     writer = _writer_with_mem_tokens()
     writer.labels = MagicMock()
     writer.labels.getUniqueNamePrefix.return_value = "cb"
-    kernel = {"1LDSBuffer": False}
+    kernel = {"_StinkySubtile": 1, "1LDSBuffer": False}
 
     for mod in (subtileClusterBarrierSignal(writer, kernel),
                 subtileClusterBarrierWait(writer, kernel)):
@@ -337,7 +338,7 @@ def test_subtile_gr_lds_buffer_swap_flips_write_tokens():
     writer.states.a.tileInfo.emitGRLDSBufferSwap.return_value = MagicMock()
     writer.states.b.tileInfo = writer.states.a.tileInfo
 
-    kernel = {"enableTDMA": False, "enableTDMB": False}
+    kernel = {"_StinkySubtile": 1, "enableTDMA": False, "enableTDMB": False}
     globalReadLDSBufferSwap("A", writer, kernel)
     assert writer.states.ldsDirectToLDSTokenIdx == 1
     assert writer.states.ldsWriteTokenIdx == 1
@@ -351,7 +352,7 @@ def test_subtile_lr_lds_buffer_swap_flips_read_token():
     writer.states.a.tileInfo = MagicMock()
     writer.states.a.tileInfo.emitLRLDSBufferSwap.return_value = MagicMock()
 
-    kernel = {}
+    kernel = {"_StinkySubtile": 1}
     localReadLDSBufferSwap("A", writer, kernel)
     assert writer.states.ldsReadTokenIdx == 1
 
