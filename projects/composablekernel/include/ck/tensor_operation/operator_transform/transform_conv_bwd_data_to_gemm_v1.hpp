@@ -48,7 +48,6 @@ struct TransformConvBwdDataToGemm_v1
     static constexpr IndexType GemmMPerBlock    = static_cast<IndexType>(GemmMPerBlock_);
     static constexpr IndexType GemmNPerBlock    = static_cast<IndexType>(GemmNPerBlock_);
     static constexpr IndexType GemmKPerBlock    = static_cast<IndexType>(GemmKPerBlock_);
-    static constexpr IndexType NumGroupsToMerge = static_cast<IndexType>(NumGroupsToMerge_);
 
     static constexpr auto NonSpatialDimsNum = Number<3>{};
 
@@ -715,62 +714,50 @@ struct TransformConvBwdDataToGemm_v1
                 const auto out_n_ydotslice_htildeslice_xdotslice_wtildeslice_k_grid_desc =
                     transform_tensor_descriptor(
                         out_n_ydot_htilde_xdot_wtilde_k_grid_desc,
-                        make_tuple(make_pass_through_transform(N_),
-                                   make_pad_transform(Ho_, I0, I0),
-                                   make_pad_transform(Wo_, I0, I0),
-                                   make_pass_through_transform(K_)),
-                        make_tuple(Sequence<0>{}, Sequence<1>{}, Sequence<2>{}, Sequence<3>{}),
-                        make_tuple(Sequence<0>{}, Sequence<1>{}, Sequence<2>{}, Sequence<3>{}));
+                        make_tuple(
+                            make_pass_through_transform(N_),
+                            make_slice_transform(YDot_, I0, YDotSlice),
+                            make_slice_transform(HTilde_, IHTildeSliceBegin, HTildeSlice),
+                            make_slice_transform(XDot_, I0, XDotSlice),
+                            make_slice_transform(WTilde_, IWTildeSliceBegin, WTildeSlice),
+                            make_pass_through_transform(K_)),
+                        make_tuple(Sequence<0>{},
+                                   Sequence<1>{},
+                                   Sequence<2>{},
+                                   Sequence<3>{},
+                                   Sequence<4>{},
+                                   Sequence<5>{}),
+                        make_tuple(Sequence<0>{},
+                                   Sequence<1>{},
+                                   Sequence<2>{},
+                                   Sequence<3>{},
+                                   Sequence<4>{},
+                                   Sequence<5>{}));
 
-                    const auto out_n_ydot_htilde_xdot_wtilde_k_grid_desc =
-                        transform_tensor_descriptor(
-                            out_n_hop_wop_k_grid_desc,
-                            make_tuple(make_pass_through_transform(N_),
-                                       make_embed_transform(
-                                           make_tuple(YDot_, HTilde_),
-                                           make_tuple(-ConvDilationH_ / GcdStrideDilationH_, I1)),
-                                       make_embed_transform(
-                                           make_tuple(XDot_, WTilde_),
-                                           make_tuple(-ConvDilationW_ / GcdStrideDilationW_, I1)),
-                                       make_pass_through_transform(K_)),
-                            make_tuple(Sequence<0>{}, Sequence<1>{}, Sequence<2>{}, Sequence<3>{}),
-                            make_tuple(
-                                Sequence<0>{}, Sequence<1, 2>{}, Sequence<3, 4>{}, Sequence<5>{}));
+                const auto out_gemmk_gemmmraw_grid_desc = transform_tensor_descriptor(
+                    out_n_ydotslice_htildeslice_xdotslice_wtildeslice_k_grid_desc,
+                    make_tuple(make_merge_transform(make_tuple(YDotSlice, XDotSlice, K_)),
+                               make_merge_transform(make_tuple(N_, HTildeSlice, WTildeSlice))),
+                    make_tuple(Sequence<1, 3, 5>{}, Sequence<0, 2, 4>{}),
+                    make_tuple(Sequence<0>{}, Sequence<1>{}));
 
-                    const auto out_n_ydotslice_htildeslice_xdotslice_wtildeslice_k_grid_desc =
-                        transform_tensor_descriptor(
-                            out_n_ydot_htilde_xdot_wtilde_k_grid_desc,
-                            make_tuple(
-                                make_pass_through_transform(N_),
-                                make_slice_transform(YDot_, I0, YDotSlice),
-                                make_slice_transform(HTilde_, IHTildeSliceBegin, HTildeSlice),
-                                make_slice_transform(XDot_, I0, XDotSlice),
-                                make_slice_transform(WTilde_, IWTildeSliceBegin, WTildeSlice),
-                                make_pass_through_transform(K_)),
-                            make_tuple(Sequence<0>{},
-                                       Sequence<1>{},
-                                       Sequence<2>{},
-                                       Sequence<3>{},
-                                       Sequence<4>{},
-                                       Sequence<5>{}),
-                            make_tuple(Sequence<0>{},
-                                       Sequence<1>{},
-                                       Sequence<2>{},
-                                       Sequence<3>{},
-                                       Sequence<4>{},
-                                       Sequence<5>{}));
+                const auto out_gemmk_gemmm_padded_grid_desc =
+                    ck::tensor_operation::device::PadTensorDescriptor(
+                        out_gemmk_gemmmraw_grid_desc,
+                        make_tuple(GemmKPerBlock, GemmMPerBlock),
+                        Sequence<true, DoPadGemmM>{});
 
                 const IndexType K0PerBlock = GemmKPerBlock / AK1;
-                const IndexType AK0 =
-                    math::integer_divide_ceil(out_gemmk_gemmm_padded_grid_desc.GetLength(I0),
-                                              AK1 * K0PerBlock * batch_k_) *
-                    K0PerBlock;
+                const IndexType AK0        = math::integer_divide_ceil(
+                                          out_gemmk_gemmm_padded_grid_desc.GetLength(Number<0>{}),
+                                          AK1 * K0PerBlock * batch_k_) *
+                                      K0PerBlock;
 
                 const auto out_gemmak0_gemmm_gemmak1_grid_desc = transform_tensor_descriptor(
                     out_gemmk_gemmm_padded_grid_desc,
                     make_tuple(make_unmerge_transform(make_tuple(AK0 * batch_k_, AK1)),
                                make_pass_through_transform(
-                                   out_gemmk_gemmm_padded_grid_desc.GetLength(I1))),
+                                   out_gemmk_gemmm_padded_grid_desc.GetLength(Number<1>{}))),
                     make_tuple(Sequence<0>{}, Sequence<1>{}),
                     make_tuple(Sequence<0, 2>{}, Sequence<1>{}));
 

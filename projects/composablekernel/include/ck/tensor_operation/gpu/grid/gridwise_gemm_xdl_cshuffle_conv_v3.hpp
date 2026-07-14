@@ -671,6 +671,9 @@ struct GridwiseGemm_xdl_cshuffle_v3
                                    c_grid_desc_mblock_mperblock_nblock_nperblock,
                                const index_t k_id = 0)
     {
+        const long_index_t a_space_size_divisor = 1;
+        const long_index_t b_space_size_divisor = 1;
+
         const auto a_grid_buf = make_dynamic_buffer<AddressSpaceEnum::Global,
                                                     AmdBufferCoherenceEnum::DefaultCoherence,
                                                     IndexType>(
@@ -683,7 +686,6 @@ struct GridwiseGemm_xdl_cshuffle_v3
                                                     AmdBufferCoherenceEnum::DefaultCoherence,
                                                     IndexType>(
             p_c_grid, c_grid_desc_mblock_mperblock_nblock_nperblock.GetElementSpaceSize());
-
 
         const AElementwiseOperation a_element_op{};
         const BElementwiseOperation b_element_op{};
@@ -1040,6 +1042,9 @@ struct GridwiseGemm_xdl_cshuffle_v3
                                         c_grid_desc_mblock_mperblock_nblock_nperblock,
                                     const index_t k_id = 0)
     {
+        const long_index_t a_space_size_divisor = 1;
+        const long_index_t b_space_size_divisor = 1;
+
         const auto a_grid_buf = make_dynamic_buffer<AddressSpaceEnum::Global,
                                                     AmdBufferCoherenceEnum::DefaultCoherence,
                                                     IndexType>(
