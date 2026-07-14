@@ -1608,6 +1608,8 @@ class Solution(collections.abc.Mapping):
                "Stream-K + TDMInst=3 requires PrefetchGlobalRead in (1, 2)")
       if not state["BufferStore"]:
         reject(state, printRejectionReason, "Stream-K requires BufferStore")
+      if state["ClusterDim"] != [1, 1]:
+        reject(state, printRejectionReason, "Stream-K does not support ClusterDim != [1, 1]")
       _validateStreamKForceDPOnly(state, printRejectionReason)
       if state["StreamKAtomic"] == 1:
         if state["StreamK"] == 4:
@@ -1646,8 +1648,6 @@ class Solution(collections.abc.Mapping):
           reject(state, printRejectionReason, "PrefetchAcrossPersistent NLL path not supported with sparse")
         if state["StoreRemapVectorWidth"]:
           reject(state, printRejectionReason, "PrefetchAcrossPersistent NLL path not supported with StoreRemap")
-        if state["ClusterDim"] != [1, 1]:
-          reject(state, printRejectionReason, "PrefetchAcrossPersistent does not support ClusterDim != [1, 1]")
         # DP-only (StreamKForceDPOnly) + PAP is supported (mirror phase): DP-only
         # StreamK==3 is a persistent grid-stride kernel (graWorkGroup pre-advances
         # StreamKIter += skGrid*ItersPerTile each persistent iteration), so the
@@ -2471,9 +2471,6 @@ class Solution(collections.abc.Mapping):
       # persisting SGPRs, so MX-scaled SK+PAP tiles are allowed here; the
       # SGPR-overflow check still drops any tile that overflows.
 
-    if state.get("PrefetchAcrossPersistent", 0) and state["TDMSplit"]:
-      reject(state, printRejectionReason, "TDMSplit + PrefetchAcrossPersistent not yet supported")
-
     # Wave-separated TDM splits waves by parity (even=A, odd=B) and requires
     # numComp = numWaves//2 to be a power of two; equivalently, numWaves
     # itself must be a power of two (>= 2).
@@ -2535,8 +2532,6 @@ class Solution(collections.abc.Mapping):
     if state["HalfPLR"]:
       state["ClusterLocalRead"] = 0
       state["SuppressNoLoadLoop"] = True
-      if state.get("PrefetchAcrossPersistent", 0):
-        reject(state, printRejectionReason, "HalfPLR forces SuppressNoLoadLoop=True, which is incompatible with PrefetchAcrossPersistent")
       if state["PrefetchLocalRead"] != 1:
         reject(state, printRejectionReason, "Need to set PrefetchLocalRead = 1 as it shares some common logic with HalfPLR")
         return
