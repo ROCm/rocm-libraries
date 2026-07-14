@@ -156,3 +156,61 @@ TEST(TestRuntimePassByValue, ResolveScalarOperandThrowsOnUnsetDataType)
     EXPECT_THROW(resolveScalarOperand(op, buffers.data(), static_cast<uint32_t>(buffers.size())),
                  HipdnnPluginException);
 }
+
+TEST(TestRuntimePassByValue, ResolveScalarOperandReadsHostHalfForPureRuntimeUserSupplied)
+{
+    const ScalarOperand op{12, DataType::HALF, true, 0.0};
+
+    // half is lossy: assert against the value that actually round-trips through fp16,
+    // not the source literal, so the test pins the byte-level read, not fp16 precision.
+    hipdnn_data_sdk::types::half hostValue(0.5f);
+    std::vector<hipdnnPluginDeviceBuffer_t> buffers = {{12, &hostValue}};
+
+    auto resolved = resolveScalarOperand(op, buffers.data(), static_cast<uint32_t>(buffers.size()));
+    EXPECT_DOUBLE_EQ(resolved, static_cast<double>(hostValue));
+}
+
+TEST(TestRuntimePassByValue, ResolveScalarOperandReadsHostBfloat16ForPureRuntimeUserSupplied)
+{
+    const ScalarOperand op{13, DataType::BFLOAT16, true, 0.0};
+
+    hipdnn_data_sdk::types::bfloat16 hostValue(0.25f);
+    std::vector<hipdnnPluginDeviceBuffer_t> buffers = {{13, &hostValue}};
+
+    auto resolved = resolveScalarOperand(op, buffers.data(), static_cast<uint32_t>(buffers.size()));
+    EXPECT_DOUBLE_EQ(resolved, static_cast<double>(hostValue));
+}
+
+TEST(TestRuntimePassByValue, ResolveScalarOperandReadsHostInt64ForPureRuntimeUserSupplied)
+{
+    const ScalarOperand op{14, DataType::INT64, true, 0.0};
+
+    int64_t hostValue = 1234567890123LL;
+    std::vector<hipdnnPluginDeviceBuffer_t> buffers = {{14, &hostValue}};
+
+    auto resolved = resolveScalarOperand(op, buffers.data(), static_cast<uint32_t>(buffers.size()));
+    EXPECT_EQ(resolved, static_cast<double>(hostValue));
+}
+
+TEST(TestRuntimePassByValue, ResolveScalarOperandReadsHostBooleanForPureRuntimeUserSupplied)
+{
+    const ScalarOperand op{15, DataType::BOOLEAN, true, 0.0};
+
+    bool hostValue = true;
+    std::vector<hipdnnPluginDeviceBuffer_t> buffers = {{15, &hostValue}};
+
+    auto resolved = resolveScalarOperand(op, buffers.data(), static_cast<uint32_t>(buffers.size()));
+    EXPECT_EQ(resolved, 1.0);
+}
+
+TEST(TestRuntimePassByValue, ResolveScalarOperandThrowsOnUnsupportedDataType)
+{
+    // A dtype with no case in the resolve switch (e.g. FP8) must hit the default throw.
+    const ScalarOperand op{16, DataType::FP8_E4M3, true, 0.0};
+
+    uint8_t hostValue = 0;
+    std::vector<hipdnnPluginDeviceBuffer_t> buffers = {{16, &hostValue}};
+
+    EXPECT_THROW(resolveScalarOperand(op, buffers.data(), static_cast<uint32_t>(buffers.size())),
+                 HipdnnPluginException);
+}
