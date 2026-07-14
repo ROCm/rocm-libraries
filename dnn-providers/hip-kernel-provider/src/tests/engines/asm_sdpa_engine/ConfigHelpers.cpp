@@ -37,8 +37,12 @@ flatbuffers::FlatBufferBuilder configToCompatibleGraph(const fmha_v3_fwdConfig& 
     flatbuffers::FlatBufferBuilder builder;
     std::vector<flatbuffers::Offset<TensorAttributes>> tensorAttributes;
 
-    // Map dtype string to DataType enum
-    const DataType dataType = toDataType(config.dtype);
+    // Map dtype string to DataType enums. FP8 configs use FP8_E4M3 inputs with a
+    // BFLOAT16 output and require q/k/v descale tensors (mirrors the engine's fp8
+    // applicability contract); every other config is single-dtype in and out.
+    const bool isFp8 = (config.dtype == config::FP8BF16);
+    const DataType inDataType = isFp8 ? DataType::FP8_E4M3_FNUZ : toDataType(config.dtype);
+    const DataType outDataType = isFp8 ? DataType::BFLOAT16 : inDataType;
 
     // Use arbitrary values for batch, num_heads, and sequence lengths
     const int64_t batch = 2;
@@ -64,22 +68,22 @@ flatbuffers::FlatBufferBuilder configToCompatibleGraph(const fmha_v3_fwdConfig& 
     // Q tensor
     const auto qUid = uid++;
     tensorAttributes.push_back(
-        CreateTensorAttributesDirect(builder, qUid, "q", dataType, &qStrides, &qDims));
+        CreateTensorAttributesDirect(builder, qUid, "q", inDataType, &qStrides, &qDims));
 
     // K tensor
     const auto kUid = uid++;
     tensorAttributes.push_back(
-        CreateTensorAttributesDirect(builder, kUid, "k", dataType, &kStrides, &kDims));
+        CreateTensorAttributesDirect(builder, kUid, "k", inDataType, &kStrides, &kDims));
 
     // V tensor
     const auto vUid = uid++;
     tensorAttributes.push_back(
-        CreateTensorAttributesDirect(builder, vUid, "v", dataType, &vStrides, &vDims));
+        CreateTensorAttributesDirect(builder, vUid, "v", inDataType, &vStrides, &vDims));
 
     // O tensor
     const auto oUid = uid++;
     tensorAttributes.push_back(
-        CreateTensorAttributesDirect(builder, oUid, "o", dataType, &oStrides, &oDims));
+        CreateTensorAttributesDirect(builder, oUid, "o", outDataType, &oStrides, &oDims));
 
     // Scale tensor (always include for SDPA)
     const std::vector<int64_t> scaleDims = {1};
@@ -95,6 +99,45 @@ flatbuffers::FlatBufferBuilder configToCompatibleGraph(const fmha_v3_fwdConfig& 
                                      false,
                                      TensorValue::Float32Value,
                                      builder.CreateStruct(scaleVal).Union()));
+
+    // FP8 inputs require per-tensor (scalar) q/k/v descale tensors, else the engine
+    // declines the graph (mirrors AITER's TORCH_CHECK).
+    flatbuffers::Optional<int64_t> descaleQUid = flatbuffers::nullopt;
+    flatbuffers::Optional<int64_t> descaleKUid = flatbuffers::nullopt;
+    flatbuffers::Optional<int64_t> descaleVUid = flatbuffers::nullopt;
+    if(isFp8)
+    {
+        const std::vector<int64_t> descaleDims = {1, 1, 1, 1};
+        const std::vector<int64_t> descaleStrides
+            = hipdnn_data_sdk::utilities::generateStrides(descaleDims);
+
+        const auto descaleQTensorUid = uid++;
+        tensorAttributes.push_back(CreateTensorAttributesDirect(builder,
+                                                                descaleQTensorUid,
+                                                                "descale_q",
+                                                                DataType::FLOAT,
+                                                                &descaleStrides,
+                                                                &descaleDims));
+        descaleQUid = flatbuffers::Optional<int64_t>(descaleQTensorUid);
+
+        const auto descaleKTensorUid = uid++;
+        tensorAttributes.push_back(CreateTensorAttributesDirect(builder,
+                                                                descaleKTensorUid,
+                                                                "descale_k",
+                                                                DataType::FLOAT,
+                                                                &descaleStrides,
+                                                                &descaleDims));
+        descaleKUid = flatbuffers::Optional<int64_t>(descaleKTensorUid);
+
+        const auto descaleVTensorUid = uid++;
+        tensorAttributes.push_back(CreateTensorAttributesDirect(builder,
+                                                                descaleVTensorUid,
+                                                                "descale_v",
+                                                                DataType::FLOAT,
+                                                                &descaleStrides,
+                                                                &descaleDims));
+        descaleVUid = flatbuffers::Optional<int64_t>(descaleVTensorUid);
+    }
 
     // Handle GROUP mode - add sequence length tensors
     flatbuffers::Optional<int64_t> seqLenQUid = flatbuffers::nullopt;
@@ -180,9 +223,9 @@ flatbuffers::FlatBufferBuilder configToCompatibleGraph(const fmha_v3_fwdConfig& 
                                flatbuffers::nullopt, // page_table_v_tensor_uid
                                flatbuffers::nullopt, // block_mask_tensor_uid
                                flatbuffers::nullopt, // sink_token_tensor_uid
-                               flatbuffers::nullopt, // descale_q_tensor_uid
-                               flatbuffers::nullopt, // descale_k_tensor_uid
-                               flatbuffers::nullopt, // descale_v_tensor_uid
+                               descaleQUid, // descale_q_tensor_uid
+                               descaleKUid, // descale_k_tensor_uid
+                               descaleVUid, // descale_v_tensor_uid
                                flatbuffers::nullopt, // descale_s_tensor_uid
                                flatbuffers::nullopt, // scale_s_tensor_uid
                                flatbuffers::nullopt, // scale_o_tensor_uid

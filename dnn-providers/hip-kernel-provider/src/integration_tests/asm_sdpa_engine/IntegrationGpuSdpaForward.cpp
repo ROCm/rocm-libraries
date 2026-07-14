@@ -3,6 +3,7 @@
 
 #include <hip/hip_runtime.h>
 #include <hip_kernel_provider_common/HipDeviceUtils.hpp>
+#include <hip_kernel_provider_common/SdpaConfigConstants.hpp>
 #include <hip_kernel_provider_common/SdpaConfigEnumerations.hpp>
 #include <hipdnn_data_sdk/types.hpp>
 #include <hipdnn_data_sdk/utilities/PlatformUtils.hpp>
@@ -350,6 +351,52 @@ std::vector<SdpaFwdTestCase> getSdpaFwdAsymSeqTestCases()
 
 using IntegrationGpuSdpaFwdShapeSweepBf16 = IntegrationSdpaFwdShapeSweep<bfloat16>;
 
+// FP8 output is BF16, so the harness DataType (used only nominally — validators
+// read each tensor's actual dtype) stays bfloat16. A distinct fixture lets the
+// fp8 correctness suite carry its own tolerance if hardware runs require it.
+class IntegrationGpuSdpaFwdFp8 : public IntegrationSdpaFwd<bfloat16>
+{
+protected:
+    // FP8 q/k/v descales are dequantization factors and must be positive; the base
+    // fixture's random [-1, 1] fill yields negative/near-zero descales that are both
+    // physically meaningless and numerically unstable. Fill every scalar tensor (the
+    // q/k/v descales and the attention scale) with 1.0 so the reference dequant is
+    // exact and the suite isolates fp8 *input* quantization; randomize the tensor-
+    // valued Q/K/V/O inputs as usual.
+    void initializeBundle(const hipdnn_frontend::graph::Graph& /*graph*/,
+                          GraphTensorBundle& bundle,
+                          unsigned int seed) override
+    {
+        for(auto& tensorPair : bundle.tensors)
+        {
+            if(tensorPair.second->elementCount() == 1)
+            {
+                bundle.randomizeTensor(tensorPair.first, 1.0f, 1.0f, seed);
+            }
+            else
+            {
+                bundle.randomizeTensor(tensorPair.first, _minVal, _maxVal, seed);
+            }
+        }
+    }
+};
+
+// Partition the kernel configs by precision so the bf16 and fp8 suites each run
+// against their own kernels.
+std::vector<GraphTestCase> getGraphTestCasesByPrecision(bool fp8)
+{
+    std::vector<GraphTestCase> cases;
+    for(const auto& [key, config] : cfg_fmha_fwd)
+    {
+        const bool isFp8 = (config.dtype == hip_kernel_provider_common::config::FP8BF16);
+        if(isFp8 == fp8)
+        {
+            cases.push_back(configToTestCase(config));
+        }
+    }
+    return cases;
+}
+
 } // namespace
 
 TEST_P(IntegrationGpuSdpaFwdBf16, Correctness)
@@ -360,7 +407,24 @@ TEST_P(IntegrationGpuSdpaFwdBf16, Correctness)
 
 INSTANTIATE_TEST_SUITE_P(Smoke,
                          IntegrationGpuSdpaFwdBf16,
-                         testing::ValuesIn(getCompatibleGraphTestCases(cfg_fmha_fwd)),
+                         testing::ValuesIn(getGraphTestCasesByPrecision(/*fp8=*/false)),
+                         GraphTestCase::getName);
+
+TEST_P(IntegrationGpuSdpaFwdFp8, Correctness)
+{
+    // FP8 (E4M3 FNUZ) inputs decode to identical values on GPU and CPU, so the only
+    // divergence is fp8 quantization propagating through the score/softmax/PV chain.
+    // That exceeds the bf16 1e-2 bound near a causal-mask diagonal (fewer averaging
+    // terms => coarser fp8 rounding shows through); 3e-2 covers it. The dynamic SDPA
+    // tolerance model does not yet account for fp8 (see DynamicTolerancesSdpa.hpp), so
+    // this fixed fp8 bound is the interim; tighten once that lands.
+    auto tolerance = 3e-2f;
+    runGraphTest(tolerance);
+}
+
+INSTANTIATE_TEST_SUITE_P(Smoke,
+                         IntegrationGpuSdpaFwdFp8,
+                         testing::ValuesIn(getGraphTestCasesByPrecision(/*fp8=*/true)),
                          GraphTestCase::getName);
 
 TEST_P(IntegrationGpuSdpaFwdShapeSweepBf16, Correctness)

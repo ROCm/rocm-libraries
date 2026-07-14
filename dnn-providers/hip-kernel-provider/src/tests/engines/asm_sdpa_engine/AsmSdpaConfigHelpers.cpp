@@ -118,8 +118,11 @@ std::shared_ptr<hipdnn_frontend::graph::Graph> buildSdpaFwdGraph(const GraphTest
     const int64_t seqQ = testCase.seqQ;
     const int64_t seqKv = testCase.seqKv;
 
-    // Determine data type
-    const DataType dataType = toDataType(config.dtype);
+    // Determine data types. For fp8 the inputs are FP8_E4M3_FNUZ (the gfx942/MI300
+    // hardware fp8 encoding the AITER kernels consume) and the output is BFLOAT16.
+    const bool isFp8 = (config.dtype == config::FP8BF16);
+    const DataType inDataType = isFp8 ? DataType::FP8_E4M3_FNUZ : toDataType(config.dtype);
+    const DataType outDataType = isFp8 ? DataType::BFLOAT16 : inDataType;
 
     // Create tensor dimensions
     const std::vector<int64_t> qDims = {batch, numHeads, seqQ, config.hdim_q};
@@ -132,13 +135,13 @@ std::shared_ptr<hipdnn_frontend::graph::Graph> buildSdpaFwdGraph(const GraphTest
         .set_intermediate_data_type(DataType::FLOAT);
 
     auto q = std::make_shared<TensorAttributes>();
-    q->set_dim(qDims).set_stride(generateStrides(qDims)).set_data_type(dataType);
+    q->set_dim(qDims).set_stride(generateStrides(qDims)).set_data_type(inDataType);
 
     auto k = std::make_shared<TensorAttributes>();
-    k->set_dim(kDims).set_stride(generateStrides(kDims)).set_data_type(dataType);
+    k->set_dim(kDims).set_stride(generateStrides(kDims)).set_data_type(inDataType);
 
     auto v = std::make_shared<TensorAttributes>();
-    v->set_dim(vDims).set_stride(generateStrides(vDims)).set_data_type(dataType);
+    v->set_dim(vDims).set_stride(generateStrides(vDims)).set_data_type(inDataType);
 
     // Configure SDPA attributes based on config
     SdpaAttributes attributes;
@@ -147,6 +150,21 @@ std::shared_ptr<hipdnn_frontend::graph::Graph> buildSdpaFwdGraph(const GraphTest
     if(testCase.attnScale.has_value())
     {
         attributes.set_attn_scale(testCase.attnScale.value());
+    }
+
+    // FP8 inputs require per-tensor (scalar) q/k/v descale tensors.
+    if(isFp8)
+    {
+        const std::vector<int64_t> descaleDims = {1, 1, 1, 1};
+        const auto descaleStrides = generateStrides(descaleDims);
+        const auto makeDescale = [&]() {
+            auto descale = std::make_shared<TensorAttributes>();
+            descale->set_dim(descaleDims).set_stride(descaleStrides).set_data_type(DataType::FLOAT);
+            return descale;
+        };
+        attributes.set_descale_q(makeDescale());
+        attributes.set_descale_k(makeDescale());
+        attributes.set_descale_v(makeDescale());
     }
 
     // Configure mask type
@@ -201,7 +219,7 @@ std::shared_ptr<hipdnn_frontend::graph::Graph> buildSdpaFwdGraph(const GraphTest
     auto [o, stats] = graph->sdpa(q, k, v, attributes);
 
     o->set_output(true);
-    o->set_data_type(dataType);
+    o->set_data_type(outDataType);
 
     return graph;
 }

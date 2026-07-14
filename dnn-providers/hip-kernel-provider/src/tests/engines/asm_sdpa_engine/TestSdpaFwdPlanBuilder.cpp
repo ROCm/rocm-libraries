@@ -363,6 +363,113 @@ flatbuffers::FlatBufferBuilder createSdpaFwdGraphWithNonPbvScaleTensor()
     return builder;
 }
 
+// Build an fp8-in / bf16-out forward SDPA graph, optionally with per-tensor
+// (scalar) q/k/v descale tensors, to exercise the fp8 applicability policy.
+flatbuffers::FlatBufferBuilder createSdpaFwdFp8Graph(bool withDescale)
+{
+    using namespace hipdnn_flatbuffers_sdk::data_objects;
+
+    flatbuffers::FlatBufferBuilder builder;
+    std::vector<flatbuffers::Offset<TensorAttributes>> tensorAttributes;
+
+    const std::vector<int64_t> dims = {4, 8, 256, 128};
+    const std::vector<int64_t> strides = hipdnn_data_sdk::utilities::generateStrides(dims);
+    const std::vector<int64_t> scalarDims = {1, 1, 1, 1};
+    const std::vector<int64_t> scalarStrides
+        = hipdnn_data_sdk::utilities::generateStrides(scalarDims);
+
+    int64_t uid = 1;
+    const auto qUid = uid++;
+    tensorAttributes.push_back(
+        CreateTensorAttributesDirect(builder, qUid, "q", DataType::FP8_E4M3_FNUZ, &strides, &dims));
+    const auto kUid = uid++;
+    tensorAttributes.push_back(
+        CreateTensorAttributesDirect(builder, kUid, "k", DataType::FP8_E4M3_FNUZ, &strides, &dims));
+    const auto vUid = uid++;
+    tensorAttributes.push_back(
+        CreateTensorAttributesDirect(builder, vUid, "v", DataType::FP8_E4M3_FNUZ, &strides, &dims));
+    const auto oUid = uid++;
+    tensorAttributes.push_back(
+        CreateTensorAttributesDirect(builder, oUid, "o", DataType::BFLOAT16, &strides, &dims));
+
+    flatbuffers::Optional<int64_t> descaleQUid;
+    flatbuffers::Optional<int64_t> descaleKUid;
+    flatbuffers::Optional<int64_t> descaleVUid;
+    if(withDescale)
+    {
+        descaleQUid = uid++;
+        tensorAttributes.push_back(CreateTensorAttributesDirect(
+            builder, *descaleQUid, "descale_q", DataType::FLOAT, &scalarStrides, &scalarDims));
+        descaleKUid = uid++;
+        tensorAttributes.push_back(CreateTensorAttributesDirect(
+            builder, *descaleKUid, "descale_k", DataType::FLOAT, &scalarStrides, &scalarDims));
+        descaleVUid = uid++;
+        tensorAttributes.push_back(CreateTensorAttributesDirect(
+            builder, *descaleVUid, "descale_v", DataType::FLOAT, &scalarStrides, &scalarDims));
+    }
+
+    const auto sdpaAttributes
+        = CreateSdpaAttributes(builder,
+                               qUid,
+                               kUid,
+                               vUid,
+                               oUid,
+                               flatbuffers::nullopt, // attn_mask_tensor_uid
+                               flatbuffers::nullopt, // scale_tensor_uid
+                               flatbuffers::nullopt, // seq_len_q_tensor_uid
+                               flatbuffers::nullopt, // seq_len_kv_tensor_uid
+                               flatbuffers::nullopt, // seed_tensor_uid
+                               flatbuffers::nullopt, // offset_tensor_uid
+                               flatbuffers::nullopt, // dropout_mask_tensor_uid
+                               flatbuffers::nullopt, // dropout_scale_tensor_uid
+                               flatbuffers::nullopt, // page_table_k_tensor_uid
+                               flatbuffers::nullopt, // page_table_v_tensor_uid
+                               flatbuffers::nullopt, // block_mask_tensor_uid
+                               flatbuffers::nullopt, // sink_token_tensor_uid
+                               descaleQUid,
+                               descaleKUid,
+                               descaleVUid,
+                               flatbuffers::nullopt, // descale_s_tensor_uid
+                               flatbuffers::nullopt, // scale_s_tensor_uid
+                               flatbuffers::nullopt, // scale_o_tensor_uid
+                               flatbuffers::nullopt, // stats_tensor_uid
+                               flatbuffers::nullopt, // max_tensor_uid
+                               flatbuffers::nullopt, // sum_exp_tensor_uid
+                               flatbuffers::nullopt, // rng_dump_tensor_uid
+                               flatbuffers::nullopt, // amax_s_tensor_uid
+                               flatbuffers::nullopt, // amax_o_tensor_uid
+                               flatbuffers::nullopt, // generate_stats
+                               false, // alibi_mask
+                               false, // padding_mask
+                               false, // causal_mask
+                               false, // causal_mask_bottom_right
+                               flatbuffers::nullopt, // dropout_probability
+                               flatbuffers::nullopt, // attn_scale_value
+                               flatbuffers::nullopt, // left_bound
+                               flatbuffers::nullopt, // right_bound
+                               flatbuffers::nullopt, // max_seq_len_kv
+                               DiagonalAlignment::TOP_LEFT,
+                               DataType::UNSET, // mma_core_mode (engine requires unset)
+                               AttentionImplementation::AUTO);
+
+    std::vector<flatbuffers::Offset<Node>> nodes;
+    nodes.push_back(CreateNodeDirect(builder,
+                                     "sdpa_fwd",
+                                     DataType::FLOAT, // node compute type (engine requires FLOAT)
+                                     NodeAttributes::SdpaAttributes,
+                                     sdpaAttributes.Union()));
+
+    const auto graphOffset = CreateGraphDirect(builder,
+                                               "test",
+                                               DataType::FLOAT,
+                                               DataType::FLOAT,
+                                               DataType::BFLOAT16,
+                                               &tensorAttributes,
+                                               &nodes);
+    builder.Finish(graphOffset);
+    return builder;
+}
+
 TEST_F(TestSdpaFwdPlanBuilder, IsApplicableAcceptsRuntimePassByValueScale)
 {
     SKIP_IF_NO_DEVICES();
@@ -422,6 +529,38 @@ TEST_F(TestSdpaFwdPlanBuilder, IsApplicableAcceptsCompileTimeConstantScaleTensor
         builder.GetBufferPointer(), builder.GetSize());
 
     EXPECT_TRUE(_planBuilder.isApplicable(_handle, graphWrapper));
+}
+
+// FP8 forward kernels are only shipped for gfx942, so these applicability tests
+// are gated on that architecture.
+TEST_F(TestSdpaFwdPlanBuilder, IsApplicableRejectsFp8WithoutDescale)
+{
+    SKIP_IF_NO_DEVICES();
+    if(hip_kernel_provider_common::getDeviceString(_handle.getStream()) != "gfx942")
+    {
+        GTEST_SKIP() << "fp8 forward kernels are gfx942-only";
+    }
+
+    auto builder = createSdpaFwdFp8Graph(/*withDescale=*/false);
+    const hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper graphWrapper(
+        builder.GetBufferPointer(), builder.GetSize());
+    EXPECT_FALSE(_planBuilder.isApplicable(_handle, graphWrapper))
+        << "fp8 inputs without q/k/v descales must be rejected";
+}
+
+TEST_F(TestSdpaFwdPlanBuilder, IsApplicableAcceptsFp8WithDescale)
+{
+    SKIP_IF_NO_DEVICES();
+    if(hip_kernel_provider_common::getDeviceString(_handle.getStream()) != "gfx942")
+    {
+        GTEST_SKIP() << "fp8 forward kernels are gfx942-only";
+    }
+
+    auto builder = createSdpaFwdFp8Graph(/*withDescale=*/true);
+    const hipdnn_flatbuffers_sdk::flatbuffer_utilities::GraphWrapper graphWrapper(
+        builder.GetBufferPointer(), builder.GetSize());
+    EXPECT_TRUE(_planBuilder.isApplicable(_handle, graphWrapper))
+        << "fp8 inputs with q/k/v descales must be accepted";
 }
 
 TEST_F(TestSdpaFwdPlanBuilder, GetMaxWorkspaceSizeCalculatesCorrectly)
