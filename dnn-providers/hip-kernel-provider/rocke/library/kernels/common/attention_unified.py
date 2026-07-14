@@ -1616,9 +1616,25 @@ def _gfx942_flash_wide_setting() -> int:
 
 
 def _select_gfx942_flash_num_warps(problem: UnifiedAttentionProblem) -> int:
-    # D64 and D128 prefill now share the wide (num_warps=4) sliced-K ring path
-    # (the ring superseded the prior D64 nw2/single-buffer config: 13-17% faster,
-    # beats Torch at S2048). See _enable_gfx942_flash_k_sliced_ring.
+    """Single source of truth for the gfx942 flash num_warps, for BOTH dtypes.
+
+    Mirrors attention_spec_builder._tiled_spec_from_problem so the launch-meta
+    grid/block matches the geometry the launcher actually builds:
+      * ring active (fp16, or bf16 D64/D128 prefill): the wide sliced-K ring
+        geometry -> _gfx942_flash_wide_setting() (nw=4 by default; 2 or 0 via
+        HIPDNN_GFX942_FLASH_WIDE). A 0/disabled setting means the L4 (WG=64)
+        fallback, i.e. num_warps=1.
+      * bf16 without the ring: the legacy bf16-wide geometry (nw=2, or the
+        smalltile double-K nw).
+    D64 and D128 prefill share the wide (num_warps=4) sliced-K ring path (the ring
+    superseded the prior D64 nw2/single-buffer config: 13-17% faster, beats Torch
+    at S2048). See _enable_gfx942_flash_k_sliced_ring.
+    """
+    if _enable_gfx942_bf16_flash(problem) and not _enable_gfx942_flash_k_sliced_ring(
+        problem
+    ):
+        nw, _ = _gfx942_bf16_wide_geometry(problem)
+        return nw
     wide = _gfx942_flash_wide_setting()
     return wide if wide in (2, 4) else 1
 
@@ -3293,15 +3309,11 @@ def _get_2d_launch_meta(
         return _2D_LAUNCH_META[meta_key]
     arch = _resolve_attention_arch()
     if _enable_gfx942_bf16_flash(problem):
-        # Mirror the spec builder (attention_spec_builder._tiled_spec_from_problem):
-        # when the sliced-K ring is active the bf16 path uses the fp16-flash
-        # geometry (nw=_gfx942_flash_wide_setting()), NOT the bf16-wide nw. Using
-        # the wide nw here would compute the grid/block for a different geometry
-        # than the launcher actually builds.
-        if _enable_gfx942_flash_k_sliced_ring(problem):
-            num_warps = _gfx942_flash_wide_setting()
-        else:
-            num_warps, _ = _gfx942_bf16_wide_geometry(problem)
+        # _select_gfx942_flash_num_warps mirrors the spec builder for BOTH dtypes:
+        # ring-active -> fp16-flash wide geometry; bf16 non-ring -> bf16-wide nw.
+        # (Using a mismatched nw here would compute the grid/block for a different
+        # geometry than the launcher actually builds.)
+        num_warps = _select_gfx942_flash_num_warps(problem)
         block_m_per_warp = 32
     elif _enable_gfx942_fp16_flash(problem):
         num_warps = _select_gfx942_flash_num_warps(problem)
