@@ -102,6 +102,9 @@ inline constexpr bool is_proxy_reference_v<_THRUST_LIBCXX::discard_iterator::__d
 template <class Fn, class Index>
 inline constexpr bool is_proxy_reference_v<_THRUST_LIBCXX::__tabulate_proxy<Fn, Index>> = true;
 
+template <class Iter, class Fn>
+inline constexpr bool is_proxy_reference_v<_THRUST_LIBCXX::__transform_output_proxy<Iter, Fn>> = true;
+
 template <typename T>
 inline constexpr bool is_non_const_reference_v =
   !_THRUST_STD::is_const_v<T> && (_THRUST_STD::is_reference_v<T> || detail::is_proxy_reference_v<T>);
