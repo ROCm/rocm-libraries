@@ -3050,6 +3050,42 @@ namespace TensileLite
                              size_t                        tiles,
                              origami::reduction_t          reductionStrat,
                              bool const*                   sk5EffectiveDynamic);
+
+        // Partial-tile slot count for the dynamic (SK4 / SK5-dynamic) partials
+        // workspace. Each stream-k tile is split skSplit ways and every split
+        // writes one macro-tile-sized partial. The kernel indexes the workspace by
+        //     partialIdx = (StreamKTileIdx - #FullTiles) * skSplit + localSplit
+        // with a maximum of skTiles*skSplit - 1 and buffer bounds checks disabled,
+        // so the region needs skTiles*skSplit slots. The skGrid-based sizing used by
+        // the static SK3 path (index in [0,skGrid)) is too small when
+        // skTiles*skSplit > skGrid, causing an out-of-bounds device write.
+        // skTiles/skSplit are derived as in makeArgs (SK4 / SK5-dynamic branches).
+        size_t dynamicPartialsSlots(ContractionSolution const&    self,
+                                    ContractionProblemGemm const& problem,
+                                    Hardware const&               hardware)
+        {
+            AMDGPU const* pAMDGPU = dynamic_cast<AMDGPU const*>(&hardware);
+            if(pAMDGPU == nullptr)
+                return 0;
+
+            int      overrideTiles = pAMDGPU->skTiles;
+            int      overrideSplit = pAMDGPU->skSplit;
+            uint32_t skTiles       = 0;
+            uint32_t skSplit       = 2;
+            if(overrideTiles > -1)
+                skTiles = static_cast<uint32_t>(overrideTiles);
+            if(overrideSplit > -1)
+                skSplit = static_cast<uint32_t>(overrideSplit);
+
+            auto itersPerTile
+                = std::max(size_t{1}, problem.getItersPerTile(self.sizeMapping));
+            // Real splitting factor in case iterations don't divide evenly.
+            uint32_t skItersPerWI
+                = CeilDivide(static_cast<uint32_t>(itersPerTile), skSplit);
+            skSplit = CeilDivide(static_cast<uint32_t>(itersPerTile), skItersPerWI);
+
+            return static_cast<size_t>(skTiles) * static_cast<size_t>(skSplit);
+        }
     }
 
     std::vector<KernelInvocation>
@@ -3162,11 +3198,25 @@ namespace TensileLite
                                     sizeMapping.streamK == 5 ? &effectiveDynamic : nullptr);
             const bool streamKDP = Debug::Instance().useStreamKDataParrallel();
             const bool forceDPOnly = sizeMapping.streamKForceDPOnly != 0;
+            // SK4 and SK5-dynamic index the partials workspace by tile-split slot
+            // (up to skTiles*skSplit), not by grid position; they also need the
+            // partials region whenever any tiles are split (skTiles>0), even when
+            // tiles divide evenly into the grid (tiles % skGrid == 0).
+            const bool isDynamic
+                = (sizeMapping.streamK == 4)
+                  || (sizeMapping.streamK == 5 && effectiveDynamic);
+            const size_t dynamicSlots
+                = isDynamic ? dynamicPartialsSlots(*this, problem, hardware) : 0;
             if(sk.grid > 0
                && (sk.reduction == origami::reduction_t::parallel
-                   || (tiles % sk.grid != 0 && !streamKDP && !forceDPOnly)))
+                   || ((tiles % sk.grid != 0 || (isDynamic && dynamicSlots > 0))
+                       && !streamKDP && !forceDPOnly)))
             {
-                size_t idealWorkspace = partialTileSize(sk.grid);
+                // For the dynamic path size by the partial-tile slot count; never
+                // below the legacy skGrid sizing to stay safe for existing cases.
+                size_t idealWorkspace
+                    = isDynamic ? partialTileSize(std::max(dynamicSlots, sk.grid))
+                                : partialTileSize(sk.grid);
                 // SK4 and SK5-dynamic need the per-XCD work-queue region; SK5-static
                 // sizes like standalone SK3.
                 if(sizeMapping.streamK == 4
@@ -3596,16 +3646,35 @@ namespace TensileLite
                     if(idealWorkspace <= problem.workspaceSize())
                         size += idealWorkspace;
                 }
-                else if(skGrid > 0 && (tiles % skGrid != 0 && !streamKDP && !forceDPOnly))
+                else
                 {
-                    size_t idealWorkspace = partialTileSize(skGrid);
-                    if(sizeMapping.streamK == 4
-                       || (sizeMapping.streamK == 5 && effectiveDynamic))
-                        idealWorkspace += 256 * 8;
-                    // If given workspace is less than ideal, we can fall back to DP mode
-                    // Performance will likely be lower, but the kernel can run if workspace is unavailable
-                    if(idealWorkspace <= problem.workspaceSize())
-                        size += idealWorkspace;
+                    // SK4 / SK5-dynamic index the partials workspace by tile-split
+                    // slot (up to skTiles*skSplit) and need the partials region
+                    // whenever any tiles are split (skTiles>0), independent of the
+                    // tiles%skGrid divisibility used by the SK3 static path. See
+                    // dynamicPartialsSlots() for the derivation.
+                    const bool isDynamic
+                        = (sizeMapping.streamK == 4)
+                          || (sizeMapping.streamK == 5 && effectiveDynamic);
+                    const size_t dynamicSlots
+                        = isDynamic ? dynamicPartialsSlots(*this, problem, hardware) : 0;
+                    const bool needPartials
+                        = (tiles % skGrid != 0 || (isDynamic && dynamicSlots > 0))
+                          && !streamKDP && !forceDPOnly;
+                    if(skGrid > 0 && needPartials)
+                    {
+                        size_t idealWorkspace
+                            = isDynamic
+                                  ? partialTileSize(std::max(dynamicSlots, skGrid))
+                                  : partialTileSize(skGrid);
+                        if(sizeMapping.streamK == 4
+                           || (sizeMapping.streamK == 5 && effectiveDynamic))
+                            idealWorkspace += 256 * 8;
+                        // If given workspace is less than ideal, we can fall back to DP mode
+                        // Performance will likely be lower, but the kernel can run if workspace is unavailable
+                        if(idealWorkspace <= problem.workspaceSize())
+                            size += idealWorkspace;
+                    }
                 }
             }
         }
