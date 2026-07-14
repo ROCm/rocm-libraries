@@ -1177,9 +1177,10 @@ def _enable_single_batch_combo(problem: UnifiedAttentionProblem) -> bool:
         the sync-dequant loader and its own routing).
       * no softcap / sinks (not wired into the transposed softmax VALU opts;
         the spec validator rejects them).
-      * ALiBi / QQ bias are NOT gated here — this cohort is already narrow
-        enough (num_seqs==1, no-SW, no-FP8) that ALiBi/QQ-bias problems won't
-        typically reach it, but the gate itself does not exclude them.
+      * ALiBi / QQ bias ARE admitted: the transposed softmax body applies
+        them per-score, so biased single-batch prefill takes the combo path
+        instead of the fallback. Only softcap/sinks are excluded (above)
+        because the mask-limit shortcut can't fold them.
       * no sliding window (the mask-once / mask-limit opts require no-SW).
       * head_size in {64, 128}.
       * max_seqlen_q > 256 (long prefill; decode-class shapes route to the 3D
