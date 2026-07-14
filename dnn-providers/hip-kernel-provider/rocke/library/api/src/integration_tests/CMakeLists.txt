@@ -15,6 +15,7 @@ add_executable(
     main.cpp
     TestRockeClientLoad.cpp
     TestRockeClientApplicability.cpp
+    TestRockeClientAotLoad.cpp
 )
 
 target_compile_options(rocke_client_integration_tests PRIVATE ${HIPDNN_WARNING_COMPILE_OPTIONS})
@@ -28,6 +29,13 @@ target_compile_definitions(
 target_link_libraries(
     rocke_client_integration_tests PUBLIC GTest::gtest hip::host hipdnn_test_sdk
                                           hipdnn_plugin_sdk Threads::Threads
+)
+
+# Expose api/src/ so the test can include dispatcher/AotSkeletonMarkers.hpp
+# (the marker constants are internal to the skeleton; this include is intentional
+# and is removed together with the markers when real execution lands).
+target_include_directories(rocke_client_integration_tests PRIVATE
+    ${CMAKE_CURRENT_SOURCE_DIR}/..
 )
 
 add_dependencies(rocke_client_integration_tests rocke_client)
