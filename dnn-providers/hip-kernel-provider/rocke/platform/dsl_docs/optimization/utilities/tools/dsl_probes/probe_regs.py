@@ -112,7 +112,7 @@ class ArchCaps:
 
 ARCH_BY_NAME = {
     "gfx950": ArchCaps("gfx950", 512, 4, 160 * 1024, 8),
-    "gfx942": ArchCaps("gfx942", 512, 4, 64 * 1024, 8), 
+    "gfx942": ArchCaps("gfx942", 512, 4, 64 * 1024, 8),
 }
 
 
