@@ -17935,17 +17935,14 @@ class KernelWriterAssembly(KernelWriter):
     # StreamK.py skFixupStep / globalWriteBatch), so they must be checkpointed
     # and restored around the borrowed next-tile identity.
     #
-    # SK5 (StreamKHybrid) ALIASING TRAP: StreamKIter/StreamKIterEnd are
-    # RegSet-aliased onto the SAME physical SGPRs as StreamKTileIdx/
-    # StreamKPartialIdx (see the KernelWriterAssembly SK5 RegSet block). Listing
-    # both the SK3 iter names and the SK4 idx names would checkpoint/restore the
-    # same physical register twice, so we checkpoint the idx names only: on the
-    # dynamic sub-path they hold the current tile's tile/partial index (read by
-    # fixup/store) which the borrowed next-tile identity overwrites, so they
-    # MUST be restored; on the static sub-path the same physical regs hold
-    # StreamKIter/StreamKIterEnd, which the static next-tile setup only reads
-    # (never writes), so the save+restore is an idempotent no-op. One static
-    # list is therefore correct for both runtime sub-paths.
+    # SK5 (StreamKHybrid) aliases StreamKIter/StreamKIterEnd onto the same
+    # physical SGPRs as StreamKTileIdx/StreamKPartialIdx (see the SK5 RegSet
+    # block). Checkpoint the idx names only; listing both the iter and idx
+    # names would save/restore the same registers twice. On the dynamic
+    # sub-path these regs hold the tile/partial index that the next-tile
+    # identity overwrites (restore required); on the static sub-path they hold
+    # StreamKIter/StreamKIterEnd, which next-tile setup only reads, so the
+    # save/restore is a no-op. One list covers both sub-paths.
     if kernel["StreamK"] in (4, 5):
       names.append("StreamKTileIdx")
       names.append("StreamKPartialIdx")
