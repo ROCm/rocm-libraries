@@ -58,7 +58,7 @@ jobs:
               "projects/hipdnn/cmake/ClangTidy.cmake",
               "projects/hipdnn/.clang-tidy"
             ],
-            checkout_paths: ["projects/hipdnn"]
+            checkout_paths: ["CMakeLists.txt", "CMakePresets.json", "cmake", "projects/hipdnn"]
           }'))
 
           # stinkytofu
@@ -242,14 +242,18 @@ jobs:
           . .venv/bin/activate
           export PATH=/opt/rocm/bin:/opt/rocm/llvm/bin:$PATH
           export CXX=/opt/rocm/llvm/bin/clang++
-          cmake -S projects/hipdnn -B build-hipdnn -G Ninja \
+          # Configure the superbuild with only hipdnn + samples enabled (other
+          # components would require libraries not present in the base ROCm install).
+          # hipdnn-tidy lints projects/hipdnn (core and samples) in one pass.
+          cmake --preset default:release -B build-hipdnn \
+            -DROCM_LIBS_ENABLE_COMPONENTS='hipdnn;hipdnn-samples' \
             -DENABLE_CLANG_TIDY=ON \
             -DROCM_PATH=/opt/rocm \
             -DCMAKE_PREFIX_PATH=/opt/rocm \
             -DENABLE_CLANG_FORMAT=OFF \
             -DHIP_PLATFORM=amd \
             -DHIPDNN_BUILD_PYTHON_BINDINGS=ON
-          ninja -C build-hipdnn tidy
+          ninja -C build-hipdnn hipdnn-tidy
 
       - name: Run clang-tidy (stinkytofu)
         if: matrix.name == 'stinkytofu'
