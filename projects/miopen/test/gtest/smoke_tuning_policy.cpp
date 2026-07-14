@@ -102,7 +102,11 @@ TEST_F(CPU_TuningPolicy_NONE, TestGetApiLogged)
     auto status = miopenGetTuningPolicy(&handle, &policy);
     ASSERT_EQ(status, miopenStatusSuccess);
     std::string output = testing::internal::GetCapturedStderr();
-    EXPECT_THAT(output, testing::HasSubstr(" miopenGetTuningPolicy("));
+    // Under the public/private split the logged function name is the renamed
+    // private entry point (miopenGetTuningPolicy_impl), since MIOPEN_LOG_FUNCTION
+    // runs inside the _impl definition. Accept either the public name or its
+    // _impl form.
+    EXPECT_THAT(output, testing::ContainsRegex(" miopenGetTuningPolicy(_impl)?\\("));
 }
 
 TEST_F(CPU_TuningPolicy_NONE, TestSetApiLogged)
@@ -120,7 +124,8 @@ TEST_F(CPU_TuningPolicy_NONE, TestSetApiLogged)
         status = miopenSetTuningPolicy(&handle, miopenTuningPolicy_t::miopenTuningPolicySearch);
         ASSERT_EQ(status, miopenStatusSuccess);
         std::string output = testing::internal::GetCapturedStderr();
-        EXPECT_THAT(output, testing::HasSubstr(" miopenSetTuningPolicy("));
+        // Accept the renamed _impl form under the public/private split (see above).
+        EXPECT_THAT(output, testing::ContainsRegex(" miopenSetTuningPolicy(_impl)?\\("));
     }
 
     status = miopenSetTuningPolicy(&handle, original_policy);

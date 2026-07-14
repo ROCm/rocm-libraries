@@ -24,6 +24,7 @@
  *
  *******************************************************************************/
 #include <miopen/driver_arguments.hpp>
+#include <miopen/miopen_impl.h>
 #include <miopen/fusion_plan.hpp>
 
 namespace miopen {
@@ -311,7 +312,7 @@ std::string BnormArgsForMIOpenDriver(const miopenTensorDescriptor_t xDesc,
                                      bool print_for_bn_driver)
 {
     int size = {0};
-    miopenGetTensorDescriptorSize(xDesc, &size);
+    miopenGetTensorDescriptorSize_impl(xDesc, &size);
     std::stringstream ss;
     if(print_for_bn_driver)
     {

@@ -24,6 +24,7 @@
  *
  *******************************************************************************/
 #include <miopen/activ.hpp>
+#include <miopen/miopen_impl.h>
 #include <miopen/errors.hpp>
 #include <miopen/handle.hpp>
 #include <miopen/logger.hpp>
@@ -32,7 +33,8 @@
 #include <array>
 #include <initializer_list>
 
-extern "C" miopenStatus_t miopenCreateActivationDescriptor(miopenActivationDescriptor_t* activDesc)
+extern "C" miopenStatus_t
+miopenCreateActivationDescriptor_impl(miopenActivationDescriptor_t* activDesc)
 {
 
     MIOPEN_LOG_FUNCTION(activDesc);
@@ -42,11 +44,11 @@ extern "C" miopenStatus_t miopenCreateActivationDescriptor(miopenActivationDescr
     });
 }
 
-extern "C" miopenStatus_t miopenSetActivationDescriptor(miopenActivationDescriptor_t activDesc,
-                                                        miopenActivationMode_t mode,
-                                                        double activAlpha,
-                                                        double activBeta,
-                                                        double activGamma)
+extern "C" miopenStatus_t miopenSetActivationDescriptor_impl(miopenActivationDescriptor_t activDesc,
+                                                             miopenActivationMode_t mode,
+                                                             double activAlpha,
+                                                             double activBeta,
+                                                             double activGamma)
 {
 
     MIOPEN_LOG_FUNCTION(activDesc, mode, activAlpha, activBeta, activGamma);
@@ -56,11 +58,11 @@ extern "C" miopenStatus_t miopenSetActivationDescriptor(miopenActivationDescript
     });
 }
 
-extern "C" miopenStatus_t miopenGetActivationDescriptor(miopenActivationDescriptor_t activDesc,
-                                                        miopenActivationMode_t* mode,
-                                                        double* activAlpha,
-                                                        double* activBeta,
-                                                        double* activGamma)
+extern "C" miopenStatus_t miopenGetActivationDescriptor_impl(miopenActivationDescriptor_t activDesc,
+                                                             miopenActivationMode_t* mode,
+                                                             double* activAlpha,
+                                                             double* activBeta,
+                                                             double* activGamma)
 {
 
     MIOPEN_LOG_FUNCTION(activDesc);
@@ -105,14 +107,14 @@ LogCmdActivation(miopenTensorDescriptor_t x_desc, miopenActivationDescriptor_t a
 }
 } // namespace miopen::debug
 
-extern "C" miopenStatus_t miopenActivationForward(miopenHandle_t handle,
-                                                  miopenActivationDescriptor_t activDesc,
-                                                  const void* alpha,
-                                                  const miopenTensorDescriptor_t xDesc,
-                                                  const void* x,
-                                                  const void* beta,
-                                                  const miopenTensorDescriptor_t yDesc,
-                                                  void* y)
+extern "C" miopenStatus_t miopenActivationForward_impl(miopenHandle_t handle,
+                                                       miopenActivationDescriptor_t activDesc,
+                                                       const void* alpha,
+                                                       const miopenTensorDescriptor_t xDesc,
+                                                       const void* x,
+                                                       const void* beta,
+                                                       const miopenTensorDescriptor_t yDesc,
+                                                       void* y)
 {
 
     MIOPEN_LOG_FUNCTION(handle, activDesc, alpha, xDesc, x, beta, yDesc, y);
@@ -135,18 +137,18 @@ extern "C" miopenStatus_t miopenActivationForward(miopenHandle_t handle,
     });
 }
 
-extern "C" miopenStatus_t miopenActivationBackward(miopenHandle_t handle,
-                                                   miopenActivationDescriptor_t activDesc,
-                                                   const void* alpha,
-                                                   const miopenTensorDescriptor_t yDesc,
-                                                   const void* y,
-                                                   const miopenTensorDescriptor_t dyDesc,
-                                                   const void* dy,
-                                                   const miopenTensorDescriptor_t xDesc,
-                                                   const void* x,
-                                                   const void* beta,
-                                                   const miopenTensorDescriptor_t dxDesc,
-                                                   void* dx)
+extern "C" miopenStatus_t miopenActivationBackward_impl(miopenHandle_t handle,
+                                                        miopenActivationDescriptor_t activDesc,
+                                                        const void* alpha,
+                                                        const miopenTensorDescriptor_t yDesc,
+                                                        const void* y,
+                                                        const miopenTensorDescriptor_t dyDesc,
+                                                        const void* dy,
+                                                        const miopenTensorDescriptor_t xDesc,
+                                                        const void* x,
+                                                        const void* beta,
+                                                        const miopenTensorDescriptor_t dxDesc,
+                                                        void* dx)
 {
     MIOPEN_LOG_FUNCTION(handle, activDesc, alpha, yDesc, y, dyDesc, dy, xDesc, x, beta, dxDesc, dx);
 
@@ -175,7 +177,8 @@ extern "C" miopenStatus_t miopenActivationBackward(miopenHandle_t handle,
     });
 }
 
-extern "C" miopenStatus_t miopenDestroyActivationDescriptor(miopenActivationDescriptor_t activDesc)
+extern "C" miopenStatus_t
+miopenDestroyActivationDescriptor_impl(miopenActivationDescriptor_t activDesc)
 {
 
     MIOPEN_LOG_FUNCTION(activDesc);

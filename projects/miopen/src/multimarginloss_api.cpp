@@ -23,7 +23,7 @@
  * SOFTWARE.
  *
  *******************************************************************************/
-#include <miopen/miopen.h>
+#include <miopen/miopen_impl.h>
 #include <miopen/multimarginloss.hpp>
 #include <miopen/errors.hpp>
 #include <miopen/handle.hpp>
@@ -31,15 +31,15 @@
 #include <miopen/tensor_ops.hpp>
 
 extern "C" miopenStatus_t
-miopenGetMultiMarginLossForwardWorkspaceSize(miopenHandle_t handle,
-                                             miopenTensorDescriptor_t inputDesc,
-                                             miopenTensorDescriptor_t targetDesc,
-                                             miopenTensorDescriptor_t weightDesc,
-                                             miopenTensorDescriptor_t outputDesc,
-                                             const long p,
-                                             const float margin,
-                                             miopenLossReductionMode_t reduction,
-                                             size_t* sizeInBytes)
+miopenGetMultiMarginLossForwardWorkspaceSize_impl(miopenHandle_t handle,
+                                                  miopenTensorDescriptor_t inputDesc,
+                                                  miopenTensorDescriptor_t targetDesc,
+                                                  miopenTensorDescriptor_t weightDesc,
+                                                  miopenTensorDescriptor_t outputDesc,
+                                                  const long p,
+                                                  const float margin,
+                                                  miopenLossReductionMode_t reduction,
+                                                  size_t* sizeInBytes)
 {
     MIOPEN_LOG_FUNCTION(
         handle, inputDesc, targetDesc, weightDesc, outputDesc, p, margin, reduction);
@@ -57,20 +57,20 @@ miopenGetMultiMarginLossForwardWorkspaceSize(miopenHandle_t handle,
     });
 }
 
-extern "C" miopenStatus_t miopenMultiMarginLossForward(miopenHandle_t handle,
-                                                       miopenTensorDescriptor_t inputDesc,
-                                                       const void* input,
-                                                       miopenTensorDescriptor_t targetDesc,
-                                                       const void* target,
-                                                       miopenTensorDescriptor_t weightDesc,
-                                                       const void* weight,
-                                                       miopenTensorDescriptor_t outputDesc,
-                                                       void* output,
-                                                       const long p,
-                                                       const float margin,
-                                                       miopenLossReductionMode_t reduction,
-                                                       void* workspace,
-                                                       size_t workspaceSizeInBytes)
+extern "C" miopenStatus_t miopenMultiMarginLossForward_impl(miopenHandle_t handle,
+                                                            miopenTensorDescriptor_t inputDesc,
+                                                            const void* input,
+                                                            miopenTensorDescriptor_t targetDesc,
+                                                            const void* target,
+                                                            miopenTensorDescriptor_t weightDesc,
+                                                            const void* weight,
+                                                            miopenTensorDescriptor_t outputDesc,
+                                                            void* output,
+                                                            const long p,
+                                                            const float margin,
+                                                            miopenLossReductionMode_t reduction,
+                                                            void* workspace,
+                                                            size_t workspaceSizeInBytes)
 {
     MIOPEN_LOG_FUNCTION(handle,
                         inputDesc,
