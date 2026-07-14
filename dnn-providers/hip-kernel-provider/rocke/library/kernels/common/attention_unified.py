@@ -622,6 +622,41 @@ def _d256_gfx950_fast(problem: "UnifiedAttentionProblem") -> bool:
     return _resolve_attention_arch() == "gfx950" and _d256_gfx950_cohort(problem)
 
 
+def _d256_gfx950_spec_overrides() -> dict:
+    """Single source of truth for the D256 gfx950 bf16 prefill knob constellation.
+
+    The 32x32 transposed + FA3-style softmax<->MFMA-interleave (mode2/g4) +
+    slab-padded K_lds codegen pins. Consumed by BOTH the builder override in
+    ``builders.common.attention_spec_builder._tiled_spec_from_problem`` (the
+    production path) and the ``dispatch.attention`` gfx950 D256 candidate, so the
+    dispatched spec and the built kernel cannot drift.
+    """
+    return dict(
+        use_mfma_32x32=True,
+        use_transposed_qk_32x32=True,
+        use_q_direct_reg=True,
+        use_transposed_half_local_pv=True,
+        use_transposed_scalar_state=True,
+        use_transposed_mask_once=True,
+        use_transposed_mask_limit=True,
+        use_mask_phase_split=True,
+        use_register_pv=False,
+        use_k_single_buffer=True,
+        use_v_double_buffer=False,
+        use_early_v_schedule=False,
+        use_sched_barrier=False,
+        use_softmax_mfma_interleave=True,
+        softmax_interleave_mode=2,
+        softmax_interleave_groups=4,
+        use_fast_paged_kv_desc=False,
+        use_mfma32_skip_legacy_qreg=False,
+        # Slab-granularity K_lds pad (16 halves): breaks the row-aliased bank
+        # conflict on the QK K read for a ~25% Sq8192 latency win.
+        use_kq_lds_pad=True,
+        kq_lds_pad_halves=16,
+    )
+
+
 def _select_2d_tile_size(problem: UnifiedAttentionProblem) -> int:
     """Choose ``tile_size`` (T) for the tiled 2D kernel.
 
@@ -2093,12 +2128,16 @@ def _resolve_lds_budget(spec):
 
 def _tiled_spec_from_problem(
     problem: UnifiedAttentionProblem,
+    *,
+    overrides=None,
 ):
     from builders.common.attention_spec_builder import (
         _tiled_spec_from_problem as _impl,
     )
 
     _spec = _impl(problem)
+    if overrides is not None:
+        _spec = replace(_spec, **overrides)
     return _resolve_lds_budget(_spec)
 
 

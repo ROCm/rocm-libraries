@@ -150,6 +150,11 @@ class AttentionSpec:
     num_query_heads: int
     num_kv_heads: int
     name: str = "rocke_attention_unified"
+    # Optional pinned codegen knobs a specialized candidate wants the builder to
+    # apply (sorted (key, value) pairs; empty for generic candidates). See
+    # ``attention_unified._d256_gfx950_spec_overrides``; the builder consumes them
+    # via ``_tiled_spec_from_problem(problem, overrides=...)``.
+    tiled_overrides: Tuple[Tuple[str, object], ...] = ()
 
     def kernel_name(self) -> str:
         from rocke.helpers.spec import kernel_name_join
@@ -350,6 +355,7 @@ def _make_gfx950_d256_candidate() -> KernelCandidate:
             raise ValueError(f"{name} does not support request: {why}")
         assert isinstance(req, AttentionRequest)
         problem = _problem(req)
+        from kernels.common.attention_unified import _d256_gfx950_spec_overrides
         return AttentionSpec(
             path="2d",
             head_size=problem.head_size,
@@ -358,6 +364,7 @@ def _make_gfx950_d256_candidate() -> KernelCandidate:
             num_query_heads=problem.num_query_heads,
             num_kv_heads=problem.num_kv_heads,
             name="rocke_attention_gfx950_d256",
+            tiled_overrides=tuple(sorted(_d256_gfx950_spec_overrides().items())),
         )
 
     candidate = KernelCandidate(
