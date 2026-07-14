@@ -5,7 +5,6 @@ GlobalParameters:
   SyncsPerBenchmark: 0
   NumElementsToValidate: -1
   KernelTime: True
-  NewClient: 2
   BoundsCheck: 0
   PrintSolutionRejectionReason: True
   ValidationMaxToPrint: 4      # maximum number of mismatches to print
@@ -22,12 +21,10 @@ GlobalParameters:
   NumWarmups: 1
   EnqueuesPerSync: 1
   PrintWinnersOnly: False
-  MinKForGSU: 1
   Architecture: gfx1250
   # KeepBuildTmp: True
   PrintLevel: 2
-  MaxLDS: 163840
-  DeviceLDS: 163840
+  DisableAsmComments: True
 
 
 BenchmarkProblems:
@@ -99,7 +96,7 @@ BenchmarkProblems:
       BenchmarkJoinParameters:
       BenchmarkFinalParameters:
         - ProblemSizes:
-          - Exact: [512, 512, 1, 1024]
+          - Exact: [512, 512, 1, 1536]
           - Exact: [512, 512, 1, 1056]
           - Exact: [514, 512, 1, 1024]
           - Exact: [512, 514, 1, 1024]

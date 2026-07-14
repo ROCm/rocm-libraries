@@ -2,12 +2,24 @@
 
 Full documentation for rocPRIM is available at [https://rocm.docs.amd.com/projects/rocPRIM/en/latest/](https://rocm.docs.amd.com/projects/rocPRIM/en/latest/).
 
-## Since last release ROCm 7.13
+## rocPRIM 5.0.0 for ROCm 10.0
+
+### Changed
+
+* Combined and simplified separate assertion templates using `std::is_floating_point`, `rocprim::half`, and `rocprim::bfloat16` to use `rocprim::is_floating_point`
+
+## rocPRIM 4.5.0 for ROCm 7.14
 
 ### Added
 
 * Added `generate_resource_spec.cpp` to the test directory and built as a new target by CMake. It generates the resource spec file required by CTest when running tests in parallel.
 * gfx1250 support
+
+* Added a parallel `device_topk`, which finds the largest/smallest K elements from an input array of keys.
+
+### Optimizations
+
+* Improved performance for the fallback path of lookback scan where the flag can't be fit into the same atomic load/store.
 
 ### Changed
 
