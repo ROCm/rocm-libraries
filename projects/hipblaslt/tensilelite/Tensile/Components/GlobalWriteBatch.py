@@ -1321,6 +1321,10 @@ class GlobalWriteBatchWriter:
       self.kernel.get("UseSubtileImpl") and not self.edge
       and self.kernel["_GlobalAccumulation"] not in ("MultipleBufferSingleKernel", "MultipleBuffer")
     )
+    isSubtileTDMStore = (
+      self.kernel.get("UseSubtileImpl")
+      and self.kernel["_GlobalAccumulation"] not in ("MultipleBufferSingleKernel", "MultipleBuffer")
+    )
     is16bitSubtile = (
       isSubtileNonEdge
       and (self.kernel["ProblemType"]["DestDataType"].isBFloat16() or
@@ -1812,7 +1816,7 @@ class GlobalWriteBatchWriter:
         #   ...
         # Pairing key: tt0 % 2 — even tt0 is sba=0, odd tt0 is sba=1.
         storeCodeModule = storeCode if self.kernel["GroupLoadStore"] else module
-        if self.kernel.get("TDMSubtileHybrid") and isSubtileNonEdge:
+        if self.kernel.get("TDMSubtileHybrid") and isSubtileTDMStore:
           if self.batchIdx == 0 and elementIdx == 0:
             _setupMod, self.parentWriter._tdmHybBaseVgpr = self.parentWriter._emitTdmHybBaseSetup(self.kernel, self.tmpS01)
             storeCodeModule.add(_setupMod)
