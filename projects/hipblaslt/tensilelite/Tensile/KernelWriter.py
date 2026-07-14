@@ -6796,6 +6796,81 @@ class KernelWriter(metaclass=abc.ABCMeta):
       instructionCount //= min(kernel["VectorWidth%s" % tc], elementsPerInstruction)
     return instructionCount
 
+  def canUseValuFirstVgprLayout(self, kernel):
+    """Return whether A/B values can precede their transient address state."""
+    hasSimpleOperands = (not kernel["ProblemType"]["Sparse"]
+                         and not kernel["ProblemType"]["MXBlockA"]
+                         and not kernel["ProblemType"]["MXBlockB"])
+    usesSimpleDataMovement = (not kernel["DirectToVgprA"]
+                              and not kernel["DirectToVgprB"]
+                              and not kernel["DirectToLdsA"]
+                              and not kernel["DirectToLdsB"]
+                              and not kernel["enableTDMA"]
+                              and not kernel["enableTDMB"])
+    hasSimpleAddressState = (kernel["BufferLoad"]
+                             and not kernel["StoreSwapAddr"]
+                             and not kernel["PrefetchGL2"]
+                             and not self.states.IncLdsBufSwitch)
+    has16BitOperands = (kernel["ProblemType"]["MacDataTypeA"].numBytes() == 2
+                        and kernel["ProblemType"]["MacDataTypeB"].numBytes() == 2)
+    return (kernel["EnableMatrixInstruction"]
+            and self.states.asmCaps["HasWMMA_V1"]
+            and kernel["LoopIters"] == 1
+            and self.states.numVgprBuffer == 1
+            and self.states.numItersPLR == 0
+            and not kernel["ConvertAfterDS"]
+            and bool(kernel["PrefetchGlobalRead"])
+            and hasSimpleOperands
+            and usesSimpleDataMovement
+            and hasSimpleAddressState
+            and has16BitOperands)
+
+  def numVgprValuPack(self, kernel, tP):
+    """Return the VGPRs reserved for one tensor's local-read pack region."""
+    if not self.localReadNeedsValuPack(kernel, tP):
+      return 0
+
+    tc = tP["tensorChar"]
+    tensorState = self.states.a if tc == "A" else self.states.b
+    lrvwTile = self.states.lrvwTileA if tc == "A" else self.states.lrvwTileB
+    numVgprBufferPack = self.states.numVgprBufferPackA if tc == "A" else self.states.numVgprBufferPackB
+    packDTV = self.states.packDTVA if tc == "A" else self.states.packDTVB
+    if lrvwTile > 1:
+      count = ceil(kernel["VectorWidth%s" % tc] * tP["bpe"] / self.states.bpr) \
+        * kernel["MIWaveTile%s" % tc] // kernel["VectorWidth%s" % tc] \
+        * kernel["InnerUnroll"] * self.states.numVgprBuffer * kernel["MIInputPerThread%s" % tc]
+      if packDTV:
+        count *= 2
+      elif kernel["UsePLRPack"] and self.states.numItersPLR:
+        count //= 2
+      return count
+
+    return tensorState.numVgprValuPerBlock * kernel["InnerUnroll"] \
+      * numVgprBufferPack * (int(4/tP["bpeDS"]) - 1)
+
+  def alignVgprForValuA(self, kernel, vgprIdx, valuFirstVgprLayout):
+    """Apply the A-value alignment and bank-selection policy."""
+    vgprIdx = ((vgprIdx+1)//2)*2
+    if self.states.archCaps["VgprBank"] and not self.states.asmCaps["HasWMMA_V3"]:
+      if valuFirstVgprLayout:
+        vgprIdx += 2
+      elif (self.states.c.startVgprValu % 4) != (vgprIdx % 4):
+        vgprIdx += 2
+    if kernel["UseDotInstruction"] and kernel["InnerUnroll"] > 1:
+      vgprIdx = ((vgprIdx+3)//4)*4
+    return vgprIdx
+
+  def alignVgprForValuB(self, kernel, vgprIdx):
+    """Apply the B-value alignment and bank-selection policy."""
+    if self.states.archCaps["VgprBank"]:
+      if (vgprIdx % 4) % 2 == 0:
+        vgprIdx += 1
+      if kernel["ISA"][:2] == (12, 5):
+        vgprIdx = ((vgprIdx+1)//2)*2
+    else:
+      vgprIdx = ((vgprIdx+1)//2)*2
+    return vgprIdx
+
   ##############################################################################
   # Init Kernel
   ##############################################################################
@@ -8284,6 +8359,7 @@ class KernelWriter(metaclass=abc.ABCMeta):
       GNLCOInit('Metadata')
 
       numVgprAddressDbg = self.states.rpga if self.debugConfig.debugKernel else 0
+      valuFirstVgprLayout = self.canUseValuFirstVgprLayout(kernel)
 
       ####################################
       # num vgprs: c write address
@@ -8417,9 +8493,19 @@ class KernelWriter(metaclass=abc.ABCMeta):
           vgprIdx = self.states.c.startVgprValu + self.states.totalMixedAgprs
           self.states.c.numVgprValu = self.states.totalMixedAgprs
 
-      #----------------------------------
-      # Move to the front and bypass to tail loop
-      self.states.startVgprMisc = vgprIdx
+      valuFirstAddressStart = None
+      valuFirstAddressEnd = None
+      if valuFirstVgprLayout:
+        valuStart = self.alignVgprForValuA(kernel, vgprIdx, valuFirstVgprLayout)
+        valuFirstAddressStart = valuStart + self.states.a.numVgprValu \
+          + self.numVgprValuPack(kernel, tensorParametersA)
+        valuFirstAddressStart = self.alignVgprForValuB(kernel, valuFirstAddressStart) \
+          + self.states.b.numVgprValu + self.numVgprValuPack(kernel, tensorParametersB)
+        self.states.startVgprMisc = valuStart
+        vgprIdx = valuFirstAddressStart
+      else:
+        # Move to the front and bypass to tail loop.
+        self.states.startVgprMisc = vgprIdx
 
       # BufferLoad:
       # Uses a resource descriptor (SRD) which is stored in 4 SGPRs and thus shared by all work-items.
@@ -8511,16 +8597,17 @@ class KernelWriter(metaclass=abc.ABCMeta):
       if kernel["ProblemType"]["MXBlockB"]:
         self.states.mxsb.startVgprLocalReadAddr = vgprIdx
         vgprIdx += self.states.mxsb.numVgprLocalReadAddr
-      self.states.a.startVgprLocalReadAddr = vgprIdx
-      vgprIdx += self.states.a.numVgprLocalReadAddr
-      self.states.b.startVgprLocalReadAddr = vgprIdx
-      vgprIdx += self.states.b.numVgprLocalReadAddr
+      if not valuFirstVgprLayout:
+        self.states.a.startVgprLocalReadAddr = vgprIdx
+        vgprIdx += self.states.a.numVgprLocalReadAddr
+        self.states.b.startVgprLocalReadAddr = vgprIdx
+        vgprIdx += self.states.b.numVgprLocalReadAddr
 
       # ----------------------------
       # TODO: alignment hack, figure out a better solution
       boolMoveLocalReadAddrA = False
       boolMoveLocalReadAddrB = False
-      if (vgprIdx % 2) == 1:
+      if not valuFirstVgprLayout and (vgprIdx % 2) == 1:
         if (self.states.a.numVgprLocalReadAddr % 2) == 1:
           boolMoveLocalReadAddrA = True
           self.states.b.startVgprLocalReadAddr -= self.states.a.numVgprLocalReadAddr
@@ -8542,35 +8629,19 @@ class KernelWriter(metaclass=abc.ABCMeta):
           self.states.mxsb.startVgprLocalReadAddrOrig = vgprIdx
           vgprIdx += 1 if self.states.mxsb.numVgprLocalReadAddr > 0 else 0
 
-      # ----------------------------
-      # TODO: alignment hack, figure out a better solution
-      vgprIdx = ((vgprIdx+1)//2)*2
-      # Avoid bank conflict between VgprA and VgprC.
-      # Skip for WMMA_V3: VgprA and VgprC are loaded in different cycles.
-      if(self.states.archCaps["VgprBank"] and not self.states.asmCaps["HasWMMA_V3"]):
-        if (self.states.c.startVgprValu % 4) != (vgprIdx % 4):
-          vgprIdx += 2
-      # dot2: alignment hack for wider local read
-      if kernel["UseDotInstruction"] and kernel["InnerUnroll"] > 1:
-        vgprIdx = ((vgprIdx+3)//4)*4
+      if valuFirstVgprLayout:
+        valuFirstAddressEnd = vgprIdx
+        vgprIdx = self.states.c.startVgprValu + self.states.c.numVgprValu
 
-      self.states.startVgpr = vgprIdx
+      self.states.startVgpr = self.alignVgprForValuA(kernel, vgprIdx, valuFirstVgprLayout)
+      vgprIdx = self.states.startVgpr
 
       self.states.a.startVgprValu = vgprIdx
       vgprIdx += self.states.a.numVgprValu
 
-      numVgprValuPackA = 0
-      if self.localReadNeedsValuPack(kernel, tensorParametersA):
+      numVgprValuPackA = self.numVgprValuPack(kernel, tensorParametersA)
+      if numVgprValuPackA:
         self.states.a.startVgprValuPack = vgprIdx
-        if self.states.lrvwTileA > 1:
-          numVgprValuPackA = ceil(kernel["VectorWidthA"] * tensorParametersA["bpe"] / self.states.bpr) * kernel["MIWaveTileA"] // kernel["VectorWidthA"] * kernel["InnerUnroll"] * self.states.numVgprBuffer * kernel["MIInputPerThreadA"]
-          if self.states.packDTVA:
-            # pack DTV case, double the number
-            numVgprValuPackA *= 2
-          elif (kernel["UsePLRPack"] and self.states.numItersPLR):
-            numVgprValuPackA //= 2
-        else:
-          numVgprValuPackA = self.states.a.numVgprValuPerBlock * kernel["InnerUnroll"] * self.states.numVgprBufferPackA * (int(4/tensorParametersA["bpeDS"]) - 1)
       vgprIdx += numVgprValuPackA
       self.states.a.startVgprG2L = None
       if (not kernel["DirectToLdsA"] or self.do["KeepDirectToLdsAlloc"]) and not kernel["enableTDMA"]:
@@ -8586,31 +8657,13 @@ class KernelWriter(metaclass=abc.ABCMeta):
           vgprIdx = self.states.a.startVgprValu  \
               + max(self.states.a.numVgprValu + numVgprValuPackA, self.states.a.numVgprG2LAllocated)
 
-      # TODO: alignment hack, figure out a better solution
-      if(self.states.archCaps["VgprBank"]):
-        residual = (vgprIdx % 4)
-        if (residual % 2) == 0:
-          # if 2-aligned bank(bank0 and bank2), move to bank1 or bank3.
-          vgprIdx += 1
-        if kernel["ISA"][:2] == (12, 5):
-          vgprIdx = ((vgprIdx+1)//2)*2
-      else:
-        vgprIdx = ((vgprIdx+1)//2)*2
+      vgprIdx = self.alignVgprForValuB(kernel, vgprIdx)
 
       self.states.b.startVgprValu = vgprIdx
       vgprIdx += self.states.b.numVgprValu
-      numVgprValuPackB = 0
-      if self.localReadNeedsValuPack(kernel, tensorParametersB):
+      numVgprValuPackB = self.numVgprValuPack(kernel, tensorParametersB)
+      if numVgprValuPackB:
         self.states.b.startVgprValuPack = vgprIdx
-        if self.states.lrvwTileB > 1:
-          numVgprValuPackB = ceil(kernel["VectorWidthB"] * tensorParametersB["bpe"] / self.states.bpr) * kernel["MIWaveTileB"] // kernel["VectorWidthB"] * kernel["InnerUnroll"] * self.states.numVgprBuffer * kernel["MIInputPerThreadB"]
-          if self.states.packDTVB:
-            # pack DTV case, double the number
-            numVgprValuPackB *= 2
-          elif (kernel["UsePLRPack"] and self.states.numItersPLR):
-            numVgprValuPackB //= 2
-        else:
-          numVgprValuPackB = self.states.b.numVgprValuPerBlock * kernel["InnerUnroll"] * self.states.numVgprBufferPackB * (int(4/tensorParametersB["bpeDS"]) - 1)
       vgprIdx += numVgprValuPackB
       self.states.b.startVgprG2L = None
       if (not kernel["DirectToLdsB"] or self.do["KeepDirectToLdsAlloc"]) and not kernel["enableTDMB"]:
@@ -8680,6 +8733,9 @@ class KernelWriter(metaclass=abc.ABCMeta):
 
       #-----------
       self.states.firstVgprForReads = vgprIdx
+      if valuFirstVgprLayout:
+        assert vgprIdx == valuFirstAddressStart
+        vgprIdx = valuFirstAddressEnd
       if self.states.a.startVgprG2L is None and self.states.a.numVgprG2LAllocated > 0:
         # TODO: alignment hack, figure out a better solution
         vgprIdx = ((vgprIdx+1)//2)*2
@@ -8725,6 +8781,12 @@ class KernelWriter(metaclass=abc.ABCMeta):
           # TODO: alignment hack, figure out a better solution
           vgprIdx = ((vgprIdx+1)//2)*2
           self.states.m.startVgprG2L = vgprIdx; vgprIdx += self.states.m.numVgprG2LAllocated
+
+      if valuFirstVgprLayout:
+        self.states.a.startVgprLocalReadAddr = vgprIdx
+        vgprIdx += self.states.a.numVgprLocalReadAddr
+        self.states.b.startVgprLocalReadAddr = vgprIdx
+        vgprIdx += self.states.b.numVgprLocalReadAddr
 
       # GlobalRead, LocalWrite, LocalRead, G2L can be reclaimed, extend the "lastVgprForReads" value
       self.states.lastVgprForReads = vgprIdx
