@@ -3,6 +3,8 @@
 
 #include "custom_kernels.hpp"
 
+#include "rocblaslt_secure_env.hpp"
+
 #include <hip/hip_ext.h>
 #include <hip/hip_runtime.h>
 #include <iostream>
@@ -37,38 +39,36 @@ std::shared_ptr<GemmKernel> createWaveGemmKernel(const std::string&           cu
 
 std::filesystem::path getCoPath()
 {
-    std::filesystem::path libraryPath;
-    bool staticLib = false;
+    // ROCM-26729 / SEC-00896: use the privilege-aware accessor so a
+    // set-uid/set-gid process cannot be redirected to an attacker-controlled
+    // code-object directory via inherited environment.
+    if(const char* env = rocblaslt_secure_getenv("HIPBLASLT_TENSILE_LIBPATH"))
+        return env;
 
+    if(rocblaslt_env_suppressed_for_security("HIPBLASLT_TENSILE_LIBPATH"))
+    {
+        std::cerr << "rocblaslt warning: ignoring HIPBLASLT_TENSILE_LIBPATH because the "
+                     "process is running with elevated privileges (set-uid/set-gid); "
+                     "falling back to the default library location."
+                  << std::endl;
+    }
+
+    // Find the location of librocblaslt.so. Fall back on a hard-coded path when
+    // built as a static library or when the shared-library-relative search fails.
+    std::optional<std::filesystem::path> default_lib_path;
 #ifdef HIPBLASLT_STATIC_LIB
-    staticLib = true;
+    // Assume library files are in "/opt/rocm"
+    default_lib_path = "/opt/rocm/lib";
 #endif
 
-    const char* env = getenv("HIPBLASLT_TENSILE_LIBPATH");
-    if(env)
+    if(auto maybe_path
+       = rocblaslt_find_library_relative_path(/*relpath=*/std::nullopt, default_lib_path))
     {
-        libraryPath = env;
-    }
-    else
-    {
-        // Find the location of librocblaslt.so
-        // Fall back on hard-coded path if static library or not found
-        std::optional<std::filesystem::path> default_lib_path;
-        if(staticLib)
-        {
-            // Assume library files are in "/opt/rocm"
-            default_lib_path = "/opt/rocm/lib";
-        }
-
-        if(auto maybe_path = rocblaslt_find_library_relative_path(
-               /*relpath=*/std::nullopt, default_lib_path))
-        {
-            // Worst case use "./"
-            libraryPath = maybe_path.value_or(".");
-        }
+        // Worst case use "./"
+        return maybe_path.value_or(".");
     }
 
-    return libraryPath;
+    return {};
 }
 
 // Helper to get kernel name with optional _ntA or _ntB suffix

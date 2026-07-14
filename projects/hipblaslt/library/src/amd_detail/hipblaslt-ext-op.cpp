@@ -39,6 +39,7 @@
 #include <memory>
 #include <optional>
 #include <rocblaslt-auxiliary.h>
+#include <rocblaslt_secure_env.hpp>
 #include <sstream>
 #include <string>
 #include <tensile_host.hpp>
@@ -136,9 +137,21 @@ namespace
     // empty path, which surfaces as a clean ExtOpMasterLibrary load failure.
     std::string getExtOpLibraryPath()
     {
-        if(auto libPath = std::getenv("HIPBLASLT_EXT_OP_LIBRARY_PATH"))
+        // ROCM-26729 / SEC-00896: honor the override only for a non-privileged
+        // process so a set-uid/set-gid process cannot be redirected to an
+        // attacker-controlled ExtOp library via inherited environment.
+        if(auto libPath = rocblaslt_secure_getenv("HIPBLASLT_EXT_OP_LIBRARY_PATH"))
         {
             return libPath;
+        }
+
+        if(rocblaslt_env_suppressed_for_security("HIPBLASLT_EXT_OP_LIBRARY_PATH"))
+        {
+            rocblaslt_log_error("getExtOpLibraryPath",
+                                "HIPBLASLT_EXT_OP_LIBRARY_PATH",
+                                "ignoring env override because the process is running with "
+                                "elevated privileges (set-uid/set-gid); using the default "
+                                "per-arch library location");
         }
 
         int              deviceId{};
