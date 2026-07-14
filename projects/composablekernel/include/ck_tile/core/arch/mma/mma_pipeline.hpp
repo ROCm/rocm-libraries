@@ -2,15 +2,12 @@
 // SPDX-License-Identifier: MIT
 #pragma once
 
-#include "ck_tile/core/arch/arch.hpp"
-#include "ck_tile/core/numeric/vector_type.hpp"
-#include "ck_tile/ops/gemm/warp/warp_gemm_params.hpp"
+#include "ck_tile/core/arch/mma/mma_traits.hpp"
+#include "ck_tile/core/config.hpp"
+#include "ck_tile/core/numeric/integer.hpp"
 #include "ck_tile/core/tensor/static_distributed_tensor.hpp"
-
-#include "amdgcn_mma.hpp"
-#include "mma_selector.hpp"
-#include "mma_traits.hpp"
-#include "mma_transforms.hpp"
+#include "ck_tile/core/utility/type_traits.hpp"
+#include "ck_tile/ops/gemm/warp/warp_gemm_params.hpp"
 
 namespace ck_tile::core::arch::mma {
 

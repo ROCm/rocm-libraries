@@ -3,10 +3,9 @@
 
 #pragma once
 
-#include "mfma_traits.hpp"
-
 #include "ck_tile/core/arch/arch.hpp"
 #include "ck_tile/core/arch/mma/amdgcn_mma.hpp"
+#include "ck_tile/core/arch/mma/mfma/mfma_traits.hpp"
 #include "ck_tile/core/arch/mma/mma_op_family.hpp"
 #include "ck_tile/core/config.hpp"
 #include "ck_tile/core/container/thread_buffer.hpp"
