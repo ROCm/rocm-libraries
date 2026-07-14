@@ -3007,10 +3007,20 @@ class KernelWriter(metaclass=abc.ABCMeta):
       # we can't init in shadow of this prefetch
       # since that would initC inside the other summation loops
 
-      if self.states.doShadowInit != 2:
-        module.add(self.initC(kernel))
+      # initC lives in setupNewTile only when shadow-init didn't already emit it.
+      emitInitCHere = self.states.doShadowInit != 2
+      # The skip-branch reads LoopCounterL in assembly, so initC must be emitted AFTER
+      # calculateLoopNumIter
+      deferInitC = emitInitCHere and bool(kernel["InitCIterWmma"])
+
+      def emitInitC(skipVMov):
+        module.add(self.initC(kernel, skipVMov))
         if kernel["ProblemType"]["Gradient"] and kernel["ProblemType"]["UseBias"] and (kernel["ProblemType"]["BiasSrc"] == "A" or kernel["ProblemType"]["BiasSrc"] == "B"):
           module.add(self.initSumUnroll(kernel))
+
+      # Immediate initC (before calculateLoopNumIter): never carries the branch.
+      if emitInitCHere and not deferInitC:
+        emitInitC(skipVMov=False)
 
       # open non-unrolled summation loops
       if not forceNoTileCode:
@@ -3020,6 +3030,9 @@ class KernelWriter(metaclass=abc.ABCMeta):
           if self.states.actualSummationLoops>1:
             module.add(self.openLoop(kernel, tensorParametersA, tensorParametersB, i))
         module.add(self.calculateLoopNumIter(kernel, tensorParametersA, tensorParametersB, self.states.unrollIdx))
+
+      if deferInitC:
+        emitInitC(skipVMov=True)
 
       if not forceNoTileCode and self.states.staggerUCode:
         module.add(self.declareStaggerParms(kernel))
@@ -3574,10 +3587,25 @@ class KernelWriter(metaclass=abc.ABCMeta):
             self.codes.globalReadMetadata = StructuredModule() # empty
 
         else:
-          self.codes.localWriteA = Module()
-          self.codes.localWriteB = Module()
-          self.codes.localWriteMXSA = Module()
-          self.codes.localWriteMXSB = Module()
+          # For ForceUnrollSubIter+SIA=0+PGR, the NLL (isLastLoop=True) still needs to
+          # write the last GR's G2L data to LDS (in localWriteEndIter subiter), because
+          # the main loop's last GR fires in subiter 3 and the NLL's subiter 2 must LW it.
+          if (not kernel["NoLdsWriteCode"]) and kernel["ForceUnrollSubIter"] and kernel["_ScheduleIterAlg"] == 0 and kernel["PrefetchGlobalRead"]:
+            self.codes.localWriteA = self.localWriteDo(kernel, tensorParametersA)
+            if "MX" in tensorParametersA:
+              self.codes.localWriteMXSA = self.localWriteDo(kernel, tensorParametersA["MX"])
+            else:
+              self.codes.localWriteMXSA = Module()
+            if "MX" in tensorParametersB:
+              self.codes.localWriteMXSB = self.localWriteDo(kernel, tensorParametersB["MX"])
+            else:
+              self.codes.localWriteMXSB = Module()
+            self.codes.localWriteB = self.localWriteDo(kernel, tensorParametersB)
+          else:
+            self.codes.localWriteA = Module()
+            self.codes.localWriteB = Module()
+            self.codes.localWriteMXSA = Module()
+            self.codes.localWriteMXSB = Module()
           self.codes.globalReadMetadata = StructuredModule() # empty
 
         callMakeSchedule = not isNGLL or kernel["ExpandPointerSwap"] or UnrollLoopSwapGlobalReadOrder or isDTVAB or \
@@ -4078,6 +4106,8 @@ class KernelWriter(metaclass=abc.ABCMeta):
         module.add(self._wait(kernel, tensorParametersA, tensorParametersB, vlcntVal, -1, -1, "10wait for global read"))
       if not kernel["NoLdsWriteCode"]:
         module.add(self._wait(kernel, tensorParametersA, tensorParametersB, -1, 0, -1, "4wait for local write"))
+      elif kernel["enableTDMA"] and kernel["enableTDMB"]:
+        module.add(self._wait(kernel, tensorParametersA, tensorParametersB, 0, -1, -1, "wait for TDM tensor loads"))
       module.add(self._syncThreads(kernel, "wait for local write done, sync"))
       papPriorSync = True
     elif kernel["enableTDMA"] and kernel["enableTDMB"]:
@@ -5275,7 +5305,7 @@ class KernelWriter(metaclass=abc.ABCMeta):
     self.states.skConstVgprs = {}
 
     consts = ["ItersPerTile", "MagicNumberItersPerTile", "MagicShiftItersPerTile", "SKItersPerWG"]
-    if kernel["StreamK"] >= 2:
+    if kernel["StreamK"] == 3:
       consts += ["skGrid", "skTiles"]
 
     baseVgpr = self.states.startVgprSKConsts
@@ -5736,6 +5766,11 @@ class KernelWriter(metaclass=abc.ABCMeta):
       originalNta = tensorParametersA["NonTemporal"]
       originalNtb = tensorParametersB["NonTemporal"]
 
+      hasTH = self.states.asmCaps.get("HasTHModifier", False)
+      if hasTH:
+        originalThA = tensorParametersA["TemporalHint"]
+        originalThB = tensorParametersB["TemporalHint"]
+
       ntCombos = [[0, 0], [0, 4], [4, 0]]
       ntLabels = [Label("LoopBody_NTA{}_NTB{}".format(nta, ntb), "") for nta, ntb in ntCombos]
       ntLabelDone = Label("LoopBody_NTA_NTB_Done", "")
@@ -5799,6 +5834,9 @@ class KernelWriter(metaclass=abc.ABCMeta):
         module.add(ntLabels[idx])
         tensorParametersA["NonTemporal"] = nta
         tensorParametersB["NonTemporal"] = ntb
+        if hasTH:
+          tensorParametersA["TemporalHint"] = 1 if nta else 0
+          tensorParametersB["TemporalHint"] = 1 if ntb else 0
         _kernelBody(pack, packPre, nta, ntb)
         # All paths but the last one need to skip the rest. Use long
         # branches everywhere because each kernelBody can easily exceed
@@ -5812,6 +5850,9 @@ class KernelWriter(metaclass=abc.ABCMeta):
 
       tensorParametersA["NonTemporal"] = originalNta
       tensorParametersB["NonTemporal"] = originalNtb
+      if hasTH:
+        tensorParametersA["TemporalHint"] = originalThA
+        tensorParametersB["TemporalHint"] = originalThB
 
     if kernel["ExpertSchedulingMode"] > 0:
       module.add(SSetRegIMM32B32(dst=HWRegContainer(reg="26", value=[0,2]), src=0x0, comment="enable hardware dependency checking"))
@@ -6238,7 +6279,7 @@ class KernelWriter(metaclass=abc.ABCMeta):
         module.addComment1("Recalc local read offsets")
         module.add(self.recalcLocalReadAddressesAB(kernel, tensorParametersA, tensorParametersB))
       module.add(self._wait(kernel, tensorParametersA, tensorParametersB, -1, 0, -1, "5wait for local write"))
-      module.add(self._syncThreads(kernel, "Tail loop LW->LR, sync LDS0", memoryToken=[self.states.memTokenLdsBuffer0]))
+      module.add(self._syncThreads(kernel, "Tail loop LW->LR, sync LDS0", memoryToken=self._tailLoopBarrierTokens(kernel)))
       #module.add(self.dumpLds(kernel, 0, 8))
 
       # tail: free G2L Vgpr
@@ -6466,7 +6507,7 @@ class KernelWriter(metaclass=abc.ABCMeta):
       # generate wait code for early exit
       module.add(self._wait(kernel, tensorParametersA, tensorParametersB, 0, -1, -1, " tailloopInNll: wait for global read"))
       module.add(self._wait(kernel, tensorParametersA, tensorParametersB, -1, 0, -1, " tailloopInNll: wait for local read"))
-      module.add(self._syncThreads(kernel, "tailloopInNll: wait until LR done, sync LDS0", memoryToken=[self.states.memTokenLdsBuffer0]))
+      module.add(self._syncThreads(kernel, "tailloopInNll: wait until LR done, sync LDS0", memoryToken=self._tailLoopBarrierTokens(kernel)))
 
     if self.states.lastValuMXSAB:
       self.vgprPool.add(0 , self.states.lastValuMXSAB, "ValuMXSAB")
@@ -7183,9 +7224,12 @@ class KernelWriter(metaclass=abc.ABCMeta):
     if kernel["1LDSBuffer"]:
       self.states.memTokenLdsBuffer0 = 0
       self.states.memTokenLdsBuffer1 = 0
+      self.states.memTokenLdsSplit = [[1, 2], [1, 2]]
     else:
       self.states.memTokenLdsBuffer0 = 0
       self.states.memTokenLdsBuffer1 = 1
+      # [bufferParity][half]; half-0 reuses buffer token so MXSA/MXSB share it
+      self.states.memTokenLdsSplit = [[self.states.memTokenLdsBuffer0, 2], [self.states.memTokenLdsBuffer1, 6]]
     self.states.ldsReadTokenIdx = self.states.memTokenLdsBuffer0
     self.states.ldsTensorTokenIdx = self.states.memTokenLdsBuffer0
     self.states.ldsDirectToLDSTokenIdx = self.states.memTokenLdsBuffer0
@@ -8460,8 +8504,9 @@ class KernelWriter(metaclass=abc.ABCMeta):
       # ----------------------------
       # TODO: alignment hack, figure out a better solution
       vgprIdx = ((vgprIdx+1)//2)*2
-      # Avoid bank conflict between VgprA and VgprC
-      if(self.states.archCaps["VgprBank"]):
+      # Avoid bank conflict between VgprA and VgprC.
+      # Skip for WMMA_V3: VgprA and VgprC are loaded in different cycles.
+      if(self.states.archCaps["VgprBank"] and not self.states.asmCaps["HasWMMA_V3"]):
         if (self.states.c.startVgprValu % 4) != (vgprIdx % 4):
           vgprIdx += 2
       # dot2: alignment hack for wider local read
@@ -8894,7 +8939,7 @@ class KernelWriter(metaclass=abc.ABCMeta):
 
       if kernel["StreamK"] and self.isStreamKConstantsToVgprEnabled(kernel):
         numSKConsts = 5  # ItersPerTile, MagicNumberItersPerTile, MagicShiftItersPerTile, SKItersPerWG, StreamKIdx
-        if kernel["StreamK"] >= 2:
+        if kernel["StreamK"] == 3:
           numSKConsts += 2  # skGrid, skTiles
         self.states.startVgprSKConsts = vgprIdx
         self.states.numVgprSKConsts = numSKConsts
@@ -8951,12 +8996,27 @@ class KernelWriter(metaclass=abc.ABCMeta):
 
       #vgprIdx += self.states.c.numVgprValu
       if kernel["StreamK"] and self.isStreamKConstantsToVgprEnabled(kernel):
-        numSKConsts = 5
-        if kernel["StreamK"] >= 2:
-          numSKConsts += 2
+        numSKConsts = 5  # ItersPerTile, MagicNumberItersPerTile, MagicShiftItersPerTile, SKItersPerWG, StreamKIdx
+        if kernel["StreamK"] == 3:
+          numSKConsts += 2  # skGrid, skTiles
         self.states.startVgprSKConsts = vgprIdx
         self.states.numVgprSKConsts = numSKConsts
         vgprIdx += numSKConsts
+
+      # GL2 prefetch: init tp fields and allocate address VGPRs
+      if kernel["PrefetchGL2"]:
+        self.gl2PrefetchInit(kernel, tensorParametersA, tensorParametersB)
+        vgprIdx = int((vgprIdx + 1) / 2) * 2
+        self.states.a.startVgprGL2PrefetchAddr = vgprIdx
+        vgprIdx += tensorParametersA["gl2nl"] * self.states.rpga
+        self.states.b.startVgprGL2PrefetchAddr = vgprIdx
+        vgprIdx += tensorParametersB["gl2nl"] * self.states.rpga
+        if kernel["ProblemType"]["MXBlockA"]:
+          self.states.mxsa.startVgprGL2PrefetchAddr = vgprIdx
+          vgprIdx += tensorParametersA["MX"]["gl2nl"] * self.states.rpga
+        if kernel["ProblemType"]["MXBlockB"]:
+          self.states.mxsb.startVgprGL2PrefetchAddr = vgprIdx
+          vgprIdx += tensorParametersB["MX"]["gl2nl"] * self.states.rpga
 
       self.states.totalVgprs = vgprIdx
 
@@ -9274,17 +9334,15 @@ class KernelWriter(metaclass=abc.ABCMeta):
       self.defineSgpr("skGrid", 1)
       self.defineSgpr("skTiles", 1)
       self.states.numSgprStreamK += 6
-    elif kernel["StreamK"]:
+    elif kernel["StreamK"] == 3: # SK3 two-tile ABI
       # StreamK args
       self.defineSgpr("ItersPerTile", 1)
       self.defineSgpr("MagicNumberItersPerTile", 1)
       self.defineSgpr("MagicShiftItersPerTile", 1)
       self.defineSgpr("SKItersPerWG", 1)
-      self.states.numSgprStreamK += 4
-      if kernel["StreamK"] >= 2: # Two-tile SK
-        self.defineSgpr("skGrid", 1)
-        self.defineSgpr("skTiles", 1)
-        self.states.numSgprStreamK += 2
+      self.defineSgpr("skGrid", 1)
+      self.defineSgpr("skTiles", 1)
+      self.states.numSgprStreamK += 6
 
     if not kernel["UseSubtileImpl"]:
       if kernel["LocalWriteUseSgprA"]:
@@ -9921,6 +9979,7 @@ class KernelWriter(metaclass=abc.ABCMeta):
     tP["wtc"] = itP[cM].writeTileDimComponents                   # write vector components along tile dimension
     tP["idx"] = kernel["ProblemType"]["Index%d"%tP["tensorIdx"]] # index 0 is tile dimension belonging to A. Note 'idx' may not be in tP['ia'].
     tP["NonTemporal"] = kernel["NonTemporal%s"%cM]               # non-temporal read type
+    tP["TemporalHint"] = kernel.get("TemporalHint%s"%cM, 0)      # temporal-hint read type
     tP["shiftGR"] = 0 if (tP["bpeGR"] >= tP["bpeDS"]) else int(tP["glvw"] // 2 * (tP["bpeDS"] / self.states.bpr))  # Shift global read register for cvt spaces
     tP["bpeRatio"] = tP["bpeDS"] // tP["bpeGR"] if tP["bpeGR"] < tP["bpeDS"] else 1                                # g2lIdx multiplier
 
@@ -10399,6 +10458,14 @@ class KernelWriter(metaclass=abc.ABCMeta):
     if self.do["Sync"]:
       return syncThreads(kernel, self.states.archCaps, self.states.asmCaps, comment, skipForceWaitcnt0=skipForceWaitcnt0, memoryToken=memoryToken)
     return Module("SyncThreads (Empty)")
+
+  def _tailLoopBarrierTokens(self, kernel):
+    # Explicit tail barriers must list every token; the auto-barrier pass doesn't cover them.
+    tokens = [self.states.memTokenLdsBuffer0]
+    if kernel["TDMSplit"] and not kernel["ProblemType"]["Sparse"]:
+      for row in self.states.memTokenLdsSplit:
+        tokens.extend(row)
+    return sorted(set(tokens))
 
   ##############################################################################
   # PostMainLoopBarrierCheckAndReset
