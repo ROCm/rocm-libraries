@@ -122,6 +122,7 @@ pr:
       - 'test_*'
       - '*_test.*'
       - 'Test*'
+      - '*_gtest.*'
     # Unit tests are required for source code ANYWHERE in the repository — there
     # are NO folder-based exemptions. A test file may also live in any folder;
     # it is recognised by its name (test_* / *_test.* / Test*), not its location.
