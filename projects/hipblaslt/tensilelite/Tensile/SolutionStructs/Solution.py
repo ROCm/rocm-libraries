@@ -180,29 +180,42 @@ def _disableUnsupportedRuntimeStaggerU(state):
     _disableRuntimeStaggerU(state)
 
 
-def _validateSubtileMIWaveEven(state, printRejectionReason):
-  # TODO: TEMPORARY FIX. Reject UseSubtileImpl solutions whose per-dimension
-  # MIWaveTile * MIWaveGroup product is odd. The two dimensions are checked
-  # independently: reject if either MIWaveTile[0] * MIWaveGroup[0] or
-  # MIWaveTile[1] * MIWaveGroup[1] is odd. A per-dimension odd product produces a
-  # numerical mismatch we have not yet root-caused. A single even factor in a
-  # dimension makes that product even, so common cases such as MIWaveGroup=[2, 2]
-  # are unaffected and need no rejection. Only the subtile (UseSubtileImpl) path
-  # on gfx950 is affected. Remove this once the underlying mismatch is understood
-  # and fixed.
+def _subtileGRKPartitionIsBuggy(loadRatioGR, localSubtileGrid):
+  # TODO: TEMPORARY FIX. Encodes the trigger for the subtile global-read
+  # cooperative-group + K-partition LDS bug (see fix_subtile_gr_missing_k_partition):
+  # when one buffer_load covers multiple consecutive M-subtiles (loadRatioGR > 1)
+  # and the per-wave M-subtile count (localSubtileGrid[0]) is not a multiple of
+  # loadRatioGR, the last partial M-group writes a "ghost" slot that overlaps the
+  # next K-partition's data, and the K>=1 representative subtile can be silently
+  # dropped. This only manifests when there is more than one K-partition
+  # (localSubtileGrid[1] > 1). Remove once the emit-side fix lands.
+  return (loadRatioGR > 1
+          and localSubtileGrid[1] > 1
+          and localSubtileGrid[0] % int(loadRatioGR) != 0)
+
+
+def _validateSubtileGRKPartition(state, printRejectionReason):
+  # TODO: TEMPORARY FIX. Reject gfx950 subtile solutions that hit the GR
+  # K-partition bug (see _subtileGRKPartitionIsBuggy). Remove once
+  # fix_subtile_gr_missing_k_partition is merged.
   if not state["UseSubtileImpl"]:
     return True
   if tuple(state["ISA"]) != (9, 5, 0):
     return True
-  product0 = state["MIWaveTile"][0] * state["MIWaveGroup"][0]
-  product1 = state["MIWaveTile"][1] * state["MIWaveGroup"][1]
-  if product0 % 2 != 0 or product1 % 2 != 0:
-    reject(state, printRejectionReason,
-           "UseSubtileImpl=1 requires MIWaveTile * MIWaveGroup to be even per "
-           "dimension, got MIWaveTile=[%d, %d], MIWaveGroup=[%d, %d]"
-           % (state["MIWaveTile"][0], state["MIWaveTile"][1],
-              state["MIWaveGroup"][0], state["MIWaveGroup"][1]))
-    return False
+  # Lazy import: Components/Subtile pulls the Components package and would
+  # deadlock at module-load time if imported from Solution.py's top level.
+  from Tensile.Components.Subtile.Kernel import selectABGeometry, TileInfo
+  for tc in ("A", "B"):
+    tileInfo = TileInfo(selectABGeometry(state, tc), tc, None, state)
+    loadRatioGR = tileInfo.loadRatioGR
+    localSubtileGrid = tileInfo.localSubtileGrid
+    if _subtileGRKPartitionIsBuggy(loadRatioGR, localSubtileGrid):
+      reject(state, printRejectionReason,
+             "UseSubtileImpl=1 hits the subtile GR K-partition bug on tensor %s: "
+             "loadRatioGR=%s with localSubtileGrid=%s (M-subtile count %d is not a "
+             "multiple of loadRatioGR and there is more than one K-partition)"
+             % (tc, loadRatioGR, localSubtileGrid, localSubtileGrid[0]))
+      return False
   return True
 
 
@@ -1807,8 +1820,6 @@ class Solution(collections.abc.Mapping):
                  "UseSubtileImpl=1 with MX datatype requires even MIWaveTile, got [%d, %d]"
                  % (state["MIWaveTile"][0], state["MIWaveTile"][1]))
           return
-      if not _validateSubtileMIWaveEven(state, printRejectionReason):
-        return
       if isaInfoMap[isa].asmCaps["HasMFMA"]:
         if not state["ProblemType"]["HighPrecisionAccumulate"] \
            and state["ProblemType"]["DataType"].numRegisters() < 1 \
@@ -2851,6 +2862,11 @@ class Solution(collections.abc.Mapping):
       if state["ProblemType"]["MXBlockB"]:
         state["_DepthUMXSB"] = depthU // state["ProblemType"]["MXBlockB"]
       state["_DepthUMetadata"] = depthUM# internal
+
+      # Runs here (not earlier) because it needs MacroTileA/B and _DepthUA/B,
+      # which TileInfo reads and which are only set by this point.
+      if not _validateSubtileGRKPartition(state, printRejectionReason):
+        return
 
       # fp6 doesn't support LDS padding yet.
       for tc in ["A", "B"]:
