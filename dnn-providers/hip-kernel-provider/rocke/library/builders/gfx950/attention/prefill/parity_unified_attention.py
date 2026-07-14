@@ -346,7 +346,7 @@ def default_scenarios() -> List[Scenario]:
         # split-KV path (seqlen_q=1).  qq_bias_stride_0 equals the batch
         # size (total_q == batch for decode).
         Scenario(
-            name="decode_bias_d128_b16",
+            name="decode_bias_fp16_d128_b16",
             seq_lens=[(1, 512), (1, 1024), (1, 2048), (1, 4096)],
             num_query_heads=16,
             num_kv_heads=2,
