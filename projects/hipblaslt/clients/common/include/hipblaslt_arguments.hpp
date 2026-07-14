@@ -2,7 +2,7 @@
  *
  * MIT License
  *
- * Copyright (C) 2022-2025 Advanced Micro Devices, Inc.
+ * Copyright (C) 2022-2026 Advanced Micro Devices, Inc.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -115,6 +115,20 @@ struct Arguments
     int32_t iters;
     int32_t cold_iters;
 
+    // Adaptive timing; all *_time fields are milliseconds, 0 disables.
+    float   warmup_time; // warm up until this wall-time is reached
+    float   sample_time; // target span per timed sample; 0 => one enqueue per sample
+    float   measure_time; // minimum total measure time (floor)
+    float   max_measure_time; // measure ceiling; 0 => unbounded
+    float   noise_threshold; // rel. std error convergence target; 0 => disabled
+    int32_t min_iters; // floor on total timed iterations
+    int32_t max_iters; // ceiling on total timed iterations; 0 => unbounded
+    float   stability_threshold; // noise-plateau fallback: max rel. spread of recent rel_iqr
+        // readings to call it "stable"; 0 => fallback disabled
+    int32_t stability_window; // rel_iqr readings tested for the plateau (>= 2)
+    int32_t stability_interval; // record a rel_iqr reading every N samples (>= 1)
+    bool    adaptive; // enable the tuned adaptive-timing preset (knobs above override it)
+
     uint32_t algo;
     int32_t  solution_index;
     int32_t  requested_solution_num;
@@ -149,6 +163,7 @@ struct Arguments
     int8_t norm_check;
     int8_t allclose_check;
     int8_t unit_check;
+    int8_t ulp_check;
     int8_t timing;
 
     char transA;
@@ -239,6 +254,17 @@ struct Arguments
     OPER(batch_mode) SEP             \
     OPER(iters) SEP                  \
     OPER(cold_iters) SEP             \
+    OPER(warmup_time) SEP            \
+    OPER(sample_time) SEP            \
+    OPER(measure_time) SEP           \
+    OPER(max_measure_time) SEP       \
+    OPER(noise_threshold) SEP        \
+    OPER(min_iters) SEP              \
+    OPER(max_iters) SEP              \
+    OPER(stability_threshold) SEP    \
+    OPER(stability_window) SEP       \
+    OPER(stability_interval) SEP     \
+    OPER(adaptive) SEP               \
     OPER(algo) SEP                   \
     OPER(solution_index) SEP         \
     OPER(requested_solution_num) SEP \
@@ -261,6 +287,7 @@ struct Arguments
     OPER(norm_check) SEP             \
     OPER(allclose_check) SEP         \
     OPER(unit_check) SEP             \
+    OPER(ulp_check) SEP              \
     OPER(timing) SEP                 \
     OPER(transA) SEP                 \
     OPER(transB) SEP                 \

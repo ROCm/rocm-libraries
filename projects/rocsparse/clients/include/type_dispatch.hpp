@@ -314,10 +314,6 @@ auto rocsparse_ixyt_dispatch(const Arguments& arg)
 
     switch(I)
     {
-    case rocsparse_indextype_u16:
-    {
-        return TEST<void, void, void, void>{}(arg);
-    }
     case rocsparse_indextype_i32:
     {
         DISPATCH_TEST(int32_t);
@@ -387,10 +383,6 @@ auto rocsparse_ixyt_axpby_dispatch(const Arguments& arg)
 
     switch(I)
     {
-    case rocsparse_indextype_u16:
-    {
-        return TEST<void, void, void, void>{}(arg);
-    }
     case rocsparse_indextype_i32:
     {
         DISPATCH_TEST(int32_t);
@@ -522,10 +514,6 @@ auto rocsparse_iaxyt_dispatch(const Arguments& arg)
 
     switch(I)
     {
-    case rocsparse_indextype_u16:
-    {
-        return TEST<void, void, void, void, void>{}(arg);
-    }
     case rocsparse_indextype_i32:
     {
         DISPATCH_TEST(int32_t);
@@ -666,15 +654,10 @@ auto rocsparse_ijaxyt_dispatch(const Arguments& arg)
 
     switch(I)
     {
-    case rocsparse_indextype_u16:
-    {
-        return TEST<void, void, void, void, void, void>{}(arg);
-    }
     case rocsparse_indextype_i32:
     {
         switch(J)
         {
-        case rocsparse_indextype_u16:
         case rocsparse_indextype_i64:
         {
             return TEST<void, void, void, void, void, void>{}(arg);
@@ -689,10 +672,6 @@ auto rocsparse_ijaxyt_dispatch(const Arguments& arg)
     {
         switch(J)
         {
-        case rocsparse_indextype_u16:
-        {
-            return TEST<void, void, void, void, void, void>{}(arg);
-        }
         case rocsparse_indextype_i32:
         {
             DISPATCH_TEST(int64_t, int32_t);
@@ -785,10 +764,6 @@ auto rocsparse_iabct_dispatch(const Arguments& arg)
 
     switch(I)
     {
-    case rocsparse_indextype_u16:
-    {
-        return TEST<void, void, void, void, void>{}(arg);
-    }
     case rocsparse_indextype_i32:
     {
         DISPATCH_TEST(int32_t);
@@ -903,15 +878,10 @@ auto rocsparse_ijabct_dispatch(const Arguments& arg)
 
     switch(I)
     {
-    case rocsparse_indextype_u16:
-    {
-        return TEST<void, void, void, void, void, void>{}(arg);
-    }
     case rocsparse_indextype_i32:
     {
         switch(J)
         {
-        case rocsparse_indextype_u16:
         case rocsparse_indextype_i64:
         {
             return TEST<void, void, void, void, void, void>{}(arg);
@@ -926,10 +896,6 @@ auto rocsparse_ijabct_dispatch(const Arguments& arg)
     {
         switch(J)
         {
-        case rocsparse_indextype_u16:
-        {
-            return TEST<void, void, void, void, void, void>{}(arg);
-        }
         case rocsparse_indextype_i32:
         {
             DISPATCH_TEST(int64_t, int32_t);
@@ -1014,15 +980,10 @@ auto rocsparse_ijabct_sddmm_dispatch(const Arguments& arg)
 
     switch(I)
     {
-    case rocsparse_indextype_u16:
-    {
-        return TEST<void, void, void, void, void, void>{}(arg);
-    }
     case rocsparse_indextype_i32:
     {
         switch(J)
         {
-        case rocsparse_indextype_u16:
         case rocsparse_indextype_i64:
         {
             return TEST<void, void, void, void, void, void>{}(arg);
@@ -1037,10 +998,6 @@ auto rocsparse_ijabct_sddmm_dispatch(const Arguments& arg)
     {
         switch(J)
         {
-        case rocsparse_indextype_u16:
-        {
-            return TEST<void, void, void, void, void, void>{}(arg);
-        }
         case rocsparse_indextype_i32:
         {
             DISPATCH_TEST(int64_t, int32_t);

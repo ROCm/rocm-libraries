@@ -1,0 +1,78 @@
+################################################################################
+# Copyright (C) 2026 Advanced Micro Devices, Inc. All rights reserved.
+# SPDX-License-Identifier: MIT
+################################################################################
+# R2 solution-derivation breadth config for gfx942 codegen characterization.
+#
+# Target: Solution.py lines 500-680, 702-900, 1024-1300 (assignDerivedParameters
+# + isDirectToVgprDoable + setGlobalLoadTileDimClassic assignment arms).
+#
+# Strategy: wide ForkParameters cartesian sweeping DepthU, VectorWidthA/B,
+# GlobalSplitU, and PrefetchGlobalRead to exercise:
+#   - Lines 500-680: assignProblemIndependentDerivedParameters (MIBlock/tile
+#     assignment, MacroTile, UseDotInstruction, EnableMatrixInstruction branches)
+#   - Lines 702-900: tailLoopOpt paths, DirectToLds, TransposeLDS, UseSubtileImpl
+#     gates; VectorWidth auto-derive paths
+#   - Lines 1024-1300: setGlobalLoadTileDimClassic nlc search, isDirectToVgprDoable
+#     checks (PrefetchGlobalRead==0 reject, TLU+VW!=GRVW reject, etc.)
+#
+# ProblemType: same dominant bf16 BH+Bias+Activation as seed.yaml — keeps
+# the config simple and ensures MFMA paths (MI block derivation) are active.
+# TransposeA=1, TransposeB=0 (TN layout) => TLUA=False, TLUB=True.
+#
+# Fork: DepthU x VectorWidthA x GlobalSplitU x PrefetchGlobalRead
+#   = 3 x 2 x 2 x 3 = 36 permutations; limit=8 keeps footprint small.
+# Many combos will be rejected (the rejection-path code is the target).
+GlobalParameters:
+  SyncsPerBenchmark: 0
+  MinimumRequiredVersion: 5.0.0
+  NumElementsToValidate: 128
+  DataInitTypeBeta: 0
+  DataInitTypeAlpha: 1
+  Device: 0
+
+BenchmarkProblems:
+  ########################################
+  # BBS (bf16 in / bf16 out / f32 compute) TN, BH + Bias + Activation
+  # Dominant attribution entry — bf16 MFMA, gfx942.
+  ########################################
+  -
+    - # ProblemType
+      OperationType: GEMM
+      DataType: b
+      DestDataType: b
+      ComputeDataType: s
+      HighPrecisionAccumulate: True
+      TransposeA: True
+      TransposeB: False
+      UseBeta: True
+      UseBias: 1
+      Batched: True
+      Activation: True
+      ActivationType: all
+    - # BenchmarkProblemSizeGroup
+      InitialSolutionParameters:
+      BenchmarkCommonParameters:
+        - KernelLanguage: ["Assembly"]
+      ForkParameters:
+        - MatrixInstruction:
+          - [16, 16, 16, 1,  1,   1, 1,  4, 1 ]
+          - [32, 32,  8, 1,  1,   1, 1,  4, 1 ]
+        - DepthU: [32, 64]
+        - GlobalSplitU: [1, 4]
+        - PrefetchGlobalRead: [1, 2]
+        - PrefetchLocalRead: [1]
+        - ClusterLocalRead: [1]
+        - LocalReadVectorWidth: [8]
+        - ScheduleIterAlg: [3]
+        - ExpandPointerSwap: [False]
+        - TransposeLDS: [1]
+        - SourceSwap: [True]
+        - AssertSummationElementMultiple: [1, 16]
+      BenchmarkJoinParameters:
+      BenchmarkFinalParameters:
+        - ProblemSizes:
+          - Exact: [256, 256, 1, 256]
+        - BiasTypeArgs: ['b']
+        - ActivationArgs:
+          - [Enum: relu]

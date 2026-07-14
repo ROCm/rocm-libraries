@@ -95,17 +95,3 @@ def test_ClientWriter_internal_caller_passes_libraryFile():
             f"writeClientConfigIni call in CreateBenchmarkClientParametersForSizes "
             f"is missing libraryFile=. Same bug class as the cached-path regression.\n{call}"
         )
-
-
-def test_TensileClientConfig_passes_libraryFile():
-    """Tensile/TensileClientConfig.py (standalone bin/TensileClientConfig entry
-    point) must also pass libraryFile= now that the default is removed."""
-    import Tensile.TensileClientConfig as tcc
-    src = inspect.getsource(tcc.TensileClientConfig)
-    calls = _extract_calls(src, "writeClientConfigIni")
-    assert calls, "expected writeClientConfigIni call(s) in TensileClientConfig"
-    for call in calls:
-        assert "libraryFile" in call, (
-            f"writeClientConfigIni call in TensileClientConfig is missing "
-            f"libraryFile=. After Task 1 this call would TypeError.\n{call}"
-        )

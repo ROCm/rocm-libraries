@@ -28,6 +28,7 @@
 
 #include "TensorDataManipulation.hpp"
 #include "allclose.hpp"
+#include "benchmark_timing.hpp"
 #include "cblas_interface.hpp"
 #include "efficiency_monitor.hpp"
 #include "flops.hpp"
@@ -44,6 +45,7 @@
 #endif
 #include "near.hpp"
 #include "norm.hpp"
+#include "ulp.hpp"
 #include "unit.hpp"
 #include "utility.hpp"
 #include <algorithm>
@@ -1114,6 +1116,8 @@ void check(hipStream_t                   stream,
            double&                       hipblaslt_error,
            double&                       hipblaslt_atol,
            double&                       hipblaslt_rtol,
+           double&                       hipblaslt_max_ulp,
+           double&                       hipblaslt_avg_ulp,
            hipDataType                   To,
            hipDataType                   Tbias,
            hipDataType                   Taux,
@@ -1122,6 +1126,10 @@ void check(hipStream_t                   stream,
 {
     // fetch GPU
     CHECK_HIP_ERROR(hipStreamSynchronize(stream));
+
+    // ULP error accumulators (sum/count are used to derive the average below)
+    double ulp_sum_total   = 0.0;
+    size_t ulp_count_total = 0;
 
     for(int gemmIdx = 0; gemmIdx < gemm_count; gemmIdx++)
     {
@@ -1413,7 +1421,45 @@ void check(hipStream_t                   stream,
             }
             //TODO: confirm if allclose_check_assert is neccessary
         }
+
+        if(arg.ulp_check)
+        {
+            if(batchMode != HIPBLASLT_BATCH_MODE_POINTER_ARRAY)
+            {
+                ulp_check_general(M[gemmIdx],
+                                  N[gemmIdx],
+                                  ldd[gemmIdx],
+                                  stride_d[gemmIdx],
+                                  hD_gold[gemmIdx].buf(),
+                                  hD_1[gemmIdx].buf(),
+                                  num_batches[gemmIdx],
+                                  hipblaslt_max_ulp,
+                                  ulp_sum_total,
+                                  ulp_count_total,
+                                  To);
+            }
+            else
+            {
+                for(int batch = 0; batch < num_batches[gemmIdx]; batch++)
+                {
+                    ulp_check_general(M[gemmIdx],
+                                      N[gemmIdx],
+                                      ldd[gemmIdx],
+                                      0,
+                                      hD_gold[batch].buf(),
+                                      hD_1[batch].buf(),
+                                      1,
+                                      hipblaslt_max_ulp,
+                                      ulp_sum_total,
+                                      ulp_count_total,
+                                      To);
+                }
+            }
+        }
     }
+
+    if(arg.ulp_check && ulp_count_total > 0)
+        hipblaslt_avg_ulp = ulp_sum_total / ulp_count_total;
 }
 
 // A function to determine the default bias_type
@@ -2323,12 +2369,12 @@ void testing_matmul_with_bias(const Arguments& arg,
                     &sm,
                     sizeof(sm)));
             }
-            int32_t dyn = hipblaslt_bench_options::dyn_persistent_tile_enabled() ? 1 : 0;
-            if(dyn != 0)
+            int32_t dyn = hipblaslt_bench_options::streamk_tile_scheduling_mode();
+            if(dyn >= 0)
             {
                 CHECK_HIPBLASLT_ERROR(hipblasLtMatmulDescSetAttribute(
                     matmul[0][i],
-                    HIPBLASLT_MATMUL_DESC_DYN_PERSISTENT_TILE_EXT,
+                    HIPBLASLT_MATMUL_DESC_STREAMK_TILE_SCHEDULING_EXT,
                     &dyn,
                     sizeof(dyn)));
             }
@@ -2748,6 +2794,11 @@ void testing_matmul_with_bias(const Arguments& arg,
         }
 
         hipblaslt_seedrand();
+
+        // For ULP validation, force hpl / trig_float A/B/C inputs to be
+        // positive-only so the reference dot products do not cancel toward zero
+        // (near-zero outputs inflate the per-element ULP error spuriously).
+        set_ulp_positive_init_state(arg.ulp_check);
 
         size_t scaleA_row = ((transA == HIPBLAS_OP_T) ? blockSize(arg.scaleA) : 1);
         size_t scaleA_col = ((transA == HIPBLAS_OP_T) ? 1 : blockSize(arg.scaleA));
@@ -3840,12 +3891,12 @@ void testing_matmul_with_bias(const Arguments& arg,
                         &sm,
                         sizeof(sm)));
                 }
-                int32_t dyn = hipblaslt_bench_options::dyn_persistent_tile_enabled() ? 1 : 0;
-                if(dyn != 0)
+                int32_t dyn = hipblaslt_bench_options::streamk_tile_scheduling_mode();
+                if(dyn >= 0)
                 {
                     CHECK_HIPBLASLT_ERROR(hipblasLtMatmulDescSetAttribute(
                         matmul[b][i],
-                        HIPBLASLT_MATMUL_DESC_DYN_PERSISTENT_TILE_EXT,
+                        HIPBLASLT_MATMUL_DESC_STREAMK_TILE_SCHEDULING_EXT,
                         &dyn,
                         sizeof(dyn)));
                 }
@@ -5482,9 +5533,11 @@ void testing_matmul_with_bias(const Arguments& arg,
                 }
             }
 
-            double              hipblaslt_error = 0.0;
-            double              hipblaslt_atol  = 1;
-            double              hipblaslt_rtol  = 1;
+            double              hipblaslt_error   = 0.0;
+            double              hipblaslt_atol    = 1;
+            double              hipblaslt_rtol    = 1;
+            double              hipblaslt_max_ulp = 0.0;
+            double              hipblaslt_avg_ulp = 0.0;
             std::vector<double> tol(gemm_count);
             if(arg.unit_check && (hipblaslt_get_arch_major() == 11) && realDataTypeSize(TiA) == 2
                && realDataTypeSize(TiB) == 2)
@@ -5549,6 +5602,8 @@ void testing_matmul_with_bias(const Arguments& arg,
                       hipblaslt_error,
                       hipblaslt_atol,
                       hipblaslt_rtol,
+                      hipblaslt_max_ulp,
+                      hipblaslt_avg_ulp,
                       To,
                       Tbias,
                       Taux,
@@ -5573,11 +5628,60 @@ void testing_matmul_with_bias(const Arguments& arg,
         double      best_norm      = 0.0;
         double      best_atol      = 0.0;
         double      best_rtol      = 0.0;
-        int         number_cold_calls
+        double      best_max_ulp   = 0.0;
+        double      best_avg_ulp   = 0.0;
+        int number_cold_calls
             = ((arg.unit_check || arg.norm_check || arg.allclose_check) && arg.cold_iters == 0)
                   ? 1
                   : arg.cold_iters;
+        // Adaptive timing ignores --cold_iters/--iters: warmup and batch are sized
+        // inside run_measurement. Keep one cold call only when a result copy or the
+        // skip-slow screen needs it.
+        if(arg.adaptive)
+            number_cold_calls = (arg.unit_check || arg.norm_check || arg.allclose_check
+                                 || arg.skip_slow_solution_ratio != 0.0f)
+                                    ? 1
+                                    : 0;
         int number_hot_calls = arg.iters;
+
+        // Adaptive timing configuration shared by every solution measured below.
+        // Adaptive timing is gated on --adaptive; the per-knob settings apply only then.
+        hipblaslt_bench::TimingConfig timingCfg;
+        timingCfg.iters         = number_hot_calls;
+        timingCfg.use_gpu_timer = arg.use_gpu_timer;
+        timingCfg.adaptive      = arg.adaptive;
+        if(arg.adaptive)
+        {
+            timingCfg.warmup_time      = arg.warmup_time;
+            timingCfg.sample_time      = arg.sample_time;
+            timingCfg.measure_time     = arg.measure_time;
+            timingCfg.max_measure_time = arg.max_measure_time;
+            timingCfg.min_iters          = arg.min_iters;
+            timingCfg.max_iters          = arg.max_iters;
+            timingCfg.noise_threshold    = arg.noise_threshold;
+            timingCfg.stability_threshold = arg.stability_threshold;
+            timingCfg.stability_window    = arg.stability_window;
+            timingCfg.stability_interval  = arg.stability_interval;
+        }
+        if(arg.adaptive)
+        {
+            if(const auto err = hipblaslt_bench::validate_adaptive_config(timingCfg); !err.empty())
+            {
+                hipblaslt_cerr << "error: invalid adaptive timing config: " << err << std::endl;
+                return;
+            }
+        }
+
+        hipblaslt_bench::TimingResult timing;
+        // Stop the sample loop if a launch hits a gtest fatal failure.
+        auto timingAbort = []() -> bool {
+#ifdef GOOGLE_TEST
+            return ::testing::Test::HasFatalFailure();
+#else
+            return false;
+#endif
+        };
+        hipblaslt_bench::TimingResult best_timing;
 
         int    flush_iter      = 100000;
         double flush_time_used = 0;
@@ -5610,6 +5714,9 @@ void testing_matmul_with_bias(const Arguments& arg,
 
         for(size_t sol = 0; sol < heuristicResult.size(); sol++)
         {
+            // Reset per-solution so an aborted/empty measurement can't report the prior
+            // solution's stats (run_measurement leaves `out` untouched on early return).
+            timing = {};
             if((arg.unit_check || arg.norm_check || arg.allclose_check) && arg.c_equal_d)
             {
                 if(batchMode == HIPBLASLT_BATCH_MODE_POINTER_ARRAY) //For General Batch GEMM
@@ -5670,14 +5777,20 @@ void testing_matmul_with_bias(const Arguments& arg,
                         }
                     }
                     perf_monitor->start();
-                    pre_gpu_time(arg.use_gpu_timer, event_gpu_time_start, gpu_time_used, stream);
-
-                    for(int i = 0; i < number_hot_calls; i++)
-                    {
-                        CHECK_HIPBLASLT_ERROR(gemmVec[i % block_count].run(stream));
-                        if(arg.flush)
-                            hipLaunchKernelGGL(flush_icache, dim3(gpu_block3), dim3(64), 0, stream);
-                    }
+                    hipblaslt_bench::run_measurement(
+                        [&](int64_t i) {
+                            int b = static_cast<int>(i % block_count);
+                            CHECK_HIPBLASLT_ERROR(gemmVec[b].run(stream));
+                            if(arg.flush)
+                                hipLaunchKernelGGL(
+                                    flush_icache, dim3(gpu_block3), dim3(64), 0, stream);
+                        },
+                        timingCfg,
+                        event_gpu_time_start,
+                        event_gpu_time_end,
+                        stream,
+                        timing,
+                        timingAbort);
                 }
                 else if(batchMode == HIPBLASLT_BATCH_MODE_POINTER_ARRAY) //For General Batch GEMM
                 {
@@ -5741,44 +5854,43 @@ void testing_matmul_with_bias(const Arguments& arg,
                         }
                     }
                     perf_monitor->start();
-                    pre_gpu_time(arg.use_gpu_timer, event_gpu_time_start, gpu_time_used, stream);
-
-                    for(int i = 0; i < number_hot_calls; i++)
-                    {
-                        auto ptr_matmul = matmul[i % block_count][0];
-                        auto ptr_alpha  = arg.scaleAlpha_vector
-                                              ? (dScaleAlphaVec[0].as<char>())
-                                                   + (i % block_count) * size_scaleAlphaVec[0]
-                                              : alpha_in[0];
-                        // Added this logic to mimic the rocblas test quick_gemm_batched_bad_arg_f32_r_bad_arg_F
-                        // This rocblas test passes alpha, A and B as 0 but beta as non-zero with valid C and D
-                        // To mimic this behavior if --sizek is passed as 0 in hipblaslt-bench for --batch_mode 1, size_dA and size_dB
-                        // will be set to 0 since A is MxK and B is KxN. In this case, we pass the pointer array A and B for 
-                        // General batched GEMM as nullptr and introduced an explicit check for AddressA and AddressB != 0
-                        // in KernelWriterAssembly.py since the dereference of AddressA and AddressB for 
-                        // General Batched GEMM happens before the alphaNonZero check.                                              
-                        void *ptrA = (size_dA[0]) ? dda[i % block_count] : nullptr;
-                        void *ptrB = (size_dB[0]) ? ddb[i % block_count] : nullptr;                                              
-                        EXPECT_HIPBLAS_STATUS(hipblasLtMatmul(handle,
-                                                              ptr_matmul,
-                                                              ptr_alpha,
-                                                              ptrA,
-                                                              matA[0],
-                                                              ptrB,
-                                                              matB[0],
-                                                              &(h_beta[0]),
-                                                              ddc[i % block_count],
-                                                              matC[0],
-                                                              ddd[i % block_count],
-                                                              matD[0],
-                                                              &heuristicResult[sol].algo,
-                                                              *dWorkspace,
-                                                              workspace_size,
-                                                              stream),
-                                              HIPBLAS_STATUS_SUCCESS);
-                        if(arg.flush)
-                            hipLaunchKernelGGL(flush_icache, dim3(gpu_block3), dim3(64), 0, stream);
-                    }
+                    hipblaslt_bench::run_measurement(
+                        [&](int64_t i) {
+                            int  b          = static_cast<int>(i % block_count);
+                            auto ptr_matmul = matmul[b][0];
+                            auto ptr_alpha  = arg.scaleAlpha_vector
+                                                  ? (dScaleAlphaVec[0].as<char>())
+                                                        + b * size_scaleAlphaVec[0]
+                                                  : alpha_in[0];
+                            void* ptrA = (size_dA[0]) ? dda[b] : nullptr;
+                            void* ptrB = (size_dB[0]) ? ddb[b] : nullptr;
+                            EXPECT_HIPBLAS_STATUS(hipblasLtMatmul(handle,
+                                                                  ptr_matmul,
+                                                                  ptr_alpha,
+                                                                  ptrA,
+                                                                  matA[0],
+                                                                  ptrB,
+                                                                  matB[0],
+                                                                  &(h_beta[0]),
+                                                                  ddc[b],
+                                                                  matC[0],
+                                                                  ddd[b],
+                                                                  matD[0],
+                                                                  &heuristicResult[sol].algo,
+                                                                  *dWorkspace,
+                                                                  workspace_size,
+                                                                  stream),
+                                                  HIPBLAS_STATUS_SUCCESS);
+                            if(arg.flush)
+                                hipLaunchKernelGGL(
+                                    flush_icache, dim3(gpu_block3), dim3(64), 0, stream);
+                        },
+                        timingCfg,
+                        event_gpu_time_start,
+                        event_gpu_time_end,
+                        stream,
+                        timing,
+                        timingAbort);
                 }
                 else
                 {
@@ -5840,47 +5952,47 @@ void testing_matmul_with_bias(const Arguments& arg,
                         }
                     }
                     perf_monitor->start();
-                    pre_gpu_time(arg.use_gpu_timer, event_gpu_time_start, gpu_time_used, stream);
-
-                    for(int i = 0; i < number_hot_calls; i++)
-                    {
-                        auto ptr_matmul = matmul[i % block_count][0];
-                        auto ptr_alpha  = arg.scaleAlpha_vector
-                                              ? (dScaleAlphaVec[0].as<char>())
-                                                   + (i % block_count) * size_scaleAlphaVec[0]
-                                              : alpha_in[0];
-                        EXPECT_HIPBLAS_STATUS(
-                            hipblasLtMatmul(
-                                handle,
-                                ptr_matmul,
-                                alpha_ptr,
-                                dA[0].as<char>()
-                                    + (i % block_count) * size_dA[0] * realDataTypeSize(TiA),
-                                matA[0],
-                                dB[0].as<char>()
-                                    + (i % block_count) * size_dB[0] * realDataTypeSize(TiB),
-                                matB[0],
-                                beta_ptr,
-                                dC[0].as<char>()
-                                    + (i % block_count) * size_C[0] * realDataTypeSize(To),
-                                matC[0],
-                                (*dDp)[0].as<char>()
-                                    + (i % block_count) * size_D[0] * realDataTypeSize(To),
-                                matD[0],
-                                &heuristicResult[sol].algo,
-                                *dWorkspace,
-                                workspace_size,
-                                stream),
-                            HIPBLAS_STATUS_SUCCESS);
-                        if(arg.flush)
-                            hipLaunchKernelGGL(flush_icache, dim3(gpu_block3), dim3(64), 0, stream);
-                    }
+                    hipblaslt_bench::run_measurement(
+                        [&](int64_t i) {
+                            int  b          = static_cast<int>(i % block_count);
+                            auto ptr_matmul = matmul[b][0];
+                            auto ptr_alpha  = arg.scaleAlpha_vector
+                                                  ? (dScaleAlphaVec[0].as<char>())
+                                                        + b * size_scaleAlphaVec[0]
+                                                  : alpha_in[0];
+                            EXPECT_HIPBLAS_STATUS(
+                                hipblasLtMatmul(
+                                    handle,
+                                    ptr_matmul,
+                                    alpha_ptr,
+                                    dA[0].as<char>() + b * size_dA[0] * realDataTypeSize(TiA),
+                                    matA[0],
+                                    dB[0].as<char>() + b * size_dB[0] * realDataTypeSize(TiB),
+                                    matB[0],
+                                    beta_ptr,
+                                    dC[0].as<char>() + b * size_C[0] * realDataTypeSize(To),
+                                    matC[0],
+                                    (*dDp)[0].as<char>() + b * size_D[0] * realDataTypeSize(To),
+                                    matD[0],
+                                    &heuristicResult[sol].algo,
+                                    *dWorkspace,
+                                    workspace_size,
+                                    stream),
+                                HIPBLAS_STATUS_SUCCESS);
+                            if(arg.flush)
+                                hipLaunchKernelGGL(
+                                    flush_icache, dim3(gpu_block3), dim3(64), 0, stream);
+                        },
+                        timingCfg,
+                        event_gpu_time_start,
+                        event_gpu_time_end,
+                        stream,
+                        timing,
+                        timingAbort);
                 }
-                post_gpu_time(arg.use_gpu_timer,
-                              event_gpu_time_start,
-                              event_gpu_time_end,
-                              gpu_time_used,
-                              stream);
+                // gpu time is reported per hot call; log_perf divides by hot_calls,
+                // so scale the mean back up to a total here.
+                gpu_time_used = timing.median_us * (number_hot_calls < 1 ? 1 : number_hot_calls);
                 perf_monitor->stop();
             }
             else
@@ -5937,17 +6049,20 @@ void testing_matmul_with_bias(const Arguments& arg,
                         }
                     }
                     perf_monitor->start();
-                    pre_gpu_time(arg.use_gpu_timer, event_gpu_time_start, gpu_time_used, stream);
-
-                    for(int i = 0; i < number_hot_calls; i++)
-                        CHECK_HIPBLASLT_ERROR(groupedGemmVec[i % block_count].run(
-                            d_userArgsVec[i % block_count], stream));
-
-                    post_gpu_time(arg.use_gpu_timer,
-                                  event_gpu_time_start,
-                                  event_gpu_time_end,
-                                  gpu_time_used,
-                                  stream);
+                    hipblaslt_bench::run_measurement(
+                        [&](int64_t i) {
+                            int b = static_cast<int>(i % block_count);
+                            CHECK_HIPBLASLT_ERROR(
+                                groupedGemmVec[b].run(d_userArgsVec[b], stream));
+                        },
+                        timingCfg,
+                        event_gpu_time_start,
+                        event_gpu_time_end,
+                        stream,
+                        timing,
+                        timingAbort);
+                    gpu_time_used
+                        = timing.median_us * (number_hot_calls < 1 ? 1 : number_hot_calls);
                     perf_monitor->stop();
                 }
                 else
@@ -5994,16 +6109,19 @@ void testing_matmul_with_bias(const Arguments& arg,
                         }
                     }
                     perf_monitor->start();
-                    pre_gpu_time(arg.use_gpu_timer, event_gpu_time_start, gpu_time_used, stream);
-
-                    for(int i = 0; i < number_hot_calls; i++)
-                        CHECK_HIPBLASLT_ERROR(groupedGemmVec[i % block_count].run(stream));
-
-                    post_gpu_time(arg.use_gpu_timer,
-                                  event_gpu_time_start,
-                                  event_gpu_time_end,
-                                  gpu_time_used,
-                                  stream);
+                    hipblaslt_bench::run_measurement(
+                        [&](int64_t i) {
+                            int b = static_cast<int>(i % block_count);
+                            CHECK_HIPBLASLT_ERROR(groupedGemmVec[b].run(stream));
+                        },
+                        timingCfg,
+                        event_gpu_time_start,
+                        event_gpu_time_end,
+                        stream,
+                        timing,
+                        timingAbort);
+                    gpu_time_used
+                        = timing.median_us * (number_hot_calls < 1 ? 1 : number_hot_calls);
                     perf_monitor->stop();
                 }
             }
@@ -6034,9 +6152,11 @@ void testing_matmul_with_bias(const Arguments& arg,
                 }
             }
 
-            double              hipblaslt_error = 0.0;
-            double              hipblaslt_atol  = 1;
-            double              hipblaslt_rtol  = 1;
+            double              hipblaslt_error   = 0.0;
+            double              hipblaslt_atol    = 1;
+            double              hipblaslt_rtol    = 1;
+            double              hipblaslt_max_ulp = 0.0;
+            double              hipblaslt_avg_ulp = 0.0;
             std::vector<double> tol(gemm_count);
             if(arg.unit_check && (hipblaslt_get_arch_major() == 11) && realDataTypeSize(TiA) == 2
                && realDataTypeSize(TiB) == 2)
@@ -6111,6 +6231,8 @@ void testing_matmul_with_bias(const Arguments& arg,
                       hipblaslt_error,
                       hipblaslt_atol,
                       hipblaslt_rtol,
+                      hipblaslt_max_ulp,
+                      hipblaslt_avg_ulp,
                       To,
                       Tbias,
                       Taux,
@@ -6184,7 +6306,10 @@ void testing_matmul_with_bias(const Arguments& arg,
                     cpu_time_used,
                     hipblaslt_error,
                     hipblaslt_atol,
-                    hipblaslt_rtol);
+                    hipblaslt_rtol,
+                    hipblaslt_max_ulp,
+                    hipblaslt_avg_ulp,
+                    timing);
             }
             if(best_gpu_time > gpu_time_used)
             {
@@ -6196,6 +6321,9 @@ void testing_matmul_with_bias(const Arguments& arg,
                 best_norm     = hipblaslt_error;
                 best_atol     = hipblaslt_atol;
                 best_rtol     = hipblaslt_rtol;
+                best_max_ulp  = hipblaslt_max_ulp;
+                best_avg_ulp  = hipblaslt_avg_ulp;
+                best_timing   = timing;
             }
         }
 
@@ -6242,7 +6370,10 @@ void testing_matmul_with_bias(const Arguments& arg,
                 cpu_time_used,
                 best_norm,
                 best_atol,
-                best_rtol);
+                best_rtol,
+                best_max_ulp,
+                best_avg_ulp,
+                best_timing);
         }
     }
 

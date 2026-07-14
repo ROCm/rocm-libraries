@@ -1,0 +1,489 @@
+# serializer version: 1
+# name: test_convert_leading_dims_with_explicit_strides
+  list([
+    128,
+    128,
+    64,
+    666,
+    777,
+    999,
+    888,
+  ])
+# ---
+# name: test_exact_dict_bad_field_raises
+  "specified field 'not_a_field' is not a valid Exact dict field"
+# ---
+# name: test_exact_dict_gemm
+  dict({
+    'sizes': list([
+      128,
+      128,
+      64,
+      128,
+      128,
+      128,
+      128,
+    ]),
+    'str': '{ sizes:[128, 128, 64, 128, 128, 128, 128] }',
+  })
+# ---
+# name: test_exact_dict_no_problem_type
+  list([
+    128,
+    128,
+    64,
+  ])
+# ---
+# name: test_exact_dict_non_gemm_wrong_count_raises
+  'specified size=[128, 128, 64] does not have enough indices for problem (expected 5, got 3)'
+# ---
+# name: test_exact_list_total_indices
+  dict({
+    'sizes': list([
+      128,
+      128,
+      64,
+      128,
+      128,
+      128,
+      128,
+    ]),
+    'str': '[128, 128, 64, 128, 128, 128, 128]',
+  })
+# ---
+# name: test_exact_list_with_ld
+  dict({
+    'sizes': list([
+      128,
+      128,
+      64,
+      128,
+      128,
+      128,
+      128,
+    ]),
+    'str': '[128, 128, 64, 128, 128, 128, 128]',
+  })
+# ---
+# name: test_problem_size_range_descriptor_lengths
+  dict({
+    'indexIsSized': list([
+      True,
+      True,
+      True,
+      True,
+      True,
+      True,
+      True,
+    ]),
+    'numProblemSizes': list([
+      4,
+      4,
+      1,
+      1,
+      1,
+      1,
+      1,
+    ]),
+    'problemSizes': list([
+      list([
+        128,
+        64,
+        32,
+        0,
+        0,
+        0,
+        0,
+      ]),
+      list([
+        256,
+        64,
+        32,
+        0,
+        0,
+        0,
+        0,
+      ]),
+      list([
+        384,
+        64,
+        32,
+        0,
+        0,
+        0,
+        0,
+      ]),
+      list([
+        512,
+        64,
+        32,
+        0,
+        0,
+        0,
+        0,
+      ]),
+      list([
+        128,
+        128,
+        32,
+        0,
+        0,
+        0,
+        0,
+      ]),
+      list([
+        256,
+        128,
+        32,
+        0,
+        0,
+        0,
+        0,
+      ]),
+      list([
+        384,
+        128,
+        32,
+        0,
+        0,
+        0,
+        0,
+      ]),
+      list([
+        512,
+        128,
+        32,
+        0,
+        0,
+        0,
+        0,
+      ]),
+      list([
+        128,
+        192,
+        32,
+        0,
+        0,
+        0,
+        0,
+      ]),
+      list([
+        256,
+        192,
+        32,
+        0,
+        0,
+        0,
+        0,
+      ]),
+      list([
+        384,
+        192,
+        32,
+        0,
+        0,
+        0,
+        0,
+      ]),
+      list([
+        512,
+        192,
+        32,
+        0,
+        0,
+        0,
+        0,
+      ]),
+      list([
+        128,
+        256,
+        32,
+        0,
+        0,
+        0,
+        0,
+      ]),
+      list([
+        256,
+        256,
+        32,
+        0,
+        0,
+        0,
+        0,
+      ]),
+      list([
+        384,
+        256,
+        32,
+        0,
+        0,
+        0,
+        0,
+      ]),
+      list([
+        512,
+        256,
+        32,
+        0,
+        0,
+        0,
+        0,
+      ]),
+    ]),
+    'str': '[ [ 128, 128, 0, 512 ], [ 64, 64, 0, 256 ], [ 32, 32, 0, 32 ], [ 0, 1, 0, 0 ], [ 0, 1, 0, 0 ], [ 0, 1, 0, 0 ], [ 0, 1, 0, 0 ] ]',
+    'totalIndices': 7,
+    'totalProblemSizes': 16,
+  })
+# ---
+# name: test_problem_size_range_multi_size
+  dict({
+    'indexIsSized': list([
+      True,
+      True,
+      True,
+      True,
+      True,
+      True,
+      True,
+    ]),
+    'numProblemSizes': list([
+      4,
+      1,
+      1,
+      1,
+      1,
+      1,
+      1,
+    ]),
+    'problemSizes': list([
+      list([
+        64,
+        128,
+        32,
+        0,
+        0,
+        0,
+        0,
+      ]),
+      list([
+        128,
+        128,
+        32,
+        0,
+        0,
+        0,
+        0,
+      ]),
+      list([
+        192,
+        128,
+        32,
+        0,
+        0,
+        0,
+        0,
+      ]),
+      list([
+        256,
+        128,
+        32,
+        0,
+        0,
+        0,
+        0,
+      ]),
+    ]),
+    'str': '[ [ 64, 64, 0, 256 ], [ 128, 128, 0, 128 ], [ 32, 32, 0, 32 ], [ 0, 1, 0, 0 ], [ 0, 1, 0, 0 ], [ 0, 1, 0, 0 ], [ 0, 1, 0, 0 ] ]',
+    'totalIndices': 7,
+    'totalProblemSizes': 4,
+  })
+# ---
+# name: test_problem_size_range_short_config_padded
+  dict({
+    'indexIsSized': list([
+      True,
+      False,
+      False,
+      True,
+      True,
+      True,
+      True,
+    ]),
+    'numProblemSizes': list([
+      1,
+      1,
+      1,
+      1,
+      1,
+      1,
+      1,
+    ]),
+    'problemSizes': list([
+      list([
+        128,
+        128,
+        128,
+        0,
+        0,
+        0,
+        0,
+      ]),
+    ]),
+    'str': '[ [ 128, 1, 0, 128 ], 0, 0, [ 0, 1, 0, 0 ], [ 0, 1, 0, 0 ], [ 0, 1, 0, 0 ], [ 0, 1, 0, 0 ] ]',
+    'totalIndices': 7,
+    'totalProblemSizes': 1,
+  })
+# ---
+# name: test_problem_size_range_sized
+  dict({
+    'indexIsSized': list([
+      True,
+      True,
+      True,
+      True,
+      True,
+      True,
+      True,
+    ]),
+    'numProblemSizes': list([
+      1,
+      1,
+      1,
+      1,
+      1,
+      1,
+      1,
+    ]),
+    'problemSizes': list([
+      list([
+        128,
+        128,
+        64,
+        0,
+        0,
+        0,
+        0,
+      ]),
+    ]),
+    'str': '[ [ 128, 128, 0, 128 ], [ 128, 128, 0, 128 ], [ 64, 64, 0, 64 ], [ 0, 1, 0, 0 ], [ 0, 1, 0, 0 ], [ 0, 1, 0, 0 ], [ 0, 1, 0, 0 ] ]',
+    'totalIndices': 7,
+    'totalProblemSizes': 1,
+  })
+# ---
+# name: test_problem_size_range_with_mapped_index
+  dict({
+    'indexIsSized': list([
+      True,
+      False,
+      True,
+      True,
+      True,
+      True,
+      True,
+    ]),
+    'numProblemSizes': list([
+      1,
+      1,
+      1,
+      1,
+      1,
+      1,
+      1,
+    ]),
+    'problemSizes': list([
+      list([
+        256,
+        256,
+        64,
+        0,
+        0,
+        0,
+        0,
+      ]),
+    ]),
+    'str': '[ [ 256, 256, 0, 256 ], 0, [ 64, 64, 0, 64 ], [ 0, 1, 0, 0 ], [ 0, 1, 0, 0 ], [ 0, 1, 0, 0 ], [ 0, 1, 0, 0 ] ]',
+    'totalIndices': 7,
+    'totalProblemSizes': 1,
+  })
+# ---
+# name: test_problem_sizes_empty_config
+  dict({
+    'maxA': 0,
+    'maxB': 0,
+    'maxC': 0,
+    'maxD': 0,
+    'minStrides': list([
+      0,
+      0,
+      0,
+    ]),
+    'problems': list([
+    ]),
+    'str': '''
+      ProblemSizes
+  
+    ''',
+    'totalProblemSizes': 0,
+  })
+# ---
+# name: test_problem_sizes_exact_dict
+  dict({
+    'maxA': 8192,
+    'maxB': 8192,
+    'maxC': 16384,
+    'maxD': 16384,
+    'minStrides': list([
+      0,
+      0,
+      0,
+    ]),
+    'problems': list([
+      '{ sizes:[128, 128, 64, 128, 128, 128, 128] }',
+    ]),
+    'str': '''
+      ProblemSizes
+  
+    ''',
+    'totalProblemSizes': 1,
+  })
+# ---
+# name: test_problem_sizes_mock
+  list([
+    '{ sizes:[128, 128, 1, 64] }',
+    '{ sizes:[256, 256, 1, 128] }',
+  ])
+# ---
+# name: test_problem_sizes_mock_dummy
+  list([
+    '{ sizes:[128, 128, 1, 512] }',
+  ])
+# ---
+# name: test_problem_sizes_only
+  '{ sizes:[128, 256, 1, 64] }'
+# ---
+# name: test_problem_sizes_range_exact_minstride
+  dict({
+    'maxA': 32768,
+    'maxB': 32768,
+    'maxC': 65536,
+    'maxD': 65536,
+    'minStrides': list([
+      0,
+      0,
+      0,
+    ]),
+    'problems': list([
+      '{ sizes:[128, 128, 64, 128, 128, 128, 128] }',
+      '[256, 256, 128, 256, 256, 256, 256]',
+    ]),
+    'str': '''
+      ProblemSizes
+        [ [ 128, 128, 0, 128 ], [ 128, 128, 0, 128 ], [ 64, 64, 0, 64 ], [ 0, 1, 0, 0 ], [ 0, 1, 0, 0 ], [ 0, 1, 0, 0 ], [ 0, 1, 0, 0 ] ]
+    ''',
+    'totalProblemSizes': 2,
+  })
+# ---
+# name: test_problem_with_strides
+  '{ sizes:[128, 256, 1, 64], stridesA:[1, 128], stridesB:[1, 64], stridesC:[1, 128], stridesD:[1, 128] }'
+# ---
