@@ -148,7 +148,7 @@
     ExtraMiLatencyLeft: -1
     ForceDisableShadowInit: true
     ForceUnrollSubIter: false
-    GlobalReadPerMfma: 1
+    GlobalReadPerMfma: 1.0
     GlobalReadVectorWidthA: 32
     GlobalReadVectorWidthB: 32
     GlobalReadVectorWidthMXSA: 4
@@ -350,7 +350,7 @@
     SpaceFillingAlgo: []
     StaggerU: 0
     StaggerUMapping: 0
-    StaggerUStride: 64.0
+    StaggerUStride: 64
     StorePriorityOpt: false
     StoreRemapVectorWidth: 0
     StoreSwapAddr: false
