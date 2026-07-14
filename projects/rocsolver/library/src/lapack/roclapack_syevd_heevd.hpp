@@ -150,13 +150,12 @@ void rocsolver_syevd_heevd_getMemorySize(rocblas_handle handle,
         // he2hb internal workspace
         size_t s_he2hb, s_D, s_V, s_W, s_X, s_Z, s_work, s_workArr;
         rocsolver_sy2sb_he2hb_getMemorySize<BATCHED, T, rocblas_int>(
-            n, kd, nb, batch_count, &s_he2hb, &s_D, &s_V, &s_W, &s_X, &s_Z, &s_work, &s_workArr);
+            uplo, n, kd, nb, batch_count, &s_he2hb, &s_D, &s_V, &s_W, &s_X, &s_Z, &s_work, &s_workArr);
         *size_he2hb_work
             = s_he2hb + s_D + s_V + s_W + s_X + s_Z + s_work + s_workArr;
 
-        // V and tau for hb2st and unmtr_hb2st:
-        // nt = ceildiv(n - 1, kd); nv = kd * nt * (nt + 1) / 2
-        const rocblas_int nt = (n - 2) / kd + 1;
+        // V and tau for hb2st and unmtr_hb2st
+        const rocblas_int nt = ceildiv(n - 1, kd);
         const rocblas_int nv = kd * nt * (nt + 1) / 2;
         const rocblas_int ldv = 2 * kd;
         *size_V_hb2st = sizeof(T) * ldv * nv * batch_count;
@@ -237,11 +236,11 @@ void rocsolver_syevd_heevd_getMemorySize(rocblas_handle handle,
                                          size_t* size_tmptau_W,
                                          size_t* size_tau,
                                          size_t* size_workArr,
-                                         bool* optim_mem,
                                          size_t* size_Aband,
                                          size_t* size_he2hb_work,
                                          size_t* size_V_hb2st,
-                                         size_t* size_tau_hb2st)
+                                         size_t* size_tau_hb2st,
+                                         bool* optim_mem)
 {
     *size_scalars = 0;
     *size_work1 = 0;
@@ -253,11 +252,11 @@ void rocsolver_syevd_heevd_getMemorySize(rocblas_handle handle,
     *size_workArr = 0;
     *size_splits = 0;
     *size_tmpz = 0;
-    *optim_mem = true;
     *size_Aband = 0;
     *size_he2hb_work = 0;
     *size_V_hb2st = 0;
     *size_tau_hb2st = 0;
+    *optim_mem = true;
 
     // if quick return, set workspace to zero
     if(n <= 1 || batch_count == 0)
@@ -326,7 +325,7 @@ void rocsolver_syevd_heevd_getMemorySize(rocblas_handle handle,
         // he2hb internal workspace
         size_t s_he2hb, s_D, s_V, s_W, s_X, s_Z, s_work, s_workArr;
         rocsolver_sy2sb_he2hb_getMemorySize<BATCHED, T, rocblas_int>(
-            n, kd, nb, batch_count, &s_he2hb, &s_D, &s_V, &s_W, &s_X, &s_Z, &s_work, &s_workArr);
+            uplo, n, kd, nb, batch_count, &s_he2hb, &s_D, &s_V, &s_W, &s_X, &s_Z, &s_work, &s_workArr);
         *size_he2hb_work
             = s_he2hb + s_D + s_V + s_W + s_X + s_Z + s_work + s_workArr;
 
@@ -475,7 +474,7 @@ rocblas_status rocsolver_syevd_heevd_template(rocblas_handle handle,
         // Partition he2hb_work into sub-workspaces
         size_t s_he2hb_scalars, s_D, s_V, s_W, s_X, s_Z, s_work, s_workArr_he2hb;
         rocsolver_sy2sb_he2hb_getMemorySize<BATCHED, T, rocblas_int>(
-            n, kd, nb, batch_count, &s_he2hb_scalars, &s_D, &s_V, &s_W, &s_X, &s_Z, &s_work,
+            uplo, n, kd, nb, batch_count, &s_he2hb_scalars, &s_D, &s_V, &s_W, &s_X, &s_Z, &s_work,
             &s_workArr_he2hb);
         T* he2hb_scalars = he2hb_work;
         T* he2hb_D = he2hb_scalars + s_he2hb_scalars / sizeof(T);
@@ -486,17 +485,6 @@ rocblas_status rocsolver_syevd_heevd_template(rocblas_handle handle,
         T* he2hb_work2 = he2hb_Z + s_Z / sizeof(T);
         T** he2hb_workArr = (T**)(he2hb_work2 + s_work / sizeof(T));
 
-        // If uplo == upper, symmetrize A: copy upper triangle to lower via conjugate transpose
-        if(uplo == rocblas_fill_upper)
-        {
-            const rocblas_int blocks = (n - 1) / BS2 + 1;
-            ROCSOLVER_LAUNCH_KERNEL((copy_trans_mat<T, T>), dim3(blocks, blocks, batch_count),
-                                    dim3(BS2, BS2, 1), 0, stream,
-                                    rocblas_operation_conjugate_transpose, n, n, A, shiftA, lda,
-                                    strideA, A, shiftA, lda, strideA, no_mask{},
-                                    rocblas_fill_upper, rocblas_diagonal_unit);
-        }
-
         // Initialize scalars for he2hb if needed
         if(s_he2hb_scalars > 0)
             init_scalars(handle, he2hb_scalars);
@@ -504,7 +492,7 @@ rocblas_status rocsolver_syevd_heevd_template(rocblas_handle handle,
         // Stage 1a: reduce dense Hermitian to band form (he2hb)
         // tau (size n) stores the he2hb Householder scalars; A stores the Householder vectors
         ROCBLAS_CHECK(rocsolver_sy2sb_he2hb_template<BATCHED, STRIDED, T, rocblas_int>(
-            handle, n, kd, nb, A, shiftA, lda, strideA, Aband, ldab, strideAband, tau, n,
+            handle, uplo, n, kd, nb, A, shiftA, lda, strideA, Aband, ldab, strideAband, tau, n,
             batch_count, he2hb_scalars, he2hb_D, he2hb_V, he2hb_W, he2hb_X, he2hb_Z, he2hb_work2,
             he2hb_workArr));
 
@@ -667,11 +655,11 @@ rocblas_status rocsolver_syevd_heevd_template(rocblas_handle handle,
                                               T* tmptau_W,
                                               T* tau,
                                               T** workArr,
-                                              bool optim_mem,
                                               T* Aband,
                                               T* he2hb_work,
                                               T* V_hb2st,
-                                              T* tau_hb2st)
+                                              T* tau_hb2st,
+                                              bool optim_mem)
 {
     ROCSOLVER_ENTER("syevd_heevd", "evect:", evect, "uplo:", uplo, "n:", n, "shiftA:", shiftA,
                     "lda:", lda, "bc:", batch_count);
@@ -704,8 +692,8 @@ rocblas_status rocsolver_syevd_heevd_template(rocblas_handle handle,
         rocsolver_syevd_heevd_getMemorySize<BATCHED, STRIDED, T, S>(
             handle, evect, uplo, n, batch_count, &size_scalars, &size_work1, &size_work2,
             &size_work3, &size_work4, &size_tmpz, &size_splits, &size_tmptau_W, &size_tau,
-            &size_workArr, &optim_mem, &size_Aband, &size_he2hb_work, &size_V_hb2st,
-            &size_tau_hb2st);
+            &size_workArr, &size_Aband, &size_he2hb_work, &size_V_hb2st,
+            &size_tau_hb2st, &optim_mem);
 
         // Memory in `scalars` has already been initialized at this point
         HIP_CHECK(hipMemsetAsync((void*)work1, 0, size_work1, stream));
@@ -761,7 +749,7 @@ rocblas_status rocsolver_syevd_heevd_template(rocblas_handle handle,
         // Partition he2hb_work into sub-workspaces
         size_t s_he2hb_scalars, s_D, s_V, s_W, s_X, s_Z, s_work, s_workArr_he2hb;
         rocsolver_sy2sb_he2hb_getMemorySize<BATCHED, T, rocblas_int>(
-            n, kd, nb, batch_count, &s_he2hb_scalars, &s_D, &s_V, &s_W, &s_X, &s_Z, &s_work,
+            uplo, n, kd, nb, batch_count, &s_he2hb_scalars, &s_D, &s_V, &s_W, &s_X, &s_Z, &s_work,
             &s_workArr_he2hb);
         T* he2hb_scalars = he2hb_work;
         T* he2hb_D = he2hb_scalars + s_he2hb_scalars / sizeof(T);
@@ -772,17 +760,6 @@ rocblas_status rocsolver_syevd_heevd_template(rocblas_handle handle,
         T* he2hb_work2 = he2hb_Z + s_Z / sizeof(T);
         T** he2hb_workArr = (T**)(he2hb_work2 + s_work / sizeof(T));
 
-        // If uplo == upper, symmetrize A: copy upper triangle to lower via conjugate transpose
-        if(uplo == rocblas_fill_upper)
-        {
-            const rocblas_int blocks = (n - 1) / BS2 + 1;
-            ROCSOLVER_LAUNCH_KERNEL((copy_trans_mat<T, T>), dim3(blocks, blocks, batch_count),
-                                    dim3(BS2, BS2, 1), 0, stream,
-                                    rocblas_operation_conjugate_transpose, n, n, A, shiftA, lda,
-                                    strideA, A, shiftA, lda, strideA, no_mask{},
-                                    rocblas_fill_upper, rocblas_diagonal_unit);
-        }
-
         // Initialize scalars for he2hb if needed
         if(s_he2hb_scalars > 0)
             init_scalars(handle, he2hb_scalars);
@@ -790,7 +767,7 @@ rocblas_status rocsolver_syevd_heevd_template(rocblas_handle handle,
         // Stage 1a: reduce dense Hermitian to band form (he2hb)
         // tau (size n) stores the he2hb Householder scalars; A stores the Householder vectors
         ROCBLAS_CHECK(rocsolver_sy2sb_he2hb_template<BATCHED, STRIDED, T, rocblas_int>(
-            handle, n, kd, nb, A, shiftA, lda, strideA, Aband, ldab, strideAband, tau, n,
+            handle, uplo, n, kd, nb, A, shiftA, lda, strideA, Aband, ldab, strideAband, tau, n,
             batch_count, he2hb_scalars, he2hb_D, he2hb_V, he2hb_W, he2hb_X, he2hb_Z, he2hb_work2,
             he2hb_workArr));
 

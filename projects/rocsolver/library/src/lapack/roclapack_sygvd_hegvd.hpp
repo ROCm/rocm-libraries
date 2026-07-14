@@ -57,12 +57,12 @@ void rocsolver_sygvd_hegvd_getMemorySize(rocblas_handle handle,
                                          size_t* size_splits,
                                          size_t* size_tau,
                                          size_t* size_pivots_workArr,
-                                         size_t* size_iinfo,
-                                         bool* optim_mem,
                                          size_t* size_Aband,
                                          size_t* size_he2hb_work,
                                          size_t* size_V_hb2st,
-                                         size_t* size_tau_hb2st)
+                                         size_t* size_tau_hb2st,
+                                         size_t* size_iinfo,
+                                         bool* optim_mem)
 {
     *size_Aband = 0;
     *size_he2hb_work = 0;
@@ -203,12 +203,12 @@ rocblas_status rocsolver_sygvd_hegvd_template(rocblas_handle handle,
                                               rocblas_int* splits,
                                               T* tau,
                                               void* pivots_workArr,
-                                              rocblas_int* iinfo,
-                                              bool optim_mem,
                                               T* Aband,
                                               T* he2hb_work,
                                               T* V_hb2st,
-                                              T* tau_hb2st)
+                                              T* tau_hb2st,
+                                              rocblas_int* iinfo,
+                                              bool optim_mem)
 {
     ROCSOLVER_ENTER("sygvd_hegvd", "itype:", itype, "evect:", evect, "uplo:", uplo, "n:", n,
                     "shiftA:", shiftA, "lda:", lda, "shiftB:", shiftB, "ldb:", ldb,

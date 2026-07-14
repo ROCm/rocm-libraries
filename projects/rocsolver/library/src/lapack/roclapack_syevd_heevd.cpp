@@ -60,8 +60,8 @@ try
 
     rocsolver_syevd_heevd_getMemorySize<false, false, T, S>(
         handle, evect, uplo, n, batch_count, &size_scalars, &size_work1, &size_work2, &size_work3,
-        &size_work4, &size_tmpz, &size_splits, &size_tmptau_W, &size_tau, &size_workArr, &optim_mem,
-        &size_Aband, &size_he2hb_work, &size_V_hb2st, &size_tau_hb2st);
+        &size_work4, &size_tmpz, &size_splits, &size_tmptau_W, &size_tau, &size_workArr,
+        &size_Aband, &size_he2hb_work, &size_V_hb2st, &size_tau_hb2st, &optim_mem);
 
     if(rocblas_is_device_memory_size_query(handle))
         return rocblas_set_optimal_device_memory_size(handle, size_scalars, size_work1, size_work2,
@@ -101,7 +101,7 @@ try
     return rocsolver_syevd_heevd_template<false, false, T>(
         handle, evect, uplo, n, A, shiftA, lda, strideA, D, strideD, E, strideE, info, batch_count,
         (T*)scalars, work1, work2, work3, work4, (S*)tmpz, (rocblas_int*)splits, (T*)tmptau_W,
-        (T*)tau, (T**)workArr, optim_mem, (T*)Aband, (T*)he2hb_work, (T*)V_hb2st, (T*)tau_hb2st);
+        (T*)tau, (T**)workArr, (T*)Aband, (T*)he2hb_work, (T*)V_hb2st, (T*)tau_hb2st, optim_mem);
 }
 catch(...)
 {

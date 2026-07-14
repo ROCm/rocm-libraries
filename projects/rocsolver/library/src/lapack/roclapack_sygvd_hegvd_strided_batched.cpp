@@ -85,7 +85,7 @@ try
     rocsolver_sygvd_hegvd_getMemorySize<false, true, T, S>(
         handle, itype, evect, uplo, n, batch_count, &size_scalars, &size_work1, &size_work2,
         &size_work3, &size_work4, &size_tmpz, &size_splits, &size_tau, &size_pivots_workArr,
-        &size_iinfo, &optim_mem, &size_Aband, &size_he2hb_work, &size_V_hb2st, &size_tau_hb2st);
+        &size_Aband, &size_he2hb_work, &size_V_hb2st, &size_tau_hb2st, &size_iinfo, &optim_mem);
 
     if(rocblas_is_device_memory_size_query(handle))
         return rocblas_set_optimal_device_memory_size(handle, size_scalars, size_work1, size_work2,
@@ -98,8 +98,8 @@ try
     void *scalars, *work1, *work2, *work3, *work4, *tmpz, *splits, *tau, *pivots_workArr, *iinfo;
     void *Aband, *he2hb_work, *V_hb2st, *tau_hb2st;
     rocblas_device_malloc mem(handle, size_scalars, size_work1, size_work2, size_work3, size_work4,
-                              size_tmpz, size_splits, size_tau, size_pivots_workArr, size_iinfo,
-                              size_Aband, size_he2hb_work, size_V_hb2st, size_tau_hb2st);
+                              size_tmpz, size_splits, size_tau, size_pivots_workArr,
+                              size_Aband, size_he2hb_work, size_V_hb2st, size_tau_hb2st, size_iinfo);
 
     if(!mem)
         return rocblas_status_memory_error;
@@ -125,8 +125,8 @@ try
     return rocsolver_sygvd_hegvd_template<false, true, T>(
         handle, itype, evect, uplo, n, A, shiftA, lda, strideA, B, shiftB, ldb, strideB, D, strideD,
         E, strideE, info, batch_count, (T*)scalars, work1, work2, work3, work4, (S*)tmpz,
-        (rocblas_int*)splits, (T*)tau, pivots_workArr, (rocblas_int*)iinfo, optim_mem, (T*)Aband,
-        (T*)he2hb_work, (T*)V_hb2st, (T*)tau_hb2st);
+        (rocblas_int*)splits, (T*)tau, pivots_workArr, (T*)Aband,
+        (T*)he2hb_work, (T*)V_hb2st, (T*)tau_hb2st, (rocblas_int*)iinfo, optim_mem);
 }
 catch(...)
 {
