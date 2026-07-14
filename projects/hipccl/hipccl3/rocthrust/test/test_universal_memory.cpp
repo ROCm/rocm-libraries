@@ -179,8 +179,8 @@ TYPED_TEST(UniversalTests, TestUniversalHostPinnedThrustVector)
     thrust::host_vector<T> host(size);
     thrust::universal_host_pinned_vector<T> universal(size);
 
-    static_assert(std::is_same_v<typename std::decay_t<decltype(universal)>::pointer, thrust::universal_ptr<T>>,
-                  "Unexpected thrust::universal_vector pointer type.");
+    static_assert(
+      std::is_same_v<typename std::decay_t<decltype(universal)>::pointer, thrust::universal_host_pinned_ptr<T>>);
 
     thrust::sequence(host.begin(), host.end(), 0);
     thrust::sequence(universal.begin(), universal.end(), 0);
