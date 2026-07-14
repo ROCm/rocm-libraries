@@ -13952,39 +13952,62 @@ class KernelWriterAssembly(KernelWriter):
     strideD1 = "StrideD%s" % (self.states.indexChars[packedD1[0]])
     sizeI = self.sizeRef(kernel["ProblemType"]["Index0"])
     sizeJ = self.sizeRef(kernel["ProblemType"]["Index1"])
-    with self.allocTmpSgpr(16, alignment=4, tag="tdmHybDesc") as descS:
+    # wave-specialized: split the N (MT1) dimension across the workgroup's waves so each
+    # wave issues ONE tensor_store for its own N-column segment (region-partitioned, no
+    # duplicated DMA). If MT1 is not divisible by the wave count, fall back to every-wave-
+    # full-MT (correct, just redundant).
+    numWaves = max(1, kernel["NumThreads"] // kernel["WavefrontSize"])
+    waveSpec = numWaves > 1 and (MT1 % numWaves == 0)
+    nSeg = (MT1 // numWaves) if waveSpec else MT1
+    ldsPerWaveBytes = nSeg * MT0 * bpe
+    with self.allocTmpSgpr(16, alignment=4, tag="tdmStoreDesc") as descS:
       g0 = descS.idx; g1 = g0 + 4
       for k in range(12): module.add(SMovB32(dst=sgpr(g0+k), src=0, comment="zero D# dword"))
       module.add(SMovB32(dst=sgpr(g0+0), src=hex(0x1 | (1<<3)), comment="G0 Reserved0|m_is_store"))
-      with self.allocTmpSgpr(2, alignment=2, tag="tdmHybAddr") as aS:
-        o = aS.idx
-        module.add(SMulI32(dst=sgpr(o), src0=sgpr("WorkGroup1"), src1=MT1, comment="col0=wg1*MT1"))
-        module.add(SMulI32(dst=sgpr(o), src0=sgpr(o), src1=sgpr(strideD1), comment="*StrideD"))
-        module.add(SMulI32(dst=sgpr(o+1), src0=sgpr("WorkGroup0"), src1=MT0, comment="row0=wg0*MT0"))
-        module.add(SAddU32(dst=sgpr(o), src0=sgpr(o), src1=sgpr(o+1), comment="tileOriginElem"))
-        if log2bpe: module.add(SLShiftLeftB32(dst=sgpr(o), shiftHex=hex(log2bpe), src=sgpr(o), comment="*bpe"))
-        module.add(SMovB64(dst=sgpr(g0+2,2), src=sgpr("AddressD",2), comment="G0 D base"))
-        module.add(SAddU32(dst=sgpr(g0+2), src0=sgpr(g0+2), src1=sgpr(o), comment="+tileOff lo"))
-        module.add(SAddCU32(dst=sgpr(g0+3), src0=sgpr(g0+3), src1=0, comment="+tileOff hi"))
-      module.add(SOrB32(dst=sgpr(g0+3), src0=sgpr(g0+3), src1=hex(2<<30), comment="G0 type=2"))
-      module.add(SMovB32(dst=sgpr(g1+0), src=hex(dss<<16), comment="G1 data_size"))
-      with self.allocTmpSgpr(3, tag="tdmHybDim") as tS:
-        t = tS.idx; rd0 = tS.idx+1; rd1 = tS.idx+2
-        module.add(SMulI32(dst=sgpr(rd0), src0=sgpr("WorkGroup0"), src1=MT0, comment="rowStart"))
-        module.add(SSubU32(dst=sgpr(rd0), src0=sizeI, src1=sgpr(rd0), comment="tdim0=M-rowStart"))
-        module.add(SMulI32(dst=sgpr(rd1), src0=sgpr("WorkGroup1"), src1=MT1, comment="colStart"))
-        module.add(SSubU32(dst=sgpr(rd1), src0=sizeJ, src1=sgpr(rd1), comment="tdim1=N-colStart"))
-        module.add(SLShiftLeftB32(dst=sgpr(t), shiftHex=hex(16), src=sgpr(rd0))); module.add(SOrB32(dst=sgpr(g1+1), src0=sgpr(g1+1), src1=sgpr(t), comment="tdim0 lo"))
-        module.add(SLShiftRightB32(dst=sgpr(t), shiftHex=hex(16), src=sgpr(rd0))); module.add(SOrB32(dst=sgpr(g1+2), src0=sgpr(g1+2), src1=sgpr(t), comment="tdim0 hi"))
-        module.add(SLShiftLeftB32(dst=sgpr(t), shiftHex=hex(16), src=sgpr(rd1))); module.add(SOrB32(dst=sgpr(g1+2), src0=sgpr(g1+2), src1=sgpr(t), comment="tdim1 lo"))
-        module.add(SLShiftRightB32(dst=sgpr(t), shiftHex=hex(16), src=sgpr(rd1))); module.add(SOrB32(dst=sgpr(g1+3), src0=sgpr(g1+3), src1=sgpr(t), comment="tdim1 hi"))
-      module.add(SOrB32(dst=sgpr(g1+3), src0=sgpr(g1+3), src1=hex((MT0 & 0xFFFF)<<16), comment="tile_dim0=MT0"))
-      module.add(SOrB32(dst=sgpr(g1+4), src0=sgpr(g1+4), src1=hex(MT1 & 0xFFFF), comment="tile_dim1=MT1"))
-      module.add(SMovB32(dst=sgpr(g1+5), src=sgpr(strideD1), comment="sgpr5=StrideD"))
-      inst = TensorStoreFromLds(sgpr(g0,4), sgpr(g1,8), None, None, "TDM store D whole MacroTile (edge via tensor_dim clamp)")
-      inst.setMemToken(MemTokenData([self.states.memTokenLdsBuffer0]))
-      module.add(inst)
-      module.add(SWaitTensorcnt(tensorcnt=0, comment="wait TDM store"))
+      with self.allocTmpSgpr(1, tag="tdmWaveId") as wS:
+        wave = wS.idx
+        if waveSpec:
+          module.add(VReadfirstlaneB32(dst=sgpr(wave), src=vgpr("Serial"), comment="wave-spec: firstlane(Serial)"))
+          module.add(SLShiftRightB32(dst=sgpr(wave), shiftHex=hex(int(log2(kernel["WavefrontSize"]))), src=sgpr(wave), comment="waveId = Serial / WavefrontSize"))
+          module.add(SMulI32(dst=sgpr(g0+1), src0=sgpr(wave), src1=ldsPerWaveBytes, comment="G0 lds base = waveId*nSeg*MT0*bpe"))
+        with self.allocTmpSgpr(2, alignment=2, tag="tdmStoreAddr") as aS:
+          o = aS.idx
+          module.add(SMulI32(dst=sgpr(o), src0=sgpr("WorkGroup1"), src1=MT1, comment="col0=wg1*MT1"))
+          module.add(SMulI32(dst=sgpr(o), src0=sgpr(o), src1=sgpr(strideD1), comment="*StrideD"))
+          module.add(SMulI32(dst=sgpr(o+1), src0=sgpr("WorkGroup0"), src1=MT0, comment="row0=wg0*MT0"))
+          module.add(SAddU32(dst=sgpr(o), src0=sgpr(o), src1=sgpr(o+1), comment="tileOriginElem"))
+          if waveSpec:
+            module.add(SMulI32(dst=sgpr(o+1), src0=sgpr(wave), src1=nSeg, comment="wave N-col start = waveId*nSeg"))
+            module.add(SMulI32(dst=sgpr(o+1), src0=sgpr(o+1), src1=sgpr(strideD1), comment="*StrideD"))
+            module.add(SAddU32(dst=sgpr(o), src0=sgpr(o), src1=sgpr(o+1), comment="+wave N-col offset"))
+          if log2bpe: module.add(SLShiftLeftB32(dst=sgpr(o), shiftHex=hex(log2bpe), src=sgpr(o), comment="*bpe"))
+          module.add(SMovB64(dst=sgpr(g0+2,2), src=sgpr("AddressD",2), comment="G0 D base"))
+          module.add(SAddU32(dst=sgpr(g0+2), src0=sgpr(g0+2), src1=sgpr(o), comment="+tileOff lo"))
+          module.add(SAddCU32(dst=sgpr(g0+3), src0=sgpr(g0+3), src1=0, comment="+tileOff hi"))
+        module.add(SOrB32(dst=sgpr(g0+3), src0=sgpr(g0+3), src1=hex(2<<30), comment="G0 type=2"))
+        module.add(SMovB32(dst=sgpr(g1+0), src=hex(dss<<16), comment="G1 data_size"))
+        with self.allocTmpSgpr(4, tag="tdmStoreDim") as tS:
+          t = tS.idx; rd0 = tS.idx+1; rd1 = tS.idx+2; cw = tS.idx+3
+          module.add(SMulI32(dst=sgpr(rd0), src0=sgpr("WorkGroup0"), src1=MT0, comment="rowStart"))
+          module.add(SSubU32(dst=sgpr(rd0), src0=sizeI, src1=sgpr(rd0), comment="tdim0=M-rowStart"))
+          module.add(SMulI32(dst=sgpr(cw), src0=sgpr("WorkGroup1"), src1=MT1, comment="colStart=wg1*MT1"))
+          if waveSpec:
+            module.add(SMulI32(dst=sgpr(rd1), src0=sgpr(wave), src1=nSeg, comment="waveId*nSeg"))
+            module.add(SAddU32(dst=sgpr(cw), src0=sgpr(cw), src1=sgpr(rd1), comment="colStart_wave"))
+          module.add(SSubU32(dst=sgpr(rd1), src0=sizeJ, src1=sgpr(cw), comment="tdim1=N-colStart_wave"))
+          module.add(SCmpLtU32(src0=sizeJ, src1=sgpr(cw), comment="wave fully OOB? (N<colStart_wave)"))
+          module.add(SCSelectB32(dst=sgpr(rd1), src0=0, src1=sgpr(rd1), comment="clamp tdim1>=0 (OOB wave writes nothing)"))
+          module.add(SLShiftLeftB32(dst=sgpr(t), shiftHex=hex(16), src=sgpr(rd0))); module.add(SOrB32(dst=sgpr(g1+1), src0=sgpr(g1+1), src1=sgpr(t), comment="tdim0 lo"))
+          module.add(SLShiftRightB32(dst=sgpr(t), shiftHex=hex(16), src=sgpr(rd0))); module.add(SOrB32(dst=sgpr(g1+2), src0=sgpr(g1+2), src1=sgpr(t), comment="tdim0 hi"))
+          module.add(SLShiftLeftB32(dst=sgpr(t), shiftHex=hex(16), src=sgpr(rd1))); module.add(SOrB32(dst=sgpr(g1+2), src0=sgpr(g1+2), src1=sgpr(t), comment="tdim1 lo"))
+          module.add(SLShiftRightB32(dst=sgpr(t), shiftHex=hex(16), src=sgpr(rd1))); module.add(SOrB32(dst=sgpr(g1+3), src0=sgpr(g1+3), src1=sgpr(t), comment="tdim1 hi"))
+        module.add(SOrB32(dst=sgpr(g1+3), src0=sgpr(g1+3), src1=hex((MT0 & 0xFFFF)<<16), comment="tile_dim0=MT0"))
+        module.add(SOrB32(dst=sgpr(g1+4), src0=sgpr(g1+4), src1=hex(nSeg & 0xFFFF), comment="tile_dim1=nSeg (wave-spec N-segment)"))
+        module.add(SMovB32(dst=sgpr(g1+5), src=sgpr(strideD1), comment="sgpr5=StrideD"))
+        inst = TensorStoreFromLds(sgpr(g0,4), sgpr(g1,8), None, None, "TDM store D wave-specialized N-segment (edge via tensor_dim clamp)")
+        inst.setMemToken(MemTokenData([self.states.memTokenLdsBuffer0]))
+        module.add(inst)
+        module.add(SWaitTensorcnt(tensorcnt=0, comment="wait TDM store"))
     return module
 
   def storeRemapAddStore(self, kernel, tmpVgpr, tmpS01, edge, StoreRemapLastBatch):
