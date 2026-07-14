@@ -522,10 +522,12 @@ target_compile_definitions(rocsolver PRIVATE
 
 add_armor_flags(rocsolver "${ARMOR_LEVEL}")
 
-if(WIN32)
-  # Embed PE version metadata (VERSIONINFO) into the DLL
+# Embed PE version metadata (VERSIONINFO) into the DLL
+if(WIN32 AND BUILD_SHARED_LIBS)
   target_sources(rocsolver PRIVATE "${PROJECT_BINARY_DIR}/version.rc")
+endif()
 
+if(WIN32)
   if(BUILD_CLIENTS_BENCHMARKS OR BUILD_CLIENTS_TESTS)
     add_custom_command(TARGET rocsolver
       POST_BUILD
