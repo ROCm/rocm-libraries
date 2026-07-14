@@ -199,6 +199,34 @@ static bool enable_d128_small_tile(const rocke_unified_attn_problem_t* p)
     return p->head_size == 128 && !p->use_fp8 && enable_single_batch_combo(p);
 }
 
+/* Python: _enable_softmax_mfma_interleave(problem). gfx950 single-batch d128
+ * prefill: enable use_softmax_mfma_interleave (iglp_opt(1)) and widen to nw=4.
+ * The widened kernel is occupancy-BETTER than the shipped nw=2 (250 vs 296 VGPR,
+ * 8 vs 4 waves/CU), so it does not trip the d128 small-tile nw=2 reconciliation.
+ * ESCAPE HATCH: HIPDNN_GFX950_D128_SOFTMAX_INTERLEAVE=0 (or off/no/false)
+ * force-DISABLES it. Mirrors the Python env gate byte-faithfully. */
+static bool enable_softmax_mfma_interleave(const rocke_unified_attn_problem_t* p)
+{
+    const char* env = getenv("HIPDNN_GFX950_D128_SOFTMAX_INTERLEAVE");
+    if(env != NULL)
+    {
+        char buf[16];
+        size_t i = 0;
+        for(; env[i] != '\0' && i + 1 < sizeof(buf); ++i)
+        {
+            char c = env[i];
+            buf[i] = (c >= 'A' && c <= 'Z') ? (char)(c - 'A' + 'a') : c;
+        }
+        buf[i] = '\0';
+        if(strcmp(buf, "0") == 0 || strcmp(buf, "false") == 0 || strcmp(buf, "no") == 0
+           || strcmp(buf, "off") == 0)
+        {
+            return false;
+        }
+    }
+    return p->head_size == 128 && !p->use_fp8 && enable_single_batch_combo(p);
+}
+
 /* Python: _enable_transposed_qk_32x32(problem). */
 static bool enable_transposed_qk_32x32(const rocke_unified_attn_problem_t* p)
 {
@@ -477,6 +505,15 @@ int rocke_unified_attn_select_2d_num_warps(const rocke_unified_attn_problem_t* p
         {
             t2 = 4;
         }
+        /* d128 softmax-MFMA-interleave cohort: widen to nw=4. The interleaved
+           kernel is occupancy-BETTER than the shipped nw=2 (250 vs 296 VGPR,
+           8 vs 4 waves/CU -- see enable_softmax_mfma_interleave), so the
+           small-tile nw=2 reconciliation below does not apply. Overrides the
+           _enable_d128_small_tile -> nw=2 rule for this cohort only. */
+        else if(enable_softmax_mfma_interleave(p))
+        {
+            t2 = 4;
+        }
         /* RECONCILIATION: the d128 small-tile occupancy win (T=block_size
            -> 2 WG/CU) REQUIRES num_warps=2 for ALL seqlens; nw=4 + T=32 is
            occupancy-WORSE (56 KB LDS -> 1 WG/CU). Override the S>=2048 -> nw=4
@@ -742,6 +779,11 @@ bool rocke_unified_attn_enable_transposed_subflags(const rocke_unified_attn_prob
 bool rocke_unified_attn_enable_d128_small_tile(const rocke_unified_attn_problem_t* p)
 {
     return enable_d128_small_tile(p);
+}
+
+bool rocke_unified_attn_enable_softmax_mfma_interleave(const rocke_unified_attn_problem_t* p)
+{
+    return enable_softmax_mfma_interleave(p);
 }
 
 bool rocke_unified_attn_enable_v_double_buffer(const rocke_unified_attn_problem_t* p)
