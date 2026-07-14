@@ -127,3 +127,111 @@ TEST(Predicates, WorkgroupMappingXCCCheck_FallbackTreatsXCCAs1)
     problem.setParams().setFallbackStatus(true);
     EXPECT_TRUE((*pred)(problem)) << "With fallback status, effective XCC=1 so 38 % 1 == 0";
 }
+
+// ----------------------------------------------------------------------------
+// ClusterReductionIterCheck: StreamK cluster-reduction split-barrier safety.
+// The C cluster peers split a tile's itersPerTile = ceil(K /
+// DepthU) K-iterations; the split barrier over-signals unless itersPerTile % C
+// == 0. When itersPerTile % C != 0 the predicate is a HARD REJECT of the
+// cluster-reduction solution (deliberate, user-visible via debugEval -- NOT a
+// silent fallback): the "must be a multiple of the cluster size" limitation.
+// K-tail (K % DepthU != 0) is safe on its own. value = {DepthU, C}.
+// Problems set K via ContractionProblemGemm::GEMM(..., k, ...).
+// ----------------------------------------------------------------------------
+
+namespace
+{
+    TensileLite::ContractionProblemGemm gemmWithK(size_t k)
+    {
+        using namespace TensileLite;
+        // TN like the MX-FP8 cluster-reduction configs; only K matters here.
+        return ContractionProblemGemm::GEMM(true, false, 256, 256, k, 256, 256, 256, 1.0, false, 1);
+    }
+}
+
+TEST(Predicates, ClusterReductionIterCheck_EvenSplit_NoTail_Passes)
+{
+    using namespace TensileLite;
+    // DepthU=256, C=4, K=2048 -> itersPerTile=8, 8 % 4 == 0 -> safe.
+    auto pred = std::make_shared<Predicates::Contraction::ClusterReductionIterCheck>(
+        std::array<int, 2>{256, 4});
+    EXPECT_TRUE((*pred)(gemmWithK(2048))) << "itersPerTile=8, 8 % 4 == 0 should pass";
+}
+
+TEST(Predicates, ClusterReductionIterCheck_EvenSplit_WithKTail_Passes)
+{
+    using namespace TensileLite;
+    // DepthU=256, C=4, K=1920 -> itersPerTile=ceil(1920/256)=8, 8 % 4 == 0.
+    // K % 256 = 128 (K-tail) but that alone is SAFE (verified on gfx1250 sim).
+    auto pred = std::make_shared<Predicates::Contraction::ClusterReductionIterCheck>(
+        std::array<int, 2>{256, 4});
+    EXPECT_TRUE((*pred)(gemmWithK(1920)))
+        << "itersPerTile=8, 8 % 4 == 0 must pass even with a K-tail";
+}
+
+TEST(Predicates, ClusterReductionIterCheck_CGreaterThanItersPerTile_Rejects)
+{
+    using namespace TensileLite;
+    // DepthU=256, C=8, K=1024 -> itersPerTile=4, 4 % 8 == 4 != 0 -> unsafe
+    // (C > itersPerTile). Would over-signal the split barrier -> HARD REJECT.
+    auto pred = std::make_shared<Predicates::Contraction::ClusterReductionIterCheck>(
+        std::array<int, 2>{256, 8});
+    EXPECT_FALSE((*pred)(gemmWithK(1024)))
+        << "C=8 > itersPerTile=4 (4 % 8 != 0) must be rejected (not a fallback)";
+}
+
+TEST(Predicates, ClusterReductionIterCheck_UnevenSplit_NoTail_Rejects)
+{
+    using namespace TensileLite;
+    // DepthU=256, C=4, K=1536 (=6*256, no K-tail) -> itersPerTile=6, 6 % 4 == 2
+    // != 0 -> unsafe even without a K-tail (verified on gfx1250 sim).
+    auto pred = std::make_shared<Predicates::Contraction::ClusterReductionIterCheck>(
+        std::array<int, 2>{256, 4});
+    EXPECT_FALSE((*pred)(gemmWithK(1536)))
+        << "itersPerTile=6, 6 % 4 != 0 must be rejected (no K-tail involved)";
+}
+
+TEST(Predicates, ClusterReductionIterCheck_UnevenSplit_WithKTail_Rejects)
+{
+    using namespace TensileLite;
+    // DepthU=256, C=2, K=1056 -> itersPerTile=ceil(1056/256)=5, 5 % 2 == 1 != 0.
+    auto pred = std::make_shared<Predicates::Contraction::ClusterReductionIterCheck>(
+        std::array<int, 2>{256, 2});
+    EXPECT_FALSE((*pred)(gemmWithK(1056))) << "itersPerTile=5, 5 % 2 != 0 must be rejected";
+}
+
+// Focused hard-reject test: the rejection is user-visible and its diagnostic
+// message names the "multiple of the cluster size" limitation (debugEval output
+// is what the solution selector surfaces on the DID_NOT_SATISFY_ASSERTS path).
+TEST(Predicates, ClusterReductionIterCheck_RejectMessageNamesLimitation)
+{
+    using namespace TensileLite;
+    // DepthU=256, C=4, K=1024 -> itersPerTile=4, 4 % 4 == 0 -> the safe case
+    // (no message emitted for a passing predicate in non-verbose mode) is not
+    // what we assert here; instead take a non-conforming case:
+    // DepthU=256, C=4, K=1280 -> itersPerTile=5, 5 % 4 != 0 -> reject.
+    auto pred = std::make_shared<Predicates::Contraction::ClusterReductionIterCheck>(
+        std::array<int, 2>{256, 4});
+    auto               problem = gemmWithK(1280);
+    std::ostringstream oss;
+    bool               rv = pred->debugEval(problem, oss);
+    EXPECT_FALSE(rv) << "itersPerTile=5, 5 % 4 != 0 must be rejected";
+    const std::string msg = oss.str();
+    EXPECT_NE(msg.find("iterations-per-tile ceil(K/DepthU)"), std::string::npos)
+        << "reject diagnostic must name iterations-per-tile; got: " << msg;
+    EXPECT_NE(msg.find("multiple of ClusterDim[0]"), std::string::npos)
+        << "reject diagnostic must name the multiple-of-cluster-size limitation; got: " << msg;
+    EXPECT_NE(msg.find("[!!]"), std::string::npos)
+        << "reject diagnostic must mark the predicate as failing; got: " << msg;
+}
+
+TEST(Predicates, ClusterReductionIterCheck_NoCluster_AlwaysPasses)
+{
+    using namespace TensileLite;
+    // C <= 1 -> predicate inert (non-cluster / multicast never emits it, but
+    // guard defensively): any K passes.
+    auto pred = std::make_shared<Predicates::Contraction::ClusterReductionIterCheck>(
+        std::array<int, 2>{256, 1});
+    EXPECT_TRUE((*pred)(gemmWithK(1056))) << "C=1 must always pass (guard inert)";
+    EXPECT_TRUE((*pred)(gemmWithK(1024))) << "C=1 must always pass (guard inert)";
+}

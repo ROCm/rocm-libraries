@@ -825,6 +825,18 @@ validParameters = { # we need to make sure this matches develop
     # 0: use linear reduction
     # 1: use tree reduction
     "StreamKFixupTreeReduction": [0, 1],
+    # Enables the gfx1250 workgroup-cluster reduction fast path for StreamK.
+    # When enabled, a StreamK tile's fixup peers are co-located in a single 1-D
+    # workgroup cluster (ClusterDim = [C,1]) and the cross-CU global-flag
+    # spin-wait is replaced by an intra-cluster split barrier. Barrier-only in
+    # v1 (Multicast stays off); partials remain in the global workspace and the
+    # global-flag reduction is retained as a runtime/compile fallback.
+    # Requires StreamK == 3, ClusterDim == [C,1] with C a power of two in 2..16,
+    # gfx1250 (HasClusterBarrier) with TDMInst != 0, and NOT StreamKAtomic /
+    # NOT StreamKForceDPOnly. See docs/design/streamk-wg-clusters.md.
+    # 0: use the existing global-flag reduction
+    # 1: enable the cluster-barrier reduction fast path
+    "StreamKClusterReduction": [0, 1],
     # Debug settings for stream-k kernels to disable parts of the kernel
     #   Bit 0: Don't generate fixup code
     #   Bit 1: Don't generate write to partials code

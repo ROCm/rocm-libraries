@@ -930,7 +930,32 @@ namespace TensileLite
                 }
 
                 // Stream-K 3 uses the two-tile ABI.
-                if(sk.reduction == origami::reduction_t::parallel)
+                //
+                // INVARIANT: the cluster-reduction kernarg path (fixed C-way
+                // split, one tile per cluster) is valid ONLY when the launch grid
+                // still matches the contract skGrid == C * tiles. getSKGridImpl
+                // sets that, but a workspace/DP fallback in solve() can re-round
+                // sk.grid to ceil(tiles/C)*C (a multiple of C, but not C*tiles).
+                // In that case skItersPerWG = itersPerTile/C no longer matches the
+                // grid, so DISABLE this path and fall through to the standard SK3
+                // accounting (the kernel's intra_cluster runtime guard already
+                // routes partially-filled clusters to the global-flag reduction).
+                if(sizeMapping.streamKClusterReduction && sizeMapping.clusterDim.x > 1
+                   && sk.grid == static_cast<size_t>(sizeMapping.clusterDim.x) * tiles)
+                {
+                    // Fixed even split / one-tile-per-cluster: the C = clusterDim.x
+                    // consecutive StreamKIdx of one cluster (its contiguous
+                    // WorkGroup0 range [c*C, c*C + C)) are exactly the fixup peers of
+                    // tile c; each peer runs itersPerTile/C iterations (skSplit == C)
+                    // and skTiles == tiles (every tile split C ways).
+                    uint32_t c            = static_cast<uint32_t>(sizeMapping.clusterDim.x);
+                    uint32_t skItersPerWG = static_cast<uint32_t>(itersPerTile) / c;
+
+                    args.template append<uint32_t>("SKItersPerWG", skItersPerWG);
+                    args.template append<uint32_t>("skGrid", sk.grid);
+                    args.template append<uint32_t>("skTiles", static_cast<uint32_t>(tiles));
+                }
+                else if(sk.reduction == origami::reduction_t::parallel)
                 {
                     uint32_t skSplit
                         = sk.grid / tiles; // skTiles is skSplit in parallel reduction path
@@ -3186,6 +3211,18 @@ namespace TensileLite
                 throw std::runtime_error("hipblasLT Error: Cannot use Parallel reduction with "
                                          "StreamK kernel with splitting factor < 2\n");
             }
+
+            // Keep the StreamK cluster launch grid a multiple of the cluster size C
+            // even if a workspace/DP fallback above changed sk.grid, so the clustered
+            // launch (gridDimX % C == 0) stays valid. In the common case sk.grid is
+            // already C * tiles (a multiple of C) so this is a no-op; when a fallback
+            // fired, per-tile correctness on any partially-filled cluster is handled by
+            // the kernel's intra_cluster runtime guard + global-flag fallback.
+            if(sizeMapping.streamKClusterReduction && sizeMapping.clusterDim.x > 1)
+            {
+                size_t c = sizeMapping.clusterDim.x;
+                sk.grid  = ((sk.grid + c - 1) / c) * c;
+            }
         }
 
         GSUSettings gsuSettings;
@@ -4040,6 +4077,23 @@ namespace TensileLite
                 {
                     skGrid = tiles;
                 }
+            }
+
+            // StreamKClusterReduction (gfx1250): fixed even split / one-tile-per-cluster
+            // (design docs/design/streamk-wg-clusters.md, section 2.3). Each of the
+            // `tiles` output tiles is owned by exactly one cluster of C = clusterDim.x
+            // peer WGs, so the launched grid is C * tiles. The HW WG-id remap gives
+            // WorkGroup0 = cluster_x*C + wg_x, so the C WGs of cluster c occupy the
+            // contiguous StreamK index range [c*C, c*C + C) -- exactly the consecutive
+            // fixup peers of tile c. C * tiles is inherently a multiple of C, satisfying
+            // the clustered-launch requirement that gridDimX be a multiple of the cluster
+            // size (see HipSolutionAdapter cluster launch). This override intentionally
+            // supersedes the grid-selection heuristics above so the alignment invariant
+            // always holds; residual/partial clusters fall back to the global-flag path
+            // via the kernel's intra_cluster runtime guard.
+            if(self.sizeMapping.streamKClusterReduction && self.sizeMapping.clusterDim.x > 1)
+            {
+                skGrid = static_cast<size_t>(self.sizeMapping.clusterDim.x) * tiles;
             }
 
             return skGrid;

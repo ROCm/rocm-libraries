@@ -97,3 +97,44 @@ def test_internal_args_support(solution_state):
 def test_problem_predicate_compound(problem_type, solution_state, snapshot):
     preds = C.ProblemPredicate.CompoundPredicates(solution_state, problem_type)
     assert {"count": len(preds), "tags": sorted({p.tag for p in preds})} == snapshot
+
+
+# --- StreamK cluster-reduction split-barrier selection guard --
+#
+# ClusterReductionIterCheck must be emitted only for StreamKClusterReduction
+# solutions with a real cluster (ClusterDim[0] > 1); its value carries
+# [DepthU, C] so the host predicate can reject problems whose
+# itersPerTile = ceil(K/DepthU) is not a multiple of C (split-barrier
+# over-signal). It must NOT be emitted for non-cluster or multicast solutions.
+
+def _preds_for(solution_state, problem_type, **overrides):
+    st = dict(solution_state)
+    st.update(overrides)
+    return C.ProblemPredicate.CompoundPredicates(st, problem_type)
+
+
+def _cluster_iter_pred(preds):
+    return next((p for p in preds if p.tag == "ClusterReductionIterCheck"), None)
+
+
+def test_cluster_reduction_iter_check_emitted(problem_type, solution_state):
+    preds = _preds_for(solution_state, problem_type,
+                       StreamKClusterReduction=1, ClusterDim=[4, 1], DepthU=256)
+    p = _cluster_iter_pred(preds)
+    assert p is not None, "cluster-reduction solution must emit ClusterReductionIterCheck"
+    # value = [DepthU, C] so the host can compute itersPerTile % C.
+    assert p.value == [256, 4]
+
+
+def test_cluster_reduction_iter_check_not_emitted_when_off(problem_type, solution_state):
+    # StreamKClusterReduction off -> no guard (the param is inert).
+    preds = _preds_for(solution_state, problem_type,
+                       StreamKClusterReduction=0, ClusterDim=[4, 1], DepthU=256)
+    assert _cluster_iter_pred(preds) is None
+
+
+def test_cluster_reduction_iter_check_not_emitted_without_cluster(problem_type, solution_state):
+    # Reduction requested but C == 1 (no real cluster) -> no guard.
+    preds = _preds_for(solution_state, problem_type,
+                       StreamKClusterReduction=1, ClusterDim=[1, 1], DepthU=256)
+    assert _cluster_iter_pred(preds) is None

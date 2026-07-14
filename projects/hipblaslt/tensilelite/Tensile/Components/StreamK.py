@@ -954,7 +954,37 @@ class StreamK(Component):
                 writer.releaseStreamKConstSgpr(sIpt)
                 module.add(SSubU32(dst=sgpr(sFixupEnd), src0=sgpr("StreamKIterEnd"), src1=sgpr(tmpSgpr), comment="calc iterations completed by this WG"))
 
+                # --- Intra-cluster split-barrier fast path (StreamK v3) ---
+                # Deadlock invariant: this owner and every non-owner peer of the
+                # tile evaluate the SAME uniform intra-cluster predicate
+                # (clusterReduceIntraCheck), so the whole cluster commits to
+                # either the barrier path or the global-flag path together --
+                # never a mix. On the fast path the owner arrives once and waits
+                # once for all C cluster members (peers signal after publishing
+                # their partials to the workspace), then reads the peer partials
+                # with the unchanged fixupStep loop; no per-peer flag
+                # read/spin/reset runs.
+                clusterFast = self._streamKClusterReductionEnabled(writer, kernel)
+                sClusterFast = None
+                skClusterSkipFlag = None
+                if clusterFast:
+                    sClusterFast = writer.sgprPool.checkOut(1, "SKClusterFast")
+                    skClusterSetupDone = Label(label=writer.labels.getNameInc("SK_ClusterSetupDone"), comment="")
+                    skClusterSkipFlag = Label(label=writer.labels.getNameInc("SK_ClusterSkipFlag"), comment="")
+                    module.add(self.clusterReduceIntraCheck(writer, kernel))
+                    module.add(SCSelectB32(dst=sgpr(sClusterFast), src0=1, src1=0, comment="latch intra-cluster verdict"))
+                    module.add(SCmpEQU32(src0=sgpr(sClusterFast), src1=1, comment="intra-cluster fast path?"))
+                    module.add(SCBranchSCC0(labelName=skClusterSetupDone.getLabelName(), comment="not intra-cluster: use global-flag reduction"))
+                    module.add(self.clusterReduceSignal(writer, kernel))   # owner arrives at the cluster barrier
+                    module.add(self.clusterReduceWait(writer, kernel))     # wait until all C cluster members arrived
+                    module.add(memOrder.acquireFence(writer))              # once: observe peers' published partials
+                    module.add(skClusterSetupDone)
+
                 module.add(skFixupLabel)
+
+                if clusterFast:
+                    module.add(SCmpEQU32(src0=sgpr(sClusterFast), src1=1, comment="intra-cluster: peers already synced via cluster barrier"))
+                    module.add(SCBranchSCC1(labelName=skClusterSkipFlag.getLabelName(), comment="skip per-peer global-flag handshake"))
 
                 # Check flag
                 module.add(SLShiftLeftB32(dst=sgpr(tmpSgpr), src=sgpr(sCtaIdx), shiftHex=log2(4), comment="flag offset based on CTA index"))
@@ -977,6 +1007,10 @@ class StreamK(Component):
                     module.add(VMovB32(dst=vgpr(tmpVgpr), src=0, comment="move 0 to tmpVgpr"))
                     module.add(self.setFlagValue(writer, src=vgpr(tmpVgpr), soffset=sgpr(tmpSgpr), comment="reset flag"))
                 module.add(skipFlagReset)
+                # Fast-path branch target: land here (after the flag handshake)
+                # so every runtime fixup iteration skips the global-flag block.
+                if clusterFast:
+                    module.add(skClusterSkipFlag)
                 writer.sgprPool.checkIn(tmpSgpr)
 
                 fixupEdge = [False] # Test no edge variant
@@ -1033,6 +1067,8 @@ class StreamK(Component):
 
                 writer.sgprPool.checkIn(sFixupEnd)
                 writer.sgprPool.checkIn(sCtaIdx)
+                if clusterFast:
+                    writer.sgprPool.checkIn(sClusterFast)
 
         module.add(skStoreLabel)
 
@@ -1350,6 +1386,24 @@ class StreamK(Component):
             module.add(memOrder.releaseFence(writer))
             module.add(SBarrier(comment="store all data before setting flag"))
 
+            # Non-owner peer fast path: after publishing the partial and the
+            # release fence, arrive at the cluster split barrier INSTEAD OF
+            # raising the global completion flag. Deadlock invariant: the
+            # intra-cluster predicate is the identical uniform check the owner
+            # evaluates, so a cluster never mixes barrier signalers with flag
+            # setters, and this peer signals exactly once on this (its only)
+            # epilogue exit before branching to endLabel below.
+            clusterFast = self._streamKClusterReductionEnabled(writer, kernel)
+            skClusterSignalDone = None
+            if clusterFast:
+                skClusterUseFlag = Label(label=writer.labels.getNameInc("SK_ClusterUseFlag"), comment="")
+                skClusterSignalDone = Label(label=writer.labels.getNameInc("SK_ClusterSignalDone"), comment="")
+                module.add(self.clusterReduceIntraCheck(writer, kernel))
+                module.add(SCBranchSCC0(labelName=skClusterUseFlag.getLabelName(), comment="not intra-cluster: fall back to global flag"))
+                module.add(self.clusterReduceSignal(writer, kernel))
+                module.add(SBranch(labelName=skClusterSignalDone.getLabelName(), comment="peer arrived at cluster barrier: skip global-flag store"))
+                module.add(skClusterUseFlag)
+
             if kernel["StreamK"] == 4:
                 # TODO modularize this section into abstract function
                 module.add(self.calculatePartialIdx(tmpSgpr))
@@ -1397,6 +1451,8 @@ class StreamK(Component):
                     module.add(VMovB32(dst=vgpr(tmpVgpr), src=1, comment="move 1 to tmpVgpr"))
                     module.add(self.setFlagValue(writer, src=vgpr(tmpVgpr), soffset=sgpr(tmpSgpr), comment="set flag"))
                 module.add(skipFlagSet)
+            if clusterFast:
+                module.add(skClusterSignalDone)
             module.add(SWaitCnt(kmcnt=0, comment="wait for flag")) # TODO just for testing
 
         if "Deferred" in endLabel.getLabelName():
@@ -1459,6 +1515,100 @@ class StreamK(Component):
         writer.vgprPool.checkIn(tmpVgprOff)
         writer.sgprPool.checkIn(tmpSgprBuffer)
 
+        return module
+
+    def _streamKClusterReductionEnabled(self, writer, kernel):
+        """Compile-time gate for the intra-cluster split-barrier reduction.
+
+        Both the owner's cluster wait and the non-owner's cluster signal are
+        gated on this identical predicate (see clusterReduceIntraCheck for the
+        deadlock invariant it upholds).
+
+        Restricted to StreamK variant 3 (StreamKTwoTileDPFirst), linear
+        reduction only (the tree schedule keeps the global-flag handshake), and
+        the non-atomic / non-DP-only reduction path. Requires the gfx1250
+        cluster-barrier asm capability.
+        """
+        return (bool(kernel.get("StreamKClusterReduction", False))
+                and kernel["StreamK"] == 3
+                and not kernel["StreamKFixupTreeReduction"]
+                and not kernel["StreamKAtomic"]
+                and not kernel["StreamKForceDPOnly"]
+                and writer.states.asmCaps.get("HasClusterBarrier", False))
+
+    def clusterReduceSignal(self, writer, kernel):
+        """Wave-0-elected cluster split-barrier arrive (``s_barrier_signal -3``).
+
+        One wave per workgroup arrives at the cluster-scope split barrier; the
+        remaining waves branch over the signal. Wave election reuses the
+        Serial/readfirstlane idiom the StreamK flag path already uses (rather
+        than sgpr("WaveIdx"), which may be undefined in the epilogue), so the
+        helper is self-contained.
+        """
+        assert writer.states.asmCaps.get("HasClusterBarrier", False), \
+            "StreamK cluster reduction requires the HasClusterBarrier asm capability"
+        module = Module("StreamK cluster reduce signal")
+        skipSignal = Label(label=writer.labels.getNameInc("SK_ClusterSkipSignal"), comment="")
+        elect = writer.sgprPool.checkOut(1, "SKClusterElect")
+        module.add(VReadfirstlaneB32(dst=sgpr(elect), src=vgpr("Serial"), comment="wave 0 signals the cluster"))
+        module.add(SCmpEQU32(src0=sgpr(elect), src1=0, comment="Check for wave 0"))
+        module.add(SCBranchSCC0(labelName=skipSignal.getLabelName(), comment="only wave 0 signals the cluster"))
+        module.add(SBarrier(True, False, True, comment="cluster_barrier signal (arrive)"))
+        module.add(skipSignal)
+        writer.sgprPool.checkIn(elect)
+        return module
+
+    def clusterReduceWait(self, writer, kernel):
+        """Cluster split-barrier wait (``s_barrier_wait -3``).
+
+        Emitted for every wave of the owner workgroup; unblocks only once every
+        workgroup in the cluster has arrived (i.e. all peers have published
+        their partials). Also serves as the intra-workgroup wave sync the
+        global-flag path got from its workgroup barrier.
+        """
+        assert writer.states.asmCaps.get("HasClusterBarrier", False), \
+            "StreamK cluster reduction requires the HasClusterBarrier asm capability"
+        module = Module("StreamK cluster reduce wait")
+        module.add(SBarrier(True, True, True, comment="cluster_barrier wait (all peers arrived)"))
+        return module
+
+    def clusterReduceIntraCheck(self, writer, kernel):
+        """Emit the uniform intra-cluster predicate; leaves SCC=1 (fast path)
+        when this workgroup's cluster hosts a single, fully-populated StreamK
+        tile, SCC=0 (fall back to the global-flag path) otherwise.
+
+        The predicate is a pure function of the cluster's top StreamK index and
+        the SK grid size (both uniform across a cluster), so every member of a
+        cluster -- owner and peers alike -- computes the identical verdict. This
+        is what makes the fast path deadlock-safe: a cluster is never split
+        between barrier signalers and flag setters.
+
+        Contract (host accounting, StreamKClusterReduction): ClusterDim=[C,1]
+        with C a power of two; cluster c owns the contiguous StreamK index range
+        [c*C, c*C+C) which is exactly one tile's peer group (skSplit==C, fixed
+        even split); skGrid is rounded up to a multiple of C. Under that
+        contract cluster_last = StreamKIdx | (C-1) < skGrid holds for every SK
+        workgroup, so the fast path is taken; a partially-filled trailing
+        cluster (contract violated) fails the check and the whole cluster falls
+        back safely.
+        """
+        module = Module("StreamK cluster intra-cluster check")
+        C = kernel["ClusterDim"][0]
+        skConstsInVgprs = writer.isStreamKConstantsToVgprEnabled(kernel)
+        sClusterLast = writer.sgprPool.checkOut(1, "SKClusterLast")
+        sIdx = writer.acquireStreamKConstSgpr(kernel, "StreamKIdx")
+        if skConstsInVgprs:
+            module.add(VReadfirstlaneB32(dst=sgpr(sIdx), src=vgpr(writer.states.skConstVgprs["StreamKIdx"])))
+        # cluster_last = StreamKIdx | (C-1): the top StreamK index of this WG's
+        # cluster (C a power of two). Uniform across every WG in the cluster.
+        module.add(SOrB32(dst=sgpr(sClusterLast), src0=sgpr(sIdx), src1=hex(C - 1), comment="cluster_last = StreamKIdx | (C-1)"))
+        writer.releaseStreamKConstSgpr(sIdx)
+        sGrid = writer.acquireStreamKConstSgpr(kernel, "skGrid")
+        if skConstsInVgprs:
+            module.add(VReadfirstlaneB32(dst=sgpr(sGrid), src=vgpr(writer.states.skConstVgprs["skGrid"])))
+        module.add(SCmpLtU32(src0=sgpr(sClusterLast), src1=sgpr(sGrid), comment="intra-cluster: cluster fully within SK grid?"))
+        writer.releaseStreamKConstSgpr(sGrid)
+        writer.sgprPool.checkIn(sClusterLast)
         return module
 
     def partialsWriteBatch(self, writer, kernel, ss, batchIdx, applyAlpha, beta, edge, gwvw, atomicW, \
@@ -2491,13 +2641,19 @@ class StreamKTwoTileDPFirst(StreamK):
         xccMapping = Component.XCCMapping.find(writer)
         module.add(xccMapping(writer, kernel))
 
-        # Skip the gfx12 ttmp reread under clustering: defineAndResources already left
-        # the cluster-decoded rank in WorkGroup0/1/2, and rereading ttmp9 (cluster_x here)
-        # would collide StreamKIdx across the cluster.
-        if writer.states.archCaps["WorkGroupIdFromTTM"] and not clusterEnabled(kernel["ClusterDim"]):
-            module.add(SMovB32(dst=sgpr("WorkGroup0"), src="ttmp9", comment="workaround"))
-            module.add(SAndB32(dst=sgpr("WorkGroup1"), src0=hex(0xFFFF), src1="ttmp7", comment="workaround"))
-            module.add(SLShiftRightB32(dst=sgpr("WorkGroup2"), shiftHex=hex(0x10), src="ttmp7", comment="workaround"))
+        # Workaround for gfx12
+        if writer.states.archCaps["WorkGroupIdFromTTM"]:
+            # Under StreamKClusterReduction the kernel-arg init already rebuilt
+            # WorkGroup0/1/2 from the cluster HW regs as the cluster-remapped
+            # GLOBAL linear index (WorkGroup0 = cluster_x*C + wg_x). The raw
+            # ttmp9 read here is only wg_x *within* the cluster, so re-applying
+            # the workaround would clobber the remap and make StreamKIdx a
+            # per-cluster local index. Keep the remapped ids so StreamKIdx is
+            # the global index the reduction/peer bookkeeping expects.
+            if not kernel.get("StreamKClusterReduction", False):
+                module.add(SMovB32(dst=sgpr("WorkGroup0"), src="ttmp9", comment="workaround"))
+                module.add(SAndB32(dst=sgpr("WorkGroup1"), src0=hex(0xFFFF), src1="ttmp7", comment="workaround"))
+                module.add(SLShiftRightB32(dst=sgpr("WorkGroup2"), shiftHex=hex(0x10), src="ttmp7", comment="workaround"))
 
         if skConstsInVgprs:
             module.add(VMovB32(dst=vgpr(self._skv(writer, "StreamKIdx")), src=sgpr("WorkGroup0"),

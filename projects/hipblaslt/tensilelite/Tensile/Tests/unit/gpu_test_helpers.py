@@ -87,9 +87,19 @@ def _detect_gfx_target():
 # ---- Constants ----
 GFX_TARGET = _detect_gfx_target()
 HAS_GFX950 = GFX_TARGET == "gfx950"
+HAS_GFX1250 = GFX_TARGET == "gfx1250"
 requires_gpu = pytest.mark.skipif(
     hip is None or not HAS_GFX950,
     reason=f"requires hip module and gfx950 (found hip={'yes' if hip else 'no'}, arch={GFX_TARGET})",
+)
+# gfx1250 gate for the StreamK workgroup-cluster reduction roundtrip. Under the
+# FFM (mi450) simulator, rocm_agent_enumerator reports the physical host arch,
+# so GFX_TARGET is driven via the TENSILE_GPU_TARGET=gfx1250 override (see
+# _detect_gfx_target). Left independent of the gfx950 gate above so both can
+# coexist.
+requires_gpu_gfx1250 = pytest.mark.skipif(
+    hip is None or not HAS_GFX1250,
+    reason=f"requires hip module and gfx1250 (found hip={'yes' if hip else 'no'}, arch={GFX_TARGET})",
 )
 WAVESIZE   = 64
 NUM_WAVES  = 4

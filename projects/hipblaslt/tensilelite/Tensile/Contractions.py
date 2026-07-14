@@ -594,6 +594,18 @@ class ProblemPredicate(Properties.Predicate):
         valuepredicates.append(state["ClusterDim"][1])
         rv += [cls('ClusterDimCheck', value=valuepredicates)]
 
+        # StreamK cluster-reduction split-barrier safety (gfx1250). The C =
+        # ClusterDim[0] peers split a tile's itersPerTile = ceil(K/DepthU)
+        # K-iterations and hand off through an intra-cluster split barrier; if
+        # itersPerTile % C != 0 (incl. C > itersPerTile) the split barrier
+        # over-signals -> hang. itersPerTile depends on runtime K, so this is a
+        # per-problem HARD REJECT (not a build-time reject, not a silent
+        # fallback). Only the K-split reduction path needs it; StreamKMulticast
+        # (no K-split) relies on ClusterDimCheck instead.
+        if state.get("StreamKClusterReduction", 0) and state["ClusterDim"][0] > 1:
+            rv += [cls('ClusterReductionIterCheck',
+                       value=[state["DepthU"], state["ClusterDim"][0]])]
+
         return rv
 
     @classmethod
@@ -627,6 +639,7 @@ class SizeMapping:
                  'streamK',
                  'streamKForceDPOnly',
                  'streamKAtomic',
+                 'streamKClusterReduction',
                  'prefetchAcrossPersistent',
                  'sourceKernel',
                  'globalAccumulation',
@@ -721,6 +734,7 @@ class SizeMapping:
                    streamK                  = d['StreamK'] if 'StreamK' in d else 0,
                    streamKForceDPOnly       = d.get('StreamKForceDPOnly', 0),
                    streamKAtomic            = d['StreamKAtomic'] if 'StreamKAtomic' in d else 0,
+                   streamKClusterReduction  = d.get('StreamKClusterReduction', 0),
                    prefetchAcrossPersistent = d.get('PrefetchAcrossPersistent', 0),
                    magicDivAlg              = d.get('MagicDivAlg', 1),
                    sourceKernel             = d['KernelLanguage'] == 'Source',
