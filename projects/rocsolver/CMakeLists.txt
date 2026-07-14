@@ -166,6 +166,10 @@ cmake_dependent_option(USE_HIPCXX "Use CMake HIP language support" OFF CMAKE_HIP
 if(USE_HIPCXX)
   enable_language(HIP)
 else()
+  if(AMDGPU_TARGETS AND NOT GPU_TARGETS)
+    message(DEPRECATION "AMDGPU_TARGETS use is deprecated. Use GPU_TARGETS.")
+    set(GPU_TARGETS "${AMDGPU_TARGETS}" CACHE STRING "GPU architectures to build for")
+  endif()
   if(NOT DEFINED GPU_TARGETS)
     set(XNACK_PLUS_TARGETS
       gfx90a:xnack+
