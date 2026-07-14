@@ -2302,7 +2302,16 @@ ROCSOLVER_KERNEL void __launch_bounds__(STEDC_SOLVE_BDIM)
     S* tempgemm = tempgemmA + bid * get_tempgemm_size(n);
     S* etmpd = ptr_etmpd(n, tempgemm);
 
+#if defined(ROCSOLVER_USE_REFERENCE_SECULAR_EQUATIONS_SOLVER)
+    // Reference path: STEDC_SOLVE_BDIM threads per block, each thread owns one eigenvalue
+    int i = hipThreadIdx_x + hipBlockDim_x * hipBlockIdx_x;
+    if(i >= n)
+        return;
+#else
+    // Updated path: one block (one warp) per eigenvalue
     int i = hipBlockIdx_x;
+#endif
+
     {
         S p = r1p[i];
         rocblas_int p1 = nps[i];
@@ -2325,14 +2334,12 @@ ROCSOLVER_KERNEL void __launch_bounds__(STEDC_SOLVE_BDIM)
             S dlam{};
 
 #if defined(ROCSOLVER_USE_REFERENCE_SECULAR_EQUATIONS_SOLVER)
-            if(threadIdx.x == 0)
-            {
-                linfo = slaed4(dd, cc, etmpd + i * n, z + p1, std::abs(p), dlam);
-                evs[i] = (p < 0) ? -dlam : dlam;
-            }
+            // Each thread independently computes its own eigenvalue
+            linfo = slaed4(dd, cc, etmpd + i * n, z + p1, std::abs(p), dlam);
+            evs[i] = (p < 0) ? -dlam : dlam;
 #else
             linfo = laed4_alt<S, rocblas_int>(dd, cc, etmpd + i * n, z + p1, std::abs(p), dlam);
-            if(threadIdx.x == 0)
+            if(hipThreadIdx_x == 0)
             {
                 evs[i] = (p < 0) ? -dlam : dlam;
             }
