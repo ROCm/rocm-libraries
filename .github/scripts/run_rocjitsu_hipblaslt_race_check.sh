@@ -354,6 +354,7 @@ GlobalParameters:
   DataInitTypeAlpha: 1
   Device: 0
   CpuThreads: 1
+  PrintSolutionRejectionReason: True
 
 BenchmarkProblems:
   -
