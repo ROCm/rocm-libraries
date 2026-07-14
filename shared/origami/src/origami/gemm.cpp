@@ -36,7 +36,11 @@ static double compute_formocast_latency(const problem_t& problem,
 context_t::context_t(const problem_t& problem, const hardware_t& hardware, const config_t& config) {
   // Extract parameters
   const size_t NUM_XCD = hardware.NUM_XCD;
-  const size_t N_CU    = hardware.N_CU;
+  // Effective usable CU count. Decided once here and consumed across the model
+  // (launch params, occupancy, cache/epilogue/reduction estimates). A non-zero
+  // problem.num_cus caps the count; 0 falls back to the full hardware count.
+  n_cu                 = resolve_num_cus(problem.num_cus, hardware.N_CU);
+  const size_t N_CU    = n_cu;
 
   const size_t M     = problem.size.m;
   const size_t N     = problem.size.n;
@@ -58,9 +62,12 @@ context_t::context_t(const problem_t& problem, const hardware_t& hardware, const
   grid_n           = math::safe_ceil_div(N, MT_N);
   num_output_tiles = grid_m * grid_n * batch;
 
-  // Launch parameters
+  // Launch parameters. Only forward a CU cap when the budget is a genuine
+  // reduction (n_cu < physical); passing 0 otherwise keeps the legacy grid
+  // selection path (incl. StreamK's occupancy handling) untouched.
+  const size_t cu_budget = (n_cu < hardware.N_CU) ? n_cu : 0;
   auto [reduction, wgs, cus, timesteps, split] =
-      compute_launch_parameters(problem, hardware, config, config.grid_selection, 0);
+      compute_launch_parameters(problem, hardware, config, config.grid_selection, cu_budget);
   reduction_strategy = reduction;
   num_wgs            = wgs;
   num_timesteps      = timesteps;
@@ -228,7 +235,9 @@ workgroup_mapping_t predict_workgroup_mapping(const problem_t& problem,
   // Extract parameters
   const size_t batch = problem.batch;
 
-  const size_t N_CU    = hardware.N_CU;
+  // Honor the caller's CU budget (problem.num_cus); 0 means use all CUs. Keeps
+  // the predicted mapping consistent with the capped model (context.n_cu).
+  const size_t N_CU    = resolve_num_cus(problem.num_cus, hardware.N_CU);
   const size_t NUM_XCD = hardware.NUM_XCD;
 
   const size_t MT_M = config.mt.m;
@@ -373,9 +382,11 @@ std::tuple<reduction_t, size_t, size_t, size_t, size_t> compute_launch_parameter
   // computations in Origami. With current implementation, it is hard to capture that
   // behaviour analytically. So for now, if the num_wgs is less than the num_mts, we calculate
   // num_timesteps based on the num_mts. Otherwise, we use num_wgs to compute num_timesteps.
-  const size_t num_active_cus   = num_wgs < hardware.N_CU ? num_wgs : hardware.N_CU;
-  const size_t num_timesteps    = num_wgs > num_mts ? math::safe_ceil_div(num_wgs, hardware.N_CU)
-                                                    : math::safe_ceil_div(num_mts, hardware.N_CU);
+  // Usable CU count: capped by max_cus when the caller supplied a budget.
+  const size_t usable_cus       = (max_cus > 0) ? std::min(max_cus, hardware.N_CU) : hardware.N_CU;
+  const size_t num_active_cus   = num_wgs < usable_cus ? num_wgs : usable_cus;
+  const size_t num_timesteps    = num_wgs > num_mts ? math::safe_ceil_div(num_wgs, usable_cus)
+                                                    : math::safe_ceil_div(num_mts, usable_cus);
   const size_t splitting_factor = math::safe_ceil_div(num_wgs, num_mts);
 
   return std::make_tuple(
@@ -1069,7 +1080,7 @@ cache_hit_rates_t estimate_cache_hit_rates(const problem_t& problem,
                                            const context_t& context) {
   // Extract parameters
   const size_t num_xcd     = hardware.NUM_XCD;
-  const size_t N_CU        = hardware.N_CU;
+  const size_t N_CU        = context.n_cu;
   const double l2_cap      = static_cast<double>(hardware.L2_capacity);
   const size_t k_per_split = context.k_per_split;
   const auto& wgm          = context.wgm;
@@ -1514,7 +1525,7 @@ double compute_epilogue_latency(const problem_t& problem,
   const size_t M = problem.size.m;
   const size_t N = problem.size.n;
 
-  const size_t N_CU = hardware.N_CU;
+  const size_t N_CU = context.n_cu;
 
   const size_t MT_M = config.mt.m;
   const size_t MT_N = config.mt.n;
@@ -1802,8 +1813,8 @@ double compute_parallel_reduction_latency(const problem_t& problem,
   const size_t VW = std::max(static_cast<size_t>(1), static_cast<size_t>(4.0 / d_bytes));
   const size_t total_wgs =
       math::safe_ceil_div(output_elements, heuristic.postgsu_threads_per_wg * VW);
-  const size_t active_wgs = std::min(total_wgs, hardware.N_CU);
-  const size_t timesteps  = math::safe_ceil_div(total_wgs, hardware.N_CU);
+  const size_t active_wgs = std::min(total_wgs, context.n_cu);
+  const size_t timesteps  = math::safe_ceil_div(total_wgs, context.n_cu);
 
   // Bandwidth based on occupancy of the reduction kernel
   // Assuming data resides in MALL.

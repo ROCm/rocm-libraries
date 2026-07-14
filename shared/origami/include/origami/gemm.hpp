@@ -50,6 +50,10 @@ struct ORIGAMI_EXPORT context_t {
   size_t num_timesteps           = 0;
 
   /// Hardware-derived values.
+  /// Number of compute units usable for this problem. Equals hardware.N_CU
+  /// unless problem.num_cus caps it lower (@see origami::problem_t::num_cus).
+  /// This is the effective CU count the whole model schedules against.
+  size_t n_cu                 = 0;
   size_t active_cus           = 0;
   double mem_bw_limited       = 0.0;
   double write_mem_bw_limited = 0.0;

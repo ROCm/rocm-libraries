@@ -1187,6 +1187,7 @@ namespace TensileLite
                     origami::problem_t origami_problem = {
                         .size  = {sizes[0], sizes[1], sizes[3]},
                         .batch = sizes[2],
+                        .num_cus = 0,
                     };
                     origami::config_t origami_config = {
                         .mt            = {static_cast<size_t>(sizeMapping.macroTile.x),
@@ -1294,6 +1295,7 @@ namespace TensileLite
                     origami::problem_t origami_problem = {
                         .size    = {sizes[0], sizes[1], sizes[3]},
                         .batch   = sizes[2],
+                        .num_cus = 0,
                         .a_dtype = datatypeToAnalyticalDatatype(problem.a().dataType()),
                         .b_dtype = datatypeToAnalyticalDatatype(problem.b().dataType()),
                     };
@@ -3770,6 +3772,7 @@ namespace TensileLite
             origami::problem_t origami_problem = {
                 .size  = {x, y, z},
                 .batch = batch,
+                .num_cus = 0,
             };
             origami::config_t origami_config = {
                 .mt = {static_cast<size_t>(sizeMapping.macroTile.x),
@@ -3853,6 +3856,7 @@ namespace TensileLite
                 origami::problem_t origami_problem = {
                     .size  = {x, y, z},
                     .batch = batchSz,
+                    .num_cus = 0,
                 };
                 origami::config_t origami_config = {
                     .mt = {static_cast<size_t>(sizeMapping.macroTile.x),
@@ -3969,6 +3973,7 @@ namespace TensileLite
                     origami::problem_t origami_problem = {
                         .size        = {x, y, z},
                         .batch       = batch,
+                        .num_cus     = 0,
                         .a_transpose = problem.transA() ? origami::transpose_t::T
                                                         : origami::transpose_t::N,
                         .b_transpose = problem.transB() ? origami::transpose_t::T

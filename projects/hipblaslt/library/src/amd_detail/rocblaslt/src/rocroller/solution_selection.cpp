@@ -224,6 +224,7 @@ std::vector<SolutionIndexParameters> chooseSolutionIndexParameters(
     origami::problem_t origami_problem = {
         .size        = {prob.m, prob.n, prob.k},
         .batch       = prob.batch_count,
+        .num_cus     = 0,
         .a_transpose = (prob.trans_a == hipblasOperation_t::HIPBLAS_OP_T) ? origami::transpose_t::T
                                                                           : origami::transpose_t::N,
         .b_transpose = (prob.trans_b == hipblasOperation_t::HIPBLAS_OP_T) ? origami::transpose_t::T

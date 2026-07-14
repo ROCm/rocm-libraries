@@ -24,6 +24,7 @@ int chooseStreamKGridSize(std::shared_ptr<GemmKernel>        gemm,
     origami::problem_t origami_problem = {
         .size = {prob.m, prob.n, prob.k},
         .batch = prob.batch_count,
+        .num_cus = 0,
         .a_dtype = rocroller_type_to_analytical_type(gemm->params->kernelType.typeA),
         .b_dtype = rocroller_type_to_analytical_type(gemm->params->kernelType.typeB),
         .mi_dtype = rocroller_type_to_analytical_type(elementSizeA_bits < elementSizeB_bits ? gemm->params->kernelType.typeB : gemm->params->kernelType.typeA),

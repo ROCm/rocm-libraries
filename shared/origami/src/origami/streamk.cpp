@@ -152,7 +152,7 @@ reduction_t select_reduction(const problem_t& problem,
   if (algorithm == grid_selection_t::k_split_aware) {
     size_t tiles = compute_number_of_output_tiles(
         config.mt.m, config.mt.n, problem.size.m, problem.size.n, problem.batch);
-    size_t cu_count       = hardware.N_CU;
+    size_t cu_count       = resolve_num_cus(problem.num_cus, hardware.N_CU);
     size_t iters_per_tile = std::max(size_t(1), num_iters_per_tile(config.mt.k, problem.size.k));
 
     if (tiles < cu_count) {
@@ -301,7 +301,9 @@ size_t grid_analytical(const problem_t& problem,
   // then multiply to get total grid size:
   size_t grid = ((M + MT_M - 1) / MT_M) * ((N + MT_N - 1) / MT_N) * batch;
 
-  size_t max_hw_split = std::floor(hardware.N_CU / grid);
+  // Honor the caller's CU budget (max_cus); 0 means use all CUs.
+  const size_t cu_count = (max_cus > 0) ? std::min(max_cus, hardware.N_CU) : hardware.N_CU;
+  size_t max_hw_split = std::floor(cu_count / grid);
   size_t MAX_SPLIT    = std::min(biggest_allowable_split, max_hw_split);
 
   size_t best_split   = 1;
@@ -461,7 +463,7 @@ size_t select_grid_size(const problem_t& problem,
       return streamk::grid_k_split_aware(problem, config, cu_count, max_cus);
 
     case grid_selection_t::number_of_cus:
-    default: return hardware.N_CU;
+    default: return cu_count;
   }
 }
 

@@ -68,7 +68,8 @@ workgroup_mapping_t select_workgroup_mapping(const problem_t& problem,
   }
 
   // Default values
-  size_t numCUs             = hardware.N_CU;
+  // Honor the caller's CU budget (problem.num_cus); 0 means use all CUs.
+  size_t numCUs             = resolve_num_cus(problem.num_cus, hardware.N_CU);
   size_t numXCD             = hardware.NUM_XCD;
   size_t numCUsPerXCD       = numCUs / numXCD;
   size_t defaultWGMXCCCHUNK = 0;
@@ -373,7 +374,8 @@ staggerU_t select_staggerU(const problem_t& problem,
   }
 
   // Default values
-  size_t numCUs       = hardware.N_CU;
+  // Honor the caller's CU budget (problem.num_cus); 0 means use all CUs.
+  size_t numCUs       = resolve_num_cus(problem.num_cus, hardware.N_CU);
   size_t numXCD       = hardware.NUM_XCD;
   size_t numCUsPerXCD = numCUs / numXCD;
 

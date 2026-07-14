@@ -213,6 +213,7 @@ NB_MODULE(origami, m) {
       .def(nanobind::init<>())
       .def_rw("size", &origami::problem_t::size)
       .def_rw("batch", &origami::problem_t::batch)
+      .def_rw("num_cus", &origami::problem_t::num_cus)
       .def_rw("q_heads", &origami::problem_t::q_heads)
       .def_rw("a_transpose", &origami::problem_t::a_transpose)
       .def_rw("b_transpose", &origami::problem_t::b_transpose)

@@ -172,6 +172,9 @@ namespace TensileLite
             origami::problem_t origami_problem = {
                 .size        = {m, n, k},
                 .batch       = batch,
+                // Number of CUs the GEMM will run on. 0 = use all CUs (current
+                // behaviour); not yet plumbed from the hipBLASLt problem/stream.
+                .num_cus     = 0,
                 .a_transpose = problem.transA() ? origami::transpose_t::T : origami::transpose_t::N,
                 .b_transpose = problem.transB() ? origami::transpose_t::T : origami::transpose_t::N,
                 .a_dtype     = datatypeToAnalyticalDatatype(problem.a().dataType()),

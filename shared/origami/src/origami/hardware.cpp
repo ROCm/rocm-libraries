@@ -11,6 +11,11 @@
 
 namespace origami {
 
+std::size_t resolve_num_cus(std::size_t requested_num_cus, std::size_t hardware_num_cus) {
+  if (requested_num_cus != 0 && requested_num_cus < hardware_num_cus) { return requested_num_cus; }
+  return hardware_num_cus;
+}
+
 hardware_t::hardware_t(architecture_t arch,
                        size_t N_CU,
                        size_t lds_capacity,
