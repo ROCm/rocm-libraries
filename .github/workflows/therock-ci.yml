@@ -242,7 +242,7 @@ jobs:
           echo '${{ toJson(needs) }}'
           FAILED_JOBS="$(echo '${{ toJson(needs) }}' \
             | jq --raw-output \
-            'del(.["therock-ci-coverage"]) | map_values(select(.result!="success" and .result!="skipped")) | keys | join(",")' \
+            'map_values(select(.result!="success" and .result!="skipped")) | keys | join(",")' \
           )"
           if [[ "${FAILED_JOBS}" != "" ]]; then
             echo "The following jobs failed: ${FAILED_JOBS}"
