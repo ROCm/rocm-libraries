@@ -83,7 +83,7 @@ if(ENABLE_HIP_FLASH2_ENGINE)
         src/engines/hip_flash2_engine/kernels/hip_flash2_fwd_gfx950.co
         DESTINATION ${HIPDNN_RELATIVE_INSTALL_PLUGIN_ENGINE_DIR}/hip_kernel_provider/hip_flash2_kernels)
     target_compile_definitions(hip_kernel_provider PRIVATE
-        HIP_FLASH2_KERNEL_DIR="${HIPDNN_RELATIVE_INSTALL_PLUGIN_ENGINE_DIR}/hip_kernel_provider/hip_flash2_kernels")
+        HIP_FLASH2_KERNEL_DIR="${CMAKE_INSTALL_PREFIX}/${HIPDNN_RELATIVE_INSTALL_PLUGIN_ENGINE_DIR}/hip_kernel_provider/hip_flash2_kernels")
 else()
     message(STATUS "HIP Flash2 SDPA engine disabled")
 endif()
