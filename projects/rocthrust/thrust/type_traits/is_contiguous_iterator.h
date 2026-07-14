@@ -133,7 +133,8 @@ inline constexpr bool is_contiguous_iterator_impl_v =
  * \see THRUST_PROCLAIM_CONTIGUOUS_ITERATOR
  */
 template <typename Iterator>
-using is_contiguous_iterator = _THRUST_STD::bool_constant<detail::is_contiguous_iterator_impl_v<Iterator>>;
+using is_contiguous_iterator =
+  _THRUST_STD::bool_constant<detail::is_contiguous_iterator_impl_v<_THRUST_STD::remove_cvref_t<Iterator>>>;
 
 /*! \brief <tt>constexpr bool</tt> that is \c true if \c Iterator satisfies
  *  <a href="https://en.cppreference.com/w/cpp/named_req/ContiguousIterator">ContiguousIterator</a>,
@@ -145,7 +146,7 @@ using is_contiguous_iterator = _THRUST_STD::bool_constant<detail::is_contiguous_
  * \see THRUST_PROCLAIM_CONTIGUOUS_ITERATOR
  */
 template <typename Iterator>
-constexpr bool is_contiguous_iterator_v = detail::is_contiguous_iterator_impl_v<Iterator>;
+constexpr bool is_contiguous_iterator_v = detail::is_contiguous_iterator_impl_v<_THRUST_STD::remove_cvref_t<Iterator>>;
 
 ///////////////////////////////////////////////////////////////////////////////
 
