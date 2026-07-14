@@ -179,4 +179,4 @@ if (inst->is(IF_MFMA) || inst->is(IF_SMFMA)) {
 - `hardware/include/gfx/GpuArchManager.hpp` - Architecture manager API
 - `tools/tablegen/GenIsa.cpp` - ISA table generation implementation
 - `tools/tablegen/GenRocisaHwMapping.cpp` - Rocisa mapping generation
-- Generated Rocisa mappings: `stinkytofu/ir/rocisa/Rocisa<arch>Mappings.inc` (build output). Rocisa conversion sources and AllHwMappings live under `src/conversion/rocisa/` (internal).
+- Generated Rocisa mappings: `stinkytofu/ir/rocisa/Rocisa<arch>Mappings.inc` (build output). Rocisa conversion sources and AllHwMappings live under `projects/hipblaslt/tensilelite/rocisa/rocisa/src/stinkytofu/` (internal).
