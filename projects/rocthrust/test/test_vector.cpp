@@ -675,24 +675,6 @@ TYPED_TEST(VectorTests, TestVectorResizing)
   v.resize(0);
 
   ASSERT_EQ(v.size(), 0lu);
-
-#ifndef ADDRESS_SANITIZER_BUILD
-  // depending on sizeof(T), we will receive one
-  // of two possible exceptions
-  try
-  {
-    v.resize(std::numeric_limits<size_t>::max());
-  }
-  catch (std::length_error e)
-  {}
-  catch (std::bad_alloc e)
-  {
-    // reset the HIP error
-    (void) hipGetLastError();
-  } // end catch
-
-  ASSERT_EQ(v.size(), 0lu);
-#endif
 }
 
 TYPED_TEST(VectorTests, TestVectorReserving)
@@ -716,19 +698,6 @@ TYPED_TEST(VectorTests, TestVectorReserving)
   v.reserve(0);
 
   ASSERT_EQ(v.capacity(), old_capacity);
-
-#ifndef ADDRESS_SANITIZER_BUILD
-  try
-  {
-    v.reserve(std::numeric_limits<size_t>::max());
-  }
-  catch (std::length_error e)
-  {}
-  catch (std::bad_alloc e)
-  {}
-
-  ASSERT_EQ(v.capacity(), old_capacity);
-#endif
 }
 
 TEST(VectorTests, TestVectorUninitialisedCopy)

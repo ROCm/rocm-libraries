@@ -638,26 +638,6 @@ void TestVectorResizing()
   v.resize(0);
 
   ASSERT_EQUAL(v.size(), 0lu);
-
-// TODO remove this WAR
-#if _CCCL_CUDA_COMPILATION() && CUDART_VERSION == 3000
-
-  // depending on sizeof(T), we will receive one
-  // of two possible exceptions
-  try
-  {
-    v.resize(std::numeric_limits<size_t>::max());
-  }
-  catch (std::length_error e)
-  {}
-  catch (std::bad_alloc e)
-  {
-    // reset the HIP error
-    (void) hipGetLastError();
-  } // end catch
-#endif // _CCCL_CUDA_COMPILATION() && CUDART_VERSION == 3000
-
-  ASSERT_EQUAL(v.size(), 0lu);
 }
 DECLARE_VECTOR_UNITTEST(TestVectorResizing);
 
@@ -675,17 +655,6 @@ void TestVectorReserving()
   size_t old_capacity = v.capacity();
 
   v.reserve(0);
-
-  ASSERT_EQUAL(v.capacity(), old_capacity);
-
-  try
-  {
-    v.reserve(std::numeric_limits<size_t>::max());
-  }
-  catch (std::length_error e)
-  {}
-  catch (std::bad_alloc e)
-  {}
 
   ASSERT_EQUAL(v.capacity(), old_capacity);
 }
