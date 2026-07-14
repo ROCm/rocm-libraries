@@ -396,8 +396,6 @@ __device__ void sb2st_hb2st_task(const I xid,
             // and copy subdiagonal element to E.
             if(xid == 0)
             {
-                // Bottom row of V stores tau.
-                // todo: if desired, save s_housev[0] back to Aband as well.
                 Aband[idiag + 1 + sweep * ldab] = s_housev[0];
                 assert(std::imag(s_housev[0]) == 0);
                 E[sweep] = std::real(s_housev[0]);
@@ -433,8 +431,6 @@ __device__ void sb2st_hb2st_task(const I xid,
                 sb2st_larf(xid, yid, rocblas_side_right, nc, nc, s_housev, s_tau,
                            Aband + idiag + (sweep + 1) * ldab, ldab - 1, s_work);
             }
-
-            // todo: copy A[ idiag + (sweep + 1)*ldab ] to D[s+1]?
         }
     }
     else
@@ -674,7 +670,7 @@ rocblas_status rocsolver_sb2st_hb2st_argCheck(rocblas_handle handle,
         return rocblas_status_not_implemented;
 
     // 2. invalid size
-    if(n < 0 || kd < 1 || ldab < 3 * kd - 1 || ldv < 2 * kd)
+    if(n < 0 || kd < 1 || ldab < 3 * kd - 1 || ldv < 2 * kd - 1)
         return rocblas_status_invalid_size;
 
     // skip pointer check if querying memory size

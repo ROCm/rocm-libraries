@@ -96,7 +96,7 @@ void sb2st_hb2st_checkBadArgs(const rocblas_handle handle,
                                                 3 * kd - 2, dD, dE, dV, ldv, dTau),
                           rocblas_status_invalid_size);
     EXPECT_ROCBLAS_STATUS(rocsolver_sb2st_hb2st(handle, rocblas_fill_lower, n, kd, dAband, ldab, dD,
-                                                dE, dV, 2 * kd - 1, dTau),
+                                                dE, dV, 2 * kd - 2, dTau),
                           rocblas_status_invalid_size);
 
     // pointers
@@ -134,7 +134,7 @@ void testing_sb2st_hb2st_bad_arg()
     I n = 2;
     I kd = 1;
     I ldab = 3 * kd - 1; // == 2
-    I ldv = 2 * kd; // == 2
+    I ldv = 2 * kd - 1; // == 1
 
     // nv = nv_blocks * kd = 1 * 1 = 1
     I nv = 1;
@@ -346,7 +346,7 @@ void testing_sb2st_hb2st(Arguments& argus)
     I n = argus.get<I>("n");
     I kd = argus.get<I>("kd");
     I ldab = argus.get<I>("ldab", 3 * kd - 1);
-    I ldv = argus.get<I>("ldv", 2 * kd);
+    I ldv = argus.get<I>("ldv", 2 * kd - 1);
 
     // V is ldv x nv
     I nt = 0;
@@ -400,7 +400,7 @@ void testing_sb2st_hb2st(Arguments& argus)
     }
 
     // check invalid sizes
-    bool invalid_size = (n < 0 || kd < 1 || ldab < 3 * kd - 1 || ldv < 2 * kd);
+    bool invalid_size = (n < 0 || kd < 1 || ldab < 3 * kd - 1 || ldv < 2 * kd - 1);
     if(invalid_size)
     {
         EXPECT_ROCBLAS_STATUS(rocsolver_sb2st_hb2st(handle, uplo, n, kd, (T*)nullptr, ldab,
