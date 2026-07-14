@@ -18,11 +18,11 @@ namespace rocke_client::dispatcher
 
 /// Emitted at INFO level when kpack_open -> kpack_get_kernel ->
 /// hipModuleLoadData -> hipModuleGetFunction all succeed.
-static constexpr const char* AOT_SKELETON_LOAD_OK = "rocke-client AOT skeleton: LOAD OK";
+static constexpr const char* AOT_PROBE_LOAD_OK = "rocke-client AOT probe: LOAD OK";
 
 /// Emitted at ERROR level on any failure in the E2E load sequence. The load
 /// runs in the noexcept selection path, so failure is a loud ERROR log, not an
 /// exception: loadForDevice() returns an empty catalog and the engine declines.
-static constexpr const char* AOT_SKELETON_LOAD_FAILED = "rocke-client AOT skeleton: LOAD FAILED";
+static constexpr const char* AOT_PROBE_LOAD_FAILED = "rocke-client AOT probe: LOAD FAILED";
 
 } // namespace rocke_client::dispatcher

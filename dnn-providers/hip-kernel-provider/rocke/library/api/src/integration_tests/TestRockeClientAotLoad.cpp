@@ -5,7 +5,7 @@
 //   ROCKE_CLIENT_AOT_BUNDLE_DIR (env) -> aotBundleDir() -> aotKpackPath() ->
 //   RockeClientDispatcher::catalogForDevice() -> AotCatalog::loadForDevice() ->
 //   kpack_open -> kpack_get_kernel -> hipModuleLoadData -> hipModuleGetFunction
-//   -> hipModuleUnload -> empty catalog (engine stays inert; scaffolding only).
+//   -> hipModuleUnload -> empty catalog (engine stays inert; probe only).
 //
 // The lazy load fires on the first selection attempt per device, which
 // graph.is_supported_ext(handle) triggers via:
@@ -21,7 +21,7 @@
 // TODO(AICK-1484): this whole test is temporary. It proves the load wiring by
 //   asserting on log markers; replace it with a real E2E test (graph submit +
 //   kernel launch + result validation) once plan-based execution lands. The
-//   AotSkeletonMarkers.hpp constants are removed with it.
+//   AotProbeMarkers.hpp constants are removed with it.
 //
 // Bundle layout (test-only; installed + relocatable, NOT under arch_content):
 //   <exeDir>/hip_kernel_provider/tests/aot_test_bundles/valid/<arch>/rocke_client_<arch>.{kpack,json}
@@ -44,7 +44,7 @@
 #include <hipdnn_data_sdk/utilities/ShapeUtilities.hpp>
 #include <hipdnn_frontend.hpp>
 
-#include "dispatcher/AotSkeletonMarkers.hpp"
+#include "dispatcher/AotProbeMarkers.hpp"
 
 namespace
 {
@@ -99,6 +99,31 @@ public:
 
 private:
     hipStream_t _stream = nullptr;
+};
+
+// RAII: elevate the global backend log level and restore it on scope exit, so an
+// early ASSERT_* below cannot leak the elevated level into later tests.
+class ScopedGlobalLogLevel
+{
+public:
+    explicit ScopedGlobalLogLevel(hipdnnSeverity_t level)
+    {
+        EXPECT_EQ(hipdnnBackendGetGlobalLogLevel_ext(&_original), HIPDNN_STATUS_SUCCESS);
+        EXPECT_EQ(hipdnnBackendSetGlobalLogLevel_ext(level), HIPDNN_STATUS_SUCCESS);
+    }
+
+    ~ScopedGlobalLogLevel()
+    {
+        EXPECT_EQ(hipdnnBackendSetGlobalLogLevel_ext(_original), HIPDNN_STATUS_SUCCESS);
+    }
+
+    ScopedGlobalLogLevel(const ScopedGlobalLogLevel&) = delete;
+    ScopedGlobalLogLevel& operator=(const ScopedGlobalLogLevel&) = delete;
+    ScopedGlobalLogLevel(ScopedGlobalLogLevel&&) = delete;
+    ScopedGlobalLogLevel& operator=(ScopedGlobalLogLevel&&) = delete;
+
+private:
+    hipdnnSeverity_t _original{HIPDNN_SEV_OFF};
 };
 
 // ---- Helpers ---------------------------------------------------------------
@@ -209,10 +234,9 @@ TEST(TestRockeClientAotLoad, ValidBundleDrivesAotLoad)
     const hipdnn_test_sdk::utilities::ScopedEnvironmentVariableSetter envGuard(
         "ROCKE_CLIENT_AOT_BUNDLE_DIR", validDir.string());
 
-    // Backend + plugin log level must be INFO so loadForDevice emits its markers.
-    hipdnnSeverity_t originalLevel{HIPDNN_SEV_OFF};
-    ASSERT_EQ(hipdnnBackendGetGlobalLogLevel_ext(&originalLevel), HIPDNN_STATUS_SUCCESS);
-    ASSERT_EQ(hipdnnBackendSetGlobalLogLevel_ext(HIPDNN_SEV_INFO), HIPDNN_STATUS_SUCCESS);
+    // Backend + plugin log level must be INFO so loadForDevice emits its markers;
+    // restored on scope exit even if an ASSERT below fires.
+    const ScopedGlobalLogLevel logLevel{HIPDNN_SEV_INFO};
 
     // Load plugin DSO: plugin's log level is set to INFO at load time.
     setRockeClientPluginPath();
@@ -227,7 +251,7 @@ TEST(TestRockeClientAotLoad, ValidBundleDrivesAotLoad)
     // Capture stderr around the first selection attempt. is_supported_ext drives:
     //   hipdnnBackendFinalize -> selectInstance -> catalogForDevice (first call)
     //   -> loadForDevice -> kpack_open -> kpack_get_kernel -> hipModuleLoadData
-    //   -> hipModuleGetFunction -> hipModuleUnload -> emits kAotSkeletonLoadOk.
+    //   -> hipModuleGetFunction -> hipModuleUnload -> emits AOT_PROBE_LOAD_OK.
     testing::internal::CaptureStderr();
 
     auto graph = buildSdpaForwardGraph();
@@ -235,12 +259,10 @@ TEST(TestRockeClientAotLoad, ValidBundleDrivesAotLoad)
 
     const std::string captured = testing::internal::GetCapturedStderr();
 
-    ASSERT_EQ(hipdnnBackendSetGlobalLogLevel_ext(originalLevel), HIPDNN_STATUS_SUCCESS);
-
-    // The engine always declines (empty catalog, skeleton only); that's expected.
+    // The engine always declines (empty catalog, probe only); that's expected.
     // The decisive assertion is the SUCCESS marker in the captured plugin logs.
-    ASSERT_NE(captured.find(rocke_client::dispatcher::AOT_SKELETON_LOAD_OK), std::string::npos)
-        << "loadForDevice() did not emit '" << rocke_client::dispatcher::AOT_SKELETON_LOAD_OK
+    ASSERT_NE(captured.find(rocke_client::dispatcher::AOT_PROBE_LOAD_OK), std::string::npos)
+        << "loadForDevice() did not emit '" << rocke_client::dispatcher::AOT_PROBE_LOAD_OK
         << "'. Either the probe bundle was not reached (check ROCKE_CLIENT_AOT_BUNDLE_DIR) "
            "or the load path was silently skipped. Plugin log capture:\n"
         << captured;
@@ -274,9 +296,8 @@ TEST(TestRockeClientAotLoad, CorruptBundleFailsLoudly)
     const hipdnn_test_sdk::utilities::ScopedEnvironmentVariableSetter envGuard(
         "ROCKE_CLIENT_AOT_BUNDLE_DIR", corruptDir.string());
 
-    hipdnnSeverity_t originalLevel{HIPDNN_SEV_OFF};
-    ASSERT_EQ(hipdnnBackendGetGlobalLogLevel_ext(&originalLevel), HIPDNN_STATUS_SUCCESS);
-    ASSERT_EQ(hipdnnBackendSetGlobalLogLevel_ext(HIPDNN_SEV_INFO), HIPDNN_STATUS_SUCCESS);
+    // Log level INFO so loadForDevice emits its markers; restored on scope exit.
+    const ScopedGlobalLogLevel logLevel{HIPDNN_SEV_INFO};
 
     setRockeClientPluginPath();
 
@@ -288,7 +309,7 @@ TEST(TestRockeClientAotLoad, CorruptBundleFailsLoudly)
     ASSERT_EQ(hipdnnSetStream(handle.get(), stream.get()), HIPDNN_STATUS_SUCCESS);
 
     // Capture stderr: loadForDevice reaches kpack_open, which rejects the
-    // corrupt file (invalid KPAK magic), logs kAotSkeletonLoadFailed, and
+    // corrupt file (invalid KPAK magic), logs AOT_PROBE_LOAD_FAILED, and
     // returns an empty catalog. No exception escapes (noexcept path).
     testing::internal::CaptureStderr();
 
@@ -297,13 +318,11 @@ TEST(TestRockeClientAotLoad, CorruptBundleFailsLoudly)
 
     const std::string captured = testing::internal::GetCapturedStderr();
 
-    ASSERT_EQ(hipdnnBackendSetGlobalLogLevel_ext(originalLevel), HIPDNN_STATUS_SUCCESS);
-
     // The FAIL marker proves the load path was executed and failed loudly —
     // not silently skipped. loadForDevice() does NOT throw (noexcept path):
     // the error is an ERROR-level log, not an exception.
-    ASSERT_NE(captured.find(rocke_client::dispatcher::AOT_SKELETON_LOAD_FAILED), std::string::npos)
-        << "loadForDevice() did not emit '" << rocke_client::dispatcher::AOT_SKELETON_LOAD_FAILED
+    ASSERT_NE(captured.find(rocke_client::dispatcher::AOT_PROBE_LOAD_FAILED), std::string::npos)
+        << "loadForDevice() did not emit '" << rocke_client::dispatcher::AOT_PROBE_LOAD_FAILED
         << "'. Either the corrupt kpack was not reached (check ROCKE_CLIENT_AOT_BUNDLE_DIR) "
            "or the load path was silently skipped.\nPlugin log capture:\n"
         << captured;

@@ -35,7 +35,7 @@ target_link_libraries(
                                           hipdnn_plugin_sdk Threads::Threads
 )
 
-# Expose api/src/ so the test can include dispatcher/AotSkeletonMarkers.hpp and
+# Expose api/src/ so the test can include dispatcher/AotProbeMarkers.hpp and
 # dispatcher/AotBundlePaths.hpp (temporary observability; removed with the
 # markers when real plan-based execution lands -- AICK-1484).
 target_include_directories(rocke_client_integration_tests PRIVATE
@@ -80,15 +80,18 @@ if(DEFINED ROCKE_PYENV_PYTHON AND DEFINED ROCKE_KPACK_PYTHON_DIR)
         set(_all_bundle_outputs "")
         # Both generators run through the rocke pyenv interpreter
         # (ROCKE_PYENV_PYTHON), so each custom command MUST be ordered after the
-        # rocke-pyenv target. add_dependencies() on the aggregate target below is
+        # venv is built. Depend on the pyenv STAMP FILE (${ROCKE_PYENV_STAMP}),
+        # not the rocke-pyenv target: that target is created later in
+        # rocke/CMakeLists.txt (after add_subdirectory(library)), so it does not
+        # exist yet in this scope and if(TARGET rocke-pyenv) would be false. The
+        # stamp path is an inherited variable here, and a cross-directory
+        # add_custom_command OUTPUT file dependency resolves under Ninja
+        # regardless of subdirectory processing order (same pattern as
+        # rocke_aot.cmake). add_dependencies() on the aggregate target alone is
         # NOT sufficient: it orders only the aggregate's stamp, not the commands
-        # that produce its DEPENDS, so ninja can run them before the venv
-        # interpreter exists (seen on Windows: "system cannot find the path
-        # specified"). Add rocke-pyenv directly to each command's DEPENDS.
-        set(_pyenv_order_dep "")
-        if(TARGET rocke-pyenv)
-            set(_pyenv_order_dep rocke-pyenv)
-        endif()
+        # that produce its DEPENDS, so ninja could otherwise run them before the
+        # venv interpreter exists (seen on Windows: "system cannot find the path
+        # specified").
 
         foreach(_arch IN LISTS GPU_TARGETS)
             set(_probe_work  "${CMAKE_CURRENT_BINARY_DIR}/probe_work/${_arch}")
@@ -126,7 +129,7 @@ if(DEFINED ROCKE_PYENV_PYTHON AND DEFINED ROCKE_KPACK_PYTHON_DIR)
                         --arch  "${_arch}"
                         --outdir "${_valid_dir}"
                         --kpack-python-dir "${ROCKE_KPACK_PYTHON_DIR}"
-                DEPENDS "${_probe_hsaco}" "${_gen_valid}" ${_pyenv_order_dep}
+                DEPENDS "${_probe_hsaco}" "${_gen_valid}" "${ROCKE_PYENV_STAMP}"
                 COMMENT "Generating valid rocKE test bundle for ${_arch}"
             )
 
@@ -137,7 +140,7 @@ if(DEFINED ROCKE_PYENV_PYTHON AND DEFINED ROCKE_KPACK_PYTHON_DIR)
                 COMMAND "${ROCKE_PYENV_PYTHON}" "${_gen_corrupt}"
                         --arch  "${_arch}"
                         --outdir "${_corrupt_dir}"
-                DEPENDS "${_gen_corrupt}" ${_pyenv_order_dep}
+                DEPENDS "${_gen_corrupt}" "${ROCKE_PYENV_STAMP}"
                 COMMENT "Generating corrupt rocKE test bundle for ${_arch}"
             )
 
@@ -150,10 +153,6 @@ if(DEFINED ROCKE_PYENV_PYTHON AND DEFINED ROCKE_KPACK_PYTHON_DIR)
             DEPENDS ${_all_bundle_outputs}
             COMMENT "Generating rocKE AOT integration-test bundles")
         add_dependencies(rocke_client_integration_tests rocke_client_aot_test_bundles)
-
-        if(TARGET rocke-pyenv)
-            add_dependencies(rocke_client_aot_test_bundles rocke-pyenv)
-        endif()
 
         # Install the generated bundles as test-only content. This lands under
         # bin/hip_kernel_provider/tests/aot_test_bundles/ and is captured by the

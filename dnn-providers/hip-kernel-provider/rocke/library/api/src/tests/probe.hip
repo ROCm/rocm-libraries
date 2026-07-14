@@ -5,7 +5,7 @@
 //   clang-offload-bundler --unbundle -> probe_<arch>.hsaco
 //   generate_test_bundle.py --hsaco probe_<arch>.hsaco
 // Symbol: rocke_test_probe
-// toc_key: rocke/test/skeleton/rocke_test_probe
+// toc_key: rocke/test/probe/rocke_test_probe
 
 extern "C" __global__ void rocke_test_probe(float* p)
 {

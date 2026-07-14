@@ -14,7 +14,7 @@ int main(int argc, char** argv)
     // SHARED LogRecording instance AND stderr (logChainedRecordingCallback
     // with force=true calls simpleStderrOutputCallback regardless of
     // HIPDNN_LOG_LEVEL). This makes testing::internal::CaptureStderr() capture
-    // the AOT_SKELETON_LOAD_OK / AOT_SKELETON_LOAD_FAILED markers emitted by
+    // the AOT_PROBE_LOAD_OK / AOT_PROBE_LOAD_FAILED markers emitted by
     // AotCatalog::loadForDevice() — the primary observable for the AOT load
     // integration tests.
     hipdnn_test_sdk::utilities::initializeChainedTestLogRecordingShared(

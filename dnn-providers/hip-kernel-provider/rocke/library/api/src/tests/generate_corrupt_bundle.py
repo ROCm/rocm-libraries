@@ -39,7 +39,7 @@ manifest = {
     "kpack": f"rocke_client_{args.arch}.kpack",
     "entries": [
         {
-            "toc_key": "rocke/test/skeleton/rocke_test_probe",
+            "toc_key": "rocke/test/probe/rocke_test_probe",
             "symbol": "rocke_test_probe",
         }
     ],

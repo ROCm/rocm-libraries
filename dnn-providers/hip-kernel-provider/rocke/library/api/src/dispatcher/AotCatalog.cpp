@@ -15,7 +15,7 @@
 #include <hipdnn_plugin_sdk/PluginLogging.hpp>
 
 #include "dispatcher/AotBundlePaths.hpp"
-#include "dispatcher/AotSkeletonMarkers.hpp"
+#include "dispatcher/AotProbeMarkers.hpp"
 #include "dispatcher/KpackModuleLoader.hpp"
 #include "dispatcher/PluginModuleDir.hpp"
 
@@ -56,8 +56,8 @@ AotCatalog AotCatalog::loadForDevice(int deviceId, const std::string& arch)
         std::ifstream manifestFile{manifestPath.string()};
         if(!manifestFile.is_open())
         {
-            HIPDNN_PLUGIN_LOG_ERROR(AOT_SKELETON_LOAD_FAILED << " step=manifest_open arch=" << arch
-                                                             << " path=" << manifestPath.string());
+            HIPDNN_PLUGIN_LOG_ERROR(AOT_PROBE_LOAD_FAILED << " step=manifest_open arch=" << arch
+                                                          << " path=" << manifestPath.string());
             return AotCatalog{};
         }
 
@@ -68,8 +68,8 @@ AotCatalog AotCatalog::loadForDevice(int deviceId, const std::string& arch)
         }
         catch(const nlohmann::json::parse_error& ex)
         {
-            HIPDNN_PLUGIN_LOG_ERROR(AOT_SKELETON_LOAD_FAILED << " step=manifest_parse arch=" << arch
-                                                             << " error=" << ex.what());
+            HIPDNN_PLUGIN_LOG_ERROR(AOT_PROBE_LOAD_FAILED << " step=manifest_parse arch=" << arch
+                                                          << " error=" << ex.what());
             return AotCatalog{};
         }
 
@@ -82,24 +82,22 @@ AotCatalog AotCatalog::loadForDevice(int deviceId, const std::string& arch)
         }
         catch(const nlohmann::json::exception& ex)
         {
-            HIPDNN_PLUGIN_LOG_ERROR(AOT_SKELETON_LOAD_FAILED << " step=manifest_fields arch="
-                                                             << arch << " error=" << ex.what());
+            HIPDNN_PLUGIN_LOG_ERROR(AOT_PROBE_LOAD_FAILED << " step=manifest_fields arch=" << arch
+                                                          << " error=" << ex.what());
             return AotCatalog{};
         }
 
         // --- Step 4: set device, load HSACO, verify, unload ---
-        // TODO(AICK-1484): temporary smoke-test wiring. This set-device +
-        // hipModuleLoadData + unload block only proves the
-        // kpack -> hipModuleLoadData -> hipModuleGetFunction path works today;
-        // nothing is launched or retained. It moves to plan construction (and
-        // the deviceId parameter goes away) under AICK-1484 -- see AotCatalog.hpp.
+        // TODO(AICK-1484): temporary probe -- this set-device + hipModuleLoad +
+        // unload only proves the kpack->module path; it moves to plan
+        // construction (and deviceId drops) under AICK-1484. See AotCatalog.hpp.
         // Save and restore the previously active HIP device.
         int prevDevice = 0;
         const bool deviceSaved = (hipGetDevice(&prevDevice) == hipSuccess);
         if(hipSetDevice(deviceId) != hipSuccess)
         {
-            HIPDNN_PLUGIN_LOG_ERROR(AOT_SKELETON_LOAD_FAILED << " step=set_device arch=" << arch
-                                                             << " deviceId=" << deviceId);
+            HIPDNN_PLUGIN_LOG_ERROR(AOT_PROBE_LOAD_FAILED << " step=set_device arch=" << arch
+                                                          << " deviceId=" << deviceId);
             return AotCatalog{};
         }
 
@@ -113,7 +111,7 @@ AotCatalog AotCatalog::loadForDevice(int deviceId, const std::string& arch)
 
         if(loaded.kpackError != KPACK_SUCCESS)
         {
-            HIPDNN_PLUGIN_LOG_ERROR(AOT_SKELETON_LOAD_FAILED
+            HIPDNN_PLUGIN_LOG_ERROR(AOT_PROBE_LOAD_FAILED
                                     << " step=kpack_extract arch=" << arch
                                     << " kpack_error=" << static_cast<int>(loaded.kpackError)
                                     << " toc_key=" << tocKey << " kpack=" << kpackPath.string());
@@ -122,7 +120,7 @@ AotCatalog AotCatalog::loadForDevice(int deviceId, const std::string& arch)
 
         if(loaded.hipError != hipSuccess)
         {
-            HIPDNN_PLUGIN_LOG_ERROR(AOT_SKELETON_LOAD_FAILED
+            HIPDNN_PLUGIN_LOG_ERROR(AOT_PROBE_LOAD_FAILED
                                     << " step=hip_module_load arch=" << arch << " hip_error="
                                     << static_cast<int>(loaded.hipError) << " symbol=" << symbol);
             return AotCatalog{};
@@ -132,24 +130,22 @@ AotCatalog AotCatalog::loadForDevice(int deviceId, const std::string& arch)
         static_cast<void>(hipModuleUnload(loaded.module));
 
         // Stable, greppable marker for integration-test log capture.
-        HIPDNN_PLUGIN_LOG_INFO(AOT_SKELETON_LOAD_OK << " arch=" << arch << " symbol=" << symbol
-                                                    << " kpack=" << kpackPath.string());
+        HIPDNN_PLUGIN_LOG_INFO(AOT_PROBE_LOAD_OK << " arch=" << arch << " symbol=" << symbol
+                                                 << " kpack=" << kpackPath.string());
 
-        // TODO(AICK-1484): scaffolding only -- return a real Catalog of candidate
-        // instances (op+arch scoped) instead of an empty one; see AotCatalog.hpp.
-        // Today we load+unload one kernel purely to prove the wiring.
+        // TODO(AICK-1484): probe only -- return a real op+arch-scoped Catalog
+        // here instead of empty. See the AotCatalog.hpp class doc.
         return AotCatalog{};
     }
     catch(const std::exception& ex)
     {
-        HIPDNN_PLUGIN_LOG_ERROR(AOT_SKELETON_LOAD_FAILED << " step=exception arch=" << arch
-                                                         << " error=" << ex.what());
+        HIPDNN_PLUGIN_LOG_ERROR(AOT_PROBE_LOAD_FAILED << " step=exception arch=" << arch
+                                                      << " error=" << ex.what());
         return AotCatalog{};
     }
     catch(...)
     {
-        HIPDNN_PLUGIN_LOG_ERROR(AOT_SKELETON_LOAD_FAILED << " step=unknown_exception arch="
-                                                         << arch);
+        HIPDNN_PLUGIN_LOG_ERROR(AOT_PROBE_LOAD_FAILED << " step=unknown_exception arch=" << arch);
         return AotCatalog{};
     }
 }

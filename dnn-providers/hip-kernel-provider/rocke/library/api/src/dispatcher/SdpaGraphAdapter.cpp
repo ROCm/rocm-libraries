@@ -64,9 +64,9 @@ const char* providerDtype(DataType type)
 // Only the two contiguous packings are recognized; padded/other layouts are
 // TensorLayout::OTHER (and therefore decline against a BSHD instance).
 //
-// TODO(kpack): confirm whether real hipDNN SDPA graphs arrive as BSHD or BHSD
+// TODO(AICK-1484): confirm whether real hipDNN SDPA graphs arrive as BSHD or BHSD
 // physical and whether the rocKE FMHA MFMA family requires a transpose; the
-// #8866 canonical_layout "BSHD" convention must be reconciled with the graph
+// canonical_layout "BSHD" convention must be reconciled with the graph
 // contract before this drives production accept/reject.
 TensorLayout inferLayout(const flatbuffers::Vector<std::int64_t>& dims,
                          const flatbuffers::Vector<std::int64_t>& strides)

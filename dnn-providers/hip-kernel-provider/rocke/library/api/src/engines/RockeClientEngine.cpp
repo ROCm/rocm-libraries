@@ -69,8 +69,8 @@ size_t RockeClientEngine::getMaxWorkspaceSize(
             "rocke-client: no AOT instance matches this graph");
     }
 
-    // TODO(kpack): return the workspace size from the winning instance's sidecar
-    // launch metadata once PR #8866's kpack packaging lands. No AOT plan can be
+    // TODO(AICK-1484): return the workspace size from the winning instance's
+    // sidecar launch metadata once plan construction lands. No AOT plan can be
     // built yet, so decline rather than report a bogus size.
     throw hipdnn_plugin_sdk::HipdnnPluginException(
         HIPDNN_PLUGIN_STATUS_NOT_APPLICABLE,
@@ -92,7 +92,7 @@ void RockeClientEngine::initializeExecutionContext(
     }
 
     // A winning instance was selected -- this is the plan-construction seam.
-    // TODO(kpack): once PR #8866's kpack packaging lands, replace this decline with:
+    // TODO(AICK-1484): once plan construction lands, replace this decline with:
     //   1. resolve kernel_id (cache_key) + launch metadata from the instance's sidecar;
     //   2. load the pre-built HSACO from the kpack (hipModuleLoad/hipModuleGetFunction);
     //   3. evaluate the symbolic grid_formula -> concrete grid[3];

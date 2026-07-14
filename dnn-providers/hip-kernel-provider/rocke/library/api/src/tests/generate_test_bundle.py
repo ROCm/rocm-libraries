@@ -7,17 +7,17 @@
 #   rocke_client_<arch>.json   - bundle manifest
 #
 # The bundle contains a single trivial kernel compiled from probe.hip.
-# It is consumed by loadDefault() to prove the AOT load path end-to-end
+# It is consumed by loadForDevice() to prove the AOT load path end-to-end
 # without executing any real SDPA workloads.
 #
-# toc_key: rocke/test/skeleton/rocke_test_probe
+# toc_key: rocke/test/probe/rocke_test_probe
 # symbol:  rocke_test_probe
 #
 # Usage (called by CMake add_custom_command):
 #   python generate_test_bundle.py \
 #       --hsaco probe_gfx942.hsaco \
 #       --arch gfx942 \
-#       --outdir /path/to/arch_content/rocke/gfx942 \
+#       --outdir /path/to/build/bin/hip_kernel_provider/tests/aot_test_bundles/valid/gfx942 \
 #       --kpack-python-dir /path/to/rocm-systems/shared/kpack/python
 
 import argparse
@@ -66,9 +66,9 @@ except ImportError as exc:
     sys.exit(1)
 
 # ---------------------------------------------------------------------------
-# Constants — must match what AotCatalog::loadDefault() parses
+# Constants — must match what AotCatalog::loadForDevice() parses
 # ---------------------------------------------------------------------------
-TOC_KEY = "rocke/test/skeleton/rocke_test_probe"
+TOC_KEY = "rocke/test/probe/rocke_test_probe"
 SYMBOL = "rocke_test_probe"
 
 # ---------------------------------------------------------------------------
@@ -103,7 +103,7 @@ manifest_path = args.outdir / manifest_name
 archive.write(kpack_path)
 
 # ---------------------------------------------------------------------------
-# Bundle manifest — schema matches what AotCatalog::loadDefault() parses:
+# Bundle manifest — schema matches what AotCatalog::loadForDevice() parses:
 #   entries[0]["toc_key"], entries[0]["symbol"]
 # ---------------------------------------------------------------------------
 manifest = {
