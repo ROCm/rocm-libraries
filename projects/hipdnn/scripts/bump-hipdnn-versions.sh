@@ -40,7 +40,7 @@ Usage:
                          [--apply] [--major[=paths]] [--minor[=paths]] [--patch[=paths]]
 
 Defaults:
-  -C, --repo <path>   Worktree folder to operate in (default /develop/work/rocmlibs1)
+  -C, --repo <path>   Worktree folder to operate in (default: current directory)
   --release  highest origin/release/therock-* branch (version-sorted)
   --target   Endpoint to compare the release against (default HEAD). Use your
              mainline ref (e.g. origin/develop) to measure drift since the
@@ -85,7 +85,7 @@ Examples:
 EOF
 }
 
-REPO="/develop/work/rocmlibs1"
+REPO="$(pwd)"
 RELEASE_REF=""
 TARGET_REF="HEAD"
 APPLY=false
@@ -136,6 +136,12 @@ if [[ "$listless_count" -gt 1 ]]; then
 fi
 
 git_c() { git -C "$REPO" "$@"; }
+
+# Validate that the repo path is a git repository.
+if ! git_c rev-parse --is-inside-work-tree >/dev/null 2>&1; then
+  echo "ERROR: not a git repository: $REPO" >&2
+  exit 1
+fi
 
 # --- Resolve release ref -----------------------------------------------------
 if [[ -z "$RELEASE_REF" ]]; then
