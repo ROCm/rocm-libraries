@@ -325,8 +325,6 @@ if( BUILD_CLIENTS_SAMPLES OR BUILD_CLIENTS_TESTS OR BUILD_CLIENTS_BENCHMARKS )
   endif()
 endif()
 
-option(ROCBLAS_ENABLE_COVERAGE "Enable code coverage" OFF)
-
 if( NOT SKIP_LIBRARY )
     add_subdirectory( library )
 endif()
@@ -402,7 +400,7 @@ rocm_create_package(
 
 #
 # ADDITIONAL TARGETS FOR CODE COVERAGE
-if(BUILD_CODE_COVERAGE)
+if(ROCBLAS_ENABLE_COVERAGE)
   #
   # > make coverage_cleanup (clean coverage related files.)
   #
