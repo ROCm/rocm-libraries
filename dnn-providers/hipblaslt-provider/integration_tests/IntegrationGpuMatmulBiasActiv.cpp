@@ -2,6 +2,7 @@
 // SPDX-License-Identifier:  MIT
 
 #include "IntegrationGpuMatmulBase.hpp"
+#include "TestWorkarounds.hpp"
 #include "utils/ActivationUtils.hpp"
 #include "utils/MatmulUtils.hpp"
 
@@ -30,13 +31,13 @@ protected:
         auto aAttr = graph::makeTensorAttributes(
             "a",
             matmulParams.aDims,
-            this->generateInputStrideOrder(matmulParams.aDims, matmulParams.transA));
+            generateInputStrideOrder(matmulParams.aDims, matmulParams.transA));
         auto aTensorAttr = std::make_shared<graph::TensorAttributes>(std::move(aAttr));
 
         auto bAttr = graph::makeTensorAttributes(
             "b",
             matmulParams.bDims,
-            this->generateInputStrideOrder(matmulParams.bDims, matmulParams.transB));
+            generateInputStrideOrder(matmulParams.bDims, matmulParams.transB));
         auto bTensorAttr = std::make_shared<graph::TensorAttributes>(std::move(bAttr));
 
         graph::MatmulAttributes const matmulAttrs;
@@ -46,7 +47,7 @@ protected:
         biasDims[biasDims.size() - 1] = matmulParams.cDims.back();
 
         auto biasAttr = graph::makeTensorAttributes(
-            "bias", biasDims, this->generateInputStrideOrder(biasDims, false));
+            "bias", biasDims, generateInputStrideOrder(biasDims, false));
         auto biasTensorAttr = std::make_shared<graph::TensorAttributes>(std::move(biasAttr));
 
         graph::PointwiseAttributes biasAttrs;
@@ -84,10 +85,26 @@ protected:
 };
 
 using IntegrationGpuMatmulBiasActivFp32 = IntegrationGpuMatmulBiasActiv<float>;
-using IntegrationGpuMatmulBiasActivFp16
-    = IntegrationGpuMatmulBiasActiv<hipdnn_data_sdk::types::half>;
 using IntegrationGpuMatmulBiasActivBf16
     = IntegrationGpuMatmulBiasActiv<hipdnn_data_sdk::types::bfloat16>;
+
+// Fp16 derives from the template so we can override the skip hook for the
+// known hipBLASLt gfx12 FP16 T-T + bias gap. Fp32 / Bf16 stay as plain
+// typedefs so they still fail loudly on regression.
+class IntegrationGpuMatmulBiasActivFp16
+    : public IntegrationGpuMatmulBiasActiv<hipdnn_data_sdk::types::half>
+{
+protected:
+    std::optional<std::string>
+        shouldSkipOnEngineConfigResult(const hipdnn_frontend::Error& result) override
+    {
+        if(IS_HIPBLASLT_GFX12_FP16_TT_BIAS(result))
+        {
+            return HIPBLASLT_GFX12_FP16_TT_BIAS_SKIP_MSG;
+        }
+        return std::nullopt;
+    }
+};
 
 } // namespace
 

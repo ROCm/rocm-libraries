@@ -1,6 +1,6 @@
 /*! \file */
 /* ************************************************************************
- * Copyright (C) 2023-2025 Advanced Micro Devices, Inc. All rights Reserved.
+ * Copyright (C) 2023-2026 Advanced Micro Devices, Inc. All rights Reserved.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -230,9 +230,9 @@ rocsparse_status rocsparse::csrgemm_symbolic_calc_preprocess_template(rocsparse_
 
     J nnz_max;
     RETURN_IF_HIP_ERROR(
-        hipMemcpyAsync(&nnz_max, workspace, sizeof(J), hipMemcpyDeviceToHost, stream));
+        rocsparse_hipMemcpyAsync(&nnz_max, workspace, sizeof(J), hipMemcpyDeviceToHost, stream));
     // Wait for host transfer to finish
-    RETURN_IF_HIP_ERROR(hipStreamSynchronize(stream));
+    RETURN_IF_HIP_ERROR(rocsparse_hipStreamSynchronize(stream));
 
     // Group offset buffer
     J* d_group_offset = reinterpret_cast<J*>(buffer);
@@ -245,7 +245,8 @@ rocsparse_status rocsparse::csrgemm_symbolic_calc_preprocess_template(rocsparse_
 
     J* d_group_size = reinterpret_cast<J*>(buffer);
     buffer += sizeof(J) * 256 * CSRGEMM_MAXGROUPS;
-    RETURN_IF_HIP_ERROR(hipMemsetAsync(d_group_size, 0, sizeof(J) * CSRGEMM_MAXGROUPS, stream));
+    RETURN_IF_HIP_ERROR(
+        rocsparse_hipMemsetAsync(d_group_size, 0, sizeof(J) * CSRGEMM_MAXGROUPS, stream));
     if(nnz_max > 16)
     {
         // Group size buffer
@@ -326,13 +327,13 @@ rocsparse_status rocsparse::csrgemm_symbolic_calc_preprocess_template(rocsparse_
     {
         // First group processes all rows
         RETURN_IF_HIP_ERROR(
-            hipMemcpyAsync(d_group_size, &m, sizeof(J), hipMemcpyHostToDevice, stream));
-        RETURN_IF_HIP_ERROR(hipMemsetAsync(d_group_offset, 0, sizeof(J), stream));
+            rocsparse_hipMemcpyAsync(d_group_size, &m, sizeof(J), hipMemcpyHostToDevice, stream));
+        RETURN_IF_HIP_ERROR(rocsparse_hipMemsetAsync(d_group_offset, 0, sizeof(J), stream));
     }
-    RETURN_IF_HIP_ERROR(hipMemcpyAsync(
+    RETURN_IF_HIP_ERROR(rocsparse_hipMemcpyAsync(
         d_group_size + CSRGEMM_MAXGROUPS, &nnz_max, sizeof(J), hipMemcpyHostToDevice, stream));
     // Wait for host transfer to finish
-    RETURN_IF_HIP_ERROR(hipStreamSynchronize(stream));
+    RETURN_IF_HIP_ERROR(rocsparse_hipStreamSynchronize(stream));
 
     // Compute columns and accumulate values for each group
     return rocsparse_status_success;
@@ -375,13 +376,13 @@ rocsparse_status rocsparse::csrgemm_symbolic_calc_template(rocsparse_handle     
     J h_group_size[CSRGEMM_MAXGROUPS + 1];
 
     // Copy group sizes to host
-    RETURN_IF_HIP_ERROR(hipMemcpyAsync(h_group_size,
-                                       d_group_size,
-                                       sizeof(J) * (CSRGEMM_MAXGROUPS + 1),
-                                       hipMemcpyDeviceToHost,
-                                       handle->stream));
+    RETURN_IF_HIP_ERROR(rocsparse_hipMemcpyAsync(h_group_size,
+                                                 d_group_size,
+                                                 sizeof(J) * (CSRGEMM_MAXGROUPS + 1),
+                                                 hipMemcpyDeviceToHost,
+                                                 handle->stream));
     // Wait for host transfer to finish
-    RETURN_IF_HIP_ERROR(hipStreamSynchronize(handle->stream));
+    RETURN_IF_HIP_ERROR(rocsparse_hipStreamSynchronize(handle->stream));
     J nnz_max = h_group_size[CSRGEMM_MAXGROUPS];
     if(nnz_max > 16)
     {

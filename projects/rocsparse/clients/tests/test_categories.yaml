@@ -78,6 +78,66 @@ test_categories:
       - "full"
       - "weekly"
 
+  ffm-quick:
+    description: "Quick level1 and level2 tests only"
+    test_patterns:
+      - "quick/*.level1*"
+      - "quick/bsrmv.*"
+      - "quick/bsrsv.*"
+      - "quick/csrmv.*"
+      - "quick/csrsv.*"
+      - "quick/coomv.*"
+    exclude:
+      - "*known_bug*"
+    labels:
+      - "ffm-quick"
+
+  ffm-full:
+    description: "Alias of ffm-quick: quick level1 and level2 tests only"
+    test_patterns:
+      - "quick/*.level1*"
+      - "quick/bsrmv.*"
+      - "quick/bsrsv.*"
+      - "quick/csrmv.*"
+      - "quick/csrsv.*"
+      - "quick/coomv.*"
+      - "quick/bsrmm.*"
+      - "quick/csrmm.*"
+    exclude:
+      - "*known_bug*"
+    labels:
+      - "ffm-full"
+
+  emulation-quick:
+    description: "Alias of ffm-quick: quick level1 and level2 tests only"
+    test_patterns:
+      - "quick/*.level1*"
+      - "quick/bsrmv.*"
+      - "quick/bsrsv.*"
+      - "quick/csrmv.*"
+      - "quick/csrsv.*"
+      - "quick/coomv.*"
+    exclude:
+      - "*known_bug*"
+    labels:
+      - "emulation-quick"
+
+  emulation-full:
+    description: "Alias of ffm-quick: quick level1 and level2 tests only"
+    test_patterns:
+      - "quick/*.level1*"
+      - "quick/bsrmv.*"
+      - "quick/bsrsv.*"
+      - "quick/csrmv.*"
+      - "quick/csrsv.*"
+      - "quick/coomv.*"
+      - "quick/bsrmm.*"
+      - "quick/csrmm.*"
+    exclude:
+      - "*known_bug*"
+    labels:
+      - "emulation-full"
+
 # GPU-specific CTest suites (rocsparse-test_{category}_gfx1151_suite) exclude f64 real/complex
 # parameterized tests on Strix Halo (gfx1151). Run those *_gfx1151_* tests on that hardware;
 # other GPUs use the standard category suites without these exclusions.
@@ -97,6 +157,10 @@ execution_settings:
   timeout_multiplier: 1
   category_timeouts:
     quick: 300
-    standard: 1800
+    standard: 3600
     comprehensive: 14400
     full: 28800
+    ffm-quick: 7200
+    ffm-full: 7200
+    emulation-quick: 7200
+    emulation-full: 7200

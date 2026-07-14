@@ -4,11 +4,14 @@
 #pragma once
 
 #include <gtest/gtest.h>
+#include <hip/hip_runtime.h>
 #include <unordered_map>
 #include <vector>
 
 #include <MiopenPlugin.hpp>
+#include <hipdnn_test_sdk/utilities/BundleMetadata.hpp>
 #include <hipdnn_test_sdk/utilities/CpuFpReferenceValidation.hpp>
+#include <hipdnn_test_sdk/utilities/DeviceQuery.hpp>
 #include <hipdnn_test_sdk/utilities/FileUtilities.hpp>
 #include <hipdnn_test_sdk/utilities/cpu_graph_executor/CpuReferenceGraphExecutor.hpp>
 
@@ -19,10 +22,12 @@
 
 namespace test_helpers
 {
+
 class TestGoldenReferenceGpu : public testing::TestWithParam<std::filesystem::path>
 {
 protected:
     hipdnn_data_sdk::utilities::GraphAndTensorMap _graphAndTensors;
+    std::optional<hipdnn_test_sdk::utilities::BundleMetadata> _bundleMetadata;
     hipdnnEnginePluginHandle_t _handle;
     flatbuffers::DetachedBuffer _engineConfigBuffer;
     std::unordered_map<int64_t, std::unique_ptr<hipdnn_data_sdk::utilities::ITensor>>
@@ -40,6 +45,23 @@ protected:
         {
             HIPDNN_PLUGIN_LOG_WARN("Reference not found for Gpu golden reference test");
             GTEST_SKIP();
+        }
+
+        // Load bundle metadata and apply device-specific guards.
+        _bundleMetadata = hipdnn_test_sdk::utilities::loadBundleMetadata(path);
+        if(_bundleMetadata)
+        {
+            if(auto reason = hipdnn_test_sdk::utilities::checkVramRequirement(
+                   *_bundleMetadata, hipdnn_test_sdk::utilities::currentDeviceTotalVramMb()))
+            {
+                GTEST_SKIP() << *reason;
+            }
+
+            if(auto reason = hipdnn_test_sdk::utilities::checkArchCompatibility(
+                   *_bundleMetadata, hipdnn_test_sdk::utilities::currentDeviceArch()))
+            {
+                GTEST_SKIP() << *reason;
+            }
         }
 
         hipdnnPluginStatus_t status = hipdnnEnginePluginCreateImpl(&_handle);

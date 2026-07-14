@@ -766,6 +766,62 @@ namespace rocRoller
     };
 
     template <>
+    struct TypeInfo<E5M3> : public BaseTypeInfo<E5M3,
+                                                DataType::E5M3,
+                                                DataType::E5M3,
+                                                PointerType::Value,
+                                                1,
+                                                1,
+                                                8,
+                                                false,
+                                                true,
+                                                false>
+    {
+    };
+
+    template <>
+    struct TypeInfo<E5M3x4> : public BaseTypeInfo<E5M3x4,
+                                                  DataType::E5M3x4,
+                                                  DataType::E5M3,
+                                                  PointerType::Value,
+                                                  4,
+                                                  1,
+                                                  32,
+                                                  false,
+                                                  false,
+                                                  false>
+    {
+    };
+
+    template <>
+    struct TypeInfo<E4M3> : public BaseTypeInfo<E4M3,
+                                                DataType::E4M3,
+                                                DataType::E4M3,
+                                                PointerType::Value,
+                                                1,
+                                                1,
+                                                8,
+                                                false,
+                                                true,
+                                                false>
+    {
+    };
+
+    template <>
+    struct TypeInfo<E4M3x4> : public BaseTypeInfo<E4M3x4,
+                                                  DataType::E4M3x4,
+                                                  DataType::E4M3,
+                                                  PointerType::Value,
+                                                  4,
+                                                  1,
+                                                  32,
+                                                  false,
+                                                  false,
+                                                  false>
+    {
+    };
+
+    template <>
     struct TypeInfo<Buffer> : public BaseTypeInfo<Buffer,
                                                   DataType::None,
                                                   DataType::None,
@@ -776,6 +832,20 @@ namespace rocRoller
                                                   false,
                                                   true,
                                                   false>
+    {
+    };
+
+    template <>
+    struct TypeInfo<TDM> : public BaseTypeInfo<TDM,
+                                               DataType::None,
+                                               DataType::None,
+                                               PointerType::TDM,
+                                               1,
+                                               12,
+                                               384,
+                                               false,
+                                               true,
+                                               false>
     {
     };
 
@@ -818,6 +888,10 @@ namespace rocRoller
     DeclareEnumTypeInfo(Bool64, Bool64);
     DeclareEnumTypeInfo(E8M0, E8M0);
     DeclareEnumTypeInfo(E8M0x4, E8M0x4);
+    DeclareEnumTypeInfo(E5M3, E5M3);
+    DeclareEnumTypeInfo(E5M3x4, E5M3x4);
+    DeclareEnumTypeInfo(E4M3, E4M3);
+    DeclareEnumTypeInfo(E4M3x4, E4M3x4);
 
 #undef DeclareEnumTypeInfo
 

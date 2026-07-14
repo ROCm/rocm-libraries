@@ -101,7 +101,7 @@ class BenchmarkMetadata:
         warmup_iters: Number of warmup iterations.
         benchmark_iters: Number of benchmark iterations.
         engine_id: Engine ID used for execution.
-        gpu_backend: GPU timer backend used ("torch" or "").
+        timing_backend: GPU timer backend used ("hip" or "").
         execution_backend: Execution backend used ("hipdnn", "pytorch", or "").
         hostname: Machine hostname where benchmark was run.
     """
@@ -112,7 +112,7 @@ class BenchmarkMetadata:
     warmup_iters: int = 0
     benchmark_iters: int = 0
     engine_id: int = 0
-    gpu_backend: str = ""
+    timing_backend: str = ""
     execution_backend: str = ""
     hostname: str = field(default_factory=_get_hostname)
 
@@ -121,16 +121,17 @@ class BenchmarkMetadata:
 class BenchmarkResult:
     """Raw benchmark timing results.
 
-    Holds both E2E (wall-clock) and optional kernel (GPU event) timings,
-    with metadata for cross-device comparison.
+    Holds host (submission) timings and optional kernel (GPU event) timings,
+    with metadata for cross-device comparison. End-to-end time, when needed,
+    is host + kernel.
 
     Attributes:
-        e2e_timings: List of end-to-end execution times in milliseconds.
+        host_timings: List of host-side submission times in milliseconds.
         kernel_timings: Optional list of GPU kernel times in milliseconds.
         metadata: Optional metadata for result identification and comparison.
     """
 
-    e2e_timings: List[float]
+    host_timings: List[float]
     kernel_timings: Optional[List[float]] = None
     metadata: Optional[BenchmarkMetadata] = None
 
@@ -140,10 +141,10 @@ class BenchmarkResult:
         return self.kernel_timings is not None and len(self.kernel_timings) > 0
 
     @property
-    def gpu_backend(self) -> str:
-        """Return GPU backend used for kernel timing."""
+    def timing_backend(self) -> str:
+        """Return backend used for kernel timing."""
         if self.metadata:
-            return self.metadata.gpu_backend
+            return self.metadata.timing_backend
         return ""
 
     def to_dict(self) -> Dict[str, Any]:
@@ -153,7 +154,7 @@ class BenchmarkResult:
             Dictionary representation of the result.
         """
         result: Dict[str, Any] = {
-            "e2e_timings": self.e2e_timings,
+            "host_timings": self.host_timings,
             "kernel_timings": self.kernel_timings,
         }
         if self.metadata:
@@ -191,9 +192,13 @@ class BenchmarkResult:
         """
         metadata = None
         if "metadata" in data and data["metadata"]:
-            metadata = BenchmarkMetadata(**data["metadata"])
+            metadata_dict = dict(data["metadata"])
+            legacy_gpu_backend = metadata_dict.pop("gpu_backend", None)
+            if "timing_backend" not in metadata_dict and legacy_gpu_backend is not None:
+                metadata_dict["timing_backend"] = legacy_gpu_backend
+            metadata = BenchmarkMetadata(**metadata_dict)
         return cls(
-            e2e_timings=data["e2e_timings"],
+            host_timings=data["host_timings"],
             kernel_timings=data.get("kernel_timings"),
             metadata=metadata,
         )
@@ -214,14 +219,14 @@ class BenchmarkResult:
 
 @dataclass
 class CombinedBenchmarkStats:
-    """Combined statistics for E2E and kernel timing.
+    """Combined statistics for host and kernel timing.
 
     Attributes:
-        e2e_stats: Statistics from wall-clock timing.
+        host_stats: Statistics from host-side submission timing.
         kernel_stats: Optional statistics from GPU kernel timing.
     """
 
-    e2e_stats: BenchmarkStats
+    host_stats: BenchmarkStats
     kernel_stats: Optional[BenchmarkStats] = None
 
     @classmethod
@@ -229,15 +234,15 @@ class CombinedBenchmarkStats:
         """Create combined stats from a BenchmarkResult.
 
         Args:
-            result: BenchmarkResult with E2E and optional kernel timings.
+            result: BenchmarkResult with host and optional kernel timings.
 
         Returns:
             CombinedBenchmarkStats with calculated statistics.
         """
-        e2e = BenchmarkStats.from_timings(result.e2e_timings)
+        host = BenchmarkStats.from_timings(result.host_timings)
         kernel = (
             BenchmarkStats.from_timings(result.kernel_timings)
             if result.has_kernel_timings
             else None
         )
-        return cls(e2e_stats=e2e, kernel_stats=kernel)
+        return cls(host_stats=host, kernel_stats=kernel)
