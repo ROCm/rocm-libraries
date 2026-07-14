@@ -50,16 +50,16 @@ TEST(TypeTraitsTests, TestIsContiguousIterator)
   using HostVector   = thrust::host_vector<int>;
   using DeviceVector = thrust::device_vector<int>;
 
-  ASSERT_EQ((bool) thrust::is_contiguous_iterator<int*>::value, true);
-  ASSERT_EQ((bool) thrust::is_contiguous_iterator<thrust::device_ptr<int>>::value, true);
+  ASSERT_EQ(thrust::is_contiguous_iterator_v<int*>, true);
+  ASSERT_EQ(thrust::is_contiguous_iterator_v<thrust::device_ptr<int>>, true);
 
-  ASSERT_EQ((bool) thrust::is_contiguous_iterator<HostVector::iterator>::value, true);
-  ASSERT_EQ((bool) thrust::is_contiguous_iterator<HostVector::const_iterator>::value, true);
+  ASSERT_EQ(thrust::is_contiguous_iterator_v<HostVector::iterator>, true);
+  ASSERT_EQ(thrust::is_contiguous_iterator_v<HostVector::const_iterator>, true);
 
-  ASSERT_EQ((bool) thrust::is_contiguous_iterator<DeviceVector::iterator>::value, true);
-  ASSERT_EQ((bool) thrust::is_contiguous_iterator<DeviceVector::const_iterator>::value, true);
+  ASSERT_EQ(thrust::is_contiguous_iterator_v<DeviceVector::iterator>, true);
+  ASSERT_EQ(thrust::is_contiguous_iterator_v<DeviceVector::const_iterator>, true);
 
-  ASSERT_EQ((bool) thrust::is_contiguous_iterator<thrust::device_ptr<int>>::value, true);
+  ASSERT_EQ(thrust::is_contiguous_iterator_v<thrust::device_ptr<int>>, true);
 
   using HostIteratorTuple = thrust::tuple<HostVector::iterator, HostVector::iterator>;
 
@@ -68,10 +68,10 @@ TEST(TypeTraitsTests, TestIsContiguousIterator)
   using TransformIterator = thrust::transform_iterator<_THRUST_STD::identity, HostVector::iterator>;
   using ZipIterator       = thrust::zip_iterator<HostIteratorTuple>;
 
-  ASSERT_EQ((bool) thrust::is_contiguous_iterator<ConstantIterator>::value, false);
-  ASSERT_EQ((bool) thrust::is_contiguous_iterator<CountingIterator>::value, false);
-  ASSERT_EQ((bool) thrust::is_contiguous_iterator<TransformIterator>::value, false);
-  ASSERT_EQ((bool) thrust::is_contiguous_iterator<ZipIterator>::value, false);
+  ASSERT_EQ(thrust::is_contiguous_iterator_v<ConstantIterator>, false);
+  ASSERT_EQ(thrust::is_contiguous_iterator_v<CountingIterator>, false);
+  ASSERT_EQ(thrust::is_contiguous_iterator_v<TransformIterator>, false);
+  ASSERT_EQ(thrust::is_contiguous_iterator_v<ZipIterator>, false);
 }
 
 TEST(TypeTraitsTests, TestIsCommutative)
