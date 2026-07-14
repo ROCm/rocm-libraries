@@ -118,7 +118,9 @@ echo ""
 
 # ── Check 4: idempotency ─────────────────────────────────────────────────
 echo "--- Check 4: idempotency (git diff must be clean) ---"
-if git -C "$BUNDLE_DIR" diff --quiet -- "$BUNDLE_DIR" 2>/dev/null; then
+if ! git -C "$BUNDLE_DIR" rev-parse --git-dir > /dev/null 2>&1; then
+    info "SKIP: $BUNDLE_DIR is not in a git repo — cannot check idempotency via diff"
+elif git -C "$BUNDLE_DIR" diff --quiet -- "$BUNDLE_DIR" 2>/dev/null; then
     pass "git diff clean on bundle tree"
 else
     # untracked new files are EXPECTED (first migration); only a *diff* on

@@ -139,7 +139,10 @@ def _load_all_cases(bundle_dir):
 
             input_roles = {}
             for uid, spec in inputs.items():
-                role = roles.get(int(uid), f"t{uid}")
+                try:
+                    role = roles.get(int(uid), f"t{uid}")
+                except (ValueError, TypeError):
+                    role = f"t{uid}"
                 input_roles[role] = spec
 
             cases.append(

@@ -832,7 +832,8 @@
       },
       "metadata": {
         "format_version": 1,
-        "operation": "BatchnormFwdInference"
+        "operation": "BatchnormFwdInference",
+        "ported_from": "c++ integration suite: Smoke/IntegrationGpuBatchnormForwardInference2dBfp16.Correctness/0"
       }
     },
     {
@@ -940,7 +941,8 @@
       },
       "metadata": {
         "format_version": 1,
-        "operation": "BatchnormFwdInference"
+        "operation": "BatchnormFwdInference",
+        "ported_from": "c++ integration suite: Smoke/IntegrationGpuBatchnormForwardInference2dFp16.Correctness/0"
       }
     },
     {
@@ -1048,7 +1050,8 @@
       },
       "metadata": {
         "format_version": 1,
-        "operation": "BatchnormFwdInference"
+        "operation": "BatchnormFwdInference",
+        "ported_from": "c++ integration suite: Smoke/IntegrationGpuBatchnormForwardInference2dFp32.Correctness/0"
       }
     }
   ]

@@ -81,7 +81,9 @@ echo "--- Supporting: idempotency check ---"
 python3 "$SCRIPT_DIR/place_bundles.py" \
     --capture-dir "$WORK/captured2" \
     --output-dir "$OUT"
-if git diff --exit-code -- "$OUT" > /dev/null 2>&1; then
+if ! git -C "$OUT" rev-parse --git-dir > /dev/null 2>&1; then
+    echo "  SKIP: $OUT is not in a git repo — cannot check idempotency via diff"
+elif git diff --exit-code -- "$OUT" > /dev/null 2>&1; then
     echo "  OK: idempotent (no diff)"
 else
     echo "  FAIL: pipeline is not idempotent — git diff follows:" >&2

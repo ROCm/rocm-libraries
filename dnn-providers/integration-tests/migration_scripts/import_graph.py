@@ -34,6 +34,7 @@ from bundle_utils import (
     TENSOR_ALWAYS,
     TENSOR_IF_VARIES,
     TOP_LEVEL_IF_VARIES,
+    _case_hash,
     assign_case_ids,
     canon,
     canonical_uid_map,
@@ -68,7 +69,10 @@ def _index_existing(bundle_dir: Path) -> dict:
                 sweep = json.load(f)
         except (json.JSONDecodeError, OSError):
             continue
-        expanded_rep = expand(template, sweep["cases"][0].get("values", {}))
+        cases = sweep.get("cases", [])
+        if not cases:
+            continue
+        expanded_rep = expand(template, cases[0].get("values", {}))
         h = skeleton_hash(expanded_rep)
         index.setdefault(h, []).append((template, sweep, sweep_path))
     return index
@@ -77,6 +81,38 @@ def _index_existing(bundle_dir: Path) -> dict:
 # --------------------------------------------------------------------------
 # Build single-case values from a graph (inverse of template expansion)
 # --------------------------------------------------------------------------
+
+
+def _extract_placeholders(node, prefix=""):
+    """Walk a JSON tree and yield (dotted_path, placeholder) for every ${case.*}."""
+    if isinstance(node, str) and node.startswith("${case.") and node.endswith("}"):
+        yield (prefix, node[len("${case.") : -1])
+    elif isinstance(node, dict):
+        for k, v in node.items():
+            yield from _extract_placeholders(v, f"{prefix}.{k}" if prefix else k)
+    elif isinstance(node, list):
+        for i, v in enumerate(node):
+            yield from _extract_placeholders(v, f"{prefix}[{i}]")
+
+
+def _deep_get(obj, dotted_path):
+    """Resolve a dotted path like 'attributes.padding' against a dict tree."""
+    cur = obj
+    for tok in dotted_path.split("."):
+        if isinstance(cur, dict) and tok in cur:
+            cur = cur[tok]
+        else:
+            return None
+    return cur
+
+
+def _deep_set(obj, dotted_path, value):
+    """Set a value at a dotted path, creating intermediate dicts as needed."""
+    parts = dotted_path.split(".")
+    cur = obj
+    for tok in parts[:-1]:
+        cur = cur.setdefault(tok, {})
+    cur[parts[-1]] = value
 
 
 def _extract_values(graph: dict, template: dict) -> dict:
@@ -98,6 +134,15 @@ def _extract_values(graph: dict, template: dict) -> dict:
                     entry[fld] = src[fld]
         tv.append(entry)
     values["tensors"] = tv
+
+    for t_node, g_node in zip(template.get("nodes", []), graph.get("nodes", [])):
+        for loc, case_path in _extract_placeholders(t_node):
+            if case_path.startswith("tensors[") or case_path in TOP_LEVEL_IF_VARIES:
+                continue
+            src_val = _deep_get(g_node, loc)
+            if src_val is not None:
+                _deep_set(values, case_path, src_val)
+
     return values
 
 
@@ -185,8 +230,15 @@ def main() -> int:
         template, sweep, sweep_path = matches[0]
         values = _extract_values(graph_canon, template)
         new_case = {"id": None, "values": values, "metadata": meta}
-        all_cases = sweep.get("cases", []) + [new_case]
+        existing_cases = sweep.get("cases", [])
+        saved_ids = [c["id"] for c in existing_cases]
+        all_cases = existing_cases + [new_case]
         assign_case_ids(all_cases)
+        for c, orig_id in zip(existing_cases, saved_ids):
+            c["id"] = orig_id
+        taken = set(saved_ids)
+        if new_case["id"] in taken:
+            new_case["id"] = f"{new_case['id']}_{_case_hash(new_case)}"
 
         expanded = expand(template, values)
         if canon(expanded) != canon(graph_canon):
