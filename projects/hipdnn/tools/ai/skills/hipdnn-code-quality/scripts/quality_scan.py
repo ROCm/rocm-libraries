@@ -74,10 +74,25 @@ def norm(l):
     s = l.strip()
     # Boilerplate lines carry no design signal; blank them so a window made only
     # of includes/usings/braces falls under the triviality filter and is skipped.
-    if (not s or s.startswith(("#include", "#pragma", "#ifdef", "#ifndef",
-                               "#endif", "#else", "#define", "#if", "using ",
-                               "namespace", "//"))
-            or s in ("{", "}", "};", "public:", "private:", "protected:")):
+    if (
+        not s
+        or s.startswith(
+            (
+                "#include",
+                "#pragma",
+                "#ifdef",
+                "#ifndef",
+                "#endif",
+                "#else",
+                "#define",
+                "#if",
+                "using ",
+                "namespace",
+                "//",
+            )
+        )
+        or s in ("{", "}", "};", "public:", "private:", "protected:")
+    ):
         return ""
     return re.sub(r"\s+", "", re.sub(r"//.*", "", l))
 
@@ -87,7 +102,7 @@ def build_index(files, w):
     for f in files:
         nl = [norm(x) for x in read(f)]
         for i in range(len(nl) - w):
-            win = nl[i:i + w]
+            win = nl[i : i + w]
             if sum(1 for x in win if len(x) > 3) < w:
                 continue
             idx[hash("\n".join(win))].append((f, i + 1))
@@ -108,8 +123,11 @@ def main():
     rels = a.files if a.files else changed_files(repo, a.base or "origin/develop")
     changed = [os.path.join(repo, p) for p in rels if is_src(p)]
     changed = [p for p in changed if os.path.exists(p)]
-    report = {"changed_src": [os.path.relpath(p, repo) for p in changed],
-              "size": [], "duplication": []}
+    report = {
+        "changed_src": [os.path.relpath(p, repo) for p in changed],
+        "size": [],
+        "duplication": [],
+    }
 
     # size on changed files only; function-size and naming are clang-tidy's job
     for p in changed:
@@ -127,12 +145,15 @@ def main():
         nl = [norm(x) for x in read(p)]
         raw = []  # (start_i, other_file, other_line, occurrences)
         for i in range(len(nl) - a.dup_window):
-            win = nl[i:i + a.dup_window]
+            win = nl[i : i + a.dup_window]
             if sum(1 for x in win if len(x) > 3) < a.dup_window:
                 raw.append(None)
                 continue
-            others = {(f, ln) for f, ln in idx.get(hash("\n".join(win)), [])
-                      if os.path.abspath(f) != p}
+            others = {
+                (f, ln)
+                for f, ln in idx.get(hash("\n".join(win)), [])
+                if os.path.abspath(f) != p
+            }
             raw.append(sorted(others)[0] + (len(others) + 1,) if others else None)
         i = 0
         while i < len(raw):
@@ -143,11 +164,15 @@ def main():
             j = i
             while j + 1 < len(raw) and raw[j + 1] is not None:
                 j += 1
-            report["duplication"].append({
-                "file": os.path.relpath(p, repo), "line": i + 1,
-                "span": (j - i) + a.dup_window,
-                "also_in": f"{os.path.relpath(f2, repo)}:{l2}",
-                "occurrences": occ})
+            report["duplication"].append(
+                {
+                    "file": os.path.relpath(p, repo),
+                    "line": i + 1,
+                    "span": (j - i) + a.dup_window,
+                    "also_in": f"{os.path.relpath(f2, repo)}:{l2}",
+                    "occurrences": occ,
+                }
+            )
             i = j + 1
 
     report["duplication"].sort(key=lambda d: (-d["span"], -d["occurrences"]))
@@ -162,9 +187,13 @@ def main():
             print(f"  {d['file']}  {d['loc']} LOC")
         print()
     if report["duplication"]:
-        print(f"## Duplicated regions (>= {a.dup_window} contiguous lines, seen elsewhere)")
+        print(
+            f"## Duplicated regions (>= {a.dup_window} contiguous lines, seen elsewhere)"
+        )
         for d in report["duplication"][:20]:
-            print(f"  {d['occurrences']}x  {d['file']}:{d['line']} (~{d['span']} lines)  also {d['also_in']}")
+            print(
+                f"  {d['occurrences']}x  {d['file']}:{d['line']} (~{d['span']} lines)  also {d['also_in']}"
+            )
         print()
     total = sum(len(report[k]) for k in ("size", "duplication"))
     if total == 0:
