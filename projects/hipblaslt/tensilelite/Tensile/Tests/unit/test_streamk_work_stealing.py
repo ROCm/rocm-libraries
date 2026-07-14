@@ -177,7 +177,12 @@ def _source_of(func) -> str:
 def _extract_ws_validation():
     """Compile the *real* ``if state["StreamKWorkStealing"]:`` block out of
     ``Solution.assignDerivedParameters`` into a standalone callable so the
-    actual rejection logic can be exercised without a full Solution state."""
+    actual rejection logic can be exercised without a full Solution state.
+
+    The block reads ``isaInfoMap[isa].asmCaps`` (for the HasSAtomic / gfx1250
+    gate), so ``isa`` and ``isaInfoMap`` are threaded in as parameters -- the
+    real function derives ``isa = tuple(state["ISA"])`` and receives
+    ``isaInfoMap`` as an argument."""
     tree = ast.parse(
         textwrap.dedent(inspect.getsource(Solution.assignDerivedParameters))
     )
@@ -194,7 +199,13 @@ def _extract_ws_validation():
         name="_validate",
         args=ast.arguments(
             posonlyargs=[],
-            args=[ast.arg("state"), ast.arg("printRejectionReason"), ast.arg("reject")],
+            args=[
+                ast.arg("state"),
+                ast.arg("printRejectionReason"),
+                ast.arg("reject"),
+                ast.arg("isa"),
+                ast.arg("isaInfoMap"),
+            ],
             vararg=None,
             kwonlyargs=[],
             kw_defaults=[],
@@ -211,6 +222,17 @@ def _extract_ws_validation():
     ns: dict = {}
     exec(compile(mod, "<ws-validation>", "exec"), ns)
     return ns["_validate"]
+
+
+# gfx1250 (12,5,0) has no scalar atomics; gfx942/gfx950 do. Mirror just the
+# HasSAtomic capability the work-stealing validation reads.
+_NO_SATOMIC_ISAS = {(12, 5, 0)}
+
+
+def _fake_isa_info_map(isa):
+    isa = tuple(isa)
+    asm_caps = {"HasSAtomic": isa not in _NO_SATOMIC_ISAS}
+    return {isa: types.SimpleNamespace(asmCaps=asm_caps)}
 
 
 # ===========================================================================
@@ -445,14 +467,16 @@ class TestSolutionValidation:
     def setup_method(self):
         self.validate = _extract_ws_validation()
 
-    def _run(self, *, streamk, atomic, work_stealing=1, debug_streamk=0):
+    def _run(self, *, streamk, atomic, work_stealing=1, debug_streamk=0, isa=(9, 4, 2)):
+        isa = tuple(isa)
         state = {
             "StreamKWorkStealing": work_stealing,
             "StreamK": streamk,
             "StreamKAtomic": atomic,
             "DebugStreamK": debug_streamk,
+            "ISA": isa,
         }
-        self.validate(state, False, reject)
+        self.validate(state, False, reject, isa, _fake_isa_info_map(isa))
         return state
 
     @pytest.mark.parametrize("streamk", [0, 1, 2, 3])
@@ -481,4 +505,23 @@ class TestSolutionValidation:
         # With the toggle off the guard must not fire, even for a combination
         # that would otherwise be rejected.
         state = self._run(streamk=3, atomic=1, work_stealing=0, debug_streamk=3)
+        assert "Valid" not in state
+
+    @pytest.mark.parametrize("streamk", [4, 5])
+    def test_rejected_on_gfx1250_no_scalar_atomic(self, streamk):
+        # gfx1250 lacks scalar atomics (HasSAtomic=false); the steal path emits
+        # s_atomic_inc with no vector fallback, so work stealing is rejected.
+        state = self._run(streamk=streamk, atomic=0, isa=(12, 5, 0))
+        assert state["Valid"] is False
+
+    @pytest.mark.parametrize("isa", [(9, 4, 2), (9, 5, 0)])
+    @pytest.mark.parametrize("streamk", [4, 5])
+    def test_accepted_on_scalar_atomic_arches(self, isa, streamk):
+        # gfx942/gfx950 have scalar atomics, so work stealing stays accepted.
+        state = self._run(streamk=streamk, atomic=0, isa=isa)
+        assert state.get("Valid", True) is True
+
+    def test_off_toggle_is_inert_on_gfx1250(self):
+        # StreamKWorkStealing=0 on gfx1250 must not fire the reject.
+        state = self._run(streamk=4, atomic=0, work_stealing=0, isa=(12, 5, 0))
         assert "Valid" not in state

@@ -106,19 +106,24 @@ namespace TensileLite
 
         // The dynamic-queue fetch / work stealing is only correct when the
         // device's runtime NUM_XCD is a power of two AND equals the baked
-        // per-XCD queue count. Returns true (UNSUPPORTED) when NUM_XCD is 0, not
-        // a power of two, the baked count is unknown, or NUM_XCD != baked (e.g.
-        // MI300A's 6 XCDs, or a 4-XCD partition of an 8-XCD gfx942). Returns
-        // false when there is no analytical hardware (unknown XCD -> allow). Kept
-        // isolated here so it stays trivially unit-testable (see CuCount_test.cpp).
+        // per-XCD queue count. Returns true (UNSUPPORTED) when the hardware is
+        // unknown (not a HipAMDGPU, missing analytical hardware, or no baked
+        // per-XCD queue count), when NUM_XCD is 0, not a power of two, or
+        // NUM_XCD != baked (e.g. MI300A's 6 XCDs, or a 4-XCD partition of an
+        // 8-XCD gfx942). Unknown hardware is treated as UNSUPPORTED: the
+        // dynamic-queue solution is then excluded from selection and a
+        // non-dynamic-queue solution serves the GEMM, rather than staying
+        // selectable while the per-XCD counter workspace is sized with an
+        // unknown (0) queue count (which would under-allocate). Kept isolated
+        // here so it stays trivially unit-testable (see CuCount_test.cpp).
         inline bool streamKDynamicQueueUnsupported(Hardware const& hardware)
         {
             auto const* hipAMDGPU = dynamic_cast<hip::HipAMDGPU const*>(&hardware);
             if(hipAMDGPU == nullptr || hipAMDGPU->analyticalHardware == nullptr)
-                return false;
+                return true;
             size_t baked  = streamKBakedQueueCount(hardware);
             size_t numXCD = hipAMDGPU->analyticalHardware->NUM_XCD;
-            return numXCD == 0 || (numXCD & (numXCD - 1)) != 0 || baked == 0
+            return baked == 0 || numXCD == 0 || (numXCD & (numXCD - 1)) != 0
                    || numXCD != baked;
         }
 
@@ -3252,6 +3257,17 @@ namespace TensileLite
             if(dynamicQueuePath && streamKDynamicQueueUnsupported(hardware))
             {
                 warnStreamKDynamicQueueUnsupportedOnce(hardware);
+                // Fail EARLY -- before workspace sizing / kernel-arg packing --
+                // when NUM_XCD is unknown (baked queue count == 0, e.g. missing
+                // analyticalHardware). Sizing the per-XCD counter region with a
+                // 0 queue count would under-allocate the workspace the kernel
+                // writes; reject with an actionable message instead.
+                if(streamKBakedQueueCount(hardware) == 0)
+                    throw std::runtime_error(
+                        "hipBLASLt Error: StreamK dynamic-queue (work-stealing) requires a known "
+                        "NUM_XCD (analyticalHardware unavailable); refusing to size the per-XCD "
+                        "counter workspace with an unknown queue count. "
+                        "Select a non-work-stealing solution instead.");
                 throw std::runtime_error(
                     "hipBLASLt Error: StreamK dynamic-queue (work-stealing) solution selected on a "
                     "device whose XCD count is not a power of two or does not equal the compiled "
@@ -4031,10 +4047,11 @@ namespace TensileLite
 
         // Fast/common path: on hardware whose runtime XCD count is a power of
         // two AND equals the baked per-XCD queue count, the fixed queue masking
-        // is valid, so nothing is excluded. This also covers the "unknown XCD"
-        // case (predicate returns false), preserving historic behavior. Checked
-        // before streamK5EffectiveDynamic() so the mainline gfx942(MI300X)/
-        // gfx950 path stays cheap.
+        // is valid, so nothing is excluded. Unknown hardware (missing analytical
+        // info / no baked count) is treated as UNSUPPORTED by the predicate, so
+        // it falls through to the reject-and-continue path below rather than
+        // being kept. Checked before streamK5EffectiveDynamic() so the mainline
+        // gfx942(MI300X)/gfx950 path stays cheap.
         if(!streamKDynamicQueueUnsupported(hardware))
             return true;
 

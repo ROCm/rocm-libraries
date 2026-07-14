@@ -779,14 +779,16 @@ namespace
     // Byte-for-byte mirror of the anonymous-namespace numeric predicate in
     // ContractionSolution.cpp (streamKDynamicQueueUnsupported). Kept in lockstep
     // with the production code; if that predicate changes, update this too.
+    // Unknown hardware (not a HipAMDGPU, no analytical hardware, or no baked
+    // per-XCD queue count) is treated as UNSUPPORTED (returns true).
     inline bool streamKDynamicQueueUnsupportedRef(Hardware const& hardware)
     {
         auto const* hipAMDGPU = dynamic_cast<hip::HipAMDGPU const*>(&hardware);
         if(hipAMDGPU == nullptr || hipAMDGPU->analyticalHardware == nullptr)
-            return false;
+            return true;
         size_t baked  = streamKBakedQueueCountRef(hardware);
         size_t numXCD = hipAMDGPU->analyticalHardware->NUM_XCD;
-        return numXCD == 0 || (numXCD & (numXCD - 1)) != 0 || baked == 0
+        return baked == 0 || numXCD == 0 || (numXCD & (numXCD - 1)) != 0
                || numXCD != baked;
     }
 
@@ -877,21 +879,26 @@ TEST(StreamKDynamicQueueXcdGateTest, AllowsGfx950EightXcd)
         << "gfx950 (NUM_XCD=8) must keep the dynamic-queue work-stealing path";
 }
 
-TEST(StreamKDynamicQueueXcdGateTest, MissingAnalyticalHardwarePreservesHistoricBehavior)
+TEST(StreamKDynamicQueueXcdGateTest, MissingAnalyticalHardwareIsUnsupported)
 {
-    // The real "unknown -> preserve historic behavior (allow)" path in the
-    // production predicate is a null analyticalHardware: it returns false so a
-    // device without analytical info keeps the pre-gate dynamic-queue path.
-    // (The predicate's separate NUM_XCD==0 guard returns true as a defensive
-    // fallback, but that state is not constructible here: origami::hardware_t
-    // divides by NUM_XCD, so a real analytical hardware can never carry 0 XCDs.)
+    // Unknown hardware (null analyticalHardware -> unknown NUM_XCD / baked
+    // queue count == 0) must be treated as UNSUPPORTED so the dynamic-queue
+    // solution is excluded from selection and a non-dynamic-queue solution
+    // serves the GEMM, rather than staying selectable while the per-XCD counter
+    // workspace is sized with an unknown (0) queue count (under-allocation).
     hip::HipAMDGPU noAnalytical;
     noAnalytical.processor     = AMDGPU::Processor::gfx942;
     noAnalytical.deviceName    = "test-gfx942-no-analytical";
     Hardware const& hwNoAnalyt = noAnalytical;
     ASSERT_EQ(noAnalytical.analyticalHardware, nullptr);
-    EXPECT_FALSE(streamKDynamicQueueUnsupportedRef(hwNoAnalyt))
-        << "Missing analyticalHardware must fall through to historic behavior (allow)";
+    EXPECT_TRUE(streamKDynamicQueueUnsupportedRef(hwNoAnalyt))
+        << "Missing analyticalHardware (unknown NUM_XCD) must be treated as unsupported";
+    // And the selection predicate must therefore EXCLUDE the dynamic-queue
+    // solution (SK4) while keeping non-dynamic-queue solutions selectable.
+    EXPECT_FALSE(streamKDynamicQueueSupportedRef(4, /*effectiveDynamic=*/false, hwNoAnalyt))
+        << "SK4 work-stealing solution must be excluded when NUM_XCD is unknown";
+    EXPECT_TRUE(streamKDynamicQueueSupportedRef(3, /*effectiveDynamic=*/false, hwNoAnalyt))
+        << "SK3-static solution must remain selectable when NUM_XCD is unknown";
 }
 
 // Selection-predicate contract: on MI300A (6 XCD) the dynamic-queue solution is
