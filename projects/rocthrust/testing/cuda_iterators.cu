@@ -82,6 +82,39 @@ void TestCUDACountingIterator()
 }
 DECLARE_UNITTEST(TestCUDACountingIterator);
 
+void TestCUDAPermutationIterator()
+{
+  { // device system
+    thrust::device_vector<int> vec{1, 2, 3, 4, 5, 6, 7, 8, 9};
+    thrust::device_vector<int> off{5, 2, 7, 0};
+    thrust::device_vector<int> res{-1, -1, -1, -1, -1};
+    thrust::copy(cuda::permutation_iterator{vec.begin(), off.begin()},
+                 cuda::permutation_iterator{vec.begin(), off.end()},
+                 res.begin());
+    ASSERT_EQUAL(res, (thrust::device_vector<int>{6, 3, 8, 1, -1}));
+  }
+  { // host system
+    thrust::host_vector<int> vec{1, 2, 3, 4, 5, 6, 7, 8, 9};
+    thrust::host_vector<int> off{5, 2, 7, 0};
+    thrust::host_vector<int> res{-1, -1, -1, -1, -1};
+    thrust::copy(cuda::permutation_iterator{vec.begin(), off.begin()},
+                 cuda::permutation_iterator{vec.begin(), off.end()},
+                 res.begin());
+    ASSERT_EQUAL(res, (thrust::host_vector<int>{6, 3, 8, 1, -1}));
+  }
+
+  { // plain std::vector
+    std::vector<int> vec{1, 2, 3, 4, 5, 6, 7, 8, 9};
+    std::vector<int> off{5, 2, 7, 0};
+    std::vector<int> res{-1, -1, -1, -1, -1};
+    thrust::copy(cuda::permutation_iterator{vec.begin(), off.begin()},
+                 cuda::permutation_iterator{vec.begin(), off.end()},
+                 res.begin());
+    ASSERT_EQUAL(res, (std::vector<int>{6, 3, 8, 1, -1}));
+  }
+}
+DECLARE_UNITTEST(TestCUDAPermutationIterator);
+
 void TestCUDAStridedIterator()
 {
   auto discard = cuda::discard_iterator{};
