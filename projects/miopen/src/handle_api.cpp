@@ -24,11 +24,12 @@
  *
  *******************************************************************************/
 #include <cstdio>
+#include <miopen/miopen_impl.h>
 #include <miopen/version.h>
 #include <miopen/errors.hpp>
 #include <miopen/handle.hpp>
 
-extern "C" const char* miopenGetErrorString(miopenStatus_t error)
+extern "C" const char* miopenGetErrorString_impl(miopenStatus_t error)
 {
     switch(error)
     {
@@ -57,7 +58,7 @@ extern "C" const char* miopenGetErrorString(miopenStatus_t error)
     return "Unknown error status";
 }
 
-extern "C" miopenStatus_t miopenGetVersion(size_t* major, size_t* minor, size_t* patch)
+extern "C" miopenStatus_t miopenGetVersion_impl(size_t* major, size_t* minor, size_t* patch)
 {
     return miopen::try_([&] {
         if(major != nullptr)
@@ -69,7 +70,7 @@ extern "C" miopenStatus_t miopenGetVersion(size_t* major, size_t* minor, size_t*
     });
 }
 
-extern "C" miopenStatus_t miopenCreate(miopenHandle_t* handle)
+extern "C" miopenStatus_t miopenCreate_impl(miopenHandle_t* handle)
 {
 
     return miopen::try_([&] {
@@ -78,8 +79,8 @@ extern "C" miopenStatus_t miopenCreate(miopenHandle_t* handle)
     });
 }
 
-extern "C" miopenStatus_t miopenCreateWithStream(miopenHandle_t* handle,
-                                                 miopenAcceleratorQueue_t stream)
+extern "C" miopenStatus_t miopenCreateWithStream_impl(miopenHandle_t* handle,
+                                                      miopenAcceleratorQueue_t stream)
 {
 
     return miopen::try_([&] {
@@ -88,35 +89,37 @@ extern "C" miopenStatus_t miopenCreateWithStream(miopenHandle_t* handle,
     });
 }
 
-extern "C" miopenStatus_t miopenSetStream(miopenHandle_t handle, miopenAcceleratorQueue_t streamID)
+extern "C" miopenStatus_t miopenSetStream_impl(miopenHandle_t handle,
+                                               miopenAcceleratorQueue_t streamID)
 {
     return miopen::try_([&] { miopen::deref(handle).SetStream(streamID); });
 }
 
-extern "C" miopenStatus_t miopenGetStream(miopenHandle_t handle, miopenAcceleratorQueue_t* streamID)
+extern "C" miopenStatus_t miopenGetStream_impl(miopenHandle_t handle,
+                                               miopenAcceleratorQueue_t* streamID)
 {
     return miopen::try_([&] { miopen::deref(streamID) = miopen::deref(handle).GetStream(); });
 }
 
-extern "C" miopenStatus_t miopenSetAllocator(miopenHandle_t handle,
-                                             miopenAllocatorFunction allocator,
-                                             miopenDeallocatorFunction deallocator,
-                                             void* allocatorContext)
+extern "C" miopenStatus_t miopenSetAllocator_impl(miopenHandle_t handle,
+                                                  miopenAllocatorFunction allocator,
+                                                  miopenDeallocatorFunction deallocator,
+                                                  void* allocatorContext)
 {
     return miopen::try_(
         [&] { miopen::deref(handle).SetAllocator(allocator, deallocator, allocatorContext); });
 }
 
-extern "C" miopenStatus_t miopenDestroy(miopenHandle_t handle)
+extern "C" miopenStatus_t miopenDestroy_impl(miopenHandle_t handle)
 {
     return miopen::try_([&] { miopen_destroy_object(handle); });
 }
 
-extern "C" miopenStatus_t miopenGetKernelTime(miopenHandle_t handle, float* time)
+extern "C" miopenStatus_t miopenGetKernelTime_impl(miopenHandle_t handle, float* time)
 {
     return miopen::try_([&] { miopen::deref(time) = miopen::deref(handle).GetKernelTime(); });
 }
-extern "C" miopenStatus_t miopenEnableProfiling(miopenHandle_t handle, bool enable)
+extern "C" miopenStatus_t miopenEnableProfiling_impl(miopenHandle_t handle, bool enable)
 {
     return miopen::try_([&] { miopen::deref(handle).EnableProfiling(enable); });
 }

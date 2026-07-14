@@ -24,6 +24,7 @@
  *
  *******************************************************************************/
 #include <miopen/softmax.hpp>
+#include <miopen/miopen_impl.h>
 #include <miopen/errors.hpp>
 #include <miopen/handle.hpp>
 #include <miopen/logger.hpp>
@@ -68,13 +69,13 @@ static void LogCmdSoftmax(const miopenTensorDescriptor_t xDesc,
     }
 }
 
-extern "C" miopenStatus_t miopenSoftmaxForward(miopenHandle_t handle,
-                                               const void* alpha,
-                                               const miopenTensorDescriptor_t xDesc,
-                                               const void* x,
-                                               const void* beta,
-                                               const miopenTensorDescriptor_t yDesc,
-                                               void* y)
+extern "C" miopenStatus_t miopenSoftmaxForward_impl(miopenHandle_t handle,
+                                                    const void* alpha,
+                                                    const miopenTensorDescriptor_t xDesc,
+                                                    const void* x,
+                                                    const void* beta,
+                                                    const miopenTensorDescriptor_t yDesc,
+                                                    void* y)
 {
     MIOPEN_LOG_FUNCTION(alpha, xDesc, x, beta, yDesc, y);
 
@@ -94,15 +95,15 @@ extern "C" miopenStatus_t miopenSoftmaxForward(miopenHandle_t handle,
     });
 }
 
-extern "C" miopenStatus_t miopenSoftmaxBackward(miopenHandle_t handle,
-                                                const void* alpha,
-                                                const miopenTensorDescriptor_t yDesc,
-                                                const void* y,
-                                                const miopenTensorDescriptor_t dyDesc,
-                                                const void* dy,
-                                                const void* beta,
-                                                const miopenTensorDescriptor_t dxDesc,
-                                                void* dx)
+extern "C" miopenStatus_t miopenSoftmaxBackward_impl(miopenHandle_t handle,
+                                                     const void* alpha,
+                                                     const miopenTensorDescriptor_t yDesc,
+                                                     const void* y,
+                                                     const miopenTensorDescriptor_t dyDesc,
+                                                     const void* dy,
+                                                     const void* beta,
+                                                     const miopenTensorDescriptor_t dxDesc,
+                                                     void* dx)
 {
 
     MIOPEN_LOG_FUNCTION(alpha, yDesc, y, dyDesc, dy, beta, dxDesc, dx);
@@ -127,15 +128,15 @@ extern "C" miopenStatus_t miopenSoftmaxBackward(miopenHandle_t handle,
     });
 }
 
-extern "C" miopenStatus_t miopenSoftmaxForward_V2(miopenHandle_t handle,
-                                                  const void* alpha,
-                                                  const miopenTensorDescriptor_t xDesc,
-                                                  const void* x,
-                                                  const void* beta,
-                                                  const miopenTensorDescriptor_t yDesc,
-                                                  void* y,
-                                                  miopenSoftmaxAlgorithm_t algorithm,
-                                                  miopenSoftmaxMode_t mode)
+extern "C" miopenStatus_t miopenSoftmaxForward_V2_impl(miopenHandle_t handle,
+                                                       const void* alpha,
+                                                       const miopenTensorDescriptor_t xDesc,
+                                                       const void* x,
+                                                       const void* beta,
+                                                       const miopenTensorDescriptor_t yDesc,
+                                                       void* y,
+                                                       miopenSoftmaxAlgorithm_t algorithm,
+                                                       miopenSoftmaxMode_t mode)
 {
     MIOPEN_LOG_FUNCTION(alpha, xDesc, x, beta, yDesc, y, algorithm, mode);
     LogCmdSoftmax(xDesc, algorithm, mode, alpha, beta, true);
@@ -154,17 +155,17 @@ extern "C" miopenStatus_t miopenSoftmaxForward_V2(miopenHandle_t handle,
     });
 }
 
-extern "C" miopenStatus_t miopenSoftmaxBackward_V2(miopenHandle_t handle,
-                                                   const void* alpha,
-                                                   const miopenTensorDescriptor_t yDesc,
-                                                   const void* y,
-                                                   const miopenTensorDescriptor_t dyDesc,
-                                                   const void* dy,
-                                                   const void* beta,
-                                                   const miopenTensorDescriptor_t dxDesc,
-                                                   void* dx,
-                                                   miopenSoftmaxAlgorithm_t algorithm,
-                                                   miopenSoftmaxMode_t mode)
+extern "C" miopenStatus_t miopenSoftmaxBackward_V2_impl(miopenHandle_t handle,
+                                                        const void* alpha,
+                                                        const miopenTensorDescriptor_t yDesc,
+                                                        const void* y,
+                                                        const miopenTensorDescriptor_t dyDesc,
+                                                        const void* dy,
+                                                        const void* beta,
+                                                        const miopenTensorDescriptor_t dxDesc,
+                                                        void* dx,
+                                                        miopenSoftmaxAlgorithm_t algorithm,
+                                                        miopenSoftmaxMode_t mode)
 {
 
     MIOPEN_LOG_FUNCTION(alpha, yDesc, y, dyDesc, dy, beta, dxDesc, dx, algorithm, mode);

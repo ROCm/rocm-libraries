@@ -24,6 +24,7 @@
  *
  *******************************************************************************/
 #include <miopen/cat.hpp>
+#include <miopen/miopen_impl.h>
 #include <miopen/errors.hpp>
 #include <miopen/handle.hpp>
 #include <miopen/logger.hpp>
@@ -67,13 +68,13 @@ static void LogCmdCat(const miopenTensorDescriptor_t* xDescs, int32_t xCount, bo
     }
 }
 
-extern "C" miopenStatus_t miopenCatForward(miopenHandle_t handle,
-                                           const int32_t xCount,
-                                           const miopenTensorDescriptor_t* xDescs,
-                                           const void* const* xs,
-                                           const miopenTensorDescriptor_t yDesc,
-                                           void* y,
-                                           const int32_t dim)
+extern "C" miopenStatus_t miopenCatForward_impl(miopenHandle_t handle,
+                                                const int32_t xCount,
+                                                const miopenTensorDescriptor_t* xDescs,
+                                                const void* const* xs,
+                                                const miopenTensorDescriptor_t yDesc,
+                                                void* y,
+                                                const int32_t dim)
 {
     MIOPEN_LOG_FUNCTION(handle, xDescs, xs, yDesc, y, dim);
     LogCmdCat(xDescs, xCount, true);

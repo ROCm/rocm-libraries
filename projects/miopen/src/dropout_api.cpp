@@ -25,6 +25,7 @@
  *******************************************************************************/
 
 #include <miopen/handle.hpp>
+#include <miopen/miopen_impl.h>
 #include <miopen/logger.hpp>
 #include <miopen/errors.hpp>
 #include <miopen/dropout.hpp>
@@ -40,7 +41,7 @@
 #pragma clang diagnostic pop
 #include "kernels/miopen_rocrand.hpp"
 
-extern "C" miopenStatus_t miopenCreateDropoutDescriptor(miopenDropoutDescriptor_t* dropoutDesc)
+extern "C" miopenStatus_t miopenCreateDropoutDescriptor_impl(miopenDropoutDescriptor_t* dropoutDesc)
 {
 
     MIOPEN_LOG_FUNCTION(dropoutDesc);
@@ -50,14 +51,15 @@ extern "C" miopenStatus_t miopenCreateDropoutDescriptor(miopenDropoutDescriptor_
     });
 }
 
-extern "C" miopenStatus_t miopenDestroyDropoutDescriptor(miopenDropoutDescriptor_t dropoutDesc)
+extern "C" miopenStatus_t miopenDestroyDropoutDescriptor_impl(miopenDropoutDescriptor_t dropoutDesc)
 {
     MIOPEN_LOG_FUNCTION(dropoutDesc);
     return miopen::try_([&] { miopen_destroy_object(dropoutDesc); });
 }
 
-extern "C" miopenStatus_t miopenDropoutGetReserveSpaceSize(const miopenTensorDescriptor_t xDesc,
-                                                           size_t* reserveSpaceSizeInBytes)
+extern "C" miopenStatus_t
+miopenDropoutGetReserveSpaceSize_impl(const miopenTensorDescriptor_t xDesc,
+                                      size_t* reserveSpaceSizeInBytes)
 {
     MIOPEN_LOG_FUNCTION(xDesc);
     return miopen::try_([&] {
@@ -66,8 +68,8 @@ extern "C" miopenStatus_t miopenDropoutGetReserveSpaceSize(const miopenTensorDes
     });
 }
 
-extern "C" miopenStatus_t miopenDropoutGetStatesSize(miopenHandle_t handle,
-                                                     size_t* stateSizeInBytes)
+extern "C" miopenStatus_t miopenDropoutGetStatesSize_impl(miopenHandle_t handle,
+                                                          size_t* stateSizeInBytes)
 {
     MIOPEN_LOG_FUNCTION(handle);
     return miopen::try_([&] {
@@ -77,14 +79,14 @@ extern "C" miopenStatus_t miopenDropoutGetStatesSize(miopenHandle_t handle,
     });
 }
 
-extern "C" miopenStatus_t miopenGetDropoutDescriptor(miopenDropoutDescriptor_t dropoutDesc,
-                                                     miopenHandle_t /* handle */,
-                                                     float* dropout,
-                                                     void** states,
-                                                     unsigned long long* seed,
-                                                     bool* use_mask,
-                                                     bool* state_evo,
-                                                     miopenRNGType_t* rng_mode)
+extern "C" miopenStatus_t miopenGetDropoutDescriptor_impl(miopenDropoutDescriptor_t dropoutDesc,
+                                                          miopenHandle_t /* handle */,
+                                                          float* dropout,
+                                                          void** states,
+                                                          unsigned long long* seed,
+                                                          bool* use_mask,
+                                                          bool* state_evo,
+                                                          miopenRNGType_t* rng_mode)
 {
     MIOPEN_LOG_FUNCTION(dropoutDesc);
     return miopen::try_([&] {
@@ -97,15 +99,15 @@ extern "C" miopenStatus_t miopenGetDropoutDescriptor(miopenDropoutDescriptor_t d
     });
 }
 
-extern "C" miopenStatus_t miopenRestoreDropoutDescriptor(miopenDropoutDescriptor_t dropoutDesc,
-                                                         miopenHandle_t /* handle */,
-                                                         float dropout,
-                                                         void* states,
-                                                         size_t stateSizeInBytes,
-                                                         unsigned long long seed,
-                                                         bool use_mask,
-                                                         bool state_evo,
-                                                         miopenRNGType_t rng_mode)
+extern "C" miopenStatus_t miopenRestoreDropoutDescriptor_impl(miopenDropoutDescriptor_t dropoutDesc,
+                                                              miopenHandle_t /* handle */,
+                                                              float dropout,
+                                                              void* states,
+                                                              size_t stateSizeInBytes,
+                                                              unsigned long long seed,
+                                                              bool use_mask,
+                                                              bool state_evo,
+                                                              miopenRNGType_t rng_mode)
 {
 
     MIOPEN_LOG_FUNCTION(dropoutDesc, dropout, states, stateSizeInBytes, seed, use_mask, state_evo);
@@ -120,15 +122,15 @@ extern "C" miopenStatus_t miopenRestoreDropoutDescriptor(miopenDropoutDescriptor
     });
 }
 
-extern "C" miopenStatus_t miopenSetDropoutDescriptor(miopenDropoutDescriptor_t dropoutDesc,
-                                                     miopenHandle_t handle,
-                                                     float dropout,
-                                                     void* states,
-                                                     size_t stateSizeInBytes,
-                                                     unsigned long long seed,
-                                                     bool use_mask,
-                                                     bool state_evo,
-                                                     miopenRNGType_t rng_mode)
+extern "C" miopenStatus_t miopenSetDropoutDescriptor_impl(miopenDropoutDescriptor_t dropoutDesc,
+                                                          miopenHandle_t handle,
+                                                          float dropout,
+                                                          void* states,
+                                                          size_t stateSizeInBytes,
+                                                          unsigned long long seed,
+                                                          bool use_mask,
+                                                          bool state_evo,
+                                                          miopenRNGType_t rng_mode)
 {
 
     MIOPEN_LOG_FUNCTION(dropoutDesc, dropout, states, stateSizeInBytes, seed, use_mask, state_evo);
@@ -171,15 +173,15 @@ static void LogCmdDropout(const miopenDropoutDescriptor_t dropoutDesc,
         MIOPEN_LOG_DRIVER_CMD(ss.str());
     }
 }
-extern "C" miopenStatus_t miopenDropoutForward(miopenHandle_t handle,
-                                               const miopenDropoutDescriptor_t dropoutDesc,
-                                               const miopenTensorDescriptor_t noise_shape,
-                                               const miopenTensorDescriptor_t xDesc,
-                                               const void* x,
-                                               const miopenTensorDescriptor_t yDesc,
-                                               void* y,
-                                               void* reserveSpace,
-                                               size_t reserveSpaceSizeInBytes)
+extern "C" miopenStatus_t miopenDropoutForward_impl(miopenHandle_t handle,
+                                                    const miopenDropoutDescriptor_t dropoutDesc,
+                                                    const miopenTensorDescriptor_t noise_shape,
+                                                    const miopenTensorDescriptor_t xDesc,
+                                                    const void* x,
+                                                    const miopenTensorDescriptor_t yDesc,
+                                                    void* y,
+                                                    void* reserveSpace,
+                                                    size_t reserveSpaceSizeInBytes)
 {
 
     MIOPEN_LOG_FUNCTION(
@@ -202,15 +204,15 @@ extern "C" miopenStatus_t miopenDropoutForward(miopenHandle_t handle,
     });
 }
 
-extern "C" miopenStatus_t miopenDropoutBackward(miopenHandle_t handle,
-                                                const miopenDropoutDescriptor_t dropoutDesc,
-                                                const miopenTensorDescriptor_t noise_shape,
-                                                const miopenTensorDescriptor_t dyDesc,
-                                                const void* dy,
-                                                const miopenTensorDescriptor_t dxDesc,
-                                                void* dx,
-                                                void* reserveSpace,
-                                                size_t reserveSpaceSizeInBytes)
+extern "C" miopenStatus_t miopenDropoutBackward_impl(miopenHandle_t handle,
+                                                     const miopenDropoutDescriptor_t dropoutDesc,
+                                                     const miopenTensorDescriptor_t noise_shape,
+                                                     const miopenTensorDescriptor_t dyDesc,
+                                                     const void* dy,
+                                                     const miopenTensorDescriptor_t dxDesc,
+                                                     void* dx,
+                                                     void* reserveSpace,
+                                                     size_t reserveSpaceSizeInBytes)
 {
 
     MIOPEN_LOG_FUNCTION(dropoutDesc, dyDesc, dy, dxDesc, dx, reserveSpace, reserveSpaceSizeInBytes);

@@ -25,6 +25,7 @@
  *******************************************************************************/
 
 #include <miopen/reduceextreme.hpp>
+#include <miopen/miopen_impl.h>
 #include <miopen/errors.hpp>
 #include <miopen/handle.hpp>
 #include <miopen/logger.hpp>
@@ -73,15 +74,16 @@ static void LogCmdReduceExtreme(const miopenTensorDescriptor_t xDesc,
     }
 }
 
-extern "C" miopenStatus_t miopenReduceExtremeForward(miopenHandle_t handle,
-                                                     const miopenTensorDescriptor_t xDesc,
-                                                     const void* x,
-                                                     const int32_t dim,
-                                                     const miopenReduceExtremeOp_t reduceExtremeOp,
-                                                     const miopenTensorDescriptor_t yDesc,
-                                                     void* y,
-                                                     const miopenTensorDescriptor_t indiceDesc,
-                                                     void* indice)
+extern "C" miopenStatus_t
+miopenReduceExtremeForward_impl(miopenHandle_t handle,
+                                const miopenTensorDescriptor_t xDesc,
+                                const void* x,
+                                const int32_t dim,
+                                const miopenReduceExtremeOp_t reduceExtremeOp,
+                                const miopenTensorDescriptor_t yDesc,
+                                void* y,
+                                const miopenTensorDescriptor_t indiceDesc,
+                                void* indice)
 {
 
     if((reduceExtremeOp == MIOPEN_REDUCE_EXTREME_ARGMIN) ||

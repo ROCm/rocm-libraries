@@ -24,6 +24,7 @@
  *
  *******************************************************************************/
 #include <miopen/groupnorm.hpp>
+#include <miopen/miopen_impl.h>
 #include <miopen/errors.hpp>
 #include <miopen/handle.hpp>
 #include <miopen/logger.hpp>
@@ -56,7 +57,7 @@ static void LogCmdGroupNorm(const miopenTensorDescriptor_t xDesc,
         }
 
         int32_t size = {0};
-        miopenGetTensorDescriptorSize(xDesc, &size);
+        miopenGetTensorDescriptorSize_impl(xDesc, &size);
         ss << " -n " << miopen::deref(xDesc).GetLengths()[0] << " -c "
            << miopen::deref(xDesc).GetLengths()[1];
         if(size == 5)
@@ -83,22 +84,22 @@ static void LogCmdGroupNorm(const miopenTensorDescriptor_t xDesc,
     }
 }
 
-extern "C" miopenStatus_t miopenGroupNormForward(miopenHandle_t handle,
-                                                 miopenNormMode_t mode,
-                                                 const miopenTensorDescriptor_t xDesc,
-                                                 const void* x,
-                                                 const miopenTensorDescriptor_t weightDesc,
-                                                 const void* weight,
-                                                 const miopenTensorDescriptor_t biasDesc,
-                                                 const void* bias,
-                                                 const uint64_t num_groups,
-                                                 const float epsilon,
-                                                 const miopenTensorDescriptor_t yDesc,
-                                                 void* y,
-                                                 const miopenTensorDescriptor_t meanDesc,
-                                                 void* mean,
-                                                 const miopenTensorDescriptor_t rstdDesc,
-                                                 void* rstd)
+extern "C" miopenStatus_t miopenGroupNormForward_impl(miopenHandle_t handle,
+                                                      miopenNormMode_t mode,
+                                                      const miopenTensorDescriptor_t xDesc,
+                                                      const void* x,
+                                                      const miopenTensorDescriptor_t weightDesc,
+                                                      const void* weight,
+                                                      const miopenTensorDescriptor_t biasDesc,
+                                                      const void* bias,
+                                                      const uint64_t num_groups,
+                                                      const float epsilon,
+                                                      const miopenTensorDescriptor_t yDesc,
+                                                      void* y,
+                                                      const miopenTensorDescriptor_t meanDesc,
+                                                      void* mean,
+                                                      const miopenTensorDescriptor_t rstdDesc,
+                                                      void* rstd)
 {
     MIOPEN_LOG_FUNCTION(handle,
                         mode,
