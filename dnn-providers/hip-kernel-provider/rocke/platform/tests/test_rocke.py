@@ -20,6 +20,7 @@ IR/lowering pipeline only. End-to-end runtime tests live in
 from __future__ import annotations
 
 import unittest
+from unittest.mock import patch, Mock
 
 import pytest
 
@@ -72,6 +73,25 @@ from rocke.instances import (
     build_implicit_gemm_conv,
     build_universal_gemm,
 )
+
+# ---------------------------------------------------------------------
+# Environment guards
+# ---------------------------------------------------------------------
+#
+# rocke is consumed downstream by PyTorch, so torch is *not* a build/test
+# dependency: the pure IR + lowering path must work with no torch installed.
+# A handful of tests below exercise torch-facing features (the torch.fx
+# fusion planner, torch-eager validation baselines) and are skipped when
+# torch is absent — torch-full CI lanes still run them.
+
+try:  # torch is optional; gate torch-facing tests on its presence.
+    import torch as _torch  # noqa: F401
+
+    _HAVE_TORCH = True
+except Exception:  # pragma: no cover - depends on the environment
+    _HAVE_TORCH = False
+
+_requires_torch = unittest.skipUnless(_HAVE_TORCH, "requires torch")
 
 # ---------------------------------------------------------------------
 # Core IR
@@ -2418,6 +2438,7 @@ class TestCdnaPrimitives(unittest.TestCase):
 class TestFusionPlanner(unittest.TestCase):
     """CPU-only coverage for the graph-capture fusion planner."""
 
+    @_requires_torch
     def test_explain_matmul_bias_relu_scale(self):
         torch = pytest.importorskip("torch")
         from rocke.helpers import explain_fn
@@ -2436,6 +2457,7 @@ class TestFusionPlanner(unittest.TestCase):
             ["bias", "scale0.5", "relu"],
         )
 
+    @_requires_torch
     def test_explain_matmul_only(self):
         torch = pytest.importorskip("torch")
         from rocke.helpers import explain_fn
@@ -2448,6 +2470,7 @@ class TestFusionPlanner(unittest.TestCase):
         self.assertEqual(info["bias_arg_name"], None)
         self.assertEqual(info["epilogue_ops"], [])
 
+    @_requires_torch
     def test_explain_unsupported_graph(self):
         torch = pytest.importorskip("torch")
         from rocke.helpers import explain_fn
@@ -2459,6 +2482,7 @@ class TestFusionPlanner(unittest.TestCase):
         self.assertFalse(info["matched"])
         self.assertIn("no registered", info["reason"])
 
+    @_requires_torch
     def test_compile_fn_exposes_plan_without_launching(self):
         torch = pytest.importorskip("torch")
         from rocke.helpers import compile_fn
@@ -2471,13 +2495,24 @@ class TestFusionPlanner(unittest.TestCase):
         self.assertEqual(compiled.match["bias_arg_name"], "bias")
 
     def test_dtype_to_ir_accepts_torch_aliases(self):
-        torch = pytest.importorskip("torch")
         from rocke.core.ir import BF16, F16, F32
         from rocke.helpers import dtype_to_ir
 
-        self.assertEqual(dtype_to_ir(torch.float16), F16)
-        self.assertEqual(dtype_to_ir(torch.bfloat16), BF16)
-        self.assertEqual(dtype_to_ir(torch.float32), F32)
+        # ``dtype_to_ir`` resolves torch dtypes via their ``str()`` repr
+        # ("torch.float16", ...) without importing torch, so this coverage
+        # runs even in torch-less lanes. Assert the string path directly.
+        self.assertEqual(dtype_to_ir("torch.float16"), F16)
+        self.assertEqual(dtype_to_ir("torch.bfloat16"), BF16)
+        self.assertEqual(dtype_to_ir("torch.float32"), F32)
+
+        # When torch is installed, the real dtype objects must round-trip
+        # identically (their ``str()`` is the "torch.<name>" form above).
+        if _HAVE_TORCH:
+            import torch
+
+            self.assertEqual(dtype_to_ir(torch.float16), F16)
+            self.assertEqual(dtype_to_ir(torch.bfloat16), BF16)
+            self.assertEqual(dtype_to_ir(torch.float32), F32)
 
     def test_bf16_fusion_configs_use_supported_bf16_atoms(self):
         from rocke.core.ir import BF16
@@ -2915,6 +2950,7 @@ class TestExpandedEpilogueOps(unittest.TestCase):
         self.assertIn("residual_mul_0", ll)
 
 
+@_requires_torch
 class TestExpandedPatternMatchers(unittest.TestCase):
     """Verify the new patterns in ``_PATTERN_TABLE`` match expected fns."""
 
@@ -3029,13 +3065,46 @@ class TestExpandedPatternMatchers(unittest.TestCase):
 
 
 class TestLoweringRegistryBuild(unittest.TestCase):
-    """End-to-end ``can_lower`` + ``candidates`` + ``build`` smoke tests.
+    """Lowerer tests: candidate generation phase (GPU-agnostic).
 
-    These tests cover the path from a normalized fusion graph all the
-    way through HSACO build for each concrete lowerer. They do NOT
-    launch the kernels (no GPU); the goal is to confirm the lowerers
-    wire up a real launcher object on every supported region kind.
+    Tests that validate lowerers can recognize regions and generate
+    spec configurations without requiring GPU hardware. Architecture
+    is mocked to gfx950 so that tests can still run without a GPU.
     """
+
+    @classmethod
+    def setUpClass(cls):
+        """Mock HIP runtime dependencies for in-process testing without GPU.
+
+        These tests do not launch kernels or require a physical GPU. To achieve this, we mock:
+
+        - ``get_device_arch``: Returns a fixed architecture string (gfx950)
+          so the compiler targets a known ISA without querying the actual
+          device via ``hipGetDeviceProperties``.
+
+        - ``Runtime.load_module``: Bypasses ``hipModuleLoadData``. The
+          mock allows tests to validate that lowerers produce a well-formed
+          launcher object without requiring a GPU driver.
+
+        Individual tests can override these mocks (via nested ``patch``
+        context managers) to exercise error paths or architecture-specific
+        behavior.
+        """
+        cls.arch_patcher = patch(
+            "rocke.runtime.hip_module.get_device_arch", return_value="gfx950"
+        )
+
+        cls.load_module_patcher = patch(
+            "rocke.runtime.hip_module.Runtime.load_module", return_value=Mock()
+        )
+        cls.arch_patcher.start()
+        cls.load_module_patcher.start()
+
+    @classmethod
+    def tearDownClass(cls):
+        """Clean up HIP runtime mocks after all tests complete."""
+        cls.arch_patcher.stop()
+        cls.load_module_patcher.stop()
 
     def _toy_gemm_graph(self, with_epilogue=True):
         from rocke.helpers import FusionOp, FusionTensor, build_graph
@@ -3078,6 +3147,33 @@ class TestLoweringRegistryBuild(unittest.TestCase):
         # Every candidate must keep the fused epilogue attached.
         for cfg in cfgs:
             self.assertTrue(hasattr(cfg.spec, "_fused_epilogue"))
+
+    def test_gemm_epilogue_candidates_errors_on_invalid_arch(self):
+        from rocke.helpers import GemmEpilogueLowerer, GreedyFusionScheduler
+
+        graph = self._toy_gemm_graph(with_epilogue=True)
+        plan = GreedyFusionScheduler().schedule(graph)
+        region = plan.regions[0]
+        lowerer = GemmEpilogueLowerer()
+        # Override the original class mock to test the error case when get_device_arch returns None
+        with patch("rocke.runtime.hip_module.get_device_arch", return_value=None):
+            with self.assertRaises(ValueError) as ctx:
+                lowerer.candidates(graph, region)
+            self.assertIn("Could not detect", str(ctx.exception))
+
+    def test_gemm_epilogue_build_errors_on_invalid_arch(self):
+        from rocke.helpers import GemmEpilogueLowerer, GreedyFusionScheduler
+
+        graph = self._toy_gemm_graph(with_epilogue=True)
+        plan = GreedyFusionScheduler().schedule(graph)
+        region = plan.regions[0]
+        lowerer = GemmEpilogueLowerer()
+        cfgs = lowerer.candidates(graph, region)
+        # Override the original class mock to test the error case when get_device_arch returns None
+        with patch("rocke.runtime.hip_module.get_device_arch", return_value=None):
+            with self.assertRaises(ValueError) as ctx:
+                lowerer.build(cfgs[0])
+            self.assertIn("Could not detect", str(ctx.exception))
 
     def test_gemm_epilogue_build_emits_kernel_launcher(self):
         from rocke.helpers import GemmEpilogueLowerer, GreedyFusionScheduler
@@ -3404,6 +3500,7 @@ class TestWorkspaceMaterialize(unittest.TestCase):
         self.assertEqual(len(allocs), 2)
         self.assertNotEqual(allocs[0].slot_name, allocs[1].slot_name)
 
+    @_requires_torch
     def test_materialize_with_fake_pool_binds_tensors(self):
         # Use the real WorkspacePool with a CPU "device" via torch.
         torch = pytest.importorskip("torch")
@@ -3427,6 +3524,7 @@ class TestWorkspaceMaterialize(unittest.TestCase):
 class TestValidationHarness(unittest.TestCase):
     """The fusion validation runner must produce well-formed reports."""
 
+    @_requires_torch
     def test_benchmark_case_runs_torch_eager_baseline(self):
         torch = pytest.importorskip("torch")
         from rocke.helpers import BenchmarkCase, run_fusion_validation_matrix
@@ -4631,6 +4729,272 @@ class TestRuntimeEventLifecycle(unittest.TestCase):
             self.assertIs(evt, e)
         finally:
             self._restore_pending(prior)
+
+
+class TestRuntimeLaunchKeepAlive(unittest.TestCase):
+    """``Runtime.launch`` / ``launch_blocking`` args-buffer lifetime.
+
+    Characterizes the non-torch race the pending-args queue exists to
+    prevent: the ``extra``-path packed-args buffer must outlive an
+    async ``launch`` (the GPU command processor reads it after
+    enqueue), whereas ``launch_blocking`` needs no bucket entry because
+    its trailing ``hipStreamSynchronize`` is the drain barrier. Runs on
+    host only -- the two HIP entry points are stubbed to return success.
+    """
+
+    def _isolate_pending(self):
+        from rocke.runtime.hip_module import Runtime
+
+        prior = dict(Runtime._pending_args)
+        Runtime._pending_args.clear()
+        return prior
+
+    def _restore_pending(self, prior):
+        from rocke.runtime.hip_module import Runtime
+
+        Runtime._pending_args.clear()
+        Runtime._pending_args.update(prior)
+
+    def test_async_launch_parks_args_buffer_until_drain(self):
+        import ctypes
+        from unittest import mock
+
+        from rocke.runtime.hip_module import Runtime, _HipFunctionHandle
+
+        rt = Runtime()
+        prior = self._isolate_pending()
+        try:
+            with mock.patch(
+                "rocke.runtime.hip_module._hipModuleLaunchKernel", return_value=0
+            ):
+                rt.launch(
+                    _HipFunctionHandle(),
+                    (1, 1, 1),
+                    (64, 1, 1),
+                    b"\x01\x02\x03\x04",
+                    stream=7,
+                    record_event=False,
+                )
+            bucket = Runtime._pending_args.get(7)
+            self.assertIsNotNone(bucket)
+            self.assertEqual(len(bucket), 1)
+            refs, evt = bucket[-1]
+            # No event recorded when record_event=False; refs hold the
+            # ctypes objects the launch pointed the CP at.
+            self.assertIsNone(evt)
+            args_buf, _size_buf, extra = refs
+            # The parked `extra` array must still point at the *same*
+            # args buffer the launch enqueued -- proving the buffer the
+            # CP reads later is the one we kept alive, not a copy that
+            # was already freed.
+            self.assertEqual(extra[1], ctypes.addressof(args_buf))
+        finally:
+            self._restore_pending(prior)
+
+    def test_blocking_launch_parks_nothing_and_syncs_once(self):
+        from unittest import mock
+
+        from rocke.runtime.hip_module import Runtime, _HipFunctionHandle
+
+        rt = Runtime()
+        prior = self._isolate_pending()
+        try:
+            with mock.patch(
+                "rocke.runtime.hip_module._hipModuleLaunchKernel", return_value=0
+            ), mock.patch(
+                "rocke.runtime.hip_module._hipStreamSynchronize", return_value=0
+            ) as sync_stub:
+                rt.launch_blocking(
+                    _HipFunctionHandle(),
+                    (1, 1, 1),
+                    (64, 1, 1),
+                    b"\x01\x02\x03\x04",
+                    stream=3,
+                )
+            # The sync IS the barrier + args-buffer drain, so no bucket
+            # bookkeeping is needed for a blocking launch.
+            self.assertNotIn(3, Runtime._pending_args)
+            self.assertEqual(sync_stub.call_count, 1)
+        finally:
+            self._restore_pending(prior)
+
+
+class TestResolveStream(unittest.TestCase):
+    """``torch_interop.resolve_stream`` -- the caching-allocator hinge.
+
+    Its whole contract is torch-*optional*: pass through a nonzero
+    handle, substitute torch's current stream when torch is present, and
+    fall back to the HIP null stream (0) only when torch is genuinely
+    absent. The torch-present case is the tripwire that fails loudly if a
+    future edit ever collapses the torch branch to 0 inside a torch
+    process.
+    """
+
+    def test_passes_through_nonzero_without_touching_torch(self):
+        import sys
+        from unittest import mock
+
+        from rocke.runtime.torch_interop import resolve_stream
+
+        # Poison torch so any import attempt would raise -- proves the
+        # nonzero fast-path never reaches for torch at all.
+        with mock.patch.dict(sys.modules, {"torch": None}):
+            self.assertEqual(resolve_stream(1234), 1234)
+
+    def test_returns_zero_when_torch_absent(self):
+        import sys
+        from unittest import mock
+
+        from rocke.runtime.torch_interop import resolve_stream
+
+        # sys.modules["torch"] = None makes `import torch` raise
+        # ImportError, standing in for a torch-free environment.
+        with mock.patch.dict(sys.modules, {"torch": None}):
+            self.assertEqual(resolve_stream(0), 0)
+
+    def test_uses_current_stream_when_torch_present(self):
+        import sys
+        from unittest import mock
+
+        from rocke.runtime.torch_interop import resolve_stream
+
+        fake = mock.MagicMock()
+        fake.cuda.current_device.return_value = 0
+        fake.cuda.current_stream.return_value.cuda_stream = 99
+        with mock.patch.dict(sys.modules, {"torch": fake}):
+            self.assertEqual(resolve_stream(0), 99)
+
+
+class TestPackArgsKernargABI(unittest.TestCase):
+    """``pack_args`` / ``pack_args_kernelparams`` -- AMDGPU kernarg ABI.
+
+    Each kernarg sits at an offset aligned to its own size (8 for
+    ptr/i64, 4 for i32/f32). The regression that motivated the padded
+    packer is a trailing pointer after three i32s landing 4 bytes early
+    and being read as garbage. These are pure host-assertable byte
+    checks -- no GPU, no torch.
+    """
+
+    _MIXED_SIG = [
+        {"name": "a", "type": "ptr<f16,global>"},
+        {"name": "b", "type": "ptr<f16,global>"},
+        {"name": "c", "type": "ptr<f16,global>"},
+        {"name": "m", "type": "i32"},
+        {"name": "n", "type": "i32"},
+        {"name": "k", "type": "i32"},
+        {"name": "d", "type": "ptr<f16,global>"},
+    ]
+    _MIXED_VALS = {
+        "a": 0x1000,
+        "b": 0x2000,
+        "c": 0x3000,
+        "m": 4,
+        "n": 5,
+        "k": 6,
+        "d": 0xABCD,
+    }
+
+    def test_inserts_padding_before_misaligned_pointer(self):
+        import struct
+
+        from rocke.runtime.packing import pack_args
+
+        packed = pack_args(self._MIXED_SIG, self._MIXED_VALS)
+        # 3 ptr (24) + 3 i32 (12) = 36, pad 4 to reach 8-alignment, then
+        # the trailing ptr (8) => 48 bytes, trailing ptr at offset 40.
+        self.assertEqual(len(packed), 48)
+        self.assertEqual(struct.unpack_from("<Q", packed, 40)[0], 0xABCD)
+
+    def test_natural_alignment_for_mixed_scalars(self):
+        import struct
+
+        from rocke.runtime.packing import pack_args
+
+        sig = [
+            {"name": "p", "type": "ptr<f32,global>"},
+            {"name": "i", "type": "i32"},
+            {"name": "q", "type": "i64"},
+            {"name": "f", "type": "f32"},
+        ]
+        vals = {"p": 0x10, "i": 7, "q": 0x1122334455, "f": 1.5}
+        packed = pack_args(sig, vals)
+        # p@0(8) i@8(4) pad4 q@16(8) f@24(4) => 28 bytes.
+        self.assertEqual(len(packed), 28)
+        self.assertEqual(struct.unpack_from("<Q", packed, 0)[0], 0x10)
+        self.assertEqual(struct.unpack_from("<i", packed, 8)[0], 7)
+        self.assertEqual(struct.unpack_from("<q", packed, 16)[0], 0x1122334455)
+        self.assertAlmostEqual(struct.unpack_from("<f", packed, 24)[0], 1.5)
+
+    def test_kernelparams_agrees_with_pack_args_values(self):
+        import ctypes
+
+        from rocke.runtime.packing import pack_args_kernelparams
+
+        params = pack_args_kernelparams(self._MIXED_SIG, self._MIXED_VALS)
+        # One ctypes scalar per kernel arg, in declaration order, with
+        # the same values the byte-packed path encodes -- the two launch
+        # paths must be interchangeable oracles.
+        self.assertEqual(len(params), len(self._MIXED_SIG))
+        self.assertEqual(params[0].value, 0x1000)
+        self.assertEqual(params[3].value, 4)
+        self.assertEqual(params[6].value, 0xABCD)
+        self.assertIsInstance(params[0], ctypes.c_uint64)
+        self.assertIsInstance(params[3], ctypes.c_int32)
+
+    def test_rejects_missing_arg(self):
+        from rocke.runtime.packing import pack_args
+
+        with self.assertRaises(KeyError):
+            pack_args([{"name": "x", "type": "i32"}], {})
+
+    def test_rejects_unknown_type(self):
+        from rocke.runtime.packing import pack_args
+
+        with self.assertRaises(ValueError):
+            pack_args([{"name": "x", "type": "f16"}], {"x": 1})
+
+
+class TestLibDiscoveryOrder(unittest.TestCase):
+    """Shared-library resolution order in ``hip_module``.
+
+    These pure helpers move to the extracted coexistence/loader module;
+    pinning their behavior first makes that move provably
+    behavior-preserving. ``comgr`` already depends on this same
+    resolution contract across the module boundary.
+    """
+
+    def test_version_key_orders_rocm_newest_first(self):
+        from rocke.runtime.runtime_coexistence import _version_key
+
+        roots = ["/opt/rocm-7.2/lib", "/opt/rocm-7.10/lib", "/opt/rocm-7.9/lib"]
+        ordered = sorted(roots, key=_version_key, reverse=True)
+        # A plain string sort would put 7.10 before 7.2; the integer-tuple
+        # key must rank 7.10 as the newest.
+        self.assertTrue(ordered[0].startswith("/opt/rocm-7.10"))
+
+    def test_candidate_paths_put_env_override_first(self):
+        import os
+        from unittest import mock
+
+        from rocke.runtime.runtime_coexistence import _candidate_lib_paths
+
+        with mock.patch.dict(os.environ, {"ROCKE_HIP_LIB": "/custom/libamdhip64.so"}):
+            paths = _candidate_lib_paths("amdhip64", "ROCKE_HIP_LIB", ["7"])
+        self.assertEqual(paths[0], "/custom/libamdhip64.so")
+
+    def test_torch_bundled_lib_never_imports_torch(self):
+        import sys
+        from unittest import mock
+
+        from rocke.runtime.runtime_coexistence import _torch_bundled_lib
+
+        # With torch absent from sys.modules, the probe must return None
+        # and must NOT import torch for the loader side effect.
+        with mock.patch.dict(sys.modules):
+            sys.modules.pop("torch", None)
+            result = _torch_bundled_lib("amdhip64")
+            self.assertIsNone(result)
+            self.assertNotIn("torch", sys.modules)
 
 
 # ---------------------------------------------------------------------
