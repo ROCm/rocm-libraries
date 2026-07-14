@@ -97,7 +97,11 @@ namespace
                                  "--incy",
                                  incy,
                                  "--batch_count",
-                                 batch_count);
+                                 batch_count,
+                                 "--alpha_stride",
+                                 handle->get_stride_alpha(),
+                                 "--beta_stride",
+                                 handle->get_stride_beta());
 
             if(layer_mode & rocblas_layer_mode_log_profile)
                 logger.log_profile(handle,
@@ -115,7 +119,11 @@ namespace
                                    "incy",
                                    incy,
                                    "batch_count",
-                                   batch_count);
+                                   batch_count,
+                                   "stride_alpha",
+                                   handle->get_stride_alpha(),
+                                   "stride_beta",
+                                   handle->get_stride_beta());
         }
 
         rocblas_status arg_status = rocblas_sbmv_arg_check<API_INT, T>(handle,
@@ -123,7 +131,7 @@ namespace
                                                                        n,
                                                                        k,
                                                                        alpha,
-                                                                       0,
+                                                                       handle->get_stride_alpha(),
                                                                        A,
                                                                        0,
                                                                        lda,
@@ -133,7 +141,7 @@ namespace
                                                                        incx,
                                                                        0,
                                                                        beta,
-                                                                       0,
+                                                                       handle->get_stride_beta(),
                                                                        y,
                                                                        0,
                                                                        incy,
@@ -173,7 +181,7 @@ namespace
                                                                                n,
                                                                                k,
                                                                                alpha,
-                                                                               0,
+                                                                               handle->get_stride_alpha(),
                                                                                A,
                                                                                0,
                                                                                lda,
@@ -183,7 +191,7 @@ namespace
                                                                                incx,
                                                                                0,
                                                                                beta,
-                                                                               0,
+                                                                               handle->get_stride_beta(),
                                                                                y,
                                                                                0,
                                                                                incy,
