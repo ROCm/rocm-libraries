@@ -34,6 +34,7 @@ from kernels.common.attention_unified import (
     _enable_mfma_32x32,
     _enable_register_pv,
     _enable_sched_barrier,
+    _enable_softmax_mfma_interleave,
     _enable_transposed_half_local_pv,
     _enable_transposed_qk_32x32,
     _enable_transposed_subflags,
@@ -205,6 +206,16 @@ def _tiled_spec_from_problem(
         )
     if "use_sched_barrier" in _spec_field_names:
         _gfx950_schedule_fields["use_sched_barrier"] = _enable_sched_barrier(problem)
+    # gfx950 d128 softmax<->MFMA interleave lever (iglp_opt(1)); paired with the
+    # nw=4 widening in _select_2d_num_warps for the same cohort. Field-presence
+    # guarded (gfx942/gfx1250 spec classes lack it). Mutually exclusive with
+    # use_sched_barrier -- the cohorts do not overlap (sched_barrier is the
+    # nw==1 short-prefill cohort; interleave is the wider d128 combo).
+    if "use_softmax_mfma_interleave" in _spec_field_names and (
+        _enable_softmax_mfma_interleave(problem)
+    ):
+        _gfx950_schedule_fields["use_softmax_mfma_interleave"] = True
+        _gfx950_schedule_fields["softmax_interleave_mode"] = 1
     # d128 long-context lever: K single-buffer lets the larger T=64 tile fit
     # the 2-WG/CU LDS budget at HD=128 (see _select_2d_tile_size). Gated on the
     # same d128 small-tile cohort + opt-in env so default/production routing is
