@@ -68,6 +68,9 @@ function Resolve-RocmArtifactGroup {
 
 $RocmArtifactGroup = Resolve-RocmArtifactGroup -Target $GpuTarget
 $LibrariesWheelTarget = $RocmArtifactGroup.ToLower().Replace('-', '_')
+# Multi-arch nightlies use a single index and select the GPU via a bare
+# `device-<arch>` extra (no family/-all suffix), e.g. gfx942-all -> device-gfx942.
+$DeviceTarget = $GpuTarget.ToLower() -replace '-all$', ''
 $VerifiedGpuTarget = $GpuTarget.ToLower() -match "^(gfx115[0-9]|gfx(120[0-9]|110[0-9]|103[0-9]|90[0-9])(-all)?)$"
 if (-not $VerifiedGpuTarget) {
     Write-Warning "GPU target '$GpuTarget' is not in the verified list (gfx115x, gfx120x[-all], gfx110x[-all], gfx103x[-all], gfx90x[-all]). Wheel install may not work."
@@ -85,6 +88,7 @@ if ($SHA) {
 Write-Host "  Venv Path:  $VenvPath"
 Write-Host "  Clang Path: $ClangPath"
 Write-Host "  GPU Target: $GpuTarget"
+Write-Host "  Device (nightly): device-$DeviceTarget"
 Write-Host "  Wheel Group: $RocmArtifactGroup"
 Write-Host ""
 
@@ -130,8 +134,8 @@ if (-not $SkipInstall) {
             "$BaseUrl/rocm_sdk_libraries_$LibrariesWheelTarget-7.12.0.dev0%2B$SHA-py3-none-win_amd64.whl" `
             "$BaseUrl/rocm_sdk_devel-7.12.0.dev0%2B$SHA-py3-none-win_amd64.whl"
     } else {
-        Write-Host "  Source: ROCm nightlies (group: $RocmArtifactGroup)" -ForegroundColor Yellow
-        pip install --index-url "https://rocm.nightlies.amd.com/v2/$RocmArtifactGroup/" "rocm[libraries,devel]"
+        Write-Host "  Source: ROCm multi-arch nightlies (device: $DeviceTarget)" -ForegroundColor Yellow
+        pip install --index-url "https://rocm.nightlies.amd.com/whl-multi-arch/" "rocm[libraries,devel,device-$DeviceTarget]"
     }
 
     if ($LASTEXITCODE -ne 0) {

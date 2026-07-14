@@ -63,7 +63,7 @@ bool BnFwdInferActivationFused::IsApplicable(const FusionContext& /*context*/,
     if(!(problem.IsLayoutNCHW() || problem.IsLayoutNHWC()))
         return false;
     const auto bn_problem = problem.GetBnProblem(0, miopen::batchnorm::Direction::ForwardInference);
-    if(!IsOCLInferTypeValid(bn_problem))
+    if(!IsInferTypeValid(bn_problem))
         return false;
     return true;
 }
@@ -140,8 +140,8 @@ ConvSolution BnFwdInferActivationFused::GetSolution(const FusionContext&,
         return [=](const Handle& handle_, const AnyInvokeParams& raw_params) {
             decltype(auto) run_kernel = handle_.Run(kernels.front());
             const auto& invoke_ctx    = raw_params.CastTo<miopen::fusion::FusionInvokeParams>();
-            const auto& bot_ocl_buf   = invoke_ctx.in;
-            const auto& top_ocl_buf   = invoke_ctx.out;
+            const auto& bot_buf       = invoke_ctx.in;
+            const auto& top_buf       = invoke_ctx.out;
             assert(invoke_ctx.op_args.params[0] != nullptr);
             const auto& bn_invoke = dynamic_cast<miopen::fusion::BatchNormInferenceOpInvokeParam&>(
                 *invoke_ctx.op_args.params[0]);
@@ -173,8 +173,8 @@ ConvSolution BnFwdInferActivationFused::GetSolution(const FusionContext&,
             else
                 MIOPEN_THROW("Unsupported Precision");
             kern_args.push_back(bn_invoke.epsilon);
-            kern_args.push_back(bot_ocl_buf);
-            kern_args.push_back(top_ocl_buf);
+            kern_args.push_back(bot_buf);
+            kern_args.push_back(top_buf);
             kern_args.push_back(bn_invoke.bnBias);
             kern_args.push_back(bn_invoke.bnScale);
             kern_args.push_back(bn_invoke.estimatedMean);

@@ -37,19 +37,19 @@ void BatchnormValidator::validateSpatialDimensions(const std::vector<int64_t>& i
 
 // --- Component Validators ---
 
-void BatchnormValidator::checkTensorLayoutsAndDimsSupported()
+void BatchnormValidator::checkTensorLayoutsAndDimsSupported(const std::vector<int64_t>& tensorIds)
 {
     // Skip tensors with embedded scalar values (epsilon, momentum) - they don't have layouts or dimensions to validate
     std::vector<TensorDescriptor> tensors;
-    tensors.reserve(_tensorMap.size());
+    tensors.reserve(tensorIds.size());
 
-    for(const auto& [id, attr] : _tensorMap)
+    for(const auto& id : tensorIds)
     {
-        if(attr->value_type() != hipdnn_flatbuffers_sdk::data_objects::TensorValue::NONE)
+        auto attr = _tensorMap.at(id);
+        if(attr->value_type() == hipdnn_flatbuffers_sdk::data_objects::TensorValue::NONE)
         {
-            continue;
+            tensors.emplace_back(attr);
         }
-        tensors.emplace_back(attr);
     }
 
     validateConsistentDimensions(tensors);
@@ -174,7 +174,12 @@ void BatchnormValidator::checkTensorConfigSupported(
     const std::vector<int64_t>& intermediateTensorIds,
     bool isTraining)
 {
-    checkTensorLayoutsAndDimsSupported();
+    std::vector<int64_t> allTensors = std::vector<int64_t>(ioTensorIds.begin(), ioTensorIds.end());
+    allTensors.insert(allTensors.end(), affineTensorIds.begin(), affineTensorIds.end());
+    allTensors.insert(allTensors.end(), statTensorIds.begin(), statTensorIds.end());
+    allTensors.insert(allTensors.end(), intermediateTensorIds.begin(), intermediateTensorIds.end());
+
+    checkTensorLayoutsAndDimsSupported(allTensors);
     checkTensorDataTypesSupported(
         ioTensorIds, affineTensorIds, statTensorIds, intermediateTensorIds);
     checkTensorShapesSupported(ioTensorIds, affineTensorIds, statTensorIds, isTraining);
