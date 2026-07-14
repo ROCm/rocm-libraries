@@ -23,6 +23,8 @@ on:
         required: false
       coverage:
         description: "When true, collect llvm profraw data from the test runs for a coverage report."
+      coverage_enabled:
+        description: "When true, collect llvm profraw from the test runs and generate a coverage report."
         type: boolean
         default: false
 
@@ -111,4 +113,5 @@ jobs:
       MIOPEN_CI_WEBHOOK_URL: ${{ secrets.MIOPEN_CI_WEBHOOK_URL }}
       HIPDNN_CI_WEBHOOK_URL: ${{ secrets.HIPDNN_CI_WEBHOOK_URL }}
       coverage: ${{ inputs.coverage }}
+      coverage_enabled: ${{ inputs.coverage_enabled }}
     secrets: inherit
