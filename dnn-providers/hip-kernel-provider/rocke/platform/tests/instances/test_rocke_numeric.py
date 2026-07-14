@@ -27,6 +27,7 @@ Run:  PYTHONPATH=python <torch-python> tests/instances/test_rocke_numeric.py
 from __future__ import annotations
 
 import glob
+import importlib.util
 import os
 import pathlib
 import subprocess
@@ -39,29 +40,29 @@ _LIBDIR = pathlib.Path(__file__).resolve().parents[3] / "library"  # rocke/libra
 _SUBPROC_PYTHONPATH = os.pathsep.join([str(_PYDIR), str(_LIBDIR)])
 
 
-def _detect_gpu_arch():
-    """(has_gpu, gfx) via torch — imported FIRST so rocke binds torch's HIP.
-
-    Using torch (already required by the parity harnesses) avoids a HIP
-    double-init: if rocke's HIP is loaded before torch, torch.cuda can fail
-    to see the device. ``gcnArchName`` is like ``gfx942:sramecc+:xnack-``.
-    """
+def _device_arch():
+    """Running device's gfx arch via the rocke HIP runtime (no torch dependency)."""
     try:
-        import torch
+        from rocke.runtime.hip_module import get_device_arch
 
-        if not torch.cuda.is_available():
-            return False, None
-        name = torch.cuda.get_device_properties(0).gcnArchName
-        return True, name.split(":", 1)[0]
+        return get_device_arch(0)
     except Exception:
-        return False, None
+        return None
 
 
-GPU, ARCH = _detect_gpu_arch()
+ARCH = _device_arch()
 _CDNA = ARCH in ("gfx942", "gfx950")  # MFMA targets; gfx1151 is RDNA/WMMA
+# The parity harnesses run in subprocesses (see _run) and import torch there for their
+# numeric reference; gate on torch being importable (a dependency check, not a device
+# probe) so a torch-free env skips cleanly. Detecting arch via the HIP runtime replaces
+# the old "import torch first so rocke binds torch's HIP" ordering hack — the probe now
+# binds no device context, and the subprocess bodies init torch fresh in their own process.
+_HAS_TORCH = importlib.util.find_spec("torch") is not None
 
 
-@unittest.skipUnless(ARCH and GPU, "needs a ROCm GPU + torch (run under a torch venv)")
+@unittest.skipUnless(
+    ARCH and _HAS_TORCH, "needs a ROCm GPU + torch (run under a torch venv)"
+)
 class TestNumericVerification(unittest.TestCase):
     """Launch + numeric-compare on whatever gfx device this runs on."""
 
