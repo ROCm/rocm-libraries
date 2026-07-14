@@ -130,7 +130,7 @@ def _torch_hip_version() -> Optional[Tuple[int, int]]:
     bundle their own ``libamd_comgr.so`` whose LLVM version follows the
     wheel's ROCm release, not the system ``/opt/rocm`` one. When rocke
     is paired with a torch-bundled comgr (see
-    :func:`runtime.hip_module._torch_bundled_lib`), the flavor must
+    :func:`runtime.runtime_coexistence._torch_bundled_lib`), the flavor must
     match torch's ROCm vintage or comgr will reject the IR or
     silently auto-upgrade declares the lowerer didn't intend.
     """
