@@ -15,7 +15,6 @@ on:
       - 'dnn-providers/**'
 permissions:
   contents: read
-  actions: read
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.event.number || github.sha }}
