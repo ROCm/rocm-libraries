@@ -63,10 +63,10 @@ __device__ __host__ inline bool rocblas_isnan(T)
 }
 
 template <typename T,
-          std::enable_if_t<!std::is_integral<T>{} && !rocblas_is_complex<T>
-                               && !std::is_same_v<T, rocblas_half> && !std::is_same_v<T, rocblas_bfloat16>,
-                           int>
-          = 0>
+          std::enable_if_t<
+              !std::is_integral<T>{}
+                  && !rocblas_is_complex<T> && !std::is_same_v<T, rocblas_half> && !std::is_same_v<T, rocblas_bfloat16>,
+              int> = 0>
 __device__ __host__ inline bool rocblas_isnan(T arg)
 {
     return std::isnan(arg);
@@ -105,10 +105,10 @@ __device__ __host__ inline T rocblas_max_nan(T x, T y)
 }
 
 template <typename T,
-          std::enable_if_t<!std::is_integral<T>{} && !rocblas_is_complex<T>
-                               && !std::is_same_v<T, rocblas_half> && !std::is_same_v<T, rocblas_bfloat16>,
-                           int>
-          = 0>
+          std::enable_if_t<
+              !std::is_integral<T>{}
+                  && !rocblas_is_complex<T> && !std::is_same_v<T, rocblas_half> && !std::is_same_v<T, rocblas_bfloat16>,
+              int> = 0>
 __device__ __host__ inline T rocblas_max_nan(T x, T y)
 {
     return (rocblas_isnan(y) || y >= x) ? y : x;
