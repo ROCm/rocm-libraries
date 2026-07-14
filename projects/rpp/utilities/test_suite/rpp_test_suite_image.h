@@ -150,7 +150,8 @@ std::map<int, string> augmentationMap = {{0, "brightness"},
                                          {102, "histogram_equalize"},
                                          {103, "yuv_to_rgb"},
                                          {104, "yuv_to_rgb_cubic_v"},
-                                         {105, "yuv_to_rgb_linear_v"}};
+                                         {105, "yuv_to_rgb_linear_v"},
+                                         {106, "tone_map"}};
 
 enum Augmentation {
     BRIGHTNESS = 0,
@@ -226,7 +227,8 @@ enum Augmentation {
     HISTOGRAM_EQUALIZE = 102,
     YUV_TO_RGB = 103,
     YUV_TO_RGB_CUBIC_V = 104,
-    YUV_TO_RGB_LINEAR_V = 105
+    YUV_TO_RGB_LINEAR_V = 105,
+    TONE_MAP = 106
 };
 
 // Enum for dropout types

@@ -100,6 +100,14 @@ else()
     endif()
 
     set(LINK_LIBRARY_LIST ${LINK_LIBRARY_LIST} rpp::rpp)
+    # In-tree builds: prefer source API headers over installed ones so new
+    # declarations are visible before the next install step.
+    if(TARGET rpp)
+        get_target_property(_rpp_src_dir rpp SOURCE_DIR)
+        if(_rpp_src_dir)
+            include_directories(BEFORE ${_rpp_src_dir}/api)
+        endif()
+    endif()
     include_directories(${rpp_INCLUDE_DIR})
 
     # RPP HOST test suite works for RPP built with HIP or HOST backend
