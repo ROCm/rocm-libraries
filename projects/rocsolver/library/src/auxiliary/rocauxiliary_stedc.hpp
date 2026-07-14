@@ -1185,6 +1185,8 @@ ROCSOLVER_KERNEL void __launch_bounds__(STEDC_BDIM)
 // ---------------------------------------------------------------------------
 // DPP helpers -- AMDGCN GFX8+ only (register-to-register, no crossbar)
 // ---------------------------------------------------------------------------
+namespace stedc_detail
+{
 
 // WARNING: the compiler is not honoring __GFXxx__ macros in debug builds; the
 // following should fall back into a generic, safe, implementation if no
@@ -1353,6 +1355,8 @@ __device__ __forceinline__ void reduce_wave_sum(S& val1, S& val2, S& val3)
 #endif
 }
 
+} // namespace stedc_detail
+
 template <typename S, typename I, bool OVERRIDE_3RD_ORDER_SCHEME = false>
 __device__ I laed4_alt(I n,
                        I i,
@@ -1439,7 +1443,7 @@ __device__ I laed4_alt(I n,
             S dj = (DELTA(j) - di) - midpt;
             psi = psi + Z(j) * Z(j) / ((DELTA(j) - di) - midpt);
         }
-        reduce_wave_sum(psi);
+        stedc_detail::reduce_wave_sum(psi);
 
         c = rhoinv + psi;
         w = c + Z(ii) * Z(ii) / ((DELTA(ii) - di) - midpt) + Z(n) * Z(n) / ((dn - di) - midpt);
@@ -1509,7 +1513,7 @@ __device__ I laed4_alt(I n,
             dpsi = dpsi + temp * temp;
             erretm = erretm + psi;
         }
-        reduce_wave_sum(psi, dpsi, erretm);
+        stedc_detail::reduce_wave_sum(psi, dpsi, erretm);
         erretm = lam_abs(erretm);
         //
         //        Evaluate phi and the derivative dphi
@@ -1602,7 +1606,7 @@ __device__ I laed4_alt(I n,
             dpsi = dpsi + temp * temp;
             erretm = erretm + psi;
         }
-        reduce_wave_sum(psi, dpsi, erretm);
+        stedc_detail::reduce_wave_sum(psi, dpsi, erretm);
         erretm = lam_abs(erretm);
         //
         //        Evaluate phi and the derivative dphi
@@ -1690,7 +1694,7 @@ __device__ I laed4_alt(I n,
                 dpsi = dpsi + temp * temp;
                 erretm = erretm + psi;
             }
-            reduce_wave_sum(psi, dpsi, erretm);
+            stedc_detail::reduce_wave_sum(psi, dpsi, erretm);
             erretm = lam_abs(erretm);
             //
             //           Evaluate phi and the derivative dphi
@@ -1726,7 +1730,7 @@ __device__ I laed4_alt(I n,
             S dj = (DELTA(j) - di) - midpt;
             psi = psi + Z(j) * Z(j) / dj;
         }
-        reduce_wave_sum(psi);
+        stedc_detail::reduce_wave_sum(psi);
 
         phi = S(0.);
         for(int j = n - hipThreadIdx_x; j >= i + 2; j -= hipBlockDim_x)
@@ -1734,7 +1738,7 @@ __device__ I laed4_alt(I n,
             S dj = (DELTA(j) - di) - midpt;
             phi = phi + Z(j) * Z(j) / dj;
         }
-        reduce_wave_sum(phi);
+        stedc_detail::reduce_wave_sum(phi);
 
         c = rhoinv + psi + phi;
         w = c + Z(i) * Z(i) / (-midpt) + Z(ip1) * Z(ip1) / ((dip1 - di) - midpt);
@@ -1820,7 +1824,7 @@ __device__ I laed4_alt(I n,
             dpsi = dpsi + temp * temp;
             erretm = erretm + psi;
         }
-        reduce_wave_sum(psi, dpsi, erretm);
+        stedc_detail::reduce_wave_sum(psi, dpsi, erretm);
         erretm = lam_abs(erretm);
         //
         //        Evaluate phi and the derivative dphi
@@ -1835,7 +1839,7 @@ __device__ I laed4_alt(I n,
             dphi = dphi + temp * temp;
             erretm2 = erretm2 + phi;
         }
-        reduce_wave_sum(phi, dphi, erretm2);
+        stedc_detail::reduce_wave_sum(phi, dphi, erretm2);
         erretm += erretm2;
         w = rhoinv + phi + psi;
         //
@@ -2005,7 +2009,7 @@ __device__ I laed4_alt(I n,
             dpsi = dpsi + temp * temp;
             erretm = erretm + psi;
         }
-        reduce_wave_sum(psi, dpsi, erretm);
+        stedc_detail::reduce_wave_sum(psi, dpsi, erretm);
         erretm = lam_abs(erretm);
         //
         //        Evaluate phi and the derivative dphi
@@ -2020,7 +2024,7 @@ __device__ I laed4_alt(I n,
             dphi = dphi + temp * temp;
             erretm2 = erretm2 + phi;
         }
-        reduce_wave_sum(phi, dphi, erretm2);
+        stedc_detail::reduce_wave_sum(phi, dphi, erretm2);
         erretm += erretm2;
         temp = Z(ii) / DELTA(ii);
         dw = dpsi + dphi + temp * temp;
@@ -2218,7 +2222,7 @@ __device__ I laed4_alt(I n,
                 dpsi = dpsi + temp * temp;
                 erretm = erretm + psi;
             }
-            reduce_wave_sum(psi, dpsi, erretm);
+            stedc_detail::reduce_wave_sum(psi, dpsi, erretm);
             erretm = lam_abs(erretm);
             //
             //           Evaluate phi and the derivative dphi
@@ -2233,7 +2237,7 @@ __device__ I laed4_alt(I n,
                 dphi = dphi + temp * temp;
                 erretm2 = erretm2 + phi;
             }
-            reduce_wave_sum(phi, dphi, erretm2);
+            stedc_detail::reduce_wave_sum(phi, dphi, erretm2);
             erretm += erretm2;
             temp = Z(ii) / DELTA(ii);
             dw = dpsi + dphi + temp * temp;
