@@ -54,6 +54,7 @@ a thin shim; this module is the superset.
 from __future__ import annotations
 
 import argparse
+import csv
 import hashlib
 import json
 import sys
@@ -66,6 +67,18 @@ import pandas as pd
 
 from ..core.lower_llvm import lower_kernel_to_llvm
 from ..runtime.comgr import build_hsaco_from_llvm_ir
+
+
+def _load_shapes_csv(paths: List[Path]) -> List[tuple]:
+    """Load shape rows from one or more CSV files (header auto-detected)."""
+    rows: List[tuple] = []
+    for p in paths:
+        with open(p) as f:
+            reader = csv.reader(f)
+            header = next(reader)  # skip header
+            for line in reader:
+                rows.append(tuple(line))
+    return rows
 
 
 # ---------------------------------------------------------------------
@@ -284,13 +297,22 @@ _MOE_VECS = (2, 4, 8)
 _MOE_PHASE = "gather"
 
 
-def _moe_enumerate(arch: str, max_shapes: Optional[int]) -> List[object]:
+def _moe_enumerate(
+    arch: str, max_shapes: Optional[int],
+    shape_csvs: Optional[List[Path]] = None,
+) -> List[object]:
     import itertools
 
     from ..instances import FusedMoeSpec
     from ..instances.common.fused_moe import is_valid_spec
 
-    shapes = _MOE_SHAPES
+    if shape_csvs:
+        shapes = [
+            (int(t), int(e), int(k), int(h), int(i), d)
+            for t, e, k, h, i, d in _load_shapes_csv(shape_csvs)
+        ]
+    else:
+        shapes = _MOE_SHAPES
     if max_shapes is not None and max_shapes > 0:
         shapes = shapes[:max_shapes]
 
@@ -359,31 +381,36 @@ _NORM_DTYPES = ("f16", "bf16")
 _NORM_ROWS = 4096
 
 
-def _norm_enumerate(arch: str, max_shapes: Optional[int]) -> List[object]:
+def _norm_enumerate(
+    arch: str, max_shapes: Optional[int],
+    shape_csvs: Optional[List[Path]] = None,
+) -> List[object]:
     import itertools
 
     from ..instances import RMSNorm2DSpec
     from ..instances.common.rmsnorm2d import is_valid_spec
 
-    n_values = _NORM_N_PER_BLOCK
+    if shape_csvs:
+        shape_pairs = [(int(n), d) for n, d in _load_shapes_csv(shape_csvs)]
+    else:
+        shape_pairs = list(itertools.product(_NORM_N_PER_BLOCK, _NORM_DTYPES))
     if max_shapes is not None and max_shapes > 0:
-        n_values = n_values[:max_shapes]
+        shape_pairs = shape_pairs[:max_shapes]
 
     specs: List[object] = []
-    for npb, bs, vec, dtype in itertools.product(
-        n_values, _NORM_BLOCK_SIZES, _NORM_VECS, _NORM_DTYPES
-    ):
-        if npb % bs != 0 or npb % vec != 0:
-            continue
-        spec = RMSNorm2DSpec(
-            n_per_block=npb,
-            block_size=bs,
-            vec=vec,
-            dtype=dtype,
-        )
-        ok, _ = is_valid_spec(spec, arch)
-        if ok:
-            specs.append(spec)
+    for npb, dtype in shape_pairs:
+        for bs, vec in itertools.product(_NORM_BLOCK_SIZES, _NORM_VECS):
+            if npb % bs != 0 or npb % vec != 0:
+                continue
+            spec = RMSNorm2DSpec(
+                n_per_block=npb,
+                block_size=bs,
+                vec=vec,
+                dtype=dtype,
+            )
+            ok, _ = is_valid_spec(spec, arch)
+            if ok:
+                specs.append(spec)
     return specs
 
 
@@ -518,6 +545,7 @@ def generate(
     cache_dir: Path,
     arch: str = "gfx950",
     max_shapes: Optional[int] = None,
+    shape_csvs: Optional[List[Path]] = None,
     isa: Optional[str] = None,
     adapter: Optional["OpAdapter"] = None,
     **gemm_kwargs: object,
@@ -533,6 +561,9 @@ def generate(
     ``adapter`` may be supplied by library callers (e.g. the sdpa entry point in
     ``builders.common.gen_sdpa_sweep_data``) to inject a pre-built
     :class:`OpAdapter` without going through the platform ``_adapter()`` registry.
+
+    ``shape_csvs``, when provided, overrides the built-in shape corpus with
+    shapes read from pre-sharded CSV files (for parallel sweep execution).
     """
     if op == "gemm":
         from . import gen_gemm_sweep_data
@@ -542,6 +573,7 @@ def generate(
             cache_dir=cache_dir,
             arch=arch,
             max_shapes=max_shapes,
+            shape_csvs=shape_csvs,
             **gemm_kwargs,  # type: ignore[arg-type]
         )
 
@@ -563,7 +595,16 @@ def generate(
     cache_dir.mkdir(parents=True, exist_ok=True)
     isa = isa or f"amdgcn-amd-amdhsa--{arch}"
 
-    specs = adapter.enumerate_specs(arch, max_shapes)
+    if shape_csvs:
+        enumerate_fn = {
+            "moe": _moe_enumerate,
+            "norm": _norm_enumerate,
+        }.get(op)
+        if enumerate_fn is None:
+            raise ValueError(f"--shapes not supported for op={op!r}")
+        specs = enumerate_fn(arch, max_shapes, shape_csvs=shape_csvs)
+    else:
+        specs = adapter.enumerate_specs(arch, max_shapes)
     if not specs:
         raise RuntimeError(f"no valid {op} specs for arch={arch}")
 
@@ -643,17 +684,64 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
         default=None,
         help="Limit number of shapes / problems (smoke tests).",
     )
-    parser.add_argument(
+    shape_source = parser.add_mutually_exclusive_group()
+    shape_source.add_argument(
+        "--shapes",
+        nargs="+",
+        type=Path,
+        metavar="CSV",
+        help="Pre-sharded shape CSV(s). Columns must match the op's problem "
+             "dimensions. Mutually exclusive with --shape-set.",
+    )
+    shape_source.add_argument(
         "--shape-set",
-        default="wide",
+        default=None,
         choices=["wide", "edge", "all"],
-        help="Shape corpus to sweep (gemm and conv ops).",
+        help="Built-in shape corpus (gemm/conv ops). Default: wide.",
+    )
+    parser.add_argument(
+        "--dump-shapes",
+        type=Path,
+        default=None,
+        help="Write shape corpus as CSV and exit (no sweep). "
+             "Used by shard prep to generate shapes for any op.",
     )
     args = parser.parse_args(argv)
 
+    shape_set = args.shape_set or "wide"
+
+    # --dump-shapes: write shape corpus as CSV and exit (used by shard prep).
+    if args.dump_shapes:
+        import itertools
+        out_csv = args.dump_shapes
+        out_csv.parent.mkdir(parents=True, exist_ok=True)
+        if args.op == "moe":
+            header = ["tokens", "experts", "topk", "hidden", "intermediate", "dtype"]
+            shapes = _MOE_SHAPES
+        elif args.op == "norm":
+            header = ["n_per_block", "dtype"]
+            shapes = list(itertools.product(_NORM_N_PER_BLOCK, _NORM_DTYPES))
+        elif args.op == "gemm":
+            from . import gen_gemm_sweep_data
+            header = ["M", "N", "K"]
+            shapes = gen_gemm_sweep_data.generate_shape_corpus(shape_set)
+        else:
+            raise ValueError(f"--dump-shapes not supported for op={args.op!r}")
+        if args.max_shapes and args.max_shapes > 0:
+            shapes = shapes[:args.max_shapes]
+        with open(out_csv, "w", newline="") as f:
+            w = csv.writer(f)
+            w.writerow(header)
+            w.writerows(shapes)
+        print(
+            f"[gen] wrote {len(shapes)} {args.op} shapes -> {out_csv}",
+            file=sys.stderr,
+        )
+        return 0
+
     gemm_kwargs: Dict[str, object] = {}
     if args.op in ("gemm", "conv"):
-        gemm_kwargs["shape_set"] = args.shape_set
+        gemm_kwargs["shape_set"] = shape_set
 
     generate(
         op=args.op,
@@ -661,6 +749,7 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
         cache_dir=args.cache_dir,
         arch=args.arch,
         max_shapes=args.max_shapes,
+        shape_csvs=args.shapes,
         **gemm_kwargs,
     )
     return 0

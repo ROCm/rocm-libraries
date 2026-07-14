@@ -925,6 +925,7 @@ class MoeFeatureEngine(FeatureEngine):
         lds_capacity: int = 65536,
         max_clock_mhz: int = 2400,
         num_xcd: int = 8,
+        **_ignored,
     ):
         self._hw = {
             "num_cus": num_cus,
@@ -1037,6 +1038,7 @@ class NormFeatureEngine(FeatureEngine):
         lds_capacity: int = 65536,
         max_clock_mhz: int = 2400,
         num_xcd: int = 8,
+        **_ignored,
     ):
         self._hw = {
             "num_cus": num_cus,

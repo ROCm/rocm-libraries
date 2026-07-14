@@ -51,6 +51,7 @@ name, so the parquet is always self-consistent with the kernels that were built.
 from __future__ import annotations
 
 import argparse
+import csv
 import sys
 from pathlib import Path
 from typing import Dict, List, Optional, Sequence, Tuple
@@ -332,6 +333,18 @@ def _bandwidth_gb_s(m: int, n: int, k: int, latency_ms: float, dtype: str) -> fl
 # ---------------------------------------------------------------------
 
 
+def _load_shapes_csv(paths: List[Path]) -> List[Tuple[int, int, int]]:
+    """Read M,N,K triples from one or more CSV files (pre-sharded shapes)."""
+    rows: List[Tuple[int, int, int]] = []
+    for p in paths:
+        with open(p) as f:
+            reader = csv.reader(f)
+            next(reader)  # skip header
+            for line in reader:
+                rows.append((int(line[0]), int(line[1]), int(line[2])))
+    return rows
+
+
 def generate(
     *,
     out_path: Path,
@@ -339,6 +352,7 @@ def generate(
     arch: str = "gfx950",
     shape_set: str = "wide",
     max_shapes: Optional[int] = None,
+    shape_csvs: Optional[List[Path]] = None,
     pipelines: Sequence[str] = ("compv3", "compv4"),
     epilogues: Sequence[str] = ("default", "cshuffle"),
     parallel: Optional[int] = None,
@@ -354,7 +368,10 @@ def generate(
     ``is_valid=False`` and zero targets so the model can learn the failure
     surface (same convention as the CK-Tile path).
     """
-    shapes = generate_shape_corpus(shape_set)
+    if shape_csvs:
+        shapes = _load_shapes_csv(shape_csvs)
+    else:
+        shapes = generate_shape_corpus(shape_set)
     if max_shapes is not None and max_shapes > 0:
         shapes = shapes[:max_shapes]
 
@@ -461,7 +478,7 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
         )
     )
     parser.add_argument(
-        "--out", type=Path, required=True, help="Output training parquet path."
+        "--out", type=Path, default=None, help="Output training parquet path."
     )
     parser.add_argument(
         "--cache-dir",
@@ -470,11 +487,25 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
         help="Directory for cached HSACO binaries + sweep manifest/results.",
     )
     parser.add_argument("--arch", default="gfx950", help="GPU architecture.")
-    parser.add_argument(
+    shape_source = parser.add_mutually_exclusive_group()
+    shape_source.add_argument(
+        "--shapes",
+        nargs="+",
+        type=Path,
+        metavar="CSV",
+        help="Pre-sharded shape CSV(s) with columns M,N,K.",
+    )
+    shape_source.add_argument(
         "--shape-set",
-        default="wide",
+        default=None,
         choices=["wide", "edge", "all"],
-        help="Shape corpus to sweep.",
+        help="Shape corpus to sweep (default: wide).",
+    )
+    parser.add_argument(
+        "--dump-shapes",
+        type=Path,
+        default=None,
+        help="Write shape corpus as CSV (M,N,K) and exit (no sweep).",
     )
     parser.add_argument(
         "--max-shapes",
@@ -512,6 +543,27 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
     )
     args = parser.parse_args(argv)
 
+    shape_set = args.shape_set or "wide"
+
+    # --dump-shapes: write shape corpus as CSV and exit (used by shard prep).
+    if args.dump_shapes:
+        shapes = generate_shape_corpus(shape_set)
+        if args.max_shapes and args.max_shapes > 0:
+            shapes = shapes[: args.max_shapes]
+        args.dump_shapes.parent.mkdir(parents=True, exist_ok=True)
+        with open(args.dump_shapes, "w", newline="") as f:
+            w = csv.writer(f)
+            w.writerow(["M", "N", "K"])
+            w.writerows(shapes)
+        print(
+            f"[gen] wrote {len(shapes)} shapes -> {args.dump_shapes}",
+            file=sys.stderr,
+        )
+        return 0
+
+    if args.out is None:
+        parser.error("--out is required when not using --dump-shapes")
+
     pipelines = tuple(p.strip() for p in args.pipelines.split(",") if p.strip())
     epilogues = tuple(e.strip() for e in args.epilogues.split(",") if e.strip())
 
@@ -519,8 +571,9 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
         out_path=args.out,
         cache_dir=args.cache_dir,
         arch=args.arch,
-        shape_set=args.shape_set,
+        shape_set=shape_set,
         max_shapes=args.max_shapes,
+        shape_csvs=args.shapes,
         pipelines=pipelines,
         epilogues=epilogues,
         parallel=args.parallel,

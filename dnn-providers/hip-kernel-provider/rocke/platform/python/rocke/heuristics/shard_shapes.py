@@ -142,6 +142,28 @@ def gemm_bucket_key(row: tuple) -> tuple:
     )
 
 
+# ── MoE bucketing ──────────────────────────────────────────────────────────
+
+
+def moe_bucket_key(row: tuple) -> tuple:
+    tokens, experts, topk, hidden, intermediate, dtype = row
+    return (
+        "decode" if int(tokens) == 1 else "prefill",
+        "s" if int(hidden) < 8192 else "l",
+    )
+
+
+# ── Norm bucketing ─────────────────────────────────────────────────────────
+
+
+def norm_bucket_key(row: tuple) -> tuple:
+    n_per_block, dtype = row
+    return (
+        "s" if int(n_per_block) < 1024 else "l",
+        str(dtype),
+    )
+
+
 # ── Config registry ─────────────────────────────────────────────────────────
 
 
@@ -164,6 +186,8 @@ CONV_HEADER = [
 CONV_SHAPE_COLS = CONV_HEADER[:-1]
 
 GEMM_HEADER = ["M", "N", "K"]
+MOE_HEADER = ["tokens", "experts", "topk", "hidden", "intermediate", "dtype"]
+NORM_HEADER = ["n_per_block", "dtype"]
 
 
 OP_CONFIGS: Dict[str, OpShapeConfig] = {
@@ -175,6 +199,14 @@ OP_CONFIGS: Dict[str, OpShapeConfig] = {
     "gemm": OpShapeConfig(
         header=GEMM_HEADER,
         bucket_fn=gemm_bucket_key,
+    ),
+    "moe": OpShapeConfig(
+        header=MOE_HEADER,
+        bucket_fn=moe_bucket_key,
+    ),
+    "norm": OpShapeConfig(
+        header=NORM_HEADER,
+        bucket_fn=norm_bucket_key,
     ),
 }
 
@@ -412,9 +444,29 @@ def print_gemm_stats(rows: List[tuple], label: str) -> None:
     print(f"  Output:  {dict(sorted(scale_counts.items()))}", file=sys.stderr)
 
 
+def print_moe_stats(rows: List[tuple], label: str) -> None:
+    buckets: Dict[tuple, int] = defaultdict(int)
+    for r in rows:
+        buckets[moe_bucket_key(r)] += 1
+    print(f"\n{label}: {len(rows)} shapes across {len(buckets)} buckets", file=sys.stderr)
+    for k in sorted(buckets):
+        print(f"  {k}: {buckets[k]}", file=sys.stderr)
+
+
+def print_norm_stats(rows: List[tuple], label: str) -> None:
+    buckets: Dict[tuple, int] = defaultdict(int)
+    for r in rows:
+        buckets[norm_bucket_key(r)] += 1
+    print(f"\n{label}: {len(rows)} shapes across {len(buckets)} buckets", file=sys.stderr)
+    for k in sorted(buckets):
+        print(f"  {k}: {buckets[k]}", file=sys.stderr)
+
+
 _STATS_FN = {
     "conv": print_conv_stats,
     "gemm": print_gemm_stats,
+    "moe": print_moe_stats,
+    "norm": print_norm_stats,
 }
 
 

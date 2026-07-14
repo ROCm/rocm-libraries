@@ -69,8 +69,9 @@ TARGET_COLUMNS = {
 }
 
 # Map a CLI --operation name to the op_type tag the generator writes into the
-# parquet. Most are 1:1; the moe generator tags rows as "fused_moe".
-OP_TYPE_ALIASES = {"moe": "fused_moe"}
+# parquet. Most are 1:1; the moe generator tags rows as "fused_moe", and the
+# norm generator tags rows as "rmsnorm2d".
+OP_TYPE_ALIASES = {"moe": "fused_moe", "norm": "rmsnorm2d"}
 
 # Targets where log1p transform is applied by default.
 # TFLOPS and bandwidth span orders of magnitude; latency is already small-scale.
