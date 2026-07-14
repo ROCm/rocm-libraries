@@ -573,6 +573,63 @@ class TestDeviceArchAndFusionTargeting(unittest.TestCase):
                     )
 
 
+class TestDeviceQueryParsing(unittest.TestCase):
+    """Field extraction for the HIP device queries, pinned without a GPU.
+
+    Uses a synthetic hipDeviceProp_t buffer so the parsing is deterministic: the
+    marketing ``name`` is the char[256] at offset 0; ``gcnArchName`` carries the gfx
+    token further in and may carry ``:sramecc+:xnack-`` feature suffixes to strip.
+    """
+
+    @staticmethod
+    def _props(name: bytes, gcn_arch: bytes | None) -> bytes:
+        buf = bytearray(4096)
+        buf[0 : len(name)] = name  # name[256] at offset 0, NUL-terminated
+        if gcn_arch is not None:
+            buf[256 : 256 + len(gcn_arch)] = gcn_arch
+        return bytes(buf)
+
+    def test_arch_strips_feature_flags(self):
+        import unittest.mock as mock
+        from rocke.runtime import hip_module
+
+        raw = self._props(b"Marketing Name", b"gfx000:sramecc+:xnack-")
+        with mock.patch.object(hip_module, "_device_props", return_value=raw):
+            self.assertEqual(hip_module.get_device_arch(0), "gfx000")
+
+    def test_arch_keeps_letter_suffix(self):
+        import unittest.mock as mock
+        from rocke.runtime import hip_module
+
+        raw = self._props(b"Marketing Name", b"gfx00a:sramecc+:xnack-")
+        with mock.patch.object(hip_module, "_device_props", return_value=raw):
+            self.assertEqual(hip_module.get_device_arch(0), "gfx00a")
+
+    def test_name_read_from_offset_zero_to_nul(self):
+        import unittest.mock as mock
+        from rocke.runtime import hip_module
+
+        raw = self._props(b"Marketing Name", b"gfx000")
+        with mock.patch.object(hip_module, "_device_props", return_value=raw):
+            self.assertEqual(hip_module.get_device_name(0), "Marketing Name")
+
+    def test_no_gfx_token_yields_none_arch(self):
+        import unittest.mock as mock
+        from rocke.runtime import hip_module
+
+        raw = self._props(b"Marketing Name", None)
+        with mock.patch.object(hip_module, "_device_props", return_value=raw):
+            self.assertIsNone(hip_module.get_device_arch(0))
+
+    def test_missing_props_yields_none(self):
+        import unittest.mock as mock
+        from rocke.runtime import hip_module
+
+        with mock.patch.object(hip_module, "_device_props", return_value=None):
+            self.assertIsNone(hip_module.get_device_arch(0))
+            self.assertIsNone(hip_module.get_device_name(0))
+
+
 class TestArchitecturalIsolation(unittest.TestCase):
     """Review-rule gates from the design doc."""
 

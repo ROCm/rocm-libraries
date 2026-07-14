@@ -188,7 +188,9 @@ def _device_props(device: int = 0) -> Optional[bytes]:
 
     The struct layout changes across ROCm releases (the symbol was versioned to
     ``...R0600`` in ROCm 6.x), so we fill a generous zeroed buffer and let callers read
-    the field they need rather than mirror the struct.
+    the field they need rather than mirror the struct. The first properties symbol that
+    returns success wins and its buffer is cached; we do not retry the legacy symbol once
+    one has succeeded.
     """
     device = int(device)
     if device in _device_props_cache:
@@ -232,7 +234,7 @@ def get_device_arch(device: int = 0) -> Optional[str]:
 
 
 def get_device_name(device: int = 0) -> Optional[str]:
-    """Marketing name of a HIP device (e.g. ``"AMD Radeon(TM) 8060S Graphics"``).
+    """Marketing name of a HIP device — the string ``rocminfo`` labels "Marketing Name".
 
     Reads ``hipDeviceProp_t.name`` — the ``char name[256]`` at struct offset 0, which
     is stable across ROCm releases (unlike the churny ``gcnArchName`` offset). This is

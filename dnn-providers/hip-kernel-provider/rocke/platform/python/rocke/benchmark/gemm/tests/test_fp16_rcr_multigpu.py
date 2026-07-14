@@ -18,10 +18,14 @@ from rocke.benchmark.gemm.fp16_rcr_sweep import (
 from rocke.runtime.hip_module import get_device_arch, get_device_count
 
 
-# The sweep builds+launches gfx950 code objects across GPUs (get_device_count respects
-# HIP_VISIBLE_DEVICES), so require both the exact arch and >=2 visible devices.
+# The sweep builds+launches gfx950 code objects across GPUs, so require both the exact
+# arch and >=2 visible devices. get_device_count respects HIP_VISIBLE_DEVICES.
+_ARCH = get_device_arch(0)
+_DEVICE_COUNT = get_device_count()
+
+
 @unittest.skipUnless(
-    get_device_count() >= 2 and get_device_arch(0) == "gfx950",
+    _DEVICE_COUNT >= 2 and _ARCH == "gfx950",
     "requires at least two gfx950 GPUs",
 )
 class TestGemmFp16RcrMultiGpuSweep(unittest.TestCase):
@@ -44,7 +48,7 @@ class TestGemmFp16RcrMultiGpuSweep(unittest.TestCase):
         runs = run_sweep_variants(
             plan,
             builds,
-            parallel=min(get_device_count(), 4),
+            parallel=min(_DEVICE_COUNT, 4),
             timeout_s=120,
         )
         self.assertEqual(len(runs), len(builds))
