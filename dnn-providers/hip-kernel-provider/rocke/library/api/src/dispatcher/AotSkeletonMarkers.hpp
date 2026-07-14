@@ -6,10 +6,10 @@
 namespace rocke_client::dispatcher
 {
 
-// Stable, greppable substrings emitted by AotCatalog::loadDefault() to mark
-// the outcome of the AOT skeleton load probe. Integration tests match these
-// exact substrings via SharedLogRecorder::hasLogContaining so they can verify
-// the load path was actually exercised, not silently skipped.
+// Stable, greppable substrings emitted by AotCatalog::loadForDevice() to mark
+// the outcome of the AOT skeleton load probe. Integration tests capture stderr
+// (testing::internal::CaptureStderr) and match these exact substrings so they
+// can verify the load path was actually exercised, not silently skipped.
 //
 // TODO(kpack-fastfollow): temporary skeleton observability — remove these
 // markers and the log-capture integration test once real selection/execution +
@@ -20,8 +20,9 @@ namespace rocke_client::dispatcher
 /// hipModuleLoadData -> hipModuleGetFunction all succeed.
 static constexpr const char* AOT_SKELETON_LOAD_OK = "rocke-client AOT skeleton: LOAD OK";
 
-/// Emitted at ERROR level immediately before throwing HipdnnPluginException
-/// on any failure in the E2E load sequence.
+/// Emitted at ERROR level on any failure in the E2E load sequence. The load
+/// runs in the noexcept selection path, so failure is a loud ERROR log, not an
+/// exception: loadForDevice() returns an empty catalog and the engine declines.
 static constexpr const char* AOT_SKELETON_LOAD_FAILED = "rocke-client AOT skeleton: LOAD FAILED";
 
 } // namespace rocke_client::dispatcher

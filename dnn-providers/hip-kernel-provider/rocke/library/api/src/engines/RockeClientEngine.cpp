@@ -17,10 +17,7 @@
 namespace rocke_client
 {
 
-RockeClientEngine::RockeClientEngine()
-    : _dispatcher(dispatcher::AotCatalog::loadDefault())
-{
-}
+RockeClientEngine::RockeClientEngine() = default;
 
 RockeClientEngine::RockeClientEngine(dispatcher::AotCatalog catalog)
     : _dispatcher(std::move(catalog))
