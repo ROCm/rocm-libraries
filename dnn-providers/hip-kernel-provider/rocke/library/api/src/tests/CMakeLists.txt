@@ -20,6 +20,7 @@ add_executable(
     TestRockeClientEngine.cpp
     TestPluginPublic.cpp
     dispatcher/TestAotCatalog.cpp
+    dispatcher/TestKpackModuleLoad.cpp
     dispatcher/TestRockeClientDispatcher.cpp
     dispatcher/TestSdpaGraphAdapter.cpp
     dispatcher/TestSelectionConstraints.cpp
@@ -31,6 +32,20 @@ target_link_libraries(
     rocke_client_tests PUBLIC GTest::gtest hip::host rocke_client_private hipdnn_test_sdk
                               hipdnn_plugin_sdk Threads::Threads
 )
+
+# Absolute path to the committed synthetic .kpack fixture (host-tier ELF magic test).
+target_compile_definitions(rocke_client_tests PRIVATE
+    "ROCKE_KPACK_TEST_FIXTURE=\"${CMAKE_CURRENT_SOURCE_DIR}/data/rocke_client_gfx942.kpack\""
+)
+
+# Optional: bake in a build-tree bundle dir so the GPU tier can find a real
+# AOT-produced .kpack without setting ROCKE_CLIENT_BUNDLE_DIR at runtime.
+# Pass -DROCKE_CLIENT_TEST_BUNDLE_DIR=/path/to/arch_content/rocke to cmake.
+if(ROCKE_CLIENT_TEST_BUNDLE_DIR)
+    target_compile_definitions(rocke_client_tests PRIVATE
+        "ROCKE_CLIENT_BUNDLE_DIR_DEFAULT=\"${ROCKE_CLIENT_TEST_BUNDLE_DIR}\""
+    )
+endif()
 
 target_include_directories(rocke_client_tests PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/..)
 

@@ -82,6 +82,9 @@ endif()
 list(APPEND CMAKE_PREFIX_PATH ${ROCM_PATH}/llvm ${ROCM_PATH} ${ROCM_PATH}/hip)
 
 find_package(hip REQUIRED)
+if(NOT TARGET rocm::rocm_kpack)
+    find_package(rocm-kpack CONFIG REQUIRED)
+endif()
 
 if(NOT TARGET hipdnn_data_sdk)
     find_package(hipdnn_data_sdk CONFIG REQUIRED)

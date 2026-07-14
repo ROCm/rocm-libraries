@@ -8,6 +8,7 @@ add_library(
     PluginPublic.cpp
     engines/RockeClientEngine.cpp
     dispatcher/AotCatalog.cpp
+    dispatcher/KpackModuleLoader.cpp
     dispatcher/RockeClientDispatcher.cpp
     dispatcher/SdpaGraphAdapter.cpp
     dispatcher/SdpaProblem.cpp
@@ -16,7 +17,7 @@ add_library(
 
 target_include_directories(rocke_client_impl PUBLIC ${CMAKE_CURRENT_SOURCE_DIR})
 dnn_provider_generate_version_header(rocke_client rocke_client_impl ${CMAKE_CURRENT_LIST_DIR}/..)
-target_link_libraries(rocke_client_impl PUBLIC hip::host hipdnn_data_sdk hipdnn_flatbuffers_sdk hipdnn_plugin_sdk)
+target_link_libraries(rocke_client_impl PUBLIC hip::host hipdnn_data_sdk hipdnn_flatbuffers_sdk hipdnn_plugin_sdk rocm::rocm_kpack)
 
 target_compile_options(rocke_client_impl PRIVATE ${HIPDNN_WARNING_COMPILE_OPTIONS})
 set_target_properties(rocke_client_impl PROPERTIES
@@ -30,10 +31,10 @@ target_include_directories(rocke_client_private PUBLIC
     ${CMAKE_CURRENT_SOURCE_DIR}
     ${CMAKE_CURRENT_BINARY_DIR}/include
 )
-target_link_libraries(rocke_client_private PUBLIC hipdnn_data_sdk hipdnn_flatbuffers_sdk hipdnn_plugin_sdk rocke_client_impl)
+target_link_libraries(rocke_client_private PUBLIC hipdnn_data_sdk hipdnn_flatbuffers_sdk hipdnn_plugin_sdk rocke_client_impl rocm::rocm_kpack)
 
 add_library(rocke_client SHARED $<TARGET_OBJECTS:rocke_client_impl>)
-target_link_libraries(rocke_client PRIVATE hip::host hipdnn_data_sdk hipdnn_flatbuffers_sdk hipdnn_plugin_sdk)
+target_link_libraries(rocke_client PRIVATE hip::host hipdnn_data_sdk hipdnn_flatbuffers_sdk hipdnn_plugin_sdk rocm::rocm_kpack)
 
 if(NOT WIN32)
     target_link_libraries(rocke_client PRIVATE "-Xlinker --exclude-libs=ALL")
