@@ -1588,7 +1588,10 @@ class Solution(collections.abc.Mapping):
       state["GlobalSplitUAlgorithm"] = "MultipleBuffer" # Set default Algorithm
       state["AdaptiveGemmGSUA"] = 0 # Disable AdaptiveGemmGSUA for Stream-K
       if not state["EnableMatrixInstruction"]:
-        reject(state, printRejectionReason, "Stream-K requires MatrixInstruction")
+        # Source/MAC (non-MI) Stream-K: partial-write + fixup are datapath-agnostic,
+        # so allow it for Assembly source kernels (other SK constraints still apply).
+        if state["KernelLanguage"] != "Assembly":
+          reject(state, printRejectionReason, "Stream-K (non-MatrixInstruction) requires Assembly source kernels")
       # if state["PersistentKernel"]:
       #   reject(state, printRejectionReason, "Cannot enable both Stream-K and PersistentKernel")
       if not state["ProblemType"]["StridedBatched"]:
