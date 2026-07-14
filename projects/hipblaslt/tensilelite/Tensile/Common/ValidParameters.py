@@ -1079,8 +1079,16 @@ validParameters = { # we need to make sure this matches develop
     # are not split regardless of this flag. When True, two extra SGPRs are allocated to
     # hold the per-iteration LDS and global address increments for the split loads.
     "TDMSplit": [False, True],
-    "TDMStoreEdge": [False, True],
-    "TDMSubtileHybrid": [False, True],
+    # TDMStoreInst: single control for the store-to-final-D epilogue on gfx1250.
+    #   When True, every alpha/beta store-to-D branch (alpha=0 / beta=0 / beta!=0,
+    #   edge and non-edge) collapses to ONE whole-MacroTile TDM store:
+    #   VGPR -> M-contiguous LDS scratch -> tensor_store_from_lds, with the descriptor
+    #   tensor_dim clamped to (Size - tileStart) so partial edge tiles are handled by
+    #   hardware OOB. No per-element buffer_store fallback is emitted on the store-to-D
+    #   path (buffer_store // store D == 0). Only affects the store to the final D
+    #   output; the GSU>1 / MultipleBuffer(SingleKernel) workspace-accumulation store
+    #   path is left unchanged.
+    "TDMStoreInst": [False, True],
     # In-device layout of the MX scale tensors (MXSA/MXSB).
     # User-facing values:
     #   "NoSwizzle":       no swizzling; plain row/column layout (this is the default

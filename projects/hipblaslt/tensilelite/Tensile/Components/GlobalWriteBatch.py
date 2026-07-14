@@ -1321,10 +1321,6 @@ class GlobalWriteBatchWriter:
       self.kernel.get("UseSubtileImpl") and not self.edge
       and self.kernel["_GlobalAccumulation"] not in ("MultipleBufferSingleKernel", "MultipleBuffer")
     )
-    isSubtileTDMStore = (
-      self.kernel.get("UseSubtileImpl")
-      and self.kernel["_GlobalAccumulation"] not in ("MultipleBufferSingleKernel", "MultipleBuffer")
-    )
     is16bitSubtile = (
       isSubtileNonEdge
       and (self.kernel["ProblemType"]["DestDataType"].isBFloat16() or
@@ -1816,17 +1812,17 @@ class GlobalWriteBatchWriter:
         #   ...
         # Pairing key: tt0 % 2 — even tt0 is sba=0, odd tt0 is sba=1.
         storeCodeModule = storeCode if self.kernel["GroupLoadStore"] else module
-        if self.kernel.get("TDMSubtileHybrid") and isSubtileTDMStore:
+        if self.kernel.get("TDMStoreInst") and self.kernel["_GlobalAccumulation"] not in ("MultipleBufferSingleKernel", "MultipleBuffer"):
           if self.batchIdx == 0 and elementIdx == 0:
-            _setupMod, self.parentWriter._tdmHybBaseVgpr = self.parentWriter._emitTdmHybBaseSetup(self.kernel, self.tmpS01)
+            _setupMod, self.parentWriter._tdmStoreBaseVgpr = self.parentWriter._emitTDMStoreBaseSetup(self.kernel, self.tmpS01)
             storeCodeModule.add(_setupMod)
-          storeCodeModule.add(self.parentWriter._emitSubtileHybridScratchStore(
+          storeCodeModule.add(self.parentWriter._emitTDMStoreScratch(
               self.kernel, self.ss, self.cvtVgprStruct, addrCalc, self.ss.elementSumIdx[elementIdx],
-              self.parentWriter.states.c.startVgprValu, self.gwvw, self.parentWriter._tdmHybBaseVgpr))
+              self.parentWriter.states.c.startVgprValu, self.gwvw, self.parentWriter._tdmStoreBaseVgpr))
           self.storesIssued += 1
           if self.batchIdx == self.numBatches - 1 and elementIdx == len(self.batchElements) - 1:
-            storeCodeModule.add(self.parentWriter._emitTdmSubtileHybridFlush(self.kernel))
-            self.parentWriter.vgprPool.checkIn(self.parentWriter._tdmHybBaseVgpr)
+            storeCodeModule.add(self.parentWriter._emitTDMStoreWholeMT(self.kernel))
+            self.parentWriter.vgprPool.checkIn(self.parentWriter._tdmStoreBaseVgpr)
         elif is16bitSubtile:
           tt0 = element[1]  # d0: thread-tile index along M
           # Epilogue (bias/activation) is applied per-element in iteration order.
