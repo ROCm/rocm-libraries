@@ -34,17 +34,6 @@
 
 #include "bench_utils.hpp"
 
-template <class T>
-struct less_then_t
-{
-  T m_val;
-
-  __host__ __device__ bool operator()(const T& val) const
-  {
-    return val < m_val;
-  }
-};
-
 template <typename T>
 struct partition_benchmark : public primbench::benchmark_interface
 {
@@ -68,9 +57,9 @@ struct partition_benchmark : public primbench::benchmark_interface
     bench_utils::caching_allocator_t alloc{};
     thrust::detail::device_t policy{};
 
-    T val = bench_utils::value_from_entropy<T>(bench_utils::get_entropy_percentage(entropy_reduction));
+    const T val = bench_utils::lerp_min_max<T>(bench_utils::get_entropy_percentage(entropy_reduction));
 
-    less_then_t<T> select_op{val};
+    bench_utils::less_then_t<T> select_op{val};
 
     thrust::device_vector<T> in = bench_utils::generate(m_items, state.seed);
     thrust::device_vector<T> out(m_items);

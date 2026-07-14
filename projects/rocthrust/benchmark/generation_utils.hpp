@@ -45,6 +45,10 @@
 // rocRAND
 #include <rocrand/rocrand.h>
 
+// LIBHIPCXX
+#include _THRUST_STD_INCLUDE(cmath)
+#include _THRUST_STD_INCLUDE(functional)
+
 // STL
 #include <algorithm>
 #include <cstdint>
@@ -85,25 +89,29 @@ float get_entropy_percentage(int entropy_reduction)
   }
 }
 
+// Creates an interpolated value of type T between min (at = 0.0) and max (at = 1.0).
 template <typename T>
-T value_from_entropy(double percentage)
+[[nodiscard]] T lerp_min_max(double at) noexcept
 {
-  if (percentage == 100.0)
+  if (at == 1.0)
   {
-    return std::numeric_limits<T>::max();
+    return _THRUST_STD::numeric_limits<T>::max();
   }
-
-  percentage /= 100; // convert percentage to per one
-
-  // Select value from the line between the lowest and the highest representable
-  // values of type T based on the entropy value.
-  const auto max_val = static_cast<double>(std::numeric_limits<T>::max());
-  const auto min_val = static_cast<double>(std::numeric_limits<T>::lowest());
-  const auto result  = min_val + percentage * (max_val - min_val);
-  return static_cast<T>(result);
+  const auto min_val = static_cast<double>(_THRUST_STD::numeric_limits<T>::lowest());
+  const auto max_val = static_cast<double>(_THRUST_STD::numeric_limits<T>::max());
+  return static_cast<T>(_THRUST_STD::lerp(min_val, max_val, at));
 }
 
-const int entropy_reductions[] = {0, 2, 4, 6};
+template <class T>
+struct less_then_t
+{
+  T m_val;
+
+  [[nodiscard]] __device__ bool operator()(const T& val) const noexcept
+  {
+    return val < m_val;
+  }
+};
 
 namespace detail
 {
