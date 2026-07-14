@@ -11,6 +11,10 @@ if [ -d /workspace ] && [ -w /workspace ]; then
 fi
 
 BUILD_DIR="$HIPDNN_ROOT/build"
+PY_BINDINGS_SRC="$HIPDNN_ROOT/python/frontend_bindings"
+PY_BINDINGS_BUILD_DIR="$HIPDNN_ROOT/python/build/frontend_bindings"
+PY_WHEEL_PACKAGE_DIR="$HIPDNN_ROOT/python/frontend_wheel_package"
+PY_WHEEL_DIR="$HIPDNN_ROOT/python/build/wheel_package"
 DEFAULT_ROCM_PREFIX="/opt/rocm"
 DNN_BENCH_WORKSPACE="${DNN_BENCH_WORKSPACE:-$DEFAULT_DNN_BENCH_WORKSPACE}"
 VENV_DIR="$DNN_BENCH_WORKSPACE/.venv"
@@ -941,8 +945,10 @@ prepend_ld_library_path "$BINDING_PREFIX/lib"
 write_activation_local "$ROCM_PATH" "$BINDING_PREFIX/lib"
 
 
-# 6. Install hipDNN Python bindings.
-# Wipe any stale cmake build cache (can reference deleted pip temp envs).
+# 6. Build and install hipDNN Python bindings.
+# Wipe any stale CMake build cache (can reference deleted pip temp envs), build
+# the standalone nanobind extension, pack it into the frontend wheel package,
+# then install the wheel into this venv.
 if [ -z "$PROVIDER_TOOLCHAIN_PREFIX" ]; then
     PROVIDER_TOOLCHAIN_PREFIX=$(select_provider_toolchain_prefix)
 fi
@@ -952,10 +958,28 @@ PY_BINDING_CMAKE_PREFIX_PATH="$BINDING_PREFIX"
 if [ "$PROVIDER_TOOLCHAIN_PREFIX" != "$BINDING_PREFIX" ]; then
     PY_BINDING_CMAKE_PREFIX_PATH="$BINDING_PREFIX;$PROVIDER_TOOLCHAIN_PREFIX"
 fi
+
+python -m pip install build
 rm -rf "$HIPDNN_ROOT/python/build"
 ROCM_PATH="$PROVIDER_TOOLCHAIN_PREFIX" \
-    CMAKE_PREFIX_PATH="$PY_BINDING_CMAKE_PREFIX_PATH" \
-    pip install -e "$HIPDNN_ROOT/python"
+    cmake -S "$PY_BINDINGS_SRC" -B "$PY_BINDINGS_BUILD_DIR" \
+        -GNinja \
+        -DCMAKE_BUILD_TYPE=Release \
+        -DCMAKE_PREFIX_PATH="$PY_BINDING_CMAKE_PREFIX_PATH" \
+        -DPython_EXECUTABLE="$(command -v python)"
+cmake --build "$PY_BINDINGS_BUILD_DIR"
+python "$PY_WHEEL_PACKAGE_DIR/pack_frontend_wheel.py" \
+    --build-dir "$PY_BINDINGS_BUILD_DIR" \
+    --wheel-dir "$PY_WHEEL_DIR"
+
+shopt -s nullglob
+HIPDNN_FRONTEND_WHEELS=("$PY_WHEEL_DIR"/hipdnn_frontend-*.whl)
+shopt -u nullglob
+if [ "${#HIPDNN_FRONTEND_WHEELS[@]}" -ne 1 ]; then
+    echo "ERROR: expected exactly one hipdnn_frontend wheel in $PY_WHEEL_DIR" >&2
+    exit 1
+fi
+python -m pip install --force-reinstall "${HIPDNN_FRONTEND_WHEELS[0]}"
 
 
 echo ""

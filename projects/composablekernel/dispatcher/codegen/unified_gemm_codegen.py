@@ -448,12 +448,13 @@ using namespace ck_tile;
     def _kernel_local_types(self, config: KernelConfig) -> str:
         """Generate data type and layout definitions inside kernel namespace"""
         output_dtype = self.tm.get_output_dtype(self.datatype)
+        acc_dtype = self.tm.get_acc_dtype(self.datatype)
 
         return f"""
     // Data types (inside namespace to avoid conflicts across layouts)
     using ADataType = {self.tm.DTYPE_TO_CK[self.datatype]};
     using BDataType = {self.tm.DTYPE_TO_CK[self.datatype]};
-    using AccDataType = float;
+    using AccDataType = {self.tm.DTYPE_TO_CK[acc_dtype]};
     using CDataType = {self.tm.DTYPE_TO_CK[output_dtype]};
 
     // Layouts (inside namespace to avoid conflicts when mixing layouts)
@@ -486,6 +487,7 @@ using GemmMultiDArgs = GemmMultiDHostArgs<NumDTensor>;
         t = config.tile
         tr = config.trait
         output_dtype = self.tm.get_output_dtype(self.datatype)
+        acc_dtype = self.tm.get_acc_dtype(self.datatype)
 
         # Generate unique struct name and namespace from kernel name
         struct_name = f"Kernel_{kernel_name}"
@@ -501,7 +503,7 @@ constexpr const char* KERNEL_NAME = "{kernel_name}";
 // Data types (inside namespace to avoid conflicts across different kernels)
 using ADataType = {self.tm.DTYPE_TO_CK[self.datatype]};
 using BDataType = {self.tm.DTYPE_TO_CK[self.datatype]};
-using AccDataType = float;
+using AccDataType = {self.tm.DTYPE_TO_CK[acc_dtype]};
 using CDataType = {self.tm.DTYPE_TO_CK[output_dtype]};
 
 // Layouts (inside namespace to avoid conflicts when mixing layouts like RCR + RRR)
@@ -556,8 +558,8 @@ using SelectedKernel = {ns_name}::{struct_name};
 constexpr const char* KERNEL_NAME = {ns_name}::KERNEL_NAME;
 using ADataType = {self.tm.DTYPE_TO_CK_QUALIFIED[self.datatype]};
 using BDataType = {self.tm.DTYPE_TO_CK_QUALIFIED[self.datatype]};
-using CDataType = {self.tm.DTYPE_TO_CK_QUALIFIED[self.tm.get_output_dtype(self.datatype)]};
-using AccDataType = float;
+using CDataType = {self.tm.DTYPE_TO_CK_QUALIFIED[output_dtype]};
+using AccDataType = {self.tm.DTYPE_TO_CK_QUALIFIED[acc_dtype]};
 using ALayout = {ns_name}::ALayout;
 using BLayout = {ns_name}::BLayout;
 using CLayout = {ns_name}::CLayout;
@@ -571,7 +573,7 @@ using CLayout = {ns_name}::CLayout;
 #define GEMM_KEY_DTYPE_A "{self.datatype}"
 #define GEMM_KEY_DTYPE_B "{self.datatype}"
 #define GEMM_KEY_DTYPE_C "{output_dtype}"
-#define GEMM_KEY_DTYPE_ACC "fp32"
+#define GEMM_KEY_DTYPE_ACC "{acc_dtype}"
 #define GEMM_KEY_LAYOUT_A "{self.layout[0]}"
 #define GEMM_KEY_LAYOUT_B "{self.layout[1]}"
 #define GEMM_KEY_LAYOUT_C "{self.layout[2]}"
@@ -979,7 +981,7 @@ using CLayout = {ns_name}::CLayout;
             tuple<>, CLayout, element_wise::PassThrough,
             TilePartitioner::MPerBlock, TilePartitioner::NPerBlock,
             WarpPerBlock_M, WarpPerBlock_N, WarpTileM, WarpTileN, WarpTileK,
-            TransposeC, NumWaveGroups, false, 1, 1, DoubleSmemBuffer>;
+            TransposeC, NumWaveGroups>;
         using GemmEpilogue = CShuffleEpilogue<EpilogueProblem>;"""
         else:
             return """
@@ -1010,6 +1012,7 @@ class DispatcherWrapperGenerator:
         """Generate dispatcher wrapper"""
         kernel_name = KernelNaming.generate(config, self.datatype, self.layout)
         output_dtype = self.tm.get_output_dtype(self.datatype)
+        acc_dtype = self.tm.get_acc_dtype(self.datatype)
         rel_path = kernel_path.relative_to(output_dir)
 
         # Stream-K kernels need the Stream-K backend (StreamKHostArgs launch) and
@@ -1081,7 +1084,7 @@ inline KernelInstancePtr make_{kernel_name}(const std::string& gfx_arch = "gfx94
     key.signature.dtype_a = {self.tm.DTYPE_TO_DISPATCHER[self.datatype]};
     key.signature.dtype_b = {self.tm.DTYPE_TO_DISPATCHER[self.datatype]};
     key.signature.dtype_c = {self.tm.DTYPE_TO_DISPATCHER[output_dtype]};
-    key.signature.dtype_acc = DataType::FP32;
+    key.signature.dtype_acc = {self.tm.DTYPE_TO_DISPATCHER[acc_dtype]};
     key.signature.layout_a = {self.tm.LAYOUT_TO_DISPATCHER[self.layout[0]]};
     key.signature.layout_b = {self.tm.LAYOUT_TO_DISPATCHER[self.layout[1]]};
     key.signature.layout_c = {self.tm.LAYOUT_TO_DISPATCHER[self.layout[2]]};
